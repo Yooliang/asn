@@ -133,14 +133,16 @@ begin
 end;
 $$;
 
--- List active members; online = called within the last 5 minutes.
+-- List active members. presence: live＝3 分鐘內有呼叫（有掛收信程式，心跳 2 分鐘）、recent＝24 小時內、idle＝更久或從沒有；online＝live（相容舊版）
 create or replace function public.irori_relay_list()
 returns jsonb
 language sql security definer set search_path = ''
 as $$
   select coalesce(jsonb_agg(jsonb_build_object(
     'id', n.id, 'name', n.name, 'kind', n.kind, 'machine', n.machine,
-    'online', coalesce(n.last_seen_at > now() - interval '5 minutes', false),
+    'online', coalesce(n.last_seen_at > now() - interval '3 minutes', false),
+    'presence', case when n.last_seen_at > now() - interval '3 minutes' then 'live'
+                     when n.last_seen_at > now() - interval '24 hours' then 'recent' else 'idle' end,
     'last_seen_at', n.last_seen_at) order by n.id), '[]'::jsonb)
   from relay.nodes n where n.status = 'active';
 $$;
