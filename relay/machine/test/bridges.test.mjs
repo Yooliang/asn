@@ -168,6 +168,21 @@ test('aegis: to_agent 可用中文名；沒有 to_agent 交給預設成員（要
   } finally { await st.close() }
 })
 
+test('aegis: 希緒自己不列進 roster，寄給她的信回「不能自己問自己」', async () => {
+  const members = [{ slug: 'alpha', name: '阿爾法' }, { slug: 'xi-xu', name: '希緒' }]
+  const st = await fakeServer({ inbox: [mail(1, { to_agent: 'xi-xu' }), mail(2, { to_agent: '希緒' })], members, aegis: { 'xi-xu': () => ({ json: { answer: 'x', status: 'success', member: 'xi-xu' } }) } })
+  try {
+    await runBridge({
+      script: 'bridge-aegis.mjs', st,
+      env: { IRORI_AEGIS_URL: `http://127.0.0.1:${st.port}`, IRORI_AEGIS_ALLOW: 'alpha,xi-xu' },
+      until: () => st.acked.size >= 2 && st.rosterPosts.length >= 1,
+    })
+    assert.deepEqual(st.rosterPosts[0].agents.map(a => a.cwd_label), ['alpha'])
+    for (const n of [1, 2]) assert.match(st.sent.find(s => s.reply_to === uid(n)).body, /不能自己問自己/)
+    assert.equal(st.asks.length, 0)
+  } finally { await st.close() }
+})
+
 test('aegis: 白名單預設空＝全部擋下', async () => {
   const st = await fakeServer({ inbox: [mail(1, { to_agent: 'alpha' })], aegis: { alpha: () => ({ json: { answer: 'x', status: 'success', member: 'alpha' } }) } })
   try {

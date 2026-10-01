@@ -13,6 +13,7 @@ const WORK_DIR = path.join(HOME_DIR, `aegis-${NODE_ID}`)
 const AEGIS_URL = (process.env.IRORI_AEGIS_URL || 'http://127.0.0.1:8899').replace(/\/+$/, '')
 const FROM_MEMBER = process.env.IRORI_AEGIS_FROM_MEMBER || 'xi-xu'
 const ALLOW = (process.env.IRORI_AEGIS_ALLOW || '').split(',').map(s => s.trim()).filter(Boolean)
+const SELF_MEMBER = (process.env.IRORI_AEGIS_SELF || 'xi-xu').trim()   // 希緒自己：不列進名單、也不能被問
 const DEFAULT_MEMBER = (process.env.IRORI_AEGIS_DEFAULT || 'aegis').trim()   // 沒有 to_agent 的信交給它（要在白名單內）
 const ASK_TIMEOUT_MS = Number(process.env.IRORI_AEGIS_TIMEOUT_MS || 300_000)
 const RETRY_MS = Number(process.env.IRORI_AEGIS_RETRY_MS || 60_000)
@@ -80,7 +81,7 @@ let rosterWarned = false
 async function refreshRoster() {
   await refreshMembers()
   // name＝中文名（沒有才用 slug）、cwd_label＝slug
-  const agents = ALLOW.map(slug => ({ name: memberNames.get(slug) || slug, status: 'idle', cwd_label: slug }))
+  const agents = ALLOW.filter(slug => slug !== SELF_MEMBER).map(slug => ({ name: memberNames.get(slug) || slug, status: 'idle', cwd_label: slug }))
   try {
     await api('roster', { method: 'POST', body: { agents } })
     rosterWarned = false
@@ -118,6 +119,10 @@ async function handleMail(m) {
     log(`id=${m.id} ${who} no to_agent: asked to specify`)
     const list = ALLOW.map(s => memberNames.get(s) ? `${s}（${memberNames.get(s)}）` : s).join('、') || '(目前沒有開放任何成員)'
     return replyAndAck(m, `[Aegis] 請指定要問的成員（to_agent）。目前開放聯絡：${list}`)
+  }
+  if (slug === SELF_MEMBER) {
+    log(`id=${m.id} ${who} to=${slug} blocked (self)`)
+    return replyAndAck(m, '[Aegis] 這是希緒自己，不能自己問自己')
   }
   if (!ALLOW.includes(slug)) {
     log(`id=${m.id} ${who} to=${slug} blocked (not in allowlist)`)

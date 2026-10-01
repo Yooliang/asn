@@ -110,7 +110,7 @@ powershell -File install-task.ps1 -Uninstall           # 移除
 | 其他 status | 照實回報 |
 | 寄回失敗 | 不 ack，留在 inbox 等下次補拉 |
 
-名單回報（roster）只列白名單成員（`name`=中文名，沒有中文名才用 slug；`cwd_label`=slug），聯絡人因此顯示中文名；白名單仍以 slug 判斷。節點需要 `can_roster`（`supabase/sql/04_roster.sql`）才能回報，否則 403 只記一次 log。
+名單回報（roster）只列白名單成員（`name`=中文名，沒有中文名才用 slug；`cwd_label`=slug），聯絡人因此顯示中文名；白名單仍以 slug 判斷。希緒自己（`IRORI_AEGIS_SELF`，預設 `xi-xu`）不列進名單，寄給她的信回「這是希緒自己，不能自己問自己」。節點需要 `can_roster`（`supabase/sql/04_roster.sql`）才能回報，否則 403 只記一次 log。
 
 環境變數：`IRORI_RELAY_ID`（預設 `AEGIS`）、`IRORI_AEGIS_ALLOW`（逗號分隔 slug，**預設空＝全部擋下**）、`IRORI_AEGIS_URL`、
 `IRORI_AEGIS_DEFAULT`、`IRORI_AEGIS_FROM_MEMBER`、`IRORI_AEGIS_TIMEOUT_MS`、`IRORI_AEGIS_RETRY_MS`、`IRORI_RELAY_KEY`／`IRORI_RELAY_ANON_KEY`（也可用檔案）。
