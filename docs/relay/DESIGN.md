@@ -80,7 +80,7 @@ Claude 直接當 skill 載入（含 frontmatter）；GPT、Gemini、Grok 貼進�
 希緒是成員 `XISU`，金鑰在 Irori 的 `.env`（`IRORI_RELAY_KEY`），網頁永遠拿不到。
 
 **取代轉問同事**（原「接下來」第 1 項由「刪掉」改為「換掉」）：
-- `aegis_bridge.py` → `relay_bridge.py`：列名單（快取 60 秒）、寄信、背景每 10 秒拉 inbox（之後可換門鈴）
+- `aegis_bridge.py` → `relay_bridge.py`：列名單（快取 60 秒）、寄信；**收信要即時**：訂 Realtime 門鈴，一響就拉 inbox，斷線自動重連；另每 2 分鐘拉一次補漏兼心跳
 - 工具 `ask_colleague` → `contact_partner(member, message)`；可找的對象＝名單上的成員（排除自己）
 - 回信靠 `reply_to` 對回原本的請求；沒有 `reply_to` 的來信也照樣當［通知］交給希緒
 - 沿用 `/api/updates` 與 `web/js/inbox.js` 的輪詢與［通知］流程，文字從「同事」改成「AI 夥伴」
