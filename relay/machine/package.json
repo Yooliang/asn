@@ -1,0 +1,9 @@
+{
+  "name": "irori-relay-machine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Per-machine bridge: relay inbox <-> local Claude Code sessions via a restricted mailbox worker (claude -p).",
+  "main": "bridge.mjs",
+  "engines": { "node": ">=22" }
+}
