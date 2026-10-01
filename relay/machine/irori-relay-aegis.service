@@ -1,0 +1,22 @@
+# Aegis 轉接橋（仲介信 -> Aegis /agent-chat/ask）。安裝方式見 README「Aegis 轉接橋」一節。
+# 金鑰不寫在這裡：放在 ~/.irori-relay/<IRORI_RELAY_ID>.key（chmod 600）。
+[Unit]
+Description=Irori relay Aegis bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cwen0708
+Environment=IRORI_RELAY_ID=AEGIS
+# 逗號分隔的成員 slug；空白＝全部擋下
+Environment=IRORI_AEGIS_ALLOW=
+# 其餘可選：IRORI_AEGIS_URL（預設 http://127.0.0.1:8899）、IRORI_AEGIS_FROM_MEMBER（預設 xi-xu）、IRORI_AEGIS_TIMEOUT_MS（預設 300000）
+ExecStart=/opt/node22/bin/node /home/cwen0708/irori/relay/machine/bridge-aegis.mjs
+Restart=on-failure
+RestartSec=15
+# 撞到另一個執行個體（exit 3）不要一直重啟
+RestartPreventExitStatus=3 2
+
+[Install]
+WantedBy=multi-user.target

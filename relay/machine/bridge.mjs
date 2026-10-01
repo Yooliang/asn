@@ -8,6 +8,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { pickFallbackAgent, fallbackNote } from './pick-fallback.mjs'
 
 const NODE_ID = (process.env.IRORI_RELAY_ID || 'H').trim()
 const BASE_URL = (process.env.IRORI_RELAY_URL || 'https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/irori-relay').replace(/\/+$/, '')
@@ -17,9 +18,12 @@ const MAILBOX_NAME = process.env.IRORI_MAILBOX_NAME || `${NODE_ID}-收發室`
 const MAILBOX_MODEL = process.env.IRORI_MAILBOX_MODEL || 'haiku'
 const DEFAULT_AGENT = process.env.IRORI_RELAY_DEFAULT_AGENT || 'H-工頭-2'
 const EXTRA_ALLOW = (process.env.IRORI_RELAY_ALLOW || '').split(',').map(s => s.trim()).filter(Boolean)
-const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude'
-const POLL_MS = 120_000
-const ROSTER_MS = 60_000
+// 測試用：IRORI_CLAUDE_SCRIPT 指向一支 node 腳本時，用 node 跑它來取代 claude 執行檔
+const CLAUDE_SCRIPT = process.env.IRORI_CLAUDE_SCRIPT || ''
+const CLAUDE_BIN = CLAUDE_SCRIPT ? process.execPath : (process.env.CLAUDE_BIN || 'claude')
+const CLAUDE_PRE = CLAUDE_SCRIPT ? [CLAUDE_SCRIPT] : []
+const POLL_MS = Number(process.env.IRORI_RELAY_POLL_MS || 120_000)
+const ROSTER_MS = Number(process.env.IRORI_ROSTER_MS || 60_000)
 const HEARTBEAT_MS = 25_000
 const MAX_BACKOFF_MS = 30_000
 const REPLY_TIMEOUT_MS = Number(process.env.IRORI_REPLY_TIMEOUT_MS || 600_000)
@@ -64,7 +68,7 @@ let mailboxPid = 0
 
 function claudeAgents() {
   return new Promise(resolve => {
-    execFile(CLAUDE_BIN, ['agents', '--json'], { timeout: 30_000, windowsHide: true, maxBuffer: 4 << 20, cwd: WORK_DIR }, (err, out) => {
+    execFile(CLAUDE_BIN, [...CLAUDE_PRE, 'agents', '--json'], { timeout: 30_000, windowsHide: true, maxBuffer: 4 << 20, cwd: WORK_DIR }, (err, out) => {
       if (err) { log(`claude agents failed: ${err.message}`); return resolve(null) }
       try { resolve(JSON.parse(out)) } catch (e) { log(`claude agents parse failed: ${e.message}`); resolve(null) }
     })
@@ -72,6 +76,9 @@ function claudeAgents() {
 }
 function entrypointOf(pid) {
   try { return JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'sessions', `${pid}.json`), 'utf8')).entrypoint } catch { return '' }
+}
+function activityOf(a) {
+  try { return Number(JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'sessions', `${a.pid}.json`), 'utf8')).updatedAt) || 0 } catch { return 0 }
 }
 const cwdLabel = p => String(p ?? '').split(/[\\/]+/).filter(Boolean).pop() || ''
 let rosterWarned = false
@@ -121,7 +128,7 @@ function startWorker() {
   fs.writeFileSync(settingsPath, JSON.stringify({ crossSessionInbound: 'accept' }))
   const cwd = path.join(WORK_DIR, 'cwd')
   fs.mkdirSync(cwd, { recursive: true })
-  const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
+  const args = [...CLAUDE_PRE, '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
     '--name', MAILBOX_NAME, '--dangerously-skip-permissions',
     '--tools', 'ListAgents,SendMessage,ToolSearch',
     '--system-prompt', SYSTEM_PROMPT, '--model', MAILBOX_MODEL,
@@ -228,12 +235,20 @@ setInterval(async () => {
 // ---- inbox -------------------------------------------------------------------------------------
 let pulling = false, again = false
 async function handleMail(m) {
-  const target = m.to_agent || DEFAULT_AGENT
-  const p = { mail: m, target, state: 'forwarding', t0: Date.now(), t: Date.now(), replied: false }
+  let target = m.to_agent || DEFAULT_AGENT
+  let note = ''
   if (!m.to_agent && !onlineNames().has(DEFAULT_AGENT)) {
-    if (!unrouted.has(m.id)) { unrouted.add(m.id); log(`id=${m.id} has no to_agent and ${DEFAULT_AGENT} is offline: left in inbox`) }
-    return
+    // 預設收件視窗不在線：改交給最近有活動的互動式 session，都沒有才留在 inbox
+    const fb = pickFallbackAgent(roster, activityOf)
+    if (!fb) {
+      if (!unrouted.has(m.id)) { unrouted.add(m.id); log(`id=${m.id} has no to_agent and ${DEFAULT_AGENT} is offline and no interactive session online: left in inbox`) }
+      return
+    }
+    target = fb.name
+    note = fallbackNote(DEFAULT_AGENT, fb.name)
+    log(`id=${m.id} has no to_agent and ${DEFAULT_AGENT} is offline: fallback to most recently active session ${fb.name}`)
   }
+  const p = { mail: m, target, state: 'forwarding', t0: Date.now(), t: Date.now(), replied: false }
   if (!forwardable(target)) {
     const names = roster.map(a => a.name).join('、') || '(無)'
     p.state = 'done'
@@ -243,7 +258,7 @@ async function handleMail(m) {
   }
   pending.set(m.id, p)
   try {
-    workerSay(`[BRIDGE-FORWARD nonce=${NONCE} id=${m.id} to=${target}]\n<<<MAIL\n${head(m)}\n${m.body}\nMAIL>>>`)
+    workerSay(`[BRIDGE-FORWARD nonce=${NONCE} id=${m.id} to=${target}]\n<<<MAIL\n${head(m)}\n${note ? note + '\n' : ''}${m.body}\nMAIL>>>`)
     log(`handed id=${m.id} from=${m.from_node}/${m.from_agent ?? ''} to=${target}`)
   } catch (e) {
     pending.delete(m.id); log(`cannot hand id=${m.id}: ${e.message} (left in inbox)`)

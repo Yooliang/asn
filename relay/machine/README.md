@@ -25,7 +25,8 @@ relay send(reply_to) <──── bridge.mjs <──stdout── 收發室 <─
    - 對方回覆（收發室收到的 `<cross-session-message>` 那一輪）→ `relay send` 帶 `reply_to` 寄回原寄件人，`from_agent` 填對方 session 名。
      之後同一 session 的追加回覆（10 分鐘內）也一併轉寄。
    - 逾時（預設 10 分鐘）沒有任何回覆 → 寄「對方沒有回覆」。
-   - 沒有 `to_agent` → 交給 `IRORI_RELAY_DEFAULT_AGENT`（預設 `H-工頭-2`）；它不在線就**不 ack、留在 inbox**，等它上線的下一次補拉。
+   - 沒有 `to_agent` → 交給 `IRORI_RELAY_DEFAULT_AGENT`（預設 `H-工頭-2`）；它不在線就改交給**最近有活動**的互動式 session
+     （依 `~/.claude/sessions/<pid>.json` 的 `updatedAt`，排除收發室），內文前加一行「原本要給 <預設> 但它不在線，請你代收並轉告／處理」；都沒有人在線才**不 ack、留在 inbox**。
    - 不在名單的 `to_agent` → 寄回「找不到這個 session（目前可達：…）」。
 4. 單一執行個體：`~/.irori-relay/machine-<ID>/bridge.pid` 有活著的 pid 就直接退出（exit 3）。
 
@@ -51,6 +52,7 @@ Log：`~/.irori-relay/machine-<ID>/bridge.log`（每個轉交、每一輪收發�
 ```
 node D:\Github\irori\relay\machine\bridge.mjs          # 前景跑（IRORI_RELAY_ID 預設 H）
 powershell -File install-task.ps1                      # 預覽，不改任何東西
+powershell -File install-task.ps1 -DefaultAgent <名稱> -Apply   # 指定預設收件 session（不帶＝H-工頭-2）；run-bridge.ps1 同名參數
 powershell -File install-task.ps1 -Apply               # 建立工作排程 IroriRelayMachine-H（登入時、隱藏視窗、失敗重啟）
 powershell -File install-task.ps1 -Uninstall           # 移除
 ```
@@ -90,3 +92,51 @@ powershell -File install-task.ps1 -Uninstall           # 移除
 - `tools-provision.mjs <新代號>`：用 H 金鑰開邀請碼並註冊測試節點（金鑰寫進 `~/.irori-relay/<id>.key`，不印）
 - `tools-roundtrip.mjs <寄件節點> <to_node> <to_agent|-> "<body>" [秒]`：寄信並輪詢自己的 inbox 等回信，印延遲
 - `tools-roster-once.mjs`：以 H 金鑰單次回報名單（不碰 inbox）
+
+## Aegis 轉接橋（Linux，`bridge-aegis.mjs`）
+
+在 Aegis 主機上不開 claude，用一把仲介節點金鑰收信：每封信 = 一次 `POST http://127.0.0.1:8899/api/v1/agent-chat/ask`
+（`target` = 信的 `to_agent` 當成員 slug、`from_member=xi-xu`、`stream=false`，逾時 300 秒；問題內文前面加一行
+`這是透過仲介轉來的信：from=<節點>/<代理> trust=<trust>`），答案用 `reply_to` 寄回原寄件人，`from_agent` 填成員 slug。
+門鈴、每 2 分鐘補拉、ack、單一執行個體 pid 檔都跟 `bridge.mjs` 一樣（共用 `relay-core.mjs`）。
+
+| 情況 | 行為 |
+|---|---|
+| `to_agent` 不在白名單 | 寄回「這位成員沒有開放聯絡」再 ack（不打 Aegis） |
+| 沒有 `to_agent` | 寄回「請指定要問的成員」並列出白名單 |
+| `status=success` | 把 `answer` 寄回 |
+| `status=error`／連線失敗／逾時 | 60 秒後重試一次；仍失敗寄「對方忙線中，請稍後再問」 |
+| HTTP 404 | 寄「查無此成員」（不重試） |
+| 其他 status | 照實回報 |
+| 寄回失敗 | 不 ack，留在 inbox 等下次補拉 |
+
+名單回報（roster）只列白名單成員（`name`=slug，`cwd_label`=中文名，取自 `GET /api/v1/members?scope=all`）；403（非 `can_invite` 節點）只記一次 log。
+
+環境變數：`IRORI_RELAY_ID`（預設 `AEGIS`）、`IRORI_AEGIS_ALLOW`（逗號分隔 slug，**預設空＝全部擋下**）、`IRORI_AEGIS_URL`、
+`IRORI_AEGIS_FROM_MEMBER`、`IRORI_AEGIS_TIMEOUT_MS`、`IRORI_AEGIS_RETRY_MS`、`IRORI_RELAY_KEY`／`IRORI_RELAY_ANON_KEY`（也可用檔案）。
+
+### 在 Aegis 上安裝
+
+1. 取得程式：把本 repo 的 `relay/machine/` 放到主機（例如 `/home/cwen0708/irori/relay/machine/`，`git clone` 或 `scp`），Node 用 `/opt/node22/bin/node`（>= 22）。
+2. 放金鑰（家目錄是 `~/.irori-relay/`；金鑰是 **Aegis 節點專用**的仲介節點金鑰，不要共用別台的）：
+   ```
+   mkdir -p ~/.irori-relay && chmod 700 ~/.irori-relay
+   (read -rs K; printf '%s' "$K" > ~/.irori-relay/AEGIS.key); chmod 600 ~/.irori-relay/AEGIS.key
+   (read -rs A; printf '%s' "$A" > ~/.irori-relay/anon.key); chmod 600 ~/.irori-relay/anon.key   # 可省：沒有 anon.key 就只剩 2 分鐘輪詢
+   ```
+   檔名要跟 `IRORI_RELAY_ID` 一致（預設 `AEGIS` → `AEGIS.key`）。
+3. 編輯 `irori-relay-aegis.service`：`IRORI_RELAY_ID`、`IRORI_AEGIS_ALLOW=<slug1>,<slug2>`、`ExecStart` 路徑，然後：
+   ```
+   sudo cp irori-relay-aegis.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now irori-relay-aegis
+   ```
+4. 看狀態與 log：`systemctl status irori-relay-aegis`、`journalctl -u irori-relay-aegis -f`，
+   或 `tail -f ~/.irori-relay/aegis-AEGIS/bridge.log`。看到 `aegis bridge starting … allow=[…]`、`whoami node=…`、`doorbell joined` 即上線。
+5. 改白名單：改 unit 的 `IRORI_AEGIS_ALLOW` → `sudo systemctl daemon-reload && sudo systemctl restart irori-relay-aegis`。
+6. 這把節點金鑰只能有**一個**收信者；`can_invite` 才能回報名單（否則 log 一行 403 後安靜）。
+
+## 測試
+
+`node --test relay/machine/test/`：本機假伺服器（node 內建 http）模擬仲介與 Aegis，不碰真實金鑰與網路服務。
+涵蓋白名單、成功帶 `reply_to`、error 重試一次、404、其他 status、無 `to_agent`、預設收件人不在線的退路、roster 403 只記一次。
