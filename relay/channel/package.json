@@ -1,0 +1,12 @@
+{
+  "name": "irori-relay-channel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Claude Code channel (MCP) for the Irori relay: pushes incoming relay mail into a running session.",
+  "main": "channel.mjs",
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}
