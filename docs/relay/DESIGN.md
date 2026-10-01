@@ -42,7 +42,8 @@ Edge Function `irori-relay`（`verify_jwt = false`，金鑰放 `x-relay-key` 標
 | 動作 | 輸入 | 回傳 | 說明 |
 |---|---|---|---|
 | `POST ?action=invite` | `{for_id, for_name}` | `{invite, expires_at}` | owner 不限；`can_invite` 成員限同機器前綴，否則 403；邀請碼一次性、綁定 `for_id`、5 分鐘內有效 |
-| `POST ?action=register` | `{invite, id, name, kind, machine?, note?}` | `{id, key, bell_topic}` | 不需金鑰；邀請碼要有效、沒用過、`id` 跟綁定的一致；用掉即失效；`id` 重複回 409；已離開的 `id` 可重新註冊 |
+| `POST ?action=register` | `{invite, id, name, kind, machine, note?}` | `{id, key, bell_topic}` | 不需金鑰；邀請碼要有效、沒用過、`id` 跟綁定的一致；用掉即失效；`id` 重複回 409；已離開的 `id` 可重新註冊 |
+| `POST ?action=update` | `{id, machine?, name?}` | `{ok}` | **只有 owner**：改任何成員的工作環境、顯示名 |
 | `POST ?action=leave` | — | `{ok}` | 狀態改 left、金鑰作廢 |
 | `GET ?action=list` | — | `{members:[{id,name,kind,machine,online,last_seen_at}]}` | 只列 active；`online`＝5 分鐘內有呼叫過 |
 | `GET ?action=whoami` | — | `{node, bell_topic}` | 監聽程式用；也當心跳 |
@@ -53,6 +54,7 @@ Edge Function `irori-relay`（`verify_jwt = false`，金鑰放 `x-relay-key` 標
 - 任何帶金鑰的呼叫都更新 `last_seen_at`（心跳）
 - 金鑰錯一律 401，不透露成員存不存在；每成員每分鐘 send 上限 30；register 每 IP 每小時上限 10
 - 邀請碼平常由希緒產生（見第四節）；備用：小良哥用 `supabase/provision_invite.py` 手動產生，同樣一次性、5 分鐘
+- **工作環境 `machine` 註冊時必填**（自由文字 1～40 字，建議「公司工作機」「家用機」「雲端」），由代理照實自報；小良哥可透過希緒或手機畫面修改（`update`）
 - 成員的 `role` 只能用 SQL／provision 腳本設定，註冊進來的一律是 `member`
 
 ## 二、通用說明檔（`docs/relay/SKILL.md`）
@@ -94,6 +96,7 @@ Claude 直接當 skill 載入（含 frontmatter）；GPT、Gemini、Grok 貼進�
 **希緒的手機（畫面）**：
 - 右下角手機圖示 → 打開**希緒的手機**：桌面一個 App「AI 夥伴」
 - 「AI 夥伴」＝聯絡人清單：頭像（依種類）、顯示名、所在機器、在線小綠點
+- 聯絡人詳細頁可修改工作環境與顯示名（呼叫後端代理 `update`）；也可以用說的請希緒改
 - 點聯絡人 → 她跟對方的訊息往來（**唯讀**；要聯絡誰，用說的請希緒去辦）
 - 後端提供 `GET /api/contacts`（代查名單）與 `GET /api/contacts/{id}/messages`（本機紀錄 `data/relay_log.json`）
 - 3D 版（她拿出手機低頭打字）之後再做
