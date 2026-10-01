@@ -19,9 +19,9 @@
 {
   "profiles": {
     "default": {
-      "label": "一般（含 Chrome、收信外掛）",
+      "label": "一般（含 Chrome）",
       "command": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-      "args": ["-NoExit", "-Command", "claude --dangerously-skip-permissions --chrome --dangerously-load-development-channels server:irori-relay -n {name}"]
+      "args": ["-NoExit", "-Command", "claude --dangerously-skip-permissions --chrome -n {name}"]
     }
   },
   "cwd_allow": ["D:\\Github", "D:\\Github\\irori", "D:\\Github\\eiyuu-md"],
@@ -29,10 +29,9 @@
 }
 ```
 
-- 家用機的 default 就照小良哥給的指令；公司機在自己的 launcher.json 寫自己的。
+- 家用機的 default 是小良哥給的指令**去掉** `--dangerously-load-development-channels server:irori-relay`（#50 機器橋已接手 H 節點收信，帶 channel 的視窗會搶同一把 H 金鑰的 inbox）；公司機在自己的 launcher.json 寫自己的。
 - `{name}` 是唯一允許的替換欄位，且必須符合 `^[A-Za-z0-9\-\u4e00-\u9fff]{1,40}$`；**工作資料夾只能從 cwd_allow 選**；第一句話不拼進指令列，改在視窗啟動後由收發室用 SendMessage 送進去。
 - 建議沿用 partner-relay 的 `spawn-partner.ps1` 的做法（清掉繼承的 `CLAUDE_*`、`NO_COLOR`，開 Remote Control），launcher 可以直接呼叫它。
-- 注意：用 #50 機器橋之後，`server:irori-relay` 這個收信外掛其實不需要了（同一把機器金鑰只能一個收信者）；保留在 default 是照小良哥給的指令，但若視窗用自己的代號註冊就沒衝突。實作時跟小良哥確認一次要不要拿掉。
 
 ## 安全（這是能在你電腦上開程式的入口，必須嚴格）
 
@@ -55,6 +54,3 @@
 3. 手機「電腦」App（3D 房間手機＋PWA 共用）。
 4. 希緒工具 `open_window(machine, name, cwd, first_message?)` 與 persona（只在小良哥親口要求時用）。
 
-## 待小良哥決定
-
-- 有了機器橋後，default 指令裡的 `--dangerously-load-development-channels server:irori-relay` 要不要拿掉。
