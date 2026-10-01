@@ -13,6 +13,7 @@ const WORK_DIR = path.join(HOME_DIR, `aegis-${NODE_ID}`)
 const AEGIS_URL = (process.env.IRORI_AEGIS_URL || 'http://127.0.0.1:8899').replace(/\/+$/, '')
 const FROM_MEMBER = process.env.IRORI_AEGIS_FROM_MEMBER || 'xi-xu'
 const ALLOW = (process.env.IRORI_AEGIS_ALLOW || '').split(',').map(s => s.trim()).filter(Boolean)
+const DEFAULT_MEMBER = (process.env.IRORI_AEGIS_DEFAULT || 'aegis').trim()   // 沒有 to_agent 的信交給它（要在白名單內）
 const ASK_TIMEOUT_MS = Number(process.env.IRORI_AEGIS_TIMEOUT_MS || 300_000)
 const RETRY_MS = Number(process.env.IRORI_AEGIS_RETRY_MS || 60_000)
 const POLL_MS = Number(process.env.IRORI_RELAY_POLL_MS || 120_000)
@@ -57,6 +58,13 @@ async function aegisAsk(target, question) {
 const askFailed = r => r.http === 0 || r.http >= 500 || (r.http >= 200 && r.http < 300 && r.data?.status === 'error')
 
 let memberNames = new Map()   // slug -> 中文名
+let membersLoaded = null     // 第一次載入成員表的 promise（收信前先等它，才能把中文名轉成 slug）
+// to_agent 可以是 slug 或中文名；回 slug（對不上就原樣回傳，交給白名單判斷）
+function resolveSlug(t) {
+  if (memberNames.has(t)) return t
+  for (const [slug, name] of memberNames) if (name && name === t) return slug
+  return t
+}
 async function refreshMembers() {
   try {
     const res = await fetch(`${AEGIS_URL}/api/v1/members?scope=all`, { signal: AbortSignal.timeout(15_000) })
@@ -71,7 +79,8 @@ async function refreshMembers() {
 let rosterWarned = false
 async function refreshRoster() {
   await refreshMembers()
-  const agents = ALLOW.map(slug => ({ name: slug, status: 'idle', cwd_label: memberNames.get(slug) || '' }))
+  // name＝中文名（沒有才用 slug）、cwd_label＝slug
+  const agents = ALLOW.map(slug => ({ name: memberNames.get(slug) || slug, status: 'idle', cwd_label: slug }))
   try {
     await api('roster', { method: 'POST', body: { agents } })
     rosterWarned = false
@@ -100,8 +109,11 @@ async function replyAndAck(m, body, fromAgent) {
 }
 
 async function handleMail(m) {
-  const slug = (m.to_agent || '').trim()
+  await membersLoaded
+  const target = (m.to_agent || '').trim()
   const who = `from=${m.from_node}/${m.from_agent ?? ''}`
+  // 沒指定收件人 → 預設成員（在白名單才算數）
+  const slug = target ? resolveSlug(target) : (ALLOW.includes(DEFAULT_MEMBER) ? DEFAULT_MEMBER : '')
   if (!slug) {
     log(`id=${m.id} ${who} no to_agent: asked to specify`)
     const list = ALLOW.map(s => memberNames.get(s) ? `${s}（${memberNames.get(s)}）` : s).join('、') || '(目前沒有開放任何成員)'
@@ -163,6 +175,7 @@ process.on('unhandledRejection', e => log(`unhandled: ${e?.stack ?? e}`))
 core.singleInstance()
 
 log(`aegis bridge starting node=${NODE_ID} aegis=${AEGIS_URL} allow=[${ALLOW.join(',')}]${ALLOW.length ? '' : ' (empty: everything blocked)'}`)
+membersLoaded = refreshMembers()
 void refreshRoster()
 setInterval(() => void refreshRoster(), ROSTER_MS)
 for (let wait = 2000;;) {

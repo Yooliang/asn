@@ -135,9 +135,36 @@ test('aegis: 白名單、成功帶 reply_to、error 重試一次、404、其他 
     for (let n = 1; n <= 7; n++) assert.equal(by(n).length, 1, `mail ${n}`)
     // roster：只回報白名單，附中文名；403 只記一次
     const r = st.rosterPosts[0].agents
-    assert.deepEqual(r.map(a => a.name), ['alpha', 'err', 'flaky', 'ghost', 'weird'])
-    assert.equal(r.find(a => a.name === 'alpha').cwd_label, '阿爾法')
+    // name＝中文名（沒有中文名才用 slug）、cwd_label＝slug
+    assert.deepEqual(r.map(a => a.name), ['阿爾法', 'err', '不穩', 'ghost', 'weird'])
+    assert.deepEqual(r.map(a => a.cwd_label), ['alpha', 'err', 'flaky', 'ghost', 'weird'])
     assert.equal((log.match(/roster post failed/g) || []).length, 1)
+  } finally { await st.close() }
+})
+
+test('aegis: to_agent 可用中文名；沒有 to_agent 交給預設成員（要在白名單內）', async () => {
+  const members = [{ slug: 'alpha', name: '阿爾法' }, { slug: 'aegis', name: '愛吉絲' }]
+  const aegis = {
+    alpha: () => ({ json: { answer: '阿爾法答', status: 'success', member: 'alpha' } }),
+    aegis: () => ({ json: { answer: '總管答', status: 'success', member: 'aegis' } }),
+  }
+  const st = await fakeServer({ inbox: [mail(1, { to_agent: '阿爾法' }), mail(2), mail(3, { to_agent: '路人' })], members, aegis })
+  try {
+    await runBridge({
+      script: 'bridge-aegis.mjs', st,
+      env: { IRORI_AEGIS_URL: `http://127.0.0.1:${st.port}`, IRORI_AEGIS_ALLOW: 'alpha,aegis' },
+      until: () => st.acked.size >= 3,
+    })
+    const by = n => st.sent.filter(s => s.reply_to === uid(n))
+    // 中文名 → slug：打到 Aegis 的 target 是 slug，回信 from_agent 是實際回答的成員
+    assert.deepEqual(st.asks.filter(a => a.question.endsWith('內文-1')).map(a => a.target), ['alpha'])
+    assert.equal(by(1)[0].body, '阿爾法答'); assert.equal(by(1)[0].from_agent, 'alpha')
+    // 沒有 to_agent → 預設成員 aegis
+    assert.deepEqual(st.asks.filter(a => a.question.endsWith('內文-2')).map(a => a.target), ['aegis'])
+    assert.equal(by(2)[0].body, '總管答'); assert.equal(by(2)[0].from_agent, 'aegis')
+    // 對不上的名字照舊擋下
+    assert.match(by(3)[0].body, /沒有開放聯絡/)
+    assert.equal(st.asks.length, 2)
   } finally { await st.close() }
 })
 
