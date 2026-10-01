@@ -40,27 +40,38 @@ Deno.serve(async (req) => {
 
   if (action === "register" && req.method === "POST") {
     const b = await req.json().catch(() => null);
-    if (!b || typeof b.invite !== "string" || typeof b.id !== "string" || !ID_RE.test(b.id) || typeof b.name !== "string" || typeof b.machine !== "string" || b.machine.length < 1 || b.machine.length > 40) {
+    const reissue = typeof b?.reissue === "string" && b.reissue;
+    if (!b || typeof b.id !== "string" || !ID_RE.test(b.id) || (!reissue && typeof b.invite !== "string")) {
+      return json(400, { error: "bad_request" });
+    }
+    if (!reissue && (typeof b.name !== "string" || typeof b.machine !== "string" || b.machine.length < 1 || b.machine.length > 40)) {
       return json(400, { error: "bad_request" });
     }
     const ip = (req.headers.get("x-forwarded-for") ?? "unknown").split(",")[0].trim();
     const key = b64u(32);
     const bellTopic = "relay-bell-" + b64u(18);
-    const { data, error } = await db.rpc("irori_relay_register", {
-      p_ip_hash: await sha256Hex("ip:" + ip),
-      p_code_hash: await sha256Hex(b.invite),
-      p_id: b.id,
-      p_name: b.name,
-      p_kind: optStr(b.kind, 20),
-      p_machine: b.machine,
-      p_note: optStr(b.note, 500),
-      p_key_hash: await sha256Hex(key),
-      p_bell_topic: bellTopic,
-    });
+    const ipHash = await sha256Hex("ip:" + ip);
+    const { data, error } = reissue
+      ? await db.rpc("irori_relay_redeem_reissue", {
+        p_ip_hash: ipHash, p_code_hash: await sha256Hex(b.reissue), p_id: b.id,
+        p_key_hash: await sha256Hex(key), p_bell_topic: bellTopic,
+      })
+      : await db.rpc("irori_relay_register", {
+        p_ip_hash: ipHash,
+        p_code_hash: await sha256Hex(b.invite),
+        p_id: b.id,
+        p_name: b.name,
+        p_kind: optStr(b.kind, 20),
+        p_machine: b.machine,
+        p_note: optStr(b.note, 500),
+        p_key_hash: await sha256Hex(key),
+        p_bell_topic: bellTopic,
+      });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     if (data?.error === "rate_limited") return json(429, { error: "rate_limited" });
     if (data?.error === "id_taken") return json(409, { error: "id_taken" });
     if (data?.error === "invalid_invite") return json(403, { error: "invalid_invite" });
+    if (data?.error === "bad_id_prefix") return json(403, { error: "bad_id_prefix", prefix: data.prefix });
     if (data?.error) return json(400, { error: data.error });
     return json(200, { id: data.id, key, bell_topic: data.bell_topic });
   }
@@ -99,19 +110,28 @@ Deno.serve(async (req) => {
     return json(200, { ok: true });
   }
   if (action === "invite" && req.method === "POST") {
-    const b = await req.json().catch(() => null);
-    if (!b || typeof b.for_id !== "string" || !ID_RE.test(b.for_id) || typeof b.for_name !== "string") {
-      return json(400, { error: "bad_request" });
-    }
+    const b = await req.json().catch(() => ({}));
     const code = b64u(24);
     const { data, error } = await db.rpc("irori_relay_invite", {
-      p_node: me.id, p_code_hash: await sha256Hex(code), p_for_id: b.for_id, p_for_name: b.for_name.slice(0, 100),
+      p_node: me.id, p_code_hash: await sha256Hex(code), p_note: optStr(b?.note, 200),
     });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     if (data?.error === "forbidden") return json(403, { error: "forbidden" });
-    if (data?.error === "id_taken") return json(409, { error: "id_taken" });
     if (data?.error) return json(400, { error: data.error });
-    return json(200, { invite: code, expires_at: data.expires_at });
+    return json(200, { invite: code, expires_at: data.expires_at, prefix: data.prefix });
+  }
+  if (action === "reissue" && req.method === "POST") {
+    const b = await req.json().catch(() => null);
+    if (!b || typeof b.id !== "string" || !ID_RE.test(b.id)) return json(400, { error: "bad_request" });
+    const code = b64u(24);
+    const { data, error } = await db.rpc("irori_relay_reissue", {
+      p_node: me.id, p_code_hash: await sha256Hex(code), p_id: b.id,
+    });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    if (data?.error === "forbidden") return json(403, { error: "forbidden" });
+    if (data?.error === "not_found") return json(404, { error: "not_found" });
+    if (data?.error) return json(400, { error: data.error });
+    return json(200, { code, expires_at: data.expires_at });
   }
   if (action === "inbox" && req.method === "GET") {
     const { data, error } = await db.rpc("irori_relay_inbox", { p_node: me.id });

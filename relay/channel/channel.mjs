@@ -86,16 +86,10 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'relay_invite',
       description:
-        'Open a one-time invite code (valid 5 minutes) so a partner on THIS machine can register as a member. ' +
-        'Only for ids that start with this machine\'s prefix (e.g. W-*, H-*); owner is unrestricted. The code is secret: give it only to that partner.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          for_id: { type: 'string', description: 'Member id to register, 1-32 chars of letters, digits, - or _' },
-          for_name: { type: 'string', description: 'Display name' },
-        },
-        required: ['for_id', 'for_name'],
-      },
+        'Open a one-time invite code (valid 15 minutes) so a partner on THIS machine can register as a member. ' +
+        'The invitee picks its own id and display name; the id must start with this machine\'s prefix (e.g. W-*, H-*) when you are a foreman (owner is unrestricted). ' +
+        'The code is secret: give it only to that partner, and tell it the id prefix.',
+      inputSchema: { type: 'object', properties: {} },
     },
   ],
 }))
@@ -119,8 +113,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
       return text(JSON.stringify(r.members, null, 1))
     }
     if (req.params.name === 'relay_invite') {
-      const r = await api('invite', { method: 'POST', body: { for_id: a.for_id, for_name: a.for_name } })
-      return text(`invite=${r.invite} expires_at=${r.expires_at} (one-time, give only to ${a.for_id})`)
+      const r = await api('invite', { method: 'POST', body: {} })
+      return text(`invite=${r.invite} expires_at=${r.expires_at} id_prefix=${r.prefix ?? '(none)'} (one-time; the invitee chooses its own id${r.prefix ? ' starting with ' + r.prefix : ''})`)
     }
     return fail(`unknown tool ${req.params.name}`)
   } catch (e) {
