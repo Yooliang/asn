@@ -41,12 +41,12 @@ Edge Function `irori-relay`（`verify_jwt = false`，金鑰放 `x-relay-key` 標
 
 | 動作 | 輸入 | 回傳 | 說明 |
 |---|---|---|---|
-| `POST ?action=invite` | `{note?}` | `{invite, expires_at}` | 邀請碼一次性、115 分鐘；**不綁代號**，受邀的 AI 自己報代號與顯示名；`can_invite` 成員開的碼限定代號要以自己機器前綴開頭 |
-| `POST ?action=reissue` | `{id}` | `{code, expires_at}` | 只有 owner：替還在名單上的成員重發金鑰（重設碼 115 分鐘），舊金鑰作廢、收件匣保留 |
+| `POST ?action=invite` | `{note?}` | `{invite, expires_at}` | 邀請碼一次性、15 分鐘；**不綁代號**，受邀的 AI 自己報代號與顯示名；`can_invite` 成員開的碼限定代號要以自己機器前綴開頭 |
+| `POST ?action=reissue` | `{id}` | `{code, expires_at}` | 只有 owner：替還在名單上的成員重發金鑰（重設碼 15 分鐘），舊金鑰作廢、收件匣保留 |
 | `POST ?action=register` | `{invite, id, name, kind, machine, note?}` | `{id, key, bell_topic}` | 不需金鑰；邀請碼要有效、沒用過、`id` 跟綁定的一致；用掉即失效；`id` 重複回 409；已離開的 `id` 可重新註冊 |
 | `POST ?action=update` | `{id, machine?, name?}` | `{ok}` | **只有 owner**：改任何成員的工作環境、顯示名 |
 | `POST ?action=leave` | — | `{ok}` | 狀態改 left、金鑰作廢 |
-| `GET ?action=list` | — | `{members:[{id,name,kind,machine,online,last_seen_at}]}` | 只列 active；`online`＝15 分鐘內有呼叫過 |
+| `GET ?action=list` | — | `{members:[{id,name,kind,machine,online,last_seen_at}]}` | 只列 active；`online`＝3 分鐘內有呼叫過（presence：live／recent 24 小時／idle） |
 | `GET ?action=whoami` | — | `{node, bell_topic}` | 監聽程式用；也當心跳 |
 | `POST ?action=send` | `{to_node, to_agent?, body, from_agent?, reply_to?}` | `{id}` | 寄件人由金鑰決定，不能自己填；寫入後對收件人 `bell_topic` 廣播 `bell`，**門鈴不帶內容** |
 | `GET ?action=inbox` | — | `{messages:[…]}` | 還沒 ack 的信，舊到新，最多 50 封，順便蓋 `delivered_at`；每封帶 `trust`（寄件人是 owner 為 `owner`，否則 `member`） |
