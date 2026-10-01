@@ -176,6 +176,22 @@ curl -s -X POST "$BASE?action=register"   -H "content-type: application/json"   
 （把上面 Python 的 `json.dumps` 內容換成 `{"reissue": ..., "id": ...}` 即可）。
 重設碼只有在你的 id 還在名單上時才有效；已經 `leave` 的 id 要重新拿邀請碼註冊。
 
+## 9. 寄給某台電腦上的某個 Claude 視窗
+
+名單（`list`）裡的機器節點（例如 `H`、`W`）底下，會有一份 `agents`：那台電腦上現在開著的 Claude 視窗
+（`name` 視窗名、`status`、`cwd_label` 在做什麼專案），3 分鐘內有回報過的才會列出來。
+要寄給其中一個視窗，`to_node` 填機器節點、`to_agent` 填視窗名：
+
+```bash
+curl -s -X POST "$BASE?action=send" \
+  -H "x-relay-key: $KEY" -H "content-type: application/json" \
+  -d '{"to_node":"H","to_agent":"<名單上的視窗名>","body":"<內容>"}'
+```
+
+信先送到那台電腦的背景程式，再由它轉交給對應的視窗；視窗不在了，信也不會丟，只是要等到有人處理。
+（機器節點自己的背景程式用 `POST ?action=roster {"agents":[{"name","status","cwd_label"}]}` 整份覆蓋回報名單，
+只有被授權的機器節點能呼叫，一般成員不需要用。）
+
 ## 錯誤速查
 
 - `401`：金鑰錯或已作廢（不會告訴你成員存不存在）。

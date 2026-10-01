@@ -202,6 +202,49 @@ begin
 end;
 $$;
 
+-- Roster: a machine node (can_invite) reports the Claude windows running on it; each report replaces the whole list.
+create table if not exists relay.roster (
+  node text not null references relay.nodes(id),
+  name text not null,
+  status text,
+  cwd_label text,
+  seen_at timestamptz not null default now(),
+  primary key (node, name)
+);
+alter table relay.roster enable row level security;
+revoke all on relay.roster from public, anon, authenticated;
+
+create or replace function public.irori_relay_roster(p_node text, p_agents jsonb)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare v_n int;
+begin
+  if not exists (select 1 from relay.nodes where id = p_node and status = 'active' and can_invite) then
+    return jsonb_build_object('error', 'forbidden');
+  end if;
+  if p_agents is null or jsonb_typeof(p_agents) <> 'array' or jsonb_array_length(p_agents) > 100 then
+    return jsonb_build_object('error', 'bad_request');
+  end if;
+  if exists (
+    select 1 from jsonb_array_elements(p_agents) a
+    where jsonb_typeof(a) <> 'object' or jsonb_typeof(a->'name') is distinct from 'string'
+       or char_length(a->>'name') not between 1 and 60
+       or char_length(coalesce(a->>'status', '')) > 20 or char_length(coalesce(a->>'cwd_label', '')) > 80
+  ) then
+    return jsonb_build_object('error', 'bad_request');
+  end if;
+  delete from relay.roster where node = p_node;
+  -- same name twice in one report: the last one wins
+  insert into relay.roster (node, name, status, cwd_label)
+    select distinct on (a.v->>'name') p_node, a.v->>'name', nullif(a.v->>'status', ''), nullif(a.v->>'cwd_label', '')
+    from jsonb_array_elements(p_agents) with ordinality as a(v, ord)
+    order by a.v->>'name', a.ord desc;
+  get diagnostics v_n = row_count;
+  return jsonb_build_object('count', v_n);
+end;
+$$;
+
 -- List active members. presence: live＝3 分鐘內有呼叫（有掛收信程式，心跳 2 分鐘）、recent＝24 小時內、idle＝更久或從沒有；online＝live（相容舊版）
 create or replace function public.irori_relay_list()
 returns jsonb
@@ -212,7 +255,11 @@ as $$
     'online', coalesce(n.last_seen_at > now() - interval '3 minutes', false),
     'presence', case when n.last_seen_at > now() - interval '3 minutes' then 'live'
                      when n.last_seen_at > now() - interval '24 hours' then 'recent' else 'idle' end,
-    'last_seen_at', n.last_seen_at) order by n.id), '[]'::jsonb)
+    'last_seen_at', n.last_seen_at,
+    'agents', coalesce((
+      select jsonb_agg(jsonb_build_object('name', r.name, 'status', r.status, 'cwd_label', r.cwd_label) order by r.name)
+      from relay.roster r where r.node = n.id and r.seen_at > now() - interval '3 minutes'
+    ), '[]'::jsonb)) order by n.id), '[]'::jsonb)
   from relay.nodes n where n.status = 'active';
 $$;
 
@@ -226,6 +273,7 @@ begin
     'public.irori_relay_register(text,text,text,text,text,text,text,text,text)',
     'public.irori_relay_leave(text)',
     'public.irori_relay_update(text,text,text,text)',
+    'public.irori_relay_roster(text,jsonb)',
     'public.irori_relay_list()'
   ] loop
     execute format('revoke execute on function %s from public, anon, authenticated', f);

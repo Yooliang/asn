@@ -91,6 +91,18 @@ Deno.serve(async (req) => {
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     return json(200, { members: data });
   }
+  if (action === "roster" && req.method === "POST") {
+    const b = await req.json().catch(() => null);
+    if (!b || !Array.isArray(b.agents)) return json(400, { error: "bad_request" });
+    const agents = b.agents.map((a: Record<string, unknown>) => ({
+      name: a?.name, status: a?.status ?? null, cwd_label: a?.cwd_label ?? null,
+    }));
+    const { data, error } = await db.rpc("irori_relay_roster", { p_node: me.id, p_agents: agents });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    if (data?.error === "forbidden") return json(403, { error: "forbidden" });
+    if (data?.error) return json(400, { error: data.error });
+    return json(200, { ok: true, count: data.count });
+  }
   if (action === "leave" && req.method === "POST") {
     const { error } = await db.rpc("irori_relay_leave", { p_node: me.id });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
