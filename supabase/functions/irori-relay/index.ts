@@ -1,0 +1,151 @@
+// Relay broker. Node key goes in the x-relay-key header; the sender node is decided by the key.
+import { createClient } from "jsr:@supabase/supabase-js@2";
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const db = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
+
+const json = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8" } });
+
+async function sha256Hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Doorbell: broadcast carries no mail content.
+async function ring(topic: string) {
+  try {
+    const r = await fetch(`${SUPABASE_URL}/realtime/v1/api/broadcast`, {
+      method: "POST",
+      headers: { apikey: SERVICE_KEY, authorization: `Bearer ${SERVICE_KEY}`, "content-type": "application/json" },
+      body: JSON.stringify({ messages: [{ topic, event: "bell", payload: {}, private: false }] }),
+    });
+    if (!r.ok) console.error("bell failed", r.status, await r.text());
+  } catch (e) {
+    console.error("bell error", String(e));
+  }
+}
+
+const b64u = (n: number) =>
+  btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(n)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
+const optStr = (v: unknown, n: number) => (typeof v === "string" && v ? v.slice(0, n) : null);
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+Deno.serve(async (req) => {
+  const url = new URL(req.url);
+  const action = url.searchParams.get("action");
+
+  if (action === "register" && req.method === "POST") {
+    const b = await req.json().catch(() => null);
+    if (!b || typeof b.invite !== "string" || typeof b.id !== "string" || !ID_RE.test(b.id) || typeof b.name !== "string" || typeof b.machine !== "string" || b.machine.length < 1 || b.machine.length > 40) {
+      return json(400, { error: "bad_request" });
+    }
+    const ip = (req.headers.get("x-forwarded-for") ?? "unknown").split(",")[0].trim();
+    const key = b64u(32);
+    const bellTopic = "relay-bell-" + b64u(18);
+    const { data, error } = await db.rpc("irori_relay_register", {
+      p_ip_hash: await sha256Hex("ip:" + ip),
+      p_code_hash: await sha256Hex(b.invite),
+      p_id: b.id,
+      p_name: b.name,
+      p_kind: optStr(b.kind, 20),
+      p_machine: b.machine,
+      p_note: optStr(b.note, 500),
+      p_key_hash: await sha256Hex(key),
+      p_bell_topic: bellTopic,
+    });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    if (data?.error === "rate_limited") return json(429, { error: "rate_limited" });
+    if (data?.error === "id_taken") return json(409, { error: "id_taken" });
+    if (data?.error === "invalid_invite") return json(403, { error: "invalid_invite" });
+    if (data?.error) return json(400, { error: data.error });
+    return json(200, { id: data.id, key, bell_topic: data.bell_topic });
+  }
+
+  const key = req.headers.get("x-relay-key");
+  if (!key) return json(401, { error: "unauthorized" });
+  const { data: nodes, error: aerr } = await db.rpc("irori_relay_auth", { p_key_hash: await sha256Hex(key) });
+  if (aerr) { console.error(aerr); return json(500, { error: "internal" }); }
+  if (!nodes || nodes.length === 0) return json(401, { error: "unauthorized" });
+  const me = nodes[0] as { id: string; bell_topic: string; role: string };
+
+  if (action === "whoami" && req.method === "GET") {
+    return json(200, { node: me.id, bell_topic: me.bell_topic });
+  }
+  if (action === "list" && req.method === "GET") {
+    const { data, error } = await db.rpc("irori_relay_list");
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    return json(200, { members: data });
+  }
+  if (action === "leave" && req.method === "POST") {
+    const { error } = await db.rpc("irori_relay_leave", { p_node: me.id });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    return json(200, { ok: true });
+  }
+  if (action === "update" && req.method === "POST") {
+    const b = await req.json().catch(() => null);
+    if (!b || typeof b.id !== "string" || !ID_RE.test(b.id)) return json(400, { error: "bad_request" });
+    const { data, error } = await db.rpc("irori_relay_update", {
+      p_node: me.id, p_id: b.id, p_machine: typeof b.machine === "string" ? b.machine : null,
+      p_name: typeof b.name === "string" ? b.name : null,
+    });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    if (data?.error === "forbidden") return json(403, { error: "forbidden" });
+    if (data?.error === "not_found") return json(404, { error: "not_found" });
+    if (data?.error) return json(400, { error: data.error });
+    return json(200, { ok: true });
+  }
+  if (action === "invite" && req.method === "POST") {
+    const b = await req.json().catch(() => null);
+    if (!b || typeof b.for_id !== "string" || !ID_RE.test(b.for_id) || typeof b.for_name !== "string") {
+      return json(400, { error: "bad_request" });
+    }
+    const code = b64u(24);
+    const { data, error } = await db.rpc("irori_relay_invite", {
+      p_node: me.id, p_code_hash: await sha256Hex(code), p_for_id: b.for_id, p_for_name: b.for_name.slice(0, 100),
+    });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    if (data?.error === "forbidden") return json(403, { error: "forbidden" });
+    if (data?.error === "id_taken") return json(409, { error: "id_taken" });
+    if (data?.error) return json(400, { error: data.error });
+    return json(200, { invite: code, expires_at: data.expires_at });
+  }
+  if (action === "inbox" && req.method === "GET") {
+    const { data, error } = await db.rpc("irori_relay_inbox", { p_node: me.id });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    return json(200, { messages: data });
+  }
+  if (action === "ack" && req.method === "POST") {
+    const b = await req.json().catch(() => null);
+    const ids = b?.ids;
+    if (!Array.isArray(ids) || ids.length > 100 || !ids.every((i: unknown) => typeof i === "string" && UUID.test(i))) {
+      return json(400, { error: "bad_ids" });
+    }
+    const { data, error } = await db.rpc("irori_relay_ack", { p_node: me.id, p_ids: ids });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    return json(200, { acked: data });
+  }
+  if (action === "send" && req.method === "POST") {
+    const b = await req.json().catch(() => null);
+    if (!b || typeof b.to_node !== "string" || typeof b.body !== "string") return json(400, { error: "bad_request" });
+    const str = (v: unknown) => (typeof v === "string" ? v.slice(0, 100) : null);
+    const rt = typeof b.reply_to === "string" && UUID.test(b.reply_to) ? b.reply_to : null;
+    const { data, error } = await db.rpc("irori_relay_send", {
+      p_from_node: me.id, // from_node in the body is ignored on purpose
+      p_from_agent: str(b.from_agent),
+      p_to_node: b.to_node,
+      p_to_agent: str(b.to_agent),
+      p_body: b.body,
+      p_reply_to: rt,
+    });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    if (data?.error === "rate_limited") return json(429, { error: "rate_limited" });
+    if (data?.error) return json(400, { error: data.error });
+    await ring(data.bell_topic);
+    return json(200, { id: data.id });
+  }
+  return json(404, { error: "not_found" });
+});
