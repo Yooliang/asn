@@ -231,7 +231,9 @@ Firebase 這邊：`firebase.json` 只有 Hosting，`web/` 沒有任何 Firebase 
 
 1. **量延遲**：`/updates` 回應多帶 `server_now`（秒）；前端與 App 收到結果時記 `server_now - item.at`（後端處理段）與本機收到時間，累積一週看 p50／p95。`at` 本來就在每則事件裡（03_irori.sql:146-171 的 push 會蓋）。
 2. **修缺口 6**：3D 頁在 `visibilitychange`→hidden 與 `pagehide` 時，用 `fetch(…, { keepalive: true })` 送一次 `GET /updates?…&visible=0&wait=0`（`apiFetch` 可帶標頭，不必用 `sendBeacon`；不能帶標頭的才是它的限制）。後端**不用改**：`liveSpeaker` 已經把 `visible===false` 視為失效（speaker.ts:34），其他台下一次輪詢就接手（speaker.ts:42）。Android 在 `paused`／`roomShowing` 變化時也立刻送一次 `visible=0`。`DEVICE_TTL_S` 先不動。
+   **【3D 頁已做；Android 還沒做；尚未部署】** 實作時改了一處：不送 `GET /updates?…&visible=0&wait=0`，改送新的 `POST /device?client_id=…&kind=…&visible=0`（只呼叫 `touchDevice`）。原因：`/updates` 就算 `wait=0`、沒帶 `since`，進場一樣會 `ensureProcessed`（拉 inbox、呼叫模型轉述、ack）與補講提醒，產生的結果只回給正在關閉的頁面，之後新開的頁面（不帶 `since`）看不到，等於把來信吃掉；`POST /device` 沒有這個副作用，也不打 irori-relay。Android 要改送 `POST /device`（`SPEAKER.md`「App 端需要的配合」）。`/chat` 獨立頁不帶 `client_id`、不是出聲裝置，不需要送。
 3. **減負兩項**：`relay.bellTopic()` 快取 10 分鐘（relay.ts:151-153，一行）；inbox 拉取加節流——進場那次 `ensureProcessed`（inbox.ts:250）只在「`away`、或這次請求不會進入等待、或距上次拉取超過 120 秒」時做（進入等待的請求，訂好門鈴後本來就會補查一次，進場那次是重複的）；補查那次也用 kv 時間戳擋掉「20 秒內別台剛拉過」的情況（同樣的原則，`DESIGN.md:73、84` 對夥伴機器端的橋已經採用：門鈴＋每 2 分鐘補拉）。預期每週期 irori-relay 呼叫從約 3 降到 ≤1。
+   **【已做；尚未部署】** `bellTopic()` 快取 10 分鐘（失敗不快取）；拉取時間戳放 kv `inbox_pulled_at`＝`{at, bell}`。門鈴**真的響**一律拉，只節流「訂好後的補查」（`waitBell` 現在把補查與真響分開傳給 `onRing(topic, real)`）。補查只認「別人在門鈴守著時拉的」（`bell: true`）那種時間戳：進場那次不在門鈴守著，不算，免得訂好門鈴前來的信被漏掉。補查被擋時若別台正在拉，會等它做完再讀結果。決策抽成 `shouldPullOnEntry`／`shouldPullOnBell`，測試在 `inbox_throttle_test.ts`。**殘留的窗口**：補查被擋、而前一次拉取的請求已經提早結束（狀態門鈴喚醒）時，兩個請求交接的那 1～2 秒內來的信會漏掉門鈴，最久約 25～30 秒後的下一次補查才拉到（沒有人會漏信，只是慢）。
 4. 到 Dashboard 確認方案與用量，記下基準。
 
 驗收：階段 0 之後一週，p95、每日呼叫數、「關掉 speaker 那台後最久多久有別台出聲」三個數字有紀錄。

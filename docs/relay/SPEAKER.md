@@ -8,6 +8,9 @@
 1. 自己有一個 `client_id`（字串，最長 64，每次安裝／啟動固定即可）與 `kind`：3D 頁是 `3d`，Android App 是 `app`。
 2. 輪詢 `GET /updates` 時加查詢參數：`client_id=<id>&kind=app&visible=1`。
    `visible=1`＝現在可以出聲（泡泡在顯示、或 App 在前景）；不能出聲就送 `visible=0`，或乾脆不輪詢。
+   **離開時要馬上說一聲**：泡泡收起、App 進背景、關頁的那一刻送一次 `POST /device?client_id=<id>&kind=app&visible=0`（參數同 /updates，帶授權標頭，回 `{"ok":true}`）。
+   後端立刻視這台為失效，別台下一次輪詢就接手；不送的話要等 180 秒沒輪詢才會判死，期間推來的話都蓋這台的 `speaker_client`、但這台不會唸，等於沒人出聲。
+   這支只更新裝置紀錄，不收信、不補講提醒，所以離開時送它比送 `GET /updates?visible=0&wait=0` 安全（後者會把來信轉述成只回給正在關閉的頁面）。
 3. 送 `POST /chat` 時，body 多帶 `"client_id": "<id>", "client_kind": "app"`（使用者在這台發話，這台就成為 speaker）。
    /chat 獨立頁不出聲，不帶這兩個欄位。
 4. 收到的 say 有 `speaker_client` 欄位時：
@@ -20,7 +23,7 @@
 - kv `dev:<client_id>`＝{kind, at, visible}，每次帶 client_id 的 `/updates` 或 `/chat` 都更新。
 - kv `speaker`＝{client_id, kind, at}：
   1. `/chat` 帶 client_id＋client_kind → 該台成為 speaker（最近互動的那台）。
-  2. 沒有 speaker、或 speaker 超過 180 秒沒輪詢／`visible=0` → 下一台可見的出聲裝置輪詢時接手（先到先得，不會每 25 秒互搶）。
+  2. 沒有 speaker、或 speaker 超過 180 秒沒輪詢／`visible=0`（輪詢帶的，或離開時 `POST /device` 送的）→ 下一台可見的出聲裝置輪詢時接手（先到先得，不會每 25 秒互搶）。
   3. 從 /chat 獨立頁發話不改 speaker，沿用上一條選出的「最近可見的 3D 頁或 App」。
 - 推送 say 時（夥伴回信、提醒、speak_elsewhere）加 `speaker_client`＝推送當下還活著的 speaker。
 - **換人立刻通知**：`/chat` 讓 speaker 換成另一台時（新的 client_id 跟原本記的不同），後端敲一次狀態門鈴（跟 `PUT /state` 同一個），各台等待中的 `/updates` 長輪詢馬上回來、帶新的 `speaker_client`（3D 頁據此即時換時間的深色底）。同一台連續說話不敲。長輪詢進來時先記當時的 speaker，門鈴一響就比一次，換了才回。發話那台 3D 頁另外在送出時先本機樂觀切成 speaker，之後仍以 `/updates` 為準。
@@ -58,6 +61,7 @@
 | 開機打招呼／新版本通知 | 每台 3D 頁自己的本機 notice → 自己 `/chat` | 是（各自一次 `/chat`） | 各自本機出聲（同瀏覽器 30 分鐘去重，跨裝置不去重） | 各自 | 各自 | 缺口：電腦＋手機各開 3D 頁時會各打一次招呼、各自出聲 |
 | 換衣服／換場景／身體擺放 | 任一台（`[outfit:]` 標籤、set_body、手動） | 是，state 存後端 | — | — | 別台輪詢到較新的 `state_seq` 就瞬移跟上（不走路） | 一致（但別台看不到「走出去換」的過程） |
 | 沒有活著的 speaker | — | — | 每台可見的 3D 頁都唸（舊規則） | 所有 | 所有 | 缺口：理論上可能多台同時出聲；實務上 3D 頁輪詢會立刻接手成 speaker |
+| 出聲那台關頁／切背景（缺口 6） | 3D 頁在 `visibilitychange`→hidden 與 `pagehide` 用 `keepalive` 送 `POST /device?…&visible=0` | 是（只更新裝置紀錄） | 別台下一次輪詢接手（以前最長 3 分鐘沒人出聲：推來的話蓋著離開那台的 `speaker_client`、但它不唸） | 所有 3D 頁 | 所有 3D 頁 | 3D 頁已修（需部署後端與網頁）；App 要自己在泡泡收起／進背景時送，**還沒做**（見下） |
 
 ### 仍有的缺口（這次沒修）
 
@@ -68,6 +72,8 @@
 5. 靜音播放的停留時間是估的，跟出聲那台不會完全同步。
 
 ### App 端需要的配合
+
+- 缺口 6（離開時讓位）：App 在 `paused`／泡泡收起（`roomShowing` 變化）時，立刻 `POST /device?client_id=<id>&kind=app&visible=0`（路徑與參數見上；`BubbleService` 現有的 `visible=0` 輪詢不用改）。沒做之前，暫停／泡泡收起要等進行中的那次長輪詢結束（最多 25 秒）才讓位；App 被系統殺掉則要等 180 秒判死，期間沒有任何一台出聲。
 
 - 主動說話現在由後端 say 推給 App：若 App 是 speaker（`speaker_client == 自己`），收到後照一般 say 唸出聲，**不需要程式改動**；它在 `origin: 'chat'` 的 say 上本來就是這樣處理。
 - 不想多唸的情況：App 不是 speaker 時照既有規則不唸。
