@@ -1,5 +1,6 @@
 // Relay broker. Node key goes in the x-relay-key header; the sender node is decided by the key.
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { handleNodeRoomAction, type RoomDeps } from "../_shared/rooms.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -178,6 +179,21 @@ Deno.serve(async (req) => {
     if (data?.error) return json(400, { error: data.error });
     await ring(data.bell_topic);
     return json(200, { id: data.id });
+  }
+  // 群組：建群組、改置頂、加人、移人對節點金鑰一律 403（見 _shared/rooms.ts）；其餘（列表、讀、發言、讀置頂）限成員
+  if (action?.startsWith("room_")) {
+    const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
+    const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
+    const deps: RoomDeps = {
+      rpc: async (fn, args) => await db.rpc(fn, args),
+      ring,
+      rosterHas: async (node, agent) => {
+        const { data, error } = await db.rpc("irori_relay_roster_has", { p_node: node, p_name: agent });
+        return !error && data === true;
+      },
+    };
+    const r = await handleNodeRoomAction(deps, me, action, params);
+    return json(r.status, r.body);
   }
   return json(404, { error: "not_found" });
 });

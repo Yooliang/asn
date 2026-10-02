@@ -1,0 +1,136 @@
+// 執行：SUPABASE_URL=http://x SUPABASE_SERVICE_ROLE_KEY=x deno test -A supabase/functions/
+import { assert, assertEquals } from "jsr:@std/assert@1";
+import { handleNodeRoomAction, OWNER_ONLY_ACTIONS, parseMentions, type RoomDeps, type RoomMember, shouldRespond } from "./rooms.ts";
+
+const MEMBERS: RoomMember[] = [
+  { key: "~owner", name: "小良哥", role: "owner", kind: "owner", node_role: "owner" },
+  { key: "XISU", name: "Irori", role: "member", kind: "claude", node_role: "owner" },
+  { key: "w02", name: "W02", kind: "claude", node_role: "member" },
+  { key: "aegis", name: "牧陽 Aegis", kind: "claude", node_role: "member" },
+  { key: "H~H-主線-3", name: "H-主線-3", kind: "window", node_role: "member" },
+  { key: "H~H-主線", name: "H-主線", kind: "window", node_role: "member" },
+  { key: "aegis~小牧", name: "小牧", kind: "window", node_role: "member" },
+];
+
+Deno.test("mentions：顯示名、key、中文、含空白的名字、希緒別名", () => {
+  assertEquals(parseMentions("@W02 幫忙看一下", MEMBERS), ["w02"]);
+  assertEquals(parseMentions("@w02 小寫也行", MEMBERS), ["w02"]);
+  assertEquals(parseMentions("請 @小牧 回答，@小良哥 也看一下", MEMBERS), ["aegis~小牧", "~owner"]);
+  assertEquals(parseMentions("@牧陽 Aegis 總機請看", MEMBERS), ["aegis"]);
+  assertEquals(parseMentions("@希緒 幫我記", MEMBERS), ["XISU"]);
+  assertEquals(parseMentions("沒有點名的一句話，信箱 a@b.com 也不算", MEMBERS), []);
+});
+
+Deno.test("mentions：最長的名字優先，英數結尾不會誤中更長名字的前半，重複與上限", () => {
+  assertEquals(parseMentions("@H-主線-3 你好", MEMBERS), ["H~H-主線-3"]);
+  assertEquals(parseMentions("@H-主線 你好", MEMBERS), ["H~H-主線"]);
+  assertEquals(parseMentions("@H-主線-3，@H-主線：兩個都點", MEMBERS), ["H~H-主線-3", "H~H-主線"]);
+  assertEquals(parseMentions("@W02 @w02 @W02", MEMBERS), ["w02"]);
+  assertEquals(parseMentions("@W022 不是 W02", MEMBERS), []); // 後面接英數＝另一個名字
+  assertEquals(parseMentions("@W02 @小牧 @aegis @XISU", MEMBERS, 2), ["w02", "aegis~小牧"]);
+  // 中文名沒有英數邊界可擋：短名字排在前面時，也要認出較長的那位
+  const zh: RoomMember[] = [{ key: "a~小牧", name: "小牧" }, { key: "a~小牧二號", name: "小牧二號" }];
+  assertEquals(parseMentions("@小牧二號 你好", zh), ["a~小牧二號"]);
+  assertEquals(parseMentions("@小牧 你好", zh), ["a~小牧"]);
+});
+
+Deno.test("只回點名或 owner 的判定：owner 發的、被點名的才回；沒點名的成員訊息、自己發的不回", () => {
+  const msg = (from: string, trust: string, mentions: string[] = []) => ({ from, trust, mentions });
+  assert(shouldRespond(msg("~owner", "owner"), "w02"));             // 小良哥發問，不用點名
+  assert(shouldRespond(msg("XISU", "owner"), "w02"));               // 希緒（owner 角色）發問
+  assert(shouldRespond(msg("aegis~小牧", "member", ["w02"]), "w02")); // 被點名
+  assert(!shouldRespond(msg("aegis~小牧", "member", ["H~H-主線"]), "w02")); // 點別人
+  assert(!shouldRespond(msg("aegis~小牧", "member"), "w02"));       // 成員之間沒點名：只看不回
+  assert(!shouldRespond(msg("w02", "member", ["w02"]), "w02"));     // 自己發的
+  assert(!shouldRespond(msg("~owner", "owner"), "~owner"));
+});
+
+// 假的資料庫與門鈴：記下每一次呼叫
+function fake(handlers: Record<string, (args: Record<string, unknown>) => unknown> = {}, roster = true) {
+  const calls: { fn: string; args: Record<string, unknown> }[] = [];
+  const rung: string[] = [];
+  const deps: RoomDeps = {
+    rpc: (fn, args) => {
+      calls.push({ fn, args });
+      const h = handlers[fn];
+      return Promise.resolve({ data: h ? h(args) : {}, error: null });
+    },
+    ring: (t) => { rung.push(t); return Promise.resolve(); },
+    rosterHas: () => Promise.resolve(roster),
+  };
+  return { deps, calls, rung };
+}
+const ME = { id: "w02" };
+const membersOk = () => ({ key: "w02", room: { id: "r1", name: "x" }, members: MEMBERS });
+
+Deno.test("權限：節點（AI，含希緒 XISU 的金鑰）呼叫建群組／改置頂／加人／移人一律 403，且完全不碰資料庫", async () => {
+  for (const node of [{ id: "w02" }, { id: "XISU" }, { id: "H" }]) {
+    for (const action of ["room_create", "room_add", "room_remove", "room_pin_set"]) {
+      const { deps, calls } = fake();
+      const r = await handleNodeRoomAction(deps, node, action, { room: "r1", member: "w02", body: "x", version: 0, name: "n", members: ["w02"] });
+      assertEquals([r.status, r.body.error], [403, "forbidden"], `${node.id} ${action}`);
+      assertEquals(calls.length, 0, `${node.id} ${action} 不能打到資料庫`);
+    }
+  }
+  assertEquals(OWNER_ONLY_ACTIONS.size, 4);
+});
+
+Deno.test("權限：節點發言永遠不能用 owner 身分（p_owner 一律 false），body 裡塞 owner／p_owner 也沒用", async () => {
+  const { deps, calls } = fake({ irori_relay_room_members: membersOk, irori_relay_room_post: () => ({ seq: 1, bell_topics: [] }) });
+  const r = await handleNodeRoomAction(deps, ME, "room_post", { room: "r1", body: "hi", owner: true, p_owner: true, as_owner: "1" });
+  assertEquals(r.status, 200);
+  for (const c of calls) assertEquals(c.args.p_owner, false, c.fn);
+  assertEquals(calls.at(-1)!.args.p_node, "w02"); // 寄件節點由金鑰決定，不是從 body 來的
+});
+
+Deno.test("視窗代發：視窗名不在該節點 roster → 403 且不寫入；名字含 ~ 或太長 → 400；在 roster 內 → 以該視窗發言並解析點名、敲所有成員節點的門鈴", async () => {
+  const bad = fake({}, false);
+  const r1 = await handleNodeRoomAction(bad.deps, ME, "room_post", { room: "r1", body: "hi", from_agent: "不存在的視窗" });
+  assertEquals([r1.status, r1.body.error], [403, "unknown_agent"]);
+  assertEquals(bad.calls.length, 0);
+  for (const evil of ["H~H-主線", "x".repeat(61)]) {
+    const r = await handleNodeRoomAction(bad.deps, ME, "room_post", { room: "r1", body: "hi", from_agent: evil });
+    assertEquals([r.status, r.body.error], [400, "bad_agent"]);
+  }
+  const ok = fake({ irori_relay_room_members: membersOk, irori_relay_room_post: () => ({ seq: 7, bell_topics: ["t1", "t2"] }) });
+  const r2 = await handleNodeRoomAction(ok.deps, ME, "room_post", { room: "r1", body: "@小牧 看一下，@小良哥 請看", from_agent: "H-視窗" });
+  assertEquals([r2.status, r2.body.seq], [200, 7]);
+  const post = ok.calls.find((c) => c.fn === "irori_relay_room_post")!;
+  assertEquals([post.args.p_agent, post.args.p_mentions], ["H-視窗", ["aegis~小牧", "~owner"]]);
+  assertEquals(ok.rung.sort(), ["t1", "t2"]);
+});
+
+Deno.test("限流與非成員：資料庫回 rate_limited → 429（不敲門鈴），not_member → 403", async () => {
+  const limited = fake({ irori_relay_room_members: membersOk, irori_relay_room_post: () => ({ error: "rate_limited" }) });
+  const r = await handleNodeRoomAction(limited.deps, ME, "room_post", { room: "r1", body: "hi" });
+  assertEquals([r.status, r.body.error], [429, "rate_limited"]);
+  assertEquals(limited.rung.length, 0);
+  const out = fake({ irori_relay_room_members: () => ({ error: "not_member" }) });
+  const r2 = await handleNodeRoomAction(out.deps, ME, "room_post", { room: "r1", body: "hi" });
+  assertEquals([r2.status, r2.body.error], [403, "not_member"]);
+  assertEquals(out.calls.some((c) => c.fn === "irori_relay_room_post"), false);
+});
+
+Deno.test("讀紀錄：每則帶 for_me（被點名或 owner 發的才為 true）", async () => {
+  const { deps } = fake({
+    irori_relay_room_read: () => ({
+      key: "w02", last_seq: 3,
+      messages: [
+        { seq: 1, from: "aegis~小牧", trust: "member", body: "閒聊", mentions: [] },
+        { seq: 2, from: "aegis~小牧", trust: "member", body: "@W02", mentions: ["w02"] },
+        { seq: 3, from: "~owner", trust: "owner", body: "大家", mentions: [] },
+      ],
+    }),
+  });
+  const r = await handleNodeRoomAction(deps, ME, "room_read", { room: "r1", since: "0" });
+  assertEquals(r.status, 200);
+  assertEquals(r.body.messages.map((m: { for_me: boolean }) => m.for_me), [false, true, true]);
+});
+
+Deno.test("參數檢查：房號格式不對 → 400；未知動作 → 404", async () => {
+  const { deps, calls } = fake();
+  assertEquals((await handleNodeRoomAction(deps, ME, "room_read", { room: "../x" })).status, 400);
+  assertEquals((await handleNodeRoomAction(deps, ME, "room_post", { room: "r1", body: "" })).status, 400);
+  assertEquals((await handleNodeRoomAction(deps, ME, "room_zzz", { room: "r1" })).status, 404);
+  assertEquals(calls.length, 0);
+});
