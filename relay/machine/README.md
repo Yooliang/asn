@@ -24,7 +24,9 @@ relay send(reply_to) <──── bridge.mjs <──stdout── 收發室 <─
    - 收發室回報 `SENT <id>` 才 ack；失敗（`FAIL`）、找不到 session、轉交逾時（2 分鐘），都寄一封說明給原寄件人再 ack。
    - 對方回覆（收發室收到的 `<cross-session-message>` 那一輪）→ `relay send` 帶 `reply_to` 寄回原寄件人，`from_agent` 填對方 session 名。
      之後同一 session 的追加回覆（10 分鐘內）也一併轉寄。
-   - 逾時（預設 10 分鐘）沒有任何回覆 → 寄「對方沒有回覆」。
+   - 逾時（預設 10 分鐘）沒有經收發室收到回覆 → 寄「［收發室］10 分鐘內沒有經收發室收到 X 的回覆（對方若已另外回信可忽略）」。
+     同一寄件人＋同一收件視窗 30 分鐘內只報一次（`IRORI_NOREPLY_WINDOW_MS` 可調），被合併的下次報時帶「另有 N 封也還沒回」。
+   - **告知類的信在內文加「（不需回覆）」或「[no-reply]」**：照常轉交、成功即 ack，但不計時、不寄逾時通知（收發室之後也不再轉寄對方的回覆）。
    - 沒有 `to_agent` → 交給 `IRORI_RELAY_DEFAULT_AGENT`（預設 `H-工頭-2`）；它不在線就改交給**最近有活動**的互動式 session
      （依 `~/.claude/sessions/<pid>.json` 的 `updatedAt`，排除收發室），內文前加一行「原本要給 <預設> 但它不在線，請你代收並轉告／處理」；都沒有人在線才**不 ack、留在 inbox**。
    - 不在名單的 `to_agent` → 寄回「找不到這個 session（目前可達：…）」。
@@ -43,6 +45,7 @@ relay send(reply_to) <──── bridge.mjs <──stdout── 收發室 <─
 | `IRORI_RELAY_ALLOW` | 逗號分隔，額外允許轉交的 session 名（測試用；預設只允許名單內的互動式 session） |
 | `IRORI_MAILBOX_NAME` / `IRORI_MAILBOX_MODEL` | 收發室名稱／模型 |
 | `IRORI_REPLY_TIMEOUT_MS` | 等回覆逾時（預設 600000） |
+| `IRORI_NOREPLY_WINDOW_MS` | 逾時通知合併視窗（預設 1800000）；`IRORI_BRIDGE_TICK_MS` 逾時檢查間隔（預設 5000，測試用） |
 | `CLAUDE_BIN` | claude 執行檔（預設 `claude`） |
 
 Log：`~/.irori-relay/machine-<ID>/bridge.log`（每個轉交、每一輪收發室的耗時與費用都有一行）。

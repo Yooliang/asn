@@ -27,6 +27,8 @@ const ROSTER_MS = Number(process.env.IRORI_ROSTER_MS || 60_000)
 const HEARTBEAT_MS = 25_000
 const MAX_BACKOFF_MS = 30_000
 const REPLY_TIMEOUT_MS = Number(process.env.IRORI_REPLY_TIMEOUT_MS || 600_000)
+const NOTICE_WINDOW_MS = Number(process.env.IRORI_NOREPLY_WINDOW_MS || 1_800_000)   // 同一寄件人＋同一收件視窗，這段時間內只報一次「沒有回覆」
+const TICK_MS = Number(process.env.IRORI_BRIDGE_TICK_MS || 5_000)
 const FORWARD_TIMEOUT_MS = 120_000
 const LOG_FILE = process.env.IRORI_RELAY_LOG || path.join(WORK_DIR, 'bridge.log')
 
@@ -165,6 +167,8 @@ const workerSay = text => {
 // ---- mail state --------------------------------------------------------------------------------
 const seen = new Set()        // acked mail ids (dedupe)
 const pending = new Map()     // mail id -> {mail, target, state, t0, t, replied}
+const noticed = new Map()     // 寄件人|收件視窗 -> {t, skipped}（逾時通知合併用）
+const NO_REPLY_RE = /（不需回覆）|\[no-reply\]/i
 const unrouted = new Set()    // mail ids already logged as waiting for the default agent
 
 const head = m => `[RELAY 來信] trust=${m.trust} from=${m.from_node}/${m.from_agent ?? ''} to=${m.to_agent ?? ''} id=${m.id}`
@@ -196,6 +200,7 @@ async function onSent(id) {
   const p = pending.get(id)
   if (!p || p.state !== 'forwarding') return
   p.state = 'waiting'
+  if (p.noReply) { pending.delete(id); log(`forwarded id=${id} -> ${p.target} (no-reply mail, no timer)`); await ackIds([id]); return }
   log(`forwarded id=${id} -> ${p.target} (${Date.now() - p.t0}ms)`)
   p.t = Date.now()
   await ackIds([id])
@@ -218,6 +223,15 @@ async function onReply(from, text) {
   log(`reply from ${from} -> ${p.mail.from_node} id=${p.mail.id} sent=${ok} (${Date.now() - p.t0}ms total)`)
 }
 
+async function noticeNoReply(p, now) {
+  const key = `${p.mail.from_node}/${p.mail.from_agent ?? ''}|${p.target}`
+  const prev = noticed.get(key)
+  if (prev && now - prev.t < NOTICE_WINDOW_MS) { prev.skipped++; log(`no-reply notice suppressed id=${p.mail.id} (${key})`); return }
+  const more = prev?.skipped ? `；另有 ${prev.skipped} 封也還沒回` : ''
+  noticed.set(key, { t: now, skipped: 0 })
+  await sendBack(p, `[收發室] ${Math.round(REPLY_TIMEOUT_MS / 60000)} 分鐘內沒有經收發室收到 ${p.target} 的回覆（對方若已另外回信可忽略）${more}`)
+}
+
 setInterval(async () => {
   const now = Date.now()
   for (const [id, p] of pending) {
@@ -226,11 +240,11 @@ setInterval(async () => {
       await sendBack(p, `[收發室] 轉交給 ${p.target} 逾時（收發室沒有完成轉交）`)
       await ackIds([id]); pending.delete(id)
     } else if (p.state === 'waiting' && now - p.t > REPLY_TIMEOUT_MS) {
-      if (!p.replied) await sendBack(p, `[收發室] 對方沒有回覆（${p.target}，已等 ${Math.round(REPLY_TIMEOUT_MS / 60000)} 分鐘）`)
       pending.delete(id)
+      if (!p.replied) await noticeNoReply(p, now)
     }
   }
-}, 5_000)
+}, TICK_MS)
 
 // ---- inbox -------------------------------------------------------------------------------------
 let pulling = false, again = false
@@ -248,7 +262,7 @@ async function handleMail(m) {
     note = fallbackNote(DEFAULT_AGENT, fb.name)
     log(`id=${m.id} has no to_agent and ${DEFAULT_AGENT} is offline: fallback to most recently active session ${fb.name}`)
   }
-  const p = { mail: m, target, state: 'forwarding', t0: Date.now(), t: Date.now(), replied: false }
+  const p = { mail: m, target, state: 'forwarding', t0: Date.now(), t: Date.now(), replied: false, noReply: NO_REPLY_RE.test(m.body ?? '') }
   if (!forwardable(target)) {
     const names = roster.map(a => a.name).join('、') || '(無)'
     p.state = 'done'

@@ -251,3 +251,40 @@ test('bridge: 預設不在線且沒有任何互動式 session → 留在 inbox�
     assert.equal(rec.length, 0); assert.equal(st.acked.size, 0)
   } finally { await st.close() }
 })
+
+// ------------------------------------------------------------------------ 逾時通知（不需回覆／合併）
+const quick = { IRORI_RELAY_DEFAULT_AGENT: 'T-最近的', IRORI_REPLY_TIMEOUT_MS: '300', IRORI_BRIDGE_TICK_MS: '100' }
+const noticesOf = st => st.sent.filter(s => /沒有經收發室收到/.test(s.body))
+
+test('bridge: 內文含（不需回覆）／[no-reply] → 照常轉交並 ack，但不計時、不寄逾時通知', async () => {
+  const st = await fakeServer({ inbox: [mail(1, { body: '（不需回覆）純告知' }), mail(2, { body: '純告知\n[No-Reply]' })] })
+  let rec
+  try {
+    await runBridge({
+      script: 'bridge.mjs', st, setup: mainSetup(SESSIONS), env: quick, settle: 1500,
+      until: ({ home }) => (rec = forwarded(home)).length >= 2 && st.acked.size >= 2,
+    })
+    assert.equal(rec.length, 2); assert.equal(noticesOf(st).length, 0)
+  } finally { await st.close() }
+})
+
+test('bridge: 逾時通知 30 分鐘內同寄件人＋同收件視窗只報一次', async () => {
+  const st = await fakeServer({ inbox: [mail(1), mail(2), mail(3)] })
+  try {
+    await runBridge({
+      script: 'bridge.mjs', st, setup: mainSetup(SESSIONS), env: quick, settle: 1500,
+      until: () => st.acked.size >= 3 && noticesOf(st).length >= 1,
+    })
+    assert.equal(noticesOf(st).length, 1)
+    assert.match(noticesOf(st)[0].body, /對方若已另外回信可忽略/)
+  } finally { await st.close() }
+  // 視窗設 0：每封都報（確認合併確實來自視窗）
+  const st2 = await fakeServer({ inbox: [mail(4), mail(5)] })
+  try {
+    await runBridge({
+      script: 'bridge.mjs', st: st2, setup: mainSetup(SESSIONS), env: { ...quick, IRORI_NOREPLY_WINDOW_MS: '0' },
+      until: () => noticesOf(st2).length >= 2,
+    })
+    assert.equal(noticesOf(st2).length, 2)
+  } finally { await st2.close() }
+})
