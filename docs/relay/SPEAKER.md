@@ -23,6 +23,7 @@
   2. 沒有 speaker、或 speaker 超過 180 秒沒輪詢／`visible=0` → 下一台可見的出聲裝置輪詢時接手（先到先得，不會每 25 秒互搶）。
   3. 從 /chat 獨立頁發話不改 speaker，沿用上一條選出的「最近可見的 3D 頁或 App」。
 - 推送 say 時（夥伴回信、提醒、speak_elsewhere）加 `speaker_client`＝推送當下還活著的 speaker。
+- **換人立刻通知**：`/chat` 讓 speaker 換成另一台時（新的 client_id 跟原本記的不同），後端敲一次狀態門鈴（跟 `PUT /state` 同一個），各台等待中的 `/updates` 長輪詢馬上回來、帶新的 `speaker_client`（3D 頁據此即時換時間的深色底）。同一台連續說話不敲。長輪詢進來時先記當時的 speaker，門鈴一響就比一次，換了才回。發話那台 3D 頁另外在送出時先本機樂觀切成 speaker，之後仍以 `/updates` 為準。
 - 實作：`supabase/functions/irori-api/speaker.ts`，測試 `speaker_test.ts`。
 
 ## 靜音播放（不是出聲裝置的 3D 頁）
