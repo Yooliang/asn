@@ -1,6 +1,7 @@
 // Relay broker. Node key goes in the x-relay-key header; the sender node is decided by the key.
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { handleNodeRoomAction, type RoomDeps, syncNodeAuto } from "../_shared/rooms.ts";
+import { handleAgentInbox } from "../_shared/agent_inbox.ts";
 import { handleNodeLaunchAction, LAUNCH_ACTIONS, sanitizeLauncher } from "../_shared/launch.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -165,6 +166,16 @@ Deno.serve(async (req) => {
     if (data?.error === "not_found") return json(404, { error: "not_found" });
     if (data?.error) return json(400, { error: data.error });
     return json(200, { code, expires_at: data.expires_at });
+  }
+  // 視窗自己收信：帶 agent 參數時只看／只 ack 寄給該視窗的信（見 _shared/agent_inbox.ts）；沒帶 agent 的走下面原本的節點信箱
+  if (action === "inbox" && req.method === "GET" && url.searchParams.has("agent")) {
+    const r = await handleAgentInbox({ rpc: async (fn, args) => await db.rpc(fn, args) }, me, "inbox", url.searchParams.get("agent"));
+    return json(r.status, r.body);
+  }
+  if (action === "ack" && req.method === "POST" && url.searchParams.has("agent")) {
+    const b = await req.json().catch(() => null);
+    const r = await handleAgentInbox({ rpc: async (fn, args) => await db.rpc(fn, args) }, me, "ack", url.searchParams.get("agent"), b);
+    return json(r.status, r.body);
   }
   if (action === "inbox" && req.method === "GET") {
     const { data, error } = await db.rpc("irori_relay_inbox", { p_node: me.id });

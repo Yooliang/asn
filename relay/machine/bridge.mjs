@@ -11,6 +11,7 @@ import path from 'node:path'
 import { pickFallbackAgent, fallbackNote } from './pick-fallback.mjs'
 import { createRooms, parseMember, roomText, roomUuid, NO_REPLY_RE as ROOM_NO_REPLY_RE } from './rooms.mjs'
 import { createLauncher } from './launcher.mjs'
+import { selfRecvAlive } from './self-recv.mjs'
 
 const NODE_ID = (process.env.IRORI_RELAY_ID || 'H').trim()
 const BASE_URL = (process.env.IRORI_RELAY_URL || 'https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/irori-relay').replace(/\/+$/, '')
@@ -181,7 +182,8 @@ const seen = new Set()        // acked mail ids (dedupe)
 const pending = new Map()     // mail id -> {mail, target, state, t0, t, replied}
 const noticed = new Map()     // 寄件人|收件視窗 -> {t, skipped}（逾時通知合併用）
 const NO_REPLY_RE = /（不需回覆）|\[no-reply\]/i
-const unrouted = new Set()    // mail ids already logged as waiting for the default agent
+const selfHandled = new Set() // mail ids already logged as left to the window's own recv
+const unrouted = new Set()   // mail ids already logged as waiting for the default agent
 
 const head = m => `[RELAY 來信] trust=${m.trust} from=${m.from_node}/${m.from_agent ?? ''} to=${m.to_agent ?? ''} id=${m.id}`
 
@@ -287,6 +289,11 @@ const launcher = createLauncher({
 
 let pulling = false, again = false
 async function handleMail(m) {
+  // 這個視窗自己在收信（recv.mjs --watch 的心跳在 90 秒內且 pid 活著）：橋不轉、不 ack，留給視窗自己拉；心跳過期就照舊轉交，不會漏信
+  if (m.to_agent && selfRecvAlive(WORK_DIR, m.to_agent)) {
+    if (!selfHandled.has(m.id)) { selfHandled.add(m.id); log(`id=${m.id} to=${m.to_agent} window receives by itself (recv heartbeat): bridge skips`) }
+    return
+  }
   let target = m.to_agent || DEFAULT_AGENT
   let note = ''
   if (!m.to_agent && !onlineNames().has(DEFAULT_AGENT)) {
