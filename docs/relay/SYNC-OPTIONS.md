@@ -254,6 +254,8 @@ Firebase 這邊：`firebase.json` 只有 Hosting，`web/` 沒有任何 Firebase 
 
 ### 階段 3：保險（只有觸發條件成立才做）
 
+**【2026-10-03 小良哥改裁示提前做，#120】** 方案 4 路線 A 已實作，規格、約定、上線步驟見 `SIGNAL.md`（保底輪詢 300 秒、離開判斷 450 秒、speaker 存活期 400 秒、兩個 secret 都沒設時整個功能關閉）。以下是當時的規劃原文。
+
 方案 4 路線 A：建 RTDB 實例與 Rules（只開 `/p/$h` 公開讀）、後端加 `notify()` 寫指標、前端 `EventSource` 加保底輪詢。**先在 irori-api 側加一個 feature flag，可隨時退回純門鈴。**
 
 ## 7. 風險

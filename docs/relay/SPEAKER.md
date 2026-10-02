@@ -24,6 +24,7 @@
 - kv `speaker`＝{client_id, kind, at}：
   1. `/chat` 帶 client_id＋client_kind → 該台成為 speaker（最近互動的那台）。
   2. 沒有 speaker、或 speaker 超過 180 秒沒輪詢／`visible=0`（輪詢帶的，或離開時 `POST /device` 送的）→ 下一台可見的出聲裝置輪詢時接手（先到先得，不會每 25 秒互搶）。
+     後端有開訊號模式（Firebase 指標，`SIGNAL.md`）時，裝置只每 300 秒保底輪詢一次，存活期改成 **400 秒**（要大於保底間隔，否則兩次保底之間 speaker 就失效）；正常離開的 `visible=0` 照樣立刻讓位。
   3. 從 /chat 獨立頁發話不改 speaker，沿用上一條選出的「最近可見的 3D 頁或 App」。
 - 推送 say 時（夥伴回信、提醒、speak_elsewhere）加 `speaker_client`＝推送當下還活著的 speaker。
 - **換人立刻通知**：`/chat` 讓 speaker 換成另一台時（新的 client_id 跟原本記的不同），後端敲一次狀態門鈴（跟 `PUT /state` 同一個），各台等待中的 `/updates` 長輪詢馬上回來、帶新的 `speaker_client`（3D 頁據此即時換時間的深色底）。同一台連續說話不敲。長輪詢進來時先記當時的 speaker，門鈴一響就比一次，換了才回。發話那台 3D 頁另外在送出時先本機樂觀切成 speaker，之後仍以 `/updates` 為準。

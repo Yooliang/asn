@@ -2,6 +2,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { handleNodeRoomAction, type RoomDeps, syncNodeAuto } from "../_shared/rooms.ts";
 import { handleAgentInbox } from "../_shared/agent_inbox.ts";
+import * as signal from "../_shared/signal.ts";
 import { handleNodeLaunchAction, LAUNCH_ACTIONS, sanitizeLauncher } from "../_shared/launch.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -17,6 +18,8 @@ async function sha256Hex(s: string): Promise<string> {
 }
 
 // Doorbell: broadcast carries no mail content.
+// Also write the Firebase RTDB bell node b/<hash> = { at } (pointer only, see docs/relay/SIGNAL.md): devices that listen to it
+// pull /updates only when it changes. No-op when IRORI_FIREBASE_DB_URL / IRORI_FIREBASE_SA are not both set; failures only log.
 async function ring(topic: string) {
   try {
     const r = await fetch(`${SUPABASE_URL}/realtime/v1/api/broadcast`, {
@@ -28,6 +31,7 @@ async function ring(topic: string) {
   } catch (e) {
     console.error("bell error", String(e));
   }
+  signal.background(signal.putBell(topic));
 }
 
 const roomDeps = (): RoomDeps => ({
