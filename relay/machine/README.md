@@ -173,10 +173,26 @@ echo 內文 | node send.mjs --to XISU --body -                                  
 
 收發室輸出的 REPLY／END 標記帶每次啟動隨機的 nonce（只在它的系統提示裡），內文偽造不了「結束區塊再開一個別人的區塊」。若輸出出現不是這個 nonce 的標記（收發室被內文帶壞，會沿用內文裡的假編號），橋記 log 並重啟收發室（fail-closed）。測試：`test/nonce.test.mjs`；CLI 測試：`test/send.test.mjs`（用 `test/fake-window.mjs` 假裝 claude 視窗）。
 
+## 遠端開 Claude 視窗（`launcher.mjs`，#64，規劃見 docs/relay/LAUNCHER.md）
+
+小良哥在 Irori Chat「聯絡人」分頁對某台電腦按「＋ 開新視窗」→ 仲介記一筆 launch 並敲門鈴 → 橋 `launch_pending` 取走 → 照**本機** launcher.json 開視窗 → `launch_result` 回報。
+- 設定：`~/.irori-relay/launcher.json`（不進 repo；範本 `launcher.example.json`；`IRORI_LAUNCHER_FILE` 可改路徑）。沒有這個檔＝這台不能遠端開視窗（名單回報 `launcher: null`，手機上不出現按鈕）。
+  - `profiles.<名>`：`label`、`command`（可用 `%SystemRoot%` 這類環境變數）、`args`（字串陣列；**唯一**允許的替換欄位是 `{name}`，其他 `{…}` 整個檔案拒收）
+  - `cwd_allow`：可選的工作資料夾（精確比對，不做前綴）；`max_per_hour`：每小時上限（預設 6，最多 20）
+  - 改檔不用重啟橋：每次用到時看修改時間重讀；格式錯在 bridge.log 記一行原因。
+- 名單回報（每 60 秒）附 `launcher` 摘要：只有 profile 名與標籤、cwd 白名單、上限，**指令內容不上雲**。
+- 執行前再驗一次：profile 存在、視窗名 `^[A-Za-z0-9一-鿿][A-Za-z0-9一-鿿-]{0,39}$`（不能以 `-` 開頭）、不和本機任何 session 重名（不分大小寫）、cwd 在白名單且存在、這小時次數（`machine-<ID>/launch-history.json`，重啟照算）。
+- 開視窗：經 `Start-Process`（跟 partner-relay 的 spawn-partner.ps1 一樣有自己的主控台視窗），腳本固定、檔名／參數／資料夾經環境變數傳入，不拼字串；子行程環境清掉 `CLAUDE*`、`NO_COLOR`、仲介金鑰。
+- 確認：每 2 秒看 `claude agents` 有沒有出現這個名字。出現 → `ok`、立刻刷新名單、有第一句話就當成 owner 來信經收發室送進去（id＝launch id，回覆照常寄回希緒）；30 秒還沒出現 → 先回 `unconfirmed`（可能卡在「是否信任此資料夾」，請到電腦前按 Enter），3 分鐘內出現仍補回 `ok`。
+  （規劃原本寫「10 秒內沒有新 node 子行程」；改成看名單，因為那才是「真的能對話了」，也不必列舉子行程。）
+- 紀錄：每一步一行 JSON 在 `machine-<ID>/launch.log`（誰、何時、profile、視窗名、cwd、結果），bridge.log 也有一行；仲介的 `relay.launches` 另有一份給手機看。
+- 仲介端：2 分鐘沒被取走的 launch 標失敗（電腦開機後不會突然補開一堆視窗）。
+
 ## 測試
 
-`node --test relay/machine/test/`：本機假伺服器（node 內建 http）模擬仲介與 Aegis，不碰真實金鑰與網路服務。
+`node --test relay/machine/test/*.test.mjs`（Node 25 的目錄寫法 `relay/machine/test/` 會失敗，用 glob）：本機假伺服器（node 內建 http）模擬仲介與 Aegis，不碰真實金鑰與網路服務。
 涵蓋群組轉交（`rooms.test.mjs`）、白名單、成功帶 `reply_to`、error 重試一次、404、其他 status、無 `to_agent`、預設收件人不在線的退路、roster 403 只記一次。
+遠端開視窗（`launcher.test.mjs`）：設定檔檢查、執行前再驗、環境清理、成功／失敗／卡信任確認後補成功／每小時上限；端到端真的經 Start-Process 開 `test/fake-launched.mjs`（隱藏視窗，`IRORI_LAUNCH_WINDOW_STYLE=Hidden`）。
 
 ## 聯絡人分組（設備名）
 

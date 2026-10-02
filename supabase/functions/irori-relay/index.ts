@@ -1,6 +1,7 @@
 // Relay broker. Node key goes in the x-relay-key header; the sender node is decided by the key.
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { handleNodeRoomAction, type RoomDeps, syncNodeAuto } from "../_shared/rooms.ts";
+import { handleNodeLaunchAction, LAUNCH_ACTIONS, sanitizeLauncher } from "../_shared/launch.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -111,6 +112,14 @@ Deno.serve(async (req) => {
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     if (data?.error === "forbidden") return json(403, { error: "forbidden" });
     if (data?.error) return json(400, { error: data.error });
+    // 機器橋把本機 launcher.json 的摘要（profile 名、cwd 白名單、每小時上限）附在名單一起回報；沒帶 launcher 欄位就不動
+    if ("launcher" in b) {
+      const l = sanitizeLauncher(b.launcher);
+      if (l && "error" in l) return json(400, { error: "bad_request" });
+      const { data: ld, error: le } = await db.rpc("irori_relay_set_launcher", { p_node: me.id, p_launcher: l });
+      if (le) console.error(le);
+      else if (ld?.error) console.warn("set_launcher", me.id, ld.error);
+    }
     // 視窗名單更新後：符合群組「自動收入」開頭字串的視窗自動入群，消失的標為離開（不是 AI 加人，是比對 roster）
     await syncNodeAuto(roomDeps(), me.id, agents.map((a: { name: unknown }) => a.name).filter((n: unknown): n is string => typeof n === "string"));
     return json(200, { ok: true, count: data.count });
@@ -190,6 +199,13 @@ Deno.serve(async (req) => {
     if (data?.error) return json(400, { error: data.error });
     await ring(data.bell_topic);
     return json(200, { id: data.id });
+  }
+  // 遠端開視窗：launch／launchers 只有 owner 節點（SQL 判斷）；launch_pending／launch_result 是機器橋取待辦、回報結果
+  if (action && LAUNCH_ACTIONS.has(action)) {
+    const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
+    const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
+    const r = await handleNodeLaunchAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params);
+    return json(r.status, r.body);
   }
   // 群組：建群組、改置頂、加人、移人對節點金鑰一律 403（見 _shared/rooms.ts）；其餘（列表、讀、發言、讀置頂）限成員
   if (action?.startsWith("room_")) {

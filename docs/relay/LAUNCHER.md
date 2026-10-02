@@ -54,3 +54,11 @@
 3. 手機「電腦」App（3D 房間手機＋PWA 共用）。
 4. 希緒工具 `open_window(machine, name, cwd, first_message?)` 與 persona（只在小良哥親口要求時用）。
 
+
+## 實作狀態（2026-10-02，I-Irori-3）
+
+- **介面改動（小良哥裁示）**：不做獨立的「電腦」App，改放在 Irori Chat「聯絡人」分頁——每個設備分組的標題列旁有「＋ 開新視窗」（只有機器橋回報了 launcher.json 的電腦才出現）。表單＝電腦（同設備多台才出現）、啟動設定、視窗名（依最近開過的「名字-數字」＋1）、工作資料夾、第一句話（選填）；下方列最近的啟動紀錄。送出後顯示進度，開好可直接「開啟對話」；新視窗出現在同一個列表。3D 房間手機與 /chat/ 共用同一份（`web/js/phone/app_chat.js`）。
+- 仲介：`supabase/sql/07_launch.sql`（`relay.launches`、`relay.nodes.launcher`；`irori_relay_set_launcher／launch／launch_pending／launch_result／launchers`）；`irori-relay` 動作 `launch`、`launchers`（owner 節點）、`launch_pending`、`launch_result`（機器節點），`roster` 可附 `launcher` 摘要；`irori-api` 的 `GET /launchers`、`POST /launch`（登入的小良哥，身分是 owner 節點，跟建群組同一條路）。共用邏輯 `supabase/functions/_shared/launch.ts`。
+- 機器橋：`relay/machine/launcher.mjs`（細節見 relay/machine/README.md「遠端開 Claude 視窗」），範本 `relay/machine/launcher.example.json`。
+- 跟規劃不同的地方：卡信任確認的判斷改成「30 秒內沒出現在 `claude agents` 名單」（回 `unconfirmed`，3 分鐘內出現仍補 `ok`），不列舉 node 子行程；第一句話在視窗出現後當成 owner 來信經收發室送進去，同時記進該視窗的往來紀錄（聊天裡看得到）。
+- 沒做：第 4 期希緒的 `open_window` 工具（I-Irori-2 裁示這次不做）。

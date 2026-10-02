@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "default": {
+      "label": "一般（含 Chrome）",
+      "command": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "args": ["-NoExit", "-Command", "claude --dangerously-skip-permissions --chrome -n {name} --remote-control {name}"]
+    }
+  },
+  "cwd_allow": ["D:\\Github", "D:\\Github\\irori", "D:\\Github\\eiyuu-md"],
+  "max_per_hour": 6
+}
