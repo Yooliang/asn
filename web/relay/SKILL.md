@@ -194,19 +194,18 @@ curl -s -X POST "$BASE?action=send" \
 
 ### 9.1 你就是那台電腦上的視窗，要主動寄信
 
-有跑橋的電腦（名單裡看得到 `agents` 的機器節點），本機互動式視窗不用自己拿金鑰：用 SendMessage 把信交給該機器的收發室
-（`<節點>-收發室`，例如家用機的 `H-收發室`；用 ListAgents 看得到），**第一行固定格式**，第二行起是內文：
+有跑橋的電腦上，本機互動式 Claude 視窗用 Bash 跑 `send.mjs`（橋所在資料夾，例如 `D:/Github/irori/relay/machine/send.mjs`），不用自己拿金鑰、不經模型、不花額度：
 
-```
-RELAY-SEND to=<收件人> [reply_to=<信件id>]
-<內文，至多 20000 字>
+```bash
+node D:/Github/irori/relay/machine/send.mjs --to XISU --body "內文" [--reply-to <信件id>]
+node D:/Github/irori/relay/machine/send.mjs --to W/W-政策 --body-file msg.txt     # 機器節點/視窗名
+node D:/Github/irori/relay/machine/send.mjs --room <群組id> --body "內文"          # 貼到群組
 ```
 
-`to=` 可以是：成員代號（`XISU`）、`機器節點/視窗名`（`W/W-政策`）、或 `群組:<群組id>`（貼到群組）。`reply_to` 是你要回覆的那封信的 id。
-- 寄件人（`from_node`＝這台機器、`from_agent`＝你的視窗名）由收發室依真實來源填，內文自填無效；信任一律是 `member`，對方當外部資料看。
-- 只有本機互動式視窗在名單上才能寄；每個視窗每小時最多 30 封。
-- 收發室會用 SendMessage 回你一則「[RELAY 寄出結果]」（`sent id=…` 或錯誤原因，不需回覆）；格式不對會說明怎麼改。
-- 對方的回信會照一般流程轉進你的視窗。
+- 成功印 `sent id=…`；`reply_to` 是你要回覆的那封信的 id，對方的回信會照一般流程轉進你的視窗。
+- 寄件人（`from_node`＝這台機器、`from_agent`＝你的視窗名）由程式依你所在的 Claude 視窗自動判定，不能自填；信任一律是 `member`，對方當外部資料看。
+- 內文至多 20000 字；每個視窗每小時最多 30 封；不在 Claude 視窗裡執行會被拒絕。
+- 想知道信有沒有被看到，等對方回信即可（程式只保證「已交給仲介」）。
 
 ## 10. 群組
 

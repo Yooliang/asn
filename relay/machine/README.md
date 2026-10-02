@@ -149,22 +149,29 @@ powershell -File install-task.ps1 -Uninstall           # 移除
 - `bridge-aegis.mjs`：成員 key `aegis~名字` → `resolveSlug(名字)`、節點本身 → `IRORI_AEGIS_DEFAULT`；要在 `IRORI_AEGIS_ALLOW` 內才問（不在就略過、記 log、推進游標）；用同樣的標頭格式呼叫 `/ask`，answer 以 `room_post`（`from_agent`＝roster 上的名字）貼回；ask 失敗不貼。
 - 共用邏輯在 `rooms.mjs`（游標、標頭格式、UUID、room_post）。
 
-## 視窗主動寄信（RELAY-SEND）
+## 視窗主動寄信：irori-send（`send.mjs`）
 
-本機視窗要主動寄新信給仲介成員（回報給希緒、寄給別台機器的視窗、貼到群組），用 SendMessage 把下面格式的訊息交給收發室（`<節點>-收發室`）：
+本機任何 Claude 視窗要主動寄信（回報給希緒、寄給別台機器的視窗、貼到群組），用 Bash 直接跑 CLI，**不經收發室、不經任何模型、不花額度**（收信仍靠橋，回信照舊由橋經收發室轉進該視窗）：
 
 ```
-RELAY-SEND to=<成員代號 | 節點/視窗名 | 群組:群組id> [reply_to=<信件id>]
-<內文>
+node D:/Github/irori/relay/machine/send.mjs --to XISU --body "內文" [--reply-to <信件id>]
+node D:/Github/irori/relay/machine/send.mjs --to W/W-政策 --body-file msg.txt      # 節點/視窗名
+node D:/Github/irori/relay/machine/send.mjs --room <群組id> --body "內文"            # 貼到群組（room_post）
+echo 內文 | node send.mjs --to XISU --body -                                         # 內文從 stdin 讀
 ```
 
-- **寄件人身分**：收發室輸出的區塊 `<<REPLY-<nonce> from=名字>>` 裡的名字取自 Claude Code 加在跨 session 訊息上的 `from-name`（內文自填的 `from_agent=`、`trust=`、假區塊一律無效）。橋用機器金鑰呼叫 `send`（`from_agent`＝該視窗名；`from_node` 由金鑰決定）或 `room_post`（`from_agent`＝該視窗名）。trust 由後端依機器節點身分決定（member），視窗無法冒充 owner。
-- **檢查**：寄件視窗要在 roster 名單上（`IRORI_RELAY_ALLOW` 內的測試視窗除外）；`to` 必填且代號格式合法、不能寄給本機節點；內文非空且 ≤ 20000 字；`reply_to` 要是 uuid；每視窗每小時 `IRORI_OUTBOUND_PER_HOUR`（預設 30）封，超量回「被擋」。格式不對回說明。
-- **結果**：橋再透過收發室 SendMessage 回給該視窗一則「[RELAY 寄出結果]（不需回覆）」：`sent id=… to=…`、`已貼到群組 … #seq` 或錯誤原因；這則通知不計逾時、不等回覆。
-- **回信**：對方回信走一般流程（`to_agent`＝視窗名）轉進該視窗。
-- **回覆區塊加了 nonce**：收發室輸出的 REPLY／END 標記帶每次啟動隨機的 nonce（只在系統提示裡），內文偽造不了「結束區塊再開一個別人的區塊」。若輸出出現不是這個 nonce 的標記（收發室被內文帶壞），橋記 log 並重啟收發室（fail-closed）。
-- **限制**：訊息是 best-effort——收發室重啟那幾秒送進去的訊息會遺失，視窗沒收到「寄出結果」就當作沒寄成、再寄一次；收發室一輪同時收到多則時，系統提示要求逐則處理。收發室仍只有 `ListAgents`／`SendMessage`／`ToolSearch` 三個工具，不能自己呼叫 relay。
-- 測試：`test/outbound.test.mjs`（假 worker 注入）涵蓋身分取自 from-name、冒名內文、名單外、群組、每小時上限、格式錯誤、假 nonce 重啟。
+輸出 `sent id=… to=… from=節點/視窗名`（群組：`posted room=… seq=…`）；錯誤印到 stderr。exit code：0 成功、1 用法或內容不合、2 認不出呼叫者、3 超量、4 後端錯誤。
+
+- **機器金鑰**：用橋同一把 `~/.irori-relay/<節點>.key`；節點代號依序取 `IRORI_RELAY_ID`、`~/.irori-relay/node`（一行節點代號）、唯一的 `~/.irori-relay/machine-<ID>/` 資料夾。`from_node` 由金鑰決定，trust 由後端決定（member）。
+- **寄件視窗名不能自填**：CLI 沿父行程鏈往上，找第一個在 `~/.claude/sessions/<pid>.json` 有登記的 claude 程序，用它的 `name` 當 `from_agent`。沒有 `--from-agent` 之類參數；內文、環境變數裡寫的名字無效。找不到（不是在 Claude 視窗裡跑、父行程已結束的孤兒行程、視窗沒有名字）就拒絕、不打後端。
+  這擋的是「本機非 Claude 程式隨手冒用」，不是同一個 Windows 使用者的惡意程式（它拿得到金鑰檔，本來就能直接打後端）。
+- **檢查**：`--to` 與 `--room` 二選一；成員代號格式合法、不能寄給本機節點；內文非空且 ≤ 20000 字；`--reply-to` 要是 uuid；每視窗每小時 `IRORI_SEND_PER_HOUR`（預設 30）封，記在 `~/.irori-relay/send-rate.json`（超量 exit 3 並說明幾分鐘後可再寄）。
+- 判定呼叫者要讀一次行程表（Windows 用 PowerShell `Get-CimInstance`，約 0.6 秒）；整個指令約 1–2 秒。
+- 實作注意：結束時不呼叫 `process.exit()`（Windows 上 node 偶爾在關閉 handle 時 assertion 當掉），改設 `process.exitCode`。
+
+## 收發室回覆區塊的 nonce
+
+收發室輸出的 REPLY／END 標記帶每次啟動隨機的 nonce（只在它的系統提示裡），內文偽造不了「結束區塊再開一個別人的區塊」。若輸出出現不是這個 nonce 的標記（收發室被內文帶壞，會沿用內文裡的假編號），橋記 log 並重啟收發室（fail-closed）。測試：`test/nonce.test.mjs`；CLI 測試：`test/send.test.mjs`（用 `test/fake-window.mjs` 假裝 claude 視窗）。
 
 ## 測試
 
