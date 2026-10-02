@@ -9,6 +9,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { pickFallbackAgent, fallbackNote } from './pick-fallback.mjs'
+import { createRooms, parseMember, roomText, roomUuid, NO_REPLY_RE as ROOM_NO_REPLY_RE } from './rooms.mjs'
 
 const NODE_ID = (process.env.IRORI_RELAY_ID || 'H').trim()
 const BASE_URL = (process.env.IRORI_RELAY_URL || 'https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/irori-relay').replace(/\/+$/, '')
@@ -84,12 +85,16 @@ function activityOf(a) {
 }
 const cwdLabel = p => String(p ?? '').split(/[\\/]+/).filter(Boolean).pop() || ''
 let rosterWarned = false
+let rosterOk = false   // 第一次成功取得本機 session 清單前，群組訊息先不處理（避免把視窗誤判成不可轉交而跳過）
 async function refreshRoster() {
   const list = await claudeAgents()
   if (!list) return
   agents = list
+  const firstRoster = !rosterOk
+  rosterOk = true
   roster = list.filter(a =>
     a.kind === 'interactive' && a.pid !== mailboxPid && a.name !== MAILBOX_NAME && entrypointOf(a.pid) === 'cli')
+  if (firstRoster) void pullRoomsGuarded()
   try {
     await api('roster', { method: 'POST', body: { agents: roster.map(a => ({ name: a.name, status: a.status, cwd_label: cwdLabel(a.cwd) })) } })
     rosterWarned = false
@@ -200,6 +205,7 @@ async function onSent(id) {
   const p = pending.get(id)
   if (!p || p.state !== 'forwarding') return
   p.state = 'waiting'
+  if (p.room) { log(`forwarded room=${p.room.id} #${p.room.seq} -> ${p.target}`); p.t = Date.now(); return }
   if (p.noReply) { pending.delete(id); log(`forwarded id=${id} -> ${p.target} (no-reply mail, no timer)`); await ackIds([id]); return }
   log(`forwarded id=${id} -> ${p.target} (${Date.now() - p.t0}ms)`)
   p.t = Date.now()
@@ -210,6 +216,7 @@ async function onFail(id, reason) {
   if (!p || p.state === 'done') return
   p.state = 'done'
   log(`forward failed id=${id}: ${reason}`)
+  if (p.room) { pending.delete(id); return }   // 群組訊息：只記 log，不回群組
   await sendBack(p, `[收發室] 轉交給 ${p.target} 失敗：${reason || '原因不明'}`)
   await ackIds([id])
   pending.delete(id)
@@ -219,6 +226,12 @@ async function onReply(from, text) {
   const p = cands.find(c => !c.replied) || cands[cands.length - 1]
   if (!p) { log(`unmatched reply from ${from} (${text.length} chars) dropped`); return }
   p.replied = true
+  if (p.room) {
+    if (ROOM_NO_REPLY_RE.test(text)) { log(`room reply from ${from} room=${p.room.id} #${p.room.seq} marked no-reply: not posted`); return }
+    const ok = await rooms.post(p.room.id, text, p.room.window || undefined)   // 節點本身是成員時以節點發言；視窗是成員時以 節點~視窗 發言
+    log(`room reply from ${from} -> room=${p.room.id} #${p.room.seq} posted=${ok}`)
+    return
+  }
   const ok = await sendBack(p, text, from)
   log(`reply from ${from} -> ${p.mail.from_node} id=${p.mail.id} sent=${ok} (${Date.now() - p.t0}ms total)`)
 }
@@ -237,11 +250,12 @@ setInterval(async () => {
   for (const [id, p] of pending) {
     if (p.state === 'forwarding' && now - p.t0 > FORWARD_TIMEOUT_MS) {
       p.state = 'done'
+      if (p.room) { log(`room forward timeout id=${id} -> ${p.target}`); pending.delete(id); continue }
       await sendBack(p, `[收發室] 轉交給 ${p.target} 逾時（收發室沒有完成轉交）`)
       await ackIds([id]); pending.delete(id)
     } else if (p.state === 'waiting' && now - p.t > REPLY_TIMEOUT_MS) {
       pending.delete(id)
-      if (!p.replied) await noticeNoReply(p, now)
+      if (!p.replied && !p.room) await noticeNoReply(p, now)
     }
   }
 }, TICK_MS)
@@ -278,7 +292,48 @@ async function handleMail(m) {
     pending.delete(m.id); log(`cannot hand id=${m.id}: ${e.message} (left in inbox)`)
   }
 }
+// ---- 群組轉交（for_me 由後端決定，橋只轉 for_me=true）----------------------------------------------
+const rooms = createRooms({ api, workDir: WORK_DIR, log })
+async function handleRoomMsg(room, member, msg) {
+  if (!rosterOk) return false
+  const { window } = parseMember(member)
+  let target, note = ''
+  if (!window) {
+    target = DEFAULT_AGENT
+    if (!onlineNames().has(DEFAULT_AGENT)) {
+      const fb = pickFallbackAgent(roster, activityOf)
+      if (!fb) { log(`room=${room.id} #${msg.seq} default agent offline and no session online: kept (cursor not advanced)`); return false }
+      target = fb.name
+      note = fallbackNote(DEFAULT_AGENT, fb.name)
+    }
+  } else {
+    target = window
+    if (!forwardable(target)) { log(`room=${room.id} #${msg.seq} window ${target} not forwardable: skipped`); return true }
+  }
+  const id = roomUuid(room.id, msg.seq, member)
+  if (pending.has(id)) return true
+  const p = { mail: { id, from_node: '', from_agent: '' }, room: { id: room.id, seq: msg.seq, window }, target, state: 'forwarding', t0: Date.now(), t: Date.now(), replied: false, noReply: false }
+  pending.set(id, p)
+  try {
+    workerSay(`[BRIDGE-FORWARD nonce=${NONCE} id=${id} to=${target}]
+<<<MAIL
+${roomText(room, msg)}${note ? '\n' + note : ''}
+MAIL>>>`)
+    log(`handed room=${room.id} #${msg.seq} member=${member} to=${target}`)
+    return true
+  } catch (e) {
+    pending.delete(id); log(`cannot hand room=${room.id} #${msg.seq}: ${e.message} (cursor not advanced)`); return false
+  }
+}
+let roomsPulling = false, roomsAgain = false
+async function pullRoomsGuarded() {
+  if (roomsPulling) { roomsAgain = true; return }
+  roomsPulling = true
+  try { do { roomsAgain = false; await rooms.pullRooms(handleRoomMsg) } while (roomsAgain) }
+  catch (e) { log(`rooms pull failed: ${e.message}`) } finally { roomsPulling = false }
+}
 async function pull(why) {
+  void pullRoomsGuarded()
   if (pulling) { again = true; return }
   pulling = true
   try {

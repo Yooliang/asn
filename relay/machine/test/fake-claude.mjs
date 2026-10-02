@@ -10,6 +10,9 @@ rl.on('line', line => {
   const m = text.match(/^\[BRIDGE-FORWARD nonce=\S+ id=(\S+) to=(.+?)\]/)
   if (!m) return
   fs.appendFileSync(process.env.FAKE_RECORD, JSON.stringify({ id: m[1], to: m[2], text }) + '\n')
-  process.stdout.write(JSON.stringify({ type: 'result', result: `SENT ${m[1]}`, duration_ms: 1, total_cost_usd: 0 }) + '\n')
+  process.stdout.write(JSON.stringify({ type: 'result', result: `SENT ${m[1]}` + (process.env.FAKE_REPLY ? `
+<<REPLY from=${m[2]}>>
+${process.env.FAKE_REPLY}
+<<END>>` : ''), duration_ms: 1, total_cost_usd: 0 }) + '\n')
 })
 rl.on('close', () => process.exit(0))

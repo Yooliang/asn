@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createCore } from './relay-core.mjs'
+import { createRooms, parseMember, roomText } from './rooms.mjs'
 
 const NODE_ID = (process.env.IRORI_RELAY_ID || 'AEGIS').trim()
 const BASE_URL = process.env.IRORI_RELAY_URL || 'https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/irori-relay'
@@ -153,8 +154,33 @@ async function handleMail(m) {
   return replyAndAck(m, `[Aegis] 對方回報狀態 ${status ?? `HTTP ${r.http}`}${answer ? `：${answer}` : ''}`, from)
 }
 
+// ---- 群組（被點名／小良哥發問才問；白名單外略過）--------------------------------------------------
+const rooms = createRooms({ api, workDir: WORK_DIR, log })
+async function handleRoomMsg(room, member, msg) {
+  await membersLoaded
+  const { window } = parseMember(member)
+  const slug = window ? resolveSlug(window) : DEFAULT_MEMBER
+  if (slug === SELF_MEMBER || !ALLOW.includes(slug)) { log(`room=${room.id} #${msg.seq} member=${member} (${slug}) not in allowlist: skipped`); return true }
+  const r = await aegisAsk(slug, roomText(room, msg))
+  const answer = String(r.data?.answer ?? '')
+  if (askFailed(r) || r.http < 200 || r.http >= 300 || r.data?.status !== 'success' || !answer) {
+    log(`room=${room.id} #${msg.seq} to=${slug} ask failed (http=${r.http} status=${r.data?.status ?? r.error ?? ''}): not posted`)
+    return true
+  }
+  await rooms.post(room.id, answer, window ? (memberNames.get(slug) || slug) : undefined)   // 節點本身是成員時以節點發言
+  return true
+}
+let roomsPulling = false, roomsAgain = false
+async function pullRoomsGuarded() {
+  if (roomsPulling) { roomsAgain = true; return }
+  roomsPulling = true
+  try { do { roomsAgain = false; await rooms.pullRooms(handleRoomMsg) } while (roomsAgain) }
+  catch (e) { log(`rooms pull failed: ${e.message}`) } finally { roomsPulling = false }
+}
+
 let pulling = false, again = false
 async function pull(why) {
+  void pullRoomsGuarded()
   if (pulling) { again = true; return }
   pulling = true
   try {

@@ -1,0 +1,79 @@
+// 群組（rooms）轉交共用邏輯（純模組，bridge.mjs／bridge-aegis.mjs 共用）。
+// 流程：room_list → 對每個 mine 項目用本地游標 room_read(since) → 只處理後端標 for_me=true 的訊息 → 推進游標。
+// 游標存 WORK_DIR/rooms-cursor.json（鍵「房號|成員key」），不用 mark、不動後端已讀位置。
+import crypto from 'node:crypto'
+import fs from 'node:fs'
+import path from 'node:path'
+
+export const ROOM_HINT = '（群組訊息；只有被點名或小良哥／希緒發問才需要回，回覆會經收發室貼回群組；不需要回就不要回）'
+export const NO_REPLY_RE = /（不需回覆）|\[no-reply\]/i
+
+// 成員 key：節點本身 `H`、視窗 `H~H-主線-3`。回 {window}：視窗名；節點本身 window=''
+export function parseMember(key) {
+  const i = String(key).indexOf('~')
+  return i < 0 ? { node: String(key), window: '' } : { node: key.slice(0, i), window: key.slice(i + 1) }
+}
+export function displayFrom(from) {
+  if (from === '~owner') return '小良哥'
+  return String(from ?? '').replace(/~/g, '/')
+}
+export function roomHeader(room, msg) {
+  return `[群組 ${room.name}] trust=${msg.trust ?? ''} from=${displayFrom(msg.from)} #${msg.seq}`
+}
+export const roomText = (room, msg) => `${roomHeader(room, msg)}\n${ROOM_HINT}\n${msg.body ?? ''}`
+
+// 確定性 UUID：sha1('room:房號:seq:成員key') 取前 16 bytes
+export function roomUuid(roomId, seq, member) {
+  const h = crypto.createHash('sha1').update(`room:${roomId}:${seq}:${member}`).digest('hex')
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`
+}
+
+export function createRooms({ api, workDir, log }) {
+  const file = path.join(workDir, 'rooms-cursor.json')
+  let cursors = {}
+  try { cursors = JSON.parse(fs.readFileSync(file, 'utf8')) || {} } catch {}
+  const save = () => { try { fs.writeFileSync(file, JSON.stringify(cursors)) } catch (e) { log(`rooms cursor save failed: ${e.message}`) } }
+
+  // handle(room, member, msg) -> true＝處理完（可推進游標）；false＝先留著，下次再來（游標停在它前面）
+  async function pullRooms(handle) {
+    let list
+    try { list = (await api('room_list'))?.rooms ?? [] } catch (e) { log(`room_list failed: ${e.message}`); return }
+    for (const room of list) {
+      for (const mine of room.mine ?? []) {
+        const member = mine.member
+        const ck = `${room.id}|${member}`
+        let cur = cursors[ck]
+        if (cur == null) { cur = Number(mine.read_seq) || Number(room.last_seq) || 0; cursors[ck] = cur; save() }
+        if (!(Number(room.last_seq) > cur)) continue
+        const { window } = parseMember(member)
+        let res
+        try {
+          res = await api(`room_read&room=${encodeURIComponent(room.id)}${window ? `&as_agent=${encodeURIComponent(window)}` : ''}&since=${cur}&limit=100`)
+        } catch (e) { log(`room_read failed room=${room.id} member=${member}: ${e.message}`); continue }
+        const msgs = (res?.messages ?? []).slice().sort((a, b) => a.seq - b.seq)
+        let done = true
+        for (const msg of msgs) {
+          if (msg.seq <= cur) continue
+          if (msg.for_me === true) {
+            let ok = false
+            try { ok = await handle(room, member, msg) } catch (e) { log(`room handle failed room=${room.id} #${msg.seq}: ${e.message}`) }
+            if (!ok) { done = false; break }
+          }
+          cur = msg.seq; cursors[ck] = cur; save()
+        }
+        if (done && Number(res?.last_seq) > cur) { cursors[ck] = Number(res.last_seq); save() }
+      }
+    }
+  }
+
+  async function post(room, body, fromAgent) {
+    try {
+      await api('room_post', { method: 'POST', body: { room, body, ...(fromAgent ? { from_agent: fromAgent } : {}) } })
+      return true
+    } catch (e) {
+      log(e.status === 429 ? `room_post rate-limited room=${room} (dropped, no retry)` : `room_post failed room=${room}: ${e.message}`)
+      return false
+    }
+  }
+  return { pullRooms, post, cursors }
+}
