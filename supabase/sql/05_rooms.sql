@@ -16,6 +16,8 @@ create table if not exists relay.rooms (
   archived_at timestamptz,
   last_seq bigint not null default 0
 );
+-- 自動收入：視窗名（roster 上的名字，不含節點前綴）以其中一段字開頭就自動入群（區分大小寫）；由 irori-api 比對後呼叫 room_auto_apply
+alter table relay.rooms add column if not exists auto_prefixes text[] not null default '{}';
 
 create table if not exists relay.room_members (
   room_id text not null references relay.rooms(id),
@@ -26,6 +28,12 @@ create table if not exists relay.room_members (
   read_seq bigint not null default 0,
   primary key (room_id, member)
 );
+
+-- joined_via：manual＝小良哥手動加入；auto＝roster 自動收入（只有 auto 的成員會在視窗消失時標為離開）
+alter table relay.room_members add column if not exists joined_via text not null default 'manual';
+do $$ begin
+  alter table relay.room_members add constraint room_members_joined_via_check check (joined_via in ('auto', 'manual'));
+exception when duplicate_object then null; end $$;
 
 create table if not exists relay.room_messages (
   room_id text not null references relay.rooms(id),
@@ -131,7 +139,8 @@ as $$
     'kind', case when m.member = '~owner' then 'owner'
                  when position('~' in m.member) > 0 then 'window'
                  else coalesce(n.kind, 'other') end,
-    'node_role', case when m.member = '~owner' then 'owner' else coalesce(n.role, 'member') end
+    'node_role', case when m.member = '~owner' then 'owner' else coalesce(n.role, 'member') end,
+    'joined_via', m.joined_via
   ) order by m.joined_at, m.member), '[]'::jsonb)
   from relay.room_members m
   left join relay.nodes n on n.id = split_part(m.member, '~', 1) and m.member <> '~owner'
@@ -195,7 +204,7 @@ begin
   end if;
   -- 新加入（或離開後重新加入）的成員從當下算起，未讀為 0；要看歷史自己用 since 讀
   insert into relay.room_members (room_id, member, role, read_seq) values (p_room, p_member, 'member', v_last)
-    on conflict (room_id, member) do update set left_at = null, joined_at = now(), read_seq = v_last
+    on conflict (room_id, member) do update set left_at = null, joined_at = now(), read_seq = v_last, joined_via = 'manual'
     where relay.room_members.left_at is not null;
   return jsonb_build_object('ok', true);
 end;
@@ -212,7 +221,8 @@ begin
   if p_member = '~owner' then
     return jsonb_build_object('error', 'cannot_remove_owner');
   end if;
-  update relay.room_members set left_at = now()
+  -- 手動移出一併改成 manual：之後 roster 再出現同名視窗也不會被自動收回
+  update relay.room_members set left_at = now(), joined_via = 'manual'
     where room_id = p_room and member = p_member and left_at is null;
   if not found then
     return jsonb_build_object('error', 'not_found');
@@ -264,7 +274,7 @@ begin
     return jsonb_build_object('error', 'forbidden');
   end if;
   select coalesce(jsonb_agg(jsonb_build_object(
-    'id', r.id, 'name', r.name, 'created_at', r.created_at, 'last_seq', r.last_seq,
+    'id', r.id, 'name', r.name, 'created_at', r.created_at, 'last_seq', r.last_seq, 'auto_prefixes', to_jsonb(r.auto_prefixes),
     'last_at', lm.at, 'last_from', lm.from_member,
     'last_from_name', case when lm.from_member is null then null else relay.room_member_name(lm.from_member) end,
     'last_body', left(lm.body, 120),
@@ -308,7 +318,7 @@ begin
     return jsonb_build_object('error', 'not_member');
   end if;
   return jsonb_build_object('key', v_key,
-    'room', (select jsonb_build_object('id', r.id, 'name', r.name) from relay.rooms r where r.id = p_room),
+    'room', (select jsonb_build_object('id', r.id, 'name', r.name, 'auto_prefixes', to_jsonb(r.auto_prefixes)) from relay.rooms r where r.id = p_room),
     'members', relay.room_members_json(p_room));
 end;
 $$;
@@ -439,6 +449,106 @@ language sql stable security definer set search_path = ''
 as $$
   select exists (select 1 from relay.roster where node = p_node and name = p_name);
 $$;
+
+-- 設定自動收入的開頭字串（只有 owner 節點／小良哥）。每段 1～40 字、不可全空白、不含 ~、最多 10 段
+create or replace function public.irori_relay_room_set_prefixes(p_actor text, p_room text, p_prefixes text[])
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare k text;
+begin
+  if not relay.room_actor_is_owner(p_actor) then
+    return jsonb_build_object('error', 'forbidden');
+  end if;
+  if p_prefixes is null or coalesce(array_length(p_prefixes, 1), 0) > 10 then
+    return jsonb_build_object('error', 'bad_request');
+  end if;
+  foreach k in array p_prefixes loop
+    if k is null or char_length(k) not between 1 and 40 or btrim(k) = '' or position('~' in k) > 0 then
+      return jsonb_build_object('error', 'bad_request');
+    end if;
+  end loop;
+  update relay.rooms set auto_prefixes = (select coalesce(array_agg(distinct x), array[]::text[]) from unnest(p_prefixes) x)
+    where id = p_room and archived_at is null;
+  if not found then
+    return jsonb_build_object('error', 'not_found');
+  end if;
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
+-- 有自動收入規則的群組（比對在 _shared/rooms.ts，這裡只給規則）
+create or replace function public.irori_relay_room_auto_rules()
+returns jsonb
+language sql stable security definer set search_path = ''
+as $$
+  select coalesce(jsonb_agg(jsonb_build_object('room', id, 'prefixes', to_jsonb(auto_prefixes))), '[]'::jsonb)
+  from relay.rooms where archived_at is null and coalesce(array_length(auto_prefixes, 1), 0) > 0;
+$$;
+
+-- 套用某節點的自動收入結果：p_joins＝[{room, name}]（該節點 roster 上符合規則的視窗）。
+-- 加入（或自動成員離開後再出現而重新加入；手動移出過的不收回）；該節點原本自動入群、這次不在 p_joins 的成員標為離開（紀錄保留）。
+-- 視窗名必須真的在 roster 內（呼叫端算錯或被騙都不能憑空塞人）
+create or replace function public.irori_relay_room_auto_apply(p_node text, p_joins jsonb)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  j jsonb;
+  v_last bigint;
+  v_key text;
+  v_added int := 0;
+  v_left int := 0;
+  v_keys text[] := array[]::text[];
+begin
+  if not exists (select 1 from relay.nodes where id = p_node and status = 'active') then
+    return jsonb_build_object('error', 'forbidden');
+  end if;
+  if p_joins is null or jsonb_typeof(p_joins) <> 'array' or jsonb_array_length(p_joins) > 500 then
+    return jsonb_build_object('error', 'bad_request');
+  end if;
+  for j in select * from jsonb_array_elements(p_joins) loop
+    if jsonb_typeof(j->'room') is distinct from 'string' or jsonb_typeof(j->'name') is distinct from 'string' then
+      continue;
+    end if;
+    if not exists (select 1 from relay.roster where node = p_node and name = j->>'name') then
+      continue;
+    end if;
+    select last_seq into v_last from relay.rooms
+      where id = j->>'room' and archived_at is null and exists (
+        select 1 from unnest(auto_prefixes) pf where left(j->>'name', char_length(pf)) = pf);
+    if not found then
+      continue;
+    end if;
+    v_key := p_node || '~' || (j->>'name');
+    v_keys := array_append(v_keys, (j->>'room') || '|' || v_key);
+    insert into relay.room_members (room_id, member, role, read_seq, joined_via)
+      values (j->>'room', v_key, 'member', v_last, 'auto')
+      on conflict (room_id, member) do update set left_at = null, joined_at = now(), read_seq = v_last
+      where relay.room_members.left_at is not null and relay.room_members.joined_via = 'auto';
+    if found then v_added := v_added + 1; end if;
+  end loop;
+  update relay.room_members m set left_at = now()
+    where m.joined_via = 'auto' and m.left_at is null
+      and left(m.member, char_length(p_node) + 1) = p_node || '~'
+      and not ((m.room_id || '|' || m.member) = any (v_keys));
+  get diagnostics v_left = row_count;
+  return jsonb_build_object('added', v_added, 'left', v_left);
+end;
+$$;
+
+do $$
+declare f text;
+begin
+  foreach f in array array[
+    'public.irori_relay_room_set_prefixes(text,text,text[])',
+    'public.irori_relay_room_auto_rules()',
+    'public.irori_relay_room_auto_apply(text,jsonb)'
+  ] loop
+    execute format('revoke execute on function %s from public, anon, authenticated', f);
+    execute format('grant execute on function %s to service_role', f);
+  end loop;
+end $$;
 
 do $$
 declare f text;

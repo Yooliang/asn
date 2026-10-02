@@ -1,6 +1,6 @@
 // Relay broker. Node key goes in the x-relay-key header; the sender node is decided by the key.
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { handleNodeRoomAction, type RoomDeps } from "../_shared/rooms.ts";
+import { handleNodeRoomAction, type RoomDeps, syncNodeAuto } from "../_shared/rooms.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -27,6 +27,15 @@ async function ring(topic: string) {
     console.error("bell error", String(e));
   }
 }
+
+const roomDeps = (): RoomDeps => ({
+  rpc: async (fn, args) => await db.rpc(fn, args),
+  ring,
+  rosterHas: async (node, agent) => {
+    const { data, error } = await db.rpc("irori_relay_roster_has", { p_node: node, p_name: agent });
+    return !error && data === true;
+  },
+});
 
 const b64u = (n: number) =>
   btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(n)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -102,6 +111,8 @@ Deno.serve(async (req) => {
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     if (data?.error === "forbidden") return json(403, { error: "forbidden" });
     if (data?.error) return json(400, { error: data.error });
+    // 視窗名單更新後：符合群組「自動收入」開頭字串的視窗自動入群，消失的標為離開（不是 AI 加人，是比對 roster）
+    await syncNodeAuto(roomDeps(), me.id, agents.map((a: { name: unknown }) => a.name).filter((n: unknown): n is string => typeof n === "string"));
     return json(200, { ok: true, count: data.count });
   }
   if (action === "leave" && req.method === "POST") {
@@ -184,14 +195,7 @@ Deno.serve(async (req) => {
   if (action?.startsWith("room_")) {
     const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
-    const deps: RoomDeps = {
-      rpc: async (fn, args) => await db.rpc(fn, args),
-      ring,
-      rosterHas: async (node, agent) => {
-        const { data, error } = await db.rpc("irori_relay_roster_has", { p_node: node, p_name: agent });
-        return !error && data === true;
-      },
-    };
+    const deps = roomDeps();
     const r = await handleNodeRoomAction(deps, me, action, params);
     return json(r.status, r.body);
   }

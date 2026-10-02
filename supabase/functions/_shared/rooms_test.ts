@@ -1,6 +1,6 @@
 // 執行：SUPABASE_URL=http://x SUPABASE_SERVICE_ROLE_KEY=x deno test -A supabase/functions/
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { handleNodeRoomAction, OWNER_ONLY_ACTIONS, parseMentions, type RoomDeps, type RoomMember, shouldRespond } from "./rooms.ts";
+import { handleNodeRoomAction, matchAutoJoins, OWNER_ONLY_ACTIONS, parseMentions, type RoomDeps, type RoomMember, shouldRespond, syncNodeAuto, validatePrefixes } from "./rooms.ts";
 
 const MEMBERS: RoomMember[] = [
   { key: "~owner", name: "小良哥", role: "owner", kind: "owner", node_role: "owner" },
@@ -133,4 +133,31 @@ Deno.test("參數檢查：房號格式不對 → 400；未知動作 → 404", as
   assertEquals((await handleNodeRoomAction(deps, ME, "room_post", { room: "r1", body: "" })).status, 400);
   assertEquals((await handleNodeRoomAction(deps, ME, "room_zzz", { room: "r1" })).status, 404);
   assertEquals(calls.length, 0);
+});
+
+Deno.test("自動收入：視窗名以開頭字串開頭才入群（區分大小寫、不解析前綴）；多群組同時符合都進；不符合不動", () => {
+  const rules = [{ room: "g36", prefixes: ["g36-"] }, { room: "home", prefixes: ["H-"] }, { room: "hg", prefixes: ["H-g36"] }];
+  const j = (names: string[]) => matchAutoJoins(rules, names).map((x) => `${x.room}:${x.name}`).sort();
+  assertEquals(j(["g36-前端", "g36-後端-2"]), ["g36:g36-前端", "g36:g36-後端-2"]);
+  assertEquals(j(["H-主線-3"]), ["home:H-主線-3"]);
+  assertEquals(j(["H-g36-前端"]), ["hg:H-g36-前端", "home:H-g36-前端"]); // 同時符合兩個群組，都進
+  assertEquals(j(["G36-前端", "h-主線", "x-g36-前端", "g36x-前端", "前端-g36"]), []); // 大小寫不同、中間含有、沒有 - 都不算
+  assertEquals(matchAutoJoins([{ room: "r", prefixes: ["", "g36-"] }], ["隨便", "g36-a"]).map((x) => x.name), ["g36-a"]); // 空字串不當萬用
+});
+
+Deno.test("自動收入：開頭字串驗證（空字串、全空白、含 ~、太長、太多都不允許）", () => {
+  assertEquals(validatePrefixes(["H-", "g36-", "H-"]), ["H-", "g36-"]);
+  assertEquals(validatePrefixes([]), []);
+  for (const bad of [[""], ["  "], ["a~b"], ["x".repeat(41)], Array.from({ length: 11 }, (_, i) => `p${i}`), [1], "H-", null]) {
+    assertEquals(validatePrefixes(bad), null, JSON.stringify(bad));
+  }
+});
+
+Deno.test("自動收入：syncNodeAuto 用規則算出該入群的視窗交給資料庫；規則取不到只記 log 不丟錯", async () => {
+  const { deps, calls } = fake({ irori_relay_room_auto_rules: () => [{ room: "g36", prefixes: ["g36-"] }] });
+  await syncNodeAuto(deps, "H", ["g36-前端", "別的"]);
+  const apply = calls.find((c) => c.fn === "irori_relay_room_auto_apply")!;
+  assertEquals(apply.args, { p_node: "H", p_joins: [{ room: "g36", name: "g36-前端" }] });
+  const broken: RoomDeps = { ...deps, rpc: () => Promise.resolve({ data: null, error: new Error("boom") }) };
+  await syncNodeAuto(broken, "H", ["x"]); // 不丟
 });

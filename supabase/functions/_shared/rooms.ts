@@ -133,6 +133,44 @@ export async function handleNodeRoomAction(deps: RoomDeps, me: { id: string }, a
   return err(404, "not_found");
 }
 
+// ── 自動收入：視窗名（roster 上的名字，不含節點前綴）以群組設定的任一段開頭字串開頭就入群 ──
+export const AUTO_PREFIX_MAX_LEN = 40;
+export const AUTO_PREFIX_MAX_COUNT = 10;
+
+// 驗證小良哥設的開頭字串：每段 1～40 字、不可全空白、不含 ~、最多 10 段；不合格回 null。區分大小寫、不修剪、去重
+export function validatePrefixes(v: unknown): string[] | null {
+  if (!Array.isArray(v) || v.length > AUTO_PREFIX_MAX_COUNT) return null;
+  for (const p of v) {
+    if (typeof p !== "string" || p.length < 1 || p.length > AUTO_PREFIX_MAX_LEN || p.trim() === "" || p.includes(WINDOW_SEP)) return null;
+  }
+  return [...new Set(v as string[])];
+}
+
+// 規則 × 視窗名 → 該入群的 {room, name}。一個視窗可同時符合多個群組；完整名稱「開頭」比對，不做任何其他解析
+export function matchAutoJoins(rules: { room: string; prefixes: string[] }[], windows: string[]): { room: string; name: string }[] {
+  const out: { room: string; name: string }[] = [];
+  for (const r of rules) {
+    const prefixes = (r.prefixes ?? []).filter((p) => typeof p === "string" && p !== "");
+    for (const name of windows) {
+      if (prefixes.some((p) => name.startsWith(p))) out.push({ room: r.room, name });
+    }
+  }
+  return out;
+}
+
+// 套用某節點目前的視窗名單：符合的自動入群；原本自動入群、視窗已消失的標為離開（資料庫端處理）。出錯只記 log，不影響呼叫端
+export async function syncNodeAuto(deps: RoomDeps, node: string, windows: string[]): Promise<void> {
+  try {
+    const rules = await deps.rpc("irori_relay_room_auto_rules", {});
+    if (rules.error) throw rules.error;
+    const joins = matchAutoJoins(rules.data ?? [], windows);
+    const res = await deps.rpc("irori_relay_room_auto_apply", { p_node: node, p_joins: joins });
+    if (res.error) throw res.error;
+  } catch (e) {
+    console.error("auto join sync failed", node, String(e));
+  }
+}
+
 // 門鈴（不帶內容）：對 Supabase Realtime 廣播 bell
 export async function ringBell(supabaseUrl: string, serviceKey: string, topic: string): Promise<void> {
   try {
