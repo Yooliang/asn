@@ -128,3 +128,47 @@ test('群組、stdin、--body-file、後端錯誤、節點代號自動判定', a
     assert.equal(r.code, 4); assert.match(r.err, /send HTTP 404 not_found/)
   } finally { await st2.close() }
 })
+
+// 備援：父行程鏈斷掉（nohup／背景化後孤兒）時，用 Claude Code 匯出的 CLAUDE_CODE_MESSAGING_SOCKET 對上還活著的 session
+test('環境變數備援：孤兒行程帶著視窗專屬的 messaging socket → 認得；socket 不符或 session 已死 → 拒絕', async () => {
+  const st = await fakeServer(), home = newHome()
+  const sdir = path.join(home, '.claude', 'sessions'); fs.mkdirSync(sdir, { recursive: true })
+  const put = (pid, sock, name) => fs.writeFileSync(path.join(sdir, `${pid}.json`), JSON.stringify({ pid, name, kind: 'interactive', entrypoint: 'cli', messagingSocketPath: sock }))
+  const alive = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore', windowsHide: true })   // 還活著、但不是 send.mjs 祖先的程序
+  put(alive.pid, '\\.\pipe\LOCAL\cc-msg-fake', 'T-備援視窗')
+  put(999999, '\\.\pipe\LOCAL\cc-msg-dead', 'T-死掉的視窗')       // pid 不存在
+  const env = { IRORI_RELAY_ID: 'T' }
+  try {
+    const ok = await run(home, st, SEND, ['--to', 'XISU', '--body', 'x'], { env: { ...env, CLAUDE_CODE_MESSAGING_SOCKET: '\\.\pipe\LOCAL\cc-msg-fake' } })
+    assert.equal(ok.code, 0, ok.err); assert.equal(st.reqs[0].body.from_agent, 'T-備援視窗')
+    const wrong = await run(home, st, SEND, ['--to', 'XISU', '--body', 'x'], { env: { ...env, CLAUDE_CODE_MESSAGING_SOCKET: '\\.\pipe\LOCAL\cc-msg-other' } })
+    assert.equal(wrong.code, 2)
+    const dead = await run(home, st, SEND, ['--to', 'XISU', '--body', 'x'], { env: { ...env, CLAUDE_CODE_MESSAGING_SOCKET: '\\.\pipe\LOCAL\cc-msg-dead' } })
+    assert.equal(dead.code, 2); assert.match(dead.err, /--whoami/)
+    assert.equal(st.reqs.length, 1)
+  } finally { alive.kill(); await st.close() }
+})
+
+test('節點代號自動判定：多個 machine-* 資料夾時，取橋正在跑的；沒有就取唯一有金鑰檔的；仍不唯一則說明候選', async () => {
+  const st = await fakeServer(), home = newHome('T')
+  const root = path.join(home, '.irori-relay')
+  for (const id of ['T', 'T-舊測試', 'X']) fs.mkdirSync(path.join(root, `machine-${id.replace('T-舊測試', 'Told')}`), { recursive: true })
+  fs.writeFileSync(path.join(root, 'Told.key'), 'k2')   // machine-T、machine-Told 都有金鑰 → 先靠 bridge.pid
+  try {
+    fs.writeFileSync(path.join(root, 'machine-T', 'bridge.pid'), String(process.pid))   // 橋在跑
+    const a = await run(home, st, WINDOW, ['T-視窗甲', '--to', 'XISU', '--body', 'x'])
+    assert.equal(a.code, 0, a.err); assert.match(a.out, /from=T\/T-視窗甲/)
+    fs.unlinkSync(path.join(root, 'machine-T', 'bridge.pid'))                           // 沒有橋在跑，T 與 Told 都有金鑰 → 不唯一
+    const b = await run(home, st, WINDOW, ['T-視窗甲', '--to', 'XISU', '--body', 'x'])
+    assert.equal(b.code, 1); assert.match(b.err, /候選：.*T.*Told|候選：.*Told.*T/)
+  } finally { await st.close() }
+})
+
+test('--whoami：不寄信，印出父行程鏈裡的視窗與節點判定', async () => {
+  const st = await fakeServer(), home = newHome()
+  try {
+    const r = await asWindow(home, st, 'T-視窗甲', ['--whoami'])
+    assert.equal(r.code, 0, r.err); assert.match(r.out, /<== session「T-視窗甲」/); assert.match(r.out, /判定（行程鏈）：pid=\d+ name=T-視窗甲/); assert.match(r.out, /機器節點判定：T/)
+    assert.equal(st.reqs.length, 0)
+  } finally { await st.close() }
+})
