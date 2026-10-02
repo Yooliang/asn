@@ -77,3 +77,18 @@
   - 連帶調整：`room_create`、`room_pin_set` 只接受 owner 從前端（irori-api，已登入的小良哥）發出；仲介對節點金鑰（AI）一律拒絕。希緒不提供建群組／改置頂的工具。
   - 接班整合改成：舊視窗把交班內容**發成一則群組訊息**（「RELAY 交班」），不寫置頂；置頂由小良哥在介面上視需要更新。
   - 加人／移人：手動只限小良哥本人（介面）。**另裁（最終）：自動收入代號**——小良哥在介面上替群組直接設一或多段開頭字串；**視窗完整名稱以這段字開頭就自動入群**（不去掉機器前綴、不做其他解析）。例：`H-` → 家用機所有視窗；`g36-` → g36- 開頭的；`H-g36` → 只有家用機的 g36 視窗。一個視窗可同時進多個群組。後端依 roster 自動加入、視窗從 roster 消失即標為離開（紀錄保留）；新視窗入群時由機器橋轉送置頂＋最近群組訊息當自動交接。這是規則自動執行，不算 AI 加人。
+
+## 第一期實作（2026-10-02，#61）
+
+- SQL：`supabase/sql/05_rooms.sql`（relay.rooms／room_members／room_messages／room_pins；函式 `irori_relay_room_*`，只給 service_role）。
+  成員 key：節點代號、`節點~視窗名`、小良哥本人 `~owner`（每個群組自動建立、不能移出）。建群組／加人／移人／改置頂的函式檢查呼叫者是 owner 節點，
+  且只有 irori-api（小良哥登入）會呼叫；irori-relay 對節點金鑰（含希緒 XISU）的 `room_create／room_add／room_remove／room_pin_set` 一律 403。
+- 節點動作（irori-relay）：`room_list／room_read／room_post／room_pin_get`，限成員；視窗代發要帶 `from_agent` 且在該節點 roster 內。
+  `room_read` 每則帶 `for_me`（被點名，或 owner 發的；自己發的不算），邏輯單一在 `supabase/functions/_shared/rooms.ts`。
+- 小良哥（irori-api，登入）：`GET/POST /rooms`、`GET /rooms/:id`、`POST /rooms/:id/members`、`DELETE /rooms/:id/members/:key`、
+  `GET/POST /rooms/:id/messages`、`GET/PUT /rooms/:id/pin`（版本號樂觀鎖，衝突 409）。希緒只有 `room_say`、`room_summary` 兩個工具。
+- 限流：每成員每群組每小時 20 則（資料庫擋，超過 429；小良哥不限）。@點名每則最多 8 位。
+- 機器橋：`relay/machine/rooms.mjs`，pull 時一併處理群組（本地游標檔 rooms-cursor.json），只轉 `for_me=true` 的訊息；視窗回覆經收發室以該視窗身分貼回群組。
+- 前端：Irori Chat（`web/js/phone/app_chat.js`）群組列、建立群組、對話、@選單、置頂、成員管理。
+- 尚未做：第 3 條「同一則訊息最多被回覆 5 次」；接班整合（partner-relay 改用群組）；希緒在群組被點名時的主動轉述；群組封存介面；群組列表的本機快取。
+
