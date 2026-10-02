@@ -10,6 +10,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { pickFallbackAgent, fallbackNote } from './pick-fallback.mjs'
 import { createRooms, parseMember, roomText, roomUuid, NO_REPLY_RE as ROOM_NO_REPLY_RE } from './rooms.mjs'
+import { createLauncher } from './launcher.mjs'
 
 const NODE_ID = (process.env.IRORI_RELAY_ID || 'H').trim()
 const BASE_URL = (process.env.IRORI_RELAY_URL || 'https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/irori-relay').replace(/\/+$/, '')
@@ -96,7 +97,7 @@ async function refreshRoster() {
     a.kind === 'interactive' && a.pid !== mailboxPid && a.name !== MAILBOX_NAME && entrypointOf(a.pid) === 'cli')
   if (firstRoster) void pullRoomsGuarded()
   try {
-    await api('roster', { method: 'POST', body: { agents: roster.map(a => ({ name: a.name, status: a.status, cwd_label: cwdLabel(a.cwd) })) } })
+    await api('roster', { method: 'POST', body: { agents: roster.map(a => ({ name: a.name, status: a.status, cwd_label: cwdLabel(a.cwd) })), launcher: launcher.summary() } })
     rosterWarned = false
   } catch (e) {
     if (!rosterWarned) { log(`roster post failed: ${e.message} (will keep trying quietly)`); rosterWarned = true }
@@ -272,6 +273,18 @@ setInterval(async () => {
 }, TICK_MS)
 
 // ---- inbox -------------------------------------------------------------------------------------
+// ---- 遠端開視窗（launcher.mjs；指令只來自本機 ~/.irori-relay/launcher.json）--------------------------
+// 視窗出現後：馬上刷新名單（手機看得到、也才轉交得到），有第一句話就當成 owner 的來信經收發室送進去（id＝launch id）
+const launcher = createLauncher({
+  api, log, workDir: WORK_DIR, configPath: process.env.IRORI_LAUNCHER_FILE || path.join(HOME_DIR, 'launcher.json'),
+  listNames: async () => { const l = await claudeAgents(); return l && new Set(l.map(a => a.name).filter(Boolean)) },
+  onLaunched: async l => {
+    await refreshRoster()
+    if (l.first_message) await handleMail({ id: l.id, from_node: l.requested_by, from_agent: null, to_agent: l.name, trust: 'owner', body: l.first_message })
+  },
+  ...(process.env.IRORI_LAUNCH_CONFIRM_MS ? { confirmMs: Number(process.env.IRORI_LAUNCH_CONFIRM_MS), pollMs: 200 } : {}),
+})
+
 let pulling = false, again = false
 async function handleMail(m) {
   let target = m.to_agent || DEFAULT_AGENT
@@ -345,6 +358,7 @@ async function pullRoomsGuarded() {
 }
 async function pull(why) {
   void pullRoomsGuarded()
+  void launcher.pull()
   if (pulling) { again = true; return }
   pulling = true
   try {
