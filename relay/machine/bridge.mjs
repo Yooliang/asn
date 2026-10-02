@@ -269,10 +269,22 @@ setInterval(async () => {
       await ackIds([id]); pending.delete(id)
     } else if (p.state === 'waiting' && now - p.t > REPLY_TIMEOUT_MS) {
       pending.delete(id)
-      if (!p.replied && !p.room) await noticeNoReply(p, now)
+      if (!p.replied && !p.room && repliedDirectly(id)) log(`no-reply notice skipped id=${id}: ${p.target} replied directly (send.mjs --reply-to)`)
+      else if (!p.replied && !p.room) await noticeNoReply(p, now)
     }
   }
+  pruneReplied(now)
 }, TICK_MS)
+
+// 視窗用 send.mjs --reply-to 直接回了這封（send.mjs 在 WORK_DIR/replied/<信件id> 留的記號）；記號留一天
+const REPLIED_DIR = path.join(WORK_DIR, 'replied')
+const repliedDirectly = id => fs.existsSync(path.join(REPLIED_DIR, id))
+let prunedAt = 0
+function pruneReplied(now) {
+  if (now - prunedAt < 3_600_000) return
+  prunedAt = now
+  try { for (const f of fs.readdirSync(REPLIED_DIR)) { const fp = path.join(REPLIED_DIR, f); if (now - fs.statSync(fp).mtimeMs > 86_400_000) fs.unlinkSync(fp) } } catch {}
+}
 
 // ---- inbox -------------------------------------------------------------------------------------
 // ---- 遠端開視窗（launcher.mjs；指令只來自本機 ~/.irori-relay/launcher.json）--------------------------

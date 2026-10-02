@@ -268,6 +268,25 @@ test('bridge: 內文含（不需回覆）／[no-reply] → 照常轉交並 ack�
   } finally { await st.close() }
 })
 
+test('bridge: 視窗已用 send.mjs --reply-to 直接回了（replied 記號）→ 不寄「沒有回覆」；沒記號的照寄', async () => {
+  const st = await fakeServer({ inbox: [mail(1), mail(2)] })
+  try {
+    const setup = home => {
+      const env = mainSetup(SESSIONS)(home)
+      const dir = path.join(home, '.irori-relay', 'machine-T', 'replied'); fs.mkdirSync(dir, { recursive: true })
+      fs.writeFileSync(path.join(dir, uid(1)), String(Date.now()))
+      return env
+    }
+    const { log } = await runBridge({
+      script: 'bridge.mjs', st, setup, env: { ...quick, IRORI_NOREPLY_WINDOW_MS: '0' }, settle: 1500,
+      until: ({ log }) => noticesOf(st).length >= 1 && /no-reply notice skipped/.test(log),
+    })
+    assert.equal(noticesOf(st).length, 1)
+    assert.equal(noticesOf(st)[0].reply_to, uid(2))
+    assert.match(log, new RegExp(`no-reply notice skipped id=${uid(1)}: T-最近的 replied directly`))
+  } finally { await st.close() }
+})
+
 test('bridge: 逾時通知 30 分鐘內同寄件人＋同收件視窗只報一次', async () => {
   const st = await fakeServer({ inbox: [mail(1), mail(2), mail(3)] })
   try {

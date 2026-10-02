@@ -72,6 +72,13 @@ function takeRate(window) {
   fs.writeFileSync(tmp, JSON.stringify(all)); fs.renameSync(tmp, file)
 }
 
+// 視窗直接回信（--reply-to）後在本機留記號：機器橋看到就不再寄「10 分鐘內沒有收到回覆」——
+// 不然對方會同時收到真的回信和一封「沒回」，希緒把兩封一起轉述時就說成沒回
+export const repliedDir = node => path.join(HOME_DIR, `machine-${node}`, 'replied')
+function markReplied(node, mailId) {
+  try { fs.mkdirSync(repliedDir(node), { recursive: true }); fs.writeFileSync(path.join(repliedDir(node), mailId), String(Date.now())) } catch {}
+}
+
 async function call(key, action, body) {
   const res = await fetch(`${BASE_URL}?action=${action}`, {
     method: 'POST', headers: { 'x-relay-key': key, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(20_000),
@@ -110,6 +117,7 @@ export async function main(argv) {
     console.log(`posted room=${a.room}${r?.seq != null ? ` seq=${r.seq}` : ''} from=${node}/${caller.name}`)
   } else {
     const r = await call(key, 'send', { to_node: toNode, to_agent: toAgent || undefined, body, reply_to: a.replyTo || undefined, from_agent: caller.name })
+    if (a.replyTo) markReplied(node, a.replyTo)
     console.log(`sent id=${r?.id} to=${a.to} from=${node}/${caller.name}`)
   }
   return 0

@@ -53,6 +53,18 @@ test('寄給成員：from_agent 取自父行程鏈上的視窗名、帶機器金
     assert.deepEqual(st.reqs, [{ action: 'send', key: 'fake-machine-key', body: { to_node: 'XISU', body: '回報：測試都過了', reply_to: rid, from_agent: 'T-視窗甲' } }])
     const r2 = await asWindow(home, st, 'T-視窗甲', ['--to', 'W/W-政策', '--body', 'x'])
     assert.equal(r2.code, 0); assert.deepEqual([st.reqs[1].body.to_node, st.reqs[1].body.to_agent], ['W', 'W-政策'])
+    // 帶 --reply-to 寄成功 → 留 replied 記號給機器橋（不再寄「沒有回覆」）；沒帶 reply-to 的不留
+    const dir = path.join(home, '.irori-relay', 'machine-T', 'replied')
+    assert.deepEqual(fs.readdirSync(dir), [rid])
+  } finally { await st.close() }
+})
+
+test('寄失敗（後端錯誤）不留 replied 記號', async () => {
+  const st = await fakeServer({ status: 500 }), home = newHome()
+  try {
+    const r = await asWindow(home, st, 'T-視窗甲', ['--to', 'XISU', '--body', 'x', '--reply-to', 'bbbbbbbb-1111-2222-3333-444444444444'])
+    assert.equal(r.code, 4)
+    assert.ok(!fs.existsSync(path.join(home, '.irori-relay', 'machine-T', 'replied')))
   } finally { await st.close() }
 })
 
