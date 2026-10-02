@@ -9,7 +9,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { pickFallbackAgent, fallbackNote } from './pick-fallback.mjs'
-import { createRooms, parseMember, roomText, roomUuid, NO_REPLY_RE as ROOM_NO_REPLY_RE } from './rooms.mjs'
+import { contextText, createRooms, parseMember, roomText, roomUuid, NO_REPLY_RE as ROOM_NO_REPLY_RE } from './rooms.mjs'
 import { createLauncher } from './launcher.mjs'
 import { selfRecvAlive } from './self-recv.mjs'
 
@@ -345,10 +345,12 @@ async function handleRoomMsg(room, member, msg) {
   if (pending.has(id)) return true
   const p = { mail: { id, from_node: '', from_agent: '' }, room: { id: room.id, seq: msg.seq, window }, target, state: 'forwarding', t0: Date.now(), t: Date.now(), replied: false, noReply: false }
   pending.set(id, p)
+  const prev = await rooms.context(room.id, member, msg.seq)   // 前面最近 5 則當上下文（只讀；失敗就不附）
   try {
     workerSay(`[BRIDGE-FORWARD nonce=${NONCE} id=${id} to=${target}]
 <<<MAIL
 ${roomText(room, msg)}${note ? '\n' + note : ''}
+${contextText(room, prev)}
 MAIL>>>`)
     log(`handed room=${room.id} #${msg.seq} member=${member} to=${target}`)
     return true

@@ -148,6 +148,20 @@ powershell -File install-task.ps1 -Uninstall           # 移除
   視窗回覆經收發室後，用 `room_post`（`from_agent`＝該視窗名）貼回群組；回覆含 `（不需回覆）`／`[no-reply]` 不貼；`room_post` 429（每成員每群組每小時 20 則）只記 log、不重試；群組訊息不寄逾時通知、轉交失敗也只記 log，不會貼到群組。
 - `bridge-aegis.mjs`：成員 key `aegis~名字` → `resolveSlug(名字)`、節點本身 → `IRORI_AEGIS_DEFAULT`；要在 `IRORI_AEGIS_ALLOW` 內才問（不在就略過、記 log、推進游標）；用同樣的標頭格式呼叫 `/ask`，answer 以 `room_post`（`from_agent`＝roster 上的名字）貼回；ask 失敗不貼。
 - 共用邏輯在 `rooms.mjs`（游標、標頭格式、UUID、room_post）。
+- 轉交時（只有 `bridge.mjs`）在內文最後附「前面 5 則」當上下文（`rooms.context()`：`room_read` 帶 `since=seq-6&limit=5`，只讀；讀失敗就不附、照常轉交）與往回翻的指令。
+
+### 視窗主動查群組：irori-room（`room.mjs`）
+
+橋只轉 for_me 的訊息；視窗要看別人之間的對話、往回翻前後文，自己跑：
+```
+node room.mjs --rooms                                        # 我（節點~視窗名）在的群組、新訊息數、最後一則
+node room.mjs --room-read <群組id|群組名> [--last 20 | --since <seq>] [--json]
+```
+- 身分跟 send.mjs／recv.mjs 同一套（`identity.mjs`，父行程鏈／環境變數備援，不能自填）；只列、只讀自己是成員的群組（本機先擋，仲介 403 也擋）。
+- **只讀**：`room_read` 一律帶 `since`（仲介在沒帶 since 時會推進已讀），不帶 `mark`；不動後端已讀、不動橋的 `rooms-cursor.json`。
+- 新訊息數用本機 `machine-<節點>/room-seen.json`（每次 `--room-read` 讀到哪記到哪），含自己發的；沒讀過就從加入時算。
+- 不需要改仲介、不需要部署 Edge Function。
+- exit code：1 用法、2 認不出視窗、3 不是成員／找不到群組、4 後端錯誤。測試：`test/room.test.mjs`。
 
 ## 視窗主動寄信：irori-send（`send.mjs`）
 

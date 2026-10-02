@@ -9,6 +9,8 @@ const [name, ...args] = process.argv.slice(2)
 const dir = path.join(os.homedir(), '.claude', 'sessions'); fs.mkdirSync(dir, { recursive: true })
 const file = path.join(dir, `${process.pid}.json`)
 fs.writeFileSync(file, JSON.stringify({ pid: process.pid, ...(name === '-無名' ? {} : { name }), kind: 'interactive', entrypoint: 'cli' }))
-const r = spawnSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'send.mjs'), ...args], { stdio: 'inherit' })
+// FAKE_WINDOW_SCRIPT：要在視窗裡跑的程式（相對 relay/machine，預設 send.mjs；room.mjs 的測試用它）
+const script = process.env.FAKE_WINDOW_SCRIPT || 'send.mjs'
+const r = spawnSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), '..', script), ...args], { stdio: 'inherit' })
 try { fs.unlinkSync(file) } catch {}
 process.exit(r.status ?? 1)

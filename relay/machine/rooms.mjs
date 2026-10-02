@@ -4,6 +4,7 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 export const ROOM_HINT = '（群組訊息；只有被點名或小良哥／希緒發問才需要回，回覆會經收發室貼回群組；不需要回就不要回）'
 export const NO_REPLY_RE = /（不需回覆）|\[no-reply\]/i
@@ -21,6 +22,15 @@ export function roomHeader(room, msg) {
   return `[群組 ${room.name}] trust=${msg.trust ?? ''} from=${displayFrom(msg.from)} #${msg.seq}`
 }
 export const roomText = (room, msg) => `${roomHeader(room, msg)}\n${ROOM_HINT}\n${msg.body ?? ''}`
+
+// 轉交點名訊息時附的上下文：前面最近幾則（舊→新，每則一行、過長截斷）＋怎麼往回翻
+export const CONTEXT_COUNT = 5
+const ROOM_CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), 'room.mjs')
+export function contextText(room, prev) {
+  const line = m => `#${m.seq} ${m.from === '~owner' ? '小良哥' : (m.from_name || displayFrom(m.from))}：${String(m.body ?? '').replace(/\s+/g, ' ').trim().slice(0, 300)}`
+  const head = prev.length ? `---- 前面 ${prev.length} 則（舊→新）----\n${prev.map(line).join('\n')}\n` : ''
+  return `${head}（要看更多：node "${ROOM_CLI}" --room-read ${room.id} --last 20）`
+}
 
 // 確定性 UUID：sha1('room:房號:seq:成員key') 取前 16 bytes
 export function roomUuid(roomId, seq, member) {
@@ -66,6 +76,16 @@ export function createRooms({ api, workDir, log }) {
     }
   }
 
+  // 某則訊息前面最近 n 則（只讀：一定帶 since，不動後端已讀）；失敗回空陣列，不擋轉交
+  async function context(roomId, member, seq, n = CONTEXT_COUNT) {
+    const { window } = parseMember(member)
+    const since = Math.max(0, seq - 1 - n)
+    try {
+      const res = await api(`room_read&room=${encodeURIComponent(roomId)}${window ? `&as_agent=${encodeURIComponent(window)}` : ''}&since=${since}&limit=${n}`)
+      return (res?.messages ?? []).filter(m => m.seq > since && m.seq < seq).sort((a, b) => a.seq - b.seq).slice(-n)
+    } catch (e) { log(`room context failed room=${roomId} #${seq}: ${e.message}`); return [] }
+  }
+
   async function post(room, body, fromAgent) {
     try {
       await api('room_post', { method: 'POST', body: { room, body, ...(fromAgent ? { from_agent: fromAgent } : {}) } })
@@ -75,5 +95,5 @@ export function createRooms({ api, workDir, log }) {
       return false
     }
   }
-  return { pullRooms, post, cursors }
+  return { pullRooms, post, context, cursors }
 }

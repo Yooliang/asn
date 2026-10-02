@@ -30,7 +30,7 @@ async function fakeServer({ rooms, members, aegis = {}, postStatus = 200 }) {
       if (a === 'room_list') return out(200, { rooms: rooms.map(({ messages, ...r }) => ({ members: [], ...r })) })
       if (a === 'room_read') {
         const id = u.searchParams.get('room'), since = Number(u.searchParams.get('since') || 0), as = u.searchParams.get('as_agent') ?? ''
-        st.reads.push({ room: id, as_agent: u.searchParams.get('as_agent'), since })
+        st.reads.push({ room: id, as_agent: u.searchParams.get('as_agent'), since, hasSince: u.searchParams.has('since'), mark: u.searchParams.get('mark') })
         const r = rooms.find(x => x.id === id)
         const messages = r.messages.filter(m => m.seq > since).map(({ forMe, ...m }) => ({ ...m, for_me: !!(forMe ?? {})[as] }))
         return out(200, { messages, last_seq: r.last_seq })
@@ -117,14 +117,18 @@ test('bridge 群組：只轉 for_me；點名轉給對的視窗；owner 發的轉
     assert.equal(rec.length, 3)
     const key = r => `${r.to}#${r.text.match(/ #(\d+)\n/)[1]}`
     assert.deepEqual(rec.map(key).sort(), ['T-視窗甲#3', 'T-視窗甲#4', 'T-預設#4'])
-    assert.ok(!rec.some(r => /群組內文-2/.test(r.text)))
+    assert.ok(!rec.some(r => / #2\n/.test(r.text)))   // #2 不單獨轉（但會出現在 #3、#4 的上下文裡）
     // 節點本身 → 預設收件人；id 是確定性 UUID
     const d4 = rec.find(r => key(r) === 'T-預設#4')
     assert.equal(d4.id, roomUuid('R1', 4, 'T')); assert.match(d4.id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
     assert.equal(rec.find(r => key(r) === 'T-視窗甲#4').id, roomUuid('R1', 4, 'T~T-視窗甲'))
     // 標頭、提示、內文
     const j3 = rec.find(r => key(r) === 'T-視窗甲#3').text
-    assert.match(j3, /\n\[群組 專案群\] trust=member from=W\/W-政策 #3\n（群組訊息；只有被點名或小良哥／希緒發問才需要回，回覆會經收發室貼回群組；不需要回就不要回）\n群組內文-3\nMAIL>>>$/)
+    assert.match(j3, /\n\[群組 專案群\] trust=member from=W\/W-政策 #3\n（群組訊息；只有被點名或小良哥／希緒發問才需要回，回覆會經收發室貼回群組；不需要回就不要回）\n群組內文-3\n---- 前面 1 則（舊→新）----\n#2 政策：群組內文-2\n（要看更多：node "[^"]+room\.mjs" --room-read R1 --last 20）\nMAIL>>>$/)
+    // #4 的上下文是 #2、#3（舊→新），不含自己
+    assert.match(d4.text, /---- 前面 2 則（舊→新）----\n#2 政策：群組內文-2\n#3 政策：群組內文-3\n（要看更多/)
+    // 所有 room_read 都帶 since、不帶 mark（不動後端已讀）
+    assert.ok(st.reads.length > 0 && st.reads.every(r => r.hasSince && r.mark === null))
     assert.match(d4.text, /\[群組 專案群\] trust=owner from=小良哥 #4\n/)
     // room_read：視窗帶 as_agent、節點本身不帶；since 從 read_seq 起算
     assert.ok(st.reads.some(r => r.as_agent === 'T-視窗甲' && r.since === 1))
