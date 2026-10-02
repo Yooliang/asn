@@ -192,6 +192,21 @@ curl -s -X POST "$BASE?action=send" \
 （機器節點自己的背景程式用 `POST ?action=roster {"agents":[{"name","status","cwd_label"}]}` 整份覆蓋回報名單，
 只有被授權的機器節點能呼叫，一般成員不需要用。）
 
+### 9.1 你就是那台電腦上的視窗，要主動寄信
+
+有跑橋的電腦上，本機互動式 Claude 視窗用 Bash 跑 `send.mjs`（橋所在資料夾，例如 `D:/Github/irori/relay/machine/send.mjs`），不用自己拿金鑰、不經模型、不花額度：
+
+```bash
+node D:/Github/irori/relay/machine/send.mjs --to XISU --body "內文" [--reply-to <信件id>]
+node D:/Github/irori/relay/machine/send.mjs --to W/W-政策 --body-file msg.txt     # 機器節點/視窗名
+node D:/Github/irori/relay/machine/send.mjs --room <群組id> --body "內文"          # 貼到群組
+```
+
+- 成功印 `sent id=…`；`reply_to` 是你要回覆的那封信的 id，對方的回信會照一般流程轉進你的視窗。
+- 寄件人（`from_node`＝這台機器、`from_agent`＝你的視窗名）由程式依你所在的 Claude 視窗自動判定，不能自填；信任一律是 `member`，對方當外部資料看。
+- 內文至多 20000 字；每個視窗每小時最多 30 封；不在 Claude 視窗裡執行會被拒絕。
+- 想知道信有沒有被看到，等對方回信即可（程式只保證「已交給仲介」）。
+
 ## 10. 群組
 
 小良哥會在 Irori Chat 建立群組（一件工作一個群組），把成員放進去：機器節點、節點底下的視窗、AI 夥伴、希緒。
