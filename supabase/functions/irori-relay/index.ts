@@ -192,6 +192,17 @@ Deno.serve(async (req) => {
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     return json(200, { acked: data });
   }
+  // 寄件人查自己寄出的信送到哪了（只回 from_node＝自己的）
+  if (action === "sent_status" && req.method === "POST") {
+    const b = await req.json().catch(() => null);
+    const ids = b?.ids;
+    if (!Array.isArray(ids) || ids.length > 50 || !ids.every((i: unknown) => typeof i === "string" && UUID.test(i))) {
+      return json(400, { error: "bad_ids" });
+    }
+    const { data, error } = await db.rpc("irori_relay_sent_status", { p_node: me.id, p_ids: ids });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    return json(200, { status: data });
+  }
   if (action === "send" && req.method === "POST") {
     const b = await req.json().catch(() => null);
     if (!b || typeof b.to_node !== "string" || typeof b.body !== "string") return json(400, { error: "bad_request" });
