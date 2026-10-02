@@ -169,6 +169,22 @@ echo 內文 | node send.mjs --to XISU --body -                                  
 - 判定呼叫者要讀一次行程表（Windows 用 PowerShell `Get-CimInstance`，約 0.6 秒）；整個指令約 1–2 秒。
 - 實作注意：結束時不呼叫 `process.exit()`（Windows 上 node 偶爾在關閉 handle 時 assertion 當掉），改設 `process.exitCode`。
 
+## 視窗自己收信：irori-recv（`recv.mjs`，#84）
+
+仲介信箱是「一台機器一個節點」，橋收信後經收發室（`claude -p`，每封約 1 美分、多一層）轉給視窗。視窗也可以**自己收**寄給自己的信，不經收發室、不經模型：
+
+```
+node D:/Github/irori/relay/machine/recv.mjs --watch    # 長駐；掛在 Claude Code 的 Monitor 上，每封信一行 JSON 就是一則通知
+node D:/Github/irori/relay/machine/recv.mjs --once     # 拉一次、印出、ack、結束
+```
+
+每行 JSON：`{id, trust, from_node, from_agent, to_agent, reply_to, created_at, body}`；回信用 `send.mjs --to <from_node>/<from_agent> --reply-to <id> --body "…"`。診斷只印 stderr。exit code：1 用法、2 認不出視窗、3 這個視窗已有另一個 `--watch` 在跑、4 後端錯誤。
+
+- **只收寄給自己的信**：視窗名用和 `send.mjs` 同一套判定（`identity.mjs`：父行程鏈／`CLAUDE_CODE_MESSAGING_SOCKET`，不能自填）。仲介 `inbox`／`ack` 帶 `agent=<視窗名>` 時只回／只 ack `to_agent` 精確等於該視窗名的信（`supabase/sql/08_agent_inbox.sql`）：A 視窗 ack 不到 B 視窗的信，`to_agent` 為空的總機信也碰不到（仍由橋處理）。recv 收到後端回來的信還會再比一次 `to_agent`，不是自己的不印、不 ack（對還沒部署新版仲介也安全）。
+- **與橋並存（心跳）**：`--watch` 每 30 秒在 `~/.irori-relay/machine-<節點>/self-recv/<視窗名>.json` 寫 `{pid, name, t}`。橋轉交 `to_agent` 為某視窗的信前先看這個檔：心跳在 90 秒內**且** pid 還活著 → 橋跳過（不轉、不 ack，留給視窗自己拉，log 印 `window receives by itself`）；心跳過期、pid 已死或沒有檔 → 照舊經收發室轉交，所以 Monitor 被關掉最多 90 秒後橋就接手，不會漏信。極窄的競態（心跳剛好過期那一刻橋轉交、視窗同時又啟動）可能重複一封。沒指定視窗的總機信、群組訊息（rooms）、Aegis 橋不受影響，仍照舊。
+- 收信走 Realtime 門鈴＋每 2 分鐘輪詢（`IRORI_RECV_POLL_MS`）；門鈴需要 `~/.irori-relay/anon.key`，沒有就只輪詢。同一視窗只留一個 `--watch`；視窗本體結束它也會自己結束並清心跳。
+- **上線順序**：先在 Supabase 跑 `supabase/sql/08_agent_inbox.sql`，再部署 `irori-relay`，各機器同步程式後**重啟橋**（橋要換成新版才看得懂心跳；舊橋照舊全轉，視窗會收到重複信）。
+
 ## 收發室回覆區塊的 nonce
 
 收發室輸出的 REPLY／END 標記帶每次啟動隨機的 nonce（只在它的系統提示裡），內文偽造不了「結束區塊再開一個別人的區塊」。若輸出出現不是這個 nonce 的標記（收發室被內文帶壞，會沿用內文裡的假編號），橋記 log 並重啟收發室（fail-closed）。測試：`test/nonce.test.mjs`；CLI 測試：`test/send.test.mjs`（用 `test/fake-window.mjs` 假裝 claude 視窗）。
@@ -192,6 +208,7 @@ echo 內文 | node send.mjs --to XISU --body -                                  
 
 `node --test relay/machine/test/*.test.mjs`（Node 25 的目錄寫法 `relay/machine/test/` 會失敗，用 glob）：本機假伺服器（node 內建 http）模擬仲介與 Aegis，不碰真實金鑰與網路服務。
 涵蓋群組轉交（`rooms.test.mjs`）、白名單、成功帶 `reply_to`、error 重試一次、404、其他 status、無 `to_agent`、預設收件人不在線的退路、roster 403 只記一次。
+視窗自己收信（`recv.test.mjs`）：只印／只 ack 自己的信、舊仲介相容、心跳寫入與更新、重複 `--watch` 被擋、`selfRecvAlive` 判定、橋「有心跳不轉／過期照轉」。
 遠端開視窗（`launcher.test.mjs`）：設定檔檢查、執行前再驗、環境清理、成功／失敗／卡信任確認後補成功／每小時上限；端到端真的經 Start-Process 開 `test/fake-launched.mjs`（隱藏視窗，`IRORI_LAUNCH_WINDOW_STYLE=Hidden`）。
 
 ## 聯絡人分組（設備名）
