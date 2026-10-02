@@ -140,3 +140,7 @@ powershell -File install-task.ps1 -Uninstall           # 移除
 
 `node --test relay/machine/test/`：本機假伺服器（node 內建 http）模擬仲介與 Aegis，不碰真實金鑰與網路服務。
 涵蓋白名單、成功帶 `reply_to`、error 重試一次、404、其他 status、無 `to_agent`、預設收件人不在線的退路、roster 403 只記一次。
+
+## 聯絡人分組（設備名）
+
+Irori Chat 的聯絡人依「節點登記的工作環境（machine）」分組，組名就是那台設備的名字（家用機、工作機、雲端…）。新電腦裝機器橋時，請把它的節點 machine 設成那台電腦的名字（希緒的 update_partner 或仲介 update 動作），就會自成一組。
