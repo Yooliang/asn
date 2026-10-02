@@ -161,3 +161,24 @@ Deno.test("自動收入：syncNodeAuto 用規則算出該入群的視窗交給�
   const broken: RoomDeps = { ...deps, rpc: () => Promise.resolve({ data: null, error: new Error("boom") }) };
   await syncNodeAuto(broken, "H", ["x"]); // 不丟
 });
+
+Deno.test("點名要完全相同：@I-Irori 不會點到 I-Irori-2；中文名後面要接空白或標點", () => {
+  const ms = [
+    { key: "H~I-Irori", name: "I-Irori" },
+    { key: "H~I-Irori-2", name: "I-Irori-2" },
+    { key: "aegis~小牧", name: "小牧" },
+  ] as unknown as RoomMember[];
+  assertEquals(parseMentions("@I-Irori 我在試", ms), ["H~I-Irori"]);
+  assertEquals(parseMentions("@I-Irori-2，你看", ms), ["H~I-Irori-2"]);
+  assertEquals(parseMentions("@I-Iror 看", ms), []);
+  assertEquals(parseMentions("@I-Irori-3 看", ms), []);
+  assertEquals(parseMentions("@小牧幫我看", ms), []);
+  assertEquals(parseMentions("@小牧 幫我看", ms), ["aegis~小牧"]);
+});
+
+Deno.test("owner 發話有點名時只有被點名的回", () => {
+  const msg = { from: "~owner", trust: "owner", mentions: ["H~I-Irori"] };
+  assertEquals(shouldRespond(msg, "H~I-Irori"), true);
+  assertEquals(shouldRespond(msg, "H~I-Irori-2"), false);
+  assertEquals(shouldRespond({ from: "~owner", trust: "owner", mentions: [] }, "H~I-Irori-2"), true);
+});

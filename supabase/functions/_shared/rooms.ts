@@ -21,6 +21,8 @@ export const keyOf = (node: string, agent?: string | null) => (agent ? `${node}$
 // 從內文找 @名字，對應成員 key。名字可含空白與中文（例如「@牧陽 Aegis」），最長的名字優先；
 // 英數結尾的名字後面不能再接英數（@H-主線 不會誤中 @H-主線-3 的前半）。成員可用顯示名或 key 被點名；
 // owner 角色的節點（希緒）另外可用「希緒」被點名。最多 MAX_MENTIONS 位，不含重複
+const MENTION_END = /[\s\p{P}\p{S}]/u;
+
 export function parseMentions(body: string, members: RoomMember[], max = MAX_MENTIONS): string[] {
   const cands: { text: string; key: string }[] = [];
   for (const m of members) {
@@ -35,8 +37,9 @@ export function parseMentions(body: string, members: RoomMember[], max = MAX_MEN
   for (let i = lower.indexOf("@"); i >= 0; i = lower.indexOf("@", i + 1)) {
     for (const c of cands) {
       if (!lower.startsWith(c.text, i + 1)) continue;
+      // 名字必須完全相同：後面只能是結尾、空白或標點（含全形），不做子字串／前綴比對（@I-Irori 不會點到 I-Irori-2）
       const next = lower[i + 1 + c.text.length];
-      if (/[a-z0-9_-]$/.test(c.text) && next !== undefined && /[a-z0-9_-]/.test(next)) continue;
+      if (next !== undefined && (!MENTION_END.test(next) || next === "-" || next === "_")) continue;
       if (!found.includes(c.key)) found.push(c.key);
       break;
     }
@@ -45,10 +48,13 @@ export function parseMentions(body: string, members: RoomMember[], max = MAX_MEN
   return found.slice(0, max);
 }
 
-// 這則訊息該不該由 selfKey 這位成員回：只有「被點名」或「owner（小良哥、希緒）發的」才回，自己發的不回
+// 這則訊息該不該由 selfKey 這位成員回：有點名時只有被點名的回（owner 發的也一樣，點了誰就只有誰回）；
+// 沒點名時，owner（小良哥、希緒）發的大家都可回；自己發的不回
 export function shouldRespond(msg: { from: string; trust: string; mentions?: string[] }, selfKey: string): boolean {
   if (msg.from === selfKey) return false;
-  return msg.trust === "owner" || (msg.mentions ?? []).includes(selfKey);
+  const mentions = msg.mentions ?? [];
+  if (mentions.length) return mentions.includes(selfKey);
+  return msg.trust === "owner";
 }
 
 export type RoomDeps = {
