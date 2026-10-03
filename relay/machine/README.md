@@ -24,9 +24,19 @@ relay send(reply_to) <──── bridge.mjs <──stdout── 收發室 <─
    - 收發室回報 `SENT <id>` 才 ack；失敗（`FAIL`）、找不到 session、轉交逾時（2 分鐘），都寄一封說明給原寄件人再 ack。
    - 對方回覆（收發室收到的 `<cross-session-message>` 那一輪）→ `relay send` 帶 `reply_to` 寄回原寄件人，`from_agent` 填對方 session 名。
      之後同一 session 的追加回覆（10 分鐘內）也一併轉寄。
-   - 逾時（預設 10 分鐘）沒有經收發室收到回覆 → 寄「［收發室］10 分鐘內沒有經收發室收到 X 的回覆（對方若已另外回信可忽略）」。
+   - 逾時（預設 10 分鐘）沒有經收發室收到回覆 → 先判斷要不要寄「［收發室］10 分鐘內沒有經收發室收到 X 的回覆（對方若已另外回信可忽略）」：
+     - 已經用 `send.mjs --reply-to` 回了（`replied/<id>` 記號）→ 不寄。
+     - 收件視窗在轉交之後曾用 `send.mjs` 寄過信給原寄件人（`sent/` 記號，不論有沒有帶 `--reply-to`；寄給同一視窗，或只寄給該節點都算）→ 視為已回覆，不寄。
+       取捨：只要寄過信給同一個人就算，不比對內容，所以對方寄的若是別件事，會少報一次「沒回」；寧可漏報也不誤報（誤報會被希緒轉述成「他沒回」）。記號只比「轉交之後」的，舊的不算。
+     - 收件視窗**正在忙**（`claude agents --json` 的 `status` 符合 `IRORI_BUSY_STATUS_RE`，預設 `busy|working|running`）→ **延後**不寄（log `no-reply notice deferred`）；
+       它變閒（idle 等）之後再過 `IRORI_BUSY_GRACE_MS`（預設 2 分鐘）仍沒回、也沒有上述記號才寄；從轉交起算滿 `IRORI_BUSY_MAX_MS`（預設 60 分鐘）無論如何寄一次。
+     - 收件視窗已不在名單（關掉了）→ 直接寄，文字改成「對方視窗「X」已關閉，沒有經收發室收到回覆」。
+     - 每封寄出的通知都記 log：`no-reply notice sent id=… (寄件人|收件視窗) reason=timeout|window-closed|busy-idle-grace|busy-max`；被合併掉的記 `suppressed`。
      同一寄件人＋同一收件視窗 30 分鐘內只報一次（`IRORI_NOREPLY_WINDOW_MS` 可調），被合併的下次報時帶「另有 N 封也還沒回」。
+   - **遲到的回覆不會被丟掉**：通知寄出（或被合併）後，這封信的對應仍保留 `IRORI_LATE_KEEP_MS`（預設 24 小時），最多 `IRORI_LATE_MAX`（預設 200）筆（超過清最舊）；
+     期間對方經收發室回覆，照常寄回原寄件人，內文前加一行「（遲到的回覆：X 在收發室寄出「沒有回覆」通知之後才回）」，寄回後清掉。同一視窗有還在等的信時，回覆先對給還在等的，沒有才對給保留中的（先進先出）。
    - **告知類的信在內文加「（不需回覆）」或「[no-reply]」**：照常轉交、成功即 ack，但不計時、不寄逾時通知（收發室之後也不再轉寄對方的回覆）。
+   - **寄件人是收發室**（`from_agent` 以「收發室」結尾，即任何節點的 `<節點>-收發室`）的系統信：比照告知類，照常轉交、不計時、不寄逾時通知；轉交失敗／找不到視窗的說明也不回給收發室（只記 log），避免兩台收發室互相丟信。
    - 沒有 `to_agent` → 交給 `IRORI_RELAY_DEFAULT_AGENT`（預設 `H-工頭-2`）；它不在線就改交給**最近有活動**的互動式 session
      （依 `~/.claude/sessions/<pid>.json` 的 `updatedAt`，排除收發室），內文前加一行「原本要給 <預設> 但它不在線，請你代收並轉告／處理」；都沒有人在線才**不 ack、留在 inbox**。
    - 不在名單的 `to_agent` → 寄回「找不到這個 session（目前可達：…）」。
@@ -46,6 +56,9 @@ relay send(reply_to) <──── bridge.mjs <──stdout── 收發室 <─
 | `IRORI_MAILBOX_NAME` / `IRORI_MAILBOX_MODEL` | 收發室名稱／模型 |
 | `IRORI_REPLY_TIMEOUT_MS` | 等回覆逾時（預設 600000） |
 | `IRORI_NOREPLY_WINDOW_MS` | 逾時通知合併視窗（預設 1800000）；`IRORI_BRIDGE_TICK_MS` 逾時檢查間隔（預設 5000，測試用） |
+| `IRORI_LATE_KEEP_MS` / `IRORI_LATE_MAX` | 寄過逾時通知後，保留信件對應以便寄回遲到回覆的時間（預設 86400000＝24 小時）／最多筆數（預設 200） |
+| `IRORI_BUSY_STATUS_RE` | 視為「忙碌」的 session status 正規式（預設 `^(busy\|working\|running)$`，不分大小寫）。**實機 `claude agents --json` 的 status 值請對照後調整** |
+| `IRORI_BUSY_GRACE_MS` / `IRORI_BUSY_MAX_MS` | 對方忙碌時延後通知：閒下來後的寬限（預設 120000）／從轉交起算的總上限（預設 3600000） |
 | `CLAUDE_BIN` | claude 執行檔（預設 `claude`） |
 
 Log：`~/.irori-relay/machine-<ID>/bridge.log`（每個轉交、每一輪收發室的耗時與費用都有一行）。
@@ -166,7 +179,8 @@ node room.mjs --room-read <群組id|群組名> [--last 20 | --since <seq>] [--js
 ## 視窗主動寄信：irori-send（`send.mjs`）
 
 本機任何 Claude 視窗要主動寄信（回報給希緒、寄給別台機器的視窗、貼到群組），用 Bash 直接跑 CLI，**不經收發室、不經任何模型、不花額度**（收信仍靠橋，回信照舊由橋經收發室轉進該視窗）。
-用 `--reply-to` 直接回某封信、寄成功後，會在 `machine-<節點>/replied/<信件id>` 留記號；橋看到就不再對那封寄「10 分鐘內沒有經收發室收到回覆」（2026-10-02 希緒把真回信和這則通知一起轉述成「沒回」，小良哥因此連問三次）。記號留一天：
+用 `--reply-to` 直接回某封信、寄成功後，會在 `machine-<節點>/replied/<信件id>` 留記號；橋看到就不再對那封寄「10 分鐘內沒有經收發室收到回覆」（2026-10-02 希緒把真回信和這則通知一起轉述成「沒回」，小良哥因此連問三次）。記號留一天。
+另外每次寄給節點／視窗（不論有沒有 `--reply-to`）也會在 `machine-<節點>/sent/<雜湊>` 留「誰寄給誰」的記號，橋據此判斷「對方已直接寄信給原寄件人」（檔名由 `sent-mark.mjs` 產生，send 與橋共用）：
 
 ```
 node D:/Github/irori/relay/machine/send.mjs --to XISU --body "內文" [--reply-to <信件id>]

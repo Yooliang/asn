@@ -12,6 +12,7 @@ import { pickFallbackAgent, fallbackNote } from './pick-fallback.mjs'
 import { contextText, createRooms, parseMember, roomText, roomUuid, NO_REPLY_RE as ROOM_NO_REPLY_RE } from './rooms.mjs'
 import { createLauncher } from './launcher.mjs'
 import { selfRecvAlive } from './self-recv.mjs'
+import { sentMarkName } from './sent-mark.mjs'
 
 const NODE_ID = (process.env.IRORI_RELAY_ID || 'H').trim()
 const BASE_URL = (process.env.IRORI_RELAY_URL || 'https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/irori-relay').replace(/\/+$/, '')
@@ -31,6 +32,12 @@ const HEARTBEAT_MS = 25_000
 const MAX_BACKOFF_MS = 30_000
 const REPLY_TIMEOUT_MS = Number(process.env.IRORI_REPLY_TIMEOUT_MS || 600_000)
 const NOTICE_WINDOW_MS = Number(process.env.IRORI_NOREPLY_WINDOW_MS || 1_800_000)   // 同一寄件人＋同一收件視窗，這段時間內只報一次「沒有回覆」
+// 逾時之後的處理：遲到回覆保留期／筆數上限；對方忙碌時延後通知（閒下來後的寬限、總上限）
+const LATE_KEEP_MS = Number(process.env.IRORI_LATE_KEEP_MS || 86_400_000)
+const LATE_MAX = Number(process.env.IRORI_LATE_MAX || 200)
+const BUSY_GRACE_MS = Number(process.env.IRORI_BUSY_GRACE_MS || 120_000)
+const BUSY_MAX_MS = Number(process.env.IRORI_BUSY_MAX_MS || 3_600_000)
+const BUSY_STATUS_RE = new RegExp(process.env.IRORI_BUSY_STATUS_RE || '^(busy|working|running)$', 'i')
 const TICK_MS = Number(process.env.IRORI_BRIDGE_TICK_MS || 5_000)
 const FORWARD_TIMEOUT_MS = 120_000
 const LOG_FILE = process.env.IRORI_RELAY_LOG || path.join(WORK_DIR, 'bridge.log')
@@ -179,9 +186,11 @@ const workerSay = text => {
 
 // ---- mail state --------------------------------------------------------------------------------
 const seen = new Set()        // acked mail ids (dedupe)
-const pending = new Map()     // mail id -> {mail, target, state, t0, t, replied}
+const pending = new Map()     // mail id -> {mail, target, state(forwarding|waiting|notified|done), t0, t, replied, notifiedAt}
 const noticed = new Map()     // 寄件人|收件視窗 -> {t, skipped}（逾時通知合併用）
 const NO_REPLY_RE = /（不需回覆）|\[no-reply\]/i
+// 寄件人是任何節點的收發室（<節點>-收發室）：系統信，照常轉交但不計時、不互相寄通知
+const isMailboxSender = m => String(m?.from_agent ?? '').endsWith('收發室')
 const selfHandled = new Set() // mail ids already logged as left to the window's own recv
 const unrouted = new Set()   // mail ids already logged as waiting for the default agent
 
@@ -231,32 +240,76 @@ async function onFail(id, reason) {
   p.state = 'done'
   log(`forward failed id=${id}: ${reason}`)
   if (p.room) { pending.delete(id); return }   // 群組訊息：只記 log，不回群組
-  await sendBack(p, `[收發室] 轉交給 ${p.target} 失敗：${reason || '原因不明'}`)
+  if (isMailboxSender(p.mail)) log(`forward failure notice to mailbox sender ${p.mail.from_node}/${p.mail.from_agent} not sent id=${id}`)
+  else await sendBack(p, `[收發室] 轉交給 ${p.target} 失敗：${reason || '原因不明'}`)
   await ackIds([id])
   pending.delete(id)
 }
 async function onReply(from, text) {
   const cands = [...pending.values()].filter(p => p.target === from && p.state !== 'forwarding')
-  const p = cands.find(c => !c.replied) || cands[cands.length - 1]
+  // 還在等的優先；沒有才輪到已通知過「沒回」、仍保留中的信（遲到的回覆，先進先出）
+  const active = cands.filter(c => c.state !== 'notified')
+  const p = active.find(c => !c.replied) || active[active.length - 1] || cands.find(c => c.state === 'notified')
   if (!p) { log(`unmatched reply from ${from} (${text.length} chars) dropped`); return }
+  const late = p.state === 'notified'
   p.replied = true
+  if (late) pending.delete(p.mail.id)   // 遲到的回覆寄回後就清掉
   if (p.room) {
     if (ROOM_NO_REPLY_RE.test(text)) { log(`room reply from ${from} room=${p.room.id} #${p.room.seq} marked no-reply: not posted`); return }
     const ok = await rooms.post(p.room.id, text, p.room.window || undefined)   // 節點本身是成員時以節點發言；視窗是成員時以 節點~視窗 發言
     log(`room reply from ${from} -> room=${p.room.id} #${p.room.seq} posted=${ok}`)
     return
   }
-  const ok = await sendBack(p, text, from)
-  log(`reply from ${from} -> ${p.mail.from_node} id=${p.mail.id} sent=${ok} (${Date.now() - p.t0}ms total)`)
+  const ok = await sendBack(p, late ? `（遲到的回覆：${p.target} 在收發室寄出「沒有回覆」通知之後才回）\n${text}` : text, from)
+  log(`${late ? 'late ' : ''}reply from ${from} -> ${p.mail.from_node} id=${p.mail.id} sent=${ok} (${Date.now() - p.t0}ms total)`)
 }
 
-async function noticeNoReply(p, now) {
+// reason：timeout（照常逾時）／window-closed（對方視窗已不在名單）／busy-idle-grace（忙完閒下來後寬限到了）／busy-max（忙碌延後到總上限）
+async function noticeNoReply(p, now, reason) {
   const key = `${p.mail.from_node}/${p.mail.from_agent ?? ''}|${p.target}`
   const prev = noticed.get(key)
   if (prev && now - prev.t < NOTICE_WINDOW_MS) { prev.skipped++; log(`no-reply notice suppressed id=${p.mail.id} (${key})`); return }
   const more = prev?.skipped ? `；另有 ${prev.skipped} 封也還沒回` : ''
   noticed.set(key, { t: now, skipped: 0 })
-  await sendBack(p, `[收發室] ${Math.round(REPLY_TIMEOUT_MS / 60000)} 分鐘內沒有經收發室收到 ${p.target} 的回覆（對方若已另外回信可忽略）${more}`)
+  const mins = Math.max(1, Math.round((now - p.t) / 60000))
+  const text = reason === 'window-closed' ? `[收發室] 對方視窗「${p.target}」已關閉，沒有經收發室收到回覆${more}`
+    : reason === 'timeout' ? `[收發室] ${Math.round(REPLY_TIMEOUT_MS / 60000)} 分鐘內沒有經收發室收到 ${p.target} 的回覆（對方若已另外回信可忽略）${more}`
+    : `[收發室] ${p.target} 先前一直在忙，等了約 ${mins} 分鐘仍沒有經收發室收到回覆（對方若已另外回信可忽略）${more}`
+  const ok = await sendBack(p, text)
+  log(`no-reply notice sent id=${p.mail.id} (${key}) reason=${reason} sent=${ok}`)
+}
+
+const agentOf = name => agents.find(a => a.name === name)
+const isBusy = a => !!a && BUSY_STATUS_RE.test(String(a.status ?? ''))
+
+// 一封「超過等待時間還沒回」的信：決定現在寄通知、延後、還是不用寄
+async function judgeTimeout(id, p, now) {
+  if (p.replied) { pending.delete(id); return }
+  if (repliedDirectly(id)) { pending.delete(id); log(`no-reply notice skipped id=${id}: ${p.target} replied directly (send.mjs --reply-to)`); return }
+  if (sentToSender(p)) { pending.delete(id); log(`no-reply notice skipped id=${id}: ${p.target} sent mail to ${p.mail.from_node}/${p.mail.from_agent ?? ''} after forward`); return }
+  const a = agentOf(p.target)
+  let reason = 'timeout'
+  if (!a && rosterOk) reason = 'window-closed'
+  else if (a && isBusy(a)) {
+    if (now - p.t < BUSY_MAX_MS) {
+      if (!p.deferred) { p.deferred = true; log(`no-reply notice deferred id=${id}: ${p.target} is busy (status=${a.status})`) }
+      p.idleSince = 0
+      return
+    }
+    reason = 'busy-max'
+  } else if (p.deferred) {
+    if (!p.idleSince) { p.idleSince = now; return }
+    if (now - p.idleSince < BUSY_GRACE_MS) return
+    reason = 'busy-idle-grace'
+  }
+  // 決定要通知：信留著等遲到的回覆（先改 state，免得 await 期間下一輪又處理同一封）
+  p.state = 'notified'; p.notifiedAt = now
+  evictNotified()
+  await noticeNoReply(p, now, reason)
+}
+function evictNotified() {
+  const list = [...pending.entries()].filter(([, p]) => p.state === 'notified').sort((a, b) => a[1].notifiedAt - b[1].notifiedAt)
+  for (let k = 0; k < list.length - LATE_MAX; k++) { pending.delete(list[k][0]); log(`late-reply slot evicted id=${list[k][0]} (over ${LATE_MAX})`) }
 }
 
 setInterval(async () => {
@@ -265,12 +318,14 @@ setInterval(async () => {
     if (p.state === 'forwarding' && now - p.t0 > FORWARD_TIMEOUT_MS) {
       p.state = 'done'
       if (p.room) { log(`room forward timeout id=${id} -> ${p.target}`); pending.delete(id); continue }
-      await sendBack(p, `[收發室] 轉交給 ${p.target} 逾時（收發室沒有完成轉交）`)
+      if (isMailboxSender(p.mail)) log(`forward timeout notice to mailbox sender not sent id=${id}`)
+      else await sendBack(p, `[收發室] 轉交給 ${p.target} 逾時（收發室沒有完成轉交）`)
       await ackIds([id]); pending.delete(id)
     } else if (p.state === 'waiting' && now - p.t > REPLY_TIMEOUT_MS) {
-      pending.delete(id)
-      if (!p.replied && !p.room && repliedDirectly(id)) log(`no-reply notice skipped id=${id}: ${p.target} replied directly (send.mjs --reply-to)`)
-      else if (!p.replied && !p.room) await noticeNoReply(p, now)
+      if (p.room) pending.delete(id)
+      else await judgeTimeout(id, p, now)
+    } else if (p.state === 'notified' && now - p.notifiedAt > LATE_KEEP_MS) {
+      pending.delete(id); log(`late-reply slot expired id=${id}`)
     }
   }
   pruneReplied(now)
@@ -279,11 +334,23 @@ setInterval(async () => {
 // 視窗用 send.mjs --reply-to 直接回了這封（send.mjs 在 WORK_DIR/replied/<信件id> 留的記號）；記號留一天
 const REPLIED_DIR = path.join(WORK_DIR, 'replied')
 const repliedDirectly = id => fs.existsSync(path.join(REPLIED_DIR, id))
+// send.mjs 每次寄給某節點／視窗也留記號（WORK_DIR/sent/<sha1(視窗|節點|視窗名)>，內容＝寄出時間 ms）：
+// 轉交之後，收件視窗曾寄信給原寄件人（同節點＋同視窗，或只寄給該節點）就視為已回覆
+const SENT_DIR = path.join(WORK_DIR, 'sent')
+const sentToSender = p => {
+  const from = p.mail.from_node, agent = p.mail.from_agent ?? ''
+  for (const to of new Set([agent, ''])) {
+    try { if (Number(fs.readFileSync(path.join(SENT_DIR, sentMarkName(p.target, from, to)), 'utf8')) >= p.t0) return true } catch {}
+  }
+  return false
+}
 let prunedAt = 0
 function pruneReplied(now) {
   if (now - prunedAt < 3_600_000) return
   prunedAt = now
-  try { for (const f of fs.readdirSync(REPLIED_DIR)) { const fp = path.join(REPLIED_DIR, f); if (now - fs.statSync(fp).mtimeMs > 86_400_000) fs.unlinkSync(fp) } } catch {}
+  for (const dir of [REPLIED_DIR, SENT_DIR]) {
+    try { for (const f of fs.readdirSync(dir)) { const fp = path.join(dir, f); if (now - fs.statSync(fp).mtimeMs > 86_400_000) fs.unlinkSync(fp) } } catch {}
+  }
 }
 
 // ---- inbox -------------------------------------------------------------------------------------
@@ -319,11 +386,12 @@ async function handleMail(m) {
     note = fallbackNote(DEFAULT_AGENT, fb.name)
     log(`id=${m.id} has no to_agent and ${DEFAULT_AGENT} is offline: fallback to most recently active session ${fb.name}`)
   }
-  const p = { mail: m, target, state: 'forwarding', t0: Date.now(), t: Date.now(), replied: false, noReply: NO_REPLY_RE.test(m.body ?? '') }
+  const p = { mail: m, target, state: 'forwarding', t0: Date.now(), t: Date.now(), replied: false, noReply: NO_REPLY_RE.test(m.body ?? '') || isMailboxSender(m) }
   if (!forwardable(target)) {
     const names = roster.map(a => a.name).join('、') || '(無)'
     p.state = 'done'
-    await sendBack(p, `[收發室] 找不到名叫「${target}」的 session（目前可達：${names}）`)
+    if (isMailboxSender(m)) log(`id=${m.id} target ${target} not found; notice to mailbox sender not sent`)
+    else await sendBack(p, `[收發室] 找不到名叫「${target}」的 session（目前可達：${names}）`)
     await ackIds([m.id])
     return
   }

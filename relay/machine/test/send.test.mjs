@@ -8,6 +8,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { sentMarkName } from '../sent-mark.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const SEND = path.join(here, '..', 'send.mjs'), WINDOW = path.join(here, 'fake-window.mjs')
@@ -56,6 +57,9 @@ test('寄給成員：from_agent 取自父行程鏈上的視窗名、帶機器金
     // 帶 --reply-to 寄成功 → 留 replied 記號給機器橋（不再寄「沒有回覆」）；沒帶 reply-to 的不留
     const dir = path.join(home, '.irori-relay', 'machine-T', 'replied')
     assert.deepEqual(fs.readdirSync(dir), [rid])
+    // 每次寄給節點／視窗也留 sent 記號（橋據此判斷「對方已直接寄信給原寄件人」）：XISU 與 W/W-政策 各一個
+    const sdir = path.join(home, '.irori-relay', 'machine-T', 'sent')
+    assert.deepEqual(fs.readdirSync(sdir).sort(), [sentMarkName('T-視窗甲', 'XISU', ''), sentMarkName('T-視窗甲', 'W', 'W-政策')].sort())
   } finally { await st.close() }
 })
 
@@ -130,7 +134,7 @@ test('群組、stdin、--body-file、後端錯誤、節點代號自動判定', a
     const bf = await asWindow(home, st, 'T-視窗甲', ['--to', 'XISU', '--body-file', f])
     assert.equal(bf.code, 0); assert.equal(st.reqs[2].body.body, '檔案內文')
     // 不給 IRORI_RELAY_ID：唯一的 machine-T 資料夾決定節點
-    fs.mkdirSync(path.join(home, '.irori-relay', 'machine-T'))
+    fs.mkdirSync(path.join(home, '.irori-relay', 'machine-T'), { recursive: true })
     const auto = await run(home, st, WINDOW, ['T-視窗甲', '--to', 'XISU', '--body', '自動判定節點'])
     assert.equal(auto.code, 0, auto.err); assert.match(auto.out, /from=T\/T-視窗甲/)
   } finally { await st.close() }
