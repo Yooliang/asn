@@ -223,7 +223,7 @@ node D:/Github/irori/relay/machine/recv.mjs --once     # 拉一次、印出、ac
 ## 遠端開 Claude 視窗（`launcher.mjs`，#64，規劃見 docs/relay/LAUNCHER.md）
 
 小良哥在 Irori Chat「聯絡人」分頁對某台電腦按「＋ 開新視窗」→ 仲介記一筆 launch 並敲門鈴 → 橋 `launch_pending` 取走 → 照**本機** launcher.json 開視窗 → `launch_result` 回報。
-- 設定：`~/.irori-relay/launcher.json`（不進 repo；範本 `launcher.example.json`；`IRORI_LAUNCHER_FILE` 可改路徑）。沒有這個檔＝這台不能遠端開視窗（名單回報 `launcher: null`，手機上不出現按鈕）。
+- 設定：`~/.irori-relay/launcher.json`（不進 repo；範本 `launcher.example.json`；`IRORI_LAUNCHER_FILE` 可改路徑）。沒有這個檔＝這台不能遠端開視窗（名單回報 `launcher: null`，手機上不出現按鈕）。profile 可加 `"engine": "codex"` 指定用哪個轉接器開（沒寫＝第一個宣告 `openWindow` 的轉接器；指定了但沒載入該轉接器會回報開不起來）。
   - `profiles.<名>`：`label`、`command`（可用 `%SystemRoot%` 這類環境變數）、`args`（字串陣列；**唯一**允許的替換欄位是 `{name}`，其他 `{…}` 整個檔案拒收）
   - `cwd_allow`：可選的工作資料夾（精確比對，不做前綴）；`max_per_hour`：每小時上限（預設 6，最多 20）
   - 改檔不用重啟橋：每次用到時看修改時間重讀；格式錯在 bridge.log 記一行原因。
@@ -262,21 +262,16 @@ node D:/Github/irori/relay/machine/recv.mjs --once     # 拉一次、印出、ac
 
 契約測試：`test/engine-contract.test.mjs` 用假引擎跑 bridge 主流程（名單上報、轉交＋回覆寄回、onFail、找不到視窗、介面檢查、身分判定登記）。新轉接器至少要能通過同形狀的測試。
 
-### Codex 轉接器要先調查的問題（尚未實作）
+### Codex 轉接器（原型，`engines/codex.mjs`）
 
-1. **名單**：codex CLI 有沒有可列出的長駐 session？（類似 `claude agents --json`；沒有的話，是否由橋自己登記「橋開的 codex 工作」當名單？狀態 busy／idle 怎麼判斷？）
-2. **把訊息送進一個開著的互動 session**：有沒有程式化入口（socket、named pipe、app-server／proto 模式、`codex resume <id>` 接續對話、stdin 注入）？沒有的話只能每封信 `codex exec` 開一次（再看 `codex exec resume` 能否接續同一段對話，讓「回覆」有上下文）。
-3. **收回覆**：`codex exec` 的輸出格式（`--json` 事件流、最後訊息檔 `--output-last-message`）能否穩定取得最終回覆；內文裡的假標記怎麼擋（沿用 nonce 概念，或直接以行程結果為準而不靠區塊標記）。
-4. **MCP**：codex 是否支援 MCP（設定檔位置、能否掛一個「寄信／收信」的 MCP，讓 codex 視窗像 Claude 視窗那樣自己用 send／recv，免去父行程鏈判定）？
-5. **身分判定**：codex 視窗呼叫 `send.mjs` 時，父行程鏈與環境變數裡有沒有可對應到視窗名／session id 的線索？（對應 Claude 的 `~/.claude/sessions` 與 messaging socket；沒有就要由橋在開 codex 時注入環境變數當憑據。）
-6. **開新視窗**：Windows 上怎麼開一個有自己主控台的 codex 互動視窗（`Start-Process`？Windows Terminal？）；`launcher.json` profile 要怎麼表示引擎；工作資料夾的信任／核准提示會不會卡住（對應 Claude 的「是否信任此資料夾」）。
-7. **沙盒與核准**：預設的 sandbox／approval 模式；橋代轉的信件是外部輸入，要用唯讀或需核准，不可全開；`--dangerously-bypass-approvals-and-sandbox` 之類的旗標一律不用。
-8. **Windows 行為**：codex CLI 在 Windows 原生是否可用（或只能在 WSL）；行程樹、編碼（UTF-8／BOM）、路徑；`windowsHide` 下是否能跑；信號與結束碼。
-9. **登入與額度**：用使用者自己的 ChatGPT／OpenAI 登入；偵測「沒裝／沒登入／額度用完」並在名單上標示（能力宣告或狀態），不要讓信件無聲失敗。
-10. **穩定性**：CLI 版本變動的風險；用哪些公開旗標、輸出格式是否有版本保證；要不要在轉接器內做版本偵測並在不相容時停用。
-11. **回覆時機**：一次性任務跑很久時 `busy` 怎麼表示、逾時與「遲到回覆」要不要沿用橋現有的狀態機（預期沿用，不改橋）。
+`IRORI_ENGINES=claude,codex` 載入。用使用者自己電腦上的 Codex CLI 與自己的 ChatGPT 登入額度；對使用者**開著的互動視窗**（TUI／桌面版）做「名單＋轉交＋回覆」。調查（原 11 題的實測答案）、限制、費用、安全與上線步驟全在 `docs/CODEX-ENGINE.md`。重點：
 
-調查結果寫回 `docs/MULTI-USER.md` 第 14 節後再實作 `engines/codex.mjs`。
+- 名單：`session_index.jsonl`（有名字的 thread）∩ `thread-writer-locks/`（正被某行程開著；Windows 以 FileShare.None 試開判斷）；忙碌＝最後一個 turn 沒結束。`codex agents` 只有 TUI、其 daemon 在 npm 安裝上起不來，所以不用。
+- 轉交：`codex queue --thread <id> --message=<信>`（寫進 Codex 佇列，持有該 thread 的視窗閒下來就處理）；回覆：reader app-server 唯讀輪詢 `thread/turns/list`，取含本信編號的 turn 的最終回答。reader 絕不 `thread/resume`。
+- 開視窗：先建有名字、有種子內容的 thread（不花額度）再 `codex resume <id>`；profile 寫 `"engine": "codex"`。會被「更新提示」與「信任資料夾」卡住，見文件第 3 節第 6 題。
+- 身分：環境變數 `CODEX_THREAD_ID` 對 `session_index.jsonl`。沙盒預設無網路，視窗內主動寄信要走 MCP（第二期）。
+- 安全：預設不轉進「完全存取」視窗；不用 `--dangerously-bypass-approvals-and-sandbox`；子行程清掉 `OPENAI_API_KEY` 等。
+- 檢查工具：`node tools-codex-probe.mjs status|send|open`。測試：`test/codex-engine.test.mjs`（假 codex `test/fake-codex.mjs`；含讓 bridge.mjs 載入 codex 轉接器的整合測試）。
 
 ## 測試
 

@@ -297,15 +297,22 @@ function pruneReplied(now) {
 // ---- 遠端開視窗（launcher.mjs；指令只來自本機 ~/.irori-relay/launcher.json）--------------------------
 // 視窗出現後：馬上刷新名單（手機看得到、也才轉交得到），有第一句話就當成 owner 的來信經收發室送進去（id＝launch id）
 engines = await loadEngines({ log, workDir: WORK_DIR, mailboxName: MAILBOX_NAME })
-// 開視窗：用第一個宣告 openWindow 的轉接器；都沒有就不提供遠端開視窗（名單回報 launcher: null）
-const openEngine = engines.find(e => e.capabilities().openWindow && e.openWindow)
-const launcher = !openEngine ? { summary: () => null, pull: async () => {}, current: () => null } : createLauncher({
+// 開視窗：launcher.json 的 profile 可寫 "engine": "codex" 指定用哪個轉接器開；沒寫就用第一個宣告 openWindow 的轉接器。
+// 都沒有就不提供遠端開視窗（名單回報 launcher: null）
+const openEngines = engines.filter(e => e.capabilities().openWindow && e.openWindow)
+const openEngineFor = id => (id ? openEngines.find(e => e.id === id) : openEngines[0])
+const launcher = !openEngines.length ? { summary: () => null, pull: async () => {}, current: () => null } : createLauncher({
   api, log, workDir: WORK_DIR, configPath: process.env.IRORI_LAUNCHER_FILE || path.join(HOME_DIR, 'launcher.json'),
   listNames: async () => {
     const sets = await Promise.all(engines.map(e => e.listNames()))
     return sets.some(x => x) ? new Set(sets.flatMap(x => (x ? [...x] : []))) : null
   },
-  start: openEngine.openWindow, envFilter: openEngine.childEnv,
+  start: s => {
+    const e = openEngineFor(s.engine)
+    if (!e) throw new Error(`沒有載入「${s.engine}」轉接器（IRORI_ENGINES）`)
+    return e.openWindow(s)
+  },
+  envFilter: (env, engineId) => (openEngineFor(engineId) ?? openEngines[0]).childEnv(env),
   onLaunched: async l => {
     await refreshRoster()
     if (l.first_message) await handleMail({ id: l.id, from_node: l.requested_by, from_agent: null, to_agent: l.name, trust: 'owner', body: l.first_message })

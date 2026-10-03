@@ -29,7 +29,8 @@ export function loadConfig(file) {
     // {name} 以外的 {…} 一律不准（避免以為可以替換 cwd 之類的東西）
     if ([p.command, ...p.args].some(a => /\{(?!name\})[^}]*\}/.test(a))) return { config: null, error: `profile ${id} 只能用 {name} 這個替換欄位` }
     if (/\{name\}/.test(p.command)) return { config: null, error: `profile ${id} 的 command 不能含 {name}` }
-    profiles[id] = { label: typeof p.label === 'string' ? p.label.slice(0, 60) : id, command: p.command, args: p.args }
+    if (p.engine != null && (typeof p.engine !== 'string' || !/^[a-z0-9_-]{1,20}$/.test(p.engine))) return { config: null, error: `profile ${id} 的 engine 要是轉接器代號（例如 claude、codex）` }
+    profiles[id] = { label: typeof p.label === 'string' ? p.label.slice(0, 60) : id, command: p.command, args: p.args, engine: p.engine ?? '' }
   }
   if (!Object.keys(profiles).length) return { config: null, error: 'launcher.json 沒有任何 profile' }
   const cwdAllow = Array.isArray(j.cwd_allow) ? j.cwd_allow.filter(c => typeof c === 'string' && c.trim()).map(c => c.trim()) : []
@@ -82,8 +83,9 @@ const expandVars = (s, env) => s.replace(/%([A-Za-z0-9_]+)%/g, (m, k) => {
 
 export function buildSpawn(config, req, env = process.env, envFilter = childEnv) {
   const p = config.profiles[req.profile]
-  const cenv = envFilter(env)
-  return { command: expandVars(p.command, cenv), args: p.args.map(a => a.split('{name}').join(req.name)), cwd: req.cwd, env: cenv }
+  const cenv = envFilter(env, p.engine)
+  // name／engine：轉接器的 openWindow 需要知道視窗名（Codex 要先替這個名字建好 thread）、橋依 engine 選轉接器；startWindow 本身不看它們
+  return { command: expandVars(p.command, cenv), args: p.args.map(a => a.split('{name}').join(req.name)), cwd: req.cwd, env: cenv, name: req.name, engine: p.engine }
 }
 
 // Windows 參數引號規則（CommandLineToArgvW）：Start-Process 的 -ArgumentList 收一整串命令列，每個參數自己加引號
