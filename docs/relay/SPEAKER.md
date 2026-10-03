@@ -45,13 +45,29 @@
 3. 所有裝置（含 leader 自己）都從 `/updates` 收到同一則 say：speaker 唸出聲（可能是手機 App），其他 3D 頁靜音播放。leader 自己也走這條路，所以不需要另外做「別重播給自己」的去重，也不會有「leader 以為自己是 speaker 但後端不這麼認為」的競態。
 4. 代價：主動說話要等整段回覆完成才開口（不再邊串流邊唸），延遲多一個輪詢喚醒（後端推完會敲門鈴，通常 1 秒內）。
 
+## 3D 頁自己的對話鏡像（origin '3d'）
+
+3D 頁送 `/chat`（`from_3d`、帶 `client_id`、沒有 `speak_elsewhere`）回答完成後，後端把「她這輪說的話＋動作」另推一則 say 進 updates_log（不寫 history，`p_turns` 為 null）：
+
+```json
+{"type":"say","text":"…","origin":"3d","from_client":"<送話那台 client_id>","speaker_client":"<同上>","actions":[…]}
+```
+
+- 沒帶 `client_id` 的舊前端不推（分不出誰是送話那台）。主動說話（`speak_elsewhere`）仍走 `origin:'chat'`，不受影響。
+- `speaker_client` 直接設成送話那台（不重新查活著的 speaker），所以舊版 App 泡泡（`speaker_client` 不是自己就不唸）也不會唸。
+- 送話那台：`inbox.js` 的 `handle` 對 `origin:'3d'` 且 `from_client` 是自己的整則丟掉（已唸過、做過，也不進手機聊天串）。
+- 其他 3D 頁：`sayPlan` 對 `origin:'3d'` 一律靜音播放（字幕、文字標籤、`actions`），開機補拉到超過 3 分鐘的舊話不處理。
+- Android 泡泡：`sayTextOf` 對 `origin:'3d'` 回 null，不唸。
+- 手機聊天串（`replies.js`）：`origin:'3d'` 不收。
+- RTDB 內容通道：照一般事件加密寫入；超過 4 KB（約 1300 個中文字以上）標 big，裝置改打 `/updates` 補；序號去重與其他事件相同。
+
 ## 多裝置行為總表
 
 出聲＝只有 speaker 那台；字幕／動作＝其他 3D 頁是否也顯示、也做。「已修」是本次（靜音播放＋主動說話走 speaker）改的。
 
 | 路徑 | 誰產生 | 經後端？ | 哪台出聲 | 哪台顯示字幕 | 哪台做動作 | 狀態 |
 |---|---|---|---|---|---|---|
-| 在 3D 頁按住說話 → 她回答 | 該 3D 頁 `/chat`（帶 client_id，成為 speaker） | 是，串流只回該頁 | 該頁 | **只有該頁**；後端不推話給別台 | 該頁全做；別台只靠 state 同步到 body／衣服／場景，motion 與手勢不會重演 | 缺口：別台 3D 頁看不到她回答了什麼 |
+| 在 3D 頁按住說話 → 她回答 | 該 3D 頁 `/chat`（帶 client_id，成為 speaker）；回答完成後後端另推一則鏡像 say（`origin:'3d'`） | 是，串流回該頁，鏡像推給其他裝置 | 該頁（鏡像一律不出聲） | 該頁＋所有**其他** 3D 頁（靜音播放）；送話那台忽略鏡像（`from_client` 是自己） | 該頁全做；其他 3D 頁照 `actions` 做 body／motion，文字標籤的表情手勢也做；App 泡泡與手機聊天串略過 | 已修（需部署後端與網頁；舊版 App 靠 speaker_client＝送話那台而不唸，新版 sayTextOf 直接略過） |
 | 從 /chat 獨立頁打字 | /chat 頁 `speak_elsewhere` → 後端推 say（origin chat） | 是 | speaker（最近互動的 3D／App） | /chat 頁自己＋所有 3D 頁（其他台靜音播放） | 所有 3D 頁照 `actions` 做 | 已修（以前非 speaker 的 3D 頁連字幕與標籤都沒有） |
 | App 泡泡說話（3D 房間顯示中） | App `/chat`＋`speak_elsewhere` | 是 | speaker（3D 房間顯示時 App 不搶 speaker） | App 泡泡＋所有 3D 頁 | 所有 3D 頁 | 已修（同上） |
 | App 泡泡說話（3D 房間沒顯示） | App `/chat`（App 成為 speaker），App 自己唸 | 是，只動作推回 | App | App 泡泡；**3D 頁沒有字幕** | 3D 頁照 `actions` 做 body／motion | 缺口：話不推給 3D 頁（要推需 App 也帶 speak_elsewhere，但那樣 App 自己就不唸；要改需協議，見下） |
@@ -66,7 +82,7 @@
 
 ### 仍有的缺口（這次沒修）
 
-1. 在 3D 頁自己說話得到的回答，別台 3D 頁看不到字幕、不做手勢／motion。修法：3D 頁送話也帶 `speak_elsewhere` 並讓自己丟棄推回的那一句（需去重，例如 say 帶 `origin_client`），或讓後端對 `from_3d` 也推「僅字幕＋動作」版。
+1. （已修）在 3D 頁自己說話得到的回答，別台 3D 頁現在有字幕、動作，見上一節「3D 頁自己的對話鏡像」。
 2. App 在 3D 房間沒顯示時自己唸，3D 頁沒有字幕；需要 App 與後端協議新增「只顯示、不出聲」的推送。
 3. 閒晃動作只有 leader 做；別台不重演。要重演需後端推一則動作 say（無話、帶 actions）。
 4. 開機打招呼、新版本通知是各台本機行為，跨裝置不去重。
