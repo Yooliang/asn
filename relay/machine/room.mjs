@@ -62,7 +62,7 @@ function writeSeen(node, seen) {
 }
 
 const oneLine = (s, n) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n) + '…' : t }
-const fromText = m => m.from === '~owner' ? '小良哥' : (m.from_name || String(m.from ?? '').replace(/~/g, '/'))
+const fromText = m => m.from_name || (m.from === '~owner' ? '主人' : String(m.from ?? '').replace(/~/g, '/'))
 export function formatMessage(m) {
   const at = m.at ? new Date(m.at).toLocaleString('zh-TW', { hour12: false, timeZone: 'Asia/Taipei' }) : ''
   const body = String(m.body ?? '').replace(/\r\n/g, '\n').split('\n').join('\n    ')

@@ -697,6 +697,10 @@ begin
      or p_machine is null or char_length(p_machine) not between 1 and 40 then
     return jsonb_build_object('error', 'bad_request');
   end if;
+  -- 「t<數字>-」開頭的代號是留給其他租戶的（沒有前綴限制的邀請，也就是租戶 1 的，不能佔用）
+  if p_id ~ '^t[0-9]+-' and v_inv.prefix is null then
+    return jsonb_build_object('error', 'id_taken');
+  end if;
   select tenant_id, true into v_old, v_has_old from relay.nodes where id = p_id;
   if coalesce(v_has_old, false) and (
        exists (select 1 from relay.nodes where id = p_id and status = 'active')

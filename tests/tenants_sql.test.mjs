@@ -273,6 +273,9 @@ test('租戶隔離：名單、邀請、重設碼、改資料都只在自己的�
   // 租戶 1 離開過的代號 W 因前綴規則 C 本來就註冊不了；即使直接測 T1 邀請+C 無關：T1 邀請可以重用自己離開的 W
   const reuse = await call(db, 'irori_relay_register', 'ip3', 'inv-t1', 'W', '工作機', 'claude', '工作機', null, 'kh-w2', 'bell-w2');
   assert.equal(reuse.id, 'W');
+  // 租戶 1 的（不限前綴的）邀請不能佔用 t<數字>- 開頭的代號（那是留給其他租戶的）
+  await call(db, 'irori_relay_invite', 'XISU', 'inv-t1-squat', null);
+  assert.equal((await call(db, 'irori_relay_register', 'ip3b', 'inv-t1-squat', 't9-evil', 'x', 'claude', '電腦', null, 'kh-sq', 'bell-sq')).error, 'id_taken');
   // 重設碼兌換：碼的租戶要與節點相同
   await call(db, 'irori_relay_reissue', 'XISU', 'reis-1', 'H');
   assert.deepEqual(await call(db, 'irori_relay_redeem_reissue', 'ip4', 'reis-1', 'H', 'newkey', 'newbell'), { id: 'H', bell_topic: 'newbell' });

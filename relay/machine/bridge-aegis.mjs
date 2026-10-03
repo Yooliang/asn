@@ -154,7 +154,7 @@ async function handleMail(m) {
   return replyAndAck(m, `[Aegis] 對方回報狀態 ${status ?? `HTTP ${r.http}`}${answer ? `：${answer}` : ''}`, from)
 }
 
-// ---- 群組（被點名／小良哥發問才問；白名單外略過）--------------------------------------------------
+// ---- 群組（被點名／主人發問才問；白名單外略過）--------------------------------------------------
 const rooms = createRooms({ api, workDir: WORK_DIR, log })
 async function handleRoomMsg(room, member, msg) {
   await membersLoaded
