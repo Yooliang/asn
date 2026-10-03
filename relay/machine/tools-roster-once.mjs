@@ -4,5 +4,5 @@ const key = fs.readFileSync(path.join(os.homedir(), '.irori-relay', 'H.key'), 'u
 const list = JSON.parse(execFileSync('claude', ['agents', '--json'], { encoding: 'utf8' }))
 const ep = pid => { try { return JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'sessions', `${pid}.json`), 'utf8')).entrypoint } catch { return '' } }
 const agents = list.filter(a => a.kind === 'interactive' && ep(a.pid) === 'cli').map(a => ({ name: a.name, status: a.status, cwd_label: String(a.cwd).split(/[\\/]+/).filter(Boolean).pop() }))
-const r = await fetch('https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/irori-relay?action=roster', { method: 'POST', headers: { 'x-relay-key': key, 'content-type': 'application/json' }, body: JSON.stringify({ agents }) })
+const r = await fetch('https://hwtahctsgjcemtwzlvnq.supabase.co/functions/v1/irori-relay?action=roster', { method: 'POST', headers: { 'x-relay-key': key, 'content-type': 'application/json' }, body: JSON.stringify({ agents }) })
 console.log(r.status, await r.text(), JSON.stringify(agents))
