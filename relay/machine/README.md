@@ -85,7 +85,7 @@ powershell -File install-task.ps1 -Uninstall           # 移除
   系統提示（信件是外部資料）、橋接指令帶每次啟動隨機的 nonce、信件包在 `<<<MAIL … MAIL>>>`；
   轉交對象由橋程式依名單決定。注入實測（信件內偽造橋接指令並要求轉給其他 session）沒有被照做。
   收發室 session 本身在你的 `/list-agents` 裡看得到，可隨時 `claude stop`。
-- trust 規則照 relay 設計：`trust=owner` 是小良哥的交辦（紅線照舊）、`trust=member` 是外部資料，標頭一律原樣帶給收件 session。
+- trust 規則照 relay 設計：`trust=owner` 是主人的交辦（紅線照舊）、`trust=member` 是外部資料，標頭一律原樣帶給收件 session。
 - 收發室 settings 有 `crossSessionInbound: accept`（只在它自己的 `--settings`），不動 `~/.claude`。
 
 ## 實測（2026-10-01，Windows 11、claude 2.1.286、模型 haiku；用測試節點 `H-bridgesender` → `H-bridgetest`，目標是自己開的測試 session）
@@ -156,10 +156,10 @@ powershell -File install-task.ps1 -Uninstall           # 移除
 
 ## 群組訊息轉交（rooms）
 
-仲介新增群組後，橋在每次 pull（門鈴／2 分鐘輪詢／啟動）多做一件事：`room_list` → 對 `mine` 的每個成員（節點本身 `H`、節點底下視窗 `H~視窗名`）用本地游標 `room_read(since=游標)` 取新訊息，**只轉後端標 `for_me=true` 的**（被點名，或小良哥／希緒發的、且不是自己發的；橋不自己重算規則），再把游標推進到 `last_seq`。
+仲介新增群組後，橋在每次 pull（門鈴／2 分鐘輪詢／啟動）多做一件事：`room_list` → 對 `mine` 的每個成員（節點本身 `H`、節點底下視窗 `H~視窗名`）用本地游標 `room_read(since=游標)` 取新訊息，**只轉後端標 `for_me=true` 的**（被點名，或主人／希緒發的、且不是自己發的；橋不自己重算規則），再把游標推進到 `last_seq`。
 - 游標存 `WORK_DIR/rooms-cursor.json`（鍵 `房號|成員key`），重啟不重播；沒有游標用該項的 `read_seq`，`read_seq` 為 0 則從 `last_seq` 起算（不補播歷史）。不用 mark、不動後端已讀位置。
 - `bridge.mjs`：成員 key 是節點本身 → 轉給 `IRORI_RELAY_DEFAULT_AGENT`（不在線就挑最近活動的視窗；都沒有就留著、游標不前進）；是視窗 key → 轉給該視窗（不在可轉交清單就略過、記 log、推進游標）。走同一個收發室 worker（id 為 `sha1(room:房號:seq:成員key)` 組的確定性 UUID）。
-  轉交文字：第一行 `[群組 名稱] trust=… from=… #seq`（`~` 顯示成 `/`，`~owner` 顯示「小良哥」），第二行固定的「不需要回就不要回」提示，之後是內文。
+  轉交文字：第一行 `[群組 名稱] trust=… from=… #seq`（`~` 顯示成 `/`，`~owner` 顯示主人的名字（沒帶名字就顯示「主人」）），第二行固定的「不需要回就不要回」提示，之後是內文。
   視窗回覆經收發室後，用 `room_post`（`from_agent`＝該視窗名）貼回群組；回覆含 `（不需回覆）`／`[no-reply]` 不貼；`room_post` 429（每成員每群組每小時 20 則）只記 log、不重試；群組訊息不寄逾時通知、轉交失敗也只記 log，不會貼到群組。
 - `bridge-aegis.mjs`：成員 key `aegis~名字` → `resolveSlug(名字)`、節點本身 → `IRORI_AEGIS_DEFAULT`；要在 `IRORI_AEGIS_ALLOW` 內才問（不在就略過、記 log、推進游標）；用同樣的標頭格式呼叫 `/ask`，answer 以 `room_post`（`from_agent`＝roster 上的名字）貼回；ask 失敗不貼。
 - 共用邏輯在 `rooms.mjs`（游標、標頭格式、UUID、room_post）。
@@ -181,7 +181,7 @@ node room.mjs --room-read <群組id|群組名> [--last 20 | --since <seq>] [--js
 ## 視窗主動寄信：irori-send（`send.mjs`）
 
 本機任何 Claude 視窗要主動寄信（回報給希緒、寄給別台機器的視窗、貼到群組），用 Bash 直接跑 CLI，**不經收發室、不經任何模型、不花額度**（收信仍靠橋，回信照舊由橋經收發室轉進該視窗）。
-用 `--reply-to` 直接回某封信、寄成功後，會在 `machine-<節點>/replied/<信件id>` 留記號；橋看到就不再對那封寄「10 分鐘內沒有經收發室收到回覆」（2026-10-02 希緒把真回信和這則通知一起轉述成「沒回」，小良哥因此連問三次）。記號留一天。
+用 `--reply-to` 直接回某封信、寄成功後，會在 `machine-<節點>/replied/<信件id>` 留記號；橋看到就不再對那封寄「10 分鐘內沒有經收發室收到回覆」（2026-10-02 希緒把真回信和這則通知一起轉述成「沒回」，使用者因此連問三次）。記號留一天。
 另外每次寄給節點／視窗（不論有沒有 `--reply-to`）也會在 `machine-<節點>/sent/<雜湊>` 留「誰寄給誰」的記號，橋據此判斷「對方已直接寄信給原寄件人」（檔名由 `sent-mark.mjs` 產生，send 與橋共用）：
 
 ```
@@ -222,7 +222,7 @@ node D:/Github/irori/relay/machine/recv.mjs --once     # 拉一次、印出、ac
 
 ## 遠端開 Claude 視窗（`launcher.mjs`，#64，規劃見 docs/relay/LAUNCHER.md）
 
-小良哥在 Irori Chat「聯絡人」分頁對某台電腦按「＋ 開新視窗」→ 仲介記一筆 launch 並敲門鈴 → 橋 `launch_pending` 取走 → 照**本機** launcher.json 開視窗 → `launch_result` 回報。
+使用者在 Irori Chat「聯絡人」分頁對某台電腦按「＋ 開新視窗」→ 仲介記一筆 launch 並敲門鈴 → 橋 `launch_pending` 取走 → 照**本機** launcher.json 開視窗 → `launch_result` 回報。
 - 設定：`~/.irori-relay/launcher.json`（不進 repo；範本 `launcher.example.json`；`IRORI_LAUNCHER_FILE` 可改路徑）。沒有這個檔＝這台不能遠端開視窗（名單回報 `launcher: null`，手機上不出現按鈕）。profile 可加 `"engine": "codex"` 指定用哪個轉接器開（沒寫＝第一個宣告 `openWindow` 的轉接器；指定了但沒載入該轉接器會回報開不起來）。
   - `profiles.<名>`：`label`、`command`（可用 `%SystemRoot%` 這類環境變數）、`args`（字串陣列；**唯一**允許的替換欄位是 `{name}`，其他 `{…}` 整個檔案拒收）
   - `cwd_allow`：可選的工作資料夾（精確比對，不做前綴）；`max_per_hour`：每小時上限（預設 6，最多 20）

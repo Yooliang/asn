@@ -18,7 +18,7 @@ export type LaunchDeps = {
 export type Reply = { status: number; body: Json };
 
 const ERROR_TEXT: Record<string, string> = {
-  forbidden: "只有小良哥能開新視窗",
+  forbidden: "只有使用者本人能開新視窗",
   not_found: "找不到這台電腦（或這筆紀錄）",
   no_launcher: "這台電腦還沒設定 launcher.json（或機器橋沒在跑）",
   bad_name: "視窗名只能用英數、連字號、中文，1～40 字，不能以連字號開頭",

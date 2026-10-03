@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-export const ROOM_HINT = '（群組訊息；只有被點名或小良哥／希緒發問才需要回，回覆會經收發室貼回群組；不需要回就不要回）'
+export const ROOM_HINT = '（群組訊息；只有被點名或主人／希緒發問才需要回，回覆會經收發室貼回群組；不需要回就不要回）'
 export const NO_REPLY_RE = /（不需回覆）|\[no-reply\]/i
 
 // 成員 key：節點本身 `H`、視窗 `H~H-主線-3`。回 {window}：視窗名；節點本身 window=''
@@ -15,7 +15,7 @@ export function parseMember(key) {
   return i < 0 ? { node: String(key), window: '' } : { node: key.slice(0, i), window: key.slice(i + 1) }
 }
 export function displayFrom(from) {
-  if (from === '~owner') return '小良哥'
+  if (from === '~owner') return '主人'
   return String(from ?? '').replace(/~/g, '/')
 }
 export function roomHeader(room, msg) {
@@ -27,7 +27,7 @@ export const roomText = (room, msg) => `${roomHeader(room, msg)}\n${ROOM_HINT}\n
 export const CONTEXT_COUNT = 5
 const ROOM_CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), 'room.mjs')
 export function contextText(room, prev) {
-  const line = m => `#${m.seq} ${m.from === '~owner' ? '小良哥' : (m.from_name || displayFrom(m.from))}：${String(m.body ?? '').replace(/\s+/g, ' ').trim().slice(0, 300)}`
+  const line = m => `#${m.seq} ${m.from_name || displayFrom(m.from)}：${String(m.body ?? '').replace(/\s+/g, ' ').trim().slice(0, 300)}`
   const head = prev.length ? `---- 前面 ${prev.length} 則（舊→新）----\n${prev.map(line).join('\n')}\n` : ''
   return `${head}（要看更多：node "${ROOM_CLI}" --room-read ${room.id} --last 20）`
 }

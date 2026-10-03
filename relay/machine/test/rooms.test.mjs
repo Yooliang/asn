@@ -124,12 +124,12 @@ test('bridge 群組：只轉 for_me；點名轉給對的視窗；owner 發的轉
     assert.equal(rec.find(r => key(r) === 'T-視窗甲#4').id, roomUuid('R1', 4, 'T~T-視窗甲'))
     // 標頭、提示、內文
     const j3 = rec.find(r => key(r) === 'T-視窗甲#3').text
-    assert.match(j3, /\n\[群組 專案群\] trust=member from=W\/W-政策 #3\n（群組訊息；只有被點名或小良哥／希緒發問才需要回，回覆會經收發室貼回群組；不需要回就不要回）\n群組內文-3\n---- 前面 1 則（舊→新）----\n#2 政策：群組內文-2\n（要看更多：node "[^"]+room\.mjs" --room-read R1 --last 20）\nMAIL>>>$/)
+    assert.match(j3, /\n\[群組 專案群\] trust=member from=W\/W-政策 #3\n（群組訊息；只有被點名或主人／希緒發問才需要回，回覆會經收發室貼回群組；不需要回就不要回）\n群組內文-3\n---- 前面 1 則（舊→新）----\n#2 政策：群組內文-2\n（要看更多：node "[^"]+room\.mjs" --room-read R1 --last 20）\nMAIL>>>$/)
     // #4 的上下文是 #2、#3（舊→新），不含自己
     assert.match(d4.text, /---- 前面 2 則（舊→新）----\n#2 政策：群組內文-2\n#3 政策：群組內文-3\n（要看更多/)
     // 所有 room_read 都帶 since、不帶 mark（不動後端已讀）
     assert.ok(st.reads.length > 0 && st.reads.every(r => r.hasSince && r.mark === null))
-    assert.match(d4.text, /\[群組 專案群\] trust=owner from=小良哥 #4\n/)
+    assert.match(d4.text, /\[群組 專案群\] trust=owner from=主人 #4\n/)
     // room_read：視窗帶 as_agent、節點本身不帶；since 從 read_seq 起算
     assert.ok(st.reads.some(r => r.as_agent === 'T-視窗甲' && r.since === 1))
     assert.ok(st.reads.some(r => r.as_agent === null && r.since === 1))
@@ -186,7 +186,7 @@ test('bridge 群組：回覆含（不需回覆）不貼回；room_post 429 只�
 })
 
 test('aegis 群組：白名單外（含節點本身→預設成員不在白名單）不問；白名單內問並以名字 room_post；ask 失敗不貼；游標推進', async () => {
-  const hdr = '[群組 專案群] trust=owner from=小良哥 #2\n（群組訊息；只有被點名或小良哥／希緒發問才需要回，回覆會經收發室貼回群組；不需要回就不要回）\n群組內文-2'
+  const hdr = '[群組 專案群] trust=owner from=主人 #2\n（群組訊息；只有被點名或主人／希緒發問才需要回，回覆會經收發室貼回群組；不需要回就不要回）\n群組內文-2'
   const st = await fakeServer({
     members: [{ slug: 'alpha', name: '阿爾法' }, { slug: 'bad', name: '壞人' }],
     aegis: {
