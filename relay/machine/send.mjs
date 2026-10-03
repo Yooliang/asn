@@ -11,6 +11,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { sentMarkName } from './sent-mark.mjs'
 import { BASE_URL, Fail, HOME_DIR, findCaller, inspectCaller, machineNode, readMachineKey, readSession, sessionsDir } from './identity.mjs'
 
 export { findCaller, inspectCaller }
@@ -79,6 +80,12 @@ function markReplied(node, mailId) {
   try { fs.mkdirSync(repliedDir(node), { recursive: true }); fs.writeFileSync(path.join(repliedDir(node), mailId), String(Date.now())) } catch {}
 }
 
+// 每次寄給某節點／視窗也留記號（誰、什麼時候、寄給誰）：橋計時到時，若收件視窗在轉交後曾寄信給原寄件人，就不再寄「沒有回覆」
+export const sentDir = node => path.join(HOME_DIR, `machine-${node}`, 'sent')
+function markSent(node, from, toNode, toAgent) {
+  try { fs.mkdirSync(sentDir(node), { recursive: true }); fs.writeFileSync(path.join(sentDir(node), sentMarkName(from, toNode, toAgent)), String(Date.now())) } catch {}
+}
+
 async function call(key, action, body) {
   const res = await fetch(`${BASE_URL}?action=${action}`, {
     method: 'POST', headers: { 'x-relay-key': key, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(20_000),
@@ -118,6 +125,7 @@ export async function main(argv) {
   } else {
     const r = await call(key, 'send', { to_node: toNode, to_agent: toAgent || undefined, body, reply_to: a.replyTo || undefined, from_agent: caller.name })
     if (a.replyTo) markReplied(node, a.replyTo)
+    markSent(node, caller.name, toNode, toAgent)
     console.log(`sent id=${r?.id} to=${a.to} from=${node}/${caller.name}`)
   }
   return 0

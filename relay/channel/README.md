@@ -30,11 +30,11 @@ npm install
 |---|---|
 | `IRORI_RELAY_KEY` | 節點金鑰明文；或用下一項 |
 | `IRORI_RELAY_ID` | 節點代號（如 `H`、`W`）；金鑰讀 `~/.irori-relay/<ID>.key` |
-| `IRORI_RELAY_URL` | 預設 `https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/irori-relay` |
+| `IRORI_RELAY_URL` | 預設 `https://hwtahctsgjcemtwzlvnq.supabase.co/functions/v1/irori-relay` |
 | `IRORI_RELAY_ANON_KEY` | 訂 Realtime 用的 anon 公開金鑰。不給＝沒有門鈴，只剩每 2 分鐘輪詢 |
 | `IRORI_RELAY_LOG` | 選填，額外把 log 寫進這個檔（預設只寫 stderr） |
 
-anon 金鑰取得（不要寫進程式或 repo）：`npx supabase projects api-keys --project-ref wiiqoaytpqvegtknlbue -o json`，取 `id` 為 `anon` 那筆。
+anon 金鑰取得（不要寫進程式或 repo）：`npx supabase projects api-keys --project-ref hwtahctsgjcemtwzlvnq -o json`，取 `id` 為 `anon` 那筆。
 
 ## 工頭的 .mcp.json
 

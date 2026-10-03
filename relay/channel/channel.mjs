@@ -7,7 +7,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-const BASE_URL = (process.env.IRORI_RELAY_URL || 'https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/irori-relay').replace(/\/+$/, '')
+const BASE_URL = (process.env.IRORI_RELAY_URL || 'https://hwtahctsgjcemtwzlvnq.supabase.co/functions/v1/irori-relay').replace(/\/+$/, '')
 const ANON_KEY = process.env.IRORI_RELAY_ANON_KEY || ''
 const POLL_MS = 120_000
 const HEARTBEAT_MS = 25_000

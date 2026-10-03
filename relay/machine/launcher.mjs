@@ -80,9 +80,9 @@ const expandVars = (s, env) => s.replace(/%([A-Za-z0-9_]+)%/g, (m, k) => {
   return hit ? env[hit] : m
 })
 
-export function buildSpawn(config, req, env = process.env) {
+export function buildSpawn(config, req, env = process.env, envFilter = childEnv) {
   const p = config.profiles[req.profile]
-  const cenv = childEnv(env)
+  const cenv = envFilter(env)
   return { command: expandVars(p.command, cenv), args: p.args.map(a => a.split('{name}').join(req.name)), cwd: req.cwd, env: cenv }
 }
 
@@ -119,7 +119,7 @@ export function startWindow({ command, args, cwd, env }) {
 
 // deps：api(action, opts)、log(msg)、workDir、configPath、listNames() → Promise<Set|null>（本機目前的 session 名）、
 //       onLaunched(launch) 視窗出現後呼叫（橋拿來刷新名單、送第一句話）、start（開視窗，測試可換掉）
-export function createLauncher({ api, log, workDir, configPath, listNames, onLaunched = async () => {}, start = startWindow,
+export function createLauncher({ api, log, workDir, configPath, listNames, onLaunched = async () => {}, start = startWindow, envFilter = childEnv,
   confirmMs = 30_000, lateMs = 180_000, pollMs = 2_000 }) {
   const historyFile = path.join(workDir, 'launch-history.json')
   const logFile = path.join(workDir, 'launch.log')
@@ -160,7 +160,7 @@ export function createLauncher({ api, log, workDir, configPath, listNames, onLau
     const why = check(config, l, { names, recent })
     if (why) return report(l, 'failed', why)
     writeHistory([...recent, Date.now()])
-    const s = buildSpawn(config, l)
+    const s = buildSpawn(config, l, process.env, envFilter)
     let started
     try { started = await start(s) } catch (e) { return report(l, 'failed', `開不起來：${e.message}`) }
     record(l, 'spawned', `pid=${started.pid}`)

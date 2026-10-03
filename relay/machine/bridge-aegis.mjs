@@ -8,7 +8,7 @@ import { createCore } from './relay-core.mjs'
 import { createRooms, parseMember, roomText } from './rooms.mjs'
 
 const NODE_ID = (process.env.IRORI_RELAY_ID || 'AEGIS').trim()
-const BASE_URL = process.env.IRORI_RELAY_URL || 'https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/irori-relay'
+const BASE_URL = process.env.IRORI_RELAY_URL || 'https://hwtahctsgjcemtwzlvnq.supabase.co/functions/v1/irori-relay'
 const HOME_DIR = path.join(os.homedir(), '.irori-relay')
 const WORK_DIR = path.join(HOME_DIR, `aegis-${NODE_ID}`)
 const AEGIS_URL = (process.env.IRORI_AEGIS_URL || 'http://127.0.0.1:8899').replace(/\/+$/, '')

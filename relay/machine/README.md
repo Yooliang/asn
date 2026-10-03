@@ -24,9 +24,21 @@ relay send(reply_to) <──── bridge.mjs <──stdout── 收發室 <─
    - 收發室回報 `SENT <id>` 才 ack；失敗（`FAIL`）、找不到 session、轉交逾時（2 分鐘），都寄一封說明給原寄件人再 ack。
    - 對方回覆（收發室收到的 `<cross-session-message>` 那一輪）→ `relay send` 帶 `reply_to` 寄回原寄件人，`from_agent` 填對方 session 名。
      之後同一 session 的追加回覆（10 分鐘內）也一併轉寄。
-   - 逾時（預設 10 分鐘）沒有經收發室收到回覆 → 寄「［收發室］10 分鐘內沒有經收發室收到 X 的回覆（對方若已另外回信可忽略）」。
+   - 逾時（預設 10 分鐘）沒有經收發室收到回覆 → 先判斷要不要寄「［收發室］10 分鐘內沒有經收發室收到 X 的回覆（對方若已另外回信可忽略）」：
+     - 已經用 `send.mjs --reply-to` 回了（`replied/<id>` 記號）→ 不寄。
+     - 收件視窗在轉交之後曾用 `send.mjs` 寄過信給原寄件人（`sent/` 記號，不論有沒有帶 `--reply-to`；寄給同一視窗，或只寄給該節點都算）→ 視為已回覆，不寄。
+       取捨：只要寄過信給同一個人就算，不比對內容，所以對方寄的若是別件事，會少報一次「沒回」；寧可漏報也不誤報（誤報會被希緒轉述成「他沒回」）。記號只比「轉交之後」的，舊的不算。
+     - 收件視窗**正在忙**（`claude agents --json` 的 `status` 符合 `IRORI_BUSY_STATUS_RE`，預設 `busy|working|running`）→ **延後**不寄（log `no-reply notice deferred`）；
+       它變閒（idle 等）之後再過 `IRORI_BUSY_GRACE_MS`（預設 2 分鐘）仍沒回、也沒有上述記號才寄；從轉交起算滿 `IRORI_BUSY_MAX_MS`（預設 60 分鐘）無論如何寄一次。
+     - 收件視窗已不在名單（關掉了）→ 直接寄，文字改成「對方視窗「X」已關閉，沒有經收發室收到回覆」。
+     - 每封寄出的通知都記 log：`no-reply notice sent id=… (寄件人|收件視窗) reason=timeout|window-closed|busy-idle-grace|busy-max`；被合併掉的記 `suppressed`。
      同一寄件人＋同一收件視窗 30 分鐘內只報一次（`IRORI_NOREPLY_WINDOW_MS` 可調），被合併的下次報時帶「另有 N 封也還沒回」。
+   - **遲到的回覆不會被丟掉**：通知寄出（或被合併）後，這封信的對應仍保留 `IRORI_LATE_KEEP_MS`（預設 24 小時），最多 `IRORI_LATE_MAX`（預設 200）筆（超過清最舊）；
+     期間對方經收發室回覆，照常寄回原寄件人，內文前加一行「（遲到的回覆：X 在收發室寄出「沒有回覆」通知之後才回）」，寄回後清掉。同一視窗有還在等的信時，回覆先對給還在等的，沒有才對給保留中的（先進先出）。
+   - **對應表跨重啟（`WORK_DIR/pending.json`）**：還在等回覆、已通知「沒回」的信（含群組訊息）的對應，每次變動就原子寫入（先寫暫存檔再 rename），只存信件 id、寄件節點／視窗、收件視窗、時間、狀態、群組資訊，**不存信件內文**。橋啟動時載回並清掉超過 `IRORI_LATE_KEEP_MS` 的；檔案損毀就忽略（log 記 `pending.json unreadable, ignored`）並重新開始。所以更新程式、改設定而重啟橋，長任務視窗之後才到的回覆仍會寄回。
+   - **對不上的回覆轉給最近交辦者**：收發室另記每個視窗「最近一次交辦它的寄件人」（`lastRequester`，同存於 pending.json，保留同樣的期限；「不需回覆」信與收發室系統信不算）。視窗的回覆找不到對應的信時（例如長任務每小時回一則進度），若 24 小時內有這位寄件人，就寄給他（`reply_to` 用那封最近的信 id，內文前加「（收發室：這則回覆對不上特定來信，依最近一次交辦轉給你）」，log 記 `-> last requester`）；沒有才丟棄，log 寫 `dropped: no pending mail and no requester…`。
    - **告知類的信在內文加「（不需回覆）」或「[no-reply]」**：照常轉交、成功即 ack，但不計時、不寄逾時通知（收發室之後也不再轉寄對方的回覆）。
+   - **寄件人是收發室**（`from_agent` 以「收發室」結尾，即任何節點的 `<節點>-收發室`）的系統信：比照告知類，照常轉交、不計時、不寄逾時通知；轉交失敗／找不到視窗的說明也不回給收發室（只記 log），避免兩台收發室互相丟信。
    - 沒有 `to_agent` → 交給 `IRORI_RELAY_DEFAULT_AGENT`（預設 `H-工頭-2`）；它不在線就改交給**最近有活動**的互動式 session
      （依 `~/.claude/sessions/<pid>.json` 的 `updatedAt`，排除收發室），內文前加一行「原本要給 <預設> 但它不在線，請你代收並轉告／處理」；都沒有人在線才**不 ack、留在 inbox**。
    - 不在名單的 `to_agent` → 寄回「找不到這個 session（目前可達：…）」。
@@ -46,6 +58,9 @@ relay send(reply_to) <──── bridge.mjs <──stdout── 收發室 <─
 | `IRORI_MAILBOX_NAME` / `IRORI_MAILBOX_MODEL` | 收發室名稱／模型 |
 | `IRORI_REPLY_TIMEOUT_MS` | 等回覆逾時（預設 600000） |
 | `IRORI_NOREPLY_WINDOW_MS` | 逾時通知合併視窗（預設 1800000）；`IRORI_BRIDGE_TICK_MS` 逾時檢查間隔（預設 5000，測試用） |
+| `IRORI_LATE_KEEP_MS` / `IRORI_LATE_MAX` | 寄過逾時通知後，保留信件對應以便寄回遲到回覆的時間（預設 86400000＝24 小時）／最多筆數（預設 200） |
+| `IRORI_BUSY_STATUS_RE` | 視為「忙碌」的 session status 正規式（預設 `^(busy\|working\|running)$`，不分大小寫）。**實機 `claude agents --json` 的 status 值請對照後調整** |
+| `IRORI_BUSY_GRACE_MS` / `IRORI_BUSY_MAX_MS` | 對方忙碌時延後通知：閒下來後的寬限（預設 120000）／從轉交起算的總上限（預設 3600000） |
 | `CLAUDE_BIN` | claude 執行檔（預設 `claude`） |
 
 Log：`~/.irori-relay/machine-<ID>/bridge.log`（每個轉交、每一輪收發室的耗時與費用都有一行）。
@@ -166,7 +181,8 @@ node room.mjs --room-read <群組id|群組名> [--last 20 | --since <seq>] [--js
 ## 視窗主動寄信：irori-send（`send.mjs`）
 
 本機任何 Claude 視窗要主動寄信（回報給希緒、寄給別台機器的視窗、貼到群組），用 Bash 直接跑 CLI，**不經收發室、不經任何模型、不花額度**（收信仍靠橋，回信照舊由橋經收發室轉進該視窗）。
-用 `--reply-to` 直接回某封信、寄成功後，會在 `machine-<節點>/replied/<信件id>` 留記號；橋看到就不再對那封寄「10 分鐘內沒有經收發室收到回覆」（2026-10-02 希緒把真回信和這則通知一起轉述成「沒回」，小良哥因此連問三次）。記號留一天：
+用 `--reply-to` 直接回某封信、寄成功後，會在 `machine-<節點>/replied/<信件id>` 留記號；橋看到就不再對那封寄「10 分鐘內沒有經收發室收到回覆」（2026-10-02 希緒把真回信和這則通知一起轉述成「沒回」，小良哥因此連問三次）。記號留一天。
+另外每次寄給節點／視窗（不論有沒有 `--reply-to`）也會在 `machine-<節點>/sent/<雜湊>` 留「誰寄給誰」的記號，橋據此判斷「對方已直接寄信給原寄件人」（檔名由 `sent-mark.mjs` 產生，send 與橋共用）：
 
 ```
 node D:/Github/irori/relay/machine/send.mjs --to XISU --body "內文" [--reply-to <信件id>]
@@ -219,11 +235,55 @@ node D:/Github/irori/relay/machine/recv.mjs --once     # 拉一次、印出、ac
 - 紀錄：每一步一行 JSON 在 `machine-<ID>/launch.log`（誰、何時、profile、視窗名、cwd、結果），bridge.log 也有一行；仲介的 `relay.launches` 另有一份給手機看。
 - 仲介端：2 分鐘沒被取走的 launch 標失敗（電腦開機後不會突然補開一堆視窗）。
 
+## 轉接器介面（engines/，docs/MULTI-USER.md 第 14 節第一步）
+
+`bridge.mjs` 不再直接碰 Claude Code，只依「轉接器」運作。Claude Code 是第一個轉接器（`engines/claude.mjs`，行為與重構前完全相同）；之後的 Codex 等照同一個介面加。`IRORI_ENGINES`（逗號分隔，預設 `claude`）決定橋載入哪些轉接器；內建名稱以外的值當成模組檔路徑（測試用假引擎 `test/fake-engine.mjs` 就是這樣載入）。
+
+轉接器模組輸出 `createEngine({ log, workDir, mailboxName, env })`，回傳：
+
+| 成員 | 作用 | Claude 轉接器 |
+|---|---|---|
+| `id` | 引擎代號，名單與信件標頭的 `engine` 欄位 | `'claude'` |
+| `capabilities()` | 能力宣告：`listWindows`、`deliver`、`openWindow`、`selfRecv`（視窗能自己收信，橋看到心跳就不轉）、`identity`（send／recv 認得出呼叫者）、`fallbackByActivity` | 全部 true |
+| `start(handlers)` / `stop()` | 啟動／結束引擎的常駐部分；`handlers = { onSent(id), onFail(id, reason), onReply(fromWindow, text) }` | 啟動／結束收發室 worker（`claude -p`），自動重啟 |
+| `listWindows()` | 回傳 `null`（讀取失敗，橋沿用舊名單）或 `{ all, windows }`。`windows`＝可轉交的視窗，每筆 `{ name, status('busy'/'idle'…), cwd_label, engine, pid? }`；`all`＝引擎看得到的所有 session（含非互動式，給 `IRORI_RELAY_ALLOW` 用） | `claude agents --json` 過濾互動式、`entrypoint=cli`、排除收發室自己 |
+| `listNames()` | 回傳所有 session 名的 `Set`（或 `null`），launcher 用來確認新視窗出現、擋同名 | 同上 |
+| `activityOf(window)` | 最近活動時間（ms），預設收件視窗不在線時挑最近活動的 | `~/.claude/sessions/<pid>.json` 的 `updatedAt` |
+| `deliver({ id, to, text })` | 轉交一封信（`text` 是含標頭的全文，一字不改交給視窗）。同步 throw＝引擎沒起來，橋把信留在 inbox 不 ack。結果非同步經 `handlers.onSent(id)`（交出去了）或 `onFail(id, reason)`（SENT／FAIL）回來；視窗的回覆經 `handlers.onReply(window, text)` 回來（Claude：帶 nonce 的 `<<REPLY-…>>` 區塊） | `BRIDGE-FORWARD nonce=… ` 給收發室 worker |
+| `openWindow(spec)`、`childEnv(env)` | 開新視窗（launcher 組好 `{command,args,cwd,env}` 後呼叫）與子行程環境清理；`capabilities().openWindow` 為 true 才需要 | `Start-Process`（`launcher.mjs` 的 `startWindow`）；清掉 `CLAUDE*` 環境變數 |
+| `identity` | 身分判定區塊 `{ engine, inspectCaller() }`，登記在 `engines/identity-providers.mjs`；`inspectCaller` 回傳 `{ viaChain, viaEnv, … }`，命中是 `{ pid, name }`。`identity.mjs` 的 `findCaller()` 依序問每個引擎，回傳 `{ pid, name, engine }` | 父行程鏈＋`CLAUDE_CODE_MESSAGING_SOCKET` 對 `~/.claude/sessions` |
+
+橋這邊保留的（與引擎無關）：relay API、ack／去重、`pending` 狀態機（轉交逾時、回覆逾時、忙碌延後、遲到回覆）、群組（rooms）、launcher.json 白名單與每小時上限、`replied/`／`sent/` 記號、單一執行個體鎖。
+
+引擎欄位：
+- roster 上報每個視窗多帶 `engine`。仲介 `action=roster` 只取 `name`／`status`／`cwd_label`，多餘欄位直接忽略，舊仲介不會 400；要讓手機顯示圖示，之後仲介（SQL 與 `index.ts` 的 map）再加欄位。
+- 信件標頭尾端加 ` engine=<id>`（`[RELAY 來信] trust=… from=… to=… id=… engine=claude`）。
+- 同名視窗出現在不同引擎時，名單順序在前的引擎優先（先到先得；之後要同時跑多引擎時再決定要不要改成 `引擎/名字`）。
+
+契約測試：`test/engine-contract.test.mjs` 用假引擎跑 bridge 主流程（名單上報、轉交＋回覆寄回、onFail、找不到視窗、介面檢查、身分判定登記）。新轉接器至少要能通過同形狀的測試。
+
+### Codex 轉接器要先調查的問題（尚未實作）
+
+1. **名單**：codex CLI 有沒有可列出的長駐 session？（類似 `claude agents --json`；沒有的話，是否由橋自己登記「橋開的 codex 工作」當名單？狀態 busy／idle 怎麼判斷？）
+2. **把訊息送進一個開著的互動 session**：有沒有程式化入口（socket、named pipe、app-server／proto 模式、`codex resume <id>` 接續對話、stdin 注入）？沒有的話只能每封信 `codex exec` 開一次（再看 `codex exec resume` 能否接續同一段對話，讓「回覆」有上下文）。
+3. **收回覆**：`codex exec` 的輸出格式（`--json` 事件流、最後訊息檔 `--output-last-message`）能否穩定取得最終回覆；內文裡的假標記怎麼擋（沿用 nonce 概念，或直接以行程結果為準而不靠區塊標記）。
+4. **MCP**：codex 是否支援 MCP（設定檔位置、能否掛一個「寄信／收信」的 MCP，讓 codex 視窗像 Claude 視窗那樣自己用 send／recv，免去父行程鏈判定）？
+5. **身分判定**：codex 視窗呼叫 `send.mjs` 時，父行程鏈與環境變數裡有沒有可對應到視窗名／session id 的線索？（對應 Claude 的 `~/.claude/sessions` 與 messaging socket；沒有就要由橋在開 codex 時注入環境變數當憑據。）
+6. **開新視窗**：Windows 上怎麼開一個有自己主控台的 codex 互動視窗（`Start-Process`？Windows Terminal？）；`launcher.json` profile 要怎麼表示引擎；工作資料夾的信任／核准提示會不會卡住（對應 Claude 的「是否信任此資料夾」）。
+7. **沙盒與核准**：預設的 sandbox／approval 模式；橋代轉的信件是外部輸入，要用唯讀或需核准，不可全開；`--dangerously-bypass-approvals-and-sandbox` 之類的旗標一律不用。
+8. **Windows 行為**：codex CLI 在 Windows 原生是否可用（或只能在 WSL）；行程樹、編碼（UTF-8／BOM）、路徑；`windowsHide` 下是否能跑；信號與結束碼。
+9. **登入與額度**：用使用者自己的 ChatGPT／OpenAI 登入；偵測「沒裝／沒登入／額度用完」並在名單上標示（能力宣告或狀態），不要讓信件無聲失敗。
+10. **穩定性**：CLI 版本變動的風險；用哪些公開旗標、輸出格式是否有版本保證；要不要在轉接器內做版本偵測並在不相容時停用。
+11. **回覆時機**：一次性任務跑很久時 `busy` 怎麼表示、逾時與「遲到回覆」要不要沿用橋現有的狀態機（預期沿用，不改橋）。
+
+調查結果寫回 `docs/MULTI-USER.md` 第 14 節後再實作 `engines/codex.mjs`。
+
 ## 測試
 
 `node --test relay/machine/test/*.test.mjs`（Node 25 的目錄寫法 `relay/machine/test/` 會失敗，用 glob）：本機假伺服器（node 內建 http）模擬仲介與 Aegis，不碰真實金鑰與網路服務。
 涵蓋群組轉交（`rooms.test.mjs`）、白名單、成功帶 `reply_to`、error 重試一次、404、其他 status、無 `to_agent`、預設收件人不在線的退路、roster 403 只記一次。
 視窗自己收信（`recv.test.mjs`）：只印／只 ack 自己的信、舊仲介相容、心跳寫入與更新、重複 `--watch` 被擋、`selfRecvAlive` 判定、橋「有心跳不轉／過期照轉」。
+轉接器介面契約（`engine-contract.test.mjs`，假引擎 `fake-engine.mjs` 跑 bridge 主流程）：名單帶 engine、轉交＋回覆、onFail、找不到視窗、介面檢查、身分判定登記。
 遠端開視窗（`launcher.test.mjs`）：設定檔檢查、執行前再驗、環境清理、成功／失敗／卡信任確認後補成功／每小時上限；端到端真的經 Start-Process 開 `test/fake-launched.mjs`（隱藏視窗，`IRORI_LAUNCH_WINDOW_STYLE=Hidden`）。
 
 ## 聯絡人分組（設備名）
