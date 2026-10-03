@@ -1,0 +1,55 @@
+{
+  "_說明": "複製成 ~/.irori-relay/agents.json（不進 repo）。IRORI_ENGINES=claude,acp 才會載入；每個工作者是橋長駐啟動的背景 AI，名單上以 name 出現。步驟與風險見 docs/AGENT-ENGINES.md「第一期上線步驟」。",
+  "workers": [
+    {
+      "name": "Gemini",
+      "engine": "acp",
+      "roster_engine": "gemini",
+      "protocol": "agy-stream",
+      "command": "agy",
+      "args": [],
+      "cwd": "C:\\Users\\你\\.irori-relay\\workers\\Gemini",
+      "label": "工作者",
+      "model": "",
+      "permissions": {
+        "read": "allow",
+        "write": "deny",
+        "execute": "deny",
+        "network": "allow",
+        "other": "deny",
+        "allow_dirs": ["C:\\Users\\你\\.irori-relay\\workers\\Gemini"]
+      },
+      "ask": { "notify": ["sender"], "timeout_ms": 300000 },
+      "turn_timeout_ms": 300000,
+      "turn_max_ms": 1800000,
+      "queue_max": 10,
+      "env_pass": []
+    },
+    {
+      "_說明": "備援：同一支 agy 改走標準 ACP（社群 google-antigravity-acp，npm i 後釘版本；它不會送權限請求，政策等同 agy 本身；重啟後無法接續對話）。要用就把 enabled 拿掉並關掉上面那個。",
+      "enabled": false,
+      "name": "Gemini-ACP",
+      "engine": "acp",
+      "roster_engine": "gemini",
+      "protocol": "acp",
+      "command": "node",
+      "args": ["C:\\path\\to\\node_modules\\google-antigravity-acp\\dist\\cli.js", "--binary-path", "C:\\Users\\你\\AppData\\Local\\agy\\bin\\agy.exe", "--no-skip-permissions"],
+      "cwd": "C:\\Users\\你\\.irori-relay\\workers\\Gemini-ACP",
+      "label": "工作者",
+      "permissions": { "write": "deny", "execute": "deny" }
+    },
+    {
+      "_說明": "真正會送權限請求的 ACP agent（例如官方 Grok Build：grok agent stdio，未實測）才能用 ask：請求寄給希緒，由她問你。",
+      "enabled": false,
+      "name": "Grok",
+      "engine": "acp",
+      "roster_engine": "grok",
+      "protocol": "acp",
+      "command": "grok",
+      "args": ["agent", "stdio"],
+      "cwd": "C:\\Users\\你\\.irori-relay\\workers\\Grok",
+      "permissions": { "write": "ask", "execute": "ask", "network": "allow" },
+      "ask": { "notify": [{ "node": "XISU" }], "timeout_ms": 300000 }
+    }
+  ]
+}

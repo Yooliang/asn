@@ -77,6 +77,8 @@ let roster = []      // 給人用的視窗（可轉交名單）；每筆帶 engi
 const engineById = id => engines.find(e => e.id === id)
 const windowOf = name => roster.find(a => a.name === name) ?? agents.find(a => a.name === name)
 const engineOfWindow = name => engineById(windowOf(name)?.engine) ?? engines[0]
+// 名單上顯示的引擎名：轉接器可用 engine_label 另外標示（例如 acp 轉接器的 Gemini 工作者回報 gemini）；路由仍依 engine（轉接器代號）
+const engineLabelOf = w => w?.engine_label ?? w?.engine
 const activityOf = w => (engineById(w.engine) ?? engines[0]).activityOf(w)
 const perEngine = new Map()   // engine id -> { all, windows }（最近一次成功的結果）
 let rosterWarned = false
@@ -95,7 +97,7 @@ async function refreshRoster() {
   if (firstRoster) void pullRoomsGuarded()
   try {
     // engine 欄位：仲介的 roster 端點只取 name／status／cwd_label（多餘欄位直接忽略，不會 400），舊仲介安全
-    await api('roster', { method: 'POST', body: { agents: roster.map(a => ({ name: a.name, status: a.status, cwd_label: a.cwd_label, engine: a.engine })), launcher: launcher.summary() } })
+    await api('roster', { method: 'POST', body: { agents: roster.map(a => ({ name: a.name, status: a.status, cwd_label: a.cwd_label, engine: engineLabelOf(a) })), launcher: launcher.summary() } })
     rosterWarned = false
   } catch (e) {
     if (!rosterWarned) { log(`roster post failed: ${e.message} (will keep trying quietly)`); rosterWarned = true }
@@ -182,11 +184,13 @@ async function forwardUnmatched(from, text) {
   const ok = await sendBack({ mail: { id: lr.mail_id, from_node: lr.from_node, from_agent: lr.from_agent } }, `（收發室：這則回覆對不上特定來信，依最近一次交辦轉給你）\n${text}`, from)
   log(`unmatched reply from ${from} (${text.length} chars) -> last requester ${lr.from_node}/${lr.from_agent} reply_to=${lr.mail_id} sent=${ok}`)
 }
-async function onReply(from, text) {
+// mailId（選用）：轉接器知道這則回覆是回哪一封時帶上（acp 工作者同時有好幾封在排隊，不能靠先進先出猜）
+async function onReply(from, text, mailId) {
   const cands = [...pending.values()].filter(p => p.target === from && p.state !== 'forwarding')
   // 還在等的優先；沒有才輪到已通知過「沒回」、仍保留中的信（遲到的回覆，先進先出）
   const active = cands.filter(c => c.state !== 'notified')
-  const p = active.find(c => !c.replied) || active[active.length - 1] || cands.find(c => c.state === 'notified')
+  const byId = mailId ? cands.find(c => c.mail.id === mailId) : null
+  const p = byId || active.find(c => !c.replied) || active[active.length - 1] || cands.find(c => c.state === 'notified')
   if (!p) { await forwardUnmatched(from, text); return }
   const late = p.state === 'notified'
   p.replied = true
@@ -296,7 +300,8 @@ function pruneReplied(now) {
 // ---- inbox -------------------------------------------------------------------------------------
 // ---- 遠端開視窗（launcher.mjs；指令只來自本機 ~/.irori-relay/launcher.json）--------------------------
 // 視窗出現後：馬上刷新名單（手機看得到、也才轉交得到），有第一句話就當成 owner 的來信經收發室送進去（id＝launch id）
-engines = await loadEngines({ log, workDir: WORK_DIR, mailboxName: MAILBOX_NAME })
+// send：轉接器要主動寄信時用（acp 工作者的授權詢問、登入通知）；from_agent 預設是收發室名稱
+engines = await loadEngines({ log, workDir: WORK_DIR, mailboxName: MAILBOX_NAME, send: m => api('send', { method: 'POST', body: { to_node: m.to_node, to_agent: m.to_agent || undefined, body: m.body, reply_to: m.reply_to || undefined, from_agent: m.from_agent || MAILBOX_NAME } }) })
 // 開視窗：launcher.json 的 profile 可寫 "engine": "codex" 指定用哪個轉接器開；沒寫就用第一個宣告 openWindow 的轉接器。
 // 都沒有就不提供遠端開視窗（名單回報 launcher: null）
 const openEngines = engines.filter(e => e.capabilities().openWindow && e.openWindow)
@@ -353,7 +358,7 @@ async function handleMail(m) {
   if (!p.noReply) { lastRequester[target] = { from_node: m.from_node, from_agent: m.from_agent ?? '', mail_id: m.id, t: Date.now() }; persist() }
   try {
     const eng = engineOfWindow(target)
-    eng.deliver({ id: m.id, to: target, text: `${head(m, eng.id)}\n${note ? note + '\n' : ''}${m.body}` })
+    eng.deliver({ id: m.id, to: target, text: `${head(m, engineLabelOf(windowOf(target)) ?? eng.id)}\n${note ? note + '\n' : ''}${m.body}` })
     log(`handed id=${m.id} from=${m.from_node}/${m.from_agent ?? ''} to=${target}`)
   } catch (e) {
     pending.delete(m.id); log(`cannot hand id=${m.id}: ${e.message} (left in inbox)`)

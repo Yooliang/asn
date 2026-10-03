@@ -285,6 +285,28 @@ test('租戶隔離：名單、邀請、重設碼、改資料都只在自己的�
   assert.deepEqual((await call(db, 'irori_relay_register', 'ip5', 'inv-c-2', 'H', 'x', 'claude', '電腦', null, 'k', 'b')).error, 'bad_id_prefix');
 });
 
+test('名單的引擎欄位（19_roster_engine）：帶 engine 就存並回傳；沒帶或格式不對＝null，不因此整份名單被拒；仍只在自己的租戶', { skip }, async () => {
+  const db = await ctx();
+  await db.exec(sqlFile('19_roster_engine.sql'));
+  await db.exec(sqlFile('19_roster_engine.sql'));   // 可重複執行
+  const rep = await call(db, 'irori_relay_roster', 'H', JSON.stringify([
+    { name: 'Gemini', status: 'login-required', cwd_label: '工作者', engine: 'gemini' },
+    { name: 'H-Irori-2', status: 'idle' },
+    { name: 'Bad', status: 'idle', engine: 'Gemini; drop table x' },
+  ]));
+  assert.deepEqual(rep, { count: 3 });
+  const h = (await call(db, 'irori_relay_list', T1)).find((n) => n.id === 'H');
+  const by = Object.fromEntries(h.agents.map((a) => [a.name, a]));
+  assert.deepEqual(by.Gemini, { name: 'Gemini', status: 'login-required', cwd_label: '工作者', engine: 'gemini' });
+  assert.equal(by['H-Irori-2'].engine, null);
+  assert.equal(by.Bad.engine, null);
+  // 別的租戶的名單看不到這些視窗
+  const tB = (await one(db, 'select id from relay.tenants where serial = 2')).id;
+  assert.equal((await call(db, 'irori_relay_list', tB)).some((n) => (n.agents ?? []).some((a) => a.name === 'Gemini')), false);
+  // 還原成沒有 engine 的名單（讓後面的測試維持原狀）
+  await call(db, 'irori_relay_roster', 'H', JSON.stringify([{ name: 'H-Irori-2', status: 'idle', cwd_label: 'irori' }]));
+});
+
 test('租戶隔離：群組——別租戶看不到、讀不到、發不了言、加不了人、改不了置頂；自動收入也不跨', { skip }, async () => {
   const db = await ctx();
   // T1 有群組 rold（seedLegacy）。B 建自己的群組

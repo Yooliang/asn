@@ -2,6 +2,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { handleNodeRoomAction, type RoomDeps, syncNodeAuto } from "../_shared/rooms.ts";
 import { handleAgentInbox } from "../_shared/agent_inbox.ts";
+import { normalizeRosterAgents } from "../_shared/roster.ts";
 import * as signal from "../_shared/signal.ts";
 import { handleNodeLaunchAction, LAUNCH_ACTIONS, sanitizeLauncher } from "../_shared/launch.ts";
 
@@ -110,9 +111,7 @@ Deno.serve(async (req) => {
   if (action === "roster" && req.method === "POST") {
     const b = await req.json().catch(() => null);
     if (!b || !Array.isArray(b.agents)) return json(400, { error: "bad_request" });
-    const agents = b.agents.map((a: Record<string, unknown>) => ({
-      name: a?.name, status: a?.status ?? null, cwd_label: a?.cwd_label ?? null,
-    }));
+    const agents = normalizeRosterAgents(b.agents); // name／status／cwd_label／engine（舊版機器橋沒帶 engine ＝ null）
     const { data, error } = await db.rpc("irori_relay_roster", { p_node: me.id, p_agents: agents });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     if (data?.error === "forbidden") return json(403, { error: "forbidden" });

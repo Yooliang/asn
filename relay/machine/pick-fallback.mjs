@@ -3,7 +3,7 @@
 export function pickFallbackAgent(roster, activityOf = () => 0) {
   let best = null, bestT = -1
   for (const a of roster) {
-    if (!a?.name) continue
+    if (!a?.name || a.noFallback) continue   // noFallback：背景工作者（acp）不代收沒指定收件人的信
     const t = Math.max(Number(activityOf(a)) || 0, Number(a.startedAt) || 0)
     if (t > bestT) { best = a; bestT = t }
   }

@@ -223,7 +223,7 @@ MCP 管的是「agent 呼叫外部工具」，不是「外部把訊息送給 age
 
 | 期 | 內容 | 前提／驗收 |
 |---|---|---|
-| **一** | `engines/acp.mjs` 通用轉接器＋ agy 工作者（先用社群 `google-antigravity-acp`，或自己寫 35 行直連 agy stream-json 以免依賴第三方套件，兩者都已實測）；權限一律拒絕；每信一個 `session/new`（無狀態）或每寄件人一個 session（有記憶，需設計回收）；契約測試 | `IRORI_ENGINES=claude,acp` 時，Irori 手機對 `Gemini-工作者` 送一句、收到回覆；不影響 Claude |
+| **一（已實作，第 9 節）** | `engines/acp.mjs` 通用轉接器＋ agy 工作者（主線＝直連 agy 原生 stream-json，備援＝標準 ACP 驅動；選擇理由見 9.1）；權限一律拒絕；每信一個 `session/new`（無狀態）或每寄件人一個 session（有記憶，需設計回收）；契約測試 | `IRORI_ENGINES=claude,acp` 時，Irori 手機對 `Gemini-工作者` 送一句、收到回覆；不影響 Claude |
 | **二** | ① pi：`irori-inbox` 擴充（已開視窗）＋ `pi --mode rpc` 工作者；② Grok：裝官方 Grok Build（先處理 `grok` 名稱衝突）、登入、實測 `grok agent stdio`，Windows 若不穩就退到 `grok -p --resume`；③ `irori-mail` MCP 伺服器讓各引擎自己回信 | 每個都先跑 `tools-acp-probe.mjs`／RPC probe 再寫轉接器 |
 | **三** | 評估 Orca 當「已開視窗」通用入口（`orca terminal send`，限 Orca 內嵌終端機）；Claude Channels 轉正式後評估是否取代收發室 worker | Orca 是否支援使用者手動開的終端機待查；Channels 仍是研究預覽 |
 
@@ -247,7 +247,123 @@ MCP 管的是「agent 呼叫外部工具」，不是「外部把訊息送給 age
 
 ---
 
-## 9. 來源
+## 9. 第一期實作：Gemini 工作者上線（2026-10-04）
+
+程式：`relay/machine/engines/acp.mjs`（轉接器）＋ `acp-config.mjs`（設定）、`acp-worker.mjs`（佇列／健康狀態／問人）、`acp-policy.mjs`（權限政策）、`acp-approvals.mjs`（授權簿）、`acp-driver-agy.mjs`、`acp-driver-acp.mjs`（兩種驅動）、`acp-errors.mjs`。範本 `relay/machine/agents.example.json`。測試 `relay/machine/test/acp-*.test.mjs`＋假 agent（`fake-agy.mjs`、`fake-acp-worker.mjs`）。
+
+### 9.1 選哪一條路：agy 原生 stream-json（主），標準 ACP（備援）
+
+兩條都實測成功（真的 agy 1.2.16，Windows）。選 **agy 原生**為主，理由：
+
+1. **社群 `google-antigravity-acp` 只是 agy 原生的薄包裝**：我讀了它的原始碼（`agy-session.js`），它做的事就是 `spawn agy --input-format=stream-json …`，再把事件翻成 ACP。所以能力沒有比較多：它**從不送 `session/request_permission`**（只有一個「要不要加 `--dangerously-skip-permissions`」的開關），宣告 `loadSession:false`（重啟後接不回對話），多一層第三方程式碼（供應鏈）與多一層行程。
+2. **原生可以 resume**：`--conversation <id>` 實測接得回上文（問過 note.txt 的內容，重啟後問「剛剛讀的檔案裡 secret-fruit 是什麼」答 KIWI）；ACP 備援重啟後答「沒讀過」。
+3. **原生的結果帶結構化狀態**：`result.status=ERROR`＋`error` 文字（登入、額度、模型錯誤都從這裡判斷）、`denied_actions`、每個工具步驟的事件（寫檔絆線靠它）。
+4. 兩者共用同一個 agy 子行程，登入額度、速度（單輪約 2～5 秒）一樣。
+
+備援（`protocol:"acp"`）仍完整可用：任何標準 ACP agent（社群 agy 包裝、之後的 Grok Build、codex-acp、`gemini --acp`…）設定檔改幾行就接得上，**而且只有這條路有「執行到一半問人」的能力**（見 9.3）。agy 1.2.16 的格式與 1.2.4 不同（`--print` 現在要吃一個提示字串，不能再跟 `--input-format stream-json` 並用；`result` 變成巢狀物件），驅動已照 1.2.16 實測寫。
+
+### 9.2 權限的現實（實測，重要）
+
+預設政策＝**唯讀放行、寫檔／執行拒絕**。但 agy 在無頭模式（stream-json）**自己只擋指令**：
+
+| 動作 | agy 無頭模式的實際行為（這台，使用者設定 `allowNonWorkspaceAccess:true`） | 我們怎麼擋 |
+|---|---|---|
+| 執行指令（`run_command`） | 自動拒絕（步驟 ERROR、結果 `denied_actions`），模型會看到被拒 | 靠 agy 自己；`execute:allow` 才加 `--dangerously-skip-permissions` |
+| 寫檔（`write_to_file`…） | **不問就直接寫，連工作資料夾以外也寫得進去**（`--mode plan` 也擋不住：被明確要求時照寫；`--sandbox` 只限制終端機） | **絆線**：驅動看每個工具步驟事件，違反政策（write 不是 allow、或路徑在白名單資料夾外）就立刻殺掉 agy 並回報。真 agy 實測 3/3 在檔案寫成前殺掉，但這是「事件比寫入早到」的時間差，不是保證 |
+| 讀檔 | 不問；連資料夾外也讀得到（agy 自己也會讀它內建的說明檔） | **擋不了**。唯讀只靠：工作資料夾是空的專用資料夾（預設 `~/.irori-relay/machine-<ID>/workers/<名字>/`）＋說明（第一則訊息附的角色說明）。不要把工作者的資料夾指到專案目錄 |
+| 上網 | 不問 | `network:deny` 時同樣用絆線 |
+
+所以：**agy 的寫檔無法「預防」，只能「偵測並中止」**，這是 agy 目前的限制，不是我們的取捨。要真正預防，只能用會送權限請求的 ACP agent（9.3）。另外模型本身也會遵守第一則訊息附的角色說明（真實測試：要它寫檔，它直接回「做不到，我目前是唯讀狀態」），但那是軟性的，不能當安全邊界。
+
+ACP 路線（標準 ACP agent）的權限是**真的預防**：agent 要做事前先送 `session/request_permission`，轉接器依政策回 `allow_once`／`reject_once`，沒有政策批准就不會執行（前提是 agent 老實送請求）。
+
+### 9.3 政策設定與「問我」模式
+
+`agents.json` 每個工作者的 `permissions`：
+
+```jsonc
+"permissions": {
+  "read": "allow", "write": "deny", "execute": "deny", "network": "allow", "other": "deny",   // 每類 allow / deny / ask
+  "allow_dirs": ["C:\\...\\workers\\Gemini"]   // 白名單資料夾：有路徑的讀／寫請求，路徑在這些資料夾外一律拒絕（預設只有 cwd）
+}
+```
+
+- 類別：`read`（讀、搜尋、思考）、`write`（寫、刪、搬）、`execute`（執行指令）、`network`（抓網頁／搜尋）、`other`（分不出類別）。
+- `ask`＝問人：轉接器把「哪個工作者想做什麼（檔案或指令的摘要，已遮蔽疑似金鑰／token）」寄給 `ask.notify`（預設 `"sender"`＝原寄件人；可寫 `{"node":"XISU"}` 寄給希緒，由她在手機上問你），**回信寫給工作者**：「允許 ABCD」「拒絕 ABCD」「全部允許 ABCD」（全部允許＝這一輪之後的同類請求都放行，下一輪重新問）。只有被問的節點的回覆算數（別人冒名不算，會被當成一般來信送進模型）；沒附編號時只認單純的一個表態（「允許」「拒絕」「好」「ok」），免得「好的，我晚點看」被當成放行。`ask.timeout_ms`（預設 5 分鐘）內沒回就**自動拒絕**並通知被問的人。
+- **agy-stream 的限制**：agy 無頭模式不能在執行中暫停，所以 `write`、`network`、`other` 設 `ask` 會自動降成 `deny`（log 提醒）。`execute:"ask"` 以「事後問」實作：指令被 agy 擋下後，問你要不要放行，同意就用放行模式（`--dangerously-skip-permissions`，只這一輪、resume 同一段對話）請它重做，之後回到一般模式。
+- **標準 ACP 路線**：`write`／`execute`／`network` 都能真的「先問再做」。要用真能問的 agent（例如 Grok Build `grok agent stdio`，**這台沒裝、未實測**；社群 agy 包裝不會送請求，設 ask 也不會被問）。
+- 範本與預設政策：唯讀，`network:allow`（只讀資訊；提示注入若引誘它把資料帶進網址有外洩風險，要全封閉就設 `deny`）。
+
+### 9.4 登入／額度／其他失敗怎麼偵測、怎麼回報（不是 ACP 權限請求的那一類）
+
+| 情況 | 偵測 | 名單狀態 | 回報 |
+|---|---|---|---|
+| 沒登入／登入失效（agy 要 Google 瀏覽器登入；ACP 的 `Authentication required`） | 結果的 `error` 或 stderr／JSON-RPC 錯誤文字符合「not logged in／login／authentication／unauthenticated／401…」；ACP 在啟動握手時就會發現 | `login-required`（手機聯絡人顯示「需要登入」，詳細頁紅字「需要到電腦前登入」） | 寄件人收到「Gemini 需要登入… 請到這台電腦前在終端機執行 agy 完成 Google 瀏覽器登入，好了再寄一次」；`ask.notify` 裡指定的人（非寄件人）另外收到一封，同一狀態一小時最多一次 |
+| 額度用完／被限流 | 文字符合「quota／rate limit／RESOURCE_EXHAUSTED／429／usage limit」（先判額度再判登入） | `quota`（「額度用完」） | 同上，說明「額度用完，請稍後再試」 |
+| 一輪太久沒動靜 | 看門狗：`turn_timeout_ms`（預設 5 分鐘，任何事件／等人授權都會重計）；`turn_max_ms` 總上限 30 分鐘 | 不變 | 殺掉該行程、回報「處理太久沒有動靜，已中止這一輪」；下一封自動重啟並 resume |
+| 行程中途死掉／指令不存在 | 結束碼＋stderr 尾端 | 起不來（找不到指令）→ 從名單消失，每分鐘重試；寄信得到「工作者目前沒有在跑：原因」 | 寄件人收到說明 |
+| 違反政策（絆線） | 見 9.2 | 不變 | 「Gemini 想做不被允許的事：寫入：檔案：X（原因）。已立刻中止這一輪；若是寫檔，檔案可能已經被寫入」 |
+| 佇列太長 | `queue_max`（預設 10，含正在處理的那封） | `busy` | 超過的信立刻回「前面還排著 N 封信，這封先不收」 |
+
+**登入狀態的恢復**：`login-required`／`quota` 不擋信（每封信都還是會試一次），所以你登入完之後寄一封，成功就自動回 `idle`。一律不吞信：成功→回覆；失敗→`[收發室] 轉交給 Gemini 失敗：…`（含 reply_to）。
+
+登入的實際步驟（人工、不能自動化）：在那台電腦開終端機執行 `agy`，照畫面用 Google 帳號完成瀏覽器登入；子行程只讀 agy 自己存在使用者家目錄的憑證檔，橋不碰任何金鑰。
+
+### 9.5 第一期上線步驟（工作機）
+
+> 以下是**使用者**在那台電腦做的事；這次實作沒有重啟任何橋、沒有部署。
+
+1. **先確認 agy 本身能用**：終端機執行 `agy --version`，再 `agy -p "只回 PONG"` 要回 PONG（沒登入就先照 9.4 登入）。
+2. **放設定檔**：複製 `relay/machine/agents.example.json` 到 `%USERPROFILE%\.irori-relay\agents.json`，至少改 `cwd` 與 `allow_dirs`（把 `你` 換成使用者名稱）。`cwd` 請用**專用的空資料夾**（不存在會自動建），不要指到專案。
+3. **載入轉接器**：橋要用 `IRORI_ENGINES=claude,acp` 啟動。用排程／手動啟動的話：`run-bridge.ps1 -NodeId <ID> -Engines claude,acp`（新增的 `-Engines` 參數）；或在使用者環境變數設 `IRORI_ENGINES`。**重啟橋才會生效**（橋有單一執行個體鎖，先正常關掉舊的再開）。
+4. **看 log**：`%USERPROFILE%\.irori-relay\machine-<ID>\bridge.log`，搜尋 `acp:`。啟動時會有 `acp: 工作者 Gemini 啟動（protocol=agy-stream cwd=… 權限 read=allow write=deny …）`；設定有問題會有 `acp: 設定有問題，已跳過：…`／`設定提醒：…`。之後每封信有 `handed id=… to=Gemini`、`[Gemini] …` 行（權限請求、等授權、狀態變化、失敗原因都在這裡）。對話的 session id 存在 `machine-<ID>\acp-workers.json`（刪掉＝下次從新對話開始）。
+5. **確認名單**：幾十秒內，手機 Irori Chat「聯絡人」那台電腦底下出現 `Gemini`（頭像右下有 ✦ 角標；要先部署 9.6 的前後端，沒部署時它會被當成 Claude 視窗顯示，功能照常）。
+6. **試一封**：從手機對 Gemini 傳一句話，或在那台電腦用 `node relay/machine/send.mjs`（見 README）寄一封，等幾秒收到回信。
+7. **關掉**：把 `agents.json` 裡該工作者加 `"enabled": false`，或移除 `IRORI_ENGINES` 裡的 `acp`，然後重啟橋；Claude 的收發室完全不受影響（兩者是獨立的轉接器）。緊急時直接結束橋，工作者子行程會跟著結束。
+
+### 9.6 手機聯絡人顯示（後端 deno、前端 node，已實作、**未部署**）
+
+橋本來就把每個視窗的 `engine` 放進 roster 上報；仲介以前直接忽略。這次補上完整鏈路：
+
+| 層 | 改法 | 檔案 |
+|---|---|---|
+| 資料庫 | `relay.roster` 加 `engine` 欄位；`irori_relay_roster` 收 `engine`（格式 `^[a-z][a-z0-9_-]{0,19}$`，不對就當 null，不拒整份名單）；`irori_relay_list(uuid)` 回傳 `engine`。可重複執行、只加欄位 | `supabase/sql/19_roster_engine.sql` |
+| 仲介函式 | roster 動作多帶 `engine` | `supabase/functions/irori-relay/index.ts`、`_shared/roster.ts` |
+| 後端 API | 視窗聯絡人的 `kind` 依 engine（gemini→gemini、codex→gpt、grok→grok、不認得→other、沒帶→claude）並多一個 `engine` 欄位；給希緒看的聯絡人清單寫成「Gemini 背景工作者」，狀態 `login-required`／`quota` 講明白 | `supabase/functions/irori-api/relay.ts` |
+| 前端 | 非 Claude 視窗的頭像加引擎角標、詳細頁多一行「種類：Gemini 背景工作者（由電腦啟動，不是開著的視窗）」、狀態字（需要登入／額度用完） | `web/js/phone/engine_logic.js`、`app_chat.js`、`web/style.css` |
+
+**部署順序**（這次沒做）：① 跑 `npx supabase db query --linked -f supabase/sql/19_roster_engine.sql` → ② 部署 `irori-relay`、`irori-api` 兩個函式 → ③ 部署前端。SQL 先上線時舊函式照常運作（只是沒有 engine）；前後端對沒有 engine 的資料（舊版機器橋）完全維持原樣。回復：重跑 `04_roster.sql`、`16_tenants.sql` 裡的同名函式（欄位留著無妨）。
+
+另外橋與仲介的對接有兩個小改動（都向下相容）：`onReply(視窗, 內文, 信件id)` 多一個選用的信件編號（工作者同時有好幾封在處理，不能再靠先進先出猜這則回覆是回哪一封；Claude 轉接器不帶，行為不變）；名單上的視窗可標 `noFallback`（背景工作者不代收「沒指定收件人」的信）。
+
+### 9.7 這次的實測（真 agy 1.2.16，`irori-probe` 暫存資料夾，環境白名單、無任何金鑰）
+
+| 項目 | 結果 |
+|---|---|
+| Gemini 工作者上線（agy-stream），名單 `Gemini`／`engine_label gemini` | OK |
+| 送「自我介紹」→ 回「我是由 Irori 收發室啟動的背景工作者「Gemini」，目前以唯讀身分…」 | OK（回覆約 3～5 秒） |
+| 工作資料夾讀 `note.txt` | 回 KIWI |
+| 要它直接寫資料夾外的檔案 | 模型自己回「做不到，我目前是唯讀狀態」；檔案不存在 |
+| 絆線（不附說明、直接要求 `write_to_file`）3 次 | 3/3 在檔案寫成前殺掉 agy，回報違規 |
+| 橋重啟（停掉引擎再起一個）後問「剛剛讀的檔案裡 secret-fruit 是什麼」 | 答 KIWI（resume 成功） |
+| 備援：同一支 agy 走社群 ACP 包裝（標準 ACP 驅動） | 自我介紹、讀檔 OK；重啟後答「沒讀過」（`loadSession:false`，符合預期，log 會寫「先前的對話找不到了」） |
+| 接上真的 `bridge.mjs`（假仲介＋假 agy，`acp-bridge.test.mjs`） | 名單帶 `engine:"gemini"`；回覆帶 `reply_to`、`from_agent:"Gemini"`；沒登入回「轉交給 Gemini 失敗：需要登入」；詢問信／允許信各寄對地方 |
+
+沒實測：**真的登入失效與額度用完的錯誤文字**（不能弄壞使用者的登入）——偵測靠 agy 回報格式（`result.status=ERROR`＋`error`）與關鍵字，遇到沒涵蓋的措辭會被當成一般錯誤（照樣回報給寄件人，只是名單不會標 `login-required`）；**真能送權限請求的 ACP agent**（只用假 ACP agent 驗證流程）；**希緒收到詢問信後在手機上問你、再替你回信**這一段（程式端的詢問、解析、放行、逾時都有測試，但希緒的轉述與回信要上線後觀察）；官方 Grok Build。
+
+### 9.8 風險
+
+1. **agy 寫檔無法預防**（9.2）：只有絆線。所以工作資料夾一定要是專用空資料夾，不要放有價值的檔案；agy 設定 `allowNonWorkspaceAccess` 是使用者全域的，我們不改。
+2. **讀檔無法限制**：工作者可以讀到使用者帳號讀得到的任何檔案，回信內容會寄給寄件人。寄件人是 `trust=member` 以上的節點，信任邊界等同「能對這台電腦的 Claude 視窗發信的人」。提示注入（信件內容叫它去讀機密）靠角色說明與寄件人信任，不是強制。
+3. **`execute:allow` 等於放行一切**（agy 只有一個總開關，同時放行寫檔與上網，只剩絆線檢查寫檔／上網）。非必要不要開；要用就用 `ask`（事後問）。
+4. **每輪成本**：agy 每輪即使很短輸入約 1.2 萬 token（系統提示加工具定義）；對話一直累積，沒有自動換新對話（要重來就刪 `acp-workers.json` 裡該工作者的 session）。
+5. **橋異常結束**：已收下（已 ack）但還沒回覆的信不會重做；寄件人會在 10 分鐘後收到「沒有回覆」通知（橋的既有機制）。
+6. **第三方程式碼**：主線不依賴任何第三方套件；備援用社群包裝時要釘版本（我讀的是 2.0.1，MIT，2 個依賴，無安裝腳本），它會用外層行程的完整環境啟動 agy，所以一定要由我們的白名單環境啟動它（驅動已這樣做）。
+7. **Google 條款**：把官方 `agy` 當本機子行程、沿用其快取登入屬支援用法（見第 3 節）；不抽取憑證。用量與互動使用共用同一份額度。
+8. **授權詢問走一般信件**：被問的節點回信必須寫給工作者本人；`from_agent` 可由對方節點自填，所以 `ask.notify` 寫節點（`{"node":"XISU"}`）比綁定視窗名穩；詢問內容會經仲介傳送（已遮蔽疑似金鑰，但檔名、指令摘要會出現在信裡）。
+9. **同名衝突**：工作者名不可與 Claude 視窗同名（先載入的引擎優先）。
+
+## 10. 來源
 
 **ACP**
 - [ACP 簡介](https://agentclientprotocol.com/overview/introduction)、[文件索引 llms.txt](https://agentclientprotocol.com/llms.txt)、[session setup](https://agentclientprotocol.com/protocol/session-setup)、[session list (v2)](https://agentclientprotocol.com/protocol/v2/session-list.md)、[Streamable HTTP／WebSocket RFD](https://agentclientprotocol.com/rfds/streamable-http-websocket-transport.md)

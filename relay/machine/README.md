@@ -273,6 +273,18 @@ node D:/Github/irori/relay/machine/recv.mjs --once     # 拉一次、印出、ac
 - 安全：預設不轉進「完全存取」視窗；不用 `--dangerously-bypass-approvals-and-sandbox`；子行程清掉 `OPENAI_API_KEY` 等。
 - 檢查工具：`node tools-codex-probe.mjs status|send|open`。測試：`test/codex-engine.test.mjs`（假 codex `test/fake-codex.mjs`；含讓 bridge.mjs 載入 codex 轉接器的整合測試）。
 
+### acp 轉接器：背景工作者（Gemini 等，`engines/acp.mjs`，#134 第一期）
+
+`IRORI_ENGINES=claude,acp` 載入（`run-bridge.ps1 -Engines claude,acp`）。不接「使用者已開的視窗」，而是依 `~/.irori-relay/agents.json`（範本 `agents.example.json`，`IRORI_AGENTS_FILE` 可改路徑）長駐啟動一批**工作者**（背景 AI），名單上以工作者名出現（roster 的 `engine` 欄位＝`roster_engine`，例如 `gemini`）。
+收到信就送一輪、拿回覆寄回（橋負責帶 `reply_to`），同一工作者保持同一段對話（session id 存 `machine-<ID>/acp-workers.json`，重啟 resume）。
+
+- 驅動：`protocol:"agy-stream"`（預設；直接跑 `agy` 的 stream-json）或 `"acp"`（標準 ACP，備援／其他 agent）。選擇理由、實測與風險見 `docs/AGENT-ENGINES.md` 第 9 節。
+- 權限：預設唯讀（read/network 放行，write/execute/other 拒絕）、白名單資料夾；每類可設 `allow`／`deny`／`ask`（問人：詢問信經仲介寄給原寄件人或指定節點，回「允許／拒絕／全部允許 編號」，逾時拒絕）。**agy 無頭模式無法預防寫檔，只能偵測中止（絆線）**，詳見該文件 9.2。
+- 失敗不吞信：沒登入（名單狀態 `login-required`）、額度用完（`quota`）、逾時、崩潰、違規、佇列滿，都以 `[收發室] 轉交給 X 失敗：…` 回給寄件人。
+- 子行程環境是白名單（`cleanEnv`），不帶任何金鑰；`env_pass` 只能列非金鑰名稱的變數。
+- 轉接器介面的擴充（向下相容）：`createEngine` 的 ctx 多一個 `send({to_node,to_agent,body,from_agent})`（轉接器主動寄信用）；名單上的視窗可帶 `engine_label`（roster 與信件標頭顯示的引擎名，路由仍用 `engine`＝轉接器代號）與 `noFallback`（不代收沒指定收件人的信）；`handlers.onReply(視窗, 內文, 信件id?)` 第三個參數選用，轉接器知道回哪一封時帶上。
+- 測試：`test/acp-policy.test.mjs`（設定、政策、授權簿、錯誤分類）、`test/acp-engine.test.mjs`（假 agy `fake-agy.mjs`、假 ACP agent `fake-acp-worker.mjs`，完整流程）、`test/acp-bridge.test.mjs`（接上真的 `bridge.mjs`）。
+
 ### 其他引擎（Gemini、Grok、pi）與 ACP
 
 調研與建議見 `docs/AGENT-ENGINES.md`：ACP／AgentAPI 都接不到使用者已開的視窗（只能控制自己啟動的 agent），所以不整套改 ACP；
