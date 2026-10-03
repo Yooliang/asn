@@ -38,12 +38,36 @@
 - `mute` 的句子照樣走 `speakText`（同一套標籤解析，沒有另寫一份），字幕、`[happy]`／`[wave]` 這類表情手勢、`[outfit:]`／`[scene:]` 等動作片段與 `actions`（body／motion）都照做；差別只在 `createSpeaker`（`speech.js`）對 `mute` 句子不呼叫 TTS、不播聲音、**嘴巴不動**（沒聲音卻對嘴很怪，也省資源），改成停留 `mutedHoldMs(text)`（每字 200ms，0.7～12 秒）再接下一句，節奏跟出聲那台接近。
 - 以前的作法是把 text 清成空字串，連字幕與文字裡的標籤都一起沒了，現已改掉。
 
-## 主動說話（leader 3D 頁）
+## 主動說話（後端決定）
 
-1. leader 擲骰到了，呼叫 `/chat`：帶 `from_3d` 與 **`speak_elsewhere: true`、不帶 `client_id`**（主動說話不算「小良哥在這台互動」，不搶 speaker），自己**不唸**（`sendChat` 的 onSegment 丟掉）。
-2. 後端 `relayPlan`（`speak_elsewhere.ts`）：3D 頁的主動說話把整句話＋動作都推成一則 `say`（`origin: 'chat'`），並加 `speaker_client`＝目前活著的 speaker。
-3. 所有裝置（含 leader 自己）都從 `/updates` 收到同一則 say：speaker 唸出聲（可能是手機 App），其他 3D 頁靜音播放。leader 自己也走這條路，所以不需要另外做「別重播給自己」的去重，也不會有「leader 以為自己是 speaker 但後端不這麼認為」的競態。
-4. 代價：主動說話要等整段回覆完成才開口（不再邊串流邊唸），延遲多一個輪詢喚醒（後端推完會敲門鈴，通常 1 秒內）。
+要不要講、什麼時候講、由哪一台出聲，**全部由後端決定**；前端不再自己擲骰、也不再送「主動說話的 /chat」。實作：`supabase/functions/irori-api/proactive.ts`（流程）、`proactive_gate.ts`（狀態與閘門）、`proactive_deps.ts`（真實依賴），測試 `proactive_test.ts`、`tests/proactive_tick.test.mjs`。
+
+### 流程
+
+1. 前端（`web/js/proactive_tick.js`）：這台是 leader、看得到畫面、沒在想／講／按住說話時，約每 60 秒 `POST /proactive/tick`（帶 `client_id`、`kind`、`visible`，以及跟 `/chat` 同樣的世界資訊：`outfit`／`scene`／`posture`／`home`／`targets`／`standing_only`／`name`／`user_name`／`from_3d`）。回應 `{ok, speaking, skipped?, next_tick_s}`，下次間隔採後端建議（夾在 30～600 秒）。永遠回 200，前端不用處理錯誤。
+2. 後端 `decide` 依序判斷（任何一步不符合就回 `skipped`，**零副作用**：不呼叫模型、不存世界資訊、不寫 history、不推給別台、不記帳）：
+
+| 順序 | 條件 | skipped | 說明 |
+|---|---|---|---|
+| 1 | `visible=false` | `hidden` | 看不到畫面的裝置不算 |
+| 2 | `state.settings.talk` ≤ 0 | `off` | 設定「不主動」就永遠不講；建議 120 秒後再看（使用者可能剛調過） |
+| 3 | 有一輪對話正在進行 | `busy` | kv `chat_busy`：任何 `/chat` 串流或主動說話開始寫 `done:false`、結束（含出錯、取消）寫 `done:true`；超過 150 秒沒收尾視為實例掛了。建議等到忙完 |
+| 4 | 最近 180 秒內使用者真的開過口 | `user_active` | kv `last_user_turn_at`：非主動說話、且不是［系統］／［通知］開頭的 `/chat`（含手機泡泡、App、`/chat` 頁、3D 頁按住說話），`/chat` 一收到就背景寫入（不等結束、不拖慢 `/chat`）。可用 secret `IRORI_PROACTIVE_QUIET_S` 調 |
+| 5 | 這個擲骰時段已有別台處理 | `taken` | `irori_claim('proactive_tick', 45)` 原子鎖：多台同時送，只有第一台往下走（也等於每約一分鐘只擲一次骰） |
+| 6 | 擲骰沒中 | `no_roll` | 機率 = `settings.talk`（每次擲骰的機率；設定頁「主動說話」滑桿 0～30%，預設 5% ≈ 平均 20 分鐘一次） |
+| 7 | 超過每小時 `chat` 用量 | `rate_limited` | 跟一般對話同一個額度 |
+
+   **頻率完全依使用者設定**：沒有另外寫死「多久內不能再講」；唯一的間隔是擲骰時段（45 秒）與上面的忙碌／使用者剛開口條件。
+3. 決定要講：回應立刻回 `speaking:true`，後端在背景（waitUntil）①標 `chat_busy` ②用 `resolveWorld` 補世界資訊（3D 頁來的就存起來）③用後端存的聊天紀錄＋［系統］提示（跟以前 `idle.js` 同一句話）呼叫模型（含工具，所以能走動、換姿勢）④生成期間若使用者開口了，這句**不推、不寫紀錄**⑤否則照現有 say 流程推給各裝置（`origin:'chat'`、帶 `speaker_client`，speaker 那台出聲、其他 3D 頁靜音播放），並**由後端把「［系統］（你主動找…）」與她的回覆寫進聊天紀錄**（`irori_updates_push` 的 `p_turns`，跟提醒同一條路）、封存進長期記憶⑥解除 `chat_busy`。
+4. 代價：話要等整段回覆完成才開口（不邊串流邊唸），多一個輪詢喚醒（後端推完會敲門鈴，通常 1 秒內）。
+
+### 舊前端相容
+
+還在送「主動說話 `/chat`」的舊前端（`speak_elsewhere`＋`from_3d`、不帶 `client_id`；或帶 `proactive:true`），後端套用同一套判斷（`dice=false`：骰子它自己擲過了，其餘第 2～5 步照樣套用）。不符合回 **HTTP 409** `{detail:"", skipped:true, reason, retry_after_s}`——在存世界資訊、記帳、呼叫模型之前就回，`detail` 是空字串所以舊前端的錯誤提示框也是空的（等於安靜地略過）。通過時照舊串流，但生成期間使用者開口了就不推。
+
+### 提醒與夥伴來信轉述不受影響
+
+提醒（到點代講）與夥伴來信轉述是後端直接推 `say`（不經 `/chat`、不是閒聊），**不套用這道閘門**：提醒有時間性、而且是使用者自己要的；夥伴來信轉述推到 3D 頁後，3D 頁的 inbox 本來就等「沒在想、沒在講、沒按著」才處理（`pump`），不會插話。取捨：它們在使用者講到一半時仍可能到達，要避開得另外做延後佇列，這次不做。
 
 ## 多裝置行為總表
 
@@ -57,7 +81,7 @@
 | App 泡泡說話（3D 房間沒顯示） | App `/chat`（App 成為 speaker），App 自己唸 | 是，只動作推回 | App | App 泡泡；**3D 頁沒有字幕** | 3D 頁照 `actions` 做 body／motion | 缺口：話不推給 3D 頁（要推需 App 也帶 speak_elsewhere，但那樣 App 自己就不唸；要改需協議，見下） |
 | 夥伴回信轉述 | 後端 inbox 以她的口氣寫好 say（帶 speaker_client） | 是 | speaker | 所有 3D 頁（其他台靜音播放） | 所有 3D 頁（文字裡的標籤） | 已修 |
 | 提醒 | 後端 reminders 推 say（帶 speaker_client） | 是 | speaker | 所有 3D 頁 | 所有 3D 頁（文字標籤） | 已修 |
-| 主動說話 | leader 3D 頁生成，經 `/chat`＋`speak_elsewhere` 推回 | 是 | speaker（不再是 leader 無條件出聲） | 所有 3D 頁 | 所有 3D 頁（話與 body／motion 都推） | 已修（需部署後端） |
+| 主動說話 | **後端決定**：leader 3D 頁只送 `POST /proactive/tick`，後端判斷（設定、對話中、使用者剛開口、多台只算一次、擲骰）後自己生成並推 say、寫聊天紀錄 | 是 | speaker（不再是 leader 無條件出聲） | 所有 3D 頁 | 所有 3D 頁（話與 body／motion 都推） | 已改（需部署後端＋網頁；撞車已擋） |
 | 閒晃動作（wander：走位、活動、手勢） | leader 本機亂數 | 否 | 無聲 | 無字幕 | **只有 leader**；別台只靠 state 同步到之後的 body，活動／手勢不會重演 | 缺口 |
 | 開機打招呼／新版本通知 | 每台 3D 頁自己的本機 notice → 自己 `/chat` | 是（各自一次 `/chat`） | 各自本機出聲（同瀏覽器 30 分鐘去重，跨裝置不去重） | 各自 | 各自 | 缺口：電腦＋手機各開 3D 頁時會各打一次招呼、各自出聲 |
 | 換衣服／換場景／身體擺放 | 任一台（`[outfit:]` 標籤、set_body、手動） | 是，state 存後端 | — | — | 別台輪詢到較新的 `state_seq` 就瞬移跟上（不走路） | 一致（但別台看不到「走出去換」的過程） |
