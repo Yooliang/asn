@@ -86,6 +86,32 @@
 - 手機聊天串（`replies.js`）：`origin:'3d'` 不收。
 - RTDB 內容通道：照一般事件加密寫入；超過 4 KB（約 1300 個中文字以上）標 big，裝置改打 `/updates` 補；序號去重與其他事件相同。
 
+## 會讓她開口的情境總表（誰決定、誰生成、走哪條路）
+
+原則：**前端只有「使用者自己說的話」會送 `/chat`**。其餘所有讓她開口的情境，前端最多只回報事實（剛打開畫面、我的網頁版本、我正在出聲），
+要不要講、什麼時候講、由哪一台出聲都由後端決定（同一套閘門 `proactive_gate.ts` `checkQuiet`），並由後端生成後推 say。
+
+| 情境 | 誰決定 | 誰生成 | 走哪條路 | 備註 |
+|---|---|---|---|---|
+| 使用者自己說話（3D 頁按住說話、App 泡泡、電視、`/chat` 頁） | 使用者 | 模型（`/chat` 串流） | 前端 `POST /chat` → 串流回該端；`speak_elsewhere` 時後端另推 say | 唯一由前端送 `/chat` 的情境；一收到就記 `last_user_turn_at` |
+| 主動說話（閒聊） | **後端**（設定 talk、對話中、使用者剛說話、有人在出聲、擲骰） | 後端（`speak`，kind `idle`） | leader 3D 頁約每 60 秒 `POST /proactive/tick` → 後端推 say | 見上節「主動說話」 |
+| **進頁面打招呼** | **後端**（有人在出聲、對話中、使用者正在說話或 3 分鐘內說過話、30 分鐘內跨裝置打過 → 不打） | 後端（`speak`，kind `greet`） | 3D 頁載入 1.5 秒後 `POST /proactive/greet`（只回報「剛打開畫面」）→ 後端推 say，出聲裝置＝打開的那台 | 冷卻鎖 `irori_claim('greet', 1800)`，跨分頁、跨裝置；額度／次數不夠時放掉鎖。舊前端自己送的［通知］打招呼 `/chat` 套同一套判斷，不符合回 409 skipped |
+| **新版本提醒** | **後端**（網頁版本比 `version.json` 已部署的舊、同一套安靜條件、每個新版本跨裝置只問一次） | 後端（`speak`，kind `update`） | 3D 頁 `POST /proactive/tick` 帶 `web_version`／`self_reload` → 後端比對後推 say | 鎖 `web_update_<版本>`；App 內嵌（`self_reload`）自己重新整理，不問；後端讀 `IRORI_WEB_ORIGIN`（預設 irori.web.app）的 `version.json`，快取 5 分鐘。舊前端的［通知］新版本 `/chat` 同樣套鎖 |
+| 夥伴來信轉述 | 後端（有人開著頁面就收信；一次多封合成一則） | 後端（`inbox.ts narrate`，不帶工具；模型出錯重試一次） | `/updates` 驅動收信 → 推 `{type:'say'}`（帶 speaker_client） | 不看閘門（使用者要等的回信）。轉述失敗／額度用完／超過次數：**後端用固定模板自己講**（`templateNarration`，仍是 say，`templated:true`），不再退回 `{type:'done'}` 原文讓前端組提示詞 |
+| 夥伴回報失敗（`failed`） | — | — | 雲端後端不產生；只有本機版 `server.py`（relay_bridge）會產生，前端 `inbox.js noticeFor` 仍保留給它 | 雲端不會走到 |
+| 提醒到點 | 後端（時間到） | 後端模板（不呼叫模型） | `/updates` 驅動 → 推 say（帶 speaker_client） | 不看閘門（時間性、使用者自己要的） |
+| 閒晃動作（走位、活動、手勢） | leader 3D 頁本機亂數 | 無（無聲） | 不經後端 | 不是「開口」，不碰 `/chat` |
+
+### 出聲回報與避讓（打招呼、主動說話不能疊在別人的聲音上）
+
+kv `voice_until`＝`{until, by}`（`voice.ts`），閘門 `checkQuiet` 多一條 `speaking`：現在有人在出聲、或剛唸完 6 秒內，就不打招呼、不主動說話、不問更新（零副作用）。兩個來源：
+
+1. **新版 App 自己回報**：泡泡播放 TTS 期間 `POST /proactive/hold {speaking:true, client_id}`，每 10 秒續期（每次算 30 秒，漏了「結束」也會過期），唸完送 `speaking:false`；別台說「唸完了」不會蓋掉正在講的這台。同時經 JS 橋通知 App 內的 3D 頁：`window.iroriHostSpeaking(true|false)`（網頁裝好後也會呼叫橋的 `IroriRoom.isSpeaking()` 問一次，避免通知落空）。3D 頁在外殼出聲期間不開始唸新的話、不打招呼、不送 tick，結束後恢復。
+2. **舊版沒有回報**：後端每推一則 say（`stampSpeaker`）就依字數估播放長度（2 秒＋每字 0.28 秒，上限 90 秒）寫進 `voice_until`，只往後延、不縮短（保守估算）。
+3. 3D 頁自己出聲時**不另外回報**：它唸的是後端推來的 say（已經估算過），或自己 `/chat` 的回覆（`chat_busy`＋`last_user_turn_at` 已經涵蓋）。
+
+`/proactive/hold` 的 body 現在是 `{listening?, speaking?, client_id?}`，至少要有 `listening` 或 `speaking`；舊版只送 `listening` 照常運作。
+
 ## 多裝置行為總表
 
 出聲＝只有 speaker 那台；字幕／動作＝其他 3D 頁是否也顯示、也做。「已修」是本次（靜音播放＋主動說話走 speaker）改的。
@@ -101,7 +127,7 @@
 | 提醒 | 後端 reminders 推 say（帶 speaker_client） | 是 | speaker | 所有 3D 頁 | 所有 3D 頁（文字標籤） | 已修 |
 | 主動說話 | **後端決定**：leader 3D 頁只送 `POST /proactive/tick`，後端判斷（設定、對話中、使用者剛開口、多台只算一次、擲骰）後自己生成並推 say、寫聊天紀錄 | 是 | speaker（不再是 leader 無條件出聲） | 所有 3D 頁 | 所有 3D 頁（話與 body／motion 都推） | 已改（需部署後端＋網頁；撞車已擋） |
 | 閒晃動作（wander：走位、活動、手勢） | leader 本機亂數 | 否 | 無聲 | 無字幕 | **只有 leader**；別台只靠 state 同步到之後的 body，活動／手勢不會重演 | 缺口 |
-| 開機打招呼／新版本通知 | 每台 3D 頁自己的本機 notice → 自己 `/chat` | 是（各自一次 `/chat`） | 各自本機出聲（同瀏覽器 30 分鐘去重，跨裝置不去重） | 各自 | 各自 | 缺口：電腦＋手機各開 3D 頁時會各打一次招呼、各自出聲 |
+| 開機打招呼／新版本通知 | **後端決定**（見上方「會讓她開口的情境總表」）：3D 頁只回報 `POST /proactive/greet`、tick 的 `web_version` | 是（後端生成、推 say） | 打開的那台（出聲裝置） | 所有 3D 頁 | 所有 3D 頁 | 已修：以前每台自己 `/chat`、會蓋在泡泡的聲音上 |
 | 換衣服／換場景／身體擺放 | 任一台（`[outfit:]` 標籤、set_body、手動） | 是，state 存後端 | — | — | 別台輪詢到較新的 `state_seq` 就瞬移跟上（不走路） | 一致（但別台看不到「走出去換」的過程） |
 | 沒有活著的 speaker | — | — | 每台可見的 3D 頁都唸（舊規則） | 所有 | 所有 | 缺口：理論上可能多台同時出聲；實務上 3D 頁輪詢會立刻接手成 speaker |
 | 出聲那台關頁／切背景（缺口 6） | 3D 頁在 `visibilitychange`→hidden 與 `pagehide` 用 `keepalive` 送 `POST /device?…&visible=0` | 是（只更新裝置紀錄） | 別台下一次輪詢接手（以前最長 3 分鐘沒人出聲：推來的話蓋著離開那台的 `speaker_client`、但它不唸） | 所有 3D 頁 | 所有 3D 頁 | 3D 頁已修（需部署後端與網頁）；App 要自己在泡泡收起／進背景時送，**還沒做**（見下） |
