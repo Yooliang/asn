@@ -1,0 +1,278 @@
+# 多引擎轉接：Gemini、Grok、pi，以及 ACP／AgentAPI 值不值得用
+
+> 2026-10-04 調研與原型。環境：Windows 11 原生、`agy 1.2.4`、`gemini 0.52.0`（舊版）、`codex-cli 0.154.0`、`claude 2.1.288`、`pi 0.84.4`、`grok`（社群版 `@vibe-kit/grok-cli 0.0.34`）。
+> 程式：`relay/machine/engines/acp-client.mjs`（最小 ACP 用戶端，無 npm 依賴）、`relay/machine/tools-acp-probe.mjs`（手動檢查）、`relay/machine/test/acp-client.test.mjs`＋`fake-acp-agent.mjs`（4 個測試，不碰真的 AI）。
+> 轉接器介面見 `relay/machine/README.md`「轉接器介面」；Codex 那一份見 `docs/CODEX-ENGINE.md`。
+
+## 0. 給小良哥的白話摘要
+
+**你問的三件事：**
+
+1. **「ACP 或 AgentAPI 還是通知得到 Claude CLI 吧？」**
+   - **接不到你已經開著的視窗。** 兩者的做法都是「由它們自己啟動 agent」：ACP 是「編輯器／程式把 agent 當子行程叫起來，用 stdio 講話」，AgentAPI 是「自己開一個模擬終端把 agent 包在裡面」。你自己在 Windows Terminal 開的 `claude`，兩者都碰不到。
+   - 現在 Irori 能送進你開著的 Claude 視窗，靠的是 Claude Code 自己的「跨 session 訊息」（`ListAgents`／`SendMessage`，收發室用 `claude -p` 去呼叫它）。**這條路目前是唯一不改 Claude、又能進已開視窗的官方路**，不要拆。
+   - **用「＋開新視窗」開的 Claude 視窗，本來就是一個真的互動式 Claude 視窗**（`Start-Process claude …`），所以 SendMessage 本來就接得到，**不需要為它改走 ACP**。改走 ACP 反而變成「看不見的背景工作」，還會碰到下一點的帳務規定。
+   - **對 Claude 用 ACP 有帳務風險**：ACP 的 Claude 轉接器是用 Anthropic 的 Agent SDK 寫的，而 Anthropic 官方文件寫明 Agent SDK 要用 API 金鑰，不准把 Pro／Max 訂閱登入轉給第三方程式用。現行收發室用的是「沒改過的 `claude -p`＋你自己的訂閱登入」，文件允許。結論：**Claude 不走 ACP。**
+   - AgentAPI 更不用考慮：它的 GitHub 專案 **2026-09-13 已封存、不再維護**。
+
+2. **「pi shell 會自動找到電腦上有的 AI 嗎？」**
+   - **不會。** pi 不是「包裝別家 CLI」的工具，它**自己就是一個 agent**（自己跑工具迴圈、自己打各家模型的 API），它也不會去偵測電腦上裝了 `claude`、`codex`、`agy`。它找金鑰的方式是：環境變數（`ANTHROPIC_API_KEY` 等）、`~/.pi/agent/auth.json`（`/login` 存的訂閱登入）、雲端環境登入。
+   - 你這台的 pi 是公司 Aegis 版：`pi --mode rpc` 回報的模型提供者是「牧陽能控」、網址指向 Aegis 的 LLM 閘道、模型是「小蕙 — 財務主管」之類的成員，另外裝了 aegis／orca 擴充。**「自動找到」很可能是公司安裝腳本幫你設好了這個提供者，不是 pi 在偵測。**（這是我的推論，沒有看安裝腳本內容。）
+   - **用 pi 開的視窗不是 Claude Code session**，不會出現在 `claude agents --json`，SendMessage 也送不進去。我在這台實測：pi 的 RPC 模式正常（`get_state` 回得來），我看了 `claude agents --json`，裡面只有 Claude 的 session。它要被送訊息，要靠 pi 自己的入口：RPC（限 Irori 自己啟動的）或「擴充」（可以放進你自己開的互動視窗，見第 5 節）。
+
+3. **「有什麼專案可以讓我們少走歪路？」**
+   - 標準有：**ACP**（Zed 提的、已有 50 幾個 agent 加入的官方登錄表，Gemini、Grok、Codex、pi、Antigravity、Claude 都在裡面）。它**不能**解決「送進已開視窗」，但**很適合**解決「Irori 自己啟動一個工作者並對話」，這一類各家不用寫私有整合。
+   - 現成的多 agent 工具（claude-squad、vibe-kanban、Crystal、OpenHands…）全都只管「自己啟動的 session」，沒有一個能把訊息送進你自己開的視窗；其中 vibe-kanban 已宣布停運、Crystal 已棄用。只有 **Orca**（你本機已有）有 `orca terminal send`，但限在 Orca 內嵌終端機。
+
+**一句話結論：不整套改成 ACP。** 維持現在的「引擎轉接器」架構，每個引擎照它**能不能接到已開視窗**分兩類處理：
+
+| 引擎 | 你已開的視窗 | Irori 自己開的視窗／工作者 |
+|---|---|---|
+| Claude | 維持 SendMessage 轉接器（現行） | 同左（互動式視窗，一樣接得到） |
+| Codex | 維持 `codex queue`（已做） | 同左 |
+| Gemini（agy） | **接不到**（沒有官方入口） | **ACP 或 agy 自己的 stream-json**，已實測「送一句、拿回覆」成功 |
+| Grok | **接不到**（官方文件沒提） | ACP（`grok agent stdio`），**這台沒裝官方版，未實測** |
+| pi | 寫一個 pi 擴充放進視窗（官方範例就有這個做法） | pi 的 RPC 模式（已實測啟動成功） |
+
+**分期建議：** 第一期做一個通用「ACP 轉接器」讓 Gemini（agy）以工作者形式上線（已實測可行）；第二期 pi 擴充＋pi 轉接器、Grok；第三期評估把 Orca 當作「已開視窗」的通用入口。細節與風險見第 8、9 節。
+
+---
+
+## 1. 重點驗證：ACP／AgentAPI 能不能通知到「使用者自己開著的 Claude 視窗」
+
+| 問題 | 答案 | 依據 |
+|---|---|---|
+| ACP 怎麼接上 agent？ | 用戶端把 agent **當子行程啟動**，stdio 上跑 JSON-RPC。遠端傳輸（HTTP／WebSocket）還在制定中 | [ACP 簡介](https://agentclientprotocol.com/overview/introduction)、[Streamable HTTP RFD](https://agentclientprotocol.com/rfds/streamable-http-websocket-transport.md) |
+| ACP 的 `session/list` 列的是什麼？ | **磁碟上存著的歷史 session，不是正在跑的**。所以不能拿它列出「使用者開著哪些視窗」 | [session/list](https://agentclientprotocol.com/protocol/v2/session-list.md) |
+| ACP 的 `session/load`／`resume` 呢？ | 在**新啟動**的 agent 行程裡把舊對話載回來，不是接上舊行程 | [session setup](https://agentclientprotocol.com/protocol/session-setup) |
+| Claude 的 ACP 轉接器怎麼做？ | 用 **Claude Agent SDK** 實作 ACP agent（SDK 自己啟動 Claude Code 行程）。文件沒有「附著到已開視窗」 | [claude-agent-acp](https://github.com/agentclientprotocol/claude-agent-acp) |
+| AgentAPI 怎麼做？ | 在記憶體裡開**模擬終端**，把 HTTP 呼叫翻成按鍵、把終端畫面解析成訊息；只能控制它自己啟動的 agent | [coder/agentapi](https://github.com/coder/agentapi) |
+| AgentAPI 現況？ | README 開頭：「AgentAPI is deprecated and no longer maintained」，**2026-09-13 封存** | 同上 |
+| 現在 Irori 用的 SendMessage 呢？ | 每個 Claude Code 互動 session 都有本機訊息 socket；`ListAgents` 找得到、`SendMessage` 送得進去，收件視窗忙時在兩次工具呼叫之間讀、閒時開新一輪。**目前只能從另一個 Claude session 的模型工具呼叫發出**（所以收發室要有一個 `claude -p` worker）；官方沒有「不經模型直接送」的 CLI（社群 [#99049](https://github.com/anthropics/claude-code/issues/99049) 在要這個功能，2026-10-02 開、尚未處理） | [跨 session 訊息說明](https://claudefa.st/blog/guide/mechanics/cross-session-messaging)、#99049 |
+| 還有別條進已開 Claude 視窗的官方路嗎？ | **Channels**（MCP 伺服器把事件推進「執行中的 session」，也可雙向）。限制：啟動時要帶 `--channels`、研究預覽、只接受官方白名單的插件（自製的要用 `--dangerously-load-development-channels`）、Team／Enterprise 要管理員開 | [Channels 文件](https://code.claude.com/docs/en/channels) |
+
+**結論**：ACP、AgentAPI 都**不能**把訊息送進使用者已開的互動 Claude 視窗。要進已開視窗，Claude 只有兩條：SendMessage（現行）、Channels（研究預覽，要重開視窗並加旗標）。
+
+### 混合做法評估（Claude 部分）
+
+| 方案 | 已開的 Claude 視窗 | 「＋開新視窗」開的 Claude 視窗 | 評語 |
+|---|---|---|---|
+| A. 全部維持 SendMessage | 接得到 | 接得到（它是真的互動式視窗） | **推薦**。零改動 |
+| B. 已開用 SendMessage，launcher 開的改 ACP 啟動 | 接得到 | 接得到，但變成**看不見的背景工作** | 使用者開「新視窗」是要一個看得到、可以接手的視窗；ACP 會破壞這件事，且碰 Agent SDK 帳務限制。不推薦 |
+| C. 用 Channels | 要重開並加 `--channels` | 可從 launcher 啟動就帶上 | 研究預覽、白名單限制，目前不當主線；可當「收發室 worker 之外的第二條路」觀察 |
+
+---
+
+## 2. 「pi」是什麼、能不能當多引擎層
+
+- **pi** ＝ Mario Zechner 的 coding agent（原 `badlogic/pi-mono`，2026-05 移到 Earendil Works，套件名 `@earendil-works/pi-coding-agent`，MIT，Node ≥ 22.19，Windows 可用）。官方 [GitHub](https://github.com/earendil-works/pi)。預設只有 read／bash／edit／write 四個工具，靠擴充、skills、prompt 範本、套件客製。
+- **它自己是 agent，不是包裝器**：內建多家模型的統一 API（Pi AI），自己跑工具迴圈。登入方式（本機文件 `docs/providers.md`）：訂閱 OAuth（ChatGPT Plus/Pro＝Codex、Claude Pro/Max、GitHub Copilot、**xAI Grok／X 訂閱**、OpenRouter）、30 幾家的 API 金鑰環境變數、`auth.json`、雲端環境登入。**沒有偵測其他 CLI 或其憑證的功能。**
+- 注意帳務：文件寫明 Claude Pro/Max 在 pi 這類第三方 harness 用的是「extra usage」，**按 token 另計，不扣 Claude 方案額度**。
+- Google 的 Gemini 訂閱（agy 的登入）**不在 pi 的訂閱清單**；Google 官方也說不准把 agy 的憑證抽出來給別的程式用（見第 3 節），所以 pi 解不了 Gemini 的訂閱用法（要用 `GEMINI_API_KEY` 另計費）。
+- **外部入口（回答「pi 開的視窗傳得進去嗎」）**：
+  - `pi --mode rpc`：stdin／stdout 一行一則 JSON，指令有 `prompt`、`steer`、`follow_up`、`abort`、`get_state`、`get_last_assistant_text`、`new_session`、`switch_session`…，事件有 `agent_end`、`agent_settled`。**實測**：在 `irori-probe` 資料夾用白名單環境啟動，`get_state` 立即回傳（含 `sessionName`、`isStreaming`）。但這是「Irori 啟動的 pi 行程」，文件沒有附著到使用者已開的互動 pi 的方式（[rpc.md](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md)）。
+  - `--mode json`（單次事件流）、TypeScript SDK、ACP 轉接器（社群 `pi-acp`，登錄表有）。
+  - **擴充**（可以放進使用者自己開的互動視窗）：擴充 API 有 `pi.sendUserMessage()`（「像使用者打的一樣，一定觸發一輪」），官方範例 `examples/extensions/file-trigger.ts` 的註解就是「監看觸發檔，把內容注入對話。給外部系統對 agent 發訊息用」。所以做法是：寫一個 `irori-inbox` 擴充，`session_start` 時在 `~/.irori-relay/…/pi-inbox/<視窗名>/` 登記並監看，收到信就 `sendUserMessage`，`agent_end` 時把最後回覆寫回。**這只是設計，我沒有實作也沒有跑**（跑了會花模型額度，且要動使用者的擴充設定）。
+- **「把 pi 當成 Irori 的一種引擎轉接器，是否比逐家整合省事？」**
+  - 只在「視窗本來就是 pi」時才成立（你的公司 Aegis 流程正是這樣）。這時一個 `pi` 轉接器（RPC＋擴充）就同時涵蓋 pi 背後所有模型，包含 Grok 訂閱、ChatGPT 訂閱、Aegis 成員。
+  - **不成立的地方**：它不能替代 Claude Code／Codex／agy 的視窗——那些是各家官方 harness，行為、外掛、記憶、帳務都不同。若想「全部改用 pi 開」，等於換掉使用者的日常工具，並讓 Claude 改按 token 另計，這不是轉接器的事，是產品決定。
+  - 小提醒：你這台 pi 的模型是 Aegis 成員，**Aegis 轉接橋（`bridge-aegis.mjs`）本來就能直接問這些成員**（呼叫 `agent-chat/ask`）；pi 視窗只是另一個介面。
+
+---
+
+## 3. Gemini：`agy`（Antigravity CLI）與舊的 `gemini` CLI
+
+| | `agy`（Antigravity CLI） | `gemini`（Google 官方舊 CLI） |
+|---|---|---|
+| 這台版本 | 1.2.4，已登入，可用 | 0.52.0（npm 全域） |
+| 登入狀態 | 可用（實測 1.8 秒回 PONG） | **不能用**：ACP 實測 `Error authenticating: IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals… migrate to the Antigravity suite`。你的 gemini skill 也寫 2026-06-18 起個人免費方案已停 |
+| 非互動 | `-p`、`--output-format text/json/stream-json`、`--input-format stream-json`（長駐、一行一則）、`--json-schema` | `-p`、`-o stream-json` |
+| ACP | CLI 本身沒有 `--acp`；Google 另出**官方 ACP 伺服器**（`agy_acp_server`，登錄表 `antigravity-acp` 1.3.0）；社群 `google-antigravity-acp`（MIT）包 agy | `gemini --acp`（原生，ACP 的第一個示範實作；`loadSession` 支援） |
+| 恢復 session | `--continue`、`--conversation <id>`（實測可恢復並記得上文） | `--resume`、`--list-sessions` |
+| 列名單 | 沒有「列出開著的視窗」；官方 ACP 伺服器宣告 `sessionCapabilities.list`（列歷史） | `--list-sessions`（歷史） |
+| 送進已開視窗 | **沒有官方入口**。Remote Control（`/remote-control` 或 `agy remote-control start` 常駐）只給 Google 自家網頁；文件「沒有提供第三方本機 API」。社群 `agy-remote` 靠 tmux `send-keys` 接手已開的視窗，Windows 原生沒有 tmux | 同左，無 |
+
+來源：[agy 無頭模式](https://antigravity.google/docs/cli/headless/)、[Remote Control](https://antigravity.google/docs/remote-control/)、[Google 論壇：外部協調 agy 無頭模式是否支援](https://discuss.ai.google.dev/t/is-external-orchestration-of-antigravity-cli-headless-mode-supported-with-account-based-usage/183051)（Google 代表回覆：把官方 `agy` 當本機子行程、沿用其快取登入，**是支援的用法**，用量與互動使用共用同一份額度；**不支援**把 OAuth 憑證抽出來用、或直接打 Antigravity 後端）、[Gemini CLI ACP 模式](https://geminicli.com/docs/cli/acp-mode/)、[sibbl/google-antigravity-acp](https://github.com/sibbl/google-antigravity-acp)、[agy-remote](https://pypi.org/project/agy-remote/)。
+
+### 在這台的實測（都是新開的 `irori-probe` 暫存資料夾，測完刪除；子行程環境用白名單，不帶任何金鑰）
+
+| 路線 | 結果 |
+|---|---|
+| `gemini --acp`（0.52.0）→ `tools-acp-probe.mjs init gemini` | `initialize` 5.5 秒成功（`loadSession: true`，登入方式 4 種）；一送 session 就因帳號層級被拒。**舊 gemini CLI 在這台已無法使用，不必投資** |
+| Google 官方 `agy_acp_server.exe` 1.3.0（`dl.google.com` 下載 zip 124 MB，解壓後 81 MB＋145 MB 兩個執行檔，Python 打包） | `initialize` 13～18 秒（冷啟動慢）成功；宣告 `loadSession`、`sessionCapabilities.list`、`resume`。`session/new` 回「Authentication required」；`authenticate oauth-personal` 會**另開一次瀏覽器 Google 登入**（它有自己的憑證庫，**不共用 agy 已登入的憑證**），我沒有替使用者完成登入，到此為止 |
+| 社群 `google-antigravity-acp` 2.0.1（MIT，npm，無安裝腳本；包本機 `agy`，沿用 agy 登入） | **成功**：`initialize` 0.2 秒、`session/new` 2.2 秒、`session/prompt`「只回 PONG」→ 回 `PONG`，`stopReason=end_turn`，整輪 4.7 秒。只宣告 `loadSession: false`，沒有名單 |
+| `agy` 原生長駐 stream-json（不經 ACP） | **成功**：單次 `-p` 1.8 秒回 PONG；長駐行程同一個 `conversation_id` 連問兩輪，第二輪記得上文（KIWI），第二輪 2.2 秒；另開新行程 `--conversation <id>` 恢復後仍記得（3.8 秒）。輸入格式（試錯得知，官方文件沒給）：`{"event":"user","message":{"content":"…"}}`；輸出事件 `init`／`step_update`（`text_delta`）／`result`（`response`、`status`、`usage`） |
+
+小觀察：agy 每輪即使很短，輸入 token 約 1.16 萬（系統提示加工具定義），量大時要算進成本。
+
+**預設權限**：社群轉接器預設是**自動核准所有工具**，要加 `--no-skip-permissions`（我的測試有加）。agy 本身在非互動模式下，需要核准的工具會被「軟拒絕」（繼續跑、結束碼 0）；我們的 ACP 用戶端也對 `session/request_permission` 一律回「拒絕」。
+
+---
+
+## 4. Grok
+
+- **這台的 `grok` 不是官方版**：是社群的 `@vibe-kit/grok-cli 0.0.34`（只有 `-p` 無頭、`mcp`、`git`；要 `GROK_API_KEY`／xAI API 金鑰；沒有 ACP、沒有 session 名單）。我沒有用它跑任何東西（它需要金鑰，我不碰）。
+- **官方 Grok Build**（xAI／SpaceXAI，2026-05 發表、v1.0 於 2026-08-07、Apache-2.0，倉庫 [xai-org/grok-build](https://github.com/xai-org/grok-build)，npm `@xai-official/grok`）：
+  - 三種用法：TUI、無頭（`grok -p "…"`，可 `-s/--session-id`、`-r/--resume`、`-c`）、**ACP（`grok agent stdio`）**。ACP 登錄表有登錄（`grok-build` 1.0.49，啟動：`npx @xai-official/grok agent stdio`）。
+  - Session 存在 `~/.grok/sessions/`（依工作資料夾分），TUI／無頭／ACP 共用；`grok sessions list`、`grok sessions search`。
+  - 登入：瀏覽器登入（需要 SuperGrok 或 X Premium+ 訂閱）或 `XAI_API_KEY`。MCP 支援。
+  - **Windows：倉庫寫「best-effort，目前沒有測試」。**
+  - 文件**沒有**提到對執行中的 TUI 從外部送訊息（[sessions 文件](https://docs.x.ai/build/features/sessions)）。→ 已開視窗接不到，同 agy。
+  - **名稱衝突**：官方版和社群版都叫 `grok`。裝官方版前要先處理（解除社群版，或用完整路徑／`npx` 呼叫）。
+- 另一條：pi 的 `/login xai` 可用 Grok／X 訂閱，走 pi 的 RPC（見第 2 節）。
+- 來源：[Grok Build 概覽](https://docs.x.ai/build/overview)、[無頭模式](https://docs.x.ai/build/cli/headless-scripting)、[Sessions](https://docs.x.ai/build/features/sessions)、[ACP 登錄表](https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json)。
+- **未實測**：官方 Grok Build 的安裝與 ACP（需要訂閱登入，且 Windows 為 best-effort）。要實測時再做，約一個工作階段內可完成（裝 → 登入 → `tools-acp-probe.mjs prompt custom "…" --cmd <grok 路徑> agent stdio`）。
+
+---
+
+## 5. 現成標準與專案比較
+
+### 5.1 ACP 登錄表中和我們有關的（2026-10-04 從登錄表 JSON 抓的）
+
+| 登錄名 | 版本 | 啟動 | 底層 | 備註 |
+|---|---|---|---|---|
+| `claude-acp`（Claude Agent） | 0.85.1 | `npx @agentclientprotocol/claude-agent-acp` | Claude Agent SDK | **帳務限制，見第 1 節** |
+| `codex-acp` | 2.1.1 | `npx @agentclientprotocol/codex-acp` | 新版建在 Codex App Server | 舊倉庫 `zed-industries/codex-acp` 2026-07-22 封存；支援 ChatGPT 訂閱登入，但「遠端專案不能用」 |
+| `gemini`（Gemini CLI） | 0.62.0 | `npx @google/gemini-cli --acp` | 原生 | 這台的帳號層級已被拒 |
+| `antigravity-acp`（Google） | 1.3.0 | 下載 `agy_acp_server`（有 windows-x86_64） | Google 官方 | 要另外登入，體積大 |
+| `grok-build` | 1.0.49 | `npx @xai-official/grok agent stdio` | 原生 | Windows best-effort |
+| `pi-acp` | 0.0.34 | `npx pi-acp` | 社群，包 pi | — |
+
+ACP 本身：Apache-2.0、穩定版是 v1、v2 在開發中、TypeScript／Python／Rust／Kotlin／Java SDK（TypeScript 的 `@agentclientprotocol/sdk`，舊的 `ClientSideConnection` 已改為 `agent()`／`client()` 流式 API）。Irori 的橋「沒有 npm 依賴」，所以原型自己寫了約 100 行的 JSON-RPC 用戶端（`acp-client.mjs`），夠用。
+
+### 5.2 多 agent 編排工具（背景研究，部分取自二手摘要，已標註）
+
+| 工具 | 引擎 | 控制方式 | 進得了使用者自己開的視窗？ | Windows | 授權／狀態 |
+|---|---|---|---|---|---|
+| [claude-squad](https://github.com/smtg-ai/claude-squad) | Claude Code、Codex、OpenCode、Amp（Aider、Gemini 靠設定） | tmux＋git worktree | 否，只管自己建的 | 無原生版，要 WSL | AGPL-3.0，持續更新 |
+| [vibe-kanban](https://github.com/BloopAI/vibe-kanban) | 10 種以上 | 未確認 | 否（推測） | 不明確 | Apache-2.0，**2026-04 宣布停運**，改社群維護（[公告](https://vibekanban.com/blog/shutdown)） |
+| [Crystal](https://github.com/stravu/crystal) | Claude Code、Codex | 桌面 App＋worktree | 否 | 從未支援 | MIT，**2026-02 棄用**，後繼 Nimbalyst |
+| [Orca](https://github.com/stablyai/orca) | 40 種以上（含 Claude Code、Codex、Grok、pi；agy 未列） | 內嵌終端機＋`orca` CLI：`terminal list/read/send/wait` | **可以，限 Orca 內嵌終端機**；你在 Orca 外開的視窗不行 | 原生 | MIT，每日發版 |
+| [OpenHands](https://github.com/OpenHands/OpenHands) | 原生、Claude Code、Codex、Gemini CLI、任何 ACP agent | 透過 ACP 啟動子行程 | 否（文件明說未涵蓋附著） | 有 | MIT。文件說會自動用訂閱登入檔，**沒提 Anthropic 政策**（疑慮） |
+| [happy](https://github.com/slopus/happy) | Claude Code、Codex | 用 `happy claude`／`happy codex` 取代原指令 | 否，必須用它啟動 | 有 | MIT。內含 `claude-agent-sdk`（帳務疑慮同上）。**你這台有裝 happy** |
+| cmux、Conductor | 多種 | macOS 專用 | — | **無** | — |
+
+沒有任何一個能「把訊息送進使用者自己開的 Claude／Gemini／Grok 視窗」，這個需求確實是特殊的，只有各家自己的入口能做（Claude SendMessage、Codex queue、pi 擴充）。多 agent 工具沒有一個比我們現在的架構更適合直接拿來用。
+
+### 5.3 MCP 的角色
+
+MCP 管的是「agent 呼叫外部工具」，不是「外部把訊息送給 agent」（Claude 的 Channels 是 MCP 加的例外）。它對我們有用的地方是**讓各引擎的 agent 用同一個工具回寄信**：寫一個 `irori-mail` MCP 伺服器（包 `send.mjs` 的 `send`／`reply`），Claude、Codex、agy（`agy mcp add`）、Grok（`grok mcp`）都支援 MCP，就不用靠「視窗內跑 `node send.mjs`」（沙盒沒網路時行不通，Codex 文件第二期就是這件事）。pi 的內建 MCP 支援我沒有查到，標為未驗證（pi 的設計是用擴充，不是 MCP）。這是第二期以後的獨立工作，與 ACP 不衝突。
+
+---
+
+## 6. 比較表：各引擎「接得到什麼」
+
+| | Claude Code | Codex | Gemini（agy） | Grok Build | pi |
+|---|---|---|---|---|---|
+| 送進**使用者已開**的視窗 | 是：SendMessage（現行）；Channels（需 `--channels`） | 是：`codex queue --thread` | **否**（無官方入口） | **否**（文件未提） | 擴充（需設計）；RPC 否 |
+| 列出開著的視窗 | `claude agents --json` | 名字索引＋鎖檔推斷 | 無 | 無（`grok sessions list` 是歷史） | 無（可由擴充登記 presence） |
+| Irori 啟動的工作者 | `claude -p`（現行收發室） | `codex exec`／app-server | **ACP 或原生 stream-json（已實測）** | ACP `grok agent stdio`（未實測） | `pi --mode rpc`（`get_state` 已實測） |
+| 取回覆 | worker 輸出帶 nonce 區塊 | 讀 turns 的最終回答 | `result.response`／ACP `agent_message_chunk` | 同左（ACP） | `agent_end` 事件、`get_last_assistant_text` |
+| ACP | 有（Agent SDK，**帳務風險**） | 有 | 有（官方＋社群） | 原生 | 社群 |
+| 帳務 | 訂閱（`claude -p` 沒改過的 binary） | ChatGPT 訂閱 | Google 帳號額度（官方說明可） | SuperGrok／X Premium+ 或 API 金鑰 | 看選的提供者；Claude 走 extra usage |
+| Windows | 原生 | 原生 | 原生（agy 是 Go 執行檔） | best-effort | 原生（需 Git Bash） |
+| 授權 | 專有 | Apache-2.0 | 專有 | Apache-2.0 | MIT |
+
+---
+
+## 7. 原型：最小 ACP 用戶端
+
+- `engines/acp-client.mjs`：`initialize`（宣告不提供 fs／terminal 能力）→ `authenticate`（選用）→ `session/new` → `session/prompt`，收集 `session/update` 裡的 `agent_message_chunk` 文字；agent 發出的 `session/request_permission` **一律選拒絕**；agent 要求沒宣告的用戶端方法（fs／terminal）回 method not found；行程掛掉時等待中的請求會被拒絕，不會卡死。
+- **子行程環境是白名單**（`cleanEnv`：只留 PATH、HOME/USERPROFILE、APPDATA、TEMP 等系統變數）。任何 `*_API_KEY`、`*_TOKEN`、`IRORI_RELAY_*` 一律不帶；登入狀態讀各 CLI 自己在家目錄的憑證檔。這比 `codexChildEnv` 的黑名單更嚴，建議新引擎都用白名單。
+- `tools-acp-probe.mjs`：
+  ```
+  node tools-acp-probe.mjs init   gemini                       # 只 initialize，印能力，不花額度
+  node tools-acp-probe.mjs prompt custom "只回 PONG" --cmd node <google-antigravity-acp>/dist/cli.js --binary-path <agy.exe> --no-skip-permissions
+  ```
+  只開 `irori-probe-acp-*` 暫存資料夾，結束即刪；不碰任何使用者視窗。
+- 測試：`node --test relay/machine/test/acp-client.test.mjs`（4 個，含「金鑰環境變數不會傳進子行程」「權限請求被拒」「agent 行程消失」），全部通過。
+
+實測的「送一句、拿回覆」結果見第 3 節表格（經 ACP 與經 agy 原生各一次，都成功）。
+
+---
+
+## 8. 建議
+
+### 8.1 要不要把轉接器層改成以 ACP（或 AgentAPI）為主？
+
+**不要整套改。** 理由：
+
+1. **最大的價值（送進使用者開著的視窗）ACP 給不了**，這是 Irori 收發室的核心。改了只會失去 Claude／Codex 的現有能力。
+2. Claude 走 ACP 有**帳務風險**（Agent SDK 不准用 Pro／Max 訂閱登入），現行方式沒有這個問題。
+3. ACP 的名單是歷史不是即時；我們需要的「現在誰開著、忙不忙」ACP 沒有。
+4. 但 ACP 對「Irori 自己啟動的工作者」確實省事：一個 `acp` 轉接器 + 設定檔（每個 agent 一條啟動指令）就能涵蓋 Gemini、Grok、pi（社群）、Codex 等，不必各寫私有整合。
+
+**AgentAPI：不採用**（已封存、靠解析終端畫面脆弱、Windows 文件未提）。
+
+### 8.2 優缺點（採用「只用 ACP 做工作者」的混合方案）
+
+| 優點 | 缺點／風險 |
+|---|---|
+| 新引擎的接入成本從「一整個轉接器」降到「一條啟動指令＋授權檢查」 | 工作者是**看不見**的背景 session，不是使用者的視窗；使用者不能直接插話（可考慮之後用 `agy --conversation <id>`、`grok --resume <id>` 讓他接手，**未驗證互動式能不能恢復這類 session**） |
+| 協定是 Apache-2.0、跨廠商、有登錄表可查啟動方式 | 各家 ACP 實作品質不一（舊 gemini 的帳號被拒、官方 agy 伺服器要另外登入且很大、社群轉接器是第三方套件） |
+| 回覆是結構化事件（`agent_message_chunk`、`stopReason`），比解析終端好 | 權限：ACP 的 agent 會要求核准工具；無人值守只能「全拒」或「全放」，全拒時 agent 幾乎只能聊天，全放有安全風險（社群轉接器預設全放，必須關掉） |
+| 與現有 `capabilities()`／`deliver()`／`onReply()` 介面可對應 | 要定義「ACP 工作者」在名單裡怎麼顯示、什麼時候建立／回收（見分期） |
+
+### 8.3 遷移成本與對現有 Claude 轉接器的影響
+
+- **對現有 Claude 轉接器（SendMessage、名單、收發室）：零影響。** ACP 轉接器是新增一個引擎，`IRORI_ENGINES=claude,codex,acp` 並存；Claude 不動。
+- 新增工作：`engines/acp.mjs`（約 200 行，沿用 `acp-client.mjs`，實作 `capabilities`／`start`／`stop`／`listWindows`／`listNames`／`activityOf`／`deliver`）、啟動指令設定檔（例如 `~/.irori-relay/acp-agents.json`：名稱 → 指令、參數、模型、權限策略）、契約測試（照 `engine-contract.test.mjs`）、README 一節。
+- 名單裡的 ACP 工作者視窗名：建議 `工作者-<引擎>`（例如 `Gemini-工作者`），引擎欄位 `engine=acp:gemini`。
+
+### 8.4 分期
+
+| 期 | 內容 | 前提／驗收 |
+|---|---|---|
+| **一** | `engines/acp.mjs` 通用轉接器＋ agy 工作者（先用社群 `google-antigravity-acp`，或自己寫 35 行直連 agy stream-json 以免依賴第三方套件，兩者都已實測）；權限一律拒絕；每信一個 `session/new`（無狀態）或每寄件人一個 session（有記憶，需設計回收）；契約測試 | `IRORI_ENGINES=claude,acp` 時，Irori 手機對 `Gemini-工作者` 送一句、收到回覆；不影響 Claude |
+| **二** | ① pi：`irori-inbox` 擴充（已開視窗）＋ `pi --mode rpc` 工作者；② Grok：裝官方 Grok Build（先處理 `grok` 名稱衝突）、登入、實測 `grok agent stdio`，Windows 若不穩就退到 `grok -p --resume`；③ `irori-mail` MCP 伺服器讓各引擎自己回信 | 每個都先跑 `tools-acp-probe.mjs`／RPC probe 再寫轉接器 |
+| **三** | 評估 Orca 當「已開視窗」通用入口（`orca terminal send`，限 Orca 內嵌終端機）；Claude Channels 轉正式後評估是否取代收發室 worker | Orca 是否支援使用者手動開的終端機待查；Channels 仍是研究預覽 |
+
+### 8.5 風險清單
+
+1. **Claude 帳務**：不要讓任何 ACP／Agent SDK 路徑用到使用者的 Claude 訂閱登入。若有人想「方便」把 Claude 加進 ACP 轉接器，這是紅線。
+2. **金鑰外洩到 AI 對話**：子行程一律白名單環境（`cleanEnv`）。這次實測沒有印出或傳送任何環境變數；測試用的子行程環境只含系統變數。
+3. **無人值守的權限**：ACP 工作者預設全拒；要放行任何工具，要有逐引擎的明確設定與白名單，且信的內容視為外部資料（提示注入）。
+4. **第三方套件供應鏈**：`google-antigravity-acp`（社群、MIT、2 個依賴、無安裝腳本，我已檢查 `npm view`）上線前要釘版本並看過原始碼；或用 35 行直連 agy 取代。
+5. **Google 條款**：Google 論壇答覆說「把官方 `agy` 當子行程、沿用其快取登入」是支援的；直接抽取憑證或打後端不支援。社群轉接器是包 `agy` 子行程，屬於前者；Google 官方 ACP 伺服器則走自己的登入。
+6. **Windows**：Grok Build 官方標示 best-effort；官方 `agy_acp_server` 冷啟動 13～18 秒，且需 226 MB。
+7. **工作者的可見性**：使用者看不到背景工作者在做什麼；需要在回信裡標明「這是 Irori 啟動的 Gemini 工作者，不是你開的視窗」，並限制它的工作資料夾（暫存資料夾，無專案檔）。
+
+### 8.6 這次沒做到／未驗證
+
+- 沒有送任何訊息到使用者開著的視窗（依規定）。
+- 沒有實測：官方 Grok Build（沒裝、要訂閱登入）、pi 擴充（只讀文件與官方範例）、Orca 對使用者自開終端機、Claude Channels。
+- 官方 `agy_acp_server` 的登入沒有完成（需要使用者互動的瀏覽器授權）；啟動它時它嘗試開登入頁，我讓逾時結束並關掉行程。如果你看到有一個 Google 登入分頁，是這個，可以直接關。
+- 多 agent 工具表中標「推測」「二手」者未逐一點進第一手頁面。
+- 「用 pi 開一個 irori-probe 的 claude session」這個測法**不適用**：pi 不會啟動 `claude`，所以沒有 Claude session 可以看；我改測 pi 自己的 RPC（`get_state`，不呼叫任何模型）。
+
+---
+
+## 9. 來源
+
+**ACP**
+- [ACP 簡介](https://agentclientprotocol.com/overview/introduction)、[文件索引 llms.txt](https://agentclientprotocol.com/llms.txt)、[session setup](https://agentclientprotocol.com/protocol/session-setup)、[session list (v2)](https://agentclientprotocol.com/protocol/v2/session-list.md)、[Streamable HTTP／WebSocket RFD](https://agentclientprotocol.com/rfds/streamable-http-websocket-transport.md)
+- [ACP 登錄表（網頁）](https://agentclientprotocol.com/get-started/registry.md)、[登錄表 JSON](https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json)、[registry 倉庫](https://github.com/agentclientprotocol/registry)
+- [協定倉庫](https://github.com/agentclientprotocol/agent-client-protocol)、[TypeScript SDK](https://agentclientprotocol.com/libraries/typescript)
+- [Zed：External Agents](https://zed.dev/docs/ai/external-agents)、[Zed ACP](https://zed.dev/acp)
+- [claude-agent-acp](https://github.com/agentclientprotocol/claude-agent-acp)、[ToS 疑問 issue #337](https://github.com/agentclientprotocol/claude-agent-acp/issues/337)、[codex-acp（舊倉庫，已封存）](https://github.com/zed-industries/codex-acp)
+- [acpx：無頭 ACP 用戶端 CLI](https://github.com/openclaw/acpx)
+
+**AgentAPI**：[coder/agentapi](https://github.com/coder/agentapi)（已封存）
+
+**Claude Code**
+- [法務與合規：認證與憑證使用](https://code.claude.com/docs/en/legal-and-compliance)
+- [Agent SDK 概覽（含「不准第三方提供 claude.ai 登入」註記）](https://code.claude.com/docs/en/agent-sdk/overview)
+- [Channels](https://code.claude.com/docs/en/channels)
+- [跨 session 訊息（第三方說明）](https://claudefa.st/blog/guide/mechanics/cross-session-messaging)、[#99049 要求不經模型的 send CLI](https://github.com/anthropics/claude-code/issues/99049)
+
+**Gemini／Antigravity**
+- [Headless mode](https://antigravity.google/docs/cli/headless/)、[Remote Control](https://antigravity.google/docs/remote-control/)、[IDE extensions](https://antigravity.google/docs/ide/extensions)
+- [Google 論壇：外部協調 agy 無頭模式](https://discuss.ai.google.dev/t/is-external-orchestration-of-antigravity-cli-headless-mode-supported-with-account-based-usage/183051)
+- [Gemini CLI ACP 模式](https://geminicli.com/docs/cli/acp-mode/)
+- [sibbl/google-antigravity-acp](https://github.com/sibbl/google-antigravity-acp)、[dongitran/agy-agent-acp](https://github.com/dongitran/agy-agent-acp)、[agy-remote](https://pypi.org/project/agy-remote/)
+
+**Grok**：[Grok Build 概覽](https://docs.x.ai/build/overview)、[無頭與腳本](https://docs.x.ai/build/cli/headless-scripting)、[Sessions](https://docs.x.ai/build/features/sessions)、[xai-org/grok-build](https://github.com/xai-org/grok-build)、[發表文](https://x.ai/news/grok-build-cli)
+
+**pi**：[earendil-works/pi](https://github.com/earendil-works/pi)、[coding-agent README](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md)、[rpc.md](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md)、[providers.md](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/providers.md)、[Wikipedia：Pi (AI agent)](https://en.wikipedia.org/wiki/Pi_(AI_agent))（本機另讀了套件內附的 `docs/` 與 `examples/extensions/file-trigger.ts`）
+
+**多 agent 工具**：[claude-squad](https://github.com/smtg-ai/claude-squad)、[vibe-kanban](https://github.com/BloopAI/vibe-kanban)與[停運公告](https://vibekanban.com/blog/shutdown)、[Crystal](https://github.com/stravu/crystal)、[Orca](https://github.com/stablyai/orca)與[orca-cli 指南](https://github.com/stablyai/orca/blob/main/skill-guides/orca-cli.md)、[OpenHands](https://github.com/OpenHands/OpenHands)與[ACP agents 文件](https://docs.openhands.dev/openhands/usage/agent-canvas/acp-agents)、[happy](https://github.com/slopus/happy)

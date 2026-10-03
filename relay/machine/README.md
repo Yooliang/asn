@@ -273,6 +273,12 @@ node D:/Github/irori/relay/machine/recv.mjs --once     # 拉一次、印出、ac
 - 安全：預設不轉進「完全存取」視窗；不用 `--dangerously-bypass-approvals-and-sandbox`；子行程清掉 `OPENAI_API_KEY` 等。
 - 檢查工具：`node tools-codex-probe.mjs status|send|open`。測試：`test/codex-engine.test.mjs`（假 codex `test/fake-codex.mjs`；含讓 bridge.mjs 載入 codex 轉接器的整合測試）。
 
+### 其他引擎（Gemini、Grok、pi）與 ACP
+
+調研與建議見 `docs/AGENT-ENGINES.md`：ACP／AgentAPI 都接不到使用者已開的視窗（只能控制自己啟動的 agent），所以不整套改 ACP；
+已開視窗各引擎走各自入口（Claude SendMessage、Codex queue、pi 擴充），Gemini（agy）／Grok 先以「Irori 啟動的工作者」形式接。
+`engines/acp-client.mjs` 是最小 ACP 用戶端原型（白名單子行程環境、權限一律拒絕），`node tools-acp-probe.mjs init|prompt …` 手動檢查任何 ACP agent。
+
 ## 測試
 
 `node --test relay/machine/test/*.test.mjs`（Node 25 的目錄寫法 `relay/machine/test/` 會失敗，用 glob）：本機假伺服器（node 內建 http）模擬仲介與 Aegis，不碰真實金鑰與網路服務。
