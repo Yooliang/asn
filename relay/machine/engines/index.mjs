@@ -4,7 +4,7 @@
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const BUILTIN = { claude: './claude.mjs' }
+const BUILTIN = { claude: './claude.mjs', codex: './codex.mjs' }
 export const REQUIRED_METHODS = ['capabilities', 'start', 'stop', 'listWindows', 'listNames', 'activityOf', 'deliver']
 
 export function validateEngine(e) {
