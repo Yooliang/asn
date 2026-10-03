@@ -13,6 +13,7 @@ import { createLauncher } from './launcher.mjs'
 import { loadEngines } from './engines/index.mjs'
 import { selfRecvAlive } from './self-recv.mjs'
 import { sentMarkName } from './sent-mark.mjs'
+import { snapshot, loadState, saveAtomic } from './pending-store.mjs'
 
 const NODE_ID = (process.env.IRORI_RELAY_ID || 'H').trim()
 const BASE_URL = (process.env.IRORI_RELAY_URL || 'https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/irori-relay').replace(/\/+$/, '')
@@ -106,7 +107,32 @@ const forwardable = name => roster.some(a => a.name === name) || (EXTRA_ALLOW.in
 
 // ---- mail state --------------------------------------------------------------------------------
 const seen = new Set()        // acked mail ids (dedupe)
-const pending = new Map()     // mail id -> {mail, target, state(forwarding|waiting|notified|done), t0, t, replied, notifiedAt}
+// 對應表有變動就存 WORK_DIR/pending.json（原子寫入、不含信件內文）；橋重啟後載回，遲到／對不上的回覆才不會因重啟被丟掉
+const PENDING_FILE = path.join(WORK_DIR, 'pending.json')
+let lastSaved = ''
+let persistFailed = false
+function persist() {
+  const snap = snapshot(pending, lastRequester)
+  const text = JSON.stringify(snap)
+  if (text === lastSaved) return
+  try { saveAtomic(PENDING_FILE, snap); lastSaved = text; persistFailed = false }
+  catch (e) { if (!persistFailed) { persistFailed = true; log(`pending.json save failed: ${e.message}`) } }
+}
+class PendingMap extends Map {
+  set(k, v) { const r = super.set(k, v); persist(); return r }
+  delete(k) { const r = super.delete(k); persist(); return r }
+}
+const pending = new PendingMap()   // mail id -> {mail, target, state(forwarding|waiting|notified|done), t0, t, replied, notifiedAt}
+const lastRequester = {}           // 收件視窗 -> {from_node, from_agent, mail_id, t}：最近一次交辦它的寄件人（對不上回覆時的轉寄對象）
+{
+  const st = loadState(PENDING_FILE, Date.now(), LATE_KEEP_MS)
+  if (st.error) log(`pending.json unreadable, ignored: ${st.error}`)
+  for (const [id, p] of st.pending) Map.prototype.set.call(pending, id, p)
+  Object.assign(lastRequester, st.lastRequester)
+  const n = st.pending.filter(([, p]) => p.state === 'notified').length
+  if (st.pending.length || Object.keys(st.lastRequester).length || st.dropped)
+    log(`pending restored: ${st.pending.length} (waiting ${st.pending.length - n}, notified ${n}), lastRequester ${Object.keys(st.lastRequester).length}, expired/invalid dropped ${st.dropped}`)
+}
 const noticed = new Map()     // 寄件人|收件視窗 -> {t, skipped}（逾時通知合併用）
 const NO_REPLY_RE = /（不需回覆）|\[no-reply\]/i
 // 寄件人是任何節點的收發室（<節點>-收發室）：系統信，照常轉交但不計時、不互相寄通知
@@ -131,6 +157,7 @@ async function onSent(id) {
   const p = pending.get(id)
   if (!p || p.state !== 'forwarding') return
   p.state = 'waiting'
+  persist()
   if (p.room) { log(`forwarded room=${p.room.id} #${p.room.seq} -> ${p.target}`); p.t = Date.now(); return }
   if (p.noReply) { pending.delete(id); log(`forwarded id=${id} -> ${p.target} (no-reply mail, no timer)`); await ackIds([id]); return }
   log(`forwarded id=${id} -> ${p.target} (${Date.now() - p.t0}ms)`)
@@ -148,12 +175,19 @@ async function onFail(id, reason) {
   await ackIds([id])
   pending.delete(id)
 }
+// 對不上任何來信的回覆：該視窗 24 小時內有最近一次交辦它的寄件人，就轉給他；沒有才丟棄（log 寫清楚）
+async function forwardUnmatched(from, text) {
+  const lr = lastRequester[from]
+  if (!lr || Date.now() - lr.t > LATE_KEEP_MS) { log(`unmatched reply from ${from} (${text.length} chars) dropped: no pending mail and no requester within ${Math.round(LATE_KEEP_MS / 3600000)}h`); return }
+  const ok = await sendBack({ mail: { id: lr.mail_id, from_node: lr.from_node, from_agent: lr.from_agent } }, `（收發室：這則回覆對不上特定來信，依最近一次交辦轉給你）\n${text}`, from)
+  log(`unmatched reply from ${from} (${text.length} chars) -> last requester ${lr.from_node}/${lr.from_agent} reply_to=${lr.mail_id} sent=${ok}`)
+}
 async function onReply(from, text) {
   const cands = [...pending.values()].filter(p => p.target === from && p.state !== 'forwarding')
   // 還在等的優先；沒有才輪到已通知過「沒回」、仍保留中的信（遲到的回覆，先進先出）
   const active = cands.filter(c => c.state !== 'notified')
   const p = active.find(c => !c.replied) || active[active.length - 1] || cands.find(c => c.state === 'notified')
-  if (!p) { log(`unmatched reply from ${from} (${text.length} chars) dropped`); return }
+  if (!p) { await forwardUnmatched(from, text); return }
   const late = p.state === 'notified'
   p.replied = true
   if (late) pending.delete(p.mail.id)   // 遲到的回覆寄回後就清掉
@@ -207,6 +241,7 @@ async function judgeTimeout(id, p, now) {
   }
   // 決定要通知：信留著等遲到的回覆（先改 state，免得 await 期間下一輪又處理同一封）
   p.state = 'notified'; p.notifiedAt = now
+  persist()
   evictNotified()
   await noticeNoReply(p, now, reason)
 }
@@ -231,6 +266,8 @@ setInterval(async () => {
       pending.delete(id); log(`late-reply slot expired id=${id}`)
     }
   }
+  for (const [t, r] of Object.entries(lastRequester)) if (now - r.t > LATE_KEEP_MS) delete lastRequester[t]
+  persist()
   pruneReplied(now)
 }, TICK_MS)
 
@@ -306,6 +343,7 @@ async function handleMail(m) {
     return
   }
   pending.set(m.id, p)
+  if (!p.noReply) { lastRequester[target] = { from_node: m.from_node, from_agent: m.from_agent ?? '', mail_id: m.id, t: Date.now() }; persist() }
   try {
     const eng = engineOfWindow(target)
     eng.deliver({ id: m.id, to: target, text: `${head(m, eng.id)}\n${note ? note + '\n' : ''}${m.body}` })
