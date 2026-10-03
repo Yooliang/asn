@@ -156,6 +156,7 @@ Deno.test("自動收入：開頭字串驗證（空字串、全空白、含 ~、�
 Deno.test("自動收入：syncNodeAuto 用規則算出該入群的視窗交給資料庫；規則取不到只記 log 不丟錯", async () => {
   const { deps, calls } = fake({ irori_relay_room_auto_rules: () => [{ room: "g36", prefixes: ["g36-"] }] });
   await syncNodeAuto(deps, "H", ["g36-前端", "別的"]);
+  assertEquals(calls.find((c) => c.fn === "irori_relay_room_auto_rules")!.args, { p_node: "H" }, "規則只取這個節點所屬租戶的群組");
   const apply = calls.find((c) => c.fn === "irori_relay_room_auto_apply")!;
   assertEquals(apply.args, { p_node: "H", p_joins: [{ room: "g36", name: "g36-前端" }] });
   const broken: RoomDeps = { ...deps, rpc: () => Promise.resolve({ data: null, error: new Error("boom") }) };

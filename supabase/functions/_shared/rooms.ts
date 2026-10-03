@@ -27,7 +27,7 @@ export function parseMentions(body: string, members: RoomMember[], max = MAX_MEN
   const cands: { text: string; key: string }[] = [];
   for (const m of members) {
     const names = new Set([m.name, m.key]);
-    if (m.key === OWNER_KEY) names.add("小良哥");
+    if (m.key === OWNER_KEY) names.add("主人"); // 顯示名來自租戶主人的稱呼（m.name）；「主人」是通用的備用叫法
     else if (m.node_role === "owner") names.add("希緒");
     for (const n of names) if (n) cands.push({ text: n.toLowerCase(), key: m.key });
   }
@@ -104,7 +104,7 @@ export async function postMessage(
 // 建群組、改置頂、加人、移人一律 403（只有小良哥經 irori-api 能做，連希緒 XISU 的金鑰也一樣）
 export async function handleNodeRoomAction(deps: RoomDeps, me: { id: string }, action: string, params: Json): Promise<Reply> {
   if (OWNER_ONLY_ACTIONS.has(action)) {
-    return err(403, "forbidden", { detail: "建群組、改置頂、加人與移人只有小良哥本人能在介面上做" });
+    return err(403, "forbidden", { detail: "建群組、改置頂、加人與移人只有使用者本人能在介面上做" });
   }
   const agent = typeof params.as_agent === "string" && params.as_agent ? params.as_agent : typeof params.from_agent === "string" && params.from_agent ? params.from_agent : null;
   if (agent && (agent.includes(WINDOW_SEP) || agent.length > 60)) return err(400, "bad_agent");
@@ -167,7 +167,7 @@ export function matchAutoJoins(rules: { room: string; prefixes: string[] }[], wi
 // 套用某節點目前的視窗名單：符合的自動入群；原本自動入群、視窗已消失的標為離開（資料庫端處理）。出錯只記 log，不影響呼叫端
 export async function syncNodeAuto(deps: RoomDeps, node: string, windows: string[]): Promise<void> {
   try {
-    const rules = await deps.rpc("irori_relay_room_auto_rules", {});
+    const rules = await deps.rpc("irori_relay_room_auto_rules", { p_node: node });
     if (rules.error) throw rules.error;
     const joins = matchAutoJoins(rules.data ?? [], windows);
     const res = await deps.rpc("irori_relay_room_auto_apply", { p_node: node, p_joins: joins });

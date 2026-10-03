@@ -97,13 +97,13 @@ Deno.serve(async (req) => {
   const { data: nodes, error: aerr } = await db.rpc("irori_relay_auth", { p_key_hash: await sha256Hex(key) });
   if (aerr) { console.error(aerr); return json(500, { error: "internal" }); }
   if (!nodes || nodes.length === 0) return json(401, { error: "unauthorized" });
-  const me = nodes[0] as { id: string; bell_topic: string; role: string };
+  const me = nodes[0] as { id: string; bell_topic: string; role: string; tenant_id: string | null };
 
   if (action === "whoami" && req.method === "GET") {
     return json(200, { node: me.id, bell_topic: me.bell_topic });
   }
   if (action === "list" && req.method === "GET") {
-    const { data, error } = await db.rpc("irori_relay_list");
+    const { data, error } = await db.rpc("irori_relay_list", { p_tenant: me.tenant_id });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     return json(200, { members: data });
   }

@@ -425,6 +425,7 @@ test('帳號：停用→登入被拒、租戶的機器橋金鑰暫時失效；�
   const list = await call(db, 'irori_account_list');
   const b = list.accounts.find((a) => a.email === 'b@example.com');
   assert.deepEqual([b.role, b.status, b.tenant, b.machines], ['member', 'active', 2, 2]); // t2-home 與 t2-gpt
+  assert.deepEqual([Number(b.quota.granted), Number(b.quota.used), b.quota.unlimited], [1, 0, false]);
   assert.ok(Array.isArray(list.invites));
   assert.ok(!JSON.stringify(list).includes('舊的一封信'));
   // 同一個 email 綁在別的登入身分上：不自動接手

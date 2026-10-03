@@ -469,7 +469,9 @@ begin
       'email', a.email, 'user_id', a.user_id, 'role', a.role, 'status', a.status, 'source', a.source,
       'tenant', t.serial, 'owner_name', t.owner_name,
       'machines', (select count(*) from relay.nodes n where n.tenant_id = a.tenant_id and n.role = 'member' and n.status = 'active'),
-      'created_at', a.created_at, 'last_login_at', a.last_login_at) order by a.created_at, a.email), '[]'::jsonb)
+      'created_at', a.created_at, 'last_login_at', a.last_login_at,
+      'quota', (select jsonb_build_object('granted', q.granted_usd, 'used', q.used_usd, 'unlimited', q.unlimited)
+                from irori.usage_quota q where q.owner = a.user_id)) order by a.created_at, a.email), '[]'::jsonb)
     into v_acc
     from irori.accounts a left join relay.tenants t on t.id = a.tenant_id;
   select coalesce(jsonb_agg(jsonb_build_object(
