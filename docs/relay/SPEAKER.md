@@ -69,7 +69,8 @@
 |---|---|---|---|---|---|---|
 | 在 3D 頁按住說話 → 她回答 | 該 3D 頁 `/chat`（帶 client_id，成為 speaker）；回答完成後後端另推一則鏡像 say（`origin:'3d'`） | 是，串流回該頁，鏡像推給其他裝置 | 該頁（鏡像一律不出聲） | 該頁＋所有**其他** 3D 頁（靜音播放）；送話那台忽略鏡像（`from_client` 是自己） | 該頁全做；其他 3D 頁照 `actions` 做 body／motion，文字標籤的表情手勢也做；App 泡泡與手機聊天串略過 | 已修（需部署後端與網頁；舊版 App 靠 speaker_client＝送話那台而不唸，新版 sayTextOf 直接略過） |
 | 從 /chat 獨立頁打字 | /chat 頁 `speak_elsewhere` → 後端推 say（origin chat） | 是 | speaker（最近互動的 3D／App） | /chat 頁自己＋所有 3D 頁（其他台靜音播放） | 所有 3D 頁照 `actions` 做 | 已修（以前非 speaker 的 3D 頁連字幕與標籤都沒有） |
-| App 泡泡說話（3D 房間顯示中） | App `/chat`＋`speak_elsewhere` | 是 | speaker（3D 房間顯示時 App 不搶 speaker） | App 泡泡＋所有 3D 頁 | 所有 3D 頁 | 已修（同上） |
+| App 泡泡說話（3D 房間顯示中） | App `/chat`＋`speak_elsewhere`＋`speak_via`（App 內 3D 頁的 client_id） | 是 | **App 內那個 3D 頁**（後端先把它蓋成 speaker；它已離開則維持原選法）。以前沒指定，後端挑最近互動的 3D 頁，常是電腦那台，手機 Live 只有字幕沒有聲音 | App 泡泡＋所有 3D 頁 | 所有 3D 頁 | 已修（需部署後端、網頁、App）；見下「speak_via」 |
+| 內容通道（RTDB）送來的 say | 同上各種 say，經加密事件 | 是 | 同各列（speaker） | 同各列 | 同各列 | 已修：以前 `applyContent` 先把 seq 登記成「已收過」才交給 `handle`，`handle` 的去重把這批全濾光，內容通道的 say 一則都沒唸也沒字幕（開了 `IRORI_SIGNAL_CONTENT` 才會發生）。測試 `tests/content_say.test.mjs` |
 | App 泡泡說話（3D 房間沒顯示） | App `/chat`（App 成為 speaker），App 自己唸 | 是，只動作推回 | App | App 泡泡；**3D 頁沒有字幕** | 3D 頁照 `actions` 做 body／motion | 缺口：話不推給 3D 頁（要推需 App 也帶 speak_elsewhere，但那樣 App 自己就不唸；要改需協議，見下） |
 | 夥伴回信轉述 | 後端 inbox 以她的口氣寫好 say（帶 speaker_client） | 是 | speaker | 所有 3D 頁（其他台靜音播放） | 所有 3D 頁（文字裡的標籤） | 已修 |
 | 提醒 | 後端 reminders 推 say（帶 speaker_client） | 是 | speaker | 所有 3D 頁 | 所有 3D 頁（文字標籤） | 已修 |
@@ -104,6 +105,31 @@ WebView.onPause 不保證 `document.visibilityState` 變 hidden，3D 頁可能�
 
 後端規則不用改：`speak_elsewhere` 沒帶 client_id 時，speaker 是「最近互動、且 `dev:` 紀錄新鮮且 visible 的那台」，
 它沒回報離開就視為活著——後端無法分辨一台「說自己 visible 但其實沒人聽」的 3D 頁，所以靠端上正確回報。
+
+### speak_via：泡泡在 Live 前景時，指定 App 內那個 3D 頁當 speaker（2026-10-03）
+
+實測：手機 App 在 Live 分頁、用泡泡講話，Live 的 3D 頁只有字幕、沒有聲音（它的時鐘也沒變深色＝不認為自己是出聲裝置）。
+原因：泡泡把出聲交給 3D 頁時送 `speak_elsewhere` 且不帶 `client_id`，後端 speaker 是「最近互動、還活著的那台」，
+結果是電腦上另一個開著的 3D 頁（`dev:5f60…`），App 內的 3D 頁只被當成「別台 3D 頁」靜音播放。
+
+- App 內的 3D 頁（`?app=1`）開機時呼叫 `window.IroriRoom.setClientId(<自己的 client_id>)`（`host_visibility.js` 的 `reportClientId`；瀏覽器沒有這座橋就什麼都不做）。
+  外殼（`MainActivity.RoomBridge`）驗證格式（1～64 字、英數與 `-` `_`）後放進 `BubbleService.roomClientId`，房間 WebView 銷毀（登出）時清掉。
+- 泡泡（`BubbleService.send`）與電視（`TvTalk`）送 `/chat` 時，`speak_elsewhere` 搭配 `speak_via=<roomClientId>`（泡泡只在 `roomShowing` 時帶；房間沒顯示由泡泡自己唸，不帶）。
+- 後端 `chat()`：`speak_elsewhere` ＋ `speak_via` 且沒有 `client_id` → `noteSpeakVia`（`speaker.ts`）：指定的裝置必須是 **還活著、可見的 3D 頁**（`dev:<id>` 新鮮、`kind=3d`、`visible` 不是 false），
+  通過就等於它剛互動過（`noteInteraction`：蓋成 speaker，換人就敲門鈴）；沒通過就不指定，維持原本選法（不會把出聲交給沒人聽的頁）。在開始回答之前就做，回答完推 say 時 `stampSpeaker` 蓋的就是它。
+- 舊版 App 不帶 `speak_via`，行為不變。
+
+### 其他一起修的（2026-10-03）
+
+- **內容通道 say 不出聲**：見總表「內容通道送來的 say」。`inbox.js` 現在先 `handle` 再 `rememberDelivered`（`signal_logic.js`）。
+- **播放不能卡死佇列**（`playback_guard.js`、`lipsync.js`、`speech.js`）：頁面因版本更新自動重新整理後沒有使用者手勢，AudioContext 一直是 suspended；
+  音訊元素接在 suspended 的 AudioContext 上 `play()` 成功但時間不走、永遠不會 ended，整條說話佇列卡死（那台之後再也不向 `/tts` 要聲音）。
+  現在：起播前 AudioContext 不是 running → 不接它、直接播（不真的對嘴，畫面提示「點一下畫面讓她能出聲」）；第一次手勢就建立／叫醒 AudioContext；
+  播放中連續約 6 秒沒進度就放棄這一句；`/tts` 取聲音 20 秒逾時。
+- **App 泡泡的聲音**：`Voice.from` 以前讀 state 根層的 voice／pitch（後端放在 `settings` 底下），讀不到就用預設的 HsiaoYu／pitch 15。現在優先讀 `settings`，沒有才退回根層。
+- **App 內 3D 頁載入完補說一次可見狀態**：`onPageFinished` 對 Live 的 WebView 再呼叫一次 `iroriHostVisible`（`applyTabVisibility` 在網頁還沒載好時呼叫是空操作）。
+- **聊天紀錄重複**：主動說話的使用者句每次都是同一句「［系統］（你主動找…說了話）」，`mergeHistory`（網頁、App 兩份）只看「開頭相同幾則」會配錯位置，紀錄滿 40 則後把同一段接兩次（再經 App 存回時 `fillAt` 讓這些重複的輪次拿到同一個時間）。
+  現在優先找「一路相同到其中一邊結尾」的完整重疊，分岔（兩邊各自往後長）至少要兩則共同段。已經寫壞的紀錄不會自己消失（清除記憶或手動整理）。
 
 ### App 端需要的配合
 
