@@ -88,6 +88,23 @@
 4. 開機打招呼、新版本通知是各台本機行為，跨裝置不去重。
 5. 靜音播放的停留時間是估的，跟出聲那台不會完全同步。
 
+### 「3D 房間在畫面上」的定義（App 的 `roomShowing`，2026-10-03 修）
+
+泡泡送話時問 `roomShowing`：true 就帶 `speak_elsewhere`（不帶 client_id、不當 speaker），把出聲交給 3D 頁。
+這個旗標必須是「3D 房間真的看得到、聽得到」，定義是三個條件同時成立（`roomShowingFor`）：**App 在前景（onResume～onPause）、已登入、目前分頁是 Live**。
+
+曾經的 bug：只算後兩項。App 進背景時 `onPause` 會把旗標設 false，但之後任何呼叫 `applyTabVisibility` 的路徑（登入狀態變化、token 換新，背景也會發生）
+又把它設回 `showingRoom`（停在 Live 分頁就是 true），還順手 `room.onResume()`。結果泡泡在背景以為 3D 房間會唸，
+送 `speak_elsewhere`，後端把出聲交給一台沒人在聽的 3D 頁（`speaker_client`＝那台），**整句話沒有任何一台唸**。
+現在 `MainActivity` 有 `foreground` 旗標，`applyTabVisibility` 一律吃它；`onPause` 先關旗標再套用，`onDestroy` 也清掉。
+
+另外 App 在 `applyTabVisibility` 時對 Live 的 WebView 呼叫 `window.iroriHostVisible(true|false)`（`web/js/host_visibility.js`）：
+WebView.onPause 不保證 `document.visibilityState` 變 hidden，3D 頁可能在背景繼續回報 visible=1、被選成 speaker。
+這支把 `visibilityState`／`hidden` 蓋成外殼說的並觸發 `visibilitychange`，既有的「離開時 POST /device visible=0」「停輪詢」「不唸話」就都照常動作。
+
+後端規則不用改：`speak_elsewhere` 沒帶 client_id 時，speaker 是「最近互動、且 `dev:` 紀錄新鮮且 visible 的那台」，
+它沒回報離開就視為活著——後端無法分辨一台「說自己 visible 但其實沒人聽」的 3D 頁，所以靠端上正確回報。
+
 ### App 端需要的配合
 
 - 缺口 6（離開時讓位）：App 在 `paused`／泡泡收起（`roomShowing` 變化）時，立刻 `POST /device?client_id=<id>&kind=app&visible=0`（路徑與參數見上；`BubbleService` 現有的 `visible=0` 輪詢不用改）。沒做之前，暫停／泡泡收起要等進行中的那次長輪詢結束（最多 25 秒）才讓位；App 被系統殺掉則要等 180 秒判死，期間沒有任何一台出聲。
