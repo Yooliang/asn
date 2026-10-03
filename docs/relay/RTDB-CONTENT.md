@@ -1,6 +1,6 @@
 # 把「內容」也放進 Firebase RTDB（加密）：設計稿
 
-2026-10-03。接在 #120（`SIGNAL.md`，RTDB 只放指標）之後。**這份只是設計，沒有改任何程式、沒有部署、沒有動 Firebase。**
+2026-10-03。接在 #120（`SIGNAL.md`，RTDB 只放指標）之後。**狀態：第 0、1 期（金鑰與加解密、事件通道；後端＋網頁）已上線，小良哥實測正常；第 2 期（狀態快照）、第 3 期（meta）與 Android 端已實作、單元測試與對真 RTDB 的探測都通過，還沒部署、還沒開開關**（第 9.4～9.9 節）。第 1～8 節是原本的設計稿，實作與設計稿不同的地方記在第 9 節。
 小良哥裁示（2026-10-03）：①盡可能用 RTDB 即時資料庫的特性優化；②**不使用 Firebase 登入**，只用不可猜的雜湊路徑當鑰匙；③放進 RTDB 的內容**要加密**，金鑰由裝置登入 Supabase 後從 `/updates`（或其他已驗證端點）拿，RTDB 只存密文。
 所以：只有後端（服務帳戶）能寫，裝置只讀；沒有 `onDisconnect`、沒有裝置端寫入。
 標「估」的數字是讀程式推的，沒實測。標「待確認」的是我沒把握、需要實測或問人的。
@@ -50,8 +50,8 @@
 /c/<hash>/                 ← 每位使用者一個子樹（內容通道，新增）
     head   明文，同 p 的欄位 + kid：{ seq, state_seq, speaker?, at, due?, kid }
     e/<12位零補齊的seq>    ← 事件，一則一個節點：{ n, c, k }
-    s                      ← 最新狀態快照（覆寫）：{ n, c, k, v }
-    m                      ← 小資料（第三期才有）：{ n, c, k, v }
+    s                      ← 最新狀態快照（覆寫）：{ n, c, k, v }（第二期，已實作）
+    meta                   ← 第三期（已實作）：明文 { chat, unread } 兩個毫秒時間戳，見 9.5（原本設計的加密 m 保留給未來的小資料，沒有用到）
 /p/<hash>                  ← #120 的指標，原樣保留（舊版本的裝置、沒金鑰的裝置用）
 /b/<hash2>                 ← 來信門鈴，不動
 ```
@@ -163,7 +163,7 @@ create unique index content_keys_one_current on irori.content_keys (owner) where
 ### 4.4 裝置端保管
 
 - 網頁：放記憶體；為了重新整理後不必等下一次 `/updates` 才能解密，可同時存 `sessionStorage`（同分頁關閉就消失）。**不存 `localStorage`**（跨分頁常駐、更容易被工具／擴充程式帶走）；不過目前使用者 token 已在 `localStorage`，所以威脅模型上其實同級，這是「盡量少」的保守選擇。全部包 try/catch，取不到就當沒有金鑰。
-- Android：用 Android Keystore 包一把 AES 金鑰，再用它加密後存 SharedPreferences（或 `EncryptedSharedPreferences`）。服務（BubbleService）與兩個 WebView 各自從 `/updates` 拿，不跨處理程序共享。**Android 金鑰儲存方式這期不查、不做，第 1 期 Android 時再定。**
+- Android：用 Android Keystore 包一把 AES 金鑰，再用它加密後存 SharedPreferences（或 `EncryptedSharedPreferences`）。服務（BubbleService）與兩個 WebView 各自從 `/updates` 拿，不跨處理程序共享。**已定（第 9.6 節）：Android 只放記憶體，不存檔、不用 Keystore 包起來存。**
 - 登出時清掉金鑰。
 
 ### 4.5 輪替
@@ -287,6 +287,8 @@ Firebase RTDB 免費額度（官方，**請上線前再核對當時定價頁**�
 | 3 | **小資料**：`meta`（未讀指標、聊天頁事件序號） | 看 2.8 決定 | 拿掉 `meta` |
 | 4（可選） | 確認所有裝置都用 `c` 後，不再寫 `/p`（`head` 取代） | 之前至少保留一個版本週期的相容 | 重新寫 `p` |
 
+實作狀態（2026-10-03）：0、1 期已上線；2、3 期與 Android 已實作未上線（第 9.4～9.9 節）；4 期還沒做（舊版 App 與沒金鑰的裝置還在用 `p`）。
+
 任一期若出問題，**最快的退路是拿掉 `IRORI_SIGNAL_CONTENT`**，不必重新部署程式；裝置端因為都有第 5.3 節的退路，不會卡住。
 
 ### 7.3 測試方式（紅線：不能用測試帳號打 `/updates`、`/chat`）
@@ -321,9 +323,9 @@ Firebase RTDB 免費額度（官方，**請上線前再核對當時定價頁**�
 | 10 | 事件保留數與 TTL（建議 20 則／24 小時）、單則上限（4 KB） | 照建議；落後者本來就該走 `/updates?since=`。 |
 | 11 | 「待確認」項目（`pending` 副作用、`PUT /state` 頻率、缺口 1～4 進度、Android 金鑰儲存、Edge 日誌是否含回應本體）誰來查 | 由實作的人在第 0 期前逐一查證並回填到本文件，沒查清的項目不進第 1 期。**已查證**，結果回填在 2.3、2.4、3.1、4.3、4.4、5.1；Android 金鑰儲存留到第 1 期 Android 時再定；動作事件（缺口 1～4 未修）與狀態快照不進第 1 期。 |
 
-## 9. 第 0 期（暗跑）與第 1 期（事件通道）的實作紀錄
+## 9. 實作紀錄（第 0、1 期已上線；第 2、3 期與 Android 已實作未上線）
 
-2026-10-03 實作（後端＋網頁；**Android 不在這次**）。決定點 2～11 一律採第 8 節「我的建議」欄，決定點 1 已決定要做。
+9.1～9.3 是第 0、1 期（2026-10-03 實作，後端＋網頁，已上線）；第 2、3 期與 Android 見 9.4～9.9。決定點 2～11 一律採第 8 節「我的建議」欄，決定點 1 已決定要做。
 
 ### 9.1 做了什麼
 
@@ -349,7 +351,7 @@ Firebase RTDB 免費額度（官方，**請上線前再核對當時定價頁**�
 - **輪替**：90 天自動（用到金鑰時順手檢查）；`POST /signal/rotate`（body `{"emergency":true}` 為緊急，舊節點立刻刪；否則 10 分鐘後由清道夫刪）。舊金鑰在庫裡留 1 小時，期間 `signal.c.keys` 同時給新舊（`cur` 只有新的是 true）。
 - **裝置端把內容通道當「最佳化」**：套不上的情況（缺口、`big`、沒金鑰、不認得 key_id、單則解不開）都不套用，本機序號沒追上，head 的序號就「比本機大」，原本的 `/updates` 補拉機制自然接手；所以這些退路不需要額外程式。連續 3 則解密失敗改聽 `p` 10 分鐘（不是退回長輪詢）；節點被刪（輪替）就補拉拿新網址。
 - **去重**：內容通道直接套用過的 seq 記在 `delivered`，之後 `/updates` 的回應若又帶到同一則就略過（兩條路同時到的情況）。
-- **還沒驗到的**：Firebase REST 串流上「一次多路徑 PATCH」的事件長相（key 含斜線 `e/000000000003`，還是巢狀物件）——網頁兩種都接，但要用 `tools/rtdb_content_probe.mjs` 對真 RTDB 實測確認，並驗 Rules 的 401 行為。
+- **已驗到（2026-10-03，第 9.7 節）**：Firebase REST 串流上「一次多路徑 PATCH」的事件長相是 `patch`、`path:"/"`、key 含斜線（`{"e/000000000003":{…}}`，**不是**巢狀）；Rules 的 401 行為也如預期。網頁與 Android 兩種寫法都接。
 
 ### 9.3 上線順序與退路
 
@@ -361,3 +363,91 @@ Firebase RTDB 免費額度（官方，**請上線前再核對當時定價頁**�
 6. 部署網頁（`web/`）。舊網頁不帶 `cap`，後端不會給 `signal.c`，不受影響。
 7. 設 `IRORI_SIGNAL_CONTENT=events`。先只開自己的一台網頁，兩台裝置各觸發一則提醒或夥伴轉述，看 Network：另一台應該沒有事件觸發的 `/updates`。
 8. 退路：把 `IRORI_SIGNAL_CONTENT` 拿掉（或改成空）→ 後端立刻不寫、`/updates` 不再帶 `signal.c` → 裝置下一次回應就退回 #120。RTDB 上殘留的密文沒有金鑰就是亂碼，可手動刪 `c/`。
+
+### 9.4 第 2 期：狀態快照 `c/<hash>/s`（2026-10-03 實作，未上線）
+
+**開關**：`IRORI_SIGNAL_CONTENT` 含 `state`（`events,state` 或 `state`）。`content.enabled` 改成「Firebase 與 KEK 都好、至少有一個認得的旗標」；寫 head 只要 enabled，**事件只在含 `events` 時寫**，快照只在含 `state` 時寫。所以只開 `state`（沒開 `events`）也行：這時只寫 head＋`s`，說話事件靠 head 的 `seq` 觸發 `/updates` 補拉。
+
+**節點**：`c/<hash>/s` ＝ `{ n, c, k, v }`。明文 item ＝ `loadState()`（跟 `/updates` 回應的 `state` 同形：outfit、scene、zoom、body、settings、tv、lights）加上 `state_seq`；`v` ＝ `state_seq`；AAD ＝ `irori-c1|<hash>|s|<state_seq>|<key_id>`（拿 v=6 的密文冒充 v=5、拿事件的密文放到 `s` 都解不開）。item 超過 4 KB（補長度前）就只放明文 `{ big: 1, v }`，裝置看到 `big` 就去 `/updates` 拿。實際大小：30 盞燈、很長的電視標題、完整的 body 與 settings 加起來密文不到 3 KB（`content_test.ts` 有案例）。`PATCH { s: … }` 是把 `s` 整個換掉（對真 RTDB 驗過，舊版欄位不會殘留）。
+
+**觸發**：`PUT /state`、`POST /tv`、`POST /lights`、tv／light 工具、走位（`state.body`）、換出聲裝置全都經過 `ringStateBell` → `notifyInBackground` → `pointer.write`；`write` 在寫完 `p` 與 head 之後，另外把 `queueState(owner, state_seq)` 放背景。
+
+**後端節流**（`content.ts` 的 `queueState`／`publishState`）：
+1. 每位使用者一個佇列，**不跟事件的寫入共用**（節流的睡眠不能拖慢說話事件）。排著還沒開始的那筆會吸收之後的通知（取最大的 hint），所以連續改動只會寫一次。
+2. 開始時先用實例記憶體備忘、再用 kv `content_state`（`{ seq, kid, at }`）判斷這個 `state_seq` 寫過沒有，寫過就結束（只在 `state_seq` 變大時寫；`say` 之類的通知不會觸發讀狀態）。
+3. 離上次寫入不到 `STATE_MIN_GAP_MS`（1 秒）就睡到滿 1 秒，**醒來才讀當下最新的狀態**再寫（連續走位只寫最後一次）；醒來後再核對 kv，別的實例若已寫了更新的就不寫。
+4. 寫入失敗只記 log、不記為已寫，下一次通知會重試（nonce 重新產生）；讀不到狀態、金鑰庫不可用一律回 false、不丟錯。
+5. 金鑰輪替：kv 記的是舊 `kid`，新路徑會重寫；舊節點（含舊的 `s`）由輪替善後刪掉。
+
+**裝置（網頁）**（`signal_client.js`、`inbox.js`）：
+- `signal.c.state`（後端有開快照才有）為真時，head 的 `state_seq` 領先但 `s` 還沒到，**先等 `STATE_SNAPSHOT_WAIT_MS`（2.5 秒）才補拉 `/updates`**；快照到了、本機追上就不拉。快照是 `big` 就不等。等的期間來了事件（`seq`）理由不被拖慢。
+- `s.v` 比本機 `state_seq` 新才解密（解不開、`item.state_seq` 與節點 `v` 不一致都算解密失敗，跟事件共用「連續 3 則停用 10 分鐘」的計數），交給 `onSnapshot`；`signal_client` 記下已交出的版本（`snapApplied`），3D 頁正忙、晚一點才套用時不會因為「本機還比指標舊」去重拉。
+- `inbox.js` 把快照交給跟 `/updates` 同一個 `onState`（`main.js` 的 `applyRemoteState`，正忙時它自己會先放著），但**先壓 300 ms**（`createSnapshotHold`）：後端的快照有可能比「自己 `PUT /state` 的回應」先到，直接套會把自己剛做的動作往回拉；壓完再看一次本機 `state_seq`，已經不比它舊（自己的存檔回應到了）就丟掉。
+- 退路：後端沒給 `state` → 行為跟第 1 期完全一樣（head 的 `state_seq` 400 ms 後補拉 `/updates`）。
+
+**延遲（估，還沒在真機量）**：快照寫完到裝置收到約 0.1～0.3 秒＋壓 0.3 秒，約 0.4～0.6 秒；對照原本「head → 400 ms 合併 → 與上次拉取至少隔 1.5 秒 → `/updates` 來回」約 1.5～2 秒。第 2 期的目標「0.1～0.3 秒」指的是 RTDB 這一段；為了不讓自己的存檔被回聲蓋掉，加了 0.3 秒的壓住（可以調 `SNAPSHOT_HOLD_MS`）。
+
+**成本**：每次寫 ≤ 約 3 KB × 其他裝置數，最多每秒一次；3 台常駐、連續走位 1 小時最壞約 3,600 次 × 3 KB × 2 台 ≈ 21 MB，仍在第 6.2 節的量級內。
+
+**已知限制**：
+- 多個 Edge Function 實例同時寫同一位使用者時，睡醒後的核對不是原子的，極少數情況可能短暫寫回較舊的版本；裝置只套 `v` 更新的，且 head 的 `state_seq` 領先時 2.5 秒後會補拉，所以會自己修好。
+- `main.js` 的 `deferredState`（正忙時先放著的別台狀態）不檢查它是不是已經過時；這是原本就有的行為（`/updates` 路徑一樣），第 2 期讓別台的狀態到得更快，碰到的機率略升。建議（沒動，因為那一段在另一個工作裡）：`applyRemoteState` 開頭加 `if (Number.isFinite(seq) && seq < world.saver.seq) return;`。
+
+### 9.5 第 3 期：meta（聊天往來／未讀的時間戳，2026-10-03 實作，未上線）
+
+**和設計稿不同的地方**：決定點 7 採「只推明文序號指標、內容不進 RTDB」，而第 2.6 節說含聯絡人 id 的未讀要加密。兩者合起來的做法是：**meta 只放兩個毫秒時間戳，連未讀「數」都不放**——`c/<hash>/meta` ＝ `{ chat, unread }`，明文，沒有內容、沒有聯絡人 id、沒有計數；裝置看到時間戳變了就自己去 irori-api 重讀（名單、對話串、`/unread`）。所以不需要加密，原本設計的加密 `m` 節點保留不用。
+
+**開關**：`IRORI_SIGNAL_CONTENT` 含 `meta`。
+
+**誰更新它**（`touchMetaInBackground`，多路徑 PATCH，只動那個欄位）：收到夥伴來信（`chat`＋`unread`，在 `irori_relay_inbound` 寫入之後）、希緒寄信（`contact_partner` 工具，`chat`）、遠端開新視窗的第一句話（`POST /launch`，`chat`）、標已讀（`POST /contacts/:id/read`，`unread`）。群組的往來不走 `relay_log`，仍靠 `b` 門鈴。
+
+**怎麼拿到網址**：`GET /signal`（聊天頁用，不帶 `cap`）多回 `signal.m`（`…/c/<hash>/meta.json`）；`/updates` 不附。不需要金鑰，所以不影響 `cap=c1` 的流程。Rules 不用改（`c/$h` 讀取涵蓋子樹；對真 RTDB 驗過：未授權可讀 `meta.json`、未授權寫入 401）。
+
+**網頁**：
+- `chat_live.js` 多聽一條 `m`（理由 `chat`／`unread`）。`m` 是加碼：連不上、逾時、被拒只關掉 `m`，`p`／`b` 照常；`m` 的節點被刪（金鑰輪替）才整組放掉、隔一陣子重問後端拿新網址。
+- 聊天畫面（`app_chat.js`）：`chat` → 全部重讀；只有 `unread` → 只重讀未讀（`replies.sync()`），不重讀名單與對話串。
+- 輪詢放寬：只有 **1 對 1 對話串**的保底輪詢，在 `m` 也連著時放寬到 5 分鐘（`META_FALLBACK_POLL_MS`；原本 10 秒，p／b 通時 60 秒）。名單（有上線狀態）與群組不是 `relay_log` 的變化，**不放寬**，仍是 30／60 秒。
+- `/phone/` 桌面的未讀徽章：只聽 `m`（`names: ['m']`），變了才 `replies.sync()`；`m` 通時保底 5 分鐘，不通照舊每分鐘。3D 頁（`main.js`）的每分鐘 `replies.sync()` 沒動（那個檔案在另一個工作裡）。
+
+**效益（估）**：開著聊天頁的裝置，對話串輪詢 10 秒→5 分鐘（有 p／b 時 60 秒→5 分鐘），名單輪詢不變。開著對話串的聊天頁一天約再少 1,100 次（原本 60 秒一次）到 8,300 次（原本 10 秒一次）`GET /contacts/:id/messages`。
+**取捨**：`mark_read` 會讓做這件事的裝置自己也收到一次 `unread` 變化而多對一次 `/unread`（1 次，沒有迴圈）。
+
+### 9.6 Android 端接內容通道（2026-10-03 實作，未發版）
+
+**金鑰存放：只放記憶體**（`ContentKeys`，`IroriClient.contentKeys`），不寫 SharedPreferences、不用 Android Keystore 包起來存。理由：①每次 `/updates` 都會帶或確認金鑰（請求帶 `cap=c1&ck=<版本>`），而 `BubbleService` 一啟動、還沒有 `signal` 設定時一定先走長輪詢打一次 `/updates` 才拿得到 `c` 的網址，所以存檔沒有任何好處；②少一份留在裝置上的秘密；③不跨處理程序共享（App 的 WebView 是網頁那一套，自己從 `/updates` 拿）。登出時清掉。（若之後想存：`EncryptedSharedPreferences` 已經用在登入 token，換用同一套即可。）
+
+**解密**：`core/ContentChannel.kt`，`javax.crypto` 的 `AES/GCM/NoPadding`＋`updateAAD`，格式與後端、網頁位元組一致，單元測試用共用向量 `tests/vectors/rtdb_content.json`（`ContentChannelTest`：向量逐筆解得回原本的 item、AAD 字串一致、竄改任一位元組／換路徑／kind／id／key_id／金鑰都解不開、base64url 嚴格解碼）。
+
+**監聽**（`net/SignalListener.kt`）：有 `signal.c` 且手上有那把金鑰、沒在冷卻中 → 主串流從 `p` 換成 `c`（`b` 照舊）。每次樹有變化：先解密、依 `seq` 連續套用事件（`ContentDelivery.onEvents`：要唸的話交給泡泡的 `sayQueue`、游標只增不減）、比本機新的狀態快照更新設定（聲音、名字）；**之後**才更新指標與叫醒收信迴圈，所以 head 的序號不比本機大，就不會多打 `/updates`。`say` 的 `speaker_client`／`origin` 判斷與 `/updates` 路徑共用同一套（`shouldSpeakSay`、`sayTextOf`）。
+
+**與 `/updates` 合流**：兩條路可能送來同一則 → `DeliveredSeqs`（最近 200 個 `seq`）去重；`/updates` 的游標照回應設，內容通道的游標只往前。
+
+**狀態快照**：Android 只用得到 `settings`；`p.state_seq` 領先時，若後端有快照（`signal.c.state`）且內容通道在聽，先等 2.5 秒（`SignalSync.delayUntilPullMs` 的 `awaitSnapshot`），快照到了本機狀態序號追上就不拉。
+
+**退路（全在裝置端）**：沒金鑰／不認得 `key_id`／缺口／`big`／單則解不開 → 不套用，序號沒追上，head 觸發原本的 `/updates` 補拉；連續 3 則解不開、或 `c` 連不上 → 停用 10 分鐘改聽 `p`（冷卻過了下一次 `/updates` 回應後換回來；不是直接退回長輪詢）；節點被刪（輪替）→ 馬上拉一次拿新網址與金鑰。舊版 App 不帶 `cap`，行為完全不變。
+
+### 9.7 測試與對真 RTDB 的驗證（2026-10-03）
+
+- 單元測試（全過）：deno 568、node 315（`tests/*.test.mjs`）＋73（`relay/machine/test`）、Android `testPhoneDebugUnitTest testTvDebugUnitTest assemblePhoneDebug assembleTvDebug`（內容通道 `ContentChannelTest` 35、`ContentDeliveryTest` 9、`SignalTest` 新增 5）。pytest（序列）106 全過。
+- 拿掉一個時序型偶發失敗的 node 測試（「單則解不開：丟掉、不顯示，改走 /updates 補拉」，原因是用「讓出 40 次」賭 WebCrypto 執行緒池做完），其餘案例的等待改成等進行中的解密回來；測試裡把 `console.info` 靜音（平行跑時輸出會讓 node 測試執行器的二進位通道報錯）。連跑 8 次全過。
+- **對真 RTDB 的探測**（`tools/rtdb_content_probe.mjs`，合成 owner＋隨機金鑰，gcloud token，跑完刪節點）：第 0、1 期的項目（未授權寫入 401、列目錄 401、不可猜路徑讀得通、密文解得開、搬路徑解不開、多路徑 PATCH 的刪除生效）＋ 第 2、3 期新增的項目全部 PASS：`PATCH { s }` 整個換掉；`s` 更新在 SSE 上是 `patch`、`path:"/"`、`{ "s": {…} }`；`meta/chat`、`meta/unread` 多路徑更新互不蓋掉；未授權可讀 `meta.json`、未授權寫入 401；`meta` 的 SSE 更新是 `patch`、`path:"/"`、`{ "unread": … }`。多路徑 PATCH 的 key 含斜線（`{"e/000000000003":…}`）也確認了，網頁與 Android 的樹套用都接得住。
+
+### 9.8 第 2、3 期與 Android 的上線步驟與退路
+
+前提：第 0、1 期已上線（`13_content_keys.sql`、`IRORI_SIGNAL_KEK`、Rules 的 `c`、網頁）。**這次不需要新的 SQL、不需要改 Rules、不需要新 secret。**
+
+1. 部署 `irori-api`（後端）。此時 `IRORI_SIGNAL_CONTENT` 若還是 `events`，行為跟現在完全一樣（`state`／`meta` 沒開 → 不寫 `s`、不寫 `meta`、`GET /signal` 不帶 `m`、`signal.c` 不帶 `state`）。
+2. 部署網頁（`web/`）。舊後端不認得的欄位網頁都當沒有；新後端 + 舊網頁：舊網頁不認得 `s`／`m`／`c.state`，照第 1 期運作。
+3. （Android）發版由小良哥決定；舊版 App 不帶 `cap=c1` 的新行為，不受影響。
+4. **開開關**：`supabase secrets set IRORI_SIGNAL_CONTENT=events,state`（先只開快照）。驗收：開兩台 3D 頁，一台走位／換衣服／開電視，另一台的 Network 面板**不該**有因狀態變化觸發的 `/updates`，位置約 0.5 秒內跟上；Android 泡泡改完設定（聲音、名字）也不必拉。一週後看 RTDB 下載量。
+5. 再開 meta：`events,state,meta`。驗收：兩台開聊天頁，一台標已讀，另一台的小紅點馬上更新；Network 面板的 `/api/contacts/:id/messages` 不再每 10 秒一次。
+6. **退路（不必重新部署）**：①拿掉 `state` → 後端立刻不寫 `s`、`signal.c` 不再帶 `state`，裝置回到 head 的 `state_seq` 觸發 `/updates`；RTDB 上殘留的 `s` 沒有金鑰就是亂碼。②拿掉 `meta` → 不再寫、`GET /signal` 不再帶 `m`，聊天頁下一次重問網址後少一條串流、輪詢回到原本的 10／30／60 秒（要等網址快取過期，最久 10 分鐘，或重新整理）；殘留的 `meta` 只是兩個時間戳。③全部拿掉（空）→ 回到 #120。
+7. 要刪殘留的節點：Firebase 控制台刪 `c/`（或輪替金鑰：`POST /signal/rotate`）。
+
+### 9.9 沒驗到的地方
+
+- 真實使用者端的延遲與下載量（第 9.4 節的數字都是估的；沒有打 `/updates`、`/chat`，沒有用任何真實帳號）。
+- Android 只有 JVM 單元測試與編譯（`assemblePhoneDebug`／`assembleTvDebug`），沒有在實機或模擬器上跑過；`SignalListener`／`BubbleService` 的串流與執行緒沒有自動化測試（跟原本的 `SignalListener` 一樣），邏輯都抽在 `core/` 測。
+- 多個 Edge Function 實例的真實競態（第 9.4 節已知限制）。
+- 網頁的整合行為（`inbox.js` 到 `main.js` 的 `applyRemoteState`）只有接線測試與純邏輯測試，沒有開兩台真的瀏覽器走位驗證；`phone.js` 的 meta 徽章同理。
+- `main.js` 的 `deferredState` 過期套用（第 9.4 節已知限制）。
