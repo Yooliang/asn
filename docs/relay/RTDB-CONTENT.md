@@ -31,8 +31,8 @@
 |---|---|---|---|
 | 2.1 | **對話的 say（含字幕、表情、動作 `actions`）**：夥伴來信轉述、提醒、`speak_elsewhere` 推話、主動說話 | **值得（第一期）** | 這是別台 3D 頁「要即時看到字幕與動作」的內容。現在每則 = 1 次 RTDB 指標 + 每台各 1 次 `/updates`（內含喚醒、讀庫、對 irori-relay 拉 inbox）。搬後 N 台全部直接從 RTDB 拿，`/updates` 只剩保底。延遲降約 0.3～0.9 秒（估）。單則通常 < 2 KB，遠低於上限 |
 | 2.2 | **done / 失敗通知（夥伴原文退回）** | 值得（同 2.1，同一條事件通道） | 跟 say 同在 `updates_log`，一起走。注意夥伴原文是信件轉述的一部分，內容敏感度比 say 高，所以**一律走加密**，不留明文欄位 |
-| 2.3 | **動作事件（body／motion／behavior 鏡像）**：SPEAKER.md 的缺口 1～3（別台看不到字幕、不重演動作、閒晃只瞬移） | **值得（第一期之後，隨缺口修好）** | 這幾個缺口修好後會產生更頻繁的小事件（閒晃每分鐘最多 1 次）。小、頻繁、要求即時，剛好是 RTDB 的強項；用現行 `/updates` 每次都是一次完整函式呼叫，不划算。**待確認**：缺口 1～4 是否已有人在做、事件格式長怎樣，本設計只預留事件 `type` 欄位，不另開通道 |
-| 2.4 | **狀態 `state`（位置、姿勢、衣服、場景、電視）** | **值得，但要節流（第二期）** | 現在別台改狀態 → 門鈴 + 指標 + 這台打 `/updates` 且 `state_seq` 不同時回整份 state。搬成 RTDB 單一節點 `s`（覆寫，不留歷史），別台直接套用。**風險是頻率**：`PUT /state` 由前端存檔器 debounce 後送（`web/js/state.js` `SAVE_DELAY_MS`），身體在走動時可能每幾秒一次。每次寫入 × 其他裝置數 × 3 KB 的下載量要算（第 6 節）。**待確認**：實際 `PUT /state` 頻率；建議後端寫 RTDB 時再合併節流（同使用者 ≥ 1.5 秒一次，取最新值） |
+| 2.3 | **動作事件（body／motion／behavior 鏡像）**：SPEAKER.md 的缺口 1～3（別台看不到字幕、不重演動作、閒晃只瞬移） | **值得（第一期之後，隨缺口修好）** | 這幾個缺口修好後會產生更頻繁的小事件（閒晃每分鐘最多 1 次）。小、頻繁、要求即時，剛好是 RTDB 的強項；用現行 `/updates` 每次都是一次完整函式呼叫，不划算。**已查證（2026-10-03）**：缺口 1～4 都還沒修（`SPEAKER.md`「仍有的缺口（這次沒修）」，git log 沒有對應的提交），也還沒有新的事件格式。所以**第 1 期只搬 `updates_log` 既有的 say／done，動作事件不進第 1 期**；等缺口修好、事件格式定了，再用同一條事件通道（`type` 欄位）加進去 |
+| 2.4 | **狀態 `state`（位置、姿勢、衣服、場景、電視）** | **值得，但要節流（第二期）** | 現在別台改狀態 → 門鈴 + 指標 + 這台打 `/updates` 且 `state_seq` 不同時回整份 state。搬成 RTDB 單一節點 `s`（覆寫，不留歷史），別台直接套用。**風險是頻率**：`PUT /state` 由前端存檔器 debounce 後送（`web/js/state.js` `SAVE_DELAY_MS`），身體在走動時可能每幾秒一次。每次寫入 × 其他裝置數 × 3 KB 的下載量要算（第 6 節）。**已查證（2026-10-03）**：`PUT /state` 由 `web/js/state.js` 的存檔器 debounce **800 ms** 後送，所以連續改動時**最快約每 0.8 秒一次**，只有 3D 頁在動（走位、縮放鏡頭、換衣）才會連發；實際每日次數沒有量測資料（程式讀不出來）。結論：狀態快照屬第 2 期，必須帶後端節流（同使用者 ≥ 1.5 秒一次、取最新值）；**第 0／1 期不碰狀態**，狀態仍走 head 的 `state_seq` 指標＋`/updates` |
 | 2.5 | **speaker（誰出聲）** | 不加密、維持放在明文 `head` | 它本來就在 `p` 裡，只是 `client_id`（隨機字串）。好處：沒有金鑰的裝置照舊能判斷。若小良哥要連它也遮，可挪進密文，代價是沒金鑰時退回現行判斷 → 決定點 3 |
 | 2.6 | **未讀數 `unread`**（`GET /unread`） | **有條件值得（第三期）** | 很小（`{聯絡人id: 數}`），但聯絡人 id 含視窗名（可能中文、含夥伴名），洩漏面比序號大，**必須加密**。好處是不用輪詢。但 `GET /unread` 本身不是常駐輪詢，只有在手機聊天頁開著時才有意義，要看第 2.8 節一起做 |
 | 2.7 | **提醒（到期時間 `due`）** | 已在 `head`，不另搬 | #120 已用明文 `due`（一個時間戳）。提醒**文字**不放 RTDB：到點時會變成 say 走 2.1，用不著先預載 |
@@ -64,7 +64,7 @@
 | `v` | 快照的版本：`s.v` ＝ `state_seq`；`m.v` ＝ 該資料的版本／時間戳 |
 
 - **事件 key 用 12 位零補齊的 seq**（如 `000000001235`），因為 RTDB 的 key 是字串、按字典序排；零補齊後字典序＝數值序。seq 是 `irori_updates_push` 回傳的 bigint，12 位夠用到 10 億。
-- 事件 `item` 就是 `updates_log` 的一個元素（`type`、`text`、`actions`、`speaker_client`、`origin`、`seq`、`id`、`at`…），**跟 `/updates` 的 `results[]` 同形**，裝置端套用邏輯只有一套，不會「RTDB 來的跟 HTTP 來的長得不一樣」。**待確認**：`say` 裡的 `raw`、`notice`（夥伴原文與通知全文）裝置顯示用不用得到，不需要的話在寫入 RTDB 時剝掉（降低體積與暴露，決定點 8）。
+- 事件 `item` 就是 `updates_log` 的一個元素（`type`、`text`、`actions`、`speaker_client`、`origin`、`seq`、`id`、`at`…），**跟 `/updates` 的 `results[]` 同形**，裝置端套用邏輯只有一套，不會「RTDB 來的跟 HTTP 來的長得不一樣」。**已查證（2026-10-03，決定點 8）**：`notice`（給模型看的通知全文）**沒有任何裝置端用到**（網頁、Android 都沒讀這個欄位），寫入 RTDB 時一律剝掉。`raw`（夥伴原文）**網頁有用到**：`web/js/replies.js` 把 `say` 存進手機聊天串時用 `job.raw ?? job.text`（串裡要放夥伴原文，不是轉述）；Android 沒讀。所以 **`raw` 不能無條件剝掉**：實作改成「保留 `raw`，加上整則 item 超過 4 KB 就走 `big`」（夥伴長信的 `raw` 通常會超過，這種就退回 `/updates` 拿；短回覆則 RTDB 內容就夠用），不改變手機聊天串的行為。若小良哥要連 `raw` 也不進 RTDB，代價是手機聊天串的 say 會改存轉述後的 `text`，要先改 `replies.js` 才行。
 - 一則 `item` 序列化後上限 **4,096 位元組**（補長度前）。超過的不放內容：該 seq 的事件節點寫 `{ big: 1 }`（明文），`head.seq` 照樣前進，裝置看到 `big` 就打 `/updates` 補這一則。Realtime Database 單一節點官方上限遠大於此，這裡自己限制是為了控制下載量。
 - 只保留**最近 20 則、且不超過 24 小時**（`updates_log` 是 50 則／24 小時；RTDB 取較小的，因為落後超過這個範圍的裝置本來就該走 `/updates?since=`）。
 
@@ -118,7 +118,7 @@ path = "c/" + hash
 `gmail.ts` 的做法：一把 `IRORI_GMAIL_TOKEN_KEY`（AES-GCM，base64 32 位元組）當金鑰加密金鑰（KEK），token 加密後存 `irori.gmail_tokens`，表啟用 RLS 且 `revoke all from public, anon, authenticated`，只能經 SECURITY DEFINER 函式存取。本設計照做，但改進兩點：KEK 另設一把不與 Gmail 共用；加密時帶 AAD。
 
 ```sql
--- supabase/sql/12_content_keys.sql（新增，未寫）
+-- supabase/sql/13_content_keys.sql（已實作；12 號被 12_phone_data.sql 用掉了。存取函式是 irori_ck_current／irori_ck_get／irori_ck_put／irori_ck_rotate／irori_ck_live）
 create table irori.content_keys (
   owner uuid not null,
   key_id int not null,
@@ -157,13 +157,13 @@ create unique index content_keys_one_current on irori.content_keys (owner) where
 - **只有裝置自己宣告支援才給**：請求帶 `cap=c1`（舊版網頁／App 不帶，行為完全不變）。
 - **不是每次都送金鑰**：請求帶 `ck=<手上最新的 key_id>`，後端發現一致就只回 `kid`，`keys` 省略；不一致（或沒帶）才附 `keys`。省回應大小，也讓金鑰出現在傳輸上的次數最少。`ck` 只是版本號，不是秘密，記進日誌無妨。
 - 輪替期間 `keys` 含新舊兩把（舊的標 `cur: false`），裝置用 `k` 欄位（key_id）選金鑰解密。
-- 回應是 TLS，不寫進後端 log（要確認 Edge Function 沒有記回應本體；**待確認**）。
+- 回應是 TLS，不寫進後端 log。**已查證（2026-10-03）**：本專案程式沒有任何地方把 `/updates` 的回應本體或金鑰寫進 `console`（內容通道的 log 只記 key_id 與遮掉 access_token 的錯誤）；Supabase 平台的 Edge Function 日誌依官方文件只記請求中繼資料（方法、路徑與查詢字串、狀態碼、耗時）與函式自己 `console` 出來的內容，不記回應本體——**這一點是讀文件的結論、沒有實測**，上線後請在 Dashboard 的 Logs 看一筆 `/updates` 確認。查詢字串會出現 `cap=c1&ck=<版本號>`，ck 只是版本號，不是秘密。
 - 金鑰**不放進 URL**（避免進日誌、歷史紀錄）。
 
 ### 4.4 裝置端保管
 
 - 網頁：放記憶體；為了重新整理後不必等下一次 `/updates` 才能解密，可同時存 `sessionStorage`（同分頁關閉就消失）。**不存 `localStorage`**（跨分頁常駐、更容易被工具／擴充程式帶走）；不過目前使用者 token 已在 `localStorage`，所以威脅模型上其實同級，這是「盡量少」的保守選擇。全部包 try/catch，取不到就當沒有金鑰。
-- Android：用 Android Keystore 包一把 AES 金鑰，再用它加密後存 SharedPreferences（或 `EncryptedSharedPreferences`，**待確認**專案目前用什麼）。服務（BubbleService）與兩個 WebView 各自從 `/updates` 拿，不跨處理程序共享。
+- Android：用 Android Keystore 包一把 AES 金鑰，再用它加密後存 SharedPreferences（或 `EncryptedSharedPreferences`）。服務（BubbleService）與兩個 WebView 各自從 `/updates` 拿，不跨處理程序共享。**Android 金鑰儲存方式這期不查、不做，第 1 期 Android 時再定。**
 - 登出時清掉金鑰。
 
 ### 4.5 輪替
@@ -193,7 +193,7 @@ create unique index content_keys_one_current on irori.content_keys (owner) where
 - `updates_log`、`since` 游標、`seq` 去重都不變。事件在 RTDB 的 `seq`＝`updates_log` 的 `seq`。
 - RTDB 收到的事件套用後，**裝置本機 `since` 前進到那個 `seq`**——之後的 `/updates?since=` 就不會重複拿到。
 - `/updates` 保底輪詢（`poll_s`）、`next_due` 到期、`b` 門鈴觸發的拉取**全都保留**，因為長輪詢同時是排程器（提醒、轉述、記憶整理靠它被呼叫才會跑，`SYNC-OPTIONS.md` 1.2）。
-- **待確認（重要）**：`/updates` 目前除了回內容還有副作用——`irori_updates_since` 每次讀會寫 `pending` 列（03_irori.sql:303）、`touchDevice`、`irori_presence_touch`。事件走 RTDB 後這些副作用在「事件觸發」時不會發生。已知：離開判斷與 speaker 存活期在訊號模式已放寬到 450／400 秒（SIGNAL.md），所以不受影響；但 **`pending` 列的消費者**（是否有人依賴「裝置拉過」來判斷已送達／才把某信算成已處理）要在實作前查清楚。
+- **已查證（2026-10-03）**：`/updates` 除了回內容還有副作用——`irori_updates_since` 每次讀會寫 `pending` 列（`03_irori.sql`）、`touchDevice`、`irori_presence_touch`。事件走 RTDB 後這些副作用在「事件觸發」時不會發生。結論：①離開判斷與 speaker 存活期在訊號模式已放寬到 450／400 秒（SIGNAL.md），保底輪詢（300 秒）照舊會呼叫，所以不受影響。②`pending` 列的寫入**只是把過期的項目修剪掉**（讀出來時本來就會依 TTL 過濾，結果不依賴有沒有寫回去）；沒有任何地方依賴「裝置拉過」才算已送達——夥伴回信的「等待中」標記是在信進來（`irori_relay_inbound`）時就由後端清掉的。③唯一會變的是**畫面上的「等夥伴回覆」名單**：它原本是 `/updates` 回應的 `pending` 欄位，事件直接從 RTDB 套用時不會更新；實作改成裝置套用 say／done 時，把該事件的 `member` 從名單拿掉（`inbox.js` `applyContent`），其餘維持到下一次 `/updates`（保底最久 5 分鐘）校正。
 
 ### 5.2 網頁（`web/js/`）
 
@@ -316,7 +316,48 @@ Firebase RTDB 免費額度（官方，**請上線前再核對當時定價頁**�
 | 5 | 輪替週期與緊急輪替的入口 | 90 天自動＋owner 手動 `POST /signal/rotate`；緊急時同時換服務帳戶金鑰。 |
 | 6 | 網頁金鑰存哪：只記憶體（重新整理後要等下一次 `/updates` 才有）／`sessionStorage`／`localStorage` | `sessionStorage`（重新整理不丟、關分頁就消失）。 |
 | 7 | 手機聊天頁的 30 秒／10 秒輪詢（2.8）要不要改成事件驅動 | 要，但分兩步：先只推「某聯絡人有新訊息」的明文序號指標（內容仍從 irori-api 拉）；內容進 RTDB 與否另議，建議**不進**。 |
-| 8 | 事件裡的 `raw`／`notice`（夥伴原文與通知全文）要不要一起放進 RTDB 密文 | 不放，剝掉；裝置顯示只需轉述後的 `text`。需要時才從 `/updates` 取。**待確認**裝置有沒有用到。 |
+| 8 | 事件裡的 `raw`／`notice`（夥伴原文與通知全文）要不要一起放進 RTDB 密文 | 不放，剝掉；裝置顯示只需轉述後的 `text`。需要時才從 `/updates` 取。**查證結果**：`notice` 沒人用，已剝掉；`raw` 網頁手機聊天串有用（`replies.js`），所以保留、超過 4 KB 走 `big`（見 3.1）。 |
 | 9 | 補長度（256 位元組倍數）要不要做 | 要，成本只多幾百位元組，可以遮掉「哪種事件」的大小特徵。 |
 | 10 | 事件保留數與 TTL（建議 20 則／24 小時）、單則上限（4 KB） | 照建議；落後者本來就該走 `/updates?since=`。 |
-| 11 | 「待確認」項目（`pending` 副作用、`PUT /state` 頻率、缺口 1～4 進度、Android 金鑰儲存、Edge 日誌是否含回應本體）誰來查 | 由實作的人在第 0 期前逐一查證並回填到本文件，沒查清的項目不進第 1 期。 |
+| 11 | 「待確認」項目（`pending` 副作用、`PUT /state` 頻率、缺口 1～4 進度、Android 金鑰儲存、Edge 日誌是否含回應本體）誰來查 | 由實作的人在第 0 期前逐一查證並回填到本文件，沒查清的項目不進第 1 期。**已查證**，結果回填在 2.3、2.4、3.1、4.3、4.4、5.1；Android 金鑰儲存留到第 1 期 Android 時再定；動作事件（缺口 1～4 未修）與狀態快照不進第 1 期。 |
+
+## 9. 第 0 期（暗跑）與第 1 期（事件通道）的實作紀錄
+
+2026-10-03 實作（後端＋網頁；**Android 不在這次**）。決定點 2～11 一律採第 8 節「我的建議」欄，決定點 1 已決定要做。
+
+### 9.1 做了什麼
+
+| 項目 | 檔案 |
+|---|---|
+| 金鑰表與存取函式 | `supabase/sql/13_content_keys.sql` |
+| 加解密、設定解析（純函式） | `supabase/functions/_shared/content_crypto.ts` |
+| RTDB 的 PATCH／DELETE／shallow GET、內容路徑 `contentPath` | `supabase/functions/_shared/signal.ts` |
+| 金鑰產生、KEK 加密存放、90 天輪替 | `supabase/functions/irori-api/content_keys.ts` |
+| 事件寫入（head＋事件一次多路徑 PATCH）、`signal.c`、輪替善後、清道夫 | `supabase/functions/irori-api/content.ts`（由 `pointer.ts` 的 `notify`／`describe` 呼叫） |
+| `/updates` 讀 `cap=c1`、`ck`；`POST /signal/rotate` | `supabase/functions/irori-api/index.ts`、`inbox.ts` |
+| Rules 多一行 `c`（只改檔、未部署） | `database.rules.json` |
+| 網頁解密、樹套用、裝置端決策、連線管理、金鑰保管 | `web/js/signal_crypto.js`、`signal_logic.js`、`signal_client.js`、`inbox.js`；`web/chat/sw.js` 快取清單 |
+| 共用測試向量與測試 | `tests/vectors/rtdb_content.json`、`tests/signal_crypto.test.mjs`、`tests/signal_content.test.mjs`、`supabase/functions/_shared/content_crypto_test.ts`、`irori-api/content_test.ts` |
+| 真 RTDB 驗證腳本（給有服務帳戶金鑰的人跑） | `tools/rtdb_content_probe.mjs` |
+
+### 9.2 與設計稿不同或補充的地方
+
+- **開關**：`IRORI_SIGNAL_CONTENT`（逗號清單）含 `events` ＋ `IRORI_SIGNAL_KEK` 合法 ＋ #120 的兩個 Firebase secret 都在，內容通道才開。任何一個不成立：不讀金鑰庫、不打 RTDB、`/updates` 的 `signal` 不帶 `c`（第 0 期暗跑）。`/p/<hash>` 不論如何照舊寫。
+- **head**：`c/<hash>/head` ＝ `p` 的值＋`kid`，每次 `notify` 都寫（狀態變了也寫），裝置的指標判斷（序號、狀態序號、speaker、提醒）原封不動套在 head 上。
+- **事件怎麼來**：`notify` 時讀 `updates_log`，把序號大於 kv `content_seq`（上次成功寫入的序號與 key_id）的項目加密寫入；沒有基準時只補寫「一分鐘內」的最新一則。寫失敗不前進基準，下次重寫（nonce 重新產生）。
+- **清道夫**：`/updates` 帶 `cap` 且內容通道開著時，背景檢查 kv `content_sweep`：①輪替後超過 10 分鐘的舊節點 DELETE ②每 6 小時一次 `shallow` 取 key，超過最新 20 個或比 24 小時內最舊一則還舊的清成 null。
+- **輪替**：90 天自動（用到金鑰時順手檢查）；`POST /signal/rotate`（body `{"emergency":true}` 為緊急，舊節點立刻刪；否則 10 分鐘後由清道夫刪）。舊金鑰在庫裡留 1 小時，期間 `signal.c.keys` 同時給新舊（`cur` 只有新的是 true）。
+- **裝置端把內容通道當「最佳化」**：套不上的情況（缺口、`big`、沒金鑰、不認得 key_id、單則解不開）都不套用，本機序號沒追上，head 的序號就「比本機大」，原本的 `/updates` 補拉機制自然接手；所以這些退路不需要額外程式。連續 3 則解密失敗改聽 `p` 10 分鐘（不是退回長輪詢）；節點被刪（輪替）就補拉拿新網址。
+- **去重**：內容通道直接套用過的 seq 記在 `delivered`，之後 `/updates` 的回應若又帶到同一則就略過（兩條路同時到的情況）。
+- **還沒驗到的**：Firebase REST 串流上「一次多路徑 PATCH」的事件長相（key 含斜線 `e/000000000003`，還是巢狀物件）——網頁兩種都接，但要用 `tools/rtdb_content_probe.mjs` 對真 RTDB 實測確認，並驗 Rules 的 401 行為。
+
+### 9.3 上線順序與退路
+
+1. 跑 `supabase/sql/13_content_keys.sql`（可重複執行，只新增）。
+2. 產生 KEK 並設 secret：`openssl rand -base64 32`，`supabase secrets set IRORI_SIGNAL_KEK=<值>`。**沒設或格式不對＝功能關**。KEK 設了就別亂換：換掉後庫裡的舊金鑰解不開（內容通道會自動關閉並記 log，不影響 #120 的行為）；真的要換，要刪掉 `irori.content_keys` 該 owner 的列重新產生，而且已開著的分頁手上還是舊金鑰（key_id 又從 1 開始），要關掉分頁重開才會拿到新的（期間它們會因解不開而退回指標模式，不會顯示錯誤內容）。
+3. 部署 `irori-api`（此時 `IRORI_SIGNAL_CONTENT` 還沒設＝暗跑，行為和 #120 完全一樣）。
+4. 部署 `database.rules.json`（`firebase deploy --only database`）。
+5. 跑 `tools/rtdb_content_probe.mjs` 驗 Rules 與 SSE 格式（會寫並刪掉合成節點）。
+6. 部署網頁（`web/`）。舊網頁不帶 `cap`，後端不會給 `signal.c`，不受影響。
+7. 設 `IRORI_SIGNAL_CONTENT=events`。先只開自己的一台網頁，兩台裝置各觸發一則提醒或夥伴轉述，看 Network：另一台應該沒有事件觸發的 `/updates`。
+8. 退路：把 `IRORI_SIGNAL_CONTENT` 拿掉（或改成空）→ 後端立刻不寫、`/updates` 不再帶 `signal.c` → 裝置下一次回應就退回 #120。RTDB 上殘留的密文沒有金鑰就是亂碼，可手動刪 `c/`。

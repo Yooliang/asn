@@ -185,6 +185,55 @@ export async function put(path: string, value: unknown, deps: Deps = realDeps): 
   }
 }
 
+// 內容通道用的其他 REST 動作（規格見 docs/relay/RTDB-CONTENT.md 第 3.2 節）。規則同 put：失敗只記 log、回 false／null，絕不丟錯。
+// PATCH＝一次多路徑更新（key 可含 "/"，值 null＝刪除），一個請求原子完成
+async function send(method: "PATCH" | "DELETE" | "GET", path: string, body: unknown, deps: Deps, extraQuery = ""): Promise<Response | null> {
+  try {
+    const cfg = deps.config();
+    if (!cfg) return null;
+    const token = await accessToken(cfg, deps);
+    if (!token) return null;
+    const r = await deps.fetch(`${cfg.dbUrl}/${path.replace(/^\/+/, "")}.json?access_token=${encodeURIComponent(token)}${extraQuery}`, {
+      method,
+      ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!r.ok) {
+      if (r.status === 401) invalidateToken();
+      console.error(`signal ${method} 被拒`, path.split("/")[0], r.status, (await r.text().catch(() => "")).slice(0, 200));
+      return null;
+    }
+    return r;
+  } catch (e) {
+    console.error(`signal ${method} 失敗`, path.split("/")[0], redact(String(e)));
+    return null;
+  }
+}
+
+export async function patch(path: string, value: Record<string, unknown>, deps: Deps = realDeps): Promise<boolean> {
+  const r = await send("PATCH", path, value, deps);
+  await r?.body?.cancel().catch(() => {});
+  return r !== null;
+}
+
+export async function remove(path: string, deps: Deps = realDeps): Promise<boolean> {
+  const r = await send("DELETE", path, undefined, deps);
+  await r?.body?.cancel().catch(() => {});
+  return r !== null;
+}
+
+// GET <path>.json?shallow=true：只回子節點的 key（很小）。失敗回 null；節點不存在回 []
+export async function shallowKeys(path: string, deps: Deps = realDeps): Promise<string[] | null> {
+  const r = await send("GET", path, undefined, deps, "&shallow=true");
+  if (!r) return null;
+  try {
+    const d = await r.json();
+    return d && typeof d === "object" && !Array.isArray(d) ? Object.keys(d) : [];
+  } catch {
+    return null;
+  }
+}
+
 // ── 節點路徑（不可猜） ──
 
 export async function sha256Hex(s: string): Promise<string> {
@@ -197,6 +246,13 @@ export async function sha256Hex(s: string): Promise<string> {
 export async function ownerPath(owner: string, cfg: Config): Promise<string> {
   const key = await crypto.subtle.importKey("raw", enc.encode(cfg.sa.private_key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   return "p/" + hex(await crypto.subtle.sign("HMAC", key, enc.encode("irori-signal-p:" + owner))).slice(0, 32);
+}
+
+// 內容通道的節點 c/<32 碼>：HMAC-SHA256(服務帳戶私鑰, "irori-signal-c:" + owner + ":" + key_id)。
+// 把 key_id 算進去：輪替金鑰時路徑跟著換，舊路徑直接作廢；路徑秘密（服務帳戶私鑰）與內容金鑰是兩個獨立的秘密
+export async function contentPath(owner: string, keyId: number, cfg: Config): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", enc.encode(cfg.sa.private_key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return "c/" + hex(await crypto.subtle.sign("HMAC", key, enc.encode(`irori-signal-c:${owner}:${keyId}`))).slice(0, 32);
 }
 
 // 仲介來信門鈴的節點 b/<32 碼>：sha256("irori-bell:" + 門鈴頻道名) 前 32 碼。頻道名本身是 irori-relay 發的隨機字串（不可猜）。
