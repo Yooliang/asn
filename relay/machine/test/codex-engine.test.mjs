@@ -120,7 +120,10 @@ test('名單：鎖檔存在但沒人持有（殘檔）不算開著——lockedTh
       const holder = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `$f=[IO.File]::Open('${lockFile}','Open','ReadWrite','None'); [Console]::Out.WriteLine('held'); Start-Sleep 30`], { stdio: ['ignore', 'pipe', 'inherit'], windowsHide: true })
       await new Promise(r => holder.stdout.once('data', r))
       assert.deepEqual([...await lockedThreadIds(fx.home, { mode: 'auto' })], [A])
+      // 等持有者真的結束（鎖檔放掉）再清資料夾，不然 Windows 刪不掉（EPERM）
+      const exited = new Promise(r => holder.once('exit', r))
       holder.kill()
+      await exited
     }
   } finally { fx.cleanup() }
 })

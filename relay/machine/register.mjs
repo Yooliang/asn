@@ -154,5 +154,6 @@ export async function main(argv, env = process.env) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const res = await main(process.argv.slice(2))
   process.stdout.write(JSON.stringify(res) + '\n')
-  process.exit(res.ok ? 0 : 1)
+  // 不直接 process.exit：Windows 上的 Node 25 在 fetch 連線還在關的時候 exit 會當掉（libuv UV_HANDLE_CLOSING 斷言、結束碼 0xC0000409），安裝程式就會以為註冊失敗
+  process.exitCode = res.ok ? 0 : 1
 }
