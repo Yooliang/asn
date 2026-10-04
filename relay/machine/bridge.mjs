@@ -35,7 +35,7 @@ const BUSY_GRACE_MS = Number(process.env.IRORI_BUSY_GRACE_MS || 120_000)
 const BUSY_MAX_MS = Number(process.env.IRORI_BUSY_MAX_MS || 3_600_000)
 const BUSY_STATUS_RE = new RegExp(process.env.IRORI_BUSY_STATUS_RE || '^(busy|working|running)$', 'i')
 const TICK_MS = Number(process.env.IRORI_BRIDGE_TICK_MS || 5_000)
-const FORWARD_TIMEOUT_MS = 120_000
+const FORWARD_TIMEOUT_MS = Number(process.env.IRORI_FORWARD_TIMEOUT_MS || 120_000)   // 收發室多久沒回報 SENT 就算轉交逾時
 const LOG_FILE = process.env.IRORI_RELAY_LOG || path.join(WORK_DIR, 'bridge.log')
 
 fs.mkdirSync(WORK_DIR, { recursive: true })
@@ -260,6 +260,8 @@ setInterval(async () => {
     if (p.state === 'forwarding' && now - p.t0 > FORWARD_TIMEOUT_MS) {
       p.state = 'done'
       if (p.room) { log(`room forward timeout id=${id} -> ${p.target}`); pending.delete(id); continue }
+      // 收發室沒回報，但對方已經回了這封（或已寄信給原寄件人）＝其實有轉到：不寄「轉交逾時」，免得寄件人以為對方沒收到
+      if (repliedDirectly(id) || sentToSender(p)) { log(`forward unconfirmed but ${p.target} already replied id=${id}: no timeout notice`); await ackIds([id]); pending.delete(id); continue }
       if (isMailboxSender(p.mail)) log(`forward timeout notice to mailbox sender not sent id=${id}`)
       else await sendBack(p, `[收發室] 轉交給 ${p.target} 逾時（收發室沒有完成轉交）`)
       await ackIds([id]); pending.delete(id)

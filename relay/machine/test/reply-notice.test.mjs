@@ -216,3 +216,40 @@ test('sent 記號早於轉交時間（舊的寄信）不算已回覆', async () 
     assert.match(log, /reason=timeout/)
   } finally { await st.close() }
 })
+
+// 10/04：收發室同一輪收到兩封、只寫了一行 SENT，另一封其實轉到了卻被誤報「轉交逾時」
+const forwardTimeouts = st => st.sent.filter(s => /轉交給 .+ 逾時/.test(s.body))
+
+test('收發室有成功呼叫 SendMessage 但漏寫 SENT 行 → 照樣算已轉交，不寄「轉交逾時」', async () => {
+  const st = await fakeServer([mail(1), mail(2)])
+  try {
+    const { log } = await go({
+      st, env: { FAKE_FORWARD: 'tool', IRORI_FORWARD_TIMEOUT_MS: '400', IRORI_REPLY_TIMEOUT_MS: '60000' },
+      step: c => /forwarded id=0+-0+-0+-0+-0+1 /.test(c.log) && /forwarded id=0+-0+-0+-0+-0+2 /.test(c.log),
+      settle: 900,
+    })
+    assert.equal(forwardTimeouts(st).length, 0)
+    assert.ok(st.acked.has(uid(1)) && st.acked.has(uid(2)))
+  } finally { await st.close() }
+})
+
+test('收發室完全沒回報，但對方已經用 --reply-to 回了這封 → 不寄「轉交逾時」；沒回的那封照常寄', async () => {
+  const st = await fakeServer([mail(1), mail(2)])
+  try {
+    let marked = false
+    const { log } = await go({
+      st, env: { FAKE_FORWARD: 'silent', IRORI_FORWARD_TIMEOUT_MS: '1200', IRORI_REPLY_TIMEOUT_MS: '60000' },
+      step: c => {
+        if (!marked && c.forwarded() >= 2) {
+          marked = true
+          const dir = path.join(c.home, '.irori-relay', 'machine-T', 'replied'); fs.mkdirSync(dir, { recursive: true })
+          fs.writeFileSync(path.join(dir, uid(1)), '')
+        }
+        return forwardTimeouts(c.st).length >= 1 && /already replied/.test(c.log)
+      },
+    })
+    assert.equal(forwardTimeouts(st).length, 1); assert.equal(forwardTimeouts(st)[0].reply_to, uid(2))
+    assert.match(log, new RegExp(`already replied id=${uid(1)}`))
+    assert.ok(st.acked.has(uid(1)))
+  } finally { await st.close() }
+})

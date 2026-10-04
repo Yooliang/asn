@@ -78,16 +78,37 @@ export function createEngine({ log, workDir, mailboxName, model, env = process.e
   let shuttingDown = false
   let handlers = { onSent() {}, onFail() {}, onReply() {} }
 
+  // 轉交中的信（id → 目標視窗）與收發室的 SendMessage 呼叫（tool_use_id → 信件 id）。
+  // 收發室一輪收到好幾封時偶爾漏寫 SENT 行（10/04 兩封同時到只寫了一行，另一封被誤報轉交逾時），
+  // 所以直接看它真的呼叫成功的 SendMessage：目標相同、信文帶這封的標頭 id，就當作已轉交。
+  const inflight = new Map()
+  const sendCalls = new Map()
+  const INFLIGHT_MAX = 200
+  const sentOnce = id => { if (!inflight.delete(id)) return; void handlers.onSent(id) }
+  function onToolEvents(ev) {
+    const content = Array.isArray(ev.message?.content) ? ev.message.content : []
+    for (const c of content) {
+      if (ev.type === 'assistant' && c.type === 'tool_use' && c.name === 'SendMessage') {
+        const to = String(c.input?.to ?? ''), msg = String(c.input?.message ?? '')
+        for (const [id, target] of inflight) if (target === to && msg.includes(`id=${id} `)) { sendCalls.set(c.id, id); break }
+      } else if (ev.type === 'user' && c.type === 'tool_result' && sendCalls.has(c.tool_use_id)) {
+        const id = sendCalls.get(c.tool_use_id); sendCalls.delete(c.tool_use_id)
+        if (!c.is_error) sentOnce(id)
+      }
+    }
+  }
+
   function onWorkerEvent(line) {
     let ev
     try { ev = JSON.parse(line) } catch { return }
+    if (ev.type === 'assistant' || ev.type === 'user') return onToolEvents(ev)
     if (ev.type !== 'result') return
     const cost = ev.total_cost_usd ?? 0
     const delta = cost - lastCost; lastCost = cost
     const txt = String(ev.result ?? '')
     log(`worker turn dur=${ev.duration_ms}ms cost=$${delta.toFixed(4)} is_error=${!!ev.is_error} :: ${txt.replace(/\s+/g, ' ').slice(0, 160)}`)
-    for (const m of txt.matchAll(/^SENT\s+([0-9a-f-]{36})/gim)) void handlers.onSent(m[1])
-    for (const m of txt.matchAll(/^FAIL\s+([0-9a-f-]{36})\s*(.*)$/gim)) void handlers.onFail(m[1], m[2])
+    for (const m of txt.matchAll(/^SENT\s+([0-9a-f-]{36})/gim)) { inflight.delete(m[1]); void handlers.onSent(m[1]) }
+    for (const m of txt.matchAll(/^FAIL\s+([0-9a-f-]{36})\s*(.*)$/gim)) { inflight.delete(m[1]); void handlers.onFail(m[1], m[2]) }
     for (const m of txt.matchAll(REPLY_RE)) void handlers.onReply(m[1].trim(), m[2])
     // 收發室若沿用了訊息內文裡的假編號（被內文帶壞），它之後的輸出都會對不上：記錄並重啟收發室（fail-closed，內文無法借此冒名）
     if ([...txt.matchAll(/<<(?:REPLY|END)-([0-9A-Za-z]*)/g)].some(m => m[1] !== NONCE)) {
@@ -148,6 +169,8 @@ export function createEngine({ log, workDir, mailboxName, model, env = process.e
     // 轉交一封信：text 是信件全文（含標頭）。成功交給收發室就回傳；之後結果經 handlers.onSent／onFail 回來，回覆經 onReply。
     // 收發室沒起來時 throw（橋把信留在 inbox 不 ack）
     deliver({ id, to, text }) {
+      if (inflight.size >= INFLIGHT_MAX) inflight.delete(inflight.keys().next().value)
+      inflight.set(id, to)
       workerSay(`[BRIDGE-FORWARD nonce=${NONCE} id=${id} to=${to}]\n<<<MAIL\n${text}\nMAIL>>>`)
     },
     // 開新視窗用的零件（launcher.mjs 依本機 launcher.json 組好 command/args/cwd/env 後呼叫 openWindow）
