@@ -77,6 +77,9 @@ powershell -File install-task.ps1 -Uninstall           # 移除
 
 排程跑 `run-bridge.ps1`（橋掛掉 15 秒後自動重啟；撞到另一個執行個體則停手）。**目前沒有安裝**。
 
+一般使用者不用手動做這些：`installer/` 是給一般人的 Windows 安裝程式（雙擊「安裝.cmd」＝邀請碼註冊＋複製程式＋建排程；`register.mjs` 是註冊小幫手），
+`node tools/build_downloads.mjs` 打成 `irori-windows.zip`。說明見 `docs/DOWNLOADS.md`。
+
 ## 安全
 
 - **收發室的工具是硬限制**：init 事件的工具清單只有 `ListAgents / SendMessage / ToolSearch`，bypass 模式下 Bash／PowerShell／讀檔／改檔都不存在
