@@ -118,7 +118,7 @@ test('同一份內容打包兩次，zip 的 sha256 一樣（可重現）；--inc
   assert.equal(b.manifest.files['irori.apk'].sha256, sha(Buffer.from('fake apk')))
 })
 
-test('firebase.json：Windows zip、downloads.json 轉址到 Supabase 公開 downloads 區；skill 沒有 zip 轉址；下載頁沒放連結', () => {
+test('firebase.json：Windows zip、downloads.json 轉址到 Supabase 公開 downloads 區；skill 沒有 zip 轉址；下載頁連本站固定網址、不連 GitHub', () => {
   const fb = JSON.parse(fs.readFileSync(new URL('../firebase.json', import.meta.url), 'utf8'))
   const base = 'https://hwtahctsgjcemtwzlvnq.supabase.co/storage/v1/object/public/downloads/'
   const red = Object.fromEntries(fb.hosting.redirects.map(r => [r.source, r]))
@@ -128,7 +128,7 @@ test('firebase.json：Windows zip、downloads.json 轉址到 Supabase 公開 dow
   }
   assert.ok(!('/download/irori-relay-skill.zip' in red))
   const page = fs.readFileSync(new URL('../web/download/index.html', import.meta.url), 'utf8').toLowerCase()
-  assert.ok(!page.includes('github') && !page.includes('.apk') && !page.includes('.zip'))
+  assert.ok(!page.includes('github') && page.includes('href="/download/irori-windows.zip"'))  // 10/04 小良哥：下載、skill、Windows 收發室同一頁
   const install = fs.readFileSync(new URL('../web/relay/INSTALL.txt', import.meta.url), 'utf8')
   assert.ok(install.includes('https://irori.web.app/relay/SKILL.md') && install.includes('name: irori-relay'))
 })
