@@ -117,7 +117,7 @@
 | 主動說話（閒聊） | **後端**（設定 talk、對話中、使用者剛說話、有人在出聲、擲骰） | 後端（`speak`，kind `idle`） | leader 3D 頁約每 60 秒 `POST /proactive/tick` → 後端推 say | 見上節「主動說話」；**睡覺時段不講**（被小良哥叫醒後的 30 分鐘內除外） |
 | **進頁面打招呼** | **後端**（有人在出聲、對話中、使用者正在說話或 3 分鐘內說過話、30 分鐘內跨裝置打過 → 不打） | 後端（`speak`，kind `greet`） | 3D 頁載入 1.5 秒後 `POST /proactive/greet`（只回報「剛打開畫面」）→ 後端推 say，出聲裝置＝打開的那台 | 冷卻鎖 `irori_claim('greet', 1800)`，跨分頁、跨裝置；額度／次數不夠時放掉鎖。舊前端自己送的［通知］打招呼 `/chat` 套同一套判斷，不符合回 409 skipped |
 | **新版本提醒** | **後端**（網頁版本比 `version.json` 已部署的舊、同一套安靜條件、每個新版本跨裝置只問一次） | 後端（`speak`，kind `update`） | 3D 頁 `POST /proactive/tick` 帶 `web_version`／`self_reload` → 後端比對後推 say | 鎖 `web_update_<版本>`；App 內嵌（`self_reload`）自己重新整理，不問；後端讀 `IRORI_WEB_ORIGIN`（預設 irori.web.app）的 `version.json`，快取 5 分鐘。舊前端的［通知］新版本 `/chat` 同樣套鎖 |
-| 夥伴來信轉述 | 後端（有人開著頁面就收信；一次多封合成一則；**睡覺時段延後到起床或被叫醒**） | 後端（`inbox.ts narrate`，不帶工具；模型出錯重試一次） | `/updates` 驅動收信 → 推 `{type:'say'}`（帶 speaker_client） | 不看一般閘門（使用者要等的回信），只看睡覺時段（延後＝不拉不 ack，信留在仲介）。轉述失敗／額度用完／超過次數：**後端用固定模板自己講**（`templateNarration`，仍是 say，`templated:true`），不再退回 `{type:'done'}` 原文讓前端組提示詞 |
+| 夥伴來信轉述 | 後端（有人開著頁面就收信；一次多封合成一則；**睡覺時段延後到起床或被叫醒**） | 後端（`inbox.ts narrate`，不帶工具；模型出錯重試一次） | `/updates` 驅動收信 → 推 `{type:'say'}`（帶 speaker_client） | 不看一般閘門（使用者要等的回信），只看睡覺時段（延後＝不拉不 ack，信留在仲介）。轉述失敗／額度用完／超過次數：**後端用固定模板自己講**（`templateNarration`，仍是 say，`templated:true`），不再退回 `{type:'done'}` 原文讓前端組提示詞。**跟她最近 10 分鐘說過的話重複的內容不再講第二遍**（提示帶最近說過的話＋事後逐句刪，全重複就不說、信照樣收到），主動說話與 /chat 串流同理，見 `NO-REPEAT.md` |
 | 夥伴回報失敗（`failed`） | — | — | 雲端後端不產生；只有本機版 `server.py`（relay_bridge）會產生，前端 `inbox.js noticeFor` 仍保留給它 | 雲端不會走到 |
 | 提醒到點 | 後端（時間到） | 後端模板（不呼叫模型） | `/updates` 驅動 → 推 say（帶 speaker_client） | 不看閘門（時間性、使用者自己要的），睡覺時段照常講 |
 | 閒晃動作（走位、活動、手勢） | leader 3D 頁本機亂數 | 無（無聲） | 不經後端 | 不是「開口」，不碰 `/chat`（走位本身由後端作息決定：睡覺時段在床上，被叫醒的視窗內不強制回床） |
