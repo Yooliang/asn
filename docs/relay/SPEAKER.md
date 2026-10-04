@@ -209,3 +209,26 @@ WebView.onPause 不保證 `document.visibilityState` 變 hidden，3D 頁可能�
 - 主動說話現在由後端 say 推給 App：若 App 是 speaker（`speaker_client == 自己`），收到後照一般 say 唸出聲，**不需要程式改動**；它在 `origin: 'chat'` 的 say 上本來就是這樣處理。
 - 不想多唸的情況：App 不是 speaker 時照既有規則不唸。
 - 想補缺口 2：需要 App 在自己唸的同時，通知後端把同一句以「僅字幕」形式推給 3D 頁（新欄位，如 `/chat` 的 `mirror_text: true`），這次沒做。
+
+## 碰到哪個畫面，聲音就從那個畫面出來（2026-10-04，App 0.1.28）
+
+小良哥實測：用手機的懸浮小視窗講話，電腦的 3D 頁也開著，聲音卻從電腦出來。規則：**觸控、說話的是哪個畫面，出聲裝置就是哪個畫面**，兩個方向都要成立。
+
+### 根因
+
+1. App 內的 3D 頁（WebView）搬進懸浮視窗時，網頁瞬間被當成「不在畫面上」，**離開**（`POST /device visible=0`）與**回來**（下一次 `/updates` 帶 visible=1）是兩個並行的請求，後端收到的順序不保證；訊號模式下回來的那次可能要等 300 秒。後端的 `dev:<id>` 因此留在 `visible=false`。
+2. 泡泡送話帶 `speak_via=<App 內 3D 頁>`，`noteSpeakVia` 要求「還活著且 visible」，被拒絕後**退回原本的選法**＝最近互動的那台（電腦）。證據：正式 kv 的 updates_log 在小視窗送話的那幾輪（seq 472）`speaker_client` 是電腦那個 3D 頁。
+3. 另外：觸控（旋轉、移動鏡頭）從來不會改 speaker，只有說話（/chat 帶 client_id）會。
+
+### 修法
+
+- **App 擔保**：`speak_via` 由外殼送來，等於外殼在說「這個 3D 頁現在在畫面上」（全畫面、懸浮小視窗、系統子母畫面都算）。`noteSpeakVia` 對 3D 頁只要求紀錄存在且 30 分鐘內有動靜（`VIA_GRACE_S`），並把它記成可見；對 App 泡泡（手機頁打字指定的）仍要求還活著、可見。
+- **指定不到絕不跳別台**：真的指不到（頁面已不在）時，`/chat` 回標頭 `x-speak-via: miss`，後端這一輪**不把話推給任何 3D 頁**（只推動作），App 自己唸（`speakViaMissed`）。手機頁打字與電視沒有這個備案，維持原本的選法。
+- **回報排隊**：3D 頁的 visible=0 / visible=1 / interact 回報走同一條序列（`inbox.js post`），回來時立刻明講 visible=1，不等輪詢。外殼搬進懸浮視窗後 0.3、1.2 秒再各說一次「看得見」。
+- **觸控切換**：3D 頁任何 `pointerdown`／`wheel`／`keydown` → `POST /device?…&interact=1`（`touch_speaker.js`，本機樂觀切成 speaker，已是 speaker 不重送，間隔 1.5 秒）；後端走 `noteInteraction`（換人敲門鈴）。叫出／收起小視窗（`iroriHostPip` 變化）也算一次互動，立刻切回手機。
+- **讓位給最近被碰過的**：`speaker_recent`（kv，最近 6 台互動過的裝置）。speaker 離開（visible=0）時，立刻讓給「還看得見、最近被碰過」的那台並敲門鈴；沒有 speaker 時新輪詢的裝置接手前也先看這份名單。
+- **手機頁（Irori Chat）打字**：App 內嵌時帶 `speak_via=<手機泡泡的 client_id>`（`IroriAndroid.clientId()`，泡泡沒在跑回空字串），泡泡還活著就由手機出聲。
+- **身分**：裝置紀錄與 speaker 多一個 `form`：`float`（懸浮小視窗）、`pip`（系統子母畫面）。來源：`iroriHostPip(on, form)`、`IroriRoom.miniForm()`；3D 頁在 `/updates`、`/device` 帶 `form=`。`/chat` 的 `origin` 多 `float`、`pip`（點懸浮視窗、按子母畫面的「說話」），`speak_form` 隨 `speak_via` 帶。後端 `channel.ts` 對希緒說「手機上的懸浮小視窗／子母畫面，聲音從小視窗裡的 3D 房間出來」；`/updates` 的回應多 `speaker_form`；出聲裝置的時鐘標記的提示字顯示「手機小視窗」。
+- **小視窗字幕**：`body.pip` 時字幕最多兩行、貼下緣，長句兩行一組輪替（`subtitle_logic.js`，每組 1.2～3 秒，依字數）。
+
+測試：`speaker_mini_test.ts`、`speaker_test.ts`、`channel_test.ts`、`tests/touch_speaker.test.mjs`、`tests/device_report.test.mjs`、`tests/host_visibility.test.mjs`、`tests/subtitle_logic.test.mjs`、`tests/phone_talk_via.test.mjs`、Android `RoomVisibilityTest`。
