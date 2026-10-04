@@ -184,8 +184,28 @@ async function forwardUnmatched(from, text) {
   const ok = await sendBack({ mail: { id: lr.mail_id, from_node: lr.from_node, from_agent: lr.from_agent } }, `（收發室：這則回覆對不上特定來信，依最近一次交辦轉給你）\n${text}`, from)
   log(`unmatched reply from ${from} (${text.length} chars) -> last requester ${lr.from_node}/${lr.from_agent} reply_to=${lr.mail_id} sent=${ok}`)
 }
+// 視窗主動寄信（10/04 小良哥：收發室也要能代寄）：傳給收發室的訊息第一行寫
+//   [RELAY 寄信] to=<節點>[/<視窗>] [re=<信件id>]   （「[RELAY 回信]」同義）
+// 有 re＝回那一封（照回信流程）；沒有 re＝寄一封新信，寄件人是這個視窗（from-name 由 Claude Code 標記，視窗無法冒名）
+const SEND_HEAD_RE = /^\s*\[RELAY (?:寄信|回信)\]\s*to=([A-Za-z0-9_-]+)(?:\/(\S+))?(?:\s+re=([0-9a-f-]{36}))?[^\S\r\n]*\r?\n?/
+function parseSendHead(text) {
+  const m = String(text).match(SEND_HEAD_RE)
+  if (!m) return null
+  return { to_node: m[1], to_agent: m[2] || undefined, re: m[3] || undefined, body: String(text).slice(m[0].length).trim() }
+}
+async function sendNew(from, h) {
+  if (!h.body) { log(`new mail from ${from} to ${h.to_node} dropped: empty body`); return }
+  try {
+    const r = await api('send', { method: 'POST', body: { to_node: h.to_node, to_agent: h.to_agent, body: h.body, from_agent: from } })
+    log(`new mail from ${from} -> ${h.to_node}/${h.to_agent ?? ''} id=${r?.id ?? '?'} sent=true`)
+  } catch (e) { log(`new mail from ${from} -> ${h.to_node} failed: ${e.message}`) }
+}
+
 // mailId（選用）：轉接器知道這則回覆是回哪一封時帶上（acp 工作者同時有好幾封在排隊，不能靠先進先出猜）
 async function onReply(from, text, mailId) {
+  const head = parseSendHead(text)
+  if (head && !head.re && !mailId) { await sendNew(from, head); return }
+  if (head?.re) { mailId = head.re; text = head.body || text }
   const cands = [...pending.values()].filter(p => p.target === from && p.state !== 'forwarding')
   // 還在等的優先；沒有才輪到已通知過「沒回」、仍保留中的信（遲到的回覆，先進先出）
   const active = cands.filter(c => c.state !== 'notified')

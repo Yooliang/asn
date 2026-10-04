@@ -253,3 +253,23 @@ test('收發室完全沒回報，但對方已經用 --reply-to 回了這封 → 
     assert.ok(st.acked.has(uid(1)))
   } finally { await st.close() }
 })
+
+// 10/04：視窗主動寄信（小良哥：收發室也要能代寄）
+test('視窗傳給收發室「[RELAY 寄信] to=節點/視窗」→ 當成新信寄出，寄件人是該視窗；沒有這行頭的照舊（對不上就丟）', async () => {
+  const st = await fakeServer([])
+  try {
+    let said = false
+    await go({
+      st, step: c => {
+        if (!said && /bridge starting|whoami/.test(c.log)) {
+          said = true
+          c.says('[RELAY 寄信] to=XISU/希緒\n希緒你好，這是新信')
+          c.says('沒有寄信頭的一般訊息')
+        }
+        return c.st.sent.length >= 1 && /unmatched reply from T-對方/.test(c.log)
+      },
+    })
+    assert.equal(st.sent.length, 1)
+    assert.deepEqual([st.sent[0].to_node, st.sent[0].to_agent, st.sent[0].from_agent, st.sent[0].body, st.sent[0].reply_to], ['XISU', '希緒', 'T-對方', '希緒你好，這是新信', undefined])
+  } finally { await st.close() }
+})
