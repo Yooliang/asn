@@ -8,9 +8,9 @@
 1. 自己有一個 `client_id`（字串，最長 64，每次安裝／啟動固定即可）與 `kind`：3D 頁是 `3d`，Android App 是 `app`。
 2. 輪詢 `GET /updates` 時加查詢參數：`client_id=<id>&kind=app&visible=1`。
    `visible=1`＝現在可以出聲（泡泡在顯示、或 App 在前景）；不能出聲就送 `visible=0`，或乾脆不輪詢。
-   **離開時要馬上說一聲**：泡泡收起、App 進背景、關頁的那一刻送一次 `POST /device?client_id=<id>&kind=app&visible=0`（參數同 /updates，帶授權標頭，回 `{"ok":true}`）。
-   後端立刻視這台為失效，別台下一次輪詢就接手；不送的話要等 180 秒沒輪詢才會判死，期間推來的話都蓋這台的 `speaker_client`、但這台不會唸，等於沒人出聲。
-   這支只更新裝置紀錄，不收信、不補講提醒，所以離開時送它比送 `GET /updates?visible=0&wait=0` 安全（後者會把來信轉述成只回給正在關閉的頁面）。
+   **暫時看不見時說一聲**：泡泡收起、App 進背景、鎖屏、分頁切走的那一刻送一次 `POST /device?client_id=<id>&kind=app&visible=0`（參數同 /updates，帶授權標頭，回 `{"ok":true}`）。
+   **出聲裝置不會因此換給別台**——只有使用者碰觸／說話才換台。這支只更新裝置紀錄，不收信、不補講提醒。
+   **真的離開**（網頁分頁關掉 pagehide、泡泡服務結束）再送 `POST /device?...&gone=1`。其餘參數：`host=<同一支手機的泡泡 client_id>`（App 內的 3D 頁帶）、`tv=1`（電視版 App）。
 3. 送 `POST /chat` 時，body 多帶 `"client_id": "<id>", "client_kind": "app"`（使用者在這台發話，這台就成為 speaker）。
    /chat 獨立頁不出聲，不帶這兩個欄位。
 4. 收到的 say 有 `speaker_client` 欄位時：
@@ -20,13 +20,18 @@
 
 ## 後端怎麼選 speaker
 
-- kv `dev:<client_id>`＝{kind, at, visible}，每次帶 client_id 的 `/updates` 或 `/chat` 都更新。
-- kv `speaker`＝{client_id, kind, at}：
-  1. `/chat` 帶 client_id＋client_kind → 該台成為 speaker（最近互動的那台）。
-  2. 沒有 speaker、或 speaker 超過 180 秒沒輪詢／`visible=0`（輪詢帶的，或離開時 `POST /device` 送的）→ 下一台可見的出聲裝置輪詢時接手（先到先得，不會每 25 秒互搶）。
-     後端有開訊號模式（Firebase 指標，`SIGNAL.md`）時，裝置只每 300 秒保底輪詢一次，存活期改成 **400 秒**（要大於保底間隔，否則兩次保底之間 speaker 就失效）；正常離開的 `visible=0` 照樣立刻讓位。
-  3. 從 /chat 獨立頁發話不改 speaker，沿用上一條選出的「最近可見的 3D 頁或 App」。
-- 推送 say 時（夥伴回信、提醒、speak_elsewhere）加 `speaker_client`＝推送當下還活著的 speaker。
+- kv `dev:<client_id>`＝{kind, at, visible, form?, host?, tv?, gone?}，每次帶 client_id 的 `/updates` 或 `/device` 都更新。
+- kv `speaker`＝{client_id, kind, at}＝最後被碰／說話的那台；kv `speaker_recent`＝最近被碰過的幾台（新的在前）。
+- **誰出聲（`liveSpeaker`，讀的時候才算）——出聲裝置只在使用者「碰觸／說話」時換台，離開不換**：
+  1. `/chat` 帶 client_id＋client_kind、或 `POST /device?interact=1`、或 `speak_via` → 該台成為 speaker。
+  2. **暫時看不見**（`visible=0`：鎖屏、切背景、小視窗收起、分頁切走、電腦螢幕關了）：speaker 不動。
+     手機 App 內的 3D 頁（全畫面、懸浮小視窗、子母畫面）帶 `host`＝同一支手機的泡泡，看不見時由那個泡泡代唸（`speaker_client` 填泡泡的 id，泡泡在鎖屏也能唸）；
+     電腦分頁切走（沒有 host）→ 仍指向它、沒人唸，各台只顯示字幕、話記在聊天紀錄。
+  3. **真的離開**（`gone=1`、可見卻超過 180 秒（訊號模式 400 秒）沒回報、暫時看不見超過 12 小時完全沒消息、泡泡也死了的 3D 頁）：交給「最近使用、還活著的手機泡泡」（kind app、不是電視）；手機也不在就不指定（不帶 `speaker_client`），下一台可見的出聲裝置輪詢時接手。
+  4. 電視（`tv=1`）視為固定裝置，跟電腦同一套：遙控器對電視說話＝碰觸；電視關閉＝真的離開，回手機。
+  5. 從 /chat 獨立頁發話不改 speaker。
+  舊客戶端沒有 `gone`、`host`：只靠心跳逾時判離開；手機鎖屏時沒有泡泡代唸（仍指向那個 3D 頁、沒人唸）。
+- 推送 say 時（夥伴回信、提醒、speak_elsewhere）加 `speaker_client`＝推送當下的出聲裝置（上面第 2 點時是泡泡的 id）。
 - **換人立刻通知**：`/chat` 讓 speaker 換成另一台時（新的 client_id 跟原本記的不同），後端敲一次狀態門鈴（跟 `PUT /state` 同一個），各台等待中的 `/updates` 長輪詢馬上回來、帶新的 `speaker_client`（3D 頁據此即時換時間的深色底）。同一台連續說話不敲。長輪詢進來時先記當時的 speaker，門鈴一響就比一次，換了才回。發話那台 3D 頁另外在送出時先本機樂觀切成 speaker，之後仍以 `/updates` 為準。
 - 實作：`supabase/functions/irori-api/speaker.ts`，測試 `speaker_test.ts`。
 
