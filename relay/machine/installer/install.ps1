@@ -157,6 +157,9 @@ if ($Reissue) { Say '（重新安裝模式：請貼上管理者給你的「重�
 $code = $InviteCode
 if (-not $code) { $code = Read-Answer $(if ($Reissue) { '請貼上重設碼' } else { '請貼上邀請碼' }) '' $ni }
 if (-not $code) { Stop-Install '沒有填邀請碼。請向希緒或管理者要一組。' }
+# 貼的是希緒產生的整行（「邀請碼：xxxx（只能用一次…）」）也可以：只取冒號後面那一串
+if ($code -match '碼\s*[:：]\s*([^\s（(]+)') { $code = $Matches[1] }
+$code = $code.Trim()
 
 $name = $DisplayName
 if (-not $name) { $name = Read-Answer '這台電腦的名稱（給人看的，例如：小美的筆電）' $env:COMPUTERNAME $ni }
