@@ -38,7 +38,7 @@ export function headReply(text) {
 // 代寄：視窗傳給收發室的訊息第一行
 //   [RELAY 寄信] to=<節點>[/<視窗>] [re=<信件id>] reply=yes|no   （「[RELAY 回信]」同義；re 與 reply 順序不拘）
 // 同一行抬頭後面若還接著別的字，當成內文的開頭（原本就是這樣）
-export const SEND_HEAD_RE = /^\s*\[RELAY (?:寄信|回信)\]\s*to=([A-Za-z0-9_-]+)(?:\/(\S+))?((?:\s+re=[0-9a-f-]{36}|[^\S\r\n]+reply=(?:[Nn][Oo]|[Yy][Ee][Ss]))*)[^\S\r\n]*\r?\n?/
+export const SEND_HEAD_RE = /^\s*\[RELAY (?:寄信|回信)\]\s*to=([A-Za-z0-9_-]+)(?:\/(\S+))?((?:\s+re=[0-9a-f-]{36}|[^\S\r\n]+reply=(?:[Nn][Oo]|[Yy][Ee][Ss])(?=\s|$))*)[^\S\r\n]*\r?\n?/
 export function parseSendHead(text) {
   const m = String(text).match(SEND_HEAD_RE)
   if (!m) return null

@@ -204,8 +204,17 @@ function refuseSend(from, h) {
   log(`new mail from ${from} to ${h.to_node} refused: no reply=yes|no in [RELAY 寄信] head (not sent)`)
   tellWindow(from, `[收發室] 你傳給收發室的代寄信沒有寄出：第一行 [RELAY 寄信] to=… 少了 reply=yes 或 reply=no。等對方回信就寫 reply=yes、只是告知就寫 reply=no（回信 re=<id> 也一樣要寫），補上後請重傳一次。（這是系統通知，不用回覆。）內文開頭：${h.body.replace(/\s+/g, ' ').slice(0, 40)}`)
 }
+// 通知信的編號／視窗記一下（TTL 10 分鐘）：視窗若回了這則通知，那則回覆不是給任何人的，丟掉而不是轉給它的最近交辦者
+const NOTICE_TTL_MS = 600_000
+const noticeIds = new Map()       // 通知信編號 -> 時間
+const noticeWindows = new Map()   // 視窗名 -> 最近一則通知的時間
+const fresh = t => t != null && Date.now() - t < NOTICE_TTL_MS
 function tellWindow(name, text) {
-  try { engineOfWindow(name).deliver({ id: crypto.randomUUID(), to: name, text }) }
+  const id = crypto.randomUUID()
+  for (const [k, t] of noticeIds) if (!fresh(t)) noticeIds.delete(k)
+  for (const [k, t] of noticeWindows) if (!fresh(t)) noticeWindows.delete(k)
+  noticeIds.set(id, Date.now()); noticeWindows.set(name, Date.now())
+  try { engineOfWindow(name).deliver({ id, to: name, text }) }
   catch (e) { log(`cannot tell window ${name}: ${e.message}`) }
 }
 
@@ -223,7 +232,10 @@ async function onReply(from, text, mailId) {
   const active = cands.filter(c => c.state !== 'notified')
   const byId = mailId ? cands.find(c => c.mail.id === mailId) : null
   const p = byId || active.find(c => !c.replied) || active[active.length - 1] || cands.find(c => c.state === 'notified')
-  if (!p) { await forwardUnmatched(from, text, expectsReply); return }
+  if (!p) {
+    if (fresh(noticeIds.get(mailId)) || fresh(noticeWindows.get(from))) { noticeIds.delete(mailId); noticeWindows.delete(from); log(`reply from ${from} dropped: answer to a bridge notice (not forwarded)`); return }
+    await forwardUnmatched(from, text, expectsReply); return
+  }
   const late = p.state === 'notified'
   p.replied = true
   if (late) pending.delete(p.mail.id)   // 遲到的回覆寄回後就清掉

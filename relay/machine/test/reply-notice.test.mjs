@@ -326,6 +326,24 @@ test('代寄沒寫 reply=（或寫錯）→ 不寄出、log 記下，並用 deli
   } finally { await st.close() }
 })
 
+test('視窗回了「少了 reply=」的通知 → 那則回覆丟掉（不轉給它最近交辦的人）', async () => {
+  const st = await fakeServer([mail(1)])
+  try {
+    let said = 0, t2 = 0
+    const { log } = await go({
+      st, step: c => {
+        if (said === 0 && c.forwarded() >= 1) { said = 1; c.says('做完了') }                                  // 先正常回掉 W 的交辦（留下 lastRequester）
+        if (said === 1 && c.st.sent.some(x => x.reply_to === uid(1))) { said = 2; t2 = Date.now() }
+        if (said === 2 && Date.now() - t2 > 900) { said = 2.5; c.says('[RELAY 寄信] to=XISU 忘了寫 reply') }   // 等已回覆的信過了計時被清掉，之後的回覆才會「對不上」
+        if (said === 2.5 && /refused/.test(c.log)) { said = 3; c.says('好的，我補上') }                         // 視窗回覆通知
+        return /answer to a bridge notice/.test(c.log)
+      },
+    })
+    assert.doesNotMatch(log, /last requester/)
+    assert.equal(st.sent.filter(s => /好的，我補上/.test(s.body)).length, 0)
+  } finally { await st.close() }
+})
+
 test('代寄回信 [RELAY 回信] to=… re=<id> reply=no → 回給那封信的寄件人（reply_to＝該信），帶 expects_reply；沒寫 reply= 不寄、通知補上', async () => {
   const st = await fakeServer([mail(1)])
   try {

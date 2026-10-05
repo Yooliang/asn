@@ -86,6 +86,12 @@ test('代寄抬頭 reply=yes|no：放最後（有無 re= 都行）、放 re= 前
   assert.equal(parseSendHead('[RELAY 寄信] to=XISU reply=no\r\nx').body, 'x')
   const d = parseSendHead('[RELAY 寄信] to=XISU reply=maybe\n內文')
   assert.equal(d.reply, undefined); assert.equal(d.body, 'reply=maybe\n內文')
+  // 值後面要有邊界：reply=yesx／reply=nope 不能被當成 yes／no
+  for (const v of ['yesx', 'nope', 'no1']) {
+    const x = parseSendHead(`[RELAY 寄信] to=XISU reply=${v}\n內文`)
+    assert.equal(x.reply, undefined, v); assert.equal(x.body, `reply=${v}\n內文`, v)
+  }
+  assert.equal(parseSendHead('[RELAY 寄信] to=XISU reply=no').reply, 'no')   // 行尾（沒有換行）也算邊界
   // 只認抬頭那一行：內文第二行開頭的 reply=no 是內文
   const e = parseSendHead('[RELAY 寄信] to=XISU\nreply=no 這是內文的第一行')
   assert.equal(e.reply, undefined); assert.equal(e.body, 'reply=no 這是內文的第一行')
