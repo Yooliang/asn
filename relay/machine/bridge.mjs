@@ -15,6 +15,9 @@ import { loadEngines } from './engines/index.mjs'
 import { selfRecvAlive } from './self-recv.mjs'
 import { sentMarkName } from './sent-mark.mjs'
 import { snapshot, loadState, saveAtomic } from './pending-store.mjs'
+import { checkAndUpdate, gitRunner, killTree, orphansOf, readyToRestart } from './self-update.mjs'
+import { processTable } from './engines/claude-identity.mjs'
+import { fileURLToPath } from 'node:url'
 
 const NODE_ID = (process.env.IRORI_RELAY_ID || 'H').trim()
 const BASE_URL = (process.env.IRORI_RELAY_URL || 'https://hwtahctsgjcemtwzlvnq.supabase.co/functions/v1/irori-relay').replace(/\/+$/, '')
@@ -38,6 +41,10 @@ const BUSY_STATUS_RE = new RegExp(process.env.IRORI_BUSY_STATUS_RE || '^(busy|wo
 const TICK_MS = Number(process.env.IRORI_BRIDGE_TICK_MS || 5_000)
 const FORWARD_TIMEOUT_MS = Number(process.env.IRORI_FORWARD_TIMEOUT_MS || 120_000)   // 收發室多久沒回報 SENT 就算轉交逾時
 const LOG_FILE = process.env.IRORI_RELAY_LOG || path.join(WORK_DIR, 'bridge.log')
+// 自己更新：多久到 origin/main 看一次 relay/machine/ 有沒有新版（0＝關掉）；有新版就拉、收尾、結束，run-bridge.ps1 會用新版重啟
+// 指向別的 relay（測試的假伺服器）時預設關掉，測試起的橋絕不會去拉真的 repo
+const SELF_UPDATE_MS = Number(process.env.IRORI_SELF_UPDATE_MS ?? (process.env.IRORI_RELAY_URL ? 0 : 600_000))
+const REPO_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 fs.mkdirSync(WORK_DIR, { recursive: true })
 const log = msg => {
@@ -110,6 +117,7 @@ const forwardable = name => roster.some(a => a.name === name) || (EXTRA_ALLOW.in
 
 // ---- mail state --------------------------------------------------------------------------------
 const seen = new Set()        // acked mail ids (dedupe)
+let restartSince = null, lastUpdateNote = ''   // 自己更新：拉到新版的時間（之後不收新信、等著重啟）
 // 對應表有變動就存 WORK_DIR/pending.json（原子寫入、不含信件內文）；橋重啟後載回，遲到／對不上的回覆才不會因重啟被丟掉
 const PENDING_FILE = path.join(WORK_DIR, 'pending.json')
 let lastSaved = ''
@@ -450,6 +458,7 @@ async function pullRoomsGuarded() {
   catch (e) { log(`rooms pull failed: ${e.message}`) } finally { roomsPulling = false }
 }
 async function pull(why) {
+  if (restartSince) return   // 已經拉到新版、等著重啟：不再收新信，留在信箱給重啟後的橋
   void pullRoomsGuarded()
   void launcher.pull()
   if (pulling) { again = true; return }
@@ -512,6 +521,14 @@ try {
   if (old && old !== process.pid) { try { process.kill(old, 0); console.error(`another bridge is running (pid ${old})`); process.exit(3) } catch (e) { if (e.code === 'EPERM') process.exit(3) } }
 } catch {}
 fs.writeFileSync(LOCK, String(process.pid))
+// 上一個橋留下的孤兒（收發室、工作者）先收掉，免得兩組同時收信（見 self-update.mjs）
+const LAST = path.join(WORK_DIR, 'bridge.last')
+try {
+  const lastPid = Number(fs.readFileSync(LAST, 'utf8')) || 0
+  const orphans = lastPid ? orphansOf(processTable(), lastPid, process.pid) : []
+  for (const pid of orphans) log(`killed orphan pid=${pid} left by previous bridge pid=${lastPid}: ${await killTree(pid) ? 'ok' : 'failed'}`)
+} catch (e) { if (e.code !== 'ENOENT') log(`orphan check failed: ${e.message}`) }
+fs.writeFileSync(LAST, String(process.pid))
 process.on('exit', () => { try { if (Number(fs.readFileSync(LOCK, 'utf8')) === process.pid) fs.unlinkSync(LOCK) } catch {} })
 
 log(`bridge starting node=${NODE_ID} mailbox=${MAILBOX_NAME}`)
@@ -524,3 +541,26 @@ for (let wait = 2000;;) {
 }
 void pull('startup')
 setInterval(() => void pull('poll'), POLL_MS)
+
+// ---- 自己更新、自己重啟 ----------------------------------------------------------------------------
+async function selfUpdate() {
+  if (restartSince) return
+  const r = await checkAndUpdate(gitRunner(REPO_DIR))
+  if (r.action === 'updated') {
+    restartSince = Date.now()
+    log(`self-update ${r.from} -> ${r.to} (${r.changed.join(', ')}): stop taking mail, restart when nothing is forwarding`)
+  } else if (r.action !== 'none' && r.reason !== lastUpdateNote) log(`self-update ${r.action}: ${r.reason}`)
+  lastUpdateNote = r.reason
+}
+if (SELF_UPDATE_MS > 0) {
+  setTimeout(() => void selfUpdate(), 30_000)
+  setInterval(() => void selfUpdate(), SELF_UPDATE_MS)
+  setInterval(() => {
+    if (!restartSince) return
+    const ok = readyToRestart([...pending.values()].map(p => p.state), restartSince, Date.now())
+    if (!ok.ok) return
+    log(`self-update restart (${ok.reason})`)
+    persist()
+    shutdown()
+  }, TICK_MS)
+}

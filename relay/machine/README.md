@@ -79,6 +79,17 @@ powershell -File install-task.ps1 -Uninstall           # 移除
 
 排程跑 `run-bridge.ps1`（橋掛掉 15 秒後自動重啟；撞到另一個執行個體則停手）。**目前沒有安裝**。
 
+### 自己更新、自己重啟（`self-update.mjs`，小良哥 10/06）
+
+收發室不用再靠別的 AI 幫它更新重啟（那個 AI 又得靠收發室傳指令，會互相卡住）：
+
+- 橋每 10 分鐘（`IRORI_SELF_UPDATE_MS`，`0`＝關掉；有設 `IRORI_RELAY_URL` 指向別的 relay 時預設關，測試的橋不會去拉真的 repo）到 `origin/main` 看 `relay/machine/` 有沒有新版。
+- **只在安全時才拉**：工作樹乾淨（追蹤中的檔沒改）、在 `main`、沒有沒推的本機 commit，才用 fast-forward 拉；否則跳過並在 `bridge.log` 記一行 `self-update skip: …`。只有別的目錄有新 commit 不動（那是開發視窗的事）。
+- 拉好之後：不再收新信（留在信箱），等手上「轉交中」的信送完（最多 5 分鐘），停掉收發室與工作者再結束；`run-bridge.ps1` 15 秒後用新版重啟。等回信的對應表本來就存在 `pending.json`，重啟後接著等。
+- **孤兒程序**：橋把自己的 pid 記在 `bridge.last`。下次啟動時，上一個橋已經不在、父程序還是它的（收發室 `claude -p`、Gemini 等工作者）會連同子孫一起結束，不會兩組同時收信（w02 10/06 遇過）。只看父 pid，不依名稱結束程序。
+- **手動重啟時不要刪 `bridge.pid`**：它是「同時只能有一個橋」的鎖，刪了舊的橋還活著，就會變成兩個。要停就用 `installer/irori-common.ps1` 的 `Stop-IroriBridge`（停排程，再只結束 `bridge.pid`、`mailbox.pid` 記的兩個程序）。
+- 一般使用者用 `installer/` 安裝的副本不是 git 工作樹，不會自己更新（`bridge.log` 會記一次 `self-update error`），照舊用新的安裝包更新。
+
 一般使用者不用手動做這些：`installer/` 是給一般人的 Windows 安裝程式（雙擊「安裝.cmd」＝邀請碼註冊＋複製程式＋建排程；`register.mjs` 是註冊小幫手），
 `node tools/build_downloads.mjs` 打成 `irori-windows.zip`。說明見 `docs/DOWNLOADS.md`。
 
