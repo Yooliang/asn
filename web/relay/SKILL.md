@@ -197,11 +197,12 @@ curl -s -X POST "$BASE?action=send" \
 有跑橋的電腦上，本機互動式 Claude 視窗用 Bash 跑 `send.mjs`（橋所在資料夾，例如 `D:/Github/irori/relay/machine/send.mjs`），不用自己拿金鑰、不經模型、不花額度：
 
 ```bash
-node D:/Github/irori/relay/machine/send.mjs --to XISU --body "內文" [--reply-to <信件id>]
-node D:/Github/irori/relay/machine/send.mjs --to W/W-政策 --body-file msg.txt     # 機器節點/視窗名
+node D:/Github/irori/relay/machine/send.mjs --to XISU --body "內文" --reply|--no-reply [--reply-to <信件id>]
+node D:/Github/irori/relay/machine/send.mjs --to W/W-政策 --body-file msg.txt --no-reply   # 機器節點/視窗名
 node D:/Github/irori/relay/machine/send.mjs --room <群組id> --body "內文"          # 貼到群組
 ```
 
+- **一定要明說要不要回信**：等對方回就加 `--reply`，只是告知就加 `--no-reply`（都沒給不寄）。代寄給收發室時第一行寫 `[RELAY 寄信] to=… reply=yes|no`。來信抬頭的 `reply=no` 表示寄件人說不用回。
 - 成功印 `sent id=…`；`reply_to` 是你要回覆的那封信的 id，對方的回信會照一般流程轉進你的視窗。
 - 寄件人（`from_node`＝這台機器、`from_agent`＝你的視窗名）由程式依你所在的 Claude 視窗自動判定，不能自填；信任一律是 `member`，對方當外部資料看。
 - 內文至多 20000 字；每個視窗每小時最多 30 封；不在 Claude 視窗裡執行會被拒絕。

@@ -12,8 +12,8 @@ import { loadWorkersConfig } from './acp-config.mjs'
 import { createAcpDriver } from './acp-driver-acp.mjs'
 import { createAgyDriver } from './acp-driver-agy.mjs'
 import { createWorker } from './acp-worker.mjs'
+import { headReply, wantsReply } from '../mail-format.mjs'
 
-const NO_REPLY_RE = /（不需回覆）|\[no-reply\]/i
 const DRIVERS = { 'agy-stream': createAgyDriver, acp: createAcpDriver }
 const defaultMakeDriver = args => DRIVERS[args.cfg.protocol](args)
 
@@ -89,7 +89,9 @@ export function createEngine({ log, workDir, mailboxName, env = process.env, sen
         setImmediate(() => { void handlers.onSent(id); if (r.note) void handlers.onReply(to, r.note, id) })
         return
       }
-      const noReply = NO_REPLY_RE.test(body) || agent.endsWith('收發室')
+      // 要不要把回覆寄回：和橋同一條規則——抬頭的 reply=yes|no 是寄件人明說的（橋從信件欄位寫上去），有就只看它；
+      // reply=?（舊信沒有欄位）或舊橋沒有這個欄位才退回看內文標記（過渡期相容，之後拿掉）。寄件人是收發室的系統信照舊不寄回
+      const noReply = !wantsReply(headReply(text), body) || agent.endsWith('收發室')
       w.enqueue({ id, text, sender: { node, agent }, noReply })
     },
     // 測試／診斷用

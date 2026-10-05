@@ -68,13 +68,15 @@ const hbPath = (home, name = 'T-視窗甲') => heartbeatFile(path.join(home, '.i
 
 test('--once：只印寄給本視窗的信（一行一個 JSON、含 id/trust/from/reply_to/body），只 ack 這些', async () => {
   const st = await fakeRelay(), home = newHome()
-  st.mails = [mail(1, 'T-視窗甲', { reply_to: U(99), trust: 'owner' }), mail(2, 'T-視窗乙'), mail(3, null), mail(4, 'T-視窗甲')]
+  st.mails = [mail(1, 'T-視窗甲', { reply_to: U(99), trust: 'owner', expects_reply: true }), mail(2, 'T-視窗乙'), mail(3, null), mail(4, 'T-視窗甲')]
   try {
     const c = spawnRecv(home, st, ['--once'])
     assert.equal(await c.done, 0, c.err)
     const got = lines(c)
     assert.deepEqual(got.map(m => m.id), [U(1), U(4)])
-    assert.deepEqual(got[0], { id: U(1), trust: 'owner', from_node: 'W', from_agent: 'W-政策', to_agent: 'T-視窗甲', reply_to: U(99), created_at: '2026-10-02T00:00:00Z', body: '信1' })
+    // expects_reply＝寄件人明說要不要回信（true 要回、false 只是告知）；舊信沒有這個欄位就是 null
+    assert.deepEqual(got[0], { id: U(1), trust: 'owner', from_node: 'W', from_agent: 'W-政策', to_agent: 'T-視窗甲', reply_to: U(99), created_at: '2026-10-02T00:00:00Z', expects_reply: true, body: '信1' })
+    assert.strictEqual(got[1].expects_reply, null)
     const inbox = st.reqs.find(r => r.action === 'inbox'), ack = st.reqs.find(r => r.action === 'ack')
     assert.equal(inbox.agent, 'T-視窗甲'); assert.equal(inbox.key, 'fake-machine-key')
     assert.equal(ack.agent, 'T-視窗甲'); assert.deepEqual(ack.body.ids, [U(1), U(4)])

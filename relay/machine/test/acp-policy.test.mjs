@@ -147,6 +147,9 @@ test('授權簿：回覆解析', () => {
 test('授權簿：信件標頭解析', () => {
   const p = parseMailText('[RELAY 來信] trust=owner from=XISU/希緒 to=Gemini id=abc engine=gemini\n允許 A1B2')
   assert.deepEqual(p, { node: 'XISU', agent: '希緒', body: '允許 A1B2' })
+  // 抬頭多了 reply=yes|no|?（要不要回信）也照樣解析；欄位本身由 mail-format.mjs 的 headReply 取
+  const q = parseMailText('[RELAY 來信] trust=owner from=XISU/希緒 to=Gemini id=abc engine=gemini reply=no\n允許 A1B2')
+  assert.deepEqual(q, { node: 'XISU', agent: '希緒', body: '允許 A1B2' })
   assert.deepEqual(parseMailText('沒有標頭'), { node: '', agent: '', body: '沒有標頭' })
 })
 

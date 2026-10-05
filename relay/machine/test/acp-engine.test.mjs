@@ -43,8 +43,8 @@ function rig(workers, { env = {} } = {}) {
   const r = {
     dir, events, sent, logs, engine: make(),
     restart() { r.engine.stop(); r.engine = make() },
-    mail(id, body, { from = 'W/政策', to = 'Gemini' } = {}) {
-      r.engine.deliver({ id, to, text: `[RELAY 來信] trust=member from=${from} to=${to} id=${id} engine=gemini\n${body}` })
+    mail(id, body, { from = 'W/政策', to = 'Gemini', reply } = {}) {
+      r.engine.deliver({ id, to, text: `[RELAY 來信] trust=member from=${from} to=${to} id=${id} engine=gemini${reply ? ` reply=${reply}` : ''}\n${body}` })
     },
     replies: () => events.filter(e => e.t === 'reply').map(e => e.text),
     fails: () => events.filter(e => e.t === 'fail'),
@@ -285,6 +285,27 @@ test('agy：「不需回覆」的信照樣處理但不寄回；不認得的收�
     await r.waitFor(() => r.logs.some(l => /不需回覆的信/.test(l)), '處理完')
     assert.equal(r.replies().length, 0)
     assert.throws(() => r.engine.deliver({ id: ID(2), to: '不存在', text: 'x' }), /沒有名叫/)
+  } finally { await r.done() }
+})
+
+// 「要不要回信」改成信件的獨立欄位：橋把欄位寫在抬頭的 reply=yes|no|?；有明說（yes／no）就只看欄位，?（舊信）或沒有這個欄位才退回看內文標記
+test('agy：抬頭 reply=no → 內文沒標記也不寄回；reply=yes → 內文有標記也照寄回；reply=? 或沒有欄位 → 退回看內文標記', async () => {
+  const r = rig([agy()])
+  try {
+    r.mail(ID(1), '請處理一下', { reply: 'no' })
+    await r.waitFor(() => r.logs.some(l => new RegExp(`不需回覆的信 ${ID(1)}`).test(l)), '欄位說不用回 → 不寄回')
+    assert.equal(r.replies().length, 0)
+    r.mail(ID(2), '通知（不需回覆）但寄件人說要等回信', { reply: 'yes' })
+    await r.waitReplies(1)
+    assert.match(r.replies()[0], /收到：通知（不需回覆）但寄件人說要等回信/)
+    r.mail(ID(3), '舊信有標記（不需回覆）', { reply: '?' })
+    await r.waitFor(() => r.logs.some(l => new RegExp(`不需回覆的信 ${ID(3)}`).test(l)), '舊信看內文標記 → 不寄回')
+    r.mail(ID(4), '舊橋沒有欄位（不需回覆）')
+    await r.waitFor(() => r.logs.some(l => new RegExp(`不需回覆的信 ${ID(4)}`).test(l)), '沒有欄位看內文標記 → 不寄回')
+    r.mail(ID(5), '舊信沒標記', { reply: '?' })
+    await r.waitReplies(2)
+    assert.equal(r.replies().length, 2)
+    assert.ok(!r.logs.some(l => new RegExp(`不需回覆的信 (${ID(2)}|${ID(5)})`).test(l)))
   } finally { await r.done() }
 })
 

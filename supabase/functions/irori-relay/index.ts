@@ -2,6 +2,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { handleNodeRoomAction, type RoomDeps, syncNodeAuto } from "../_shared/rooms.ts";
 import { handleAgentInbox } from "../_shared/agent_inbox.ts";
+import { expectsReplyArgs } from "../_shared/expects_reply.ts";
 import { normalizeRosterAgents } from "../_shared/roster.ts";
 import * as signal from "../_shared/signal.ts";
 import { handleNodeLaunchAction, LAUNCH_ACTIONS, sanitizeLauncher } from "../_shared/launch.ts";
@@ -211,6 +212,9 @@ Deno.serve(async (req) => {
     if (!b || typeof b.to_node !== "string" || typeof b.body !== "string") return json(400, { error: "bad_request" });
     const str = (v: unknown) => (typeof v === "string" ? v.slice(0, 100) : null);
     const rt = typeof b.reply_to === "string" && UUID.test(b.reply_to) ? b.reply_to : null;
+    // expects_reply：寄件人明說要不要等回信（選填 boolean，給了就存；型別不對回 400）。沒給就不帶這個參數，信的欄位是 null（舊寄件工具）
+    const er = expectsReplyArgs(b.expects_reply);
+    if (!er) return json(400, { error: "bad_expects_reply" });
     const { data, error } = await db.rpc("irori_relay_send", {
       p_from_node: me.id, // from_node in the body is ignored on purpose
       p_from_agent: str(b.from_agent),
@@ -218,6 +222,7 @@ Deno.serve(async (req) => {
       p_to_agent: str(b.to_agent),
       p_body: b.body,
       p_reply_to: rt,
+      ...er,
     });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     if (data?.error === "rate_limited") return json(429, { error: "rate_limited" });

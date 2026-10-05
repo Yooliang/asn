@@ -256,7 +256,47 @@ test('bridge: 預設不在線且沒有任何互動式 session → 留在 inbox�
 const quick = { IRORI_RELAY_DEFAULT_AGENT: 'T-最近的', IRORI_REPLY_TIMEOUT_MS: '300', IRORI_BRIDGE_TICK_MS: '100' }
 const noticesOf = st => st.sent.filter(s => /沒有經收發室收到/.test(s.body))
 
-test('bridge: 內文含（不需回覆）／[no-reply] → 照常轉交並 ack，但不計時、不寄逾時通知', async () => {
+// 「要不要回信」是信件的獨立欄位 expects_reply：true／false 就只看欄位；null（舊版寄件工具、舊信）才退回看內文標記
+test('bridge: expects_reply=false → 不計時；=true → 計時（內文寫不需回覆也一樣）；null → 退回看內文標記；抬頭帶 reply=no|yes|?', async () => {
+  const st = await fakeServer({ inbox: [
+    mail(1, { body: '一般內文，沒有任何標記', expects_reply: false }),   // 欄位說只是告知 → 不計時
+    mail(2, { body: '（不需回覆）但欄位說要等回信', expects_reply: true }),   // 欄位優先 → 計時
+    mail(3, { body: '（不需回覆）舊信', expects_reply: null }),             // 舊信 → 看內文標記 → 不計時
+    mail(4, { body: '舊信沒標記', expects_reply: null }),                  // 舊信 → 計時
+    mail(5, { body: '舊橋的信沒有這個欄位' }),                              // 欄位根本沒有（舊後端）→ 同 null → 計時
+    mail(6, { body: '純告知\n[No-Reply]' }),                              // 舊式 [no-reply] 標記照舊有效 → 不計時
+    mail(7, { body: '請處理', expects_reply: true }),                      // 欄位說要回 → 計時
+  ] })
+  let rec
+  try {
+    await runBridge({
+      script: 'bridge.mjs', st, setup: mainSetup(SESSIONS), env: { ...quick, IRORI_NOREPLY_WINDOW_MS: '0' }, settle: 1500,
+      until: ({ home }) => (rec = forwarded(home)).length >= 7 && st.acked.size >= 7 && noticesOf(st).length >= 4,
+    })
+    assert.deepEqual(noticesOf(st).map(s => s.reply_to).sort(), [uid(2), uid(4), uid(5), uid(7)].sort())
+    for (const s of noticesOf(st)) assert.ok(s.body.endsWith('只是告知的信，寄件時用 --no-reply（代寄寫 reply=no）就不會提醒'), s.body)
+    // 抬頭：reply 欄位如實反映寄件人的明說（舊信是 ?），放在 engine= 後面
+    const headOf = n => rec.find(r => r.id === uid(n)).text.split('\n').find(l => l.startsWith('[RELAY 來信]'))
+    assert.match(headOf(1), / id=\S+ engine=claude reply=no$/)
+    assert.match(headOf(2), / engine=claude reply=yes$/)
+    assert.match(headOf(3), / engine=claude reply=\?$/)
+    assert.match(headOf(5), / engine=claude reply=\?$/)
+    assert.match(headOf(7), / engine=claude reply=yes$/)
+  } finally { await st.close() }
+})
+
+test('bridge: 收發室寄來的系統信（from_agent 以「收發室」結尾）不管欄位怎麼寫都不計時', async () => {
+  const st = await fakeServer({ inbox: [mail(1, { from_agent: 'W-收發室', expects_reply: true }), mail(2, { from_agent: 'W-收發室' })] })
+  try {
+    await runBridge({
+      script: 'bridge.mjs', st, setup: mainSetup(SESSIONS), env: quick, settle: 1500,
+      until: ({ home }) => forwarded(home).length >= 2 && st.acked.size >= 2,
+    })
+    assert.equal(noticesOf(st).length, 0)
+  } finally { await st.close() }
+})
+
+test('bridge: 內文含（不需回覆）／[no-reply]（舊信，欄位是 null）→ 照常轉交並 ack，但不計時、不寄逾時通知', async () => {
   const st = await fakeServer({ inbox: [mail(1, { body: '（不需回覆）純告知' }), mail(2, { body: '純告知\n[No-Reply]' })] })
   let rec
   try {

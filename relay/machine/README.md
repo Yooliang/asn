@@ -20,7 +20,7 @@ relay send(reply_to) <──── bridge.mjs <──stdout── 收發室 <─
    `--strict-mcp-config --disable-slash-commands`，工作目錄是 `~/.irori-relay/machine-<ID>/cwd`（沒有 CLAUDE.md、沒有記憶）。
    預設模型 `haiku`（`IRORI_MAILBOX_MODEL` 可改）。
 3. **收信**：訂 Realtime 門鈴＋每 2 分鐘補拉 inbox。每封信交給收發室，SendMessage 轉給 `to_agent` 指的 session，
-   內文開頭是 `[RELAY 來信] trust=… from=<節點>/<代理> to=… id=…`。
+   內文開頭是 `[RELAY 來信] trust=… from=<節點>/<代理> to=… id=… engine=… reply=yes|no|?`（`reply=` 是寄件人明說的「要不要回信」：yes 在等回信、no 只是告知不用回、? 是舊信沒說）。
    - 收發室回報 `SENT <id>` 才 ack；失敗（`FAIL`）、找不到 session、轉交逾時（2 分鐘），都寄一封說明給原寄件人再 ack。
    - 對方回覆（收發室收到的 `<cross-session-message>` 那一輪）→ `relay send` 帶 `reply_to` 寄回原寄件人，`from_agent` 填對方 session 名。
      之後同一 session 的追加回覆（10 分鐘內）也一併轉寄。
@@ -37,8 +37,8 @@ relay send(reply_to) <──── bridge.mjs <──stdout── 收發室 <─
      期間對方經收發室回覆，照常寄回原寄件人，內文前加一行「（遲到的回覆：X 在收發室寄出「沒有回覆」通知之後才回）」，寄回後清掉。同一視窗有還在等的信時，回覆先對給還在等的，沒有才對給保留中的（先進先出）。
    - **對應表跨重啟（`WORK_DIR/pending.json`）**：還在等回覆、已通知「沒回」的信（含群組訊息）的對應，每次變動就原子寫入（先寫暫存檔再 rename），只存信件 id、寄件節點／視窗、收件視窗、時間、狀態、群組資訊，**不存信件內文**。橋啟動時載回並清掉超過 `IRORI_LATE_KEEP_MS` 的；檔案損毀就忽略（log 記 `pending.json unreadable, ignored`）並重新開始。所以更新程式、改設定而重啟橋，長任務視窗之後才到的回覆仍會寄回。
    - **對不上的回覆轉給最近交辦者**：收發室另記每個視窗「最近一次交辦它的寄件人」（`lastRequester`，同存於 pending.json，保留同樣的期限；「不需回覆」信與收發室系統信不算）。視窗的回覆找不到對應的信時（例如長任務每小時回一則進度），若 24 小時內有這位寄件人，就寄給他（`reply_to` 用那封最近的信 id，內文前加「（收發室：這則回覆對不上特定來信，依最近一次交辦轉給你）」，log 記 `-> last requester`）；沒有才丟棄，log 寫 `dropped: no pending mail and no requester…`。
-   - **視窗主動寄信（代寄）**：本機視窗用 SendMessage 傳給收發室（例如 `w02-收發室`），第一行寫 `[RELAY 寄信] to=<節點>[/<視窗>]`（`[RELAY 回信]` 同義；加 ` re=<信件id>` 就是回那一封），下面接內文。收發室把它當一封新信寄出，寄件人是這個視窗（名字取自 Claude Code 標記的 from-name，視窗無法冒名）。沒有這行頭的訊息照舊當回覆處理（對不上來信也沒有最近交辦者就丟棄）。`send.mjs` 照樣可用。
-   - **告知類的信在內文加「（不需回覆）」或「[no-reply]」**：照常轉交、成功即 ack，但不計時、不寄逾時通知（收發室之後也不再轉寄對方的回覆）。
+   - **視窗主動寄信（代寄）**：本機視窗用 SendMessage 傳給收發室（例如 `w02-收發室`），第一行寫 `[RELAY 寄信] to=<節點>[/<視窗>] reply=yes|no`（`[RELAY 回信]` 同義；加 ` re=<信件id>` 就是回那一封；`reply=` **必填**：yes＝在等回信、no＝只是告知；沒寫就不寄，收發室會通知寄件視窗補上，log `refused`），下面接內文。收發室把它當一封新信寄出，寄件人是這個視窗（名字取自 Claude Code 標記的 from-name，視窗無法冒名）。沒有這行頭的訊息照舊當回覆處理（對不上來信也沒有最近交辦者就丟棄）。`send.mjs` 照樣可用。
+   - **要不要回信是信件的獨立欄位 `expects_reply`**（SQL 23；寄件人用 `send.mjs --reply`／`--no-reply`、代寄 `reply=yes|no` 明說，不往內文加標記）。`false`（只是告知）：照常轉交、成功即 ack，但不計時、不寄逾時通知（收發室之後也不再轉寄對方的回覆）；`true`：計時。欄位有值就**只看欄位**；欄位是 null（舊版寄件工具、舊信）才退回看內文的「（不需回覆）」「[no-reply]」（過渡期相容，之後拿掉）。逾時提醒（timeout／busy）結尾會提示「只是告知的信，寄件時用 --no-reply（代寄寫 reply=no）就不會提醒」。acp 轉接器（Gemini 工作者）用同一條規則決定要不要把回覆寄回。
    - **寄件人是收發室**（`from_agent` 以「收發室」結尾，即任何節點的 `<節點>-收發室`）的系統信：比照告知類，照常轉交、不計時、不寄逾時通知；轉交失敗／找不到視窗的說明也不回給收發室（只記 log），避免兩台收發室互相丟信。
    - 沒有 `to_agent` → 交給 `IRORI_RELAY_DEFAULT_AGENT`（預設 `H-工頭-2`）；它不在線就改交給**最近有活動**的互動式 session
      （依 `~/.claude/sessions/<pid>.json` 的 `updatedAt`，排除收發室），內文前加一行「原本要給 <預設> 但它不在線，請你代收並轉告／處理」；都沒有人在線才**不 ack、留在 inbox**。
@@ -189,11 +189,13 @@ node room.mjs --room-read <群組id|群組名> [--last 20 | --since <seq>] [--js
 另外每次寄給節點／視窗（不論有沒有 `--reply-to`）也會在 `machine-<節點>/sent/<雜湊>` 留「誰寄給誰」的記號，橋據此判斷「對方已直接寄信給原寄件人」（檔名由 `sent-mark.mjs` 產生，send 與橋共用）：
 
 ```
-node D:/Github/irori/relay/machine/send.mjs --to XISU --body "內文" [--reply-to <信件id>]
-node D:/Github/irori/relay/machine/send.mjs --to W/W-政策 --body-file msg.txt      # 節點/視窗名
+node D:/Github/irori/relay/machine/send.mjs --to XISU --body "內文" --reply|--no-reply [--reply-to <信件id>]
+node D:/Github/irori/relay/machine/send.mjs --to W/W-政策 --body-file msg.txt --no-reply   # 節點/視窗名
 node D:/Github/irori/relay/machine/send.mjs --room <群組id> --body "內文"            # 貼到群組（room_post）
-echo 內文 | node send.mjs --to XISU --body -                                         # 內文從 stdin 讀
+echo 內文 | node send.mjs --to XISU --body - --reply                                 # 內文從 stdin 讀
 ```
+
+**寄給成員／視窗（含回信）一定要二選一**：`--reply`＝我在等回信、`--no-reply`＝只是告知；都沒給就不寄（exit 1：「請說明要不要回信：等對方回就加 --reply，只是告知就加 --no-reply」），兩個都給也報錯。結果以 `expects_reply` 欄位送後端，**內文一字不動**。`--room` 群組不計時，給了會忽略（印一行說明）。
 
 輸出 `sent id=… to=… from=節點/視窗名`（群組：`posted room=… seq=…`）；錯誤印到 stderr。exit code：0 成功、1 用法或內容不合、2 認不出呼叫者、3 超量、4 後端錯誤。
 
@@ -213,7 +215,7 @@ node D:/Github/irori/relay/machine/recv.mjs --watch    # 長駐；掛在 Claude 
 node D:/Github/irori/relay/machine/recv.mjs --once     # 拉一次、印出、ack、結束
 ```
 
-每行 JSON：`{id, trust, from_node, from_agent, to_agent, reply_to, created_at, body}`；回信用 `send.mjs --to <from_node>/<from_agent> --reply-to <id> --body "…"`。診斷只印 stderr。exit code：1 用法、2 認不出視窗、3 這個視窗已有另一個 `--watch` 在跑、4 後端錯誤。
+每行 JSON：`{id, trust, from_node, from_agent, to_agent, reply_to, created_at, expects_reply, body}`（`expects_reply`：true 要回、false 只是告知、null 舊信沒說）；回信用 `send.mjs --to <from_node>/<from_agent> --reply-to <id> --body "…" --reply|--no-reply`。診斷只印 stderr。exit code：1 用法、2 認不出視窗、3 這個視窗已有另一個 `--watch` 在跑、4 後端錯誤。
 
 - **只收寄給自己的信**：視窗名用和 `send.mjs` 同一套判定（`identity.mjs`：父行程鏈／`CLAUDE_CODE_MESSAGING_SOCKET`，不能自填）。仲介 `inbox`／`ack` 帶 `agent=<視窗名>` 時只回／只 ack `to_agent` 精確等於該視窗名的信（`supabase/sql/08_agent_inbox.sql`）：A 視窗 ack 不到 B 視窗的信，`to_agent` 為空的總機信也碰不到（仍由橋處理）。recv 收到後端回來的信還會再比一次 `to_agent`，不是自己的不印、不 ack（對還沒部署新版仲介也安全）。
 - **與橋並存（心跳）**：`--watch` 每 30 秒在 `~/.irori-relay/machine-<節點>/self-recv/<視窗名>.json` 寫 `{pid, name, t}`。橋轉交 `to_agent` 為某視窗的信前先看這個檔：心跳在 90 秒內**且** pid 還活著 → 橋跳過（不轉、不 ack，留給視窗自己拉，log 印 `window receives by itself`）；心跳過期、pid 已死或沒有檔 → 照舊經收發室轉交，所以 Monitor 被關掉最多 90 秒後橋就接手，不會漏信。極窄的競態（心跳剛好過期那一刻橋轉交、視窗同時又啟動）可能重複一封。沒指定視窗的總機信、群組訊息（rooms）、Aegis 橋不受影響，仍照舊。
@@ -261,7 +263,7 @@ node D:/Github/irori/relay/machine/recv.mjs --once     # 拉一次、印出、ac
 
 引擎欄位：
 - roster 上報每個視窗多帶 `engine`。仲介 `action=roster` 只取 `name`／`status`／`cwd_label`，多餘欄位直接忽略，舊仲介不會 400；要讓手機顯示圖示，之後仲介（SQL 與 `index.ts` 的 map）再加欄位。
-- 信件標頭尾端加 ` engine=<id>`（`[RELAY 來信] trust=… from=… to=… id=… engine=claude`）。
+- 信件標頭尾端加 ` engine=<id>`、再加 ` reply=yes|no|?`（`[RELAY 來信] trust=… from=… to=… id=… engine=claude reply=yes`）。reply 一律放最後，前面欄位順序不動。
 - 同名視窗出現在不同引擎時，名單順序在前的引擎優先（先到先得；之後要同時跑多引擎時再決定要不要改成 `引擎/名字`）。
 
 契約測試：`test/engine-contract.test.mjs` 用假引擎跑 bridge 主流程（名單上報、轉交＋回覆寄回、onFail、找不到視窗、介面檢查、身分判定登記）。新轉接器至少要能通過同形狀的測試。

@@ -4,6 +4,8 @@
 // 動作的名稱、參數、回應格式與 irori-relay 的 HTTP 動作一致（whoami、list、inbox、ack、sent_status、send、invite、reissue、update），
 // 所以 irori-api/relay.ts 的呼叫端不用關心走的是哪一條路。租戶一律由呼叫端（登入者的帳號）決定，不接受任何來自 body 的租戶或節點。
 
+import { expectsReplyArgs } from "./expects_reply.ts";
+
 // deno-lint-ignore no-explicit-any
 type Json = any;
 
@@ -65,9 +67,11 @@ export async function nodeAction(deps: OpsDeps, who: Actor, action: string, body
     case "send": {
       if (typeof b.to_node !== "string" || typeof b.body !== "string") return err(400, "bad_request");
       const rt = typeof b.reply_to === "string" && UUID_RE.test(b.reply_to) ? b.reply_to : null;
+      const er = expectsReplyArgs(b.expects_reply); // 寄件人明說要不要等回信（選填 boolean）；型別不對回 400
+      if (!er) return err(400, "bad_expects_reply");
       const { data, error } = await deps.rpc("irori_relay_send", {
         p_from_node: who.node, // body 裡的 from_node 一律忽略
-        p_from_agent: str100(b.from_agent), p_to_node: b.to_node, p_to_agent: str100(b.to_agent), p_body: b.body, p_reply_to: rt,
+        p_from_agent: str100(b.from_agent), p_to_node: b.to_node, p_to_agent: str100(b.to_agent), p_body: b.body, p_reply_to: rt, ...er,
       });
       if (error) return internal(action, error);
       if (data?.error === "rate_limited") return err(429, "rate_limited");

@@ -82,7 +82,7 @@ test('橋＋acp：名單帶 engine=gemini；信送進工作者，回覆帶 reply
 
 test('橋＋acp：信件標頭的 engine= 用名單上的名稱（gemini）；白名單環境仍有 HOME（登入憑證檔要靠它）', async () => {
   const r = await run({ inbox: [mail(1, { body: '@@HEAD' }), mail(2, { body: '@@ENV HOME' })], workers: [worker()], until: c => c.st.sent.some(s => s.reply_to === uid(1)) && c.st.sent.some(s => s.reply_to === uid(2)) })
-  assert.match(r.st.sent.find(s => s.reply_to === uid(1)).body, /^\[RELAY 來信\] trust=member from=W\/W-政策 to=Gemini id=\S+ engine=gemini$/)
+  assert.match(r.st.sent.find(s => s.reply_to === uid(1)).body, /^\[RELAY 來信\] trust=member from=W\/W-政策 to=Gemini id=\S+ engine=gemini reply=\?$/)
   assert.match(r.st.sent.find(s => s.reply_to === uid(2)).body, /\[env HOME=present\]/)
 })
 

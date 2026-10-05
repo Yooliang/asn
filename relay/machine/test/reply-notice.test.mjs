@@ -263,7 +263,7 @@ test('視窗傳給收發室「[RELAY 寄信] to=節點/視窗」→ 當成新信
       st, step: c => {
         if (!said && /bridge starting|whoami/.test(c.log)) {
           said = true
-          c.says('[RELAY 寄信] to=XISU/希緒\n希緒你好，這是新信')
+          c.says('[RELAY 寄信] to=XISU/希緒 reply=no\n希緒你好，這是新信')
           c.says('沒有寄信頭的一般訊息')
         }
         return c.st.sent.length >= 1 && /unmatched reply from T-對方/.test(c.log)
@@ -271,5 +271,103 @@ test('視窗傳給收發室「[RELAY 寄信] to=節點/視窗」→ 當成新信
     })
     assert.equal(st.sent.length, 1)
     assert.deepEqual([st.sent[0].to_node, st.sent[0].to_agent, st.sent[0].from_agent, st.sent[0].body, st.sent[0].reply_to], ['XISU', '希緒', 'T-對方', '希緒你好，這是新信', undefined])
+    assert.strictEqual(st.sent[0].expects_reply, false)
   } finally { await st.close() }
+})
+
+// 10/05：代寄一定要寫 reply=yes|no（小良哥：「要不要回信」由寄件人明說，收發室自己決定要不要計時）
+const TIP = '只是告知的信，寄件時用 --no-reply（代寄寫 reply=no）就不會提醒'
+const recordOf = home => fs.readFileSync(path.join(home, 'record.jsonl'), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l))
+
+test('代寄 [RELAY 寄信] to=… reply=no|yes → 寄出時帶 expects_reply（false／true），內文一字不改、不補任何標記', async () => {
+  const st = await fakeServer([])
+  try {
+    let said = false
+    await go({
+      st, step: c => {
+        if (!said && /bridge starting|whoami/.test(c.log)) {
+          said = true
+          c.says('[RELAY 寄信] to=XISU/希緒 reply=no\n希緒你好，這是告知')
+          c.says('[RELAY 寄信] to=W/W-政策 reply=yes\n請你回我')
+        }
+        return c.st.sent.length >= 2
+      },
+    })
+    assert.equal(st.sent.length, 2)
+    const a = st.sent.find(s => s.to_node === 'XISU'), b = st.sent.find(s => s.to_node === 'W')
+    assert.deepEqual([a.to_agent, a.from_agent, a.body, a.reply_to, a.expects_reply], ['希緒', 'T-對方', '希緒你好，這是告知', undefined, false])
+    assert.deepEqual([b.to_agent, b.from_agent, b.body, b.expects_reply], ['W-政策', 'T-對方', '請你回我', true])
+  } finally { await st.close() }
+})
+
+test('代寄沒寫 reply=（或寫錯）→ 不寄出、log 記下，並用 deliver 通知寄件視窗補上；補上之後照常寄', async () => {
+  const st = await fakeServer([])
+  try {
+    let said = false, fixed = false, rec = []
+    const { log } = await go({
+      st, step: c => {
+        rec = recordOf(c.home)
+        if (!said && /bridge starting|whoami/.test(c.log)) {
+          said = true
+          c.says('[RELAY 寄信] to=XISU/希緒\n忘了寫 reply 的信')
+          c.says('[RELAY 寄信] to=XISU reply=maybe\n寫錯值的信')
+        }
+        if (said && !fixed && (c.log.match(/refused/g) || []).length >= 2) { fixed = true; c.says('[RELAY 寄信] to=XISU/希緒 reply=no\n補上了') }
+        return c.st.sent.length >= 1
+      },
+    })
+    assert.equal(st.sent.length, 1)                                      // 前兩封沒寄，只有補上 reply 的那封
+    assert.deepEqual([st.sent[0].body, st.sent[0].expects_reply], ['補上了', false])
+    assert.match(log, /new mail from T-對方 to XISU refused: no reply=yes\|no/)
+    const notices = rec.filter(r => r.to === 'T-對方' && /代寄信沒有寄出/.test(r.text))
+    assert.equal(notices.length, 2, '兩封都要通知寄件視窗')
+    assert.match(notices[0].text, /reply=yes/); assert.match(notices[0].text, /reply=no/); assert.match(notices[0].text, /不用回覆/)   // 說清楚怎麼補、這則通知本身不用回
+    assert.match(notices[0].text, /忘了寫 reply 的信/)   // 帶上內文開頭，寄件視窗才知道是哪一封
+  } finally { await st.close() }
+})
+
+test('代寄回信 [RELAY 回信] to=… re=<id> reply=no → 回給那封信的寄件人（reply_to＝該信），帶 expects_reply；沒寫 reply= 不寄、通知補上', async () => {
+  const st = await fakeServer([mail(1)])
+  try {
+    let said = false, rec = []
+    await go({
+      st, env: { IRORI_REPLY_TIMEOUT_MS: '60000' }, step: c => {
+        rec = recordOf(c.home)
+        if (!said && c.forwarded() >= 1) {
+          said = true
+          c.says(`[RELAY 回信] to=W/W-政策 re=${uid(1)}\n沒寫 reply 的回信`)
+          c.says(`[RELAY 回信] to=W/W-政策 re=${uid(1)} reply=no\n好了，收到`)
+        }
+        return c.st.sent.length >= 1 && rec.some(r => /代寄信沒有寄出/.test(r.text))
+      },
+    })
+    const back = st.sent.filter(s => s.reply_to === uid(1))
+    assert.equal(back.length, 1)
+    assert.deepEqual([back[0].to_node, back[0].to_agent, back[0].from_agent, back[0].body, back[0].expects_reply], ['W', 'W-政策', 'T-對方', '好了，收到', false])
+    assert.ok(rec.some(r => r.to === 'T-對方' && /代寄信沒有寄出/.test(r.text) && /沒寫 reply 的回信/.test(r.text)))
+  } finally { await st.close() }
+})
+
+test('逾時提醒（timeout 與 busy 兩種）結尾多一句怎麼避免誤報；視窗已關閉那種不加', async () => {
+  const st = await fakeServer([mail(1)])
+  try {
+    await go({ st, step: c => notices(c.st).length >= 1 })
+    assert.ok(notices(st)[0].body.endsWith(`。${TIP}`), notices(st)[0].body)
+    assert.match(notices(st)[0].body, /分鐘內沒有經收發室收到 T-對方 的回覆/)
+  } finally { await st.close() }
+  const st2 = await fakeServer([mail(1)])
+  try {
+    let idle = false
+    await go({
+      st: st2, agents: [['T-對方', 'busy'], ['T-別人', 'idle']], env: { IRORI_BUSY_GRACE_MS: '300', IRORI_BUSY_MAX_MS: '60000' },
+      step: c => { if (!idle && /no-reply notice deferred/.test(c.log)) { idle = true; c.setAgents([['T-對方', 'idle'], ['T-別人', 'idle']]) } return notices(c.st).length >= 1 },
+    })
+    assert.match(notices(st2)[0].body, /先前一直在忙/); assert.ok(notices(st2)[0].body.endsWith(`。${TIP}`), notices(st2)[0].body)
+  } finally { await st2.close() }
+  const st3 = await fakeServer([mail(1)])
+  try {
+    let closed = false
+    await go({ st: st3, step: c => { if (!closed && c.forwarded() >= 1) { closed = true; c.setAgents([['T-別人', 'idle']]) } return notices(c.st).length >= 1 } })
+    assert.match(notices(st3)[0].body, /已關閉/); assert.ok(!notices(st3)[0].body.includes(TIP))
+  } finally { await st3.close() }
 })

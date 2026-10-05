@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 // irori-send：本機 Claude 視窗主動寄信給仲介成員／群組，不經收發室、不經任何模型。
-//   node send.mjs --to XISU --body "內文" [--reply-to <信件id>]
-//   node send.mjs --to W/W-政策 --body-file msg.txt
+//   node send.mjs --to XISU --body "內文" --reply|--no-reply [--reply-to <信件id>]
+//   node send.mjs --to W/W-政策 --body-file msg.txt --no-reply
 //   node send.mjs --room <群組id> --body "內文"
-//   echo 內文 | node send.mjs --to XISU --body -
+//   echo 內文 | node send.mjs --to XISU --body - --reply
+// 寄給成員／視窗（--to，含回信 --reply-to）一定要明說要不要回信：--reply＝我在等回信（收發室 10 分鐘沒收到回覆會提醒）、
+// --no-reply＝只是告知；結果以 expects_reply 欄位送給後端，【不往內文加任何標記】（內文有沒有標記沒辦法用程式可靠判斷）。
+// 兩個都沒給就不寄（exit 1）；--room 群組本來就不計時，給了會忽略。
 // 用這台機器的節點金鑰（~/.irori-relay/<節點>.key，橋用的同一把）直接呼叫 relay。
 // 寄件視窗名不能自填：沿父行程鏈往上找 claude 程序，對照 ~/.claude/sessions/<pid>.json 的 name 當 from_agent；找不到就拒絕。
 // 輸出 `sent id=…`（或 `posted room=… seq=…`）；錯誤印到 stderr，exit code：1 用法／內容、2 認不出呼叫者、3 超量、4 後端錯誤。
@@ -21,8 +24,11 @@ const MAX_BODY = 20000
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const ID_RE = /^[A-Za-z0-9_-]{1,32}$/
 const USAGE = `用法：
-  node send.mjs --to <成員代號 | 節點/視窗名> --body "<內文>" [--reply-to <信件id>]
+  node send.mjs --to <成員代號 | 節點/視窗名> --body "<內文>" (--reply | --no-reply) [--reply-to <信件id>]
   node send.mjs --room <群組id> --body "<內文>"
+  --reply | --no-reply  寄給成員／視窗（含回信 --reply-to）時二選一、一定要給，兩個不能同時給：
+                     --reply＝我在等對方回信（收發室 10 分鐘沒收到回覆會提醒）；--no-reply＝只是告知，不用回、不會提醒。
+                     結果以欄位送給後端，不會在內文加任何標記。--room 群組本來就不計時，給了會忽略（印一行說明）。
   --body-file <檔>   內文從檔案讀；--body -  內文從 stdin 讀
   --whoami           不寄信，印出父行程鏈、session 對照、節點判定（除錯用）
 內文至多 ${MAX_BODY} 字。寄件人（視窗名）由本程式自動判定，不能自填；信任一律是 member。`
@@ -38,11 +44,22 @@ export function parseArgs(argv) {
     else if (k === '--body') a.body = need()
     else if (k === '--body-file') a.bodyFile = need()
     else if (k === '--reply-to') a.replyTo = need()
+    else if (k === '--reply') a.reply = true
+    else if (k === '--no-reply') a.noReply = true
     else if (k === '--whoami') a.whoami = true
     else if (k === '--help' || k === '-h') a.help = true
     else throw new Fail(1, `不認得的參數 ${k}\n${USAGE}`)
   }
   return a
+}
+
+// 要不要回信：--to 一定要二選一；回傳要送給後端的 expects_reply（true＝等回信、false＝只是告知）。
+// 群組（--room）不計時：旗標忽略（expectsReply=null、不送欄位），note 是要印給呼叫者的一行說明。兩個旗標互相矛盾一律報錯。
+export function resolveReplyFlag({ reply, noReply, room }) {
+  if (reply && noReply) throw new Fail(1, `--reply 與 --no-reply 不能同時給（一個說要等回信、一個說只是告知）\n${USAGE}`)
+  if (room) return { expectsReply: null, note: reply || noReply ? '群組訊息本來就不計時，--reply／--no-reply 不適用，已忽略' : '' }
+  if (!reply && !noReply) throw new Fail(1, `請說明要不要回信：等對方回就加 --reply，只是告知就加 --no-reply\n${USAGE}`)
+  return { expectsReply: !!reply, note: '' }
 }
 
 function whoami() {
@@ -101,6 +118,7 @@ export async function main(argv) {
   if (a.help) { console.log(USAGE); return 0 }
   if (a.whoami) { whoami(); return 0 }
   if (!a.to === !a.room) throw new Fail(1, `--to 與 --room 要二選一\n${USAGE}`)
+  const { expectsReply, note } = resolveReplyFlag({ reply: a.reply, noReply: a.noReply, room: a.room })   // 先檢查旗標，沒說就不讀內文、不寄
   let body = a.body
   if (a.bodyFile) body = fs.readFileSync(a.bodyFile, 'utf8')
   else if (body === '-') body = fs.readFileSync(0, 'utf8')
@@ -123,11 +141,12 @@ export async function main(argv) {
     const r = await call(key, 'room_post', { room: a.room, body, from_agent: caller.name })
     console.log(`posted room=${a.room}${r?.seq != null ? ` seq=${r.seq}` : ''} from=${node}/${caller.name}`)
   } else {
-    const r = await call(key, 'send', { to_node: toNode, to_agent: toAgent || undefined, body, reply_to: a.replyTo || undefined, from_agent: caller.name })
+    const r = await call(key, 'send', { to_node: toNode, to_agent: toAgent || undefined, body, reply_to: a.replyTo || undefined, from_agent: caller.name, expects_reply: expectsReply })
     if (a.replyTo) markReplied(node, a.replyTo)
     markSent(node, caller.name, toNode, toAgent)
     console.log(`sent id=${r?.id} to=${a.to} from=${node}/${caller.name}`)
   }
+  if (note) console.error(note)
   return 0
 }
 

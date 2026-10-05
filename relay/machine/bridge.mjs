@@ -9,6 +9,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { pickFallbackAgent, fallbackNote } from './pick-fallback.mjs'
 import { contextText, createRooms, parseMember, roomText, roomUuid, NO_REPLY_RE as ROOM_NO_REPLY_RE } from './rooms.mjs'
+import { NO_REPLY_TIP, mailHead, parseSendHead, wantsReply } from './mail-format.mjs'
 import { createLauncher } from './launcher.mjs'
 import { loadEngines } from './engines/index.mjs'
 import { selfRecvAlive } from './self-recv.mjs'
@@ -136,17 +137,19 @@ const lastRequester = {}           // 收件視窗 -> {from_node, from_agent, ma
     log(`pending restored: ${st.pending.length} (waiting ${st.pending.length - n}, notified ${n}), lastRequester ${Object.keys(st.lastRequester).length}, expired/invalid dropped ${st.dropped}`)
 }
 const noticed = new Map()     // 寄件人|收件視窗 -> {t, skipped}（逾時通知合併用）
-const NO_REPLY_RE = /（不需回覆）|\[no-reply\]/i
+// 要不要計時看信件的 expects_reply 欄位（寄件人明說；判斷在 mail-format.mjs 的 wantsReply）：true／false 就只看欄位，
+// 欄位是 null（舊版寄件工具、舊信）才退回看內文的「（不需回覆）」「[no-reply]」標記——過渡期相容，之後拿掉。
 // 寄件人是任何節點的收發室（<節點>-收發室）：系統信，照常轉交但不計時、不互相寄通知
 const isMailboxSender = m => String(m?.from_agent ?? '').endsWith('收發室')
 const selfHandled = new Set() // mail ids already logged as left to the window's own recv
 const unrouted = new Set()   // mail ids already logged as waiting for the default agent
 
-const head = (m, engine = 'claude') => `[RELAY 來信] trust=${m.trust} from=${m.from_node}/${m.from_agent ?? ''} to=${m.to_agent ?? ''} id=${m.id} engine=${engine}`
+// 來信抬頭（mailHead，mail-format.mjs）：…id=<id> engine=<引擎> reply=yes|no|?（?＝舊信沒有 expects_reply 欄位）
 
-async function sendBack(p, body, fromAgent) {
+// expectsReply（選填 true／false）：視窗代寄回信時寄件人明說的「要不要等回信」；系統通知與沒有明說的轉寄不帶，欄位就是 null
+async function sendBack(p, body, fromAgent, expectsReply) {
   try {
-    await api('send', { method: 'POST', body: { to_node: p.mail.from_node, to_agent: p.mail.from_agent || undefined, body, reply_to: p.mail.id, from_agent: fromAgent || MAILBOX_NAME } })
+    await api('send', { method: 'POST', body: { to_node: p.mail.from_node, to_agent: p.mail.from_agent || undefined, body, reply_to: p.mail.id, from_agent: fromAgent || MAILBOX_NAME, ...(typeof expectsReply === 'boolean' ? { expects_reply: expectsReply } : {}) } })
     return true
   } catch (e) { log(`send back failed id=${p.mail.id}: ${e.message}`); return false }
 }
@@ -178,40 +181,49 @@ async function onFail(id, reason) {
   pending.delete(id)
 }
 // 對不上任何來信的回覆：該視窗 24 小時內有最近一次交辦它的寄件人，就轉給他；沒有才丟棄（log 寫清楚）
-async function forwardUnmatched(from, text) {
+async function forwardUnmatched(from, text, expectsReply) {
   const lr = lastRequester[from]
   if (!lr || Date.now() - lr.t > LATE_KEEP_MS) { log(`unmatched reply from ${from} (${text.length} chars) dropped: no pending mail and no requester within ${Math.round(LATE_KEEP_MS / 3600000)}h`); return }
-  const ok = await sendBack({ mail: { id: lr.mail_id, from_node: lr.from_node, from_agent: lr.from_agent } }, `（收發室：這則回覆對不上特定來信，依最近一次交辦轉給你）\n${text}`, from)
+  const ok = await sendBack({ mail: { id: lr.mail_id, from_node: lr.from_node, from_agent: lr.from_agent } }, `（收發室：這則回覆對不上特定來信，依最近一次交辦轉給你）\n${text}`, from, expectsReply)
   log(`unmatched reply from ${from} (${text.length} chars) -> last requester ${lr.from_node}/${lr.from_agent} reply_to=${lr.mail_id} sent=${ok}`)
 }
 // 視窗主動寄信（10/04 小良哥：收發室也要能代寄）：傳給收發室的訊息第一行寫
-//   [RELAY 寄信] to=<節點>[/<視窗>] [re=<信件id>]   （「[RELAY 回信]」同義）
-// 有 re＝回那一封（照回信流程）；沒有 re＝寄一封新信，寄件人是這個視窗（from-name 由 Claude Code 標記，視窗無法冒名）
-const SEND_HEAD_RE = /^\s*\[RELAY (?:寄信|回信)\]\s*to=([A-Za-z0-9_-]+)(?:\/(\S+))?(?:\s+re=([0-9a-f-]{36}))?[^\S\r\n]*\r?\n?/
-function parseSendHead(text) {
-  const m = String(text).match(SEND_HEAD_RE)
-  if (!m) return null
-  return { to_node: m[1], to_agent: m[2] || undefined, re: m[3] || undefined, body: String(text).slice(m[0].length).trim() }
-}
+//   [RELAY 寄信] to=<節點>[/<視窗>] [re=<信件id>] reply=yes|no   （「[RELAY 回信]」同義；re 與 reply 順序不拘）
+// 有 re＝回那一封（照回信流程）；沒有 re＝寄一封新信，寄件人是這個視窗（from-name 由 Claude Code 標記，視窗無法冒名）。
+// reply 【必填】：yes＝寄件視窗在等回信（收發室對方那邊會計時）、no＝只是告知；寄出時當 expects_reply 欄位送給後端，內文不動。
+// 沒寫（或寫錯）就不寄，用 tellWindow 通知寄件視窗補上（解析在 mail-format.mjs 的 parseSendHead）
 async function sendNew(from, h) {
   if (!h.body) { log(`new mail from ${from} to ${h.to_node} dropped: empty body`); return }
   try {
-    const r = await api('send', { method: 'POST', body: { to_node: h.to_node, to_agent: h.to_agent, body: h.body, from_agent: from } })
-    log(`new mail from ${from} -> ${h.to_node}/${h.to_agent ?? ''} id=${r?.id ?? '?'} sent=true`)
+    const r = await api('send', { method: 'POST', body: { to_node: h.to_node, to_agent: h.to_agent, body: h.body, from_agent: from, expects_reply: h.reply === 'yes' } })
+    log(`new mail from ${from} -> ${h.to_node}/${h.to_agent ?? ''} id=${r?.id ?? '?'} sent=true reply=${h.reply}`)
   } catch (e) { log(`new mail from ${from} -> ${h.to_node} failed: ${e.message}`) }
+}
+// 代寄抬頭少了 reply=yes|no：不寄，log 記下，並把原因經轉接器 deliver 回給寄件視窗（和來信同一條路；亂數 id 不在 pending，結果回報會被忽略）
+function refuseSend(from, h) {
+  log(`new mail from ${from} to ${h.to_node} refused: no reply=yes|no in [RELAY 寄信] head (not sent)`)
+  tellWindow(from, `[收發室] 你傳給收發室的代寄信沒有寄出：第一行 [RELAY 寄信] to=… 少了 reply=yes 或 reply=no。等對方回信就寫 reply=yes、只是告知就寫 reply=no（回信 re=<id> 也一樣要寫），補上後請重傳一次。（這是系統通知，不用回覆。）內文開頭：${h.body.replace(/\s+/g, ' ').slice(0, 40)}`)
+}
+function tellWindow(name, text) {
+  try { engineOfWindow(name).deliver({ id: crypto.randomUUID(), to: name, text }) }
+  catch (e) { log(`cannot tell window ${name}: ${e.message}`) }
 }
 
 // mailId（選用）：轉接器知道這則回覆是回哪一封時帶上（acp 工作者同時有好幾封在排隊，不能靠先進先出猜）
 async function onReply(from, text, mailId) {
   const head = parseSendHead(text)
-  if (head && !head.re && !mailId) { await sendNew(from, head); return }
-  if (head?.re) { mailId = head.re; text = head.body || text }
+  let expectsReply   // 代寄回信（re=）時寄件人明說的 true／false；其他回覆不帶（null）
+  if (head && !head.re && !mailId) { if (head.reply) await sendNew(from, head); else refuseSend(from, head); return }
+  if (head?.re) {
+    if (!head.reply) { refuseSend(from, head); return }
+    mailId = head.re; text = head.body || text; expectsReply = head.reply === 'yes'
+  }
   const cands = [...pending.values()].filter(p => p.target === from && p.state !== 'forwarding')
   // 還在等的優先；沒有才輪到已通知過「沒回」、仍保留中的信（遲到的回覆，先進先出）
   const active = cands.filter(c => c.state !== 'notified')
   const byId = mailId ? cands.find(c => c.mail.id === mailId) : null
   const p = byId || active.find(c => !c.replied) || active[active.length - 1] || cands.find(c => c.state === 'notified')
-  if (!p) { await forwardUnmatched(from, text); return }
+  if (!p) { await forwardUnmatched(from, text, expectsReply); return }
   const late = p.state === 'notified'
   p.replied = true
   if (late) pending.delete(p.mail.id)   // 遲到的回覆寄回後就清掉
@@ -221,7 +233,7 @@ async function onReply(from, text, mailId) {
     log(`room reply from ${from} -> room=${p.room.id} #${p.room.seq} posted=${ok}`)
     return
   }
-  const ok = await sendBack(p, late ? `（遲到的回覆：${p.target} 在收發室寄出「沒有回覆」通知之後才回）\n${text}` : text, from)
+  const ok = await sendBack(p, late ? `（遲到的回覆：${p.target} 在收發室寄出「沒有回覆」通知之後才回）\n${text}` : text, from, expectsReply)
   log(`${late ? 'late ' : ''}reply from ${from} -> ${p.mail.from_node} id=${p.mail.id} sent=${ok} (${Date.now() - p.t0}ms total)`)
 }
 
@@ -233,9 +245,10 @@ async function noticeNoReply(p, now, reason) {
   const more = prev?.skipped ? `；另有 ${prev.skipped} 封也還沒回` : ''
   noticed.set(key, { t: now, skipped: 0 })
   const mins = Math.max(1, Math.round((now - p.t) / 60000))
+  // timeout 與 busy 兩種結尾多一句：只是告知的信別等回信（寄件時用 --no-reply／代寄寫 reply=no），就不會有這個提醒
   const text = reason === 'window-closed' ? `[收發室] 對方視窗「${p.target}」已關閉，沒有經收發室收到回覆${more}`
-    : reason === 'timeout' ? `[收發室] ${Math.round(REPLY_TIMEOUT_MS / 60000)} 分鐘內沒有經收發室收到 ${p.target} 的回覆（對方若已另外回信可忽略）${more}`
-    : `[收發室] ${p.target} 先前一直在忙，等了約 ${mins} 分鐘仍沒有經收發室收到回覆（對方若已另外回信可忽略）${more}`
+    : reason === 'timeout' ? `[收發室] ${Math.round(REPLY_TIMEOUT_MS / 60000)} 分鐘內沒有經收發室收到 ${p.target} 的回覆（對方若已另外回信可忽略）${more}。${NO_REPLY_TIP}`
+    : `[收發室] ${p.target} 先前一直在忙，等了約 ${mins} 分鐘仍沒有經收發室收到回覆（對方若已另外回信可忽略）${more}。${NO_REPLY_TIP}`
   const ok = await sendBack(p, text)
   log(`no-reply notice sent id=${p.mail.id} (${key}) reason=${reason} sent=${ok}`)
 }
@@ -367,7 +380,7 @@ async function handleMail(m) {
     note = fallbackNote(DEFAULT_AGENT, fb.name)
     log(`id=${m.id} has no to_agent and ${DEFAULT_AGENT} is offline: fallback to most recently active session ${fb.name}`)
   }
-  const p = { mail: m, target, state: 'forwarding', t0: Date.now(), t: Date.now(), replied: false, noReply: NO_REPLY_RE.test(m.body ?? '') || isMailboxSender(m) }
+  const p = { mail: m, target, state: 'forwarding', t0: Date.now(), t: Date.now(), replied: false, noReply: !wantsReply(m.expects_reply, m.body) || isMailboxSender(m) }
   if (!forwardable(target)) {
     const names = roster.map(a => a.name).join('、') || '(無)'
     p.state = 'done'
@@ -380,7 +393,7 @@ async function handleMail(m) {
   if (!p.noReply) { lastRequester[target] = { from_node: m.from_node, from_agent: m.from_agent ?? '', mail_id: m.id, t: Date.now() }; persist() }
   try {
     const eng = engineOfWindow(target)
-    eng.deliver({ id: m.id, to: target, text: `${head(m, engineLabelOf(windowOf(target)) ?? eng.id)}\n${note ? note + '\n' : ''}${m.body}` })
+    eng.deliver({ id: m.id, to: target, text: `${mailHead(m, engineLabelOf(windowOf(target)) ?? eng.id)}\n${note ? note + '\n' : ''}${m.body}` })
     log(`handed id=${m.id} from=${m.from_node}/${m.from_agent ?? ''} to=${target}`)
   } catch (e) {
     pending.delete(m.id); log(`cannot hand id=${m.id}: ${e.message} (left in inbox)`)

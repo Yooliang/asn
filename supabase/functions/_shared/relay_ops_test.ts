@@ -77,3 +77,29 @@ Deno.test("資料庫錯誤回 500 internal（不外洩細節）；b64u／sha256H
   assert(/^[A-Za-z0-9_-]{32}$/.test(b64u(24)));
   assertEquals(await sha256Hex("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 });
+
+Deno.test("send：expects_reply（寄件人明說要不要等回信）true／false 帶進資料庫函式；沒給或 null 不帶；型別不對 400 且不碰資料庫", async () => {
+  const f = fake({ irori_relay_send: () => ({ id: UUID, bell_topic: "bell-x" }) });
+  assertEquals((await nodeAction(f.deps, WHO, "send", { to_node: "H", body: "請回我", expects_reply: true })).status, 200);
+  assertEquals(f.calls.at(-1)!.args.p_expects_reply, true);
+  assertEquals((await nodeAction(f.deps, WHO, "send", { to_node: "H", body: "告知", expects_reply: false })).status, 200);
+  assertEquals(f.calls.at(-1)!.args.p_expects_reply, false);
+  // 沒給／null：不帶 p_expects_reply（所以還沒套 SQL 23 的資料庫、或舊程式照舊能呼叫），信的欄位就是 null
+  for (const body of [{ to_node: "H", body: "舊程式" }, { to_node: "H", body: "舊程式", expects_reply: null }]) {
+    await nodeAction(f.deps, WHO, "send", body);
+    assertEquals("p_expects_reply" in f.calls.at(-1)!.args, false);
+  }
+  const before = f.calls.length;
+  for (const bad of ["yes", "true", 1, 0, {}, []]) {
+    const r = await nodeAction(f.deps, WHO, "send", { to_node: "H", body: "x", expects_reply: bad });
+    assertEquals([r.status, r.body], [400, { error: "bad_expects_reply" }], String(bad));
+  }
+  assertEquals(f.calls.length, before);
+  assertEquals(f.rung.length, 4);   // 型別不對的不會敲門鈴
+});
+
+Deno.test("inbox：資料庫回來的信帶 expects_reply（true／false／null）原樣交給呼叫端，不加工", async () => {
+  const mails = [{ id: UUID, body: "a", expects_reply: true }, { id: UUID, body: "b", expects_reply: false }, { id: UUID, body: "舊信", expects_reply: null }];
+  const f = fake({ irori_relay_inbox: () => mails });
+  assertEquals((await nodeAction(f.deps, WHO, "inbox")).body, { messages: mails });
+});
