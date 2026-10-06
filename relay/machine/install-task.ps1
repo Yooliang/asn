@@ -2,10 +2,12 @@
 #   .\install-task.ps1                 預覽（不改任何東西）
 #   .\install-task.ps1 -Apply          建立排程 IroriRelayMachine-<ID>
 #   .\install-task.ps1 -DefaultAgent 工頭名 -Apply   指定沒有 to_agent 的信預設交給誰（不帶＝H-工頭-2）
+#   .\install-task.ps1 -Engines claude,acp,codex -Apply   要載入哪些轉接器（run-bridge.ps1 同名參數；不帶＝只有 claude）
 #   .\install-task.ps1 -Uninstall      移除排程
-param([string]$NodeId = 'H', [string]$DefaultAgent = '', [switch]$Apply, [switch]$Uninstall)
+param([string]$NodeId = 'H', [string]$DefaultAgent = '', [string]$Engines = '', [switch]$Apply, [switch]$Uninstall)
 $name = "IroriRelayMachine-$NodeId"
 $agentArg = if ($DefaultAgent) { " -DefaultAgent `"$DefaultAgent`"" } else { '' }
+if ($Engines) { $agentArg += " -Engines $Engines" }   # 重建排程時要帶，否則 Gemini、Codex 等工作者會被拿掉（w02 用 claude,acp,codex）
 $dir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script = Join-Path $dir 'run-bridge.ps1'
 if ($Uninstall) { Unregister-ScheduledTask -TaskName $name -Confirm:$false; "removed $name"; return }
