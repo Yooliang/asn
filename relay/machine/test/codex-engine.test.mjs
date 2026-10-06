@@ -30,7 +30,13 @@ function fixture({ threads, login = true, limit = false, open = threads.map(t =>
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'irori-codex-test-'))
   const home = path.join(dir, 'codex-home'); fs.mkdirSync(path.join(home, 'thread-writer-locks'), { recursive: true })
   const state = path.join(dir, 'state.json'), calls = path.join(dir, 'calls.jsonl')
-  const full = threads.map(t => ({ cwd: 'C:\\proj\\' + (t.cwdName ?? 'demo'), updatedAt: 1000, turns: [], path: null, ...t }))
+  // 沒指定 rollout 的視窗給一份「一般沙盒」的 turn_context：讀不到權限的視窗收發室一律不轉（fail-closed），測試要明確寫出
+  const safeRollout = id => {
+    const f = path.join(dir, `rollout-${id}.jsonl`)
+    fs.writeFileSync(f, JSON.stringify({ type: 'turn_context', payload: { approval_policy: 'on-request', sandbox_policy: { type: 'workspace-write' } } }) + '\n')
+    return f
+  }
+  const full = threads.map(t => ({ cwd: 'C:\\proj\\' + (t.cwdName ?? 'demo'), updatedAt: 1000, turns: [], ...t, path: t.path ?? safeRollout(t.id) }))
   fs.writeFileSync(state, JSON.stringify({ login, limit, threads: full }))
   fs.writeFileSync(path.join(home, 'session_index.jsonl'), full.filter(t => t.name).map(t => JSON.stringify({ id: t.id, thread_name: t.name, updated_at: 'x' })).join('\n') + '\n')
   for (const id of open) fs.writeFileSync(path.join(home, 'thread-writer-locks', `${id}.lock`), '')
@@ -282,6 +288,34 @@ test('安全閘門：視窗是「完全存取」沙盒就不轉外部來信；IR
         }
       } finally { await s.stop(); fx.cleanup() }
     }
+  } finally { fs.rmSync(base, { recursive: true, force: true }) }
+})
+
+test('安全閘門：長對話的 turn_context 離結尾超過 1MB 也讀得到（往回分段讀，中文不會被段落切壞）；完全讀不到權限＝不轉信（fail-closed）', async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'irori-codex-pol2-'))
+  const line = o => JSON.stringify(o) + '\n'
+  try {
+    // w02 10/06 實測：16MB rollout、最近的 turn_context 離結尾約 3MB → 舊版只讀最後 1MB 回 null、閘門放行
+    const filler = line({ type: 'event_msg', payload: { text: '中文字'.repeat(300) } })
+    const big = path.join(base, 'big.jsonl')
+    fs.writeFileSync(big, line({ type: 'turn_context', payload: { approval_policy: 'never', sandbox_policy: { type: 'danger-full-access' }, note: '測試用的中文' } }) + filler.repeat(3500))
+    assert.ok(fs.statSync(big).size > 3 << 20)
+    assert.deepEqual(readPolicy(big), { approval: 'never', sandbox: 'danger-full-access' })
+    // 段落大小刻意取奇數，讓段落邊界切在多位元組中文字與 turn_context 那行中間
+    assert.deepEqual(readPolicy(big, 777), { approval: 'never', sandbox: 'danger-full-access' })
+    // 超過讀取上限才找得到 → 當成不知道
+    assert.equal(readPolicy(big, 1 << 20, 1 << 20), null)
+    // 沒有任何 turn_context 的 rollout：deliver 必須拒絕、不能排進佇列
+    const none = path.join(base, 'none.jsonl')
+    fs.writeFileSync(none, filler.repeat(10))
+    const fx = fixture({ threads: [{ id: A, name: '視窗甲', path: none }], open: [A], extraEnv: { FAKE_CODEX_REPLY_MS: '50' } })
+    const s = start(fx)
+    try {
+      await s.eng.listWindows()
+      s.eng.deliver({ id: uid(0xd2), to: '視窗甲', text: mailText(uid(0xd2)) })
+      assert.match((await s.until(e => e.t === 'fail')).reason, /讀不到.*權限/)
+      assert.equal(fx.readCalls().filter(c => c.cmd === 'queue').length, 0)
+    } finally { await s.stop(); fx.cleanup() }
   } finally { fs.rmSync(base, { recursive: true, force: true }) }
 })
 

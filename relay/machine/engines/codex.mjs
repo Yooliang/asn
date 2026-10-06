@@ -166,6 +166,8 @@ export function createEngine({ log, workDir, mailboxName, env = process.env, dep
     if (!(await lockedThreadIds(home, { mode: LOCK_MODE, env, log })).has(w.threadId)) return fail(`Codex 視窗「${to}」已關閉`)
     if (String(text).length > MAX_MAIL_CHARS) return fail(`信太長（${String(text).length} 字，上限 ${MAX_MAIL_CHARS}），Codex 轉交走命令列放不下`)
     const policy = readPolicy(w.path)
+    // 讀不到權限設定＝不知道是不是完全存取：寧可不轉（fail-closed，w02 10/06 實測長對話讀不到時被放行）
+    if (!policy && !ALLOW_FULL_ACCESS) return fail(`讀不到 Codex 視窗「${to}」的權限設定，收發室不把外部來信轉進去（要放行請設 IRORI_CODEX_ALLOW_FULL_ACCESS=1）`)
     if (isFullAccess(policy) && !ALLOW_FULL_ACCESS) return fail(`Codex 視窗「${to}」是「完全存取（沒有沙盒）」模式，收發室不把外部來信轉進去（要放行請設 IRORI_CODEX_ALLOW_FULL_ACCESS=1）`)
     // --message=<內文>（連在一起）：內文若以 -- 開頭，分開寫會被 codex 的參數解析器當成旗標而失敗
     try { await runCodex(codex, ['queue', '--thread', w.threadId, `--message=${wrap(id, text)}`], { env: cenv, cwd: workDir }) }

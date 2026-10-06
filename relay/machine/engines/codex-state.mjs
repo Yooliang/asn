@@ -63,23 +63,39 @@ export async function lockedThreadIds(home, { mode = 'auto', env = process.env, 
   }
 }
 
-// rollout（.jsonl）尾端往回找最後一個 turn_context → { approval, sandbox }；還沒有任何 turn、讀不到就回 null
-export function readPolicy(rolloutPath, tailBytes = 1 << 20) {
+// rollout（.jsonl）從結尾往回一段一段讀（每段 chunkBytes），找最近一筆 turn_context → { approval, sandbox }；最多讀 maxBytes。
+// 舊版只讀最後 1MB：長對話（w02 10/06 實測 16MB、最近的 turn_context 離結尾約 3MB）讀不到就回 null，閘門被放行。
+// 回 null＝真的不知道（還沒有任何 turn、讀不到、超過上限）；呼叫端要當成「不能轉信」（fail-closed，見 codex.mjs deliverAsync）
+export function readPolicy(rolloutPath, chunkBytes = 1 << 20, maxBytes = 64 << 20) {
   if (!rolloutPath) return null
   let fd
   try {
     fd = fs.openSync(rolloutPath, 'r')
     const size = fs.fstatSync(fd).size
-    const len = Math.min(size, tailBytes)
-    const buf = Buffer.alloc(len)
-    fs.readSync(fd, buf, 0, len, size - len)
-    const lines = buf.toString('utf8').split(/\r?\n/)
-    for (let i = lines.length - 1; i >= 0; i--) {
-      if (!lines[i].includes('"type":"turn_context"')) continue
-      let j; try { j = JSON.parse(lines[i]) } catch { continue }
-      const p = j?.payload
-      if (!p) continue
-      return { approval: typeof p.approval_policy === 'string' ? p.approval_policy : (p.approval_policy ? 'granular' : ''), sandbox: p.sandbox_policy?.type ?? '' }
+    let pos = size, carry = Buffer.alloc(0)
+    while (pos > 0 && size - pos < maxBytes) {
+      const len = Math.min(chunkBytes, pos)
+      pos -= len
+      const buf = Buffer.alloc(len)
+      fs.readSync(fd, buf, 0, len, pos)
+      // carry＝後面那段開頭還沒讀完整的一行（位元組，免得中文字被切在兩段之間解壞），接在這段後面
+      let data = Buffer.concat([buf, carry])
+      carry = Buffer.alloc(0)
+      if (pos > 0) {
+        // 還沒到檔案開頭：第一個換行之前那截可能是被切斷的行，留到下一輪跟更前面的內容接起來
+        const nl = data.indexOf(0x0a)
+        if (nl < 0) { carry = data; continue }
+        carry = data.subarray(0, nl)
+        data = data.subarray(nl + 1)
+      }
+      const lines = data.toString('utf8').split(/\r?\n/)
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (!lines[i].includes('"type":"turn_context"')) continue
+        let j; try { j = JSON.parse(lines[i]) } catch { continue }
+        const p = j?.payload
+        if (!p) continue
+        return { approval: typeof p.approval_policy === 'string' ? p.approval_policy : (p.approval_policy ? 'granular' : ''), sandbox: p.sandbox_policy?.type ?? '' }
+      }
     }
   } catch { /* 讀不到就當不知道 */ } finally { if (fd != null) try { fs.closeSync(fd) } catch {} }
   return null
