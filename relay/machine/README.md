@@ -77,7 +77,7 @@ powershell -File install-task.ps1 -Apply               # 建立工作排程 Iror
 powershell -File install-task.ps1 -Uninstall           # 移除
 ```
 
-排程跑 `run-bridge.ps1`（橋掛掉 15 秒後自動重啟；撞到另一個執行個體則停手）。**目前沒有安裝**。
+排程用 `conhost.exe --headless` 跑 `run-bridge.ps1`（沒有視窗，不會被誤關；橋掛掉 15 秒後自動重啟；撞到另一個執行個體則停手）。**目前沒有安裝**。
 
 ### 自己更新、自己重啟（`self-update.mjs`，小良哥 10/06）
 

@@ -94,7 +94,7 @@ function Install-AppFiles {
 }
 
 function Start-IroriTask([string]$Id) {
-  # 沿用 install-task.ps1 的排程設定（登入時執行、隱藏視窗、失敗 1 分鐘後重啟最多 5 次）
+  # 沿用 install-task.ps1 的排程設定（登入時執行、conhost --headless 沒有視窗、失敗 1 分鐘後重啟最多 5 次）
   try {
     & (Join-Path $appDst 'install-task.ps1') -NodeId $Id -Apply | Out-Null
     Start-ScheduledTask -TaskName "IroriRelayMachine-$Id"
