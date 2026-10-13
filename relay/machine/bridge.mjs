@@ -8,6 +8,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { pickFallbackAgent, fallbackNote } from './pick-fallback.mjs'
+import { createLog } from './safe-log.mjs'
 import { contextText, createRooms, parseMember, roomText, roomUuid, NO_REPLY_RE as ROOM_NO_REPLY_RE } from './rooms.mjs'
 import { NO_REPLY_TIP, mailHead, parseSendHead, wantsReply } from './mail-format.mjs'
 import { createLauncher } from './launcher.mjs'
@@ -47,11 +48,8 @@ const SELF_UPDATE_MS = Number(process.env.IRORI_SELF_UPDATE_MS ?? (process.env.I
 const REPO_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 fs.mkdirSync(WORK_DIR, { recursive: true })
-const log = msg => {
-  const line = `${new Date().toISOString()} ${msg}`
-  console.error(line)
-  try { fs.appendFileSync(LOG_FILE, line + '\n') } catch {}
-}
+// 主控台寫不出去也不會進無限迴圈、檔案有上限會輪替（2026-10-13 bridge.log 長到 181 GB 的事故，見 safe-log.mjs）
+const log = createLog(LOG_FILE)
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 function readSecret(env, file) {
