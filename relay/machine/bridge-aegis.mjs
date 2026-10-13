@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createCore } from './relay-core.mjs'
+import { createLog } from './safe-log.mjs'
 import { createRooms, parseMember, roomText } from './rooms.mjs'
 
 const NODE_ID = (process.env.IRORI_RELAY_ID || 'AEGIS').trim()
@@ -23,11 +24,8 @@ const ROSTER_MS = Number(process.env.IRORI_ROSTER_MS || 60_000)
 const LOG_FILE = process.env.IRORI_RELAY_LOG || path.join(WORK_DIR, 'bridge.log')
 
 fs.mkdirSync(WORK_DIR, { recursive: true })
-const log = msg => {
-  const line = `${new Date().toISOString()} ${msg}`
-  console.error(line)
-  try { fs.appendFileSync(LOG_FILE, line + '\n') } catch {}
-}
+// 主控台寫不出去也不會進無限迴圈、檔案有上限會輪替（2026-10-13 bridge.log 長到 181 GB 的事故，見 safe-log.mjs）
+const log = createLog(LOG_FILE)
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 function readSecret(env, file) {
