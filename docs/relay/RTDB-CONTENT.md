@@ -340,7 +340,7 @@ Firebase RTDB 免費額度（官方，**請上線前再核對當時定價頁**�
 | Rules 多一行 `c`（只改檔、未部署） | `database.rules.json` |
 | 網頁解密、樹套用、裝置端決策、連線管理、金鑰保管 | `web/js/signal_crypto.js`、`signal_logic.js`、`signal_client.js`、`inbox.js`；`web/chat/sw.js` 快取清單 |
 | 共用測試向量與測試 | `tests/vectors/rtdb_content.json`、`tests/signal_crypto.test.mjs`、`tests/signal_content.test.mjs`、`supabase/functions/_shared/content_crypto_test.ts`、`irori-api/content_test.ts` |
-| 真 RTDB 驗證腳本（給有服務帳戶金鑰的人跑） | `tools/rtdb_content_probe.mjs` |
+| 真 RTDB 驗證腳本（給有服務帳戶金鑰的人跑） | `tools/relay/rtdb_content_probe.mjs` |
 
 ### 9.2 與設計稿不同或補充的地方
 
@@ -359,7 +359,7 @@ Firebase RTDB 免費額度（官方，**請上線前再核對當時定價頁**�
 2. 產生 KEK 並設 secret：`openssl rand -base64 32`，`supabase secrets set IRORI_SIGNAL_KEK=<值>`。**沒設或格式不對＝功能關**。KEK 設了就別亂換：換掉後庫裡的舊金鑰解不開（內容通道會自動關閉並記 log，不影響 #120 的行為）；真的要換，要刪掉 `irori.content_keys` 該 owner 的列重新產生，而且已開著的分頁手上還是舊金鑰（key_id 又從 1 開始），要關掉分頁重開才會拿到新的（期間它們會因解不開而退回指標模式，不會顯示錯誤內容）。
 3. 部署 `irori-api`（此時 `IRORI_SIGNAL_CONTENT` 還沒設＝暗跑，行為和 #120 完全一樣）。
 4. 部署 `database.rules.json`（`firebase deploy --only database`）。
-5. 跑 `tools/rtdb_content_probe.mjs` 驗 Rules 與 SSE 格式（會寫並刪掉合成節點）。
+5. 跑 `tools/relay/rtdb_content_probe.mjs` 驗 Rules 與 SSE 格式（會寫並刪掉合成節點）。
 6. 部署網頁（`web/`）。舊網頁不帶 `cap`，後端不會給 `signal.c`，不受影響。
 7. 設 `IRORI_SIGNAL_CONTENT=events`。先只開自己的一台網頁，兩台裝置各觸發一則提醒或夥伴轉述，看 Network：另一台應該沒有事件觸發的 `/updates`。
 8. 退路：把 `IRORI_SIGNAL_CONTENT` 拿掉（或改成空）→ 後端立刻不寫、`/updates` 不再帶 `signal.c` → 裝置下一次回應就退回 #120。RTDB 上殘留的密文沒有金鑰就是亂碼，可手動刪 `c/`。
@@ -430,7 +430,7 @@ Firebase RTDB 免費額度（官方，**請上線前再核對當時定價頁**�
 
 - 單元測試（全過）：deno 568、node 315（`tests/*.test.mjs`）＋73（`relay/machine/test`）、Android `testPhoneDebugUnitTest testTvDebugUnitTest assemblePhoneDebug assembleTvDebug`（內容通道 `ContentChannelTest` 35、`ContentDeliveryTest` 9、`SignalTest` 新增 5）。pytest（序列）106 全過。
 - 拿掉一個時序型偶發失敗的 node 測試（「單則解不開：丟掉、不顯示，改走 /updates 補拉」，原因是用「讓出 40 次」賭 WebCrypto 執行緒池做完），其餘案例的等待改成等進行中的解密回來；測試裡把 `console.info` 靜音（平行跑時輸出會讓 node 測試執行器的二進位通道報錯）。連跑 8 次全過。
-- **對真 RTDB 的探測**（`tools/rtdb_content_probe.mjs`，合成 owner＋隨機金鑰，gcloud token，跑完刪節點）：第 0、1 期的項目（未授權寫入 401、列目錄 401、不可猜路徑讀得通、密文解得開、搬路徑解不開、多路徑 PATCH 的刪除生效）＋ 第 2、3 期新增的項目全部 PASS：`PATCH { s }` 整個換掉；`s` 更新在 SSE 上是 `patch`、`path:"/"`、`{ "s": {…} }`；`meta/chat`、`meta/unread` 多路徑更新互不蓋掉；未授權可讀 `meta.json`、未授權寫入 401；`meta` 的 SSE 更新是 `patch`、`path:"/"`、`{ "unread": … }`。多路徑 PATCH 的 key 含斜線（`{"e/000000000003":…}`）也確認了，網頁與 Android 的樹套用都接得住。
+- **對真 RTDB 的探測**（`tools/relay/rtdb_content_probe.mjs`，合成 owner＋隨機金鑰，gcloud token，跑完刪節點）：第 0、1 期的項目（未授權寫入 401、列目錄 401、不可猜路徑讀得通、密文解得開、搬路徑解不開、多路徑 PATCH 的刪除生效）＋ 第 2、3 期新增的項目全部 PASS：`PATCH { s }` 整個換掉；`s` 更新在 SSE 上是 `patch`、`path:"/"`、`{ "s": {…} }`；`meta/chat`、`meta/unread` 多路徑更新互不蓋掉；未授權可讀 `meta.json`、未授權寫入 401；`meta` 的 SSE 更新是 `patch`、`path:"/"`、`{ "unread": … }`。多路徑 PATCH 的 key 含斜線（`{"e/000000000003":…}`）也確認了，網頁與 Android 的樹套用都接得住。
 
 ### 9.8 第 2、3 期與 Android 的上線步驟與退路
 

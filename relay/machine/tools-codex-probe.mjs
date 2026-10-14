@@ -2,7 +2,7 @@
 //   node tools-codex-probe.mjs status                          版本、登入、額度、目前開著的 Codex 視窗（名單）
 //   node tools-codex-probe.mjs send <視窗名> <內文...>           像橋一樣轉交一封信（含標頭）進該視窗並等回覆（最多 10 分鐘）
 //   node tools-codex-probe.mjs open <視窗名> <資料夾> [codex resume 的額外參數...]   建好有名字的 thread，開新視窗接上它
-// 環境變數：IRORI_CODEX_*（見 docs/CODEX-ENGINE.md）、CODEX_HOME。
+// 環境變數：IRORI_CODEX_*（見 docs/archive/CODEX-ENGINE.md）、CODEX_HOME。
 import crypto from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'

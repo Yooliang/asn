@@ -2,7 +2,7 @@
 
 > 2026-10-04 調研與原型。環境：Windows 11 原生、`agy 1.2.4`、`gemini 0.52.0`（舊版）、`codex-cli 0.154.0`、`claude 2.1.288`、`pi 0.84.4`、`grok`（社群版 `@vibe-kit/grok-cli 0.0.34`）。
 > 程式：`relay/machine/engines/acp-client.mjs`（最小 ACP 用戶端，無 npm 依賴）、`relay/machine/tools-acp-probe.mjs`（手動檢查）、`relay/machine/test/acp-client.test.mjs`＋`fake-acp-agent.mjs`（4 個測試，不碰真的 AI）。
-> 轉接器介面見 `relay/machine/README.md`「轉接器介面」；Codex 那一份見 `docs/CODEX-ENGINE.md`。
+> 轉接器介面見 `relay/machine/README.md`「轉接器介面」；Codex 那一份見 `docs/archive/CODEX-ENGINE.md`。
 
 ## 0. 給小良哥的白話摘要
 

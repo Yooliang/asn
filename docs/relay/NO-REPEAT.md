@@ -95,4 +95,4 @@ kv `repeat_stats`＝`{counts, since, last_at}`，只記次數、不存內容：`
 - `speech_repeat.ts`（相似度、切句、逐句過濾、提示）、`speech_repeat_stream.ts`（/chat 串流）、`repeat_guard.ts`（讀最近說過的話、生成前後檢查、計數）、`jev_repeat.ts`（邊界句，預設關）
 - 接線：`inbox.ts`（`narrateOnce`、`skipNarration`、`runExclusive`）、`proactive.ts`（`speak`）、`proactive_deps.ts`、`index.ts`（/chat 事件迴圈）、`llm.ts`（保險句更正帶 `guard:true`）
 - 測試：`speech_repeat_test.ts`、`speech_repeat_stream_test.ts`、`repeat_guard_test.ts`、`jev_repeat_test.ts`、`inbox_serialize_test.ts`（序列化＋多使用者互不影響＋鎖逾時自動釋放＋連續兩封來信）、`proactive_repeat_test.ts`
-- 驗證腳本：`tools/jev_validate_repeat.ts`（Jev，資料集放 `%TEMP%`）
+- 驗證腳本：`tools/jev/jev_validate_repeat.ts`（Jev，資料集放 `%TEMP%`）
