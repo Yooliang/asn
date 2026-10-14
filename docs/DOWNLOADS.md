@@ -92,7 +92,7 @@ curl -sS -X POST "https://hwtahctsgjcemtwzlvnq.supabase.co/storage/v1/object/dow
 要含 `application/zip`（原本只有 apk 與 json）。上傳後驗證：`curl -sIL https://irori.web.app/download/irori-windows.zip`
 應該 302 → 200，大小與 `downloads.json` 一致；Storage 公開物件有 CDN 快取，剛覆蓋後可能要等一下才看到新版。
 
-手機／電視 APK 的發版步驟見 `docs/handoff/` 最新一份的 Android 段（打包後同樣上傳到同一個 bucket）。
+手機／電視 APK：在 `android/` 跑 `./gradlew assemblePhoneDebug assembleTvDebug`，發版後上傳到同一個 bucket 的 `downloads/irori.apk`、`irori-tv.apk`（`x-upsert: true`）。
 
 ## 4. 測試
 
