@@ -1,4 +1,4 @@
--- 16_tenants.sql：多使用者第一期 A 段（設計見 docs/MULTI-USER.md；本輪做了什麼見 docs/MULTI-USER-PHASE1.md）。
+-- 16_tenants.sql：多使用者第一期 A 段（設計見 docs/MULTI-USER.md；本輪做了什麼見 docs/archive/MULTI-USER-PHASE1.md）。
 -- 內容：
 --   1. relay.tenants（租戶）、irori.accounts（帳號白名單，取代 IRORI_OWNER_EMAILS）、irori.account_invites（邀請碼）。
 --   2. relay.nodes／messages／invites／rooms／launches 加 tenant_id，並把現有資料全部回填成「租戶 1」（小良哥的 XISU、H、w02、aegis、群組…）。

@@ -70,7 +70,7 @@ skill 本體 `web/relay/SKILL.md` 已公開在 `https://irori.web.app/relay/SKIL
 Windows 小程式（`relay/machine/` 或 `relay/machine/installer/` 有改動時）：
 
 ```
-node tools/build_downloads.mjs              # 輸出到 %TEMP%\irori-downloads\：irori-windows.zip、downloads.json
+node tools/release/build_downloads.mjs              # 輸出到 %TEMP%\irori-downloads\：irori-windows.zip、downloads.json
 ```
 
 （要把 APK 也列進 `downloads.json`：加 `--include <路徑>\irori.apk`，可重複。）打包前先 commit——工作樹有未提交的

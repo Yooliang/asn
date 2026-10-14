@@ -85,7 +85,7 @@ Claude 直接當 skill 載入（含 frontmatter）；GPT、Gemini、Grok 貼進�
 - 工具 `ask_colleague` → `contact_partner(member, message)`；可找的對象＝名單上的成員（排除自己）
 - 回信靠 `reply_to` 對回原本的請求；沒有 `reply_to` 的來信也照樣當［通知］交給希緒
 - 沿用 `/api/updates` 與 `web/js/inbox.js` 的輪詢與［通知］流程，文字從「同事」改成「AI 夥伴」
-- `persona.md` 的「幫小良哥問同事」改成「用手機聯絡 AI 夥伴」
+- `supabase/persona.md` 的「幫小良哥問同事」改成「用手機聯絡 AI 夥伴」
 - 牧陽的成員之後註冊成仲介成員接進來；公司閘道網址、成員名單不留在 Irori
 
 **邀請新成員**：

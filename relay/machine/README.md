@@ -91,7 +91,7 @@ powershell -File install-task.ps1 -Uninstall           # 移除
 - 一般使用者用 `installer/` 安裝的副本不是 git 工作樹，不會自己更新（`bridge.log` 會記一次 `self-update error`），照舊用新的安裝包更新。
 
 一般使用者不用手動做這些：`installer/` 是給一般人的 Windows 安裝程式（雙擊「安裝.cmd」＝邀請碼註冊＋複製程式＋建排程；`register.mjs` 是註冊小幫手），
-`node tools/build_downloads.mjs` 打成 `irori-windows.zip`。說明見 `docs/DOWNLOADS.md`。
+`node tools/release/build_downloads.mjs` 打成 `irori-windows.zip`。說明見 `docs/DOWNLOADS.md`。
 
 ## 安全
 
@@ -282,7 +282,7 @@ node D:/Github/irori/relay/machine/recv.mjs --once     # 拉一次、印出、ac
 
 ### Codex 轉接器（原型，`engines/codex.mjs`）
 
-`IRORI_ENGINES=claude,codex` 載入。用使用者自己電腦上的 Codex CLI 與自己的 ChatGPT 登入額度；對使用者**開著的互動視窗**（TUI／桌面版）做「名單＋轉交＋回覆」。調查（原 11 題的實測答案）、限制、費用、安全與上線步驟全在 `docs/CODEX-ENGINE.md`。重點：
+`IRORI_ENGINES=claude,codex` 載入。用使用者自己電腦上的 Codex CLI 與自己的 ChatGPT 登入額度；對使用者**開著的互動視窗**（TUI／桌面版）做「名單＋轉交＋回覆」。調查（原 11 題的實測答案）、限制、費用、安全與上線步驟全在 `docs/archive/CODEX-ENGINE.md`。重點：
 
 - 名單：`session_index.jsonl`（有名字的 thread）∩ `thread-writer-locks/`（正被某行程開著；Windows 以 FileShare.None 試開判斷）；忙碌＝最後一個 turn 沒結束。`codex agents` 只有 TUI、其 daemon 在 npm 安裝上起不來，所以不用。
 - 轉交：`codex queue --thread <id> --message=<信>`（寫進 Codex 佇列，持有該 thread 的視窗閒下來就處理）；回覆：reader app-server 唯讀輪詢 `thread/turns/list`，取含本信編號的 turn 的最終回答。reader 絕不 `thread/resume`。

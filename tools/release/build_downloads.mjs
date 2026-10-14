@@ -1,7 +1,7 @@
 // 產生「下載區」的檔案到 %TEMP%\irori-downloads\（不上傳、不部署；上傳步驟見 docs/DOWNLOADS.md）：
 //   irori-windows.zip   Windows 小程式（收發室橋 + 安裝／解除安裝程式）
 //   downloads.json      各檔版本（git 短 sha + 日期）、大小、sha256
-// 用法：node tools/build_downloads.mjs [--out <資料夾>] [--include <其他要列進 downloads.json 的檔案，例如 apk>]...
+// 用法：node tools/release/build_downloads.mjs [--out <資料夾>] [--include <其他要列進 downloads.json 的檔案，例如 apk>]...
 // 同一個 commit 產出的 zip 內容固定（時間戳取 commit 日期），sha256 也會一樣。
 import fs from 'node:fs'
 import os from 'node:os'
@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { buildZip } from './zip_lite.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
-export const REPO = path.resolve(here, '..')
+export const REPO = path.resolve(here, '..', '..')
 export const PUBLIC_BASE = 'https://irori.web.app/download'
 export const WINDOWS_ZIP = 'irori-windows.zip'
 

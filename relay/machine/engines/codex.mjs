@@ -1,4 +1,4 @@
-// Codex CLI 轉接器（原型；介面見 relay/machine/README.md「轉接器介面」，調查與取捨見 docs/CODEX-ENGINE.md）。
+// Codex CLI 轉接器（原型；介面見 relay/machine/README.md「轉接器介面」，調查與取捨見 docs/archive/CODEX-ENGINE.md）。
 // 用「使用者自己電腦上的 Codex CLI、使用者自己的 ChatGPT 登入額度」，不碰 API 金鑰。做法（全部實測過，codex-cli 0.154.0 / Windows 原生）：
 //   名單    ＝ session_index.jsonl（有名字的 thread）∩ thread-writer-locks（正被某個行程開著）；忙碌 ＝ 最後一個 turn 還沒結束
 //   轉交    ＝ `codex queue --thread <id> --message <信>`：寫進 Codex 的佇列，持有該 thread 的行程（TUI／桌面版）閒下來就當成使用者訊息處理
@@ -82,7 +82,7 @@ export function createEngine({ log, workDir, mailboxName, env = process.env, dep
         log(`codex ${version.text} 比已驗證的最低版本 0.${MIN_VERSION.minor} 舊，轉接器停用（codex update 或設 IRORI_CODEX_SKIP_VERSION_CHECK=1 自負風險）`)
         return
       }
-      if (version.text !== TESTED_VERSION) log(`codex ${version.text}（已驗證版本 ${TESTED_VERSION}）；名單或轉交若異常，先看 docs/CODEX-ENGINE.md「版本穩定性」`)
+      if (version.text !== TESTED_VERSION) log(`codex ${version.text}（已驗證版本 ${TESTED_VERSION}）；名單或轉交若異常，先看 docs/archive/CODEX-ENGINE.md「版本穩定性」`)
       usable = true
     } catch (e) { log(`找不到可用的 codex（${e.message}）；Codex 轉接器停用`) }
   }
