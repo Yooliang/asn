@@ -249,7 +249,6 @@ html.toast-page,html.toast-page body{background:transparent}
 /* ---------- 工具列：只有圖示（滑過看提示）；位置可在輸入框上方（預設）或下方 ---------- */
 .tool-group{display:inline-flex;align-items:center}
 .tool.icon{padding:3px 6px}
-.tool.caret{padding:3px 3px;font-size:10px;color:var(--muted)}
 .tool-group .tool.icon{border-top-right-radius:0;border-bottom-right-radius:0}
 .tool-group .tool.caret{border-top-left-radius:0;border-bottom-left-radius:0}
 .tb-bottom .compose-main{flex-direction:column-reverse}
