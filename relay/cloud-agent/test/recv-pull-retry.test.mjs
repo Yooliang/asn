@@ -31,21 +31,16 @@ test('inbox 前兩次 500、第三次成功：短退避內寫入 inbox 並 ack',
 })
 
 test('持續失敗：退避間隔遞增且卡在上限，不會 tight loop', async () => {
-  const delays = []
   let n = 0
   const pullOnce = async () => { n++; throw new Error('fetch failed') }
-  const pr = createPullWithRetry({
-    pullOnce,
-    log: () => {},
-    backoffMs: [5, 10, 20, 60],
-    sleep: ms => { delays.push(ms); return new Promise(r => setTimeout(r, ms)) },
-  })
+  const pr = createPullWithRetry({ pullOnce, log: () => {}, backoffMs: [5, 10, 20, 60] })
   try {
     void pr.pull('bell')
-    assert.ok(await until(() => delays.length >= 3, 2000), `delays=${delays.join(',')}`)
+    assert.ok(await until(() => pr.getScheduledDelays().length >= 3, 2000), `delays=${pr.getScheduledDelays().join(',')}`)
+    const delays = pr.getScheduledDelays()
     assert.deepEqual(delays.slice(0, 3), [5, 10, 20])
-    assert.ok(await until(() => delays.length >= 4, 2000))
-    assert.equal(delays[3], 60)
+    assert.ok(await until(() => pr.getScheduledDelays().length >= 4, 2000))
+    assert.equal(pr.getScheduledDelays()[3], 60)
     assert.ok(n >= 4)
   } finally {
     pr.destroy()

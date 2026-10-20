@@ -15,7 +15,10 @@ export async function startFakeRelay({ node = 'grok', rosterStatus = 200, onAck 
     const u = new URL(req.url, 'http://x'), action = u.searchParams.get('action')
     const body = await readBody(req)
     st.reqs.push({ action, method: req.method, key: req.headers['x-relay-key'], body })
-    const out = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)) }
+    const out = (code, obj) => {
+      res.writeHead(code, { 'content-type': 'application/json', connection: 'close' })
+      res.end(JSON.stringify(obj))
+    }
     if (action === 'register') {
       st.registerBody = body
       if (body?.invite !== INVITE) return out(403, { error: 'invalid_invite' })
