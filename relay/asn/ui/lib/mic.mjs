@@ -9,7 +9,7 @@ export const micErrorText = e => {
 }
 
 export function createMic() {
-  let ctx = null, stream = null, node = null, src = null, mute = null, chunks = []
+  let ctx = null, stream = null, node = null, src = null, mute = null, chunks = [], session = 0
   const release = () => {
     try { node && (node.onaudioprocess = null, node.disconnect()) } catch { /* 已斷 */ }
     try { src && src.disconnect() } catch { /* 已斷 */ }
@@ -22,11 +22,17 @@ export function createMic() {
   return {
     async start() {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error('這個環境不支援麥克風錄音。')
-      try { stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } }) }
+      const my = ++session   // 授權視窗等很久的時候被 stop()（取消）了，晚到的麥克風要立刻放掉
+      let got
+      try { got = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } }) }
       catch (e) { throw new Error(micErrorText(e)) }
+      if (my !== session) { got.getTracks().forEach(t => t.stop()); throw new Error('已取消') }
+      stream = got
       chunks = []
       ctx = new AudioContext()
-      if (ctx.state === 'suspended') await ctx.resume().catch(() => {})
+      // resume() 在某些情況不會回來，最多等 1.5 秒，不能讓開始錄音卡住
+      if (ctx.state === 'suspended') await Promise.race([ctx.resume().catch(() => {}), new Promise(r => setTimeout(r, 1500))])
+      if (my !== session) { release(); throw new Error('已取消') }
       src = ctx.createMediaStreamSource(stream)
       // ScriptProcessor 雖然被標為過時，但不需要另外載入 worklet 檔案（受 CSP 限制），WebView2 長期支援
       node = ctx.createScriptProcessor(4096, 1, 1)
@@ -35,6 +41,7 @@ export function createMic() {
       src.connect(node); node.connect(mute); mute.connect(ctx.destination)
     },
     async stop() {
+      session++   // 讓還在等的 start() 作廢
       const rate = ctx?.sampleRate ?? 48000
       const parts = chunks; chunks = []
       release()

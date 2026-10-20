@@ -8,7 +8,7 @@ import { attachmentFromFile, imageFromBlob } from './photo-canvas.mjs'
 import { Annotator } from './annotator.mjs'
 import { shotFileName } from './shot.mjs'
 
-const { ref, computed, watch, nextTick, onMounted } = Vue
+const { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } = Vue
 const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯示為離線' }
 
 export const ChatPane = {
@@ -135,13 +135,21 @@ export const ChatPane = {
     const speaking = (m, i) => !!props.voice && props.voice.state.tts.key === msgKey(m, i) && props.voice.state.tts.phase !== 'idle'
     const speakTip = (m, i) => (speaking(m, i) ? '停止念出' : '念出這則訊息')
     const speak = (m, i) => props.voice && props.voice.speak(msgKey(m, i), m.text)
-    const micTip = computed(() => (props.voice?.state.mic.phase === 'recording' ? '說完了，按一下辨識' : '語音輸入（按一下開始說話）'))
+    const MIC_TIP = { starting: '準備麥克風…按一下取消', recording: '聆聽中…說完了，按一下辨識（Esc 取消）', recognizing: '辨識中…按一下取消' }
+    const micTip = computed(() => MIC_TIP[props.voice?.state.mic.phase] || '語音輸入（按一下開始說話）')
     const voiceNote = computed(() => props.voice?.state.note || props.voice?.state.tts.error || '')
     onMounted(() => {
       scrollDown(); if (props.active) composeEl.value && composeEl.value.focus()
       if (props.shotApi) props.shotApi.supported().then(v => { shotOk.value = v === true }).catch(() => {})
-      window.addEventListener('keydown', e => { if (e.key === 'Escape' && viewer.value) closeViewer() })
+      window.addEventListener('keydown', onKey)
     })
+    // Esc：先關放大的照片；沒有的話取消語音輸入（準備中／錄音中／辨識中，只有目前看得到的面板處理）
+    function onKey(e) {
+      if (e.key !== 'Escape') return
+      if (viewer.value) { closeViewer(); return }
+      if (props.active && props.voice && props.voice.state.mic.phase !== 'idle') { e.preventDefault(); void props.voice.cancelMic() }
+    }
+    onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     const docEl = ref(null)
     return { micClick, msgKey, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, composeHint, composeTitle, collapsed, classes, lay, arrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
@@ -214,7 +222,7 @@ export const ChatPane = {
         <button class="tool icon" type="button" v-if="shotApi && shotOk" @click="startShot" :disabled="photoBusy || !!annot" aria-label="截圖" title="截圖（框選螢幕任一區域，可畫筆標註後傳送）">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M7 3v14h14M3 7h14v14" fill="none" stroke="#4a5d73" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 14l4-4" stroke="#d9302b" stroke-width="1.8" stroke-linecap="round"/></svg>
         </button>
-        <button class="tool icon mic" :class="{ rec: voice && voice.state.mic.phase === 'recording', busy: voice && voice.state.mic.phase === 'recognizing' }" type="button" v-if="voice" @click="micClick" :disabled="voice.state.mic.phase === 'recognizing'" :aria-label="micTip" :aria-pressed="voice.state.mic.phase === 'recording'" :title="micTip">
+        <button class="tool icon mic" :class="{ rec: voice && voice.state.mic.phase === 'recording', busy: voice && (voice.state.mic.phase === 'recognizing' || voice.state.mic.phase === 'starting') }" type="button" v-if="voice" @click="micClick" :aria-label="micTip" :aria-pressed="voice.state.mic.phase === 'recording'" :title="micTip">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="9" y="3.5" width="6" height="11" rx="3" fill="currentColor"/><path d="M5.8 11.5a6.2 6.2 0 0 0 12.4 0M12 17.7v3M8.6 20.7h6.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
         </button>
         <div class="picker" v-if="pickerOpen" role="menu">
