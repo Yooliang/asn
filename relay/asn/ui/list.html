@@ -70,12 +70,15 @@
           <div class="search"><input v-model="query" placeholder="搜尋聯絡人..." aria-label="搜尋聯絡人"></div>
           <div class="list">
             <div v-for="g in shown" :key="g.key">
-              <button class="g-head" @click="collapsed[g.key] = !collapsed[g.key]" :aria-expanded="!collapsed[g.key]">
-                <span class="box">{{ collapsed[g.key] ? '+' : '−' }}</span>{{ groupHeading(g) }}
-              </button>
+              <div class="g-head-row">
+                <button class="g-head" type="button" @click="collapsed[g.key] = !collapsed[g.key]" :aria-expanded="!collapsed[g.key]">
+                  <span class="box">{{ collapsed[g.key] ? '+' : '−' }}</span>{{ groupHeading(g) }}
+                </button>
+                <button v-if="canLaunchOn(g.key)" class="g-launch" type="button" title="開新夥伴" aria-label="開新夥伴" @click.stop="openPartnerDlg(g.key)">＋</button>
+              </div>
               <ul v-show="!collapsed[g.key]">
-                <li v-for="c in g.items" :key="c.id">
-                  <button class="buddy" :class="{ offline: c.status === 'offline' }" @click="openChat(c.id)">
+                <li v-for="c in g.items" :key="c.id" @contextmenu.prevent="openBuddyMenu(c, $event)">
+                  <button class="buddy" :class="{ offline: c.status === 'offline', pending: c.pending }" @click="openChat(c.id)">
                     <span class="dp xs" :class="'st-' + c.status"><span><img :src="avOf(c)" alt=""></span></span>
                     <span class="b-text">
                       <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-st" v-if="statusNote(c.status)">{{ statusNote(c.status) }}</span></span>
@@ -170,6 +173,23 @@
           <label>分組依
             <select class="set-sel" v-model="dims.groupDim" aria-label="分組依"><option v-for="d in groupOptions(dims.tabDim)" :key="d.key" :value="d.key">{{ d.label }}</option></select>
           </label>
+          <div class="launch-set">
+            <b>啟動設定</b>
+            <p class="launch-note">偵測本機 CLI 自動產生啟動方式；指令只在這台電腦決定，不上傳雲端。</p>
+            <ul class="launch-tools">
+              <li v-for="t in launchToolRows" :key="t.id" :class="{ off: !t.installed }">
+                <span class="launch-name">{{ t.label }}</span>
+                <span class="launch-ver" v-if="t.installed">{{ t.version || '已安裝' }}</span>
+                <span class="launch-hint" v-else>{{ t.installHint }}</span>
+              </li>
+            </ul>
+            <label>每小時開新夥伴上限
+              <input class="set-input" type="number" min="1" max="20" v-model.number="launchPrefs.maxPerHour" @change="saveLaunchPrefs">
+            </label>
+            <label>工作資料夾白名單（一行一個）
+              <textarea class="set-area" rows="4" :value="launchCwdText" @change="setLaunchCwdText($event.target.value)"></textarea>
+            </label>
+          </div>
           <small class="ver-line">版本 {{ version }}</small>
         </div>
       </div>
@@ -236,6 +256,34 @@
       <div class="pane guide-pane" v-else-if="view === 'guide'"><guide-doc :guide="openedGuide"></guide-doc></div>
     </div>
   </section>
+  </div>
+  <ul class="av-menu buddy-menu" v-if="buddyMenu" :style="{ left: buddyMenuPos.x + 'px', top: buddyMenuPos.y + 'px' }" role="menu" @click.stop>
+    <li v-if="buddyMenuCanLaunch"><button type="button" role="menuitem" @click="partnerFromMenu">開新夥伴…</button></li>
+  </ul>
+  <div class="partner-dlg-back" v-if="partnerDlg.open" @click.self="closePartnerDlg">
+    <div class="partner-dlg" role="dialog" aria-labelledby="partner-dlg-title" @click.stop>
+      <h3 id="partner-dlg-title">開新夥伴</h3>
+      <p class="partner-node" v-if="partnerDlg.node !== selfNode">設備：{{ partnerDlg.deviceLabel }}</p>
+      <div class="partner-models" role="radiogroup" aria-label="模型">
+        <button v-for="m in partnerModels" :key="m.id" type="button" class="pmodel" :class="{ on: partnerDlg.profile === m.profileId, off: !m.installed }" :disabled="!m.installed" :title="m.installed ? m.modeLabel : m.installHint" @click="pickPartnerModel(m)">
+          <span class="pmodel-ic" :data-m="m.id"></span>
+          <span class="pmodel-lb">{{ m.label }}</span>
+        </button>
+      </div>
+      <p class="partner-mode" v-if="partnerDlg.modeLabel">{{ partnerDlg.modeLabel }}</p>
+      <label>名字<input class="set-input" v-model="partnerDlg.name" maxlength="40" aria-label="夥伴名字"></label>
+      <label>工作資料夾
+        <select class="set-sel" v-model="partnerDlg.cwd" aria-label="工作資料夾">
+          <option v-for="c in partnerCwdChoices" :key="c" :value="c">{{ c }}</option>
+        </select>
+      </label>
+      <label>第一句話（選填）<textarea class="set-area" rows="2" v-model="partnerDlg.firstMessage" maxlength="4000" aria-label="第一句話"></textarea></label>
+      <p class="partner-err" v-if="partnerDlg.error" role="alert">{{ partnerDlg.error }}</p>
+      <div class="partner-actions">
+        <button class="aero-btn" type="button" @click="closePartnerDlg">取消</button>
+        <button class="aero-btn primary" type="button" :disabled="partnerDlg.busy" @click="submitPartnerDlg">{{ partnerDlg.busy ? '啟動中…' : '開啟' }}</button>
+      </div>
+    </div>
   </div>
 </div>
 <script src="vendor/vue.global.prod.js"></script>

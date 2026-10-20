@@ -3,7 +3,7 @@
 // - 摘要（profile 名與標籤、cwd 白名單、上限；不含指令）附在 roster 回報給仲介，手機的表單才有下拉選單
 // - 門鈴／輪詢時 launch_pending 取走待辦 → 執行前再驗一次 → 開視窗 → 等它出現在 `claude agents` → launch_result 回報
 // 指令完全由本機 launcher.json 決定；仲介來的只有 profile 名、視窗名、cwd（必須在白名單裡）。{name} 是唯一的替換欄位。
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -13,29 +13,75 @@ const DEFAULT_MAX_PER_HOUR = 6
 const HOUR_MS = 3_600_000
 export const TRUST_HINT = '視窗已開，但 30 秒內沒出現在名單上：可能卡在「是否信任此資料夾」，請到電腦前按一次 Enter'
 
-// 讀並檢查 launcher.json；不存在回 {config:null}，格式錯回 {config:null, error}
-export function loadConfig(file) {
-  let raw
-  try { raw = fs.readFileSync(file, 'utf8') } catch (e) { return e.code === 'ENOENT' ? { config: null } : { config: null, error: `讀不到 ${file}：${e.message}` } }
-  let j
-  try { j = JSON.parse(raw.replace(/^﻿/, '')) } catch (e) { return { config: null, error: `launcher.json 不是合法 JSON：${e.message}` } }
-  if (!j || typeof j !== 'object' || !j.profiles || typeof j.profiles !== 'object' || Array.isArray(j.profiles)) return { config: null, error: 'launcher.json 缺 profiles' }
-  const profiles = {}
-  for (const [id, p] of Object.entries(j.profiles)) {
-    if (!/^[A-Za-z0-9_-]{1,40}$/.test(id)) return { config: null, error: `profile 名不合法：${id}` }
-    if (!p || typeof p.command !== 'string' || !p.command || !Array.isArray(p.args) || !p.args.every(a => typeof a === 'string')) {
-      return { config: null, error: `profile ${id} 要有 command（字串）與 args（字串陣列）` }
-    }
-    // {name} 以外的 {…} 一律不准（避免以為可以替換 cwd 之類的東西）
-    if ([p.command, ...p.args].some(a => /\{(?!name\})[^}]*\}/.test(a))) return { config: null, error: `profile ${id} 只能用 {name} 這個替換欄位` }
-    if (/\{name\}/.test(p.command)) return { config: null, error: `profile ${id} 的 command 不能含 {name}` }
-    if (p.engine != null && (typeof p.engine !== 'string' || !/^[a-z0-9_-]{1,20}$/.test(p.engine))) return { config: null, error: `profile ${id} 的 engine 要是轉接器代號（例如 claude、codex）` }
-    profiles[id] = { label: typeof p.label === 'string' ? p.label.slice(0, 60) : id, command: p.command, args: p.args, engine: p.engine ?? '' }
+/** 工作資料夾：先 path.resolve，再 realpath（符號連結、.. 都會落到實際路徑） */
+export function normalizePath(p) {
+  return path.resolve(String(p))
+}
+
+export function canonicalLaunchCwd(p) {
+  const resolved = normalizePath(p)
+  try {
+    return fs.realpathSync.native(resolved)
+  } catch {
+    return resolved
   }
-  if (!Object.keys(profiles).length) return { config: null, error: 'launcher.json 沒有任何 profile' }
-  const cwdAllow = Array.isArray(j.cwd_allow) ? j.cwd_allow.filter(c => typeof c === 'string' && c.trim()).map(c => c.trim()) : []
-  if (!cwdAllow.length) return { config: null, error: 'launcher.json 的 cwd_allow 是空的' }
-  const max = Number.isInteger(j.max_per_hour) ? Math.min(Math.max(j.max_per_hour, 1), 20) : DEFAULT_MAX_PER_HOUR
+}
+
+function parseOneProfile(id, p) {
+  if (!/^[A-Za-z0-9_-]{1,40}$/.test(id)) return { error: `profile 名不合法：${id}` }
+  if (!p || typeof p !== 'object') return { error: `profile ${id} 格式不對` }
+  const mode = p.mode === 'background' ? 'background' : 'window'
+  if (p.disabled) {
+    return { profile: { label: typeof p.label === 'string' ? p.label.slice(0, 60) : id, command: '', args: [], engine: p.engine ?? '', mode, disabled: true, disabledReason: p.disabledReason ?? '' } }
+  }
+  if (mode === 'window') {
+    if (typeof p.command !== 'string' || !p.command || !Array.isArray(p.args) || !p.args.every(a => typeof a === 'string')) {
+      return { error: `profile ${id} 要有 command（字串）與 args（字串陣列）` }
+    }
+    if ([p.command, ...p.args].some(a => /\{(?!name\})[^}]*\}/.test(a))) return { error: `profile ${id} 只能用 {name} 這個替換欄位` }
+    if (/\{name\}/.test(p.command)) return { error: `profile ${id} 的 command 不能含 {name}` }
+  } else if (typeof p.command !== 'string' || !p.command) {
+    return { error: `profile ${id}（背景）要有 command` }
+  }
+  if (p.engine != null && (typeof p.engine !== 'string' || !/^[a-z0-9_-]{1,20}$/.test(p.engine))) return { error: `profile ${id} 的 engine 要是轉接器代號（例如 claude、codex）` }
+  return {
+    profile: {
+      label: typeof p.label === 'string' ? p.label.slice(0, 60) : id,
+      command: typeof p.command === 'string' ? p.command : '',
+      args: Array.isArray(p.args) ? p.args : [],
+      engine: p.engine ?? (mode === 'background' ? 'acp' : ''),
+      mode,
+      model: typeof p.model === 'string' ? p.model : id,
+      acp: p.acp && typeof p.acp === 'object' ? p.acp : null,
+    },
+  }
+}
+
+// 讀 launcher.json，並與 bootstrap（CLI 自動 profile）合併；手寫覆蓋同 id 的自動項。
+export function loadConfig(file, bootstrap = null) {
+  let j = null
+  let fileErr = null
+  try {
+    const raw = fs.readFileSync(file, 'utf8')
+    try { j = JSON.parse(raw.replace(/^\uFEFF/, '')) } catch (e) { return { config: null, error: `launcher.json 不是合法 JSON：${e.message}` } }
+  } catch (e) {
+    if (e.code !== 'ENOENT') fileErr = `讀不到 ${file}：${e.message}`
+  }
+  const mergedRaw = { ...(bootstrap?.profiles ?? {}), ...(j?.profiles ?? {}) }
+  if (!Object.keys(mergedRaw).length) {
+    return { config: null, error: fileErr || '這台電腦還沒有可用的啟動設定（請安裝 CLI 或撰寫 launcher.json）' }
+  }
+  const profiles = {}
+  for (const [id, p] of Object.entries(mergedRaw)) {
+    const one = parseOneProfile(id, p)
+    if (one.error) return { config: null, error: one.error }
+    profiles[id] = one.profile
+  }
+  const cwdAllow = (Array.isArray(j?.cwd_allow) && j.cwd_allow.length ? j.cwd_allow : bootstrap?.cwd_allow ?? [])
+    .filter(c => typeof c === 'string' && c.trim()).map(c => canonicalLaunchCwd(c.trim()))
+  if (!cwdAllow.length) return { config: null, error: '工作資料夾白名單（cwd_allow）是空的' }
+  const max = Number.isInteger(j?.max_per_hour) ? Math.min(Math.max(j.max_per_hour, 1), 20)
+    : Number.isInteger(bootstrap?.max_per_hour) ? bootstrap.max_per_hour : DEFAULT_MAX_PER_HOUR
   return { config: { profiles, cwd_allow: cwdAllow, max_per_hour: max } }
 }
 
@@ -51,13 +97,19 @@ export function summary(config) {
 
 // 執行前再驗一次；通過回 null，不通過回原因（中文，會回報給手機）
 export function check(config, req, { names = new Set(), recent = [], now = Date.now() } = {}) {
-  if (!config) return '這台電腦沒有 launcher.json'
+  if (!config) return '這台電腦還沒有可用的啟動設定'
   if (typeof req?.name !== 'string' || !NAME_RE.test(req.name)) return '視窗名格式不對'
   if (typeof req.profile !== 'string' || !Object.hasOwn(config.profiles, req.profile)) return `沒有這個啟動設定：${req.profile}`
-  if (typeof req.cwd !== 'string' || !config.cwd_allow.includes(req.cwd)) return '工作資料夾不在允許清單裡'
+  const prof = config.profiles[req.profile]
+  if (prof?.disabled) return prof.disabledReason || '這個模型目前無法從這裡啟動'
+  if (typeof req.cwd !== 'string' || !req.cwd.trim()) return '工作資料夾不在允許清單裡'
+  const cwdCanon = canonicalLaunchCwd(req.cwd)
+  const allowCanon = new Set(config.cwd_allow.map(canonicalLaunchCwd))
+  if (!allowCanon.has(cwdCanon)) return '工作資料夾不在允許清單裡'
   let st
-  try { st = fs.statSync(req.cwd) } catch { st = null }
+  try { st = fs.statSync(cwdCanon) } catch { st = null }
   if (!st?.isDirectory()) return `工作資料夾不存在：${req.cwd}`
+  req.cwd = cwdCanon
   const lower = req.name.toLowerCase()
   if ([...names].some(n => String(n).toLowerCase() === lower)) return `已經有叫「${req.name}」的視窗`
   if (recent.filter(t => now - t < HOUR_MS).length >= config.max_per_hour) return `這個小時已經開了 ${config.max_per_hour} 個視窗，超過上限`
@@ -103,7 +155,44 @@ const START_PS = [
   "$p = if ($a) { Start-Process -FilePath $f -ArgumentList $a -WorkingDirectory $d -WindowStyle $w -PassThru } else { Start-Process -FilePath $f -WorkingDirectory $d -WindowStyle $w -PassThru }",
   "[Console]::Out.Write($p.Id)",
 ].join('\n')
+export function startWindowLinux({ command, args, cwd, env }) {
+  const term = pickLinuxTerminal(env)
+  const joined = [command, ...args].map(quoteArg).join(' ')
+  if (term) {
+    const argv = [...term.argsPrefix, term.binary, ...term.argsSuffix, joined]
+    return spawnDetached(argv[0], argv.slice(1), cwd, env)
+  }
+  return spawnDetached(command, args, cwd, env)
+}
+
+function pickLinuxTerminal(env) {
+  const pathEnv = env.PATH ?? ''
+  const tryBins = [
+    { binary: 'gnome-terminal', argsPrefix: [], argsSuffix: ['--', 'bash', '-lc'] },
+    { binary: 'konsole', argsPrefix: [], argsSuffix: ['-e', 'bash', '-lc'] },
+    { binary: 'xfce4-terminal', argsPrefix: [], argsSuffix: ['-e', 'bash', '-lc'] },
+    { binary: 'xterm', argsPrefix: [], argsSuffix: ['-e', 'bash', '-lc'] },
+  ]
+  for (const t of tryBins) {
+    for (const dir of pathEnv.split(':').filter(Boolean)) {
+      const p = path.join(dir, t.binary)
+      try { if (fs.statSync(p).isFile()) return { ...t, binary: p } } catch { /* 略過 */ }
+    }
+  }
+  return null
+}
+
+function spawnDetached(command, args, cwd, env) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { cwd, env, detached: true, stdio: 'ignore' })
+    child.on('error', reject)
+    child.unref()
+    resolve({ pid: child.pid ?? 0 })
+  })
+}
+
 export function startWindow({ command, args, cwd, env }) {
+  if (process.platform !== 'win32') return startWindowLinux({ command, args, cwd, env })
   const psExe = path.join(env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
   const encoded = Buffer.from(START_PS, 'utf16le').toString('base64')
   const henv = { ...env, IRORI_LAUNCH_FILE: command, IRORI_LAUNCH_ARGS: args.map(quoteArg).join(' '), IRORI_LAUNCH_DIR: cwd,
@@ -121,8 +210,8 @@ export function startWindow({ command, args, cwd, env }) {
 
 // deps：api(action, opts)、log(msg)、workDir、configPath、listNames() → Promise<Set|null>（本機目前的 session 名）、
 //       onLaunched(launch) 視窗出現後呼叫（橋拿來刷新名單、送第一句話）、start（開視窗，測試可換掉）
-export function createLauncher({ api, log, workDir, configPath, listNames, onLaunched = async () => {}, start = startWindow, envFilter = childEnv,
-  confirmMs = 30_000, lateMs = 180_000, pollMs = 2_000 }) {
+export function createLauncher({ api, log, workDir, configPath, listNames, onLaunched = async () => {}, start = startWindow, startBackground = null, envFilter = childEnv,
+  bootstrap = null, confirmMs = 30_000, lateMs = 180_000, pollMs = 2_000 }) {
   const historyFile = path.join(workDir, 'launch-history.json')
   const logFile = path.join(workDir, 'launch.log')
   let cache = { mtime: -1, value: { config: null } }
@@ -131,8 +220,10 @@ export function createLauncher({ api, log, workDir, configPath, listNames, onLau
   function current() {
     let mtime = 0
     try { mtime = fs.statSync(configPath).mtimeMs } catch { mtime = 0 }
-    if (mtime !== cache.mtime) {
-      cache = { mtime, value: loadConfig(configPath) }
+    const bootKey = bootstrap ? JSON.stringify(bootstrap).length : 0
+    const cacheKey = `${mtime}:${bootKey}`
+    if (cacheKey !== cache.mtime) {
+      cache = { mtime: cacheKey, value: loadConfig(configPath, typeof bootstrap === 'function' ? bootstrap() : bootstrap) }
       if (cache.value.error && cache.value.error !== warned) { log(`launcher: ${cache.value.error}`); warned = cache.value.error }
       if (cache.value.config) { warned = ''; log(`launcher: loaded ${Object.keys(cache.value.config.profiles).length} profile(s), ${cache.value.config.cwd_allow.length} cwd(s)`) }
     }
@@ -162,10 +253,16 @@ export function createLauncher({ api, log, workDir, configPath, listNames, onLau
     const why = check(config, l, { names, recent })
     if (why) return report(l, 'failed', why)
     writeHistory([...recent, Date.now()])
-    const s = buildSpawn(config, l, process.env, envFilter)
+    const prof = config.profiles[l.profile]
     let started
-    try { started = await start(s) } catch (e) { return report(l, 'failed', `開不起來：${e.message}`) }
-    record(l, 'spawned', `pid=${started.pid}`)
+    if (prof.mode === 'background') {
+      if (!startBackground) return report(l, 'failed', '這台機器橋尚未啟用背景夥伴啟動')
+      try { started = await startBackground({ req: l, profile: prof, config }) } catch (e) { return report(l, 'failed', `背景啟動失敗：${e.message}`) }
+    } else {
+      const s = buildSpawn(config, l, process.env, envFilter)
+      try { started = await start(s) } catch (e) { return report(l, 'failed', `開不起來：${e.message}`) }
+    }
+    record(l, 'spawned', `pid=${started?.pid ?? 0}`)
     const t0 = Date.now()
     let unconfirmed = false
     while (Date.now() - t0 < lateMs) {

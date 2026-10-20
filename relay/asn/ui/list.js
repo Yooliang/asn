@@ -14,6 +14,9 @@ import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MOD
 import { chatTabSameZone, closeAllChatTabs, dropInsertBefore, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
 import { FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_LABEL, normalizeFrame, soundChoice, soundFromChoice, soundFromSaved } from './lib/prefs.mjs'
 import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
+import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
+import { bumpRecentCwd, cwdChoices, normalizeLaunchPrefs } from './lib/launch-prefs.mjs'
+import { friendId } from './lib/roster.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
@@ -103,6 +106,145 @@ const rooms = ref([]), roomsErr = ref(false)
 async function refreshRooms() {
   try { rooms.value = groupRows((await invoke('relay_rooms'))?.rooms); roomsErr.value = false } catch { roomsErr.value = true }
 }
+
+// ---------- 開新夥伴 ----------
+const cliTools = ref({})
+const remoteLaunchers = ref({})   // node → launcher 摘要
+const launchPending = ref([])     // 啟動中列
+const launchTrack = ref([])       // { id, node, name, profile } 遠端 launch uuid
+const launchPrefs = reactive(normalizeLaunchPrefs(null))
+const launchCwdText = ref('')
+async function refreshCliTools() {
+  try {
+    const r = await transport.cliDetect()
+    const map = {}
+    for (const t of r?.tools ?? []) map[t.id] = t
+    cliTools.value = map
+  } catch (e) { console.info('[ASN] cli detect failed', e.message) }
+}
+async function refreshLaunchers() {
+  try {
+    const body = await transport.launchers()
+    const map = {}
+    for (const m of body?.machines ?? []) if (m?.node) map[m.node] = m.launcher
+    remoteLaunchers.value = map
+  } catch { /* 非 owner 或後台未就緒 */ }
+}
+async function loadLaunchPrefs() {
+  try {
+    const p = normalizeLaunchPrefs(await transport.launchPrefsGet())
+    Object.assign(launchPrefs, p)
+    launchCwdText.value = (p.cwdAllow.length ? p.cwdAllow : defaultCwdAllowFromCli()).join('\n')
+  } catch { launchCwdText.value = defaultCwdAllowFromCli().join('\n') }
+}
+function defaultCwdAllowFromCli() {
+  return cwdChoices({ allow: [], recent: launchPrefs.recentCwd })
+}
+async function saveLaunchPrefs() {
+  const cwdAllow = launchCwdText.value.split('\n').map(s => s.trim()).filter(Boolean)
+  const prefs = { ...launchPrefs, cwdAllow, maxPerHour: launchPrefs.maxPerHour ?? 6 }
+  try { await transport.launchPrefsSet(prefs) } catch (e) { console.info('[ASN] launch prefs', e.message) }
+}
+function setLaunchCwdText(text) {
+  launchCwdText.value = text
+  launchPrefs.cwdAllow = text.split('\n').map(s => s.trim()).filter(Boolean)
+  void saveLaunchPrefs()
+}
+const launchToolRows = computed(() => MODEL_CATALOG.map(m => modelUiRow(m, cliTools.value[m.toolId ?? m.id])))
+const partnerModels = computed(() => launchToolRows.value)
+function canLaunchOn(nodeKey) {
+  if (nodeKey === info.node) return partnerModels.value.some(m => m.installed)
+  return Boolean(remoteLaunchers.value[nodeKey]?.profiles?.length)
+}
+const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '' })
+const partnerCwdChoices = computed(() => {
+  const allow = partnerDlg.node === info.node
+    ? (launchPrefs.cwdAllow.length ? launchPrefs.cwdAllow : defaultCwdAllowFromCli())
+    : (remoteLaunchers.value[partnerDlg.node]?.cwd_allow ?? [])
+  return cwdChoices({ allow, recent: launchPrefs.recentCwd })
+})
+function pickPartnerModel(m) {
+  if (!m.installed) return
+  partnerDlg.profile = m.profileId
+  partnerDlg.modeLabel = m.modeLabel
+  partnerDlg.name = defaultPartnerName(friends.value, m.profileId)
+}
+function openPartnerDlg(nodeKey) {
+  const devLabel = friends.value.find(f => f.node === nodeKey)?.device ?? nodeKey
+  partnerDlg.open = true
+  partnerDlg.node = nodeKey
+  partnerDlg.deviceLabel = devLabel
+  partnerDlg.error = ''
+  partnerDlg.busy = false
+  partnerDlg.firstMessage = ''
+  const first = partnerModels.value.find(m => m.installed) ?? partnerModels.value[0]
+  if (first) pickPartnerModel(first)
+  const choices = partnerCwdChoices.value
+  partnerDlg.cwd = choices[0] ?? ''
+}
+function closePartnerDlg() { partnerDlg.open = false; partnerDlg.error = '' }
+const buddyMenu = ref('')
+const buddyMenuPos = reactive({ x: 0, y: 0 })
+const buddyMenuNode = ref('')
+function openBuddyMenu(c, e) {
+  buddyMenuPos.x = e?.clientX ?? 0
+  buddyMenuPos.y = e?.clientY ?? 0
+  buddyMenuNode.value = c.node
+  buddyMenu.value = c.node
+}
+const buddyMenuCanLaunch = computed(() => canLaunchOn(buddyMenuNode.value))
+function partnerFromMenu() {
+  const n = buddyMenuNode.value
+  buddyMenu.value = ''
+  if (n) openPartnerDlg(n)
+}
+async function submitPartnerDlg() {
+  partnerDlg.error = ''
+  if (!partnerDlg.name.trim() || !partnerDlg.cwd) { partnerDlg.error = '請填名字與工作資料夾'; return }
+  partnerDlg.busy = true
+  const mode = MODEL_CATALOG.find(m => m.profileId === partnerDlg.profile)?.mode ?? 'window'
+  const pend = pendingFriend({ node: partnerDlg.node, device: partnerDlg.deviceLabel, name: partnerDlg.name.trim(), profileId: partnerDlg.profile, mode })
+  launchPending.value = [...launchPending.value, pend]
+  try {
+    if (partnerDlg.node === info.node) {
+      await transport.partnerLaunchLocal({ profile: partnerDlg.profile, name: partnerDlg.name.trim(), cwd: partnerDlg.cwd })
+    } else {
+      const r = await transport.launch({ node: partnerDlg.node, profile: partnerDlg.profile, name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, first_message: partnerDlg.firstMessage.trim() || null })
+      if (r?.id) launchTrack.value = [...launchTrack.value, { id: r.id, node: partnerDlg.node, name: partnerDlg.name.trim(), profile: partnerDlg.profile }]
+    }
+    Object.assign(launchPrefs, bumpRecentCwd(launchPrefs, partnerDlg.cwd))
+    void saveLaunchPrefs()
+    closePartnerDlg()
+    if (partnerDlg.node === info.node && partnerDlg.firstMessage.trim()) {
+      setTimeout(async () => {
+        const id = friendId(partnerDlg.node, partnerDlg.name.trim())
+        if (core.friends.has(id)) await core.send(id, partnerDlg.firstMessage.trim())
+      }, 8000)
+    }
+  } catch (e) {
+    launchPending.value = launchPending.value.filter(p => p.id !== pend.id)
+    partnerDlg.error = e.message
+    partnerDlg.open = true
+  } finally { partnerDlg.busy = false }
+}
+async function pollLaunchResults() {
+  if (!launchTrack.value.length) return
+  try {
+    const ids = launchTrack.value.map(t => t.id)
+    const body = await transport.launchers(ids)
+    for (const row of body?.launches ?? []) {
+      if (row.status === 'ok' || row.status === 'failed') {
+        launchTrack.value = launchTrack.value.filter(t => t.id !== row.id)
+        if (row.status === 'failed') console.info('[ASN] 開新夥伴失敗', row.detail)
+      }
+    }
+  } catch { /* 略過 */ }
+  launchPending.value = resolvePending(launchPending.value, friends.value)
+}
+void refreshCliTools()
+void refreshLaunchers()
+void loadLaunchPrefs()
+setInterval(() => { void refreshLaunchers(); void pollLaunchResults() }, 15_000)
 // 語音：整合模式的對話分頁用這一份；設定存在 Rust 端的 voice.json（對話視窗也讀同一份）
 const voice = createVoiceUi({ invoke, listen, createMic, createAudio: browserAudio, reactive })
 const voiceCfg = reactive(normalizeCfg(await invoke('voice_cfg_get').catch(() => null)))
@@ -114,6 +256,7 @@ core.on('notify', n => {
 })
 
 async function openChat(id) {
+  if (String(id).startsWith('pending:')) return
   const f = core.friends.get(id); if (!f) return
   core.markRead(id)
   if (ui.mode === 'merged') {   // 整合模式：在右邊開分頁（或切過去），不開新視窗
@@ -207,9 +350,10 @@ const app = createApp({
     watch(dev, d => { if (!normalizeTab(tab.value, d.all.map(x => x.key))) tab.value = d.all[0]?.key ?? '' }, { immediate: true })
     const shown = computed(() => {
       if (!isDevice.value) return []
-      return rosterShownGroups(friends.value, {
+      const base = rosterShownGroups(friends.value, {
         tabDim: dims.tabDim, tabKey: tab.value, groupDim: dims.groupDim, selfNode: info.node, query: query.value, plainText: plain,
       })
+      return injectPendingGroups(base, launchPending.value.filter(p => !tab.value || p.node === tab.value))
     })
     const emptyText = computed(() => (normalizeSearchQuery(query.value) ? '沒有符合的聯絡人。' : conn.value !== 'on' ? '還沒連上收發室。' : '這一頁目前沒有視窗。'))
     const openAd = a => openAdWith(a, url => void invoke('open_url', { url }))
@@ -331,6 +475,9 @@ const app = createApp({
       tab, adI, rooms, roomsErr, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote,
       GUIDES, openedGuide, view, openGuideKey, closeGuideView, showHome,
       selfNode: info.node, emo, initial, openChat, ctl,
+      canLaunchOn, openPartnerDlg, closePartnerDlg, partnerDlg, partnerModels, partnerCwdChoices, pickPartnerModel, submitPartnerDlg,
+      buddyMenu, buddyMenuPos, openBuddyMenu, buddyMenuCanLaunch, partnerFromMenu,
+      launchToolRows, launchPrefs, launchCwdText, saveLaunchPrefs, setLaunchCwdText,
     }
   },
 })
