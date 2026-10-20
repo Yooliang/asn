@@ -3,3 +3,4 @@ target/
 .env
 *.key
 .irori-relay/
+site/shots/

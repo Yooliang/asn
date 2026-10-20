@@ -1,0 +1,114 @@
+/* ASN 官網樣式：懷舊 Aero 藍玻璃風，純 CSS，不載入任何外部資源 */
+:root {
+  --ink: #15324f;
+  --ink-soft: #3f5f80;
+  --glass: rgba(255, 255, 255, .62);
+  --glass-edge: rgba(255, 255, 255, .9);
+  --line: #8fb8dc;
+  --btn-top: #4aa3e6;
+  --btn-bot: #1670c0;
+  --warn: #b7791f;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+body {
+  margin: 0;
+  color: var(--ink);
+  font: 16px/1.75 "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", system-ui, sans-serif;
+  background: linear-gradient(180deg, #bcdcf6 0, #e6f2fc 420px, #f4f9fe 100%) fixed;
+  min-height: 100vh;
+}
+a { color: #0b5fb0; }
+.wrap { width: min(1040px, 100% - 32px); margin: 0 auto; }
+
+/* 頂欄 */
+.top {
+  background: linear-gradient(180deg, rgba(255,255,255,.85), rgba(190,222,248,.8));
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 1px 0 #fff inset, 0 2px 10px rgba(30, 90, 150, .12);
+}
+.top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); font-weight: 700; font-style: italic; letter-spacing: .02em; }
+.brand-mark {
+  width: 34px; height: 34px; border-radius: 10px; flex: none;
+  background: radial-gradient(circle at 35% 30%, #fff 0, #bfe0fa 35%, #3f93d6 100%);
+  border: 1px solid #5a9fd8; box-shadow: 0 1px 3px rgba(20, 80, 140, .35), inset 0 1px 0 #fff;
+  position: relative;
+}
+.brand-mark::before, .brand-mark::after { content: ""; position: absolute; top: 13px; width: 5px; height: 7px; border-radius: 3px; background: #15324f; }
+.brand-mark::before { left: 9px; }
+.brand-mark::after { right: 9px; }
+.nav { display: flex; gap: 18px; font-size: 15px; flex-wrap: wrap; }
+.nav a { text-decoration: none; color: var(--ink-soft); }
+.nav a:hover { color: #0b5fb0; text-decoration: underline; }
+
+/* 玻璃面板 */
+.glass {
+  background: var(--glass);
+  border: 1px solid var(--glass-edge);
+  border-radius: 14px;
+  box-shadow: 0 6px 24px rgba(30, 90, 150, .15), 0 1px 0 #fff inset;
+  backdrop-filter: blur(6px);
+}
+
+/* 首頁 hero */
+.hero { padding: 56px 0 36px; display: grid; grid-template-columns: 1.05fr 1fr; gap: 36px; align-items: center; }
+.hero h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.25; margin: 0 0 14px; }
+.hero h1 small { display: block; font-size: .36em; font-weight: 600; letter-spacing: .14em; color: var(--ink-soft); font-style: italic; margin-bottom: 8px; }
+.lead { font-size: 18px; color: var(--ink-soft); margin: 0 0 22px; }
+.hero-shot { padding: 10px; }
+.hero-shot img { display: block; width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); }
+
+/* 按鈕 */
+.btn {
+  display: inline-block; padding: 10px 26px; border-radius: 8px; border: 1px solid #0f5a9e;
+  background: linear-gradient(180deg, var(--btn-top) 0, var(--btn-top) 48%, var(--btn-bot) 52%, #1a82d4 100%);
+  color: #fff; font-weight: 700; text-decoration: none; font-size: 16px;
+  box-shadow: 0 1px 0 rgba(255,255,255,.55) inset, 0 2px 5px rgba(10, 60, 110, .3);
+  text-shadow: 0 -1px 0 rgba(0, 40, 90, .45);
+}
+.btn[aria-disabled="true"] {
+  background: linear-gradient(180deg, #e8eef4, #cdd7e0); color: #6b7a89; border-color: #aab7c4;
+  box-shadow: none; text-shadow: none; cursor: not-allowed; pointer-events: none;
+}
+
+/* 區塊 */
+section { padding: 36px 0; }
+h2 { font-size: 26px; margin: 0 0 6px; }
+.sub { color: var(--ink-soft); margin: 0 0 22px; }
+.features { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+.feature { padding: 20px 20px 18px; }
+.feature h3 { margin: 0 0 6px; font-size: 18px; }
+.feature p { margin: 0; color: var(--ink-soft); font-size: 15px; }
+.tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 9px; border-radius: 99px; background: #fff4d6; color: var(--warn); border: 1px solid #ecd28f; margin-left: 6px; vertical-align: 2px; white-space: nowrap; }
+
+.shots { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; align-items: start; }
+.shots figure { margin: 0; padding: 10px; }
+.shots img { display: block; max-width: 100%; height: auto; margin: 0 auto; border-radius: 6px; border: 1px solid var(--line); }
+.shots figcaption { text-align: center; font-size: 14px; color: var(--ink-soft); margin-top: 8px; }
+.shots .stack { display: grid; gap: 18px; }
+
+.download { padding: 26px; text-align: center; }
+.download p { margin: 8px 0 16px; color: var(--ink-soft); }
+
+/* 文件頁 */
+.doc { margin: 34px auto 10px; padding: 28px clamp(18px, 4vw, 44px) 34px; }
+.doc h1 { font-size: 30px; margin: 0 0 4px; }
+.doc .meta { color: var(--ink-soft); font-size: 14px; margin: 0 0 20px; }
+.doc h2 { font-size: 20px; margin: 28px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+.doc ul { padding-left: 1.3em; }
+.doc li { margin: 3px 0; }
+.doc table { border-collapse: collapse; width: 100%; font-size: 15px; margin: 8px 0; }
+.doc th, .doc td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+.doc th { background: rgba(156, 199, 236, .35); white-space: nowrap; }
+.tablewrap { overflow-x: auto; }
+
+footer { margin-top: 30px; padding: 22px 0 34px; border-top: 1px solid var(--line); background: rgba(255,255,255,.45); font-size: 14px; color: var(--ink-soft); }
+footer .wrap { display: flex; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; }
+footer a { margin-right: 16px; }
+
+@media (max-width: 760px) {
+  .hero { grid-template-columns: 1fr; padding-top: 32px; gap: 24px; }
+  .shots { grid-template-columns: 1fr; }
+  .nav { gap: 14px; font-size: 14px; }
+}
