@@ -1,12 +1,13 @@
 // ASN 狀態核心（瀏覽器與 node 都能跑）：好友、對話、未讀、收信、寄信、震動。
 // 不碰網路細節：transport 由外面注入（桌面版＝Rust 命令，金鑰留在 Rust；測試＝連本機假 relay）。
-//   transport: { list(), inbox(), ack(ids), send(payload), avatar?(node), setAvatar?(dataUrl|null) }
+//   transport: { list(), inbox(), ack(ids), send(payload), avatar?(node), setAvatar?(dataUrl|null), sendAttachment?(payload) }
 //   store:     { load() → 物件|null, save(物件) }
 //   isChatVisible(id) → Promise<boolean>：該好友的對話視窗是否開著且沒最小化
 import { isAvatarDataUrl } from './avatar.mjs'
 import { buildFriends, cleanPsm, mergeFriends } from './roster.mjs'
 import { routeMail, stubFriend } from './routing.mjs'
 import { hasNudge, hueOf, initial, plain, stripNudge, unwrapShell } from './text.mjs'
+import { noticeOf, expiresAt, fileMimeOf, friendlyPhotoError, normalizePhotos, stripPhotoLines } from './photo.mjs'
 
 export const MAX_BODY = 20000
 const LOG_KEEP = 200
@@ -136,18 +137,21 @@ export class AsnCore {
     const lg = this.#log(r.id)
     const body = unwrapShell(m.body)
     const nudge = hasNudge(body)
-    const text = stripNudge(body)
-    if (text) { lg.push({ k: 'them', text, t, id: m.id }); f.lastAt = t; f.replyTo = m.id }
+    // 照片：信裡的 attachments 整理乾淨（只留白名單欄位），內文開頭給舊版用戶端看的〔照片〕替代文字行不重複顯示
+    const photos = normalizePhotos(m.attachments)
+    const text = stripPhotoLines(stripNudge(body), photos.length)
+    const shown = Boolean(text) || photos.length > 0
+    if (shown) { lg.push({ k: 'them', text, t, id: m.id, ...(photos.length ? { photos } : {}) }); f.lastAt = t; f.replyTo = m.id }
     const visible = await this.isChatVisible(r.id)
     if (nudge) {
       lg.push({ k: 'sys', nudge: true, text: `${plain(f.nick)} 傳送了一個震動。`, t })
-      if (!text && !visible) f.unread++
+      if (!shown && !visible) f.unread++
     }
-    if (text && !visible) f.unread++
+    if (shown && !visible) f.unread++
     this.#scheduleSave()
     this.emit('state')
     this.emit('log', r.id)
-    if (text) this.emit('notify', { kind: 'msg', friend: f, line: plain(text), sound: 'msg', toast: !visible })
+    if (shown) this.emit('notify', { kind: 'msg', friend: f, line: text ? plain(text) : noticeOf(photos), sound: 'msg', toast: !visible })
     if (nudge) this.emit('notify', { kind: 'nudge', friend: f, line: '傳送了一個震動', sound: 'nudge', toast: !visible, shake: visible })
   }
 
@@ -160,6 +164,36 @@ export class AsnCore {
     const payload = { to_node: f.node, to_agent: f.agent || undefined, body: text, reply_to: f.replyTo || undefined, from_agent: this.windowName, expects_reply: true }
     try { await this.transport.send(payload) } catch (e) { return this.#fail(id, e) }
     this.#log(id).push({ k: 'me', text, t: this.now() })
+    f.waiting = true
+    f.replyTo = null
+    f.known = true
+    this.#scheduleSave()
+    this.emit('state')
+    this.emit('log', id)
+    return { ok: true }
+  }
+
+  // 寄照片或檔案（可重用：截圖標註等功能把 Blob 交給 photo-canvas.mjs 的 imageFromBlob／fileFromBlob 再呼叫這個）。item＝{ kind, name, data（base64）, width?, height?, thumb? }，caption＝說明文字（可空）。
+  // 格式與大小由 Rust 端再檢查一次；失敗就在對話裡留一行「沒有傳出去：原因」
+  async sendAttachment(id, photo, caption = "") {
+    const f = this.friends.get(id)
+    if (!f || !photo?.data) return { ok: false, error: '沒有內容或找不到好友' }
+    const cap = String(caption ?? '').trim()
+    if (cap.length > MAX_BODY - 200) return { ok: false, error: `說明文字超過 ${MAX_BODY - 200} 字` }
+    if (typeof this.transport.sendAttachment !== "function") return { ok: false, error: "這個版本不能傳照片或檔案" }
+    const payload = { kind: photo.kind === 'file' ? 'file' : 'image', to_node: f.node, to_agent: f.agent || undefined, reply_to: f.replyTo || undefined, caption: cap, name: photo.name, data: photo.data, width: photo.width, height: photo.height, thumb: photo.thumb || undefined }
+    let r
+    try { r = await this.transport.sendAttachment(payload) } catch (e) {
+      const msg = friendlyPhotoError(e.message)
+      this.#log(id).push({ k: 'sys', text: `沒有傳出去：${msg}`, t: this.now() })
+      this.emit('log', id)
+      return { ok: false, error: msg }
+    }
+    const now = this.now()
+    const isFile = photo.kind === 'file'
+    const mine = { id: r?.attachment_id, kind: isFile ? 'file' : 'image', name: r?.name || photo.name, mime: isFile ? fileMimeOf(r?.name || photo.name) : 'image/webp', bytes: r?.bytes ?? null, width: photo.width ?? null, height: photo.height ?? null, thumb: photo.thumb ?? null, expires_at: expiresAt(now), expired: false }
+    const photos = normalizePhotos([mine])
+    this.#log(id).push({ k: 'me', text: cap, t: now, ...(photos.length ? { photos } : {}) })
     f.waiting = true
     f.replyTo = null
     f.known = true

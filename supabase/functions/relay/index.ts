@@ -7,6 +7,10 @@ import { normalizeRosterAgents } from "../_shared/roster.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
 import * as signal from "../_shared/signal.ts";
 import { handleNodeLaunchAction, LAUNCH_ACTIONS, sanitizeLauncher } from "../_shared/launch.ts";
+import {
+  ACTIONS as ATTACH_ACTIONS, bindAttachments, handleAttachAction, prepareAttachments, type StorageDeps, withAttachments,
+  withRoomAttachments,
+} from "../_shared/attachments.ts";
 import { handleTts, TtsLimiter, ttsVoicesResponse } from "../_shared/tts.ts";
 
 const ttsLimiter = new TtsLimiter();
@@ -48,6 +52,32 @@ const roomDeps = (): RoomDeps => ({
     return !error && data === true;
   },
 });
+
+// 附件放在私有 bucket「attachments」；只有這裡（service role）能簽上傳與下載網址
+const ATTACH_BUCKET = "attachments";
+const storage: StorageDeps = {
+  signUpload: async (path) => {
+    const { data, error } = await db.storage.from(ATTACH_BUCKET).createSignedUploadUrl(path);
+    if (error || !data?.signedUrl) { console.error("signUpload", error); return null; }
+    return data.signedUrl;
+  },
+  info: async (path) => {
+    const { data, error } = await db.storage.from(ATTACH_BUCKET).info(path);
+    if (error || !data) return null;
+    return { size: Number(data.size), mime: String(data.contentType ?? "") };
+  },
+  signDownload: async (path, seconds, filename) => {
+    const { data, error } = await db.storage.from(ATTACH_BUCKET).createSignedUrl(path, seconds, { download: filename });
+    if (error || !data?.signedUrl) { console.error("signDownload", error); return null; }
+    return data.signedUrl;
+  },
+  remove: async (paths) => {
+    const { error } = await db.storage.from(ATTACH_BUCKET).remove(paths);
+    if (error) console.error("storage remove", error);
+    return !error;
+  },
+};
+const rpc = async (fn: string, args: Record<string, unknown>) => await db.rpc(fn, args);
 
 const b64u = (n: number) =>
   btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(n)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -104,6 +134,15 @@ Deno.serve(async (req) => {
   if (aerr) { console.error(aerr); return json(500, { error: "internal" }); }
   if (!nodes || nodes.length === 0) return json(401, { error: "unauthorized" });
   const me = nodes[0] as { id: string; bell_topic: string; role: string; tenant_id: string | null };
+
+  // 附件：要上傳網址、確認上傳、換下載網址、清理（見 _shared/attachments.ts、docs/ATTACHMENTS.md）
+  if (action && ATTACH_ACTIONS.has(action)) {
+    if (action !== "attach_url" && req.method !== "POST") return json(405, { error: "method_not_allowed" });
+    const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
+    const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
+    const r = await handleAttachAction({ rpc, storage }, me, action, params);
+    return json(r.status, r.body);
+  }
 
   if (action === "whoami" && req.method === "GET") {
     return json(200, { node: me.id, bell_topic: me.bell_topic });
@@ -206,6 +245,7 @@ Deno.serve(async (req) => {
   // 視窗自己收信：帶 agent 參數時只看／只 ack 寄給該視窗的信（見 _shared/agent_inbox.ts）；沒帶 agent 的走下面原本的節點信箱
   if (action === "inbox" && req.method === "GET" && url.searchParams.has("agent")) {
     const r = await handleAgentInbox({ rpc: async (fn, args) => await db.rpc(fn, args) }, me, "inbox", url.searchParams.get("agent"));
+    if (r.status === 200) (r.body as { messages: unknown }).messages = await withAttachments({ rpc }, (r.body as { messages: unknown }).messages);
     return json(r.status, r.body);
   }
   if (action === "ack" && req.method === "POST" && url.searchParams.has("agent")) {
@@ -216,7 +256,7 @@ Deno.serve(async (req) => {
   if (action === "inbox" && req.method === "GET") {
     const { data, error } = await db.rpc("irori_relay_inbox", { p_node: me.id });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
-    return json(200, { messages: data });
+    return json(200, { messages: await withAttachments({ rpc }, data) });
   }
   if (action === "ack" && req.method === "POST") {
     const b = await req.json().catch(() => null);
@@ -247,6 +287,9 @@ Deno.serve(async (req) => {
     // expects_reply：寄件人明說要不要等回信（選填 boolean，給了就存；型別不對回 400）。沒給就不帶這個參數，信的欄位是 null（舊寄件工具）
     const er = expectsReplyArgs(b.expects_reply);
     if (!er) return json(400, { error: "bad_expects_reply" });
+    // 附件（選填 attachment_ids）：寄出前確認都是自己上傳、已確認、沒綁過的；寄出後綁到這封信，再敲門鈴（收信端一響就能看到附件）
+    const att = await prepareAttachments({ rpc }, me.id, b.attachment_ids);
+    if (!att.ok) return json(att.reply.status, att.reply.body);
     const { data, error } = await db.rpc("irori_relay_send", {
       p_from_node: me.id, // from_node in the body is ignored on purpose
       p_from_agent: str(b.from_agent),
@@ -259,6 +302,7 @@ Deno.serve(async (req) => {
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     if (data?.error === "rate_limited") return json(429, { error: "rate_limited" });
     if (data?.error) return json(400, { error: data.error });
+    await bindAttachments({ rpc }, me.id, att.ids, { messageId: data.id });
     await ring(data.bell_topic);
     return json(200, { id: data.id });
   }
@@ -274,7 +318,19 @@ Deno.serve(async (req) => {
     const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
     const deps = roomDeps();
+    // 群組發言帶附件：寄出前先驗；訊息寫入後、敲門鈴前綁到這則訊息
+    let attIds: string[] = [];
+    if (action === "room_post") {
+      const att = await prepareAttachments({ rpc }, me.id, params.attachment_ids);
+      if (!att.ok) return json(att.reply.status, att.reply.body);
+      attIds = att.ids;
+      const roomId = typeof params.room === "string" ? params.room : "";
+      if (attIds.length) deps.beforeRing = async (seq) => { await bindAttachments({ rpc }, me.id, attIds, { room: roomId, seq }); };
+    }
     const r = await handleNodeRoomAction(deps, me, action, params);
+    if (action === "room_read" && r.status === 200 && typeof params.room === "string") {
+      r.body.messages = await withRoomAttachments({ rpc }, params.room, r.body.messages);
+    }
     return json(r.status, r.body);
   }
   return json(404, { error: "not_found" });

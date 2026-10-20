@@ -5,6 +5,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { bodyWithNotes } from './attach-format.mjs'
 
 export const ROOM_HINT = '（群組訊息；只有被點名或主人／希緒發問才需要回，回覆會經收發室貼回群組；不需要回就不要回）'
 export const NO_REPLY_RE = /（不需回覆）|\[no-reply\]/i
@@ -21,7 +22,7 @@ export function displayFrom(from) {
 export function roomHeader(room, msg) {
   return `[群組 ${room.name}] trust=${msg.trust ?? ''} from=${displayFrom(msg.from)} #${msg.seq}`
 }
-export const roomText = (room, msg) => `${roomHeader(room, msg)}\n${ROOM_HINT}\n${msg.body ?? ''}`
+export const roomText = (room, msg) => `${roomHeader(room, msg)}\n${ROOM_HINT}\n${bodyWithNotes(msg.body ?? '', msg.attachments)}`
 
 // 轉交點名訊息時附的上下文：前面最近幾則（舊→新，每則一行、過長截斷）＋怎麼往回翻
 export const CONTEXT_COUNT = 5

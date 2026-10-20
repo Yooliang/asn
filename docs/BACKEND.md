@@ -42,6 +42,12 @@ supabase/
 
 - `relay-purge-90d`（pg_cron）：每天 03:17（UTC）刪除超過 90 天的 `messages` 與 `room_messages`；群組置頂不刪。migration `20261020000400`。
 
+- `relay-purge-attachments`（pg_cron）：每天 03:27（UTC）把到期（30 天）與放棄的上傳標成 `expired` 並清掉縮圖；實體檔案由函式的 `attach_sweep` 經 Storage API 刪除。migration `20261020000500`。
+
+### 附件（照片與檔案）
+
+私有 Storage bucket `attachments`＋表 `relay.attachments`；動作 `attach_init`、`attach_commit`、`attach_url`、`attach_sweep`，`send`／`room_post` 可帶 `attachment_ids`，`inbox`／`room_read` 回的信多一個 `attachments` 欄位。設計、授權、型別白名單與部署順序見 [ATTACHMENTS.md](ATTACHMENTS.md)。
+
 ### 門鈴
 
 函式在寫入訊息後，用服務金鑰呼叫 Realtime 的 broadcast REST（`/realtime/v1/api/broadcast`，event `bell`，非私有頻道，payload 為空）。新專案不需額外設定。用戶端訂閱時要用**新專案的 anon（公開）金鑰**。
