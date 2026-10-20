@@ -17,6 +17,12 @@ export const transport = {
   send: payload => invoke('relay_send', { payload }),
   avatar: node => invoke('relay_avatar', { node }),                 // 某台設備上傳的大頭貼（按需取）
   setAvatar: avatar => invoke('relay_set_avatar', { avatar }),      // 上傳自己這台的大頭貼；null＝移除
+  sendAttachment: payload => invoke('relay_send_attachment', { payload }),   // 寄照片或檔案：Rust 端檢查、要上傳網址、上傳、確認、寄信
+}
+// 照片放大與另存（對話視窗各自呼叫，不經樞紐）：Rust 端換短效下載網址、下載、檢查
+export const photoApi = {
+  fetch: id => invoke('relay_attachment_fetch', { id }),   // → { name, mime, data_url }
+  save: id => invoke('relay_attachment_save', { id }),     // → 存檔路徑（下載\ASN）
 }
 export const store = name => ({
   load: async () => { const s = await invoke('store_load', { name }); try { return s ? JSON.parse(s) : null } catch { return null } },

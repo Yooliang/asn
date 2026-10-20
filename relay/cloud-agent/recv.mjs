@@ -9,6 +9,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createCore } from '../machine/relay-core.mjs'   // 沿用 API 呼叫與門鈴，不複製協定
 import { createLog } from '../machine/safe-log.mjs'
+import { normalizeAttachments } from '../machine/attach-format.mjs'
 import { NO_KEY_MSG, readAnonKey, readKey, resolveCloudAgents, resolveConfig, rosterScanEnvFrom } from './config.mjs'
 import { createPullWithRetry, parsePullBackoffMs } from '../machine/pull-retry.mjs'
 import { acquirePidLock, appendLineDurable, ensureDir, readJsonl } from './lib.mjs'
@@ -18,6 +19,8 @@ const recordOf = m => ({
   reply_to: m.reply_to ?? null, created_at: m.created_at ?? null,
   expects_reply: typeof m.expects_reply === 'boolean' ? m.expects_reply : null,   // true＝在等回信、false＝只是告知、null＝舊信沒說
   body: m.body, received_at: new Date().toISOString(),
+  // 附件（照片）：只存編號、檔名、型別、大小、尺寸（不存縮圖）；沒附件的信不加這個欄位。顯示與下載指令見 inbox.mjs、attach.mjs
+  ...(normalizeAttachments(m.attachments).length ? { attachments: normalizeAttachments(m.attachments) } : {}),
 })
 
 // 收信核心（可單獨測試）：api(action, {method, body}) 是 relay-core 的 api

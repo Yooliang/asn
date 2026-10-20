@@ -10,6 +10,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Fail, resolveCloudAgents, resolveConfig, rosterScanEnvFrom } from './config.mjs'
 import { appendLineDurable, ensureDir, readJsonl } from './lib.mjs'
+import { bodyWithNotes } from '../machine/attach-format.mjs'
+import { cloudCmd } from './attach.mjs'
 
 const USAGE = `用法：
   node inbox.mjs [--unread] [--all] [--json] [--agent <名>]
@@ -34,7 +36,7 @@ ${USAGE}`) }
 
 const fmt = m => {
   const reply = m.expects_reply === true ? '要回信' : m.expects_reply === false ? '只是告知' : '未說明'
-  return `[${m.id}] ${m.created_at ?? ''} to=${m.to_agent || '（未指定）'} from=${m.from_node}${m.from_agent ? '/' + m.from_agent : ''} (${reply})${m.reply_to ? ` reply_to=${m.reply_to}` : ''}\n${m.body}\n`
+  return `[${m.id}] ${m.created_at ?? ''} to=${m.to_agent || '（未指定）'} from=${m.from_node}${m.from_agent ? '/' + m.from_agent : ''} (${reply})${m.reply_to ? ` reply_to=${m.reply_to}` : ''}\n${bodyWithNotes(m.body, m.attachments, cloudCmd())}\n`   // 照片：內文後面多一行「〔照片〕檔名＋下載指令」（外部資料，同內文）
 }
 
 export async function main(argv, env = process.env, out = s => process.stdout.write(s + '\n')) {

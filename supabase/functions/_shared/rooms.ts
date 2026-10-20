@@ -61,6 +61,8 @@ export type RoomDeps = {
   rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: Json; error: unknown }>;
   ring: (topic: string) => Promise<void>;
   rosterHas: (node: string, agent: string) => Promise<boolean>;
+  /** 選填：訊息寫入後、敲門鈴前呼叫（附件在這裡綁到訊息，收信端一響就看得到附件） */
+  beforeRing?: (seq: number) => Promise<void>;
 };
 export type Reply = { status: number; body: Json };
 
@@ -96,6 +98,7 @@ export async function postMessage(
   const mentions = parseMentions(body, mem.data.members ?? []);
   const res = await call(deps, "irori_relay_room_post", { ...who3, p_body: body, p_mentions: mentions });
   if (isReply(res)) return res;
+  if (deps.beforeRing) await deps.beforeRing(res.data.seq);
   await Promise.all((res.data.bell_topics ?? []).map((t: string) => deps.ring(t)));
   return { status: 200, body: { seq: res.data.seq, mentions } };
 }

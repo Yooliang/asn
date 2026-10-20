@@ -13,6 +13,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { BASE_URL, Fail, HOME_DIR, alivePid, findCaller, machineNode, readMachineKey } from './identity.mjs'
 import { createCore } from './relay-core.mjs'
+import { bodyWithNotes, normalizeAttachments } from './attach-format.mjs'
 import { createPullWithRetry, parsePullBackoffMs } from './pull-retry.mjs'
 import { HEARTBEAT_MS, clearHeartbeat, readHeartbeat, selfRecvAlive, writeHeartbeat } from './self-recv.mjs'
 
@@ -34,12 +35,17 @@ export function parseArgs(argv) {
   return a
 }
 
-export const toLine = m => JSON.stringify({
-  id: m.id, trust: m.trust, from_node: m.from_node, from_agent: m.from_agent ?? null, to_agent: m.to_agent ?? null,
-  reply_to: m.reply_to ?? null, created_at: m.created_at ?? null,
-  expects_reply: typeof m.expects_reply === 'boolean' ? m.expects_reply : null,   // 寄件人明說要不要回信：true 要回、false 只是告知、null＝舊信沒說
-  body: m.body,
-})
+// 有附件（照片）時：body 後面多一行「〔照片〕檔名（…）下載：node "…/attach.mjs" --id <編號>」（外部資料，同內文），另有 attachments 欄位（不含縮圖）；沒附件的信完全不變
+export const toLine = m => {
+  const atts = normalizeAttachments(m.attachments)
+  return JSON.stringify({
+    id: m.id, trust: m.trust, from_node: m.from_node, from_agent: m.from_agent ?? null, to_agent: m.to_agent ?? null,
+    reply_to: m.reply_to ?? null, created_at: m.created_at ?? null,
+    expects_reply: typeof m.expects_reply === 'boolean' ? m.expects_reply : null,   // 寄件人明說要不要回信：true 要回、false 只是告知、null＝舊信沒說
+    body: atts.length ? bodyWithNotes(m.body, atts) : m.body,
+    ...(atts.length ? { attachments: atts } : {}),
+  })
+}
 
 export async function main(argv, out = line => process.stdout.write(line + '\n')) {
   const a = parseArgs(argv)

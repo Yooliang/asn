@@ -10,7 +10,7 @@ import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatar
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, closeTab, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, openTab, switchMode, tabVisible, toggleCollapsed } from './lib/merge.mjs'
 import { FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_LABEL, normalizeFrame, soundChoice, soundFromChoice, soundFromSaved } from './lib/prefs.mjs'
-import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, resizeFrom, store, transport } from './lib/tauri.mjs'
+import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, store, transport } from './lib/tauri.mjs'
 
 const { createApp, reactive, ref, computed, watch } = Vue
 const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯示為離線' }
@@ -121,9 +121,11 @@ await listen('asn:cmd', async c => {
   else if (c.op === 'dp') ui.collapsed = toggleCollapsed(ui.collapsed)
   else if (c.op === 'send') { const r = await core.send(c.id, c.text); if (!r.ok) console.info('[ASN] send failed', r.error) }
   else if (c.op === 'nudge') await core.nudge(c.id)
+  else if (c.op === 'attach') await sendAttachTo(c.id, c.photo, c.caption)
 })
 const sendTo = async (id, text) => { const r = await core.send(id, text); if (!r.ok) console.info('[ASN] send failed', r.error) }
 const nudgeTo = id => core.nudge(id)
+const sendAttachTo = async (id, item, caption) => { const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
 const activateTab = id => { ui.active = id; Object.assign(ui, hideGuide(ui)); core.markRead(id); sync() }
 const closeChatTab = id => { Object.assign(ui, closeTab(ui, id)); if (ui.active) core.markRead(ui.active); sync() }
 const toggleDp = () => { ui.collapsed = toggleCollapsed(ui.collapsed) }
@@ -235,7 +237,7 @@ const app = createApp({
     return {
       frame, FRAMES, FRAME_LABEL, setFrame, SOUND_CHOICES, SOUND_LABEL, soundChoice, soundFromChoice, RESIZE_DIRS, resizeFrom, avMenu,
       avOf, meAv, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar,
-      ui, MODES, MODE_LABEL, DP_MODES, DP_LABEL, BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, normalizeDpMode, normalizeBubble, setMode, mergedTabs, logs, sendTo, nudgeTo, activateTab, closeChatTab, toggleDp, plain,
+      ui, MODES, MODE_LABEL, DP_MODES, DP_LABEL, BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, normalizeDpMode, normalizeBubble, setMode, mergedTabs, logs, sendTo, nudgeTo, sendAttachTo, photoApi, activateTab, closeChatTab, toggleDp, plain,
       STATUS, CONN_LABEL, FIXED_TABS, ADS, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, soundOn, friends, conn, shown, query, collapsed, nickErr, commitNick,
       tab, adI, rooms, roomsErr, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote,
       GUIDES, openedGuide, view, openGuideKey, closeGuideView, showHome,

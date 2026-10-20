@@ -1,5 +1,6 @@
 //! ASN 即時通（Tauri 2）：金鑰、anon 金鑰、收發室 HTTP／WebSocket、心跳檔、設定與對話存檔都在 Rust 端；
 //! 前端（ui/）只拿得到「信件與名單」，拿不到任何金鑰。
+mod attach;
 mod avatar;
 mod bell;
 mod heartbeat;
@@ -139,6 +140,32 @@ async fn relay_send(app: State<'_, App>, payload: Value) -> Result<Value, String
     relay_of(&app)?.send(&payload).await
 }
 
+/// 寄照片：前端已壓縮成 webp；格式與大小在 attach.rs 檢查，通過才依序要上傳網址、上傳、確認、寄信（金鑰只在這裡）
+#[tauri::command]
+async fn relay_send_attachment(app: State<'_, App>, payload: Value) -> Result<Value, String> {
+    let r = relay_of(&app)?;
+    attach::send_attachment(&r, &reqwest::Client::new(), &payload).await
+}
+
+/// 放大看：換短效下載網址、下載、檢查，回前端 <img> 能直接用的 data URL（只有寄件人與收件人換得到網址）
+#[tauri::command]
+async fn relay_attachment_fetch(app: State<'_, App>, id: String) -> Result<Value, String> {
+    let r = relay_of(&app)?;
+    let d = attach::download(&r, &reqwest::Client::new(), &id).await?;
+    if d.mime != "image/webp" {
+        return Err("這不是圖片，請改用「另存」".into());
+    }
+    Ok(serde_json::json!({ "name": d.name, "mime": d.mime, "data_url": attach::data_url(&d.bytes) }))
+}
+
+/// 另存：存到「下載\ASN」資料夾（不覆蓋同名檔），回存檔路徑
+#[tauri::command]
+async fn relay_attachment_save(app: State<'_, App>, id: String) -> Result<String, String> {
+    let dir = identity::home_dir().join("Downloads").join("ASN");
+    let r = relay_of(&app)?;
+    attach::save(&r, &reqwest::Client::new(), &id, &dir).await.map(|p| p.display().to_string())
+}
+
 /// 改暱稱＝改對外名字（驗證在 names::validate_name；不合法就回錯誤字串，介面還原並提示）
 #[tauri::command]
 fn set_window_name(app: State<'_, App>, name: String) -> Result<String, String> {
@@ -228,7 +255,7 @@ pub fn run() {
         .manage(wins::Slots::default())
         .manage(wins::Frame::default())
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_avatar, relay_set_avatar, relay_rooms, open_url, set_window_name, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_avatar, relay_set_avatar, relay_rooms, open_url, set_window_name, store_load, store_save, quit_app,
             wins::open_chat, wins::chat_visible, wins::close_chats, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot,
         ])
         .setup(move |app| {

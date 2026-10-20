@@ -347,3 +347,26 @@ test('bridge: 逾時通知 30 分鐘內同寄件人＋同收件視窗只報一�
     assert.equal(noticesOf(st2).length, 2)
   } finally { await st2.close() }
 })
+
+// 照片（附件）：橋把信轉給視窗時，內文後面多一行「〔照片〕檔名＋下載指令」，和內文一起進外部資料區塊；沒附件的信不變
+test('bridge: 信帶附件 → 轉給視窗的文字多一行〔照片〕提示（替代文字行不重複、縮圖不轉交）；沒附件的信原樣', async () => {
+  const att = { id: uid(0x50), kind: 'image', name: 'cat.webp', mime: 'image/webp', bytes: 183422, width: 1536, height: 2048, thumb: 'data:image/webp;base64,SECRETTHUMB', expires_at: 'x', expired: false }
+  const st = await fakeServer({ inbox: [mail(1, { body: '〔照片〕cat.webp\n看這隻', attachments: [att], expects_reply: false }), mail(2, { expects_reply: false })] })
+  let rec
+  try {
+    await runBridge({
+      script: 'bridge.mjs', st, setup: mainSetup(SESSIONS), env: { IRORI_RELAY_DEFAULT_AGENT: 'T-最近的' },
+      until: ({ home }) => (rec = forwarded(home)).length >= 2,
+    })
+    const withPhoto = rec.find(r => r.text.includes('看這隻')).text
+    // 轉給視窗的是 [BRIDGE-FORWARD …] 包著 <<<MAIL … MAIL>>>；來信抬頭、內文、〔照片〕提示都在這個外部資料區塊裡面
+    const block = t => t.slice(t.indexOf('<<<MAIL\n') + 8, t.lastIndexOf('\nMAIL>>>')).split('\n')
+    const lines = block(withPhoto)
+    assert.match(lines[0], /^\[RELAY 來信\]/)
+    assert.equal(lines[1], '看這隻')
+    assert.match(lines[2], new RegExp(`^〔照片〕cat\\.webp（image/webp，179 KB，1536×2048）下載：node ".*attach\\.mjs" --id ${att.id}$`))
+    assert.equal(lines.length, 3)
+    assert.doesNotMatch(withPhoto, /SECRETTHUMB/)
+    assert.equal(block(rec.find(r => r.text.includes('內文-2')).text).length, 2, '沒附件的信：抬頭＋內文，沒有多餘的行')
+  } finally { await st.close() }
+})

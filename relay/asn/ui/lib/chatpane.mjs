@@ -2,6 +2,8 @@
 // 只顯示、只發事件（send／nudge／toggle-dp），不碰網路與 Tauri；信件內文與名稱一律先 emo()（跳脫）才進 v-html。
 import { EMO, emo, fmt, fmtDate, initial, plain } from './text.mjs'
 import { foldArrow, hasSideCol, isCollapsed, msgLayout, paneClasses, sideOf } from './merge.mjs'
+import { FILE_ACCEPT, formatBytes, photoExpired, photoTitle } from './photo.mjs'
+import { attachmentFromFile } from './photo-canvas.mjs'
 
 const { ref, computed, watch, nextTick, onMounted } = Vue
 const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯示為離線' }
@@ -19,8 +21,9 @@ export const ChatPane = {
     bubble: { type: String, default: 'none' },     // 文字底色：none／color／auto
     dpCollapsed: { type: Boolean, default: false },  // 側欄收合（只對 left／right 有意義）
     active: { type: Boolean, default: true },      // 整合模式下只有目前分頁是 true；變成 true 時捲到底並聚焦輸入框
+    photoApi: { type: Object, default: null },     // photoApi.fetch 回 {data_url}、photoApi.save 回路徑：放大看與另存（Rust 端，金鑰不在前端）；沒給就不能放大
   },
-  emits: ['send', 'nudge', 'toggle-dp'],
+  emits: ['send', 'nudge', 'toggle-dp', 'attach'],
   setup(props, { emit }) {
     const draft = ref(''), pickerOpen = ref(false), nudgeCooling = ref(false)
     const msgsEl = ref(null), composeEl = ref(null)
@@ -43,13 +46,57 @@ export const ChatPane = {
       nudgeCooling.value = true; setTimeout(() => { nudgeCooling.value = false }, 2500)
       emit('nudge')
     }
+    // ---- 照片：選圖／貼上 → 前端壓縮（長邊 2048、webp、≤ 5 MB）→ 發 photo 事件（樞紐經 Rust 上傳寄出）；輸入框裡的字當說明 ----
+    const fileEl = ref(null), photoBusy = ref(false), photoMsg = ref('')
+    async function sendFile(file) {
+      if (!file || photoBusy.value) return
+      photoBusy.value = true; photoMsg.value = '處理中…'
+      try {
+        const photo = await attachmentFromFile(file)
+        const caption = draft.value.trim()
+        emit('attach', photo, caption)
+        draft.value = ''; pickerOpen.value = false; photoMsg.value = ''
+      } catch (e) { photoMsg.value = e.message } finally { photoBusy.value = false }
+    }
+    function pickPhoto(ev) { const f = ev.target.files && ev.target.files[0]; ev.target.value = ''; void sendFile(f) }
+    function onPaste(ev) {
+      const item = [...(ev.clipboardData?.items ?? [])].find(i => i.kind === 'file' && /^image\//.test(i.type))
+      if (item) { ev.preventDefault(); void sendFile(item.getAsFile()) }
+    }
+    // ---- 放大看：點縮圖才向收發室換下載網址（Rust 端）；可另存到「下載\ASN」 ----
+    const viewer = ref(null)
+    const expired = p => photoExpired(p)
+    // 一般檔案不預覽：點了就下載並存到「下載\ASN」，結果顯示在底下那一行
+    async function saveFile(p) {
+      photoMsg.value = '下載中…'
+      try { photoMsg.value = `已存到：${await props.photoApi.save(p.id)}` } catch (e) { photoMsg.value = e.message }
+    }
+    async function openPhoto(p) {
+      if (!props.photoApi || photoExpired(p)) return
+      if (p.kind === 'file') return saveFile(p)
+      viewer.value = { id: p.id, title: photoTitle(p), thumb: p.thumb, src: '', msg: '載入中…', busy: false }
+      try {
+        const r = await props.photoApi.fetch(p.id)
+        if (viewer.value && viewer.value.id === p.id) { viewer.value.src = r.data_url; viewer.value.msg = '' }
+      } catch (e) { if (viewer.value && viewer.value.id === p.id) viewer.value.msg = e.message }
+    }
+    async function saveViewer() {
+      const v = viewer.value; if (!v || v.busy || !v.src) return
+      v.busy = true
+      try { v.msg = `已存到：${await props.photoApi.save(v.id)}` } catch (e) { v.msg = e.message } finally { v.busy = false }
+    }
+    const closeViewer = () => { viewer.value = null }
     function insertEmo(code) {
       draft.value = (draft.value ? draft.value + ' ' : '') + code
       pickerOpen.value = false
       nextTick(() => composeEl.value && composeEl.value.focus())
     }
-    onMounted(() => { scrollDown(); if (props.active) composeEl.value && composeEl.value.focus() })
-    return { STATUS, EMO, sideCol, collapsed, classes, lay, arrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo }
+    onMounted(() => {
+      scrollDown(); if (props.active) composeEl.value && composeEl.value.focus()
+      window.addEventListener('keydown', e => { if (e.key === 'Escape' && viewer.value) closeViewer() })
+    })
+    const docEl = ref(null)
+    return { docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, collapsed, classes, lay, arrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, photoBusy, photoMsg, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -70,7 +117,19 @@ export const ChatPane = {
             <div class="m-av" v-if="lay(m.k).avatar"><div class="dp xs" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span><img :src="friendAv" alt=""></span></div></div>
             <div class="m-main">
               <div class="who">{{ m.k === 'me' ? plain(me.nick) : plain(friend.nick) }} 說：<time>{{ fmt(m.t) }}</time></div>
-              <div class="m-body" :class="'tone-' + lay(m.k).tone" v-html="emo(m.text)"></div>
+              <div class="m-body" :class="'tone-' + lay(m.k).tone" v-if="m.text" v-html="emo(m.text)"></div>
+              <div class="photos" v-if="m.photos && m.photos.length">
+                <template v-for="p in m.photos" :key="p.id">
+                  <button v-if="p.kind === 'file'" type="button" class="filecard" :class="{ gone: expired(p) }" :title="photoTitle(p)" :aria-label="'檔案：' + photoTitle(p) + (expired(p) ? '（已過期）' : '，點一下下載並另存')" :disabled="expired(p) || !photoApi" @click="openPhoto(p)">
+                    <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M6 2.5h8.5L19 7v14.5H6z" fill="#fff" stroke="#4a5d73" stroke-width="1.4" stroke-linejoin="round"/><path d="M14.5 2.5V7H19" fill="none" stroke="#4a5d73" stroke-width="1.4" stroke-linejoin="round"/></svg>
+                    <span class="fc-text"><span class="fc-name">{{ p.name }}</span><span class="fc-sub">{{ expired(p) ? '已過期，檔案已刪除' : formatBytes(p.bytes) + '　點一下下載並另存' }}</span></span>
+                  </button>
+                  <button v-else type="button" class="photo" :class="{ gone: expired(p) }" :title="photoTitle(p)" :aria-label="'照片：' + photoTitle(p)" :disabled="expired(p) || !photoApi" @click="openPhoto(p)">
+                    <img v-if="p.thumb && !expired(p)" :src="p.thumb" alt="">
+                    <span v-else class="photo-ph">{{ expired(p) ? '照片已過期' : '照片' }}</span>
+                  </button>
+                </template>
+              </div>
             </div>
           </div>
         </template>
@@ -93,12 +152,20 @@ export const ChatPane = {
         <button class="tool icon" type="button" @click="nudge" :disabled="nudgeCooling" aria-label="傳送震動" title="傳送震動">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="8.2" y="4.5" width="7.6" height="15" rx="1.8" fill="#dfeaf6" stroke="#4a5d73" stroke-width="1.4"/><circle cx="12" cy="16.6" r="1" fill="#4a5d73"/><path d="M4.6 8.5l-2 3.5 2 3.5M19.4 8.5l2 3.5-2 3.5" fill="none" stroke="#d9302b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
+        <button class="tool icon" type="button" @click="fileEl && fileEl.click()" :disabled="photoBusy" aria-label="傳照片" title="傳照片（也可以直接貼上圖片）">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" fill="#e8f3ff" stroke="#4a5d73" stroke-width="1.4"/><circle cx="8.5" cy="10" r="1.7" fill="#f2b632"/><path d="M4.5 17l4.6-4.4 3.2 3 2.6-2.4 4.6 3.8" fill="none" stroke="#2f7d3c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <input ref="fileEl" type="file" accept="image/*" hidden @change="pickPhoto" aria-hidden="true" tabindex="-1">
+        <button class="tool icon" type="button" @click="docEl && docEl.click()" :disabled="photoBusy" aria-label="傳送檔案" title="傳送檔案（pdf、txt、md、json、csv、zip、docx、xlsx、pptx，單檔 25 MB 內）">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 2.5h8.5L19 7v14.5H6z" fill="#fff" stroke="#4a5d73" stroke-width="1.4" stroke-linejoin="round"/><path d="M14.5 2.5V7H19" fill="none" stroke="#4a5d73" stroke-width="1.4" stroke-linejoin="round"/><path d="M9 12h7M9 15.5h7" stroke="#2f7d3c" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+        <input ref="docEl" type="file" :accept="FILE_ACCEPT + ',image/*'" hidden @change="pickPhoto" aria-hidden="true" tabindex="-1">
         <div class="picker" v-if="pickerOpen" role="menu">
           <button v-for="[code, icon] in EMO" :key="code" type="button" :title="code" @click="insertEmo(code)" role="menuitem">{{ icon }}</button>
         </div>
       </div>
       <form class="composer" @submit.prevent="send">
-        <textarea ref="composeEl" v-model="draft" @keydown.enter.exact.prevent="send" placeholder="輸入訊息，Enter 傳送，Shift+Enter 換行" aria-label="輸入訊息"></textarea>
+        <textarea ref="composeEl" v-model="draft" @keydown.enter.exact.prevent="send" @paste="onPaste" placeholder="輸入訊息，Enter 傳送，Shift+Enter 換行" aria-label="輸入訊息"></textarea>
         <button class="aero-btn" type="submit" :disabled="!draft.trim()">傳送</button>
       </form>
     </div>
@@ -108,8 +175,21 @@ export const ChatPane = {
     </div>
   </div>
   <div class="typing">
-    <template v-if="friend.waiting">✎ 已送出，等對方回信…</template>
+    <template v-if="photoMsg">{{ photoMsg }}</template>
+    <template v-else-if="friend.waiting">✎ 已送出，等對方回信…</template>
     <template v-else-if="friend.lastAt">上次接收訊息是 {{ fmtDate(friend.lastAt) }}</template>
+  </div>
+  <div class="photo-viewer" v-if="viewer" @click.self="closeViewer" @keydown.esc="closeViewer" role="dialog" aria-modal="true" aria-label="放大看照片">
+    <div class="pv-bar">
+      <span class="pv-name">{{ viewer.title }}</span>
+      <button class="aero-btn" type="button" @click="saveViewer" :disabled="viewer.busy || !viewer.src">另存</button>
+      <button class="aero-btn" type="button" @click="closeViewer">關閉</button>
+    </div>
+    <div class="pv-body" @click.self="closeViewer">
+      <img v-if="viewer.src" :src="viewer.src" :alt="viewer.title">
+      <img v-else-if="viewer.thumb" class="pv-thumb" :src="viewer.thumb" alt="">
+      <div class="pv-msg" v-if="viewer.msg" role="status">{{ viewer.msg }}</div>
+    </div>
   </div>
 </div>
 <div class="pane" v-else><div class="empty-chat">找不到這位朋友。</div></div>`,

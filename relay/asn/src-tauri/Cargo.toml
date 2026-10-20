@@ -20,6 +20,7 @@ tokio = { version = "1", features = ["time", "macros", "rt", "process"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+base64 = "0.22"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading"] }
