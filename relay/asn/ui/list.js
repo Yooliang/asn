@@ -11,7 +11,7 @@ import { ChatPane } from './lib/chatpane.mjs'
 import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatarFile, selfAvatarSrc } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, switchMode, tabVisible, toggleCollapsed } from './lib/merge.mjs'
-import { chatTabSameZone, closeAllChatTabs, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
+import { chatTabSameZone, closeAllChatTabs, dropInsertBefore, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
 import { FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_LABEL, normalizeFrame, soundChoice, soundFromChoice, soundFromSaved } from './lib/prefs.mjs'
 import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, store, transport } from './lib/tauri.mjs'
 import { createMic } from './lib/mic.mjs'
@@ -262,11 +262,11 @@ const app = createApp({
     const menuTogglePin = () => runTabMenu(id => { const r = toggleChatPin(ui, id, ui.pinnedChat); ui.pinnedChat = r.pinned; ui.tabs = r.tabs })
     const isChatTabPinned = id => isPinned(id, ui.pinnedChat)
     const tabDragId = ref('')
-    const tabDropBefore = ref('')
-    const clearTabDrag = () => { tabDragId.value = ''; tabDropBefore.value = '' }
+    const tabDrop = reactive({ over: '', after: false })   // 拖到哪個分頁上、左半還是右半（右半＝插在它後面，才放得到最後一個）
+    const clearTabDrag = () => { tabDragId.value = ''; tabDrop.over = ''; tabDrop.after = false }
     const onTabDragStart = (id, e) => {
       tabDragId.value = id
-      tabDropBefore.value = ''
+      tabDrop.over = ''
       e.dataTransfer.effectAllowed = 'move'
       e.dataTransfer.setData('text/plain', id)
     }
@@ -280,7 +280,9 @@ const app = createApp({
       }
       e.preventDefault()
       e.dataTransfer.dropEffect = 'move'
-      tabDropBefore.value = beforeId
+      const r = e.currentTarget.getBoundingClientRect()
+      tabDrop.over = beforeId
+      tabDrop.after = e.clientX > r.left + r.width / 2
     }
     const onTabDrop = (beforeId, e) => {
       e.preventDefault()
@@ -289,14 +291,15 @@ const app = createApp({
         clearTabDrag()
         return
       }
-      const r = moveChatTab(ui.tabs, ui.pinnedChat, dragId, beforeId)
+      const r = moveChatTab(ui.tabs, ui.pinnedChat, dragId, dropInsertBefore(ui.tabs, ui.pinnedChat, beforeId, tabDrop.over === beforeId && tabDrop.after))
       ui.pinnedChat = r.pinned
       ui.tabs = r.tabs
       clearTabDrag()
     }
     const tabDragClass = id => ({
       'tab-dragging': tabDragId.value === id,
-      'tab-drop-before': tabDropBefore.value === id,
+      'tab-drop-before': tabDrop.over === id && !tabDrop.after,
+      'tab-drop-after': tabDrop.over === id && tabDrop.after,
     })
     // 設定頁「語音」：改了就寫回 Rust 端（驗證在那裡；失敗就還原成存檔的值並提示）
     const ttsVoices = ref({ enabled: true, voices: [], default: '' }), sttSt = ref(null), voiceMsg = ref('')

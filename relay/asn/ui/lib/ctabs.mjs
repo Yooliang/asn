@@ -134,3 +134,16 @@ export function moveChatTab(tabs, pinned, dragId, insertBeforeId) {
   const nextNormal = reorderList(normal, dragId, insertBeforeId)
   return { pinned: pin, tabs: [...head, ...nextNormal] }
 }
+
+/**
+ * 拖到某個分頁上時要插在哪裡：滑鼠在左半＝插在它前面；右半＝插在它後面，
+ * 也就是同一區的下一個分頁前面，沒有下一個就回 ''（＝該區最後，moveChatTab 會放到最後）。
+ */
+export function dropInsertBefore(tabs, pinned, overId, after) {
+  if (!after) return overId
+  const pin = normalizePinned(pinned)
+  const ordered = orderTabs(tabs, pin)
+  const zone = ordered.filter(id => chatTabSameZone(id, overId, pin))
+  const i = zone.indexOf(overId)
+  return i >= 0 && i + 1 < zone.length ? zone[i + 1] : ''
+}

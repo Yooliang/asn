@@ -244,6 +244,7 @@ html.toast-page,html.toast-page body{background:transparent}
 .ctab.pinned{position:relative}
 .ctab.tab-dragging{opacity:.55}
 .ctab.tab-drop-before{box-shadow:inset 3px 0 0 #1a6fb5}
+.ctab.tab-drop-after{box-shadow:inset -3px 0 0 #1a6fb5}
 .ctab-menu{position:fixed;z-index:60;margin:0}
 .chat-stack{flex:1;min-height:0;display:flex;flex-direction:column}
 .chat-stack > .pane{flex:1;min-height:0;border-top-left-radius:0}

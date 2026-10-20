@@ -12,6 +12,7 @@ import {
   orderTabs,
   toggleChatPin,
   chatTabSameZone,
+  dropInsertBefore,
   moveChatTab,
 } from '../ui/lib/ctabs.mjs'
 
@@ -112,4 +113,15 @@ test('拖到區域最後', () => {
     pinned: ['p2', 'p1'],
     tabs: ['p2', 'p1', 'a'],
   })
+})
+
+test('拖到右半＝插在後面；拖到該區最後一個的右半＝放到最後', () => {
+  const tabs = ['p1', 'p2', 'a', 'b', 'c'], pinned = ['p1', 'p2']
+  assert.equal(dropInsertBefore(tabs, pinned, 'b', false), 'b')
+  assert.equal(dropInsertBefore(tabs, pinned, 'b', true), 'c')
+  assert.equal(dropInsertBefore(tabs, pinned, 'c', true), '')
+  assert.deepEqual(moveChatTab(tabs, pinned, 'a', dropInsertBefore(tabs, pinned, 'c', true)).tabs, ['p1', 'p2', 'b', 'c', 'a'])
+  // 固定區最後一個的右半：只到固定區最後，不跑進一般區
+  assert.equal(dropInsertBefore(tabs, pinned, 'p2', true), '')
+  assert.deepEqual(moveChatTab(tabs, pinned, 'p1', dropInsertBefore(tabs, pinned, 'p2', true)).pinned, ['p2', 'p1'])
 })
