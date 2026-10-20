@@ -33,18 +33,45 @@
 
 ## 二、各用戶端怎麼指向後台
 
+新預設後台：`https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay`（Supabase 專案 `asn`）。程式內預設值已改；環境變數 `IRORI_RELAY_URL` 仍可覆寫（改名是 #14，這期不動）。舊後台（專案 `hwtahctsgjcemtwzlvnq` 的 `irori-relay`）只在回退時才手動指回。
+
 | 用戶端 | 設定方式 | 備註 |
 |---|---|---|
-| 收發室橋、`send.mjs`、`recv.mjs`、`room.mjs` | 環境變數 `IRORI_RELAY_URL`；沒設就用程式內的預設值（舊後台） | `relay/machine/identity.mjs`、`bridge.mjs` 等有預設值；Windows 工作排程的啟動腳本要把變數帶進去 |
-| 轉接橋（特定平台） | 同上 | systemd unit 的 `Environment=` |
-| ASN 電腦版 | 環境變數 `IRORI_RELAY_URL`；預設值寫在 `relay/asn/src-tauri/src/identity.rs` | 預設值要改程式再重新打包 |
-| 雲端代理 | 環境變數 `IRORI_RELAY_URL`（平台的環境設定） | 金鑰環境變數不變 |
-| Claude Code channel | 環境變數 `IRORI_RELAY_URL` | 通常已被橋取代 |
+| 收發室橋、`send.mjs`、`recv.mjs`、`room.mjs` | 環境變數 `IRORI_RELAY_URL`；沒設就用程式內預設值（**新後台**） | 預設值在 `relay/machine/identity.mjs`、`bridge.mjs`、`bridge-aegis.mjs`、`register.mjs`；工具腳本 `tools-*.mjs` 同步改新 |
+| 轉接橋（特定平台） | 同上 | systemd unit 的 `Environment=` 若有寫舊網址要拿掉 |
+| ASN 電腦版 | 環境變數 `IRORI_RELAY_URL`；預設值寫在 `relay/asn/src-tauri/src/identity.rs`（**新後台**） | 要重新打包才生效 |
+| 雲端代理 | 環境變數 `IRORI_RELAY_URL`；沒設就用 `register.mjs` 的預設值（**新後台**，`relay/cloud-agent/config.mjs` 引用它） | 平台環境設定若曾寫舊網址要拿掉；金鑰環境變數不變 |
+| Claude Code channel | 環境變數 `IRORI_RELAY_URL`；預設值在 `relay/channel/channel.mjs`（**新後台**） | 通常已被橋取代 |
 | Irori | 自己的設定檔（網址、`IRORI_RELAY_KEY`） | 在 Irori repo 改 |
-| 邀請與安裝程式 | `relay/machine/register.mjs` 的預設網址；安裝包內預設值 | 打包前要改，新安裝才會註冊到新後台 |
-| Claude Code skill | `web/relay/SKILL.md` 內的 `BASE=` | 改後要重新發佈 |
+| 邀請與安裝程式 | `relay/machine/register.mjs` 的預設網址（安裝程式沒有另外寫死，`-BaseUrl` 才覆寫） | 新打包的安裝包註冊到新後台 |
+| Claude Code skill | `web/relay/SKILL.md` 內的 `BASE=`（兩處，已改新） | 改後要重新發佈 |
 
 另外：Realtime 門鈴要用**新專案的 anon（公開）金鑰**。各設備的 `%USERPROFILE%\.irori-relay\anon.key`（或 `IRORI_RELAY_ANON_KEY`）要換成新專案的；沒換的話門鈴連不上，只剩 2 分鐘輪詢（不會掉信，但變慢）。取得方式：Supabase 主控台 → 專案設定 → API，或 `npx supabase projects api-keys --project-ref <新專案代號>`（只取 anon 那一筆，不要碰 service role）。
+
+門鈴 WebSocket 位址不是寫死的：由後台網址的主機名推導（`wss://<專案代號>.supabase.co/realtime/v1/websocket`），所以網址指向新專案，門鈴就連新專案；**程式內沒有任何寫死的 anon 金鑰**，只從 `IRORI_RELAY_ANON_KEY` 或 `anon.key` 讀。維護者只需要把新專案 anon 公開金鑰發到各設備（不進 repo）。
+
+## 二之一、家用機收發室橋改指向本 repo
+
+現況：Windows 工作排程 `IroriRelayMachine-H` 啟動 `D:\Github\irori
+elay\machine
+un-bridge.ps1`。目標：改跑 `D:\Github\Yooliangsn
+elay\machine
+un-bridge.ps1`。`run-bridge.ps1` 用自己所在資料夾找 `bridge.mjs`，`install-task.ps1` 用自己所在資料夾組出排程動作，所以**不必改這兩支腳本**，只要從本 repo 的資料夾重新註冊排程即可。排程不帶 `IRORI_RELAY_URL`，網址來自新版程式的預設值，所以改指向本 repo 與切換後台是同一步（建議在第三節第 2 步「其他設備的收發室橋」時一起做，不要提前）。
+
+步驟（在家用機，切換當下執行；全程只關自己記下 PID 的程序）：
+
+1. 確認本 repo 在 `D:\Github\Yooliangsn` 且已是含新預設網址的版本（合併本 PR 後 `git pull`）；`cd relay\machine && npm ci`（橋需要的相依套件）。
+2. 記下現行排程的啟動參數，重建時要帶一樣的：`(Get-ScheduledTask IroriRelayMachine-H).Actions | Format-List Arguments`，看 `-DefaultAgent`、`-Engines`（例如 `claude,acp,codex`）。
+3. 備妥 `%USERPROFILE%\.irori-relaynon.key` 換成新專案的 anon 公開金鑰（不要印出內容）。
+4. 停橋：用 `installer\irori-common.ps1` 的 `Stop-IroriBridge`（讀 `bridge.pid` 只停那一棵），不要刪 `bridge.pid`，不要整批 taskkill；確認 `launcher.log` 最後一行是結束。
+5. 預覽新排程：`powershell -File D:\Github\Yooliangsn
+elay\machine\install-task.ps1 -NodeId H -DefaultAgent <原值> -Engines <原值>`，確認預覽裡的 `-File` 路徑是 `D:\Github\Yooliangsn\...`。
+6. 套用：同上指令加 `-Apply`（`-Force` 會覆蓋同名排程），再 `Start-ScheduledTask IroriRelayMachine-H`。
+7. 驗證：`launcher.log` 出現 `start bridge`、`bridge.log` 沒有 `no anon key`、對新後台 `whoami` 回 200、互寄一封信。
+8. 回退：把步驟 5～6 改在 `D:\Github\irori
+elay\machine` 執行同樣指令即可（舊目錄保留，確認穩定一週後再清）。
+
+注意：`send.mjs`／`recv.mjs` 的手動呼叫路徑（`web/relay/SKILL.md`、`relay/machine/README.md` 內的 `D:/Github/irori/relay/machine/...`）是家用機寫法，改指向後要一併改成 `D:/Github/Yooliang/asn/relay/machine/...`；本 PR 先不動這些範例路徑，等家用機實際換完再改。
 
 ## 三、切換步驟
 
