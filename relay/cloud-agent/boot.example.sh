@@ -37,3 +37,6 @@ else
   nohup setsid node "$APP/relay/cloud-agent/recv.mjs" >> "$WS/relay/recv.out" 2>&1 &
   echo "[irori] recv 已啟動（log：$WS/relay/recv.log）"
 fi
+
+# 選用：新信即時分派（獨立程序，見 README「四之二」）
+# bash "$APP/relay/cloud-agent/dispatch-start.example.sh"

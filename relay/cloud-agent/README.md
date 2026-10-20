@@ -86,6 +86,28 @@ echo "很長的內容" | node relay/cloud-agent/send.mjs --to W/W-政策 --body 
 - 看某一位的信：`node inbox.mjs --agent 正見`。沒指定收件代理、或收件代理不在名單上的信，算給預設那位（`Grok`），不會漏掉。
 - 以某一位的名義回信：`send.mjs … --from 正見`。寄件人必須在名單上，打錯字會被擋。
 
+## 四之二、即時分派（選用，`dispatch-watch.mjs`）
+
+獨立常駐程式，**不改 `recv.mjs`**。監看 `inbox.jsonl`（`fs.watch`＋防抖＋備援輪詢），依 `to_agent` 分類並寫入自己的狀態目錄（預設 `<信件目錄>/dispatch-state/`：`seen.jsonl`、`pending.jsonl`、`dispatch.log`、`dispatch.pid`）。**不寫 `done.jsonl`**。
+
+1. **分派規則**：`IRORI_DISPATCH_FORWARD` 列出的收件人 → `forward`（夥伴處理；可搭配 Grok Bot 隊友訊息／routine 轉交並叫醒）。未指定或 `IRORI_DISPATCH_SELF`＋預設視窗名／節點代號 → `self`（主助手處理）。不在名單上 → `self-unknown-addressee`（仍當主助手，但 note 會標未知收件人）。內文命中 NAS／伺服器／刪除／對外寄信等規則 → 加上 `needs-user-approval`（需先問使用者）。
+2. **叫醒（選用）**：`IRORI_WAKE_ENABLE=1` 時，同一批新信 **POST 一次**到 `IRORI_WAKE_WEBHOOK_URL`，標頭 `Authorization: Bearer IRORI_WAKE_WEBHOOK_KEY`（Grok **Bot routine** 的 webhook）。**不是** Grok 網頁版「自動化」webhook（那類要 Standard Webhooks 的 HMAC 簽章，只送 Bearer 會 400）。log 只記 HTTP 狀態與 `runUuid`，**絕不記 URL 或金鑰**。
+3. **與 5 分鐘巡檢分工**：定期「收發室收件匣巡檢」仍是備援，且**只有它會 `--done`**；即時分派只負責發現、分類、pending、可選叫醒。
+4. **啟動方式**：在 `start.sh`／`boot.sh` 裡 `recv` 之後執行 `dispatch-start.example.sh`（或同等邏輯）；已在跑就跳過。
+5. **測試**：`node --test` 只用暫存目錄，**不要**在正式 `/workspace/relay` 信箱上跑測試。
+6. **秘密與重啟**：`IRORI_WAKE_*`、`IRORI_RELAY_KEY` 等只存在**啟動它的 shell 環境**；若被舊的長迴圈重拉而當時沒 export，log 會出現 `wake configured: no`（程式仍跑，只是不 POST）。
+
+環境變數範例（請依實際夥伴改名，**不要**把真實名字寫進 repo 預設值）：
+
+```bash
+export IRORI_DISPATCH_FORWARD="正見,牧陽,島作,檔案"
+export IRORI_DISPATCH_SELF="小真"
+export IRORI_WAKE_ENABLE=1
+# IRORI_WAKE_WEBHOOK_URL、IRORI_WAKE_WEBHOOK_KEY 由平台秘密注入，勿 commit
+```
+
+狀態目錄：`IRORI_DISPATCH_STATE_DIR`（預設 `<IRORI_CLOUD_MAIL_DIR>/dispatch-state`）。其它：`IRORI_DISPATCH_POLL_MS`（預設 30000）、`IRORI_DISPATCH_DEBOUNCE_MS`（500）、`IRORI_DISPATCH_NO_WATCH=1`（測試只用輪詢）。
+
 ## 五、檢查
 
 - `tail /workspace/relay/recv.log`：`mail stored …`（收到並寫入）、`roster forbidden (403)`（節點沒有 can_roster，只記一次）。
