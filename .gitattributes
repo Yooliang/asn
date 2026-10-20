@@ -8,3 +8,6 @@ relay/machine/**/*.mjs text eol=lf
 relay/machine/*.service text eol=lf
 relay/machine/package.json text eol=lf
 relay/machine/README.md text eol=lf
+
+# relay/cloud-agent 在雲端 Linux 上跑：程式與 .sh 一律 LF
+relay/cloud-agent/** text eol=lf
