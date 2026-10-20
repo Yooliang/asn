@@ -371,3 +371,6 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .voice-install>span{flex:1 1 220px}
 .voice-install .aero-btn{padding:2px 12px}
 .voice-set{display:flex;flex-direction:column;gap:6px}
+
+.titlebar .ver { opacity: .7; font-weight: normal; }
+.settings .ver-line { display: block; margin-top: 12px; color: #6b7a8c; }

@@ -40,6 +40,7 @@ struct StartupInfo {
     shot: bool,
     poll_ms: u64,
     roster_ms: u64,
+    version: String,
 }
 
 fn env_ms(k: &str, d: u64) -> u64 {
@@ -76,6 +77,7 @@ fn startup_info(app: State<'_, App>) -> StartupInfo {
         shot: app.shot.is_some(),
         poll_ms: env_ms("IRORI_ASN_POLL_MS", 120_000),
         roster_ms: env_ms("IRORI_ASN_ROSTER_MS", 60_000),
+        version: env!("CARGO_PKG_VERSION").into(),
     }
 }
 

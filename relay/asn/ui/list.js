@@ -45,6 +45,7 @@ const SOUNDS = {
 }
 
 const info = await invoke('startup_info')
+document.title = `Agent Sync Network Messenger (${info.version})`
 if (info.error) {
   document.body.textContent = `ASN 無法啟動：${info.error}`
   throw new Error(info.error)
@@ -263,7 +264,7 @@ const app = createApp({
       void refreshVoice()
     }
     return {
-      voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
+      version: info.version, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       frame, FRAMES, FRAME_LABEL, setFrame, SOUND_CHOICES, SOUND_LABEL, soundChoice, soundFromChoice, RESIZE_DIRS, resizeFrom, avMenu,
       avOf, meAv, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar,
       ui, MODES, MODE_LABEL, DP_MODES, DP_LABEL, BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, normalizeDpMode, normalizeBubble, setMode, mergedTabs, logs, sendTo, nudgeTo, sendAttachTo, photoApi, activateTab, closeChatTab, toggleDp, plain,

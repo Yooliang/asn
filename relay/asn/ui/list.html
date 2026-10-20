@@ -11,7 +11,7 @@
   <input ref="avFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden @change="pickAvatar">
   <i class="rz" v-for="d in RESIZE_DIRS" :key="d" :class="'rz-' + d" @mousedown.left.prevent="resizeFrom(d)"></i>
   <header class="titlebar" data-tauri-drag-region>
-    <span class="t-icon"></span><span class="t-text"><span class="brand">Agent Sync Network Messenger</span></span>
+    <span class="t-icon"></span><span class="t-text"><span class="brand">Agent Sync Network Messenger <span class="ver">({{ version }})</span></span></span>
     <span class="t-btns">
       <button class="tb" @click="ctl('min')" aria-label="最小化" title="最小化"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="2" y="8" width="8" height="2" rx=".5" fill="currentColor"/></svg></button>
       <button class="tb" @click="ctl('max')" aria-label="最大化" title="最大化"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="1.75" y="1.75" width="8.5" height="8.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="1.75" y="1.75" width="8.5" height="2.2" fill="currentColor"/></svg></button>
@@ -170,6 +170,7 @@
           <label>分組依
             <select class="set-sel" v-model="dims.groupDim" aria-label="分組依"><option v-for="d in groupOptions(dims.tabDim)" :key="d.key" :value="d.key">{{ d.label }}</option></select>
           </label>
+          <small class="ver-line">版本 {{ version }}</small>
         </div>
       </div>
     </div>
