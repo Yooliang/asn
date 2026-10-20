@@ -6,10 +6,10 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { defaultExe, runShot } from '../scripts/shot.mjs'
+import { defaultExe, runShot, shotCaptureSupported } from '../scripts/shot.mjs'
 import { FAKE_KEY, U } from './fake-relay.mjs'
 
-test('asn.exe 端到端（假 relay）', { skip: !fs.existsSync(defaultExe) && '先執行 npm run build', timeout: 120_000 }, async () => {
+test('asn.exe 端到端（假 relay）', { skip: (!shotCaptureSupported && '端到端截圖僅 Windows') || (!fs.existsSync(defaultExe) && '先執行 npm run build'), timeout: 120_000 }, async () => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-e2e-'))
   const r = await runShot(out)
   assert.equal(r.code, 0, r.log)

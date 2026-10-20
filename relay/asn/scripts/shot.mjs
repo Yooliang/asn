@@ -10,7 +10,9 @@ import { FAKE_KEY, startFakeRelay } from '../test/fake-relay.mjs'
 import { demoUploadUrl, pngDataUrl } from '../test/png.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
-export const defaultExe = path.join(root, 'src-tauri', 'target', 'release', 'asn.exe')
+const releaseName = process.platform === 'win32' ? 'asn.exe' : 'asn'
+export const defaultExe = path.join(root, 'src-tauri', 'target', 'release', releaseName)
+export const shotCaptureSupported = process.platform === 'win32'
 
 export const demoMembers = [
   { id: 'H', name: '家用機', kind: 'claude', agents: [
@@ -51,7 +53,7 @@ export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000, me
   fs.mkdirSync(env.IRORI_ASN_DATA, { recursive: true })
   fs.writeFileSync(path.join(env.IRORI_ASN_DATA, 'settings.json'), JSON.stringify({ window_name: 'H-ASN', old_names: [{ name: 'H-舊名', t: Date.now() - 60_000 }, { name: 'H-過期', t: Date.now() - 9 * 24 * 3600_000 }] }))
   if (me) fs.writeFileSync(path.join(env.IRORI_ASN_DATA, 'asn-me.json'), JSON.stringify(me))
-  const child = spawn(exe, ['--shot', outDir], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: false })
+  const child = spawn(exe, ['--shot', outDir], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: false, detached: process.platform !== 'win32' })
   let log = ''
   child.stdout.on('data', d => (log += d)); child.stderr.on('data', d => (log += d))
   const pid = child.pid   // 只關自己啟動的這一個（含它的 WebView2 子程序）
@@ -60,8 +62,12 @@ export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000, me
   let heartbeat = null, oldHeartbeat = null, expiredHeartbeat = false
   const oldHb = path.join(path.dirname(hbFile), 'H-舊名.json'), expHb = path.join(path.dirname(hbFile), 'H-過期.json')
   const poll = setInterval(() => { try { heartbeat ??= JSON.parse(fs.readFileSync(hbFile, 'utf8')) } catch {}; try { oldHeartbeat ??= JSON.parse(fs.readFileSync(oldHb, 'utf8')) } catch {}; if (fs.existsSync(expHb)) expiredHeartbeat = true }, 100)
+  const killTree = () => {
+    if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'])
+    else { try { process.kill(-pid, 'SIGKILL') } catch { try { process.kill(pid, 'SIGKILL') } catch {} } }
+  }
   const code = await new Promise(res => {
-    const t = setTimeout(() => { spawnSync('taskkill', ['/PID', String(pid), '/T', '/F']); res('timeout') }, timeoutMs)
+    const t = setTimeout(() => { killTree(); res('timeout') }, timeoutMs)
     child.on('exit', c => { clearTimeout(t); res(c) })
   })
   clearInterval(poll)

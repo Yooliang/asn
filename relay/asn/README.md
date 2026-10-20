@@ -5,6 +5,8 @@ Tauri 2（Rust）＋ Vue 3；多視窗：好友名單一扇、每位好友的對
 
 ## 安裝與執行
 
+### Windows
+
 需要：Node 22+、Rust（`winget install --id Rustlang.Rustup -e`，再 `rustup default stable-msvc`）、Visual Studio C++ 建置工具、WebView2（Windows 11 內建）。
 
 ```
@@ -13,6 +15,26 @@ npm install
 npm start            # 開發模式（tauri dev）
 npm run build        # 出 exe 與安裝檔（src-tauri/target/release/asn.exe、bundle/nsis/ASN_*_x64-setup.exe）
 ```
+
+### Linux（deb／AppImage）
+
+需要：Node 22+、Rust stable（`rustup default stable`）、Tauri 2 的 Linux 依賴（Ubuntu／Debian 範例）：
+
+```
+sudo apt-get update
+sudo apt-get install -y build-essential pkg-config libssl-dev \
+  libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+  libjavascriptcoregtk-4.1-dev libsoup-3.0-dev patchelf
+```
+
+```
+cd relay/asn
+npm ci
+npm start            # 開發模式（需要圖形桌面或 X11／Wayland）
+npm run build        # 出 asn 二進位、bundle/deb/*.deb、bundle/appimage/*.AppImage
+```
+
+已知差異：開允許清單內的網址用 `xdg-open`；提示音在 WebKitGTK 上可能要先點過視窗才有聲（不像 WebView2 可背景播放）；右下角置頂提示在 Wayland 上「不搶焦點」行為需實機確認；`--shot` 端到端截圖與 `scripts/mem.mjs` 僅 Windows。
 
 關掉好友名單視窗＝結束程式。
 
@@ -77,7 +99,7 @@ node scripts/mem.mjs             # 量閒置記憶體
 
 ## 已知限制
 
-- 音效用 WebAudio 合成，已用 WebView2 參數允許不點視窗就出聲；若系統靜音則聽不到。
+- 音效用 WebAudio 合成；Windows 已用 WebView2 參數允許不點視窗就出聲，Linux WebKitGTK 可能需先點過視窗；若系統靜音則聽不到。
 - 與本機（同節點）視窗聊天：後端不擋，ASN 放行；`send.mjs` 也放行同節點（本機 Claude 視窗可直接寄信給本機的 ASN），只擋寄給自己這個視窗。
 - 若 ASN 沒開，寄給視窗名的信會留在節點信箱，機器橋心跳過期後會當成「找不到視窗」處理（照橋的退路）。
 - 我的狀態（線上／忙碌…）只是本機顯示，不會回報給收發室。

@@ -19,8 +19,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-/// 所有視窗共用的 WebView2 啟動參數（必須一致，否則第二扇視窗建不起來）；允許沒點過視窗就出提示音
+/// 所有視窗共用的瀏覽器啟動參數（必須一致，否則第二扇視窗建不起來）。WebView2 才支援自動播放參數；Linux WebKitGTK 略過。
+#[cfg(windows)]
 pub const BROWSER_ARGS: &str = "--autoplay-policy=no-user-gesture-required";
+#[cfg(not(windows))]
+pub const BROWSER_ARGS: &str = "";
 
 pub struct App {
     pub relay: Option<Arc<Relay>>,
@@ -113,13 +116,23 @@ pub const OPEN_ALLOW: [&str; 4] = [
 pub fn open_allowed(url: &str) -> bool {
     OPEN_ALLOW.contains(&url)
 }
-/// 用系統瀏覽器開（explorer 交給預設瀏覽器；網址已比對白名單，不經 shell）
+/// 用系統預設瀏覽器開（網址已比對白名單，不經 shell）
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
     if !open_allowed(&url) {
         return Err("這個網址不在允許清單內".into());
     }
-    std::process::Command::new("explorer.exe").arg(&url).spawn().map(|_| ()).map_err(|e| e.to_string())
+    spawn_browser(&url)
+}
+
+#[cfg(windows)]
+fn spawn_browser(url: &str) -> Result<(), String> {
+    std::process::Command::new("explorer.exe").arg(url).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+#[cfg(not(windows))]
+fn spawn_browser(url: &str) -> Result<(), String> {
+    std::process::Command::new("xdg-open").arg(url).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// 某台設備上傳的大頭貼（名單只帶更新時間，圖按需取）。節點代號先驗格式才組網址
