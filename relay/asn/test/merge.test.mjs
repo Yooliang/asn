@@ -174,7 +174,12 @@ test('守門：元件依 paneClasses／msgLayout／foldArrow 排版；樞紐用 
   const hub = fs.readFileSync(path.join(UI, 'list.js'), 'utf8')
   for (const k of ['switchMode(from, to', 'tabVisible(ui, id', 'toggleCollapsed(ui.collapsed)', 'closeChatTab(ui, id)', 'openChatTab(ui, id', 'pinnedChat', 'dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed']) assert.ok(hub.includes(k), `list.js 缺 ${k}`)
   const htmlTab = fs.readFileSync(path.join(UI, 'list.html'), 'utf8')
-  assert.ok(htmlTab.includes('@contextmenu.prevent="openChatTabMenu(t.id)"'))
+  assert.ok(htmlTab.includes('@contextmenu.prevent="openChatTabMenu(t.id, $event)"'))
+  // 選單不能放在 .tabbar 裡面（tabbar overflow:hidden 會把選單裁掉，右鍵看起來像沒反應）
+  const fromBar = htmlTab.slice(htmlTab.indexOf('<div class="tabbar"'), htmlTab.indexOf('class="av-menu ctab-menu"'))
+  const opens = (fromBar.match(/<div[\s>]/g) || []).length, closes = (fromBar.match(/<\/div>/g) || []).length
+  assert.ok(closes >= opens, '分頁選單必須在 .tabbar 結束之後')
+  assert.ok(/\.ctab-menu\{position:fixed/.test(fs.readFileSync(path.join(UI, 'style.css'), 'utf8')), '分頁選單要 position:fixed')
   for (const label of ['關閉', '關閉其他', '關閉右側', '全部關閉']) assert.ok(htmlTab.includes(label), `list.html 缺 ${label}`)
   assert.ok(htmlTab.includes('menuTogglePin') && htmlTab.includes('tabPinLabel'))
   const html = fs.readFileSync(path.join(UI, 'list.html'), 'utf8')

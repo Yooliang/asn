@@ -189,7 +189,7 @@
   <section class="chat-area" v-if="ui.mode === 'merged'" aria-label="對話">
     <div class="tabbar" role="tablist" aria-label="開著的對話">
       <div class="ctab home" v-if="!mergedTabs.length" :class="{ on: view === 'home' }" role="tab" :aria-selected="view === 'home'" @click="showHome"><img src="img/logo.svg" alt="" width="14" height="14"><span class="ctab-name">開始</span></div>
-      <div v-for="t in mergedTabs" :key="t.id" class="ctab" :class="{ on: view === 'chat' && t.id === ui.active, pinned: isChatTabPinned(t.id) }" role="tab" :aria-selected="view === 'chat' && t.id === ui.active" :title="plain(t.nick)" :aria-label="plain(t.nick)" @click="activateTab(t.id)" @contextmenu.prevent="openChatTabMenu(t.id)" @auxclick.middle.prevent="!isChatTabPinned(t.id) && closeChatTab(t.id)">
+      <div v-for="t in mergedTabs" :key="t.id" class="ctab" :class="{ on: view === 'chat' && t.id === ui.active, pinned: isChatTabPinned(t.id) }" role="tab" :aria-selected="view === 'chat' && t.id === ui.active" :title="plain(t.nick)" :aria-label="plain(t.nick)" @click="activateTab(t.id)" @contextmenu.prevent="openChatTabMenu(t.id, $event)" @auxclick.middle.prevent="!isChatTabPinned(t.id) && closeChatTab(t.id)">
         <template v-if="isChatTabPinned(t.id)">
           <span class="dp xs pin-av" :class="'st-' + t.status"><span><img :src="avOf(t)" alt=""></span></span>
         </template>
@@ -200,19 +200,20 @@
         <span class="unread" v-if="t.unread">{{ t.unread }}</span>
         <button v-if="!isChatTabPinned(t.id)" class="ctab-x" type="button" @click.stop="closeChatTab(t.id)" :aria-label="'關閉 ' + plain(t.nick) + ' 的對話'">✕</button>
       </div>
-      <ul class="av-menu ctab-menu" v-if="chatTabMenu" role="menu" @click.stop>
-        <li><button type="button" role="menuitem" @click="menuCloseTab">關閉</button></li>
-        <li><button type="button" role="menuitem" @click="menuCloseOther">關閉其他</button></li>
-        <li><button type="button" role="menuitem" @click="menuCloseRight">關閉右側</button></li>
-        <li><button type="button" role="menuitem" @click="menuCloseAll">全部關閉</button></li>
-        <li><button type="button" role="menuitem" @click="menuTogglePin">{{ tabPinLabel }}</button></li>
-      </ul>
       <div class="ctab guide-tab" v-if="openedGuide" :class="{ on: view === 'guide' }" role="tab" :aria-selected="view === 'guide'" @click="ui.showGuide = true">
         <span class="guide-ic sm" aria-hidden="true"></span>
         <span class="ctab-name">指引：{{ openedGuide.title }}</span>
         <button class="ctab-x" type="button" @click.stop="closeGuideView" aria-label="關閉指引">✕</button>
       </div>
     </div>
+    <!-- 分頁右鍵選單放在 .tabbar 外：tabbar 有 overflow:hidden，放裡面會被裁掉 -->
+    <ul class="av-menu ctab-menu" v-if="chatTabMenu" :style="{ left: chatTabMenuPos.x + 'px', top: chatTabMenuPos.y + 'px' }" role="menu" @click.stop>
+      <li><button type="button" role="menuitem" @click="menuCloseTab">關閉</button></li>
+      <li><button type="button" role="menuitem" @click="menuCloseOther">關閉其他</button></li>
+      <li><button type="button" role="menuitem" @click="menuCloseRight">關閉右側</button></li>
+      <li><button type="button" role="menuitem" @click="menuCloseAll">全部關閉</button></li>
+      <li><button type="button" role="menuitem" @click="menuTogglePin">{{ tabPinLabel }}</button></li>
+    </ul>
     <div class="chat-stack">
       <chat-pane v-for="t in mergedTabs" :key="t.id" v-show="view === 'chat' && t.id === ui.active" :friend="t" :me="me" :log="logs[t.id] || []" :friend-av="avOf(t)" :me-av="meAv" :win-mode="ui.mode" :dp-mode="ui.dpMode" :bubble="ui.bubble" :toolbar="ui.toolbar" :dp-collapsed="ui.collapsed" :active="view === 'chat' && t.id === ui.active" :voice="voice"
         :photo-api="photoApi" @send="text => sendTo(t.id, text)" @nudge="nudgeTo(t.id)" @attach="(p, cap) => sendAttachTo(t.id, p, cap)" @toggle-dp="toggleDp"></chat-pane>
