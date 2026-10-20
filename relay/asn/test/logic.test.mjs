@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { esc, emo, plain, initial, hasNudge, stripNudge, NUDGE_TAG, hueOf } from '../ui/lib/text.mjs'
-import { buildFriends, mergeFriends, statusOf, isRelayRoom, friendId, groupByDevice } from '../ui/lib/roster.mjs'
+import { cleanPsm, buildFriends, mergeFriends, statusOf, isRelayRoom, friendId, groupByDevice } from '../ui/lib/roster.mjs'
 import { routeMail } from '../ui/lib/routing.mjs'
 
 const UI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ui')
@@ -45,10 +45,13 @@ const members = [
 test('buildFriends：一視窗一列、略過收發室與自己、個人訊息＝節點／資料夾', () => {
   const f = buildFriends(members, { selfNode: 'H', selfName: 'H-ASN' })
   assert.deepEqual(f.map(x => x.id), ['H/H-Irori', 'W/W-政策', 'W/W-空'])
-  assert.equal(f[0].psm, 'H／irori')
+  assert.equal(f[0].psm, 'irori')
   assert.equal(f[0].nick, 'H-Irori')
   assert.equal(f[1].status, 'busy')
-  assert.equal(f[2].psm, 'W')
+  assert.equal(f[2].psm, '')
+  assert.equal(cleanPsm('H／irori', 'H'), 'irori')
+  assert.equal(cleanPsm('X', 'X'), '')
+  assert.equal(cleanPsm('irori', 'H'), 'irori')
   assert.ok(isRelayRoom('家用收發室') && !isRelayRoom('收發室甲'))
   assert.deepEqual(buildFriends(undefined), [])
 })

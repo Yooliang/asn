@@ -12,4 +12,4 @@ export function routeMail(friendsById, mail) {
 }
 
 // 新增好友（來信對不到名單時）
-export const stubFriend = ({ id, node, agent }) => ({ id, node, agent, nick: agent || node, psm: agent ? node : '總機', engine: null, status: 'offline' })
+export const stubFriend = ({ id, node, agent }) => ({ id, node, agent, nick: agent || node, psm: agent ? '' : '總機', engine: null, status: 'offline' })

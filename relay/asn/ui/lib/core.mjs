@@ -3,19 +3,20 @@
 //   transport: { list(), inbox(), ack(ids), send(payload) }
 //   store:     { load() → 物件|null, save(物件) }
 //   isChatVisible(id) → Promise<boolean>：該好友的對話視窗是否開著且沒最小化
-import { buildFriends, mergeFriends } from './roster.mjs'
+import { buildFriends, cleanPsm, mergeFriends } from './roster.mjs'
 import { routeMail, stubFriend } from './routing.mjs'
-import { NUDGE_TAG, hasNudge, hueOf, initial, plain, stripNudge } from './text.mjs'
+import { NUDGE_TAG, hasNudge, hueOf, initial, plain, stripNudge, unwrapShell } from './text.mjs'
 
 export const MAX_BODY = 20000
 const LOG_KEEP = 200
 
 export class AsnCore {
-  constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000 }) {
-    Object.assign(this, { transport, store, selfNode, windowName, isChatVisible, now, log, pollMs, rosterMs })
+  constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, aliases = [] }) {
+    Object.assign(this, { aliases: new Set(aliases), transport, store, selfNode, windowName, isChatVisible, now, log, pollMs, rosterMs })
     this.friends = new Map()   // id → 好友
     this.logs = new Map()      // id → 訊息陣列
     this.seen = new Set()      // 已處理過的信件 id（ack 失敗重拉時不重複顯示）
+    this.nodeOrder = []        // 收發室名單裡的節點順序（設備頁籤照這個排）
     this.conn = 'connecting'   // connecting | on | off
     this.rosterLoaded = false
     this.handlers = {}
@@ -31,7 +32,7 @@ export class AsnCore {
   // ---------- 啟動／停止 ----------
   async start() {
     const saved = await this.store.load()
-    for (const f of saved?.friends ?? []) this.friends.set(f.id, this.#decorate({ ...f, status: 'offline', unread: 0, waiting: false, replyTo: null }))
+    for (const f of saved?.friends ?? []) this.friends.set(f.id, this.#decorate({ ...f, psm: cleanPsm(f.psm, f.node), status: 'offline', unread: 0, waiting: false, replyTo: null }))
     for (const [id, l] of Object.entries(saved?.logs ?? {})) this.logs.set(id, l)
     this.emit('state')
     await this.refreshRoster()
@@ -46,6 +47,7 @@ export class AsnCore {
     let members
     try { members = (await this.transport.list())?.members; this.#setConn('on') }
     catch (e) { this.log(`list failed: ${e.message}`); this.#setConn('off'); return }
+    this.nodeOrder = (Array.isArray(members) ? members : []).map(m => m?.id).filter(x => typeof x === 'string')
     const live = buildFriends(members, { selfNode: this.selfNode, selfName: this.windowName })
     const prev = new Map([...this.friends].map(([id, f]) => [id, f.status]))
     const known = [...this.friends.values()].filter(f => this.logs.has(f.id) || f.known)
@@ -78,7 +80,7 @@ export class AsnCore {
         this.#setConn('on')
         const ids = []
         for (const m of messages) {
-          if (m.to_agent !== this.windowName) continue   // 不是寄給本視窗的絕不處理、不 ack
+          if (m.to_agent !== this.windowName && !this.aliases.has(m.to_agent)) continue   // 不是寄給本視窗（或還沒過期的舊名）的絕不處理、不 ack
           if (!this.seen.has(m.id)) { this.seen.add(m.id); await this.#incoming(m) }
           ids.push(m.id)
         }
@@ -96,8 +98,9 @@ export class AsnCore {
     f.waiting = false
     const t = Date.parse(m.created_at) || this.now()
     const lg = this.#log(r.id)
-    const nudge = hasNudge(m.body)
-    const text = stripNudge(m.body)
+    const body = unwrapShell(m.body)
+    const nudge = hasNudge(body)
+    const text = stripNudge(body)
     if (text) { lg.push({ k: 'them', text, t, id: m.id }); f.lastAt = t; f.replyTo = m.id }
     const visible = await this.isChatVisible(r.id)
     if (nudge) {
@@ -152,7 +155,7 @@ export class AsnCore {
   markRead(id) { const f = this.friends.get(id); if (f && f.unread) { f.unread = 0; this.emit('state') } }
   #log(id) { if (!this.logs.has(id)) this.logs.set(id, []); return this.logs.get(id) }
   logOf(id) { return this.logs.get(id) ?? [] }
-  snapshot() { return { conn: this.conn, windowName: this.windowName, selfNode: this.selfNode, friends: [...this.friends.values()].map(f => ({ ...f })) } }
+  snapshot() { return { conn: this.conn, windowName: this.windowName, selfNode: this.selfNode, nodeOrder: [...this.nodeOrder], friends: [...this.friends.values()].map(f => ({ ...f })) } }
 
   // ---------- 存檔 ----------
   #scheduleSave() { if (!this.saveTimer) this.saveTimer = setTimeout(() => { this.saveTimer = null; void this.flush() }, 300) }

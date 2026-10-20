@@ -162,7 +162,7 @@ pub fn win_ctl(window: Window, op: String) {
 
 /// --shot：把名單、對話、提示三類視窗各用螢幕擷取存成 PNG（沒有 capturePage，所以用 PowerShell CopyFromScreen 抓視窗範圍）
 #[tauri::command]
-pub async fn take_shot(app: AppHandle, state: State<'_, App>) -> Result<(), String> {
+pub async fn take_shot(app: AppHandle, state: State<'_, App>, tab: Option<String>) -> Result<(), String> {
     let dir = state.shot.clone().ok_or("不在 --shot 模式")?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let wins = app.webview_windows();
@@ -173,7 +173,9 @@ pub async fn take_shot(app: AppHandle, state: State<'_, App>) -> Result<(), Stri
     tokio::time::sleep(Duration::from_millis(900)).await;
     let mut specs = vec![];
     for (label, w) in app.webview_windows() {
-        let name = if label == "list" { "list".to_string() } else if label.starts_with("chat-") { "chat".to_string() } else if label.starts_with("toast-") { label.clone() } else { continue };
+        // 帶 tab：只拍名單視窗，檔名 tabs-<tab>（逐頁籤截圖用）
+        if tab.is_some() && label != "list" { continue }
+        let name = if label == "list" { tab.as_ref().map(|t| format!("tabs-{}", t.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect::<String>())).unwrap_or_else(|| "list".to_string()) } else if label.starts_with("chat-") { "chat".to_string() } else if label.starts_with("toast-") { label.clone() } else { continue };
         if let (Ok(p), Ok(s)) = (w.outer_position(), w.outer_size()) {
             specs.push(format!("{name}|{}|{}|{}|{}", p.x, p.y, s.width, s.height));
         }
