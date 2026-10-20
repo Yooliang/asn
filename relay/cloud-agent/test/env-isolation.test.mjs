@@ -1,0 +1,90 @@
+// shell 已 export 生產用 IRORI_* 時，測試仍只認 tmpEnv／childEnv 的值（絕不印金鑰）
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { startFakeRelay, FAKE_KEY } from './fake-relay.mjs'
+import { childEnv, rm, run, script, tmpEnv, withoutIroriEnv } from './helpers.mjs'
+
+const POLLUTION = {
+  IRORI_RELAY_KEY: 'pollution-key-must-not-leak-to-relay-or-logs',
+  IRORI_CLOUD_HOME: '/pollution/home',
+  IRORI_CLOUD_MAIL_DIR: '/pollution/mail',
+  IRORI_RELAY_ID: 'pollution-node',
+  IRORI_CLOUD_APP: 'pollution-app',
+}
+
+function savePollution() {
+  const prev = {}
+  for (const k of Object.keys(POLLUTION)) {
+    prev[k] = process.env[k]
+    process.env[k] = POLLUTION[k]
+  }
+  return prev
+}
+
+function restorePollution(prev) {
+  for (const k of Object.keys(POLLUTION)) {
+    if (prev[k] === undefined) delete process.env[k]
+    else process.env[k] = prev[k]
+  }
+}
+
+test('childEnv：剔除 process.env 的 IRORI_* 後才套用測試覆寫', () => {
+  const prev = savePollution()
+  try {
+    const bare = childEnv({ IRORI_RELAY_KEY: '' })
+    assert.equal(bare.IRORI_RELAY_KEY, '')
+    assert.equal(bare.IRORI_CLOUD_HOME, undefined)
+    assert.equal(bare.IRORI_CLOUD_MAIL_DIR, undefined)
+    assert.equal(bare.IRORI_RELAY_ID, undefined)
+    assert.ok(process.env.PATH, '非 IRORI_ 的變數仍保留')
+    assert.ok(withoutIroriEnv(process.env).PATH)
+  } finally { restorePollution(prev) }
+})
+
+test('process.env 帶生產 IRORI_* 時 send／tmpEnv 行為仍正確', async () => {
+  const st = await startFakeRelay()
+  const prev = savePollution()
+  let root = null
+  let root2 = null
+  let env = null
+  let env2 = null
+  try {
+    ;({ root, env } = tmpEnv(st.url))
+    assert.equal((await run('send.mjs', ['--to', 'W', '--body', 'x', '--no-reply'], { env })).code, 2)
+    ;({ root: root2, env: env2 } = tmpEnv(st.url, { IRORI_RELAY_KEY: FAKE_KEY }))
+    const ok = await run('send.mjs', ['--to', 'W', '--body', 'x', '--no-reply'], { env: env2 })
+    assert.equal(ok.code, 0, ok.stderr)
+    assert.equal(st.reqs.at(-1).key, FAKE_KEY)
+    assert.ok(!ok.stdout.includes('pollution-key'))
+    assert.ok(!ok.stderr.includes('pollution-key'))
+  } finally {
+    restorePollution(prev)
+    if (root) rm(root)
+    if (root2) rm(root2)
+    await st.close()
+  }
+})
+
+test('process.env 帶生產 IRORI_* 時 spawn recv 只用 childEnv（不連正式後端）', async () => {
+  const st = await startFakeRelay()
+  const prev = savePollution()
+  let root = null
+  let env = null
+  try {
+    ;({ root, env } = tmpEnv(st.url, { IRORI_RELAY_KEY: FAKE_KEY, IRORI_RECV_POLL_MS: '500', IRORI_ROSTER_MS: '500' }))
+    const c = spawn(process.execPath, [script('recv.mjs')], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: childEnv(env) })
+    let out = ''
+    c.stdout.on('data', d => (out += d))
+    c.stderr.on('data', d => (out += d))
+    await new Promise(r => setTimeout(r, 400))
+    c.kill()
+    await new Promise(r => c.on('close', r))
+    assert.ok(st.reqs.some(q => q.key === FAKE_KEY), '應連假後端')
+    assert.ok(!out.includes('pollution-key'))
+  } finally {
+    restorePollution(prev)
+    if (root) rm(root)
+    await st.close()
+  }
+})

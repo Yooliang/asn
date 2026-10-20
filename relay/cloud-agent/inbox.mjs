@@ -8,7 +8,7 @@
 // 回信：node send.mjs --to <from_node>/<from_agent> --reply-to <id> --body "…" (--reply|--no-reply)
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Fail, loadAgents, resolveConfig } from './config.mjs'
+import { Fail, resolveCloudAgents, resolveConfig, rosterScanEnvFrom } from './config.mjs'
 import { appendLineDurable, ensureDir, readJsonl } from './lib.mjs'
 
 const USAGE = `用法：
@@ -37,7 +37,7 @@ const fmt = m => {
   return `[${m.id}] ${m.created_at ?? ''} to=${m.to_agent || '（未指定）'} from=${m.from_node}${m.from_agent ? '/' + m.from_agent : ''} (${reply})${m.reply_to ? ` reply_to=${m.reply_to}` : ''}\n${m.body}\n`
 }
 
-export function main(argv, env = process.env, out = s => process.stdout.write(s + '\n')) {
+export async function main(argv, env = process.env, out = s => process.stdout.write(s + '\n')) {
   const a = parseArgs(argv)
   if (a.help) { out(USAGE); return 0 }
   const cfg = resolveConfig(env)
@@ -60,7 +60,7 @@ export function main(argv, env = process.env, out = s => process.stdout.write(s 
   }
   const seen = new Set()
   // 沒指定收件代理、或收件代理不在名單上的信，算給預設那位（不會被漏掉）
-  const names = new Set(loadAgents(cfg).map(x => x.name))
+  const names = new Set((await resolveCloudAgents(cfg, rosterScanEnvFrom(cfg))).map(x => x.name))
   const owner = m => (m.to_agent && names.has(m.to_agent) ? m.to_agent : cfg.name)
   const list = mails.filter(m => m?.id && !seen.has(m.id) && seen.add(m.id)).filter(m => a.all || !doneIds.has(m.id))
     .filter(m => !a.agent || owner(m) === a.agent)
@@ -71,6 +71,8 @@ export function main(argv, env = process.env, out = s => process.stdout.write(s 
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try { process.exitCode = main(process.argv.slice(2)) }
-  catch (e) { console.error(e instanceof Fail ? e.message : `錯誤：${e.message}`); process.exitCode = e instanceof Fail ? e.code : 4 }
+  main(process.argv.slice(2)).then(
+    c => { process.exitCode = c },
+    e => { console.error(e instanceof Fail ? e.message : `錯誤：${e.message}`); process.exitCode = e instanceof Fail ? e.code : 4 },
+  )
 }

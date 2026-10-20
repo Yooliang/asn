@@ -9,7 +9,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createCore } from '../machine/relay-core.mjs'
-import { Fail, ID_RE, NO_KEY_MSG, UUID_RE, loadAgents, readKey, resolveConfig } from './config.mjs'
+import { Fail, ID_RE, NO_KEY_MSG, UUID_RE, readKey, resolveCloudAgents, resolveConfig, rosterScanEnvFrom } from './config.mjs'
 
 const MAX_BODY = 20000
 const USAGE = `用法：
@@ -58,7 +58,7 @@ export async function main(argv, env = process.env) {
   const key = readKey(cfg, env)
   if (!key) throw new Fail(2, NO_KEY_MSG)
   const from = (a.from || cfg.name).trim().slice(0, 100)
-  const names = loadAgents(cfg).map(x => x.name)
+  const names = (await resolveCloudAgents(cfg, rosterScanEnvFrom(cfg))).map(x => x.name)
   if (!names.includes(from)) throw new Fail(1, `「${from}」不在這台的代理名單上（${names.join('、')}）：用名單上的名字回信，或先把他加進 agents.json`)
   const core = createCore({ baseUrl: cfg.baseUrl, key, anonKey: '', log: () => {}, workDir: cfg.mailDir })
   let r

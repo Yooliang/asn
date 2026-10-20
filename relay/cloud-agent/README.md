@@ -15,6 +15,9 @@
 | 已處理 | `/workspace/relay/done.jsonl` | 同上 |
 | 常駐的 log／pid | `/workspace/relay/recv.log`（20MB 輪替）、`recv.pid`；`recv.out` 只收當機堆疊 | 同上 |
 | 節點代號／視窗名 | `grok`（`IRORI_RELAY_ID`）／`Grok`（`cwd_label=grok-cloud`、`engine=grok`） | `IRORI_RELAY_ID`、`IRORI_CLOUD_ROSTER_NAME` |
+| 本機夥伴名單（roster 掃描） | Grok 夥伴目錄 `/home/box/agent-data/agents` | `GROK_AGENTS_DIR` |
+| Claude 視窗（預設不列） | 設 `1` 才跑 `IRORI_CLAUDE_BIN agents --json`（目前雲端不轉信進 Claude，勿開） | `IRORI_CLOUD_ROSTER_CLAUDE`、`IRORI_CLAUDE_BIN` |
+| 自動掃描 roster | 預設開；與 `agents.json` 合併（見下） | `IRORI_CLOUD_ROSTER_AUTO=0` 關閉掃描 |
 | Realtime 門鈴（選用） | 沒有就只輪詢 | `IRORI_RELAY_ANON_KEY` 或 `/workspace/.irori-relay/anon.key` |
 
 ## 一、取得程式
@@ -22,7 +25,7 @@
 程式要保留 repo 的相對位置（`recv.mjs` 會 import `../machine/`）。放到 `/workspace/irori-relay/`：
 
 ```
-/workspace/irori-relay/relay/cloud-agent/*.mjs        （含 boot.example.sh）
+/workspace/irori-relay/relay/cloud-agent/*.mjs        （含 grok-agents.mjs、boot.example.sh）
 /workspace/irori-relay/relay/machine/{relay-core,safe-log,register}.mjs
 ```
 
@@ -59,16 +62,27 @@ echo "很長的內容" | node relay/cloud-agent/send.mjs --to W/W-政策 --body 
 
 不帶 `--reply-to`，收發室不知道你回的是哪一封，會誤報「對方沒有回覆」。主動寄信也是同一個指令（只是不用 `--reply-to`）。
 
-## 四之一、一台環境住好幾位代理
+## 四之一、一台環境住好幾位代理（roster 名單）
 
-在 `<信件目錄>/agents.json` 列出名單（收信程式每次回報都重讀，改了不用重啟），ASN 好友名單上每位各一列：
+**一份名單三處共用**：`config.mjs` 的 `resolveCloudAgents()` 供 **roster 回報**、`send.mjs --from` 檢查、`inbox.mjs --agent` 篩選（邏輯一致）。
+
+**預設（自動掃描）**：`recv.mjs` 每 60 秒掃 Grok 夥伴並合併 `agents.json` 後回報收發室：
+
+1. **Grok 夥伴**：在 `GROK_AGENTS_DIR`（預設 `/home/box/agent-data/agents`）底下，每個 UUID 子目錄只讀 `profile.json` 的 `name`（不讀記憶、附件或資料庫）。
+2. **Claude Code 視窗**：預設**不列**（`IRORI_CLOUD_ROSTER_CLAUDE=1` 才執行 `claude agents --json`；雲端目前沒有把信轉進 Claude 視窗，開了會讓 ASN 看得到但收不到信）。
+
+**與 agents.json 合併**（掃描開著時）：名字以掃描為主，`agents.json` 多列的也會收進名單；**同名**時 `status`、`cwd_label` 以 `agents.json` 為準（方便前台標忙碌）。掃描與手動都空時，才只回報預設那位（`IRORI_CLOUD_ROSTER_NAME`，預設 `Grok`）。
+
+手動檢查掃描結果：`node relay/cloud-agent/grok-agents.mjs`（JSON）或 `--names`。
+
+**關閉自動掃描**（只用固定名單）：設 `IRORI_CLOUD_ROSTER_AUTO=0`，在 `<信件目錄>/agents.json` 列出名單（每次讀取都重讀，改了不用重啟 recv）：
 
 ```json
 [{"name": "小真"}, {"name": "正見", "cwd_label": "policy"}, {"name": "牧陽"}, {"name": "檔案"}, {"name": "島作", "status": "busy"}]
 ```
 
-- 也可以用環境變數 `IRORI_CLOUD_AGENTS="小真,正見,牧陽"`；agents.json 優先。都沒有＝只有 `Grok` 一位。
-- `status` 只認 `idle`（線上）、`busy`（忙碌）、`waiting`（暫離），其餘當 `idle`。這台掃不到誰真的開著，名單就是你寫的固定名單。
+- 也可以用環境變數 `IRORI_CLOUD_AGENTS="小真,正見,牧陽"`；檔案優先於環境變數。關閉掃描且都沒有＝只有 `Grok` 一位。
+- `status` 只認 `idle`（線上）、`busy`（忙碌）、`waiting`（暫離），其餘當 `idle`。掃描到的 Grok 夥伴預設 `idle`；要改狀態請在 `agents.json` 寫同名覆寫。
 - 看某一位的信：`node inbox.mjs --agent 正見`。沒指定收件代理、或收件代理不在名單上的信，算給預設那位（`Grok`），不會漏掉。
 - 以某一位的名義回信：`send.mjs … --from 正見`。寄件人必須在名單上，打錯字會被擋。
 
@@ -84,4 +98,5 @@ echo "很長的內容" | node relay/cloud-agent/send.mjs --to W/W-政策 --body 
 node --test "relay/cloud-agent/test/*.test.mjs"
 ```
 
-只連 127.0.0.1 的假後端，路徑全指到暫存資料夾，Windows 也能跑。
+只連 127.0.0.1 的假後端，路徑全指到暫存資料夾（`tmpEnv` 預設 `IRORI_CLOUD_ROSTER_AUTO=0`、空的 `GROK_AGENTS_DIR`、假 Claude CLI），不會讀 Grok 雲端本機的 `/home/box/agent-data/agents` 或真的 `claude`。
+`childEnv` 會先剔除 shell 裡的 `IRORI_*`（含 `start.sh` export 的金鑰與路徑），再套用測試值，所以在已設 `IRORI_RELAY_KEY` 的環境裡跑測試也安全。Windows 也能跑。

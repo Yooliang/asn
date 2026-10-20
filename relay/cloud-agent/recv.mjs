@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 // 雲端代理的收信常駐程式：Realtime 門鈴＋每 2 分鐘補拉；每封信「先 append 到 inbox.jsonl 並 fsync，寫成功才 ack」。
 // 環境被重置時信還留在收發室信箱（沒 ack），不會掉；以信件 id 去重（含重啟後，從 inbox.jsonl 重建）。
-// 每 60 秒 roster 回報一個視窗（預設 Grok），讓 ASN 好友名單看得到。roster 被拒（403）只記一次、之後改成每小時才試一次。
+// 每 60 秒 roster 回報 resolveCloudAgents 名單（Grok 掃描＋agents.json 合併；見 grok-agents.mjs）。roster 403 只記一次、之後每小時才試一次。
 //   node recv.mjs          長駐（boot.sh 用 nohup setsid 啟動）
 // 不需要公開 IP：全程只往外連（HTTPS 輪詢＋WebSocket 門鈴）。exit code：2 沒金鑰、3 已有另一個在跑。
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createCore } from '../machine/relay-core.mjs'   // 沿用 API 呼叫與門鈴，不複製協定
 import { createLog } from '../machine/safe-log.mjs'
-import { NO_KEY_MSG, loadAgents, readAnonKey, readKey, resolveConfig } from './config.mjs'
+import { NO_KEY_MSG, readAnonKey, readKey, resolveCloudAgents, resolveConfig, rosterScanEnvFrom } from './config.mjs'
 import { acquirePidLock, appendLineDurable, ensureDir, readJsonl } from './lib.mjs'
 
 const recordOf = m => ({
@@ -19,7 +19,7 @@ const recordOf = m => ({
 })
 
 // 收信核心（可單獨測試）：api(action, {method, body}) 是 relay-core 的 api
-export function createReceiver({ api, cfg, log, now = () => Date.now() }) {
+export function createReceiver({ api, cfg, log, now = () => Date.now(), listAllFn, env = rosterScanEnvFrom(cfg) }) {
   ensureDir(cfg.mailDir, 0o700)
   const seen = new Set(readJsonl(cfg.inboxFile).map(m => m?.id).filter(Boolean))   // 重啟後靠檔案去重
   let pulling = false, again = false
@@ -47,11 +47,11 @@ export function createReceiver({ api, cfg, log, now = () => Date.now() }) {
     catch (e) { log(`pull failed (${why}): ${e.message}`) } finally { pulling = false }
   }
 
-  // roster：名單上的每位代理各一列（見 config.mjs 的 loadAgents）。403＝這個節點沒有 can_roster，只記一次、之後每小時才試一次（管理者開了權限就會自己恢復）
+  // roster：每位代理一列（本機掃描或 config.mjs 的 loadAgents）。403＝沒有 can_roster，只記一次、之後每小時才試
   let blockedUntil = 0, warned = false
   async function rosterOnce() {
     if (now() < blockedUntil) return false
-    const agents = loadAgents(cfg)   // 每次都重讀 agents.json，改名單不用重啟
+    const agents = await resolveCloudAgents(cfg, env, listAllFn)
     try {
       await api('roster', { method: 'POST', body: { agents } })
       if (warned) log('roster ok again')
