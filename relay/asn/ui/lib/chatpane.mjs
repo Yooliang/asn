@@ -121,7 +121,7 @@ export const ChatPane = {
 <div class="pane chatpane" :class="classes" v-if="friend">
   <div class="conv">
     <div class="conv-main">
-      <div class="to-line">給：<span v-html="emo(friend.nick)"></span>
+      <div class="to-line"><span v-html="emo(friend.nick)"></span>
         <span class="to-psm" v-if="friend.psm" v-html="emo(friend.psm)"></span>
       </div>
       <div class="warn" v-if="friend.status !== 'online'">
