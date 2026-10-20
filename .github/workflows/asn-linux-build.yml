@@ -1,0 +1,58 @@
+name: ASN Linux 建置
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'relay/asn/**'
+      - '.github/workflows/asn-linux-build.yml'
+  pull_request:
+    paths:
+      - 'relay/asn/**'
+      - '.github/workflows/asn-linux-build.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: relay/asn
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安裝系統依賴
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libssl-dev \
+            libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libjavascriptcoregtk-4.1-dev libsoup-3.0-dev patchelf
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: relay/asn/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: 安裝前端依賴
+        run: npm ci
+
+      - name: 單元測試（Node）
+        run: npm test
+
+      - name: 單元測試（Rust）
+        run: npm run test:rust
+
+      - name: 建置 deb 與 AppImage
+        run: npm run build
+
+      - name: 上傳成品
+        uses: actions/upload-artifact@v4
+        with:
+          name: asn-linux-${{ github.sha }}
+          path: |
+            relay/asn/src-tauri/target/release/bundle/deb/*.deb
+            relay/asn/src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
