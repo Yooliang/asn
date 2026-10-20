@@ -2,6 +2,8 @@
 //! 視窗按鈕（最小化／最大化／關閉）與 --shot 的螢幕擷取。
 use crate::{App, BROWSER_ARGS};
 use serde::Deserialize;
+#[cfg(windows)]
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -80,6 +82,7 @@ pub async fn open_chat(app: AppHandle, frame: State<'_, Frame>, id: String, titl
         .inner_size(720.0, 600.0)
         .min_inner_size(520.0, 440.0)
         .decorations(frame.0.load(Ordering::Relaxed))
+        .disable_drag_drop_handler()   // 讓 WebView2 的 HTML5 拖放（分頁排序）能觸發
         .additional_browser_args(BROWSER_ARGS);
     b = if n == 0.0 { b.center() } else { b.position(120.0 + 28.0 * n, 80.0 + 28.0 * n) };
     b.build().map_err(|e| e.to_string())?;
@@ -221,6 +224,7 @@ pub async fn show_toast(app: AppHandle, slots: State<'_, Slots>, toast: Toast) -
         .focused(false)
         .focusable(false)
         .visible(false)
+        .disable_drag_drop_handler()
         .additional_browser_args(BROWSER_ARGS)
         .build();
     let w = match built {
@@ -275,6 +279,11 @@ pub async fn take_shot(app: AppHandle, state: State<'_, App>, tab: Option<String
     if let Some(l) = wins.get("list") { let _ = l.set_position(PhysicalPosition::new(40, 40)); let _ = l.set_always_on_top(true); }
     if let Some((_, c)) = wins.iter().find(|(k, _)| k.starts_with("chat-")) { let _ = c.set_position(PhysicalPosition::new(420, 40)); let _ = c.set_always_on_top(true); }
     tokio::time::sleep(Duration::from_millis(900)).await;
+    take_shot_capture(&app, &dir, tab).await
+}
+
+#[cfg(windows)]
+async fn take_shot_capture(app: &AppHandle, dir: &Path, tab: Option<String>) -> Result<(), String> {
     let mut specs = vec![];
     for (label, w) in app.webview_windows() {
         // 帶 tab：只拍名單視窗，檔名 tabs-<tab>（逐頁籤截圖用）
@@ -301,11 +310,17 @@ foreach ($s in ($env:ASN_SPECS -split ';')) {
     let status = tokio::process::Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .env("ASN_SPECS", specs.join(";"))
-        .env("ASN_DIR", &dir)
+        .env("ASN_DIR", dir)
         .status()
         .await
         .map_err(|e| e.to_string())?;
     if status.success() { Ok(()) } else { Err(format!("擷取失敗：{status}")) }
+}
+
+/// Linux 上沒有與 PowerShell 等價的可靠螢幕擷取；--shot 仍跑完收發流程，略過 PNG。
+#[cfg(not(windows))]
+async fn take_shot_capture(_app: &AppHandle, _dir: &std::path::Path, _tab: Option<String>) -> Result<(), String> {
+    Ok(())
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@
 //! 文字回前端（前端再過濾靜音幻覺字、填進輸入框，不自動送出）。**聲音不離開這台電腦**。
 //!
 //! 辨識引擎與模型都不進 git，第一次使用時由使用者按「下載」才抓：
-//! - 引擎：whisper.cpp 官方 release 的 whisper-bin-x64.zip（固定版本、固定 SHA-256），只解出 whisper-cli.exe 與 DLL。
+//! - 引擎：whisper.cpp 官方 release（Windows：whisper-bin-x64.zip；Linux：whisper-bin-ubuntu-x64.tar.gz），固定 SHA-256。
 //! - 模型：Hugging Face ggerganov/whisper.cpp 的 ggml 量化檔（固定 SHA-256）。
 //!
 //! 為什麼用外部程式而不是 whisper-rs：whisper-rs 要在每個開發者與 CI 的機器上編 C++（要 cmake、libclang），
@@ -19,9 +19,22 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 
 pub const ENGINE_TAG: &str = "b5454";
+#[cfg(windows)]
 pub const ENGINE_URL: &str = "https://github.com/ggml-org/whisper.cpp/releases/download/b5454/whisper-bin-x64.zip";
+#[cfg(windows)]
 pub const ENGINE_SHA256: &str = "6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb";
+#[cfg(windows)]
 pub const ENGINE_BYTES: u64 = 8_928_640;
+#[cfg(not(windows))]
+pub const ENGINE_URL: &str = "https://github.com/ggml-org/whisper.cpp/releases/download/b5454/whisper-bin-ubuntu-x64.tar.gz";
+#[cfg(not(windows))]
+pub const ENGINE_SHA256: &str = "a72becf15d7917f990f6313867a52638b82b7f9ef237fb0c980dac56a135781c";
+#[cfg(not(windows))]
+pub const ENGINE_BYTES: u64 = 10_364_195;
+
+fn engine_cli_name() -> &'static str {
+    if cfg!(windows) { "whisper-cli.exe" } else { "whisper-cli" }
+}
 
 pub struct Model {
     pub id: &'static str,
@@ -70,7 +83,11 @@ pub fn model_path(data_dir: &Path, m: &Model) -> PathBuf {
 }
 pub fn engine_ready(data_dir: &Path) -> bool {
     let d = engine_dir(data_dir);
-    d.join("whisper-cli.exe").is_file() && d.join("whisper.dll").is_file()
+    if cfg!(windows) {
+        d.join("whisper-cli.exe").is_file() && d.join("whisper.dll").is_file()
+    } else {
+        d.join("whisper-cli").is_file() && d.join("libwhisper.so").is_file()
+    }
 }
 pub fn model_ready(data_dir: &Path, m: &Model) -> bool {
     std::fs::metadata(model_path(data_dir, m)).map(|x| x.len() == m.bytes).unwrap_or(false)
@@ -139,7 +156,7 @@ async fn download_inner(client: &reqwest::Client, url: &str, part: &Path, sha256
 // ---------- 引擎解壓縮 ----------
 
 /// 只解出 Release/ 底下的 whisper-cli.exe 與 .dll（檔名不含路徑分隔，其餘一律略過，防 zip 路徑穿越）。
-/// 先解到暫存資料夾，齊了才改名成正式資料夾。回傳解出幾個檔。
+#[cfg(windows)]
 pub fn extract_engine(zip_path: &Path, dest: &Path) -> Result<usize, String> {
     let file = std::fs::File::open(zip_path).map_err(|e| format!("開啟壓縮檔失敗：{e}"))?;
     let mut zip = zip::ZipArchive::new(file).map_err(|e| format!("壓縮檔格式不對：{e}"))?;
@@ -168,6 +185,57 @@ pub fn extract_engine(zip_path: &Path, dest: &Path) -> Result<usize, String> {
             n += 1;
         }
         if !tmp.join("whisper-cli.exe").is_file() || !tmp.join("whisper.dll").is_file() {
+            return Err("壓縮檔裡找不到辨識引擎。".into());
+        }
+        Ok(())
+    })();
+    if let Err(e) = res {
+        let _ = std::fs::remove_dir_all(&tmp);
+        return Err(e);
+    }
+    let _ = std::fs::remove_dir_all(dest);
+    std::fs::rename(&tmp, dest).map_err(|e| {
+        let _ = std::fs::remove_dir_all(&tmp);
+        format!("安裝引擎失敗：{e}")
+    })?;
+    Ok(n)
+}
+
+/// 解出 whisper-bin-ubuntu-x64/ 底下的 whisper-cli 與 .so（不含子目錄，防路徑穿越）。
+#[cfg(not(windows))]
+pub fn extract_engine(tar_path: &Path, dest: &Path) -> Result<usize, String> {
+    use flate2::read::GzDecoder;
+    use tar::Archive;
+    const PREFIX: &str = "whisper-bin-ubuntu-x64/";
+    let file = std::fs::File::open(tar_path).map_err(|e| format!("開啟壓縮檔失敗：{e}"))?;
+    let dec = GzDecoder::new(file);
+    let mut archive = Archive::new(dec);
+    let tmp = PathBuf::from(format!("{}.tmp", dest.display()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).map_err(|e| format!("建立資料夾失敗：{e}"))?;
+    let mut n = 0;
+    let res = (|| -> Result<(), String> {
+        for entry in archive.entries().map_err(|e| format!("讀壓縮檔失敗：{e}"))? {
+            let mut entry = entry.map_err(|e| format!("讀壓縮檔失敗：{e}"))?;
+            let path = entry.path().map_err(|e| format!("讀壓縮檔失敗：{e}"))?;
+            let name = path.to_string_lossy().replace('\\', "/");
+            let Some(rest) = name.strip_prefix(PREFIX) else { continue };
+            if rest.is_empty() || rest.contains('/') || rest.contains("..") || rest.contains(':') {
+                continue;
+            }
+            let lower = rest.to_ascii_lowercase();
+            let wanted = lower == "whisper-cli" || lower.ends_with(".so");
+            if !wanted {
+                continue;
+            }
+            if entry.size() > 64 * 1024 * 1024 {
+                return Err("壓縮檔裡有異常大的檔案，已中止。".into());
+            }
+            let mut out = std::fs::File::create(tmp.join(rest)).map_err(|e| format!("寫檔失敗：{e}"))?;
+            std::io::copy(&mut entry, &mut out).map_err(|e| format!("解壓縮失敗：{e}"))?;
+            n += 1;
+        }
+        if !tmp.join("whisper-cli").is_file() || !tmp.join("libwhisper.so").is_file() {
             return Err("壓縮檔裡找不到辨識引擎。".into());
         }
         Ok(())
@@ -255,7 +323,7 @@ async fn run_engine(data_dir: &Path, model: &Model, wav: &[u8], lang: &str) -> R
     let txt_path = tmp.join(format!("out-{stamp}.txt"));
     std::fs::write(&wav_path, wav).map_err(|e| format!("寫入暫存失敗：{e}"))?;
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(1, 8);
-    let mut cmd = tokio::process::Command::new(dir.join("whisper-cli.exe"));
+    let mut cmd = tokio::process::Command::new(dir.join(engine_cli_name()));
     cmd.args(build_args(&model_path(data_dir, model), &wav_path, &out_base, lang, threads))
         .current_dir(&dir)
         .stdin(std::process::Stdio::null())
@@ -334,15 +402,16 @@ pub async fn stt_install(app: State<'_, App>, handle: AppHandle) -> Result<(), S
     let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(20)).read_timeout(Duration::from_secs(60)).build().map_err(|e| e.to_string())?;
     let dd = app.data_dir.clone();
     if !engine_ready(&dd) {
-        let zip = stt_dir(&dd).join(format!("engine-{ENGINE_TAG}.zip"));
+        let ext = if cfg!(windows) { "zip" } else { "tar.gz" };
+        let archive = stt_dir(&dd).join(format!("engine-{ENGINE_TAG}.{ext}"));
         let h = handle.clone();
-        download_verified(&client, ENGINE_URL, &zip, ENGINE_SHA256, ENGINE_BYTES + 1024 * 1024, move |d, t| {
+        download_verified(&client, ENGINE_URL, &archive, ENGINE_SHA256, ENGINE_BYTES + 1024 * 1024, move |d, t| {
             let _ = h.emit("asn:stt-progress", Progress { stage: "engine", done: d, total: t });
         })
         .await?;
-        let (z, d2) = (zip.clone(), engine_dir(&dd));
+        let (z, d2) = (archive.clone(), engine_dir(&dd));
         let r = tauri::async_runtime::spawn_blocking(move || extract_engine(&z, &d2)).await.map_err(|e| e.to_string())?;
-        let _ = std::fs::remove_file(&zip);
+        let _ = std::fs::remove_file(&archive);
         r?;
     }
     if !model_ready(&dd, model) {
@@ -516,6 +585,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn 解壓縮_只收_release_底下的_cli_與_dll_路徑穿越一律略過() {
         let d = tempfile::tempdir().unwrap();
         let zp = d.path().join("e.zip");
@@ -544,6 +614,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn 解壓縮_缺引擎或不是壓縮檔就失敗_不留半成品() {
         let d = tempfile::tempdir().unwrap();
         let zp = d.path().join("e.zip");
@@ -564,8 +635,12 @@ mod tests {
         // 引擎在、模型長度不對（沒下載完）也不算
         let ed = engine_dir(d.path());
         std::fs::create_dir_all(&ed).unwrap();
-        std::fs::write(ed.join("whisper-cli.exe"), b"x").unwrap();
-        std::fs::write(ed.join("whisper.dll"), b"x").unwrap();
+        std::fs::write(ed.join(engine_cli_name()), b"x").unwrap();
+        if cfg!(windows) {
+            std::fs::write(ed.join("whisper.dll"), b"x").unwrap();
+        } else {
+            std::fs::write(ed.join("libwhisper.so"), b"x").unwrap();
+        }
         let mp = model_path(d.path(), &MODELS[0]);
         std::fs::create_dir_all(mp.parent().unwrap()).unwrap();
         std::fs::write(&mp, b"short").unwrap();

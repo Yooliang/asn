@@ -149,7 +149,7 @@ export const ChatPane = {
 <div class="pane chatpane" :class="classes" v-if="friend">
   <div class="conv">
     <div class="conv-main">
-      <div class="to-line">給：<span v-html="emo(friend.nick)"></span>
+      <div class="to-line"><span v-html="emo(friend.nick)"></span>
         <span class="to-psm" v-if="friend.psm" v-html="emo(friend.psm)"></span>
       </div>
       <div class="warn" v-if="friend.status !== 'online'">
@@ -199,7 +199,6 @@ export const ChatPane = {
           <button class="tool icon" type="button" @click="pickerOpen = !pickerOpen" :aria-expanded="pickerOpen" aria-label="表情符號" title="表情符號">
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="9.5" fill="#ffd84a" stroke="#b58a00"/><circle cx="8.6" cy="9.6" r="1.4" fill="#5a3b00"/><circle cx="15.4" cy="9.6" r="1.4" fill="#5a3b00"/><path d="M7.2 14c1.2 2.6 3 3.6 4.8 3.6s3.6-1 4.8-3.6" fill="none" stroke="#5a3b00" stroke-width="1.6" stroke-linecap="round"/></svg>
           </button>
-          <button class="tool caret" type="button" @click="pickerOpen = !pickerOpen" :aria-expanded="pickerOpen" aria-label="開啟表情選單" title="表情選單">▾</button>
         </span>
         <button class="tool icon" type="button" @click="nudge" :disabled="nudgeCooling" aria-label="傳送震動" title="傳送震動">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="8.2" y="4.5" width="7.6" height="15" rx="1.8" fill="#dfeaf6" stroke="#4a5d73" stroke-width="1.4"/><circle cx="12" cy="16.6" r="1" fill="#4a5d73"/><path d="M4.6 8.5l-2 3.5 2 3.5M19.4 8.5l2 3.5-2 3.5" fill="none" stroke="#d9302b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>

@@ -5,6 +5,8 @@ Tauri 2（Rust）＋ Vue 3；多視窗：好友名單一扇、每位好友的對
 
 ## 安裝與執行
 
+### Windows
+
 需要：Node 22+、Rust（`winget install --id Rustlang.Rustup -e`，再 `rustup default stable-msvc`）、Visual Studio C++ 建置工具、WebView2（Windows 11 內建）。
 
 ```
@@ -13,6 +15,26 @@ npm install
 npm start            # 開發模式（tauri dev）
 npm run build        # 出 exe 與安裝檔（src-tauri/target/release/asn.exe、bundle/nsis/ASN_*_x64-setup.exe）
 ```
+
+### Linux（deb／AppImage）
+
+需要：Node 22+、Rust stable（`rustup default stable`）、Tauri 2 的 Linux 依賴（Ubuntu／Debian 範例）：
+
+```
+sudo apt-get update
+sudo apt-get install -y build-essential pkg-config libssl-dev \
+  libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+  libjavascriptcoregtk-4.1-dev libsoup-3.0-dev patchelf
+```
+
+```
+cd relay/asn
+npm ci
+npm start            # 開發模式（需要圖形桌面或 X11／Wayland）
+npm run build        # 出 asn 二進位、bundle/deb/*.deb、bundle/appimage/*.AppImage
+```
+
+已知差異：開允許清單內的網址用 `xdg-open`；提示音在 WebKitGTK 上可能要先點過視窗才有聲（不像 WebView2 可背景播放）；右下角置頂提示在 Wayland 上「不搶焦點」行為需實機確認；`--shot` 端到端截圖與 `scripts/mem.mjs` 僅 Windows。
 
 關掉好友名單視窗＝結束程式。
 
@@ -25,7 +47,7 @@ npm run build        # 出 exe 與安裝檔（src-tauri/target/release/asn.exe�
 - 心跳：每 30 秒寫 `~/.irori-relay/machine-<節點>/self-recv/<視窗名>.json`，內容 `{"pid","name","t"}`，格式、路徑、原子寫入都與 `relay/machine/self-recv.mjs` 相同，pid 是本程式。機器橋看到 90 秒內且 pid 活著的心跳，就不再轉交這個視窗的信。結束時清掉自己的心跳。同一個視窗名已有另一個 ASN 在跑就拒絕啟動。
 - 寄信：`POST ?action=send`，`expects_reply` 一定明說（一般訊息 `true`、震動 `false`；震動由前端帶 `nudge:true`，內文由 Rust 組），回覆某封來信時帶 `reply_to`。`from_agent` 由 Rust 端強制設成視窗名，前端不能自填。
 - 好友名單：`list` 的 members 各節點視窗，一視窗一列（名字＝視窗名，個人訊息＝資料夾（cwd_label，沒有就空；設備由左側頁籤表示））；結尾「收發室」的不列；每 60 秒更新，有人新上線會彈「已經登入」。狀態：busy／working／running＝忙碌、其餘＝線上、不在名單＝離線（有對話的好友才會留在離線）。
-- 震動：寄內文「（<視窗名> 傳送了一個震動）」、`expects_reply:false` 的信（前端只帶 `nudge:true`，內文與視窗名由 Rust 端組，前端不能自填）；收到時，整段內文就是這一句（新格式），或內文含舊版的 `[震動]`（相容還沒升級的 ASN），就抖動該對話視窗（沒開就未讀＋提示），標記不顯示在對話裡。
+- 震動：寄兩行內文——「（<視窗名> 傳送了一個震動）」加一行請對方回一個震動的提示（`NUDGE_HINT`，`ui/lib/text.mjs` 與 `relay.rs` 同一句）——`expects_reply:false` 的信（前端只帶 `nudge:true`，內文與視窗名由 Rust 端組，前端不能自填）；收到時，第一行是這一句、其餘是空的或就是那行提示（新格式；AI 照提示回的震動只有第一行），或內文含舊版的 `[震動]`（相容還沒升級的 ASN），就抖動該對話視窗（沒開就未讀＋提示），標記不顯示在對話裡。
 
 ## 介面
 
@@ -45,7 +67,7 @@ npm run build        # 出 exe 與安裝檔（src-tauri/target/release/asn.exe�
   - **自己的大頭貼**：名單最上面點一下就開選圖（同設定頁的上傳流程），右鍵可「改回自動產生」。音效在設定頁是「開／關」下拉。
   - **頭像模式**：左（預設）／右＝對話區旁邊一欄放大頭貼（對方在上、自己在下），欄旁的小箭頭可收起／展開（狀態記住）；整合＝像 LINE，頭像跟著訊息（對方靠左帶小頭像、自己靠右），沒有側欄也沒有箭頭。
   - **文字底色**：透明（預設）／色彩（每則訊息一個底色泡泡、雙方同色）／自動（對方淡灰、自己淡綠）。
-  - **工具列位置**：輸入框上方（預設，舊版 MSN 6～2009 的樣子）／輸入框下方。工具列按鈕只有圖示（內嵌 SVG，滑過看提示、`aria-label` 是中文），表情圖示旁的 ▾ 開表情選單。
+  - **工具列位置**：輸入框上方（預設，舊版 MSN 6～2009 的樣子）／輸入框下方。工具列按鈕只有圖示（內嵌 SVG，滑過看提示、`aria-label` 是中文），按表情圖示開表情選單。
   - 對話區的版面只有一份（`ui/lib/chatpane.mjs`），分離模式的對話視窗與整合模式的分頁共用。
 - 大頭貼：名單、對話區、右下角提示、自己的頭像都用圖片（`ui/lib/avatar.mjs`）。**自動產生**：依字串雜湊產生左右對稱 8×8 色塊（三種顏色，blockies 風格，自己實作、不含第三方程式），種子＝好友 id（`節點/視窗名`），每人固定、不同人不同。**設備上傳**：設定頁「大頭貼」選圖 → 前端置中裁成正方形、縮成 96×96、轉 webp（不行就 png）、≤ 32 KB → 經 Rust 指令 `relay_set_avatar`（檢查格式與大小才送，金鑰只在 Rust）上傳到收發室；也可以「移除，改回自動產生」。**顯示規則**：名單上的 AI 視窗一律自動產生；不在名單上的寄件人（例如別台的 ASN）用他那台設備上傳的圖，沒有就自動產生；自己＝本機節點有上傳就用上傳的，沒有就自動產生。`list` 只帶各節點的 `avatar_updated_at`，圖用 `GET ?action=avatar&node=<節點>` 在更新時間變了才取（收到的圖也要通過格式檢查才顯示）。
 - 傳照片與檔案（設計見 `docs/ATTACHMENTS.md`）：對話工具列有「傳照片」（也可直接貼上圖片）與「傳送檔案」。照片先在前端縮到長邊 2048、轉 webp（≤ 5 MB）並做 256 長邊縮圖；一般檔案（pdf、txt、md、json、csv、zip、docx、xlsx、pptx，≤ 25 MB）不壓縮不轉檔。交給 Rust 指令 `relay_send_attachment`：檢查型別、大小與檔頭才依序向收發室要一次性上傳網址、上傳、確認、寄信（金鑰只在 Rust）。對話裡照片顯示縮圖（點了放大，可另存）、檔案顯示檔案卡（點了下載並另存到 `下載\ASN`）；對方的來信也一樣。保存 30 天，過期顯示「已過期」。可重用入口：`ui/lib/photo-canvas.mjs` 的 `imageFromBlob`／`fileFromBlob`＋`core.sendAttachment`。
@@ -78,7 +100,7 @@ node scripts/mem.mjs             # 量閒置記憶體
 
 ## 已知限制
 
-- 音效用 WebAudio 合成，已用 WebView2 參數允許不點視窗就出聲；若系統靜音則聽不到。
+- 音效用 WebAudio 合成；Windows 已用 WebView2 參數允許不點視窗就出聲，Linux WebKitGTK 可能需先點過視窗；若系統靜音則聽不到。
 - 與本機（同節點）視窗聊天：後端不擋，ASN 放行；`send.mjs` 也放行同節點（本機 Claude 視窗可直接寄信給本機的 ASN），只擋寄給自己這個視窗。
 - 若 ASN 沒開，寄給視窗名的信會留在節點信箱，機器橋心跳過期後會當成「找不到視窗」處理（照橋的退路）。
 - 我的狀態（線上／忙碌…）只是本機顯示，不會回報給收發室。

@@ -78,7 +78,7 @@ mod tests {
 
     #[test]
     fn 網址_https_換_wss_並帶編碼後的_anon() {
-        assert_eq!(ws_url("https://x.supabase.co/functions/v1/irori-relay", "a b").unwrap(), "wss://x.supabase.co/realtime/v1/websocket?apikey=a%20b&vsn=1.0.0");
+        assert_eq!(ws_url("https://x.supabase.co/functions/v1/relay", "a b").unwrap(), "wss://x.supabase.co/realtime/v1/websocket?apikey=a%20b&vsn=1.0.0");
         assert!(ws_url("http://127.0.0.1:9/relay", "k").unwrap().starts_with("ws://127.0.0.1:9/"));
         assert!(ws_url("ftp://x", "k").is_none());
     }
