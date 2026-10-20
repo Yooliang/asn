@@ -4,6 +4,7 @@
 export const FIXED_TABS = [
   { key: 'groups', label: '群組' },
   { key: 'guide', label: '指引' },
+  { key: 'usage', label: '用量' },
   { key: 'settings', label: '設定' },
 ]
 // 名單頁籤的鍵：舊存檔／設定若寫著已拿掉的頁籤（例如通知）或任何不認得的值，一律當沒有，退回名單第一頁

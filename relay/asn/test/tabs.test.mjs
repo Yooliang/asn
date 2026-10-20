@@ -70,8 +70,8 @@ test('deviceItems：只取該設備、線上忙碌在前離線在後、可搜尋
 })
 
 test('固定頁籤：群組、指引、設定（通知已拿掉）；舊存檔或設定寫著通知／不認得的頁籤一律忽略', () => {
-  assert.deepEqual(FIXED_TABS.map(t => t.key), ['groups', 'guide', 'settings'])
-  assert.deepEqual(FIXED_TABS.map(t => t.label), ['群組', '指引', '設定'])
+  assert.deepEqual(FIXED_TABS.map(t => t.key), ['groups', 'guide', 'usage', 'settings'])
+  assert.deepEqual(FIXED_TABS.map(t => t.label), ['群組', '指引', '用量', '設定'])
   assert.equal(normalizeTab('guide'), 'guide')
   assert.equal(normalizeTab('notices'), '')
   for (const v of ['', null, undefined, 3, 'zzz']) assert.equal(normalizeTab(v), '', String(v))

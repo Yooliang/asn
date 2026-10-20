@@ -379,3 +379,20 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 
 .titlebar .ver { opacity: .7; font-weight: normal; }
 .settings .ver-line { display: block; margin-top: 12px; color: #6b7a8c; }
+
+.usage-list{padding:10px;gap:10px;background:var(--panel);overflow:auto}
+.usage-lead{margin:0 0 8px;color:var(--muted);font-size:12px;line-height:1.45}
+.usage-err,.usage-busy{margin:0;color:var(--busy);font-size:12px}
+.usage-card{border:1px solid var(--line);border-radius:4px;padding:8px 10px;background:var(--panel-soft)}
+.usage-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.usage-st{color:var(--muted);font-size:12px}
+.usage-plan{margin-left:auto;color:var(--link);font-size:11px}
+.usage-note{margin:6px 0 0;font-size:12px;color:var(--muted)}
+.usage-wins{margin:8px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+.usage-wins li{display:grid;grid-template-columns:5.5em 1fr auto;gap:6px;align-items:center;font-size:12px}
+.u-bar{height:8px;border:1px solid var(--line);border-radius:4px;background:#fff;overflow:hidden}
+.u-bar i{display:block;height:100%;background:linear-gradient(90deg,#6fb6f0,#1f7ad6)}
+.u-txt{color:var(--muted);white-space:nowrap}
+.usage-actions{display:flex;gap:8px;margin-top:8px}
+.usage-hint{display:block;margin-top:4px;color:var(--muted);font-size:11px;line-height:1.4}
+.usage-refresh{align-self:flex-start;margin-top:4px}

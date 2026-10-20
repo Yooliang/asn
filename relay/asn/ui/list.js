@@ -18,6 +18,7 @@ import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL, normalizeCfg, shouldAutoSpeak, sttStatusText } from './lib/voice-prefs.mjs'
+import { authClass, authLabel, formatWindow, showInstall, showLogin } from './lib/usage.mjs'
 
 const { createApp, reactive, ref, computed, watch } = Vue
 const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯示為離線' }
@@ -280,6 +281,47 @@ const app = createApp({
       voiceMsg.value = voice.state.note
       void refreshVoice()
     }
+    const usageProviders = ref([])
+    const usageBusy = ref(false)
+    const usageErr = ref('')
+    const usageActBusy = ref('')
+    const refreshUsage = async () => {
+      usageBusy.value = true
+      usageErr.value = ''
+      try {
+        const snap = await invoke('ai_usage_snapshot')
+        usageProviders.value = snap.providers ?? []
+      } catch (e) {
+        usageErr.value = e.message || '無法讀取用量'
+      } finally {
+        usageBusy.value = false
+      }
+    }
+    watch(tab, v => { if (v === 'usage') void refreshUsage() }, { immediate: true })
+    const runInstall = async id => {
+      usageActBusy.value = id
+      usageErr.value = ''
+      try {
+        const r = await invoke('ai_cli_install', { tool_id: id })
+        if (!r.ok) usageErr.value = r.message
+        else await refreshUsage()
+      } catch (e) {
+        usageErr.value = e.message
+      } finally {
+        usageActBusy.value = ''
+      }
+    }
+    const runLogin = async id => {
+      usageActBusy.value = id
+      usageErr.value = ''
+      try {
+        await invoke('ai_cli_login', { tool_id: id })
+      } catch (e) {
+        usageErr.value = e.message
+      } finally {
+        usageActBusy.value = ''
+      }
+    }
     return {
       version: info.version, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       frame, FRAMES, FRAME_LABEL, setFrame, SOUND_CHOICES, SOUND_LABEL, soundChoice, soundFromChoice, RESIZE_DIRS, resizeFrom, avMenu,
@@ -290,6 +332,9 @@ const app = createApp({
       tab, adI, rooms, roomsErr, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote,
       GUIDES, openedGuide, view, openGuideKey, closeGuideView, showHome,
       selfNode: info.node, emo, initial, openChat, ctl,
+      usageProviders, usageBusy, usageErr, usageActBusy, refreshUsage, runInstall, runLogin,
+      usageAuthLabel: authLabel, usageAuthClass: authClass, usageWinText: formatWindow,
+      usageShowInstall: showInstall, usageShowLogin: showLogin,
     }
   },
 })
@@ -337,7 +382,7 @@ if (info.shot) {
   }
   // 逐頁籤截圖：本機、第二台設備、群組、指引（清單與一篇內容）、設定
   const p = pages.value.all
-  for (const [name, key] of [['local', p[0]?.key], ['device', p[1]?.key], ['last', p.at(-1)?.key], ['groups', 'groups'], ['guide', 'guide'], ['guide-doc', 'guide'], ['settings', 'settings']]) {
+  for (const [name, key] of [['local', p[0]?.key], ['device', p[1]?.key], ['last', p.at(-1)?.key], ['groups', 'groups'], ['guide', 'guide'], ['guide-doc', 'guide'], ['usage', 'usage'], ['settings', 'settings']]) {
     if (!key) continue
     shotTab.value = key
     if (name === 'guide-doc') Object.assign(ui, openGuide(ui, 'bridge', ui.mode))
