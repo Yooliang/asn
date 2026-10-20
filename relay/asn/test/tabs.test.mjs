@@ -9,7 +9,7 @@ test('statusNote：線上不加，其餘灰字', () => {
   assert.equal(statusNote('online'), '')
   assert.equal(statusNote('busy'), '(忙碌)')
   assert.equal(statusNote('offline'), '(離線)')
-  assert.equal(statusNote('away'), '(馬上回來)')
+  assert.equal(statusNote('away'), '(暫離)')
 })
 
 test('groupHeading：設備名 (線上數/總數)', () => {
@@ -103,4 +103,24 @@ test('廣告輪播：循環一圈回到起點；連結只有 repo 文件寫明�
   assert.deepEqual(adUrls(), ['https://irori.web.app/', 'https://irori.web.app/dev/shots/'])
   for (const a of ADS) assert.ok(!/msn|messenger|microsoft/i.test(JSON.stringify(a)), a.key)
   assert.equal(nextAd(0, 0), 0)
+})
+
+test('groupInDevice：依狀態分線上／忙碌／暫離／離線，空組不列；依類型 Claude、Gemini、Grok 在前，沒回報的歸其他排最後', async () => {
+  const { groupInDevice, groupHeading } = await import('../ui/lib/tabs.mjs')
+  const f = (nick, status, engine) => ({ id: nick, nick, status, engine })
+  const items = [f('a', 'online', 'claude'), f('b', 'busy', 'gemini'), f('c', 'away', null), f('d', 'offline', 'claude'), f('e', 'online', 'grok')]
+  const st = groupInDevice(items, 'status')
+  assert.deepEqual(st.map(g => [g.label, g.items.map(x => x.nick)]), [['線上', ['a', 'e']], ['忙碌', ['b']], ['暫離', ['c']], ['離線', ['d']]])
+  assert.equal(groupHeading(st[0]), '線上 (2)')
+  assert.deepEqual(groupInDevice([f('x', 'busy', 'claude')], 'status').map(g => g.label), ['忙碌'])
+  const en = groupInDevice(items, 'engine')
+  assert.deepEqual(en.map(g => [g.label, g.items.map(x => x.nick)]), [['Claude', ['a', 'd']], ['Gemini', ['b']], ['Grok', ['e']], ['其他', ['c']]])
+  assert.equal(groupHeading(en[0]), 'Claude (1/2)')
+})
+
+test('statusOf：waiting 之類＝暫離', async () => {
+  const { statusOf } = await import('../ui/lib/roster.mjs')
+  assert.equal(statusOf('waiting'), 'away')
+  assert.equal(statusOf('idle'), 'online')
+  assert.equal(statusOf('working'), 'busy')
 })

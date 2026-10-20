@@ -32,13 +32,13 @@
     </div>
     <div class="body">
       <nav class="rail" role="tablist" aria-label="名單分頁">
-        <button v-for="(d, i) in dev.visible" :key="d.key" :style="{ zIndex: 30 - i }" class="rtab dev" :class="{ on: tab === d.key }" role="tab" :aria-selected="tab === d.key" :title="d.label" :aria-label="d.label" @click="tab = d.key">
+        <button v-for="d in dev.visible" :key="d.key" class="rtab dev" :class="{ on: tab === d.key }" role="tab" :aria-selected="tab === d.key" :title="d.label" :aria-label="d.label" @click="tab = d.key">
           <img v-if="d.key === selfNode" src="img/logo.svg" alt="">
           <span v-else class="mono">{{ d.short }}</span>
           <span class="red" v-if="d.unread"></span>
         </button>
         <div class="more-wrap" v-if="dev.more.length">
-          <button class="rtab dev" style="z-index:20" :class="{ on: moreOn }" role="tab" :aria-selected="moreOn" title="更多設備" aria-label="更多設備" @click="moreOpen = !moreOpen">
+          <button class="rtab dev" :class="{ on: moreOn }" role="tab" :aria-selected="moreOn" title="更多設備" aria-label="更多設備" @click="moreOpen = !moreOpen">
             <span class="mono">⋯</span><span class="red" v-if="moreUnreadN"></span>
           </button>
           <ul class="more-pop" v-if="moreOpen">
@@ -46,7 +46,7 @@
           </ul>
         </div>
         <span class="rail-gap"></span>
-        <button v-for="(t, i) in FIXED_TABS" :key="t.key" :style="{ zIndex: 10 - i }" class="rtab" :class="{ on: tab === t.key }" role="tab" :aria-selected="tab === t.key" :title="t.label" :aria-label="t.label" @click="tab = t.key">
+        <button v-for="t in FIXED_TABS" :key="t.key" class="rtab" :class="{ on: tab === t.key }" role="tab" :aria-selected="tab === t.key" :title="t.label" :aria-label="t.label" @click="tab = t.key">
           <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
             <g v-if="t.key === 'groups'"><circle cx="8" cy="9" r="3" fill="#f0b040" stroke="#a06a10"/><circle cx="16" cy="9" r="3" fill="#6fb6f0" stroke="#1f5d9e"/><path d="M2.5 19c0-3.6 2.4-5.4 5.5-5.4s5.5 1.8 5.5 5.4zM10.5 19c0-3.6 2.4-5.4 5.5-5.4s5.5 1.8 5.5 5.4z" fill="#e8eef5" stroke="#6b7f95"/></g>
             <g v-else-if="t.key === 'notices'"><path d="M12 3c-3.6 0-5.5 2.6-5.5 6v3.6L4.5 16h15l-2-3.4V9c0-3.4-1.9-6-5.5-6z" fill="#f4c542" stroke="#a37a0a"/><path d="M10 18.5a2 2 0 0 0 4 0z" fill="#d49a10" stroke="#a37a0a"/></g>
@@ -56,7 +56,8 @@
       </nav>
       <div class="content" role="tabpanel">
         <template v-if="isDevice">
-          <div class="search"><input v-model="query" placeholder="搜尋聯絡人..." aria-label="搜尋聯絡人"></div>
+          <div class="search"><input v-model="query" placeholder="搜尋聯絡人..." aria-label="搜尋聯絡人">
+            <span class="gmode" role="group" aria-label="分組方式"><button v-for="m in GROUP_MODES" :key="m.key" :class="{ on: groupMode === m.key }" :aria-pressed="groupMode === m.key" @click="groupMode = m.key">{{ m.label }}</button></span></div>
           <div class="list">
             <div v-for="g in shown" :key="g.key">
               <button class="g-head" @click="collapsed[g.key] = !collapsed[g.key]" :aria-expanded="!collapsed[g.key]">

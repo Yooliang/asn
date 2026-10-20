@@ -3,7 +3,7 @@ import { EMO, emo, fmt, fmtDate, initial, plain } from './lib/text.mjs'
 import { ctl, emit, listen } from './lib/tauri.mjs'
 
 const { createApp, ref, computed, nextTick, onMounted } = Vue
-const STATUS = { online: '線上', busy: '忙碌', away: '馬上回來', offline: '顯示為離線' }
+const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯示為離線' }
 const id = new URLSearchParams(location.search).get('id') ?? ''
 
 createApp({
