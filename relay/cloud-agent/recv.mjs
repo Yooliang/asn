@@ -8,7 +8,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createCore } from '../machine/relay-core.mjs'   // 沿用 API 呼叫與門鈴，不複製協定
 import { createLog } from '../machine/safe-log.mjs'
-import { NO_KEY_MSG, readAnonKey, readKey, resolveConfig } from './config.mjs'
+import { NO_KEY_MSG, loadAgents, readAnonKey, readKey, resolveConfig } from './config.mjs'
 import { acquirePidLock, appendLineDurable, ensureDir, readJsonl } from './lib.mjs'
 
 const recordOf = m => ({
@@ -47,11 +47,11 @@ export function createReceiver({ api, cfg, log, now = () => Date.now() }) {
     catch (e) { log(`pull failed (${why}): ${e.message}`) } finally { pulling = false }
   }
 
-  // roster：一個視窗。403＝這個節點沒有 can_roster，只記一次、之後每小時才試一次（管理者開了權限就會自己恢復）
+  // roster：名單上的每位代理各一列（見 config.mjs 的 loadAgents）。403＝這個節點沒有 can_roster，只記一次、之後每小時才試一次（管理者開了權限就會自己恢復）
   let blockedUntil = 0, warned = false
   async function rosterOnce() {
     if (now() < blockedUntil) return false
-    const agents = [{ name: cfg.name, status: 'idle', engine: cfg.engine, cwd_label: cfg.cwdLabel }]
+    const agents = loadAgents(cfg)   // 每次都重讀 agents.json，改名單不用重啟
     try {
       await api('roster', { method: 'POST', body: { agents } })
       if (warned) log('roster ok again')

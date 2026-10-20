@@ -9,14 +9,14 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createCore } from '../machine/relay-core.mjs'
-import { Fail, ID_RE, NO_KEY_MSG, UUID_RE, readKey, resolveConfig } from './config.mjs'
+import { Fail, ID_RE, NO_KEY_MSG, UUID_RE, loadAgents, readKey, resolveConfig } from './config.mjs'
 
 const MAX_BODY = 20000
 const USAGE = `用法：
   node send.mjs --to <節點>[/<視窗>] --body "<內文>" (--reply | --no-reply) [--reply-to <信件id>] [--from <名稱>]
   --body -  內文從 stdin 讀；--body-file <檔> 從檔案讀
   --reply   我在等對方回信；--no-reply  只是告知。二選一、不能同時給。
-  --from    寄件視窗名（預設 Grok，環境變數 IRORI_CLOUD_ROSTER_NAME 可改）
+  --from    寄件視窗名（預設 Grok，環境變數 IRORI_CLOUD_ROSTER_NAME 可改）；必須是名單（agents.json／IRORI_CLOUD_AGENTS）上的一位
 回信一定要帶 --reply-to <來信 id>。內文至多 ${MAX_BODY} 字。`
 
 export function parseArgs(argv) {
@@ -57,7 +57,9 @@ export async function main(argv, env = process.env) {
   if (toNode === cfg.node) throw new Fail(1, '收件人是自己這個節點')
   const key = readKey(cfg, env)
   if (!key) throw new Fail(2, NO_KEY_MSG)
-  const from = (a.from || cfg.name).slice(0, 100)
+  const from = (a.from || cfg.name).trim().slice(0, 100)
+  const names = loadAgents(cfg).map(x => x.name)
+  if (!names.includes(from)) throw new Fail(1, `「${from}」不在這台的代理名單上（${names.join('、')}）：用名單上的名字回信，或先把他加進 agents.json`)
   const core = createCore({ baseUrl: cfg.baseUrl, key, anonKey: '', log: () => {}, workDir: cfg.mailDir })
   let r
   try {
