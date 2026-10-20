@@ -23,7 +23,7 @@ textarea,input{user-select:text;-webkit-user-select:text}
   border:1px solid rgba(40,80,130,.7);box-shadow:inset 0 0 0 1px var(--glass-edge)}
 .titlebar{display:flex;align-items:center;gap:8px;height:32px;flex:none;padding:0 2px 0 6px;color:var(--title-fg);font-weight:600;text-shadow:0 0 8px #fff,0 0 2px #fff;cursor:default}
 .titlebar .t-text{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
-.t-icon{width:16px;height:16px;border-radius:50%;flex:none;pointer-events:none;background:radial-gradient(circle at 35% 30%,#fff 0 18%,var(--online) 45%,#1e7a10 100%)}
+.t-icon{width:18px;height:18px;flex:none;pointer-events:none;background:url(img/logo.svg) center/contain no-repeat}
 .brand{font-weight:800;letter-spacing:.06em;font-style:italic}
 .t-btns{display:flex;gap:2px;flex:none}
 .tb{width:26px;height:18px;border-radius:4px;border:1px solid rgba(30,60,100,.5);background:linear-gradient(#f4f9ff 0 45%,#c9dcf0 50%,#dbe9f7);display:grid;place-items:center;font-size:10px;line-height:1;color:#29425e;padding:0;cursor:pointer}
@@ -129,12 +129,19 @@ html.toast-page,html.toast-page body{background:transparent}
 
 /* ---------- 左側直立頁籤＋內容區（選中的頁籤跟內容區連成一片） ---------- */
 .body{flex:1;min-height:0;display:flex;background:linear-gradient(90deg,#cfe2f6,#e4effb)}
-.rail{flex:none;width:44px;display:flex;flex-direction:column;gap:3px;padding:8px 0 6px 4px;overflow:visible}
-.rail-gap{flex:1}
-.rtab{position:relative;width:40px;height:44px;margin-right:-1px;padding:0;display:grid;place-items:center;cursor:pointer;
-  border:1px solid #8aa9c8;border-right:0;border-radius:9px 0 0 9px;background:linear-gradient(90deg,#b9d3ee,#dcebf9);color:var(--title-fg)}
-.rtab:hover{background:linear-gradient(90deg,#c9def3,#eaf4fd)}
-.rtab.on{width:41px;background:var(--panel);border-color:var(--line);z-index:2;box-shadow:-1px 0 0 #fff inset}
+.rail{flex:none;width:44px;display:flex;flex-direction:column;padding:8px 0 6px 4px;overflow:visible}
+.rail-gap{flex:1;min-height:8px}
+/* 頁籤外形：左上圓角、左下切一刀斜角；上面的頁籤壓在下面那個的頂上（z-index 由上往下遞減），像疊起來的資料夾頁籤。
+   外框＝按鈕本身的底色（框線色）用外形裁切，內面＝::before 往內縮 1px 的同一外形 */
+.rtab{--edge:#8aa9c8;--face:linear-gradient(180deg,rgba(255,255,255,.85) 0,rgba(255,255,255,.25) 46%,rgba(255,255,255,0) 52%),linear-gradient(90deg,#9fc2e8,#d6e8fa 70%,#eaf3fd);
+  position:relative;width:40px;height:50px;margin:0 -1px -9px 0;padding:0 0 6px;display:grid;place-items:center;cursor:pointer;
+  border:0;background:var(--edge);color:var(--title-fg);
+  clip-path:path("M41 0 H9 Q0 0 0 9 V35 L15 50 H41 Z")}
+.rtab::before{content:"";position:absolute;inset:0;background:var(--face);
+  clip-path:path("M41 1 H9.4 Q1 1 1 9.4 V34.6 L15.4 49 H41 Z")}
+.rtab > *{position:relative}
+.rtab:hover{--face:linear-gradient(180deg,rgba(255,255,255,.9) 0,rgba(255,255,255,.35) 46%,rgba(255,255,255,.05) 52%),linear-gradient(90deg,#b4d3f3,#e2f0fd 70%,#f4f9ff)}
+.rtab.on{z-index:40 !important;width:41px;--edge:var(--line);--face:linear-gradient(90deg,#e9f3fd,#fff 60%)}
 .rtab .mono{font-weight:800;font-size:16px;color:#1f5d9e}
 .rtab.on .mono{color:var(--accent)}
 .red{position:absolute;top:3px;right:5px;width:9px;height:9px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ffb0a8,var(--busy) 55%,#8d1812);box-shadow:0 0 0 1px #fff}
