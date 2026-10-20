@@ -39,11 +39,11 @@
 
 ```
 set IRORI_INVITE=<邀請碼>
-node relaycloud-agentegister.mjs        # 代號預設 grok、名稱「Grok 雲端」、kind grok
+node relay/cloud-agent/register.mjs        # 代號預設 grok、名稱「Grok 雲端」、kind grok
 ```
 
 金鑰寫到 `~/.irori-relay/grok.key`（權限收緊、原子寫入），畫面只印「已寫入 <路徑>」。再把檔案內容貼進雲端平台的秘密變數 `IRORI_RELAY_KEY`。
-`node relaycloud-agentegister.mjs --check` 可確認金鑰連得上。
+`node relay/cloud-agent/register.mjs --check` 可確認金鑰連得上。
 
 ## 三、讓它開機自動跑
 
