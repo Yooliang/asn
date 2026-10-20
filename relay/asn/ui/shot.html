@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ASN 截圖</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;cursor:crosshair;user-select:none}
+canvas{display:block;width:100vw;height:100vh}
+#hint{position:fixed;top:14px;left:50%;transform:translateX(-50%);padding:6px 14px;border-radius:4px;background:rgba(10,24,40,.82);color:#fff;font:14px "Microsoft JhengHei","Segoe UI",sans-serif;pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="cv" aria-label="截圖框選區域"></canvas>
+<div id="hint" role="status">拖曳框選要截圖的區域　Esc 或按右鍵取消</div>
+<script type="module" src="shot.js"></script>
+</body>
+</html>

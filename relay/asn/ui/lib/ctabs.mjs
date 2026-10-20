@@ -95,3 +95,55 @@ export function toggleChatPin(st, id, pinned) {
   const nextPin = on ? pin.filter(x => x !== id) : [...pin, id]
   return { pinned: nextPin, tabs: orderTabs(st.tabs, nextPin) }
 }
+
+/** 兩個分頁是否同一區（固定／一般） */
+export function chatTabSameZone(idA, idB, pinned) {
+  const pinSet = new Set(normalizePinned(pinned))
+  return pinSet.has(idA) === pinSet.has(idB)
+}
+
+function reorderList(list, dragId, insertBeforeId) {
+  if (!list.includes(dragId)) return [...list]
+  const rest = list.filter(id => id !== dragId)
+  if (insertBeforeId == null || insertBeforeId === '') return [...rest, dragId]
+  const i = rest.indexOf(insertBeforeId)
+  if (i < 0) return [...rest, dragId]
+  const out = [...rest]
+  out.splice(i, 0, dragId)
+  return out
+}
+
+/**
+ * 拖曳排序：只能在同一區內移動。insertBeforeId 為目標分頁 id（插在它前面）；null／空字串＝該區最後。
+ * 固定區會更新 pinned；一般區只改 tabs 順序（本次執行）。
+ */
+export function moveChatTab(tabs, pinned, dragId, insertBeforeId) {
+  const pin = normalizePinned(pinned)
+  const pinSet = new Set(pin)
+  const dragPinned = pinSet.has(dragId)
+  if (insertBeforeId != null && insertBeforeId !== '' && !chatTabSameZone(dragId, insertBeforeId, pin)) {
+    return { tabs: orderTabs(tabs, pin), pinned: pin }
+  }
+  if (dragPinned) {
+    const nextPin = reorderList(pin, dragId, insertBeforeId)
+    return { pinned: nextPin, tabs: orderTabs(tabs, nextPin) }
+  }
+  const ordered = orderTabs(tabs, pin)
+  const head = ordered.filter(id => pinSet.has(id))
+  const normal = ordered.filter(id => !pinSet.has(id))
+  const nextNormal = reorderList(normal, dragId, insertBeforeId)
+  return { pinned: pin, tabs: [...head, ...nextNormal] }
+}
+
+/**
+ * 拖到某個分頁上時要插在哪裡：滑鼠在左半＝插在它前面；右半＝插在它後面，
+ * 也就是同一區的下一個分頁前面，沒有下一個就回 ''（＝該區最後，moveChatTab 會放到最後）。
+ */
+export function dropInsertBefore(tabs, pinned, overId, after) {
+  if (!after) return overId
+  const pin = normalizePinned(pinned)
+  const ordered = orderTabs(tabs, pin)
+  const zone = ordered.filter(id => chatTabSameZone(id, overId, pin))
+  const i = zone.indexOf(overId)
+  return i >= 0 && i + 1 < zone.length ? zone[i + 1] : ''
+}

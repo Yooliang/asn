@@ -20,7 +20,7 @@
 
 ## 可重用的送出介面（給之後的截圖標註功能）
 
-- 前端：`photo-canvas.mjs` 的 `imageFromBlob(blob, name)`（任何圖片 Blob → 縮圖、轉 webp、附縮圖）、`fileFromBlob(blob, name)`、`attachmentFromFile(file)`；再交給 `core.sendAttachment(id, item, caption)`。截圖功能只要把標註後的 canvas 轉成 Blob 呼叫這兩步。
+- 前端：`photo-canvas.mjs` 的 `imageFromBlob(blob, name)`（任何圖片 Blob → 縮圖、轉 webp、附縮圖）、`fileFromBlob(blob, name)`、`attachmentFromFile(file)`；再交給 `core.sendAttachment(id, item, caption)`。截圖功能只要把標註後的 canvas 轉成 Blob 呼叫這兩步（已實作：`annotator.mjs` 輸出 PNG Blob → `imageFromBlob`，見 `relay/asn/README.md` 的「截圖與標註」）。
 - Rust：`relay_send_attachment`（payload 見 `attach.rs` 的 `parse_photo`）。
 
 ## 資料表與 bucket（migration `20261020000500_attachments.sql`）

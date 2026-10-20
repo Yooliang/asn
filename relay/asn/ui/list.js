@@ -11,9 +11,9 @@ import { ChatPane } from './lib/chatpane.mjs'
 import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatarFile, selfAvatarSrc } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, switchMode, tabVisible, toggleCollapsed } from './lib/merge.mjs'
-import { closeAllChatTabs, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
+import { chatTabSameZone, closeAllChatTabs, dropInsertBefore, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
 import { FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_LABEL, normalizeFrame, soundChoice, soundFromChoice, soundFromSaved } from './lib/prefs.mjs'
-import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, store, transport } from './lib/tauri.mjs'
+import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
@@ -261,6 +261,46 @@ const app = createApp({
     const menuCloseAll = () => { closeChatTabMenu(); applyChatTabClose(closeAllChatTabs(ui, ui.pinnedChat)) }
     const menuTogglePin = () => runTabMenu(id => { const r = toggleChatPin(ui, id, ui.pinnedChat); ui.pinnedChat = r.pinned; ui.tabs = r.tabs })
     const isChatTabPinned = id => isPinned(id, ui.pinnedChat)
+    const tabDragId = ref('')
+    const tabDrop = reactive({ over: '', after: false })   // 拖到哪個分頁上、左半還是右半（右半＝插在它後面，才放得到最後一個）
+    const clearTabDrag = () => { tabDragId.value = ''; tabDrop.over = ''; tabDrop.after = false }
+    const onTabDragStart = (id, e) => {
+      tabDragId.value = id
+      tabDrop.over = ''
+      e.dataTransfer.effectAllowed = 'move'
+      e.dataTransfer.setData('text/plain', id)
+    }
+    const onTabDragEnd = () => clearTabDrag()
+    const onTabDragOver = (beforeId, e) => {
+      const dragId = tabDragId.value
+      if (!dragId || dragId === beforeId) return
+      if (!chatTabSameZone(dragId, beforeId, ui.pinnedChat)) {
+        e.dataTransfer.dropEffect = 'none'
+        return
+      }
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'move'
+      const r = e.currentTarget.getBoundingClientRect()
+      tabDrop.over = beforeId
+      tabDrop.after = e.clientX > r.left + r.width / 2
+    }
+    const onTabDrop = (beforeId, e) => {
+      e.preventDefault()
+      const dragId = tabDragId.value || e.dataTransfer.getData('text/plain')
+      if (!dragId || dragId === beforeId || !chatTabSameZone(dragId, beforeId, ui.pinnedChat)) {
+        clearTabDrag()
+        return
+      }
+      const r = moveChatTab(ui.tabs, ui.pinnedChat, dragId, dropInsertBefore(ui.tabs, ui.pinnedChat, beforeId, tabDrop.over === beforeId && tabDrop.after))
+      ui.pinnedChat = r.pinned
+      ui.tabs = r.tabs
+      clearTabDrag()
+    }
+    const tabDragClass = id => ({
+      'tab-dragging': tabDragId.value === id,
+      'tab-drop-before': tabDrop.over === id && !tabDrop.after,
+      'tab-drop-after': tabDrop.over === id && tabDrop.after,
+    })
     // 設定頁「語音」：改了就寫回 Rust 端（驗證在那裡；失敗就還原成存檔的值並提示）
     const ttsVoices = ref({ enabled: true, voices: [], default: '' }), sttSt = ref(null), voiceMsg = ref('')
     const sttText = computed(() => sttStatusText(sttSt.value))
@@ -284,8 +324,9 @@ const app = createApp({
       version: info.version, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       frame, FRAMES, FRAME_LABEL, setFrame, SOUND_CHOICES, SOUND_LABEL, soundChoice, soundFromChoice, RESIZE_DIRS, resizeFrom, avMenu,
       avOf, meAv, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar,
-      ui, MODES, MODE_LABEL, DP_MODES, DP_LABEL, BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, normalizeDpMode, normalizeBubble, setMode, mergedTabs, logs, sendTo, nudgeTo, sendAttachTo, photoApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
+      ui, MODES, MODE_LABEL, DP_MODES, DP_LABEL, BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, normalizeDpMode, normalizeBubble, setMode, mergedTabs, logs, sendTo, nudgeTo, sendAttachTo, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
       chatTabMenu, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuTogglePin, isChatTabPinned,
+      onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
       STATUS, CONN_LABEL, FIXED_TABS, ADS, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, soundOn, friends, conn, shown, query, collapsed, nickErr, commitNick,
       tab, adI, rooms, roomsErr, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote,
       GUIDES, openedGuide, view, openGuideKey, closeGuideView, showHome,

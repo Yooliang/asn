@@ -242,6 +242,9 @@ html.toast-page,html.toast-page body{background:transparent}
 .ctab.pinned .pin-av{flex:none}
 .ctab.pinned .unread{position:absolute;top:2px;right:2px;margin:0}
 .ctab.pinned{position:relative}
+.ctab.tab-dragging{opacity:.55}
+.ctab.tab-drop-before{box-shadow:inset 3px 0 0 #1a6fb5}
+.ctab.tab-drop-after{box-shadow:inset -3px 0 0 #1a6fb5}
 .ctab-menu{position:fixed;z-index:60;margin:0}
 .chat-stack{flex:1;min-height:0;display:flex;flex-direction:column}
 .chat-stack > .pane{flex:1;min-height:0;border-top-left-radius:0}
@@ -379,3 +382,25 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 
 .titlebar .ver { opacity: .7; font-weight: normal; }
 .settings .ver-line { display: block; margin-top: 12px; color: #6b7a8c; }
+
+/* 截圖標註畫面（對話區全區浮層） */
+.annot{position:absolute;inset:0;z-index:25;display:flex;flex-direction:column;background:rgba(10,24,40,.9);color:#fff}
+.an-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:6px 10px;flex:none;background:linear-gradient(var(--panel-soft),var(--panel-head));color:var(--title-fg);border-bottom:1px solid var(--line)}
+.an-group{display:inline-flex;align-items:center;gap:3px}
+.an-btn,.an-size{border:1px solid transparent;background:none;border-radius:3px;padding:3px 6px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;color:inherit;min-width:28px;min-height:26px}
+.an-btn:hover:not(:disabled),.an-size:hover{border-color:#8fb6de;background:linear-gradient(#fbfdff,#d6e8fa)}
+.an-btn.on,.an-size.on{border-color:var(--accent);background:linear-gradient(#e3f0fd,#c3dcf5)}
+.an-btn:disabled{opacity:.4;cursor:default}
+.an-size i{display:block;width:18px;background:#4a5d73;border-radius:2px}
+.an-color{width:20px;height:20px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px #6b7f95;cursor:pointer;padding:0}
+.an-color.on{box-shadow:0 0 0 2px var(--accent)}
+.an-box{position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:4px}
+.an-stage{position:relative;flex:none;background:#fff;box-shadow:0 0 0 1px rgba(255,255,255,.4)}
+.an-cv{position:absolute;inset:0;width:100%;height:100%}
+.an-top{touch-action:none}
+.an-top.tool-text{cursor:text}
+.an-top:not(.tool-text){cursor:crosshair}
+.an-text{position:absolute;z-index:2;min-width:140px;max-width:70%;font:600 18px "Microsoft JhengHei",sans-serif;background:rgba(255,255,255,.85);border:1px dashed var(--accent);outline:none;resize:none;padding:2px 4px}
+.an-msg{position:absolute;left:50%;bottom:8px;transform:translateX(-50%);padding:4px 10px;border-radius:4px;background:rgba(160,30,25,.9);font-size:13px}
+.an-foot{display:flex;align-items:center;gap:8px;padding:6px 10px;flex:none}
+.an-cap{flex:1;min-width:0;padding:4px 8px;border:1px solid var(--line);border-radius:3px;font:inherit}

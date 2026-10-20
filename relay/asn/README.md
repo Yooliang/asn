@@ -47,7 +47,7 @@ npm run build        # 出 asn 二進位、bundle/deb/*.deb、bundle/appimage/*.
 - 心跳：每 30 秒寫 `~/.irori-relay/machine-<節點>/self-recv/<視窗名>.json`，內容 `{"pid","name","t"}`，格式、路徑、原子寫入都與 `relay/machine/self-recv.mjs` 相同，pid 是本程式。機器橋看到 90 秒內且 pid 活著的心跳，就不再轉交這個視窗的信。結束時清掉自己的心跳。同一個視窗名已有另一個 ASN 在跑就拒絕啟動。
 - 寄信：`POST ?action=send`，`expects_reply` 一定明說（一般訊息 `true`、震動 `false`；震動由前端帶 `nudge:true`，內文由 Rust 組），回覆某封來信時帶 `reply_to`。`from_agent` 由 Rust 端強制設成視窗名，前端不能自填。
 - 好友名單：`list` 的 members 各節點視窗，一視窗一列（名字＝視窗名，個人訊息＝資料夾（cwd_label，沒有就空；設備由左側頁籤表示））；結尾「收發室」的不列；每 60 秒更新，有人新上線會彈「已經登入」。狀態：busy／working／running＝忙碌、其餘＝線上、不在名單＝離線（有對話的好友才會留在離線）。
-- 震動：寄內文「（<視窗名> 傳送了一個震動）」、`expects_reply:false` 的信（前端只帶 `nudge:true`，內文與視窗名由 Rust 端組，前端不能自填）；收到時，整段內文就是這一句（新格式），或內文含舊版的 `[震動]`（相容還沒升級的 ASN），就抖動該對話視窗（沒開就未讀＋提示），標記不顯示在對話裡。
+- 震動：寄兩行內文——「（<視窗名> 傳送了一個震動）」加一行請對方回一個震動的提示（`NUDGE_HINT`，`ui/lib/text.mjs` 與 `relay.rs` 同一句）——`expects_reply:false` 的信（前端只帶 `nudge:true`，內文與視窗名由 Rust 端組，前端不能自填）；收到時，第一行是這一句、其餘是空的或就是那行提示（新格式；AI 照提示回的震動只有第一行），或內文含舊版的 `[震動]`（相容還沒升級的 ASN），就抖動該對話視窗（沒開就未讀＋提示），標記不顯示在對話裡。
 
 ## 介面
 
@@ -71,6 +71,7 @@ npm run build        # 出 asn 二進位、bundle/deb/*.deb、bundle/appimage/*.
   - 對話區的版面只有一份（`ui/lib/chatpane.mjs`），分離模式的對話視窗與整合模式的分頁共用。
 - 大頭貼：名單、對話區、右下角提示、自己的頭像都用圖片（`ui/lib/avatar.mjs`）。**自動產生**：依字串雜湊產生左右對稱 8×8 色塊（三種顏色，blockies 風格，自己實作、不含第三方程式），種子＝好友 id（`節點/視窗名`），每人固定、不同人不同。**設備上傳**：設定頁「大頭貼」選圖 → 前端置中裁成正方形、縮成 96×96、轉 webp（不行就 png）、≤ 32 KB → 經 Rust 指令 `relay_set_avatar`（檢查格式與大小才送，金鑰只在 Rust）上傳到收發室；也可以「移除，改回自動產生」。**顯示規則**：名單上的 AI 視窗一律自動產生；不在名單上的寄件人（例如別台的 ASN）用他那台設備上傳的圖，沒有就自動產生；自己＝本機節點有上傳就用上傳的，沒有就自動產生。`list` 只帶各節點的 `avatar_updated_at`，圖用 `GET ?action=avatar&node=<節點>` 在更新時間變了才取（收到的圖也要通過格式檢查才顯示）。
 - 傳照片與檔案（設計見 `docs/ATTACHMENTS.md`）：對話工具列有「傳照片」（也可直接貼上圖片）與「傳送檔案」。照片先在前端縮到長邊 2048、轉 webp（≤ 5 MB）並做 256 長邊縮圖；一般檔案（pdf、txt、md、json、csv、zip、docx、xlsx、pptx，≤ 25 MB）不壓縮不轉檔。交給 Rust 指令 `relay_send_attachment`：檢查型別、大小與檔頭才依序向收發室要一次性上傳網址、上傳、確認、寄信（金鑰只在 Rust）。對話裡照片顯示縮圖（點了放大，可另存）、檔案顯示檔案卡（點了下載並另存到 `下載\ASN`）；對方的來信也一樣。保存 30 天，過期顯示「已過期」。可重用入口：`ui/lib/photo-canvas.mjs` 的 `imageFromBlob`／`fileFromBlob`＋`core.sendAttachment`。
+- 截圖與標註（issue #10）：對話工具列有「截圖」鈕（Windows 版；Linux 版沒有這個按鈕，因為擷取程式碼只在 Windows 編譯，`shot_supported` 回 false）。按下後 Rust 端（`src-tauri/src/shot.rs`）隱藏 ASN 所有可見視窗、等 260 ms 讓桌面重繪，再用 GDI（`BitBlt`＋`CAPTUREBLT`，只多開 `windows-sys` 兩個功能開關，不新增擷取套件）把整個虛擬桌面一次抓成凍結圖，然後每個螢幕開一扇置頂無邊框覆蓋視窗（`ui/shot.html`／`shot.js`）顯示該螢幕那一塊；拖曳框選、Esc 或右鍵取消、5 分鐘沒動作自動取消。框選範圍限在同一個螢幕內（不能跨螢幕邊界）。座標換算不信任 `devicePixelRatio`，用「視窗實際大小 ÷ 圖片實體像素」的比例（`ui/lib/shot.mjs`），所以 125%／150%／混合縮放的多螢幕都對得準；Rust 端再夾一次範圍。截圖以 PNG 位元組直接經 `tauri::ipc::Response` 傳（不經 JSON／base64）。框選完進入標註畫面（`ui/lib/annotator.mjs`，浮層在對話區內）：畫筆、螢光筆、矩形、箭頭、文字、馬賽克，8 種顏色、細／中／粗，復原／重做（Ctrl+Z／Ctrl+Y）、清除（可復原）；規則、堆疊與畫法在 `ui/lib/markup.mjs`。按「傳送」輸出 PNG（長邊超過 4096 先縮小）→ `imageFromBlob` 轉成 webp → `core.sendAttachment`（可加說明文字）；取消則整張丟掉。在輸入框貼上圖片也會進同一個標註畫面（不再直接送出）。測試：`test/shot.test.mjs`、`test/markup.test.mjs`、`test/shot-wiring.test.mjs`；Rust 的裁切、座標夾限、PNG 編碼與真的擷取桌面在 `shot.rs` 的單元測試。
 - 經機器橋轉回的回信若整段包著 `<cross-session-message …>…</cross-session-message>`，收信時剝掉最外層（`unwrapShell`）。
 
 ## 語音（念出訊息、語音輸入）

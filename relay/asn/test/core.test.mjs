@@ -1,4 +1,5 @@
 // AsnCore 對本機假 relay 的端到端（relay-core 的 api）：收信歸屬、未讀、震動、寄信格式、離線／上線、已送出等回信。
+import { nudgeBody } from '../ui/lib/text.mjs'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { AsnCore } from '../ui/lib/core.mjs'
@@ -107,7 +108,7 @@ test('寄震動：內文「（某某 傳送了一個震動）」（測試用傳�
   const { relay, core } = await setup()
   await core.start()
   assert.equal((await core.nudge('W/W-政策')).ok, true)
-  assert.deepEqual(relay.sent[0], { to_node: 'W', to_agent: 'W-政策', body: `（${NAME} 傳送了一個震動）`, from_agent: NAME, expects_reply: false })
+  assert.deepEqual(relay.sent[0], { to_node: 'W', to_agent: 'W-政策', body: nudgeBody(NAME), from_agent: NAME, expects_reply: false })
   await core.stop(); await relay.close()
 })
 
