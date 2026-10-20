@@ -132,18 +132,16 @@ html.toast-page,html.toast-page body{background:transparent}
 .rail{flex:none;width:47px;display:flex;flex-direction:column;padding:6px 0 6px 3px;overflow:visible}
 .rail-gap{flex:1;min-height:10px}
 /* 頁籤外形照舊版即時通（從參考圖取邊量的）：左上、右上圓角，右邊一條直邊；
-   下緣是一道 S 形貝茲曲線——左邊較高，往右下掃，貼著右邊收成一條變細的尾巴，尾巴壓在下一個頁籤的右上角上。
-   圖示比頁籤大、被外形切掉。外層＝邊色，::before 往內縮 1px＝亮面漸變；選中的變白 */
-.rtab{--edge:#8ea4c9;--face:linear-gradient(180deg,#f3f6fc 0,#dfe6f4 45%,#cbd6ec 100%);
-  position:relative;width:42px;height:64px;margin:0 0 -10px 0;padding:0;display:block;cursor:pointer;overflow:hidden;
-  border:0;background:var(--edge);color:var(--title-fg);
+   下緣是一道 S 形貝茲曲線——左邊較高，往右下掃，貼著右邊收成一條變細的尾巴，尾巴壓在下一個頁籤的右上角上，右邊框線一路連到底。
+   外形與框線用 SVG 背景畫（1px 描邊，粗細一致）；clip-path 只負責把放大的圖示切在外形裡 */
+.rtab{--tab:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2242%22 height=%2264%22 viewBox=%220 0 42 64%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%220%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%23f3f6fc%22/%3E%3Cstop offset=%22.45%22 stop-color=%22%23dfe6f4%22/%3E%3Cstop offset=%221%22 stop-color=%22%23cbd6ec%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d=%22M7.5 .5 H34.5 C38.5 .5 41.5 3.5 41.5 7.5 V64 C40.5 58 36.5 53 28.5 50 C18.5 46 4 44 .5 33 V7.5 C.5 3.5 3.5 .5 7.5 .5 Z%22 fill=%22url%28%23g%29%22 stroke=%22%238ea4c9%22 stroke-width=%221%22/%3E%3C/svg%3E");
+  position:relative;width:42px;height:64px;margin:0 0 -10px 0;padding:0;display:block;cursor:pointer;overflow:visible;
+  border:0;background:var(--tab) 0 0/42px 64px no-repeat;color:var(--title-fg);
   clip-path:path("M7 0 H35 C39 0 42 3 42 7 V64 C41 58 37 53 29 50 C19 46 4 44 0 33 V7 C0 3 3 0 7 0 Z")}
-.rtab::before{content:"";position:absolute;inset:0;background:var(--face);
-  clip-path:path("M7 1 H35 C38.4 1 41 3.6 41 7 V60.5 C39.6 56.5 36 52.6 28.6 49.9 C18.8 46 4.6 43.6 1 33.2 V7 C1 3.6 3.6 1 7 1 Z")}
-.rtab > svg,.rtab > .mono{position:absolute;left:-1px;top:3px;width:42px;height:42px;filter:drop-shadow(0 1px 1px rgba(0,30,80,.35))}
+.rtab > svg,.rtab > img,.rtab > .mono{position:absolute;left:-1px;top:3px;width:42px;height:42px;filter:drop-shadow(0 1px 1px rgba(0,30,80,.35))}
 .rtab > .red{position:absolute;top:4px;right:5px}
-.rtab:hover{--face:linear-gradient(180deg,#fff 0,#eaf0fa 45%,#d8e2f3 100%)}
-.rtab.on{z-index:40 !important;--edge:#7f97c0;--face:linear-gradient(180deg,#fff 0,#fbfcfe 60%,#eef3fb 100%)}
+.rtab:hover{--tab:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2242%22 height=%2264%22 viewBox=%220 0 42 64%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%220%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%23ffffff%22/%3E%3Cstop offset=%22.45%22 stop-color=%22%23eaf0fa%22/%3E%3Cstop offset=%221%22 stop-color=%22%23d8e2f3%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d=%22M7.5 .5 H34.5 C38.5 .5 41.5 3.5 41.5 7.5 V64 C40.5 58 36.5 53 28.5 50 C18.5 46 4 44 .5 33 V7.5 C.5 3.5 3.5 .5 7.5 .5 Z%22 fill=%22url%28%23g%29%22 stroke=%22%238ea4c9%22 stroke-width=%221%22/%3E%3C/svg%3E")}
+.rtab.on{z-index:40 !important;--tab:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2242%22 height=%2264%22 viewBox=%220 0 42 64%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%220%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%23ffffff%22/%3E%3Cstop offset=%22.45%22 stop-color=%22%23fbfcfe%22/%3E%3Cstop offset=%221%22 stop-color=%22%23eef3fb%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d=%22M7.5 .5 H34.5 C38.5 .5 41.5 3.5 41.5 7.5 V64 C40.5 58 36.5 53 28.5 50 C18.5 46 4 44 .5 33 V7.5 C.5 3.5 3.5 .5 7.5 .5 Z%22 fill=%22url%28%23g%29%22 stroke=%22%237f97c0%22 stroke-width=%221%22/%3E%3C/svg%3E")}
 .rtab .mono{display:grid;place-items:center;font-weight:900;font-size:30px;line-height:1;color:#2a6fc0;text-shadow:0 1px 0 #fff}
 .rtab.on .mono{color:var(--accent)}
 .red{position:absolute;top:3px;right:5px;width:9px;height:9px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ffb0a8,var(--busy) 55%,#8d1812);box-shadow:0 0 0 1px #fff}
