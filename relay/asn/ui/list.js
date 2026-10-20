@@ -1,12 +1,12 @@
 // 好友名單視窗：同時是整個程式的「樞紐」——AsnCore 跑在這裡，對話視窗與提示視窗只顯示、用事件下指令。
 // 關掉這扇＝結束程式（Rust 端處理）。
 import { AsnCore } from './lib/core.mjs'
-import { ADS, AD_MS, FIXED_TABS, addNotice, deviceItems, deviceTabs, fmtTime, groupHeading, groupRows, moreUnread, nextAd, statusNote } from './lib/tabs.mjs'
+import { ADS, AD_MS, FIXED_TABS, GROUP_MODES, groupInDevice, addNotice, deviceItems, deviceTabs, fmtTime, groupHeading, groupRows, moreUnread, nextAd, statusNote } from './lib/tabs.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
 import { ctl, emit, invoke, listen, store, transport } from './lib/tauri.mjs'
 
 const { createApp, reactive, ref, computed, watch } = Vue
-const STATUS = { online: '線上', busy: '忙碌', away: '馬上回來', offline: '顯示為離線' }
+const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯示為離線' }
 const CONN_LABEL = { connecting: '連線中…', on: '已連線', off: '連線中斷，重試中' }
 
 // ---------- 音效（WebAudio 合成） ----------
@@ -42,6 +42,7 @@ const savedMe = (await meStore.load()) ?? {}
 // 暱稱＝視窗名＝對外名字；以 Rust 端現用名為準，不再從存檔讀
 const me = reactive({ psm: '', status: 'online', ...savedMe.me, nick: info.window_name })
 const soundOn = ref(savedMe.sound !== false)
+const groupMode = ref(savedMe.groupMode === 'engine' ? 'engine' : 'status')   // 設備頁裡依狀態或依類型分組
 
 const core = new AsnCore({
   transport, store: store('chats'), selfNode: info.node, windowName: info.window_name,
@@ -94,7 +95,7 @@ await listen('asn:cmd', async c => {
 await listen('relay-bell', () => void core.pull('bell'))   // Rust 端的 Realtime 門鈴
 await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 
-watch([me, soundOn], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, sound: soundOn.value }); sync() }, { deep: true })
+watch([me, soundOn, groupMode], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, sound: soundOn.value, groupMode: groupMode.value }); sync() }, { deep: true })
 
 const shotTab = ref(info.node)
 createApp({
@@ -115,8 +116,7 @@ createApp({
       if (!isDevice.value) return []
       const q = query.value.trim().toLowerCase()
       const items = deviceItems(friends.value, tab.value, c => !q || plain(c.nick).toLowerCase().includes(q))
-      const d = dev.value.all.find(x => x.key === tab.value)
-      return items.length ? [{ key: tab.value, label: d.label, items }] : []
+      return groupInDevice(items, groupMode.value)
     })
     const emptyText = computed(() => (query.value.trim() ? '沒有符合的聯絡人。' : conn.value !== 'on' ? '還沒連上收發室。' : '這台設備目前沒有視窗。'))
     const openAd = a => { if (a.url) void invoke('open_url', { url: a.url }) }
@@ -128,7 +128,7 @@ createApp({
       catch (e) { me.nick = info.window_name; nickErr.value = e.message; setTimeout(() => { nickErr.value = '' }, 5000) }
     }
     return {
-      STATUS, CONN_LABEL, FIXED_TABS, ADS, dev, isDevice, moreOn, moreOpen, moreUnreadN, me, soundOn, friends, conn, shown, query, collapsed, nickErr, commitNick,
+      STATUS, CONN_LABEL, FIXED_TABS, ADS, GROUP_MODES, groupMode, dev, isDevice, moreOn, moreOpen, moreUnreadN, me, soundOn, friends, conn, shown, query, collapsed, nickErr, commitNick,
       tab, adI, rooms, roomsErr, notices, emptyText, openAd, groupHeading, statusNote, fmtTime,
       selfNode: info.node, emo, initial, openChat, ctl,
     }

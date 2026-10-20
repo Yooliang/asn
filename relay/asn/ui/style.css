@@ -56,7 +56,12 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .nick-err{font-size:11px;color:var(--busy)}
 .psm-input{font-size:12px;color:var(--muted);font-style:italic}
 .search{padding:6px 8px;border-bottom:1px solid var(--line);background:var(--panel-soft)}
-.search input{width:100%;border:1px solid var(--line);border-radius:3px;padding:4px 8px;background:var(--panel)}
+.search{display:flex;gap:6px;align-items:center}
+.search input{flex:1;min-width:0;width:100%;border:1px solid var(--line);border-radius:3px;padding:4px 8px;background:var(--panel)}
+.gmode{flex:none;display:flex;border:1px solid #9ab7d6;border-radius:3px;overflow:hidden}
+.gmode button{border:0;padding:3px 7px;font-size:12px;background:linear-gradient(#fdfeff,#e3eef9);color:var(--muted);cursor:pointer}
+.gmode button + button{border-left:1px solid #9ab7d6}
+.gmode button.on{background:linear-gradient(#d9ebfd,#bcd9f7);color:var(--title-fg);font-weight:600}
 .list{flex:1;overflow-y:auto;padding:4px 0}
 .list ul{list-style:none;margin:0;padding:0}
 .g-head{display:flex;align-items:center;gap:4px;width:100%;border:0;background:none;text-align:left;padding:5px 8px;font-weight:600;color:var(--title-fg);cursor:pointer}
@@ -128,26 +133,22 @@ html.toast-page,html.toast-page body{background:transparent}
 @media (prefers-reduced-motion:reduce){.toast{animation:none}}
 
 /* ---------- 左側直立頁籤＋內容區（選中的頁籤跟內容區連成一片） ---------- */
-.body{flex:1;min-height:0;display:flex;background:linear-gradient(90deg,#e9f0fa,#f4f8fd)}
-.rail{flex:none;width:47px;display:flex;flex-direction:column;padding:6px 0 6px 3px;overflow:visible}
-.rail-gap{flex:1;min-height:10px}
-/* 頁籤外形照舊版即時通（從參考圖取邊量的）：左上、右上圓角，右邊一條直邊；
-   下緣是一道 S 形貝茲曲線——左邊較高，往右下掃，貼著右邊收成一條變細的尾巴，尾巴壓在下一個頁籤的右上角上，右邊框線一路連到底。
-   外形與框線用 SVG 背景畫（1px 描邊，粗細一致）；clip-path 只負責把放大的圖示切在外形裡 */
-.rtab{--tab:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2242%22 height=%2264%22 viewBox=%220 0 42 64%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%220%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%23f3f6fc%22/%3E%3Cstop offset=%22.45%22 stop-color=%22%23dfe6f4%22/%3E%3Cstop offset=%221%22 stop-color=%22%23cbd6ec%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d=%22M7.5 .5 H34.5 C38.5 .5 41.5 3.5 41.5 7.5 V64 C40.5 58 36.5 53 28.5 50 C18.5 46 4 44 .5 33 V7.5 C.5 3.5 3.5 .5 7.5 .5 Z%22 fill=%22url%28%23g%29%22 stroke=%22%238ea4c9%22 stroke-width=%221%22/%3E%3C/svg%3E");
-  position:relative;width:42px;height:64px;margin:0 0 -10px 0;padding:0;display:block;cursor:pointer;overflow:visible;
-  border:0;background:var(--tab) 0 0/42px 64px no-repeat;color:var(--title-fg);
-  clip-path:path("M7 0 H35 C39 0 42 3 42 7 V64 C41 58 37 53 29 50 C19 46 4 44 0 33 V7 C0 3 3 0 7 0 Z")}
-.rtab > svg,.rtab > img,.rtab > .mono{position:absolute;left:-1px;top:3px;width:42px;height:42px;filter:drop-shadow(0 1px 1px rgba(0,30,80,.35))}
-.rtab > .red{position:absolute;top:4px;right:5px}
-.rtab:hover{--tab:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2242%22 height=%2264%22 viewBox=%220 0 42 64%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%220%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%23ffffff%22/%3E%3Cstop offset=%22.45%22 stop-color=%22%23eaf0fa%22/%3E%3Cstop offset=%221%22 stop-color=%22%23d8e2f3%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d=%22M7.5 .5 H34.5 C38.5 .5 41.5 3.5 41.5 7.5 V64 C40.5 58 36.5 53 28.5 50 C18.5 46 4 44 .5 33 V7.5 C.5 3.5 3.5 .5 7.5 .5 Z%22 fill=%22url%28%23g%29%22 stroke=%22%238ea4c9%22 stroke-width=%221%22/%3E%3C/svg%3E")}
-.rtab.on{z-index:40 !important;--tab:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2242%22 height=%2264%22 viewBox=%220 0 42 64%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%220%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%23ffffff%22/%3E%3Cstop offset=%22.45%22 stop-color=%22%23fbfcfe%22/%3E%3Cstop offset=%221%22 stop-color=%22%23eef3fb%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d=%22M7.5 .5 H34.5 C38.5 .5 41.5 3.5 41.5 7.5 V64 C40.5 58 36.5 53 28.5 50 C18.5 46 4 44 .5 33 V7.5 C.5 3.5 3.5 .5 7.5 .5 Z%22 fill=%22url%28%23g%29%22 stroke=%22%237f97c0%22 stroke-width=%221%22/%3E%3C/svg%3E")}
-.rtab .mono{display:grid;place-items:center;font-weight:900;font-size:30px;line-height:1;color:#2a6fc0;text-shadow:0 1px 0 #fff}
+.body{flex:1;min-height:0;display:flex;background:linear-gradient(90deg,#dcebf9,#eef5fd)}
+.rail{flex:none;width:38px;display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 0;overflow:visible;border-right:1px solid var(--line)}
+.rail-gap{flex:1;min-height:8px}
+/* 頁籤：小巧的正方塊（照 Live Messenger 2009 左側那排）。平常只有圖示，滑過有淡淡的亮框，選中的是白底細框 */
+.rtab{position:relative;width:30px;height:30px;padding:0;display:grid;place-items:center;cursor:pointer;
+  border:1px solid transparent;border-radius:4px;background:transparent;color:var(--title-fg)}
+.rtab > svg,.rtab > img{width:24px;height:24px;filter:drop-shadow(0 1px 1px rgba(0,30,80,.25))}
+.rtab:hover{border-color:#a9c6e6;background:linear-gradient(#ffffff,#e4f0fc)}
+.rtab.on{border-color:#7fa3cc;background:linear-gradient(#ffffff,#f1f7fe);box-shadow:0 1px 2px rgba(0,40,90,.18)}
+.rtab > .red{position:absolute;top:-2px;right:-2px}
+.rtab .mono{font-weight:800;font-size:17px;line-height:1;color:#2a6fc0;text-shadow:0 1px 0 #fff}
 .rtab.on .mono{color:var(--accent)}
 .red{position:absolute;top:3px;right:5px;width:9px;height:9px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ffb0a8,var(--busy) 55%,#8d1812);box-shadow:0 0 0 1px #fff}
 .content{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--panel);border-left:1px solid var(--line);z-index:1}
-.more-wrap{position:relative;z-index:20;margin-bottom:-10px}
-.more-pop{position:absolute;left:44px;top:0;z-index:9;margin:0;padding:3px;list-style:none;min-width:130px;background:var(--panel);border:1px solid #7a9ec4;border-radius:4px;box-shadow:0 6px 18px rgba(0,30,70,.25)}
+.more-wrap{position:relative;z-index:20}
+.more-pop{position:absolute;left:34px;top:0;z-index:9;margin:0;padding:3px;list-style:none;min-width:130px;background:var(--panel);border:1px solid #7a9ec4;border-radius:4px;box-shadow:0 6px 18px rgba(0,30,70,.25)}
 .more-pop button{position:relative;display:block;width:100%;text-align:left;border:1px solid transparent;background:none;padding:4px 18px 4px 8px;border-radius:3px;cursor:pointer;white-space:nowrap}
 .more-pop button:hover,.more-pop button.on{background:#e6f1fc;border-color:#b8d6f2}
 .more-pop .red{top:8px;right:6px}

@@ -10,12 +10,13 @@ export const DEVICE_TAB_MAX = 6   // 設備頁籤超過 6 個時，第 6 個起�
 export const MORE_KEY = 'more'
 
 // 名字後面的灰字狀態：線上不加
-const NOTE = { busy: '忙碌', away: '馬上回來', offline: '離線' }
+const NOTE = { busy: '忙碌', away: '暫離', offline: '離線' }
 export const statusNote = status => (NOTE[status] ? `(${NOTE[status]})` : '')
 
-// 「設備名 (線上數/總數)」；線上＝非離線
+// 組標題：依狀態分的組只寫人數「線上 (3)」；其他組寫「名稱 (線上數/總數)」，線上＝非離線
 export function groupHeading(g) {
   const items = g?.items ?? []
+  if (g?.kind === 'status') return `${g.label} (${items.length})`
   return `${g?.label ?? ''} (${items.filter(c => c.status !== 'offline').length}/${items.length})`
 }
 
@@ -95,3 +96,25 @@ export const ADS = [
 export const AD_MS = 6000
 export const nextAd = (i, n = ADS.length) => (n > 0 ? (i + 1) % n : 0)
 export const adUrls = () => [...new Set(ADS.map(a => a.url).filter(Boolean))]
+
+// ---------- 設備頁裡的分組 ----------
+// mode＝'status'：線上／忙碌／暫離／離線；mode＝'engine'：Claude／Gemini／Grok…（沒回報類型的歸「其他」，排最後）。空的組不列。
+export const GROUP_MODES = [{ key: 'status', label: '狀態' }, { key: 'engine', label: '類型' }]
+const STATUS_GROUPS = [['online', '線上'], ['busy', '忙碌'], ['away', '暫離'], ['offline', '離線']]
+const ENGINE_ORDER = ['claude', 'gemini', 'grok', 'codex']
+const ENGINE_LABEL = { claude: 'Claude', gemini: 'Gemini', grok: 'Grok', codex: 'Codex' }
+export const engineKey = f => String(f?.engine ?? '').trim().toLowerCase() || 'other'
+export const engineLabel = k => ENGINE_LABEL[k] ?? (k === 'other' ? '其他' : k.charAt(0).toUpperCase() + k.slice(1))
+export function groupInDevice(items, mode = 'status') {
+  if (mode === 'engine') {
+    const by = new Map()
+    for (const f of items) { const k = engineKey(f); if (!by.has(k)) by.set(k, []); by.get(k).push(f) }
+    const rank = k => (k === 'other' ? 1e3 : ENGINE_ORDER.includes(k) ? ENGINE_ORDER.indexOf(k) : 100)
+    const keys = [...by.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+    const st = s => STATUS_GROUPS.findIndex(([k]) => k === s)
+    return keys.map(k => ({ key: `engine:${k}`, kind: 'engine', label: engineLabel(k),
+      items: by.get(k).slice().sort((a, b) => st(a.status) - st(b.status)) }))
+  }
+  return STATUS_GROUPS.map(([k, label]) => ({ key: `status:${k}`, kind: 'status', label, items: items.filter(f => f.status === k) }))
+    .filter(g => g.items.length)
+}

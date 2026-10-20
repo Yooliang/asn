@@ -5,9 +5,13 @@ export const friendId = (node, agent) => `${node}/${agent ?? ''}`
 // 收發室自己（名字結尾「收發室」）不當好友
 export const isRelayRoom = name => /收發室$/.test(String(name ?? ''))
 
-// 後端回報的視窗狀態 → 介面狀態：busy/working/running 之類＝忙碌，其餘（idle…）＝線上；不在名單＝離線（由 mergeFriends 決定）
+// 後端回報的視窗狀態 → 介面狀態：busy/working/running 之類＝忙碌，waiting 之類（等人回應）＝暫離，其餘（idle…）＝線上；不在名單＝離線（由 mergeFriends 決定）
 const BUSY = new Set(['busy', 'working', 'running', 'thinking'])
-export const statusOf = raw => (BUSY.has(String(raw ?? '').trim().toLowerCase()) ? 'busy' : 'online')
+const AWAY = new Set(['waiting', 'away', 'blocked', 'paused'])
+export function statusOf(raw) {
+  const s = String(raw ?? '').trim().toLowerCase()
+  return BUSY.has(s) ? 'busy' : AWAY.has(s) ? 'away' : 'online'
+}
 
 // 舊存檔的個人訊息是「節點／資料夾」或單獨節點名；設備已由頁籤表示，只留資料夾
 export const cleanPsm = (psm, node) => { const s = String(psm ?? ''); return s === node ? '' : s.replace(/^[^／]*／/, '') }

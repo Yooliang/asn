@@ -32,7 +32,7 @@ test('震動標記：含 [震動] 就算，內文拿掉標記', () => {
 
 test('statusOf：busy／working／running＝忙碌，idle 之類＝線上', () => {
   for (const s of ['busy', 'WORKING', 'running']) assert.equal(statusOf(s), 'busy', s)
-  for (const s of ['idle', 'waiting', '', null, undefined]) assert.equal(statusOf(s), 'online', String(s))
+  for (const s of ['idle', '', null, undefined]) assert.equal(statusOf(s), 'online', String(s))
 })
 
 const members = [
