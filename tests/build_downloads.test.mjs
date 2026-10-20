@@ -163,6 +163,19 @@ test('註冊：成功寫金鑰檔與 node 檔、讀回一致，回傳值與輸�
   await srv.close()
 })
 
+test('註冊：node 檔已經有了就不改（替別台註冊不會改掉這台的身分）；帶 setNode 才改', async () => {
+  const srv = await fakeRelay({ invites: { X: {}, Y: {} } })
+  try {
+    const home = tmp('irori-reg-node-')
+    fs.mkdirSync(path.join(home, '.irori-relay'), { recursive: true })
+    fs.writeFileSync(path.join(home, '.irori-relay', 'node'), 'H')
+    assert.equal((await registerNode({ baseUrl: srv.url, invite: 'X', id: 'grok', name: 'Grok 雲端', machine: 'grok-cloud', home })).ok, true)
+    assert.equal(fs.readFileSync(path.join(home, '.irori-relay', 'node'), 'utf8'), 'H')
+    assert.equal((await registerNode({ baseUrl: srv.url, invite: 'Y', id: 'PC-9', name: 'x', machine: 'x', home, setNode: true })).ok, true)
+    assert.equal(fs.readFileSync(path.join(home, '.irori-relay', 'node'), 'utf8'), 'PC-9')
+  } finally { await srv.close() }
+})
+
 test('註冊：撞名、前綴不符、格式錯、網路不通都回白話訊息，且不寫任何檔案', async () => {
   const srv = await fakeRelay({ invites: { A: {}, B: { prefix: 'W-' }, C: {} }, takenIds: ['TAKEN'] })
   const home = tmp('irori-reg2-')

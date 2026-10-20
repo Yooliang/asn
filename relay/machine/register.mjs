@@ -6,7 +6,9 @@
 // 金鑰只寫進 ~/.irori-relay/<代號>.key（寫完讀回比對），絕不印出、不放進回傳值。
 //
 // CLI（邀請碼走環境變數 IRORI_INVITE，不放命令列）：
-//   node register.mjs --id <代號> --name <顯示名> --machine <電腦名> [--kind other] [--url <仲介網址>] [--home <家目錄>] [--reissue]
+//   node register.mjs --id <代號> --name <顯示名> --machine <電腦名> [--kind other] [--url <仲介網址>] [--home <家目錄>] [--reissue] [--set-node]
+//   ~/.irori-relay/node（這台電腦自己的節點代號）：還沒有才寫；已經有就不動，除非帶 --set-node（安裝程式註冊這台電腦時會帶）。
+//   在管理電腦上替別台（例如雲端代理 grok）註冊時不要帶，否則這台電腦的身分會被改成別台（10/20 家用機 H 曾被改成 grok）
 //   node register.mjs --suggest <電腦名> [--prefix <前綴>]      印出建議的代號
 //   node register.mjs --check --id <代號>                        用已存的金鑰呼叫 whoami，確認連得上
 //   node register.mjs --leave --id <代號>                        離開名單（金鑰立即作廢）
@@ -90,7 +92,7 @@ export async function leaveNode({ baseUrl, id, home, fetchImpl = fetch }) {
 
 // 註冊。成功：寫金鑰檔與 node 檔，回 { ok:true, id, verified }；失敗：{ ok:false, error, message, prefix? }
 // reissue：用「重設碼」換新金鑰（這台電腦以前裝過、金鑰不見了）。invite 欄位放重設碼。
-export async function registerNode({ baseUrl, invite, id, name, machine, kind = 'other', home, fetchImpl = fetch, reissue = false }) {
+export async function registerNode({ baseUrl, invite, id, name, machine, kind = 'other', home, fetchImpl = fetch, reissue = false, setNode = false }) {
   const code = String(invite ?? '').trim()
   if (!code) return { ok: false, error: 'bad_request', message: '還沒有填邀請碼。' }
   if (!ID_RE.test(id ?? '')) return { ok: false, error: 'bad_request', message: friendly('bad_request') }
@@ -121,7 +123,8 @@ export async function registerNode({ baseUrl, invite, id, name, machine, kind = 
   if (fs.readFileSync(keyFile, 'utf8').trim() !== r.data.key) {
     return { ok: false, error: 'write_mismatch', message: '金鑰存到這台電腦後讀回不一致，請管理者重發金鑰。' }
   }
-  fs.writeFileSync(path.join(dir, 'node'), id, 'utf8')
+  const nodeFile = path.join(dir, 'node')
+  if (setNode || !fs.existsSync(nodeFile)) fs.writeFileSync(nodeFile, id, 'utf8')
   const check = await checkNode({ baseUrl, id, home, fetchImpl })
   return { ok: true, id: r.data.id || id, verified: check.ok }
 }
@@ -133,7 +136,7 @@ function parseArgs(argv) {
     const k = argv[i]
     if (!k.startsWith('--')) continue
     const name = k.slice(2)
-    if (['check', 'leave', 'reissue'].includes(name)) a[name] = true
+    if (['check', 'leave', 'reissue', 'set-node'].includes(name)) a[name] = true
     else a[name] = argv[++i]
   }
   return a
@@ -147,7 +150,7 @@ export async function main(argv, env = process.env) {
   if (a.check) return await checkNode({ baseUrl, id: a.id, home })
   if (a.leave) return await leaveNode({ baseUrl, id: a.id, home })
   return await registerNode({
-    baseUrl, invite: env.IRORI_INVITE, id: a.id, name: a.name, machine: a.machine, kind: a.kind || 'other', home, reissue: !!a.reissue,
+    baseUrl, invite: env.IRORI_INVITE, id: a.id, name: a.name, machine: a.machine, kind: a.kind || 'other', home, reissue: !!a.reissue, setNode: !!a['set-node'],
   })
 }
 

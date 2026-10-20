@@ -176,7 +176,7 @@ $res = $null
 for ($try = 1; $try -le 4; $try++) {
   $env:IRORI_INVITE = $code
   try {
-    $args_ = @('--id', $id, '--name', $name, '--machine', $name, '--kind', 'other') + $urlArgs + $homeArgs
+    $args_ = @('--id', $id, '--name', $name, '--machine', $name, '--kind', 'other', '--set-node') + $urlArgs + $homeArgs   # 註冊的就是這台電腦：node 檔要寫成它
     if ($Reissue) { $args_ += '--reissue' }
     $res = Invoke-RegisterTool $nodeExe $register $args_
   } finally { Remove-Item Env:\IRORI_INVITE -ErrorAction SilentlyContinue }
