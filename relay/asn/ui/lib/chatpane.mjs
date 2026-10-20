@@ -11,6 +11,8 @@ export const ChatPane = {
   props: {
     friend: { type: Object, default: null },
     me: { type: Object, default: () => ({ nick: '我', status: 'online' }) },
+    friendAv: { type: String, default: '' },       // 大頭貼圖片網址（自動產生或設備上傳）
+    meAv: { type: String, default: '' },
     log: { type: Array, default: () => [] },
     dpMode: { type: String, default: 'left' },     // 頭像模式：left／right＝側欄；inline＝頭像在每則訊息旁
     toolbar: { type: String, default: 'top' },     // 工具列位置：top（輸入框上方）／bottom（輸入框下方）
@@ -65,7 +67,7 @@ export const ChatPane = {
         <template v-for="(m, i) in log" :key="i">
           <div v-if="m.k === 'sys'" class="sys" :class="{ nudge: m.nudge }">{{ m.text }}</div>
           <div v-else class="msg" :class="['al-' + lay(m.k).align, { mine: m.k === 'me' }]">
-            <div class="m-av" v-if="lay(m.k).avatar"><div class="dp xs" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span>{{ friend.dp }}</span></div></div>
+            <div class="m-av" v-if="lay(m.k).avatar"><div class="dp xs" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span><img :src="friendAv" alt=""></span></div></div>
             <div class="m-main">
               <div class="who">{{ m.k === 'me' ? plain(me.nick) : plain(friend.nick) }} 說：<time>{{ fmt(m.t) }}</time></div>
               <div class="m-body" :class="'tone-' + lay(m.k).tone" v-html="emo(m.text)"></div>
@@ -76,7 +78,7 @@ export const ChatPane = {
     </div>
     <button class="dp-fold" type="button" v-if="sideCol" @click="$emit('toggle-dp')" :aria-label="foldTip" :aria-expanded="!collapsed" :title="foldTip">{{ arrow }}</button>
     <div class="dp-col" v-if="sideCol && !collapsed">
-      <div class="dp xl" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span>{{ friend.dp }}</span></div>
+      <div class="dp xl" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span><img :src="friendAv" alt=""></span></div>
     </div>
   </div>
   <div class="compose-row">
@@ -102,7 +104,7 @@ export const ChatPane = {
     </div>
     <span class="dp-fold-sp" v-if="sideCol"></span>
     <div class="dp-col" v-if="sideCol && !collapsed">
-      <div class="dp xl" :class="'st-' + me.status" :style="{ '--h': 205 }"><span>{{ initial(me.nick) }}</span></div>
+      <div class="dp xl" :class="'st-' + me.status" :style="{ '--h': 205 }"><span><img :src="meAv" alt=""></span></div>
     </div>
   </div>
   <div class="typing">

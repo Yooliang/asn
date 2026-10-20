@@ -131,11 +131,25 @@ pub struct Toast {
     status: String,
     hue: f64,
     dp: String,
+    /// 提示上的大頭貼：設備上傳的圖（data URL）；沒有就由提示視窗用好友 id 自己畫自動產生的那張
+    av: Option<String>,
 }
 
 fn clip(s: &str, n: usize) -> String {
     let t: String = s.chars().take(n).collect();
     if s.chars().count() > n { format!("{t}…") } else { t }
+}
+
+/// 提示視窗的網址；大頭貼（av）只有通過格式與大小檢查才帶，否則不帶（提示視窗會改用自動產生的）
+fn toast_url(toast: &Toast, status: &str) -> String {
+    let mut url = format!(
+        "toast.html?cid={}&title={}&line={}&status={}&hue={}&dp={}",
+        q(&toast.cid), q(&clip(&toast.title, 40)), q(&clip(&toast.line, 60)), status, toast.hue as i64, q(&clip(&toast.dp, 2))
+    );
+    if let Some(av) = toast.av.as_deref().filter(|a| crate::avatar::validate(a).is_ok()) {
+        url.push_str(&format!("&av={}", q(av)));
+    }
+    url
 }
 
 fn release(app: &AppHandle, slot: usize) {
@@ -155,10 +169,7 @@ pub async fn show_toast(app: AppHandle, slots: State<'_, Slots>, toast: Toast) -
     static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let label = format!("toast-{}-{}", slot, SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
     let status = if ["online", "busy", "away", "offline"].contains(&toast.status.as_str()) { toast.status.as_str() } else { "online" };
-    let url = format!(
-        "toast.html?cid={}&title={}&line={}&status={}&hue={}&dp={}",
-        q(&toast.cid), q(&clip(&toast.title, 40)), q(&clip(&toast.line, 60)), status, toast.hue as i64, q(&clip(&toast.dp, 2))
-    );
+    let url = toast_url(&toast, status);
     let built = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
         .title("ASN 提示")
         .inner_size(TOAST_W, TOAST_H)
@@ -278,6 +289,17 @@ mod tests {
         }
         for bad in ["list", "chat-", "chat-4", "chat-zz", "toast-0-1", "chat-ff"] {
             assert_eq!(chat_id_of(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn 提示網址_大頭貼通過檢查才帶() {
+        let mk = |av: Option<&str>| Toast { cid: "W/a".into(), title: "t".into(), line: "l".into(), status: "online".into(), hue: 10.0, dp: "W".into(), av: av.map(String::from) };
+        let ok = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==";
+        assert!(toast_url(&mk(Some(ok)), "online").contains("&av=data%3Aimage%2Fpng"));
+        assert!(!toast_url(&mk(None), "online").contains("av="));
+        for bad in ["javascript:alert(1)", "data:image/svg+xml;base64,PHN2Zz4=", "data:image/png;base64,!!"] {
+            assert!(!toast_url(&mk(Some(bad)), "online").contains("av="), "{bad}");
         }
     }
 

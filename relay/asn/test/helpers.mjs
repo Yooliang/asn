@@ -10,6 +10,8 @@ export function httpTransport(url, windowName, key = FAKE_KEY) {
     inbox: () => core.api(`inbox&agent=${q}`),
     ack: ids => core.api(`ack&agent=${q}`, { method: 'POST', body: { ids } }),
     send: payload => core.api('send', { method: 'POST', body: payload }),
+    avatar: node => core.api(`avatar&node=${encodeURIComponent(node)}`),
+    setAvatar: avatar => core.api('set_avatar', { method: 'POST', body: { avatar } }),
   }
 }
 export const memStore = (init = null) => {

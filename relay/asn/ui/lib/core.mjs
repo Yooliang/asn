@@ -1,8 +1,9 @@
 // ASN 狀態核心（瀏覽器與 node 都能跑）：好友、對話、未讀、收信、寄信、震動。
 // 不碰網路細節：transport 由外面注入（桌面版＝Rust 命令，金鑰留在 Rust；測試＝連本機假 relay）。
-//   transport: { list(), inbox(), ack(ids), send(payload) }
+//   transport: { list(), inbox(), ack(ids), send(payload), avatar?(node), setAvatar?(dataUrl|null) }
 //   store:     { load() → 物件|null, save(物件) }
 //   isChatVisible(id) → Promise<boolean>：該好友的對話視窗是否開著且沒最小化
+import { isAvatarDataUrl } from './avatar.mjs'
 import { buildFriends, cleanPsm, mergeFriends } from './roster.mjs'
 import { routeMail, stubFriend } from './routing.mjs'
 import { NUDGE_TAG, hasNudge, hueOf, initial, plain, stripNudge, unwrapShell } from './text.mjs'
@@ -17,6 +18,7 @@ export class AsnCore {
     this.logs = new Map()      // id → 訊息陣列
     this.seen = new Set()      // 已處理過的信件 id（ack 失敗重拉時不重複顯示）
     this.nodeOrder = []        // 收發室名單裡的節點順序（設備頁籤照這個排）
+    this.avatars = new Map()   // 節點 → { at, data }：各設備上傳的大頭貼（名單只帶更新時間，圖按需取、依更新時間快取）
     this.conn = 'connecting'   // connecting | on | off
     this.rosterLoaded = false
     this.handlers = {}
@@ -64,6 +66,40 @@ export class AsnCore {
     this.friends = next
     this.rosterLoaded = true
     this.emit('state')
+    await this.#syncAvatars(members)
+  }
+
+  // ---------- 設備大頭貼 ----------
+  // 名單每個節點帶 avatar_updated_at（沒上傳＝空）；時間跟快取不同才去取圖，不再上傳了就清掉。收到的圖一律驗格式（外部資料）。
+  async #syncAvatars(members) {
+    if (!this.transport.avatar) return
+    const want = new Map()
+    for (const m of Array.isArray(members) ? members : []) if (typeof m?.id === 'string' && typeof m.avatar_updated_at === 'string' && m.avatar_updated_at) want.set(m.id, m.avatar_updated_at)
+    let changed = false
+    for (const node of [...this.avatars.keys()]) if (!want.has(node)) { this.avatars.delete(node); changed = true }
+    for (const [node, at] of want) {
+      if (this.avatars.get(node)?.at === at) continue
+      try {
+        const r = await this.transport.avatar(node)
+        if (isAvatarDataUrl(r?.avatar)) { this.avatars.set(node, { at, data: r.avatar }); changed = true }
+        else this.log(`avatar ${node}: 格式不合，略過`)
+      } catch (e) { this.log(`avatar ${node} failed: ${e.message}`) }
+    }
+    if (changed) this.emit('avatars')
+  }
+  avatarMap() { return Object.fromEntries([...this.avatars].map(([n, e]) => [n, e.data])) }
+
+  // 上傳／移除本機設備的大頭貼（null＝移除，改回自動產生）。成功後直接更新本機快取，不等下一輪名單
+  async setSelfAvatar(dataUrl) {
+    if (!this.transport.setAvatar) return { ok: false, error: '這個版本不支援大頭貼' }
+    if (dataUrl !== null && !isAvatarDataUrl(dataUrl)) return { ok: false, error: '大頭貼格式不對' }
+    try {
+      const r = await this.transport.setAvatar(dataUrl)
+      if (dataUrl === null) this.avatars.delete(this.selfNode)
+      else this.avatars.set(this.selfNode, { at: String(r?.avatar_updated_at ?? this.now()), data: dataUrl })
+      this.emit('avatars')
+      return { ok: true }
+    } catch (e) { return { ok: false, error: e.message } }
   }
 
   #setConn(c) { if (this.conn !== c) { this.conn = c; this.emit('state') } }
@@ -164,7 +200,7 @@ export class AsnCore {
     const withLog = [...this.friends.values()].filter(f => this.logs.has(f.id) || f.known)
     try {
       await this.store.save({
-        friends: withLog.map(f => ({ id: f.id, node: f.node, agent: f.agent, nick: f.nick, psm: f.psm, engine: f.engine, lastAt: f.lastAt ?? 0, known: true })),
+        friends: withLog.map(f => ({ id: f.id, node: f.node, agent: f.agent, nick: f.nick, psm: f.psm, engine: f.engine, lastAt: f.lastAt ?? 0, known: true, onRoster: f.onRoster === true })),
         logs: Object.fromEntries(withLog.filter(f => this.logs.has(f.id)).map(f => [f.id, this.logs.get(f.id).slice(-LOG_KEEP)])),
       })
     } catch (e) { this.log(`save failed: ${e.message}`) }

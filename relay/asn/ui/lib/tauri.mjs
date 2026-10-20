@@ -15,6 +15,8 @@ export const transport = {
   ack: ids => invoke('relay_ack', { ids }),
   rooms: () => invoke('relay_rooms'),
   send: payload => invoke('relay_send', { payload }),
+  avatar: node => invoke('relay_avatar', { node }),                 // 某台設備上傳的大頭貼（按需取）
+  setAvatar: avatar => invoke('relay_set_avatar', { avatar }),      // 上傳自己這台的大頭貼；null＝移除
 }
 export const store = name => ({
   load: async () => { const s = await invoke('store_load', { name }); try { return s ? JSON.parse(s) : null } catch { return null } },

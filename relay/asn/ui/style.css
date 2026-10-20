@@ -44,6 +44,10 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .dp.xl>span{font-size:42px;border-radius:6px}
 .dp.st-online,.dot.st-online{--frame:var(--online)} .dp.st-busy,.dot.st-busy{--frame:var(--busy)} .dp.st-away,.dot.st-away{--frame:var(--away)} .dp.st-offline,.dot.st-offline{--frame:var(--offline)}
 
+/* 大頭貼圖片（自動產生的色塊或設備上傳的圖）填滿相框 */
+.dp img{display:block;width:100%;height:100%;border-radius:inherit;object-fit:cover}
+.dp.st-offline img{filter:grayscale(.65) opacity(.85)}
+
 /* ---------- 好友名單 ---------- */
 .me{display:flex;gap:10px;padding:10px;background:linear-gradient(var(--panel-head),var(--panel-soft));border-bottom:1px solid var(--line)}
 .me-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
@@ -240,3 +244,11 @@ html.toast-page,html.toast-page body{background:transparent}
 .tool-group .tool.caret{border-top-left-radius:0;border-bottom-left-radius:0}
 .tb-bottom .compose-main{flex-direction:column-reverse}
 .tb-bottom .toolbar{border-bottom:0;border-top:1px solid var(--line);background:linear-gradient(var(--panel-head),var(--panel-soft))}
+
+/* ---------- 名單裡的小大頭貼、設定頁的大頭貼區 ---------- */
+.buddy{align-items:center}
+.buddy .dp.xs{flex:none}
+.av-set{display:flex;flex-direction:column;gap:6px}
+.av-row{display:flex;gap:12px;align-items:center}
+.av-btns{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.av-btns .aero-btn{white-space:nowrap;font-size:12px;padding:3px 8px}

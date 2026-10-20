@@ -17,7 +17,7 @@
       <button class="tb close" @click="ctl('close')" aria-label="關閉對話">✕</button>
     </span>
   </header>
-  <chat-pane :friend="f" :me="me" :log="log" :dp-mode="look.dpMode" :bubble="look.bubble" :toolbar="look.toolbar" :dp-collapsed="look.collapsed" @send="send" @nudge="nudge" @toggle-dp="toggleDp"></chat-pane>
+  <chat-pane :friend="f" :me="me" :log="log" :friend-av="friendAv" :me-av="meAv" :dp-mode="look.dpMode" :bubble="look.bubble" :toolbar="look.toolbar" :dp-collapsed="look.collapsed" @send="send" @nudge="nudge" @toggle-dp="toggleDp"></chat-pane>
 </div>
 <script src="vendor/vue.global.prod.js"></script>
 <script type="module" src="chat.js"></script>
