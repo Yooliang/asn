@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// 雲端代理的收信常駐程式：Realtime 門鈴＋每 2 分鐘補拉；每封信「先 append 到 inbox.jsonl 並 fsync，寫成功才 ack」。
+// 雲端代理的收信常駐程式：Realtime 門鈴＋每 2 分鐘補拉；pull 失敗時短退避重試（見 relay/machine/pull-retry.mjs）。
+// 每封信「先 append 到 inbox.jsonl 並 fsync，寫成功才 ack」。
 // 環境被重置時信還留在收發室信箱（沒 ack），不會掉；以信件 id 去重（含重啟後，從 inbox.jsonl 重建）。
 // 每 60 秒 roster 回報 resolveCloudAgents 名單（Grok 掃描＋agents.json 合併；見 grok-agents.mjs）。roster 403 只記一次、之後每小時才試一次。
 //   node recv.mjs          長駐（boot.sh 用 nohup setsid 啟動）
@@ -9,6 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { createCore } from '../machine/relay-core.mjs'   // 沿用 API 呼叫與門鈴，不複製協定
 import { createLog } from '../machine/safe-log.mjs'
 import { NO_KEY_MSG, readAnonKey, readKey, resolveCloudAgents, resolveConfig, rosterScanEnvFrom } from './config.mjs'
+import { createPullWithRetry, parsePullBackoffMs } from '../machine/pull-retry.mjs'
 import { acquirePidLock, appendLineDurable, ensureDir, readJsonl } from './lib.mjs'
 
 const recordOf = m => ({
@@ -19,10 +21,12 @@ const recordOf = m => ({
 })
 
 // 收信核心（可單獨測試）：api(action, {method, body}) 是 relay-core 的 api
-export function createReceiver({ api, cfg, log, now = () => Date.now(), listAllFn, env = rosterScanEnvFrom(cfg) }) {
+export function createReceiver({
+  api, cfg, log, now = () => Date.now(), listAllFn, env = rosterScanEnvFrom(cfg),
+  sleep, backoffMs,
+}) {
   ensureDir(cfg.mailDir, 0o700)
   const seen = new Set(readJsonl(cfg.inboxFile).map(m => m?.id).filter(Boolean))   // 重啟後靠檔案去重
-  let pulling = false, again = false
 
   async function pullOnce() {
     const { messages = [] } = await api('inbox')
@@ -40,12 +44,9 @@ export function createReceiver({ api, cfg, log, now = () => Date.now(), listAllF
     for (let i = 0; i < ackIds.length; i += 100) await api('ack', { method: 'POST', body: { ids: ackIds.slice(i, i + 100) } })
     return ackIds.length
   }
-  async function pull(why) {
-    if (pulling) { again = true; return }
-    pulling = true
-    try { do { again = false; await pullOnce() } while (again) }
-    catch (e) { log(`pull failed (${why}): ${e.message}`) } finally { pulling = false }
-  }
+  const { pull } = createPullWithRetry({
+    pullOnce, log, sleep, backoffMs: backoffMs ?? parsePullBackoffMs(env),
+  })
 
   // roster：每位代理一列（本機掃描或 config.mjs 的 loadAgents）。403＝沒有 can_roster，只記一次、之後每小時才試
   let blockedUntil = 0, warned = false
