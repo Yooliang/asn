@@ -46,6 +46,8 @@
       <li><strong>Supabase</strong>：本服務的資料庫與後端函式託管在 Supabase 的雲端服務，主機位於日本東京區域。</li>
       <li><strong>Google、GitHub</strong>：提供登入驗證（透過 Supabase Auth）。你與它們之間的關係受其各自的隱私權政策規範。</li>
       <li><strong>Firebase Hosting（Google）</strong>：提供本網站的靜態頁面。</li>
+      <li><strong>念出訊息（選用，僅在維護者啟用時）</strong>：你在 ASN 按下「念出」或開啟「收到新訊息自動念」時，那則訊息的文字會經本服務的後端轉給 Cloudflare 上的語音代理，再由它送到微軟 Edge 的線上語音合成取得聲音；文字不會被本服務另外保存。此功能預設不啟用，且僅供個人使用。</li>
+      <li><strong>語音輸入</strong>：在你電腦上的本機程式辨識，錄音不會離開你的電腦，也不會上傳到本服務。第一次使用時，程式會從 GitHub 與 Hugging Face 下載辨識引擎與模型檔，這兩個網站會看到你的下載請求（IP 位址等），不會看到你的錄音。</li>
       <li>你的訊息可能被送到你自己指定的 AI 代理（例如你電腦上的 Claude Code，或雲端的 Grok 代理）。這些代理如何處理訊息，由其提供者與你自己的設定決定，不在本政策範圍內。</li>
     </ul>
 

@@ -122,6 +122,25 @@ impl Relay {
         Ok(data.unwrap_or(Value::Null))
     }
 
+    /// 回傳二進位內容的動作（念出訊息的音檔）：成功回（位元組，content-type）。超過 `max` 位元組算失敗。
+    /// 錯誤訊息只含動作名、狀態碼與後端的錯誤代碼，不含金鑰與內文。
+    pub async fn api_bytes(&self, action: &str, body: Value, max: usize, timeout: Duration) -> Result<(Vec<u8>, String), String> {
+        let url = format!("{}?action={}", self.base, action);
+        let name = action.split('&').next().unwrap_or(action);
+        let res = self.client.post(&url).json(&body).header("x-relay-key", &self.key).timeout(timeout).send().await.map_err(|e| format!("{name} 連線失敗：{}", e.without_url()))?;
+        let status = res.status();
+        let mime = res.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+        let bytes = res.bytes().await.map_err(|e| format!("{name} 讀取失敗：{}", e.without_url()))?;
+        if !status.is_success() {
+            let err = serde_json::from_slice::<Value>(&bytes).ok().and_then(|d| d.get("error").and_then(Value::as_str).map(String::from)).unwrap_or_default();
+            return Err(format!("{name} HTTP {} {err}", status.as_u16()).trim().to_string());
+        }
+        if bytes.len() > max {
+            return Err(format!("{name} 回應太大"));
+        }
+        Ok((bytes.to_vec(), mime))
+    }
+
     pub async fn list(&self) -> Result<Value, String> {
         self.api("list", None).await
     }

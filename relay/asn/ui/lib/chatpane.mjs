@@ -19,6 +19,7 @@ export const ChatPane = {
     bubble: { type: String, default: 'none' },     // 文字底色：none／color／auto
     dpCollapsed: { type: Boolean, default: false },  // 側欄收合（只對 left／right 有意義）
     active: { type: Boolean, default: true },      // 整合模式下只有目前分頁是 true；變成 true 時捲到底並聚焦輸入框
+    voice: { type: Object, default: null },        // 語音功能（lib/voice-ui.mjs 的 createVoiceUi）；沒給就沒有念出訊息與麥克風
   },
   emits: ['send', 'nudge', 'toggle-dp'],
   setup(props, { emit }) {
@@ -48,8 +49,22 @@ export const ChatPane = {
       pickerOpen.value = false
       nextTick(() => composeEl.value && composeEl.value.focus())
     }
+    // 語音輸入：辨識完的字接在輸入框後面讓人確認，不自動送出
+    function micClick() {
+      if (!props.voice) return
+      void props.voice.toggleMic(text => {
+        draft.value = draft.value && !/\s$/.test(draft.value) ? draft.value + ' ' + text : draft.value + text
+        nextTick(() => composeEl.value && composeEl.value.focus())
+      })
+    }
+    const msgKey = (m, i) => (m.id ? String(m.id) : `${m.t}:${i}`)
+    const speaking = (m, i) => !!props.voice && props.voice.state.tts.key === msgKey(m, i) && props.voice.state.tts.phase !== 'idle'
+    const speakTip = (m, i) => (speaking(m, i) ? '停止念出' : '念出這則訊息')
+    const speak = (m, i) => props.voice && props.voice.speak(msgKey(m, i), m.text)
+    const micTip = computed(() => (props.voice?.state.mic.phase === 'recording' ? '說完了，按一下辨識' : '語音輸入（按一下開始說話）'))
+    const voiceNote = computed(() => props.voice?.state.note || props.voice?.state.tts.error || '')
     onMounted(() => { scrollDown(); if (props.active) composeEl.value && composeEl.value.focus() })
-    return { STATUS, EMO, sideCol, collapsed, classes, lay, arrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo }
+    return { micClick, msgKey, speaking, speakTip, speak, micTip, voiceNote, STATUS, EMO, sideCol, collapsed, classes, lay, arrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -69,7 +84,12 @@ export const ChatPane = {
           <div v-else class="msg" :class="['al-' + lay(m.k).align, { mine: m.k === 'me' }]">
             <div class="m-av" v-if="lay(m.k).avatar"><div class="dp xs" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span><img :src="friendAv" alt=""></span></div></div>
             <div class="m-main">
-              <div class="who">{{ m.k === 'me' ? plain(me.nick) : plain(friend.nick) }} 說：<time>{{ fmt(m.t) }}</time></div>
+              <div class="who">{{ m.k === 'me' ? plain(me.nick) : plain(friend.nick) }} 說：<time>{{ fmt(m.t) }}</time>
+                <button v-if="voice && m.k === 'them'" class="spk" :class="{ on: speaking(m, i) }" type="button" @click="speak(m, i)" :aria-label="speakTip(m, i)" :title="speakTip(m, i)">
+                  <svg v-if="!speaking(m, i)" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 9.5v5h3.6L12 18.5v-13L7.6 9.5z" fill="currentColor"/><path d="M15 9.2a4 4 0 0 1 0 5.6M17.4 6.8a7.4 7.4 0 0 1 0 10.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+                  <svg v-else viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/></svg>
+                </button>
+              </div>
               <div class="m-body" :class="'tone-' + lay(m.k).tone" v-html="emo(m.text)"></div>
             </div>
           </div>
@@ -93,10 +113,20 @@ export const ChatPane = {
         <button class="tool icon" type="button" @click="nudge" :disabled="nudgeCooling" aria-label="傳送震動" title="傳送震動">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="8.2" y="4.5" width="7.6" height="15" rx="1.8" fill="#dfeaf6" stroke="#4a5d73" stroke-width="1.4"/><circle cx="12" cy="16.6" r="1" fill="#4a5d73"/><path d="M4.6 8.5l-2 3.5 2 3.5M19.4 8.5l2 3.5-2 3.5" fill="none" stroke="#d9302b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
+        <button class="tool icon mic" :class="{ rec: voice && voice.state.mic.phase === 'recording', busy: voice && voice.state.mic.phase === 'recognizing' }" type="button" v-if="voice" @click="micClick" :disabled="voice.state.mic.phase === 'recognizing'" :aria-label="micTip" :aria-pressed="voice.state.mic.phase === 'recording'" :title="micTip">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="9" y="3.5" width="6" height="11" rx="3" fill="currentColor"/><path d="M5.8 11.5a6.2 6.2 0 0 0 12.4 0M12 17.7v3M8.6 20.7h6.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </button>
         <div class="picker" v-if="pickerOpen" role="menu">
           <button v-for="[code, icon] in EMO" :key="code" type="button" :title="code" @click="insertEmo(code)" role="menuitem">{{ icon }}</button>
         </div>
       </div>
+      <div class="voice-install" v-if="voice && voice.state.install.needed" role="alert">
+        <span v-if="!voice.state.install.busy">語音輸入在這台電腦上辨識，聲音不會上傳。第一次使用要先下載辨識引擎與語音模型（約 200 MB，只下載一次）。</span>
+        <span v-else>{{ voice.state.install.text }}</span>
+        <button class="aero-btn" type="button" :disabled="voice.state.install.busy" @click="voice.installStt()">下載</button>
+        <button class="aero-btn" type="button" :disabled="voice.state.install.busy" @click="voice.dismissInstall()">取消</button>
+      </div>
+      <div class="voice-note" v-if="voiceNote" role="status">{{ voiceNote }}</div>
       <form class="composer" @submit.prevent="send">
         <textarea ref="composeEl" v-model="draft" @keydown.enter.exact.prevent="send" placeholder="輸入訊息，Enter 傳送，Shift+Enter 換行" aria-label="輸入訊息"></textarea>
         <button class="aero-btn" type="submit" :disabled="!draft.trim()">傳送</button>

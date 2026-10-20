@@ -28,6 +28,7 @@ ASN 從 Irori 專案（github.com/cwen0708/irori）拆出，保留 git 歷史。
 | `relay/cloud-agent/` | 雲端 Linux 代理（例如 Grok）用的收寄信腳本 | `relay/cloud-agent/README.md` |
 | `relay/channel/` | Claude Code channel 外掛（早期做法，被收發室橋取代，仍保留） | `relay/channel/README.md` |
 | `relay/asn/` | ASN 電腦版（Tauri 2 + Vue 3） | `relay/asn/README.md` |
+| `cloudflare/edge-tts/` | 念出訊息用的 Edge TTS 代理（Cloudflare Worker，僅個人用、預設不啟用） | [VOICE.md](VOICE.md) |
 | `supabase/migrations/` | 新後台的 migration（Supabase CLI 格式） | [BACKEND.md](BACKEND.md) |
 | `supabase/functions/relay/` | 新後台的 Edge Function | [BACKEND.md](BACKEND.md) |
 | `supabase/functions/_shared/` | 函式共用邏輯與單元測試 | [BACKEND.md](BACKEND.md) |
@@ -66,6 +67,9 @@ node --test "relay/cloud-agent/test/*.test.mjs"
 
 # 後端共用邏輯
 cd supabase/functions && deno test -A _shared/
+
+# 念出訊息代理的簽章守門測試
+node --test tests/edge_tts_drm.test.mjs
 
 # 根目錄測試（部分仍相依 Irori 其他檔案，搬家期間可能失敗）
 node --test tests/*.test.mjs

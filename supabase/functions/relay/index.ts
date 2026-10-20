@@ -7,6 +7,9 @@ import { normalizeRosterAgents } from "../_shared/roster.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
 import * as signal from "../_shared/signal.ts";
 import { handleNodeLaunchAction, LAUNCH_ACTIONS, sanitizeLauncher } from "../_shared/launch.ts";
+import { handleTts, TtsLimiter, ttsVoicesResponse } from "../_shared/tts.ts";
+
+const ttsLimiter = new TtsLimiter();
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -131,6 +134,12 @@ Deno.serve(async (req) => {
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     if (data?.error === "not_found") return json(404, { error: "not_found" });
     return json(200, data);
+  }
+  // 念出訊息：節點金鑰驗證後轉給 Cloudflare Worker（Edge TTS，僅個人用，預設不啟用）；節點代號只取自金鑰，限長度與頻率（見 _shared/tts.ts）
+  if (action === "tts_voices" && req.method === "GET") return ttsVoicesResponse({ env: (k) => Deno.env.get(k) });
+  if (action === "tts" && req.method === "POST") {
+    const b = await req.json().catch(() => null);
+    return await handleTts({ env: (k) => Deno.env.get(k), fetch, now: Date.now, limiter: ttsLimiter }, me.id, b);
   }
   if (action === "roster" && req.method === "POST") {
     const b = await req.json().catch(() => null);
