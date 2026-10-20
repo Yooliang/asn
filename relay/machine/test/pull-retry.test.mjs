@@ -36,17 +36,37 @@ async function fakeRelay(inboxFailRemaining = 0) {
   })
   await new Promise(r => srv.listen(0, '127.0.0.1', r))
   st.port = srv.address().port
-  st.close = () => new Promise(r => srv.close(r))
+  st.close = () => new Promise(r => { srv.closeAllConnections?.(); srv.close(r) })
   return st
 }
 
-function newHome() {
+function newHome(name = 'T-視窗甲') {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'irori-recv-retry-'))
   fs.mkdirSync(path.join(home, '.irori-relay'), { recursive: true })
   fs.writeFileSync(path.join(home, '.irori-relay', 'T.key'), 'fake-machine-key')
   const sdir = path.join(home, '.claude', 'sessions'); fs.mkdirSync(sdir, { recursive: true })
-  fs.writeFileSync(path.join(sdir, `${process.pid}.json`), JSON.stringify({ pid: process.pid, name: 'T-視窗甲', kind: 'interactive', entrypoint: 'cli', messagingSocketPath: `\\\\.\\pipe\\fake-${process.pid}` }))
+  fs.writeFileSync(path.join(sdir, `${process.pid}.json`), JSON.stringify({ pid: process.pid, name, kind: 'interactive', entrypoint: 'cli', messagingSocketPath: `\\\\.\\pipe\\fake-${process.pid}` }))
   return home
+}
+
+const baseEnv = (home, st, extra = {}) => ({
+  PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: home, USERPROFILE: home,
+  IRORI_RELAY_ID: 'T', IRORI_RELAY_URL: `http://127.0.0.1:${st.port}/relay`, CLAUDE_CODE_MESSAGING_SOCKET: `\\\\.\\pipe\\fake-${process.pid}`, ...extra,
+})
+
+function spawnRecv(home, st, args, env = {}) {
+  const c = spawn(process.execPath, [RECV, ...args], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: baseEnv(home, st, env) })
+  c.out = ''; c.err = ''; c.stdout.on('data', d => (c.out += d)); c.stderr.on('data', d => (c.err += d))
+  c.done = new Promise(r => c.on('close', code => r(code)))
+  return c
+}
+
+async function until(f, ms = 15000) { const t0 = Date.now(); while (!f() && Date.now() - t0 < ms) await sleep(50); return f() }
+
+async function stopChild(c) {
+  if (c.exitCode != null || c.killed) return c.done
+  c.kill()
+  return c.done
 }
 
 test('--watch：inbox 多次 500 後成功，短退避內印出信並 ack', async () => {
@@ -54,19 +74,18 @@ test('--watch：inbox 多次 500 後成功，短退避內印出信並 ack', asyn
   st.mails = [mail(1, 'T-視窗甲')]
   const home = newHome()
   const env = {
-    PATH: process.env.PATH, HOME: home, USERPROFILE: home,
-    IRORI_RELAY_ID: 'T', IRORI_RELAY_URL: `http://127.0.0.1:${st.port}/relay`,
-    CLAUDE_CODE_MESSAGING_SOCKET: `\\\\.\\pipe\\fake-${process.pid}`,
     IRORI_RECV_POLL_MS: '60000',
     IRORI_PULL_BACKOFF_MS: '5,10,20,40',
   }
-  const c = spawn(process.execPath, [RECV, '--watch'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env })
-  let out = ''; c.stdout.on('data', d => (out += d))
+  const c = spawnRecv(home, st, ['--watch'], env)
   try {
-    await sleep(200)
-    assert.ok(out.includes(U(1)), `stdout=${out}\nstderr=${c.err}`)
+    assert.ok(await until(() => c.out.includes(U(1))), `stdout=${c.out}\nstderr=${c.err}`)
     assert.equal(st.mails[0].acked, true)
     const inboxCalls = st.reqs.filter(r => r.action === 'inbox').length
     assert.ok(inboxCalls >= 3, `應重試 inbox，實際 ${inboxCalls}`)
-  } finally { c.kill(); await new Promise(r => c.on('close', r)); await st.close(); fs.rmSync(home, { recursive: true, force: true }) }
+  } finally {
+    await stopChild(c)
+    await st.close()
+    fs.rmSync(home, { recursive: true, force: true })
+  }
 })

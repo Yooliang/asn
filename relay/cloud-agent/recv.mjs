@@ -44,7 +44,7 @@ export function createReceiver({
     for (let i = 0; i < ackIds.length; i += 100) await api('ack', { method: 'POST', body: { ids: ackIds.slice(i, i + 100) } })
     return ackIds.length
   }
-  const { pull } = createPullWithRetry({
+  const { pull, destroy } = createPullWithRetry({
     pullOnce, log, sleep, backoffMs: backoffMs ?? parsePullBackoffMs(env),
   })
 
@@ -67,7 +67,7 @@ export function createReceiver({
       return false
     }
   }
-  return { pull, pullOnce, rosterOnce, seen }
+  return { pull, pullOnce, rosterOnce, seen, destroy }
 }
 
 export async function main(env = process.env) {
