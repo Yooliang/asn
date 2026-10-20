@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
-# 放進雲端環境的 boot.sh（重置後會重跑）。可重複執行：Node 22 已有就跳過、recv 已在跑就跳過。
-# 前提：程式放在 /workspace/irori-relay（見 README「取得程式」）；節點金鑰在秘密環境變數 IRORI_RELAY_KEY（本腳本不讀、不印它）。
+# 放進雲端環境的 boot.sh（重置後會重跑）。可重複執行：Node 裝在 IRORI_NODE_DIR、recv 已在跑就跳過。
+# 前提：已用 install-cloud-node.sh 或手動放好程式；節點金鑰在秘密環境變數 IRORI_RELAY_KEY（本腳本不讀、不印它）。
 set -u
 WS="${IRORI_CLOUD_HOME:-/workspace}"
-APP="${IRORI_CLOUD_APP:-$WS/irori-relay}"      # 裡面要有 relay/cloud-agent 與 relay/machine
-NODE_DIR="$WS/.node"                            # Node 裝在 /workspace：重置後保留，不用每次重下載
-mkdir -p "$WS/relay"
+APP="${IRORI_CLOUD_APP:-$WS/irori-relay}"
+MAIL="${IRORI_CLOUD_MAIL_DIR:-$WS/relay}"
+NODE_DIR="${IRORI_NODE_DIR:-$WS/.node}"
+NODE_BIN="${IRORI_NODE_BIN:-$NODE_DIR/bin/node}"
+mkdir -p "$MAIL"
 
-node_ok() { command -v node >/dev/null 2>&1 && [ "$(node -p 'process.versions.node.split(".")[0]')" -ge 22 ]; }
+node_ok_at() {
+  [ -x "$1" ] && "$1" -p 'Number(process.versions.node.split(".")[0]) >= 22' 2>/dev/null | grep -q true
+}
 
 install_node() {
-  # 官方來源 nodejs.org 的 tar.gz（免 root、不需要 xz），並用同目錄 SHASUMS256.txt 驗證 sha256
   local arch base file tmp
   case "$(uname -m)" in x86_64) arch=x64 ;; aarch64|arm64) arch=arm64 ;; *) echo "不支援的 CPU：$(uname -m)" >&2; return 1 ;; esac
   base="https://nodejs.org/dist/latest-v22.x"
@@ -24,16 +27,53 @@ install_node() {
   rm -rf "$tmp"
 }
 
-export PATH="$NODE_DIR/bin:$PATH"
-if ! node_ok; then
-  echo "[irori] 安裝 Node 22…"
+if ! node_ok_at "$NODE_BIN"; then
+  echo "[irori] 安裝 Node 22 到 $NODE_DIR …"
   install_node || { echo "[irori] Node 安裝失敗，收信常駐沒有啟動" >&2; exit 1; }
 fi
+export PATH="$NODE_DIR/bin:$PATH"
 
-# 已在跑就跳過（recv.mjs 自己也有 pid 檔鎖，這裡只是少開一個馬上退出的程序）
-if pgrep -f "cloud-agent/recv.mjs" >/dev/null 2>&1; then
-  echo "[irori] recv 已在執行"
+if [ -z "${IRORI_RELAY_KEY:-}" ]; then
+  echo "[irori] 缺少 IRORI_RELAY_KEY，拒絕啟動 recv（請在平台秘密變數設定後重開 shell 再跑 boot）" >&2
+  exit 1
+fi
+
+recv_running() {
+  local pidfile="$MAIL/recv.pid"
+  [ -f "$pidfile" ] || return 1
+  local pid
+  pid="$(tr -d ' \n\r' < "$pidfile" 2>/dev/null)" || return 1
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  if [ -r "/proc/$pid/cmdline" ]; then
+    tr '\0' ' ' < "/proc/$pid/cmdline" | grep -q 'recv\.mjs' || return 1
+  fi
+  return 0
+}
+
+if recv_running; then
+  echo "[irori] recv 已在執行（pid 檔：$MAIL/recv.pid）"
 else
-  nohup setsid node "$APP/relay/cloud-agent/recv.mjs" >> "$WS/relay/recv.out" 2>&1 &
-  echo "[irori] recv 已啟動（log：$WS/relay/recv.log）"
+  nohup setsid "$NODE_BIN" "$APP/relay/cloud-agent/recv.mjs" >> "$MAIL/recv.out" 2>&1 &
+  echo "[irori] recv 已啟動（log：$MAIL/recv.log，當機堆疊：$MAIL/recv.out）"
+fi
+
+# 若已合併 dispatch-watch（draft PR #4），有檔案就一併啟動
+DISPATCH="$APP/relay/cloud-agent/dispatch-watch.mjs"
+if [ -f "$DISPATCH" ]; then
+  STATE="${IRORI_DISPATCH_STATE_DIR:-$MAIL/dispatch-state}"
+  dispatch_running() {
+    local pf="$STATE/dispatch.pid"
+    [ -f "$pf" ] || return 1
+    local pid; pid="$(tr -d ' \n\r' < "$pf" 2>/dev/null)" || return 1
+    kill -0 "$pid" 2>/dev/null || return 1
+    [ -r "/proc/$pid/cmdline" ] && tr '\0' ' ' < "/proc/$pid/cmdline" | grep -q 'dispatch-watch\.mjs'
+  }
+  if dispatch_running; then
+    echo "[irori] dispatch-watch 已在執行"
+  else
+    mkdir -p "$STATE"
+    nohup setsid "$NODE_BIN" "$DISPATCH" >> "$STATE/dispatch.out" 2>&1 < /dev/null &
+    echo "[irori] dispatch-watch 已啟動（log：$STATE/dispatch.log）"
+  fi
 fi

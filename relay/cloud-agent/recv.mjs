@@ -11,6 +11,7 @@ import { createCore } from '../machine/relay-core.mjs'   // 沿用 API 呼叫與
 import { createLog } from '../machine/safe-log.mjs'
 import { normalizeAttachments } from '../machine/attach-format.mjs'
 import { NO_KEY_MSG, readAnonKey, readKey, resolveCloudAgents, resolveConfig, rosterScanEnvFrom } from './config.mjs'
+import { backendHostCode } from './env.mjs'
 import { createPullWithRetry, parsePullBackoffMs } from '../machine/pull-retry.mjs'
 import { acquirePidLock, appendLineDurable, ensureDir, readJsonl } from './lib.mjs'
 
@@ -86,7 +87,7 @@ export async function main(env = process.env) {
 
   const core = createCore({ baseUrl: cfg.baseUrl, key, anonKey: readAnonKey(cfg, env), log, workDir: cfg.mailDir })
   const rx = createReceiver({ api: core.api, cfg, log })
-  log(`recv starting node=${cfg.node} window=${cfg.name} inbox=${cfg.inboxFile}`)
+  log(`recv starting node=${cfg.node} window=${cfg.name} backend=${backendHostCode(cfg.baseUrl)} inbox=${cfg.inboxFile}`)
   void rx.rosterOnce()
   setInterval(() => void rx.rosterOnce(), cfg.rosterMs)
   for (let wait = 2000; ; wait = Math.min(wait * 2, 30_000)) {

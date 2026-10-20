@@ -7,8 +7,12 @@ export const FAKE_KEY = 'fake-grok-node-key'
 export const INVITE = 'good-invite-code'
 export const ISSUED_KEY = 'issued-secret-key-for-test'
 
-export async function startFakeRelay({ node = 'grok', rosterStatus = 200, onAck = null, inboxFailRemaining = 0 } = {}) {
-  const st = { mails: [], reqs: [], sent: [], rosters: [], acks: [], rosterStatus, url: '', port: 0 }
+export async function startFakeRelay({ node = 'grok', rosterStatus = 200, onAck = null, inboxFailRemaining = 0, members = null } = {}) {
+  const defaultMembers = [
+    { id: node, name: node, online: true, presence: 'live', agents: [] },
+    { id: 'W', name: '工作', online: false, presence: 'idle', agents: [] },
+  ]
+  const st = { mails: [], reqs: [], sent: [], rosters: [], acks: [], rosterStatus, members: members ?? defaultMembers, url: '', port: 0 }
   let inboxFailsLeft = inboxFailRemaining
   const readBody = req => new Promise(r => { let b = ''; req.on('data', d => (b += d)); req.on('end', () => r(b ? JSON.parse(b) : null)) })
   const srv = http.createServer(async (req, res) => {
@@ -28,6 +32,7 @@ export async function startFakeRelay({ node = 'grok', rosterStatus = 200, onAck 
     const k = req.headers['x-relay-key']
     if (k !== FAKE_KEY && k !== ISSUED_KEY) return out(401, { error: 'unauthorized' })
     if (action === 'whoami') return out(200, { node, bell_topic: 'bell-test' })
+    if (action === 'list') return out(200, { members: st.members })
     if (action === 'inbox') {
       if (inboxFailsLeft > 0) { inboxFailsLeft--; return out(500, { error: 'server_error' }) }
       return out(200, { messages: st.mails.filter(m => !m.acked) })
