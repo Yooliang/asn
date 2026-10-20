@@ -5,8 +5,8 @@ import http from 'node:http'
 export const U = n => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`
 export const FAKE_KEY = 'fake-machine-key'
 
-export async function startFakeRelay({ node = 'T', members = [], mails = [], port = 0 } = {}) {
-  const st = { node, members, mails: [...mails], reqs: [], sent: [], port: 0, url: '' }
+export async function startFakeRelay({ node = 'T', members = [], mails = [], rooms = [], port = 0 } = {}) {
+  const st = { node, members, mails: [...mails], rooms, reqs: [], sent: [], port: 0, url: '' }
   const readBody = req => new Promise(r => { let b = ''; req.on('data', d => (b += d)); req.on('end', () => r(b ? JSON.parse(b) : null)) })
   const srv = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x'), action = u.searchParams.get('action'), agent = u.searchParams.get('agent')
@@ -16,6 +16,7 @@ export async function startFakeRelay({ node = 'T', members = [], mails = [], por
     if (req.headers['x-relay-key'] !== FAKE_KEY) return out(401, { error: 'unauthorized' })
     if (action === 'whoami') return out(200, { node, bell_topic: 'bell-test' })
     if (action === 'list') return out(200, { members: st.members })
+    if (action === 'room_list' && req.method === 'GET') return out(200, { rooms: st.rooms })
     if (action === 'inbox' && agent) return out(200, { messages: st.mails.filter(m => !m.acked && m.to_agent === agent) })
     if (action === 'ack' && agent) {
       let n = 0

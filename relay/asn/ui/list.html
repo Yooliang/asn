@@ -21,46 +21,98 @@
       <div class="dp" :class="'st-' + me.status" :style="{ '--h': 205 }"><span>{{ initial(me.nick) }}</span></div>
       <div class="me-info">
         <div class="me-row">
-          <input class="ghost nick-input" v-model="me.nick" maxlength="40" aria-label="我的暱稱">
+          <input class="ghost nick-input" v-model="me.nick" maxlength="40" aria-label="我的暱稱（也是對外的名字）" @change="commitNick" @keydown.enter="$event.target.blur()">
           <select class="ghost status-sel" v-model="me.status" aria-label="我的狀態">
             <option v-for="(label, key) in STATUS" :key="key" :value="key">({{ label }})</option>
           </select>
         </div>
         <input class="ghost psm-input" v-model="me.psm" maxlength="60" placeholder="&lt;輸入個人訊息&gt;" aria-label="個人訊息">
+        <div class="nick-err" v-if="nickErr" role="alert">{{ nickErr }}</div>
       </div>
     </div>
-    <div class="search"><input v-model="query" placeholder="搜尋聯絡人..." aria-label="搜尋聯絡人"></div>
-    <div class="list">
-      <div v-for="g in groups" :key="g.key">
-        <button class="g-head" @click="collapsed[g.key] = !collapsed[g.key]" :aria-expanded="!collapsed[g.key]">
-          <span class="caret" :class="{ open: !collapsed[g.key] }">▶</span>{{ g.label }} ({{ g.items.filter(c => c.status !== 'offline').length }}/{{ g.items.length }})
+    <div class="body">
+      <nav class="rail" role="tablist" aria-label="名單分頁">
+        <button v-for="d in dev.visible" :key="d.key" class="rtab dev" :class="{ on: tab === d.key }" role="tab" :aria-selected="tab === d.key" :title="d.label" :aria-label="d.label" @click="tab = d.key">
+          <svg v-if="d.key === selfNode" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="8" r="4.2" fill="#3cb521" stroke="#1e7a10"/><path d="M4 21c0-5 3.6-7.6 8-7.6s8 2.6 8 7.6z" fill="#3cb521" stroke="#1e7a10"/></svg>
+          <span v-else class="mono">{{ d.short }}</span>
+          <span class="red" v-if="d.unread"></span>
         </button>
-        <ul v-show="!collapsed[g.key]">
-          <li v-for="c in g.items" :key="c.id">
-            <button class="buddy" :class="{ offline: c.status === 'offline' }" @click="openChat(c.id)">
-              <span class="dot" :class="'st-' + c.status"></span>
-              <span class="b-text">
-                <span class="b-nick" v-html="emo(c.nick)"></span>
-                <span class="b-psm" v-if="c.psm" v-html="emo(c.psm)"></span>
-              </span>
-              <span class="unread" v-if="c.unread">{{ c.unread }}</span>
-            </button>
-          </li>
-        </ul>
+        <div class="more-wrap" v-if="dev.more.length">
+          <button class="rtab dev" :class="{ on: moreOn }" role="tab" :aria-selected="moreOn" title="更多設備" aria-label="更多設備" @click="moreOpen = !moreOpen">
+            <span class="mono">⋯</span><span class="red" v-if="moreUnreadN"></span>
+          </button>
+          <ul class="more-pop" v-if="moreOpen">
+            <li v-for="d in dev.more" :key="d.key"><button :class="{ on: tab === d.key }" @click="tab = d.key; moreOpen = false">{{ d.label }}<i class="red" v-if="d.unread"></i></button></li>
+          </ul>
+        </div>
+        <span class="rail-gap"></span>
+        <button v-for="t in FIXED_TABS" :key="t.key" class="rtab" :class="{ on: tab === t.key }" role="tab" :aria-selected="tab === t.key" :title="t.label" :aria-label="t.label" @click="tab = t.key">
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+            <g v-if="t.key === 'groups'"><circle cx="8" cy="9" r="3" fill="#f0b040" stroke="#a06a10"/><circle cx="16" cy="9" r="3" fill="#6fb6f0" stroke="#1f5d9e"/><path d="M2.5 19c0-3.6 2.4-5.4 5.5-5.4s5.5 1.8 5.5 5.4zM10.5 19c0-3.6 2.4-5.4 5.5-5.4s5.5 1.8 5.5 5.4z" fill="#e8eef5" stroke="#6b7f95"/></g>
+            <g v-else-if="t.key === 'notices'"><path d="M12 3c-3.6 0-5.5 2.6-5.5 6v3.6L4.5 16h15l-2-3.4V9c0-3.4-1.9-6-5.5-6z" fill="#f4c542" stroke="#a37a0a"/><path d="M10 18.5a2 2 0 0 0 4 0z" fill="#d49a10" stroke="#a37a0a"/></g>
+            <g v-else><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M18.5 5.5l-2.1 2.1M7.6 16.4l-2.1 2.1" stroke="#4a5d73" stroke-width="2.4" stroke-linecap="round"/><circle cx="12" cy="12" r="5.6" fill="#dfe8f2" stroke="#4a5d73" stroke-width="2"/><circle cx="12" cy="12" r="2" fill="#fff" stroke="#4a5d73"/></g>
+          </svg>
+        </button>
+      </nav>
+      <div class="content" role="tabpanel">
+        <template v-if="isDevice">
+          <div class="search"><input v-model="query" placeholder="搜尋聯絡人..." aria-label="搜尋聯絡人"></div>
+          <div class="list">
+            <div v-for="g in shown" :key="g.key">
+              <button class="g-head" @click="collapsed[g.key] = !collapsed[g.key]" :aria-expanded="!collapsed[g.key]">
+                <span class="box">{{ collapsed[g.key] ? '+' : '−' }}</span>{{ groupHeading(g) }}
+              </button>
+              <ul v-show="!collapsed[g.key]">
+                <li v-for="c in g.items" :key="c.id">
+                  <button class="buddy" :class="{ offline: c.status === 'offline' }" @click="openChat(c.id)">
+                    <span class="dot" :class="'st-' + c.status"></span>
+                    <span class="b-text">
+                      <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-st" v-if="statusNote(c.status)">{{ statusNote(c.status) }}</span></span>
+                      <span class="b-psm" v-if="c.psm" v-html="emo(c.psm)"></span>
+                    </span>
+                    <span class="unread" v-if="c.unread">{{ c.unread }}</span>
+                  </button>
+                </li>
+              </ul>
+            </div>
+            <div class="empty-list" v-if="!shown.length">{{ emptyText }}</div>
+          </div>
+        </template>
+        <div class="list" v-else-if="tab === 'groups'">
+          <ul>
+            <li v-for="r in rooms" :key="r.id" class="room">
+              <span class="room-ic"></span>
+              <span class="b-text"><span class="b-line"><span class="b-nick" v-html="emo(r.name)"></span><span class="b-st">({{ r.count }} 人)</span></span><span class="b-psm" v-if="r.last" v-html="emo(r.last)"></span></span>
+            </li>
+          </ul>
+          <div class="empty-list" v-if="!rooms.length">{{ roomsErr ? '讀不到群組。' : '目前不在任何群組。' }}</div>
+        </div>
+        <div class="list" v-else-if="tab === 'notices'">
+          <ul>
+            <li v-for="(n, i) in notices" :key="i">
+              <button class="buddy" @click="openChat(n.cid)">
+                <span class="dot st-online"></span>
+                <span class="b-text"><span class="b-line"><span class="b-nick" v-html="emo(n.who)"></span><span class="b-st">{{ fmtTime(n.t) }}</span></span><span class="b-psm" v-html="emo(n.line)"></span></span>
+              </button>
+            </li>
+          </ul>
+          <div class="empty-list" v-if="!notices.length">還沒有通知。</div>
+        </div>
+        <div class="list settings" v-else>
+          <div><button class="aero-btn" @click="soundOn = !soundOn" :aria-pressed="soundOn">音效：{{ soundOn ? '開' : '關' }}</button></div>
+        </div>
       </div>
-      <div class="empty-list" v-if="!friends.length">{{ conn === 'on' ? '收發室名單上目前沒有視窗。' : '還沒連上收發室。' }}</div>
-    </div>
-    <div class="settings" v-if="settingsOpen">
-      <label>視窗名 <input v-model="nameDraft" maxlength="60" aria-label="視窗名"></label>
-      <small>節點 {{ selfNode }}。別人用這個名字寄信給你；改完會重新啟動連線。</small>
-      <div><button class="aero-btn" @click="saveName" :disabled="!nameDraft.trim() || nameDraft.trim() === windowName">儲存並重新連線</button></div>
     </div>
     <div class="c-foot">
       <span class="conn"><span class="dot" :class="conn === 'on' ? 'st-online' : conn === 'off' ? 'st-busy' : 'st-away'"></span>{{ CONN_LABEL[conn] }}</span>
-      <span class="foot-btns">
-        <button class="aero-btn" @click="settingsOpen = !settingsOpen">設定</button>
-        <button class="aero-btn" @click="soundOn = !soundOn" :aria-pressed="soundOn">音效：{{ soundOn ? '開' : '關' }}</button>
-      </span>
+    </div>
+    <div class="ad-wrap">
+      <button v-for="(a, i) in ADS" :key="a.key" v-show="i === adI" class="ad" :class="{ link: a.url }" :style="{ '--h': a.hue }" :disabled="!a.url" :aria-label="a.title + '：' + a.sub" @click="openAd(a)">
+        <span class="ad-new" v-if="a.badge">{{ a.badge }}</span>
+        <span class="ad-art"><i></i><i></i><i></i></span>
+        <span class="ad-tx"><b>{{ a.title }}</b><small>{{ a.sub }}</small><em v-if="a.cta">{{ a.cta }} ›</em></span>
+      </button>
+      <span class="ad-dots"><i v-for="(a, i) in ADS" :key="a.key" :class="{ on: i === adI }"></i></span>
     </div>
   </div>
 </div>

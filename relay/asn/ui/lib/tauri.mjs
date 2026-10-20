@@ -13,6 +13,7 @@ export const transport = {
   list: () => invoke('relay_list'),
   inbox: () => invoke('relay_inbox'),
   ack: ids => invoke('relay_ack', { ids }),
+  rooms: () => invoke('relay_rooms'),
   send: payload => invoke('relay_send', { payload }),
 }
 export const store = name => ({

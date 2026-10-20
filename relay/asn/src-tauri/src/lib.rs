@@ -3,12 +3,13 @@
 mod bell;
 mod heartbeat;
 mod identity;
+mod names;
 mod relay;
 mod wins;
 
 use relay::Relay;
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -29,6 +30,7 @@ pub struct App {
 struct StartupInfo {
     node: String,
     window_name: String,
+    old_names: Vec<String>,
     error: Option<String>,
     shot: bool,
     poll_ms: u64,
@@ -64,6 +66,7 @@ fn startup_info(app: State<'_, App>) -> StartupInfo {
     StartupInfo {
         node: app.node.clone(),
         window_name: app.relay.as_ref().map(|r| r.window_name()).unwrap_or_default(),
+        old_names: app.relay.as_ref().map(|r| r.active_names().into_iter().skip(1).collect()).unwrap_or_default(),
         error: app.init_error.clone(),
         shot: app.shot.is_some(),
         poll_ms: env_ms("IRORI_ASN_POLL_MS", 120_000),
@@ -87,23 +90,39 @@ async fn relay_inbox(app: State<'_, App>) -> Result<Value, String> {
 async fn relay_ack(app: State<'_, App>, ids: Vec<String>) -> Result<Value, String> {
     relay_of(&app)?.ack(&ids).await
 }
+/// 群組列表：只讀（GET room_list），後端只回節點自己所在的群組
+#[tauri::command]
+async fn relay_rooms(app: State<'_, App>) -> Result<Value, String> {
+    relay_of(&app)?.api("room_list", None).await
+}
+
+/// 底部廣告可以開的網址（全是 repo 文件寫明的公開網址）；只准完全相同的字串，其餘一律拒絕
+pub const OPEN_ALLOW: [&str; 3] = [
+    "https://irori.web.app/",
+    "https://irori.web.app/download/irori.apk",
+    "https://irori.web.app/dev/shots/",
+];
+pub fn open_allowed(url: &str) -> bool {
+    OPEN_ALLOW.contains(&url)
+}
+/// 用系統瀏覽器開（explorer 交給預設瀏覽器；網址已比對白名單，不經 shell）
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    if !open_allowed(&url) {
+        return Err("這個網址不在允許清單內".into());
+    }
+    std::process::Command::new("explorer.exe").arg(&url).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn relay_send(app: State<'_, App>, payload: Value) -> Result<Value, String> {
     relay_of(&app)?.send(&payload).await
 }
 
+/// 改暱稱＝改對外名字（驗證在 names::validate_name；不合法就回錯誤字串，介面還原並提示）
 #[tauri::command]
-fn set_window_name(app: State<'_, App>, name: String) -> Result<(), String> {
-    let name = name.trim().to_string();
-    if !valid_window_name(&name) {
-        return Err("視窗名不合格（1～60 字、不含控制字元）".into());
-    }
-    let r = relay_of(&app)?;
-    let old = r.window_name();
-    write_atomic(&app.data_dir.join("settings.json"), &json!({ "window_name": name }).to_string()).map_err(|e| e.to_string())?;
-    heartbeat::clear_heartbeat(&app.work_dir, &old, std::process::id());
-    *r.window.lock().unwrap() = name.clone();
-    heartbeat::write_heartbeat(&app.work_dir, &name, std::process::id(), heartbeat::now_ms()).map_err(|e| e.to_string())
+fn set_window_name(app: State<'_, App>, name: String) -> Result<String, String> {
+    names::rename(relay_of(&app)?.as_ref(), &app.data_dir, &app.work_dir, &name, heartbeat::now_ms())
 }
 
 fn store_path(app: &App, name: &str) -> Result<PathBuf, String> {
@@ -133,7 +152,9 @@ fn quit_app(app: AppHandle) {
 fn cleanup(app: &AppHandle) {
     let st = app.state::<App>();
     if let Some(r) = &st.relay {
-        heartbeat::clear_heartbeat(&st.work_dir, &r.window_name(), std::process::id());
+        for n in r.active_names() {
+            heartbeat::clear_heartbeat(&st.work_dir, &n, std::process::id());
+        }
     }
 }
 
@@ -165,7 +186,9 @@ pub fn run() {
 
     let relay_obj = base.map(|(url, key)| {
         let name = read_settings_name(&data_dir).unwrap_or_else(|| default_window_name(&node));
-        Arc::new(Relay::new(url, key, node.clone(), name))
+        let r = Relay::new(url, key, node.clone(), name);
+        r.set_old_names(names::prune(&names::read_old_names(&data_dir), &r.window_name(), heartbeat::now_ms()));
+        Arc::new(r)
     });
 
     // 同一個視窗名只留一個 ASN（另一個還活著就退出，同 recv.mjs 的 exit 3）
@@ -183,7 +206,7 @@ pub fn run() {
         .manage(state)
         .manage(wins::Slots::default())
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, set_window_name, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_rooms, open_url, set_window_name, store_load, store_save, quit_app,
             wins::open_chat, wins::chat_visible, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::take_shot,
         ])
         .setup(move |app| {
@@ -192,17 +215,20 @@ pub fn run() {
                 // 心跳：每 30 秒寫一次（格式同 self-recv.mjs），pid 用本程式
                 let wd = work_dir.clone();
                 let r2 = r.clone();
-                let mut last_name = r.window_name();
+                let mut last: Vec<String> = vec![];
                 tauri::async_runtime::spawn(async move {
                     loop {
-                        let name = r2.window_name();
-                        if name != last_name {
-                            heartbeat::clear_heartbeat(&wd, &last_name, std::process::id());
-                            last_name = name.clone();
+                        // 現用名與還沒過期的舊名各寫一份心跳；掉出清單的清掉
+                        let names = r2.active_names();
+                        for gone in last.iter().filter(|n| !names.contains(n)) {
+                            heartbeat::clear_heartbeat(&wd, gone, std::process::id());
                         }
-                        if let Err(e) = heartbeat::write_heartbeat(&wd, &name, std::process::id(), heartbeat::now_ms()) {
-                            eprintln!("heartbeat failed: {e}");
+                        for n in &names {
+                            if let Err(e) = heartbeat::write_heartbeat(&wd, n, std::process::id(), heartbeat::now_ms()) {
+                                eprintln!("heartbeat failed: {e}");
+                            }
                         }
+                        last = names;
                         tokio::time::sleep(std::time::Duration::from_millis(heartbeat::heartbeat_ms())).await;
                     }
                 });
@@ -250,6 +276,14 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 開網址只准白名單() {
+        assert!(open_allowed("https://irori.web.app/"));
+        for bad in ["https://irori.web.app", "https://irori.web.app/x", "http://irori.web.app/", "https://evil.example/", "calc.exe", "https://irori.web.app/ & calc", ""] {
+            assert!(!open_allowed(bad), "{bad}");
+        }
+    }
 
     #[test]
     fn 視窗名規則與預設值() {

@@ -1,6 +1,8 @@
 //! 收發室 HTTP 客戶端。節點金鑰只存在這個結構裡（x-relay-key 標頭），不進 log、不傳前端。
 //! 協定照 relay/machine/relay-core.mjs 的 api()，寄信欄位照 send.mjs／irori-relay/index.ts 的 send。
 use serde_json::{json, Map, Value};
+use crate::names::{prune, OldName};
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -10,6 +12,9 @@ pub struct Relay {
     key: String,
     pub node: String,
     pub window: Mutex<String>,
+    old: Mutex<Vec<OldName>>,
+    /// 最近一次收信時「信件 id → 是從哪個名字的信箱拿到的」，ack 要對同一個名字送
+    ack_agent: Mutex<HashMap<String, String>>,
 }
 
 /// 與 JS encodeURIComponent 相同：只留 A-Za-z0-9 -_.!~*'()
@@ -70,10 +75,26 @@ pub fn build_ack_body(ids: &[String]) -> Result<Value, String> {
 
 impl Relay {
     pub fn new(base: String, key: String, node: String, window: String) -> Relay {
-        Relay { client: reqwest::Client::new(), base, key, node, window: Mutex::new(window) }
+        Relay { client: reqwest::Client::new(), base, key, node, window: Mutex::new(window), old: Mutex::new(vec![]), ack_agent: Mutex::new(HashMap::new()) }
     }
     pub fn window_name(&self) -> String {
         self.window.lock().unwrap().clone()
+    }
+    pub fn old_names(&self) -> Vec<OldName> {
+        self.old.lock().unwrap().clone()
+    }
+    pub fn set_old_names(&self, v: Vec<OldName>) {
+        *self.old.lock().unwrap() = v;
+    }
+    /// 現在要收信（也要寫心跳）的名字：現用名在前，後面是還沒過期的舊名
+    pub fn active_names_at(&self, now: u64) -> Vec<String> {
+        let cur = self.window_name();
+        let mut v = vec![cur.clone()];
+        v.extend(prune(&self.old_names(), &cur, now).into_iter().map(|o| o.name));
+        v
+    }
+    pub fn active_names(&self) -> Vec<String> {
+        self.active_names_at(crate::heartbeat::now_ms())
     }
     pub fn base(&self) -> &str {
         &self.base
@@ -99,17 +120,50 @@ impl Relay {
         self.api("list", None).await
     }
     pub async fn inbox(&self) -> Result<Value, String> {
-        let w = self.window_name();
-        let mut v = self.api(&format!("inbox&agent={}", encode_component(&w)), None).await?;
-        // 後端已過濾；這裡再擋一次：不是寄給本視窗的信絕不交給前端、也不會被 ack
-        if let Some(arr) = v.get_mut("messages").and_then(Value::as_array_mut) {
-            arr.retain(|m| m.get("to_agent").and_then(Value::as_str) == Some(w.as_str()));
+        let names = self.active_names();
+        let mut all: Vec<Value> = vec![];
+        let mut map = HashMap::new();
+        for (i, w) in names.iter().enumerate() {
+            let mut v = match self.api(&format!("inbox&agent={}", encode_component(w)), None).await {
+                Ok(v) => v,
+                Err(e) if i == 0 => return Err(e),
+                Err(_) => continue,   // 舊名那邊失敗不影響現用名
+            };
+            // 後端已過濾；這裡再擋一次：不是寄給這個名字的信絕不交給前端、也不會被 ack
+            if let Some(arr) = v.get_mut("messages").and_then(Value::as_array_mut) {
+                for m in arr.drain(..) {
+                    if m.get("to_agent").and_then(Value::as_str) == Some(w.as_str()) {
+                        if let Some(id) = m.get("id").and_then(Value::as_str) {
+                            map.insert(id.to_string(), w.clone());
+                        }
+                        all.push(m);
+                    }
+                }
+            }
         }
-        Ok(v)
+        *self.ack_agent.lock().unwrap() = map;
+        Ok(json!({ "messages": all }))
     }
     pub async fn ack(&self, ids: &[String]) -> Result<Value, String> {
-        let b = build_ack_body(ids)?;
-        self.api(&format!("ack&agent={}", encode_component(&self.window_name())), Some(b)).await
+        build_ack_body(ids)?;
+        let cur = self.window_name();
+        let mut by: Vec<(String, Vec<String>)> = vec![];
+        {
+            let map = self.ack_agent.lock().unwrap();
+            for id in ids {
+                let a = map.get(id).cloned().unwrap_or_else(|| cur.clone());
+                match by.iter_mut().find(|(n, _)| *n == a) {
+                    Some((_, v)) => v.push(id.clone()),
+                    None => by.push((a, vec![id.clone()])),
+                }
+            }
+        }
+        let mut acked = 0u64;
+        for (agent, group) in by {
+            let r = self.api(&format!("ack&agent={}", encode_component(&agent)), Some(build_ack_body(&group)?)).await?;
+            acked += r.get("acked").and_then(Value::as_u64).unwrap_or(0);
+        }
+        Ok(json!({ "acked": acked }))
     }
     pub async fn send(&self, payload: &Value) -> Result<Value, String> {
         let b = build_send_body(payload, &self.window_name())?;

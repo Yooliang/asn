@@ -1,7 +1,7 @@
 // 好友名單視窗：同時是整個程式的「樞紐」——AsnCore 跑在這裡，對話視窗與提示視窗只顯示、用事件下指令。
 // 關掉這扇＝結束程式（Rust 端處理）。
 import { AsnCore } from './lib/core.mjs'
-import { groupByDevice } from './lib/roster.mjs'
+import { ADS, AD_MS, FIXED_TABS, addNotice, deviceItems, deviceTabs, fmtTime, groupHeading, groupRows, moreUnread, nextAd, statusNote } from './lib/tabs.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
 import { ctl, emit, invoke, listen, store, transport } from './lib/tauri.mjs'
 
@@ -39,21 +39,25 @@ if (info.error) {
 }
 const meStore = store('me')
 const savedMe = (await meStore.load()) ?? {}
-const me = reactive({ nick: info.window_name, psm: '', status: 'online', ...savedMe.me })
+// 暱稱＝視窗名＝對外名字；以 Rust 端現用名為準，不再從存檔讀
+const me = reactive({ psm: '', status: 'online', ...savedMe.me, nick: info.window_name })
 const soundOn = ref(savedMe.sound !== false)
 
 const core = new AsnCore({
   transport, store: store('chats'), selfNode: info.node, windowName: info.window_name,
   isChatVisible: id => invoke('chat_visible', { id }),
+  aliases: info.old_names,
   pollMs: info.poll_ms, rosterMs: info.roster_ms,
   log: m => console.info('[ASN]', m),
 })
 
 const friends = ref([])
+const nodeOrder = ref([])
 const conn = ref('connecting')
 const sync = () => {
   const s = core.snapshot()
   friends.value = s.friends
+  nodeOrder.value = s.nodeOrder
   conn.value = s.conn
   emit('asn:state', { ...s, me: { ...me } })
 }
@@ -61,7 +65,13 @@ const pushLog = id => emit('asn:log', { id, log: core.logOf(id).slice(-200) })
 
 core.on('state', sync)
 core.on('log', pushLog)
+const notices = ref([])
+const rooms = ref([]), roomsErr = ref(false)
+async function refreshRooms() {
+  try { rooms.value = groupRows((await invoke('relay_rooms'))?.rooms); roomsErr.value = false } catch { roomsErr.value = true }
+}
 core.on('notify', n => {
+  if (n.kind === 'msg' || n.kind === 'nudge') notices.value = addNotice(notices.value, { cid: n.friend.id, who: plain(n.friend.nick), line: n.line, kind: n.kind })
   if (n.sound && soundOn.value && me.status !== 'busy') SOUNDS[n.sound]?.()
   if (n.shake) void invoke('shake', { id: n.friend.id })
   if (n.toast) void invoke('show_toast', { toast: { cid: n.friend.id, title: plain(n.friend.nick), line: n.line, status: n.friend.status, hue: n.friend.hue, dp: n.friend.dp } })
@@ -84,21 +94,43 @@ await listen('asn:cmd', async c => {
 await listen('relay-bell', () => void core.pull('bell'))   // Rust 端的 Realtime 門鈴
 await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 
-watch([me, soundOn], () => { void meStore.save({ me: { ...me }, sound: soundOn.value }); sync() }, { deep: true })
+watch([me, soundOn], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, sound: soundOn.value }); sync() }, { deep: true })
 
+const shotTab = ref(info.node)
 createApp({
   setup() {
-    const query = ref(''), settingsOpen = ref(false), nameDraft = ref(info.window_name)
+    const tab = shotTab, moreOpen = ref(false), adI = ref(0)
+    setInterval(() => { adI.value = nextAd(adI.value) }, AD_MS)
+    setInterval(() => void refreshRooms(), 60_000)
+    void refreshRooms()
+    const query = ref(''), nickErr = ref('')
     const collapsed = reactive({})
-    const groups = computed(() => {
+    const dev = computed(() => deviceTabs(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value }))
+    const isDevice = computed(() => dev.value.all.some(d => d.key === tab.value))
+    const moreOn = computed(() => dev.value.more.some(d => d.key === tab.value))
+    const moreUnreadN = computed(() => moreUnread(dev.value.more))
+    // 選到的設備從名單與紀錄都消失時退回本機
+    watch(dev, d => { if (!d.all.some(x => x.key === tab.value) && !FIXED_TABS.some(t => t.key === tab.value)) tab.value = info.node })
+    const shown = computed(() => {
+      if (!isDevice.value) return []
       const q = query.value.trim().toLowerCase()
-      const match = c => !q || plain(c.nick).toLowerCase().includes(q)
-      return groupByDevice(friends.value, { selfNode: info.node, match })
+      const items = deviceItems(friends.value, tab.value, c => !q || plain(c.nick).toLowerCase().includes(q))
+      const d = dev.value.all.find(x => x.key === tab.value)
+      return items.length ? [{ key: tab.value, label: d.label, items }] : []
     })
-    const saveName = async () => { await invoke('set_window_name', { name: nameDraft.value.trim() }); location.reload() }
+    const emptyText = computed(() => (query.value.trim() ? '沒有符合的聯絡人。' : conn.value !== 'on' ? '還沒連上收發室。' : '這台設備目前沒有視窗。'))
+    const openAd = a => { if (a.url) void invoke('open_url', { url: a.url }) }
+    // 改最上面的暱稱＝改對外名字；Rust 端驗證，不合法就還原並提示
+    const commitNick = async () => {
+      const want = String(me.nick ?? '').trim()
+      if (want === info.window_name) { me.nick = info.window_name; nickErr.value = ''; return }
+      try { await invoke('set_window_name', { name: want }); location.reload() }
+      catch (e) { me.nick = info.window_name; nickErr.value = e.message; setTimeout(() => { nickErr.value = '' }, 5000) }
+    }
     return {
-      STATUS, CONN_LABEL, me, soundOn, friends, conn, groups, query, collapsed, settingsOpen, nameDraft,
-      windowName: info.window_name, selfNode: info.node, emo, initial, openChat, ctl, saveName,
+      STATUS, CONN_LABEL, FIXED_TABS, ADS, dev, isDevice, moreOn, moreOpen, moreUnreadN, me, soundOn, friends, conn, shown, query, collapsed, nickErr, commitNick,
+      tab, adI, rooms, roomsErr, notices, emptyText, openAd, groupHeading, statusNote, fmtTime,
+      selfNode: info.node, emo, initial, openChat, ctl,
     }
   },
 }).mount('#app')
@@ -121,6 +153,14 @@ if (info.shot) {
   }
   await sleep(1500)
   await invoke('take_shot')
+  // 逐頁籤截圖：本機、第二台設備、群組、通知、設定
+  const other = [...new Set(core.snapshot().friends.map(f => f.node))].find(n => n !== info.node)
+  for (const [name, key] of [['local', info.node], ['device', other], ['groups', 'groups'], ['notices', 'notices'], ['settings', 'settings']]) {
+    if (!key) continue
+    shotTab.value = key
+    await sleep(500)
+    await invoke('take_shot', { tab: name })
+  }
   await core.stop()
   await invoke('quit_app')
 }

@@ -9,7 +9,10 @@ export const isRelayRoom = name => /收發室$/.test(String(name ?? ''))
 const BUSY = new Set(['busy', 'working', 'running', 'thinking'])
 export const statusOf = raw => (BUSY.has(String(raw ?? '').trim().toLowerCase()) ? 'busy' : 'online')
 
-// 一個視窗一列；名字＝視窗名，個人訊息＝「節點／資料夾」
+// 舊存檔的個人訊息是「節點／資料夾」或單獨節點名；設備已由頁籤表示，只留資料夾
+export const cleanPsm = (psm, node) => { const s = String(psm ?? ''); return s === node ? '' : s.replace(/^[^／]*／/, '') }
+
+// 一個視窗一列；名字＝視窗名，個人訊息＝資料夾（cwd_label，沒有就空）
 export function buildFriends(members, { selfNode, selfName } = {}) {
   const out = []
   for (const m of Array.isArray(members) ? members : []) {
@@ -20,7 +23,7 @@ export function buildFriends(members, { selfNode, selfName } = {}) {
       if (m.id === selfNode && a.name === selfName) continue
       out.push({
         id: friendId(m.id, a.name), node: m.id, device: typeof m.name === 'string' && m.name ? m.name : m.id, agent: a.name, nick: a.name,
-        psm: a.cwd_label ? `${m.id}／${a.cwd_label}` : m.id,
+        psm: a.cwd_label ? String(a.cwd_label) : '',
         engine: a.engine ?? null, status: statusOf(a.status),
       })
     }

@@ -36,6 +36,23 @@ export const NUDGE_TAG = '[震動]'
 export const hasNudge = body => String(body ?? '').includes(NUDGE_TAG)
 export const stripNudge = body => String(body ?? '').split(NUDGE_TAG).join('').trim()
 
+// 經機器橋轉回來的回信，內文整段包著 <cross-session-message …>…</cross-session-message>（斜線可能寫成 <\ 與 <\/）。
+// 只在「首尾都對得上」時剝最外層一次；內文中間出現的同字串不動；只有開頭沒有結尾就不剝。剝完仍要經 esc 才能顯示。
+const SHELL_OPEN = /^\s*<\\?cross-session-message(?:\s[^>]*)?>/
+const SHELL_CLOSE = /<\\?\/cross-session-message>\s*$/
+const SHELL_CLOSE_ANY = /<\\?\/cross-session-message>/
+const SHELL_OPEN_ANY = /<\\?cross-session-message(?:\s[^>]*)?>/
+export function unwrapShell(body) {
+  const s = String(body ?? '')
+  const o = SHELL_OPEN.exec(s), c = SHELL_CLOSE.exec(s)
+  if (!o || !c || c.index < o[0].length) return s
+  const inner = s.slice(o[0].length, c.index)
+  // 兩段各自獨立的外殼接在一起（<a>…</a> <a>…</a>）不是「一整段包著」，不動
+  const firstClose = SHELL_CLOSE_ANY.exec(inner)
+  if (firstClose && SHELL_OPEN_ANY.test(inner.slice(firstClose.index + firstClose[0].length)) && !SHELL_OPEN_ANY.test(inner.slice(0, firstClose.index))) return s
+  return inner.trim()
+}
+
 // 好友頭像底色：由 id 算出固定色相
 export function hueOf(id) {
   let h = 0
