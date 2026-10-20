@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ASN 即時通</title>
+<title>Agent Sync Network Messenger</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -11,11 +11,11 @@
   <input ref="avFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden @change="pickAvatar">
   <i class="rz" v-for="d in RESIZE_DIRS" :key="d" :class="'rz-' + d" @mousedown.left.prevent="resizeFrom(d)"></i>
   <header class="titlebar" data-tauri-drag-region>
-    <span class="t-icon"></span><span class="t-text"><span class="brand">ASN</span> 即時通</span>
+    <span class="t-icon"></span><span class="t-text"><span class="brand">Agent Sync Network Messenger</span></span>
     <span class="t-btns">
-      <button class="tb" @click="ctl('min')" aria-label="最小化">_</button>
-      <button class="tb" @click="ctl('max')" aria-label="最大化">□</button>
-      <button class="tb close" @click="ctl('close')" aria-label="關閉並結束">✕</button>
+      <button class="tb" @click="ctl('min')" aria-label="最小化" title="最小化"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="2" y="8" width="8" height="2" rx=".5" fill="currentColor"/></svg></button>
+      <button class="tb" @click="ctl('max')" aria-label="最大化" title="最大化"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="1.75" y="1.75" width="8.5" height="8.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="1.75" y="1.75" width="8.5" height="2.2" fill="currentColor"/></svg></button>
+      <button class="tb close" @click="ctl('close')" aria-label="關閉並結束" title="關閉"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.6 2.6l6.8 6.8M9.4 2.6l-6.8 6.8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
     </span>
   </header>
   <div class="shell" :class="{ merged: ui.mode === 'merged' }">
@@ -60,7 +60,7 @@
         <button v-for="t in FIXED_TABS" :key="t.key" class="rtab" :class="{ on: tab === t.key }" role="tab" :aria-selected="tab === t.key" :title="t.label" :aria-label="t.label" @click="tab = t.key">
           <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
             <g v-if="t.key === 'groups'"><circle cx="8" cy="9" r="3" fill="#f0b040" stroke="#a06a10"/><circle cx="16" cy="9" r="3" fill="#6fb6f0" stroke="#1f5d9e"/><path d="M2.5 19c0-3.6 2.4-5.4 5.5-5.4s5.5 1.8 5.5 5.4zM10.5 19c0-3.6 2.4-5.4 5.5-5.4s5.5 1.8 5.5 5.4z" fill="#e8eef5" stroke="#6b7f95"/></g>
-            <g v-else-if="t.key === 'notices'"><path d="M12 3c-3.6 0-5.5 2.6-5.5 6v3.6L4.5 16h15l-2-3.4V9c0-3.4-1.9-6-5.5-6z" fill="#f4c542" stroke="#a37a0a"/><path d="M10 18.5a2 2 0 0 0 4 0z" fill="#d49a10" stroke="#a37a0a"/></g>
+            <g v-else-if="t.key === 'guide'"><path d="M4.5 4.5c2.6-.9 5.2-.7 7.5 1v14c-2.3-1.7-4.9-1.9-7.5-1z" fill="#6fb6f0" stroke="#1f5d9e"/><path d="M19.5 4.5c-2.6-.9-5.2-.7-7.5 1v14c2.3-1.7 4.9-1.9 7.5-1z" fill="#e8f3fd" stroke="#1f5d9e"/><path d="M6.5 8.2c1.4-.2 2.7 0 3.6.6M6.5 11.2c1.4-.2 2.7 0 3.6.6M14 8.8c.9-.6 2.2-.8 3.6-.6M14 11.8c.9-.6 2.2-.8 3.6-.6" stroke="#1f5d9e" stroke-width="1" stroke-linecap="round" fill="none"/></g>
             <g v-else><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M18.5 5.5l-2.1 2.1M7.6 16.4l-2.1 2.1" stroke="#4a5d73" stroke-width="2.4" stroke-linecap="round"/><circle cx="12" cy="12" r="5.6" fill="#dfe8f2" stroke="#4a5d73" stroke-width="2"/><circle cx="12" cy="12" r="2" fill="#fff" stroke="#4a5d73"/></g>
           </svg>
         </button>
@@ -98,16 +98,19 @@
           </ul>
           <div class="empty-list" v-if="!rooms.length">{{ roomsErr ? '讀不到群組。' : '目前不在任何群組。' }}</div>
         </div>
-        <div class="list" v-else-if="tab === 'notices'">
-          <ul>
-            <li v-for="(n, i) in notices" :key="i">
-              <button class="buddy" @click="openChat(n.cid)">
-                <span class="dp xs st-online"><span><img :src="avById(n.cid)" alt=""></span></span>
-                <span class="b-text"><span class="b-line"><span class="b-nick" v-html="emo(n.who)"></span><span class="b-st">{{ fmtTime(n.t) }}</span></span><span class="b-psm" v-html="emo(n.line)"></span></span>
+        <div class="list guide-list" v-else-if="tab === 'guide'">
+          <div class="guide-doc" v-if="ui.mode === 'split' && openedGuide">
+            <button class="aero-btn guide-back" type="button" @click="closeGuideView">‹ 回到指引清單</button>
+            <guide-doc :guide="openedGuide"></guide-doc>
+          </div>
+          <ul v-else>
+            <li v-for="g in GUIDES" :key="g.key">
+              <button class="buddy guide-item" :class="{ on: ui.mode === 'merged' && ui.guide === g.key }" type="button" @click="openGuideKey(g.key)">
+                <span class="guide-ic" aria-hidden="true"></span>
+                <span class="b-text"><span class="b-line"><span class="b-nick">{{ g.title }}</span></span><span class="b-psm">{{ g.sub }}</span></span>
               </button>
             </li>
           </ul>
-          <div class="empty-list" v-if="!notices.length">還沒有通知。</div>
         </div>
         <div class="list settings" v-else>
           <div class="av-set">
@@ -162,17 +165,39 @@
   </div>
   <section class="chat-area" v-if="ui.mode === 'merged'" aria-label="對話">
     <div class="tabbar" role="tablist" aria-label="開著的對話">
-      <div v-for="t in mergedTabs" :key="t.id" class="ctab" :class="{ on: t.id === ui.active }" role="tab" :aria-selected="t.id === ui.active" @click="activateTab(t.id)" @auxclick.middle.prevent="closeChatTab(t.id)">
+      <div class="ctab home" v-if="!mergedTabs.length" :class="{ on: view === 'home' }" role="tab" :aria-selected="view === 'home'" @click="showHome"><img src="img/logo.svg" alt="" width="14" height="14"><span class="ctab-name">開始</span></div>
+      <div v-for="t in mergedTabs" :key="t.id" class="ctab" :class="{ on: view === 'chat' && t.id === ui.active }" role="tab" :aria-selected="view === 'chat' && t.id === ui.active" @click="activateTab(t.id)" @auxclick.middle.prevent="closeChatTab(t.id)">
         <span class="dot" :class="'st-' + t.status"></span>
         <span class="ctab-name">{{ plain(t.nick) }}</span>
         <span class="unread" v-if="t.unread">{{ t.unread }}</span>
         <button class="ctab-x" type="button" @click.stop="closeChatTab(t.id)" :aria-label="'關閉 ' + plain(t.nick) + ' 的對話'">✕</button>
       </div>
+      <div class="ctab guide-tab" v-if="openedGuide" :class="{ on: view === 'guide' }" role="tab" :aria-selected="view === 'guide'" @click="ui.showGuide = true">
+        <span class="guide-ic sm" aria-hidden="true"></span>
+        <span class="ctab-name">指引：{{ openedGuide.title }}</span>
+        <button class="ctab-x" type="button" @click.stop="closeGuideView" aria-label="關閉指引">✕</button>
+      </div>
     </div>
     <div class="chat-stack">
-      <chat-pane v-for="t in mergedTabs" :key="t.id" v-show="t.id === ui.active" :friend="t" :me="me" :log="logs[t.id] || []" :friend-av="avOf(t)" :me-av="meAv" :dp-mode="ui.dpMode" :bubble="ui.bubble" :toolbar="ui.toolbar" :dp-collapsed="ui.collapsed" :active="t.id === ui.active"
+      <chat-pane v-for="t in mergedTabs" :key="t.id" v-show="view === 'chat' && t.id === ui.active" :friend="t" :me="me" :log="logs[t.id] || []" :friend-av="avOf(t)" :me-av="meAv" :dp-mode="ui.dpMode" :bubble="ui.bubble" :toolbar="ui.toolbar" :dp-collapsed="ui.collapsed" :active="view === 'chat' && t.id === ui.active"
         @send="text => sendTo(t.id, text)" @nudge="nudgeTo(t.id)" @toggle-dp="toggleDp"></chat-pane>
-      <div class="pane" v-if="!mergedTabs.length"><div class="empty-chat">從左邊的名單點一位好友，開始聊天。</div></div>
+      <div class="pane home-pane" v-if="view === 'home'">
+        <div class="hero" role="region" aria-label="宣傳" aria-roledescription="輪播">
+          <section v-for="(a, i) in ADS" :key="a.key" v-show="i === adI" class="hero-slide" :style="{ '--h': a.hue }" :aria-label="a.title + '：' + a.sub">
+            <span class="hero-new" v-if="a.badge">{{ a.badge }}</span>
+            <div class="hero-tx">
+              <h2>{{ a.title }}</h2>
+              <p>{{ a.sub }}</p>
+              <button class="hero-cta" type="button" :disabled="!a.url" :class="{ link: a.url }" @click="openAd(a)">{{ a.cta }} ›</button>
+            </div>
+            <div class="hero-art" aria-hidden="true"><i></i><i></i><i></i></div>
+          </section>
+          <button class="hero-nav prev" type="button" aria-label="上一則" @click="stepAd(-1)">‹</button>
+          <button class="hero-nav next" type="button" aria-label="下一則" @click="stepAd(1)">›</button>
+          <div class="hero-dots"><button v-for="(a, i) in ADS" :key="a.key" type="button" :class="{ on: i === adI }" :aria-label="'第 ' + (i + 1) + ' 則：' + a.title" @click="jumpAd(i)"></button></div>
+        </div>
+      </div>
+      <div class="pane guide-pane" v-else-if="view === 'guide'"><guide-doc :guide="openedGuide"></guide-doc></div>
     </div>
   </section>
   </div>
