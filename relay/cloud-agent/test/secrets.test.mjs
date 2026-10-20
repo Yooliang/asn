@@ -41,7 +41,7 @@ test('用假金鑰掃輸出：壞金鑰被拒、後端回 401、常駐 log、--h
   const leaks = text => ['SECRET-sk', 'abcdef0123', 'zyx'].some(p => text.includes(p))
   try {
     const outs = []
-    for (const [f, a] of [['send.mjs', ['--to', 'W', '--body', 'x', '--no-reply']], ['send.mjs', ['--help']], ['inbox.mjs', ['--help']], ['inbox.mjs', ['--all']], ['register.mjs', ['--check']]]) {
+    for (const [f, a] of [['send.mjs', ['--to', 'W', '--body', 'x', '--no-reply']], ['send.mjs', ['--help']], ['inbox.mjs', ['--help']], ['inbox.mjs', ['--all']]]) {
       const r = await run(f, a, { env }); outs.push(r.stdout + r.stderr)
     }
     // 常駐：壞金鑰 → whoami 一直 401，看 log／輸出

@@ -4,5 +4,6 @@
 -- 套用時機：【節點 grok 註冊之後】執行才有作用（節點還不存在時是空操作，不會報錯，也不會替未來的節點預先開權限）。
 --   重新註冊（on conflict）不會動 can_roster，所以只要跑一次。
 -- 執行方式：npx supabase db query --linked -f supabase/sql/29_grok_roster.sql（可重複執行；supabase/sql 沒有自動套用，一律手動）
+-- 紀錄：2026-10-20 已由小良哥在正式資料庫手動套用（節點 grok 已註冊）；本檔留作紀錄，冪等，重跑無害。
 -- 回復：update relay.nodes set can_roster = false where id = 'grok';
 update relay.nodes set can_roster = true where id = 'grok' and status = 'active';

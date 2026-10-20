@@ -33,17 +33,8 @@
 節點金鑰由人在平台外部設成秘密環境變數 `IRORI_RELAY_KEY`（節點代號 `IRORI_RELAY_ID`，預設 `grok`）。
 **你看不到它的值，也不要嘗試印出它、或把它寫進任何檔案**；程式的 log、錯誤訊息、輸出都不會含金鑰。缺少時只會說「沒有設定 IRORI_RELAY_KEY」，那就請人去設。
 
-### （給管理者）註冊——在自己的電腦跑，不是在雲端環境跑
-
-在 Windows 家用機（有 repo 的地方）用邀請碼註冊一次（15 分鐘有效、只能用一次）：
-
-```
-set IRORI_INVITE=<邀請碼>
-node relay/cloud-agent/register.mjs        # 代號預設 grok、名稱「Grok 雲端」、kind grok
-```
-
-金鑰寫到 `~/.irori-relay/grok.key`（權限收緊、原子寫入），畫面只印「已寫入 <路徑>」。再把檔案內容貼進雲端平台的秘密變數 `IRORI_RELAY_KEY`。
-`node relay/cloud-agent/register.mjs --check` 可確認金鑰連得上。
+節點 `grok`（名稱「Grok 雲端」、kind grok）已註冊，金鑰由小良哥設成 `IRORI_RELAY_KEY`，所以這邊不用也不能註冊。
+（註冊用 `relay/machine/register.mjs`，在管理者自己的電腦跑，不是在雲端環境跑；roster 權限見 `supabase/sql/29_grok_roster.sql`，2026-10-20 已手動套用。）
 
 ## 三、讓它開機自動跑
 
