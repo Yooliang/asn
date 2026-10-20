@@ -9,6 +9,8 @@
 //   名單有好幾個代理時（一台雲端環境裡住了好幾位）：<信件目錄>/agents.json（優先，每次回報都重讀，可隨時改）
 //     [{"name":"小真"},{"name":"正見","engine":"grok","cwd_label":"policy","status":"busy"}]
 //   或環境變數 IRORI_CLOUD_AGENTS="Grok,小真,正見"（逗號分隔）。都沒有＝只有 IRORI_CLOUD_ROSTER_NAME 一位
+//   自動掃描（Grok 雲端預設開）：grok-agents.mjs 讀 Grok 夥伴 profile ＋ claude agents --json；IRORI_CLOUD_ROSTER_AUTO=0 關閉，只用 agents.json／IRORI_CLOUD_AGENTS
+//   GROK_AGENTS_DIR（預設 /home/box/agent-data/agents）、IRORI_CLAUDE_BIN（預設 /home/box/.local/bin/claude）
 import fs from 'node:fs'
 import path from 'node:path'
 // 協定常數沿用 relay/machine，不複製一份
@@ -78,4 +80,24 @@ export function loadAgents(cfg) {
     if (out.length >= 30) break
   }
   return out.length ? out : [{ name: cfg.name, status: 'idle', engine: cfg.engine, cwd_label: cfg.cwdLabel }]
+}
+
+// roster 回報用名單：先試本機掃描（Grok 夥伴＋ Claude 視窗），沒有結果再 loadAgents（手動 agents.json 等）
+export async function rosterAgentsForReport(cfg, env = process.env, listAllFn) {
+  const auto = (env.IRORI_CLOUD_ROSTER_AUTO ?? '1') !== '0'
+  if (auto) {
+    let raw = []
+    try {
+      const listAll = listAllFn ?? (await import('./grok-agents.mjs')).listAll
+      raw = listAll(env)
+    } catch {}
+    const agents = (Array.isArray(raw) ? raw : []).map(({ name, status, engine, cwd_label }) => ({
+      name: String(name).trim(),
+      status: STATUSES.has(status) ? status : 'idle',
+      engine: String(engine ?? cfg.engine).trim().slice(0, 20) || cfg.engine,
+      cwd_label: String(cwd_label ?? cfg.cwdLabel).trim().slice(0, 100) || cfg.cwdLabel,
+    })).filter(a => a.name && !/收發室$/.test(a.name))
+    if (agents.length) return agents.slice(0, 30)
+  }
+  return loadAgents(cfg)
 }
