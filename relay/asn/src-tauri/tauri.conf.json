@@ -1,0 +1,37 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ASN",
+  "mainBinaryName": "asn",
+  "version": "0.1.0",
+  "identifier": "tw.irori.asn",
+  "build": {
+    "frontendDist": "../ui",
+    "beforeBuildCommand": "node scripts/prep.mjs"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "list",
+        "url": "list.html",
+        "title": "ASN 即時通",
+        "width": 320,
+        "height": 660,
+        "minWidth": 280,
+        "minHeight": 420,
+        "decorations": false,
+        "center": true,
+        "additionalBrowserArgs": "--autoplay-policy=no-user-gesture-required"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
+    "windows": { "nsis": { "installMode": "currentUser", "languages": ["TradChinese"] } }
+  }
+}

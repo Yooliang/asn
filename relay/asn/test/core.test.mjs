@@ -1,0 +1,156 @@
+// AsnCore 對本機假 relay 的端到端（relay-core 的 api）：收信歸屬、未讀、震動、寄信格式、離線／上線、已送出等回信。
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { AsnCore } from '../ui/lib/core.mjs'
+import { startFakeRelay, U } from './fake-relay.mjs'
+import { httpTransport, memStore, sleep } from './helpers.mjs'
+
+const NAME = 'T-ASN'
+const roster = (extra = []) => [
+  { id: 'T', agents: [{ name: NAME, status: 'idle', cwd_label: 'asn' }, { name: 'T-收發室', status: 'idle', cwd_label: 'r' }] },
+  { id: 'W', agents: [{ name: 'W-政策', status: 'idle', cwd_label: 'policy-tw' }, { name: 'W-忙', status: 'working', cwd_label: 'x' }, ...extra] },
+]
+
+async function setup({ visible = false, store = memStore(), members = roster() } = {}) {
+  const relay = await startFakeRelay({ node: 'T', members })
+  const state = { visible }
+  const core = new AsnCore({ transport: httpTransport(relay.url, NAME), store, selfNode: 'T', windowName: NAME, isChatVisible: async () => state.visible, pollMs: 60_000, rosterMs: 60_000 })
+  const notes = []
+  core.on('notify', n => notes.push(n))
+  return { relay, core, notes, state, store }
+}
+
+test('名單：一視窗一列、收發室與自己不列、忙碌／線上', async () => {
+  const { relay, core } = await setup()
+  await core.start()
+  const f = core.snapshot().friends
+  assert.deepEqual(f.map(x => `${x.id}:${x.status}`).sort(), ['W/W-忙:busy', 'W/W-政策:online'])
+  assert.equal(core.conn, 'on')
+  await core.stop(); await relay.close()
+})
+
+test('收信：對到好友進對話、對話沒開→未讀＋提示＋音效；ack 之後不重複', async () => {
+  const { relay, core, notes } = await setup()
+  relay.mail(1, { body: '嗨 (L)' })
+  relay.mail(2, { from_agent: 'Z-陌生人', from_node: 'Z', body: '你好' })
+  relay.mail(3, { to_agent: '別的視窗', body: '不是給我的' })
+  await core.start()
+  const w = core.snapshot().friends.find(f => f.id === 'W/W-政策')
+  assert.equal(w.unread, 1)
+  assert.deepEqual(core.logOf('W/W-政策').map(m => m.text), ['嗨 (L)'])
+  const z = core.snapshot().friends.find(f => f.id === 'Z/Z-陌生人')
+  assert.ok(z, '對不到的來信要新增一列好友')
+  assert.equal(z.status, 'offline')
+  assert.deepEqual(notes.map(n => [n.kind, n.toast, n.sound]), [['msg', true, 'msg'], ['msg', true, 'msg']])
+  assert.equal(relay.mails.find(m => m.id === U(3)).acked, false, '不是寄給本視窗的信不能 ack')
+  assert.ok(relay.mails.filter(m => m.id !== U(3)).every(m => m.acked))
+  await core.pull(); assert.equal(core.logOf('W/W-政策').length, 1)
+  await core.stop(); await relay.close()
+})
+
+test('收信：對話視窗開著→不加未讀、不彈提示，但仍有音效', async () => {
+  const { relay, core, notes } = await setup({ visible: true })
+  relay.mail(1, { body: '在嗎' })
+  await core.start()
+  assert.equal(core.snapshot().friends.find(f => f.id === 'W/W-政策').unread, 0)
+  assert.deepEqual(notes.map(n => [n.toast, n.sound]), [[false, 'msg']])
+  await core.stop(); await relay.close()
+})
+
+test('震動：收到 [震動] 抖視窗（開著）或未讀＋提示（沒開）；標記不顯示在對話裡', async () => {
+  const a = await setup({ visible: true })
+  a.relay.mail(1, { body: '[震動]' })
+  await a.core.start()
+  assert.deepEqual(a.notes.map(n => [n.kind, n.shake, n.toast]), [['nudge', true, false]])
+  assert.ok(!a.core.logOf('W/W-政策').some(m => m.text?.includes('[震動]') && m.k === 'them'))
+  assert.equal(a.core.logOf('W/W-政策')[0].nudge, true)
+  await a.core.stop(); await a.relay.close()
+  const b = await setup({ visible: false })
+  b.relay.mail(1, { body: '[震動]' })
+  await b.core.start()
+  assert.deepEqual(b.notes.map(n => [n.kind, n.shake, n.toast]), [['nudge', false, true]])
+  assert.equal(b.core.snapshot().friends.find(f => f.id === 'W/W-政策').unread, 1)
+  await b.core.stop(); await b.relay.close()
+})
+
+test('寄信：body／to_node／to_agent／from_agent／expects_reply／reply_to 都對；回信帶 reply_to；等回信狀態', async () => {
+  const { relay, core } = await setup()
+  relay.mail(7, { body: '請問進度？' })
+  await core.start()
+  const id = 'W/W-政策'
+  assert.equal((await core.send(id, '  好的，在做 :)  ')).ok, true)
+  assert.deepEqual(relay.sent[0], { to_node: 'W', to_agent: 'W-政策', body: '好的，在做 :)', reply_to: U(7), from_agent: NAME, expects_reply: true })
+  assert.equal(relay.reqs.at(-1).key, 'fake-machine-key')
+  assert.equal(core.snapshot().friends.find(f => f.id === id).waiting, true)
+  await core.send(id, '再補一句')
+  assert.equal(relay.sent[1].reply_to, undefined, '沒有新的未回來信就不帶 reply_to')
+  relay.mail(8, { body: '收到' })
+  await core.pull()
+  assert.equal(core.snapshot().friends.find(f => f.id === id).waiting, false, '收到回信就不再等')
+  assert.deepEqual(core.logOf(id).map(m => m.k), ['them', 'me', 'me', 'them'])
+  await core.stop(); await relay.close()
+})
+
+test('寄震動：內文 [震動]、expects_reply:false、不帶 reply_to', async () => {
+  const { relay, core } = await setup()
+  await core.start()
+  assert.equal((await core.nudge('W/W-政策')).ok, true)
+  assert.deepEqual(relay.sent[0], { to_node: 'W', to_agent: 'W-政策', body: '[震動]', from_agent: NAME, expects_reply: false })
+  await core.stop(); await relay.close()
+})
+
+test('寄信失敗：對話出現說明、不進「已送出」', async () => {
+  const { relay, core } = await setup()
+  await core.start()
+  relay.members = []
+  const bad = await setup()
+  await bad.core.start()
+  await bad.relay.close()   // 後端不見了
+  const r = await bad.core.send('W/W-政策', 'hi')
+  assert.equal(r.ok, false)
+  assert.equal(bad.core.snapshot().friends.find(f => f.id === 'W/W-政策').waiting, false)
+  assert.match(bad.core.logOf('W/W-政策').at(-1).text, /沒有送到/)
+  await bad.core.stop(); await core.stop(); await relay.close()
+})
+
+test('上線提示：第一次名單不提示；之後有人新上線才提示；掉線的好友變離線但保留', async () => {
+  const { relay, core, notes } = await setup()
+  relay.mail(1, { body: 'hi' })
+  await core.start()
+  notes.length = 0
+  relay.members = roster([{ name: 'W-新人', status: 'idle', cwd_label: 'n' }])
+  await core.refreshRoster(); await sleep(5)
+  assert.deepEqual(notes.map(n => [n.kind, n.friend.id]), [['login', 'W/W-新人']])
+  relay.members = [{ id: 'T', agents: [] }]
+  await core.refreshRoster()
+  const w = core.snapshot().friends
+  assert.equal(w.find(f => f.id === 'W/W-政策').status, 'offline', '有對話的好友掉線後留著')
+  assert.ok(!w.find(f => f.id === 'W/W-新人'), '沒對話的掉線就消失')
+  relay.members = roster()
+  notes.length = 0
+  await core.refreshRoster(); await sleep(5)
+  assert.ok(notes.some(n => n.kind === 'login' && n.friend.id === 'W/W-政策'))
+  await core.stop(); await relay.close()
+})
+
+test('存檔：重開後好友與對話還在（離線）', async () => {
+  const store = memStore()
+  const a = await setup({ store })
+  a.relay.mail(1, { body: '存起來' })
+  await a.core.start(); await a.core.stop(); await a.relay.close()
+  assert.ok(store.data.logs['W/W-政策'])
+  const b = await setup({ store, members: [{ id: 'T', agents: [] }] })
+  await b.core.start()
+  const w = b.core.snapshot().friends.find(f => f.id === 'W/W-政策')
+  assert.equal(w.status, 'offline')
+  assert.equal(b.core.logOf('W/W-政策')[0].text, '存起來')
+  await b.core.stop(); await b.relay.close()
+})
+
+test('後端斷線：連線狀態變 off，不丟例外', async () => {
+  const { relay, core } = await setup()
+  await relay.close()
+  await core.start()
+  assert.equal(core.conn, 'off')
+  await core.stop()
+})

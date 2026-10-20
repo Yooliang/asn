@@ -1,0 +1,21 @@
+{
+  "name": "irori-asn",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ASN 即時通：收發室的懷舊桌面介面（Tauri 2 + Vue 3）",
+  "scripts": {
+    "prep": "node scripts/prep.mjs",
+    "start": "node scripts/prep.mjs && tauri dev",
+    "tauri": "tauri",
+    "build": "node scripts/prep.mjs && tauri build",
+    "test": "node --test test/*.test.mjs",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml"
+  },
+  "dependencies": {
+    "vue": "3.5.44"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.3"
+  }
+}
