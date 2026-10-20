@@ -21,6 +21,7 @@
         "minHeight": 420,
         "decorations": false,
         "center": true,
+        "dragDropEnabled": false,
         "additionalBrowserArgs": "--autoplay-policy=no-user-gesture-required"
       }
     ],
