@@ -59,6 +59,19 @@ echo "很長的內容" | node relay/cloud-agent/send.mjs --to W/W-政策 --body 
 
 不帶 `--reply-to`，收發室不知道你回的是哪一封，會誤報「對方沒有回覆」。主動寄信也是同一個指令（只是不用 `--reply-to`）。
 
+## 四之一、一台環境住好幾位代理
+
+在 `<信件目錄>/agents.json` 列出名單（收信程式每次回報都重讀，改了不用重啟），ASN 好友名單上每位各一列：
+
+```json
+[{"name": "小真"}, {"name": "正見", "cwd_label": "policy"}, {"name": "牧陽"}, {"name": "檔案"}, {"name": "島作", "status": "busy"}]
+```
+
+- 也可以用環境變數 `IRORI_CLOUD_AGENTS="小真,正見,牧陽"`；agents.json 優先。都沒有＝只有 `Grok` 一位。
+- `status` 只認 `idle`（線上）、`busy`（忙碌）、`waiting`（暫離），其餘當 `idle`。這台掃不到誰真的開著，名單就是你寫的固定名單。
+- 看某一位的信：`node inbox.mjs --agent 正見`。沒指定收件代理、或收件代理不在名單上的信，算給預設那位（`Grok`），不會漏掉。
+- 以某一位的名義回信：`send.mjs … --from 正見`。寄件人必須在名單上，打錯字會被擋。
+
 ## 五、檢查
 
 - `tail /workspace/relay/recv.log`：`mail stored …`（收到並寫入）、`roster forbidden (403)`（節點沒有 can_roster，只記一次）。
