@@ -1,7 +1,8 @@
 // 好友名單視窗：同時是整個程式的「樞紐」——AsnCore 跑在這裡，對話視窗與提示視窗只顯示、用事件下指令。
 // 關掉這扇＝結束程式（Rust 端處理）。
 import { AsnCore } from './lib/core.mjs'
-import { ADS, AD_MS, FIXED_TABS, GROUP_MODES, groupInDevice, addNotice, deviceItems, deviceTabs, fmtTime, groupHeading, groupRows, moreUnread, nextAd, statusNote } from './lib/tabs.mjs'
+import { ADS, AD_MS, FIXED_TABS, addNotice, fmtTime, groupHeading, groupRows, moreUnread, nextAd, statusNote } from './lib/tabs.mjs'
+import { DIMS, groupItems, groupOptions, loadDims, pageItems, pageTabs, withTabDim } from './lib/dims.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
 import { ctl, emit, invoke, listen, store, transport } from './lib/tauri.mjs'
 
@@ -42,7 +43,7 @@ const savedMe = (await meStore.load()) ?? {}
 // 暱稱＝視窗名＝對外名字；以 Rust 端現用名為準，不再從存檔讀
 const me = reactive({ psm: '', status: 'online', ...savedMe.me, nick: info.window_name })
 const soundOn = ref(savedMe.sound !== false)
-const groupMode = ref(savedMe.groupMode === 'engine' ? 'engine' : 'status')   // 設備頁裡依狀態或依類型分組
+const dims = reactive(loadDims(savedMe))   // 分頁依（設備／廠商／狀態）與分組依；舊存檔的 groupMode 在這裡轉換
 
 const core = new AsnCore({
   transport, store: store('chats'), selfNode: info.node, windowName: info.window_name,
@@ -95,9 +96,12 @@ await listen('asn:cmd', async c => {
 await listen('relay-bell', () => void core.pull('bell'))   // Rust 端的 Realtime 門鈴
 await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 
-watch([me, soundOn, groupMode], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, sound: soundOn.value, groupMode: groupMode.value }); sync() }, { deep: true })
+watch([me, soundOn, dims], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, sound: soundOn.value, tabDim: dims.tabDim, groupDim: dims.groupDim }); sync() }, { deep: true })
+// 設定頁改「分頁依」：分組若撞到自動換成剩下兩個裡的第一個
+const setTabDim = v => Object.assign(dims, withTabDim(dims, v))
+const pages = computed(() => pageTabs(friends.value, dims.tabDim, { selfNode: info.node, nodeOrder: nodeOrder.value }))
 
-const shotTab = ref(info.node)
+const shotTab = ref(dims.tabDim === 'device' ? info.node : '')
 createApp({
   setup() {
     const tab = shotTab, moreOpen = ref(false), adI = ref(0)
@@ -106,19 +110,19 @@ createApp({
     void refreshRooms()
     const query = ref(''), nickErr = ref('')
     const collapsed = reactive({})
-    const dev = computed(() => deviceTabs(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value }))
-    const isDevice = computed(() => dev.value.all.some(d => d.key === tab.value))
+    const dev = pages
+    const isDevice = computed(() => !FIXED_TABS.some(t => t.key === tab.value))   // 名單頁（設備／廠商／狀態的頁籤）；其餘是群組、通知、設定
     const moreOn = computed(() => dev.value.more.some(d => d.key === tab.value))
     const moreUnreadN = computed(() => moreUnread(dev.value.more))
-    // 選到的設備從名單與紀錄都消失時退回本機
-    watch(dev, d => { if (!d.all.some(x => x.key === tab.value) && !FIXED_TABS.some(t => t.key === tab.value)) tab.value = info.node })
+    // 選到的頁籤不在現在的清單（改了維度、設備消失…）時退回第一個（設備維度的第一個就是本機）
+    watch(dev, d => { if (!d.all.some(x => x.key === tab.value) && !FIXED_TABS.some(t => t.key === tab.value)) tab.value = d.all[0]?.key ?? '' }, { immediate: true })
     const shown = computed(() => {
       if (!isDevice.value) return []
       const q = query.value.trim().toLowerCase()
-      const items = deviceItems(friends.value, tab.value, c => !q || plain(c.nick).toLowerCase().includes(q))
-      return groupInDevice(items, groupMode.value)
+      const items = pageItems(friends.value, dims.tabDim, tab.value, c => !q || plain(c.nick).toLowerCase().includes(q))
+      return groupItems(items, dims.groupDim, { selfNode: info.node })
     })
-    const emptyText = computed(() => (query.value.trim() ? '沒有符合的聯絡人。' : conn.value !== 'on' ? '還沒連上收發室。' : '這台設備目前沒有視窗。'))
+    const emptyText = computed(() => (query.value.trim() ? '沒有符合的聯絡人。' : conn.value !== 'on' ? '還沒連上收發室。' : '這一頁目前沒有視窗。'))
     const openAd = a => { if (a.url) void invoke('open_url', { url: a.url }) }
     // 改最上面的暱稱＝改對外名字；Rust 端驗證，不合法就還原並提示
     const commitNick = async () => {
@@ -128,7 +132,7 @@ createApp({
       catch (e) { me.nick = info.window_name; nickErr.value = e.message; setTimeout(() => { nickErr.value = '' }, 5000) }
     }
     return {
-      STATUS, CONN_LABEL, FIXED_TABS, ADS, GROUP_MODES, groupMode, dev, isDevice, moreOn, moreOpen, moreUnreadN, me, soundOn, friends, conn, shown, query, collapsed, nickErr, commitNick,
+      STATUS, CONN_LABEL, FIXED_TABS, ADS, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, soundOn, friends, conn, shown, query, collapsed, nickErr, commitNick,
       tab, adI, rooms, roomsErr, notices, emptyText, openAd, groupHeading, statusNote, fmtTime,
       selfNode: info.node, emo, initial, openChat, ctl,
     }
@@ -154,8 +158,8 @@ if (info.shot) {
   await sleep(1500)
   await invoke('take_shot')
   // 逐頁籤截圖：本機、第二台設備、群組、通知、設定
-  const other = [...new Set(core.snapshot().friends.map(f => f.node))].find(n => n !== info.node)
-  for (const [name, key] of [['local', info.node], ['device', other], ['groups', 'groups'], ['notices', 'notices'], ['settings', 'settings']]) {
+  const p = pages.value.all
+  for (const [name, key] of [['local', p[0]?.key], ['device', p[1]?.key], ['groups', 'groups'], ['notices', 'notices'], ['settings', 'settings']]) {
     if (!key) continue
     shotTab.value = key
     await sleep(500)

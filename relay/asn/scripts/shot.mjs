@@ -12,17 +12,19 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 export const defaultExe = path.join(root, 'src-tauri', 'target', 'release', 'asn.exe')
 
 export const demoMembers = [
-  { id: 'H', name: '家用機', agents: [
+  { id: 'H', name: '家用機', kind: 'claude', agents: [
     { name: 'H-ASN', status: 'idle', cwd_label: 'asn' },
     { name: '家用收發室', status: 'idle', cwd_label: 'relay' },
     { name: 'H-Irori', status: 'idle', cwd_label: 'irori', engine: 'claude' },
     { name: 'H-島作', status: 'working', cwd_label: 'IslandMade', engine: 'claude' },
   ] },
-  { id: 'W', name: '工作機', agents: [
+  { id: 'W', name: '工作機', kind: 'claude', agents: [
+    { name: 'W-新視窗', status: 'idle', cwd_label: 'scratch' },   // 沒回報 engine：用節點 kind 推斷成 Claude
     { name: 'W-政策', status: 'idle', cwd_label: 'policy-tw', engine: 'claude' },
     { name: 'W-日本', status: 'busy', cwd_label: 'policy-jp', engine: 'claude' },
   ] },
-  { id: 'aegis', name: '牧陽 Aegis', agents: [{ name: '小牧', status: 'idle', cwd_label: 'aegis', engine: 'claude' }] },
+  { id: 'aegis', name: '牧陽 Aegis', kind: 'other', agents: [{ name: '小牧', status: 'idle', cwd_label: 'aegis' }, { name: '小陽', status: 'waiting', cwd_label: 'ops' }] },
+  { id: 'G', name: 'Grok 機', kind: 'grok', agents: [{ name: 'G-研究', status: 'idle', cwd_label: 'lab' }] },
 ]
 
 export const demoRooms = [
@@ -30,7 +32,8 @@ export const demoRooms = [
   { id: 'room-irori', name: '希緒開發', created_at: '2026-10-12T00:00:00Z', members: [{}, {}] },
 ]
 
-export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000 } = {}) {
+// me：預先寫進 asn-me.json 的設定（例如 { tabDim: 'engine', groupDim: 'device' }），截圖時用來切換維度
+export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000, me = null } = {}) {
   const relay = await startFakeRelay({ node: 'H', members: demoMembers, rooms: demoRooms })
   relay.mail(1, { from_node: 'W', from_agent: 'W-政策', to_node: 'H', to_agent: 'H-ASN', body: '資料補完了，幫我看一下 (Y)\n明天要上線 :)', created_at: new Date(Date.now() - 4 * 60_000).toISOString() })
   // 改名後的舊名：還沒過期，所以 asn.exe 也要用 inbox&agent=H-舊名 收信、對同一個名字 ack、並寫它的心跳
@@ -43,6 +46,7 @@ export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000 } =
   fs.mkdirSync(env.USERPROFILE, { recursive: true })
   fs.mkdirSync(env.IRORI_ASN_DATA, { recursive: true })
   fs.writeFileSync(path.join(env.IRORI_ASN_DATA, 'settings.json'), JSON.stringify({ window_name: 'H-ASN', old_names: [{ name: 'H-舊名', t: Date.now() - 60_000 }, { name: 'H-過期', t: Date.now() - 9 * 24 * 3600_000 }] }))
+  if (me) fs.writeFileSync(path.join(env.IRORI_ASN_DATA, 'asn-me.json'), JSON.stringify(me))
   const child = spawn(exe, ['--shot', outDir], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: false })
   let log = ''
   child.stdout.on('data', d => (log += d)); child.stderr.on('data', d => (log += d))
@@ -64,7 +68,8 @@ export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000 } =
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const out = path.resolve(process.argv[2] ?? 'shots')
-  const r = await runShot(out, process.argv[3] ?? defaultExe)
+  // 第三個參數之後：exe 路徑；環境變數 ASN_SHOT_ME 可放 JSON 設定（如 {"tabDim":"engine","groupDim":"device"}）
+  const r = await runShot(out, process.argv[3] ?? defaultExe, { me: process.env.ASN_SHOT_ME ? JSON.parse(process.env.ASN_SHOT_ME) : null })
   console.log(`exit=${r.code} files=${r.files.join(',')} sent=${r.relay.sent.length}`)
   if (r.log.trim()) console.log(r.log.trim())
   process.exit(r.code === 0 ? 0 : 1)

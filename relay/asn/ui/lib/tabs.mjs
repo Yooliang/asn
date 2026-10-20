@@ -99,18 +99,25 @@ export const adUrls = () => [...new Set(ADS.map(a => a.url).filter(Boolean))]
 
 // ---------- 設備頁裡的分組 ----------
 // mode＝'status'：線上／忙碌／暫離／離線；mode＝'engine'：Claude／Gemini／Grok…（沒回報類型的歸「其他」，排最後）。空的組不列。
-export const GROUP_MODES = [{ key: 'status', label: '狀態' }, { key: 'engine', label: '類型' }]
 const STATUS_GROUPS = [['online', '線上'], ['busy', '忙碌'], ['away', '暫離'], ['offline', '離線']]
-const ENGINE_ORDER = ['claude', 'gemini', 'grok', 'codex']
-const ENGINE_LABEL = { claude: 'Claude', gemini: 'Gemini', grok: 'Grok', codex: 'Codex' }
-export const engineKey = f => String(f?.engine ?? '').trim().toLowerCase() || 'other'
+const ENGINE_ORDER = ['claude', 'gemini', 'grok', 'codex', 'deepseek']
+const ENGINE_LABEL = { claude: 'Claude', gemini: 'Gemini', grok: 'Grok', codex: 'Codex', deepseek: 'DeepSeek', gpt: 'GPT' }
+// 節點回報的 kind 只有這幾個值可以拿來推斷廠商；'other' 不採用
+const KIND_VENDORS = ['claude', 'gpt', 'gemini', 'grok']
+// 廠商：好友自己回報的 engine 優先；沒回報（null）就用所在節點的 kind（claude／gpt／gemini／grok）；都沒有＝其他
+export const engineKey = f => {
+  const e = String(f?.engine ?? '').trim().toLowerCase()
+  if (e) return e
+  const k = String(f?.kind ?? '').trim().toLowerCase()
+  return KIND_VENDORS.includes(k) ? k : 'other'
+}
+export const engineRank = k => (k === 'other' ? 1e3 : ENGINE_ORDER.includes(k) ? ENGINE_ORDER.indexOf(k) : 100)
 export const engineLabel = k => ENGINE_LABEL[k] ?? (k === 'other' ? '其他' : k.charAt(0).toUpperCase() + k.slice(1))
 export function groupInDevice(items, mode = 'status') {
   if (mode === 'engine') {
     const by = new Map()
     for (const f of items) { const k = engineKey(f); if (!by.has(k)) by.set(k, []); by.get(k).push(f) }
-    const rank = k => (k === 'other' ? 1e3 : ENGINE_ORDER.includes(k) ? ENGINE_ORDER.indexOf(k) : 100)
-    const keys = [...by.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+    const keys = [...by.keys()].sort((a, b) => engineRank(a) - engineRank(b) || a.localeCompare(b))
     const st = s => STATUS_GROUPS.findIndex(([k]) => k === s)
     return keys.map(k => ({ key: `engine:${k}`, kind: 'engine', label: engineLabel(k),
       items: by.get(k).slice().sort((a, b) => st(a.status) - st(b.status)) }))

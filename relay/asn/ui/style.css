@@ -143,6 +143,10 @@ html.toast-page,html.toast-page body{background:transparent}
 .rtab:hover{border-color:#a9c6e6;background:linear-gradient(#ffffff,#e4f0fc)}
 .rtab.on{border-color:#7fa3cc;background:linear-gradient(#ffffff,#f1f7fe);box-shadow:0 1px 2px rgba(0,40,90,.18)}
 .rtab > .red{position:absolute;top:-2px;right:-2px}
+.rtab.empty{opacity:.45}
+.rtab .dot.big{width:16px;height:16px;margin:0}
+.more-pop button.empty{opacity:.5}
+.set-sel{border:1px solid var(--line);border-radius:3px;padding:3px 6px;background:var(--panel);font:inherit}
 .rtab .mono{font-weight:800;font-size:17px;line-height:1;color:#2a6fc0;text-shadow:0 1px 0 #fff}
 .rtab.on .mono{color:var(--accent)}
 .red{position:absolute;top:3px;right:5px;width:9px;height:9px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ffb0a8,var(--busy) 55%,#8d1812);box-shadow:0 0 0 1px #fff}
