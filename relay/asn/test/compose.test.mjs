@@ -8,6 +8,8 @@ import {
   COMPOSE_HINT_MERGED,
   composeHintTitle,
   composePlaceholder,
+  showComposeSideCol,
+  showComposeSideSpacer,
 } from '../ui/lib/compose.mjs'
 
 const UI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ui')
@@ -20,12 +22,23 @@ test('輸入提示：整合模式用較短 placeholder，完整說明放在 titl
   assert.ok(COMPOSE_HINT_MERGED.length < COMPOSE_HINT_FULL.length)
 })
 
+test('輸入列大頭貼：整合模式一律顯示；分離模式與對話區側欄對齊', () => {
+  assert.equal(showComposeSideCol('merged', 'left', false), true)
+  assert.equal(showComposeSideCol('merged', 'left', true), true)
+  assert.equal(showComposeSideCol('merged', 'inline', false), true)
+  assert.equal(showComposeSideSpacer('merged', 'left'), true)
+  assert.equal(showComposeSideSpacer('merged', 'inline'), false)
+  assert.equal(showComposeSideCol('split', 'left', false), true)
+  assert.equal(showComposeSideCol('split', 'left', true), false)
+  assert.equal(showComposeSideSpacer('split', 'inline'), false)
+})
+
 test('守門：ChatPane 接上 compose 提示與 win-mode；placeholder 不換行樣式', () => {
   const pane = fs.readFileSync(path.join(UI, 'lib', 'chatpane.mjs'), 'utf8')
   assert.ok(pane.includes('composePlaceholder(props.winMode)'))
   assert.ok(pane.includes(':placeholder="composeHint"'))
+  assert.ok(pane.includes('showComposeSideCol(props.winMode'))
   assert.ok(pane.includes('sideCol && !collapsed'))
-  assert.ok(!pane.includes('showComposeSideCol'))
   const html = fs.readFileSync(path.join(UI, 'list.html'), 'utf8')
   assert.ok(html.includes(':win-mode="ui.mode"'))
   const css = fs.readFileSync(path.join(UI, 'style.css'), 'utf8')
