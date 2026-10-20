@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process'
 import { createReceiver } from '../recv.mjs'
 import { acquirePidLock, isOurProcess, readJsonl } from '../lib.mjs'
 import { startFakeRelay, U } from './fake-relay.mjs'
-import { apiFor, rm, script, sleep, tmpEnv } from './helpers.mjs'
+import { apiFor, childEnv, rm, script, sleep, tmpEnv } from './helpers.mjs'
 
 test('收信：先寫 inbox.jsonl（含內容）才 ack；ack 當下檔案裡已經有這封信', async () => {
   let seenAtAck = null
@@ -112,7 +112,7 @@ test('roster 403：只記一次 log、期間不再重試；過了重試期才再
 test('常駐程式煙霧測試：收到信寫進 inbox.jsonl 並 ack、回報 roster、第二個執行個體 exit 3；只關自己的 PID', async () => {
   const st = await startFakeRelay()
   const { root, env, cfg } = tmpEnv(st.url, { IRORI_RELAY_KEY: 'fake-grok-node-key', IRORI_RECV_POLL_MS: '200', IRORI_ROSTER_MS: '200' })
-  const spawnRecv = () => spawn(process.execPath, [script('recv.mjs')], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...env } })
+  const spawnRecv = () => spawn(process.execPath, [script('recv.mjs')], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: childEnv(env) })
   const c = spawnRecv()
   let out = ''; c.stdout.on('data', d => (out += d)); c.stderr.on('data', d => (out += d))
   try {

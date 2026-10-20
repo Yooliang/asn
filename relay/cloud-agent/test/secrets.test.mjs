@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import { spawn } from 'node:child_process'
 import { readKey } from '../config.mjs'
 import { startFakeRelay, FAKE_KEY, U } from './fake-relay.mjs'
-import { rm, run, script, sleep, tmpEnv } from './helpers.mjs'
+import { childEnv, rm, run, script, sleep, tmpEnv } from './helpers.mjs'
 
 test('有 IRORI_RELAY_KEY：完全不讀金鑰檔（檔案不存在／是資料夾／內容不同都無關）、不寫檔', async () => {
   const st = await startFakeRelay()
@@ -45,7 +45,7 @@ test('用假金鑰掃輸出：壞金鑰被拒、後端回 401、常駐 log、--h
       const r = await run(f, a, { env }); outs.push(r.stdout + r.stderr)
     }
     // 常駐：壞金鑰 → whoami 一直 401，看 log／輸出
-    const c = spawn(process.execPath, [script('recv.mjs')], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...env } })
+    const c = spawn(process.execPath, [script('recv.mjs')], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: childEnv(env) })
     let out = ''; c.stdout.on('data', d => (out += d)); c.stderr.on('data', d => (out += d))
     await sleep(1200)
     const closed = new Promise(r => c.on('close', r)); c.kill(); await closed

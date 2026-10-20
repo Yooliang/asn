@@ -13,6 +13,18 @@ export const fakeClaudeBin = path.join(testDir, 'fake-claude-agents.mjs')
 export const script = name => path.join(dir, name)
 export const sleep = ms => new Promise(r => setTimeout(r, ms))
 
+// 去掉 shell／start.sh 帶進來的 IRORI_*（子行程與 resolveConfig 不該繼承生產設定）
+export function withoutIroriEnv(base = process.env) {
+  const out = {}
+  for (const k of Object.keys(base)) if (!k.startsWith('IRORI_')) out[k] = base[k]
+  return out
+}
+
+// 測試用完整 process env：先剔除 IRORI_*，再套用 tmpEnv／run 的覆寫
+export function childEnv(overrides = {}) {
+  return { ...withoutIroriEnv(process.env), ...overrides }
+}
+
 // 暫存根目錄＋指向假 relay 的環境變數（不碰真實 /workspace、不碰正式後端、不讀本機 Grok／Claude）
 export function tmpEnv(url, extra = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-agent-test-'))
@@ -29,8 +41,7 @@ export function tmpEnv(url, extra = {}) {
     FAKE_CLAUDE_AGENTS_JSON: '[]',
     ...extra,
   }
-  const merged = { ...process.env, ...env }
-  return { root, env, cfg: resolveConfig(merged) }
+  return { root, env, cfg: resolveConfig(childEnv(env)) }
 }
 export const rm = root => fs.rmSync(root, { recursive: true, force: true })
 
@@ -41,7 +52,7 @@ export function apiFor(cfg, key = FAKE_KEY) {
 // 執行 script，收 stdout/stderr/exit code
 export function run(file, args, { env = {}, stdin } = {}) {
   return new Promise(res => {
-    const c = spawn(process.execPath, [script(file), ...args], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...env } })
+    const c = spawn(process.execPath, [script(file), ...args], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: childEnv(env) })
     let stdout = '', stderr = ''
     c.stdout.on('data', d => (stdout += d)); c.stderr.on('data', d => (stderr += d))
     c.on('close', code => res({ code, stdout, stderr }))
