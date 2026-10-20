@@ -359,3 +359,15 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .fc-text{display:flex;flex-direction:column;min-width:0}
 .fc-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .fc-sub{font-size:12px;color:var(--muted)}
+/* 語音：訊息旁的喇叭鈕、工具列的麥克風、輸入框上方的提示 */
+.spk{border:1px solid transparent;background:none;border-radius:3px;padding:0 3px;margin-left:4px;cursor:pointer;color:var(--muted);vertical-align:middle;line-height:1}
+.spk:hover,.spk.on{border-color:#8fb6de;background:linear-gradient(#fbfdff,#d6e8fa);color:var(--title-fg)}
+.tool.mic.rec{border-color:#d9302b;background:linear-gradient(#fff3f2,#f6c9c6);color:#c0211c;animation:micpulse 1.1s ease-in-out infinite}
+.tool.mic.busy{opacity:.6}
+@keyframes micpulse{50%{box-shadow:0 0 0 3px rgba(217,48,43,.25)}}
+@media (prefers-reduced-motion:reduce){.tool.mic.rec{animation:none}}
+.voice-note{padding:3px 10px;font-size:12px;color:var(--muted)}
+.voice-install{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px 10px;font-size:12px;background:#fffbe6;border-top:1px solid var(--line)}
+.voice-install>span{flex:1 1 220px}
+.voice-install .aero-btn{padding:2px 12px}
+.voice-set{display:flex;flex-direction:column;gap:6px}

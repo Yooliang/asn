@@ -25,7 +25,7 @@ test('asn.exe 端到端（假 relay）', { skip: !fs.existsSync(defaultExe) && '
   assert.ok(!reqs.some(q => q.action === 'inbox' && !q.agent), '不拉整個節點信箱（那是機器橋的）')
   assert.ok(r.relay.sent.every(s => s.from_agent === 'H-ASN'), '寄信一律用現用名')
   assert.deepEqual(r.relay.sent[0], { to_node: 'W', to_agent: 'W-政策', body: '收到！我晚點看一下 :)', reply_to: U(2), from_agent: 'H-ASN', expects_reply: true })
-  assert.deepEqual(r.relay.sent[1], { to_node: 'W', to_agent: 'W-政策', body: '[震動]', from_agent: 'H-ASN', expects_reply: false })
+  assert.deepEqual(r.relay.sent[1], { to_node: 'W', to_agent: 'W-政策', body: '（H-ASN 傳送了一個震動）', from_agent: 'H-ASN', expects_reply: false })
   // 改名後的舊名（H-舊名，7 天內）照樣收信、對同一個名字 ack、寫自己的心跳；過期的（H-過期）不碰
   assert.ok(reqs.some(q => q.action === 'inbox' && q.agent === 'H-舊名'), '舊名也用 inbox&agent=<舊名> 收信')
   assert.ok(reqs.some(q => q.action === 'ack' && q.agent === 'H-舊名' && q.body.ids.includes(U(2))), '寄給舊名的信對舊名 ack')

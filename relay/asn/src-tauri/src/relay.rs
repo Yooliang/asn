@@ -40,7 +40,10 @@ pub fn build_send_body(payload: &Value, window: &str) -> Result<Value, String> {
     if !crate::identity::valid_id(to_node) {
         return Err(format!("收件節點格式不對：{to_node}"));
     }
-    let body = o.get("body").and_then(Value::as_str).unwrap_or("").trim_end();
+    // 震動：前端只說 nudge:true，內文由這裡用視窗名組成「（某某 傳送了一個震動）」（視窗名以本程式為準，前端不能自填）
+    let nudge = o.get("nudge").and_then(Value::as_bool).unwrap_or(false);
+    let nudge_body = format!("（{window} 傳送了一個震動）");
+    let body = if nudge { nudge_body.as_str() } else { o.get("body").and_then(Value::as_str).unwrap_or("").trim_end() };
     if body.is_empty() {
         return Err("內文是空的".into());
     }
@@ -49,6 +52,9 @@ pub fn build_send_body(payload: &Value, window: &str) -> Result<Value, String> {
     }
     let expects = o.get("expects_reply").and_then(Value::as_bool).ok_or("expects_reply 一定要明說（true 或 false）")?;
     let mut m = Map::new();
+    if nudge && expects {
+        return Err("震動不等回信（expects_reply 要是 false）".into());
+    }
     m.insert("to_node".into(), json!(to_node));
     if let Some(a) = o.get("to_agent").and_then(Value::as_str).filter(|s| !s.is_empty()) {
         m.insert("to_agent".into(), json!(a));
@@ -116,6 +122,25 @@ impl Relay {
         Ok(data.unwrap_or(Value::Null))
     }
 
+    /// 回傳二進位內容的動作（念出訊息的音檔）：成功回（位元組，content-type）。超過 `max` 位元組算失敗。
+    /// 錯誤訊息只含動作名、狀態碼與後端的錯誤代碼，不含金鑰與內文。
+    pub async fn api_bytes(&self, action: &str, body: Value, max: usize, timeout: Duration) -> Result<(Vec<u8>, String), String> {
+        let url = format!("{}?action={}", self.base, action);
+        let name = action.split('&').next().unwrap_or(action);
+        let res = self.client.post(&url).json(&body).header("x-relay-key", &self.key).timeout(timeout).send().await.map_err(|e| format!("{name} 連線失敗：{}", e.without_url()))?;
+        let status = res.status();
+        let mime = res.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+        let bytes = res.bytes().await.map_err(|e| format!("{name} 讀取失敗：{}", e.without_url()))?;
+        if !status.is_success() {
+            let err = serde_json::from_slice::<Value>(&bytes).ok().and_then(|d| d.get("error").and_then(Value::as_str).map(String::from)).unwrap_or_default();
+            return Err(format!("{name} HTTP {} {err}", status.as_u16()).trim().to_string());
+        }
+        if bytes.len() > max {
+            return Err(format!("{name} 回應太大"));
+        }
+        Ok((bytes.to_vec(), mime))
+    }
+
     pub async fn list(&self) -> Result<Value, String> {
         self.api("list", None).await
     }
@@ -167,7 +192,7 @@ impl Relay {
     }
     pub async fn send(&self, payload: &Value) -> Result<Value, String> {
         let b = build_send_body(payload, &self.window_name())?;
-        // 後端不擋同節點寄信；與本機視窗聊天是這個程式的主要用途，所以放行（send.mjs 擋同節點是因為視窗之間有 SendMessage）
+        // 後端不擋同節點寄信；與本機視窗聊天是這個程式的主要用途，所以放行（send.mjs 也放行同節點，只擋寄給自己這個視窗）
         self.api("send", Some(b)).await
     }
 }
@@ -192,8 +217,13 @@ mod tests {
 
     #[test]
     fn 寄信_震動與回信() {
-        let b = build_send_body(&json!({"to_node":"W","body":"[震動]","expects_reply":false}), "H-ASN").unwrap();
+        // 震動：前端只帶 nudge:true（帶了 body 也不理），內文由 Rust 用視窗名組成
+        let b = build_send_body(&json!({"to_node":"W","nudge":true,"body":"偽造","expects_reply":false}), "H-ASN").unwrap();
         assert_eq!(b["expects_reply"], false);
+        assert_eq!(b["body"], "（H-ASN 傳送了一個震動）");
+        assert_eq!(b["from_agent"], "H-ASN");
+        assert!(b.get("nudge").is_none(), "nudge 欄位不送給後端");
+        assert!(build_send_body(&json!({"to_node":"W","nudge":true,"expects_reply":true}), "H-ASN").is_err());
         assert!(b.get("to_agent").is_none() && b.get("reply_to").is_none());
         let r = build_send_body(&json!({"to_node":"W","body":"x","expects_reply":true,"reply_to":"00000000-0000-0000-0000-000000000001"}), "H-ASN").unwrap();
         assert_eq!(r["reply_to"], "00000000-0000-0000-0000-000000000001");
