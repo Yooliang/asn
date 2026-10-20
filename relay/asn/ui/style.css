@@ -123,6 +123,7 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .picker button:hover{border-color:#8fb6de;background:#e6f1fc}
 .composer{display:flex;gap:8px;padding:8px}
 .composer textarea{flex:1;min-width:0;resize:none;height:64px;border:1px solid var(--line);border-radius:3px;padding:6px 8px;font-size:14px}
+.composer textarea::placeholder{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .composer .aero-btn{align-self:stretch;padding:0 18px;font-weight:600}
 .typing{height:22px;flex:none;padding:3px 14px;font-size:12px;color:var(--muted);border-top:1px solid var(--line);background:var(--panel-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .empty-chat{flex:1;display:grid;place-items:center;color:var(--muted);padding:24px;text-align:center}
@@ -237,11 +238,8 @@ html.toast-page,html.toast-page body{background:transparent}
 .ctab-name{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ctab-x{flex:none;width:18px;height:18px;padding:0;border:0;border-radius:3px;background:transparent;color:var(--muted);font-size:10px;cursor:pointer}
 .ctab-x:hover{background:var(--close);color:#fff}
-.chat-stack{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
-.chat-stack > .pane{flex:1;min-width:0;min-height:0;width:100%;align-self:stretch;border-top-left-radius:0}
-/* 整合模式：輸入列與上方對話區同寬（不再在輸入列右側再留一欄大頭貼） */
-.shell.merged .compose-row .compose-main{flex:1 1 auto;width:100%;max-width:none}
-.shell.merged .composer textarea{width:100%}
+.chat-stack{flex:1;min-height:0;display:flex;flex-direction:column}
+.chat-stack > .pane{flex:1;min-height:0;border-top-left-radius:0}
 
 /* ---------- 工具列：只有圖示（滑過看提示）；位置可在輸入框上方（預設）或下方 ---------- */
 .tool-group{display:inline-flex;align-items:center}
