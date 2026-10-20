@@ -33,7 +33,7 @@
     <div class="body">
       <nav class="rail" role="tablist" aria-label="名單分頁">
         <button v-for="(d, i) in dev.visible" :key="d.key" :style="{ zIndex: 30 - i }" class="rtab dev" :class="{ on: tab === d.key }" role="tab" :aria-selected="tab === d.key" :title="d.label" :aria-label="d.label" @click="tab = d.key">
-          <svg v-if="d.key === selfNode" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="8" r="4.2" fill="#3cb521" stroke="#1e7a10"/><path d="M4 21c0-5 3.6-7.6 8-7.6s8 2.6 8 7.6z" fill="#3cb521" stroke="#1e7a10"/></svg>
+          <img v-if="d.key === selfNode" src="img/logo.svg" alt="">
           <span v-else class="mono">{{ d.short }}</span>
           <span class="red" v-if="d.unread"></span>
         </button>
