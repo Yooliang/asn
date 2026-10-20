@@ -37,7 +37,8 @@ export function tmpEnv(url, extra = {}) {
     IRORI_RELAY_ANON_KEY: '',
     IRORI_CLOUD_ROSTER_AUTO: '0',
     GROK_AGENTS_DIR: grokAgentsDir,
-    IRORI_CLAUDE_BIN: fakeClaudeBin,
+    IRORI_CLAUDE_BIN: process.execPath,
+    IRORI_CLAUDE_SCRIPT: fakeClaudeBin,
     FAKE_CLAUDE_AGENTS_JSON: '[]',
     ...extra,
   }

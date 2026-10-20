@@ -15,8 +15,9 @@
 | 已處理 | `/workspace/relay/done.jsonl` | 同上 |
 | 常駐的 log／pid | `/workspace/relay/recv.log`（20MB 輪替）、`recv.pid`；`recv.out` 只收當機堆疊 | 同上 |
 | 節點代號／視窗名 | `grok`（`IRORI_RELAY_ID`）／`Grok`（`cwd_label=grok-cloud`、`engine=grok`） | `IRORI_RELAY_ID`、`IRORI_CLOUD_ROSTER_NAME` |
-| 本機夥伴名單（roster 掃描） | Grok 夥伴目錄 `/home/box/agent-data/agents`；Claude CLI `/home/box/.local/bin/claude` | `GROK_AGENTS_DIR`、`IRORI_CLAUDE_BIN` |
-| 自動掃描 roster | 預設開（`recv` 每 60 秒用 `grok-agents.mjs` 回報） | `IRORI_CLOUD_ROSTER_AUTO=0` 關閉，改用手動名單（見下） |
+| 本機夥伴名單（roster 掃描） | Grok 夥伴目錄 `/home/box/agent-data/agents` | `GROK_AGENTS_DIR` |
+| Claude 視窗（預設不列） | 設 `1` 才跑 `IRORI_CLAUDE_BIN agents --json`（目前雲端不轉信進 Claude，勿開） | `IRORI_CLOUD_ROSTER_CLAUDE`、`IRORI_CLAUDE_BIN` |
+| 自動掃描 roster | 預設開；與 `agents.json` 合併（見下） | `IRORI_CLOUD_ROSTER_AUTO=0` 關閉掃描 |
 | Realtime 門鈴（選用） | 沒有就只輪詢 | `IRORI_RELAY_ANON_KEY` 或 `/workspace/.irori-relay/anon.key` |
 
 ## 一、取得程式
@@ -63,23 +64,25 @@ echo "很長的內容" | node relay/cloud-agent/send.mjs --to W/W-政策 --body 
 
 ## 四之一、一台環境住好幾位代理（roster 名單）
 
-**預設（自動掃描）**：`recv.mjs` 每 60 秒執行 `grok-agents.mjs` 的 `listAll()`，把掃到的夥伴回報給收發室（ASN 好友名單每位一列）：
+**一份名單三處共用**：`config.mjs` 的 `resolveCloudAgents()` 供 **roster 回報**、`send.mjs --from` 檢查、`inbox.mjs --agent` 篩選（邏輯一致）。
 
-1. **Grok 夥伴**：在 `GROK_AGENTS_DIR`（預設 `/home/box/agent-data/agents`）底下，每個 UUID 子目錄只讀 `profile.json` 的 `name` 欄位（不讀記憶、附件或資料庫）。
-2. **Claude Code 視窗**：執行 `IRORI_CLAUDE_BIN agents --json`（預設 `/home/box/.local/bin/claude`），只保留 `kind=interactive` 且 `entrypoint=cli` 的 session，並排除名稱以「收發室」結尾的（與 `relay/machine/bridge.mjs` 相同）。
+**預設（自動掃描）**：`recv.mjs` 每 60 秒掃 Grok 夥伴並合併 `agents.json` 後回報收發室：
 
-掃不到任何人（目錄不存在、Claude 沒裝、或都關了）時，退回只回報預設那位（`IRORI_CLOUD_ROSTER_NAME`，預設 `Grok`）。
+1. **Grok 夥伴**：在 `GROK_AGENTS_DIR`（預設 `/home/box/agent-data/agents`）底下，每個 UUID 子目錄只讀 `profile.json` 的 `name`（不讀記憶、附件或資料庫）。
+2. **Claude Code 視窗**：預設**不列**（`IRORI_CLOUD_ROSTER_CLAUDE=1` 才執行 `claude agents --json`；雲端目前沒有把信轉進 Claude 視窗，開了會讓 ASN 看得到但收不到信）。
 
-手動檢查名單：`node relay/cloud-agent/grok-agents.mjs`（JSON）或 `node relay/cloud-agent/grok-agents.mjs --names`。
+**與 agents.json 合併**（掃描開著時）：名字以掃描為主，`agents.json` 多列的也會收進名單；**同名**時 `status`、`cwd_label` 以 `agents.json` 為準（方便前台標忙碌）。掃描與手動都空時，才只回報預設那位（`IRORI_CLOUD_ROSTER_NAME`，預設 `Grok`）。
 
-**關閉自動掃描**（只用固定名單）：設 `IRORI_CLOUD_ROSTER_AUTO=0`，在 `<信件目錄>/agents.json` 列出名單（收信程式每次回報都重讀，改了不用重啟）：
+手動檢查掃描結果：`node relay/cloud-agent/grok-agents.mjs`（JSON）或 `--names`。
+
+**關閉自動掃描**（只用固定名單）：設 `IRORI_CLOUD_ROSTER_AUTO=0`，在 `<信件目錄>/agents.json` 列出名單（每次讀取都重讀，改了不用重啟 recv）：
 
 ```json
 [{"name": "小真"}, {"name": "正見", "cwd_label": "policy"}, {"name": "牧陽"}, {"name": "檔案"}, {"name": "島作", "status": "busy"}]
 ```
 
-- 也可以用環境變數 `IRORI_CLOUD_AGENTS="小真,正見,牧陽"`；agents.json 優先。都沒有＝只有 `Grok` 一位。（僅在 `IRORI_CLOUD_ROSTER_AUTO=0` 或自動掃描結果為空時才會用到。）
-- `status` 只認 `idle`（線上）、`busy`（忙碌）、`waiting`（暫離），其餘當 `idle`。自動掃描時 Grok 夥伴固定 `idle`、Claude 帶 CLI 回報的 status；手動名單則以你寫的為準。
+- 也可以用環境變數 `IRORI_CLOUD_AGENTS="小真,正見,牧陽"`；檔案優先於環境變數。關閉掃描且都沒有＝只有 `Grok` 一位。
+- `status` 只認 `idle`（線上）、`busy`（忙碌）、`waiting`（暫離），其餘當 `idle`。掃描到的 Grok 夥伴預設 `idle`；要改狀態請在 `agents.json` 寫同名覆寫。
 - 看某一位的信：`node inbox.mjs --agent 正見`。沒指定收件代理、或收件代理不在名單上的信，算給預設那位（`Grok`），不會漏掉。
 - 以某一位的名義回信：`send.mjs … --from 正見`。寄件人必須在名單上，打錯字會被擋。
 

@@ -6,11 +6,9 @@
 //   IRORI_RELAY_URL       仲介網址（預設正式；測試指到 127.0.0.1）
 //   IRORI_RELAY_KEY       節點金鑰（優先於金鑰檔）；IRORI_RELAY_ANON_KEY／<金鑰目錄>/anon.key：Realtime 門鈴用的公開 anon 金鑰（沒有＝只輪詢）
 //   IRORI_CLOUD_ROSTER_NAME（預設 Grok）／IRORI_CLOUD_ROSTER_LABEL（預設 grok-cloud）／IRORI_CLOUD_ENGINE（預設 grok）
-//   名單有好幾個代理時（一台雲端環境裡住了好幾位）：<信件目錄>/agents.json（優先，每次回報都重讀，可隨時改）
-//     [{"name":"小真"},{"name":"正見","engine":"grok","cwd_label":"policy","status":"busy"}]
-//   或環境變數 IRORI_CLOUD_AGENTS="Grok,小真,正見"（逗號分隔）。都沒有＝只有 IRORI_CLOUD_ROSTER_NAME 一位
-//   自動掃描（Grok 雲端預設開）：grok-agents.mjs 讀 Grok 夥伴 profile ＋ claude agents --json；IRORI_CLOUD_ROSTER_AUTO=0 關閉，只用 agents.json／IRORI_CLOUD_AGENTS
-//   GROK_AGENTS_DIR（預設 /home/box/agent-data/agents）、IRORI_CLAUDE_BIN（預設 /home/box/.local/bin/claude）
+//   agents.json／IRORI_CLOUD_AGENTS：手動名單；與自動掃描合併（同名時 status、cwd_label 以 agents.json 為準）
+//   自動掃描（Grok 雲端預設開）：grok-agents.mjs；IRORI_CLOUD_ROSTER_AUTO=0 關閉
+//   GROK_AGENTS_DIR、IRORI_CLAUDE_BIN、IRORI_CLAUDE_SCRIPT（測試用 node 跑假 claude）、IRORI_CLOUD_ROSTER_CLAUDE=1 才列 Claude 視窗
 import fs from 'node:fs'
 import path from 'node:path'
 // 協定常數沿用 relay/machine，不複製一份
@@ -30,10 +28,12 @@ export function resolveConfig(env = process.env) {
   const name = (env.IRORI_CLOUD_ROSTER_NAME || 'Grok').trim()
   const grokAgentsDir = (env.GROK_AGENTS_DIR || '/home/box/agent-data/agents').trim()
   const claudeBin = (env.IRORI_CLAUDE_BIN || '/home/box/.local/bin/claude').trim()
+  const claudeScript = (env.IRORI_CLAUDE_SCRIPT || '').trim()
   const rosterAuto = (env.IRORI_CLOUD_ROSTER_AUTO ?? '1') !== '0'
+  const rosterClaude = (env.IRORI_CLOUD_ROSTER_CLAUDE ?? '0') === '1'
   return {
     root, keyDir, mailDir, node, name,
-    grokAgentsDir, claudeBin, rosterAuto,
+    grokAgentsDir, claudeBin, claudeScript, rosterAuto, rosterClaude,
     baseUrl: (env.IRORI_RELAY_URL || DEFAULT_URL).replace(/\/+$/, ''),
     keyFile: path.join(keyDir, `${node}.key`),
     inboxFile: path.join(mailDir, 'inbox.jsonl'),
@@ -47,7 +47,6 @@ export function resolveConfig(env = process.env) {
     pollMs: Number(env.IRORI_RECV_POLL_MS || 120_000),
     rosterMs: Number(env.IRORI_ROSTER_MS || 60_000),
     rosterRetryAfter403Ms: Number(env.IRORI_ROSTER_403_RETRY_MS || 3_600_000),
-    // resolveConfig 當下用的 env 快照（測試合併暫存變數時，roster 掃描不會漏回 process.env 的真實路徑）
     _resolvedEnv: env,
   }
 }
@@ -59,11 +58,12 @@ export function rosterScanEnvFrom(cfg) {
     ...base,
     GROK_AGENTS_DIR: cfg.grokAgentsDir,
     IRORI_CLAUDE_BIN: cfg.claudeBin,
+    IRORI_CLAUDE_SCRIPT: cfg.claudeScript,
     IRORI_CLOUD_ROSTER_AUTO: cfg.rosterAuto ? '1' : '0',
+    IRORI_CLOUD_ROSTER_CLAUDE: cfg.rosterClaude ? '1' : '0',
   }
 }
 
-// 金鑰：有 IRORI_RELAY_KEY 就只用它、完全不讀檔；沒有才讀金鑰檔。找不到回空字串。呼叫端絕不可印出回傳值（連片段都不行）。
 export function readKey(cfg, env = process.env) {
   const fromEnv = (env.IRORI_RELAY_KEY || '').trim()
   if (fromEnv) return fromEnv
@@ -76,44 +76,98 @@ export function readAnonKey(cfg, env = process.env) {
   try { return fs.readFileSync(path.join(cfg.keyDir, 'anon.key'), 'utf8').trim() } catch { return '' }
 }
 
-// 這台雲端環境要回報的代理名單：agents.json → IRORI_CLOUD_AGENTS → 只有預設那位。名字去頭尾空白、去重、最多 30 位、每個最多 100 字；
-// 結尾是「收發室」的不收（ASN 不列收發室）。status 只收 idle／busy／waiting，其餘當 idle。
 const STATUSES = new Set(['idle', 'busy', 'waiting'])
-export function loadAgents(cfg) {
+
+function normalizeManualEntry(a, cfg) {
+  const name = String((typeof a === 'string' ? a : a?.name) ?? '').trim().slice(0, 100)
+  if (!name || /收發室$/.test(name)) return null
+  return {
+    name,
+    status: STATUSES.has(a?.status) ? a.status : 'idle',
+    engine: String(a?.engine ?? cfg.engine).trim().slice(0, 20) || cfg.engine,
+    cwd_label: String(a?.cwd_label ?? cfg.cwdLabel).trim().slice(0, 100),
+  }
+}
+
+// agents.json → IRORI_CLOUD_AGENTS；沒有設定時回 []（不含預設 Grok）
+export function loadManualAgentEntries(cfg) {
   let raw = null
   try { raw = JSON.parse(fs.readFileSync(cfg.agentsFile, 'utf8')) } catch {}
   if (!Array.isArray(raw)) raw = cfg.agentsEnv ? cfg.agentsEnv.split(',').map(name => ({ name })) : []
-  const out = [], seen = new Set()
+  const out = []
+  const seen = new Set()
   for (const a of raw) {
-    const name = String((typeof a === 'string' ? a : a?.name) ?? '').trim().slice(0, 100)
-    if (!name || seen.has(name) || /收發室$/.test(name)) continue
-    seen.add(name)
-    out.push({
-      name,
-      status: STATUSES.has(a?.status) ? a.status : 'idle',
-      engine: String(a?.engine ?? cfg.engine).trim().slice(0, 20) || cfg.engine,
-      cwd_label: String(a?.cwd_label ?? cfg.cwdLabel).trim().slice(0, 100),
-    })
+    const row = normalizeManualEntry(a, cfg)
+    if (!row || seen.has(row.name)) continue
+    seen.add(row.name)
+    out.push(row)
     if (out.length >= 30) break
   }
-  return out.length ? out : [{ name: cfg.name, status: 'idle', engine: cfg.engine, cwd_label: cfg.cwdLabel }]
+  return out
 }
 
-// roster 回報用名單：先試本機掃描（Grok 夥伴＋ Claude 視窗），沒有結果再 loadAgents（手動 agents.json 等）
-export async function rosterAgentsForReport(cfg, env = rosterScanEnvFrom(cfg), listAllFn) {
-  if (cfg.rosterAuto) {
-    let raw = []
-    try {
-      const listAll = listAllFn ?? (await import('./grok-agents.mjs')).listAll
-      raw = listAll(env)
-    } catch {}
-    const agents = (Array.isArray(raw) ? raw : []).map(({ name, status, engine, cwd_label }) => ({
-      name: String(name).trim(),
-      status: STATUSES.has(status) ? status : 'idle',
-      engine: String(engine ?? cfg.engine).trim().slice(0, 20) || cfg.engine,
-      cwd_label: String(cwd_label ?? cfg.cwdLabel).trim().slice(0, 100) || cfg.cwdLabel,
-    })).filter(a => a.name && !/收發室$/.test(a.name))
-    if (agents.length) return agents.slice(0, 30)
+// 僅手動名單（相容舊呼叫）；都沒有＝只有預設那位
+export function loadAgents(cfg) {
+  const manual = loadManualAgentEntries(cfg)
+  return manual.length ? manual : [{ name: cfg.name, status: 'idle', engine: cfg.engine, cwd_label: cfg.cwdLabel }]
+}
+
+function normalizeScannedEntry(a, cfg) {
+  const name = String(a?.name ?? '').trim()
+  if (!name || /收發室$/.test(name)) return null
+  return {
+    name,
+    status: STATUSES.has(a?.status) ? a.status : 'idle',
+    engine: String(a?.engine ?? cfg.engine).trim().slice(0, 20) || cfg.engine,
+    cwd_label: String(a?.cwd_label ?? cfg.cwdLabel).trim().slice(0, 100) || cfg.cwdLabel,
   }
-  return loadAgents(cfg)
+}
+
+function mergeScannedWithManual(scanned, manual, cfg) {
+  const manualMap = new Map(manual.map(a => [a.name, a]))
+  const byName = new Map()
+  const order = []
+  for (const raw of scanned) {
+    const base = normalizeScannedEntry(raw, cfg)
+    if (!base) continue
+    const m = manualMap.get(base.name)
+    const row = m ? {
+      ...base,
+      status: STATUSES.has(m.status) ? m.status : base.status,
+      cwd_label: m.cwd_label || base.cwd_label,
+    } : base
+    if (!byName.has(row.name)) order.push(row.name)
+    byName.set(row.name, row)
+  }
+  for (const m of manual) {
+    if (!byName.has(m.name)) {
+      byName.set(m.name, m)
+      order.push(m.name)
+    }
+  }
+  if (!order.length) {
+    return [{ name: cfg.name, status: 'idle', engine: cfg.engine, cwd_label: cfg.cwdLabel }]
+  }
+  return order.map(n => byName.get(n)).slice(0, 30)
+}
+
+// roster／send --from／inbox --agent 共用：掃描＋agents.json 合併
+export async function resolveCloudAgents(cfg, env = rosterScanEnvFrom(cfg), listAllFn) {
+  const manual = loadManualAgentEntries(cfg)
+  if (!cfg.rosterAuto) return loadAgents(cfg)
+  let scanned = []
+  try {
+    const listAll = listAllFn ?? (await import('./grok-agents.mjs')).listAll
+    scanned = await listAll(env)
+  } catch {}
+  if (!Array.isArray(scanned)) scanned = []
+  if (!scanned.length && !manual.length) {
+    return [{ name: cfg.name, status: 'idle', engine: cfg.engine, cwd_label: cfg.cwdLabel }]
+  }
+  return mergeScannedWithManual(scanned, manual, cfg)
+}
+
+/** @deprecated 請用 resolveCloudAgents；recv roster 仍呼叫此別名 */
+export async function rosterAgentsForReport(cfg, env = rosterScanEnvFrom(cfg), listAllFn) {
+  return resolveCloudAgents(cfg, env, listAllFn)
 }
