@@ -28,8 +28,12 @@ export function resolveConfig(env = process.env) {
   const mailDir = env.IRORI_CLOUD_MAIL_DIR || path.join(root, 'relay')
   const node = (env.IRORI_RELAY_ID || 'grok').trim()
   const name = (env.IRORI_CLOUD_ROSTER_NAME || 'Grok').trim()
+  const grokAgentsDir = (env.GROK_AGENTS_DIR || '/home/box/agent-data/agents').trim()
+  const claudeBin = (env.IRORI_CLAUDE_BIN || '/home/box/.local/bin/claude').trim()
+  const rosterAuto = (env.IRORI_CLOUD_ROSTER_AUTO ?? '1') !== '0'
   return {
     root, keyDir, mailDir, node, name,
+    grokAgentsDir, claudeBin, rosterAuto,
     baseUrl: (env.IRORI_RELAY_URL || DEFAULT_URL).replace(/\/+$/, ''),
     keyFile: path.join(keyDir, `${node}.key`),
     inboxFile: path.join(mailDir, 'inbox.jsonl'),
@@ -43,6 +47,19 @@ export function resolveConfig(env = process.env) {
     pollMs: Number(env.IRORI_RECV_POLL_MS || 120_000),
     rosterMs: Number(env.IRORI_ROSTER_MS || 60_000),
     rosterRetryAfter403Ms: Number(env.IRORI_ROSTER_403_RETRY_MS || 3_600_000),
+    // resolveConfig 當下用的 env 快照（測試合併暫存變數時，roster 掃描不會漏回 process.env 的真實路徑）
+    _resolvedEnv: env,
+  }
+}
+
+// listAll / roster 掃描用的 env：以 cfg 裡解析好的路徑為準，並保留 FAKE_CLAUDE_AGENTS_JSON 等測試用變數
+export function rosterScanEnvFrom(cfg) {
+  const base = cfg._resolvedEnv ?? process.env
+  return {
+    ...base,
+    GROK_AGENTS_DIR: cfg.grokAgentsDir,
+    IRORI_CLAUDE_BIN: cfg.claudeBin,
+    IRORI_CLOUD_ROSTER_AUTO: cfg.rosterAuto ? '1' : '0',
   }
 }
 
@@ -83,9 +100,8 @@ export function loadAgents(cfg) {
 }
 
 // roster 回報用名單：先試本機掃描（Grok 夥伴＋ Claude 視窗），沒有結果再 loadAgents（手動 agents.json 等）
-export async function rosterAgentsForReport(cfg, env = process.env, listAllFn) {
-  const auto = (env.IRORI_CLOUD_ROSTER_AUTO ?? '1') !== '0'
-  if (auto) {
+export async function rosterAgentsForReport(cfg, env = rosterScanEnvFrom(cfg), listAllFn) {
+  if (cfg.rosterAuto) {
     let raw = []
     try {
       const listAll = listAllFn ?? (await import('./grok-agents.mjs')).listAll

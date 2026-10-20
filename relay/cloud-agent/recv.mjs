@@ -8,7 +8,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createCore } from '../machine/relay-core.mjs'   // 沿用 API 呼叫與門鈴，不複製協定
 import { createLog } from '../machine/safe-log.mjs'
-import { NO_KEY_MSG, readAnonKey, readKey, resolveConfig, rosterAgentsForReport } from './config.mjs'
+import { NO_KEY_MSG, readAnonKey, readKey, resolveConfig, rosterAgentsForReport, rosterScanEnvFrom } from './config.mjs'
 import { acquirePidLock, appendLineDurable, ensureDir, readJsonl } from './lib.mjs'
 
 const recordOf = m => ({
@@ -19,7 +19,7 @@ const recordOf = m => ({
 })
 
 // 收信核心（可單獨測試）：api(action, {method, body}) 是 relay-core 的 api
-export function createReceiver({ api, cfg, log, now = () => Date.now(), listAllFn, env = process.env }) {
+export function createReceiver({ api, cfg, log, now = () => Date.now(), listAllFn, env = rosterScanEnvFrom(cfg) }) {
   ensureDir(cfg.mailDir, 0o700)
   const seen = new Set(readJsonl(cfg.inboxFile).map(m => m?.id).filter(Boolean))   // 重啟後靠檔案去重
   let pulling = false, again = false

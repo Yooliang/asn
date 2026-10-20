@@ -8,14 +8,29 @@ import { createCore } from '../../machine/relay-core.mjs'
 import { FAKE_KEY } from './fake-relay.mjs'
 
 export const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+export const testDir = path.dirname(fileURLToPath(import.meta.url))
+export const fakeClaudeBin = path.join(testDir, 'fake-claude-agents.mjs')
 export const script = name => path.join(dir, name)
 export const sleep = ms => new Promise(r => setTimeout(r, ms))
 
-// 暫存根目錄＋指向假 relay 的環境變數（不碰真實 /workspace、不碰正式後端）
+// 暫存根目錄＋指向假 relay 的環境變數（不碰真實 /workspace、不碰正式後端、不讀本機 Grok／Claude）
 export function tmpEnv(url, extra = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-agent-test-'))
-  const env = { IRORI_CLOUD_HOME: root, IRORI_RELAY_URL: url, IRORI_RELAY_KEY: '', IRORI_RELAY_ANON_KEY: '', ...extra }
-  return { root, env, cfg: resolveConfig({ ...process.env, ...env }) }
+  const grokAgentsDir = extra.GROK_AGENTS_DIR || path.join(root, 'grok-agents-isolated')
+  if (!extra.GROK_AGENTS_DIR) fs.mkdirSync(grokAgentsDir, { recursive: true })
+  const env = {
+    IRORI_CLOUD_HOME: root,
+    IRORI_RELAY_URL: url,
+    IRORI_RELAY_KEY: '',
+    IRORI_RELAY_ANON_KEY: '',
+    IRORI_CLOUD_ROSTER_AUTO: '0',
+    GROK_AGENTS_DIR: grokAgentsDir,
+    IRORI_CLAUDE_BIN: fakeClaudeBin,
+    FAKE_CLAUDE_AGENTS_JSON: '[]',
+    ...extra,
+  }
+  const merged = { ...process.env, ...env }
+  return { root, env, cfg: resolveConfig(merged) }
 }
 export const rm = root => fs.rmSync(root, { recursive: true, force: true })
 
