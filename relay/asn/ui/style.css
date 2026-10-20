@@ -128,26 +128,28 @@ html.toast-page,html.toast-page body{background:transparent}
 @media (prefers-reduced-motion:reduce){.toast{animation:none}}
 
 /* ---------- 左側直立頁籤＋內容區（選中的頁籤跟內容區連成一片） ---------- */
-.body{flex:1;min-height:0;display:flex;background:linear-gradient(90deg,#cfe2f6,#e4effb)}
-.rail{flex:none;width:44px;display:flex;flex-direction:column;padding:8px 0 6px 4px;overflow:visible}
-.rail-gap{flex:1;min-height:8px}
-/* 頁籤外形：左上圓角、左下切一刀斜角；上面的頁籤壓在下面那個的頂上（z-index 由上往下遞減），像疊起來的資料夾頁籤。
-   外框＝按鈕本身的底色（框線色）用外形裁切，內面＝::before 往內縮 1px 的同一外形 */
-.rtab{--edge:#8aa9c8;--face:linear-gradient(180deg,rgba(255,255,255,.85) 0,rgba(255,255,255,.25) 46%,rgba(255,255,255,0) 52%),linear-gradient(90deg,#9fc2e8,#d6e8fa 70%,#eaf3fd);
-  position:relative;width:40px;height:50px;margin:0 -1px -9px 0;padding:0 0 6px;display:grid;place-items:center;cursor:pointer;
+.body{flex:1;min-height:0;display:flex;background:linear-gradient(90deg,#e9f0fa,#f4f8fd)}
+.rail{flex:none;width:47px;display:flex;flex-direction:column;padding:6px 0 6px 3px;overflow:visible}
+.rail-gap{flex:1;min-height:10px}
+/* 頁籤外形照舊版即時通（從參考圖取邊量的）：左上、右上圓角，右邊一條直邊；
+   下緣是一道 S 形貝茲曲線——左邊較高，往右下掃，貼著右邊收成一條變細的尾巴，尾巴壓在下一個頁籤的右上角上。
+   圖示比頁籤大、被外形切掉。外層＝邊色，::before 往內縮 1px＝亮面漸變；選中的變白 */
+.rtab{--edge:#8ea4c9;--face:linear-gradient(180deg,#f3f6fc 0,#dfe6f4 45%,#cbd6ec 100%);
+  position:relative;width:42px;height:64px;margin:0 0 -10px 0;padding:0;display:block;cursor:pointer;overflow:hidden;
   border:0;background:var(--edge);color:var(--title-fg);
-  clip-path:path("M41 0 H9 Q0 0 0 9 V35 L15 50 H41 Z")}
+  clip-path:path("M7 0 H35 C39 0 42 3 42 7 V64 C41 58 37 53 29 50 C19 46 4 44 0 33 V7 C0 3 3 0 7 0 Z")}
 .rtab::before{content:"";position:absolute;inset:0;background:var(--face);
-  clip-path:path("M41 1 H9.4 Q1 1 1 9.4 V34.6 L15.4 49 H41 Z")}
-.rtab > *{position:relative}
-.rtab:hover{--face:linear-gradient(180deg,rgba(255,255,255,.9) 0,rgba(255,255,255,.35) 46%,rgba(255,255,255,.05) 52%),linear-gradient(90deg,#b4d3f3,#e2f0fd 70%,#f4f9ff)}
-.rtab.on{z-index:40 !important;width:41px;--edge:var(--line);--face:linear-gradient(90deg,#e9f3fd,#fff 60%)}
-.rtab .mono{font-weight:800;font-size:16px;color:#1f5d9e}
+  clip-path:path("M7 1 H35 C38.4 1 41 3.6 41 7 V60.5 C39.6 56.5 36 52.6 28.6 49.9 C18.8 46 4.6 43.6 1 33.2 V7 C1 3.6 3.6 1 7 1 Z")}
+.rtab > svg,.rtab > .mono{position:absolute;left:-1px;top:3px;width:42px;height:42px;filter:drop-shadow(0 1px 1px rgba(0,30,80,.35))}
+.rtab > .red{position:absolute;top:4px;right:5px}
+.rtab:hover{--face:linear-gradient(180deg,#fff 0,#eaf0fa 45%,#d8e2f3 100%)}
+.rtab.on{z-index:40 !important;--edge:#7f97c0;--face:linear-gradient(180deg,#fff 0,#fbfcfe 60%,#eef3fb 100%)}
+.rtab .mono{display:grid;place-items:center;font-weight:900;font-size:30px;line-height:1;color:#2a6fc0;text-shadow:0 1px 0 #fff}
 .rtab.on .mono{color:var(--accent)}
 .red{position:absolute;top:3px;right:5px;width:9px;height:9px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ffb0a8,var(--busy) 55%,#8d1812);box-shadow:0 0 0 1px #fff}
 .content{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--panel);border-left:1px solid var(--line);z-index:1}
-.more-wrap{position:relative}
-.more-pop{position:absolute;left:42px;top:0;z-index:9;margin:0;padding:3px;list-style:none;min-width:130px;background:var(--panel);border:1px solid #7a9ec4;border-radius:4px;box-shadow:0 6px 18px rgba(0,30,70,.25)}
+.more-wrap{position:relative;z-index:20;margin-bottom:-10px}
+.more-pop{position:absolute;left:44px;top:0;z-index:9;margin:0;padding:3px;list-style:none;min-width:130px;background:var(--panel);border:1px solid #7a9ec4;border-radius:4px;box-shadow:0 6px 18px rgba(0,30,70,.25)}
 .more-pop button{position:relative;display:block;width:100%;text-align:left;border:1px solid transparent;background:none;padding:4px 18px 4px 8px;border-radius:3px;cursor:pointer;white-space:nowrap}
 .more-pop button:hover,.more-pop button.on{background:#e6f1fc;border-color:#b8d6f2}
 .more-pop .red{top:8px;right:6px}
