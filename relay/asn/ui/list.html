@@ -7,7 +7,9 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div id="app" class="win" v-cloak>
+<div id="app" class="win" v-cloak @click="avMenu = false">
+  <input ref="avFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden @change="pickAvatar">
+  <i class="rz" v-for="d in RESIZE_DIRS" :key="d" :class="'rz-' + d" @mousedown.left.prevent="resizeFrom(d)"></i>
   <header class="titlebar" data-tauri-drag-region>
     <span class="t-icon"></span><span class="t-text"><span class="brand">ASN</span> 即時通</span>
     <span class="t-btns">
@@ -19,7 +21,13 @@
   <div class="shell" :class="{ merged: ui.mode === 'merged' }">
   <div class="pane list-pane">
     <div class="me">
-      <div class="dp" :class="'st-' + me.status" :style="{ '--h': 205 }"><span><img :src="meAv" alt=""></span></div>
+      <div class="me-av">
+        <button class="dp me-dp" type="button" :class="'st-' + me.status" :style="{ '--h': 205 }" :disabled="avBusy" aria-label="點一下換大頭貼" title="點一下換大頭貼" data-tip="點一下換大頭貼" @click="avMenu = false; avFile.click()" @contextmenu.prevent="avMenu = !avMenu"><span><img :src="meAv" alt="我的大頭貼"></span></button>
+        <ul class="av-menu" v-if="avMenu" role="menu" @click.stop>
+          <li><button type="button" role="menuitem" @click="avMenu = false; avFile.click()">換大頭貼…</button></li>
+          <li><button type="button" role="menuitem" :disabled="!selfHasUpload" @click="avMenu = false; removeAvatar()">改回自動產生</button></li>
+        </ul>
+      </div>
       <div class="me-info">
         <div class="me-row">
           <input class="ghost nick-input" v-model="me.nick" maxlength="40" aria-label="我的暱稱（也是對外的名字）" @change="commitNick" @keydown.enter="$event.target.blur()">
@@ -29,6 +37,7 @@
         </div>
         <input class="ghost psm-input" v-model="me.psm" maxlength="60" placeholder="&lt;輸入個人訊息&gt;" aria-label="個人訊息">
         <div class="nick-err" v-if="nickErr" role="alert">{{ nickErr }}</div>
+        <div class="av-note" v-if="avMsg" role="status">{{ avMsg }}</div>
       </div>
     </div>
     <div class="body">
@@ -110,10 +119,14 @@
                 <button class="aero-btn" type="button" @click="removeAvatar" :disabled="avBusy || !selfHasUpload">移除，改回自動產生</button>
               </div>
             </div>
-            <input ref="avFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden @change="pickAvatar">
             <small role="status">{{ avMsg || (selfHasUpload ? '目前用的是這台設備上傳的大頭貼。' : '目前用的是自動產生的大頭貼。') }}</small>
           </div>
-          <div><button class="aero-btn" @click="soundOn = !soundOn" :aria-pressed="soundOn">音效：{{ soundOn ? '開' : '關' }}</button></div>
+          <label>音效
+            <select class="set-sel" :value="soundChoice(soundOn)" @change="soundOn = soundFromChoice($event.target.value)" aria-label="音效"><option v-for="c in SOUND_CHOICES" :key="c" :value="c">{{ SOUND_LABEL[c] }}</option></select>
+          </label>
+          <label>視窗外框
+            <select class="set-sel" :value="frame" @change="setFrame($event.target.value)" aria-label="視窗外框"><option v-for="f in FRAMES" :key="f" :value="f">{{ FRAME_LABEL[f] }}</option></select>
+          </label>
           <label>視窗模式
             <select class="set-sel" :value="ui.mode" @change="setMode($event.target.value)" aria-label="視窗模式"><option v-for="m in MODES" :key="m" :value="m">{{ MODE_LABEL[m] }}</option></select>
           </label>

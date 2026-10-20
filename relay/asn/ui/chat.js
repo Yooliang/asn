@@ -3,9 +3,10 @@ import { ChatPane } from './lib/chatpane.mjs'
 import { avatarSrc, selfAvatarSrc } from './lib/avatar.mjs'
 import { normalizeLook } from './lib/merge.mjs'
 import { plain } from './lib/text.mjs'
-import { ctl, emit, listen } from './lib/tauri.mjs'
+import { RESIZE_DIRS, ctl, emit, initFrame, listen, resizeFrom } from './lib/tauri.mjs'
 
 const { createApp, ref, computed, onMounted } = Vue
+await initFrame()
 const id = new URLSearchParams(location.search).get('id') ?? ''
 
 const app = createApp({
@@ -25,7 +26,7 @@ const app = createApp({
       window.addEventListener('focus', () => emit('asn:cmd', { op: 'read', id }))
     })
     return {
-      f, me, log, look, friendAv, meAv, plain, ctl,
+      f, me, log, look, friendAv, meAv, plain, ctl, RESIZE_DIRS, resizeFrom,
       send: text => emit('asn:cmd', { op: 'send', id, text }),
       nudge: () => emit('asn:cmd', { op: 'nudge', id }),
       toggleDp: () => emit('asn:cmd', { op: 'dp' }),

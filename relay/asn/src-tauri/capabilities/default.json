@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "ASN 所有視窗：事件收發與拖曳標題列；其餘動作都走自訂命令（金鑰與檔案只在 Rust 端）",
+  "description": "ASN 所有視窗：事件收發與拖曳標題列與拖邊緣調整大小；其餘動作都走自訂命令（金鑰與檔案只在 Rust 端）",
   "windows": ["*"],
-  "permissions": ["core:default", "core:window:allow-start-dragging"]
+  "permissions": ["core:default", "core:window:allow-start-dragging", "core:window:allow-start-resize-dragging"]
 }

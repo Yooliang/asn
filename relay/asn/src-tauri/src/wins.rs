@@ -2,6 +2,7 @@
 //! 視窗按鈕（最小化／最大化／關閉）與 --shot 的螢幕擷取。
 use crate::{App, BROWSER_ARGS};
 use serde::Deserialize;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder, Window};
@@ -15,6 +16,44 @@ const TOAST_MS: u64 = 5500;
 #[derive(Default)]
 pub struct Slots(Mutex<[bool; TOAST_MAX]>);
 
+/// 視窗外框：false＝自訂（ASN 自己畫 Aero 風標題列與邊框，預設）、true＝Windows 原生。
+/// 開機時讀資料夾裡 asn-me.json 的 frame 欄位（前端存的設定），之後由設定頁透過 set_frame 即時改。
+#[derive(Default)]
+pub struct Frame(pub AtomicBool);
+
+/// 存檔文字 → 是不是原生外框：只有 `"frame":"native"` 才是；沒這欄位的舊存檔、壞檔、壞值一律是自訂
+pub fn native_from_saved(text: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(text).ok().and_then(|v| v.get("frame")?.as_str().map(|f| f == "native")).unwrap_or(false)
+}
+
+/// 開機：照存檔設定主視窗的外框（視窗是由 tauri.conf 建的，預設無邊框）
+pub fn init_frame(app: &AppHandle, native: bool) {
+    app.state::<Frame>().0.store(native, Ordering::Relaxed);
+    if native {
+        if let Some(w) = app.get_webview_window("list") {
+            let _ = w.set_decorations(true);
+        }
+    }
+}
+
+/// 目前是不是原生外框（每扇視窗載入時問一次，決定要不要藏自畫的標題列）
+#[tauri::command]
+pub fn frame_native(frame: State<'_, Frame>) -> bool {
+    frame.0.load(Ordering::Relaxed)
+}
+
+/// 設定頁切換外框：名單、對話視窗立刻改，之後開的視窗也照這個；提示視窗永遠無邊框
+#[tauri::command]
+pub fn set_frame(app: AppHandle, frame: State<'_, Frame>, native: bool) {
+    frame.0.store(native, Ordering::Relaxed);
+    for (label, w) in app.webview_windows() {
+        if label == "list" || label.starts_with("chat-") {
+            let _ = w.set_decorations(native);
+        }
+    }
+    let _ = app.emit("asn:frame", native);
+}
+
 /// 對話視窗標籤：好友 id 的 UTF-8 位元組轉十六進位（標籤只允許英數與 -/:_）
 pub fn chat_label(id: &str) -> String {
     let hex: String = id.bytes().map(|b| format!("{b:02x}")).collect();
@@ -26,7 +65,7 @@ fn q(s: &str) -> String {
 }
 
 #[tauri::command]
-pub async fn open_chat(app: AppHandle, id: String, title: String) -> Result<(), String> {
+pub async fn open_chat(app: AppHandle, frame: State<'_, Frame>, id: String, title: String) -> Result<(), String> {
     let label = chat_label(&id);
     if let Some(w) = app.get_webview_window(&label) {
         let _ = w.unminimize();
@@ -40,7 +79,7 @@ pub async fn open_chat(app: AppHandle, id: String, title: String) -> Result<(), 
         .title(title)
         .inner_size(720.0, 600.0)
         .min_inner_size(520.0, 440.0)
-        .decorations(false)
+        .decorations(frame.0.load(Ordering::Relaxed))
         .additional_browser_args(BROWSER_ARGS);
     b = if n == 0.0 { b.center() } else { b.position(120.0 + 28.0 * n, 80.0 + 28.0 * n) };
     b.build().map_err(|e| e.to_string())?;
@@ -300,6 +339,14 @@ mod tests {
         assert!(!toast_url(&mk(None), "online").contains("av="));
         for bad in ["javascript:alert(1)", "data:image/svg+xml;base64,PHN2Zz4=", "data:image/png;base64,!!"] {
             assert!(!toast_url(&mk(Some(bad)), "online").contains("av="), "{bad}");
+        }
+    }
+
+    #[test]
+    fn 外框設定_沒欄位的舊存檔與壞值都是自訂() {
+        assert!(native_from_saved(r#"{"frame":"native","sound":true}"#));
+        for t in [r#"{"sound":true}"#, r#"{"frame":"custom"}"#, r#"{"frame":"Native"}"#, r#"{"frame":true}"#, r#"{"frame":null}"#, "{壞掉", ""] {
+            assert!(!native_from_saved(t), "{t}");
         }
     }
 
