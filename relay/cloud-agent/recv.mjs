@@ -8,7 +8,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createCore } from '../machine/relay-core.mjs'   // 沿用 API 呼叫與門鈴，不複製協定
 import { createLog } from '../machine/safe-log.mjs'
-import { readAnonKey, readKey, resolveConfig } from './config.mjs'
+import { NO_KEY_MSG, readAnonKey, readKey, resolveConfig } from './config.mjs'
 import { acquirePidLock, appendLineDurable, ensureDir, readJsonl } from './lib.mjs'
 
 const recordOf = m => ({
@@ -74,7 +74,7 @@ export async function main(env = process.env) {
   ensureDir(cfg.mailDir, 0o700)
   const log = createLog(cfg.logFile, { stderr: null })   // 只寫 recv.log（20MB 輪替）；boot.sh 的 stdout/stderr 只收當機時的堆疊
   const key = readKey(cfg, env)
-  if (!key) { console.error(`沒有金鑰：請先執行 register.mjs（金鑰檔 ${cfg.keyFile}）或設 IRORI_RELAY_KEY`); return 2 }
+  if (!key) { console.error(NO_KEY_MSG); return 2 }
   if (!acquirePidLock(cfg.pidFile, 'recv.mjs')) { console.error('另一個 recv 正在執行（pid 檔有活著的程序）'); return 3 }
   process.on('SIGINT', () => process.exit(0)); process.on('SIGTERM', () => process.exit(0))
   process.on('uncaughtException', e => log(`uncaught: ${e.stack ?? e}`))

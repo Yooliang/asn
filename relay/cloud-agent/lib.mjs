@@ -1,6 +1,7 @@
 // 檔案小工具：原子寫入、附加一行並 fsync、讀 jsonl、單一執行個體 pid 檔。純 Node、無依賴。
 import fs from 'node:fs'
 import path from 'node:path'
+import { execFileSync } from 'node:child_process'
 
 export function ensureDir(dir, mode = 0o700) {
   fs.mkdirSync(dir, { recursive: true, mode })
@@ -60,4 +61,12 @@ export function acquirePidLock(pidFile, match, procRoot) {
   writeFileAtomic(pidFile, String(process.pid), 0o600)
   process.on('exit', () => { try { if (Number(fs.readFileSync(pidFile, 'utf8')) === process.pid) fs.unlinkSync(pidFile) } catch {} })
   return true
+}
+
+// 權限盡量收緊：unix 用 chmod；Windows 沒有權限位元，改用 icacls 拿掉繼承、只留目前使用者（失敗就算了，不影響註冊）
+export function restrictPerms(target, mode) {
+  try { fs.chmodSync(target, mode) } catch {}
+  if (process.platform === 'win32' && process.env.USERNAME) {
+    try { execFileSync('icacls', [target, '/inheritance:r', '/grant:r', `${process.env.USERNAME}:F`], { stdio: 'ignore', windowsHide: true }) } catch {}
+  }
 }

@@ -9,7 +9,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createCore } from '../machine/relay-core.mjs'
-import { Fail, ID_RE, UUID_RE, readKey, resolveConfig } from './config.mjs'
+import { Fail, ID_RE, NO_KEY_MSG, UUID_RE, readKey, resolveConfig } from './config.mjs'
 
 const MAX_BODY = 20000
 const USAGE = `用法：
@@ -56,7 +56,7 @@ export async function main(argv, env = process.env) {
   const cfg = resolveConfig(env)
   if (toNode === cfg.node) throw new Fail(1, '收件人是自己這個節點')
   const key = readKey(cfg, env)
-  if (!key) throw new Fail(2, `沒有金鑰（${cfg.keyFile}）：先執行 register.mjs`)
+  if (!key) throw new Fail(2, NO_KEY_MSG)
   const from = (a.from || cfg.name).slice(0, 100)
   const core = createCore({ baseUrl: cfg.baseUrl, key, anonKey: '', log: () => {}, workDir: cfg.mailDir })
   let r

@@ -10,11 +10,11 @@
 | 東西 | 預設 | 環境變數 |
 |---|---|---|
 | 根目錄（重置後保留） | `/workspace` | `IRORI_CLOUD_HOME` |
-| 金鑰 | `/workspace/.irori-relay/grok.key`（目錄 700、檔 600） | `IRORI_CLOUD_KEY_DIR`；`IRORI_RELAY_KEY` 優先於檔案 |
+| 金鑰 | **環境變數 `IRORI_RELAY_KEY`**（平台的秘密變數）；有它就完全不讀檔、不寫檔。備援才是檔案 `/workspace/.irori-relay/<代號>.key` | `IRORI_CLOUD_KEY_DIR` |
 | 收到的信 | `/workspace/relay/inbox.jsonl` | `IRORI_CLOUD_MAIL_DIR` |
 | 已處理 | `/workspace/relay/done.jsonl` | 同上 |
 | 常駐的 log／pid | `/workspace/relay/recv.log`（20MB 輪替）、`recv.pid`；`recv.out` 只收當機堆疊 | 同上 |
-| 節點代號／視窗名 | `grok`／`Grok`（`cwd_label=grok-cloud`、`engine=grok`） | `IRORI_RELAY_ID`、`IRORI_CLOUD_ROSTER_NAME` |
+| 節點代號／視窗名 | `grok`（`IRORI_RELAY_ID`）／`Grok`（`cwd_label=grok-cloud`、`engine=grok`） | `IRORI_RELAY_ID`、`IRORI_CLOUD_ROSTER_NAME` |
 | Realtime 門鈴（選用） | 沒有就只輪詢 | `IRORI_RELAY_ANON_KEY` 或 `/workspace/.irori-relay/anon.key` |
 
 ## 一、取得程式
@@ -28,17 +28,22 @@
 
 （在有 repo 的機器上：`tar czf grok-relay.tgz relay/cloud-agent relay/machine/relay-core.mjs relay/machine/safe-log.mjs relay/machine/register.mjs`，傳到雲端環境解開。）
 
-## 二、一次性註冊
+## 二、身分（Grok 這邊不用註冊）
 
-向管理者要一組一次性邀請碼（15 分鐘有效、只能用一次），在雲端環境執行：
+節點金鑰由人在平台外部設成秘密環境變數 `IRORI_RELAY_KEY`（節點代號 `IRORI_RELAY_ID`，預設 `grok`）。
+**你看不到它的值，也不要嘗試印出它、或把它寫進任何檔案**；程式的 log、錯誤訊息、輸出都不會含金鑰。缺少時只會說「沒有設定 IRORI_RELAY_KEY」，那就請人去設。
+
+### （給管理者）註冊——在自己的電腦跑，不是在雲端環境跑
+
+在 Windows 家用機（有 repo 的地方）用邀請碼註冊一次（15 分鐘有效、只能用一次）：
 
 ```
-cd /workspace/irori-relay
-IRORI_INVITE='<邀請碼>' node relay/cloud-agent/register.mjs        # 代號預設 grok、名稱「Grok 雲端」、kind grok
-node relay/cloud-agent/register.mjs --check                        # 確認連得上（印 {"ok":true,"node":"grok"}）
+set IRORI_INVITE=<邀請碼>
+node relaycloud-agentegister.mjs        # 代號預設 grok、名稱「Grok 雲端」、kind grok
 ```
 
-金鑰只會寫進 `/workspace/.irori-relay/grok.key`，不會印在畫面或 log。已經有金鑰檔就不會重複註冊。
+金鑰寫到 `~.irori-relaygrok.key`（權限收緊、原子寫入），畫面只印「已寫入 <路徑>」。再把檔案內容貼進雲端平台的秘密變數 `IRORI_RELAY_KEY`。
+`node relaycloud-agentegister.mjs --check` 可確認金鑰連得上。
 
 ## 三、讓它開機自動跑
 

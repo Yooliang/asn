@@ -14,10 +14,9 @@ test('註冊成功：金鑰寫到 <金鑰目錄>/grok.key、權限 700/600、std
   try {
     const r = await run('register.mjs', [], { env: { ...env, IRORI_INVITE: INVITE } })
     assert.equal(r.code, 0, r.stderr)
-    const out = JSON.parse(r.stdout.trim())
-    assert.equal(out.ok, true); assert.equal(out.id, 'grok'); assert.equal(out.verified, true)
+    assert.equal(r.stdout.trim(), `已寫入 ${cfg.keyFile}`, 'stdout 只印路徑')
     assert.equal(fs.readFileSync(cfg.keyFile, 'utf8'), ISSUED_KEY)
-    assert.equal(cfg.keyFile, path.join(root, '.irori-relay', 'grok.key'))
+    assert.equal(cfg.keyFile, path.join(root, '.irori-relay', 'grok.key'))   // 家目錄（測試以 IRORI_CLOUD_HOME 代替）
     if (posix) {
       assert.equal(fs.statSync(cfg.keyDir).mode & 0o777, 0o700)
       assert.equal(fs.statSync(cfg.keyFile).mode & 0o777, 0o600)
@@ -36,10 +35,10 @@ test('邀請碼錯／代號被占用：不寫金鑰檔、exit 1、訊息白話',
   try {
     const bad = await run('register.mjs', [], { env: { ...env, IRORI_INVITE: 'wrong' } })
     assert.equal(bad.code, 1)
-    assert.equal(JSON.parse(bad.stdout).error, 'invalid_invite')
+    assert.match(bad.stdout, /^失敗：.*邀請碼/)
     const taken = await run('register.mjs', ['--id', 'taken'], { env: { ...env, IRORI_INVITE: INVITE } })
     assert.equal(taken.code, 1)
-    assert.equal(JSON.parse(taken.stdout).error, 'id_taken')
+    assert.match(taken.stdout, /^失敗：.*代號/)
     assert.equal(fs.existsSync(cfg.keyDir), false)
   } finally { await st.close(); rm(root) }
 })
@@ -52,20 +51,23 @@ test('沒給邀請碼不連線；已有金鑰檔不重複註冊（不消耗邀�
     assert.equal(none.code, 1); assert.equal(st.reqs.length, 0)
     fs.mkdirSync(cfg.keyDir, { recursive: true }); fs.writeFileSync(cfg.keyFile, 'old')
     const again = await run('register.mjs', [], { env: { ...env, IRORI_INVITE: INVITE } })
-    assert.equal(again.code, 1); assert.equal(JSON.parse(again.stdout).error, 'already_registered')
+    assert.equal(again.code, 1); assert.match(again.stdout, /不重複註冊/)
     assert.equal(st.reqs.length, 0); assert.equal(fs.readFileSync(cfg.keyFile, 'utf8'), 'old')
   } finally { await st.close(); rm(root) }
 })
 
-test('--check：IRORI_RELAY_KEY 優先於金鑰檔；沒金鑰就說沒有', async () => {
+test('--check：IRORI_RELAY_KEY 優先於金鑰檔；沒金鑰只說「沒有設定 IRORI_RELAY_KEY」', async () => {
   const st = await startFakeRelay()
   const { root, env, cfg } = tmpEnv(st.url)
   try {
-    assert.equal(JSON.parse((await run('register.mjs', ['--check'], { env })).stdout).error, 'no_key')
+    const none = await run('register.mjs', ['--check'], { env })
+    assert.equal(none.code, 1); assert.match(none.stdout, /沒有設定 IRORI_RELAY_KEY/)
     const viaEnv = await run('register.mjs', ['--check'], { env: { ...env, IRORI_RELAY_KEY: ISSUED_KEY } })
-    assert.deepEqual(JSON.parse(viaEnv.stdout), { ok: true, node: 'grok' })
+    assert.equal(viaEnv.code, 0); assert.match(viaEnv.stdout, /連線正常：節點 grok/)
     fs.mkdirSync(cfg.keyDir, { recursive: true }); fs.writeFileSync(cfg.keyFile, ISSUED_KEY)
-    assert.equal(JSON.parse((await run('register.mjs', ['--check'], { env })).stdout).ok, true)
-    assert.equal(JSON.parse((await run('register.mjs', ['--check'], { env: { ...env, IRORI_RELAY_KEY: 'bad' } })).stdout).ok, false)
+    assert.equal((await run('register.mjs', ['--check'], { env })).code, 0)
+    const bad = await run('register.mjs', ['--check'], { env: { ...env, IRORI_RELAY_KEY: 'bad-env-key-123' } })
+    assert.equal(bad.code, 1, '環境變數優先：給壞金鑰就失敗（檔案裡是好的）')
+    assert.ok(!(viaEnv.stdout + viaEnv.stderr + bad.stdout + bad.stderr).includes('bad-env-key-123'))
   } finally { await st.close(); rm(root) }
 })

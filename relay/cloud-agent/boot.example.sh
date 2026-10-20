@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 放進雲端環境的 boot.sh（重置後會重跑）。可重複執行：Node 22 已有就跳過、recv 已在跑就跳過。
-# 前提：程式放在 /workspace/irori-relay（見 README「取得程式」），金鑰已用 register.mjs 註冊好（/workspace/.irori-relay/grok.key）。
+# 前提：程式放在 /workspace/irori-relay（見 README「取得程式」）；節點金鑰在秘密環境變數 IRORI_RELAY_KEY（本腳本不讀、不印它）。
 set -u
 WS="${IRORI_CLOUD_HOME:-/workspace}"
 APP="${IRORI_CLOUD_APP:-$WS/irori-relay}"      # 裡面要有 relay/cloud-agent 與 relay/machine

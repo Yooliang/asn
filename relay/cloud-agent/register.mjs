@@ -6,10 +6,11 @@
 // 後端規則同 relay/machine/register.mjs：代號英數 - _ 1～32 字且全名單唯一、名稱 1～100 字、machine 1～40 字、同網路位址每小時 10 次、邀請碼 15 分鐘有效只能用一次。
 // 為什麼不直接用 machine/register.mjs 的 registerNode：它固定寫到 ~/.irori-relay、不是原子寫入也不設目錄權限；這裡的金鑰要放在重置後保留的 /workspace。
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ID_RE, readKey, resolveConfig } from './config.mjs'
-import { ensureDir, writeFileAtomic } from './lib.mjs'
+import { ID_RE, NO_KEY_MSG, readKey, resolveConfig } from './config.mjs'
+import { ensureDir, restrictPerms, writeFileAtomic } from './lib.mjs'
 
 const KINDS = ['claude', 'gpt', 'gemini', 'grok', 'other']
 const MESSAGES = {
@@ -48,13 +49,16 @@ function parseArgs(argv) {
 
 export async function main(argv, env = process.env) {
   const a = parseArgs(argv)
-  const cfg = resolveConfig(a.id ? { ...env, IRORI_RELAY_ID: a.id } : env)
+  // 這支在自己電腦跑：金鑰檔預設放 <家目錄>/.irori-relay（IRORI_CLOUD_KEY_DIR／IRORI_CLOUD_HOME 可改，測試用）
+  const e2 = { ...env, ...(a.id ? { IRORI_RELAY_ID: a.id } : {}) }
+  if (!e2.IRORI_CLOUD_KEY_DIR) e2.IRORI_CLOUD_KEY_DIR = path.join(e2.IRORI_CLOUD_HOME || os.homedir(), '.irori-relay')
+  const cfg = resolveConfig(e2)
   const id = cfg.node
   if (!ID_RE.test(id)) return { ok: false, error: 'bad_request', message: MESSAGES.bad_request }
 
   if (a.check) {
     const key = readKey(cfg, env)
-    if (!key) return { ok: false, error: 'no_key', message: '找不到金鑰（沒有 IRORI_RELAY_KEY，也沒有金鑰檔）。' }
+    if (!key) return { ok: false, error: 'no_key', message: NO_KEY_MSG + '，也沒有金鑰檔。' }
     const r = await call(cfg.baseUrl, 'whoami', { method: 'GET', key })
     if (r.status === 200 && r.data?.node) return { ok: true, node: r.data.node }
     const error = r.data?.error || 'unauthorized'
@@ -77,7 +81,9 @@ export async function main(argv, env = process.env) {
     return out
   }
   ensureDir(cfg.keyDir, 0o700)
+  restrictPerms(cfg.keyDir, 0o700)
   writeFileAtomic(cfg.keyFile, r.data.key, 0o600)
+  restrictPerms(cfg.keyFile, 0o600)
   if (fs.readFileSync(cfg.keyFile, 'utf8').trim() !== r.data.key) {
     return { ok: false, error: 'write_mismatch', message: '金鑰存檔後讀回不一致，請管理者重發金鑰。' }
   }
@@ -87,6 +93,10 @@ export async function main(argv, env = process.env) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const res = await main(process.argv.slice(2))
-  process.stdout.write(JSON.stringify(res) + '\n')
+  // 給人看的純文字；成功只印路徑（不印金鑰、不印邀請碼）
+  const a = process.argv.slice(2)
+  if (!res.ok) console.log(`失敗：${res.message}`)
+  else if (a.includes('--check')) console.log(`連線正常：節點 ${res.node}`)
+  else console.log(`已寫入 ${res.keyFile}${res.verified ? '' : '（但連線驗證沒通過，請用 --check 再試）'}`)
   process.exitCode = res.ok ? 0 : 1   // 不呼叫 process.exit：fetch 連線還在關的時候強制結束，部分平台會當掉
 }

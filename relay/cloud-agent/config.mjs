@@ -1,6 +1,6 @@
 // 雲端代理收發室工具的共用設定：路徑、節點代號、金鑰讀取。全部可用環境變數改（測試就是靠這個指到暫存資料夾）。
 //   IRORI_CLOUD_HOME      根目錄（預設 /workspace，重置後保留的那個）
-//   IRORI_CLOUD_KEY_DIR   金鑰目錄（預設 <根>/.irori-relay）
+//   IRORI_CLOUD_KEY_DIR   金鑰檔目錄（預設 <根>/.irori-relay；只是備援，主要身分來源是環境變數 IRORI_RELAY_KEY）
 //   IRORI_CLOUD_MAIL_DIR  信件目錄（預設 <根>/relay）：inbox.jsonl、done.jsonl、recv.log、recv.pid
 //   IRORI_RELAY_ID        節點代號（預設 grok）
 //   IRORI_RELAY_URL       仲介網址（預設正式；測試指到 127.0.0.1）
@@ -12,6 +12,7 @@ import path from 'node:path'
 import { DEFAULT_URL, ID_RE } from '../machine/register.mjs'
 
 export { ID_RE }
+export const NO_KEY_MSG = '沒有設定 IRORI_RELAY_KEY'
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export class Fail extends Error { constructor(code, msg) { super(msg); this.code = code } }
@@ -38,7 +39,7 @@ export function resolveConfig(env = process.env) {
   }
 }
 
-// 金鑰：環境變數優先，其次金鑰檔。找不到回空字串。呼叫端絕不可印出回傳值。
+// 金鑰：有 IRORI_RELAY_KEY 就只用它、完全不讀檔；沒有才讀金鑰檔。找不到回空字串。呼叫端絕不可印出回傳值（連片段都不行）。
 export function readKey(cfg, env = process.env) {
   const fromEnv = (env.IRORI_RELAY_KEY || '').trim()
   if (fromEnv) return fromEnv
