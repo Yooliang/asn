@@ -4,3 +4,5 @@ target/
 *.key
 .irori-relay/
 site/shots/
+supabase/.temp/
+site/.firebase/
