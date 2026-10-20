@@ -1,7 +1,7 @@
 // 對話區元件：分開模式的對話視窗（chat.html）與整合模式右邊的分頁內容（list.html）共用同一份版面。
 // 只顯示、只發事件（send／nudge／toggle-dp），不碰網路與 Tauri；信件內文與名稱一律先 emo()（跳脫）才進 v-html。
 import { EMO, emo, fmt, fmtDate, initial, plain } from './text.mjs'
-import { composeHintTitle, composePlaceholder, showComposeSideCol, showComposeSideSpacer } from './compose.mjs'
+import { composeHintTitle, composePlaceholder } from './compose.mjs'
 import { foldArrow, hasSideCol, isCollapsed, msgLayout, paneClasses, sideOf } from './merge.mjs'
 import { FILE_ACCEPT, formatBytes, photoExpired, photoTitle } from './photo.mjs'
 import { attachmentFromFile } from './photo-canvas.mjs'
@@ -31,8 +31,6 @@ export const ChatPane = {
     const draft = ref(''), pickerOpen = ref(false), nudgeCooling = ref(false)
     const msgsEl = ref(null), composeEl = ref(null)
     const sideCol = computed(() => hasSideCol(props.dpMode))
-    const composeSideSp = computed(() => showComposeSideSpacer(props.winMode, props.dpMode))
-    const composeSideCol = computed(() => showComposeSideCol(props.winMode, props.dpMode, props.dpCollapsed))
     const composeHint = computed(() => composePlaceholder(props.winMode))
     const composeTitle = computed(() => composeHintTitle(props.winMode))
     const collapsed = computed(() => isCollapsed(props.dpMode, props.dpCollapsed))
@@ -117,7 +115,7 @@ export const ChatPane = {
       window.addEventListener('keydown', e => { if (e.key === 'Escape' && viewer.value) closeViewer() })
     })
     const docEl = ref(null)
-    return { micClick, msgKey, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, composeSideSp, composeSideCol, composeHint, composeTitle, collapsed, classes, lay, arrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, photoBusy, photoMsg, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { micClick, msgKey, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, composeHint, composeTitle, collapsed, classes, lay, arrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, photoBusy, photoMsg, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -205,8 +203,8 @@ export const ChatPane = {
         <button class="aero-btn" type="submit" :disabled="!draft.trim()">傳送</button>
       </form>
     </div>
-    <span class="dp-fold-sp" v-if="composeSideSp"></span>
-    <div class="dp-col" v-if="composeSideCol">
+    <span class="dp-fold-sp" v-if="sideCol"></span>
+    <div class="dp-col" v-if="sideCol && !collapsed">
       <div class="dp xl" :class="'st-' + me.status" :style="{ '--h': 205 }"><span><img :src="meAv" alt=""></span></div>
     </div>
   </div>
