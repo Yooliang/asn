@@ -4,7 +4,8 @@ import { blockContextMenu } from './lib/nomenu.mjs'
 import { AsnCore } from './lib/core.mjs'
 import { ADS, AD_MS, FIXED_TABS, goAd, groupHeading, groupRows, moreUnread, nextAd, normalizeTab, openAdWith, prevAd, statusNote } from './lib/tabs.mjs'
 import { GUIDES, closeGuide, guideByKey, hideGuide, numbered, openGuide, rightView } from './lib/guides.mjs'
-import { DIMS, groupItems, groupOptions, loadDims, pageItems, pageTabs, withTabDim } from './lib/dims.mjs'
+import { DIMS, groupOptions, loadDims, pageTabs, withTabDim } from './lib/dims.mjs'
+import { normalizeSearchQuery, rosterShownGroups } from './lib/search.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
 import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatarFile, selfAvatarSrc } from './lib/avatar.mjs'
@@ -203,11 +204,11 @@ const app = createApp({
     watch(dev, d => { if (!normalizeTab(tab.value, d.all.map(x => x.key))) tab.value = d.all[0]?.key ?? '' }, { immediate: true })
     const shown = computed(() => {
       if (!isDevice.value) return []
-      const q = query.value.trim().toLowerCase()
-      const items = pageItems(friends.value, dims.tabDim, tab.value, c => !q || plain(c.nick).toLowerCase().includes(q))
-      return groupItems(items, dims.groupDim, { selfNode: info.node })
+      return rosterShownGroups(friends.value, {
+        tabDim: dims.tabDim, tabKey: tab.value, groupDim: dims.groupDim, selfNode: info.node, query: query.value, plainText: plain,
+      })
     })
-    const emptyText = computed(() => (query.value.trim() ? '沒有符合的聯絡人。' : conn.value !== 'on' ? '還沒連上收發室。' : '這一頁目前沒有視窗。'))
+    const emptyText = computed(() => (normalizeSearchQuery(query.value) ? '沒有符合的聯絡人。' : conn.value !== 'on' ? '還沒連上收發室。' : '這一頁目前沒有視窗。'))
     const openAd = a => openAdWith(a, url => void invoke('open_url', { url }))
     // 改最上面的暱稱＝改對外名字；Rust 端驗證，不合法就還原並提示
     const commitNick = async () => {
