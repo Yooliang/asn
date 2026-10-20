@@ -6,7 +6,7 @@
 import { isAvatarDataUrl } from './avatar.mjs'
 import { buildFriends, cleanPsm, mergeFriends } from './roster.mjs'
 import { routeMail, stubFriend } from './routing.mjs'
-import { NUDGE_TAG, hasNudge, hueOf, initial, plain, stripNudge, unwrapShell } from './text.mjs'
+import { hasNudge, hueOf, initial, plain, stripNudge, unwrapShell } from './text.mjs'
 
 export const MAX_BODY = 20000
 const LOG_KEEP = 200
@@ -172,7 +172,7 @@ export class AsnCore {
   async nudge(id) {
     const f = this.friends.get(id)
     if (!f) return { ok: false, error: '找不到好友' }
-    try { await this.transport.send({ to_node: f.node, to_agent: f.agent || undefined, body: NUDGE_TAG, from_agent: this.windowName, expects_reply: false }) }
+    try { await this.transport.send({ to_node: f.node, to_agent: f.agent || undefined, nudge: true, from_agent: this.windowName, expects_reply: false }) }
     catch (e) { return this.#fail(id, e) }
     this.#log(id).push({ k: 'sys', nudge: true, mine: true, text: '你已傳送震動。', t: this.now() })
     f.known = true
