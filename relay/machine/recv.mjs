@@ -13,6 +13,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { BASE_URL, Fail, HOME_DIR, alivePid, findCaller, machineNode, readMachineKey } from './identity.mjs'
 import { createCore } from './relay-core.mjs'
+import { createPullWithRetry, parsePullBackoffMs } from './pull-retry.mjs'
 import { HEARTBEAT_MS, clearHeartbeat, readHeartbeat, selfRecvAlive, writeHeartbeat } from './self-recv.mjs'
 
 const POLL_MS = Number(process.env.IRORI_RECV_POLL_MS || 120_000)
@@ -86,13 +87,7 @@ export async function main(argv, out = line => process.stdout.write(line + '\n')
   // 視窗本體不在了（Monitor 沒收乾淨）就自己結束，免得心跳一直亮著卻沒人看
   timers.push(setInterval(() => { if (!alivePid(me.pid)) { log('window gone: exit'); stop() } }, 10_000))
 
-  let pulling = false, again = false
-  const pull = async why => {
-    if (pulling) { again = true; return }
-    pulling = true
-    try { do { again = false; await pullOnce() } while (again) }
-    catch (e) { log(`pull failed (${why}): ${e.message}`) } finally { pulling = false }
-  }
+  const { pull } = createPullWithRetry({ pullOnce, log, backoffMs: parsePullBackoffMs(process.env) })
   let topic = null
   for (let wait = 2000; ; wait = Math.min(wait * 2, 30_000)) {
     try { topic = (await core.api('whoami')).bell_topic; break } catch (e) { log(`whoami failed: ${e.message}`); await core.sleep(wait) }

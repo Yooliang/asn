@@ -7,14 +7,18 @@ export const FAKE_KEY = 'fake-grok-node-key'
 export const INVITE = 'good-invite-code'
 export const ISSUED_KEY = 'issued-secret-key-for-test'
 
-export async function startFakeRelay({ node = 'grok', rosterStatus = 200, onAck = null } = {}) {
+export async function startFakeRelay({ node = 'grok', rosterStatus = 200, onAck = null, inboxFailRemaining = 0 } = {}) {
   const st = { mails: [], reqs: [], sent: [], rosters: [], acks: [], rosterStatus, url: '', port: 0 }
+  let inboxFailsLeft = inboxFailRemaining
   const readBody = req => new Promise(r => { let b = ''; req.on('data', d => (b += d)); req.on('end', () => r(b ? JSON.parse(b) : null)) })
   const srv = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x'), action = u.searchParams.get('action')
     const body = await readBody(req)
     st.reqs.push({ action, method: req.method, key: req.headers['x-relay-key'], body })
-    const out = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)) }
+    const out = (code, obj) => {
+      res.writeHead(code, { 'content-type': 'application/json', connection: 'close' })
+      res.end(JSON.stringify(obj))
+    }
     if (action === 'register') {
       st.registerBody = body
       if (body?.invite !== INVITE) return out(403, { error: 'invalid_invite' })
@@ -24,7 +28,10 @@ export async function startFakeRelay({ node = 'grok', rosterStatus = 200, onAck 
     const k = req.headers['x-relay-key']
     if (k !== FAKE_KEY && k !== ISSUED_KEY) return out(401, { error: 'unauthorized' })
     if (action === 'whoami') return out(200, { node, bell_topic: 'bell-test' })
-    if (action === 'inbox') return out(200, { messages: st.mails.filter(m => !m.acked) })
+    if (action === 'inbox') {
+      if (inboxFailsLeft > 0) { inboxFailsLeft--; return out(500, { error: 'server_error' }) }
+      return out(200, { messages: st.mails.filter(m => !m.acked) })
+    }
     if (action === 'ack') {
       st.acks.push(body.ids)
       onAck?.(body.ids)
