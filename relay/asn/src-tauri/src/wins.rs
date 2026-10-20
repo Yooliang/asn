@@ -4,7 +4,7 @@ use crate::{App, BROWSER_ARGS};
 use serde::Deserialize;
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder, Window};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder, Window};
 
 const TOAST_W: f64 = 270.0;
 const TOAST_H: f64 = 96.0;
@@ -53,10 +53,64 @@ pub fn chat_visible(app: AppHandle, id: String) -> bool {
     app.get_webview_window(&chat_label(&id)).map(|w| w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(true)).unwrap_or(false)
 }
 
-/// 震動：把該好友的對話視窗左右上下抖約 0.55 秒，再放回原位
+/// 對話視窗標籤 → 好友 id（chat_label 的反向；不合格式就 None）
+pub fn chat_id_of(label: &str) -> Option<String> {
+    let hex = label.strip_prefix("chat-")?;
+    if hex.is_empty() || hex.len() % 2 != 0 || !hex.is_ascii() {
+        return None;
+    }
+    let bytes: Option<Vec<u8>> = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok()).collect();
+    String::from_utf8(bytes?).ok()
+}
+
+/// 整合模式用：關掉所有對話視窗，回傳它們原本是哪些好友（前端把它們變成分頁）
 #[tauri::command]
-pub fn shake(app: AppHandle, id: String) {
-    let Some(w) = app.get_webview_window(&chat_label(&id)) else { return };
+pub fn close_chats(app: AppHandle) -> Vec<String> {
+    let mut ids = vec![];
+    for (label, w) in app.webview_windows() {
+        if let Some(id) = chat_id_of(&label) {
+            ids.push(id);
+            let _ = w.close();
+        }
+    }
+    ids.sort();
+    ids
+}
+
+/// 主視窗（名單／整合模式的唯一視窗）是否開著且沒最小化
+#[tauri::command]
+pub fn main_visible(app: AppHandle) -> bool {
+    app.get_webview_window("list").map(|w| w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(true)).unwrap_or(false)
+}
+
+/// 整合模式點好友／點提示：把主視窗叫出來
+#[tauri::command]
+pub fn show_main(app: AppHandle) {
+    if let Some(w) = app.get_webview_window("list") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
+/// 套用視窗模式的大小：整合模式最小 720×480，分開模式最小 280×420；大小是前端記住的（CSS 像素）
+#[tauri::command]
+pub fn main_layout(app: AppHandle, merged: bool, w: f64, h: f64, recenter: bool) {
+    let Some(win) = app.get_webview_window("list") else { return };
+    let (mw, mh) = if merged { (720.0, 480.0) } else { (280.0, 420.0) };
+    let (w, h) = (w.clamp(mw, 8000.0), h.clamp(mh, 8000.0));
+    let _ = win.set_min_size(Some(LogicalSize::new(mw, mh)));
+    let _ = win.set_size(LogicalSize::new(w, h));
+    if recenter {
+        let _ = win.center();
+    }
+}
+
+/// 震動：把該好友的對話視窗（整合模式＝主視窗）左右上下抖約 0.55 秒，再放回原位
+#[tauri::command]
+pub fn shake(app: AppHandle, id: String, main: Option<bool>) {
+    let label = if main == Some(true) { "list".to_string() } else { chat_label(&id) };
+    let Some(w) = app.get_webview_window(&label) else { return };
     let Ok(origin) = w.outer_position() else { return };
     let _ = w.unminimize();
     std::thread::spawn(move || {
@@ -215,6 +269,16 @@ mod tests {
         assert!(a.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'), "{a}");
         assert_ne!(a, b);
         assert_eq!(chat_label("A"), "chat-41");
+    }
+
+    #[test]
+    fn 視窗標籤可以還原成好友_id() {
+        for id in ["W/W-政策", "H/H-島作", "a/b"] {
+            assert_eq!(chat_id_of(&chat_label(id)).as_deref(), Some(id));
+        }
+        for bad in ["list", "chat-", "chat-4", "chat-zz", "toast-0-1", "chat-ff"] {
+            assert_eq!(chat_id_of(bad), None, "{bad}");
+        }
     }
 
     #[test]
