@@ -31,6 +31,8 @@ pub fn encode_component(s: &str) -> String {
 }
 
 pub const MAX_BODY: usize = 20000;
+/// 震動信第二行：請收到的 AI 回一個震動（與 ui/lib/text.mjs 的 NUDGE_HINT 同一句，test/logic.test.mjs 會比對）
+pub const NUDGE_HINT: &str = "想回應的話，就回一個震動：寄一封內文只有「（你的名字 傳送了一個震動）」的信，不用另外回信。";
 
 /// 前端交來的寄信內容 → 要送給後端的 body。from_agent 一律換成本程式的視窗名（前端不能自填），
 /// 只放行 to_node／to_agent／body／reply_to／from_agent／expects_reply 六個欄位；expects_reply 一定要明說（布林）。
@@ -42,7 +44,8 @@ pub fn build_send_body(payload: &Value, window: &str) -> Result<Value, String> {
     }
     // 震動：前端只說 nudge:true，內文由這裡用視窗名組成「（某某 傳送了一個震動）」（視窗名以本程式為準，前端不能自填）
     let nudge = o.get("nudge").and_then(Value::as_bool).unwrap_or(false);
-    let nudge_body = format!("（{window} 傳送了一個震動）");
+    // 第二行請收到的 AI 回一個震動（與 ui/lib/text.mjs 的 NUDGE_HINT 同一句）
+    let nudge_body = format!("（{window} 傳送了一個震動）\n{NUDGE_HINT}");
     let body = if nudge { nudge_body.as_str() } else { o.get("body").and_then(Value::as_str).unwrap_or("").trim_end() };
     if body.is_empty() {
         return Err("內文是空的".into());
@@ -220,7 +223,7 @@ mod tests {
         // 震動：前端只帶 nudge:true（帶了 body 也不理），內文由 Rust 用視窗名組成
         let b = build_send_body(&json!({"to_node":"W","nudge":true,"body":"偽造","expects_reply":false}), "H-ASN").unwrap();
         assert_eq!(b["expects_reply"], false);
-        assert_eq!(b["body"], "（H-ASN 傳送了一個震動）");
+        assert_eq!(b["body"], format!("（H-ASN 傳送了一個震動）\n{NUDGE_HINT}"));
         assert_eq!(b["from_agent"], "H-ASN");
         assert!(b.get("nudge").is_none(), "nudge 欄位不送給後端");
         assert!(build_send_body(&json!({"to_node":"W","nudge":true,"expects_reply":true}), "H-ASN").is_err());
