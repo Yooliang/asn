@@ -163,9 +163,9 @@ test('守門：元件依 paneClasses／msgLayout／foldArrow 排版；樞紐用 
   assert.ok(pane.includes('foldArrow(sideOf(props.dpMode), collapsed.value)'))
   assert.ok(pane.includes('v-if="sideCol && !collapsed"'))
   assert.ok(pane.includes("'tone-' + lay(m.k).tone"))
-  // 工具列按鈕只有圖示：有中文 aria-label 與提示，圖示用內嵌 SVG；表情圖示旁有 ▾ 下拉
-  for (const label of ['表情符號', '傳送震動', '開啟表情選單']) assert.ok(pane.includes(`aria-label="${label}"`), `缺 aria-label ${label}`)
-  assert.ok(pane.includes('class="tool caret"') && pane.includes('>▾</button>'))
+  // 工具列按鈕只有圖示：有中文 aria-label 與提示，圖示用內嵌 SVG；表情鈕本身就開表情選單（旁邊不另放 ▾，功能重複）
+  for (const label of ['表情符號', '傳送震動']) assert.ok(pane.includes(`aria-label="${label}"`), `缺 aria-label ${label}`)
+  assert.ok(!pane.includes('class="tool caret"') && !pane.includes('>▾</button>'), '表情鈕旁不放重複的 ▾')
   assert.ok(!/>\s*(🙂|〰)?\s*(表情符號|傳送震動)\s*</.test(pane), '工具列按鈕不該再有文字')
   const css = fs.readFileSync(path.join(UI, 'style.css'), 'utf8')
   assert.ok(css.includes('.dp-left .conv,.dp-left .compose-row{flex-direction:row-reverse}'))
