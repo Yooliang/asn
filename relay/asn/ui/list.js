@@ -12,6 +12,10 @@ import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, closeTab, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, openTab, switchMode, tabVisible, toggleCollapsed } from './lib/merge.mjs'
 import { FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_LABEL, normalizeFrame, soundChoice, soundFromChoice, soundFromSaved } from './lib/prefs.mjs'
 import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, resizeFrom, store, transport } from './lib/tauri.mjs'
+import { createMic } from './lib/mic.mjs'
+import { browserAudio } from './lib/tts-player.mjs'
+import { createVoiceUi } from './lib/voice-ui.mjs'
+import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL, normalizeCfg, shouldAutoSpeak, sttStatusText } from './lib/voice-prefs.mjs'
 
 const { createApp, reactive, ref, computed, watch } = Vue
 const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯示為離線' }
@@ -95,8 +99,12 @@ const rooms = ref([]), roomsErr = ref(false)
 async function refreshRooms() {
   try { rooms.value = groupRows((await invoke('relay_rooms'))?.rooms); roomsErr.value = false } catch { roomsErr.value = true }
 }
+// 語音：整合模式的對話分頁用這一份；設定存在 Rust 端的 voice.json（對話視窗也讀同一份）
+const voice = createVoiceUi({ invoke, listen, createMic, createAudio: browserAudio, reactive })
+const voiceCfg = reactive(normalizeCfg(await invoke('voice_cfg_get').catch(() => null)))
 core.on('notify', n => {
   if (n.sound && soundOn.value && me.status !== 'busy') SOUNDS[n.sound]?.()
+  if (shouldAutoSpeak(n, voiceCfg, me.status)) voice.speakAuto(`auto:${n.friend.id}:${Date.now()}`, n.line)   // 預設關
   if (n.shake) void invoke('shake', { id: n.friend.id, main: ui.mode === 'merged' })   // 整合模式抖整個主視窗
   if (n.toast) void invoke('show_toast', { toast: { cid: n.friend.id, title: plain(n.friend.nick), line: n.line, status: n.friend.status, hue: n.friend.hue, dp: n.friend.dp, av: (a => (a.kind === 'upload' ? a.src : null))(avatarFor(n.friend, { avatars: avatars.value })) } })
 })
@@ -233,7 +241,27 @@ const app = createApp({
     const closeGuideView = () => Object.assign(ui, closeGuide())
     const showHome = () => Object.assign(ui, hideGuide(ui))
     const mergedTabs = computed(() => ui.tabs.map(id => friends.value.find(f => f.id === id)).filter(Boolean))
+    // 設定頁「語音」：改了就寫回 Rust 端（驗證在那裡；失敗就還原成存檔的值並提示）
+    const ttsVoices = ref({ enabled: true, voices: [], default: '' }), sttSt = ref(null), voiceMsg = ref('')
+    const sttText = computed(() => sttStatusText(sttSt.value))
+    const refreshVoice = async () => {
+      try { ttsVoices.value = await invoke('tts_voices') } catch (e) { voiceMsg.value = e.message }
+      try { sttSt.value = await invoke('stt_status') } catch { /* 取不到就不顯示 */ }
+    }
+    void refreshVoice()
+    const saveVoice = async patch => {
+      const next = normalizeCfg({ ...voiceCfg, ...patch })
+      try { await invoke('voice_cfg_set', { cfg: next }); Object.assign(voiceCfg, next); voiceMsg.value = ''; void refreshVoice() }
+      catch (e) { voiceMsg.value = e.message }
+    }
+    const installFromSettings = async () => {
+      voiceMsg.value = '正在下載…'
+      await voice.installStt()
+      voiceMsg.value = voice.state.note
+      void refreshVoice()
+    }
     return {
+      voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       frame, FRAMES, FRAME_LABEL, setFrame, SOUND_CHOICES, SOUND_LABEL, soundChoice, soundFromChoice, RESIZE_DIRS, resizeFrom, avMenu,
       avOf, meAv, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar,
       ui, MODES, MODE_LABEL, DP_MODES, DP_LABEL, BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, normalizeDpMode, normalizeBubble, setMode, mergedTabs, logs, sendTo, nudgeTo, activateTab, closeChatTab, toggleDp, plain,

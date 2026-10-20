@@ -1,0 +1,6 @@
+name = "asn-edge-tts"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+workers_dev = true
+
+# 密鑰不寫在這裡：wrangler secret put ASN_TTS_SECRET

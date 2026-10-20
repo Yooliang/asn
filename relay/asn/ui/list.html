@@ -127,6 +127,28 @@
           <label>音效
             <select class="set-sel" :value="soundChoice(soundOn)" @change="soundOn = soundFromChoice($event.target.value)" aria-label="音效"><option v-for="c in SOUND_CHOICES" :key="c" :value="c">{{ SOUND_LABEL[c] }}</option></select>
           </label>
+          <div class="voice-set">
+            <b>語音</b>
+            <label>念出訊息的聲音
+              <select class="set-sel" :value="voiceCfg.tts_voice" @change="saveVoice({ tts_voice: $event.target.value })" aria-label="念出訊息的聲音" :disabled="!ttsVoices.enabled">
+                <option value="">預設</option>
+                <option v-for="v in ttsVoices.voices" :key="v.id" :value="v.id">{{ v.label }}</option>
+              </select>
+            </label>
+            <label>收到新訊息自動念
+              <select class="set-sel" :value="voiceCfg.tts_auto ? 'on' : 'off'" @change="saveVoice({ tts_auto: $event.target.value === 'on' })" aria-label="收到新訊息自動念" :disabled="!ttsVoices.enabled"><option v-for="c in AUTO_CHOICES" :key="c" :value="c">{{ AUTO_LABEL[c] }}</option></select>
+            </label>
+            <small v-if="!ttsVoices.enabled">念出訊息要由維護者在後台啟用；對話裡每則對方的訊息旁有喇叭鈕，啟用後才念得出聲。</small>
+            <small v-else>念出訊息時，那則訊息的文字會經收發室送到語音代理合成（微軟 Edge 的非公開介面，僅個人用）。語音輸入則完全在這台電腦上辨識。</small>
+            <label>語音輸入的語言
+              <select class="set-sel" :value="voiceCfg.stt_lang" @change="saveVoice({ stt_lang: $event.target.value })" aria-label="語音輸入的語言"><option v-for="l in STT_LANGS" :key="l" :value="l">{{ STT_LANG_LABEL[l] }}</option></select>
+            </label>
+            <label>語音辨識模型
+              <select class="set-sel" :value="voiceCfg.stt_model" @change="saveVoice({ stt_model: $event.target.value })" aria-label="語音辨識模型"><option v-for="m in STT_MODELS" :key="m" :value="m">{{ STT_MODEL_LABEL[m] }}</option></select>
+            </label>
+            <div class="av-btns"><button class="aero-btn" type="button" @click="installFromSettings" :disabled="voice.state.install.busy || (sttSt && sttSt.ready)">下載語音辨識</button></div>
+            <small role="status">{{ voice.state.install.text || voiceMsg || sttText }}</small>
+          </div>
           <label>視窗外框
             <select class="set-sel" :value="frame" @change="setFrame($event.target.value)" aria-label="視窗外框"><option v-for="f in FRAMES" :key="f" :value="f">{{ FRAME_LABEL[f] }}</option></select>
           </label>
@@ -179,7 +201,7 @@
       </div>
     </div>
     <div class="chat-stack">
-      <chat-pane v-for="t in mergedTabs" :key="t.id" v-show="view === 'chat' && t.id === ui.active" :friend="t" :me="me" :log="logs[t.id] || []" :friend-av="avOf(t)" :me-av="meAv" :dp-mode="ui.dpMode" :bubble="ui.bubble" :toolbar="ui.toolbar" :dp-collapsed="ui.collapsed" :active="view === 'chat' && t.id === ui.active"
+      <chat-pane v-for="t in mergedTabs" :key="t.id" v-show="view === 'chat' && t.id === ui.active" :friend="t" :me="me" :log="logs[t.id] || []" :friend-av="avOf(t)" :me-av="meAv" :dp-mode="ui.dpMode" :bubble="ui.bubble" :toolbar="ui.toolbar" :dp-collapsed="ui.collapsed" :active="view === 'chat' && t.id === ui.active" :voice="voice"
         @send="text => sendTo(t.id, text)" @nudge="nudgeTo(t.id)" @toggle-dp="toggleDp"></chat-pane>
       <div class="pane home-pane" v-if="view === 'home'">
         <div class="hero" role="region" aria-label="宣傳" aria-roledescription="輪播">

@@ -50,6 +50,13 @@ npm run build        # 出 exe 與安裝檔（src-tauri/target/release/asn.exe�
 - 大頭貼：名單、對話區、右下角提示、自己的頭像都用圖片（`ui/lib/avatar.mjs`）。**自動產生**：依字串雜湊產生左右對稱 8×8 色塊（三種顏色，blockies 風格，自己實作、不含第三方程式），種子＝好友 id（`節點/視窗名`），每人固定、不同人不同。**設備上傳**：設定頁「大頭貼」選圖 → 前端置中裁成正方形、縮成 96×96、轉 webp（不行就 png）、≤ 32 KB → 經 Rust 指令 `relay_set_avatar`（檢查格式與大小才送，金鑰只在 Rust）上傳到收發室；也可以「移除，改回自動產生」。**顯示規則**：名單上的 AI 視窗一律自動產生；不在名單上的寄件人（例如別台的 ASN）用他那台設備上傳的圖，沒有就自動產生；自己＝本機節點有上傳就用上傳的，沒有就自動產生。`list` 只帶各節點的 `avatar_updated_at`，圖用 `GET ?action=avatar&node=<節點>` 在更新時間變了才取（收到的圖也要通過格式檢查才顯示）。
 - 經機器橋轉回的回信若整段包著 `<cross-session-message …>…</cross-session-message>`，收信時剝掉最外層（`unwrapShell`）。
 
+## 語音（念出訊息、語音輸入）
+
+- 對話裡對方每則訊息旁有喇叭鈕＝念出來；設定頁「語音」可選聲音、開「收到新訊息自動念」（預設關）。文字經 Rust 端送收發室後台的 `tts` 動作（需維護者在後台啟用，未啟用時按鈕會提示），回來的 MP3 在前端播放。
+- 輸入框旁的麥克風鈕＝語音輸入：按一下開始、再按一下結束；在本機用 whisper.cpp 辨識（錄音不離開電腦），結果填進輸入框，**不會自動送出**。第一次使用要先下載辨識引擎與模型（約 200 MB，存在資料夾的 `stt\`，不進 git）。
+- 設定存在資料夾的 `voice.json`；Rust 指令 `tts_voices`、`tts_speak`、`stt_status`、`stt_install`、`stt_transcribe`、`voice_cfg_get`、`voice_cfg_set`（程式在 `src-tauri/src/tts.rs`、`stt.rs`、`voicecfg.rs`）。
+- 架構、部署、隱私、需要真機驗證的項目、後續選項：[docs/VOICE.md](../../docs/VOICE.md)。
+
 ## 資料
 
 - 對話紀錄：`%APPDATA%\tw.irori.asn\asn-chats.json`（每位好友最近 200 則，只有信件內容與系統提示）；暱稱／狀態／音效：`asn-me.json`。環境變數 `IRORI_ASN_DATA` 可改資料夾。

@@ -46,7 +46,13 @@ supabase/
 
 函式在寫入訊息後，用服務金鑰呼叫 Realtime 的 broadcast REST（`/realtime/v1/api/broadcast`，event `bell`，非私有頻道，payload 為空）。新專案不需額外設定。用戶端訂閱時要用**新專案的 anon（公開）金鑰**。
 
+### 念出訊息（TTS）
+
+動作 `tts`（POST，轉給 Cloudflare Worker 合成 MP3，限 1000 字、每節點每分鐘 12 次）與 `tts_voices`（GET，列可選聲音與是否啟用），邏輯在 `_shared/tts.ts`。兩個秘密變數 `ASN_EDGE_TTS_URL`、`ASN_EDGE_TTS_SECRET` 都設了才啟用，沒設回 503。無資料庫變更。部署步驟、風險與隱私見 [VOICE.md](VOICE.md)。
+
 ### 選用的環境變數（Edge Function secrets）
+
+`ASN_EDGE_TTS_URL`、`ASN_EDGE_TTS_SECRET`：念出訊息（見上）。
 
 `IRORI_FIREBASE_DB_URL`、`IRORI_FIREBASE_SA`：Firebase 訊號（設計見 `docs/relay/SIGNAL.md`），兩者都設才啟用，未設則該功能關閉。新專案目前未設。
 

@@ -4,9 +4,12 @@ import { ChatPane } from './lib/chatpane.mjs'
 import { avatarSrc, selfAvatarSrc } from './lib/avatar.mjs'
 import { normalizeLook } from './lib/merge.mjs'
 import { plain } from './lib/text.mjs'
-import { RESIZE_DIRS, ctl, emit, initFrame, listen, resizeFrom } from './lib/tauri.mjs'
+import { createMic } from './lib/mic.mjs'
+import { browserAudio } from './lib/tts-player.mjs'
+import { createVoiceUi } from './lib/voice-ui.mjs'
+import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, resizeFrom } from './lib/tauri.mjs'
 
-const { createApp, ref, computed, onMounted } = Vue
+const { createApp, ref, computed, onMounted, reactive } = Vue
 await initFrame()
 const id = new URLSearchParams(location.search).get('id') ?? ''
 
@@ -19,6 +22,7 @@ const app = createApp({
     const avatars = ref({})   // 各設備上傳的大頭貼（節點 → data URL），由樞紐推送
     const friendAv = computed(() => (f.value ? avatarSrc(f.value, { avatars: avatars.value }) : ''))
     const meAv = computed(() => selfAvatarSrc({ selfNode: snap.value?.selfNode ?? '', windowName: snap.value?.windowName ?? '', avatars: avatars.value }))
+    const voice = createVoiceUi({ invoke, listen, createMic, createAudio: browserAudio, reactive })   // 念出訊息＋語音輸入（金鑰與辨識都在 Rust 端）
     listen('asn:avatars', a => { avatars.value = a ?? {} })
     listen('asn:state', s => { snap.value = s })
     listen('asn:log', p => { if (p.id === id) log.value = p.log })
@@ -27,7 +31,7 @@ const app = createApp({
       window.addEventListener('focus', () => emit('asn:cmd', { op: 'read', id }))
     })
     return {
-      f, me, log, look, friendAv, meAv, plain, ctl, RESIZE_DIRS, resizeFrom,
+      f, me, log, look, friendAv, meAv, voice, plain, ctl, RESIZE_DIRS, resizeFrom,
       send: text => emit('asn:cmd', { op: 'send', id, text }),
       nudge: () => emit('asn:cmd', { op: 'nudge', id }),
       toggleDp: () => emit('asn:cmd', { op: 'dp' }),
