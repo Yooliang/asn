@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { resolveConfig } from '../config.mjs'
 import { createCore } from '../../machine/relay-core.mjs'
 import { FAKE_KEY } from './fake-relay.mjs'
+import { applyEnvCompat, withoutRelayEnv } from '../env-compat.mjs'
 
 export const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 export const testDir = path.dirname(fileURLToPath(import.meta.url))
@@ -13,16 +14,12 @@ export const fakeClaudeBin = path.join(testDir, 'fake-claude-agents.mjs')
 export const script = name => path.join(dir, name)
 export const sleep = ms => new Promise(r => setTimeout(r, ms))
 
-// 去掉 shell／start.sh 帶進來的 IRORI_*（子行程與 resolveConfig 不該繼承生產設定）
-export function withoutIroriEnv(base = process.env) {
-  const out = {}
-  for (const k of Object.keys(base)) if (!k.startsWith('IRORI_')) out[k] = base[k]
-  return out
-}
+/** 去掉 shell／start.sh 帶進來的 IRORI_* 與 ASN_* */
+export const withoutIroriEnv = withoutRelayEnv
 
-// 測試用完整 process env：先剔除 IRORI_*，再套用 tmpEnv／run 的覆寫
+// 測試用完整 process env：先剔除 IRORI_*／ASN_*，再套用 tmpEnv／run 的覆寫
 export function childEnv(overrides = {}) {
-  return { ...withoutIroriEnv(process.env), ...overrides }
+  return { ...withoutRelayEnv(process.env), ...overrides }
 }
 
 // 暫存根目錄＋指向假 relay 的環境變數（不碰真實 /workspace、不碰正式後端、不讀本機 Grok／Claude）
@@ -31,18 +28,20 @@ export function tmpEnv(url, extra = {}) {
   const grokAgentsDir = extra.GROK_AGENTS_DIR || path.join(root, 'grok-agents-isolated')
   if (!extra.GROK_AGENTS_DIR) fs.mkdirSync(grokAgentsDir, { recursive: true })
   const env = {
-    IRORI_CLOUD_HOME: root,
-    IRORI_RELAY_URL: url,
-    IRORI_RELAY_KEY: '',
-    IRORI_RELAY_ANON_KEY: '',
-    IRORI_CLOUD_ROSTER_AUTO: '0',
+    ASN_CLOUD_HOME: root,
+    ASN_RELAY_URL: url,
+    ASN_RELAY_KEY: '',
+    ASN_RELAY_ANON_KEY: '',
     GROK_AGENTS_DIR: grokAgentsDir,
-    IRORI_CLAUDE_BIN: process.execPath,
-    IRORI_CLAUDE_SCRIPT: fakeClaudeBin,
+    ASN_CLAUDE_BIN: process.execPath,
+    ASN_CLAUDE_SCRIPT: fakeClaudeBin,
     FAKE_CLAUDE_AGENTS_JSON: '[]',
     ...extra,
   }
-  return { root, env, cfg: resolveConfig(childEnv(env)) }
+  const hasRosterAuto = (env.ASN_CLOUD_ROSTER_AUTO ?? env.IRORI_CLOUD_ROSTER_AUTO ?? '') !== ''
+  if (!hasRosterAuto) env.ASN_CLOUD_ROSTER_AUTO = '0'
+  const { env: normalized } = applyEnvCompat(env)
+  return { root, env: normalized, cfg: resolveConfig(childEnv(normalized)) }
 }
 export const rm = root => fs.rmSync(root, { recursive: true, force: true })
 

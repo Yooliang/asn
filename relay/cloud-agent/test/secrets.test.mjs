@@ -7,13 +7,13 @@ import { readKey } from '../config.mjs'
 import { startFakeRelay, FAKE_KEY, U } from './fake-relay.mjs'
 import { childEnv, rm, run, script, sleep, tmpEnv } from './helpers.mjs'
 
-test('有 IRORI_RELAY_KEY：完全不讀金鑰檔（檔案不存在／是資料夾／內容不同都無關）、不寫檔', async () => {
+test('有 ASN_RELAY_KEY：完全不讀金鑰檔（檔案不存在／是資料夾／內容不同都無關）、不寫檔', async () => {
   const st = await startFakeRelay()
-  const { root, env, cfg } = tmpEnv(st.url, { IRORI_RELAY_KEY: FAKE_KEY })
+  const { root, env, cfg } = tmpEnv(st.url, { ASN_RELAY_KEY: FAKE_KEY })
   try {
     fs.mkdirSync(cfg.keyDir, { recursive: true })
     fs.mkdirSync(cfg.keyFile)   // 真的去讀會丟 EISDIR；環境變數有值就不該碰
-    assert.equal(readKey(cfg, { IRORI_RELAY_KEY: FAKE_KEY }), FAKE_KEY)
+    assert.equal(readKey(cfg, { ASN_RELAY_KEY: FAKE_KEY }), FAKE_KEY)
     const r = await run('send.mjs', ['--to', 'W', '--body', 'x', '--no-reply'], { env })
     assert.equal(r.code, 0, r.stderr)
     assert.equal(st.reqs.at(-1).key, FAKE_KEY)
@@ -22,14 +22,24 @@ test('有 IRORI_RELAY_KEY：完全不讀金鑰檔（檔案不存在／是資料�
   } finally { await st.close(); rm(root) }
 })
 
-test('沒有任何金鑰：recv／send 只說「沒有設定 IRORI_RELAY_KEY」', async () => {
+test('舊名 IRORI_RELAY_KEY 仍視為有效金鑰', async () => {
+  const st = await startFakeRelay()
+  const { root, env, cfg } = tmpEnv(st.url, { IRORI_RELAY_KEY: FAKE_KEY })
+  try {
+    assert.equal(readKey(cfg, env), FAKE_KEY)
+    const s = await run('send.mjs', ['--to', 'W', '--body', 'x', '--no-reply'], { env })
+    assert.equal(s.code, 0, s.stderr)
+  } finally { await st.close(); rm(root) }
+})
+
+test('沒有任何金鑰：recv／send 只說「沒有設定 ASN_RELAY_KEY」', async () => {
   const st = await startFakeRelay()
   const { root, env } = tmpEnv(st.url)
   try {
     const s = await run('send.mjs', ['--to', 'W', '--body', 'x', '--no-reply'], { env })
-    assert.equal(s.code, 2); assert.match(s.stderr, /沒有設定 IRORI_RELAY_KEY/)
+    assert.equal(s.code, 2); assert.match(s.stderr, /沒有設定 ASN_RELAY_KEY/)
     const r = await run('recv.mjs', [], { env })
-    assert.equal(r.code, 2); assert.match(r.stderr, /沒有設定 IRORI_RELAY_KEY/)
+    assert.equal(r.code, 2); assert.match(r.stderr, /沒有設定 ASN_RELAY_KEY/)
     assert.equal(st.reqs.length, 0)
   } finally { await st.close(); rm(root) }
 })
@@ -37,7 +47,7 @@ test('沒有任何金鑰：recv／send 只說「沒有設定 IRORI_RELAY_KEY」'
 test('用假金鑰掃輸出：壞金鑰被拒、後端回 401、常駐 log、--help、inbox 輸出，都不含金鑰字串或片段', async () => {
   const SECRET = 'SECRET-sk-abcdef0123456789-zyx'
   const st = await startFakeRelay()
-  const { root, env, cfg } = tmpEnv(st.url, { IRORI_RELAY_KEY: SECRET, IRORI_RECV_POLL_MS: '150', IRORI_ROSTER_MS: '150' })
+  const { root, env, cfg } = tmpEnv(st.url, { ASN_RELAY_KEY: SECRET, ASN_RECV_POLL_MS: '150', ASN_ROSTER_MS: '150' })
   const leaks = text => ['SECRET-sk', 'abcdef0123', 'zyx'].some(p => text.includes(p))
   try {
     const outs = []

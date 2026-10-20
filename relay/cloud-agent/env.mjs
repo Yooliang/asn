@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-// 雲端節點路徑與後台代號小幫手：例行任務不必硬編碼 /workspace/irori-relay。
+// 雲端節點路徑與後台代號小幫手：例行任務不必硬編碼路徑。
 //   node env.mjs paths [--json|--shell]     印出路徑（relay.env 只放路徑，不含秘密）
-//   node env.mjs host-code                  依 IRORI_RELAY_URL／預設值推導後台主機代號（不連網、不印完整網址）
+//   node env.mjs host-code                  依 ASN_RELAY_URL／預設值推導後台主機代號（不連網、不印完整網址）
 //   node env.mjs print <鍵>                 單一路徑：home|app|node|mail|recv|inbox|send|preflight|…
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveConfig } from './config.mjs'
+import { applyEnvCompat } from './env-compat.mjs'
 
 /** 從仲介 base URL 取出 Supabase 專案代號（或一般 hostname），絕不印 query／路徑。 */
 export function backendHostCode(baseUrl) {
@@ -21,14 +22,15 @@ export function backendHostCode(baseUrl) {
 }
 
 /** 程式與 Node、各腳本絕對路徑（不含秘密）。 */
-export function cloudToolPaths(env = process.env) {
+export function cloudToolPaths(rawEnv = process.env) {
+  const { env } = applyEnvCompat(rawEnv)
   const cfg = resolveConfig(env)
   const home = cfg.root
-  const app = (env.IRORI_CLOUD_APP || path.join(home, 'irori-relay')).trim()
-  const nodeDir = (env.IRORI_NODE_DIR || path.join(home, '.node')).trim()
-  const nodeBin = (env.IRORI_NODE_BIN || path.join(nodeDir, 'bin', 'node')).trim()
+  const app = (env.ASN_CLOUD_APP || path.join(home, 'asn-relay')).trim()
+  const nodeDir = (env.ASN_NODE_DIR || path.join(home, '.node')).trim()
+  const nodeBin = (env.ASN_NODE_BIN || path.join(nodeDir, 'bin', 'node')).trim()
   const mailDir = cfg.mailDir
-  const dispatchState = (env.IRORI_DISPATCH_STATE_DIR || path.join(mailDir, 'dispatch-state')).trim()
+  const dispatchState = (env.ASN_DISPATCH_STATE_DIR || path.join(mailDir, 'dispatch-state')).trim()
   const script = name => path.join(app, 'relay', 'cloud-agent', name)
   return {
     home,
@@ -38,7 +40,7 @@ export function cloudToolPaths(env = process.env) {
     mailDir,
     dispatchState,
     recvOut: path.join(mailDir, 'recv.out'),
-    relayEnvFile: (env.IRORI_RELAY_ENV_FILE || path.join(app, 'relay.env')).trim(),
+    relayEnvFile: (env.ASN_RELAY_ENV_FILE || path.join(app, 'relay.env')).trim(),
     startScript: path.join(app, 'start.sh'),
     recv: script('recv.mjs'),
     send: script('send.mjs'),
@@ -60,14 +62,14 @@ export function cloudToolPaths(env = process.env) {
 export function pathsShellLines(p) {
   return [
     `# 由 install-cloud-node.sh 或 env.mjs paths --shell 產生；秘密請在平台環境變數設定（勿寫進檔案）`,
-    `IRORI_CLOUD_HOME=${shellQuote(p.home)}`,
-    `IRORI_CLOUD_APP=${shellQuote(p.app)}`,
-    `IRORI_CLOUD_MAIL_DIR=${shellQuote(p.mailDir)}`,
-    `IRORI_NODE_DIR=${shellQuote(p.nodeDir)}`,
-    `IRORI_NODE_BIN=${shellQuote(p.nodeBin)}`,
-    `IRORI_RELAY_ID=${shellQuote(p.nodeId)}`,
-    `IRORI_RELAY_ENV_FILE=${shellQuote(p.relayEnvFile)}`,
-    `IRORI_DISPATCH_STATE_DIR=${shellQuote(p.dispatchState)}`,
+    `ASN_CLOUD_HOME=${shellQuote(p.home)}`,
+    `ASN_CLOUD_APP=${shellQuote(p.app)}`,
+    `ASN_CLOUD_MAIL_DIR=${shellQuote(p.mailDir)}`,
+    `ASN_NODE_DIR=${shellQuote(p.nodeDir)}`,
+    `ASN_NODE_BIN=${shellQuote(p.nodeBin)}`,
+    `ASN_RELAY_ID=${shellQuote(p.nodeId)}`,
+    `ASN_RELAY_ENV_FILE=${shellQuote(p.relayEnvFile)}`,
+    `ASN_DISPATCH_STATE_DIR=${shellQuote(p.dispatchState)}`,
   ].join('\n') + '\n'
 }
 
@@ -103,10 +105,11 @@ function usage() {
 `)
 }
 
-export function main(argv = process.argv.slice(2)) {
+export function main(argv = process.argv.slice(2), rawEnv = process.env) {
+  applyEnvCompat(rawEnv)
   const cmd = argv[0]
   if (!cmd || cmd === '--help' || cmd === '-h') { usage(); return cmd ? 0 : 1 }
-  const p = cloudToolPaths()
+  const p = cloudToolPaths(rawEnv)
   if (cmd === 'host-code') { process.stdout.write(`${p.backendHostCode}\n`); return 0 }
   if (cmd === 'paths') {
     const fmt = argv.includes('--shell') ? 'shell' : argv.includes('--json') ? 'json' : 'json'

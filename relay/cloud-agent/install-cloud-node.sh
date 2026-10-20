@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 # 雲端收發室節點一鍵安裝（Linux／bash，可重複執行）。
 # 用法：bash install-cloud-node.sh [選項]
-#   --home <路徑>           IRORI_CLOUD_HOME（預設 /workspace）
-#   --app <路徑>            程式根 IRORI_CLOUD_APP（預設 <home>/irori-relay）
-#   --node-id <代號>        IRORI_RELAY_ID（預設 grok）
-#   --repo <git 網址>       淺層 clone 來源（預設本 repo 遠端或 GitHub ASN）
-#   --use-checkout          不 clone，使用本腳本所在 repo 根目錄（開發／CI）
-#   --migrate-from <舊目錄>  複製 inbox.jsonl、done.jsonl、agents.json 與 dispatch seen/pending（不覆蓋較新的檔案）
-#   --hook-boot <boot.sh>   若尚未包含 start 呼叫，追加 source <app>/start.sh
-#   --skip-preflight        略過結尾的 preflight（沒金鑰時仍會提示）
+#   --home <路徑>           ASN_CLOUD_HOME（預設 /workspace；亦接受舊名 IRORI_CLOUD_HOME）
+#   --app <路徑>            ASN_CLOUD_APP（預設 <home>/asn-relay）
+#   --node-id <代號>        ASN_RELAY_ID（預設 grok）
+#   --repo <git 網址>       淺層 clone 來源
+#   --use-checkout          不 clone，使用本腳本所在 repo 根目錄
+#   --migrate-from <舊目錄>  複製 inbox／done／agents 與 dispatch seen/pending；可讀舊 relay.env（IRORI_*）
+#   --hook-boot <boot.sh>   追加 source <app>/start.sh
+#   --skip-preflight        略過結尾的 preflight
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_FROM_SCRIPT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-HOME_DIR="${IRORI_CLOUD_HOME:-/workspace}"
+HOME_DIR="${ASN_CLOUD_HOME:-${IRORI_CLOUD_HOME:-/workspace}}"
 APP_DIR=""
-NODE_ID="${IRORI_RELAY_ID:-grok}"
+NODE_ID="${ASN_RELAY_ID:-${IRORI_RELAY_ID:-grok}}"
 REPO_URL=""
 USE_CHECKOUT=0
 MIGRATE_FROM=""
@@ -41,9 +41,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-APP_DIR="${APP_DIR:-$HOME_DIR/irori-relay}"
-MAIL_DIR="${IRORI_CLOUD_MAIL_DIR:-$HOME_DIR/relay}"
-NODE_DIR="${IRORI_NODE_DIR:-$HOME_DIR/.node}"
+APP_DIR="${APP_DIR:-$HOME_DIR/asn-relay}"
+MAIL_DIR="${ASN_CLOUD_MAIL_DIR:-${IRORI_CLOUD_MAIL_DIR:-$HOME_DIR/relay}}"
+NODE_DIR="${ASN_NODE_DIR:-${IRORI_NODE_DIR:-$HOME_DIR/.node}}"
 NODE_BIN="$NODE_DIR/bin/node"
 RELAY_ENV="$APP_DIR/relay.env"
 START_SH="$APP_DIR/start.sh"
@@ -111,15 +111,15 @@ ensure_code() {
 
 write_relay_env() {
   cat > "$RELAY_ENV" <<EOF
-# 路徑設定（不含秘密）。IRORI_RELAY_KEY、IRORI_RELAY_URL、IRORI_RELAY_ANON_KEY 請在平台環境變數設定。
-IRORI_CLOUD_HOME=$HOME_DIR
-IRORI_CLOUD_APP=$APP_DIR
-IRORI_CLOUD_MAIL_DIR=$MAIL_DIR
-IRORI_NODE_DIR=$NODE_DIR
-IRORI_NODE_BIN=$NODE_BIN
-IRORI_RELAY_ID=$NODE_ID
-IRORI_RELAY_ENV_FILE=$RELAY_ENV
-IRORI_DISPATCH_STATE_DIR=$MAIL_DIR/dispatch-state
+# 路徑設定（不含秘密）。ASN_RELAY_KEY、ASN_RELAY_URL、ASN_RELAY_ANON_KEY 請在平台環境變數設定。
+ASN_CLOUD_HOME=$HOME_DIR
+ASN_CLOUD_APP=$APP_DIR
+ASN_CLOUD_MAIL_DIR=$MAIL_DIR
+ASN_NODE_DIR=$NODE_DIR
+ASN_NODE_BIN=$NODE_BIN
+ASN_RELAY_ID=$NODE_ID
+ASN_RELAY_ENV_FILE=$RELAY_ENV
+ASN_DISPATCH_STATE_DIR=$MAIL_DIR/dispatch-state
 EOF
   chmod 600 "$RELAY_ENV"
   log "已寫入 $RELAY_ENV"
@@ -129,17 +129,17 @@ write_start_sh() {
   cat > "$START_SH" <<'STARTEOF'
 #!/usr/bin/env bash
 set -u
-ENV_FILE="${IRORI_RELAY_ENV_FILE:-__APP__/relay.env}"
+ENV_FILE="${ASN_RELAY_ENV_FILE:-${IRORI_RELAY_ENV_FILE:-__APP__/relay.env}}"
 if [ -f "$ENV_FILE" ]; then set -a; # shellcheck source=/dev/null
   . "$ENV_FILE"; set +a; fi
-WS="${IRORI_CLOUD_HOME:-/workspace}"
-APP="${IRORI_CLOUD_APP:-__APP__}"
-MAIL="${IRORI_CLOUD_MAIL_DIR:-__MAIL__}"
-NODE_BIN="${IRORI_NODE_BIN:-__NODE_BIN__}"
+WS="${ASN_CLOUD_HOME:-${IRORI_CLOUD_HOME:-/workspace}}"
+APP="${ASN_CLOUD_APP:-${IRORI_CLOUD_APP:-__APP__}}"
+MAIL="${ASN_CLOUD_MAIL_DIR:-${IRORI_CLOUD_MAIL_DIR:-__MAIL__}}"
+NODE_BIN="${ASN_NODE_BIN:-${IRORI_NODE_BIN:-__NODE_BIN__}}"
 mkdir -p "$MAIL"
 log_msg() { echo "[start] $*" >&2; }
-if [ -z "${IRORI_RELAY_KEY:-}" ]; then
-  log_msg "缺少 IRORI_RELAY_KEY，拒絕啟動。請在平台設定秘密後開新 shell 再執行本腳本。"
+if [ -z "${ASN_RELAY_KEY:-}" ] && [ -z "${IRORI_RELAY_KEY:-}" ]; then
+  log_msg "缺少 ASN_RELAY_KEY，拒絕啟動。請在平台設定秘密後開新 shell 再執行本腳本。"
   exit 1
 fi
 if [ ! -x "$NODE_BIN" ]; then log_msg "找不到 Node：$NODE_BIN"; exit 1; fi
@@ -154,7 +154,7 @@ nohup setsid "$NODE_BIN" "$APP/relay/cloud-agent/recv.mjs" >> "$MAIL/recv.out" 2
 log_msg "recv 已啟動（log：$MAIL/recv.log）"
 DISPATCH="$APP/relay/cloud-agent/dispatch-watch.mjs"
 if [ -f "$DISPATCH" ]; then
-  STATE="${IRORI_DISPATCH_STATE_DIR:-$MAIL/dispatch-state}"
+  STATE="${ASN_DISPATCH_STATE_DIR:-${IRORI_DISPATCH_STATE_DIR:-$MAIL/dispatch-state}}"
   mkdir -p "$STATE"
   dp="$STATE/dispatch.pid"
   if [ -f "$dp" ] && kill -0 "$(tr -d ' \n\r' < "$dp" 2>/dev/null)" 2>/dev/null; then
@@ -186,11 +186,11 @@ migrate_from_old() {
   [ -n "$old" ] || return 0
   [ -d "$old" ] || { echo "找不到舊目錄：$old" >&2; exit 1; }
   mkdir -p "$MAIL_DIR"
-  local old_mail="${IRORI_CLOUD_MAIL_DIR:-}"
-  if [ -z "$old_mail" ] && [ -f "$old/relay.env" ]; then
+  local old_mail=""
+  if [ -f "$old/relay.env" ]; then
     # shellcheck disable=SC1090
     set -a; . "$old/relay.env"; set +a
-    old_mail="${IRORI_CLOUD_MAIL_DIR:-$old/relay}"
+    old_mail="${ASN_CLOUD_MAIL_DIR:-${IRORI_CLOUD_MAIL_DIR:-}}"
   fi
   old_mail="${old_mail:-$old/relay}"
   copy_if_newer "$old_mail/inbox.jsonl" "$MAIL_DIR/inbox.jsonl"
@@ -207,7 +207,7 @@ hook_boot_script() {
   local boot="$1"
   [ -n "$boot" ] || return 0
   [ -f "$boot" ] || { echo "找不到 boot 腳本：$boot" >&2; exit 1; }
-  local marker="# irori-cloud-agent-start"
+  local marker="# asn-cloud-agent-start"
   if grep -qF "$marker" "$boot" 2>/dev/null; then
     log "boot 已掛載 start：$boot"
     return 0
@@ -237,15 +237,15 @@ hook_boot_script "$HOOK_BOOT"
 if [ "$SKIP_PREFLIGHT" -eq 0 ]; then
   log "執行事前檢查（preflight，只讀）…"
   set +e
-  IRORI_CLOUD_HOME="$HOME_DIR" IRORI_CLOUD_APP="$APP_DIR" IRORI_CLOUD_MAIL_DIR="$MAIL_DIR" \
-    IRORI_NODE_BIN="$NODE_BIN" IRORI_RELAY_ID="$NODE_ID" \
+  ASN_CLOUD_HOME="$HOME_DIR" ASN_CLOUD_APP="$APP_DIR" ASN_CLOUD_MAIL_DIR="$MAIL_DIR" \
+    ASN_NODE_BIN="$NODE_BIN" ASN_RELAY_ID="$NODE_ID" \
     "$NODE_BIN" "$APP_DIR/relay/cloud-agent/preflight.mjs"
   pf=$?
   set -e
   if [ "$pf" -eq 2 ]; then
-    log "preflight：尚未設定 IRORI_RELAY_KEY（在平台設好後，開新 shell 再跑 preflight 或 start.sh）"
+    log "preflight：尚未設定 ASN_RELAY_KEY（在平台設好後，開新 shell 再跑 preflight 或 start.sh）"
   elif [ "$pf" -ne 0 ]; then
-    log "preflight 結束碼 $pf（請核對 IRORI_RELAY_URL 是否與金鑰同一後台）"
+    log "preflight 結束碼 $pf（請核對 ASN_RELAY_URL 是否與金鑰同一後台）"
   fi
 else
   log "略過 preflight"

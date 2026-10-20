@@ -6,6 +6,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createCore } from '../machine/relay-core.mjs'
 import { NO_KEY_MSG, readKey, resolveConfig } from './config.mjs'
+import { applyEnvCompat } from './env-compat.mjs'
 import { backendHostCode } from './env.mjs'
 
 function fmtMember(m) {
@@ -18,7 +19,8 @@ function fmtMember(m) {
   return `  · ${id}${name && name !== id ? `（${name}）` : ''}：${label}${agents ? `，代理 ${agents} 位` : ''}`
 }
 
-export async function runPreflight(env = process.env, { json = false } = {}) {
+export async function runPreflight(rawEnv = process.env, { json = false } = {}) {
+  const { env } = applyEnvCompat(rawEnv)
   const cfg = resolveConfig(env)
   const hostCode = backendHostCode(cfg.baseUrl)
   const key = readKey(cfg, env)
@@ -45,7 +47,7 @@ export async function runPreflight(env = process.env, { json = false } = {}) {
     else {
       process.stderr.write(`後台代號：${hostCode}\n`)
       process.stderr.write(`whoami 失敗：${e.message}\n`)
-      process.stderr.write('請確認 IRORI_RELAY_KEY 與 IRORI_RELAY_URL 是否指向同一套後台。\n')
+      process.stderr.write('請確認 ASN_RELAY_KEY 與 ASN_RELAY_URL 是否指向同一套後台。\n')
     }
     return { code: e.status === 401 ? 3 : 4, data: err }
   }

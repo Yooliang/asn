@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# 放進雲端環境的 boot.sh（重置後會重跑）。可重複執行：Node 裝在 IRORI_NODE_DIR、recv 已在跑就跳過。
-# 前提：已用 install-cloud-node.sh 或手動放好程式；節點金鑰在秘密環境變數 IRORI_RELAY_KEY（本腳本不讀、不印它）。
+# 放進雲端環境的 boot.sh（重置後會重跑）。可重複執行：Node 裝在 ASN_NODE_DIR、recv 已在跑就跳過。
+# 前提：已用 install-cloud-node.sh 或手動放好程式；節點金鑰在 ASN_RELAY_KEY（或舊名 IRORI_RELAY_KEY，本腳本不讀、不印值）。
 set -u
-WS="${IRORI_CLOUD_HOME:-/workspace}"
-APP="${IRORI_CLOUD_APP:-$WS/irori-relay}"
-MAIL="${IRORI_CLOUD_MAIL_DIR:-$WS/relay}"
-NODE_DIR="${IRORI_NODE_DIR:-$WS/.node}"
-NODE_BIN="${IRORI_NODE_BIN:-$NODE_DIR/bin/node}"
+WS="${ASN_CLOUD_HOME:-${IRORI_CLOUD_HOME:-/workspace}}"
+APP="${ASN_CLOUD_APP:-${IRORI_CLOUD_APP:-$WS/asn-relay}}"
+MAIL="${ASN_CLOUD_MAIL_DIR:-${IRORI_CLOUD_MAIL_DIR:-$WS/relay}}"
+NODE_DIR="${ASN_NODE_DIR:-${IRORI_NODE_DIR:-$WS/.node}}"
+NODE_BIN="${ASN_NODE_BIN:-${IRORI_NODE_BIN:-$NODE_DIR/bin/node}}"
 mkdir -p "$MAIL"
 
 node_ok_at() {
@@ -28,13 +28,13 @@ install_node() {
 }
 
 if ! node_ok_at "$NODE_BIN"; then
-  echo "[irori] 安裝 Node 22 到 $NODE_DIR …"
-  install_node || { echo "[irori] Node 安裝失敗，收信常駐沒有啟動" >&2; exit 1; }
+  echo "[asn] 安裝 Node 22 到 $NODE_DIR …"
+  install_node || { echo "[asn] Node 安裝失敗，收信常駐沒有啟動" >&2; exit 1; }
 fi
 export PATH="$NODE_DIR/bin:$PATH"
 
-if [ -z "${IRORI_RELAY_KEY:-}" ]; then
-  echo "[irori] 缺少 IRORI_RELAY_KEY，拒絕啟動 recv（請在平台秘密變數設定後重開 shell 再跑 boot）" >&2
+if [ -z "${ASN_RELAY_KEY:-}" ] && [ -z "${IRORI_RELAY_KEY:-}" ]; then
+  echo "[asn] 缺少 ASN_RELAY_KEY，拒絕啟動 recv（請在平台秘密變數設定後重開 shell 再跑 boot）" >&2
   exit 1
 fi
 
@@ -52,16 +52,15 @@ recv_running() {
 }
 
 if recv_running; then
-  echo "[irori] recv 已在執行（pid 檔：$MAIL/recv.pid）"
+  echo "[asn] recv 已在執行（pid 檔：$MAIL/recv.pid）"
 else
   nohup setsid "$NODE_BIN" "$APP/relay/cloud-agent/recv.mjs" >> "$MAIL/recv.out" 2>&1 &
-  echo "[irori] recv 已啟動（log：$MAIL/recv.log，當機堆疊：$MAIL/recv.out）"
+  echo "[asn] recv 已啟動（log：$MAIL/recv.log，當機堆疊：$MAIL/recv.out）"
 fi
 
-# 若已合併 dispatch-watch（draft PR #4），有檔案就一併啟動
 DISPATCH="$APP/relay/cloud-agent/dispatch-watch.mjs"
 if [ -f "$DISPATCH" ]; then
-  STATE="${IRORI_DISPATCH_STATE_DIR:-$MAIL/dispatch-state}"
+  STATE="${ASN_DISPATCH_STATE_DIR:-${IRORI_DISPATCH_STATE_DIR:-$MAIL/dispatch-state}}"
   dispatch_running() {
     local pf="$STATE/dispatch.pid"
     [ -f "$pf" ] || return 1
@@ -70,10 +69,10 @@ if [ -f "$DISPATCH" ]; then
     [ -r "/proc/$pid/cmdline" ] && tr '\0' ' ' < "/proc/$pid/cmdline" | grep -q 'dispatch-watch\.mjs'
   }
   if dispatch_running; then
-    echo "[irori] dispatch-watch 已在執行"
+    echo "[asn] dispatch-watch 已在執行"
   else
     mkdir -p "$STATE"
     nohup setsid "$NODE_BIN" "$DISPATCH" >> "$STATE/dispatch.out" 2>&1 < /dev/null &
-    echo "[irori] dispatch-watch 已啟動（log：$STATE/dispatch.log）"
+    echo "[asn] dispatch-watch 已啟動（log：$STATE/dispatch.log）"
   fi
 fi

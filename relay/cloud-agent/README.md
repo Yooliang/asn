@@ -7,27 +7,29 @@
 
 ## 路徑（都可用環境變數改）
 
+環境變數已改為 **`ASN_` 前綴**（`docs/design/ONBOARDING.md` 第 5 節）。`env-compat.mjs` 在程式入口把舊名 `IRORI_*` 對應到新名（新名優先）；文件與 `relay.env` 一律寫新名。
+
 | 東西 | 預設 | 環境變數 |
 |---|---|---|
-| 根目錄（重置後保留） | `/workspace` | `IRORI_CLOUD_HOME` |
-| 程式根目錄 | `/workspace/irori-relay` | `IRORI_CLOUD_APP` |
-| 金鑰 | **環境變數 `IRORI_RELAY_KEY`**（平台的秘密變數）；有它就完全不讀檔、不寫檔。備援才是檔案 `/workspace/.irori-relay/<代號>.key` | `IRORI_CLOUD_KEY_DIR` |
-| 收到的信 | `/workspace/relay/inbox.jsonl` | `IRORI_CLOUD_MAIL_DIR` |
+| 根目錄（重置後保留） | `/workspace` | `ASN_CLOUD_HOME` |
+| 程式根目錄 | `/workspace/asn-relay` | `ASN_CLOUD_APP` |
+| 金鑰 | **環境變數 `ASN_RELAY_KEY`**（平台的秘密變數）；有它就完全不讀檔、不寫檔。備援才是檔案 `<根>/.asn/<代號>.key`（若只有舊目錄 `.irori-relay` 則沿用） | `ASN_CLOUD_KEY_DIR` |
+| 收到的信 | `/workspace/relay/inbox.jsonl` | `ASN_CLOUD_MAIL_DIR` |
 | 已處理 | `/workspace/relay/done.jsonl` | 同上 |
 | 常駐的 log／pid | `/workspace/relay/recv.log`（20MB 輪替）、`recv.pid`；`recv.out` 只收當機堆疊 | 同上 |
-| 私有 Node | `/workspace/.node` | `IRORI_NODE_DIR`、`IRORI_NODE_BIN` |
-| 路徑設定檔（**只有路徑，不含秘密**） | `<程式根>/relay.env` | `IRORI_RELAY_ENV_FILE` |
-| 節點代號／視窗名 | `grok`（`IRORI_RELAY_ID`）／`Grok`（`cwd_label=grok-cloud`、`engine=grok`） | `IRORI_RELAY_ID`、`IRORI_CLOUD_ROSTER_NAME` |
+| 私有 Node | `/workspace/.node` | `ASN_NODE_DIR`、`ASN_NODE_BIN` |
+| 路徑設定檔（**只有路徑，不含秘密**） | `<程式根>/relay.env` | `ASN_RELAY_ENV_FILE` |
+| 節點代號／視窗名 | `grok`（`ASN_RELAY_ID`）／`Grok` | `ASN_CLOUD_ROSTER_NAME` 等 |
 | 本機夥伴名單（roster 掃描） | Grok 夥伴目錄 `/home/box/agent-data/agents` | `GROK_AGENTS_DIR` |
-| Claude 視窗（預設不列） | 設 `1` 才跑 `IRORI_CLAUDE_BIN agents --json`（目前雲端不轉信進 Claude，勿開） | `IRORI_CLOUD_ROSTER_CLAUDE`、`IRORI_CLAUDE_BIN` |
-| 自動掃描 roster | 預設開；與 `agents.json` 合併（見下） | `IRORI_CLOUD_ROSTER_AUTO=0` 關閉掃描 |
-| Realtime 門鈴（選用） | 沒有就只輪詢 | `IRORI_RELAY_ANON_KEY` 或 `/workspace/.irori-relay/anon.key` |
+| Claude 視窗（預設不列） | 設 `1` 才跑 `ASN_CLAUDE_BIN agents --json` | `ASN_CLOUD_ROSTER_CLAUDE` |
+| 自動掃描 roster | 預設開；與 `agents.json` 合併（見下） | `ASN_CLOUD_ROSTER_AUTO=0` 關閉 |
+| Realtime 門鈴（選用） | 沒有就只輪詢 | `ASN_RELAY_ANON_KEY` 或 `<金鑰目錄>/anon.key` |
 
 例行任務不必硬編碼路徑，可用：
 
 ```bash
 node "$(node relay/cloud-agent/env.mjs print app)/relay/cloud-agent/env.mjs" print recv
-# 或先 source relay.env 後：node "$IRORI_CLOUD_APP/relay/cloud-agent/env.mjs" print send
+# 或先 source relay.env 後：node "$ASN_CLOUD_APP/relay/cloud-agent/env.mjs" print send
 ```
 
 ## 一、取得程式（建議用安裝腳本）
@@ -37,7 +39,7 @@ node "$(node relay/cloud-agent/env.mjs print app)/relay/cloud-agent/env.mjs" pri
 在 Linux 雲端環境（例如 Grok Bot）：
 
 ```bash
-bash relay/cloud-agent/install-cloud-node.sh --use-checkout   # 從目前 repo 複製到預設 /workspace/irori-relay
+bash relay/cloud-agent/install-cloud-node.sh --use-checkout   # 從目前 repo 複製到預設 /workspace/asn-relay
 # 或遠端淺層 clone：
 bash relay/cloud-agent/install-cloud-node.sh --home /workspace --node-id grok
 ```
@@ -45,18 +47,18 @@ bash relay/cloud-agent/install-cloud-node.sh --home /workspace --node-id grok
 腳本會（可重複執行）：
 
 - 淺層 clone 或使用 `--use-checkout`／已存在的目錄
-- 在 `IRORI_NODE_DIR`（預設 `/workspace/.node`）安裝 Node 22（**一律裝在指定位置**，不依賴系統 PATH 裡的 Node）
-- 產生 `relay.env`（**僅路徑**）與 `start.sh`
-- 可選 `--migrate-from <舊 irori-relay 根或含 relay 資料的目錄>`：複製 `inbox.jsonl`、`done.jsonl`、`agents.json`，以及 dispatch 的 `seen.jsonl`／`pending.jsonl`（若存在）
+- 在 `ASN_NODE_DIR`（預設 `/workspace/.node`）安裝 Node 22（**一律裝在指定位置**，不依賴系統 PATH 裡的 Node）
+- 產生 `relay.env`（**僅路徑，ASN_ 變數名**）與 `start.sh`
+- 可選 `--migrate-from <舊安裝根目錄>`：複製信件與 dispatch 狀態；可讀舊 `relay.env`（含 `IRORI_*` 路徑）
 - 可選 `--hook-boot /path/to/boot.sh`：追加呼叫 `start.sh`
 - 結尾執行 `preflight.mjs`（只讀檢查；沒金鑰時會提示）
 
-秘密（`IRORI_RELAY_KEY`、`IRORI_RELAY_URL`、`IRORI_RELAY_ANON_KEY`）請在**平台環境變數**設定，不要寫進 `relay.env`。
+秘密（`ASN_RELAY_KEY`、`ASN_RELAY_URL`、`ASN_RELAY_ANON_KEY`）請在**平台環境變數**設定，不要寫進 `relay.env`。
 
 ### 手動 clone
 
 ```bash
-gh repo clone Yooliang/asn /workspace/irori-relay -- --depth 1
+gh repo clone Yooliang/asn /workspace/asn-relay -- --depth 1
 ```
 
 需保留目錄結構：`relay/cloud-agent/` 與 `relay/machine/` 下述檔案（`recv.mjs` 會 import）：
@@ -65,8 +67,8 @@ gh repo clone Yooliang/asn /workspace/irori-relay -- --depth 1
 
 ## 二、身分（Grok 這邊不用註冊）
 
-節點金鑰由人在平台外部設成秘密環境變數 `IRORI_RELAY_KEY`（節點代號 `IRORI_RELAY_ID`，預設 `grok`）。
-**你看不到它的值，也不要嘗試印出它、或把它寫進任何檔案**；程式的 log、錯誤訊息、輸出都不會含金鑰。缺少時只會說「沒有設定 IRORI_RELAY_KEY」，那就請人去設。
+節點金鑰由人在平台外部設成秘密環境變數 `ASN_RELAY_KEY`（節點代號 `ASN_RELAY_ID`，預設 `grok`；舊名 `IRORI_RELAY_*` 仍相容）。
+**你看不到它的值，也不要嘗試印出它、或把它寫進任何檔案**；程式的 log、錯誤訊息、輸出都不會含金鑰。缺少時只會說「沒有設定 ASN_RELAY_KEY」，那就請人去設。
 
 切到新後台前，可先跑（**不讀 inbox、不會改 delivered_at**）：
 
@@ -81,11 +83,11 @@ node relay/cloud-agent/preflight.mjs
 
 ## 三、讓它開機自動跑
 
-1. 跑過 `install-cloud-node.sh` 後，用 `<程式根>/start.sh` 啟動 recv（缺 `IRORI_RELAY_KEY` 會寫清楚並拒絕啟動）。
+1. 跑過 `install-cloud-node.sh` 後，用 `<程式根>/start.sh` 啟動 recv（缺 `ASN_RELAY_KEY`／舊名 `IRORI_RELAY_KEY` 會寫清楚並拒絕啟動）。
 2. 把 `boot.example.sh` 的內容放進（或從）`/workspace` 的 `boot.sh`，或讓安裝腳本 `--hook-boot` 掛上 `start.sh`。
 3. `recv.mjs` 啟動時會在 `recv.log` 寫 `backend=<主機代號>`（不寫完整 URL）。已在跑時用 **`recv.pid` + 命令列** 判斷，不用 `pgrep -f` 誤判其他安裝。
 
-**換秘密或改 `IRORI_RELAY_URL` 之後**：長期跑著的 boot 迴圈**不會**自動拿到新環境變數。請在平台改好變數後，**開新的 shell**（或重跑 boot／手動執行 `start.sh`），必要時先停掉舊 recv（刪除過期的 `recv.pid` 或 kill 對應行程）。
+**換秘密或改 `ASN_RELAY_URL` 之後**：長期跑著的 boot 迴圈**不會**自動拿到新環境變數。請在平台改好變數後，**開新的 shell**（或重跑 boot／手動執行 `start.sh`），必要時先停掉舊 recv（刪除過期的 `recv.pid` 或 kill 對應行程）。
 
 ### 新信即時分派（dispatch-watch，選用）
 
@@ -97,7 +99,7 @@ node relay/cloud-agent/preflight.mjs
 
 ## 四、日常操作
 
-路徑請用 `env.mjs print` 或 `relay.env`，以下以 `/workspace/irori-relay` 為例：
+路徑請用 `env.mjs print` 或 `relay.env`，以下以 `/workspace/asn-relay` 為例：
 
 ```
 node relay/cloud-agent/inbox.mjs                  # 列出還沒處理的信（= --unread）；--all 全部、--json 每封一行 JSON
@@ -152,4 +154,6 @@ node --test "relay/cloud-agent/test/*.test.mjs"
 ```
 
 只連 127.0.0.1 的假後端，路徑全指到暫存資料夾（`tmpEnv` 預設 `IRORI_CLOUD_ROSTER_AUTO=0`、空的 `GROK_AGENTS_DIR`、假 Claude CLI），不會讀 Grok 雲端本機的 `/home/box/agent-data/agents` 或真的 `claude`。
-`childEnv` 會先剔除 shell 裡的 `IRORI_*`（含 `start.sh` export 的金鑰與路徑），再套用測試值，所以在已設 `IRORI_RELAY_KEY` 的環境裡跑測試也安全。Windows 也能跑。
+`childEnv` 會先剔除 shell 裡的 `IRORI_*` 與 `ASN_*`（含 `start.sh` export 的金鑰與路徑），再套用測試值，所以在已設生產金鑰的環境裡跑測試也安全。Windows 也能跑。
+
+本 PR 只改 **relay/cloud-agent** 的改名相容；ASN 桌面版、machine 橋、channel、資料庫函式等全 repo 改名見 ONBOARDING 總表，不在此 PR 範圍。

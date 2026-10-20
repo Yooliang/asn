@@ -13,16 +13,16 @@ test('backendHostCode：只回 Supabase 專案代號，不含路徑', () => {
   assert.equal(backendHostCode('http://127.0.0.1:9/x'), '127-0-0-1')
 })
 
-test('cloudToolPaths：依 IRORI_CLOUD_HOME 指到暫存目錄', () => {
+test('cloudToolPaths：依 ASN_CLOUD_HOME 指到暫存目錄', () => {
   const st = { url: 'http://127.0.0.1/relay' }
-  const { root, env } = tmpEnv(st.url, { IRORI_CLOUD_APP: '/tmp/my-app' })
+  const { root, env } = tmpEnv(st.url, { ASN_CLOUD_APP: '/tmp/my-app' })
   try {
     const p = cloudToolPaths(childEnv(env))
     assert.equal(p.home, root)
     assert.equal(p.app, '/tmp/my-app')
     assert.equal(p.recv, '/tmp/my-app/relay/cloud-agent/recv.mjs')
-    assert.match(pathsShellLines(p), /IRORI_CLOUD_HOME=/)
-    assert.ok(!pathsShellLines(p).includes('IRORI_RELAY_KEY'))
+    assert.match(pathsShellLines(p), /ASN_CLOUD_HOME=/)
+    assert.ok(!pathsShellLines(p).includes('ASN_RELAY_KEY'))
   } finally { rm(root) }
 })
 
@@ -34,7 +34,7 @@ test('preflight：whoami + list，輸出不含金鑰', async () => {
       { id: 'grok', name: 'Grok', online: false, presence: 'idle', agents: [] },
     ],
   })
-  const { root, env } = tmpEnv(st.url, { IRORI_RELAY_KEY: FAKE_KEY })
+  const { root, env } = tmpEnv(st.url, { ASN_RELAY_KEY: FAKE_KEY })
   try {
     const r = await runPreflight(childEnv(env), { json: true })
     assert.equal(r.code, 0)
@@ -43,6 +43,15 @@ test('preflight：whoami + list，輸出不含金鑰', async () => {
     assert.equal(r.data.onlineCount, 1)
     const text = JSON.stringify(r.data)
     assert.ok(!text.includes(FAKE_KEY))
+  } finally { await st.close(); rm(root) }
+})
+
+test('preflight：舊名 IRORI_RELAY_KEY 仍可用', async () => {
+  const st = await startFakeRelay({ node: 'grok' })
+  const { root, env } = tmpEnv(st.url, { IRORI_RELAY_KEY: FAKE_KEY })
+  try {
+    const r = await runPreflight(childEnv(env), { json: true })
+    assert.equal(r.code, 0)
   } finally { await st.close(); rm(root) }
 })
 
@@ -58,9 +67,9 @@ test('preflight：沒金鑰回 2', async () => {
 test('env.mjs CLI：print recv', () => {
   const root = fs.mkdtempSync('/tmp/env-cli-')
   const env = childEnv({
-    IRORI_CLOUD_HOME: root,
-    IRORI_CLOUD_APP: '/opt/irori-relay',
-    IRORI_RELAY_URL: 'http://127.0.0.1:1/r',
+    ASN_CLOUD_HOME: root,
+    ASN_CLOUD_APP: '/opt/asn-relay',
+    ASN_RELAY_URL: 'http://127.0.0.1:1/r',
   })
   try {
     const prev = process.env

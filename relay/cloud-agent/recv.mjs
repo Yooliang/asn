@@ -11,6 +11,7 @@ import { createCore } from '../machine/relay-core.mjs'   // 沿用 API 呼叫與
 import { createLog } from '../machine/safe-log.mjs'
 import { normalizeAttachments } from '../machine/attach-format.mjs'
 import { NO_KEY_MSG, readAnonKey, readKey, resolveCloudAgents, resolveConfig, rosterScanEnvFrom } from './config.mjs'
+import { applyEnvCompat } from './env-compat.mjs'
 import { backendHostCode } from './env.mjs'
 import { createPullWithRetry, parsePullBackoffMs } from '../machine/pull-retry.mjs'
 import { acquirePidLock, appendLineDurable, ensureDir, readJsonl } from './lib.mjs'
@@ -74,10 +75,13 @@ export function createReceiver({
   return { pull, pullOnce, rosterOnce, seen, destroy }
 }
 
-export async function main(env = process.env) {
+export async function main(rawEnv = process.env) {
+  const compat = applyEnvCompat(rawEnv)
+  const env = compat.env
   const cfg = resolveConfig(env)
   ensureDir(cfg.mailDir, 0o700)
   const log = createLog(cfg.logFile, { stderr: null })   // 只寫 recv.log（20MB 輪替）；boot.sh 的 stdout/stderr 只收當機時的堆疊
+  for (const n of compat.legacyNames) log(`使用舊環境變數名：${n}`)
   const key = readKey(cfg, env)
   if (!key) { console.error(NO_KEY_MSG); return 2 }
   if (!acquirePidLock(cfg.pidFile, 'recv.mjs')) { console.error('另一個 recv 正在執行（pid 檔有活著的程序）'); return 3 }
