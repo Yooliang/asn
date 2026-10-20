@@ -206,7 +206,7 @@ pub fn run() {
         .manage(wins::Slots::default())
         .invoke_handler(tauri::generate_handler![
             startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_rooms, open_url, set_window_name, store_load, store_save, quit_app,
-            wins::open_chat, wins::chat_visible, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::take_shot,
+            wins::open_chat, wins::chat_visible, wins::close_chats, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::take_shot,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

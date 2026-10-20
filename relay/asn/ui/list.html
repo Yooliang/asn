@@ -16,7 +16,8 @@
       <button class="tb close" @click="ctl('close')" aria-label="關閉並結束">✕</button>
     </span>
   </header>
-  <div class="pane">
+  <div class="shell" :class="{ merged: ui.mode === 'merged' }">
+  <div class="pane list-pane">
     <div class="me">
       <div class="dp" :class="'st-' + me.status" :style="{ '--h': 205 }"><span>{{ initial(me.nick) }}</span></div>
       <div class="me-info">
@@ -101,6 +102,18 @@
         </div>
         <div class="list settings" v-else>
           <div><button class="aero-btn" @click="soundOn = !soundOn" :aria-pressed="soundOn">音效：{{ soundOn ? '開' : '關' }}</button></div>
+          <label>視窗模式
+            <select class="set-sel" :value="ui.mode" @change="setMode($event.target.value)" aria-label="視窗模式"><option v-for="m in MODES" :key="m" :value="m">{{ MODE_LABEL[m] }}</option></select>
+          </label>
+          <label>頭像模式
+            <select class="set-sel" v-model="ui.dpMode" aria-label="頭像模式"><option v-for="m in DP_MODES" :key="m" :value="m">{{ DP_LABEL[m] }}</option></select>
+          </label>
+          <label>工具列位置
+            <select class="set-sel" v-model="ui.toolbar" aria-label="工具列位置"><option v-for="b in TOOLBARS" :key="b" :value="b">{{ TOOLBAR_LABEL[b] }}</option></select>
+          </label>
+          <label>文字底色
+            <select class="set-sel" v-model="ui.bubble" aria-label="文字底色"><option v-for="b in BUBBLES" :key="b" :value="b">{{ BUBBLE_LABEL[b] }}</option></select>
+          </label>
           <label>分頁依
             <select class="set-sel" :value="dims.tabDim" @change="setTabDim($event.target.value)" aria-label="分頁依"><option v-for="d in DIMS" :key="d.key" :value="d.key">{{ d.label }}</option></select>
           </label>
@@ -121,6 +134,22 @@
       </button>
       <span class="ad-dots"><i v-for="(a, i) in ADS" :key="a.key" :class="{ on: i === adI }"></i></span>
     </div>
+  </div>
+  <section class="chat-area" v-if="ui.mode === 'merged'" aria-label="對話">
+    <div class="tabbar" role="tablist" aria-label="開著的對話">
+      <div v-for="t in mergedTabs" :key="t.id" class="ctab" :class="{ on: t.id === ui.active }" role="tab" :aria-selected="t.id === ui.active" @click="activateTab(t.id)" @auxclick.middle.prevent="closeChatTab(t.id)">
+        <span class="dot" :class="'st-' + t.status"></span>
+        <span class="ctab-name">{{ plain(t.nick) }}</span>
+        <span class="unread" v-if="t.unread">{{ t.unread }}</span>
+        <button class="ctab-x" type="button" @click.stop="closeChatTab(t.id)" :aria-label="'關閉 ' + plain(t.nick) + ' 的對話'">✕</button>
+      </div>
+    </div>
+    <div class="chat-stack">
+      <chat-pane v-for="t in mergedTabs" :key="t.id" v-show="t.id === ui.active" :friend="t" :me="me" :log="logs[t.id] || []" :dp-mode="ui.dpMode" :bubble="ui.bubble" :toolbar="ui.toolbar" :dp-collapsed="ui.collapsed" :active="t.id === ui.active"
+        @send="text => sendTo(t.id, text)" @nudge="nudgeTo(t.id)" @toggle-dp="toggleDp"></chat-pane>
+      <div class="pane" v-if="!mergedTabs.length"><div class="empty-chat">從左邊的名單點一位好友，開始聊天。</div></div>
+    </div>
+  </section>
   </div>
 </div>
 <script src="vendor/vue.global.prod.js"></script>

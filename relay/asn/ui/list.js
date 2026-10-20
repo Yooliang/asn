@@ -4,6 +4,8 @@ import { AsnCore } from './lib/core.mjs'
 import { ADS, AD_MS, FIXED_TABS, addNotice, fmtTime, groupHeading, groupRows, moreUnread, nextAd, statusNote } from './lib/tabs.mjs'
 import { DIMS, groupItems, groupOptions, loadDims, pageItems, pageTabs, withTabDim } from './lib/dims.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
+import { ChatPane } from './lib/chatpane.mjs'
+import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, closeTab, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, openTab, switchMode, tabVisible, toggleCollapsed } from './lib/merge.mjs'
 import { ctl, emit, invoke, listen, store, transport } from './lib/tauri.mjs'
 
 const { createApp, reactive, ref, computed, watch } = Vue
@@ -45,9 +47,17 @@ const me = reactive({ psm: '', status: 'online', ...savedMe.me, nick: info.windo
 const soundOn = ref(savedMe.sound !== false)
 const dims = reactive(loadDims(savedMe))   // 分頁依（設備／廠商／狀態）與分組依；舊存檔的 groupMode 在這裡轉換
 
+// 視窗模式：分開（每位好友一扇對話視窗）／整合（一個視窗，右邊是對話分頁）。tabs／active 只在整合模式用，不存檔
+// 視窗模式、頭像模式（左／右／整合）、文字底色（透明／色彩／自動）三個設定彼此獨立，分離與整合視窗都有效
+const ui = reactive({ mode: normalizeMode(savedMe.winMode), ...normalizeLook(savedMe), tabs: [], active: '' })
+const sizes = reactive({ split: normalizeSize(savedMe.splitSize, 'split'), merged: normalizeSize(savedMe.mergedSize, 'merged') })
+const winSize = () => ({ w: window.innerWidth, h: window.innerHeight })
+let switching = false
+
 const core = new AsnCore({
   transport, store: store('chats'), selfNode: info.node, windowName: info.window_name,
-  isChatVisible: id => invoke('chat_visible', { id }),
+  // 整合模式：只有「目前分頁」且主視窗開著沒最小化才算看得到
+  isChatVisible: async id => (ui.mode === 'merged' ? tabVisible(ui, id, await invoke('main_visible')) : invoke('chat_visible', { id })),
   aliases: info.old_names,
   pollMs: info.poll_ms, rosterMs: info.roster_ms,
   log: m => console.info('[ASN]', m),
@@ -61,9 +71,10 @@ const sync = () => {
   friends.value = s.friends
   nodeOrder.value = s.nodeOrder
   conn.value = s.conn
-  emit('asn:state', { ...s, me: { ...me } })
+  emit('asn:state', { ...s, me: { ...me }, ui: { dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, collapsed: ui.collapsed } })
 }
-const pushLog = id => emit('asn:log', { id, log: core.logOf(id).slice(-200) })
+const logs = reactive({})   // 整合模式的分頁直接讀這份；分開模式的對話視窗走 asn:log 事件
+const pushLog = id => { const l = core.logOf(id).slice(-200); logs[id] = l; emit('asn:log', { id, log: l }) }
 
 core.on('state', sync)
 core.on('log', pushLog)
@@ -75,13 +86,20 @@ async function refreshRooms() {
 core.on('notify', n => {
   if (n.kind === 'msg' || n.kind === 'nudge') notices.value = addNotice(notices.value, { cid: n.friend.id, who: plain(n.friend.nick), line: n.line, kind: n.kind })
   if (n.sound && soundOn.value && me.status !== 'busy') SOUNDS[n.sound]?.()
-  if (n.shake) void invoke('shake', { id: n.friend.id })
+  if (n.shake) void invoke('shake', { id: n.friend.id, main: ui.mode === 'merged' })   // 整合模式抖整個主視窗
   if (n.toast) void invoke('show_toast', { toast: { cid: n.friend.id, title: plain(n.friend.nick), line: n.line, status: n.friend.status, hue: n.friend.hue, dp: n.friend.dp } })
 })
 
 async function openChat(id) {
   const f = core.friends.get(id); if (!f) return
   core.markRead(id)
+  if (ui.mode === 'merged') {   // 整合模式：在右邊開分頁（或切過去），不開新視窗
+    Object.assign(ui, openTab(ui, id))
+    pushLog(id)
+    await invoke('show_main')
+    sync()
+    return
+  }
   await invoke('open_chat', { id, title: `${plain(f.nick)} - 對話` })
   sync(); pushLog(id)
 }
@@ -90,19 +108,53 @@ async function openChat(id) {
 await listen('asn:cmd', async c => {
   if (c.op === 'hello') { sync(); pushLog(c.id); core.markRead(c.id) }
   else if (c.op === 'read') core.markRead(c.id)
+  else if (c.op === 'dp') ui.collapsed = toggleCollapsed(ui.collapsed)
   else if (c.op === 'send') { const r = await core.send(c.id, c.text); if (!r.ok) console.info('[ASN] send failed', r.error) }
   else if (c.op === 'nudge') await core.nudge(c.id)
 })
+const sendTo = async (id, text) => { const r = await core.send(id, text); if (!r.ok) console.info('[ASN] send failed', r.error) }
+const nudgeTo = id => core.nudge(id)
+const activateTab = id => { ui.active = id; core.markRead(id); sync() }
+const closeChatTab = id => { Object.assign(ui, closeTab(ui, id)); if (ui.active) core.markRead(ui.active); sync() }
+const toggleDp = () => { ui.collapsed = toggleCollapsed(ui.collapsed) }
+
+// 切換視窗模式：已開的對話接得上（分開→整合：對話視窗關掉變分頁；整合→分開：分頁開成視窗）
+async function setMode(to) {
+  to = normalizeMode(to)
+  const from = ui.mode
+  if (to === from || switching) return
+  switching = true
+  try {
+    sizes[from] = normalizeSize(winSize(), from)
+    const closed = from === 'split' ? await invoke('close_chats') : []
+    const plan = switchMode(from, to, { tabs: ui.tabs, active: ui.active, windowIds: closed })
+    ui.mode = to
+    ui.tabs = plan.tabs; ui.active = plan.active
+    await invoke('main_layout', { merged: to === 'merged', w: sizes[to].w, h: sizes[to].h, recenter: false })
+    if (ui.active) core.markRead(ui.active)
+    for (const id of plan.openWindows) await openChat(id)
+    for (const id of plan.tabs) pushLog(id)
+    sync()
+  } finally { switching = false }
+}
+// 視窗大小記住：每種模式各記各的（拖到邊界 resize 事件很多，停下來才存）
+let sizeTimer = null
+window.addEventListener('resize', () => {
+  clearTimeout(sizeTimer)
+  sizeTimer = setTimeout(() => { if (!switching) sizes[ui.mode] = normalizeSize(winSize(), ui.mode) }, 400)
+})
+if (ui.mode === 'merged') await invoke('main_layout', { merged: true, w: sizes.merged.w, h: sizes.merged.h, recenter: true })
+
 await listen('relay-bell', () => void core.pull('bell'))   // Rust 端的 Realtime 門鈴
 await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 
-watch([me, soundOn, dims], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, sound: soundOn.value, tabDim: dims.tabDim, groupDim: dims.groupDim }); sync() }, { deep: true })
+watch([me, soundOn, dims, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, sizes], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, sound: soundOn.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, splitSize: sizes.split, mergedSize: sizes.merged }); sync() }, { deep: true })
 // 設定頁改「分頁依」：分組若撞到自動換成剩下兩個裡的第一個
 const setTabDim = v => Object.assign(dims, withTabDim(dims, v))
 const pages = computed(() => pageTabs(friends.value, dims.tabDim, { selfNode: info.node, nodeOrder: nodeOrder.value }))
 
 const shotTab = ref(dims.tabDim === 'device' ? info.node : '')
-createApp({
+const app = createApp({
   setup() {
     const tab = shotTab, moreOpen = ref(false), adI = ref(0)
     setInterval(() => { adI.value = nextAd(adI.value) }, AD_MS)
@@ -131,13 +183,17 @@ createApp({
       try { await invoke('set_window_name', { name: want }); location.reload() }
       catch (e) { me.nick = info.window_name; nickErr.value = e.message; setTimeout(() => { nickErr.value = '' }, 5000) }
     }
+    const mergedTabs = computed(() => ui.tabs.map(id => friends.value.find(f => f.id === id)).filter(Boolean))
     return {
+      ui, MODES, MODE_LABEL, DP_MODES, DP_LABEL, BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, normalizeDpMode, normalizeBubble, setMode, mergedTabs, logs, sendTo, nudgeTo, activateTab, closeChatTab, toggleDp, plain,
       STATUS, CONN_LABEL, FIXED_TABS, ADS, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, soundOn, friends, conn, shown, query, collapsed, nickErr, commitNick,
       tab, adI, rooms, roomsErr, notices, emptyText, openAd, groupHeading, statusNote, fmtTime,
       selfNode: info.node, emo, initial, openChat, ctl,
     }
   },
-}).mount('#app')
+})
+app.component('chat-pane', ChatPane)
+app.mount('#app')
 
 await core.start()
 sync()
@@ -149,6 +205,7 @@ if (info.shot) {
   const target = all.find(f => f.unread > 0) ?? all.find(f => f.status !== 'offline') ?? all[0]
   if (target) {
     await openChat(target.id)
+    if (ui.mode === 'merged') { const other = all.find(f => f.id !== target.id && f.status !== 'offline'); if (other) await openChat(other.id); await openChat(target.id) }
     await sleep(600)
     await core.send(target.id, '收到！我晚點看一下 :)')
     await core.nudge(target.id)

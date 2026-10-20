@@ -79,8 +79,8 @@ test('routeMail：對到好友就歸他；對不到標為新增；沒有視窗�
 
 // 守門：介面模板裡的 v-html 只准吃 emo(...) 的輸出（先跳脫），不准直接放原文
 test('守門：所有 v-html 都只用 emo(...)', () => {
-  const files = fs.readdirSync(UI).filter(f => f.endsWith('.html'))
-  assert.ok(files.length >= 3, `找不到介面檔：${files}`)
+  const files = [...fs.readdirSync(UI).filter(f => f.endsWith('.html')), 'lib/chatpane.mjs']   // 對話區的模板在 lib/chatpane.mjs
+  assert.ok(files.length >= 4, `找不到介面檔：${files}`)
   let count = 0
   for (const f of files) {
     for (const m of fs.readFileSync(path.join(UI, f), 'utf8').matchAll(/v-html\s*=\s*"([^"]*)"/g)) {
