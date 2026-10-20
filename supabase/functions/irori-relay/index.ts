@@ -4,6 +4,7 @@ import { handleNodeRoomAction, type RoomDeps, syncNodeAuto } from "../_shared/ro
 import { handleAgentInbox } from "../_shared/agent_inbox.ts";
 import { expectsReplyArgs } from "../_shared/expects_reply.ts";
 import { normalizeRosterAgents } from "../_shared/roster.ts";
+import { checkAvatar } from "../_shared/avatar.ts";
 import * as signal from "../_shared/signal.ts";
 import { handleNodeLaunchAction, LAUNCH_ACTIONS, sanitizeLauncher } from "../_shared/launch.ts";
 
@@ -108,6 +109,28 @@ Deno.serve(async (req) => {
     const { data, error } = await db.rpc("irori_relay_list", { p_tenant: me.tenant_id });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     return json(200, { members: data });
+  }
+  // 設備大頭貼：list 只帶各節點的 avatar_updated_at（不帶圖，名單輪詢流量不跟著放大）；圖用 avatar 動作按需取（限同租戶）。
+  // set_avatar 只能改金鑰所屬的自己節點（p_node 一律是 me.id，body 裡不接受指定節點）；avatar 為 null＝移除。
+  if (action === "set_avatar" && req.method === "POST") {
+    const b = await req.json().catch(() => null);
+    if (!b || typeof b !== "object" || !("avatar" in b)) return json(400, { error: "bad_request" });
+    const c = checkAvatar(b.avatar);
+    if (!c.ok) return json(400, { error: c.error });
+    const { data, error } = await db.rpc("irori_relay_set_avatar", { p_node: me.id, p_avatar: c.avatar });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    if (data?.error === "forbidden") return json(403, { error: "forbidden" });
+    if (data?.error === "bad_avatar") return json(400, { error: "bad_avatar_format" });
+    if (data?.error) return json(400, { error: data.error });
+    return json(200, { ok: true, avatar_updated_at: data.avatar_updated_at });
+  }
+  if (action === "avatar" && req.method === "GET") {
+    const node = url.searchParams.get("node") ?? "";
+    if (!ID_RE.test(node)) return json(400, { error: "bad_request" });
+    const { data, error } = await db.rpc("irori_relay_get_avatar", { p_tenant: me.tenant_id, p_node: node });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    if (data?.error === "not_found") return json(404, { error: "not_found" });
+    return json(200, data);
   }
   if (action === "roster" && req.method === "POST") {
     const b = await req.json().catch(() => null);

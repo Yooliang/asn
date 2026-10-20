@@ -1,5 +1,6 @@
 //! ASN 即時通（Tauri 2）：金鑰、anon 金鑰、收發室 HTTP／WebSocket、心跳檔、設定與對話存檔都在 Rust 端；
 //! 前端（ui/）只拿得到「信件與名單」，拿不到任何金鑰。
+mod avatar;
 mod bell;
 mod heartbeat;
 mod identity;
@@ -97,9 +98,11 @@ async fn relay_rooms(app: State<'_, App>) -> Result<Value, String> {
 }
 
 /// 底部廣告可以開的網址（全是 repo 文件寫明的公開網址）；只准完全相同的字串，其餘一律拒絕
-pub const OPEN_ALLOW: [&str; 2] = [
+pub const OPEN_ALLOW: [&str; 4] = [
     "https://irori.web.app/",
     "https://irori.web.app/dev/shots/",
+    "https://policy-tw.web.app",
+    "https://islandmade.app",
 ];
 pub fn open_allowed(url: &str) -> bool {
     OPEN_ALLOW.contains(&url)
@@ -111,6 +114,24 @@ fn open_url(url: String) -> Result<(), String> {
         return Err("這個網址不在允許清單內".into());
     }
     std::process::Command::new("explorer.exe").arg(&url).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// 某台設備上傳的大頭貼（名單只帶更新時間，圖按需取）。節點代號先驗格式才組網址
+#[tauri::command]
+async fn relay_avatar(app: State<'_, App>, node: String) -> Result<Value, String> {
+    if !identity::valid_id(&node) {
+        return Err(format!("節點格式不對：{node}"));
+    }
+    relay_of(&app)?.api(&format!("avatar&node={}", relay::encode_component(&node)), None).await
+}
+
+/// 上傳（或 null＝移除）自己這台設備的大頭貼：格式與大小在這裡檢查，通過才送出；只能改自己的節點（後端由金鑰決定是誰）
+#[tauri::command]
+async fn relay_set_avatar(app: State<'_, App>, avatar: Option<String>) -> Result<Value, String> {
+    if let Some(a) = &avatar {
+        avatar::validate(a)?;
+    }
+    relay_of(&app)?.api("set_avatar", Some(serde_json::json!({ "avatar": avatar }))).await
 }
 
 #[tauri::command]
@@ -205,7 +226,7 @@ pub fn run() {
         .manage(state)
         .manage(wins::Slots::default())
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_rooms, open_url, set_window_name, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_avatar, relay_set_avatar, relay_rooms, open_url, set_window_name, store_load, store_save, quit_app,
             wins::open_chat, wins::chat_visible, wins::close_chats, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::take_shot,
         ])
         .setup(move |app| {
@@ -279,7 +300,8 @@ mod tests {
     #[test]
     fn 開網址只准白名單() {
         assert!(open_allowed("https://irori.web.app/"));
-        for bad in ["https://irori.web.app", "https://irori.web.app/x", "http://irori.web.app/", "https://evil.example/", "calc.exe", "https://irori.web.app/ & calc", ""] {
+        assert!(open_allowed("https://policy-tw.web.app") && open_allowed("https://islandmade.app"));
+        for bad in ["https://irori.web.app", "https://irori.web.app/x", "http://irori.web.app/", "https://evil.example/", "calc.exe", "https://irori.web.app/ & calc", "https://policy-tw.web.app/x", "https://islandmade.app.evil.example/", "http://islandmade.app", ""] {
             assert!(!open_allowed(bad), "{bad}");
         }
     }

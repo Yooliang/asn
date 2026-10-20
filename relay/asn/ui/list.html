@@ -19,7 +19,7 @@
   <div class="shell" :class="{ merged: ui.mode === 'merged' }">
   <div class="pane list-pane">
     <div class="me">
-      <div class="dp" :class="'st-' + me.status" :style="{ '--h': 205 }"><span>{{ initial(me.nick) }}</span></div>
+      <div class="dp" :class="'st-' + me.status" :style="{ '--h': 205 }"><span><img :src="meAv" alt=""></span></div>
       <div class="me-info">
         <div class="me-row">
           <input class="ghost nick-input" v-model="me.nick" maxlength="40" aria-label="我的暱稱（也是對外的名字）" @change="commitNick" @keydown.enter="$event.target.blur()">
@@ -67,7 +67,7 @@
               <ul v-show="!collapsed[g.key]">
                 <li v-for="c in g.items" :key="c.id">
                   <button class="buddy" :class="{ offline: c.status === 'offline' }" @click="openChat(c.id)">
-                    <span class="dot" :class="'st-' + c.status"></span>
+                    <span class="dp xs" :class="'st-' + c.status"><span><img :src="avOf(c)" alt=""></span></span>
                     <span class="b-text">
                       <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-st" v-if="statusNote(c.status)">{{ statusNote(c.status) }}</span></span>
                       <span class="b-psm" v-if="c.psm" v-html="emo(c.psm)"></span>
@@ -93,7 +93,7 @@
           <ul>
             <li v-for="(n, i) in notices" :key="i">
               <button class="buddy" @click="openChat(n.cid)">
-                <span class="dot st-online"></span>
+                <span class="dp xs st-online"><span><img :src="avById(n.cid)" alt=""></span></span>
                 <span class="b-text"><span class="b-line"><span class="b-nick" v-html="emo(n.who)"></span><span class="b-st">{{ fmtTime(n.t) }}</span></span><span class="b-psm" v-html="emo(n.line)"></span></span>
               </button>
             </li>
@@ -101,6 +101,18 @@
           <div class="empty-list" v-if="!notices.length">還沒有通知。</div>
         </div>
         <div class="list settings" v-else>
+          <div class="av-set">
+            <b>大頭貼</b>
+            <div class="av-row">
+              <div class="dp" :class="'st-' + me.status"><span><img :src="meAv" alt="我的大頭貼"></span></div>
+              <div class="av-btns">
+                <button class="aero-btn" type="button" @click="avFile.click()" :disabled="avBusy">選擇圖片…</button>
+                <button class="aero-btn" type="button" @click="removeAvatar" :disabled="avBusy || !selfHasUpload">移除，改回自動產生</button>
+              </div>
+            </div>
+            <input ref="avFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden @change="pickAvatar">
+            <small role="status">{{ avMsg || (selfHasUpload ? '目前用的是這台設備上傳的大頭貼。' : '目前用的是自動產生的大頭貼。') }}</small>
+          </div>
           <div><button class="aero-btn" @click="soundOn = !soundOn" :aria-pressed="soundOn">音效：{{ soundOn ? '開' : '關' }}</button></div>
           <label>視窗模式
             <select class="set-sel" :value="ui.mode" @change="setMode($event.target.value)" aria-label="視窗模式"><option v-for="m in MODES" :key="m" :value="m">{{ MODE_LABEL[m] }}</option></select>
@@ -145,7 +157,7 @@
       </div>
     </div>
     <div class="chat-stack">
-      <chat-pane v-for="t in mergedTabs" :key="t.id" v-show="t.id === ui.active" :friend="t" :me="me" :log="logs[t.id] || []" :dp-mode="ui.dpMode" :bubble="ui.bubble" :toolbar="ui.toolbar" :dp-collapsed="ui.collapsed" :active="t.id === ui.active"
+      <chat-pane v-for="t in mergedTabs" :key="t.id" v-show="t.id === ui.active" :friend="t" :me="me" :log="logs[t.id] || []" :friend-av="avOf(t)" :me-av="meAv" :dp-mode="ui.dpMode" :bubble="ui.bubble" :toolbar="ui.toolbar" :dp-collapsed="ui.collapsed" :active="t.id === ui.active"
         @send="text => sendTo(t.id, text)" @nudge="nudgeTo(t.id)" @toggle-dp="toggleDp"></chat-pane>
       <div class="pane" v-if="!mergedTabs.length"><div class="empty-chat">從左邊的名單點一位好友，開始聊天。</div></div>
     </div>

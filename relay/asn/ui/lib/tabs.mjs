@@ -85,17 +85,30 @@ export function groupRows(rooms) {
   return rows.sort((a, b) => b.at - a.at)
 }
 
-// ---------- 底部廣告：全是 Irori 自家的宣傳，事實出處見 README、docs/HANDOFF.md、android/README.md ----------
-// url 只能是 repo 文件寫明的公開網址，且必須同時列在 Rust 端 lib.rs 的 OPEN_ALLOW。
+// ---------- 底部廣告：自家產品宣傳＋一則招租，輪播。不用任何 AdSense 或外部廣告程式碼 ----------
+// 文案的事實出處：希緒＝README／docs/HANDOFF.md；正見＝Yooliang/policy-tw 的 README（政見追蹤平台、每筆都附來源網址）；
+// 島作＝Yooliang/IslandMade 的 README（繁體中文的 AI 作品介紹與評論網站，聚焦台灣開發者）。每則一句標語＋一個短按鈕字。
+// url 只能是下面列的公開網址，且必須同時列在 Rust 端 lib.rs 的 OPEN_ALLOW（有測試比對兩邊一致）。
+// 招租的聯絡方式還沒給：AD_CONTACT_URL 是空字串時，招租那則照常輪播顯示，但按鈕不可點、不會開任何網址；
+// 之後填上網址時要同步加進 lib.rs 的 OPEN_ALLOW。
+export const AD_CONTACT_URL = ''
 export const ADS = [
   { key: 'shio', badge: 'NEW', title: '認識希緒', sub: '住在 3D 家裡、陪你聊天的 AI 角色', cta: '去看看', url: 'https://irori.web.app/', hue: 205 },
-  { key: 'android', badge: 'NEW', title: 'Irori Android 版', sub: '手機上也能找希緒說話', cta: '看看希緒', url: 'https://irori.web.app/', hue: 150 },
+  { key: 'policy', badge: '', title: '正見', sub: '追蹤政見做到多少，附來源', cta: '看看', url: 'https://policy-tw.web.app', hue: 170 },
+  { key: 'islandmade', badge: '', title: '島作', sub: '台灣開發者做的 AI 作品介紹', cta: '逛逛', url: 'https://islandmade.app', hue: 150 },
   { key: 'devlog', badge: '', title: '開發日誌', sub: '每次改動都有截圖可以看', cta: '翻翻看', url: 'https://irori.web.app/dev/shots/', hue: 28 },
-  { key: 'relay', badge: '', title: 'ASN 即時通', sub: '跟你的 Claude 視窗用收發室傳話', cta: '', url: '', hue: 265 },
+  { key: 'rent', badge: '', title: '廣告位招租', sub: '這個位置可以放你的廣告', cta: '洽詢', url: AD_CONTACT_URL, hue: 48 },
 ]
 export const AD_MS = 6000
 export const nextAd = (i, n = ADS.length) => (n > 0 ? (i + 1) % n : 0)
 export const adUrls = () => [...new Set(ADS.map(a => a.url).filter(Boolean))]
+// 點廣告：有網址才呼叫 open（桌面版＝Rust 的 open_url，再比對白名單）；沒有網址（招租尚未填聯絡方式、純文字那種）什麼都不做
+export function openAdWith(ad, open) {
+  const u = typeof ad?.url === 'string' ? ad.url : ''
+  if (!u) return false
+  open(u)
+  return true
+}
 
 // ---------- 設備頁裡的分組 ----------
 // mode＝'status'：線上／忙碌／暫離／離線；mode＝'engine'：Claude／Gemini／Grok…（沒回報類型的歸「其他」，排最後）。空的組不列。

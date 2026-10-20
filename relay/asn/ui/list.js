@@ -1,10 +1,12 @@
 // 好友名單視窗：同時是整個程式的「樞紐」——AsnCore 跑在這裡，對話視窗與提示視窗只顯示、用事件下指令。
 // 關掉這扇＝結束程式（Rust 端處理）。
 import { AsnCore } from './lib/core.mjs'
-import { ADS, AD_MS, FIXED_TABS, addNotice, fmtTime, groupHeading, groupRows, moreUnread, nextAd, statusNote } from './lib/tabs.mjs'
+import { ADS, AD_MS, FIXED_TABS, addNotice, fmtTime, groupHeading, groupRows, moreUnread, nextAd, openAdWith, statusNote } from './lib/tabs.mjs'
 import { DIMS, groupItems, groupOptions, loadDims, pageItems, pageTabs, withTabDim } from './lib/dims.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
+import { avatarFor, avatarSrc, friendlyAvatarError, isAvatarDataUrl, selfAvatarSrc, blockieDataUrl } from './lib/avatar.mjs'
+import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, closeTab, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, openTab, switchMode, tabVisible, toggleCollapsed } from './lib/merge.mjs'
 import { ctl, emit, invoke, listen, store, transport } from './lib/tauri.mjs'
 
@@ -76,6 +78,12 @@ const sync = () => {
 const logs = reactive({})   // 整合模式的分頁直接讀這份；分開模式的對話視窗走 asn:log 事件
 const pushLog = id => { const l = core.logOf(id).slice(-200); logs[id] = l; emit('asn:log', { id, log: l }) }
 
+// 設備大頭貼：節點 → data URL。好友顯示用哪張由 avatar.mjs 的規則決定（AI 視窗一律自動產生；名單外的寄件人用他那台設備的圖）
+const avatars = ref({})
+core.on('avatars', () => { avatars.value = core.avatarMap(); emit('asn:avatars', avatars.value) })
+const avOf = f => avatarSrc(f, { avatars: avatars.value })
+const meAv = computed(() => selfAvatarSrc({ selfNode: info.node, windowName: info.window_name, avatars: avatars.value }))
+
 core.on('state', sync)
 core.on('log', pushLog)
 const notices = ref([])
@@ -87,7 +95,7 @@ core.on('notify', n => {
   if (n.kind === 'msg' || n.kind === 'nudge') notices.value = addNotice(notices.value, { cid: n.friend.id, who: plain(n.friend.nick), line: n.line, kind: n.kind })
   if (n.sound && soundOn.value && me.status !== 'busy') SOUNDS[n.sound]?.()
   if (n.shake) void invoke('shake', { id: n.friend.id, main: ui.mode === 'merged' })   // 整合模式抖整個主視窗
-  if (n.toast) void invoke('show_toast', { toast: { cid: n.friend.id, title: plain(n.friend.nick), line: n.line, status: n.friend.status, hue: n.friend.hue, dp: n.friend.dp } })
+  if (n.toast) void invoke('show_toast', { toast: { cid: n.friend.id, title: plain(n.friend.nick), line: n.line, status: n.friend.status, hue: n.friend.hue, dp: n.friend.dp, av: (a => (a.kind === 'upload' ? a.src : null))(avatarFor(n.friend, { avatars: avatars.value })) } })
 })
 
 async function openChat(id) {
@@ -106,7 +114,7 @@ async function openChat(id) {
 
 // 對話視窗的指令
 await listen('asn:cmd', async c => {
-  if (c.op === 'hello') { sync(); pushLog(c.id); core.markRead(c.id) }
+  if (c.op === 'hello') { sync(); emit('asn:avatars', avatars.value); pushLog(c.id); core.markRead(c.id) }
   else if (c.op === 'read') core.markRead(c.id)
   else if (c.op === 'dp') ui.collapsed = toggleCollapsed(ui.collapsed)
   else if (c.op === 'send') { const r = await core.send(c.id, c.text); if (!r.ok) console.info('[ASN] send failed', r.error) }
@@ -157,7 +165,9 @@ const shotTab = ref(dims.tabDim === 'device' ? info.node : '')
 const app = createApp({
   setup() {
     const tab = shotTab, moreOpen = ref(false), adI = ref(0)
-    setInterval(() => { adI.value = nextAd(adI.value) }, AD_MS)
+    // --shot 模式可用設定檔的 shotAd 固定停在某一則廣告（截圖用）；平常照常輪播
+    if (info.shot && Number.isInteger(savedMe.shotAd)) adI.value = savedMe.shotAd
+    else setInterval(() => { adI.value = nextAd(adI.value) }, AD_MS)
     setInterval(() => void refreshRooms(), 60_000)
     void refreshRooms()
     const query = ref(''), nickErr = ref('')
@@ -175,7 +185,7 @@ const app = createApp({
       return groupItems(items, dims.groupDim, { selfNode: info.node })
     })
     const emptyText = computed(() => (query.value.trim() ? '沒有符合的聯絡人。' : conn.value !== 'on' ? '還沒連上收發室。' : '這一頁目前沒有視窗。'))
-    const openAd = a => { if (a.url) void invoke('open_url', { url: a.url }) }
+    const openAd = a => openAdWith(a, url => void invoke('open_url', { url }))
     // 改最上面的暱稱＝改對外名字；Rust 端驗證，不合法就還原並提示
     const commitNick = async () => {
       const want = String(me.nick ?? '').trim()
@@ -183,8 +193,28 @@ const app = createApp({
       try { await invoke('set_window_name', { name: want }); location.reload() }
       catch (e) { me.nick = info.window_name; nickErr.value = e.message; setTimeout(() => { nickErr.value = '' }, 5000) }
     }
+    // 設定頁「大頭貼」：選圖 → 前端裁成正方形縮成 96×96（webp／png，≤ 32 KB）→ 上傳；也可以移除改回自動產生
+    const avBusy = ref(false), avMsg = ref(''), avFile = ref(null)
+    const selfHasUpload = computed(() => isAvatarDataUrl(avatars.value[info.node]))
+    const say = t => { avMsg.value = t; setTimeout(() => { if (avMsg.value === t) avMsg.value = '' }, 6000) }
+    async function pickAvatar(ev) {
+      const file = ev.target.files?.[0]; ev.target.value = ''
+      if (!file) return
+      avBusy.value = true
+      try {
+        const url = await avatarFromFile(file)
+        const r = await core.setSelfAvatar(url)
+        say(r.ok ? '大頭貼已更新。' : friendlyAvatarError(r.error))
+      } catch (e) { say(e.message) } finally { avBusy.value = false }
+    }
+    async function removeAvatar() {
+      avBusy.value = true
+      try { const r = await core.setSelfAvatar(null); say(r.ok ? '已移除，改回自動產生。' : friendlyAvatarError(r.error)) } finally { avBusy.value = false }
+    }
+    const avById = id => { const f = friends.value.find(x => x.id === id); return f ? avOf(f) : blockieDataUrl(id) }
     const mergedTabs = computed(() => ui.tabs.map(id => friends.value.find(f => f.id === id)).filter(Boolean))
     return {
+      avOf, avById, meAv, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar,
       ui, MODES, MODE_LABEL, DP_MODES, DP_LABEL, BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, normalizeDpMode, normalizeBubble, setMode, mergedTabs, logs, sendTo, nudgeTo, activateTab, closeChatTab, toggleDp, plain,
       STATUS, CONN_LABEL, FIXED_TABS, ADS, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, soundOn, friends, conn, shown, query, collapsed, nickErr, commitNick,
       tab, adI, rooms, roomsErr, notices, emptyText, openAd, groupHeading, statusNote, fmtTime,
@@ -216,7 +246,7 @@ if (info.shot) {
   await invoke('take_shot')
   // 逐頁籤截圖：本機、第二台設備、群組、通知、設定
   const p = pages.value.all
-  for (const [name, key] of [['local', p[0]?.key], ['device', p[1]?.key], ['groups', 'groups'], ['notices', 'notices'], ['settings', 'settings']]) {
+  for (const [name, key] of [['local', p[0]?.key], ['device', p[1]?.key], ['last', p.at(-1)?.key], ['groups', 'groups'], ['notices', 'notices'], ['settings', 'settings']]) {
     if (!key) continue
     shotTab.value = key
     await sleep(500)
