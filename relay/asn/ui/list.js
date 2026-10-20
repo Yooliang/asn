@@ -5,10 +5,11 @@ import { ADS, AD_MS, FIXED_TABS, addNotice, fmtTime, groupHeading, groupRows, mo
 import { DIMS, groupItems, groupOptions, loadDims, pageItems, pageTabs, withTabDim } from './lib/dims.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
-import { avatarFor, avatarSrc, friendlyAvatarError, isAvatarDataUrl, selfAvatarSrc, blockieDataUrl } from './lib/avatar.mjs'
+import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatarFile, selfAvatarSrc, blockieDataUrl } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, closeTab, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, openTab, switchMode, tabVisible, toggleCollapsed } from './lib/merge.mjs'
-import { ctl, emit, invoke, listen, store, transport } from './lib/tauri.mjs'
+import { FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_LABEL, normalizeFrame, soundChoice, soundFromChoice, soundFromSaved } from './lib/prefs.mjs'
+import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, resizeFrom, store, transport } from './lib/tauri.mjs'
 
 const { createApp, reactive, ref, computed, watch } = Vue
 const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯示為離線' }
@@ -46,7 +47,9 @@ const meStore = store('me')
 const savedMe = (await meStore.load()) ?? {}
 // 暱稱＝視窗名＝對外名字；以 Rust 端現用名為準，不再從存檔讀
 const me = reactive({ psm: '', status: 'online', ...savedMe.me, nick: info.window_name })
-const soundOn = ref(savedMe.sound !== false)
+const soundOn = ref(soundFromSaved(savedMe.sound))
+const frame = ref(normalizeFrame(savedMe.frame))   // 視窗外框：自訂（預設，含舊存檔）／Windows 原生；Rust 端開視窗時讀同一份存檔
+await initFrame()
 const dims = reactive(loadDims(savedMe))   // 分頁依（設備／廠商／狀態）與分組依；舊存檔的 groupMode 在這裡轉換
 
 // 視窗模式：分開（每位好友一扇對話視窗）／整合（一個視窗，右邊是對話分頁）。tabs／active 只在整合模式用，不存檔
@@ -156,7 +159,7 @@ if (ui.mode === 'merged') await invoke('main_layout', { merged: true, w: sizes.m
 await listen('relay-bell', () => void core.pull('bell'))   // Rust 端的 Realtime 門鈴
 await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 
-watch([me, soundOn, dims, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, sizes], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, sound: soundOn.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, splitSize: sizes.split, mergedSize: sizes.merged }); sync() }, { deep: true })
+watch([me, soundOn, frame, dims, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, sizes], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, sound: soundOn.value, frame: frame.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, splitSize: sizes.split, mergedSize: sizes.merged }); sync() }, { deep: true })
 // 設定頁改「分頁依」：分組若撞到自動換成剩下兩個裡的第一個
 const setTabDim = v => Object.assign(dims, withTabDim(dims, v))
 const pages = computed(() => pageTabs(friends.value, dims.tabDim, { selfNode: info.node, nodeOrder: nodeOrder.value }))
@@ -197,23 +200,27 @@ const app = createApp({
     const avBusy = ref(false), avMsg = ref(''), avFile = ref(null)
     const selfHasUpload = computed(() => isAvatarDataUrl(avatars.value[info.node]))
     const say = t => { avMsg.value = t; setTimeout(() => { if (avMsg.value === t) avMsg.value = '' }, 6000) }
+    const avMenu = ref(false)
+    const avApi = { toDataUrl: avatarFromFile, setAvatar: v => core.setSelfAvatar(v) }
     async function pickAvatar(ev) {
       const file = ev.target.files?.[0]; ev.target.value = ''
       if (!file) return
       avBusy.value = true
-      try {
-        const url = await avatarFromFile(file)
-        const r = await core.setSelfAvatar(url)
-        say(r.ok ? '大頭貼已更新。' : friendlyAvatarError(r.error))
-      } catch (e) { say(e.message) } finally { avBusy.value = false }
+      try { say((await uploadAvatarFile(file, avApi)).message) } finally { avBusy.value = false }
     }
     async function removeAvatar() {
       avBusy.value = true
-      try { const r = await core.setSelfAvatar(null); say(r.ok ? '已移除，改回自動產生。' : friendlyAvatarError(r.error)) } finally { avBusy.value = false }
+      try { say((await removeAvatarUpload(avApi)).message) } finally { avBusy.value = false }
+    }
+    // 設定頁改「視窗外框」：Rust 端立刻改所有視窗的外框並通知各視窗的頁面換樣式
+    const setFrame = async v => {
+      frame.value = normalizeFrame(v)
+      try { await invoke('set_frame', { native: frame.value === 'native' }) } catch (e) { say(e.message) }
     }
     const avById = id => { const f = friends.value.find(x => x.id === id); return f ? avOf(f) : blockieDataUrl(id) }
     const mergedTabs = computed(() => ui.tabs.map(id => friends.value.find(f => f.id === id)).filter(Boolean))
     return {
+      frame, FRAMES, FRAME_LABEL, setFrame, SOUND_CHOICES, SOUND_LABEL, soundChoice, soundFromChoice, RESIZE_DIRS, resizeFrom, avMenu,
       avOf, avById, meAv, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar,
       ui, MODES, MODE_LABEL, DP_MODES, DP_LABEL, BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, normalizeDpMode, normalizeBubble, setMode, mergedTabs, logs, sendTo, nudgeTo, activateTab, closeChatTab, toggleDp, plain,
       STATUS, CONN_LABEL, FIXED_TABS, ADS, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, soundOn, friends, conn, shown, query, collapsed, nickErr, commitNick,

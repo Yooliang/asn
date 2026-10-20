@@ -8,6 +8,7 @@
 </head>
 <body>
 <div id="app" class="win" v-cloak>
+  <i class="rz" v-for="d in RESIZE_DIRS" :key="d" :class="'rz-' + d" @mousedown.left.prevent="resizeFrom(d)"></i>
   <header class="titlebar" data-tauri-drag-region>
     <span class="t-icon"></span>
     <span class="t-text">{{ f ? plain(f.nick) + ' - 對話' : '對話' }}</span>

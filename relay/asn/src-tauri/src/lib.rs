@@ -219,18 +219,23 @@ pub fn run() {
         }
     }
 
+    let frame_data_dir = data_dir.clone();
     let state = App { relay: relay_obj.clone(), init_error, node: node.clone(), work_dir: work_dir.clone(), data_dir, shot };
     let anon_url = relay_obj.as_ref().zip(anon).and_then(|(r, a)| bell::ws_url(r.base(), &a));
 
     let app = tauri::Builder::default()
         .manage(state)
         .manage(wins::Slots::default())
+        .manage(wins::Frame::default())
         .invoke_handler(tauri::generate_handler![
             startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_avatar, relay_set_avatar, relay_rooms, open_url, set_window_name, store_load, store_save, quit_app,
-            wins::open_chat, wins::chat_visible, wins::close_chats, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::take_shot,
+            wins::open_chat, wins::chat_visible, wins::close_chats, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
+            // 視窗外框設定存在前端的 asn-me.json；沒有或壞掉就是自訂外框
+            let native = std::fs::read_to_string(frame_data_dir.join("asn-me.json")).map(|t| wins::native_from_saved(&t)).unwrap_or(false);
+            wins::init_frame(&handle, native);
             if let Some(r) = relay_obj.clone() {
                 // 心跳：每 30 秒寫一次（格式同 self-recv.mjs），pid 用本程式
                 let wd = work_dir.clone();

@@ -151,3 +151,21 @@ export function friendlyAvatarError(message) {
   if (/連線失敗/.test(m)) return '連不上收發室，請稍後再試。'
   return `上傳沒有成功：${m}`
 }
+
+// ---------- 換大頭貼的流程（設定頁與名單最上面自己的大頭貼共用） ----------
+// 選到圖 → toDataUrl（裁正方形、縮 96×96、≤ 32 KB）→ setAvatar（上傳）；回 { ok, message }，message 是給人看的中文
+export async function uploadAvatarFile(file, { toDataUrl, setAvatar }) {
+  if (!file) return { ok: false, message: '' }
+  try {
+    const url = await toDataUrl(file)
+    const r = await setAvatar(url)
+    return r.ok ? { ok: true, message: '大頭貼已更新。' } : { ok: false, message: friendlyAvatarError(r.error) }
+  } catch (e) { return { ok: false, message: e.message } }
+}
+// 移除上傳的圖，改回自動產生
+export async function removeAvatarUpload({ setAvatar }) {
+  try {
+    const r = await setAvatar(null)
+    return r.ok ? { ok: true, message: '已移除，改回自動產生。' } : { ok: false, message: friendlyAvatarError(r.error) }
+  } catch (e) { return { ok: false, message: e.message } }
+}
