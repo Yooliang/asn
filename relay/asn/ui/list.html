@@ -216,7 +216,7 @@
     </ul>
     <div class="chat-stack">
       <chat-pane v-for="t in mergedTabs" :key="t.id" v-show="view === 'chat' && t.id === ui.active" :friend="t" :me="me" :log="logs[t.id] || []" :friend-av="avOf(t)" :me-av="meAv" :win-mode="ui.mode" :dp-mode="ui.dpMode" :bubble="ui.bubble" :toolbar="ui.toolbar" :dp-collapsed="ui.collapsed" :active="view === 'chat' && t.id === ui.active" :voice="voice"
-        :photo-api="photoApi" @send="text => sendTo(t.id, text)" @nudge="nudgeTo(t.id)" @attach="(p, cap) => sendAttachTo(t.id, p, cap)" @toggle-dp="toggleDp"></chat-pane>
+        :photo-api="photoApi" :shot-api="shotApi" @send="text => sendTo(t.id, text)" @nudge="nudgeTo(t.id)" @attach="(p, cap) => sendAttachTo(t.id, p, cap)" @toggle-dp="toggleDp"></chat-pane>
       <div class="pane home-pane" v-if="view === 'home'">
         <div class="hero" role="region" aria-label="宣傳" aria-roledescription="輪播">
           <section v-for="(a, i) in ADS" :key="a.key" v-show="i === adI" class="hero-slide" :style="{ '--h': a.hue }" :aria-label="a.title + '：' + a.sub">

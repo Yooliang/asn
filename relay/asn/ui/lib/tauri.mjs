@@ -24,6 +24,15 @@ export const photoApi = {
   fetch: id => invoke('relay_attachment_fetch', { id }),   // → { name, mime, data_url }
   save: id => invoke('relay_attachment_save', { id }),     // → 存檔路徑（下載\ASN）
 }
+// 截圖（Rust 端隱藏 ASN 視窗、擷取所有螢幕、開框選視窗）：capture 回 PNG 的 Blob，使用者取消回 null；Linux 版 supported 為 false（按鈕隱藏）
+export const shotApi = {
+  supported: () => invoke('shot_supported').catch(() => false),
+  capture: async () => {
+    const r = await invoke('shot_begin')
+    const bytes = r instanceof ArrayBuffer ? new Uint8Array(r) : Array.isArray(r) ? Uint8Array.from(r) : new Uint8Array(0)
+    return bytes.length ? new Blob([bytes], { type: 'image/png' }) : null
+  },
+}
 export const store = name => ({
   load: async () => { const s = await invoke('store_load', { name }); try { return s ? JSON.parse(s) : null } catch { return null } },
   save: data => invoke('store_save', { name, text: JSON.stringify(data) }),
