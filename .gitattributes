@@ -1,7 +1,4 @@
 *.bat text eol=crlf
-*.vrm binary
-*.glb binary
-*.jpg binary
 
 # relay/machine 的程式會在 Linux（Aegis 主機）上跑：一律 LF
 relay/machine/**/*.mjs text eol=lf
