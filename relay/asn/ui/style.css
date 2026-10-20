@@ -237,6 +237,11 @@ html.toast-page,html.toast-page body{background:transparent}
 .ctab-name{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ctab-x{flex:none;width:18px;height:18px;padding:0;border:0;border-radius:3px;background:transparent;color:var(--muted);font-size:10px;cursor:pointer}
 .ctab-x:hover{background:var(--close);color:#fff}
+.ctab.pinned{max-width:52px;padding:0 6px;justify-content:center}
+.ctab.pinned .pin-av{flex:none}
+.ctab.pinned .unread{position:absolute;top:2px;right:2px;margin:0}
+.ctab.pinned{position:relative}
+.ctab-menu{position:absolute;right:8px;top:100%;z-index:40;margin-top:2px}
 .chat-stack{flex:1;min-height:0;display:flex;flex-direction:column}
 .chat-stack > .pane{flex:1;min-height:0;border-top-left-radius:0}
 

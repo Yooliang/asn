@@ -9,7 +9,8 @@ import { emo, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
 import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatarFile, selfAvatarSrc } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
-import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, closeTab, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, openTab, switchMode, tabVisible, toggleCollapsed } from './lib/merge.mjs'
+import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, switchMode, tabVisible, toggleCollapsed } from './lib/merge.mjs'
+import { closeAllChatTabs, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
 import { FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_LABEL, normalizeFrame, soundChoice, soundFromChoice, soundFromSaved } from './lib/prefs.mjs'
 import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, store, transport } from './lib/tauri.mjs'
 import { createMic } from './lib/mic.mjs'
@@ -61,7 +62,8 @@ const dims = reactive(loadDims(savedMe))   // 分頁依（設備／廠商／狀�
 
 // 視窗模式：分開（每位好友一扇對話視窗）／整合（一個視窗，右邊是對話分頁）。tabs／active 只在整合模式用，不存檔
 // 視窗模式、頭像模式（左／右／整合）、文字底色（透明／色彩／自動）三個設定彼此獨立，分離與整合視窗都有效
-const ui = reactive({ mode: normalizeMode(savedMe.winMode), ...normalizeLook(savedMe), tabs: [], active: '', guide: '', showGuide: false })
+const pinnedChat = normalizePinned(savedMe.pinnedChat)
+const ui = reactive({ mode: normalizeMode(savedMe.winMode), ...normalizeLook(savedMe), tabs: [], active: '', pinnedChat, guide: '', showGuide: false })
 const sizes = reactive({ split: normalizeSize(savedMe.splitSize, 'split'), merged: normalizeSize(savedMe.mergedSize, 'merged') })
 const winSize = () => ({ w: window.innerWidth, h: window.innerHeight })
 let switching = false
@@ -114,7 +116,7 @@ async function openChat(id) {
   const f = core.friends.get(id); if (!f) return
   core.markRead(id)
   if (ui.mode === 'merged') {   // 整合模式：在右邊開分頁（或切過去），不開新視窗
-    Object.assign(ui, openTab(ui, id), hideGuide(ui))
+    Object.assign(ui, openChatTab(ui, id, ui.pinnedChat), hideGuide(ui))
     pushLog(id)
     await invoke('show_main')
     sync()
@@ -137,7 +139,8 @@ const sendTo = async (id, text) => { const r = await core.send(id, text); if (!r
 const nudgeTo = id => core.nudge(id)
 const sendAttachTo = async (id, item, caption) => { const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
 const activateTab = id => { ui.active = id; Object.assign(ui, hideGuide(ui)); core.markRead(id); sync() }
-const closeChatTab = id => { Object.assign(ui, closeTab(ui, id)); if (ui.active) core.markRead(ui.active); sync() }
+const closeOneChatTab = id => { Object.assign(ui, closeChatTab(ui, id)); if (ui.active) core.markRead(ui.active); sync() }
+const applyChatTabClose = patch => { Object.assign(ui, patch); if (ui.active) core.markRead(ui.active); sync() }
 const toggleDp = () => { ui.collapsed = toggleCollapsed(ui.collapsed) }
 
 // 切換視窗模式：已開的對話接得上（分開→整合：對話視窗關掉變分頁；整合→分開：分頁開成視窗）
@@ -152,7 +155,7 @@ async function setMode(to) {
     const plan = switchMode(from, to, { tabs: ui.tabs, active: ui.active, windowIds: closed })
     ui.mode = to
     ui.showGuide = false
-    ui.tabs = plan.tabs; ui.active = plan.active
+    ui.tabs = orderTabs(plan.tabs, ui.pinnedChat); ui.active = plan.active
     await invoke('main_layout', { merged: to === 'merged', w: sizes[to].w, h: sizes[to].h, recenter: false })
     if (ui.active) core.markRead(ui.active)
     for (const id of plan.openWindows) await openChat(id)
@@ -171,7 +174,7 @@ if (ui.mode === 'merged') await invoke('main_layout', { merged: true, w: sizes.m
 await listen('relay-bell', () => void core.pull('bell'))   // Rust 端的 Realtime 門鈴
 await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 
-watch([me, soundOn, frame, dims, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, sizes], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, sound: soundOn.value, frame: frame.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, splitSize: sizes.split, mergedSize: sizes.merged }); sync() }, { deep: true })
+watch([me, soundOn, frame, dims, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, sound: soundOn.value, frame: frame.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged }); sync() }, { deep: true })
 // 設定頁改「分頁依」：分組若撞到自動換成剩下兩個裡的第一個
 const setTabDim = v => Object.assign(dims, withTabDim(dims, v))
 const pages = computed(() => pageTabs(friends.value, dims.tabDim, { selfNode: info.node, nodeOrder: nodeOrder.value }))
@@ -244,6 +247,18 @@ const app = createApp({
     const closeGuideView = () => Object.assign(ui, closeGuide())
     const showHome = () => Object.assign(ui, hideGuide(ui))
     const mergedTabs = computed(() => ui.tabs.map(id => friends.value.find(f => f.id === id)).filter(Boolean))
+    const chatTabMenu = ref('')
+    const chatTabMenuPin = computed(() => (chatTabMenu.value ? isPinned(chatTabMenu.value, ui.pinnedChat) : false))
+    const closeChatTabMenu = () => { chatTabMenu.value = '' }
+    const openChatTabMenu = id => { chatTabMenu.value = id }
+    const tabPinLabel = computed(() => (chatTabMenuPin.value ? '取消固定分頁' : '固定分頁'))
+    const runTabMenu = fn => { const id = chatTabMenu.value; closeChatTabMenu(); if (id) fn(id) }
+    const menuCloseTab = () => runTabMenu(id => applyChatTabClose(closeChatTab(ui, id)))
+    const menuCloseOther = () => runTabMenu(id => applyChatTabClose(closeOtherChatTabs(ui, id, ui.pinnedChat)))
+    const menuCloseRight = () => runTabMenu(id => applyChatTabClose(closeRightChatTabs(ui, id, ui.pinnedChat)))
+    const menuCloseAll = () => { closeChatTabMenu(); applyChatTabClose(closeAllChatTabs(ui, ui.pinnedChat)) }
+    const menuTogglePin = () => runTabMenu(id => { const r = toggleChatPin(ui, id, ui.pinnedChat); ui.pinnedChat = r.pinned; ui.tabs = r.tabs })
+    const isChatTabPinned = id => isPinned(id, ui.pinnedChat)
     // 設定頁「語音」：改了就寫回 Rust 端（驗證在那裡；失敗就還原成存檔的值並提示）
     const ttsVoices = ref({ enabled: true, voices: [], default: '' }), sttSt = ref(null), voiceMsg = ref('')
     const sttText = computed(() => sttStatusText(sttSt.value))
@@ -267,7 +282,8 @@ const app = createApp({
       version: info.version, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       frame, FRAMES, FRAME_LABEL, setFrame, SOUND_CHOICES, SOUND_LABEL, soundChoice, soundFromChoice, RESIZE_DIRS, resizeFrom, avMenu,
       avOf, meAv, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar,
-      ui, MODES, MODE_LABEL, DP_MODES, DP_LABEL, BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, normalizeDpMode, normalizeBubble, setMode, mergedTabs, logs, sendTo, nudgeTo, sendAttachTo, photoApi, activateTab, closeChatTab, toggleDp, plain,
+      ui, MODES, MODE_LABEL, DP_MODES, DP_LABEL, BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, normalizeDpMode, normalizeBubble, setMode, mergedTabs, logs, sendTo, nudgeTo, sendAttachTo, photoApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
+      chatTabMenu, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuTogglePin, isChatTabPinned,
       STATUS, CONN_LABEL, FIXED_TABS, ADS, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, soundOn, friends, conn, shown, query, collapsed, nickErr, commitNick,
       tab, adI, rooms, roomsErr, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote,
       GUIDES, openedGuide, view, openGuideKey, closeGuideView, showHome,
