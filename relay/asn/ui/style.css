@@ -26,9 +26,12 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .t-icon{width:18px;height:18px;flex:none;pointer-events:none;background:url(img/logo.svg) center/contain no-repeat}
 .brand{font-weight:800;letter-spacing:.06em;font-style:italic}
 .t-btns{display:flex;gap:2px;flex:none}
-.tb{width:26px;height:18px;border-radius:4px;border:1px solid rgba(30,60,100,.5);background:linear-gradient(#f4f9ff 0 45%,#c9dcf0 50%,#dbe9f7);display:grid;place-items:center;font-size:10px;line-height:1;color:#29425e;padding:0;cursor:pointer}
+/* 標題列按鈕：圖示用內嵌 SVG（最小化一條線、最大化有粗上緣的方框、關閉粗叉），大小一致 */
+.tb{width:30px;height:20px;border-radius:4px;border:1px solid rgba(30,60,100,.5);background:linear-gradient(#f4f9ff 0 45%,#c9dcf0 50%,#dbe9f7);display:grid;place-items:center;line-height:1;color:#22405f;padding:0;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(255,255,255,.55)}
+.tb svg{display:block;filter:drop-shadow(0 1px 0 rgba(255,255,255,.7))}
 .tb:hover{filter:brightness(1.06)}
-.tb.close{width:40px;background:linear-gradient(#f0a497 0 45%,var(--close) 50%,#e2624f);color:#fff;border-color:#7c1d14}
+.tb.close svg{filter:drop-shadow(0 1px 1px rgba(80,0,0,.45))}
+.tb.close{width:46px;background:linear-gradient(#f0a497 0 45%,var(--close) 50%,#e2624f);color:#fff;border-color:#7c1d14}
 .tb.close:hover{filter:brightness(1.12)}
 
 .pane{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:3px;overflow:hidden}
@@ -280,3 +283,5 @@ html.toast-page,html.toast-page body{background:transparent}
 /* ---------- 原生外框：Windows 自己畫標題列與邊框，ASN 不再畫 ---------- */
 html.frame-native .titlebar,html.frame-native .rz{display:none}
 html.frame-native .win{padding:6px;border:0;box-shadow:none}
+.ctab.home img{display:block;flex:none}
+.chat-stack > .pane:only-child{background:linear-gradient(var(--panel-head),var(--panel) 80px)}
