@@ -11,6 +11,8 @@ import {
   openChatTab,
   orderTabs,
   toggleChatPin,
+  chatTabSameZone,
+  moveChatTab,
 } from '../ui/lib/ctabs.mjs'
 
 test('固定清單：只收字串、去重、上限', () => {
@@ -70,4 +72,44 @@ test('切換固定：加入或移除並重排', () => {
 test('isPinned', () => {
   assert.equal(isPinned('a', ['a']), true)
   assert.equal(isPinned('b', ['a']), false)
+})
+
+test('同一區：固定與一般分開', () => {
+  assert.equal(chatTabSameZone('a', 'b', ['a']), false)
+  assert.equal(chatTabSameZone('a', 'c', ['a', 'c']), true)
+  assert.equal(chatTabSameZone('x', 'y', []), true)
+})
+
+test('拖曳固定分頁：只改 pinned 順序', () => {
+  const tabs = ['p2', 'p1', 'a', 'b']
+  const pinned = ['p1', 'p2']
+  const r = moveChatTab(tabs, pinned, 'p2', 'p1')
+  assert.deepEqual(r.pinned, ['p2', 'p1'])
+  assert.deepEqual(r.tabs, ['p2', 'p1', 'a', 'b'])
+})
+
+test('拖曳一般分頁：pinned 不變', () => {
+  const tabs = ['p', 'a', 'b', 'c']
+  const pinned = ['p']
+  const r = moveChatTab(tabs, pinned, 'c', 'a')
+  assert.deepEqual(r.pinned, ['p'])
+  assert.deepEqual(r.tabs, ['p', 'c', 'a', 'b'])
+})
+
+test('跨區拖曳：不變', () => {
+  const tabs = ['p', 'a', 'b']
+  const pinned = ['p']
+  const before = moveChatTab(tabs, pinned, 'a', 'p')
+  assert.deepEqual(before, { tabs: ['p', 'a', 'b'], pinned: ['p'] })
+  const after = moveChatTab(tabs, pinned, 'p', 'a')
+  assert.deepEqual(after, { tabs: ['p', 'a', 'b'], pinned: ['p'] })
+})
+
+test('拖到區域最後', () => {
+  const tabs = ['a', 'b', 'c']
+  assert.deepEqual(moveChatTab(tabs, [], 'a', ''), { tabs: ['b', 'c', 'a'], pinned: [] })
+  assert.deepEqual(moveChatTab(['p1', 'p2', 'a'], ['p1', 'p2'], 'p1', null), {
+    pinned: ['p2', 'p1'],
+    tabs: ['p2', 'p1', 'a'],
+  })
 })
