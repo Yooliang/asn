@@ -9,7 +9,7 @@ const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8')
 test('標題：list.html／toast.html 的 <title> 與標題列、tauri.conf.json 都是同一個名字，舊名不留', () => {
   const list = read('../ui/list.html'), toast = read('../ui/toast.html'), conf = JSON.parse(read('../src-tauri/tauri.conf.json'))
   assert.ok(list.includes(`<title>${TITLE}</title>`))
-  assert.ok(list.includes(`<span class="t-text"><span class="brand">${TITLE}</span></span>`))
+  assert.ok(list.includes(`<span class="t-text"><span class="brand">${TITLE} <span class="ver">({{ version }})</span></span></span>`))   // 名單標題列後面接版本號
   assert.ok(toast.includes(`<span class="t-text"><span class="brand">${TITLE}</span></span>`))
   assert.ok(conf.app.windows.some(w => w.title === TITLE))
   for (const [n, t] of [['list.html', list], ['toast.html', toast], ['tauri.conf.json', JSON.stringify(conf)]]) assert.ok(!t.includes('即時通'), `${n} 還有舊名`)
