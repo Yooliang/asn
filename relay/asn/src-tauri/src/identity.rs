@@ -5,7 +5,7 @@ use crate::heartbeat::pid_alive;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub const DEFAULT_URL: &str = "https://hwtahctsgjcemtwzlvnq.supabase.co/functions/v1/irori-relay";
+pub const DEFAULT_URL: &str = "https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay";
 
 pub fn home_dir() -> PathBuf {
     std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from).unwrap_or_default()
@@ -154,6 +154,7 @@ mod tests {
 
     #[test]
     fn base_url_預設值與去尾斜線() {
+        assert_eq!(DEFAULT_URL, "https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay");
         assert_eq!(base_url(None), DEFAULT_URL);
         assert_eq!(base_url(Some("http://127.0.0.1:1/relay//".into())), "http://127.0.0.1:1/relay");
         assert_eq!(base_url(Some("  ".into())), DEFAULT_URL);

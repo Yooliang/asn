@@ -22,7 +22,7 @@ import { processTable } from './engines/claude-identity.mjs'
 import { fileURLToPath } from 'node:url'
 
 const NODE_ID = (process.env.IRORI_RELAY_ID || 'H').trim()
-const BASE_URL = (process.env.IRORI_RELAY_URL || 'https://hwtahctsgjcemtwzlvnq.supabase.co/functions/v1/irori-relay').replace(/\/+$/, '')
+const BASE_URL = (process.env.IRORI_RELAY_URL || 'https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay').replace(/\/+$/, '')
 const HOME_DIR = path.join(os.homedir(), '.irori-relay')
 const WORK_DIR = path.join(HOME_DIR, `machine-${NODE_ID}`)
 const MAILBOX_NAME = process.env.IRORI_MAILBOX_NAME || `${NODE_ID}-收發室`
