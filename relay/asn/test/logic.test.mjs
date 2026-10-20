@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { esc, emo, plain, initial, hasNudge, stripNudge, NUDGE_TAG, hueOf } from '../ui/lib/text.mjs'
-import { buildFriends, mergeFriends, statusOf, isRelayRoom, friendId } from '../ui/lib/roster.mjs'
+import { buildFriends, mergeFriends, statusOf, isRelayRoom, friendId, groupByDevice } from '../ui/lib/roster.mjs'
 import { routeMail } from '../ui/lib/routing.mjs'
 
 const UI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ui')
@@ -87,4 +87,20 @@ test('守門：所有 v-html 都只用 emo(...)', () => {
   }
   assert.ok(count >= 4, `v-html 數量異常：${count}`)
   for (const f of fs.readdirSync(UI).filter(f => f.endsWith('.js'))) assert.ok(!/innerHTML\s*=/.test(fs.readFileSync(path.join(UI, f), 'utf8')), `${f} 不准用 innerHTML`)
+})
+
+test('groupByDevice：一台設備一組、自己那台排第一、組內離線排後、標題用設備名', () => {
+  const ms = [
+    { id: 'w02', name: 'w02', agents: [{ name: 'claude-8b', status: 'idle' }] },
+    { id: 'H', name: '家用機', agents: [{ name: '家用若莉', status: 'busy' }, { name: '家用收發室', status: 'idle' }] },
+    { id: 'aegis', name: '牧陽 Aegis', agents: [{ name: '小牧', status: 'idle' }] },
+  ]
+  const live = buildFriends(ms, { selfNode: 'w02', selfName: 'w02-ASN' })
+  const friends = mergeFriends([{ id: 'w02/舊視窗', node: 'w02', agent: '舊視窗', nick: '舊視窗' }], live)
+  const g = groupByDevice(friends, { selfNode: 'w02' })
+  assert.deepEqual(g.map(x => x.label), ['w02', ...['家用機', '牧陽 Aegis'].sort((a, b) => a.localeCompare(b, 'zh-Hant'))])
+  assert.deepEqual(g[0].items.map(f => [f.nick, f.status]), [['claude-8b', 'online'], ['舊視窗', 'offline']])
+  assert.deepEqual(g.find(x => x.key === 'H').items.map(f => f.nick), ['家用若莉'])
+  const only = groupByDevice(friends, { selfNode: 'w02', match: f => f.nick === '小牧' })
+  assert.deepEqual(only.map(x => x.label), ['牧陽 Aegis'])
 })

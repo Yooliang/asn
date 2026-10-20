@@ -19,7 +19,7 @@ export function buildFriends(members, { selfNode, selfName } = {}) {
       if (isRelayRoom(a.name)) continue
       if (m.id === selfNode && a.name === selfName) continue
       out.push({
-        id: friendId(m.id, a.name), node: m.id, agent: a.name, nick: a.name,
+        id: friendId(m.id, a.name), node: m.id, device: typeof m.name === 'string' && m.name ? m.name : m.id, agent: a.name, nick: a.name,
         psm: a.cwd_label ? `${m.id}／${a.cwd_label}` : m.id,
         engine: a.engine ?? null, status: statusOf(a.status),
       })
@@ -35,4 +35,20 @@ export function mergeFriends(known, live) {
   for (const l of live) map.set(l.id, { ...(map.get(l.id) ?? {}), ...l })
   return [...map.values()].map(f => ({ ...f, hue: hueOf(f.id), dp: initial(f.nick) }))
     .sort((a, b) => a.nick.localeCompare(b.nick, 'zh-Hant'))
+}
+
+// 依設備分組（跟收發室名單一樣一台機器一組）：自己這台排第一，其餘照設備名；組內線上／忙碌在前、離線在後。q＝搜尋字（已轉小寫）
+export function groupByDevice(friends, { selfNode, match = () => true } = {}) {
+  const groups = new Map()
+  for (const f of friends) {
+    if (!match(f)) continue
+    const key = f.node ?? ''
+    if (!groups.has(key)) groups.set(key, { key, label: f.device || key || '其他', items: [] })
+    const g = groups.get(key)
+    if (f.device && g.label === key) g.label = f.device
+    g.items.push(f)
+  }
+  const rank = s => (s === 'offline' ? 1 : 0)
+  for (const g of groups.values()) g.items.sort((a, b) => rank(a.status) - rank(b.status) || a.nick.localeCompare(b.nick, 'zh-Hant'))
+  return [...groups.values()].sort((a, b) => (b.key === selfNode) - (a.key === selfNode) || a.label.localeCompare(b.label, 'zh-Hant'))
 }

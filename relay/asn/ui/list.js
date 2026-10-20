@@ -1,6 +1,7 @@
 // 好友名單視窗：同時是整個程式的「樞紐」——AsnCore 跑在這裡，對話視窗與提示視窗只顯示、用事件下指令。
 // 關掉這扇＝結束程式（Rust 端處理）。
 import { AsnCore } from './lib/core.mjs'
+import { groupByDevice } from './lib/roster.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
 import { ctl, emit, invoke, listen, store, transport } from './lib/tauri.mjs'
 
@@ -88,14 +89,11 @@ watch([me, soundOn], () => { void meStore.save({ me: { ...me }, sound: soundOn.v
 createApp({
   setup() {
     const query = ref(''), settingsOpen = ref(false), nameDraft = ref(info.window_name)
-    const collapsed = reactive({ on: false, off: false })
+    const collapsed = reactive({})
     const groups = computed(() => {
       const q = query.value.trim().toLowerCase()
-      const hit = c => !q || plain(c.nick).toLowerCase().includes(q)
-      return [
-        { key: 'on', label: '線上', items: friends.value.filter(c => c.status !== 'offline' && hit(c)) },
-        { key: 'off', label: '離線', items: friends.value.filter(c => c.status === 'offline' && hit(c)) },
-      ]
+      const match = c => !q || plain(c.nick).toLowerCase().includes(q)
+      return groupByDevice(friends.value, { selfNode: info.node, match })
     })
     const saveName = async () => { await invoke('set_window_name', { name: nameDraft.value.trim() }); location.reload() }
     return {
