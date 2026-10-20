@@ -22,13 +22,19 @@ export function createVoiceUi({ invoke, listen, createMic, createAudio, reactive
 
   const input = new VoiceInput({
     mic: createMic(),
-    transcribe: wav => invoke('stt_transcribe', { wav }),
+    transcribe: async wav => {
+      try { return await invoke('stt_transcribe', { wav }) }
+      catch (e) { if (/還沒下載/.test(e?.message || '')) { sttReady = false; state.install.needed = true }; throw e }
+    },
+    onCancelRecognize: () => { void Promise.resolve().then(() => invoke('stt_cancel')).catch(() => {}) },   // 請 Rust 端結束正在跑的辨識程式
     onState: s => { state.mic.phase = s },
     onNote: t => { state.note = t },
     log,
   })
 
-  let pendingText = null   // 目前這次錄音辨識完要交給誰
+  let sttReady = false     // 確認過辨識已下載就記住，之後的點擊不必再問 stt_status
+  let checkGen = 0, checking = false   // 開始前的 stt_status 檢查（可被再按一下取消）
+  let pendingText = null   // 目前這次錄音辨識完要交給誰（多個面板共用時，交給「按結束」的那個面板）
   input.onText = t => { const f = pendingText; pendingText = null; if (f) f(t) }
 
   let unlisten = null
@@ -50,16 +56,34 @@ export function createVoiceUi({ invoke, listen, createMic, createAudio, reactive
     speakAuto: (key, text) => player.enqueue(key, text),
     stopSpeaking: () => player.stop(),
 
-    /** 麥克風按鈕：第一次用要先下載；之後點一下開始、再點一下結束。辨識完的文字交給 onText（填進輸入框，不送出） */
+    /** 麥克風按鈕：第一次用要先下載；之後點一下開始、再點一下結束；準備中或辨識中再點一下＝取消。
+     *  辨識完的文字交給 onText（填進輸入框，不送出）。狀態只看 VoiceInput 本身，錄音中的點擊不會再等任何東西。 */
     async toggleMic(onText) {
-      if (state.mic.phase === 'idle') {
-        let st
-        try { st = await invoke('stt_status') } catch (e) { state.note = e.message; return }
-        if (!st.ready) { state.install.needed = true; state.note = ''; return }
-        state.install.needed = false
-        pendingText = onText
+      if (input.state !== 'idle') { if (onText) pendingText = onText; return input.toggle() }
+      if (checking) { checkGen++; checking = false; state.mic.phase = 'idle'; state.note = ''; return undefined }   // 還在檢查時又點＝取消
+      if (!sttReady) {
+        const g = ++checkGen
+        checking = true; state.mic.phase = 'starting'; state.note = '準備中…再按一下取消'
+        let st, timer
+        try {
+          const late = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('語音功能沒有回應，請再試一次。')), 5000); timer?.unref?.() })
+          st = await Promise.race([Promise.resolve().then(() => invoke('stt_status')), late])
+        } catch (e) { if (g === checkGen) { checking = false; state.mic.phase = 'idle'; state.note = e.message }; return undefined }
+        finally { clearTimeout(timer) }
+        if (g !== checkGen) return undefined   // 等的時候被取消了
+        checking = false
+        if (!st.ready) { state.mic.phase = 'idle'; state.install.needed = true; state.note = ''; return undefined }
+        sttReady = true
       }
+      state.install.needed = false
+      pendingText = onText
       return input.toggle()
+    },
+    /** 取消（Esc 或再按一下）：準備中／錄音中／辨識中都放棄，結果丟棄 */
+    async cancelMic() {
+      checkGen++; checking = false
+      await input.cancel()
+      state.mic.phase = 'idle'
     },
     /** 按下「下載」：抓辨識引擎與目前選的模型（只下載一次） */
     async installStt() {

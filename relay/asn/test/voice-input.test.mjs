@@ -25,7 +25,7 @@ test('按一下開始、再按一下辨識：文字交給 onText，流程 idle�
   assert.equal(await r.input.toggle(), true)
   assert.equal(r.input.state, 'recording')
   assert.equal(await r.input.toggle(), '你好嗎')
-  assert.deepEqual(r.log, ['recording', 'recognizing', 'idle'])
+  assert.deepEqual(r.log, ['starting', 'recording', 'recognizing', 'idle'])
   assert.deepEqual(r.texts, ['你好嗎'])
   assert.equal(r.input.state, 'idle')
 })
@@ -96,7 +96,7 @@ test('取消：停掉麥克風、什麼都不送', async () => {
   assert.equal(r.wavs.length, 0)
 })
 
-test('辨識中再按：忽略（不重複送）', async () => {
+test('辨識中再按：取消（不重複送、晚到的結果丟掉）', async () => {
   let release
   const r = rig({ take: speech() })
   r.input.transcribe = () => new Promise(res => { release = res })
@@ -104,9 +104,12 @@ test('辨識中再按：忽略（不重複送）', async () => {
   const p = r.input.toggle()
   await new Promise(res => setImmediate(res))
   assert.equal(r.input.state, 'recognizing')
-  assert.equal(await r.input.toggle(), undefined)
+  await r.input.toggle()
+  assert.equal(r.input.state, 'idle')
   release('好')
-  assert.equal(await p, '好')
+  assert.equal(await p, null)
+  assert.equal(r.wavs.length, 0)
+  assert.deepEqual(r.texts, [])
 })
 
 test('錄到上限自動結束', async () => {
