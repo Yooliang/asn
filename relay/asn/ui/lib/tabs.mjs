@@ -1,11 +1,13 @@
-// 名單視窗的頁籤、通知紀錄、群組列與廣告輪播（純邏輯，node 與瀏覽器都能跑）。
+// 名單視窗的頁籤、群組列與廣告輪播（純邏輯，node 與瀏覽器都能跑）。
 
 // 固定在設備頁籤之後的頁籤（群組只有在有唯讀 API 時才放，目前有 room_list）
 export const FIXED_TABS = [
   { key: 'groups', label: '群組' },
-  { key: 'notices', label: '通知' },
+  { key: 'guide', label: '指引' },
   { key: 'settings', label: '設定' },
 ]
+// 名單頁籤的鍵：舊存檔／設定若寫著已拿掉的頁籤（例如通知）或任何不認得的值，一律當沒有，退回名單第一頁
+export const normalizeTab = (key, validKeys = []) => (FIXED_TABS.some(t => t.key === key) || validKeys.includes(key) ? key : '')
 export const DEVICE_TAB_MAX = 6   // 設備頁籤超過 6 個時，第 6 個起收進「更多」
 export const MORE_KEY = 'more'
 
@@ -57,19 +59,6 @@ export function deviceItems(friends, key, match = () => true) {
   return friends.filter(f => (f.node ?? '') === key && match(f)).sort((a, b) => rank(a.status) - rank(b.status) || a.nick.localeCompare(b.nick, 'zh-Hant'))
 }
 
-// ---------- 通知紀錄：新的在前，最多 max 筆 ----------
-export const NOTICE_MAX = 50
-export function addNotice(list, n, { max = NOTICE_MAX, now = Date.now } = {}) {
-  const item = { cid: n.cid, who: String(n.who ?? ''), line: String(n.line ?? ''), kind: n.kind ?? 'msg', t: n.t ?? now() }
-  return [item, ...list].slice(0, max)
-}
-export function fmtTime(t, now = Date.now()) {
-  const d = new Date(t), n = new Date(now)
-  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-  if (d.toDateString() === n.toDateString()) return hm
-  return `${d.getMonth() + 1}/${d.getDate()} ${hm}`
-}
-
 // ---------- 群組列（room_list 的唯讀結果）：最近有動靜的在前 ----------
 export function groupRows(rooms) {
   const rows = []
@@ -85,7 +74,7 @@ export function groupRows(rooms) {
   return rows.sort((a, b) => b.at - a.at)
 }
 
-// ---------- 底部廣告：自家產品宣傳＋一則招租，輪播。不用任何 AdSense 或外部廣告程式碼 ----------
+// ---------- 廣告：底部小輪播與整合模式「開始」頁的大幅輪播共用這份資料。自家產品宣傳＋一則招租，輪播。不用任何 AdSense 或外部廣告程式碼 ----------
 // 文案的事實出處：希緒＝README／docs/HANDOFF.md；正見＝Yooliang/policy-tw 的 README（政見追蹤平台、每筆都附來源網址）；
 // 島作＝Yooliang/IslandMade 的 README（繁體中文的 AI 作品介紹與評論網站，聚焦台灣開發者）。每則一句標語＋一個短按鈕字。
 // url 只能是下面列的公開網址，且必須同時列在 Rust 端 lib.rs 的 OPEN_ALLOW（有測試比對兩邊一致）。
@@ -101,6 +90,11 @@ export const ADS = [
 ]
 export const AD_MS = 6000
 export const nextAd = (i, n = ADS.length) => (n > 0 ? (i + 1) % n : 0)
+export const prevAd = (i, n = ADS.length) => (n > 0 ? (i - 1 + n) % n : 0)
+// 大幅廣告的小圓點：直接跳到第 i 則（超出範圍就夾回合法值）
+export const goAd = (i, n = ADS.length) => (n > 0 && Number.isInteger(i) ? Math.min(Math.max(i, 0), n - 1) : 0)
+// 有網址才可點；招租在聯絡網址還沒給時＝不可點
+export const adClickable = ad => typeof ad?.url === 'string' && ad.url !== ''
 export const adUrls = () => [...new Set(ADS.map(a => a.url).filter(Boolean))]
 // 點廣告：有網址才呼叫 open（桌面版＝Rust 的 open_url，再比對白名單）；沒有網址（招租尚未填聯絡方式、純文字那種）什麼都不做
 export function openAdWith(ad, open) {

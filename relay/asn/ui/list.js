@@ -1,11 +1,12 @@
 // 好友名單視窗：同時是整個程式的「樞紐」——AsnCore 跑在這裡，對話視窗與提示視窗只顯示、用事件下指令。
 // 關掉這扇＝結束程式（Rust 端處理）。
 import { AsnCore } from './lib/core.mjs'
-import { ADS, AD_MS, FIXED_TABS, addNotice, fmtTime, groupHeading, groupRows, moreUnread, nextAd, openAdWith, statusNote } from './lib/tabs.mjs'
+import { ADS, AD_MS, FIXED_TABS, goAd, groupHeading, groupRows, moreUnread, nextAd, normalizeTab, openAdWith, prevAd, statusNote } from './lib/tabs.mjs'
+import { GUIDES, closeGuide, guideByKey, hideGuide, numbered, openGuide, rightView } from './lib/guides.mjs'
 import { DIMS, groupItems, groupOptions, loadDims, pageItems, pageTabs, withTabDim } from './lib/dims.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
-import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatarFile, selfAvatarSrc, blockieDataUrl } from './lib/avatar.mjs'
+import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatarFile, selfAvatarSrc } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, closeTab, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, openTab, switchMode, tabVisible, toggleCollapsed } from './lib/merge.mjs'
 import { FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_LABEL, normalizeFrame, soundChoice, soundFromChoice, soundFromSaved } from './lib/prefs.mjs'
@@ -54,7 +55,7 @@ const dims = reactive(loadDims(savedMe))   // 分頁依（設備／廠商／狀�
 
 // 視窗模式：分開（每位好友一扇對話視窗）／整合（一個視窗，右邊是對話分頁）。tabs／active 只在整合模式用，不存檔
 // 視窗模式、頭像模式（左／右／整合）、文字底色（透明／色彩／自動）三個設定彼此獨立，分離與整合視窗都有效
-const ui = reactive({ mode: normalizeMode(savedMe.winMode), ...normalizeLook(savedMe), tabs: [], active: '' })
+const ui = reactive({ mode: normalizeMode(savedMe.winMode), ...normalizeLook(savedMe), tabs: [], active: '', guide: '', showGuide: false })
 const sizes = reactive({ split: normalizeSize(savedMe.splitSize, 'split'), merged: normalizeSize(savedMe.mergedSize, 'merged') })
 const winSize = () => ({ w: window.innerWidth, h: window.innerHeight })
 let switching = false
@@ -89,13 +90,11 @@ const meAv = computed(() => selfAvatarSrc({ selfNode: info.node, windowName: inf
 
 core.on('state', sync)
 core.on('log', pushLog)
-const notices = ref([])
 const rooms = ref([]), roomsErr = ref(false)
 async function refreshRooms() {
   try { rooms.value = groupRows((await invoke('relay_rooms'))?.rooms); roomsErr.value = false } catch { roomsErr.value = true }
 }
 core.on('notify', n => {
-  if (n.kind === 'msg' || n.kind === 'nudge') notices.value = addNotice(notices.value, { cid: n.friend.id, who: plain(n.friend.nick), line: n.line, kind: n.kind })
   if (n.sound && soundOn.value && me.status !== 'busy') SOUNDS[n.sound]?.()
   if (n.shake) void invoke('shake', { id: n.friend.id, main: ui.mode === 'merged' })   // 整合模式抖整個主視窗
   if (n.toast) void invoke('show_toast', { toast: { cid: n.friend.id, title: plain(n.friend.nick), line: n.line, status: n.friend.status, hue: n.friend.hue, dp: n.friend.dp, av: (a => (a.kind === 'upload' ? a.src : null))(avatarFor(n.friend, { avatars: avatars.value })) } })
@@ -105,7 +104,7 @@ async function openChat(id) {
   const f = core.friends.get(id); if (!f) return
   core.markRead(id)
   if (ui.mode === 'merged') {   // 整合模式：在右邊開分頁（或切過去），不開新視窗
-    Object.assign(ui, openTab(ui, id))
+    Object.assign(ui, openTab(ui, id), hideGuide(ui))
     pushLog(id)
     await invoke('show_main')
     sync()
@@ -125,7 +124,7 @@ await listen('asn:cmd', async c => {
 })
 const sendTo = async (id, text) => { const r = await core.send(id, text); if (!r.ok) console.info('[ASN] send failed', r.error) }
 const nudgeTo = id => core.nudge(id)
-const activateTab = id => { ui.active = id; core.markRead(id); sync() }
+const activateTab = id => { ui.active = id; Object.assign(ui, hideGuide(ui)); core.markRead(id); sync() }
 const closeChatTab = id => { Object.assign(ui, closeTab(ui, id)); if (ui.active) core.markRead(ui.active); sync() }
 const toggleDp = () => { ui.collapsed = toggleCollapsed(ui.collapsed) }
 
@@ -140,6 +139,7 @@ async function setMode(to) {
     const closed = from === 'split' ? await invoke('close_chats') : []
     const plan = switchMode(from, to, { tabs: ui.tabs, active: ui.active, windowIds: closed })
     ui.mode = to
+    ui.showGuide = false
     ui.tabs = plan.tabs; ui.active = plan.active
     await invoke('main_layout', { merged: to === 'merged', w: sizes[to].w, h: sizes[to].h, recenter: false })
     if (ui.active) core.markRead(ui.active)
@@ -164,23 +164,31 @@ watch([me, soundOn, frame, dims, () => ui.mode, () => ui.dpMode, () => ui.bubble
 const setTabDim = v => Object.assign(dims, withTabDim(dims, v))
 const pages = computed(() => pageTabs(friends.value, dims.tabDim, { selfNode: info.node, nodeOrder: nodeOrder.value }))
 
-const shotTab = ref(dims.tabDim === 'device' ? info.node : '')
+// 起始頁籤：平常是設備維度的本機；--shot 可用設定檔的 shotTab 指定固定頁籤（已拿掉的「通知」或任何不認得的值都忽略）
+const startTab = info.shot ? normalizeTab(savedMe.shotTab) : ''
+const shotTab = ref(startTab || (dims.tabDim === 'device' ? info.node : ''))
+const adI = ref(0)   // 底部小廣告與「開始」頁大幅廣告共用同一個目前位置
 const app = createApp({
   setup() {
-    const tab = shotTab, moreOpen = ref(false), adI = ref(0)
+    const tab = shotTab, moreOpen = ref(false)
+    let adTimer = null
+    const startAds = () => { clearInterval(adTimer); adTimer = setInterval(() => { adI.value = nextAd(adI.value) }, AD_MS) }
     // --shot 模式可用設定檔的 shotAd 固定停在某一則廣告（截圖用）；平常照常輪播
     if (info.shot && Number.isInteger(savedMe.shotAd)) adI.value = savedMe.shotAd
-    else setInterval(() => { adI.value = nextAd(adI.value) }, AD_MS)
+    else startAds()
+    // 大幅廣告的左右鍵與小圓點：換了就重新計時，不會剛點完又被自動換掉
+    const stepAd = d => { adI.value = d < 0 ? prevAd(adI.value) : nextAd(adI.value); if (!info.shot) startAds() }
+    const jumpAd = i => { adI.value = goAd(i); if (!info.shot) startAds() }
     setInterval(() => void refreshRooms(), 60_000)
     void refreshRooms()
     const query = ref(''), nickErr = ref('')
     const collapsed = reactive({})
     const dev = pages
-    const isDevice = computed(() => !FIXED_TABS.some(t => t.key === tab.value))   // 名單頁（設備／廠商／狀態的頁籤）；其餘是群組、通知、設定
+    const isDevice = computed(() => !FIXED_TABS.some(t => t.key === tab.value))   // 名單頁（設備／廠商／狀態的頁籤）；其餘是群組、指引、設定
     const moreOn = computed(() => dev.value.more.some(d => d.key === tab.value))
     const moreUnreadN = computed(() => moreUnread(dev.value.more))
     // 選到的頁籤不在現在的清單（改了維度、設備消失…）時退回第一個（設備維度的第一個就是本機）
-    watch(dev, d => { if (!d.all.some(x => x.key === tab.value) && !FIXED_TABS.some(t => t.key === tab.value)) tab.value = d.all[0]?.key ?? '' }, { immediate: true })
+    watch(dev, d => { if (!normalizeTab(tab.value, d.all.map(x => x.key))) tab.value = d.all[0]?.key ?? '' }, { immediate: true })
     const shown = computed(() => {
       if (!isDevice.value) return []
       const q = query.value.trim().toLowerCase()
@@ -217,29 +225,50 @@ const app = createApp({
       frame.value = normalizeFrame(v)
       try { await invoke('set_frame', { native: frame.value === 'native' }) } catch (e) { say(e.message) }
     }
-    const avById = id => { const f = friends.value.find(x => x.id === id); return f ? avOf(f) : blockieDataUrl(id) }
+    // 指引：分離模式顯示在名單內容區，整合模式是右邊的一個分頁（純邏輯在 guides.mjs）
+    const openedGuide = computed(() => guideByKey(ui.guide))
+    const view = computed(() => rightView({ tabs: ui.tabs, guide: ui.guide, showGuide: ui.showGuide }))
+    const openGuideKey = key => Object.assign(ui, openGuide(ui, key, ui.mode))
+    const closeGuideView = () => Object.assign(ui, closeGuide())
+    const showHome = () => Object.assign(ui, hideGuide(ui))
     const mergedTabs = computed(() => ui.tabs.map(id => friends.value.find(f => f.id === id)).filter(Boolean))
     return {
       frame, FRAMES, FRAME_LABEL, setFrame, SOUND_CHOICES, SOUND_LABEL, soundChoice, soundFromChoice, RESIZE_DIRS, resizeFrom, avMenu,
-      avOf, avById, meAv, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar,
+      avOf, meAv, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar,
       ui, MODES, MODE_LABEL, DP_MODES, DP_LABEL, BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, normalizeDpMode, normalizeBubble, setMode, mergedTabs, logs, sendTo, nudgeTo, activateTab, closeChatTab, toggleDp, plain,
       STATUS, CONN_LABEL, FIXED_TABS, ADS, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, soundOn, friends, conn, shown, query, collapsed, nickErr, commitNick,
-      tab, adI, rooms, roomsErr, notices, emptyText, openAd, groupHeading, statusNote, fmtTime,
+      tab, adI, rooms, roomsErr, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote,
+      GUIDES, openedGuide, view, openGuideKey, closeGuideView, showHome,
       selfNode: info.node, emo, initial, openChat, ctl,
     }
   },
 })
 app.component('chat-pane', ChatPane)
+// 一篇指引的顯示：全部用文字插值（不用 v-html），步驟自動編號
+app.component('guide-doc', {
+  props: { guide: { type: Object, required: true } },
+  setup: props => ({ rows: computed(() => numbered(props.guide.blocks)) }),
+  template: `<article class="guide-article"><h2>{{ guide.title }}</h2>
+    <template v-for="(b, i) in rows" :key="i">
+      <h3 v-if="b.k === 'h'">{{ b.t }}</h3>
+      <p v-else-if="b.k === 'p'">{{ b.t }}</p>
+      <p v-else-if="b.k === 'li'" class="g-step"><b>{{ b.n }}</b><span>{{ b.t }}</span></p>
+      <pre v-else-if="b.k === 'code'" class="g-code"><code>{{ b.t }}</code></pre>
+      <p v-else class="g-note">{{ b.t }}</p>
+    </template></article>`,
+})
 app.mount('#app')
 
 await core.start()
 sync()
 
 // ---------- --shot 模式：開一個對話、寄一封信＋一個震動、彈一則提示，然後截圖並結束 ----------
+// 設定檔（asn-me.json）可帶：winMode（'merged' 才是整合模式，欄位名就是 winMode，不是 mode）、shotNoChat（true＝不開任何對話，
+// 整合模式停在「開始」大幅廣告）、shotAd（固定停在第幾則廣告）、shotTab（起始頁籤）。
 if (info.shot) {
   const sleep = ms => new Promise(r => setTimeout(r, ms))
   const all = core.snapshot().friends
-  const target = all.find(f => f.unread > 0) ?? all.find(f => f.status !== 'offline') ?? all[0]
+  const target = savedMe.shotNoChat ? null : (all.find(f => f.unread > 0) ?? all.find(f => f.status !== 'offline') ?? all[0])
   if (target) {
     await openChat(target.id)
     if (ui.mode === 'merged') { const other = all.find(f => f.id !== target.id && f.status !== 'offline'); if (other) await openChat(other.id); await openChat(target.id) }
@@ -251,13 +280,20 @@ if (info.shot) {
   }
   await sleep(1500)
   await invoke('take_shot')
-  // 逐頁籤截圖：本機、第二台設備、群組、通知、設定
+  // 沒開對話的整合模式：再各拍一張別則大幅廣告（正見、招租＝按鈕不可點）
+  if (savedMe.shotNoChat && ui.mode === 'merged') {
+    for (const [name, i] of [['ad-policy', 1], ['ad-rent', ADS.length - 1]]) { adI.value = i; await sleep(700); await invoke('take_shot', { tab: name }) }
+    adI.value = Number.isInteger(savedMe.shotAd) ? savedMe.shotAd : 0
+  }
+  // 逐頁籤截圖：本機、第二台設備、群組、指引（清單與一篇內容）、設定
   const p = pages.value.all
-  for (const [name, key] of [['local', p[0]?.key], ['device', p[1]?.key], ['last', p.at(-1)?.key], ['groups', 'groups'], ['notices', 'notices'], ['settings', 'settings']]) {
+  for (const [name, key] of [['local', p[0]?.key], ['device', p[1]?.key], ['last', p.at(-1)?.key], ['groups', 'groups'], ['guide', 'guide'], ['guide-doc', 'guide'], ['settings', 'settings']]) {
     if (!key) continue
     shotTab.value = key
+    if (name === 'guide-doc') Object.assign(ui, openGuide(ui, 'bridge', ui.mode))
     await sleep(500)
     await invoke('take_shot', { tab: name })
+    if (name === 'guide-doc') Object.assign(ui, closeGuide())
   }
   await core.stop()
   await invoke('quit_app')

@@ -1,8 +1,8 @@
-// 頁籤、通知紀錄、群組列、廣告輪播的純邏輯。
+// 頁籤、群組列、廣告輪播的純邏輯。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { AD_CONTACT_URL, ADS, AD_MS, DEVICE_TAB_MAX, openAdWith, addNotice, adUrls, deviceItems, deviceTabs, fmtTime, groupHeading, groupRows, moreUnread, nextAd, shortOf, statusNote, NOTICE_MAX } from '../ui/lib/tabs.mjs'
+import { AD_CONTACT_URL, ADS, AD_MS, DEVICE_TAB_MAX, FIXED_TABS, adClickable, goAd, normalizeTab, openAdWith, prevAd, adUrls, deviceItems, deviceTabs, groupHeading, groupRows, moreUnread, nextAd, shortOf, statusNote } from '../ui/lib/tabs.mjs'
 
 const F = (node, device, nick, status = 'online', unread = 0) => ({ id: `${node}/${nick}`, node, device, nick, status, unread })
 
@@ -69,18 +69,22 @@ test('deviceItems：只取該設備、線上忙碌在前離線在後、可搜尋
   assert.equal(shortOf('abc'), 'A')
 })
 
-test('通知紀錄：新的在前、上限 50、欄位完整', () => {
-  let l = []
-  for (let i = 0; i < NOTICE_MAX + 5; i++) l = addNotice(l, { cid: `c${i}`, who: `誰${i}`, line: `句${i}`, t: i })
-  assert.equal(l.length, NOTICE_MAX)
-  assert.deepEqual(l[0], { cid: `c${NOTICE_MAX + 4}`, who: `誰${NOTICE_MAX + 4}`, line: `句${NOTICE_MAX + 4}`, kind: 'msg', t: NOTICE_MAX + 4 })
-  assert.equal(addNotice([], { cid: 'x', who: 'a', line: 'b' }, { now: () => 123 })[0].t, 123)
+test('固定頁籤：群組、指引、設定（通知已拿掉）；舊存檔或設定寫著通知／不認得的頁籤一律忽略', () => {
+  assert.deepEqual(FIXED_TABS.map(t => t.key), ['groups', 'guide', 'settings'])
+  assert.deepEqual(FIXED_TABS.map(t => t.label), ['群組', '指引', '設定'])
+  assert.equal(normalizeTab('guide'), 'guide')
+  assert.equal(normalizeTab('notices'), '')
+  for (const v of ['', null, undefined, 3, 'zzz']) assert.equal(normalizeTab(v), '', String(v))
+  assert.equal(normalizeTab('H', ['H', 'W']), 'H', '名單頁籤的鍵也算合法')
+  assert.equal(normalizeTab('notices', ['H']), '')
 })
 
-test('fmtTime：當天只顯示時間、其他天加日期', () => {
-  const now = new Date(2026, 9, 20, 15, 0).getTime()
-  assert.equal(fmtTime(new Date(2026, 9, 20, 9, 5).getTime(), now), '09:05')
-  assert.equal(fmtTime(new Date(2026, 9, 19, 23, 59).getTime(), now), '10/19 23:59')
+test('守門：通知頁籤與通知紀錄的程式與畫面都拿掉了（右下角提示與未讀數還在）', () => {
+  const dir = new URL('../ui/', import.meta.url)
+  const html = fs.readFileSync(new URL('list.html', dir), 'utf8'), js = fs.readFileSync(new URL('list.js', dir), 'utf8'), tabs = fs.readFileSync(new URL('lib/tabs.mjs', dir), 'utf8')
+  for (const [name, t] of [['list.html', html], ['list.js', js], ['tabs.mjs', tabs]]) assert.ok(!/notices|addNotice|fmtTime|NOTICE_MAX|'notices'/.test(t), `${name} 還有通知紀錄的東西`)
+  assert.ok(js.includes("'show_toast'") && js.includes('n.toast'), '右下角提示照舊')
+  assert.ok(html.includes('class="unread"') && html.includes('class="red"'), '未讀數與紅點照舊')
 })
 
 test('groupRows：成員數、最近動靜在前、壞資料略過', () => {
@@ -92,6 +96,23 @@ test('groupRows：成員數、最近動靜在前、壞資料略過', () => {
   assert.deepEqual(rows.map(r => [r.id, r.count]), [['r2', 3], ['r1', 2]])
   assert.equal(rows[0].last, '小牧：看一下 這個')
   assert.deepEqual(groupRows(undefined), [])
+})
+
+test('大幅廣告輪播：上一則／下一則循環、小圓點跳到指定那則；招租沒網址時按鈕不可點、有網址的才可點', () => {
+  assert.equal(prevAd(0), ADS.length - 1)
+  assert.equal(prevAd(3), 2)
+  assert.equal(nextAd(prevAd(2)), 2)
+  assert.equal(prevAd(0, 0), 0)
+  assert.equal(goAd(2), 2)
+  assert.equal(goAd(99), ADS.length - 1)
+  assert.equal(goAd(-5), 0)
+  assert.equal(goAd('x'), 0)
+  assert.deepEqual(ADS.map(a => [a.key, adClickable(a)]), [['shio', true], ['policy', true], ['islandmade', true], ['devlog', true], ['rent', false]])
+  assert.equal(adClickable(undefined), false)
+  // 大幅廣告與底部小廣告用同一份資料、同一個點擊函式；招租沒網址就不呼叫 open
+  const opened = []
+  for (const a of ADS) openAdWith(a, u => opened.push(u))
+  assert.deepEqual(opened, adUrls())
 })
 
 test('廣告輪播：循環一圈回到起點；連結只有 repo 文件寫明的網址；文案不含英文品牌', () => {
@@ -177,7 +198,9 @@ test('守門：廣告不用任何 AdSense／外部廣告程式碼；點廣告一
   const js = fs.readFileSync(new URL('list.js', dir), 'utf8')
   assert.ok(js.includes("openAdWith(a, url => void invoke('open_url', { url }))"))
   assert.ok(!js.includes("if (a.url) void invoke('open_url'"))
-  assert.ok(fs.readFileSync(new URL('list.html', dir), 'utf8').includes(':disabled="!a.url"'))
   const html = fs.readFileSync(new URL('list.html', dir), 'utf8')
+  assert.equal(html.split(':disabled="!a.url"').length - 1, 2, '底部小廣告與「開始」頁大幅廣告的按鈕，沒網址時都要停用')
+  assert.equal(html.split('@click="openAd(a)"').length - 1, 2, '兩處點廣告都走 openAd')
+  assert.ok(!/open_url/.test(html), '畫面模板不直接呼叫 open_url')
   assert.ok(!/<script[^>]+src="https?:/.test(html), '不載入外部腳本')
 })

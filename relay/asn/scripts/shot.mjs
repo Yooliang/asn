@@ -72,7 +72,9 @@ export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000, me
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const out = path.resolve(process.argv[2] ?? 'shots')
-  // 第三個參數之後：exe 路徑；環境變數 ASN_SHOT_ME 可放 JSON 設定（如 {"tabDim":"engine","groupDim":"device"}）
+  // 第三個參數之後：exe 路徑；環境變數 ASN_SHOT_ME 可放 JSON 設定（如 {"tabDim":"engine","groupDim":"device"}）；
+  // 整合模式是 {"winMode":"merged"}（欄位名是 winMode，不是 mode），再加 "shotNoChat":true 就不開任何對話、停在「開始」大幅廣告；
+  // "shotAd":N 固定停在第 N 則廣告；"shotTab":"guide" 指定起始頁籤
   const r = await runShot(out, process.argv[3] ?? defaultExe, { me: process.env.ASN_SHOT_ME ? JSON.parse(process.env.ASN_SHOT_ME) : null, avatars: process.env.ASN_SHOT_AVATARS === '1' })
   console.log(`exit=${r.code} files=${r.files.join(',')} sent=${r.relay.sent.length}`)
   if (r.log.trim()) console.log(r.log.trim())

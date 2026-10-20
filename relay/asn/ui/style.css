@@ -285,3 +285,54 @@ html.frame-native .titlebar,html.frame-native .rz{display:none}
 html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .ctab.home img{display:block;flex:none}
 .chat-stack > .pane:only-child{background:linear-gradient(var(--panel-head),var(--panel) 80px)}
+
+/* ---------- 整合模式「開始」頁：大幅廣告輪播（純 CSS 畫，不用外部圖片） ---------- */
+.home-pane{position:relative;background:var(--panel)}
+.hero{position:relative;flex:1;min-height:0;display:flex}
+.hero-slide{position:absolute;inset:0;display:flex;align-items:center;padding:0 72px 0 64px;overflow:hidden;animation:ad-in .5s ease both;
+  background:radial-gradient(ellipse at 82% 28%,hsl(var(--h) 90% 96%) 0,transparent 55%),linear-gradient(120deg,hsl(var(--h) 75% 94%),hsl(var(--h) 70% 80%))}
+.hero-slide::before,.hero-slide::after{content:"";position:absolute;border-radius:50%;border:1px solid hsl(var(--h) 60% 100% / .7);pointer-events:none}
+.hero-slide::before{width:420px;height:420px;right:-90px;top:-120px;background:radial-gradient(circle at 30% 25%,hsl(0 0% 100% / .55),hsl(0 0% 100% / 0) 62%)}
+.hero-slide::after{width:260px;height:260px;left:-80px;bottom:-110px;background:radial-gradient(circle at 30% 25%,hsl(0 0% 100% / .45),hsl(0 0% 100% / 0) 62%)}
+.hero-tx{position:relative;z-index:1;min-width:0;max-width:52%;display:flex;flex-direction:column;align-items:flex-start;gap:14px}
+.hero-tx h2{margin:0;font-size:40px;line-height:1.15;letter-spacing:.04em;color:hsl(var(--h) 70% 20%);text-shadow:0 1px 0 #fff,0 0 14px hsl(0 0% 100% / .8)}
+.hero-tx p{margin:0;font-size:18px;line-height:1.5;color:hsl(var(--h) 30% 26%)}
+.hero-cta{margin-top:6px;padding:9px 28px;border-radius:6px;border:1px solid hsl(var(--h) 55% 30%);font-size:16px;font-weight:700;letter-spacing:.06em;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.35);
+  background:linear-gradient(hsl(var(--h) 75% 62%) 0 48%,hsl(var(--h) 80% 44%) 52%,hsl(var(--h) 80% 52%));box-shadow:inset 0 0 0 1px hsl(0 0% 100% / .45),0 2px 5px rgba(0,30,70,.25);cursor:default}
+.hero-cta.link{cursor:pointer}
+.hero-cta.link:hover{filter:brightness(1.08)}
+.hero-cta:disabled{color:hsl(var(--h) 20% 96%);filter:saturate(.35) brightness(1.05);box-shadow:inset 0 0 0 1px hsl(0 0% 100% / .45)}
+.hero-art{position:absolute;right:9%;top:50%;width:230px;height:230px;transform:translateY(-50%)}
+.hero-art i{position:absolute;border-radius:50%;box-shadow:0 10px 24px hsl(var(--h) 60% 25% / .3);background:radial-gradient(circle at 35% 30%,#fff 0 9%,hsl(var(--h) 80% 62%) 48%,hsl(var(--h) 70% 34%))}
+.hero-art i:nth-child(1){left:0;top:70px;width:140px;height:140px}
+.hero-art i:nth-child(2){left:104px;top:0;width:104px;height:104px;filter:hue-rotate(40deg)}
+.hero-art i:nth-child(3){left:128px;top:124px;width:80px;height:80px;filter:hue-rotate(-40deg)}
+.hero-new{position:absolute;z-index:2;top:26px;left:-34px;width:140px;transform:rotate(-35deg);background:linear-gradient(#b5e36b,#6fb81f);color:#fff;font:800 14px/22px var(--font-ui);letter-spacing:.1em;text-align:center;text-shadow:0 1px 1px rgba(0,0,0,.3);box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.hero-nav{position:absolute;z-index:3;top:50%;width:34px;height:56px;margin-top:-28px;padding:0;border:1px solid rgba(30,60,100,.35);border-radius:5px;background:linear-gradient(#ffffffcc,#d6e6f6cc);color:#22405f;font-size:26px;line-height:1;cursor:pointer}
+.hero-nav:hover{background:linear-gradient(#fff,#e4f0fc)}
+.hero-nav.prev{left:10px}.hero-nav.next{right:10px}
+.hero-dots{position:absolute;z-index:3;left:0;right:0;bottom:14px;display:flex;justify-content:center;gap:9px}
+.hero-dots button{width:11px;height:11px;padding:0;border-radius:50%;border:1px solid rgba(30,60,100,.55);background:rgba(255,255,255,.65);cursor:pointer}
+.hero-dots button.on{background:rgba(30,60,100,.85)}
+@media (prefers-reduced-motion:reduce){.hero-slide{animation:none}}
+
+/* ---------- 指引：清單與一篇說明 ---------- */
+.guide-ic{flex:none;width:22px;height:22px;display:inline-block;border-radius:3px;
+  background:linear-gradient(90deg,#6fb6f0 0 49%,#1f5d9e 49% 51%,#e8f3fd 51%);border:1px solid #1f5d9e;box-shadow:0 1px 1px rgba(0,30,80,.25)}
+.guide-ic.sm{width:14px;height:14px}
+.guide-item{width:100%;text-align:left}
+.guide-item.on{background:#e6f1fc}
+.guide-list{padding:6px 0}
+.guide-doc{display:flex;flex-direction:column;gap:6px;padding:0 8px 8px}
+.guide-back{align-self:flex-start;font-size:12px;padding:3px 8px}
+.guide-pane{overflow-y:auto;padding:14px 20px 24px}
+.guide-article{user-select:text;-webkit-user-select:text;line-height:1.6}
+.guide-article h2{margin:0 0 8px;font-size:18px;color:var(--title-fg)}
+.guide-article h3{margin:14px 0 4px;font-size:13px;color:var(--accent)}
+.guide-article p{margin:4px 0}
+.g-step{display:flex;gap:8px;align-items:flex-start}
+.g-step b{flex:none;width:20px;height:20px;margin-top:1px;border-radius:50%;background:linear-gradient(#8fc4f2,#3a86d4);color:#fff;font-size:12px;line-height:20px;text-align:center}
+.g-step span{min-width:0;overflow-wrap:anywhere}
+.g-code{margin:4px 0 6px 28px;padding:6px 8px;border:1px solid var(--line);border-radius:3px;background:var(--panel-soft);overflow-x:auto}
+.g-code code{font:12px/1.5 Consolas,"Cascadia Mono",monospace;white-space:pre;user-select:text}
+.g-note{margin-top:10px;padding:6px 10px;border:1px solid var(--warn-line);border-radius:3px;background:var(--warn-bg);font-size:12px}
