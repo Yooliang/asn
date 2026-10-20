@@ -109,13 +109,29 @@ test('每視窗每小時上限，記在 send-rate.json；別的視窗不受影�
   } finally { await st.close() }
 })
 
+test('同節點寄信：可寄給本機其他視窗（含 ASN），照一般信送後端；寄給自己這個視窗被擋、不打後端', async () => {
+  const st = await fakeServer(), home = newHome()
+  try {
+    const r = await asWindow(home, st, 'T-視窗甲', ['--to', 'T/H-ASN', '--body', '給本機 ASN', '--reply'])
+    assert.equal(r.code, 0, r.err); assert.match(r.out, /^sent id=aaaaaaaa-0000-0000-0000-000000000009 to=T\/H-ASN from=T\/T-視窗甲/)
+    assert.deepEqual(st.reqs, [{ action: 'send', key: 'fake-machine-key', body: { to_node: 'T', to_agent: 'H-ASN', body: '給本機 ASN', from_agent: 'T-視窗甲', expects_reply: true } }])
+    // 只寫本機節點（不指視窗）也放行，由橋交給預設收件視窗
+    assert.equal((await asWindow(home, st, 'T-視窗甲', ['--to', 'T', '--body', '給本機預設', '--no-reply'])).code, 0)
+    assert.equal(st.reqs.length, 2)
+    // 寄給自己同一個視窗名：擋，不計次、不打後端
+    const self = await asWindow(home, st, 'T-視窗甲', ['--to', 'T/T-視窗甲', '--body', '自言自語', '--no-reply'])
+    assert.equal(self.code, 1); assert.match(self.err, /收件人就是你自己（T\/T-視窗甲）/)
+    assert.equal(st.reqs.length, 2)
+  } finally { await st.close() }
+})
+
 test('格式與內容檢查：全部 exit 1、不打後端；超過 20000 字被擋，剛好 20000 可以', async () => {
   const st = await fakeServer(), home = newHome()
   try {
     const bads = [
       [[], /二選一/], [['--to', 'XISU', '--room', 'g1', '--body', 'x', '--no-reply'], /二選一/], [['--to', 'XISU', '--body', '   ', '--no-reply'], /內文是空的/],
       [['--to', 'XISU', '--body', 'x', '--reply-to', '不是uuid', '--no-reply'], /reply-to/], [['--to', 'bad!id', '--body', 'x', '--no-reply'], /成員代號格式不對/],
-      [['--to', 'T/T-預設', '--body', 'x', '--no-reply'], /本機節點/], [['--to', 'XISU', '--body', 'x'.repeat(20001), '--no-reply'], /超過 20000 字/],
+      [['--to', 'T/T-視窗甲', '--body', 'x', '--no-reply'], /就是你自己/], [['--to', 'XISU', '--body', 'x'.repeat(20001), '--no-reply'], /超過 20000 字/],
     ]
     for (const [args, re] of bads) { const r = await asWindow(home, st, 'T-視窗甲', args); assert.equal(r.code, 1, args.join(' ')); assert.match(r.err, re) }
     assert.equal(st.reqs.length, 0)

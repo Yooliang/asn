@@ -31,10 +31,16 @@ const pad = n => String(n).padStart(2, '0')
 export const fmt = t => { const d = new Date(t); return `${d.getHours()}:${pad(d.getMinutes())}` }
 export const fmtDate = t => { const d = new Date(t); return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${fmt(t)}` }
 
-// 震動：寄一封內文為 [震動] 的信（expects_reply:false）；收到內文含 [震動] 就抖視窗
-export const NUDGE_TAG = '[震動]'
-export const hasNudge = body => String(body ?? '').includes(NUDGE_TAG)
-export const stripNudge = body => String(body ?? '').split(NUDGE_TAG).join('').trim()
+// 震動：寄出的內文是「（<視窗名> 傳送了一個震動）」（expects_reply:false；內文由 Rust 端用視窗名組成），AI 看了才懂意思。
+// 收信端兩種都認：新格式要「整段內文」就是這句才算（避免一般訊息裡提到這句話被誤判）；舊版（尚未升級的 ASN）寄的 [震動] 照舊，內文含它就算。
+export const NUDGE_TAG = '[震動]'   // 舊格式，只用於辨識
+export const nudgeBody = name => `（${String(name ?? '').trim()} 傳送了一個震動）`
+const NUDGE_RE = /^（[^（）\r\n]{1,80} 傳送了一個震動）$/
+export const hasNudge = body => { const s = String(body ?? ''); return s.includes(NUDGE_TAG) || NUDGE_RE.test(s.trim()) }
+export const stripNudge = body => {
+  const s = String(body ?? '').trim()
+  return NUDGE_RE.test(s) ? '' : s.split(NUDGE_TAG).join('').trim()
+}
 
 // 經機器橋轉回來的回信，內文整段包著 <cross-session-message …>…</cross-session-message>（斜線可能寫成 <\ 與 <\/）。
 // 只在「首尾都對得上」時剝最外層一次；內文中間出現的同字串不動；只有開頭沒有結尾就不剝。剝完仍要經 esc 才能顯示。

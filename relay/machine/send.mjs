@@ -31,6 +31,7 @@ const USAGE = `用法：
                      結果以欄位送給後端，不會在內文加任何標記。--room 群組本來就不計時，給了會忽略（印一行說明）。
   --body-file <檔>   內文從檔案讀；--body -  內文從 stdin 讀
   --whoami           不寄信，印出父行程鏈、session 對照、節點判定（除錯用）
+同一台機器上的其他視窗（含 ASN）也可以寄（--to <本機節點>/<視窗名>）；不能寄給自己這個視窗。
 內文至多 ${MAX_BODY} 字。寄件人（視窗名）由本程式自動判定，不能自填；信任一律是 member。`
 
 
@@ -133,9 +134,10 @@ export async function main(argv) {
     if (!ID_RE.test(toNode)) throw new Fail(1, `--to ${a.to} 的成員代號格式不對`)
   }
   const node = machineNode()
-  if (toNode === node) throw new Fail(1, '收件人是本機節點；本機視窗之間請直接用 SendMessage')
   const key = readMachineKey(node)
   const caller = findCaller('寄信')   // 先認人，再計次、再寄
+  // 同節點可以寄（例如寄給本機的 ASN）：信經後端回到本機橋，照一般信轉交。只擋「寄給自己這個視窗」（沒有意義，還會把信轉回自己）
+  if (toNode === node && toAgent === caller.name) throw new Fail(1, `收件人就是你自己（${node}/${caller.name}）；不能寄給自己`)
   takeRate(caller.name)
   if (a.room) {
     const r = await call(key, 'room_post', { room: a.room, body, from_agent: caller.name })
