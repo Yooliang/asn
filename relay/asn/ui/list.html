@@ -33,7 +33,7 @@
     <div class="list">
       <div v-for="g in groups" :key="g.key">
         <button class="g-head" @click="collapsed[g.key] = !collapsed[g.key]" :aria-expanded="!collapsed[g.key]">
-          <span class="caret" :class="{ open: !collapsed[g.key] }">▶</span>{{ g.label }} ({{ g.items.length }})
+          <span class="caret" :class="{ open: !collapsed[g.key] }">▶</span>{{ g.label }} ({{ g.items.filter(c => c.status !== 'offline').length }}/{{ g.items.length }})
         </button>
         <ul v-show="!collapsed[g.key]">
           <li v-for="c in g.items" :key="c.id">
