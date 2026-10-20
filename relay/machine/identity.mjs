@@ -9,7 +9,7 @@ import { identityProviders } from './engines/identity-providers.mjs'
 export { alivePid, processTable, readSession, sessionsDir } from './engines/claude-identity.mjs'
 
 export const HOME_DIR = path.join(os.homedir(), '.irori-relay')
-export const BASE_URL = (process.env.IRORI_RELAY_URL || 'https://hwtahctsgjcemtwzlvnq.supabase.co/functions/v1/irori-relay').replace(/\/+$/, '')
+export const BASE_URL = (process.env.IRORI_RELAY_URL || 'https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay').replace(/\/+$/, '')
 
 export class Fail extends Error { constructor(code, msg) { super(msg); this.code = code } }
 

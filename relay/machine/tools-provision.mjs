@@ -1,7 +1,7 @@
 // 一次性測試用：用 H 金鑰開邀請碼，註冊測試節點並把金鑰寫到 ~/.irori-relay/<id>.key（不印金鑰）
 // 用法：node tools-provision.mjs <新代號> [顯示名]
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
-const URL_ = 'https://hwtahctsgjcemtwzlvnq.supabase.co/functions/v1/irori-relay'
+const URL_ = 'https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay'
 const dir = path.join(os.homedir(), '.irori-relay')
 const hkey = fs.readFileSync(path.join(dir, 'H.key'), 'utf8').trim()
 const id = process.argv[2], name = process.argv[3] || id

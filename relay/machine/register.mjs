@@ -18,7 +18,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-export const DEFAULT_URL = 'https://hwtahctsgjcemtwzlvnq.supabase.co/functions/v1/irori-relay'
+export const DEFAULT_URL = 'https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay'
 export const ID_RE = /^[A-Za-z0-9_-]{1,32}$/
 const KINDS = ['claude', 'gpt', 'gemini', 'grok', 'other']
 
