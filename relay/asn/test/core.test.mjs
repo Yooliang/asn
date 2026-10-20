@@ -73,6 +73,18 @@ test('震動：收到 [震動] 抖視窗（開著）或未讀＋提示（沒開�
   await b.core.stop(); await b.relay.close()
 })
 
+test('震動（新格式）：整段內文「（某某 傳送了一個震動）」也抖視窗、標記不顯示；一般訊息提到不算', async () => {
+  const a = await setup({ visible: true })
+  a.relay.mail(1, { body: '（W-政策 傳送了一個震動）' })
+  a.relay.mail(2, { body: '他說（W-政策 傳送了一個震動）' })
+  await a.core.start()
+  assert.deepEqual(a.notes.map(n => n.kind), ['nudge', 'msg'])
+  const lg = a.core.logOf('W/W-政策')
+  assert.equal(lg[0].nudge, true)
+  assert.deepEqual(lg.filter(m => m.k === 'them').map(m => m.text), ['他說（W-政策 傳送了一個震動）'])
+  await a.core.stop(); await a.relay.close()
+})
+
 test('寄信：body／to_node／to_agent／from_agent／expects_reply／reply_to 都對；回信帶 reply_to；等回信狀態', async () => {
   const { relay, core } = await setup()
   relay.mail(7, { body: '請問進度？' })
@@ -91,11 +103,11 @@ test('寄信：body／to_node／to_agent／from_agent／expects_reply／reply_to
   await core.stop(); await relay.close()
 })
 
-test('寄震動：內文 [震動]、expects_reply:false、不帶 reply_to', async () => {
+test('寄震動：內文「（某某 傳送了一個震動）」（測試用傳輸層照 Rust 規則組）、expects_reply:false、不帶 reply_to', async () => {
   const { relay, core } = await setup()
   await core.start()
   assert.equal((await core.nudge('W/W-政策')).ok, true)
-  assert.deepEqual(relay.sent[0], { to_node: 'W', to_agent: 'W-政策', body: '[震動]', from_agent: NAME, expects_reply: false })
+  assert.deepEqual(relay.sent[0], { to_node: 'W', to_agent: 'W-政策', body: `（${NAME} 傳送了一個震動）`, from_agent: NAME, expects_reply: false })
   await core.stop(); await relay.close()
 })
 

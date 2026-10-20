@@ -1,6 +1,7 @@
 // 測試共用：用 relay-core（沿用 relay/machine 的現成模組）連本機假 relay，組成 AsnCore 的 transport。
 import { createCore } from '../../machine/relay-core.mjs'
 import { FAKE_KEY } from './fake-relay.mjs'
+import { nudgeBody } from '../ui/lib/text.mjs'
 
 export function httpTransport(url, windowName, key = FAKE_KEY) {
   const core = createCore({ baseUrl: url, key, anonKey: '', log: () => {}, workDir: '' })
@@ -9,7 +10,8 @@ export function httpTransport(url, windowName, key = FAKE_KEY) {
     list: () => core.api('list'),
     inbox: () => core.api(`inbox&agent=${q}`),
     ack: ids => core.api(`ack&agent=${q}`, { method: 'POST', body: { ids } }),
-    send: payload => core.api('send', { method: 'POST', body: payload }),
+    // 照 Rust 的 build_send_body：震動（nudge:true）的內文由「視窗名」組成，nudge 欄位不送給後端
+    send: ({ nudge, ...payload }) => core.api('send', { method: 'POST', body: nudge ? { ...payload, body: nudgeBody(windowName) } : payload }),
     avatar: node => core.api(`avatar&node=${encodeURIComponent(node)}`),
     setAvatar: avatar => core.api('set_avatar', { method: 'POST', body: { avatar } }),
   }

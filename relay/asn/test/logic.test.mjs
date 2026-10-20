@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { esc, emo, plain, initial, hasNudge, stripNudge, NUDGE_TAG, hueOf } from '../ui/lib/text.mjs'
+import { esc, emo, plain, initial, hasNudge, stripNudge, NUDGE_TAG, nudgeBody, hueOf } from '../ui/lib/text.mjs'
 import { cleanPsm, buildFriends, mergeFriends, statusOf, isRelayRoom, friendId, groupByDevice } from '../ui/lib/roster.mjs'
 import { routeMail } from '../ui/lib/routing.mjs'
 
@@ -22,8 +22,13 @@ test('esc／emo：標籤與引號一律跳脫，表情代碼換成圖示', () =>
   assert.equal(initial('~*小美*~'), '小')
 })
 
-test('震動標記：含 [震動] 就算，內文拿掉標記', () => {
+test('震動標記：新格式整段內文才算、舊 [震動] 含有就算，內文拿掉標記', () => {
   assert.equal(NUDGE_TAG, '[震動]')
+  assert.equal(nudgeBody('H-ASN'), '（H-ASN 傳送了一個震動）')
+  assert.ok(hasNudge('（H-ASN 傳送了一個震動）') && hasNudge('  （家用 ASN 傳送了一個震動）\n'))
+  assert.equal(stripNudge('（H-ASN 傳送了一個震動）'), '')
+  assert.ok(!hasNudge('他說（H-ASN 傳送了一個震動）然後走了') && !hasNudge('（傳送了一個震動）') && !hasNudge('（A）（B 傳送了一個震動）'), '一般訊息裡提到不算')
+  assert.equal(stripNudge('他說（H-ASN 傳送了一個震動）然後走了'), '他說（H-ASN 傳送了一個震動）然後走了')
   assert.ok(hasNudge('[震動]') && hasNudge('欸 [震動] 看這裡'))
   assert.ok(!hasNudge('一般訊息') && !hasNudge(null))
   assert.equal(stripNudge('[震動]'), '')
