@@ -28,7 +28,7 @@ export function buildFriends(members, { selfNode, selfName } = {}) {
       out.push({
         id: friendId(m.id, a.name), node: m.id, device: typeof m.name === 'string' && m.name ? m.name : m.id, agent: a.name, nick: a.name,
         psm: a.cwd_label ? String(a.cwd_label) : '',
-        engine: a.engine ?? null, status: statusOf(a.status),
+        engine: a.engine ?? null, kind: typeof m.kind === 'string' && m.kind ? m.kind : null, status: statusOf(a.status),
       })
     }
   }
