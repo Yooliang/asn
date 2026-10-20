@@ -97,9 +97,8 @@ async fn relay_rooms(app: State<'_, App>) -> Result<Value, String> {
 }
 
 /// 底部廣告可以開的網址（全是 repo 文件寫明的公開網址）；只准完全相同的字串，其餘一律拒絕
-pub const OPEN_ALLOW: [&str; 3] = [
+pub const OPEN_ALLOW: [&str; 2] = [
     "https://irori.web.app/",
-    "https://irori.web.app/download/irori.apk",
     "https://irori.web.app/dev/shots/",
 ];
 pub fn open_allowed(url: &str) -> bool {

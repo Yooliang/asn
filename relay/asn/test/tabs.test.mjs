@@ -100,7 +100,7 @@ test('廣告輪播：循環一圈回到起點；連結只有 repo 文件寫明�
   assert.deepEqual(seq, ADS.map((_, k) => k))
   assert.equal(i, 0)
   assert.ok(ADS.length >= 3 && ADS.length <= 4)
-  assert.deepEqual(adUrls(), ['https://irori.web.app/', 'https://irori.web.app/download/irori.apk', 'https://irori.web.app/dev/shots/'])
+  assert.deepEqual(adUrls(), ['https://irori.web.app/', 'https://irori.web.app/dev/shots/'])
   for (const a of ADS) assert.ok(!/msn|messenger|microsoft/i.test(JSON.stringify(a)), a.key)
   assert.equal(nextAd(0, 0), 0)
 })

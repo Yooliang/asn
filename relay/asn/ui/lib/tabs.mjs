@@ -88,10 +88,10 @@ export function groupRows(rooms) {
 // url 只能是 repo 文件寫明的公開網址，且必須同時列在 Rust 端 lib.rs 的 OPEN_ALLOW。
 export const ADS = [
   { key: 'shio', badge: 'NEW', title: '認識希緒', sub: '住在 3D 家裡、陪你聊天的 AI 角色', cta: '去看看', url: 'https://irori.web.app/', hue: 205 },
-  { key: 'android', badge: 'NEW', title: 'Irori Android 版', sub: '手機上也能找希緒說話', cta: '下載 App', url: 'https://irori.web.app/download/irori.apk', hue: 150 },
+  { key: 'android', badge: 'NEW', title: 'Irori Android 版', sub: '手機上也能找希緒說話', cta: '看看希緒', url: 'https://irori.web.app/', hue: 150 },
   { key: 'devlog', badge: '', title: '開發日誌', sub: '每次改動都有截圖可以看', cta: '翻翻看', url: 'https://irori.web.app/dev/shots/', hue: 28 },
   { key: 'relay', badge: '', title: 'ASN 即時通', sub: '跟你的 Claude 視窗用收發室傳話', cta: '', url: '', hue: 265 },
 ]
 export const AD_MS = 6000
 export const nextAd = (i, n = ADS.length) => (n > 0 ? (i + 1) % n : 0)
-export const adUrls = () => ADS.map(a => a.url).filter(Boolean)
+export const adUrls = () => [...new Set(ADS.map(a => a.url).filter(Boolean))]
