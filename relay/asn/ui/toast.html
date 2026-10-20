@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-Hant" class="toast-page">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ASN 提示</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app" v-cloak>
+  <button class="toast" @click="open" aria-label="開啟對話">
+    <div class="titlebar"><span class="t-icon"></span><span class="t-text"><span class="brand">ASN</span> 即時通</span></div>
+    <div class="toast-body">
+      <div class="dp sm" :class="'st-' + t.status" :style="{ '--h': t.hue }"><span>{{ t.dp }}</span></div>
+      <div class="tx"><b>{{ t.title }}</b><small>{{ t.line }}</small></div>
+    </div>
+  </button>
+</div>
+<script src="vendor/vue.global.prod.js"></script>
+<script type="module" src="toast.js"></script>
+</body>
+</html>

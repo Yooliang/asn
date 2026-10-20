@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ASN 即時通</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app" class="win" v-cloak>
+  <header class="titlebar" data-tauri-drag-region>
+    <span class="t-icon"></span><span class="t-text"><span class="brand">ASN</span> 即時通</span>
+    <span class="t-btns">
+      <button class="tb" @click="ctl('min')" aria-label="最小化">_</button>
+      <button class="tb" @click="ctl('max')" aria-label="最大化">□</button>
+      <button class="tb close" @click="ctl('close')" aria-label="關閉並結束">✕</button>
+    </span>
+  </header>
+  <div class="pane">
+    <div class="me">
+      <div class="dp" :class="'st-' + me.status" :style="{ '--h': 205 }"><span>{{ initial(me.nick) }}</span></div>
+      <div class="me-info">
+        <div class="me-row">
+          <input class="ghost nick-input" v-model="me.nick" maxlength="40" aria-label="我的暱稱">
+          <select class="ghost status-sel" v-model="me.status" aria-label="我的狀態">
+            <option v-for="(label, key) in STATUS" :key="key" :value="key">({{ label }})</option>
+          </select>
+        </div>
+        <input class="ghost psm-input" v-model="me.psm" maxlength="60" placeholder="&lt;輸入個人訊息&gt;" aria-label="個人訊息">
+      </div>
+    </div>
+    <div class="search"><input v-model="query" placeholder="搜尋聯絡人..." aria-label="搜尋聯絡人"></div>
+    <div class="list">
+      <div v-for="g in groups" :key="g.key">
+        <button class="g-head" @click="collapsed[g.key] = !collapsed[g.key]" :aria-expanded="!collapsed[g.key]">
+          <span class="caret" :class="{ open: !collapsed[g.key] }">▶</span>{{ g.label }} ({{ g.items.length }})
+        </button>
+        <ul v-show="!collapsed[g.key]">
+          <li v-for="c in g.items" :key="c.id">
+            <button class="buddy" :class="{ offline: c.status === 'offline' }" @click="openChat(c.id)">
+              <span class="dot" :class="'st-' + c.status"></span>
+              <span class="b-text">
+                <span class="b-nick" v-html="emo(c.nick)"></span>
+                <span class="b-psm" v-if="c.psm" v-html="emo(c.psm)"></span>
+              </span>
+              <span class="unread" v-if="c.unread">{{ c.unread }}</span>
+            </button>
+          </li>
+        </ul>
+      </div>
+      <div class="empty-list" v-if="!friends.length">{{ conn === 'on' ? '收發室名單上目前沒有視窗。' : '還沒連上收發室。' }}</div>
+    </div>
+    <div class="settings" v-if="settingsOpen">
+      <label>視窗名 <input v-model="nameDraft" maxlength="60" aria-label="視窗名"></label>
+      <small>節點 {{ selfNode }}。別人用這個名字寄信給你；改完會重新啟動連線。</small>
+      <div><button class="aero-btn" @click="saveName" :disabled="!nameDraft.trim() || nameDraft.trim() === windowName">儲存並重新連線</button></div>
+    </div>
+    <div class="c-foot">
+      <span class="conn"><span class="dot" :class="conn === 'on' ? 'st-online' : conn === 'off' ? 'st-busy' : 'st-away'"></span>{{ CONN_LABEL[conn] }}</span>
+      <span class="foot-btns">
+        <button class="aero-btn" @click="settingsOpen = !settingsOpen">設定</button>
+        <button class="aero-btn" @click="soundOn = !soundOn" :aria-pressed="soundOn">音效：{{ soundOn ? '開' : '關' }}</button>
+      </span>
+    </div>
+  </div>
+</div>
+<script src="vendor/vue.global.prod.js"></script>
+<script type="module" src="list.js"></script>
+</body>
+</html>

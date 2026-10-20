@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ASN 對話</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app" class="win" v-cloak>
+  <header class="titlebar" data-tauri-drag-region>
+    <span class="t-icon"></span>
+    <span class="t-text">{{ f ? plain(f.nick) + ' - 對話' : '對話' }}</span>
+    <span class="t-btns">
+      <button class="tb" @click="ctl('min')" aria-label="最小化">_</button>
+      <button class="tb" @click="ctl('max')" aria-label="最大化">□</button>
+      <button class="tb close" @click="ctl('close')" aria-label="關閉對話">✕</button>
+    </span>
+  </header>
+  <div class="pane" v-if="f">
+    <div class="conv">
+      <div class="conv-main">
+        <div class="to-line">給：<span v-html="emo(f.nick)"></span>
+          <span class="to-psm" v-if="f.psm" v-html="emo(f.psm)"></span>
+        </div>
+        <div class="warn" v-if="f.status !== 'online'">
+          <i>i</i>
+          <span v-if="f.status === 'offline'">{{ plain(f.nick) }} 目前離線，訊息會先留在收發室，對方上線後才收得到。</span>
+          <span v-else>{{ plain(f.nick) }} 的狀態是{{ STATUS[f.status] }}，可能無法馬上回應。</span>
+        </div>
+        <div class="msgs" ref="msgsEl" aria-live="polite">
+          <template v-for="(m, i) in log" :key="i">
+            <div v-if="m.k === 'sys'" class="sys" :class="{ nudge: m.nudge }">{{ m.text }}</div>
+            <div v-else class="msg" :class="{ mine: m.k === 'me' }">
+              <div class="who">{{ m.k === 'me' ? plain(me.nick) : plain(f.nick) }} 說：<time>{{ fmt(m.t) }}</time></div>
+              <div class="body" v-html="emo(m.text)"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+      <div class="dp-col">
+        <div class="dp xl" :class="'st-' + f.status" :style="{ '--h': f.hue }"><span>{{ f.dp }}</span></div>
+      </div>
+    </div>
+    <div class="compose-row">
+      <div class="compose-main">
+        <div class="toolbar">
+          <button class="tool" @click="pickerOpen = !pickerOpen" :aria-expanded="pickerOpen">🙂 表情符號</button>
+          <button class="tool" @click="nudge" :disabled="nudgeCooling">〰 傳送震動</button>
+          <div class="picker" v-if="pickerOpen" role="menu">
+            <button v-for="[code, icon] in EMO" :key="code" :title="code" @click="insertEmo(code)" role="menuitem">{{ icon }}</button>
+          </div>
+        </div>
+        <form class="composer" @submit.prevent="send">
+          <textarea ref="composeEl" v-model="draft" @keydown.enter.exact.prevent="send" placeholder="輸入訊息，Enter 傳送，Shift+Enter 換行" aria-label="輸入訊息"></textarea>
+          <button class="aero-btn" type="submit" :disabled="!draft.trim()">傳送</button>
+        </form>
+      </div>
+      <div class="dp-col">
+        <div class="dp xl" :class="'st-' + me.status" :style="{ '--h': 205 }"><span>{{ initial(me.nick) }}</span></div>
+      </div>
+    </div>
+    <div class="typing">
+      <template v-if="f.waiting">✎ 已送出，等對方回信…</template>
+      <template v-else-if="f.lastAt">上次接收訊息是 {{ fmtDate(f.lastAt) }}</template>
+    </div>
+  </div>
+  <div class="pane" v-else><div class="empty-chat">找不到這位朋友。</div></div>
+</div>
+<script src="vendor/vue.global.prod.js"></script>
+<script type="module" src="chat.js"></script>
+</body>
+</html>

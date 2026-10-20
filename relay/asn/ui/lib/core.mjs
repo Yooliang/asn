@@ -1,0 +1,169 @@
+// ASN 狀態核心（瀏覽器與 node 都能跑）：好友、對話、未讀、收信、寄信、震動。
+// 不碰網路細節：transport 由外面注入（桌面版＝Rust 命令，金鑰留在 Rust；測試＝連本機假 relay）。
+//   transport: { list(), inbox(), ack(ids), send(payload) }
+//   store:     { load() → 物件|null, save(物件) }
+//   isChatVisible(id) → Promise<boolean>：該好友的對話視窗是否開著且沒最小化
+import { buildFriends, mergeFriends } from './roster.mjs'
+import { routeMail, stubFriend } from './routing.mjs'
+import { NUDGE_TAG, hasNudge, hueOf, initial, plain, stripNudge } from './text.mjs'
+
+export const MAX_BODY = 20000
+const LOG_KEEP = 200
+
+export class AsnCore {
+  constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000 }) {
+    Object.assign(this, { transport, store, selfNode, windowName, isChatVisible, now, log, pollMs, rosterMs })
+    this.friends = new Map()   // id → 好友
+    this.logs = new Map()      // id → 訊息陣列
+    this.seen = new Set()      // 已處理過的信件 id（ack 失敗重拉時不重複顯示）
+    this.conn = 'connecting'   // connecting | on | off
+    this.rosterLoaded = false
+    this.handlers = {}
+    this.timers = []
+    this.pulling = false
+    this.again = false
+    this.saveTimer = null
+  }
+
+  on(evt, fn) { (this.handlers[evt] ??= []).push(fn); return this }
+  emit(evt, arg) { for (const fn of this.handlers[evt] ?? []) { try { fn(arg) } catch (e) { this.log(`handler ${evt}: ${e.message}`) } } }
+
+  // ---------- 啟動／停止 ----------
+  async start() {
+    const saved = await this.store.load()
+    for (const f of saved?.friends ?? []) this.friends.set(f.id, this.#decorate({ ...f, status: 'offline', unread: 0, waiting: false, replyTo: null }))
+    for (const [id, l] of Object.entries(saved?.logs ?? {})) this.logs.set(id, l)
+    this.emit('state')
+    await this.refreshRoster()
+    await this.pull('startup')
+    this.timers.push(setInterval(() => void this.refreshRoster(), this.rosterMs))
+    this.timers.push(setInterval(() => void this.pull('poll'), this.pollMs))
+  }
+  async stop() { this.timers.forEach(clearInterval); this.timers = []; await this.flush() }
+
+  // ---------- 名單 ----------
+  async refreshRoster() {
+    let members
+    try { members = (await this.transport.list())?.members; this.#setConn('on') }
+    catch (e) { this.log(`list failed: ${e.message}`); this.#setConn('off'); return }
+    const live = buildFriends(members, { selfNode: this.selfNode, selfName: this.windowName })
+    const prev = new Map([...this.friends].map(([id, f]) => [id, f.status]))
+    const known = [...this.friends.values()].filter(f => this.logs.has(f.id) || f.known)
+    const merged = mergeFriends(known, live)
+    const next = new Map()
+    for (const m of merged) {
+      const old = this.friends.get(m.id)
+      const f = this.#decorate({ unread: 0, waiting: false, replyTo: null, ...(old ?? {}), ...m })
+      next.set(m.id, f)
+      if (this.rosterLoaded && f.status !== 'offline' && (prev.get(m.id) ?? 'offline') === 'offline') {
+        queueMicrotask(() => this.emit('notify', { kind: 'login', friend: f, line: '已經登入', sound: 'login', toast: true }))
+      }
+    }
+    this.friends = next
+    this.rosterLoaded = true
+    this.emit('state')
+  }
+
+  #setConn(c) { if (this.conn !== c) { this.conn = c; this.emit('state') } }
+  #decorate(f) { return { ...f, hue: hueOf(f.id), dp: initial(f.nick) } }
+
+  // ---------- 收信 ----------
+  async pull(why = 'poll') {
+    if (this.pulling) { this.again = true; return }
+    this.pulling = true
+    try {
+      do {
+        this.again = false
+        const { messages = [] } = (await this.transport.inbox()) ?? {}
+        this.#setConn('on')
+        const ids = []
+        for (const m of messages) {
+          if (m.to_agent !== this.windowName) continue   // 不是寄給本視窗的絕不處理、不 ack
+          if (!this.seen.has(m.id)) { this.seen.add(m.id); await this.#incoming(m) }
+          ids.push(m.id)
+        }
+        if (ids.length) { await this.flush(); await this.transport.ack(ids); ids.forEach(i => this.seen.delete(i)) }
+      } while (this.again)
+    } catch (e) { this.log(`pull failed (${why}): ${e.message}`); this.#setConn('off') }
+    finally { this.pulling = false }
+  }
+
+  async #incoming(m) {
+    const r = routeMail(this.friends, m)
+    let f = this.friends.get(r.id)
+    if (!f) { f = this.#decorate({ ...stubFriend(r), unread: 0, waiting: false, replyTo: null }); this.friends.set(r.id, f) }
+    f.known = true
+    f.waiting = false
+    const t = Date.parse(m.created_at) || this.now()
+    const lg = this.#log(r.id)
+    const nudge = hasNudge(m.body)
+    const text = stripNudge(m.body)
+    if (text) { lg.push({ k: 'them', text, t, id: m.id }); f.lastAt = t; f.replyTo = m.id }
+    const visible = await this.isChatVisible(r.id)
+    if (nudge) {
+      lg.push({ k: 'sys', nudge: true, text: `${plain(f.nick)} 傳送了一個震動。`, t })
+      if (!text && !visible) f.unread++
+    }
+    if (text && !visible) f.unread++
+    this.#scheduleSave()
+    this.emit('state')
+    this.emit('log', r.id)
+    if (text) this.emit('notify', { kind: 'msg', friend: f, line: plain(text), sound: 'msg', toast: !visible })
+    if (nudge) this.emit('notify', { kind: 'nudge', friend: f, line: '傳送了一個震動', sound: 'nudge', toast: !visible, shake: visible })
+  }
+
+  // ---------- 寄信 ----------
+  async send(id, raw) {
+    const f = this.friends.get(id)
+    const text = String(raw ?? '').trim()
+    if (!f || !text) return { ok: false, error: '沒有內容或找不到好友' }
+    if (text.length > MAX_BODY) return { ok: false, error: `內文超過 ${MAX_BODY} 字` }
+    const payload = { to_node: f.node, to_agent: f.agent || undefined, body: text, reply_to: f.replyTo || undefined, from_agent: this.windowName, expects_reply: true }
+    try { await this.transport.send(payload) } catch (e) { return this.#fail(id, e) }
+    this.#log(id).push({ k: 'me', text, t: this.now() })
+    f.waiting = true
+    f.replyTo = null
+    f.known = true
+    this.#scheduleSave()
+    this.emit('state')
+    this.emit('log', id)
+    return { ok: true }
+  }
+
+  async nudge(id) {
+    const f = this.friends.get(id)
+    if (!f) return { ok: false, error: '找不到好友' }
+    try { await this.transport.send({ to_node: f.node, to_agent: f.agent || undefined, body: NUDGE_TAG, from_agent: this.windowName, expects_reply: false }) }
+    catch (e) { return this.#fail(id, e) }
+    this.#log(id).push({ k: 'sys', nudge: true, mine: true, text: '你已傳送震動。', t: this.now() })
+    f.known = true
+    this.#scheduleSave()
+    this.emit('log', id)
+    return { ok: true }
+  }
+
+  #fail(id, e) {
+    this.#log(id).push({ k: 'sys', text: `訊息沒有送到：${e.message}`, t: this.now() })
+    this.emit('log', id)
+    return { ok: false, error: e.message }
+  }
+
+  // ---------- 讀取 ----------
+  markRead(id) { const f = this.friends.get(id); if (f && f.unread) { f.unread = 0; this.emit('state') } }
+  #log(id) { if (!this.logs.has(id)) this.logs.set(id, []); return this.logs.get(id) }
+  logOf(id) { return this.logs.get(id) ?? [] }
+  snapshot() { return { conn: this.conn, windowName: this.windowName, selfNode: this.selfNode, friends: [...this.friends.values()].map(f => ({ ...f })) } }
+
+  // ---------- 存檔 ----------
+  #scheduleSave() { if (!this.saveTimer) this.saveTimer = setTimeout(() => { this.saveTimer = null; void this.flush() }, 300) }
+  async flush() {
+    if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null }
+    const withLog = [...this.friends.values()].filter(f => this.logs.has(f.id) || f.known)
+    try {
+      await this.store.save({
+        friends: withLog.map(f => ({ id: f.id, node: f.node, agent: f.agent, nick: f.nick, psm: f.psm, engine: f.engine, lastAt: f.lastAt ?? 0, known: true })),
+        logs: Object.fromEntries(withLog.filter(f => this.logs.has(f.id)).map(f => [f.id, this.logs.get(f.id).slice(-LOG_KEEP)])),
+      })
+    } catch (e) { this.log(`save failed: ${e.message}`) }
+  }
+}

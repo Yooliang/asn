@@ -1,0 +1,38 @@
+// 收發室名單（list 動作的 members）→ 好友與狀態。純函式。
+import { hueOf, initial } from './text.mjs'
+
+export const friendId = (node, agent) => `${node}/${agent ?? ''}`
+// 收發室自己（名字結尾「收發室」）不當好友
+export const isRelayRoom = name => /收發室$/.test(String(name ?? ''))
+
+// 後端回報的視窗狀態 → 介面狀態：busy/working/running 之類＝忙碌，其餘（idle…）＝線上；不在名單＝離線（由 mergeFriends 決定）
+const BUSY = new Set(['busy', 'working', 'running', 'thinking'])
+export const statusOf = raw => (BUSY.has(String(raw ?? '').trim().toLowerCase()) ? 'busy' : 'online')
+
+// 一個視窗一列；名字＝視窗名，個人訊息＝「節點／資料夾」
+export function buildFriends(members, { selfNode, selfName } = {}) {
+  const out = []
+  for (const m of Array.isArray(members) ? members : []) {
+    if (!m || typeof m.id !== 'string') continue
+    for (const a of Array.isArray(m.agents) ? m.agents : []) {
+      if (!a || typeof a.name !== 'string' || !a.name) continue
+      if (isRelayRoom(a.name)) continue
+      if (m.id === selfNode && a.name === selfName) continue
+      out.push({
+        id: friendId(m.id, a.name), node: m.id, agent: a.name, nick: a.name,
+        psm: a.cwd_label ? `${m.id}／${a.cwd_label}` : m.id,
+        engine: a.engine ?? null, status: statusOf(a.status),
+      })
+    }
+  }
+  return out
+}
+
+// 把「這次名單」和「記得的好友（有過對話）」合併：名單裡的 → 線上／忙碌；記得但不在名單 → 離線
+export function mergeFriends(known, live) {
+  const map = new Map()
+  for (const k of known) map.set(k.id, { ...k, status: 'offline' })
+  for (const l of live) map.set(l.id, { ...(map.get(l.id) ?? {}), ...l })
+  return [...map.values()].map(f => ({ ...f, hue: hueOf(f.id), dp: initial(f.nick) }))
+    .sort((a, b) => a.nick.localeCompare(b.nick, 'zh-Hant'))
+}
