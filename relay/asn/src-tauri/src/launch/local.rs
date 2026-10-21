@@ -94,7 +94,7 @@ fn quote_arg(a: &str) -> String {
     format!("\"{}\"", a.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-fn start_window(title: &str, command: &str, args: &[String], cwd: &Path, hidden: bool) -> Result<u32, String> {
+pub(super) fn start_window(title: &str, command: &str, args: &[String], cwd: &Path, hidden: bool) -> Result<u32, String> {
     #[cfg(windows)]
     {
         start_window_windows(title, command, args, cwd, hidden)
@@ -108,13 +108,13 @@ fn start_window(title: &str, command: &str, args: &[String], cwd: &Path, hidden:
 
 /// PowerShell 單引號字串（內部單引號加倍），整串都是字面值，不會展開 $ 或反引號。
 #[cfg_attr(not(windows), allow(dead_code))]
-fn ps_quote(s: &str) -> String {
+pub(super) fn ps_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
 /// 去掉 Windows 的長路徑前綴（canonicalize 會加）；不少 CLI 對它處理不一致，工作資料夾也會被當成不同的專案路徑。
 #[cfg_attr(not(windows), allow(dead_code))]
-fn strip_verbatim_prefix(p: &str) -> String {
+pub(super) fn strip_verbatim_prefix(p: &str) -> String {
     if let Some(rest) = p.strip_prefix(r"\\?\UNC\") {
         return format!(r"\\{rest}");
     }
@@ -157,7 +157,7 @@ fn encode_ps_command(script: &str) -> String {
 
 /// 外層 PowerShell（承載視窗）的參數字串：-NoExit 讓視窗留著。
 #[cfg_attr(not(windows), allow(dead_code))]
-fn window_launcher_args(title: &str, command: &str, args: &[String]) -> String {
+pub(super) fn window_launcher_args(title: &str, command: &str, args: &[String]) -> String {
     let enc = encode_ps_command(&build_window_script(title, command, args));
     format!("-NoLogo -NoProfile -NoExit -ExecutionPolicy Bypass -EncodedCommand {enc}")
 }
