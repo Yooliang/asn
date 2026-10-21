@@ -293,6 +293,17 @@
       <button type="button" role="menuitem" :class="{ off: launchDisableReason(d.key) }" :disabled="!!launchDisableReason(d.key)" :title="launchDisableReason(d.key) || d.label" @click="pickLaunchDevice(d.key)">{{ d.label }}<span class="launch-why" v-if="launchDisableReason(d.key)">{{ launchDisableReason(d.key) }}</span></button>
     </li>
   </ul>
+  <div class="partner-dlg-back" v-if="launchNotice.open" @click.self="closeLaunchNotice">
+    <div class="partner-dlg launch-notice-dlg" role="alertdialog" aria-labelledby="launch-notice-title" aria-describedby="launch-notice-body" @click.stop>
+      <h3 id="launch-notice-title">{{ launchNotice.title }}</h3>
+      <p id="launch-notice-body" class="launch-notice-body">{{ launchNotice.body }}</p>
+      <p class="launch-notice-log" v-if="launchNotice.logPath"><span class="launch-notice-log-label">記錄檔：</span><code>{{ launchNotice.logPath }}</code></p>
+      <div class="partner-actions">
+        <button class="aero-btn" type="button" v-if="launchNotice.logPath" @click="openLaunchLogFolder">開啟記錄資料夾</button>
+        <button class="aero-btn primary" type="button" @click="closeLaunchNotice">知道了</button>
+      </div>
+    </div>
+  </div>
   <div class="partner-dlg-back" v-if="partnerDlg.open" @click.self="closePartnerDlg">
     <div class="partner-dlg" role="dialog" aria-labelledby="partner-dlg-title" @click.stop>
       <h3 id="partner-dlg-title">開新夥伴</h3>

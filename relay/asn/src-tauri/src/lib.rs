@@ -147,6 +147,55 @@ async fn launch_prefs_set(app: State<'_, App>, prefs: Value) -> Result<(), Strin
     launch::launch_prefs_set(app.data_dir.clone(), prefs).await
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RelayLogPaths {
+    bridge_log: String,
+    machine_dir: String,
+}
+
+/// 收發橋與夥伴啟動相關紀錄的路徑（不含金鑰）。
+#[tauri::command]
+fn relay_log_paths(app: State<'_, App>) -> RelayLogPaths {
+    let machine_dir = app.work_dir.clone();
+    RelayLogPaths {
+        bridge_log: machine_dir.join("bridge.log").display().to_string(),
+        machine_dir: machine_dir.display().to_string(),
+    }
+}
+
+fn open_in_file_manager(path: &Path) -> Result<(), String> {
+    if !path.is_dir() {
+        return Err("路徑不是資料夾".into());
+    }
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(windows))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// 用檔案管理員開啟本機 machine 資料夾（內含 bridge.log）。
+#[tauri::command]
+fn open_machine_log_dir(app: State<'_, App>) -> Result<(), String> {
+    let dir = app.work_dir.clone();
+    if !dir.starts_with(identity::relay_home()) {
+        return Err("記錄資料夾路徑異常".into());
+    }
+    open_in_file_manager(&dir)
+}
+
 /// `--shot` 模式：前端錯誤印到 stderr，方便 shot.mjs 除錯。
 #[tauri::command]
 fn shot_frontend_log(app: State<'_, App>, level: String, message: String) {
@@ -347,7 +396,7 @@ pub fn run() {
         .manage(updater::Pending::default())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, partner_console_query, partner_console_set, launch_prefs_get, launch_prefs_set, shot_frontend_log, open_url, set_window_name, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, partner_console_query, partner_console_set, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, set_window_name, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
