@@ -47,10 +47,17 @@ test('buildFriends 把節點 kind 帶進好友', () => {
   assert.equal(engineKey(fr[0]), 'claude')
 })
 
+test('分頁依廠商：用 vendorKey 而非首字母', () => {
+  const t = pageTabs(SAMPLE, 'engine', { selfNode: 'H' })
+  const cl = t.all.find(x => x.key === 'claude')
+  assert.equal(cl.vendorKey, 'claude')
+  assert.equal(cl.short, '')
+})
+
 test('分頁依廠商：排序、首字母、未讀與人數彙總；kind 推斷的歸進對應廠商', () => {
   const t = pageTabs(SAMPLE, 'engine', { selfNode: 'H' })
   assert.deepEqual(t.all.map(x => x.label), ['Claude', 'Grok', 'DeepSeek', '其他'])
-  assert.deepEqual(t.all.map(x => x.short), ['C', 'G', 'D', '其'])
+  assert.deepEqual(t.all.map(x => x.vendorKey), ['claude', 'grok', 'deepseek', 'other'])
   const c = t.all[0]
   assert.deepEqual([c.total, c.online, c.unread], [3, 2, 2])
   assert.equal(t.all[1].unread, 1)

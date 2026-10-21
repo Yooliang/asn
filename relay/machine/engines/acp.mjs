@@ -94,6 +94,27 @@ export function createEngine({ log, workDir, mailboxName, env = process.env, sen
       const noReply = !wantsReply(headReply(text), body) || agent.endsWith('收發室')
       w.enqueue({ id, text, sender: { node, agent }, noReply })
     },
+    /** 動態加一個背景工作者（開新夥伴；同名且還在跑就拒絕） */
+    addPartnerWorker(cfg) {
+      if (workers.has(cfg.name)) {
+        const w = workers.get(cfg.name)
+        if (w.listed()) throw new Error(`已經有叫「${cfg.name}」的工作者`)
+        workers.delete(cfg.name)
+      }
+      try { fs.mkdirSync(cfg.cwd, { recursive: true }) } catch (e) { throw new Error(`工作資料夾建不起來：${e.message}`) }
+      const w = createWorker({
+        cfg, env, log, approvals, store: store(cfg), makeDriver,
+        notify: m => notify({ ...m, from_agent: cfg.name }),
+        handlers: {
+          onSent: id => handlers.onSent(id),
+          onFail: (id, reason) => handlers.onFail(id, reason),
+          onReply: (name, text, mailId) => handlers.onReply(name, text, mailId),
+        },
+      })
+      workers.set(cfg.name, w)
+      w.start()
+      log(`acp: 動態啟動工作者 ${cfg.name}（protocol=${cfg.protocol} cwd=${cfg.cwd}）`)
+    },
     // 測試／診斷用
     _workers: workers,
   }

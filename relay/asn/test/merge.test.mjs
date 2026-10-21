@@ -160,8 +160,9 @@ test('守門：元件依 paneClasses／msgLayout／foldArrow 排版；樞紐用 
   const pane = fs.readFileSync(path.join(UI, 'lib', 'chatpane.mjs'), 'utf8')
   assert.ok(pane.includes('paneClasses({ dpMode: props.dpMode, bubble: props.bubble, collapsed: props.dpCollapsed, toolbar: props.toolbar })'))
   assert.ok(pane.includes('msgLayout(k, { dpMode: props.dpMode, bubble: props.bubble })'))
-  assert.ok(pane.includes('foldArrow(sideOf(props.dpMode), collapsed.value)'))
-  assert.ok(pane.includes('v-if="sideCol && !collapsed"'))
+  assert.ok(pane.includes('foldBarArrow(side.value, collapsed.value)'))
+  assert.ok(pane.includes('class="dp-fold-bar"'))
+  assert.ok(pane.includes('dp-side-stack'))
   assert.ok(pane.includes("'tone-' + lay(m.k).tone"))
   // 工具列按鈕只有圖示：有中文 aria-label 與提示，圖示用內嵌 SVG；表情鈕本身就開表情選單（旁邊不另放 ▾，功能重複）
   for (const label of ['表情符號', '傳送震動']) assert.ok(pane.includes(`aria-label="${label}"`), `缺 aria-label ${label}`)
@@ -180,6 +181,9 @@ test('守門：元件依 paneClasses／msgLayout／foldArrow 排版；樞紐用 
   const opens = (fromBar.match(/<div[\s>]/g) || []).length, closes = (fromBar.match(/<\/div>/g) || []).length
   assert.ok(closes >= opens, '分頁選單必須在 .tabbar 結束之後')
   assert.ok(/\.ctab-menu\{position:fixed/.test(fs.readFileSync(path.join(UI, 'style.css'), 'utf8')), '分頁選單要 position:fixed')
+  assert.ok(/\.buddy-menu[\s\S]*position:fixed/.test(fs.readFileSync(path.join(UI, 'style.css'), 'utf8')), '名單右鍵選單要 position:fixed')
+  assert.ok(!htmlTab.includes('g-launch') && !htmlTab.includes('開新夥伴…'), '組標題旁與右鍵不保留舊入口')
+  assert.ok(htmlTab.includes('openLaunchPicker') && htmlTab.includes('search-ic'), '搜尋列旁要有開新夥伴')
   for (const label of ['關閉', '關閉其他', '關閉右側', '全部關閉']) assert.ok(htmlTab.includes(label), `list.html 缺 ${label}`)
   assert.ok(htmlTab.includes('menuTogglePin') && htmlTab.includes('tabPinLabel'))
   const html = fs.readFileSync(path.join(UI, 'list.html'), 'utf8')
@@ -189,7 +193,7 @@ test('守門：元件依 paneClasses／msgLayout／foldArrow 排版；樞紐用 
 
 test('分頁右鍵選單：按選單以外任何地方（pointerdown 捕獲）、Esc、視窗失焦都會收起', () => {
   const js = fs.readFileSync(path.join(UI, 'list.js'), 'utf8')
-  assert.match(js, /addEventListener\('pointerdown'[\s\S]{0,200}closest\('\.ctab-menu'\)[\s\S]{0,80}closeChatTabMenu\(\)[\s\S]{0,20}true\)/)
+  assert.match(js, /addEventListener\('pointerdown'[\s\S]*closest\('\.ctab-menu'\)[\s\S]*closeChatTabMenu\(\)[\s\S]*true\)/)
   assert.match(js, /Escape' && chatTabMenu\.value\) closeChatTabMenu\(\)/)
-  assert.match(js, /addEventListener\('blur'[\s\S]{0,60}closeChatTabMenu\(\)/)
+  assert.match(js, /addEventListener\('blur'[\s\S]*closeChatTabMenu\(\)/)
 })

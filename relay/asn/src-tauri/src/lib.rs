@@ -1,11 +1,13 @@
 //! ASN 即時通（Tauri 2）：金鑰、anon 金鑰、收發室 HTTP／WebSocket、心跳檔、設定與對話存檔都在 Rust 端；
 //! 前端（ui/）只拿得到「信件與名單」，拿不到任何金鑰。
+mod agent_tools;
 mod attach;
 mod avatar;
 mod bell;
 mod claude_accounts;
 mod heartbeat;
 mod identity;
+mod launch;
 mod names;
 mod relay;
 mod shot;
@@ -107,6 +109,49 @@ async fn relay_ack(app: State<'_, App>, ids: Vec<String>) -> Result<Value, Strin
 #[tauri::command]
 async fn relay_rooms(app: State<'_, App>) -> Result<Value, String> {
     relay_of(&app)?.api("room_list", None).await
+}
+
+#[tauri::command]
+async fn relay_launch(app: State<'_, App>, body: Value) -> Result<Value, String> {
+    launch::relay_launch(relay_of(&app)?.as_ref(), body).await
+}
+
+#[tauri::command]
+async fn relay_launchers(app: State<'_, App>, ids: Option<Vec<String>>) -> Result<Value, String> {
+    launch::relay_launchers(relay_of(&app)?.as_ref(), ids).await
+}
+
+#[tauri::command]
+async fn partner_launch_local(app: State<'_, App>, req: launch::LocalLaunchReq) -> Result<Value, String> {
+    launch::partner_launch_local(app.node.clone(), app.work_dir.clone(), req).await
+}
+
+#[tauri::command]
+async fn partner_console_query(req: launch::PartnerConsoleReq) -> Result<Value, String> {
+    launch::partner_console_query(req).await
+}
+
+#[tauri::command]
+async fn partner_console_set(req: launch::PartnerConsoleReq) -> Result<Value, String> {
+    launch::partner_console_set(req).await
+}
+
+#[tauri::command]
+async fn launch_prefs_get(app: State<'_, App>) -> Result<Value, String> {
+    launch::launch_prefs_get(app.data_dir.clone()).await
+}
+
+#[tauri::command]
+async fn launch_prefs_set(app: State<'_, App>, prefs: Value) -> Result<(), String> {
+    launch::launch_prefs_set(app.data_dir.clone(), prefs).await
+}
+
+/// `--shot` 模式：前端錯誤印到 stderr，方便 shot.mjs 除錯。
+#[tauri::command]
+fn shot_frontend_log(app: State<'_, App>, level: String, message: String) {
+    if app.shot.is_some() {
+        eprintln!("[asn-ui {level}] {message}");
+    }
 }
 
 /// 底部廣告可以開的網址（全是 repo 文件寫明的公開網址）；只准完全相同的字串，其餘一律拒絕
@@ -299,10 +344,11 @@ pub fn run() {
         .manage(tray::TrayFailed::default())
         .manage(shot::ShotState::default())
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_avatar, relay_set_avatar, relay_rooms, open_url, set_window_name, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, partner_console_query, partner_console_set, launch_prefs_get, launch_prefs_set, shot_frontend_log, open_url, set_window_name, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete,
-            voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe, stt::stt_cancel,
+            voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
+            agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
             wins::open_chat, wins::chat_visible, wins::close_chats, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot,
             tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_set,
         ])

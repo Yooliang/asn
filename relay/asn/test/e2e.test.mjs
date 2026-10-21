@@ -10,7 +10,7 @@ import { defaultExe, runShot, shotCaptureSupported } from '../scripts/shot.mjs'
 import { FAKE_KEY, U } from './fake-relay.mjs'
 import { nudgeBody } from '../ui/lib/text.mjs'
 
-test('asn.exe 端到端（假 relay）', { skip: (!shotCaptureSupported && '端到端截圖僅 Windows') || (!fs.existsSync(defaultExe) && '先執行 npm run build'), timeout: 120_000 }, async () => {
+test('asn.exe 端到端（假 relay）', { skip: !fs.existsSync(defaultExe) && '先執行 npm run build', timeout: 120_000 }, async () => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-e2e-'))
   const r = await runShot(out)
   assert.equal(r.code, 0, r.log)
@@ -19,7 +19,7 @@ test('asn.exe 端到端（假 relay）', { skip: (!shotCaptureSupported && '端�
   assert.ok(reqs.some(q => q.action === 'list'))
   assert.ok(reqs.some(q => q.action === 'room_list' && q.method === 'GET' && !q.body), '群組頁籤只用唯讀 GET room_list')
   assert.ok(!reqs.some(q => q.action?.startsWith('room_') && q.method !== 'GET'), '群組沒有任何寫入')
-  assert.ok(r.files.some(f => f.startsWith('tabs-groups')), '有群組頁籤截圖')
+  if (shotCaptureSupported) assert.ok(r.files.some(f => f.startsWith('tabs-groups')), '有群組頁籤截圖')
   assert.ok(reqs.some(q => q.action === 'inbox' && q.agent === 'H-ASN'), '用 inbox&agent=<視窗名> 收信')
   assert.ok(reqs.some(q => q.action === 'ack' && q.agent === 'H-ASN' && q.body.ids.includes(U(1))), '收到後 ack')
   assert.equal(r.relay.mails[0].acked, true)
@@ -40,8 +40,10 @@ test('asn.exe 端到端（假 relay）', { skip: (!shotCaptureSupported && '端�
   assert.equal(r.heartbeat.pid, r.pid)
   assert.ok(Math.abs(Date.now() - r.heartbeat.t) < 120_000)
   assert.equal(fs.existsSync(r.hbFile), false, '結束時清掉自己的心跳')
-  for (const f of ['list.png', 'chat.png']) assert.ok(r.files.includes(f), `缺 ${f}`)
-  assert.ok(r.files.some(f => f.startsWith('toast-')), '有提示視窗截圖')
+  if (shotCaptureSupported) {
+    for (const f of ['list.png', 'chat.png']) assert.ok(r.files.includes(f), `缺 ${f}`)
+    assert.ok(r.files.some(f => f.startsWith('toast-')), '有提示視窗截圖')
+  }
   assert.ok(fs.existsSync(path.join(r.data, 'asn-chats.json')), '對話存檔寫在資料夾')
   assert.ok(!fs.readFileSync(path.join(r.data, 'asn-chats.json'), 'utf8').includes(FAKE_KEY), '存檔裡沒有金鑰')
 })

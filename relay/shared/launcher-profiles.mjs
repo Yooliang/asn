@@ -1,0 +1,129 @@
+// 依 agent-tools-detect 結果產生 launcher profile（指令只在本機決定，不上雲）。
+import os from 'node:os'
+import path from 'node:path'
+
+/** @typedef {'window'|'background'} LaunchMode */
+
+/**
+ * @param {Record<string, { cmd: string|null }>} tools
+ * @param {{ homeDir?: string, platform?: string }} opts
+ */
+export function buildDefaultProfiles(tools, opts = {}) {
+  const platform = opts.platform ?? process.platform
+  const home = opts.homeDir ?? os.homedir()
+  const profiles = {}
+  if (tools.claude?.cmd) profiles.claude = profileClaude(tools.claude.cmd, platform)
+  if (tools.codex?.cmd) profiles.codex = profileCodex(tools.codex.cmd, platform)
+  if (tools.agy?.cmd) profiles.gemini = profileGemini(tools.agy.cmd, home)
+  if (tools.grok?.cmd) profiles.grok = profileGrok(tools.grok.cmd, home)
+  if (tools.pi?.cmd) profiles.pi = profilePi(tools.pi.cmd, platform)
+  return profiles
+}
+
+function profileClaude(cmd, platform) {
+  if (platform === 'win32') {
+    return {
+      label: 'Claude（互動視窗）',
+      mode: 'window',
+      engine: 'claude',
+      model: 'claude',
+      command: cmd,
+      args: ['--dangerously-skip-permissions', '-n', '{name}', '--remote-control', '{name}'],
+    }
+  }
+  return {
+    label: 'Claude（互動視窗）',
+    mode: 'window',
+    engine: 'claude',
+    model: 'claude',
+    command: cmd,
+    args: ['--dangerously-skip-permissions', '-n', '{name}', '--remote-control', '{name}'],
+  }
+}
+
+function profileCodex(cmd, platform) {
+  const args = platform === 'win32'
+    ? ['/c', cmd, '-c', 'check_for_update_on_startup=false', '-s', 'workspace-write', '-a', 'on-request', 'resume', '{name}']
+    : ['-lc', `${shellQuote(cmd)} -c check_for_update_on_startup=false -s workspace-write -a on-request resume {name}`]
+  return {
+    label: 'Codex（互動視窗）',
+    mode: 'window',
+    engine: 'codex',
+    model: 'codex',
+    command: platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh',
+    args,
+  }
+}
+
+function profileGemini(cmd, home) {
+  const cwd = path.join(home, '.irori-relay', 'workers', '{name}')
+  return {
+    label: 'Gemini（背景工作者）',
+    mode: 'background',
+    engine: 'acp',
+    model: 'gemini',
+    acp: { protocol: 'agy-stream', command: cmd, args: [], roster_engine: 'gemini' },
+    command: cmd,
+    args: [],
+    cwdTemplate: cwd,
+  }
+}
+
+function profileGrok(cmd, home) {
+  const cwd = path.join(home, '.irori-relay', 'workers', '{name}')
+  return {
+    label: 'Grok（背景工作者）',
+    mode: 'background',
+    engine: 'acp',
+    model: 'grok',
+    acp: { protocol: 'acp', command: cmd, args: ['agent', 'stdio'], roster_engine: 'grok' },
+    command: cmd,
+    args: ['agent', 'stdio'],
+    cwdTemplate: cwd,
+  }
+}
+
+function profilePi(cmd, platform) {
+  return {
+    label: 'pi（互動視窗，實驗）',
+    mode: 'window',
+    engine: 'pi',
+    model: 'pi',
+    command: platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh',
+    args: platform === 'win32'
+      ? ['/c', 'start', 'pi', '{name}']
+      : ['-lc', `${shellQuote(cmd)}`],
+    disabled: true,
+    disabledReason: 'pi 互動視窗與收發室整合尚在擴充，請先在終端機手動開 pi',
+  }
+}
+
+function shellQuote(s) {
+  if (/^[A-Za-z0-9_./-]+$/.test(s)) return s
+  return `'${String(s).replace(/'/g, `'\\''`)}'`
+}
+
+export function defaultCwdAllow(homeDir = os.homedir()) {
+  const out = new Set()
+  for (const p of [
+    path.join(homeDir, 'Github'),
+    path.join(homeDir, 'Projects'),
+    path.join(homeDir, 'projects'),
+    path.join(homeDir, 'Documents'),
+    path.join(homeDir, 'workspace'),
+  ]) out.add(normalizePath(p))
+  return [...out]
+}
+
+export function normalizePath(p) {
+  return path.resolve(String(p))
+}
+
+/** UI 用：各模型的展示資訊 */
+export const MODEL_CATALOG = [
+  { id: 'claude', toolId: 'claude', profileId: 'claude', label: 'Claude', mode: 'window', modeLabel: '會開一個視窗' },
+  { id: 'codex', toolId: 'codex', profileId: 'codex', label: 'Codex', mode: 'window', modeLabel: '會開一個視窗' },
+  { id: 'gemini', toolId: 'agy', profileId: 'gemini', label: 'Gemini', mode: 'background', modeLabel: '在背景執行' },
+  { id: 'grok', toolId: 'grok', profileId: 'grok', label: 'Grok', mode: 'background', modeLabel: '在背景執行' },
+  { id: 'pi', toolId: 'pi', profileId: 'pi', label: 'pi', mode: 'window', modeLabel: '會開一個視窗' },
+]

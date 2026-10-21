@@ -64,8 +64,25 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .nick-err{font-size:11px;color:var(--busy)}
 .psm-input{font-size:12px;color:var(--muted);font-style:italic}
 .search{padding:6px 8px;border-bottom:1px solid var(--line);background:var(--panel-soft)}
-.search{display:flex;gap:6px;align-items:center}
+.search{display:flex;gap:4px;align-items:center}
 .search input{flex:1;min-width:0;width:100%;border:1px solid var(--line);border-radius:3px;padding:4px 8px;background:var(--panel)}
+.search-ic{flex:none;width:26px;height:26px;padding:0;border:1px solid var(--line);border-radius:3px;background:linear-gradient(#fdfeff,#e3eef9);color:var(--title-fg);cursor:pointer;display:grid;place-items:center}
+.search-ic:hover{border-color:var(--accent);background:linear-gradient(#f2f9ff,#bfe0fb)}
+.buddy-menu,.launch-picker{position:fixed;z-index:62;margin:0;max-width:min(320px,calc(100vw - 16px))}
+.launch-picker button.off{color:var(--muted);cursor:default}
+.launch-picker .launch-why{display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:2px;white-space:normal}
+.partner-dlg-back{position:fixed;inset:0;z-index:70;background:rgba(10,24,40,.45);display:flex;align-items:center;justify-content:center;padding:12px}
+.partner-dlg{min-width:min(420px,96vw);max-width:480px;padding:14px 16px;border:1px solid #7a9ec4;border-radius:6px;background:var(--panel);box-shadow:0 8px 28px rgba(0,30,70,.35);display:flex;flex-direction:column;gap:8px}
+.partner-dlg h3{margin:0 0 4px;font-size:15px}
+.partner-dlg label{display:flex;flex-direction:column;gap:3px;font-size:12px}
+.partner-display{border:1px solid var(--line);border-radius:4px;padding:6px 8px;margin:0;display:flex;flex-wrap:wrap;gap:8px 14px}
+.partner-display legend{padding:0 4px;font-size:12px;font-weight:600}
+.partner-display-opt{display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer}
+.partner-models{display:flex;flex-wrap:wrap;gap:6px}
+.pmodel{border:1px solid var(--line);border-radius:4px;padding:6px 8px;background:var(--panel-soft);cursor:pointer;display:flex;align-items:center;gap:6px;font-size:12px}
+.pmodel.on{border-color:var(--accent);background:#e6f1fc;font-weight:600}
+.pmodel.off{opacity:.45;cursor:default}
+.partner-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
 .gmode{flex:none;display:flex;border:1px solid #9ab7d6;border-radius:3px;overflow:hidden}
 .gmode button{border:0;padding:3px 7px;font-size:12px;background:linear-gradient(#fdfeff,#e3eef9);color:var(--muted);cursor:pointer}
 .gmode button + button{border-left:1px solid #9ab7d6}
@@ -98,6 +115,8 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .settings small{color:var(--muted)}
 
 /* ---------- 對話視窗 ---------- */
+.chatpane-body{flex:1;min-height:0;display:flex;gap:0;min-width:0}
+.chatpane-main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
 .conv,.compose-row{display:flex;gap:8px;padding:8px;background:var(--panel-soft);min-height:0}
 .conv{flex:1}
 .compose-row{flex:none;padding-top:0}
@@ -206,9 +225,14 @@ html.toast-page,html.toast-page body{background:transparent}
 @media (prefers-reduced-motion:reduce){.ad{animation:none}}
 
 /* ---------- 大頭貼欄收合（對話區）：分開模式欄在右、整合模式欄在左 ---------- */
-.dp-fold,.dp-fold-sp{flex:none;width:16px}
-.dp-fold{align-self:stretch;border:0;border-radius:3px;background:transparent;color:var(--muted);font-size:16px;line-height:1;padding:0;cursor:pointer}
-.dp-fold:hover{background:#dcebf9;color:var(--title-fg)}
+.dp-side{flex:none;width:74px;display:flex;flex-direction:column;align-items:stretch;background:var(--panel-soft);border-left:1px solid var(--line);min-height:0}
+.dp-left .chatpane-body{flex-direction:row-reverse}
+.dp-left .dp-side{border-left:0;border-right:1px solid var(--line)}
+.dp-side-stack{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:10px;padding:8px 6px 4px}
+.dp-fold-bar{flex:none;width:100%;margin:0;padding:0;height:24px;border:0;border-top:1px solid var(--line);border-radius:0;background:linear-gradient(var(--panel-head),var(--panel-soft));color:var(--muted);font-size:15px;line-height:1;cursor:pointer}
+.dp-fold-bar:hover{background:#dcebf9;color:var(--title-fg)}
+.rtab-vendor{display:grid;place-items:center;line-height:0}
+.rtab-vendor svg{display:block}
 .dp-left .conv,.dp-left .compose-row{flex-direction:row-reverse}
 .dp-inline .conv{gap:0}
 

@@ -14,6 +14,9 @@ import { contextText, createRooms, parseMember, roomText, roomUuid, NO_REPLY_RE 
 import { NO_REPLY_TIP, mailHead, parseSendHead, stripReplyHead, wantsReply } from './mail-format.mjs'
 import { bodyWithNotes } from './attach-format.mjs'
 import { createLauncher } from './launcher.mjs'
+import { detectAgentTools } from '../shared/agent-tools-detect.mjs'
+import { buildDefaultProfiles, defaultCwdAllow } from '../shared/launcher-profiles.mjs'
+import { createPartnerQueue, workerSpecFromProfile } from './partner-background.mjs'
 import { loadEngines } from './engines/index.mjs'
 import { selfRecvAlive } from './self-recv.mjs'
 import { sentMarkName } from './sent-mark.mjs'
@@ -361,11 +364,36 @@ function pruneReplied(now) {
 // send：轉接器要主動寄信時用（acp 工作者的授權詢問、登入通知）；from_agent 預設是收發室名稱
 engines = await loadEngines({ log, workDir: WORK_DIR, mailboxName: MAILBOX_NAME, send: m => api('send', { method: 'POST', body: { to_node: m.to_node, to_agent: m.to_agent || undefined, body: m.body, reply_to: m.reply_to || undefined, from_agent: m.from_agent || MAILBOX_NAME } }) })
 // 開視窗：launcher.json 的 profile 可寫 "engine": "codex" 指定用哪個轉接器開；沒寫就用第一個宣告 openWindow 的轉接器。
-// 都沒有就不提供遠端開視窗（名單回報 launcher: null）
+// 背景夥伴（Gemini／Grok）走 acp 轉接器；CLI 自動 profile 合併在 bootstrap。
 const openEngines = engines.filter(e => e.capabilities().openWindow && e.openWindow)
 const openEngineFor = id => (id ? openEngines.find(e => e.id === id) : openEngines[0])
-const launcher = !openEngines.length ? { summary: () => null, pull: async () => {}, current: () => null } : createLauncher({
+const acpEngine = engines.find(e => e.id === 'acp')
+const launchNoAuto = process.env.IRORI_LAUNCH_NO_AUTO === '1'
+const launchTools = launchNoAuto ? {} : await detectAgentTools()
+const launchBootstrap = launchNoAuto ? null : { profiles: buildDefaultProfiles(launchTools), cwd_allow: defaultCwdAllow(), max_per_hour: 6 }
+async function startBackgroundPartner({ req, profile }) {
+  if (!acpEngine?.addPartnerWorker) throw new Error('acp 轉接器未載入（請設 IRORI_ENGINES 含 acp）')
+  const spec = workerSpecFromProfile({ name: req.name, cwd: req.cwd, profile, workDir: WORK_DIR })
+  acpEngine.addPartnerWorker(spec)
+  await refreshRoster()
+  return { pid: 0 }
+}
+let launcher = { summary: () => null, pull: async () => {}, current: () => null }
+const partnerQueue = createPartnerQueue({
+  file: path.join(WORK_DIR, 'partner-queue.jsonl'),
+  log,
+  onLaunch: async req => {
+    const config = launcher.current()
+    if (!config) throw new Error('啟動設定不可用')
+    const profile = config.profiles[req.profile]
+    if (!profile) throw new Error(`沒有 profile：${req.profile}`)
+    await startBackgroundPartner({ req: { name: req.name, cwd: req.cwd, profile: req.profile }, profile })
+  },
+})
+const canRemoteLaunch = openEngines.length || acpEngine
+launcher = !canRemoteLaunch ? launcher : createLauncher({
   api, log, workDir: WORK_DIR, configPath: process.env.IRORI_LAUNCHER_FILE || path.join(HOME_DIR, 'launcher.json'),
+  bootstrap: () => launchBootstrap,
   listNames: async () => {
     const sets = await Promise.all(engines.map(e => e.listNames()))
     return sets.some(x => x) ? new Set(sets.flatMap(x => (x ? [...x] : []))) : null
@@ -375,7 +403,8 @@ const launcher = !openEngines.length ? { summary: () => null, pull: async () => 
     if (!e) throw new Error(`沒有載入「${s.engine}」轉接器（IRORI_ENGINES）`)
     return e.openWindow(s)
   },
-  envFilter: (env, engineId) => (openEngineFor(engineId) ?? openEngines[0]).childEnv(env),
+  startBackground: startBackgroundPartner,
+  envFilter: (env, engineId) => (openEngineFor(engineId) ?? openEngines[0])?.childEnv?.(env) ?? env,
   onLaunched: async l => {
     await refreshRoster()
     if (l.first_message) await handleMail({ id: l.id, from_node: l.requested_by, from_agent: null, to_agent: l.name, trust: 'owner', body: l.first_message })
@@ -463,6 +492,7 @@ async function pullRoomsGuarded() {
 async function pull(why) {
   if (restartSince) return   // 已經拉到新版、等著重啟：不再收新信，留在信箱給重啟後的橋
   void pullRoomsGuarded()
+  void partnerQueue.drain().catch(e => log(`partner-queue: ${e.message}`))
   void launcher.pull()
   if (pulling) { again = true; return }
   pulling = true

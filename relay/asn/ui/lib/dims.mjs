@@ -39,7 +39,7 @@ export function pageTabs(friends, dim, { selfNode, selfName = '', nodeOrder = []
     const by = new Map()
     for (const f of friends) { const k = engineKey(f); if (!by.has(k)) by.set(k, []); by.get(k).push(f) }
     all = [...by.keys()].sort((a, b) => engineRank(a) - engineRank(b) || a.localeCompare(b))
-      .map(k => sumTab({ key: k, label: engineLabel(k), short: shortOf(engineLabel(k)), dot: '', unread: 0, online: 0, total: 0 }, by.get(k)))
+      .map(k => sumTab({ key: k, label: engineLabel(k), short: '', vendorKey: k, dot: '', unread: 0, online: 0, total: 0 }, by.get(k)))
   } else {
     all = deviceTabs(friends, { selfNode, selfName, nodeOrder, max }).all.map(t => ({ ...t, dot: '' }))
   }

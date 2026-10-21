@@ -102,7 +102,7 @@ test('守門：所有 v-html 都只用 emo(...)', () => {
   for (const f of files) {
     for (const m of fs.readFileSync(path.join(UI, f), 'utf8').matchAll(/v-html\s*=\s*"([^"]*)"/g)) {
       count++
-      assert.match(m[1], /^emo\(.+\)$/, `${f} 的 v-html 不是 emo(...)：${m[1]}`)
+      assert.match(m[1], /^(emo|vendorIcon)\(.+\)$/, `${f} 的 v-html 只准 emo(...) 或 vendorIcon(...)：${m[1]}`)
     }
   }
   assert.ok(count >= 4, `v-html 數量異常：${count}`)

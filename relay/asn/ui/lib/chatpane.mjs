@@ -2,7 +2,7 @@
 // 只顯示、只發事件（send／nudge／toggle-dp），不碰網路與 Tauri；信件內文與名稱一律先 emo()（跳脫）才進 v-html。
 import { EMO, emo, fmt, fmtDate, initial, plain } from './text.mjs'
 import { composeHintTitle, composePlaceholder } from './compose.mjs'
-import { foldArrow, hasSideCol, isCollapsed, msgLayout, paneClasses, sideOf } from './merge.mjs'
+import { foldBarArrow, hasSideCol, isCollapsed, msgLayout, paneClasses, sideOf } from './merge.mjs'
 import { FILE_ACCEPT, formatBytes, photoExpired, photoTitle } from './photo.mjs'
 import { attachmentFromFile, imageFromBlob } from './photo-canvas.mjs'
 import { Annotator } from './annotator.mjs'
@@ -40,7 +40,8 @@ export const ChatPane = {
     const composeTitle = computed(() => composeHintTitle(props.winMode))
     const collapsed = computed(() => isCollapsed(props.dpMode, props.dpCollapsed))
     const classes = computed(() => paneClasses({ dpMode: props.dpMode, bubble: props.bubble, collapsed: props.dpCollapsed, toolbar: props.toolbar }))
-    const arrow = computed(() => foldArrow(sideOf(props.dpMode), collapsed.value))
+    const side = computed(() => sideOf(props.dpMode))
+    const barArrow = computed(() => foldBarArrow(side.value, collapsed.value))
     const foldTip = computed(() => (collapsed.value ? '展開大頭貼' : '收起大頭貼'))
     const lay = k => msgLayout(k, { dpMode: props.dpMode, bubble: props.bubble })
     const scrollDown = () => nextTick(() => { const el = msgsEl.value; if (el) el.scrollTop = el.scrollHeight })
@@ -154,10 +155,12 @@ export const ChatPane = {
     }
     onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     const docEl = ref(null)
-    return { micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, composeHint, composeTitle, collapsed, classes, lay, arrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
+  <div class="chatpane-body">
+  <div class="chatpane-main">
   <div class="conv">
     <div class="conv-main">
       <div class="to-line"><span v-html="emo(friend.nick)"></span>
@@ -198,10 +201,6 @@ export const ChatPane = {
           </div>
         </template>
       </div>
-    </div>
-    <button class="dp-fold" type="button" v-if="sideCol" @click="$emit('toggle-dp')" :aria-label="foldTip" :aria-expanded="!collapsed" :title="foldTip">{{ arrow }}</button>
-    <div class="dp-col" v-if="sideCol && !collapsed">
-      <div class="dp xl" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span><img :src="friendAv" alt=""></span></div>
     </div>
   </div>
   <div class="compose-row">
@@ -244,10 +243,15 @@ export const ChatPane = {
         <button class="aero-btn" type="submit" :disabled="!draft.trim()">傳送</button>
       </form>
     </div>
-    <span class="dp-fold-sp" v-if="sideCol"></span>
-    <div class="dp-col" v-if="sideCol && !collapsed">
+  </div>
+  </div>
+  <aside class="dp-side" v-if="sideCol" :class="'dp-side-' + side">
+    <div class="dp-side-stack" v-show="!collapsed">
+      <div class="dp xl" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span><img :src="friendAv" alt=""></span></div>
       <div class="dp xl" :class="'st-' + me.status" :style="{ '--h': 205 }"><span><img :src="meAv" alt=""></span></div>
     </div>
+    <button class="dp-fold-bar" type="button" @click="$emit('toggle-dp')" :aria-label="foldTip" :aria-expanded="!collapsed" :title="foldTip">{{ barArrow }}</button>
+  </aside>
   </div>
   <div class="typing" role="status">
     <template v-if="voiceNote">{{ voiceNote }}</template>

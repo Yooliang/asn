@@ -8,7 +8,13 @@ export const FAKE_KEY = 'fake-machine-key'
 // avatars：節點 → data URL（設備上傳的大頭貼）。名單每個節點帶 avatar_updated_at（沒上傳＝沒有這個欄位）；圖用 GET avatar&node=<節點> 取。
 // set_avatar（POST，只能改金鑰所屬的自己節點）：前綴須是 data:image/png|webp;base64,、全長 ≤ 48000，否則回白話代碼（同後端）。
 export async function startFakeRelay({ node = 'T', members = [], mails = [], rooms = [], avatars = {}, port = 0 } = {}) {
-  const st = { node, members, mails: [...mails], outbox: [], rooms, avatars: Object.fromEntries(Object.entries(avatars).map(([n, d]) => [n, { data: d, at: '2026-10-20T08:00:00Z' }])), reqs: [], sent: [], setCount: 1, port: 0, url: '' }
+  const st = {
+    node, members, mails: [...mails], outbox: [], rooms,
+    avatars: Object.fromEntries(Object.entries(avatars).map(([n, d]) => [n, { data: d, at: '2026-10-20T08:00:00Z' }])),
+    reqs: [], sent: [], launches: [],
+    launchers: { profiles: [{ id: 'claude', label: 'Claude' }], cwd_allow: ['C:/work'], max_per_hour: 6 },
+    setCount: 1, port: 0, url: '',
+  }
   const readBody = req => new Promise(r => { let b = ''; req.on('data', d => (b += d)); req.on('end', () => r(b ? JSON.parse(b) : null)) })
   const srv = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x'), action = u.searchParams.get('action'), agent = u.searchParams.get('agent')
@@ -69,6 +75,18 @@ export async function startFakeRelay({ node = 'T', members = [], mails = [], roo
         }, null),
       }))
       return out(200, { status: rows })
+    }
+    if (action === 'launch' && req.method === 'POST') {
+      const id = U(800 + st.launches.length + 1)
+      st.launches.push({ id, status: 'pending', ...body })
+      return out(200, { id })
+    }
+    if (action === 'launchers') {
+      const ids = body?.ids
+      if (Array.isArray(ids) && ids.length) {
+        return out(200, { launches: st.launches.filter(l => ids.includes(l.id)).map(l => ({ id: l.id, status: l.status ?? 'ok', detail: l.detail ?? '' })) })
+      }
+      return out(200, { machines: [{ node, launcher: st.launchers }], launches: st.launches })
     }
     out(404, { error: 'not_found' })
   })

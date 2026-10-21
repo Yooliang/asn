@@ -14,6 +14,11 @@ import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MOD
 import { chatTabSameZone, closeAllChatTabs, dropInsertBefore, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_LABEL, normalizeClose, normalizeFrame, totalUnread, soundChoice, soundFromChoice, soundFromSaved } from './lib/prefs.mjs'
 import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
+import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
+import { bumpRecentCwd, cwdChoices, normalizeLaunchPrefs } from './lib/launch-prefs.mjs'
+import { DISPLAY_MODES, consoleToggleLabel, engineForProfile, launchDeviceRows, launchDisableReason, showDisplayModeChoice } from './lib/partner-launch-ui.mjs'
+import { friendId } from './lib/roster.mjs'
+import { vendorIconSvg } from './lib/vendor-icons.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
@@ -49,6 +54,11 @@ const SOUNDS = {
 
 const info = await invoke('startup_info')
 document.title = `Agent Sync Network Messenger (${info.version})`
+if (info.shot) {
+  const logFe = (level, msg) => invoke('shot_frontend_log', { level, message: String(msg) }).catch(() => {})
+  window.onerror = (msg, src, line, col, err) => { logFe('error', `${msg} @ ${src}:${line}:${col} ${err?.stack ?? ''}`) }
+  window.onunhandledrejection = e => logFe('error', e.reason?.stack ?? e.reason ?? 'unhandled rejection')
+}
 if (info.error) {
   document.body.textContent = `ASN 無法啟動：${info.error}`
   throw new Error(info.error)
@@ -114,6 +124,200 @@ const rooms = ref([]), roomsErr = ref(false)
 async function refreshRooms() {
   try { rooms.value = groupRows((await invoke('relay_rooms'))?.rooms); roomsErr.value = false } catch { roomsErr.value = true }
 }
+
+// ---------- 開新夥伴 ----------
+const cliTools = ref({})
+const remoteLaunchers = ref({})   // node → launcher 摘要
+const launchPending = ref([])     // 啟動中列
+const launchTrack = ref([])       // { id, node, name, profile } 遠端 launch uuid
+const launchPrefs = reactive(normalizeLaunchPrefs(null))
+const launchCwdText = ref('')
+async function refreshCliTools() {
+  try {
+    const r = await transport.cliDetect()
+    const map = {}
+    for (const t of r?.tools ?? []) map[t.id] = t
+    cliTools.value = map
+  } catch (e) { console.info('[ASN] cli detect failed', e.message) }
+}
+async function refreshLaunchers() {
+  try {
+    const body = await transport.launchers()
+    const map = {}
+    for (const m of body?.machines ?? []) if (m?.node) map[m.node] = m.launcher
+    remoteLaunchers.value = map
+  } catch { /* 非 owner 或後台未就緒 */ }
+}
+async function loadLaunchPrefs() {
+  try {
+    const p = normalizeLaunchPrefs(await transport.launchPrefsGet())
+    Object.assign(launchPrefs, p)
+    launchCwdText.value = (p.cwdAllow.length ? p.cwdAllow : defaultCwdAllowFromCli()).join('\n')
+  } catch { launchCwdText.value = defaultCwdAllowFromCli().join('\n') }
+}
+function defaultCwdAllowFromCli() {
+  return cwdChoices({ allow: [], recent: launchPrefs.recentCwd })
+}
+async function saveLaunchPrefs() {
+  const cwdAllow = launchCwdText.value.split('\n').map(s => s.trim()).filter(Boolean)
+  const prefs = { ...launchPrefs, cwdAllow, maxPerHour: launchPrefs.maxPerHour ?? 6 }
+  try { await transport.launchPrefsSet(prefs) } catch (e) { console.info('[ASN] launch prefs', e.message) }
+}
+function setLaunchCwdText(text) {
+  launchCwdText.value = text
+  launchPrefs.cwdAllow = text.split('\n').map(s => s.trim()).filter(Boolean)
+  void saveLaunchPrefs()
+}
+const launchToolRows = computed(() => MODEL_CATALOG.map(m => modelUiRow(m, cliTools.value[m.toolId ?? m.id])))
+const partnerModels = computed(() => launchToolRows.value)
+const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '', display: 'foreground' })
+const partnerShowDisplay = computed(() => partnerDlg.node === info.node && showDisplayModeChoice(partnerDlg.profile))
+const launchCtx = computed(() => ({ selfNode: info.node, partnerModels: partnerModels.value, remoteLaunchers: remoteLaunchers.value }))
+const launchDeviceRowsList = computed(() => launchDeviceRows(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value }))
+function launchDisableReasonFor(nodeKey) { return launchDisableReason(nodeKey, launchCtx.value) }
+const partnerCwdChoices = computed(() => {
+  const allow = partnerDlg.node === info.node
+    ? (launchPrefs.cwdAllow.length ? launchPrefs.cwdAllow : defaultCwdAllowFromCli())
+    : (remoteLaunchers.value[partnerDlg.node]?.cwd_allow ?? [])
+  return cwdChoices({ allow, recent: launchPrefs.recentCwd })
+})
+function pickPartnerModel(m) {
+  if (!m.installed) return
+  partnerDlg.profile = m.profileId
+  partnerDlg.modeLabel = m.modeLabel
+  partnerDlg.name = defaultPartnerName(friends.value, m.profileId)
+}
+function openPartnerDlg(nodeKey) {
+  closeLaunchPicker()
+  const devLabel = friends.value.find(f => f.node === nodeKey)?.device ?? nodeKey
+  partnerDlg.open = true
+  partnerDlg.node = nodeKey
+  partnerDlg.deviceLabel = devLabel
+  partnerDlg.error = ''
+  partnerDlg.busy = false
+  partnerDlg.firstMessage = ''
+  partnerDlg.display = launchPrefs.launchDisplay === 'background' ? 'background' : 'foreground'
+  const first = partnerModels.value.find(m => m.installed) ?? partnerModels.value[0]
+  if (first) pickPartnerModel(first)
+  const choices = partnerCwdChoices.value
+  partnerDlg.cwd = choices[0] ?? ''
+}
+function closePartnerDlg() { partnerDlg.open = false; partnerDlg.error = '' }
+const searchInput = ref(null)
+function focusSearch() { searchInput.value?.focus?.() }
+const launchPicker = ref(false)
+const launchPickerPos = reactive({ x: 0, y: 0 })
+function openLaunchPicker(e) {
+  closeBuddyMenu()
+  const r = e?.currentTarget?.getBoundingClientRect?.()
+  launchPickerPos.x = r ? r.right - 4 : (e?.clientX ?? 0)
+  launchPickerPos.y = r ? r.bottom + 2 : (e?.clientY ?? 0)
+  launchPicker.value = true
+}
+function closeLaunchPicker() { launchPicker.value = false }
+function pickLaunchDevice(nodeKey) {
+  if (launchDisableReasonFor(nodeKey)) return
+  closeLaunchPicker()
+  openPartnerDlg(nodeKey)
+}
+const buddyMenu = ref('')
+const buddyMenuPos = reactive({ x: 0, y: 0 })
+const buddyMenuFriend = ref(null)
+const buddyConsole = reactive({ canToggle: false, visible: true })
+const buddyConsoleToggle = computed(() => buddyMenu.value && buddyConsole.canToggle)
+const buddyConsoleLabel = computed(() => consoleToggleLabel(buddyConsole.visible))
+function closeBuddyMenu() { buddyMenu.value = ''; buddyMenuFriend.value = null; buddyConsole.canToggle = false }
+async function openBuddyMenu(c, e) {
+  closeLaunchPicker()
+  buddyMenuPos.x = e?.clientX ?? 0
+  buddyMenuPos.y = e?.clientY ?? 0
+  buddyMenuFriend.value = c
+  buddyMenu.value = c.id
+  buddyConsole.canToggle = false
+  buddyConsole.visible = true
+  if (c.node !== info.node || c.engine === 'acp' || c.pending) return
+  const eng = c.engine || engineForProfile(c.launchProfile || 'claude')
+  try {
+    const q = await transport.partnerConsoleQuery({ engine: eng, name: c.agent || c.nick })
+    if (q?.canToggle) {
+      buddyConsole.canToggle = true
+      buddyConsole.visible = Boolean(q.visible)
+    }
+  } catch { /* 略過 */ }
+}
+async function toggleBuddyConsole() {
+  const c = buddyMenuFriend.value
+  if (!c) { closeBuddyMenu(); return }
+  const eng = c.engine || engineForProfile(c.launchProfile || 'claude')
+  const nextVis = !buddyConsole.visible
+  try {
+    const r = await transport.partnerConsoleSet({ engine: eng, name: c.agent || c.nick, visible: nextVis })
+    if (r?.ok) buddyConsole.visible = Boolean(r.visible)
+  } catch (e) { console.info('[ASN] 主控台切換', e.message) }
+  closeBuddyMenu()
+}
+async function submitPartnerDlg() {
+  partnerDlg.error = ''
+  if (!partnerDlg.name.trim() || !partnerDlg.cwd) { partnerDlg.error = '請填名字與工作資料夾'; return }
+  partnerDlg.busy = true
+  const mode = MODEL_CATALOG.find(m => m.profileId === partnerDlg.profile)?.mode ?? 'window'
+  const display = partnerShowDisplay.value && partnerDlg.display === 'background' ? 'background' : 'foreground'
+  const pend = pendingFriend({ node: partnerDlg.node, device: partnerDlg.deviceLabel, name: partnerDlg.name.trim(), profileId: partnerDlg.profile, mode, launchDisplay: display })
+  launchPending.value = [...launchPending.value, pend]
+  try {
+    if (partnerDlg.node === info.node) {
+      if (display === 'foreground') launchPrefs.launchDisplay = 'foreground'
+      else launchPrefs.launchDisplay = 'background'
+      void saveLaunchPrefs()
+      await transport.partnerLaunchLocal({ profile: partnerDlg.profile, name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, display })
+    } else {
+      const r = await transport.launch({ node: partnerDlg.node, profile: partnerDlg.profile, name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, first_message: partnerDlg.firstMessage.trim() || null })
+      if (r?.id) launchTrack.value = [...launchTrack.value, { id: r.id, node: partnerDlg.node, name: partnerDlg.name.trim(), profile: partnerDlg.profile }]
+    }
+    Object.assign(launchPrefs, bumpRecentCwd(launchPrefs, partnerDlg.cwd))
+    void saveLaunchPrefs()
+    closePartnerDlg()
+    if (partnerDlg.node === info.node && partnerDlg.firstMessage.trim()) {
+      setTimeout(async () => {
+        const id = friendId(partnerDlg.node, partnerDlg.name.trim())
+        if (core.friends.has(id)) await core.send(id, partnerDlg.firstMessage.trim())
+      }, 8000)
+    }
+  } catch (e) {
+    launchPending.value = launchPending.value.filter(p => p.id !== pend.id)
+    partnerDlg.error = e.message
+    partnerDlg.open = true
+  } finally { partnerDlg.busy = false }
+}
+async function pollLaunchResults() {
+  if (!launchTrack.value.length) return
+  try {
+    const ids = launchTrack.value.map(t => t.id)
+    const body = await transport.launchers(ids)
+    for (const row of body?.launches ?? []) {
+      if (row.status === 'ok' || row.status === 'failed') {
+        launchTrack.value = launchTrack.value.filter(t => t.id !== row.id)
+        if (row.status === 'failed') console.info('[ASN] 開新夥伴失敗', row.detail)
+      }
+    }
+  } catch { /* 略過 */ }
+  const still = resolvePending(launchPending.value, friends.value)
+  const now = Date.now()
+  for (const p of launchPending.value) {
+    if (still.includes(p) && p.launchDisplay === 'background' && p.node === info.node && now - (p.launchSince ?? 0) > 30_000 && !p.trustRestored) {
+      p.trustRestored = true
+      const eng = engineForProfile(p.launchProfile || 'claude')
+      void transport.partnerConsoleSet({ engine: eng, name: p.agent, visible: true }).then(() => {
+        console.info('[ASN] 背景啟動可能卡在「信任此資料夾」，已改為前台顯示，請到電腦前按一次 Enter')
+      }).catch(() => {})
+    }
+  }
+  launchPending.value = still
+}
+void refreshCliTools()
+void refreshLaunchers()
+void loadLaunchPrefs()
+setInterval(() => { void refreshLaunchers(); void pollLaunchResults() }, 15_000)
 // 語音：整合模式的對話分頁用這一份；設定存在 Rust 端的 voice.json（對話視窗也讀同一份）
 const voice = createVoiceUi({ invoke, listen, createMic, createAudio: browserAudio, reactive })
 const voiceCfg = reactive(normalizeCfg(await invoke('voice_cfg_get').catch(() => null)))
@@ -125,6 +329,7 @@ core.on('notify', n => {
 })
 
 async function openChat(id) {
+  if (String(id).startsWith('pending:')) return
   const f = core.friends.get(id); if (!f) return
   core.markRead(id)
   if (ui.mode === 'merged') {   // 整合模式：在右邊開分頁（或切過去），不開新視窗
@@ -220,9 +425,10 @@ const app = createApp({
     watch(dev, d => { if (!normalizeTab(tab.value, d.all.map(x => x.key))) tab.value = d.all[0]?.key ?? '' }, { immediate: true })
     const shown = computed(() => {
       if (!isDevice.value) return []
-      return rosterShownGroups(friends.value, {
+      const base = rosterShownGroups(friends.value, {
         tabDim: dims.tabDim, tabKey: tab.value, groupDim: dims.groupDim, selfNode: info.node, selfName: info.window_name, query: query.value, plainText: plain,
       })
+      return injectPendingGroups(base, launchPending.value.filter(p => !tab.value || p.node === tab.value))
     })
     const emptyText = computed(() => (normalizeSearchQuery(query.value) ? '沒有符合的聯絡人。' : conn.value !== 'on' ? '還沒連上收發室。' : '這一頁目前沒有視窗。'))
     const openAd = a => openAdWith(a, url => void invoke('open_url', { url }))
@@ -278,10 +484,13 @@ const app = createApp({
     // 按選單以外任何地方（含拖曳區、別的元件攔掉 click 的地方、右鍵）、按 Esc、視窗失焦都收起選單。
     // 用 pointerdown 捕獲階段：不靠 click 冒泡到 #app（有些區域會 stopPropagation 或是拖曳區不送 click）。
     document.addEventListener('pointerdown', e => {
-      if (chatTabMenu.value && !(e.target instanceof Element && e.target.closest('.ctab-menu'))) closeChatTabMenu()
+      const el = e.target instanceof Element ? e.target : null
+      if (chatTabMenu.value && !el?.closest('.ctab-menu')) closeChatTabMenu()
+      if (buddyMenu.value && !el?.closest('.buddy-menu')) closeBuddyMenu()
+      if (launchPicker.value && !el?.closest('.launch-picker') && !el?.closest('.search-ic')) closeLaunchPicker()
     }, true)
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && chatTabMenu.value) closeChatTabMenu() })
-    window.addEventListener('blur', () => { if (chatTabMenu.value) closeChatTabMenu() })
+    window.addEventListener('blur', () => { if (chatTabMenu.value) closeChatTabMenu(); if (buddyMenu.value) closeBuddyMenu(); if (launchPicker.value) closeLaunchPicker() })
     const tabPinLabel = computed(() => (chatTabMenuPin.value ? '取消固定分頁' : '固定分頁'))
     const runTabMenu = fn => { const id = chatTabMenu.value; closeChatTabMenu(); if (id) fn(id) }
     const menuCloseTab = () => runTabMenu(id => applyChatTabClose(closeChatTab(ui, id)))
@@ -362,7 +571,12 @@ const app = createApp({
       STATUS, CONN_LABEL, FIXED_TABS, ADS, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, soundOn, friends, conn, shown, query, collapsed, nickErr, commitNick,
       tab, adI, rooms, roomsErr, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote,
       GUIDES, openedGuide, view, openGuideKey, closeGuideView, showHome,
-      selfNode: info.node, emo, initial, openChat, ctl,
+      selfNode: info.node, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg,
+      searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickLaunchDevice,
+      DISPLAY_MODES, partnerShowDisplay,
+      openPartnerDlg, closePartnerDlg, partnerDlg, partnerModels, partnerCwdChoices, pickPartnerModel, submitPartnerDlg,
+      buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddyConsoleToggle, buddyConsoleLabel, toggleBuddyConsole,
+      launchToolRows, launchPrefs, launchCwdText, saveLaunchPrefs, setLaunchCwdText,
     }
   },
 })
