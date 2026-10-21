@@ -45,6 +45,16 @@ export const shotApi = {
     return bytes.length ? new Blob([bytes], { type: 'image/png' }) : null
   },
 }
+// 帳號登入：權杖與節點金鑰都只在 Rust 端，這裡只拿得到狀態與文字
+export const authApi = {
+  status: () => invoke('auth_status'),                       // → { signed_in, email }
+  login: provider => invoke('auth_login', { provider }),     // 開系統瀏覽器登入，等回呼（最久 5 分鐘）→ 狀態
+  cancel: () => invoke('auth_cancel'),
+  logout: () => invoke('auth_logout'),                       // 只清登入權杖，不刪節點金鑰
+  accountInfo: () => invoke('auth_account_info'),            // → { email, created, node_count, this_node_mine }
+  claim: () => invoke('auth_claim_this'),                    // 把這台電腦（現有節點金鑰）連到登入帳號 → 一句話
+  setupDevice: () => invoke('auth_setup_device'),            // 新電腦：建立節點、存好金鑰、重新啟動
+}
 export const store = name => ({
   load: async () => { const s = await invoke('store_load', { name }); try { return s ? JSON.parse(s) : null } catch { return null } },
   save: data => invoke('store_save', { name, text: JSON.stringify(data) }),
