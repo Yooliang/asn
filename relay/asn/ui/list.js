@@ -101,6 +101,15 @@ const applyBridgeStatus = s => {
   Object.assign(bridge, { enabled: s.enabled === true, running: s.running === true, legacy: s.legacy === true, takeoverAllowed: s.takeover_allowed === true, remoteLaunch: s.remote_launch === true, error: s.error || '', shown: true })
 }
 try { applyBridgeStatus(await invoke('bridge_status')) } catch { /* 舊版後端沒有這個指令就不顯示 */ }
+// 命令列（asn-cli）：Claude 視窗用它寄信、收信、看群組、下載附件。設定頁顯示完整路徑，可複製。程式在 cli/
+const cliInfo = reactive({ shown: false, path: '', example: '', copied: false })
+try {
+  const c = await invoke('cli_info')
+  if (c?.path) Object.assign(cliInfo, { shown: true, path: String(c.path), example: String(c.example || '') })
+} catch { /* 舊版後端沒有這個指令就不顯示 */ }
+async function copyCliExample() {
+  try { await navigator.clipboard.writeText(cliInfo.example); cliInfo.copied = true; setTimeout(() => { cliInfo.copied = false }, 2500) } catch (e) { console.info('[ASN] 複製失敗', e.message) }
+}
 // 自動更新：啟動與每 6 小時檢查；有新版只在名單上方顯示一條通知，使用者按「更新」才下載安裝（--shot 模式不檢查）。程式在 updater.rs
 const autoCheck = ref(autoCheckFromSaved(savedMe.autoUpdate))
 const upd = reactive({ ...initialUpdateState(), checking: false, manual: '', lastCheck: 0, checkErr: '' })
@@ -818,6 +827,7 @@ const app = createApp({
       },
       closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy },
       bridge: bridge.shown ? { enabled: bridge.enabled, running: bridge.running, legacy: bridge.legacy, takeoverAllowed: bridge.takeoverAllowed, remoteLaunch: bridge.remoteLaunch, error: bridge.error, busy: bridge.busy, confirm: bridge.confirm } : null,
+      cli: cliInfo.shown ? { path: cliInfo.path, example: cliInfo.example, copied: cliInfo.copied } : null,
       autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual, status: updateStatus({ checking: upd.checking, phase: upd.phase, info: upd.info, lastCheck: upd.lastCheck, error: upd.checkErr, current: info.version }) },
       launch: { tools: launchToolRows.value, maxPerHour: launchPrefs.maxPerHour, cwdText: launchCwdText.value },
       version: info.version,
@@ -848,6 +858,7 @@ const app = createApp({
         case 'bridge-takeover': bridge.confirm = true; break
         case 'bridge-takeover-yes': await takeoverBridge(); break
         case 'bridge-takeover-no': bridge.confirm = false; break
+        case 'cli-copy': await copyCliExample(); break
         case 'autoCheck': autoCheck.value = value === true; break
         case 'check-update': await checkUpdate(true); break
         case 'launch-max': launchPrefs.maxPerHour = Number.isFinite(value) ? value : 6; await saveLaunchPrefs(); break

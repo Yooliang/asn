@@ -9,6 +9,7 @@ mod auth;
 mod avatar;
 mod bell;
 mod bridge;
+pub mod cli;
 mod claude_accounts;
 mod claude_json;
 mod codex_accounts;
@@ -524,6 +525,11 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
+/// 命令列（asn-cli）的完整路徑與寄信範例（設定頁「寄信指令」用）
+#[tauri::command]
+fn cli_info() -> serde_json::Value {
+    cli::info()
+}
 /// 內建收發室橋的狀態（設定頁用）。預設關閉
 #[tauri::command]
 fn bridge_status(m: State<'_, bridge::Manager>) -> bridge::Status {
@@ -629,7 +635,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, ads::ads_fetch, set_window_name, set_presence, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_takeover, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, ads::ads_fetch, set_window_name, set_presence, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_takeover, cli_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete,
             codex_accounts::codex_account_current,

@@ -254,8 +254,8 @@ fn cfg(work: &std::path::Path, sessions: &std::path::Path) -> Config {
     c.forward_timeout_ms = 120_000;
     c.pull_backoff_ms = vec![5_000, 10_000, 20_000];
     // 下載指令與群組「要看更多」的指令固定寫死（不依執行檔位置去找）
-    c.attach_cmd = Some("node \"/x/attach.mjs\"".into());
-    c.room_cmd = Some("node \"/x/room.mjs\"".into());
+    c.attach_cmd = Some("/x/asn-cli attach".into());
+    c.room_cmd = Some("/x/asn-cli room".into());
     c
 }
 

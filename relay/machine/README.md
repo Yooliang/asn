@@ -1,5 +1,9 @@
 # irori-relay machine bridge（收發室橋）
 
+> **本機有 ASN 電腦版時，Claude 視窗改用 ASN 內建的命令列（不需要 Node）**：`asn send`／`asn recv`／`asn room`／`asn attach`
+> （Windows 為 ASN 安裝資料夾裡的 `asn-cli.exe`，設定頁「寄信指令」可複製完整路徑；原始碼在 `relay/asn/src-tauri/src/cli/`，設計見 `docs/design/BRIDGE-RUST.md` 第四段）。
+> 參數、結束碼、輸出格式、`replied/`／`sent/` 記號都與下面的 Node 版相同。**這裡的 Node 版保留給雲端代理與沒有 ASN 的 Linux 無畫面節點。**
+
 每台機器跑一支常駐程式，把仲介（relay）的信送進**本機正在跑的 Claude Code session**，並把對方的回覆寄回去。
 不碰 Claude Code 私有協定：全程只用公開的 CLI 旗標與公開的 SendMessage 工具。純 Node（>= 22），沒有 npm 依賴。
 

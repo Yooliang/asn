@@ -3,11 +3,9 @@
 //! 附件編號必須是 uuid 才會組進下載指令。收到的是一行「〔照片〕檔名（型別，大小，尺寸）下載：<指令> --id <編號>」，
 //! 接在內文後面，和內文一起放進既有的外部資料區塊（橋的 <<<MAIL … MAIL>>>）。
 //!
-//! 下載指令（第二段暫時沿用 Node）：`node "<attach.mjs>"`。第四段做 `asn send`／`asn attach` 命令列之後換成 ASN 自己的指令。
-//! 指令前綴的來源：環境變數 `IRORI_ATTACH_CMD`（整串，原樣使用）→ 從 ASN 執行檔往上找 `relay/machine/attach.mjs`
-//! （從原始碼資料夾執行時找得到）→ 都沒有就不給指令，只留附件編號與「請到 ASN 查看」。
+//! 下載指令是 ASN 自己的命令列：`<asn-cli 完整路徑> attach --id <編號>`（第四段；不再需要 Node）。
+//! 指令前綴的來源：環境變數 `IRORI_ATTACH_CMD`（整串，原樣使用）→ 和 ASN 同資料夾的 asn-cli。
 use serde_json::Value;
-use std::path::{Path, PathBuf};
 
 pub const MAX_ATTACHMENTS: usize = 4;
 const LABEL_IMAGE: &str = "〔照片〕";
@@ -149,41 +147,20 @@ pub fn notes_for(body: &str, list: &[Attachment], cmd: Option<&str>) -> String {
 
 // ---- 命令列的位置 ------------------------------------------------------------------------------------
 
-fn find_up(start: &Path, rel: &[&str]) -> Option<PathBuf> {
-    let mut cur = start.parent();
-    while let Some(d) = cur {
-        let mut p = d.to_path_buf();
-        for s in rel {
-            p.push(s);
-        }
-        if p.is_file() {
-            return Some(p);
-        }
-        cur = d.parent();
-    }
-    None
-}
-
-/// Node 命令列腳本（attach.mjs／room.mjs）的路徑：環境變數 `<name>` 優先，其次從執行檔往上找 relay/machine/<file>
-pub fn machine_script(file: &str) -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    find_up(&exe, &["relay", "machine", file])
-}
-
-/// 下載指令前綴：`IRORI_ATTACH_CMD` 整串優先；否則 `node "<attach.mjs>"`；找不到回 None
+/// 下載指令前綴：`IRORI_ATTACH_CMD` 整串優先；否則 ASN 自己的命令列（`<asn-cli 完整路徑> attach`，見 cli::cmd_prefix）
 pub fn attach_cmd_from_env() -> Option<String> {
     if let Some(c) = std::env::var("IRORI_ATTACH_CMD").ok().filter(|s| !s.trim().is_empty()) {
         return Some(c.trim().to_string());
     }
-    machine_script("attach.mjs").map(|p| format!("node \"{}\"", p.display()))
+    crate::cli::cmd_prefix("attach")
 }
 
-/// 群組「要看更多」用的 room.mjs 指令前綴：`IRORI_ROOM_CMD` 整串優先；否則 `node "<room.mjs>"`
+/// 群組「要看更多」用的指令前綴：`IRORI_ROOM_CMD` 整串優先；否則 `<asn-cli 完整路徑> room`
 pub fn room_cmd_from_env() -> Option<String> {
     if let Some(c) = std::env::var("IRORI_ROOM_CMD").ok().filter(|s| !s.trim().is_empty()) {
         return Some(c.trim().to_string());
     }
-    machine_script("room.mjs").map(|p| format!("node \"{}\"", p.display()))
+    crate::cli::cmd_prefix("room")
 }
 
 #[cfg(test)]
@@ -201,7 +178,7 @@ mod tests {
         }
         v
     }
-    const CMD: &str = "node \"/x/attach.mjs\"";
+    const CMD: &str = "/x/asn-cli attach";
 
     #[test]
     fn safe_text_控制字元括號引號路徑符號雙向控制字元都去掉_不以點開頭_有長度上限() {

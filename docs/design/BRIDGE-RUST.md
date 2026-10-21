@@ -11,7 +11,7 @@ issue #12 第二期。目標：打開 ASN ＝ 這台設備的收發室就上線�
 | 第一段（PR #110） | Claude 引擎的核心：單一收信者鎖、名單回報（上線）、門鈴＋輪詢＋快速重試、轉交給本機 Claude 視窗、回覆寄回、ack／去重／逾時通知／遲到回覆／no-reply／self-recv、對應表跨重啟、設定開關與舊橋偵測、「改由 ASN 負責」（程式有、預設不放行） | 完成，設定「讓 ASN 負責這台的收發室」預設關 |
 | 第二段（本 PR） | 群組轉送（`rooms.mjs`）；附件（照片）下載提示行；孤兒程序清理（`bridge.last`）；舊橋退出後自動接手（設定開著時，每 5 秒看一次舊橋還在不在） | 完成；「自己更新」不搬（ASN 的更新由 ASN 自己的更新機制負責，見第 6 節第 6 點） |
 | 第三段（本 PR） | 遠端開視窗：`launcher.mjs` 的 `launch_pending`／`launch_result`、本機啟動設定、白名單與每小時上限、roster 的 `launcher` 摘要、開出視窗後的第一句話；別台的「開新夥伴」對話框列出那台回報的 profile 與資料夾；設定頁新增「允許我的其他設備替這台開新視窗」 | 完成，預設關（見第 7 節） |
-| 第四段 | `asn send` 命令列取代 `send.mjs`（含 `replied/`、`sent/` 記號與父行程鏈身分判定），讓 Claude 視窗不依賴 Node；`asn recv`／`asn room` | 未開工 |
+| 第四段（本 PR） | `asn send`／`asn recv`／`asn room`／`asn attach` 命令列取代 `send.mjs`／`recv.mjs`／`room.mjs`／`attach.mjs`（含 `replied/`、`sent/` 記號、`--file` 附件、父行程鏈身分判定、`--watch` 心跳）；獨立的 console 子系統執行檔 `asn-cli.exe`；橋轉交信件裡的附件下載提示與群組翻頁提示改成這個命令 | 完成（見第 10 節） |
 | 第五段 | 其他引擎：Codex、ACP（Gemini／Grok 背景夥伴）；opt-in 後把預設改為開、淘汰安裝程式的工作排程 | 未開工 |
 
 每段都維持「預設關、關著時 ASN 行為與以前完全一樣」，直到第五段才討論預設值。
@@ -47,7 +47,7 @@ issue #12 第二期。目標：打開 ASN ＝ 這台設備的收發室就上線�
 | 附件下載提示行（`attach-format.mjs`） | `attach.rs`（清理檔名、白名單欄位、uuid 檢查、最多 4 筆、過期不給指令）；來信與群組訊息都用 | 第二段已搬 |
 | 孤兒清理 `bridge.last`（`self-update.mjs` 的 `orphansOf`／`killTree`） | `orphans.rs` | 第二段已搬（`self-update.mjs` 的 git 自動更新不搬） |
 | 遠端開視窗 `launcher.mjs`（驗證、歷史、紀錄、等視窗出現） | `launcher.rs`；設定與啟動沿用 `launch/`（`config.rs`、`cwds.rs`、`prefs.rs`、`local.rs`） | 第三段已搬（背景夥伴 `partner-*.mjs` 留到第五段） |
-| `send.mjs`／`recv.mjs`／`room.mjs`／`attach.mjs`、`identity.mjs` | — | 第四段 |
+| `send.mjs`／`recv.mjs`／`room.mjs`／`attach.mjs`、`identity.mjs`、`self-recv.mjs`、`attach-upload.mjs`／`attach-download.mjs` | `cli/`（`send.rs`、`recv.rs`、`room.rs`、`attach_cmd.rs`、`upload.rs`、`caller.rs`） | 第四段已搬（Node 版保留給雲端／Linux 無畫面節點） |
 | Codex／ACP 引擎 | — | 第五段 |
 
 ### 主迴圈
@@ -125,7 +125,7 @@ Rust 測試在各模組的 `#[cfg(test)]`，整合測試在 `bridge/tests.rs`（
 3. **忙碌狀態**：固定 busy／working／running（不分大小寫），不讀 `IRORI_BUSY_STATUS_RE`。
 4. **寄給 ASN 自己視窗的信**：內建橋不處理（見第 2 節表格）。
 5. **群組、附件、孤兒清理**（第二段已搬）：
-   - 群組上下文與附件的「下載指令」暫時沿用 Node：`node "<relay/machine/attach.mjs>"`、`node "<room.mjs>" --room-read …`。指令前綴的來源是環境變數 `IRORI_ATTACH_CMD`／`IRORI_ROOM_CMD`（整串原樣使用），其次從 ASN 執行檔往上找 `relay/machine/` 底下的腳本（從原始碼資料夾執行時找得到），都找不到就不給指令，只留附件編號與「請到 ASN 查看」。第四段做 `asn attach`／`asn room` 命令列之後，兩處一起換成 ASN 自己的命令，不再需要 Node。
+   - 群組上下文與附件的「下載指令」第二段暫時沿用 Node，**第四段起換成 ASN 自己的命令列**：`<asn-cli 完整路徑> attach --id …`、`<asn-cli 完整路徑> room --room-read …`（路徑用斜線、含空白才加引號；`asn-cli` 找不到時退回 `asn` 主程式自己）。環境變數 `IRORI_ATTACH_CMD`／`IRORI_ROOM_CMD` 仍可整串覆寫。
    - 群組項目的逾時：轉交逾時、等回覆逾時都只記 log 並清掉，不寄通知（與 Node 橋相同）。
    - 孤兒清理多一道限制（見第 3 節）。
 6. **自己更新**：Node 橋的 `self-update.mjs` 是「橋自己 git pull 並重啟」。內建橋跟著 ASN 走，ASN 的更新由 ASN 自己的更新機制（`updater.rs`）負責，所以這一項不搬。
@@ -160,7 +160,6 @@ Rust 測試在各模組的 `#[cfg(test)]`，整合測試在 `bridge/tests.rs`（
 
 ## 8. 留到後面的段
 
-- 第四段：`asn send`／`asn recv`／`asn room`／`asn attach` 命令列（取代 `send.mjs` 等，含 `replied/`、`sent/` 記號與父行程鏈身分判定），附件與群組的下載／翻頁指令改成 ASN 自己的命令。
 - 第五段：Codex、ACP（Gemini／Grok 背景夥伴）引擎；遠端開視窗支援它們；opt-in 後把預設改為開、淘汰安裝程式的工作排程。
 - 遠端開視窗在 Linux／macOS 的實機驗證（程式沿用 `start_window_unix`，沒有在真機跑過）。
 
@@ -182,3 +181,51 @@ Rust 測試在各模組的 `#[cfg(test)]`，整合測試在 `bridge/tests.rs`（
 7. **同意開關**：甲取消勾「允許我的其他設備替這台開新視窗」→ 約 1 分鐘內乙選甲時應顯示「這台設備尚未回報啟動設定」（甲沒有 `launcher.json` 的情況）。
 8. **要確認的未知數**：session 檔的 `status` 欄位是否和 `claude agents --json` 一致（第 6 節第 1 點，忙碌延後依賴它）；「30 秒內出現在 `~/.claude/sessions`」的判斷在 Claude Code 新版上是否仍成立（視窗名來自 `-n <名字>`）。
 9. **退回**：取消勾「讓 ASN 負責這台的收發室」→ 橋停止，`bridge.pid` 被清掉；舊橋要自己重新啟用工作排程。
+
+## 10. 第四段：命令列（`asn send`／`recv`／`room`／`attach`）
+
+目標「ASN 全 Rust、不帶 Node」：Claude 視窗寄信、收信、翻群組、下載附件，不再需要 `node relay/machine/*.mjs`。
+
+### 10.1 命令列方案：獨立的 `asn-cli.exe`（console 子系統）
+
+評估過兩個做法，選獨立執行檔：
+
+| | 單一 `asn.exe` ＋ `AttachConsole(ATTACH_PARENT_PROCESS)` | 獨立 `asn-cli.exe`（採用） |
+|---|---|---|
+| cmd／PowerShell 會不會等它結束 | **不會**（GUI 子系統的程式，殼層直接回到提示字元）；`%ERRORLEVEL%`／`$LASTEXITCODE` 拿不到真正的結束碼 | 會，結束碼正確 |
+| 輸出 | 要接上父行程的主控台，還要補標準代碼；輸出會在提示字元之後才冒出來 | 一般的主控台程式，輸出入走管線或主控台都正常 |
+| GUI 啟動時閃黑視窗 | 不會 | 不會（asn.exe 還是 GUI 子系統，沒有改動） |
+| 建置 | 不用多一個檔 | `Cargo.toml` 多一個 `[[bin]]`，Tauri 會把它跟 `asn.exe` 一起打進安裝檔 |
+
+Claude 的 Bash／PowerShell 工具都要「等指令結束並拿結束碼」（寄信失敗要看得到 exit 1～4），所以正式入口是 `asn-cli.exe`。
+`asn.exe` 遇到第一個參數是 `send`／`recv`／`room`／`attach` 時仍會跑同一份程式（先 `AttachConsole` 接上父行程的主控台，已被導向的標準輸出入不動），當備援，讓使用者打 `asn send` 也能用；這條路在 cmd／PowerShell 不會等待，文件一律建議用 `asn-cli`。
+兩者都不啟動視窗、不碰單一執行個體鎖，所以可以和正在跑的 ASN（以及橋）並存。
+
+### 10.2 行為對照
+
+- 參數、錯誤訊息、結束碼（1 用法／內容、2 認不出呼叫者、3 超量／被擋／已有人在跑、4 後端錯誤）、輸出格式（`sent id=…`、`posted room=… seq=…`、`saved <路徑>`、`recv` 每封一行 JSON）都照 Node 版。
+- 寄件／收件視窗名不能自填：沿父行程鏈（Windows 用 Toolhelp 行程快照，不再呼叫 PowerShell，約快 0.5 秒）找 `~/.claude/sessions/<pid>.json` 登記的 claude 程序；鏈斷了用 `CLAUDE_CODE_MESSAGING_SOCKET` 對上還活著的 session；`--whoami` 印判定過程。
+- 記號檔與橋相容：`machine-<節點>/replied/<信件id>`、`machine-<節點>/sent/<sha1([寄件視窗,節點,視窗])>`（與 Node 的 `sentMarkName` 逐字相同，測試內有 Node 算出的向量）、`send-rate.json`、`room-seen.json`、`self-recv/<視窗名>.json` 心跳（`recv --watch` 每 30 秒寫，格式同 `self-recv.mjs`）。
+- `recv --watch` 的失敗退避、單一實例（exit 3）、視窗本體不在就自己結束、結束時清心跳，都與 Node 版相同。
+- 沒搬的：Codex 視窗的身分判定（`CODEX_THREAD_ID`，第五段）；照片轉 webp（命令列與 Node 版一樣只收已是 webp 的照片）。
+
+### 10.3 在哪裡找到命令列
+
+- 橋轉交的信件與群組訊息裡的附件下載提示、群組「要看更多」提示，都帶 `asn-cli` 的**完整路徑**（和 `asn.exe` 同一個資料夾），舊的 Claude 視窗不用重開、不用 PATH 就能直接照著打。
+- 設定頁新增「寄信指令」：顯示命令列的完整路徑與寄信範例，可複製。
+- 沒有改安裝檔的 PATH（這一版不動使用者的環境變數）；之後要加，可在 NSIS 的 installerHooks 把安裝資料夾加進使用者 PATH。
+
+### 10.4 測試
+
+`cargo test`：`cli/tests/` 底下由 Node 版的 `send.test.mjs`／`send-attach.test.mjs`／`recv.test.mjs`／`room.test.mjs`／`attach.test.mjs` 改寫（本機假後端，只連 127.0.0.1），另有 `tests/cli_bin.rs` 真的跑 `asn-cli`／`asn`（父行程當 Claude 視窗）。Node 版的測試保留，因為 Node 版還在（雲端、Linux 無畫面節點）。
+
+### 10.5 真機驗證步驟
+
+1. 安裝或執行新版 ASN；到設定頁「寄信指令」確認路徑存在，按「複製」。
+2. 在 Claude 視窗用 Bash 跑：`<路徑> send --whoami`，確認「判定（行程鏈）」是該視窗的名字、節點正確。
+3. `<路徑> send --to <本機節點>/<另一個視窗名> --body "測試" --no-reply`，另一個視窗（或 ASN）收到；本機 `~/.irori-relay/machine-<節點>/sent/` 多一個檔。
+4. 對收到的信用 `--reply-to <id> --no-reply` 回覆，`replied/` 多一個檔，之後橋不再報「沒有收到回覆」。
+5. `--file` 寄一個 pdf 與一張 webp；對方信裡看到「下載：…asn-cli.exe attach --id …」，照打可存檔。
+6. `<路徑> recv --watch` 掛在 Monitor：另一邊寄一封，印出一行 JSON；`self-recv/<視窗名>.json` 有心跳；關掉後約 90 秒橋接手。
+7. 群組：`<路徑> room --rooms`、`room --room-read <群組> --last 5`。
+8. 在 cmd／PowerShell 打 `<路徑> send` 看結束碼（`echo %ERRORLEVEL%`／`$LASTEXITCODE`）是 1，確認會等到結束、沒有閃黑視窗；GUI 的 `asn.exe` 照常啟動沒有黑視窗。

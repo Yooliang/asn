@@ -4,6 +4,16 @@ version = "0.1.16"
 description = "ASN 即時通：收發室的懷舊桌面介面"
 edition = "2021"
 publish = false
+default-run = "asn"
+
+[[bin]]
+name = "asn"
+path = "src/main.rs"
+
+# 命令列（寄信／收信／群組／附件）：console 子系統的獨立小執行檔，cmd／PowerShell／Claude 的 Bash 都會等它結束、拿得到結束碼
+[[bin]]
+name = "asn-cli"
+path = "src/bin/asn-cli.rs"
 
 [lib]
 name = "asn_lib"
@@ -16,7 +26,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["time", "macros", "rt", "process", "sync", "io-util"] }
+tokio = { version = "1", features = ["time", "macros", "rt", "process", "sync", "io-util", "signal"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
@@ -32,7 +42,7 @@ tauri-plugin-updater = "=2.14.0"
 tauri-plugin-dialog = "=2.8.3"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_System_Console", "Win32_Foundation", "Win32_System_Threading", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_Security_Cryptography", "Win32_UI_Shell", "Win32_System_Diagnostics_Debug", "Win32_System_Diagnostics_ToolHelp"] }
+windows-sys = { version = "0.59", features = ["Win32_System_Console", "Win32_Foundation", "Win32_System_Threading", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_Security_Cryptography", "Win32_UI_Shell", "Win32_System_Diagnostics_Debug", "Win32_System_Diagnostics_ToolHelp", "Win32_Storage_FileSystem", "Win32_Security"] }
 
 [dev-dependencies]
 tempfile = "3"

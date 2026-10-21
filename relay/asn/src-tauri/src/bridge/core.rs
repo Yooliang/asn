@@ -45,9 +45,9 @@ pub struct Config {
     pub extra_env: Vec<(String, String)>,
     /// 名單裡也列出 ASN 自己的視窗名
     pub report_asn_window: bool,
-    /// 附件下載指令前綴（不含 --id）。第二段暫時沿用 `node "<attach.mjs>"`；第四段換成 ASN 自己的命令列
+    /// 附件下載指令前綴（不含 --id）。ASN 自己的命令列：`<asn-cli 完整路徑> attach`
     pub attach_cmd: Option<String>,
-    /// 群組「要看更多」的指令前綴（room.mjs）
+    /// 群組「要看更多」的指令前綴（`<asn-cli 完整路徑> room`）
     pub room_cmd: Option<String>,
 }
 
@@ -890,7 +890,7 @@ impl Core {
         let p = self.pending[i].clone();
         if self.replied_directly(id) {
             self.remove(id);
-            self.log.line(&format!("no-reply notice skipped id={id}: {} replied directly (send.mjs --reply-to)", p.target));
+            self.log.line(&format!("no-reply notice skipped id={id}: {} replied directly (asn send --reply-to)", p.target));
             return;
         }
         if self.sent_to_sender(&p) {
