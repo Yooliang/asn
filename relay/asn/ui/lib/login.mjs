@@ -27,24 +27,29 @@ export function errorText(e) {
 // 登入畫面按鈕是否可按（等待中不可再按；按「取消」才能重來）
 export const canStart = phase => phase === 'idle' || phase === 'error'
 
-// 設定頁「帳號登入」區塊：依登入狀態與帳號資訊決定顯示什麼
-//   status：{ signed_in, email }；info：{ node_count, this_node_mine } 或 null（還沒取到）；hasNode：這台有沒有節點金鑰
-export function accountView(status, info, hasNode) {
+// 這台電腦還沒綁到帳號時的小字提示（舊租戶還沒被管理者認領；登入後每次啟動會自動再試，不用按任何鈕）
+export const PENDING_HINT = '這台電腦尚未綁到你的帳號（管理者認領後會自動完成）'
+
+// 設定頁「帳號登入」區塊：只顯示登入狀態（已登入的 email、登出；或尚未登入與登入鈕）
+//   status：{ signed_in, email }；info：{ node_count, this_node_mine } 或 null（還沒取到）
+export function accountView(status, info) {
   if (!status?.signed_in) {
-    return { signedIn: false, title: '尚未登入', detail: '登入後，這台電腦可以連到你的帳號，換電腦時也能用同一個帳號。', canClaim: false, mine: false }
+    return { signedIn: false, title: '尚未登入', detail: '登入後，這台電腦會自動連到你的帳號，換電腦時也能用同一個帳號。', mine: false }
   }
   const email = status.email || '（沒有 email）'
   let detail = ''
-  let canClaim = false
   let mine = false
   if (info) {
-    mine = hasNode && info.this_node_mine === true
-    canClaim = hasNode && !mine
+    mine = info.this_node_mine === true
     const n = Number.isInteger(info.node_count) ? info.node_count : 0
-    detail = mine ? `這台電腦已連到你的帳號，帳號底下共有 ${n} 台電腦。` : `帳號底下有 ${n} 台電腦，這台還沒連到你的帳號。`
+    detail = mine ? `這台電腦已連到你的帳號，帳號底下共有 ${n} 台電腦。` : PENDING_HINT
   }
-  return { signedIn: true, title: `已登入：${email}`, detail, canClaim, mine }
+  return { signedIn: true, title: `已登入：${email}`, detail, mine }
 }
 
-// 沒有節點金鑰＝新電腦；有登入就可以直接建立節點
+// 沒有節點金鑰＝新電腦：登入後要建立節點；有金鑰的舊電腦登入後改為自動綁定
 export const needsDeviceSetup = (hasNode, status) => !hasNode && status?.signed_in === true
+
+// 登入畫面是否顯示「暫時不登入」小字連結：只有這台已有節點金鑰、而且沒在登入途中
+export const showSkip = (canSkip, phase) => canSkip === true && (phase === 'idle' || phase === 'error')
+export const SKIP_LABEL = '暫時不登入（只用這台的收發室金鑰）'

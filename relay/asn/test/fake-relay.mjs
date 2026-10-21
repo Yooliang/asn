@@ -7,7 +7,8 @@ export const FAKE_KEY = 'fake-machine-key'
 
 // avatars：節點 → data URL（設備上傳的大頭貼）。名單每個節點帶 avatar_updated_at（沒上傳＝沒有這個欄位）；圖用 GET avatar&node=<節點> 取。
 // set_avatar（POST，只能改金鑰所屬的自己節點）：前綴須是 data:image/png|webp;base64,、全長 ≤ 48000，否則回白話代碼（同後端）。
-export async function startFakeRelay({ node = 'T', members = [], mails = [], rooms = [], avatars = {}, acctRemote = {}, port = 0 } = {}) {
+// claim：node_claim 的結果（'ok'＝成功、'tenant_not_yours'＝舊租戶還沒被認領、'already'＝本來就在名下）
+export async function startFakeRelay({ node = 'T', members = [], mails = [], rooms = [], avatars = {}, acctRemote = {}, claim = 'ok', port = 0 } = {}) {
   const st = {
     node, members, mails: [...mails], outbox: [], rooms,
     avatars: Object.fromEntries(Object.entries(avatars).map(([n, d]) => [n, { data: d, at: '2026-10-20T08:00:00Z' }])),
@@ -20,8 +21,18 @@ export async function startFakeRelay({ node = 'T', members = [], mails = [], roo
   const srv = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x'), action = u.searchParams.get('action'), agent = u.searchParams.get('agent')
     const body = await readBody(req)
-    st.reqs.push({ action, agent, method: req.method, key: req.headers['x-relay-key'], body })
+    st.reqs.push({ action, agent, method: req.method, key: req.headers['x-relay-key'], auth: req.headers.authorization, body })
     const out = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)) }
+    // 帳號動作（登入憑證，不是節點金鑰）：照 supabase/functions/_shared/account.ts 的形狀；憑證真偽在真後端驗，這裡只認 Bearer 標頭有帶
+    if (['account_bootstrap', 'node_create', 'node_claim'].includes(action) && req.method === 'POST') {
+      if (!/^Bearer \S+/.test(req.headers.authorization ?? '')) return out(401, { error: 'unauthorized' })
+      if (action === 'account_bootstrap') return out(200, { created: false, user: 'u1', tenant: 't1', nodes: st.claimed ? [{ id: node }] : [] })
+      if (action === 'node_create') return out(200, { id: 't1-newnode01', key: 'fake-new-node-key', bell_topic: 'bell-new', rotated: false })
+      if (req.headers['x-relay-key'] !== FAKE_KEY) return out(403, { error: 'invalid_key' })
+      if (claim === 'tenant_not_yours') return out(409, { error: 'tenant_not_yours' })
+      st.claimed = true
+      return out(200, { ok: true, already: claim === 'already', node: { id: node } })
+    }
     if (req.headers['x-relay-key'] !== FAKE_KEY) return out(401, { error: 'unauthorized' })
     if (action === 'whoami') return out(200, { node, bell_topic: 'bell-test' })
     if (action === 'list') return out(200, { members: st.members.map(m => (st.avatars[m.id] ? { ...m, avatar_updated_at: st.avatars[m.id].at } : m)) })
