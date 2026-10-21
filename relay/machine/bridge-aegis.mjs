@@ -1,6 +1,7 @@
 // Irori relay Aegis 轉接橋（Linux / Aegis 主機）。
 // 用一把仲介節點金鑰收信；每封信 = 一次 POST <aegis>/api/v1/agent-chat/ask（to_agent 當成員 slug），把 answer 用 reply_to 寄回。
 // 只有白名單（IRORI_AEGIS_ALLOW）內的成員能被問；不開 claude -p、不需要 claude CLI。
+import { pickAnon } from './anon.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -34,7 +35,7 @@ function readSecret(env, file) {
   try { return fs.readFileSync(path.join(HOME_DIR, file), 'utf8').trim() } catch { return '' }
 }
 const KEY = readSecret('IRORI_RELAY_KEY', `${NODE_ID}.key`)
-const ANON_KEY = readSecret('IRORI_RELAY_ANON_KEY', 'anon.key')
+const ANON_KEY = pickAnon(BASE_URL, [process.env.IRORI_RELAY_ANON_KEY, readSecret('', 'anon.key')])   // 內建新後台的 anon；殘留的舊專案 anon.key 會被跳過
 if (!KEY) { console.error(`no relay key (${path.join(HOME_DIR, NODE_ID + '.key')})`); process.exit(2) }
 
 const core = createCore({ baseUrl: BASE_URL, key: KEY, anonKey: ANON_KEY, log, workDir: WORK_DIR })

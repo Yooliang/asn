@@ -8,6 +8,7 @@
 // 每行 JSON：{id, trust, from_node, from_agent, to_agent, reply_to, created_at, expects_reply, body}。診斷訊息只走 stderr。
 // expects_reply：寄件人明說要不要回信（true 要回、false 只是告知不用回、null＝舊信沒說）；回信用 send.mjs 時也要選 --reply／--no-reply。
 // exit code：1 用法、2 認不出視窗、3 這個視窗已有另一個 recv --watch 在跑、4 後端錯誤。
+import { pickAnon } from './anon.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -56,6 +57,7 @@ export async function main(argv, out = line => process.stdout.write(line + '\n')
   const workDir = path.join(HOME_DIR, `machine-${node}`)
   let anonKey = (process.env.IRORI_RELAY_ANON_KEY || '').trim()
   if (!anonKey) { try { anonKey = fs.readFileSync(path.join(HOME_DIR, 'anon.key'), 'utf8').trim() } catch {} }
+  anonKey = pickAnon(BASE_URL, [anonKey])   // 沒有或是舊專案的就用內建
   const log = msg => console.error(`${new Date().toISOString()} recv[${me.name}] ${msg}`)
   const core = createCore({ baseUrl: BASE_URL, key, anonKey, log, workDir })
   const q = encodeURIComponent(me.name)
