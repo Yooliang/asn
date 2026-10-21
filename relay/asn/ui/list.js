@@ -19,6 +19,7 @@ import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom
 import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
 import { bumpRecentCwd, cwdChoices, normalizeLaunchPrefs } from './lib/launch-prefs.mjs'
 import { DISPLAY_MODES, consoleToggleLabel, engineForProfile, launchDeviceRows, launchDisableReason, showDisplayModeChoice } from './lib/partner-launch-ui.mjs'
+import { backgroundRestoreNoticeText, collectLaunchFailures, findBackgroundTimeouts, launchFailedNoticeText } from './lib/partner-launch-notify.mjs'
 import { friendId } from './lib/roster.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
 import { createMic } from './lib/mic.mjs'
@@ -159,6 +160,16 @@ const cliTools = ref({})
 const remoteLaunchers = ref({})   // node → launcher 摘要
 const launchPending = ref([])     // 啟動中列
 const launchTrack = ref([])       // { id, node, name, profile } 遠端 launch uuid
+const launchNotice = reactive({ open: false, title: '', body: '', logPath: '' })
+const launchLogPaths = reactive({ bridgeLog: '', machineDir: '' })
+void invoke('relay_log_paths').then(p => { if (p) Object.assign(launchLogPaths, p) }).catch(() => {})
+function showLaunchNotice(notice) {
+  Object.assign(launchNotice, { open: true, logPath: launchLogPaths.bridgeLog || '', title: notice.title, body: notice.body })
+}
+function closeLaunchNotice() { launchNotice.open = false }
+async function openLaunchLogFolder() {
+  try { await invoke('open_machine_log_dir') } catch (e) { console.info('[ASN] 開啟記錄資料夾', e.message) }
+}
 const launchPrefs = reactive(normalizeLaunchPrefs(null))
 const launchCwdText = ref('')
 async function refreshCliTools() {
@@ -319,27 +330,32 @@ async function submitPartnerDlg() {
   } finally { partnerDlg.busy = false }
 }
 async function pollLaunchResults() {
-  if (!launchTrack.value.length) return
-  try {
-    const ids = launchTrack.value.map(t => t.id)
-    const body = await transport.launchers(ids)
-    for (const row of body?.launches ?? []) {
-      if (row.status === 'ok' || row.status === 'failed') {
-        launchTrack.value = launchTrack.value.filter(t => t.id !== row.id)
-        if (row.status === 'failed') console.info('[ASN] 開新夥伴失敗', row.detail)
+  if (launchTrack.value.length) {
+    try {
+      const ids = launchTrack.value.map(t => t.id)
+      const trackSnap = launchTrack.value
+      const body = await transport.launchers(ids)
+      for (const fail of collectLaunchFailures(body?.launches, trackSnap)) {
+        console.info('[ASN] 開新夥伴失敗', fail.detail)
+        showLaunchNotice(launchFailedNoticeText(fail.name, fail.detail))
       }
-    }
-  } catch { /* 略過 */ }
+      for (const row of body?.launches ?? []) {
+        if (row.status === 'ok' || row.status === 'failed') {
+          launchTrack.value = launchTrack.value.filter(t => t.id !== row.id)
+        }
+      }
+    } catch { /* 略過 */ }
+  }
   const still = resolvePending(launchPending.value, friends.value)
   const now = Date.now()
-  for (const p of launchPending.value) {
-    if (still.includes(p) && p.launchDisplay === 'background' && p.node === info.node && now - (p.launchSince ?? 0) > 30_000 && !p.trustRestored) {
-      p.trustRestored = true
-      const eng = engineForProfile(p.launchProfile || 'claude')
-      void transport.partnerConsoleSet({ engine: eng, name: p.agent, visible: true }).then(() => {
-        console.info('[ASN] 背景啟動可能卡在「信任此資料夾」，已改為前台顯示，請到電腦前按一次 Enter')
-      }).catch(() => {})
-    }
+  for (const p of findBackgroundTimeouts(launchPending.value, still, now, info.node)) {
+    p.trustRestored = true
+    const eng = engineForProfile(p.launchProfile || 'claude')
+    const notice = backgroundRestoreNoticeText(p.agent)
+    void transport.partnerConsoleSet({ engine: eng, name: p.agent, visible: true }).then(() => {
+      console.info('[ASN] 背景啟動可能卡在「信任此資料夾」，已改為前台顯示，請到電腦前按一次 Enter')
+      showLaunchNotice(notice)
+    }).catch(() => {})
   }
   launchPending.value = still
 }
@@ -613,6 +629,7 @@ const app = createApp({
       searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickLaunchDevice,
       DISPLAY_MODES, partnerShowDisplay,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerModels, partnerCwdChoices, pickPartnerModel, submitPartnerDlg,
+      launchNotice, closeLaunchNotice, openLaunchLogFolder,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddyConsoleToggle, buddyConsoleLabel, toggleBuddyConsole,
       launchToolRows, launchPrefs, launchCwdText, saveLaunchPrefs, setLaunchCwdText,
     }
@@ -640,9 +657,22 @@ sync()
 
 // ---------- --shot 模式：開一個對話、寄一封信＋一個震動、彈一則提示，然後截圖並結束 ----------
 // 設定檔（asn-me.json）可帶：winMode（'merged' 才是整合模式，欄位名就是 winMode，不是 mode）、shotNoChat（true＝不開任何對話，
-// 整合模式停在「開始」大幅廣告）、shotAd（固定停在第幾則廣告）、shotTab（起始頁籤）。
+// 整合模式停在「開始」大幅廣告）、shotAd（固定停在第幾則廣告）、shotTab（起始頁籤）、shotLaunchNotice（true＝只拍背景逾時通知對話框）。
 if (info.shot) {
   const sleep = ms => new Promise(r => setTimeout(r, ms))
+  const waitPaint = async (frames = 3) => {
+    for (let i = 0; i < frames; i++) await new Promise(r => requestAnimationFrame(r))
+    await sleep(350)
+  }
+  if (savedMe.shotLaunchNotice) {
+    showLaunchNotice(backgroundRestoreNoticeText('夥伴-7'))
+    await waitPaint()
+    await invoke('show_main').catch(() => {})
+    await waitPaint()
+    await invoke('capture_ui_ready', { tag: 'launch-notice-ready' })
+    await invoke('take_shot', { tab: 'launch-notice' })
+    closeLaunchNotice()
+  } else {
   const all = core.snapshot().friends
   const target = savedMe.shotNoChat ? null : (all.find(f => f.unread > 0) ?? all.find(f => f.status !== 'offline') ?? all[0])
   if (target) {
@@ -670,6 +700,7 @@ if (info.shot) {
     await sleep(500)
     await invoke('take_shot', { tab: name })
     if (name === 'guide-doc') root.closeDlg()
+  }
   }
   await core.stop()
   await invoke('quit_app')

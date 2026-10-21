@@ -147,6 +147,85 @@ async fn launch_prefs_set(app: State<'_, App>, prefs: Value) -> Result<(), Strin
     launch::launch_prefs_set(app.data_dir.clone(), prefs).await
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RelayLogPaths {
+    bridge_log: String,
+    machine_dir: String,
+}
+
+/// 收發橋與夥伴啟動相關紀錄的路徑（不含金鑰）。
+#[tauri::command]
+fn relay_log_paths(app: State<'_, App>) -> RelayLogPaths {
+    let machine_dir = app.work_dir.clone();
+    RelayLogPaths {
+        bridge_log: machine_dir.join("bridge.log").display().to_string(),
+        machine_dir: machine_dir.display().to_string(),
+    }
+}
+
+fn open_in_file_manager(path: &Path) -> Result<(), String> {
+    if !path.is_dir() {
+        return Err("路徑不是資料夾".into());
+    }
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(windows))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// 唯一允許用檔案管理員開啟的 machine 記錄目錄；路徑只來自 Rust 端 work_dir，不接受前端傳入。
+pub fn machine_log_dir_for(work_dir: &Path, relay_home: &Path) -> Result<PathBuf, String> {
+    if !work_dir.starts_with(relay_home) {
+        return Err("記錄資料夾路徑異常".into());
+    }
+    let leaf = work_dir
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| "記錄資料夾路徑異常".to_string())?;
+    let node = leaf
+        .strip_prefix("machine-")
+        .ok_or_else(|| "記錄資料夾路徑異常".to_string())?;
+    if !identity::valid_id(node) {
+        return Err("節點格式不對".into());
+    }
+    Ok(work_dir.to_path_buf())
+}
+
+pub fn machine_log_dir(work_dir: &Path) -> Result<PathBuf, String> {
+    machine_log_dir_for(work_dir, &identity::relay_home())
+}
+
+/// 用檔案管理員開啟本機 machine 資料夾（內含 bridge.log）；不接受任何路徑參數。
+#[tauri::command]
+fn open_machine_log_dir(app: State<'_, App>) -> Result<(), String> {
+    let dir = machine_log_dir(&app.work_dir)?;
+    open_in_file_manager(&dir)
+}
+
+/// `--shot` 模式：前端標記「這一刻可以截」（例如對話框已掛上 DOM）。
+#[tauri::command]
+fn capture_ui_ready(app: State<'_, App>, tag: String) -> Result<(), String> {
+    let dir = app.shot.clone().ok_or("不在 --shot 模式")?;
+    let safe: String = tag.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+    if safe.is_empty() {
+        return Err("標記名稱不合格".into());
+    }
+    write_atomic(&dir.join(format!("{safe}.ok")), "1").map_err(|e| e.to_string())
+}
+
 /// `--shot` 模式：前端錯誤印到 stderr，方便 shot.mjs 除錯。
 #[tauri::command]
 fn shot_frontend_log(app: State<'_, App>, level: String, message: String) {
@@ -292,6 +371,12 @@ pub(crate) fn cleanup(app: &AppHandle) {
 }
 
 pub fn run() {
+    #[cfg(not(windows))]
+    {
+        // WebKitGTK 在 Xvfb 下用 scrot 擷圖時，不關合成／DMABUF 常拍到空白。
+        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
     let args: Vec<String> = std::env::args().collect();
     let background = args.iter().any(|a| a == tray::BACKGROUND_FLAG);
     let shot = args.iter().position(|a| a == "--shot").and_then(|i| args.get(i + 1)).map(PathBuf::from);
@@ -347,12 +432,12 @@ pub fn run() {
         .manage(updater::Pending::default())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, partner_console_query, partner_console_set, launch_prefs_get, launch_prefs_set, shot_frontend_log, open_url, set_window_name, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, partner_console_query, partner_console_set, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, set_window_name, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
-            wins::open_chat, wins::chat_visible, wins::close_chats, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot,
+            wins::open_chat, wins::chat_visible, wins::close_chats, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,
             tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_set, updater::update_check, updater::update_install,
         ])
         .setup(move |app| {
@@ -471,5 +556,18 @@ mod tests {
         assert_eq!(read_settings_name(d.path()), None);
         write_atomic(&d.path().join("settings.json"), "{壞掉").unwrap();
         assert_eq!(read_settings_name(d.path()), None);
+    }
+
+    #[test]
+    fn machine_log_dir_只准_relay_home_底下的_machine_節點() {
+        let root = tempfile::tempdir().unwrap();
+        let relay = root.path().join("relay-home");
+        std::fs::create_dir_all(relay.join("machine-H")).unwrap();
+        let ok = relay.join("machine-H");
+        assert_eq!(machine_log_dir_for(&ok, &relay).unwrap(), ok);
+        assert!(machine_log_dir_for(root.path().join("etc/passwd").as_path(), &relay).is_err());
+        assert!(machine_log_dir_for(&relay.join("machine-../etc"), &relay).is_err());
+        assert!(machine_log_dir_for(&relay.join("machine-bad!"), &relay).is_err());
+        assert!(machine_log_dir_for(&relay.join("other-H"), &relay).is_err());
     }
 }

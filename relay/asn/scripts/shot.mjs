@@ -12,7 +12,11 @@ import { demoUploadUrl, pngDataUrl } from '../test/png.mjs'
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const releaseName = process.platform === 'win32' ? 'asn.exe' : 'asn'
 export const defaultExe = path.join(root, 'src-tauri', 'target', 'release', releaseName)
-export const shotCaptureSupported = process.platform === 'win32'
+function scrotOnPath() {
+  if (process.platform !== 'linux') return false
+  try { return spawnSync('scrot', ['--version'], { stdio: 'ignore' }).status === 0 } catch { return false }
+}
+export const shotCaptureSupported = process.platform === 'win32' || scrotOnPath()
 
 export const demoMembers = [
   { id: 'H', name: '家用機', kind: 'claude', agents: [
@@ -48,6 +52,10 @@ export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000, me
   const env = {
     ...process.env, IRORI_RELAY_URL: relay.url, IRORI_RELAY_ID: 'H', IRORI_RELAY_KEY: FAKE_KEY, IRORI_RELAY_ANON_KEY: '',
     USERPROFILE: path.join(tmp, 'home'), HOME: path.join(tmp, 'home'), IRORI_ASN_DATA: path.join(tmp, 'data'), WEBVIEW2_USER_DATA_FOLDER: path.join(tmp, 'wv2'),
+  }
+  if (process.platform === 'linux') {
+    env.WEBKIT_DISABLE_COMPOSITING_MODE = '1'
+    env.WEBKIT_DISABLE_DMABUF_RENDERER = '1'
   }
   fs.mkdirSync(env.USERPROFILE, { recursive: true })
   fs.mkdirSync(env.IRORI_ASN_DATA, { recursive: true })

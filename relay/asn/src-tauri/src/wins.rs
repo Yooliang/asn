@@ -2,7 +2,6 @@
 //! 視窗按鈕（最小化／最大化／關閉）與 --shot 的螢幕擷取。
 use crate::{App, BROWSER_ARGS};
 use serde::Deserialize;
-#[cfg(windows)]
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -317,10 +316,55 @@ foreach ($s in ($env:ASN_SPECS -split ';')) {
     if status.success() { Ok(()) } else { Err(format!("擷取失敗：{status}")) }
 }
 
-/// Linux 上沒有與 PowerShell 等價的可靠螢幕擷取；--shot 仍跑完收發流程，略過 PNG。
+/// Linux：用 scrot 依視窗外框擷取（需 X11／Xvfb）；沒有 scrot 就略過 PNG，流程仍跑完。
 #[cfg(not(windows))]
-async fn take_shot_capture(_app: &AppHandle, _dir: &std::path::Path, _tab: Option<String>) -> Result<(), String> {
+async fn take_shot_capture(app: &AppHandle, dir: &Path, tab: Option<String>) -> Result<(), String> {
+    let scrot = which_scrot();
+    let Some(scrot) = scrot else { return Ok(()) };
+    for (label, w) in app.webview_windows() {
+        if tab.is_some() && label != "list" {
+            continue;
+        }
+        let name = if label == "list" {
+            tab.as_ref()
+                .map(|t| format!("tabs-{}", t.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect::<String>()))
+                .unwrap_or_else(|| "list".to_string())
+        } else if label.starts_with("chat-") {
+            "chat".to_string()
+        } else if label.starts_with("toast-") {
+            label.clone()
+        } else {
+            continue;
+        };
+        let (Ok(p), Ok(s)) = (w.outer_position(), w.outer_size()) else { continue };
+        if s.width == 0 || s.height == 0 {
+            continue;
+        }
+        let out = dir.join(format!("{name}.png"));
+        let area = format!("{},{},{},{}", p.x, p.y, s.width, s.height);
+        let status = tokio::process::Command::new(&scrot)
+            .args(["-o", "-a", &area, out.to_string_lossy().as_ref()])
+            .status()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !status.success() {
+            return Err(format!("scrot 擷取失敗：{status}"));
+        }
+    }
     Ok(())
+}
+
+#[cfg(not(windows))]
+fn which_scrot() -> Option<String> {
+    std::env::var_os("PATH").and_then(|path| {
+        for dir in path.to_string_lossy().split(':').filter(|d| !d.is_empty()) {
+            let p = std::path::PathBuf::from(dir).join("scrot");
+            if p.is_file() {
+                return Some(p.display().to_string());
+            }
+        }
+        None
+    })
 }
 
 #[cfg(test)]

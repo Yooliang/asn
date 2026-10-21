@@ -74,6 +74,9 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .partner-dlg-back{position:fixed;inset:0;z-index:70;background:rgba(10,24,40,.45);display:flex;align-items:center;justify-content:center;padding:12px}
 .partner-dlg{min-width:min(420px,96vw);max-width:480px;padding:14px 16px;border:1px solid #7a9ec4;border-radius:6px;background:var(--panel);box-shadow:0 8px 28px rgba(0,30,70,.35);display:flex;flex-direction:column;gap:8px}
 .partner-dlg h3{margin:0 0 4px;font-size:15px}
+.launch-notice-body{margin:0;white-space:pre-line;font-size:13px;line-height:1.45}
+.launch-notice-log{margin:0;font-size:11px;color:#4a6080;word-break:break-all}
+.launch-notice-log code{font-family:Consolas,"Liberation Mono",monospace;font-size:11px}
 .partner-dlg label{display:flex;flex-direction:column;gap:3px;font-size:12px}
 .partner-display{border:1px solid var(--line);border-radius:4px;padding:6px 8px;margin:0;display:flex;flex-wrap:wrap;gap:8px 14px}
 .partner-display legend{padding:0 4px;font-size:12px;font-weight:600}

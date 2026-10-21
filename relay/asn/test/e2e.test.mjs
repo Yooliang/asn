@@ -9,6 +9,7 @@ import path from 'node:path'
 import { defaultExe, runShot, shotCaptureSupported } from '../scripts/shot.mjs'
 import { FAKE_KEY, U } from './fake-relay.mjs'
 import { nudgeBody } from '../ui/lib/text.mjs'
+import { assertShotNotBlank } from './shot-png.mjs'
 
 test('asn.exe 端到端（假 relay）', { skip: !fs.existsSync(defaultExe) && '先執行 npm run build', timeout: 120_000 }, async () => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-e2e-'))
@@ -41,8 +42,17 @@ test('asn.exe 端到端（假 relay）', { skip: !fs.existsSync(defaultExe) && '
   assert.ok(Math.abs(Date.now() - r.heartbeat.t) < 120_000)
   assert.equal(fs.existsSync(r.hbFile), false, '結束時清掉自己的心跳')
   if (shotCaptureSupported) {
-    for (const f of ['list.png', 'chat.png']) assert.ok(r.files.includes(f), `缺 ${f}`)
+    for (const f of ['list.png', 'chat.png']) {
+      assert.ok(r.files.includes(f), `缺 ${f}`)
+      assertShotNotBlank(path.join(out, f))
+    }
+    for (const f of r.files.filter(x => x.startsWith('tabs-'))) {
+      assertShotNotBlank(path.join(out, f), { minBytes: 8000 })
+    }
     assert.ok(r.files.some(f => f.startsWith('toast-')), '有提示視窗截圖')
+    for (const f of r.files.filter(x => x.startsWith('toast-'))) {
+      assertShotNotBlank(path.join(out, f), { minBytes: 3000, minUnique: 8 })
+    }
   }
   assert.ok(fs.existsSync(path.join(r.data, 'asn-chats.json')), '對話存檔寫在資料夾')
   assert.ok(!fs.readFileSync(path.join(r.data, 'asn-chats.json'), 'utf8').includes(FAKE_KEY), '存檔裡沒有金鑰')
