@@ -1,9 +1,8 @@
-// 「指引」頁籤：說明資料完整、開關指引的狀態切換、整合模式右邊該顯示什麼、守門（不放金鑰與內部網址、不用 v-html）。
+// 「指引」頁籤：說明資料完整、列表只列標題並開共用對話框（不再開右邊分頁）、守門（不放金鑰與內部網址、不用 v-html）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { GUIDES, GUIDE_KEYS, closeGuide, guideByKey, hideGuide, numbered, openGuide, rightView } from '../ui/lib/guides.mjs'
-import { tabVisible } from '../ui/lib/merge.mjs'
+import { GUIDES, GUIDE_KEYS, guideByKey, numbered } from '../ui/lib/guides.mjs'
 
 test('指引清單：五篇、順序與鍵固定、每篇有標題與副標、內容有步驟', () => {
   assert.deepEqual(GUIDE_KEYS, ['start', 'bridge', 'cloud', 'groups', 'faq'])
@@ -44,39 +43,16 @@ test('步驟編號：連續的步驟從 1 數，遇到小標、指令或注意�
   assert.equal(GUIDES[0].blocks.some(b => 'n' in b), false)
 })
 
-test('開啟指引：分離模式只記哪一篇（顯示在名單內容區）；整合模式同時選到右邊的指引分頁；不認得的鍵不動', () => {
-  assert.deepEqual(openGuide({ guide: '', showGuide: false }, 'faq', 'split'), { guide: 'faq', showGuide: false })
-  assert.deepEqual(openGuide({ guide: '', showGuide: false }, 'faq', 'merged'), { guide: 'faq', showGuide: true })
-  assert.deepEqual(openGuide({ guide: 'start', showGuide: true }, 'cloud', 'merged'), { guide: 'cloud', showGuide: true }, '換一篇＝同一個分頁換內容')
-  assert.deepEqual(openGuide({ guide: 'start', showGuide: true }, 'nope', 'merged'), { guide: 'start', showGuide: true })
-  assert.deepEqual(openGuide(undefined, 'nope', 'merged'), { guide: '', showGuide: false })
-  assert.deepEqual(closeGuide(), { guide: '', showGuide: false })
-  assert.deepEqual(hideGuide({ guide: 'faq', showGuide: true }), { guide: 'faq', showGuide: false }, '切去別的分頁：指引留著但退到背景')
-})
-
-test('整合模式右邊顯示什麼：指引分頁選著＝指引；否則有對話＝對話；都沒有＝「開始」大幅廣告', () => {
-  assert.equal(rightView({}), 'home')
-  assert.equal(rightView({ tabs: ['a'] }), 'chat')
-  assert.equal(rightView({ tabs: [], guide: 'faq', showGuide: true }), 'guide')
-  assert.equal(rightView({ tabs: ['a'], guide: 'faq', showGuide: true }), 'guide')
-  assert.equal(rightView({ tabs: ['a'], guide: 'faq', showGuide: false }), 'chat')
-  assert.equal(rightView({ tabs: [], guide: 'faq', showGuide: false }), 'home', '指引在背景、沒有對話＝回到開始頁')
-  assert.equal(rightView({ tabs: ['a'], guide: 'nope', showGuide: true }), 'chat', '壞的鍵不會顯示空白頁')
-})
-
-test('指引蓋住對話時，來信要算未讀（對話不算看得到）', () => {
-  assert.equal(tabVisible({ active: 'a', showGuide: false }, 'a', true), true)
-  assert.equal(tabVisible({ active: 'a', showGuide: true }, 'a', true), false)
-  assert.equal(tabVisible({ active: 'a' }, 'a', true), true, '舊狀態沒有 showGuide 欄位照常')
-})
-
-test('守門：指引畫面一律用文字插值（沒有 v-html）；整合模式的指引是右邊分頁，分離模式在名單內容區；沒有任何外部腳本', () => {
+test('守門：指引畫面一律用文字插值（沒有 v-html）；指引改開對話框、不再有右邊分頁；沒有任何外部腳本', () => {
   const dir = new URL('../ui/', import.meta.url)
   const html = fs.readFileSync(new URL('list.html', dir), 'utf8'), js = fs.readFileSync(new URL('list.js', dir), 'utf8')
   const guideBlock = /<div class="list guide-list"[\s\S]*?<\/ul>/.exec(html)[0]
   assert.ok(!/v-html/.test(guideBlock), '指引清單不用 v-html')
   const comp = /app\.component\('guide-doc'[\s\S]*?\n\}\)/.exec(js)[0]
   assert.ok(!/v-html/.test(comp), '指引內文不用 v-html')
-  assert.ok(html.includes('v-else-if="view === \'guide\'"') && html.includes('class="ctab guide-tab"'), '整合模式：右邊有指引分頁與內容')
-  assert.ok(html.includes("ui.mode === 'split' && openedGuide"), '分離模式：在名單內容區顯示')
+  assert.ok(!html.includes('guide-tab') && !html.includes('guide-pane') && !/view === 'guide'/.test(html), '整合模式不再有右邊的指引分頁')
+  assert.ok(!/rightView|openGuide\b|hideGuide|showGuide|openedGuide/.test(js + html), '舊的分頁邏輯都拿掉了')
+  assert.ok(html.includes('@click="openGuideDlg(g.key)"') && html.includes('<guide-doc v-if="dlg.kind === \'guide\'"'), '點標題開對話框，內容放在對話框裡')
+  assert.ok(!/b-psm">\{\{ g\.sub/.test(html), '列表只列標題')
+  assert.ok(!/<script[^>]+src="https?:/.test(html), '不載入外部腳本')
 })

@@ -1,4 +1,4 @@
-// 「指引」頁籤：安裝與使用說明（純資料＋純邏輯，node 與瀏覽器都能跑）。
+// 「指引」頁籤：安裝與使用說明（純資料＋純邏輯，node 與瀏覽器都能跑）。列表只列標題，點了開共用對話框（dialog.mjs）顯示內容。
 // 內容出處：relay/asn/README.md、relay/machine/README.md、relay/machine/installer/使用說明.txt、docs/DOWNLOADS.md、
 // relay/cloud-agent/README.md、relay/machine/room.mjs／rooms.mjs。只寫目前真的做得到的；之後要改文字就改這個檔。
 // 規矩：不放金鑰、內部網址、後台網址；檔案路徑用通用寫法（%USERPROFILE%\.irori-relay）；不用 v-html，畫面一律當純文字顯示。
@@ -123,20 +123,3 @@ export function numbered(blocks) {
   let n = 0
   return blocks.map(b => { if (b.k === 'li') { n++; return { ...b, n } } n = 0; return { ...b, n: 0 } })
 }
-
-// 開啟／關閉一篇指引。state＝{ guide, showGuide }（整合模式的 ui 物件就有這兩個欄位）。
-// 分離模式：指引顯示在名單內容區（只用 guide）；整合模式：同時 showGuide＝true，指引變成右邊的一個分頁。
-// 不認得的 key 不動狀態。回傳新的 { guide, showGuide }，不改傳入物件。
-export function openGuide(state, key, mode) {
-  if (!guideByKey(key)) return { guide: state?.guide ?? '', showGuide: !!state?.showGuide }
-  return { guide: key, showGuide: mode === 'merged' }
-}
-export const closeGuide = () => ({ guide: '', showGuide: false })
-
-// 整合模式右邊現在顯示什麼：指引分頁被選著＝'guide'；否則有對話分頁＝'chat'；都沒有＝'home'（大幅廣告）
-export function rightView({ tabs = [], guide = '', showGuide = false } = {}) {
-  if (guide && showGuide && guideByKey(guide)) return 'guide'
-  return tabs.length ? 'chat' : 'home'
-}
-// 切到別的右側分頁（對話或開始）時，指引分頁退到背景
-export const hideGuide = state => ({ guide: state?.guide ?? '', showGuide: false })
