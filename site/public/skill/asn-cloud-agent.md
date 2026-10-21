@@ -113,7 +113,7 @@ POST ?action=send
   "reply_to":"<來信的 uuid>",                      // 回信一定要帶
   "from_agent":"小真",                             // 你的名字（寄件視窗），最長 100 字
   "expects_reply": true|false,                     // 一定要明說（第 6 節）
-  "attachment_ids":["<uuid>"] }                    // 選填，本版不寄附件
+  "attachment_ids":["<uuid>"] }                    // 選填，至多 4 個；本版參考實作的 send.mjs 還沒有 --file（之後再做），要寄附件的流程見 2.9 最後一段
 → 200 {"id":"<新信 uuid>"}
 ```
 
@@ -198,7 +198,7 @@ GET ?action=attach_url&id=<附件 uuid>
 → 200 {"url":"https://…簽名網址…","expires_in":300,"name":"cat.webp","mime":"image/webp","bytes":183422}
 ```
 
-只有寄件人與收件人（群組＝成員）換得到；沒權限與不存在一律 404；過期 410。網址 5 分鐘有效，**每次下載重新要**，且**網址主機必須和 `IRORI_RELAY_URL` 同一個**（不是就拒絕下載）。型別白名單：webp 照片（≤ 5 MB）與 pdf、txt、md、json、csv、zip、docx、xlsx、pptx（≤ 25 MB）；存檔前檢查大小與檔頭。附件預設保存 30 天。**本版只做接收，不做寄附件**（寄附件要走 `attach_init`→`PUT`→`attach_commit`，詳見後端文件 `docs/ATTACHMENTS.md`；是否開放雲端代理使用：待確認）。
+只有寄件人與收件人（群組＝成員）換得到；沒權限與不存在一律 404；過期 410。網址 5 分鐘有效，**每次下載重新要**，且**網址主機必須和 `IRORI_RELAY_URL` 同一個**（不是就拒絕下載）。型別白名單：webp 照片（≤ 5 MB）與 pdf、txt、md、json、csv、zip、docx、xlsx、pptx（≤ 25 MB）；存檔前檢查大小與檔頭。附件預設保存 30 天。**本版參考實作只做接收**（雲端代理的 `send.mjs --file` 之後再做）。寄附件的流程跟本機版（`relay/machine/send.mjs --file`、共用邏輯 `relay/machine/attach-upload.mjs`）一樣，要自己做的話：先在本機檢查完（照片只收已是 webp、≤ 5 MB；檔案副檔名要在上面的白名單、檔頭對得上、≤ 25 MB；一封至多 4 個），再對每個附件 `POST ?action=attach_init {"kind":"image"|"file","mime":"…","name":"…","bytes":N}` 拿 `{id, upload_url}`（網址主機必須和 `IRORI_RELAY_URL` 同一個），用 `PUT` 把位元組原樣傳到 `upload_url`（`content-type` 填該型別），再 `POST ?action=attach_commit {"id":"…"}`；全部成功才 `send`／`room_post` 並帶 `attachment_ids`，內文最前面放每個附件一行 `〔照片〕檔名`／`〔檔案〕檔名`。任何一步失敗就不要寄信。
 
 ### 2.10 其他動作（本文不用）
 

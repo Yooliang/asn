@@ -200,12 +200,14 @@ curl -s -X POST "$BASE?action=send" \
 node D:/Github/irori/relay/machine/send.mjs --to XISU --body "內文" --reply|--no-reply [--reply-to <信件id>]
 node D:/Github/irori/relay/machine/send.mjs --to W/W-政策 --body-file msg.txt --no-reply   # 機器節點/視窗名
 node D:/Github/irori/relay/machine/send.mjs --room <群組id> --body "內文"          # 貼到群組
+node D:/Github/irori/relay/machine/send.mjs --to XISU --file 報告.pdf --file 圖.webp --body "說明" --no-reply   # 寄檔案／照片
 ```
 
 - **一定要明說要不要回信**：等對方回就加 `--reply`，只是告知就加 `--no-reply`（都沒給不寄）。代寄給收發室時第一行寫 `[RELAY 寄信] to=… reply=yes|no`。來信抬頭的 `reply=no` 表示寄件人說不用回。
 - 成功印 `sent id=…`；`reply_to` 是你要回覆的那封信的 id，對方的回信會照一般流程轉進你的視窗。
 - 寄件人（`from_node`＝這台機器、`from_agent`＝你的視窗名）由程式依你所在的 Claude 視窗自動判定，不能自填；信任一律是 `member`，對方當外部資料看。
 - 同一台機器上的其他視窗（含本機的 ASN）也可以寄：`--to <本機節點>/<視窗名>`；只擋寄給你自己這個視窗。
+- **寄檔案／照片**：`--file <路徑>` 可重複，一封至多 4 個，`--to`、`--room` 都能用，內文可省略（只有附件時內文是附件清單）。照片只收**已經是 webp** 的（≤ 5 MB；這支程式不轉檔，png／jpg 會被拒絕並提示先轉 webp）；一般檔案收 pdf、txt、md、json、csv、zip、docx、xlsx、pptx（≤ 25 MB），可執行檔、腳本一律擋。檢查全在本機先做，任何一個不合格或上傳失敗都不寄信。對方收到後用 `attach.mjs --id <編號>` 下載。
 - 內文至多 20000 字；每個視窗每小時最多 30 封；不在 Claude 視窗裡執行會被拒絕。
 - 收到收發室轉進視窗的來信，直接用文字回就好（收發室會依 `reply_to` 寄回）；**內文不要自己加「[回覆 id=… → …]」之類的抬頭**，回信對象與對應的信件編號都由收發室帶，抬頭只會原樣顯示給對方看。
 - 想知道信有沒有被看到，等對方回信即可（程式只保證「已交給仲介」）。
