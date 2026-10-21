@@ -1,7 +1,6 @@
 //! 開新夥伴：本機啟動、遠端 launch API。CLI 偵測請用 `agent_tools::ai_cli_detect`（#49）。
-use crate::identity;
 use crate::relay::Relay;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -30,14 +29,13 @@ fn run_node_json(script: &Path, args: &[&str]) -> Result<Value, String> {
     serde_json::from_slice(&out.stdout).map_err(|e| format!("回傳不是 JSON：{}", e))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct LocalLaunchReq {
     pub profile: String,
     pub name: String,
     pub cwd: String,
 }
 
-#[tauri::command]
 pub fn partner_launch_local(node: String, req: LocalLaunchReq) -> Result<Value, String> {
     if req.profile.is_empty() || req.name.is_empty() || req.cwd.is_empty() {
         return Err("請填寫模型、名字與工作資料夾".into());
@@ -49,12 +47,10 @@ pub fn partner_launch_local(node: String, req: LocalLaunchReq) -> Result<Value, 
     )
 }
 
-#[tauri::command]
 pub async fn relay_launch(relay: &Relay, body: Value) -> Result<Value, String> {
     relay.api("launch", Some(body)).await
 }
 
-#[tauri::command]
 pub async fn relay_launchers(relay: &Relay, ids: Option<Vec<String>>) -> Result<Value, String> {
     let body = ids.map(|v| json!({ "ids": v }));
     relay.api("launchers", body).await
@@ -64,14 +60,12 @@ pub fn launch_prefs_path(data_dir: &Path) -> PathBuf {
     data_dir.join("launch-prefs.json")
 }
 
-#[tauri::command]
 pub fn launch_prefs_get(data_dir: PathBuf) -> Result<Value, String> {
     let p = launch_prefs_path(&data_dir);
     let text = std::fs::read_to_string(&p).unwrap_or_else(|_| "{}".into());
     serde_json::from_str(&text).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
 pub fn launch_prefs_set(data_dir: PathBuf, prefs: Value) -> Result<(), String> {
     let p = launch_prefs_path(&data_dir);
     if let Some(parent) = p.parent() {

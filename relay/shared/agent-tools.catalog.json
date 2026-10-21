@@ -13,8 +13,8 @@
         "ps1": "https://claude.ai/install.ps1"
       },
       "loginCommand": ["claude"],
-      "installBlurb": "將從 Anthropic 官方腳本安裝 Claude Code。",
-      "loginBlurb": "終端機會啟動 Claude Code，依畫面在瀏覽器完成登入。"
+      "install_blurb": "將從 Anthropic 官方腳本安裝 Claude Code。",
+      "login_blurb": "終端機會啟動 Claude Code，依畫面在瀏覽器完成登入。"
     },
     {
       "id": "codex",
@@ -28,8 +28,8 @@
         "npm": "@openai/codex"
       },
       "loginCommand": ["codex"],
-      "installBlurb": "將從 OpenAI 官方 Codex 安裝腳本安裝。",
-      "loginBlurb": "請在終端機選擇使用 ChatGPT 登入。"
+      "install_blurb": "將從 OpenAI 官方 Codex 安裝腳本安裝。",
+      "login_blurb": "請在終端機選擇使用 ChatGPT 登入。"
     },
     {
       "id": "agy",
@@ -42,8 +42,8 @@
         "ps1": "https://antigravity.google/cli/install.ps1"
       },
       "loginCommand": ["agy"],
-      "installBlurb": "將從 Google Antigravity 官方腳本安裝 agy（不是舊版 gemini 指令，也不是 Gmail 工具 gogcli）。",
-      "loginBlurb": "終端機會啟動 agy，依畫面用 Google 帳號登入。"
+      "install_blurb": "將從 Google Antigravity 官方腳本安裝 agy（不是舊版 gemini 指令，也不是 Gmail 工具 gogcli）。",
+      "login_blurb": "終端機會啟動 agy，依畫面用 Google 帳號登入。"
     },
     {
       "id": "grok",
@@ -57,8 +57,8 @@
         "npm": "@xai-official/grok"
       },
       "loginCommand": ["grok", "login"],
-      "installBlurb": "將從 xAI 官方腳本安裝 Grok CLI（若 PATH 上已有社群版 grok，請先移除以免衝突）。",
-      "loginBlurb": "終端機會執行 grok login，依畫面完成登入。"
+      "install_blurb": "將從 xAI 官方腳本安裝 Grok CLI（若 PATH 上已有社群版 grok，請先移除以免衝突）。",
+      "login_blurb": "終端機會執行 grok login，依畫面完成登入。"
     },
     {
       "id": "pi",
@@ -70,8 +70,8 @@
         "npm": "@earendil-works/pi-coding-agent"
       },
       "loginCommand": ["pi"],
-      "installBlurb": "將用 npm 安裝官方 pi 套件（需 Node.js 22.19+）。",
-      "loginBlurb": "在 pi 裡使用 /login 完成各模型提供者登入；ASN 無法代為選提供者。"
+      "install_blurb": "將用 npm 安裝官方 pi 套件（需 Node.js 22.19+）。",
+      "login_blurb": "在 pi 裡使用 /login 完成各模型提供者登入；ASN 無法代為選提供者。"
     }
   ]
 }
