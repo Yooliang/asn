@@ -1,5 +1,6 @@
 //! ASN 即時通（Tauri 2）：金鑰、anon 金鑰、收發室 HTTP／WebSocket、心跳檔、設定與對話存檔都在 Rust 端；
 //! 前端（ui/）只拿得到「信件與名單」，拿不到任何金鑰。
+mod acct_remote;
 mod ads;
 mod agent_tools;
 mod attach;
@@ -7,6 +8,7 @@ mod avatar;
 mod bell;
 mod claude_accounts;
 mod claude_json;
+mod codex_accounts;
 mod heartbeat;
 mod identity;
 mod launch;
@@ -123,6 +125,47 @@ async fn relay_launch(app: State<'_, App>, body: Value) -> Result<Value, String>
 #[tauri::command]
 async fn relay_launchers(app: State<'_, App>, ids: Option<Vec<String>>) -> Result<Value, String> {
     launch::relay_launchers(relay_of(&app)?.as_ref(), ids).await
+}
+
+// ---------- 遠端切換 Claude 帳號（設計見 acct_remote.rs；權杖只在各自那台搬，不進收發室） ----------
+/// 把本機帳號庫的清單（只有 email、方案、使用中）回報給收發室，讓擁有者設備看得到
+#[tauri::command]
+async fn acct_remote_report(app: State<'_, App>) -> Result<Value, String> {
+    let relay = relay_of(&app)?;
+    let list = tauri::async_runtime::spawn_blocking(claude_accounts::local_list).await.map_err(|e| e.to_string())?;
+    acct_remote::report(relay.as_ref(), &list).await
+}
+#[tauri::command]
+async fn acct_remote_list(app: State<'_, App>, node: String) -> Result<Value, String> {
+    acct_remote::remote_list(relay_of(&app)?.as_ref(), &node).await
+}
+#[tauri::command]
+async fn acct_remote_request(app: State<'_, App>, node: String, email: String) -> Result<Value, String> {
+    acct_remote::remote_request(relay_of(&app)?.as_ref(), &node, &email).await
+}
+#[tauri::command]
+async fn acct_remote_status(app: State<'_, App>, ids: Vec<String>) -> Result<Value, String> {
+    acct_remote::remote_status(relay_of(&app)?.as_ref(), ids).await
+}
+#[tauri::command]
+async fn acct_remote_pending(app: State<'_, App>) -> Result<Vec<acct_remote::Pending>, String> {
+    acct_remote::pending(relay_of(&app)?.as_ref(), &app.data_dir).await
+}
+#[tauri::command]
+async fn acct_remote_apply(app: State<'_, App>, id: String, confirmed: bool) -> Result<Value, String> {
+    acct_remote::apply(relay_of(&app)?.as_ref(), &app.data_dir, id, confirmed).await
+}
+#[tauri::command]
+async fn acct_remote_decline(app: State<'_, App>, id: String) -> Result<(), String> {
+    acct_remote::decline(relay_of(&app)?.as_ref(), id).await
+}
+#[tauri::command]
+fn acct_remote_trust_get(app: State<'_, App>) -> bool {
+    acct_remote::trust_own(&app.data_dir)
+}
+#[tauri::command]
+fn acct_remote_trust_set(app: State<'_, App>, on: bool) -> Result<(), String> {
+    acct_remote::set_trust_own(&app.data_dir, on)
 }
 
 #[tauri::command]
@@ -502,7 +545,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, ads::ads_fetch, set_window_name, set_presence, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
-            claude_accounts::claude_accounts_list, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete,
+            claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete,
+            codex_accounts::codex_account_current,
+            acct_remote_report, acct_remote_list, acct_remote_request, acct_remote_status, acct_remote_pending, acct_remote_apply, acct_remote_decline, acct_remote_trust_get, acct_remote_trust_set,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
             wins::open_chat, wins::open_panel, wins::close_panels, wins::chat_visible, wins::close_chats, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,

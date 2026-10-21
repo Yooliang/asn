@@ -6,12 +6,12 @@ import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MO
 import { BUBBLES, BUBBLE_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, TOOLBARS, TOOLBAR_LABEL } from './merge.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_LABEL, soundChoice } from './prefs.mjs'
 import { DIMS, groupOptions } from './dims.mjs'
-import { accountLine } from './claude-accounts.mjs'
+import { OTHER_VENDORS, VENDOR_UNSUPPORTED, accountLine } from './claude-accounts.mjs'
 
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
 export const SETTING_OPS = [
   'sound', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
-  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-save',
+  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-add', 'acct-remote-node', 'acct-remote-switch', 'acct-trust',
   'closeTo', 'autostart', 'autoCheck', 'check-update', 'launch-max', 'launch-cwd', 'avatar-remove',
 ]
 
@@ -19,15 +19,12 @@ export const SettingsPanel = {
   props: { st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
-    const { ref, watch } = globalThis.Vue
+    const { ref } = globalThis.Vue
     const fileEl = ref(null)
-    const acctName = ref('')
-    // 樞紐回報「帳號已存好」才清掉輸入（存失敗要保留，讓使用者改了再按）
-    watch(() => props.st.accounts.savedSeq, () => { acctName.value = '' })
     const act = (op, value) => emit('act', op, value)
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return {
-      fileEl, acctName, act, pickFile, accountLine, soundChoice, groupOptions,
+      fileEl, act, pickFile, accountLine, soundChoice, groupOptions, OTHER_VENDORS, VENDOR_UNSUPPORTED,
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL,
       CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_LABEL, DIMS,
@@ -79,17 +76,48 @@ export const SettingsPanel = {
       </template>
       <template v-if="catKey === 'accounts'">
         <div class="acct-set">
-          <b>Claude 帳號</b>
-          <ul class="acct-list" v-if="st.accounts.list.length">
-            <li v-for="a in st.accounts.list" :key="a.name">
-              <span class="acct-txt"><span class="acct-name">{{ a.name }}<em v-if="a.current">使用中</em></span><small>{{ accountLine(a) }}</small></span>
-              <button class="aero-btn" type="button" @click="act('acct-switch', a.name)" :disabled="st.accounts.busy || a.current">切換</button>
-              <button class="aero-btn" type="button" @click="act('acct-remove', a.name)" :disabled="st.accounts.busy">{{ st.accounts.confirmDel === a.name ? '確認刪除' : '刪除' }}</button>
-            </li>
-          </ul>
-          <small v-else>還沒有存過帳號。</small>
-          <div class="acct-add"><input v-model="acctName" maxlength="40" placeholder="幫目前登入取個名字" aria-label="帳號名稱" @keydown.enter="acctName.trim() && act('acct-save', acctName.trim())"><button class="aero-btn" type="button" @click="act('acct-save', acctName.trim())" :disabled="st.accounts.busy || !acctName.trim()">存成帳號</button></div>
-          <small role="status">{{ st.accounts.msg }}</small>
+          <section class="set-card" aria-label="Claude 帳號">
+            <header class="vendor-h"><b>Claude 帳號</b><small>Anthropic</small></header>
+            <ul class="acct-list" v-if="st.accounts.list.length">
+              <li v-for="a in st.accounts.list" :key="a.email">
+                <span class="acct-txt"><span class="acct-name">{{ a.email }}<em v-if="a.current">使用中</em></span><small v-if="a.plan">{{ a.plan }}</small></span>
+                <button class="aero-btn" type="button" @click="act('acct-switch', a.email)" :disabled="st.accounts.busy || a.current">切換</button>
+                <button class="aero-btn" type="button" @click="act('acct-remove', a.email)" :disabled="st.accounts.busy">{{ st.accounts.confirmDel === a.email ? '確認刪除' : '刪除' }}</button>
+              </li>
+            </ul>
+            <small v-else>還沒有加入過帳號。</small>
+            <small v-if="st.accounts.current && !st.accounts.current.saved" class="acct-warn">目前登入的 {{ st.accounts.current.email }} 還沒加入帳號庫，切換到別的帳號前請先加入。</small>
+            <small v-else-if="!st.accounts.current">這台電腦目前沒有 Claude 登入。</small>
+            <div class="acct-add"><button class="aero-btn" type="button" @click="act('acct-add')" :disabled="st.accounts.busy || !st.accounts.current">加入目前登入的帳號</button></div>
+            <small role="status">{{ st.accounts.msg }}</small>
+          </section>
+          <section class="set-card" aria-label="OpenAI（Codex）帳號">
+            <header class="vendor-h"><b>OpenAI（Codex）帳號</b><small>OpenAI</small></header>
+            <div class="acct-txt"><span class="acct-name">{{ st.accounts.codexLine }}</span></div>
+            <small>切換尚未支援，目前只顯示現在登入的帳號。</small>
+          </section>
+          <section class="set-card" aria-label="遠端設備">
+            <header class="vendor-h"><b>遠端設備</b><small>切換別台電腦的 Claude 帳號</small></header>
+            <label>設備
+              <select class="set-sel" :value="st.accounts.remote.node" @change="act('acct-remote-node', $event.target.value)" aria-label="遠端設備">
+                <option value="">請選擇…</option>
+                <option v-for="d in st.accounts.remote.devices" :key="d.key" :value="d.key">{{ d.label }}</option>
+              </select>
+            </label>
+            <small v-if="!st.accounts.remote.devices.length">目前沒有其他在線的設備（對方要開著 ASN）。</small>
+            <ul class="acct-list" v-if="st.accounts.remote.list.length">
+              <li v-for="a in st.accounts.remote.list" :key="a.email">
+                <span class="acct-txt"><span class="acct-name">{{ a.email }}<em v-if="a.current">使用中</em></span><small v-if="a.plan">{{ a.plan }}</small></span>
+                <button class="aero-btn" type="button" @click="act('acct-remote-switch', a.email)" :disabled="st.accounts.remote.busy || a.current">切換</button>
+              </li>
+            </ul>
+            <small role="status">{{ st.accounts.remote.loading ? '讀取中…' : st.accounts.remote.msg }}</small>
+            <label class="chk"><input type="checkbox" :checked="st.accounts.trustOwn" @change="act('acct-trust', $event.target.checked)" /><span>信任我自己的設備，別台要求切換這台時不用確認</span></label>
+            <small>預設會在這台跳出確認，按了同意才會切換。指令只帶 email，權杖不會經過收發室。</small>
+          </section>
+          <section class="set-card" v-for="v in OTHER_VENDORS" :key="v.key" :aria-label="v.title">
+            <header class="vendor-h"><b>{{ v.title }}</b><small>{{ VENDOR_UNSUPPORTED }}</small></header>
+          </section>
         </div>
       </template>
       <template v-if="catKey === 'look'">
@@ -114,11 +142,19 @@ export const SettingsPanel = {
           <select class="set-sel" :value="st.closeTo" @change="act('closeTo', $event.target.value)" aria-label="關閉視窗時"><option v-for="c in CLOSE_CHOICES" :key="c" :value="c">{{ CLOSE_LABEL[c] }}</option></select>
         </label>
         <small v-if="!st.trayOk">這台電腦建不起系統匣圖示，關閉視窗一律結束程式。</small>
-        <label class="chk" v-if="st.autostart.supported"><input type="checkbox" :checked="st.autostart.on" :disabled="st.autostart.busy" @change="act('autostart', $event.target.checked)" aria-label="登入時自動啟動 ASN" /> 登入時自動啟動 ASN</label>
+        <label class="chk" v-if="st.autostart.supported"><input type="checkbox" :checked="st.autostart.on" :disabled="st.autostart.busy" @change="act('autostart', $event.target.checked)" aria-label="登入時自動啟動 ASN" /><span>登入時自動啟動 ASN</span></label>
       </template>
       <template v-if="catKey === 'update'">
-        <label class="chk"><input type="checkbox" :checked="st.autoCheck" @change="act('autoCheck', $event.target.checked)" aria-label="自動檢查更新" /> 自動檢查更新</label>
-        <div class="upd-set"><button class="aero-btn" type="button" @click="act('check-update')" :disabled="st.upd.checking || st.upd.installing">立即檢查</button> <small role="status">{{ st.upd.manual }}</small></div>
+        <section class="set-card upd-card" aria-label="更新">
+          <label class="chk"><input type="checkbox" :checked="st.autoCheck" @change="act('autoCheck', $event.target.checked)" aria-label="自動檢查更新" /><span>自動檢查更新</span></label>
+          <div class="upd-row">
+            <button class="aero-btn" type="button" @click="act('check-update')" :disabled="st.upd.checking || st.upd.installing">立即檢查</button>
+            <div class="upd-status" :class="'tone-' + st.upd.status.tone" role="status">
+              <b>{{ st.upd.status.head }}</b>
+              <small v-for="(l, i) in st.upd.status.lines" :key="i">{{ l }}</small>
+            </div>
+          </div>
+        </section>
         <section class="chlog" aria-label="版本更新記錄">
           <b>版本更新記錄</b>
           <p v-if="!(st.log && st.log.length)" class="chlog-none">沒有可顯示的更新記錄。</p>

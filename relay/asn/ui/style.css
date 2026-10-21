@@ -68,7 +68,7 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .search input{flex:1;min-width:0;width:100%;border:1px solid var(--line);border-radius:3px;padding:4px 8px;background:var(--panel)}
 .search-ic{flex:none;width:26px;height:26px;padding:0;border:1px solid var(--line);border-radius:3px;background:linear-gradient(#fdfeff,#e3eef9);color:var(--title-fg);cursor:pointer;display:grid;place-items:center}
 .search-ic:hover{border-color:var(--accent);background:linear-gradient(#f2f9ff,#bfe0fb)}
-.buddy-menu,.launch-picker{position:fixed;z-index:62;margin:0;max-width:min(320px,calc(100vw - 16px))}
+.buddy-menu,.launch-picker,.device-menu{position:fixed;z-index:62;margin:0;max-width:min(320px,calc(100vw - 16px))}
 .launch-picker button.off{color:var(--muted);cursor:default}
 .launch-picker .launch-why{display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:2px;white-space:normal}
 .partner-dlg-back{position:fixed;inset:0;z-index:70;background:rgba(10,24,40,.45);display:flex;align-items:center;justify-content:center;padding:12px}
@@ -446,7 +446,12 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .an-foot{display:flex;align-items:center;gap:8px;padding:6px 10px;flex:none}
 .an-cap{flex:1;min-width:0;padding:4px 8px;border:1px solid var(--line);border-radius:3px;font:inherit}
 /* 設定頁：Claude 帳號 */
-.acct-set{display:flex;flex-direction:column;gap:6px}
+.acct-set{display:flex;flex-direction:column;gap:10px}
+.acct-set .set-card{gap:8px}
+.vendor-h{display:flex;align-items:baseline;gap:8px}
+.vendor-h small{color:var(--muted)}
+.acct-warn{color:#a86f00}
+.acct-add{display:flex;gap:6px}
 .acct-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
 .acct-list li{display:flex;align-items:center;gap:6px}
 .acct-txt{flex:1;min-width:0;display:flex;flex-direction:column}
@@ -454,8 +459,6 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .acct-txt small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .acct-list .aero-btn{white-space:nowrap;font-size:12px;padding:3px 8px}
 .acct-add{display:flex;gap:6px}
-.acct-add input{flex:1;min-width:0;border:1px solid var(--line);border-radius:3px;padding:3px 6px;background:var(--panel);font:inherit}
-.acct-add .aero-btn{white-space:nowrap;font-size:12px;padding:3px 8px}
 .upd-bar{display:flex;gap:6px;align-items:center;padding:4px 8px;background:#fff6d6;border-bottom:1px solid #d9c26a;font-size:12px}
 .upd-bar.failed{background:#fde4e0;border-bottom-color:#d98a80}
 .upd-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -494,9 +497,26 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .win > .pane.panel-win{flex:1}
 .ctab .panel-ic{flex:none;width:14px;height:14px;fill:none;stroke:var(--accent);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 
-/* 設定裡的勾選框：勾選框在左、文字在右，同一行 */
-label.chk{display:flex;flex-direction:row;align-items:center;gap:6px;cursor:pointer}
-label.chk input{margin:0;flex:none}
+/* ---------- 設定表單統一風格（勾選框、下拉、輸入框、按鈕） ----------
+   原本的 `label.chk` 輸給 `.list.settings label`（直排）與 `.settings input`（flex:1＋外框）：兩條的權重都比它高，
+   所以勾選框被撐到右邊、文字掉到下一行。這裡的選擇器都帶 `.settings` 前綴，權重一定贏過那兩條。 */
+.settings select,.settings textarea,.settings input:not([type=checkbox]):not([type=radio]):not([type=file]){
+  border:1px solid var(--line);border-radius:4px;padding:4px 8px;min-height:26px;background:var(--panel);color:var(--fg);font:inherit}
+.settings select:hover,.settings textarea:hover,.settings input:not([type=checkbox]):not([type=radio]):not([type=file]):hover{border-color:#8fb6de}
+.settings select:focus-visible,.settings textarea:focus-visible,.settings input:not([type=checkbox]):not([type=radio]):not([type=file]):focus-visible{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
+.settings select:disabled,.settings input:disabled{opacity:.55}
+.settings .aero-btn{min-height:26px;padding:3px 12px;font-size:12px;white-space:nowrap}
+.list.settings label.chk{display:flex;flex-direction:row;align-items:center;gap:8px;cursor:pointer}
+.list.settings label.chk input[type=checkbox],.settings input[type=checkbox]{flex:none;width:16px;height:16px;margin:0;padding:0;border:0;accent-color:var(--accent);cursor:pointer;background:none}
+.list.settings label.chk span{flex:0 1 auto;min-width:0}
+.set-card{display:flex;flex-direction:column;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:6px;background:var(--panel-soft)}
+.upd-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.upd-status{flex:1;min-width:150px;display:flex;flex-direction:column;gap:1px;font-size:12px;line-height:1.5}
+.upd-status b{font-weight:600}
+.upd-status small{color:var(--muted)}
+.upd-status.tone-ok b{color:#2a7a3a}
+.upd-status.tone-new b{color:#a86f00}
+.upd-status.tone-err b{color:var(--busy)}
 .ad-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none;user-select:none}
 .hero-page{position:absolute;left:0;top:0;width:100%;height:calc(100% - 58px);border:0;background:transparent;pointer-events:none}
 .hero-page-cta{position:absolute;z-index:3;left:64px;bottom:10px;margin:0}

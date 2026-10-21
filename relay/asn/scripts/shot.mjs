@@ -43,10 +43,10 @@ export const demoRooms = [
 
 // me：預先寫進 asn-me.json 的設定（例如 { tabDim: 'engine', groupDim: 'device' }），截圖時用來切換維度
 // avatars：true＝示範大頭貼（本機這台 H 已上傳一張；另有不在名單上的設備 K 也上傳了一張，並寄來一封信）
-export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000, me = null, avatars = false, setup = null } = {}) {
+export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000, me = null, avatars = false, setup = null, acctRemote = {} } = {}) {
   const all = avatars ? [...demoMembers, { id: 'K', name: '小凱的電腦', kind: 'other', agents: [] }] : demoMembers
   const members = all.map(m => (demoAsn[m.id] ? { ...m, asn: demoAsn[m.id] } : m))
-  const relay = await startFakeRelay({ node: 'H', members, rooms: demoRooms, avatars: avatars ? { H: demoUploadUrl(), K: pngDataUrl(96, 96, (x, y) => (((x >> 4) + (y >> 4)) % 2 ? [70, 130, 200] : [250, 210, 90])) } : {} })
+  const relay = await startFakeRelay({ node: 'H', members, rooms: demoRooms, acctRemote, avatars: avatars ? { H: demoUploadUrl(), K: pngDataUrl(96, 96, (x, y) => (((x >> 4) + (y >> 4)) % 2 ? [70, 130, 200] : [250, 210, 90])) } : {} })
   if (avatars) relay.mail(3, { from_node: 'K', from_agent: 'K-ASN', to_node: 'H', to_agent: 'H-ASN', body: '嗨，我是另一台的 ASN 使用者 :)', created_at: new Date(Date.now() - 60_000).toISOString() })
   relay.mail(1, { from_node: 'W', from_agent: 'W-政策', to_node: 'H', to_agent: 'H-ASN', body: '資料補完了，幫我看一下 (Y)\n明天要上線 :)', created_at: new Date(Date.now() - 4 * 60_000).toISOString() })
   // 改名後的舊名：還沒過期，所以 asn.exe 也要用 inbox&agent=H-舊名 收信、對同一個名字 ack、並寫它的心跳

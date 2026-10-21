@@ -9,6 +9,7 @@ import { normalizeRosterAgents } from "../_shared/roster.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
 import * as signal from "../_shared/signal.ts";
 import { handleNodeLaunchAction, LAUNCH_ACTIONS, sanitizeLauncher } from "../_shared/launch.ts";
+import { ACCT_ACTIONS, handleAcctAction } from "../_shared/account_switch.ts";
 import {
   ACTIONS as ATTACH_ACTIONS, bindAttachments, handleAttachAction, prepareAttachments, type StorageDeps, withAttachments,
   withRoomAttachments,
@@ -337,6 +338,14 @@ Deno.serve(async (req) => {
     const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
     const r = await handleNodeLaunchAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params);
+    return json(r.status, r.body);
+  }
+  // 遠端切換 Claude 帳號（ASN 帳號管理，見 _shared/account_switch.ts）：
+  // acct_list／acct_switch／acct_switch_status 只有擁有者節點（SQL 判斷）；acct_report／acct_switch_pending／acct_switch_result 只動金鑰所屬的自己節點。權杖不經過收發室。
+  if (action && ACCT_ACTIONS.has(action)) {
+    const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
+    const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
+    const r = await handleAcctAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params);
     return json(r.status, r.body);
   }
   // 群組：建群組、改置頂、加人、移人對節點金鑰一律 403（見 _shared/rooms.ts）；其餘（列表、讀、發言、讀置頂）限成員

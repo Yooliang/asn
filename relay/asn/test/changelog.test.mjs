@@ -11,6 +11,7 @@ import { renderToString } from 'vue/server-renderer'
 import { addChangelogSection, buildLogView, notesToLines, parseChangelog } from '../ui/lib/changelog.mjs'
 import { changelogFirstSection, resolveNotes } from '../scripts/release-lib.mjs'
 import { SettingsPanel } from '../ui/lib/settings-panel.mjs'
+import { updateStatus } from '../ui/lib/update.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const realLog = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8')
@@ -101,7 +102,7 @@ test('打包：prep.mjs 把 CHANGELOG 轉成 ui/vendor/changelog.json（跟 vend
 test('設定「更新」表單：開關與立即檢查照舊，下面是版本更新記錄（標籤、日期、多行）', async () => {
   globalThis.Vue = Vue
   const st = {
-    autoCheck: true, upd: { checking: false, installing: false, manual: '' },
+    autoCheck: true, upd: { checking: false, installing: false, manual: '', status: updateStatus({}) },
     log: buildLogView({
       entries: parseChangelog('## 0.1.3（2026-10-23）\n- 新甲\n## 0.1.2（2026-10-22）\n- 甲\n- 乙'),
       current: '0.1.2', available: { version: '0.1.3', notes: '- 新甲\n- 新乙' },
@@ -113,6 +114,6 @@ test('設定「更新」表單：開關與立即檢查照舊，下面是版本�
   assert.ok(html.indexOf('立即檢查') < html.indexOf('版本更新記錄'), '記錄在按鈕下面')
   assert.ok(html.indexOf('0.1.3') < html.indexOf('0.1.2'), '新到舊')
   for (const t of ['可更新', '目前版本', '2026-10-22', '新乙', '乙']) assert.ok(html.includes(t), t)
-  const empty = await renderToString(Vue.createSSRApp(SettingsPanel, { st: { autoCheck: true, upd: { manual: '' }, accounts: { savedSeq: 0 } }, catKey: 'update' }))
+  const empty = await renderToString(Vue.createSSRApp(SettingsPanel, { st: { autoCheck: true, upd: { manual: '', status: updateStatus({}) }, accounts: { savedSeq: 0 } }, catKey: 'update' }))
   assert.ok(empty.includes('沒有可顯示的更新記錄'))
 })
