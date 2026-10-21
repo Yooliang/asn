@@ -22,6 +22,8 @@ pub struct Relay {
     presence_off: AtomicBool,
     /// 已經送過離線回報（關閉流程可能走兩次，只送一次，之後迴圈也不再回報）
     presence_closed: AtomicBool,
+    /// 後台在回報回應裡說「本人要這台更新」：記下來等迴圈取走（只取一次，後台也只回一次）
+    update_requested: AtomicBool,
     pub presence_wake: tokio::sync::Notify,
 }
 
@@ -144,7 +146,7 @@ impl Relay {
     pub fn new(base: String, key: String, node: String, window: String) -> Relay {
         Relay {
             client: reqwest::Client::new(), base, key, node, window: Mutex::new(window), old: Mutex::new(vec![]), ack_agent: Mutex::new(HashMap::new()),
-            presence: Mutex::new(("online".into(), String::new())), presence_off: AtomicBool::new(false), presence_closed: AtomicBool::new(false),
+            presence: Mutex::new(("online".into(), String::new())), presence_off: AtomicBool::new(false), presence_closed: AtomicBool::new(false), update_requested: AtomicBool::new(false),
             presence_wake: tokio::sync::Notify::new(),
         }
     }
@@ -161,7 +163,12 @@ impl Relay {
         let (status, psm) = self.presence.lock().unwrap().clone();
         let body = build_presence_body(&self.window_name(), version, &status, &psm);
         match self.api_with("asn_presence", Some(body), timeout).await {
-            Ok(_) => true,
+            Ok(v) => {
+                if v.get("update_requested").and_then(Value::as_bool) == Some(true) {
+                    self.update_requested.store(true, Ordering::SeqCst);
+                }
+                true
+            }
             Err(e) if set_name_unsupported(&e) => {
                 self.presence_off.store(true, Ordering::Relaxed);
                 false
@@ -170,6 +177,17 @@ impl Relay {
                 eprintln!("asn_presence failed: {e}");
                 true
             }
+        }
+    }
+    /// 取走「要求更新」的旗標（有就回 true，並清掉，不會重複觸發）
+    pub fn take_update_request(&self) -> bool {
+        self.update_requested.swap(false, Ordering::SeqCst)
+    }
+    /// 遠端更新的結果：ok＝不用更新（已是最新版）；失敗帶原因（後台只留前 200 字）。失敗只記 log
+    pub async fn report_update_result(&self, ok: bool, detail: &str) {
+        let body = json!({ "ok": ok, "detail": detail.chars().filter(|c| !c.is_control()).take(200).collect::<String>() });
+        if let Err(e) = self.api_with("asn_update_result", Some(body), Duration::from_secs(10)).await {
+            eprintln!("asn_update_result failed: {e}");
         }
     }
     /// 關閉時盡力回報一次離線（失敗、逾時都不擋關閉）；只送一次。在獨立執行緒裡跑，不論從哪個執行緒呼叫都安全。
@@ -370,6 +388,9 @@ mod tests {
 
     /// 本機假後端：每個連線回一個固定狀態碼，並記下請求（只連 127.0.0.1）
     fn fake_server(code: u16) -> (String, std::sync::Arc<Mutex<Vec<String>>>) {
+        fake_server_with(code, r#"{"ok":true}"#)
+    }
+    fn fake_server_with(code: u16, ok_body: &'static str) -> (String, std::sync::Arc<Mutex<Vec<String>>>) {
         use std::io::{Read, Write};
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://127.0.0.1:{}/relay", l.local_addr().unwrap().port());
@@ -381,7 +402,7 @@ mod tests {
                 let mut buf = vec![0u8; 8192];
                 let n = c.read(&mut buf).unwrap_or(0);
                 s2.lock().unwrap().push(String::from_utf8_lossy(&buf[..n]).to_string());
-                let body = if code == 200 { r#"{"ok":true}"# } else { r#"{"error":"not_found"}"# };
+                let body = if code == 200 { ok_body } else { r#"{"error":"not_found"}"# };
                 let _ = write!(c, "HTTP/1.1 {code} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len());
             }
         });
@@ -421,6 +442,26 @@ mod tests {
         assert!(s[1].contains(r#""status":"offline""#));
         drop(s);
         assert!(!r.report_presence("0.1.13", Duration::from_secs(5)).await, "送過離線後迴圈不再回報");
+    }
+
+    #[tokio::test]
+    async fn 遠端更新_回應帶旗標才記下_只取一次_結果帶金鑰標頭() {
+        let (url, _seen) = fake_server(200);
+        let r = Relay::new(url, "k".into(), "H".into(), "H-ASN".into());
+        assert!(r.report_presence("0.1.13", Duration::from_secs(5)).await);
+        assert!(!r.take_update_request(), "回應沒旗標就不更新");
+        let (url, _seen) = fake_server_with(200, r#"{"ok":true,"update_requested":true}"#);
+        let r = Relay::new(url, "secret-key".into(), "H".into(), "H-ASN".into());
+        assert!(r.report_presence("0.1.13", Duration::from_secs(5)).await);
+        assert!(r.take_update_request());
+        assert!(!r.take_update_request(), "旗標只取一次，不會重複啟動更新");
+        let (url, seen) = fake_server(200);
+        let r = Relay::new(url, "secret-key".into(), "H".into(), "H-ASN".into());
+        r.report_update_result(false, "下載失敗\n請重試").await;
+        let s = seen.lock().unwrap();
+        assert!(s[0].starts_with("POST /relay?action=asn_update_result"));
+        assert!(s[0].to_lowercase().contains("x-relay-key: secret-key"));
+        assert!(s[0].contains(r#""ok":false"#) && s[0].contains("下載失敗") && !s[0].contains("\\n"));
     }
 
     fn send_payload() -> Value {

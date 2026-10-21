@@ -5,7 +5,7 @@ use crate::App;
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 /// 檢查到的新版（等使用者按「更新」才下載）與是否正在安裝
@@ -53,12 +53,40 @@ pub async fn update_install(app: AppHandle, st: State<'_, App>, pending: State<'
     }
     let update = pending.update.lock().unwrap().clone().ok_or("沒有可安裝的新版，請先檢查更新")?;
     if pending.busy.swap(true, Ordering::SeqCst) {
-        return Err("正在更新中".into());
+        return Err(BUSY_TEXT.into());
     }
     let r = run_install(&app, &update).await;
     pending.busy.store(false, Ordering::SeqCst);
     r
 }
+
+/// 遠端更新（名單上本人按「更新」，由後台旗標觸發）的結果
+#[derive(Debug, PartialEq)]
+pub enum Remote {
+    /// 已是最新版，沒有東西要裝
+    Latest,
+    /// 這台正在更新中（使用者自己按了更新）：不重複啟動，也不回報
+    Busy,
+    /// 下載、驗簽、安裝都完成（Windows 安裝程式會接手重開，通常不會回到這裡）
+    Installed,
+}
+
+/// 遠端更新走跟設定頁「更新」同一條路：檢查 → 下載 → 驗簽 → 安裝 → 重開。不經 AI、不經前端。
+pub async fn run_remote(app: &AppHandle) -> Result<Remote, String> {
+    if app.state::<Pending>().busy.load(Ordering::SeqCst) {
+        return Ok(Remote::Busy);
+    }
+    if update_check(app.clone(), app.state::<App>(), app.state::<Pending>()).await?.is_none() {
+        return Ok(Remote::Latest);
+    }
+    match update_install(app.clone(), app.state::<App>(), app.state::<Pending>()).await {
+        Ok(()) => Ok(Remote::Installed),
+        Err(e) if e == BUSY_TEXT => Ok(Remote::Busy),
+        Err(e) => Err(e),
+    }
+}
+
+const BUSY_TEXT: &str = "正在更新中";
 
 async fn run_install(app: &AppHandle, update: &Update) -> Result<(), String> {
     let mut done: u64 = 0;

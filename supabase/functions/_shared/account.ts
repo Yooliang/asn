@@ -4,7 +4,7 @@
 // 所有資料庫存取經 SECURITY DEFINER 函式（只授權 service_role）。見 docs/AUTH.md。
 import { parseSelfName } from "./node_name.ts";
 
-export const ACCOUNT_ACTIONS = new Set(["account_bootstrap", "node_create", "node_claim"]);
+export const ACCOUNT_ACTIONS = new Set(["account_bootstrap", "node_create", "node_claim", "node_update_request", "node_update_status"]);
 
 export interface AuthUser {
   id: string;
@@ -67,6 +67,9 @@ const ERR_STATUS: Record<string, number> = {
   tenant_inactive: 403,
   too_many: 429,
   bad_request: 400,
+  not_found: 404,
+  asn_offline: 409,
+  rate_limited: 429,
 };
 
 function mapError(code: string): Reply {
@@ -125,6 +128,23 @@ export async function handleAccountAction(
     const d = data as Record<string, unknown>;
     if (typeof d?.error === "string") return mapError(d.error);
     return { status: 200, body: { id: d.id, key, bell_topic: d.bell_topic, rotated: d.rotated === true } };
+  }
+
+  // 遠端更新（見 supabase/migrations/20261021070000_asn_remote_update.sql）：只有自己帳號名下的節點；對別人的節點一律 not_found
+  if (action === "node_update_request") {
+    const node = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>).node : null;
+    if (typeof node !== "string" || !/^[A-Za-z0-9_-]{1,32}$/.test(node)) return { status: 400, body: { error: "bad_request" } };
+    const { data, error } = await deps.rpc("asn_update_request", { p_user: user.id, p_node: node });
+    if (error) { console.error("node_update_request", error); return { status: 500, body: { error: "internal" } }; }
+    const d = data as Record<string, unknown>;
+    if (typeof d?.error === "string") return mapError(d.error);
+    return { status: 200, body: { ok: true, already: d?.already === true, state: d?.state } };
+  }
+
+  if (action === "node_update_status") {
+    const { data, error } = await deps.rpc("asn_update_status", { p_user: user.id });
+    if (error) { console.error("node_update_status", error); return { status: 500, body: { error: "internal" } }; }
+    return { status: 200, body: { nodes: Array.isArray(data) ? data : [] } };
   }
 
   return { status: 404, body: { error: "not_found" } };

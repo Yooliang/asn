@@ -151,6 +151,8 @@ node scripts/mem.mjs             # 量閒置記憶體
 
 ASN 用 Tauri 官方 updater：啟動時與每 6 小時檢查 `https://asnmessenger.web.app/update/latest.json`；有新版就在名單上方顯示「有新版本 x.y.z：<說明第一行>　[更新]」，**按了才**下載、驗簽、安裝並重開（不強制）。設定頁可關「自動檢查更新」（存在 `asn-me.json` 的 `autoUpdate`，預設開），也有「立即檢查」。`--shot` 模式不檢查。只接受用更新私鑰簽過的安裝檔（公鑰寫在 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`）。
 
+**遠端更新**：名單上別台設備顯示「有新版」時，已登入的本人（該設備在同一個帳號下）可按旁邊的「更新」。流程：本人用登入憑證呼叫後台 `node_update_request`（只認 `relay.nodes.owner_user` 等於本人的節點，別人的設備一律 `not_found`；對方 ASN 要在線）→ 後台在 `relay.asn_update_requests` 留一筆請求 → 那台 ASN 回報在線（`asn_presence`，每 60 秒）的回應帶 `update_requested: true`（只回一次）→ 它在 Rust 端用同一個內建更新器（檢查 → 下載 → 驗簽 → 安裝 → 重開，`updater::run_remote`）自己更新，正在更新中就不重複啟動 → 已是最新版或失敗用 `asn_update_result` 回報；更新成功則重開後回報的版本變了，請求自動清掉。請求 30 分鐘沒完成就過期。名單上依序顯示「已送出更新要求」→「更新中…」→ 版本變新後標記消失；失敗顯示「更新失敗，重試」。全程不經 AI。需要 migration `20261021070000_asn_remote_update.sql` 與重新部署 relay 函式；後台還沒部署時 `node_update_status` 會失敗，名單就不顯示「更新」鈕。
+
 ### 發一版
 
 ```
