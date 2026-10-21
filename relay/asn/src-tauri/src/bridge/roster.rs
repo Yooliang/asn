@@ -2,6 +2,7 @@
 //! 對應 engines/claude.mjs 的 listWindows：只留互動式（kind=interactive）、entrypoint=cli、pid 還活著的視窗，
 //! 排除收發室 worker 自己。回報格式照 bridge.mjs 的 roster：`{agents:[{name,status,cwd_label,engine}], launcher}`。
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -12,6 +13,8 @@ pub struct Window {
     pub pid: u32,
     /// 最後活動時間（毫秒），預設收件視窗不在線時挑最近活動的
     pub updated_at: u64,
+    /// Claude 的 session 編號（session 檔的 sessionId）；夥伴 ID 用它判斷「同一位夥伴換名或換 session」（#109）
+    pub session_id: Option<String>,
 }
 
 impl Window {
@@ -48,6 +51,7 @@ fn parse_session(v: &Value) -> Option<Window> {
         cwd: v.get("cwd").and_then(Value::as_str).unwrap_or("").to_string(),
         pid,
         updated_at: v.get("updatedAt").and_then(Value::as_u64).unwrap_or(0),
+        session_id: v.get("sessionId").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(String::from),
     })
 }
 
@@ -88,6 +92,45 @@ pub fn roster_body(windows: &[Window], asn_window: Option<&str>, launcher: Value
     json!({ "agents": agents, "launcher": launcher })
 }
 
+/// partner_sync 的請求內容（#109）：每個視窗的名字、session 編號（沒有就不送）、引擎。節點由後端依金鑰決定，這裡不送。
+/// ASN 自己的視窗也列進去（引擎 asn、沒有 session），和 roster 一樣與同名的 Claude 視窗不重複。
+pub fn partner_body(windows: &[Window], asn_window: Option<&str>) -> Value {
+    let mut ws: Vec<Value> = windows
+        .iter()
+        .map(|w| {
+            let mut o = json!({ "name": w.name, "engine": "claude" });
+            if let Some(s) = &w.session_id {
+                o["session_id"] = json!(s);
+            }
+            o
+        })
+        .collect();
+    if let Some(n) = asn_window {
+        if !windows.iter().any(|w| w.name == n) {
+            ws.push(json!({ "name": n, "engine": "asn" }));
+        }
+    }
+    json!({ "windows": ws })
+}
+
+/// 夥伴 ID 的格式（與後端 partners_id_check 同）：p_ 加 20 個小寫十六進位字元
+pub fn valid_partner_id(s: &str) -> bool {
+    s.len() == 22 && s.starts_with("p_") && s[2..].bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// partner_sync 的回應 `{ok, partners:[{name, partner_id}]}` → 視窗名對夥伴 ID；格式不對的項目略過
+pub fn parse_partners(resp: &Value) -> BTreeMap<String, String> {
+    let mut m = BTreeMap::new();
+    for p in resp.get("partners").and_then(Value::as_array).into_iter().flatten() {
+        if let (Some(n), Some(id)) = (p.get("name").and_then(Value::as_str), p.get("partner_id").and_then(Value::as_str)) {
+            if !n.is_empty() && valid_partner_id(id) {
+                m.insert(n.to_string(), id.to_string());
+            }
+        }
+    }
+    m
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,6 +163,52 @@ mod tests {
     }
 
     #[test]
+    fn 讀得到_session_編號_沒有或空白就是_none() {
+        let d = tempfile::tempdir().unwrap();
+        put(d.path(), 201, json!({"pid":201,"name":"T-有","entrypoint":"cli","sessionId":" 11111111-aaaa "}));
+        put(d.path(), 202, json!({"pid":202,"name":"T-無","entrypoint":"cli"}));
+        put(d.path(), 203, json!({"pid":203,"name":"T-空","entrypoint":"cli","sessionId":"  "}));
+        let ws = read_sessions(d.path(), |_| true, 0, "x").unwrap();
+        let by = |n: &str| ws.iter().find(|w| w.name == n).unwrap().session_id.clone();
+        assert_eq!(by("T-有").as_deref(), Some("11111111-aaaa"));
+        assert_eq!(by("T-無"), None);
+        assert_eq!(by("T-空"), None);
+    }
+
+    #[test]
+    fn 夥伴同步的請求內容_名字_session_引擎_不含節點_asn_視窗不重複() {
+        let a = Window { name: "T-甲".into(), status: None, cwd: "".into(), pid: 1, updated_at: 0, session_id: Some("sess-0001-aaaa".into()) };
+        let b = Window { name: "T-乙".into(), status: None, cwd: "".into(), pid: 2, updated_at: 0, session_id: None };
+        let body = partner_body(&[a.clone(), b.clone()], Some("T-ASN"));
+        assert_eq!(body, json!({"windows": [
+            {"name":"T-甲","engine":"claude","session_id":"sess-0001-aaaa"},
+            {"name":"T-乙","engine":"claude"},
+            {"name":"T-ASN","engine":"asn"},
+        ]}));
+        assert!(body.get("node").is_none());
+        assert_eq!(partner_body(&[a, b], Some("T-乙"))["windows"].as_array().unwrap().len(), 2);
+        assert_eq!(partner_body(&[], None), json!({"windows": []}));
+    }
+
+    #[test]
+    fn 夥伴同步的回應_只收格式正確的夥伴_id() {
+        let ok = format!("p_{}", "0123456789abcdef0123");
+        let r = json!({"ok": true, "partners": [
+            {"name":"T-甲","partner_id": ok},
+            {"name":"T-壞1","partner_id":"p_XYZ"},
+            {"name":"T-壞2","partner_id":"q_0123456789abcdef0123"},
+            {"name":"","partner_id": ok},
+            {"partner_id": ok},
+            "x",
+        ]});
+        let m = parse_partners(&r);
+        assert_eq!(m.len(), 1);
+        assert_eq!(m.get("T-甲").map(String::as_str), Some(ok.as_str()));
+        assert!(parse_partners(&json!({"ok": true})).is_empty());
+        assert!(valid_partner_id(&ok) && !valid_partner_id("p_0123456789ABCDEF0123") && !valid_partner_id("p_0123"));
+    }
+
+    #[test]
     fn 資料夾不存在是空名單_讀不了才是_none() {
         let d = tempfile::tempdir().unwrap();
         assert_eq!(read_sessions(&d.path().join("none"), |_| true, 0, "x"), Some(vec![]));
@@ -131,7 +220,7 @@ mod tests {
 
     #[test]
     fn 回報內容格式_含_asn_視窗名_launcher_摘要或_null() {
-        let w = Window { name: "T-甲".into(), status: Some("idle".into()), cwd: "D:\\a\\b".into(), pid: 1, updated_at: 0 };
+        let w = Window { name: "T-甲".into(), status: Some("idle".into()), cwd: "D:\\a\\b".into(), pid: 1, updated_at: 0, session_id: None };
         let b = roster_body(&[w.clone()], Some("T-ASN"), Value::Null);
         assert_eq!(b["launcher"], Value::Null);
         assert_eq!(roster_body(&[w.clone()], None, json!({"profiles": []}))["launcher"], json!({"profiles": []}));
@@ -139,7 +228,7 @@ mod tests {
         assert_eq!(b["agents"][1], json!({"name":"T-ASN","status":"idle","cwd_label":"","engine":"asn"}));
         // 不給 ASN 視窗名就只有 Claude 視窗；與視窗同名不重複列
         assert_eq!(roster_body(&[w], None, Value::Null)["agents"].as_array().unwrap().len(), 1);
-        let w2 = Window { name: "T-ASN".into(), status: None, cwd: "".into(), pid: 2, updated_at: 0 };
+        let w2 = Window { name: "T-ASN".into(), status: None, cwd: "".into(), pid: 2, updated_at: 0, session_id: None };
         assert_eq!(roster_body(&[w2], Some("T-ASN"), Value::Null)["agents"].as_array().unwrap().len(), 1);
         assert!(is_busy_status(Some("Working")) && !is_busy_status(Some("idle")) && !is_busy_status(None));
     }

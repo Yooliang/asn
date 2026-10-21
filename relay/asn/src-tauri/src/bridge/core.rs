@@ -177,6 +177,11 @@ pub struct Core {
     cursor_warned: bool,
     launcher: Option<Arc<Launcher>>,
     corr: CorrLog,
+    /// 視窗名 → 夥伴 ID（#109；每次回報名單時向後端對一次，只放記憶體）
+    partners: BTreeMap<String, String>,
+    /// 後台還沒支援夥伴 ID（404／400）：靜默停止，直到下次啟動
+    partner_off: bool,
+    partner_warned: bool,
 }
 
 /// JSON 數字（整數、浮點或數字字串）→ u64；不是數字回 0
@@ -211,6 +216,7 @@ impl Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
             last_requester: BTreeMap::new(), noticed: HashMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), unrouted: HashSet::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, cursor_warned: false, launcher: None, corr,
+            partners: BTreeMap::new(), partner_off: false, partner_warned: false,
         };
         c.restore();
         c
@@ -363,6 +369,37 @@ impl Core {
                 }
             }
         }
+        self.sync_partners(asn.as_deref()).await;
+    }
+
+    /// 夥伴 ID（#109）：把名字與 session 交給後台判斷是哪位夥伴，回來的 ID 只存記憶體，並讓往來記錄檔頭帶上。
+    /// 後台沒有這個動作（404／400）就靜默停用、一切照舊；其他失敗只記一次 log，下一輪再試。
+    async fn sync_partners(&mut self, asn: Option<&str>) {
+        if self.partner_off {
+            return;
+        }
+        match self.relay.api("partner_sync", Some(roster::partner_body(&self.roster, asn))).await {
+            Ok(v) => {
+                self.partner_warned = false;
+                self.partners = roster::parse_partners(&v);
+                self.corr.set_partners(self.partners.clone());
+            }
+            Err(e) if crate::relay::set_name_unsupported(&e) => {
+                self.partner_off = true;
+                self.log.line("partner_sync not supported by backend (carrying on without partner ids)");
+            }
+            Err(e) => {
+                if !self.partner_warned {
+                    self.log.line(&format!("partner_sync failed: {e} (will keep trying quietly)"));
+                    self.partner_warned = true;
+                }
+            }
+        }
+    }
+
+    /// 目前視窗名對應的夥伴 ID（後台還沒回、或不支援就是 None）
+    pub fn partner_id(&self, name: &str) -> Option<&str> {
+        self.partners.get(name).map(String::as_str)
     }
 
     // ---- 收信 ----
