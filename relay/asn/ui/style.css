@@ -488,3 +488,7 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .panel-h{margin:0 0 12px;font-size:16px;color:var(--title-fg)}
 .win > .pane.panel-win{flex:1}
 .ctab .panel-ic{flex:none;width:14px;height:14px;fill:none;stroke:var(--accent);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+/* 設定裡的勾選框：勾選框在左、文字在右，同一行 */
+label.chk{display:flex;flex-direction:row;align-items:center;gap:6px;cursor:pointer}
+label.chk input{margin:0;flex:none}
