@@ -363,11 +363,7 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
   background:linear-gradient(90deg,#6fb6f0 0 49%,#1f5d9e 49% 51%,#e8f3fd 51%);border:1px solid #1f5d9e;box-shadow:0 1px 1px rgba(0,30,80,.25)}
 .guide-ic.sm{width:14px;height:14px}
 .guide-item{width:100%;text-align:left}
-.guide-item.on{background:#e6f1fc}
 .guide-list{padding:6px 0}
-.guide-doc{display:flex;flex-direction:column;gap:6px;padding:0 8px 8px}
-.guide-back{align-self:flex-start;font-size:12px;padding:3px 8px}
-.guide-pane{overflow-y:auto;padding:14px 20px 24px}
 .guide-article{user-select:text;-webkit-user-select:text;line-height:1.6}
 .guide-article h2{margin:0 0 8px;font-size:18px;color:var(--title-fg)}
 .guide-article h3{margin:14px 0 4px;font-size:13px;color:var(--accent)}
@@ -454,3 +450,16 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .upd-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .upd-btn{flex:none}
 .settings .upd-set{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+
+/* 共用對話框（設定分類、指引內容）：position:fixed 蓋在最上層，不放進 overflow:hidden 的容器；內容區自己捲動 */
+.dlg-back{position:fixed;inset:0;z-index:75;background:rgba(10,24,40,.45);display:flex;align-items:center;justify-content:center;padding:12px}
+.dlg{width:min(520px,100%);max-height:100%;display:flex;flex-direction:column;border:1px solid #7a9ec4;border-radius:6px;background:var(--panel);color:var(--fg);box-shadow:0 8px 28px rgba(0,30,70,.35);overflow:hidden;outline:0}
+.dlg-head{flex:none;display:flex;align-items:center;gap:8px;padding:6px 6px 6px 12px;border-bottom:1px solid var(--line);background:linear-gradient(var(--panel-soft),var(--panel-head))}
+.dlg-head h3{flex:1;min-width:0;margin:0;font-size:14px;color:var(--title-fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dlg-x{flex:none;width:26px;height:22px;border:1px solid transparent;border-radius:3px;background:none;color:var(--title-fg);cursor:pointer;font-size:13px;line-height:1}
+.dlg-x:hover{border-color:#d9726a;background:var(--close);color:#fff}
+.dlg-body{flex:1;min-height:0;overflow-y:auto;padding:10px 14px 14px}
+.dlg-body > .guide-article{padding:0}
+.dlg-body .list.settings{flex:none;overflow:visible;padding:0;background:none}
+.cat-ic{flex:none;width:22px;height:22px;fill:none;stroke:var(--accent);stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.cat-list{padding:6px 0}

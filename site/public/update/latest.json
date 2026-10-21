@@ -1,11 +1,11 @@
 {
-  "version": "0.1.9",
-  "notes": "加入自動更新：之後有新版會在名單上方提示，按一下就更新。",
-  "pub_date": "2026-10-21T03:40:48.416Z",
+  "version": "0.1.10",
+  "notes": "設定頁改成分類列表，點了開對話框；指引也改成對話框。",
+  "pub_date": "2026-10-21T04:33:01.289Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybi9uaW1uYVhRVVk5TDBWeEtSQXJFNkZwcEdYK3pEZ1drSytROVlXdW9EOEFTOXgxc0JKMERSeVp4VTBQWUdjaGVUR0dDNWs1a21JSzRwWkFKUmo1T3dFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNTU0MDQ4CWZpbGU6QVNOXzAuMS45X3g2NC1zZXR1cC5leGUJdmVyc2lvbjowLjEuOQowaUNTTXlORGhUdG94NFRJbzgzbHRhMWxVa29Fai9PU0FUeVNzbmFCanIveU9rYjNpQmtad2g4MnViMUtrOHJEeVNURVJFL3NVS3QzMS9EU0lmWXhBQT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.9_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjV0SkU5NmQ2bzM5NHkrOVVBWjFCWWIrUUZTOUtEVU5DVjFyR2pINlAwZ1JqUmxDVlYwT3FVNGFYWjQ3eE5NSWxyeFh3ajlpd3R2T01PeDJ2WUdOMlFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNTU3MTgwCWZpbGU6QVNOXzAuMS4xMF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjEwCktYZy85ZHJYRDRRSkxBdWcrbnRhYW9ibTVZaDlCR1ljZ1BnRHNJVkROR2ZpUkhYNWxMZHBqL2lFRm12OGJlcEovUCthUzRSZDlyYzJYRi96Rkk0MEFnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.10_x64-setup.exe"
     }
   }
 }

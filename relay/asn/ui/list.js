@@ -3,7 +3,9 @@
 import { blockContextMenu } from './lib/nomenu.mjs'
 import { AsnCore } from './lib/core.mjs'
 import { ADS, AD_MS, FIXED_TABS, goAd, groupHeading, groupRows, moreUnread, nextAd, normalizeTab, openAdWith, prevAd, statusNote } from './lib/tabs.mjs'
-import { GUIDES, closeGuide, guideByKey, hideGuide, numbered, openGuide, rightView } from './lib/guides.mjs'
+import { GUIDES, guideByKey, numbered } from './lib/guides.mjs'
+import { AsnDialog } from './lib/dialog.mjs'
+import { SETTING_CATS, catByKey, catSummary } from './lib/settings-cats.mjs'
 import { DIMS, groupOptions, loadDims, pageTabs, withTabDim } from './lib/dims.mjs'
 import { normalizeSearchQuery, rosterShownGroups } from './lib/search.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
@@ -113,7 +115,7 @@ const dims = reactive(loadDims(savedMe))   // 分頁依（設備／廠商／狀�
 // 視窗模式：分開（每位好友一扇對話視窗）／整合（一個視窗，右邊是對話分頁）。tabs／active 只在整合模式用，不存檔
 // 視窗模式、頭像模式（左／右／整合）、文字底色（透明／色彩／自動）三個設定彼此獨立，分離與整合視窗都有效
 const pinnedChat = normalizePinned(savedMe.pinnedChat)
-const ui = reactive({ mode: normalizeMode(savedMe.winMode), ...normalizeLook(savedMe), tabs: [], active: '', pinnedChat, guide: '', showGuide: false })
+const ui = reactive({ mode: normalizeMode(savedMe.winMode), ...normalizeLook(savedMe), tabs: [], active: '', pinnedChat })
 const sizes = reactive({ split: normalizeSize(savedMe.splitSize, 'split'), merged: normalizeSize(savedMe.mergedSize, 'merged') })
 const winSize = () => ({ w: window.innerWidth, h: window.innerHeight })
 let switching = false
@@ -376,7 +378,7 @@ async function openChat(id) {
   const f = core.friends.get(id); if (!f) return
   core.markRead(id)
   if (ui.mode === 'merged') {   // 整合模式：在右邊開分頁（或切過去），不開新視窗
-    Object.assign(ui, openChatTab(ui, id, ui.pinnedChat), hideGuide(ui))
+    Object.assign(ui, openChatTab(ui, id, ui.pinnedChat))
     pushLog(id)
     await invoke('show_main')
     sync()
@@ -398,7 +400,7 @@ await listen('asn:cmd', async c => {
 const sendTo = async (id, text) => { const r = await core.send(id, text); if (!r.ok) console.info('[ASN] send failed', r.error) }
 const nudgeTo = id => core.nudge(id)
 const sendAttachTo = async (id, item, caption) => { const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
-const activateTab = id => { ui.active = id; Object.assign(ui, hideGuide(ui)); core.markRead(id); sync() }
+const activateTab = id => { ui.active = id; core.markRead(id); sync() }
 const closeOneChatTab = id => { Object.assign(ui, closeChatTab(ui, id)); if (ui.active) core.markRead(ui.active); sync() }
 const applyChatTabClose = patch => { Object.assign(ui, patch); if (ui.active) core.markRead(ui.active); sync() }
 const toggleDp = () => { ui.collapsed = toggleCollapsed(ui.collapsed) }
@@ -414,7 +416,6 @@ async function setMode(to) {
     const closed = from === 'split' ? await invoke('close_chats') : []
     const plan = switchMode(from, to, { tabs: ui.tabs, active: ui.active, windowIds: closed })
     ui.mode = to
-    ui.showGuide = false
     ui.tabs = orderTabs(plan.tabs, ui.pinnedChat); ui.active = plan.active
     await invoke('main_layout', { merged: to === 'merged', w: sizes[to].w, h: sizes[to].h, recenter: false })
     if (ui.active) core.markRead(ui.active)
@@ -512,12 +513,21 @@ const app = createApp({
       autostart.busy = true
       try { await invoke('autostart_set', { on }); autostart.on = on } catch (e) { say(String(e?.message ?? e)); autostart.on = await invoke('autostart_get').catch(() => autostart.on) } finally { autostart.busy = false }
     }
-    // 指引：分離模式顯示在名單內容區，整合模式是右邊的一個分頁（純邏輯在 guides.mjs）
-    const openedGuide = computed(() => guideByKey(ui.guide))
-    const view = computed(() => rightView({ tabs: ui.tabs, guide: ui.guide, showGuide: ui.showGuide }))
-    const openGuideKey = key => Object.assign(ui, openGuide(ui, key, ui.mode))
-    const closeGuideView = () => Object.assign(ui, closeGuide())
-    const showHome = () => Object.assign(ui, hideGuide(ui))
+    // 設定分類與指引都在共用對話框（dialog.mjs）裡顯示，分離與整合模式相同；整合模式右邊只剩對話與「開始」
+    const dlg = reactive({ kind: '', key: '' })
+    const openSettingDlg = key => { if (catByKey(key)) { dlg.kind = 'setting'; dlg.key = key } }
+    const openGuideDlg = key => { if (guideByKey(key)) { dlg.kind = 'guide'; dlg.key = key } }
+    const closeDlg = () => { dlg.kind = ''; dlg.key = '' }
+    const dlgGuide = computed(() => (dlg.kind === 'guide' ? guideByKey(dlg.key) : null))
+    const dlgTitle = computed(() => (dlg.kind === 'guide' ? dlgGuide.value?.title : catByKey(dlg.key)?.title) ?? '')
+    const catSub = key => catSummary(key, {
+      hasUpload: selfHasUpload.value, accountCount: accounts.state.list.length, accountCurrent: accounts.state.list.find(a => a.current)?.name ?? '',
+      frame: frame.value, mode: ui.mode, dpMode: ui.dpMode, toolbar: ui.toolbar, bubble: ui.bubble, tabDim: dims.tabDim, groupDim: dims.groupDim,
+      soundOn: soundOn.value, voiceEnabled: ttsVoices.value.enabled, ttsAuto: voiceCfg.tts_auto, sttLang: voiceCfg.stt_lang,
+      closeTo: closeTo.value, trayOk: trayOk.value, autostartSupported: autostart.supported, autostartOn: autostart.on,
+      maxPerHour: launchPrefs.maxPerHour, cwdCount: launchCwdText.value.split('\n').filter(x => x.trim()).length, autoCheck: autoCheck.value, version: info.version,
+    })
+    const view = computed(() => (ui.tabs.length ? 'chat' : 'home'))
     const mergedTabs = computed(() => ui.tabs.map(id => friends.value.find(f => f.id === id)).filter(Boolean))
     const chatTabMenu = ref('')
     const chatTabMenuPin = computed(() => (chatTabMenu.value ? isPinned(chatTabMenu.value, ui.pinnedChat) : false))
@@ -614,7 +624,7 @@ const app = createApp({
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
       STATUS, CONN_LABEL, FIXED_TABS, ADS, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, soundOn, friends, conn, shown, query, collapsed, nickErr, commitNick,
       tab, adI, rooms, roomsErr, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote,
-      GUIDES, openedGuide, view, openGuideKey, closeGuideView, showHome,
+      GUIDES, view, dlg, dlgGuide, dlgTitle, openSettingDlg, openGuideDlg, closeDlg, SETTING_CATS, catSub,
       selfNode: info.node, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg,
       searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickLaunchDevice,
       DISPLAY_MODES, partnerShowDisplay,
@@ -626,6 +636,7 @@ const app = createApp({
   },
 })
 app.component('chat-pane', ChatPane)
+app.component('asn-dialog', AsnDialog)
 // 一篇指引的顯示：全部用文字插值（不用 v-html），步驟自動編號
 app.component('guide-doc', {
   props: { guide: { type: Object, required: true } },
@@ -639,7 +650,7 @@ app.component('guide-doc', {
       <p v-else class="g-note">{{ b.t }}</p>
     </template></article>`,
 })
-app.mount('#app')
+const root = app.mount('#app')
 
 await core.start()
 sync()
@@ -685,10 +696,10 @@ if (info.shot) {
   for (const [name, key] of [['local', p[0]?.key], ['device', p[1]?.key], ['last', p.at(-1)?.key], ['groups', 'groups'], ['guide', 'guide'], ['guide-doc', 'guide'], ['settings', 'settings']]) {
     if (!key) continue
     shotTab.value = key
-    if (name === 'guide-doc') Object.assign(ui, openGuide(ui, 'bridge', ui.mode))
+    if (name === 'guide-doc') root.openGuideDlg('bridge')
     await sleep(500)
     await invoke('take_shot', { tab: name })
-    if (name === 'guide-doc') Object.assign(ui, closeGuide())
+    if (name === 'guide-doc') root.closeDlg()
   }
   }
   await core.stop()

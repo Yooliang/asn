@@ -186,13 +186,32 @@ fn open_in_file_manager(path: &Path) -> Result<(), String> {
     }
 }
 
-/// 用檔案管理員開啟本機 machine 資料夾（內含 bridge.log）。
-#[tauri::command]
-fn open_machine_log_dir(app: State<'_, App>) -> Result<(), String> {
-    let dir = app.work_dir.clone();
-    if !dir.starts_with(identity::relay_home()) {
+/// 唯一允許用檔案管理員開啟的 machine 記錄目錄；路徑只來自 Rust 端 work_dir，不接受前端傳入。
+pub fn machine_log_dir_for(work_dir: &Path, relay_home: &Path) -> Result<PathBuf, String> {
+    if !work_dir.starts_with(relay_home) {
         return Err("記錄資料夾路徑異常".into());
     }
+    let leaf = work_dir
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| "記錄資料夾路徑異常".to_string())?;
+    let node = leaf
+        .strip_prefix("machine-")
+        .ok_or_else(|| "記錄資料夾路徑異常".to_string())?;
+    if !identity::valid_id(node) {
+        return Err("節點格式不對".into());
+    }
+    Ok(work_dir.to_path_buf())
+}
+
+pub fn machine_log_dir(work_dir: &Path) -> Result<PathBuf, String> {
+    machine_log_dir_for(work_dir, &identity::relay_home())
+}
+
+/// 用檔案管理員開啟本機 machine 資料夾（內含 bridge.log）；不接受任何路徑參數。
+#[tauri::command]
+fn open_machine_log_dir(app: State<'_, App>) -> Result<(), String> {
+    let dir = machine_log_dir(&app.work_dir)?;
     open_in_file_manager(&dir)
 }
 
@@ -537,5 +556,18 @@ mod tests {
         assert_eq!(read_settings_name(d.path()), None);
         write_atomic(&d.path().join("settings.json"), "{壞掉").unwrap();
         assert_eq!(read_settings_name(d.path()), None);
+    }
+
+    #[test]
+    fn machine_log_dir_只准_relay_home_底下的_machine_節點() {
+        let root = tempfile::tempdir().unwrap();
+        let relay = root.path().join("relay-home");
+        std::fs::create_dir_all(relay.join("machine-H")).unwrap();
+        let ok = relay.join("machine-H");
+        assert_eq!(machine_log_dir_for(&ok, &relay).unwrap(), ok);
+        assert!(machine_log_dir_for(root.path().join("etc/passwd").as_path(), &relay).is_err());
+        assert!(machine_log_dir_for(&relay.join("machine-../etc"), &relay).is_err());
+        assert!(machine_log_dir_for(&relay.join("machine-bad!"), &relay).is_err());
+        assert!(machine_log_dir_for(&relay.join("other-H"), &relay).is_err());
     }
 }
