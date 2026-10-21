@@ -125,7 +125,32 @@ async fn relay_launchers(app: State<'_, App>, ids: Option<Vec<String>>) -> Resul
 
 #[tauri::command]
 async fn partner_launch_local(app: State<'_, App>, req: launch::LocalLaunchReq) -> Result<Value, String> {
-    launch::partner_launch_local(app.node.clone(), app.work_dir.clone(), req).await
+    launch::partner_launch_local(app.node.clone(), app.work_dir.clone(), app.data_dir.clone(), req).await
+}
+
+#[tauri::command]
+async fn launch_cwd_candidates(app: State<'_, App>) -> Result<Vec<String>, String> {
+    launch::launch_cwd_candidates(app.data_dir.clone()).await
+}
+
+/// 「瀏覽…」：在 Rust 端開「選擇資料夾」對話框；選好的資料夾寫進本機白名單並回傳，取消回 null。
+#[tauri::command]
+async fn launch_cwd_browse(app: State<'_, App>, handle: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let start = identity::home_dir();
+    let picked = tokio::task::spawn_blocking(move || {
+        let mut b = handle.dialog().file().set_title("選擇工作資料夾");
+        if start.is_dir() {
+            b = b.set_directory(&start);
+        }
+        b.blocking_pick_folder().and_then(|f| f.into_path().ok())
+    })
+    .await
+    .map_err(|e| format!("背景工作失敗：{e}"))?;
+    match picked {
+        Some(p) => Ok(Some(launch::launch_cwd_add(app.data_dir.clone(), p.to_string_lossy().into_owned()).await?)),
+        None => Ok(None),
+    }
 }
 
 #[tauri::command]
@@ -473,7 +498,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, partner_console_query, partner_console_set, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, set_window_name, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, set_window_name, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,

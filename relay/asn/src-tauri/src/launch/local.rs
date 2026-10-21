@@ -5,11 +5,12 @@ use serde_json::{json, Value};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-pub fn partner_launch_local(_node: &str, work_dir: &Path, req: LocalLaunchReq) -> Result<Value, String> {
+pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: LocalLaunchReq) -> Result<Value, String> {
     if req.profile.is_empty() || req.name.is_empty() || req.cwd.is_empty() {
         return Err("請填寫模型、名字與工作資料夾".into());
     }
-    let config = load_launch_config()?;
+    let mut config = load_launch_config()?;
+    super::cwds::grant_local_cwd(&mut config, &req.cwd, &crate::identity::home_dir(), data_dir)?;
     let mut launch_req = LaunchReq {
         profile: &req.profile,
         name: &req.name,

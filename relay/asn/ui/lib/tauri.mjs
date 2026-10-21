@@ -25,6 +25,8 @@ export const transport = {
   partnerLaunchLocal: req => invoke('partner_launch_local', { req }),
   partnerConsoleQuery: req => invoke('partner_console_query', { req }),
   partnerConsoleSet: req => invoke('partner_console_set', { req }),
+  launchCwdCandidates: () => invoke('launch_cwd_candidates'),   // 白名單＋自動建議（Rust 端合併、去重、略過不存在的）
+  launchCwdBrowse: () => invoke('launch_cwd_browse'),   // Rust 端開「選擇資料夾」；→ 路徑（已寫進本機白名單）或 null
   launchPrefsGet: () => invoke('launch_prefs_get'),
   launchPrefsSet: prefs => invoke('launch_prefs_set', { prefs }),
 }
