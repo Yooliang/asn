@@ -3,6 +3,7 @@
 //! 舊 Node 橋在跑（bridge.pid 的 pid 活著）時內建橋不啟動，設定頁顯示由舊版負責。
 pub mod attach;
 pub mod core;
+pub mod corrlog;
 pub mod handoff;
 pub mod launcher;
 pub mod lock;

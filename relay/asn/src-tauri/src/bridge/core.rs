@@ -2,6 +2,7 @@
 //! 所有時間都由呼叫端傳入（毫秒），測試可以不用真的等待逾時。核心一次只被一個任務使用（見 mod.rs 的 run 迴圈）。
 //! 對後端只透過 [`Relay`]（HTTP），對 worker 只透過 [`WorkerSink`]，所以測試可用本機假後端與假 worker。
 use super::attach;
+use super::corrlog::{self, CorrLog, Dir, Entry};
 use super::launcher::{Launched, Launcher};
 use super::mail::{self, fallback_note, mail_head, parse_send_head, strip_reply_head, wants_reply, Mail, SendHead};
 use super::pending::{self, LastReq, Pending, RoomRef, State};
@@ -49,10 +50,13 @@ pub struct Config {
     pub attach_cmd: Option<String>,
     /// 群組「要看更多」的指令前綴（`<asn-cli 完整路徑> room`）
     pub room_cmd: Option<String>,
+    /// 依視窗名的往來記錄資料夾（預設 `~/.asn/handoff`；測試一律指到暫存資料夾）
+    pub handoff_dir: PathBuf,
 }
 
 impl Config {
     pub fn from_env(node: &str, work_dir: PathBuf) -> Config {
+        let test_handoff = work_dir.join("handoff");
         let home = crate::identity::home_dir();
         let list = |k: &str| std::env::var(k).unwrap_or_default().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect::<Vec<_>>();
         Config {
@@ -80,6 +84,8 @@ impl Config {
             report_asn_window: true,
             attach_cmd: attach::attach_cmd_from_env(),
             room_cmd: attach::room_cmd_from_env(),
+            // 測試時絕不碰真實家目錄：往來記錄放進工作資料夾底下
+            handoff_dir: if cfg!(test) { test_handoff } else { corrlog::default_dir() },
         }
     }
 }
@@ -141,6 +147,7 @@ impl Origin {
 }
 
 const NOTICE_TTL_MS: u64 = 600_000;
+const DIRECT_NOTE: &str = "（這個視窗自己用命令列回了信，內文只在對方那邊，收發室看不到）";
 
 pub struct Core {
     pub cfg: Config,
@@ -169,6 +176,7 @@ pub struct Core {
     cursors: Cursors,
     cursor_warned: bool,
     launcher: Option<Arc<Launcher>>,
+    corr: CorrLog,
 }
 
 /// JSON 數字（整數、浮點或數字字串）→ u64；不是數字回 0
@@ -198,10 +206,11 @@ pub fn sent_mark_name(from_window: &str, to_node: &str, to_agent: &str) -> Strin
 impl Core {
     pub fn new(cfg: Config, relay: Arc<Relay>, sink: Arc<dyn WorkerSink>, nonce: &str, log: Arc<BridgeLog>, alive: Arc<dyn Fn(u32) -> bool + Send + Sync>, now: u64) -> Core {
         let cursors = Cursors::load(&cfg.work_dir);
+        let corr = CorrLog::new(cfg.handoff_dir.clone());
         let mut c = Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
             last_requester: BTreeMap::new(), noticed: HashMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), unrouted: HashSet::new(),
-            last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, cursor_warned: false, launcher: None,
+            last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, cursor_warned: false, launcher: None, corr,
         };
         c.restore();
         c
@@ -411,6 +420,16 @@ impl Core {
         best.cloned()
     }
 
+    /// 往來記錄：失敗只記 log，不影響轉交
+    fn corr_note(&self, name: &str, dir: Dir, from: &str, to: &str, id: &str, body: &str, attachments: &[String]) {
+        if let Err(e) = self.corr.append(name, &Entry { ts_ms: self.now, dir, from, to, id, body, attachments }) {
+            self.log.line(&format!("corr log failed window={name}: {e}"));
+        }
+    }
+    fn node_agent(node: &str, agent: &str) -> String {
+        if agent.is_empty() { node.to_string() } else { format!("{node}/{agent}") }
+    }
+
     fn deliver(&mut self, id: &str, to: &str, text: &str) -> Result<(), String> {
         self.parser.register(id, to);
         self.sink.say(forward_text(&self.parser.nonce, id, to, text))
@@ -469,8 +488,13 @@ impl Core {
         // 照片／檔案：內文後面多一行「〔照片〕檔名＋下載指令」，和內文一起在外部資料區塊內
         let body = attach::notes_for(&m.body, &m.attachments, self.cfg.attach_cmd.as_deref());
         let text = format!("{}\n{}{}", mail_head(&m, "claude"), if note.is_empty() { String::new() } else { format!("{note}\n") }, body);
+        let text = format!("{text}\n{}", self.corr.path_line(&target));
         match self.deliver(&m.id, &target, &text) {
-            Ok(_) => self.log.line(&format!("handed id={} from={}/{} to={target}", m.id, m.from_node, from_agent)),
+            Ok(_) => {
+                self.log.line(&format!("handed id={} from={}/{} to={target}", m.id, m.from_node, from_agent));
+                let names: Vec<String> = m.attachments.iter().map(|a| a.name.clone()).collect();
+                self.corr_note(&target, Dir::Received, &Self::node_agent(&m.from_node, &from_agent), &target, &m.id, &m.body, &names);
+            }
             Err(e) => {
                 self.remove(&m.id);
                 self.log.line(&format!("cannot hand id={}: {e} (left in inbox)", m.id));
@@ -560,6 +584,9 @@ impl Core {
         };
         let o = Origin { id: lr.mail_id.clone(), from_node: lr.from_node.clone(), from_agent: lr.from_agent.clone() };
         let ok = self.send_back(&o, &format!("（收發室：這則回覆對不上特定來信，依最近一次交辦轉給你）\n{text}"), Some(from), expects).await;
+        if ok {
+            self.corr_note(from, Dir::Replied, from, &Self::node_agent(&o.from_node, &o.from_agent), &o.id, text, &[]);
+        }
         self.log.line(&format!("unmatched reply from {from} ({} chars) -> last requester {}/{} reply_to={} sent={ok}", text.chars().count(), lr.from_node, lr.from_agent, lr.mail_id));
     }
 
@@ -574,7 +601,11 @@ impl Core {
             b["to_agent"] = json!(a);
         }
         match self.relay.api("send", Some(b)).await {
-            Ok(r) => self.log.line(&format!("new mail from {from} -> {}/{} id={} sent=true reply={}", h.to_node, h.to_agent.clone().unwrap_or_default(), r.get("id").and_then(Value::as_str).unwrap_or("?"), h.reply.clone().unwrap_or_default())),
+            Ok(r) => {
+                let nid = r.get("id").and_then(Value::as_str).unwrap_or("?");
+                self.log.line(&format!("new mail from {from} -> {}/{} id={nid} sent=true reply={}", h.to_node, h.to_agent.clone().unwrap_or_default(), h.reply.clone().unwrap_or_default()));
+                self.corr_note(from, Dir::Replied, from, &Self::node_agent(&h.to_node, h.to_agent.as_deref().unwrap_or("")), nid, &h.body, &[]);
+            }
             Err(e) => self.log.line(&format!("new mail from {from} -> {} failed: {e}", h.to_node)),
         }
     }
@@ -668,11 +699,17 @@ impl Core {
             }
             // 節點本身是成員時以節點發言；視窗是成員時以「節點~視窗」發言
             let ok = self.post_room(&r, &text).await;
+            if ok {
+                self.corr_note(from, Dir::Replied, from, &format!("群組 {}", r.id), &o.id, &text, &[]);
+            }
             self.log.line(&format!("room reply from {from} -> room={} #{} posted={ok}", r.id, r.seq));
             return;
         }
         let body = if late { format!("（遲到的回覆：{target} 在收發室寄出「沒有回覆」通知之後才回）\n{text}") } else { text.clone() };
         let ok = self.send_back(&o, &body, Some(from), expects).await;
+        if ok {
+            self.corr_note(from, Dir::Replied, from, &Self::node_agent(&o.from_node, &o.from_agent), &o.id, &text, &[]);
+        }
         self.log.line(&format!("{}reply from {from} -> {} id={} sent={ok} ({}ms total)", if late { "late " } else { "" }, o.from_node, o.id, self.now.saturating_sub(t0)));
     }
 
@@ -791,9 +828,13 @@ impl Core {
             if note.is_empty() { String::new() } else { format!("\n{note}") },
             rooms::context_text(&room_id, &prev, self.cfg.room_cmd.as_deref())
         );
+        let text = format!("{text}\n{}", self.corr.path_line(&target));
         match self.deliver(&id, &target, &text) {
             Ok(_) => {
                 self.log.line(&format!("handed room={room_id} #{seq} member={member} to={target}"));
+                let names: Vec<String> = attach::normalize(msg.get("attachments")).iter().map(|a| a.name.clone()).collect();
+                let from = rooms::display_from(msg.get("from").and_then(Value::as_str).unwrap_or(""));
+                self.corr_note(&target, Dir::Received, &format!("群組 {room_name} {from}"), &target, &id, msg.get("body").and_then(Value::as_str).unwrap_or(""), &names);
                 true
             }
             Err(e) => {
@@ -890,11 +931,13 @@ impl Core {
         let p = self.pending[i].clone();
         if self.replied_directly(id) {
             self.remove(id);
+            self.corr_note(&p.target, Dir::Direct, &p.target, &Self::node_agent(&p.from_node, &p.from_agent), id, DIRECT_NOTE, &[]);
             self.log.line(&format!("no-reply notice skipped id={id}: {} replied directly (asn send --reply-to)", p.target));
             return;
         }
         if self.sent_to_sender(&p) {
             self.remove(id);
+            self.corr_note(&p.target, Dir::Direct, &p.target, &Self::node_agent(&p.from_node, &p.from_agent), id, DIRECT_NOTE, &[]);
             self.log.line(&format!("no-reply notice skipped id={id}: {} sent mail to {}/{} after forward", p.target, p.from_node, p.from_agent));
             return;
         }

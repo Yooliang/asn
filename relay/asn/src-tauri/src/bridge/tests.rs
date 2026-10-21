@@ -972,4 +972,80 @@ fn 管理器_舊橋活著時不啟動_狀態顯示由舊版負責_設定關著�
     }
 }
 
+// ---- 往來記錄（#107）-----------------------------------------------------------------------------
+
+fn corr_text(h: &H, window: &str) -> String {
+    std::fs::read_to_string(super::corrlog::file_of(&h.core.cfg.handoff_dir, window)).unwrap_or_default()
+}
+
+#[tokio::test]
+async fn 往來記錄_轉交與回覆都追加_信尾多一行路徑_附件名也記() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    assert!(h.core.cfg.handoff_dir.starts_with(h.work.path()), "測試的往來記錄資料夾在暫存資料夾底下");
+    let att = json!({"id": uid(0x50), "kind": "file", "name": "報告.pdf", "mime": "application/pdf", "bytes": 10, "expires_at": "x", "expired": false});
+    h.fr.put(mail(1, json!({"body": "請看附件", "attachments": [att]})));
+    h.core.pull("test", T0).await;
+    let said = h.said();
+    let want = super::corrlog::path_line(&h.core.cfg.handoff_dir, "T-乙");
+    assert!(said[0].ends_with(&format!("\n{want}\nMAIL>>>")), "路徑行在內文區塊的最後");
+    assert!(want.starts_with("你與收發室的往來記錄在：") && want.ends_with("T-乙.md（接手前請先讀）"));
+    h.core.on_worker_line(res(&format!("SENT {}", uid(1))), T0 + 10).await;
+    h.core.on_worker_line(res(&reply_block("T-乙", "好的，已處理")), T0 + 3_000).await;
+    let t = corr_text(&h, "T-乙");
+    assert!(t.contains(&format!("收到｜W/W-政策 → T-乙｜id={}", uid(1))), "{t}");
+    assert!(t.contains("附件：報告.pdf") && t.contains("請看附件"));
+    assert!(t.contains(&format!("回覆｜T-乙 → W/W-政策｜id={}", uid(1))) && t.contains("好的，已處理"));
+    assert!(!t.contains("你與收發室的往來記錄在"), "記錄檔本身不含那行提示");
+}
+
+#[tokio::test]
+async fn 往來記錄_系統通知不附路徑也不記_轉不出去的信不記() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    // 代寄少了 reply：橋通知視窗補上（系統通知）
+    h.core.on_worker_line(res(&reply_block("T-乙", "[RELAY 寄信] to=W/W-政策\n沒寫 reply")), T0).await;
+    let notice = h.said().pop().unwrap();
+    assert!(notice.contains("沒有寄出") && !notice.contains("往來記錄在"));
+    assert_eq!(corr_text(&h, "T-乙"), "");
+    // worker 倒了：轉交失敗，不留「收到」
+    h.sink.down.store(true, std::sync::atomic::Ordering::SeqCst);
+    h.fr.put(mail(2, json!({})));
+    h.core.pull("test", T0 + 1).await;
+    assert_eq!(corr_text(&h, "T-乙"), "");
+}
+
+#[tokio::test]
+async fn 往來記錄_視窗代寄新信也記_檔名非法字元換成底線() {
+    let mut h = harness(&[("T-乙:丙", "idle")]).await;
+    h.core.on_worker_line(res(&reply_block("T-乙:丙", "[RELAY 寄信] to=W/W-政策 reply=no\n順便通知你")), T0).await;
+    let f = h.core.cfg.handoff_dir.join("T-乙_丙.md");
+    let t = std::fs::read_to_string(&f).unwrap();
+    assert!(t.contains("回覆｜T-乙:丙 → W/W-政策") && t.contains("順便通知你"));
+    assert!(!h.core.cfg.handoff_dir.join("T-乙:丙.md").exists());
+}
+
+#[tokio::test]
+async fn 往來記錄_視窗自己用命令列回信_橋只看得到記號_照實記() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.forward(mail(1, json!({})), T0).await;
+    std::fs::create_dir_all(h.work.path().join("replied")).unwrap();
+    std::fs::write(h.work.path().join("replied").join(uid(1)), "").unwrap();
+    h.core.tick(T0 + 700_000).await;
+    let t = corr_text(&h, "T-乙");
+    assert!(t.contains("自行回信｜T-乙 → W/W-政策") && t.contains("收發室看不到"), "{t}");
+}
+
+#[tokio::test]
+async fn 往來記錄_超過兩百筆輪替_活檔留最近的_舊的進_archive() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    for i in 0..205u32 {
+        h.core.on_worker_line(res(&reply_block("T-乙", &format!("[RELAY 寄信] to=W reply=no\n第 {i} 則"))), T0 + i as u64).await;
+    }
+    let live = corr_text(&h, "T-乙");
+    assert!(live.contains("第 204 則") && !live.contains("第 0 則\n"));
+    assert_eq!(live.lines().filter(|l| l.starts_with('▌')).count(), 200);
+    let arch = h.core.cfg.handoff_dir.join("archive");
+    let n: usize = std::fs::read_dir(&arch).unwrap().flatten().map(|e| std::fs::read_to_string(e.path()).unwrap().lines().filter(|l| l.starts_with('▌')).count()).sum();
+    assert_eq!(n, 5);
+}
+
 mod rooms_launch;
