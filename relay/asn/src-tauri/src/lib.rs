@@ -9,6 +9,7 @@ mod auth;
 mod avatar;
 mod bell;
 mod bridge;
+pub mod cli;
 mod claude_accounts;
 mod claude_json;
 mod codex_accounts;
@@ -54,8 +55,10 @@ struct StartupInfo {
     window_name: String,
     old_names: Vec<String>,
     error: Option<String>,
-    /// 沒有節點金鑰（新電腦）：畫面要顯示登入
+    /// 要先顯示登入畫面：沒有節點金鑰，或有金鑰但還沒登入（除非選了「暫時不登入」）
     needs_login: bool,
+    /// 登入畫面可以顯示「暫時不登入」：只有這台已有節點金鑰時
+    can_skip_login: bool,
     shot: bool,
     poll_ms: u64,
     roster_ms: u64,
@@ -116,13 +119,14 @@ pub fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
 }
 
 #[tauri::command]
-fn startup_info(app: State<'_, App>) -> StartupInfo {
+fn startup_info(app: State<'_, App>, auth: State<'_, auth::AuthState>) -> StartupInfo {
     StartupInfo {
         node: app.node.clone(),
         window_name: app.relay.as_ref().map(|r| r.window_name()).unwrap_or_default(),
         old_names: app.relay.as_ref().map(|r| r.active_names().into_iter().skip(1).collect()).unwrap_or_default(),
         error: app.init_error.clone(),
-        needs_login: app.relay.is_none(),
+        needs_login: account::needs_login(app.relay.is_some(), auth.status().signed_in, account::login_skipped(&app.data_dir)),
+        can_skip_login: app.relay.is_some(),
         shot: app.shot.is_some(),
         poll_ms: env_ms("IRORI_ASN_POLL_MS", 120_000),
         roster_ms: env_ms("IRORI_ASN_ROSTER_MS", 60_000),
@@ -524,6 +528,11 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
+/// 命令列（asn-cli）的完整路徑與寄信範例（設定頁「寄信指令」用）
+#[tauri::command]
+fn cli_info() -> serde_json::Value {
+    cli::info()
+}
 /// 內建收發室橋的狀態（設定頁用）。預設關閉
 #[tauri::command]
 fn bridge_status(m: State<'_, bridge::Manager>) -> bridge::Status {
@@ -533,6 +542,11 @@ fn bridge_status(m: State<'_, bridge::Manager>) -> bridge::Status {
 #[tauri::command]
 fn bridge_set_enabled(m: State<'_, bridge::Manager>, on: bool) -> Result<bridge::Status, String> {
     m.set_enabled(on)
+}
+/// 打開／關閉「允許我的其他設備替這台開新視窗」（預設關）
+#[tauri::command]
+fn bridge_set_remote_launch(m: State<'_, bridge::Manager>, on: bool) -> Result<bridge::Status, String> {
+    m.set_remote_launch(on)
 }
 /// 「改由 ASN 負責」：停掉舊版收發室橋（要使用者確認、要設定開關放行）再啟動內建橋
 #[tauri::command]
@@ -607,6 +621,14 @@ pub fn run() {
     let bridge_data_dir = data_dir.clone();
     let auto_acct_dir = data_dir.clone();
     let auth_state = auth::AuthState::new(auth::default_store(&data_dir));
+    // 端到端測試用：--shot 模式下假裝已登入（只連本機假後端；正式執行沒有這條路）
+    if shot.is_some() {
+        if let Ok(email) = std::env::var("IRORI_ASN_SHOT_LOGIN") {
+            if !email.trim().is_empty() {
+                auth_state.seed_shot_session(email.trim());
+            }
+        }
+    }
     let state = App { relay: relay_obj.clone(), init_error, node: node.clone(), work_dir: work_dir.clone(), data_dir, shot };
     let anon_url = relay_obj.as_ref().zip(anon).and_then(|(r, a)| bell::ws_url(r.base(), &a));
     let bridge_mgr = bridge::Manager::new(relay_obj.clone(), anon_url.clone(), node.clone(), work_dir.clone(), bridge_data_dir);
@@ -625,7 +647,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, ads::ads_fetch, set_window_name, set_presence, bridge_status, bridge_set_enabled, bridge_takeover, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, ads::ads_fetch, set_window_name, set_presence, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_takeover, cli_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete,
             codex_accounts::codex_account_current,
@@ -633,7 +655,7 @@ pub fn run() {
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
             wins::open_chat, wins::open_panel, wins::close_panels, wins::chat_visible, wins::close_chats, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,
-            account::auth_status, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_claim_this, account::auth_setup_device,
+            account::auth_status, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_bind, account::auth_skip_login,
             tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_set, updater::update_check, updater::update_install,
         ])
         .setup(move |app| {
@@ -659,9 +681,25 @@ pub fn run() {
                     let _ = w.hide();
                 }
             }
+            // 已登入且這台有節點金鑰：每次啟動在背景綁一次到帳號（舊租戶還沒被認領時會失敗，不擋使用，下次啟動再試）
+            if relay_obj.is_some() && handle.state::<auth::AuthState>().status().signed_in {
+                let h = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    let _ = account::bind_this(&h.state::<App>(), &h.state::<auth::AuthState>()).await;
+                });
+            }
             // 內建收發室橋：設定打開才啟動（預設關）；--shot 截圖模式不啟動
             if handle.state::<App>().shot.is_none() {
                 handle.state::<bridge::Manager>().start_if_enabled();
+                // 啟動時舊版收發室橋在跑而讓步的話，舊橋一退出就自動接手（設定仍開著）
+                let h2 = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        h2.state::<bridge::Manager>().poll_handoff();
+                    }
+                });
             }
             if let Some(r) = relay_obj.clone() {
                 // 心跳：每 30 秒寫一次（格式同 self-recv.mjs），pid 用本程式

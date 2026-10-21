@@ -23,6 +23,7 @@
       <button v-for="p in PROVIDERS" :key="p.key" class="aero-btn login-btn" type="button" :disabled="!canStart(phase)" @click="start(p.key)">{{ p.label }}</button>
       <p class="login-note" v-if="note" role="status">{{ note }}</p>
       <button class="aero-btn login-cancel" type="button" v-if="phase === 'waiting'" @click="cancel">取消</button>
+      <button class="login-skip" type="button" v-if="showSkip(canSkip, phase)" @click="skip">{{ SKIP_LABEL }}</button>
       <p class="login-err" v-if="phase === 'error'" role="alert">{{ error }}</p>
     </div>
   </div>

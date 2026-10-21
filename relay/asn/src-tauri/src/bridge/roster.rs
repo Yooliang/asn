@@ -77,15 +77,15 @@ pub fn read_sessions(dir: &Path, alive: impl Fn(u32) -> bool, exclude_pid: u32, 
 }
 
 /// roster 動作的請求內容。asn_window＝ASN 自己的視窗名（也列進名單，別台看得到這台的 ASN；engine 標 asn）。
-/// launcher 本段先送 null（遠端開視窗留到下一段）。
-pub fn roster_body(windows: &[Window], asn_window: Option<&str>) -> Value {
+/// launcher＝遠端開視窗的摘要（profile 名與標籤、cwd 白名單、上限；不含指令），沒有可用設定送 null，仲介就清掉。
+pub fn roster_body(windows: &[Window], asn_window: Option<&str>, launcher: Value) -> Value {
     let mut agents: Vec<Value> = windows.iter().map(|w| json!({ "name": w.name, "status": w.status, "cwd_label": w.cwd_label(), "engine": "claude" })).collect();
     if let Some(n) = asn_window {
         if !windows.iter().any(|w| w.name == n) {
             agents.push(json!({ "name": n, "status": "idle", "cwd_label": "", "engine": "asn" }));
         }
     }
-    json!({ "agents": agents, "launcher": null })
+    json!({ "agents": agents, "launcher": launcher })
 }
 
 #[cfg(test)]
@@ -130,16 +130,17 @@ mod tests {
     }
 
     #[test]
-    fn 回報內容格式_含_asn_視窗名_launcher_先送_null() {
+    fn 回報內容格式_含_asn_視窗名_launcher_摘要或_null() {
         let w = Window { name: "T-甲".into(), status: Some("idle".into()), cwd: "D:\\a\\b".into(), pid: 1, updated_at: 0 };
-        let b = roster_body(&[w.clone()], Some("T-ASN"));
+        let b = roster_body(&[w.clone()], Some("T-ASN"), Value::Null);
         assert_eq!(b["launcher"], Value::Null);
+        assert_eq!(roster_body(&[w.clone()], None, json!({"profiles": []}))["launcher"], json!({"profiles": []}));
         assert_eq!(b["agents"][0], json!({"name":"T-甲","status":"idle","cwd_label":"b","engine":"claude"}));
         assert_eq!(b["agents"][1], json!({"name":"T-ASN","status":"idle","cwd_label":"","engine":"asn"}));
         // 不給 ASN 視窗名就只有 Claude 視窗；與視窗同名不重複列
-        assert_eq!(roster_body(&[w], None)["agents"].as_array().unwrap().len(), 1);
+        assert_eq!(roster_body(&[w], None, Value::Null)["agents"].as_array().unwrap().len(), 1);
         let w2 = Window { name: "T-ASN".into(), status: None, cwd: "".into(), pid: 2, updated_at: 0 };
-        assert_eq!(roster_body(&[w2], Some("T-ASN"))["agents"].as_array().unwrap().len(), 1);
+        assert_eq!(roster_body(&[w2], Some("T-ASN"), Value::Null)["agents"].as_array().unwrap().len(), 1);
         assert!(is_busy_status(Some("Working")) && !is_busy_status(Some("idle")) && !is_busy_status(None));
     }
 }

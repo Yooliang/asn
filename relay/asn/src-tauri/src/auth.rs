@@ -514,6 +514,15 @@ impl AuthState {
         Self { store, mem: Mutex::new(None), cancel: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false) }
     }
 
+    /// 只給 `--shot` 測試用：假裝已登入（記憶體裡放一組假權杖，不寫存檔），讓端到端測試能走「已登入」的情境。
+    /// 呼叫端必須確認在 `--shot` 模式（只連本機假後端）。
+    pub fn seed_shot_session(&self, email: &str) {
+        let s = Session { access_token: "shot-access".into(), refresh_token: "shot-refresh".into(), expires_at_ms: now_ms() + 24 * 3600 * 1000, email: Some(email.to_string()) };
+        if let Ok(mut g) = self.mem.lock() {
+            *g = Some(s);
+        }
+    }
+
     pub fn status(&self) -> AuthStatus {
         if let Some(s) = self.mem.lock().ok().and_then(|g| g.clone()) {
             return AuthStatus { signed_in: true, email: s.email };

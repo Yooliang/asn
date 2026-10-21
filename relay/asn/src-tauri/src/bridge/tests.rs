@@ -28,6 +28,42 @@ struct FState {
     fail_inbox: usize,
     /// 已 ack 的信下次 inbox 仍回傳（模擬 ack 沒生效，測去重）
     sticky: bool,
+    /// 群組：[{id,name,last_seq,mine:[{member,read_seq}],messages:[{seq,…,forMe:{視窗名:true}}]}]；forMe 的鍵「空字串」＝節點本身
+    rooms: Vec<Value>,
+    room_reads: Vec<Value>,
+    room_posts: Vec<Value>,
+    room_post_status: u16,
+    /// 遠端開視窗：待辦佇列（launch_pending 取走）與回報結果
+    launches: Vec<Value>,
+    launch_results: Vec<Value>,
+    launch_pending_calls: usize,
+}
+
+fn pct_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = vec![];
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let Some(v) = std::str::from_utf8(&b[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok()) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(if b[i] == b'+' { b' ' } else { b[i] });
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+/// 請求行的查詢參數（已解碼）
+fn query_of(line: &str) -> std::collections::HashMap<String, String> {
+    let q = line.split(' ').nth(1).unwrap_or("").split('?').nth(1).unwrap_or("");
+    q.split('&').filter(|x| !x.is_empty()).map(|kv| {
+        let mut it = kv.splitn(2, '=');
+        (it.next().unwrap_or("").to_string(), pct_decode(it.next().unwrap_or("")))
+    }).collect()
 }
 struct FakeRelay {
     url: String,
@@ -60,8 +96,44 @@ fn handle_conn(mut c: std::net::TcpStream, st: Arc<Mutex<FState>>) {
     let body: Value = serde_json::from_slice(&buf[head_end..(head_end + len).min(buf.len())]).unwrap_or(Value::Null);
     let line = head.lines().next().unwrap_or("");
     let action = line.split("action=").nth(1).unwrap_or("").split(&['&', ' '][..]).next().unwrap_or("").to_string();
+    let q = query_of(line);
     let mut s = st.lock().unwrap();
     let (code, out) = match action.as_str() {
+        "room_list" => {
+            let rooms: Vec<Value> = s.rooms.iter().map(|r| json!({"id": r["id"], "name": r["name"], "last_seq": r["last_seq"], "mine": r["mine"]})).collect();
+            (200, json!({"rooms": rooms}))
+        }
+        "room_read" => {
+            let (room, as_agent, since) = (q.get("room").cloned().unwrap_or_default(), q.get("as_agent").cloned(), q.get("since").and_then(|v| v.parse::<u64>().ok()));
+            s.room_reads.push(json!({"room": room, "as_agent": as_agent, "since": since, "mark": q.get("mark")}));
+            let since = since.unwrap_or(0);
+            let as_key = as_agent.unwrap_or_default();
+            match s.rooms.iter().find(|r| r["id"] == room.as_str()) {
+                None => (404, json!({"error": "not_found"})),
+                Some(r) => {
+                    let msgs: Vec<Value> = r["messages"].as_array().cloned().unwrap_or_default().into_iter().filter(|m| m["seq"].as_u64().unwrap_or(0) > since).map(|mut m| {
+                        let for_me = m["forMe"].get(as_key.as_str()).and_then(Value::as_bool).unwrap_or(false);
+                        m.as_object_mut().unwrap().remove("forMe");
+                        m["for_me"] = json!(for_me);
+                        m
+                    }).collect();
+                    (200, json!({"messages": msgs, "last_seq": r["last_seq"]}))
+                }
+            }
+        }
+        "room_post" => {
+            s.room_posts.push(body.clone());
+            if s.room_post_status == 0 || s.room_post_status == 200 { (200, json!({"seq": 99})) } else { (s.room_post_status, json!({"error": "rate"})) }
+        }
+        "launch_pending" => {
+            s.launch_pending_calls += 1;
+            let l = std::mem::take(&mut s.launches);
+            (200, json!({"launches": l}))
+        }
+        "launch_result" => {
+            s.launch_results.push(body.clone());
+            (200, json!({"ok": true}))
+        }
         "whoami" => (200, json!({"node": "T", "bell_topic": "bell-test"})),
         "inbox" => {
             if s.fail_inbox > 0 {
@@ -119,6 +191,9 @@ impl FakeRelay {
     }
     fn sent(&self) -> Vec<Value> {
         self.st.lock().unwrap().sent.clone()
+    }
+    fn rosters(&self) -> Vec<Value> {
+        self.st.lock().unwrap().rosters.clone()
     }
 }
 
@@ -178,6 +253,9 @@ fn cfg(work: &std::path::Path, sessions: &std::path::Path) -> Config {
     c.busy_max_ms = 3_600_000;
     c.forward_timeout_ms = 120_000;
     c.pull_backoff_ms = vec![5_000, 10_000, 20_000];
+    // 下載指令與群組「要看更多」的指令固定寫死（不依執行檔位置去找）
+    c.attach_cmd = Some("/x/asn-cli attach".into());
+    c.room_cmd = Some("/x/asn-cli room".into());
     c
 }
 
@@ -864,8 +942,8 @@ fn 真的子程序_啟動轉交回覆寄回_關閉時只關自己的_worker_並�
 #[test]
 fn 設定_預設關閉_壞檔當關閉() {
     let d = tempfile::tempdir().unwrap();
-    assert_eq!(super::read_settings(d.path()), super::BridgeSettings { enabled: false, allow_takeover: false });
-    super::write_settings(d.path(), super::BridgeSettings { enabled: true, allow_takeover: false }).unwrap();
+    assert_eq!(super::read_settings(d.path()), super::BridgeSettings { enabled: false, allow_takeover: false, allow_remote_launch: false });
+    super::write_settings(d.path(), super::BridgeSettings { enabled: true, allow_takeover: false, allow_remote_launch: false }).unwrap();
     assert!(super::read_settings(d.path()).enabled);
     std::fs::write(super::settings_path(d.path()), "壞").unwrap();
     assert!(!super::read_settings(d.path()).enabled);
@@ -881,15 +959,17 @@ fn 管理器_舊橋活著時不啟動_狀態顯示由舊版負責_設定關著�
     let m = super::Manager::new(Some(relay), None, "T".into(), work.path().to_path_buf(), data.path().to_path_buf());
     // 設定關：start_if_enabled 不啟動
     m.start_if_enabled();
-    assert_eq!(m.status(), super::Status { enabled: false, running: false, legacy: false, takeover_allowed: false, error: None });
+    assert_eq!(m.status(), super::Status { enabled: false, running: false, legacy: false, takeover_allowed: false, remote_launch: false, error: None });
     // 另一個「活著的」pid 寫進 bridge.pid（找一個真的活著且不是自己的：init 類程序用 pid 4 在 Windows、1 在 Unix）
     let other = if cfg!(windows) { 4 } else { 1 };
     if crate::heartbeat::pid_alive(other) && other != std::process::id() {
         std::fs::write(super::lock::pid_file(work.path()), other.to_string()).unwrap();
-        super::write_settings(data.path(), super::BridgeSettings { enabled: true, allow_takeover: false }).unwrap();
+        super::write_settings(data.path(), super::BridgeSettings { enabled: true, allow_takeover: false, allow_remote_launch: false }).unwrap();
         m.start_if_enabled();
         let st = m.status();
         assert!(st.enabled && !st.running && st.legacy && !st.takeover_allowed, "{st:?}");
         assert_eq!(std::fs::read_to_string(super::lock::pid_file(work.path())).unwrap(), other.to_string(), "不動舊橋的 pid 檔");
     }
 }
+
+mod rooms_launch;

@@ -11,7 +11,7 @@ const base = () => ({
   closeTo: 'tray', trayOk: true, autostart: { supported: true, on: false, busy: false },
   accounts: { list: [], current: null, codexLine: '', busy: false, confirmDel: '', msg: '', trustOwn: false, remote: { node: '', devices: [], list: [], loading: false, busy: false, msg: '' } },
 })
-const bridge = (o = {}) => ({ enabled: false, running: false, legacy: false, takeoverAllowed: false, error: '', busy: false, confirm: false, ...o })
+const bridge = (o = {}) => ({ enabled: false, running: false, legacy: false, takeoverAllowed: false, remoteLaunch: false, error: '', busy: false, confirm: false, ...o })
 const render = async st => {
   globalThis.Vue = Vue
   return renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st, catKey: 'window' }) }))
@@ -44,14 +44,22 @@ test('舊版收發室橋在跑：顯示由舊版負責；開關放行才出現�
   assert.ok(ask.includes('要停掉舊版收發室橋，改由 ASN 負責嗎？') && ask.includes('確定') && ask.includes('取消'))
 })
 
+test('允許其他設備替這台開新視窗：預設關，打開後勾選；按下去送出 bridge-launch', async () => {
+  const off = await render({ ...base(), bridge: bridge() })
+  assert.match(off, /<input type="checkbox"(?![^>]*checked)[^>]*aria-label="允許我的其他設備替這台開新視窗"/)
+  const on = await render({ ...base(), bridge: bridge({ enabled: true, running: true, remoteLaunch: true }) })
+  assert.match(on, /aria-label="允許我的其他設備替這台開新視窗"[^>]*checked|checked[^>]*aria-label="允許我的其他設備替這台開新視窗"/)
+  assert.ok(SettingsPanel.template.includes("act('bridge-launch', $event.target.checked)"))
+})
+
 test('錯誤訊息照實顯示', async () => {
   assert.ok((await render({ ...base(), bridge: bridge({ error: '這台電腦還沒有節點金鑰，請先登入' }) })).includes('這台電腦還沒有節點金鑰，請先登入'))
 })
 
 test('守門：新增的指令都在清單裡，樞紐接得住，Rust 端有註冊對應指令', () => {
-  for (const op of ['bridge-enable', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no']) assert.ok(SETTING_OPS.includes(op), op)
+  for (const op of ['bridge-enable', 'bridge-launch', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no']) assert.ok(SETTING_OPS.includes(op), op)
   const list = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
-  for (const cmd of ['bridge_status', 'bridge_set_enabled', 'bridge_takeover']) {
+  for (const cmd of ['bridge_status', 'bridge_set_enabled', 'bridge_set_remote_launch', 'bridge_takeover']) {
     assert.ok(list.includes(`invoke('${cmd}'`), `前端呼叫 ${cmd}`)
     assert.ok(fs.readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8').includes(`${cmd},`), `lib.rs 註冊 ${cmd}`)
   }
