@@ -1,7 +1,7 @@
 // 截圖標註：操作清單（堆疊／復原／重做／清除）、整理規則、幾何、輸出尺寸、畫圖（記錄用假 ctx）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { COLORS, TEXT_MAX, arrowHead, createMarkup, drawOp, exportSize, fitView, mosaicCell, normalizeOp, renderAll, strokeScale, strokeWidth, textSize, toImagePoint } from '../ui/lib/markup.mjs'
+import { COLORS, TEXT_MAX, arrowHead, createMarkup, drawOp, exportSize, fitView, mosaicCell, normalizeOp, renderAll, strokeScale, strokeWidth, placeTextBox, textBackdrop, textSize, textStroke, toImagePoint } from '../ui/lib/markup.mjs'
 
 const rect = (x = 0) => ({ type: 'rect', color: '#e53935', width: 4, x, y: 0, w: 50, h: 40 })
 
@@ -142,4 +142,17 @@ test('畫圖：renderAll 先畫底圖，clear 記號之前的操作不畫', () =
   const rects = calls.filter(c => c[0] === 'strokeRect')
   assert.equal(rects.length, 1)
   assert.equal(rects[0][1], 7)
+})
+
+test('文字輸入框：放在點的位置，靠邊往內推、不超出圖片顯示區', () => {
+  assert.deepEqual(placeTextBox(100, 50, 20, 600, 400), { left: 100, top: 50 })
+  assert.deepEqual(placeTextBox(590, 395, 20, 600, 400), { left: 440, top: 380 })   // 右下角：寬至少留 160、高留一行
+  assert.deepEqual(placeTextBox(-5, -5, 20, 600, 400), { left: 0, top: 0 })
+  assert.deepEqual(placeTextBox(90, 10, 20, 100, 400), { left: 0, top: 10 })   // 顯示區比最小寬還窄
+  assert.deepEqual(placeTextBox(0, 0, 900, 600, 400), { left: 0, top: 0 })   // 多行比顯示區還高
+})
+
+test('文字描邊與輸入框底色：淺色字配深色、其餘配淺色，永遠有對比', () => {
+  for (const c of ['#ffffff', '#fdd835']) { assert.match(textStroke(c), /^rgba\(0,0,0/); assert.match(textBackdrop(c), /^rgba\(0,0,0/) }
+  for (const c of COLORS.filter(c => c !== '#ffffff' && c !== '#fdd835')) { assert.match(textStroke(c), /^rgba\(255,255,255/); assert.match(textBackdrop(c), /^rgba\(255,255,255/) }
 })
