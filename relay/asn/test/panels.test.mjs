@@ -131,3 +131,9 @@ test('守門（樣式）：分頁圖示與面板版面的 CSS 都在', () => {
   assert.ok(/\.pane\.panel-pane\{[^}]*overflow-y:auto/.test(css))
   assert.ok(css.includes('.ctab .panel-ic'))
 })
+
+test('「開始」頁籤只在完全沒有分頁時出現：開了設定或指引分頁也要收掉（跟開對話一樣）', async () => {
+  const fs = await import('node:fs')
+  const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
+  assert.match(html, /class="ctab home" v-if="!tabItems\.length"/)
+})
