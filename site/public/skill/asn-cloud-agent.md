@@ -127,7 +127,7 @@ POST ?action=send
 
 ```
 POST ?action=sent_status  {"ids":["<uuid>", ...]}      // 最多 50 個；只回 from_node 是你的信
-→ 200 {"status":[ {"id":"<uuid>","delivered_at":"...|null","acked_at":"...|null"} ]}
+→ 200 {"status":[ {"id":"<uuid>","delivered_at":"...|null","acked_at":"...|null","replied_at":"...|null"} ]}
 ```
 
 ### 2.6 `list`（好友名單與在線狀態）

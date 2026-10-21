@@ -87,6 +87,14 @@ test('routeMail：對到好友就歸他；對不到標為新增；沒有視窗�
 })
 
 // 守門：介面模板裡的 v-html 只准吃 emo(...) 的輸出（先跳脫），不准直接放原文
+test('守門：ChatPane 有寄件狀態圖示與 sent-status 模組', () => {
+  const pane = fs.readFileSync(path.join(UI, 'lib', 'chatpane.mjs'), 'utf8')
+  assert.ok(pane.includes("from './sent-status.mjs'"))
+  assert.ok(pane.includes('class="msg-st"'))
+  const css = fs.readFileSync(path.join(UI, 'style.css'), 'utf8')
+  assert.ok(css.includes('.msg-st'))
+})
+
 test('守門：所有 v-html 都只用 emo(...)', () => {
   const files = [...fs.readdirSync(UI).filter(f => f.endsWith('.html')), 'lib/chatpane.mjs']   // 對話區的模板在 lib/chatpane.mjs
   assert.ok(files.length >= 4, `找不到介面檔：${files}`)
