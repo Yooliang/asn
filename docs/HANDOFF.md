@@ -89,3 +89,11 @@ npx --yes http-server site/public -p 5179
 - 切換完成前，未經維護者同意不對舊後台做寫入性變更；對新後台套用 migration、部署函式前也要同意。
 - 測試只連 `127.0.0.1` 的假後端，不要把測試指向真實後端。
 - 給人看的文字一律繁體中文、不中英夾雜（英文名稱只留在註解與 log）。
+
+## 2026-10-21 現況（asn session 交接用）
+
+- 切換新後台（#7）：新後台已套照片 migration、部署最新 relay 函式；增量同步用 `tools/migrate/sync_relay_delta.py`（以主鍵 upsert、不清空、可重跑）。**已切**：H 家用機收發室橋（排程改跑本 repo `relay/machine`，`anon.key` 已換新、舊的備份成 `anon.key.old-irori`）、grok 小真。**未切**：w02、aegis（小良哥到公司做）、Irori XISU（請家用若莉）。切完後再跑一次 `sync_relay_delta.py export`＋`upsert` 補舊後台的信。
+- 開發分工：小真（grok，能直接開 PR，環境編不了 Rust）做功能；本 session 審查、Windows 打包＋端到端、合併。介面 PR 合併前要實際開起來操作。
+- 進行中：#48 開新 AI 夥伴（疊在 #49 偵測上；待 Windows 實測開 Claude／Codex 視窗）；#44 雲端代理安裝腳本＋ASN_ 改名（待審）；#4 dispatch-watch 草稿（待審）。
+- 待辦：#51 切換 Claude 帳號、#52 用量（Rust 讀本機紀錄，參考 ccusage）、#12 登入＋內建橋（已改裁全 Rust 重寫，設計文件 D1 待改）、#13 雲端代理技能（`site/public/skill/asn-cloud-agent.md` 已寫）、#14 去 Irori 化、#20 聽歌狀態、#22 系統匣、#26 機密保管、#27 子代理、#40 功能列。
+- 部署狀態：念出回覆（TTS）要部署 Cloudflare Worker＋設兩個秘密才會出聲（未做，要小良哥同意）；官網隱私權政策的照片／語音段落未部署。
