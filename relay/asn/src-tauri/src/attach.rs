@@ -252,6 +252,7 @@ pub async fn send_attachment_signed(relay: &Relay, http: &reqwest::Client, paylo
     if let Value::Object(m) = &mut body {
         m.insert("attachment_ids".into(), json!([id]));
     }
+    let body = if token.map_or(false, |t| !t.is_empty()) { body } else { crate::relay::without_person(body) };
     let sent = relay.api_signed("send", Some(body), token).await.map_err(|e| explain(&e))?;
     Ok(json!({ "id": sent.get("id"), "attachment_id": id, "name": photo.name, "bytes": photo.bytes.len() }))
 }

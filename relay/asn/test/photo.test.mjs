@@ -150,7 +150,7 @@ test('寄照片：交給 Rust 的 payload 欄位正確（收件人、回信對�
   await core.start()
   const r = await core.sendAttachment(ID, { name: 'cat.webp', data: 'UklG', width: 640, height: 480, thumb: THUMB }, '  這張  ')
   assert.equal(r.ok, true)
-  assert.deepEqual(sent[0], { kind: 'image', to_node: 'W', to_agent: 'W-政策', reply_to: U(7), caption: '這張', name: 'cat.webp', data: 'UklG', width: 640, height: 480, thumb: THUMB })
+  assert.deepEqual(sent[0], { person: true, kind: 'image', to_node: 'W', to_agent: 'W-政策', reply_to: U(7), caption: '這張', name: 'cat.webp', data: 'UklG', width: 640, height: 480, thumb: THUMB })
   const mine = core.logOf(ID).at(-1)
   assert.equal(mine.k, 'me'); assert.equal(mine.text, '這張')
   assert.equal(mine.photos[0].id, U(77)); assert.equal(mine.photos[0].thumb, THUMB); assert.equal(mine.photos[0].bytes, 1234)
@@ -243,7 +243,7 @@ test('寄檔案（可重用入口 sendAttachment）：payload 帶 kind=file、�
   await core.start()
   const item = { kind: 'file', name: '報告.pdf', data: 'JVBERg==' }
   assert.equal((await core.sendAttachment(ID, item, '請看')).ok, true)
-  assert.deepEqual(sent[0], { kind: 'file', to_node: 'W', to_agent: 'W-政策', reply_to: undefined, caption: '請看', name: '報告.pdf', data: 'JVBERg==', width: undefined, height: undefined, thumb: undefined })
+  assert.deepEqual(sent[0], { person: true, kind: 'file', to_node: 'W', to_agent: 'W-政策', reply_to: undefined, caption: '請看', name: '報告.pdf', data: 'JVBERg==', width: undefined, height: undefined, thumb: undefined })
   const mine = core.logOf(ID).at(-1)
   assert.deepEqual([mine.k, mine.text, mine.photos[0].kind, mine.photos[0].mime, mine.photos[0].thumb], ['me', '請看', 'file', 'application/pdf', null])
   // 圖片項目（截圖等功能用 imageFromBlob 產生）走同一個入口
