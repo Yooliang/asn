@@ -26,6 +26,7 @@ import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaun
 import { CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, buddyConsoleItem, engineForProfile,launchDeviceRows, launchDisableReason, showDisplayModeChoice, withTimeout } from './lib/partner-launch-ui.mjs'
 import { backgroundRestoreNoticeText, collectLaunchFailures, findBackgroundTimeouts, launchFailedNoticeText } from './lib/partner-launch-notify.mjs'
 import { friendId } from './lib/roster.mjs'
+import { canOfferModelSwitch, confirmText, createModelSwitcher } from './lib/model-switch.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
@@ -315,7 +316,38 @@ const buddyMenuFriend = ref(null)
 // 右鍵選單立刻出現（固定有「開啟對話」）；主控台切換項目先顯示「檢查中…」，查到才可按，逾時／查不到就停用
 const buddyConsole = reactive({ state: 'none', visible: true })
 const buddyConsoleItemView = computed(() => buddyConsoleItem(buddyConsole.state, buddyConsole.visible))
-function closeBuddyMenu() { buddyMenu.value = ''; buddyMenuFriend.value = null; buddyConsole.state = 'none' }
+// 「切換模型 ▸」：只有本機的 Claude 視窗會出現；查詢逾時或查不到就停用並說明原因（共用 lib/model-switch.mjs，功能列 #40 也用它）
+const modelSwitcher = createModelSwitcher({ transport, log: m => console.info('[ASN]', m) })
+const buddyModel = reactive({ show: false, state: 'none', reason: '', current: '', items: [], open: false, st: null })
+function resetBuddyModel() { Object.assign(buddyModel, { show: false, state: 'none', reason: '', current: '', items: [], open: false, st: null }) }
+const buddyModelLabel = computed(() => (buddyModel.state === 'checking' ? '切換模型（檢查中…）' : buddyModel.state === 'none' ? '切換模型（無法切換）' : '切換模型 ▸'))
+const modelDlg = reactive({ open: false, name: '', target: null, current: '', busy: false, error: '', manual: '', done: '', copied: false, st: null })
+const modelDlgText = computed(() => confirmText(modelDlg.name, modelDlg.current, modelDlg.target?.label ?? ''))
+function closeModelDlg() { if (!modelDlg.busy) modelDlg.open = false }
+function closeBuddyMenu() { buddyMenu.value = ''; buddyMenuFriend.value = null; buddyConsole.state = 'none'; resetBuddyModel() }
+async function loadBuddyModel(c) {
+  buddyModel.state = 'checking'
+  const st = await modelSwitcher.query(c.agent || c.nick)
+  if (buddyMenuFriend.value !== c) return   // 使用者已經關掉或換開別人的選單
+  Object.assign(buddyModel, { state: st.state, reason: st.reason, current: st.current, items: st.items, st })
+}
+function pickBuddyModel(item) {
+  const c = buddyMenuFriend.value
+  if (!c || item.disabled || item.checked || !buddyModel.st) return
+  Object.assign(modelDlg, { open: true, name: c.agent || c.nick, target: item, current: buddyModel.current, busy: false, error: '', manual: '', done: '', copied: false, st: buddyModel.st })
+  closeBuddyMenu()
+}
+async function submitModelDlg() {
+  if (modelDlg.busy || modelDlg.done) return
+  modelDlg.busy = true; modelDlg.error = ''; modelDlg.manual = ''
+  const r = await modelSwitcher.run(modelDlg.name, modelDlg.st, modelDlg.target.id)
+  modelDlg.busy = false
+  if (r.ok) modelDlg.done = r.message
+  else { modelDlg.error = r.message; modelDlg.manual = r.manual }
+}
+async function copyModelManual() {
+  try { await navigator.clipboard.writeText(modelDlg.manual); modelDlg.copied = true } catch (e) { console.info('[ASN] 複製失敗', e.message) }
+}
 function buddyMenuOpenChat() {
   const c = buddyMenuFriend.value
   closeBuddyMenu()
@@ -328,9 +360,12 @@ async function openBuddyMenu(c, e) {
   buddyMenuFriend.value = c
   buddyMenu.value = c.id
   buddyConsole.visible = true
+  const eng = c.engine || engineForProfile(c.launchProfile || 'claude')
+  resetBuddyModel()
+  buddyModel.show = canOfferModelSwitch(c, { selfNode: info.node, engine: eng })
+  if (buddyModel.show) void loadBuddyModel(c)
   if (c.node !== info.node || c.engine === 'acp' || c.pending) { buddyConsole.state = 'none'; return }
   buddyConsole.state = 'checking'
-  const eng = c.engine || engineForProfile(c.launchProfile || 'claude')
   const q = await withTimeout(transport.partnerConsoleQuery({ engine: eng, name: c.agent || c.nick }), CONSOLE_QUERY_TIMEOUT_MS)
   if (buddyMenuFriend.value !== c) return   // 使用者已經關掉或換開別人的選單
   if (q?.can_toggle ?? q?.canToggle) {
@@ -841,6 +876,7 @@ const app = createApp({
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddyConsoleItemView, buddyMenuOpenChat, toggleBuddyConsole,
+      buddyModel, buddyModelLabel, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,
       launchToolRows, launchPrefs, launchCwdText, saveLaunchPrefs, setLaunchCwdText,
     }
   },
