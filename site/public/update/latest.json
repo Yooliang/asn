@@ -1,11 +1,11 @@
 {
-  "version": "0.1.18",
-  "notes": "你在 ASN 視窗打的字會附上本人簽章，對方收到時標成主人；AI 寄的信不受影響。名單上別台設備顯示「有新版」時可以直接按「更新」，那台會自己下載、驗簽、安裝並重開。",
-  "pub_date": "2026-10-21T14:39:29.553Z",
+  "version": "0.1.19",
+  "notes": "修正安裝更新後重開時誤判「已經有一個 ASN 在跑」而無法啟動；換模型重開的視窗恢復文字顏色（開視窗一律清掉繼承來的 NO_COLOR 等環境變數）。",
+  "pub_date": "2026-10-21T15:40:43.698Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybnk0dVV0VGZiTFZIWlEzZWhINHEraVVsOEROL0xQdUo0WjR5VFN5SXpJN2dDT1JLZXlKVTkva1VJUDNVQ0NoUlZWS3VBZkliUEVQUG9SaFJPSG9WUXdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNTkzNTY4CWZpbGU6QVNOXzAuMS4xOF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjE4CjRmZy9CdG5aUDhnc0pSUllvMkhLdDhyaVIydGxsYlhKb2hDMzJtNnFvcDc5dFMvVmZhWG4wWndmalRLemg0WVNnOUViQjd3bTU4ZTF3aUxIazBjdkRRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.18_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjhMVHM5YVhzRTBBdkY4cUZSWFQrU25BMjlONklEMStBT1J1NFJRWWFFdTdwRThsNmN0Q2NOa1Z0SnlCblNGMHlyaWR3M0w1K3ZLUmxCcU0vZ3hHU3c4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNTk3MjQzCWZpbGU6QVNOXzAuMS4xOV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjE5Ckl2blR4SVJ1RnBuZDBpL29VMWoyNlkzYldScldGQ2ZHbVNPYnc0TkZONXZjUW85YWZ3M09yWlM2UDlFODNFelQybUNRTEhoYm50QkFrTXVWK25iSkFBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.19_x64-setup.exe"
     }
   }
 }
