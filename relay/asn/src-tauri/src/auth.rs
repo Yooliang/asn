@@ -680,6 +680,12 @@ mod tests {
     }
 
     // ----- 本機伺服器：真的連 127.0.0.1 -----
+    // 這幾個測試都從 49200 起搶埠；平行跑時，別的測試會在這裡剛放掉的埠上重新監聽（Linux 上立刻就搶得到），
+    // 害「收完就關閉」的檢查連到別人的伺服器。所以同一時間只讓一個測試占用回送埠。
+    static LOOPBACK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn loopback_guard() -> std::sync::MutexGuard<'static, ()> {
+        LOOPBACK_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
     fn get(port: u16, target: &str) -> String {
         let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
         write!(s, "GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n").unwrap();
@@ -690,6 +696,7 @@ mod tests {
 
     #[test]
     fn 伺服器只收一次有效回呼_雜訊不會中斷_收完就關閉() {
+        let _g = loopback_guard();
         let (l, port) = bind_loopback().unwrap();
         assert!((PORT_FIRST..=PORT_LAST).contains(&port));
         let cancel = Arc::new(AtomicBool::new(false));
@@ -708,6 +715,7 @@ mod tests {
 
     #[test]
     fn 伺服器逾時與取消() {
+        let _g = loopback_guard();
         let (l, port) = bind_loopback().unwrap();
         let cancel = AtomicBool::new(false);
         let e = wait_for_code(l, port, "S", Duration::from_millis(200), &cancel).unwrap_err();
@@ -719,6 +727,7 @@ mod tests {
 
     #[test]
     fn 伺服器收到登入失敗回呼就回報原因() {
+        let _g = loopback_guard();
         let (l, port) = bind_loopback().unwrap();
         let cancel = Arc::new(AtomicBool::new(false));
         let c2 = cancel.clone();

@@ -337,6 +337,8 @@ mod tests {
 
     #[tokio::test]
     async fn 信任自己的設備_不用確認也會切() {
+        // 待辦表 TAKEN 是全域的，跟上一個測試平行跑時不能共用同一個編號（會被對方取走）
+        const U4: &str = "44444444-2222-3333-4444-555555555555";
         let home = tempfile::tempdir().unwrap();
         let data = tempfile::tempdir().unwrap();
         let h = home.path().to_path_buf();
@@ -346,12 +348,12 @@ mod tests {
         claude_accounts::save_current(&h).unwrap();
         login(&h, "u-a", "a@x.test", "A");
         set_trust_own(data.path(), true).unwrap();
-        let (url, _seen) = fake_server(vec![json!({ "id": U, "requested_by": "H", "vendor": "claude", "email": "b@x.test" })]);
+        let (url, _seen) = fake_server(vec![json!({ "id": U4, "requested_by": "H", "vendor": "claude", "email": "b@x.test" })]);
         let relay = Relay::new(url, "k".into(), "W".into(), "W-ASN".into());
         let p = pending(&relay, data.path()).await.unwrap();
         assert!(!p[0].needs_confirm);
         let h2 = h.clone();
-        apply_with(&relay, data.path(), U.into(), false, move |e| claude_accounts::switch_to(&h2, e).map(|o| o.notice).map_err(|e| e.to_string())).await.unwrap();
+        apply_with(&relay, data.path(), U4.into(), false, move |e| claude_accounts::switch_to(&h2, e).map(|o| o.notice).map_err(|e| e.to_string())).await.unwrap();
         assert!(std::fs::read_to_string(h.join(".claude").join(".credentials.json")).unwrap().contains("FAKE-B"));
     }
 
