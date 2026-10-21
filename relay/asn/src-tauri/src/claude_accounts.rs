@@ -117,23 +117,7 @@ fn account_dir(home: &Path, name: &str) -> R<PathBuf> {
 }
 
 // ---------- 檔案：原子寫入、權限 ----------
-fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    let dir = path.parent().ok_or_else(|| std::io::Error::other("no parent"))?;
-    std::fs::create_dir_all(dir)?;
-    let tmp = dir.join(format!(".asn-tmp-{}-{}", std::process::id(), path.file_name().and_then(|s| s.to_str()).unwrap_or("f")));
-    let res = (|| {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
-        drop(f);
-        std::fs::rename(&tmp, path)
-    })();
-    if res.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    res
-}
+use crate::claude_json::write_atomic;
 
 /// 資料夾權限只給本人。Windows 用 icacls 拿掉繼承、只授權目前使用者；其他系統用 0700。
 /// 盡力而為（失敗只印固定字串，不影響功能；帳號庫本來就在家目錄底下，不是共享位置）。
