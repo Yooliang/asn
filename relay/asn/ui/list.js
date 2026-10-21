@@ -18,7 +18,7 @@ import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pen
 import { bumpRecentCwd, cwdChoices, normalizeLaunchPrefs } from './lib/launch-prefs.mjs'
 import { DISPLAY_MODES, consoleToggleLabel, engineForProfile, launchDeviceRows, launchDisableReason, showDisplayModeChoice } from './lib/partner-launch-ui.mjs'
 import { friendId } from './lib/roster.mjs'
-import { VENDOR_ICON_KEYS, vendorIconSvg } from './lib/vendor-icons.mjs'
+import { vendorIconSvg } from './lib/vendor-icons.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
@@ -571,7 +571,7 @@ const app = createApp({
       STATUS, CONN_LABEL, FIXED_TABS, ADS, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, soundOn, friends, conn, shown, query, collapsed, nickErr, commitNick,
       tab, adI, rooms, roomsErr, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote,
       GUIDES, openedGuide, view, openGuideKey, closeGuideView, showHome,
-      selfNode: info.node, emo, initial, openChat, ctl,
+      selfNode: info.node, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg,
       searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickLaunchDevice,
       DISPLAY_MODES, partnerShowDisplay,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerModels, partnerCwdChoices, pickPartnerModel, submitPartnerDlg,
@@ -580,10 +580,6 @@ const app = createApp({
     }
   },
 })
-for (const k of VENDOR_ICON_KEYS) {
-  const inner = vendorIconSvg(k)
-  app.component(`vi-${k}`, { template: `<span class="rtab-vendor">${inner}</span>` })
-}
 app.component('chat-pane', ChatPane)
 // 一篇指引的顯示：全部用文字插值（不用 v-html），步驟自動編號
 app.component('guide-doc', {
