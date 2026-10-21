@@ -404,3 +404,14 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .an-msg{position:absolute;left:50%;bottom:8px;transform:translateX(-50%);padding:4px 10px;border-radius:4px;background:rgba(160,30,25,.9);font-size:13px}
 .an-foot{display:flex;align-items:center;gap:8px;padding:6px 10px;flex:none}
 .an-cap{flex:1;min-width:0;padding:4px 8px;border:1px solid var(--line);border-radius:3px;font:inherit}
+/* 設定頁：Claude 帳號 */
+.acct-set{display:flex;flex-direction:column;gap:6px}
+.acct-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.acct-list li{display:flex;align-items:center;gap:6px}
+.acct-txt{flex:1;min-width:0;display:flex;flex-direction:column}
+.acct-name em{font-style:normal;margin-left:6px;font-size:11px;color:#2a7a3a}
+.acct-txt small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acct-list .aero-btn{white-space:nowrap;font-size:12px;padding:3px 8px}
+.acct-add{display:flex;gap:6px}
+.acct-add input{flex:1;min-width:0;border:1px solid var(--line);border-radius:3px;padding:3px 6px;background:var(--panel);font:inherit}
+.acct-add .aero-btn{white-space:nowrap;font-size:12px;padding:3px 8px}

@@ -149,6 +149,19 @@
             <div class="av-btns"><button class="aero-btn" type="button" @click="installFromSettings" :disabled="voice.state.install.busy || (sttSt && sttSt.ready)">下載語音辨識</button></div>
             <small role="status">{{ voice.state.install.text || voiceMsg || sttText }}</small>
           </div>
+          <div class="acct-set">
+            <b>Claude 帳號</b>
+            <ul class="acct-list" v-if="accounts.state.list.length">
+              <li v-for="a in accounts.state.list" :key="a.name">
+                <span class="acct-txt"><span class="acct-name">{{ a.name }}<em v-if="a.current">使用中</em></span><small>{{ accountLine(a) }}</small></span>
+                <button class="aero-btn" type="button" @click="accounts.switchTo(a.name)" :disabled="accounts.state.busy || a.current">切換</button>
+                <button class="aero-btn" type="button" @click="accounts.remove(a.name)" :disabled="accounts.state.busy">{{ accounts.state.confirmDel === a.name ? '確認刪除' : '刪除' }}</button>
+              </li>
+            </ul>
+            <small v-else>還沒有存過帳號。</small>
+            <div class="acct-add"><input v-model="accounts.state.name" maxlength="40" placeholder="幫目前登入取個名字" aria-label="帳號名稱" @keydown.enter="accounts.save()"><button class="aero-btn" type="button" @click="accounts.save()" :disabled="accounts.state.busy || !accounts.state.name.trim()">存成帳號</button></div>
+            <small role="status">{{ accounts.state.msg }}</small>
+          </div>
           <label>視窗外框
             <select class="set-sel" :value="frame" @change="setFrame($event.target.value)" aria-label="視窗外框"><option v-for="f in FRAMES" :key="f" :value="f">{{ FRAME_LABEL[f] }}</option></select>
           </label>
