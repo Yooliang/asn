@@ -223,3 +223,19 @@ test('介面：麥克風按鈕任何時候都不 disabled、Esc 可取消、有�
   assert.match(v, /聆聽中/)
   assert.match(v, /辨識中…按一下取消/)
 })
+
+test('計時器預設值不能直接放 setTimeout／clearTimeout（WebView2 當成 this.setTimer() 呼叫會丟 Illegal invocation）', () => {
+  const v = fs.readFileSync(new URL('../ui/lib/voice-input.mjs', import.meta.url), 'utf8')
+  assert.doesNotMatch(v, /setTimer\s*=\s*setTimeout\b/)
+  assert.doesNotMatch(v, /clearTimer\s*=\s*clearTimeout\b/)
+  // 模擬瀏覽器：this 不是 window 就丟錯的 setTimeout
+  const strict = function (fn, ms) { if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation'); return setTimeout(fn, ms) }
+  const holder = { setTimer: (fn, ms) => strict(fn, ms) }
+  assert.doesNotThrow(() => clearTimeout(holder.setTimer(() => {}, 1)))
+})
+
+test('語音狀態文字放在底下狀態列，不放在輸入框上方', () => {
+  const s = fs.readFileSync(new URL('../ui/lib/chatpane.mjs', import.meta.url), 'utf8')
+  assert.ok(!s.includes('class="voice-note"'), '輸入框上方不再有 voice-note')
+  assert.match(s, /<div class="typing"[^>]*>\s*<template v-if="voiceNote">\{\{ voiceNote \}\}<\/template>/)
+})

@@ -171,7 +171,7 @@ export const ChatPane = {
           <div v-else class="msg" :class="['al-' + lay(m.k).align, { mine: m.k === 'me' }]">
             <div class="m-av" v-if="lay(m.k).avatar"><div class="dp xs" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span><img :src="friendAv" alt=""></span></div></div>
             <div class="m-main">
-              <div class="who">{{ m.k === 'me' ? plain(me.nick) : plain(friend.nick) }} 說：<time>{{ fmt(m.t) }}</time>
+              <div class="who">{{ m.k === 'me' ? plain(me.nick) : plain(friend.nick) }}：<time>{{ fmt(m.t) }}</time>
                 <button v-if="voice && m.k === 'them' && m.text" class="spk" :class="{ on: speaking(m, i) }" type="button" @click="speak(m, i)" :aria-label="speakTip(m, i)" :title="speakTip(m, i)">
                   <svg v-if="!speaking(m, i)" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 9.5v5h3.6L12 18.5v-13L7.6 9.5z" fill="currentColor"/><path d="M15 9.2a4 4 0 0 1 0 5.6M17.4 6.8a7.4 7.4 0 0 1 0 10.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
                   <svg v-else viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/></svg>
@@ -235,7 +235,6 @@ export const ChatPane = {
         <button class="aero-btn" type="button" :disabled="voice.state.install.busy" @click="voice.installStt()">下載</button>
         <button class="aero-btn" type="button" :disabled="voice.state.install.busy" @click="voice.dismissInstall()">取消</button>
       </div>
-      <div class="voice-note" v-if="voiceNote" role="status">{{ voiceNote }}</div>
       <form class="composer" @submit.prevent="send">
         <textarea ref="composeEl" v-model="draft" @keydown.enter.exact.prevent="send" @paste="onPaste" :placeholder="composeHint" :title="composeTitle || undefined" aria-label="輸入訊息"></textarea>
         <button class="aero-btn" type="submit" :disabled="!draft.trim()">傳送</button>
@@ -246,8 +245,9 @@ export const ChatPane = {
       <div class="dp xl" :class="'st-' + me.status" :style="{ '--h': 205 }"><span><img :src="meAv" alt=""></span></div>
     </div>
   </div>
-  <div class="typing">
-    <template v-if="photoMsg">{{ photoMsg }}</template>
+  <div class="typing" role="status">
+    <template v-if="voiceNote">{{ voiceNote }}</template>
+    <template v-else-if="photoMsg">{{ photoMsg }}</template>
     <template v-else-if="friend.waiting">✎ 已送出，等對方回信…</template>
     <template v-else-if="friend.lastAt">上次接收訊息是 {{ fmtDate(friend.lastAt) }}</template>
   </div>
