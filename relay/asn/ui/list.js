@@ -94,6 +94,12 @@ try {
   autostart.supported = await invoke('autostart_supported')
   if (autostart.supported) autostart.on = await invoke('autostart_get')
 } catch { /* 沒有這些指令（舊版後端）就不顯示 */ }
+// 內建收發室橋（預設關）：狀態以 Rust 端為準，不存檔。程式在 bridge/
+const bridge = reactive({ enabled: false, running: false, legacy: false, takeoverAllowed: false, error: '', busy: false, confirm: false, shown: false })
+const applyBridgeStatus = s => {
+  Object.assign(bridge, { enabled: s.enabled === true, running: s.running === true, legacy: s.legacy === true, takeoverAllowed: s.takeover_allowed === true, error: s.error || '', shown: true })
+}
+try { applyBridgeStatus(await invoke('bridge_status')) } catch { /* 舊版後端沒有這個指令就不顯示 */ }
 // 自動更新：啟動與每 6 小時檢查；有新版只在名單上方顯示一條通知，使用者按「更新」才下載安裝（--shot 模式不檢查）。程式在 updater.rs
 const autoCheck = ref(autoCheckFromSaved(savedMe.autoUpdate))
 const upd = reactive({ ...initialUpdateState(), checking: false, manual: '', lastCheck: 0, checkErr: '' })
@@ -599,6 +605,13 @@ const app = createApp({
       autostart.busy = true
       try { await invoke('autostart_set', { on }); autostart.on = on } catch (e) { say(String(e?.message ?? e)); autostart.on = await invoke('autostart_get').catch(() => autostart.on) } finally { autostart.busy = false }
     }
+    // 設定頁「讓 ASN 負責這台的收發室」與「改由 ASN 負責」（停舊版收發室橋，要再按一次確認）
+    const runBridge = async fn => {
+      bridge.busy = true
+      try { applyBridgeStatus(await fn()) } catch (e) { bridge.error = String(e?.message ?? e); say(bridge.error) } finally { bridge.busy = false; bridge.confirm = false }
+    }
+    const setBridgeEnabled = on => runBridge(() => invoke('bridge_set_enabled', { on }))
+    const takeoverBridge = () => runBridge(() => invoke('bridge_takeover', { confirmed: true }))
     // 指引、設定的聊天窗（openPanel／closePanel 在上面）：列表只負責「點一項就開」，內容在右邊分頁或獨立視窗
     const panelGuide = computed(() => panelItem('guide', ui.panel.guide))
     const catSub = key => catSummary(key, {
@@ -757,6 +770,7 @@ const app = createApp({
         remote: { node: accounts.state.remote.node, devices: accounts.remoteNodes(), list: accounts.state.remote.list, loading: accounts.state.remote.loading, busy: accounts.state.remote.busy, msg: accounts.state.remote.msg },
       },
       closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy },
+      bridge: bridge.shown ? { enabled: bridge.enabled, running: bridge.running, legacy: bridge.legacy, takeoverAllowed: bridge.takeoverAllowed, error: bridge.error, busy: bridge.busy, confirm: bridge.confirm } : null,
       autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual, status: updateStatus({ checking: upd.checking, phase: upd.phase, info: upd.info, lastCheck: upd.lastCheck, error: upd.checkErr, current: info.version }) },
       launch: { tools: launchToolRows.value, maxPerHour: launchPrefs.maxPerHour, cwdText: launchCwdText.value },
       version: info.version,
@@ -782,6 +796,10 @@ const app = createApp({
         case 'acct-trust': await accounts.setTrust(value === true); break
         case 'closeTo': await setCloseTo(value); break
         case 'autostart': await setAutostart(value === true); break
+        case 'bridge-enable': await setBridgeEnabled(value === true); break
+        case 'bridge-takeover': bridge.confirm = true; break
+        case 'bridge-takeover-yes': await takeoverBridge(); break
+        case 'bridge-takeover-no': bridge.confirm = false; break
         case 'autoCheck': autoCheck.value = value === true; break
         case 'check-update': await checkUpdate(true); break
         case 'launch-max': launchPrefs.maxPerHour = Number.isFinite(value) ? value : 6; await saveLaunchPrefs(); break
