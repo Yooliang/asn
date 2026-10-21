@@ -18,7 +18,7 @@ export const RECOGNIZE_TIMEOUT_MS = 75_000   // 辨識最久等多久（Rust 端
 const CANCELLED = Symbol('cancelled')
 
 export class VoiceInput {
-  constructor({ mic, transcribe, onState = () => {}, onNote = () => {}, onText = () => {}, onCancelRecognize = () => {}, tailMs = TAIL_MS, wait = ms => new Promise(r => setTimeout(r, ms)), setTimer = setTimeout, clearTimer = clearTimeout, log = () => {}, startTimeoutMs = START_TIMEOUT_MS, stopTimeoutMs = STOP_TIMEOUT_MS, recognizeTimeoutMs = RECOGNIZE_TIMEOUT_MS }) {
+  constructor({ mic, transcribe, onState = () => {}, onNote = () => {}, onText = () => {}, onCancelRecognize = () => {}, tailMs = TAIL_MS, wait = ms => new Promise(r => setTimeout(r, ms)), setTimer = (fn, ms) => setTimeout(fn, ms), clearTimer = id => clearTimeout(id), log = () => {}, startTimeoutMs = START_TIMEOUT_MS, stopTimeoutMs = STOP_TIMEOUT_MS, recognizeTimeoutMs = RECOGNIZE_TIMEOUT_MS }) {
     Object.assign(this, { mic, transcribe, onState, onNote, onText, onCancelRecognize, tailMs, wait, setTimer, clearTimer, log, startTimeoutMs, stopTimeoutMs, recognizeTimeoutMs })
     this.state = 'idle'   // idle | starting | recording | recognizing
     this.lastDropped = null   // 最近一次被當成幻覺丟掉的原文（除錯用）

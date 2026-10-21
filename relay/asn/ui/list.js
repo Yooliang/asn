@@ -397,6 +397,13 @@ const app = createApp({
     const closeChatTabMenu = () => { chatTabMenu.value = '' }
     const chatTabMenuPos = reactive({ x: 0, y: 0 })   // 選單出現在滑鼠位置（position:fixed），不受分頁列裁切
     const openChatTabMenu = (id, e) => { chatTabMenuPos.x = e?.clientX ?? 0; chatTabMenuPos.y = e?.clientY ?? 0; chatTabMenu.value = id }
+    // 按選單以外任何地方（含拖曳區、別的元件攔掉 click 的地方、右鍵）、按 Esc、視窗失焦都收起選單。
+    // 用 pointerdown 捕獲階段：不靠 click 冒泡到 #app（有些區域會 stopPropagation 或是拖曳區不送 click）。
+    document.addEventListener('pointerdown', e => {
+      if (chatTabMenu.value && !(e.target instanceof Element && e.target.closest('.ctab-menu'))) closeChatTabMenu()
+    }, true)
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && chatTabMenu.value) closeChatTabMenu() })
+    window.addEventListener('blur', () => { if (chatTabMenu.value) closeChatTabMenu() })
     const tabPinLabel = computed(() => (chatTabMenuPin.value ? '取消固定分頁' : '固定分頁'))
     const runTabMenu = fn => { const id = chatTabMenu.value; closeChatTabMenu(); if (id) fn(id) }
     const menuCloseTab = () => runTabMenu(id => applyChatTabClose(closeChatTab(ui, id)))

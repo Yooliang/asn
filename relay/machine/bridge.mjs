@@ -4,6 +4,7 @@
 // - inbox: Realtime bell + 2 min poll -> 轉接器 deliver（Claude：收發室 worker，claude -p，只有 ListAgents/SendMessage）
 //   -> SendMessage 給本機視窗 -> 等回覆（onReply）-> relay send (reply_to) back to the sender
 // No private Claude Code protocol is used; everything goes through public CLI flags and the public SendMessage tool.
+import { pickAnon } from './anon.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -62,7 +63,7 @@ function readSecret(env, file) {
   try { return fs.readFileSync(path.join(HOME_DIR, file), 'utf8').trim() } catch { return '' }
 }
 const KEY = readSecret('IRORI_RELAY_KEY', `${NODE_ID}.key`)
-const ANON_KEY = readSecret('IRORI_RELAY_ANON_KEY', 'anon.key')
+const ANON_KEY = pickAnon(BASE_URL, [process.env.IRORI_RELAY_ANON_KEY, readSecret('', 'anon.key')])   // 內建新後台的 anon；殘留的舊專案 anon.key 會被跳過
 if (!KEY) { console.error(`no relay key (${path.join(HOME_DIR, NODE_ID + '.key')})`); process.exit(2) }
 
 async function api(action, { method = 'GET', body } = {}) {
