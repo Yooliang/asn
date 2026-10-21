@@ -7,6 +7,7 @@
 //!
 //! 為什麼用外部程式而不是 whisper-rs：whisper-rs 要在每個開發者與 CI 的機器上編 C++（要 cmake、libclang），
 //! 這期先用官方預編譯的執行檔；之後要內嵌再換，介面（stt_status／stt_install／stt_transcribe）不變。
+use crate::nowin::NoWindow;
 use crate::App;
 use base64::Engine;
 use serde::Serialize;
@@ -669,12 +670,14 @@ mod tests {
         let mut c = {
             let mut c = tokio::process::Command::new("ping.exe");
             c.args(["-n", "40", "127.0.0.1"]);
+            c.no_window();
             c
         };
         #[cfg(not(windows))]
         let mut c = {
             let mut c = tokio::process::Command::new("sleep");
             c.arg("40");
+            c.no_window();
             c
         };
         c.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).kill_on_drop(true);
@@ -683,12 +686,12 @@ mod tests {
     fn alive(pid: u32) -> bool {
         #[cfg(windows)]
         {
-            let o = std::process::Command::new("tasklist").args(["/FI", &format!("PID eq {pid}"), "/NH"]).output().unwrap();
+            let o = std::process::Command::new("tasklist").no_window().args(["/FI", &format!("PID eq {pid}"), "/NH"]).output().unwrap();
             String::from_utf8_lossy(&o.stdout).contains(&format!(" {pid} "))
         }
         #[cfg(not(windows))]
         {
-            std::process::Command::new("kill").args(["-0", &pid.to_string()]).status().map(|s| s.success()).unwrap_or(false)
+            std::process::Command::new("kill").no_window().args(["-0", &pid.to_string()]).status().map(|s| s.success()).unwrap_or(false)
         }
     }
 
@@ -728,13 +731,18 @@ mod tests {
         let c = {
             let mut c = tokio::process::Command::new("cmd");
             c.args(["/C", "exit", "0"]);
+            c.no_window();
             c
         };
         #[cfg(not(windows))]
-        let c = tokio::process::Command::new("true");
-        let s = run_with_deadline(c, Duration::from_secs(20), &n, |_| {}).await.unwrap();
+        let c = {
+            let mut c = tokio::process::Command::new("true");
+            c.no_window();
+            c
+        };
+        let s =run_with_deadline(c, Duration::from_secs(20), &n, |_| {}).await.unwrap();
         assert!(s.success());
-        let e = run_with_deadline(tokio::process::Command::new("no-such-program-xyz"), Duration::from_secs(1), &n, |_| {}).await.unwrap_err();
+        let e = run_with_deadline({ let mut c = tokio::process::Command::new("no-such-program-xyz"); c.no_window(); c }, Duration::from_secs(1), &n, |_| {}).await.unwrap_err();
         assert!(e.contains("啟動失敗"), "{e}");
     }
 

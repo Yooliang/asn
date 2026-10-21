@@ -1,5 +1,6 @@
 //! 僅偵測 PATH 上是否有 CLI 指令；不讀取 ~/.claude、auth.json 等任何憑證檔。
 
+use crate::nowin::NoWindow;
 use std::path::PathBuf;
 
 pub fn binary_on_path(name: &str) -> bool {
@@ -21,7 +22,7 @@ pub fn resolve_binary(name: &str) -> Option<PathBuf> {
     }
     #[cfg(windows)]
     {
-        let out = std::process::Command::new("where")
+        let out = std::process::Command::new("where").no_window()
             .arg(name)
             .output()
             .ok()?;
@@ -37,7 +38,7 @@ pub fn resolve_binary(name: &str) -> Option<PathBuf> {
     }
     #[cfg(not(windows))]
     {
-        let out = std::process::Command::new("sh")
+        let out = std::process::Command::new("sh").no_window()
             .arg("-c")
             .arg(format!("command -v {name}"))
             .output()

@@ -43,16 +43,20 @@ test('步驟編號：連續的步驟從 1 數，遇到小標、指令或注意�
   assert.equal(GUIDES[0].blocks.some(b => 'n' in b), false)
 })
 
-test('守門：指引畫面一律用文字插值（沒有 v-html）；指引改開對話框、不再有右邊分頁；沒有任何外部腳本', () => {
+test('守門：指引畫面一律用文字插值（沒有 v-html）；點一篇開聊天窗（整合＝右邊分頁、分離＝獨立視窗），不再彈對話框；沒有任何外部腳本', () => {
   const dir = new URL('../ui/', import.meta.url)
-  const html = fs.readFileSync(new URL('list.html', dir), 'utf8'), js = fs.readFileSync(new URL('list.js', dir), 'utf8')
+  const read = f => fs.readFileSync(new URL(f, dir), 'utf8').replace(/\r\n/g, '\n')
+  const html = read('list.html'), js = read('list.js'), doc = read('lib/guide-doc.mjs'), panelHtml = read('panel.html'), panelJs = read('panel.js')
   const guideBlock = /<div class="list guide-list"[\s\S]*?<\/ul>/.exec(html)[0]
   assert.ok(!/v-html/.test(guideBlock), '指引清單不用 v-html')
-  const comp = /app\.component\('guide-doc'[\s\S]*?\n\}\)/.exec(js)[0]
-  assert.ok(!/v-html/.test(comp), '指引內文不用 v-html')
-  assert.ok(!html.includes('guide-tab') && !html.includes('guide-pane') && !/view === 'guide'/.test(html), '整合模式不再有右邊的指引分頁')
-  assert.ok(!/rightView|openGuide\b|hideGuide|showGuide|openedGuide/.test(js + html), '舊的分頁邏輯都拿掉了')
-  assert.ok(html.includes('@click="openGuideDlg(g.key)"') && html.includes('<guide-doc v-if="dlg.kind === \'guide\'"'), '點標題開對話框，內容放在對話框裡')
+  assert.ok(!/v-html/.test(doc), '指引內文不用 v-html')
+  assert.ok(doc.includes('numbered(props.guide.blocks)') && /export const GuideDoc/.test(doc))
+  assert.ok(js.includes("app.component('guide-doc', GuideDoc)") && panelJs.includes("app.component('guide-doc', GuideDoc)"), '兩邊用同一個元件')
+  assert.ok(!html.includes('guide-tab') && !html.includes('guide-pane') && !/view === 'guide'/.test(html), '舊的右邊指引分頁（view 切換）都拿掉了')
+  assert.ok(!/rightView|openGuide\b|hideGuide|showGuide|openedGuide|openGuideDlg|dlg\.kind|closeDlg/.test(js + html), '舊的分頁與對話框邏輯都拿掉了')
+  assert.ok(html.includes('@click="openPanel(\'guide\', g.key)"'), '點標題開指引聊天窗')
+  assert.ok(html.includes('<guide-doc v-if="k === \'guide\'" :guide="panelGuide">'), '整合模式內容放在右邊的面板分頁')
+  assert.ok(panelHtml.includes('<guide-doc v-if="kind === \'guide\' && guide"'), '分離模式內容放在獨立視窗')
   assert.ok(!/b-psm">\{\{ g\.sub/.test(html), '列表只列標題')
-  assert.ok(!/<script[^>]+src="https?:/.test(html), '不載入外部腳本')
+  assert.ok(!/<script[^>]+src="https?:/.test(html + panelHtml), '不載入外部腳本')
 })

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { splitTabs } from '../ui/lib/panels.mjs'
 import { DEFAULT_LOOK, DEFAULT_SIZE, closeTab, foldArrow, hasSideCol, isCollapsed, msgLayout, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, normalizeToolbar, openTab, paneClasses, sideOf, switchMode, tabVisible, toggleCollapsed } from '../ui/lib/merge.mjs'
 
 const UI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ui')
@@ -53,6 +54,19 @@ test('切模式：整合→分離＝每個分頁開成一扇視窗、分頁清�
   const there = switchMode('split', 'merged', { windowIds: ['W/a', 'W/b'] })
   const back = switchMode('merged', 'split', there)
   assert.deepEqual(back.openWindows, ['W/a', 'W/b'])
+})
+
+test('切模式：指引、設定的分頁不是好友——先拆開，好友的對話照舊轉，面板另外轉成視窗或分頁', () => {
+  const tabs = ['W/a', '@setting', 'W/b', '@guide']
+  const { chats, panels } = splitTabs(tabs)
+  assert.deepEqual(chats, ['W/a', 'W/b'])
+  assert.deepEqual(panels, ['setting', 'guide'])
+  const r = switchMode('merged', 'split', { tabs: chats, active: 'W/a' })
+  assert.deepEqual(r.openWindows, ['W/a', 'W/b'], '面板分頁不會被當成好友開對話視窗')
+  const back = switchMode('split', 'merged', { windowIds: ['W/a'] })
+  assert.deepEqual(back.tabs, ['W/a'])
+  const hub = fs.readFileSync(path.join(UI, 'list.js'), 'utf8')
+  assert.ok(hub.includes("await invoke('close_panels')") && hub.includes('closedPanels.map(panelTabId)') && hub.includes('await openPanel(kind, ui.panel[kind])'), '樞紐切模式時也轉指引、設定')
 })
 
 test('視窗大小：整合視窗預設 900×640；存檔壞掉／太小／不是數字都退回預設；合理值照用並取整', () => {
@@ -187,7 +201,10 @@ test('守門：元件依 paneClasses／msgLayout／foldArrow 排版；樞紐用 
   for (const label of ['關閉', '關閉其他', '關閉右側', '全部關閉']) assert.ok(htmlTab.includes(label), `list.html 缺 ${label}`)
   assert.ok(htmlTab.includes('menuTogglePin') && htmlTab.includes('tabPinLabel'))
   const html = fs.readFileSync(path.join(UI, 'list.html'), 'utf8')
-  for (const k of ['v-model="ui.dpMode"', 'v-model="ui.bubble"', 'v-model="ui.toolbar"', 'setMode($event.target.value)']) assert.ok(html.includes(k), `list.html 缺 ${k}`)
+  // 外觀設定的下拉在設定聊天窗的元件裡（整合模式的分頁與分離視窗共用），改了都經樞紐的 applySetting
+  const setPanel = fs.readFileSync(path.join(UI, 'lib', 'settings-panel.mjs'), 'utf8')
+  for (const k of ["act('dpMode'", "act('bubble'", "act('toolbar'", "act('mode'"]) assert.ok(setPanel.includes(k), `settings-panel.mjs 缺 ${k}`)
+  for (const k of ["case 'dpMode': ui.dpMode = normalizeDpMode(value)", "case 'bubble': ui.bubble = normalizeBubble(value)", "case 'mode': await setMode(value)"]) assert.ok(hub.includes(k), `list.js 缺 ${k}`)
   assert.ok(html.includes('isChatTabPinned'))
 })
 
@@ -196,4 +213,34 @@ test('分頁右鍵選單：按選單以外任何地方（pointerdown 捕獲）�
   assert.match(js, /addEventListener\('pointerdown'[\s\S]*closest\('\.ctab-menu'\)[\s\S]*closeChatTabMenu\(\)[\s\S]*true\)/)
   assert.match(js, /Escape' && chatTabMenu\.value\) closeChatTabMenu\(\)/)
   assert.match(js, /addEventListener\('blur'[\s\S]*closeChatTabMenu\(\)/)
+})
+
+// 守門：#60 改壞過——欄寬不夠把大頭貼裁一半、兩顆擠在最上面、收合鈕變成欄底小箭頭
+test('守門：側欄寬度不小於大頭貼 xl 尺寸；對方在上、自己在下；橫條收合鈕在兩顆大頭貼之後；收起時仍可點', () => {
+  const css = fs.readFileSync(path.join(UI, 'style.css'), 'utf8')
+  const xl = Number(/\.dp\.xl\{width:(\d+)px/.exec(css)[1])
+  const varXl = Number(/\.dp-side\{--dp-xl:(\d+)px/.exec(css)[1])
+  assert.ok(varXl >= xl, '側欄大頭貼尺寸變數不得小於 xl')
+  assert.ok(/\.dp-side\{[^}]*width:calc\(var\(--dp-xl\) \+ \d+px\)/.test(css), '側欄寬度要由 xl 尺寸算出')
+  assert.ok(!/\.dp-side\{[^}]*;width:\d+px/.test(css), '側欄不得寫死像素寬度')
+  assert.ok(/\.dp-side-stack\{[^}]*justify-content:space-between/.test(css), '兩顆大頭貼上下分開，不擠在最上面')
+  assert.ok(/\.dp-fold-strip\{flex:1/.test(css), '收起時留一條整欄高的可點條')
+  const pane = fs.readFileSync(path.join(UI, 'lib', 'chatpane.mjs'), 'utf8')
+  const i = pane.indexOf('<aside class="dp-side"')
+  const f = pane.indexOf("'st-' + friend.status", i), bar1 = pane.indexOf('class="dp-fold-bar"', f), m = pane.indexOf("'st-' + me.status", i), bar2 = pane.indexOf('class="dp-fold-bar"', m)
+  assert.ok(i > 0 && f > i && bar1 > f && m > bar1 && bar2 > m, '順序：對方大頭貼、其下橫條、自己大頭貼、其下橫條')
+  assert.ok(pane.includes('class="dp-fold-strip"'), '收起狀態要有可展開的條')
+  assert.ok(/\.dp-grp\{[^}]*width:var\(--dp-xl\)/.test(css), '橫條與大頭貼同寬')
+})
+
+test('「點一下換大頭貼」提示不被左側頁籤與名單蓋住：.me 自成較高的堆疊層', () => {
+  const css = fs.readFileSync(path.join(UI, 'style.css'), 'utf8')
+  assert.match(css, /\.me\{position:relative;z-index:50;/)
+})
+
+test('換大頭貼只出現一個提示：有自訂 data-tip 就不再加原生 title', () => {
+  const html = fs.readFileSync(path.join(UI, 'list.html'), 'utf8')
+  const btn = html.split(/\r?\n/).find(l => l.includes('class="dp me-dp"'))
+  assert.ok(btn.includes('data-tip="點一下換大頭貼"'))
+  assert.ok(!/\stitle="/.test(btn), '不能同時有 title（會出現兩個提示）')
 })

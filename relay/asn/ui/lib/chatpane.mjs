@@ -97,18 +97,25 @@ export const ChatPane = {
       } catch (e) { a.msg = e.message; a.busy = false }
     }
     function annotCancel() { annot.value = null; nextTick(() => composeEl.value && composeEl.value.focus()) }
-    // ---- 放大看：點縮圖才向收發室換下載網址（Rust 端）；可另存到「下載\ASN」 ----
+    // ---- 放大看：點縮圖才向收發室換下載網址（Rust 端）；另存時由系統對話框選位置 ----
     const viewer = ref(null)
     const expired = p => photoExpired(p)
-    // 一般檔案不預覽：點了就下載並存到「下載\ASN」，結果顯示在底下那一行
+    // 一般檔案不預覽：點了先跳出「另存新檔」選位置（取消就不下載），結果顯示在底下那一行
+    const savedHere = ref(false)
     async function saveFile(p) {
-      photoMsg.value = '下載中…'
-      try { photoMsg.value = `已存到：${await props.photoApi.save(p.id)}` } catch (e) { photoMsg.value = e.message }
+      savedHere.value = false; photoMsg.value = ''
+      try {
+        const path = await props.photoApi.save(p.id, p.name)
+        if (path) { photoMsg.value = `已存到：${path}`; savedHere.value = true }
+      } catch (e) { photoMsg.value = e.message }
+    }
+    async function revealSaved() {
+      try { await props.photoApi.reveal() } catch (e) { photoMsg.value = e.message; savedHere.value = false }
     }
     async function openPhoto(p) {
       if (!props.photoApi || photoExpired(p)) return
       if (p.kind === 'file') return saveFile(p)
-      viewer.value = { id: p.id, title: photoTitle(p), thumb: p.thumb, src: '', msg: '載入中…', busy: false }
+      viewer.value = { id: p.id, name: p.name, saved: false, title: photoTitle(p), thumb: p.thumb, src: '', msg: '載入中…', busy: false }
       try {
         const r = await props.photoApi.fetch(p.id)
         if (viewer.value && viewer.value.id === p.id) { viewer.value.src = r.data_url; viewer.value.msg = '' }
@@ -117,7 +124,11 @@ export const ChatPane = {
     async function saveViewer() {
       const v = viewer.value; if (!v || v.busy || !v.src) return
       v.busy = true
-      try { v.msg = `已存到：${await props.photoApi.save(v.id)}` } catch (e) { v.msg = e.message } finally { v.busy = false }
+      v.saved = false
+      try {
+        const path = await props.photoApi.save(v.id, v.name)
+        if (path) { v.msg = `已存到：${path}`; v.saved = true } else v.msg = ''
+      } catch (e) { v.msg = e.message } finally { v.busy = false }
     }
     const closeViewer = () => { viewer.value = null }
     function insertEmo(code) {
@@ -155,7 +166,7 @@ export const ChatPane = {
     }
     onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     const docEl = ref(null)
-    return { micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -247,15 +258,21 @@ export const ChatPane = {
   </div>
   <aside class="dp-side" v-if="sideCol" :class="'dp-side-' + side">
     <div class="dp-side-stack" v-show="!collapsed">
-      <div class="dp xl" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span><img :src="friendAv" alt=""></span></div>
-      <div class="dp xl" :class="'st-' + me.status" :style="{ '--h': 205 }"><span><img :src="meAv" alt=""></span></div>
+      <div class="dp-grp">
+        <div class="dp xl" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span><img :src="friendAv" alt=""></span></div>
+        <button class="dp-fold-bar" type="button" @click="$emit('toggle-dp')" :aria-label="foldTip" :aria-expanded="!collapsed" :title="foldTip">{{ barArrow }}</button>
+      </div>
+      <div class="dp-grp">
+        <div class="dp xl" :class="'st-' + me.status" :style="{ '--h': 205 }"><span><img :src="meAv" alt=""></span></div>
+        <button class="dp-fold-bar" type="button" @click="$emit('toggle-dp')" :aria-label="foldTip" :aria-expanded="!collapsed" :title="foldTip">{{ barArrow }}</button>
+      </div>
     </div>
-    <button class="dp-fold-bar" type="button" @click="$emit('toggle-dp')" :aria-label="foldTip" :aria-expanded="!collapsed" :title="foldTip">{{ barArrow }}</button>
+    <button class="dp-fold-strip" type="button" v-if="collapsed" @click="$emit('toggle-dp')" :aria-label="foldTip" :aria-expanded="false" :title="foldTip">{{ barArrow }}</button>
   </aside>
   </div>
   <div class="typing" role="status">
     <template v-if="voiceNote">{{ voiceNote }}</template>
-    <template v-else-if="photoMsg">{{ photoMsg }}</template>
+    <template v-else-if="photoMsg">{{ photoMsg }}<button v-if="savedHere" class="aero-btn" type="button" @click="revealSaved">開啟資料夾</button></template>
     <template v-else-if="friend.waiting">✎ 已送出，等對方回信…</template>
     <template v-else-if="friend.lastAt">上次接收訊息是 {{ fmtDate(friend.lastAt) }}</template>
   </div>
@@ -269,7 +286,7 @@ export const ChatPane = {
     <div class="pv-body" @click.self="closeViewer">
       <img v-if="viewer.src" :src="viewer.src" :alt="viewer.title">
       <img v-else-if="viewer.thumb" class="pv-thumb" :src="viewer.thumb" alt="">
-      <div class="pv-msg" v-if="viewer.msg" role="status">{{ viewer.msg }}</div>
+      <div class="pv-msg" v-if="viewer.msg" role="status">{{ viewer.msg }}<button v-if="viewer.saved" class="aero-btn" type="button" @click="revealSaved">開啟資料夾</button></div>
     </div>
   </div>
 </div>

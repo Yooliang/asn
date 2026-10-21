@@ -10,6 +10,7 @@ mod heartbeat;
 mod identity;
 mod launch;
 mod names;
+mod nowin;
 mod relay;
 mod shot;
 mod stt;
@@ -310,12 +311,50 @@ async fn relay_attachment_fetch(app: State<'_, App>, id: String) -> Result<Value
     Ok(serde_json::json!({ "name": d.name, "mime": d.mime, "data_url": attach::data_url(&d.bytes) }))
 }
 
-/// 另存：存到「下載\ASN」資料夾（不覆蓋同名檔），回存檔路徑
+/// 另存新檔的記憶：上次存的資料夾（下次對話框的預設位置）。只在 Rust 端，前端拿不到、也不能設定。
+#[derive(Default)]
+struct SaveDir(std::sync::Mutex<Option<PathBuf>>);
+
+/// 另存：跳出系統「另存新檔」對話框（預設＝上次存的資料夾，第一次是「下載\ASN」；預設檔名＝附件原檔名），
+/// 使用者選好才下載、存到他選的那個路徑；按取消就不下載。回存檔路徑，取消回 null。
+/// `name` 只是預設檔名的建議（外部資料，Rust 端清理過）；寫檔位置只來自對話框。
 #[tauri::command]
-async fn relay_attachment_save(app: State<'_, App>, id: String) -> Result<String, String> {
-    let dir = identity::home_dir().join("Downloads").join("ASN");
+async fn relay_attachment_save(
+    app: State<'_, App>,
+    dir_state: State<'_, SaveDir>,
+    handle: AppHandle,
+    id: String,
+    name: Option<String>,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
     let r = relay_of(&app)?;
-    attach::save(&r, &reqwest::Client::new(), &id, &dir).await.map(|p| p.display().to_string())
+    let start = dir_state.0.lock().ok().and_then(|g| g.clone()).filter(|d| d.is_dir()).unwrap_or_else(|| {
+        let d = identity::home_dir().join("Downloads").join("ASN");
+        let _ = std::fs::create_dir_all(&d);
+        d
+    });
+    let pick = |fname: &str, ext: Option<&'static str>| {
+        let mut b = handle.dialog().file().set_title("另存新檔").set_directory(&start).set_file_name(fname);
+        if let Some(e) = ext {
+            b = b.add_filter(e.to_uppercase(), &[e]);
+        }
+        b = b.add_filter("所有檔案", &["*"]);
+        b.blocking_save_file().and_then(|f| f.into_path().ok())
+    };
+    let saved = attach::save_as(&r, &reqwest::Client::new(), &id, name.as_deref().unwrap_or(""), pick).await?;
+    Ok(saved.map(|p| {
+        if let (Some(parent), Ok(mut g)) = (p.parent(), dir_state.0.lock()) {
+            *g = Some(parent.to_path_buf());
+        }
+        p.display().to_string()
+    }))
+}
+
+/// 開啟資料夾：只開「上次存檔的那個資料夾」，路徑由 Rust 記著、前端不能帶參數
+#[tauri::command]
+fn relay_attachment_reveal(dir_state: State<'_, SaveDir>) -> Result<(), String> {
+    let dir = dir_state.0.lock().ok().and_then(|g| g.clone()).ok_or("還沒有存過檔案")?;
+    open_in_file_manager(&dir)
 }
 
 /// 改暱稱＝改對外名字（驗證在 names::validate_name；不合法就回錯誤字串，介面還原並提示）
@@ -431,14 +470,16 @@ pub fn run() {
         .manage(tray::TrayFailed::default())
         .manage(shot::ShotState::default())
         .manage(updater::Pending::default())
+        .manage(SaveDir::default())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, partner_console_query, partner_console_set, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, set_window_name, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, partner_console_query, partner_console_set, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, set_window_name, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
-            wins::open_chat, wins::chat_visible, wins::close_chats, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,
+            wins::open_chat, wins::open_panel, wins::close_panels, wins::chat_visible, wins::close_chats, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,
             tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_set, updater::update_check, updater::update_install,
         ])
         .setup(move |app| {

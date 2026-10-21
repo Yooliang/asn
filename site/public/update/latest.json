@@ -1,11 +1,11 @@
 {
-  "version": "0.1.11",
-  "notes": "開新夥伴失敗或背景啟動逾時會跳出說明對話框，可直接開啟記錄資料夾。",
-  "pub_date": "2026-10-21T05:03:03.113Z",
+  "version": "0.1.13",
+  "notes": "- 指引與設定改成跟聊天一樣的聊天窗，不再跳出對話框。\n- 修正側欄大頭貼的欄寬與排列：對方在上、自己在下，收起鈕改在各頭像下方。\n- 修正截圖標註的文字工具：打字時現在看得到輸入框。\n- 附件另存改跳系統的「另存新檔」視窗，選好位置才下載。\n- 修正右鍵選單偶爾冒出黑色視窗的問題。\n- 設定的「更新」多了版本更新記錄，離線也看得到每一版改了什麼。",
+  "pub_date": "2026-10-21T06:46:49.553Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjQzbDNURTJIdCtOVDRWNVlxbk83K1RudzlpYzlOZzFIdjNiaEIyRWdMNmtIdDRIY3Z4OVh4d0FETXF1VWNlQXhBZFdYWUNQc3A2V1FwUlJZR05oTXdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNTU4OTgyCWZpbGU6QVNOXzAuMS4xMV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjExClJlNjdVTVhhYWhLQVVxUkhRcnFzMUVLT0JIVlcrSC9INGhUMitwSFVGT2ZYNW5YbG9kK1BCcUtKeDFrcENiWXdpZXVaQ3hmTVdBbEJ6UFI3TkFwdURnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.11_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjk4VWlGRnI2Y205cjBlaERPTm1DRVpGamRRTU45bzRZeldORG5mMytRem43Y1hmQjBoQ0UwNTcwTm1lZUZpRjR2MzlScXJkMU5lU2lweXpLYzF5MHdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNTY1MjA5CWZpbGU6QVNOXzAuMS4xM194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjEzCkEvRVBHaSthYnlSVVplTFNRcGJzTnJzc3pEQ09zRkRFVzUza2VaKzBhOHplTk5ucmlhYkJha2VEc25XM0xYNGFLUlRHK1ZEMnN3Mmt0clFnSis2S0JnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.13_x64-setup.exe"
     }
   }
 }

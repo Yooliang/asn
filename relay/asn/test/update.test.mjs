@@ -96,8 +96,8 @@ test('更新說明：參數優先，其次 CHANGELOG 第一段，最後預設句
 })
 
 test('發版參數', () => {
-  assert.deepEqual(parseArgs([]), { dryRun: false, noBump: false, notes: '' })
-  assert.deepEqual(parseArgs(['--dry-run', '--notes', '說明']), { dryRun: true, noBump: false, notes: '說明' })
+  assert.deepEqual(parseArgs([]), { dryRun: false, noBump: false, notes: '', printNotes: false })
+  assert.deepEqual(parseArgs(['--dry-run', '--notes', '說明']), { dryRun: true, noBump: false, notes: '說明', printNotes: false })
   assert.equal(parseArgs(['--notes=甲']).notes, '甲')
   assert.equal(parseArgs(['--no-bump']).noBump, true)
   assert.throws(() => parseArgs(['--notes']), /說明文字/)
@@ -105,9 +105,11 @@ test('發版參數', () => {
 })
 
 test('接線：設定頁開關與立即檢查、存檔欄位、--shot 不檢查、Rust 指令註冊', () => {
-  const html = read('ui/list.html'), js = read('ui/list.js'), rs = read('src-tauri/src/lib.rs'), up = read('src-tauri/src/updater.rs')
-  assert.match(html, /v-model="autoCheck"[^>]*aria-label="自動檢查更新"/)
-  assert.match(html, /@click="checkUpdate\(true\)"[^>]*>立即檢查</)
+  const html = read('ui/list.html'), panel = read('ui/lib/settings-panel.mjs'), js = read('ui/list.js'), rs = read('src-tauri/src/lib.rs'), up = read('src-tauri/src/updater.rs')
+  assert.match(panel, /:checked="st\.autoCheck"[^>]*aria-label="自動檢查更新"/)   // 設定聊天窗的開關，改了經樞紐 applySetting 寫回 autoCheck
+  assert.match(panel, /act\('check-update'\)"[^>]*>立即檢查</)
+  assert.match(js, /case 'autoCheck': autoCheck\.value = value === true/)
+  assert.match(js, /case 'check-update': await checkUpdate\(true\)/)
   assert.match(html, /@click\.stop="installUpdate"/, '只有按「更新」才安裝')
   assert.match(js, /autoUpdate: autoCheck\.value/, '開關存進 asn-me.json')
   assert.match(js, /if \(info\.shot \|\| upd\.checking/, '--shot 不檢查')

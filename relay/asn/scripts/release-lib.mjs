@@ -1,6 +1,8 @@
 // 發版腳本（release.mjs）用到的純邏輯，獨立出來好測：latest.json 內容、更新說明、安裝檔名與網址。
 // 不碰檔案系統、不碰金鑰。
 
+import { addChangelogSection } from '../ui/lib/changelog.mjs'
+
 export const UPDATE_BASE = 'https://asnmessenger.web.app/update/'
 export const PLATFORM = 'windows-x86_64'
 
@@ -18,6 +20,15 @@ export const pickNotes = ({ arg, changelog, version }) => {
   if (a) return a
   const c = changelogFirstSection(changelog)
   return c || `ASN ${version} 更新`
+}
+
+// 決定這版的更新說明與要不要改寫 CHANGELOG：
+//   有給 --notes → 說明用它，並回傳加上新段落的 CHANGELOG 全文（呼叫端決定寫不寫檔；演練不寫）
+//   沒給 → 取 CHANGELOG 最新一段（沒有就預設句），CHANGELOG 不動（newChangelog 為 null）
+export const resolveNotes = ({ arg, changelog, version, date }) => {
+  const a = String(arg ?? '').trim()
+  if (!a) return { notes: pickNotes({ arg: '', changelog, version }), newChangelog: null }
+  return { notes: a, newChangelog: addChangelogSection(changelog, { version, date, notes: a }) }
 }
 
 export const installerName = version => `ASN_${version}_x64-setup.exe`
@@ -38,12 +49,13 @@ export const buildLatestJson = ({ version, notes, pubDate, signature }) => {
   }
 }
 
-// 命令列：--dry-run（不 bump、不寫進官網目錄）、--notes "<說明>"、--no-bump（沿用目前版本但照常寫進官網目錄）
+// 命令列：--print-notes（只印出這版會用的更新說明就結束，不打包，供檢查）、--dry-run（不 bump、不寫進官網目錄）、--notes "<說明>"、--no-bump（沿用目前版本但照常寫進官網目錄）
 export const parseArgs = argv => {
-  const o = { dryRun: false, noBump: false, notes: '' }
+  const o = { dryRun: false, noBump: false, notes: '', printNotes: false }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--dry-run') o.dryRun = true
+    else if (a === '--print-notes') o.printNotes = true
     else if (a === '--no-bump') o.noBump = true
     else if (a === '--notes') { o.notes = argv[++i] ?? ''; if (!o.notes) throw new Error('--notes 後面要接說明文字') }
     else if (a.startsWith('--notes=')) o.notes = a.slice(8)

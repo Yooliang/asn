@@ -22,6 +22,15 @@ export function strokeWidth(level, imgW, tool = 'pen') {
   return Math.round(base * (tool === 'marker' ? 3 : 1) * strokeScale(imgW))
 }
 export const textSize = (level, imgW) => Math.round(({ 1: 18, 2: 28, 3: 44 }[level] ?? 28) * strokeScale(imgW))
+// 文字的描邊色：淺色字（白、黃）加深色描邊，其餘加白色描邊；畫到圖上與輸入時的預覽共用，任何底色都看得清楚
+export const textStroke = color => (color === '#ffffff' || color === '#fdd835' ? 'rgba(0,0,0,.65)' : 'rgba(255,255,255,.85)')
+// 輸入框的底色：與字色反差（淺色字配深底、其餘配淺底）
+export const textBackdrop = color => (color === '#ffffff' || color === '#fdd835' ? 'rgba(0,0,0,.5)' : 'rgba(255,255,255,.55)')
+// 文字輸入框放進顯示區（顯示像素）：左上角盡量在點的位置，靠邊就往內推；寬度至少留 minW（區域更窄就取區域寬）
+export function placeTextBox(x, y, boxH, viewW, viewH, minW = 160) {
+  const w = Math.min(minW, viewW), h = Math.min(boxH, viewH)
+  return { left: clamp(fin(x), 0, Math.max(0, viewW - w)), top: clamp(fin(y), 0, Math.max(0, viewH - h)) }
+}
 export const mosaicCell = imgW => Math.max(8, Math.round(fin(imgW) / 110))
 
 const safeColor = c => (typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) ? c.toLowerCase() : COLORS[0])
@@ -154,7 +163,7 @@ export function drawOp(ctx, op, base, makeCanvas) {
         ctx.fillStyle = op.color; ctx.font = `600 ${op.size}px "Microsoft JhengHei","PingFang TC","Noto Sans CJK TC",sans-serif`; ctx.textBaseline = 'top'
         // 淺色字加深色描邊、其餘加白色描邊，任何底色都看得清楚
         ctx.lineWidth = Math.max(2, op.size / 8); ctx.lineJoin = 'round'
-        ctx.strokeStyle = op.color === '#ffffff' || op.color === '#fdd835' ? 'rgba(0,0,0,.65)' : 'rgba(255,255,255,.85)'
+        ctx.strokeStyle = textStroke(op.color)
         op.text.split('\n').forEach((line, i) => { ctx.strokeText(line, op.x, op.y + i * op.size * 1.25); ctx.fillText(line, op.x, op.y + i * op.size * 1.25) })
         break
       }

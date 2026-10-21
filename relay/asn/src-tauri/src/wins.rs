@@ -1,5 +1,6 @@
 //! 多視窗：每個好友一扇對話、右下角提示視窗（置頂、不搶焦點、不進工作列、透明）、震動（真的移動視窗）、
 //! 視窗按鈕（最小化／最大化／關閉）與 --shot 的螢幕擷取。
+use crate::nowin::NoWindow;
 use crate::{App, BROWSER_ARGS};
 use serde::Deserialize;
 use std::path::Path;
@@ -48,7 +49,7 @@ pub fn frame_native(frame: State<'_, Frame>) -> bool {
 pub fn set_frame(app: AppHandle, frame: State<'_, Frame>, native: bool) {
     frame.0.store(native, Ordering::Relaxed);
     for (label, w) in app.webview_windows() {
-        if label == "list" || label.starts_with("chat-") {
+        if label == "list" || label.starts_with("chat-") || is_panel_label(&label) {
             let _ = w.set_decorations(native);
         }
     }
@@ -86,6 +87,60 @@ pub async fn open_chat(app: AppHandle, frame: State<'_, Frame>, id: String, titl
     b = if n == 0.0 { b.center() } else { b.position(120.0 + 28.0 * n, 80.0 + 28.0 * n) };
     b.build().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// 指引、設定兩扇聊天窗（分離模式）：每種各一扇，內容由名單視窗用事件換
+const PANEL_KINDS: [&str; 2] = ["guide", "setting"];
+
+/// 指引、設定視窗的標籤；種類不認得就 None
+pub fn panel_label(kind: &str) -> Option<String> {
+    PANEL_KINDS.contains(&kind).then(|| format!("panel-{kind}"))
+}
+
+/// 視窗標籤是不是指引、設定視窗
+pub fn is_panel_label(label: &str) -> bool {
+    label.strip_prefix("panel-").is_some_and(|k| PANEL_KINDS.contains(&k))
+}
+
+/// 開（或叫出）指引／設定視窗：已開著就只換標題並叫到前面，內容由前端用 asn:panel 事件換；沒開就照記住的大小開新的
+#[tauri::command]
+pub async fn open_panel(app: AppHandle, frame: State<'_, Frame>, kind: String, title: String, w: f64, h: f64) -> Result<(), String> {
+    let label = panel_label(&kind).ok_or("不認得的視窗種類")?;
+    if let Some(win) = app.get_webview_window(&label) {
+        let _ = win.set_title(&title);
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_focus();
+        return Ok(());
+    }
+    let (w, h) = (w.clamp(360.0, 8000.0), h.clamp(320.0, 8000.0));
+    let mut b = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(format!("panel.html?kind={kind}").into()))
+        .title(title)
+        .inner_size(w, h)
+        .min_inner_size(360.0, 320.0)
+        .decorations(frame.0.load(Ordering::Relaxed))
+        .disable_drag_drop_handler()
+        .additional_browser_args(BROWSER_ARGS);
+    // 指引錯開在左、設定在右，同時開著也不會疊在一起
+    b = if kind == "guide" { b.position(140.0, 100.0) } else { b.position(200.0, 130.0) };
+    b.build().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 關掉指引、設定視窗（kind 給了只關那一種），回傳原本開著的種類（整合模式切換時前端把它們變成分頁）
+#[tauri::command]
+pub fn close_panels(app: AppHandle, kind: Option<String>) -> Vec<String> {
+    let mut kinds = vec![];
+    for (label, w) in app.webview_windows() {
+        let Some(k) = label.strip_prefix("panel-").filter(|k| PANEL_KINDS.contains(k)) else { continue };
+        if kind.as_deref().is_some_and(|only| only != k) {
+            continue;
+        }
+        kinds.push(k.to_string());
+        let _ = w.close();
+    }
+    kinds.sort();
+    kinds
 }
 
 /// 該好友的對話視窗是否開著且沒最小化（來信時決定要不要未讀＋提示）
@@ -277,6 +332,7 @@ pub async fn take_shot(app: AppHandle, state: State<'_, App>, tab: Option<String
     // 暫時置頂，才不會被使用者桌面上別的視窗蓋住而拍到別人的畫面
     if let Some(l) = wins.get("list") { let _ = l.set_position(PhysicalPosition::new(40, 40)); let _ = l.set_always_on_top(true); }
     if let Some((_, c)) = wins.iter().find(|(k, _)| k.starts_with("chat-")) { let _ = c.set_position(PhysicalPosition::new(420, 40)); let _ = c.set_always_on_top(true); }
+    for (label, p) in &wins { if is_panel_label(label) { let _ = p.set_position(PhysicalPosition::new(420, 40)); let _ = p.set_always_on_top(true); } }
     tokio::time::sleep(Duration::from_millis(900)).await;
     take_shot_capture(&app, &dir, tab).await
 }
@@ -285,9 +341,9 @@ pub async fn take_shot(app: AppHandle, state: State<'_, App>, tab: Option<String
 async fn take_shot_capture(app: &AppHandle, dir: &Path, tab: Option<String>) -> Result<(), String> {
     let mut specs = vec![];
     for (label, w) in app.webview_windows() {
-        // 帶 tab：只拍名單視窗，檔名 tabs-<tab>（逐頁籤截圖用）
-        if tab.is_some() && label != "list" { continue }
-        let name = if label == "list" { tab.as_ref().map(|t| format!("tabs-{}", t.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect::<String>())).unwrap_or_else(|| "list".to_string()) } else if label.starts_with("chat-") { "chat".to_string() } else if label.starts_with("toast-") { label.clone() } else { continue };
+        // 帶 tab：只拍名單視窗，檔名 tabs-<tab>（逐頁籤截圖用）；分離模式開著的指引、設定視窗另拍，檔名就是 panel-guide、panel-setting
+        if tab.is_some() && label != "list" && !is_panel_label(&label) { continue }
+        let name = if is_panel_label(&label) { label.clone() } else if label == "list" { tab.as_ref().map(|t| format!("tabs-{}", t.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect::<String>())).unwrap_or_else(|| "list".to_string()) } else if label.starts_with("chat-") { "chat".to_string() } else if label.starts_with("toast-") { label.clone() } else { continue };
         if let (Ok(p), Ok(s)) = (w.outer_position(), w.outer_size()) {
             specs.push(format!("{name}|{}|{}|{}|{}", p.x, p.y, s.width, s.height));
         }
@@ -306,7 +362,7 @@ foreach ($s in ($env:ASN_SPECS -split ';')) {
   $g.Dispose(); $bmp.Dispose()
 }
 "#;
-    let status = tokio::process::Command::new("powershell")
+    let status = tokio::process::Command::new("powershell").no_window()
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .env("ASN_SPECS", specs.join(";"))
         .env("ASN_DIR", dir)
@@ -322,10 +378,12 @@ async fn take_shot_capture(app: &AppHandle, dir: &Path, tab: Option<String>) -> 
     let scrot = which_scrot();
     let Some(scrot) = scrot else { return Ok(()) };
     for (label, w) in app.webview_windows() {
-        if tab.is_some() && label != "list" {
+        if tab.is_some() && label != "list" && !is_panel_label(&label) {
             continue;
         }
-        let name = if label == "list" {
+        let name = if is_panel_label(&label) {
+            label.clone()
+        } else if label == "list" {
             tab.as_ref()
                 .map(|t| format!("tabs-{}", t.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect::<String>()))
                 .unwrap_or_else(|| "list".to_string())
@@ -342,7 +400,7 @@ async fn take_shot_capture(app: &AppHandle, dir: &Path, tab: Option<String>) -> 
         }
         let out = dir.join(format!("{name}.png"));
         let area = format!("{},{},{},{}", p.x, p.y, s.width, s.height);
-        let status = tokio::process::Command::new(&scrot)
+        let status = tokio::process::Command::new(&scrot).no_window()
             .args(["-o", "-a", &area, out.to_string_lossy().as_ref()])
             .status()
             .await
@@ -407,6 +465,21 @@ mod tests {
         for t in [r#"{"sound":true}"#, r#"{"frame":"custom"}"#, r#"{"frame":"Native"}"#, r#"{"frame":true}"#, r#"{"frame":null}"#, "{壞掉", ""] {
             assert!(!native_from_saved(t), "{t}");
         }
+    }
+
+    #[test]
+    fn 指引與設定視窗標籤_只認兩種() {
+        assert_eq!(panel_label("guide").as_deref(), Some("panel-guide"));
+        assert_eq!(panel_label("setting").as_deref(), Some("panel-setting"));
+        for bad in ["", "chat", "Guide", "guide ", "../x"] {
+            assert_eq!(panel_label(bad), None, "{bad}");
+        }
+        assert!(is_panel_label("panel-guide") && is_panel_label("panel-setting"));
+        for bad in ["panel-", "panel-x", "list", "chat-70616e656c2d", "toast-0-1", "panel-guide2"] {
+            assert!(!is_panel_label(bad), "{bad}");
+        }
+        // 對話視窗與指引視窗的標籤互不相干（chat_id_of 不會把面板視窗當成好友）
+        assert_eq!(chat_id_of("panel-guide"), None);
     }
 
     #[test]

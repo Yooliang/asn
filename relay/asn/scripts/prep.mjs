@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildSync } from 'esbuild'
+import { parseChangelog } from '../ui/lib/changelog.mjs'
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const src = path.join(root, 'node_modules', 'vue', 'dist', 'vue.global.prod.js')
 if (!fs.existsSync(src)) { console.error('找不到 node_modules/vue：先執行 npm install'); process.exit(1) }
@@ -16,3 +17,10 @@ buildSync({
   outfile: path.join(vendor, 'dicebear.mjs'),
   bundle: true, format: 'esm', minify: true, platform: 'browser', target: 'es2020', legalComments: 'none', logLevel: 'warning',
 })
+// 版本更新記錄：CHANGELOG.md → ui/vendor/changelog.json（跟著安裝檔打包，離線也能在設定的「更新」看）
+const changelogFile = path.join(root, 'CHANGELOG.md')
+const entries = fs.existsSync(changelogFile) ? parseChangelog(fs.readFileSync(changelogFile, 'utf8')) : []
+fs.writeFileSync(path.join(vendor, 'changelog.json'), `${JSON.stringify(entries)}
+`)
+fs.writeFileSync(path.join(vendor, 'changelog.mjs'), `export default ${JSON.stringify(entries)}
+`) // 畫面用 import 載入（CSP 不放行 fetch）

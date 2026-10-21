@@ -269,3 +269,25 @@ test('守門：對話區的縮圖用 <img :src>（資料網址）與按鈕，沒
   assert.ok(!/v-html/.test(viewer) && viewer.includes('role="dialog"') && viewer.includes('aria-label'))
   assert.ok(pane.includes('aria-label="傳照片"'))
 })
+
+// ---- 另存新檔對話框 ----
+
+test('守門：另存走 Rust 的系統對話框——前端沒有 fs／dialog 權限、reveal 不帶路徑、save 只多帶一個建議檔名', () => {
+  const cap = read('src-tauri/capabilities/default.json')
+  assert.ok(!/"(fs|dialog|shell|opener)[:\w-]*"/.test(cap), '前端不開放 fs／dialog／shell 權限')
+  const api = read('ui/lib/tauri.mjs')
+  assert.ok(api.includes("invoke('relay_attachment_save', { id, name })"))
+  assert.ok(api.includes("invoke('relay_attachment_reveal')") && !/relay_attachment_reveal'\s*,/.test(api), 'reveal 不帶參數')
+  const lib = read('src-tauri/src/lib.rs')
+  assert.match(lib, /fn relay_attachment_reveal\(dir_state: State<'_, SaveDir>\)/)
+  assert.ok(lib.includes('blocking_save_file') && lib.includes('attach::save_as'))
+  const handler = lib.slice(lib.indexOf('generate_handler!['), lib.indexOf(']', lib.indexOf('generate_handler![')))
+  assert.match(handler, /relay_attachment_reveal/)
+})
+
+test('另存：取消不顯示已存、存好顯示位置並出現「開啟資料夾」', () => {
+  const pane = read('ui/lib/chatpane.mjs')
+  assert.ok(pane.includes('if (path) {'), '取消（null）不顯示已存到')
+  assert.ok(pane.includes('開啟資料夾') && pane.includes('revealSaved'))
+  assert.ok(!pane.includes('下載\\ASN'), '介面文字不再說自動存到下載\\ASN')
+})

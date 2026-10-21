@@ -57,3 +57,26 @@ test('asn.exe 端到端（假 relay）', { skip: !fs.existsSync(defaultExe) && '
   assert.ok(fs.existsSync(path.join(r.data, 'asn-chats.json')), '對話存檔寫在資料夾')
   assert.ok(!fs.readFileSync(path.join(r.data, 'asn-chats.json'), 'utf8').includes(FAKE_KEY), '存檔裡沒有金鑰')
 })
+
+// 設定聊天窗改值：兩種模式都走 asn:set 事件進樞紐（分離模式的設定視窗就是這樣下指令），改了即時生效並寫進存檔；
+// 分離模式另外要有指引、設定兩扇獨立視窗的截圖
+for (const mode of ['split', 'merged']) {
+  test(`設定聊天窗改值會進樞紐並存檔（${mode}）`, { skip: !fs.existsSync(defaultExe) && '先執行 npm run build', timeout: 120_000 }, async () => {
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-e2e-set-'))
+    const me = { winMode: mode, shotNoChat: true, shotSetting: 'look', shotSettingSet: [{ op: 'dpMode', value: 'right' }, { op: 'sound', value: 'off' }, { op: 'tabDim', value: 'status' }, { op: 'bubble', value: 'auto' }] }
+    const r = await runShot(out, defaultExe, { me })
+    assert.equal(r.code, 0, r.log)
+    const saved = JSON.parse(fs.readFileSync(path.join(r.data, 'asn-me.json'), 'utf8'))
+    assert.equal(saved.dpMode, 'right')
+    assert.equal(saved.sound, false)
+    assert.equal(saved.tabDim, 'status')
+    assert.equal(saved.bubble, 'auto')
+    assert.equal(saved.winMode, mode)
+    assert.ok(!JSON.stringify(saved).includes(FAKE_KEY), '存檔裡沒有金鑰')
+    if (shotCaptureSupported) {
+      assert.ok(r.files.includes('tabs-settings-doc.png') && r.files.includes('tabs-guide-doc.png'))
+      if (mode === 'split') for (const f of ['panel-guide.png', 'panel-setting.png']) { assert.ok(r.files.includes(f), `缺 ${f}`); assertShotNotBlank(path.join(out, f), { minBytes: 8000 }) }
+      else assert.ok(!r.files.some(f => f.startsWith('panel-')), '整合模式沒有獨立視窗，指引與設定在右邊分頁')
+    }
+  })
+}

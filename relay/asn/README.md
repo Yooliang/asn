@@ -57,7 +57,13 @@ npm run build        # 出 asn 二進位、bundle/deb/*.deb、bundle/appimage/*.
   - 之後是「群組」「指引」「設定」。
 - 設備內容：該設備的 Claude 視窗，線上／忙碌在前、離線在後，名字後灰字狀態；組標題「[−] 設備名 (線上數/總數)」可收合；名字下一行只顯示資料夾（cwd_label）。
 - 群組：唯讀 `GET ?action=room_list`（只列本節點所在的群組：名稱、成員數、最後一句），不寄、不改。
-- 指引：安裝與使用說明（開始使用 ASN、讓這台電腦的 Claude 視窗出現在名單上、讓雲端 AI 代理加入、群組怎麼用、常見問題），資料在 `ui/lib/guides.mjs`（要改文字就改這個檔，不放金鑰與網址，路徑用 `%USERPROFILE%` 通用寫法）。點一篇：整合模式開在右邊的「指引：…」分頁（可關），分離模式顯示在名單內容區（有「回到指引清單」鈕）。
+- 指引：安裝與使用說明（開始使用 ASN、讓這台電腦的 Claude 視窗出現在名單上、讓雲端 AI 代理加入、群組怎麼用、常見問題），資料在 `ui/lib/guides.mjs`（要改文字就改這個檔，不放金鑰與網址，路徑用 `%USERPROFILE%` 通用寫法）。清單只列標題，點一篇＝開「指引聊天窗」（見下一條）。
+- 設定：清單列十個分類（個人、Claude 帳號、外觀、分頁與分組、音效、語音、視窗與系統匣、啟動設定、更新、關於），每類一行目前值摘要（`ui/lib/settings-cats.mjs`）；點一類＝開「設定聊天窗」。存檔格式與各設定的行為不變。
+- **指引、設定的聊天窗**：左側直立頁籤切換的是「列表」（好友名單／群組／指引列表／設定分類列表），列表裡點一項就開聊天窗，跟點好友同一套機制（純邏輯在 `ui/lib/panels.mjs`）。所有指引共用一扇、所有設定分類共用一扇——點另一篇／另一類是換內容，不再多開。
+  - **整合模式**：右邊分頁列多出「指引：<標題>」「設定：<分類名>」兩種分頁（id 是 `@guide`、`@setting`，不會撞到好友 id），各最多一個；點另一篇／另一類就換內容並切過去；可用 ✕、中鍵、右鍵選單（關閉／關閉其他／關閉右側／全部關閉）關掉；**可拖曳排序、不可固定**（右鍵選單沒有「固定分頁」，存檔裡的固定清單也不收這兩個 id）。
+  - **分離模式**：各開一扇獨立視窗（`ui/panel.html`＋`panel.js`，Rust 端 `open_panel`／`close_panels`，標籤 `panel-guide`、`panel-setting`），有跟聊天視窗一樣的自訂外框（可拖曳標題列、最小化／最大化／關閉、拖邊緣調整大小，外框設定即時跟著改），大小記在 asn-me.json 的 `guideSize`／`settingSize`（停止調整 0.4 秒後存）；點不同項目就換內容並叫到前面。
+  - **跨視窗同步**：設定的狀態與所有動作都留在名單視窗的樞紐（`list.js`），金鑰與存檔不搬到別的視窗。設定視窗只用事件溝通——`asn:panel`（顯示哪一篇／哪一類）、`asn:settings`（設定快照）由樞紐推出去，視窗用 `asn:set`（`{ op, value }`）把改動送回樞紐的 `applySetting`；改了立即生效於名單視窗並寫進存檔。整合模式的分頁用同一個元件（`ui/lib/settings-panel.mjs`），同一個 `applySetting`。
+  - 切換視窗模式時，開著的指引、設定跟著轉（分離視窗→分頁、分頁→視窗），內容不變。
 - 通知頁籤已拿掉；右下角提示視窗與名單上的未讀數照舊。
 - 整合模式沒開任何對話時，右邊「開始」分頁是大幅廣告輪播（同一份 `ADS` 資料，大標題、標語、按鈕、左右鍵與小圓點、6 秒自動換，純 CSS 繪製）；招租沒有聯絡網址時按鈕不可點。
 - 底部廣告：Irori 自家宣傳輪播（`ui/lib/tabs.mjs` 的 `ADS`），可點的網址只有 `lib.rs` 的 `OPEN_ALLOW` 三個（`open_url` 指令比對完全相同才開）。
@@ -72,7 +78,7 @@ npm run build        # 出 asn 二進位、bundle/deb/*.deb、bundle/appimage/*.
   - **工具列位置**：輸入框上方（預設，舊版 MSN 6～2009 的樣子）／輸入框下方。工具列按鈕只有圖示（內嵌 SVG，滑過看提示、`aria-label` 是中文），按表情圖示開表情選單。
   - 對話區的版面只有一份（`ui/lib/chatpane.mjs`），分離模式的對話視窗與整合模式的分頁共用。
 - 大頭貼：名單、對話區、右下角提示、自己的頭像都用圖片（`ui/lib/avatar.mjs`）。**自動產生**：DiceBear 的 `shapes` 風格，在本機離線產生（官方套件 `@dicebear/core`＋`@dicebear/shapes`，固定 9.x 版；`npm run prep` 用 esbuild 打成單檔 `ui/vendor/dicebear.mjs`，不連 api.dicebear.com，`ui/vendor` 不進 git），種子＝好友 id（`節點/視窗名`），每人固定、不同人不同。**設備上傳**：設定頁「大頭貼」選圖 → 前端置中裁成正方形、縮成 96×96、轉 webp（不行就 png）、≤ 32 KB → 經 Rust 指令 `relay_set_avatar`（檢查格式與大小才送，金鑰只在 Rust）上傳到收發室；也可以「移除，改回自動產生」。**顯示規則**：名單上的 AI 視窗一律自動產生；不在名單上的寄件人（例如別台的 ASN）用他那台設備上傳的圖，沒有就自動產生；自己＝本機節點有上傳就用上傳的，沒有就自動產生。`list` 只帶各節點的 `avatar_updated_at`，圖用 `GET ?action=avatar&node=<節點>` 在更新時間變了才取（收到的圖也要通過格式檢查才顯示）。
-- 傳照片與檔案（設計見 `docs/ATTACHMENTS.md`）：對話工具列有「傳照片」（也可直接貼上圖片）與「傳送檔案」。照片先在前端縮到長邊 2048、轉 webp（≤ 5 MB）並做 256 長邊縮圖；一般檔案（pdf、txt、md、json、csv、zip、docx、xlsx、pptx，≤ 25 MB）不壓縮不轉檔。交給 Rust 指令 `relay_send_attachment`：檢查型別、大小與檔頭才依序向收發室要一次性上傳網址、上傳、確認、寄信（金鑰只在 Rust）。對話裡照片顯示縮圖（點了放大，可另存）、檔案顯示檔案卡（點了下載並另存到 `下載\ASN`）；對方的來信也一樣。保存 30 天，過期顯示「已過期」。可重用入口：`ui/lib/photo-canvas.mjs` 的 `imageFromBlob`／`fileFromBlob`＋`core.sendAttachment`。
+- 傳照片與檔案（設計見 `docs/ATTACHMENTS.md`）：對話工具列有「傳照片」（也可直接貼上圖片）與「傳送檔案」。照片先在前端縮到長邊 2048、轉 webp（≤ 5 MB）並做 256 長邊縮圖；一般檔案（pdf、txt、md、json、csv、zip、docx、xlsx、pptx，≤ 25 MB）不壓縮不轉檔。交給 Rust 指令 `relay_send_attachment`：檢查型別、大小與檔頭才依序向收發室要一次性上傳網址、上傳、確認、寄信（金鑰只在 Rust）。對話裡照片顯示縮圖（點了放大，可另存）、檔案顯示檔案卡（點了跳出系統「另存新檔」對話框，預設在 `下載\ASN` 或上次存的資料夾、預設檔名＝原檔名；選好才下載，按取消就不下載；存好後狀態列顯示位置並可「開啟資料夾」，路徑由 Rust 決定）；對方的來信也一樣。保存 30 天，過期顯示「已過期」。可重用入口：`ui/lib/photo-canvas.mjs` 的 `imageFromBlob`／`fileFromBlob`＋`core.sendAttachment`。
 - 截圖與標註（issue #10）：對話工具列有「截圖」鈕（Windows 版；Linux 版沒有這個按鈕，因為擷取程式碼只在 Windows 編譯，`shot_supported` 回 false）。按下後 Rust 端（`src-tauri/src/shot.rs`）隱藏 ASN 所有可見視窗、等 260 ms 讓桌面重繪，再用 GDI（`BitBlt`＋`CAPTUREBLT`，只多開 `windows-sys` 兩個功能開關，不新增擷取套件）把整個虛擬桌面一次抓成凍結圖，然後每個螢幕開一扇置頂無邊框覆蓋視窗（`ui/shot.html`／`shot.js`）顯示該螢幕那一塊；拖曳框選、Esc 或右鍵取消、5 分鐘沒動作自動取消。框選範圍限在同一個螢幕內（不能跨螢幕邊界）。座標換算不信任 `devicePixelRatio`，用「視窗實際大小 ÷ 圖片實體像素」的比例（`ui/lib/shot.mjs`），所以 125%／150%／混合縮放的多螢幕都對得準；Rust 端再夾一次範圍。截圖以 PNG 位元組直接經 `tauri::ipc::Response` 傳（不經 JSON／base64）。框選完進入標註畫面（`ui/lib/annotator.mjs`，浮層在對話區內）：畫筆、螢光筆、矩形、箭頭、文字、馬賽克，8 種顏色、細／中／粗，復原／重做（Ctrl+Z／Ctrl+Y）、清除（可復原）；規則、堆疊與畫法在 `ui/lib/markup.mjs`。按「傳送」輸出 PNG（長邊超過 4096 先縮小）→ `imageFromBlob` 轉成 webp → `core.sendAttachment`（可加說明文字）；取消則整張丟掉。在輸入框貼上圖片也會進同一個標註畫面（不再直接送出）。測試：`test/shot.test.mjs`、`test/markup.test.mjs`、`test/shot-wiring.test.mjs`；Rust 的裁切、座標夾限、PNG 編碼與真的擷取桌面在 `shot.rs` 的單元測試。
 - 經機器橋轉回的回信若整段包著 `<cross-session-message …>…</cross-session-message>`，收信時剝掉最外層（`unwrapShell`）。
 
@@ -93,7 +99,7 @@ npm run build        # 出 asn 二進位、bundle/deb/*.deb、bundle/appimage/*.
 ```
 npm test             # node --test：純邏輯（roster、歸屬、震動、跳脫、v-html 守門）、AsnCore 對假 relay、asn.exe 端到端
 npm run test:rust    # cargo test：心跳檔格式、身分判定、寄信欄位、門鈴訊息
-ASN_SHOT_ME='{"winMode":"merged","shotNoChat":true}' node scripts/shot.mjs <資料夾>   # 設定欄位名是 winMode（不是 mode）；shotNoChat＝不開對話（整合模式停在「開始」大幅廣告）；shotAd／shotTab 固定廣告與起始頁籤
+ASN_SHOT_ME='{"winMode":"merged","shotNoChat":true}' node scripts/shot.mjs <資料夾>   # 設定欄位名是 winMode（不是 mode）；shotNoChat＝不開對話（整合模式停在「開始」大幅廣告）；shotAd／shotTab 固定廣告與起始頁籤；逐頁籤截圖最後會各開一次指引（bridge）與設定聊天窗：整合模式在右邊分頁（`tabs-guide-doc.png`、`tabs-settings-doc.png`），分離模式另存兩扇獨立視窗（`panel-guide.png`、`panel-setting.png`）；shotSetting 指定設定窗顯示哪一類（預設 look），shotSettingSet 是 `[{"op":"dpMode","value":"right"}]` 這樣的清單，模擬在設定窗裡改值
 node scripts/shot.mjs <資料夾>   # （環境變數 ASN_SHOT_AVATARS=1 會示範設備上傳的大頭貼）開假 relay＋真的 asn.exe，名單＋對話＋提示各截一張 PNG（需要真桌面，沙盒裡會是黑的）
 node scripts/mem.mjs             # 量閒置記憶體
 ```
