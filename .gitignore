@@ -6,3 +6,6 @@ target/
 site/shots/
 supabase/.temp/
 site/.firebase/
+
+# Claude Code 子代理工作資料夾與暫存
+.claude/

@@ -163,7 +163,7 @@ async fn relay_send(app: State<'_, App>, payload: Value) -> Result<Value, String
 #[tauri::command]
 async fn relay_sent_status(app: State<'_, App>, ids: Vec<String>) -> Result<Value, String> {
     let rows = relay_of(&app)?.sent_status(&ids).await?;
-    Ok(json!({ "status": rows }))
+    Ok(serde_json::json!({ "status": rows }))
 }
 
 /// 寄照片：前端已壓縮成 webp；格式與大小在 attach.rs 檢查，通過才依序要上傳網址、上傳、確認、寄信（金鑰只在這裡）
