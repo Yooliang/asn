@@ -8,6 +8,7 @@ mod attach;
 mod auth;
 mod avatar;
 mod bell;
+mod bridge;
 mod claude_accounts;
 mod claude_json;
 mod codex_accounts;
@@ -70,6 +71,35 @@ fn env_ms(k: &str, d: u64) -> u64 {
 /// 視窗名：預設 `<節點>-ASN`；設定檔 settings.json 的 window_name 可改
 pub fn default_window_name(node: &str) -> String {
     format!("{node}-ASN")
+}
+/// 登入時由後台自動產生的節點代號：`t<序號>-` 或 `n` 開頭，後面剛好 8 碼小寫十六進位（見 asn_node_create）。
+/// 使用者不取也不會看到這種代號；舊電腦手動取的代號（H、w02…）不是這個格式，照舊。
+pub fn is_auto_node_id(id: &str) -> bool {
+    let rest = if let Some(r) = id.strip_prefix('t') {
+        let digits = r.chars().take_while(|c| c.is_ascii_digit()).count();
+        if digits == 0 {
+            return false;
+        }
+        match r[digits..].strip_prefix('-') {
+            Some(x) => x,
+            None => return false,
+        }
+    } else if let Some(r) = id.strip_prefix('n') {
+        r
+    } else {
+        return false;
+    };
+    rest.len() == 8 && rest.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+}
+
+/// 視窗名預設值：手動取代號的舊電腦＝`<代號>-ASN`；自動產生代號的新電腦改用電腦名稱（`<電腦名>-ASN`），畫面上不會出現節點代號
+pub fn default_window_name_for(node: &str, computer: &str) -> String {
+    if is_auto_node_id(node) {
+        let c: String = computer.chars().filter(|c| !c.is_control()).collect::<String>().trim().chars().take(36).collect();
+        let c = if c.is_empty() { "我的電腦".to_string() } else { c };
+        return format!("{c}-ASN");
+    }
+    default_window_name(node)
 }
 pub fn valid_window_name(s: &str) -> bool {
     !s.is_empty() && s.chars().count() <= 60 && s.trim() == s && !s.chars().any(|c| c.is_control())
@@ -214,6 +244,16 @@ async fn partner_console_query(req: launch::PartnerConsoleReq) -> Result<Value, 
 #[tauri::command]
 async fn partner_console_set(req: launch::PartnerConsoleReq) -> Result<Value, String> {
     launch::partner_console_set(req).await
+}
+
+#[tauri::command]
+async fn model_switch_query(req: launch::SwitchQueryReq) -> Result<Value, String> {
+    launch::model_switch_query(req).await
+}
+
+#[tauri::command]
+async fn model_switch_run(req: launch::SwitchRunReq) -> Result<Value, String> {
+    launch::model_switch_run(req).await
 }
 
 #[tauri::command]
@@ -487,7 +527,30 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
+/// 內建收發室橋的狀態（設定頁用）。預設關閉
+#[tauri::command]
+fn bridge_status(m: State<'_, bridge::Manager>) -> bridge::Status {
+    m.status()
+}
+/// 打開／關閉「讓 ASN 負責這台的收發室」
+#[tauri::command]
+fn bridge_set_enabled(m: State<'_, bridge::Manager>, on: bool) -> Result<bridge::Status, String> {
+    m.set_enabled(on)
+}
+/// 打開／關閉「允許我的其他設備替這台開新視窗」（預設關）
+#[tauri::command]
+fn bridge_set_remote_launch(m: State<'_, bridge::Manager>, on: bool) -> Result<bridge::Status, String> {
+    m.set_remote_launch(on)
+}
+/// 「改由 ASN 負責」：停掉舊版收發室橋（要使用者確認、要設定開關放行）再啟動內建橋
+#[tauri::command]
+async fn bridge_takeover(m: State<'_, bridge::Manager>, confirmed: bool) -> Result<bridge::Status, String> {
+    m.takeover(confirmed).await
+}
+
 pub(crate) fn cleanup(app: &AppHandle) {
+    // 內建橋：只關自己啟動的收發室 worker、釋放收信鎖
+    app.state::<bridge::Manager>().shutdown();
     let st = app.state::<App>();
     if let Some(r) = &st.relay {
         for n in r.active_names() {
@@ -534,7 +597,7 @@ pub fn run() {
     });
 
     let relay_obj = base.map(|(url, key)| {
-        let name = read_settings_name(&data_dir).unwrap_or_else(|| default_window_name(&node));
+        let name = read_settings_name(&data_dir).unwrap_or_else(|| default_window_name_for(&node, &account::computer_name(|k| std::env::var(k).ok())));
         let r = Relay::new(url, key, node.clone(), name);
         r.set_old_names(names::prune(&names::read_old_names(&data_dir), &r.window_name(), heartbeat::now_ms()));
         Arc::new(r)
@@ -549,6 +612,7 @@ pub fn run() {
     }
 
     let frame_data_dir = data_dir.clone();
+    let bridge_data_dir = data_dir.clone();
     let auth_state = auth::AuthState::new(auth::default_store(&data_dir));
     // 端到端測試用：--shot 模式下假裝已登入（只連本機假後端；正式執行沒有這條路）
     if shot.is_some() {
@@ -560,6 +624,7 @@ pub fn run() {
     }
     let state = App { relay: relay_obj.clone(), init_error, node: node.clone(), work_dir: work_dir.clone(), data_dir, shot };
     let anon_url = relay_obj.as_ref().zip(anon).and_then(|(r, a)| bell::ws_url(r.base(), &a));
+    let bridge_mgr = bridge::Manager::new(relay_obj.clone(), anon_url.clone(), node.clone(), work_dir.clone(), bridge_data_dir);
 
     let app = tauri::Builder::default()
         .manage(state)
@@ -571,10 +636,11 @@ pub fn run() {
         .manage(updater::Pending::default())
         .manage(SaveDir::default())
         .manage(auth_state)
+        .manage(bridge_mgr)
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, ads::ads_fetch, set_window_name, set_presence, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, ads::ads_fetch, set_window_name, set_presence, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_takeover, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete,
             codex_accounts::codex_account_current,
@@ -606,6 +672,18 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                     let _ = account::bind_this(&h.state::<App>(), &h.state::<auth::AuthState>()).await;
+                });
+            }
+            // 內建收發室橋：設定打開才啟動（預設關）；--shot 截圖模式不啟動
+            if handle.state::<App>().shot.is_none() {
+                handle.state::<bridge::Manager>().start_if_enabled();
+                // 啟動時舊版收發室橋在跑而讓步的話，舊橋一退出就自動接手（設定仍開著）
+                let h2 = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        h2.state::<bridge::Manager>().poll_handoff();
+                    }
                 });
             }
             if let Some(r) = relay_obj.clone() {
@@ -701,6 +779,30 @@ mod tests {
         assert_eq!(default_window_name("H"), "H-ASN");
         assert!(valid_window_name("家用-ASN"));
         assert!(!valid_window_name("") && !valid_window_name(" x") && !valid_window_name("a\nb") && !valid_window_name(&"字".repeat(61)));
+    }
+
+    #[test]
+    fn 自動產生的節點代號辨識_舊電腦手動代號不受影響() {
+        for id in ["t5-ab12cd34", "t12-00000000", "n1a2b3c4d"] {
+            assert!(is_auto_node_id(id), "{id}");
+        }
+        for id in ["H", "w02", "cloud", "t5-ab12cd3", "t5-ab12cd345", "t-ab12cd34", "t5ab12cd34", "n1a2b3c4", "t5-AB12CD34", "n1a2b3c4g", "home-pc", ""] {
+            assert!(!is_auto_node_id(id), "{id}");
+        }
+    }
+
+    #[test]
+    fn 視窗名預設值_新電腦用電腦名稱_不含節點代號() {
+        assert_eq!(default_window_name_for("H", "PC-1"), "H-ASN", "手動代號照舊");
+        assert_eq!(default_window_name_for("w02", "PC-1"), "w02-ASN");
+        let n = default_window_name_for("t5-ab12cd34", "  小良的電腦\n");
+        assert_eq!(n, "小良的電腦-ASN");
+        assert!(!n.contains("ab12cd34") && !n.contains("t5"));
+        assert!(valid_window_name(&n));
+        // 電腦名稱太長或空白：視窗名仍合格
+        let long = default_window_name_for("n1a2b3c4d", &"字".repeat(80));
+        assert!(valid_window_name(&long) && long.chars().count() <= 40);
+        assert_eq!(default_window_name_for("n1a2b3c4d", "  "), "我的電腦-ASN");
     }
 
     #[test]

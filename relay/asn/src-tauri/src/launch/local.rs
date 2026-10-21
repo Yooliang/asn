@@ -39,6 +39,18 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
     }))
 }
 
+/// 遠端開視窗（內建收發室橋）用：驗證（profile、名字、白名單、上限）都已在呼叫端做完，
+/// 這裡只做「自動信任資料夾 → 依本機設定組命令 → 開視窗」。指令只來自本機的 profile，遠端只決定 profile 名、名字與資料夾。
+/// hidden＝視窗樣式 Hidden（測試用，正式一律 false）。回傳外層視窗（PowerShell）的 PID。
+pub fn start_remote_window(config: &super::config::LaunchConfig, profile: &str, name: &str, cwd: &str, hidden: bool) -> Result<u32, String> {
+    let prof = config.profiles.get(profile).ok_or_else(|| "沒有這個啟動設定".to_string())?;
+    // 沒寫 engine 的自訂 profile 與 Node 橋相同，視為 Claude
+    maybe_trust_claude_cwd(if prof.engine.is_empty() { "claude" } else { prof.engine.as_str() }, cwd);
+    let req = LaunchReq { profile, name, cwd: cwd.to_string() };
+    let (command, args, cwd) = build_spawn_spec(config, &req)?;
+    start_window(name, &command, &args, &cwd, hidden)
+}
+
 /// Claude 引擎：在啟動前把 cwd_allow 內、本次使用的資料夾標成已信任（失敗只記 log，不擋啟動）。
 fn maybe_trust_claude_cwd(engine: &str, cwd: &str) {
     if engine != "claude" {
@@ -82,7 +94,7 @@ fn quote_arg(a: &str) -> String {
     format!("\"{}\"", a.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-fn start_window(title: &str, command: &str, args: &[String], cwd: &Path, hidden: bool) -> Result<u32, String> {
+pub(super) fn start_window(title: &str, command: &str, args: &[String], cwd: &Path, hidden: bool) -> Result<u32, String> {
     #[cfg(windows)]
     {
         start_window_windows(title, command, args, cwd, hidden)
@@ -96,13 +108,13 @@ fn start_window(title: &str, command: &str, args: &[String], cwd: &Path, hidden:
 
 /// PowerShell 單引號字串（內部單引號加倍），整串都是字面值，不會展開 $ 或反引號。
 #[cfg_attr(not(windows), allow(dead_code))]
-fn ps_quote(s: &str) -> String {
+pub(super) fn ps_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
 /// 去掉 Windows 的長路徑前綴（canonicalize 會加）；不少 CLI 對它處理不一致，工作資料夾也會被當成不同的專案路徑。
 #[cfg_attr(not(windows), allow(dead_code))]
-fn strip_verbatim_prefix(p: &str) -> String {
+pub(super) fn strip_verbatim_prefix(p: &str) -> String {
     if let Some(rest) = p.strip_prefix(r"\\?\UNC\") {
         return format!(r"\\{rest}");
     }
@@ -145,7 +157,7 @@ fn encode_ps_command(script: &str) -> String {
 
 /// 外層 PowerShell（承載視窗）的參數字串：-NoExit 讓視窗留著。
 #[cfg_attr(not(windows), allow(dead_code))]
-fn window_launcher_args(title: &str, command: &str, args: &[String]) -> String {
+pub(super) fn window_launcher_args(title: &str, command: &str, args: &[String]) -> String {
     let enc = encode_ps_command(&build_window_script(title, command, args));
     format!("-NoLogo -NoProfile -NoExit -ExecutionPolicy Bypass -EncodedCommand {enc}")
 }

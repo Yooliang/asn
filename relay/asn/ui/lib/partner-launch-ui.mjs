@@ -16,6 +16,23 @@ export function launchDisableReason(nodeKey, { selfNode, partnerModels, remoteLa
   return ''
 }
 
+/**
+ * 別台設備在開新夥伴對話框裡的模型列：用那台回報的 profile（id、標籤），不是本機偵測到的 CLI。
+ * 那台是 ASN 內建收發室橋或舊版收發室橋都一樣；回報裡沒有指令，只有 id 與標籤。
+ */
+export function remoteModelRows(launcher) {
+  const list = Array.isArray(launcher?.profiles) ? launcher.profiles : []
+  return list.filter(p => p && typeof p.id === 'string' && p.id).map(p => {
+    const cat = MODEL_CATALOG.find(m => m.profileId === p.id)
+    return {
+      id: cat?.id ?? p.id, toolId: cat?.toolId ?? p.id, profileId: p.id,
+      label: (typeof p.label === 'string' && p.label.trim()) || cat?.label || p.id,
+      mode: cat?.mode ?? 'window', modeLabel: cat?.modeLabel ?? '會開一個視窗',
+      installed: true, installHint: '', version: '',
+    }
+  })
+}
+
 export function canLaunchOnNode(nodeKey, ctx) {
   return !launchDisableReason(nodeKey, ctx)
 }

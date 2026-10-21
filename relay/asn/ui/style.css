@@ -69,6 +69,11 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .search-ic{flex:none;width:26px;height:26px;padding:0;border:1px solid var(--line);border-radius:3px;background:linear-gradient(#fdfeff,#e3eef9);color:var(--title-fg);cursor:pointer;display:grid;place-items:center}
 .search-ic:hover{border-color:var(--accent);background:linear-gradient(#f2f9ff,#bfe0fb)}
 .buddy-menu,.launch-picker,.device-menu{position:fixed;z-index:62;margin:0;max-width:min(320px,calc(100vw - 16px))}
+.buddy-submenu{list-style:none;margin:0;padding:0 0 2px 12px}
+.buddy-submenu .menu-note{padding:2px 8px;font-size:11px;color:var(--muted);white-space:normal}
+.model-points{margin:0;padding-left:18px;font-size:13px;line-height:1.5}
+.model-err{color:var(--busy)}
+.model-manual{width:100%;box-sizing:border-box;font-family:Consolas,"Liberation Mono",monospace;font-size:11px;resize:none}
 .launch-picker button.off{color:var(--muted);cursor:default}
 .launch-picker .launch-why{display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:2px;white-space:normal}
 .partner-dlg-back{position:fixed;inset:0;z-index:70;background:rgba(10,24,40,.45);display:flex;align-items:center;justify-content:center;padding:12px}

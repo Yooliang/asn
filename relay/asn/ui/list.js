@@ -23,9 +23,10 @@ import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_L
 import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
 import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
-import { CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, buddyConsoleItem, engineForProfile,launchDeviceRows, launchDisableReason, showDisplayModeChoice, withTimeout } from './lib/partner-launch-ui.mjs'
+import { CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, buddyConsoleItem, engineForProfile,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice, withTimeout } from './lib/partner-launch-ui.mjs'
 import { backgroundRestoreNoticeText, collectLaunchFailures, findBackgroundTimeouts, launchFailedNoticeText } from './lib/partner-launch-notify.mjs'
 import { friendId } from './lib/roster.mjs'
+import { canOfferModelSwitch, confirmText, createModelSwitcher } from './lib/model-switch.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
@@ -94,6 +95,12 @@ try {
   autostart.supported = await invoke('autostart_supported')
   if (autostart.supported) autostart.on = await invoke('autostart_get')
 } catch { /* 沒有這些指令（舊版後端）就不顯示 */ }
+// 內建收發室橋（預設關）：狀態以 Rust 端為準，不存檔。程式在 bridge/
+const bridge = reactive({ enabled: false, running: false, legacy: false, takeoverAllowed: false, remoteLaunch: false, error: '', busy: false, confirm: false, shown: false })
+const applyBridgeStatus = s => {
+  Object.assign(bridge, { enabled: s.enabled === true, running: s.running === true, legacy: s.legacy === true, takeoverAllowed: s.takeover_allowed === true, remoteLaunch: s.remote_launch === true, error: s.error || '', shown: true })
+}
+try { applyBridgeStatus(await invoke('bridge_status')) } catch { /* 舊版後端沒有這個指令就不顯示 */ }
 // 自動更新：啟動與每 6 小時檢查；有新版只在名單上方顯示一條通知，使用者按「更新」才下載安裝（--shot 模式不檢查）。程式在 updater.rs
 const autoCheck = ref(autoCheckFromSaved(savedMe.autoUpdate))
 const upd = reactive({ ...initialUpdateState(), checking: false, manual: '', lastCheck: 0, checkErr: '' })
@@ -229,6 +236,8 @@ function setLaunchCwdText(text) {
 }
 const launchToolRows = computed(() => MODEL_CATALOG.map(m => modelUiRow(m, cliTools.value[m.toolId ?? m.id])))
 const partnerModels = computed(() => launchToolRows.value)
+// 對話框裡的模型列：本機看偵測到的 CLI；別台設備看那台回報的 profile
+const dlgModels = computed(() => (partnerDlg.node && partnerDlg.node !== info.node ? remoteModelRows(remoteLaunchers.value[partnerDlg.node]) : partnerModels.value))
 const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '', display: 'foreground' })
 const partnerShowDisplay = computed(() => partnerDlg.node === info.node && showDisplayModeChoice(partnerDlg.profile))
 const launchCtx = computed(() => ({ selfNode: info.node, partnerModels: partnerModels.value, remoteLaunchers: remoteLaunchers.value }))
@@ -276,9 +285,18 @@ function openPartnerDlg(nodeKey) {
   partnerDlg.busy = false
   partnerDlg.firstMessage = ''
   partnerDlg.display = launchPrefs.launchDisplay === 'background' ? 'background' : 'foreground'
-  const first = partnerModels.value.find(m => m.installed) ?? partnerModels.value[0]
+  const first = dlgModels.value.find(m => m.installed) ?? dlgModels.value[0]
   if (first) pickPartnerModel(first)
   partnerDlg.cwd = partnerCwdChoices.value[0] ?? ''
+  if (nodeKey !== info.node) {
+    // 別台設備：開對話框時重抓一次它回報的 profile 與資料夾（剛啟用內建橋或剛改設定時才不會看到舊的）
+    void refreshLaunchers().then(() => {
+      if (!partnerDlg.open || partnerDlg.node !== nodeKey) return
+      const cur = dlgModels.value.find(m => m.profileId === partnerDlg.profile)
+      if (!cur) { const f = dlgModels.value[0]; if (f) pickPartnerModel(f) }
+      if (!partnerDlg.cwd || !partnerCwdChoices.value.includes(partnerDlg.cwd)) partnerDlg.cwd = partnerCwdChoices.value[0] ?? ''
+    })
+  }
   if (nodeKey === info.node) {
     void refreshCwdCandidates().then(() => {
       if (partnerDlg.open && !partnerDlg.cwd) partnerDlg.cwd = partnerCwdChoices.value[0] ?? ''
@@ -309,7 +327,38 @@ const buddyMenuFriend = ref(null)
 // 右鍵選單立刻出現（固定有「開啟對話」）；主控台切換項目先顯示「檢查中…」，查到才可按，逾時／查不到就停用
 const buddyConsole = reactive({ state: 'none', visible: true })
 const buddyConsoleItemView = computed(() => buddyConsoleItem(buddyConsole.state, buddyConsole.visible))
-function closeBuddyMenu() { buddyMenu.value = ''; buddyMenuFriend.value = null; buddyConsole.state = 'none' }
+// 「切換模型 ▸」：只有本機的 Claude 視窗會出現；查詢逾時或查不到就停用並說明原因（共用 lib/model-switch.mjs，功能列 #40 也用它）
+const modelSwitcher = createModelSwitcher({ transport, log: m => console.info('[ASN]', m) })
+const buddyModel = reactive({ show: false, state: 'none', reason: '', current: '', items: [], open: false, st: null })
+function resetBuddyModel() { Object.assign(buddyModel, { show: false, state: 'none', reason: '', current: '', items: [], open: false, st: null }) }
+const buddyModelLabel = computed(() => (buddyModel.state === 'checking' ? '切換模型（檢查中…）' : buddyModel.state === 'none' ? '切換模型（無法切換）' : '切換模型 ▸'))
+const modelDlg = reactive({ open: false, name: '', target: null, current: '', busy: false, error: '', manual: '', done: '', copied: false, st: null })
+const modelDlgText = computed(() => confirmText(modelDlg.name, modelDlg.current, modelDlg.target?.label ?? ''))
+function closeModelDlg() { if (!modelDlg.busy) modelDlg.open = false }
+function closeBuddyMenu() { buddyMenu.value = ''; buddyMenuFriend.value = null; buddyConsole.state = 'none'; resetBuddyModel() }
+async function loadBuddyModel(c) {
+  buddyModel.state = 'checking'
+  const st = await modelSwitcher.query(c.agent || c.nick)
+  if (buddyMenuFriend.value !== c) return   // 使用者已經關掉或換開別人的選單
+  Object.assign(buddyModel, { state: st.state, reason: st.reason, current: st.current, items: st.items, st })
+}
+function pickBuddyModel(item) {
+  const c = buddyMenuFriend.value
+  if (!c || item.disabled || item.checked || !buddyModel.st) return
+  Object.assign(modelDlg, { open: true, name: c.agent || c.nick, target: item, current: buddyModel.current, busy: false, error: '', manual: '', done: '', copied: false, st: buddyModel.st })
+  closeBuddyMenu()
+}
+async function submitModelDlg() {
+  if (modelDlg.busy || modelDlg.done) return
+  modelDlg.busy = true; modelDlg.error = ''; modelDlg.manual = ''
+  const r = await modelSwitcher.run(modelDlg.name, modelDlg.st, modelDlg.target.id)
+  modelDlg.busy = false
+  if (r.ok) modelDlg.done = r.message
+  else { modelDlg.error = r.message; modelDlg.manual = r.manual }
+}
+async function copyModelManual() {
+  try { await navigator.clipboard.writeText(modelDlg.manual); modelDlg.copied = true } catch (e) { console.info('[ASN] 複製失敗', e.message) }
+}
 function buddyMenuOpenChat() {
   const c = buddyMenuFriend.value
   closeBuddyMenu()
@@ -322,12 +371,15 @@ async function openBuddyMenu(c, e) {
   buddyMenuFriend.value = c
   buddyMenu.value = c.id
   buddyConsole.visible = true
+  const eng = c.engine || engineForProfile(c.launchProfile || 'claude')
+  resetBuddyModel()
+  buddyModel.show = canOfferModelSwitch(c, { selfNode: info.node, engine: eng })
+  if (buddyModel.show) void loadBuddyModel(c)
   if (c.node !== info.node || c.engine === 'acp' || c.pending) { buddyConsole.state = 'none'; return }
   buddyConsole.state = 'checking'
-  const eng = c.engine || engineForProfile(c.launchProfile || 'claude')
   const q = await withTimeout(transport.partnerConsoleQuery({ engine: eng, name: c.agent || c.nick }), CONSOLE_QUERY_TIMEOUT_MS)
   if (buddyMenuFriend.value !== c) return   // 使用者已經關掉或換開別人的選單
-  if (q?.canToggle) {
+  if (q?.can_toggle ?? q?.canToggle) {
     buddyConsole.state = 'toggle'
     buddyConsole.visible = Boolean(q.visible)
   } else {
@@ -599,6 +651,14 @@ const app = createApp({
       autostart.busy = true
       try { await invoke('autostart_set', { on }); autostart.on = on } catch (e) { say(String(e?.message ?? e)); autostart.on = await invoke('autostart_get').catch(() => autostart.on) } finally { autostart.busy = false }
     }
+    // 設定頁「讓 ASN 負責這台的收發室」與「改由 ASN 負責」（停舊版收發室橋，要再按一次確認）
+    const runBridge = async fn => {
+      bridge.busy = true
+      try { applyBridgeStatus(await fn()) } catch (e) { bridge.error = String(e?.message ?? e); say(bridge.error) } finally { bridge.busy = false; bridge.confirm = false }
+    }
+    const setBridgeEnabled = on => runBridge(() => invoke('bridge_set_enabled', { on }))
+    const setBridgeRemoteLaunch = on => runBridge(() => invoke('bridge_set_remote_launch', { on }))
+    const takeoverBridge = () => runBridge(() => invoke('bridge_takeover', { confirmed: true }))
     // 指引、設定的聊天窗（openPanel／closePanel 在上面）：列表只負責「點一項就開」，內容在右邊分頁或獨立視窗
     const panelGuide = computed(() => panelItem('guide', ui.panel.guide))
     const catSub = key => catSummary(key, {
@@ -757,6 +817,7 @@ const app = createApp({
         remote: { node: accounts.state.remote.node, devices: accounts.remoteNodes(), list: accounts.state.remote.list, loading: accounts.state.remote.loading, busy: accounts.state.remote.busy, msg: accounts.state.remote.msg },
       },
       closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy },
+      bridge: bridge.shown ? { enabled: bridge.enabled, running: bridge.running, legacy: bridge.legacy, takeoverAllowed: bridge.takeoverAllowed, remoteLaunch: bridge.remoteLaunch, error: bridge.error, busy: bridge.busy, confirm: bridge.confirm } : null,
       autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual, status: updateStatus({ checking: upd.checking, phase: upd.phase, info: upd.info, lastCheck: upd.lastCheck, error: upd.checkErr, current: info.version }) },
       launch: { tools: launchToolRows.value, maxPerHour: launchPrefs.maxPerHour, cwdText: launchCwdText.value },
       version: info.version,
@@ -782,6 +843,11 @@ const app = createApp({
         case 'acct-trust': await accounts.setTrust(value === true); break
         case 'closeTo': await setCloseTo(value); break
         case 'autostart': await setAutostart(value === true); break
+        case 'bridge-enable': await setBridgeEnabled(value === true); break
+        case 'bridge-launch': await setBridgeRemoteLaunch(value === true); break
+        case 'bridge-takeover': bridge.confirm = true; break
+        case 'bridge-takeover-yes': await takeoverBridge(); break
+        case 'bridge-takeover-no': bridge.confirm = false; break
         case 'autoCheck': autoCheck.value = value === true; break
         case 'check-update': await checkUpdate(true); break
         case 'launch-max': launchPrefs.maxPerHour = Number.isFinite(value) ? value : 6; await saveLaunchPrefs(); break
@@ -820,9 +886,10 @@ const app = createApp({
       selfNode: info.node, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg,
       searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickLaunchDevice,
       DISPLAY_MODES, partnerShowDisplay,
-      openPartnerDlg, closePartnerDlg, partnerDlg, partnerModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
+      openPartnerDlg, closePartnerDlg, partnerDlg, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddyConsoleItemView, buddyMenuOpenChat, toggleBuddyConsole,
+      buddyModel, buddyModelLabel, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,
       launchToolRows, launchPrefs, launchCwdText, saveLaunchPrefs, setLaunchCwdText,
     }
   },

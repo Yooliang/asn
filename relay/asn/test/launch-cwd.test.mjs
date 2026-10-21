@@ -79,3 +79,11 @@ test('shot：開新夥伴對話框（候選來自暫存家目錄裡假的 Claude
   assertShotNotBlank(path.join(out, 'tabs-partner-dlg.png'))
   console.log('SHOT_DIR', out)
 })
+
+test('背景／前台切換：前端讀的欄位名要跟 Rust 回傳一致（can_toggle）', async () => {
+  const fs = await import('node:fs')
+  const js = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
+  const rs = fs.readFileSync(new URL('../src-tauri/src/launch/console.rs', import.meta.url), 'utf8')
+  assert.ok(rs.includes('can_toggle: Option<bool>'))
+  assert.match(js, /q\?\.can_toggle/)
+})

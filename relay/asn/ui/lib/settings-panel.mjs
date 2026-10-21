@@ -13,7 +13,7 @@ import { OTHER_VENDORS, VENDOR_UNSUPPORTED, accountLine } from './claude-account
 export const SETTING_OPS = [
   'sound', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-add', 'acct-remote-node', 'acct-remote-switch', 'acct-trust',
-  'closeTo', 'autostart', 'autoCheck', 'check-update', 'launch-max', 'launch-cwd', 'avatar-remove',
+  'closeTo', 'autostart', 'bridge-enable', 'bridge-launch', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'autoCheck', 'check-update', 'launch-max', 'launch-cwd', 'avatar-remove',
 ]
 
 export const SettingsPanel = {
@@ -146,6 +146,21 @@ export const SettingsPanel = {
         </label>
         <small v-if="!st.trayOk">這台電腦建不起系統匣圖示，關閉視窗一律結束程式。</small>
         <label class="chk" v-if="st.autostart.supported"><input type="checkbox" :checked="st.autostart.on" :disabled="st.autostart.busy" @change="act('autostart', $event.target.checked)" aria-label="登入時自動啟動 ASN" /><span>登入時自動啟動 ASN</span></label>
+        <section class="set-card" aria-label="收發室" v-if="st.bridge">
+          <label class="chk"><input type="checkbox" :checked="st.bridge.enabled" :disabled="st.bridge.busy" @change="act('bridge-enable', $event.target.checked)" aria-label="讓 ASN 負責這台的收發室" /><span>讓 ASN 負責這台的收發室</span></label>
+          <label class="chk"><input type="checkbox" :checked="st.bridge.remoteLaunch" :disabled="st.bridge.busy" @change="act('bridge-launch', $event.target.checked)" aria-label="允許我的其他設備替這台開新視窗" /><span>允許我的其他設備替這台開新視窗</span></label>
+          <small v-if="st.bridge.running">這台的收發室目前由 ASN 負責。</small>
+          <small v-else-if="st.bridge.legacy">這台的收發室目前由舊版收發室橋負責。</small>
+          <template v-if="st.bridge.legacy && st.bridge.takeoverAllowed">
+            <button v-if="!st.bridge.confirm" class="aero-btn" type="button" :disabled="st.bridge.busy" @click="act('bridge-takeover')">改由 ASN 負責</button>
+            <div v-else class="upd-row">
+              <small>要停掉舊版收發室橋，改由 ASN 負責嗎？</small>
+              <button class="aero-btn" type="button" :disabled="st.bridge.busy" @click="act('bridge-takeover-yes')">確定</button>
+              <button class="aero-btn" type="button" :disabled="st.bridge.busy" @click="act('bridge-takeover-no')">取消</button>
+            </div>
+          </template>
+          <small v-if="st.bridge.error">{{ st.bridge.error }}</small>
+        </section>
       </template>
       <template v-if="catKey === 'update'">
         <section class="set-card upd-card" aria-label="更新">
