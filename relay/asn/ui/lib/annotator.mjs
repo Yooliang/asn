@@ -1,7 +1,7 @@
 // 截圖標註畫面（對話區裡的全區浮層）：畫筆、螢光筆、矩形、箭頭、文字、馬賽克、復原／重做、清除；確定後輸出 PNG 與說明文字。
 // 只顯示與發事件（done／cancel），不碰網路與 Tauri；規則與畫法在 markup.mjs（有單元測試）。
 // 兩層畫布：底層＝底圖＋已確定的標註（變動時才重畫），上層＝正在拖曳的那一筆（每次移動重畫，很輕）。
-import { COLORS, COLOR_LABEL, SIZES, SIZE_LABEL, TOOLS, TOOL_LABEL, createMarkup, drawOp, exportSize, fitView, mosaicCell, rectOf, renderAll, strokeWidth, textSize, toImagePoint } from './markup.mjs'
+import { COLORS, COLOR_LABEL, SIZES, SIZE_LABEL, TOOLS, TOOL_LABEL, createMarkup, drawOp, exportSize, fitView, mosaicCell, rectOf, placeTextBox, renderAll, strokeWidth, textBackdrop, textSize, textStroke, toImagePoint } from './markup.mjs'
 
 const { ref, computed, reactive, onMounted, onBeforeUnmount, nextTick } = Vue
 const ICON = {   // 每個圖示一條路徑；fill＝實心
@@ -25,7 +25,7 @@ export const Annotator = {
   setup(props, { emit }) {
     const baseEl = ref(null), topEl = ref(null), boxEl = ref(null), textEl = ref(null), capEl = ref(null)
     const tool = ref('pen'), color = ref(COLORS[0]), size = ref(2)
-    const text = reactive({ open: false, x: 0, y: 0, left: 0, top: 0, value: '' })
+    const text = reactive({ open: false, px: 0, py: 0, value: '' })   // px／py：點的位置（畫面像素，相對圖片顯示區）
     const cap = ref(props.caption)
     const note = ref('')
     const marks = createMarkup(), tick = ref(0)   // tick：清單變動時讓按鈕狀態重算
@@ -100,16 +100,25 @@ export const Annotator = {
     }
 
     // 文字：在點的位置放一個輸入框，Enter 確定（Shift+Enter 換行）、Esc 取消這一段字
+    // 輸入框放在圖片顯示區（.an-stage）裡，座標與圖片同一個系統；靠邊時往內推，最後畫上去的位置就是輸入框的位置
+    const viewScale = () => (state.w ? state.view.w / state.w : 1)
+    const textPx = () => textSize(size.value, state.w) * viewScale()   // 輸入框的字級（畫面像素），與畫上去的大小成比例
+    const textRows = () => text.value.split('\n').length
+    const textBox = computed(() => placeTextBox(text.px, text.py, textRows() * textPx() * 1.25, state.view.w, state.view.h))
+    const textStyle = computed(() => {
+      const b = textBox.value, px = textPx(), c = color.value, st = textStroke(c), o = Math.max(1, px / 14)
+      const shadow = [[-o, 0], [o, 0], [0, -o], [0, o], [-o, -o], [o, -o], [-o, o], [o, o]].map(([dx, dy]) => dx + 'px ' + dy + 'px 0 ' + st).join(',')
+      return { left: b.left + 'px', top: b.top + 'px', width: Math.max(0, state.view.w - b.left) + 'px', fontSize: px + 'px', color: c, background: textBackdrop(c), textShadow: shadow }
+    })
     function openText(e, p) {
-      const r = topEl.value.getBoundingClientRect(), b = boxEl.value.getBoundingClientRect()
-      Object.assign(text, { open: true, x: p.x, y: p.y, left: e.clientX - b.left, top: e.clientY - b.top, value: '' })
-      void r
+      const k = viewScale()
+      Object.assign(text, { open: true, px: p.x * k, py: p.y * k, value: '' })
       nextTick(() => textEl.value && textEl.value.focus())
     }
     function commitText() {
       if (!text.open) return
-      const v = text.value; text.open = false
-      if (marks.commit({ type: 'text', color: color.value, size: textSize(size.value, state.w), x: text.x, y: text.y, text: v })) repaint()
+      const v = text.value, b = textBox.value, k = viewScale(); text.open = false
+      if (marks.commit({ type: 'text', color: color.value, size: textSize(size.value, state.w), x: b.left / k, y: b.top / k, text: v })) repaint()
     }
     const cancelText = () => { text.open = false }
 
@@ -148,7 +157,7 @@ export const Annotator = {
     })
     onBeforeUnmount(() => { window.removeEventListener('keydown', onKey, true); ro && ro.disconnect(); bmp && bmp.close && bmp.close() })
 
-    return { baseEl, topEl, boxEl, textEl, capEl, tool, color, size, text, cap, note, state, canUndo, canRedo, hasMarks, TOOLS, TOOL_LABEL, COLORS, COLOR_LABEL, SIZES, SIZE_LABEL, ICON, down, move, up, commitText, cancelText, undo, redo, clearAll, finish, cancel }
+    return { textStyle, textRows, baseEl, topEl, boxEl, textEl, capEl, tool, color, size, text, cap, note, state, canUndo, canRedo, hasMarks, TOOLS, TOOL_LABEL, COLORS, COLOR_LABEL, SIZES, SIZE_LABEL, ICON, down, move, up, commitText, cancelText, undo, redo, clearAll, finish, cancel }
   },
   template: `
 <div class="annot" role="dialog" aria-modal="true" aria-label="標註圖片">
@@ -173,9 +182,9 @@ export const Annotator = {
   <div class="an-box" ref="boxEl">
     <div class="an-stage" :style="{ width: state.view.w + 'px', height: state.view.h + 'px' }">
       <canvas ref="baseEl" class="an-cv" aria-label="要標註的圖片"></canvas>
-      <canvas ref="topEl" class="an-cv an-top" :class="'tool-' + tool" @pointerdown="down" @pointermove="move" @pointerup="up" @pointercancel="up"></canvas>
+      <canvas ref="topEl" class="an-cv an-top" :class="'tool-' + tool" @pointerdown="down" @pointermove="move" @pointerup="up" @pointercancel="up" @mousedown.prevent></canvas>
+      <textarea v-if="text.open" ref="textEl" class="an-text" :rows="textRows()" wrap="off" spellcheck="false" v-model="text.value" :style="textStyle" aria-label="輸入要放在圖上的文字" @keydown.enter.exact.prevent="commitText" @keydown.esc.stop.prevent="cancelText" @blur="commitText"></textarea>
     </div>
-    <textarea v-if="text.open" ref="textEl" class="an-text" rows="1" v-model="text.value" :style="{ left: text.left + 'px', top: text.top + 'px', color: color }" aria-label="輸入要放在圖上的文字" @keydown.enter.exact.prevent="commitText" @keydown.esc.stop.prevent="cancelText" @blur="commitText"></textarea>
     <div class="an-msg" v-if="note || message" role="status">{{ note || message }}</div>
   </div>
   <div class="an-foot">
