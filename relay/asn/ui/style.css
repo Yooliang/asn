@@ -78,6 +78,9 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .launch-notice-log{margin:0;font-size:11px;color:#4a6080;word-break:break-all}
 .launch-notice-log code{font-family:Consolas,"Liberation Mono",monospace;font-size:11px}
 .partner-dlg label{display:flex;flex-direction:column;gap:3px;font-size:12px}
+.partner-cwd-row{display:flex;gap:6px;align-items:center}
+.partner-cwd-row .set-sel{flex:1;min-width:0}
+.partner-hint{margin:0;font-size:12px;color:#b25b00}
 .partner-display{border:1px solid var(--line);border-radius:4px;padding:6px 8px;margin:0;display:flex;flex-wrap:wrap;gap:8px 14px}
 .partner-display legend{padding:0 4px;font-size:12px;font-weight:600}
 .partner-display-opt{display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer}

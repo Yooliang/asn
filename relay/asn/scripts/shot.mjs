@@ -41,7 +41,7 @@ export const demoRooms = [
 
 // me：預先寫進 asn-me.json 的設定（例如 { tabDim: 'engine', groupDim: 'device' }），截圖時用來切換維度
 // avatars：true＝示範大頭貼（本機這台 H 已上傳一張；另有不在名單上的設備 K 也上傳了一張，並寄來一封信）
-export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000, me = null, avatars = false } = {}) {
+export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000, me = null, avatars = false, setup = null } = {}) {
   const members = avatars ? [...demoMembers, { id: 'K', name: '小凱的電腦', kind: 'other', agents: [] }] : demoMembers
   const relay = await startFakeRelay({ node: 'H', members, rooms: demoRooms, avatars: avatars ? { H: demoUploadUrl(), K: pngDataUrl(96, 96, (x, y) => (((x >> 4) + (y >> 4)) % 2 ? [70, 130, 200] : [250, 210, 90])) } : {} })
   if (avatars) relay.mail(3, { from_node: 'K', from_agent: 'K-ASN', to_node: 'H', to_agent: 'H-ASN', body: '嗨，我是另一台的 ASN 使用者 :)', created_at: new Date(Date.now() - 60_000).toISOString() })
@@ -61,6 +61,7 @@ export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000, me
   fs.mkdirSync(env.IRORI_ASN_DATA, { recursive: true })
   fs.writeFileSync(path.join(env.IRORI_ASN_DATA, 'settings.json'), JSON.stringify({ window_name: 'H-ASN', old_names: [{ name: 'H-舊名', t: Date.now() - 60_000 }, { name: 'H-過期', t: Date.now() - 9 * 24 * 3600_000 }] }))
   if (me) fs.writeFileSync(path.join(env.IRORI_ASN_DATA, 'asn-me.json'), JSON.stringify(me))
+  if (setup) setup(env)   // 截圖前預先放好暫存家目錄裡的檔案（例如假的 ~/.claude/sessions）
   const child = spawn(exe, ['--shot', outDir], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: false, detached: process.platform !== 'win32' })
   let log = ''
   child.stdout.on('data', d => (log += d)); child.stderr.on('data', d => (log += d))

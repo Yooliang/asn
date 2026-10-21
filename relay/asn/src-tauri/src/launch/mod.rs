@@ -1,6 +1,7 @@
 //! 開新夥伴：本機啟動、遠端 launch API（全 Rust，不呼叫 Node）。
 mod config;
 mod console;
+mod cwds;
 mod local;
 mod prefs;
 mod profiles;
@@ -42,8 +43,30 @@ pub struct PartnerConsoleReq {
     pub visible: Option<bool>,
 }
 
-pub async fn partner_launch_local(node: String, work_dir: PathBuf, req: LocalLaunchReq) -> Result<Value, String> {
-    blocking_timeout(move || local::partner_launch_local(&node, &work_dir, req)).await
+pub async fn partner_launch_local(node: String, work_dir: PathBuf, data_dir: PathBuf, req: LocalLaunchReq) -> Result<Value, String> {
+    blocking_timeout(move || local::partner_launch_local(&node, &work_dir, &data_dir, req)).await
+}
+
+/// 工作資料夾下拉的候選（白名單＋自動建議，最多 15 筆）。
+pub async fn launch_cwd_candidates(data_dir: PathBuf) -> Result<Vec<String>, String> {
+    blocking_timeout(move || {
+        let allow = config::load_launch_config().map(|c| c.cwd_allow).unwrap_or_default();
+        Ok(cwds::candidates(&crate::identity::home_dir(), &data_dir, &allow))
+    })
+    .await
+}
+
+/// 「瀏覽…」選好的資料夾：存在才收，並寫進本機白名單；回傳正規化後的路徑。
+pub async fn launch_cwd_add(data_dir: PathBuf, cwd: String) -> Result<String, String> {
+    blocking_timeout(move || {
+        let p = cwds::norm_path(&cwd).ok_or_else(|| "資料夾是空的".to_string())?;
+        if !std::path::Path::new(&p).is_dir() {
+            return Err(format!("資料夾不存在：{p}"));
+        }
+        cwds::add_to_prefs_allow(&data_dir, &p)?;
+        Ok(p)
+    })
+    .await
 }
 
 pub async fn partner_console_query(req: PartnerConsoleReq) -> Result<Value, String> {
