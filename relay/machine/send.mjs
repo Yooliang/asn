@@ -4,6 +4,7 @@
 //   node send.mjs --to W/W-政策 --body-file msg.txt --no-reply
 //   node send.mjs --room <群組id> --body "內文"
 //   echo 內文 | node send.mjs --to XISU --body - --reply
+//   node send.mjs --to W/W-政策 --file 報告.pdf --file 截圖.webp --body "說明" --no-reply   # 寄檔案／照片（內文可省略）
 // 寄給成員／視窗（--to，含回信 --reply-to）一定要明說要不要回信：--reply＝我在等回信（收發室 10 分鐘沒收到回覆會提醒）、
 // --no-reply＝只是告知；結果以 expects_reply 欄位送給後端，【不往內文加任何標記】（內文有沒有標記沒辦法用程式可靠判斷）。
 // 兩個都沒給就不寄（exit 1）；--room 群組本來就不計時，給了會忽略。
@@ -15,6 +16,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { sentMarkName } from './sent-mark.mjs'
+import { AttachFail } from './attach-download.mjs'
+import { MAX_FILES, attachmentText, prepareFiles, uploadItems } from './attach-upload.mjs'
 import { BASE_URL, Fail, HOME_DIR, findCaller, inspectCaller, machineNode, readMachineKey, readSession, sessionsDir } from './identity.mjs'
 
 export { findCaller, inspectCaller }
@@ -30,6 +33,10 @@ const USAGE = `用法：
                      --reply＝我在等對方回信（收發室 10 分鐘沒收到回覆會提醒）；--no-reply＝只是告知，不用回、不會提醒。
                      結果以欄位送給後端，不會在內文加任何標記。--room 群組本來就不計時，給了會忽略（印一行說明）。
   --body-file <檔>   內文從檔案讀；--body -  內文從 stdin 讀
+  --file <路徑>      附件，可重複，一封至多 ${MAX_FILES} 個（--to、--room 都能用；內文可省略，只有附件時內文就是附件清單）。
+                     照片只收已是 webp 的（5 MB；本程式不轉檔，png／jpg 請先轉 webp，或用 ASN 電腦版寄）；
+                     一般檔案收 pdf、txt、md、json、csv、zip、docx、xlsx、pptx（25 MB），可執行檔、腳本一律擋。
+                     檢查全在本機先做，任何一個不合格或上傳失敗都不寄信。收的人用 attach.mjs --id <編號> 下載。
   --whoami           不寄信，印出父行程鏈、session 對照、節點判定（除錯用）
 同一台機器上的其他視窗（含 ASN）也可以寄（--to <本機節點>/<視窗名>）；不能寄給自己這個視窗。
 內文至多 ${MAX_BODY} 字。寄件人（視窗名）由本程式自動判定，不能自填；信任一律是 member。`
@@ -45,6 +52,7 @@ export function parseArgs(argv) {
     else if (k === '--body') a.body = need()
     else if (k === '--body-file') a.bodyFile = need()
     else if (k === '--reply-to') a.replyTo = need()
+    else if (k === '--file') (a.files ??= []).push(need())
     else if (k === '--reply') a.reply = true
     else if (k === '--no-reply') a.noReply = true
     else if (k === '--whoami') a.whoami = true
@@ -124,7 +132,9 @@ export async function main(argv) {
   if (a.bodyFile) body = fs.readFileSync(a.bodyFile, 'utf8')
   else if (body === '-') body = fs.readFileSync(0, 'utf8')
   body = (body ?? '').replace(/\s+$/, '')
-  if (!body) throw new Fail(1, `內文是空的\n${USAGE}`)
+  if (!body && !a.files?.length) throw new Fail(1, `內文是空的\n${USAGE}`)
+  const items = a.files?.length ? prepareFiles(a.files) : []   // 附件先在本機全部檢查完（不碰網路），不合格就不往下
+  if (items.length) body = attachmentText(items, body)
   if (body.length > MAX_BODY) throw new Fail(1, `內文 ${body.length} 字，超過 ${MAX_BODY} 字`)
   if (a.replyTo && !UUID_RE.test(a.replyTo)) throw new Fail(1, '--reply-to 要是信件 id（uuid）')
   let toNode = '', toAgent = ''
@@ -139,11 +149,13 @@ export async function main(argv) {
   // 同節點可以寄（例如寄給本機的 ASN）：信經後端回到本機橋，照一般信轉交。只擋「寄給自己這個視窗」（沒有意義，還會把信轉回自己）
   if (toNode === node && toAgent === caller.name) throw new Fail(1, `收件人就是你自己（${node}/${caller.name}）；不能寄給自己`)
   takeRate(caller.name)
+  // 附件先傳完並確認；任何一個失敗就丟錯，下面不會寄信
+  const attachment_ids = items.length ? await uploadItems({ api: (action, b) => call(key, action, b), baseUrl: BASE_URL, items }) : undefined
   if (a.room) {
-    const r = await call(key, 'room_post', { room: a.room, body, from_agent: caller.name })
+    const r = await call(key, 'room_post', { room: a.room, body, from_agent: caller.name, attachment_ids })
     console.log(`posted room=${a.room}${r?.seq != null ? ` seq=${r.seq}` : ''} from=${node}/${caller.name}`)
   } else {
-    const r = await call(key, 'send', { to_node: toNode, to_agent: toAgent || undefined, body, reply_to: a.replyTo || undefined, from_agent: caller.name, expects_reply: expectsReply })
+    const r = await call(key, 'send', { to_node: toNode, to_agent: toAgent || undefined, body, reply_to: a.replyTo || undefined, from_agent: caller.name, expects_reply: expectsReply, attachment_ids })
     if (a.replyTo) markReplied(node, a.replyTo)
     markSent(node, caller.name, toNode, toAgent)
     console.log(`sent id=${r?.id} to=${a.to} from=${node}/${caller.name}`)
@@ -155,7 +167,8 @@ export async function main(argv) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   // 不呼叫 process.exit()：Windows 上 fetch 剛結束就強制結束，node 偶爾會在關閉 handle 時 assertion 當掉；改設 exitCode 讓事件圈自然結束
   main(process.argv.slice(2)).then(c => { process.exitCode = c }, e => {
-    console.error(e instanceof Fail ? e.message : `錯誤：${e.message}`)
-    process.exitCode = e instanceof Fail ? e.code : 4
+    const known = e instanceof Fail || e instanceof AttachFail
+    console.error(known ? e.message : `錯誤：${e.message}`)
+    process.exitCode = known ? e.code : 4
   })
 }

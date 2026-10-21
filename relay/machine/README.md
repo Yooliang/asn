@@ -205,7 +205,15 @@ node D:/Github/irori/relay/machine/send.mjs --to XISU --body "內文" --reply|--
 node D:/Github/irori/relay/machine/send.mjs --to W/W-政策 --body-file msg.txt --no-reply   # 節點/視窗名
 node D:/Github/irori/relay/machine/send.mjs --room <群組id> --body "內文"            # 貼到群組（room_post）
 echo 內文 | node send.mjs --to XISU --body - --reply                                 # 內文從 stdin 讀
+node send.mjs --to XISU --file 報告.pdf --file 圖.webp --body "說明" --no-reply        # 寄檔案／照片
 ```
+
+**寄附件（`--file <路徑>`，可重複，一封至多 4 個，`--to`、`--room` 都能用）**：共用邏輯在 `attach-upload.mjs`（對應下載端 `attach-download.mjs`），規則同 `docs/ATTACHMENTS.md` 與 `supabase/functions/_shared/attachments.ts`。
+- **照片只收已經是 webp 的**（檔頭 `RIFF….WEBP`、≤ 5 MB，位元組原樣上傳，不縮放、不帶縮圖）。Node 沒有影像函式庫、也不加原生依賴，所以不轉檔：png／jpg／gif 等會被明確拒絕並提示先轉 webp（它們不在一般檔案白名單，不會被當檔案混進去）；要自動轉請用 ASN 電腦版寄。
+- 一般檔案：副檔名在白名單（pdf、txt、md、json、csv、zip、docx、xlsx、pptx）、內容檔頭要對得上（`%PDF-`、`PK`、文字檔不含 NUL）、≤ 25 MB；exe、bat、ps1、sh、js 等一律擋。
+- 內文可省略：只有附件時，內文是每個附件一行 `〔照片〕檔名`／`〔檔案〕檔名`；有 `--body` 就把說明接在後面。
+- 順序：本機全部檢查完（不碰網路）→ 認呼叫者、計次 → 逐個 `attach_init`、`PUT`、`attach_commit` → 全部成功才 `send`／`room_post`（帶 `attachment_ids`）。超過上限、白名單外、內容不符、第 5 個在本機就 exit 1；上傳或確認失敗、後端拒收（額度、型別、舊後端不支援）exit 4；兩種情況都不寄信。上傳網址必須與收發室同一主機，錯誤訊息不含簽名網址。
+- 收的人用 `attach.mjs --id <編號>` 下載。測試：`test/send-attach.test.mjs`（假後端模擬 attach_init／上傳／commit／send）。
 
 **寄給成員／視窗（含回信）一定要二選一**：`--reply`＝我在等回信、`--no-reply`＝只是告知；都沒給就不寄（exit 1：「請說明要不要回信：等對方回就加 --reply，只是告知就加 --no-reply」），兩個都給也報錯。結果以 `expects_reply` 欄位送後端，**內文一字不動**。`--room` 群組不計時，給了會忽略（印一行說明）。
 
