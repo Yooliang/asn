@@ -456,6 +456,17 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .upd-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .upd-btn{flex:none}
 .settings .upd-set{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.settings .chlog{display:flex;flex-direction:column;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
+.chlog-none{margin:0;font-size:12px;opacity:.7}
+.chlog-item{border:1px solid var(--line);border-radius:4px;padding:5px 8px;background:var(--panel)}
+.chlog-item.current{border-color:#7a9ec4;background:#eef5fc}
+.chlog-item.update{border-color:#d9c26a;background:#fff6d6}
+.chlog-item header{display:flex;gap:6px;align-items:baseline}
+.chlog-ver{font-weight:700}
+.chlog-item time{margin-left:auto;font-size:11px;opacity:.65}
+.chlog-tag{font-size:11px;padding:0 5px;border-radius:8px;background:#7a9ec4;color:#fff}
+.chlog-tag.upd{background:#c28a00}
+.chlog-item ul{margin:3px 0 0;padding-left:18px;font-size:12px}
 
 /* 共用對話框（設定分類、指引內容）：position:fixed 蓋在最上層，不放進 overflow:hidden 的容器；內容區自己捲動 */
 .dlg-back{position:fixed;inset:0;z-index:75;background:rgba(10,24,40,.45);display:flex;align-items:center;justify-content:center;padding:12px}

@@ -5,6 +5,7 @@ import { AsnCore } from './lib/core.mjs'
 import { ADS, AD_MS, FIXED_TABS, goAd, groupHeading, groupRows, moreUnread, nextAd, normalizeTab, openAdWith, prevAd, statusNote } from './lib/tabs.mjs'
 import { GUIDES } from './lib/guides.mjs'
 import { GuideDoc } from './lib/guide-doc.mjs'
+import { buildLogView } from './lib/changelog.mjs'
 import { SettingsPanel } from './lib/settings-panel.mjs'
 import { PANEL_KINDS, isPanelTab, normalizePanelSize, panelItem, panelTabId, panelTabItem, panelTitle, splitTabs } from './lib/panels.mjs'
 import { AsnDialog } from './lib/dialog.mjs'
@@ -90,6 +91,10 @@ try {
 // 自動更新：啟動與每 6 小時檢查；有新版只在名單上方顯示一條通知，使用者按「更新」才下載安裝（--shot 模式不檢查）。程式在 updater.rs
 const autoCheck = ref(autoCheckFromSaved(savedMe.autoUpdate))
 const upd = reactive({ ...initialUpdateState(), checking: false, manual: '' })
+// 版本更新記錄：打包時 CHANGELOG.md 轉成 vendor/changelog.json（與同內容的 changelog.mjs），離線也能看（讀不到就當沒有）
+const changelogEntries = ref([])
+// （CSP 的 connect-src 不放行 fetch；跟 dicebear.mjs 一樣用 import 載入同內容的 .mjs 版）
+try { changelogEntries.value = (await import('./vendor/changelog.mjs')).default } catch { /* 沒有記錄檔就不顯示 */ }
 const setUpd = next => Object.assign(upd, next)
 const checkUpdate = async (manual = false) => {
   if (info.shot || upd.checking || upd.phase === 'installing') return
@@ -659,6 +664,7 @@ const app = createApp({
       autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual },
       launch: { tools: launchToolRows.value, maxPerHour: launchPrefs.maxPerHour, cwdText: launchCwdText.value },
       version: info.version,
+      log: buildLogView({ entries: changelogEntries.value, current: info.version, available: upd.phase === 'idle' ? null : upd.info }),
     }))
     const applySetting = async (op, value) => {
       switch (op) {

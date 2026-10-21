@@ -9,7 +9,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { buildLatestJson, installerName, parseArgs, pickNotes } from './release-lib.mjs'
+import { buildLatestJson, installerName, parseArgs, resolveNotes } from './release-lib.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const siteUpdate = path.join(root, '..', '..', 'site', 'public', 'update')
@@ -17,6 +17,18 @@ const fail = m => { console.error(`發版中止：${m}`); process.exit(1) }
 
 let opts
 try { opts = parseArgs(process.argv.slice(2)) } catch (e) { fail(e.message) }
+
+const changelogFile = path.join(root, 'CHANGELOG.md')
+const readChangelog = () => (fs.existsSync(changelogFile) ? fs.readFileSync(changelogFile, 'utf8') : '')
+const readVersion = () => JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version
+const today = () => new Date().toLocaleDateString('sv-SE') // yyyy-mm-dd（本機日期）
+
+// --print-notes：只印這版會用的更新說明就結束（不 bump、不打包、不讀金鑰）
+if (opts.printNotes) {
+  const nextVer = opts.dryRun || opts.noBump ? readVersion() : readVersion().replace(/\d+$/, n => String(Number(n) + 1))
+  console.log(resolveNotes({ arg: opts.notes, changelog: readChangelog(), version: nextVer, date: today() }).notes)
+  process.exit(0)
+}
 
 const keyDir = process.env.ASN_UPDATER_KEY_DIR || path.join(os.homedir(), '.asn', 'updater')
 const keyFile = path.join(keyDir, 'asn.key')
@@ -33,8 +45,15 @@ const run = (cmd, args, extra = {}) => {
 const node = process.execPath
 
 if (!opts.dryRun && !opts.noBump) run(node, ['scripts/bump.mjs'])
-const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version
+const version = readVersion()
 console.log(`版本 ${version}${opts.dryRun ? '（演練）' : ''}`)
+
+// 更新說明：沒給 --notes 用 CHANGELOG 最新一段；給了就先寫進 CHANGELOG 的新段落（版本號用 bump 後的；演練不改檔）
+const { notes, newChangelog } = resolveNotes({ arg: opts.notes, changelog: readChangelog(), version, date: today() })
+if (newChangelog !== null) {
+  if (opts.dryRun) console.log('演練：不改 CHANGELOG.md（正式發版會把 --notes 寫成新段落）。')
+  else { fs.writeFileSync(changelogFile, newChangelog); console.log(`已把更新說明寫進 CHANGELOG.md（${version}）`) }
+}
 
 run(node, ['scripts/prep.mjs'])
 run(node, [path.join('node_modules', '@tauri-apps', 'cli', 'tauri.js'), 'build', '--bundles', 'nsis'])
@@ -46,8 +65,6 @@ const sigFile = `${exe}.sig`
 if (!fs.existsSync(exe)) fail(`沒產出安裝檔：${exe}`)
 if (!fs.existsSync(sigFile)) fail(`沒產出簽章檔：${sigFile}（確認 tauri.conf.json 的 createUpdaterArtifacts 與簽章環境變數）`)
 
-const changelogFile = path.join(root, 'CHANGELOG.md')
-const notes = pickNotes({ arg: opts.notes, changelog: fs.existsSync(changelogFile) ? fs.readFileSync(changelogFile, 'utf8') : '', version })
 const latest = buildLatestJson({ version, notes, pubDate: new Date(), signature: fs.readFileSync(sigFile, 'utf8') })
 
 const out = opts.dryRun ? path.join(root, 'src-tauri', 'target', 'release-dry') : siteUpdate
