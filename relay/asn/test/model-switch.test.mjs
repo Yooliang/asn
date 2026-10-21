@@ -134,3 +134,17 @@ test('守門：要先確認才會執行（確認鈕才呼叫 run；選單點選�
   assert.doesNotMatch(pick, /modelSwitcher\.run/, '點選單不能直接執行')
   assert.match(js.slice(js.indexOf('async function submitModelDlg')), /modelSwitcher\.run\(/)
 })
+
+test('確認窗：使用者自己開的視窗多一句說明終端機分頁會留下；ASN 開的不用', () => {
+  const asn = confirmText('小良哥', 'Opus', 'Sonnet')
+  const own = confirmText('小良哥', 'Opus', 'Sonnet', { ownWindow: true })
+  assert.equal(own.points.length, asn.points.length + 1)
+  assert.match(own.points.at(-1), /你自己開的視窗.*分頁會留下/)
+  assert.ok(!asn.points.some(x => x.includes('你自己開的')))
+  assert.ok(!/node|pid|[A-Z]{2,}\d/i.test(own.points.join('')), '不顯示節點代號')
+})
+
+test('列表右鍵把後端的 ownWindow 傳進確認窗', () => {
+  const list = read('ui/list.js')
+  assert.match(list, /confirmText\(modelDlg\.name[^\n]*ownWindow: Boolean\(modelDlg\.st\?\.raw\?\.ownWindow\)/)
+})

@@ -5,6 +5,7 @@ pub(crate) mod cwds;
 pub(crate) mod local;
 pub(crate) mod prefs;
 pub(crate) mod profiles;
+mod resume;
 mod switch;
 
 use crate::relay::Relay;
@@ -34,6 +35,9 @@ pub struct LocalLaunchReq {
     pub cwd: String,
     #[serde(default)]
     pub display: String,
+    /// true＝不接續舊對話、強制新開（預設 false：有同名舊對話就接續）
+    #[serde(default)]
+    pub fresh: bool,
 }
 
 #[derive(Serialize, Deserialize)]
