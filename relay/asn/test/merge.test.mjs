@@ -197,3 +197,21 @@ test('分頁右鍵選單：按選單以外任何地方（pointerdown 捕獲）�
   assert.match(js, /Escape' && chatTabMenu\.value\) closeChatTabMenu\(\)/)
   assert.match(js, /addEventListener\('blur'[\s\S]*closeChatTabMenu\(\)/)
 })
+
+// 守門：#60 改壞過——欄寬不夠把大頭貼裁一半、兩顆擠在最上面、收合鈕變成欄底小箭頭
+test('守門：側欄寬度不小於大頭貼 xl 尺寸；對方在上、自己在下；橫條收合鈕在兩顆大頭貼之後；收起時仍可點', () => {
+  const css = fs.readFileSync(path.join(UI, 'style.css'), 'utf8')
+  const xl = Number(/\.dp\.xl\{width:(\d+)px/.exec(css)[1])
+  const varXl = Number(/\.dp-side\{--dp-xl:(\d+)px/.exec(css)[1])
+  assert.ok(varXl >= xl, '側欄大頭貼尺寸變數不得小於 xl')
+  assert.ok(/\.dp-side\{[^}]*width:calc\(var\(--dp-xl\) \+ \d+px\)/.test(css), '側欄寬度要由 xl 尺寸算出')
+  assert.ok(!/\.dp-side\{[^}]*;width:\d+px/.test(css), '側欄不得寫死像素寬度')
+  assert.ok(/\.dp-side-stack\{[^}]*justify-content:space-between/.test(css), '兩顆大頭貼上下分開，不擠在最上面')
+  assert.ok(/\.dp-fold-strip\{flex:1/.test(css), '收起時留一條整欄高的可點條')
+  const pane = fs.readFileSync(path.join(UI, 'lib', 'chatpane.mjs'), 'utf8')
+  const i = pane.indexOf('<aside class="dp-side"')
+  const f = pane.indexOf("'st-' + friend.status", i), bar1 = pane.indexOf('class="dp-fold-bar"', f), m = pane.indexOf("'st-' + me.status", i), bar2 = pane.indexOf('class="dp-fold-bar"', m)
+  assert.ok(i > 0 && f > i && bar1 > f && m > bar1 && bar2 > m, '順序：對方大頭貼、其下橫條、自己大頭貼、其下橫條')
+  assert.ok(pane.includes('class="dp-fold-strip"'), '收起狀態要有可展開的條')
+  assert.ok(/\.dp-grp\{[^}]*width:var\(--dp-xl\)/.test(css), '橫條與大頭貼同寬')
+})
