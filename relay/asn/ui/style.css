@@ -344,6 +344,8 @@ html.frame-native .titlebar,html.frame-native .rz{display:none}
 .login-note{margin:0;font-size:12px}
 .login-err{margin:0;font-size:12px;color:#b3261e}
 .login-cancel{align-self:center}
+.login-skip{align-self:center;margin-top:4px;padding:2px 4px;border:0;background:none;font:inherit;font-size:12px;color:inherit;opacity:.7;text-decoration:underline;cursor:pointer}
+.login-skip:hover{opacity:1}
 .login-set .login-state{margin:4px 0;font-weight:600}
 html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .ctab.home img{display:block;flex:none}

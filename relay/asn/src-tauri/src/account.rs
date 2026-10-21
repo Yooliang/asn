@@ -11,7 +11,7 @@ use tauri::{AppHandle, State};
 pub fn error_text(code: &str) -> String {
     match code {
         "unauthorized" => "登入已失效，請重新登入",
-        "tenant_not_yours" => "這個節點還在舊的收發室租戶底下，請先請管理者把舊租戶認領到你的帳號，再回來連結",
+        "tenant_not_yours" => "這個節點還在舊的收發室租戶底下，要等管理者把舊租戶認領到你的帳號",
         "already_claimed" => "這個節點已經被別的帳號認領了",
         "invalid_key" => "這台電腦的節點金鑰後台不認得（可能已被換掉）",
         "too_many" => "這個帳號的電腦數量已達上限",
@@ -23,8 +23,21 @@ pub fn error_text(code: &str) -> String {
     .to_string()
 }
 
+/// 帳號動作失敗：code＝後台回的錯誤碼（連不上時是空字串），text＝給人看的話
+#[derive(Debug)]
+pub struct CallErr {
+    pub code: String,
+    pub text: String,
+}
+impl From<CallErr> for String {
+    fn from(e: CallErr) -> String {
+        e.text
+    }
+}
+
 /// 呼叫帳號動作（POST）。token＝登入存取憑證；node_key 只有 node_claim 才帶（x-relay-key）。
-pub async fn call(client: &reqwest::Client, relay_url: &str, token: &str, action: &str, node_key: Option<&str>, body: Value) -> Result<Value, String> {
+pub async fn call(client: &reqwest::Client, relay_url: &str, token: &str, action: &str, node_key: Option<&str>, body: Value) -> Result<Value, CallErr> {
+    let net = |t: &str| CallErr { code: String::new(), text: t.to_string() };
     let mut rb = client
         .post(format!("{relay_url}?action={action}"))
         .timeout(std::time::Duration::from_secs(30))
@@ -33,15 +46,58 @@ pub async fn call(client: &reqwest::Client, relay_url: &str, token: &str, action
     if let Some(k) = node_key {
         rb = rb.header("x-relay-key", k);
     }
-    let r = rb.send().await.map_err(|_| "連不上後台，請檢查網路".to_string())?;
+    let r = rb.send().await.map_err(|_| net("連不上後台，請檢查網路"))?;
     let status = r.status();
-    let text = r.text().await.map_err(|_| "讀不到後台的回應".to_string())?;
+    let text = r.text().await.map_err(|_| net("讀不到後台的回應"))?;
     let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
     if status.is_success() {
         return Ok(v);
     }
     let code = v.get("error").and_then(Value::as_str).unwrap_or("");
-    Err(error_text(code))
+    Err(CallErr { code: code.to_string(), text: error_text(code) })
+}
+
+// ---------- 「暫時不登入」的記號 ----------
+
+const SKIP_FILE: &str = "login_skipped";
+
+/// 使用者在登入畫面按過「暫時不登入」（只在這台已有節點金鑰時才有這個選項）
+pub fn login_skipped(data_dir: &Path) -> bool {
+    data_dir.join(SKIP_FILE).exists()
+}
+pub fn set_login_skipped(data_dir: &Path, on: bool) -> Result<(), String> {
+    let f = data_dir.join(SKIP_FILE);
+    if on {
+        crate::write_atomic(&f, "1").map_err(|e| format!("存不了設定：{e}"))
+    } else {
+        match std::fs::remove_file(&f) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("清不掉設定：{e}")),
+        }
+    }
+}
+
+/// 啟動時要不要先顯示登入畫面：沒有節點金鑰一定要；有金鑰但沒登入，除非使用者選了「暫時不登入」
+pub fn needs_login(has_node: bool, signed_in: bool, skipped: bool) -> bool {
+    !has_node || (!signed_in && !skipped)
+}
+
+/// 綁定結果給前端的樣子
+#[derive(Serialize, Debug, PartialEq)]
+pub struct BindOutcome {
+    /// created＝新建節點（稍後重新啟動）；bound＝已綁到帳號；pending＝這台沒擋，但還沒綁到
+    pub state: &'static str,
+    pub note: String,
+}
+
+/// 有節點金鑰時 node_claim 的結果 → 綁定結果。任何失敗都不擋使用（tenant_not_yours＝舊租戶還沒被認領，之後每次啟動再試）
+pub fn claim_outcome(r: Result<Value, CallErr>) -> BindOutcome {
+    match r {
+        Ok(v) if v.get("already").and_then(Value::as_bool) == Some(true) => BindOutcome { state: "bound", note: "這台電腦本來就在你的帳號底下".into() },
+        Ok(_) => BindOutcome { state: "bound", note: "已把這台電腦連到你的帳號".into() },
+        Err(e) => BindOutcome { state: "pending", note: if e.code == "tenant_not_yours" { "這台電腦尚未綁到你的帳號（管理者認領後會自動完成）".into() } else { e.text } },
+    }
 }
 
 // ---------- 本機檔案 ----------
@@ -167,9 +223,11 @@ pub fn auth_status(auth: State<'_, AuthState>) -> AuthStatus {
 
 /// 開瀏覽器登入並等回呼（最多 5 分鐘）。provider＝google 或 github
 #[tauri::command]
-pub async fn auth_login(auth: State<'_, AuthState>, provider: String) -> Result<AuthStatus, String> {
+pub async fn auth_login(app: State<'_, App>, auth: State<'_, AuthState>, provider: String) -> Result<AuthStatus, String> {
     let c = ctx()?;
-    auth.login(&c.client, &c.auth_base, &c.anon, &provider, |u| crate::spawn_browser(u)).await
+    let st = auth.login(&c.client, &c.auth_base, &c.anon, &provider, |u| crate::spawn_browser(u)).await?;
+    set_login_skipped(&app.data_dir, false)?;   // 登入了就不再是「暫時不登入」
+    Ok(st)
 }
 
 #[tauri::command]
@@ -177,15 +235,39 @@ pub fn auth_cancel(auth: State<'_, AuthState>) {
     auth.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
-/// 登出：通知後台作廢這個登入（盡力而為），再清掉本機登入權杖。不刪節點金鑰。
+/// 登出：通知後台作廢這個登入（盡力而為），再清掉本機登入權杖與「暫時不登入」記號，重新啟動回到登入畫面。不刪節點金鑰。
 #[tauri::command]
-pub async fn auth_logout(auth: State<'_, AuthState>) -> Result<(), String> {
+pub async fn auth_logout(app: State<'_, App>, auth: State<'_, AuthState>, handle: AppHandle) -> Result<(), String> {
     if let Ok(c) = ctx() {
         if let Ok(t) = auth.access_token(&c.client, &c.auth_base, &c.anon).await {
             let _ = c.client.post(format!("{}/auth/v1/logout?scope=local", c.auth_base)).header("apikey", &c.anon).bearer_auth(t).timeout(std::time::Duration::from_secs(5)).send().await;
         }
     }
-    auth.sign_out()
+    auth.sign_out()?;
+    set_login_skipped(&app.data_dir, false)?;
+    restart_soon(&app, handle);
+    Ok(())
+}
+
+/// 晚一點再重新啟動，讓指令先把結果回給畫面（--shot 模式不重啟）
+fn restart_soon(app: &App, handle: AppHandle) {
+    if app.shot.is_some() {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        crate::cleanup(&handle);
+        handle.restart();
+    });
+}
+
+/// 登入畫面的「暫時不登入」：只有這台已有節點金鑰時才准（記住這個選擇，之後開機照舊進名單）
+#[tauri::command]
+pub fn auth_skip_login(app: State<'_, App>) -> Result<(), String> {
+    if app.relay.is_none() {
+        return Err("這台電腦還沒有收發室金鑰，需要先登入".into());
+    }
+    set_login_skipped(&app.data_dir, true)
 }
 
 /// 帳號資訊：第一次呼叫時後台會替這個帳號建租戶；回名下電腦數與「這台是不是已經在名下」
@@ -203,25 +285,23 @@ pub async fn auth_account_info(app: State<'_, App>, auth: State<'_, AuthState>) 
     })
 }
 
-/// 把這台電腦（目前的節點金鑰）連到登入帳號。金鑰從本機檔案讀，只放在送出的標頭裡
-#[tauri::command]
-pub async fn auth_claim_this(auth: State<'_, AuthState>) -> Result<String, String> {
+/// 登入後自動處理金鑰（使用者不用按任何鈕）：
+/// - 這台已有節點金鑰 → node_claim 綁到帳號；失敗（含舊租戶還沒被認領）都不擋使用，回 pending，下次啟動再試
+/// - 沒有節點金鑰 → node_create 建新節點、存好金鑰（呼叫端稍後重新啟動）
+/// 金鑰從本機檔案讀，只放在送出的標頭裡；新金鑰只經過這裡一次。
+pub async fn bind_this(app: &App, auth: &AuthState) -> Result<BindOutcome, String> {
     let c = ctx()?;
-    let id = identity::resolve()?;
     let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
-    call(&c.client, &c.relay_url, &token, "account_bootstrap", None, json!({})).await?;
-    let v = call(&c.client, &c.relay_url, &token, "node_claim", Some(&id.key), json!({})).await?;
-    Ok(if v.get("already").and_then(Value::as_bool) == Some(true) { "這台電腦本來就在你的帳號底下".into() } else { "已把這台電腦連到你的帳號".into() })
-}
-
-/// 新電腦：替這台建節點、存好金鑰，然後重新啟動 ASN（重啟後就以新節點進入名單）
-#[tauri::command]
-pub async fn auth_setup_device(app: State<'_, App>, auth: State<'_, AuthState>, handle: AppHandle) -> Result<(), String> {
     if app.relay.is_some() {
-        return Err("這台電腦已經有節點金鑰了".into());
+        let id = match identity::resolve() {
+            Ok(i) => i,
+            Err(t) => return Ok(BindOutcome { state: "pending", note: t }),
+        };
+        if let Err(e) = call(&c.client, &c.relay_url, &token, "account_bootstrap", None, json!({})).await {
+            return Ok(claim_outcome(Err(e)));
+        }
+        return Ok(claim_outcome(call(&c.client, &c.relay_url, &token, "node_claim", Some(&id.key), json!({})).await));
     }
-    let c = ctx()?;
-    let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
     call(&c.client, &c.relay_url, &token, "account_bootstrap", None, json!({})).await?;
     let name = computer_name(|k| std::env::var(k).ok());
     let device_id = load_or_create_device_id(&app.data_dir)?;
@@ -229,15 +309,16 @@ pub async fn auth_setup_device(app: State<'_, App>, auth: State<'_, AuthState>, 
     let id = v.get("id").and_then(Value::as_str).unwrap_or("");
     let key = v.get("key").and_then(Value::as_str).unwrap_or("");
     write_node_files(&identity::relay_home(), id, key, restrict_file)?;
-    if app.shot.is_none() {
-        // 晚一點再重啟，讓這個指令先把結果回給畫面
-        tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
-            crate::cleanup(&handle);
-            handle.restart();
-        });
+    Ok(BindOutcome { state: "created", note: "已替這台電腦建立節點".into() })
+}
+
+#[tauri::command]
+pub async fn auth_bind(app: State<'_, App>, auth: State<'_, AuthState>, handle: AppHandle) -> Result<BindOutcome, String> {
+    let out = bind_this(&app, &auth).await?;
+    if out.state == "created" {
+        restart_soon(&app, handle);
     }
-    Ok(())
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -302,6 +383,39 @@ mod tests {
         assert!(write_node_files(d.path(), "../evil", "K", |_| true).is_err());
         assert!(write_node_files(d.path(), "ok", "  ", |_| true).is_err());
         assert!(std::fs::read_dir(d.path()).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn 啟動要不要先顯示登入畫面() {
+        assert!(needs_login(false, false, false), "新電腦一定要登入");
+        assert!(needs_login(false, true, true), "沒有金鑰就算登入過也要走建立節點");
+        assert!(needs_login(true, false, false), "舊電腦沒登入：要登入一次");
+        assert!(!needs_login(true, true, false), "舊電腦已登入：直接進名單");
+        assert!(!needs_login(true, false, true), "舊電腦選了暫時不登入：進名單");
+    }
+
+    #[test]
+    fn 暫時不登入的記號_寫入_讀取_清除() {
+        let d = tempfile::tempdir().unwrap();
+        assert!(!login_skipped(d.path()));
+        set_login_skipped(d.path(), true).unwrap();
+        assert!(login_skipped(d.path()));
+        set_login_skipped(d.path(), false).unwrap();
+        assert!(!login_skipped(d.path()));
+        set_login_skipped(d.path(), false).unwrap();   // 本來就沒有也不出錯
+    }
+
+    #[test]
+    fn 綁定結果_成功_已綁_舊租戶沒認領不擋_其他失敗也不擋() {
+        let ok = claim_outcome(Ok(json!({ "ok": true, "already": false })));
+        assert_eq!((ok.state, ok.note.as_str()), ("bound", "已把這台電腦連到你的帳號"));
+        assert_eq!(claim_outcome(Ok(json!({ "ok": true, "already": true }))).state, "bound");
+        let old = claim_outcome(Err(CallErr { code: "tenant_not_yours".into(), text: error_text("tenant_not_yours") }));
+        assert_eq!(old.state, "pending");
+        assert!(old.note.contains("尚未綁到你的帳號") && old.note.contains("自動完成"));
+        let net = claim_outcome(Err(CallErr { code: String::new(), text: "連不上後台，請檢查網路".into() }));
+        assert_eq!((net.state, net.note.as_str()), ("pending", "連不上後台，請檢查網路"));
+        assert_eq!(claim_outcome(Err(CallErr { code: "already_claimed".into(), text: error_text("already_claimed") })).state, "pending");
     }
 
     #[test]

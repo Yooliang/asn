@@ -50,10 +50,10 @@ export const authApi = {
   status: () => invoke('auth_status'),                       // → { signed_in, email }
   login: provider => invoke('auth_login', { provider }),     // 開系統瀏覽器登入，等回呼（最久 5 分鐘）→ 狀態
   cancel: () => invoke('auth_cancel'),
-  logout: () => invoke('auth_logout'),                       // 只清登入權杖，不刪節點金鑰
+  logout: () => invoke('auth_logout'),                       // 只清登入權杖，不刪節點金鑰；之後自動重新啟動，回到登入畫面
   accountInfo: () => invoke('auth_account_info'),            // → { email, created, node_count, this_node_mine }
-  claim: () => invoke('auth_claim_this'),                    // 把這台電腦（現有節點金鑰）連到登入帳號 → 一句話
-  setupDevice: () => invoke('auth_setup_device'),            // 新電腦：建立節點、存好金鑰、重新啟動
+  bind: () => invoke('auth_bind'),                           // 登入後自動處理金鑰 → { state: created | bound | pending, note }；created 時稍後自動重新啟動
+  skip: () => invoke('auth_skip_login'),                     // 「暫時不登入」（這台已有節點金鑰時才准）
 }
 export const store = name => ({
   load: async () => { const s = await invoke('store_load', { name }); try { return s ? JSON.parse(s) : null } catch { return null } },
