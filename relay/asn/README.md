@@ -130,6 +130,10 @@ asn-cli attach --id <附件編號> [--out 路徑]
 - 設定存在資料夾的 `voice.json`；Rust 指令 `tts_voices`、`tts_speak`、`stt_status`、`stt_install`、`stt_transcribe`、`voice_cfg_get`、`voice_cfg_set`（程式在 `src-tauri/src/tts.rs`、`stt.rs`、`voicecfg.rs`）。
 - 架構、部署、隱私、需要真機驗證的項目、後續選項：[docs/VOICE.md](../../docs/VOICE.md)。
 
+## 往來記錄（依視窗名）
+
+內建收發室橋每轉交一封信（含群組訊息）給某個視窗、每轉出該視窗的一則回覆，就追加到 `%USERPROFILE%\.asn\handoff\<視窗名>.md`（只在本機）。每封轉交的信最後多一行「你與收發室的往來記錄在：<路徑>（接手前請先讀）」，同名的新視窗接手時先讀它。單筆內文最多約 4 KB；檔案超過 1 MB 或 200 筆，較舊的搬到 `handoff\archive\`。視窗自己用命令列直接回的信，橋看不到內文，只記一筆「自行回信」。細節見 [docs/design/BRIDGE-RUST.md](../../docs/design/BRIDGE-RUST.md) 7.5。
+
 ## 資料
 
 - 對話紀錄：`%APPDATA%\tw.irori.asn\asn-chats.json`（每位好友最近 200 則，只有信件內容與系統提示）；暱稱／狀態／音效／自動檢查更新：`asn-me.json`。環境變數 `IRORI_ASN_DATA` 可改資料夾。
