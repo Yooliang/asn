@@ -120,28 +120,36 @@ async fn relay_launchers(app: State<'_, App>, ids: Option<Vec<String>>) -> Resul
 }
 
 #[tauri::command]
-fn partner_launch_local(app: State<'_, App>, req: launch::LocalLaunchReq) -> Result<Value, String> {
-    launch::partner_launch_local(app.node.clone(), req)
+async fn partner_launch_local(app: State<'_, App>, req: launch::LocalLaunchReq) -> Result<Value, String> {
+    launch::partner_launch_local(app.node.clone(), app.work_dir.clone(), req).await
 }
 
 #[tauri::command]
-fn partner_console_query(req: launch::PartnerConsoleReq) -> Result<Value, String> {
-    launch::partner_console_query(req)
+async fn partner_console_query(req: launch::PartnerConsoleReq) -> Result<Value, String> {
+    launch::partner_console_query(req).await
 }
 
 #[tauri::command]
-fn partner_console_set(req: launch::PartnerConsoleReq) -> Result<Value, String> {
-    launch::partner_console_set(req)
+async fn partner_console_set(req: launch::PartnerConsoleReq) -> Result<Value, String> {
+    launch::partner_console_set(req).await
 }
 
 #[tauri::command]
-fn launch_prefs_get(app: State<'_, App>) -> Result<Value, String> {
-    launch::launch_prefs_get(app.data_dir.clone())
+async fn launch_prefs_get(app: State<'_, App>) -> Result<Value, String> {
+    launch::launch_prefs_get(app.data_dir.clone()).await
 }
 
 #[tauri::command]
-fn launch_prefs_set(app: State<'_, App>, prefs: Value) -> Result<(), String> {
-    launch::launch_prefs_set(app.data_dir.clone(), prefs)
+async fn launch_prefs_set(app: State<'_, App>, prefs: Value) -> Result<(), String> {
+    launch::launch_prefs_set(app.data_dir.clone(), prefs).await
+}
+
+/// `--shot` 模式：前端錯誤印到 stderr，方便 shot.mjs 除錯。
+#[tauri::command]
+fn shot_frontend_log(app: State<'_, App>, level: String, message: String) {
+    if app.shot.is_some() {
+        eprintln!("[asn-ui {level}] {message}");
+    }
 }
 
 /// 底部廣告可以開的網址（全是 repo 文件寫明的公開網址）；只准完全相同的字串，其餘一律拒絕
@@ -322,7 +330,7 @@ pub fn run() {
         .manage(wins::Frame::default())
         .manage(shot::ShotState::default())
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, partner_console_query, partner_console_set, launch_prefs_get, launch_prefs_set, open_url, set_window_name, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, partner_console_query, partner_console_set, launch_prefs_get, launch_prefs_set, shot_frontend_log, open_url, set_window_name, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,

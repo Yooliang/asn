@@ -3,32 +3,54 @@
 use std::path::PathBuf;
 
 pub fn binary_on_path(name: &str) -> bool {
-    if let Ok(p) = std::env::var("IRORI_ASN_MOCK_BIN_DIR") {
-        let base = PathBuf::from(p);
-        if base.join(name).exists() || (cfg!(windows) && base.join(format!("{name}.exe")).exists()) {
-            return true;
-        }
-    }
-    which(name)
+    resolve_binary(name).is_some()
 }
 
-fn which(name: &str) -> bool {
+/// PATH 上第一個可執行檔路徑（與 agent-tools-detect.mjs 的 lookup 對齊）。
+pub fn resolve_binary(name: &str) -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("IRORI_ASN_MOCK_BIN_DIR") {
+        let base = PathBuf::from(p);
+        let win = base.join(format!("{name}.exe"));
+        if win.is_file() {
+            return Some(win);
+        }
+        let nx = base.join(name);
+        if nx.is_file() {
+            return Some(nx);
+        }
+    }
     #[cfg(windows)]
     {
-        std::process::Command::new("where")
+        let out = std::process::Command::new("where")
             .arg(name)
             .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let line = String::from_utf8_lossy(&out.stdout).lines().next()?.trim().to_string();
+        if line.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(line))
+        }
     }
     #[cfg(not(windows))]
     {
-        std::process::Command::new("sh")
+        let out = std::process::Command::new("sh")
             .arg("-c")
             .arg(format!("command -v {name}"))
             .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let line = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if line.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(line))
+        }
     }
 }
 

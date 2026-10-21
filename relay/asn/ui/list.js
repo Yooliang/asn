@@ -52,6 +52,11 @@ const SOUNDS = {
 
 const info = await invoke('startup_info')
 document.title = `Agent Sync Network Messenger (${info.version})`
+if (info.shot) {
+  const logFe = (level, msg) => invoke('shot_frontend_log', { level, message: String(msg) }).catch(() => {})
+  window.onerror = (msg, src, line, col, err) => { logFe('error', `${msg} @ ${src}:${line}:${col} ${err?.stack ?? ''}`) }
+  window.onunhandledrejection = e => logFe('error', e.reason?.stack ?? e.reason ?? 'unhandled rejection')
+}
 if (info.error) {
   document.body.textContent = `ASN 無法啟動：${info.error}`
   throw new Error(info.error)

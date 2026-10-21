@@ -4,6 +4,8 @@
 
 mod catalog;
 mod detect;
+
+pub use detect::resolve_binary;
 mod install;
 mod types;
 
@@ -44,29 +46,38 @@ pub fn detect_snapshot() -> ToolsDetectSnapshot {
 }
 
 #[tauri::command]
-pub fn ai_cli_detect() -> ToolsDetectSnapshot {
-    detect_snapshot()
+pub async fn ai_cli_detect() -> ToolsDetectSnapshot {
+    tokio::task::spawn_blocking(detect_snapshot)
+        .await
+        .unwrap_or_else(|_| ToolsDetectSnapshot {
+            checked_at: checked_at(),
+            tools: vec![],
+        })
 }
 
 #[tauri::command]
-pub fn ai_cli_install(tool_id: String) -> Result<InstallResult, String> {
+pub async fn ai_cli_install(tool_id: String) -> Result<InstallResult, String> {
     if tool(&tool_id).is_none() {
         return Err("不認得這個工具。".into());
     }
-    Ok(install::install_tool(&tool_id, true))
+    Ok(tokio::task::spawn_blocking(move || install::install_tool(&tool_id, true))
+        .await
+        .map_err(|e| e.to_string())?)
 }
 
 /// 僅開啟登入用終端機（不是「啟動 CLI 工作階段」捷徑）。
 #[tauri::command]
-pub fn ai_cli_login(tool_id: String) -> Result<(), String> {
-    let def = tool(&tool_id).ok_or_else(|| "不認得這個工具。".to_string())?;
+pub async fn ai_cli_login(tool_id: String) -> Result<(), String> {
+    let def = tool(&tool_id).ok_or_else(|| "不認得這個工具。".to_string())?.clone();
     if def.login_argv.is_empty() {
         return Err("請在官方應用程式內登入。".into());
     }
     if !binary_on_path(&def.binary) {
         return Err(format!("尚未安裝 {}，請先按「安裝」。", def.label));
     }
-    install::open_login_terminal(def)
+    tokio::task::spawn_blocking(move || install::open_login_terminal(&def))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
