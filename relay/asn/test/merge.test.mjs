@@ -232,3 +232,8 @@ test('守門：側欄寬度不小於大頭貼 xl 尺寸；對方在上、自己�
   assert.ok(pane.includes('class="dp-fold-strip"'), '收起狀態要有可展開的條')
   assert.ok(/\.dp-grp\{[^}]*width:var\(--dp-xl\)/.test(css), '橫條與大頭貼同寬')
 })
+
+test('「點一下換大頭貼」提示不被左側頁籤與名單蓋住：.me 自成較高的堆疊層', () => {
+  const css = fs.readFileSync(path.join(UI, 'style.css'), 'utf8')
+  assert.match(css, /\.me\{position:relative;z-index:50;/)
+})
