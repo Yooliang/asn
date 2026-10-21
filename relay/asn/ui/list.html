@@ -211,7 +211,31 @@
   <ul class="av-menu buddy-menu" v-if="buddyMenu" :style="{ left: buddyMenuPos.x + 'px', top: buddyMenuPos.y + 'px' }" role="menu" @click.stop>
     <li><button type="button" role="menuitem" @click="buddyMenuOpenChat">開啟對話</button></li>
     <li><button type="button" role="menuitem" :disabled="buddyConsoleItemView.disabled" @click="toggleBuddyConsole">{{ buddyConsoleItemView.label }}</button></li>
+    <li v-if="buddyModel.show" class="model-sub">
+      <button type="button" role="menuitem" aria-haspopup="true" :aria-expanded="buddyModel.open" :disabled="buddyModel.state === 'none' || buddyModel.state === 'checking'" :title="buddyModel.state === 'none' ? buddyModel.reason : ''" @click="buddyModel.open = !buddyModel.open">{{ buddyModelLabel }}</button>
+      <ul class="buddy-submenu" v-if="buddyModel.open && buddyModel.items.length" role="menu">
+        <li class="menu-note">目前：{{ buddyModel.current }}</li>
+        <li v-for="m in buddyModel.items" :key="m.id"><button type="button" role="menuitemradio" :aria-checked="m.checked" :disabled="m.disabled" @click="pickBuddyModel(m)">{{ m.checked ? '✓ ' : '　' }}{{ m.label }}</button></li>
+        <li class="menu-note" v-if="buddyModel.reason">{{ buddyModel.reason }}</li>
+      </ul>
+    </li>
   </ul>
+  <asn-dialog v-if="modelDlg.open" :title="modelDlgText.title" @close="closeModelDlg">
+    <p class="launch-notice-body" v-if="!modelDlg.done">{{ modelDlgText.lead }}</p>
+    <ul class="model-points" v-if="!modelDlg.done && !modelDlg.error"><li v-for="p in modelDlgText.points" :key="p">{{ p }}</li></ul>
+    <p class="launch-notice-body" v-if="modelDlg.busy">切換中，請稍候…（舊視窗關掉、新視窗開好大約要十幾秒）</p>
+    <p class="launch-notice-body" v-if="modelDlg.done">{{ modelDlg.done }}</p>
+    <p class="launch-notice-body model-err" v-if="modelDlg.error">{{ modelDlg.error }}</p>
+    <div v-if="modelDlg.manual">
+      <p class="launch-notice-body">可以把下面這行貼到終端機，手動接續對話：</p>
+      <textarea class="model-manual" readonly rows="3" :value="modelDlg.manual" aria-label="手動重開指令"></textarea>
+    </div>
+    <div class="partner-actions">
+      <button class="aero-btn" type="button" v-if="modelDlg.manual" @click="copyModelManual">{{ modelDlg.copied ? '已複製' : '複製指令' }}</button>
+      <button class="aero-btn" type="button" :disabled="modelDlg.busy" @click="closeModelDlg">{{ modelDlg.done || modelDlg.error ? '關閉' : modelDlgText.cancel }}</button>
+      <button class="aero-btn primary" type="button" v-if="!modelDlg.done && !modelDlg.error" :disabled="modelDlg.busy" @click="submitModelDlg">{{ modelDlgText.ok }}</button>
+    </div>
+  </asn-dialog>
   <ul class="av-menu device-menu" v-if="deviceMenu" :style="{ left: deviceMenuPos.x + 'px', top: deviceMenuPos.y + 'px' }" role="menu" @click.stop>
     <li><button type="button" role="menuitem" @click="deviceMenuSwitch">切換這台的 Claude 帳號…</button></li>
   </ul>

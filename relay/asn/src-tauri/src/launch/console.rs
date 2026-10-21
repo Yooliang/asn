@@ -38,7 +38,7 @@ impl ConsoleQuery {
 }
 
 /// Claude 放工作階段記錄的資料夾：`CLAUDE_CONFIG_DIR\sessions`，沒設就是 `~/.claude/sessions`
-fn sessions_dir() -> Option<PathBuf> {
+pub(super) fn sessions_dir() -> Option<PathBuf> {
     if let Some(d) = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()) {
         return Some(PathBuf::from(d).join("sessions"));
     }
@@ -47,7 +47,7 @@ fn sessions_dir() -> Option<PathBuf> {
 }
 
 /// 讀資料夾裡每個 `<pid>.json`；壞檔略過。檔名的 pid 補進沒有 pid 欄位的記錄
-fn read_sessions(dir: &Path) -> Vec<Value> {
+pub(super) fn read_sessions(dir: &Path) -> Vec<Value> {
     let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
     let mut out = Vec::new();
     for e in rd.flatten() {
@@ -70,7 +70,7 @@ fn read_sessions(dir: &Path) -> Vec<Value> {
 }
 
 /// 從工作階段記錄挑出名字相符、互動式、而且程序還活著的 pid；同名多筆取最近啟動的
-fn pick_session_pid(sessions: &[Value], name: &str, alive: impl Fn(u32) -> bool) -> Option<u32> {
+pub(super) fn pick_session_pid(sessions: &[Value], name: &str, alive: impl Fn(u32) -> bool) -> Option<u32> {
     sessions
         .iter()
         .filter(|s| s.get("name").and_then(Value::as_str) == Some(name))
@@ -129,7 +129,7 @@ fn set_console_visible(engine: &str, name: &str, visible: bool) -> Result<Value,
 }
 
 #[cfg(windows)]
-mod win {
+pub(super) mod win {
     use std::sync::Mutex;
     use windows_sys::Win32::Foundation::{CloseHandle, HWND, LPARAM};
     use windows_sys::Win32::System::Console::{AttachConsole, FreeConsole, GetConsoleWindow};

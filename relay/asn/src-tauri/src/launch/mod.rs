@@ -5,6 +5,7 @@ mod cwds;
 mod local;
 mod prefs;
 mod profiles;
+mod switch;
 
 use crate::relay::Relay;
 use prefs::{launch_prefs_get_sync, launch_prefs_set_sync};
@@ -71,6 +72,21 @@ pub async fn launch_cwd_add(data_dir: PathBuf, cwd: String) -> Result<String, St
 
 pub async fn partner_console_query(req: PartnerConsoleReq) -> Result<Value, String> {
     blocking_timeout(move || console::partner_console_query(req)).await
+}
+
+pub use switch::{SwitchQueryReq, SwitchRunReq};
+
+/// 讀這個夥伴 Claude 視窗的目前模型與是否閒置（只讀檔與讀程序命令列，不啟動子程序）
+pub async fn model_switch_query(req: SwitchQueryReq) -> Result<Value, String> {
+    blocking_timeout(move || switch::model_switch_query(req)).await
+}
+
+/// 切換模型：關掉那一個視窗、照原參數重開、等新對話出現。最久約一分多鐘，所以不用 60 秒的一般逾時。
+pub async fn model_switch_run(req: SwitchRunReq) -> Result<Value, String> {
+    tokio::time::timeout(Duration::from_secs(120), tokio::task::spawn_blocking(move || switch::model_switch_run(req)))
+        .await
+        .map_err(|_| "操作逾時".to_string())?
+        .map_err(|e| format!("背景工作失敗：{e}"))?
 }
 
 pub async fn partner_console_set(req: PartnerConsoleReq) -> Result<Value, String> {
