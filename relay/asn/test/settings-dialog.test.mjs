@@ -166,3 +166,10 @@ test('守門：分離視窗不持有設定狀態或金鑰——只收快照、�
   const hub = read('list.js')
   assert.ok(hub.includes("emit('asn:settings', settingsState.value)") && hub.includes("listen('asn:set'"))
 })
+
+test('開網址不用 explorer.exe（長網址會被當成路徑開成檔案總管），改用 ShellExecuteW', async () => {
+  const fs = await import('node:fs')
+  const lib = fs.readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8')
+  assert.ok(!lib.includes('Command::new("explorer.exe")'), '不能再用 explorer.exe 開網址')
+  assert.ok(lib.includes('ShellExecuteW('))
+})

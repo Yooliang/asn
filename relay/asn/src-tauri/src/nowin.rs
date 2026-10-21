@@ -42,7 +42,6 @@ mod tests {
         ("agent_tools/install.rs", "Command::new(\"cmd\")"), // 登入用終端機（cmd /C start）
         ("agent_tools/install.rs", "Command::new(term)"),    // Linux 登入用終端機
         ("lib.rs", "Command::new(\"explorer\")"),            // 使用者要看的資料夾視窗
-        ("lib.rs", "Command::new(\"explorer.exe\")"),        // 用預設瀏覽器開網址
         ("lib.rs", "Command::new(\"xdg-open\")"),
     ];
 
