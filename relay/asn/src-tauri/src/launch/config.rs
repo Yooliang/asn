@@ -220,13 +220,18 @@ pub fn expand_vars(s: &str, env: &std::collections::HashMap<String, String>) -> 
     out
 }
 
+/// 開出去的視窗用的環境：清掉繼承來的 CLAUDE*（不然新視窗會被當成某個 Claude 的子程序）、NO_COLOR（字會變純白）、
+/// 收發室金鑰；只留使用者自己設的 CLAUDE_CONFIG_DIR。ASN 若是從 Claude Code 裡被開起來的，這些都會帶在身上。
 pub fn child_env() -> std::collections::HashMap<String, String> {
-    std::env::vars()
-        .filter(|(k, _)| {
-            let u = k.to_ascii_uppercase();
-            !(u.starts_with("CLAUDE") || u == "NO_COLOR" || k == "IRORI_RELAY_KEY" || k == "IRORI_RELAY_ANON_KEY")
-        })
-        .collect()
+    child_env_from(std::env::vars())
+}
+
+pub fn child_env_from(vars: impl Iterator<Item = (String, String)>) -> std::collections::HashMap<String, String> {
+    vars.filter(|(k, _)| {
+        let u = k.to_ascii_uppercase();
+        u == "CLAUDE_CONFIG_DIR" || !(u.starts_with("CLAUDE") || u == "NO_COLOR" || u == "IRORI_RELAY_KEY" || u == "IRORI_RELAY_ANON_KEY")
+    })
+    .collect()
 }
 
 pub fn build_spawn_spec(config: &LaunchConfig, req: &LaunchReq<'_>) -> Result<(String, Vec<String>, PathBuf), String> {
@@ -239,4 +244,28 @@ pub fn build_spawn_spec(config: &LaunchConfig, req: &LaunchReq<'_>) -> Result<(S
         .map(|a| a.replace("{name}", req.name))
         .collect();
     Ok((command, args, PathBuf::from(&req.cwd)))
+}
+
+#[cfg(test)]
+mod child_env_tests {
+    use super::*;
+
+    #[test]
+    fn 開出去的視窗清掉NO_COLOR與CLAUDE但留設定資料夾() {
+        let vars = [("PATH", "p"), ("NO_COLOR", "1"), ("CLAUDECODE", "1"), ("CLAUDE_CODE_ENTRYPOINT", "cli"), ("CLAUDE_CONFIG_DIR", "D:/c"), ("IRORI_RELAY_KEY", "k"), ("irori_relay_anon_key", "a"), ("WT_SESSION", "x")];
+        let env = child_env_from(vars.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+        let mut keys: Vec<_> = env.keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, ["CLAUDE_CONFIG_DIR", "PATH", "WT_SESSION"]);
+    }
+
+    /// 守門：每個開視窗的地方（一般主控台、Linux 終端機、換模型重開的 WT 分頁）都要換成乾淨的環境，不然字會變純白
+    #[test]
+    fn 守門_開視窗都用乾淨的環境() {
+        let local = include_str!("local.rs");
+        let switch = include_str!("switch.rs");
+        let marker = ["env_clear()", ".envs(super::config::child_env())"];
+        assert!(local.matches(marker[0]).count() >= 3, "local.rs 的三個開視窗路徑都要 env_clear");
+        assert!(switch.contains("wt.exe") && switch.matches(marker[1]).count() >= 1, "換模型重開走 WT 也要乾淨環境");
+    }
 }

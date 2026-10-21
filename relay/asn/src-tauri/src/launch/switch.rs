@@ -597,6 +597,8 @@ fn real_launch(plan: &Plan) -> Result<(), String> {
         if plan.in_wt && !plan.cwd.to_string_lossy().contains(';') && !plan.name.contains(';') {
             let r = std::process::Command::new("wt.exe")
                 .no_window()
+                .env_clear()
+                .envs(super::config::child_env())
                 .args(wt_args(plan))
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())

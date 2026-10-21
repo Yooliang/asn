@@ -71,13 +71,46 @@ pub fn pid_alive(pid: u32) -> bool {
             // 沒權限（ERROR_ACCESS_DENIED）也算活著，與 self-recv.mjs 的 EPERM 同
             return std::io::Error::last_os_error().raw_os_error() == Some(5);
         }
+        // 已經結束、但還有人握著它的 handle（安裝程式、WebView 子程序等）時 OpenProcess 照樣成功：要看結束碼
+        const STILL_ACTIVE: u32 = 259;
+        let mut code: u32 = 0;
+        let ok = windows_sys::Win32::System::Threading::GetExitCodeProcess(h, &mut code) != 0;
         CloseHandle(h);
-        true
+        !ok || code == STILL_ACTIVE
     }
 }
 #[cfg(not(windows))]
 pub fn pid_alive(pid: u32) -> bool {
     Path::new(&format!("/proc/{pid}")).exists()
+}
+
+/// 這個 pid 的執行檔是不是 asn（查不到回 None，呼叫端當作「可能是」）
+#[cfg(windows)]
+pub fn is_asn_process(pid: u32) -> Option<bool> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION};
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            return None;
+        }
+        let mut buf = [0u16; 1024];
+        let mut len = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(h, 0, buf.as_mut_ptr(), &mut len) != 0;
+        CloseHandle(h);
+        ok.then(|| image_is_asn(&String::from_utf16_lossy(&buf[..len as usize])))
+    }
+}
+#[cfg(not(windows))]
+pub fn is_asn_process(pid: u32) -> Option<bool> {
+    let comm = fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
+    Some(image_is_asn(comm.trim()))
+}
+
+/// 執行檔名（不分大小寫、不看路徑）是 asn 或 asn.exe
+pub fn image_is_asn(path: &str) -> bool {
+    let file = path.rsplit(['\\', '/']).next().unwrap_or(path).to_ascii_lowercase();
+    file == "asn" || file == "asn.exe"
 }
 
 /// 心跳是否新鮮且 pid 還活著（同 selfRecvAlive）
@@ -87,13 +120,75 @@ pub fn alive_fresh(h: &Heartbeat, now: u64, stale: u64, alive: impl Fn(u32) -> b
 
 /// 已經有另一個 ASN（別的 pid）用同一個視窗名在收信嗎？
 pub fn other_instance(work_dir: &Path, name: &str, my_pid: u32) -> Option<Heartbeat> {
+    other_instance_with(work_dir, name, my_pid, is_asn_process)
+}
+
+/// 同上，執行檔判斷可替換（測試用）；pid 被別的程式重用也不算：執行檔得是 asn
+pub fn other_instance_with(work_dir: &Path, name: &str, my_pid: u32, is_asn: impl Fn(u32) -> Option<bool>) -> Option<Heartbeat> {
     let h = read_heartbeat(work_dir, name)?;
-    (h.pid != my_pid && alive_fresh(&h, now_ms(), stale_ms(), pid_alive)).then_some(h)
+    (h.pid != my_pid && alive_fresh(&h, now_ms(), stale_ms(), pid_alive) && is_asn(h.pid) != Some(false)).then_some(h)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[allow(unused_imports)]
+    use crate::nowin::NoWindow;
+
+    #[test]
+    fn 執行檔名判斷() {
+        assert!(image_is_asn(r"C:\Users\x\AppData\Local\ASN\asn.exe"));
+        assert!(image_is_asn("ASN.EXE"));
+        assert!(image_is_asn("/opt/asn/asn"));
+        assert!(!image_is_asn(r"C:\Windows\System32\PING.EXE"));
+        assert!(!image_is_asn("asn-cli.exe"));
+    }
+
+    /// 工作機實際踩到的：舊 ASN 已結束，但它的 handle 還被握著 → 不能算活著
+    #[test]
+    fn 已結束的程序即使handle還被握著也不算活著() {
+        #[cfg(windows)]
+        let mut c = {
+            let mut c = std::process::Command::new("cmd");
+            c.no_window().args(["/c", "exit 0"]);
+            c
+        };
+        #[cfg(not(windows))]
+        let mut c = std::process::Command::new("true");
+        c.no_window();
+        let mut child = c.spawn().unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        // child 還沒 drop：handle 還在，正是舊版會誤判成活著的情況
+        assert!(!pid_alive(pid), "結束的程序不算活著");
+        drop(child);
+    }
+
+    #[test]
+    fn 心跳的pid是別的程式就不算另一個ASN() {
+        let d = tempfile::tempdir().unwrap();
+        #[cfg(windows)]
+        let mut c = {
+            let mut c = std::process::Command::new("ping.exe");
+            c.no_window().args(["-n", "20", "127.0.0.1"]);
+            c
+        };
+        #[cfg(not(windows))]
+        let mut c = {
+            let mut c = std::process::Command::new("sleep");
+            c.no_window();
+            c.arg("20");
+            c
+        };
+        let mut child = c.stdout(std::process::Stdio::null()).spawn().unwrap();
+        let pid = child.id();
+        write_heartbeat(d.path(), "工作機", pid, now_ms()).unwrap();
+        assert!(pid_alive(pid));
+        assert_eq!(is_asn_process(pid), Some(false));
+        assert!(other_instance(d.path(), "工作機", std::process::id()).is_none(), "pid 是別的程式，不是 ASN");
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 
     #[test]
     fn 檔名與格式和_self_recv_mjs_相同() {
@@ -145,6 +240,6 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         write_heartbeat(d.path(), "S", std::process::id(), now_ms()).unwrap();
         assert!(other_instance(d.path(), "S", std::process::id()).is_none());
-        assert!(other_instance(d.path(), "S", 1).is_some(), "另一個 pid 看到本行程的新鮮心跳＝已有人在收");
+        assert!(other_instance_with(d.path(), "S", 1, |_| Some(true)).is_some(), "另一個 pid 看到本行程的新鮮心跳＝已有人在收");
     }
 }

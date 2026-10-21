@@ -210,6 +210,8 @@ try {
     let style = if hidden { "Hidden" } else { "Normal" };
     let mut cmd = Command::new(&ps);
     cmd.no_window()
+        .env_clear()
+        .envs(super::config::child_env())
         .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script])
         .env("IRORI_LAUNCH_ARGS", window_launcher_args(title, command, args))
         .env("IRORI_LAUNCH_DIR", &cwd_s)
@@ -231,6 +233,7 @@ fn start_window_unix(command: &str, args: &[String], cwd: &Path) -> Result<u32, 
         .join(" ");
     if let Some(term) = pick_linux_terminal() {
         let mut cmd = Command::new(&term.binary);
+        cmd.env_clear().envs(super::config::child_env());
         cmd.args(&term.args_prefix)
             .args(&term.args_suffix)
             .arg(&joined)
@@ -242,6 +245,7 @@ fn start_window_unix(command: &str, args: &[String], cwd: &Path) -> Result<u32, 
         return Ok(child.id());
     }
     let mut cmd = Command::new(command);
+    cmd.env_clear().envs(super::config::child_env());
     cmd.args(args).current_dir(cwd).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     let child = cmd.spawn().map_err(|e| format!("開不起來：{e}"))?;
     Ok(child.id())
