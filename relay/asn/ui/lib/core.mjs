@@ -6,7 +6,7 @@
 import { isAvatarDataUrl } from './avatar.mjs'
 import { buildFriends, cleanPsm, mergeFriends } from './roster.mjs'
 import { routeMail, stubFriend } from './routing.mjs'
-import { hasNudge, hueOf, initial, plain, stripNudge, unwrapShell } from './text.mjs'
+import { hasNudge, hueOf, initial, plain, stripNudge, stripReplyHead, unwrapShell } from './text.mjs'
 import { noticeOf, expiresAt, fileMimeOf, friendlyPhotoError, normalizePhotos, stripPhotoLines } from './photo.mjs'
 
 export const MAX_BODY = 20000
@@ -135,7 +135,7 @@ export class AsnCore {
     f.waiting = false
     const t = Date.parse(m.created_at) || this.now()
     const lg = this.#log(r.id)
-    const body = unwrapShell(m.body)
+    const body = stripReplyHead(unwrapShell(m.body))
     const nudge = hasNudge(body)
     // 照片：信裡的 attachments 整理乾淨（只留白名單欄位），內文開頭給舊版用戶端看的〔照片〕替代文字行不重複顯示
     const photos = normalizePhotos(m.attachments)

@@ -11,7 +11,7 @@ import path from 'node:path'
 import { pickFallbackAgent, fallbackNote } from './pick-fallback.mjs'
 import { createLog } from './safe-log.mjs'
 import { contextText, createRooms, parseMember, roomText, roomUuid, NO_REPLY_RE as ROOM_NO_REPLY_RE } from './rooms.mjs'
-import { NO_REPLY_TIP, mailHead, parseSendHead, wantsReply } from './mail-format.mjs'
+import { NO_REPLY_TIP, mailHead, parseSendHead, stripReplyHead, wantsReply } from './mail-format.mjs'
 import { bodyWithNotes } from './attach-format.mjs'
 import { createLauncher } from './launcher.mjs'
 import { loadEngines } from './engines/index.mjs'
@@ -235,6 +235,9 @@ async function onReply(from, text, mailId) {
     if (!head.reply) { refuseSend(from, head); return }
     mailId = head.re; text = head.body || text; expectsReply = head.reply === 'yes'
   }
+  // 視窗自己在回信開頭加的「[回覆 id=… → …]」抬頭：拆掉，編號當作回的是哪一封（只在沒有更可靠的對應時用）
+  const sh = stripReplyHead(text)
+  if (sh.id) { text = sh.body || text; mailId ||= sh.id }
   const cands = [...pending.values()].filter(p => p.target === from && p.state !== 'forwarding')
   // 還在等的優先；沒有才輪到已通知過「沒回」、仍保留中的信（遲到的回覆，先進先出）
   const active = cands.filter(c => c.state !== 'notified')
