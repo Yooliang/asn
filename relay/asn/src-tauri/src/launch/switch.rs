@@ -1374,6 +1374,8 @@ mod tests {
     #[test]
     #[ignore]
     fn 真機_讀命令列_結束_重開() {
+        // 會在桌面上開出真的視窗，只准人手動跑
+        if std::env::var("ASN_MANUAL_TEST").as_deref() != Ok("1") { eprintln!("略過：要手動跑請設 ASN_MANUAL_TEST=1"); return; }
         use crate::nowin::NoWindow;
         use std::process::Command;
         let tmp = tempfile::tempdir().unwrap();

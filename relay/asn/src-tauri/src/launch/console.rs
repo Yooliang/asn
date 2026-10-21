@@ -281,6 +281,8 @@ mod tests {
     #[test]
     #[ignore]
     fn console_real_假主控台子程序查詢與切換() {
+        // 會在桌面上冒出主控台視窗（預設終端機是 Windows Terminal 時藏不住），只准人手動跑
+        if std::env::var("ASN_MANUAL_TEST").as_deref() != Ok("1") { eprintln!("略過：要手動跑請設 ASN_MANUAL_TEST=1"); return; }
         use crate::nowin::NoWindow;
         let script = "$p = Start-Process -FilePath ping.exe -ArgumentList '-n','60','127.0.0.1' -WindowStyle Hidden -PassThru; [Console]::Out.Write($p.Id)";
         let out = std::process::Command::new("powershell").no_window().args(["-NoProfile", "-NonInteractive", "-Command", script]).output().unwrap();
