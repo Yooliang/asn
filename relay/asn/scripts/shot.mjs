@@ -53,6 +53,10 @@ export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000, me
     ...process.env, IRORI_RELAY_URL: relay.url, IRORI_RELAY_ID: 'H', IRORI_RELAY_KEY: FAKE_KEY, IRORI_RELAY_ANON_KEY: '',
     USERPROFILE: path.join(tmp, 'home'), HOME: path.join(tmp, 'home'), IRORI_ASN_DATA: path.join(tmp, 'data'), WEBVIEW2_USER_DATA_FOLDER: path.join(tmp, 'wv2'),
   }
+  if (process.platform === 'linux') {
+    env.WEBKIT_DISABLE_COMPOSITING_MODE = '1'
+    env.WEBKIT_DISABLE_DMABUF_RENDERER = '1'
+  }
   fs.mkdirSync(env.USERPROFILE, { recursive: true })
   fs.mkdirSync(env.IRORI_ASN_DATA, { recursive: true })
   fs.writeFileSync(path.join(env.IRORI_ASN_DATA, 'settings.json'), JSON.stringify({ window_name: 'H-ASN', old_names: [{ name: 'H-舊名', t: Date.now() - 60_000 }, { name: 'H-過期', t: Date.now() - 9 * 24 * 3600_000 }] }))

@@ -649,10 +649,16 @@ sync()
 // 整合模式停在「開始」大幅廣告）、shotAd（固定停在第幾則廣告）、shotTab（起始頁籤）、shotLaunchNotice（true＝只拍背景逾時通知對話框）。
 if (info.shot) {
   const sleep = ms => new Promise(r => setTimeout(r, ms))
+  const waitPaint = async (frames = 3) => {
+    for (let i = 0; i < frames; i++) await new Promise(r => requestAnimationFrame(r))
+    await sleep(350)
+  }
   if (savedMe.shotLaunchNotice) {
     showLaunchNotice(backgroundRestoreNoticeText('夥伴-7'))
+    await waitPaint()
     await invoke('show_main').catch(() => {})
-    await sleep(900)
+    await waitPaint()
+    await invoke('capture_ui_ready', { tag: 'launch-notice-ready' })
     await invoke('take_shot', { tab: 'launch-notice' })
     closeLaunchNotice()
   } else {

@@ -9,9 +9,14 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const tests = fs.readdirSync(path.join(root, 'test')).filter(f => f.endsWith('.test.mjs')).sort().map(f => path.join('test', f))
 const nodeArgs = ['--test', ...tests]
 const useXvfb = process.platform === 'linux' && !process.env.DISPLAY
+const env = { ...process.env }
+if (process.platform === 'linux') {
+  env.WEBKIT_DISABLE_COMPOSITING_MODE = '1'
+  env.WEBKIT_DISABLE_DMABUF_RENDERER = '1'
+}
 
 const r = useXvfb
-  ? spawnSync('xvfb-run', ['-a', process.execPath, ...nodeArgs], { cwd: root, stdio: 'inherit' })
-  : spawnSync(process.execPath, nodeArgs, { cwd: root, stdio: 'inherit' })
+  ? spawnSync('xvfb-run', ['-a', process.execPath, ...nodeArgs], { cwd: root, stdio: 'inherit', env })
+  : spawnSync(process.execPath, nodeArgs, { cwd: root, stdio: 'inherit', env })
 
 process.exit(typeof r.status === 'number' ? r.status : 1)

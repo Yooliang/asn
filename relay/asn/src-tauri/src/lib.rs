@@ -196,6 +196,17 @@ fn open_machine_log_dir(app: State<'_, App>) -> Result<(), String> {
     open_in_file_manager(&dir)
 }
 
+/// `--shot` 模式：前端標記「這一刻可以截」（例如對話框已掛上 DOM）。
+#[tauri::command]
+fn capture_ui_ready(app: State<'_, App>, tag: String) -> Result<(), String> {
+    let dir = app.shot.clone().ok_or("不在 --shot 模式")?;
+    let safe: String = tag.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+    if safe.is_empty() {
+        return Err("標記名稱不合格".into());
+    }
+    write_atomic(&dir.join(format!("{safe}.ok")), "1").map_err(|e| e.to_string())
+}
+
 /// `--shot` 模式：前端錯誤印到 stderr，方便 shot.mjs 除錯。
 #[tauri::command]
 fn shot_frontend_log(app: State<'_, App>, level: String, message: String) {
@@ -341,6 +352,12 @@ pub(crate) fn cleanup(app: &AppHandle) {
 }
 
 pub fn run() {
+    #[cfg(not(windows))]
+    {
+        // WebKitGTK 在 Xvfb 下用 scrot 擷圖時，不關合成／DMABUF 常拍到空白。
+        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
     let args: Vec<String> = std::env::args().collect();
     let background = args.iter().any(|a| a == tray::BACKGROUND_FLAG);
     let shot = args.iter().position(|a| a == "--shot").and_then(|i| args.get(i + 1)).map(PathBuf::from);
@@ -401,7 +418,7 @@ pub fn run() {
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
-            wins::open_chat, wins::chat_visible, wins::close_chats, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot,
+            wins::open_chat, wins::chat_visible, wins::close_chats, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,
             tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_set, updater::update_check, updater::update_install,
         ])
         .setup(move |app| {
