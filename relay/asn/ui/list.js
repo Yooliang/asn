@@ -88,6 +88,7 @@ await initFrame()
 // 關閉視窗時：縮到系統匣（預設，含舊存檔）／結束程式；登入時自動啟動以系統上的真實設定為準（不存檔）。程式在 tray.rs
 const closeTo = ref(normalizeClose(savedMe.closeTo))
 const trayOk = ref(true)
+const autoAddClaude = ref(savedMe.autoAddClaude !== false)   // Claude 帳號自動加入／回存（預設開；Rust 背景工作每分鐘讀同一份存檔看開關）
 const autostart = reactive({ supported: false, on: false, busy: false })
 try {
   await invoke('set_close_to_tray', { tray: closeTo.value === 'tray' })
@@ -548,7 +549,7 @@ if (ui.mode === 'merged') await invoke('main_layout', { merged: true, w: sizes.m
 await listen('relay-bell', () => void core.pull('bell'))   // Rust 端的 Realtime 門鈴
 await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 
-watch([me, soundOn, frame, closeTo, autoCheck, dims, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, sound: soundOn.value, frame: frame.value, closeTo: closeTo.value, autoUpdate: autoCheck.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting }); sync() }, { deep: true })
+watch([me, soundOn, frame, closeTo, autoAddClaude, autoCheck, dims, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, sound: soundOn.value, frame: frame.value, closeTo: closeTo.value, autoAddClaude: autoAddClaude.value, autoUpdate: autoCheck.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting }); sync() }, { deep: true })
 // 系統匣圖示的提示文字帶未讀總數
 watch(() => totalUnread(friends.value), n => { void invoke('set_tray_unread', { n }).catch(() => {}) }, { immediate: true })
 // 在線狀態：狀態下拉與個人訊息交給 Rust 端回報（每 60 秒一次，改了立刻送；後台沒部署就靜默不送）
@@ -762,6 +763,7 @@ const app = createApp({
     // 本機帳號庫清單定期回報給收發室（只有 email、方案、使用中）；別台送來的切換指令定期取走（預設要本機按確認才切）。--shot 不輪詢指令。
     setTimeout(() => void accounts.report(), 5_000)
     setInterval(() => void accounts.report(), 5 * 60_000)
+    void listen('claude-account-auto', e => void accounts.onAuto(e.payload))   // Rust 背景工作自動加入／回存之後
     if (!info.shot) {
       setInterval(() => void accounts.pollIncoming(), 15_000)
       void listen('relay-bell', () => void accounts.pollIncoming())
@@ -801,7 +803,7 @@ const app = createApp({
       voice: { cfg: { tts_voice: voiceCfg.tts_voice, tts_auto: voiceCfg.tts_auto, stt_lang: voiceCfg.stt_lang, stt_model: voiceCfg.stt_model }, enabled: ttsVoices.value.enabled, voices: ttsVoices.value.voices, sttReady: Boolean(sttSt.value?.ready), installBusy: voice.state.install.busy, note: voice.state.install.text || voiceMsg.value || sttText.value },
       accounts: {
         list: accounts.state.list, current: accounts.state.current, codexLine: codexLine(accounts.state.codex, accounts.state.codexErr),
-        busy: accounts.state.busy, confirmDel: accounts.state.confirmDel, msg: accounts.state.msg, trustOwn: accounts.state.trustOwn,
+        busy: accounts.state.busy, confirmDel: accounts.state.confirmDel, msg: accounts.state.msg, trustOwn: accounts.state.trustOwn, autoAdd: autoAddClaude.value, autoNote: accounts.state.autoNote,
         remote: { node: accounts.state.remote.node, devices: accounts.remoteNodes(), list: accounts.state.remote.list, loading: accounts.state.remote.loading, busy: accounts.state.remote.busy, msg: accounts.state.remote.msg },
       },
       closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy },
@@ -826,6 +828,7 @@ const app = createApp({
         case 'acct-switch': await accounts.switchTo(value); break
         case 'acct-remove': await accounts.remove(value); break
         case 'acct-add': await accounts.addCurrent(); break
+        case 'acct-auto': autoAddClaude.value = value === true; if (!autoAddClaude.value) accounts.state.autoNote = ''; break
         case 'acct-remote-node': await accounts.remoteSelect(String(value ?? '')); break
         case 'acct-remote-switch': await accounts.remoteSwitch(String(value ?? '')); break
         case 'acct-trust': await accounts.setTrust(value === true); break

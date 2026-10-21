@@ -143,3 +143,24 @@ test('接線守門：設定頁有這一塊、Rust 指令有註冊、前端不碰
   assert.doesNotMatch(acctPart, /token|credential/i)
   assert.ok(!/acct-save|acctName|存成帳號|取個名字/.test(panel + js + lib), '不再有取名字的流程')
 })
+
+test('自動加入：Rust 背景工作通知後顯示一行小字、清單即時更新；只回存權杖時不吵', async () => {
+  const { f, ui } = mk({ claude_accounts_list: [{ email: 'a@x.test', plan: 'max', current: true }], claude_account_current: { email: 'a@x.test', saved: true }, codex_account_current: null, acct_remote_report: {} })
+  await ui.onAuto({ kind: 'updated', email: 'a@x.test' })
+  assert.equal(ui.state.autoNote, '', '回存最新權杖不顯示字')
+  await ui.onAuto({ kind: 'added', email: 'a@x.test' })
+  assert.equal(ui.state.autoNote, '已自動加入 a@x.test')
+  assert.equal(ui.state.list.length, 1, '清單已重抓')
+  assert.ok(f.calls.some(c => c[0] === 'acct_remote_report'))
+})
+
+test('自動加入接線守門：開關預設開、存進 asn-me.json、設定頁有開關、Rust 背景工作已啟動', () => {
+  const panel = read('ui/lib/settings-panel.mjs'), js = read('ui/list.js'), rs = read('src-tauri/src/lib.rs')
+  assert.match(js, /autoAddClaude = ref\(savedMe\.autoAddClaude !== false\)/, '舊存檔沒這欄位＝開')
+  assert.match(js, /meStore\.save\(\{[^]*?autoAddClaude: autoAddClaude\.value/, '開關要寫進 asn-me.json')
+  assert.match(js, /case 'acct-auto'/)
+  assert.match(js, /listen\('claude-account-auto'/)
+  assert.match(panel, /act\('acct-auto'/)
+  assert.match(panel, /<span>自動加入<\/span>/)
+  assert.ok(rs.includes('claude_accounts::auto_loop') && rs.includes('"claude-account-auto"'))
+})

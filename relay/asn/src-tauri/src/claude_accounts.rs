@@ -532,8 +532,107 @@ pub fn switch_impl(home: &Path, email: &str, fault: Fault) -> R<SwitchOutcome> {
     Ok(SwitchOutcome { email, notice: "切換好了。開著的 Claude 視窗要關掉重開，才會用新帳號。".into() })
 }
 
-// ---------- Tauri 指令（前端只拿得到 AccountInfo） ----------
 static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+// ---------- 自動加入／回存（背景每分鐘一次） ----------
+/// 自動同步的結果（前端只拿得到 email，沒有權杖）
+#[derive(Serialize, Debug, PartialEq, Clone)]
+#[serde(tag = "kind", content = "email", rename_all = "lowercase")]
+pub enum AutoOutcome {
+    /// 沒有登入、已是最新、或讀不全：什麼都沒做
+    Nothing,
+    /// 目前登入的帳號原本不在帳號庫，已加入
+    Added(String),
+    /// 已在帳號庫，但權杖自動換新過：已回存最新一份
+    Updated(String),
+}
+
+/// 設定（asn-me.json 的 `autoAddClaude`）：只有明確寫 false 才關；沒這欄位的舊存檔、壞檔、壞值一律開
+pub fn auto_enabled_from_saved(text: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(text).ok().and_then(|v| v.get("autoAddClaude")?.as_bool()).unwrap_or(true)
+}
+
+/// 做一次：目前登入不在庫就加入；在庫但權杖檔（或帳號資訊）和庫裡不同就回存；沒登入什麼都不動。
+/// 呼叫端要自己持有 `LOCK`（見 `auto_tick`），避免和切換同時寫檔。只比對與寫入檔案，權杖不進 log。
+pub fn auto_sync(home: &Path) -> R<AutoOutcome> {
+    let Some(cred) = read_cred(home)? else { return Ok(AutoOutcome::Nothing) };
+    let Some((frag, uuid)) = current_fragment(home)? else { return Ok(AutoOutcome::Nothing) };
+    let Some(email) = email_of_fragment(&frag) else { return Ok(AutoOutcome::Nothing) };
+    let owner = saved_accounts(home).into_iter().find(|s| s.uuid == uuid || s.email == email);
+    let Some(owner) = owner else {
+        save_current(home)?;
+        return Ok(AutoOutcome::Added(email));
+    };
+    let same_cred = std::fs::read(owner.dir.join(CRED)).map(|b| b == cred).unwrap_or(false);
+    let same_frag = owner.frag == frag;
+    if same_cred && same_frag {
+        return Ok(AutoOutcome::Nothing);
+    }
+    if !same_cred {
+        write_atomic(&owner.dir.join(CRED), &cred)?;
+    }
+    if !same_frag {
+        write_atomic(&owner.dir.join(FRAG), frag.as_bytes())?;
+    }
+    Ok(AutoOutcome::Updated(owner.email))
+}
+
+/// 拿著 `lock` 做一次 `auto_sync`（背景工作傳進和切換、加入、刪除共用的那把 `LOCK`）
+pub fn auto_tick(lock: &std::sync::Mutex<()>, home: &Path) -> R<AutoOutcome> {
+    let _g = lock.lock().unwrap_or_else(|e| e.into_inner());
+    auto_sync(home)
+}
+
+/// 防「登入到一半」誤存：Claude 登入新帳號時權杖檔和 .claude.json 不是同時寫好的，
+/// 只在連續兩次檢查看到完全相同的內容時才動作（指紋只留在記憶體）。
+#[derive(Default)]
+pub struct Steady(Option<u64>);
+impl Steady {
+    pub fn settled(&mut self, home: &Path) -> bool {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        std::fs::read(cred_path(home)).ok().hash(&mut h);
+        std::fs::read(cj_path(home)).ok().hash(&mut h);
+        let now = Some(h.finish());
+        let ok = self.0 == now;
+        self.0 = now;
+        ok
+    }
+}
+
+/// 背景工作：先等 `first`，之後每 `every` 看一次 asn-me.json 的開關，開著就同步一次；有動作就叫 `on_event`
+pub async fn auto_loop(data_dir: PathBuf, first: std::time::Duration, every: std::time::Duration, on_event: impl Fn(&AutoOutcome) + Send + 'static) {
+    tokio::time::sleep(first).await;
+    let mut steady = Steady::default();
+    loop {
+        let dd = data_dir.clone();
+        let mut steady_in = std::mem::take(&mut steady);
+        let r = tokio::task::spawn_blocking(move || {
+            let on = std::fs::read_to_string(dd.join("asn-me.json")).map(|t| auto_enabled_from_saved(&t)).unwrap_or(true);
+            if !on {
+                return (AutoOutcome::Nothing, steady_in);
+            }
+            let home = claude_home();
+            let out = if steady_in.settled(&home) { auto_tick(&LOCK, &home).unwrap_or(AutoOutcome::Nothing) } else { AutoOutcome::Nothing };
+            (out, steady_in)
+        })
+        .await;
+        if let Ok((out, st)) = r {
+            steady = st;
+            match &out {
+                AutoOutcome::Added(e) => eprintln!("已自動加入 {e}"),
+                AutoOutcome::Updated(e) => eprintln!("已更新 {e} 的登入憑證"),
+                AutoOutcome::Nothing => {}
+            }
+            if out != AutoOutcome::Nothing {
+                on_event(&out);
+            }
+        }
+        tokio::time::sleep(every).await;
+    }
+}
+
+// ---------- Tauri 指令（前端只拿得到 AccountInfo） ----------
 
 #[tauri::command]
 pub fn claude_accounts_list() -> Vec<AccountInfo> {
@@ -806,6 +905,137 @@ mod tests {
         assert_eq!(f, "{\"k\": \"}\"}");
         let out = replace_fragment(src, r#"{"k":"new"}"#).unwrap();
         assert_eq!(out, "{\"x\": \"} { \\\" oauthAccount\", \"oauthAccount\": {\"k\":\"new\"}, \"z\": 1}");
+    }
+
+    #[test]
+    fn 自動加入_目前登入不在庫就加入_清單馬上有() {
+        let d = setup();
+        let h = d.path();
+        login(h, "u-a", "A@x.test", "A1");
+        assert_eq!(auto_sync(h), Ok(AutoOutcome::Added("a@x.test".into())));
+        assert_eq!(emails(h), vec!["a@x.test"]);
+        assert_eq!(read(dir_of(h, "a@x.test").join(CRED)), cred("A1"));
+        // 再跑一次：已經一樣，什麼都不做
+        assert_eq!(auto_sync(h), Ok(AutoOutcome::Nothing));
+    }
+
+    #[test]
+    fn 自動回存_權杖換新就更新庫裡那份_其他帳號不動() {
+        let d = setup();
+        let h = d.path();
+        login(h, "u-a", "a@x.test", "A1");
+        save_current(h).unwrap();
+        login(h, "u-b", "b@x.test", "B1");
+        save_current(h).unwrap();
+        login(h, "u-a", "a@x.test", "A2");
+        assert_eq!(auto_sync(h), Ok(AutoOutcome::Updated("a@x.test".into())));
+        assert_eq!(read(dir_of(h, "a@x.test").join(CRED)), cred("A2"));
+        assert_eq!(read(dir_of(h, "b@x.test").join(CRED)), cred("B1"));
+        assert!(fs::read_dir(dir_of(h, "a@x.test")).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().contains("asn-tmp")), "不留暫存檔");
+    }
+
+    #[test]
+    fn 自動同步_內容相同不寫檔() {
+        let d = setup();
+        let h = d.path();
+        login(h, "u-a", "a@x.test", "A1");
+        save_current(h).unwrap();
+        let f = dir_of(h, "a@x.test").join(CRED);
+        let g = dir_of(h, "a@x.test").join(FRAG);
+        let set_ro = |ro: bool| {
+            for p in [&f, &g] {
+                let mut perm = fs::metadata(p).unwrap().permissions();
+                perm.set_readonly(ro);
+                fs::set_permissions(p, perm).unwrap();
+            }
+        };
+        // 庫裡兩個檔設成唯讀：若真的去寫（rename 蓋過唯讀檔在 Windows 會失敗）就會變 Err；另外比修改時間
+        let (m1, m2) = (fs::metadata(&f).unwrap().modified().unwrap(), fs::metadata(&g).unwrap().modified().unwrap());
+        set_ro(true);
+        let r = auto_sync(h);
+        set_ro(false);
+        assert_eq!(r, Ok(AutoOutcome::Nothing));
+        assert_eq!((fs::metadata(&f).unwrap().modified().unwrap(), fs::metadata(&g).unwrap().modified().unwrap()), (m1, m2));
+    }
+
+    #[test]
+    fn 自動同步_沒登入什麼都不動() {
+        let d = setup();
+        let h = d.path();
+        assert_eq!(auto_sync(h), Ok(AutoOutcome::Nothing));
+        assert!(!store_root(h).exists(), "沒登入不可建帳號庫");
+        // 只有帳號資訊、沒有權杖檔
+        login(h, "u-a", "a@x.test", "A1");
+        fs::remove_file(cred_path(h)).unwrap();
+        assert_eq!(auto_sync(h), Ok(AutoOutcome::Nothing));
+        assert!(!store_root(h).exists());
+        // 有權杖檔、沒有帳號資訊
+        login(h, "u-a", "a@x.test", "A1");
+        fs::write(cj_path(h), "{\"numStartups\": 1}").unwrap();
+        assert_eq!(auto_sync(h), Ok(AutoOutcome::Nothing));
+        assert!(!store_root(h).exists());
+        // 權杖檔寫到一半（不是合法 JSON）：不動帳號庫
+        login(h, "u-a", "a@x.test", "A1");
+        save_current(h).unwrap();
+        fs::write(cred_path(h), "{半截").unwrap();
+        assert!(auto_sync(h).is_err());
+        assert_eq!(read(dir_of(h, "a@x.test").join(CRED)), cred("A1"));
+    }
+
+    #[test]
+    fn 自動同步_與切換互斥_拿著鎖時等切換做完() {
+        use std::sync::{mpsc, Arc, Mutex};
+        let d = setup();
+        let h = d.path().to_path_buf();
+        login(&h, "u-a", "a@x.test", "A1");
+        save_current(&h).unwrap();
+        login(&h, "u-b", "b@x.test", "B1");
+        save_current(&h).unwrap();
+        login(&h, "u-a", "a@x.test", "A2");
+        let lock = Arc::new(Mutex::new(()));
+        let guard = lock.lock().unwrap(); // 模擬切換進行中（切換指令拿的是同一把鎖）
+        let (tx, rx) = mpsc::channel();
+        let (l2, h2) = (lock.clone(), h.clone());
+        let t = std::thread::spawn(move || tx.send(auto_tick(&l2, &h2)).unwrap());
+        assert!(rx.recv_timeout(std::time::Duration::from_millis(300)).is_err(), "切換還沒做完，自動同步不可動手");
+        assert_eq!(read(dir_of(&h, "a@x.test").join(CRED)), cred("A1"), "鎖著的時候庫裡沒被改");
+        switch_to(&h, "b@x.test").unwrap(); // 切換做完（先回存甲的 A2）
+        drop(guard);
+        let out = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        t.join().unwrap();
+        // 切換後目前登入是乙、和庫裡一致 → 沒有多餘動作
+        assert_eq!(out, Ok(AutoOutcome::Nothing));
+        assert_eq!(read(dir_of(&h, "a@x.test").join(CRED)), cred("A2"));
+        assert_eq!(read(cred_path(&h)), cred("B1"));
+    }
+
+    #[test]
+    fn 背景工作與_Tauri_指令用同一把鎖() {
+        let src = include_str!("claude_accounts.rs").replace("\r\n", "\n");
+        assert!(src.contains("auto_tick(&LOCK, &home)"), "背景工作要用和切換同一把 LOCK");
+        assert!(src.contains("pub fn local_switch(email: &str) -> Result<SwitchOutcome, String> {\n    let _g = LOCK.lock()"));
+    }
+
+    #[test]
+    fn 開關讀法_預設開_只有明確寫_false_才關() {
+        assert!(!auto_enabled_from_saved(r#"{"autoAddClaude":false,"closeTo":"tray"}"#));
+        assert!(auto_enabled_from_saved(r#"{"autoAddClaude":true}"#));
+        for t in [r#"{"sound":true}"#, r#"{"autoAddClaude":null}"#, r#"{"autoAddClaude":"false"}"#, "{壞掉", ""] {
+            assert!(auto_enabled_from_saved(t), "{t}");
+        }
+    }
+
+    #[test]
+    fn 登入到一半不動作_連續兩次相同才算穩定() {
+        let d = setup();
+        let h = d.path();
+        let mut st = Steady::default();
+        login(h, "u-a", "a@x.test", "A1");
+        assert!(!st.settled(h), "第一次看到：先不動");
+        assert!(st.settled(h));
+        login(h, "u-a", "a@x.test", "A2");
+        assert!(!st.settled(h), "內容變了：再等一輪");
+        assert!(st.settled(h));
     }
 
     #[cfg(windows)]
