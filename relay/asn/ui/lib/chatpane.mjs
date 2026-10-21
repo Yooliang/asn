@@ -6,6 +6,7 @@ import { foldBarArrow, hasSideCol, isCollapsed, msgLayout, paneClasses, sideOf }
 import { FILE_ACCEPT, formatBytes, photoExpired, photoTitle } from './photo.mjs'
 import { attachmentFromFile, imageFromBlob } from './photo-canvas.mjs'
 import { Annotator } from './annotator.mjs'
+import { ActionBar } from './actionbar.mjs'
 import { shotFileName } from './shot.mjs'
 import { statusTip, tierOf } from './sent-status.mjs'
 
@@ -14,7 +15,7 @@ const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯
 
 export const ChatPane = {
   name: 'ChatPane',
-  components: { Annotator },
+  components: { Annotator, ActionBar },
   props: {
     friend: { type: Object, default: null },
     me: { type: Object, default: () => ({ nick: '我', status: 'online' }) },
@@ -29,6 +30,8 @@ export const ChatPane = {
     winMode: { type: String, default: 'split' },   // split｜merged：整合模式用較短的輸入提示
     photoApi: { type: Object, default: null },     // photoApi.fetch 回 {data_url}、photoApi.save 回路徑：放大看與另存（Rust 端，金鑰不在前端）；沒給就不能放大
     shotApi: { type: Object, default: null },      // 截圖（lib/tauri.mjs 的 shotApi）；沒給或這個系統不支援就沒有截圖鈕
+    agentApi: { type: Object, default: null },     // 上方功能列用（lib/tauri.mjs 的 transport）；沒給就沒有功能列
+    selfNode: { type: String, default: '' },       // 這台設備的節點代號（只拿來判斷是不是本機的視窗，不顯示）
     voice: { type: Object, default: null },        // 語音功能（lib/voice-ui.mjs 的 createVoiceUi）；沒給就沒有念出訊息與麥克風
   },
   emits: ['send', 'nudge', 'toggle-dp', 'attach'],
@@ -170,6 +173,7 @@ export const ChatPane = {
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
+  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :active="active"></action-bar>
   <div class="chatpane-body">
   <div class="chatpane-main">
   <div class="conv">

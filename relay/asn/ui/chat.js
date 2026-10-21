@@ -7,7 +7,7 @@ import { plain } from './lib/text.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
-import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi } from './lib/tauri.mjs'
+import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, transport } from './lib/tauri.mjs'
 
 const { createApp, ref, computed, onMounted, reactive } = Vue
 await initFrame()
@@ -30,8 +30,9 @@ const app = createApp({
       emit('asn:cmd', { op: 'hello', id })
       window.addEventListener('focus', () => emit('asn:cmd', { op: 'read', id }))
     })
+    const selfNode = computed(() => snap.value?.selfNode ?? '')
     return {
-      f, me, log, look, friendAv, meAv, voice, photoApi, shotApi, plain, ctl, RESIZE_DIRS, resizeFrom,
+      f, me, transport, selfNode, log, look, friendAv, meAv, voice, photoApi, shotApi, plain, ctl, RESIZE_DIRS, resizeFrom,
       send: text => emit('asn:cmd', { op: 'send', id, text }),
       nudge: () => emit('asn:cmd', { op: 'nudge', id }),
       attach: (photo, caption) => emit('asn:cmd', { op: 'attach', id, photo, caption }),
