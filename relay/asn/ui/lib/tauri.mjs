@@ -22,6 +22,8 @@ export const transport = {
   launchers: ids => invoke('relay_launchers', { ids: ids ?? null }),
   cliDetect: () => invoke('ai_cli_detect'),
   partnerLaunchLocal: req => invoke('partner_launch_local', { req }),
+  partnerConsoleQuery: req => invoke('partner_console_query', { req }),
+  partnerConsoleSet: req => invoke('partner_console_set', { req }),
   launchPrefsGet: () => invoke('launch_prefs_get'),
   launchPrefsSet: prefs => invoke('launch_prefs_set', { prefs }),
 }

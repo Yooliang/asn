@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div id="app" class="win" v-cloak @click="avMenu = false; closeChatTabMenu()">
+<div id="app" class="win" v-cloak @click="avMenu = false; closeChatTabMenu(); closeBuddyMenu(); closeLaunchPicker()">
   <input ref="avFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden @change="pickAvatar">
   <i class="rz" v-for="d in RESIZE_DIRS" :key="d" :class="'rz-' + d" @mousedown.left.prevent="resizeFrom(d)"></i>
   <header class="titlebar" data-tauri-drag-region>
@@ -67,15 +67,16 @@
       </nav>
       <div class="content" role="tabpanel">
         <template v-if="isDevice">
-          <div class="search"><input v-model="query" placeholder="搜尋聯絡人..." aria-label="搜尋聯絡人"></div>
+          <div class="search">
+            <input ref="searchInput" v-model="query" placeholder="搜尋聯絡人..." aria-label="搜尋聯絡人">
+            <button class="search-ic" type="button" title="搜尋" aria-label="搜尋" @click="focusSearch"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+            <button class="search-ic" type="button" title="開新夥伴" aria-label="開新夥伴" @click.stop="openLaunchPicker"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>
+          </div>
           <div class="list">
             <div v-for="g in shown" :key="g.key">
-              <div class="g-head-row">
-                <button class="g-head" type="button" @click="collapsed[g.key] = !collapsed[g.key]" :aria-expanded="!collapsed[g.key]">
-                  <span class="box">{{ collapsed[g.key] ? '+' : '−' }}</span>{{ groupHeading(g) }}
-                </button>
-                <button v-if="canLaunchOn(g.key)" class="g-launch" type="button" title="開新夥伴" aria-label="開新夥伴" @click.stop="openPartnerDlg(g.key)">＋</button>
-              </div>
+              <button class="g-head" type="button" @click="collapsed[g.key] = !collapsed[g.key]" :aria-expanded="!collapsed[g.key]">
+                <span class="box">{{ collapsed[g.key] ? '+' : '−' }}</span>{{ groupHeading(g) }}
+              </button>
               <ul v-show="!collapsed[g.key]">
                 <li v-for="c in g.items" :key="c.id" @contextmenu.prevent="openBuddyMenu(c, $event)">
                   <button class="buddy" :class="{ offline: c.status === 'offline', pending: c.pending }" @click="openChat(c.id)">
@@ -258,7 +259,12 @@
   </section>
   </div>
   <ul class="av-menu buddy-menu" v-if="buddyMenu" :style="{ left: buddyMenuPos.x + 'px', top: buddyMenuPos.y + 'px' }" role="menu" @click.stop>
-    <li v-if="buddyMenuCanLaunch"><button type="button" role="menuitem" @click="partnerFromMenu">開新夥伴…</button></li>
+    <li v-if="buddyConsoleToggle"><button type="button" role="menuitem" @click="toggleBuddyConsole">{{ buddyConsoleLabel }}</button></li>
+  </ul>
+  <ul class="av-menu launch-picker" v-if="launchPicker" :style="{ left: launchPickerPos.x + 'px', top: launchPickerPos.y + 'px' }" role="menu" @click.stop>
+    <li v-for="d in launchDeviceRows" :key="d.key">
+      <button type="button" role="menuitem" :class="{ off: launchDisableReason(d.key) }" :disabled="!!launchDisableReason(d.key)" :title="launchDisableReason(d.key) || d.label" @click="pickLaunchDevice(d.key)">{{ d.label }}<span class="launch-why" v-if="launchDisableReason(d.key)">{{ launchDisableReason(d.key) }}</span></button>
+    </li>
   </ul>
   <div class="partner-dlg-back" v-if="partnerDlg.open" @click.self="closePartnerDlg">
     <div class="partner-dlg" role="dialog" aria-labelledby="partner-dlg-title" @click.stop>
@@ -277,6 +283,12 @@
           <option v-for="c in partnerCwdChoices" :key="c" :value="c">{{ c }}</option>
         </select>
       </label>
+      <fieldset class="partner-display" v-if="partnerShowDisplay">
+        <legend>顯示方式</legend>
+        <label v-for="m in DISPLAY_MODES" :key="m.key" class="partner-display-opt">
+          <input type="radio" name="partner-display" :value="m.key" v-model="partnerDlg.display" :aria-label="m.label"> {{ m.label }}
+        </label>
+      </fieldset>
       <label>第一句話（選填）<textarea class="set-area" rows="2" v-model="partnerDlg.firstMessage" maxlength="4000" aria-label="第一句話"></textarea></label>
       <p class="partner-err" v-if="partnerDlg.error" role="alert">{{ partnerDlg.error }}</p>
       <div class="partner-actions">

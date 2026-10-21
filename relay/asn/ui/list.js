@@ -16,6 +16,7 @@ import { FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_LABEL, normalizeFrame, soundC
 import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
 import { bumpRecentCwd, cwdChoices, normalizeLaunchPrefs } from './lib/launch-prefs.mjs'
+import { DISPLAY_MODES, consoleToggleLabel, engineForProfile, launchDeviceRows, launchDisableReason, showDisplayModeChoice } from './lib/partner-launch-ui.mjs'
 import { friendId } from './lib/roster.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
@@ -152,11 +153,11 @@ function setLaunchCwdText(text) {
 }
 const launchToolRows = computed(() => MODEL_CATALOG.map(m => modelUiRow(m, cliTools.value[m.toolId ?? m.id])))
 const partnerModels = computed(() => launchToolRows.value)
-function canLaunchOn(nodeKey) {
-  if (nodeKey === info.node) return partnerModels.value.some(m => m.installed)
-  return Boolean(remoteLaunchers.value[nodeKey]?.profiles?.length)
-}
-const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '' })
+const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '', display: 'foreground' })
+const partnerShowDisplay = computed(() => partnerDlg.node === info.node && showDisplayModeChoice(partnerDlg.profile))
+const launchCtx = computed(() => ({ selfNode: info.node, partnerModels: partnerModels.value, remoteLaunchers: remoteLaunchers.value }))
+const launchDeviceRowsList = computed(() => launchDeviceRows(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value }))
+function launchDisableReasonFor(nodeKey) { return launchDisableReason(nodeKey, launchCtx.value) }
 const partnerCwdChoices = computed(() => {
   const allow = partnerDlg.node === info.node
     ? (launchPrefs.cwdAllow.length ? launchPrefs.cwdAllow : defaultCwdAllowFromCli())
@@ -170,6 +171,7 @@ function pickPartnerModel(m) {
   partnerDlg.name = defaultPartnerName(friends.value, m.profileId)
 }
 function openPartnerDlg(nodeKey) {
+  closeLaunchPicker()
   const devLabel = friends.value.find(f => f.node === nodeKey)?.device ?? nodeKey
   partnerDlg.open = true
   partnerDlg.node = nodeKey
@@ -177,37 +179,80 @@ function openPartnerDlg(nodeKey) {
   partnerDlg.error = ''
   partnerDlg.busy = false
   partnerDlg.firstMessage = ''
+  partnerDlg.display = launchPrefs.launchDisplay === 'background' ? 'background' : 'foreground'
   const first = partnerModels.value.find(m => m.installed) ?? partnerModels.value[0]
   if (first) pickPartnerModel(first)
   const choices = partnerCwdChoices.value
   partnerDlg.cwd = choices[0] ?? ''
 }
 function closePartnerDlg() { partnerDlg.open = false; partnerDlg.error = '' }
+const searchInput = ref(null)
+function focusSearch() { searchInput.value?.focus?.() }
+const launchPicker = ref(false)
+const launchPickerPos = reactive({ x: 0, y: 0 })
+function openLaunchPicker(e) {
+  closeBuddyMenu()
+  const r = e?.currentTarget?.getBoundingClientRect?.()
+  launchPickerPos.x = r ? r.right - 4 : (e?.clientX ?? 0)
+  launchPickerPos.y = r ? r.bottom + 2 : (e?.clientY ?? 0)
+  launchPicker.value = true
+}
+function closeLaunchPicker() { launchPicker.value = false }
+function pickLaunchDevice(nodeKey) {
+  if (launchDisableReasonFor(nodeKey)) return
+  closeLaunchPicker()
+  openPartnerDlg(nodeKey)
+}
 const buddyMenu = ref('')
 const buddyMenuPos = reactive({ x: 0, y: 0 })
-const buddyMenuNode = ref('')
-function openBuddyMenu(c, e) {
+const buddyMenuFriend = ref(null)
+const buddyConsole = reactive({ canToggle: false, visible: true })
+const buddyConsoleToggle = computed(() => buddyMenu.value && buddyConsole.canToggle)
+const buddyConsoleLabel = computed(() => consoleToggleLabel(buddyConsole.visible))
+function closeBuddyMenu() { buddyMenu.value = ''; buddyMenuFriend.value = null; buddyConsole.canToggle = false }
+async function openBuddyMenu(c, e) {
+  closeLaunchPicker()
   buddyMenuPos.x = e?.clientX ?? 0
   buddyMenuPos.y = e?.clientY ?? 0
-  buddyMenuNode.value = c.node
-  buddyMenu.value = c.node
+  buddyMenuFriend.value = c
+  buddyMenu.value = c.id
+  buddyConsole.canToggle = false
+  buddyConsole.visible = true
+  if (c.node !== info.node || c.engine === 'acp' || c.pending) return
+  const eng = c.engine || engineForProfile(c.launchProfile || 'claude')
+  try {
+    const q = await transport.partnerConsoleQuery({ engine: eng, name: c.agent || c.nick })
+    if (q?.canToggle) {
+      buddyConsole.canToggle = true
+      buddyConsole.visible = Boolean(q.visible)
+    }
+  } catch { /* 略過 */ }
 }
-const buddyMenuCanLaunch = computed(() => canLaunchOn(buddyMenuNode.value))
-function partnerFromMenu() {
-  const n = buddyMenuNode.value
-  buddyMenu.value = ''
-  if (n) openPartnerDlg(n)
+async function toggleBuddyConsole() {
+  const c = buddyMenuFriend.value
+  if (!c) { closeBuddyMenu(); return }
+  const eng = c.engine || engineForProfile(c.launchProfile || 'claude')
+  const nextVis = !buddyConsole.visible
+  try {
+    const r = await transport.partnerConsoleSet({ engine: eng, name: c.agent || c.nick, visible: nextVis })
+    if (r?.ok) buddyConsole.visible = Boolean(r.visible)
+  } catch (e) { console.info('[ASN] 主控台切換', e.message) }
+  closeBuddyMenu()
 }
 async function submitPartnerDlg() {
   partnerDlg.error = ''
   if (!partnerDlg.name.trim() || !partnerDlg.cwd) { partnerDlg.error = '請填名字與工作資料夾'; return }
   partnerDlg.busy = true
   const mode = MODEL_CATALOG.find(m => m.profileId === partnerDlg.profile)?.mode ?? 'window'
-  const pend = pendingFriend({ node: partnerDlg.node, device: partnerDlg.deviceLabel, name: partnerDlg.name.trim(), profileId: partnerDlg.profile, mode })
+  const display = partnerShowDisplay.value && partnerDlg.display === 'background' ? 'background' : 'foreground'
+  const pend = pendingFriend({ node: partnerDlg.node, device: partnerDlg.deviceLabel, name: partnerDlg.name.trim(), profileId: partnerDlg.profile, mode, launchDisplay: display })
   launchPending.value = [...launchPending.value, pend]
   try {
     if (partnerDlg.node === info.node) {
-      await transport.partnerLaunchLocal({ profile: partnerDlg.profile, name: partnerDlg.name.trim(), cwd: partnerDlg.cwd })
+      if (display === 'foreground') launchPrefs.launchDisplay = 'foreground'
+      else launchPrefs.launchDisplay = 'background'
+      void saveLaunchPrefs()
+      await transport.partnerLaunchLocal({ profile: partnerDlg.profile, name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, display })
     } else {
       const r = await transport.launch({ node: partnerDlg.node, profile: partnerDlg.profile, name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, first_message: partnerDlg.firstMessage.trim() || null })
       if (r?.id) launchTrack.value = [...launchTrack.value, { id: r.id, node: partnerDlg.node, name: partnerDlg.name.trim(), profile: partnerDlg.profile }]
@@ -239,7 +284,18 @@ async function pollLaunchResults() {
       }
     }
   } catch { /* 略過 */ }
-  launchPending.value = resolvePending(launchPending.value, friends.value)
+  const still = resolvePending(launchPending.value, friends.value)
+  const now = Date.now()
+  for (const p of launchPending.value) {
+    if (still.includes(p) && p.launchDisplay === 'background' && p.node === info.node && now - (p.launchSince ?? 0) > 30_000 && !p.trustRestored) {
+      p.trustRestored = true
+      const eng = engineForProfile(p.launchProfile || 'claude')
+      void transport.partnerConsoleSet({ engine: eng, name: p.agent, visible: true }).then(() => {
+        console.info('[ASN] 背景啟動可能卡在「信任此資料夾」，已改為前台顯示，請到電腦前按一次 Enter')
+      }).catch(() => {})
+    }
+  }
+  launchPending.value = still
 }
 void refreshCliTools()
 void refreshLaunchers()
@@ -400,10 +456,13 @@ const app = createApp({
     // 按選單以外任何地方（含拖曳區、別的元件攔掉 click 的地方、右鍵）、按 Esc、視窗失焦都收起選單。
     // 用 pointerdown 捕獲階段：不靠 click 冒泡到 #app（有些區域會 stopPropagation 或是拖曳區不送 click）。
     document.addEventListener('pointerdown', e => {
-      if (chatTabMenu.value && !(e.target instanceof Element && e.target.closest('.ctab-menu'))) closeChatTabMenu()
+      const el = e.target instanceof Element ? e.target : null
+      if (chatTabMenu.value && !el?.closest('.ctab-menu')) closeChatTabMenu()
+      if (buddyMenu.value && !el?.closest('.buddy-menu')) closeBuddyMenu()
+      if (launchPicker.value && !el?.closest('.launch-picker') && !el?.closest('.search-ic')) closeLaunchPicker()
     }, true)
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && chatTabMenu.value) closeChatTabMenu() })
-    window.addEventListener('blur', () => { if (chatTabMenu.value) closeChatTabMenu() })
+    window.addEventListener('blur', () => { if (chatTabMenu.value) closeChatTabMenu(); if (buddyMenu.value) closeBuddyMenu(); if (launchPicker.value) closeLaunchPicker() })
     const tabPinLabel = computed(() => (chatTabMenuPin.value ? '取消固定分頁' : '固定分頁'))
     const runTabMenu = fn => { const id = chatTabMenu.value; closeChatTabMenu(); if (id) fn(id) }
     const menuCloseTab = () => runTabMenu(id => applyChatTabClose(closeChatTab(ui, id)))
@@ -482,8 +541,10 @@ const app = createApp({
       tab, adI, rooms, roomsErr, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote,
       GUIDES, openedGuide, view, openGuideKey, closeGuideView, showHome,
       selfNode: info.node, emo, initial, openChat, ctl,
-      canLaunchOn, openPartnerDlg, closePartnerDlg, partnerDlg, partnerModels, partnerCwdChoices, pickPartnerModel, submitPartnerDlg,
-      buddyMenu, buddyMenuPos, openBuddyMenu, buddyMenuCanLaunch, partnerFromMenu,
+      searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickLaunchDevice,
+      DISPLAY_MODES, partnerShowDisplay,
+      openPartnerDlg, closePartnerDlg, partnerDlg, partnerModels, partnerCwdChoices, pickPartnerModel, submitPartnerDlg,
+      buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddyConsoleToggle, buddyConsoleLabel, toggleBuddyConsole,
       launchToolRows, launchPrefs, launchCwdText, saveLaunchPrefs, setLaunchCwdText,
     }
   },

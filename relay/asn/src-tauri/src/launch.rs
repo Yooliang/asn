@@ -34,6 +34,17 @@ pub struct LocalLaunchReq {
     pub profile: String,
     pub name: String,
     pub cwd: String,
+    /// 前台顯示或背景執行（僅互動視窗 profile；預設 foreground）
+    #[serde(default)]
+    pub display: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PartnerConsoleReq {
+    pub engine: String,
+    pub name: String,
+    #[serde(default)]
+    pub visible: Option<bool>,
 }
 
 pub fn partner_launch_local(node: String, req: LocalLaunchReq) -> Result<Value, String> {
@@ -41,9 +52,52 @@ pub fn partner_launch_local(node: String, req: LocalLaunchReq) -> Result<Value, 
         return Err("請填寫模型、名字與工作資料夾".into());
     }
     let script = node_script("machine/local-partner-launch.mjs");
+    let display = if req.display == "background" { "background" } else { "foreground" };
     run_node_json(
         &script,
-        &["--node", &node, "--profile", &req.profile, "--name", &req.name, "--cwd", &req.cwd],
+        &[
+            "--node",
+            &node,
+            "--profile",
+            &req.profile,
+            "--name",
+            &req.name,
+            "--cwd",
+            &req.cwd,
+            "--display",
+            display,
+        ],
+    )
+}
+
+pub fn partner_console_query(req: PartnerConsoleReq) -> Result<Value, String> {
+    if req.name.is_empty() {
+        return Err("缺少名字".into());
+    }
+    let script = node_script("machine/partner-console.mjs");
+    run_node_json(
+        &script,
+        &["--query", "--engine", &req.engine, "--name", &req.name],
+    )
+}
+
+pub fn partner_console_set(req: PartnerConsoleReq) -> Result<Value, String> {
+    if req.name.is_empty() {
+        return Err("缺少名字".into());
+    }
+    let vis = req.visible.unwrap_or(true);
+    let script = node_script("machine/partner-console.mjs");
+    run_node_json(
+        &script,
+        &[
+            "--set",
+            "--engine",
+            &req.engine,
+            "--name",
+            &req.name,
+            "--visible",
+            if vis { "true" } else { "false" },
+        ],
     )
 }
 
@@ -86,5 +140,6 @@ mod tests {
     fn 本機啟動腳本存在() {
         let p = node_script("machine/local-partner-launch.mjs");
         assert!(p.exists(), "{}", p.display());
+        assert!(node_script("machine/partner-console.mjs").exists());
     }
 }

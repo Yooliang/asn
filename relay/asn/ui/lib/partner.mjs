@@ -15,7 +15,7 @@ export function defaultPartnerName(friends, profileId) {
   return `${base}-${max + 1}`
 }
 
-export function pendingFriend({ node, device, name, profileId, mode }) {
+export function pendingFriend({ node, device, name, profileId, mode, launchDisplay, t0 }) {
   return {
     id: `pending:${node}/${name}`,
     node,
@@ -28,6 +28,8 @@ export function pendingFriend({ node, device, name, profileId, mode }) {
     pending: true,
     launchProfile: profileId,
     launchMode: mode,
+    launchDisplay: launchDisplay === 'background' ? 'background' : 'foreground',
+    launchSince: t0 ?? Date.now(),
     engine: profileId === 'gemini' ? 'gemini' : profileId === 'grok' ? 'grok' : null,
   }
 }

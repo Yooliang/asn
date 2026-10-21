@@ -13,13 +13,14 @@ import { createPartnerQueue } from './partner-background.mjs'
 const here = path.dirname(fileURLToPath(import.meta.url))
 
 function parseArgs(argv) {
-  const out = { profile: '', name: '', cwd: '', node: process.env.IRORI_RELAY_ID || 'H', queueOnly: false }
+  const out = { profile: '', name: '', cwd: '', node: process.env.IRORI_RELAY_ID || 'H', queueOnly: false, display: 'foreground' }
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--profile') out.profile = argv[++i] ?? ''
     else if (a === '--name') out.name = argv[++i] ?? ''
     else if (a === '--cwd') out.cwd = argv[++i] ?? ''
     else if (a === '--node') out.node = argv[++i] ?? out.node
+    else if (a === '--display') out.display = argv[++i] === 'background' ? 'background' : 'foreground'
     else if (a === '--queue-only') out.queueOnly = true
     else if (a === '--help') out.help = true
   }
@@ -60,9 +61,18 @@ async function main() {
     console.log(JSON.stringify({ ok: true, mode: 'background', queued: true }))
     return
   }
-  const spawnSpec = buildSpawn(config, req, process.env, childEnv)
-  const started = await startWindow(spawnSpec)
-  console.log(JSON.stringify({ ok: true, mode: 'window', pid: started.pid }))
+  const prevStyle = process.env.IRORI_LAUNCH_WINDOW_STYLE
+  if (args.display === 'background') process.env.IRORI_LAUNCH_WINDOW_STYLE = 'Hidden'
+  try {
+    const spawnSpec = buildSpawn(config, req, process.env, childEnv)
+    const started = await startWindow(spawnSpec)
+    console.log(JSON.stringify({ ok: true, mode: 'window', pid: started.pid, display: args.display }))
+  } finally {
+    if (args.display === 'background') {
+      if (prevStyle === undefined) delete process.env.IRORI_LAUNCH_WINDOW_STYLE
+      else process.env.IRORI_LAUNCH_WINDOW_STYLE = prevStyle
+    }
+  }
 }
 
 main().catch(e => { console.error(e.message); process.exit(1) })

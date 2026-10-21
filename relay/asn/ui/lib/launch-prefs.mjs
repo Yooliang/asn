@@ -6,7 +6,8 @@ export function normalizeLaunchPrefs(raw) {
   const recent = Array.isArray(o.recentCwd) ? o.recentCwd.filter(p => typeof p === 'string').slice(0, 12) : []
   const cwdAllow = Array.isArray(o.cwdAllow) ? o.cwdAllow.filter(p => typeof p === 'string') : []
   const maxPerHour = Number.isInteger(o.maxPerHour) ? Math.min(Math.max(o.maxPerHour, 1), 20) : 6
-  return { recentCwd: recent, cwdAllow, maxPerHour, showAdvanced: Boolean(o.showAdvanced) }
+  const launchDisplay = o.launchDisplay === 'background' ? 'background' : 'foreground'
+  return { recentCwd: recent, cwdAllow, maxPerHour, showAdvanced: Boolean(o.showAdvanced), launchDisplay }
 }
 
 export function bumpRecentCwd(prefs, cwd) {

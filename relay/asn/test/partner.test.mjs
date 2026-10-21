@@ -28,3 +28,8 @@ test('最近用過的工作資料夾', () => {
   assert.deepEqual(n.recentCwd.slice(0, 2), ['/b', '/a'])
   assert.deepEqual(cwdChoices({ allow: ['/x'], recent: n.recentCwd }), ['/b', '/a', '/x'])
 })
+
+test('啟動設定記住顯示方式', () => {
+  assert.equal(normalizeLaunchPrefs({ launchDisplay: 'background' }).launchDisplay, 'background')
+  assert.equal(normalizeLaunchPrefs({ launchDisplay: 'weird' }).launchDisplay, 'foreground')
+})

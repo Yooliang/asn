@@ -125,6 +125,16 @@ fn partner_launch_local(app: State<'_, App>, req: launch::LocalLaunchReq) -> Res
 }
 
 #[tauri::command]
+fn partner_console_query(req: launch::PartnerConsoleReq) -> Result<Value, String> {
+    launch::partner_console_query(req)
+}
+
+#[tauri::command]
+fn partner_console_set(req: launch::PartnerConsoleReq) -> Result<Value, String> {
+    launch::partner_console_set(req)
+}
+
+#[tauri::command]
 fn launch_prefs_get(app: State<'_, App>) -> Result<Value, String> {
     launch::launch_prefs_get(app.data_dir.clone())
 }
@@ -312,7 +322,7 @@ pub fn run() {
         .manage(wins::Frame::default())
         .manage(shot::ShotState::default())
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_prefs_get, launch_prefs_set, open_url, set_window_name, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, partner_console_query, partner_console_set, launch_prefs_get, launch_prefs_set, open_url, set_window_name, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
