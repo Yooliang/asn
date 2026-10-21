@@ -67,8 +67,13 @@ export function loadConfig(file, bootstrap = null) {
   } catch (e) {
     if (e.code !== 'ENOENT') fileErr = `讀不到 ${file}：${e.message}`
   }
+  if (j && (j.profiles == null || typeof j.profiles !== 'object' || Array.isArray(j.profiles))) {
+    return { config: null, error: 'launcher.json 缺 profiles' }
+  }
   const mergedRaw = { ...(bootstrap?.profiles ?? {}), ...(j?.profiles ?? {}) }
   if (!Object.keys(mergedRaw).length) {
+    if (j && Object.hasOwn(j, 'profiles')) return { config: null, error: 'launcher.json 沒有任何 profile' }
+    if (!bootstrap && !j) return { config: null, ...(fileErr ? { error: fileErr } : {}) }
     return { config: null, error: fileErr || '這台電腦還沒有可用的啟動設定（請安裝 CLI 或撰寫 launcher.json）' }
   }
   const profiles = {}
@@ -79,7 +84,7 @@ export function loadConfig(file, bootstrap = null) {
   }
   const cwdAllow = (Array.isArray(j?.cwd_allow) && j.cwd_allow.length ? j.cwd_allow : bootstrap?.cwd_allow ?? [])
     .filter(c => typeof c === 'string' && c.trim()).map(c => canonicalLaunchCwd(c.trim()))
-  if (!cwdAllow.length) return { config: null, error: '工作資料夾白名單（cwd_allow）是空的' }
+  if (!cwdAllow.length) return { config: null, error: '工作資料夾白名單 cwd_allow 是空的' }
   const max = Number.isInteger(j?.max_per_hour) ? Math.min(Math.max(j.max_per_hour, 1), 20)
     : Number.isInteger(bootstrap?.max_per_hour) ? bootstrap.max_per_hour : DEFAULT_MAX_PER_HOUR
   return { config: { profiles, cwd_allow: cwdAllow, max_per_hour: max } }
@@ -220,12 +225,13 @@ export function createLauncher({ api, log, workDir, configPath, listNames, onLau
   function current() {
     let mtime = 0
     try { mtime = fs.statSync(configPath).mtimeMs } catch { mtime = 0 }
-    const bootKey = bootstrap ? JSON.stringify(bootstrap).length : 0
+    const bootResolved = typeof bootstrap === 'function' ? bootstrap() : bootstrap
+    const bootKey = bootResolved ? JSON.stringify(bootResolved).length : 0
     const cacheKey = `${mtime}:${bootKey}`
     if (cacheKey !== cache.mtime) {
-      cache = { mtime: cacheKey, value: loadConfig(configPath, typeof bootstrap === 'function' ? bootstrap() : bootstrap) }
+      cache = { mtime: cacheKey, value: loadConfig(configPath, bootResolved) }
       if (cache.value.error && cache.value.error !== warned) { log(`launcher: ${cache.value.error}`); warned = cache.value.error }
-      if (cache.value.config) { warned = ''; log(`launcher: loaded ${Object.keys(cache.value.config.profiles).length} profile(s), ${cache.value.config.cwd_allow.length} cwd(s)`) }
+      if (cache.value.config?.cwd_allow) { warned = ''; log(`launcher: loaded ${Object.keys(cache.value.config.profiles).length} profile(s), ${cache.value.config.cwd_allow.length} cwd(s)`) }
     }
     return cache.value.config
   }
