@@ -15,6 +15,7 @@ mod claude_json;
 mod codex_accounts;
 mod heartbeat;
 mod identity;
+mod lastlogin;
 mod launch;
 mod names;
 mod nowin;
@@ -59,6 +60,8 @@ struct StartupInfo {
     needs_login: bool,
     /// 登入畫面可以顯示「暫時不登入」：只有這台已有節點金鑰時
     can_skip_login: bool,
+    /// 上次登入的方式與頭像（沒登入過就是空）
+    last_login: Option<lastlogin::LastLoginView>,
     shot: bool,
     poll_ms: u64,
     roster_ms: u64,
@@ -127,6 +130,7 @@ fn startup_info(app: State<'_, App>, auth: State<'_, auth::AuthState>) -> Startu
         error: app.init_error.clone(),
         needs_login: account::needs_login(app.relay.is_some(), auth.status().signed_in, account::login_skipped(&app.data_dir)),
         can_skip_login: app.relay.is_some(),
+        last_login: lastlogin::view(&app.data_dir),
         shot: app.shot.is_some(),
         poll_ms: env_ms("IRORI_ASN_POLL_MS", 120_000),
         roster_ms: env_ms("IRORI_ASN_ROSTER_MS", 60_000),
@@ -659,7 +663,7 @@ pub fn run() {
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
             wins::open_chat, wins::open_panel, wins::close_panels, wins::chat_visible, wins::close_chats, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,
-            account::auth_status, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_bind, account::auth_skip_login, account::update_remote_request, account::update_remote_status,
+            account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_bind, account::auth_skip_login, account::update_remote_request, account::update_remote_status,
             tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_set, updater::update_check, updater::update_install,
         ])
         .setup(move |app| {

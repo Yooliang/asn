@@ -3,7 +3,7 @@
 // 這台已有節點金鑰時，另有小字連結「暫時不登入」照舊進名單。
 // 權杖與節點金鑰都只在 Rust 端，這裡只看得到「登入了沒」與錯誤文字。
 import { blockContextMenu } from './lib/nomenu.mjs'
-import { PROVIDERS, SKIP_LABEL, canStart, errorText, phaseText, showSkip } from './lib/login.mjs'
+import { LAST_USED_LABEL, PROVIDERS, SKIP_LABEL, canStart, errorText, phaseText, showSkip } from './lib/login.mjs'
 import { RESIZE_DIRS, authApi, ctl, initFrame, invoke, resizeFrom } from './lib/tauri.mjs'
 
 const { createApp, ref, computed } = Vue
@@ -16,6 +16,9 @@ const app = createApp({
     const phase = ref('idle'), provider = ref(''), error = ref('')
     const note = computed(() => phaseText(phase.value, provider.value))
     const canSkip = info.can_skip_login === true
+    // 上次登入的方式與頭像（Rust 端讀 last-login.json；沒登入過就是空）：頭像放進大框、那顆按鈕標「上次使用」
+    const lastProvider = info.last_login?.provider || ''
+    const lastAvatar = info.last_login?.avatar || ''
     // 登入完成後自動處理金鑰：沒有金鑰＝建節點（Rust 端稍後自動重新啟動）；有金鑰＝綁到帳號，不管成功與否都進名單
     const finish = async () => {
       phase.value = 'setting'
@@ -34,7 +37,7 @@ const app = createApp({
       if (!showSkip(canSkip, phase.value)) return
       try { await authApi.skip(); if (!info.shot) location.replace('list.html') } catch (e) { error.value = errorText(e); phase.value = 'error' }
     }
-    return { PROVIDERS, RESIZE_DIRS, resizeFrom, ctl, phase, error, note, canStart, canSkip, SKIP_LABEL, showSkip, start, skip, finish, cancel: () => authApi.cancel(), quit: () => invoke('quit_app') }
+    return { LAST_USED_LABEL, lastProvider, lastAvatar, PROVIDERS, RESIZE_DIRS, resizeFrom, ctl, phase, error, note, canStart, canSkip, SKIP_LABEL, showSkip, start, skip, finish, cancel: () => authApi.cancel(), quit: () => invoke('quit_app') }
   },
 })
 const vm = app.mount('#app')

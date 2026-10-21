@@ -248,7 +248,19 @@ pub async fn auth_login(app: State<'_, App>, auth: State<'_, AuthState>, provide
     let c = ctx()?;
     let st = auth.login(&c.client, &c.auth_base, &c.anon, &provider, |u| crate::spawn_browser(u)).await?;
     set_login_skipped(&app.data_dir, false)?;   // 登入了就不再是「暫時不登入」
+    // 記住這次的登入方式與帳號頭像（下載失敗不擋登入；檔案裡沒有任何權杖）
+    let avatar = match auth.session_avatar_url() {
+        Some(u) => crate::lastlogin::fetch_avatar(&c.client, &u).await,
+        None => None,
+    };
+    let _ = crate::lastlogin::save_login(&app.data_dir, &provider, avatar);
     Ok(st)
+}
+
+/// 名單視窗的這台大頭貼有變：同步到「上次登入」的記憶（None＝清掉）
+#[tauri::command]
+pub fn last_login_set_avatar(app: State<'_, App>, avatar: Option<String>) -> Result<(), String> {
+    crate::lastlogin::set_custom_avatar(&app.data_dir, avatar)
 }
 
 #[tauri::command]

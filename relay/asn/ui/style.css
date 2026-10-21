@@ -345,15 +345,33 @@ html.toast-page,html.toast-page body{background:transparent}
 /* ---------- 原生外框：Windows 自己畫標題列與邊框，ASN 不再畫 ---------- */
 html.frame-native .titlebar,html.frame-native .rz{display:none}
 /* 登入畫面（login.html）與設定頁的帳號登入區塊 */
-.login-pane{flex:1;display:flex;align-items:center;justify-content:center;padding:16px}
-.login-card{display:flex;flex-direction:column;gap:12px;width:100%;max-width:280px;text-align:center}
-.login-h{margin:0 0 2px;font-size:20px;color:var(--title-fg)}
-.login-sub{margin:0 0 8px;font-size:13px;opacity:.8}
-.login-btn{padding:10px 12px;font-size:14px;font-weight:600}
+/* 登入畫面：淡天藍極光底（上段）漸層到白色表單區，上方一顆大大的玻璃頭像框；全用 CSS 漸層與內嵌 SVG */
+.login-pane{position:relative;flex:1;display:flex;align-items:flex-start;justify-content:center;padding:28px 16px 16px;overflow:auto;
+  background:linear-gradient(180deg,#cfe8f7 0,#dcf0fa 22%,#e9f5fc 40%,#fff 62%,#fff 100%)}
+.login-sky{position:absolute;left:0;right:0;top:0;height:300px;pointer-events:none;
+  background:radial-gradient(120% 70% at 20% 0,rgba(255,255,255,.85),rgba(255,255,255,0) 60%),radial-gradient(90% 60% at 100% 35%,rgba(160,212,242,.55),rgba(160,212,242,0) 65%);
+  -webkit-mask-image:linear-gradient(#000 55%,transparent);mask-image:linear-gradient(#000 55%,transparent)}
+.login-sky svg{display:block;width:100%;height:100%}
+.login-card{position:relative;display:flex;flex-direction:column;gap:12px;width:100%;max-width:280px;text-align:center}
+.login-avatar{position:relative;align-self:center;width:124px;height:124px;margin-bottom:6px;padding:5px;border-radius:14px;
+  background:linear-gradient(160deg,#fff,#eaf5fd 60%,#f6fbff);border:1px solid rgba(255,255,255,.95);
+  box-shadow:0 0 0 1px rgba(120,170,210,.55),0 0 18px 4px rgba(140,200,240,.65),0 6px 14px rgba(40,100,160,.25)}
+.login-avatar img{display:block;width:100%;height:100%;border-radius:9px;object-fit:cover;background:linear-gradient(#e3f2fc,#a9d2f0);box-shadow:inset 0 2px 6px rgba(10,50,100,.35),inset 0 0 0 1px rgba(40,90,150,.35)}
+.login-avatar.is-logo img{object-fit:contain;padding:12px;box-sizing:border-box}
+.login-btn{position:relative}
+.login-last{position:absolute;right:6px;top:-8px;padding:1px 8px;border-radius:999px;font-size:10px;font-weight:600;line-height:15px;color:#fff;
+  background:linear-gradient(#6fb6ee,#2f7fd0);border:1px solid #fff;box-shadow:0 1px 3px rgba(20,70,130,.4);pointer-events:none}
+.login-avatar::after{content:"";position:absolute;left:5px;right:5px;top:5px;height:46%;border-radius:9px 9px 60% 60%/9px 9px 22% 22%;pointer-events:none;
+  background:linear-gradient(180deg,rgba(255,255,255,.6),rgba(255,255,255,.08))}
+.login-h{margin:4px 0 0;font-size:20px;color:var(--title-fg)}
+.login-sub{margin:0 0 8px;text-wrap:balance;font-size:13px;color:var(--muted)}
+.login-btn{padding:9px 12px;font-size:14px;font-weight:600;border-radius:4px;border-color:#8aa7c4;
+  background:linear-gradient(#fff 0 48%,#e6eef7 52%,#f3f8fd);box-shadow:inset 0 0 0 1px rgba(255,255,255,.9),0 1px 2px rgba(30,70,120,.2)}
+.login-btn:hover:not(:disabled){border-color:#3c8bd9;background:linear-gradient(#fbfdff 0 48%,#cfe7fb 52%,#e2f1fd);box-shadow:inset 0 0 0 1px rgba(255,255,255,.9),0 0 6px rgba(80,160,230,.55)}
 .login-note{margin:0;font-size:12px}
 .login-err{margin:0;font-size:12px;color:#b3261e}
 .login-cancel{align-self:center}
-.login-skip{align-self:center;margin-top:4px;padding:2px 4px;border:0;background:none;font:inherit;font-size:12px;color:inherit;opacity:.7;text-decoration:underline;cursor:pointer}
+.login-skip{align-self:center;margin-top:4px;padding:2px 4px;border:0;background:none;font:inherit;font-size:12px;color:var(--link);opacity:.85;text-decoration:underline;cursor:pointer}
 .login-skip:hover{opacity:1}
 .login-set .login-state{margin:4px 0;font-weight:600}
 html.frame-native .win{padding:6px;border:0;box-shadow:none}

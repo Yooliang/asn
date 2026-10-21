@@ -53,3 +53,6 @@ export const needsDeviceSetup = (hasNode, status) => !hasNode && status?.signed_
 // 登入畫面是否顯示「暫時不登入」小字連結：只有這台已有節點金鑰、而且沒在登入途中
 export const showSkip = (canSkip, phase) => canSkip === true && (phase === 'idle' || phase === 'error')
 export const SKIP_LABEL = '暫時不登入（只用這台的收發室金鑰）'
+
+// 上次用哪種方式登入，就在那顆按鈕上標這個小標籤
+export const LAST_USED_LABEL = '上次使用'

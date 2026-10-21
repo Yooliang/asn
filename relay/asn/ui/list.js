@@ -21,7 +21,7 @@ import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, switchMode, tabVisible, toggleCollapsed } from './lib/merge.mjs'
 import { chatTabSameZone, closeAllChatTabs, dropInsertBefore, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_LABEL, normalizeClose, normalizeFrame, totalUnread, soundChoice, soundFromChoice, soundFromSaved } from './lib/prefs.mjs'
-import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
+import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
 import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
 import { CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, buddyConsoleItem, engineForProfile,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice, withTimeout } from './lib/partner-launch-ui.mjs'
@@ -203,7 +203,13 @@ const pushLog = id => { const l = core.logOf(id).slice(-200); logs[id] = l; emit
 
 // 設備大頭貼：節點 → data URL。好友顯示用哪張由 avatar.mjs 的規則決定（AI 視窗一律自動產生；名單外的寄件人用他那台設備的圖）
 const avatars = ref({})
-core.on('avatars', () => { avatars.value = core.avatarMap(); emit('asn:avatars', avatars.value) })
+core.on('avatars', () => {
+  avatars.value = core.avatarMap(); emit('asn:avatars', avatars.value)
+  // 這台自己設定的大頭貼同步給登入畫面的「上次登入」記憶（只在有圖時寫；Rust 端沒登入過就不動）
+  const mine = avatars.value[info.node]
+  if (isAvatarDataUrl(mine) && mine !== lastSyncedAvatar) { lastSyncedAvatar = mine; void authApi.setLastAvatar(mine).catch(() => {}) }
+})
+let lastSyncedAvatar = ''
 const avOf = f => avatarSrc(f, { avatars: avatars.value })
 const meAv = computed(() => selfAvatarSrc({ selfNode: info.node, windowName: info.window_name, avatars: avatars.value }))
 
@@ -668,7 +674,7 @@ const app = createApp({
     }
     async function removeAvatar() {
       avBusy.value = true
-      try { say((await removeAvatarUpload(avApi)).message) } finally { avBusy.value = false }
+      try { say((await removeAvatarUpload(avApi)).message); lastSyncedAvatar = ''; void authApi.setLastAvatar(null).catch(() => {}) } finally { avBusy.value = false }
     }
     // 設定頁改「視窗外框」：Rust 端立刻改所有視窗的外框並通知各視窗的頁面換樣式
     const setFrame = async v => {
