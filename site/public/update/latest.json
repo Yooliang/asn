@@ -1,11 +1,11 @@
 {
-  "version": "0.1.11",
-  "notes": "開新夥伴失敗或背景啟動逾時會跳出說明對話框，可直接開啟記錄資料夾。",
-  "pub_date": "2026-10-21T05:03:03.113Z",
+  "version": "0.1.12",
+  "notes": "廠商圖示改用官方標誌（Claude、OpenAI、Gemini、Grok、DeepSeek）。",
+  "pub_date": "2026-10-21T05:46:36.157Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjQzbDNURTJIdCtOVDRWNVlxbk83K1RudzlpYzlOZzFIdjNiaEIyRWdMNmtIdDRIY3Z4OVh4d0FETXF1VWNlQXhBZFdYWUNQc3A2V1FwUlJZR05oTXdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNTU4OTgyCWZpbGU6QVNOXzAuMS4xMV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjExClJlNjdVTVhhYWhLQVVxUkhRcnFzMUVLT0JIVlcrSC9INGhUMitwSFVGT2ZYNW5YbG9kK1BCcUtKeDFrcENiWXdpZXVaQ3hmTVdBbEJ6UFI3TkFwdURnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.11_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjJXTXpYSmM2Ym5Kcm1Od3d6SE1kZkV5bXp0WmFndUdkOU1PTWdaOUp6aEl6aGIvWDlxTElicHVFaktVMXozK3pHQW4wWUpDNlBNZldvT3QxbE9pQ1FBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNTYxNTk1CWZpbGU6QVNOXzAuMS4xMl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjEyClM4dUFRNFEzM0tUdC9sekxHR1N0RXdlbjFXaGhUOFJtVjdPOWhTbmFjTkRCT3M2Z2dYTWtEbnBhbWN2QmxoekhCbHNFYllRMklmOEtpREdtU3k0S0NnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.12_x64-setup.exe"
     }
   }
 }
