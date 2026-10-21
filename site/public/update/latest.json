@@ -1,11 +1,11 @@
 {
-  "version": "0.1.16",
-  "notes": "修正按「登入」卻開成檔案總管：網址改用系統預設瀏覽器開啟。",
-  "pub_date": "2026-10-21T09:35:37.059Z",
+  "version": "0.1.17",
+  "notes": "開啟時先檢查登入；登入後自動把這台電腦連到你的帳號（舊電腦自動認領、新電腦自動建立），不用再按任何鈕；設定的帳號只顯示 email 與登出。",
+  "pub_date": "2026-10-21T12:38:49.614Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjdMOWgwV0orWWJOMEVmejRTSExvbDRpTHNsZ0FWNml4a21CWm5IWDYzQUpTRGFRVnNqV1lWQ3I3L000Mm1zYjNoTnFxanI3UzJBdVNpbXIzSWRMdXdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNTc1MzM2CWZpbGU6QVNOXzAuMS4xNl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjE2Cm9hRlNKejh1NXBUYlhFdGNWZHBLWG9FMnJhR1NWMDRUenk2Um1SNjFqQVQya2pPN0hUcnlZUGJYZ0l2T2pvQUgydy9GRmVHamVHNGYrbGRRYkZ4OUR3PT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.16_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjlkSHRnZy9tQ21GSUl4RG55Q2ZkejNIT3RRbUJRcngzUjBYVkQ5cHZrbnpwZlRkenEzVVFWS1JXK0xQRmVaNldtU2JMM0szRFhyTnB5RWQ2Uit6U1F3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNTg2MzI5CWZpbGU6QVNOXzAuMS4xN194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjE3CmtyTGdMQ1FielBBNVRHajhFczFnYVNxUlgyaHh1bDdIQmxxUVpNYWlxWFNWUDRPYmdPbDg1d2lSWTJFZ25mVkdMRDduS1Vhc25UTWt2VFdGVFY1aEN3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.17_x64-setup.exe"
     }
   }
 }
