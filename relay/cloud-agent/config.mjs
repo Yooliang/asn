@@ -9,6 +9,7 @@
 //   agents.json／IRORI_CLOUD_AGENTS：手動名單；與自動掃描合併（同名時 status、cwd_label 以 agents.json 為準）
 //   自動掃描（Grok 雲端預設開）：grok-agents.mjs；IRORI_CLOUD_ROSTER_AUTO=0 關閉
 //   GROK_AGENTS_DIR、IRORI_CLAUDE_BIN、IRORI_CLAUDE_SCRIPT（測試用 node 跑假 claude）、IRORI_CLOUD_ROSTER_CLAUDE=1 才列 Claude 視窗
+import { pickAnon } from '../machine/anon.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
 // 協定常數沿用 relay/machine，不複製一份
@@ -71,9 +72,9 @@ export function readKey(cfg, env = process.env) {
 }
 
 export function readAnonKey(cfg, env = process.env) {
-  const v = (env.IRORI_RELAY_ANON_KEY || '').trim()
-  if (v) return v
-  try { return fs.readFileSync(path.join(cfg.keyDir, 'anon.key'), 'utf8').trim() } catch { return '' }
+  let f = ''
+  try { f = fs.readFileSync(path.join(cfg.keyDir, 'anon.key'), 'utf8').trim() } catch { /* 沒有檔案 */ }
+  return pickAnon(cfg.baseUrl, [env.IRORI_RELAY_ANON_KEY, f])   // 內建新後台的 anon；殘留的舊專案 anon.key 會被跳過
 }
 
 const STATUSES = new Set(['idle', 'busy', 'waiting'])
