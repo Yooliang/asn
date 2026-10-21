@@ -6,7 +6,7 @@
 import { isAvatarDataUrl } from './avatar.mjs'
 import { buildFriends, cleanPsm, mergeFriends } from './roster.mjs'
 import { routeMail, stubFriend } from './routing.mjs'
-import { hasNudge, hueOf, initial, plain, stripNudge, stripReplyHead, unwrapShell } from './text.mjs'
+import { hasNudge, hueOf, initial, noReplyNoticeOf, plain, stripNudge, stripReplyHead, unwrapShell } from './text.mjs'
 import { noticeOf, expiresAt, fileMimeOf, friendlyPhotoError, normalizePhotos, stripPhotoLines } from './photo.mjs'
 import { applyStatusRow, chunkIds, collectPollIds } from './sent-status.mjs'
 
@@ -124,7 +124,7 @@ export class AsnCore {
         const ids = []
         for (const m of messages) {
           if (m.to_agent !== this.windowName && !this.aliases.has(m.to_agent)) continue   // 不是寄給本視窗（或還沒過期的舊名）的絕不處理、不 ack
-          if (!this.seen.has(m.id)) { this.seen.add(m.id); await this.#incoming(m) }
+          if (!this.seen.has(m.id)) { this.seen.add(m.id); if (!this.#noReplyNotice(m)) await this.#incoming(m) }
           ids.push(m.id)
         }
         if (ids.length) { await this.flush(); await this.transport.ack(ids); ids.forEach(i => this.seen.delete(i)) }
@@ -132,6 +132,24 @@ export class AsnCore {
     } catch (e) { this.log(`pull failed (${why}): ${e.message}`); this.#setConn('off') }
     finally { this.pulling = false }
     void this.refreshSentStatus(why)
+  }
+
+  // 收發室的「等了 N 分鐘仍沒收到回覆」提醒信不是對話：不進對話、不提示、不算未讀。
+  // 有 reply_to 對得到我們自己寄出的那則（log 裡 me 訊息存了寄出時的信件 id）就在那則標 unanswered＝等待分鐘數（資料欄位，畫面只顯示小字）；對不到就丟掉。回傳 true＝已處理（呼叫端不再當一般信）
+  #noReplyNotice(m) {
+    const n = noReplyNoticeOf(m)
+    if (!n) return false
+    if (m.reply_to) {
+      for (const [fid, lg] of this.logs) {
+        const mine = lg.find(x => x.k === 'me' && x.id === m.reply_to)
+        if (!mine) continue
+        mine.unanswered = n.mins
+        this.#scheduleSave()
+        this.emit('log', fid)
+        break
+      }
+    }
+    return true
   }
 
   async #incoming(m) {

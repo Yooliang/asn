@@ -195,7 +195,11 @@ async fn relay_attachment_save(app: State<'_, App>, id: String) -> Result<String
 /// 改暱稱＝改對外名字（驗證在 names::validate_name；不合法就回錯誤字串，介面還原並提示）
 #[tauri::command]
 fn set_window_name(app: State<'_, App>, name: String) -> Result<String, String> {
-    names::rename(relay_of(&app)?.as_ref(), &app.data_dir, &app.work_dir, &name, heartbeat::now_ms())
+    let relay = relay_of(&app)?;
+    let n = names::rename(relay.as_ref(), &app.data_dir, &app.work_dir, &name, heartbeat::now_ms())?;
+    // 改名成功後把新視窗名同步成這台設備的顯示名；失敗只記 log，不影響改名
+    tauri::async_runtime::spawn(async move { relay.sync_device_name().await });
+    Ok(n)
 }
 
 fn store_path(app: &App, name: &str) -> Result<PathBuf, String> {
@@ -321,6 +325,9 @@ pub fn run() {
                 // 心跳：每 30 秒寫一次（格式同 self-recv.mjs），pid 用本程式
                 let wd = work_dir.clone();
                 let r2 = r.clone();
+                // 啟動時把視窗名同步成這台設備的顯示名（別台設備的前台依設備分組時顯示它）
+                let r3 = r.clone();
+                tauri::async_runtime::spawn(async move { r3.sync_device_name().await });
                 let mut last: Vec<String> = vec![];
                 tauri::async_runtime::spawn(async move {
                     loop {

@@ -3,6 +3,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { handleNodeRoomAction, type RoomDeps, syncNodeAuto } from "../_shared/rooms.ts";
 import { handleAgentInbox } from "../_shared/agent_inbox.ts";
 import { expectsReplyArgs } from "../_shared/expects_reply.ts";
+import { parseSelfName } from "../_shared/node_name.ts";
 import { normalizeRosterAgents } from "../_shared/roster.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
 import * as signal from "../_shared/signal.ts";
@@ -199,6 +200,17 @@ Deno.serve(async (req) => {
     // 視窗名單更新後：符合群組「自動收入」開頭字串的視窗自動入群，消失的標為離開（不是 AI 加人，是比對 roster）
     await syncNodeAuto(roomDeps(), me.id, agents.map((a: { name: unknown }) => a.name).filter((n: unknown): n is string => typeof n === "string"));
     return json(200, { ok: true, count: data.count });
+  }
+  // 節點改自己的顯示名（ASN 把視窗名寫進來；只改自己這一列的 name）
+  if (action === "set_name" && req.method === "POST") {
+    const b = await req.json().catch(() => null);
+    const name = parseSelfName(b?.name);
+    if (name === null) return json(400, { error: "bad_request" });
+    const { data, error } = await db.rpc("irori_relay_set_self_name", { p_node: me.id, p_name: name });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    if (data?.error === "not_found") return json(404, { error: "not_found" });
+    if (data?.error) return json(400, { error: data.error });
+    return json(200, { ok: true });
   }
   if (action === "leave" && req.method === "POST") {
     const { error } = await db.rpc("irori_relay_leave", { p_node: me.id });

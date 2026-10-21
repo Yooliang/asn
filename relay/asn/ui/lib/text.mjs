@@ -84,3 +84,15 @@ export function hueOf(id) {
   for (const ch of String(id)) h = (h * 31 + ch.codePointAt(0)) >>> 0
   return h % 360
 }
+
+// 前台凡要顯示「這是哪台設備」一律用該設備 ASN 的視窗名（後端 nodes.name）；沒有（例如只有收發室橋或雲端代理的設備）就顯示這個，絕不顯示節點代號
+export const UNNAMED_DEVICE = '未命名設備'
+
+// 收發室寄來的「等了一陣子仍沒收到回覆」提醒信（relay/machine/bridge.mjs noticeNoReply）：不是對話訊息。
+// 回傳 null（不是這類信）或 { mins }（mins＝內文寫的等待分鐘數，沒寫＝0，例如對方視窗已關閉）。
+export function noReplyNoticeOf(m) {
+  const body = String(m?.body ?? '')
+  if (!/收發室$/.test(String(m?.from_agent ?? '')) || !body.startsWith('[收發室] ') || !/沒有經收發室收到/.test(body)) return null
+  const n = body.match(/等了約\s*(\d+)\s*分鐘/) ?? body.match(/(\d+)\s*分鐘內/)
+  return { mins: n ? Number(n[1]) : 0 }
+}
