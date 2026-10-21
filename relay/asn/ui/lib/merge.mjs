@@ -30,8 +30,7 @@ export function closeTab(st, id) {
   return { tabs, active }
 }
 // 整合模式下這位好友的對話「看得到」嗎（來信要不要算未讀、要不要彈提示）：是目前分頁，且主視窗開著沒最小化
-// （整合視窗右邊正顯示指引分頁時，對話被蓋住，也算看不到）
-export const tabVisible = (st, id, windowVisible) => Boolean(windowVisible) && st.active === id && !st.showGuide
+export const tabVisible = (st, id, windowVisible) => Boolean(windowVisible) && st.active === id
 
 // 切換視窗模式時，已開的對話怎麼接：
 //   分開→整合：已開的對話視窗（windowIds）全關掉、變成分頁（最後一個當目前分頁）
