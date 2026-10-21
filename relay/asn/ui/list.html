@@ -22,7 +22,7 @@
   <div class="pane list-pane">
     <div class="me">
       <div class="me-av">
-        <button class="dp me-dp" type="button" :class="'st-' + me.status" :style="{ '--h': 205 }" :disabled="avBusy" aria-label="點一下換大頭貼" title="點一下換大頭貼" data-tip="點一下換大頭貼" @click="avMenu = false; avFile.click()" @contextmenu.prevent="avMenu = !avMenu"><span><img :src="meAv" alt="我的大頭貼"></span></button>
+        <button class="dp me-dp" type="button" :class="'st-' + me.status" :style="{ '--h': 205 }" :disabled="avBusy" aria-label="點一下換大頭貼" data-tip="點一下換大頭貼" @click="avMenu = false; avFile.click()" @contextmenu.prevent="avMenu = !avMenu"><span><img :src="meAv" alt="我的大頭貼"></span></button>
         <ul class="av-menu" v-if="avMenu" role="menu" @click.stop>
           <li><button type="button" role="menuitem" @click="avMenu = false; avFile.click()">換大頭貼…</button></li>
           <li><button type="button" role="menuitem" :disabled="!selfHasUpload" @click="avMenu = false; removeAvatar()">改回自動產生</button></li>
