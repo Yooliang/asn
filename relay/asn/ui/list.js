@@ -18,6 +18,7 @@ import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pen
 import { bumpRecentCwd, cwdChoices, normalizeLaunchPrefs } from './lib/launch-prefs.mjs'
 import { DISPLAY_MODES, consoleToggleLabel, engineForProfile, launchDeviceRows, launchDisableReason, showDisplayModeChoice } from './lib/partner-launch-ui.mjs'
 import { friendId } from './lib/roster.mjs'
+import { VENDOR_ICON_KEYS, vendorIconSvg } from './lib/vendor-icons.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
@@ -579,6 +580,10 @@ const app = createApp({
     }
   },
 })
+for (const k of VENDOR_ICON_KEYS) {
+  const inner = vendorIconSvg(k)
+  app.component(`vi-${k}`, { template: `<span class="rtab-vendor">${inner}</span>` })
+}
 app.component('chat-pane', ChatPane)
 // 一篇指引的顯示：全部用文字插值（不用 v-html），步驟自動編號
 app.component('guide-doc', {

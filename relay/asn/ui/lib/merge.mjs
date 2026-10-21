@@ -76,6 +76,12 @@ export function foldArrow(side, collapsed) {
   const towardMiddle = side === 'left' ? '›' : '‹'
   return collapsed ? towardMiddle : towardSide
 }
+
+/** 側欄底部橫向收合鈕：展開時指向側欄外（收合），收起時指回（展開） */
+export function foldBarArrow(side, collapsed) {
+  if (side === 'left') return collapsed ? '›' : '‹'
+  return collapsed ? '‹' : '›'
+}
 // 對話區根元素的版面類別：頭像模式、底色、收合（模式與底色互不影響）
 export function paneClasses({ dpMode, bubble, collapsed, toolbar } = {}) {
   const d = normalizeDpMode(dpMode)

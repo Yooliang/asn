@@ -160,8 +160,9 @@ test('守門：元件依 paneClasses／msgLayout／foldArrow 排版；樞紐用 
   const pane = fs.readFileSync(path.join(UI, 'lib', 'chatpane.mjs'), 'utf8')
   assert.ok(pane.includes('paneClasses({ dpMode: props.dpMode, bubble: props.bubble, collapsed: props.dpCollapsed, toolbar: props.toolbar })'))
   assert.ok(pane.includes('msgLayout(k, { dpMode: props.dpMode, bubble: props.bubble })'))
-  assert.ok(pane.includes('foldArrow(sideOf(props.dpMode), collapsed.value)'))
-  assert.ok(pane.includes('v-if="sideCol && !collapsed"'))
+  assert.ok(pane.includes('foldBarArrow(side.value, collapsed.value)'))
+  assert.ok(pane.includes('class="dp-fold-bar"'))
+  assert.ok(pane.includes('dp-side-stack'))
   assert.ok(pane.includes("'tone-' + lay(m.k).tone"))
   // 工具列按鈕只有圖示：有中文 aria-label 與提示，圖示用內嵌 SVG；表情鈕本身就開表情選單（旁邊不另放 ▾，功能重複）
   for (const label of ['表情符號', '傳送震動']) assert.ok(pane.includes(`aria-label="${label}"`), `缺 aria-label ${label}`)
