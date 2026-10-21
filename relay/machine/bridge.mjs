@@ -368,7 +368,9 @@ engines = await loadEngines({ log, workDir: WORK_DIR, mailboxName: MAILBOX_NAME,
 const openEngines = engines.filter(e => e.capabilities().openWindow && e.openWindow)
 const openEngineFor = id => (id ? openEngines.find(e => e.id === id) : openEngines[0])
 const acpEngine = engines.find(e => e.id === 'acp')
-const launchNoAuto = process.env.IRORI_LAUNCH_NO_AUTO === '1'
+// 自動偵測本機 CLI 併成遠端開視窗的 profile：預設關（要明確設 IRORI_LAUNCH_AUTO=1 才開）。
+// 遠端開視窗是擴大權限的動作，只有本機 launcher.json 或明確同意才算數；IRORI_LAUNCH_NO_AUTO=1 仍可強制關。
+const launchNoAuto = process.env.IRORI_LAUNCH_NO_AUTO === '1' || process.env.IRORI_LAUNCH_AUTO !== '1'
 const launchTools = launchNoAuto ? {} : await detectAgentTools()
 const launchBootstrap = launchNoAuto ? null : { profiles: buildDefaultProfiles(launchTools), cwd_allow: defaultCwdAllow(), max_per_hour: 6 }
 async function startBackgroundPartner({ req, profile }) {
