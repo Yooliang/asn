@@ -41,6 +41,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     remote: { node: '', list: [], reportedAt: '', asnOnline: false, loading: false, busy: false, msg: '' },
     incoming: [],   // 等本機使用者按確認的遠端切換指令：{ id, email, from, fromLabel }
     savedSeq: 0,
+    autoNote: '',   // 背景自動加入成功時的一行小字
   })
   const refresh = async () => {
     try { s.list = await invoke('claude_accounts_list') } catch (e) { s.msg = errText(e) }
@@ -122,13 +123,19 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     s.incoming = s.incoming.filter(x => x.id !== id)
     try { await invoke('acct_remote_decline', { id }) } catch { /* 略過 */ }
   }
+  // Rust 背景工作（每分鐘）自動加入／回存後的通知：只有 kind 與 email，沒有權杖
+  const onAuto = async ev => {
+    if (ev?.kind === 'added' && ev.email) s.autoNote = `已自動加入 ${ev.email}`
+    await refresh()
+    void report()
+  }
   const loadTrust = async () => { try { s.trustOwn = (await invoke('acct_remote_trust_get')) === true } catch { s.trustOwn = false } }
   const setTrust = async on => {
     try { await invoke('acct_remote_trust_set', { on }); s.trustOwn = on === true } catch (e) { s.msg = errText(e) }
   }
   return {
     state: s,
-    refresh, report, remoteNodes, remoteSelect, remoteLoad, remoteSwitch, pollIncoming, approve, decline, loadTrust, setTrust,
+    refresh, report, onAuto, remoteNodes, remoteSelect, remoteLoad, remoteSwitch, pollIncoming, approve, decline, loadTrust, setTrust,
     addCurrent: () => run(async () => { const a = await invoke('claude_account_save'); s.savedSeq++; return `已加入 ${a.email}。` }),
     switchTo: email => run(async () => { const r = await invoke('claude_account_switch', { email }); return `已切換到 ${r.email}。${SWITCH_NOTICE}` }),
     // 刪除要按兩次（第一次變成「確認刪除」），避免誤觸

@@ -12,7 +12,7 @@ import { OTHER_VENDORS, VENDOR_UNSUPPORTED, accountLine } from './claude-account
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
 export const SETTING_OPS = [
   'sound', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
-  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-add', 'acct-remote-node', 'acct-remote-switch', 'acct-trust',
+  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-add', 'acct-auto', 'acct-remote-node', 'acct-remote-switch', 'acct-trust',
   'closeTo', 'autostart', 'bridge-enable', 'bridge-launch', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'cli-copy', 'autoCheck', 'check-update', 'launch-max', 'launch-cwd', 'avatar-remove',
 ]
 
@@ -92,6 +92,8 @@ export const SettingsPanel = {
             <small v-if="st.accounts.current && !st.accounts.current.saved" class="acct-warn">目前登入的 {{ st.accounts.current.email }} 還沒加入帳號庫，切換到別的帳號前請先加入。</small>
             <small v-else-if="!st.accounts.current">這台電腦目前沒有 Claude 登入。</small>
             <div class="acct-add"><button class="aero-btn" type="button" @click="act('acct-add')" :disabled="st.accounts.busy || !st.accounts.current">加入目前登入的帳號</button></div>
+            <label class="chk"><input type="checkbox" :checked="st.accounts.autoAdd" @change="act('acct-auto', $event.target.checked)" /><span>自動加入</span></label>
+            <small v-if="st.accounts.autoNote" role="status">{{ st.accounts.autoNote }}</small>
             <small role="status">{{ st.accounts.msg }}</small>
           </section>
           <section class="set-card" aria-label="OpenAI（Codex）帳號">

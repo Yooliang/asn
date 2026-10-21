@@ -619,6 +619,7 @@ pub fn run() {
 
     let frame_data_dir = data_dir.clone();
     let bridge_data_dir = data_dir.clone();
+    let auto_acct_dir = data_dir.clone();
     let auth_state = auth::AuthState::new(auth::default_store(&data_dir));
     // 端到端測試用：--shot 模式下假裝已登入（只連本機假後端；正式執行沒有這條路）
     if shot.is_some() {
@@ -666,6 +667,14 @@ pub fn run() {
             let to_tray = std::fs::read_to_string(frame_data_dir.join("asn-me.json")).map(|t| tray::close_to_tray_from_saved(&t)).unwrap_or(true);
             tray::init(&handle, to_tray);
             tray::build(&handle);
+            // Claude 帳號自動加入／回存：啟動後 15 秒起每 60 秒一次（asn-me.json 的 autoAddClaude 開著才動，預設開）；--shot 截圖模式不動
+            if handle.state::<App>().shot.is_none() {
+                let h = handle.clone();
+                let every = std::time::Duration::from_millis(env_ms("IRORI_ASN_CLAUDE_AUTO_MS", 60_000));
+                tauri::async_runtime::spawn(claude_accounts::auto_loop(auto_acct_dir.clone(), std::time::Duration::from_secs(15), every, move |o| {
+                    let _ = h.emit("claude-account-auto", o);
+                }));
+            }
             // 開機自動啟動帶 --background：只常駐系統匣，不跳出名單（系統匣建失敗就照常顯示）
             if background && !handle.state::<tray::TrayFailed>().0.load(std::sync::atomic::Ordering::Relaxed) {
                 if let Some(w) = handle.get_webview_window("list") {

@@ -83,7 +83,7 @@ const render = async (catKey, st = fullState()) => {
 test('設定表單：每一類都轉得出來，各類原本的項目都在', async () => {
   const want = {
     me: ['大頭貼', '選擇圖片', '移除，改回自動產生', '目前用的是自動產生的大頭貼。'],
-    accounts: ['登入狀態', '尚未登入', '用 Google 登入', '用 GitHub 登入', 'Claude 帳號', '使用中', '加入目前登入的帳號', '切換', '刪除', 'a@b.c', 'OpenAI（Codex）帳號', 'x@openai.test · plus', 'Gemini', '尚未支援', '遠端設備', 'w@b.c', '信任我自己的設備'],
+    accounts: ['登入狀態', '尚未登入', '用 Google 登入', '用 GitHub 登入', 'Claude 帳號', '使用中', '加入目前登入的帳號', '自動加入', '切換', '刪除', 'a@b.c', 'OpenAI（Codex）帳號', 'x@openai.test · plus', 'Gemini', '尚未支援', '遠端設備', 'w@b.c', '信任我自己的設備'],
     look: ['視窗外框', '視窗模式', '頭像模式', '工具列位置', '文字底色'],
     tabs: ['分頁依', '分組依'],
     sound: ['音效'],
