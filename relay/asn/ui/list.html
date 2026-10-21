@@ -200,7 +200,8 @@
   </section>
   </div>
   <ul class="av-menu buddy-menu" v-if="buddyMenu" :style="{ left: buddyMenuPos.x + 'px', top: buddyMenuPos.y + 'px' }" role="menu" @click.stop>
-    <li v-if="buddyConsoleToggle"><button type="button" role="menuitem" @click="toggleBuddyConsole">{{ buddyConsoleLabel }}</button></li>
+    <li><button type="button" role="menuitem" @click="buddyMenuOpenChat">開啟對話</button></li>
+    <li><button type="button" role="menuitem" :disabled="buddyConsoleItemView.disabled" @click="toggleBuddyConsole">{{ buddyConsoleItemView.label }}</button></li>
   </ul>
   <ul class="av-menu launch-picker" v-if="launchPicker" :style="{ left: launchPickerPos.x + 'px', top: launchPickerPos.y + 'px' }" role="menu" @click.stop>
     <li v-for="d in launchDeviceRows" :key="d.key">

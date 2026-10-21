@@ -142,7 +142,7 @@ mod sys {
     use std::path::Path;
     use std::process::Command;
     const KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
-    const NO_WINDOW: u32 = 0x0800_0000;
+    use crate::nowin::NO_WINDOW;
     pub fn get() -> bool {
         Command::new("reg").args(["query", KEY, "/v", "ASN"]).creation_flags(NO_WINDOW).output().map(|o| o.status.success() && super::reg_query_has_value(&String::from_utf8_lossy(&o.stdout))).unwrap_or(false)
     }

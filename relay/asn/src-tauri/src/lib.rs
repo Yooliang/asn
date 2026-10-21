@@ -9,6 +9,7 @@ mod heartbeat;
 mod identity;
 mod launch;
 mod names;
+mod nowin;
 mod relay;
 mod shot;
 mod stt;

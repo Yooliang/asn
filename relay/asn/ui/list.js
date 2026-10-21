@@ -21,7 +21,7 @@ import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_L
 import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
 import { bumpRecentCwd, cwdChoices, normalizeLaunchPrefs } from './lib/launch-prefs.mjs'
-import { DISPLAY_MODES, consoleToggleLabel, engineForProfile, launchDeviceRows, launchDisableReason, showDisplayModeChoice } from './lib/partner-launch-ui.mjs'
+import { CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, buddyConsoleItem, engineForProfile,launchDeviceRows, launchDisableReason, showDisplayModeChoice, withTimeout } from './lib/partner-launch-ui.mjs'
 import { backgroundRestoreNoticeText, collectLaunchFailures, findBackgroundTimeouts, launchFailedNoticeText } from './lib/partner-launch-notify.mjs'
 import { friendId } from './lib/roster.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
@@ -267,31 +267,37 @@ function pickLaunchDevice(nodeKey) {
 const buddyMenu = ref('')
 const buddyMenuPos = reactive({ x: 0, y: 0 })
 const buddyMenuFriend = ref(null)
-const buddyConsole = reactive({ canToggle: false, visible: true })
-const buddyConsoleToggle = computed(() => buddyMenu.value && buddyConsole.canToggle)
-const buddyConsoleLabel = computed(() => consoleToggleLabel(buddyConsole.visible))
-function closeBuddyMenu() { buddyMenu.value = ''; buddyMenuFriend.value = null; buddyConsole.canToggle = false }
+// 右鍵選單立刻出現（固定有「開啟對話」）；主控台切換項目先顯示「檢查中…」，查到才可按，逾時／查不到就停用
+const buddyConsole = reactive({ state: 'none', visible: true })
+const buddyConsoleItemView = computed(() => buddyConsoleItem(buddyConsole.state, buddyConsole.visible))
+function closeBuddyMenu() { buddyMenu.value = ''; buddyMenuFriend.value = null; buddyConsole.state = 'none' }
+function buddyMenuOpenChat() {
+  const c = buddyMenuFriend.value
+  closeBuddyMenu()
+  if (c) void openChat(c.id)
+}
 async function openBuddyMenu(c, e) {
   closeLaunchPicker()
   buddyMenuPos.x = e?.clientX ?? 0
   buddyMenuPos.y = e?.clientY ?? 0
   buddyMenuFriend.value = c
   buddyMenu.value = c.id
-  buddyConsole.canToggle = false
   buddyConsole.visible = true
-  if (c.node !== info.node || c.engine === 'acp' || c.pending) return
+  if (c.node !== info.node || c.engine === 'acp' || c.pending) { buddyConsole.state = 'none'; return }
+  buddyConsole.state = 'checking'
   const eng = c.engine || engineForProfile(c.launchProfile || 'claude')
-  try {
-    const q = await transport.partnerConsoleQuery({ engine: eng, name: c.agent || c.nick })
-    if (q?.canToggle) {
-      buddyConsole.canToggle = true
-      buddyConsole.visible = Boolean(q.visible)
-    }
-  } catch { /* 略過 */ }
+  const q = await withTimeout(transport.partnerConsoleQuery({ engine: eng, name: c.agent || c.nick }), CONSOLE_QUERY_TIMEOUT_MS)
+  if (buddyMenuFriend.value !== c) return   // 使用者已經關掉或換開別人的選單
+  if (q?.canToggle) {
+    buddyConsole.state = 'toggle'
+    buddyConsole.visible = Boolean(q.visible)
+  } else {
+    buddyConsole.state = 'none'
+  }
 }
 async function toggleBuddyConsole() {
   const c = buddyMenuFriend.value
-  if (!c) { closeBuddyMenu(); return }
+  if (!c || buddyConsole.state !== 'toggle') { closeBuddyMenu(); return }
   const eng = c.engine || engineForProfile(c.launchProfile || 'claude')
   const nextVis = !buddyConsole.visible
   try {
@@ -711,7 +717,7 @@ const app = createApp({
       DISPLAY_MODES, partnerShowDisplay,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerModels, partnerCwdChoices, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
-      buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddyConsoleToggle, buddyConsoleLabel, toggleBuddyConsole,
+      buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddyConsoleItemView, buddyMenuOpenChat, toggleBuddyConsole,
       launchToolRows, launchPrefs, launchCwdText, saveLaunchPrefs, setLaunchCwdText,
     }
   },

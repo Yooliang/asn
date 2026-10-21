@@ -58,5 +58,23 @@ export function engineForProfile(profileId) {
 }
 
 export function consoleToggleLabel(visible) {
-  return visible ? '背景執行' : '前台執行'
+  return visible ? '切到背景' : '叫回前台'
+}
+
+/** 名單右鍵選單查主控台狀態最多等多久；超過就當查不到，不擋選單 */
+export const CONSOLE_QUERY_TIMEOUT_MS = 1500
+
+/** 右鍵選單的切換項目：checking＝還在查（停用）、toggle＝可切換、none＝這個視窗切不了（停用） */
+export function buddyConsoleItem(state, visible) {
+  if (state === 'toggle') return { label: consoleToggleLabel(visible), disabled: false }
+  if (state === 'checking') return { label: '檢查中…', disabled: true }
+  return { label: '這個視窗無法切換', disabled: true }
+}
+
+/** 等 promise 最多 ms 毫秒；逾時或失敗一律回 null（右鍵選單不能被慢的查詢卡住） */
+export function withTimeout(promise, ms) {
+  return new Promise(resolve => {
+    const t = setTimeout(() => resolve(null), ms)
+    Promise.resolve(promise).then(v => { clearTimeout(t); resolve(v) }, () => { clearTimeout(t); resolve(null) })
+  })
 }

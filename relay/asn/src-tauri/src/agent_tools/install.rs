@@ -1,5 +1,6 @@
 //! 使用者明確按下安裝後，才呼叫官方安裝流程；成功後可選擇開啟「登入用」終端機（不是一般啟動捷徑）。
 
+use crate::nowin::NoWindow;
 use super::catalog::{tool, InstallKind, ToolDef};
 use super::detect::binary_on_path;
 use super::types::InstallResult;
@@ -75,7 +76,7 @@ fn run_native_installer(def: &ToolDef) -> Result<String, String> {
             "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; \
              irm {url} | iex"
         );
-        let st = Command::new("powershell")
+        let st = Command::new("powershell").no_window()
             .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script])
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
@@ -94,7 +95,7 @@ fn run_native_installer(def: &ToolDef) -> Result<String, String> {
             .clone()
             .ok_or_else(|| "此平台沒有官方安裝網址".to_string())?;
         let script = format!("curl -fsSL {url} | bash");
-        let st = Command::new("bash")
+        let st = Command::new("bash").no_window()
             .arg("-lc")
             .arg(&script)
             .stdin(Stdio::inherit())
@@ -113,7 +114,7 @@ fn run_npm_global(package: &str) -> Result<String, String> {
     if !binary_on_path("npm") {
         return Err("找不到 npm。請先從 nodejs.org 安裝 Node.js 20 以上，再重試。".into());
     }
-    let st = Command::new("npm")
+    let st = Command::new("npm").no_window()
         .args(["install", "-g", package])
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
