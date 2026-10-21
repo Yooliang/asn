@@ -333,7 +333,7 @@ async function openBuddyMenu(c, e) {
   const eng = c.engine || engineForProfile(c.launchProfile || 'claude')
   const q = await withTimeout(transport.partnerConsoleQuery({ engine: eng, name: c.agent || c.nick }), CONSOLE_QUERY_TIMEOUT_MS)
   if (buddyMenuFriend.value !== c) return   // 使用者已經關掉或換開別人的選單
-  if (q?.canToggle) {
+  if (q?.can_toggle ?? q?.canToggle) {
     buddyConsole.state = 'toggle'
     buddyConsole.visible = Boolean(q.visible)
   } else {
