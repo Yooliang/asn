@@ -1,11 +1,11 @@
 {
-  "version": "0.1.14",
-  "notes": "名單顯示各設備的 ASN 是否在線與版本，自己的狀態會真的回報；廣告改從官網更新；開新夥伴可選工作資料夾（含瀏覽），並自動信任該資料夾；換大頭貼提示修正；頭像在右時工具列不再被擠掉。",
-  "pub_date": "2026-10-21T07:42:42.631Z",
+  "version": "0.1.15",
+  "notes": "新增一鍵登入（Google／GitHub）；設定「帳號」整合登入狀態、Claude／Codex 帳號（以 email 辨識）與遠端切換；「更新」頁重新排版；開新夥伴失敗時會留住視窗並顯示錯誤原因。",
+  "pub_date": "2026-10-21T08:50:41.058Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybi8zRDU5MFhWZ3V1bzNnemZHQmtVSFpqQlh3a3dmdDZUVWVseFVKb1J5ditkUG1laGJPc0IzM2FzV2xpMFJlQWY5cmpZSCtSZzBESmxGV3lGc0pON2dVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNTY4NTYyCWZpbGU6QVNOXzAuMS4xNF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjE0CllqdVV6RDU2eTdSb0h3RmRCMmZ5cmptdDlleTAzaVoyTjMzQVY0YTNnRVFSaVEvd3hEU1dsWDM4ODEySm0yQXNnTjBMcllMamdDNWRHblNvQmZhdERBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.14_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjcyd2J0SkYzdVQyV1BtNjhSaTBZa1dqYytOeFU1M2JJKytGUDdweGFFMERVOEp3UDBYNGNkMDlUNVJWc1diOXZidEZ1V21SNHd4L2VLdi9SdkRWT2d3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNTcyNjQwCWZpbGU6QVNOXzAuMS4xNV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjE1Ci9nRy9MLzgydDNYTVJVeDh0VE5veForWnpSNUdRVENnWXdOWThKQkpFdWRmTGQ5VDBvOVY0SVN1WUJKZG9FanlTdk5GdWV1eTcvS3k2TmFpVDRwNURBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.15_x64-setup.exe"
     }
   }
 }
