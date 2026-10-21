@@ -17,10 +17,24 @@
     </span>
   </header>
   <div class="pane login-pane">
+    <div class="login-sky" aria-hidden="true">
+      <svg viewBox="0 0 360 300" preserveAspectRatio="none" focusable="false">
+        <defs>
+          <linearGradient id="lg-r1" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".95"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+          <linearGradient id="lg-r2" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#9fd2f1" stop-opacity="0"/><stop offset=".55" stop-color="#9fd2f1" stop-opacity=".7"/><stop offset="1" stop-color="#9fd2f1" stop-opacity="0"/></linearGradient>
+        </defs>
+        <path d="M-20 150 C60 60 140 190 230 110 S350 60 390 100 L390 150 C320 120 250 200 160 170 S40 110 -20 190Z" fill="url(#lg-r1)"/>
+        <path d="M-20 90 C70 150 150 20 250 80 S340 140 390 60 L390 100 C330 180 250 60 160 110 S40 190 -20 130Z" fill="url(#lg-r2)"/>
+        <path d="M-20 215 C80 160 170 250 270 190 S350 170 390 200 L390 235 C320 215 250 270 160 240 S60 200 -20 250Z" fill="url(#lg-r1)" opacity=".8"/>
+      </svg>
+    </div>
     <div class="login-card">
+      <div class="login-avatar" :class="{ 'is-logo': !lastAvatar }">
+        <img :src="lastAvatar || 'img/logo.svg'" alt="" draggable="false">
+      </div>
       <h1 class="login-h">歡迎使用 ASN</h1>
       <p class="login-sub">登入後，這台電腦會自動出現在你的名單裡。</p>
-      <button v-for="p in PROVIDERS" :key="p.key" class="aero-btn login-btn" type="button" :disabled="!canStart(phase)" @click="start(p.key)">{{ p.label }}</button>
+      <button v-for="p in PROVIDERS" :key="p.key" class="aero-btn login-btn" type="button" :disabled="!canStart(phase)" @click="start(p.key)">{{ p.label }}<span class="login-last" v-if="lastProvider === p.key">{{ LAST_USED_LABEL }}</span></button>
       <p class="login-note" v-if="note" role="status">{{ note }}</p>
       <button class="aero-btn login-cancel" type="button" v-if="phase === 'waiting'" @click="cancel">取消</button>
       <button class="login-skip" type="button" v-if="showSkip(canSkip, phase)" @click="skip">{{ SKIP_LABEL }}</button>

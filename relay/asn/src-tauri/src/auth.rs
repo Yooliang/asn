@@ -267,6 +267,8 @@ pub struct Session {
     pub refresh_token: String,
     pub expires_at_ms: u64,
     pub email: Option<String>,
+    /// 登入帳號的頭像網址（Supabase 使用者資料的 avatar_url／picture），只用來下載一次存成本機小圖
+    pub avatar_url: Option<String>,
 }
 
 pub fn now_ms() -> u64 {
@@ -281,8 +283,14 @@ impl Session {
 }
 
 #[derive(Deserialize)]
+struct TokenMeta {
+    avatar_url: Option<String>,
+    picture: Option<String>,
+}
+#[derive(Deserialize)]
 struct TokenUser {
     email: Option<String>,
+    user_metadata: Option<TokenMeta>,
 }
 #[derive(Deserialize)]
 struct TokenResp {
@@ -309,7 +317,8 @@ pub fn session_from_json(text: &str, now: u64) -> Result<Session, String> {
         access_token: r.access_token,
         refresh_token: r.refresh_token,
         expires_at_ms: now + secs * 1000,
-        email: r.user.and_then(|u| u.email).filter(|e| !e.is_empty()),
+        email: r.user.as_ref().and_then(|u| u.email.clone()).filter(|e| !e.is_empty()),
+        avatar_url: r.user.and_then(|u| u.user_metadata).and_then(|m| m.avatar_url.or(m.picture)).filter(|e| !e.is_empty()),
     })
 }
 
@@ -517,10 +526,15 @@ impl AuthState {
     /// 只給 `--shot` 測試用：假裝已登入（記憶體裡放一組假權杖，不寫存檔），讓端到端測試能走「已登入」的情境。
     /// 呼叫端必須確認在 `--shot` 模式（只連本機假後端）。
     pub fn seed_shot_session(&self, email: &str) {
-        let s = Session { access_token: "shot-access".into(), refresh_token: "shot-refresh".into(), expires_at_ms: now_ms() + 24 * 3600 * 1000, email: Some(email.to_string()) };
+        let s = Session { access_token: "shot-access".into(), refresh_token: "shot-refresh".into(), expires_at_ms: now_ms() + 24 * 3600 * 1000, email: Some(email.to_string()), avatar_url: None };
         if let Ok(mut g) = self.mem.lock() {
             *g = Some(s);
         }
+    }
+
+    /// 目前這次登入帶的帳號頭像網址（不是權杖；給登入後下載頭像用）
+    pub fn session_avatar_url(&self) -> Option<String> {
+        self.mem.lock().ok().and_then(|g| g.as_ref().and_then(|s| s.avatar_url.clone()))
     }
 
     pub fn status(&self) -> AuthStatus {
@@ -775,7 +789,7 @@ mod tests {
     }
 
     fn sess(rt: &str, exp: u64) -> Session {
-        Session { access_token: "AT".into(), refresh_token: rt.into(), expires_at_ms: exp, email: Some("me@x.y".into()) }
+        Session { access_token: "AT".into(), refresh_token: rt.into(), expires_at_ms: exp, email: Some("me@x.y".into()), avatar_url: None }
     }
 
     #[test]
@@ -931,6 +945,16 @@ mod tests {
         #[cfg(not(windows))]
         let st = FileStore { path: d.path().join("login.bin"), prot: PlainFile };
         assert!(st.load().unwrap().is_none());
+    }
+
+    #[test]
+    fn 後台回應帶帳號頭像網址_avatar_url_優先_沒有就用_picture() {
+        let a = session_from_json(r#"{"access_token":"A","refresh_token":"R","user":{"email":"a@b.c","user_metadata":{"avatar_url":"https://x/a.png","picture":"https://x/p.png"}}}"#, 1).unwrap();
+        assert_eq!(a.avatar_url.as_deref(), Some("https://x/a.png"));
+        let b = session_from_json(r#"{"access_token":"A","refresh_token":"R","user":{"user_metadata":{"picture":"https://x/p.png"}}}"#, 1).unwrap();
+        assert_eq!(b.avatar_url.as_deref(), Some("https://x/p.png"));
+        let c = session_from_json(r#"{"access_token":"A","refresh_token":"R","user":{"email":"a@b.c"}}"#, 1).unwrap();
+        assert_eq!(c.avatar_url, None);
     }
 
     #[test]

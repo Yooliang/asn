@@ -47,7 +47,7 @@ export const demoRooms = [
 
 // me：預先寫進 asn-me.json 的設定（例如 { tabDim: 'engine', groupDim: 'device' }），截圖時用來切換維度
 // avatars：true＝示範大頭貼（本機這台 H 已上傳一張；另有不在名單上的設備 K 也上傳了一張，並寄來一封信）
-export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000, me = null, avatars = false, setup = null, noKey = false, acctRemote = {}, login = 'skipped', claim = 'ok' } = {}) {
+export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000, me = null, avatars = false, setup = null, noKey = false, acctRemote = {}, login = 'skipped', claim = 'ok', lastLogin = null } = {}) {
   // login：'skipped'＝已有金鑰、選了暫時不登入（預設，進名單）；'none'＝已有金鑰、還沒登入（只截登入畫面）；其他字串＝已登入的 email
   const signedIn = login !== 'skipped' && login !== 'none' ? login : null
   const all = avatars ? [...demoMembers, { id: 'K', name: '小凱的電腦', kind: 'other', agents: [] }] : demoMembers
@@ -74,6 +74,8 @@ export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000, me
   fs.writeFileSync(path.join(env.IRORI_ASN_DATA, 'settings.json'), JSON.stringify({ window_name: 'H-ASN', old_names: [{ name: 'H-舊名', t: Date.now() - 60_000 }, { name: 'H-過期', t: Date.now() - 9 * 24 * 3600_000 }] }))
   // 沒登入也沒選暫時不登入的情境（none、noKey）會停在登入畫面；其餘（預設 skipped、已登入）進名單
   if (login === 'skipped' && !noKey) fs.writeFileSync(path.join(env.IRORI_ASN_DATA, 'login_skipped'), '1')
+  // lastLogin：預先寫進 last-login.json（{ provider, account_avatar }），截「登入過」的登入畫面用
+  if (lastLogin) fs.writeFileSync(path.join(env.IRORI_ASN_DATA, 'last-login.json'), JSON.stringify(lastLogin))
   if (me) fs.writeFileSync(path.join(env.IRORI_ASN_DATA, 'asn-me.json'), JSON.stringify(me))
   if (setup) setup(env)   // 截圖前預先放好暫存家目錄裡的檔案（例如假的 ~/.claude/sessions）
   const child = spawn(exe, ['--shot', outDir], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: false, detached: process.platform !== 'win32' })
@@ -104,7 +106,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   // 第三個參數之後：exe 路徑；環境變數 ASN_SHOT_ME 可放 JSON 設定（如 {"tabDim":"engine","groupDim":"device"}）；
   // 整合模式是 {"winMode":"merged"}（欄位名是 winMode，不是 mode），再加 "shotNoChat":true 就不開任何對話、停在「開始」大幅廣告；
   // "shotAd":N 固定停在第 N 則廣告；"shotTab":"guide" 指定起始頁籤
-  const r = await runShot(out, process.argv[3] ?? defaultExe, { me: process.env.ASN_SHOT_ME ? JSON.parse(process.env.ASN_SHOT_ME) : null, avatars: process.env.ASN_SHOT_AVATARS === '1', noKey: process.env.ASN_SHOT_NOKEY === '1', login: process.env.ASN_SHOT_LOGIN || 'skipped' })
+  const r = await runShot(out, process.argv[3] ?? defaultExe, { me: process.env.ASN_SHOT_ME ? JSON.parse(process.env.ASN_SHOT_ME) : null, avatars: process.env.ASN_SHOT_AVATARS === '1', noKey: process.env.ASN_SHOT_NOKEY === '1', login: process.env.ASN_SHOT_LOGIN || 'skipped', lastLogin: process.env.ASN_SHOT_LASTLOGIN ? JSON.parse(process.env.ASN_SHOT_LASTLOGIN) : null })
   console.log(`exit=${r.code} files=${r.files.join(',')} sent=${r.relay.sent.length}`)
   if (r.log.trim()) console.log(r.log.trim())
   process.exit(r.code === 0 ? 0 : 1)

@@ -11,6 +11,7 @@ import { PENDING_HINT, PROVIDERS, SKIP_LABEL, accountView, canStart, errorText, 
 import { LoginPanel } from '../ui/lib/login-panel.mjs'
 import { defaultExe, runShot, shotCaptureSupported } from '../scripts/shot.mjs'
 import { assertShotNotBlank } from './shot-png.mjs'
+import { demoUploadUrl } from './png.mjs'
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
@@ -190,4 +191,22 @@ test('沒有金鑰的新電腦登入後：自動 node_create，把新金鑰寫�
   const home = path.join(r.home, '.irori-relay')
   assert.equal(fs.readFileSync(path.join(home, 't1-newnode01.key'), 'utf8'), 'fake-new-node-key')
   assert.equal(fs.readFileSync(path.join(home, 'node'), 'utf8'), 't1-newnode01')
+})
+
+test('上次登入：頭像進大框、只有上次用的那顆按鈕有「上次使用」，預設用 ASN 自己的標誌原檔', () => {
+  const html = read('ui/login.html'), js = read('ui/login.js')
+  assert.ok(html.includes("lastAvatar || 'img/logo.svg'"), '沒登入過用專案裡的 logo 原檔')
+  assert.ok(html.includes('v-if="lastProvider === p.key"') && html.includes('LAST_USED_LABEL'))
+  assert.ok(js.includes('info.last_login?.provider') && js.includes('info.last_login?.avatar'))
+  assert.ok(fs.existsSync(new URL('../ui/img/logo.svg', import.meta.url)))
+  assert.ok(read('src-tauri/src/lib.rs').includes('last_login: lastlogin::view(&app.data_dir)'))
+  assert.ok(read('src-tauri/src/lib.rs').includes('account::last_login_set_avatar'))
+})
+
+test('上次登入的畫面：登入過會在 Google 那顆標上次使用並顯示記住的頭像', { skip: !fs.existsSync(defaultExe) && '先執行 npm run build', timeout: 120_000 }, async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-e2e-lastlogin-'))
+  const r = await runShot(out, defaultExe, { login: 'none', lastLogin: { provider: 'google', account_avatar: demoUploadUrl() } })
+  assert.equal(r.code, 0, r.log)
+  assert.equal(r.relay.reqs.filter(q => ['account_bootstrap', 'node_claim', 'node_create'].includes(q.action)).length, 0)
+  if (shotCaptureSupported) assertShotNotBlank(path.join(out, 'tabs-login.png'), { minBytes: 4000 })
 })
