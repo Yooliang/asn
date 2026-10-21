@@ -38,6 +38,8 @@ pub fn encode_component(s: &str) -> String {
     out
 }
 
+/// 本人簽章標頭（與 supabase/functions/_shared/owner_sign.ts 的 SIGN_HEADER 同一個）
+pub const SIGN_HEADER: &str = "x-asn-user";
 pub const MAX_BODY: usize = 20000;
 /// 震動信第二行：請收到的 AI 回一個震動（與 ui/lib/text.mjs 的 NUDGE_HINT 同一句，test/logic.test.mjs 會比對）
 pub const NUDGE_HINT: &str = "想回應的話，就回一個震動：寄一封內文只有「（你的名字 傳送了一個震動）」的信，不用另外回信。";
@@ -212,9 +214,20 @@ impl Relay {
         self.api_with(action, body, Duration::from_secs(20)).await
     }
     pub async fn api_with(&self, action: &str, body: Option<Value>, timeout: Duration) -> Result<Value, String> {
+        self.api_inner(action, body, timeout, None).await
+    }
+    /// 本人簽章版：另外帶登入憑證（標頭 x-asn-user，值是 Bearer 憑證）。**只有 ASN 視窗的寄信指令會用**；
+    /// 橋、asn-cli 一律走 api／api_with（不帶憑證）。憑證不進 log、不進錯誤訊息。
+    pub async fn api_signed(&self, action: &str, body: Option<Value>, token: Option<&str>) -> Result<Value, String> {
+        self.api_inner(action, body, Duration::from_secs(20), token).await
+    }
+    async fn api_inner(&self, action: &str, body: Option<Value>, timeout: Duration, user_token: Option<&str>) -> Result<Value, String> {
         let url = format!("{}?action={}", self.base, action);
         let name = action.split('&').next().unwrap_or(action);
-        let req = if let Some(b) = body { self.client.post(&url).json(&b) } else { self.client.get(&url) };
+        let mut req = if let Some(b) = body { self.client.post(&url).json(&b) } else { self.client.get(&url) };
+        if let Some(t) = user_token.filter(|t| !t.is_empty()) {
+            req = req.header(SIGN_HEADER, format!("Bearer {t}"));
+        }
         let res = req.header("x-relay-key", &self.key).timeout(timeout).send().await.map_err(|e| format!("{name} 連線失敗：{}", e.without_url()))?;
         let status = res.status();
         let text = res.text().await.unwrap_or_default();
@@ -314,6 +327,11 @@ impl Relay {
         // 後端不擋同節點寄信；與本機視窗聊天是這個程式的主要用途，所以放行（send.mjs 也放行同節點，只擋寄給自己這個視窗）
         self.api("send", Some(b)).await
     }
+    /// ASN 視窗裡人打的字：帶登入憑證（有的話）讓後台標成本人（trust=owner）。沒有憑證＝和 send 完全一樣
+    pub async fn send_signed(&self, payload: &Value, token: Option<&str>) -> Result<Value, String> {
+        let b = build_send_body(payload, &self.window_name())?;
+        self.api_signed("send", Some(b), token).await
+    }
     pub async fn sent_status(&self, ids: &[String]) -> Result<Value, String> {
         let b = build_sent_status_body(ids)?;
         let v = self.api("sent_status", Some(b)).await?;
@@ -403,6 +421,66 @@ mod tests {
         assert!(s[1].contains(r#""status":"offline""#));
         drop(s);
         assert!(!r.report_presence("0.1.13", Duration::from_secs(5)).await, "送過離線後迴圈不再回報");
+    }
+
+    fn send_payload() -> Value {
+        json!({ "to_node": "W", "to_agent": "小職", "body": "安裝吧", "expects_reply": true })
+    }
+
+    #[tokio::test]
+    async fn 本人簽章_視窗寄信帶憑證標頭_沒憑證和原本完全一樣() {
+        let (url, seen) = fake_server(200);
+        let r = Relay::new(url, "secret-key".into(), "H".into(), "H-ASN".into());
+        r.send_signed(&send_payload(), Some("USERTOKEN-123")).await.unwrap();
+        r.send_signed(&send_payload(), None).await.unwrap();
+        r.send_signed(&send_payload(), Some("")).await.unwrap();
+        let s = seen.lock().unwrap();
+        let low = s[0].to_lowercase();
+        assert!(low.contains("x-asn-user: bearer usertoken-123") && low.contains("x-relay-key: secret-key"), "{low}");
+        assert!(!s[1].to_lowercase().contains("x-asn-user"), "沒憑證不帶標頭（登入過期也要能寄）");
+        assert!(!s[2].to_lowercase().contains("x-asn-user"), "空憑證等於沒有");
+        assert!(!s[0].contains("USERTOKEN") || s[0].contains("x-asn-user"), "憑證只出現在簽章標頭");
+    }
+
+    #[tokio::test]
+    async fn 本人簽章_一般寄信路徑send與api不帶憑證() {
+        let (url, seen) = fake_server(200);
+        let r = Relay::new(url, "k".into(), "H".into(), "H-ASN".into());
+        r.send(&send_payload()).await.unwrap();
+        r.api("send", Some(json!({ "to_node": "W", "body": "x", "expects_reply": false }))).await.unwrap();
+        let s = seen.lock().unwrap();
+        assert_eq!(s.len(), 2);
+        assert!(s.iter().all(|q| !q.to_lowercase().contains("x-asn-user")));
+    }
+
+    /// 守門：登入憑證只在 ASN 視窗的寄信指令（lib.rs）用；asn-cli、內建橋、機器橋相關程式碼一個字都不准碰。
+    /// 拿掉這個測試守的東西（例如讓 cli 呼叫 api_signed）會讓它變紅。
+    #[test]
+    fn 守門_cli與橋的原始碼不碰登入憑證() {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().map_or(false, |x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = vec![];
+        for d in ["cli", "bin", "bridge"] {
+            walk(&root.join(d), &mut files);
+        }
+        assert!(files.len() >= 10, "掃到的檔案太少，路徑可能變了：{}", files.len());
+        // 標記字串用拆開的寫法，免得這個測試檔自己（不在掃描範圍，但以防日後搬動）命中
+        let banned = [["api", "_signed"].concat(), ["send", "_signed"].concat(), ["signing", "_token"].concat(), ["SIGN", "_HEADER"].concat(), ["x-asn", "-user"].concat(), ["Auth", "State"].concat(), ["access", "_token"].concat()];
+        for f in &files {
+            let t = std::fs::read_to_string(f).unwrap();
+            for b in &banned {
+                assert!(!t.contains(b.as_str()), "{} 不該出現 {b}（登入憑證不能交給 AI 能呼叫的路徑）", f.display());
+            }
+        }
     }
 
     #[test]

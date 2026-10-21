@@ -217,6 +217,11 @@ pub fn is_uuid(s: &str) -> bool {
 /// 寄照片：檢查 → attach_init → PUT 上傳 → attach_commit → send（帶 attachment_ids）。
 /// payload 另需 to_node／to_agent／reply_to／caption（說明文字）；寄件視窗名一律由 Relay 決定。
 pub async fn send_attachment(relay: &Relay, http: &reqwest::Client, payload: &Value) -> Result<Value, String> {
+    send_attachment_signed(relay, http, payload, None).await
+}
+
+/// 同上；token＝登入憑證（有的話最後那封信標成本人）。只有 ASN 視窗的寄照片指令會帶
+pub async fn send_attachment_signed(relay: &Relay, http: &reqwest::Client, payload: &Value, token: Option<&str>) -> Result<Value, String> {
     let photo = parse_photo(payload)?;
     let caption = payload.get("caption").and_then(Value::as_str).unwrap_or("");
     // 先把寄信欄位檢查完（收件人、說明文字長度），免得白傳一張圖才發現信寄不出去
@@ -247,7 +252,7 @@ pub async fn send_attachment(relay: &Relay, http: &reqwest::Client, payload: &Va
     if let Value::Object(m) = &mut body {
         m.insert("attachment_ids".into(), json!([id]));
     }
-    let sent = relay.api("send", Some(body)).await.map_err(|e| explain(&e))?;
+    let sent = relay.api_signed("send", Some(body), token).await.map_err(|e| explain(&e))?;
     Ok(json!({ "id": sent.get("id"), "attachment_id": id, "name": photo.name, "bytes": photo.bytes.len() }))
 }
 
