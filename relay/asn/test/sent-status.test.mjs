@@ -34,3 +34,13 @@ test('statusTip：繁中標籤與時間', () => {
   assert.match(tip, /已送達/)
   assert.match(tip, /送達/)
 })
+
+test('已讀記號放在訊息標頭時間後面：送出只顯示時間、送達 ✓、已讀／已回覆 ✓✓', async () => {
+  const fs = await import('node:fs')
+  const s = fs.readFileSync(new URL('../ui/lib/chatpane.mjs', import.meta.url), 'utf8')
+  const who = s.split(/\r?\n/).find(l => l.includes('class="who"'))
+  assert.ok(who && who.includes('class="msg-st"'), '記號在 who 那一行')
+  assert.ok(who.includes("msgTier(m) !== 'sent'"), '只送出時不顯示記號')
+  assert.ok(who.includes("'✓'") && who.includes("'✓✓'"))
+  assert.equal(s.split('class="msg-st"').length - 1, 1, '訊息下方不再另外放一個')
+})
