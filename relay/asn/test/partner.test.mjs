@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { MODEL_CATALOG as sharedCatalog } from '../../shared/launcher-profiles.mjs'
+import { MODEL_CATALOG as uiCatalog } from '../ui/lib/model-catalog.mjs'
 import { defaultPartnerName, injectPendingGroups, pendingFriend, resolvePending } from '../ui/lib/partner.mjs'
 import { bumpRecentCwd, cwdChoices, normalizeLaunchPrefs } from '../ui/lib/launch-prefs.mjs'
+
+test('WebView 用 model-catalog 與 shared MODEL_CATALOG 一致', () => {
+  assert.deepEqual(uiCatalog, sharedCatalog)
+})
 
 test('預設夥伴名字會遞增', () => {
   const friends = [{ nick: 'Gemini-1' }, { nick: 'Gemini-3' }]

@@ -1,5 +1,5 @@
 // 開新夥伴：設備選單、能否在此設備開啟、顯示方式（前台／背景）。
-import { MODEL_CATALOG } from '../../../shared/launcher-profiles.mjs'
+import { MODEL_CATALOG } from './model-catalog.mjs'
 
 export const DISPLAY_MODES = [
   { key: 'foreground', label: '前台顯示' },

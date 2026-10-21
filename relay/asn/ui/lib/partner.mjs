@@ -1,8 +1,8 @@
 // 開新夥伴：對話框狀態、預設名字、啟動中列、輪詢遠端 launch 結果。
-import { MODEL_CATALOG } from '../../../shared/launcher-profiles.mjs'
+import { MODEL_CATALOG } from './model-catalog.mjs'
 import { friendId } from './roster.mjs'
 
-export { MODEL_CATALOG }
+export { MODEL_CATALOG } from './model-catalog.mjs'
 
 export function defaultPartnerName(friends, profileId) {
   const base = profileId === 'gemini' ? 'Gemini' : profileId === 'grok' ? 'Grok' : profileId === 'codex' ? 'Codex' : '夥伴'
