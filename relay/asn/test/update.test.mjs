@@ -96,8 +96,8 @@ test('更新說明：參數優先，其次 CHANGELOG 第一段，最後預設句
 })
 
 test('發版參數', () => {
-  assert.deepEqual(parseArgs([]), { dryRun: false, noBump: false, notes: '' })
-  assert.deepEqual(parseArgs(['--dry-run', '--notes', '說明']), { dryRun: true, noBump: false, notes: '說明' })
+  assert.deepEqual(parseArgs([]), { dryRun: false, noBump: false, notes: '', printNotes: false })
+  assert.deepEqual(parseArgs(['--dry-run', '--notes', '說明']), { dryRun: true, noBump: false, notes: '說明', printNotes: false })
   assert.equal(parseArgs(['--notes=甲']).notes, '甲')
   assert.equal(parseArgs(['--no-bump']).noBump, true)
   assert.throws(() => parseArgs(['--notes']), /說明文字/)

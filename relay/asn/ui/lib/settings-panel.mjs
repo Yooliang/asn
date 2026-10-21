@@ -119,6 +119,14 @@ export const SettingsPanel = {
       <template v-if="catKey === 'update'">
         <label><input type="checkbox" :checked="st.autoCheck" @change="act('autoCheck', $event.target.checked)" aria-label="自動檢查更新" /> 自動檢查更新</label>
         <div class="upd-set"><button class="aero-btn" type="button" @click="act('check-update')" :disabled="st.upd.checking || st.upd.installing">立即檢查</button> <small role="status">{{ st.upd.manual }}</small></div>
+        <section class="chlog" aria-label="版本更新記錄">
+          <b>版本更新記錄</b>
+          <p v-if="!(st.log && st.log.length)" class="chlog-none">沒有可顯示的更新記錄。</p>
+          <article v-for="e in (st.log || [])" :key="e.version" class="chlog-item" :class="e.tag">
+            <header><span class="chlog-ver">{{ e.version }}</span><span v-if="e.tag === 'current'" class="chlog-tag">目前版本</span><span v-else-if="e.tag === 'update'" class="chlog-tag upd">可更新</span><time v-if="e.date">{{ e.date }}</time></header>
+            <ul><li v-for="(l, i) in e.lines" :key="i">{{ l }}</li></ul>
+          </article>
+        </section>
       </template>
       <template v-if="catKey === 'tabs'">
         <label>分頁依
