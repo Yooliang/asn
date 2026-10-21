@@ -197,6 +197,14 @@ pub struct AccountInfo {
 }
 
 /// 後台回的名下節點是否包含這台的節點
+/// 名下「電腦」數：只算電腦本身（舊的機器節點 kind=claude，登入後建的 created_via=login-device），
+/// 雲端代理（grok）、服務（aegis）、角色（希緒）不算電腦
+pub fn computer_count(nodes: &Value) -> usize {
+    nodes.as_array().map(|a| a.iter().filter(|n| {
+        n.get("kind").and_then(Value::as_str) == Some("claude") || n.get("created_via").and_then(Value::as_str) == Some("login-device")
+    }).count()).unwrap_or(0)
+}
+
 pub fn node_in_list(nodes: &Value, node: &str) -> bool {
     nodes.as_array().map(|a| a.iter().any(|n| n.get("id").and_then(Value::as_str) == Some(node))).unwrap_or(false)
 }
@@ -280,7 +288,7 @@ pub async fn auth_account_info(app: State<'_, App>, auth: State<'_, AuthState>) 
     Ok(AccountInfo {
         email: auth.status().email,
         created: v.get("created").and_then(Value::as_bool).unwrap_or(false),
-        node_count: nodes.as_array().map(|a| a.len()).unwrap_or(0),
+        node_count: computer_count(&nodes),
         this_node_mine: !app.node.is_empty() && node_in_list(&nodes, &app.node),
     })
 }
@@ -331,6 +339,13 @@ mod tests {
         assert!(error_text("already_claimed").contains("別的帳號"));
         assert!(error_text("whatever").contains("沒有接受"));
         assert!(error_text("unauthorized").contains("重新登入"));
+    }
+
+    #[test]
+    fn 電腦數只算電腦() {
+        let v = json!([{"id":"H","kind":"claude"},{"id":"w02","kind":"claude"},{"id":"grok","kind":"grok"},{"id":"aegis","kind":"other"},{"id":"t1-ab","kind":"other","created_via":"login-device"}]);
+        assert_eq!(computer_count(&v), 3);
+        assert_eq!(computer_count(&Value::Null), 0);
     }
 
     #[test]
