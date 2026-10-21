@@ -320,9 +320,20 @@ fn open_url(url: String) -> Result<(), String> {
     spawn_browser(&url)
 }
 
+/// 用預設瀏覽器開網址：ShellExecuteW("open", url)。不用 explorer.exe——長網址或帶 & 的網址（例如登入的 OAuth 網址）
+/// 會被 explorer 當成路徑，結果開成「檔案總管」。只接受 http(s)，其他一律拒絕。
 #[cfg(windows)]
 pub(crate) fn spawn_browser(url: &str) -> Result<(), String> {
-    std::process::Command::new("explorer.exe").arg(url).spawn().map(|_| ()).map_err(|e| e.to_string())
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("只能開 http(s) 網址".into());
+    }
+    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let (verb, file) = (wide("open"), wide(url));
+    // 回傳值大於 32 表示成功（Win32 規定）
+    let r = unsafe { ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), file.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) };
+    if r as isize > 32 { Ok(()) } else { Err(format!("無法開啟瀏覽器（代碼 {}）", r as isize)) }
 }
 
 #[cfg(not(windows))]

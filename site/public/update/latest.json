@@ -1,11 +1,11 @@
 {
-  "version": "0.1.15",
-  "notes": "新增一鍵登入（Google／GitHub）；設定「帳號」整合登入狀態、Claude／Codex 帳號（以 email 辨識）與遠端切換；「更新」頁重新排版；開新夥伴失敗時會留住視窗並顯示錯誤原因。",
-  "pub_date": "2026-10-21T08:50:41.058Z",
+  "version": "0.1.16",
+  "notes": "修正按「登入」卻開成檔案總管：網址改用系統預設瀏覽器開啟。",
+  "pub_date": "2026-10-21T09:35:37.059Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjcyd2J0SkYzdVQyV1BtNjhSaTBZa1dqYytOeFU1M2JJKytGUDdweGFFMERVOEp3UDBYNGNkMDlUNVJWc1diOXZidEZ1V21SNHd4L2VLdi9SdkRWT2d3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNTcyNjQwCWZpbGU6QVNOXzAuMS4xNV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjE1Ci9nRy9MLzgydDNYTVJVeDh0VE5veForWnpSNUdRVENnWXdOWThKQkpFdWRmTGQ5VDBvOVY0SVN1WUJKZG9FanlTdk5GdWV1eTcvS3k2TmFpVDRwNURBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.15_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjdMOWgwV0orWWJOMEVmejRTSExvbDRpTHNsZ0FWNml4a21CWm5IWDYzQUpTRGFRVnNqV1lWQ3I3L000Mm1zYjNoTnFxanI3UzJBdVNpbXIzSWRMdXdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNTc1MzM2CWZpbGU6QVNOXzAuMS4xNl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjE2Cm9hRlNKejh1NXBUYlhFdGNWZHBLWG9FMnJhR1NWMDRUenk2Um1SNjFqQVQya2pPN0hUcnlZUGJYZ0l2T2pvQUgydy9GRmVHamVHNGYrbGRRYkZ4OUR3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.16_x64-setup.exe"
     }
   }
 }
