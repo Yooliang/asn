@@ -35,6 +35,12 @@ test('asn.exe 端到端（假 relay）', { skip: !fs.existsSync(defaultExe) && '
   assert.equal(r.relay.mails.find(m => m.id === U(2)).acked, true)
   assert.ok(r.oldHeartbeat && r.oldHeartbeat.name === 'H-舊名' && r.oldHeartbeat.pid === r.pid, '舊名各寫自己的心跳')
   assert.equal(r.expiredHeartbeat, false)
+  // 在線回報：啟動後回報（視窗名、版本、狀態），不送節點（節點由金鑰決定）；關閉時送一次離線；程式只連本機假後端
+  const pres = r.relay.presence
+  assert.ok(pres.length >= 2, '回報在線與離線')
+  assert.deepEqual(pres[0], { window_name: 'H-ASN', version: JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version, status: 'online' })
+  assert.ok(pres.every(p => !('node' in p)))
+  assert.equal(pres.at(-1).status, 'offline', '關閉時回報離線')
   assert.ok(r.heartbeat, '執行中有寫心跳檔')
   assert.deepEqual(Object.keys(r.heartbeat), ['pid', 'name', 't'])
   assert.equal(r.heartbeat.name, 'H-ASN')

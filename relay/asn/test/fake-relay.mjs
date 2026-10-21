@@ -11,7 +11,7 @@ export async function startFakeRelay({ node = 'T', members = [], mails = [], roo
   const st = {
     node, members, mails: [...mails], outbox: [], rooms,
     avatars: Object.fromEntries(Object.entries(avatars).map(([n, d]) => [n, { data: d, at: '2026-10-20T08:00:00Z' }])),
-    reqs: [], sent: [], launches: [],
+    reqs: [], sent: [], launches: [], presence: [], asnPresenceStatus: 0,
     launchers: { profiles: [{ id: 'claude', label: 'Claude' }], cwd_allow: ['C:/work'], max_per_hour: 6 },
     setCount: 1, port: 0, url: '',
   }
@@ -36,6 +36,14 @@ export async function startFakeRelay({ node = 'T', members = [], mails = [], roo
       const at = new Date(Date.now() + st.setCount++ * 1000).toISOString()
       st.avatars[node] = { data: v, at }
       return out(200, { ok: true, avatar_updated_at: at })
+    }
+    // ASN 回報在線（POST，節點取自金鑰）：照後端 asn_presence 的規則驗證後記下來；st.asnPresenceStatus 可設成 404 模擬後台還沒部署
+    if (action === 'asn_presence' && req.method === 'POST') {
+      if (st.asnPresenceStatus) return out(st.asnPresenceStatus, { error: 'not_found' })
+      const b = body ?? {}
+      if (typeof b.window_name !== 'string' || !/^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}(-[0-9A-Za-z.]{1,16})?$/.test(b.version ?? '') || !['online', 'away', 'busy', 'offline'].includes(b.status) || (b.psm != null && (typeof b.psm !== 'string' || [...b.psm].length > 80))) return out(400, { error: 'bad_request' })
+      st.presence.push(b)
+      return out(200, { ok: true })
     }
     if (action === 'room_list' && req.method === 'GET') return out(200, { rooms: st.rooms })
     if (action === 'inbox' && agent) return out(200, { messages: st.mails.filter(m => !m.acked && m.to_agent === agent) })

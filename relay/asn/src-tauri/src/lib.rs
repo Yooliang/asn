@@ -356,6 +356,13 @@ fn relay_attachment_reveal(dir_state: State<'_, SaveDir>) -> Result<(), String> 
     open_in_file_manager(&dir)
 }
 
+/// 前端的狀態下拉與個人訊息：記在 Rust 端，由回報迴圈每 60 秒送出；改了就立刻回報一次
+#[tauri::command]
+fn set_presence(app: State<'_, App>, status: String, psm: String) -> Result<(), String> {
+    relay_of(&app)?.set_presence(&status, &psm);
+    Ok(())
+}
+
 /// 改暱稱＝改對外名字（驗證在 names::validate_name；不合法就回錯誤字串，介面還原並提示）
 #[tauri::command]
 fn set_window_name(app: State<'_, App>, name: String) -> Result<String, String> {
@@ -406,6 +413,8 @@ pub(crate) fn cleanup(app: &AppHandle) {
         for n in r.active_names() {
             heartbeat::clear_heartbeat(&st.work_dir, &n, std::process::id());
         }
+        // 關閉時盡力回報一次離線（最多等 3 秒，失敗不擋關閉；只送一次）
+        r.report_offline_blocking(env!("CARGO_PKG_VERSION"));
     }
 }
 
@@ -473,7 +482,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, partner_console_query, partner_console_set, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, set_window_name, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, partner_console_query, partner_console_set, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, set_window_name, set_presence, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
@@ -503,6 +512,19 @@ pub fn run() {
                 // 啟動時把視窗名同步成這台設備的顯示名（別台設備的前台依設備分組時顯示它）
                 let r3 = r.clone();
                 tauri::async_runtime::spawn(async move { r3.sync_device_name().await });
+                // 在線狀態與版本：啟動後（等前端把狀態交過來）與每 60 秒回報一次；前端改狀態會叫醒立刻回報。
+                // 後台還沒部署（404／400）就停止，直到下次啟動；--shot 模式連的是本機假後端。
+                let r4 = r.clone();
+                tauri::async_runtime::spawn(async move {
+                    let every = std::time::Duration::from_millis(env_ms("IRORI_ASN_PRESENCE_MS", 60_000));
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    while r4.report_presence(env!("CARGO_PKG_VERSION"), std::time::Duration::from_secs(10)).await {
+                        tokio::select! {
+                            _ = tokio::time::sleep(every) => {}
+                            _ = r4.presence_wake.notified() => {}
+                        }
+                    }
+                });
                 let mut last: Vec<String> = vec![];
                 tauri::async_runtime::spawn(async move {
                     loop {
