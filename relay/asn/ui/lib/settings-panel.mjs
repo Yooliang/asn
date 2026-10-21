@@ -114,10 +114,10 @@ export const SettingsPanel = {
           <select class="set-sel" :value="st.closeTo" @change="act('closeTo', $event.target.value)" aria-label="關閉視窗時"><option v-for="c in CLOSE_CHOICES" :key="c" :value="c">{{ CLOSE_LABEL[c] }}</option></select>
         </label>
         <small v-if="!st.trayOk">這台電腦建不起系統匣圖示，關閉視窗一律結束程式。</small>
-        <label v-if="st.autostart.supported"><input type="checkbox" :checked="st.autostart.on" :disabled="st.autostart.busy" @change="act('autostart', $event.target.checked)" aria-label="登入時自動啟動 ASN" /> 登入時自動啟動 ASN</label>
+        <label class="chk" v-if="st.autostart.supported"><input type="checkbox" :checked="st.autostart.on" :disabled="st.autostart.busy" @change="act('autostart', $event.target.checked)" aria-label="登入時自動啟動 ASN" /> 登入時自動啟動 ASN</label>
       </template>
       <template v-if="catKey === 'update'">
-        <label><input type="checkbox" :checked="st.autoCheck" @change="act('autoCheck', $event.target.checked)" aria-label="自動檢查更新" /> 自動檢查更新</label>
+        <label class="chk"><input type="checkbox" :checked="st.autoCheck" @change="act('autoCheck', $event.target.checked)" aria-label="自動檢查更新" /> 自動檢查更新</label>
         <div class="upd-set"><button class="aero-btn" type="button" @click="act('check-update')" :disabled="st.upd.checking || st.upd.installing">立即檢查</button> <small role="status">{{ st.upd.manual }}</small></div>
         <section class="chlog" aria-label="版本更新記錄">
           <b>版本更新記錄</b>
