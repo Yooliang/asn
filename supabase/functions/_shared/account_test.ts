@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertNotEquals } from "jsr:@std/assert@1";
-import { type AccountDeps, bearerToken, cleanDisplayName, handleAccountAction, parseNodeCreate } from "./account.ts";
+import { ACCOUNT_ACTIONS, type AccountDeps, bearerToken, cleanDisplayName, handleAccountAction, parseNodeCreate } from "./account.ts";
 
 const UID = "3f2b7c1e-9a41-4c1b-8d52-0a6f6c7e1b10";
 const JWT = "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJlLXNpZ25hdHVyZQ";
@@ -153,4 +153,58 @@ Deno.test("migration：新函式只授權 service_role，資料表開 RLS", asyn
   }
   assert(sql.includes("alter table relay.account_events enable row level security;"));
   assert(!/p_key\b[^_]/.test(sql.replace(/p_key_hash/g, "")), "資料庫函式不收金鑰明文，只收雜湊");
+});
+
+Deno.test("node_update_request：登入憑證決定使用者、body 的 user 被忽略；節點格式要合格", async () => {
+  const f = fake({}, () => ({ ok: true, already: false, state: "pending" }));
+  const r = await handleAccountAction(f.deps, "node_update_request", bearer, null, { node: "w02", user: "evil", p_user: "evil" });
+  assertEquals(r.status, 200);
+  assertEquals(r.body, { ok: true, already: false, state: "pending" });
+  assertEquals(f.calls, [{ fn: "asn_update_request", args: { p_user: UID, p_node: "w02" } }]);
+  for (const bad of [null, [], {}, { node: "" }, { node: 5 }, { node: "a b" }, { node: "x".repeat(33) }]) {
+    const g = fake();
+    assertEquals((await handleAccountAction(g.deps, "node_update_request", bearer, null, bad)).status, 400, JSON.stringify(bad));
+    assertEquals(g.calls.length, 0);
+  }
+});
+
+Deno.test("node_update_request：別人的設備＝not_found 404、對方不在線 409、太頻繁 429、資料庫錯誤 500", async () => {
+  for (const [code, status] of [["not_found", 404], ["asn_offline", 409], ["rate_limited", 429]] as const) {
+    const f = fake({}, () => ({ error: code }));
+    const r = await handleAccountAction(f.deps, "node_update_request", bearer, null, { node: "w02" });
+    assertEquals(r.status, status, code);
+    assertEquals(r.body, { error: code });
+  }
+  const f = fake({ rpc: async () => ({ data: null, error: { message: "db secret" } }) });
+  const r = await handleAccountAction(f.deps, "node_update_request", bearer, null, { node: "w02" });
+  assertEquals(r.status, 500);
+  assertEquals(JSON.stringify(r.body).includes("secret"), false);
+});
+
+Deno.test("node_update_status：只傳登入使用者，回節點清單；沒憑證 401 不碰資料庫", async () => {
+  const f = fake({}, () => [{ id: "w02", update: null }, { id: "H", update: { state: "taken", detail: null, at: "2026-10-21T00:00:00Z" } }]);
+  const r = await handleAccountAction(f.deps, "node_update_status", bearer, null, { user: "evil" });
+  assertEquals(r.status, 200);
+  assertEquals((r.body.nodes as unknown[]).length, 2);
+  assertEquals(f.calls, [{ fn: "asn_update_status", args: { p_user: UID } }]);
+  const g = fake();
+  for (const action of ["node_update_request", "node_update_status"]) {
+    assertEquals((await handleAccountAction(g.deps, action, null, null, { node: "w02" })).status, 401);
+  }
+  assertEquals(g.calls.length, 0);
+});
+
+Deno.test("遠端更新：動作登錄在帳號動作、presence 回旗標、結果動作只動自己節點；migration 只授權 service_role", async () => {
+  assert(ACCOUNT_ACTIONS.has("node_update_request") && ACCOUNT_ACTIONS.has("node_update_status"));
+  const src = await Deno.readTextFile(new URL("../relay/index.ts", import.meta.url));
+  assert(src.includes("p_node: me.id, p_version: p.version") && src.includes("update_requested"), "presence 用金鑰所屬節點問更新旗標");
+  assert(/irori_relay_asn_update_result", \{ p_node: me\.id/.test(src), "結果只寫金鑰所屬的節點");
+  const sql = await Deno.readTextFile(new URL("../../migrations/20261021060000_asn_remote_update.sql", import.meta.url));
+  for (const fn of ["asn_update_request(uuid, text)", "asn_update_status(uuid)", "irori_relay_asn_update_poll(text, text)", "irori_relay_asn_update_result(text, boolean, text)"]) {
+    assert(sql.includes(`revoke all on function public.${fn} from public, anon, authenticated;`), fn);
+    assert(sql.includes(`grant execute on function public.${fn} to service_role;`), fn);
+  }
+  assert(sql.includes("alter table relay.asn_update_requests enable row level security;"));
+  assert(sql.includes("owner_user = p_user"), "只有擁有者本人的節點可請求");
+  assert(sql.includes("interval '30 minutes'"), "請求 30 分鐘過期");
 });

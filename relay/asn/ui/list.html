@@ -83,7 +83,7 @@
             <div v-for="g in shown" :key="g.key">
               <button class="g-head" type="button" @click="collapsed[g.key] = !collapsed[g.key]" @contextmenu.prevent="openDeviceMenu(g, $event)" :aria-expanded="!collapsed[g.key]">
                 <span class="box">{{ collapsed[g.key] ? '+' : '−' }}</span>{{ groupHeading(g) }}
-                <template v-if="g.kind === 'device' && asnBadge(g.node)"><span class="dot asn-dot" :class="'st-' + asnBadge(g.node).status" :title="asnBadge(g.node).tip" :aria-label="asnBadge(g.node).tip"></span><span class="asn-new" v-if="asnBadge(g.node).outdated" title="這台的 ASN 版本比你的舊">有新版</span></template>
+                <template v-if="g.kind === 'device' && asnBadge(g.node)"><span class="dot asn-dot" :class="'st-' + asnBadge(g.node).status" :title="asnBadge(g.node).tip" :aria-label="asnBadge(g.node).tip"></span><span class="asn-new" v-if="asnBadge(g.node).outdated" title="這台的 ASN 版本比你的舊">有新版</span><span class="asn-upd" :class="'tone-' + remoteBtn(g.node).tone" role="button" tabindex="0" v-if="remoteBtn(g.node)" :aria-disabled="remoteBtn(g.node).busy" :title="remoteBtn(g.node).title" @click.stop="requestRemoteUpdate(g.node)" @keydown.enter.stop.prevent="requestRemoteUpdate(g.node)" @keydown.space.stop.prevent="requestRemoteUpdate(g.node)">{{ remoteBtn(g.node).label }}</span></template>
               </button>
               <ul v-show="!collapsed[g.key]">
                 <li v-for="c in g.items" :key="c.id" @contextmenu.prevent="openBuddyMenu(c, $event)">

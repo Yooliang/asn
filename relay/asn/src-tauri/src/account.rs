@@ -18,6 +18,9 @@ pub fn error_text(code: &str) -> String {
         "tenant_inactive" => "這個帳號的收發室目前停用中",
         "bad_request" => "送出的內容不合格",
         "internal" => "後台暫時有問題，請稍後再試",
+        "not_found" => "找不到這台設備（它不在你的帳號底下）",
+        "asn_offline" => "那台電腦的 ASN 目前沒有開著，等它上線再試",
+        "rate_limited" => "剛剛更新失敗，請稍候一分鐘再試",
         _ => "後台沒有接受這個要求",
     }
     .to_string()
@@ -320,6 +323,30 @@ pub async fn bind_this(app: &App, auth: &AuthState) -> Result<BindOutcome, Strin
     Ok(BindOutcome { state: "created", note: "已替這台電腦建立節點".into() })
 }
 
+/// 遠端更新：對自己帳號下的別台設備留一筆「更新」請求（後台只認登入憑證的本人，對別人的設備一律 not_found）。
+/// 那台 ASN 下次回報在線時讀到旗標，自己用內建更新器更新。→ { ok, already, state }
+#[tauri::command]
+pub async fn update_remote_request(app: State<'_, App>, auth: State<'_, AuthState>, node: String) -> Result<Value, String> {
+    if app.shot.is_some() {
+        return Err("--shot 模式不更新".into());
+    }
+    let c = ctx()?;
+    let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
+    Ok(call(&c.client, &c.relay_url, &token, "node_update_request", None, json!({ "node": node })).await?)
+}
+
+/// 遠端更新的狀態：自己帳號下各設備 → { nodes: [{ id, update: null | { state: pending | taken | failed, detail, at } }] }。
+/// 沒登入、--shot 模式回空清單（不報錯，名單照常顯示、只是沒有「更新」鈕）。
+#[tauri::command]
+pub async fn update_remote_status(app: State<'_, App>, auth: State<'_, AuthState>) -> Result<Value, String> {
+    if app.shot.is_some() || !auth.status().signed_in {
+        return Ok(json!({ "nodes": [] }));
+    }
+    let c = ctx()?;
+    let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
+    Ok(call(&c.client, &c.relay_url, &token, "node_update_status", None, json!({})).await?)
+}
+
 #[tauri::command]
 pub async fn auth_bind(app: State<'_, App>, auth: State<'_, AuthState>, handle: AppHandle) -> Result<BindOutcome, String> {
     let out = bind_this(&app, &auth).await?;
@@ -338,6 +365,7 @@ mod tests {
         assert!(error_text("tenant_not_yours").contains("舊"));
         assert!(error_text("already_claimed").contains("別的帳號"));
         assert!(error_text("whatever").contains("沒有接受"));
+        assert!(error_text("not_found").contains("不在你的帳號") && error_text("asn_offline").contains("沒有開著") && error_text("rate_limited").contains("稍候"));
         assert!(error_text("unauthorized").contains("重新登入"));
     }
 

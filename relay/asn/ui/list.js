@@ -13,6 +13,7 @@ import { SETTING_CATS, catSummary } from './lib/settings-cats.mjs'
 import { DIMS, groupOptions, loadDims, pageTabs, withTabDim } from './lib/dims.mjs'
 import { normalizeSearchQuery, rosterShownGroups } from './lib/search.mjs'
 import { deviceAsn } from './lib/presence.mjs'
+import { POLL_MS as REMOTE_UPD_POLL_MS, mineFromStatus, remoteUpdateView } from './lib/remote-update.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
 import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatarFile, selfAvatarSrc } from './lib/avatar.mjs'
@@ -143,6 +144,27 @@ if (!info.shot) {
   setInterval(() => { if (autoCheck.value) void checkUpdate() }, CHECK_MS)
   if (autoCheck.value) void checkUpdate()
 }
+// 遠端更新：名單上別台設備顯示「有新版」時，本人（已登入、設備在同一帳號下）可按「更新」，請那台自己更新（後台留請求、
+// 對方 ASN 回報在線時取走並用內建更新器安裝，不經 AI）。remoteMine＝本人帳號下的設備與請求狀態；程式在 account.rs
+const remoteMine = ref({}), remoteErr = reactive({})
+const refreshRemoteUpd = async () => {
+  try { remoteMine.value = mineFromStatus(await invoke('update_remote_status')) } catch { /* 沒登入、後台還沒部署或連不上：保持上一次的狀態 */ }
+}
+const remoteBtn = node => remoteUpdateView(remoteMine.value, node, !!asnBadge(node)?.outdated, remoteErr[node])
+const requestRemoteUpdate = async node => {
+  if (remoteBtn(node)?.busy) return
+  remoteErr[node] = ''
+  remoteMine.value = { ...remoteMine.value, [node]: { state: 'pending', detail: '' } }   // 先顯示「已送出」，失敗再還原
+  try { await invoke('update_remote_request', { node }) } catch (e) {
+    remoteMine.value = { ...remoteMine.value, [node]: null }
+    remoteErr[node] = e?.message ?? String(e)
+  }
+  void refreshRemoteUpd()
+}
+if (!info.shot) {
+  void refreshRemoteUpd()
+  setInterval(() => void refreshRemoteUpd(), REMOTE_UPD_POLL_MS)
+}
 const dims = reactive(loadDims(savedMe))   // 分頁依（設備／廠商／狀態）與分組依；舊存檔的 groupMode 在這裡轉換
 
 // 視窗模式：分開（每位好友一扇對話視窗）／整合（一個視窗，右邊是對話分頁）。tabs／active 只在整合模式用，不存檔
@@ -165,6 +187,7 @@ const core = new AsnCore({
 
 const friends = ref([])
 const nodeOrder = ref([])
+const asnBadge = node => deviceAsn(asnMap.value[node], info.version)
 const asnMap = ref({})   // 節點 → 在線的 ASN 視窗（版本與狀態），名單設備分組標題旁的小綠點用
 const conn = ref('connecting')
 const sync = () => {
@@ -895,7 +918,7 @@ const app = createApp({
       chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuTogglePin, isChatTabPinned,
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
       STATUS, CONN_LABEL, FIXED_TABS, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, soundOn, friends, conn, shown, query, collapsed, nickErr, commitNick,
-      tab, adI, rooms, roomsErr, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge: node => deviceAsn(asnMap.value[node], info.version),
+      tab, adI, rooms, roomsErr, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,
       GUIDES, view, SETTING_CATS, catSub, PANEL_KINDS, panelTabId, panelGuide, panelTitle, openPanel, closePanel, settingsState, applySetting, pickAvatarFile,
       selfNode: info.node, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg,
       searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickLaunchDevice,

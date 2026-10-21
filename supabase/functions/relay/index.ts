@@ -248,6 +248,22 @@ Deno.serve(async (req) => {
     if (data?.error === "not_found") return json(404, { error: "not_found" });
     if (data?.error === "too_many") return json(429, { error: "too_many" });
     if (data?.error) return json(400, { error: data.error });
+    // 順便回報「本人有沒有要這台更新」（遠端更新；失敗不影響在線回報）。offline 不問
+    let update_requested = false;
+    if (p.status !== "offline") {
+      const u = await db.rpc("irori_relay_asn_update_poll", { p_node: me.id, p_version: p.version });
+      if (u.error) console.error(u.error);
+      else update_requested = u.data?.requested === true;
+    }
+    return json(200, update_requested ? { ok: true, update_requested: true } : { ok: true });
+  }
+  // 遠端更新的結果（ASN 取走請求後回報：ok＝例如已是最新版，false＝失敗與原因）。只動金鑰所屬的自己節點
+  if (action === "asn_update_result" && req.method === "POST") {
+    const b = await req.json().catch(() => null);
+    if (!b || typeof b !== "object" || typeof b.ok !== "boolean" || (b.detail != null && typeof b.detail !== "string")) return json(400, { error: "bad_request" });
+    const { data, error } = await db.rpc("irori_relay_asn_update_result", { p_node: me.id, p_ok: b.ok, p_detail: b.detail ?? null });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    if (data?.error) return json(400, { error: data.error });
     return json(200, { ok: true });
   }
   if (action === "leave" && req.method === "POST") {

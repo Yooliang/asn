@@ -655,7 +655,7 @@ pub fn run() {
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
             wins::open_chat, wins::open_panel, wins::close_panels, wins::chat_visible, wins::close_chats, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,
-            account::auth_status, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_bind, account::auth_skip_login,
+            account::auth_status, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_bind, account::auth_skip_login, account::update_remote_request, account::update_remote_status,
             tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_set, updater::update_check, updater::update_install,
         ])
         .setup(move |app| {
@@ -711,10 +711,22 @@ pub fn run() {
                 // 在線狀態與版本：啟動後（等前端把狀態交過來）與每 60 秒回報一次；前端改狀態會叫醒立刻回報。
                 // 後台還沒部署（404／400）就停止，直到下次啟動；--shot 模式連的是本機假後端。
                 let r4 = r.clone();
+                let up_handle = handle.clone();
                 tauri::async_runtime::spawn(async move {
                     let every = std::time::Duration::from_millis(env_ms("IRORI_ASN_PRESENCE_MS", 60_000));
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                     while r4.report_presence(env!("CARGO_PKG_VERSION"), std::time::Duration::from_secs(10)).await {
+                        // 本人在別台按了「更新」：用內建更新器自己下載、驗簽、安裝、重開（失敗回報原因）
+                        if r4.take_update_request() {
+                            let (h, r5) = (up_handle.clone(), r4.clone());
+                            tauri::async_runtime::spawn(async move {
+                                match updater::run_remote(&h).await {
+                                    Ok(updater::Remote::Latest) => r5.report_update_result(true, "已是最新版").await,
+                                    Ok(_) => {}
+                                    Err(e) => r5.report_update_result(false, &e).await,
+                                }
+                            });
+                        }
                         tokio::select! {
                             _ = tokio::time::sleep(every) => {}
                             _ = r4.presence_wake.notified() => {}
