@@ -1,5 +1,5 @@
 // 收發室名單（list 動作的 members）→ 好友與狀態。純函式。
-import { hueOf, initial } from './text.mjs'
+import { UNNAMED_DEVICE, hueOf, initial } from './text.mjs'
 
 export const friendId = (node, agent) => `${node}/${agent ?? ''}`
 // 收發室自己（名字結尾「收發室」）不當好友
@@ -26,7 +26,7 @@ export function buildFriends(members, { selfNode, selfName } = {}) {
       if (isRelayRoom(a.name)) continue
       if (m.id === selfNode && a.name === selfName) continue
       out.push({
-        id: friendId(m.id, a.name), node: m.id, device: typeof m.name === 'string' && m.name ? m.name : m.id, agent: a.name, nick: a.name,
+        id: friendId(m.id, a.name), node: m.id, device: typeof m.name === 'string' && m.name.trim() ? m.name.trim() : '', agent: a.name, nick: a.name,
         psm: a.cwd_label ? String(a.cwd_label) : '',
         onRoster: true, engine: a.engine ?? null, kind: typeof m.kind === 'string' && m.kind ? m.kind : null, status: statusOf(a.status),
       })
@@ -50,9 +50,9 @@ export function groupByDevice(friends, { selfNode, match = () => true } = {}) {
   for (const f of friends) {
     if (!match(f)) continue
     const key = f.node ?? ''
-    if (!groups.has(key)) groups.set(key, { key, label: f.device || key || '其他', items: [] })
+    if (!groups.has(key)) groups.set(key, { key, label: f.device || UNNAMED_DEVICE, items: [] })
     const g = groups.get(key)
-    if (f.device && g.label === key) g.label = f.device
+    if (f.device && g.label === UNNAMED_DEVICE) g.label = f.device
     g.items.push(f)
   }
   const rank = s => (s === 'offline' ? 1 : 0)

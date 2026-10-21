@@ -94,6 +94,15 @@ test('契約：轉交一封信 → deliver 收到全文與標頭（含 engine）
   assert.equal(back.to_node, 'W'); assert.equal(back.to_agent, 'W-政策'); assert.equal(back.body, '收到了'); assert.equal(back.from_agent, '假視窗甲')
 })
 
+test('契約：視窗回信自己加了「[回覆 id=… → …]」抬頭 → 橋寄回前拆掉，內文只剩正文（issue #16）', async () => {
+  const r = await runWithFakeEngine({
+    inbox: [mail(1)], windows: wins, env: { FAKE_ENGINE_REPLY: `[回覆 id=${uid(1)} → W/W-政策] 收到了` },
+    until: c => c.st.acked.has(uid(1)) && c.st.sent.some(s => s.reply_to === uid(1)),
+  })
+  const back = r.st.sent.find(s => s.reply_to === uid(1))
+  assert.equal(back.body, '收到了')
+})
+
 test('契約：onFail → 寄「轉交失敗」給寄件人並 ack', async () => {
   const r = await runWithFakeEngine({
     inbox: [mail(2)], windows: wins, env: { FAKE_ENGINE_FAIL: '假的失敗原因' },

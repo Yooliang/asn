@@ -1,4 +1,5 @@
 // 名單視窗的頁籤、群組列與廣告輪播（純邏輯，node 與瀏覽器都能跑）。
+import { UNNAMED_DEVICE } from './text.mjs'
 
 // 固定在設備頁籤之後的頁籤（群組只有在有唯讀 API 時才放，目前有 room_list）
 export const FIXED_TABS = [
@@ -27,17 +28,17 @@ export function groupHeading(g) {
 // 超過 DEVICE_TAB_MAX 個時，第 DEVICE_TAB_MAX 個起收進「更多」；本機不會被收進去。
 // 回傳 { all, visible, more }：每項 { key, label, short, unread, online, total }；more 為空代表不需要「更多」。
 export const shortOf = label => Array.from(String(label ?? '').trim())[0]?.toUpperCase() ?? '?'
-export function deviceTabs(friends, { selfNode, nodeOrder = [], max = DEVICE_TAB_MAX } = {}) {
+export function deviceTabs(friends, { selfNode, selfName = '', nodeOrder = [], max = DEVICE_TAB_MAX } = {}) {
   const by = new Map()
   const slot = (key, label) => {
-    if (!by.has(key)) by.set(key, { key, label: label || key, short: '', unread: 0, online: 0, total: 0 })
+    if (!by.has(key)) by.set(key, { key, label: label || UNNAMED_DEVICE, short: '', unread: 0, online: 0, total: 0 })
     const t = by.get(key)
-    if (label && t.label === key) t.label = label
+    if (label && t.label === UNNAMED_DEVICE) t.label = label
     return t
   }
-  slot(selfNode, '')
+  slot(selfNode, selfName)   // 本機這頁籤＝自己的視窗名；其他設備＝該設備 ASN 設的名字，沒有就「未命名設備」，不顯示節點代號
   for (const f of friends) {
-    const t = slot(f.node ?? '', f.device)
+    const t = slot(f.node ?? '', (f.node ?? '') === selfNode && selfName ? selfName : f.device)
     t.total++
     if (f.status !== 'offline') t.online++
     t.unread += f.unread || 0

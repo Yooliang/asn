@@ -160,6 +160,25 @@ test('存檔：重開後好友與對話還在（離線）', async () => {
   await b.core.stop(); await b.relay.close()
 })
 
+test('寄信狀態：sent_status 更新已送達／已讀；收到 reply_to 標已回覆', async () => {
+  const { relay, core } = await setup()
+  await core.start()
+  await core.send('W/W-政策', '你好')
+  const mine = core.logOf('W/W-政策').find(m => m.k === 'me' && m.text === '你好')
+  assert.ok(mine?.id, '寄信後對話要記 message id')
+  const row = relay.outbox.find(m => m.id === mine.id)
+  row.delivered_at = '2026-10-20T08:01:00Z'
+  await core.refreshSentStatus('test')
+  assert.equal(mine.deliveredAt, '2026-10-20T08:01:00Z')
+  row.acked_at = '2026-10-20T08:02:00Z'
+  await core.refreshSentStatus('test')
+  assert.equal(mine.ackedAt, '2026-10-20T08:02:00Z')
+  relay.mail(9, { body: '回你', reply_to: mine.id })
+  await core.pull('test')
+  assert.equal(Date.parse(mine.repliedAt), Date.parse('2026-10-20T08:00:00Z'))
+  await core.stop(); await relay.close()
+})
+
 test('後端斷線：連線狀態變 off，不丟例外', async () => {
   const { relay, core } = await setup()
   await relay.close()

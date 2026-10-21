@@ -1,11 +1,11 @@
-// 大頭貼：自動產生（決定性、左右對稱、三種顏色、不同人不同圖）、顯示規則、上傳前的格式與大小檢查、
+// 大頭貼：自動產生（DiceBear shapes，離線、決定性、不同人不同圖）、顯示規則、上傳前的格式與大小檢查、
 // AsnCore 對假 relay 的大頭貼同步與上傳。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { AVATAR_MAX_BYTES, AVATAR_MAX_CHARS, GRID, avatarFor, avatarSrc, blockieDataUrl, blockieGrid, blockieSvg, checkAvatarDataUrl, friendlyAvatarError, selfAvatarFor, selfAvatarSrc, squareCrop } from '../ui/lib/avatar.mjs'
+import { AVATAR_MAX_BYTES, AVATAR_MAX_CHARS, autoAvatarDataUrl, autoAvatarSvg, avatarFor, avatarSrc, checkAvatarDataUrl, friendlyAvatarError, selfAvatarFor, selfAvatarSrc, squareCrop } from '../ui/lib/avatar.mjs'
 import { AsnCore } from '../ui/lib/core.mjs'
 import { buildFriends, mergeFriends } from '../ui/lib/roster.mjs'
 import { startFakeRelay } from './fake-relay.mjs'
@@ -14,48 +14,53 @@ import { demoUploadUrl, pngDataUrl } from './png.mjs'
 
 const UI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ui')
 
-// ---------- 自動產生 ----------
-test('blockies：同一個種子永遠同一張（決定性）', () => {
-  assert.deepEqual(blockieGrid('W/W-政策'), blockieGrid('W/W-政策'))
-  assert.equal(blockieSvg('H/H-Irori'), blockieSvg('H/H-Irori'))
-  assert.equal(blockieDataUrl('H/H-Irori'), blockieDataUrl('H/H-Irori'))
+// ---------- 自動產生（DiceBear shapes，離線） ----------
+const PFX = 'data:image/svg+xml;charset=utf-8,'
+const svgOf = u => decodeURIComponent(u.slice(PFX.length))
+
+test('自動產生：同一個種子永遠同一張（決定性）', () => {
+  assert.equal(autoAvatarSvg('W/W-政策'), autoAvatarSvg('W/W-政策'))
+  assert.equal(autoAvatarDataUrl('H/H-Irori'), autoAvatarDataUrl('H/H-Irori'))
 })
 
-test('blockies：8×8、左右對稱、格子只有 0／1／2、三種顏色互不相同', () => {
-  for (const seed of ['W/W-政策', 'H/H-島作', 'aegis/小牧', 'G/G-研究', '', 'x']) {
-    const { colors, cells } = blockieGrid(seed)
-    assert.equal(cells.length, GRID)
-    for (const row of cells) {
-      assert.equal(row.length, GRID)
-      for (let c = 0; c < GRID; c++) { assert.equal(row[c], row[GRID - 1 - c], `${seed} 不對稱`); assert.ok([0, 1, 2].includes(row[c])) }
-    }
-    assert.equal(colors.length, 3)
-    assert.equal(new Set(colors).size, 3, `${seed} 三種顏色要不同`)
-    assert.ok(colors.every(c => /^hsl\(\d+ \d+% \d+%\)$/.test(c)))
+test('自動產生：不同 id 不同圖（300 個 id 沒有撞圖）', () => {
+  const seen = new Set()
+  for (let i = 0; i < 300; i++) seen.add(autoAvatarSvg(`N${i % 7}/視窗-${i}`))
+  assert.equal(seen.size, 300)
+  assert.notEqual(autoAvatarSvg('W/W-政策'), autoAvatarSvg('W/W-政第'))
+})
+
+test('自動產生：輸出是合法的 data:image/svg+xml，內容是 SVG 且沒有腳本、外部連結', () => {
+  for (const seed of ['W/W-政策', '', 'W/<script>alert(1)</script>']) {
+    const u = autoAvatarDataUrl(seed)
+    assert.ok(u.startsWith(PFX))
+    const svg = svgOf(u)
+    assert.ok(svg.startsWith('<svg ') && svg.endsWith('</svg>'), svg.slice(0, 40))
+    assert.ok(/viewBox="0 0 /.test(svg))
+    assert.ok(!/<script|onload|onclick|href=/i.test(svg), '不該有腳本或外部連結')
+    assert.ok(!/https?:\/\/(?!www\.w3\.org)/.test(svg.replace(/<metadata[\s\S]*?<\/metadata>/, '')), '圖本體不該引用外部網址（授權中繼資料只是文字）')
   }
 })
 
-test('blockies：不同 id 不同圖（500 個 id 沒有撞圖）', () => {
-  const seen = new Set()
-  for (let i = 0; i < 500; i++) seen.add(blockieSvg(`N${i % 7}/視窗-${i}`))
-  assert.equal(seen.size, 500)
-  assert.notEqual(blockieSvg('W/W-政策'), blockieSvg('W/W-政第'))
+test('自動產生：離線，不呼叫 fetch／XMLHttpRequest', () => {
+  const f = globalThis.fetch
+  let calls = 0
+  globalThis.fetch = () => { calls++; return Promise.reject(new Error('不該連網')) }
+  try {
+    for (let i = 0; i < 20; i++) autoAvatarDataUrl(`離線測試-${i}`)
+  } finally { globalThis.fetch = f }
+  assert.equal(calls, 0)
 })
 
-test('blockies：SVG 資料網址格式正確、內容只有色塊（不含種子文字、沒有腳本）', () => {
-  const seed = 'W/<script>alert(1)</script>'
-  const u = blockieDataUrl(seed)
-  assert.ok(u.startsWith('data:image/svg+xml;charset=utf-8,'))
-  const svg = decodeURIComponent(u.slice('data:image/svg+xml;charset=utf-8,'.length))
-  assert.ok(svg.startsWith('<svg ') && svg.endsWith('</svg>'))
-  assert.ok(!/script|alert|W\//.test(svg))
-  assert.ok(/viewBox="0 0 8 8"/.test(svg))
-})
-
-test('守門：自動產生用的是自寫的雜湊與亂數，沒有第三方程式', () => {
+test('守門：自動產生用的是打包好的 DiceBear shapes（ui/vendor/dicebear.mjs），不連 api.dicebear.com', () => {
   const src = fs.readFileSync(path.join(UI, 'lib', 'avatar.mjs'), 'utf8')
-  assert.ok(!/^\s*import\s/m.test(src), 'avatar.mjs 不該 import 任何東西')
-  assert.ok(src.includes('function fnv1a') && src.includes('function mulberry32'))
+  assert.ok(src.includes("from '../vendor/dicebear.mjs'") && src.includes('createAvatar') && src.includes('shapes'))
+  assert.ok(!/https?:\/\/|fetch\(/.test(src), 'avatar.mjs 不該有網址或 fetch')
+  const prep = fs.readFileSync(path.join(UI, '..', 'scripts', 'prep.mjs'), 'utf8')
+  assert.ok(prep.includes('esbuild') && prep.includes('dicebear.mjs'))
+  const pkg = JSON.parse(fs.readFileSync(path.join(UI, '..', 'package.json'), 'utf8'))
+  for (const n of ['@dicebear/core', '@dicebear/shapes']) assert.match(pkg.dependencies[n], /^9\.\d+\.\d+$/, `${n} 要固定 9.x 版本`)
+  assert.match(pkg.devDependencies.esbuild, /^\d+\.\d+\.\d+$/)
 })
 
 // ---------- 上傳前處理 ----------
@@ -112,7 +117,7 @@ test('顯示規則：名單上的 AI 視窗一律自動產生（就算它那台�
   const f = { id: 'W/W-政策', node: 'W', onRoster: true }
   const a = avatarFor(f, { avatars: { W: UP_W } })
   assert.deepEqual(a, { kind: 'auto', seed: 'W/W-政策' })
-  assert.equal(avatarSrc(f, { avatars: { W: UP_W } }), blockieDataUrl('W/W-政策'))
+  assert.equal(avatarSrc(f, { avatars: { W: UP_W } }), autoAvatarDataUrl('W/W-政策'))
 })
 
 test('顯示規則：不在名單上的寄件人用他那台設備上傳的圖；沒有就自動產生', () => {
@@ -134,7 +139,7 @@ test('顯示規則：別人的設備傳來不合格的圖（svg、腳本）不�
 test('顯示規則：自己＝本機節點有上傳就用上傳的，沒有就自動產生（種子＝節點/視窗名）', () => {
   assert.deepEqual(selfAvatarFor({ selfNode: 'H', windowName: 'H-ASN', avatars: { H: UP_H, W: UP_W } }), { kind: 'upload', src: UP_H })
   assert.deepEqual(selfAvatarFor({ selfNode: 'H', windowName: 'H-ASN', avatars: { W: UP_W } }), { kind: 'auto', seed: 'H/H-ASN' })
-  assert.equal(selfAvatarSrc({ selfNode: 'H', windowName: 'H-ASN', avatars: {} }), blockieDataUrl('H/H-ASN'))
+  assert.equal(selfAvatarSrc({ selfNode: 'H', windowName: 'H-ASN', avatars: {} }), autoAvatarDataUrl('H/H-ASN'))
 })
 
 test('名單：AI 視窗標 onRoster、來信對不到名單的標非名單；離線的好友記得它原本在不在名單上', () => {
@@ -231,7 +236,7 @@ test('守門：名單、對話區、提示、設定頁都接上大頭貼；上�
   assert.ok(read('list.html').includes('avOf(c)') && read('list.html').includes('meAv') && read('list.html').includes('removeAvatar'))
   assert.ok(read('lib/chatpane.mjs').includes('friendAv') && read('lib/chatpane.mjs').includes('meAv'))
   assert.ok(!/\{\{\s*(friend\.dp|initial\(me\.nick\))\s*\}\}/.test(read('lib/chatpane.mjs')), '對話區不該再用單字色塊')
-  assert.ok(read('toast.js').includes('blockieDataUrl') && read('toast.html').includes('t.src'))
+  assert.ok(read('toast.js').includes('autoAvatarDataUrl') && read('toast.html').includes('t.src'))
   assert.ok(read('lib/tauri.mjs').includes("invoke('relay_set_avatar'") && read('lib/tauri.mjs').includes("invoke('relay_avatar'"))
   assert.ok(read('list.js').includes('avatarFor(n.friend'), '提示帶的圖要照顯示規則')
   assert.ok(read('lib/avatar-canvas.mjs').includes('squareCrop') && read('lib/avatar-canvas.mjs').includes('checkAvatarDataUrl'))

@@ -67,9 +67,32 @@ export function unwrapShell(body) {
   return inner.trim()
 }
 
+// 對方視窗的 AI 有時在回信開頭自己加一行「[回覆 id=<uuid> → <節點/視窗>]」（issue #16）。顯示時只剝開頭這一行；
+// 不是這個格式（id 不是 uuid、箭頭不對、不在開頭）一律不動；整則只有抬頭時保留原文，免得變成空訊息。
+const REPLY_HEAD = /^\s*\[回覆 id=[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12} → [^\]\r\n]*\][ \t]*\r?\n?/
+export function stripReplyHead(body) {
+  const s = String(body ?? '')
+  const m = REPLY_HEAD.exec(s)
+  if (!m) return s
+  const rest = s.slice(m[0].length).trim()
+  return rest || s
+}
+
 // 好友頭像底色：由 id 算出固定色相
 export function hueOf(id) {
   let h = 0
   for (const ch of String(id)) h = (h * 31 + ch.codePointAt(0)) >>> 0
   return h % 360
+}
+
+// 前台凡要顯示「這是哪台設備」一律用該設備 ASN 的視窗名（後端 nodes.name）；沒有（例如只有收發室橋或雲端代理的設備）就顯示這個，絕不顯示節點代號
+export const UNNAMED_DEVICE = '未命名設備'
+
+// 收發室寄來的「等了一陣子仍沒收到回覆」提醒信（relay/machine/bridge.mjs noticeNoReply）：不是對話訊息。
+// 回傳 null（不是這類信）或 { mins }（mins＝內文寫的等待分鐘數，沒寫＝0，例如對方視窗已關閉）。
+export function noReplyNoticeOf(m) {
+  const body = String(m?.body ?? '')
+  if (!/收發室$/.test(String(m?.from_agent ?? '')) || !body.startsWith('[收發室] ') || !/沒有經收發室收到/.test(body)) return null
+  const n = body.match(/等了約\s*(\d+)\s*分鐘/) ?? body.match(/(\d+)\s*分鐘內/)
+  return { mins: n ? Number(n[1]) : 0 }
 }

@@ -4,6 +4,7 @@ mod agent_tools;
 mod attach;
 mod avatar;
 mod bell;
+mod claude_accounts;
 mod heartbeat;
 mod identity;
 mod launch;
@@ -11,6 +12,7 @@ mod names;
 mod relay;
 mod shot;
 mod stt;
+mod tray;
 mod tts;
 mod voicecfg;
 mod wins;
@@ -203,6 +205,11 @@ async fn relay_set_avatar(app: State<'_, App>, avatar: Option<String>) -> Result
 async fn relay_send(app: State<'_, App>, payload: Value) -> Result<Value, String> {
     relay_of(&app)?.send(&payload).await
 }
+#[tauri::command]
+async fn relay_sent_status(app: State<'_, App>, ids: Vec<String>) -> Result<Value, String> {
+    let rows = relay_of(&app)?.sent_status(&ids).await?;
+    Ok(serde_json::json!({ "status": rows }))
+}
 
 /// 寄照片：前端已壓縮成 webp；格式與大小在 attach.rs 檢查，通過才依序要上傳網址、上傳、確認、寄信（金鑰只在這裡）
 #[tauri::command]
@@ -233,7 +240,11 @@ async fn relay_attachment_save(app: State<'_, App>, id: String) -> Result<String
 /// 改暱稱＝改對外名字（驗證在 names::validate_name；不合法就回錯誤字串，介面還原並提示）
 #[tauri::command]
 fn set_window_name(app: State<'_, App>, name: String) -> Result<String, String> {
-    names::rename(relay_of(&app)?.as_ref(), &app.data_dir, &app.work_dir, &name, heartbeat::now_ms())
+    let relay = relay_of(&app)?;
+    let n = names::rename(relay.as_ref(), &app.data_dir, &app.work_dir, &name, heartbeat::now_ms())?;
+    // 改名成功後把新視窗名同步成這台設備的顯示名；失敗只記 log，不影響改名
+    tauri::async_runtime::spawn(async move { relay.sync_device_name().await });
+    Ok(n)
 }
 
 fn store_path(app: &App, name: &str) -> Result<PathBuf, String> {
@@ -281,6 +292,7 @@ fn cleanup(app: &AppHandle) {
 
 pub fn run() {
     let args: Vec<String> = std::env::args().collect();
+    let background = args.iter().any(|a| a == tray::BACKGROUND_FLAG);
     let shot = args.iter().position(|a| a == "--shot").and_then(|i| args.get(i + 1)).map(PathBuf::from);
 
     let (relay, node, init_error, work_dir, anon, base) = match identity::resolve() {
@@ -328,23 +340,40 @@ pub fn run() {
         .manage(state)
         .manage(wins::Slots::default())
         .manage(wins::Frame::default())
+        .manage(tray::CloseToTray::default())
+        .manage(tray::TrayFailed::default())
         .manage(shot::ShotState::default())
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, partner_console_query, partner_console_set, launch_prefs_get, launch_prefs_set, shot_frontend_log, open_url, set_window_name, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, partner_console_query, partner_console_set, launch_prefs_get, launch_prefs_set, shot_frontend_log, open_url, set_window_name, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
+            claude_accounts::claude_accounts_list, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
             wins::open_chat, wins::chat_visible, wins::close_chats, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot,
+            tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_set,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
             // 視窗外框設定存在前端的 asn-me.json；沒有或壞掉就是自訂外框
             let native = std::fs::read_to_string(frame_data_dir.join("asn-me.json")).map(|t| wins::native_from_saved(&t)).unwrap_or(false);
             wins::init_frame(&handle, native);
+            // 關閉行為同樣讀 asn-me.json 的 closeTo；系統匣圖示永遠建立（左鍵叫回、右鍵開啟／結束）
+            let to_tray = std::fs::read_to_string(frame_data_dir.join("asn-me.json")).map(|t| tray::close_to_tray_from_saved(&t)).unwrap_or(true);
+            tray::init(&handle, to_tray);
+            tray::build(&handle);
+            // 開機自動啟動帶 --background：只常駐系統匣，不跳出名單（系統匣建失敗就照常顯示）
+            if background && !handle.state::<tray::TrayFailed>().0.load(std::sync::atomic::Ordering::Relaxed) {
+                if let Some(w) = handle.get_webview_window("list") {
+                    let _ = w.hide();
+                }
+            }
             if let Some(r) = relay_obj.clone() {
                 // 心跳：每 30 秒寫一次（格式同 self-recv.mjs），pid 用本程式
                 let wd = work_dir.clone();
                 let r2 = r.clone();
+                // 啟動時把視窗名同步成這台設備的顯示名（別台設備的前台依設備分組時顯示它）
+                let r3 = r.clone();
+                tauri::async_runtime::spawn(async move { r3.sync_device_name().await });
                 let mut last: Vec<String> = vec![];
                 tauri::async_runtime::spawn(async move {
                     loop {
@@ -385,11 +414,17 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|w, ev| {
-            // 關掉名單視窗＝結束程式
+            // 關掉名單視窗：設定「縮到系統匣」（預設）就只藏起來，程序與收信照常；設「結束程式」才真的結束
             if w.label() == "list" {
-                if let tauri::WindowEvent::CloseRequested { .. } = ev {
-                    cleanup(w.app_handle());
-                    w.app_handle().exit(0);
+                if let tauri::WindowEvent::CloseRequested { api, .. } = ev {
+                    let h = w.app_handle();
+                    if tray::should_hide_on_close(&h.state::<tray::CloseToTray>(), &h.state::<tray::TrayFailed>()) {
+                        api.prevent_close();
+                        let _ = w.hide();
+                    } else {
+                        cleanup(h);
+                        h.exit(0);
+                    }
                 }
             }
         })

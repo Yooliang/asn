@@ -25,7 +25,7 @@ export function rosterListItems(friends, { tabDim, tabKey, query, plainText }) {
   return pageItems(friends, tabDim, tabKey, match)
 }
 
-export function rosterShownGroups(friends, { tabDim, tabKey, groupDim, selfNode, query, plainText }) {
+export function rosterShownGroups(friends, { tabDim, tabKey, groupDim, selfNode, selfName, query, plainText }) {
   const items = rosterListItems(friends, { tabDim, tabKey, query, plainText })
-  return groupItems(items, groupDim, { selfNode })
+  return groupItems(items, groupDim, { selfNode, selfName })
 }

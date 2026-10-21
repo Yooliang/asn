@@ -64,12 +64,14 @@ npm run build        # 出 asn 二進位、bundle/deb/*.deb、bundle/appimage/*.
 - 設定頁有四個彼此獨立的外觀設定（記在 asn-me.json，任意組合都有效，純邏輯在 `ui/lib/merge.mjs`）：
   - **視窗模式**：分離（預設，每位好友一扇對話視窗）／整合（一個主視窗，預設約 900×640、可調整、各模式各記各的大小；左邊是名單、右邊上方一排對話分頁，可關閉、有未讀數）。整合模式下點好友、點右下角提示都是切到那個分頁；來信震動抖整個主視窗；切換模式時已開的對話接得上（視窗關掉變分頁、分頁開成視窗）。
   - **視窗外框**：自訂（預設，ASN 自畫的 Aero 風標題列與邊框，可拖曳、拖邊緣調整大小）／Windows 原生；名單、對話、整合主視窗都照這個設定，切換即時生效（存在 `asn-me.json` 的 `frame`，沒有這欄位的舊存檔＝自訂；Rust 端開視窗時讀同一份）。
+  - **關閉視窗時**：縮到系統匣（預設）／結束程式（存在 `asn-me.json` 的 `closeTo`，沒有這欄位的舊存檔＝縮到系統匣）。縮到系統匣只把名單視窗藏起來，收信、心跳、門鈴與右下角提示照常；系統匣圖示左鍵叫回名單、右鍵選單「開啟」「結束」，提示文字帶未讀總數。系統匣建不起來（例如 Linux 缺 appindicator）時關閉一律結束。程式在 `src-tauri/src/tray.rs`。
+  - **登入時自動啟動 ASN**（預設關）：Windows 寫 `HKCU\...\Run` 的 `ASN` 值、Linux 寫 `~/.config/autostart/asn.desktop`，都帶 `--background`（開機只常駐系統匣、不跳名單）；其他系統隱藏這個開關。是否開啟以系統上的實際設定為準，不存在 `asn-me.json`。
   - **自己的大頭貼**：名單最上面點一下就開選圖（同設定頁的上傳流程），右鍵可「改回自動產生」。音效在設定頁是「開／關」下拉。
   - **頭像模式**：左（預設）／右＝對話區旁邊一欄放大頭貼（對方在上、自己在下），欄旁的小箭頭可收起／展開（狀態記住）；整合＝像 LINE，頭像跟著訊息（對方靠左帶小頭像、自己靠右），沒有側欄也沒有箭頭。
   - **文字底色**：透明（預設）／色彩（每則訊息一個底色泡泡、雙方同色）／自動（對方淡灰、自己淡綠）。
   - **工具列位置**：輸入框上方（預設，舊版 MSN 6～2009 的樣子）／輸入框下方。工具列按鈕只有圖示（內嵌 SVG，滑過看提示、`aria-label` 是中文），按表情圖示開表情選單。
   - 對話區的版面只有一份（`ui/lib/chatpane.mjs`），分離模式的對話視窗與整合模式的分頁共用。
-- 大頭貼：名單、對話區、右下角提示、自己的頭像都用圖片（`ui/lib/avatar.mjs`）。**自動產生**：依字串雜湊產生左右對稱 8×8 色塊（三種顏色，blockies 風格，自己實作、不含第三方程式），種子＝好友 id（`節點/視窗名`），每人固定、不同人不同。**設備上傳**：設定頁「大頭貼」選圖 → 前端置中裁成正方形、縮成 96×96、轉 webp（不行就 png）、≤ 32 KB → 經 Rust 指令 `relay_set_avatar`（檢查格式與大小才送，金鑰只在 Rust）上傳到收發室；也可以「移除，改回自動產生」。**顯示規則**：名單上的 AI 視窗一律自動產生；不在名單上的寄件人（例如別台的 ASN）用他那台設備上傳的圖，沒有就自動產生；自己＝本機節點有上傳就用上傳的，沒有就自動產生。`list` 只帶各節點的 `avatar_updated_at`，圖用 `GET ?action=avatar&node=<節點>` 在更新時間變了才取（收到的圖也要通過格式檢查才顯示）。
+- 大頭貼：名單、對話區、右下角提示、自己的頭像都用圖片（`ui/lib/avatar.mjs`）。**自動產生**：DiceBear 的 `shapes` 風格，在本機離線產生（官方套件 `@dicebear/core`＋`@dicebear/shapes`，固定 9.x 版；`npm run prep` 用 esbuild 打成單檔 `ui/vendor/dicebear.mjs`，不連 api.dicebear.com，`ui/vendor` 不進 git），種子＝好友 id（`節點/視窗名`），每人固定、不同人不同。**設備上傳**：設定頁「大頭貼」選圖 → 前端置中裁成正方形、縮成 96×96、轉 webp（不行就 png）、≤ 32 KB → 經 Rust 指令 `relay_set_avatar`（檢查格式與大小才送，金鑰只在 Rust）上傳到收發室；也可以「移除，改回自動產生」。**顯示規則**：名單上的 AI 視窗一律自動產生；不在名單上的寄件人（例如別台的 ASN）用他那台設備上傳的圖，沒有就自動產生；自己＝本機節點有上傳就用上傳的，沒有就自動產生。`list` 只帶各節點的 `avatar_updated_at`，圖用 `GET ?action=avatar&node=<節點>` 在更新時間變了才取（收到的圖也要通過格式檢查才顯示）。
 - 傳照片與檔案（設計見 `docs/ATTACHMENTS.md`）：對話工具列有「傳照片」（也可直接貼上圖片）與「傳送檔案」。照片先在前端縮到長邊 2048、轉 webp（≤ 5 MB）並做 256 長邊縮圖；一般檔案（pdf、txt、md、json、csv、zip、docx、xlsx、pptx，≤ 25 MB）不壓縮不轉檔。交給 Rust 指令 `relay_send_attachment`：檢查型別、大小與檔頭才依序向收發室要一次性上傳網址、上傳、確認、寄信（金鑰只在 Rust）。對話裡照片顯示縮圖（點了放大，可另存）、檔案顯示檔案卡（點了下載並另存到 `下載\ASN`）；對方的來信也一樣。保存 30 天，過期顯示「已過期」。可重用入口：`ui/lib/photo-canvas.mjs` 的 `imageFromBlob`／`fileFromBlob`＋`core.sendAttachment`。
 - 截圖與標註（issue #10）：對話工具列有「截圖」鈕（Windows 版；Linux 版沒有這個按鈕，因為擷取程式碼只在 Windows 編譯，`shot_supported` 回 false）。按下後 Rust 端（`src-tauri/src/shot.rs`）隱藏 ASN 所有可見視窗、等 260 ms 讓桌面重繪，再用 GDI（`BitBlt`＋`CAPTUREBLT`，只多開 `windows-sys` 兩個功能開關，不新增擷取套件）把整個虛擬桌面一次抓成凍結圖，然後每個螢幕開一扇置頂無邊框覆蓋視窗（`ui/shot.html`／`shot.js`）顯示該螢幕那一塊；拖曳框選、Esc 或右鍵取消、5 分鐘沒動作自動取消。框選範圍限在同一個螢幕內（不能跨螢幕邊界）。座標換算不信任 `devicePixelRatio`，用「視窗實際大小 ÷ 圖片實體像素」的比例（`ui/lib/shot.mjs`），所以 125%／150%／混合縮放的多螢幕都對得準；Rust 端再夾一次範圍。截圖以 PNG 位元組直接經 `tauri::ipc::Response` 傳（不經 JSON／base64）。框選完進入標註畫面（`ui/lib/annotator.mjs`，浮層在對話區內）：畫筆、螢光筆、矩形、箭頭、文字、馬賽克，8 種顏色、細／中／粗，復原／重做（Ctrl+Z／Ctrl+Y）、清除（可復原）；規則、堆疊與畫法在 `ui/lib/markup.mjs`。按「傳送」輸出 PNG（長邊超過 4096 先縮小）→ `imageFromBlob` 轉成 webp → `core.sendAttachment`（可加說明文字）；取消則整張丟掉。在輸入框貼上圖片也會進同一個標註畫面（不再直接送出）。測試：`test/shot.test.mjs`、`test/markup.test.mjs`、`test/shot-wiring.test.mjs`；Rust 的裁切、座標夾限、PNG 編碼與真的擷取桌面在 `shot.rs` 的單元測試。
 - 經機器橋轉回的回信若整段包著 `<cross-session-message …>…</cross-session-message>`，收信時剝掉最外層（`unwrapShell`）。
@@ -97,6 +99,13 @@ node scripts/mem.mjs             # 量閒置記憶體
 ```
 
 所有測試與截圖只連 `127.0.0.1` 的假 relay（`test/fake-relay.mjs`），不碰真實後端；`--shot` 若 `IRORI_RELAY_URL` 不是本機會直接拒絕。
+
+## 第三方授權
+
+- **Vue 3**（`vue`）：MIT。
+- **DiceBear 程式**（`@dicebear/core`、`@dicebear/shapes` 的程式碼）：MIT，Copyright (c) 2024 Florian Körner。
+- **shapes 風格的圖案設計**：DiceBear（<https://www.dicebear.com>）創作，CC0 1.0（公眾領域貢獻，<https://creativecommons.org/publicdomain/zero/1.0/>）。以上依據套件內的 `LICENSE` 與風格中繼資料（`meta.license`）。
+- **esbuild**（只用於建置，不隨程式發佈）：MIT。
 
 ## 已知限制
 

@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "ASN",
   "mainBinaryName": "asn",
-  "version": "0.1.4",
+  "version": "0.1.6",
   "identifier": "tw.irori.asn",
   "build": {
     "frontendDist": "../ui",

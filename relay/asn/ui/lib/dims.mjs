@@ -1,4 +1,5 @@
 // 名單的「分頁依」與「分組依」：三個維度（狀態／廠商／設備）的純邏輯，node 與瀏覽器都能跑。
+import { UNNAMED_DEVICE } from './text.mjs'
 import { DEVICE_TAB_MAX, deviceTabs, engineKey, engineLabel, engineRank, groupInDevice, shortOf } from './tabs.mjs'
 
 export const DIMS = [{ key: 'status', label: '狀態' }, { key: 'engine', label: '廠商' }, { key: 'device', label: '設備' }]
@@ -30,7 +31,7 @@ const sumTab = (t, friends) => { for (const f of friends) { t.total++; if (onlin
 
 // 頁籤清單 { all, visible, more }；每項 { key, label, short, dot, unread, online, total, empty }
 // 設備：本機第一、照名單順序、消失但有紀錄的排最後；廠商：Claude、Gemini、Grok、Codex、DeepSeek、其他字母、「其他」最後；狀態：固定四個。
-export function pageTabs(friends, dim, { selfNode, nodeOrder = [], max = DEVICE_TAB_MAX } = {}) {
+export function pageTabs(friends, dim, { selfNode, selfName = '', nodeOrder = [], max = DEVICE_TAB_MAX } = {}) {
   let all
   if (dim === 'status') {
     all = STATUS_LIST.map(([key, label]) => sumTab({ key, label, short: '', dot: key, unread: 0, online: 0, total: 0 }, friends.filter(f => f.status === key)))
@@ -40,7 +41,7 @@ export function pageTabs(friends, dim, { selfNode, nodeOrder = [], max = DEVICE_
     all = [...by.keys()].sort((a, b) => engineRank(a) - engineRank(b) || a.localeCompare(b))
       .map(k => sumTab({ key: k, label: engineLabel(k), short: shortOf(engineLabel(k)), dot: '', unread: 0, online: 0, total: 0 }, by.get(k)))
   } else {
-    all = deviceTabs(friends, { selfNode, nodeOrder, max }).all.map(t => ({ ...t, dot: '' }))
+    all = deviceTabs(friends, { selfNode, selfName, nodeOrder, max }).all.map(t => ({ ...t, dot: '' }))
   }
   all = all.map(t => ({ ...t, empty: t.total === 0 && !(dim === 'device' && t.key === selfNode) }))
   if (all.length <= max) return { all, visible: all, more: [] }
@@ -55,13 +56,15 @@ export function pageItems(friends, dim, key, match = () => true) {
 }
 
 // 頁籤裡的分組；設備組用設備名、本機那組排第一，其餘照設備名
-export function groupItems(items, groupDim, { selfNode } = {}) {
+export function groupItems(items, groupDim, { selfNode, selfName = '' } = {}) {
   if (groupDim === 'device') {
     const by = new Map()
     for (const f of items) {
       const k = f.node ?? ''
-      if (!by.has(k)) by.set(k, { key: `device:${k}`, kind: 'device', node: k, label: f.device || k || '其他', items: [] })
-      by.get(k).items.push(f)
+      if (!by.has(k)) by.set(k, { key: `device:${k}`, kind: 'device', node: k, label: (k === selfNode && selfName) || f.device || UNNAMED_DEVICE, items: [] })
+      const g = by.get(k)
+      if (f.device && g.label === UNNAMED_DEVICE) g.label = f.device
+      g.items.push(f)
     }
     return [...by.values()].sort((a, b) => (b.node === selfNode) - (a.node === selfNode) || a.label.localeCompare(b.label, 'zh-Hant'))
       .map(({ node, ...g }) => g)

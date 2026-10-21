@@ -7,6 +7,7 @@ import { FILE_ACCEPT, formatBytes, photoExpired, photoTitle } from './photo.mjs'
 import { attachmentFromFile, imageFromBlob } from './photo-canvas.mjs'
 import { Annotator } from './annotator.mjs'
 import { shotFileName } from './shot.mjs'
+import { statusTip, tierOf } from './sent-status.mjs'
 
 const { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } = Vue
 const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯示為離線' }
@@ -132,6 +133,8 @@ export const ChatPane = {
       })
     }
     const msgKey = (m, i) => (m.id ? String(m.id) : `${m.t}:${i}`)
+    const msgTier = m => tierOf(m)
+    const msgStatusTip = m => statusTip(m)
     const speaking = (m, i) => !!props.voice && props.voice.state.tts.key === msgKey(m, i) && props.voice.state.tts.phase !== 'idle'
     const speakTip = (m, i) => (speaking(m, i) ? '停止念出' : '念出這則訊息')
     const speak = (m, i) => props.voice && props.voice.speak(msgKey(m, i), m.text)
@@ -151,7 +154,7 @@ export const ChatPane = {
     }
     onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     const docEl = ref(null)
-    return { micClick, msgKey, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, composeHint, composeTitle, collapsed, classes, lay, arrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, composeHint, composeTitle, collapsed, classes, lay, arrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -178,6 +181,7 @@ export const ChatPane = {
                 </button>
               </div>
               <div class="m-body" :class="'tone-' + lay(m.k).tone" v-if="m.text" v-html="emo(m.text)"></div>
+              <div class="unanswered" v-if="m.k === 'me' && m.unanswered != null">{{ m.unanswered > 0 ? '超過 ' + m.unanswered + ' 分鐘未回' : '對方視窗已關閉，未回' }}</div>
               <div class="photos" v-if="m.photos && m.photos.length">
                 <template v-for="p in m.photos" :key="p.id">
                   <button v-if="p.kind === 'file'" type="button" class="filecard" :class="{ gone: expired(p) }" :title="photoTitle(p)" :aria-label="'檔案：' + photoTitle(p) + (expired(p) ? '（已過期）' : '，點一下下載並另存')" :disabled="expired(p) || !photoApi" @click="openPhoto(p)">
@@ -190,6 +194,10 @@ export const ChatPane = {
                   </button>
                 </template>
               </div>
+              <span v-if="m.k === 'me' && msgTier(m)" class="msg-st" :class="'st-' + msgTier(m)" :title="msgStatusTip(m)" :aria-label="msgStatusTip(m)">
+                <svg v-if="msgTier(m) === 'sent'" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <svg v-else viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 8.5l2.8 2.8L7.5 8.5M5.5 8.5l2.8 2.8L11.5 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
             </div>
           </div>
         </template>
