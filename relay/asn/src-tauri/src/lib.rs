@@ -404,8 +404,11 @@ async fn relay_set_avatar(app: State<'_, App>, avatar: Option<String>) -> Result
 }
 
 #[tauri::command]
-async fn relay_send(app: State<'_, App>, payload: Value) -> Result<Value, String> {
-    relay_of(&app)?.send(&payload).await
+async fn relay_send(app: State<'_, App>, auth: State<'_, auth::AuthState>, payload: Value) -> Result<Value, String> {
+    let r = relay_of(&app)?;
+    // 人在視窗裡打的字：盡力帶登入憑證讓後台標成本人（取不到就照舊寄，不擋）
+    let token = account::signing_token(&auth).await;
+    r.send_signed(&payload, token.as_deref()).await
 }
 #[tauri::command]
 async fn relay_sent_status(app: State<'_, App>, ids: Vec<String>) -> Result<Value, String> {
@@ -415,9 +418,10 @@ async fn relay_sent_status(app: State<'_, App>, ids: Vec<String>) -> Result<Valu
 
 /// 寄照片：前端已壓縮成 webp；格式與大小在 attach.rs 檢查，通過才依序要上傳網址、上傳、確認、寄信（金鑰只在這裡）
 #[tauri::command]
-async fn relay_send_attachment(app: State<'_, App>, payload: Value) -> Result<Value, String> {
+async fn relay_send_attachment(app: State<'_, App>, auth: State<'_, auth::AuthState>, payload: Value) -> Result<Value, String> {
     let r = relay_of(&app)?;
-    attach::send_attachment(&r, &reqwest::Client::new(), &payload).await
+    let token = account::signing_token(&auth).await;
+    attach::send_attachment_signed(&r, &reqwest::Client::new(), &payload, token.as_deref()).await
 }
 
 /// 放大看：換短效下載網址、下載、檢查，回前端 <img> 能直接用的 data URL（只有寄件人與收件人換得到網址）

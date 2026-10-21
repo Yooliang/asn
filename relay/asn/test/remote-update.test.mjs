@@ -71,7 +71,7 @@ test('Rust 端：命令登錄、回報迴圈取走旗標後走內建更新器、
 })
 
 test('後台 migration：沒被套用也要能讀出規則（擁有者限定、30 分鐘過期、只授權 service_role）', () => {
-  const sql = read('../../supabase/migrations/20261021060000_asn_remote_update.sql')
+  const sql = read('../../supabase/migrations/20261021070000_asn_remote_update.sql')
   assert.match(sql, /owner_user = p_user/)
   assert.match(sql, /interval '30 minutes'/)
   assert.doesNotMatch(sql, /grant execute[^;]*to (anon|authenticated|public)/)

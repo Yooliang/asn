@@ -176,3 +176,12 @@ auth.users（人）  1 ──< N  relay.nodes（設備／代理）   以 nodes.o
 ### 工作量（估計）
 
 認領碼＋帳號函式＋最小網頁（登入、名單、認領）約 1～2 週；含重設金鑰、釋出與既有節點遷移約再加 1 週。
+
+## 本人簽章（issue #118）
+
+在 ASN 視窗裡人打的字，信上標 `trust=owner`；AI 用 `send.mjs`、`asn-cli` 寄的照舊是 `member`。
+
+- 用戶端：只有 ASN 視窗的寄信指令（`relay_send`、`relay_send_attachment`）在 Rust 端盡力取登入憑證，放在標頭 `x-asn-user: Bearer <憑證>`（`Authorization` 要留給平台閘道）。取不到（沒登入、過期、逾時）就不帶，照舊寄。`asn-cli`、內建橋、機器橋不碰憑證；`relay.rs` 的守門測試掃 `cli/`、`bin/`、`bridge/` 原始碼確認。
+- 後端：節點金鑰驗證照舊必備。`send`、`room_post` 讀 `x-asn-user`，驗證過才把使用者 id 傳給資料庫函式；函式再核對「這個節點的擁有者與所屬租戶的擁有者都是這個人」才標 owner（信件記在 `relay.messages.owner_signed`，群組訊息直接記 trust）。驗證失敗一律當沒帶，不擋寄送。
+- 收件端：機器橋與內建橋原樣顯示後端給的 `trust`，不用改。
+- 部署順序：先套 migration `20261021060000_owner_signed.sql`，再部署 `relay` 函式（函式只在有簽章時才帶新參數，舊資料庫不受影響）。

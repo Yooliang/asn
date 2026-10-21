@@ -15,6 +15,7 @@ import {
   ACTIONS as ATTACH_ACTIONS, bindAttachments, handleAttachAction, prepareAttachments, type StorageDeps, withAttachments,
   withRoomAttachments,
 } from "../_shared/attachments.ts";
+import { SIGN_HEADER, signedArgs, signedUserId } from "../_shared/owner_sign.ts";
 import { handleTts, TtsLimiter, ttsVoicesResponse } from "../_shared/tts.ts";
 
 const ttsLimiter = new TtsLimiter();
@@ -356,7 +357,10 @@ Deno.serve(async (req) => {
     // 附件（選填 attachment_ids）：寄出前確認都是自己上傳、已確認、沒綁過的；寄出後綁到這封信，再敲門鈴（收信端一響就能看到附件）
     const att = await prepareAttachments({ rpc }, me.id, b.attachment_ids);
     if (!att.ok) return json(att.reply.status, att.reply.body);
+    // 本人簽章（選填）：ASN 視窗另帶登入憑證；驗過才傳使用者 id，資料庫再核對擁有關係。沒帶或驗不過＝照舊，不擋寄送
+    const signed = await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER));
     const { data, error } = await db.rpc("irori_relay_send", {
+      ...signedArgs(signed),
       p_from_node: me.id, // from_node in the body is ignored on purpose
       p_from_agent: str(b.from_agent),
       p_to_node: b.to_node,
@@ -392,6 +396,14 @@ Deno.serve(async (req) => {
     const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
     const deps = roomDeps();
+    // 本人簽章（選填，只有發言用）：驗過就在寫入訊息的資料庫呼叫多帶使用者 id；其餘 room_ 動作不讀這個標頭
+    if (action === "room_post") {
+      const signed = await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER));
+      if (signed) {
+        deps.rpc = async (fn, args) =>
+          await db.rpc(fn, fn === "irori_relay_room_post" ? { ...args, ...signedArgs(signed) } : args);
+      }
+    }
     // 群組發言帶附件：寄出前先驗；訊息寫入後、敲門鈴前綁到這則訊息
     let attIds: string[] = [];
     if (action === "room_post") {

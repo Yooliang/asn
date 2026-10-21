@@ -130,7 +130,7 @@ export async function handleAccountAction(
     return { status: 200, body: { id: d.id, key, bell_topic: d.bell_topic, rotated: d.rotated === true } };
   }
 
-  // 遠端更新（見 supabase/migrations/20261021060000_asn_remote_update.sql）：只有自己帳號名下的節點；對別人的節點一律 not_found
+  // 遠端更新（見 supabase/migrations/20261021070000_asn_remote_update.sql）：只有自己帳號名下的節點；對別人的節點一律 not_found
   if (action === "node_update_request") {
     const node = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>).node : null;
     if (typeof node !== "string" || !/^[A-Za-z0-9_-]{1,32}$/.test(node)) return { status: 400, body: { error: "bad_request" } };
