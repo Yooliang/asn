@@ -1,0 +1,60 @@
+// 發版：bump 版本 → prep → tauri build（帶更新簽章環境變數）→ 產生 latest.json → 安裝檔與 .sig 複製到官網 update 目錄。
+// 只在本機產檔，不部署（部署官網由人做）。用法：
+//   npm run release -- --notes "這版改了什麼"      正式發版（版本加一、寫進 site/public/update/）
+//   npm run release -- --dry-run                   演練：不改版本號，產物放 target/release-dry/，不碰官網目錄
+// 更新簽章私鑰在 %USERPROFILE%\.asn\updater\（asn.key、asn.key.password）；這支腳本只把「檔案路徑」（TAURI_SIGNING_PRIVATE_KEY 可填路徑）與「密碼」交給 tauri 的環境變數，
+// 不讀私鑰內容、不印密碼。環境變數 ASN_UPDATER_KEY_DIR 可改資料夾。
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import { buildLatestJson, installerName, parseArgs, pickNotes } from './release-lib.mjs'
+
+const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+const siteUpdate = path.join(root, '..', '..', 'site', 'public', 'update')
+const fail = m => { console.error(`發版中止：${m}`); process.exit(1) }
+
+let opts
+try { opts = parseArgs(process.argv.slice(2)) } catch (e) { fail(e.message) }
+
+const keyDir = process.env.ASN_UPDATER_KEY_DIR || path.join(os.homedir(), '.asn', 'updater')
+const keyFile = path.join(keyDir, 'asn.key')
+const passFile = path.join(keyDir, 'asn.key.password')
+if (!fs.existsSync(keyFile)) fail(`找不到更新簽章私鑰：${keyFile}`)
+// 密碼檔只讀進子程序的環境變數（有就帶，沒有代表金鑰沒設密碼）；不印出
+const env = { ...process.env, TAURI_SIGNING_PRIVATE_KEY: keyFile }
+if (fs.existsSync(passFile)) env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD = fs.readFileSync(passFile, 'utf8').replace(/[\r\n]+$/, '')
+
+const run = (cmd, args, extra = {}) => {
+  const r = spawnSync(cmd, args, { cwd: root, stdio: 'inherit', env, ...extra })
+  if (r.status !== 0) fail(`${path.basename(args[0] ?? cmd)} 失敗（結束碼 ${r.status}）`)
+}
+const node = process.execPath
+
+if (!opts.dryRun && !opts.noBump) run(node, ['scripts/bump.mjs'])
+const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version
+console.log(`版本 ${version}${opts.dryRun ? '（演練）' : ''}`)
+
+run(node, ['scripts/prep.mjs'])
+run(node, [path.join('node_modules', '@tauri-apps', 'cli', 'tauri.js'), 'build', '--bundles', 'nsis'])
+
+const bundle = path.join(root, 'src-tauri', 'target', 'release', 'bundle', 'nsis')
+const name = installerName(version)
+const exe = path.join(bundle, name)
+const sigFile = `${exe}.sig`
+if (!fs.existsSync(exe)) fail(`沒產出安裝檔：${exe}`)
+if (!fs.existsSync(sigFile)) fail(`沒產出簽章檔：${sigFile}（確認 tauri.conf.json 的 createUpdaterArtifacts 與簽章環境變數）`)
+
+const changelogFile = path.join(root, 'CHANGELOG.md')
+const notes = pickNotes({ arg: opts.notes, changelog: fs.existsSync(changelogFile) ? fs.readFileSync(changelogFile, 'utf8') : '', version })
+const latest = buildLatestJson({ version, notes, pubDate: new Date(), signature: fs.readFileSync(sigFile, 'utf8') })
+
+const out = opts.dryRun ? path.join(root, 'src-tauri', 'target', 'release-dry') : siteUpdate
+fs.mkdirSync(out, { recursive: true })
+fs.copyFileSync(exe, path.join(out, name))
+fs.copyFileSync(sigFile, path.join(out, `${name}.sig`))
+fs.writeFileSync(path.join(out, 'latest.json'), `${JSON.stringify(latest, null, 2)}\n`)
+console.log(`已產生：${out}`)
+console.log(`  ${name}、${name}.sig、latest.json`)
+console.log(opts.dryRun ? '演練完成：沒有改版本號，也沒有動官網目錄。' : '下一步：提交版本號與 site/public/update/latest.json，再由人部署官網（firebase deploy --only hosting，在 site/ 底下）。')
