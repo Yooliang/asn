@@ -6,7 +6,7 @@
 import { isAvatarDataUrl } from './avatar.mjs'
 import { buildFriends, cleanPsm, mergeFriends } from './roster.mjs'
 import { routeMail, stubFriend } from './routing.mjs'
-import { hasNudge, hueOf, initial, plain, stripNudge, unwrapShell } from './text.mjs'
+import { hasNudge, hueOf, initial, noReplyNoticeOf, plain, stripNudge, unwrapShell } from './text.mjs'
 import { noticeOf, expiresAt, fileMimeOf, friendlyPhotoError, normalizePhotos, stripPhotoLines } from './photo.mjs'
 
 export const MAX_BODY = 20000
@@ -118,13 +118,31 @@ export class AsnCore {
         const ids = []
         for (const m of messages) {
           if (m.to_agent !== this.windowName && !this.aliases.has(m.to_agent)) continue   // 不是寄給本視窗（或還沒過期的舊名）的絕不處理、不 ack
-          if (!this.seen.has(m.id)) { this.seen.add(m.id); await this.#incoming(m) }
+          if (!this.seen.has(m.id)) { this.seen.add(m.id); if (!this.#noReplyNotice(m)) await this.#incoming(m) }
           ids.push(m.id)
         }
         if (ids.length) { await this.flush(); await this.transport.ack(ids); ids.forEach(i => this.seen.delete(i)) }
       } while (this.again)
     } catch (e) { this.log(`pull failed (${why}): ${e.message}`); this.#setConn('off') }
     finally { this.pulling = false }
+  }
+
+  // 收發室的「等了 N 分鐘仍沒收到回覆」提醒信不是對話：不進對話、不提示、不算未讀。
+  // 有 reply_to 對得到我們自己寄出的那則（log 裡 me 訊息存了寄出時的信件 id）就在那則標 unanswered＝等待分鐘數（資料欄位，畫面只顯示小字）；對不到就丟掉。回傳 true＝已處理（呼叫端不再當一般信）
+  #noReplyNotice(m) {
+    const n = noReplyNoticeOf(m)
+    if (!n) return false
+    if (m.reply_to) {
+      for (const [fid, lg] of this.logs) {
+        const mine = lg.find(x => x.k === 'me' && x.id === m.reply_to)
+        if (!mine) continue
+        mine.unanswered = n.mins
+        this.#scheduleSave()
+        this.emit('log', fid)
+        break
+      }
+    }
+    return true
   }
 
   async #incoming(m) {
@@ -162,8 +180,9 @@ export class AsnCore {
     if (!f || !text) return { ok: false, error: '沒有內容或找不到好友' }
     if (text.length > MAX_BODY) return { ok: false, error: `內文超過 ${MAX_BODY} 字` }
     const payload = { to_node: f.node, to_agent: f.agent || undefined, body: text, reply_to: f.replyTo || undefined, from_agent: this.windowName, expects_reply: true }
-    try { await this.transport.send(payload) } catch (e) { return this.#fail(id, e) }
-    this.#log(id).push({ k: 'me', text, t: this.now() })
+    let sent
+    try { sent = await this.transport.send(payload) } catch (e) { return this.#fail(id, e) }
+    this.#log(id).push({ k: 'me', text, t: this.now(), ...(typeof sent?.id === 'string' ? { id: sent.id } : {}) })
     f.waiting = true
     f.replyTo = null
     f.known = true
@@ -193,7 +212,7 @@ export class AsnCore {
     const isFile = photo.kind === 'file'
     const mine = { id: r?.attachment_id, kind: isFile ? 'file' : 'image', name: r?.name || photo.name, mime: isFile ? fileMimeOf(r?.name || photo.name) : 'image/webp', bytes: r?.bytes ?? null, width: photo.width ?? null, height: photo.height ?? null, thumb: photo.thumb ?? null, expires_at: expiresAt(now), expired: false }
     const photos = normalizePhotos([mine])
-    this.#log(id).push({ k: 'me', text: cap, t: now, ...(photos.length ? { photos } : {}) })
+    this.#log(id).push({ k: 'me', text: cap, t: now, ...(typeof r?.id === 'string' ? { id: r.id } : {}), ...(photos.length ? { photos } : {}) })
     f.waiting = true
     f.replyTo = null
     f.known = true

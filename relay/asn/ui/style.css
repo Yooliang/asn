@@ -112,6 +112,7 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .msg.mine .m-body{color:#1b3d6e}
 .sys{color:var(--muted);font-size:12px;padding:2px 0;border-top:1px dotted var(--line);border-bottom:1px dotted var(--line)}
 .sys.nudge{color:var(--busy);font-weight:600}
+.msg .unanswered{color:var(--muted);font-size:11px;margin-top:2px}
 .emo{display:inline-block;font-size:1.15em;line-height:1;vertical-align:-1px}
 .dp-col{flex:none}
 .toolbar{position:relative;display:flex;gap:4px;padding:4px 8px;border-bottom:1px solid var(--line);background:linear-gradient(var(--panel-soft),var(--panel-head))}

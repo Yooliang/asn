@@ -82,6 +82,16 @@ pub fn build_ack_body(ids: &[String]) -> Result<Value, String> {
     Ok(json!({ "ids": ids }))
 }
 
+/// set_name 的請求內容（驗證在後端與 names::validate_name 同規則；這裡只送視窗名）
+pub fn build_set_name_body(name: &str) -> Value {
+    json!({ "name": name })
+}
+
+/// 後台還沒部署 set_name（404）或不認得（400）：靜默略過，不當錯誤
+pub fn set_name_unsupported(err: &str) -> bool {
+    err.contains("HTTP 404") || err.contains("HTTP 400")
+}
+
 impl Relay {
     pub fn new(base: String, key: String, node: String, window: String) -> Relay {
         Relay { client: reqwest::Client::new(), base, key, node, window: Mutex::new(window), old: Mutex::new(vec![]), ack_agent: Mutex::new(HashMap::new()) }
@@ -193,6 +203,21 @@ impl Relay {
         }
         Ok(json!({ "acked": acked }))
     }
+    /// 把這台設備的顯示名（nodes.name）設成目前的視窗名，名單才會讓別台設備的前台顯示這台的 ASN 視窗名。
+    /// 只改自己這個節點的 name。後台還沒部署（404／400）當作不支援、靜默略過；其他失敗只記 log 並稍後再試，不打擾使用者。
+    pub async fn sync_device_name(&self) {
+        for wait in [0u64, 30, 120] {
+            if wait > 0 {
+                tokio::time::sleep(Duration::from_secs(wait)).await;
+            }
+            match self.api("set_name", Some(build_set_name_body(&self.window_name()))).await {
+                Ok(_) => return,
+                Err(e) if set_name_unsupported(&e) => return,
+                Err(e) => eprintln!("set_name failed: {e}"),
+            }
+        }
+    }
+
     pub async fn send(&self, payload: &Value) -> Result<Value, String> {
         let b = build_send_body(payload, &self.window_name())?;
         // 後端不擋同節點寄信；與本機視窗聊天是這個程式的主要用途，所以放行（send.mjs 也放行同節點，只擋寄給自己這個視窗）
@@ -203,6 +228,15 @@ impl Relay {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 設備名同步_內容只有視窗名_後台未部署靜默() {
+        assert_eq!(build_set_name_body("小希"), json!({ "name": "小希" }));
+        assert!(set_name_unsupported("set_name HTTP 404 not_found"));
+        assert!(set_name_unsupported("set_name HTTP 400 bad_request"));
+        assert!(!set_name_unsupported("set_name HTTP 500 internal"));
+        assert!(!set_name_unsupported("set_name 連線失敗：timeout"));
+    }
 
     #[test]
     fn 編碼和_encodeuricomponent_一致() {

@@ -178,6 +178,7 @@ export const ChatPane = {
                 </button>
               </div>
               <div class="m-body" :class="'tone-' + lay(m.k).tone" v-if="m.text" v-html="emo(m.text)"></div>
+              <div class="unanswered" v-if="m.k === 'me' && m.unanswered != null">{{ m.unanswered > 0 ? '超過 ' + m.unanswered + ' 分鐘未回' : '對方視窗已關閉，未回' }}</div>
               <div class="photos" v-if="m.photos && m.photos.length">
                 <template v-for="p in m.photos" :key="p.id">
                   <button v-if="p.kind === 'file'" type="button" class="filecard" :class="{ gone: expired(p) }" :title="photoTitle(p)" :aria-label="'檔案：' + photoTitle(p) + (expired(p) ? '（已過期）' : '，點一下下載並另存')" :disabled="expired(p) || !photoApi" @click="openPhoto(p)">

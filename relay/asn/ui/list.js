@@ -178,7 +178,7 @@ await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 watch([me, soundOn, frame, dims, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, sound: soundOn.value, frame: frame.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged }); sync() }, { deep: true })
 // 設定頁改「分頁依」：分組若撞到自動換成剩下兩個裡的第一個
 const setTabDim = v => Object.assign(dims, withTabDim(dims, v))
-const pages = computed(() => pageTabs(friends.value, dims.tabDim, { selfNode: info.node, nodeOrder: nodeOrder.value }))
+const pages = computed(() => pageTabs(friends.value, dims.tabDim, { selfNode: info.node, selfName: info.window_name, nodeOrder: nodeOrder.value }))
 
 // 起始頁籤：平常是設備維度的本機；--shot 可用設定檔的 shotTab 指定固定頁籤（已拿掉的「通知」或任何不認得的值都忽略）
 const startTab = info.shot ? normalizeTab(savedMe.shotTab) : ''
@@ -208,7 +208,7 @@ const app = createApp({
     const shown = computed(() => {
       if (!isDevice.value) return []
       return rosterShownGroups(friends.value, {
-        tabDim: dims.tabDim, tabKey: tab.value, groupDim: dims.groupDim, selfNode: info.node, query: query.value, plainText: plain,
+        tabDim: dims.tabDim, tabKey: tab.value, groupDim: dims.groupDim, selfNode: info.node, selfName: info.window_name, query: query.value, plainText: plain,
       })
     })
     const emptyText = computed(() => (normalizeSearchQuery(query.value) ? '沒有符合的聯絡人。' : conn.value !== 'on' ? '還沒連上收發室。' : '這一頁目前沒有視窗。'))
