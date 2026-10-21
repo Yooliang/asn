@@ -35,6 +35,16 @@ export function headReply(text) {
   return m ? m[1] : null
 }
 
+// 視窗用文字回信時，偶爾自己在開頭加一行「[回覆 id=<信件id> → <節點>[/<視窗>]]」（任何程式與說明都沒有教這個格式，
+// 是模型照來信抬頭仿的；收發室轉交員又被要求原文逐字不刪標頭，所以原封不動送到寄件人那邊，issue #16）。
+// 這裡把它拆掉：回傳 { id, body }。沒有這行就回傳 { id: null, body: 原文 }。編號只當「回的是哪一封」的提示，不改任何信任判斷。
+export const REPLY_HEAD_RE = /^\s*\[回覆 id=([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}) → [^\]\r\n]*\][ \t]*\r?\n?/
+export function stripReplyHead(text) {
+  const s = String(text ?? '')
+  const m = REPLY_HEAD_RE.exec(s)
+  return m ? { id: m[1].toLowerCase(), body: s.slice(m[0].length).trim() } : { id: null, body: s }
+}
+
 // 代寄：視窗傳給收發室的訊息第一行
 //   [RELAY 寄信] to=<節點>[/<視窗>] [re=<信件id>] reply=yes|no   （「[RELAY 回信]」同義；re 與 reply 順序不拘）
 // 同一行抬頭後面若還接著別的字，當成內文的開頭（原本就是這樣）
