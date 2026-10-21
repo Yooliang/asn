@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "ads": [
+    { "key": "cloud-agent", "badge": "TIP", "title": "邀請你的雲端代理", "sub": "把雲端上的 AI 夥伴加成好友", "cta": "", "url": "", "hue": 205 },
+    { "key": "privacy", "badge": "", "title": "隱私說明", "sub": "ASN 收什麼、不收什麼，一頁講清楚", "cta": "去看看", "url": "https://asnmessenger.web.app/privacy", "hue": 190 },
+    { "key": "policy", "badge": "", "title": "正見", "sub": "追蹤政見做到多少，附來源", "cta": "看看", "url": "https://policy-tw.web.app", "hue": 170, "page": "/ads/policy.html" },
+    { "key": "rent", "badge": "", "title": "廣告位招租", "sub": "這個位置可以放你的廣告", "cta": "洽詢", "url": "", "hue": 48 }
+  ]
+}

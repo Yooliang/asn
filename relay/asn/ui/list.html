@@ -135,12 +135,15 @@
       <span class="conn"><span class="dot" :class="conn === 'on' ? 'st-online' : conn === 'off' ? 'st-busy' : 'st-away'"></span>{{ CONN_LABEL[conn] }}</span>
     </div>
     <div class="ad-wrap">
-      <button v-for="(a, i) in ADS" :key="a.key" v-show="i === adI" class="ad" :class="{ link: a.url }" :style="{ '--h': a.hue }" :disabled="!a.url" :aria-label="a.title + '：' + a.sub" @click="openAd(a)">
-        <span class="ad-new" v-if="a.badge">{{ a.badge }}</span>
-        <span class="ad-art"><i></i><i></i><i></i></span>
-        <span class="ad-tx"><b>{{ a.title }}</b><small>{{ a.sub }}</small><em v-if="a.cta">{{ a.cta }} ›</em></span>
+      <button v-for="(a, i) in ads" :key="a.key" v-show="i === adI" class="ad" :class="{ link: a.url }" :style="{ '--h': a.hue }" :disabled="!a.url" :aria-label="a.title + '：' + a.sub" @click="openAd(a)">
+        <img v-if="adImageSrc(a)" class="ad-img" :src="adImageSrc(a)" alt="" draggable="false">
+        <template v-else>
+          <span class="ad-new" v-if="a.badge">{{ a.badge }}</span>
+          <span class="ad-art"><i></i><i></i><i></i></span>
+          <span class="ad-tx"><b>{{ a.title }}</b><small>{{ a.sub }}</small><em v-if="a.cta">{{ a.cta }} ›</em></span>
+        </template>
       </button>
-      <span class="ad-dots"><i v-for="(a, i) in ADS" :key="a.key" :class="{ on: i === adI }"></i></span>
+      <span class="ad-dots"><i v-for="(a, i) in ads" :key="a.key" :class="{ on: i === adI }"></i></span>
     </div>
   </div>
   <section class="chat-area" v-if="ui.mode === 'merged'" aria-label="對話">
@@ -182,18 +185,23 @@
       </template>
       <div class="pane home-pane" v-if="view === 'home'">
         <div class="hero" role="region" aria-label="宣傳" aria-roledescription="輪播">
-          <section v-for="(a, i) in ADS" :key="a.key" v-show="i === adI" class="hero-slide" :style="{ '--h': a.hue }" :aria-label="a.title + '：' + a.sub">
-            <span class="hero-new" v-if="a.badge">{{ a.badge }}</span>
-            <div class="hero-tx">
+          <section v-for="(a, i) in ads" :key="a.key" v-show="i === adI" class="hero-slide" :style="{ '--h': a.hue }" :aria-label="a.title + '：' + a.sub">
+            <template v-if="pageSrc(a)">
+              <!-- 官網的廣告大頁：sandbox 不給 same-origin、top-navigation、forms、popups、scripts；不送 referrer、不開任何權限；pointer-events 關掉＝頁面裡的連結點不到。要導流用下面 ASN 自己的按鈕 -->
+              <iframe v-if="i === adI" class="hero-page" :src="pageSrc(a)" sandbox="" referrerpolicy="no-referrer" allow="" loading="eager" tabindex="-1" :title="a.title" @load="pageDone(a)" @error="pageBroken(a)"></iframe>
+              <button v-if="a.cta" class="hero-cta hero-page-cta" type="button" :disabled="!a.url" :class="{ link: a.url }" @click="openAd(a)">{{ a.cta }} ›</button>
+            </template>
+            <span class="hero-new" v-if="!pageSrc(a) && a.badge">{{ a.badge }}</span>
+            <div class="hero-tx" v-if="!pageSrc(a)">
               <h2>{{ a.title }}</h2>
               <p>{{ a.sub }}</p>
               <button class="hero-cta" type="button" :disabled="!a.url" :class="{ link: a.url }" @click="openAd(a)">{{ a.cta }} ›</button>
             </div>
-            <div class="hero-art" aria-hidden="true"><i></i><i></i><i></i></div>
+            <div class="hero-art" v-if="!pageSrc(a)" aria-hidden="true"><i></i><i></i><i></i></div>
           </section>
           <button class="hero-nav prev" type="button" aria-label="上一則" @click="stepAd(-1)">‹</button>
           <button class="hero-nav next" type="button" aria-label="下一則" @click="stepAd(1)">›</button>
-          <div class="hero-dots"><button v-for="(a, i) in ADS" :key="a.key" type="button" :class="{ on: i === adI }" :aria-label="'第 ' + (i + 1) + ' 則：' + a.title" @click="jumpAd(i)"></button></div>
+          <div class="hero-dots"><button v-for="(a, i) in ads" :key="a.key" type="button" :class="{ on: i === adI }" :aria-label="'第 ' + (i + 1) + ' 則：' + a.title" @click="jumpAd(i)"></button></div>
         </div>
       </div>
     </div>

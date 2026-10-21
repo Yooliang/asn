@@ -65,8 +65,23 @@ npm run build        # 出 asn 二進位、bundle/deb/*.deb、bundle/appimage/*.
   - **跨視窗同步**：設定的狀態與所有動作都留在名單視窗的樞紐（`list.js`），金鑰與存檔不搬到別的視窗。設定視窗只用事件溝通——`asn:panel`（顯示哪一篇／哪一類）、`asn:settings`（設定快照）由樞紐推出去，視窗用 `asn:set`（`{ op, value }`）把改動送回樞紐的 `applySetting`；改了立即生效於名單視窗並寫進存檔。整合模式的分頁用同一個元件（`ui/lib/settings-panel.mjs`），同一個 `applySetting`。
   - 切換視窗模式時，開著的指引、設定跟著轉（分離視窗→分頁、分頁→視窗），內容不變。
 - 通知頁籤已拿掉；右下角提示視窗與名單上的未讀數照舊。
-- 整合模式沒開任何對話時，右邊「開始」分頁是大幅廣告輪播（同一份 `ADS` 資料，大標題、標語、按鈕、左右鍵與小圓點、6 秒自動換，純 CSS 繪製）；招租沒有聯絡網址時按鈕不可點。
-- 底部廣告：Irori 自家宣傳輪播（`ui/lib/tabs.mjs` 的 `ADS`），可點的網址只有 `lib.rs` 的 `OPEN_ALLOW` 三個（`open_url` 指令比對完全相同才開）。
+- 整合模式沒開任何對話時，右邊「開始」分頁是大幅廣告輪播（跟底部小廣告同一份資料，大標題、標語、按鈕、左右鍵與小圓點、6 秒自動換）；每則可以改用官網上的網頁（`page`），沒有就用純 CSS 畫的樣板；招租沒有聯絡網址時按鈕不可點。
+- 廣告來源與安全：見下面「廣告輪播」一節。
+
+### 廣告輪播
+
+- **來源**：官網 `site/public/ads.json`（線上網址 `https://asnmessenger.web.app/ads.json`）。ASN 啟動時抓一次、之後每 6 小時一次，由 Rust 的 `ads_fetch` 發出請求（`src-tauri/src/ads.rs`）：只准 https、不跟轉址、5 秒逾時、64 KB 上限；逐則驗證欄位，不合格的那一則丟掉，過期或還沒開始的也過濾掉。整份抓不到就用打包在 `ui/lib/tabs.mjs` 的 `ADS`（備用，key 集合與 `ads.json` 一致，有守門測試）。`--shot` 模式不上網，一律用備用。
+- **怎麼改**：只改 `site/public/ads.json` 然後部署官網，使用者最久 6 小時後看到（官網對它設 `max-age=300`）。要同步改 `tabs.mjs` 的 `ADS` 備用（至少 key 要一致）。
+- **欄位**（`version` 目前是 1，最多 10 則，key 不可重複）：
+  - `key`：英數與 `-` `_`，32 字內；`title`：30 字內；`sub`：60 字內（畫面上實際顯示約 24 字，太長會被截）；`badge`：選填，6 字內（例如 `TIP`、`NEW`）；`cta`：按鈕字，6 字內，有 `url` 就必填；`url`：選填，點了用系統瀏覽器開；`hue`：0–360 的色相。
+  - `start`、`end`：選填，`YYYY-MM-DD`（UTC，含當天）。
+  - `smallImage`：選填，小輪播（名單底部）用的圖，官網路徑如 `/ads/<key>-small.webp`，只收 png／webp，300 KB 內；建議 **336×54（2 倍圖 672×108）**，左右留邊距，右下角有輪播小圓點。Rust 端下載、看檔頭確認真的是 png／webp 後轉成 data URI 給畫面（所以 CSP 的 `img-src` 不用放寬）；沒有、抓不到、太大、格式不對都退回樣板。
+  - `page`：選填，大幅輪播用的網頁，官網路徑如 `/ads/<key>.html`（只准 `/ads/` 底下、小寫英數與 `-` `_` `.` `/`、副檔名 `.html`）；Rust 端組成 `https://asnmessenger.web.app/ads/…` 後交給畫面。5 秒內沒載入完或載入失敗就退回樣板。
+- **做一則新廣告**：(1) 在 `ads.json` 加一則；(2) 要大頁就放 `site/public/ads/<key>.html`（範例：`ads/policy.html`），要小圖就放 `site/public/ads/<key>-small.webp`；(3) 備用 `ADS` 也加上同 key；(4) 跑測試；(5) 部署官網。
+- **大頁的限制**：靜態單檔，樣式寫在頁內，動畫只用 CSS；**不能引用外部資源**（官網對 `/ads/**` 的 CSP 是 `default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'none'`，圖片只能 data URI）；不能有腳本。ASN 用 `<iframe sandbox="">`（不給 same-origin、scripts、top-navigation、forms、popups）、`referrerpolicy="no-referrer"`、`allow=""`，而且 iframe 不接收滑鼠，**頁面裡的連結點不到**——要導流請用 `cta` 與 `url`，ASN 會在頁面下方放自己的按鈕，經網域允許清單開外部瀏覽器。頁面大小隨視窗變，請用 `vw`／`vmin`／`clamp()`，建議以 16:9 到 4:3 都好看為準，底部留 58px 給按鈕與小圓點。
+- **嵌入的來源**：Tauri 2 在 Windows 的網頁來源是 `http://tauri.localhost`（Linux／macOS 是 `tauri://localhost`），官網只對 `/ads/**` 的 `frame-ancestors` 放行這兩個，其餘路徑仍是 `X-Frame-Options: DENY`＋`frame-ancestors 'none'`。`tauri.conf.json` 的 CSP 只加了 `frame-src https://asnmessenger.web.app`。
+- **網域允許清單**：廣告的 `url` 與 `open_url` 指令共用 `ads::url_allowed`——只准 https、不能帶帳號密碼、主機要是網域名稱（IP 位址一律不行）且完全等於清單內的一項（子網域不算）、埠只能是預設的 443。目前清單（`ads.rs` 的 `ALLOWED_HOSTS`）：`asnmessenger.web.app`、`policy-tw.web.app`。要加網域就改這一處並補測試。
+- **純文字顯示**：線上內容一律用 `{{ }}` 當純文字，不進 `v-html`；圖片只收 Rust 轉好的 png／webp data URI。
 - 設定頁有四個彼此獨立的外觀設定（記在 asn-me.json，任意組合都有效，純邏輯在 `ui/lib/merge.mjs`）：
   - **視窗模式**：分離（預設，每位好友一扇對話視窗）／整合（一個主視窗，預設約 900×640、可調整、各模式各記各的大小；左邊是名單、右邊上方一排對話分頁，可關閉、有未讀數）。整合模式下點好友、點右下角提示都是切到那個分頁；來信震動抖整個主視窗；切換模式時已開的對話接得上（視窗關掉變分頁、分頁開成視窗）。
   - **視窗外框**：自訂（預設，ASN 自畫的 Aero 風標題列與邊框，可拖曳、拖邊緣調整大小）／Windows 原生；名單、對話、整合主視窗都照這個設定，切換即時生效（存在 `asn-me.json` 的 `frame`，沒有這欄位的舊存檔＝自訂；Rust 端開視窗時讀同一份）。

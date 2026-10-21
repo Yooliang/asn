@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { AD_CONTACT_URL, ADS, AD_MS, DEVICE_TAB_MAX, FIXED_TABS, adClickable, goAd, normalizeTab, openAdWith, prevAd, adUrls, deviceItems, deviceTabs, groupHeading, groupRows, moreUnread, nextAd, shortOf, statusNote } from '../ui/lib/tabs.mjs'
+import { AD_CONTACT_URL, ADS, AD_MS, AD_PAGE_MS, adImageSrc, adPageUrl, pickAds, DEVICE_TAB_MAX, FIXED_TABS, adClickable, goAd, normalizeTab, openAdWith, prevAd, adUrls, deviceItems, deviceTabs, groupHeading, groupRows, moreUnread, nextAd, shortOf, statusNote } from '../ui/lib/tabs.mjs'
 
 const F = (node, device, nick, status = 'online', unread = 0) => ({ id: `${node}/${nick}`, node, device, nick, status, unread })
 
@@ -107,7 +107,7 @@ test('大幅廣告輪播：上一則／下一則循環、小圓點跳到指定�
   assert.equal(goAd(99), ADS.length - 1)
   assert.equal(goAd(-5), 0)
   assert.equal(goAd('x'), 0)
-  assert.deepEqual(ADS.map(a => [a.key, adClickable(a)]), [['shio', true], ['policy', true], ['islandmade', true], ['devlog', true], ['rent', false]])
+  assert.deepEqual(ADS.map(a => [a.key, adClickable(a)]), [['cloud-agent', false], ['privacy', true], ['policy', true], ['rent', false]])
   assert.equal(adClickable(undefined), false)
   // 大幅廣告與底部小廣告用同一份資料、同一個點擊函式；招租沒網址就不呼叫 open
   const opened = []
@@ -115,14 +115,14 @@ test('大幅廣告輪播：上一則／下一則循環、小圓點跳到指定�
   assert.deepEqual(opened, adUrls())
 })
 
-test('廣告輪播：循環一圈回到起點；連結只有 repo 文件寫明的網址；文案不含英文品牌', () => {
+test('廣告輪播：循環一圈回到起點；連結只有官網與正見的網址；文案不含英文品牌', () => {
   let i = 0
   const seq = []
   for (let k = 0; k < ADS.length; k++) { seq.push(i); i = nextAd(i) }
   assert.deepEqual(seq, ADS.map((_, k) => k))
   assert.equal(i, 0)
-  assert.deepEqual(adUrls(), ['https://irori.web.app/', 'https://policy-tw.web.app', 'https://islandmade.app', 'https://irori.web.app/dev/shots/'])
-  for (const a of ADS) assert.ok(!/msn|messenger|microsoft/i.test(JSON.stringify(a)), a.key)
+  assert.deepEqual(adUrls(), ['https://asnmessenger.web.app/privacy', 'https://policy-tw.web.app'])
+  for (const a of ADS) assert.ok(!/msn|messenger|microsoft/i.test(JSON.stringify([a.title, a.sub, a.cta, a.badge])), a.key)
   assert.equal(nextAd(0, 0), 0)
 })
 
@@ -146,31 +146,129 @@ test('statusOf：waiting 之類＝暫離', async () => {
   assert.equal(statusOf('working'), 'busy')
 })
 
-test('廣告：輪播順序＝希緒、正見、島作、開發日誌、招租；Android 那則已拿掉；每則一句標語加一個短按鈕字', () => {
-  assert.deepEqual(ADS.map(a => a.key), ['shio', 'policy', 'islandmade', 'devlog', 'rent'])
+test('廣告：打包備用的輪播順序與內容；每則一句標語加一個短按鈕字；沒有希緒、Irori 的宣傳', () => {
+  assert.deepEqual(ADS.map(a => a.key), ['cloud-agent', 'privacy', 'policy', 'rent'])
   assert.ok(!ADS.some(a => /android/i.test(JSON.stringify(a))))
   for (const a of ADS) {
     assert.ok(a.title && a.sub && !/\n/.test(a.sub) && a.sub.length <= 24, `${a.key} 標語要一句`)
-    assert.ok(a.cta && a.cta.length <= 3, `${a.key} 按鈕字要短`)
+    assert.ok(a.cta.length <= 3, `${a.key} 按鈕字要短`)
   }
-  assert.equal(ADS[0].url, 'https://irori.web.app/')
-  assert.equal(ADS[1].url, 'https://policy-tw.web.app')
-  assert.equal(ADS[2].url, 'https://islandmade.app')
-  assert.equal(ADS[3].url, 'https://irori.web.app/dev/shots/')
+  assert.equal(ADS[1].url, 'https://asnmessenger.web.app/privacy')
+  assert.equal(ADS[2].url, 'https://policy-tw.web.app')
   let i = 0; const seq = []
   for (let k = 0; k < ADS.length * 2; k++) { seq.push(ADS[i].key); i = nextAd(i) }
-  assert.deepEqual(seq, ['shio', 'policy', 'islandmade', 'devlog', 'rent', 'shio', 'policy', 'islandmade', 'devlog', 'rent'])
+  assert.deepEqual(seq, ['cloud-agent', 'privacy', 'policy', 'rent', 'cloud-agent', 'privacy', 'policy', 'rent'])
   assert.ok(AD_MS >= 3000)
 })
 
-test('廣告：每個網址都在 Rust 端 OPEN_ALLOW 白名單裡，白名單裡也沒有多餘的（兩邊一致）', () => {
-  const rs = fs.readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8')
-  const block = /pub const OPEN_ALLOW[^=]*=\s*\[([\s\S]*?)\];/.exec(rs)[1]
-  const allow = [...block.matchAll(/"([^"]+)"/g)].map(m => m[1])
-  const used = [...adUrls(), ...(AD_CONTACT_URL ? [AD_CONTACT_URL] : [])]
-  for (const u of used) assert.ok(allow.includes(u), `${u} 沒列在 OPEN_ALLOW`)
-  for (const u of allow) assert.ok(used.includes(u), `OPEN_ALLOW 有多餘的 ${u}`)
-  assert.ok(allow.every(u => u.startsWith('https://')))
+const siteAds = () => JSON.parse(fs.readFileSync(new URL('../../../site/public/ads.json', import.meta.url), 'utf8'))
+
+test('守門：打包備用 ADS 與官網 site/public/ads.json 的 key 集合一致、不含「希緒」「Irori」', () => {
+  const online = siteAds()
+  assert.equal(online.version, 1)
+  assert.deepEqual(online.ads.map(a => a.key), ADS.map(a => a.key))
+  for (const [name, text] of [['官網 ads.json', JSON.stringify(online)], ['打包 ADS', JSON.stringify(ADS)]]) {
+    assert.ok(!/希緒|irori/i.test(text), `${name} 不該有希緒或 Irori`)
+  }
+  // 官網與備用的網址也一致，且全都是 https
+  for (const a of online.ads) {
+    const b = ADS.find(x => x.key === a.key)
+    assert.equal(a.url, b.url, a.key)
+    assert.ok(a.url === '' || a.url.startsWith('https://'), a.key)
+  }
+})
+
+test('守門：Rust 端的網域允許清單只有官網與正見，沒有 Irori；廣告網址的主機都在清單內', () => {
+  const rs = fs.readFileSync(new URL('../src-tauri/src/ads.rs', import.meta.url), 'utf8')
+  const hosts = [...(/ALLOWED_HOSTS: \[&str; \d+\] = \[([^\]]*)\]/.exec(rs)?.[1] ?? '').matchAll(/"([^"]+)"/g)].map(m => m[1])
+  assert.deepEqual(hosts, ['asnmessenger.web.app', 'policy-tw.web.app'])
+  for (const u of [...adUrls(), ...siteAds().ads.map(a => a.url).filter(Boolean)]) assert.ok(hosts.includes(new URL(u).hostname), `${u} 不在允許清單`)
+  const lib = fs.readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8')
+  assert.ok(lib.includes('ads::url_allowed(&url)'), 'open_url 要走網域允許清單')
+  assert.ok(!/OPEN_ALLOW/.test(lib))
+})
+
+test('廣告網頁／圖片的前端檢查：只認官網 /ads/ 底下的 https 網址與 png／webp data URI', () => {
+  assert.equal(adPageUrl({ page: 'https://asnmessenger.web.app/ads/policy.html' }), 'https://asnmessenger.web.app/ads/policy.html')
+  for (const bad of ['http://asnmessenger.web.app/ads/x.html', 'https://evil.example/ads/x.html', 'https://asnmessenger.web.app/other/x.html', 'https://asnmessenger.web.app.evil.example/ads/x.html', 'https://asnmessenger.web.app/ads/x.html" onload="x', 'javascript:alert(1)', '', undefined, 5]) {
+    assert.equal(adPageUrl({ page: bad }), '', String(bad))
+  }
+  assert.equal(adPageUrl(undefined), '')
+  assert.equal(adImageSrc({ smallImage: 'data:image/png;base64,iVBORw0KGgo=' }), 'data:image/png;base64,iVBORw0KGgo=')
+  assert.equal(adImageSrc({ smallImage: 'data:image/webp;base64,UklGRg==' }), 'data:image/webp;base64,UklGRg==')
+  for (const bad of ['https://asnmessenger.web.app/ads/x.png', 'data:image/svg+xml;base64,PHN2Zz4=', 'data:text/html;base64,PGI+', 'data:image/png;base64,AA" onerror="x', '', undefined]) {
+    assert.equal(adImageSrc({ smallImage: bad }), '', String(bad))
+  }
+})
+
+test('線上抓不到（回空、不是陣列）就用打包備用；有內容才採用', () => {
+  assert.equal(pickAds([]), ADS)
+  assert.equal(pickAds(undefined), ADS)
+  assert.equal(pickAds('x'), ADS)
+  assert.equal(pickAds([], null), null)
+  const remote = [{ key: 'a', title: 't', sub: 's' }]
+  assert.equal(pickAds(remote), remote)
+})
+
+test('守門：廣告大頁的 iframe 一律 sandbox（空＝全部關）、不送 referrer、不開權限；畫面模板與 CSP 的網域只有官網', () => {
+  const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
+  const frames = html.match(/<iframe\b[^>]*>/g) ?? []
+  assert.equal(frames.length, 1, '整個畫面只有大幅廣告那一個 iframe')
+  const f = frames[0]
+  assert.match(f, /\ssandbox=""/, 'sandbox 必須是空值（不給 allow-*）')
+  assert.ok(!/allow-/.test(f), '不給任何 allow-* ')
+  assert.match(f, /referrerpolicy="no-referrer"/)
+  assert.match(f, /\sallow=""/, '不開任何權限')
+  assert.match(f, /:src="pageSrc\(a\)"/, 'src 只來自檢查過的 pageSrc')
+  assert.ok(!/allow-same-origin|allow-top-navigation|allow-forms|allow-popups/.test(html))
+  const css = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8')
+  assert.match(css, /\.hero-page\{[^}]*pointer-events:none/, 'iframe 不接收滑鼠，頁面裡的連結點不到')
+  const conf = JSON.parse(fs.readFileSync(new URL('../src-tauri/tauri.conf.json', import.meta.url), 'utf8'))
+  const csp = conf.app.security.csp
+  const frameSrc = /(?:^|;)\s*frame-src ([^;]*)/.exec(csp)?.[1].trim().split(/\s+/)
+  assert.deepEqual(frameSrc, ['https://asnmessenger.web.app'], 'frame-src 只放官網')
+  assert.ok(!/frame-src[^;]*\*/.test(csp))
+  assert.match(csp, /img-src 'self' data:(;|$)/, 'img-src 不放寬')
+  assert.match(csp, /connect-src ipc: http:\/\/ipc\.localhost(;|$)/, '前端不能 fetch')
+})
+
+test('守門：大頁載入失敗或逾時、--shot 模式、沒有圖片時都退回樣板；線上內容不進 v-html', () => {
+  const js = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
+  const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
+  assert.match(js, /const pageSrc = a => \(info\.shot \|\| pageFail\[a\.key\] \? '' : adPageUrl\(a\)\)/, '--shot 或失敗＝不給網址＝樣板')
+  assert.match(js, /setTimeout\(\(\) => \{ if \(!pageLoaded\[a\.key\]\) pageFail\[a\.key\] = true \}, AD_PAGE_MS\)/, '逾時＝失敗')
+  assert.ok(AD_PAGE_MS <= 5000)
+  assert.match(html, /@error="pageBroken\(a\)"/)
+  assert.match(html, /<template v-else>\s*<span class="ad-new"/, '小輪播沒圖就退回樣板')
+  assert.ok(html.includes('<div class="hero-tx" v-if="!pageSrc(a)">'), '大幅輪播沒網頁就退回樣板')
+  assert.ok(!/v-html="[^"]*\b(?:a\.(?:title|sub|cta|badge|url|page|smallImage)|ads|adImageSrc|pageSrc)\b/.test(html), '廣告的內容不進 v-html')
+  assert.match(js, /if \(info\.shot\) return\s*\r?\n\s*try \{\s*\r?\n\s*const next = pickAds\(await invoke\('ads_fetch'\)/, '--shot 不抓線上廣告')
+})
+
+test('守門：官網 /ads/** 的標頭只放行 ASN 的 WebView 來源；其他路徑仍禁止被嵌入；範例大頁不引用外部資源', () => {
+  const fb = JSON.parse(fs.readFileSync(new URL('../../../site/firebase.json', import.meta.url), 'utf8'))
+  const rules = fb.hosting.headers
+  const base = rules.findIndex(r => r.source === '**')
+  const ads = rules.findIndex(r => r.source === 'ads/**')
+  assert.ok(base >= 0 && ads > base, 'ads/** 的規則要排在 ** 之後才會蓋過去')
+  const h = k => Object.fromEntries(rules[ads].headers.map(x => [x.key, x.value]))[k]
+  const fa = /frame-ancestors ([^;]*)/.exec(h('Content-Security-Policy'))[1].trim().split(/\s+/)
+  assert.deepEqual(fa, ['http://tauri.localhost', 'tauri://localhost'])
+  assert.match(h('Content-Security-Policy'), /script-src 'none'/)
+  assert.match(h('Content-Security-Policy'), /default-src 'none'/)
+  assert.match(JSON.stringify(rules[base]), /X-Frame-Options.{3,12}DENY/)
+  assert.match(JSON.stringify(rules[base]), /frame-ancestors 'none'/)
+  const ads_json = rules.find(r => r.source === 'ads.json')
+  assert.match(JSON.stringify(ads_json), /max-age=300/)
+  const dir = new URL('../../../site/public/ads/', import.meta.url)
+  const pages = fs.readdirSync(dir).filter(f => f.endsWith('.html'))
+  assert.ok(pages.length > 0)
+  for (const p of pages) {
+    const t = fs.readFileSync(new URL(p, dir), 'utf8')
+    assert.ok(!/<script|<a\s|<link|<iframe|<form|<img[^>]+src="(?!data:)|@import|url\((?!["']?data:)|https?:\/\//i.test(t), `${p} 不能有腳本、連結、外部資源`)
+  }
+  // ads.json 裡的 page 都要真的有檔案
+  for (const a of siteAds().ads.filter(x => x.page)) assert.ok(fs.existsSync(new URL('.' + a.page.replace('/ads/', '/'), dir)), a.page)
 })
 
 test('廣告位招租：聯絡網址還沒給（空字串）時照常輪播，但點下去不呼叫 open_url、不開任何網址', () => {
@@ -199,8 +297,8 @@ test('守門：廣告不用任何 AdSense／外部廣告程式碼；點廣告一
   assert.ok(js.includes("openAdWith(a, url => void invoke('open_url', { url }))"))
   assert.ok(!js.includes("if (a.url) void invoke('open_url'"))
   const html = fs.readFileSync(new URL('list.html', dir), 'utf8')
-  assert.equal(html.split(':disabled="!a.url"').length - 1, 2, '底部小廣告與「開始」頁大幅廣告的按鈕，沒網址時都要停用')
-  assert.equal(html.split('@click="openAd(a)"').length - 1, 2, '兩處點廣告都走 openAd')
+  assert.equal(html.split(':disabled="!a.url"').length - 1, 3, '底部小廣告、「開始」頁大幅廣告（樣板與網頁版各一顆）的按鈕，沒網址時都要停用')
+  assert.equal(html.split('@click="openAd(a)"').length - 1, 3, '各處點廣告都走 openAd')
   assert.ok(!/open_url/.test(html), '畫面模板不直接呼叫 open_url')
   assert.ok(!/<script[^>]+src="https?:/.test(html), '不載入外部腳本')
 })
