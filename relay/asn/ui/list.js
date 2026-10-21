@@ -646,9 +646,16 @@ sync()
 
 // ---------- --shot 模式：開一個對話、寄一封信＋一個震動、彈一則提示，然後截圖並結束 ----------
 // 設定檔（asn-me.json）可帶：winMode（'merged' 才是整合模式，欄位名就是 winMode，不是 mode）、shotNoChat（true＝不開任何對話，
-// 整合模式停在「開始」大幅廣告）、shotAd（固定停在第幾則廣告）、shotTab（起始頁籤）。
+// 整合模式停在「開始」大幅廣告）、shotAd（固定停在第幾則廣告）、shotTab（起始頁籤）、shotLaunchNotice（true＝只拍背景逾時通知對話框）。
 if (info.shot) {
   const sleep = ms => new Promise(r => setTimeout(r, ms))
+  if (savedMe.shotLaunchNotice) {
+    showLaunchNotice(backgroundRestoreNoticeText('夥伴-7'))
+    await invoke('show_main').catch(() => {})
+    await sleep(900)
+    await invoke('take_shot', { tab: 'launch-notice' })
+    closeLaunchNotice()
+  } else {
   const all = core.snapshot().friends
   const target = savedMe.shotNoChat ? null : (all.find(f => f.unread > 0) ?? all.find(f => f.status !== 'offline') ?? all[0])
   if (target) {
@@ -676,6 +683,7 @@ if (info.shot) {
     await sleep(500)
     await invoke('take_shot', { tab: name })
     if (name === 'guide-doc') Object.assign(ui, closeGuide())
+  }
   }
   await core.stop()
   await invoke('quit_app')

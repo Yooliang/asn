@@ -12,7 +12,11 @@ import { demoUploadUrl, pngDataUrl } from '../test/png.mjs'
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const releaseName = process.platform === 'win32' ? 'asn.exe' : 'asn'
 export const defaultExe = path.join(root, 'src-tauri', 'target', 'release', releaseName)
-export const shotCaptureSupported = process.platform === 'win32'
+function scrotOnPath() {
+  if (process.platform !== 'linux') return false
+  try { return spawnSync('scrot', ['--version'], { stdio: 'ignore' }).status === 0 } catch { return false }
+}
+export const shotCaptureSupported = process.platform === 'win32' || scrotOnPath()
 
 export const demoMembers = [
   { id: 'H', name: '家用機', kind: 'claude', agents: [
