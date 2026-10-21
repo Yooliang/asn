@@ -10,6 +10,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createCore } from '../machine/relay-core.mjs'
 import { Fail, ID_RE, NO_KEY_MSG, UUID_RE, readKey, resolveCloudAgents, resolveConfig, rosterScanEnvFrom } from './config.mjs'
+import { applyEnvCompat } from './env-compat.mjs'
 
 const MAX_BODY = 20000
 const USAGE = `用法：
@@ -37,7 +38,8 @@ export function parseArgs(argv) {
   return a
 }
 
-export async function main(argv, env = process.env) {
+export async function main(argv, rawEnv = process.env) {
+  const { env } = applyEnvCompat(rawEnv)
   const a = parseArgs(argv)
   if (a.help) { console.log(USAGE); return 0 }
   if (!a.to) throw new Fail(1, `缺少 --to\n${USAGE}`)

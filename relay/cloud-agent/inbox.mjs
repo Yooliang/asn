@@ -9,6 +9,7 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Fail, resolveCloudAgents, resolveConfig, rosterScanEnvFrom } from './config.mjs'
+import { applyEnvCompat } from './env-compat.mjs'
 import { appendLineDurable, ensureDir, readJsonl } from './lib.mjs'
 import { bodyWithNotes } from '../machine/attach-format.mjs'
 import { cloudCmd } from './attach.mjs'
@@ -39,7 +40,8 @@ const fmt = m => {
   return `[${m.id}] ${m.created_at ?? ''} to=${m.to_agent || '（未指定）'} from=${m.from_node}${m.from_agent ? '/' + m.from_agent : ''} (${reply})${m.reply_to ? ` reply_to=${m.reply_to}` : ''}\n${bodyWithNotes(m.body, m.attachments, cloudCmd())}\n`   // 照片：內文後面多一行「〔照片〕檔名＋下載指令」（外部資料，同內文）
 }
 
-export async function main(argv, env = process.env, out = s => process.stdout.write(s + '\n')) {
+export async function main(argv, rawEnv = process.env, out = s => process.stdout.write(s + '\n')) {
+  const { env } = applyEnvCompat(rawEnv)
   const a = parseArgs(argv)
   if (a.help) { out(USAGE); return 0 }
   const cfg = resolveConfig(env)

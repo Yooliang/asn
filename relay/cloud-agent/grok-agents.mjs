@@ -10,15 +10,16 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { UUID_RE } from './config.mjs'
+import { applyEnvCompat } from './env-compat.mjs'
 
 const execFileAsync = promisify(execFile)
 
 const agentsDir = (env = process.env) => env.GROK_AGENTS_DIR || '/home/box/agent-data/agents'
-const claudeBin = (env = process.env) => env.IRORI_CLAUDE_BIN || '/home/box/.local/bin/claude'
+const claudeBin = (env = process.env) => env.ASN_CLAUDE_BIN || env.IRORI_CLAUDE_BIN || '/home/box/.local/bin/claude'
 
-// 測試／Windows：IRORI_CLAUDE_SCRIPT 指向假 .mjs 時用 node 執行
+// 測試／Windows：ASN_CLAUDE_SCRIPT 指向假 .mjs 時用 node 執行
 function claudeAgentsExec(env = process.env) {
-  const script = (env.IRORI_CLAUDE_SCRIPT || '').trim()
+  const script = (env.ASN_CLAUDE_SCRIPT || env.IRORI_CLAUDE_SCRIPT || '').trim()
   if (script) return { file: process.execPath, args: [script, 'agents', '--json'] }
   return { file: claudeBin(env), args: ['agents', '--json'] }
 }
@@ -40,7 +41,7 @@ export function listGrokAgents(env = process.env) {
 }
 
 export async function listClaudeSessions(env = process.env) {
-  if ((env.IRORI_CLOUD_ROSTER_CLAUDE ?? '0') !== '1') return []
+  if ((env.ASN_CLOUD_ROSTER_CLAUDE ?? env.IRORI_CLOUD_ROSTER_CLAUDE ?? '0') !== '1') return []
   const { file, args } = claudeAgentsExec(env)
   try {
     const { stdout } = await execFileAsync(file, args, {
@@ -53,7 +54,8 @@ export async function listClaudeSessions(env = process.env) {
   } catch { return [] }
 }
 
-export async function listAll(env = process.env) {
+export async function listAll(rawEnv = process.env) {
+  const { env } = applyEnvCompat(rawEnv)
   return [...listGrokAgents(env), ...(await listClaudeSessions(env))]
 }
 

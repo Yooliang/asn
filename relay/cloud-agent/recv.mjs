@@ -11,6 +11,8 @@ import { createCore } from '../machine/relay-core.mjs'   // 沿用 API 呼叫與
 import { createLog } from '../machine/safe-log.mjs'
 import { normalizeAttachments } from '../machine/attach-format.mjs'
 import { NO_KEY_MSG, readAnonKey, readKey, resolveCloudAgents, resolveConfig, rosterScanEnvFrom } from './config.mjs'
+import { applyEnvCompat } from './env-compat.mjs'
+import { backendHostCode } from './env.mjs'
 import { createPullWithRetry, parsePullBackoffMs } from '../machine/pull-retry.mjs'
 import { acquirePidLock, appendLineDurable, ensureDir, readJsonl } from './lib.mjs'
 
@@ -73,10 +75,14 @@ export function createReceiver({
   return { pull, pullOnce, rosterOnce, seen, destroy }
 }
 
-export async function main(env = process.env) {
+export async function main(rawEnv = process.env) {
+  const compat = applyEnvCompat(rawEnv)
+  const env = compat.env
   const cfg = resolveConfig(env)
   ensureDir(cfg.mailDir, 0o700)
   const log = createLog(cfg.logFile, { stderr: null })   // 只寫 recv.log（20MB 輪替）；boot.sh 的 stdout/stderr 只收當機時的堆疊
+  for (const n of compat.legacyNames) log(`使用舊環境變數名：${n}`)
+  for (const n of compat.conflictNames) log(`環境變數 ${n} 與對應舊名同時存在且不同，以 ${n} 為準`)
   const key = readKey(cfg, env)
   if (!key) { console.error(NO_KEY_MSG); return 2 }
   if (!acquirePidLock(cfg.pidFile, 'recv.mjs')) { console.error('另一個 recv 正在執行（pid 檔有活著的程序）'); return 3 }
@@ -86,7 +92,7 @@ export async function main(env = process.env) {
 
   const core = createCore({ baseUrl: cfg.baseUrl, key, anonKey: readAnonKey(cfg, env), log, workDir: cfg.mailDir })
   const rx = createReceiver({ api: core.api, cfg, log })
-  log(`recv starting node=${cfg.node} window=${cfg.name} inbox=${cfg.inboxFile}`)
+  log(`recv starting node=${cfg.node} window=${cfg.name} backend=${backendHostCode(cfg.baseUrl)} inbox=${cfg.inboxFile}`)
   void rx.rosterOnce()
   setInterval(() => void rx.rosterOnce(), cfg.rosterMs)
   for (let wait = 2000; ; wait = Math.min(wait * 2, 30_000)) {

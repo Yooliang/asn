@@ -135,6 +135,30 @@ test('常駐程式煙霧測試：收到信寫進 inbox.jsonl 並 ack、回報 ro
   }
 })
 
+test('常駐啟動：新舊環境變數衝突寫入 recv.log（只記變數名、不含衝突值）', async () => {
+  const st = await startFakeRelay()
+  const secretOld = 'https://old-backend.example/functions/v1/relay'
+  const { root, env, cfg } = tmpEnv(st.url, {
+    ASN_RELAY_KEY: 'fake-grok-node-key',
+    IRORI_RELAY_URL: secretOld,
+    ASN_RECV_POLL_MS: '600000',
+    ASN_ROSTER_MS: '600000',
+  })
+  const c = spawn(process.execPath, [script('recv.mjs')], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: childEnv(env) })
+  try {
+    for (let i = 0; i < 30 && !fs.existsSync(cfg.logFile); i++) await sleep(50)
+    const logText = fs.existsSync(cfg.logFile) ? fs.readFileSync(cfg.logFile, 'utf8') : ''
+    assert.ok(logText.includes('ASN_RELAY_URL') && logText.includes('以 ASN_RELAY_URL 為準'))
+    assert.ok(!logText.includes(secretOld))
+  } finally {
+    const closed = new Promise(r => c.on('close', r))
+    c.kill()
+    await closed
+    await st.close()
+    rm(root)
+  }
+})
+
 test('pid 檔過期（同一個 pid 現在是無關程序）：視為沒人在跑，照常取得鎖', () => {
   if (!fs.existsSync(`/proc/${process.pid}/cmdline`)) return   // 沒有 /proc（Windows／macOS）只能看活不活，略過
   assert.equal(isOurProcess(process.pid, 'recv.mjs'), false)

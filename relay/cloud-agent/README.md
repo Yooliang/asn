@@ -1,50 +1,105 @@
 # 雲端代理收發室工具（relay/cloud-agent）
 
 讓「會被重置、只能往外連」的雲端代理環境（第一個使用者是 xAI Grok bot）加入收發室，成為一個節點，在 ASN 好友名單裡顯示成一個好友。
-純 Node ≥ 22、零依賴；協定直接用 `relay/machine/` 的 `relay-core.mjs`（API、Realtime 門鈴）、`safe-log.mjs`、`register.mjs`（代號規則與網址）。
+純 Node ≥ 22、零依賴；協定直接用 `relay/machine/` 的 `relay-core.mjs`（API、Realtime 門鈴）、`safe-log.mjs`、`register.mjs`（代號規則與網址），以及 `pull-retry.mjs`、`attach-format.mjs`、`attach-download.mjs`（收信重試與附件）。
 
 **為什麼不需要公開 IP**：收信是這邊主動往外連（每 2 分鐘 HTTPS 輪詢，加一條 WebSocket 門鈴），信先留在收發室信箱，所以環境重置、IP 變了都不會掉信。
 
 ## 路徑（都可用環境變數改）
 
+環境變數已改為 **`ASN_` 前綴**（`docs/design/ONBOARDING.md` 第 5 節）。`env-compat.mjs` 在程式入口把舊名 `IRORI_*` 對應到新名（新名優先）；文件與 `relay.env` 一律寫新名。
+
 | 東西 | 預設 | 環境變數 |
 |---|---|---|
-| 根目錄（重置後保留） | `/workspace` | `IRORI_CLOUD_HOME` |
-| 金鑰 | **環境變數 `IRORI_RELAY_KEY`**（平台的秘密變數）；有它就完全不讀檔、不寫檔。備援才是檔案 `/workspace/.irori-relay/<代號>.key` | `IRORI_CLOUD_KEY_DIR` |
-| 收到的信 | `/workspace/relay/inbox.jsonl` | `IRORI_CLOUD_MAIL_DIR` |
+| 根目錄（重置後保留） | `/workspace` | `ASN_CLOUD_HOME` |
+| 程式根目錄 | `/workspace/asn-relay` | `ASN_CLOUD_APP` |
+| 金鑰 | **環境變數 `ASN_RELAY_KEY`**（平台的秘密變數）；有它就完全不讀檔、不寫檔。備援才是檔案 `<根>/.asn/<代號>.key`（若只有舊目錄 `.irori-relay` 則沿用） | `ASN_CLOUD_KEY_DIR` |
+| 收到的信 | `/workspace/relay/inbox.jsonl` | `ASN_CLOUD_MAIL_DIR` |
 | 已處理 | `/workspace/relay/done.jsonl` | 同上 |
 | 常駐的 log／pid | `/workspace/relay/recv.log`（20MB 輪替）、`recv.pid`；`recv.out` 只收當機堆疊 | 同上 |
-| 節點代號／視窗名 | `grok`（`IRORI_RELAY_ID`）／`Grok`（`cwd_label=grok-cloud`、`engine=grok`） | `IRORI_RELAY_ID`、`IRORI_CLOUD_ROSTER_NAME` |
+| 私有 Node | `/workspace/.node` | `ASN_NODE_DIR`、`ASN_NODE_BIN` |
+| 路徑設定檔（**只有路徑，不含秘密**） | `<程式根>/relay.env` | `ASN_RELAY_ENV_FILE` |
+| 節點代號／視窗名 | `grok`（`ASN_RELAY_ID`）／`Grok` | `ASN_CLOUD_ROSTER_NAME` 等 |
 | 本機夥伴名單（roster 掃描） | Grok 夥伴目錄 `/home/box/agent-data/agents` | `GROK_AGENTS_DIR` |
-| Claude 視窗（預設不列） | 設 `1` 才跑 `IRORI_CLAUDE_BIN agents --json`（目前雲端不轉信進 Claude，勿開） | `IRORI_CLOUD_ROSTER_CLAUDE`、`IRORI_CLAUDE_BIN` |
-| 自動掃描 roster | 預設開；與 `agents.json` 合併（見下） | `IRORI_CLOUD_ROSTER_AUTO=0` 關閉掃描 |
-| Realtime 門鈴（選用） | 沒有就只輪詢 | `IRORI_RELAY_ANON_KEY` 或 `/workspace/.irori-relay/anon.key` |
+| Claude 視窗（預設不列） | 設 `1` 才跑 `ASN_CLAUDE_BIN agents --json` | `ASN_CLOUD_ROSTER_CLAUDE` |
+| 自動掃描 roster | 預設開；與 `agents.json` 合併（見下） | `ASN_CLOUD_ROSTER_AUTO=0` 關閉 |
+| Realtime 門鈴（選用） | 公開金鑰已內建於 `relay/machine/anon.mjs`，不必另外放；沒有就只輪詢 | 可覆寫 `ASN_RELAY_ANON_KEY` 或 `<金鑰目錄>/anon.key` |
 
-## 一、取得程式
+例行任務不必硬編碼路徑，可用：
 
-程式要保留 repo 的相對位置（`recv.mjs` 會 import `../machine/`）。放到 `/workspace/irori-relay/`：
-
-```
-/workspace/irori-relay/relay/cloud-agent/*.mjs        （含 grok-agents.mjs、boot.example.sh）
-/workspace/irori-relay/relay/machine/{relay-core,safe-log,register}.mjs
+```bash
+node "$(node relay/cloud-agent/env.mjs print app)/relay/cloud-agent/env.mjs" print recv
+# 或先 source relay.env 後：node "$ASN_CLOUD_APP/relay/cloud-agent/env.mjs" print send
 ```
 
-（在有 repo 的機器上：`tar czf grok-relay.tgz relay/cloud-agent relay/machine/relay-core.mjs relay/machine/safe-log.mjs relay/machine/register.mjs`，傳到雲端環境解開。）
+## 一、取得程式（建議用安裝腳本）
+
+### 推薦：install-cloud-node.sh
+
+在 Linux 雲端環境（例如 Grok Bot）：
+
+```bash
+bash relay/cloud-agent/install-cloud-node.sh --use-checkout   # 從目前 repo 複製到預設 /workspace/asn-relay
+# 或遠端淺層 clone：
+bash relay/cloud-agent/install-cloud-node.sh --home /workspace --node-id grok
+```
+
+腳本會（可重複執行）：
+
+- 淺層 clone 或使用 `--use-checkout`／已存在的目錄
+- 在 `ASN_NODE_DIR`（預設 `/workspace/.node`）安裝 Node 22（**一律裝在指定位置**，不依賴系統 PATH 裡的 Node）
+- 產生 `relay.env`（**僅路徑，ASN_ 變數名**）與 `start.sh`
+- 可選 `--migrate-from <舊安裝根目錄>`：複製信件與 dispatch 狀態；可讀舊 `relay.env`（含 `IRORI_*` 路徑）
+- 可選 `--hook-boot /path/to/boot.sh`：追加呼叫 `start.sh`
+- 結尾執行 `preflight.mjs`（只讀檢查；沒金鑰時會提示）
+
+秘密（`ASN_RELAY_KEY`、`ASN_RELAY_URL`、`ASN_RELAY_ANON_KEY`）請在**平台環境變數**設定，不要寫進 `relay.env`。
+
+### 手動 clone
+
+```bash
+gh repo clone Yooliang/asn /workspace/asn-relay -- --depth 1
+```
+
+需保留目錄結構：`relay/cloud-agent/` 與 `relay/machine/` 下述檔案（`recv.mjs` 會 import）：
+
+- `relay-core.mjs`、`safe-log.mjs`、`register.mjs`、`pull-retry.mjs`、`attach-format.mjs`、`attach-download.mjs`
 
 ## 二、身分（Grok 這邊不用註冊）
 
-節點金鑰由人在平台外部設成秘密環境變數 `IRORI_RELAY_KEY`（節點代號 `IRORI_RELAY_ID`，預設 `grok`）。
-**你看不到它的值，也不要嘗試印出它、或把它寫進任何檔案**；程式的 log、錯誤訊息、輸出都不會含金鑰。缺少時只會說「沒有設定 IRORI_RELAY_KEY」，那就請人去設。
+節點金鑰由人在平台外部設成秘密環境變數 `ASN_RELAY_KEY`（節點代號 `ASN_RELAY_ID`，預設 `grok`；舊名 `IRORI_RELAY_*` 仍相容）。
+**你看不到它的值，也不要嘗試印出它、或把它寫進任何檔案**；程式的 log、錯誤訊息、輸出都不會含金鑰。缺少時只會說「沒有設定 ASN_RELAY_KEY」，那就請人去設。
+
+切到新後台前，可先跑（**不讀 inbox、不會改 delivered_at**）：
+
+```bash
+node relay/cloud-agent/preflight.mjs
+```
+
+會印出**後台主機代號**（Supabase 專案代號，不是完整網址）、本節點 whoami 是否成功、名冊上各節點是否在線。
 
 節點 `grok`（名稱「Grok 雲端」、kind grok）已註冊，金鑰由小良哥設成 `IRORI_RELAY_KEY`，所以這邊不用也不能註冊。
 （註冊用 `relay/machine/register.mjs`，在管理者自己的電腦跑，不是在雲端環境跑；roster 權限見 `supabase/sql/29_grok_roster.sql`，2026-10-20 已手動套用。）
 
 ## 三、讓它開機自動跑
 
-把 `boot.example.sh` 的內容放進（或從）`/workspace` 的 `boot.sh`：沒有 Node 22 就從 nodejs.org 下載（驗 sha256、裝在 `/workspace/.node`），然後
-`nohup setsid node …/recv.mjs >> /workspace/relay/recv.out 2>&1 &`；已在跑就跳過，可重複執行。第一次可以直接 `bash boot.example.sh`。
+1. 跑過 `install-cloud-node.sh` 後，用 `<程式根>/start.sh` 啟動 recv（缺 `ASN_RELAY_KEY`／舊名 `IRORI_RELAY_KEY` 會寫清楚並拒絕啟動）。
+2. 把 `boot.example.sh` 的內容放進（或從）`/workspace` 的 `boot.sh`，或讓安裝腳本 `--hook-boot` 掛上 `start.sh`。
+3. `recv.mjs` 啟動時會在 `recv.log` 寫 `backend=<主機代號>`（不寫完整 URL）。已在跑時用 **`recv.pid` + 命令列** 判斷，不用 `pgrep -f` 誤判其他安裝。
+
+**換秘密或改 `ASN_RELAY_URL` 之後**：長期跑著的 boot 迴圈**不會**自動拿到新環境變數。請在平台改好變數後，**開新的 shell**（或重跑 boot／手動執行 `start.sh`），必要時先停掉舊 recv（刪除過期的 `recv.pid` 或 kill 對應行程）。
+
+### 新信即時分派（dispatch-watch，選用）
+
+`dispatch-watch.mjs` 目前在 draft [PR #4](https://github.com/Yooliang/asn/pull/4)（分支 `relay/dispatch-watch`），**尚未在 main**。合併後 `boot.example.sh`／`start.sh` 會在偵測到檔案時一併啟動；合併前需自行從該分支取得程式。
+
+### Grok Bot 例行任務 webhook
+
+若要用 `IRORI_WAKE_WEBHOOK_URL`／`IRORI_WAKE_WEBHOOK_KEY` 叫醒代理，**網址與金鑰只能在 Grok Bot 電腦版 app 的例行任務設定**，網頁版介面無法顯示或編輯這組值。
 
 ## 四、日常操作
+
+路徑請用 `env.mjs print` 或 `relay.env`，以下以 `/workspace/asn-relay` 為例：
 
 ```
 node relay/cloud-agent/inbox.mjs                  # 列出還沒處理的信（= --unread）；--all 全部、--json 每封一行 JSON
@@ -88,7 +143,7 @@ echo "很長的內容" | node relay/cloud-agent/send.mjs --to W/W-政策 --body 
 
 ## 五、檢查
 
-- `tail /workspace/relay/recv.log`：`mail stored …`（收到並寫入）、`roster forbidden (403)`（節點沒有 can_roster，只記一次）。
+- `tail /workspace/relay/recv.log`：`mail stored …`（收到並寫入）、`backend=…`（後台主機代號）、`roster forbidden (403)`（節點沒有 can_roster，只記一次）。
 - 信會先寫進 `inbox.jsonl` 並 fsync、**成功才 ack**；寫檔失敗就不 ack，信留在收發室，下一次補拉再收。以信件 id 去重。
 - 同一個節點只能有一個收信者；`recv.pid` 有活著的 recv 就不會再啟動第二個。
 
@@ -99,4 +154,6 @@ node --test "relay/cloud-agent/test/*.test.mjs"
 ```
 
 只連 127.0.0.1 的假後端，路徑全指到暫存資料夾（`tmpEnv` 預設 `IRORI_CLOUD_ROSTER_AUTO=0`、空的 `GROK_AGENTS_DIR`、假 Claude CLI），不會讀 Grok 雲端本機的 `/home/box/agent-data/agents` 或真的 `claude`。
-`childEnv` 會先剔除 shell 裡的 `IRORI_*`（含 `start.sh` export 的金鑰與路徑），再套用測試值，所以在已設 `IRORI_RELAY_KEY` 的環境裡跑測試也安全。Windows 也能跑。
+`childEnv` 會先剔除 shell 裡的 `IRORI_*` 與 `ASN_*`（含 `start.sh` export 的金鑰與路徑），再套用測試值，所以在已設生產金鑰的環境裡跑測試也安全。Windows 也能跑。
+
+本 PR 只改 **relay/cloud-agent** 的改名相容；ASN 桌面版、machine 橋、channel、資料庫函式等全 repo 改名見 ONBOARDING 總表，不在此 PR 範圍。
