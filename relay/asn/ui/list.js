@@ -12,6 +12,7 @@ import { AsnDialog } from './lib/dialog.mjs'
 import { SETTING_CATS, catSummary } from './lib/settings-cats.mjs'
 import { DIMS, groupOptions, loadDims, pageTabs, withTabDim } from './lib/dims.mjs'
 import { normalizeSearchQuery, rosterShownGroups } from './lib/search.mjs'
+import { deviceAsn } from './lib/presence.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
 import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatarFile, selfAvatarSrc } from './lib/avatar.mjs'
@@ -21,7 +22,7 @@ import { chatTabSameZone, closeAllChatTabs, dropInsertBefore, closeChatTab, clos
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_LABEL, normalizeClose, normalizeFrame, totalUnread, soundChoice, soundFromChoice, soundFromSaved } from './lib/prefs.mjs'
 import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
-import { bumpRecentCwd, cwdChoices, normalizeLaunchPrefs } from './lib/launch-prefs.mjs'
+import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
 import { CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, buddyConsoleItem, engineForProfile,launchDeviceRows, launchDisableReason, showDisplayModeChoice, withTimeout } from './lib/partner-launch-ui.mjs'
 import { backgroundRestoreNoticeText, collectLaunchFailures, findBackgroundTimeouts, launchFailedNoticeText } from './lib/partner-launch-notify.mjs'
 import { friendId } from './lib/roster.mjs'
@@ -140,11 +141,13 @@ const core = new AsnCore({
 
 const friends = ref([])
 const nodeOrder = ref([])
+const asnMap = ref({})   // 節點 → 在線的 ASN 視窗（版本與狀態），名單設備分組標題旁的小綠點用
 const conn = ref('connecting')
 const sync = () => {
   const s = core.snapshot()
   friends.value = s.friends
   nodeOrder.value = s.nodeOrder
+  asnMap.value = s.asn ?? {}
   conn.value = s.conn
   emit('asn:state', { ...s, me: { ...me }, ui: { dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, collapsed: ui.collapsed } })
 }
@@ -224,12 +227,32 @@ const partnerShowDisplay = computed(() => partnerDlg.node === info.node && showD
 const launchCtx = computed(() => ({ selfNode: info.node, partnerModels: partnerModels.value, remoteLaunchers: remoteLaunchers.value }))
 const launchDeviceRowsList = computed(() => launchDeviceRows(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value }))
 function launchDisableReasonFor(nodeKey) { return launchDisableReason(nodeKey, launchCtx.value) }
+// 本機的候選由 Rust 端合併（白名單＋開著的 Claude 視窗＋信任過的資料夾＋最近用過，去重、略過不存在的、最多 15 筆）
+const localCwdList = ref([])
+async function refreshCwdCandidates() {
+  try {
+    const r = await transport.launchCwdCandidates()
+    localCwdList.value = Array.isArray(r) ? mergeCwdLists([r]) : []
+  } catch (e) { console.info('[ASN] 工作資料夾候選', e.message) }
+}
 const partnerCwdChoices = computed(() => {
-  const allow = partnerDlg.node === info.node
-    ? (launchPrefs.cwdAllow.length ? launchPrefs.cwdAllow : defaultCwdAllowFromCli())
-    : (remoteLaunchers.value[partnerDlg.node]?.cwd_allow ?? [])
-  return cwdChoices({ allow, recent: launchPrefs.recentCwd })
+  if (partnerDlg.node === info.node) {
+    const fallback = cwdChoices({ allow: launchPrefs.cwdAllow.length ? launchPrefs.cwdAllow : defaultCwdAllowFromCli(), recent: launchPrefs.recentCwd })
+    return mergeCwdLists([localCwdList.value, fallback])
+  }
+  return mergeCwdLists([cwdChoices({ allow: remoteLaunchers.value[partnerDlg.node]?.cwd_allow ?? [], recent: launchPrefs.recentCwd })])
 })
+// 「瀏覽…」：Rust 端開選擇資料夾對話框，選好的已寫進本機白名單；這裡加進候選並選取
+async function browsePartnerCwd() {
+  partnerDlg.error = ''
+  try {
+    const p = await transport.launchCwdBrowse()
+    if (!p) return
+    localCwdList.value = withPickedCwd(localCwdList.value, p)
+    partnerDlg.cwd = p
+    await loadLaunchPrefs()
+  } catch (e) { partnerDlg.error = e.message }
+}
 function pickPartnerModel(m) {
   if (!m.installed) return
   partnerDlg.profile = m.profileId
@@ -248,8 +271,12 @@ function openPartnerDlg(nodeKey) {
   partnerDlg.display = launchPrefs.launchDisplay === 'background' ? 'background' : 'foreground'
   const first = partnerModels.value.find(m => m.installed) ?? partnerModels.value[0]
   if (first) pickPartnerModel(first)
-  const choices = partnerCwdChoices.value
-  partnerDlg.cwd = choices[0] ?? ''
+  partnerDlg.cwd = partnerCwdChoices.value[0] ?? ''
+  if (nodeKey === info.node) {
+    void refreshCwdCandidates().then(() => {
+      if (partnerDlg.open && !partnerDlg.cwd) partnerDlg.cwd = partnerCwdChoices.value[0] ?? ''
+    })
+  }
 }
 function closePartnerDlg() { partnerDlg.open = false; partnerDlg.error = '' }
 const searchInput = ref(null)
@@ -476,6 +503,8 @@ await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 watch([me, soundOn, frame, closeTo, autoCheck, dims, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, sound: soundOn.value, frame: frame.value, closeTo: closeTo.value, autoUpdate: autoCheck.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting }); sync() }, { deep: true })
 // 系統匣圖示的提示文字帶未讀總數
 watch(() => totalUnread(friends.value), n => { void invoke('set_tray_unread', { n }).catch(() => {}) }, { immediate: true })
+// 在線狀態：狀態下拉與個人訊息交給 Rust 端回報（每 60 秒一次，改了立刻送；後台沒部署就靜默不送）
+watch(() => [me.status, me.psm], () => { void invoke('set_presence', { status: me.status, psm: me.psm ?? '' }).catch(() => {}) }, { immediate: true })
 // 設定頁改「分頁依」：分組若撞到自動換成剩下兩個裡的第一個
 const setTabDim = v => Object.assign(dims, withTabDim(dims, v))
 const pages = computed(() => pageTabs(friends.value, dims.tabDim, { selfNode: info.node, selfName: info.window_name, nodeOrder: nodeOrder.value }))
@@ -741,12 +770,12 @@ const app = createApp({
       chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuTogglePin, isChatTabPinned,
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
       STATUS, CONN_LABEL, FIXED_TABS, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, soundOn, friends, conn, shown, query, collapsed, nickErr, commitNick,
-      tab, adI, rooms, roomsErr, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote,
+      tab, adI, rooms, roomsErr, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge: node => deviceAsn(asnMap.value[node], info.version),
       GUIDES, view, SETTING_CATS, catSub, PANEL_KINDS, panelTabId, panelGuide, panelTitle, openPanel, closePanel, settingsState, applySetting, pickAvatarFile,
       selfNode: info.node, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg,
       searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickLaunchDevice,
       DISPLAY_MODES, partnerShowDisplay,
-      openPartnerDlg, closePartnerDlg, partnerDlg, partnerModels, partnerCwdChoices, pickPartnerModel, submitPartnerDlg,
+      openPartnerDlg, closePartnerDlg, partnerDlg, partnerModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddyConsoleItemView, buddyMenuOpenChat, toggleBuddyConsole,
       launchToolRows, launchPrefs, launchCwdText, saveLaunchPrefs, setLaunchCwdText,
@@ -764,14 +793,26 @@ sync()
 
 // ---------- --shot 模式：開一個對話、寄一封信＋一個震動、彈一則提示，然後截圖並結束 ----------
 // 設定檔（asn-me.json）可帶：winMode（'merged' 才是整合模式，欄位名就是 winMode，不是 mode）、shotNoChat（true＝不開任何對話，
-// 整合模式停在「開始」大幅廣告）、shotAd（固定停在第幾則廣告）、shotTab（起始頁籤）、shotSetting（逐頁籤截圖時設定聊天窗顯示哪一類，預設 look）、shotSettingSet（[{ op, value }…]：在設定窗裡改值的模擬）、shotLaunchNotice（true＝只拍背景逾時通知對話框）。
+// 整合模式停在「開始」大幅廣告）、shotAd（固定停在第幾則廣告）、shotTab（起始頁籤）、shotSetting（逐頁籤截圖時設定聊天窗顯示哪一類，預設 look）、shotSettingSet（[{ op, value }…]：在設定窗裡改值的模擬）、shotLaunchNotice（true＝只拍背景逾時通知對話框）、shotPartnerDlg（true＝只拍開新夥伴對話框）。
 if (info.shot) {
   const sleep = ms => new Promise(r => setTimeout(r, ms))
   const waitPaint = async (frames = 3) => {
     for (let i = 0; i < frames; i++) await new Promise(r => requestAnimationFrame(r))
     await sleep(350)
   }
-  if (savedMe.shotLaunchNotice) {
+  if (savedMe.shotPartnerDlg) {
+    // 開新夥伴對話框：停在本機（候選來自 Rust 端的真實合併；截圖用暫存家目錄）
+    openPartnerDlg(info.node)
+    await refreshCwdCandidates()
+    if (!partnerDlg.cwd) partnerDlg.cwd = partnerCwdChoices.value[0] ?? ''
+    await waitPaint()
+    await invoke('show_main').catch(() => {})
+    await waitPaint()
+    await sleep(900)
+    await invoke('capture_ui_ready', { tag: 'partner-dlg-ready' })
+    await invoke('take_shot', { tab: 'partner-dlg' })
+    closePartnerDlg()
+  } else if (savedMe.shotLaunchNotice) {
     showLaunchNotice(backgroundRestoreNoticeText('夥伴-7'))
     await waitPaint()
     await invoke('show_main').catch(() => {})
