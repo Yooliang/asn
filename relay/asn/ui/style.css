@@ -228,12 +228,18 @@ html.toast-page,html.toast-page body{background:transparent}
 @media (prefers-reduced-motion:reduce){.ad{animation:none}}
 
 /* ---------- 大頭貼欄收合（對話區）：分開模式欄在右、整合模式欄在左 ---------- */
-.dp-side{flex:none;width:74px;display:flex;flex-direction:column;align-items:stretch;background:var(--panel-soft);border-left:1px solid var(--line);min-height:0}
+.dp-side{--dp-xl:104px;flex:none;box-sizing:border-box;width:calc(var(--dp-xl) + 24px);display:flex;flex-direction:column;align-items:stretch;background:var(--panel-soft);border-left:1px solid var(--line);min-height:0}
 .dp-left .chatpane-body{flex-direction:row-reverse}
 .dp-left .dp-side{border-left:0;border-right:1px solid var(--line)}
-.dp-side-stack{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:10px;padding:8px 6px 4px}
-.dp-fold-bar{flex:none;width:100%;margin:0;padding:0;height:24px;border:0;border-top:1px solid var(--line);border-radius:0;background:linear-gradient(var(--panel-head),var(--panel-soft));color:var(--muted);font-size:15px;line-height:1;cursor:pointer}
+.dp-side-stack{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:8px 0}
+.dp-side-stack .dp.xl{width:var(--dp-xl);height:var(--dp-xl)}
+.dp-grp{flex:none;width:var(--dp-xl);display:flex;flex-direction:column}
+.dp-fold-bar,.dp-fold-strip{margin:0;padding:0;border:1px solid var(--line);background:linear-gradient(var(--panel-head),var(--panel-soft));color:var(--muted);font-size:15px;line-height:1;cursor:pointer}
+.dp-fold-bar{flex:none;width:100%;height:16px;margin-top:3px;border-radius:4px}
+.dp-fold-strip{flex:1;width:100%;border-width:0;border-radius:0}
+.dp-fold-strip:hover{background:#dcebf9;color:var(--title-fg)}
 .dp-fold-bar:hover{background:#dcebf9;color:var(--title-fg)}
+.dp-collapsed .dp-side{width:20px}
 .rtab-vendor{display:grid;place-items:center;line-height:0}
 .rtab-vendor svg{display:block}
 .dp-left .conv,.dp-left .compose-row{flex-direction:row-reverse}

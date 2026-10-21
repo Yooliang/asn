@@ -247,10 +247,16 @@ export const ChatPane = {
   </div>
   <aside class="dp-side" v-if="sideCol" :class="'dp-side-' + side">
     <div class="dp-side-stack" v-show="!collapsed">
-      <div class="dp xl" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span><img :src="friendAv" alt=""></span></div>
-      <div class="dp xl" :class="'st-' + me.status" :style="{ '--h': 205 }"><span><img :src="meAv" alt=""></span></div>
+      <div class="dp-grp">
+        <div class="dp xl" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span><img :src="friendAv" alt=""></span></div>
+        <button class="dp-fold-bar" type="button" @click="$emit('toggle-dp')" :aria-label="foldTip" :aria-expanded="!collapsed" :title="foldTip">{{ barArrow }}</button>
+      </div>
+      <div class="dp-grp">
+        <div class="dp xl" :class="'st-' + me.status" :style="{ '--h': 205 }"><span><img :src="meAv" alt=""></span></div>
+        <button class="dp-fold-bar" type="button" @click="$emit('toggle-dp')" :aria-label="foldTip" :aria-expanded="!collapsed" :title="foldTip">{{ barArrow }}</button>
+      </div>
     </div>
-    <button class="dp-fold-bar" type="button" @click="$emit('toggle-dp')" :aria-label="foldTip" :aria-expanded="!collapsed" :title="foldTip">{{ barArrow }}</button>
+    <button class="dp-fold-strip" type="button" v-if="collapsed" @click="$emit('toggle-dp')" :aria-label="foldTip" :aria-expanded="false" :title="foldTip">{{ barArrow }}</button>
   </aside>
   </div>
   <div class="typing" role="status">
