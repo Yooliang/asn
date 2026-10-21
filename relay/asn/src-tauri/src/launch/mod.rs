@@ -1,10 +1,10 @@
 //! 開新夥伴：本機啟動、遠端 launch API（全 Rust，不呼叫 Node）。
-mod config;
+pub(crate) mod config;
 mod console;
-mod cwds;
-mod local;
-mod prefs;
-mod profiles;
+pub(crate) mod cwds;
+pub(crate) mod local;
+pub(crate) mod prefs;
+pub(crate) mod profiles;
 mod switch;
 
 use crate::relay::Relay;

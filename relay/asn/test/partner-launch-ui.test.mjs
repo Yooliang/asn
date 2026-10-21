@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import test from 'node:test'
-import { CONSOLE_QUERY_TIMEOUT_MS, buddyConsoleItem, consoleToggleLabel, withTimeout,launchDeviceRows, launchDisableReason, showDisplayModeChoice } from '../ui/lib/partner-launch-ui.mjs'
+import { CONSOLE_QUERY_TIMEOUT_MS, buddyConsoleItem, consoleToggleLabel, withTimeout,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice } from '../ui/lib/partner-launch-ui.mjs'
 
 test('設備選單：本機排第一', () => {
   const rows = launchDeviceRows(
@@ -51,4 +51,22 @@ test('查詢逾時或失敗都回 null，不卡住', async () => {
 test('背景選項只給互動視窗 profile', () => {
   assert.equal(showDisplayModeChoice('claude'), true)
   assert.equal(showDisplayModeChoice('gemini'), false)
+})
+
+test('別台設備的模型列：用它回報的 profile 與標籤，不看本機偵測；沒有回報就是空的', () => {
+  const rows = remoteModelRows({ profiles: [{ id: 'claude', label: 'Claude（互動視窗）' }, { id: 'default', label: '一般（含 Chrome）' }, { id: '', label: 'x' }, null], cwd_allow: ['D:\a'], max_per_hour: 6 })
+  assert.deepEqual(rows.map(r => [r.profileId, r.label, r.installed]), [['claude', 'Claude（互動視窗）', true], ['default', '一般（含 Chrome）', true]])
+  assert.equal(rows[0].id, 'claude', '認得的 profile 沿用圖示代號')
+  assert.equal(rows[1].modeLabel, '會開一個視窗')
+  assert.deepEqual(remoteModelRows(null), [])
+  assert.deepEqual(remoteModelRows({ profiles: 'x' }), [])
+  assert.equal(remoteModelRows({ profiles: [{ id: 'gemini' }] })[0].label, 'Gemini', '沒給標籤用目錄上的名字')
+})
+
+test('開新夥伴對話框：模型列依設備切換（本機偵測／別台回報），並在開啟時重抓別台的設定', () => {
+  const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
+  assert.match(html, /v-for="m in dlgModels"/)
+  const js = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
+  assert.match(js, /remoteModelRows\(remoteLaunchers\.value\[partnerDlg\.node\]\)/)
+  assert.match(js, /void refreshLaunchers\(\)\.then\(/)
 })

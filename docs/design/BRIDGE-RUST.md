@@ -8,9 +8,9 @@ issue #12 第二期。目標：打開 ASN ＝ 這台設備的收發室就上線�
 
 | 段 | 內容 | 狀態 |
 |---|---|---|
-| 第一段（本 PR） | Claude 引擎的核心：單一收信者鎖、名單回報（上線）、門鈴＋輪詢＋快速重試、轉交給本機 Claude 視窗、回覆寄回、ack／去重／逾時通知／遲到回覆／no-reply／self-recv、對應表跨重啟、設定開關與舊橋偵測、「改由 ASN 負責」（程式有、預設不放行） | 完成，設定「讓 ASN 負責這台的收發室」預設關 |
-| 第二段 | 群組轉送（`rooms.mjs`）；附件（照片）轉交；孤兒程序清理（`bridge.last`）；舊橋退出後自動接手（現在要重開 ASN 或重按開關）；自己更新改由 ASN 更新負責 | 未開工 |
-| 第三段 | 遠端開視窗：`launcher.mjs` 的 `launch_pending`／`launch_result` 輪詢、`launcher.json`／預設 profile、白名單與每小時上限、roster 的 `launcher` 欄位（本段先送 null）、開出視窗後的第一句話 | 未開工 |
+| 第一段（PR #110） | Claude 引擎的核心：單一收信者鎖、名單回報（上線）、門鈴＋輪詢＋快速重試、轉交給本機 Claude 視窗、回覆寄回、ack／去重／逾時通知／遲到回覆／no-reply／self-recv、對應表跨重啟、設定開關與舊橋偵測、「改由 ASN 負責」（程式有、預設不放行） | 完成，設定「讓 ASN 負責這台的收發室」預設關 |
+| 第二段（本 PR） | 群組轉送（`rooms.mjs`）；附件（照片）下載提示行；孤兒程序清理（`bridge.last`）；舊橋退出後自動接手（設定開著時，每 5 秒看一次舊橋還在不在） | 完成；「自己更新」不搬（ASN 的更新由 ASN 自己的更新機制負責，見第 6 節第 6 點） |
+| 第三段（本 PR） | 遠端開視窗：`launcher.mjs` 的 `launch_pending`／`launch_result`、本機啟動設定、白名單與每小時上限、roster 的 `launcher` 摘要、開出視窗後的第一句話；別台的「開新夥伴」對話框列出那台回報的 profile 與資料夾；設定頁新增「允許我的其他設備替這台開新視窗」 | 完成，預設關（見第 7 節） |
 | 第四段 | `asn send` 命令列取代 `send.mjs`（含 `replied/`、`sent/` 記號與父行程鏈身分判定），讓 Claude 視窗不依賴 Node；`asn recv`／`asn room` | 未開工 |
 | 第五段 | 其他引擎：Codex、ACP（Gemini／Grok 背景夥伴）；opt-in 後把預設改為開、淘汰安裝程式的工作排程 | 未開工 |
 
@@ -26,7 +26,7 @@ issue #12 第二期。目標：打開 ASN ＝ 這台設備的收發室就上線�
 | 單一執行個體 `bridge.pid`（`bridge.mjs`、`relay-core.mjs`） | `lock.rs` | 已搬，與 Node 橋互斥 |
 | 認出舊橋、停舊橋與排程（`run-bridge.ps1`、`install-task.ps1` 的反向操作；ONBOARDING 3.9） | `handoff.rs` | 已搬，受設定開關保護 |
 | 視窗名單 `claude agents --json`（`engines/claude.mjs` `listWindows`） | `roster.rs`：直接讀 `~/.claude/sessions/<pid>.json`（pid 活著、`kind=interactive`、`entrypoint=cli`、排除收發室自己） | 已搬（資料來源改了，見第 6 節） |
-| roster 回報 `POST ?action=roster`（`bridge.mjs` `refreshRoster`） | `roster.rs` `roster_body`＋`core.rs` `refresh_roster`；每 60 秒；多列一筆 ASN 自己的視窗名（engine 標 `asn`）；`launcher` 先送 null | 已搬 |
+| roster 回報 `POST ?action=roster`（`bridge.mjs` `refreshRoster`） | `roster.rs` `roster_body`＋`core.rs` `refresh_roster`；每 60 秒；多列一筆 ASN 自己的視窗名（engine 標 `asn`）；`launcher` 送遠端開視窗摘要（沒有可用設定送 null） | 已搬 |
 | 門鈴 Realtime（`connectBell`） | 沿用 `bell.rs`；`mod.rs` 另開一條連線，響了就叫醒主迴圈 | 已搬 |
 | 2 分鐘輪詢＋拉信失敗短退避（`pull-retry.mjs`） | `mod.rs` `run_loop`（輪詢）、`core.rs` `pull`／`retry_due`（5→10→20→40→60 秒，成功歸零，不並行兩個 pull） | 已搬 |
 | 收信處理 `handleMail`：預設收件人、最近活動的視窗代收、找不到視窗、告知類不計時、收發室系統信 | `core.rs` `handle_mail` | 已搬 |
@@ -43,10 +43,10 @@ issue #12 第二期。目標：打開 ASN ＝ 這台設備的收發室就上線�
 | self-recv 心跳（`self-recv.mjs`） | 沿用 `heartbeat.rs`（ASN 本來就寫同格式心跳）；`handle_mail` 心跳新鮮且 pid 活著就跳過、不 ack | 已搬 |
 | 寄給 ASN 自己視窗的信 | `handle_mail` 直接跳過、不 ack，留給 ASN 畫面收（Node 橋的行為是回「找不到」並 ack，這是刻意修正） | 新增 |
 | `bridge.log`＋上限輪替（`safe-log.mjs`） | `core.rs` `BridgeLog`（2 MB 輪替成 `bridge.log.1`） | 已搬 |
-| 群組轉送（`rooms.mjs`） | — | 第二段 |
-| 附件下載提示行（`attach-format.mjs`） | 本段只在內文後補一行「帶有 N 個附件，請到 ASN 查看」 | 第二段 |
-| 孤兒清理 `bridge.last`、`self-update.mjs` | — | 第二段 |
-| 遠端開視窗 `launcher.mjs`、`partner-*.mjs` | — | 第三段 |
+| 群組轉送（`rooms.mjs`）：`room_list`、游標、只轉 `for_me`、回覆貼回群組、上下文 | `rooms.rs`（格式、游標、確定性編號）＋`core.rs` `pull_rooms`／`handle_room_msg`／`post_room`；`pending.rs` 的 `room` 欄位與 Node 橋同格式 | 第二段已搬 |
+| 附件下載提示行（`attach-format.mjs`） | `attach.rs`（清理檔名、白名單欄位、uuid 檢查、最多 4 筆、過期不給指令）；來信與群組訊息都用 | 第二段已搬 |
+| 孤兒清理 `bridge.last`（`self-update.mjs` 的 `orphansOf`／`killTree`） | `orphans.rs` | 第二段已搬（`self-update.mjs` 的 git 自動更新不搬） |
+| 遠端開視窗 `launcher.mjs`（驗證、歷史、紀錄、等視窗出現） | `launcher.rs`；設定與啟動沿用 `launch/`（`config.rs`、`cwds.rs`、`prefs.rs`、`local.rs`） | 第三段已搬（背景夥伴 `partner-*.mjs` 留到第五段） |
 | `send.mjs`／`recv.mjs`／`room.mjs`／`attach.mjs`、`identity.mjs` | — | 第四段 |
 | Codex／ACP 引擎 | — | 第五段 |
 
@@ -67,6 +67,8 @@ issue #12 第二期。目標：打開 ASN ＝ 這台設備的收發室就上線�
   4. 等舊橋 pid 消失（最多 10 秒），拿鎖，啟動內建橋；
   任何一步失敗就停手並回報，不繼續下一步。
 - **信箱的 ack 責任**：同一把金鑰同一時間只有一個收信者。接手之前舊橋已轉交、還在等回覆的信，其對應表在 `pending.json`，格式兩邊相同，內建橋啟動時載回，回覆照樣寄得回去。
+- **舊橋退出後自動接手**（第二段）：設定開著、啟動時因舊橋在跑而讓步，ASN 每 5 秒看一次舊橋的 pid；舊橋一退出（例如使用者自己停掉工作排程）就拿鎖、啟動內建橋。只有「因舊橋而讓步」的情況才會自動接手；設定關著、或啟動失敗是別的原因，都不會反覆重試。
+- **孤兒清理**（第二段）：內建橋啟動拿到鎖之後、啟動 worker 之前，讀 `bridge.last`（上一個橋的 pid，正常結束也不刪）。上一個橋已經不在（它的 pid 不在程序表裡），而且 `mailbox.pid` 記的收發室 worker 的父程序還是它，就連同子孫結束那一個 worker（Windows `taskkill /PID /T /F`）。只看父 pid，不依名稱砍；比 Node 橋多一道限制——ASN 是桌面程式，上一個 ASN 還有別的子程序（例如 Linux 上開的終端機視窗）不能一起收掉，所以孤兒必須同時是上次記在 `mailbox.pid` 的 worker。然後把自己的 pid 寫進 `bridge.last`。
 - **退回**：把 `bridge.json` 的 `enabled` 關掉（或設定頁取消勾選），內建橋結束並釋放鎖；舊橋要使用者自己重新啟用工作排程（本段不自動恢復）。
 
 ## 4. 節點代號自動產生（小良哥追加）
@@ -92,7 +94,7 @@ Rust 測試在各模組的 `#[cfg(test)]`，整合測試在 `bridge/tests.rs`（
 |---|---|
 | `bridges.test.mjs` 預設收件人／代收／留在 inbox | `tests::沒指定收件人_…` |
 | `bridges.test.mjs` expects_reply 欄位／舊標記／收發室系統信 | `tests::告知類信_…`、`欄位是_null_才看內文舊標記`、`收發室寄來的系統信不計時` |
-| `bridges.test.mjs` 附件提示行 | 第二段 |
+| `bridges.test.mjs` 附件提示行 | `tests::rooms_launch::信帶附件_…`、`attach::tests::*` |
 | `reply-notice.test.mjs` 遲到回覆、保留期與筆數上限 | `tests::遲到的回覆照寄_…`、`遲到回覆的保留期與筆數上限` |
 | `reply-notice.test.mjs` 忙碌延後／寬限／上限／延後期間回覆 | `tests::對方忙碌_…`、`延後期間對方回覆了_…` |
 | `reply-notice.test.mjs` 視窗已關閉、合併、sent／replied 記號 | `tests::對方視窗已關閉_…`、`逾時沒回_…30_分鐘內只報一次`、`視窗在轉交後曾寄信給原寄件人_…`、`轉交逾時_但對方已經用_reply_to_回了_…` |
@@ -106,6 +108,12 @@ Rust 測試在各模組的 `#[cfg(test)]`，整合測試在 `bridge/tests.rs`（
 | （新增）鎖與舊橋共存 | `lock::tests::*`、`handoff::tests::*`、`tests::管理器_…`、`設定_預設關閉_…` |
 | （新增）名單／上線 | `roster::tests::*`、`tests::名單回報_…` |
 | （新增）真的子程序 | `tests::真的子程序_…`（啟動、轉交、回覆寄回、結束時只關自己的 worker、清掉 `mailbox.pid`／`bridge.pid`） |
+| `rooms.test.mjs`（bridge 部分：只轉 for_me、標頭與上下文、`room_post` 身分、游標、read_seq=0、不可轉交略過、不需回覆、429） | `tests::rooms_launch::群組_*`、`rooms::tests::*` |
+| `attach.test.mjs`（格式模組：safeText、normalize、noteLine、bodyWithNotes、群組文字） | `attach::tests::*`、`rooms::tests::標頭_提示_內文_…` |
+| `launcher.test.mjs`（設定組合、摘要不含指令、check 各項、流程成功／驗不過／開不起來／unconfirmed 補 ok／每小時上限、第一句話、名單附摘要、沒設定回 failed 與 null） | `launcher::tests::*`、`tests::rooms_launch::遠端開視窗_*` |
+| `launcher.test.mjs` 端到端（Start-Process 開假視窗） | `tests::rooms_launch::遠端開視窗_真的開一個隱藏視窗_…`（Windows；假視窗程式是測試執行檔自己） |
+| `launch-auto-optin.test.mjs`（自動 profile 預設關） | `launcher::tests::沒有_launcher_json_也沒同意_…`、`設定_允許遠端開視窗預設關_…` |
+| （新增）孤兒清理、舊橋退出後接手 | `orphans::tests::*`、`tests::rooms_launch::孤兒清理_…`（真的程序，只收自己記下的）、`管理器_舊橋退出後自動接手_…` |
 | （新增）節點代號 | `tests::自動產生的節點代號辨識_…`、`視窗名預設值_新電腦用電腦名稱_不含節點代號`（`lib.rs`） |
 
 守門測試都做過還原驗證（拿掉被守的行為，確認對應測試會紅）：ASN 自己視窗跳過、self-recv 跳過、假 nonce 偵測、30 分鐘合併、去重、ack 時機。
@@ -116,4 +124,61 @@ Rust 測試在各模組的 `#[cfg(test)]`，整合測試在 `bridge/tests.rs`（
 2. **非互動式 session**：Node 橋另存一份含背景 session 的 `agents`（給 `IRORI_RELAY_ALLOW` 用）。內建橋名單與可轉交名單相同，`IRORI_RELAY_ALLOW` 只對名單內的視窗有效。
 3. **忙碌狀態**：固定 busy／working／running（不分大小寫），不讀 `IRORI_BUSY_STATUS_RE`。
 4. **寄給 ASN 自己視窗的信**：內建橋不處理（見第 2 節表格）。
-5. **群組、附件、孤兒清理**：第二段。
+5. **群組、附件、孤兒清理**（第二段已搬）：
+   - 群組上下文與附件的「下載指令」暫時沿用 Node：`node "<relay/machine/attach.mjs>"`、`node "<room.mjs>" --room-read …`。指令前綴的來源是環境變數 `IRORI_ATTACH_CMD`／`IRORI_ROOM_CMD`（整串原樣使用），其次從 ASN 執行檔往上找 `relay/machine/` 底下的腳本（從原始碼資料夾執行時找得到），都找不到就不給指令，只留附件編號與「請到 ASN 查看」。第四段做 `asn attach`／`asn room` 命令列之後，兩處一起換成 ASN 自己的命令，不再需要 Node。
+   - 群組項目的逾時：轉交逾時、等回覆逾時都只記 log 並清掉，不寄通知（與 Node 橋相同）。
+   - 孤兒清理多一道限制（見第 3 節）。
+6. **自己更新**：Node 橋的 `self-update.mjs` 是「橋自己 git pull 並重啟」。內建橋跟著 ASN 走，ASN 的更新由 ASN 自己的更新機制（`updater.rs`）負責，所以這一項不搬。
+
+## 7. 遠端開視窗（第三段）
+
+目標：打開 ASN ＝ 這台收發室上線；別台（工作機）的 ASN 看到這台上線，可以遠端替這台開一個新的 Claude 視窗並跟它溝通。流程照 `relay/machine/launcher.mjs`：
+
+1. **名單回報附摘要**：`launcher` 欄位＝`{ profiles:[{id,label}], cwd_allow:[…], max_per_hour }`，**不含指令**；沒有可用設定送 null（仲介會清掉，別台就不顯示「開新夥伴」）。
+2. **取走待辦**：門鈴響、輪詢、重試時，信件拉完之後 `launch_pending`；每個 id 只處理一次。
+3. **執行前再驗一次**（`launcher.rs` `verify`）：視窗名格式、profile 存在且沒停用、cwd 在白名單且是存在的資料夾（先正規化，`..` 與符號連結落到實際路徑）、不和本機視窗重名（不分大小寫，也包含正在開的）、每小時上限（`launch-history.json`，與 Node 橋同格式，重啟也算）。沒通過就 `launch_result failed` 並寫原因。
+4. **開視窗**：`launch/local.rs` 的 `start_remote_window`——Claude 引擎先自動信任該資料夾（`claude_json`），再依本機 profile 組命令，用有自己主控台的 PowerShell 視窗開出來（Windows）。
+5. **等它出現**：輪詢 `~/.claude/sessions`（每 2 秒），30 秒內沒出現先回 `unconfirmed`（可能卡在「是否信任此資料夾」，提示到電腦前按 Enter），3 分鐘內出現再補 `ok`，超過就放棄（只記 log）。
+6. **第一句話**：視窗出現後馬上刷新名單，有 `first_message` 就當成 owner 的來信（id＝launch id）經收發室送進新視窗。
+7. 紀錄寫在 `launch.log`（JSON 一行一筆，與 Node 橋同位置）與 `bridge.log`。
+
+**指令只來自本機**（守門測試 `守門_啟動請求的處理程式不讀任何指令類欄位`、`遠端開視窗_取走_開視窗_…`：請求夾帶 `command`／`args`／`env` 也不採用，開出來的命令等於本機 profile 展開 `{name}` 之後的結果）。遠端請求只有 profile 名、視窗名、cwd 會被採用。
+
+**設定來源與同意**（延續 Node 橋「遠端開視窗是擴大權限的動作，預設關」的裁決）：
+
+| 條件 | profile | 工作資料夾白名單 |
+|---|---|---|
+| 沒有 `launcher.json`、設定頁「允許我的其他設備替這台開新視窗」關著（預設） | 無（整個功能關閉，名單 launcher 送 null） | — |
+| 有 `launcher.json`（本機自己寫的＝明確同意） | 檔案裡的 profile | 檔案裡的 `cwd_allow` |
+| 打開「允許我的其他設備替這台開新視窗」（`bridge.json` 的 `allow_remote_launch`） | 再加上 ASN 偵測到的 Claude CLI（自動 profile） | 再加上啟動偏好的 `cwdAllow` 與「工作資料夾候選」（`launch/cwds.rs`：最近用過、開著的視窗、信任過的資料夾，最多 15 筆） |
+
+其他限制：只收 **Claude 引擎的視窗型 profile**（Codex、Gemini 等背景夥伴留到第五段）；白名單最多 50 筆（仲介的上限）；不存在的資料夾不列；所有路徑正規化成同一種寫法再比對。切換同意不用重啟橋（每次回報和處理請求都重讀 `bridge.json`）。
+
+**安全取捨（請小良哥確認）**：打開同意後，白名單包含「工作資料夾候選」（開著的視窗、信任過的資料夾），不只是使用者在「瀏覽…」明確加過的。這是照任務要求（資料來源改用 `launch/prefs.rs`、`launch/cwds.rs`）；如果要更嚴，改成只用 `launcher.json` 與 `cwdAllow`，只要在 `SystemEnv::build` 拿掉 `cwds::candidates` 那一行。
+
+**前端**：「開新夥伴」選別台設備時，模型列用那台回報的 profile 與標籤（不再顯示本機偵測到的 CLI），工作資料夾下拉用它回報的 `cwd_allow`；開對話框時重抓一次別台的設定。那台是 ASN 內建橋或舊版 Node 橋都一樣。設定頁新增「允許我的其他設備替這台開新視窗」。
+
+## 8. 留到後面的段
+
+- 第四段：`asn send`／`asn recv`／`asn room`／`asn attach` 命令列（取代 `send.mjs` 等，含 `replied/`、`sent/` 記號與父行程鏈身分判定），附件與群組的下載／翻頁指令改成 ASN 自己的命令。
+- 第五段：Codex、ACP（Gemini／Grok 背景夥伴）引擎；遠端開視窗支援它們；opt-in 後把預設改為開、淘汰安裝程式的工作排程。
+- 遠端開視窗在 Linux／macOS 的實機驗證（程式沿用 `start_window_unix`，沒有在真機跑過）。
+
+## 9. 真機驗證步驟（第二段＋第三段）
+
+測試都用假後端，真機只能人工驗。建議被控端用**沒有舊 Node 橋**的電腦；家用機的收發室橋正在服務時不要動它。
+
+1. **被控端（甲）**：裝這一版 ASN，登入。設定 → 收發室 → 勾「讓 ASN 負責這台的收發室」。
+   - 若顯示「這台的收發室目前由舊版收發室橋負責」：先自己停掉舊橋（停用工作排程 `IroriRelayMachine-<代號>` 並結束它），ASN 會在 5 秒內自動接手；不需要重開 ASN。
+   - 看記錄檔（設定 → 記錄資料夾 → `bridge.log`）：應有 `bridge starting … (ASN built-in)`，沒有 `killed orphan`（除非上次是被硬砍）。
+2. 同一頁勾「允許我的其他設備替這台開新視窗」。
+3. 等 1 分鐘（名單每 60 秒回報一次）。**操控端（乙，另一台電腦的 ASN，同一帳號）**：名單上方 ＋ → 選甲這台設備。對話框應顯示甲回報的模型（例如「Claude（互動視窗）」）與甲的工作資料夾清單，而不是乙自己偵測到的 CLI。
+4. 填名字、選資料夾、寫第一句話（例如「回我一句收到」）→ 開啟。
+   - 甲的螢幕應跳出新的 Claude 視窗（標題是那個名字）；乙的名單幾秒到幾十秒內出現這個新夥伴。
+   - 30 秒內沒出現，乙會先看到「可能卡在信任此資料夾，請到電腦前按一次 Enter」；按了之後 3 分鐘內出現會補成功。
+   - 第一句話應已送進新視窗，視窗的回覆會回到乙。
+5. 乙對這個新夥伴再傳一句，確認甲的 Claude 視窗收到並回覆。
+6. **群組**：在乙建立含甲某個視窗的群組並點名它 → 甲的視窗收到 `[群組 …]` 開頭的訊息，回覆會貼回群組；帶照片的訊息應多一行 `〔照片〕…下載：…`。
+7. **同意開關**：甲取消勾「允許我的其他設備替這台開新視窗」→ 約 1 分鐘內乙選甲時應顯示「這台設備尚未回報啟動設定」（甲沒有 `launcher.json` 的情況）。
+8. **要確認的未知數**：session 檔的 `status` 欄位是否和 `claude agents --json` 一致（第 6 節第 1 點，忙碌延後依賴它）；「30 秒內出現在 `~/.claude/sessions`」的判斷在 Claude Code 新版上是否仍成立（視窗名來自 `-n <名字>`）。
+9. **退回**：取消勾「讓 ASN 負責這台的收發室」→ 橋停止，`bridge.pid` 被清掉；舊橋要自己重新啟用工作排程。
