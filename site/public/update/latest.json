@@ -1,11 +1,11 @@
 {
-  "version": "0.1.10",
-  "notes": "設定頁改成分類列表，點了開對話框；指引也改成對話框。",
-  "pub_date": "2026-10-21T04:33:01.289Z",
+  "version": "0.1.11",
+  "notes": "開新夥伴失敗或背景啟動逾時會跳出說明對話框，可直接開啟記錄資料夾。",
+  "pub_date": "2026-10-21T05:03:03.113Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjV0SkU5NmQ2bzM5NHkrOVVBWjFCWWIrUUZTOUtEVU5DVjFyR2pINlAwZ1JqUmxDVlYwT3FVNGFYWjQ3eE5NSWxyeFh3ajlpd3R2T01PeDJ2WUdOMlFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNTU3MTgwCWZpbGU6QVNOXzAuMS4xMF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjEwCktYZy85ZHJYRDRRSkxBdWcrbnRhYW9ibTVZaDlCR1ljZ1BnRHNJVkROR2ZpUkhYNWxMZHBqL2lFRm12OGJlcEovUCthUzRSZDlyYzJYRi96Rkk0MEFnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.10_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjQzbDNURTJIdCtOVDRWNVlxbk83K1RudzlpYzlOZzFIdjNiaEIyRWdMNmtIdDRIY3Z4OVh4d0FETXF1VWNlQXhBZFdYWUNQc3A2V1FwUlJZR05oTXdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNTU4OTgyCWZpbGU6QVNOXzAuMS4xMV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjExClJlNjdVTVhhYWhLQVVxUkhRcnFzMUVLT0JIVlcrSC9INGhUMitwSFVGT2ZYNW5YbG9kK1BCcUtKeDFrcENiWXdpZXVaQ3hmTVdBbEJ6UFI3TkFwdURnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.11_x64-setup.exe"
     }
   }
 }
