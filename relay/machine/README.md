@@ -250,6 +250,7 @@ node D:/Github/irori/relay/machine/recv.mjs --once     # 拉一次、印出、ac
 
 使用者在 Irori Chat「聯絡人」分頁對某台電腦按「＋ 開新視窗」→ 仲介記一筆 launch 並敲門鈴 → 橋 `launch_pending` 取走 → 照**本機** launcher.json 開視窗 → `launch_result` 回報。
 - 設定：`~/.irori-relay/launcher.json`（不進 repo；範本 `launcher.example.json`；`IRORI_LAUNCHER_FILE` 可改路徑）。沒有這個檔＝這台不能遠端開視窗（名單回報 `launcher: null`，手機上不出現按鈕）。profile 可加 `"engine": "codex"` 指定用哪個轉接器開（沒寫＝第一個宣告 `openWindow` 的轉接器；指定了但沒載入該轉接器會回報開不起來）。
+- 自動偵測本機 CLI（claude、codex、agy…）併成遠端開視窗的 profile **預設關**；要開請在橋的環境設 `IRORI_LAUNCH_AUTO=1`（`IRORI_LAUNCH_NO_AUTO=1` 仍可強制關）。ASN 電腦版的「開新夥伴」在本機啟動，不受這個設定影響。
   - `profiles.<名>`：`label`、`command`（可用 `%SystemRoot%` 這類環境變數）、`args`（字串陣列；**唯一**允許的替換欄位是 `{name}`，其他 `{…}` 整個檔案拒收）
   - `cwd_allow`：可選的工作資料夾（精確比對，不做前綴）；`max_per_hour`：每小時上限（預設 6，最多 20）
   - 改檔不用重啟橋：每次用到時看修改時間重讀；格式錯在 bridge.log 記一行原因。
