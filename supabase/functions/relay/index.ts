@@ -6,6 +6,7 @@ import { ACCOUNT_ACTIONS, type AccountDeps, cleanDisplayName, handleAccountActio
 import { expectsReplyArgs } from "../_shared/expects_reply.ts";
 import { parseSelfName } from "../_shared/node_name.ts";
 import { parseAsnPresence } from "../_shared/asn_presence.ts";
+import { handlePartnerSync } from "../_shared/partners.ts";
 import { normalizeRosterAgents } from "../_shared/roster.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
 import * as signal from "../_shared/signal.ts";
@@ -266,6 +267,11 @@ Deno.serve(async (req) => {
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     if (data?.error) return json(400, { error: data.error });
     return json(200, { ok: true });
+  }
+  // 夥伴 ID（#109）：ASN 內建橋回報視窗名單時順便送「名字＋session」，後端判斷是哪位夥伴並回夥伴 ID。節點一律是金鑰所屬的 me.id
+  if (action === "partner_sync" && req.method === "POST") {
+    const r = await handlePartnerSync({ rpc }, me, await req.json().catch(() => null));
+    return json(r.status, r.body);
   }
   if (action === "leave" && req.method === "POST") {
     const { error } = await db.rpc("irori_relay_leave", { p_node: me.id });

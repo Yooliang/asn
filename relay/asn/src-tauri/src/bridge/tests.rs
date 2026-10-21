@@ -37,6 +37,10 @@ struct FState {
     launches: Vec<Value>,
     launch_results: Vec<Value>,
     launch_pending_calls: usize,
+    /// 夥伴 ID（#109）：收到的 partner_sync 請求；partner_resp 為 None＝後台沒這個動作（404）；partner_fail＝回 500
+    partner_posts: Vec<Value>,
+    partner_resp: Option<Value>,
+    partner_fail: bool,
 }
 
 fn pct_decode(s: &str) -> String {
@@ -160,6 +164,17 @@ fn handle_conn(mut c: std::net::TcpStream, st: Arc<Mutex<FState>>) {
         "roster" => {
             s.rosters.push(body);
             (200, json!({"ok": true}))
+        }
+        "partner_sync" => {
+            s.partner_posts.push(body);
+            if s.partner_fail {
+                (500, json!({"error": "internal"}))
+            } else {
+                match s.partner_resp.clone() {
+                    Some(r) => (200, r),
+                    None => (404, json!({"error": "not_found"})),
+                }
+            }
         }
         _ => (404, json!({"error": "not_found"})),
     };
@@ -1046,6 +1061,82 @@ async fn 往來記錄_超過兩百筆輪替_活檔留最近的_舊的進_archive
     let arch = h.core.cfg.handoff_dir.join("archive");
     let n: usize = std::fs::read_dir(&arch).unwrap().flatten().map(|e| std::fs::read_to_string(e.path()).unwrap().lines().filter(|l| l.starts_with('▌')).count()).sum();
     assert_eq!(n, 5);
+}
+
+// ---- 夥伴 ID（#109）----------------------------------------------------------------------------
+
+const PID_B: &str = "p_00112233445566778899";
+
+fn put_session_with_id(dir: &std::path::Path, pid: u32, name: &str, session: &str) {
+    std::fs::write(dir.join(format!("{pid}.json")), json!({"pid": pid, "sessionId": session, "name": name, "cwd": "D:\\x", "status": "idle", "kind": "interactive", "entrypoint": "cli", "updatedAt": 1}).to_string()).unwrap();
+}
+
+#[tokio::test]
+async fn 夥伴_id_回報名字與_session_記憶體留_id_往來記錄檔頭帶_id_檔名仍是視窗名() {
+    let fr = FakeRelay::start();
+    fr.st.lock().unwrap().partner_resp = Some(json!({"ok": true, "partners": [{"name": "T-乙", "partner_id": PID_B}, {"name": "T-ASN", "partner_id": "p_ffeeddccbbaa99887766"}]}));
+    let work = tempfile::tempdir().unwrap();
+    let sessions = tempfile::tempdir().unwrap();
+    put_session_with_id(sessions.path(), 5001, "T-乙", "sess-0001-aaaa");
+    let mut core = new_core(&fr, work.path(), sessions.path(), Arc::new(FakeSink::default()), T0);
+    core.refresh_roster(T0).await;
+    let posts = fr.st.lock().unwrap().partner_posts.clone();
+    assert_eq!(posts, vec![json!({"windows": [{"name": "T-乙", "engine": "claude", "session_id": "sess-0001-aaaa"}, {"name": "T-ASN", "engine": "asn"}]})]);
+    assert_eq!(core.partner_id("T-乙"), Some(PID_B));
+    assert_eq!(core.partner_id("沒這個"), None);
+    // 轉交一封信後，記錄檔（檔名仍是視窗名）第一行是檔頭，記錄照常
+    fr.put(mail(1, json!({})));
+    core.pull("test", T0).await;
+    core.on_worker_line(res(&format!("SENT {}", uid(1))), T0 + 10).await;
+    let f = super::corrlog::file_of(&core.cfg.handoff_dir, "T-乙");
+    assert_eq!(f.file_name().unwrap().to_string_lossy(), "T-乙.md");
+    let t = std::fs::read_to_string(f).unwrap();
+    assert_eq!(t.lines().next().unwrap(), super::corrlog::header_line(PID_B, "T-乙"));
+    assert!(t.contains(&format!("收到｜W/W-政策 → T-乙｜id={}", uid(1))));
+}
+
+#[tokio::test]
+async fn 夥伴_id_後台不支援_404_靜默停用_只記一次_信與記錄照舊() {
+    let fr = FakeRelay::start(); // partner_resp 沒設定＝404
+    let work = tempfile::tempdir().unwrap();
+    let sessions = tempfile::tempdir().unwrap();
+    put_session_with_id(sessions.path(), 5001, "T-乙", "sess-0001-aaaa");
+    let mut core = new_core(&fr, work.path(), sessions.path(), Arc::new(FakeSink::default()), T0);
+    core.refresh_roster(T0).await;
+    core.refresh_roster(T0 + 1).await;
+    core.refresh_roster(T0 + 2).await;
+    assert_eq!(fr.st.lock().unwrap().partner_posts.len(), 1, "停用後不再呼叫");
+    assert_eq!(core.log.count("partner_sync not supported"), 1);
+    assert_eq!(core.log.count("partner_sync failed"), 0);
+    assert_eq!(fr.rosters().len(), 3, "名單照常回報");
+    assert_eq!(core.partner_id("T-乙"), None);
+    fr.put(mail(1, json!({})));
+    core.pull("test", T0 + 10).await;
+    core.on_worker_line(res(&format!("SENT {}", uid(1))), T0 + 20).await;
+    let t = std::fs::read_to_string(super::corrlog::file_of(&core.cfg.handoff_dir, "T-乙")).unwrap();
+    assert!(t.starts_with('▌') && !t.contains("夥伴 ID"), "沒有 ID 就沒有檔頭：{t}");
+}
+
+#[tokio::test]
+async fn 夥伴_id_暫時失敗_500_只記一次_下一輪再試_好了就接上() {
+    let fr = FakeRelay::start();
+    fr.st.lock().unwrap().partner_fail = true;
+    let work = tempfile::tempdir().unwrap();
+    let sessions = tempfile::tempdir().unwrap();
+    put_session_with_id(sessions.path(), 5001, "T-乙", "sess-0001-aaaa");
+    let mut core = new_core(&fr, work.path(), sessions.path(), Arc::new(FakeSink::default()), T0);
+    core.refresh_roster(T0).await;
+    core.refresh_roster(T0 + 1).await;
+    assert_eq!(fr.st.lock().unwrap().partner_posts.len(), 2);
+    assert_eq!(core.log.count("partner_sync failed"), 1);
+    assert_eq!(core.partner_id("T-乙"), None);
+    {
+        let mut s = fr.st.lock().unwrap();
+        s.partner_fail = false;
+        s.partner_resp = Some(json!({"ok": true, "partners": [{"name": "T-乙", "partner_id": PID_B}]}));
+    }
+    core.refresh_roster(T0 + 2).await;
+    assert_eq!(core.partner_id("T-乙"), Some(PID_B));
 }
 
 mod rooms_launch;

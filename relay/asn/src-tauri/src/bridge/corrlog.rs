@@ -4,6 +4,7 @@
 //! - 單筆內文超過 4 KB 截斷並加「（以下省略）」。
 //! - 檔案超過 1 MB 或 200 筆：舊的搬到 `archive/<視窗名>-<yyyymmdd-HHMMSS>.md`，活檔只留最近的（最多 200 筆、不超過 1 MB）。
 //! - 寫檔用 write_atomic；行程內用一把互斥鎖串起來（一台電腦只有一個橋）。
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -12,6 +13,24 @@ pub const MAX_ENTRIES: usize = 200;
 pub const MAX_FILE_BYTES: usize = 1024 * 1024;
 pub const TRUNC_MARK: &str = "（以下省略）";
 const MARK: char = '▌';
+/// 檔頭行（#109）：記這個視窗名目前對應的夥伴 ID，之後記錄改以夥伴 ID 為鍵時（#108）可以接上；檔名仍用視窗名
+pub const HEADER_PREFIX: &str = "# 夥伴 ID：";
+
+/// 檔頭行內容：`# 夥伴 ID：p_xxx｜目前名字：甲`
+pub fn header_line(partner_id: &str, name: &str) -> String {
+    format!("{HEADER_PREFIX}{partner_id}｜目前名字：{name}")
+}
+
+/// 切出檔頭行（有的話）與其餘內容
+fn split_header(text: &str) -> (Option<&str>, &str) {
+    if !text.starts_with(HEADER_PREFIX) {
+        return (None, text);
+    }
+    match text.find('\n') {
+        Some(i) => (Some(text[..i].trim_end_matches('\r')), &text[i + 1..]),
+        None => (Some(text.trim_end_matches('\r')), ""),
+    }
+}
 
 /// `%USERPROFILE%\.asn\handoff`（沿用身分模組的家目錄，測試用同一個覆蓋方式）
 pub fn default_dir() -> PathBuf {
@@ -55,6 +74,8 @@ pub struct Entry<'a> {
 pub struct CorrLog {
     dir: PathBuf,
     lock: Mutex<()>,
+    /// 視窗名 → 夥伴 ID（橋回報名單時由後端回傳；沒有就不寫檔頭，已有的檔頭保持原樣）
+    partners: Mutex<BTreeMap<String, String>>,
 }
 
 /// 本地時間 (年,月,日,時,分,秒)。Windows 用系統時區；其他平台退回 UTC
@@ -162,7 +183,11 @@ fn split_entries(text: &str) -> Vec<&str> {
 
 impl CorrLog {
     pub fn new(dir: PathBuf) -> CorrLog {
-        CorrLog { dir, lock: Mutex::new(()) }
+        CorrLog { dir, lock: Mutex::new(()), partners: Mutex::new(BTreeMap::new()) }
+    }
+    /// 更新視窗名對夥伴 ID 的對照（整份換掉）；下一次追加時寫進檔頭
+    pub fn set_partners(&self, m: BTreeMap<String, String>) {
+        *self.partners.lock().unwrap_or_else(|p| p.into_inner()) = m;
     }
     #[cfg(test)]
     pub fn dir(&self) -> &Path {
@@ -179,12 +204,20 @@ impl CorrLog {
         }
         let _g = self.lock.lock().unwrap_or_else(|p| p.into_inner());
         let file = file_of(&self.dir, name);
-        let mut text = std::fs::read_to_string(&file).unwrap_or_default();
+        let existing = std::fs::read_to_string(&file).unwrap_or_default();
+        // 檔頭行先拆開：輪替只認記錄，不能把檔頭當雜訊丟掉；寫回時用最新的夥伴 ID，沒有就保留原本的
+        let (old_head, rest) = split_header(&existing);
+        let mut text = rest.trim_start_matches(['\r', '\n']).to_string();
         if !text.is_empty() && !text.ends_with('\n') {
             text.push('\n');
         }
         text.push_str(&render(e));
         let text = self.rotate(name, text, e.ts_ms)?;
+        let head = self.partners.lock().unwrap_or_else(|p| p.into_inner()).get(name).map(|id| header_line(id, name)).or_else(|| old_head.map(String::from));
+        let text = match head {
+            Some(h) => format!("{h}\n\n{text}"),
+            None => text,
+        };
         crate::write_atomic(&file, &text).map_err(|e| format!("存不了往來記錄 {}：{e}", file.display()))
     }
 
@@ -310,6 +343,76 @@ mod tests {
         assert!(live.len() <= MAX_FILE_BYTES + 5000);
         assert!(live.contains("id=id-299"));
         assert!(c.dir().join("archive").exists());
+    }
+
+    fn pid(n: u8) -> String {
+        format!("p_{}", format!("{n:02x}").repeat(10))
+    }
+
+    #[test]
+    fn 夥伴_id_寫在檔頭行_檔名仍是視窗名_每次追加只留一行檔頭() {
+        let t = tempfile::tempdir().unwrap();
+        let c = CorrLog::new(t.path().join("handoff"));
+        c.set_partners(BTreeMap::from([("乙".to_string(), pid(1))]));
+        c.append("乙", &e(1_700_000_000_000, Dir::Received, "id-1", "你好")).unwrap();
+        c.append("乙", &e(1_700_000_001_000, Dir::Replied, "id-1", "好")).unwrap();
+        let s = std::fs::read_to_string(file_of(c.dir(), "乙")).unwrap();
+        assert!(s.starts_with(&format!("{HEADER_PREFIX}{}｜目前名字：乙\n\n{MARK} ", pid(1))), "{s}");
+        assert_eq!(s.matches(HEADER_PREFIX).count(), 1);
+        assert_eq!(split_entries(&s).len(), 2);
+    }
+
+    #[test]
+    fn 同一個視窗名換了夥伴_檔頭跟著更新_記錄不掉() {
+        let t = tempfile::tempdir().unwrap();
+        let c = CorrLog::new(t.path().to_path_buf());
+        c.set_partners(BTreeMap::from([("乙".to_string(), pid(1))]));
+        c.append("乙", &e(1, Dir::Received, "i1", "x")).unwrap();
+        c.set_partners(BTreeMap::from([("乙".to_string(), pid(9))]));
+        c.append("乙", &e(2, Dir::Received, "i2", "y")).unwrap();
+        let s = std::fs::read_to_string(file_of(c.dir(), "乙")).unwrap();
+        assert!(s.starts_with(&header_line(&pid(9), "乙")));
+        assert_eq!(s.matches(HEADER_PREFIX).count(), 1);
+        assert_eq!(split_entries(&s).len(), 2);
+    }
+
+    #[test]
+    fn 沒有夥伴_id_不寫檔頭_已有檔頭的檔保持原樣_後端不支援時照舊() {
+        let t = tempfile::tempdir().unwrap();
+        let c = CorrLog::new(t.path().to_path_buf());
+        c.append("乙", &e(1, Dir::Received, "i1", "x")).unwrap();
+        assert!(!std::fs::read_to_string(file_of(c.dir(), "乙")).unwrap().contains(HEADER_PREFIX));
+        // 先有 ID 後來查不到（例如後端暫時沒回）：保留原檔頭
+        c.set_partners(BTreeMap::from([("丙".to_string(), pid(2))]));
+        c.append("丙", &e(2, Dir::Received, "i2", "y")).unwrap();
+        c.set_partners(BTreeMap::new());
+        c.append("丙", &e(3, Dir::Received, "i3", "z")).unwrap();
+        let s = std::fs::read_to_string(file_of(c.dir(), "丙")).unwrap();
+        assert!(s.starts_with(&header_line(&pid(2), "丙")));
+        assert_eq!(split_entries(&s).len(), 2);
+        // 既有的舊檔（沒有檔頭）之後拿到夥伴 ID：補上檔頭，原有記錄不掉
+        c.set_partners(BTreeMap::from([("乙".to_string(), pid(3))]));
+        c.append("乙", &e(4, Dir::Received, "i4", "w")).unwrap();
+        let s = std::fs::read_to_string(file_of(c.dir(), "乙")).unwrap();
+        assert!(s.starts_with(&header_line(&pid(3), "乙")));
+        assert_eq!(split_entries(&s).len(), 2);
+    }
+
+    #[test]
+    fn 輪替時檔頭不會被當雜訊丟掉_封存檔不帶檔頭() {
+        let t = tempfile::tempdir().unwrap();
+        let c = CorrLog::new(t.path().join("handoff"));
+        c.set_partners(BTreeMap::from([("乙".to_string(), pid(1))]));
+        for i in 0..205u32 {
+            c.append("乙", &e(1_700_000_000_000, Dir::Received, &format!("id-{i:03}"), "x")).unwrap();
+        }
+        let live = std::fs::read_to_string(file_of(c.dir(), "乙")).unwrap();
+        assert!(live.starts_with(&header_line(&pid(1), "乙")));
+        assert_eq!(live.matches(HEADER_PREFIX).count(), 1);
+        let arch: Vec<_> = std::fs::read_dir(c.dir().join("archive")).unwrap().flatten().collect();
+        assert_eq!(arch.len(), 1);
+        assert!(!std::fs::read_to_string(arch[0].path()).unwrap().contains(HEADER_PREFIX));
+        assert_eq!(split_entries(&live).len() + split_entries(&std::fs::read_to_string(arch[0].path()).unwrap()).len(), 205);
     }
 
     #[test]
