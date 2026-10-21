@@ -8,6 +8,7 @@
 //! - 切換前備份：`<home>\.asn\claude-backup\`（只留最近一次）
 //!
 //! 紅線：本模組的函式一律吃 `home` 參數；只有 `claude_home()` 會決定真實家目錄，測試不得呼叫它。
+use crate::nowin::NoWindow;
 use serde::Serialize;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -143,7 +144,7 @@ fn restrict_dir(dir: &Path) {
     {
         if let Some(user) = std::env::var_os("USERNAME") {
             let who = format!("{}:(OI)(CI)F", user.to_string_lossy());
-            let ok = std::process::Command::new("icacls")
+            let ok = std::process::Command::new("icacls").no_window()
                 .arg(dir)
                 .args(["/inheritance:r", "/grant:r"])
                 .arg(who)
@@ -705,7 +706,7 @@ mod tests {
         let h = d.path();
         login(h, "u-a", "a@x.test", "A1");
         save_current(h, "甲").unwrap();
-        let o = std::process::Command::new("icacls").arg(store_root(h)).output().unwrap();
+        let o = std::process::Command::new("icacls").no_window().arg(store_root(h)).output().unwrap();
         let t = String::from_utf8_lossy(&o.stdout).to_lowercase();
         assert!(!t.contains("everyone") && !t.contains("\\users:") && !t.contains("authenticated users"), "{t}");
         assert!(t.contains(&std::env::var("USERNAME").unwrap().to_lowercase()));

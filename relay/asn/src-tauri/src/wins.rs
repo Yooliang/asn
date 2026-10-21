@@ -1,5 +1,6 @@
 //! 多視窗：每個好友一扇對話、右下角提示視窗（置頂、不搶焦點、不進工作列、透明）、震動（真的移動視窗）、
 //! 視窗按鈕（最小化／最大化／關閉）與 --shot 的螢幕擷取。
+use crate::nowin::NoWindow;
 use crate::{App, BROWSER_ARGS};
 use serde::Deserialize;
 use std::path::Path;
@@ -361,7 +362,7 @@ foreach ($s in ($env:ASN_SPECS -split ';')) {
   $g.Dispose(); $bmp.Dispose()
 }
 "#;
-    let status = tokio::process::Command::new("powershell")
+    let status = tokio::process::Command::new("powershell").no_window()
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .env("ASN_SPECS", specs.join(";"))
         .env("ASN_DIR", dir)
@@ -399,7 +400,7 @@ async fn take_shot_capture(app: &AppHandle, dir: &Path, tab: Option<String>) -> 
         }
         let out = dir.join(format!("{name}.png"));
         let area = format!("{},{},{},{}", p.x, p.y, s.width, s.height);
-        let status = tokio::process::Command::new(&scrot)
+        let status = tokio::process::Command::new(&scrot).no_window()
             .args(["-o", "-a", &area, out.to_string_lossy().as_ref()])
             .status()
             .await
