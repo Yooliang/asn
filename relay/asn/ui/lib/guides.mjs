@@ -85,10 +85,10 @@ export const GUIDES = [
       { k: 'li', t: '只有被點名、或主人與希緒發問時才需要回；不需要回就不要回。回覆會經收發室貼回群組。' },
       { k: 'h', t: 'Claude 視窗自己查群組（只讀）' },
       { k: 'li', t: '列出我在的群組與新訊息數：' },
-      { k: 'code', t: 'node %USERPROFILE%\\.irori-relay\\app\\room.mjs --rooms' },
+      { k: 'code', t: 'asn-cli room --rooms' },
       { k: 'li', t: '讀某個群組最近的訊息（群組 id 或名稱都可以，最多 200 則）：' },
-      { k: 'code', t: 'node %USERPROFILE%\\.irori-relay\\app\\room.mjs --room-read <群組id或名稱> --last 20' },
-      { k: 'note', t: '這兩個指令只讀，不會改已讀位置；不是成員的群組會被擋下。' },
+      { k: 'code', t: 'asn-cli room --room-read <群組id或名稱> --last 20' },
+      { k: 'note', t: '這兩個指令只讀，不會改已讀位置；不是成員的群組會被擋下。指令在 ASN 的安裝資料夾（asn-cli），完整路徑可到設定的「視窗」分類，在「寄信指令」複製。' },
     ],
   },
   {

@@ -13,7 +13,7 @@ import { OTHER_VENDORS, VENDOR_UNSUPPORTED, accountLine } from './claude-account
 export const SETTING_OPS = [
   'sound', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-add', 'acct-remote-node', 'acct-remote-switch', 'acct-trust',
-  'closeTo', 'autostart', 'bridge-enable', 'bridge-launch', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'autoCheck', 'check-update', 'launch-max', 'launch-cwd', 'avatar-remove',
+  'closeTo', 'autostart', 'bridge-enable', 'bridge-launch', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'cli-copy', 'autoCheck', 'check-update', 'launch-max', 'launch-cwd', 'avatar-remove',
 ]
 
 export const SettingsPanel = {
@@ -160,6 +160,12 @@ export const SettingsPanel = {
             </div>
           </template>
           <small v-if="st.bridge.error">{{ st.bridge.error }}</small>
+        </section>
+        <section class="set-card" aria-label="寄信指令" v-if="st.cli">
+          <small>Claude 視窗用這個命令列寄信、收信、看群組、下載附件，不必另外安裝任何東西：</small>
+          <code class="set-code">{{ st.cli.path }}</code>
+          <code class="set-code">{{ st.cli.example }}</code>
+          <button class="aero-btn" type="button" @click="act('cli-copy')">{{ st.cli.copied ? '已複製' : '複製寄信指令' }}</button>
         </section>
       </template>
       <template v-if="catKey === 'update'">

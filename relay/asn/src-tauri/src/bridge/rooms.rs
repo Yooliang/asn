@@ -52,7 +52,7 @@ pub fn room_text(room_name: &str, msg: &Value, attach_cmd: Option<&str>) -> Stri
     format!("{}\n{}\n{}", room_header(room_name, msg), ROOM_HINT, body_with_notes(body, msg.get("attachments"), attach_cmd))
 }
 
-/// 上下文：前面最近幾則（舊→新，每則一行、過長截斷）＋怎麼往回翻（room_cmd＝room.mjs 的指令前綴，沒有就改成請到 ASN 看）
+/// 上下文：前面最近幾則（舊→新，每則一行、過長截斷）＋怎麼往回翻（room_cmd＝asn room 的指令前綴，沒有就改成請到 ASN 看）
 pub fn context_text(room_id: &str, prev: &[Value], room_cmd: Option<&str>) -> String {
     let line = |m: &Value| {
         let who = m.get("from_name").and_then(Value::as_str).filter(|s| !s.is_empty()).map(String::from).unwrap_or_else(|| display_from(m.get("from").and_then(Value::as_str).unwrap_or("")));
@@ -137,12 +137,12 @@ mod tests {
     #[test]
     fn 上下文_舊到新_截斷_指令前綴() {
         let prev = vec![json!({"seq": 2, "from": "W~W-政策", "from_name": "政策", "body": "群組內文-2"}), json!({"seq": 3, "from": "~owner", "body": format!("a\n  b {}", "字".repeat(400))})];
-        let t = context_text("R1", &prev, Some("node \"/x/room.mjs\""));
+        let t = context_text("R1", &prev, Some("/x/asn-cli room"));
         let lines: Vec<&str> = t.lines().collect();
         assert_eq!(lines[0], "---- 前面 2 則（舊→新）----");
         assert_eq!(lines[1], "#2 政策：群組內文-2");
         assert!(lines[2].starts_with("#3 主人：a b 字") && lines[2].chars().count() <= "#3 主人：".chars().count() + 300);
-        assert_eq!(lines[3], "（要看更多：node \"/x/room.mjs\" --room-read R1 --last 20）");
+        assert_eq!(lines[3], "（要看更多：/x/asn-cli room --room-read R1 --last 20）");
         assert_eq!(context_text("R1", &[], None), "（要看更多：請到 ASN 的群組查看）");
     }
 

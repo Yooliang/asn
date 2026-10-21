@@ -51,6 +51,25 @@ npm run build        # 出 asn 二進位、bundle/deb/*.deb、bundle/appimage/*.
 
 - 內建收發室橋（全 Rust，預設關）：設定「視窗」分類的「讓 ASN 負責這台的收發室」打開後，ASN 自己做收發室橋的工作（名單回報＝上線、收信、轉交給本機 Claude 視窗、回覆寄回）；舊的 Node 橋在跑時不啟動。設計與分段計畫見 [docs/design/BRIDGE-RUST.md](../../docs/design/BRIDGE-RUST.md)。
 
+## 命令列（`asn-cli`）：Claude 視窗寄信、收信、看群組、下載附件
+
+ASN 兼當命令列工具，取代 `relay/machine` 的 `send.mjs`／`recv.mjs`／`room.mjs`／`attach.mjs`，**不需要 Node**。程式在 `src-tauri/src/cli/`，設計與取捨見 [docs/design/BRIDGE-RUST.md](../../docs/design/BRIDGE-RUST.md) 第 10 節。
+
+```
+asn-cli send --to <成員代號|節點/視窗名> --body "內文" (--reply|--no-reply) [--reply-to <信件id>] [--body-file 檔] [--file 路徑 ...]
+asn-cli send --room <群組id> --body "內文"
+asn-cli send --whoami            # 不寄信，印出父行程鏈、session 對照、節點判定
+asn-cli recv --once | --watch    # 每封一行 JSON；--watch 寫心跳，橋就不再轉交這個視窗的信
+asn-cli room --rooms | --room-read <群組id|群組名> [--last N | --since SEQ] [--json]
+asn-cli attach --id <附件編號> [--out 路徑]
+```
+
+- **執行檔**：`asn-cli.exe`（Linux 是 `asn-cli`）和 `asn` 在同一個資料夾，是 console 子系統的獨立小執行檔——cmd／PowerShell／Claude 的 Bash 都會等它結束並拿到結束碼（1 用法、2 認不出視窗、3 超量／已有人在跑、4 後端錯誤），GUI 啟動時也不會閃黑視窗。`asn.exe` 遇到 `send`／`recv`／`room`／`attach` 也會跑同一份程式（備援；殼層不等它結束，不建議）。
+- **不啟動視窗、不搶單一執行個體鎖**，可以和正在跑的 ASN 與內建橋並存。
+- 寄件視窗名不能自填：沿父行程鏈找 `~/.claude/sessions` 登記的 claude 程序（備援 `CLAUDE_CODE_MESSAGING_SOCKET`）。寄成功留 `replied/`、`sent/` 記號（和 Node 版、橋相容）。
+- 找不到命令列時：設定「視窗」分類的「寄信指令」顯示完整路徑，可複製。橋轉交的信件裡附件下載提示與群組翻頁提示也都是完整路徑。
+- Node 版（`relay/machine/*.mjs`）保留給雲端代理與沒有 ASN 的 Linux 無畫面節點。
+
 ## 介面
 
 - 左側直立頁籤，「設定」頁可選**分頁依**與**分組依**（記在 asn-me.json 的 tabDim／groupDim，舊存檔的 groupMode 會自動轉換）。三個維度：狀態（線上／忙碌／暫離／離線）、廠商（Claude、Gemini、Grok、Codex、DeepSeek，其他照字母，「其他」最後；好友沒回報 engine 時用節點 kind 推斷，kind=other 不採用）、設備。
@@ -120,7 +139,7 @@ npm run build        # 出 asn 二進位、bundle/deb/*.deb、bundle/appimage/*.
 
 ```
 npm test             # node --test：純邏輯（roster、歸屬、震動、跳脫、v-html 守門）、AsnCore 對假 relay、asn.exe 端到端
-npm run test:rust    # cargo test：心跳檔格式、身分判定、寄信欄位、門鈴訊息
+npm run test:rust    # cargo test：心跳檔格式、身分判定、寄信欄位、門鈴訊息、命令列（send／recv／room／attach，本機假後端；含真的跑 asn-cli 的測試）
 ASN_SHOT_ME='{"winMode":"merged","shotNoChat":true}' node scripts/shot.mjs <資料夾>   # 設定欄位名是 winMode（不是 mode）；shotNoChat＝不開對話（整合模式停在「開始」大幅廣告）；shotAd／shotTab 固定廣告與起始頁籤；逐頁籤截圖最後會各開一次指引（bridge）與設定聊天窗：整合模式在右邊分頁（`tabs-guide-doc.png`、`tabs-settings-doc.png`），分離模式另存兩扇獨立視窗（`panel-guide.png`、`panel-setting.png`）；shotSetting 指定設定窗顯示哪一類（預設 look），shotSettingSet 是 `[{"op":"dpMode","value":"right"}]` 這樣的清單，模擬在設定窗裡改值
 node scripts/shot.mjs <資料夾>   # （環境變數 ASN_SHOT_AVATARS=1 會示範設備上傳的大頭貼）開假 relay＋真的 asn.exe，名單＋對話＋提示各截一張 PNG（需要真桌面，沙盒裡會是黑的）
 node scripts/mem.mjs             # 量閒置記憶體
@@ -164,6 +183,6 @@ npm run release -- --notes "這版改了什麼（第一行會顯示在通知列�
 ## 已知限制
 
 - 音效用 WebAudio 合成；Windows 已用 WebView2 參數允許不點視窗就出聲，Linux WebKitGTK 可能需先點過視窗；若系統靜音則聽不到。
-- 與本機（同節點）視窗聊天：後端不擋，ASN 放行；`send.mjs` 也放行同節點（本機 Claude 視窗可直接寄信給本機的 ASN），只擋寄給自己這個視窗。
+- 與本機（同節點）視窗聊天：後端不擋，ASN 放行；`asn-cli send`（與 Node 版 `send.mjs`）也放行同節點（本機 Claude 視窗可直接寄信給本機的 ASN），只擋寄給自己這個視窗。
 - 若 ASN 沒開，寄給視窗名的信會留在節點信箱，機器橋心跳過期後會當成「找不到視窗」處理（照橋的退路）。
 - 我的狀態（線上／忙碌…）只是本機顯示，不會回報給收發室。
