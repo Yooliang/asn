@@ -434,7 +434,7 @@ test('橋整合：IRORI_ENGINES=codex → 名單上報帶 engine=codex；來信�
   const st = await fakeRelay(inbox)
   const child = spawn(process.execPath, [path.join(MACHINE, 'bridge.mjs')], {
     cwd: fx.dir, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true,
-    env: { ...fx.env, HOME: fx.dir, USERPROFILE: fx.dir, IRORI_RELAY_ID: 'T', IRORI_RELAY_KEY: 'fake-test-key', IRORI_RELAY_URL: `http://127.0.0.1:${st.port}`,
+    env: { ...fx.env, HOME: fx.dir, USERPROFILE: fx.dir, IRORI_RELAY_ID: 'T', IRORI_RELAY_KEY: 'fake-test-key', IRORI_LAUNCH_NO_AUTO: '1', IRORI_RELAY_URL: `http://127.0.0.1:${st.port}`,
       IRORI_RELAY_POLL_MS: '200', IRORI_ROSTER_MS: '150', IRORI_ENGINES: CODEX_MJS },
   })
   let log = ''; child.stderr.on('data', d => log += d)
