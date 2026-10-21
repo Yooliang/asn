@@ -5,6 +5,7 @@ mod attach;
 mod avatar;
 mod bell;
 mod claude_accounts;
+mod claude_json;
 mod heartbeat;
 mod identity;
 mod launch;

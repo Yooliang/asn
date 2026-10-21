@@ -1,5 +1,7 @@
 use super::config::{build_spawn_spec, check_launch, load_launch_config, LaunchReq};
 use super::profiles::LaunchMode;
+use crate::claude_accounts::claude_home;
+use crate::claude_json::{claude_project_key, ensure_project_trusted};
 use crate::launch::LocalLaunchReq;
 use serde_json::{json, Value};
 use std::path::Path;
@@ -17,6 +19,7 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, req: LocalLaunchReq) -
     };
     check_launch(&config, &mut launch_req, &[], now_ms())?;
     let prof = config.profiles.get(&req.profile).ok_or_else(|| "沒有這個啟動設定".to_string())?;
+    maybe_trust_claude_cwd(prof.engine.as_str(), &launch_req.cwd);
 
     if prof.mode == LaunchMode::Background {
         enqueue_background(work_dir, &req.profile, &req.name, &launch_req.cwd)?;
@@ -32,6 +35,18 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, req: LocalLaunchReq) -
         "pid": pid,
         "display": if display_bg { "background" } else { "foreground" }
     }))
+}
+
+/// Claude 引擎：在啟動前把 cwd_allow 內、本次使用的資料夾標成已信任（失敗只記 log，不擋啟動）。
+fn maybe_trust_claude_cwd(engine: &str, cwd: &str) {
+    if engine != "claude" {
+        return;
+    }
+    let home = claude_home();
+    let key = claude_project_key(Path::new(cwd));
+    if let Err(e) = ensure_project_trusted(&home, &key) {
+        eprintln!("開新夥伴前寫入 Claude 資料夾信任失敗（不影響啟動）：{e}");
+    }
 }
 
 fn now_ms() -> u64 {
