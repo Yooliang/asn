@@ -12,6 +12,7 @@ export function httpTransport(url, windowName, key = FAKE_KEY) {
     ack: ids => core.api(`ack&agent=${q}`, { method: 'POST', body: { ids } }),
     // 照 Rust 的 build_send_body：震動（nudge:true）的內文由「視窗名」組成，nudge 欄位不送給後端
     send: ({ nudge, ...payload }) => core.api('send', { method: 'POST', body: nudge ? { ...payload, body: nudgeBody(windowName) } : payload }),
+    sentStatus: ids => core.api('sent_status', { method: 'POST', body: { ids } }).then(r => r?.status ?? []),
     avatar: node => core.api(`avatar&node=${encodeURIComponent(node)}`),
     setAvatar: avatar => core.api('set_avatar', { method: 'POST', body: { avatar } }),
   }

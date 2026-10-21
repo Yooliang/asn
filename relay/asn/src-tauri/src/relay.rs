@@ -71,6 +71,17 @@ pub fn build_send_body(payload: &Value, window: &str) -> Result<Value, String> {
     Ok(Value::Object(m))
 }
 
+pub fn build_sent_status_body(ids: &[String]) -> Result<Value, String> {
+    let uuid = |s: &str| {
+        let p: Vec<&str> = s.split('-').collect();
+        p.len() == 5 && [8, 4, 4, 4, 12].iter().zip(&p).all(|(n, x)| x.len() == *n && x.chars().all(|c| c.is_ascii_hexdigit()))
+    };
+    if ids.len() > 50 || !ids.iter().all(|i| uuid(i)) {
+        return Err("信件 id 格式不對".into());
+    }
+    Ok(json!({ "ids": ids }))
+}
+
 pub fn build_ack_body(ids: &[String]) -> Result<Value, String> {
     let uuid = |s: &str| {
         let p: Vec<&str> = s.split('-').collect();
@@ -198,6 +209,11 @@ impl Relay {
         // 後端不擋同節點寄信；與本機視窗聊天是這個程式的主要用途，所以放行（send.mjs 也放行同節點，只擋寄給自己這個視窗）
         self.api("send", Some(b)).await
     }
+    pub async fn sent_status(&self, ids: &[String]) -> Result<Value, String> {
+        let b = build_sent_status_body(ids)?;
+        let v = self.api("sent_status", Some(b)).await?;
+        Ok(v.get("status").cloned().unwrap_or(json!([])))
+    }
 }
 
 #[cfg(test)]
@@ -249,5 +265,13 @@ mod tests {
         assert!(build_ack_body(&[ok.clone()]).is_ok());
         assert!(build_ack_body(&["nope".to_string()]).is_err());
         assert!(build_ack_body(&vec![ok; 101]).is_err());
+    }
+
+    #[test]
+    fn sent_status_只收_uuid_最多五十個() {
+        let ok = "00000000-0000-0000-0000-000000000001".to_string();
+        assert!(build_sent_status_body(&[ok.clone()]).is_ok());
+        assert!(build_sent_status_body(&["nope".to_string()]).is_err());
+        assert!(build_sent_status_body(&vec![ok; 51]).is_err());
     }
 }

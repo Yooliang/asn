@@ -8,7 +8,7 @@ export const FAKE_KEY = 'fake-machine-key'
 // avatars：節點 → data URL（設備上傳的大頭貼）。名單每個節點帶 avatar_updated_at（沒上傳＝沒有這個欄位）；圖用 GET avatar&node=<節點> 取。
 // set_avatar（POST，只能改金鑰所屬的自己節點）：前綴須是 data:image/png|webp;base64,、全長 ≤ 48000，否則回白話代碼（同後端）。
 export async function startFakeRelay({ node = 'T', members = [], mails = [], rooms = [], avatars = {}, port = 0 } = {}) {
-  const st = { node, members, mails: [...mails], rooms, avatars: Object.fromEntries(Object.entries(avatars).map(([n, d]) => [n, { data: d, at: '2026-10-20T08:00:00Z' }])), reqs: [], sent: [], setCount: 1, port: 0, url: '' }
+  const st = { node, members, mails: [...mails], outbox: [], rooms, avatars: Object.fromEntries(Object.entries(avatars).map(([n, d]) => [n, { data: d, at: '2026-10-20T08:00:00Z' }])), reqs: [], sent: [], setCount: 1, port: 0, url: '' }
   const readBody = req => new Promise(r => { let b = ''; req.on('data', d => (b += d)); req.on('end', () => r(b ? JSON.parse(b) : null)) })
   const srv = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x'), action = u.searchParams.get('action'), agent = u.searchParams.get('agent')
@@ -41,7 +41,34 @@ export async function startFakeRelay({ node = 'T', members = [], mails = [], roo
     if (action === 'send') {
       if (typeof body?.to_node !== 'string' || typeof body?.body !== 'string') return out(400, { error: 'bad_request' })
       st.sent.push(body)
-      return out(200, { id: U(900 + st.sent.length) })
+      const id = U(900 + st.sent.length)
+      st.outbox.push({
+        id,
+        from_node: node,
+        to_node: body.to_node,
+        to_agent: body.to_agent ?? null,
+        body: body.body,
+        reply_to: body.reply_to ?? null,
+        created_at: new Date().toISOString(),
+        delivered_at: null,
+        acked_at: null,
+      })
+      return out(200, { id })
+    }
+    if (action === 'sent_status' && req.method === 'POST') {
+      const ids = body?.ids
+      if (!Array.isArray(ids) || ids.length > 50) return out(400, { error: 'bad_ids' })
+      const rows = st.outbox.filter(m => m.from_node === node && ids.includes(m.id)).map(m => ({
+        id: m.id,
+        delivered_at: m.delivered_at,
+        acked_at: m.acked_at,
+        replied_at: st.mails.concat(st.outbox).reduce((t, r) => {
+          if (r.reply_to !== m.id) return t
+          const c = r.created_at
+          return !t || (c && c < t) ? c : t
+        }, null),
+      }))
+      return out(200, { status: rows })
     }
     out(404, { error: 'not_found' })
   })

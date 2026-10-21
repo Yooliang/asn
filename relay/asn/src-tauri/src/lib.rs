@@ -160,6 +160,11 @@ async fn relay_set_avatar(app: State<'_, App>, avatar: Option<String>) -> Result
 async fn relay_send(app: State<'_, App>, payload: Value) -> Result<Value, String> {
     relay_of(&app)?.send(&payload).await
 }
+#[tauri::command]
+async fn relay_sent_status(app: State<'_, App>, ids: Vec<String>) -> Result<Value, String> {
+    let rows = relay_of(&app)?.sent_status(&ids).await?;
+    Ok(json!({ "status": rows }))
+}
 
 /// 寄照片：前端已壓縮成 webp；格式與大小在 attach.rs 檢查，通過才依序要上傳網址、上傳、確認、寄信（金鑰只在這裡）
 #[tauri::command]
@@ -290,7 +295,7 @@ pub fn run() {
         .manage(tray::TrayFailed::default())
         .manage(shot::ShotState::default())
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_avatar, relay_set_avatar, relay_rooms, open_url, set_window_name, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_avatar, relay_set_avatar, relay_rooms, open_url, set_window_name, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe, stt::stt_cancel,
