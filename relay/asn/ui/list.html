@@ -40,6 +40,12 @@
         <div class="av-note" v-if="avMsg" role="status">{{ avMsg }}</div>
       </div>
     </div>
+    <div class="upd-bar" v-if="upd.phase !== 'idle'" role="status" :class="{ failed: upd.phase === 'failed' }">
+      <span class="upd-text" v-if="upd.phase === 'available'">{{ updateNoticeText(upd.info) }}</span>
+      <span class="upd-text" v-else-if="upd.phase === 'installing'">{{ progressText(upd.done, upd.total) }}</span>
+      <span class="upd-text" v-else>更新失敗：{{ upd.error }}</span>
+      <button class="aero-btn upd-btn" type="button" v-if="upd.phase !== 'installing'" @click.stop="installUpdate">{{ upd.phase === 'failed' ? '重試' : '更新' }}</button>
+    </div>
     <div class="body">
       <nav class="rail" role="tablist" aria-label="名單分頁">
         <button v-for="d in dev.visible" :key="d.key" class="rtab dev" :class="{ on: tab === d.key, empty: d.empty }" role="tab" :aria-selected="tab === d.key" :title="d.label" :aria-label="d.label" @click="tab = d.key">
@@ -175,6 +181,8 @@
           </label>
           <small v-if="!trayOk">這台電腦建不起系統匣圖示，關閉視窗一律結束程式。</small>
           <label v-if="autostart.supported"><input type="checkbox" :checked="autostart.on" :disabled="autostart.busy" @change="setAutostart($event.target.checked)" aria-label="登入時自動啟動 ASN" /> 登入時自動啟動 ASN</label>
+          <label><input type="checkbox" v-model="autoCheck" aria-label="自動檢查更新" /> 自動檢查更新</label>
+          <div class="upd-set"><button class="aero-btn" type="button" @click="checkUpdate(true)" :disabled="upd.checking || upd.phase === 'installing'">立即檢查</button> <small role="status">{{ upd.manual }}</small></div>
           <label>視窗模式
             <select class="set-sel" :value="ui.mode" @change="setMode($event.target.value)" aria-label="視窗模式"><option v-for="m in MODES" :key="m" :value="m">{{ MODE_LABEL[m] }}</option></select>
           </label>

@@ -85,7 +85,7 @@ npm run build        # 出 asn 二進位、bundle/deb/*.deb、bundle/appimage/*.
 
 ## 資料
 
-- 對話紀錄：`%APPDATA%\tw.irori.asn\asn-chats.json`（每位好友最近 200 則，只有信件內容與系統提示）；暱稱／狀態／音效：`asn-me.json`。環境變數 `IRORI_ASN_DATA` 可改資料夾。
+- 對話紀錄：`%APPDATA%\tw.irori.asn\asn-chats.json`（每位好友最近 200 則，只有信件內容與系統提示）；暱稱／狀態／音效／自動檢查更新：`asn-me.json`。環境變數 `IRORI_ASN_DATA` 可改資料夾。
 - 信件內文與好友名稱是外部資料：顯示前一律跳脫（`ui/lib/text.mjs` 的 `esc`／`emo`），介面模板不准 v-html 原文（有守門測試）。
 
 ## 測試
@@ -99,6 +99,32 @@ node scripts/mem.mjs             # 量閒置記憶體
 ```
 
 所有測試與截圖只連 `127.0.0.1` 的假 relay（`test/fake-relay.mjs`），不碰真實後端；`--shot` 若 `IRORI_RELAY_URL` 不是本機會直接拒絕。
+
+## 發版與自動更新
+
+ASN 用 Tauri 官方 updater：啟動時與每 6 小時檢查 `https://asnmessenger.web.app/update/latest.json`；有新版就在名單上方顯示「有新版本 x.y.z：<說明第一行>　[更新]」，**按了才**下載、驗簽、安裝並重開（不強制）。設定頁可關「自動檢查更新」（存在 `asn-me.json` 的 `autoUpdate`，預設開），也有「立即檢查」。`--shot` 模式不檢查。只接受用更新私鑰簽過的安裝檔（公鑰寫在 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`）。
+
+### 發一版
+
+```
+npm run release -- --notes "這版改了什麼（第一行會顯示在通知列）"
+```
+
+`scripts/release.mjs` 依序：版本號加一（`bump.mjs`）→ `prep` → `tauri build --bundles nsis`（帶簽章環境變數，產出 `.exe` 與 `.exe.sig`）→ 產生 `site/public/update/latest.json`（version、notes、pub_date、`platforms.windows-x86_64` 的 signature 與 url）→ 把安裝檔與 `.sig` 複製到 `site/public/update/`。沒給 `--notes` 時取 `relay/asn/CHANGELOG.md` 的第一段，再沒有就用預設句。腳本只在本機產檔，**不部署**。
+
+之後：
+
+1. 提交版本號（`package.json`、`tauri.conf.json`、`Cargo.toml`）與 `site/public/update/latest.json`（安裝檔與 `.sig` 已被 `.gitignore` 擋住，不進 git）。
+2. 由人部署官網：在 `site/` 底下 `firebase deploy --only hosting`。**先確認安裝檔已一起上傳**，使用者的 ASN 才下載得到；`latest.json` 已設 `no-cache`。
+3. 想先演練：`npm run release -- --dry-run`（不改版本號、不動官網目錄，產物放 `src-tauri/target/release-dry/`）；`--no-bump` 則沿用目前版本號但照常寫進官網目錄。
+
+平常的 `npm run build`（含 CI）不簽章、不產 `.sig`（用 `src-tauri/tauri.nosign.conf.json` 關掉 `createUpdaterArtifacts`），所以不需要私鑰。
+
+### 更新簽章私鑰
+
+- 位置：`%USERPROFILE%\.asn\updater\`（`asn.key` 私鑰、`asn.key.password` 密碼、`asn.key.pub` 公鑰）。環境變數 `ASN_UPDATER_KEY_DIR` 可改資料夾。發版腳本只把私鑰的**檔案路徑**交給 `TAURI_SIGNING_PRIVATE_KEY`，密碼檔讀進子程序的 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`，兩者都不印出；私鑰與密碼不進 repo（`.gitignore` 擋 `*.key`）。
+- **遺失私鑰的後果**：已安裝的舊版只認現在這把公鑰，換一把新的簽的更新檔會驗簽失敗，舊版**再也收不到自動更新**，只能請使用者手動重新安裝（新版內建新公鑰）。私鑰外洩則是別人能發出舊版會接受的惡意更新，要立刻換鑰並請使用者手動重裝。
+- 備份建議：把 `asn.key` 與 `asn.key.password` 各複製一份到離線的位置（加密隨身碟或密碼管理器），兩份分開放；換電腦打包時整個資料夾搬過去。
 
 ## 第三方授權
 

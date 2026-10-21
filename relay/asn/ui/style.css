@@ -446,3 +446,8 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .acct-add{display:flex;gap:6px}
 .acct-add input{flex:1;min-width:0;border:1px solid var(--line);border-radius:3px;padding:3px 6px;background:var(--panel);font:inherit}
 .acct-add .aero-btn{white-space:nowrap;font-size:12px;padding:3px 8px}
+.upd-bar{display:flex;gap:6px;align-items:center;padding:4px 8px;background:#fff6d6;border-bottom:1px solid #d9c26a;font-size:12px}
+.upd-bar.failed{background:#fde4e0;border-bottom-color:#d98a80}
+.upd-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.upd-btn{flex:none}
+.settings .upd-set{display:flex;gap:6px;align-items:center;flex-wrap:wrap}

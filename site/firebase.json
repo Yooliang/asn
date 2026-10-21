@@ -17,6 +17,10 @@
         ]
       },
       {
+        "source": "update/latest.json",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+      },
+      {
         "source": "**/*.@(png|webp|jpg|svg|css)",
         "headers": [{ "key": "Cache-Control", "value": "public, max-age=3600" }]
       }

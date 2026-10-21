@@ -14,6 +14,7 @@ mod shot;
 mod stt;
 mod tray;
 mod tts;
+mod updater;
 mod voicecfg;
 mod wins;
 
@@ -281,7 +282,7 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
-fn cleanup(app: &AppHandle) {
+pub(crate) fn cleanup(app: &AppHandle) {
     let st = app.state::<App>();
     if let Some(r) = &st.relay {
         for n in r.active_names() {
@@ -343,6 +344,8 @@ pub fn run() {
         .manage(tray::CloseToTray::default())
         .manage(tray::TrayFailed::default())
         .manage(shot::ShotState::default())
+        .manage(updater::Pending::default())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, partner_console_query, partner_console_set, launch_prefs_get, launch_prefs_set, shot_frontend_log, open_url, set_window_name, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
@@ -350,7 +353,7 @@ pub fn run() {
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
             wins::open_chat, wins::chat_visible, wins::close_chats, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot,
-            tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_set,
+            tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_set, updater::update_check, updater::update_install,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
