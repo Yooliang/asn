@@ -497,3 +497,6 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 /* 設定裡的勾選框：勾選框在左、文字在右，同一行 */
 label.chk{display:flex;flex-direction:row;align-items:center;gap:6px;cursor:pointer}
 label.chk input{margin:0;flex:none}
+.ad-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none;user-select:none}
+.hero-page{position:absolute;left:0;top:0;width:100%;height:calc(100% - 58px);border:0;background:transparent;pointer-events:none}
+.hero-page-cta{position:absolute;z-index:3;left:64px;bottom:10px;margin:0}

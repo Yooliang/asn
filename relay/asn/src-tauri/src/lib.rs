@@ -1,5 +1,6 @@
 //! ASN 即時通（Tauri 2）：金鑰、anon 金鑰、收發室 HTTP／WebSocket、心跳檔、設定與對話存檔都在 Rust 端；
 //! 前端（ui/）只拿得到「信件與名單」，拿不到任何金鑰。
+mod ads;
 mod agent_tools;
 mod attach;
 mod avatar;
@@ -261,20 +262,11 @@ fn shot_frontend_log(app: State<'_, App>, level: String, message: String) {
     }
 }
 
-/// 底部廣告可以開的網址（全是 repo 文件寫明的公開網址）；只准完全相同的字串，其餘一律拒絕
-pub const OPEN_ALLOW: [&str; 4] = [
-    "https://irori.web.app/",
-    "https://irori.web.app/dev/shots/",
-    "https://policy-tw.web.app",
-    "https://islandmade.app",
-];
-pub fn open_allowed(url: &str) -> bool {
-    OPEN_ALLOW.contains(&url)
-}
+/// 底部廣告可以開的網址：只准 https、沒有帳密、主機在網域允許清單內（見 ads.rs 的 ALLOWED_HOSTS）
 /// 用系統預設瀏覽器開（網址已比對白名單，不經 shell）
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
-    if !open_allowed(&url) {
+    if !ads::url_allowed(&url) {
         return Err("這個網址不在允許清單內".into());
     }
     spawn_browser(&url)
@@ -508,7 +500,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, set_window_name, set_presence, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, ads::ads_fetch, set_window_name, set_presence, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
@@ -618,15 +610,6 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn 開網址只准白名單() {
-        assert!(open_allowed("https://irori.web.app/"));
-        assert!(open_allowed("https://policy-tw.web.app") && open_allowed("https://islandmade.app"));
-        for bad in ["https://irori.web.app", "https://irori.web.app/x", "http://irori.web.app/", "https://evil.example/", "calc.exe", "https://irori.web.app/ & calc", "https://policy-tw.web.app/x", "https://islandmade.app.evil.example/", "http://islandmade.app", ""] {
-            assert!(!open_allowed(bad), "{bad}");
-        }
-    }
 
     #[test]
     fn 視窗名規則與預設值() {

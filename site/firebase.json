@@ -23,6 +23,18 @@
       {
         "source": "**/*.@(png|webp|jpg|svg|css)",
         "headers": [{ "key": "Cache-Control", "value": "public, max-age=3600" }]
+      },
+      {
+        "source": "ads.json",
+        "headers": [{ "key": "Cache-Control", "value": "public, max-age=300" }]
+      },
+      {
+        "source": "ads/**",
+        "headers": [
+          { "key": "Content-Security-Policy", "value": "default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'none'; frame-ancestors http://tauri.localhost tauri://localhost; base-uri 'none'; form-action 'none'" },
+          { "key": "X-Frame-Options", "value": "ALLOWALL" },
+          { "key": "Cache-Control", "value": "public, max-age=300" }
+        ]
       }
     ]
   }

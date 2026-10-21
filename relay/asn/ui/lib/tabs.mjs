@@ -76,19 +76,24 @@ export function groupRows(rooms) {
 }
 
 // ---------- 廣告：底部小輪播與整合模式「開始」頁的大幅輪播共用這份資料。自家產品宣傳＋一則招租，輪播。不用任何 AdSense 或外部廣告程式碼 ----------
-// 文案的事實出處：希緒＝README／docs/HANDOFF.md；正見＝Yooliang/policy-tw 的 README（政見追蹤平台、每筆都附來源網址）；
-// 島作＝Yooliang/IslandMade 的 README（繁體中文的 AI 作品介紹與評論網站，聚焦台灣開發者）。每則一句標語＋一個短按鈕字。
-// url 只能是下面列的公開網址，且必須同時列在 Rust 端 lib.rs 的 OPEN_ALLOW（有測試比對兩邊一致）。
-// 招租的聯絡方式還沒給：AD_CONTACT_URL 是空字串時，招租那則照常輪播顯示，但按鈕不可點、不會開任何網址；
-// 之後填上網址時要同步加進 lib.rs 的 OPEN_ALLOW。
+// 平常從官網 site/public/ads.json 線上抓（Rust 的 ads_fetch）；下面這份是打包備用，抓不到時才用，key 集合要跟 ads.json 一致（有守門測試）。
+// 可點的網址只准 https 且網域在 Rust 端 ads.rs 的 ALLOWED_HOSTS 內。正見＝Yooliang/policy-tw 的 README（政見追蹤平台、每筆都附來源網址）。
+// 招租的聯絡方式還沒給：AD_CONTACT_URL 是空字串時，招租那則照常輪播顯示，但按鈕不可點、不會開任何網址。
 export const AD_CONTACT_URL = ''
 export const ADS = [
-  { key: 'shio', badge: 'NEW', title: '認識希緒', sub: '住在 3D 家裡、陪你聊天的 AI 角色', cta: '去看看', url: 'https://irori.web.app/', hue: 205 },
+  { key: 'cloud-agent', badge: 'TIP', title: '邀請你的雲端代理', sub: '把雲端上的 AI 夥伴加成好友', cta: '', url: '', hue: 205 },
+  { key: 'privacy', badge: '', title: '隱私說明', sub: 'ASN 收什麼、不收什麼，一頁講清楚', cta: '去看看', url: 'https://asnmessenger.web.app/privacy', hue: 190 },
   { key: 'policy', badge: '', title: '正見', sub: '追蹤政見做到多少，附來源', cta: '看看', url: 'https://policy-tw.web.app', hue: 170 },
-  { key: 'islandmade', badge: '', title: '島作', sub: '台灣開發者做的 AI 作品介紹', cta: '逛逛', url: 'https://islandmade.app', hue: 150 },
-  { key: 'devlog', badge: '', title: '開發日誌', sub: '每次改動都有截圖可以看', cta: '翻翻看', url: 'https://irori.web.app/dev/shots/', hue: 28 },
   { key: 'rent', badge: '', title: '廣告位招租', sub: '這個位置可以放你的廣告', cta: '洽詢', url: AD_CONTACT_URL, hue: 48 },
 ]
+// 線上抓到的清單（Rust 端 ads_fetch 已驗證過）：是非空陣列才採用，否則用打包備用。內容一律當純文字顯示
+export const pickAds = (remote, fallback = ADS) => (Array.isArray(remote) && remote.length > 0 ? remote : fallback)
+// 大幅廣告可以用官網上的網頁（iframe）：只認官網 /ads/ 底下的 https 網址（Rust 端已驗證，這裡再擋一次）；5 秒內沒載入完就退回樣板
+export const AD_PAGE_PREFIX = 'https://asnmessenger.web.app/ads/'
+export const AD_PAGE_MS = 5000
+export const adPageUrl = a => (typeof a?.page === 'string' && a.page.startsWith(AD_PAGE_PREFIX) && a.page.length <= 200 && !/[\s"'<>\\]/.test(a.page) ? a.page : '')
+// 小輪播的圖：只認 Rust 端轉好的 png／webp data URI（CSP 的 img-src 不必放寬）；沒有或格式不對＝空字串，退回樣板
+export const adImageSrc = a => (typeof a?.smallImage === 'string' && /^data:image\/(png|webp);base64,[A-Za-z0-9+/=]+$/.test(a.smallImage) ? a.smallImage : '')
 export const AD_MS = 6000
 export const nextAd = (i, n = ADS.length) => (n > 0 ? (i + 1) % n : 0)
 export const prevAd = (i, n = ADS.length) => (n > 0 ? (i - 1 + n) % n : 0)

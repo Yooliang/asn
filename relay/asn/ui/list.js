@@ -2,7 +2,7 @@
 // 關掉這扇＝結束程式（Rust 端處理）。
 import { blockContextMenu } from './lib/nomenu.mjs'
 import { AsnCore } from './lib/core.mjs'
-import { ADS, AD_MS, FIXED_TABS, goAd, groupHeading, groupRows, moreUnread, nextAd, normalizeTab, openAdWith, prevAd, statusNote } from './lib/tabs.mjs'
+import { ADS, AD_MS, FIXED_TABS, goAd, groupHeading, groupRows, moreUnread, nextAd, normalizeTab, AD_PAGE_MS, adImageSrc, adPageUrl, openAdWith, pickAds, prevAd, statusNote } from './lib/tabs.mjs'
 import { GUIDES } from './lib/guides.mjs'
 import { GuideDoc } from './lib/guide-doc.mjs'
 import { buildLogView } from './lib/changelog.mjs'
@@ -513,17 +513,29 @@ const pages = computed(() => pageTabs(friends.value, dims.tabDim, { selfNode: in
 const startTab = info.shot ? normalizeTab(savedMe.shotTab) : ''
 const shotTab = ref(startTab || (dims.tabDim === 'device' ? info.node : ''))
 const adI = ref(0)   // 底部小廣告與「開始」頁大幅廣告共用同一個目前位置
+// 廣告：預設是打包備用（ADS）；啟動時與每 6 小時由 Rust 的 ads_fetch 從官網抓一次（--shot 模式不抓），抓不到（回空）就維持現況。內容一律當純文字顯示
+const ads = ref(ADS)
+const pageFail = reactive({})   // key → true：這則的網頁載入失敗或逾時，改用樣板
+const refreshAds = async () => {
+  if (info.shot) return
+  try {
+    const next = pickAds(await invoke('ads_fetch'), null)
+    if (next) { ads.value = next; for (const k of Object.keys(pageFail)) delete pageFail[k]; if (adI.value >= next.length) adI.value = 0 }
+  } catch { /* 抓不到就沿用目前的 */ }
+}
+void refreshAds()
+setInterval(() => void refreshAds(), 6 * 3600_000)
 const app = createApp({
   setup() {
     const tab = shotTab, moreOpen = ref(false)
     let adTimer = null
-    const startAds = () => { clearInterval(adTimer); adTimer = setInterval(() => { adI.value = nextAd(adI.value) }, AD_MS) }
+    const startAds = () => { clearInterval(adTimer); adTimer = setInterval(() => { adI.value = nextAd(adI.value, ads.value.length) }, AD_MS) }
     // --shot 模式可用設定檔的 shotAd 固定停在某一則廣告（截圖用）；平常照常輪播
     if (info.shot && Number.isInteger(savedMe.shotAd)) adI.value = savedMe.shotAd
     else startAds()
     // 大幅廣告的左右鍵與小圓點：換了就重新計時，不會剛點完又被自動換掉
-    const stepAd = d => { adI.value = d < 0 ? prevAd(adI.value) : nextAd(adI.value); if (!info.shot) startAds() }
-    const jumpAd = i => { adI.value = goAd(i); if (!info.shot) startAds() }
+    const stepAd = d => { adI.value = d < 0 ? prevAd(adI.value, ads.value.length) : nextAd(adI.value, ads.value.length); if (!info.shot) startAds() }
+    const jumpAd = i => { adI.value = goAd(i, ads.value.length); if (!info.shot) startAds() }
     setInterval(() => void refreshRooms(), 60_000)
     void refreshRooms()
     const query = ref(''), nickErr = ref('')
@@ -590,6 +602,19 @@ const app = createApp({
       maxPerHour: launchPrefs.maxPerHour, cwdCount: launchCwdText.value.split('\n').filter(x => x.trim()).length, autoCheck: autoCheck.value, version: info.version,
     })
     const view = computed(() => (ui.tabs.length ? 'chat' : 'home'))
+    // 大幅廣告的網頁（iframe）：--shot 不載入；載入失敗或 5 秒內沒載入完就退回樣板（load 事件才算成功）
+    const pageSrc = a => (info.shot || pageFail[a.key] ? '' : adPageUrl(a))
+    const pageLoaded = reactive({})
+    let pageTimer = null
+    watch([adI, ads, view], () => {
+      clearTimeout(pageTimer)
+      const a = ads.value[adI.value]
+      if (view.value !== 'home' || !a || !pageSrc(a)) return
+      pageLoaded[a.key] = false
+      pageTimer = setTimeout(() => { if (!pageLoaded[a.key]) pageFail[a.key] = true }, AD_PAGE_MS)
+    }, { immediate: true })
+    const pageDone = a => { pageLoaded[a.key] = true }
+    const pageBroken = a => { pageFail[a.key] = true }
     // 分頁列：好友的對話分頁，加上「指引：…」「設定：…」兩種面板分頁（各最多一個）
     const tabItems = computed(() => ui.tabs.map(id => (isPanelTab(id) ? panelTabItem(id.slice(1), ui.panel[id.slice(1)]) : friends.value.find(f => f.id === id))).filter(Boolean))
     const mergedTabs = computed(() => tabItems.value.filter(t => !t.panel))   // 只有好友的對話才有對話窗
@@ -744,7 +769,7 @@ const app = createApp({
       ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo, nudgeTo, sendAttachTo, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
       chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuTogglePin, isChatTabPinned,
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
-      STATUS, CONN_LABEL, FIXED_TABS, ADS, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, soundOn, friends, conn, shown, query, collapsed, nickErr, commitNick,
+      STATUS, CONN_LABEL, FIXED_TABS, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, soundOn, friends, conn, shown, query, collapsed, nickErr, commitNick,
       tab, adI, rooms, roomsErr, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge: node => deviceAsn(asnMap.value[node], info.version),
       GUIDES, view, SETTING_CATS, catSub, PANEL_KINDS, panelTabId, panelGuide, panelTitle, openPanel, closePanel, settingsState, applySetting, pickAvatarFile,
       selfNode: info.node, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg,
@@ -811,7 +836,7 @@ if (info.shot) {
   await invoke('take_shot')
   // 沒開對話的整合模式：再各拍一張別則大幅廣告（正見、招租＝按鈕不可點）
   if (savedMe.shotNoChat && ui.mode === 'merged') {
-    for (const [name, i] of [['ad-policy', 1], ['ad-rent', ADS.length - 1]]) { adI.value = i; await sleep(700); await invoke('take_shot', { tab: name }) }
+    for (const [name, i] of [['ad-policy', Math.max(0, ads.value.findIndex(a => a.key === 'policy'))], ['ad-rent', ads.value.length - 1]]) { adI.value = i; await sleep(700); await invoke('take_shot', { tab: name }) }
     adI.value = Number.isInteger(savedMe.shotAd) ? savedMe.shotAd : 0
   }
   // 逐頁籤截圖：本機、第二台設備、群組、指引（清單與一篇內容）、設定
