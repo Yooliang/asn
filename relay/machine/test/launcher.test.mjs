@@ -248,7 +248,7 @@ test('bridge 端到端：launch_pending → Start-Process 開假視窗（參數�
     cwd: home, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true,
     env: {
       PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: home, USERPROFILE: home,
-      IRORI_RELAY_ID: 'T', IRORI_RELAY_KEY: 'fake-test-key', IRORI_RELAY_URL: `http://127.0.0.1:${st.port}/relay`,
+      IRORI_RELAY_ID: 'T', IRORI_RELAY_KEY: 'fake-test-key', IRORI_LAUNCH_NO_AUTO: '1', IRORI_RELAY_URL: `http://127.0.0.1:${st.port}/relay`,
       IRORI_RELAY_POLL_MS: '300', IRORI_ROSTER_MS: '400', IRORI_LAUNCH_WINDOW_STYLE: 'Hidden', IRORI_LAUNCH_CONFIRM_MS: '20000',
       IRORI_CLAUDE_SCRIPT: path.join(here, 'fake-claude.mjs'), FAKE_AGENTS: agentsFile, FAKE_RECORD: record, FAKE_LAUNCHED: launchedFile,
       CLAUDECODE: '1', CLAUDE_CODE_ENTRYPOINT: 'cli', NO_COLOR: '1',
@@ -291,7 +291,7 @@ test('bridge 端到端：沒有 launcher.json → 名單回報 launcher:null（�
     cwd: home, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true,
     env: {
       PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: home, USERPROFILE: home,
-      IRORI_RELAY_ID: 'T', IRORI_RELAY_KEY: 'fake-test-key', IRORI_RELAY_URL: `http://127.0.0.1:${st.port}/relay`,
+      IRORI_RELAY_ID: 'T', IRORI_RELAY_KEY: 'fake-test-key', IRORI_LAUNCH_NO_AUTO: '1', IRORI_RELAY_URL: `http://127.0.0.1:${st.port}/relay`,
       IRORI_RELAY_POLL_MS: '300', IRORI_ROSTER_MS: '300',
       IRORI_CLAUDE_SCRIPT: path.join(here, 'fake-claude.mjs'), FAKE_AGENTS: agentsFile, FAKE_RECORD: record,
     },

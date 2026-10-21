@@ -80,7 +80,7 @@ test('--watch：inbox 多次 500 後成功，短退避內印出信並 ack', asyn
   const c = spawnRecv(home, st, ['--watch'], env)
   try {
     assert.ok(await until(() => c.out.includes(U(1))), `stdout=${c.out}\nstderr=${c.err}`)
-    assert.equal(st.mails[0].acked, true)
+    assert.ok(await until(() => st.mails[0].acked === true), '印出後應 ack（ack 在印出之後，不能立刻斷言）')
     const inboxCalls = st.reqs.filter(r => r.action === 'inbox').length
     assert.ok(inboxCalls >= 3, `應重試 inbox，實際 ${inboxCalls}`)
   } finally {

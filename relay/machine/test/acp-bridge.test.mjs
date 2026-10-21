@@ -48,7 +48,7 @@ async function run({ inbox, workers, until, env = {} }) {
     cwd: home, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true,
     env: {
       PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: home, USERPROFILE: home,
-      IRORI_RELAY_ID: 'T', IRORI_RELAY_KEY: 'fake-test-key', IRORI_RELAY_URL: `http://127.0.0.1:${st.port}`,
+      IRORI_RELAY_ID: 'T', IRORI_RELAY_KEY: 'fake-test-key', IRORI_LAUNCH_NO_AUTO: '1', IRORI_RELAY_URL: `http://127.0.0.1:${st.port}`,
       IRORI_RELAY_POLL_MS: '200', IRORI_ROSTER_MS: '150', IRORI_ENGINES: 'acp', IRORI_AGENTS_FILE: agents,
       FAKE_AGY_STATE: path.join(home, 'st'), ...env,
     },
