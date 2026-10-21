@@ -1,4 +1,4 @@
-//! 工具清單：與 `relay/shared/agent-tools.catalog.json` 同步（issue #23 共用）。
+//! 工具清單：與 `relay/shared/agent-tools.catalog.json` 同步（issue #23／#48 共用）。
 
 use serde::Deserialize;
 
@@ -11,16 +11,6 @@ pub enum InstallKind {
     NpmGlobal,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UsageKind {
-    ClaudeOAuth,
-    CodexOAuth,
-    AgyCodeAssist,
-    GrokCliBilling,
-    None,
-    Unsupported,
-}
-
 #[derive(Debug, Clone)]
 pub struct ToolDef {
     pub id: String,
@@ -31,7 +21,6 @@ pub struct ToolDef {
     pub install_sh_url: Option<String>,
     pub install_ps1_url: Option<String>,
     pub npm_package: Option<String>,
-    pub usage: UsageKind,
     pub login_argv: Vec<String>,
     pub install_blurb: String,
     pub login_blurb: String,
@@ -51,8 +40,6 @@ struct CatalogTool {
     install: CatalogInstall,
     #[serde(rename = "loginCommand")]
     login_command: Vec<String>,
-    #[serde(rename = "usageProvider")]
-    usage_provider: String,
     install_blurb: String,
     login_blurb: String,
 }
@@ -63,17 +50,6 @@ struct CatalogInstall {
     sh: Option<String>,
     ps1: Option<String>,
     npm: Option<String>,
-}
-
-fn parse_usage(s: &str) -> UsageKind {
-    match s {
-        "claude_oauth" => UsageKind::ClaudeOAuth,
-        "codex_oauth" => UsageKind::CodexOAuth,
-        "agy_code_assist" => UsageKind::AgyCodeAssist,
-        "grok_cli_billing" => UsageKind::GrokCliBilling,
-        "none" => UsageKind::None,
-        _ => UsageKind::Unsupported,
-    }
 }
 
 fn parse_install(i: &CatalogInstall) -> (InstallKind, Option<String>, Option<String>, Option<String>) {
@@ -104,7 +80,6 @@ fn load_tools() -> Vec<ToolDef> {
                 install_sh_url: sh,
                 install_ps1_url: ps1,
                 npm_package: npm,
-                usage: parse_usage(&t.usage_provider),
                 login_argv: t.login_command,
                 install_blurb: t.install_blurb,
                 login_blurb: t.login_blurb,

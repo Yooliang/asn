@@ -28,7 +28,7 @@ pub fn install_tool(tool_id: &str, open_login_after: bool) -> InstallResult {
         opened = open_login_terminal(def).is_ok();
     }
     let tail = if opened {
-        "已開啟終端機供您登入；完成後回到此分頁重新整理。"
+        "已開啟終端機供您登入。"
     } else if !def.login_argv.is_empty() {
         "請手動開啟終端機執行登入指令。"
     } else {
@@ -149,7 +149,7 @@ fn spawn_interactive_terminal(program: &str, args: &[String]) -> Result<(), Stri
     #[cfg(not(windows))]
     {
         let joined = args.join(" ");
-        let inner = format!("{program} {joined}; echo; echo '登入完成後可關閉此視窗，回到 ASN 用量分頁重新整理。'; exec bash");
+        let inner = format!("{program} {joined}; echo; echo '登入完成後可關閉此視窗。'; exec bash");
         for (term, term_args) in [
             ("x-terminal-emulator", vec!["-e", "bash", "-lc", &inner]),
             ("gnome-terminal", vec!["--", "bash", "-lc", &inner]),

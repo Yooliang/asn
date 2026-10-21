@@ -1,37 +1,18 @@
-// 用量分頁：顯示文字與進度條（邏輯可單測；資料來自 Rust）。
-import { authLabel } from '../../../shared/agent-tools.mjs'
+// 用量分頁（暫停中）：僅 PATH 偵測與安裝／登入引導；額度待 docs/research/04-ai-usage.md 結論。
+import { installStateLabel } from '../../../shared/agent-tools.mjs'
 
-export { authLabel }
-
-export function authClass(auth) {
-  switch (auth) {
-    case 'logged_in': return 'st-online'
-    case 'not_logged_in': return 'st-away'
-    case 'not_installed': return 'st-offline'
-    default: return 'st-busy'
-  }
+export function authLabel(row) {
+  return installStateLabel(row.binary_found)
 }
 
-export function formatPercent(v) {
-  if (v == null || Number.isNaN(v)) return '—'
-  return `${Math.round(v)}%`
-}
-
-export function formatWindow(w) {
-  const used = formatPercent(w.used_percent)
-  const left = w.remaining_percent != null ? `剩 ${formatPercent(w.remaining_percent)}` : ''
-  const reset = w.reset_at ? `重置 ${w.reset_at}` : ''
-  return [used, left, reset, w.detail].filter(Boolean).join(' · ')
+export function authClass(row) {
+  return row.binary_found ? 'st-online' : 'st-offline'
 }
 
 export function showInstall(p) {
-  return p.install_available && p.auth === 'not_installed'
+  return p.install_available && !p.binary_found
 }
 
 export function showLogin(p) {
-  return p.login_available && p.auth === 'not_logged_in'
-}
-
-export function canRefresh(p) {
-  return p.auth === 'logged_in' && p.usage_supported
+  return p.login_available && p.binary_found
 }

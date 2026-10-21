@@ -18,7 +18,7 @@ import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL, normalizeCfg, shouldAutoSpeak, sttStatusText } from './lib/voice-prefs.mjs'
-import { authClass, authLabel, formatWindow, showInstall, showLogin } from './lib/usage.mjs'
+import { authClass, authLabel, showInstall, showLogin } from './lib/usage.mjs'
 
 const { createApp, reactive, ref, computed, watch } = Vue
 const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯示為離線' }
@@ -281,7 +281,7 @@ const app = createApp({
       voiceMsg.value = voice.state.note
       void refreshVoice()
     }
-    const usageProviders = ref([])
+    const usageTools = ref([])
     const usageBusy = ref(false)
     const usageErr = ref('')
     const usageActBusy = ref('')
@@ -289,10 +289,10 @@ const app = createApp({
       usageBusy.value = true
       usageErr.value = ''
       try {
-        const snap = await invoke('ai_usage_snapshot')
-        usageProviders.value = snap.providers ?? []
+        const snap = await invoke('ai_cli_detect')
+        usageTools.value = snap.tools ?? []
       } catch (e) {
-        usageErr.value = e.message || '無法讀取用量'
+        usageErr.value = e.message || '無法偵測本機 CLI'
       } finally {
         usageBusy.value = false
       }
@@ -332,8 +332,8 @@ const app = createApp({
       tab, adI, rooms, roomsErr, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote,
       GUIDES, openedGuide, view, openGuideKey, closeGuideView, showHome,
       selfNode: info.node, emo, initial, openChat, ctl,
-      usageProviders, usageBusy, usageErr, usageActBusy, refreshUsage, runInstall, runLogin,
-      usageAuthLabel: authLabel, usageAuthClass: authClass, usageWinText: formatWindow,
+      usageTools, usageBusy, usageErr, usageActBusy, refreshUsage, runInstall, runLogin,
+      usageAuthLabel: authLabel, usageAuthClass: authClass,
       usageShowInstall: showInstall, usageShowLogin: showLogin,
     }
   },

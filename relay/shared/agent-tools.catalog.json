@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "comment": "與 issue #23 開新視窗偵測共用；Rust（ai_usage/catalog.rs）與 relay/shared/agent-tools.mjs 必須一致。",
+  "comment": "與 issue #23 開新視窗偵測共用；Rust（agent_tools/catalog.rs）與 relay/shared/agent-tools.mjs 必須一致。",
   "tools": [
     {
       "id": "claude",

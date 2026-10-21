@@ -114,24 +114,15 @@
           </ul>
         </div>
         <div class="list usage-list" v-else-if="tab === 'usage'">
-          <p class="usage-lead">讀取本機已登入的 AI 工具額度；資料只在本機查詢，不會上傳金鑰。</p>
+          <p class="usage-paused" role="note">此分頁暫停開發：額度顯示改待 <code>docs/research/04-ai-usage.md</code> 開源工具調查結論；目前僅偵測 CLI 是否已安裝，並提供官方安裝／登入引導（不讀取登入憑證）。</p>
           <p class="usage-err" v-if="usageErr" role="alert">{{ usageErr }}</p>
           <p class="usage-busy" v-if="usageBusy" role="status">正在更新…</p>
-          <article v-for="p in usageProviders" :key="p.id" class="usage-card">
+          <article v-for="p in usageTools" :key="p.id" class="usage-card">
             <header class="usage-head">
-              <span class="dot" :class="usageAuthClass(p.auth)"></span>
+              <span class="dot" :class="usageAuthClass(p)"></span>
               <b>{{ p.label }}</b>
-              <span class="usage-st">{{ usageAuthLabel(p.auth) }}</span>
-              <span class="usage-plan" v-if="p.plan">{{ p.plan }}</span>
+              <span class="usage-st">{{ usageAuthLabel(p) }}</span>
             </header>
-            <p class="usage-note" v-if="p.note">{{ p.note }}</p>
-            <ul class="usage-wins" v-if="p.windows && p.windows.length">
-              <li v-for="(w, i) in p.windows" :key="i">
-                <span class="u-lbl">{{ w.label }}</span>
-                <span class="u-bar" v-if="w.used_percent != null"><i :style="{ width: Math.min(100, w.used_percent) + '%' }"></i></span>
-                <span class="u-txt">{{ usageWinText(w) }}</span>
-              </li>
-            </ul>
             <div class="usage-actions" v-if="usageShowInstall(p) || usageShowLogin(p)">
               <button v-if="usageShowInstall(p)" class="aero-btn" type="button" :disabled="usageActBusy === p.id" @click="runInstall(p.id)">安裝</button>
               <button v-if="usageShowLogin(p)" class="aero-btn" type="button" :disabled="usageActBusy === p.id" @click="runLogin(p.id)">登入</button>
