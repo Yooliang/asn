@@ -50,12 +50,25 @@ pub fn claude_project_key(cwd: &Path) -> String {
     let p = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
     #[cfg(windows)]
     {
-        return p.to_string_lossy().replace('\\', "/");
+        // canonicalize 在 Windows 會回帶 \\?\ 長路徑前綴的路徑；Claude Code 的鍵是 C:/...，要拿掉前綴才對得上
+        return windows_key(&p.to_string_lossy());
     }
     #[cfg(not(windows))]
     {
         p.to_string_lossy().into_owned()
     }
+}
+
+/// Windows：拿掉 `\\?\` 或 `\\?\UNC\` 長路徑前綴，反斜線改正斜線（Claude Code 在 ~/.claude.json 的寫法，例如 D:/Github/irori）
+pub fn windows_key(raw: &str) -> String {
+    let s = if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = raw.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        raw.to_string()
+    };
+    s.replace('\\', "/")
 }
 
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -448,6 +461,25 @@ mod tests {
         assert_eq!(read(h), before);
     }
 
+    #[test]
+    fn windows_key_拿掉長路徑前綴並改正斜線() {
+        assert_eq!(windows_key(r"\\?\C:\Users\a\b"), "C:/Users/a/b");
+        assert_eq!(windows_key(r"D:\Github\irori"), "D:/Github/irori");
+        assert_eq!(windows_key(r"\\?\UNC\srv\share\x"), "//srv/share/x");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn claude_project_key_windows_沒有長路徑前綴() {
+        let d = setup();
+        let sub = d.path().join("a").join("b");
+        fs::create_dir_all(&sub).unwrap();
+        let key = claude_project_key(&sub);
+        assert!(!key.starts_with("//?/"), "{key}");
+        assert!(key.as_bytes()[1] == b':' && !key.contains('\\'), "{key}");
+    }
+
+    #[cfg(not(windows))]
     #[test]
     fn claude_project_key_linux_用_canonical() {
         let d = setup();
