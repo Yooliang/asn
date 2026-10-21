@@ -15,7 +15,7 @@ test('版本號：package.json、tauri.conf.json、Cargo.toml 三處一致', () 
 test('版本號：標題列與設定頁都有顯示', () => {
   const html = read('ui/list.html')
   assert.match(html, /class="brand">[^<]*<span class="ver">\(\{\{ version \}\}\)<\/span>/)
-  assert.match(html, /版本 \{\{ version \}\}/)
+  assert.match(read('ui/lib/settings-panel.mjs'), /版本 \{\{ st\.version \}\}/)   // 設定聊天窗的「關於」
   assert.match(read('ui/list.js'), /version: info\.version/)
   assert.match(read('src-tauri/src/lib.rs'), /version: env!\("CARGO_PKG_VERSION"\)/)
 })

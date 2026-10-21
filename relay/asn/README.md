@@ -57,7 +57,13 @@ npm run build        # 出 asn 二進位、bundle/deb/*.deb、bundle/appimage/*.
   - 之後是「群組」「指引」「設定」。
 - 設備內容：該設備的 Claude 視窗，線上／忙碌在前、離線在後，名字後灰字狀態；組標題「[−] 設備名 (線上數/總數)」可收合；名字下一行只顯示資料夾（cwd_label）。
 - 群組：唯讀 `GET ?action=room_list`（只列本節點所在的群組：名稱、成員數、最後一句），不寄、不改。
-- 指引：安裝與使用說明（開始使用 ASN、讓這台電腦的 Claude 視窗出現在名單上、讓雲端 AI 代理加入、群組怎麼用、常見問題），資料在 `ui/lib/guides.mjs`（要改文字就改這個檔，不放金鑰與網址，路徑用 `%USERPROFILE%` 通用寫法）。點一篇：整合模式開在右邊的「指引：…」分頁（可關），分離模式顯示在名單內容區（有「回到指引清單」鈕）。
+- 指引：安裝與使用說明（開始使用 ASN、讓這台電腦的 Claude 視窗出現在名單上、讓雲端 AI 代理加入、群組怎麼用、常見問題），資料在 `ui/lib/guides.mjs`（要改文字就改這個檔，不放金鑰與網址，路徑用 `%USERPROFILE%` 通用寫法）。清單只列標題，點一篇＝開「指引聊天窗」（見下一條）。
+- 設定：清單列十個分類（個人、Claude 帳號、外觀、分頁與分組、音效、語音、視窗與系統匣、啟動設定、更新、關於），每類一行目前值摘要（`ui/lib/settings-cats.mjs`）；點一類＝開「設定聊天窗」。存檔格式與各設定的行為不變。
+- **指引、設定的聊天窗**：左側直立頁籤切換的是「列表」（好友名單／群組／指引列表／設定分類列表），列表裡點一項就開聊天窗，跟點好友同一套機制（純邏輯在 `ui/lib/panels.mjs`）。所有指引共用一扇、所有設定分類共用一扇——點另一篇／另一類是換內容，不再多開。
+  - **整合模式**：右邊分頁列多出「指引：<標題>」「設定：<分類名>」兩種分頁（id 是 `@guide`、`@setting`，不會撞到好友 id），各最多一個；點另一篇／另一類就換內容並切過去；可用 ✕、中鍵、右鍵選單（關閉／關閉其他／關閉右側／全部關閉）關掉；**可拖曳排序、不可固定**（右鍵選單沒有「固定分頁」，存檔裡的固定清單也不收這兩個 id）。
+  - **分離模式**：各開一扇獨立視窗（`ui/panel.html`＋`panel.js`，Rust 端 `open_panel`／`close_panels`，標籤 `panel-guide`、`panel-setting`），有跟聊天視窗一樣的自訂外框（可拖曳標題列、最小化／最大化／關閉、拖邊緣調整大小，外框設定即時跟著改），大小記在 asn-me.json 的 `guideSize`／`settingSize`（停止調整 0.4 秒後存）；點不同項目就換內容並叫到前面。
+  - **跨視窗同步**：設定的狀態與所有動作都留在名單視窗的樞紐（`list.js`），金鑰與存檔不搬到別的視窗。設定視窗只用事件溝通——`asn:panel`（顯示哪一篇／哪一類）、`asn:settings`（設定快照）由樞紐推出去，視窗用 `asn:set`（`{ op, value }`）把改動送回樞紐的 `applySetting`；改了立即生效於名單視窗並寫進存檔。整合模式的分頁用同一個元件（`ui/lib/settings-panel.mjs`），同一個 `applySetting`。
+  - 切換視窗模式時，開著的指引、設定跟著轉（分離視窗→分頁、分頁→視窗），內容不變。
 - 通知頁籤已拿掉；右下角提示視窗與名單上的未讀數照舊。
 - 整合模式沒開任何對話時，右邊「開始」分頁是大幅廣告輪播（同一份 `ADS` 資料，大標題、標語、按鈕、左右鍵與小圓點、6 秒自動換，純 CSS 繪製）；招租沒有聯絡網址時按鈕不可點。
 - 底部廣告：Irori 自家宣傳輪播（`ui/lib/tabs.mjs` 的 `ADS`），可點的網址只有 `lib.rs` 的 `OPEN_ALLOW` 三個（`open_url` 指令比對完全相同才開）。
@@ -93,7 +99,7 @@ npm run build        # 出 asn 二進位、bundle/deb/*.deb、bundle/appimage/*.
 ```
 npm test             # node --test：純邏輯（roster、歸屬、震動、跳脫、v-html 守門）、AsnCore 對假 relay、asn.exe 端到端
 npm run test:rust    # cargo test：心跳檔格式、身分判定、寄信欄位、門鈴訊息
-ASN_SHOT_ME='{"winMode":"merged","shotNoChat":true}' node scripts/shot.mjs <資料夾>   # 設定欄位名是 winMode（不是 mode）；shotNoChat＝不開對話（整合模式停在「開始」大幅廣告）；shotAd／shotTab 固定廣告與起始頁籤
+ASN_SHOT_ME='{"winMode":"merged","shotNoChat":true}' node scripts/shot.mjs <資料夾>   # 設定欄位名是 winMode（不是 mode）；shotNoChat＝不開對話（整合模式停在「開始」大幅廣告）；shotAd／shotTab 固定廣告與起始頁籤；逐頁籤截圖最後會各開一次指引（bridge）與設定聊天窗：整合模式在右邊分頁（`tabs-guide-doc.png`、`tabs-settings-doc.png`），分離模式另存兩扇獨立視窗（`panel-guide.png`、`panel-setting.png`）；shotSetting 指定設定窗顯示哪一類（預設 look），shotSettingSet 是 `[{"op":"dpMode","value":"right"}]` 這樣的清單，模擬在設定窗裡改值
 node scripts/shot.mjs <資料夾>   # （環境變數 ASN_SHOT_AVATARS=1 會示範設備上傳的大頭貼）開假 relay＋真的 asn.exe，名單＋對話＋提示各截一張 PNG（需要真桌面，沙盒裡會是黑的）
 node scripts/mem.mjs             # 量閒置記憶體
 ```

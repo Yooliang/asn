@@ -105,9 +105,11 @@ test('發版參數', () => {
 })
 
 test('接線：設定頁開關與立即檢查、存檔欄位、--shot 不檢查、Rust 指令註冊', () => {
-  const html = read('ui/list.html'), js = read('ui/list.js'), rs = read('src-tauri/src/lib.rs'), up = read('src-tauri/src/updater.rs')
-  assert.match(html, /v-model="autoCheck"[^>]*aria-label="自動檢查更新"/)
-  assert.match(html, /@click="checkUpdate\(true\)"[^>]*>立即檢查</)
+  const html = read('ui/list.html'), panel = read('ui/lib/settings-panel.mjs'), js = read('ui/list.js'), rs = read('src-tauri/src/lib.rs'), up = read('src-tauri/src/updater.rs')
+  assert.match(panel, /:checked="st\.autoCheck"[^>]*aria-label="自動檢查更新"/)   // 設定聊天窗的開關，改了經樞紐 applySetting 寫回 autoCheck
+  assert.match(panel, /act\('check-update'\)"[^>]*>立即檢查</)
+  assert.match(js, /case 'autoCheck': autoCheck\.value = value === true/)
+  assert.match(js, /case 'check-update': await checkUpdate\(true\)/)
   assert.match(html, /@click\.stop="installUpdate"/, '只有按「更新」才安裝')
   assert.match(js, /autoUpdate: autoCheck\.value/, '開關存進 asn-me.json')
   assert.match(js, /if \(info\.shot \|\| upd\.checking/, '--shot 不檢查')

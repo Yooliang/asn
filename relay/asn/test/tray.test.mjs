@@ -23,10 +23,10 @@ test('系統匣未讀數：只加正整數', () => {
 })
 
 test('接線：設定頁有兩個控制項，存檔欄位 closeTo，Rust 端註冊了對應指令', () => {
-  const js = read('ui/list.js'), html = read('ui/list.html'), lib = read('src-tauri/src/lib.rs'), tray = read('src-tauri/src/tray.rs')
+  const js = read('ui/list.js'), html = read('ui/lib/settings-panel.mjs'), lib = read('src-tauri/src/lib.rs'), tray = read('src-tauri/src/tray.rs')
   assert.match(html, /關閉視窗時/)
   assert.match(html, /登入時自動啟動 ASN/)
-  assert.match(html, /v-if="autostart\.supported"/, '不支援的系統隱藏自動啟動開關')
+  assert.match(html, /v-if="st\.autostart\.supported"/, '不支援的系統隱藏自動啟動開關')
   assert.match(js, /closeTo: closeTo\.value/, '關閉行為存進 asn-me.json')
   for (const cmd of ['set_close_to_tray', 'set_tray_unread', 'autostart_get', 'autostart_set', 'autostart_supported', 'tray_available']) {
     assert.ok(js.includes(`'${cmd}'`), `前端呼叫 ${cmd}`)

@@ -3,9 +3,12 @@
 import { blockContextMenu } from './lib/nomenu.mjs'
 import { AsnCore } from './lib/core.mjs'
 import { ADS, AD_MS, FIXED_TABS, goAd, groupHeading, groupRows, moreUnread, nextAd, normalizeTab, openAdWith, prevAd, statusNote } from './lib/tabs.mjs'
-import { GUIDES, guideByKey, numbered } from './lib/guides.mjs'
+import { GUIDES } from './lib/guides.mjs'
+import { GuideDoc } from './lib/guide-doc.mjs'
+import { SettingsPanel } from './lib/settings-panel.mjs'
+import { PANEL_KINDS, isPanelTab, normalizePanelSize, panelItem, panelTabId, panelTabItem, panelTitle, splitTabs } from './lib/panels.mjs'
 import { AsnDialog } from './lib/dialog.mjs'
-import { SETTING_CATS, catByKey, catSummary } from './lib/settings-cats.mjs'
+import { SETTING_CATS, catSummary } from './lib/settings-cats.mjs'
 import { DIMS, groupOptions, loadDims, pageTabs, withTabDim } from './lib/dims.mjs'
 import { normalizeSearchQuery, rosterShownGroups } from './lib/search.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
@@ -115,8 +118,9 @@ const dims = reactive(loadDims(savedMe))   // 分頁依（設備／廠商／狀�
 // 視窗模式：分開（每位好友一扇對話視窗）／整合（一個視窗，右邊是對話分頁）。tabs／active 只在整合模式用，不存檔
 // 視窗模式、頭像模式（左／右／整合）、文字底色（透明／色彩／自動）三個設定彼此獨立，分離與整合視窗都有效
 const pinnedChat = normalizePinned(savedMe.pinnedChat)
-const ui = reactive({ mode: normalizeMode(savedMe.winMode), ...normalizeLook(savedMe), tabs: [], active: '', pinnedChat })
-const sizes = reactive({ split: normalizeSize(savedMe.splitSize, 'split'), merged: normalizeSize(savedMe.mergedSize, 'merged') })
+// panel＝指引、設定兩個聊天窗目前顯示哪一篇／哪一類（整合模式是右邊的分頁、分離模式是獨立視窗；不存檔）
+const ui = reactive({ mode: normalizeMode(savedMe.winMode), ...normalizeLook(savedMe), tabs: [], active: '', pinnedChat, panel: { guide: '', setting: '' } })
+const sizes = reactive({ split: normalizeSize(savedMe.splitSize, 'split'), merged: normalizeSize(savedMe.mergedSize, 'merged'), guide: normalizePanelSize(savedMe.guideSize), setting: normalizePanelSize(savedMe.settingSize) })   // guide／setting＝分離模式兩扇視窗的大小
 const winSize = () => ({ w: window.innerWidth, h: window.innerHeight })
 let switching = false
 
@@ -388,6 +392,25 @@ async function openChat(id) {
   sync(); pushLog(id)
 }
 
+// 指引、設定的聊天窗（跟 openChat 同一套）：整合模式＝右邊開（或換內容並切到）那個分頁；分離模式＝開（或叫出）那扇視窗並換內容
+async function openPanel(kind, key) {
+  if (!panelItem(kind, key)) return
+  ui.panel[kind] = key
+  if (ui.mode === 'merged') {
+    Object.assign(ui, openChatTab(ui, panelTabId(kind), ui.pinnedChat))
+    await invoke('show_main')
+    sync()
+    return
+  }
+  const { w, h } = sizes[kind]
+  await invoke('open_panel', { kind, title: panelTitle(kind, key), w, h })
+  emit('asn:panel', { kind, key })
+}
+async function closePanel(kind) {
+  if (ui.mode === 'merged') { Object.assign(ui, closeChatTab(ui, panelTabId(kind))); sync() }
+  else await invoke('close_panels', { kind })
+}
+
 // 對話視窗的指令
 await listen('asn:cmd', async c => {
   if (c.op === 'hello') { sync(); emit('asn:avatars', avatars.value); pushLog(c.id); core.markRead(c.id) }
@@ -400,7 +423,7 @@ await listen('asn:cmd', async c => {
 const sendTo = async (id, text) => { const r = await core.send(id, text); if (!r.ok) console.info('[ASN] send failed', r.error) }
 const nudgeTo = id => core.nudge(id)
 const sendAttachTo = async (id, item, caption) => { const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
-const activateTab = id => { ui.active = id; core.markRead(id); sync() }
+const activateTab = id => { ui.active = id; core.markRead(id); sync() }   // 指引、設定的分頁 id 不是好友，markRead 會直接略過
 const closeOneChatTab = id => { Object.assign(ui, closeChatTab(ui, id)); if (ui.active) core.markRead(ui.active); sync() }
 const applyChatTabClose = patch => { Object.assign(ui, patch); if (ui.active) core.markRead(ui.active); sync() }
 const toggleDp = () => { ui.collapsed = toggleCollapsed(ui.collapsed) }
@@ -414,12 +437,16 @@ async function setMode(to) {
   try {
     sizes[from] = normalizeSize(winSize(), from)
     const closed = from === 'split' ? await invoke('close_chats') : []
-    const plan = switchMode(from, to, { tabs: ui.tabs, active: ui.active, windowIds: closed })
+    const closedPanels = from === 'split' ? (await invoke('close_panels')).filter(k => PANEL_KINDS.includes(k)) : []   // 開著的指引、設定視窗
+    // 指引、設定也跟著轉：分離→整合＝視窗變分頁；整合→分開＝分頁開成視窗。好友的對話照舊交給 switchMode
+    const { chats: chatTabs, panels: panelTabs } = splitTabs(ui.tabs)
+    const plan = switchMode(from, to, { tabs: chatTabs, active: isPanelTab(ui.active) ? '' : ui.active, windowIds: closed })
     ui.mode = to
-    ui.tabs = orderTabs(plan.tabs, ui.pinnedChat); ui.active = plan.active
+    ui.tabs = orderTabs([...plan.tabs, ...closedPanels.map(panelTabId)], ui.pinnedChat); ui.active = plan.active || ui.tabs.at(-1) || ''
     await invoke('main_layout', { merged: to === 'merged', w: sizes[to].w, h: sizes[to].h, recenter: false })
     if (ui.active) core.markRead(ui.active)
     for (const id of plan.openWindows) await openChat(id)
+    if (to === 'split') for (const kind of panelTabs) await openPanel(kind, ui.panel[kind])
     for (const id of plan.tabs) pushLog(id)
     sync()
   } finally { switching = false }
@@ -435,7 +462,7 @@ if (ui.mode === 'merged') await invoke('main_layout', { merged: true, w: sizes.m
 await listen('relay-bell', () => void core.pull('bell'))   // Rust 端的 Realtime 門鈴
 await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 
-watch([me, soundOn, frame, closeTo, autoCheck, dims, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, sound: soundOn.value, frame: frame.value, closeTo: closeTo.value, autoUpdate: autoCheck.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged }); sync() }, { deep: true })
+watch([me, soundOn, frame, closeTo, autoCheck, dims, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, sound: soundOn.value, frame: frame.value, closeTo: closeTo.value, autoUpdate: autoCheck.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting }); sync() }, { deep: true })
 // 系統匣圖示的提示文字帶未讀總數
 watch(() => totalUnread(friends.value), n => { void invoke('set_tray_unread', { n }).catch(() => {}) }, { immediate: true })
 // 設定頁改「分頁依」：分組若撞到自動換成剩下兩個裡的第一個
@@ -513,13 +540,8 @@ const app = createApp({
       autostart.busy = true
       try { await invoke('autostart_set', { on }); autostart.on = on } catch (e) { say(String(e?.message ?? e)); autostart.on = await invoke('autostart_get').catch(() => autostart.on) } finally { autostart.busy = false }
     }
-    // 設定分類與指引都在共用對話框（dialog.mjs）裡顯示，分離與整合模式相同；整合模式右邊只剩對話與「開始」
-    const dlg = reactive({ kind: '', key: '' })
-    const openSettingDlg = key => { if (catByKey(key)) { dlg.kind = 'setting'; dlg.key = key } }
-    const openGuideDlg = key => { if (guideByKey(key)) { dlg.kind = 'guide'; dlg.key = key } }
-    const closeDlg = () => { dlg.kind = ''; dlg.key = '' }
-    const dlgGuide = computed(() => (dlg.kind === 'guide' ? guideByKey(dlg.key) : null))
-    const dlgTitle = computed(() => (dlg.kind === 'guide' ? dlgGuide.value?.title : catByKey(dlg.key)?.title) ?? '')
+    // 指引、設定的聊天窗（openPanel／closePanel 在上面）：列表只負責「點一項就開」，內容在右邊分頁或獨立視窗
+    const panelGuide = computed(() => panelItem('guide', ui.panel.guide))
     const catSub = key => catSummary(key, {
       hasUpload: selfHasUpload.value, accountCount: accounts.state.list.length, accountCurrent: accounts.state.list.find(a => a.current)?.name ?? '',
       frame: frame.value, mode: ui.mode, dpMode: ui.dpMode, toolbar: ui.toolbar, bubble: ui.bubble, tabDim: dims.tabDim, groupDim: dims.groupDim,
@@ -528,7 +550,9 @@ const app = createApp({
       maxPerHour: launchPrefs.maxPerHour, cwdCount: launchCwdText.value.split('\n').filter(x => x.trim()).length, autoCheck: autoCheck.value, version: info.version,
     })
     const view = computed(() => (ui.tabs.length ? 'chat' : 'home'))
-    const mergedTabs = computed(() => ui.tabs.map(id => friends.value.find(f => f.id === id)).filter(Boolean))
+    // 分頁列：好友的對話分頁，加上「指引：…」「設定：…」兩種面板分頁（各最多一個）
+    const tabItems = computed(() => ui.tabs.map(id => (isPanelTab(id) ? panelTabItem(id.slice(1), ui.panel[id.slice(1)]) : friends.value.find(f => f.id === id))).filter(Boolean))
+    const mergedTabs = computed(() => tabItems.value.filter(t => !t.panel))   // 只有好友的對話才有對話窗
     const chatTabMenu = ref('')
     const chatTabMenuPin = computed(() => (chatTabMenu.value ? isPinned(chatTabMenu.value, ui.pinnedChat) : false))
     const closeChatTabMenu = () => { chatTabMenu.value = '' }
@@ -551,6 +575,7 @@ const app = createApp({
     const menuCloseRight = () => runTabMenu(id => applyChatTabClose(closeRightChatTabs(ui, id, ui.pinnedChat)))
     const menuCloseAll = () => { closeChatTabMenu(); applyChatTabClose(closeAllChatTabs(ui, ui.pinnedChat)) }
     const menuTogglePin = () => runTabMenu(id => { const r = toggleChatPin(ui, id, ui.pinnedChat); ui.pinnedChat = r.pinned; ui.tabs = r.tabs })
+    const chatTabMenuPanel = computed(() => isPanelTab(chatTabMenu.value))   // 指引、設定的分頁不能固定，選單不給「固定分頁」
     const isChatTabPinned = id => isPinned(id, ui.pinnedChat)
     const tabDragId = ref('')
     const tabDrop = reactive({ over: '', after: false })   // 拖到哪個分頁上、左半還是右半（右半＝插在它後面，才放得到最後一個）
@@ -614,17 +639,73 @@ const app = createApp({
       voiceMsg.value = voice.state.note
       void refreshVoice()
     }
+    // ---------- 設定聊天窗的狀態快照與指令 ----------
+    // 設定的狀態與動作都留在這裡（名單視窗的樞紐）。整合模式的分頁直接讀這份快照；分離模式的設定視窗用 asn:settings 事件收同一份，
+    // 改了什麼用 asn:set 事件送回來，一律進同一個 applySetting。金鑰、存檔、Rust 指令都不離開這個視窗。
+    const acctSavedSeq = ref(0)
+    const settingsState = computed(() => ({
+      status: me.status, hasUpload: selfHasUpload.value, avBusy: avBusy.value, avMsg: avMsg.value,
+      soundOn: soundOn.value, frame: frame.value, mode: ui.mode, dpMode: ui.dpMode, toolbar: ui.toolbar, bubble: ui.bubble,
+      tabDim: dims.tabDim, groupDim: dims.groupDim,
+      voice: { cfg: { tts_voice: voiceCfg.tts_voice, tts_auto: voiceCfg.tts_auto, stt_lang: voiceCfg.stt_lang, stt_model: voiceCfg.stt_model }, enabled: ttsVoices.value.enabled, voices: ttsVoices.value.voices, sttReady: Boolean(sttSt.value?.ready), installBusy: voice.state.install.busy, note: voice.state.install.text || voiceMsg.value || sttText.value },
+      accounts: { list: accounts.state.list, busy: accounts.state.busy, confirmDel: accounts.state.confirmDel, msg: accounts.state.msg, savedSeq: acctSavedSeq.value },
+      closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy },
+      autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual },
+      launch: { tools: launchToolRows.value, maxPerHour: launchPrefs.maxPerHour, cwdText: launchCwdText.value },
+      version: info.version,
+    }))
+    const applySetting = async (op, value) => {
+      switch (op) {
+        case 'sound': soundOn.value = soundFromChoice(value); break
+        case 'frame': await setFrame(value); break
+        case 'mode': await setMode(value); break
+        case 'dpMode': ui.dpMode = normalizeDpMode(value); break
+        case 'toolbar': ui.toolbar = TOOLBARS.includes(value) ? value : ui.toolbar; break
+        case 'bubble': ui.bubble = normalizeBubble(value); break
+        case 'tabDim': setTabDim(value); break
+        case 'groupDim': dims.groupDim = value; break
+        case 'voice-save': await saveVoice(value); break
+        case 'voice-install': await installFromSettings(); break
+        case 'acct-switch': await accounts.switchTo(value); break
+        case 'acct-remove': await accounts.remove(value); break
+        case 'acct-save': accounts.state.name = String(value ?? ''); await accounts.save(); if (!accounts.state.name) acctSavedSeq.value++; break
+        case 'closeTo': await setCloseTo(value); break
+        case 'autostart': await setAutostart(value === true); break
+        case 'autoCheck': autoCheck.value = value === true; break
+        case 'check-update': await checkUpdate(true); break
+        case 'launch-max': launchPrefs.maxPerHour = Number.isFinite(value) ? value : 6; await saveLaunchPrefs(); break
+        case 'launch-cwd': setLaunchCwdText(String(value ?? '')); break
+        case 'avatar-remove': await removeAvatar(); break
+        case 'avatar-upload': avBusy.value = true; try { say((await uploadAvatarFile(value, { toDataUrl: async u => u, setAvatar: v => core.setSelfAvatar(v) })).message) } finally { avBusy.value = false } break   // 分離視窗已在自己那邊裁好圖，送來的是 data URL
+        default: break
+      }
+    }
+    // 分離模式的指引、設定視窗：開起來先問一聲（hello），樞紐回目前要顯示哪一篇與設定快照；之後設定一變就推新快照
+    const pushSettings = () => { if (ui.mode === 'split') emit('asn:settings', settingsState.value) }
+    watch(settingsState, pushSettings, { deep: true })
+    void listen('asn:cmd', c => {
+      if (c.op !== 'panel-hello' || !PANEL_KINDS.includes(c.kind)) return
+      sync()   // 設定視窗的大頭貼要用 asn:state 裡的自己的節點與視窗名
+      emit('asn:panel', { kind: c.kind, key: ui.panel[c.kind] })
+      if (c.kind === 'setting') pushSettings()
+      emit('asn:avatars', avatars.value)
+    })
+    void listen('asn:set', c => {
+      if (c.op === 'panel-size') { if (PANEL_KINDS.includes(c.kind)) sizes[c.kind] = normalizePanelSize({ w: c.w, h: c.h }) }
+      else void applySetting(c.op, c.value)
+    })
+    const pickAvatarFile = file => applySetting('avatar-upload', file)
     return {
       version: info.version, accounts, accountLine, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       upd, autoCheck, checkUpdate, installUpdate, updateNoticeText, progressText,
       frame, FRAMES, FRAME_LABEL, setFrame, closeTo, CLOSE_CHOICES, CLOSE_LABEL, setCloseTo, trayOk, autostart, setAutostart, SOUND_CHOICES, SOUND_LABEL, soundChoice, soundFromChoice, RESIZE_DIRS, resizeFrom, avMenu,
       avOf, meAv, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar,
-      ui, MODES, MODE_LABEL, DP_MODES, DP_LABEL, BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, normalizeDpMode, normalizeBubble, setMode, mergedTabs, logs, sendTo, nudgeTo, sendAttachTo, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
-      chatTabMenu, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuTogglePin, isChatTabPinned,
+      ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo, nudgeTo, sendAttachTo, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
+      chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuTogglePin, isChatTabPinned,
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
       STATUS, CONN_LABEL, FIXED_TABS, ADS, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, soundOn, friends, conn, shown, query, collapsed, nickErr, commitNick,
       tab, adI, rooms, roomsErr, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote,
-      GUIDES, view, dlg, dlgGuide, dlgTitle, openSettingDlg, openGuideDlg, closeDlg, SETTING_CATS, catSub,
+      GUIDES, view, SETTING_CATS, catSub, PANEL_KINDS, panelTabId, panelGuide, panelTitle, openPanel, closePanel, settingsState, applySetting, pickAvatarFile,
       selfNode: info.node, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg,
       searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickLaunchDevice,
       DISPLAY_MODES, partnerShowDisplay,
@@ -637,19 +718,8 @@ const app = createApp({
 })
 app.component('chat-pane', ChatPane)
 app.component('asn-dialog', AsnDialog)
-// 一篇指引的顯示：全部用文字插值（不用 v-html），步驟自動編號
-app.component('guide-doc', {
-  props: { guide: { type: Object, required: true } },
-  setup: props => ({ rows: computed(() => numbered(props.guide.blocks)) }),
-  template: `<article class="guide-article"><h2>{{ guide.title }}</h2>
-    <template v-for="(b, i) in rows" :key="i">
-      <h3 v-if="b.k === 'h'">{{ b.t }}</h3>
-      <p v-else-if="b.k === 'p'">{{ b.t }}</p>
-      <p v-else-if="b.k === 'li'" class="g-step"><b>{{ b.n }}</b><span>{{ b.t }}</span></p>
-      <pre v-else-if="b.k === 'code'" class="g-code"><code>{{ b.t }}</code></pre>
-      <p v-else class="g-note">{{ b.t }}</p>
-    </template></article>`,
-})
+app.component('guide-doc', GuideDoc)
+app.component('settings-panel', SettingsPanel)
 const root = app.mount('#app')
 
 await core.start()
@@ -657,7 +727,7 @@ sync()
 
 // ---------- --shot 模式：開一個對話、寄一封信＋一個震動、彈一則提示，然後截圖並結束 ----------
 // 設定檔（asn-me.json）可帶：winMode（'merged' 才是整合模式，欄位名就是 winMode，不是 mode）、shotNoChat（true＝不開任何對話，
-// 整合模式停在「開始」大幅廣告）、shotAd（固定停在第幾則廣告）、shotTab（起始頁籤）、shotLaunchNotice（true＝只拍背景逾時通知對話框）。
+// 整合模式停在「開始」大幅廣告）、shotAd（固定停在第幾則廣告）、shotTab（起始頁籤）、shotSetting（逐頁籤截圖時設定聊天窗顯示哪一類，預設 look）、shotSettingSet（[{ op, value }…]：在設定窗裡改值的模擬）、shotLaunchNotice（true＝只拍背景逾時通知對話框）。
 if (info.shot) {
   const sleep = ms => new Promise(r => setTimeout(r, ms))
   const waitPaint = async (frames = 3) => {
@@ -693,13 +763,20 @@ if (info.shot) {
   }
   // 逐頁籤截圖：本機、第二台設備、群組、指引（清單與一篇內容）、設定
   const p = pages.value.all
-  for (const [name, key] of [['local', p[0]?.key], ['device', p[1]?.key], ['last', p.at(-1)?.key], ['groups', 'groups'], ['guide', 'guide'], ['guide-doc', 'guide'], ['settings', 'settings']]) {
+  // 指引、設定各拍一張「清單」與一張「點了一項之後的聊天窗」：整合模式＝右邊的分頁（拍名單視窗就看得到）；分離模式＝獨立視窗（另存 panel-*.png）
+  for (const [name, key] of [['local', p[0]?.key], ['device', p[1]?.key], ['last', p.at(-1)?.key], ['groups', 'groups'], ['guide', 'guide'], ['guide-doc', 'guide'], ['settings', 'settings'], ['settings-doc', 'settings']]) {
     if (!key) continue
     shotTab.value = key
-    if (name === 'guide-doc') root.openGuideDlg('bridge')
-    await sleep(500)
+    if (name === 'guide-doc') await root.openPanel('guide', 'bridge')
+    if (name === 'settings-doc') {
+      await root.openPanel('setting', savedMe.shotSetting || 'look')
+      // shotSettingSet：[{ op, value }…]，模擬在設定窗裡改值——走跟分離視窗一樣的 asn:set 事件（整合模式也一樣），驗證改了馬上生效、也寫進存檔
+      if (Array.isArray(savedMe.shotSettingSet)) for (const c of savedMe.shotSettingSet) { emit('asn:set', c); await sleep(400) }
+    }
+    await sleep(name.endsWith('-doc') ? 900 : 500)
     await invoke('take_shot', { tab: name })
-    if (name === 'guide-doc') root.closeDlg()
+    if (name === 'guide-doc') await root.closePanel('guide')
+    if (name === 'settings-doc') await root.closePanel('setting')
   }
   }
   await core.stop()

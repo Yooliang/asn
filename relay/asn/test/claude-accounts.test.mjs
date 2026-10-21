@@ -59,7 +59,7 @@ test('刪除要按兩次才真的刪', async () => {
 })
 
 test('接線守門：設定頁有這一塊、Rust 指令有註冊、前端不碰權杖', () => {
-  const html = read('ui/list.html'), js = read('ui/list.js'), lib = read('ui/lib/claude-accounts.mjs'), rs = read('src-tauri/src/lib.rs')
+  const html = read('ui/lib/settings-panel.mjs'), js = read('ui/list.js'), lib = read('ui/lib/claude-accounts.mjs'), rs = read('src-tauri/src/lib.rs')   // 設定表單在設定聊天窗的元件裡
   assert.match(html, /acct-set/)
   assert.match(js, /createAccountsUi/)
   for (const c of ['claude_accounts_list', 'claude_account_save', 'claude_account_switch', 'claude_account_delete']) {

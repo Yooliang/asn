@@ -1,15 +1,16 @@
 // 整合模式對話分頁：固定、排序、右鍵選單的批次關閉。純邏輯，介面與測試共用。
 import { closeTab, openTab } from './merge.mjs'
+import { isPanelTab } from './panels.mjs'
 
 const MAX_PINNED = 40
 
-/** 從 asn-me.json 讀回固定分頁 id 清單（壞值清空） */
+/** 從 asn-me.json 讀回固定分頁 id 清單（壞值清空；「指引」「設定」分頁不能固定，存檔裡有也丟掉） */
 export function normalizePinned(raw) {
   if (!Array.isArray(raw)) return []
   const out = []
   const seen = new Set()
   for (const x of raw) {
-    if (typeof x !== 'string' || !x || seen.has(x)) continue
+    if (typeof x !== 'string' || !x || isPanelTab(x) || seen.has(x)) continue
     seen.add(x)
     out.push(x)
     if (out.length >= MAX_PINNED) break
@@ -91,6 +92,7 @@ export function closeAllChatTabs(st, pinned) {
 /** 切換固定；回傳新 pinned 與重排後的 tabs */
 export function toggleChatPin(st, id, pinned) {
   const pin = normalizePinned(pinned)
+  if (isPanelTab(id)) return { pinned: pin, tabs: orderTabs(st.tabs, pin) }   // 指引、設定分頁不能固定
   const on = pin.includes(id)
   const nextPin = on ? pin.filter(x => x !== id) : [...pin, id]
   return { pinned: nextPin, tabs: orderTabs(st.tabs, nextPin) }
