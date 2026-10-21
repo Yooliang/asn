@@ -22,7 +22,7 @@ import { chatTabSameZone, closeAllChatTabs, dropInsertBefore, closeChatTab, clos
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_LABEL, normalizeClose, normalizeFrame, totalUnread, soundChoice, soundFromChoice, soundFromSaved } from './lib/prefs.mjs'
 import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
-import { bumpRecentCwd, cwdChoices, normalizeLaunchPrefs } from './lib/launch-prefs.mjs'
+import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
 import { CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, buddyConsoleItem, engineForProfile,launchDeviceRows, launchDisableReason, showDisplayModeChoice, withTimeout } from './lib/partner-launch-ui.mjs'
 import { backgroundRestoreNoticeText, collectLaunchFailures, findBackgroundTimeouts, launchFailedNoticeText } from './lib/partner-launch-notify.mjs'
 import { friendId } from './lib/roster.mjs'
@@ -227,12 +227,32 @@ const partnerShowDisplay = computed(() => partnerDlg.node === info.node && showD
 const launchCtx = computed(() => ({ selfNode: info.node, partnerModels: partnerModels.value, remoteLaunchers: remoteLaunchers.value }))
 const launchDeviceRowsList = computed(() => launchDeviceRows(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value }))
 function launchDisableReasonFor(nodeKey) { return launchDisableReason(nodeKey, launchCtx.value) }
+// 本機的候選由 Rust 端合併（白名單＋開著的 Claude 視窗＋信任過的資料夾＋最近用過，去重、略過不存在的、最多 15 筆）
+const localCwdList = ref([])
+async function refreshCwdCandidates() {
+  try {
+    const r = await transport.launchCwdCandidates()
+    localCwdList.value = Array.isArray(r) ? mergeCwdLists([r]) : []
+  } catch (e) { console.info('[ASN] 工作資料夾候選', e.message) }
+}
 const partnerCwdChoices = computed(() => {
-  const allow = partnerDlg.node === info.node
-    ? (launchPrefs.cwdAllow.length ? launchPrefs.cwdAllow : defaultCwdAllowFromCli())
-    : (remoteLaunchers.value[partnerDlg.node]?.cwd_allow ?? [])
-  return cwdChoices({ allow, recent: launchPrefs.recentCwd })
+  if (partnerDlg.node === info.node) {
+    const fallback = cwdChoices({ allow: launchPrefs.cwdAllow.length ? launchPrefs.cwdAllow : defaultCwdAllowFromCli(), recent: launchPrefs.recentCwd })
+    return mergeCwdLists([localCwdList.value, fallback])
+  }
+  return mergeCwdLists([cwdChoices({ allow: remoteLaunchers.value[partnerDlg.node]?.cwd_allow ?? [], recent: launchPrefs.recentCwd })])
 })
+// 「瀏覽…」：Rust 端開選擇資料夾對話框，選好的已寫進本機白名單；這裡加進候選並選取
+async function browsePartnerCwd() {
+  partnerDlg.error = ''
+  try {
+    const p = await transport.launchCwdBrowse()
+    if (!p) return
+    localCwdList.value = withPickedCwd(localCwdList.value, p)
+    partnerDlg.cwd = p
+    await loadLaunchPrefs()
+  } catch (e) { partnerDlg.error = e.message }
+}
 function pickPartnerModel(m) {
   if (!m.installed) return
   partnerDlg.profile = m.profileId
@@ -251,8 +271,12 @@ function openPartnerDlg(nodeKey) {
   partnerDlg.display = launchPrefs.launchDisplay === 'background' ? 'background' : 'foreground'
   const first = partnerModels.value.find(m => m.installed) ?? partnerModels.value[0]
   if (first) pickPartnerModel(first)
-  const choices = partnerCwdChoices.value
-  partnerDlg.cwd = choices[0] ?? ''
+  partnerDlg.cwd = partnerCwdChoices.value[0] ?? ''
+  if (nodeKey === info.node) {
+    void refreshCwdCandidates().then(() => {
+      if (partnerDlg.open && !partnerDlg.cwd) partnerDlg.cwd = partnerCwdChoices.value[0] ?? ''
+    })
+  }
 }
 function closePartnerDlg() { partnerDlg.open = false; partnerDlg.error = '' }
 const searchInput = ref(null)
@@ -726,7 +750,7 @@ const app = createApp({
       selfNode: info.node, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg,
       searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickLaunchDevice,
       DISPLAY_MODES, partnerShowDisplay,
-      openPartnerDlg, closePartnerDlg, partnerDlg, partnerModels, partnerCwdChoices, pickPartnerModel, submitPartnerDlg,
+      openPartnerDlg, closePartnerDlg, partnerDlg, partnerModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddyConsoleItemView, buddyMenuOpenChat, toggleBuddyConsole,
       launchToolRows, launchPrefs, launchCwdText, saveLaunchPrefs, setLaunchCwdText,
@@ -744,14 +768,26 @@ sync()
 
 // ---------- --shot 模式：開一個對話、寄一封信＋一個震動、彈一則提示，然後截圖並結束 ----------
 // 設定檔（asn-me.json）可帶：winMode（'merged' 才是整合模式，欄位名就是 winMode，不是 mode）、shotNoChat（true＝不開任何對話，
-// 整合模式停在「開始」大幅廣告）、shotAd（固定停在第幾則廣告）、shotTab（起始頁籤）、shotSetting（逐頁籤截圖時設定聊天窗顯示哪一類，預設 look）、shotSettingSet（[{ op, value }…]：在設定窗裡改值的模擬）、shotLaunchNotice（true＝只拍背景逾時通知對話框）。
+// 整合模式停在「開始」大幅廣告）、shotAd（固定停在第幾則廣告）、shotTab（起始頁籤）、shotSetting（逐頁籤截圖時設定聊天窗顯示哪一類，預設 look）、shotSettingSet（[{ op, value }…]：在設定窗裡改值的模擬）、shotLaunchNotice（true＝只拍背景逾時通知對話框）、shotPartnerDlg（true＝只拍開新夥伴對話框）。
 if (info.shot) {
   const sleep = ms => new Promise(r => setTimeout(r, ms))
   const waitPaint = async (frames = 3) => {
     for (let i = 0; i < frames; i++) await new Promise(r => requestAnimationFrame(r))
     await sleep(350)
   }
-  if (savedMe.shotLaunchNotice) {
+  if (savedMe.shotPartnerDlg) {
+    // 開新夥伴對話框：停在本機（候選來自 Rust 端的真實合併；截圖用暫存家目錄）
+    openPartnerDlg(info.node)
+    await refreshCwdCandidates()
+    if (!partnerDlg.cwd) partnerDlg.cwd = partnerCwdChoices.value[0] ?? ''
+    await waitPaint()
+    await invoke('show_main').catch(() => {})
+    await waitPaint()
+    await sleep(900)
+    await invoke('capture_ui_ready', { tag: 'partner-dlg-ready' })
+    await invoke('take_shot', { tab: 'partner-dlg' })
+    closePartnerDlg()
+  } else if (savedMe.shotLaunchNotice) {
     showLaunchNotice(backgroundRestoreNoticeText('夥伴-7'))
     await waitPaint()
     await invoke('show_main').catch(() => {})

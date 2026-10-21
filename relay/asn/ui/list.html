@@ -230,10 +230,15 @@
       <p class="partner-mode" v-if="partnerDlg.modeLabel">{{ partnerDlg.modeLabel }}</p>
       <label>名字<input class="set-input" v-model="partnerDlg.name" maxlength="40" aria-label="夥伴名字"></label>
       <label>工作資料夾
-        <select class="set-sel" v-model="partnerDlg.cwd" aria-label="工作資料夾">
-          <option v-for="c in partnerCwdChoices" :key="c" :value="c">{{ c }}</option>
-        </select>
+        <span class="partner-cwd-row">
+          <select class="set-sel" v-model="partnerDlg.cwd" aria-label="工作資料夾">
+            <option v-if="!partnerCwdChoices.length" value="" disabled>（還沒有資料夾）</option>
+            <option v-for="c in partnerCwdChoices" :key="c" :value="c">{{ c }}</option>
+          </select>
+          <button class="aero-btn" type="button" v-if="partnerDlg.node === selfNode" @click.prevent="browsePartnerCwd" aria-label="瀏覽資料夾">瀏覽…</button>
+        </span>
       </label>
+      <p class="partner-hint" v-if="!partnerCwdChoices.length">{{ partnerDlg.node === selfNode ? CWD_EMPTY_HINT : '這台設備還沒有開放的工作資料夾' }}</p>
       <fieldset class="partner-display" v-if="partnerShowDisplay">
         <legend>顯示方式</legend>
         <label v-for="m in DISPLAY_MODES" :key="m.key" class="partner-display-opt">
