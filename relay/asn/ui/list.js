@@ -12,7 +12,7 @@ import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatar
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, switchMode, tabVisible, toggleCollapsed } from './lib/merge.mjs'
 import { chatTabSameZone, closeAllChatTabs, dropInsertBefore, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
-import { FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_LABEL, normalizeFrame, soundChoice, soundFromChoice, soundFromSaved } from './lib/prefs.mjs'
+import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_LABEL, normalizeClose, normalizeFrame, totalUnread, soundChoice, soundFromChoice, soundFromSaved } from './lib/prefs.mjs'
 import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
@@ -60,6 +60,16 @@ const me = reactive({ psm: '', status: 'online', ...savedMe.me, nick: info.windo
 const soundOn = ref(soundFromSaved(savedMe.sound))
 const frame = ref(normalizeFrame(savedMe.frame))   // 視窗外框：自訂（預設，含舊存檔）／Windows 原生；Rust 端開視窗時讀同一份存檔
 await initFrame()
+// 關閉視窗時：縮到系統匣（預設，含舊存檔）／結束程式；登入時自動啟動以系統上的真實設定為準（不存檔）。程式在 tray.rs
+const closeTo = ref(normalizeClose(savedMe.closeTo))
+const trayOk = ref(true)
+const autostart = reactive({ supported: false, on: false, busy: false })
+try {
+  await invoke('set_close_to_tray', { tray: closeTo.value === 'tray' })
+  trayOk.value = await invoke('tray_available')
+  autostart.supported = await invoke('autostart_supported')
+  if (autostart.supported) autostart.on = await invoke('autostart_get')
+} catch { /* 沒有這些指令（舊版後端）就不顯示 */ }
 const dims = reactive(loadDims(savedMe))   // 分頁依（設備／廠商／狀態）與分組依；舊存檔的 groupMode 在這裡轉換
 
 // 視窗模式：分開（每位好友一扇對話視窗）／整合（一個視窗，右邊是對話分頁）。tabs／active 只在整合模式用，不存檔
@@ -176,7 +186,9 @@ if (ui.mode === 'merged') await invoke('main_layout', { merged: true, w: sizes.m
 await listen('relay-bell', () => void core.pull('bell'))   // Rust 端的 Realtime 門鈴
 await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 
-watch([me, soundOn, frame, dims, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, sound: soundOn.value, frame: frame.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged }); sync() }, { deep: true })
+watch([me, soundOn, frame, closeTo, dims, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, sound: soundOn.value, frame: frame.value, closeTo: closeTo.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged }); sync() }, { deep: true })
+// 系統匣圖示的提示文字帶未讀總數
+watch(() => totalUnread(friends.value), n => { void invoke('set_tray_unread', { n }).catch(() => {}) }, { immediate: true })
 // 設定頁改「分頁依」：分組若撞到自動換成剩下兩個裡的第一個
 const setTabDim = v => Object.assign(dims, withTabDim(dims, v))
 const pages = computed(() => pageTabs(friends.value, dims.tabDim, { selfNode: info.node, nodeOrder: nodeOrder.value }))
@@ -241,6 +253,15 @@ const app = createApp({
     const setFrame = async v => {
       frame.value = normalizeFrame(v)
       try { await invoke('set_frame', { native: frame.value === 'native' }) } catch (e) { say(e.message) }
+    }
+    // 設定頁改「關閉視窗時」「登入時自動啟動」：立刻通知 Rust 端
+    const setCloseTo = async v => {
+      closeTo.value = normalizeClose(v)
+      try { await invoke('set_close_to_tray', { tray: closeTo.value === 'tray' }) } catch (e) { say(e.message) }
+    }
+    const setAutostart = async on => {
+      autostart.busy = true
+      try { await invoke('autostart_set', { on }); autostart.on = on } catch (e) { say(String(e?.message ?? e)); autostart.on = await invoke('autostart_get').catch(() => autostart.on) } finally { autostart.busy = false }
     }
     // 指引：分離模式顯示在名單內容區，整合模式是右邊的一個分頁（純邏輯在 guides.mjs）
     const openedGuide = computed(() => guideByKey(ui.guide))
@@ -333,7 +354,7 @@ const app = createApp({
     }
     return {
       version: info.version, accounts, accountLine, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
-      frame, FRAMES, FRAME_LABEL, setFrame, SOUND_CHOICES, SOUND_LABEL, soundChoice, soundFromChoice, RESIZE_DIRS, resizeFrom, avMenu,
+      frame, FRAMES, FRAME_LABEL, setFrame, closeTo, CLOSE_CHOICES, CLOSE_LABEL, setCloseTo, trayOk, autostart, setAutostart, SOUND_CHOICES, SOUND_LABEL, soundChoice, soundFromChoice, RESIZE_DIRS, resizeFrom, avMenu,
       avOf, meAv, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar,
       ui, MODES, MODE_LABEL, DP_MODES, DP_LABEL, BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, normalizeDpMode, normalizeBubble, setMode, mergedTabs, logs, sendTo, nudgeTo, sendAttachTo, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
       chatTabMenu, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuTogglePin, isChatTabPinned,

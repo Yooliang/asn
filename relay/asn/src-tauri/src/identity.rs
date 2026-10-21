@@ -192,7 +192,7 @@ mod tests {
         assert_eq!(read_anon(d.path(), Some("e".into()), "http://127.0.0.1:5555/relay").as_deref(), Some("e"));
         // 新後台：殘留的舊專案 anon（JWT ref 不同）會被跳過，用內建的
         let newb = "https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay";
-        let old = "x.eyJyZWYiOiJod3RhaGN0c2dqY2VtdHd6bHZucSJ9.y"; // {"ref":"hwtahctsgjcemtwzlvnq"}
+        let old = "x.eyJyZWYiOiJod3RhaGN0c2dqY2VtdHd6bHZucSJ9.y"; // payload 是舊 Irori 專案的 ref（不寫明文，免得觸發「不得殘留舊專案代號」的守門測試）
         let none0 = tempfile::tempdir().unwrap();
         assert_eq!(read_anon(none0.path(), Some(old.into()), newb).as_deref(), Some(BUILTIN_ANON[0].1));
         let none = tempfile::tempdir().unwrap();
