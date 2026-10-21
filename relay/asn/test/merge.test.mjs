@@ -237,3 +237,10 @@ test('「點一下換大頭貼」提示不被左側頁籤與名單蓋住：.me �
   const css = fs.readFileSync(path.join(UI, 'style.css'), 'utf8')
   assert.match(css, /\.me\{position:relative;z-index:50;/)
 })
+
+test('換大頭貼只出現一個提示：有自訂 data-tip 就不再加原生 title', () => {
+  const html = fs.readFileSync(path.join(UI, 'list.html'), 'utf8')
+  const btn = html.split(/\r?\n/).find(l => l.includes('class="dp me-dp"'))
+  assert.ok(btn.includes('data-tip="點一下換大頭貼"'))
+  assert.ok(!/\stitle="/.test(btn), '不能同時有 title（會出現兩個提示）')
+})
