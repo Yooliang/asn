@@ -264,7 +264,9 @@ fn fake_orphan_parent() {
     #[cfg(windows)]
     std::os::windows::process::CommandExt::creation_flags(&mut c, 0x0000_0008 | 0x0000_0200);
     let child = c.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap();
-    std::fs::write(std::env::var("ASN_ORPHAN_OUT").unwrap(), child.id().to_string()).unwrap();
+    // 第一行孫子（孤兒）的 pid、第二行自己（上一個橋）的 pid：Linux 上孤兒會改掛 init，從程序表讀不到原本的父 pid
+    std::fs::write(std::env::var("ASN_ORPHAN_OUT").unwrap(), format!("{}
+{}", child.id(), std::process::id())).unwrap();
     // 不等孫子：自己結束，孫子就成了孤兒
 }
 
@@ -283,11 +285,12 @@ fn 孤兒清理_上一個橋被硬砍後留下的_worker_被收掉_別的程序�
         .status()
         .expect("啟動假的上一個橋");
     assert!(st.success());
-    let orphan: u32 = std::fs::read_to_string(&out_file).expect("假的上一個橋寫出孤兒 pid").trim().parse().unwrap();
-    // 「上一個橋」是剛結束的那個測試程序：它的 pid 我們不知道，但孤兒的父 pid 就是它——從程序表讀出來
+    let written = std::fs::read_to_string(&out_file).expect("假的上一個橋寫出孤兒 pid");
+    let mut it = written.lines().map(|l| l.trim().parse::<u32>().unwrap());
+    let (orphan, dead_parent) = (it.next().unwrap(), it.next().unwrap());
     let table = super::super::orphans::process_table();
-    let dead_parent = *table.get(&orphan).expect("孤兒還活著");
-    assert!(!table.contains_key(&dead_parent), "它的父程序已經結束");
+    assert!(table.contains_key(&orphan), "孤兒還活著");
+    assert!(!table.contains_key(&dead_parent), "它的父程序（上一個橋）已經結束");
     std::fs::write(super::super::orphans::last_file(work.path()), dead_parent.to_string()).unwrap();
     std::fs::write(super::super::lock::mailbox_pid_file(work.path()), orphan.to_string()).unwrap();
     // 另一個無關的程序（同樣記不到 mailbox.pid）不能被碰：用自己開的一個子程序當對照，記下它的 pid
