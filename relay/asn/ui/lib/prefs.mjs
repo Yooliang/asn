@@ -14,3 +14,12 @@ export const SOUND_LABEL = { on: '開', off: '關' }
 export const soundFromSaved = v => v !== false
 export const soundChoice = on => (on ? 'on' : 'off')
 export const soundFromChoice = v => v !== 'off'
+
+// 關閉視窗時：tray＝縮到系統匣（預設，程式與收信照常）／quit＝結束程式；存在 asn-me.json 的 closeTo，Rust 開機時讀同一份
+export const CLOSE_CHOICES = ['tray', 'quit']
+export const CLOSE_LABEL = { tray: '縮到系統匣', quit: '結束程式' }
+// 讀回存檔：只有明確寫 quit 才結束；沒有這個欄位的舊存檔、壞值一律縮到系統匣
+export const normalizeClose = v => (v === 'quit' ? 'quit' : 'tray')
+
+// 系統匣圖示上的未讀總數：只算正整數，其餘（壞值、負數、小數）當 0
+export const totalUnread = friends => (friends ?? []).reduce((n, f) => n + (Number.isInteger(f?.unread) && f.unread > 0 ? f.unread : 0), 0)

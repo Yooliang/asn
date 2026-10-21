@@ -67,6 +67,17 @@ export function unwrapShell(body) {
   return inner.trim()
 }
 
+// 對方視窗的 AI 有時在回信開頭自己加一行「[回覆 id=<uuid> → <節點/視窗>]」（issue #16）。顯示時只剝開頭這一行；
+// 不是這個格式（id 不是 uuid、箭頭不對、不在開頭）一律不動；整則只有抬頭時保留原文，免得變成空訊息。
+const REPLY_HEAD = /^\s*\[回覆 id=[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12} → [^\]\r\n]*\][ \t]*\r?\n?/
+export function stripReplyHead(body) {
+  const s = String(body ?? '')
+  const m = REPLY_HEAD.exec(s)
+  if (!m) return s
+  const rest = s.slice(m[0].length).trim()
+  return rest || s
+}
+
 // 好友頭像底色：由 id 算出固定色相
 export function hueOf(id) {
   let h = 0

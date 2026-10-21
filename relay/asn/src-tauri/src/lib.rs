@@ -3,12 +3,14 @@
 mod attach;
 mod avatar;
 mod bell;
+mod claude_accounts;
 mod heartbeat;
 mod identity;
 mod names;
 mod relay;
 mod shot;
 mod stt;
+mod tray;
 mod tts;
 mod voicecfg;
 mod wins;
@@ -158,6 +160,11 @@ async fn relay_set_avatar(app: State<'_, App>, avatar: Option<String>) -> Result
 async fn relay_send(app: State<'_, App>, payload: Value) -> Result<Value, String> {
     relay_of(&app)?.send(&payload).await
 }
+#[tauri::command]
+async fn relay_sent_status(app: State<'_, App>, ids: Vec<String>) -> Result<Value, String> {
+    let rows = relay_of(&app)?.sent_status(&ids).await?;
+    Ok(json!({ "status": rows }))
+}
 
 /// 寄照片：前端已壓縮成 webp；格式與大小在 attach.rs 檢查，通過才依序要上傳網址、上傳、確認、寄信（金鑰只在這裡）
 #[tauri::command]
@@ -240,6 +247,7 @@ fn cleanup(app: &AppHandle) {
 
 pub fn run() {
     let args: Vec<String> = std::env::args().collect();
+    let background = args.iter().any(|a| a == tray::BACKGROUND_FLAG);
     let shot = args.iter().position(|a| a == "--shot").and_then(|i| args.get(i + 1)).map(PathBuf::from);
 
     let (relay, node, init_error, work_dir, anon, base) = match identity::resolve() {
@@ -287,18 +295,32 @@ pub fn run() {
         .manage(state)
         .manage(wins::Slots::default())
         .manage(wins::Frame::default())
+        .manage(tray::CloseToTray::default())
+        .manage(tray::TrayFailed::default())
         .manage(shot::ShotState::default())
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_avatar, relay_set_avatar, relay_rooms, open_url, set_window_name, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_avatar, relay_set_avatar, relay_rooms, open_url, set_window_name, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
+            claude_accounts::claude_accounts_list, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe, stt::stt_cancel,
             wins::open_chat, wins::chat_visible, wins::close_chats, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot,
+            tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_set,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
             // 視窗外框設定存在前端的 asn-me.json；沒有或壞掉就是自訂外框
             let native = std::fs::read_to_string(frame_data_dir.join("asn-me.json")).map(|t| wins::native_from_saved(&t)).unwrap_or(false);
             wins::init_frame(&handle, native);
+            // 關閉行為同樣讀 asn-me.json 的 closeTo；系統匣圖示永遠建立（左鍵叫回、右鍵開啟／結束）
+            let to_tray = std::fs::read_to_string(frame_data_dir.join("asn-me.json")).map(|t| tray::close_to_tray_from_saved(&t)).unwrap_or(true);
+            tray::init(&handle, to_tray);
+            tray::build(&handle);
+            // 開機自動啟動帶 --background：只常駐系統匣，不跳出名單（系統匣建失敗就照常顯示）
+            if background && !handle.state::<tray::TrayFailed>().0.load(std::sync::atomic::Ordering::Relaxed) {
+                if let Some(w) = handle.get_webview_window("list") {
+                    let _ = w.hide();
+                }
+            }
             if let Some(r) = relay_obj.clone() {
                 // 心跳：每 30 秒寫一次（格式同 self-recv.mjs），pid 用本程式
                 let wd = work_dir.clone();
@@ -346,11 +368,17 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|w, ev| {
-            // 關掉名單視窗＝結束程式
+            // 關掉名單視窗：設定「縮到系統匣」（預設）就只藏起來，程序與收信照常；設「結束程式」才真的結束
             if w.label() == "list" {
-                if let tauri::WindowEvent::CloseRequested { .. } = ev {
-                    cleanup(w.app_handle());
-                    w.app_handle().exit(0);
+                if let tauri::WindowEvent::CloseRequested { api, .. } = ev {
+                    let h = w.app_handle();
+                    if tray::should_hide_on_close(&h.state::<tray::CloseToTray>(), &h.state::<tray::TrayFailed>()) {
+                        api.prevent_close();
+                        let _ = w.hide();
+                    } else {
+                        cleanup(h);
+                        h.exit(0);
+                    }
                 }
             }
         })

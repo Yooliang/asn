@@ -6,15 +6,17 @@
 import { isAvatarDataUrl } from './avatar.mjs'
 import { buildFriends, cleanPsm, mergeFriends } from './roster.mjs'
 import { routeMail, stubFriend } from './routing.mjs'
-import { hasNudge, hueOf, initial, noReplyNoticeOf, plain, stripNudge, unwrapShell } from './text.mjs'
+import { hasNudge, hueOf, initial, noReplyNoticeOf, plain, stripNudge, stripReplyHead, unwrapShell } from './text.mjs'
 import { noticeOf, expiresAt, fileMimeOf, friendlyPhotoError, normalizePhotos, stripPhotoLines } from './photo.mjs'
+import { applyStatusRow, chunkIds, collectPollIds } from './sent-status.mjs'
 
 export const MAX_BODY = 20000
 const LOG_KEEP = 200
+const STATUS_POLL_MS = 15_000
 
 export class AsnCore {
-  constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, aliases = [] }) {
-    Object.assign(this, { aliases: new Set(aliases), transport, store, selfNode, windowName, isChatVisible, now, log, pollMs, rosterMs })
+  constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, statusPollMs = STATUS_POLL_MS, aliases = [] }) {
+    Object.assign(this, { aliases: new Set(aliases), transport, store, selfNode, windowName, isChatVisible, now, log, pollMs, rosterMs, statusPollMs })
     this.friends = new Map()   // id → 好友
     this.logs = new Map()      // id → 訊息陣列
     this.seen = new Set()      // 已處理過的信件 id（ack 失敗重拉時不重複顯示）
@@ -26,6 +28,8 @@ export class AsnCore {
     this.timers = []
     this.pulling = false
     this.again = false
+    this.statusPulling = false
+    this.statusAgain = false
     this.saveTimer = null
   }
 
@@ -40,8 +44,10 @@ export class AsnCore {
     this.emit('state')
     await this.refreshRoster()
     await this.pull('startup')
+    await this.refreshSentStatus('startup')
     this.timers.push(setInterval(() => void this.refreshRoster(), this.rosterMs))
     this.timers.push(setInterval(() => void this.pull('poll'), this.pollMs))
+    this.timers.push(setInterval(() => void this.refreshSentStatus('poll'), this.statusPollMs))
   }
   async stop() { this.timers.forEach(clearInterval); this.timers = []; await this.flush() }
 
@@ -125,6 +131,7 @@ export class AsnCore {
       } while (this.again)
     } catch (e) { this.log(`pull failed (${why}): ${e.message}`); this.#setConn('off') }
     finally { this.pulling = false }
+    void this.refreshSentStatus(why)
   }
 
   // 收發室的「等了 N 分鐘仍沒收到回覆」提醒信不是對話：不進對話、不提示、不算未讀。
@@ -153,13 +160,14 @@ export class AsnCore {
     f.waiting = false
     const t = Date.parse(m.created_at) || this.now()
     const lg = this.#log(r.id)
-    const body = unwrapShell(m.body)
+    const body = stripReplyHead(unwrapShell(m.body))
     const nudge = hasNudge(body)
     // 照片：信裡的 attachments 整理乾淨（只留白名單欄位），內文開頭給舊版用戶端看的〔照片〕替代文字行不重複顯示
     const photos = normalizePhotos(m.attachments)
     const text = stripPhotoLines(stripNudge(body), photos.length)
     const shown = Boolean(text) || photos.length > 0
     if (shown) { lg.push({ k: 'them', text, t, id: m.id, ...(photos.length ? { photos } : {}) }); f.lastAt = t; f.replyTo = m.id }
+    if (m.reply_to) this.#markReplied(m.reply_to, typeof m.created_at === 'string' ? m.created_at : new Date(t).toISOString())
     const visible = await this.isChatVisible(r.id)
     if (nudge) {
       lg.push({ k: 'sys', nudge: true, text: `${plain(f.nick)} 傳送了一個震動。`, t })
@@ -182,13 +190,15 @@ export class AsnCore {
     const payload = { to_node: f.node, to_agent: f.agent || undefined, body: text, reply_to: f.replyTo || undefined, from_agent: this.windowName, expects_reply: true }
     let sent
     try { sent = await this.transport.send(payload) } catch (e) { return this.#fail(id, e) }
-    this.#log(id).push({ k: 'me', text, t: this.now(), ...(typeof sent?.id === 'string' ? { id: sent.id } : {}) })
+    const mid = typeof sent?.id === 'string' ? sent.id : null
+    this.#log(id).push({ k: 'me', text, t: this.now(), ...(mid ? { id: mid } : {}) })
     f.waiting = true
     f.replyTo = null
     f.known = true
     this.#scheduleSave()
     this.emit('state')
     this.emit('log', id)
+    await this.refreshSentStatus('send')
     return { ok: true }
   }
 
@@ -212,13 +222,15 @@ export class AsnCore {
     const isFile = photo.kind === 'file'
     const mine = { id: r?.attachment_id, kind: isFile ? 'file' : 'image', name: r?.name || photo.name, mime: isFile ? fileMimeOf(r?.name || photo.name) : 'image/webp', bytes: r?.bytes ?? null, width: photo.width ?? null, height: photo.height ?? null, thumb: photo.thumb ?? null, expires_at: expiresAt(now), expired: false }
     const photos = normalizePhotos([mine])
-    this.#log(id).push({ k: 'me', text: cap, t: now, ...(typeof r?.id === 'string' ? { id: r.id } : {}), ...(photos.length ? { photos } : {}) })
+    const mid = typeof r?.id === 'string' ? r.id : null
+    this.#log(id).push({ k: 'me', text: cap, t: now, ...(mid ? { id: mid } : {}), ...(photos.length ? { photos } : {}) })
     f.waiting = true
     f.replyTo = null
     f.known = true
     this.#scheduleSave()
     this.emit('state')
     this.emit('log', id)
+    await this.refreshSentStatus('send')
     return { ok: true }
   }
 
@@ -238,6 +250,51 @@ export class AsnCore {
     this.#log(id).push({ k: 'sys', text: `訊息沒有送到：${e.message}`, t: this.now() })
     this.emit('log', id)
     return { ok: false, error: e.message }
+  }
+
+  #markReplied(replyTo, at) {
+    let changed = false
+    for (const lg of this.logs.values()) {
+      for (const m of lg) {
+        if (m.k === 'me' && m.id === replyTo && !m.repliedAt) {
+          m.repliedAt = at
+          changed = true
+        }
+      }
+    }
+    if (changed) {
+      this.#scheduleSave()
+      this.emit('state')
+    }
+  }
+
+  /** 批次查自己寄出訊息的 delivered_at／acked_at／replied_at */
+  async refreshSentStatus(why = 'poll') {
+    if (typeof this.transport.sentStatus !== 'function') return
+    if (this.statusPulling) { this.statusAgain = true; return }
+    this.statusPulling = true
+    try {
+      do {
+        this.statusAgain = false
+        const ids = collectPollIds(this.logs, this.now())
+        if (!ids.length) break
+        let changed = false
+        for (const batch of chunkIds(ids)) {
+          const rows = await this.transport.sentStatus(batch)
+          if (!Array.isArray(rows)) continue
+          for (const row of rows) {
+            for (const lg of this.logs.values()) {
+              for (const m of lg) if (applyStatusRow(m, row)) changed = true
+            }
+          }
+        }
+        if (changed) {
+          this.#scheduleSave()
+          this.emit('state')
+        }
+      } while (this.statusAgain)
+    } catch (e) { this.log(`sent_status failed (${why}): ${e.message}`) }
+    finally { this.statusPulling = false }
   }
 
   // ---------- 讀取 ----------
