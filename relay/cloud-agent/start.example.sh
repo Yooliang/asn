@@ -37,11 +37,10 @@ recv_running() {
 
 if recv_running; then
   log_msg "recv 已在執行（$MAIL/recv.pid）"
-  exit 0
+else
+  nohup setsid "$NODE_BIN" "$APP/relay/cloud-agent/recv.mjs" >> "$MAIL/recv.out" 2>&1 &
+  log_msg "recv 已啟動（log：$MAIL/recv.log）"
 fi
-
-nohup setsid "$NODE_BIN" "$APP/relay/cloud-agent/recv.mjs" >> "$MAIL/recv.out" 2>&1 &
-log_msg "recv 已啟動（log：$MAIL/recv.log）"
 
 DISPATCH="$APP/relay/cloud-agent/dispatch-watch.mjs"
 if [ -f "$DISPATCH" ]; then

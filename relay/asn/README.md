@@ -47,7 +47,7 @@ npm run build        # 出 asn 二進位、bundle/deb/*.deb、bundle/appimage/*.
 - 心跳：每 30 秒寫 `~/.irori-relay/machine-<節點>/self-recv/<視窗名>.json`，內容 `{"pid","name","t"}`，格式、路徑、原子寫入都與 `relay/machine/self-recv.mjs` 相同，pid 是本程式。機器橋看到 90 秒內且 pid 活著的心跳，就不再轉交這個視窗的信。結束時清掉自己的心跳。同一個視窗名已有另一個 ASN 在跑就拒絕啟動。
 - 寄信：`POST ?action=send`，`expects_reply` 一定明說（一般訊息 `true`、震動 `false`；震動由前端帶 `nudge:true`，內文由 Rust 組），回覆某封來信時帶 `reply_to`。`from_agent` 由 Rust 端強制設成視窗名，前端不能自填。
 - 好友名單：`list` 的 members 各節點視窗，一視窗一列（名字＝視窗名，個人訊息＝資料夾（cwd_label，沒有就空；設備由左側頁籤表示））；結尾「收發室」的不列；每 60 秒更新，有人新上線會彈「已經登入」。狀態：busy／working／running＝忙碌、其餘＝線上、不在名單＝離線（有對話的好友才會留在離線）。
-- 震動：寄內文「（<視窗名> 傳送了一個震動）」、`expects_reply:false` 的信（前端只帶 `nudge:true`，內文與視窗名由 Rust 端組，前端不能自填）；收到時，整段內文就是這一句（新格式），或內文含舊版的 `[震動]`（相容還沒升級的 ASN），就抖動該對話視窗（沒開就未讀＋提示），標記不顯示在對話裡。
+- 震動：寄兩行內文——「（<視窗名> 傳送了一個震動）」加一行請對方回一個震動的提示（`NUDGE_HINT`，`ui/lib/text.mjs` 與 `relay.rs` 同一句）——`expects_reply:false` 的信（前端只帶 `nudge:true`，內文與視窗名由 Rust 端組，前端不能自填）；收到時，第一行是這一句、其餘是空的或就是那行提示（新格式；AI 照提示回的震動只有第一行），或內文含舊版的 `[震動]`（相容還沒升級的 ASN），就抖動該對話視窗（沒開就未讀＋提示），標記不顯示在對話裡。
 
 ## 介面
 
@@ -64,13 +64,16 @@ npm run build        # 出 asn 二進位、bundle/deb/*.deb、bundle/appimage/*.
 - 設定頁有四個彼此獨立的外觀設定（記在 asn-me.json，任意組合都有效，純邏輯在 `ui/lib/merge.mjs`）：
   - **視窗模式**：分離（預設，每位好友一扇對話視窗）／整合（一個主視窗，預設約 900×640、可調整、各模式各記各的大小；左邊是名單、右邊上方一排對話分頁，可關閉、有未讀數）。整合模式下點好友、點右下角提示都是切到那個分頁；來信震動抖整個主視窗；切換模式時已開的對話接得上（視窗關掉變分頁、分頁開成視窗）。
   - **視窗外框**：自訂（預設，ASN 自畫的 Aero 風標題列與邊框，可拖曳、拖邊緣調整大小）／Windows 原生；名單、對話、整合主視窗都照這個設定，切換即時生效（存在 `asn-me.json` 的 `frame`，沒有這欄位的舊存檔＝自訂；Rust 端開視窗時讀同一份）。
+  - **關閉視窗時**：縮到系統匣（預設）／結束程式（存在 `asn-me.json` 的 `closeTo`，沒有這欄位的舊存檔＝縮到系統匣）。縮到系統匣只把名單視窗藏起來，收信、心跳、門鈴與右下角提示照常；系統匣圖示左鍵叫回名單、右鍵選單「開啟」「結束」，提示文字帶未讀總數。系統匣建不起來（例如 Linux 缺 appindicator）時關閉一律結束。程式在 `src-tauri/src/tray.rs`。
+  - **登入時自動啟動 ASN**（預設關）：Windows 寫 `HKCU\...\Run` 的 `ASN` 值、Linux 寫 `~/.config/autostart/asn.desktop`，都帶 `--background`（開機只常駐系統匣、不跳名單）；其他系統隱藏這個開關。是否開啟以系統上的實際設定為準，不存在 `asn-me.json`。
   - **自己的大頭貼**：名單最上面點一下就開選圖（同設定頁的上傳流程），右鍵可「改回自動產生」。音效在設定頁是「開／關」下拉。
   - **頭像模式**：左（預設）／右＝對話區旁邊一欄放大頭貼（對方在上、自己在下），欄旁的小箭頭可收起／展開（狀態記住）；整合＝像 LINE，頭像跟著訊息（對方靠左帶小頭像、自己靠右），沒有側欄也沒有箭頭。
   - **文字底色**：透明（預設）／色彩（每則訊息一個底色泡泡、雙方同色）／自動（對方淡灰、自己淡綠）。
   - **工具列位置**：輸入框上方（預設，舊版 MSN 6～2009 的樣子）／輸入框下方。工具列按鈕只有圖示（內嵌 SVG，滑過看提示、`aria-label` 是中文），按表情圖示開表情選單。
   - 對話區的版面只有一份（`ui/lib/chatpane.mjs`），分離模式的對話視窗與整合模式的分頁共用。
-- 大頭貼：名單、對話區、右下角提示、自己的頭像都用圖片（`ui/lib/avatar.mjs`）。**自動產生**：依字串雜湊產生左右對稱 8×8 色塊（三種顏色，blockies 風格，自己實作、不含第三方程式），種子＝好友 id（`節點/視窗名`），每人固定、不同人不同。**設備上傳**：設定頁「大頭貼」選圖 → 前端置中裁成正方形、縮成 96×96、轉 webp（不行就 png）、≤ 32 KB → 經 Rust 指令 `relay_set_avatar`（檢查格式與大小才送，金鑰只在 Rust）上傳到收發室；也可以「移除，改回自動產生」。**顯示規則**：名單上的 AI 視窗一律自動產生；不在名單上的寄件人（例如別台的 ASN）用他那台設備上傳的圖，沒有就自動產生；自己＝本機節點有上傳就用上傳的，沒有就自動產生。`list` 只帶各節點的 `avatar_updated_at`，圖用 `GET ?action=avatar&node=<節點>` 在更新時間變了才取（收到的圖也要通過格式檢查才顯示）。
+- 大頭貼：名單、對話區、右下角提示、自己的頭像都用圖片（`ui/lib/avatar.mjs`）。**自動產生**：DiceBear 的 `shapes` 風格，在本機離線產生（官方套件 `@dicebear/core`＋`@dicebear/shapes`，固定 9.x 版；`npm run prep` 用 esbuild 打成單檔 `ui/vendor/dicebear.mjs`，不連 api.dicebear.com，`ui/vendor` 不進 git），種子＝好友 id（`節點/視窗名`），每人固定、不同人不同。**設備上傳**：設定頁「大頭貼」選圖 → 前端置中裁成正方形、縮成 96×96、轉 webp（不行就 png）、≤ 32 KB → 經 Rust 指令 `relay_set_avatar`（檢查格式與大小才送，金鑰只在 Rust）上傳到收發室；也可以「移除，改回自動產生」。**顯示規則**：名單上的 AI 視窗一律自動產生；不在名單上的寄件人（例如別台的 ASN）用他那台設備上傳的圖，沒有就自動產生；自己＝本機節點有上傳就用上傳的，沒有就自動產生。`list` 只帶各節點的 `avatar_updated_at`，圖用 `GET ?action=avatar&node=<節點>` 在更新時間變了才取（收到的圖也要通過格式檢查才顯示）。
 - 傳照片與檔案（設計見 `docs/ATTACHMENTS.md`）：對話工具列有「傳照片」（也可直接貼上圖片）與「傳送檔案」。照片先在前端縮到長邊 2048、轉 webp（≤ 5 MB）並做 256 長邊縮圖；一般檔案（pdf、txt、md、json、csv、zip、docx、xlsx、pptx，≤ 25 MB）不壓縮不轉檔。交給 Rust 指令 `relay_send_attachment`：檢查型別、大小與檔頭才依序向收發室要一次性上傳網址、上傳、確認、寄信（金鑰只在 Rust）。對話裡照片顯示縮圖（點了放大，可另存）、檔案顯示檔案卡（點了下載並另存到 `下載\ASN`）；對方的來信也一樣。保存 30 天，過期顯示「已過期」。可重用入口：`ui/lib/photo-canvas.mjs` 的 `imageFromBlob`／`fileFromBlob`＋`core.sendAttachment`。
+- 截圖與標註（issue #10）：對話工具列有「截圖」鈕（Windows 版；Linux 版沒有這個按鈕，因為擷取程式碼只在 Windows 編譯，`shot_supported` 回 false）。按下後 Rust 端（`src-tauri/src/shot.rs`）隱藏 ASN 所有可見視窗、等 260 ms 讓桌面重繪，再用 GDI（`BitBlt`＋`CAPTUREBLT`，只多開 `windows-sys` 兩個功能開關，不新增擷取套件）把整個虛擬桌面一次抓成凍結圖，然後每個螢幕開一扇置頂無邊框覆蓋視窗（`ui/shot.html`／`shot.js`）顯示該螢幕那一塊；拖曳框選、Esc 或右鍵取消、5 分鐘沒動作自動取消。框選範圍限在同一個螢幕內（不能跨螢幕邊界）。座標換算不信任 `devicePixelRatio`，用「視窗實際大小 ÷ 圖片實體像素」的比例（`ui/lib/shot.mjs`），所以 125%／150%／混合縮放的多螢幕都對得準；Rust 端再夾一次範圍。截圖以 PNG 位元組直接經 `tauri::ipc::Response` 傳（不經 JSON／base64）。框選完進入標註畫面（`ui/lib/annotator.mjs`，浮層在對話區內）：畫筆、螢光筆、矩形、箭頭、文字、馬賽克，8 種顏色、細／中／粗，復原／重做（Ctrl+Z／Ctrl+Y）、清除（可復原）；規則、堆疊與畫法在 `ui/lib/markup.mjs`。按「傳送」輸出 PNG（長邊超過 4096 先縮小）→ `imageFromBlob` 轉成 webp → `core.sendAttachment`（可加說明文字）；取消則整張丟掉。在輸入框貼上圖片也會進同一個標註畫面（不再直接送出）。測試：`test/shot.test.mjs`、`test/markup.test.mjs`、`test/shot-wiring.test.mjs`；Rust 的裁切、座標夾限、PNG 編碼與真的擷取桌面在 `shot.rs` 的單元測試。
 - 經機器橋轉回的回信若整段包著 `<cross-session-message …>…</cross-session-message>`，收信時剝掉最外層（`unwrapShell`）。
 
 ## 語音（念出訊息、語音輸入）
@@ -82,7 +85,7 @@ npm run build        # 出 asn 二進位、bundle/deb/*.deb、bundle/appimage/*.
 
 ## 資料
 
-- 對話紀錄：`%APPDATA%\tw.irori.asn\asn-chats.json`（每位好友最近 200 則，只有信件內容與系統提示）；暱稱／狀態／音效：`asn-me.json`。環境變數 `IRORI_ASN_DATA` 可改資料夾。
+- 對話紀錄：`%APPDATA%\tw.irori.asn\asn-chats.json`（每位好友最近 200 則，只有信件內容與系統提示）；暱稱／狀態／音效／自動檢查更新：`asn-me.json`。環境變數 `IRORI_ASN_DATA` 可改資料夾。
 - 信件內文與好友名稱是外部資料：顯示前一律跳脫（`ui/lib/text.mjs` 的 `esc`／`emo`），介面模板不准 v-html 原文（有守門測試）。
 
 ## 測試
@@ -96,6 +99,39 @@ node scripts/mem.mjs             # 量閒置記憶體
 ```
 
 所有測試與截圖只連 `127.0.0.1` 的假 relay（`test/fake-relay.mjs`），不碰真實後端；`--shot` 若 `IRORI_RELAY_URL` 不是本機會直接拒絕。
+
+## 發版與自動更新
+
+ASN 用 Tauri 官方 updater：啟動時與每 6 小時檢查 `https://asnmessenger.web.app/update/latest.json`；有新版就在名單上方顯示「有新版本 x.y.z：<說明第一行>　[更新]」，**按了才**下載、驗簽、安裝並重開（不強制）。設定頁可關「自動檢查更新」（存在 `asn-me.json` 的 `autoUpdate`，預設開），也有「立即檢查」。`--shot` 模式不檢查。只接受用更新私鑰簽過的安裝檔（公鑰寫在 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`）。
+
+### 發一版
+
+```
+npm run release -- --notes "這版改了什麼（第一行會顯示在通知列）"
+```
+
+`scripts/release.mjs` 依序：版本號加一（`bump.mjs`）→ `prep` → `tauri build --bundles nsis`（帶簽章環境變數，產出 `.exe` 與 `.exe.sig`）→ 產生 `site/public/update/latest.json`（version、notes、pub_date、`platforms.windows-x86_64` 的 signature 與 url）→ 把安裝檔與 `.sig` 複製到 `site/public/update/`。沒給 `--notes` 時取 `relay/asn/CHANGELOG.md` 的第一段，再沒有就用預設句。腳本只在本機產檔，**不部署**。
+
+之後：
+
+1. 提交版本號（`package.json`、`tauri.conf.json`、`Cargo.toml`）與 `site/public/update/latest.json`（安裝檔與 `.sig` 已被 `.gitignore` 擋住，不進 git）。
+2. 由人部署官網：在 `site/` 底下 `firebase deploy --only hosting`。**先確認安裝檔已一起上傳**，使用者的 ASN 才下載得到；`latest.json` 已設 `no-cache`。
+3. 想先演練：`npm run release -- --dry-run`（不改版本號、不動官網目錄，產物放 `src-tauri/target/release-dry/`）；`--no-bump` 則沿用目前版本號但照常寫進官網目錄。
+
+平常的 `npm run build`（含 CI）不簽章、不產 `.sig`（用 `src-tauri/tauri.nosign.conf.json` 關掉 `createUpdaterArtifacts`），所以不需要私鑰。
+
+### 更新簽章私鑰
+
+- 位置：`%USERPROFILE%\.asn\updater\`（`asn.key` 私鑰、`asn.key.password` 密碼、`asn.key.pub` 公鑰）。環境變數 `ASN_UPDATER_KEY_DIR` 可改資料夾。發版腳本只把私鑰的**檔案路徑**交給 `TAURI_SIGNING_PRIVATE_KEY`，密碼檔讀進子程序的 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`，兩者都不印出；私鑰與密碼不進 repo（`.gitignore` 擋 `*.key`）。
+- **遺失私鑰的後果**：已安裝的舊版只認現在這把公鑰，換一把新的簽的更新檔會驗簽失敗，舊版**再也收不到自動更新**，只能請使用者手動重新安裝（新版內建新公鑰）。私鑰外洩則是別人能發出舊版會接受的惡意更新，要立刻換鑰並請使用者手動重裝。
+- 備份建議：把 `asn.key` 與 `asn.key.password` 各複製一份到離線的位置（加密隨身碟或密碼管理器），兩份分開放；換電腦打包時整個資料夾搬過去。
+
+## 第三方授權
+
+- **Vue 3**（`vue`）：MIT。
+- **DiceBear 程式**（`@dicebear/core`、`@dicebear/shapes` 的程式碼）：MIT，Copyright (c) 2024 Florian Körner。
+- **shapes 風格的圖案設計**：DiceBear（<https://www.dicebear.com>）創作，CC0 1.0（公眾領域貢獻，<https://creativecommons.org/publicdomain/zero/1.0/>）。以上依據套件內的 `LICENSE` 與風格中繼資料（`meta.license`）。
+- **esbuild**（只用於建置，不隨程式發佈）：MIT。
 
 ## 已知限制
 

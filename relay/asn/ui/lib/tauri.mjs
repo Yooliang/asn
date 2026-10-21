@@ -15,14 +15,32 @@ export const transport = {
   ack: ids => invoke('relay_ack', { ids }),
   rooms: () => invoke('relay_rooms'),
   send: payload => invoke('relay_send', { payload }),
+  sentStatus: ids => invoke('relay_sent_status', { ids }).then(r => r?.status ?? []),
   avatar: node => invoke('relay_avatar', { node }),                 // 某台設備上傳的大頭貼（按需取）
   setAvatar: avatar => invoke('relay_set_avatar', { avatar }),      // 上傳自己這台的大頭貼；null＝移除
   sendAttachment: payload => invoke('relay_send_attachment', { payload }),   // 寄照片或檔案：Rust 端檢查、要上傳網址、上傳、確認、寄信
+  launch: body => invoke('relay_launch', { body }),
+  launchers: ids => invoke('relay_launchers', { ids: ids ?? null }),
+  cliDetect: () => invoke('ai_cli_detect'),
+  partnerLaunchLocal: req => invoke('partner_launch_local', { req }),
+  partnerConsoleQuery: req => invoke('partner_console_query', { req }),
+  partnerConsoleSet: req => invoke('partner_console_set', { req }),
+  launchPrefsGet: () => invoke('launch_prefs_get'),
+  launchPrefsSet: prefs => invoke('launch_prefs_set', { prefs }),
 }
 // 照片放大與另存（對話視窗各自呼叫，不經樞紐）：Rust 端換短效下載網址、下載、檢查
 export const photoApi = {
   fetch: id => invoke('relay_attachment_fetch', { id }),   // → { name, mime, data_url }
   save: id => invoke('relay_attachment_save', { id }),     // → 存檔路徑（下載\ASN）
+}
+// 截圖（Rust 端隱藏 ASN 視窗、擷取所有螢幕、開框選視窗）：capture 回 PNG 的 Blob，使用者取消回 null；Linux 版 supported 為 false（按鈕隱藏）
+export const shotApi = {
+  supported: () => invoke('shot_supported').catch(() => false),
+  capture: async () => {
+    const r = await invoke('shot_begin')
+    const bytes = r instanceof ArrayBuffer ? new Uint8Array(r) : Array.isArray(r) ? Uint8Array.from(r) : new Uint8Array(0)
+    return bytes.length ? new Blob([bytes], { type: 'image/png' }) : null
+  },
 }
 export const store = name => ({
   load: async () => { const s = await invoke('store_load', { name }); try { return s ? JSON.parse(s) : null } catch { return null } },

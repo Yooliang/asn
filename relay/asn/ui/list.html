@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div id="app" class="win" v-cloak @click="avMenu = false; closeChatTabMenu()">
+<div id="app" class="win" v-cloak @click="avMenu = false; closeChatTabMenu(); closeBuddyMenu(); closeLaunchPicker()">
   <input ref="avFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden @change="pickAvatar">
   <i class="rz" v-for="d in RESIZE_DIRS" :key="d" :class="'rz-' + d" @mousedown.left.prevent="resizeFrom(d)"></i>
   <header class="titlebar" data-tauri-drag-region>
@@ -40,10 +40,17 @@
         <div class="av-note" v-if="avMsg" role="status">{{ avMsg }}</div>
       </div>
     </div>
+    <div class="upd-bar" v-if="upd.phase !== 'idle'" role="status" :class="{ failed: upd.phase === 'failed' }">
+      <span class="upd-text" v-if="upd.phase === 'available'">{{ updateNoticeText(upd.info) }}</span>
+      <span class="upd-text" v-else-if="upd.phase === 'installing'">{{ progressText(upd.done, upd.total) }}</span>
+      <span class="upd-text" v-else>更新失敗：{{ upd.error }}</span>
+      <button class="aero-btn upd-btn" type="button" v-if="upd.phase !== 'installing'" @click.stop="installUpdate">{{ upd.phase === 'failed' ? '重試' : '更新' }}</button>
+    </div>
     <div class="body">
       <nav class="rail" role="tablist" aria-label="名單分頁">
         <button v-for="d in dev.visible" :key="d.key" class="rtab dev" :class="{ on: tab === d.key, empty: d.empty }" role="tab" :aria-selected="tab === d.key" :title="d.label" :aria-label="d.label" @click="tab = d.key">
           <img v-if="dimTab === 'device' && d.key === selfNode" src="img/logo.svg" alt="">
+          <span v-else-if="dimTab === 'engine' && d.vendorKey" class="rtab-vendor" v-html="vendorIcon(d.vendorKey)"></span>
           <span v-else-if="d.dot" class="dot big" :class="'st-' + d.dot"></span>
           <span v-else class="mono">{{ d.short }}</span>
           <span class="red" v-if="d.unread"></span>
@@ -67,15 +74,19 @@
       </nav>
       <div class="content" role="tabpanel">
         <template v-if="isDevice">
-          <div class="search"><input v-model="query" placeholder="搜尋聯絡人..." aria-label="搜尋聯絡人"></div>
+          <div class="search">
+            <input ref="searchInput" v-model="query" placeholder="搜尋聯絡人..." aria-label="搜尋聯絡人">
+            <button class="search-ic" type="button" title="搜尋" aria-label="搜尋" @click="focusSearch"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+            <button class="search-ic" type="button" title="開新夥伴" aria-label="開新夥伴" @click.stop="openLaunchPicker"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>
+          </div>
           <div class="list">
             <div v-for="g in shown" :key="g.key">
-              <button class="g-head" @click="collapsed[g.key] = !collapsed[g.key]" :aria-expanded="!collapsed[g.key]">
+              <button class="g-head" type="button" @click="collapsed[g.key] = !collapsed[g.key]" :aria-expanded="!collapsed[g.key]">
                 <span class="box">{{ collapsed[g.key] ? '+' : '−' }}</span>{{ groupHeading(g) }}
               </button>
               <ul v-show="!collapsed[g.key]">
-                <li v-for="c in g.items" :key="c.id">
-                  <button class="buddy" :class="{ offline: c.status === 'offline' }" @click="openChat(c.id)">
+                <li v-for="c in g.items" :key="c.id" @contextmenu.prevent="openBuddyMenu(c, $event)">
+                  <button class="buddy" :class="{ offline: c.status === 'offline', pending: c.pending }" @click="openChat(c.id)">
                     <span class="dp xs" :class="'st-' + c.status"><span><img :src="avOf(c)" alt=""></span></span>
                     <span class="b-text">
                       <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-st" v-if="statusNote(c.status)">{{ statusNote(c.status) }}</span></span>
@@ -149,9 +160,29 @@
             <div class="av-btns"><button class="aero-btn" type="button" @click="installFromSettings" :disabled="voice.state.install.busy || (sttSt && sttSt.ready)">下載語音辨識</button></div>
             <small role="status">{{ voice.state.install.text || voiceMsg || sttText }}</small>
           </div>
+          <div class="acct-set">
+            <b>Claude 帳號</b>
+            <ul class="acct-list" v-if="accounts.state.list.length">
+              <li v-for="a in accounts.state.list" :key="a.name">
+                <span class="acct-txt"><span class="acct-name">{{ a.name }}<em v-if="a.current">使用中</em></span><small>{{ accountLine(a) }}</small></span>
+                <button class="aero-btn" type="button" @click="accounts.switchTo(a.name)" :disabled="accounts.state.busy || a.current">切換</button>
+                <button class="aero-btn" type="button" @click="accounts.remove(a.name)" :disabled="accounts.state.busy">{{ accounts.state.confirmDel === a.name ? '確認刪除' : '刪除' }}</button>
+              </li>
+            </ul>
+            <small v-else>還沒有存過帳號。</small>
+            <div class="acct-add"><input v-model="accounts.state.name" maxlength="40" placeholder="幫目前登入取個名字" aria-label="帳號名稱" @keydown.enter="accounts.save()"><button class="aero-btn" type="button" @click="accounts.save()" :disabled="accounts.state.busy || !accounts.state.name.trim()">存成帳號</button></div>
+            <small role="status">{{ accounts.state.msg }}</small>
+          </div>
           <label>視窗外框
             <select class="set-sel" :value="frame" @change="setFrame($event.target.value)" aria-label="視窗外框"><option v-for="f in FRAMES" :key="f" :value="f">{{ FRAME_LABEL[f] }}</option></select>
           </label>
+          <label>關閉視窗時
+            <select class="set-sel" :value="closeTo" @change="setCloseTo($event.target.value)" aria-label="關閉視窗時"><option v-for="c in CLOSE_CHOICES" :key="c" :value="c">{{ CLOSE_LABEL[c] }}</option></select>
+          </label>
+          <small v-if="!trayOk">這台電腦建不起系統匣圖示，關閉視窗一律結束程式。</small>
+          <label v-if="autostart.supported"><input type="checkbox" :checked="autostart.on" :disabled="autostart.busy" @change="setAutostart($event.target.checked)" aria-label="登入時自動啟動 ASN" /> 登入時自動啟動 ASN</label>
+          <label><input type="checkbox" v-model="autoCheck" aria-label="自動檢查更新" /> 自動檢查更新</label>
+          <div class="upd-set"><button class="aero-btn" type="button" @click="checkUpdate(true)" :disabled="upd.checking || upd.phase === 'installing'">立即檢查</button> <small role="status">{{ upd.manual }}</small></div>
           <label>視窗模式
             <select class="set-sel" :value="ui.mode" @change="setMode($event.target.value)" aria-label="視窗模式"><option v-for="m in MODES" :key="m" :value="m">{{ MODE_LABEL[m] }}</option></select>
           </label>
@@ -170,6 +201,23 @@
           <label>分組依
             <select class="set-sel" v-model="dims.groupDim" aria-label="分組依"><option v-for="d in groupOptions(dims.tabDim)" :key="d.key" :value="d.key">{{ d.label }}</option></select>
           </label>
+          <div class="launch-set">
+            <b>啟動設定</b>
+            <p class="launch-note">偵測本機 CLI 自動產生啟動方式；指令只在這台電腦決定，不上傳雲端。</p>
+            <ul class="launch-tools">
+              <li v-for="t in launchToolRows" :key="t.id" :class="{ off: !t.installed }">
+                <span class="launch-name">{{ t.label }}</span>
+                <span class="launch-ver" v-if="t.installed">{{ t.version || '已安裝' }}</span>
+                <span class="launch-hint" v-else>{{ t.installHint }}</span>
+              </li>
+            </ul>
+            <label>每小時開新夥伴上限
+              <input class="set-input" type="number" min="1" max="20" v-model.number="launchPrefs.maxPerHour" @change="saveLaunchPrefs">
+            </label>
+            <label>工作資料夾白名單（一行一個）
+              <textarea class="set-area" rows="4" :value="launchCwdText" @change="setLaunchCwdText($event.target.value)"></textarea>
+            </label>
+          </div>
           <small class="ver-line">版本 {{ version }}</small>
         </div>
       </div>
@@ -189,7 +237,7 @@
   <section class="chat-area" v-if="ui.mode === 'merged'" aria-label="對話">
     <div class="tabbar" role="tablist" aria-label="開著的對話">
       <div class="ctab home" v-if="!mergedTabs.length" :class="{ on: view === 'home' }" role="tab" :aria-selected="view === 'home'" @click="showHome"><img src="img/logo.svg" alt="" width="14" height="14"><span class="ctab-name">開始</span></div>
-      <div v-for="t in mergedTabs" :key="t.id" class="ctab" :class="{ on: view === 'chat' && t.id === ui.active, pinned: isChatTabPinned(t.id) }" role="tab" :aria-selected="view === 'chat' && t.id === ui.active" :title="plain(t.nick)" :aria-label="plain(t.nick)" @click="activateTab(t.id)" @contextmenu.prevent="openChatTabMenu(t.id, $event)" @auxclick.middle.prevent="!isChatTabPinned(t.id) && closeChatTab(t.id)">
+      <div v-for="t in mergedTabs" :key="t.id" class="ctab" draggable="true" :class="[{ on: view === 'chat' && t.id === ui.active, pinned: isChatTabPinned(t.id) }, tabDragClass(t.id)]" role="tab" :aria-selected="view === 'chat' && t.id === ui.active" :title="plain(t.nick)" :aria-label="plain(t.nick)" @click="activateTab(t.id)" @contextmenu.prevent="openChatTabMenu(t.id, $event)" @auxclick.middle.prevent="!isChatTabPinned(t.id) && closeChatTab(t.id)" @dragstart="onTabDragStart(t.id, $event)" @dragend="onTabDragEnd" @dragover="onTabDragOver(t.id, $event)" @drop="onTabDrop(t.id, $event)">
         <template v-if="isChatTabPinned(t.id)">
           <span class="dp xs pin-av" :class="'st-' + t.status"><span><img :src="avOf(t)" alt=""></span></span>
         </template>
@@ -216,7 +264,7 @@
     </ul>
     <div class="chat-stack">
       <chat-pane v-for="t in mergedTabs" :key="t.id" v-show="view === 'chat' && t.id === ui.active" :friend="t" :me="me" :log="logs[t.id] || []" :friend-av="avOf(t)" :me-av="meAv" :win-mode="ui.mode" :dp-mode="ui.dpMode" :bubble="ui.bubble" :toolbar="ui.toolbar" :dp-collapsed="ui.collapsed" :active="view === 'chat' && t.id === ui.active" :voice="voice"
-        :photo-api="photoApi" @send="text => sendTo(t.id, text)" @nudge="nudgeTo(t.id)" @attach="(p, cap) => sendAttachTo(t.id, p, cap)" @toggle-dp="toggleDp"></chat-pane>
+        :photo-api="photoApi" :shot-api="shotApi" @send="text => sendTo(t.id, text)" @nudge="nudgeTo(t.id)" @attach="(p, cap) => sendAttachTo(t.id, p, cap)" @toggle-dp="toggleDp"></chat-pane>
       <div class="pane home-pane" v-if="view === 'home'">
         <div class="hero" role="region" aria-label="宣傳" aria-roledescription="輪播">
           <section v-for="(a, i) in ADS" :key="a.key" v-show="i === adI" class="hero-slide" :style="{ '--h': a.hue }" :aria-label="a.title + '：' + a.sub">
@@ -236,6 +284,45 @@
       <div class="pane guide-pane" v-else-if="view === 'guide'"><guide-doc :guide="openedGuide"></guide-doc></div>
     </div>
   </section>
+  </div>
+  <ul class="av-menu buddy-menu" v-if="buddyMenu" :style="{ left: buddyMenuPos.x + 'px', top: buddyMenuPos.y + 'px' }" role="menu" @click.stop>
+    <li v-if="buddyConsoleToggle"><button type="button" role="menuitem" @click="toggleBuddyConsole">{{ buddyConsoleLabel }}</button></li>
+  </ul>
+  <ul class="av-menu launch-picker" v-if="launchPicker" :style="{ left: launchPickerPos.x + 'px', top: launchPickerPos.y + 'px' }" role="menu" @click.stop>
+    <li v-for="d in launchDeviceRows" :key="d.key">
+      <button type="button" role="menuitem" :class="{ off: launchDisableReason(d.key) }" :disabled="!!launchDisableReason(d.key)" :title="launchDisableReason(d.key) || d.label" @click="pickLaunchDevice(d.key)">{{ d.label }}<span class="launch-why" v-if="launchDisableReason(d.key)">{{ launchDisableReason(d.key) }}</span></button>
+    </li>
+  </ul>
+  <div class="partner-dlg-back" v-if="partnerDlg.open" @click.self="closePartnerDlg">
+    <div class="partner-dlg" role="dialog" aria-labelledby="partner-dlg-title" @click.stop>
+      <h3 id="partner-dlg-title">開新夥伴</h3>
+      <p class="partner-node" v-if="partnerDlg.node !== selfNode">設備：{{ partnerDlg.deviceLabel }}</p>
+      <div class="partner-models" role="radiogroup" aria-label="模型">
+        <button v-for="m in partnerModels" :key="m.id" type="button" class="pmodel" :class="{ on: partnerDlg.profile === m.profileId, off: !m.installed }" :disabled="!m.installed" :title="m.installed ? m.modeLabel : m.installHint" @click="pickPartnerModel(m)">
+          <span class="pmodel-ic" :data-m="m.id"></span>
+          <span class="pmodel-lb">{{ m.label }}</span>
+        </button>
+      </div>
+      <p class="partner-mode" v-if="partnerDlg.modeLabel">{{ partnerDlg.modeLabel }}</p>
+      <label>名字<input class="set-input" v-model="partnerDlg.name" maxlength="40" aria-label="夥伴名字"></label>
+      <label>工作資料夾
+        <select class="set-sel" v-model="partnerDlg.cwd" aria-label="工作資料夾">
+          <option v-for="c in partnerCwdChoices" :key="c" :value="c">{{ c }}</option>
+        </select>
+      </label>
+      <fieldset class="partner-display" v-if="partnerShowDisplay">
+        <legend>顯示方式</legend>
+        <label v-for="m in DISPLAY_MODES" :key="m.key" class="partner-display-opt">
+          <input type="radio" name="partner-display" :value="m.key" v-model="partnerDlg.display" :aria-label="m.label"> {{ m.label }}
+        </label>
+      </fieldset>
+      <label>第一句話（選填）<textarea class="set-area" rows="2" v-model="partnerDlg.firstMessage" maxlength="4000" aria-label="第一句話"></textarea></label>
+      <p class="partner-err" v-if="partnerDlg.error" role="alert">{{ partnerDlg.error }}</p>
+      <div class="partner-actions">
+        <button class="aero-btn" type="button" @click="closePartnerDlg">取消</button>
+        <button class="aero-btn primary" type="button" :disabled="partnerDlg.busy" @click="submitPartnerDlg">{{ partnerDlg.busy ? '啟動中…' : '開啟' }}</button>
+      </div>
+    </div>
   </div>
 </div>
 <script src="vendor/vue.global.prod.js"></script>

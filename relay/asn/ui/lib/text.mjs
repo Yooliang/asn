@@ -31,15 +31,23 @@ const pad = n => String(n).padStart(2, '0')
 export const fmt = t => { const d = new Date(t); return `${d.getHours()}:${pad(d.getMinutes())}` }
 export const fmtDate = t => { const d = new Date(t); return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${fmt(t)}` }
 
-// 震動：寄出的內文是「（<視窗名> 傳送了一個震動）」（expects_reply:false；內文由 Rust 端用視窗名組成），AI 看了才懂意思。
-// 收信端兩種都認：新格式要「整段內文」就是這句才算（避免一般訊息裡提到這句話被誤判）；舊版（尚未升級的 ASN）寄的 [震動] 照舊，內文含它就算。
+// 震動：寄出的內文兩行——第一行「（<視窗名> 傳送了一個震動）」，第二行 NUDGE_HINT 請收到的 AI 回一個震動
+// （expects_reply:false，不計時；內文由 Rust 端 relay.rs 用視窗名組成，第二行與 NUDGE_HINT 同一句）。
+// 收信端認：第一行是這句、其餘只能是空的或就是 NUDGE_HINT（AI 照提示回的震動只有第一行）；舊版 ASN 寄的 [震動] 內文含它就算。
+// 一般訊息裡提到這句話、或第二行是別的內容都不算。
 export const NUDGE_TAG = '[震動]'   // 舊格式，只用於辨識
-export const nudgeBody = name => `（${String(name ?? '').trim()} 傳送了一個震動）`
+export const NUDGE_HINT = '想回應的話，就回一個震動：寄一封內文只有「（你的名字 傳送了一個震動）」的信，不用另外回信。'
+export const nudgeBody = name => `（${String(name ?? '').trim()} 傳送了一個震動）\n${NUDGE_HINT}`
 const NUDGE_RE = /^（[^（）\r\n]{1,80} 傳送了一個震動）$/
-export const hasNudge = body => { const s = String(body ?? ''); return s.includes(NUDGE_TAG) || NUDGE_RE.test(s.trim()) }
+const isNewNudge = body => {
+  const [first = '', ...rest] = String(body ?? '').trim().split(/\r?\n/)
+  const tail = rest.join('\n').trim()
+  return NUDGE_RE.test(first.trim()) && (tail === '' || tail === NUDGE_HINT)
+}
+export const hasNudge = body => String(body ?? '').includes(NUDGE_TAG) || isNewNudge(body)
 export const stripNudge = body => {
   const s = String(body ?? '').trim()
-  return NUDGE_RE.test(s) ? '' : s.split(NUDGE_TAG).join('').trim()
+  return isNewNudge(s) ? '' : s.split(NUDGE_TAG).join('').trim()
 }
 
 // 經機器橋轉回來的回信，內文整段包著 <cross-session-message …>…</cross-session-message>（斜線可能寫成 <\ 與 <\/）。
@@ -59,9 +67,32 @@ export function unwrapShell(body) {
   return inner.trim()
 }
 
+// 對方視窗的 AI 有時在回信開頭自己加一行「[回覆 id=<uuid> → <節點/視窗>]」（issue #16）。顯示時只剝開頭這一行；
+// 不是這個格式（id 不是 uuid、箭頭不對、不在開頭）一律不動；整則只有抬頭時保留原文，免得變成空訊息。
+const REPLY_HEAD = /^\s*\[回覆 id=[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12} → [^\]\r\n]*\][ \t]*\r?\n?/
+export function stripReplyHead(body) {
+  const s = String(body ?? '')
+  const m = REPLY_HEAD.exec(s)
+  if (!m) return s
+  const rest = s.slice(m[0].length).trim()
+  return rest || s
+}
+
 // 好友頭像底色：由 id 算出固定色相
 export function hueOf(id) {
   let h = 0
   for (const ch of String(id)) h = (h * 31 + ch.codePointAt(0)) >>> 0
   return h % 360
+}
+
+// 前台凡要顯示「這是哪台設備」一律用該設備 ASN 的視窗名（後端 nodes.name）；沒有（例如只有收發室橋或雲端代理的設備）就顯示這個，絕不顯示節點代號
+export const UNNAMED_DEVICE = '未命名設備'
+
+// 收發室寄來的「等了一陣子仍沒收到回覆」提醒信（relay/machine/bridge.mjs noticeNoReply）：不是對話訊息。
+// 回傳 null（不是這類信）或 { mins }（mins＝內文寫的等待分鐘數，沒寫＝0，例如對方視窗已關閉）。
+export function noReplyNoticeOf(m) {
+  const body = String(m?.body ?? '')
+  if (!/收發室$/.test(String(m?.from_agent ?? '')) || !body.startsWith('[收發室] ') || !/沒有經收發室收到/.test(body)) return null
+  const n = body.match(/等了約\s*(\d+)\s*分鐘/) ?? body.match(/(\d+)\s*分鐘內/)
+  return { mins: n ? Number(n[1]) : 0 }
 }

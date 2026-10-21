@@ -2,15 +2,19 @@
 // 只顯示、只發事件（send／nudge／toggle-dp），不碰網路與 Tauri；信件內文與名稱一律先 emo()（跳脫）才進 v-html。
 import { EMO, emo, fmt, fmtDate, initial, plain } from './text.mjs'
 import { composeHintTitle, composePlaceholder } from './compose.mjs'
-import { foldArrow, hasSideCol, isCollapsed, msgLayout, paneClasses, sideOf } from './merge.mjs'
+import { foldBarArrow, hasSideCol, isCollapsed, msgLayout, paneClasses, sideOf } from './merge.mjs'
 import { FILE_ACCEPT, formatBytes, photoExpired, photoTitle } from './photo.mjs'
-import { attachmentFromFile } from './photo-canvas.mjs'
+import { attachmentFromFile, imageFromBlob } from './photo-canvas.mjs'
+import { Annotator } from './annotator.mjs'
+import { shotFileName } from './shot.mjs'
+import { statusTip, tierOf } from './sent-status.mjs'
 
-const { ref, computed, watch, nextTick, onMounted } = Vue
+const { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } = Vue
 const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯示為離線' }
 
 export const ChatPane = {
   name: 'ChatPane',
+  components: { Annotator },
   props: {
     friend: { type: Object, default: null },
     me: { type: Object, default: () => ({ nick: '我', status: 'online' }) },
@@ -24,6 +28,7 @@ export const ChatPane = {
     active: { type: Boolean, default: true },      // 整合模式下只有目前分頁是 true；變成 true 時捲到底並聚焦輸入框
     winMode: { type: String, default: 'split' },   // split｜merged：整合模式用較短的輸入提示
     photoApi: { type: Object, default: null },     // photoApi.fetch 回 {data_url}、photoApi.save 回路徑：放大看與另存（Rust 端，金鑰不在前端）；沒給就不能放大
+    shotApi: { type: Object, default: null },      // 截圖（lib/tauri.mjs 的 shotApi）；沒給或這個系統不支援就沒有截圖鈕
     voice: { type: Object, default: null },        // 語音功能（lib/voice-ui.mjs 的 createVoiceUi）；沒給就沒有念出訊息與麥克風
   },
   emits: ['send', 'nudge', 'toggle-dp', 'attach'],
@@ -35,7 +40,8 @@ export const ChatPane = {
     const composeTitle = computed(() => composeHintTitle(props.winMode))
     const collapsed = computed(() => isCollapsed(props.dpMode, props.dpCollapsed))
     const classes = computed(() => paneClasses({ dpMode: props.dpMode, bubble: props.bubble, collapsed: props.dpCollapsed, toolbar: props.toolbar }))
-    const arrow = computed(() => foldArrow(sideOf(props.dpMode), collapsed.value))
+    const side = computed(() => sideOf(props.dpMode))
+    const barArrow = computed(() => foldBarArrow(side.value, collapsed.value))
     const foldTip = computed(() => (collapsed.value ? '展開大頭貼' : '收起大頭貼'))
     const lay = k => msgLayout(k, { dpMode: props.dpMode, bubble: props.bubble })
     const scrollDown = () => nextTick(() => { const el = msgsEl.value; if (el) el.scrollTop = el.scrollHeight })
@@ -64,10 +70,33 @@ export const ChatPane = {
       } catch (e) { photoMsg.value = e.message } finally { photoBusy.value = false }
     }
     function pickPhoto(ev) { const f = ev.target.files && ev.target.files[0]; ev.target.value = ''; void sendFile(f) }
+    // 貼上圖片：先進標註畫面（可以直接按「傳送」不畫），不再直接送出
     function onPaste(ev) {
       const item = [...(ev.clipboardData?.items ?? [])].find(i => i.kind === 'file' && /^image\//.test(i.type))
-      if (item) { ev.preventDefault(); void sendFile(item.getAsFile()) }
+      if (item) { ev.preventDefault(); openAnnot(item.getAsFile(), 'paste') }
     }
+    // ---- 截圖＋標註：Rust 端隱藏視窗、框選螢幕任一區域 → 標註畫面 → 確定後走一樣的送出圖片流程 ----
+    const shotOk = ref(false), annot = ref(null)   // annot：{ blob, name, busy, msg }
+    function openAnnot(blob, from) {
+      if (!blob || annot.value) return
+      annot.value = { blob, name: from === 'paste' ? 'paste.png' : shotFileName(), busy: false, msg: '' }
+    }
+    async function startShot() {
+      if (!props.shotApi || photoBusy.value || annot.value) return
+      photoBusy.value = true; photoMsg.value = ''
+      try { openAnnot(await props.shotApi.capture(), 'shot') } catch (e) { photoMsg.value = e.message } finally { photoBusy.value = false }
+    }
+    async function annotDone({ blob, caption }) {
+      const a = annot.value; if (!a || a.busy) return
+      a.busy = true; a.msg = ''
+      try {
+        const photo = await imageFromBlob(blob, a.name)
+        emit('attach', photo, caption || draft.value.trim())
+        draft.value = ''; annot.value = null
+        nextTick(() => composeEl.value && composeEl.value.focus())
+      } catch (e) { a.msg = e.message; a.busy = false }
+    }
+    function annotCancel() { annot.value = null; nextTick(() => composeEl.value && composeEl.value.focus()) }
     // ---- 放大看：點縮圖才向收發室換下載網址（Rust 端）；可另存到「下載\ASN」 ----
     const viewer = ref(null)
     const expired = p => photoExpired(p)
@@ -105,20 +134,33 @@ export const ChatPane = {
       })
     }
     const msgKey = (m, i) => (m.id ? String(m.id) : `${m.t}:${i}`)
+    const msgTier = m => tierOf(m)
+    const msgStatusTip = m => statusTip(m)
     const speaking = (m, i) => !!props.voice && props.voice.state.tts.key === msgKey(m, i) && props.voice.state.tts.phase !== 'idle'
     const speakTip = (m, i) => (speaking(m, i) ? '停止念出' : '念出這則訊息')
     const speak = (m, i) => props.voice && props.voice.speak(msgKey(m, i), m.text)
-    const micTip = computed(() => (props.voice?.state.mic.phase === 'recording' ? '說完了，按一下辨識' : '語音輸入（按一下開始說話）'))
+    const MIC_TIP = { starting: '準備麥克風…按一下取消', recording: '聆聽中…說完了，按一下辨識（Esc 取消）', recognizing: '辨識中…按一下取消' }
+    const micTip = computed(() => MIC_TIP[props.voice?.state.mic.phase] || '語音輸入（按一下開始說話）')
     const voiceNote = computed(() => props.voice?.state.note || props.voice?.state.tts.error || '')
     onMounted(() => {
       scrollDown(); if (props.active) composeEl.value && composeEl.value.focus()
-      window.addEventListener('keydown', e => { if (e.key === 'Escape' && viewer.value) closeViewer() })
+      if (props.shotApi) props.shotApi.supported().then(v => { shotOk.value = v === true }).catch(() => {})
+      window.addEventListener('keydown', onKey)
     })
+    // Esc：先關放大的照片；沒有的話取消語音輸入（準備中／錄音中／辨識中，只有目前看得到的面板處理）
+    function onKey(e) {
+      if (e.key !== 'Escape') return
+      if (viewer.value) { closeViewer(); return }
+      if (props.active && props.voice && props.voice.state.mic.phase !== 'idle') { e.preventDefault(); void props.voice.cancelMic() }
+    }
+    onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     const docEl = ref(null)
-    return { micClick, msgKey, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, composeHint, composeTitle, collapsed, classes, lay, arrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, photoBusy, photoMsg, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
+  <div class="chatpane-body">
+  <div class="chatpane-main">
   <div class="conv">
     <div class="conv-main">
       <div class="to-line"><span v-html="emo(friend.nick)"></span>
@@ -135,13 +177,14 @@ export const ChatPane = {
           <div v-else class="msg" :class="['al-' + lay(m.k).align, { mine: m.k === 'me' }]">
             <div class="m-av" v-if="lay(m.k).avatar"><div class="dp xs" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span><img :src="friendAv" alt=""></span></div></div>
             <div class="m-main">
-              <div class="who">{{ m.k === 'me' ? plain(me.nick) : plain(friend.nick) }} 說：<time>{{ fmt(m.t) }}</time>
+              <div class="who">{{ m.k === 'me' ? plain(me.nick) : plain(friend.nick) }}：<time>{{ fmt(m.t) }}</time><span v-if="m.k === 'me' && msgTier(m) && msgTier(m) !== 'sent'" class="msg-st" :class="'st-' + msgTier(m)" :title="msgStatusTip(m)" :aria-label="msgStatusTip(m)">{{ msgTier(m) === 'delivered' ? '✓' : '✓✓' }}</span>
                 <button v-if="voice && m.k === 'them' && m.text" class="spk" :class="{ on: speaking(m, i) }" type="button" @click="speak(m, i)" :aria-label="speakTip(m, i)" :title="speakTip(m, i)">
                   <svg v-if="!speaking(m, i)" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 9.5v5h3.6L12 18.5v-13L7.6 9.5z" fill="currentColor"/><path d="M15 9.2a4 4 0 0 1 0 5.6M17.4 6.8a7.4 7.4 0 0 1 0 10.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
                   <svg v-else viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/></svg>
                 </button>
               </div>
               <div class="m-body" :class="'tone-' + lay(m.k).tone" v-if="m.text" v-html="emo(m.text)"></div>
+              <div class="unanswered" v-if="m.k === 'me' && m.unanswered != null">{{ m.unanswered > 0 ? '超過 ' + m.unanswered + ' 分鐘未回' : '對方視窗已關閉，未回' }}</div>
               <div class="photos" v-if="m.photos && m.photos.length">
                 <template v-for="p in m.photos" :key="p.id">
                   <button v-if="p.kind === 'file'" type="button" class="filecard" :class="{ gone: expired(p) }" :title="photoTitle(p)" :aria-label="'檔案：' + photoTitle(p) + (expired(p) ? '（已過期）' : '，點一下下載並另存')" :disabled="expired(p) || !photoApi" @click="openPhoto(p)">
@@ -158,10 +201,6 @@ export const ChatPane = {
           </div>
         </template>
       </div>
-    </div>
-    <button class="dp-fold" type="button" v-if="sideCol" @click="$emit('toggle-dp')" :aria-label="foldTip" :aria-expanded="!collapsed" :title="foldTip">{{ arrow }}</button>
-    <div class="dp-col" v-if="sideCol && !collapsed">
-      <div class="dp xl" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span><img :src="friendAv" alt=""></span></div>
     </div>
   </div>
   <div class="compose-row">
@@ -183,7 +222,10 @@ export const ChatPane = {
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 2.5h8.5L19 7v14.5H6z" fill="#fff" stroke="#4a5d73" stroke-width="1.4" stroke-linejoin="round"/><path d="M14.5 2.5V7H19" fill="none" stroke="#4a5d73" stroke-width="1.4" stroke-linejoin="round"/><path d="M9 12h7M9 15.5h7" stroke="#2f7d3c" stroke-width="1.5" stroke-linecap="round"/></svg>
         </button>
         <input ref="docEl" type="file" :accept="FILE_ACCEPT + ',image/*'" hidden @change="pickPhoto" aria-hidden="true" tabindex="-1">
-        <button class="tool icon mic" :class="{ rec: voice && voice.state.mic.phase === 'recording', busy: voice && voice.state.mic.phase === 'recognizing' }" type="button" v-if="voice" @click="micClick" :disabled="voice.state.mic.phase === 'recognizing'" :aria-label="micTip" :aria-pressed="voice.state.mic.phase === 'recording'" :title="micTip">
+        <button class="tool icon" type="button" v-if="shotApi && shotOk" @click="startShot" :disabled="photoBusy || !!annot" aria-label="截圖" title="截圖（框選螢幕任一區域，可畫筆標註後傳送）">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M7 3v14h14M3 7h14v14" fill="none" stroke="#4a5d73" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 14l4-4" stroke="#d9302b" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+        <button class="tool icon mic" :class="{ rec: voice && voice.state.mic.phase === 'recording', busy: voice && (voice.state.mic.phase === 'recognizing' || voice.state.mic.phase === 'starting') }" type="button" v-if="voice" @click="micClick" :aria-label="micTip" :aria-pressed="voice.state.mic.phase === 'recording'" :title="micTip">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="9" y="3.5" width="6" height="11" rx="3" fill="currentColor"/><path d="M5.8 11.5a6.2 6.2 0 0 0 12.4 0M12 17.7v3M8.6 20.7h6.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
         </button>
         <div class="picker" v-if="pickerOpen" role="menu">
@@ -196,22 +238,28 @@ export const ChatPane = {
         <button class="aero-btn" type="button" :disabled="voice.state.install.busy" @click="voice.installStt()">下載</button>
         <button class="aero-btn" type="button" :disabled="voice.state.install.busy" @click="voice.dismissInstall()">取消</button>
       </div>
-      <div class="voice-note" v-if="voiceNote" role="status">{{ voiceNote }}</div>
       <form class="composer" @submit.prevent="send">
         <textarea ref="composeEl" v-model="draft" @keydown.enter.exact.prevent="send" @paste="onPaste" :placeholder="composeHint" :title="composeTitle || undefined" aria-label="輸入訊息"></textarea>
         <button class="aero-btn" type="submit" :disabled="!draft.trim()">傳送</button>
       </form>
     </div>
-    <span class="dp-fold-sp" v-if="sideCol"></span>
-    <div class="dp-col" v-if="sideCol && !collapsed">
+  </div>
+  </div>
+  <aside class="dp-side" v-if="sideCol" :class="'dp-side-' + side">
+    <div class="dp-side-stack" v-show="!collapsed">
+      <div class="dp xl" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span><img :src="friendAv" alt=""></span></div>
       <div class="dp xl" :class="'st-' + me.status" :style="{ '--h': 205 }"><span><img :src="meAv" alt=""></span></div>
     </div>
+    <button class="dp-fold-bar" type="button" @click="$emit('toggle-dp')" :aria-label="foldTip" :aria-expanded="!collapsed" :title="foldTip">{{ barArrow }}</button>
+  </aside>
   </div>
-  <div class="typing">
-    <template v-if="photoMsg">{{ photoMsg }}</template>
+  <div class="typing" role="status">
+    <template v-if="voiceNote">{{ voiceNote }}</template>
+    <template v-else-if="photoMsg">{{ photoMsg }}</template>
     <template v-else-if="friend.waiting">✎ 已送出，等對方回信…</template>
     <template v-else-if="friend.lastAt">上次接收訊息是 {{ fmtDate(friend.lastAt) }}</template>
   </div>
+  <annotator v-if="annot" :blob="annot.blob" :caption="draft.trim()" :busy="annot.busy" :message="annot.msg" @done="annotDone" @cancel="annotCancel"></annotator>
   <div class="photo-viewer" v-if="viewer" @click.self="closeViewer" @keydown.esc="closeViewer" role="dialog" aria-modal="true" aria-label="放大看照片">
     <div class="pv-bar">
       <span class="pv-name">{{ viewer.title }}</span>

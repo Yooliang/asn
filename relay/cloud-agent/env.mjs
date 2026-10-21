@@ -106,7 +106,7 @@ function usage() {
 }
 
 export function main(argv = process.argv.slice(2), rawEnv = process.env) {
-  applyEnvCompat(rawEnv)
+  void applyEnvCompat(rawEnv)
   const cmd = argv[0]
   if (!cmd || cmd === '--help' || cmd === '-h') { usage(); return cmd ? 0 : 1 }
   const p = cloudToolPaths(rawEnv)

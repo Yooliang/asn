@@ -1,78 +1,29 @@
 // 大頭貼（純函式，介面與測試共用）：
-//   1. 自動產生：依字串雜湊產生左右對稱 8×8 色塊（三種顏色），種子＝好友 id（`節點/視窗名`），每人固定、不同人不同。
-//      概念同常見的「錢包 blockies」：種子 → 偽隨機數 → 一組主色／底色／點綴色，再逐列決定半邊格子、鏡射成另一半。
-//      雜湊（FNV-1a）與亂數（mulberry32）是自己寫的標準演算法，不含任何第三方程式。
+//   1. 自動產生：DiceBear 的 shapes 風格（離線，由 scripts/prep.mjs 打包成 ui/vendor/dicebear.mjs），
+//      種子＝好友 id（`節點/視窗名`），每人固定、不同人不同。
 //   2. 設備上傳的大頭貼：96×96、png 或 webp、≤ 32 KB 的 data URL；上傳前與收到時都要檢查格式與大小。
 //   3. 顯示規則：AI 視窗（在名單上）→ 一律自動產生；不在名單上的寄件人 → 用他那台設備上傳的圖，沒有就自動產生；
 //      自己 → 本機節點有上傳就用上傳的，沒有就自動產生。
 
-export const GRID = 8
+import { createAvatar, shapes } from '../vendor/dicebear.mjs'
+
 export const AVATAR_PX = 96
 export const AVATAR_MAX_BYTES = 32 * 1024        // 圖檔本身（解碼後）上限
 export const AVATAR_MAX_CHARS = 48000            // data URL 全長上限（與資料庫、後端一致）
 const PREFIX_RE = /^data:image\/(png|webp);base64,/
 const B64_RE = /^[A-Za-z0-9+/]+={0,2}$/
 
-// ---------- 自動產生（blockies 風格） ----------
-function fnv1a(s) {
-  let h = 0x811c9dc5
-  for (const ch of String(s)) {
-    h ^= ch.codePointAt(0)
-    h = Math.imul(h, 0x01000193) >>> 0
-  }
-  return h >>> 0
-}
-function mulberry32(a) {
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0
-    let t = a
-    t = Math.imul(t ^ (t >>> 15), t | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-
-// 三種顏色：主色、底色、點綴色；底色與主色的亮度至少差 22，避免整張糊成一色
-function palette(rand) {
-  const hue = Math.floor(rand() * 360)
-  const main = { h: hue, s: 45 + Math.floor(rand() * 45), l: 35 + Math.floor(rand() * 25) }
-  const bgL = main.l > 55 ? 14 + Math.floor(rand() * 18) : 76 + Math.floor(rand() * 16)
-  const bg = { h: (hue + 150 + Math.floor(rand() * 60)) % 360, s: 25 + Math.floor(rand() * 40), l: bgL }
-  const spot = { h: (hue + 40 + Math.floor(rand() * 280)) % 360, s: 55 + Math.floor(rand() * 40), l: 45 + Math.floor(rand() * 20) }
-  return [main, bg, spot].map(c => `hsl(${c.h} ${c.s}% ${c.l}%)`)
-}
-
-// 回傳 { colors: [主色, 底色, 點綴色], cells: 8 列 × 8 欄，值 0＝底色、1＝主色、2＝點綴色 }；左右對稱
-export function blockieGrid(seed) {
-  const rand = mulberry32(fnv1a(seed))
-  const colors = palette(rand)
-  const half = GRID / 2
-  const cells = []
-  for (let r = 0; r < GRID; r++) {
-    const row = new Array(GRID)
-    for (let c = 0; c < half; c++) {
-      const v = Math.floor(rand() * 2.3)   // 0（底）約 43%、1（主）約 43%、2（點綴）約 13%
-      row[c] = v
-      row[GRID - 1 - c] = v
-    }
-    cells.push(row)
-  }
-  return { colors, cells }
-}
-
-// SVG 文字（只含色塊，不含種子本身）：先鋪底色，再畫非底色的格子
-export function blockieSvg(seed) {
-  const { colors, cells } = blockieGrid(seed)
-  let rects = ''
-  for (let r = 0; r < GRID; r++) for (let c = 0; c < GRID; c++) if (cells[r][c]) rects += `<rect x="${c}" y="${r}" width="1" height="1" fill="${colors[cells[r][c]]}"/>`
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${GRID} ${GRID}" shape-rendering="crispEdges"><rect width="${GRID}" height="${GRID}" fill="${colors[1]}"/>${rects}</svg>`
-}
+// ---------- 自動產生（DiceBear shapes 風格，離線） ----------
+// 用打包進 ui/vendor/dicebear.mjs 的官方套件在本機產生，不連 api.dicebear.com；同一個種子永遠同一張。
 const memo = new Map()
-export function blockieDataUrl(seed) {
+export function autoAvatarSvg(seed) {
+  return createAvatar(shapes, { seed: String(seed) }).toString()
+}
+export function autoAvatarDataUrl(seed) {
   const k = String(seed)
   let u = memo.get(k)
   if (!u) {
-    u = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(blockieSvg(k))
+    u = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(autoAvatarSvg(k))
     if (memo.size > 500) memo.clear()
     memo.set(k, u)
   }
@@ -137,7 +88,7 @@ export function selfAvatarFor({ selfNode, windowName, avatars }) {
   const up = pick(avatars, selfNode)
   return up ? { kind: 'upload', src: up } : { kind: 'auto', seed: `${selfNode}/${windowName}` }
 }
-export const avatarSrcOf = a => (a.kind === 'upload' ? a.src : blockieDataUrl(a.seed))
+export const avatarSrcOf = a => (a.kind === 'upload' ? a.src : autoAvatarDataUrl(a.seed))
 export const avatarSrc = (friend, ctx) => avatarSrcOf(avatarFor(friend, ctx))
 export const selfAvatarSrc = ctx => avatarSrcOf(selfAvatarFor(ctx))
 

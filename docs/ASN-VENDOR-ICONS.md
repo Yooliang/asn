@@ -1,0 +1,14 @@
+# ASN 廠商分頁圖示
+
+名單「分頁依廠商」時，左側頁籤改用小圖示（滑過仍顯示全名）。
+
+## 來源與授權
+
+- 圖示為 **ASN 自繪簡化標誌**（`relay/asn/ui/lib/vendor-icons.mjs` 內嵌 SVG），刻意不做官方商標的像素級複製。
+- 設計時參考公開品牌色系與 [Simple Icons](https://simpleicons.org/)（**CC0 1.0**）的構圖概念；**本 repo 未直接嵌入 Simple Icons 的 SVG 路徑**。
+- 若日後改為直接引用 Simple Icons，請在此列出各 slug 與 CC0 聲明。
+
+## 深／淺色
+
+- 線條與中性形狀使用 `currentColor`，隨 ASN 主題前景色變化。
+- 少量識別色（例如 Gemini 藍綠、Claude 橘）保留固定 hex，在深淺背景下仍辨識。

@@ -4,8 +4,10 @@
 //   ASN_CLOUD_MAIL_DIR  信件目錄（預設 <根>/relay）
 //   ASN_RELAY_ID        節點代號（預設 grok）
 //   ASN_RELAY_URL       仲介網址（預設正式；測試指到 127.0.0.1）
-//   ASN_RELAY_KEY       節點金鑰（優先於金鑰檔）；ASN_RELAY_ANON_KEY／<金鑰目錄>/anon.key：Realtime 門鈴
+//   ASN_RELAY_KEY       節點金鑰（優先於金鑰檔）
+//   ASN_RELAY_ANON_KEY／<金鑰目錄>/anon.key：Realtime 門鈴（pickAnon 會對專案代號並內建新後台 anon；舊名 IRORI_RELAY_ANON_KEY 經 env-compat 併入新名）
 //   舊名 IRORI_* 由 env-compat.mjs 在 resolveConfig 入口轉成 ASN_*（ONBOARDING §5）
+import { pickAnon } from '../machine/anon.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
 import { DEFAULT_URL, ID_RE } from '../machine/register.mjs'
@@ -80,9 +82,9 @@ export function readKey(cfg, rawEnv = cfg._resolvedEnv ?? process.env) {
 
 export function readAnonKey(cfg, rawEnv = cfg._resolvedEnv ?? process.env) {
   const { env } = applyEnvCompat(rawEnv)
-  const v = (env.ASN_RELAY_ANON_KEY || '').trim()
-  if (v) return v
-  try { return fs.readFileSync(path.join(cfg.keyDir, 'anon.key'), 'utf8').trim() } catch { return '' }
+  let f = ''
+  try { f = fs.readFileSync(path.join(cfg.keyDir, 'anon.key'), 'utf8').trim() } catch { /* 沒有檔案 */ }
+  return pickAnon(cfg.baseUrl, [env.ASN_RELAY_ANON_KEY, f])
 }
 
 const STATUSES = new Set(['idle', 'busy', 'waiting'])

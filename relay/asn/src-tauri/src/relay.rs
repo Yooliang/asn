@@ -31,6 +31,8 @@ pub fn encode_component(s: &str) -> String {
 }
 
 pub const MAX_BODY: usize = 20000;
+/// 震動信第二行：請收到的 AI 回一個震動（與 ui/lib/text.mjs 的 NUDGE_HINT 同一句，test/logic.test.mjs 會比對）
+pub const NUDGE_HINT: &str = "想回應的話，就回一個震動：寄一封內文只有「（你的名字 傳送了一個震動）」的信，不用另外回信。";
 
 /// 前端交來的寄信內容 → 要送給後端的 body。from_agent 一律換成本程式的視窗名（前端不能自填），
 /// 只放行 to_node／to_agent／body／reply_to／from_agent／expects_reply 六個欄位；expects_reply 一定要明說（布林）。
@@ -42,7 +44,8 @@ pub fn build_send_body(payload: &Value, window: &str) -> Result<Value, String> {
     }
     // 震動：前端只說 nudge:true，內文由這裡用視窗名組成「（某某 傳送了一個震動）」（視窗名以本程式為準，前端不能自填）
     let nudge = o.get("nudge").and_then(Value::as_bool).unwrap_or(false);
-    let nudge_body = format!("（{window} 傳送了一個震動）");
+    // 第二行請收到的 AI 回一個震動（與 ui/lib/text.mjs 的 NUDGE_HINT 同一句）
+    let nudge_body = format!("（{window} 傳送了一個震動）\n{NUDGE_HINT}");
     let body = if nudge { nudge_body.as_str() } else { o.get("body").and_then(Value::as_str).unwrap_or("").trim_end() };
     if body.is_empty() {
         return Err("內文是空的".into());
@@ -68,6 +71,17 @@ pub fn build_send_body(payload: &Value, window: &str) -> Result<Value, String> {
     Ok(Value::Object(m))
 }
 
+pub fn build_sent_status_body(ids: &[String]) -> Result<Value, String> {
+    let uuid = |s: &str| {
+        let p: Vec<&str> = s.split('-').collect();
+        p.len() == 5 && [8, 4, 4, 4, 12].iter().zip(&p).all(|(n, x)| x.len() == *n && x.chars().all(|c| c.is_ascii_hexdigit()))
+    };
+    if ids.len() > 50 || !ids.iter().all(|i| uuid(i)) {
+        return Err("信件 id 格式不對".into());
+    }
+    Ok(json!({ "ids": ids }))
+}
+
 pub fn build_ack_body(ids: &[String]) -> Result<Value, String> {
     let uuid = |s: &str| {
         let p: Vec<&str> = s.split('-').collect();
@@ -77,6 +91,16 @@ pub fn build_ack_body(ids: &[String]) -> Result<Value, String> {
         return Err("信件 id 格式不對".into());
     }
     Ok(json!({ "ids": ids }))
+}
+
+/// set_name 的請求內容（驗證在後端與 names::validate_name 同規則；這裡只送視窗名）
+pub fn build_set_name_body(name: &str) -> Value {
+    json!({ "name": name })
+}
+
+/// 後台還沒部署 set_name（404）或不認得（400）：靜默略過，不當錯誤
+pub fn set_name_unsupported(err: &str) -> bool {
+    err.contains("HTTP 404") || err.contains("HTTP 400")
 }
 
 impl Relay {
@@ -190,16 +214,45 @@ impl Relay {
         }
         Ok(json!({ "acked": acked }))
     }
+    /// 把這台設備的顯示名（nodes.name）設成目前的視窗名，名單才會讓別台設備的前台顯示這台的 ASN 視窗名。
+    /// 只改自己這個節點的 name。後台還沒部署（404／400）當作不支援、靜默略過；其他失敗只記 log 並稍後再試，不打擾使用者。
+    pub async fn sync_device_name(&self) {
+        for wait in [0u64, 30, 120] {
+            if wait > 0 {
+                tokio::time::sleep(Duration::from_secs(wait)).await;
+            }
+            match self.api("set_name", Some(build_set_name_body(&self.window_name()))).await {
+                Ok(_) => return,
+                Err(e) if set_name_unsupported(&e) => return,
+                Err(e) => eprintln!("set_name failed: {e}"),
+            }
+        }
+    }
+
     pub async fn send(&self, payload: &Value) -> Result<Value, String> {
         let b = build_send_body(payload, &self.window_name())?;
         // 後端不擋同節點寄信；與本機視窗聊天是這個程式的主要用途，所以放行（send.mjs 也放行同節點，只擋寄給自己這個視窗）
         self.api("send", Some(b)).await
+    }
+    pub async fn sent_status(&self, ids: &[String]) -> Result<Value, String> {
+        let b = build_sent_status_body(ids)?;
+        let v = self.api("sent_status", Some(b)).await?;
+        Ok(v.get("status").cloned().unwrap_or(json!([])))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 設備名同步_內容只有視窗名_後台未部署靜默() {
+        assert_eq!(build_set_name_body("小希"), json!({ "name": "小希" }));
+        assert!(set_name_unsupported("set_name HTTP 404 not_found"));
+        assert!(set_name_unsupported("set_name HTTP 400 bad_request"));
+        assert!(!set_name_unsupported("set_name HTTP 500 internal"));
+        assert!(!set_name_unsupported("set_name 連線失敗：timeout"));
+    }
 
     #[test]
     fn 編碼和_encodeuricomponent_一致() {
@@ -220,7 +273,7 @@ mod tests {
         // 震動：前端只帶 nudge:true（帶了 body 也不理），內文由 Rust 用視窗名組成
         let b = build_send_body(&json!({"to_node":"W","nudge":true,"body":"偽造","expects_reply":false}), "H-ASN").unwrap();
         assert_eq!(b["expects_reply"], false);
-        assert_eq!(b["body"], "（H-ASN 傳送了一個震動）");
+        assert_eq!(b["body"], format!("（H-ASN 傳送了一個震動）\n{NUDGE_HINT}"));
         assert_eq!(b["from_agent"], "H-ASN");
         assert!(b.get("nudge").is_none(), "nudge 欄位不送給後端");
         assert!(build_send_body(&json!({"to_node":"W","nudge":true,"expects_reply":true}), "H-ASN").is_err());
@@ -246,5 +299,13 @@ mod tests {
         assert!(build_ack_body(&[ok.clone()]).is_ok());
         assert!(build_ack_body(&["nope".to_string()]).is_err());
         assert!(build_ack_body(&vec![ok; 101]).is_err());
+    }
+
+    #[test]
+    fn sent_status_只收_uuid_最多五十個() {
+        let ok = "00000000-0000-0000-0000-000000000001".to_string();
+        assert!(build_sent_status_body(&[ok.clone()]).is_ok());
+        assert!(build_sent_status_body(&["nope".to_string()]).is_err());
+        assert!(build_sent_status_body(&vec![ok; 51]).is_err());
     }
 }

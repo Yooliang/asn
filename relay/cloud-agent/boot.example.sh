@@ -13,6 +13,19 @@ node_ok_at() {
   [ -x "$1" ] && "$1" -p 'Number(process.versions.node.split(".")[0]) >= 22' 2>/dev/null | grep -q true
 }
 
+safe_rm_node_dir() {
+  local target="$1" home_root="$2"
+  if [ -z "$target" ]; then echo "拒絕刪除：NODE_DIR 為空" >&2; return 1; fi
+  case "$target" in /|"$HOME") echo "拒絕刪除危險路徑：$target" >&2; return 1 ;; esac
+  local real_home real_target
+  real_home="$(realpath -m "$home_root")"
+  real_target="$(realpath -m "$target")"
+  case "$real_target" in
+    "$real_home"|"$real_home"/*) rm -rf "$target" ;;
+    *) echo "拒絕刪除：$target 不在 $home_root 底下" >&2; return 1 ;;
+  esac
+}
+
 install_node() {
   local arch base file tmp
   case "$(uname -m)" in x86_64) arch=x64 ;; aarch64|arm64) arch=arm64 ;; *) echo "不支援的 CPU：$(uname -m)" >&2; return 1 ;; esac
@@ -23,7 +36,7 @@ install_node() {
   [ -n "$file" ] || { echo "找不到 $arch 的安裝檔" >&2; return 1; }
   curl -fsSL "$base/$file" -o "$tmp/$file" || return 1
   (cd "$tmp" && grep " $file\$" SHASUMS256.txt | sha256sum -c -) || { echo "sha256 驗證失敗" >&2; return 1; }
-  rm -rf "$NODE_DIR" && mkdir -p "$NODE_DIR" && tar -xzf "$tmp/$file" -C "$NODE_DIR" --strip-components=1
+  safe_rm_node_dir "$NODE_DIR" "$WS" && mkdir -p "$NODE_DIR" && tar -xzf "$tmp/$file" -C "$NODE_DIR" --strip-components=1
   rm -rf "$tmp"
 }
 

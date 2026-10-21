@@ -50,6 +50,38 @@ START_SH="$APP_DIR/start.sh"
 
 log() { echo "[install] $*"; }
 
+# 只允許刪除 HOME_DIR 底下的 NODE_DIR（拒絕 /、$HOME、空字串）
+safe_rm_node_dir() {
+  local target="$1"
+  local home_root="$2"
+  if [ -z "$target" ]; then
+    echo "拒絕刪除：NODE_DIR 為空" >&2
+    return 1
+  fi
+  case "$target" in
+    /|"$HOME") echo "拒絕刪除危險路徑：$target" >&2; return 1 ;;
+  esac
+  local real_home real_target
+  real_home="$(realpath -m "$home_root")"
+  real_target="$(realpath -m "$target")"
+  case "$real_target" in
+    "$real_home"|"$real_home"/*) rm -rf "$target" ;;
+    *) echo "拒絕刪除：$target 不在 $home_root 底下" >&2; return 1 ;;
+  esac
+}
+
+relay_env_mail_dir() {
+  local envfile="$1"
+  local v=""
+  [ -f "$envfile" ] || return 0
+  v="$(grep -E '^ASN_CLOUD_MAIL_DIR=' "$envfile" 2>/dev/null | tail -n1 | sed 's/^ASN_CLOUD_MAIL_DIR=//' | tr -d '\r' || true)"
+  if [ -z "$v" ]; then
+    v="$(grep -E '^IRORI_CLOUD_MAIL_DIR=' "$envfile" 2>/dev/null | tail -n1 | sed 's/^IRORI_CLOUD_MAIL_DIR=//' | tr -d '\r' || true)"
+  fi
+  v="${v%\"}"; v="${v#\"}"
+  printf '%s' "$v"
+}
+
 detect_repo_url() {
   if [ -n "$REPO_URL" ]; then echo "$REPO_URL"; return; fi
   if git -C "$REPO_FROM_SCRIPT" remote get-url origin >/dev/null 2>&1; then
@@ -69,7 +101,7 @@ install_node() {
   [ -n "$file" ] || { echo "找不到 $arch 的 Node 安裝檔" >&2; return 1; }
   curl -fsSL "$base/$file" -o "$tmp/$file"
   (cd "$tmp" && grep " $file\$" SHASUMS256.txt | sha256sum -c -)
-  rm -rf "$NODE_DIR"
+  safe_rm_node_dir "$NODE_DIR" "$HOME_DIR"
   mkdir -p "$NODE_DIR"
   tar -xzf "$tmp/$file" -C "$NODE_DIR" --strip-components=1
   rm -rf "$tmp"
@@ -86,9 +118,8 @@ ensure_code() {
     if [ "$(realpath "$REPO_FROM_SCRIPT")" != "$(realpath "$APP_DIR")" ]; then
       mkdir -p "$APP_DIR/relay/cloud-agent" "$APP_DIR/relay/machine"
       cp -a "$REPO_FROM_SCRIPT/relay/cloud-agent/." "$APP_DIR/relay/cloud-agent/"
-      for f in relay-core.mjs safe-log.mjs register.mjs pull-retry.mjs attach-format.mjs attach-download.mjs; do
-        cp -a "$REPO_FROM_SCRIPT/relay/machine/$f" "$APP_DIR/relay/machine/"
-      done
+      mkdir -p "$APP_DIR/relay/machine"
+      cp -a "$REPO_FROM_SCRIPT/relay/machine/"*.mjs "$APP_DIR/relay/machine/"
     fi
     return
   fi
@@ -149,9 +180,12 @@ recv_running() {
   kill -0 "$pid" 2>/dev/null || return 1
   [ -r "/proc/$pid/cmdline" ] && tr '\0' ' ' < "/proc/$pid/cmdline" | grep -q 'recv\.mjs'
 }
-if recv_running; then log_msg "recv 已在執行"; exit 0; fi
-nohup setsid "$NODE_BIN" "$APP/relay/cloud-agent/recv.mjs" >> "$MAIL/recv.out" 2>&1 &
-log_msg "recv 已啟動（log：$MAIL/recv.log）"
+if recv_running; then
+  log_msg "recv 已在執行"
+else
+  nohup setsid "$NODE_BIN" "$APP/relay/cloud-agent/recv.mjs" >> "$MAIL/recv.out" 2>&1 &
+  log_msg "recv 已啟動（log：$MAIL/recv.log）"
+fi
 DISPATCH="$APP/relay/cloud-agent/dispatch-watch.mjs"
 if [ -f "$DISPATCH" ]; then
   STATE="${ASN_DISPATCH_STATE_DIR:-${IRORI_DISPATCH_STATE_DIR:-$MAIL/dispatch-state}}"
@@ -188,11 +222,13 @@ migrate_from_old() {
   mkdir -p "$MAIL_DIR"
   local old_mail=""
   if [ -f "$old/relay.env" ]; then
-    # shellcheck disable=SC1090
-    set -a; . "$old/relay.env"; set +a
-    old_mail="${ASN_CLOUD_MAIL_DIR:-${IRORI_CLOUD_MAIL_DIR:-}}"
+    old_mail="$(relay_env_mail_dir "$old/relay.env")"
   fi
   old_mail="${old_mail:-$old/relay}"
+  if [ "$(realpath -m "$old_mail")" = "$(realpath -m "$MAIL_DIR")" ]; then
+    log "遷移略過複製（信件目錄相同）：$MAIL_DIR"
+    return 0
+  fi
   copy_if_newer "$old_mail/inbox.jsonl" "$MAIL_DIR/inbox.jsonl"
   copy_if_newer "$old_mail/done.jsonl" "$MAIL_DIR/done.jsonl"
   copy_if_newer "$old_mail/agents.json" "$MAIL_DIR/agents.json"
@@ -215,7 +251,7 @@ hook_boot_script() {
   {
     echo ""
     echo "$marker"
-    echo "if [ -x \"$START_SH\" ]; then . \"$START_SH\" || true; fi"
+    echo "if [ -x \"$START_SH\" ]; then bash \"$START_SH\" || true; fi"
   } >> "$boot"
   log "已在 $boot 追加 start 呼叫"
 }

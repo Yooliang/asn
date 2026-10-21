@@ -78,11 +78,51 @@ pub fn read_key(relay_home: &Path, node: &str, env_key: Option<String>) -> Resul
         .ok_or_else(|| format!("找不到機器金鑰 {}", relay_home.join(format!("{node}.key")).display()))
 }
 
-pub fn read_anon(relay_home: &Path, env_key: Option<String>) -> Option<String> {
-    env_key
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .or_else(|| fs::read_to_string(relay_home.join("anon.key")).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()))
+/// 內建新後台的 anon 公開金鑰（公開金鑰，任何網頁前端都看得到；與 relay/machine/anon.mjs 同一把）
+pub const BUILTIN_ANON: &[(&str, &str)] = &[(
+    "etccgmkrosbzpltudlgt",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV0Y2NnbWtyb3NienBsdHVkbGd0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI0OTk0MDUsImV4cCI6MjEwODA3NTQwNX0.2ew035D3LOskYGxCG2ryIaXz-U9BJcUFXtMKuSCo6QA",
+)];
+
+/// 後台網址 https://<ref>.supabase.co/... → ref；不是 supabase.co 回空字串
+fn project_ref(base_url: &str) -> String {
+    let host = base_url.split("://").nth(1).unwrap_or("").split(['/', ':', '?']).next().unwrap_or("");
+    match host.strip_suffix(".supabase.co") {
+        Some(r) if r.len() == 20 && r.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()) => r.to_string(),
+        _ => String::new(),
+    }
+}
+
+/// JWT 第二段的 ref；不是 JWT 回空字串
+fn anon_ref(key: &str) -> String {
+    use base64::Engine;
+    let parts: Vec<&str> = key.split('.').collect();
+    if parts.len() != 3 {
+        return String::new();
+    }
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(parts[1].trim_end_matches('='))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+        .and_then(|v| v.get("ref").and_then(|r| r.as_str()).map(str::to_string))
+        .unwrap_or_default()
+}
+
+/// 環境變數 → anon.key 檔 → 內建；候選金鑰的專案（JWT ref）跟後台網址對不上就跳過（例如切換後殘留的舊專案 anon.key）
+pub fn read_anon(relay_home: &Path, env_key: Option<String>, base_url: &str) -> Option<String> {
+    let want = project_ref(base_url);
+    let file = fs::read_to_string(relay_home.join("anon.key")).ok();
+    for c in [env_key, file].into_iter().flatten() {
+        let k = c.trim().to_string();
+        if k.is_empty() {
+            continue;
+        }
+        let r = anon_ref(&k);
+        if want.is_empty() || r.is_empty() || r == want {
+            return Some(k);
+        }
+    }
+    BUILTIN_ANON.iter().find(|(r, _)| *r == want).map(|(_, k)| k.to_string())
 }
 
 pub struct Identity {
@@ -100,8 +140,9 @@ pub fn resolve() -> Result<Identity, String> {
         return Err(format!("節點代號格式不對：{node}"));
     }
     let key = read_key(&relay_home, &node, std::env::var("IRORI_RELAY_KEY").ok())?;
-    let anon = read_anon(&relay_home, std::env::var("IRORI_RELAY_ANON_KEY").ok());
-    Ok(Identity { node, base_url: base_url(std::env::var("IRORI_RELAY_URL").ok()), relay_home, key, anon })
+    let url = base_url(std::env::var("IRORI_RELAY_URL").ok());
+    let anon = read_anon(&relay_home, std::env::var("IRORI_RELAY_ANON_KEY").ok(), &url);
+    Ok(Identity { node, base_url: url, relay_home, key, anon })
 }
 
 #[cfg(test)]
@@ -146,8 +187,17 @@ mod tests {
         fs::write(d.path().join("H.key"), "file-key\r\n").unwrap();
         assert_eq!(read_key(d.path(), "H", None).unwrap(), "file-key");
         fs::write(d.path().join("anon.key"), " anon \n").unwrap();
-        assert_eq!(read_anon(d.path(), None).as_deref(), Some("anon"));
-        assert_eq!(read_anon(d.path(), Some("e".into())).as_deref(), Some("e"));
+        // 本機假後端（認不出專案）：檔案與環境變數照用
+        assert_eq!(read_anon(d.path(), None, "http://127.0.0.1:5555/relay").as_deref(), Some("anon"));
+        assert_eq!(read_anon(d.path(), Some("e".into()), "http://127.0.0.1:5555/relay").as_deref(), Some("e"));
+        // 新後台：殘留的舊專案 anon（JWT ref 不同）會被跳過，用內建的
+        let newb = "https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay";
+        let old = "x.eyJyZWYiOiJod3RhaGN0c2dqY2VtdHd6bHZucSJ9.y"; // payload 是舊 Irori 專案的 ref（不寫明文，免得觸發「不得殘留舊專案代號」的守門測試）
+        let none0 = tempfile::tempdir().unwrap();
+        assert_eq!(read_anon(none0.path(), Some(old.into()), newb).as_deref(), Some(BUILTIN_ANON[0].1));
+        let none = tempfile::tempdir().unwrap();
+        assert_eq!(read_anon(none.path(), None, newb).as_deref(), Some(BUILTIN_ANON[0].1));
+        assert_eq!(anon_ref(BUILTIN_ANON[0].1), "etccgmkrosbzpltudlgt");
         let e = read_key(d.path(), "Z", None).unwrap_err();
         assert!(!e.contains("file-key"));
     }

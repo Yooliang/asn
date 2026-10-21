@@ -23,7 +23,7 @@
 | 本機夥伴名單（roster 掃描） | Grok 夥伴目錄 `/home/box/agent-data/agents` | `GROK_AGENTS_DIR` |
 | Claude 視窗（預設不列） | 設 `1` 才跑 `ASN_CLAUDE_BIN agents --json` | `ASN_CLOUD_ROSTER_CLAUDE` |
 | 自動掃描 roster | 預設開；與 `agents.json` 合併（見下） | `ASN_CLOUD_ROSTER_AUTO=0` 關閉 |
-| Realtime 門鈴（選用） | 沒有就只輪詢 | `ASN_RELAY_ANON_KEY` 或 `<金鑰目錄>/anon.key` |
+| Realtime 門鈴（選用） | 公開金鑰已內建於 `relay/machine/anon.mjs`，不必另外放；沒有就只輪詢 | 可覆寫 `ASN_RELAY_ANON_KEY` 或 `<金鑰目錄>/anon.key` |
 
 例行任務不必硬編碼路徑，可用：
 

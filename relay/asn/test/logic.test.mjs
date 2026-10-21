@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { esc, emo, plain, initial, hasNudge, stripNudge, NUDGE_TAG, nudgeBody, hueOf } from '../ui/lib/text.mjs'
+import { esc, emo, plain, initial, hasNudge, stripNudge, NUDGE_TAG, NUDGE_HINT, nudgeBody, hueOf } from '../ui/lib/text.mjs'
 import { cleanPsm, buildFriends, mergeFriends, statusOf, isRelayRoom, friendId, groupByDevice } from '../ui/lib/roster.mjs'
 import { routeMail } from '../ui/lib/routing.mjs'
 
@@ -24,7 +24,11 @@ test('esc／emo：標籤與引號一律跳脫，表情代碼換成圖示', () =>
 
 test('震動標記：新格式整段內文才算、舊 [震動] 含有就算，內文拿掉標記', () => {
   assert.equal(NUDGE_TAG, '[震動]')
-  assert.equal(nudgeBody('H-ASN'), '（H-ASN 傳送了一個震動）')
+  assert.equal(nudgeBody('H-ASN'), '（H-ASN 傳送了一個震動）\n' + NUDGE_HINT)
+  assert.ok(hasNudge(nudgeBody('H-ASN')) && stripNudge(nudgeBody('H-ASN')) === '', '帶提示的兩行震動要認得、整段不顯示')
+  assert.ok(!hasNudge('（H-ASN 傳送了一個震動）\n另外我想問一件事'), '第二行是別的內容就不是震動')
+  // Rust 端組的第二行要跟前端同一句
+  assert.ok(fs.readFileSync(new URL('../src-tauri/src/relay.rs', import.meta.url), 'utf8').includes(`pub const NUDGE_HINT: &str = "${NUDGE_HINT}";`))
   assert.ok(hasNudge('（H-ASN 傳送了一個震動）') && hasNudge('  （家用 ASN 傳送了一個震動）\n'))
   assert.equal(stripNudge('（H-ASN 傳送了一個震動）'), '')
   assert.ok(!hasNudge('他說（H-ASN 傳送了一個震動）然後走了') && !hasNudge('（傳送了一個震動）') && !hasNudge('（A）（B 傳送了一個震動）'), '一般訊息裡提到不算')
@@ -83,6 +87,14 @@ test('routeMail：對到好友就歸他；對不到標為新增；沒有視窗�
 })
 
 // 守門：介面模板裡的 v-html 只准吃 emo(...) 的輸出（先跳脫），不准直接放原文
+test('守門：ChatPane 有寄件狀態圖示與 sent-status 模組', () => {
+  const pane = fs.readFileSync(path.join(UI, 'lib', 'chatpane.mjs'), 'utf8')
+  assert.ok(pane.includes("from './sent-status.mjs'"))
+  assert.ok(pane.includes('class="msg-st"'))
+  const css = fs.readFileSync(path.join(UI, 'style.css'), 'utf8')
+  assert.ok(css.includes('.msg-st'))
+})
+
 test('守門：所有 v-html 都只用 emo(...)', () => {
   const files = [...fs.readdirSync(UI).filter(f => f.endsWith('.html')), 'lib/chatpane.mjs']   // 對話區的模板在 lib/chatpane.mjs
   assert.ok(files.length >= 4, `找不到介面檔：${files}`)
@@ -90,7 +102,7 @@ test('守門：所有 v-html 都只用 emo(...)', () => {
   for (const f of files) {
     for (const m of fs.readFileSync(path.join(UI, f), 'utf8').matchAll(/v-html\s*=\s*"([^"]*)"/g)) {
       count++
-      assert.match(m[1], /^emo\(.+\)$/, `${f} 的 v-html 不是 emo(...)：${m[1]}`)
+      assert.match(m[1], /^(emo|vendorIcon)\(.+\)$/, `${f} 的 v-html 只准 emo(...) 或 vendorIcon(...)：${m[1]}`)
     }
   }
   assert.ok(count >= 4, `v-html 數量異常：${count}`)

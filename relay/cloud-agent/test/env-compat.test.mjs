@@ -1,7 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { applyEnvCompat, hasRelayKey, withoutRelayEnv, SCRUB_ENV_PREFIXES } from '../env-compat.mjs'
-import { resolveConfig, readKey, NO_KEY_MSG } from '../config.mjs'
+import { resolveConfig, readKey, readAnonKey, NO_KEY_MSG } from '../config.mjs'
+import { BUILTIN_ANON } from '../../machine/anon.mjs'
+import { DEFAULT_URL } from '../../machine/register.mjs'
 import { childEnv } from './helpers.mjs'
 
 test('applyEnvCompat：只有舊名時複製到新名', () => {
@@ -58,4 +60,14 @@ test('withoutRelayEnv：剝離 IRORI_* 與 ASN_*', () => {
 
 test('NO_KEY_MSG 使用新名', () => {
   assert.match(NO_KEY_MSG, /ASN_RELAY_KEY/)
+})
+
+test('readAnonKey：新名優先、內建 anon、舊名 IRORI_RELAY_ANON_KEY 經 compat', () => {
+  const base = DEFAULT_URL.replace(/\/+$/, '')
+  const cfg = resolveConfig(childEnv({ ASN_CLOUD_HOME: '/tmp/x', ASN_RELAY_URL: base }))
+  assert.equal(readAnonKey(cfg, childEnv({})), BUILTIN_ANON.etccgmkrosbzpltudlgt)
+  const mine = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV0Y2NnbWtyb3NienBsdHVkbGd0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI0OTk0MDUsImV4cCI6MjEwODA3NTQwNX0.custom'
+  assert.equal(readAnonKey(cfg, childEnv({ ASN_RELAY_ANON_KEY: mine })), mine)
+  const { env } = applyEnvCompat({ IRORI_RELAY_ANON_KEY: mine })
+  assert.equal(readAnonKey(cfg, env), mine)
 })

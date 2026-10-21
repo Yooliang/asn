@@ -82,6 +82,7 @@ export async function main(rawEnv = process.env) {
   ensureDir(cfg.mailDir, 0o700)
   const log = createLog(cfg.logFile, { stderr: null })   // 只寫 recv.log（20MB 輪替）；boot.sh 的 stdout/stderr 只收當機時的堆疊
   for (const n of compat.legacyNames) log(`使用舊環境變數名：${n}`)
+  for (const n of compat.conflictNames) log(`環境變數 ${n} 與對應舊名同時存在且不同，以 ${n} 為準`)
   const key = readKey(cfg, env)
   if (!key) { console.error(NO_KEY_MSG); return 2 }
   if (!acquirePidLock(cfg.pidFile, 'recv.mjs')) { console.error('另一個 recv 正在執行（pid 檔有活著的程序）'); return 3 }

@@ -82,6 +82,7 @@ pub async fn open_chat(app: AppHandle, frame: State<'_, Frame>, id: String, titl
         .inner_size(720.0, 600.0)
         .min_inner_size(520.0, 440.0)
         .decorations(frame.0.load(Ordering::Relaxed))
+        .disable_drag_drop_handler()   // 讓 WebView2 的 HTML5 拖放（分頁排序）能觸發
         .additional_browser_args(BROWSER_ARGS);
     b = if n == 0.0 { b.center() } else { b.position(120.0 + 28.0 * n, 80.0 + 28.0 * n) };
     b.build().map_err(|e| e.to_string())?;
@@ -223,6 +224,7 @@ pub async fn show_toast(app: AppHandle, slots: State<'_, Slots>, toast: Toast) -
         .focused(false)
         .focusable(false)
         .visible(false)
+        .disable_drag_drop_handler()
         .additional_browser_args(BROWSER_ARGS)
         .build();
     let w = match built {

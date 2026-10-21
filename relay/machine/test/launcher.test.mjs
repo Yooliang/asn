@@ -9,7 +9,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { buildSpawn, check, childEnv, createLauncher, loadConfig, NAME_RE, quoteArg, summary, TRUST_HINT } from '../launcher.mjs'
+import { buildSpawn, canonicalLaunchCwd, check, childEnv, createLauncher, loadConfig, NAME_RE, quoteArg, summary, TRUST_HINT } from '../launcher.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const MACHINE = path.join(here, '..')
@@ -55,13 +55,28 @@ test('summary：上傳給仲介的只有 profile 名／標籤、cwd 白名單、
   } finally { fs.rmSync(d, { recursive: true, force: true }) }
 })
 
+test('check：cwd 白名單會正規化（..）並比對 realpath（符號連結）', () => {
+  const d = tmp()
+  try {
+    const sub = path.join(d, 'proj')
+    fs.mkdirSync(sub)
+    const link = path.join(d, 'link-proj')
+    try { fs.symlinkSync(sub, link, 'dir') } catch { return } // 無權建立 symlink 就略過
+    const c = loadConfig(writeJson(path.join(d, 'a.json'), { ...CONF(sub), cwd_allow: [sub] })).config
+    assert.equal(check(c, { profile: 'default', name: 'H-英雄-2', cwd: link }), null)
+    assert.equal(check(c, { profile: 'default', name: 'H-英雄-2', cwd: path.join(sub, '..', 'proj') }), null)
+    assert.match(check(c, { profile: 'default', name: 'H-英雄-2', cwd: path.join(sub, '..') }), /不在允許清單/)
+    assert.equal(canonicalLaunchCwd(link), canonicalLaunchCwd(sub))
+  } finally { fs.rmSync(d, { recursive: true, force: true }) }
+})
+
 test('check：執行前再驗 profile、名稱、cwd（白名單＋存在）、重名（不分大小寫）、每小時上限', () => {
   const d = tmp()
   try {
     const c = loadConfig(writeJson(path.join(d, 'a.json'), CONF(d))).config
     const req = { profile: 'default', name: 'H-英雄-2', cwd: d }
     assert.equal(check(c, req), null)
-    assert.match(check(null, req), /沒有 launcher.json/)
+    assert.match(check(null, req), /啟動設定/)
     assert.match(check(c, { ...req, name: '-rf' }), /格式不對/)
     assert.match(check(c, { ...req, name: 'a b' }), /格式不對/)
     assert.match(check(c, { ...req, name: 'a&calc' }), /格式不對/)
@@ -285,7 +300,7 @@ test('bridge 端到端：沒有 launcher.json → 名單回報 launcher:null（�
   try {
     const t0 = Date.now()
     while (!(st.results.length && st.rosterPosts.length) && Date.now() - t0 < 10000) await sleep(100)
-    assert.deepEqual(st.results.map(r => [r.status, r.detail]), [['failed', '這台電腦沒有 launcher.json']], log)
+    assert.deepEqual(st.results.map(r => [r.status, r.detail]), [['failed', '這台電腦還沒有可用的啟動設定']], log)
     assert.ok('launcher' in st.rosterPosts[0] && st.rosterPosts[0].launcher === null)
   } finally {
     child.kill()

@@ -70,7 +70,10 @@ pub fn model_of(id: &str) -> Option<&'static Model> {
 pub const MAX_SECONDS: u32 = 60;
 pub const RATE: u32 = 16_000;
 const MAX_WAV_BYTES: usize = (MAX_SECONDS as usize + 2) * RATE as usize * 2 + 44;
-const RUN_TIMEOUT: Duration = Duration::from_secs(120);
+/// 辨識程式最久跑多久：到了就結束那一個子程序並回「辨識逾時」（前端另有 75 秒的保險）
+const RUN_TIMEOUT: Duration = Duration::from_secs(60);
+/// 前端按「取消」時叫醒正在等辨識程式的那一個 `run_with_deadline`
+static CANCEL: tokio::sync::Notify = tokio::sync::Notify::const_new();
 
 pub fn stt_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("stt")
@@ -312,6 +315,27 @@ impl Drop for BusyGuard {
     }
 }
 
+/// 跑一個子程序，最多等 `timeout`，或 `cancel` 被叫醒就提前結束。逾時／取消時**只結束這一個自己啟動的子程序**（用它的 handle，
+/// 不靠名稱、不動別的程序）並等它真的結束才回傳。`on_spawn` 收到子程序的 PID（測試用來確認它真的死了）。
+/// 呼叫端要自己設 `kill_on_drop(true)`，萬一這個 future 被丟掉也不會留下孤兒。
+pub async fn run_with_deadline(mut cmd: tokio::process::Command, timeout: Duration, cancel: &tokio::sync::Notify, on_spawn: impl FnOnce(u32)) -> Result<std::process::ExitStatus, String> {
+    let mut child = cmd.spawn().map_err(|e| format!("辨識引擎啟動失敗：{e}"))?;
+    if let Some(pid) = child.id() {
+        on_spawn(pid);
+    }
+    tokio::select! {
+        r = child.wait() => r.map_err(|e| format!("辨識引擎執行失敗：{e}")),
+        _ = tokio::time::sleep(timeout) => {
+            let _ = child.kill().await;
+            Err("辨識逾時".to_string())
+        }
+        _ = cancel.notified() => {
+            let _ = child.kill().await;
+            Err("已取消".to_string())
+        }
+    }
+}
+
 async fn run_engine(data_dir: &Path, model: &Model, wav: &[u8], lang: &str) -> Result<String, String> {
     let _g = BusyGuard::take().ok_or("上一段還在辨識中")?;
     let dir = engine_dir(data_dir);
@@ -332,11 +356,10 @@ async fn run_engine(data_dir: &Path, model: &Model, wav: &[u8], lang: &str) -> R
         .kill_on_drop(true);
     #[cfg(windows)]
     cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW：不要閃出黑視窗
-    let res = match tokio::time::timeout(RUN_TIMEOUT, cmd.status()).await {
-        Err(_) => Err("辨識逾時".to_string()),
-        Ok(Err(e)) => Err(format!("辨識引擎啟動失敗：{e}")),
-        Ok(Ok(s)) if !s.success() => Err("辨識引擎執行失敗".to_string()),
-        Ok(Ok(_)) => std::fs::read_to_string(&txt_path).map(|t| read_transcript(&t)).map_err(|_| "辨識沒有產生結果".to_string()),
+    let res = match run_with_deadline(cmd, RUN_TIMEOUT, &CANCEL, |_| {}).await {
+        Err(e) => Err(e),
+        Ok(s) if !s.success() => Err("辨識引擎執行失敗".to_string()),
+        Ok(_) => std::fs::read_to_string(&txt_path).map(|t| read_transcript(&t)).map_err(|_| "辨識沒有產生結果".to_string()),
     };
     let _ = std::fs::remove_file(&wav_path);
     let _ = std::fs::remove_file(&txt_path);
@@ -439,6 +462,20 @@ pub async fn stt_transcribe(app: State<'_, App>, wav: String) -> Result<String, 
         return Err("還沒下載語音辨識".into());
     }
     run_engine(&app.data_dir, model, &bytes, &cfg.stt_lang).await
+}
+
+/// 取消正在進行的辨識：結束那個 whisper-cli 子程序，並等它收乾淨（最多 3 秒），這樣馬上再錄一段不會撞到「上一段還在辨識中」
+#[tauri::command]
+pub async fn stt_cancel() {
+    if BUSY.load(Ordering::SeqCst) {
+        CANCEL.notify_waiters();
+        for _ in 0..60 {
+            if !BUSY.load(Ordering::SeqCst) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -624,6 +661,81 @@ mod tests {
         assert!(!dest.exists() && !PathBuf::from(format!("{}.tmp", dest.display())).exists());
         std::fs::write(&zp, b"not a zip").unwrap();
         assert!(extract_engine(&zp, &dest).is_err());
+    }
+
+    /// 一個會睡很久的假程式（只連本機的 ping／sleep，不碰網路）
+    fn sleeper() -> tokio::process::Command {
+        #[cfg(windows)]
+        let mut c = {
+            let mut c = tokio::process::Command::new("ping.exe");
+            c.args(["-n", "40", "127.0.0.1"]);
+            c
+        };
+        #[cfg(not(windows))]
+        let mut c = {
+            let mut c = tokio::process::Command::new("sleep");
+            c.arg("40");
+            c
+        };
+        c.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).kill_on_drop(true);
+        c
+    }
+    fn alive(pid: u32) -> bool {
+        #[cfg(windows)]
+        {
+            let o = std::process::Command::new("tasklist").args(["/FI", &format!("PID eq {pid}"), "/NH"]).output().unwrap();
+            String::from_utf8_lossy(&o.stdout).contains(&format!(" {pid} "))
+        }
+        #[cfg(not(windows))]
+        {
+            std::process::Command::new("kill").args(["-0", &pid.to_string()]).status().map(|s| s.success()).unwrap_or(false)
+        }
+    }
+
+    #[tokio::test]
+    async fn 子程序逾時_只結束那一個程序_很快就回() {
+        let n = tokio::sync::Notify::new();
+        let pid = std::sync::atomic::AtomicU32::new(0);
+        let t0 = std::time::Instant::now();
+        let e = run_with_deadline(sleeper(), Duration::from_millis(400), &n, |p| pid.store(p, Ordering::SeqCst)).await.unwrap_err();
+        assert_eq!(e, "辨識逾時");
+        assert!(t0.elapsed() < Duration::from_secs(10), "不能等到睡醒：{:?}", t0.elapsed());
+        let pid = pid.load(Ordering::SeqCst);
+        assert!(pid != 0 && pid != std::process::id());
+        assert!(!alive(pid), "逾時後那個子程序要真的結束");
+    }
+
+    #[tokio::test]
+    async fn 子程序被取消_也只結束那一個程序() {
+        let n = std::sync::Arc::new(tokio::sync::Notify::new());
+        let n2 = n.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            n2.notify_waiters();
+        });
+        let pid = std::sync::atomic::AtomicU32::new(0);
+        let t0 = std::time::Instant::now();
+        let e = run_with_deadline(sleeper(), Duration::from_secs(30), &n, |p| pid.store(p, Ordering::SeqCst)).await.unwrap_err();
+        assert_eq!(e, "已取消");
+        assert!(t0.elapsed() < Duration::from_secs(10));
+        assert!(!alive(pid.load(Ordering::SeqCst)));
+    }
+
+    #[tokio::test]
+    async fn 子程序正常結束_不受逾時影響_啟動失敗有說明() {
+        let n = tokio::sync::Notify::new();
+        #[cfg(windows)]
+        let c = {
+            let mut c = tokio::process::Command::new("cmd");
+            c.args(["/C", "exit", "0"]);
+            c
+        };
+        #[cfg(not(windows))]
+        let c = tokio::process::Command::new("true");
+        let s = run_with_deadline(c, Duration::from_secs(20), &n, |_| {}).await.unwrap();
+        assert!(s.success());
+        let e = run_with_deadline(tokio::process::Command::new("no-such-program-xyz"), Duration::from_secs(1), &n, |_| {}).await.unwrap_err();
+        assert!(e.contains("啟動失敗"), "{e}");
     }
 
     #[test]

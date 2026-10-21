@@ -1,4 +1,5 @@
 // AsnCore 對本機假 relay 的端到端（relay-core 的 api）：收信歸屬、未讀、震動、寄信格式、離線／上線、已送出等回信。
+import { nudgeBody } from '../ui/lib/text.mjs'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { AsnCore } from '../ui/lib/core.mjs'
@@ -107,7 +108,7 @@ test('寄震動：內文「（某某 傳送了一個震動）」（測試用傳�
   const { relay, core } = await setup()
   await core.start()
   assert.equal((await core.nudge('W/W-政策')).ok, true)
-  assert.deepEqual(relay.sent[0], { to_node: 'W', to_agent: 'W-政策', body: `（${NAME} 傳送了一個震動）`, from_agent: NAME, expects_reply: false })
+  assert.deepEqual(relay.sent[0], { to_node: 'W', to_agent: 'W-政策', body: nudgeBody(NAME), from_agent: NAME, expects_reply: false })
   await core.stop(); await relay.close()
 })
 
@@ -157,6 +158,25 @@ test('存檔：重開後好友與對話還在（離線）', async () => {
   assert.equal(w.status, 'offline')
   assert.equal(b.core.logOf('W/W-政策')[0].text, '存起來')
   await b.core.stop(); await b.relay.close()
+})
+
+test('寄信狀態：sent_status 更新已送達／已讀；收到 reply_to 標已回覆', async () => {
+  const { relay, core } = await setup()
+  await core.start()
+  await core.send('W/W-政策', '你好')
+  const mine = core.logOf('W/W-政策').find(m => m.k === 'me' && m.text === '你好')
+  assert.ok(mine?.id, '寄信後對話要記 message id')
+  const row = relay.outbox.find(m => m.id === mine.id)
+  row.delivered_at = '2026-10-20T08:01:00Z'
+  await core.refreshSentStatus('test')
+  assert.equal(mine.deliveredAt, '2026-10-20T08:01:00Z')
+  row.acked_at = '2026-10-20T08:02:00Z'
+  await core.refreshSentStatus('test')
+  assert.equal(mine.ackedAt, '2026-10-20T08:02:00Z')
+  relay.mail(9, { body: '回你', reply_to: mine.id })
+  await core.pull('test')
+  assert.equal(Date.parse(mine.repliedAt), Date.parse('2026-10-20T08:00:00Z'))
+  await core.stop(); await relay.close()
 })
 
 test('後端斷線：連線狀態變 off，不丟例外', async () => {

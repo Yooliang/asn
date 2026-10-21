@@ -2,6 +2,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { backendHostCode, cloudToolPaths, pathsShellLines, main as envMain } from '../env.mjs'
 import { runPreflight } from '../preflight.mjs'
 import { startFakeRelay, FAKE_KEY } from './fake-relay.mjs'
@@ -15,12 +17,13 @@ test('backendHostCode：只回 Supabase 專案代號，不含路徑', () => {
 
 test('cloudToolPaths：依 ASN_CLOUD_HOME 指到暫存目錄', () => {
   const st = { url: 'http://127.0.0.1/relay' }
-  const { root, env } = tmpEnv(st.url, { ASN_CLOUD_APP: '/tmp/my-app' })
+  const { root, env } = tmpEnv(st.url)
+  const app = path.join(root, 'my-app')
   try {
-    const p = cloudToolPaths(childEnv(env))
+    const p = cloudToolPaths(childEnv({ ...env, ASN_CLOUD_APP: app }))
     assert.equal(p.home, root)
-    assert.equal(p.app, '/tmp/my-app')
-    assert.equal(p.recv, '/tmp/my-app/relay/cloud-agent/recv.mjs')
+    assert.equal(p.app, app)
+    assert.equal(p.recv, path.join(app, 'relay/cloud-agent/recv.mjs'))
     assert.match(pathsShellLines(p), /ASN_CLOUD_HOME=/)
     assert.ok(!pathsShellLines(p).includes('ASN_RELAY_KEY'))
   } finally { rm(root) }
@@ -65,10 +68,11 @@ test('preflight：沒金鑰回 2', async () => {
 })
 
 test('env.mjs CLI：print recv', () => {
-  const root = fs.mkdtempSync('/tmp/env-cli-')
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'env-cli-'))
+  const app = path.join(root, 'my-app')
   const env = childEnv({
     ASN_CLOUD_HOME: root,
-    ASN_CLOUD_APP: '/opt/asn-relay',
+    ASN_CLOUD_APP: app,
     ASN_RELAY_URL: 'http://127.0.0.1:1/r',
   })
   try {

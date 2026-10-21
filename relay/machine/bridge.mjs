@@ -4,15 +4,19 @@
 // - inbox: Realtime bell + 2 min poll -> 轉接器 deliver（Claude：收發室 worker，claude -p，只有 ListAgents/SendMessage）
 //   -> SendMessage 給本機視窗 -> 等回覆（onReply）-> relay send (reply_to) back to the sender
 // No private Claude Code protocol is used; everything goes through public CLI flags and the public SendMessage tool.
+import { pickAnon } from './anon.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { pickFallbackAgent, fallbackNote } from './pick-fallback.mjs'
 import { createLog } from './safe-log.mjs'
 import { contextText, createRooms, parseMember, roomText, roomUuid, NO_REPLY_RE as ROOM_NO_REPLY_RE } from './rooms.mjs'
-import { NO_REPLY_TIP, mailHead, parseSendHead, wantsReply } from './mail-format.mjs'
+import { NO_REPLY_TIP, mailHead, parseSendHead, stripReplyHead, wantsReply } from './mail-format.mjs'
 import { bodyWithNotes } from './attach-format.mjs'
 import { createLauncher } from './launcher.mjs'
+import { detectAgentTools } from '../shared/agent-tools-detect.mjs'
+import { buildDefaultProfiles, defaultCwdAllow } from '../shared/launcher-profiles.mjs'
+import { createPartnerQueue, workerSpecFromProfile } from './partner-background.mjs'
 import { loadEngines } from './engines/index.mjs'
 import { selfRecvAlive } from './self-recv.mjs'
 import { sentMarkName } from './sent-mark.mjs'
@@ -59,7 +63,7 @@ function readSecret(env, file) {
   try { return fs.readFileSync(path.join(HOME_DIR, file), 'utf8').trim() } catch { return '' }
 }
 const KEY = readSecret('IRORI_RELAY_KEY', `${NODE_ID}.key`)
-const ANON_KEY = readSecret('IRORI_RELAY_ANON_KEY', 'anon.key')
+const ANON_KEY = pickAnon(BASE_URL, [process.env.IRORI_RELAY_ANON_KEY, readSecret('', 'anon.key')])   // 內建新後台的 anon；殘留的舊專案 anon.key 會被跳過
 if (!KEY) { console.error(`no relay key (${path.join(HOME_DIR, NODE_ID + '.key')})`); process.exit(2) }
 
 async function api(action, { method = 'GET', body } = {}) {
@@ -234,6 +238,9 @@ async function onReply(from, text, mailId) {
     if (!head.reply) { refuseSend(from, head); return }
     mailId = head.re; text = head.body || text; expectsReply = head.reply === 'yes'
   }
+  // 視窗自己在回信開頭加的「[回覆 id=… → …]」抬頭：拆掉，編號當作回的是哪一封（只在沒有更可靠的對應時用）
+  const sh = stripReplyHead(text)
+  if (sh.id) { text = sh.body || text; mailId ||= sh.id }
   const cands = [...pending.values()].filter(p => p.target === from && p.state !== 'forwarding')
   // 還在等的優先；沒有才輪到已通知過「沒回」、仍保留中的信（遲到的回覆，先進先出）
   const active = cands.filter(c => c.state !== 'notified')
@@ -357,11 +364,36 @@ function pruneReplied(now) {
 // send：轉接器要主動寄信時用（acp 工作者的授權詢問、登入通知）；from_agent 預設是收發室名稱
 engines = await loadEngines({ log, workDir: WORK_DIR, mailboxName: MAILBOX_NAME, send: m => api('send', { method: 'POST', body: { to_node: m.to_node, to_agent: m.to_agent || undefined, body: m.body, reply_to: m.reply_to || undefined, from_agent: m.from_agent || MAILBOX_NAME } }) })
 // 開視窗：launcher.json 的 profile 可寫 "engine": "codex" 指定用哪個轉接器開；沒寫就用第一個宣告 openWindow 的轉接器。
-// 都沒有就不提供遠端開視窗（名單回報 launcher: null）
+// 背景夥伴（Gemini／Grok）走 acp 轉接器；CLI 自動 profile 合併在 bootstrap。
 const openEngines = engines.filter(e => e.capabilities().openWindow && e.openWindow)
 const openEngineFor = id => (id ? openEngines.find(e => e.id === id) : openEngines[0])
-const launcher = !openEngines.length ? { summary: () => null, pull: async () => {}, current: () => null } : createLauncher({
+const acpEngine = engines.find(e => e.id === 'acp')
+const launchNoAuto = process.env.IRORI_LAUNCH_NO_AUTO === '1'
+const launchTools = launchNoAuto ? {} : await detectAgentTools()
+const launchBootstrap = launchNoAuto ? null : { profiles: buildDefaultProfiles(launchTools), cwd_allow: defaultCwdAllow(), max_per_hour: 6 }
+async function startBackgroundPartner({ req, profile }) {
+  if (!acpEngine?.addPartnerWorker) throw new Error('acp 轉接器未載入（請設 IRORI_ENGINES 含 acp）')
+  const spec = workerSpecFromProfile({ name: req.name, cwd: req.cwd, profile, workDir: WORK_DIR })
+  acpEngine.addPartnerWorker(spec)
+  await refreshRoster()
+  return { pid: 0 }
+}
+let launcher = { summary: () => null, pull: async () => {}, current: () => null }
+const partnerQueue = createPartnerQueue({
+  file: path.join(WORK_DIR, 'partner-queue.jsonl'),
+  log,
+  onLaunch: async req => {
+    const config = launcher.current()
+    if (!config) throw new Error('啟動設定不可用')
+    const profile = config.profiles[req.profile]
+    if (!profile) throw new Error(`沒有 profile：${req.profile}`)
+    await startBackgroundPartner({ req: { name: req.name, cwd: req.cwd, profile: req.profile }, profile })
+  },
+})
+const canRemoteLaunch = openEngines.length || acpEngine
+launcher = !canRemoteLaunch ? launcher : createLauncher({
   api, log, workDir: WORK_DIR, configPath: process.env.IRORI_LAUNCHER_FILE || path.join(HOME_DIR, 'launcher.json'),
+  bootstrap: () => launchBootstrap,
   listNames: async () => {
     const sets = await Promise.all(engines.map(e => e.listNames()))
     return sets.some(x => x) ? new Set(sets.flatMap(x => (x ? [...x] : []))) : null
@@ -371,7 +403,8 @@ const launcher = !openEngines.length ? { summary: () => null, pull: async () => 
     if (!e) throw new Error(`沒有載入「${s.engine}」轉接器（IRORI_ENGINES）`)
     return e.openWindow(s)
   },
-  envFilter: (env, engineId) => (openEngineFor(engineId) ?? openEngines[0]).childEnv(env),
+  startBackground: startBackgroundPartner,
+  envFilter: (env, engineId) => (openEngineFor(engineId) ?? openEngines[0])?.childEnv?.(env) ?? env,
   onLaunched: async l => {
     await refreshRoster()
     if (l.first_message) await handleMail({ id: l.id, from_node: l.requested_by, from_agent: null, to_agent: l.name, trust: 'owner', body: l.first_message })
@@ -459,6 +492,7 @@ async function pullRoomsGuarded() {
 async function pull(why) {
   if (restartSince) return   // 已經拉到新版、等著重啟：不再收新信，留在信箱給重啟後的橋
   void pullRoomsGuarded()
+  void partnerQueue.drain().catch(e => log(`partner-queue: ${e.message}`))
   void launcher.pull()
   if (pulling) { again = true; return }
   pulling = true
