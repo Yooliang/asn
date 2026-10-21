@@ -31,7 +31,8 @@ export const transport = {
 // 照片放大與另存（對話視窗各自呼叫，不經樞紐）：Rust 端換短效下載網址、下載、檢查
 export const photoApi = {
   fetch: id => invoke('relay_attachment_fetch', { id }),   // → { name, mime, data_url }
-  save: id => invoke('relay_attachment_save', { id }),     // → 存檔路徑（下載\ASN）
+  save: (id, name) => invoke('relay_attachment_save', { id, name }),   // Rust 端跳出「另存新檔」對話框：→ 存檔路徑；使用者按取消 → null（不下載）
+  reveal: () => invoke('relay_attachment_reveal'),          // 開啟「剛存檔的那個資料夾」（路徑 Rust 記著，前端不帶參數）
 }
 // 截圖（Rust 端隱藏 ASN 視窗、擷取所有螢幕、開框選視窗）：capture 回 PNG 的 Blob，使用者取消回 null；Linux 版 supported 為 false（按鈕隱藏）
 export const shotApi = {

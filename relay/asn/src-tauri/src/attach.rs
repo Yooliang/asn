@@ -306,32 +306,61 @@ pub async fn download(relay: &Relay, http: &reqwest::Client, id: &str) -> Result
     Ok(Downloaded { name: clean_name_or(info.get("name").and_then(Value::as_str).unwrap_or(""), "file"), mime, bytes })
 }
 
-/// 存檔位置：<下載資料夾>/ASN/<編號前 8 碼>-<檔名>.<副檔名>；已有同名就加 (2)、(3)…，不覆蓋
-pub fn unique_path(dir: &Path, id: &str, name: &str, mime: &str) -> PathBuf {
-    let ext = ext_of(mime).unwrap_or("bin");
-    let stem: String = {
-        let suffix = format!(".{ext}");
-        let lower = name.to_lowercase();
-        let base = if lower.ends_with(&suffix) { &name[..name.len() - suffix.len()] } else { name };
-        let base = base.replace(' ', "_");
-        let base = if base.is_empty() { "file".to_string() } else { base };
-        format!("{}-{}", id.chars().take(8).collect::<String>(), base)
-    };
-    let mut p = dir.join(format!("{stem}.{ext}"));
-    let mut n = 2;
-    while p.exists() {
-        p = dir.join(format!("{stem}({n}).{ext}"));
-        n += 1;
-    }
-    p
+/// 對話框的預設檔名：前端給的原檔名（外部資料）清理過；清完沒東西就用 file。字元與長度限制同 clean_name_or
+pub fn suggest_name(hint: &str) -> String {
+    clean_name_or(hint, "file")
 }
 
-pub async fn save(relay: &Relay, http: &reqwest::Client, id: &str, dir: &Path) -> Result<PathBuf, String> {
+/// 對話框的篩選副檔名：只取白名單內的（可執行檔等一律不出現）；不認得就回 None，對話框只顯示「所有檔案」
+pub fn filter_ext(name: &str) -> Option<&'static str> {
+    let ext = name.rsplit_once('.')?.1.to_ascii_lowercase();
+    if ext == "webp" { return Some("webp"); }
+    FILE_TYPES.iter().find(|(e, _)| *e == ext).map(|(e, _)| *e)
+}
+
+/// 使用者在對話框選的路徑 → 實際寫入的路徑：
+/// 檔名去控制字元與方向字元；副檔名一律對齊「伺服器回報、已驗過內容的型別」——不一致就補上正確副檔名，
+/// 所以不論使用者或寄件人怎麼取名，都寫不出 .exe／.bat 之類（白名單外的型別早在 download 就被擋）。
+/// 資料夾部分照使用者選的，不改。
+pub fn final_path(chosen: &Path, mime: &str) -> Result<PathBuf, String> {
+    let ext = ext_of(mime).ok_or("不認得的檔案型別，已取消")?;
+    let dir = chosen.parent().filter(|d| !d.as_os_str().is_empty()).ok_or("存檔位置不正確，已取消")?;
+    let raw = chosen.file_name().and_then(|n| n.to_str()).ok_or("檔名不正確，已取消")?;
+    let name: String = raw
+        .chars()
+        .filter(|c| {
+            let u = *c as u32;
+            !(c.is_control() || matches!(u, 0x2028 | 0x2029 | 0x200b..=0x200f | 0x202a..=0x202e | 0x2066..=0x2069))
+        })
+        .collect();
+    let name = name.trim().trim_end_matches('.').trim().to_string();
+    if name.is_empty() {
+        return Err("檔名不正確，已取消".into());
+    }
+    let has_ext = name.rsplit_once('.').map(|(stem, e)| !stem.is_empty() && e.eq_ignore_ascii_case(ext)).unwrap_or(false);
+    let name = if has_ext { name } else { format!("{name}.{ext}") };
+    Ok(dir.join(name))
+}
+
+/// 另存新檔：先問使用者存哪（pick 收「預設檔名、篩選副檔名」，回選好的路徑；按取消回 None），
+/// 選好才換網址、下載、檢查、寫檔；取消＝完全不連線、不寫檔，回 Ok(None)。
+/// 只會寫 pick 回的那一個路徑（final_path 只修正檔名與副檔名）。
+pub async fn save_as(
+    relay: &Relay,
+    http: &reqwest::Client,
+    id: &str,
+    hint: &str,
+    pick: impl FnOnce(&str, Option<&'static str>) -> Option<PathBuf>,
+) -> Result<Option<PathBuf>, String> {
+    if !is_uuid(id) {
+        return Err("附件編號格式不對".into());
+    }
+    let name = suggest_name(hint);
+    let Some(chosen) = pick(&name, filter_ext(&name)) else { return Ok(None) };
     let d = download(relay, http, id).await?;
-    std::fs::create_dir_all(dir).map_err(|e| format!("建不了資料夾：{e}"))?;
-    let path = unique_path(dir, id, &d.name, &d.mime);
+    let path = final_path(&chosen, &d.mime)?;
     std::fs::write(&path, &d.bytes).map_err(|e| format!("存檔失敗：{e}"))?;
-    Ok(path)
+    Ok(Some(path))
 }
 
 /// 整張照片轉成前端 <img> 能直接用的 data URL
@@ -539,13 +568,57 @@ mod tests {
             });
             *port_cell.lock().unwrap() = port;
             let dir = tempfile::tempdir().unwrap();
-            let r = save(&relay_at(port), &reqwest::Client::new(), ID, dir.path()).await;
+            let want = dir.path().join("我的報告.pdf");
+            let w2 = want.clone();
+            let r = save_as(&relay_at(port), &reqwest::Client::new(), ID, name, move |n, f| {
+                assert_eq!(f, filter_ext(n));
+                Some(w2)
+            })
+            .await;
             assert_eq!(r.is_ok(), ok, "{mime}: {r:?}");
             if let Ok(p) = r {
-                assert_eq!(p.file_name().unwrap(), "00000000-報告.pdf");
-                assert_eq!(std::fs::read(p).unwrap(), pdf);
+                assert_eq!(p, Some(want.clone()));
+                assert_eq!(std::fs::read(want).unwrap(), pdf);
+            } else {
+                assert!(!want.exists());
             }
         }
+    }
+
+    #[tokio::test]
+    async fn 另存_按取消_完全不連線_不寫檔() {
+        // 埠 1 沒人聽：只要有任何連線嘗試就會變成 Err
+        let r = save_as(&relay_at(1), &reqwest::Client::new(), ID, "報告.pdf", |n, f| {
+            assert_eq!(n, "報告.pdf");
+            assert_eq!(f, Some("pdf"));
+            None
+        })
+        .await;
+        assert_eq!(r, Ok(None));
+        // 編號格式不對：連對話框都不開
+        let called = std::cell::Cell::new(false);
+        let r = save_as(&relay_at(1), &reqwest::Client::new(), "bad", "a.pdf", |_, _| { called.set(true); None }).await;
+        assert!(r.is_err() && !called.get());
+    }
+
+    #[tokio::test]
+    async fn 另存_使用者改了副檔名_仍寫成型別對的副檔名() {
+        let pdf = b"%PDF-1.7\nhello".to_vec();
+        let port_cell = Arc::new(Mutex::new(0u16));
+        let pc = port_cell.clone();
+        let c2 = pdf.clone();
+        let (port, _) = serve(move |r, _| {
+            let port = *pc.lock().unwrap();
+            if r.path.starts_with("/storage/dl") { return (200, c2.clone(), "application/octet-stream"); }
+            (200, format!(r#"{{"url":"http://127.0.0.1:{port}/storage/dl","name":"a.pdf","mime":"application/pdf","bytes":{}}}"#, c2.len()).into_bytes(), "application/json")
+        });
+        *port_cell.lock().unwrap() = port;
+        let dir = tempfile::tempdir().unwrap();
+        let chosen = dir.path().join("x.exe");
+        let p = save_as(&relay_at(port), &reqwest::Client::new(), ID, "a.pdf", move |_, _| Some(chosen)).await.unwrap().unwrap();
+        assert_eq!(p.file_name().unwrap(), "x.exe.pdf");
+        assert_eq!(std::fs::read(&p).unwrap(), pdf);
+        assert!(!dir.path().join("x.exe").exists());
     }
 
     #[test]
@@ -569,16 +642,32 @@ mod tests {
     }
 
     #[test]
-    fn 存檔路徑_不覆蓋() {
-        let d = tempfile::tempdir().unwrap();
-        let p1 = unique_path(d.path(), ID, "cat.webp", "image/webp");
-        assert_eq!(p1.file_name().unwrap(), "00000000-cat.webp");
-        std::fs::write(&p1, b"x").unwrap();
-        let p2 = unique_path(d.path(), ID, "cat.webp", "image/webp");
-        assert_eq!(p2.file_name().unwrap(), "00000000-cat(2).webp");
-        std::fs::write(&p2, b"x").unwrap();
-        assert_eq!(unique_path(d.path(), ID, "cat.webp", "image/webp").file_name().unwrap(), "00000000-cat(3).webp");
-        assert_eq!(unique_path(d.path(), ID, "a b.webp", "image/webp").file_name().unwrap(), "00000000-a_b.webp");
+    fn 另存_預設檔名與篩選副檔名() {
+        assert_eq!(suggest_name("報告(最終).pdf"), "報告 最終 .pdf");
+        assert_eq!(suggest_name("../../evil\u{202e}.pdf"), "evil .pdf");
+        assert_eq!(suggest_name("   "), "file");
+        assert_eq!(filter_ext("a.PDF"), Some("pdf"));
+        assert_eq!(filter_ext("cat.webp"), Some("webp"));
+        assert_eq!(filter_ext("setup.exe"), None);
+        assert_eq!(filter_ext("noext"), None);
+    }
+
+    #[test]
+    fn 另存_實際路徑_副檔名對齊型別_控制字元去掉_可執行檔擋住() {
+        let d = Path::new("D:/save");
+        assert_eq!(final_path(&d.join("報告.pdf"), "application/pdf").unwrap(), d.join("報告.pdf"));
+        assert_eq!(final_path(&d.join("報告.PDF"), "application/pdf").unwrap(), d.join("報告.PDF"));
+        // 沒副檔名、或使用者改成別的副檔名：補上型別對應的，原名保留
+        assert_eq!(final_path(&d.join("報告"), "application/pdf").unwrap(), d.join("報告.pdf"));
+        assert_eq!(final_path(&d.join("run.exe"), "application/pdf").unwrap(), d.join("run.exe.pdf"));
+        assert_eq!(final_path(&d.join("a.bat"), "image/webp").unwrap(), d.join("a.bat.webp"));
+        // 控制字元與方向字元去掉
+        assert_eq!(final_path(&d.join("a\u{202e}fdp.pdf"), "application/pdf").unwrap(), d.join("afdp.pdf"));
+        assert_eq!(final_path(&d.join(".pdf"), "application/pdf").unwrap(), d.join(".pdf.pdf"));
+        assert!(final_path(&d.join("..."), "application/pdf").is_err());
+        // 型別不認得、或沒有資料夾：拒絕
+        assert!(final_path(&d.join("a.exe"), "application/x-msdownload").is_err());
+        assert!(final_path(Path::new("a.pdf"), "application/pdf").is_err());
     }
 
     // ---- 整段流程對本機假伺服器（只聽 127.0.0.1，不碰真實後端） ----
@@ -720,10 +809,11 @@ mod tests {
         assert_eq!(g[1].key, None, "下載網址自帶簽名，不帶節點金鑰");
         drop(g);
         let dir = tempfile::tempdir().unwrap();
-        let p = save(&relay_at(port), &reqwest::Client::new(), ID, dir.path()).await.unwrap();
-        assert_eq!(std::fs::read(&p).unwrap(), webp(64));
-        let p2 = save(&relay_at(port), &reqwest::Client::new(), ID, dir.path()).await.unwrap();
-        assert_ne!(p, p2, "再存一次不覆蓋");
+        let want = dir.path().join("cat.webp");
+        let w = want.clone();
+        let p = save_as(&relay_at(port), &reqwest::Client::new(), ID, "cat.webp", move |_, _| Some(w)).await.unwrap();
+        assert_eq!(p.as_deref(), Some(want.as_path()));
+        assert_eq!(std::fs::read(&want).unwrap(), webp(64));
     }
 
     #[tokio::test]
