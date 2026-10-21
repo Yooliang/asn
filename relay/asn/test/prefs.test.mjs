@@ -59,18 +59,18 @@ test('改回自動產生：送 null', async () => {
 })
 
 test('守門：名單頁點大頭貼走上傳流程、設定頁兩處共用同一個檔案輸入與流程', () => {
-  const html = read('ui/list.html'), js = read('ui/list.js')
+  const html = read('ui/list.html'), js = read('ui/list.js'), panel = read('ui/lib/settings-panel.mjs')
   assert.match(html, /class="dp me-dp"[^>]*@click="avMenu = false; avFile\.click\(\)"/)   // 名單最上面自己的大頭貼
   assert.match(html, /點一下換大頭貼/)
   assert.match(html, /@contextmenu\.prevent/)   // 右鍵小選單
   assert.equal(html.match(/ref="avFile"/g).length, 1, '只有一個檔案輸入')
-  assert.match(html, /選擇圖片…/)   // 設定頁的大頭貼區保留
+  assert.match(panel, /選擇圖片…/)   // 設定聊天窗的大頭貼區保留（它有自己的檔案輸入，把選到的檔案交給樞紐）
   assert.match(js, /uploadAvatarFile\(file, avApi\)/)
   assert.match(js, /removeAvatarUpload\(avApi\)/)
 })
 
 test('守門：設定頁的音效與視窗外框都是下拉，不再是按鈕', () => {
-  const html = read('ui/list.html')
+  const html = read('ui/lib/settings-panel.mjs') + read('ui/list.html')
   assert.match(html, /aria-label="音效"/)
   assert.match(html, /aria-label="視窗外框"/)
   assert.doesNotMatch(html, /音效：/)
