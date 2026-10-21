@@ -6,6 +6,7 @@ import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MO
 import { BUBBLES, BUBBLE_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, TOOLBARS, TOOLBAR_LABEL } from './merge.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_LABEL, soundChoice } from './prefs.mjs'
 import { DIMS, groupOptions } from './dims.mjs'
+import { LoginPanel } from './login-panel.mjs'
 import { accountLine } from './claude-accounts.mjs'
 
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
@@ -16,6 +17,7 @@ export const SETTING_OPS = [
 ]
 
 export const SettingsPanel = {
+  components: { LoginPanel },
   props: { st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
@@ -48,6 +50,7 @@ export const SettingsPanel = {
           <small role="status">{{ st.avMsg || (st.hasUpload ? '目前用的是這台設備上傳的大頭貼。' : '目前用的是自動產生的大頭貼。') }}</small>
         </div>
       </template>
+      <login-panel v-if="catKey === 'login'"></login-panel>
       <template v-if="catKey === 'sound'">
         <label>音效
           <select class="set-sel" :value="soundChoice(st.soundOn)" @change="act('sound', $event.target.value)" aria-label="音效"><option v-for="c in SOUND_CHOICES" :key="c" :value="c">{{ SOUND_LABEL[c] }}</option></select>

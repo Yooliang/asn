@@ -68,6 +68,11 @@ if (info.shot) {
   window.onerror = (msg, src, line, col, err) => { logFe('error', `${msg} @ ${src}:${line}:${col} ${err?.stack ?? ''}`) }
   window.onunhandledrejection = e => logFe('error', e.reason?.stack ?? e.reason ?? 'unhandled rejection')
 }
+if (info.needs_login) {
+  // 沒有節點金鑰（新電腦）：轉到登入畫面，登入後自動建立節點並重新啟動
+  location.replace('login.html')
+  await new Promise(() => {})
+}
 if (info.error) {
   document.body.textContent = `ASN 無法啟動：${info.error}`
   throw new Error(info.error)

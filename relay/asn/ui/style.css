@@ -335,6 +335,16 @@ html.toast-page,html.toast-page body{background:transparent}
 
 /* ---------- 原生外框：Windows 自己畫標題列與邊框，ASN 不再畫 ---------- */
 html.frame-native .titlebar,html.frame-native .rz{display:none}
+/* 登入畫面（login.html）與設定頁的帳號登入區塊 */
+.login-pane{flex:1;display:flex;align-items:center;justify-content:center;padding:16px}
+.login-card{display:flex;flex-direction:column;gap:12px;width:100%;max-width:280px;text-align:center}
+.login-h{margin:0 0 2px;font-size:20px;color:var(--title-fg)}
+.login-sub{margin:0 0 8px;font-size:13px;opacity:.8}
+.login-btn{padding:10px 12px;font-size:14px;font-weight:600}
+.login-note{margin:0;font-size:12px}
+.login-err{margin:0;font-size:12px;color:#b3261e}
+.login-cancel{align-self:center}
+.login-set .login-state{margin:4px 0;font-weight:600}
 html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .ctab.home img{display:block;flex:none}
 .chat-stack > .pane:only-child{background:linear-gradient(var(--panel-head),var(--panel) 80px)}
