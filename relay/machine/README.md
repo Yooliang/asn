@@ -201,9 +201,9 @@ node room.mjs --room-read <群組id|群組名> [--last 20 | --since <seq>] [--js
 另外每次寄給節點／視窗（不論有沒有 `--reply-to`）也會在 `machine-<節點>/sent/<雜湊>` 留「誰寄給誰」的記號，橋據此判斷「對方已直接寄信給原寄件人」（檔名由 `sent-mark.mjs` 產生，send 與橋共用）：
 
 ```
-node D:/Github/irori/relay/machine/send.mjs --to XISU --body "內文" --reply|--no-reply [--reply-to <信件id>]
-node D:/Github/irori/relay/machine/send.mjs --to W/W-政策 --body-file msg.txt --no-reply   # 節點/視窗名
-node D:/Github/irori/relay/machine/send.mjs --room <群組id> --body "內文"            # 貼到群組（room_post）
+node D:/Github/Yooliang/asn/relay/machine/send.mjs --to XISU --body "內文" --reply|--no-reply [--reply-to <信件id>]
+node D:/Github/Yooliang/asn/relay/machine/send.mjs --to W/W-政策 --body-file msg.txt --no-reply   # 節點/視窗名
+node D:/Github/Yooliang/asn/relay/machine/send.mjs --room <群組id> --body "內文"            # 貼到群組（room_post）
 echo 內文 | node send.mjs --to XISU --body - --reply                                 # 內文從 stdin 讀
 node send.mjs --to XISU --file 報告.pdf --file 圖.webp --body "說明" --no-reply        # 寄檔案／照片
 ```
@@ -231,8 +231,8 @@ node send.mjs --to XISU --file 報告.pdf --file 圖.webp --body "說明" --no-r
 仲介信箱是「一台機器一個節點」，橋收信後經收發室（`claude -p`，每封約 1 美分、多一層）轉給視窗。視窗也可以**自己收**寄給自己的信，不經收發室、不經模型：
 
 ```
-node D:/Github/irori/relay/machine/recv.mjs --watch    # 長駐；掛在 Claude Code 的 Monitor 上，每封信一行 JSON 就是一則通知
-node D:/Github/irori/relay/machine/recv.mjs --once     # 拉一次、印出、ack、結束
+node D:/Github/Yooliang/asn/relay/machine/recv.mjs --watch    # 長駐；掛在 Claude Code 的 Monitor 上，每封信一行 JSON 就是一則通知
+node D:/Github/Yooliang/asn/relay/machine/recv.mjs --once     # 拉一次、印出、ack、結束
 ```
 
 每行 JSON：`{id, trust, from_node, from_agent, to_agent, reply_to, created_at, expects_reply, body}`（`expects_reply`：true 要回、false 只是告知、null 舊信沒說）；回信用 `send.mjs --to <from_node>/<from_agent> --reply-to <id> --body "…" --reply|--no-reply`。診斷只印 stderr。exit code：1 用法、2 認不出視窗、3 這個視窗已有另一個 `--watch` 在跑、4 後端錯誤。
