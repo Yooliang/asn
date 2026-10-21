@@ -4,6 +4,7 @@
 //   store:     { load() → 物件|null, save(物件) }
 //   isChatVisible(id) → Promise<boolean>：該好友的對話視窗是否開著且沒最小化
 import { isAvatarDataUrl } from './avatar.mjs'
+import { asnByNode } from './presence.mjs'
 import { buildFriends, cleanPsm, mergeFriends } from './roster.mjs'
 import { routeMail, stubFriend } from './routing.mjs'
 import { hasNudge, hueOf, initial, noReplyNoticeOf, plain, stripNudge, stripReplyHead, unwrapShell } from './text.mjs'
@@ -21,6 +22,7 @@ export class AsnCore {
     this.logs = new Map()      // id → 訊息陣列
     this.seen = new Set()      // 已處理過的信件 id（ack 失敗重拉時不重複顯示）
     this.nodeOrder = []        // 收發室名單裡的節點順序（設備頁籤照這個排）
+    this.asn = {}              // 節點 → 在線的 ASN 視窗（名單帶的 asn：版本與狀態）
     this.avatars = new Map()   // 節點 → { at, data }：各設備上傳的大頭貼（名單只帶更新時間，圖按需取、依更新時間快取）
     this.conn = 'connecting'   // connecting | on | off
     this.rosterLoaded = false
@@ -57,6 +59,7 @@ export class AsnCore {
     try { members = (await this.transport.list())?.members; this.#setConn('on') }
     catch (e) { this.log(`list failed: ${e.message}`); this.#setConn('off'); return }
     this.nodeOrder = (Array.isArray(members) ? members : []).map(m => m?.id).filter(x => typeof x === 'string')
+    this.asn = asnByNode(members)
     const live = buildFriends(members, { selfNode: this.selfNode, selfName: this.windowName })
     const prev = new Map([...this.friends].map(([id, f]) => [id, f.status]))
     const known = [...this.friends.values()].filter(f => this.logs.has(f.id) || f.known)
@@ -301,7 +304,7 @@ export class AsnCore {
   markRead(id) { const f = this.friends.get(id); if (f && f.unread) { f.unread = 0; this.emit('state') } }
   #log(id) { if (!this.logs.has(id)) this.logs.set(id, []); return this.logs.get(id) }
   logOf(id) { return this.logs.get(id) ?? [] }
-  snapshot() { return { conn: this.conn, windowName: this.windowName, selfNode: this.selfNode, nodeOrder: [...this.nodeOrder], friends: [...this.friends.values()].map(f => ({ ...f })) } }
+  snapshot() { return { conn: this.conn, windowName: this.windowName, selfNode: this.selfNode, nodeOrder: [...this.nodeOrder], asn: this.asn, friends: [...this.friends.values()].map(f => ({ ...f })) } }
 
   // ---------- 存檔 ----------
   #scheduleSave() { if (!this.saveTimer) this.saveTimer = setTimeout(() => { this.saveTimer = null; void this.flush() }, 300) }

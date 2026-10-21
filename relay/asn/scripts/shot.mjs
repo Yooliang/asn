@@ -18,6 +18,8 @@ function scrotOnPath() {
 }
 export const shotCaptureSupported = process.platform === 'win32' || scrotOnPath()
 
+// asn：各設備上 ASN 回報的在線狀態與版本（牧陽沒有 ASN＝名單上不顯示小綠點；工作機是舊版＝顯示「有新版」）
+const demoAsn = { H: [{ window_name: 'H-ASN', version: '0.1.13', status: 'online', psm: '' }], W: [{ window_name: 'W-ASN', version: '0.1.12', status: 'busy', psm: '' }], G: [{ window_name: 'G-ASN', version: '0.1.13', status: 'away', psm: '' }] }
 export const demoMembers = [
   { id: 'H', name: '家用機', kind: 'claude', agents: [
     { name: 'H-ASN', status: 'idle', cwd_label: 'asn' },
@@ -42,7 +44,8 @@ export const demoRooms = [
 // me：預先寫進 asn-me.json 的設定（例如 { tabDim: 'engine', groupDim: 'device' }），截圖時用來切換維度
 // avatars：true＝示範大頭貼（本機這台 H 已上傳一張；另有不在名單上的設備 K 也上傳了一張，並寄來一封信）
 export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000, me = null, avatars = false, setup = null } = {}) {
-  const members = avatars ? [...demoMembers, { id: 'K', name: '小凱的電腦', kind: 'other', agents: [] }] : demoMembers
+  const all = avatars ? [...demoMembers, { id: 'K', name: '小凱的電腦', kind: 'other', agents: [] }] : demoMembers
+  const members = all.map(m => (demoAsn[m.id] ? { ...m, asn: demoAsn[m.id] } : m))
   const relay = await startFakeRelay({ node: 'H', members, rooms: demoRooms, avatars: avatars ? { H: demoUploadUrl(), K: pngDataUrl(96, 96, (x, y) => (((x >> 4) + (y >> 4)) % 2 ? [70, 130, 200] : [250, 210, 90])) } : {} })
   if (avatars) relay.mail(3, { from_node: 'K', from_agent: 'K-ASN', to_node: 'H', to_agent: 'H-ASN', body: '嗨，我是另一台的 ASN 使用者 :)', created_at: new Date(Date.now() - 60_000).toISOString() })
   relay.mail(1, { from_node: 'W', from_agent: 'W-政策', to_node: 'H', to_agent: 'H-ASN', body: '資料補完了，幫我看一下 (Y)\n明天要上線 :)', created_at: new Date(Date.now() - 4 * 60_000).toISOString() })

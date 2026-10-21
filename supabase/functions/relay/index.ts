@@ -4,6 +4,7 @@ import { handleNodeRoomAction, type RoomDeps, syncNodeAuto } from "../_shared/ro
 import { handleAgentInbox } from "../_shared/agent_inbox.ts";
 import { expectsReplyArgs } from "../_shared/expects_reply.ts";
 import { parseSelfName } from "../_shared/node_name.ts";
+import { parseAsnPresence } from "../_shared/asn_presence.ts";
 import { normalizeRosterAgents } from "../_shared/roster.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
 import * as signal from "../_shared/signal.ts";
@@ -209,6 +210,19 @@ Deno.serve(async (req) => {
     const { data, error } = await db.rpc("irori_relay_set_self_name", { p_node: me.id, p_name: name });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     if (data?.error === "not_found") return json(404, { error: "not_found" });
+    if (data?.error) return json(400, { error: data.error });
+    return json(200, { ok: true });
+  }
+  // ASN 回報在線狀態與版本（每 60 秒一次；關閉時 status=offline＝刪掉那一列）。節點一律是金鑰所屬的 me.id
+  if (action === "asn_presence" && req.method === "POST") {
+    const p = parseAsnPresence(await req.json().catch(() => null));
+    if (p === null) return json(400, { error: "bad_request" });
+    const { data, error } = await db.rpc("irori_relay_asn_presence_set", {
+      p_node: me.id, p_window: p.window_name, p_version: p.version, p_status: p.status, p_psm: p.psm,
+    });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    if (data?.error === "not_found") return json(404, { error: "not_found" });
+    if (data?.error === "too_many") return json(429, { error: "too_many" });
     if (data?.error) return json(400, { error: data.error });
     return json(200, { ok: true });
   }

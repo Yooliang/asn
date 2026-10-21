@@ -67,7 +67,7 @@ export function groupItems(items, groupDim, { selfNode, selfName = '' } = {}) {
       g.items.push(f)
     }
     return [...by.values()].sort((a, b) => (b.node === selfNode) - (a.node === selfNode) || a.label.localeCompare(b.label, 'zh-Hant'))
-      .map(({ node, ...g }) => g)
+      // node 留在組上：設備分組標題旁要用它查那台的 ASN 在線狀態
   }
   return groupInDevice(items, groupDim)
 }
