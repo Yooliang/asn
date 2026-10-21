@@ -30,8 +30,8 @@ import { vendorIconSvg } from './lib/vendor-icons.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
-import { accountLine, createAccountsUi } from './lib/claude-accounts.mjs'
-import { CHECK_MS, autoCheckFromSaved, initialUpdateState, manualResultText, progressText, updateNoticeText, withAvailable, withFailure, withInstalling, withProgress } from './lib/update.mjs'
+import { accountLine, codexLine, createAccountsUi } from './lib/claude-accounts.mjs'
+import { CHECK_MS, autoCheckFromSaved, initialUpdateState, manualResultText, progressText, updateNoticeText, withAvailable, withFailure, withInstalling, withProgress, updateStatus } from './lib/update.mjs'
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL, normalizeCfg, shouldAutoSpeak, sttStatusText } from './lib/voice-prefs.mjs'
 
 const { createApp, reactive, ref, computed, watch } = Vue
@@ -96,7 +96,7 @@ try {
 } catch { /* 沒有這些指令（舊版後端）就不顯示 */ }
 // 自動更新：啟動與每 6 小時檢查；有新版只在名單上方顯示一條通知，使用者按「更新」才下載安裝（--shot 模式不檢查）。程式在 updater.rs
 const autoCheck = ref(autoCheckFromSaved(savedMe.autoUpdate))
-const upd = reactive({ ...initialUpdateState(), checking: false, manual: '' })
+const upd = reactive({ ...initialUpdateState(), checking: false, manual: '', lastCheck: 0, checkErr: '' })
 // 版本更新記錄：打包時 CHANGELOG.md 轉成 vendor/changelog.json（與同內容的 changelog.mjs），離線也能看（讀不到就當沒有）
 const changelogEntries = ref([])
 // （CSP 的 connect-src 不放行 fetch；跟 dicebear.mjs 一樣用 import 載入同內容的 .mjs 版）
@@ -109,9 +109,11 @@ const checkUpdate = async (manual = false) => {
   try {
     const found = await invoke('update_check')
     setUpd(withAvailable(upd, found))
+    upd.lastCheck = Date.now(); upd.checkErr = ''
     if (manual) upd.manual = manualResultText(found, info.version)
   } catch (e) {
-    if (manual) upd.manual = String(e?.message ?? e)
+    upd.checkErr = String(e?.message ?? e)
+    if (manual) upd.manual = upd.checkErr
   } finally { upd.checking = false }
 }
 const installUpdate = async () => {
@@ -600,7 +602,7 @@ const app = createApp({
     // 指引、設定的聊天窗（openPanel／closePanel 在上面）：列表只負責「點一項就開」，內容在右邊分頁或獨立視窗
     const panelGuide = computed(() => panelItem('guide', ui.panel.guide))
     const catSub = key => catSummary(key, {
-      hasUpload: selfHasUpload.value, accountCount: accounts.state.list.length, accountCurrent: accounts.state.list.find(a => a.current)?.name ?? '',
+      hasUpload: selfHasUpload.value, accountCount: accounts.state.list.length, accountCurrent: accounts.state.current?.email ?? '',
       frame: frame.value, mode: ui.mode, dpMode: ui.dpMode, toolbar: ui.toolbar, bubble: ui.bubble, tabDim: dims.tabDim, groupDim: dims.groupDim,
       soundOn: soundOn.value, voiceEnabled: ttsVoices.value.enabled, ttsAuto: voiceCfg.tts_auto, sttLang: voiceCfg.stt_lang,
       closeTo: closeTo.value, trayOk: trayOk.value, autostartSupported: autostart.supported, autostartOn: autostart.on,
@@ -635,9 +637,10 @@ const app = createApp({
       if (chatTabMenu.value && !el?.closest('.ctab-menu')) closeChatTabMenu()
       if (buddyMenu.value && !el?.closest('.buddy-menu')) closeBuddyMenu()
       if (launchPicker.value && !el?.closest('.launch-picker') && !el?.closest('.search-ic')) closeLaunchPicker()
+      if (deviceMenu.value && !el?.closest('.device-menu')) closeDeviceMenu()
     }, true)
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && chatTabMenu.value) closeChatTabMenu() })
-    window.addEventListener('blur', () => { if (chatTabMenu.value) closeChatTabMenu(); if (buddyMenu.value) closeBuddyMenu(); if (launchPicker.value) closeLaunchPicker() })
+    window.addEventListener('blur', () => { if (chatTabMenu.value) closeChatTabMenu(); if (buddyMenu.value) closeBuddyMenu(); if (launchPicker.value) closeLaunchPicker(); if (deviceMenu.value) closeDeviceMenu() })
     const tabPinLabel = computed(() => (chatTabMenuPin.value ? '取消固定分頁' : '固定分頁'))
     const runTabMenu = fn => { const id = chatTabMenu.value; closeChatTabMenu(); if (id) fn(id) }
     const menuCloseTab = () => runTabMenu(id => applyChatTabClose(closeChatTab(ui, id)))
@@ -700,9 +703,40 @@ const app = createApp({
       try { await invoke('voice_cfg_set', { cfg: next }); Object.assign(voiceCfg, next); voiceMsg.value = ''; void refreshVoice() }
       catch (e) { voiceMsg.value = e.message }
     }
-    // 設定頁「Claude 帳號」（檔案操作全在 Rust 端）
-    const accounts = createAccountsUi({ invoke, reactive })
+    // 設定頁「帳號」（檔案操作全在 Rust 端）：Claude 帳號庫、Codex 目前登入、遠端設備的 Claude 帳號切換
+    const accounts = createAccountsUi({
+      invoke, reactive,
+      devices: () => launchDeviceRowsList.value.filter(d => d.key !== info.node && asnMap.value[d.key]),
+      nodeLabel: n => launchDeviceRowsList.value.find(d => d.key === n)?.label ?? n,
+    })
     void accounts.refresh()
+    void accounts.loadTrust()
+    // 本機帳號庫清單定期回報給收發室（只有 email、方案、使用中）；別台送來的切換指令定期取走（預設要本機按確認才切）。--shot 不輪詢指令。
+    setTimeout(() => void accounts.report(), 5_000)
+    setInterval(() => void accounts.report(), 5 * 60_000)
+    if (!info.shot) {
+      setInterval(() => void accounts.pollIncoming(), 15_000)
+      void listen('relay-bell', () => void accounts.pollIncoming())
+    }
+    // 有人要求切換這台的帳號：把視窗叫到前面，讓使用者看得到確認框
+    watch(() => accounts.state.incoming.length, n => { if (n) void invoke('show_main').catch(() => {}) })
+    // 名單設備標題右鍵：切換那台設備的 Claude 帳號
+    const deviceMenu = ref('')
+    const deviceMenuPos = reactive({ x: 0, y: 0 })
+    const openDeviceMenu = (g, e) => {
+      if (g.kind !== 'device' || g.node === info.node || !asnMap.value[g.node]) return
+      closeBuddyMenu(); closeLaunchPicker()
+      deviceMenuPos.x = e?.clientX ?? 0; deviceMenuPos.y = e?.clientY ?? 0
+      deviceMenu.value = g.node
+    }
+    const closeDeviceMenu = () => { deviceMenu.value = '' }
+    const deviceMenuSwitch = async () => {
+      const node = deviceMenu.value
+      closeDeviceMenu()
+      if (!node) return
+      await openPanel('setting', 'accounts')
+      await accounts.remoteSelect(node)
+    }
     const installFromSettings = async () => {
       voiceMsg.value = '正在下載…'
       await voice.installStt()
@@ -712,15 +746,18 @@ const app = createApp({
     // ---------- 設定聊天窗的狀態快照與指令 ----------
     // 設定的狀態與動作都留在這裡（名單視窗的樞紐）。整合模式的分頁直接讀這份快照；分離模式的設定視窗用 asn:settings 事件收同一份，
     // 改了什麼用 asn:set 事件送回來，一律進同一個 applySetting。金鑰、存檔、Rust 指令都不離開這個視窗。
-    const acctSavedSeq = ref(0)
     const settingsState = computed(() => ({
       status: me.status, hasUpload: selfHasUpload.value, avBusy: avBusy.value, avMsg: avMsg.value,
       soundOn: soundOn.value, frame: frame.value, mode: ui.mode, dpMode: ui.dpMode, toolbar: ui.toolbar, bubble: ui.bubble,
       tabDim: dims.tabDim, groupDim: dims.groupDim,
       voice: { cfg: { tts_voice: voiceCfg.tts_voice, tts_auto: voiceCfg.tts_auto, stt_lang: voiceCfg.stt_lang, stt_model: voiceCfg.stt_model }, enabled: ttsVoices.value.enabled, voices: ttsVoices.value.voices, sttReady: Boolean(sttSt.value?.ready), installBusy: voice.state.install.busy, note: voice.state.install.text || voiceMsg.value || sttText.value },
-      accounts: { list: accounts.state.list, busy: accounts.state.busy, confirmDel: accounts.state.confirmDel, msg: accounts.state.msg, savedSeq: acctSavedSeq.value },
+      accounts: {
+        list: accounts.state.list, current: accounts.state.current, codexLine: codexLine(accounts.state.codex, accounts.state.codexErr),
+        busy: accounts.state.busy, confirmDel: accounts.state.confirmDel, msg: accounts.state.msg, trustOwn: accounts.state.trustOwn,
+        remote: { node: accounts.state.remote.node, devices: accounts.remoteNodes(), list: accounts.state.remote.list, loading: accounts.state.remote.loading, busy: accounts.state.remote.busy, msg: accounts.state.remote.msg },
+      },
       closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy },
-      autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual },
+      autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual, status: updateStatus({ checking: upd.checking, phase: upd.phase, info: upd.info, lastCheck: upd.lastCheck, error: upd.checkErr, current: info.version }) },
       launch: { tools: launchToolRows.value, maxPerHour: launchPrefs.maxPerHour, cwdText: launchCwdText.value },
       version: info.version,
       log: buildLogView({ entries: changelogEntries.value, current: info.version, available: upd.phase === 'idle' ? null : upd.info }),
@@ -739,7 +776,10 @@ const app = createApp({
         case 'voice-install': await installFromSettings(); break
         case 'acct-switch': await accounts.switchTo(value); break
         case 'acct-remove': await accounts.remove(value); break
-        case 'acct-save': accounts.state.name = String(value ?? ''); await accounts.save(); if (!accounts.state.name) acctSavedSeq.value++; break
+        case 'acct-add': await accounts.addCurrent(); break
+        case 'acct-remote-node': await accounts.remoteSelect(String(value ?? '')); break
+        case 'acct-remote-switch': await accounts.remoteSwitch(String(value ?? '')); break
+        case 'acct-trust': await accounts.setTrust(value === true); break
         case 'closeTo': await setCloseTo(value); break
         case 'autostart': await setAutostart(value === true); break
         case 'autoCheck': autoCheck.value = value === true; break
@@ -767,7 +807,7 @@ const app = createApp({
     })
     const pickAvatarFile = file => applySetting('avatar-upload', file)
     return {
-      version: info.version, accounts, accountLine, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
+      version: info.version, accounts, accountLine, deviceMenu, deviceMenuPos, openDeviceMenu, closeDeviceMenu, deviceMenuSwitch, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       upd, autoCheck, checkUpdate, installUpdate, updateNoticeText, progressText,
       frame, FRAMES, FRAME_LABEL, setFrame, closeTo, CLOSE_CHOICES, CLOSE_LABEL, setCloseTo, trayOk, autostart, setAutostart, SOUND_CHOICES, SOUND_LABEL, soundChoice, soundFromChoice, RESIZE_DIRS, resizeFrom, avMenu,
       avOf, meAv, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar,

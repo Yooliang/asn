@@ -7,12 +7,13 @@ export const FAKE_KEY = 'fake-machine-key'
 
 // avatars：節點 → data URL（設備上傳的大頭貼）。名單每個節點帶 avatar_updated_at（沒上傳＝沒有這個欄位）；圖用 GET avatar&node=<節點> 取。
 // set_avatar（POST，只能改金鑰所屬的自己節點）：前綴須是 data:image/png|webp;base64,、全長 ≤ 48000，否則回白話代碼（同後端）。
-export async function startFakeRelay({ node = 'T', members = [], mails = [], rooms = [], avatars = {}, port = 0 } = {}) {
+export async function startFakeRelay({ node = 'T', members = [], mails = [], rooms = [], avatars = {}, acctRemote = {}, port = 0 } = {}) {
   const st = {
     node, members, mails: [...mails], outbox: [], rooms,
     avatars: Object.fromEntries(Object.entries(avatars).map(([n, d]) => [n, { data: d, at: '2026-10-20T08:00:00Z' }])),
     reqs: [], sent: [], launches: [], presence: [], asnPresenceStatus: 0,
     launchers: { profiles: [{ id: 'claude', label: 'Claude' }], cwd_allow: ['C:/work'], max_per_hour: 6 },
+    acctRemote: { ...acctRemote }, acctReports: [], acctSwitches: [], acctIncoming: [], acctResults: [],
     setCount: 1, port: 0, url: '',
   }
   const readBody = req => new Promise(r => { let b = ''; req.on('data', d => (b += d)); req.on('end', () => r(b ? JSON.parse(b) : null)) })
@@ -96,6 +97,22 @@ export async function startFakeRelay({ node = 'T', members = [], mails = [], roo
       }
       return out(200, { machines: [{ node, launcher: st.launchers }], launches: st.launches })
     }
+    // 遠端切換 Claude 帳號（照 supabase/functions/_shared/account_switch.ts 的形狀；擁有者判斷、頻率等在真後端，這裡只管流程）
+    // st.acctRemote：節點 → 那台回報的帳號清單；st.acctIncoming：等這台取走的指令；st.acctResults：這台回報過的結果
+    if (action === 'acct_report' && req.method === 'POST') { st.acctReports.push(body); return out(200, { ok: true, count: body?.accounts?.length ?? 0 }) }
+    if (action === 'acct_list' && req.method === 'POST') {
+      const accounts = st.acctRemote[body?.node]
+      return accounts ? out(200, { node: body.node, accounts, reported_at: '2026-10-21T08:00:00Z', asn_online: true }) : out(404, { error: 'not_found' })
+    }
+    if (action === 'acct_switch' && req.method === 'POST') {
+      if (!st.acctRemote[body?.node]?.some(a => a.email === body.email)) return out(409, { error: 'unknown_account' })
+      const id = U(900 + st.acctSwitches.length + 1)
+      st.acctSwitches.push({ id, node: body.node, email: body.email, status: 'pending', detail: null })
+      return out(200, { id })
+    }
+    if (action === 'acct_switch_status' && req.method === 'POST') return out(200, { switches: st.acctSwitches.filter(s => (body?.ids ?? []).includes(s.id)) })
+    if (action === 'acct_switch_pending' && req.method === 'POST') { const requests = st.acctIncoming.splice(0); return out(200, { requests }) }
+    if (action === 'acct_switch_result' && req.method === 'POST') { st.acctResults.push(body); return out(200, { ok: true }) }
     out(404, { error: 'not_found' })
   })
   await new Promise(r => srv.listen(port, '127.0.0.1', r))

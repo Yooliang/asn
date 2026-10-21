@@ -58,7 +58,11 @@ npm run build        # 出 asn 二進位、bundle/deb/*.deb、bundle/appimage/*.
 - 設備內容：該設備的 Claude 視窗，線上／忙碌在前、離線在後，名字後灰字狀態；組標題「[−] 設備名 (線上數/總數)」可收合；名字下一行只顯示資料夾（cwd_label）。
 - 群組：唯讀 `GET ?action=room_list`（只列本節點所在的群組：名稱、成員數、最後一句），不寄、不改。
 - 指引：安裝與使用說明（開始使用 ASN、讓這台電腦的 Claude 視窗出現在名單上、讓雲端 AI 代理加入、群組怎麼用、常見問題），資料在 `ui/lib/guides.mjs`（要改文字就改這個檔，不放金鑰與網址，路徑用 `%USERPROFILE%` 通用寫法）。清單只列標題，點一篇＝開「指引聊天窗」（見下一條）。
-- 設定：清單列十個分類（個人、Claude 帳號、外觀、分頁與分組、音效、語音、視窗與系統匣、啟動設定、更新、關於），每類一行目前值摘要（`ui/lib/settings-cats.mjs`）；點一類＝開「設定聊天窗」。存檔格式與各設定的行為不變。
+- 設定：清單列十個分類（個人、帳號、外觀、分頁與分組、音效、語音、視窗與系統匣、啟動設定、更新、關於），每類一行目前值摘要（`ui/lib/settings-cats.mjs`）；點一類＝開「設定聊天窗」。存檔格式與各設定的行為不變。表單元件（勾選框、下拉、輸入框、按鈕）共用 `ui/style.css` 的「設定表單統一風格」；「更新」是一張卡片（自動檢查開關一行、立即檢查＋狀態一行、下面是版本更新記錄）。
+- **帳號**（含「登入狀態」區塊 `ui/lib/login-panel.mjs`；`ui/lib/claude-accounts.mjs`、`src-tauri/src/claude_accounts.rs`、`codex_accounts.rs`、`acct_remote.rs`）：
+  - **Claude 帳號**：以 email（`.claude.json` 的 `oauthAccount.emailAddress`）識別，不用取名字。「加入目前登入的帳號」把現在的登入存進帳號庫 `<家目錄>\.asn\claude-accounts\<email 正規化>\`（email 轉小寫、不安全字元改成 `_xx`；舊版以名字存的資料夾第一次讀到時自動改名）；切換前先把目前權杖回存、備份、兩個檔案原子寫入，失敗會還原。權杖只在本機搬，介面只拿得到 email／方案／使用中。
+  - **OpenAI（Codex）帳號**：只顯示目前登入的 email 與方案——讀 `<CODEX_HOME 或 ~/.codex>\auth.json` 的 `tokens.id_token`（JWT）公開聲明裡的 `email` 與 `chatgpt_plan_type`，其餘欄位一律不讀、不留；**切換尚未支援**（Codex 會在使用中回寫權杖，得像 Claude 那樣先回存再換，還沒做）。Gemini 與其他廠商只留位置，顯示「尚未支援」。
+  - **遠端切換**：擁有者設備可切換別台的 Claude 帳號。流程與安全設計見 `supabase/migrations/20261021040000_asn_account_switch.sql` 的開頭註解與 `supabase/functions/_shared/account_switch.ts`：每台 ASN 定期回報帳號庫清單（只有 email、方案、使用中）；發起端（帳號管理的「遠端設備」，或名單上對設備標題按右鍵）選對方的 email 送出指令；對方 ASN 取走後預設跳出確認框，按「同意切換」才在本機搬檔（設定可勾「信任我自己的設備」略過確認），並把結果回報給發起端。指令只帶 email，權杖不經過收發室；本機只處理自己剛從收發室取走的指令編號，每個編號只能用一次。
 - **指引、設定的聊天窗**：左側直立頁籤切換的是「列表」（好友名單／群組／指引列表／設定分類列表），列表裡點一項就開聊天窗，跟點好友同一套機制（純邏輯在 `ui/lib/panels.mjs`）。所有指引共用一扇、所有設定分類共用一扇——點另一篇／另一類是換內容，不再多開。
   - **整合模式**：右邊分頁列多出「指引：<標題>」「設定：<分類名>」兩種分頁（id 是 `@guide`、`@setting`，不會撞到好友 id），各最多一個；點另一篇／另一類就換內容並切過去；可用 ✕、中鍵、右鍵選單（關閉／關閉其他／關閉右側／全部關閉）關掉；**可拖曳排序、不可固定**（右鍵選單沒有「固定分頁」，存檔裡的固定清單也不收這兩個 id）。
   - **分離模式**：各開一扇獨立視窗（`ui/panel.html`＋`panel.js`，Rust 端 `open_panel`／`close_panels`，標籤 `panel-guide`、`panel-setting`），有跟聊天視窗一樣的自訂外框（可拖曳標題列、最小化／最大化／關閉、拖邊緣調整大小，外框設定即時跟著改），大小記在 asn-me.json 的 `guideSize`／`settingSize`（停止調整 0.4 秒後存）；點不同項目就換內容並叫到前面。

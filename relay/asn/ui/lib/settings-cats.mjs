@@ -8,14 +8,13 @@ import { AUTO_LABEL, STT_LANG_LABEL } from './voice-prefs.mjs'
 // 每類的圖示：24x24 的線條路徑（畫面用 svg 的 path 顯示，不用 v-html）
 export const SETTING_CATS = [
   { key: 'me', title: '個人', icon: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c0-4.4 3.6-7 8-7s8 2.6 8 7' },
-  { key: 'accounts', title: 'Claude 帳號', icon: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 20c0-3.3 2.7-5 6-5s6 1.7 6 5M16 5.5a3 3 0 0 1 0 5.5M18 15c2 .5 3 2 3 5' },
+  { key: 'accounts', title: '帳號', icon: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 20c0-3.3 2.7-5 6-5s6 1.7 6 5M16 5.5a3 3 0 0 1 0 5.5M18 15c2 .5 3 2 3 5' },
   { key: 'look', title: '外觀', icon: 'M12 3a9 9 0 1 0 0 18c1.5 0 2-1 1.5-2s0-2 1.5-2h2a3 3 0 0 0 3-3c0-5-4-11-8-11z' },
   { key: 'tabs', title: '分頁與分組', icon: 'M3 6h7l2 2h9v11H3z' },
   { key: 'sound', title: '音效', icon: 'M4 9v6h4l5 4V5L8 9zM16 9c1.5 1.5 1.5 4.5 0 6' },
   { key: 'voice', title: '語音', icon: 'M12 3a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM6 11a6 6 0 0 0 12 0M12 17v4' },
   { key: 'window', title: '視窗與系統匣', icon: 'M3 5h18v14H3zM3 9h18' },
   { key: 'launch', title: '啟動設定', icon: 'M6 4l14 8-14 8z' },
-  { key: 'login', title: '帳號登入', icon: 'M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3' },
   { key: 'update', title: '更新', icon: 'M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5' },
   { key: 'about', title: '關於', icon: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v6M12 7.5v.5' },
 ]
@@ -33,8 +32,8 @@ export function catSummary(key, s = {}) {
       return s.hasUpload ? '已上傳大頭貼' : '自動產生的大頭貼'
     case 'accounts': {
       const n = Number.isInteger(s.accountCount) ? s.accountCount : 0
-      if (!n) return '還沒有存過帳號'
-      return s.accountCurrent ? `${n} 個帳號，使用中：${s.accountCurrent}` : `${n} 個帳號`
+      if (!n) return s.accountCurrent ? `使用中：${s.accountCurrent}（還沒加入帳號庫）` : '還沒有加入過帳號'
+      return s.accountCurrent ? `${n} 個 Claude 帳號，使用中：${s.accountCurrent}` : `${n} 個 Claude 帳號`
     }
     case 'look':
       return join([FRAME_LABEL[s.frame] ?? FRAME_LABEL.custom, MODE_LABEL[s.mode], `頭像${DP_LABEL[s.dpMode] ?? ''}`, `工具列${TOOLBAR_LABEL[s.toolbar] ?? ''}`, `底色${BUBBLE_LABEL[s.bubble] ?? ''}`])
@@ -54,8 +53,6 @@ export function catSummary(key, s = {}) {
       const cwd = Number.isInteger(s.cwdCount) ? s.cwdCount : 0
       return `每小時上限 ${Number.isInteger(s.maxPerHour) ? s.maxPerHour : '-'} 個、白名單 ${cwd} 個資料夾`
     }
-    case 'login':
-      return '用 Google 或 GitHub 登入、把這台電腦連到帳號'
     case 'update':
       return `自動檢查：${onOff(s.autoCheck)}`
     case 'about':

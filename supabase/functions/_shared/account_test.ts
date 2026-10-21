@@ -136,7 +136,8 @@ Deno.test("未知動作：404（驗證通過之後）", async () => {
 Deno.test("relay/index.ts：帳號動作只收 POST、交給 handleAccountAction（它先驗憑證），且在節點金鑰驗證之前", async () => {
   const src = await Deno.readTextFile(new URL("../relay/index.ts", import.meta.url));
   const acct = src.indexOf("ACCOUNT_ACTIONS.has(action)");
-  const nodeKey = src.indexOf('req.headers.get("x-relay-key");\n  if (!key)');
+  // Windows checkout 可能是 CRLF，所以用正規表示式找位置，不依賴換行字元
+  const nodeKey = src.search(/req\.headers\.get\("x-relay-key"\);\r?\n\s*if \(!key\)/);
   assert(acct > 0 && nodeKey > acct, "帳號動作要排在節點金鑰驗證之前");
   const block = src.slice(acct, nodeKey);
   assert(block.includes('req.method !== "POST"'));

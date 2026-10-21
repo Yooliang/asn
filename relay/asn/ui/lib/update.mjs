@@ -49,3 +49,24 @@ export const withFailure = (st, message) => ({ ...st, phase: 'failed', error: St
 
 // 手動「立即檢查」後設定頁顯示的結果
 export const manualResultText = (info, current) => (info ? `有新版本 ${info.version}（目前 ${current}），請按名單上方的「更新」。` : `目前已是最新版（${current}）。`)
+
+// 最後檢查時間：今天只顯示「今天 時:分」，其他天顯示「月/日 時:分」；沒檢查過回空字串
+export const formatCheckTime = (ms, now = Date.now()) => {
+  if (!Number.isFinite(ms) || ms <= 0) return ''
+  const d = new Date(ms), p = x => String(x).padStart(2, '0')
+  const hm = `${p(d.getHours())}:${p(d.getMinutes())}`
+  return d.toDateString() === new Date(now).toDateString() ? `今天 ${hm}` : `${d.getMonth() + 1}/${d.getDate()} ${hm}`
+}
+
+// 設定「更新」頁卡片右邊的狀態：tone（顏色）＋標題＋兩行小字（目前版本、最後檢查）。
+// 參數：{ checking, installing, phase, info, lastCheck, error, current }
+export const updateStatus = ({ checking, installing, phase, info, lastCheck, error, current } = {}, now = Date.now()) => {
+  const when = formatCheckTime(lastCheck, now)
+  const lines = [`目前版本 ${current ?? ''}`.trim(), when ? `最後檢查：${when}` : '尚未檢查過']
+  if (checking) return { tone: 'busy', head: '檢查中…', lines }
+  if (installing || phase === 'installing') return { tone: 'busy', head: '下載安裝中…', lines }
+  if (error) return { tone: 'err', head: `檢查失敗：${error}`, lines }
+  if (phase === 'available' && info?.version) return { tone: 'new', head: `有新版 ${info.version}，請按名單上方的「更新」`, lines }
+  if (phase === 'failed') return { tone: 'err', head: '上次更新失敗，可按名單上方的「更新」重試', lines }
+  return lastCheck ? { tone: 'ok', head: '已是最新版', lines } : { tone: 'idle', head: '按「立即檢查」看有沒有新版', lines }
+}

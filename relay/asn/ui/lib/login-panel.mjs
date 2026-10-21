@@ -1,4 +1,4 @@
-// 設定頁「帳號登入」區塊：登入／已登入 email／登出，以及把這台電腦連到我的帳號（認領）。
+// 設定頁「帳號」分類裡的「登入狀態」區塊：登入／已登入 email／登出，以及把這台電腦連到我的帳號（認領）。
 // 自己呼叫 Rust 指令（登入狀態與權杖都在 Rust 端，不經名單樞紐的設定快照）；整合模式與分離視窗共用。
 // 這個檔在 node 也要能載入（測試），所以 Vue 與 Tauri 只在元件 setup 裡才取用。
 import { PROVIDERS, accountView, errorText } from './login.mjs'
@@ -29,8 +29,8 @@ export const LoginPanel = {
     onMounted(refresh)
     return { PROVIDERS, view, busy, msg, waiting, login, logout, claim, cancel: () => authApi.cancel() }
   },
-  template: `<div class="acct-set login-set">
-      <b>帳號登入</b>
+  template: `<section class="set-card login-set" aria-label="登入狀態">
+      <header class="vendor-h"><b>登入狀態</b><small>Google／GitHub</small></header>
       <p class="login-state">{{ view.title }}</p>
       <small>{{ view.detail }}</small>
       <div class="av-btns" v-if="!view.signedIn">
@@ -43,5 +43,5 @@ export const LoginPanel = {
       </div>
       <small v-if="waiting" role="status">請在瀏覽器完成登入，完成後回到這裡。</small>
       <small role="status">{{ msg }}</small>
-    </div>`,
+    </section>`,
 }

@@ -81,7 +81,7 @@
           </div>
           <div class="list">
             <div v-for="g in shown" :key="g.key">
-              <button class="g-head" type="button" @click="collapsed[g.key] = !collapsed[g.key]" :aria-expanded="!collapsed[g.key]">
+              <button class="g-head" type="button" @click="collapsed[g.key] = !collapsed[g.key]" @contextmenu.prevent="openDeviceMenu(g, $event)" :aria-expanded="!collapsed[g.key]">
                 <span class="box">{{ collapsed[g.key] ? '+' : '−' }}</span>{{ groupHeading(g) }}
                 <template v-if="g.kind === 'device' && asnBadge(g.node)"><span class="dot asn-dot" :class="'st-' + asnBadge(g.node).status" :title="asnBadge(g.node).tip" :aria-label="asnBadge(g.node).tip"></span><span class="asn-new" v-if="asnBadge(g.node).outdated" title="這台的 ASN 版本比你的舊">有新版</span></template>
               </button>
@@ -212,6 +212,17 @@
     <li><button type="button" role="menuitem" @click="buddyMenuOpenChat">開啟對話</button></li>
     <li><button type="button" role="menuitem" :disabled="buddyConsoleItemView.disabled" @click="toggleBuddyConsole">{{ buddyConsoleItemView.label }}</button></li>
   </ul>
+  <ul class="av-menu device-menu" v-if="deviceMenu" :style="{ left: deviceMenuPos.x + 'px', top: deviceMenuPos.y + 'px' }" role="menu" @click.stop>
+    <li><button type="button" role="menuitem" @click="deviceMenuSwitch">切換這台的 Claude 帳號…</button></li>
+  </ul>
+  <asn-dialog v-if="accounts.state.incoming.length" title="有人要切換這台的 Claude 帳號" @close="accounts.decline(accounts.state.incoming[0].id)">
+    <p class="launch-notice-body">「{{ accounts.state.incoming[0].fromLabel }}」要求把這台電腦的 Claude 帳號切換成 {{ accounts.state.incoming[0].email }}。</p>
+    <p class="launch-notice-body">同意後，這台開著的 Claude 視窗要關掉重開，才會用新帳號。不是你本人操作就按拒絕。</p>
+    <div class="partner-actions">
+      <button class="aero-btn" type="button" @click="accounts.decline(accounts.state.incoming[0].id)">拒絕</button>
+      <button class="aero-btn primary" type="button" @click="accounts.approve(accounts.state.incoming[0].id)">同意切換</button>
+    </div>
+  </asn-dialog>
   <ul class="av-menu launch-picker" v-if="launchPicker" :style="{ left: launchPickerPos.x + 'px', top: launchPickerPos.y + 'px' }" role="menu" @click.stop>
     <li v-for="d in launchDeviceRows" :key="d.key">
       <button type="button" role="menuitem" :class="{ off: launchDisableReason(d.key) }" :disabled="!!launchDisableReason(d.key)" :title="launchDisableReason(d.key) || d.label" @click="pickLaunchDevice(d.key)">{{ d.label }}<span class="launch-why" v-if="launchDisableReason(d.key)">{{ launchDisableReason(d.key) }}</span></button>

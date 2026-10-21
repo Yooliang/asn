@@ -11,9 +11,9 @@ import { closesDialog } from '../ui/lib/dialog.mjs'
 
 const read = f => fs.readFileSync(new URL(`../ui/${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
-test('分類：十一類、順序與鍵固定、標題與圖示都有、鍵不重複', () => {
-  assert.deepEqual(SETTING_KEYS, ['me', 'accounts', 'look', 'tabs', 'sound', 'voice', 'window', 'launch', 'login', 'update', 'about'])
-  assert.deepEqual(SETTING_CATS.map(c => c.title), ['個人', 'Claude 帳號', '外觀', '分頁與分組', '音效', '語音', '視窗與系統匣', '啟動設定', '帳號登入', '更新', '關於'])
+test('分類：十類、順序與鍵固定、標題與圖示都有、鍵不重複', () => {
+  assert.deepEqual(SETTING_KEYS, ['me', 'accounts', 'look', 'tabs', 'sound', 'voice', 'window', 'launch', 'update', 'about'])
+  assert.deepEqual(SETTING_CATS.map(c => c.title), ['個人', '帳號', '外觀', '分頁與分組', '音效', '語音', '視窗與系統匣', '啟動設定', '更新', '關於'])
   assert.equal(new Set(SETTING_KEYS).size, SETTING_CATS.length)
   for (const c of SETTING_CATS) assert.ok(/^M[0-9A-Za-z .,-]+$/.test(c.icon), `${c.key} 圖示`)
   assert.equal(catByKey('voice').title, '語音')
@@ -33,9 +33,10 @@ test('摘要：每一類都有一行文字，缺欄位不丟錯', () => {
 test('摘要：照目前的值顯示', () => {
   assert.equal(catSummary('me', { hasUpload: true }), '已上傳大頭貼')
   assert.equal(catSummary('me', { hasUpload: false }), '自動產生的大頭貼')
-  assert.equal(catSummary('accounts', { accountCount: 0 }), '還沒有存過帳號')
-  assert.equal(catSummary('accounts', { accountCount: 2, accountCurrent: '工作' }), '2 個帳號，使用中：工作')
-  assert.equal(catSummary('accounts', { accountCount: 2 }), '2 個帳號')
+  assert.equal(catSummary('accounts', { accountCount: 0 }), '還沒有加入過帳號')
+  assert.equal(catSummary('accounts', { accountCount: 0, accountCurrent: 'a@x.test' }), '使用中：a@x.test（還沒加入帳號庫）')
+  assert.equal(catSummary('accounts', { accountCount: 2, accountCurrent: 'a@x.test' }), '2 個 Claude 帳號，使用中：a@x.test')
+  assert.equal(catSummary('accounts', { accountCount: 2 }), '2 個 Claude 帳號')
   const look = catSummary('look', { frame: 'native', mode: 'merged', dpMode: 'side', toolbar: 'top', bubble: 'bubble' })
   assert.ok(look.includes('Windows 原生'), look)
   assert.equal(catSummary('tabs', { tabDim: 'device', groupDim: 'status' }), '分頁依設備、分組依狀態')
@@ -62,9 +63,14 @@ const fullState = () => ({
   status: 'online', hasUpload: false, avBusy: false, avMsg: '',
   soundOn: true, frame: 'custom', mode: 'merged', dpMode: 'left', toolbar: 'top', bubble: 'none', tabDim: 'device', groupDim: 'status',
   voice: { cfg: { tts_voice: '', tts_auto: false, stt_lang: 'zh', stt_model: 'base' }, enabled: true, voices: [{ id: 'v1', label: '曉曉' }], sttReady: false, installBusy: false, note: '尚未安裝' },
-  accounts: { list: [{ name: '工作', email: 'a@b.c', plan: 'Max', current: true }, { name: '個人', email: '', plan: '', current: false }], busy: false, confirmDel: '', msg: '', savedSeq: 0 },
+  accounts: {
+    list: [{ email: 'a@b.c', plan: 'Max', current: true, saved: true }, { email: 'p@b.c', plan: '', current: false, saved: true }],
+    current: { email: 'a@b.c', plan: 'Max', current: true, saved: true }, codexLine: 'x@openai.test · plus',
+    busy: false, confirmDel: '', msg: '', trustOwn: false,
+    remote: { node: 'W', devices: [{ key: 'W', label: '工作機' }], list: [{ vendor: 'claude', email: 'w@b.c', plan: 'pro', current: false }], loading: false, busy: false, msg: '' },
+  },
   closeTo: 'tray', trayOk: true, autostart: { supported: true, on: false, busy: false },
-  autoCheck: true, upd: { checking: false, installing: false, manual: '' },
+  autoCheck: true, upd: { checking: false, installing: false, manual: '', status: { tone: 'ok', head: '已是最新版', lines: ['目前版本 9.9.9', '最後檢查：今天 14:03'] } },
   launch: { tools: [{ id: 'claude', label: 'Claude Code', installed: true, version: '2.0', installHint: '' }, { id: 'gemini', label: 'Gemini', installed: false, version: '', installHint: '先安裝 Gemini CLI' }], maxPerHour: 6, cwdText: 'D:/a\nD:/b' },
   version: '9.9.9',
 })
@@ -77,15 +83,14 @@ const render = async (catKey, st = fullState()) => {
 test('設定表單：每一類都轉得出來，各類原本的項目都在', async () => {
   const want = {
     me: ['大頭貼', '選擇圖片', '移除，改回自動產生', '目前用的是自動產生的大頭貼。'],
-    accounts: ['Claude 帳號', '使用中', '存成帳號', '切換', '刪除', 'a@b.c · Max'],
+    accounts: ['登入狀態', '尚未登入', '用 Google 登入', '用 GitHub 登入', 'Claude 帳號', '使用中', '加入目前登入的帳號', '切換', '刪除', 'a@b.c', 'OpenAI（Codex）帳號', 'x@openai.test · plus', 'Gemini', '尚未支援', '遠端設備', 'w@b.c', '信任我自己的設備'],
     look: ['視窗外框', '視窗模式', '頭像模式', '工具列位置', '文字底色'],
     tabs: ['分頁依', '分組依'],
     sound: ['音效'],
     voice: ['念出訊息的聲音', '收到新訊息自動念', '語音輸入的語言', '語音辨識模型', '下載語音辨識', '曉曉', '尚未安裝'],
     window: ['關閉視窗時', '登入時自動啟動 ASN'],
     launch: ['每小時開新夥伴上限', '工作資料夾白名單', 'Claude Code', '先安裝 Gemini CLI'],
-    login: ['帳號登入', '尚未登入', '用 Google 登入', '用 GitHub 登入'],
-    update: ['自動檢查更新', '立即檢查'],
+    update: ['自動檢查更新', '立即檢查', '已是最新版', '目前版本 9.9.9', '最後檢查：今天 14:03', '版本更新記錄'],
     about: ['版本 9.9.9'],
   }
   assert.deepEqual(Object.keys(want), SETTING_KEYS, '每一類都有檢查')
@@ -129,7 +134,7 @@ test('守門：元件送出的每個指令，樞紐的 applySetting 都接得住
 
 test('守門：每個舊設定項目的行為綁定都還在（改走樞紐指令，存檔欄位不變）', () => {
   const hub = read('list.js')
-  for (const k of ['setFrame(value)', 'setMode(value)', 'setTabDim(value)', 'saveVoice(value)', 'installFromSettings()', 'accounts.switchTo(value)', 'accounts.remove(value)', 'accounts.save()',
+  for (const k of ['setFrame(value)', 'setMode(value)', 'setTabDim(value)', 'saveVoice(value)', 'installFromSettings()', 'accounts.switchTo(value)', 'accounts.remove(value)', 'accounts.addCurrent()', 'accounts.remoteSwitch(', 'accounts.setTrust(',
     'setCloseTo(value)', 'setAutostart(', 'checkUpdate(true)', 'saveLaunchPrefs()', 'setLaunchCwdText(', 'removeAvatar()', 'soundFromChoice(value)', 'normalizeDpMode(value)', 'normalizeBubble(value)']) {
     assert.ok(hub.includes(k), `樞紐缺 ${k}`)
   }
@@ -147,7 +152,7 @@ test('守門：設定不再用彈出對話框，點分類列表的一項就開�
   assert.ok(!/openSettingDlg|dlg\.kind|dlg\.key|closeDlg|dlgTitle/.test(html + js), '舊的對話框接線都拿掉了')
   // 對話框元件只剩開新夥伴失敗提示在用
   const uses = [...html.matchAll(/<asn-dialog v-if="([^"]+)"/g)].map(m => m[1])
-  assert.deepEqual(uses, ['launchNotice.open'])
+  assert.deepEqual(uses, ['accounts.state.incoming.length', 'launchNotice.open'])   // 開新夥伴失敗提示、別台要求切換帳號的確認框
   assert.match(js, /app\.component\('asn-dialog', AsnDialog\)/)
   // 整合模式右邊的設定窗用同一個元件
   assert.ok(html.includes('<settings-panel :st="settingsState"') && js.includes("app.component('settings-panel', SettingsPanel)"))

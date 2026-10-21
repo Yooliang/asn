@@ -1,10 +1,13 @@
-//! 本機 Claude 帳號庫：把目前登入存成帳號、在帳號之間切換、刪除。
-//! 全部只在本機搬檔，權杖不離開這台電腦、不進 log、不回給前端（前端只拿得到名稱、email、方案）。
+//! 本機 Claude 帳號庫：把目前登入加入帳號庫、在帳號之間切換、刪除。
+//! 全部只在本機搬檔，權杖不離開這台電腦、不進 log、不回給前端（前端只拿得到 email、方案）。
+//! 帳號以 email 識別，不再讓使用者取名字。
 //!
 //! 位置（`home` 是家目錄，測試一律指到暫存資料夾）：
 //! - 登入權杖：`<home>\.claude\.credentials.json`
 //! - 帳號資訊：`<home>\.claude.json` 的頂層欄位 `oauthAccount`
-//! - 帳號庫：`<home>\.asn\claude-accounts\<名稱>\{.credentials.json, account.json}`
+//! - 帳號庫：`<home>\.asn\claude-accounts\<email 正規化>\{.credentials.json, account.json}`
+//!   資料夾名由 email 轉小寫、不安全字元改成 `_xx`（見 `email_dir`）；舊版以名字存的資料夾，
+//!   第一次讀到時自動改名成新格式（`migrate_legacy`）。
 //! - 切換前備份：`<home>\.asn\claude-backup\`（只留最近一次）
 //!
 //! 紅線：本模組的函式一律吃 `home` 參數；只有 `claude_home()` 會決定真實家目錄，測試不得呼叫它。
@@ -19,9 +22,8 @@ const KEY: &str = "oauthAccount";
 
 #[derive(Debug, PartialEq)]
 pub enum AccErr {
-    BadName,
+    BadEmail,
     NotFound,
-    Exists(String),
     NoLogin,
     CurrentUnsaved,
     Corrupt(&'static str),
@@ -31,11 +33,10 @@ pub enum AccErr {
 impl fmt::Display for AccErr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AccErr::BadName => write!(f, "帳號名稱不合格：1～40 字，不可含 / \\ : * ? \" < > | 或控制字元，頭尾不可是空白或句點"),
+            AccErr::BadEmail => write!(f, "email 格式不對"),
             AccErr::NotFound => write!(f, "找不到這個帳號"),
-            AccErr::Exists(n) => write!(f, "這個登入已經存成帳號「{n}」，或名稱已被別的帳號使用"),
-            AccErr::NoLogin => write!(f, "這台電腦目前沒有 Claude 登入，請先登入再存成帳號"),
-            AccErr::CurrentUnsaved => write!(f, "目前登入的帳號還沒存成帳號，切走會遺失；請先按「存成帳號」"),
+            AccErr::NoLogin => write!(f, "這台電腦目前沒有 Claude 登入，請先登入再加入帳號"),
+            AccErr::CurrentUnsaved => write!(f, "目前登入的帳號還沒加入帳號庫，切走會遺失；請先按「加入目前登入的帳號」"),
             AccErr::Corrupt(what) => write!(f, "{what}"),
             AccErr::Io(e) => write!(f, "檔案操作失敗：{e}"),
         }
@@ -51,16 +52,16 @@ type R<T> = Result<T, AccErr>;
 /// 介面看得到的欄位（沒有任何權杖）
 #[derive(Serialize, Debug, PartialEq, Clone)]
 pub struct AccountInfo {
-    pub name: String,
     pub email: String,
     pub plan: String,
     pub org: String,
     pub current: bool,
+    /// 已經在帳號庫裡（`list` 一律 true；`current_login` 才可能是 false）
+    pub saved: bool,
 }
 
 #[derive(Serialize, Debug, PartialEq)]
 pub struct SwitchOutcome {
-    pub name: String,
     pub email: String,
     /// 固定提示：開著的 Claude 視窗還握著舊權杖
     pub notice: String,
@@ -92,27 +93,43 @@ fn backup_dir(home: &Path) -> PathBuf {
     home.join(".asn").join("claude-backup")
 }
 
-const RESERVED: [&str; 22] = [
-    "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
-];
-pub fn valid_name(s: &str) -> bool {
-    let n = s.chars().count();
-    (1..=40).contains(&n)
-        && s.trim() == s
-        && !s.starts_with('.')
-        && !s.ends_with('.')
-        && !s.starts_with('_')
-        && !s.chars().any(|c| c.is_control() || "/\\:*?\"<>|".contains(c))
-        && !RESERVED.contains(&s.split('.').next().unwrap_or("").to_lowercase().as_str())
+/// email 正規化：去頭尾空白、轉小寫；必須剛好一個 `@`、兩邊都有字、3～120 字，
+/// 不含空白、控制字元或檔名禁用字元。不合格回 None。
+pub fn normalize_email(s: &str) -> Option<String> {
+    let t = s.trim().to_lowercase();
+    let n = t.chars().count();
+    let (user, host) = t.split_once('@')?;
+    let ok = (3..=120).contains(&n)
+        && !user.is_empty()
+        && !host.is_empty()
+        && !host.contains('@')
+        && !t.chars().any(|c| c.is_control() || c.is_whitespace() || "/\\:*?\"<>|".contains(c));
+    ok.then_some(t)
 }
-fn account_dir(home: &Path, name: &str) -> R<PathBuf> {
-    if !valid_name(name) {
-        return Err(AccErr::BadName);
+/// 帳號庫資料夾名：英數與 `@ . - +` 照留，其餘（含 `_` 本身、頭尾的句點）改成 `_` 加 UTF-8 十六進位，
+/// 所以不同 email 一定對到不同資料夾，也不可能跳出帳號庫。
+pub fn email_dir_name(email: &str) -> String {
+    let n = email.chars().count();
+    let mut out = String::new();
+    for (i, c) in email.chars().enumerate() {
+        let edge_dot = c == '.' && (i == 0 || i + 1 == n);
+        if (c.is_ascii_alphanumeric() || "@-+".contains(c) || c == '.') && !edge_dot {
+            out.push(c);
+        } else {
+            let mut b = [0u8; 4];
+            for x in c.encode_utf8(&mut b).bytes() {
+                out.push_str(&format!("_{x:02x}"));
+            }
+        }
     }
+    out
+}
+fn account_dir(home: &Path, email: &str) -> R<PathBuf> {
+    let e = normalize_email(email).ok_or(AccErr::BadEmail)?;
     let root = store_root(home);
-    let d = root.join(name);
+    let d = root.join(email_dir_name(&e));
     if d.parent() != Some(root.as_path()) {
-        return Err(AccErr::BadName);
+        return Err(AccErr::BadEmail);
     }
     Ok(d)
 }
@@ -318,42 +335,83 @@ fn current_fragment(home: &Path) -> R<Option<(String, String)>> {
 
 // ---------- 帳號庫 ----------
 struct Saved {
-    name: String,
+    /// 正規化後的 email（帳號的識別）
+    email: String,
+    dir: PathBuf,
     uuid: String,
     frag: String,
 }
-fn saved_accounts(home: &Path) -> Vec<Saved> {
-    let mut v = vec![];
-    let Ok(rd) = std::fs::read_dir(store_root(home)) else { return v };
+fn email_of_fragment(frag: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(frag).ok()?;
+    normalize_email(v.get("emailAddress")?.as_str()?)
+}
+
+/// 舊版以「名字」當資料夾名：讀到就自動改名成 email 資料夾。目標已存在就不動（列表時會去重）。失敗略過，下次再試。
+pub fn migrate_legacy(home: &Path) {
+    let root = store_root(home);
+    let Ok(rd) = std::fs::read_dir(&root) else { return };
     for e in rd.flatten() {
         let name = e.file_name().to_string_lossy().to_string();
-        if !valid_name(&name) {
-            continue;
-        }
         let Ok(frag) = std::fs::read_to_string(e.path().join(FRAG)) else { continue };
-        if let Some(uuid) = uuid_of_fragment(&frag) {
-            v.push(Saved { name, uuid, frag });
+        let Some(email) = email_of_fragment(&frag) else { continue };
+        let want = email_dir_name(&email);
+        if name != want && !root.join(&want).exists() {
+            let _ = std::fs::rename(e.path(), root.join(&want));
         }
     }
-    v.sort_by(|a, b| a.name.cmp(&b.name));
+}
+
+fn saved_accounts(home: &Path) -> Vec<Saved> {
+    migrate_legacy(home);
+    let mut v: Vec<Saved> = vec![];
+    let Ok(rd) = std::fs::read_dir(store_root(home)) else { return v };
+    for e in rd.flatten() {
+        let Ok(frag) = std::fs::read_to_string(e.path().join(FRAG)) else { continue };
+        let (Some(uuid), Some(email)) = (uuid_of_fragment(&frag), email_of_fragment(&frag)) else { continue };
+        // 同一個 email 只留資料夾名正確的那份（舊名字資料夾沒搬成時，不重複列出）
+        let canonical = e.file_name().to_string_lossy() == email_dir_name(&email).as_str();
+        if let Some(i) = v.iter().position(|s| s.email == email) {
+            if canonical {
+                v[i] = Saved { email, dir: e.path(), uuid, frag };
+            }
+            continue;
+        }
+        v.push(Saved { email, dir: e.path(), uuid, frag });
+    }
+    v.sort_by(|a, b| a.email.cmp(&b.email));
     v
 }
 
+/// 目前登入的 email 與方案（方案只取權杖檔的 subscriptionType 這一個字串欄位）；沒登入回 None
+pub fn current_login(home: &Path) -> Option<AccountInfo> {
+    let (frag, uuid) = current_fragment(home).ok().flatten()?;
+    let email = email_of_fragment(&frag)?;
+    let saved = saved_accounts(home).into_iter().any(|s| s.uuid == uuid || s.email == email);
+    let mut info = info_of(&frag, &email, &cred_path(home), true);
+    info.saved = saved;
+    Some(info)
+}
+
+fn info_of(frag: &str, email: &str, cred_file: &Path, current: bool) -> AccountInfo {
+    let a: serde_json::Value = serde_json::from_str(frag).unwrap_or_default();
+    let plan = ["subscriptionType", "organizationType", "billingType"].iter().map(|k| field(&a, k)).find(|p| !p.is_empty()).unwrap_or_else(|| {
+        // 方案也可能只在權杖檔的 subscriptionType；只取這一個字串欄位，其餘不讀出來
+        std::fs::read_to_string(cred_file)
+            .ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            .and_then(|v| v.pointer("/claudeAiOauth/subscriptionType").and_then(|x| x.as_str().map(String::from)))
+            .unwrap_or_default()
+    });
+    AccountInfo { email: email.to_string(), plan, org: field(&a, "organizationName"), current, saved: true }
+}
+
 pub fn list(home: &Path) -> Vec<AccountInfo> {
-    let cur = current_fragment(home).ok().flatten().map(|(_, u)| u);
+    let cur = current_fragment(home).ok().flatten();
     saved_accounts(home)
         .into_iter()
         .map(|s| {
-            let a: serde_json::Value = serde_json::from_str(&s.frag).unwrap_or_default();
-            let plan = ["subscriptionType", "organizationType", "billingType"].iter().map(|k| field(&a, k)).find(|p| !p.is_empty()).unwrap_or_else(|| {
-                // 方案也可能只在權杖檔的 subscriptionType；只取這一個字串欄位，其餘不讀出來
-                std::fs::read_to_string(store_root(home).join(&s.name).join(CRED))
-                    .ok()
-                    .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-                    .and_then(|v| v.pointer("/claudeAiOauth/subscriptionType").and_then(|x| x.as_str().map(String::from)))
-                    .unwrap_or_default()
-            });
-            AccountInfo { name: s.name, email: field(&a, "emailAddress"), plan, org: field(&a, "organizationName"), current: cur.as_deref() == Some(s.uuid.as_str()) }
+            let is_cur = cur.as_ref().is_some_and(|(f, u)| *u == s.uuid || email_of_fragment(f).as_deref() == Some(s.email.as_str()));
+            info_of(&s.frag, &s.email, &s.dir.join(CRED), is_cur)
         })
         .collect()
 }
@@ -369,25 +427,24 @@ fn read_cred(home: &Path) -> R<Option<Vec<u8>>> {
     }
 }
 
-/// 把目前登入存成帳號
-pub fn save_current(home: &Path, name: &str) -> R<AccountInfo> {
-    let dir = account_dir(home, name)?;
+/// 把目前登入加入帳號庫（以 email 識別；已經在庫裡就用最新的權杖更新那一份）
+pub fn save_current(home: &Path) -> R<AccountInfo> {
     let cred = read_cred(home)?.ok_or(AccErr::NoLogin)?;
-    let (frag, uuid) = current_fragment(home)?.ok_or(AccErr::NoLogin)?;
-    for s in saved_accounts(home) {
-        if (s.uuid == uuid && s.name != name) || (s.name == name && s.uuid != uuid) {
-            return Err(AccErr::Exists(s.name));
-        }
-    }
+    let (frag, _) = current_fragment(home)?.ok_or(AccErr::NoLogin)?;
+    let email = email_of_fragment(&frag).ok_or(AccErr::Corrupt("目前登入的帳號資訊裡沒有 email，無法加入"))?;
+    let dir = account_dir(home, &email)?;
     ensure_store(home);
+    migrate_legacy(home);
     std::fs::create_dir_all(&dir)?;
     write_atomic(&dir.join(CRED), &cred)?;
     write_atomic(&dir.join(FRAG), frag.as_bytes())?;
-    list(home).into_iter().find(|a| a.name == name).ok_or(AccErr::NotFound)
+    list(home).into_iter().find(|a| a.email == email).ok_or(AccErr::NotFound)
 }
 
-pub fn delete(home: &Path, name: &str) -> R<()> {
-    let dir = account_dir(home, name)?;
+pub fn delete(home: &Path, email: &str) -> R<()> {
+    let e = normalize_email(email).ok_or(AccErr::BadEmail)?;
+    migrate_legacy(home);
+    let dir = account_dir(home, &e)?;
     if !dir.is_dir() {
         return Err(AccErr::NotFound);
     }
@@ -395,12 +452,14 @@ pub fn delete(home: &Path, name: &str) -> R<()> {
     Ok(())
 }
 
-pub fn switch_to(home: &Path, name: &str) -> R<SwitchOutcome> {
-    switch_impl(home, name, Fault::None)
+pub fn switch_to(home: &Path, email: &str) -> R<SwitchOutcome> {
+    switch_impl(home, email, Fault::None)
 }
 
-pub fn switch_impl(home: &Path, name: &str, fault: Fault) -> R<SwitchOutcome> {
-    let dir = account_dir(home, name)?;
+pub fn switch_impl(home: &Path, email: &str, fault: Fault) -> R<SwitchOutcome> {
+    let email = normalize_email(email).ok_or(AccErr::BadEmail)?;
+    migrate_legacy(home);
+    let dir = account_dir(home, &email)?;
     let tgt_cred = std::fs::read(dir.join(CRED)).map_err(|_| AccErr::NotFound)?;
     let tgt_frag = std::fs::read_to_string(dir.join(FRAG)).map_err(|_| AccErr::NotFound)?;
     serde_json::from_slice::<serde_json::Value>(&tgt_cred).map_err(|_| AccErr::Corrupt("帳號庫裡的權杖檔壞了"))?;
@@ -412,10 +471,10 @@ pub fn switch_impl(home: &Path, name: &str, fault: Fault) -> R<SwitchOutcome> {
     let cur = current_fragment(home)?;
     match (&old_cred, &cur) {
         (Some(c), Some((frag, uuid))) => {
-            let owner = saved_accounts(home).into_iter().find(|s| &s.uuid == uuid).ok_or(AccErr::CurrentUnsaved)?;
-            let od = account_dir(home, &owner.name)?;
-            write_atomic(&od.join(CRED), c)?;
-            write_atomic(&od.join(FRAG), frag.as_bytes())?;
+            let cur_email = email_of_fragment(frag);
+            let owner = saved_accounts(home).into_iter().find(|s| &s.uuid == uuid || Some(&s.email) == cur_email.as_ref()).ok_or(AccErr::CurrentUnsaved)?;
+            write_atomic(&owner.dir.join(CRED), c)?;
+            write_atomic(&owner.dir.join(FRAG), frag.as_bytes())?;
         }
         (Some(_), None) => return Err(AccErr::CurrentUnsaved),
         _ => {}
@@ -470,8 +529,7 @@ pub fn switch_impl(home: &Path, name: &str, fault: Fault) -> R<SwitchOutcome> {
             AccErr::from(e)
         });
     }
-    let a: serde_json::Value = serde_json::from_str(&tgt_frag).unwrap_or_default();
-    Ok(SwitchOutcome { name: name.to_string(), email: field(&a, "emailAddress"), notice: "切換好了。開著的 Claude 視窗要關掉重開，才會用新帳號。".into() })
+    Ok(SwitchOutcome { email, notice: "切換好了。開著的 Claude 視窗要關掉重開，才會用新帳號。".into() })
 }
 
 // ---------- Tauri 指令（前端只拿得到 AccountInfo） ----------
@@ -483,19 +541,33 @@ pub fn claude_accounts_list() -> Vec<AccountInfo> {
     list(&claude_home())
 }
 #[tauri::command]
-pub fn claude_account_save(name: String) -> Result<AccountInfo, String> {
+pub fn claude_account_current() -> Option<AccountInfo> {
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    save_current(&claude_home(), &name).map_err(|e| e.to_string())
+    current_login(&claude_home())
 }
 #[tauri::command]
-pub fn claude_account_switch(name: String) -> Result<SwitchOutcome, String> {
+pub fn claude_account_save() -> Result<AccountInfo, String> {
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    switch_to(&claude_home(), &name).map_err(|e| e.to_string())
+    save_current(&claude_home()).map_err(|e| e.to_string())
 }
 #[tauri::command]
-pub fn claude_account_delete(name: String) -> Result<(), String> {
+pub fn claude_account_switch(email: String) -> Result<SwitchOutcome, String> {
+    local_switch(&email)
+}
+#[tauri::command]
+pub fn claude_account_delete(email: String) -> Result<(), String> {
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    delete(&claude_home(), &name).map_err(|e| e.to_string())
+    delete(&claude_home(), &email).map_err(|e| e.to_string())
+}
+/// 本機切換（Tauri 指令與遠端切換共用同一個入口，同一把鎖）
+pub fn local_switch(email: &str) -> Result<SwitchOutcome, String> {
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    switch_to(&claude_home(), email).map_err(|e| e.to_string())
+}
+/// 帳號庫清單（遠端回報用）
+pub fn local_list() -> Vec<AccountInfo> {
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    list(&claude_home())
 }
 
 #[cfg(test)]
@@ -523,31 +595,41 @@ mod tests {
     fn read(p: PathBuf) -> String {
         fs::read_to_string(p).unwrap()
     }
-
-    #[test]
-    fn 存成帳號_庫裡有權杖與帳號資訊_清單沒有權杖() {
-        let d = setup();
-        let h = d.path();
-        login(h, "u-a", "a@x.test", "A1");
-        let info = save_current(h, "甲").unwrap();
-        assert_eq!((info.name.as_str(), info.email.as_str(), info.plan.as_str(), info.current), ("甲", "a@x.test", "max", true));
-        assert_eq!(read(store_root(h).join("甲").join(CRED)), cred("A1"));
-        assert!(read(store_root(h).join("甲").join(FRAG)).contains("a@x.test"));
-        let shown = serde_json::to_string(&list(h)).unwrap();
-        assert!(!shown.contains("FAKE-"), "清單不可含權杖");
-        // 同一個登入不能用另一個名字再存；同名不同人也不行
-        assert_eq!(save_current(h, "乙"), Err(AccErr::Exists("甲".into())));
-        login(h, "u-b", "b@x.test", "B1");
-        assert_eq!(save_current(h, "甲"), Err(AccErr::Exists("甲".into())));
+    fn dir_of(h: &Path, email: &str) -> PathBuf {
+        store_root(h).join(email_dir_name(email))
+    }
+    fn emails(h: &Path) -> Vec<String> {
+        list(h).into_iter().map(|a| a.email).collect()
     }
 
     #[test]
-    fn 沒登入就不能存() {
+    fn 加入帳號_以_email_識別_庫裡有權杖與帳號資訊_清單沒有權杖() {
         let d = setup();
-        assert_eq!(save_current(d.path(), "甲"), Err(AccErr::NoLogin));
+        let h = d.path();
+        login(h, "u-a", "A@x.test", "A1");
+        let info = save_current(h).unwrap();
+        assert_eq!((info.email.as_str(), info.plan.as_str(), info.current, info.saved), ("a@x.test", "max", true, true));
+        assert_eq!(read(dir_of(h, "a@x.test").join(CRED)), cred("A1"));
+        assert!(read(dir_of(h, "a@x.test").join(FRAG)).contains("A@x.test"));
+        let shown = serde_json::to_string(&list(h)).unwrap();
+        assert!(!shown.contains("FAKE-"), "清單不可含權杖");
+        // 再加一次同一個登入：不報錯、不重複，並用最新權杖更新
+        login(h, "u-a", "a@x.test", "A2");
+        save_current(h).unwrap();
+        assert_eq!(emails(h), vec!["a@x.test"]);
+        assert_eq!(read(dir_of(h, "a@x.test").join(CRED)), cred("A2"));
+    }
+
+    #[test]
+    fn 沒登入就不能加入() {
+        let d = setup();
+        assert_eq!(save_current(d.path()), Err(AccErr::NoLogin));
         login(d.path(), "u-a", "a@x.test", "A1");
         fs::remove_file(cred_path(d.path())).unwrap();
-        assert_eq!(save_current(d.path(), "甲"), Err(AccErr::NoLogin));
+        assert_eq!(save_current(d.path()), Err(AccErr::NoLogin));
+        // 帳號資訊裡沒有 email：不加入
+        login(d.path(), "u-a", "", "A1");
+        assert!(matches!(save_current(d.path()), Err(AccErr::Corrupt(_))));
     }
 
     #[test]
@@ -555,17 +637,17 @@ mod tests {
         let d = setup();
         let h = d.path();
         login(h, "u-a", "a@x.test", "A1");
-        save_current(h, "甲").unwrap();
+        save_current(h).unwrap();
         login(h, "u-b", "b@x.test", "B1");
-        save_current(h, "乙").unwrap();
+        save_current(h).unwrap();
         // 甲換新權杖（使用中自動更新）：切走前要回存
         login(h, "u-a", "a@x.test", "A2");
         let before = read(cj_path(h));
-        let out = switch_to(h, "乙").unwrap();
+        let out = switch_to(h, "B@x.test").unwrap();
         assert_eq!(out.email, "b@x.test");
         assert!(out.notice.contains("重開"));
         assert_eq!(read(cred_path(h)), cred("B1"));
-        assert_eq!(read(store_root(h).join("甲").join(CRED)), cred("A2"), "甲的最新權杖要回存");
+        assert_eq!(read(dir_of(h, "a@x.test").join(CRED)), cred("A2"), "甲的最新權杖要回存");
         let after = read(cj_path(h));
         assert!(after.contains("b@x.test") && !after.contains("a@x.test"));
         // 替換範圍之外逐字相同
@@ -575,24 +657,26 @@ mod tests {
         assert_eq!(&before[e..], &after[e2..]);
         assert!(after.contains("\"projects\": {\"D:\\\\x\": {\"a\": [1, 2,3]}}") && after.contains("\"tail\":   null"));
         // 換回來：甲拿到 A2，乙的權杖回存
-        switch_to(h, "甲").unwrap();
+        switch_to(h, "a@x.test").unwrap();
         assert_eq!(read(cred_path(h)), cred("A2"));
-        assert_eq!(read(store_root(h).join("乙").join(CRED)), cred("B1"));
+        assert_eq!(read(dir_of(h, "b@x.test").join(CRED)), cred("B1"));
         assert_eq!(read(cj_path(h)), before, "來回之後 .claude.json 與原本完全相同");
-        let cur: Vec<_> = list(h).into_iter().filter(|a| a.current).map(|a| a.name).collect();
-        assert_eq!(cur, vec!["甲"]);
+        let cur: Vec<_> = list(h).into_iter().filter(|a| a.current).map(|a| a.email).collect();
+        assert_eq!(cur, vec!["a@x.test"]);
     }
 
     #[test]
-    fn 目前登入還沒存成帳號_不准切走() {
+    fn 目前登入還沒加入帳號庫_不准切走() {
         let d = setup();
         let h = d.path();
         login(h, "u-a", "a@x.test", "A1");
-        save_current(h, "甲").unwrap();
+        save_current(h).unwrap();
         login(h, "u-c", "c@x.test", "C1");
         let (c0, j0) = (read(cred_path(h)), read(cj_path(h)));
-        assert_eq!(switch_to(h, "甲"), Err(AccErr::CurrentUnsaved));
+        assert_eq!(switch_to(h, "a@x.test"), Err(AccErr::CurrentUnsaved));
         assert_eq!((read(cred_path(h)), read(cj_path(h))), (c0, j0), "什麼都沒動");
+        let cur = current_login(h).unwrap();
+        assert_eq!((cur.email.as_str(), cur.saved), ("c@x.test", false));
     }
 
     #[test]
@@ -600,12 +684,12 @@ mod tests {
         let d = setup();
         let h = d.path();
         login(h, "u-a", "a@x.test", "A1");
-        save_current(h, "甲").unwrap();
+        save_current(h).unwrap();
         login(h, "u-b", "b@x.test", "B1");
-        save_current(h, "乙").unwrap();
+        save_current(h).unwrap();
         login(h, "u-a", "a@x.test", "A2");
         let (c0, j0) = (read(cred_path(h)), read(cj_path(h)));
-        let r = switch_impl(h, "乙", Fault::AfterCredentials);
+        let r = switch_impl(h, "b@x.test", Fault::AfterCredentials);
         assert!(matches!(r, Err(AccErr::Io(_))), "{r:?}");
         assert_eq!(read(cred_path(h)), c0);
         assert_eq!(read(cj_path(h)), j0);
@@ -619,12 +703,12 @@ mod tests {
         let d = setup();
         let h = d.path();
         login(h, "u-a", "a@x.test", "A1");
-        save_current(h, "甲").unwrap();
+        save_current(h).unwrap();
         login(h, "u-b", "b@x.test", "B1");
-        save_current(h, "乙").unwrap();
+        save_current(h).unwrap();
         fs::write(cj_path(h), "{壞掉").unwrap();
         let (c0, j0) = (read(cred_path(h)), read(cj_path(h)));
-        assert!(switch_to(h, "甲").is_err());
+        assert!(switch_to(h, "a@x.test").is_err());
         assert_eq!((read(cred_path(h)), read(cj_path(h))), (c0, j0));
     }
 
@@ -632,22 +716,35 @@ mod tests {
     fn 找不到帳號() {
         let d = setup();
         login(d.path(), "u-a", "a@x.test", "A1");
-        assert_eq!(switch_to(d.path(), "沒有這個"), Err(AccErr::NotFound));
-        assert_eq!(delete(d.path(), "沒有這個"), Err(AccErr::NotFound));
+        assert_eq!(switch_to(d.path(), "no@x.test"), Err(AccErr::NotFound));
+        assert_eq!(delete(d.path(), "no@x.test"), Err(AccErr::NotFound));
     }
 
     #[test]
-    fn 名稱不合法_路徑穿越一律擋() {
+    fn email_不合法_路徑穿越一律擋() {
         let d = setup();
         let h = d.path();
         login(h, "u-a", "a@x.test", "A1");
-        for bad in ["", "..", ".", "../x", "..\\x", "a/b", "a\\b", "C:\\x", "con", "NUL.txt", " 甲", "甲 ", "甲.", ".hid", "_backup", "a:b", "a*", "x\ny", &"長".repeat(41)] {
-            assert_eq!(save_current(h, bad), Err(AccErr::BadName), "{bad:?}");
-            assert_eq!(switch_to(h, bad), Err(AccErr::BadName), "{bad:?}");
-            assert_eq!(delete(h, bad), Err(AccErr::BadName), "{bad:?}");
+        for bad in ["", "..", "../x", "..\\x@y", "a/b@x", "a@b@c", "@x.test", "a@", "C:\\x@y", "x y@z", "a\nb@c", "a*@b", &format!("{}@x.test", "長".repeat(120))] {
+            assert_eq!(switch_to(h, bad), Err(AccErr::BadEmail), "{bad:?}");
+            assert_eq!(delete(h, bad), Err(AccErr::BadEmail), "{bad:?}");
         }
-        assert!(!store_root(h).exists(), "擋下來的名稱不可建出任何資料夾");
-        assert!(valid_name("工作機-甲 2"));
+        assert!(!store_root(h).exists(), "擋下來的 email 不可建出任何資料夾");
+        assert_eq!(normalize_email("  Foo.Bar+x@Example.COM "), Some("foo.bar+x@example.com".into()));
+    }
+
+    #[test]
+    fn 資料夾名_不同_email_一定不同_且不含路徑字元() {
+        let samples = ["a@x.test", "a_b@x.test", "a_5fb@x.test", ".a@x.test", "a@x.", "中文@例.tw", "a+b@x.test"];
+        let names: Vec<String> = samples.iter().map(|e| email_dir_name(&normalize_email(e).unwrap())).collect();
+        let uniq: std::collections::HashSet<_> = names.iter().collect();
+        assert_eq!(uniq.len(), names.len(), "{names:?}");
+        for n in &names {
+            assert!(!n.contains(['/', '\\', ':', '*', '?', '"', '<', '>', '|']) && !n.starts_with('.') && !n.ends_with('.'), "{n}");
+        }
+        assert_eq!(email_dir_name("a@x.test"), "a@x.test");
+        assert_eq!(email_dir_name("a_b@x.test"), "a_5fb@x.test");
+        assert_ne!(email_dir_name("a_b@x.test"), email_dir_name("a_5fb@x.test"));
     }
 
     #[test]
@@ -655,12 +752,40 @@ mod tests {
         let d = setup();
         let h = d.path();
         login(h, "u-a", "a@x.test", "A1");
-        save_current(h, "甲").unwrap();
+        save_current(h).unwrap();
         login(h, "u-b", "b@x.test", "B1");
-        save_current(h, "乙").unwrap();
-        delete(h, "甲").unwrap();
-        assert_eq!(list(h).iter().map(|a| a.name.as_str()).collect::<Vec<_>>(), vec!["乙"]);
+        save_current(h).unwrap();
+        delete(h, "A@x.test").unwrap();
+        assert_eq!(emails(h), vec!["b@x.test"]);
         assert_eq!(read(cred_path(h)), cred("B1"), "不碰目前登入");
+    }
+
+    #[test]
+    fn 舊版以名字存的帳號_讀到就自動遷移成_email_資料夾() {
+        let d = setup();
+        let h = d.path();
+        login(h, "u-a", "a@x.test", "A1");
+        // 舊格式：資料夾名是「工作」「個人」
+        for (name, uuid, email, tag) in [("工作", "u-a", "a@x.test", "A1"), ("個人", "u-b", "b@x.test", "B1")] {
+            let dir = store_root(h).join(name);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join(CRED), cred(tag)).unwrap();
+            fs::write(dir.join(FRAG), extract_fragment(&cj(uuid, email)).unwrap().unwrap()).unwrap();
+        }
+        assert_eq!(emails(h), vec!["a@x.test", "b@x.test"]);
+        assert!(!store_root(h).join("工作").exists() && !store_root(h).join("個人").exists(), "舊資料夾已改名");
+        assert_eq!(read(dir_of(h, "b@x.test").join(CRED)), cred("B1"));
+        // 遷移後切換照常運作，且目前登入（甲）判得出來
+        assert_eq!(list(h).into_iter().filter(|a| a.current).map(|a| a.email).collect::<Vec<_>>(), vec!["a@x.test"]);
+        switch_to(h, "b@x.test").unwrap();
+        assert_eq!(read(cred_path(h)), cred("B1"));
+        // 目標已存在：不覆蓋、清單不重複
+        let dup = store_root(h).join("甲的複本");
+        fs::create_dir_all(&dup).unwrap();
+        fs::write(dup.join(CRED), cred("OLD")).unwrap();
+        fs::write(dup.join(FRAG), extract_fragment(&cj("u-a", "a@x.test")).unwrap().unwrap()).unwrap();
+        assert_eq!(emails(h), vec!["a@x.test", "b@x.test"]);
+        assert_ne!(read(dir_of(h, "a@x.test").join(CRED)), cred("OLD"));
     }
 
     #[test]
@@ -689,7 +814,7 @@ mod tests {
         let d = setup();
         let h = d.path();
         login(h, "u-a", "a@x.test", "A1");
-        save_current(h, "甲").unwrap();
+        save_current(h).unwrap();
         let o = std::process::Command::new("icacls").no_window().arg(store_root(h)).output().unwrap();
         let t = String::from_utf8_lossy(&o.stdout).to_lowercase();
         assert!(!t.contains("everyone") && !t.contains("\\users:") && !t.contains("authenticated users"), "{t}");
