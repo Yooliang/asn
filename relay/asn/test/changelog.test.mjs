@@ -28,7 +28,11 @@ test('解析：新到舊、版本與日期、條列去掉符號、CRLF 也行、
 
 test('真實的 CHANGELOG：0.1.2 到 0.1.13 都有、由新到舊、每版至少一條、純中文沒有英文夾雜的版本說明外殼', () => {
   const es = parseChangelog(realLog)
-  assert.deepEqual(es.map(e => e.version), ['0.1.13', '0.1.12', '0.1.11', '0.1.10', '0.1.9', '0.1.8', '0.1.7', '0.1.6', '0.1.5', '0.1.4', '0.1.3', '0.1.2'])
+  // 不寫死最新版號（每次發版都會多一段）：最新一段＝package.json 版本，往下逐版遞減到 0.1.2
+  const cur = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version
+  const last = Number(cur.split('.')[2])
+  const want = Array.from({ length: last - 1 }, (_, i) => `0.1.${last - i}`)
+  assert.deepEqual(es.map(e => e.version), want)
   for (const e of es) { assert.match(e.date, /^\d{4}-\d{2}-\d{2}$/, e.version); assert.ok(e.lines.length >= 1, e.version) }
   assert.equal(changelogFirstSection(realLog).split('\n')[0].startsWith('- '), true, '最新一段可直接當 latest.json 的 notes')
 })
@@ -64,15 +68,18 @@ test('寫進 CHANGELOG：加在最上面、同版本替換、空檔也行、多�
 })
 
 test('發版說明來源：沒給 --notes 用 CHANGELOG 最新一段（不改檔）；給了就寫成新段落並成為 notes', () => {
-  const none = resolveNotes({ arg: '', changelog: realLog, version: '0.1.13', date: '2026-10-21' })
+  // 不寫死版號：以 CHANGELOG 目前最新一段為準，模擬下一版
+  const top = parseChangelog(realLog)[0].version
+  const next = top.replace(/\d+$/, n => String(Number(n) + 1))
+  const none = resolveNotes({ arg: '', changelog: realLog, version: top, date: '2026-10-21' })
   assert.equal(none.newChangelog, null)
   assert.equal(none.notes, changelogFirstSection(realLog))
-  assert.ok(none.notes.includes('指引與設定改成跟聊天一樣的聊天窗'))
-  const given = resolveNotes({ arg: '這版新增 X', changelog: realLog, version: '0.1.14', date: '2026-10-22' })
+  assert.ok(none.notes.startsWith('- '))
+  const given = resolveNotes({ arg: '這版新增 X', changelog: realLog, version: next, date: '2026-10-22' })
   assert.equal(given.notes, '這版新增 X')
   const es = parseChangelog(given.newChangelog)
-  assert.deepEqual([es[0].version, es[0].date, es[0].lines], ['0.1.14', '2026-10-22', ['這版新增 X']])
-  assert.equal(es[1].version, '0.1.13')
+  assert.deepEqual([es[0].version, es[0].date, es[0].lines], [next, '2026-10-22', ['這版新增 X']])
+  assert.equal(es[1].version, top)
   assert.equal(changelogFirstSection(given.newChangelog), '- 這版新增 X')
 })
 

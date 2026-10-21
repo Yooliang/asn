@@ -8,7 +8,7 @@ import { AUTO_LABEL, STT_LANG_LABEL } from './voice-prefs.mjs'
 // 每類的圖示：24x24 的線條路徑（畫面用 svg 的 path 顯示，不用 v-html）
 export const SETTING_CATS = [
   { key: 'me', title: '個人', icon: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c0-4.4 3.6-7 8-7s8 2.6 8 7' },
-  { key: 'accounts', title: '帳號管理', icon: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 20c0-3.3 2.7-5 6-5s6 1.7 6 5M16 5.5a3 3 0 0 1 0 5.5M18 15c2 .5 3 2 3 5' },
+  { key: 'accounts', title: '帳號', icon: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 20c0-3.3 2.7-5 6-5s6 1.7 6 5M16 5.5a3 3 0 0 1 0 5.5M18 15c2 .5 3 2 3 5' },
   { key: 'look', title: '外觀', icon: 'M12 3a9 9 0 1 0 0 18c1.5 0 2-1 1.5-2s0-2 1.5-2h2a3 3 0 0 0 3-3c0-5-4-11-8-11z' },
   { key: 'tabs', title: '分頁與分組', icon: 'M3 6h7l2 2h9v11H3z' },
   { key: 'sound', title: '音效', icon: 'M4 9v6h4l5 4V5L8 9zM16 9c1.5 1.5 1.5 4.5 0 6' },

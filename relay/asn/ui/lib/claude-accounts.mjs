@@ -1,4 +1,4 @@
-// 設定頁「帳號管理」：Claude 帳號（加入目前登入、切換、刪除）、OpenAI（Codex）目前登入、遠端設備的 Claude 帳號切換。
+// 設定頁「帳號」：Claude 帳號（加入目前登入、切換、刪除）、OpenAI（Codex）目前登入、遠端設備的 Claude 帳號切換。
 // 檔案操作全在 Rust（claude_accounts.rs、codex_accounts.rs、acct_remote.rs），這裡只呼叫指令並整理訊息。
 // 帳號以 email 識別；介面只會拿到 email／方案／是否使用中，權杖不經過前端。
 export const SWITCH_NOTICE = '開著的 Claude 視窗要關掉重開，才會用新帳號。'
@@ -69,7 +69,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
       r.asnOnline = v?.asn_online === true
       r.reportedAt = v?.reported_at ?? ''
       if (!r.asnOnline) r.msg = '對方電腦的 ASN 目前沒有在線，無法切換。'
-      else if (!r.list.length) r.msg = '對方電腦還沒有帳號（請對方先在帳號管理按「加入目前登入的帳號」）。'
+      else if (!r.list.length) r.msg = '對方電腦還沒有帳號（請對方先在設定的「帳號」頁按「加入目前登入的帳號」）。'
     } catch (e) { r.list = []; r.msg = errText(e) }
     r.loading = false
   }

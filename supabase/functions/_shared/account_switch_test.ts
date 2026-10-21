@@ -115,7 +115,7 @@ Deno.test("relay/index.ts：帳號動作排在金鑰驗證之後，行動者是 
   const block = src.slice(at, at + 500);
   assert(block.includes("handleAcctAction(") && block.includes(", me, action"));
   // 資料庫函式：擁有者判定與 launch 同一套，且所有函式只給 service_role
-  const sql = Deno.readTextFileSync(new URL("../../migrations/20261021030000_asn_account_switch.sql", import.meta.url));
+  const sql = Deno.readTextFileSync(new URL("../../migrations/20261021040000_asn_account_switch.sql", import.meta.url));
   assertEquals((sql.match(/role = 'owner' and status = 'active'/g) ?? []).length, 2, "acct_list 與 acct_switch 都要驗擁有者");
   assertEquals((sql.match(/grant execute on function/g) ?? []).length, (sql.match(/revoke all on function/g) ?? []).length);
   assert(!/grant execute on function[^;]*\bto (anon|authenticated|public)\b/.test(sql));

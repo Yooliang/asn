@@ -1,4 +1,4 @@
-// 遠端切換 Claude 帳號（ASN 帳號管理）共用邏輯。設計與流程見 supabase/migrations/20261021030000_asn_account_switch.sql。
+// 遠端切換 Claude 帳號（ASN 帳號管理）共用邏輯。設計與流程見 supabase/migrations/20261021040000_asn_account_switch.sql。
 // 最後一道關在資料庫函式（擁有者限定、同租戶、對方 ASN 在線、email 在對方回報的清單裡、頻率）；
 // 這裡負責：輸入整理與第一層格式檢查、動作分派、錯誤碼對應。
 // 權杖絕不經過這裡：回報與指令都只有廠商、email、方案、是否使用中；多餘欄位一律丟掉。

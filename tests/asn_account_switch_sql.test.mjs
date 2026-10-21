@@ -3,7 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
-const sql = fs.readFileSync(new URL('../supabase/migrations/20261021030000_asn_account_switch.sql', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const sql = fs.readFileSync(new URL('../supabase/migrations/20261021040000_asn_account_switch.sql', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const fn = name => {
   const i = sql.indexOf(`function public.${name}(`)
   assert.ok(i >= 0, `找不到函式 ${name}`)

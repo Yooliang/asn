@@ -68,6 +68,11 @@ if (info.shot) {
   window.onerror = (msg, src, line, col, err) => { logFe('error', `${msg} @ ${src}:${line}:${col} ${err?.stack ?? ''}`) }
   window.onunhandledrejection = e => logFe('error', e.reason?.stack ?? e.reason ?? 'unhandled rejection')
 }
+if (info.needs_login) {
+  // 沒有節點金鑰（新電腦）：轉到登入畫面，登入後自動建立節點並重新啟動
+  location.replace('login.html')
+  await new Promise(() => {})
+}
 if (info.error) {
   document.body.textContent = `ASN 無法啟動：${info.error}`
   throw new Error(info.error)
@@ -698,7 +703,7 @@ const app = createApp({
       try { await invoke('voice_cfg_set', { cfg: next }); Object.assign(voiceCfg, next); voiceMsg.value = ''; void refreshVoice() }
       catch (e) { voiceMsg.value = e.message }
     }
-    // 設定頁「帳號管理」（檔案操作全在 Rust 端）：Claude 帳號庫、Codex 目前登入、遠端設備的 Claude 帳號切換
+    // 設定頁「帳號」（檔案操作全在 Rust 端）：Claude 帳號庫、Codex 目前登入、遠端設備的 Claude 帳號切換
     const accounts = createAccountsUi({
       invoke, reactive,
       devices: () => launchDeviceRowsList.value.filter(d => d.key !== info.node && asnMap.value[d.key]),

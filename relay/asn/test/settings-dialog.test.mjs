@@ -13,7 +13,7 @@ const read = f => fs.readFileSync(new URL(`../ui/${f}`, import.meta.url), 'utf8'
 
 test('分類：十類、順序與鍵固定、標題與圖示都有、鍵不重複', () => {
   assert.deepEqual(SETTING_KEYS, ['me', 'accounts', 'look', 'tabs', 'sound', 'voice', 'window', 'launch', 'update', 'about'])
-  assert.deepEqual(SETTING_CATS.map(c => c.title), ['個人', '帳號管理', '外觀', '分頁與分組', '音效', '語音', '視窗與系統匣', '啟動設定', '更新', '關於'])
+  assert.deepEqual(SETTING_CATS.map(c => c.title), ['個人', '帳號', '外觀', '分頁與分組', '音效', '語音', '視窗與系統匣', '啟動設定', '更新', '關於'])
   assert.equal(new Set(SETTING_KEYS).size, SETTING_CATS.length)
   for (const c of SETTING_CATS) assert.ok(/^M[0-9A-Za-z .,-]+$/.test(c.icon), `${c.key} 圖示`)
   assert.equal(catByKey('voice').title, '語音')
@@ -83,7 +83,7 @@ const render = async (catKey, st = fullState()) => {
 test('設定表單：每一類都轉得出來，各類原本的項目都在', async () => {
   const want = {
     me: ['大頭貼', '選擇圖片', '移除，改回自動產生', '目前用的是自動產生的大頭貼。'],
-    accounts: ['Claude 帳號', '使用中', '加入目前登入的帳號', '切換', '刪除', 'a@b.c', 'OpenAI（Codex）帳號', 'x@openai.test · plus', 'Gemini', '尚未支援', '遠端設備', 'w@b.c', '信任我自己的設備'],
+    accounts: ['登入狀態', '尚未登入', '用 Google 登入', '用 GitHub 登入', 'Claude 帳號', '使用中', '加入目前登入的帳號', '切換', '刪除', 'a@b.c', 'OpenAI（Codex）帳號', 'x@openai.test · plus', 'Gemini', '尚未支援', '遠端設備', 'w@b.c', '信任我自己的設備'],
     look: ['視窗外框', '視窗模式', '頭像模式', '工具列位置', '文字底色'],
     tabs: ['分頁依', '分組依'],
     sound: ['音效'],

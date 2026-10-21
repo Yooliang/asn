@@ -2,6 +2,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { handleNodeRoomAction, type RoomDeps, syncNodeAuto } from "../_shared/rooms.ts";
 import { handleAgentInbox } from "../_shared/agent_inbox.ts";
+import { ACCOUNT_ACTIONS, type AccountDeps, cleanDisplayName, handleAccountAction } from "../_shared/account.ts";
 import { expectsReplyArgs } from "../_shared/expects_reply.ts";
 import { parseSelfName } from "../_shared/node_name.ts";
 import { parseAsnPresence } from "../_shared/asn_presence.ts";
@@ -89,6 +90,20 @@ const optStr = (v: unknown, n: number) => (typeof v === "string" && v ? v.slice(
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// 登入帳號的動作：用 Supabase 登入憑證（Authorization: Bearer）驗身分，不用節點金鑰（node_claim 另帶 x-relay-key 證明擁有）
+const accountDeps: AccountDeps = {
+  verifyJwt: async (token) => {
+    const { data, error } = await db.auth.getUser(token);
+    const u = data?.user;
+    if (error || !u || u.is_anonymous) return null;
+    const meta = (u.user_metadata ?? {}) as Record<string, unknown>;
+    return { id: u.id, email: u.email ?? null, name: cleanDisplayName(meta.full_name ?? meta.name ?? meta.user_name) };
+  },
+  rpc: async (fn, args) => await db.rpc(fn, args),
+  sha256Hex,
+  newSecrets: () => ({ key: b64u(32), bellTopic: "relay-bell-" + b64u(18) }),
+};
+
 Deno.serve(async (req) => {
   const url = new URL(req.url);
   const action = url.searchParams.get("action");
@@ -129,6 +144,14 @@ Deno.serve(async (req) => {
     if (data?.error === "bad_id_prefix") return json(403, { error: "bad_id_prefix", prefix: data.prefix });
     if (data?.error) return json(400, { error: data.error });
     return json(200, { id: data.id, key, bell_topic: data.bell_topic });
+  }
+
+  // 登入帳號的動作（在節點金鑰驗證之前：身分來自登入憑證，見 _shared/account.ts）
+  if (action && ACCOUNT_ACTIONS.has(action)) {
+    if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
+    const raw = await req.json().catch(() => null);
+    const r = await handleAccountAction(accountDeps, action, req.headers.get("authorization"), req.headers.get("x-relay-key"), raw);
+    return json(r.status, r.body);
   }
 
   const key = req.headers.get("x-relay-key");

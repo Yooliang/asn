@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agent Sync Network Messenger</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app" class="win" v-cloak>
+  <i class="rz" v-for="d in RESIZE_DIRS" :key="d" :class="'rz-' + d" @mousedown.left.prevent="resizeFrom(d)"></i>
+  <header class="titlebar" data-tauri-drag-region>
+    <span class="t-icon"></span><span class="t-text"><span class="brand">Agent Sync Network Messenger</span></span>
+    <span class="t-btns">
+      <button class="tb" @click="ctl('min')" aria-label="最小化" title="最小化"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="2" y="8" width="8" height="2" rx=".5" fill="currentColor"/></svg></button>
+      <button class="tb close" @click="quit" aria-label="關閉並結束" title="關閉"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.6 2.6l6.8 6.8M9.4 2.6l-6.8 6.8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+    </span>
+  </header>
+  <div class="pane login-pane">
+    <div class="login-card">
+      <h1 class="login-h">歡迎使用 ASN</h1>
+      <p class="login-sub">登入後，這台電腦會自動出現在你的名單裡。</p>
+      <button v-for="p in PROVIDERS" :key="p.key" class="aero-btn login-btn" type="button" :disabled="!canStart(phase)" @click="start(p.key)">{{ p.label }}</button>
+      <p class="login-note" v-if="note" role="status">{{ note }}</p>
+      <button class="aero-btn login-cancel" type="button" v-if="phase === 'waiting'" @click="cancel">取消</button>
+      <p class="login-err" v-if="phase === 'error'" role="alert">{{ error }}</p>
+    </div>
+  </div>
+</div>
+<script src="vendor/vue.global.prod.js"></script>
+<script type="module" src="login.js"></script>
+</body>
+</html>

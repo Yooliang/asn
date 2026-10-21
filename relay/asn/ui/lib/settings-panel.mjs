@@ -16,6 +16,7 @@ export const SETTING_OPS = [
 ]
 
 export const SettingsPanel = {
+  components: { LoginPanel },
   props: { st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
@@ -76,6 +77,7 @@ export const SettingsPanel = {
       </template>
       <template v-if="catKey === 'accounts'">
         <div class="acct-set">
+          <login-panel></login-panel>
           <section class="set-card" aria-label="Claude 帳號">
             <header class="vendor-h"><b>Claude 帳號</b><small>Anthropic</small></header>
             <ul class="acct-list" v-if="st.accounts.list.length">

@@ -21,8 +21,9 @@ supabase/
 
 | 表 | 用途 |
 |---|---|
-| `tenants` | 租戶（目前只有一個）；含序號與 `owner_user` |
-| `nodes` | 節點：代號、名稱、`key_hash`、`bell_topic`、種類、角色（owner／member）、`can_invite`、`can_roster`、狀態（active／left）、`last_seen_at`、頭像、所在設備名稱、**`owner_user`**（對應 `auth.users`，可為空＝尚未認領） |
+| `tenants` | 租戶（舊租戶序號 1＋每個登入帳號各一個，見 [AUTH.md](AUTH.md)）；含序號、`id_prefix` 與 `owner_user` |
+| `account_events` | 帳號動作稽核（建租戶、建節點、認領、換金鑰；不含金鑰） |
+| `nodes` | 節點：代號、名稱、`key_hash`、`bell_topic`、種類、角色（owner／member）、`can_invite`、`can_roster`、狀態（active／left）、`last_seen_at`、頭像、所在設備名稱、**`owner_user`**（對應 `auth.users`，可為空＝尚未認領）、`device_id`（登入建立的節點才有）、`created_via` |
 | `invites` | 一次性邀請碼（只存雜湊，15 分鐘失效） |
 | `register_attempts` | 註冊限流計數 |
 | `messages` | 一對一訊息：寄收節點與視窗、內文（≤ 20,000 字）、`reply_to`、`expects_reply`、`created_at／delivered_at／acked_at` |

@@ -1,6 +1,7 @@
 // 端到端截圖：起本機假 relay，用 `asn.exe --shot <資料夾>` 跑一次真的程式（名單＋一個對話＋一則提示），
 // 程式自己用螢幕擷取存 PNG 後結束。全程只連 127.0.0.1 的假後端，不碰真實 relay、不用真實金鑰。
 //   node scripts/shot.mjs <輸出資料夾> [exe 路徑]
+//   ASN_SHOT_NOKEY=1 node scripts/shot.mjs <輸出資料夾>   模擬沒有節點金鑰的新電腦，只截登入畫面（tabs-login.png）
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -43,7 +44,7 @@ export const demoRooms = [
 
 // me：預先寫進 asn-me.json 的設定（例如 { tabDim: 'engine', groupDim: 'device' }），截圖時用來切換維度
 // avatars：true＝示範大頭貼（本機這台 H 已上傳一張；另有不在名單上的設備 K 也上傳了一張，並寄來一封信）
-export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000, me = null, avatars = false, setup = null, acctRemote = {} } = {}) {
+export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000, me = null, avatars = false, setup = null, noKey = false, acctRemote = {} } = {}) {
   const all = avatars ? [...demoMembers, { id: 'K', name: '小凱的電腦', kind: 'other', agents: [] }] : demoMembers
   const members = all.map(m => (demoAsn[m.id] ? { ...m, asn: demoAsn[m.id] } : m))
   const relay = await startFakeRelay({ node: 'H', members, rooms: demoRooms, acctRemote, avatars: avatars ? { H: demoUploadUrl(), K: pngDataUrl(96, 96, (x, y) => (((x >> 4) + (y >> 4)) % 2 ? [70, 130, 200] : [250, 210, 90])) } : {} })
@@ -56,6 +57,8 @@ export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000, me
     ...process.env, IRORI_RELAY_URL: relay.url, IRORI_RELAY_ID: 'H', IRORI_RELAY_KEY: FAKE_KEY, IRORI_RELAY_ANON_KEY: '',
     USERPROFILE: path.join(tmp, 'home'), HOME: path.join(tmp, 'home'), IRORI_ASN_DATA: path.join(tmp, 'data'), WEBVIEW2_USER_DATA_FOLDER: path.join(tmp, 'wv2'),
   }
+  // noKey：模擬沒有節點金鑰的新電腦（只截登入畫面）；家目錄是暫存的空資料夾，這裡再把身分環境變數清掉，免得吃到使用者自己的
+  if (noKey) { delete env.IRORI_RELAY_ID; delete env.IRORI_RELAY_KEY }
   if (process.platform === 'linux') {
     env.WEBKIT_DISABLE_COMPOSITING_MODE = '1'
     env.WEBKIT_DISABLE_DMABUF_RENDERER = '1'
@@ -93,7 +96,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   // 第三個參數之後：exe 路徑；環境變數 ASN_SHOT_ME 可放 JSON 設定（如 {"tabDim":"engine","groupDim":"device"}）；
   // 整合模式是 {"winMode":"merged"}（欄位名是 winMode，不是 mode），再加 "shotNoChat":true 就不開任何對話、停在「開始」大幅廣告；
   // "shotAd":N 固定停在第 N 則廣告；"shotTab":"guide" 指定起始頁籤
-  const r = await runShot(out, process.argv[3] ?? defaultExe, { me: process.env.ASN_SHOT_ME ? JSON.parse(process.env.ASN_SHOT_ME) : null, avatars: process.env.ASN_SHOT_AVATARS === '1' })
+  const r = await runShot(out, process.argv[3] ?? defaultExe, { me: process.env.ASN_SHOT_ME ? JSON.parse(process.env.ASN_SHOT_ME) : null, avatars: process.env.ASN_SHOT_AVATARS === '1', noKey: process.env.ASN_SHOT_NOKEY === '1' })
   console.log(`exit=${r.code} files=${r.files.join(',')} sent=${r.relay.sent.length}`)
   if (r.log.trim()) console.log(r.log.trim())
   process.exit(r.code === 0 ? 0 : 1)

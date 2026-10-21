@@ -1,4 +1,4 @@
-// 設定頁「帳號管理」：前端只呼叫 Rust 指令、只顯示 email／方案，權杖不經過前端。
+// 設定頁「帳號」：前端只呼叫 Rust 指令、只顯示 email／方案，權杖不經過前端。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'

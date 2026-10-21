@@ -1,9 +1,11 @@
 //! ASN 即時通（Tauri 2）：金鑰、anon 金鑰、收發室 HTTP／WebSocket、心跳檔、設定與對話存檔都在 Rust 端；
 //! 前端（ui/）只拿得到「信件與名單」，拿不到任何金鑰。
 mod acct_remote;
+mod account;
 mod ads;
 mod agent_tools;
 mod attach;
+mod auth;
 mod avatar;
 mod bell;
 mod claude_accounts;
@@ -51,6 +53,8 @@ struct StartupInfo {
     window_name: String,
     old_names: Vec<String>,
     error: Option<String>,
+    /// 沒有節點金鑰（新電腦）：畫面要顯示登入
+    needs_login: bool,
     shot: bool,
     poll_ms: u64,
     roster_ms: u64,
@@ -88,6 +92,7 @@ fn startup_info(app: State<'_, App>) -> StartupInfo {
         window_name: app.relay.as_ref().map(|r| r.window_name()).unwrap_or_default(),
         old_names: app.relay.as_ref().map(|r| r.active_names().into_iter().skip(1).collect()).unwrap_or_default(),
         error: app.init_error.clone(),
+        needs_login: app.relay.is_none(),
         shot: app.shot.is_some(),
         poll_ms: env_ms("IRORI_ASN_POLL_MS", 120_000),
         roster_ms: env_ms("IRORI_ASN_ROSTER_MS", 60_000),
@@ -316,12 +321,12 @@ fn open_url(url: String) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-fn spawn_browser(url: &str) -> Result<(), String> {
+pub(crate) fn spawn_browser(url: &str) -> Result<(), String> {
     std::process::Command::new("explorer.exe").arg(url).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 #[cfg(not(windows))]
-fn spawn_browser(url: &str) -> Result<(), String> {
+pub(crate) fn spawn_browser(url: &str) -> Result<(), String> {
     std::process::Command::new("xdg-open").arg(url).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
@@ -501,7 +506,9 @@ pub fn run() {
 
     // --shot 只准連本機假後端（紅線：測試不碰真實 relay）
     if shot.is_some() {
-        let ok = base.as_ref().map(|(u, _)| u.starts_with("http://127.0.0.1") || u.starts_with("http://localhost")).unwrap_or(false);
+        // 看環境變數指的後台網址（沒有金鑰、模擬新電腦的截圖也要擋住真實後台）
+        let u = identity::base_url(std::env::var("IRORI_RELAY_URL").ok());
+        let ok = u.starts_with("http://127.0.0.1") || u.starts_with("http://localhost");
         if !ok {
             eprintln!("--shot 只能搭配指向本機假後端的 IRORI_RELAY_URL（http://127.0.0.1…）");
             std::process::exit(5);
@@ -528,6 +535,7 @@ pub fn run() {
     }
 
     let frame_data_dir = data_dir.clone();
+    let auth_state = auth::AuthState::new(auth::default_store(&data_dir));
     let state = App { relay: relay_obj.clone(), init_error, node: node.clone(), work_dir: work_dir.clone(), data_dir, shot };
     let anon_url = relay_obj.as_ref().zip(anon).and_then(|(r, a)| bell::ws_url(r.base(), &a));
 
@@ -540,6 +548,7 @@ pub fn run() {
         .manage(shot::ShotState::default())
         .manage(updater::Pending::default())
         .manage(SaveDir::default())
+        .manage(auth_state)
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
@@ -551,6 +560,7 @@ pub fn run() {
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
             wins::open_chat, wins::open_panel, wins::close_panels, wins::chat_visible, wins::close_chats, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,
+            account::auth_status, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_claim_this, account::auth_setup_device,
             tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_set, updater::update_check, updater::update_install,
         ])
         .setup(move |app| {
