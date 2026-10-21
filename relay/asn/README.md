@@ -42,12 +42,14 @@ npm run build        # 出 asn 二進位、bundle/deb/*.deb、bundle/appimage/*.
 
 - 節點、金鑰、`IRORI_RELAY_URL` 的判定與 `relay/machine/identity.mjs` 相同：`IRORI_RELAY_ID` → `~/.irori-relay/node` → 橋正在跑的 `machine-<ID>` → 唯一有金鑰檔的節點；金鑰讀 `IRORI_RELAY_KEY` 或 `~/.irori-relay/<節點>.key`；`IRORI_RELAY_ANON_KEY` 或 `~/.irori-relay/anon.key` 用來訂 Realtime 門鈴（沒有就只輪詢）。
 - **金鑰只存在 Rust 的記憶體**：HTTP（reqwest）與 WebSocket 都在 Rust 端做，前端拿不到金鑰，也不寫 log。
-- 暱稱＝視窗名＝對外寄信的 `from_agent`／收信的 agent 名：只有名單最上面那一格，預設 `<節點>-ASN`，直接改就是改對外名字（Rust 端驗證：去頭尾空白、1～40 字、不能結尾是「收發室」、不含控制字元；不合法就還原並提示），存在資料夾的 `settings.json`。介面其他地方不顯示節點代號或視窗名（設備名只在左側頁籤）。
+- 暱稱＝視窗名＝對外寄信的 `from_agent`／收信的 agent 名：只有名單最上面那一格，預設 `<節點>-ASN`（登入時系統自動產生代號的新電腦改用 `<電腦名稱>-ASN`，畫面不會出現代號），直接改就是改對外名字（Rust 端驗證：去頭尾空白、1～40 字、不能結尾是「收發室」、不含控制字元；不合法就還原並提示），存在資料夾的 `settings.json`。介面其他地方不顯示節點代號或視窗名（設備名只在左側頁籤）。
 - 改名後舊名繼續收信：`settings.json` 的 `old_names` 記改名前用過的名字（最多 5 個、保留 7 天），每個舊名照樣用 `inbox&agent=<舊名>` 收信（ack 對同一個名字）並各寫一份心跳；過期就停。用 `inbox&agent=<視窗名>` 只收寄給這個名字的信，收到存檔後才 `ack&agent=`。
 - 心跳：每 30 秒寫 `~/.irori-relay/machine-<節點>/self-recv/<視窗名>.json`，內容 `{"pid","name","t"}`，格式、路徑、原子寫入都與 `relay/machine/self-recv.mjs` 相同，pid 是本程式。機器橋看到 90 秒內且 pid 活著的心跳，就不再轉交這個視窗的信。結束時清掉自己的心跳。同一個視窗名已有另一個 ASN 在跑就拒絕啟動。
 - 寄信：`POST ?action=send`，`expects_reply` 一定明說（一般訊息 `true`、震動 `false`；震動由前端帶 `nudge:true`，內文由 Rust 組），回覆某封來信時帶 `reply_to`。`from_agent` 由 Rust 端強制設成視窗名，前端不能自填。
 - 好友名單：`list` 的 members 各節點視窗，一視窗一列（名字＝視窗名，個人訊息＝資料夾（cwd_label，沒有就空；設備由左側頁籤表示））；結尾「收發室」的不列；每 60 秒更新，有人新上線會彈「已經登入」。狀態：busy／working／running＝忙碌、其餘＝線上、不在名單＝離線（有對話的好友才會留在離線）。
 - 震動：寄兩行內文——「（<視窗名> 傳送了一個震動）」加一行請對方回一個震動的提示（`NUDGE_HINT`，`ui/lib/text.mjs` 與 `relay.rs` 同一句）——`expects_reply:false` 的信（前端只帶 `nudge:true`，內文與視窗名由 Rust 端組，前端不能自填）；收到時，第一行是這一句、其餘是空的或就是那行提示（新格式；AI 照提示回的震動只有第一行），或內文含舊版的 `[震動]`（相容還沒升級的 ASN），就抖動該對話視窗（沒開就未讀＋提示），標記不顯示在對話裡。
+
+- 內建收發室橋（全 Rust，預設關）：設定「視窗」分類的「讓 ASN 負責這台的收發室」打開後，ASN 自己做收發室橋的工作（名單回報＝上線、收信、轉交給本機 Claude 視窗、回覆寄回）；舊的 Node 橋在跑時不啟動。設計與分段計畫見 [docs/design/BRIDGE-RUST.md](../../docs/design/BRIDGE-RUST.md)。
 
 ## 介面
 
