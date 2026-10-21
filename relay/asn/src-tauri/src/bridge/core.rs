@@ -1,8 +1,11 @@
-//! 收發室橋的核心狀態機：對應 relay/machine/bridge.mjs（只做 Claude 引擎、不含群組與遠端開視窗）。
+//! 收發室橋的核心狀態機：對應 relay/machine/bridge.mjs（只做 Claude 引擎；含信件、群組轉送、遠端開視窗的接口）。
 //! 所有時間都由呼叫端傳入（毫秒），測試可以不用真的等待逾時。核心一次只被一個任務使用（見 mod.rs 的 run 迴圈）。
 //! 對後端只透過 [`Relay`]（HTTP），對 worker 只透過 [`WorkerSink`]，所以測試可用本機假後端與假 worker。
+use super::attach;
+use super::launcher::{Launched, Launcher};
 use super::mail::{self, fallback_note, mail_head, parse_send_head, strip_reply_head, wants_reply, Mail, SendHead};
-use super::pending::{self, LastReq, Pending, State};
+use super::pending::{self, LastReq, Pending, RoomRef, State};
+use super::rooms::{self, Cursors};
 use super::roster::{self, Window};
 use super::worker::{forward_text, Parser, WorkerEvent, WorkerLine, WorkerSink};
 use crate::relay::Relay;
@@ -42,6 +45,10 @@ pub struct Config {
     pub extra_env: Vec<(String, String)>,
     /// 名單裡也列出 ASN 自己的視窗名
     pub report_asn_window: bool,
+    /// 附件下載指令前綴（不含 --id）。第二段暫時沿用 `node "<attach.mjs>"`；第四段換成 ASN 自己的命令列
+    pub attach_cmd: Option<String>,
+    /// 群組「要看更多」的指令前綴（room.mjs）
+    pub room_cmd: Option<String>,
 }
 
 impl Config {
@@ -71,6 +78,8 @@ impl Config {
             model: std::env::var("IRORI_MAILBOX_MODEL").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "haiku".into()),
             extra_env: vec![],
             report_asn_window: true,
+            attach_cmd: attach::attach_cmd_from_env(),
+            room_cmd: attach::room_cmd_from_env(),
         }
     }
 }
@@ -157,6 +166,18 @@ pub struct Core {
     pruned_at: u64,
     fail_step: usize,
     pub retry_at: Option<u64>,
+    cursors: Cursors,
+    cursor_warned: bool,
+    launcher: Option<Arc<Launcher>>,
+}
+
+/// JSON 數字（整數、浮點或數字字串）→ u64；不是數字回 0
+fn json_u64(v: Option<&Value>) -> u64 {
+    match v {
+        Some(Value::Number(n)) => n.as_u64().or_else(|| n.as_f64().filter(|f| *f >= 0.0).map(|f| f as u64)).unwrap_or(0),
+        Some(Value::String(s)) => s.trim().parse::<u64>().unwrap_or(0),
+        _ => 0,
+    }
 }
 
 fn new_uuid() -> String {
@@ -176,13 +197,23 @@ pub fn sent_mark_name(from_window: &str, to_node: &str, to_agent: &str) -> Strin
 
 impl Core {
     pub fn new(cfg: Config, relay: Arc<Relay>, sink: Arc<dyn WorkerSink>, nonce: &str, log: Arc<BridgeLog>, alive: Arc<dyn Fn(u32) -> bool + Send + Sync>, now: u64) -> Core {
+        let cursors = Cursors::load(&cfg.work_dir);
         let mut c = Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
             last_requester: BTreeMap::new(), noticed: HashMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), unrouted: HashSet::new(),
-            last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None,
+            last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, cursor_warned: false, launcher: None,
         };
         c.restore();
         c
+    }
+
+    pub fn sink(&self) -> Arc<dyn WorkerSink> {
+        self.sink.clone()
+    }
+
+    /// 接上遠端開視窗（第三段）。沒接＝名單回報 launcher 送 null、不處理 launch_pending
+    pub fn set_launcher(&mut self, l: Arc<Launcher>) {
+        self.launcher = Some(l);
     }
 
     fn pending_file(&self) -> PathBuf {
@@ -309,7 +340,12 @@ impl Core {
         self.roster = list;
         self.roster_ok = true;
         let asn = self.cfg.report_asn_window.then(|| self.relay.window_name());
-        match self.relay.api("roster", Some(roster::roster_body(&self.roster, asn.as_deref()))).await {
+        // 摘要要讀設定檔、偵測 CLI（會開外部程序），放到背景執行緒，不卡住收信的主迴圈
+        let launcher = match self.launcher.clone() {
+            Some(l) => tokio::task::spawn_blocking(move || l.summary()).await.unwrap_or(Value::Null),
+            None => Value::Null,
+        };
+        match self.relay.api("roster", Some(roster::roster_body(&self.roster, asn.as_deref(), launcher))).await {
             Ok(_) => self.roster_warned = false,
             Err(e) => {
                 if !self.roster_warned {
@@ -325,7 +361,13 @@ impl Core {
     pub async fn pull(&mut self, why: &str, now: u64) {
         self.now = now;
         self.retry_at = None;
-        match self.pull_once().await {
+        let r = self.pull_once().await;
+        // 遠端開視窗與群組跟信件各走各的：失敗只記 log，不影響信件的退避重試
+        if let Some(l) = self.launcher.clone() {
+            l.pull().await;
+        }
+        self.pull_rooms(now).await;
+        match r {
             Ok(_) => self.fail_step = 0,
             Err(e) => {
                 self.log.line(&format!("pull failed ({why}): {e}"));
@@ -358,6 +400,17 @@ impl Core {
         Ok(())
     }
 
+    /// 預設收件視窗不在線時代收的視窗：最近有活動的互動式 session
+    fn fallback_window(&self) -> Option<Window> {
+        let mut best: Option<&Window> = None;
+        for w in &self.roster {
+            if best.map(|b| w.updated_at > b.updated_at).unwrap_or(true) {
+                best = Some(w);
+            }
+        }
+        best.cloned()
+    }
+
     fn deliver(&mut self, id: &str, to: &str, text: &str) -> Result<(), String> {
         self.parser.register(id, to);
         self.sink.say(forward_text(&self.parser.nonce, id, to, text))
@@ -384,13 +437,7 @@ impl Core {
         let mut note = String::new();
         if m.to_agent.is_none() && !self.online_names().contains(self.cfg.default_agent.as_str()) {
             // 預設收件視窗不在線：改交給最近有活動的互動式 session，都沒有才留在 inbox
-            let mut best: Option<&Window> = None;
-            for w in &self.roster {
-                if best.map(|b| w.updated_at > b.updated_at).unwrap_or(true) {
-                    best = Some(w);
-                }
-            }
-            let Some(fb) = best else {
+            let Some(fb) = self.fallback_window() else {
                 if self.unrouted.insert(m.id.clone()) {
                     self.log.line(&format!("id={} has no to_agent and {} is offline and no interactive session online: left in inbox", m.id, self.cfg.default_agent));
                 }
@@ -419,8 +466,9 @@ impl Core {
             self.last_requester.insert(target.clone(), LastReq { from_node: m.from_node.clone(), from_agent: from_agent.clone(), mail_id: m.id.clone(), t: self.now });
         }
         self.persist();
-        let attach = if m.attachments > 0 { format!("\n（這封信帶有 {} 個附件；ASN 內建橋這個版本還不轉交附件，請到 ASN 查看）", m.attachments) } else { String::new() };
-        let text = format!("{}\n{}{}{}", mail_head(&m, "claude"), if note.is_empty() { String::new() } else { format!("{note}\n") }, m.body, attach);
+        // 照片／檔案：內文後面多一行「〔照片〕檔名＋下載指令」，和內文一起在外部資料區塊內
+        let body = attach::notes_for(&m.body, &m.attachments, self.cfg.attach_cmd.as_deref());
+        let text = format!("{}\n{}{}", mail_head(&m, "claude"), if note.is_empty() { String::new() } else { format!("{note}\n") }, body);
         match self.deliver(&m.id, &target, &text) {
             Ok(_) => self.log.line(&format!("handed id={} from={}/{} to={target}", m.id, m.from_node, from_agent)),
             Err(e) => {
@@ -463,6 +511,12 @@ impl Core {
         self.pending[i].state = State::Waiting;
         self.persist();
         let (target, t0, no_reply) = (self.pending[i].target.clone(), self.pending[i].t0, self.pending[i].no_reply);
+        if let Some(r) = self.pending[i].room.clone() {
+            // 群組訊息：只記 log、開始等回覆；不 ack（群組沒有信箱）
+            self.log.line(&format!("forwarded room={} #{} -> {target}", r.id, r.seq));
+            self.pending[i].t = self.now;
+            return;
+        }
         if no_reply {
             self.remove(id);
             self.log.line(&format!("forwarded id={id} -> {target} (no-reply mail, no timer)"));
@@ -482,6 +536,10 @@ impl Core {
         self.pending[i].state = State::Done;
         let (o, target, from_agent) = (Origin::of(&self.pending[i]), self.pending[i].target.clone(), self.pending[i].from_agent.clone());
         self.log.line(&format!("forward failed id={id}: {reason}"));
+        if self.pending[i].room.is_some() {
+            self.remove(id); // 群組訊息：只記 log，不回群組
+            return;
+        }
         if Self::is_mailbox_sender(&from_agent) {
             self.log.line(&format!("forward failure notice to mailbox sender {}/{} not sent id={id}", o.from_node, from_agent));
         } else {
@@ -597,14 +655,203 @@ impl Core {
         let late = self.pending[i].state == State::Notified;
         self.pending[i].replied = true;
         let (o, t0, target) = (Origin::of(&self.pending[i]), self.pending[i].t0, self.pending[i].target.clone());
+        let room = self.pending[i].room.clone();
         if late {
             self.remove(&o.id); // 遲到的回覆寄回後就清掉
         } else {
             self.persist();
         }
+        if let Some(r) = room {
+            if rooms::is_no_reply(&text) {
+                self.log.line(&format!("room reply from {from} room={} #{} marked no-reply: not posted", r.id, r.seq));
+                return;
+            }
+            // 節點本身是成員時以節點發言；視窗是成員時以「節點~視窗」發言
+            let ok = self.post_room(&r, &text).await;
+            self.log.line(&format!("room reply from {from} -> room={} #{} posted={ok}", r.id, r.seq));
+            return;
+        }
         let body = if late { format!("（遲到的回覆：{target} 在收發室寄出「沒有回覆」通知之後才回）\n{text}") } else { text.clone() };
         let ok = self.send_back(&o, &body, Some(from), expects).await;
         self.log.line(&format!("{}reply from {from} -> {} id={} sent={ok} ({}ms total)", if late { "late " } else { "" }, o.from_node, o.id, self.now.saturating_sub(t0)));
+    }
+
+    // ---- 群組 ----
+    fn save_cursor(&mut self, key: &str, v: u64) {
+        if let Err(e) = self.cursors.set(key, v) {
+            if !self.cursor_warned {
+                self.cursor_warned = true;
+                self.log.line(&format!("rooms cursor save failed: {e}"));
+            }
+        }
+    }
+
+    /// 拉一次群組：room_list → 每個 mine 項目用本地游標 room_read(since) → 只處理後端標 for_me=true 的訊息 → 推進游標。
+    /// 游標不用 mark、不動後端已讀位置；轉交失敗（回 false）就停在那則前面，下次再來。
+    pub async fn pull_rooms(&mut self, now: u64) {
+        self.now = now;
+        let list = match self.relay.api("room_list", None).await {
+            Ok(v) => v.get("rooms").and_then(Value::as_array).cloned().unwrap_or_default(),
+            Err(e) => {
+                self.log.line(&format!("room_list failed: {e}"));
+                return;
+            }
+        };
+        for room in list {
+            let Some(room_id) = room.get("id").and_then(Value::as_str).map(String::from) else { continue };
+            let last_seq = json_u64(room.get("last_seq"));
+            for mine in room.get("mine").and_then(Value::as_array).cloned().unwrap_or_default() {
+                let Some(member) = mine.get("member").and_then(Value::as_str).map(String::from) else { continue };
+                let ck = Cursors::key(&room_id, &member);
+                let mut cur = match self.cursors.get(&ck) {
+                    Some(c) => c,
+                    None => {
+                        // 第一次看到：從已讀位置起算（沒有就從最新起算，不補播舊訊息）
+                        let c = Some(json_u64(mine.get("read_seq"))).filter(|n| *n > 0).or(Some(last_seq).filter(|n| *n > 0)).unwrap_or(0);
+                        self.save_cursor(&ck, c);
+                        c
+                    }
+                };
+                if last_seq <= cur {
+                    continue;
+                }
+                let window = rooms::member_window(&member);
+                let as_agent = if window.is_empty() { String::new() } else { format!("&as_agent={}", crate::relay::encode_component(&window)) };
+                let res = match self.relay.api(&format!("room_read&room={}{as_agent}&since={cur}&limit=100", crate::relay::encode_component(&room_id)), None).await {
+                    Ok(r) => r,
+                    Err(e) => {
+                        self.log.line(&format!("room_read failed room={room_id} member={member}: {e}"));
+                        continue;
+                    }
+                };
+                let mut msgs: Vec<Value> = res.get("messages").and_then(Value::as_array).cloned().unwrap_or_default();
+                msgs.sort_by_key(|m| json_u64(m.get("seq")));
+                let mut done = true;
+                for msg in msgs {
+                    let seq = json_u64(msg.get("seq"));
+                    if seq <= cur {
+                        continue;
+                    }
+                    if msg.get("for_me").and_then(Value::as_bool) == Some(true) && !self.handle_room_msg(&room, &member, &msg).await {
+                        done = false;
+                        break;
+                    }
+                    cur = seq;
+                    self.save_cursor(&ck, cur);
+                }
+                let tail = json_u64(res.get("last_seq"));
+                if done && tail > cur {
+                    self.save_cursor(&ck, tail);
+                }
+            }
+        }
+    }
+
+    /// 轉交一則群組訊息。true＝處理完（可推進游標）；false＝先留著，下次再來
+    async fn handle_room_msg(&mut self, room: &Value, member: &str, msg: &Value) -> bool {
+        if !self.roster_ok {
+            return false;
+        }
+        let room_id = room.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+        let room_name = room.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+        let seq = json_u64(msg.get("seq"));
+        let window = rooms::member_window(member);
+        let mut note = String::new();
+        let target;
+        if window.is_empty() {
+            if self.online_names().contains(self.cfg.default_agent.as_str()) {
+                target = self.cfg.default_agent.clone();
+            } else {
+                let Some(fb) = self.fallback_window() else {
+                    self.log.line(&format!("room={room_id} #{seq} default agent offline and no session online: kept (cursor not advanced)"));
+                    return false;
+                };
+                note = fallback_note(&self.cfg.default_agent, &fb.name);
+                target = fb.name;
+            }
+        } else {
+            if !self.forwardable(&window) {
+                self.log.line(&format!("room={room_id} #{seq} window {window} not forwardable: skipped"));
+                return true;
+            }
+            target = window.clone();
+        }
+        let id = rooms::room_uuid(&room_id, seq, member);
+        if self.idx(&id).is_some() {
+            return true;
+        }
+        let mut p = Pending::new(&id, "", "", &target, self.now, false);
+        p.room = Some(RoomRef { id: room_id.clone(), seq, window: window.clone() });
+        self.pending.push(p);
+        self.persist();
+        let prev = self.room_context(&room_id, member, seq).await; // 前面最近 5 則當上下文（只讀；失敗就不附）
+        let text = format!(
+            "{}{}\n{}",
+            rooms::room_text(&room_name, msg, self.cfg.attach_cmd.as_deref()),
+            if note.is_empty() { String::new() } else { format!("\n{note}") },
+            rooms::context_text(&room_id, &prev, self.cfg.room_cmd.as_deref())
+        );
+        match self.deliver(&id, &target, &text) {
+            Ok(_) => {
+                self.log.line(&format!("handed room={room_id} #{seq} member={member} to={target}"));
+                true
+            }
+            Err(e) => {
+                self.remove(&id);
+                self.log.line(&format!("cannot hand room={room_id} #{seq}: {e} (cursor not advanced)"));
+                false
+            }
+        }
+    }
+
+    /// 某則訊息前面最近 n 則（只讀：一定帶 since，不動後端已讀）；失敗回空陣列，不擋轉交
+    async fn room_context(&self, room_id: &str, member: &str, seq: u64) -> Vec<Value> {
+        let n = rooms::CONTEXT_COUNT as u64;
+        let window = rooms::member_window(member);
+        let as_agent = if window.is_empty() { String::new() } else { format!("&as_agent={}", crate::relay::encode_component(&window)) };
+        let since = seq.saturating_sub(1 + n);
+        match self.relay.api(&format!("room_read&room={}{as_agent}&since={since}&limit={n}", crate::relay::encode_component(room_id)), None).await {
+            Ok(res) => {
+                let mut v: Vec<Value> = res.get("messages").and_then(Value::as_array).cloned().unwrap_or_default().into_iter().filter(|m| json_u64(m.get("seq")) > since && json_u64(m.get("seq")) < seq).collect();
+                v.sort_by_key(|m| json_u64(m.get("seq")));
+                let skip = v.len().saturating_sub(n as usize);
+                v.split_off(skip)
+            }
+            Err(e) => {
+                self.log.line(&format!("room context failed room={room_id} #{seq}: {e}"));
+                vec![]
+            }
+        }
+    }
+
+    /// 回覆貼回群組（429 只記 log，不重試）
+    async fn post_room(&self, r: &RoomRef, body: &str) -> bool {
+        let mut b = json!({ "room": r.id, "body": body });
+        if !r.window.is_empty() {
+            b["from_agent"] = json!(r.window);
+        }
+        match self.relay.api("room_post", Some(b)).await {
+            Ok(_) => true,
+            Err(e) => {
+                if e.contains("HTTP 429") {
+                    self.log.line(&format!("room_post rate-limited room={} (dropped, no retry)", r.id));
+                } else {
+                    self.log.line(&format!("room_post failed room={}: {e}", r.id));
+                }
+                false
+            }
+        }
+    }
+
+    // ---- 遠端開視窗 ----
+    /// 新視窗出現後：馬上刷新名單（別台看得到、也才轉交得到），有第一句話就當成 owner 的來信經收發室送進去（id＝launch id）
+    pub async fn on_launched(&mut self, ev: Launched, now: u64) {
+        self.now = now;
+        self.refresh_roster(now).await;
+        if let Some(body) = ev.first_message {
+            let m = Mail { id: ev.id, from_node: ev.requested_by, from_agent: None, to_agent: Some(ev.name), body, trust: "owner".into(), expects_reply: None, attachments: vec![] };
+            self.handle_mail(m).await;
+        }
     }
 
     // ---- 逾時 ----
@@ -702,6 +949,11 @@ impl Core {
             let p = self.pending[i].clone();
             if p.state == State::Forwarding && now.saturating_sub(p.t0) > self.cfg.forward_timeout_ms {
                 self.pending[i].state = State::Done;
+                if p.room.is_some() {
+                    self.log.line(&format!("room forward timeout id={id} -> {}", p.target));
+                    self.remove(&id);
+                    continue;
+                }
                 // 收發室沒回報，但對方已經回了這封（或已寄信給原寄件人）＝其實有轉到：不寄「轉交逾時」
                 if self.replied_directly(&id) || self.sent_to_sender(&p) {
                     self.log.line(&format!("forward unconfirmed but {} already replied id={id}: no timeout notice", p.target));
@@ -717,7 +969,11 @@ impl Core {
                 self.ack_ids(&[id.clone()]).await;
                 self.remove(&id);
             } else if p.state == State::Waiting && now.saturating_sub(p.t) > self.cfg.reply_timeout_ms {
-                self.judge_timeout(&id).await;
+                if p.room.is_some() {
+                    self.remove(&id); // 群組訊息逾時不通知，直接清掉
+                } else {
+                    self.judge_timeout(&id).await;
+                }
             } else if p.state == State::Notified && now.saturating_sub(p.notified_at.unwrap_or(now)) > self.cfg.late_keep_ms {
                 self.remove(&id);
                 self.log.line(&format!("late-reply slot expired id={id}"));

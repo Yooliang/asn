@@ -1,6 +1,7 @@
 //! 開新夥伴對話框的「工作資料夾」候選：白名單＋自動建議（開著的 Claude 視窗、信任過的資料夾、最近用過）。
 //! 使用者從下拉或「瀏覽…」選了＝明確同意，才會加進本機啟動設定（launch-prefs.json）的 cwdAllow；
-//! 這份名單只管本機啟動，不會回報給收發室，遠端來的啟動仍只看 launcher.json。
+//! 本機啟動直接用這份候選。內建收發室橋（bridge/launcher.rs）在使用者於設定打開「允許我的其他設備替這台開新視窗」之後，
+//! 也把這份候選併進回報給別台設備的工作資料夾白名單；沒打開時遠端來的啟動仍只看 launcher.json。
 use super::config::{canonical_launch_cwd, LaunchConfig};
 use super::prefs::{launch_prefs_get_sync, launch_prefs_set_sync};
 use serde_json::{json, Value};

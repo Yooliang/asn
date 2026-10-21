@@ -13,7 +13,7 @@ import { OTHER_VENDORS, VENDOR_UNSUPPORTED, accountLine } from './claude-account
 export const SETTING_OPS = [
   'sound', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-add', 'acct-remote-node', 'acct-remote-switch', 'acct-trust',
-  'closeTo', 'autostart', 'bridge-enable', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'autoCheck', 'check-update', 'launch-max', 'launch-cwd', 'avatar-remove',
+  'closeTo', 'autostart', 'bridge-enable', 'bridge-launch', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'autoCheck', 'check-update', 'launch-max', 'launch-cwd', 'avatar-remove',
 ]
 
 export const SettingsPanel = {
@@ -148,6 +148,7 @@ export const SettingsPanel = {
         <label class="chk" v-if="st.autostart.supported"><input type="checkbox" :checked="st.autostart.on" :disabled="st.autostart.busy" @change="act('autostart', $event.target.checked)" aria-label="登入時自動啟動 ASN" /><span>登入時自動啟動 ASN</span></label>
         <section class="set-card" aria-label="收發室" v-if="st.bridge">
           <label class="chk"><input type="checkbox" :checked="st.bridge.enabled" :disabled="st.bridge.busy" @change="act('bridge-enable', $event.target.checked)" aria-label="讓 ASN 負責這台的收發室" /><span>讓 ASN 負責這台的收發室</span></label>
+          <label class="chk"><input type="checkbox" :checked="st.bridge.remoteLaunch" :disabled="st.bridge.busy" @change="act('bridge-launch', $event.target.checked)" aria-label="允許我的其他設備替這台開新視窗" /><span>允許我的其他設備替這台開新視窗</span></label>
           <small v-if="st.bridge.running">這台的收發室目前由 ASN 負責。</small>
           <small v-else-if="st.bridge.legacy">這台的收發室目前由舊版收發室橋負責。</small>
           <template v-if="st.bridge.legacy && st.bridge.takeoverAllowed">

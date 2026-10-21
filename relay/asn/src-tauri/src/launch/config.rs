@@ -47,13 +47,19 @@ pub struct LaunchConfig {
     pub max_per_hour: u32,
 }
 
+pub type Bootstrap = (HashMap<String, Profile>, Vec<PathBuf>, u32);
+
 pub fn load_launch_config() -> Result<LaunchConfig, String> {
-    let path = launcher_config_path();
-    let bootstrap = bootstrap_config();
-    let file_text = std::fs::read_to_string(&path).ok();
+    load_launch_config_from(&launcher_config_path(), bootstrap_config())
+}
+
+/// 讀指定的 launcher.json，並與 bootstrap（依 PATH 偵測的 CLI 自動 profile）合併；手寫覆蓋同 id 的自動項。
+/// 內建橋的遠端開視窗用它：沒有明確同意時 bootstrap 傳 None，只認本機 launcher.json。
+pub fn load_launch_config_from(path: &Path, bootstrap: Option<Bootstrap>) -> Result<LaunchConfig, String> {
+    let file_text = std::fs::read_to_string(path).ok();
     let j: Value = file_text
         .as_ref()
-        .map(|t| serde_json::from_str(t).map_err(|e| format!("launcher.json 不是合法 JSON：{e}")))
+        .map(|t| serde_json::from_str(t.trim_start_matches('\u{feff}')).map_err(|e| format!("launcher.json 不是合法 JSON：{e}")))
         .transpose()?
         .unwrap_or(Value::Null);
 

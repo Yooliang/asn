@@ -48,7 +48,8 @@ pub struct Mail {
     pub body: String,
     pub trust: String,
     pub expects_reply: Option<bool>,
-    pub attachments: usize,
+    /// 清理過的附件清單（縮圖丟掉、編號必須是 uuid、最多 4 筆）
+    pub attachments: Vec<super::attach::Attachment>,
 }
 
 impl Mail {
@@ -62,7 +63,7 @@ impl Mail {
             body: s("body").unwrap_or_default(),
             trust: s("trust").unwrap_or_else(|| "member".into()),
             expects_reply: v.get("expects_reply").and_then(to_reply_flag),
-            attachments: v.get("attachments").and_then(Value::as_array).map(|a| a.len()).unwrap_or(0),
+            attachments: super::attach::normalize(v.get("attachments")),
         })
     }
 }

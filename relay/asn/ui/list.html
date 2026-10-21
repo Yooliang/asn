@@ -241,7 +241,7 @@
       <h3 id="partner-dlg-title">開新夥伴</h3>
       <p class="partner-node" v-if="partnerDlg.node !== selfNode">設備：{{ partnerDlg.deviceLabel }}</p>
       <div class="partner-models" role="radiogroup" aria-label="模型">
-        <button v-for="m in partnerModels" :key="m.id" type="button" class="pmodel" :class="{ on: partnerDlg.profile === m.profileId, off: !m.installed }" :disabled="!m.installed" :title="m.installed ? m.modeLabel : m.installHint" @click="pickPartnerModel(m)">
+        <button v-for="m in dlgModels" :key="m.id" type="button" class="pmodel" :class="{ on: partnerDlg.profile === m.profileId, off: !m.installed }" :disabled="!m.installed" :title="m.installed ? m.modeLabel : m.installHint" @click="pickPartnerModel(m)">
           <span class="pmodel-ic" :data-m="m.id"></span>
           <span class="pmodel-lb">{{ m.label }}</span>
         </button>

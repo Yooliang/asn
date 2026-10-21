@@ -24,6 +24,14 @@ impl State {
     }
 }
 
+/// 群組訊息的轉交資訊：回覆要貼回哪個群組（window＝以視窗身分發言；空字串＝以節點本身）
+#[derive(Clone, Debug, PartialEq)]
+pub struct RoomRef {
+    pub id: String,
+    pub seq: u64,
+    pub window: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct Pending {
     pub id: String,
@@ -39,13 +47,15 @@ pub struct Pending {
     /// 逾時通知被延後（對方忙碌）；不存檔，重啟後重新判斷
     pub deferred: bool,
     pub idle_since: u64,
+    /// 群組訊息（沒有就是一般來信）
+    pub room: Option<RoomRef>,
 }
 
 impl Pending {
     pub fn new(id: &str, from_node: &str, from_agent: &str, target: &str, now: u64, no_reply: bool) -> Pending {
         Pending {
             id: id.into(), from_node: from_node.into(), from_agent: from_agent.into(), target: target.into(),
-            state: State::Forwarding, t0: now, t: now, no_reply, replied: false, notified_at: None, deferred: false, idle_since: 0,
+            state: State::Forwarding, t0: now, t: now, no_reply, replied: false, notified_at: None, deferred: false, idle_since: 0, room: None,
         }
     }
 }
@@ -62,7 +72,8 @@ pub fn to_record(p: &Pending) -> Value {
     json!({
         "id": p.id, "from_node": p.from_node, "from_agent": p.from_agent, "target": p.target,
         "state": p.state.name(), "t0": p.t0, "t": p.t, "noReply": p.no_reply, "replied": p.replied,
-        "notifiedAt": p.notified_at, "room": null,
+        "notifiedAt": p.notified_at,
+        "room": p.room.as_ref().map(|r| json!({ "id": r.id, "seq": r.seq, "window": if r.window.is_empty() { Value::Null } else { json!(r.window) } })),
     })
 }
 
@@ -94,14 +105,15 @@ fn from_record(r: &Value) -> Option<Pending> {
     if state == State::Notified && notified_at.is_none() {
         return None;
     }
-    // 群組訊息（room）本段不處理：略過，留給下一段（群組轉送）
-    if r.get("room").map(|x| !x.is_null()).unwrap_or(false) {
-        return None;
-    }
+    let room = r.get("room").filter(|x| x.is_object()).and_then(|x| {
+        let id = x.get("id")?.as_str()?;
+        let seq = num(x.get("seq")?)?;
+        Some(RoomRef { id: id.into(), seq, window: x.get("window").and_then(Value::as_str).unwrap_or("").into() })
+    });
     Some(Pending {
         id: id.into(), from_node: s("from_node").unwrap_or("").into(), from_agent: s("from_agent").unwrap_or("").into(), target: target.into(),
         state, t0, t, no_reply: r.get("noReply").and_then(Value::as_bool).unwrap_or(false), replied: r.get("replied").and_then(Value::as_bool).unwrap_or(false),
-        notified_at: if state == State::Notified { notified_at } else { None }, deferred: false, idle_since: 0,
+        notified_at: if state == State::Notified { notified_at } else { None }, deferred: false, idle_since: 0, room,
     })
 }
 
@@ -206,14 +218,32 @@ mod tests {
     }
 
     #[test]
+    fn 群組項目存檔再載回_視窗名與節點本身都對得上() {
+        let mut a = p("room-a", State::Waiting, 10);
+        a.room = Some(RoomRef { id: "R1".into(), seq: 4, window: "T-視窗甲".into() });
+        let mut b = p("room-b", State::Waiting, 10);
+        b.room = Some(RoomRef { id: "R1".into(), seq: 5, window: String::new() });
+        let snap = snapshot(&[a, b], &BTreeMap::new());
+        assert_eq!(snap["pending"][0]["room"], json!({"id": "R1", "seq": 4, "window": "T-視窗甲"}));
+        assert_eq!(snap["pending"][1]["room"]["window"], Value::Null, "與 Node 橋相同：節點本身存 null");
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("pending.json");
+        save_atomic(&f, &snap).unwrap();
+        let l = load_state(&f, 100, 1000);
+        assert_eq!(l.pending[0].room.as_ref().unwrap().window, "T-視窗甲");
+        assert_eq!(l.pending[1].room, Some(RoomRef { id: "R1".into(), seq: 5, window: String::new() }));
+    }
+
+    #[test]
     fn 過期_欄位怪異_損毀檔案都安全忽略() {
         let d = tempfile::tempdir().unwrap();
         let f = d.path().join("pending.json");
         std::fs::write(&f, r#"{"version":1,"pending":[{"id":"old","target":"x","state":"waiting","t0":1,"t":1},{"id":"bad","state":"waiting"},{"id":"n","target":"x","state":"notified","t0":5,"t":5},{"id":"room1","target":"x","state":"waiting","t0":900,"t":900,"room":{"id":"r","seq":1}}],"lastRequester":{"x":{"from_node":"W","mail_id":"m","t":1},"y":{"from_node":"W","mail_id":"m","t":950}}}"#).unwrap();
         let l = load_state(&f, 1000, 500);
-        assert_eq!(l.pending.len(), 0, "過期的、欄位不全的、notified 沒有 notifiedAt 的、群組的都不載入");
+        assert_eq!(l.pending.len(), 1, "過期的、欄位不全的、notified 沒有 notifiedAt 的都不載入");
+        assert_eq!(l.pending[0].room, Some(RoomRef { id: "r".into(), seq: 1, window: String::new() }), "群組項目載回來（第二段）");
         assert_eq!(l.last.keys().collect::<Vec<_>>(), vec!["y"]);
-        assert_eq!(l.dropped, 5);
+        assert_eq!(l.dropped, 4);
         std::fs::write(&f, "{壞掉").unwrap();
         assert!(load_state(&f, 1, 1).error.unwrap().contains("損毀"));
         std::fs::write(&f, "[]").unwrap();

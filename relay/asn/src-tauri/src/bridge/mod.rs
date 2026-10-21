@@ -1,12 +1,16 @@
 //! ASN 內建收發室橋（全 Rust，只做 Claude 引擎）。設計見 docs/design/BRIDGE-RUST.md。
 //! 預設關閉：設定「讓 ASN 負責這台的收發室」打開才啟動；關閉時 ASN 的行為與以前完全一樣。
 //! 舊 Node 橋在跑（bridge.pid 的 pid 活著）時內建橋不啟動，設定頁顯示由舊版負責。
+pub mod attach;
 pub mod core;
 pub mod handoff;
+pub mod launcher;
 pub mod lock;
 pub mod mail;
+pub mod orphans;
 pub mod pending;
 pub mod roster;
+pub mod rooms;
 pub mod worker;
 
 #[cfg(test)]
@@ -14,6 +18,7 @@ mod tests;
 
 use crate::relay::Relay;
 use core::{BridgeLog, Config, Core};
+use launcher::{LaunchEnv, Launched, Launcher};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -29,6 +34,8 @@ pub struct BridgeSettings {
     pub enabled: bool,
     /// 允許「改由 ASN 負責」按鈕停掉舊版收發室橋（預設關，這一版先不開放）
     pub allow_takeover: bool,
+    /// 允許我的其他設備替這台開新的 Claude 視窗（預設關）。本機有 launcher.json 時它自己就是同意，不看這個開關
+    pub allow_remote_launch: bool,
 }
 
 pub fn settings_path(data_dir: &Path) -> PathBuf {
@@ -37,10 +44,11 @@ pub fn settings_path(data_dir: &Path) -> PathBuf {
 pub fn read_settings(data_dir: &Path) -> BridgeSettings {
     let Ok(text) = std::fs::read_to_string(settings_path(data_dir)) else { return BridgeSettings::default() };
     let Ok(v) = serde_json::from_str::<Value>(&text) else { return BridgeSettings::default() };
-    BridgeSettings { enabled: v.get("enabled").and_then(Value::as_bool).unwrap_or(false), allow_takeover: v.get("allow_takeover").and_then(Value::as_bool).unwrap_or(false) }
+    let flag = |k: &str| v.get(k).and_then(Value::as_bool).unwrap_or(false);
+    BridgeSettings { enabled: flag("enabled"), allow_takeover: flag("allow_takeover"), allow_remote_launch: flag("allow_remote_launch") }
 }
 pub fn write_settings(data_dir: &Path, s: BridgeSettings) -> Result<(), String> {
-    crate::write_atomic(&settings_path(data_dir), &json!({ "enabled": s.enabled, "allow_takeover": s.allow_takeover }).to_string()).map_err(|e| e.to_string())
+    crate::write_atomic(&settings_path(data_dir), &json!({ "enabled": s.enabled, "allow_takeover": s.allow_takeover, "allow_remote_launch": s.allow_remote_launch }).to_string()).map_err(|e| e.to_string())
 }
 
 // ---- 執行 --------------------------------------------------------------------------------------
@@ -74,13 +82,23 @@ pub enum StartError {
     Other(String),
 }
 
-/// 啟動內建橋（要在 tokio 執行環境裡呼叫）。anon_url＝門鈴的 WebSocket 網址（沒有就只剩輪詢）
+/// 啟動內建橋（要在 tokio 執行環境裡呼叫）。anon_url＝門鈴的 WebSocket 網址（沒有就只剩輪詢）。不接遠端開視窗
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn start(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>) -> Result<Running, StartError> {
+    start_with(cfg, relay, anon_url, None)
+}
+
+/// 同 [`start`]，launch_env 有值就接上遠端開視窗（第三段）
+pub fn start_with(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>, launch_env: Option<Arc<dyn LaunchEnv>>) -> Result<Running, StartError> {
     let lock = lock::BridgeLock::acquire(&cfg.work_dir, std::process::id(), crate::heartbeat::pid_alive).map_err(|e| match e {
         lock::LockError::HeldBy(p) => StartError::HeldBy(p),
         lock::LockError::Io(m) => StartError::Other(format!("拿不到收信鎖：{m}")),
     })?;
     let log = Arc::new(BridgeLog::new(Some(cfg.work_dir.join("bridge.log"))));
+    // 上一個橋（被硬砍的 ASN）留下的收發室 worker 先收掉，免得兩組同時收信；然後把自己的 pid 記進 bridge.last
+    for l in orphans::cleanup_and_mark(&cfg.work_dir, std::process::id(), orphans::process_table, orphans::kill_tree) {
+        log.line(&l);
+    }
     let nonce = worker::new_nonce();
     let spec = WorkerSpec {
         bin: cfg.claude_bin.clone(),
@@ -98,9 +116,20 @@ pub fn start(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>) -> Result
     let alive: Arc<dyn Fn(u32) -> bool + Send + Sync> = Arc::new(crate::heartbeat::pid_alive);
     let wake = Arc::new(Notify::new());
     let shutdown = Arc::new(Notify::new());
-    let core = Core::new(cfg.clone(), relay.clone(), sink, &nonce, log.clone(), alive, crate::heartbeat::now_ms());
+    let mut core = Core::new(cfg.clone(), relay.clone(), sink, &nonce, log.clone(), alive.clone(), crate::heartbeat::now_ms());
+    // 遠端開視窗：視窗名單（本機 session ＋ ASN 自己的視窗名）給「不重名」與「等它出現」用
+    let launched_rx = launch_env.map(|env| {
+        let (sessions, mailbox, r2, sink2, alive2) = (cfg.sessions_dir.clone(), cfg.mailbox_name.clone(), relay.clone(), core.sink(), alive.clone());
+        let names: Arc<dyn Fn() -> Option<Vec<String>> + Send + Sync> = Arc::new(move || {
+            let ws = roster::read_sessions(&sessions, |p| alive2(p), sink2.pid(), &mailbox)?;
+            Some(ws.into_iter().map(|w| w.name).chain(r2.active_names()).collect())
+        });
+        let (l, rx) = Launcher::new(relay.clone(), log.clone(), cfg.work_dir.clone(), env, names);
+        core.set_launcher(l);
+        rx
+    });
     let mut tasks = vec![];
-    tasks.push(tauri::async_runtime::spawn(run_loop(core, lines, wake.clone(), shutdown.clone())));
+    tasks.push(tauri::async_runtime::spawn(run_loop(core, lines, launched_rx, wake.clone(), shutdown.clone())));
     match anon_url {
         Some(url) => {
             let (w2, l2) = (wake, log.clone());
@@ -130,7 +159,10 @@ fn now() -> u64 {
 }
 
 /// 主迴圈：worker 輸出、門鈴、2 分鐘輪詢、名單、逾時檢查，全部在同一個任務裡依序處理
-pub async fn run_loop(mut core: Core, mut lines: mpsc::UnboundedReceiver<WorkerLine>, wake: Arc<Notify>, shutdown: Arc<Notify>) {
+pub async fn run_loop(mut core: Core, mut lines: mpsc::UnboundedReceiver<WorkerLine>, launched: Option<mpsc::UnboundedReceiver<Launched>>, wake: Arc<Notify>, shutdown: Arc<Notify>) {
+    // 沒接遠端開視窗就給一個永遠不會有東西的接收端（送端留在這裡，不會關）
+    let (_keep, idle) = mpsc::unbounded_channel::<Launched>();
+    let mut launched = launched.unwrap_or(idle);
     let every = |ms: u64| {
         let mut i = tokio::time::interval(std::time::Duration::from_millis(ms.max(10)));
         i.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -145,6 +177,7 @@ pub async fn run_loop(mut core: Core, mut lines: mpsc::UnboundedReceiver<WorkerL
     loop {
         tokio::select! {
             Some(l) = lines.recv() => core.on_worker_line(l, now()).await,
+            Some(ev) = launched.recv() => core.on_launched(ev, now()).await,
             _ = wake.notified() => core.pull("bell", now()).await,
             _ = poll.tick() => core.pull("poll", now()).await,
             _ = roster.tick() => core.refresh_roster(now()).await,
@@ -170,6 +203,8 @@ pub struct Status {
     pub legacy: bool,
     /// 「改由 ASN 負責」按鈕是否開放
     pub takeover_allowed: bool,
+    /// 設定：允許我的其他設備替這台開新視窗
+    pub remote_launch: bool,
     pub error: Option<String>,
 }
 
@@ -180,26 +215,38 @@ pub struct Manager {
     work_dir: PathBuf,
     data_dir: PathBuf,
     inner: Mutex<Inner>,
+    /// 測試用：換掉遠端開視窗的環境（假設定、假視窗程式）與調整橋設定（假 claude）
+    launch_env: Option<Arc<dyn LaunchEnv>>,
+    tweak: Mutex<Option<Box<dyn Fn(&mut Config) + Send>>>,
 }
 #[derive(Default)]
 struct Inner {
     running: Option<Running>,
     error: Option<String>,
+    /// 啟動時舊橋在跑而讓步了：舊橋一退出就自動接手（設定仍開著的話）
+    waiting_legacy: bool,
 }
 
 impl Manager {
     pub fn new(relay: Option<Arc<Relay>>, anon_url: Option<String>, node: String, work_dir: PathBuf, data_dir: PathBuf) -> Manager {
-        Manager { relay, anon_url, node, work_dir, data_dir, inner: Mutex::new(Inner::default()) }
+        Manager { relay, anon_url, node, work_dir, data_dir, inner: Mutex::new(Inner::default()), launch_env: None, tweak: Mutex::new(None) }
     }
 
     fn legacy(&self) -> bool {
         !self.node.is_empty() && matches!(handoff::legacy_status(&self.work_dir, std::process::id(), crate::heartbeat::pid_alive), handoff::Legacy::Running { .. })
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_test_hooks(mut self, env: Option<Arc<dyn LaunchEnv>>, tweak: Box<dyn Fn(&mut Config) + Send>) -> Manager {
+        self.launch_env = env;
+        *self.tweak.lock().unwrap() = Some(tweak);
+        self
+    }
+
     pub fn status(&self) -> Status {
         let s = read_settings(&self.data_dir);
         let g = self.inner.lock().unwrap();
-        Status { enabled: s.enabled, running: g.running.is_some(), legacy: g.running.is_none() && self.legacy(), takeover_allowed: s.allow_takeover, error: g.error.clone() }
+        Status { enabled: s.enabled, running: g.running.is_some(), legacy: g.running.is_none() && self.legacy(), takeover_allowed: s.allow_takeover, remote_launch: s.allow_remote_launch, error: g.error.clone() }
     }
 
     fn try_start(&self) {
@@ -212,11 +259,41 @@ impl Manager {
             g.error = Some("這台電腦還沒有節點金鑰，請先登入".into());
             return;
         };
-        match start(Config::from_env(&self.node, self.work_dir.clone()), relay, self.anon_url.clone()) {
-            Ok(r) => g.running = Some(r),
-            Err(StartError::HeldBy(_)) => {} // 舊橋在跑：不啟動，狀態會顯示由舊版負責
+        let mut cfg = Config::from_env(&self.node, self.work_dir.clone());
+        if let Some(f) = self.tweak.lock().unwrap().as_ref() {
+            f(&mut cfg);
+        }
+        let env: Arc<dyn LaunchEnv> = self.launch_env.clone().unwrap_or_else(|| Arc::new(launcher::SystemEnv::new(self.data_dir.clone())));
+        match start_with(cfg, relay, self.anon_url.clone(), Some(env)) {
+            Ok(r) => {
+                g.running = Some(r);
+                g.waiting_legacy = false;
+            }
+            Err(StartError::HeldBy(_)) => g.waiting_legacy = true, // 舊橋在跑：不啟動，狀態顯示由舊版負責；舊橋退出後自動接手
             Err(StartError::Other(m)) => g.error = Some(m),
         }
+    }
+
+    /// 定時呼叫（ASN 每幾秒一次）：設定開著、啟動時因舊橋在跑而讓步，舊橋退出後自動接手
+    pub fn poll_handoff(&self) {
+        {
+            let g = self.inner.lock().unwrap();
+            if !g.waiting_legacy || g.running.is_some() {
+                return;
+            }
+        }
+        if !read_settings(&self.data_dir).enabled || self.legacy() {
+            return;
+        }
+        self.try_start();
+    }
+
+    /// 打開／關閉「允許我的其他設備替這台開新視窗」。不用重啟橋：每次處理請求和回報名單都重讀設定
+    pub fn set_remote_launch(&self, on: bool) -> Result<Status, String> {
+        let mut s = read_settings(&self.data_dir);
+        s.allow_remote_launch = on;
+        write_settings(&self.data_dir, s)?;
+        Ok(self.status())
     }
 
     /// ASN 啟動時：設定打開才啟動
