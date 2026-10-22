@@ -177,5 +177,5 @@ test('守門：手機指令清單有兩個簽章指令；沒有電腦端指令�
   const relay = read('src-tauri', 'src', 'relay.rs')
   assert.match(relay, /pub async fn partner_op_signed[\s\S]*?ok_or\("尚未登入，無法管理夥伴視窗"\)\?;[\s\S]*?api_signed\("partner_op"/, '沒憑證在打後台之前就回錯')
   assert.match(relay, /pub async fn partner_ops_signed[\s\S]*?ok_or\("尚未登入，無法查詢管理操作的進度"\)\?;[\s\S]*?api_signed\("partner_ops"/)
-  assert.match(read('..', '..', 'supabase', 'functions', 'relay', 'index.ts'), /action === "partner_op" \|\| action === "partner_ops"\) \? await signedUserId/)
+  assert.match(read('..', '..', 'supabase', 'functions', 'relay', 'index.ts'), /action === "partner_op" \|\| action === "partner_ops" \|\| action === "partner_archive"\) \? await signedUserId/)
 })

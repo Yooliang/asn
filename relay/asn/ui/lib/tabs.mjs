@@ -19,6 +19,7 @@ export const statusNote = status => (NOTE[status] ? `(${NOTE[status]})` : '')
 // 組標題：依狀態分的組只寫人數「線上 (3)」；其他組寫「名稱 (線上數/總數)」，線上＝非離線
 export function groupHeading(g) {
   const items = g?.items ?? []
+  if (g?.kind === 'archived') return `${g.label}（${items.length}）`   // 名單最底下收合的「已封存」群組
   if (g?.kind === 'status') return `${g.label} (${items.length})`
   return `${g?.label ?? ''} (${items.filter(c => c.status !== 'offline').length}/${items.length})`
 }

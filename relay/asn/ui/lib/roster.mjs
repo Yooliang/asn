@@ -53,6 +53,7 @@ export function buildFriends(members, { selfNode, selfName } = {}) {
         id: friendId(m.id, a.name), node: m.id, device: typeof m.name === 'string' && m.name.trim() ? m.name.trim() : '', agent: a.name, nick: a.name,
         psm: psmOf(a),
         onRoster: true, engine: a.engine ?? null, kind: typeof m.kind === 'string' && m.kind ? m.kind : null, status: off || a.online === false ? 'offline' : statusOf(a.status),
+        archived: a.archived === true,   // 封存（記在帳號層；舊後台沒有這個鍵＝沒封存）。每次名單都明寫，才不會被記住的舊值蓋掉
         ...(PARTNER_ID.test(String(a.partner_id ?? '')) ? { partnerId: a.partner_id } : {}),   // 夥伴 ID（#153）：只在內部用來查往來記錄與交接檔資料夾，不顯示
       })
     }

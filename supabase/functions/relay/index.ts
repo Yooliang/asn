@@ -425,7 +425,7 @@ Deno.serve(async (req) => {
   if (action && PARTNER_OP_ACTIONS.has(action)) {
     const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
-    const signedOp = (action === "partner_op" || action === "partner_ops") ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
+    const signedOp = (action === "partner_op" || action === "partner_ops" || action === "partner_archive") ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
     const r = await handleNodePartnerOpAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedOp);
     return json(r.status, r.body);
   }

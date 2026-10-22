@@ -12,7 +12,8 @@ import { OnboardCard } from './lib/onboard-card.mjs'
 import { ONBOARD_STORE, TEXT as ONBOARD_TEXT, checkName, markOnboarded, planOnboarding } from './lib/onboard.mjs'
 import { friendId } from './lib/roster.mjs'
 import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, showsInSheet } from './lib/mobile-ops.mjs'
-import { OP_LABEL, menuItems, opFormError } from './lib/partner-ops.mjs'
+import { OP_LABEL, opFormError } from './lib/partner-ops.mjs'
+import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
 import { opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
 import { defaultPartnerName } from './lib/partner.mjs'
 import { groupHeading, statusNote } from './lib/tabs.mjs'
@@ -41,6 +42,7 @@ const transport = {
 const opsTransport = {
   partnerOp: body => invoke('android_partner_op', { body }),
   partnerOps: ids => invoke('android_partner_ops', { ids }),
+  partnerArchive: body => invoke('android_partner_archive', { body }),
 }
 // 照片放大與收到的檔案：另存＝存進 App 私有資料夾，再請外殼複製到「下載/ASN」
 const photoApi = {
@@ -84,7 +86,8 @@ const prefs = reactive({ ...DEFAULT_PREFS })
 const friends = ref([]), conn = ref('connecting'), nodeOrder = ref([])
 const logs = reactive({})
 const avatars = ref({})
-const query = ref(''), collapsed = reactive({})
+const query = ref(''), collapsed = reactive({ [ARCHIVE_GROUP_KEY]: true })   // 「已封存」群組預設收合
+const archiveNote = ref('')
 const banner = ref(null), shake = ref(false), refreshing = ref(false)
 // 自動更新（自行安裝版才有；Rust 端與外殼都沒編進 Google Play 版）。測試用的清單網址只收 127.0.0.1（Rust 端再擋一次）
 const upd = reactive(initialUpdate())
@@ -205,7 +208,11 @@ const sw = reactive({ mode: '', locked: '', x0: 0, y0: 0, t0: 0, dx: 0, shift: 0
 
 const app = createApp({
   setup() {
-    const groups = computed(() => rosterGroups(friends.value, { query: query.value, selfNode: info.node, selfName: info.window_name, plainText: plain }))
+    // 已封存的不放進名單，另成最底下一個預設收合的「已封存（N）」群組（搜尋字同樣適用）
+    const groups = computed(() => {
+      const o = { query: query.value, selfNode: info.node, selfName: info.window_name, plainText: plain }
+      return withArchivedGroup(rosterGroups(activeFriends(friends.value), o), rosterGroups(archivedFriends(friends.value), o).flatMap(g => g.items))
+    })
     const unreadTotal = computed(() => totalUnread(friends.value))
     const emptyText = computed(() => (query.value.trim() ? '找不到符合的聯絡人。' : conn.value === 'off' ? '連不上收發室，請檢查網路。' : '名單上還沒有夥伴。'))
     const avOf = f => avatarSrc(f, { avatars: avatars.value })
@@ -302,7 +309,7 @@ const app = createApp({
     // ---------- 「⋯」選單：管理這位夥伴的視窗（詳情、改名、切換模型、關閉視窗、接班換手；離線的只有喚醒） ----------
     // 判斷全部用 lib/partner-ops.mjs 的 menuItems／opFormError／progressView，手機不另寫一套。手機只下指令，視窗在那台電腦上
     const opsCtx = computed(() => ({ machines: lchData.machines, loaded: lchData.loaded, signedIn: acct.value.signed_in, friends: friends.value, nonWindowNodes: [info.node] }))
-    const opsItems = computed(() => (chatFriend.value ? menuItems(chatFriend.value, opsCtx.value) : []))
+    const opsItems = computed(() => (chatFriend.value ? manageItems(chatFriend.value, opsCtx.value) : []))
     const ops = reactive({ phase: 'menu', newName: '', note: '', model: '', error: '', view: null })
     const opsText = computed(() => opDialogText(ops.phase, chatFriend.value?.agent || chatFriend.value?.nick || '', chatFriend.value?.device || ''))
     const opsTitle = computed(() => (ops.phase === 'menu' ? (chatFriend.value?.nick ?? '') : OP_LABEL[ops.phase] ?? ''))
@@ -321,6 +328,7 @@ const app = createApp({
       const item = opsItems.value.find(i => i.key === op)
       if (!item || !item.ok) return
       ops.error = ''
+      if (op === 'archive' || op === 'unarchive') { history.back(); void setArchived(chatFriend.value, op === 'archive'); return }
       if (opStep(op) === 'run') void submitOp(op)
       else ops.phase = op
     }
@@ -344,6 +352,17 @@ const app = createApp({
         if (next && core.friends.get(next)) lastChat.value = next
       }
     }
+    // 封存／取消封存：記在帳號層（後台），立刻重新拉名單；結果用名單上方的一行字說明（對話頁在進度條上顯示）
+    let archiveNoteTimer = null
+    async function setArchived(f, archived) {
+      if (!f) return
+      const r = await runArchive(opsTransport, f, archived)
+      if (r.ok) await core.refreshRoster()
+      archiveNote.value = r.text
+      clearTimeout(archiveNoteTimer)
+      archiveNoteTimer = setTimeout(() => { archiveNote.value = '' }, 6000)
+      opsRun.value = { op: 'archive', view: { phase: r.ok ? 'done' : 'failed', done: true, text: r.text } }
+    }
     const dismissRun = () => { opsRun.value = null }
     // 名單第三行「最後一句話」：本機有記錄就用；沒有的（例如剛裝）向後台補一次往來（每位最多一次、依畫面順序、慢慢來、整個執行期有上限），補到的記錄存在本機當快取
     const lastOf = id => lastMap[id] ?? ''
@@ -364,7 +383,6 @@ const app = createApp({
         }
       } finally { backfilling = false }
     }
-    watch([() => friends.value.length, () => acct.value.signed_in], () => { void backfillLast() })
     const refreshAll = async () => { refreshing.value = true; try { await Promise.all([core.refreshRoster(), core.pull('manual')]) } finally { refreshing.value = false } }
     // 下拉重整：頁面捲到最上面時往下拉，頂端長出機器人；拉過門檻放開才更新，完成後收回。夥伴與對話兩頁各一組（設置頁沒有）
     function makePtr() {
@@ -467,6 +485,8 @@ const app = createApp({
       catch (e) { nameDraft.value = myName.value; nameErr.value = e.message; setTimeout(() => { nameErr.value = '' }, 5000) }
     }
     const acct = ref({ signed_in: false, email: '' })
+    // 要放在 acct 定義之後：watch 的來源函式會立刻執行一次，放前面會踩到「初始化之前就取用」而整個監看失效
+    watch([() => friends.value.length, () => acct.value.signed_in], () => { void backfillLast() })
     void authApi.status().then(s => { acct.value = s ?? acct.value }).catch(() => {})
     // 我的名字（帳號層）：先用上次存的，登入帳號的資料取到後更新並存起來（離線也有名字可顯示）
     void authApi.accountInfo().then(i => { if (typeof i?.owner_name === 'string') ownerName.value = i.owner_name }).catch(() => {})
@@ -487,7 +507,7 @@ const app = createApp({
       upd, updText: computed(() => bannerText(upd)), updButton: computed(() => buttonLabel(upd)), startUpdate, checkUpdate,
       pf, sw, pagerStyle, indicator, swipeStart, swipeMove, swipeEnd, goTab, TABS, TAB_LABEL, myName, meForChat, lastOf, vendorIcon: vendorBadgeHtml,
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, headTone, CONN_LABEL, info, banner, shake, refreshing,
-      avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, ops, opsText, opsTitle, opsModels, opsModelNote, opsBanner, openOps, pickOp, submitOp, dismissRun, photoApi, emo, groupHeading, statusNote,
+      avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, ops, opsText, opsTitle, opsModels, opsModelNote, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       openChat, back, openBanner, sendTo, nudgeTo, sendAttachTo, refreshAll,
       nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,

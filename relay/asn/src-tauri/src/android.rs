@@ -74,6 +74,14 @@ pub async fn android_partner_op(app: State<'_, App>, auth: State<'_, crate::auth
     r.partner_op_signed(&body, token.as_deref()).await
 }
 
+/// 封存／取消封存夥伴（記在帳號層，不需要那台電腦在線）。要本人簽章；沒登入回錯，不打後台。回 { ok, archived }
+#[tauri::command]
+pub async fn android_partner_archive(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>, body: serde_json::Value) -> Result<serde_json::Value, String> {
+    let r = relay_of(&app)?;
+    let token = crate::account::signing_token(&auth).await;
+    r.partner_archive_signed(&body, token.as_deref()).await
+}
+
 /// 查管理操作的進度（最多 20 筆）。要本人簽章；沒登入回錯，不打後台。回 { ops: [...] }
 #[tauri::command]
 pub async fn android_partner_ops(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>, ids: Vec<String>) -> Result<serde_json::Value, String> {
