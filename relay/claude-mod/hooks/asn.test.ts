@@ -76,6 +76,8 @@ test('外掛本體：asn_send 走 $.process.run、缺欄位不執行', { options
   const sent = await $.tool.call({ tool: 'mcp__asn__asn_send', to: 'XISU', body: 'hi', expects_reply: false } as never)
   expect(ran).toEqual([['C:/ASN/asn-cli.exe', 'send', '--to', 'XISU', '--body', 'hi', '--no-reply']])
   expect(JSON.stringify(sent)).toContain('sent id=1')
+  // 註冊工具沒有輸出 schema：引擎只收字串或內容區塊陣列（10-22 實際載入時物件被拒）
+  expect(typeof (sent as { result: unknown }).result).toBe('string')
 
   await $.tool.call({ tool: 'mcp__asn__asn_send', to: 'XISU', body: 'hi' } as never)
   expect(ran.length).toBe(1)
