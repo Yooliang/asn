@@ -1,11 +1,11 @@
 {
-  "version": "0.1.30",
-  "notes": "沒指定收件視窗的信改交給本人（顯示「未指定收件人」），不再丟給隨便一個視窗；可在設定指定交給哪個視窗",
-  "pub_date": "2026-10-22T05:28:33.111Z",
+  "version": "0.1.31",
+  "notes": "夥伴改名、換 session、換電腦都延續同一位：往來記錄跟著走、寄給舊名字的信自動改送新名字，開新夥伴可選「這是誰的接班」（#153）",
+  "pub_date": "2026-10-22T05:45:57.755Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjBydUhqYXlrMm00Q0J2eWtHMHI0ZENaekEySmcva01iZytHaHIyVkZVT0FEeUhZOFgrZWhGSUpYNXI0UEt2bnpITnllTEw5Z3RwQml5U29RZFc4cndNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjQ2OTEzCWZpbGU6QVNOXzAuMS4zMF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjMwCldpWUtrL045OCtEQk52N2sxZHBQMFpnRjJwMEpIZ0VHT0ppNi9oMlN6bkJMMnh2a2xyM2pHdmVOUE1KZ2oydzYyRWpMR21hdEIwN05PN0NmelZnRUR3PT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.30_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybndlaU9lcSs0UmtQTFVNc04rRXA2dEJJTWNsS0w4NVRSRi9GejdhY1FKcUZ2WlJVZXRjUTRQV1JqRThGa1BtZXNZK3FSRVJ0bkhHR2lVc1BCd3VkOWd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjQ3OTU3CWZpbGU6QVNOXzAuMS4zMV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjMxCjFvZWQ5RXZCOXRxcWZwRHZyUUhOeTZYeFVqTU9aWHVYa1ZqYXY2d3BuTXFXZEtyQUIzT1ZZcUxwSVFSSGg4bFBHaWVWREt6S3R3WlJpb2M1RS9GY0JBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.31_x64-setup.exe"
     }
   }
 }
