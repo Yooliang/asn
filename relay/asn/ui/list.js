@@ -823,6 +823,7 @@ const app = createApp({
     // 本機帳號庫清單定期回報給收發室（只有 email、方案、使用中）；別台送來的切換指令定期取走（預設要本機按確認才切）。--shot 不輪詢指令。
     setTimeout(() => void accounts.report(), 5_000)
     setInterval(() => void accounts.report(), 5 * 60_000)
+    void listen('claude-mod-status', e => { accounts.state.mod = String(e.payload ?? '') })   // Rust 背景安裝 Claude 外掛完成
     void listen('claude-account-auto', e => void accounts.onAuto(e.payload))   // Rust 背景工作自動加入／回存之後
     if (!info.shot) {
       setInterval(() => void accounts.pollIncoming(), 15_000)

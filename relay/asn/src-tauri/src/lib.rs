@@ -12,6 +12,7 @@ mod bridge;
 mod envc;
 pub mod cli;
 mod claude_accounts;
+mod claude_mod;
 mod claude_json;
 mod codex_accounts;
 mod heartbeat;
@@ -664,6 +665,7 @@ pub fn run() {
         .manage(shot::ShotState::default())
         .manage(updater::Pending::default())
         .manage(SaveDir::default())
+        .manage(claude_mod::ModState::default())
         .manage(auth_state)
         .manage(bridge_mgr)
         .plugin(tauri_plugin_dialog::init())
@@ -671,7 +673,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, ads::ads_fetch, set_window_name, set_presence, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_takeover, cli_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
-            claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete,
+            claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_mod::claude_mod_status,
             codex_accounts::codex_account_current, usage::usage_summary,
             acct_remote_report, acct_remote_list, acct_remote_request, acct_remote_status, acct_remote_pending, acct_remote_apply, acct_remote_decline, acct_remote_trust_get, acct_remote_trust_set,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
@@ -696,6 +698,18 @@ pub fn run() {
                 tauri::async_runtime::spawn(claude_accounts::auto_loop(auto_acct_dir.clone(), std::time::Duration::from_secs(15), every, move |o| {
                     let _ = h.emit("claude-account-auto", o);
                 }));
+            }
+            // Claude Code 外掛：啟動後 5 秒在背景安裝一次（找不到 claude 就略過；有標記檔就不再碰；--shot 截圖模式不動）
+            if handle.state::<App>().shot.is_none() {
+                let h = handle.clone();
+                let dir = auto_acct_dir.clone();
+                *handle.state::<claude_mod::ModState>().0.lock().unwrap() = "Claude 外掛：檢查中…".into();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    let line = tauri::async_runtime::spawn_blocking(move || claude_mod::run_real(&dir).line()).await.unwrap_or_else(|_| "Claude 外掛：安裝失敗：背景工作中斷".into());
+                    *h.state::<claude_mod::ModState>().0.lock().unwrap() = line.clone();
+                    let _ = h.emit("claude-mod-status", line);
+                });
             }
             // 開機自動啟動帶 --background：只常駐系統匣，不跳出名單（系統匣建失敗就照常顯示）
             if background && !handle.state::<tray::TrayFailed>().0.load(std::sync::atomic::Ordering::Relaxed) {

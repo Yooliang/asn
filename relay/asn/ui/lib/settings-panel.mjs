@@ -94,6 +94,7 @@ export const SettingsPanel = {
             <label class="chk"><input type="checkbox" :checked="st.accounts.autoAdd" @change="act('acct-auto', $event.target.checked)" /><span>自動加入</span></label>
             <small v-if="st.accounts.autoNote" role="status">{{ st.accounts.autoNote }}</small>
             <small role="status">{{ st.accounts.msg }}</small>
+            <small v-if="st.accounts.mod" role="status">{{ st.accounts.mod }}</small>
           </section>
           <section class="set-card" aria-label="OpenAI（Codex）帳號">
             <header class="vendor-h"><b>OpenAI（Codex）帳號</b><small>OpenAI</small></header>
