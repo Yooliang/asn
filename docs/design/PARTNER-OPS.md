@@ -21,8 +21,9 @@
 
 詳情不寫進名單（名單每輪都報，PID、完整路徑不必常駐後台），按下去才問、結果存在那筆請求的 `result`（jsonb，≤4 KB），與其他動作一樣 2 分鐘逾時；不需要「允許遠端管理」開關，但仍要本人簽章。
 
-轉交的第一句話（固定文字，手機可以再補一段）：
+轉交的第一句話由電腦端組（固定文字；手機補的話換行附在後面，後台只傳補的那段 `note`）：
 「你是『<名字>』的下一任，前任的上下文用完了。先讀你與收發室的往來記錄（信尾那行的路徑）和前任留下的交接檔，接著把手上的工作做下去。」
+有補話時接著換行：「前任交代：<補的話>」。
 
 不做「先叫前任寫交接檔再關」：前任 context 快滿時寫交接常常失敗，而且要等它回覆，流程會卡住。前任要寫交接，小良哥可以先在對話裡叫它寫，再按轉交。
 
@@ -81,3 +82,30 @@ migration → relay 函式 → 發 ASN（電腦版與安卓同一版）。順序
 - 手機介面：`ui/m.html`、`ui/m.js`、`ui/mobile.css`、新 `ui/lib/partner-ops.mjs`＋測試（等 feat/158-android-polish 合併後開分支）。
 - Rust：`android.rs`（手機呼叫）、`bridge/` 新 `partner_ops.rs`＋接到輪詢、`launch/switch.rs` 抽出可重用的「關／重開」函式。動 `bridge/` 前先通知 asn 主線。
 - 後台：新 migration、`_shared/partner_ops.ts`＋測試、`relay/index.ts` 分派。動 `supabase/` 前先通知 asn 主線。
+
+
+## 八、電腦端實作現況與外掛控制檔格式（`bridge/partner_ops.rs`）
+
+### 外掛控制檔格式
+
+橋與視窗內的 ASN 外掛（relay/claude-mod，家用正見實作）用兩個檔案溝通，檔名都是 Claude 的 sessionId（只收英數、`-`、`_`，長度 ≤128）：
+
+| 檔案 | 誰寫 | 內容 |
+|---|---|---|
+| `~/.asn/control/<sessionId>.json` | 橋 | `{"id": "<請求編號>", "op": "rename" 或 "model", "arg": "<新名字或模型>", "at": <毫秒時間>}` |
+| `~/.asn/status/<sessionId>.json`（既有狀態檔） | 外掛 | 照舊的欄位，再加 `control: {"id": "<同一個請求編號>", "ok": true 或 false, "detail": "<中文說明，≤200 字>"}` |
+
+- 橋只在狀態檔有效（存在、完整 JSON、sessionId 相符、`at` 在 30 分鐘內、不是「已結束」）時才寫控制檔，也就是「有外掛」的判斷；沒有就直接退回重開。
+- 外掛讀到控制檔後，執行 `rename`（`/rename <arg>`）或 `model`（`/model <arg>`），完成後把 `control` 欄位寫進狀態檔。`id` 必須原樣回傳；橋只認 `control.id` 等於自己這筆的請求編號。
+- 橋最多等 30 秒。收到 `ok:true` 回報成功；`ok:false` 回報失敗並帶 `detail`（不再重開）；逾時才退回重開。
+- 橋在結果出來（或逾時）時**刪掉控制檔**。外掛要忽略 `at` 超過 2 分鐘的控制檔，也不要重複執行同一個 `id`。
+- 狀態檔可選的新欄位：`model`（目前模型，詳情以它為準）、`context`（上下文用量，物件 `{used, limit, percent}`，三個都是數字；沒給 percent 而有 limit 時由橋算出；其他欄位一律丟掉）。沒有就不顯示。
+
+### 詳情結果（`partner_op_result.result`，≤4 KB）
+
+`{pid, model, engine:"claude", cwd, started_at, status, opened_by:"asn"|"user", shell_chain:[程式名…], mod_installed, context?:{used, limit, percent}}`。
+`shell_chain` 由外往內排（例如 `windowsterminal.exe, powershell.exe, claude.exe`），只有執行檔名稱，不含路徑與命令列參數。關閉的結果是 `{pid, kept_terminal}`。
+
+### 接到橋的輪詢
+
+`PartnerOps::pull()` 與 launcher 的 `pull()` 同一形狀，接在 `bridge/core.rs` 的 `pull()` 裡 `l.pull().await` 之後（欄位 `partner_ops`、`set_partner_ops()`，約 10 行）；`bridge/mod.rs` 在建立 launcher 的地方呼叫 `PartnerOps::system(...)`（需要 bridge 設定的資料夾，沒有就不接）。後台回 404／400 就靜默停用到下次啟動，只記一次 log。

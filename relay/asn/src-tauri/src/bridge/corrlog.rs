@@ -88,6 +88,8 @@ pub enum Dir {
     Replied,
     /// 視窗自己用命令列回信或寄信，橋只看得到記號（沒有內文）
     Direct,
+    /// 手機下令的視窗管理操作（詳情、改名、切換模型、關閉、轉交）：誰下的令、做了什麼、結果
+    Op,
 }
 
 pub struct Entry<'a> {
@@ -180,6 +182,7 @@ fn render(e: &Entry) -> String {
         Dir::Received => "收到",
         Dir::Replied => "回覆",
         Dir::Direct => "自行回信",
+        Dir::Op => "視窗管理",
     };
     let mut s = format!("{MARK} {} {label}｜{} → {}｜id={}\n", stamp(e.ts_ms), e.from, e.to, e.id);
     if !e.attachments.is_empty() {

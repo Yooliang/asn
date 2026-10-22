@@ -148,3 +148,7 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-chat .photo-viewer .aero-btn{min-height:44px;padding:0 16px}
 .m-chat .filecard,.m-chat .photo{min-height:44px}
 .m-chathead .m-icon-btn{font-size:40px;font-weight:700;width:48px}
+/* ---- 訊息內文的 Markdown（手機）：issue #169，獨立區塊方便合併 ---- */
+.m-chat .msg .m-body.md-on{font-size:16px;line-height:1.45;max-width:100%}
+.m-chat .msg .m-body.md-on pre.md-code{font-size:14px}
+.m-chat .msg .m-body.md-on a{padding:2px 0}

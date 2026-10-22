@@ -440,6 +440,24 @@ fn open_url(url: String) -> Result<(), String> {
     spawn_browser(&url)
 }
 
+/// 訊息內文裡的連結（Markdown）：只准 http(s)、沒有帳密、沒有空白或控制字元、長度有限；不比對網域（內容是對方寫的，使用者自己點才開）。
+/// 電腦版用系統預設瀏覽器，手機版走「開網址」外掛的 Intent；都不在 WebView 裡導覽。
+pub(crate) fn link_allowed(url: &str) -> bool {
+    if url.is_empty() || url.len() > 2000 || url.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return false;
+    }
+    let Ok(u) = reqwest::Url::parse(url) else { return false };
+    matches!(u.scheme(), "http" | "https") && u.host_str().is_some() && u.username().is_empty() && u.password().is_none()
+}
+
+#[tauri::command]
+fn open_link(handle: AppHandle, url: String) -> Result<(), String> {
+    if !link_allowed(&url) {
+        return Err("這個網址不能開".into());
+    }
+    open_in_browser(&handle, &url)
+}
+
 /// 用預設瀏覽器開網址：ShellExecuteW("open", url)。不用 explorer.exe——長網址或帶 & 的網址（例如登入的 OAuth 網址）
 /// 會被 explorer 當成路徑，結果開成「檔案總管」。只接受 http(s)，其他一律拒絕。
 #[cfg(windows)]
@@ -811,7 +829,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_partner_list, relay_partner_succeed, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_partner_list, relay_partner_succeed, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_mod::claude_mod_status,
             codex_accounts::codex_account_current, usage::usage_summary,
@@ -827,7 +845,7 @@ pub fn run() {
     #[cfg(not(desktop))]
     let builder = builder.invoke_handler(tauri::generate_handler![
         startup_info, relay_list, relay_inbox, relay_ack, relay_rooms, relay_send, relay_chat_history, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_avatar, relay_set_avatar,
-        set_presence, set_window_name, store_load, store_save, quit_app, capture_ui_ready, shot_frontend_log,
+        set_presence, set_window_name, store_load, store_save, quit_app, capture_ui_ready, shot_frontend_log, open_link,
         account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_bind,
         android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_launch, android::android_partner_op, android::android_partner_ops, relay_partner_list, relay_partner_succeed,
     ]);
@@ -1011,6 +1029,16 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 訊息連結只准一般網址() {
+        assert!(link_allowed("https://example.com/a?b=1&c=2#x") && link_allowed("http://example.org:8080/"));
+        for bad in ["", "javascript:alert(1)", "data:text/html,<script>1</script>", "file:///C:/Windows/system32/calc.exe", "ftp://x.com/", "mailto:a@b.c",
+                    "https://u:p@example.com/", "https://example.com/a b", "https://example.com/\n", "//example.com", "calc.exe", "\\\\server\\share"] {
+            assert!(!link_allowed(bad), "{bad:?} 不該放行");
+        }
+        assert!(!link_allowed(&format!("https://example.com/{}", "a".repeat(2000))));
+    }
 
     #[test]
     fn 視窗名規則與預設值() {

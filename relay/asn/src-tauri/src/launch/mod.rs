@@ -1,13 +1,13 @@
 //! 開新夥伴：本機啟動、遠端 launch API（全 Rust，不呼叫 Node）。
 pub(crate) mod config;
-mod console;
+pub(crate) mod console;
 pub(crate) mod cwds;
 pub(crate) mod local;
 pub(crate) mod prefs;
 pub(crate) mod profiles;
 mod resume;
 mod subagents;
-mod switch;
+pub(crate) mod switch;
 
 use crate::relay::Relay;
 use prefs::{launch_prefs_get_sync, launch_prefs_set_sync};
