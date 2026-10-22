@@ -15,10 +15,29 @@ pub struct Window {
     pub updated_at: u64,
     /// Claude 的 session 編號（session 檔的 sessionId）；夥伴 ID 用它判斷「同一位夥伴換名或換 session」（#109）
     pub session_id: Option<String>,
+    /// 這個視窗由哪個引擎轉交：claude（預設）／acp／codex
+    pub engine: String,
+    /// 名單上顯示的引擎名（例如 acp 工作者回報 gemini）；路由仍依 engine
+    pub engine_label: Option<String>,
+    /// 沒指定收件人又找不到預設視窗時，不拿它當代收者（背景工作者）
+    pub no_fallback: bool,
+    /// 名單上顯示的資料夾標籤（ACP 工作者用設定的 label，不用資料夾名）
+    pub cwd_label_override: Option<String>,
 }
 
 impl Window {
+    /// 名單與夥伴同步回報的引擎名
+    pub fn label(&self) -> &str {
+        self.engine_label.as_deref().unwrap_or(&self.engine)
+    }
+    /// Claude 視窗（由 ~/.claude/sessions 讀出）
+    pub fn claude(name: &str, status: Option<String>, cwd: &str, pid: u32, updated_at: u64, session_id: Option<String>) -> Window {
+        Window { name: name.into(), status, cwd: cwd.into(), pid, updated_at, session_id, engine: "claude".into(), engine_label: None, no_fallback: false, cwd_label_override: None }
+    }
     pub fn cwd_label(&self) -> String {
+        if let Some(l) = &self.cwd_label_override {
+            return l.clone();
+        }
         self.cwd.split(['\\', '/']).filter(|s| !s.is_empty()).last().unwrap_or("").to_string()
     }
     pub fn is_busy(&self) -> bool {
@@ -45,14 +64,14 @@ fn parse_session(v: &Value) -> Option<Window> {
     if name.is_empty() {
         return None;
     }
-    Some(Window {
-        name,
-        status: v.get("status").and_then(Value::as_str).map(String::from),
-        cwd: v.get("cwd").and_then(Value::as_str).unwrap_or("").to_string(),
+    Some(Window::claude(
+        &name,
+        v.get("status").and_then(Value::as_str).map(String::from),
+        v.get("cwd").and_then(Value::as_str).unwrap_or(""),
         pid,
-        updated_at: v.get("updatedAt").and_then(Value::as_u64).unwrap_or(0),
-        session_id: v.get("sessionId").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(String::from),
-    })
+        v.get("updatedAt").and_then(Value::as_u64).unwrap_or(0),
+        v.get("sessionId").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(String::from),
+    ))
 }
 
 /// 讀取失敗（資料夾存在卻讀不了）回 None，呼叫端沿用舊名單；資料夾不存在＝沒有任何視窗
@@ -83,7 +102,7 @@ pub fn read_sessions(dir: &Path, alive: impl Fn(u32) -> bool, exclude_pid: u32, 
 /// roster 動作的請求內容。asn_window＝ASN 自己的視窗名（也列進名單，別台看得到這台的 ASN；engine 標 asn）。
 /// launcher＝遠端開視窗的摘要（profile 名與標籤、cwd 白名單、上限；不含指令），沒有可用設定送 null，仲介就清掉。
 pub fn roster_body(windows: &[Window], asn_window: Option<&str>, launcher: Value) -> Value {
-    let mut agents: Vec<Value> = windows.iter().map(|w| json!({ "name": w.name, "status": w.status, "cwd_label": w.cwd_label(), "engine": "claude" })).collect();
+    let mut agents: Vec<Value> = windows.iter().map(|w| json!({ "name": w.name, "status": w.status, "cwd_label": w.cwd_label(), "engine": w.label() })).collect();
     if let Some(n) = asn_window {
         if !windows.iter().any(|w| w.name == n) {
             agents.push(json!({ "name": n, "status": "idle", "cwd_label": "", "engine": "asn" }));
@@ -98,7 +117,7 @@ pub fn partner_body(windows: &[Window], asn_window: Option<&str>) -> Value {
     let mut ws: Vec<Value> = windows
         .iter()
         .map(|w| {
-            let mut o = json!({ "name": w.name, "engine": "claude" });
+            let mut o = json!({ "name": w.name, "engine": w.label() });
             if let Some(s) = &w.session_id {
                 o["session_id"] = json!(s);
             }
@@ -177,8 +196,8 @@ mod tests {
 
     #[test]
     fn 夥伴同步的請求內容_名字_session_引擎_不含節點_asn_視窗不重複() {
-        let a = Window { name: "T-甲".into(), status: None, cwd: "".into(), pid: 1, updated_at: 0, session_id: Some("sess-0001-aaaa".into()) };
-        let b = Window { name: "T-乙".into(), status: None, cwd: "".into(), pid: 2, updated_at: 0, session_id: None };
+        let a = Window::claude("T-甲", None, "", 1, 0, Some("sess-0001-aaaa".into()));
+        let b = Window::claude("T-乙", None, "", 2, 0, None);
         let body = partner_body(&[a.clone(), b.clone()], Some("T-ASN"));
         assert_eq!(body, json!({"windows": [
             {"name":"T-甲","engine":"claude","session_id":"sess-0001-aaaa"},
@@ -220,7 +239,7 @@ mod tests {
 
     #[test]
     fn 回報內容格式_含_asn_視窗名_launcher_摘要或_null() {
-        let w = Window { name: "T-甲".into(), status: Some("idle".into()), cwd: "D:\\a\\b".into(), pid: 1, updated_at: 0, session_id: None };
+        let w = Window::claude("T-甲", Some("idle".into()), "D:\\a\\b", 1, 0, None);
         let b = roster_body(&[w.clone()], Some("T-ASN"), Value::Null);
         assert_eq!(b["launcher"], Value::Null);
         assert_eq!(roster_body(&[w.clone()], None, json!({"profiles": []}))["launcher"], json!({"profiles": []}));
@@ -228,7 +247,7 @@ mod tests {
         assert_eq!(b["agents"][1], json!({"name":"T-ASN","status":"idle","cwd_label":"","engine":"asn"}));
         // 不給 ASN 視窗名就只有 Claude 視窗；與視窗同名不重複列
         assert_eq!(roster_body(&[w], None, Value::Null)["agents"].as_array().unwrap().len(), 1);
-        let w2 = Window { name: "T-ASN".into(), status: None, cwd: "".into(), pid: 2, updated_at: 0, session_id: None };
+        let w2 = Window::claude("T-ASN", None, "", 2, 0, None);
         assert_eq!(roster_body(&[w2], Some("T-ASN"), Value::Null)["agents"].as_array().unwrap().len(), 1);
         assert!(is_busy_status(Some("Working")) && !is_busy_status(Some("idle")) && !is_busy_status(None));
     }
