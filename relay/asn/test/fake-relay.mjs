@@ -12,7 +12,7 @@ export async function startFakeRelay({ node = 'T', members = [], mails = [], roo
   const st = {
     node, members, mails: [...mails], outbox: [], rooms,
     avatars: Object.fromEntries(Object.entries(avatars).map(([n, d]) => [n, { data: d, at: '2026-10-20T08:00:00Z' }])),
-    reqs: [], sent: [], launches: [], presence: [], asnPresenceStatus: 0,
+    reqs: [], sent: [], historyRows: [], historyStatus: 0, launches: [], presence: [], asnPresenceStatus: 0,
     launchers: { profiles: [{ id: 'claude', label: 'Claude' }], cwd_allow: ['C:/work'], max_per_hour: 6 },
     acctRemote: { ...acctRemote }, acctReports: [], acctSwitches: [], acctIncoming: [], acctResults: [],
     setCount: 1, port: 0, url: '',
@@ -56,6 +56,12 @@ export async function startFakeRelay({ node = 'T', members = [], mails = [], roo
       if (typeof b.window_name !== 'string' || !/^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}(-[0-9A-Za-z.]{1,16})?$/.test(b.version ?? '') || !['online', 'away', 'busy', 'offline'].includes(b.status) || (b.psm != null && (typeof b.psm !== 'string' || [...b.psm].length > 80))) return out(400, { error: 'bad_request' })
       st.presence.push(b)
       return out(200, { ok: true })
+    }
+    // 往來記錄（#108）：回 st.historyRows（測試放進去的）；st.historyStatus 可設成 404／401 模擬後台還沒部署／沒登入
+    if (action === 'chat_history' && req.method === 'POST') {
+      if (st.historyStatus) return out(st.historyStatus, { error: 'not_found' })
+      if (typeof body?.node !== 'string') return out(400, { error: 'bad_request' })
+      return out(200, { messages: st.historyRows })
     }
     if (action === 'room_list' && req.method === 'GET') return out(200, { rooms: st.rooms })
     if (action === 'inbox' && agent) return out(200, { messages: st.mails.filter(m => !m.acked && m.to_agent === agent) })

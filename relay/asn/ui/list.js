@@ -517,6 +517,7 @@ async function openChat(id) {
   if (String(id).startsWith('pending:')) return
   const f = core.friends.get(id); if (!f) return
   core.markRead(id)
+  void core.syncHistory(id)   // 打開對話：向後台補這位夥伴的往來（以後台為準；失敗就用本機快取）
   if (ui.mode === 'merged') {   // 整合模式：在右邊開分頁（或切過去），不開新視窗
     Object.assign(ui, openChatTab(ui, id, ui.pinnedChat))
     pushLog(id)

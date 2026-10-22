@@ -80,6 +80,37 @@ pub fn build_send_body(payload: &Value, window: &str) -> Result<Value, String> {
     }
     m.insert("from_agent".into(), json!(window));
     m.insert("expects_reply".into(), json!(expects));
+    // 以「人」寄出（#108）：前端說 person:true 才送 as_person。真正生效要有登入憑證（見 without_person）
+    if o.get("person").and_then(Value::as_bool) == Some(true) {
+        m.insert("as_person".into(), json!(true));
+    }
+    Ok(Value::Object(m))
+}
+
+/// 沒有登入憑證就不送 as_person（後台沒有簽章本來就不認，這裡先拿掉，AI 用的寄信路徑一個字都不會帶）
+pub fn without_person(mut body: Value) -> Value {
+    if let Some(o) = body.as_object_mut() {
+        o.remove("as_person");
+    }
+    body
+}
+
+/// 取「我和某夥伴」往來記錄的請求內容：夥伴節點必須合格，視窗名可空（找總機），不送使用者或帳號（後台由簽章決定）
+pub fn build_history_body(node: &str, agent: &str, limit: Option<u64>) -> Result<Value, String> {
+    if !crate::identity::valid_id(node) {
+        return Err(format!("夥伴節點格式不對：{node}"));
+    }
+    if agent.chars().count() > 100 || agent.chars().any(|c| c.is_control()) {
+        return Err("夥伴視窗名格式不對".into());
+    }
+    let mut m = Map::new();
+    m.insert("node".into(), json!(node));
+    if !agent.is_empty() {
+        m.insert("agent".into(), json!(agent));
+    }
+    if let Some(l) = limit {
+        m.insert("limit".into(), json!(l.clamp(1, 200)));
+    }
     Ok(Value::Object(m))
 }
 
@@ -343,12 +374,19 @@ impl Relay {
     pub async fn send(&self, payload: &Value) -> Result<Value, String> {
         let b = build_send_body(payload, &self.window_name())?;
         // 後端不擋同節點寄信；與本機視窗聊天是這個程式的主要用途，所以放行（send.mjs 也放行同節點，只擋寄給自己這個視窗）
-        self.api("send", Some(b)).await
+        self.api("send", Some(without_person(b))).await
     }
     /// ASN 視窗裡人打的字：帶登入憑證（有的話）讓後台標成本人（trust=owner）。沒有憑證＝和 send 完全一樣
     pub async fn send_signed(&self, payload: &Value, token: Option<&str>) -> Result<Value, String> {
         let b = build_send_body(payload, &self.window_name())?;
+        let b = if token.map_or(false, |t| !t.is_empty()) { b } else { without_person(b) };
         self.api_signed("send", Some(b), token).await
+    }
+    /// 往來記錄（#108）：一定要登入憑證（後台用簽章認人；節點金鑰 AI 也拿得到，不夠）。沒憑證直接回錯，不打後台
+    pub async fn chat_history(&self, node: &str, agent: &str, token: Option<&str>) -> Result<Value, String> {
+        let body = build_history_body(node, agent, None)?;
+        let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法取得雲端的往來記錄")?;
+        self.api_signed("chat_history", Some(body), Some(t)).await
     }
     pub async fn sent_status(&self, ids: &[String]) -> Result<Value, String> {
         let b = build_sent_status_body(ids)?;
@@ -494,6 +532,66 @@ mod tests {
         assert!(s.iter().all(|q| !q.to_lowercase().contains("x-asn-user")));
     }
 
+    fn person_payload() -> Value {
+        json!({ "to_node": "W", "to_agent": "小職", "body": "安裝吧", "expects_reply": true, "person": true })
+    }
+
+    #[test]
+    fn 以人寄出_只有明說person才送as_person_欄位只此一個() {
+        let b = build_send_body(&person_payload(), "H-ASN").unwrap();
+        assert_eq!(b["as_person"], true);
+        assert!(b.get("person").is_none(), "前端的 person 欄位不原樣送出");
+        let none = build_send_body(&send_payload(), "H-ASN").unwrap();
+        assert!(none.get("as_person").is_none(), "沒說就不送（舊行為）");
+        let mut p = person_payload();
+        p["person"] = json!("yes");
+        assert!(build_send_body(&p, "H-ASN").unwrap().get("as_person").is_none(), "只認布林 true");
+        // 震動也可以以人寄出
+        let nudge = build_send_body(&json!({"to_node":"W","nudge":true,"expects_reply":false,"person":true}), "H-ASN").unwrap();
+        assert_eq!(nudge["as_person"], true);
+    }
+
+    #[tokio::test]
+    async fn 以人寄出_沒有登入憑證就拿掉as_person_有憑證才送() {
+        let (url, seen) = fake_server(200);
+        let r = Relay::new(url, "secret-key".into(), "H".into(), "H-ASN".into());
+        r.send_signed(&person_payload(), Some("USERTOKEN-123")).await.unwrap();
+        r.send_signed(&person_payload(), None).await.unwrap();
+        r.send_signed(&person_payload(), Some("")).await.unwrap();
+        r.send(&person_payload()).await.unwrap();
+        let s = seen.lock().unwrap();
+        assert!(s[0].contains(r#""as_person":true"#), "有憑證：送");
+        for (i, q) in s.iter().enumerate().skip(1) {
+            assert!(!q.contains("as_person"), "第 {i} 個請求不該帶 as_person：{q}");
+        }
+    }
+
+    #[test]
+    fn 往來記錄請求_只送夥伴與筆數_不送使用者() {
+        assert_eq!(build_history_body("M", "小文", None).unwrap(), json!({ "node": "M", "agent": "小文" }));
+        assert_eq!(build_history_body("M", "", Some(9999)).unwrap(), json!({ "node": "M", "limit": 200 }));
+        assert_eq!(build_history_body("M", "", Some(0)).unwrap()["limit"], 1);
+        assert!(build_history_body("a/b", "x", None).is_err());
+        assert!(build_history_body("M", "a\nb", None).is_err());
+        assert!(build_history_body("M", &"字".repeat(101), None).is_err());
+    }
+
+    #[tokio::test]
+    async fn 往來記錄_一定要憑證_沒憑證不打後台_有憑證帶簽章標頭() {
+        let (url, seen) = fake_server_with(200, r#"{"messages":[]}"#);
+        let r = Relay::new(url, "secret-key".into(), "H".into(), "H-ASN".into());
+        assert!(r.chat_history("M", "小文", None).await.is_err());
+        assert!(r.chat_history("M", "小文", Some("")).await.is_err());
+        assert_eq!(seen.lock().unwrap().len(), 0, "沒憑證不送出任何請求");
+        let v = r.chat_history("M", "小文", Some("USERTOKEN-123")).await.unwrap();
+        assert_eq!(v, json!({ "messages": [] }));
+        let s = seen.lock().unwrap();
+        let low = s[0].to_lowercase();
+        assert!(s[0].starts_with("POST /relay?action=chat_history"));
+        assert!(low.contains("x-asn-user: bearer usertoken-123") && low.contains("x-relay-key: secret-key"), "{low}");
+        assert!(s[0].contains(r#""node":"M""#) && s[0].contains("小文"));
+    }
+
     /// 守門：登入憑證只在 ASN 視窗的寄信指令（lib.rs）用；asn-cli、內建橋、機器橋相關程式碼一個字都不准碰。
     /// 拿掉這個測試守的東西（例如讓 cli 呼叫 api_signed）會讓它變紅。
     #[test]
@@ -515,7 +613,7 @@ mod tests {
         }
         assert!(files.len() >= 10, "掃到的檔案太少，路徑可能變了：{}", files.len());
         // 標記字串用拆開的寫法，免得這個測試檔自己（不在掃描範圍，但以防日後搬動）命中
-        let banned = [["api", "_signed"].concat(), ["send", "_signed"].concat(), ["signing", "_token"].concat(), ["SIGN", "_HEADER"].concat(), ["x-asn", "-user"].concat(), ["Auth", "State"].concat(), ["access", "_token"].concat()];
+        let banned = [["api", "_signed"].concat(), ["send", "_signed"].concat(), ["signing", "_token"].concat(), ["SIGN", "_HEADER"].concat(), ["x-asn", "-user"].concat(), ["Auth", "State"].concat(), ["access", "_token"].concat(), ["as", "_person"].concat(), ["chat", "_history"].concat()];
         for f in &files {
             let t = std::fs::read_to_string(f).unwrap();
             for b in &banned {
