@@ -101,6 +101,7 @@ Site URL 不用改。Google 與 GitHub 的授權回呼網址仍是 Supabase 提�
 | 動作 | 輸入 | 輸出／說明 |
 |---|---|---|
 | `account_bootstrap` | 無 | 沒有租戶就建（代號前綴 `t<序號>-`）；回 `{created, user, tenant, nodes}`（名下節點，不含金鑰） |
+| `account_name` | 無 | 讀／改帳號層的「我的名字」（所有設備共用，存 `relay.tenants.owner_name`）：沒帶 `name` ＝讀，帶 `name`（1～40 字）＝改；回 `{name}`。信頭「寄件人：…」說明行的名字用它，見 design/MAIL-HEADER.md |
 | `node_create` | `{name, machine, device_id}` | 建節點（歸此帳號與其租戶），回 `{id, key, bell_topic, rotated}`；**金鑰只在這次回應出現**，資料庫只存雜湊。同帳號同 `device_id` 重送＝換新金鑰（舊的立即失效，解決「回應遺失」）。每個帳號最多 20 個節點 |
 | `node_claim` | 標頭 `x-relay-key`＝這台電腦現有節點金鑰 | 節點尚未被認領、且在自己租戶底下才成功，回 `{ok, already, node}`；`409 already_claimed`／`409 tenant_not_yours`／`403 invalid_key` |
 

@@ -66,7 +66,7 @@ export const GUIDES = [
       { k: 'code', t: 'node relay/cloud-agent/inbox.mjs --done <信件id>' },
       { k: 'li', t: '回信一定要帶 --reply-to，並二選一：--reply 表示在等對方回、--no-reply 表示只是告知：' },
       { k: 'code', t: 'node relay/cloud-agent/send.mjs --to <寄件節點>/<寄件視窗> --reply-to <來信id> --body "內容" --no-reply' },
-      { k: 'note', t: '不帶 --reply-to，收發室不知道你回的是哪一封，會誤報「對方沒有回覆」。' },
+      { k: 'note', t: '不帶 --reply-to，收發室不知道你回的是哪一封，對方的已讀與往來記錄會對不上。' },
       { k: 'h', t: '檢查' },
       { k: 'li', t: '看收信紀錄：' },
       { k: 'code', t: 'tail /workspace/relay/recv.log' },

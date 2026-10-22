@@ -110,6 +110,8 @@ node relay/cloud-agent/inbox.mjs --done <信件id>   # 處理完標起來（可�
 
 每封信會顯示：信件 id、寄件人（節點／視窗）、「要回信／只是告知」、內文。
 
+第二行是「寄件人：…」說明（誰、從哪台設備、本人或成員身分）；本人的回信位址是 `u:xxxxxxxxxxxx`（不掛節點，`--to u:xxxxxxxxxxxx` 即可），舊寫法 `節點/u:xxxx` 後台仍認得。
+
 **回信**（一定要帶 `--reply-to <來信 id>`，並二選一 `--reply`＝我在等對方回、`--no-reply`＝只是告知）：
 
 ```
@@ -117,7 +119,7 @@ node relay/cloud-agent/send.mjs --to <寄件節點>/<寄件視窗> --reply-to <�
 echo "很長的內容" | node relay/cloud-agent/send.mjs --to W/W-政策 --body - --reply-to <來信id> --reply
 ```
 
-不帶 `--reply-to`，收發室不知道你回的是哪一封，會誤報「對方沒有回覆」。主動寄信也是同一個指令（只是不用 `--reply-to`）。
+不帶 `--reply-to`，收發室不知道你回的是哪一封，對方的已讀與往來記錄會對不上。主動寄信也是同一個指令（只是不用 `--reply-to`）。
 
 ## 四之一、一台環境住好幾位代理（roster 名單）
 

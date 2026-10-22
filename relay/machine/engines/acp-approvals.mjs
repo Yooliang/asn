@@ -18,8 +18,8 @@ export function parseVerdict(text) {
 // 信件全文 → { node, agent, body }。橋交給轉接器的 text 第一行是 `[RELAY 來信] trust=… from=<節點>/<視窗> to=… id=…`
 export function parseMailText(text) {
   const s = String(text ?? '')
-  const m = /^\[RELAY 來信\][^\n]*?\bfrom=([^\s/]*)\/(\S*)/.exec(s)
-  const body = s.replace(/^\[RELAY 來信\][^\n]*\n?/, '').replace(/^\[收發室\][^\n]*\n?/, '')
+  const m = /^\[RELAY 來信\][^\n]*?\bfrom=([^\s/]*)(?:\/(\S*))?/.exec(s)   // 本人的位址是不帶節點的 u:xxx（node＝人代號、agent 空）
+  const body = s.replace(/^\[RELAY 來信\][^\n]*\n?/, '').replace(/^寄件人：[^\n]*\n?/, '').replace(/^【要回信】[^\n]*\n?/, '').replace(/^\[收發室\][^\n]*\n?/, '')
   return { node: m?.[1] ?? '', agent: m?.[2] ?? '', body }
 }
 

@@ -57,7 +57,7 @@ function startBridge(h, st, env = {}) {
       PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: h.home, USERPROFILE: h.home,
       IRORI_RELAY_ID: 'T', IRORI_RELAY_KEY: 'fake-test-key', IRORI_LAUNCH_NO_AUTO: '1', IRORI_RELAY_URL: `http://127.0.0.1:${st.port}/relay`,
       IRORI_RELAY_POLL_MS: '200', IRORI_ROSTER_MS: '150', IRORI_RELAY_DEFAULT_AGENT: 'T-對方',
-      IRORI_REPLY_TIMEOUT_MS: '60000', IRORI_BRIDGE_TICK_MS: '100', IRORI_NOREPLY_WINDOW_MS: '0',
+      IRORI_REPLY_TIMEOUT_MS: '60000', IRORI_BRIDGE_TICK_MS: '100',
       IRORI_CLAUDE_SCRIPT: path.join(here, 'fake-claude.mjs'), FAKE_AGENTS: path.join(h.home, 'agents.json'),
       FAKE_RECORD: path.join(h.home, 'record.jsonl'), FAKE_INBOUND: path.join(h.home, 'inbound.jsonl'), ...env,
     },
@@ -98,19 +98,19 @@ test('重啟：還在等的信（waiting）→ 新的橋仍把回覆寄回原寄
   } finally { await st.close(); cleanup(h) }
 })
 
-test('重啟：已通知「沒回」的信（notified）→ 新的橋收到遲到回覆仍寄回（帶「遲到的回覆」）', async () => {
+test('重啟：等過頭的信（notified）→ 新的橋收到遲到回覆仍寄回（原文，不通知寄件人）', async () => {
   const st = await fakeServer([mail(1)]), h = makeHome()
   try {
     const b1 = startBridge(h, st, { IRORI_REPLY_TIMEOUT_MS: '300' })
-    await b1.until(() => notices(st).length >= 1)
+    await b1.until(() => /reply wait over/.test(b1.log))
     await b1.stop()
     const b2 = startBridge(h, st, { IRORI_REPLY_TIMEOUT_MS: '300' })
     await b2.until(() => /pending restored: 1 \(waiting 0, notified 1\)/.test(b2.log))
     b2.says('重啟後才做完')
     await b2.until(() => /late reply from T-對方/.test(b2.log))
     const back = st.sent.filter(s => /重啟後才做完/.test(s.body))
-    assert.equal(back.length, 1); assert.match(back[0].body, /^（遲到的回覆/); assert.equal(back[0].reply_to, uid(1))
-    assert.equal(notices(st).length, 1)   // 重啟沒有重複寄通知
+    assert.equal(back.length, 1); assert.equal(back[0].body, '重啟後才做完'); assert.equal(back[0].reply_to, uid(1))
+    assert.equal(notices(st).length, 0)   // 從來不通知寄件人
     await b2.stop()
   } finally { await st.close(); cleanup(h) }
 })

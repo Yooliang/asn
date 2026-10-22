@@ -4,7 +4,7 @@
 // 執行：node --test relay/machine/test/
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { NO_REPLY_RE, NO_REPLY_TIP, headReply, mailHead, parseSendHead, replyLabel, toReplyFlag, wantsReply } from '../mail-format.mjs'
+import { NO_REPLY_RE, fromAddress, headReply, isPersonMail, mailHead, mailPreamble, parseSendHead, replyLine, senderLine, replyLabel, toReplyFlag, wantsReply } from '../mail-format.mjs'
 
 const ID = '00000000-0000-0000-0000-000000000001'
 
@@ -97,6 +97,45 @@ test('代寄抬頭 reply=yes|no：放最後（有無 re= 都行）、放 re= 前
   assert.equal(e.reply, undefined); assert.equal(e.body, 'reply=no 這是內文的第一行')
 })
 
-test('逾時提醒的提示句：講明 --no-reply 與代寄的 reply=no', () => {
-  assert.equal(NO_REPLY_TIP, '只是告知的信，寄件時用 --no-reply（代寄寫 reply=no）就不會提醒')
+const ALIAS = 'u:3cda66252c34'
+const owner = { id: ID, trust: 'owner', from_node: 'XISU', from_agent: ALIAS, to_agent: 'T-甲', expects_reply: true, sender_display: '小良', sender_device: 'Oppo 手機' }
+const member = { id: ID, trust: 'member', from_node: 'H', from_agent: 'asn', to_agent: 'T-甲', expects_reply: false, sender_device: '小良的家用機', sender_engine: 'claude' }
+
+test('本人的信：回信位址是人代號（不掛節點）、說明行有名字和設備；信頭其餘欄位不變', () => {
+  assert.equal(mailHead(owner), `[RELAY 來信] trust=owner from=${ALIAS} to=T-甲 id=${ID} engine=claude reply=yes`)
+  assert.equal(senderLine(owner), '寄件人：小良（本人，帳號簽章已驗證，從「Oppo 手機」寄出）')
+  assert.equal(senderLine({ ...owner, sender_device: undefined }), '寄件人：小良（本人，帳號簽章已驗證）')
+  assert.equal(fromAddress(owner), ALIAS)
+  assert.ok(!mailHead(owner).includes('XISU') && !senderLine(owner).includes('XISU'))
+  assert.equal(headReply(mailHead(owner) + '\n'), 'yes', 'reply= 仍在第一行最後')
+})
+
+test('回信位址不變：後台沒給 sender_display（舊後台）、或 member，位址照舊是 節點/視窗名', () => {
+  assert.equal(isPersonMail({ ...owner, sender_display: undefined }), false)
+  assert.equal(fromAddress({ ...owner, sender_display: undefined }), `XISU/${ALIAS}`)
+  assert.equal(fromAddress({ ...owner, trust: 'member' }), `XISU/${ALIAS}`, 'member 即使視窗名長得像人代號也不換位址')
+  assert.equal(fromAddress(member), 'H/asn')
+  assert.equal(mailHead(member), `[RELAY 來信] trust=member from=H/asn to=T-甲 id=${ID} engine=claude reply=no`)
+})
+
+test('member 的說明行：寫「成員身分」、不含節點代號；引擎名、雲端代理、收發室通知', () => {
+  assert.equal(senderLine(member), '寄件人：asn（「小良的家用機」上的 Claude 視窗，成員身分）')
+  assert.ok(!senderLine(member).includes('H/') && !/\bH\b/.test(senderLine(member)))
+  assert.equal(senderLine({ ...member, sender_engine: undefined }), '寄件人：asn（「小良的家用機」上的視窗，成員身分）')
+  assert.equal(senderLine({ ...member, sender_device: undefined, sender_engine: 'gemini' }), '寄件人：asn（Gemini 視窗，成員身分）')
+  assert.equal(senderLine({ ...member, sender_device: undefined, sender_engine: undefined }), '寄件人：asn（成員身分）')
+  assert.equal(senderLine({ ...member, from_agent: 'Grok', sender_engine: 'cloud', sender_device: 'grok' }), '寄件人：Grok（雲端代理，成員身分）')
+  assert.equal(senderLine({ ...member, from_agent: 'W-收發室' }), '寄件人：收發室通知（成員身分）')
+  assert.equal(senderLine({ ...member, sender_device: 'H' }), '寄件人：asn（Claude 視窗，成員身分）', '設備名等於節點代號就省略')
+  assert.equal(senderLine({ ...member, sender_device: '甲\n「乙」' }), '寄件人：asn（「甲 乙」上的 Claude 視窗，成員身分）')
+})
+
+test('【要回信】行：只有 reply=yes 且收件是 claude 才有；位址與信件編號填好', () => {
+  assert.equal(replyLine(member), '')
+  assert.equal(replyLine({ ...member, expects_reply: null }), '')
+  assert.equal(replyLine(owner), `【要回信】回信位址=${ALIAS} 信件編號=${ID}：在視窗裡直接回答，對方看不到；請用 asn_send（to=回信位址、reply_to=信件編號）或 asn-cli send --to ${ALIAS} --reply-to ${ID} --no-reply 寄回。`)
+  assert.equal(replyLine({ ...member, expects_reply: true }).startsWith(`【要回信】回信位址=H/asn 信件編號=${ID}：`), true)
+  assert.equal(mailPreamble(owner), `${senderLine(owner)}\n${replyLine(owner)}\n`)
+  assert.equal(mailPreamble(owner, 'acp'), `${senderLine(owner)}\n`, '背景工作者的回答由橋寄回，不叫它用 asn_send')
+  assert.equal(mailPreamble(member), `${senderLine(member)}\n`)
 })
