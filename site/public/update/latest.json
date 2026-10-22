@@ -1,11 +1,11 @@
 {
-  "version": "0.1.21",
-  "notes": "夥伴 ID（#109）：同一個視窗改名、換電腦後仍認得是同一位夥伴",
-  "pub_date": "2026-10-21T22:56:08.839Z",
+  "version": "0.1.22",
+  "notes": "對話視窗上方的大按鈕列（#40）；切換模型支援自己開的視窗、開同名夥伴預設接續上次對話（#82）",
+  "pub_date": "2026-10-22T00:02:07.413Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjJ1ckNMTGxaR0RsTGViSzIzRFRKMDkzOUxSMjdzaUl4YlExRGh6Y3I4bWNkMkE2aFYzS3QrcXNRT3d6V0pGWG5YSWE0OSs2RHF2VzZaQnpJWjhlNXdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjIzMzY4CWZpbGU6QVNOXzAuMS4yMV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjIxClFzMGpHNXZWU2hQTHdZVjNuYmZ6QisrT0NrYnloQldDdmJnNkxmWm1qUkY4VE9uNFFKUHVPaU9TTTM3RWg5WnBSWlFtWGxZbmc4aDY5dGRwaFlpT0F3PT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.21_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybit6VXVLVURjdnExT0VZM1NNSVZGUjZkdncyNGtXSGd6bktPenpndSt2SVkzY3MvMG91U2kwY0NNTWJERFJOZ3J1R1RBWUd3Ymg4MGhBVVNVaFJvNGdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjI3MzI3CWZpbGU6QVNOXzAuMS4yMl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjIyCm1FMXBlT3lZL2VjdGhTK1VCVHd4eXBnenlla2U4amkzVTJXdWVMRmF3b2d2Nkt1cmhnSEZtS3RlbnF6Z1YxZTlLZGhRMUs5WE5kc00ySkdMakovK0JRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.22_x64-setup.exe"
     }
   }
 }
