@@ -2,6 +2,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { handleNodeRoomAction, type RoomDeps, syncNodeAuto } from "../_shared/rooms.ts";
 import { handleAgentInbox } from "../_shared/agent_inbox.ts";
+import { readNodeInbox } from "../_shared/inbox_exclude.ts";
 import { ACCOUNT_ACTIONS, type AccountDeps, cleanDisplayName, handleAccountAction } from "../_shared/account.ts";
 import { expectsReplyArgs } from "../_shared/expects_reply.ts";
 import { parseSelfName } from "../_shared/node_name.ts";
@@ -351,7 +352,7 @@ Deno.serve(async (req) => {
     return json(r.status, r.body);
   }
   if (action === "inbox" && req.method === "GET") {
-    const { data, error } = await db.rpc("irori_relay_inbox", { p_node: me.id });
+    const { data, error } = await readNodeInbox((fn, args) => db.rpc(fn, args), me.id, url.searchParams.get("exclude"));
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     return json(200, { messages: await withAttachments({ rpc }, data) });
   }

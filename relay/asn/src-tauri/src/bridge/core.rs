@@ -18,6 +18,13 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+/// 後台節點信箱一次最多回幾封（與 irori_relay_inbox 的 limit 一致）
+const INBOX_PAGE: usize = 50;
+/// 一輪收信最多往後多拿幾批
+const INBOX_ROUNDS: usize = 5;
+/// 排除清單的名字上限（與後台 Edge Function 的上限一致）
+const MAX_EXCLUDE: usize = 20;
+
 fn env_u64(k: &str, d: u64) -> u64 {
     crate::envc::get(k).and_then(|v| v.trim().parse().ok()).unwrap_or(d)
 }
@@ -497,25 +504,56 @@ impl Core {
         self.retry_at.map(|t| now >= t).unwrap_or(false)
     }
     async fn pull_once(&mut self) -> Result<(), String> {
-        let v = self.relay.api("inbox", None).await?;
-        let msgs: Vec<Value> = v.get("messages").and_then(Value::as_array).cloned().unwrap_or_default();
-        let mut dup = vec![];
-        for raw in msgs {
-            let Some(m) = Mail::from_json(&raw) else { continue };
-            if self.seen.contains(&m.id) {
-                dup.push(m.id);
-                continue;
+        // 寄給 ASN 自己視窗（含 7 天內舊名）的信橋不收（留給 ASN 畫面收），一律請後台別放進這份信箱，免得它們塞滿一頁、擋住後面寄給別人的信
+        let mut exclude = self.relay.active_names();
+        let mut done: HashSet<String> = HashSet::new();
+        for round in 0..INBOX_ROUNDS {
+            let v = match self.relay.api(&crate::relay::inbox_action(&exclude), None).await {
+                Ok(v) => v,
+                Err(e) if round == 0 => return Err(e),
+                Err(e) => {
+                    self.log.line(&format!("inbox refetch failed: {e}"));
+                    break;
+                }
+            };
+            let msgs: Vec<Value> = v.get("messages").and_then(Value::as_array).cloned().unwrap_or_default();
+            let full = msgs.len() >= INBOX_PAGE;
+            let (mut dup, mut held) = (vec![], vec![]);
+            for raw in msgs {
+                let Some(m) = Mail::from_json(&raw) else { continue };
+                if done.contains(&m.id) {
+                    continue;
+                }
+                if self.seen.contains(&m.id) {
+                    dup.push(m.id);
+                    continue;
+                }
+                if self.idx(&m.id).is_some() {
+                    // 已在處理中、還沒 ack：同樣佔著信箱的位置
+                    held.extend(m.to_agent.clone());
+                    continue;
+                }
+                // 還沒拿到第一份名單：收件視窗在空名單裡一定找不到，不能回「找不到」還 ack；先留在 inbox，等名單到了下一輪再處理（和群組一樣）
+                if !self.roster_ok {
+                    continue;
+                }
+                done.insert(m.id.clone());
+                held.extend(self.handle_mail_raw(m, Some(raw)).await);
             }
-            if self.idx(&m.id).is_some() {
-                continue;
+            self.ack_ids(&dup).await;
+            // 整頁（後台一次最多回 INBOX_PAGE 封）都被留著不處理的信占滿時，把這些視窗名也加進排除清單再拿下一批；沒有新名字（或後台不認排除參數）就停，不空轉
+            let mut fresh: Vec<String> = vec![];
+            for n in held {
+                if !exclude.contains(&n) && !fresh.contains(&n) {
+                    fresh.push(n);
+                }
             }
-            // 還沒拿到第一份名單：收件視窗在空名單裡一定找不到，不能回「找不到」還 ack；先留在 inbox，等名單到了下一輪再處理（和群組一樣）
-            if !self.roster_ok {
-                continue;
+            if !full || fresh.is_empty() || exclude.len() + fresh.len() > MAX_EXCLUDE {
+                break;
             }
-            self.handle_mail_raw(m, Some(raw)).await;
+            self.log.line(&format!("inbox page full of mail left in place; fetching more excluding {}", fresh.join(",")));
+            exclude.extend(fresh);
         }
-        self.ack_ids(&dup).await;
         Ok(())
     }
 
@@ -567,25 +605,26 @@ impl Core {
     }
 
     pub async fn handle_mail(&mut self, m: Mail) {
-        self.handle_mail_raw(m, None).await
+        self.handle_mail_raw(m, None).await;
     }
 
     /// raw＝後端回的原始信件（交給本人時原樣保留時間、附件等欄位）；沒有就用解析後的欄位重組
-    pub async fn handle_mail_raw(&mut self, m: Mail, raw: Option<Value>) {
+    /// 回傳 Some(視窗名)＝這封信留在信箱沒處理（ASN 自己的視窗、視窗自己在收、轉交失敗），收信時拿來排除，免得占滿一頁
+    pub async fn handle_mail_raw(&mut self, m: Mail, raw: Option<Value>) -> Option<String> {
         if let Some(to) = m.to_agent.clone() {
             // 寄給 ASN 自己視窗的信：留給 ASN 自己的畫面收（不轉交、不 ack）
             if self.relay.active_names().contains(&to) {
                 if self.self_handled.insert(m.id.clone()) {
                     self.log.line(&format!("id={} to={to} is ASN's own window: bridge skips", m.id));
                 }
-                return;
+                return Some(to);
             }
             // 這個視窗自己在收信（recv 心跳 90 秒內且 pid 活著）：橋不轉、不 ack；心跳過期就照舊轉交（只有 Claude 視窗會自己收信）
             if self.engine_of(&to) == "claude" && crate::heartbeat::read_heartbeat(&self.cfg.work_dir, &to).map(|h| crate::heartbeat::alive_fresh(&h, self.now, crate::heartbeat::stale_ms(), |p| (self.alive)(p))).unwrap_or(false) {
                 if self.self_handled.insert(m.id.clone()) {
                     self.log.line(&format!("id={} to={to} window receives by itself (recv heartbeat): bridge skips", m.id));
                 }
-                return;
+                return Some(to);
             }
         }
         let from_agent = m.from_agent.clone().unwrap_or_default();
@@ -602,7 +641,7 @@ impl Core {
                 // 否則交給本人（ASN 視窗）：信留在信箱不 ack，ASN 畫面收下才 ack。不再丟給隨便一個 session
                 None => {
                     self.hand_to_owner(&m, raw, &from_agent).await;
-                    return;
+                    return None;
                 }
             },
         };
@@ -618,7 +657,7 @@ impl Core {
                 self.send_back(&Origin::of(&p), &format!("[收發室] 找不到名叫「{target}」的 session（目前可達：{names}）"), None, None).await;
             }
             self.ack_ids(&[m.id.clone()]).await;
-            return;
+            return None;
         }
         self.pending.push(p);
         if !no_reply {
@@ -638,8 +677,10 @@ impl Core {
             Err(e) => {
                 self.remove(&m.id);
                 self.log.line(&format!("cannot hand id={}: {e} (left in inbox)", m.id));
+                return Some(target);
             }
         }
+        None
     }
 
     /// 沒指定收件視窗的信交給本人：留在信箱（不 ack、不轉交），ASN 畫面以「寄件人 → 未指定收件人」顯示並由本人決定；寄件人（要回覆的話）收到一次說明

@@ -179,6 +179,16 @@ pub fn build_set_name_body(name: &str) -> Value {
     json!({ "name": name })
 }
 
+/// 節點信箱的讀取動作。帶 exclude＝請後台別回寄給這些視窗名的信（逗號分隔、各自編碼；含逗號的名字略過，最多 20 個）。
+/// 舊版後台不認得這個參數、照舊回最舊的一頁，所以舊後台也不會壞。
+pub fn inbox_action(exclude: &[String]) -> String {
+    let names: Vec<String> = exclude.iter().filter(|n| !n.is_empty() && !n.contains(',')).take(20).map(|n| encode_component(n)).collect();
+    if names.is_empty() {
+        "inbox".into()
+    } else {
+        format!("inbox&exclude={}", names.join(","))
+    }
+}
 /// 後台還沒部署 set_name（404）或不認得（400）：靜默略過，不當錯誤
 pub fn set_name_unsupported(err: &str) -> bool {
     err.contains("HTTP 404") || err.contains("HTTP 400")
@@ -388,7 +398,8 @@ impl Relay {
         if self.bridge_on.load(Ordering::Relaxed) || !self.owns_unaddressed() {
             return;
         }
-        let Ok(v) = self.api("inbox", None).await else { return };
+        // ASN 自己視窗的信由畫面另外收，不要讓它們占滿這一頁
+        let Ok(v) = self.api(&inbox_action(&self.active_names()), None).await else { return };
         for m in v.get("messages").and_then(Value::as_array).cloned().unwrap_or_default() {
             let none = m.get("to_agent").and_then(Value::as_str).map(str::is_empty).unwrap_or(true);
             let from = m.get("from_agent").and_then(Value::as_str).unwrap_or("");
