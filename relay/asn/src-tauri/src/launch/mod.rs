@@ -6,6 +6,7 @@ pub(crate) mod local;
 pub(crate) mod prefs;
 pub(crate) mod profiles;
 mod resume;
+mod subagents;
 mod switch;
 
 use crate::relay::Relay;
@@ -78,7 +79,13 @@ pub async fn partner_console_query(req: PartnerConsoleReq) -> Result<Value, Stri
     blocking_timeout(move || console::partner_console_query(req)).await
 }
 
+pub use subagents::SubagentsReq;
 pub use switch::{SwitchQueryReq, SwitchRunReq};
+
+/// 這個 Claude 視窗正在跑哪些子代理（只讀對話記錄檔）
+pub async fn subagents_query(req: SubagentsReq) -> Result<Value, String> {
+    blocking_timeout(move || subagents::subagents_query(req)).await
+}
 
 /// 讀這個夥伴 Claude 視窗的目前模型與是否閒置（只讀檔與讀程序命令列，不啟動子程序）
 pub async fn model_switch_query(req: SwitchQueryReq) -> Result<Value, String> {
