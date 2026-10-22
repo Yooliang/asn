@@ -1,13 +1,16 @@
 import type { Register } from 'claude-code'
 import { buildSendArgv, guardBash } from './lib'
+import { createStatus, questionDetail } from './status'
 
 const TOOL = 'mcp__asn__asn_send'
 
 export const register: Register = (on, options) => {
   const str = (k: string): string => (typeof options[k] === 'string' ? (options[k] as string) : '')
+  const st = createStatus() // 視窗狀態檔，見 status.ts
   const cfg = () => ({ asnCliPath: str('asn_cli_path'), sendMjsPath: str('send_mjs_path'), nodePath: str('node_path') })
 
   on('session.start', async ($, e, next) => {
+    st.sessionStart({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root })
     await $.tool.register({
       name: 'asn_send',
       isDeferred: false,
@@ -51,4 +54,37 @@ export const register: Register = (on, options) => {
     const why = guardBash(e.command)
     return why ? { deny: why } : next(e)
   }).catch(($, e, next) => (next.called ? next(e) : { deny: 'asn 寄信守門發生內部錯誤' }))
+
+  // ───── 視窗狀態檔（只看主迴圈 e.agentId === undefined；全部純觀察、一律 next(e)）─────
+  on('turn.start', ($, e, next) => {
+    if (e.agentId === undefined) st.turnStart({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root }, e.turnId)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  on('classic.Stop', ($, e, next) => {
+    st.stop({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root }, e)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  on('turn.complete', ($, e, next) => {
+    if (e.agentId === undefined) st.turnComplete({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root }, e.reason)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
+    const isMain = e.agentId === undefined
+    const io = { home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: (p: string) => $.fs.read(p), write: (p: string, t: string) => $.fs.write(p, t), sid: () => $.session.id(), log: (t: string) => $.ui.log(t), root: $.plugin.root }
+    if (isMain) void st.write(io, 'waiting_user', questionDetail(e as never))
+    try {
+      return await next(e)
+    } finally {
+      if (isMain) void st.write(io, 'busy', '')
+    }
+  }).catch(($, e, next) => next(e))
+
+  on('session.end', async ($, e, next) => {
+    // 引擎給 session.end 約 1.5 秒：等寫完再放行
+    await st.write({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root }, 'idle', '已結束')
+    return next(e)
+  }).catch(($, e, next) => next(e))
 }
