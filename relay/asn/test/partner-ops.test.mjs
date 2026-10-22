@@ -64,7 +64,7 @@ test('送出前檢查與請求內容：只放該動作的欄位；節點與視�
 
 test('轉交的固定接班提示：名字放進去，手機補的話接在後面', () => {
   const p = handoverPrompt('小文')
-  assert.equal(p, '你是『小文』的下一任，前任的 context 用完了。先讀你與收發室的往來記錄（信尾那行的路徑）和前任留下的交接檔，接著把手上的工作做下去。')
+  assert.equal(p, '你是『小文』的下一任，前任的上下文用完了。先讀你與收發室的往來記錄（信尾那行的路徑）和前任留下的交接檔，接著把手上的工作做下去。')
   assert.equal(handoverPrompt('小文', '  先修測試  '), `${p}\n\n先修測試`)
   assert.equal(handoverPrompt('小文', ' '), p)
 })
@@ -115,7 +115,7 @@ test('詳情列：中文標籤；沒有的欄位不列；外殼只列程式名�
   assert.deepEqual(rows, [
     { label: 'PID', value: '4321' }, { label: '模型', value: 'opus[1m]' }, { label: '引擎', value: 'Claude' }, { label: '工作資料夾', value: 'D:\\Github\\asn' },
     { label: '開啟時間', value: '2026-10-22 09:05' }, { label: '狀態', value: '閒置' }, { label: '開啟方式', value: 'ASN 開的' },
-    { label: '外殼', value: 'Windows Terminal → pwsh → claude' }, { label: 'ASN 外掛', value: '已安裝' }, { label: 'context 用量', value: '已用 12%（12.3 萬 / 100 萬）' },
+    { label: '外殼', value: 'Windows Terminal → pwsh → claude' }, { label: 'ASN 外掛', value: '已安裝' }, { label: '上下文用量', value: '已用 12%（12.3 萬 / 100 萬）' },
   ])
   assert.ok(!JSON.stringify(rows).match(/secret|resume|NoProfile/), '參數不外露')
   assert.deepEqual(infoRows({ pid: 7, opened_by: 'user', mod: false, status: 'busy' }), [

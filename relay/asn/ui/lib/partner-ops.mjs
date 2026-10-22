@@ -91,7 +91,7 @@ export function buildOpRequest(friend, op, input = {}) {
 
 // 轉交的固定接班提示（電腦端開新 session 的第一句話；手機補的話接在後面）
 export const handoverPrompt = (name, note = '') => {
-  const base = `你是『${name}』的下一任，前任的 context 用完了。先讀你與收發室的往來記錄（信尾那行的路徑）和前任留下的交接檔，接著把手上的工作做下去。`
+  const base = `你是『${name}』的下一任，前任的上下文用完了。先讀你與收發室的往來記錄（信尾那行的路徑）和前任留下的交接檔，接著把手上的工作做下去。`
   const extra = String(note ?? '').trim()
   return extra ? `${base}\n\n${extra}` : base
 }
@@ -212,6 +212,6 @@ export function infoRows(result) {
   const mod = pick(r, 'mod', 'mod_installed', 'asn_mod')
   const modOn = typeof mod === 'boolean' ? mod : mod && typeof mod === 'object' ? mod.installed !== false : null
   if (modOn != null) add('ASN 外掛', modOn ? '已安裝' : '沒有安裝')
-  add('context 用量', contextText(pick(r, 'context', 'context_usage')))
+  add('上下文用量', contextText(pick(r, 'context', 'context_usage')))
   return rows
 }
