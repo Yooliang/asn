@@ -70,13 +70,13 @@ pub struct CodexBin {
     pub pre: Vec<String>,
 }
 
-/// 找到 codex 執行檔。測試用：IRORI_CODEX_SCRIPT 指向一支 node 腳本時，用 node 跑它來取代 codex。
+/// 找到 codex 執行檔。測試用：ASN_CODEX_SCRIPT（舊名 IRORI_CODEX_SCRIPT）指向一支 node 腳本時，用 node 跑它來取代 codex。
 /// Windows 的 npm 安裝只有 codex.cmd 外殼（不能直接 spawn），所以改成「node + 套件裡的 bin/codex.js」
 pub fn resolve_codex(env: &[(String, String)]) -> CodexBin {
-    if let Some(s) = env_get(env, "IRORI_CODEX_SCRIPT").filter(|s| !s.is_empty()) {
+    if let Some(s) = env_get(env, "ASN_CODEX_SCRIPT").filter(|s| !s.is_empty()) {
         return CodexBin { command: "node".into(), pre: vec![s] };
     }
-    if let Some(b) = env_get(env, "IRORI_CODEX_BIN").filter(|s| !s.is_empty()) {
+    if let Some(b) = env_get(env, "ASN_CODEX_BIN").filter(|s| !s.is_empty()) {
         return CodexBin { command: b, pre: vec![] };
     }
     if cfg!(windows) {
@@ -240,15 +240,15 @@ impl CodexEngine {
             bin: resolve_codex(&env),
             cenv: codex_child_env(&env),
             home: codex_home(&env, &ctx.home),
-            poll_ms: num(&env, "IRORI_CODEX_POLL_MS", 2000),
-            health_ttl_ms: num(&env, "IRORI_CODEX_HEALTH_TTL_MS", 30_000),
-            outstanding_max_ms: num(&env, "IRORI_CODEX_OUTSTANDING_MAX_MS", 3_600_000),
-            drain_warn_ms: num(&env, "IRORI_CODEX_DRAIN_WARN_MS", 180_000),
-            max_mail_chars: num(&env, "IRORI_CODEX_MAX_MAIL_CHARS", 12_000) as usize, // codex queue 只能走命令列參數，Windows 命令列上限約 32k 個字元
-            exists_only: flag("IRORI_CODEX_LOCK_MODE").as_deref() == Some("exists") || !cfg!(windows),
-            allow_full_access: flag("IRORI_CODEX_ALLOW_FULL_ACCESS").as_deref() == Some("1"),
-            reply_note: flag("IRORI_CODEX_REPLY_NOTE").as_deref() != Some("0"),
-            skip_version: flag("IRORI_CODEX_SKIP_VERSION_CHECK").as_deref() == Some("1"),
+            poll_ms: num(&env, "ASN_CODEX_POLL_MS", 2000),
+            health_ttl_ms: num(&env, "ASN_CODEX_HEALTH_TTL_MS", 30_000),
+            outstanding_max_ms: num(&env, "ASN_CODEX_OUTSTANDING_MAX_MS", 3_600_000),
+            drain_warn_ms: num(&env, "ASN_CODEX_DRAIN_WARN_MS", 180_000),
+            max_mail_chars: num(&env, "ASN_CODEX_MAX_MAIL_CHARS", 12_000) as usize, // codex queue 只能走命令列參數，Windows 命令列上限約 32k 個字元
+            exists_only: flag("ASN_CODEX_LOCK_MODE").as_deref() == Some("exists") || !cfg!(windows),
+            allow_full_access: flag("ASN_CODEX_ALLOW_FULL_ACCESS").as_deref() == Some("1"),
+            reply_note: flag("ASN_CODEX_REPLY_NOTE").as_deref() != Some("0"),
+            skip_version: flag("ASN_CODEX_SKIP_VERSION_CHECK").as_deref() == Some("1"),
             probed: tokio::sync::OnceCell::new(),
             usable: AtomicBool::new(false),
             health: Mutex::new(Health { ok: true, ..Default::default() }),
@@ -291,7 +291,7 @@ impl Inner {
                         None => self.ctx.log(format!("codex --version 看不懂：{}", out.trim().chars().take(80).collect::<String>())),
                         Some((major, minor, _, text)) => {
                             if major == 0 && minor < MIN_MINOR && !self.skip_version {
-                                self.ctx.log(format!("codex {text} 比已驗證的最低版本 0.{MIN_MINOR} 舊，Codex 引擎停用（codex update 或設 IRORI_CODEX_SKIP_VERSION_CHECK=1 自負風險）"));
+                                self.ctx.log(format!("codex {text} 比已驗證的最低版本 0.{MIN_MINOR} 舊，Codex 引擎停用（codex update 或設 ASN_CODEX_SKIP_VERSION_CHECK=1 自負風險）"));
                                 return;
                             }
                             if text != TESTED_VERSION {
@@ -495,10 +495,10 @@ impl Inner {
         let policy = w.path.as_deref().and_then(|p| read_policy(std::path::Path::new(p), 1 << 20, 64 << 20));
         // 讀不到權限設定＝不知道是不是完全存取：寧可不轉（fail-closed）
         let Some(policy) = policy.or_else(|| self.allow_full_access.then(|| super::codex_state::Policy { approval: String::new(), sandbox: String::new() })) else {
-            return self.fail(&id, format!("讀不到 Codex 視窗「{to}」的權限設定，收發室不把外部來信轉進去（要放行請設 IRORI_CODEX_ALLOW_FULL_ACCESS=1）"));
+            return self.fail(&id, format!("讀不到 Codex 視窗「{to}」的權限設定，收發室不把外部來信轉進去（要放行請設 ASN_CODEX_ALLOW_FULL_ACCESS=1）"));
         };
         if is_full_access(&policy) && !self.allow_full_access {
-            return self.fail(&id, format!("Codex 視窗「{to}」是「完全存取（沒有沙盒）」模式，收發室不把外部來信轉進去（要放行請設 IRORI_CODEX_ALLOW_FULL_ACCESS=1）"));
+            return self.fail(&id, format!("Codex 視窗「{to}」是「完全存取（沒有沙盒）」模式，收發室不把外部來信轉進去（要放行請設 ASN_CODEX_ALLOW_FULL_ACCESS=1）"));
         }
         // --message=<內文>（連在一起）：內文若以 -- 開頭，分開寫會被 codex 的參數解析器當成旗標而失敗
         let args = vec!["queue".to_string(), "--thread".to_string(), w.thread_id.clone(), format!("--message={}", self.wrap(&id, &text))];

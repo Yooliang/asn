@@ -96,8 +96,9 @@ test('check：執行前再驗 profile、名稱、cwd（白名單＋存在）、�
 test('名稱規則與仲介一致；buildSpawn 只替換 {name}、展開 %VAR%；childEnv 清 CLAUDE_*／NO_COLOR／仲介金鑰', () => {
   for (const ok of ['H-英雄-2', 'a', 'X'.repeat(40)]) assert.ok(NAME_RE.test(ok), ok)
   for (const bad of ['', '-x', 'a b', "a'b", 'a"b', 'a;b', 'a$b', 'a`b', 'X'.repeat(41), 'a{b}']) assert.ok(!NAME_RE.test(bad), bad)
-  const env = { SystemRoot: 'C:\\Windows', PATH: 'p', CLAUDECODE: '1', CLAUDE_CODE_ENTRYPOINT: 'cli', NO_COLOR: '1', IRORI_RELAY_KEY: 'k', IRORI_RELAY_ANON_KEY: 'a', IRORI_RELAY_ID: 'H' }
-  assert.deepEqual(childEnv(env), { SystemRoot: 'C:\\Windows', PATH: 'p', IRORI_RELAY_ID: 'H' })
+  const env = { SystemRoot: 'C:\\Windows', PATH: 'p', CLAUDECODE: '1', CLAUDE_CODE_ENTRYPOINT: 'cli', NO_COLOR: '1', IRORI_RELAY_KEY: 'k', IRORI_RELAY_ANON_KEY: 'a', ASN_RELAY_KEY: 'k2', ASN_RELAY_ANON_KEY: 'a2', IRORI_RELAY_ID: 'H' }
+  // 金鑰新舊名都擋；非金鑰的改名變數新舊名都帶
+  assert.deepEqual(childEnv(env), { SystemRoot: 'C:\\Windows', PATH: 'p', IRORI_RELAY_ID: 'H', ASN_RELAY_ID: 'H' })
   const d = tmp()
   try {
     const c = loadConfig(writeJson(path.join(d, 'a.json'), CONF(d))).config

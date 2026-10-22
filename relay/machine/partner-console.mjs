@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // 本機 CLI 夥伴的主控台視窗：查詢可否切換、顯示／隱藏（Windows 用 ShowWindow；其他平台回報不支援）。
+import { envGet } from './env-compat.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -40,7 +41,7 @@ function alivePid(pid) {
 
 /** @returns {number|null} */
 export function resolveClaudePidByName(name, env = process.env) {
-  const script = env.IRORI_CLAUDE_SCRIPT || ''
+  const script = envGet(env, 'CLAUDE_SCRIPT') || ''
   const bin = script ? process.execPath : (env.CLAUDE_BIN || 'claude')
   const pre = script ? [script] : []
   let out

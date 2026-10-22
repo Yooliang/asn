@@ -22,7 +22,7 @@ issue #12 第二期。目標：打開 ASN ＝ 這台設備的收發室就上線�
 
 | Node 行為（檔案） | Rust（檔案） | 第一段 |
 |---|---|---|
-| 設定與環境變數（`bridge.mjs` 開頭，`IRORI_*`） | `core.rs` `Config::from_env`（同名同預設值；忙碌狀態改成固定的 busy／working／running，不支援自訂正規式） | 已搬 |
+| 設定與環境變數（`bridge.mjs` 開頭，`ASN_*`，舊名 `IRORI_*` 相容） | `core.rs` `Config::from_env`（同名同預設值；忙碌狀態改成固定的 busy／working／running，不支援自訂正規式） | 已搬 |
 | 單一執行個體 `bridge.pid`（`bridge.mjs`、`relay-core.mjs`） | `lock.rs` | 已搬，與 Node 橋互斥 |
 | 認出舊橋、停舊橋與排程（`run-bridge.ps1`、`install-task.ps1` 的反向操作；ONBOARDING 3.9） | `handoff.rs` | 已搬，受設定開關保護 |
 | 視窗名單 `claude agents --json`（`engines/claude.mjs` `listWindows`） | `roster.rs`：直接讀 `~/.claude/sessions/<pid>.json`（pid 活著、`kind=interactive`、`entrypoint=cli`、排除收發室自己） | 已搬（資料來源改了，見第 6 節） |
@@ -79,7 +79,7 @@ issue #12 第二期。目標：打開 ASN ＝ 這台設備的收發室就上線�
 
 - **後端**（`asn_node_create`、`_shared/account.ts`）本來就是自動產生：`<租戶前綴>` 加亂數 8 碼十六進位（前綴 `t<序號>-`，舊租戶用 `n`），只含 `[a-z0-9-]`，撞到 PK 就重試最多 5 次。電腦名稱只進 `nodes.name`／`nodes.machine`（顯示用），使用者不輸入任何代號，所以**不需要新的 migration**。
 - **ASN 端補強**（本 PR）：預設視窗名原本是 `<節點>-ASN`，新電腦會因此在畫面上露出自動產生的代號（例如 `t5-ab12cd34-ASN`）。改成：節點代號符合自動產生格式（`is_auto_node_id`）時，預設視窗名用電腦名稱（`<電腦名>-ASN`，電腦名稱限 36 字）。手動取代號的舊電腦（`H`、`w02`…）不符合這個格式，照舊不動。使用者仍可在設定改視窗名，設定值優先。
-- **身分檔**：沒有 `IRORI_RELAY_ID`、沒有 `~/.irori-relay/node` 的新電腦，登入建立節點後 `write_node_files` 會把代號寫進 `~/.irori-relay/node`（金鑰在 `<代號>.key`，先限縮權限再寫入、讀回比對）。之後 ASN、內建橋、未來的 `asn send` 都經 `identity::resolve` 讀同一份，所以是同一個節點。環境變數 `IRORI_RELAY_ID` 永遠優先。
+- **身分檔**：沒有 `ASN_RELAY_ID`、沒有 `~/.irori-relay/node` 的新電腦，登入建立節點後 `write_node_files` 會把代號寫進 `~/.irori-relay/node`（金鑰在 `<代號>.key`，先限縮權限再寫入、讀回比對）。之後 ASN、內建橋、未來的 `asn send` 都經 `identity::resolve` 讀同一份，所以是同一個節點。環境變數 `ASN_RELAY_ID` 永遠優先。
 - **device_id 綁定這台電腦**：ASN 資料夾（`%APPDATA%\tw.irori.asn\device_id`，本機自產的亂數）。後端以「帳號＋device_id」唯一：
   - 同一個帳號、同一個 `device_id` 重送 `node_create`＝換新金鑰（舊金鑰立即失效），不會多出節點；回應遺失或金鑰檔沒寫成功時重試即可。
   - **重灌 Windows**：`%APPDATA%` 與 `~/.irori-relay` 都沒了，產生新的 `device_id`，會建立**新節點**；舊節點留在帳號下，由使用者在「我的設備」移除（帳號上限 20 個）。若重灌時有保留 `%APPDATA%\tw.irori.asn` 與 `~/.irori-relay`，就是同一台，什麼都不會變。
@@ -121,11 +121,11 @@ Rust 測試在各模組的 `#[cfg(test)]`，整合測試在 `bridge/tests.rs`（
 ## 6. 與 Node 橋的已知差異
 
 1. **名單來源**：Node 橋跑 `claude agents --json`（約每次 1～3 秒的子程序），內建橋直接讀 session 檔。欄位（pid、name、cwd、status、kind、entrypoint、updatedAt）與 Node 橋本來就讀的 `~/.claude/sessions/<pid>.json` 相同，但 `status` 在 session 檔裡是否與 `agents --json` 一致，要在實機確認（忙碌延後依賴它）。若不一致，第二段改回呼叫 `claude agents --json`。
-2. **非互動式 session**：Node 橋另存一份含背景 session 的 `agents`（給 `IRORI_RELAY_ALLOW` 用）。內建橋名單與可轉交名單相同，`IRORI_RELAY_ALLOW` 只對名單內的視窗有效。
-3. **忙碌狀態**：固定 busy／working／running（不分大小寫），不讀 `IRORI_BUSY_STATUS_RE`。
+2. **非互動式 session**：Node 橋另存一份含背景 session 的 `agents`（給 `ASN_RELAY_ALLOW` 用）。內建橋名單與可轉交名單相同，`ASN_RELAY_ALLOW` 只對名單內的視窗有效。
+3. **忙碌狀態**：固定 busy／working／running（不分大小寫），不讀 `ASN_BUSY_STATUS_RE`。
 4. **寄給 ASN 自己視窗的信**：內建橋不處理（見第 2 節表格）。
 5. **群組、附件、孤兒清理**（第二段已搬）：
-   - 群組上下文與附件的「下載指令」第二段暫時沿用 Node，**第四段起換成 ASN 自己的命令列**：`<asn-cli 完整路徑> attach --id …`、`<asn-cli 完整路徑> room --room-read …`（路徑用斜線、含空白才加引號；`asn-cli` 找不到時退回 `asn` 主程式自己）。環境變數 `IRORI_ATTACH_CMD`／`IRORI_ROOM_CMD` 仍可整串覆寫。
+   - 群組上下文與附件的「下載指令」第二段暫時沿用 Node，**第四段起換成 ASN 自己的命令列**：`<asn-cli 完整路徑> attach --id …`、`<asn-cli 完整路徑> room --room-read …`（路徑用斜線、含空白才加引號；`asn-cli` 找不到時退回 `asn` 主程式自己）。環境變數 `ASN_ATTACH_CMD`／`ASN_ROOM_CMD` 仍可整串覆寫。
    - 群組項目的逾時：轉交逾時、等回覆逾時都只記 log 並清掉，不寄通知（與 Node 橋相同）。
    - 孤兒清理多一道限制（見第 3 節）。
 6. **自己更新**：Node 橋的 `self-update.mjs` 是「橋自己 git pull 並重啟」。內建橋跟著 ASN 走，ASN 的更新由 ASN 自己的更新機制（`updater.rs`）負責，所以這一項不搬。

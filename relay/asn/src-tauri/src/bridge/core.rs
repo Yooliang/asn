@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 fn env_u64(k: &str, d: u64) -> u64 {
-    std::env::var(k).ok().and_then(|v| v.trim().parse().ok()).unwrap_or(d)
+    crate::envc::get(k).and_then(|v| v.trim().parse().ok()).unwrap_or(d)
 }
 
 /// 橋的設定。環境變數沿用 Node 橋的名稱與預設值（README「設定」）
@@ -53,11 +53,11 @@ pub struct Config {
     pub room_cmd: Option<String>,
     /// 依視窗名的往來記錄資料夾（預設 `~/.asn/handoff`；測試一律指到暫存資料夾）
     pub handoff_dir: PathBuf,
-    /// 其他引擎（第五段）：IRORI_ENGINES 的值（逗號分隔的 acp／codex）；None＝自動（有 agents.json 載 acp、有 ~/.codex 載 codex）
+    /// 其他引擎（第五段）：ASN_ENGINES（舊名 IRORI_ENGINES）的值（逗號分隔的 acp／codex）；None＝自動（有 agents.json 載 acp、有 ~/.codex 載 codex）
     pub engines: Option<String>,
     /// 引擎子程序環境的來源（啟動時的環境變數快照）
     pub engine_env: Vec<(String, String)>,
-    /// ACP 工作者設定檔（預設 `~/.irori-relay/agents.json`，與舊橋同一份；IRORI_AGENTS_FILE 可改）
+    /// ACP 工作者設定檔（預設 `~/.irori-relay/agents.json`，與舊橋同一份；ASN_AGENTS_FILE 可改，舊名 IRORI_AGENTS_FILE 仍可用）
     pub agents_file: PathBuf,
     /// 使用者家目錄（找 ~/.codex；測試指到暫存資料夾）
     pub home: PathBuf,
@@ -70,28 +70,28 @@ impl Config {
         let test_handoff = work_dir.join("handoff");
         let (work_dir_agents, work_dir_home) = (work_dir.join("agents.json"), work_dir.join("home"));
         let home = crate::identity::home_dir();
-        let list = |k: &str| std::env::var(k).unwrap_or_default().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect::<Vec<_>>();
+        let list = |k: &str| crate::envc::get(k).unwrap_or_default().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect::<Vec<_>>();
         Config {
             node: node.into(),
-            mailbox_name: std::env::var("IRORI_MAILBOX_NAME").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| format!("{node}-收發室")),
-            default_agent: std::env::var("IRORI_RELAY_DEFAULT_AGENT").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "H-工頭-2".into()),
-            extra_allow: list("IRORI_RELAY_ALLOW"),
+            mailbox_name: crate::envc::get("ASN_MAILBOX_NAME").filter(|s| !s.trim().is_empty()).unwrap_or_else(|| format!("{node}-收發室")),
+            default_agent: crate::envc::get("ASN_RELAY_DEFAULT_AGENT").filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "H-工頭-2".into()),
+            extra_allow: list("ASN_RELAY_ALLOW"),
             work_dir,
             sessions_dir: home.join(".claude").join("sessions"),
-            poll_ms: env_u64("IRORI_RELAY_POLL_MS", 120_000),
-            roster_ms: env_u64("IRORI_ROSTER_MS", 60_000),
-            tick_ms: env_u64("IRORI_BRIDGE_TICK_MS", 5_000),
-            reply_timeout_ms: env_u64("IRORI_REPLY_TIMEOUT_MS", 600_000),
-            notice_window_ms: env_u64("IRORI_NOREPLY_WINDOW_MS", 1_800_000),
-            late_keep_ms: env_u64("IRORI_LATE_KEEP_MS", 86_400_000),
-            late_max: env_u64("IRORI_LATE_MAX", 200) as usize,
-            busy_grace_ms: env_u64("IRORI_BUSY_GRACE_MS", 120_000),
-            busy_max_ms: env_u64("IRORI_BUSY_MAX_MS", 3_600_000),
-            forward_timeout_ms: env_u64("IRORI_FORWARD_TIMEOUT_MS", 120_000),
+            poll_ms: env_u64("ASN_RELAY_POLL_MS", 120_000),
+            roster_ms: env_u64("ASN_ROSTER_MS", 60_000),
+            tick_ms: env_u64("ASN_BRIDGE_TICK_MS", 5_000),
+            reply_timeout_ms: env_u64("ASN_REPLY_TIMEOUT_MS", 600_000),
+            notice_window_ms: env_u64("ASN_NOREPLY_WINDOW_MS", 1_800_000),
+            late_keep_ms: env_u64("ASN_LATE_KEEP_MS", 86_400_000),
+            late_max: env_u64("ASN_LATE_MAX", 200) as usize,
+            busy_grace_ms: env_u64("ASN_BUSY_GRACE_MS", 120_000),
+            busy_max_ms: env_u64("ASN_BUSY_MAX_MS", 3_600_000),
+            forward_timeout_ms: env_u64("ASN_FORWARD_TIMEOUT_MS", 120_000),
             pull_backoff_ms: vec![5_000, 10_000, 20_000, 40_000, 60_000],
             claude_bin: std::env::var("CLAUDE_BIN").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "claude".into()),
             claude_pre: vec![],
-            model: std::env::var("IRORI_MAILBOX_MODEL").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "haiku".into()),
+            model: crate::envc::get("ASN_MAILBOX_MODEL").filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "haiku".into()),
             extra_env: vec![],
             report_asn_window: true,
             attach_cmd: attach::attach_cmd_from_env(),
@@ -99,11 +99,11 @@ impl Config {
             // 測試時絕不碰真實家目錄：往來記錄放進工作資料夾底下
             handoff_dir: if cfg!(test) { test_handoff } else { corrlog::default_dir() },
             // 測試時絕不碰真實的設定與 ~/.codex：只載 Claude，路徑都放進工作資料夾底下
-            engines: if cfg!(test) { Some("claude".into()) } else { std::env::var("IRORI_ENGINES").ok().filter(|s| !s.trim().is_empty()) },
+            engines: if cfg!(test) { Some("claude".into()) } else { crate::envc::get("ASN_ENGINES").filter(|s| !s.trim().is_empty()) },
             engine_env: std::env::vars().collect(),
-            agents_file: if cfg!(test) { work_dir_agents } else { std::env::var_os("IRORI_AGENTS_FILE").filter(|s| !s.is_empty()).map(PathBuf::from).unwrap_or_else(|| crate::identity::relay_home().join("agents.json")) },
+            agents_file: if cfg!(test) { work_dir_agents } else { crate::envc::get_os("ASN_AGENTS_FILE").filter(|s| !s.is_empty()).map(PathBuf::from).unwrap_or_else(|| crate::identity::relay_home().join("agents.json")) },
             home: if cfg!(test) { work_dir_home } else { home },
-            engine_refresh_ms: env_u64("IRORI_ROSTER_MS", 60_000),
+            engine_refresh_ms: env_u64("ASN_ROSTER_MS", 60_000),
         }
     }
 }

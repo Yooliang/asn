@@ -1,9 +1,10 @@
 // 通用 acp 轉接器（#134 第一期；調研與取捨見 docs/AGENT-ENGINES.md，上線步驟見該文件「第一期上線步驟」）。
 // 這個轉接器不接「使用者已經開著的視窗」（那只有 Claude／Codex 各自的入口辦得到），而是由收發室橋依設定
 // 長駐啟動一批「工作者」（背景 AI，例如 Gemini），名單上以工作者出現；收到信就送一輪、把回覆寄回（橋負責帶 reply_to）。
-// 設定檔 ~/.irori-relay/agents.json（範本 relay/machine/agents.example.json；IRORI_AGENTS_FILE 可改路徑）。
+// 設定檔 ~/.irori-relay/agents.json（範本 relay/machine/agents.example.json；ASN_AGENTS_FILE 可改路徑）。
 // 兩種驅動：protocol "agy-stream"（agy 原生 stream-json，預設、第一選擇）與 "acp"（標準 ACP，備援／其他 agent）。
-// IRORI_ENGINES=claude,acp 才會載入。
+// ASN_ENGINES=claude,acp 才會載入。
+import { envGet } from '../env-compat.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -33,7 +34,7 @@ function openStore(file, log) {
 
 // ctx：{ log, workDir, mailboxName, env?, send? }。send({to_node,to_agent,body})：橋提供的寄信函式（授權詢問、登入通知用）
 export function createEngine({ log, workDir, mailboxName, env = process.env, send, deps = {} }) {
-  const file = env.IRORI_AGENTS_FILE || path.join(os.homedir(), '.irori-relay', 'agents.json')
+  const file = envGet(env, 'AGENTS_FILE') || path.join(os.homedir(), '.irori-relay', 'agents.json')
   const makeDriver = deps.makeDriver ?? defaultMakeDriver
   const approvals = createApprovals({ log })
   const workers = new Map()

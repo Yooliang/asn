@@ -8,10 +8,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// 與 self-recv.mjs 的 HEARTBEAT_MS／STALE_MS 同值（可用同樣的環境變數覆寫）
 pub fn heartbeat_ms() -> u64 {
-    std::env::var("IRORI_RECV_HEARTBEAT_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(30_000)
+    crate::envc::get("ASN_RECV_HEARTBEAT_MS").and_then(|v| v.parse().ok()).unwrap_or(30_000)
 }
 pub fn stale_ms() -> u64 {
-    std::env::var("IRORI_RECV_STALE_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(90_000)
+    crate::envc::get("ASN_RECV_STALE_MS").and_then(|v| v.parse().ok()).unwrap_or(90_000)
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]

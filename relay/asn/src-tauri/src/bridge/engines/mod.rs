@@ -125,17 +125,24 @@ pub fn acp_clean_env(vars: &[(String, String)], extra: &[String]) -> Vec<(String
 /// 清掉 OPENAI_API_KEY／CODEX_API_KEY（帳務要走使用者自己的 ChatGPT 登入額度）、繼承來的視窗識別（CODEX_THREAD_ID 等）、
 /// NO_COLOR、CLAUDE*、仲介金鑰；保留 CODEX_HOME 與其他
 pub fn codex_child_env(vars: &[(String, String)]) -> Vec<(String, String)> {
-    const DROP: [&str; 8] = ["OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "CODEX_CI", "NO_COLOR", "IRORI_RELAY_KEY", "IRORI_RELAY_ANON_KEY"];
-    vars.iter()
+    const DROP: [&str; 10] = ["OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "CODEX_CI", "NO_COLOR", "ASN_RELAY_KEY", "ASN_RELAY_ANON_KEY", "IRORI_RELAY_KEY", "IRORI_RELAY_ANON_KEY"];
+    let kept: Vec<(String, String)> = vars
+        .iter()
         .filter(|(k, _)| {
             let u = k.to_uppercase();
             !(DROP.contains(&u.as_str()) || u.starts_with("CLAUDE") || u.starts_with("CODEX_SANDBOX") || u.starts_with("CODEX_MANAGED"))
         })
         .cloned()
-        .collect()
+        .collect();
+    // 登記過的非金鑰變數新舊名都帶（沒更新的舊程式照樣讀得到）
+    crate::envc::mirror_vec(kept)
 }
 
+/// 讀環境快照。名字登記在 [`crate::envc::PAIRS`] 的，新名（ASN_）優先、沒有才讀舊名（IRORI_）；其他名字照舊精確比對
 pub fn env_get(vars: &[(String, String)], k: &str) -> Option<String> {
+    if crate::envc::legacy(k).is_some() {
+        return crate::envc::pick_from(vars, k);
+    }
     vars.iter().find(|(n, _)| n.eq_ignore_ascii_case(k)).map(|(_, v)| v.clone())
 }
 
@@ -229,7 +236,7 @@ impl EngineSet {
     }
 }
 
-/// 要載入哪些引擎：IRORI_ENGINES（逗號分隔，acp／codex；claude 一律載入）有設就照它，沒設就自動：
+/// 要載入哪些引擎：ASN_ENGINES（舊名 IRORI_ENGINES；逗號分隔，acp／codex；claude 一律載入）有設就照它，沒設就自動：
 /// 有 agents.json 載 acp、有 ~/.codex 資料夾載 codex
 pub fn selected(spec: Option<&str>, agents_file: &Path, codex_home: &Path) -> (bool, bool) {
     match spec.map(|s| s.split(',').map(|x| x.trim().to_lowercase()).filter(|x| !x.is_empty()).collect::<Vec<_>>()) {
@@ -265,7 +272,7 @@ mod tests {
 
     #[test]
     fn acp_子程序環境是白名單_金鑰不外洩_env_pass_才帶() {
-        let vars = kv(&[("PATH", "p"), ("Home", "h"), ("GEMINI_API_KEY", "k"), ("OPENAI_API_KEY", "k2"), ("IRORI_RELAY_KEY", "k3"), ("FAKE_X", "1"), ("USERPROFILE", "u")]);
+        let vars = kv(&[("PATH", "p"), ("Home", "h"), ("GEMINI_API_KEY", "k"), ("OPENAI_API_KEY", "k2"), ("IRORI_RELAY_KEY", "k3"), ("ASN_RELAY_KEY", "k4"), ("FAKE_X", "1"), ("USERPROFILE", "u")]);
         let out = acp_clean_env(&vars, &[]);
         let names: Vec<&str> = out.iter().map(|(k, _)| k.as_str()).collect();
         assert_eq!(names, vec!["PATH", "Home", "USERPROFILE"]);
@@ -282,6 +289,26 @@ mod tests {
     }
 
     #[test]
+    fn codex_子程序環境_金鑰新舊名都擋_非金鑰的改名變數新舊名都帶() {
+        let vars = kv(&[("PATH", "p"), ("ASN_RELAY_KEY", "k1"), ("ASN_RELAY_ANON_KEY", "a1"), ("IRORI_RELAY_KEY", "k2"), ("IRORI_RELAY_ANON_KEY", "a2"), ("IRORI_RELAY_ID", "N")]);
+        let out = codex_child_env(&vars);
+        let get = |k: &str| out.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+        for secret in ["ASN_RELAY_KEY", "ASN_RELAY_ANON_KEY", "IRORI_RELAY_KEY", "IRORI_RELAY_ANON_KEY"] {
+            assert_eq!(get(secret), None, "{secret} 不該帶進子程序");
+        }
+        assert_eq!(get("IRORI_RELAY_ID"), Some("N"));
+        assert_eq!(get("ASN_RELAY_ID"), Some("N"));
+    }
+
+    #[test]
+    fn env_get_只設舊名_只設新名_兩個都設以新名為準() {
+        assert_eq!(env_get(&kv(&[("IRORI_CODEX_BIN", "/o")]), "ASN_CODEX_BIN").as_deref(), Some("/o"));
+        assert_eq!(env_get(&kv(&[("ASN_CODEX_BIN", "/n")]), "ASN_CODEX_BIN").as_deref(), Some("/n"));
+        assert_eq!(env_get(&kv(&[("ASN_CODEX_BIN", "/n"), ("IRORI_CODEX_BIN", "/o")]), "ASN_CODEX_BIN").as_deref(), Some("/n"));
+        assert_eq!(env_get(&kv(&[("OTHER", "x")]), "other").as_deref(), Some("x"), "沒登記的名字照舊大小寫不分比對");
+    }
+
+    #[test]
     fn 選引擎_有設就照它_沒設就自動() {
         let d = tempfile::tempdir().unwrap();
         let (f, h) = (d.path().join("agents.json"), d.path().join(".codex"));
@@ -289,7 +316,7 @@ mod tests {
         std::fs::write(&f, "{}").unwrap();
         std::fs::create_dir_all(&h).unwrap();
         assert_eq!(selected(None, &f, &h), (true, true));
-        assert_eq!(selected(Some("claude"), &f, &h), (false, false), "IRORI_ENGINES=claude 關掉其他引擎");
+        assert_eq!(selected(Some("claude"), &f, &h), (false, false), "ASN_ENGINES=claude 關掉其他引擎");
         assert_eq!(selected(Some("claude, ACP"), &f, &h), (true, false));
         assert_eq!(selected(Some("codex"), &f, &h), (false, true));
     }

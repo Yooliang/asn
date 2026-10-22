@@ -74,9 +74,9 @@ pub enum Fault {
     AfterCredentials,
 }
 
-/// 真實家目錄（可用 IRORI_ASN_CLAUDE_HOME 指到別處）；只有 Tauri 指令會呼叫，測試不碰
+/// 真實家目錄（可用 ASN_CLAUDE_HOME（舊名 IRORI_ASN_CLAUDE_HOME） 指到別處）；只有 Tauri 指令會呼叫，測試不碰
 pub fn claude_home() -> PathBuf {
-    std::env::var_os("IRORI_ASN_CLAUDE_HOME").map(PathBuf::from).unwrap_or_else(crate::identity::home_dir)
+    crate::envc::get_os("ASN_CLAUDE_HOME").map(PathBuf::from).unwrap_or_else(crate::identity::home_dir)
 }
 
 // ---------- 路徑與名稱 ----------

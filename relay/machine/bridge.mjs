@@ -4,6 +4,7 @@
 // - inbox: Realtime bell + 2 min poll -> 轉接器 deliver（Claude：收發室 worker，claude -p，只有 ListAgents/SendMessage）
 //   -> SendMessage 給本機視窗 -> 等回覆（onReply）-> relay send (reply_to) back to the sender
 // No private Claude Code protocol is used; everything goes through public CLI flags and the public SendMessage tool.
+import { envGet } from './env-compat.mjs'
 import { pickAnon } from './anon.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -25,31 +26,31 @@ import { checkAndUpdate, gitRunner, killTree, orphansOf, readyToRestart } from '
 import { processTable } from './engines/claude-identity.mjs'
 import { fileURLToPath } from 'node:url'
 
-const NODE_ID = (process.env.IRORI_RELAY_ID || 'H').trim()
-const BASE_URL = (process.env.IRORI_RELAY_URL || 'https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay').replace(/\/+$/, '')
+const NODE_ID = (envGet(process.env, 'RELAY_ID') || 'H').trim()
+const BASE_URL = (envGet(process.env, 'RELAY_URL') || 'https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay').replace(/\/+$/, '')
 const HOME_DIR = path.join(os.homedir(), '.irori-relay')
 const WORK_DIR = path.join(HOME_DIR, `machine-${NODE_ID}`)
-const MAILBOX_NAME = process.env.IRORI_MAILBOX_NAME || `${NODE_ID}-收發室`
-const DEFAULT_AGENT = process.env.IRORI_RELAY_DEFAULT_AGENT || 'H-工頭-2'
-const EXTRA_ALLOW = (process.env.IRORI_RELAY_ALLOW || '').split(',').map(s => s.trim()).filter(Boolean)
-const POLL_MS = Number(process.env.IRORI_RELAY_POLL_MS || 120_000)
-const ROSTER_MS = Number(process.env.IRORI_ROSTER_MS || 60_000)
+const MAILBOX_NAME = envGet(process.env, 'MAILBOX_NAME') || `${NODE_ID}-收發室`
+const DEFAULT_AGENT = envGet(process.env, 'RELAY_DEFAULT_AGENT') || 'H-工頭-2'
+const EXTRA_ALLOW = (envGet(process.env, 'RELAY_ALLOW') || '').split(',').map(s => s.trim()).filter(Boolean)
+const POLL_MS = Number(envGet(process.env, 'RELAY_POLL_MS') || 120_000)
+const ROSTER_MS = Number(envGet(process.env, 'ROSTER_MS') || 60_000)
 const HEARTBEAT_MS = 25_000
 const MAX_BACKOFF_MS = 30_000
-const REPLY_TIMEOUT_MS = Number(process.env.IRORI_REPLY_TIMEOUT_MS || 600_000)
-const NOTICE_WINDOW_MS = Number(process.env.IRORI_NOREPLY_WINDOW_MS || 1_800_000)   // 同一寄件人＋同一收件視窗，這段時間內只報一次「沒有回覆」
+const REPLY_TIMEOUT_MS = Number(envGet(process.env, 'REPLY_TIMEOUT_MS') || 600_000)
+const NOTICE_WINDOW_MS = Number(envGet(process.env, 'NOREPLY_WINDOW_MS') || 1_800_000)   // 同一寄件人＋同一收件視窗，這段時間內只報一次「沒有回覆」
 // 逾時之後的處理：遲到回覆保留期／筆數上限；對方忙碌時延後通知（閒下來後的寬限、總上限）
-const LATE_KEEP_MS = Number(process.env.IRORI_LATE_KEEP_MS || 86_400_000)
-const LATE_MAX = Number(process.env.IRORI_LATE_MAX || 200)
-const BUSY_GRACE_MS = Number(process.env.IRORI_BUSY_GRACE_MS || 120_000)
-const BUSY_MAX_MS = Number(process.env.IRORI_BUSY_MAX_MS || 3_600_000)
-const BUSY_STATUS_RE = new RegExp(process.env.IRORI_BUSY_STATUS_RE || '^(busy|working|running)$', 'i')
-const TICK_MS = Number(process.env.IRORI_BRIDGE_TICK_MS || 5_000)
-const FORWARD_TIMEOUT_MS = Number(process.env.IRORI_FORWARD_TIMEOUT_MS || 120_000)   // 收發室多久沒回報 SENT 就算轉交逾時
-const LOG_FILE = process.env.IRORI_RELAY_LOG || path.join(WORK_DIR, 'bridge.log')
+const LATE_KEEP_MS = Number(envGet(process.env, 'LATE_KEEP_MS') || 86_400_000)
+const LATE_MAX = Number(envGet(process.env, 'LATE_MAX') || 200)
+const BUSY_GRACE_MS = Number(envGet(process.env, 'BUSY_GRACE_MS') || 120_000)
+const BUSY_MAX_MS = Number(envGet(process.env, 'BUSY_MAX_MS') || 3_600_000)
+const BUSY_STATUS_RE = new RegExp(envGet(process.env, 'BUSY_STATUS_RE') || '^(busy|working|running)$', 'i')
+const TICK_MS = Number(envGet(process.env, 'BRIDGE_TICK_MS') || 5_000)
+const FORWARD_TIMEOUT_MS = Number(envGet(process.env, 'FORWARD_TIMEOUT_MS') || 120_000)   // 收發室多久沒回報 SENT 就算轉交逾時
+const LOG_FILE = envGet(process.env, 'RELAY_LOG') || path.join(WORK_DIR, 'bridge.log')
 // 自己更新：多久到 origin/main 看一次 relay/machine/ 有沒有新版（0＝關掉）；有新版就拉、收尾、結束，run-bridge.ps1 會用新版重啟
 // 指向別的 relay（測試的假伺服器）時預設關掉，測試起的橋絕不會去拉真的 repo
-const SELF_UPDATE_MS = Number(process.env.IRORI_SELF_UPDATE_MS ?? (process.env.IRORI_RELAY_URL ? 0 : 600_000))
+const SELF_UPDATE_MS = Number(envGet(process.env, 'SELF_UPDATE_MS') ?? (envGet(process.env, 'RELAY_URL') ? 0 : 600_000))
 const REPO_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 fs.mkdirSync(WORK_DIR, { recursive: true })
@@ -58,12 +59,12 @@ const log = createLog(LOG_FILE)
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 function readSecret(env, file) {
-  const v = (process.env[env] || '').trim()
+  const v = (envGet(process.env, env) || '').trim()
   if (v) return v
   try { return fs.readFileSync(path.join(HOME_DIR, file), 'utf8').trim() } catch { return '' }
 }
-const KEY = readSecret('IRORI_RELAY_KEY', `${NODE_ID}.key`)
-const ANON_KEY = pickAnon(BASE_URL, [process.env.IRORI_RELAY_ANON_KEY, readSecret('', 'anon.key')])   // 內建新後台的 anon；殘留的舊專案 anon.key 會被跳過
+const KEY = readSecret('RELAY_KEY', `${NODE_ID}.key`)
+const ANON_KEY = pickAnon(BASE_URL, [envGet(process.env, 'RELAY_ANON_KEY'), readSecret('', 'anon.key')])   // 內建新後台的 anon；殘留的舊專案 anon.key 會被跳過
 if (!KEY) { console.error(`no relay key (${path.join(HOME_DIR, NODE_ID + '.key')})`); process.exit(2) }
 
 async function api(action, { method = 'GET', body } = {}) {
@@ -82,7 +83,7 @@ async function api(action, { method = 'GET', body } = {}) {
 
 // ---- 本機視窗名單（轉接器 listWindows；每個引擎各自列自己的視窗）-----------------------------------
 // 橋只認轉接器介面（engines/，見 README「轉接器介面」），不知道 Claude／Codex 的細節。
-let engines = []     // IRORI_ENGINES 載入的轉接器（預設只有 claude）
+let engines = []     // ASN_ENGINES（舊名 IRORI_ENGINES）載入的轉接器（預設只有 claude）
 let agents = []      // 所有引擎列出的全部 session（含非互動式）
 let roster = []      // 給人用的視窗（可轉交名單）；每筆帶 engine 欄位
 const engineById = id => engines.find(e => e.id === id)
@@ -368,13 +369,13 @@ engines = await loadEngines({ log, workDir: WORK_DIR, mailboxName: MAILBOX_NAME,
 const openEngines = engines.filter(e => e.capabilities().openWindow && e.openWindow)
 const openEngineFor = id => (id ? openEngines.find(e => e.id === id) : openEngines[0])
 const acpEngine = engines.find(e => e.id === 'acp')
-// 自動偵測本機 CLI 併成遠端開視窗的 profile：預設關（要明確設 IRORI_LAUNCH_AUTO=1 才開）。
-// 遠端開視窗是擴大權限的動作，只有本機 launcher.json 或明確同意才算數；IRORI_LAUNCH_NO_AUTO=1 仍可強制關。
-const launchNoAuto = process.env.IRORI_LAUNCH_NO_AUTO === '1' || process.env.IRORI_LAUNCH_AUTO !== '1'
+// 自動偵測本機 CLI 併成遠端開視窗的 profile：預設關（要明確設 ASN_LAUNCH_AUTO=1 才開）。
+// 遠端開視窗是擴大權限的動作，只有本機 launcher.json 或明確同意才算數；ASN_LAUNCH_NO_AUTO=1 仍可強制關。
+const launchNoAuto = envGet(process.env, 'LAUNCH_NO_AUTO') === '1' || envGet(process.env, 'LAUNCH_AUTO') !== '1'
 const launchTools = launchNoAuto ? {} : await detectAgentTools()
 const launchBootstrap = launchNoAuto ? null : { profiles: buildDefaultProfiles(launchTools), cwd_allow: defaultCwdAllow(), max_per_hour: 6 }
 async function startBackgroundPartner({ req, profile }) {
-  if (!acpEngine?.addPartnerWorker) throw new Error('acp 轉接器未載入（請設 IRORI_ENGINES 含 acp）')
+  if (!acpEngine?.addPartnerWorker) throw new Error('acp 轉接器未載入（請設 ASN_ENGINES 含 acp）')
   const spec = workerSpecFromProfile({ name: req.name, cwd: req.cwd, profile, workDir: WORK_DIR })
   acpEngine.addPartnerWorker(spec)
   await refreshRoster()
@@ -394,7 +395,7 @@ const partnerQueue = createPartnerQueue({
 })
 const canRemoteLaunch = openEngines.length || acpEngine
 launcher = !canRemoteLaunch ? launcher : createLauncher({
-  api, log, workDir: WORK_DIR, configPath: process.env.IRORI_LAUNCHER_FILE || path.join(HOME_DIR, 'launcher.json'),
+  api, log, workDir: WORK_DIR, configPath: envGet(process.env, 'LAUNCHER_FILE') || path.join(HOME_DIR, 'launcher.json'),
   bootstrap: () => launchBootstrap,
   listNames: async () => {
     const sets = await Promise.all(engines.map(e => e.listNames()))
@@ -402,7 +403,7 @@ launcher = !canRemoteLaunch ? launcher : createLauncher({
   },
   start: s => {
     const e = openEngineFor(s.engine)
-    if (!e) throw new Error(`沒有載入「${s.engine}」轉接器（IRORI_ENGINES）`)
+    if (!e) throw new Error(`沒有載入「${s.engine}」轉接器（ASN_ENGINES）`)
     return e.openWindow(s)
   },
   startBackground: startBackgroundPartner,
@@ -411,7 +412,7 @@ launcher = !canRemoteLaunch ? launcher : createLauncher({
     await refreshRoster()
     if (l.first_message) await handleMail({ id: l.id, from_node: l.requested_by, from_agent: null, to_agent: l.name, trust: 'owner', body: l.first_message })
   },
-  ...(process.env.IRORI_LAUNCH_CONFIRM_MS ? { confirmMs: Number(process.env.IRORI_LAUNCH_CONFIRM_MS), pollMs: 200 } : {}),
+  ...(envGet(process.env, 'LAUNCH_CONFIRM_MS') ? { confirmMs: Number(envGet(process.env, 'LAUNCH_CONFIRM_MS')), pollMs: 200 } : {}),
 })
 
 let pulling = false, again = false

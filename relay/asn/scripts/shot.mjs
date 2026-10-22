@@ -59,24 +59,24 @@ export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000, me
   relay.mail(2, { from_node: 'W', from_agent: 'W-政策', to_node: 'H', to_agent: 'H-舊名', body: '這封是寄給改名前的名字', created_at: new Date(Date.now() - 2 * 60_000).toISOString() })
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-shot-'))
   const env = {
-    ...process.env, IRORI_RELAY_URL: relay.url, IRORI_RELAY_ID: 'H', IRORI_RELAY_KEY: FAKE_KEY, IRORI_RELAY_ANON_KEY: signedIn ? 'fake-anon-key' : '',   // 登入相關的動作要有 anon；其他情境維持空的
-    USERPROFILE: path.join(tmp, 'home'), HOME: path.join(tmp, 'home'), IRORI_ASN_DATA: path.join(tmp, 'data'), WEBVIEW2_USER_DATA_FOLDER: path.join(tmp, 'wv2'),
+    ...process.env, ASN_RELAY_URL: relay.url, ASN_RELAY_ID: 'H', ASN_RELAY_KEY: FAKE_KEY, ASN_RELAY_ANON_KEY: signedIn ? 'fake-anon-key' : '',   // 登入相關的動作要有 anon；其他情境維持空的
+    USERPROFILE: path.join(tmp, 'home'), HOME: path.join(tmp, 'home'), ASN_DATA: path.join(tmp, 'data'), WEBVIEW2_USER_DATA_FOLDER: path.join(tmp, 'wv2'),
   }
   // noKey：模擬沒有節點金鑰的新電腦（只截登入畫面）；家目錄是暫存的空資料夾，這裡再把身分環境變數清掉，免得吃到使用者自己的
-  if (noKey) { delete env.IRORI_RELAY_ID; delete env.IRORI_RELAY_KEY }
-  if (signedIn) env.IRORI_ASN_SHOT_LOGIN = signedIn
+  if (noKey) { delete env.ASN_RELAY_ID; delete env.ASN_RELAY_KEY }
+  if (signedIn) env.ASN_SHOT_LOGIN = signedIn
   if (process.platform === 'linux') {
     env.WEBKIT_DISABLE_COMPOSITING_MODE = '1'
     env.WEBKIT_DISABLE_DMABUF_RENDERER = '1'
   }
   fs.mkdirSync(env.USERPROFILE, { recursive: true })
-  fs.mkdirSync(env.IRORI_ASN_DATA, { recursive: true })
-  fs.writeFileSync(path.join(env.IRORI_ASN_DATA, 'settings.json'), JSON.stringify({ window_name: 'H-ASN', old_names: [{ name: 'H-舊名', t: Date.now() - 60_000 }, { name: 'H-過期', t: Date.now() - 9 * 24 * 3600_000 }] }))
+  fs.mkdirSync(env.ASN_DATA, { recursive: true })
+  fs.writeFileSync(path.join(env.ASN_DATA, 'settings.json'), JSON.stringify({ window_name: 'H-ASN', old_names: [{ name: 'H-舊名', t: Date.now() - 60_000 }, { name: 'H-過期', t: Date.now() - 9 * 24 * 3600_000 }] }))
   // 沒登入也沒選暫時不登入的情境（none、noKey）會停在登入畫面；其餘（預設 skipped、已登入）進名單
-  if (login === 'skipped' && !noKey) fs.writeFileSync(path.join(env.IRORI_ASN_DATA, 'login_skipped'), '1')
+  if (login === 'skipped' && !noKey) fs.writeFileSync(path.join(env.ASN_DATA, 'login_skipped'), '1')
   // lastLogin：預先寫進 last-login.json（{ provider, account_avatar }），截「登入過」的登入畫面用
-  if (lastLogin) fs.writeFileSync(path.join(env.IRORI_ASN_DATA, 'last-login.json'), JSON.stringify(lastLogin))
-  if (me) fs.writeFileSync(path.join(env.IRORI_ASN_DATA, 'asn-me.json'), JSON.stringify(me))
+  if (lastLogin) fs.writeFileSync(path.join(env.ASN_DATA, 'last-login.json'), JSON.stringify(lastLogin))
+  if (me) fs.writeFileSync(path.join(env.ASN_DATA, 'asn-me.json'), JSON.stringify(me))
   if (setup) setup(env)   // 截圖前預先放好暫存家目錄裡的檔案（例如假的 ~/.claude/sessions）
   const child = spawn(exe, ['--shot', outDir], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: false, detached: process.platform !== 'win32' })
   let log = ''
@@ -96,7 +96,7 @@ export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000, me
     child.on('exit', c => { clearTimeout(t); res(c) })
   })
   clearInterval(poll)
-  const result = { code, log, heartbeat, oldHeartbeat, expiredHeartbeat, hbFile, relay, tmp, home: env.USERPROFILE, data: env.IRORI_ASN_DATA, pid, files: fs.existsSync(outDir) ? fs.readdirSync(outDir) : [] }
+  const result = { code, log, heartbeat, oldHeartbeat, expiredHeartbeat, hbFile, relay, tmp, home: env.USERPROFILE, data: env.ASN_DATA, pid, files: fs.existsSync(outDir) ? fs.readdirSync(outDir) : [] }
   await relay.close()
   return result
 }

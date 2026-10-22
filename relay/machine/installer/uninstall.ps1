@@ -1,4 +1,4 @@
-﻿# Irori 收發室橋：移除程式（雙擊「解除安裝.cmd」或在 PowerShell 執行）。
+﻿# ASN 收發室橋：移除程式（雙擊「解除安裝.cmd」或在 PowerShell 執行）。
 # 做的事：移除自動啟動的排程 → 停止橋與收發室（只結束 bridge.pid、mailbox.pid 記的兩個程序）→ 問你要不要刪除金鑰與資料夾。
 #
 # 預覽（不改任何東西、不連網）：  .\uninstall.ps1 -WhatIf
@@ -22,7 +22,7 @@ $preview = [bool]$WhatIfPreference
 $ni = [bool]$NonInteractive
 
 Say ''
-Say '=== Irori 收發室橋：移除 ===' 'Cyan'
+Say '=== ASN 收發室橋：移除 ===' 'Cyan'
 if ($preview) { Say '（預覽模式：只告訴你會做什麼，不會改動這台電腦，也不會連網。）' 'Yellow' }
 
 $home_ = Get-IroriHome $HomeDir
@@ -61,7 +61,7 @@ if (-not $DeleteData -and -not $KeepData -and -not $preview) {
 }
 if ($preview) {
   Say "（預覽）會問你要不要刪除金鑰（$id.key）、node 檔、machine-$id 資料夾與 app 資料夾；不刪的話它們原地保留。"
-  Say '（預覽）刪除時還會問你要不要同時從希緒的名單移除這台電腦。'
+  Say '（預覽）刪除時還會問你要不要同時從 ASN 的名單移除這台電腦。'
   exit 0
 }
 if (-not $delete) {
@@ -72,7 +72,7 @@ if (-not $delete) {
 
 # 要不要同時離開名單：離開後這個代號才能被重新註冊（金鑰會作廢）。要先做，因為要用金鑰
 $doLeave = [bool]$Leave
-if (-not $Leave -and -not $ni) { $doLeave = Read-YesNo '同時把這台電腦從希緒的名單移除？（建議：之後想再裝同一個代號才不用找管理者）' $true $ni }
+if (-not $Leave -and -not $ni) { $doLeave = Read-YesNo '同時把這台電腦從 ASN 的名單移除？（建議：之後想再裝同一個代號才不用再要邀請碼）' $true $ni }
 if ($doLeave) {
   $nodeCmd = Get-Command $NodeCommand -ErrorAction SilentlyContinue
   if ($nodeCmd) {
@@ -80,9 +80,9 @@ if ($doLeave) {
     $homeArgs = if ($HomeDir) { @('--home', $HomeDir) } else { @() }
     $tool = @((Join-Path $irori 'app\register.mjs'), (Join-Path $PSScriptRoot 'app\register.mjs')) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
     $r = if ($tool) { Invoke-RegisterTool $nodeCmd.Source $tool (@('--leave', '--id', $id) + $urlArgs + $homeArgs) } else { [pscustomobject]@{ ok = $false; message = '找不到程式檔' } }
-    if ($r.ok) { Say '已從名單移除這台電腦。' 'Green' } else { Say "沒有從名單移除成功（$($r.message)）。可請管理者幫你移除。" 'Yellow' }
+    if ($r.ok) { Say '已從名單移除這台電腦。' 'Green' } else { Say "沒有從名單移除成功（$($r.message)）。可請帳號擁有者幫你移除。" 'Yellow' }
   } else {
-    Say '找不到 Node.js，沒辦法從名單移除；可請管理者幫你移除。' 'Yellow'
+    Say '找不到 Node.js，沒辦法從名單移除；可請帳號擁有者幫你移除。' 'Yellow'
   }
 }
 

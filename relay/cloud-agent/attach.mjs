@@ -2,7 +2,7 @@
 // 雲端代理下載收到的附件（照片）：向收發室換一次短效下載網址，把檔案存到本機並印出路徑。
 //   node attach.mjs --id <附件編號> [--out <路徑>]
 // 預設存到 <信件目錄>/attachments/<編號前 8 碼>-<檔名>（信件目錄預設 /workspace/relay，重置後保留）；不覆蓋既有檔案。
-// 只有寄件人與收件人（群組＝成員）換得到網址；沒權限一律 404。金鑰（IRORI_RELAY_KEY）絕不印出。
+// 只有寄件人與收件人（群組＝成員）換得到網址；沒權限一律 404。金鑰（ASN_RELAY_KEY，舊名 IRORI_RELAY_KEY）絕不印出。
 // exit code：1 用法／目的地已有檔案、2 沒金鑰、4 後端或下載錯誤。輸出 `saved <路徑>`。
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'

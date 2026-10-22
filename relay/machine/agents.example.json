@@ -1,5 +1,5 @@
 {
-  "_說明": "複製成 ~/.irori-relay/agents.json（不進 repo）。IRORI_ENGINES=claude,acp 才會載入；每個工作者是橋長駐啟動的背景 AI，名單上以 name 出現。步驟與風險見 docs/AGENT-ENGINES.md「第一期上線步驟」。",
+  "_說明": "複製成 ~/.irori-relay/agents.json（不進 repo）。ASN_ENGINES=claude,acp 才會載入；每個工作者是橋長駐啟動的背景 AI，名單上以 name 出現。步驟與風險見 docs/AGENT-ENGINES.md「第一期上線步驟」。",
   "workers": [
     {
       "name": "Gemini",
@@ -39,7 +39,7 @@
       "permissions": { "write": "deny", "execute": "deny" }
     },
     {
-      "_說明": "真正會送權限請求的 ACP agent（例如官方 Grok Build：grok agent stdio，未實測）才能用 ask：請求寄給希緒，由她問你。",
+      "_說明": "真正會送權限請求的 ACP agent（例如官方 Grok Build：grok agent stdio，未實測）才能用 ask：請求寄給帳號擁有者（登入帳號），由他決定。",
       "enabled": false,
       "name": "Grok",
       "engine": "acp",

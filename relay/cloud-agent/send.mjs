@@ -17,7 +17,7 @@ const USAGE = `用法：
   node send.mjs --to <節點>[/<視窗>] --body "<內文>" (--reply | --no-reply) [--reply-to <信件id>] [--from <名稱>]
   --body -  內文從 stdin 讀；--body-file <檔> 從檔案讀
   --reply   我在等對方回信；--no-reply  只是告知。二選一、不能同時給。
-  --from    寄件視窗名（預設 Grok，環境變數 IRORI_CLOUD_ROSTER_NAME 可改）；必須是名單（agents.json／IRORI_CLOUD_AGENTS）上的一位
+  --from    寄件視窗名（預設 Grok，環境變數 ASN_CLOUD_ROSTER_NAME 可改，舊名 IRORI_CLOUD_ROSTER_NAME）；必須是名單（agents.json／ASN_CLOUD_AGENTS）上的一位
 回信一定要帶 --reply-to <來信 id>。內文至多 ${MAX_BODY} 字。`
 
 export function parseArgs(argv) {

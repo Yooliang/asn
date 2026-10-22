@@ -22,7 +22,7 @@ test('指引內容的出處：各篇提到的關鍵步驟都在（對照 repo �
   const text = k => guideByKey(k).blocks.map(b => b.t).join('\n')
   assert.ok(/1 到 40 個字/.test(text('start')) && /收發室/.test(text('start')) && /不會回報給收發室/.test(text('start')))
   assert.ok(/安裝\.cmd/.test(text('bridge')) && /邀請碼/.test(text('bridge')) && /Node\.js 22/.test(text('bridge')) && /bridge\.log/.test(text('bridge')) && /解除安裝\.cmd/.test(text('bridge')))
-  assert.ok(/IRORI_RELAY_KEY/.test(text('cloud')) && /boot\.sh/.test(text('cloud')) && /inbox\.mjs/.test(text('cloud')) && /send\.mjs/.test(text('cloud')) && /--reply-to/.test(text('cloud')))
+  assert.ok(/ASN_RELAY_KEY/.test(text('cloud')) && /boot\.sh/.test(text('cloud')) && /inbox\.mjs/.test(text('cloud')) && /send\.mjs/.test(text('cloud')) && /--reply-to/.test(text('cloud')))
   assert.ok(/asn-cli room --rooms/.test(text('groups')) && /--room-read/.test(text('groups')) && /唯讀|只讀|只能「看」/.test(text('groups')))
   for (const w of ['沒回覆', '名字改了', '狀態燈', '震動']) assert.ok(guideByKey('faq').blocks.some(b => b.k === 'h' && b.t.includes(w)), w)
 })
