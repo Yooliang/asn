@@ -15,7 +15,7 @@ import { USAGE_NOTE } from './usage.mjs'
 export const SETTING_OPS = [
   'notify', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-add', 'acct-auto', 'acct-remote-node', 'acct-remote-switch', 'acct-trust',
-  'closeTo', 'autostart', 'bridge-enable', 'bridge-launch', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'cli-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'avatar-remove',
+  'closeTo', 'autostart', 'bridge-enable', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'cli-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'avatar-remove',
 ]
 
 export const SettingsPanel = {
@@ -153,6 +153,10 @@ export const SettingsPanel = {
         <section class="set-card" aria-label="收發室" v-if="st.bridge">
           <label class="chk"><input type="checkbox" :checked="st.bridge.enabled" :disabled="st.bridge.busy" @change="act('bridge-enable', $event.target.checked)" aria-label="讓 ASN 負責這台的收發室" /><span>讓 ASN 負責這台的收發室</span></label>
           <label class="chk"><input type="checkbox" :checked="st.bridge.remoteLaunch" :disabled="st.bridge.busy" @change="act('bridge-launch', $event.target.checked)" aria-label="允許我的其他設備替這台開新視窗" /><span>允許我的其他設備替這台開新視窗</span></label>
+          <label>沒指定收件人的信交給
+            <input class="set-sel" type="text" maxlength="100" :value="st.bridge.unaddressedTo" :disabled="st.bridge.busy" placeholder="留空＝交給我本人" @change="act('bridge-unaddressed', $event.target.value)" aria-label="沒指定收件人的信交給哪個視窗" />
+          </label>
+          <small>寄來的信沒有指定收件視窗時，預設交給你本人，在對話裡顯示為「未指定收件人」。指定的視窗不在線時也會交給你本人。</small>
           <small v-if="st.bridge.running">這台的收發室目前由 ASN 負責。</small>
           <small v-else-if="st.bridge.legacy">這台的收發室目前由舊版收發室橋負責。</small>
           <template v-if="st.bridge.legacy && st.bridge.takeoverAllowed">

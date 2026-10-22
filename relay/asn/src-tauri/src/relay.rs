@@ -16,6 +16,10 @@ pub struct Relay {
     old: Mutex<Vec<OldName>>,
     /// 最近一次收信時「信件 id → 是從哪個名字的信箱拿到的」，ack 要對同一個名字送
     ack_agent: Mutex<HashMap<String, String>>,
+    /// 沒指定收件視窗、橋決定「交給本人」的信（原始內容）。ASN 視窗收信時一併交給畫面，由本人決定轉給誰或自己回；畫面確認收下（ack）才移除
+    unaddressed: Mutex<Vec<Value>>,
+    /// 剛 ack 掉的未指定收件人信件 id（橋晚一步才處理到同一封舊回應時，不能再把它收回來）
+    unaddressed_acked: Mutex<Vec<String>>,
     /// 在線狀態回報：目前的狀態與個人訊息（前端改了就更新並叫醒回報迴圈）
     presence: Mutex<(String, String)>,
     /// 後台還沒部署 asn_presence（404／400）：靜默停止回報，直到下次啟動
@@ -176,7 +180,7 @@ pub fn build_presence_body(window: &str, version: &str, status: &str, psm: &str)
 impl Relay {
     pub fn new(base: String, key: String, node: String, window: String) -> Relay {
         Relay {
-            client: reqwest::Client::new(), base, key, node, window: Mutex::new(window), old: Mutex::new(vec![]), ack_agent: Mutex::new(HashMap::new()),
+            client: reqwest::Client::new(), base, key, node, window: Mutex::new(window), old: Mutex::new(vec![]), ack_agent: Mutex::new(HashMap::new()), unaddressed: Mutex::new(vec![]), unaddressed_acked: Mutex::new(vec![]),
             presence: Mutex::new(("online".into(), String::new())), presence_off: AtomicBool::new(false), presence_closed: AtomicBool::new(false), update_requested: AtomicBool::new(false),
             presence_wake: tokio::sync::Notify::new(),
         }
@@ -310,6 +314,23 @@ impl Relay {
     pub async fn list(&self) -> Result<Value, String> {
         self.api("list", None).await
     }
+    /// 橋把一封沒指定收件視窗的信交給本人：留在信箱（不 ack），等 ASN 畫面收下。回傳 true＝新收到（同一封重複交來回 false）
+    pub fn hold_unaddressed(&self, raw: Value) -> bool {
+        let Some(id) = raw.get("id").and_then(Value::as_str).map(String::from) else { return false };
+        if self.unaddressed_acked.lock().unwrap().contains(&id) {
+            return false;
+        }
+        let mut held = self.unaddressed.lock().unwrap();
+        if held.iter().any(|m| m.get("id").and_then(Value::as_str) == Some(id.as_str())) {
+            return false;
+        }
+        held.push(raw);
+        true
+    }
+    /// 目前等著交給本人的信件 id
+    pub fn unaddressed_ids(&self) -> Vec<String> {
+        self.unaddressed.lock().unwrap().iter().filter_map(|m| m.get("id").and_then(Value::as_str).map(String::from)).collect()
+    }
     pub async fn inbox(&self) -> Result<Value, String> {
         let names = self.active_names();
         let mut all: Vec<Value> = vec![];
@@ -332,6 +353,15 @@ impl Relay {
                 }
             }
         }
+        // 沒指定收件視窗的信：以本視窗名義交給畫面（標記 unaddressed）；ack 走節點信箱（對應名字留空）
+        for raw in self.unaddressed.lock().unwrap().iter() {
+            let Some(id) = raw.get("id").and_then(Value::as_str) else { continue };
+            let mut m = raw.clone();
+            m["to_agent"] = json!(names[0]);
+            m["unaddressed"] = json!(true);
+            map.insert(id.to_string(), String::new());
+            all.push(m);
+        }
         *self.ack_agent.lock().unwrap() = map;
         Ok(json!({ "messages": all }))
     }
@@ -351,8 +381,18 @@ impl Relay {
         }
         let mut acked = 0u64;
         for (agent, group) in by {
-            let r = self.api(&format!("ack&agent={}", encode_component(&agent)), Some(build_ack_body(&group)?)).await?;
+            let action = if agent.is_empty() { "ack".to_string() } else { format!("ack&agent={}", encode_component(&agent)) };
+            let r = self.api(&action, Some(build_ack_body(&group)?)).await?;
             acked += r.get("acked").and_then(Value::as_u64).unwrap_or(0);
+            if agent.is_empty() {
+                self.unaddressed.lock().unwrap().retain(|m| !m.get("id").and_then(Value::as_str).map(|i| group.iter().any(|g| g == i)).unwrap_or(false));
+                let mut done = self.unaddressed_acked.lock().unwrap();
+                done.extend(group.iter().cloned());
+                let n = done.len();
+                if n > 200 {
+                    done.drain(..n - 200);
+                }
+            }
         }
         Ok(json!({ "acked": acked }))
     }

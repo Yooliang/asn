@@ -210,7 +210,7 @@ const mainSetup = agents => home => {
 }
 const forwarded = home => fs.readFileSync(path.join(home, 'record.jsonl'), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l))
 
-test('bridge: 預設收件人在線時轉給它且不加說明', async () => {
+test('bridge: 設定的預設收件人在線時轉給它並附說明', async () => {
   const st = await fakeServer({ inbox: [mail(1)] })
   let rec
   try {
@@ -219,34 +219,33 @@ test('bridge: 預設收件人在線時轉給它且不加說明', async () => {
       env: { IRORI_RELAY_DEFAULT_AGENT: 'T-預設' },
       until: ({ home }) => (rec = forwarded(home)).length >= 1,
     })
-    assert.equal(rec[0].to, 'T-預設'); assert.doesNotMatch(rec[0].text, /不在線/)
+    assert.equal(rec[0].to, 'T-預設'); assert.match(rec[0].text, /這封信沒有指定收件視窗，依設定交給你（T-預設）處理。/)
   } finally { await st.close() }
 })
 
-test('bridge: 預設收件人不在線 → 交給最近有活動的 session、內文加說明、排除收發室、roster 403 只記一次', async () => {
+test('bridge: 沒指定收件人且預設收件人不在線 → 不丟給最近有活動的 session、不 ack、留在信箱；roster 403 只記一次', async () => {
   const st = await fakeServer({ inbox: [mail(1)] })
   let rec
   try {
     const { log } = await runBridge({
       script: 'bridge.mjs', st, setup: mainSetup(SESSIONS), env: { IRORI_RELAY_DEFAULT_AGENT: 'T-預設' },
-      until: ({ home }) => (rec = forwarded(home)).length >= 1 && st.rosterPosts.length >= 3,
+      until: ({ home, log }) => { rec = forwarded(home); return /kept in inbox for the owner/.test(log) && st.rosterPosts.length >= 3 },
     })
-    assert.equal(rec.length, 1)
-    assert.equal(rec[0].to, 'T-最近的')
-    assert.match(rec[0].text, /這封信原本要給「T-預設」，但它不在線，請你（T-最近的）代收並轉告／處理。\n內文-1/)
-    assert.match(log, /fallback to most recently active session T-最近的/)
+    assert.equal(rec.length, 0, '不能轉給任何 session（以前會挑最近有活動的）')
+    assert.match(log, /id=.* has no to_agent: kept in inbox for the owner \(ASN window\), not acked/)
+    assert.doesNotMatch(log, /fallback/)
     assert.equal((log.match(/roster post failed/g) || []).length, 1)
-    assert.ok(st.acked.has(uid(1)))
+    assert.equal(st.acked.size, 0, '交給本人的信不能由橋 ack')
   } finally { await st.close() }
 })
 
-test('bridge: 預設不在線且沒有任何互動式 session → 留在 inbox（不 ack、不轉交）', async () => {
+test('bridge: 完全沒設預設收件人 → 同樣留在信箱（不 ack、不轉交），即使有很多在線的 session', async () => {
   const st = await fakeServer({ inbox: [mail(1)] })
   let rec
   try {
     await runBridge({
-      script: 'bridge.mjs', st, setup: mainSetup([{ pid: 91004, name: 'T-收發室', updatedAt: 9000 }]), env: { IRORI_RELAY_DEFAULT_AGENT: 'T-預設' },
-      until: ({ log, home }) => { rec = forwarded(home); return /no interactive session online: left in inbox/.test(log) },
+      script: 'bridge.mjs', st, setup: mainSetup(SESSIONS), env: {},
+      until: ({ log, home }) => { rec = forwarded(home); return /kept in inbox for the owner/.test(log) },
     })
     assert.equal(rec.length, 0); assert.equal(st.acked.size, 0)
   } finally { await st.close() }
@@ -351,7 +350,7 @@ test('bridge: 逾時通知 30 分鐘內同寄件人＋同收件視窗只報一�
 // 照片（附件）：橋把信轉給視窗時，內文後面多一行「〔照片〕檔名＋下載指令」，和內文一起進外部資料區塊；沒附件的信不變
 test('bridge: 信帶附件 → 轉給視窗的文字多一行〔照片〕提示（替代文字行不重複、縮圖不轉交）；沒附件的信原樣', async () => {
   const att = { id: uid(0x50), kind: 'image', name: 'cat.webp', mime: 'image/webp', bytes: 183422, width: 1536, height: 2048, thumb: 'data:image/webp;base64,SECRETTHUMB', expires_at: 'x', expired: false }
-  const st = await fakeServer({ inbox: [mail(1, { body: '〔照片〕cat.webp\n看這隻', attachments: [att], expects_reply: false }), mail(2, { expects_reply: false })] })
+  const st = await fakeServer({ inbox: [mail(1, { body: '〔照片〕cat.webp\n看這隻', attachments: [att], expects_reply: false, to_agent: 'T-最近的' }), mail(2, { expects_reply: false, to_agent: 'T-最近的' })] })
   let rec
   try {
     await runBridge({

@@ -335,8 +335,8 @@ async fn acp_沒指定收件人且預設視窗不在線_背景工作者不代收
     let mut h = eh(Some(json!([worker("Gemini", "acp", json!({}))])), &[], "acp", &[]).await;
     h.put_pull(mail(1, json!({"to_agent": null}))).await;
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-    assert!(h.fr.acked().is_empty() && h.fr.sent().is_empty());
-    assert!(h.core.log.has("left in inbox"));
+    assert!(h.fr.acked().is_empty());
+    assert!(h.core.log.has("kept in inbox for the owner"));
 }
 
 #[tokio::test]
@@ -834,7 +834,7 @@ async fn 共存_名單同時有_claude_gemini_codex_各走各的路_抬頭_engin
 }
 
 #[tokio::test]
-async fn 共存_codex_視窗當預設代收者_gemini_不會() {
+async fn 共存_沒指定收件人的信不丟給最近有動作的_codex_視窗_也不給_gemini() {
     let d = tempfile::tempdir().unwrap();
     let cx = codex_fx(d.path(), threads(), &OPEN, true, false, &[("FAKE_CODEX_REPLY", "代收了")]);
     let fr = FakeRelay::start();
@@ -846,11 +846,9 @@ async fn 共存_codex_視窗當預設代收者_gemini_不會() {
     let (core, set, rx, notices, logs) = boot(&fr, work.path(), home.path(), sessions.path(), sink.clone(), "acp,codex", &cx.env).await;
     let mut h = EH { core, fr, work, home, sessions, sink, set, rx, notices, logs, spec: "acp,codex".into(), env: cx.env.clone() };
     h.put_pull(mail(1, json!({"to_agent": null}))).await;
-    h.wait("Codex 視窗代收", |h| !h.fr.sent().is_empty()).await;
-    let q = cx.queues();
-    assert_eq!(q.len(), 1);
-    assert_eq!(q[0]["argv"][2], CA, "最近有活動的 Codex 視窗（視窗甲 updatedAt 較新）代收");
-    assert!(Cx::message(&q[0]).contains("這封信原本要給「T-甲」，但它不在線"));
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(cx.queues().is_empty(), "沒指定收件人：不能丟給最近有動作的 Codex 視窗");
+    assert!(h.core.relay.unaddressed_ids().contains(&uid(1)) && !h.fr.acked().contains(&uid(1)), "交給本人、不 ack");
 }
 
 #[test]

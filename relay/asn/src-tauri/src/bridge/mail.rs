@@ -207,9 +207,14 @@ pub fn strip_reply_head(text: &str) -> (Option<String>, String) {
     (Some(id.to_lowercase()), if body.is_empty() { text.to_string() } else { body })
 }
 
-/// 預設收件視窗不在線時代收的說明
-pub fn fallback_note(wanted: &str, actual: &str) -> String {
-    format!("[收發室] 這封信原本要給「{wanted}」，但它不在線，請你（{actual}）代收並轉告／處理。")
+/// 沒指定收件視窗、依設定交給某個視窗時，附在信前的說明
+pub fn unaddressed_window_note(actual: &str) -> String {
+    format!("[收發室] 這封信沒有指定收件視窗，依設定交給你（{actual}）處理。")
+}
+
+/// 沒指定收件視窗、交給本人時，回給寄件人的說明
+pub fn unaddressed_receipt(owner: &str) -> String {
+    format!("（這封信沒有指定收件視窗，已交給 {owner} 本人）")
 }
 
 #[cfg(test)]

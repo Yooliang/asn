@@ -174,6 +174,8 @@ export class AsnCore {
     const photos = normalizePhotos(m.attachments)
     const text = stripPhotoLines(stripNudge(body), photos.length)
     const shown = Boolean(text) || photos.length > 0
+    // 沒指定收件視窗、由橋交給本人的信：先標出「寄件人 → 未指定收件人」，由使用者決定轉給誰或自己回
+    if (shown && m.unaddressed === true) lg.push({ k: 'sys', text: `${plain(f.nick)} → 未指定收件人`, t })
     if (shown) { lg.push({ k: 'them', text, t, id: m.fanout_id ?? m.id, ...(photos.length ? { photos } : {}) }); f.lastAt = t; f.replyTo = m.id }
     if (m.reply_to) this.#markReplied(m.reply_to, typeof m.created_at === 'string' ? m.created_at : new Date(t).toISOString())
     const visible = await this.isChatVisible(r.id)
