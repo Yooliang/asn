@@ -52,8 +52,10 @@ fn 參數_once_與_watch_二選一() {
     assert!(p(&["--once"]).unwrap().once && p(&["--watch"]).unwrap().watch);
     for bad in [&[][..], &["--once", "--watch"][..]] {
         let e = p(bad).unwrap_err();
-        assert!(e.code == 1 && e.msg.contains("二選一"));
+        assert!(e.code == 1 && e.msg.contains("三選一"));
     }
+    let both = p(&["--once", "--peek"]).unwrap_err();
+    assert!(both.code == 1 && both.msg.contains("三選一"));
     assert!(p(&["--x"]).unwrap_err().msg.contains("不認得的參數 --x"));
     assert!(p(&["--help"]).unwrap().help);
 }
@@ -110,6 +112,122 @@ fn once_後端錯誤_結束碼_4_已印出的信下次不會重複() {
     assert_eq!(inb.fail_first.load(Ordering::SeqCst), 0);
     let (c, out, _) = go(&f.env, &["recv", "--once"], "");
     assert_eq!((c, out.lines().count()), (0, 1));
+}
+
+/// 假後端（新版）：inbox_peek 回固定內容；inbox／ack 若被呼叫就記下來（peek 絕不該呼叫）
+fn peek_backend(status: u16) -> Fake {
+    Fake::start(move |req: &Req, _| match req.action().as_str() {
+        "inbox_peek" if status == 200 => {
+            let long = "長".repeat(120);
+            Resp::ok(json!({"count": 7, "messages": [
+                {"id": uid(1), "from_node": "W", "from_agent": "W-政策", "created_at": "2026-10-02T00:00:00Z", "body": "第一行\n第二行"},
+                {"id": uid(2), "from_node": "W", "from_agent": null, "created_at": "2026-10-02T00:01:00Z", "body": long},
+            ]}))
+        }
+        "inbox_peek" => Resp::json(status, json!({"error": "not_found"})),
+        _ => Resp::json(500, json!({"error": "peek 不該呼叫別的動作"})),
+    })
+}
+
+/// 整個家目錄的檔案清單（含大小），用來證明 peek 沒有寫任何記號／心跳
+fn tree(p: &Path, out: &mut Vec<(String, u64)>) {
+    for e in std::fs::read_dir(p).unwrap().flatten() {
+        let m = e.metadata().unwrap();
+        if m.is_dir() {
+            tree(&e.path(), out);
+        } else {
+            out.push((e.path().display().to_string(), m.len()));
+        }
+    }
+    out.sort();
+}
+
+#[test]
+fn peek_印一行_json_count_與_messages_preview_截_80_字_只呼叫_inbox_peek_不_ack_不寫任何檔() {
+    let fake = peek_backend(200);
+    let f = fx(&fake.url(), Some("T-視窗甲"));
+    let (mut before, mut after) = (vec![], vec![]);
+    tree(&f.home, &mut before);
+    let (c, out, err) = go(&f.env, &["recv", "--peek"], "");
+    assert_eq!(c, 0, "{err}");
+    assert_eq!(out.lines().count(), 1, "{out}");
+    let j: Value = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(j["count"], 7); // 以後端總數為準，不是 messages 長度
+    let ms = j["messages"].as_array().unwrap();
+    assert_eq!(ms.len(), 2);
+    assert_eq!(ms[0], json!({"id": uid(1), "from": "W-政策", "at": "2026-10-02T00:00:00Z", "preview": "第一行 第二行"}));
+    assert_eq!(ms[1]["from"], "W"); // 沒有 from_agent 退回 from_node
+    assert_eq!(ms[1]["preview"].as_str().unwrap().chars().count(), 80);
+    assert!(out.starts_with("{\"count\":7,\"messages\":[{\"id\":\""), "欄位順序固定：{out}");
+    // 只打了一次 inbox_peek，帶機器金鑰與視窗名；沒有任何 inbox／ack
+    assert_eq!(fake.actions(), vec!["inbox_peek"]);
+    let r = &fake.of("inbox_peek")[0];
+    assert_eq!((r.method.as_str(), r.param("agent").as_deref(), r.headers.get("x-relay-key").map(String::as_str)), ("GET", Some("T-視窗甲"), Some(KEY)));
+    // 不寫心跳、replied／sent 記號：家目錄檔案清單前後完全一樣
+    tree(&f.home, &mut after);
+    assert_eq!(before, after);
+}
+
+#[test]
+fn peek_count_only_只印_count() {
+    let fake = peek_backend(200);
+    let f = fx(&fake.url(), Some("T-視窗甲"));
+    let (c, out, _) = go(&f.env, &["recv", "--peek", "--count-only"], "");
+    assert_eq!((c, out.as_str()), (0, "{\"count\":7}\n"));
+    assert_eq!(fake.actions(), vec!["inbox_peek"]);
+    // --count-only 單獨用不行
+    let (c, _, err) = go(&f.env, &["recv", "--once", "--count-only"], "");
+    assert_eq!(c, 1);
+    assert!(err.contains("--count-only 只能和 --peek"), "{err}");
+}
+
+#[test]
+fn peek_後端還沒部署_404_印清楚的中文錯誤_結束碼_4_stdout_空() {
+    let fake = peek_backend(404);
+    let f = fx(&fake.url(), Some("T-視窗甲"));
+    let (c, out, err) = go(&f.env, &["recv", "--peek"], "");
+    assert_eq!((c, out.as_str()), (4, ""));
+    assert!(err.contains("後端還沒支援") && err.contains("inbox_peek 回 404"), "{err}");
+    assert_eq!(fake.actions(), vec!["inbox_peek"]); // 失敗也不退回去呼叫會 ack 的 inbox
+    // 其他錯誤照原樣回報
+    let fake = peek_backend(500);
+    let f = fx(&fake.url(), Some("T-視窗甲"));
+    let (c, _, err) = go(&f.env, &["recv", "--peek"], "");
+    assert_eq!(c, 4);
+    assert!(err.contains("查詢未讀失敗：inbox_peek HTTP 500"), "{err}");
+}
+
+#[test]
+fn peek_認不出視窗_結束碼_2_沒打任何請求() {
+    let fake = peek_backend(200);
+    let f = fx(&fake.url(), None);
+    let (c, _, _) = go(&f.env, &["recv", "--peek"], "");
+    assert_eq!(c, 2);
+    assert_eq!(fake.count(), 0);
+}
+
+// 守門：--peek 的程式路徑絕不呼叫 inbox／ack／心跳／replied／sent（拿掉這條的保證，例如在 peek 區塊加一個 ack 就會紅）
+#[test]
+fn 守門_peek_程式路徑只碰_inbox_peek() {
+    let src = include_str!("../recv.rs").replace("\r\n", "\n");
+    let start = src.find("if a.peek {").expect("找不到 peek 區塊");
+    let end = start + src[start..].find("return Ok(0);").expect("peek 區塊沒有 return");
+    let block = &src[start..end];
+    assert!(block.contains("inbox_peek&agent="));
+    for banned in ["\"inbox&", "inbox&agent", "ack&", "\"ack", "write_heartbeat", "replied", "sent", "pull_once", "Some(json!"] {
+        assert!(!block.contains(banned), "peek 區塊不可出現 {banned}");
+    }
+    // 整個 recv.rs 裡 inbox_peek 以外，只有 pull_once 巨集能碰 inbox／ack
+    assert_eq!(src.matches("\"inbox&agent=").count(), 1);
+    assert_eq!(src.matches("\"ack&agent=").count(), 1);
+}
+
+#[test]
+fn peek_line_沒有_count_欄位時用信數_壞資料不當掉() {
+    use crate::cli::recv::peek_line;
+    assert_eq!(peek_line(&json!({"messages": [{"id": uid(1), "from_agent": "a", "created_at": "t", "body": "x"}]}), false), format!("{{\"count\":1,\"messages\":[{{\"id\":\"{}\",\"from\":\"a\",\"at\":\"t\",\"preview\":\"x\"}}]}}", uid(1)));
+    assert_eq!(peek_line(&Value::Null, false), "{\"count\":0,\"messages\":[]}");
+    assert_eq!(peek_line(&json!({"count": 3}), true), "{\"count\":3}");
 }
 
 /// 共用的輸出緩衝，讓主執行緒可以邊跑邊看 watch 印了什麼

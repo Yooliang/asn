@@ -330,6 +330,11 @@ Deno.serve(async (req) => {
     if (r.status === 200) (r.body as { messages: unknown }).messages = await withAttachments({ rpc }, (r.body as { messages: unknown }).messages);
     return json(r.status, r.body);
   }
+  // 只看不收（asn-cli recv --peek）：唯讀，不 ack、不設 delivered_at
+  if (action === "inbox_peek" && req.method === "GET") {
+    const r = await handleAgentInbox({ rpc: async (fn, args) => await db.rpc(fn, args) }, me, "inbox_peek", url.searchParams.get("agent"));
+    return json(r.status, r.body);
+  }
   if (action === "ack" && req.method === "POST" && url.searchParams.has("agent")) {
     const b = await req.json().catch(() => null);
     const r = await handleAgentInbox({ rpc: async (fn, args) => await db.rpc(fn, args) }, me, "ack", url.searchParams.get("agent"), b);

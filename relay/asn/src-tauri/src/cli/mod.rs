@@ -63,7 +63,7 @@ const TOP_USAGE: &str = "用法：
   asn send   --to <成員代號 | 節點/視窗名> --body \"<內文>\" (--reply | --no-reply) [--reply-to <信件id>] [--file <路徑> ...]
   asn send   --room <群組id> --body \"<內文>\"
   asn send   --whoami
-  asn recv   --once | --watch
+  asn recv   --once | --watch | --peek [--count-only]
   asn room   --rooms | --room-read <群組id|群組名> [--last N | --since SEQ] [--json]
   asn attach --id <附件編號> [--out <路徑>]
 各子命令加 --help 看詳細說明。身分（節點、寄件視窗名）自動判定，不能自填。";

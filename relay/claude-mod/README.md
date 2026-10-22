@@ -28,9 +28,9 @@ claude --plugin-dir D:/Github/Yooliang/asn/relay/claude-mod
 2. **Bash 守門**：命令裡有 `send.mjs`／`asn send`／`asn-cli send`，用了 `--to` 卻沒有 `--reply`／`--no-reply` → 拒絕並提示改用 asn_send。`--room` 不擋。
 3. **本人簽章紅線（ASN#118）**：mod 寄出的信一律是成員身分。`asn_send` 組出的參數、Bash 寄信命令只要出現 `as_person`、`x-asn-user`、`--person`、`ASN_USER…`、`user_token` 之類字樣就擋。mod 不傳任何環境變數給子行程，也不讀任何金鑰檔（金鑰由 asn-cli／send.mjs 自己讀）。
 
-## 沒做：狀態列未讀數
+## 狀態列未讀數（第一期還沒做，但唯讀查詢已備好）
 
-`recv` 只有 `--once`（拉到就 ack）與 `--watch`（長駐、ack），asn-cli 也一樣，**沒有「只看不 ack」的唯讀指令**。mod 若輪詢會把信 ack 掉或與本視窗自己的收信搶信，所以第一期不做。要做需先在 relay／asn-cli 加唯讀查詢（例如 `recv --peek`），由 ASN 主線決定。
+`recv --once`／`--watch` 都會 ack，不能拿來輪詢。現在 asn-cli 有唯讀的 **`asn-cli recv --peek`**：列出本視窗目前未讀的信，一行 JSON `{"count":N,"messages":[{"id","from","at","preview"}]}`（preview 截 80 字），**不 ack、不改任何狀態、不寫記號**；加 `--count-only` 只輸出 `{"count":N}`。狀態列腳本可直接輪詢它。後端要先部署 `inbox_peek` 動作（migration `20261022030000_inbox_peek.sql`）；還沒部署時 asn-cli 會印中文錯誤並以結束碼 4 離開，這時狀態列就不要顯示數字。
 
 ## 限制
 
