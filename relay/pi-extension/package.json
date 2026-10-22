@@ -1,0 +1,14 @@
+{
+  "name": "asn-pi-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ASN 收發室寄信工具與守門（pi 擴充，#135 第一期）",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}
