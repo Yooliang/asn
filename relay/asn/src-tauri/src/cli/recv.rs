@@ -5,6 +5,7 @@
 //! 寄給整台機器（沒指定視窗）的總機信不在這裡，仍由收發室橋處理。
 //! --watch 會寫心跳 ~/.irori-relay/machine-<節點>/self-recv/<視窗名>.json（每 30 秒）；橋看到心跳就不再轉交這個視窗的信（心跳過期就照舊轉）。
 //! 每行 JSON：{id, trust, from_node, from_agent, to_agent, reply_to, created_at, expects_reply, body[, attachments]}。診斷訊息只走 stderr。
+//!   asn recv --peek     只看不收：印 {"count":N,"messages":[{id,from,at,preview}]} 一行；不 ack、不改任何狀態（後端 inbox_peek 動作，只 select）；加 --count-only 只印 {"count":N}
 //! 結束碼：1 用法、2 認不出視窗、3 這個視窗已有另一個 recv --watch 在跑、4 後端錯誤。
 use super::caller::{find_caller, identity, relay};
 use super::env::Env;
@@ -19,12 +20,17 @@ use std::time::Duration;
 const USAGE: &str = "用法：
   asn recv --once    拉一次、印出（每封一行 JSON）、ack 後結束
   asn recv --watch   長駐收信（門鈴＋輪詢，每封一行 JSON 到 stdout；給 Monitor 用）
+  asn recv --peek [--count-only]
+                     只看不收：印未讀數與每封的 id／寄件人／時間／前 80 字，不 ack、不改任何狀態
+                     （給狀態列用；--count-only 只印 {\"count\":N}）
 只收寄給本視窗名的信；回信用 asn send --reply-to <id>（再加 --reply 或 --no-reply 二選一）。";
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Args {
     pub once: bool,
     pub watch: bool,
+    pub peek: bool,
+    pub count_only: bool,
     pub help: bool,
 }
 
@@ -34,12 +40,17 @@ pub fn parse_args(argv: &[String]) -> R<Args> {
         match k.as_str() {
             "--once" => a.once = true,
             "--watch" => a.watch = true,
+            "--peek" => a.peek = true,
+            "--count-only" => a.count_only = true,
             "--help" | "-h" => a.help = true,
             _ => return Err(Fail::new(1, format!("不認得的參數 {k}\n{USAGE}"))),
         }
     }
-    if !a.help && a.once == a.watch {
-        return Err(Fail::new(1, format!("--once 與 --watch 要二選一\n{USAGE}")));
+    if !a.help && [a.once, a.watch, a.peek].iter().filter(|b| **b).count() != 1 {
+        return Err(Fail::new(1, format!("--once、--watch、--peek 要三選一\n{USAGE}")));
+    }
+    if !a.help && a.count_only && !a.peek {
+        return Err(Fail::new(1, format!("--count-only 只能和 --peek 一起用\n{USAGE}")));
     }
     Ok(a)
 }
@@ -100,6 +111,27 @@ pub fn to_line(m: &Value, cmd: Option<&str>) -> String {
     s
 }
 
+/// 只看不收的輸出：{"count":N,"messages":[{"id","from","at","preview"}]}；preview 取內文前 80 字（控制字元壓成空白）。
+/// count 以後端回的總數為準（沒給就用信數）；count_only 只印 {"count":N}。
+pub fn peek_line(v: &Value, count_only: bool) -> String {
+    let msgs = v.get("messages").and_then(Value::as_array).cloned().unwrap_or_default();
+    let count = v.get("count").and_then(Value::as_u64).unwrap_or(msgs.len() as u64);
+    if count_only {
+        return format!("{{\"count\":{count}}}");
+    }
+    let items: Vec<String> = msgs
+        .iter()
+        .map(|m| {
+            let from = m.get("from_agent").and_then(Value::as_str).filter(|s| !s.is_empty()).or_else(|| m.get("from_node").and_then(Value::as_str)).unwrap_or("");
+            let body = m.get("body").and_then(Value::as_str).unwrap_or("");
+            let flat: String = body.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+            let preview: String = flat.chars().take(80).collect();
+            format!("{{\"id\":{},\"from\":{},\"at\":{},\"preview\":{}}}", js_opt(m.get("id")), js(from), js_opt(m.get("created_at")), js(&preview))
+        })
+        .collect();
+    format!("{{\"count\":{count},\"messages\":[{}]}}", items.join(","))
+}
+
 /// 毫秒時間 → ISO 8601（UTC，毫秒），給 stderr 的診斷行用
 pub fn iso(ms: u64) -> String {
     let secs = (ms / 1000) as i64;
@@ -133,6 +165,19 @@ pub async fn main(argv: &[String], env: &Env, io: &mut Io<'_>) -> R<i32> {
     let rl = relay(&id, &me.name);
     let cmd = env.prefix("attach");
     let q = encode_component(&me.name);
+
+    // --peek：只讀。只呼叫 inbox_peek（後端只 select），絕不呼叫 inbox／ack，也不寫心跳、replied／sent 記號
+    if a.peek {
+        let v = rl.api(&format!("inbox_peek&agent={q}"), None).await.map_err(|e| {
+            if e.contains("HTTP 404") {
+                Fail::new(4, "查詢未讀失敗：後端還沒支援「只看不收」（inbox_peek 回 404），請等後端部署新版後再試；這次沒有動到任何信。")
+            } else {
+                Fail::new(4, format!("查詢未讀失敗：{e}"))
+            }
+        })?;
+        io.outln(&peek_line(&v, a.count_only));
+        return Ok(0);
+    }
     let mut printed: HashSet<String> = HashSet::new(); // 已印出但（可能）還沒 ack 成功的信：不重印，只重試 ack
 
     macro_rules! pull_once {

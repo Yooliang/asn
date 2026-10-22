@@ -15,7 +15,7 @@ export function parseAgentName(v: unknown): string | null {
 export async function handleAgentInbox(
   deps: AgentInboxDeps,
   me: { id: string },
-  action: "inbox" | "ack",
+  action: "inbox" | "inbox_peek" | "ack",
   agentRaw: unknown,
   body?: unknown,
 ): Promise<{ status: number; body: unknown }> {
@@ -25,6 +25,12 @@ export async function handleAgentInbox(
     const { data, error } = await deps.rpc("irori_relay_inbox_agent", { p_node: me.id, p_agent: agent });
     if (error) { console.error(error); return { status: 500, body: { error: "internal" } }; }
     return { status: 200, body: { messages: data } };
+  }
+  if (action === "inbox_peek") {
+    // 只看不收（asn-cli recv --peek）：只呼叫唯讀的 irori_relay_inbox_peek，不 ack、不設 delivered_at
+    const { data, error } = await deps.rpc("irori_relay_inbox_peek", { p_node: me.id, p_agent: agent });
+    if (error) { console.error(error); return { status: 500, body: { error: "internal" } }; }
+    return { status: 200, body: data };
   }
   const ids = (body as { ids?: unknown } | null)?.ids;
   if (!Array.isArray(ids) || ids.length > 100 || !ids.every((i) => typeof i === "string" && UUID.test(i))) {

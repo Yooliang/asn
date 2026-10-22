@@ -60,6 +60,7 @@ asn-cli send --to <成員代號|節點/視窗名> --body "內文" (--reply|--no-
 asn-cli send --room <群組id> --body "內文"
 asn-cli send --whoami            # 不寄信，印出父行程鏈、session 對照、節點判定
 asn-cli recv --once | --watch    # 每封一行 JSON；--watch 寫心跳，橋就不再轉交這個視窗的信
+asn-cli recv --peek [--count-only]   # 只看不收（給狀態列）：{"count":N,"messages":[{id,from,at,preview}]}，不 ack、不改任何狀態；需後端 inbox_peek
 asn-cli room --rooms | --room-read <群組id|群組名> [--last N | --since SEQ] [--json]
 asn-cli attach --id <附件編號> [--out 路徑]
 ```
