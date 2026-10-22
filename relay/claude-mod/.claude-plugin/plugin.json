@@ -1,0 +1,25 @@
+{
+  "name": "asn",
+  "version": "0.1.0",
+  "description": "ASN 收發室接進 Claude 視窗：asn_send 寄信工具＋寄信旗標守門（#134 第一期）",
+  "userConfig": {
+    "asn_cli_path": {
+      "type": "string",
+      "title": "asn-cli 路徑",
+      "description": "ASN 安裝資料夾裡的 asn-cli.exe 完整路徑（ASN 設定頁「寄信指令」可複製）。優先使用。",
+      "default": ""
+    },
+    "send_mjs_path": {
+      "type": "string",
+      "title": "send.mjs 路徑",
+      "description": "沒設 asn-cli 時的退路：relay/machine/send.mjs 完整路徑（需要 node）。",
+      "default": ""
+    },
+    "node_path": {
+      "type": "string",
+      "title": "node 指令",
+      "description": "跑 send.mjs 用的 node 指令或完整路徑。",
+      "default": "node"
+    }
+  }
+}
