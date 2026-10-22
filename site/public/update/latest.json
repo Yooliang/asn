@@ -1,11 +1,11 @@
 {
-  "version": "0.1.27",
-  "notes": "修正：收發室剛啟動、還沒拿到視窗名單時寄來的信不會再被誤判找不到而丟掉；環境變數改用 ASN_*（舊的 IRORI_* 照樣能用，#14 第一期）",
-  "pub_date": "2026-10-22T02:57:11.522Z",
+  "version": "0.1.28",
+  "notes": "ASN 打開時自動幫 Claude Code 安裝 ASN 外掛（預設啟用）；名單顯示「等你回答」「背景工作中」等狀態",
+  "pub_date": "2026-10-22T03:32:45.036Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjgrZ0I3SmlnckZ5cUx4Q0V2MlYrM1pmRUhtaVlFTkg2ZTE0UzF5eG4xVUZsbzBicVI4TmVNUXpjdzMvZklDdVlvalhNdmYvNHphWTFkMXMyWE1GR0FNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjM3ODMxCWZpbGU6QVNOXzAuMS4yN194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjI3CldSa1UrVGFkTHROQ2xhNXEzZTNsbzJmMEZNVnh2dk4vOFk4Z2JxVlByQ0NYRmpoT1V6NjhGTVJTRkpucklkcTVhRnhMbWVXN2luRXMrVndnc1NCb0JnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.27_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjdtTEFMMGNTWW5TcTFsY0xWemRzazZ4OHZIblVjMFl4ZWNjd3I5bXpzc3NpcDJrdkZzajN1UHFvbHhWenVEYjAybFhvdW04MklSaUdTQXBPQkFISmdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjM5OTY1CWZpbGU6QVNOXzAuMS4yOF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjI4ClVpWlBFK2JETHk2ZDluNEY3elBRQm1TZjladXduOXFkSVl0N1UycHNKTk9KWjRrZjdDa1NlVWh3M0czdVc2dWQ0aGRhWi9LdDdEWUgyV3ZDQSsrVEFnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.28_x64-setup.exe"
     }
   }
 }
