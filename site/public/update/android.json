@@ -1,8 +1,8 @@
 {
-  "version": "0.1.42",
-  "versionCode": 1042,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.42_android.apk",
-  "sha256": "5d585af803fc53aac71285a494c726ea42f73a0cca48906ac255f29bb4e57765",
-  "notes": "- 從手機傳「/指令 參數」可直接在 Claude 視窗執行（限本人、等視窗閒置，做完回報結果）；改名、切換模型遇到視窗忙碌時改成排隊；名單不再列出 ASN 程式本身那一筆",
+  "version": "0.1.43",
+  "versionCode": 1043,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.43_android.apk",
+  "sha256": "217c7bc87dc37e8a2ac17ab896b49f08cfff07b0472e3c3c8bffa28c19f7d78a",
+  "notes": "- 名單直接顯示 Claude 視窗的上下文用量（70% 以上顯示、90% 以上紅字），升破 90% 時提醒一次，手機可直接按接班換手",
   "bytes": 8895972
 }
