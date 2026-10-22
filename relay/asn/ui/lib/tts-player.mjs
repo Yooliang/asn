@@ -3,6 +3,7 @@
 //   createAudio(b64, mime) → { play(): Promise<void>, stop(), onended: fn 可設 }
 // 同一時間只播一則；再按同一則＝停止；按另一則＝換過去。自動念的信排隊（最多 3 則，超過丟掉最舊的）。
 import { EMO } from './text.mjs'
+import { speechSegments } from './speech-split.mjs'
 
 export const SPEAK_MAX = 900   // 一次最多念這麼多字（後台上限 1000）
 
@@ -43,29 +44,41 @@ export class TtsPlayer {
     await this.play(key, text)
   }
 
-  async play(key, raw) {
+  /** opts.stream＝真：切成句子分段合成，第一段好了就先念，念的同時預先合成下一段（通話用） */
+  async play(key, raw, opts = {}) {
     this.#halt()
-    const text = speakableText(raw)
+    const text = speakableText(raw, opts.max)
     if (!text) { this.#set('', 'idle', '這則訊息沒有可以念的文字。'); return false }
+    const segs = opts.stream ? speechSegments(text) : [text]
     const gen = ++this.gen
     this.#set(key, 'loading')
+    return this.#playSeg(key, segs, 0, gen, null)
+  }
+
+  async #playSeg(key, segs, i, gen, pre) {
     let res
-    try { res = await this.fetchAudio(text) }
+    try { res = await (pre ?? this.fetchAudio(segs[i])) }
     catch (e) { if (gen === this.gen) this.#set('', 'idle', e?.message || '念出訊息失敗。'); return false }
     if (gen !== this.gen) return false
+    const nextP = i + 1 < segs.length ? this.fetchAudio(segs[i + 1]) : null   // 現在這段開始念時，下一段同時在合成
+    nextP?.catch(() => {})
     let audio
     try { audio = this.createAudio(res.audio, res.mime) } catch { this.#set('', 'idle', '無法播放聲音。'); return false }
     this.audio = audio
-    audio.onended = () => { if (gen === this.gen) this.#finish() }
+    audio.onended = () => {
+      if (gen !== this.gen) return
+      if (nextP) { this.#halt(); void this.#playSeg(key, segs, i + 1, gen, nextP) }   // 段與段之間維持「念出中」，不回 idle
+      else this.#finish()
+    }
     try { await audio.play() } catch { if (gen === this.gen) { this.#halt(); this.#set('', 'idle', '無法播放聲音。') } return false }
     if (gen === this.gen) this.#set(key, 'playing')
     return true
   }
 
   /** 自動念：忙碌中就排隊（最多 3 則，滿了丟最舊的） */
-  enqueue(key, text) {
-    if (this.phase === 'idle') { void this.play(key, text); return }
-    this.queue.push({ key, text })
+  enqueue(key, text, opts = {}) {
+    if (this.phase === 'idle') { void this.play(key, text, opts); return }
+    this.queue.push({ key, text, opts })
     while (this.queue.length > 3) this.queue.shift()
   }
 
@@ -77,7 +90,7 @@ export class TtsPlayer {
     this.#halt()
     const next = this.queue.shift()
     this.#set('', 'idle')
-    if (next) void this.play(next.key, next.text)
+    if (next) void this.play(next.key, next.text, next.opts)
   }
 }
 
