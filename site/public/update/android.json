@@ -1,8 +1,8 @@
 {
-  "version": "0.1.33",
-  "versionCode": 1033,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.33_android.apk",
-  "sha256": "5b86a8afc7afde7e469d68efa12e2bd8e82de16c51ec932faea140dd4085f85a",
-  "notes": "安卓第一期：登入、名單、對話、自動更新、幫電腦開新夥伴",
-  "bytes": 8805860
+  "version": "0.1.34",
+  "versionCode": 1034,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.34_android.apk",
+  "sha256": "5965b9c105413e899ca2efe0fa71a6bb8dbbec02f21babb34a36f78e1e2e093c",
+  "notes": "離線成員也列出來、同一封信不再重複、標出寄件設備",
+  "bytes": 8801764
 }
