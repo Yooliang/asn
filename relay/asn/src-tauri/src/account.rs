@@ -212,14 +212,14 @@ pub fn node_in_list(nodes: &Value, node: &str) -> bool {
     nodes.as_array().map(|a| a.iter().any(|n| n.get("id").and_then(Value::as_str) == Some(node))).unwrap_or(false)
 }
 
-struct Ctx {
-    client: reqwest::Client,
-    relay_url: String,
-    auth_base: String,
-    anon: String,
+pub(crate) struct Ctx {
+    pub(crate) client: reqwest::Client,
+    pub(crate) relay_url: String,
+    pub(crate) auth_base: String,
+    pub(crate) anon: String,
 }
 
-fn ctx() -> Result<Ctx, String> {
+pub(crate) fn ctx() -> Result<Ctx, String> {
     let relay_url = identity::base_url(crate::envc::get("ASN_RELAY_URL"));
     let anon = identity::read_anon(&identity::relay_home(), crate::envc::get("ASN_RELAY_ANON_KEY"), &relay_url).ok_or("找不到後台的公開金鑰（anon），沒辦法登入")?;
     Ok(Ctx { client: reqwest::Client::new(), auth_base: auth::auth_base_from(&relay_url), relay_url, anon })

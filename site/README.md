@@ -8,6 +8,7 @@
 | 首頁 | `public/index.html` |
 | 隱私權政策 | `public/privacy.html`（網址 `/privacy`） |
 | 服務條款 | `public/terms.html`（網址 `/terms`） |
+| 雲端代理技能說明 | `public/skill/`（`/skill/`；說明本體 `asn-cloud-agent.md`，輕量檢查 `version.json`） |
 
 ## 本機預覽
 
