@@ -31,12 +31,23 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-btn-big{min-height:50px;font-weight:700}
 .m-danger{color:#b3261e;border-color:#d79a95}
 .m-link{border:0;background:none;color:var(--link);min-height:44px;padding:0 12px;text-decoration:underline}
-.m-icon-btn{flex:none;width:44px;height:44px;border:0;border-radius:50%;background:transparent;color:var(--title-fg);font-size:28px;line-height:1;display:grid;place-items:center;cursor:pointer}
+/* 標題列的圖示按鈕：全部同一個尺寸（觸控區 48px、圖示 28px），返回鍵與「＋」一模一樣 */
+.m-icon-btn{flex:none;width:48px;height:48px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--title-fg);line-height:0;display:grid;place-items:center;cursor:pointer}
+.m-icon-btn .m-ic{width:28px;height:28px;display:block}
 .m-icon-btn:active:not(:disabled){background:rgba(255,255,255,.55)}
 .m-icon-btn:disabled{opacity:.5}
 
 /* 頁面骨架：上面標題列、中間可捲動、下面分頁列 */
-.m-page,.m-chat{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.m-page{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+/* 三個大分頁並排（夥伴／對話／設置），整排用 transform 平移：手指拖動時跟手、放開吸附。只動 transform，捲動與動畫都不觸發排版 */
+.m-pager-wrap{flex:1;min-height:0;overflow:hidden;position:relative;touch-action:pan-y}
+.m-pager{display:flex;width:300%;height:100%;will-change:transform;transition:transform .28s cubic-bezier(.2,.8,.3,1)}
+.m-pager.dragging{transition:none}
+.m-pg{flex:0 0 33.3333%;width:33.3333%;min-width:0;min-height:0;display:flex;flex-direction:column}
+@media (prefers-reduced-motion:reduce){.m-pager,.m-chat{transition:none}}
+/* 對話：蓋在分頁上的一層，可以左右滑走（滑動時跟手；放開後滑出或彈回） */
+.m-chat{position:fixed;z-index:60;inset:0;display:flex;flex-direction:column;overflow:hidden;touch-action:pan-y;will-change:transform;transition:transform .2s ease-out;background:linear-gradient(180deg,var(--glass-top),var(--glass-bottom) 55%,#a9cdee)}
+.m-chat.dragging{transition:none}
 .m-head{flex:none;display:flex;align-items:center;gap:10px;height:60px;overflow:hidden;padding:6px 10px;color:var(--title-fg)}
 .m-head-tx{flex:1;min-width:0}
 .m-title{font-weight:800;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 0 8px #fff,0 0 2px #fff}
@@ -45,16 +56,23 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-me{flex:none;width:48px;height:48px;border:0;background:none;padding:2px;cursor:pointer;line-height:0;display:grid;place-items:center}
 /* 標題列的大頭貼：固定 44px 圓形（外框顏色＝狀態），不沿用電腦版的 .dp 相框，免得被撐滿 */
 /* （不能叫 .m-av：那是 ChatPane 訊息旁頭像的類別名） */
-.m-pic{--frame:var(--online);flex:none;display:block;width:44px;height:44px;max-width:44px;max-height:44px;object-fit:cover;border-radius:50%;border:3px solid var(--frame);background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3)}
-.m-pic-lg{width:112px;height:112px;max-width:112px;max-height:112px;border-width:4px}
+.m-pic{--frame:var(--online);flex:none;display:block;width:44px;height:44px;max-width:44px;max-height:44px;object-fit:cover;border-radius:8px;border:3px solid var(--frame);background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.m-pic-lg{width:112px;height:112px;max-width:112px;max-height:112px;border-width:4px;border-radius:16px}
 .m-pic.st-busy{--frame:var(--busy)} .m-pic.st-away{--frame:var(--away)} .m-pic.st-offline{--frame:var(--offline);filter:grayscale(.65)}
 .m-conn-tx{min-width:0;overflow:hidden;text-overflow:ellipsis}
 /* 滿版：左右不留外框與外距，內容直接貼齊螢幕寬 */
 .m-scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;margin:0;background:var(--panel);border:0;border-top:1px solid var(--line);border-radius:0}
-.m-tabs{flex:none;display:flex;margin:0;border:0;border-top:1px solid var(--line);border-radius:0;overflow:hidden;background:var(--panel-soft)}
+.m-tabs{position:relative;flex:none;display:flex;margin:0;border:0;border-top:1px solid var(--line);border-radius:0;overflow:hidden;background:var(--panel-soft)}
+.m-ind{position:absolute;z-index:2;top:0;left:0;width:33.3333%;height:3px;background:var(--accent);transition:transform .28s cubic-bezier(.2,.8,.3,1);will-change:transform;pointer-events:none}
+.m-tabs.dragging .m-ind{transition:none}
 .m-tabs button{position:relative;flex:1;min-height:52px;border:0;background:none;color:var(--muted);font-weight:600;cursor:pointer}
-.m-tabs button.on{color:var(--accent);background:var(--panel);box-shadow:inset 0 3px 0 var(--accent)}
+.m-tabs button.on{color:var(--accent);background:var(--panel)}
 .m-tabs .red{top:10px;right:calc(50% - 30px)}
+/* 「對話」分頁：一列一個對話串 */
+.m-thread-side{flex:none;align-self:flex-start;display:flex;flex-direction:column;align-items:flex-end;gap:6px;padding-top:2px}
+.m-thread-side time{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.m-buddy .b-last2{display:block;margin-top:1px;font-size:14px;color:#6b7b8d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.m-threads{list-style:none;margin:0;padding:0}
 
 /* 名單 */
 .m-search{position:sticky;top:0;z-index:2;padding:8px;background:var(--panel-soft);border-bottom:1px solid var(--line)}
@@ -63,22 +81,42 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-caret{display:inline-block;transition:transform .15s;font-size:12px;color:var(--muted)}
 .m-caret.open{transform:rotate(90deg)}
 .m-group ul{list-style:none;margin:0;padding:0}
-.m-ghead-row{display:flex;align-items:center}
-.m-ghead-row .m-ghead{flex:1;min-width:0}
-.m-gplus{flex:none;min-height:36px;margin-right:10px;padding:0 12px;border:1px solid #7a9ec4;border-radius:18px;background:linear-gradient(#fdfeff,#e3eef9);color:var(--title-fg);font-size:14px;cursor:pointer}
-.m-gplus:active{background:#cfe6fb}
 .m-buddy{display:flex;align-items:center;gap:12px;width:100%;min-height:60px;padding:6px 14px;border:0;border-top:1px solid #edf2f7;background:none;text-align:left;cursor:pointer}
 .m-buddy:active{background:#e6f1fc}
 .m-buddy.offline .b-nick{color:var(--muted)}
 .m-buddy .b-nick{font-size:16px}
 .m-buddy .b-psm{font-size:13px}
+.m-buddy .b-last{display:block;margin-top:1px;font-size:13px;color:#98a4b3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* 頭像右下角的廠商小徽章：約頭像寬的 40%，白底圓角，不擋臉 */
+.m-av-wrap{position:relative;flex:none;display:block;width:38px;height:38px;line-height:0}
+.m-av-wrap .dp{display:block;width:38px;height:38px}   /* 不再是 flex 項目時，span 預設是 inline，寬高會被忽略（頭像就被撐開）：明確設成 block */
+.m-vendor{position:absolute;right:-5px;bottom:-5px;width:16px;height:16px;padding:2px;box-sizing:border-box;border-radius:5px;background:#fff;box-shadow:0 0 0 1px rgba(40,80,130,.28),0 1px 2px rgba(0,0,0,.2);color:#1d2733;display:grid;place-items:center;line-height:0}
+.m-vendor svg,.m-vendor img{display:block;width:100%;height:100%}
 .m-buddy .unread{min-width:22px;line-height:22px;font-size:12px}
+
+/* 下拉重整：高度隨手指拉動（JS 設 height 與 --p＝0～1），機器人只用 transform／opacity 動（不觸發排版，捲動不卡） */
+.m-ptr{flex:none;position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:2px;height:0;margin:0 0 0;background:var(--panel-soft);color:var(--muted);font-size:13px;transition:height .26s cubic-bezier(.2,.8,.3,1);will-change:height}
+.m-ptr.dragging{transition:none}
+.m-ptr-bot{flex:none;display:block;width:44px;height:50px;margin-bottom:0;transform:translateY(calc((1 - var(--p,0)) * 14px)) rotate(calc((var(--p,0) - .5) * 10deg)) scale(calc(.6 + var(--p,0) * .4));transform-origin:50% 90%;opacity:calc(.25 + var(--p,0) * .75)}
+.m-ptr-tx{flex:none;padding-bottom:6px;line-height:1.2}
+.m-ptr-eyes,.m-ptr-smile{transform-box:fill-box;transform-origin:center}
+.m-ptr.ready .m-ptr-bot{animation:m-ptr-hop .5s ease-in-out infinite alternate}
+.m-ptr.loading .m-ptr-bot{transform:none;opacity:1;animation:m-ptr-bounce .7s cubic-bezier(.45,0,.55,1) infinite alternate}
+.m-ptr.loading .m-ptr-eyes{animation:m-ptr-blink 1.4s ease-in-out infinite}
+.m-ptr.loading::after{content:"";position:absolute;left:50%;bottom:28px;width:34px;height:6px;margin-left:-17px;border-radius:50%;background:rgba(30,58,138,.2);animation:m-ptr-shadow .7s cubic-bezier(.45,0,.55,1) infinite alternate;pointer-events:none}
+@keyframes m-ptr-hop{from{transform:translateY(0) rotate(-4deg) scale(1)}to{transform:translateY(-4px) rotate(4deg) scale(1.04)}}
+@keyframes m-ptr-bounce{from{transform:translateY(2px) scale(1.02,.96)}to{transform:translateY(-6px) scale(.98,1.03)}}
+@keyframes m-ptr-blink{0%,38%,62%,100%{transform:scaleY(1)}48%,52%{transform:scaleY(.1)}}
+@keyframes m-ptr-shadow{from{transform:scaleX(1);opacity:.9}to{transform:scaleX(.6);opacity:.4}}
+@media (prefers-reduced-motion:reduce){.m-ptr,.m-ptr-bot{transition:none;animation:none!important}.m-ptr.loading::after,.m-ptr.loading .m-ptr-eyes{animation:none!important}}
 
 /* 我 */
 .m-meview{padding:0;display:flex;flex-direction:column;gap:0}
 .m-card{display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:16px;border:0;border-bottom:1px solid var(--line);border-radius:0;background:var(--panel-soft)}
 .m-card:first-child{align-items:center}
 .m-av-big{border:0;background:none;padding:0;line-height:0;cursor:pointer;display:grid;place-items:center}
+.m-who{margin:0;font-size:18px;font-weight:700;color:var(--title-fg);text-align:center}
+.m-fine{font-size:12px;font-weight:400;color:var(--muted);line-height:1.4}
 .m-hint,.m-note,.m-ver{margin:0;font-size:13px;color:var(--muted);text-align:center}
 .m-err{margin:0;font-size:13px;color:var(--busy)}
 .m-form label{display:flex;flex-direction:column;gap:6px;font-size:14px;color:var(--title-fg)}
@@ -147,7 +185,6 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-chat .typing{height:auto;min-height:22px}
 .m-chat .photo-viewer .aero-btn{min-height:44px;padding:0 16px}
 .m-chat .filecard,.m-chat .photo{min-height:44px}
-.m-chathead .m-icon-btn{font-size:40px;font-weight:700;width:48px}
 /* ---- 訊息內文的 Markdown（手機）：issue #169，獨立區塊方便合併 ---- */
 .m-chat .msg .m-body.md-on{font-size:16px;line-height:1.45;max-width:100%}
 .m-chat .msg .m-body.md-on pre.md-code{font-size:14px}
