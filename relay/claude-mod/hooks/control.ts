@@ -67,12 +67,43 @@ export type ControlIo = Io & {
 
 type Writer = { setControl: (io: Io, r: ControlResult) => Promise<unknown> }
 
+// command.run hook 看到的那一筆（只用到這三欄）
+export type CommandRunLike = { command: string; args: string; origin?: { kind?: string } }
+
+export const ABANDONED_NOTE = '橋已放棄等待'
+
 export function createControl(st: Writer) {
   const seen: string[] = []
   let busy = false
+  // 已交給 $.command.run、還沒跑完的那一筆（busy 保證同時只有一筆）；abandoned＝執行前發現橋已放棄、沒有執行
+  let pending: { id: string; command: string; args: string; abandoned: boolean } | undefined
   const remember = (id: string): void => {
     seen.push(id)
     if (seen.length > SEEN_MAX) seen.shift()
+  }
+
+  // 控制檔還在、而且 id 相同（＝橋還在等這一筆）。讀不到、壞掉一律當不在。永不 reject
+  const stillWanted = async (io: Io, id: string): Promise<boolean> => {
+    try {
+      const home = await io.home()
+      if (!home) return false
+      const sid = await io.sid()
+      if (!validSessionId(sid)) return false
+      const o = JSON.parse(await io.read(controlPath(home, sid))) as unknown
+      return !!o && typeof o === 'object' && (o as { id?: unknown }).id === id
+    } catch {
+      return false
+    }
+  }
+
+  // command.run hook 用：$.command.run 排到閒置才跑，橋可能已逾時刪掉控制檔。
+  // 只管自己排進去的那一筆（來源是外掛、指令與參數相同）；回 true＝放行，false＝放棄不執行。永不 reject
+  const gate = async (io: Io, e: CommandRunLike): Promise<boolean> => {
+    const p = pending
+    if (!p || p.abandoned || e.origin?.kind !== 'plugin' || e.command !== p.command || e.args !== p.args) return true
+    if (await stillWanted(io, p.id)) return true
+    p.abandoned = true
+    return false
   }
 
   // 輪詢一次。回傳的 promise 永不 reject。
@@ -94,8 +125,15 @@ export function createControl(st: Writer) {
         return
       }
       let result: ControlResult
+      const p = { id: req.id, command: req.command, args: req.args, abandoned: false }
+      pending = p
       try {
         const r = (await io.run(req.command, req.args)) as { text?: unknown } | undefined
+        // 執行前 gate 發現橋已放棄：指令沒跑，不寫結果
+        if (p.abandoned) {
+          io.log(`asn 控制檔 ${req.id}：${ABANDONED_NOTE}，未執行`)
+          return
+        }
         const raw = typeof r?.text === 'string' ? r.text.trim() : ''
         if (req.op === 'command') {
           // 指令輸出原樣（保留換行）截 MAX_OUTPUT 字；沒有輸出文字就說已執行
@@ -106,7 +144,14 @@ export function createControl(st: Writer) {
           result = { id: req.id, ok: true, detail: clip(said ? `${base}：${said}` : base) }
         }
       } catch (err) {
+        if (p.abandoned) return
         result = { id: req.id, ok: false, detail: clip(`執行失敗：${err instanceof Error ? err.message : String(err)}`) }
+      } finally {
+        pending = undefined
+      }
+      // 已經送出無法取消：跑完才發現橋放棄了，照樣寫結果，detail 開頭加註讓橋之後看得出來
+      if (!(await stillWanted(io, req.id))) {
+        result = { ...result, detail: clip(`（${ABANDONED_NOTE}）${result.detail}`, req.op === 'command' && result.ok ? MAX_OUTPUT : 200) }
       }
       await st.setControl(io, result)
     } catch (err) {
@@ -120,5 +165,5 @@ export function createControl(st: Writer) {
     }
   }
 
-  return { poll }
+  return { poll, gate }
 }

@@ -1,6 +1,6 @@
 import type { Register } from 'claude-code'
 import { bashRepliedTo, buildSendArgv, guardBash, planAutoReply, resolveCli, sendRepliedTo, startNotice, trackFromText, type ReplyTrack, type StopLike } from './lib'
-import { createControl, POLL_MS } from './control'
+import { ABANDONED_NOTE, createControl, POLL_MS } from './control'
 import { createStatus, questionDetail } from './status'
 
 const TOOL = 'mcp__asn__asn_send'
@@ -133,6 +133,13 @@ export const register: Register = (on, options) => {
     } finally {
       if (isMain) void st.write(io, 'busy', '')
     }
+  }).catch(($, e, next) => next(e))
+
+  // 控制檔排進去的指令真正執行前再確認一次：橋已逾時刪掉控制檔（或換了 id）就不執行（見 control.ts gate）
+  on('command.run', async ($, e, next) => {
+    const io = { home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: (p: string) => $.fs.read(p), write: (p: string, t: string) => $.fs.write(p, t), sid: () => $.session.id(), log: (t: string) => $.ui.log(t), root: $.plugin.root }
+    if (await ctl.gate(io, e)) return next(e)
+    return { text: `ASN ${ABANDONED_NOTE}，這個遠端指令沒有執行` }
   }).catch(($, e, next) => next(e))
 
   on('session.end', async ($, e, next) => {
