@@ -69,7 +69,7 @@ test('asn.exe 端到端（假 relay）', { skip: !fs.existsSync(defaultExe) && '
 for (const mode of ['split', 'merged']) {
   test(`設定聊天窗改值會進樞紐並存檔（${mode}）`, { skip: !fs.existsSync(defaultExe) && '先執行 npm run build', timeout: 120_000 }, async () => {
     const out = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-e2e-set-'))
-    const me = { winMode: mode, shotNoChat: true, shotSetting: 'look', shotSettingSet: [{ op: 'dpMode', value: 'right' }, { op: 'sound', value: 'off' }, { op: 'tabDim', value: 'status' }, { op: 'bubble', value: 'auto' }] }
+    const me = { winMode: mode, shotNoChat: true, shotSetting: 'look', shotSettingSet: [{ op: 'dpMode', value: 'right' }, { op: 'notify', value: { key: 'msg', on: false } }, { op: 'tabDim', value: 'status' }, { op: 'bubble', value: 'auto' }] }
     const r = await runShot(out, defaultExe, { me })
     assert.equal(r.code, 0, r.log)
     const saved = JSON.parse(fs.readFileSync(path.join(r.data, 'asn-me.json'), 'utf8'))
