@@ -259,6 +259,7 @@ fn cfg(work: &std::path::Path, sessions: &std::path::Path) -> Config {
     c.mailbox_name = "T-收發室".into();
     c.default_agent = "T-甲".into();
     c.sessions_dir = sessions.to_path_buf();
+    c.status_dir = work.join("mod-status"); // 測試不碰真的 ~/.asn
     c.extra_allow = vec![];
     c.reply_timeout_ms = 600_000;
     c.notice_window_ms = 1_800_000;
@@ -339,6 +340,31 @@ async fn 名單回報_格式與_node_橋相同_含_asn_視窗_排除死掉的視
         ], "launcher": null})
     );
     assert!(core.roster_ok);
+}
+
+#[tokio::test]
+async fn 名單回報_外掛狀態檔有效就蓋過_sessions_的_status_並帶_detail_壞檔忽略() {
+    let fr = FakeRelay::start();
+    let work = tempfile::tempdir().unwrap();
+    let sessions = tempfile::tempdir().unwrap();
+    let put = |pid: u32, name: &str, sid: &str| {
+        std::fs::write(sessions.path().join(format!("{pid}.json")), json!({"pid": pid, "sessionId": sid, "name": name, "cwd": "D:\\x", "status": "idle", "kind": "interactive", "entrypoint": "cli", "updatedAt": 1}).to_string()).unwrap();
+    };
+    put(5001, "T-甲", "sid-a");
+    put(5002, "T-乙", "sid-b");
+    put(5003, "T-丙", "sid-c");
+    let st = work.path().join("mod-status");
+    std::fs::create_dir_all(&st).unwrap();
+    std::fs::write(st.join("sid-a.json"), json!({"sessionId":"sid-a","state":"waiting_user","detail":"AskUserQuestion：要刪嗎","at":T0 - 1000, "turnId":"t","plugin":"asn@1"}).to_string()).unwrap();
+    std::fs::write(st.join("sid-b.json"), json!({"sessionId":"sid-b","state":"busy","at":T0 - 31 * 60 * 1000}).to_string()).unwrap(); // 過期
+    std::fs::write(st.join("sid-c.json"), "{半份").unwrap();
+    let mut core = new_core(&fr, work.path(), sessions.path(), Arc::new(FakeSink::default()), T0);
+    core.refresh_roster(T0).await;
+    let posts = fr.st.lock().unwrap().rosters.clone();
+    let agents = posts[0]["agents"].as_array().unwrap().clone();
+    assert!(agents.contains(&json!({"name":"T-甲","status":"waiting","cwd_label":"x","engine":"claude","detail":"AskUserQuestion：要刪嗎"})), "{agents:?}");
+    assert!(agents.contains(&json!({"name":"T-乙","status":"idle","cwd_label":"x","engine":"claude"})), "{agents:?}");
+    assert!(agents.contains(&json!({"name":"T-丙","status":"idle","cwd_label":"x","engine":"claude"})), "{agents:?}");
 }
 
 #[tokio::test]

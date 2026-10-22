@@ -30,6 +30,8 @@ pub struct Config {
     pub extra_allow: Vec<String>,
     pub work_dir: PathBuf,
     pub sessions_dir: PathBuf,
+    /// Claude Code 外掛寫的狀態檔資料夾（~/.asn/status，橋只讀）
+    pub status_dir: PathBuf,
     pub poll_ms: u64,
     pub roster_ms: u64,
     pub tick_ms: u64,
@@ -78,6 +80,7 @@ impl Config {
             extra_allow: list("ASN_RELAY_ALLOW"),
             work_dir,
             sessions_dir: home.join(".claude").join("sessions"),
+            status_dir: home.join(".asn").join("status"),
             poll_ms: env_u64("ASN_RELAY_POLL_MS", 120_000),
             roster_ms: env_u64("ASN_ROSTER_MS", 60_000),
             tick_ms: env_u64("ASN_BRIDGE_TICK_MS", 5_000),
@@ -395,7 +398,10 @@ impl Core {
         if claude.is_none() && !engine_ok {
             return;
         }
-        if let Some(l) = claude {
+        if let Some(mut l) = claude {
+            roster::apply_mod_status(&mut l, &self.cfg.status_dir, now);
+            let live: Vec<String> = l.iter().filter_map(|w| w.session_id.clone()).collect();
+            roster::cleanup_mod_status(&self.cfg.status_dir, &live, now);
             self.claude_roster = l;
         }
         let mut list = self.claude_roster.clone();
