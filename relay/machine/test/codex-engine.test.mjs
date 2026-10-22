@@ -8,6 +8,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
+import { spawnTracked } from './spawn-tracked.mjs'
 import { fileURLToPath } from 'node:url'
 import { REQUIRED_METHODS, loadEngines, validateEngine } from '../engines/index.mjs'
 import { createEngine } from '../engines/codex.mjs'
@@ -432,7 +433,7 @@ test('橋整合：IRORI_ENGINES=codex → 名單上報帶 engine=codex；來信�
   const fx = fixture({ threads: THREADS, open: [A, B], extraEnv: { FAKE_CODEX_REPLY: '橋整合回覆', FAKE_CODEX_REPLY_MS: '200' } })
   const inbox = [{ id: uid(0xf1), from_node: 'W', from_agent: 'W-政策', trust: 'member', body: '內文-F1', to_agent: '視窗甲' }]
   const st = await fakeRelay(inbox)
-  const child = spawn(process.execPath, [path.join(MACHINE, 'bridge.mjs')], {
+  const child = spawnTracked(process.execPath, [path.join(MACHINE, 'bridge.mjs')], {
     cwd: fx.dir, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true,
     env: { ...fx.env, HOME: fx.dir, USERPROFILE: fx.dir, IRORI_RELAY_ID: 'T', IRORI_RELAY_KEY: 'fake-test-key', IRORI_LAUNCH_NO_AUTO: '1', IRORI_RELAY_URL: `http://127.0.0.1:${st.port}`,
       IRORI_RELAY_POLL_MS: '200', IRORI_ROSTER_MS: '150', IRORI_ENGINES: CODEX_MJS },

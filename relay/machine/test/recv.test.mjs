@@ -6,7 +6,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawnTracked } from './spawn-tracked.mjs'
 import { fileURLToPath } from 'node:url'
 import { selfRecvAlive, writeHeartbeat, heartbeatFile } from '../self-recv.mjs'
 
@@ -57,7 +57,7 @@ const baseEnv = (home, st, extra = {}) => ({
   IRORI_RELAY_ID: 'T', IRORI_RELAY_URL: `http://127.0.0.1:${st.port}/relay`, CLAUDE_CODE_MESSAGING_SOCKET: `\\\\.\\pipe\\fake-${process.pid}`, ...extra,
 })
 function spawnRecv(home, st, args, env = {}) {
-  const c = spawn(process.execPath, [RECV, ...args], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: baseEnv(home, st, env) })
+  const c = spawnTracked(process.execPath, [RECV, ...args], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: baseEnv(home, st, env) })
   c.out = ''; c.err = ''; c.stdout.on('data', d => c.out += d); c.stderr.on('data', d => c.err += d)
   c.done = new Promise(r => c.on('close', code => r(code)))
   return c
@@ -101,7 +101,7 @@ test('不是在 Claude 視窗裡跑（認不出視窗）→ 拒絕、不打後�
   const st = await fakeRelay(), home = newHome()
   try {
     fs.rmSync(path.join(home, '.claude', 'sessions', `${process.pid}.json`))   // 測試行程在父行程鏈上：先拿掉它的 session 登記，才是「沒有視窗」
-    const noWin = spawn(process.execPath, [RECV, '--once'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: baseEnv(home, st, { CLAUDE_CODE_MESSAGING_SOCKET: '' }) })
+    const noWin = spawnTracked(process.execPath, [RECV, '--once'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: baseEnv(home, st, { CLAUDE_CODE_MESSAGING_SOCKET: '' }) })
     let err = ''; noWin.stderr.on('data', d => err += d)
     assert.equal(await new Promise(r => noWin.on('close', r)), 2); assert.match(err, /找不到呼叫者所屬的 Claude 視窗/)
     const bad = spawnRecv(home, st, ['--once', '--watch']); assert.equal(await bad.done, 1)
@@ -160,7 +160,7 @@ async function bridgeRun({ heartbeat }) {
   fs.writeFileSync(agentsFile, JSON.stringify([{ pid: 93001, cwd: 'D:\\x', kind: 'interactive', startedAt: 1, name: 'T-視窗甲', status: 'idle' }]))
   fs.writeFileSync(inboundFile, ''); fs.writeFileSync(recordFile, '')
   if (heartbeat) writeHeartbeat(path.join(home, '.irori-relay', 'machine-T'), 'T-視窗甲', process.pid, Date.now() - heartbeat.ageMs)
-  const child = spawn(process.execPath, [path.join(MACHINE, 'bridge.mjs')], {
+  const child = spawnTracked(process.execPath, [path.join(MACHINE, 'bridge.mjs')], {
     cwd: home, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true,
     env: {
       PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: home, USERPROFILE: home,
@@ -170,9 +170,10 @@ async function bridgeRun({ heartbeat }) {
     },
   })
   let log = ''; child.stderr.on('data', d => log += d)
-  await sleep(1200)   // 讓橋先拿到第一份視窗名單，再放信進信箱（名單還空時橋會回「找不到 session」）
+  // 等橋第一次回報名單，再放信進信箱（名單還空時橋會回「找不到 session」）；固定等一段時間在負載高時不夠
+  await until(() => st.reqs.some(r => r.action === 'roster'), 20000)
   st.mails = [mail(1, 'T-視窗甲')]
-  await until(() => /handed id=|window receives by itself/.test(log), 6000)
+  await until(() => /handed id=|window receives by itself/.test(log), 20000)
   await sleep(1000)   // 多輪輪詢，確認不會反悔轉交
   child.kill(); await new Promise(r => child.once('exit', r)); await sleep(300)
   const res = { log, acks: st.reqs.filter(r => r.action === 'ack' && !r.agent), mails: st.mails }
