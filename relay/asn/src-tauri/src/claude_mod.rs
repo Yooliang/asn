@@ -295,6 +295,64 @@ pub fn run(runner: &dyn Runner, path_var: &OsStr, extra: &[PathBuf], mod_dir: &P
     out
 }
 
+/// 版本資料夾名稱：只收「數字.數字…」（例如 1.2.3），其他名稱一律不碰
+fn version_key(name: &str) -> Option<Vec<u64>> {
+    if name.is_empty() || name.len() > 32 {
+        return None;
+    }
+    name.split('.').map(|p| if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) { p.parse::<u64>().ok() } else { None }).collect()
+}
+
+/// 清掉 Claude Code 外掛快取裡的舊版本資料夾（cache/asn/asn/<版本>/，每次發版都會多一份、從不清）。
+/// 只在確定新版已安裝成功之後呼叫。保留：目前版本，加上其餘版本裡最新的一版（舊的 Claude 視窗可能還在讀）。
+/// 「正在被使用」無法可靠判斷，所以保守地只保留最新兩版。
+/// 只動 cache_root 底下、名稱是版本號的真資料夾；連結、非版本名稱、路徑正規化後不在 cache_root 內的一律略過。回傳實際刪掉的資料夾名稱。
+pub fn prune_plugin_cache(cache_root: &Path, current: &str) -> Vec<String> {
+    let mut removed = Vec::new();
+    // 目前版本本身必須是版本號，而且資料夾真的存在；否則不敢刪任何東西
+    if version_key(current).is_none() || !cache_root.join(current).is_dir() {
+        return removed;
+    }
+    let Ok(root) = std::fs::canonicalize(cache_root) else { return removed };
+    let Ok(rd) = std::fs::read_dir(&root) else { return removed };
+    let mut found: Vec<(Vec<u64>, String, PathBuf)> = Vec::new();
+    for e in rd.flatten() {
+        let Some(name) = e.file_name().to_str().map(String::from) else { continue };
+        let Some(key) = version_key(&name) else { continue };
+        let Ok(meta) = std::fs::symlink_metadata(e.path()) else { continue };
+        if !meta.is_dir() || meta.file_type().is_symlink() {
+            continue;
+        }
+        // 正規化後必須正好是 root/名稱（擋連結、接合點、路徑穿越）
+        match std::fs::canonicalize(e.path()) {
+            Ok(real) if real == root.join(&name) => {}
+            _ => continue,
+        }
+        found.push((key, name, e.path()));
+    }
+    found.sort_by(|a, b| b.0.cmp(&a.0));
+    let mut kept_other = false;
+    for (_, name, path) in found {
+        if name == current {
+            continue;
+        }
+        if !kept_other {
+            kept_other = true; // 其餘版本裡最新的一版留著
+            continue;
+        }
+        match std::fs::remove_dir_all(&path) {
+            Ok(()) => removed.push(name),
+            Err(e) => eprintln!("[claude-mod] 清舊版快取失敗（{name}）：{e}"),
+        }
+    }
+    removed
+}
+
+/// Claude Code 外掛快取裡本外掛的資料夾（家目錄/.claude/plugins/cache/asn/asn）
+pub fn plugin_cache_root(home: &Path) -> PathBuf {
+    home.join(".claude").join("plugins").join("cache").join(MARKETPLACE).join("asn")
+}
+
 /// 安裝資料夾裡的外掛資料夾（執行檔旁邊的 claude-mod）
 pub fn bundled_dir() -> Option<PathBuf> {
     Some(std::env::current_exe().ok()?.parent()?.join("claude-mod"))
@@ -307,7 +365,15 @@ pub fn run_real(data_dir: &Path) -> Outcome {
     let home = crate::identity::home_dir();
     let extra = [home.join(".local").join("bin")];
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    run(&runner, &std::env::var_os("PATH").unwrap_or_default(), &extra, &mod_dir, data_dir, now)
+    let out = run(&runner, &std::env::var_os("PATH").unwrap_or_default(), &extra, &mod_dir, data_dir, now);
+    // 新版確定裝好了（含標記一致）才清舊版快取
+    if let Outcome::Installed(v) = &out {
+        let gone = prune_plugin_cache(&plugin_cache_root(&home), v);
+        if !gone.is_empty() {
+            eprintln!("[claude-mod] 已清掉舊版快取：{}", gone.join("、"));
+        }
+    }
+    out
 }
 
 #[tauri::command]
@@ -637,5 +703,72 @@ mod tests {
         // 只有更新路徑可以呼叫 update；重裝（install）只准出現在 first_install 一處
         assert_eq!(body.matches("\"install\"").count(), 1);
         assert_eq!(body.matches("fn first_install").count(), 1);
+    }
+
+    fn mk_cache(names: &[&str]) -> (tempfile::TempDir, PathBuf) {
+        let t = tempfile::tempdir().unwrap();
+        let root = t.path().join("cache").join("asn").join("asn");
+        for n in names {
+            std::fs::create_dir_all(root.join(n).join("sub")).unwrap();
+            std::fs::write(root.join(n).join("sub").join("f.txt"), "x").unwrap();
+        }
+        (t, root)
+    }
+    fn left(root: &Path) -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(root).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn 清舊版_只留目前版本與前一版_用數字排序而非字串排序() {
+        let (_t, root) = mk_cache(&["0.9.0", "0.10.0", "0.10.1", "0.10.2", "0.2.0"]);
+        let gone = prune_plugin_cache(&root, "0.10.2");
+        assert_eq!(left(&root), vec!["0.10.1".to_string(), "0.10.2".to_string()]);
+        assert_eq!(gone.len(), 3);
+    }
+
+    #[test]
+    fn 清舊版_非版本名稱與檔案不碰_目前版本不存在就一個都不刪() {
+        let (_t, root) = mk_cache(&["1.0.0", "1.1.0", "1.2.0", "latest", "1.2.0-beta", "..x", "tmp.1"]);
+        std::fs::write(root.join("9.9.9"), "我是檔案").unwrap();
+        prune_plugin_cache(&root, "1.2.0");
+        assert_eq!(left(&root), vec!["..x", "1.1.0", "1.2.0", "1.2.0-beta", "9.9.9", "latest", "tmp.1"]);
+        let (_t2, root2) = mk_cache(&["1.0.0", "1.1.0", "1.2.0"]);
+        assert!(prune_plugin_cache(&root2, "2.0.0").is_empty(), "目前版本資料夾不存在＝新版沒裝好，不刪");
+        assert!(prune_plugin_cache(&root2, "../x").is_empty());
+        assert_eq!(left(&root2).len(), 3);
+        assert!(prune_plugin_cache(&root2.join("不存在"), "1.2.0").is_empty());
+    }
+
+    #[test]
+    fn 清舊版_只動快取資料夾底下_連結指到外面的不跟著刪() {
+        let (t, root) = mk_cache(&["1.0.0", "1.1.0", "1.2.0"]);
+        let outside = t.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("keep.txt"), "別碰").unwrap();
+        // 最舊的 0.5.0 是指向外面的連結（建立失敗的平台就略過這段）
+        #[cfg(unix)]
+        let linked = std::os::unix::fs::symlink(&outside, root.join("0.5.0")).is_ok();
+        #[cfg(windows)]
+        let linked = std::os::windows::fs::symlink_dir(&outside, root.join("0.5.0")).is_ok();
+        let gone = prune_plugin_cache(&root, "1.2.0");
+        assert_eq!(gone, vec!["1.0.0".to_string()]);
+        assert!(outside.join("keep.txt").is_file(), "連結目標不可被刪");
+        if linked {
+            assert!(root.join("0.5.0").exists() || std::fs::symlink_metadata(root.join("0.5.0")).is_ok(), "連結本身也不處理");
+        }
+        // 別的外掛與上層資料夾原封不動
+        std::fs::create_dir_all(root.parent().unwrap().join("other").join("0.0.1")).unwrap();
+        prune_plugin_cache(&root, "1.2.0");
+        assert!(root.parent().unwrap().join("other").join("0.0.1").is_dir());
+    }
+
+    #[test]
+    fn 清舊版_快取路徑與守門() {
+        assert_eq!(plugin_cache_root(Path::new("H")), Path::new("H").join(".claude").join("plugins").join("cache").join("asn").join("asn"));
+        let src = include_str!("claude_mod.rs");
+        let body = &src[..src.find("#[cfg(test)]").unwrap()];
+        assert!(body.contains("prune_plugin_cache(&plugin_cache_root(&home), v)"), "run_real 要在新版裝好後清舊版");
     }
 }
