@@ -291,7 +291,9 @@ test('三個大分頁：夥伴／對話／設置，橫向翻頁、底部指示�
 
 test('名字兩層、頭像圓角方形：我的名字（帳號層、唯讀）與這台設備的名稱分開；對話與「我」頂端用帳號名；.m-pic 不是圓形', () => {
   const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
-  assert.match(html, /<label>我的名字<input[^>]*:value="myName"[^>]*readonly/, '「我的名字」唯讀（改帳號名的後台動作還沒上線）')
+  assert.match(html, /<label>我的名字<input[^>]*v-model="nameDraft"[^>]*@change="commitName"/, '「我的名字」可改（#166：走後台 account_name）')
+  assert.doesNotMatch(html, /readonly/, '不再唯讀')
+  assert.match(js, /authApi\.setAccountName\(c\.name\)/, '改名字走帳號名稱指令')
   assert.match(html, /<label>這台設備的名稱<input[^>]*v-model="me\.nick"[^>]*@change="commitNick"/, '設備名稱照舊可改（就是視窗名）')
   assert.doesNotMatch(html, /暱稱（也是對外的名字）/)
   assert.match(html, /<chat-pane v-if="chatFriend" :friend="chatFriend" :me="meForChat"/, '對話裡自己的名字用帳號名')
@@ -390,7 +392,7 @@ test('登入畫面背景：電腦版與手機版各用一張 MSN 風背景，cov
   assert.match(style, /\.login-card\{[^}]*background:rgba\(255,255,255,\.\d+\)/)
   assert.match(mcss, /\.m-login-card\{[^}]*background:rgba\(255,255,255,\.\d+\)/)
   assert.doesNotMatch(read('ui', 'm.html'), /<div id="app"[^>]*:class/, '#app 自己的屬性不會被 Vue 處理，:class 綁了也沒用')
-  assert.match(read('ui', 'm.js'), /classList\.toggle\('is-login', s === 'login'\)/)
+  assert.match(read('ui', 'm.js'), /classList\.toggle\('is-login', s === 'login' \|\| s === 'onboard'\)/)
 })
 
 test('文件與資源：設計文件存在，說明套件名、登入方式、限制', () => {

@@ -113,7 +113,31 @@ pub fn autostart_set(app: State<'_, crate::App>, on: bool) -> Result<(), String>
         return Err("--shot 模式不改系統設定".into());
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    autostart_check(on, &exe)?;
     sys::set(on, &exe)
+}
+
+/// 開發版（cargo 建置資料夾底下的執行檔）不能寫開機啟動：登錄會指到開發資料夾，正式版收不到更新、建置時檔案被占用
+pub const DEV_BUILD_AUTOSTART_MSG: &str = "開發版不能設定開機自動啟動，請用正式安裝的 ASN";
+
+/// 執行檔路徑是不是在 cargo 的 target 資料夾底下（路徑含 \target\release\ 或 \target\debug\，大小寫不分，斜線反斜線都算）
+pub fn is_dev_build_path(exe: &std::path::Path) -> bool {
+    let p = format!("\\{}", exe.display().to_string().replace('/', "\\").to_lowercase());
+    p.contains("\\target\\release\\") || p.contains("\\target\\debug\\")
+}
+
+/// 這個執行檔不能開機啟動時的中文原因（正式版回 None）。設定頁用它顯示原因、把開關反灰
+#[tauri::command]
+pub fn autostart_blocked() -> Option<String> {
+    std::env::current_exe().ok().filter(|e| is_dev_build_path(e)).map(|_| DEV_BUILD_AUTOSTART_MSG.to_string())
+}
+
+/// 寫入前的檢查：開啟時開發版一律拒絕；關閉永遠放行（讓人清掉以前誤寫的項目）
+pub fn autostart_check(on: bool, exe: &std::path::Path) -> Result<(), String> {
+    if on && is_dev_build_path(exe) {
+        return Err(DEV_BUILD_AUTOSTART_MSG.into());
+    }
+    Ok(())
 }
 
 /// Windows Run 登錄值：路徑用雙引號包住，後面接背景參數
@@ -232,6 +256,24 @@ mod tests {
         assert!(reg_query_has_value(out));
         assert!(!reg_query_has_value("    OTHER    REG_SZ    x\r\n"));
         assert!(!reg_query_has_value(""));
+    }
+
+    #[test]
+    fn 開發版路徑判斷_target_release_與_debug_大小寫不分() {
+        for p in [r"D:\Github\asn\relay\asn\src-tauri\target\release\asn.exe", r"d:\x\TARGET\Debug\asn.exe", "/home/u/asn/src-tauri/target/release/asn", r"C:\a\Target\RELEASE\deps\asn.exe"] {
+            assert!(is_dev_build_path(Path::new(p)), "{p}");
+        }
+        for p in [r"C:\Program Files\ASN\asn.exe", r"C:\Users\a\AppData\Local\ASN\asn.exe", r"D:\targets\release2\asn.exe", r"D:\x\target\asn.exe", r"D:\x\mytarget\release\asn.exe", "/opt/asn/asn"] {
+            assert!(!is_dev_build_path(Path::new(p)), "{p}");
+        }
+    }
+
+    #[test]
+    fn 開發版寫開機啟動被拒絕_關閉放行() {
+        let dev = Path::new(r"D:\g\src-tauri\target\release\asn.exe");
+        assert_eq!(autostart_check(true, dev).unwrap_err(), "開發版不能設定開機自動啟動，請用正式安裝的 ASN");
+        assert!(autostart_check(false, dev).is_ok(), "關閉要放行，才清得掉以前誤寫的項目");
+        assert!(autostart_check(true, Path::new(r"C:\Program Files\ASN\asn.exe")).is_ok());
     }
 
     #[test]

@@ -15,6 +15,15 @@
   <!-- 啟動中、無法啟動 -->
   <section class="m-center" v-if="screen === 'fatal'"><img class="m-logo" src="img/logo.svg" alt=""><p role="alert">ASN 無法啟動：{{ fatal }}</p></section>
 
+  <!-- 首次登入引導：帳號名稱（已有就跳過）＋這支手機的名稱 -->
+  <section class="m-login" v-else-if="screen === 'onboard'">
+    <div class="m-login-card">
+      <div class="login-avatar is-logo"><img src="img/logo.svg" alt=""></div>
+      <h1 class="login-h">{{ ONBOARD_TEXT.title }}</h1>
+      <onboard-card :steps="onboard.steps" :device-default="info.window_name" :api="onboardApi" :mobile="true" @done="finishOnboard"></onboard-card>
+    </div>
+  </section>
+
   <!-- 登入 -->
   <section class="m-login" v-else-if="screen === 'login'">
     <div class="m-login-card">
@@ -127,7 +136,8 @@
                 <p class="m-note" v-if="avMsg" role="status">{{ avMsg }}</p>
               </div>
               <div class="m-card m-form">
-                <label>我的名字<input class="set-input" :value="myName" readonly aria-readonly="true"><small class="m-fine">帳號的名字，所有設備共用。目前只能查看，之後會開放在這裡修改。</small></label>
+                <label>我的名字<input class="set-input" v-model="nameDraft" maxlength="40" enterkeyhint="done" @change="commitName" @keydown.enter="$event.target.blur()"><small class="m-fine">帳號的名字，所有設備共用，改了每台設備都會跟著變。</small></label>
+                <p class="m-err" v-if="nameErr" role="alert">{{ nameErr }}</p>
                 <label>這台設備的名稱<input class="set-input" v-model="me.nick" maxlength="40" enterkeyhint="done" @change="commitNick" @keydown.enter="$event.target.blur()"><small class="m-fine">只有這支手機用：別台設備看到你從這裡寄信時，會標「從 {{ me.nick }}」。</small></label>
                 <p class="m-err" v-if="nickErr" role="alert">{{ nickErr }}</p>
                 <label>狀態<select class="set-sel" v-model="me.status"><option v-for="(label, key) in STATUS" :key="key" :value="key">{{ label }}</option></select></label>

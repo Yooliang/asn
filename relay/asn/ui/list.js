@@ -30,6 +30,7 @@ import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
 import { PartnerOpDialog, loadOpsContext } from './lib/partner-ops-ui.mjs'
 import { menuItems as opMenuItems } from './lib/partner-ops.mjs'
 import { backgroundRestoreNoticeText, collectLaunchFailures, findBackgroundTimeouts, launchFailedNoticeText } from './lib/partner-launch-notify.mjs'
+import { ONBOARD_STORE, planOnboarding } from './lib/onboard.mjs'
 import { friendId } from './lib/roster.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher } from './lib/model-switch.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
@@ -83,6 +84,14 @@ if (info.needs_login) {
   location.replace('login.html')
   await new Promise(() => {})
 }
+// 登入後第一次進來：先走首次登入引導（帳號名稱＋設備名稱）；旗標已設、帳號與設備都有名字、沒登入、取不到帳號資料都直接往下
+if (!info.needs_login && !info.error && !info.shot) {
+  const plan = await planOnboarding({ store: store(ONBOARD_STORE), status: authApi.status, accountInfo: authApi.accountInfo, startup: info })
+  if (plan.steps.length) {
+    location.replace('onboard.html')
+    await new Promise(() => {})
+  }
+}
 if (info.error) {
   document.body.textContent = `ASN 無法啟動：${info.error}`
   throw new Error(info.error)
@@ -100,12 +109,12 @@ const trayOk = ref(true)
 const showNowPlaying = ref(normalizeNowPlaying(savedMe.showNowPlaying))   // 顯示正在聽的歌（預設關；開了 Rust 端才去讀系統媒體、才送出）
 const nowPlaying = ref('')   // 目前正在聽的「歌名 - 歌手」（Rust 端輪詢後推來；沒在聽＝空）
 const autoAddClaude = ref(savedMe.autoAddClaude !== false)   // Claude 帳號自動加入／回存（預設開；Rust 背景工作每分鐘讀同一份存檔看開關）
-const autostart = reactive({ supported: false, on: false, busy: false })
+const autostart = reactive({ supported: false, on: false, busy: false, blocked: '' })
 try {
   await invoke('set_close_to_tray', { tray: closeTo.value === 'tray' })
   trayOk.value = await invoke('tray_available')
   autostart.supported = await invoke('autostart_supported')
-  if (autostart.supported) autostart.on = await invoke('autostart_get')
+  if (autostart.supported) { autostart.on = await invoke('autostart_get'); autostart.blocked = (await invoke('autostart_blocked').catch(() => null)) || '' }
 } catch { /* 沒有這些指令（舊版後端）就不顯示 */ }
 // 內建收發室橋（預設關）：狀態以 Rust 端為準，不存檔。程式在 bridge/
 const bridge = reactive({ enabled: false, running: false, legacy: false, takeoverAllowed: false, remoteLaunch: false, unaddressedTo: '', error: '', busy: false, confirm: false, shown: false })
@@ -953,7 +962,7 @@ const app = createApp({
         busy: accounts.state.busy, confirmDel: accounts.state.confirmDel, msg: accounts.state.msg, trustOwn: accounts.state.trustOwn, autoAdd: autoAddClaude.value, autoNote: accounts.state.autoNote,
         remote: { node: accounts.state.remote.node, devices: accounts.remoteNodes(), list: accounts.state.remote.list, loading: accounts.state.remote.loading, busy: accounts.state.remote.busy, msg: accounts.state.remote.msg },
       },
-      closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy },
+      closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy, blocked: autostart.blocked },
       bridge: bridge.shown ? { enabled: bridge.enabled, running: bridge.running, legacy: bridge.legacy, takeoverAllowed: bridge.takeoverAllowed, remoteLaunch: bridge.remoteLaunch, unaddressedTo: bridge.unaddressedTo, error: bridge.error, busy: bridge.busy, confirm: bridge.confirm } : null,
       cli: cliInfo.shown ? { path: cliInfo.path, example: cliInfo.example, copied: cliInfo.copied } : null,
       askpass: askpassInfo.shown ? { path: askpassInfo.path, example: askpassInfo.example, copied: askpassInfo.copied } : null,
