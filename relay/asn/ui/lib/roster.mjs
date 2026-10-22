@@ -1,6 +1,7 @@
 // 收發室名單（list 動作的 members）→ 好友與狀態。純函式。
 import { UNNAMED_DEVICE, hueOf, initial } from './text.mjs'
 
+const PARTNER_ID = /^p_[0-9a-f]{20}$/
 export const friendId = (node, agent) => `${node}/${agent ?? ''}`
 // 收發室自己（名字結尾「收發室」）不當好友
 export const isRelayRoom = name => /收發室$/.test(String(name ?? ''))
@@ -36,6 +37,7 @@ export function buildFriends(members, { selfNode, selfName } = {}) {
         id: friendId(m.id, a.name), node: m.id, device: typeof m.name === 'string' && m.name.trim() ? m.name.trim() : '', agent: a.name, nick: a.name,
         psm: psmOf(a),
         onRoster: true, engine: a.engine ?? null, kind: typeof m.kind === 'string' && m.kind ? m.kind : null, status: statusOf(a.status),
+        ...(PARTNER_ID.test(String(a.partner_id ?? '')) ? { partnerId: a.partner_id } : {}),   // 夥伴 ID（#153）：只在內部用來查往來記錄與指定接班，不顯示
       })
     }
   }

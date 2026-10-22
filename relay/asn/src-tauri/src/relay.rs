@@ -123,6 +123,33 @@ pub fn build_history_body(node: &str, agent: &str, limit: Option<u64>) -> Result
     Ok(Value::Object(m))
 }
 
+/// 夥伴 ID 的格式（與後台同）：p_ 加 20 個小寫十六進位字元
+pub fn valid_partner_id(s: &str) -> bool {
+    s.len() == 22 && s.starts_with("p_") && s[2..].bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// 往來記錄請求加上夥伴 ID（#153，選填）：格式不對就不送，後台改用名字比對
+pub fn with_partner_id(mut body: Value, partner_id: Option<&str>) -> Value {
+    if let (Some(o), Some(id)) = (body.as_object_mut(), partner_id.filter(|i| valid_partner_id(i))) {
+        o.insert("partner_id".into(), json!(id));
+    }
+    body
+}
+
+/// 「這是某某的接班」請求內容（#153）：前任夥伴 ID、新視窗的節點與名字；格式不對就不送
+pub fn build_succeed_body(predecessor: &str, node: &str, name: &str) -> Result<Value, String> {
+    if !valid_partner_id(predecessor) {
+        return Err("前任夥伴格式不對".into());
+    }
+    if !crate::identity::valid_id(node) {
+        return Err(format!("節點格式不對：{node}"));
+    }
+    if name.chars().count() < 1 || name.chars().count() > 60 || name.chars().any(|c| c.is_control()) {
+        return Err("視窗名格式不對".into());
+    }
+    Ok(json!({ "predecessor": predecessor, "node": node, "name": name }))
+}
+
 pub fn build_sent_status_body(ids: &[String]) -> Result<Value, String> {
     let uuid = |s: &str| {
         let p: Vec<&str> = s.split('-').collect();
@@ -464,10 +491,21 @@ impl Relay {
         self.api_signed("send", Some(b), token).await
     }
     /// 往來記錄（#108）：一定要登入憑證（後台用簽章認人；節點金鑰 AI 也拿得到，不夠）。沒憑證直接回錯，不打後台
-    pub async fn chat_history(&self, node: &str, agent: &str, token: Option<&str>) -> Result<Value, String> {
-        let body = build_history_body(node, agent, None)?;
+    pub async fn chat_history(&self, node: &str, agent: &str, partner_id: Option<&str>, token: Option<&str>) -> Result<Value, String> {
+        let body = with_partner_id(build_history_body(node, agent, None)?, partner_id);
         let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法取得雲端的往來記錄")?;
         self.api_signed("chat_history", Some(body), Some(t)).await
+    }
+    /// 指定接班（#153）：一定要登入憑證（後台用簽章認人）。沒憑證直接回錯，不打後台
+    pub async fn partner_succeed(&self, predecessor: &str, node: &str, name: &str, token: Option<&str>) -> Result<Value, String> {
+        let body = build_succeed_body(predecessor, node, name)?;
+        let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法指定接班")?;
+        self.api_signed("partner_succeed", Some(body), Some(t)).await
+    }
+    /// 可被接班的夥伴清單（#153）：同樣要登入憑證
+    pub async fn partner_list(&self, token: Option<&str>) -> Result<Value, String> {
+        let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法取得夥伴清單")?;
+        self.api_signed("partner_list", Some(json!({})), Some(t)).await
     }
     pub async fn sent_status(&self, ids: &[String]) -> Result<Value, String> {
         let b = build_sent_status_body(ids)?;
@@ -661,16 +699,54 @@ mod tests {
     async fn 往來記錄_一定要憑證_沒憑證不打後台_有憑證帶簽章標頭() {
         let (url, seen) = fake_server_with(200, r#"{"messages":[]}"#);
         let r = Relay::new(url, "secret-key".into(), "H".into(), "H-ASN".into());
-        assert!(r.chat_history("M", "小文", None).await.is_err());
-        assert!(r.chat_history("M", "小文", Some("")).await.is_err());
+        assert!(r.chat_history("M", "小文", None, None).await.is_err());
+        assert!(r.chat_history("M", "小文", None, Some("")).await.is_err());
         assert_eq!(seen.lock().unwrap().len(), 0, "沒憑證不送出任何請求");
-        let v = r.chat_history("M", "小文", Some("USERTOKEN-123")).await.unwrap();
+        let v = r.chat_history("M", "小文", Some("p_0123456789abcdef0123"), Some("USERTOKEN-123")).await.unwrap();
         assert_eq!(v, json!({ "messages": [] }));
         let s = seen.lock().unwrap();
         let low = s[0].to_lowercase();
         assert!(s[0].starts_with("POST /relay?action=chat_history"));
         assert!(low.contains("x-asn-user: bearer usertoken-123") && low.contains("x-relay-key: secret-key"), "{low}");
         assert!(s[0].contains(r#""node":"M""#) && s[0].contains("小文"));
+        assert!(s[0].contains(r#""partner_id":"p_0123456789abcdef0123""#), "夥伴 ID 一併送出：{}", s[0]);
+    }
+
+    #[test]
+    fn 往來記錄請求_夥伴_id_格式不對就不送() {
+        let b = build_history_body("M", "小文", None).unwrap();
+        assert_eq!(with_partner_id(b.clone(), Some("p_0123456789abcdef0123"))["partner_id"], "p_0123456789abcdef0123");
+        assert_eq!(with_partner_id(b.clone(), Some("p_XYZ")), b);
+        assert_eq!(with_partner_id(b.clone(), None), b);
+    }
+
+    #[test]
+    fn 接班請求內容_格式檢查() {
+        let id = "p_0123456789abcdef0123";
+        assert_eq!(build_succeed_body(id, "M", "小文").unwrap(), json!({ "predecessor": id, "node": "M", "name": "小文" }));
+        assert!(build_succeed_body("p_x", "M", "小文").is_err());
+        assert!(build_succeed_body(id, "a/b", "小文").is_err());
+        assert!(build_succeed_body(id, "M", "").is_err());
+        assert!(build_succeed_body(id, "M", "a\nb").is_err());
+    }
+
+    #[tokio::test]
+    async fn 指定接班與夥伴清單_一定要憑證_沒憑證不打後台_有憑證帶簽章標頭() {
+        let (url, seen) = fake_server_with(200, r#"{"ok":true}"#);
+        let r = Relay::new(url, "secret-key".into(), "H".into(), "H-ASN".into());
+        let id = "p_0123456789abcdef0123";
+        assert!(r.partner_succeed(id, "M", "小文", None).await.is_err());
+        assert!(r.partner_succeed(id, "M", "小文", Some("")).await.is_err());
+        assert!(r.partner_list(None).await.is_err());
+        assert_eq!(seen.lock().unwrap().len(), 0, "沒憑證不送出任何請求");
+        r.partner_succeed(id, "M", "小文", Some("USERTOKEN-123")).await.unwrap();
+        r.partner_list(Some("USERTOKEN-123")).await.unwrap();
+        let s = seen.lock().unwrap();
+        assert!(s[0].starts_with("POST /relay?action=partner_succeed") && s[1].starts_with("POST /relay?action=partner_list"));
+        for q in s.iter() {
+            assert!(q.to_lowercase().contains("x-asn-user: bearer usertoken-123"), "{q}");
+        }
+        assert!(s[0].contains(id) && s[0].contains(r#""name":"小文""#));
     }
 
     /// 守門：登入憑證只在 ASN 視窗的寄信指令（lib.rs）用；asn-cli、內建橋、機器橋相關程式碼一個字都不准碰。
@@ -694,7 +770,7 @@ mod tests {
         }
         assert!(files.len() >= 10, "掃到的檔案太少，路徑可能變了：{}", files.len());
         // 標記字串用拆開的寫法，免得這個測試檔自己（不在掃描範圍，但以防日後搬動）命中
-        let banned = [["api", "_signed"].concat(), ["send", "_signed"].concat(), ["signing", "_token"].concat(), ["SIGN", "_HEADER"].concat(), ["x-asn", "-user"].concat(), ["Auth", "State"].concat(), ["access", "_token"].concat(), ["as", "_person"].concat(), ["chat", "_history"].concat()];
+        let banned = [["api", "_signed"].concat(), ["send", "_signed"].concat(), ["signing", "_token"].concat(), ["SIGN", "_HEADER"].concat(), ["x-asn", "-user"].concat(), ["Auth", "State"].concat(), ["access", "_token"].concat(), ["as", "_person"].concat(), ["chat", "_history"].concat(), ["partner", "_succeed"].concat(), ["partner", "_list"].concat()];
         for f in &files {
             let t = std::fs::read_to_string(f).unwrap();
             for b in &banned {

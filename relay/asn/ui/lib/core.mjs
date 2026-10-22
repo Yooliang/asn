@@ -1,6 +1,6 @@
 // ASN 狀態核心（瀏覽器與 node 都能跑）：好友、對話、未讀、收信、寄信、震動。
 // 不碰網路細節：transport 由外面注入（桌面版＝Rust 命令，金鑰留在 Rust；測試＝連本機假 relay）。
-//   transport: { list(), inbox(), ack(ids), send(payload), avatar?(node), setAvatar?(dataUrl|null), sendAttachment?(payload), history?(node, agent) }
+//   transport: { list(), inbox(), ack(ids), send(payload), avatar?(node), setAvatar?(dataUrl|null), sendAttachment?(payload), history?(node, agent, partnerId) }
 //   store:     { load() → 物件|null, save(物件) }
 //   isChatVisible(id) → Promise<boolean>：該好友的對話視窗是否開著且沒最小化
 import { isAvatarDataUrl } from './avatar.mjs'
@@ -274,7 +274,7 @@ export class AsnCore {
     this.historyBusy.add(id)
     this.historyAt.set(id, this.now())
     try {
-      const r = await this.transport.history(f.node, f.agent || '')
+      const r = await this.transport.history(f.node, f.agent || '', f.partnerId || null)
       const { log, added } = mergeHistory(this.logOf(id), r?.messages, f.nick)
       if (!added) return 0
       this.logs.set(id, log)
@@ -356,7 +356,7 @@ export class AsnCore {
     const withLog = [...this.friends.values()].filter(f => this.logs.has(f.id) || f.known)
     try {
       await this.store.save({
-        friends: withLog.map(f => ({ id: f.id, node: f.node, agent: f.agent, nick: f.nick, psm: f.psm, engine: f.engine, lastAt: f.lastAt ?? 0, known: true, onRoster: f.onRoster === true })),
+        friends: withLog.map(f => ({ id: f.id, node: f.node, agent: f.agent, nick: f.nick, psm: f.psm, engine: f.engine, ...(f.partnerId ? { partnerId: f.partnerId } : {}), lastAt: f.lastAt ?? 0, known: true, onRoster: f.onRoster === true })),
         logs: Object.fromEntries(withLog.filter(f => this.logs.has(f.id)).map(f => [f.id, this.logs.get(f.id).slice(-LOG_KEEP)])),
       })
     } catch (e) { this.log(`save failed: ${e.message}`) }

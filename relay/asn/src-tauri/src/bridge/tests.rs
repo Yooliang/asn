@@ -1212,27 +1212,31 @@ fn put_session_with_id(dir: &std::path::Path, pid: u32, name: &str, session: &st
 }
 
 #[tokio::test]
-async fn 夥伴_id_回報名字與_session_記憶體留_id_往來記錄檔頭帶_id_檔名仍是視窗名() {
+async fn 夥伴_id_回報名字與_session_記憶體留_id_往來記錄檔名與檔頭都是夥伴_id_路徑行指向它() {
     let fr = FakeRelay::start();
     fr.st.lock().unwrap().partner_resp = Some(json!({"ok": true, "partners": [{"name": "T-乙", "partner_id": PID_B}, {"name": "T-ASN", "partner_id": "p_ffeeddccbbaa99887766"}]}));
     let work = tempfile::tempdir().unwrap();
     let sessions = tempfile::tempdir().unwrap();
     put_session_with_id(sessions.path(), 5001, "T-乙", "sess-0001-aaaa");
-    let mut core = new_core(&fr, work.path(), sessions.path(), Arc::new(FakeSink::default()), T0);
+    let sink = Arc::new(FakeSink::default());
+    let mut core = new_core(&fr, work.path(), sessions.path(), sink.clone(), T0);
     core.refresh_roster(T0).await;
     let posts = fr.st.lock().unwrap().partner_posts.clone();
     assert_eq!(posts, vec![json!({"windows": [{"name": "T-乙", "engine": "claude", "session_id": "sess-0001-aaaa"}, {"name": "T-ASN", "engine": "asn"}]})]);
     assert_eq!(core.partner_id("T-乙"), Some(PID_B));
     assert_eq!(core.partner_id("沒這個"), None);
-    // 轉交一封信後，記錄檔（檔名仍是視窗名）第一行是檔頭，記錄照常
+    // 轉交一封信後，記錄檔（#153：檔名是夥伴 ID）第一行是檔頭，記錄照常；信上「往來記錄在」指向同一個檔
     fr.put(mail(1, json!({})));
     core.pull("test", T0).await;
     core.on_worker_line(res(&format!("SENT {}", uid(1))), T0 + 10).await;
-    let f = super::corrlog::file_of(&core.cfg.handoff_dir, "T-乙");
-    assert_eq!(f.file_name().unwrap().to_string_lossy(), "T-乙.md");
-    let t = std::fs::read_to_string(f).unwrap();
+    let f = super::corrlog::pid_file_of(&core.cfg.handoff_dir, PID_B);
+    assert_eq!(f.file_name().unwrap().to_string_lossy(), format!("{PID_B}.md"));
+    assert!(!super::corrlog::file_of(&core.cfg.handoff_dir, "T-乙").exists(), "有夥伴 ID 就不寫視窗名檔");
+    let t = std::fs::read_to_string(&f).unwrap();
     assert_eq!(t.lines().next().unwrap(), super::corrlog::header_line(PID_B, "T-乙"));
     assert!(t.contains(&format!("收到｜W/W-政策 → T-乙｜id={}", uid(1))));
+    let said = sink.said.lock().unwrap().clone();
+    assert!(said[0].contains(&super::corrlog::path_line_of(&f)), "信尾的路徑行指向夥伴 ID 檔：{}", said[0]);
 }
 
 #[tokio::test]

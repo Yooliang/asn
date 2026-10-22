@@ -51,7 +51,11 @@ export interface HistoryQuery {
   node: string;
   agent: string | null;
   limit: number;
+  /** 夥伴 ID（#153，選填）：格式不對當沒帶；有就以「帳號＋夥伴 ID」查，改名前後的往來都拿得到 */
+  partnerId: string | null;
 }
+
+const PARTNER_ID_RE = /^p_[0-9a-f]{20}$/;
 
 /** 夥伴的節點與視窗名（視窗名可空＝找總機）；格式不對回 null */
 export function parseHistoryQuery(b: unknown): HistoryQuery | null {
@@ -68,7 +72,8 @@ export function parseHistoryQuery(b: unknown): HistoryQuery | null {
     if (typeof o.limit !== "number" || !Number.isInteger(o.limit) || o.limit < 1) return null;
     limit = Math.min(o.limit, HISTORY_MAX);
   }
-  return { node: o.node, agent, limit };
+  const partnerId = typeof o.partner_id === "string" && PARTNER_ID_RE.test(o.partner_id) ? o.partner_id : null;
+  return { node: o.node, agent, limit, partnerId };
 }
 
 export interface HistoryDeps {
@@ -88,9 +93,16 @@ export async function handleChatHistory(
   if (!q) return { status: 400, body: { error: "bad_request" } };
   const user = await signedUserId(deps.verifyJwt, signHeader);
   if (!user) return { status: 401, body: { error: "unauthorized" } };
-  const { data, error } = await deps.rpc("asn_chat_history", {
+  const args: Record<string, unknown> = {
     p_user: user, p_node: me.id, p_partner_node: q.node, p_partner_agent: q.agent, p_limit: q.limit,
-  });
+  };
+  if (q.partnerId) args.p_partner_id = q.partnerId;
+  let { data, error } = await deps.rpc("asn_chat_history", args);
+  // 資料庫還沒套用第六個參數的版本（找不到函式）：退回不帶夥伴 ID 重呼叫，只用名字比對（順序顛倒也不壞）
+  if (error && q.partnerId && rpcMissing(error)) {
+    delete args.p_partner_id;
+    ({ data, error } = await deps.rpc("asn_chat_history", args));
+  }
   if (error) {
     if (rpcMissing(error)) return { status: 404, body: { error: "not_found" } };
     console.error(error);

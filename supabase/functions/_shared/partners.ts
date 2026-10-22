@@ -3,6 +3,9 @@
 //   同 session 改名＝同一位；同名換 session＝同一位（記交接）；名字與 session 都換＝新夥伴；同台兩個同名＝不處理。
 // 這個檔案做：格式整理（先擋掉、少打一次資料庫）、錯誤對應、以及規則的純函式版（decidePartner，測試用來釘住規則，
 // 與 SQL 逐項對照；SQL 本身另有 tests/partner_id_pglite.test.mjs 實跑）。
+import type { AuthUser } from "./account.ts";
+import { signedUserId } from "./owner_sign.ts";
+
 export type RpcFn = (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>;
 
 export const SESSION_RE = /^[A-Za-z0-9_-]{8,80}$/;
@@ -68,6 +71,74 @@ export async function handlePartnerSync(
   if (d?.error === "not_found") return { status: 404, body: { error: "not_found" } };
   if (d?.error) return { status: 400, body: { error: d.error } };
   return { status: 200, body: { ok: true, partners: Array.isArray(d?.partners) ? d!.partners : [] } };
+}
+
+// ---- 第二期（#153）：指定接班、列出可被接班的夥伴。兩個動作都要本人簽章（x-asn-user）：節點金鑰 AI 視窗也拿得到，
+// 但登入憑證只在 ASN 的 Rust 端，所以 AI 沒辦法替人把夥伴 ID 搬來搬去，也讀不到夥伴清單。
+export const PARTNER_ID_RE = /^p_[0-9a-f]{20}$/;
+const NODE_RE = /^[A-Za-z0-9_-]{1,32}$/;
+
+export interface SignedDeps {
+  rpc: RpcFn;
+  verifyJwt: (token: string) => Promise<AuthUser | null>;
+}
+
+/** 「這是某某的接班」請求：前任夥伴 ID、新視窗所在節點與名字；格式不對回 null */
+export function parseSucceed(b: unknown): { predecessor: string; node: string; name: string } | null {
+  if (!b || typeof b !== "object") return null;
+  const o = b as Record<string, unknown>;
+  if (typeof o.predecessor !== "string" || !PARTNER_ID_RE.test(o.predecessor)) return null;
+  if (typeof o.node !== "string" || !NODE_RE.test(o.node)) return null;
+  if (typeof o.name !== "string") return null;
+  const len = Array.from(o.name).length;
+  if (len < 1 || len > NAME_MAX || /[\u0000-\u001f\u007f-\u009f]/.test(o.name)) return null;
+  return { predecessor: o.predecessor, node: o.node, name: o.name };
+}
+
+const SUCCEED_ERRORS: Record<string, number> = {
+  bad_request: 400, forbidden: 403, not_found: 404, predecessor_live: 409,
+};
+
+export async function handlePartnerSucceed(
+  deps: SignedDeps,
+  me: { id: string },
+  signHeader: string | null,
+  body: unknown,
+): Promise<{ status: number; body: unknown }> {
+  const q = parseSucceed(body);
+  if (!q) return { status: 400, body: { error: "bad_request" } };
+  const user = await signedUserId(deps.verifyJwt, signHeader);
+  if (!user) return { status: 401, body: { error: "unauthorized" } };
+  const { data, error } = await deps.rpc("irori_relay_partner_succeed", {
+    p_user: user, p_caller: me.id, p_predecessor: q.predecessor, p_node: q.node, p_name: q.name,
+  });
+  if (error) {
+    if (rpcMissing(error)) return { status: 404, body: { error: "not_found" } };
+    console.error(error);
+    return { status: 500, body: { error: "internal" } };
+  }
+  const d = data as { error?: string; ok?: boolean } | null;
+  if (d?.error) return { status: SUCCEED_ERRORS[d.error] ?? 400, body: { error: d.error } };
+  return { status: 200, body: { ok: true } };
+}
+
+export async function handlePartnerList(
+  deps: SignedDeps,
+  me: { id: string },
+  signHeader: string | null,
+): Promise<{ status: number; body: unknown }> {
+  const user = await signedUserId(deps.verifyJwt, signHeader);
+  if (!user) return { status: 401, body: { error: "unauthorized" } };
+  const { data, error } = await deps.rpc("irori_relay_partner_list", { p_user: user, p_caller: me.id });
+  if (error) {
+    if (rpcMissing(error)) return { status: 404, body: { error: "not_found" } };
+    console.error(error);
+    return { status: 500, body: { error: "internal" } };
+  }
+  const d = data as { error?: string; partners?: unknown } | null;
+  if (d?.error === "forbidden") return { status: 403, body: { error: "forbidden" } };
+  if (d?.error) return { status: 400, body: { error: d.error } };
+  return { status: 200, body: { partners: Array.isArray(d?.partners) ? d!.partners : [] } };
 }
 
 // ---- 規則的純函式版（與 SQL 逐項對照，供測試釘住；後端實際判斷在資料庫函式） ----
