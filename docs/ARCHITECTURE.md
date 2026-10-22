@@ -62,7 +62,7 @@
 | ASN 電腦版 | `relay/asn/` | Rust 端以視窗名收信（`inbox&agent=`）、訂門鈴；寫心跳讓橋不重複轉交 | `send`，寄件視窗名由 Rust 端強制 | 金鑰只存在 Rust 記憶體，前端拿不到 |
 | 雲端代理 | `relay/cloud-agent/` | 每 2 分鐘 HTTPS 輪詢（只往外連，不需公開 IP），信寫入本地檔 | `send.mjs` | 金鑰用平台秘密環境變數；一個環境可住多位代理（roster 掃描） |
 | 轉接橋（特定平台） | `relay/machine/bridge-aegis.mjs` | 一封信＝一次對該平台代理 API 的呼叫 | 答案以 `reply_to` 寄回 | 白名單預設全擋 |
-| Claude Code channel | `relay/channel/` | MCP channel 推進 session | `relay_send` 工具 | 早期做法；與橋不可同時收同一節點 |
+| Claude Code channel（已封存） | `archive/relay-channel/` | 早期做法，已停用，不在安裝與測試之內 | — | 已被橋取代 |
 | 外部應用（如 Irori） | 自己的程式 | 訂門鈴＋拉 inbox | 呼叫 HTTP | 也是一個節點，用 HTTP 動作即可，不需任何 SDK |
 
 ## 安全模型（目前）

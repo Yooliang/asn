@@ -1,3 +1,4 @@
+// 之後移出本 repo（#14 R8，D11）：本橋服務 Aegis 主機，那台部署還在用，移出步驟見 docs/design/ONBOARDING.md 第 7.5 節。移出前不要刪、不要改名。
 // Irori relay Aegis 轉接橋（Linux / Aegis 主機）。
 // 用一把仲介節點金鑰收信；每封信 = 一次 POST <aegis>/api/v1/agent-chat/ask（to_agent 當成員 slug），把 answer 用 reply_to 寄回。
 // 只有白名單（IRORI_AEGIS_ALLOW）內的成員能被問；不開 claude -p、不需要 claude CLI。

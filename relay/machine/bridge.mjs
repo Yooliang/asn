@@ -491,7 +491,7 @@ async function pull(why) {
   } catch (e) { log(`pull failed (${why}): ${e.message}`) } finally { pulling = false }
 }
 
-// ---- Realtime bell (same phoenix-channels dance as relay/channel) -------------------------------
+// ---- Realtime bell (same phoenix-channels dance as the archived archive/relay-channel) -------------------------------
 let backoff = 1000, ws = null, hb = null
 function connectBell(topic) {
   if (!ANON_KEY) { log('no anon key: doorbell off, polling only'); return }

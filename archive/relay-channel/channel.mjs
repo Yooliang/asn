@@ -1,3 +1,4 @@
+// 已封存（#14 R8）：早期 Claude Code channel 外掛，已被收發室取代，不再維護。見同資料夾 README.md。
 // Irori relay channel: MCP channel server for Claude Code.
 // Realtime bell -> inbox pull -> push into the session -> ack. Tools: relay_send / relay_list / relay_invite.
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'

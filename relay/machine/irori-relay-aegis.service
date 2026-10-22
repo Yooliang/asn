@@ -1,3 +1,4 @@
+# 之後移出本 repo（#14 R8，D11）：Aegis 主機仍以本檔部署（ExecStart 指向該機的 clone），移出步驟見 docs/design/ONBOARDING.md 第 7.5 節。
 # Aegis 轉接橋（仲介信 -> Aegis /agent-chat/ask）。安裝方式見 README「Aegis 轉接橋」一節。
 # 金鑰不寫在這裡：放在 ~/.irori-relay/<IRORI_RELAY_ID>.key（chmod 600）。
 [Unit]

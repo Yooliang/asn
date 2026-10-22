@@ -47,7 +47,7 @@ relay send(reply_to) <──── bridge.mjs <──stdout── 收發室 <─
    - 不在名單的 `to_agent` → 寄回「找不到這個 session（目前可達：…）」。
 4. 單一執行個體：`~/.asn/machine-<ID>/bridge.pid` 有活著的 pid 就直接退出（exit 3）。
 
-> 重要：同一把節點金鑰只能有**一個**收信者。H 節點啟用本橋之後，工頭 session 的 `relay/channel`（irori-relay channel）要拿掉，
+> 重要：同一把節點金鑰只能有**一個**收信者。H 節點啟用本橋之後，工頭 session 若還掛著已封存的 channel 外掛（`archive/relay-channel/`）要拿掉，
 > 否則兩邊搶同一個 inbox、互相 ack。
 
 ## 設定（`~/.asn/`，不進 repo）
@@ -131,6 +131,8 @@ powershell -File install-task.ps1 -Uninstall           # 移除
 - `tools-roster-once.mjs`：以 H 金鑰單次回報名單（不碰 inbox）
 
 ## Aegis 轉接橋（Linux，`bridge-aegis.mjs`）
+
+> 標記為之後移出本 repo（#14 R8，D11）：Aegis 主機的部署還依賴本檔與 `irori-relay-aegis.service`，移出步驟見 `docs/design/ONBOARDING.md` 第 7.5 節；移出前不要刪、不要改名。
 
 在 Aegis 主機上不開 claude，用一把仲介節點金鑰收信：每封信 = 一次 `POST http://127.0.0.1:8899/api/v1/agent-chat/ask`
 （`target` = 信的 `to_agent` 轉成的成員 slug（`to_agent` 可寫 slug 或中文名，用 `GET /api/v1/members?scope=all` 對照）、`from_member=xi-xu`、`stream=false`，逾時 300 秒；問題內文前面加一行
