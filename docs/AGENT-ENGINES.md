@@ -72,7 +72,7 @@
 - **外部入口（回答「pi 開的視窗傳得進去嗎」）**：
   - `pi --mode rpc`：stdin／stdout 一行一則 JSON，指令有 `prompt`、`steer`、`follow_up`、`abort`、`get_state`、`get_last_assistant_text`、`new_session`、`switch_session`…，事件有 `agent_end`、`agent_settled`。**實測**：在 `irori-probe` 資料夾用白名單環境啟動，`get_state` 立即回傳（含 `sessionName`、`isStreaming`）。但這是「Irori 啟動的 pi 行程」，文件沒有附著到使用者已開的互動 pi 的方式（[rpc.md](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md)）。
   - `--mode json`（單次事件流）、TypeScript SDK、ACP 轉接器（社群 `pi-acp`，登錄表有）。
-  - **擴充**（可以放進使用者自己開的互動視窗）：擴充 API 有 `pi.sendUserMessage()`（「像使用者打的一樣，一定觸發一輪」），官方範例 `examples/extensions/file-trigger.ts` 的註解就是「監看觸發檔，把內容注入對話。給外部系統對 agent 發訊息用」。所以做法是：寫一個 `irori-inbox` 擴充，`session_start` 時在 `~/.irori-relay/…/pi-inbox/<視窗名>/` 登記並監看，收到信就 `sendUserMessage`，`agent_end` 時把最後回覆寫回。**這只是設計，我沒有實作也沒有跑**（跑了會花模型額度，且要動使用者的擴充設定）。
+  - **擴充**（可以放進使用者自己開的互動視窗）：擴充 API 有 `pi.sendUserMessage()`（「像使用者打的一樣，一定觸發一輪」），官方範例 `examples/extensions/file-trigger.ts` 的註解就是「監看觸發檔，把內容注入對話。給外部系統對 agent 發訊息用」。所以做法是：寫一個 `irori-inbox` 擴充，`session_start` 時在 `~/.asn/…/pi-inbox/<視窗名>/` 登記並監看，收到信就 `sendUserMessage`，`agent_end` 時把最後回覆寫回。**這只是設計，我沒有實作也沒有跑**（跑了會花模型額度，且要動使用者的擴充設定）。
 - **「把 pi 當成 Irori 的一種引擎轉接器，是否比逐家整合省事？」**
   - 只在「視窗本來就是 pi」時才成立（你的公司 Aegis 流程正是這樣）。這時一個 `pi` 轉接器（RPC＋擴充）就同時涵蓋 pi 背後所有模型，包含 Grok 訂閱、ChatGPT 訂閱、Aegis 成員。
   - **不成立的地方**：它不能替代 Claude Code／Codex／agy 的視窗——那些是各家官方 harness，行為、外掛、記憶、帳務都不同。若想「全部改用 pi 開」，等於換掉使用者的日常工具，並讓 Claude 改按 token 另計，這不是轉接器的事，是產品決定。
@@ -216,7 +216,7 @@ MCP 管的是「agent 呼叫外部工具」，不是「外部把訊息送給 age
 ### 8.3 遷移成本與對現有 Claude 轉接器的影響
 
 - **對現有 Claude 轉接器（SendMessage、名單、收發室）：零影響。** ACP 轉接器是新增一個引擎，`ASN_ENGINES=claude,codex,acp` 並存；Claude 不動。
-- 新增工作：`engines/acp.mjs`（約 200 行，沿用 `acp-client.mjs`，實作 `capabilities`／`start`／`stop`／`listWindows`／`listNames`／`activityOf`／`deliver`）、啟動指令設定檔（例如 `~/.irori-relay/acp-agents.json`：名稱 → 指令、參數、模型、權限策略）、契約測試（照 `engine-contract.test.mjs`）、README 一節。
+- 新增工作：`engines/acp.mjs`（約 200 行，沿用 `acp-client.mjs`，實作 `capabilities`／`start`／`stop`／`listWindows`／`listNames`／`activityOf`／`deliver`）、啟動指令設定檔（例如 `~/.asn/acp-agents.json`：名稱 → 指令、參數、模型、權限策略）、契約測試（照 `engine-contract.test.mjs`）、README 一節。
 - 名單裡的 ACP 工作者視窗名：建議 `工作者-<引擎>`（例如 `Gemini-工作者`），引擎欄位 `engine=acp:gemini`。
 
 ### 8.4 分期
@@ -270,7 +270,7 @@ MCP 管的是「agent 呼叫外部工具」，不是「外部把訊息送給 age
 |---|---|---|
 | 執行指令（`run_command`） | 自動拒絕（步驟 ERROR、結果 `denied_actions`），模型會看到被拒 | 靠 agy 自己；`execute:allow` 才加 `--dangerously-skip-permissions` |
 | 寫檔（`write_to_file`…） | **不問就直接寫，連工作資料夾以外也寫得進去**（`--mode plan` 也擋不住：被明確要求時照寫；`--sandbox` 只限制終端機） | **絆線**：驅動看每個工具步驟事件，違反政策（write 不是 allow、或路徑在白名單資料夾外）就立刻殺掉 agy 並回報。真 agy 實測 3/3 在檔案寫成前殺掉，但這是「事件比寫入早到」的時間差，不是保證 |
-| 讀檔 | 不問；連資料夾外也讀得到（agy 自己也會讀它內建的說明檔） | **擋不了**。唯讀只靠：工作資料夾是空的專用資料夾（預設 `~/.irori-relay/machine-<ID>/workers/<名字>/`）＋說明（第一則訊息附的角色說明）。不要把工作者的資料夾指到專案目錄 |
+| 讀檔 | 不問；連資料夾外也讀得到（agy 自己也會讀它內建的說明檔） | **擋不了**。唯讀只靠：工作資料夾是空的專用資料夾（預設 `~/.asn/machine-<ID>/workers/<名字>/`）＋說明（第一則訊息附的角色說明）。不要把工作者的資料夾指到專案目錄 |
 | 上網 | 不問 | `network:deny` 時同樣用絆線 |
 
 所以：**agy 的寫檔無法「預防」，只能「偵測並中止」**，這是 agy 目前的限制，不是我們的取捨。要真正預防，只能用會送權限請求的 ACP agent（9.3）。另外模型本身也會遵守第一則訊息附的角色說明（真實測試：要它寫檔，它直接回「做不到，我目前是唯讀狀態」），但那是軟性的，不能當安全邊界。
@@ -314,9 +314,9 @@ ACP 路線（標準 ACP agent）的權限是**真的預防**：agent 要做事�
 > 以下是**使用者**在那台電腦做的事；這次實作沒有重啟任何橋、沒有部署。
 
 1. **先確認 agy 本身能用**：終端機執行 `agy --version`，再 `agy -p "只回 PONG"` 要回 PONG（沒登入就先照 9.4 登入）。
-2. **放設定檔**：複製 `relay/machine/agents.example.json` 到 `%USERPROFILE%\.irori-relay\agents.json`，至少改 `cwd` 與 `allow_dirs`（把 `你` 換成使用者名稱）。`cwd` 請用**專用的空資料夾**（不存在會自動建），不要指到專案。
+2. **放設定檔**：複製 `relay/machine/agents.example.json` 到 `%USERPROFILE%.asn\agents.json`，至少改 `cwd` 與 `allow_dirs`（把 `你` 換成使用者名稱）。`cwd` 請用**專用的空資料夾**（不存在會自動建），不要指到專案。
 3. **載入轉接器**：橋要用 `ASN_ENGINES=claude,acp` 啟動。用排程／手動啟動的話：`run-bridge.ps1 -NodeId <ID> -Engines claude,acp`（新增的 `-Engines` 參數）；或在使用者環境變數設 `ASN_ENGINES`。**重啟橋才會生效**（橋有單一執行個體鎖，先正常關掉舊的再開）。
-4. **看 log**：`%USERPROFILE%\.irori-relay\machine-<ID>\bridge.log`，搜尋 `acp:`。啟動時會有 `acp: 工作者 Gemini 啟動（protocol=agy-stream cwd=… 權限 read=allow write=deny …）`；設定有問題會有 `acp: 設定有問題，已跳過：…`／`設定提醒：…`。之後每封信有 `handed id=… to=Gemini`、`[Gemini] …` 行（權限請求、等授權、狀態變化、失敗原因都在這裡）。對話的 session id 存在 `machine-<ID>\acp-workers.json`（刪掉＝下次從新對話開始）。
+4. **看 log**：`%USERPROFILE%.asn\machine-<ID>\bridge.log`，搜尋 `acp:`。啟動時會有 `acp: 工作者 Gemini 啟動（protocol=agy-stream cwd=… 權限 read=allow write=deny …）`；設定有問題會有 `acp: 設定有問題，已跳過：…`／`設定提醒：…`。之後每封信有 `handed id=… to=Gemini`、`[Gemini] …` 行（權限請求、等授權、狀態變化、失敗原因都在這裡）。對話的 session id 存在 `machine-<ID>\acp-workers.json`（刪掉＝下次從新對話開始）。
 5. **確認名單**：幾十秒內，手機 Irori Chat「聯絡人」那台電腦底下出現 `Gemini`（頭像右下有 ✦ 角標；要先部署 9.6 的前後端，沒部署時它會被當成 Claude 視窗顯示，功能照常）。
 6. **試一封**：從手機對 Gemini 傳一句話，或在那台電腦用 `node relay/machine/send.mjs`（見 README）寄一封，等幾秒收到回信。
 7. **關掉**：把 `agents.json` 裡該工作者加 `"enabled": false`，或移除 `ASN_ENGINES` 裡的 `acp`，然後重啟橋；Claude 的收發室完全不受影響（兩者是獨立的轉接器）。緊急時直接結束橋，工作者子行程會跟著結束。

@@ -12,7 +12,7 @@ import { createRooms, parseMember, roomText } from './rooms.mjs'
 
 const NODE_ID = (envGet(process.env, 'RELAY_ID') || 'AEGIS').trim()
 const BASE_URL = envGet(process.env, 'RELAY_URL') || 'https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay'
-const HOME_DIR = path.join(os.homedir(), '.irori-relay')
+import { HOME_DIR, locateHome } from './home.mjs'
 const WORK_DIR = path.join(HOME_DIR, `aegis-${NODE_ID}`)
 const AEGIS_URL = (process.env.IRORI_AEGIS_URL || 'http://127.0.0.1:8899').replace(/\/+$/, '')
 const FROM_MEMBER = process.env.IRORI_AEGIS_FROM_MEMBER || 'xi-xu'
@@ -33,7 +33,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms))
 function readSecret(env, file) {
   const v = (envGet(process.env, env) || '').trim()
   if (v) return v
-  try { return fs.readFileSync(path.join(HOME_DIR, file), 'utf8').trim() } catch { return '' }
+  try { return fs.readFileSync(locateHome(file), 'utf8').trim() } catch { return '' }
 }
 const KEY = readSecret('RELAY_KEY', `${NODE_ID}.key`)
 const ANON_KEY = pickAnon(BASE_URL, [envGet(process.env, 'RELAY_ANON_KEY'), readSecret('', 'anon.key')])   // 內建新後台的 anon；殘留的舊專案 anon.key 會被跳過

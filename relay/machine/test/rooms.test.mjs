@@ -53,7 +53,7 @@ async function fakeServer({ rooms, members, aegis = {}, postStatus = 200 }) {
 
 async function runBridge({ script, workName, env = {}, st, setup, until, timeout = 15000, settle = 1000 }) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-rooms-test-'))
-  const workDir = path.join(home, '.irori-relay', workName)
+  const workDir = path.join(home, '.asn', workName)
   const extra = setup ? setup(home, workDir) : {}
   const child = spawnTracked(process.execPath, [path.join(MACHINE, script)], {
     cwd: home, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true,

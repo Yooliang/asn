@@ -156,7 +156,7 @@ test('對方在轉交後曾用 send.mjs 寄信給原寄件人（sent 記號，�
       st, env: { IRORI_REPLY_TIMEOUT_MS: '1500' }, step: c => {
         if (!marked && c.forwarded() >= 2) {
           marked = true
-          const dir = path.join(c.home, '.irori-relay', 'machine-T', 'sent'); fs.mkdirSync(dir, { recursive: true })
+          const dir = path.join(c.home, '.asn', 'machine-T', 'sent'); fs.mkdirSync(dir, { recursive: true })
           // 只寄給節點 W（沒指定視窗）也算回了第一封（寄件人 W/W-政策）；第二封（Z/Z-別窗）沒有任何記號
           fs.writeFileSync(path.join(dir, sentMarkName('T-對方', 'W', '')), String(Date.now()))
         }
@@ -173,7 +173,7 @@ test('sent 記號早於轉交時間（舊的寄信）不算已回覆：信轉成
   try {
     const { log } = await go({
       st, env: { IRORI_REPLY_TIMEOUT_MS: '1500' }, step: c => {
-        const dir = path.join(c.home, '.irori-relay', 'machine-T', 'sent'); fs.mkdirSync(dir, { recursive: true })
+        const dir = path.join(c.home, '.asn', 'machine-T', 'sent'); fs.mkdirSync(dir, { recursive: true })
         const f = path.join(dir, sentMarkName('T-對方', 'W', 'W-政策'))
         if (!fs.existsSync(f)) fs.writeFileSync(f, String(Date.now() - 3_600_000))
         return /reply wait over id=.* no notice to sender/.test(c.log)
@@ -209,7 +209,7 @@ test('收發室完全沒回報，但對方已經用 --reply-to 回了這封 → 
       step: c => {
         if (!marked && c.forwarded() >= 2) {
           marked = true
-          const dir = path.join(c.home, '.irori-relay', 'machine-T', 'replied'); fs.mkdirSync(dir, { recursive: true })
+          const dir = path.join(c.home, '.asn', 'machine-T', 'replied'); fs.mkdirSync(dir, { recursive: true })
           fs.writeFileSync(path.join(dir, uid(1)), '')
         }
         return forwardTimeouts(c.st).length >= 1 && /already replied/.test(c.log)

@@ -3,6 +3,7 @@ target/
 .env
 *.key
 .irori-relay/
+.asn/
 site/shots/
 supabase/.temp/
 site/.firebase/

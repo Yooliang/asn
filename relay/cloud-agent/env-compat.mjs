@@ -28,6 +28,7 @@ export const ENV_RENAME_PAIRS = [
   ['ASN_CLAUDE_BIN', 'IRORI_CLAUDE_BIN'],
   ['ASN_CLAUDE_SCRIPT', 'IRORI_CLAUDE_SCRIPT'],
   ['ASN_DATA', 'IRORI_ASN_DATA'],
+  ['ASN_HOME', 'IRORI_HOME'],
 ]
 
 /** 子程序測試／清理時要剝離的前綴（含秘密） */

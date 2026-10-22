@@ -1,4 +1,4 @@
-//! agents.json（`~/.irori-relay/agents.json`，與舊 Node 橋同一份；範本 relay/machine/agents.example.json）的讀取與檢查。
+//! agents.json（`~/.asn/agents.json`，與舊 Node 橋同一份；範本 relay/machine/agents.example.json）的讀取與檢查。
 //! 對應 engines/acp-config.mjs。一個壞掉的工作者條目只跳過那一條（log 寫原因），不影響其他條目；
 //! 整個檔案壞掉或不存在＝沒有工作者。
 use super::acp_policy::{normalize_permissions, resolve, Permissions, Verdict};

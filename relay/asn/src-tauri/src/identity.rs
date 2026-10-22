@@ -1,6 +1,6 @@
 //! 本機身分：節點代號、節點金鑰、anon 金鑰、BASE_URL。判定順序照 relay/machine/identity.mjs：
-//! 節點＝ASN_RELAY_ID（舊名 IRORI_RELAY_ID）→ ~/.irori-relay/node → 橋正在跑的 machine-<ID> → 唯一有金鑰檔的 machine-<ID>。
-//! 金鑰＝ASN_RELAY_KEY（舊名 IRORI_RELAY_KEY）→ ~/.irori-relay/<節點>.key。金鑰只在 Rust 記憶體，絕不進 log、不傳前端。
+//! 節點＝ASN_RELAY_ID（舊名 IRORI_RELAY_ID）→ ~/.asn/node → 橋正在跑的 machine-<ID> → 唯一有金鑰檔的 machine-<ID>。
+//! 金鑰＝ASN_RELAY_KEY（舊名 IRORI_RELAY_KEY）→ ~/.asn/<節點>.key（舊資料夾 ~/.irori-relay 仍讀得到，見 home.rs）。金鑰只在 Rust 記憶體，絕不進 log、不傳前端。
 use crate::heartbeat::pid_alive;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -18,8 +18,9 @@ pub fn home_dir() -> PathBuf {
         std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from).unwrap_or_default()
     }
 }
+/// 使用者資料夾（金鑰、節點代號、橋的工作資料夾）：經單一解析函式（`home.rs`）：ASN_HOME → ~/.asn → 舊的 ~/.irori-relay
 pub fn relay_home() -> PathBuf {
-    home_dir().join(".irori-relay")
+    crate::home::resolve().primary
 }
 pub fn work_dir(relay_home: &Path, node: &str) -> PathBuf {
     relay_home.join(format!("machine-{node}"))
@@ -70,7 +71,7 @@ pub fn machine_node(relay_home: &Path, env_id: Option<String>, alive: impl Fn(u3
     }
     let cand = if !live.is_empty() { live } else if !keyed.is_empty() { keyed } else { ids.iter().collect() };
     Err(format!(
-        "認不出這台機器的節點代號（候選：{}）：設環境變數 ASN_RELAY_ID，或在 ~/.irori-relay/node 寫上節點代號",
+        "認不出這台機器的節點代號（候選：{}）：設環境變數 ASN_RELAY_ID，或在 %USERPROFILE%\\.asn\\node 寫上節點代號",
         if cand.is_empty() { "無".to_string() } else { cand.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("、") }
     ))
 }
@@ -142,15 +143,32 @@ pub struct Identity {
 }
 
 pub fn resolve() -> Result<Identity, String> {
-    let relay_home = relay_home();
-    let node = machine_node(&relay_home, crate::envc::get("ASN_RELAY_ID"), pid_alive)?;
+    resolve_in(&crate::home::resolve())
+}
+
+/// 先看主要位置；節點代號、金鑰、anon 金鑰各自找不到時再看後備位置（遷移被打斷、項目分在兩邊的情況）。
+/// relay_home 仍是主要位置（橋的工作資料夾、紀錄都放那邊）。
+pub fn resolve_in(h: &crate::home::HomeInfo) -> Result<Identity, String> {
+    let dirs: Vec<&Path> = std::iter::once(h.primary.as_path()).chain(h.fallback.as_deref()).collect();
+    let pick = |f: &dyn Fn(&Path) -> Result<String, String>| -> Result<String, String> {
+        let mut err = None;
+        for d in &dirs {
+            match f(d) {
+                Ok(v) => return Ok(v),
+                Err(e) => err = err.or(Some(e)),
+            }
+        }
+        Err(err.unwrap_or_default())
+    };
+    let node = pick(&|d| machine_node(d, crate::envc::get("ASN_RELAY_ID"), pid_alive))?;
     if !valid_id(&node) {
         return Err(format!("節點代號格式不對：{node}"));
     }
-    let key = read_key(&relay_home, &node, crate::envc::get("ASN_RELAY_KEY"))?;
+    let key = pick(&|d| read_key(d, &node, crate::envc::get("ASN_RELAY_KEY")))?;
     let url = base_url(crate::envc::get("ASN_RELAY_URL"));
-    let anon = read_anon(&relay_home, crate::envc::get("ASN_RELAY_ANON_KEY"), &url);
-    Ok(Identity { node, base_url: url, relay_home, key, anon })
+    let anon_dir = dirs.iter().find(|d| d.join("anon.key").exists()).copied().unwrap_or(h.primary.as_path());
+    let anon = read_anon(anon_dir, crate::envc::get("ASN_RELAY_ANON_KEY"), &url);
+    Ok(Identity { node, base_url: url, relay_home: h.primary.clone(), key, anon })
 }
 
 #[cfg(test)]

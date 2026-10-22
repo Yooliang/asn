@@ -45,7 +45,7 @@ Claude 視窗裡也有 `asn_send` 工具（同樣的參數：`to`／`room`、`bo
 
 - PowerShell 寄多行內文：先放進變數 `$b = @" ... "@`，再 `--body $b`。Bash 用 `printf` 時路徑的 `\U` 會被吃掉，改用 heredoc。
 - 不要在寄信參數裡放本人簽章相關字樣；AI 寄出的信一律是成員身分。
-- 不讀、不印 `~/.irori-relay` 底下的金鑰。
+- 不讀、不印 `~/.asn`（舊位置 `~/.irori-relay` 也一樣）底下的金鑰。
 
 ## 查版本與新功能
 

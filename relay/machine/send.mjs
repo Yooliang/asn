@@ -8,7 +8,7 @@
 // 寄給成員／視窗（--to，含回信 --reply-to）一定要明說要不要回信：--reply＝我在等回信（收發室 10 分鐘沒收到回覆會提醒）、
 // --no-reply＝只是告知；結果以 expects_reply 欄位送給後端，【不往內文加任何標記】（內文有沒有標記沒辦法用程式可靠判斷）。
 // 兩個都沒給就不寄（exit 1）；--room 群組本來就不計時，給了會忽略。
-// 用這台機器的節點金鑰（~/.irori-relay/<節點>.key，橋用的同一把）直接呼叫 relay。
+// 用這台機器的節點金鑰（~/.asn/<節點>.key，橋用的同一把）直接呼叫 relay。
 // 寄件視窗名不能自填：沿父行程鏈往上找 claude 程序，對照 ~/.claude/sessions/<pid>.json 的 name 當 from_agent；找不到就拒絕。
 // 輸出 `sent id=…`（或 `posted room=… seq=…`）；錯誤印到 stderr，exit code：1 用法／內容、2 認不出呼叫者、3 超量、4 後端錯誤。
 import { envGet } from './env-compat.mjs'
@@ -86,7 +86,7 @@ function whoami() {
   try { console.log(`機器節點判定：${machineNode()}`) } catch (e) { console.log(`機器節點判定失敗：${e.message}`) }
 }
 
-// 每視窗每小時上限，記在 ~/.irori-relay/send-rate.json（暫存檔＋rename，避免寫壞）
+// 每視窗每小時上限，記在 ~/.asn/send-rate.json（暫存檔＋rename，避免寫壞）
 function takeRate(window) {
   const file = path.join(HOME_DIR, 'send-rate.json')
   let all = {}

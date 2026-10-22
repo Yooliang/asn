@@ -29,9 +29,9 @@
         存取憑證只放記憶體；更新憑證存 DPAPI 加密檔（%APPDATA%\tw.irori.asn\login.bin）
   ⑥ relay?action=account_bootstrap   （Bearer 登入憑證）→ 第一次就建立這個帳號的租戶
   ⑦ 自動處理金鑰（`auth_bind`）：
-       這台沒有節點金鑰 → node_create：後台發新金鑰（只回這一次）→ Rust 寫 ~/.irori-relay/<節點>.key（權限只給本人）與 node
+       這台沒有節點金鑰 → node_create：後台發新金鑰（只回這一次）→ Rust 寫 ~/.asn/<節點>.key（權限只給本人）與 node
                           → ASN 自動重新啟動進名單
-       這台已有節點金鑰（~/.irori-relay 的現有節點）→ node_claim：Bearer 登入憑證＋x-relay-key 現有金鑰，
+       這台已有節點金鑰（~/.asn 的現有節點）→ node_claim：Bearer 登入憑證＋x-relay-key 現有金鑰，
                           節點的 owner_user 設成此帳號，金鑰不變 → 直接進名單
                           └ 回 tenant_not_yours（舊租戶還沒被管理者認領）→ **不擋使用**，照常用現有金鑰進名單
 ```
@@ -112,7 +112,7 @@ Site URL 不用改。Google 與 GitHub 的授權回呼網址仍是 Supabase 提�
 - OAuth `state`（16 位元組亂數）放在 `redirect_to` 的查詢字串裡，回呼時用常數時間比對；沒有或不符一律回 400 並繼續等（別人亂打的請求不能中斷你的登入）。PKCE 用 S256，驗證碼 32 位元組亂數，只存在 Rust 記憶體。
 - 回呼伺服器只綁 `127.0.0.1`、只收 `GET /callback`、檢查 `Host`（擋 DNS 重綁定）、收到第一個有效回呼就關、5 分鐘逾時、最多處理 30 條連線；回應頁是不含外部資源的靜態頁（CSP `default-src 'none'`），不回顯授權碼。
 - 權杖：存取憑證只放記憶體；更新憑證存 DPAPI 加密檔（非 Windows 是 0600 檔，沒有系統金鑰庫可用）；`Session`／`StoredLogin` 不實作 Debug 與 Serialize（有守門測試），權杖不進 log、不傳前端——前端只拿得到 `{signed_in, email}`。
-- 節點金鑰：只經 Rust 一次，寫進 `~/.irori-relay/<節點>.key`（沿用現有格式：只有金鑰本身）。先建空檔、用 `icacls` 限縮成只有本人，才寫入內容；寫完讀回比對；限縮失敗就刪檔放棄。
+- 節點金鑰：只經 Rust 一次，寫進 `~/.asn/<節點>.key`（沿用現有格式：只有金鑰本身）。先建空檔、用 `icacls` 限縮成只有本人，才寫入內容；寫完讀回比對；限縮失敗就刪檔放棄。
 - 登出：通知後台作廢這次登入（盡力而為），再清掉本機登入權杖。**不刪節點金鑰**，舊電腦登出後照常收發信。
 
 ### 設定頁

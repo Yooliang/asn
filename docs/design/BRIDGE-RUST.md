@@ -56,7 +56,7 @@ issue #12 第二期。目標：打開 ASN ＝ 這台設備的收發室就上線�
 
 ## 3. 與舊 Node 橋共存與交接
 
-- **互斥**：兩邊共用 `~/.irori-relay/machine-<節點>/bridge.pid`。內建橋啟動時讀它：pid 活著且不是自己＝舊橋在跑，內建橋不啟動。內建橋啟動後寫入自己的 pid，Node 橋啟動時看到活著的 pid 也會自己退出（exit 3），`run-bridge.ps1` 對 exit 3 是停手而不是重啟。結束時只在檔案裡還是自己的 pid 時才刪。
+- **互斥**：兩邊共用 `~/.asn/machine-<節點>/bridge.pid`。內建橋啟動時讀它：pid 活著且不是自己＝舊橋在跑，內建橋不啟動。內建橋啟動後寫入自己的 pid，Node 橋啟動時看到活著的 pid 也會自己退出（exit 3），`run-bridge.ps1` 對 exit 3 是停手而不是重啟。結束時只在檔案裡還是自己的 pid 時才刪。
 - **設定開關**：`<ASN 資料夾>/bridge.json`，`enabled`（讓 ASN 負責這台的收發室，預設 false）、`allow_takeover`（放行「改由 ASN 負責」，預設 false，本段不開放）。獨立一個檔案是因為 `settings.json` 會在改名時整份重寫。
 - **關閉時行為不變**：開關關著時，ASN 啟動不建立任何橋相關的程序、檔案或連線。`--shot` 截圖模式永遠不啟動。
 - **設定頁**：舊橋在跑時顯示「這台的收發室目前由舊版收發室橋負責」；`allow_takeover` 放行時才出現「改由 ASN 負責」，按下去要再按一次「確定」。
@@ -79,10 +79,10 @@ issue #12 第二期。目標：打開 ASN ＝ 這台設備的收發室就上線�
 
 - **後端**（`asn_node_create`、`_shared/account.ts`）本來就是自動產生：`<租戶前綴>` 加亂數 8 碼十六進位（前綴 `t<序號>-`，舊租戶用 `n`），只含 `[a-z0-9-]`，撞到 PK 就重試最多 5 次。電腦名稱只進 `nodes.name`／`nodes.machine`（顯示用），使用者不輸入任何代號，所以**不需要新的 migration**。
 - **ASN 端補強**（本 PR）：預設視窗名原本是 `<節點>-ASN`，新電腦會因此在畫面上露出自動產生的代號（例如 `t5-ab12cd34-ASN`）。改成：節點代號符合自動產生格式（`is_auto_node_id`）時，預設視窗名用電腦名稱（`<電腦名>-ASN`，電腦名稱限 36 字）。手動取代號的舊電腦（`H`、`w02`…）不符合這個格式，照舊不動。使用者仍可在設定改視窗名，設定值優先。
-- **身分檔**：沒有 `ASN_RELAY_ID`、沒有 `~/.irori-relay/node` 的新電腦，登入建立節點後 `write_node_files` 會把代號寫進 `~/.irori-relay/node`（金鑰在 `<代號>.key`，先限縮權限再寫入、讀回比對）。之後 ASN、內建橋、未來的 `asn send` 都經 `identity::resolve` 讀同一份，所以是同一個節點。環境變數 `ASN_RELAY_ID` 永遠優先。
+- **身分檔**：沒有 `ASN_RELAY_ID`、沒有 `~/.asn/node` 的新電腦，登入建立節點後 `write_node_files` 會把代號寫進 `~/.asn/node`（金鑰在 `<代號>.key`，先限縮權限再寫入、讀回比對）。之後 ASN、內建橋、未來的 `asn send` 都經 `identity::resolve` 讀同一份，所以是同一個節點。環境變數 `ASN_RELAY_ID` 永遠優先。
 - **device_id 綁定這台電腦**：ASN 資料夾（`%APPDATA%\tw.irori.asn\device_id`，本機自產的亂數）。後端以「帳號＋device_id」唯一：
   - 同一個帳號、同一個 `device_id` 重送 `node_create`＝換新金鑰（舊金鑰立即失效），不會多出節點；回應遺失或金鑰檔沒寫成功時重試即可。
-  - **重灌 Windows**：`%APPDATA%` 與 `~/.irori-relay` 都沒了，產生新的 `device_id`，會建立**新節點**；舊節點留在帳號下，由使用者在「我的設備」移除（帳號上限 20 個）。若重灌時有保留 `%APPDATA%\tw.irori.asn` 與 `~/.irori-relay`，就是同一台，什麼都不會變。
+  - **重灌 Windows**：`%APPDATA%` 與 `~/.asn` 都沒了，產生新的 `device_id`，會建立**新節點**；舊節點留在帳號下，由使用者在「我的設備」移除（帳號上限 20 個）。若重灌時有保留 `%APPDATA%\tw.irori.asn` 與 `~/.asn`，就是同一台，什麼都不會變。
   - **同一台換 Windows 使用者**：`%APPDATA%` 與家目錄都不同，視為另一台設備，建立新節點。
   - 「這就是這台電腦（接手）」的選單（ONBOARDING 3.3）仍是後續工作，不在本 PR。
 
@@ -235,7 +235,7 @@ Claude 的 Bash／PowerShell 工具都要「等指令結束並拿結束碼」（
 
 1. 安裝或執行新版 ASN；到設定頁「寄信指令」確認路徑存在，按「複製」。
 2. 在 Claude 視窗用 Bash 跑：`<路徑> send --whoami`，確認「判定（行程鏈）」是該視窗的名字、節點正確。
-3. `<路徑> send --to <本機節點>/<另一個視窗名> --body "測試" --no-reply`，另一個視窗（或 ASN）收到；本機 `~/.irori-relay/machine-<節點>/sent/` 多一個檔。
+3. `<路徑> send --to <本機節點>/<另一個視窗名> --body "測試" --no-reply`，另一個視窗（或 ASN）收到；本機 `~/.asn/machine-<節點>/sent/` 多一個檔。
 4. 對收到的信用 `--reply-to <id> --no-reply` 回覆，`replied/` 多一個檔，之後橋不再報「沒有收到回覆」。
 5. `--file` 寄一個 pdf 與一張 webp；對方信裡看到「下載：…asn-cli.exe attach --id …」，照打可存檔。
 6. `<路徑> recv --watch` 掛在 Monitor：另一邊寄一封，印出一行 JSON；`self-recv/<視窗名>.json` 有心跳；關掉後約 90 秒橋接手。

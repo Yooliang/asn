@@ -2,6 +2,7 @@
 // 本機開新夥伴（ASN 或命令列）：不經後台 launch 流程。
 // 互動視窗：直接 spawn；背景工作者：寫入 partner-queue.jsonl 由機器橋消化。
 import { envGet } from './env-compat.mjs'
+import { HOME_DIR, locateHome } from './home.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -38,9 +39,9 @@ async function main() {
     console.error('名字格式不對')
     process.exit(2)
   }
-  const home = path.join(os.homedir(), '.irori-relay')
+  const home = HOME_DIR
   const workDir = path.join(home, `machine-${args.node}`)
-  const configPath = envGet(process.env, 'LAUNCHER_FILE') || path.join(home, 'launcher.json')
+  const configPath = envGet(process.env, 'LAUNCHER_FILE') || locateHome('launcher.json')
   const tools = await detectAgentTools()
   const bootstrap = { profiles: buildDefaultProfiles(tools), cwd_allow: defaultCwdAllow(), max_per_hour: 6 }
   const { config, error } = loadConfig(configPath, bootstrap)

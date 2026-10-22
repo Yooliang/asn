@@ -311,7 +311,7 @@ test('bridge: 視窗已用 send.mjs --reply-to 直接回了（replied 記號）�
   try {
     const setup = home => {
       const env = mainSetup(SESSIONS)(home)
-      const dir = path.join(home, '.irori-relay', 'machine-T', 'replied'); fs.mkdirSync(dir, { recursive: true })
+      const dir = path.join(home, '.asn', 'machine-T', 'replied'); fs.mkdirSync(dir, { recursive: true })
       fs.writeFileSync(path.join(dir, uid(1)), String(Date.now()))
       return env
     }

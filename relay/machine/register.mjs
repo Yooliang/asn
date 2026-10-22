@@ -3,17 +3,18 @@
 //   id：英數、-、_，1～32 字，全名單唯一（撞名回 409 id_taken）；邀請碼若限定前綴（工頭開的），id 必須以前綴開頭（403 bad_id_prefix，邀請碼不會被用掉）
 //   「t<數字>-」開頭的代號留給其他租戶，一般邀請（無前綴）不能用；name 1～100 字；machine 1～40 字；kind 不在清單就當 other
 //   同一網路位址每小時最多 10 次（429）。邀請碼 15 分鐘有效、只能用一次。
-// 金鑰只寫進 ~/.irori-relay/<代號>.key（寫完讀回比對），絕不印出、不放進回傳值。
+// 金鑰只寫進 ~/.asn/<代號>.key（寫完讀回比對），絕不印出、不放進回傳值。
 //
 // CLI（邀請碼走環境變數 ASN_INVITE（舊名 IRORI_INVITE），不放命令列）：
 //   node register.mjs --id <代號> --name <顯示名> --machine <電腦名> [--kind other] [--url <仲介網址>] [--home <家目錄>] [--reissue] [--set-node]
-//   ~/.irori-relay/node（這台電腦自己的節點代號）：還沒有才寫；已經有就不動，除非帶 --set-node（安裝程式註冊這台電腦時會帶）。
+//   ~/.asn/node（這台電腦自己的節點代號）：還沒有才寫；已經有就不動，除非帶 --set-node（安裝程式註冊這台電腦時會帶）。
 //   在管理電腦上替別台（例如雲端代理 grok）註冊時不要帶，否則這台電腦的身分會被改成別台（10/20 家用機 H 曾被改成 grok）
 //   node register.mjs --suggest <電腦名> [--prefix <前綴>]      印出建議的代號
 //   node register.mjs --check --id <代號>                        用已存的金鑰呼叫 whoami，確認連得上
 //   node register.mjs --leave --id <代號>                        離開名單（金鑰立即作廢）
 // 每個模式都在標準輸出印一行 JSON（不含金鑰）；成功 exit 0，失敗 exit 1。
 import { envGet } from './env-compat.mjs'
+import { HOME_INFO, resolveHome } from './home.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -36,7 +37,7 @@ const MESSAGES = {
 }
 const friendly = code => MESSAGES[code] ?? '註冊沒有成功，請稍後再試，或請帳號擁有者協助。'
 
-const homeDirOf = home => path.join(home || os.homedir(), '.irori-relay')
+const homeDirOf = home => (home ? resolveHome({ base: home, env: {} }) : HOME_INFO).primary
 const apiUrl = (base, action) => `${String(base || DEFAULT_URL).replace(/\/+$/, '')}?action=${action}`
 
 // 邀請碼限定前綴時，把代號補成合法的（已經以前綴開頭就不動；總長仍 ≤ 32）

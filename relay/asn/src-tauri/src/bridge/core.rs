@@ -62,7 +62,7 @@ pub struct Config {
     pub engines: Option<String>,
     /// 引擎子程序環境的來源（啟動時的環境變數快照）
     pub engine_env: Vec<(String, String)>,
-    /// ACP 工作者設定檔（預設 `~/.irori-relay/agents.json`，與舊橋同一份；ASN_AGENTS_FILE 可改，舊名 IRORI_AGENTS_FILE 仍可用）
+    /// ACP 工作者設定檔（預設 `~/.asn/agents.json`，與舊橋同一份；ASN_AGENTS_FILE 可改，舊名 IRORI_AGENTS_FILE 仍可用）
     pub agents_file: PathBuf,
     /// 使用者家目錄（找 ~/.codex；測試指到暫存資料夾）
     pub home: PathBuf,

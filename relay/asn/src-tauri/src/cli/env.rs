@@ -8,7 +8,7 @@ pub type ProcTable = HashMap<u32, (u32, String)>;
 
 #[derive(Clone)]
 pub struct Env {
-    /// ~/.irori-relay
+    /// ~/.asn
     pub relay_home: PathBuf,
     /// ~/.claude/sessions
     pub sessions_dir: PathBuf,

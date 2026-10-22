@@ -13,6 +13,7 @@ mod avatar;
 mod bell;
 mod envc;
 mod heartbeat;
+mod home;
 mod identity;
 mod lastlogin;
 mod names;
@@ -761,6 +762,10 @@ pub fn run() {
     let background = args.iter().any(|a| a == tray::BACKGROUND_FLAG);
     let shot = args.iter().position(|a| a == "--shot").and_then(|i| args.get(i + 1)).map(PathBuf::from);
 
+    // 使用者資料夾合併式遷移（#14 R2）：只做一次、失敗就照舊用舊位置；截圖模式（假家目錄）不做
+    if shot.is_none() {
+        home::migrate_at_startup();
+    }
     let (relay, node, init_error, work_dir, anon, base) = match identity::resolve() {
         Ok(id) => {
             let wd = identity::work_dir(&id.relay_home, &id.node);

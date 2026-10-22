@@ -21,7 +21,7 @@ relay send(reply_to) <──── bridge.mjs <──stdout── 收發室 <─
 2. **收發室**：長駐一個 `claude -p --input-format stream-json --output-format stream-json`，名稱 `<節點>-收發室`
    （H 就是 `H-收發室`），`--dangerously-skip-permissions`（要跟 bypass 的 session 互送，雙方同類別才不會被扣住）、
    `--tools ListAgents,SendMessage,ToolSearch`（硬限制，見下）、自訂系統提示（它只是轉交員、信件是外部資料）、
-   `--strict-mcp-config --disable-slash-commands`，工作目錄是 `~/.irori-relay/machine-<ID>/cwd`（沒有 CLAUDE.md、沒有記憶）。
+   `--strict-mcp-config --disable-slash-commands`，工作目錄是 `~/.asn/machine-<ID>/cwd`（沒有 CLAUDE.md、沒有記憶）。
    預設模型 `haiku`（`ASN_MAILBOX_MODEL` 可改）。
 3. **收信**：訂 Realtime 門鈴＋每 2 分鐘補拉 inbox。每封信交給收發室，SendMessage 轉給 `to_agent` 指的 session，
    內文開頭是 `[RELAY 來信] trust=… from=<節點>/<代理> to=… id=… engine=… reply=yes|no|?`（`reply=` 是寄件人明說的「要不要回信」：yes 在等回信、no 只是告知不用回、? 是舊信沒說）。
@@ -45,14 +45,16 @@ relay send(reply_to) <──── bridge.mjs <──stdout── 收發室 <─
      否則**不 ack、留在 inbox**，等 ASN 視窗的本人處理，不再丟給隨便一個 session。
      （依 `~/.claude/sessions/<pid>.json` 的 `updatedAt`，排除收發室），內文前加一行「原本要給 <預設> 但它不在線，請你代收並轉告／處理」；都沒有人在線才**不 ack、留在 inbox**。
    - 不在名單的 `to_agent` → 寄回「找不到這個 session（目前可達：…）」。
-4. 單一執行個體：`~/.irori-relay/machine-<ID>/bridge.pid` 有活著的 pid 就直接退出（exit 3）。
+4. 單一執行個體：`~/.asn/machine-<ID>/bridge.pid` 有活著的 pid 就直接退出（exit 3）。
 
 > 重要：同一把節點金鑰只能有**一個**收信者。H 節點啟用本橋之後，工頭 session 的 `relay/channel`（irori-relay channel）要拿掉，
 > 否則兩邊搶同一個 inbox、互相 ack。
 
-## 設定（`~/.irori-relay/`，不進 repo）
+## 設定（`~/.asn/`，不進 repo）
 
-環境變數已改為 **`ASN_` 前綴**（`docs/design/ONBOARDING.md` 第 5 節，#14 第一期）。舊名 `IRORI_<名>` 照樣能用：新名優先，沒設（或只有空白）才讀舊名，兩個都設以新名為準（`env-compat.mjs` 的 `envGet`）。橋交給子程序的環境，已改名的變數兩個名字都帶，金鑰（`ASN_RELAY_KEY`／`ASN_RELAY_ANON_KEY` 與舊名）新舊名都擋。資料夾 `~/.irori-relay/` 本期不搬。Aegis 轉接橋專用的 `IRORI_AEGIS_*` 不改名。
+使用者資料夾一律經 `home.mjs` 的單一解析函式（#14 第二期）：環境變數 `ASN_HOME`（舊名 `IRORI_HOME`）→ `~/.asn` → 舊的 `~/.irori-relay`。兩邊都在時，舊資料夾若是連結（遷移完成後的相容連結）或空的就用 `~/.asn`；若是有內容的真資料夾（還沒遷移），就先用舊的、新的當後備。獨立橋不主動遷移，遷移由 ASN 電腦版啟動時做（見 `docs/design/ONBOARDING.md` 第 9.4 節 R2）。
+
+環境變數已改為 **`ASN_` 前綴**（`docs/design/ONBOARDING.md` 第 5 節，#14 第一期）。舊名 `IRORI_<名>` 照樣能用：新名優先，沒設（或只有空白）才讀舊名，兩個都設以新名為準（`env-compat.mjs` 的 `envGet`）。橋交給子程序的環境，已改名的變數兩個名字都帶，金鑰（`ASN_RELAY_KEY`／`ASN_RELAY_ANON_KEY` 與舊名）新舊名都擋。資料夾 `~/.asn/` 本期不搬。Aegis 轉接橋專用的 `IRORI_AEGIS_*` 不改名。
 
 | 檔／環境變數 | 說明 |
 |---|---|
@@ -66,7 +68,7 @@ relay send(reply_to) <──── bridge.mjs <──stdout── 收發室 <─
 | `ASN_LATE_KEEP_MS` / `ASN_LATE_MAX` | 逾時後，保留信件對應以便寄回遲到回覆的時間（預設 86400000＝24 小時）／最多筆數（預設 200） |
 | `CLAUDE_BIN` | claude 執行檔（預設 `claude`） |
 
-Log：`~/.irori-relay/machine-<ID>/bridge.log`（每個轉交、每一輪收發室的耗時與費用都有一行）。
+Log：`~/.asn/machine-<ID>/bridge.log`（每個轉交、每一輪收發室的耗時與費用都有一行）。
 
 ## 執行與開機自動啟動
 
@@ -124,7 +126,7 @@ powershell -File install-task.ps1 -Uninstall           # 移除
 
 ## 測試用小工具（拋棄式）
 
-- `tools-provision.mjs <新代號>`：用 H 金鑰開邀請碼並註冊測試節點（金鑰寫進 `~/.irori-relay/<id>.key`，不印）
+- `tools-provision.mjs <新代號>`：用 H 金鑰開邀請碼並註冊測試節點（金鑰寫進 `~/.asn/<id>.key`，不印）
 - `tools-roundtrip.mjs <寄件節點> <to_node> <to_agent|-> "<body>" [秒]`：寄信並輪詢自己的 inbox 等回信，印延遲
 - `tools-roster-once.mjs`：以 H 金鑰單次回報名單（不碰 inbox）
 
@@ -153,11 +155,11 @@ powershell -File install-task.ps1 -Uninstall           # 移除
 ### 在 Aegis 上安裝
 
 1. 取得程式：把本 repo 的 `relay/machine/` 放到主機（例如 `/home/cwen0708/irori/relay/machine/`，`git clone` 或 `scp`），Node 用 `/opt/node22/bin/node`（>= 22）。
-2. 放金鑰（家目錄是 `~/.irori-relay/`；金鑰是 **Aegis 節點專用**的仲介節點金鑰，不要共用別台的）：
+2. 放金鑰（家目錄是 `~/.asn/`；金鑰是 **Aegis 節點專用**的仲介節點金鑰，不要共用別台的）：
    ```
-   mkdir -p ~/.irori-relay && chmod 700 ~/.irori-relay
-   (read -rs K; printf '%s' "$K" > ~/.irori-relay/AEGIS.key); chmod 600 ~/.irori-relay/AEGIS.key
-   (read -rs A; printf '%s' "$A" > ~/.irori-relay/anon.key); chmod 600 ~/.irori-relay/anon.key   # 可省：沒有 anon.key 就只剩 2 分鐘輪詢
+   mkdir -p ~/.asn && chmod 700 ~/.asn
+   (read -rs K; printf '%s' "$K" > ~/.asn/AEGIS.key); chmod 600 ~/.asn/AEGIS.key
+   (read -rs A; printf '%s' "$A" > ~/.asn/anon.key); chmod 600 ~/.asn/anon.key   # 可省：沒有 anon.key 就只剩 2 分鐘輪詢
    ```
    檔名要跟 `ASN_RELAY_ID` 一致（預設 `AEGIS` → `AEGIS.key`）。
 3. 編輯 `irori-relay-aegis.service`：`ASN_RELAY_ID`、`IRORI_AEGIS_ALLOW=<slug1>,<slug2>`、`ExecStart` 路徑，然後：
@@ -167,7 +169,7 @@ powershell -File install-task.ps1 -Uninstall           # 移除
    sudo systemctl enable --now irori-relay-aegis
    ```
 4. 看狀態與 log：`systemctl status irori-relay-aegis`、`journalctl -u irori-relay-aegis -f`，
-   或 `tail -f ~/.irori-relay/aegis-AEGIS/bridge.log`。看到 `aegis bridge starting … allow=[…]`、`whoami node=…`、`doorbell joined` 即上線。
+   或 `tail -f ~/.asn/aegis-AEGIS/bridge.log`。看到 `aegis bridge starting … allow=[…]`、`whoami node=…`、`doorbell joined` 即上線。
 5. 改白名單：改 unit 的 `IRORI_AEGIS_ALLOW` → `sudo systemctl daemon-reload && sudo systemctl restart irori-relay-aegis`。
 6. 這把節點金鑰只能有**一個**收信者；`can_invite` 才能回報名單（否則 log 一行 403 後安靜）。
 
@@ -220,10 +222,10 @@ node send.mjs --to XISU --file 報告.pdf --file 圖.webp --body "說明" --no-r
 
 輸出 `sent id=… to=… from=節點/視窗名`（群組：`posted room=… seq=…`）；錯誤印到 stderr。exit code：0 成功、1 用法或內容不合、2 認不出呼叫者、3 超量、4 後端錯誤。
 
-- **機器金鑰**：用橋同一把 `~/.irori-relay/<節點>.key`；節點代號依序取 `ASN_RELAY_ID`、`~/.irori-relay/node`（一行節點代號）、橋正在跑的 `machine-<ID>`（`bridge.pid` 的程序還活著）、唯一有 `<ID>.key` 的 `machine-<ID>` 資料夾；仍不唯一就報錯並列出候選（這時在 `~/.irori-relay/node` 寫一行節點代號即可，家用機＝`H`）。`from_node` 由金鑰決定，trust 由後端決定（member）。
+- **機器金鑰**：用橋同一把 `~/.asn/<節點>.key`；節點代號依序取 `ASN_RELAY_ID`、`~/.asn/node`（一行節點代號）、橋正在跑的 `machine-<ID>`（`bridge.pid` 的程序還活著）、唯一有 `<ID>.key` 的 `machine-<ID>` 資料夾；仍不唯一就報錯並列出候選（這時在 `~/.asn/node` 寫一行節點代號即可，家用機＝`H`）。`from_node` 由金鑰決定，trust 由後端決定（member）。
 - **寄件視窗名不能自填**：CLI 沿父行程鏈往上，找第一個在 `~/.claude/sessions/<pid>.json` 有登記的 claude 程序，用它的 `name` 當 `from_agent`。（行程鏈用 Windows PID，Git Bash／PowerShell／cmd 的中間層都在鏈上，實測兩種殼都認得。）若鏈斷了（`nohup`／背景化後父行程已消失的孤兒行程），改用 Claude Code 匯出給 Bash 指令的 `CLAUDE_CODE_MESSAGING_SOCKET`，對上某個還活著的 session 的 `messagingSocketPath` 才算；獨立啟動的程式兩者都沒有。實例：I-Irori-2 的 Bash 工具外層包了 `timeout.exe`，行程鏈斷在那裡，靠這個環境變數備援才認出視窗（實寄成功，`from=H/I-Irori-2`）。**除錯**：`node send.mjs --whoami` 不寄信，印出父行程鏈（Windows PID＋名稱）、每個 session 的 pid／name 對照、環境變數備援結果與節點判定。沒有 `--from-agent` 之類參數；內文、環境變數裡寫的名字無效。找不到（不是在 Claude 視窗裡跑、父行程已結束的孤兒行程、視窗沒有名字）就拒絕、不打後端。
   這擋的是「本機非 Claude 程式隨手冒用」，不是同一個 Windows 使用者的惡意程式（它拿得到金鑰檔，本來就能直接打後端）。
-- **檢查**：`--to` 與 `--room` 二選一；成員代號格式合法；可以寄給本機其他視窗（含 ASN；信經後端回到本機橋，照一般信轉交，視窗有自己收信的心跳就由它自己拉），只擋「寄給自己這個視窗」；內文非空且 ≤ 20000 字；`--reply-to` 要是 uuid；每視窗每小時 `ASN_SEND_PER_HOUR`（預設 30）封，記在 `~/.irori-relay/send-rate.json`（超量 exit 3 並說明幾分鐘後可再寄）。
+- **檢查**：`--to` 與 `--room` 二選一；成員代號格式合法；可以寄給本機其他視窗（含 ASN；信經後端回到本機橋，照一般信轉交，視窗有自己收信的心跳就由它自己拉），只擋「寄給自己這個視窗」；內文非空且 ≤ 20000 字；`--reply-to` 要是 uuid；每視窗每小時 `ASN_SEND_PER_HOUR`（預設 30）封，記在 `~/.asn/send-rate.json`（超量 exit 3 並說明幾分鐘後可再寄）。
 - 判定呼叫者要讀一次行程表（Windows 用 PowerShell `Get-CimInstance`，約 0.6 秒）；整個指令約 1–2 秒。
 - 實作注意：結束時不呼叫 `process.exit()`（Windows 上 node 偶爾在關閉 handle 時 assertion 當掉），改設 `process.exitCode`。
 
@@ -239,8 +241,8 @@ node D:/Github/Yooliang/asn/relay/machine/recv.mjs --once     # 拉一次、印�
 每行 JSON：`{id, trust, from_node, from_agent, to_agent, reply_to, created_at, expects_reply, body}`（`expects_reply`：true 要回、false 只是告知、null 舊信沒說）；回信用 `send.mjs --to <from_node>/<from_agent> --reply-to <id> --body "…" --reply|--no-reply`。診斷只印 stderr。exit code：1 用法、2 認不出視窗、3 這個視窗已有另一個 `--watch` 在跑、4 後端錯誤。
 
 - **只收寄給自己的信**：視窗名用和 `send.mjs` 同一套判定（`identity.mjs`：父行程鏈／`CLAUDE_CODE_MESSAGING_SOCKET`，不能自填）。仲介 `inbox`／`ack` 帶 `agent=<視窗名>` 時只回／只 ack `to_agent` 精確等於該視窗名的信（`supabase/sql/08_agent_inbox.sql`）：A 視窗 ack 不到 B 視窗的信，`to_agent` 為空的總機信也碰不到（仍由橋處理）。recv 收到後端回來的信還會再比一次 `to_agent`，不是自己的不印、不 ack（對還沒部署新版仲介也安全）。
-- **與橋並存（心跳）**：`--watch` 每 30 秒在 `~/.irori-relay/machine-<節點>/self-recv/<視窗名>.json` 寫 `{pid, name, t}`。橋轉交 `to_agent` 為某視窗的信前先看這個檔：心跳在 90 秒內**且** pid 還活著 → 橋跳過（不轉、不 ack，留給視窗自己拉，log 印 `window receives by itself`）；心跳過期、pid 已死或沒有檔 → 照舊經收發室轉交，所以 Monitor 被關掉最多 90 秒後橋就接手，不會漏信。極窄的競態（心跳剛好過期那一刻橋轉交、視窗同時又啟動）可能重複一封。沒指定視窗的總機信、群組訊息（rooms）、Aegis 橋不受影響，仍照舊。
-- 收信走 Realtime 門鈴＋每 2 分鐘輪詢（`ASN_RECV_POLL_MS`）；門鈴需要 `~/.irori-relay/anon.key`，沒有就只輪詢。同一視窗只留一個 `--watch`；視窗本體結束它也會自己結束並清心跳。
+- **與橋並存（心跳）**：`--watch` 每 30 秒在 `~/.asn/machine-<節點>/self-recv/<視窗名>.json` 寫 `{pid, name, t}`。橋轉交 `to_agent` 為某視窗的信前先看這個檔：心跳在 90 秒內**且** pid 還活著 → 橋跳過（不轉、不 ack，留給視窗自己拉，log 印 `window receives by itself`）；心跳過期、pid 已死或沒有檔 → 照舊經收發室轉交，所以 Monitor 被關掉最多 90 秒後橋就接手，不會漏信。極窄的競態（心跳剛好過期那一刻橋轉交、視窗同時又啟動）可能重複一封。沒指定視窗的總機信、群組訊息（rooms）、Aegis 橋不受影響，仍照舊。
+- 收信走 Realtime 門鈴＋每 2 分鐘輪詢（`ASN_RECV_POLL_MS`）；門鈴需要 `~/.asn/anon.key`，沒有就只輪詢。同一視窗只留一個 `--watch`；視窗本體結束它也會自己結束並清心跳。
 - **上線順序**：先在 Supabase 跑 `supabase/sql/08_agent_inbox.sql`，再部署 `irori-relay`，各機器同步程式後**重啟橋**（橋要換成新版才看得懂心跳；舊橋照舊全轉，視窗會收到重複信）。
 
 ## 收發室回覆區塊的 nonce
@@ -250,7 +252,7 @@ node D:/Github/Yooliang/asn/relay/machine/recv.mjs --once     # 拉一次、印�
 ## 遠端開 Claude 視窗（`launcher.mjs`，#64，規劃見 docs/relay/LAUNCHER.md）
 
 使用者在 Irori Chat「聯絡人」分頁對某台電腦按「＋ 開新視窗」→ 仲介記一筆 launch 並敲門鈴 → 橋 `launch_pending` 取走 → 照**本機** launcher.json 開視窗 → `launch_result` 回報。
-- 設定：`~/.irori-relay/launcher.json`（不進 repo；範本 `launcher.example.json`；`ASN_LAUNCHER_FILE` 可改路徑）。沒有這個檔＝這台不能遠端開視窗（名單回報 `launcher: null`，手機上不出現按鈕）。profile 可加 `"engine": "codex"` 指定用哪個轉接器開（沒寫＝第一個宣告 `openWindow` 的轉接器；指定了但沒載入該轉接器會回報開不起來）。
+- 設定：`~/.asn/launcher.json`（不進 repo；範本 `launcher.example.json`；`ASN_LAUNCHER_FILE` 可改路徑）。沒有這個檔＝這台不能遠端開視窗（名單回報 `launcher: null`，手機上不出現按鈕）。profile 可加 `"engine": "codex"` 指定用哪個轉接器開（沒寫＝第一個宣告 `openWindow` 的轉接器；指定了但沒載入該轉接器會回報開不起來）。
 - 自動偵測本機 CLI（claude、codex、agy…）併成遠端開視窗的 profile **預設關**；要開請在橋的環境設 `ASN_LAUNCH_AUTO=1`（`ASN_LAUNCH_NO_AUTO=1` 仍可強制關）。ASN 電腦版的「開新夥伴」在本機啟動，不受這個設定影響。
   - `profiles.<名>`：`label`、`command`（可用 `%SystemRoot%` 這類環境變數）、`args`（字串陣列；**唯一**允許的替換欄位是 `{name}`，其他 `{…}` 整個檔案拒收）
   - `cwd_allow`：可選的工作資料夾（精確比對，不做前綴）；`max_per_hour`：每小時上限（預設 6，最多 20）
@@ -303,7 +305,7 @@ node D:/Github/Yooliang/asn/relay/machine/recv.mjs --once     # 拉一次、印�
 
 ### acp 轉接器：背景工作者（Gemini 等，`engines/acp.mjs`，#134 第一期）
 
-`ASN_ENGINES=claude,acp` 載入（`run-bridge.ps1 -Engines claude,acp`）。不接「使用者已開的視窗」，而是依 `~/.irori-relay/agents.json`（範本 `agents.example.json`，`ASN_AGENTS_FILE` 可改路徑）長駐啟動一批**工作者**（背景 AI），名單上以工作者名出現（roster 的 `engine` 欄位＝`roster_engine`，例如 `gemini`）。
+`ASN_ENGINES=claude,acp` 載入（`run-bridge.ps1 -Engines claude,acp`）。不接「使用者已開的視窗」，而是依 `~/.asn/agents.json`（範本 `agents.example.json`，`ASN_AGENTS_FILE` 可改路徑）長駐啟動一批**工作者**（背景 AI），名單上以工作者名出現（roster 的 `engine` 欄位＝`roster_engine`，例如 `gemini`）。
 收到信就送一輪、拿回覆寄回（橋負責帶 `reply_to`），同一工作者保持同一段對話（session id 存 `machine-<ID>/acp-workers.json`，重啟 resume）。
 
 - 驅動：`protocol:"agy-stream"`（預設；直接跑 `agy` 的 stream-json）或 `"acp"`（標準 ACP，備援／其他 agent）。選擇理由、實測與風險見 `docs/AGENT-ENGINES.md` 第 9 節。

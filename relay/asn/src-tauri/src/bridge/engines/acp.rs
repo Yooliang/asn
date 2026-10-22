@@ -1,4 +1,4 @@
-//! 通用 ACP 引擎：由內建橋依 `~/.irori-relay/agents.json` 長駐啟動一批「工作者」（背景 AI，例如 Gemini），
+//! 通用 ACP 引擎：由內建橋依 `~/.asn/agents.json` 長駐啟動一批「工作者」（背景 AI，例如 Gemini），
 //! 名單上以工作者名出現（roster 的 engine 欄位＝設定的 roster_engine，例如 gemini）；收到信就送一輪、把回覆寄回。
 //! 對應 engines/acp.mjs 與 acp-driver-acp.mjs。兩種驅動：`acp`（標準 ACP，Gemini CLI 的 --experimental-acp 等）在這個檔案，
 //! `agy-stream`（Antigravity CLI 原生 stream-json）在 acp_agy.rs。

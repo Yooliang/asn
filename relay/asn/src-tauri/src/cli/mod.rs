@@ -5,7 +5,7 @@
 //! `asn.exe`（GUI 子系統）遇到這幾個子命令時改接上父行程的主控台後跑同一份程式（備援，見 [`run_attached`]）。
 //! 命令列模式不啟動視窗、不碰單一執行個體鎖，所以和正在跑的 ASN 並存。
 //!
-//! 金鑰只在記憶體（讀 ~/.irori-relay/<節點>.key 或 ASN_RELAY_KEY），絕不印出。
+//! 金鑰只在記憶體（讀 ~/.asn/<節點>.key 或 ASN_RELAY_KEY），絕不印出。
 mod attach_cmd;
 mod caller;
 mod env;

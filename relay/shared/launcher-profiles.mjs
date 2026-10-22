@@ -56,7 +56,7 @@ function profileCodex(cmd, platform) {
 }
 
 function profileGemini(cmd, home) {
-  const cwd = path.join(home, '.irori-relay', 'workers', '{name}')
+  const cwd = path.join(home, '.asn', 'workers', '{name}')
   return {
     label: 'Gemini（背景工作者）',
     mode: 'background',
@@ -70,7 +70,7 @@ function profileGemini(cmd, home) {
 }
 
 function profileGrok(cmd, home) {
-  const cwd = path.join(home, '.irori-relay', 'workers', '{name}')
+  const cwd = path.join(home, '.asn', 'workers', '{name}')
   return {
     label: 'Grok（背景工作者）',
     mode: 'background',

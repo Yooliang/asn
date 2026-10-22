@@ -29,8 +29,8 @@ async function fakeServer({ status = 200 } = {}) {
 }
 const newHome = (node = 'T') => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-send-test-'))
-  fs.mkdirSync(path.join(home, '.irori-relay'), { recursive: true })
-  fs.writeFileSync(path.join(home, '.irori-relay', `${node}.key`), 'fake-machine-key')
+  fs.mkdirSync(path.join(home, '.asn'), { recursive: true })
+  fs.writeFileSync(path.join(home, '.asn', `${node}.key`), 'fake-machine-key')
   return home
 }
 // 執行 script，收 stdout/stderr/exit code
@@ -56,10 +56,10 @@ test('寄給成員：from_agent 取自父行程鏈上的視窗名、帶機器金
     const r2 = await asWindow(home, st, 'T-視窗甲', ['--to', 'W/W-政策', '--body', 'x', '--no-reply'])
     assert.equal(r2.code, 0); assert.deepEqual([st.reqs[1].body.to_node, st.reqs[1].body.to_agent], ['W', 'W-政策'])
     // 帶 --reply-to 寄成功 → 留 replied 記號給機器橋（不再寄「沒有回覆」）；沒帶 reply-to 的不留
-    const dir = path.join(home, '.irori-relay', 'machine-T', 'replied')
+    const dir = path.join(home, '.asn', 'machine-T', 'replied')
     assert.deepEqual(fs.readdirSync(dir), [rid])
     // 每次寄給節點／視窗也留 sent 記號（橋據此判斷「對方已直接寄信給原寄件人」）：XISU 與 W/W-政策 各一個
-    const sdir = path.join(home, '.irori-relay', 'machine-T', 'sent')
+    const sdir = path.join(home, '.asn', 'machine-T', 'sent')
     assert.deepEqual(fs.readdirSync(sdir).sort(), [sentMarkName('T-視窗甲', 'XISU', ''), sentMarkName('T-視窗甲', 'W', 'W-政策')].sort())
   } finally { await st.close() }
 })
@@ -69,7 +69,7 @@ test('寄失敗（後端錯誤）不留 replied 記號', async () => {
   try {
     const r = await asWindow(home, st, 'T-視窗甲', ['--to', 'XISU', '--body', 'x', '--reply-to', 'bbbbbbbb-1111-2222-3333-444444444444', '--no-reply'])
     assert.equal(r.code, 4)
-    assert.ok(!fs.existsSync(path.join(home, '.irori-relay', 'machine-T', 'replied')))
+    assert.ok(!fs.existsSync(path.join(home, '.asn', 'machine-T', 'replied')))
   } finally { await st.close() }
 })
 
@@ -104,7 +104,7 @@ test('每視窗每小時上限，記在 send-rate.json；別的視窗不受影�
     assert.equal(r.code, 3); assert.match(r.err, /被擋：視窗「T-視窗甲」每小時最多寄 2 封/)
     assert.equal((await asWindow(home, st, 'T-視窗乙', ['--to', 'XISU', '--body', '別的視窗', '--no-reply'], { env })).code, 0)
     assert.deepEqual(st.reqs.map(q => q.body.body), ['第1封', '第2封', '別的視窗'])
-    const rate = JSON.parse(fs.readFileSync(path.join(home, '.irori-relay', 'send-rate.json'), 'utf8'))
+    const rate = JSON.parse(fs.readFileSync(path.join(home, '.asn', 'send-rate.json'), 'utf8'))
     assert.equal(rate['T-視窗甲'].length, 2)
   } finally { await st.close() }
 })
@@ -151,7 +151,7 @@ test('群組、stdin、--body-file、後端錯誤、節點代號自動判定', a
     const bf = await asWindow(home, st, 'T-視窗甲', ['--to', 'XISU', '--body-file', f, '--no-reply'])
     assert.equal(bf.code, 0); assert.equal(st.reqs[2].body.body, '檔案內文')
     // 不給 IRORI_RELAY_ID：唯一的 machine-T 資料夾決定節點
-    fs.mkdirSync(path.join(home, '.irori-relay', 'machine-T'), { recursive: true })
+    fs.mkdirSync(path.join(home, '.asn', 'machine-T'), { recursive: true })
     const auto = await run(home, st, WINDOW, ['T-視窗甲', '--to', 'XISU', '--body', '自動判定節點', '--no-reply'])
     assert.equal(auto.code, 0, auto.err); assert.match(auto.out, /from=T\/T-視窗甲/)
   } finally { await st.close() }
@@ -184,7 +184,7 @@ test('環境變數備援：孤兒行程帶著視窗專屬的 messaging socket �
 
 test('節點代號自動判定：多個 machine-* 資料夾時，取橋正在跑的；沒有就取唯一有金鑰檔的；仍不唯一則說明候選', async () => {
   const st = await fakeServer(), home = newHome('T')
-  const root = path.join(home, '.irori-relay')
+  const root = path.join(home, '.asn')
   for (const id of ['T', 'T-舊測試', 'X']) fs.mkdirSync(path.join(root, `machine-${id.replace('T-舊測試', 'Told')}`), { recursive: true })
   fs.writeFileSync(path.join(root, 'Told.key'), 'k2')   // machine-T、machine-Told 都有金鑰 → 先靠 bridge.pid
   try {
@@ -269,8 +269,8 @@ test('沒說要不要回信（--to 沒給 --reply 也沒給 --no-reply）→ exi
       assert.equal(r.code, 1, args.join(' ')); assert.ok(r.err.includes(NEED_FLAG), r.err); assert.equal(r.out, '')
     }
     assert.equal(st.reqs.length, 0)
-    assert.ok(!fs.existsSync(path.join(home, '.irori-relay', 'machine-T', 'sent')) && !fs.existsSync(path.join(home, '.irori-relay', 'machine-T', 'replied')))
-    assert.ok(!fs.existsSync(path.join(home, '.irori-relay', 'send-rate.json')))   // 沒寄就不計次
+    assert.ok(!fs.existsSync(path.join(home, '.asn', 'machine-T', 'sent')) && !fs.existsSync(path.join(home, '.asn', 'machine-T', 'replied')))
+    assert.ok(!fs.existsSync(path.join(home, '.asn', 'send-rate.json')))   // 沒寄就不計次
   } finally { await st.close() }
 })
 

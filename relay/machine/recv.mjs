@@ -4,11 +4,12 @@
 //   node recv.mjs --watch    長駐：Realtime 門鈴＋輪詢；每封一行 JSON 到 stdout（給 Claude Code 的 Monitor 用）
 // 只收「to_agent＝本視窗名」的信（視窗名由父行程鏈／環境變數備援認出，和 send.mjs 同一套，不能自填）；
 // 寄給整台機器（沒指定視窗）的總機信不在這裡，仍由機器橋處理。回信用：node send.mjs --to <from_node>/<from_agent> --reply-to <id> --body "…" (--reply | --no-reply)
-// --watch 會在 ~/.irori-relay/machine-<節點>/self-recv/<視窗名>.json 寫心跳；橋看到心跳就不再轉交這個視窗的信（心跳過期就照舊轉）。
+// --watch 會在 ~/.asn/machine-<節點>/self-recv/<視窗名>.json 寫心跳；橋看到心跳就不再轉交這個視窗的信（心跳過期就照舊轉）。
 // 每行 JSON：{id, trust, from_node, from_agent, to_agent, reply_to, created_at, expects_reply, body}。診斷訊息只走 stderr。
 // expects_reply：寄件人明說要不要回信（true 要回、false 只是告知不用回、null＝舊信沒說）；回信用 send.mjs 時也要選 --reply／--no-reply。
 // exit code：1 用法、2 認不出視窗、3 這個視窗已有另一個 recv --watch 在跑、4 後端錯誤。
 import { envGet } from './env-compat.mjs'
+import { locateHome } from './home.mjs'
 import { pickAnon } from './anon.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -57,7 +58,7 @@ export async function main(argv, out = line => process.stdout.write(line + '\n')
   const me = findCaller('收信')
   const workDir = path.join(HOME_DIR, `machine-${node}`)
   let anonKey = (envGet(process.env, 'RELAY_ANON_KEY') || '').trim()
-  if (!anonKey) { try { anonKey = fs.readFileSync(path.join(HOME_DIR, 'anon.key'), 'utf8').trim() } catch {} }
+  if (!anonKey) { try { anonKey = fs.readFileSync(locateHome('anon.key'), 'utf8').trim() } catch {} }
   anonKey = pickAnon(BASE_URL, [anonKey])   // 沒有或是舊專案的就用內建
   const log = msg => console.error(`${new Date().toISOString()} recv[${me.name}] ${msg}`)
   const core = createCore({ baseUrl: BASE_URL, key, anonKey, log, workDir })

@@ -1,7 +1,7 @@
 //! `asn attach`：下載收到的附件（照片）到本機（對應 relay/machine/attach.mjs 與 attach-download.mjs）。
 //!   asn attach --id <附件編號> [--out <路徑>]
 //! 向收發室換一次短效下載網址，再把檔案存到本機路徑並印出 `saved <路徑>`。
-//! 預設存到 ~/.irori-relay/machine-<節點>/attachments/<編號前 8 碼>-<檔名>；不覆蓋既有檔案（--out 指到已存在的檔案會拒絕）。
+//! 預設存到 ~/.asn/machine-<節點>/attachments/<編號前 8 碼>-<檔名>；不覆蓋既有檔案（--out 指到已存在的檔案會拒絕）。
 //! 只有寄件人與收件人（群組＝成員）換得到網址；沒權限一律 404。金鑰絕不印出。
 //! 結束碼：1 用法／目的地已有檔案、4 後端或下載錯誤（含沒權限、已過期、檔案內容不對）。
 use super::caller::{http_status, identity};

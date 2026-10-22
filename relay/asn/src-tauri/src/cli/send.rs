@@ -6,7 +6,7 @@
 //! 寄給成員／視窗（含回信）一定要明說要不要回信；結果以 expects_reply 欄位送給後端，不往內文加任何標記。
 //! 寄件視窗名不能自填：沿父行程鏈找 ~/.claude/sessions 登記的 claude 程序（備援 CLAUDE_CODE_MESSAGING_SOCKET）。
 //! 輸出 `sent id=…`（或 `posted room=… seq=…`）；錯誤印到 stderr，結束碼：1 用法／內容、2 認不出呼叫者、3 超量、4 後端錯誤。
-//! 寄成功後在 ~/.irori-relay/machine-<節點>/ 留記號給橋：`replied/<信件id>`（直接回信）、`sent/<sha1>`（曾寄給某節點／視窗）。
+//! 寄成功後在 ~/.asn/machine-<節點>/ 留記號給橋：`replied/<信件id>`（直接回信）、`sent/<sha1>`（曾寄給某節點／視窗）。
 use super::caller::{backend, find_caller, identity, relay, whoami};
 use super::env::Env;
 use super::upload::{attachment_text, prepare_files, upload_items, MAX_FILES};
@@ -101,7 +101,7 @@ fn valid_id(s: &str) -> bool {
     crate::identity::valid_id(s)
 }
 
-/// 每視窗每小時上限，記在 ~/.irori-relay/send-rate.json（暫存檔＋rename，避免寫壞）
+/// 每視窗每小時上限，記在 ~/.asn/send-rate.json（暫存檔＋rename，避免寫壞）
 fn take_rate(relay_home: &Path, window: &str, limit: usize, now: u64) -> R<()> {
     let file = relay_home.join("send-rate.json");
     let mut all: Map<String, Value> = std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();

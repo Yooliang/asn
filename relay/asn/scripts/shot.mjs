@@ -83,7 +83,7 @@ export async function runShot(outDir, exe = defaultExe, { timeoutMs = 90_000, me
   child.stdout.on('data', d => (log += d)); child.stderr.on('data', d => (log += d))
   const pid = child.pid   // 只關自己啟動的這一個（含它的 WebView2 子程序）
   // 程式結束時會清掉自己的心跳檔，所以執行中輪詢，記下看到的內容
-  const hbFile = path.join(env.USERPROFILE, '.irori-relay', 'machine-H', 'self-recv', 'H-ASN.json')
+  const hbFile = path.join(env.USERPROFILE, '.asn', 'machine-H', 'self-recv', 'H-ASN.json')
   let heartbeat = null, oldHeartbeat = null, expiredHeartbeat = false
   const oldHb = path.join(path.dirname(hbFile), 'H-舊名.json'), expHb = path.join(path.dirname(hbFile), 'H-過期.json')
   const poll = setInterval(() => { try { heartbeat ??= JSON.parse(fs.readFileSync(hbFile, 'utf8')) } catch {}; try { oldHeartbeat ??= JSON.parse(fs.readFileSync(oldHb, 'utf8')) } catch {}; if (fs.existsSync(expHb)) expiredHeartbeat = true }, 100)

@@ -1,6 +1,6 @@
 // 雲端代理收發室工具的共用設定：路徑、節點代號、金鑰讀取。全部可用環境變數改（測試就是靠這個指到暫存資料夾）。
 //   ASN_CLOUD_HOME      根目錄（預設 /workspace，重置後保留的那個）
-//   ASN_CLOUD_KEY_DIR   金鑰檔目錄（預設 <根>/.asn，若只有舊 .irori-relay 則沿用）
+//   ASN_CLOUD_KEY_DIR   金鑰檔目錄（預設 ASN_HOME；沒有就 <根>/.asn，若只有舊 .irori-relay 則沿用）
 //   ASN_CLOUD_MAIL_DIR  信件目錄（預設 <根>/relay）
 //   ASN_RELAY_ID        節點代號（預設 grok）
 //   ASN_RELAY_URL       仲介網址（預設正式；測試指到 127.0.0.1）
@@ -8,6 +8,7 @@
 //   ASN_RELAY_ANON_KEY／<金鑰目錄>/anon.key：Realtime 門鈴（pickAnon 會對專案代號並內建新後台 anon；舊名 IRORI_RELAY_ANON_KEY 經 env-compat 併入新名）
 //   舊名 IRORI_* 由 env-compat.mjs 在 resolveConfig 入口轉成 ASN_*（ONBOARDING §5）
 import { pickAnon } from '../machine/anon.mjs'
+import { resolveHome } from '../machine/home.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
 import { DEFAULT_URL, ID_RE } from '../machine/register.mjs'
@@ -19,20 +20,15 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 
 export class Fail extends Error { constructor(code, msg) { super(msg); this.code = code } }
 
+// 金鑰目錄：照 ../machine/home.mjs 的順序（<根>/.asn 優先、只有舊 <根>/.irori-relay 才沿用）；ASN_HOME 由 resolveConfig 另外處理
 function defaultKeyDir(root) {
-  const asn = path.join(root, '.asn')
-  const legacy = path.join(root, '.irori-relay')
-  try {
-    if (fs.existsSync(asn)) return asn
-    if (fs.existsSync(legacy)) return legacy
-  } catch {}
-  return asn
+  return resolveHome({ base: root, env: {} }).primary
 }
 
 export function resolveConfig(rawEnv = process.env) {
   const { env } = applyEnvCompat(rawEnv)
   const root = env.ASN_CLOUD_HOME || '/workspace'
-  const keyDir = env.ASN_CLOUD_KEY_DIR || defaultKeyDir(root)
+  const keyDir = env.ASN_CLOUD_KEY_DIR || (env.ASN_HOME || '').trim() || defaultKeyDir(root)
   const mailDir = env.ASN_CLOUD_MAIL_DIR || path.join(root, 'relay')
   const node = (env.ASN_RELAY_ID || 'grok').trim()
   const name = (env.ASN_CLOUD_ROSTER_NAME || 'Grok').trim()

@@ -3,7 +3,7 @@
 //!   asn recv --watch    長駐：Realtime 門鈴＋輪詢；每封一行 JSON 到 stdout（給 Claude Code 的 Monitor 用）
 //! 只收「to_agent＝本視窗名」的信（視窗名由父行程鏈／環境變數備援認出，和 asn send 同一套，不能自填）；
 //! 寄給整台機器（沒指定視窗）的總機信不在這裡，仍由收發室橋處理。
-//! --watch 會寫心跳 ~/.irori-relay/machine-<節點>/self-recv/<視窗名>.json（每 30 秒）；橋看到心跳就不再轉交這個視窗的信（心跳過期就照舊轉）。
+//! --watch 會寫心跳 ~/.asn/machine-<節點>/self-recv/<視窗名>.json（每 30 秒）；橋看到心跳就不再轉交這個視窗的信（心跳過期就照舊轉）。
 //! 每行 JSON：{id, trust, from_node, from_agent, to_agent, reply_to, created_at, expects_reply, body[, attachments]}。診斷訊息只走 stderr。
 //!   asn recv --peek     只看不收：印 {"count":N,"messages":[{id,from,at,preview}]} 一行；不 ack、不改任何狀態（後端 inbox_peek 動作，只 select）；加 --count-only 只印 {"count":N}
 //! 結束碼：1 用法、2 認不出視窗、3 這個視窗已有另一個 recv --watch 在跑、4 後端錯誤。

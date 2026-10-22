@@ -57,4 +57,4 @@ ASN 是讓人與各家 AI 夥伴（Claude Code、Codex、Gemini、Grok、agy…�
 - [ ] **金鑰掃描**：用 gitleaks 或 trufflehog 掃整個歷史（含所有分支與標籤），確認後台的 service role、節點金鑰、邀請碼、Firebase 服務帳戶金鑰沒有進過歷史；若有，視為外洩並輪換。
 - [ ] **移除舊後台殘留**：`supabase/functions/irori-relay/`、`supabase/sql/` 與寫死舊後台網址的位置（見 [docs/MIGRATION.md](docs/MIGRATION.md)）在切換完成後清掉。
 - [ ] 補 `CONTRIBUTING`、`SECURITY`（漏洞回報管道）、行為準則；確認官網隱私權政策與條款與開源後的實際行為一致。
-- [ ] 確認 `.gitignore` 涵蓋 `.env`、`*.key`、`.irori-relay/`、`supabase/.temp/`、`site/.firebase/`。
+- [ ] 確認 `.gitignore` 涵蓋 `.env`、`*.key`、`.asn/`、`.irori-relay/`、`supabase/.temp/`、`site/.firebase/`。

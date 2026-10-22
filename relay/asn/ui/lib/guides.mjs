@@ -1,7 +1,7 @@
 // 「指引」頁籤：安裝與使用說明（純資料＋純邏輯，node 與瀏覽器都能跑）。列表只列標題，點了開共用對話框（dialog.mjs）顯示內容。
 // 內容出處：relay/asn/README.md、relay/machine/README.md、relay/machine/installer/使用說明.txt、docs/DOWNLOADS.md、
 // relay/cloud-agent/README.md、relay/machine/room.mjs／rooms.mjs。只寫目前真的做得到的；之後要改文字就改這個檔。
-// 規矩：不放金鑰、內部網址、後台網址；檔案路徑用通用寫法（%USERPROFILE%\.irori-relay）；不用 v-html，畫面一律當純文字顯示。
+// 規矩：不放金鑰、內部網址、後台網址；檔案路徑用通用寫法（%USERPROFILE%\.asn）；不用 v-html，畫面一律當純文字顯示。
 // 區塊種類 k：h＝小標、p＝一段話、li＝一個步驟（畫面自動編號）、code＝指令（等寬字）、note＝注意事項。
 
 export const GUIDES = [
@@ -26,7 +26,7 @@ export const GUIDES = [
       { k: 'li', t: '下方可以打一句說明文字，按「傳送」就會像傳照片一樣送給對方；按「取消」或 Esc 則整張丟掉，什麼都不會送出。' },
       { k: 'li', t: '從別處複製的圖片，在輸入框按 Ctrl+V 貼上，也會進入同一個標註畫面。' },
       { k: 'note', t: '截圖目前只有 Windows 版有；Linux 版的工具列不會出現「截圖」鈕，但貼上圖片後標註仍可使用。畫面上若有密碼或私人資料，記得先用馬賽克遮住再傳送。' },
-      { k: 'note', t: '關掉好友名單視窗，整個程式就結束。節點與金鑰是從 %USERPROFILE%\\.irori-relay 讀的，啟動失敗時畫面會寫原因。' },
+      { k: 'note', t: '關掉好友名單視窗，整個程式就結束。節點與金鑰是從 %USERPROFILE%\\.asn 讀的，啟動失敗時畫面會寫原因。' },
     ],
   },
   {
@@ -45,9 +45,9 @@ export const GUIDES = [
       { k: 'note', t: '如果 Windows 跳出藍色「已保護你的電腦」：在壓縮檔上按右鍵、內容、勾選「解除封鎖」，再重新解壓縮。' },
       { k: 'h', t: '更新、檢查、移除' },
       { k: 'li', t: '更新：下載新版 zip、解壓縮、再雙擊一次「安裝.cmd」，它只會換程式並重啟，不需要邀請碼。' },
-      { k: 'li', t: '確認有在跑：看紀錄檔，位置是 %USERPROFILE%\\.irori-relay\\machine-<你的代號>\\bridge.log。' },
+      { k: 'li', t: '確認有在跑：看紀錄檔，位置是 %USERPROFILE%\\.asn\\machine-<你的代號>\\bridge.log。' },
       { k: 'li', t: '不想用了：雙擊「解除安裝.cmd」，它會移除自動啟動並問你要不要刪除金鑰與資料夾。' },
-      { k: 'note', t: '名單看得到這台電腦、卻看不到上面開著的 Claude 視窗：請告訴帳號擁有者，這個代號需要開通「回報視窗」。金鑰只存在 %USERPROFILE%\\.irori-relay，請不要寄給別人或貼到對話裡。' },
+      { k: 'note', t: '名單看得到這台電腦、卻看不到上面開著的 Claude 視窗：請告訴帳號擁有者，這個代號需要開通「回報視窗」。金鑰只存在 %USERPROFILE%\\.asn，請不要寄給別人或貼到對話裡。' },
     ],
   },
   {
