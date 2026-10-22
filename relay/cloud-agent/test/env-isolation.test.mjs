@@ -44,7 +44,10 @@ test('childEnv：剔除 process.env 的 IRORI_*／ASN_* 後才套用測試覆寫
     assert.equal(bare.ASN_CLOUD_HOME, undefined)
     assert.equal(bare.IRORI_CLOUD_HOME, undefined)
     assert.ok(process.env.PATH, '非 IRORI_ 的變數仍保留')
-    assert.ok(withoutIroriEnv(process.env).PATH)
+    // Windows 的環境變數名稱不分大小寫，展開成一般物件後鍵名可能是 Path
+    const pathKey = o => Object.keys(o).find(n => n.toUpperCase() === 'PATH')
+    assert.ok(pathKey(bare), 'childEnv 仍保留 PATH')
+    assert.ok(pathKey(withoutIroriEnv(process.env)), 'withoutIroriEnv 仍保留 PATH')
   } finally { restorePollution(prev) }
 })
 

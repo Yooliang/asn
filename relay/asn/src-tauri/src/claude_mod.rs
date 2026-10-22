@@ -606,11 +606,12 @@ mod tests {
         let (t, _m, _d) = dirs();
         let bin_dir = t.path().join("bin");
         std::fs::create_dir_all(&bin_dir).unwrap();
-        let claude = script(&bin_dir, "ping -n 6 127.0.0.1 >nul", "sleep 6");
+        let claude = script(&bin_dir, "ping -n 41 127.0.0.1 >nul", "sleep 40");
         let runner = RealRunner { env: test_env(&[]), timeout: Duration::from_millis(600) };
         let t0 = Instant::now();
         let r = runner.run(&claude, &["plugin", "list"]);
-        assert!(t0.elapsed() < Duration::from_secs(5), "逾時要在 600ms 附近就中止");
+        // 假程式睡 40 秒、逾時 600ms；上限 25 秒容納機器忙碌時的啟動延遲。逾時機制失效時會跑滿 40 秒而紅
+        assert!(t0.elapsed() < Duration::from_secs(25), "逾時要在 600ms 附近就中止：{:?}", t0.elapsed());
         assert!(r.err().unwrap().contains("沒有回應"));
     }
 

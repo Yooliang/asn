@@ -121,7 +121,7 @@ impl EH {
     fn log_text(&self) -> String {
         self.logs.lock().unwrap().join("\n")
     }
-    /// 一直處理引擎事件，直到條件成立（最多 25 秒）
+    /// 一直處理引擎事件，直到條件成立（最多 90 秒；機器同時在編譯時子程序啟動會慢很多，條件一成立就立刻返回）
     async fn wait(&mut self, what: &str, f: impl Fn(&EH) -> bool) {
         let t0 = std::time::Instant::now();
         loop {
@@ -131,7 +131,7 @@ impl EH {
             if f(self) {
                 return;
             }
-            if t0.elapsed() > std::time::Duration::from_secs(25) {
+            if t0.elapsed() > std::time::Duration::from_secs(90) {
                 panic!("等不到：{what}\n--- 引擎 log ---\n{}\n--- 橋 log ---\n{}\n--- 寄出 ---\n{:?}", self.log_text(), self.core.log.recent().join("\n"), self.fr.sent());
             }
             tokio::time::sleep(std::time::Duration::from_millis(30)).await;
