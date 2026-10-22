@@ -81,11 +81,10 @@ export function consoleToggleLabel(visible) {
 /** 名單右鍵選單查主控台狀態最多等多久；超過就當查不到，不擋選單 */
 export const CONSOLE_QUERY_TIMEOUT_MS = 1500
 
-/** 右鍵選單的切換項目：checking＝還在查（停用）、toggle＝可切換、none＝這個視窗切不了（停用） */
-export function buddyConsoleItem(state, visible) {
-  if (state === 'toggle') return { label: consoleToggleLabel(visible), disabled: false }
-  if (state === 'checking') return { label: '檢查中…', disabled: true }
-  return { label: '這個視窗無法切換', disabled: true }
+/** 右鍵選單的「背景／前台切換」項目：文字固定、不隨狀態改字；能切換才可按，檢查中或切不了就反灰 */
+export const BUDDY_CONSOLE_LABEL = '背景／前台切換'
+export function buddyConsoleItem(state) {
+  return { label: BUDDY_CONSOLE_LABEL, disabled: state !== 'toggle' }
 }
 
 /** 等 promise 最多 ms 毫秒；逾時或失敗一律回 null（右鍵選單不能被慢的查詢卡住） */

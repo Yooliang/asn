@@ -152,7 +152,7 @@ pub fn stamp(ms: u64) -> String {
     let (y, mo, d, h, mi, s) = local_fields(ms);
     format!("{y:04}-{mo:02}-{d:02} {h:02}:{mi:02}:{s:02}")
 }
-fn stamp_compact(ms: u64) -> String {
+pub(crate) fn stamp_compact(ms: u64) -> String {
     let (y, mo, d, h, mi, s) = local_fields(ms);
     format!("{y:04}{mo:02}{d:02}-{h:02}{mi:02}{s:02}")
 }
@@ -234,7 +234,7 @@ impl CorrLog {
     }
 
     /// 這個視窗名現在對應的夥伴 ID：後台回報的優先；後台暫時沒回，就看視窗名舊檔的檔頭
-    fn pid_of(&self, name: &str) -> Option<String> {
+    pub(crate) fn pid_of(&self, name: &str) -> Option<String> {
         if let Some(id) = self.partners.lock().unwrap_or_else(|p| p.into_inner()).get(name) {
             return Some(id.clone());
         }

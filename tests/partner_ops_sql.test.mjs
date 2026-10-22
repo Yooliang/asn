@@ -11,11 +11,11 @@ const sql = fs.readFileSync(new URL('../supabase/migrations/20261022120000_partn
 
 test('靜態：四個函式 security definer、search_path 空、只授權 service_role；資料表開 RLS 且不建 policy', () => {
   for (const sig of ['irori_relay_partner_op\\(text, uuid, text, text, text, text, text, text\\)', 'irori_relay_partner_ops\\(text, uuid, uuid\\[\\]\\)',
-    'irori_relay_partner_op_pending\\(text\\)', 'irori_relay_partner_op_result\\(text, uuid, text, text, jsonb\\)']) {
+    'irori_relay_partner_op_pending\\(text\\)', 'irori_relay_partner_op_result\\(text, uuid, text, text, jsonb\\)', 'irori_relay_partner_op_progress\\(text, uuid, text\\)']) {
     assert.match(sql, new RegExp(`revoke all on function public\\.${sig} from public, anon, authenticated;`), sig)
     assert.match(sql, new RegExp(`grant execute on function public\\.${sig} to service_role;`), sig)
   }
-  assert.equal((sql.match(/security definer\nset search_path to ''/g) ?? []).length, 4)
+  assert.equal((sql.match(/security definer\nset search_path to ''/g) ?? []).length, 5)
   assert.doesNotMatch(sql, /grant execute[^;]*to (anon|authenticated|public)/)
   assert.match(sql, /alter table relay\.partner_ops enable row level security;/)
   assert.match(sql, /revoke all on relay\.partner_ops from public, anon, authenticated;/)
@@ -32,6 +32,8 @@ test('靜態：下令要本人簽章——簽章的人擁有呼叫節點與目�
   assert.match(f, /engine = 'asn'/)
   assert.match(f, /'protected'/); assert.match(f, /'no_launcher'/); assert.match(f, /'busy'/); assert.match(f, /'rate_limited'/); assert.match(f, />= 30/)
   assert.match(f, /p_op <> 'info' and v_l is null/)
+  assert.match(f, /'already_online'/); assert.match(f, /'no_session'/); assert.match(f, /'device_offline'/)
+  assert.match(f, /session_id[\s\S]*case when p_op = 'resume' then v_sid end/, 'session 只來自夥伴記錄，不收呼叫端傳的')
 })
 
 let PGlite = null
@@ -47,7 +49,9 @@ const LAUNCHER = '{"profiles":[{"id":"claude"}],"cwd_allow":["x"]}'
 async function boot() {
   const db = new PGlite()
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
-    create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', owner_user uuid, name text, launcher jsonb, bell_topic text);
+    create table relay.nodes(id text primary key, tenant_id uuid, status text default 'active', owner_user uuid, name text, launcher jsonb, bell_topic text, last_seen_at timestamptz default now());
+    create table relay.partners(partner_id text primary key, tenant_id uuid, node text, current_name text, current_session text, engine text, updated_at timestamptz default now());
+    create table relay.partner_names(partner_id text, name text, renamed_at timestamptz default now());
     create table relay.roster(node text, name text, engine text, seen_at timestamptz default now());
     create function public.asn_user_owns_node(p_user uuid, p_node text) returns boolean language sql stable as
       $$ select p_user is not null and exists (select 1 from relay.nodes n where n.id = p_node and n.status = 'active' and n.owner_user = p_user) $$;
@@ -59,6 +63,20 @@ async function boot() {
       ('C','${T1}','${U1}','沒開放的電腦', null, 'bell-C'),
       ('X','${T2}','${U2}','別人的電腦', '${LAUNCHER}', 'bell-X'),
       ('Y','${T1}','${U2}','同租戶但不是你的', '${LAUNCHER}', 'bell-Y');
+    insert into relay.nodes(id, tenant_id, owner_user, name, launcher, bell_topic, last_seen_at) values
+      ('D','${T1}','${U1}','關機的電腦', '${LAUNCHER}', 'bell-D', now() - interval '1 hour');
+    insert into relay.partners(partner_id, tenant_id, node, current_name, current_session, engine) values
+      ('p_00000000000000000001','${T1}','H','小離','sess-1111-aaaa','claude'),
+      ('p_00000000000000000002','${T1}','H','小文','sess-0000-online','claude'),
+      ('p_00000000000000000003','${T1}','H','小無',null,'claude'),
+      ('p_00000000000000000004','${T1}','H','新名','sess-2222-bbbb',null),
+      ('p_00000000000000000005','${T1}','H','小碼','sess-4444-dddd','codex'),
+      ('p_00000000000000000006','${T1}','D','遠離','sess-3333-cccc','claude'),
+      ('p_00000000000000000007','${T1}','C','沒開放','sess-5555-eeee','claude'),
+      ('p_00000000000000000008','${T2}','X','別人離線','sess-6666-ffff','claude'),
+      ('p_00000000000000000009','${T1}','H','家用收發室','sess-7777-gggg','claude');
+    insert into relay.partner_names(partner_id, name, renamed_at) values
+      ('p_00000000000000000004','舊名', now() - interval '2 days'), ('p_00000000000000000004','更舊', now() - interval '9 days');
     insert into relay.roster(node, name, engine) values ('H','小文','claude'), ('H','小武','claude'), ('H','H-ASN','asn'), ('H','家用收發室',null),
       ('C','小乙','claude'), ('X','別人','claude'), ('Y','他的','claude');
     insert into relay.roster(node, name, engine, seen_at) values ('H','舊的','claude', now() - interval '10 minutes');`)
@@ -97,6 +115,35 @@ test('實跑（pglite）：下令的核對——簽章、擁有關係、同租�
   assert.deepEqual(mr, { model: 'opus[1m]', note: null, new_name: null }, '只存該動作用得到的欄位')
 })
 
+test('實跑（pglite）：喚醒——已離線的夥伴用夥伴記錄裡的 session；在線、無 session、電腦不在線、沒開放、別租戶都擋', { skip }, async () => {
+  const { op, one, q } = await boot()
+  const r = await op({ name: '小離', op: 'resume', new_name: '不該存', model: 'opus', note: '不該存' })
+  assert.equal(r.bell_topic, 'bell-H'); assert.ok(r.id)
+  const row = (await q('select op, name, session_id, new_name, model, note, status from relay.partner_ops where id = $1', [r.id]))[0]
+  assert.deepEqual(row, { op: 'resume', name: '小離', session_id: 'sess-1111-aaaa', new_name: null, model: null, note: null, status: 'pending' }, 'session 由後台從夥伴記錄查，只存該動作用得到的欄位')
+  const got = (await one(`select public.irori_relay_partner_op_pending('H') r`)).r
+  assert.deepEqual([got[0].op, got[0].name, got[0].session_id], ['resume', '小離', 'sess-1111-aaaa'], '待辦帶 session_id')
+  assert.equal((await op({ name: '小文', op: 'resume' })).error, 'already_online', '3 分鐘內在名單上')
+  assert.equal((await op({ name: 'XIAOWEN', op: 'resume' })).error, 'not_found', '沒有這位夥伴')
+  assert.equal((await op({ name: '小無', op: 'resume' })).error, 'no_session')
+  assert.equal((await op({ name: '小碼', op: 'resume' })).error, 'not_claude')
+  assert.equal((await op({ node: 'D', name: '遠離', op: 'resume' })).error, 'device_offline', '那台電腦心跳與名單都超過 3 分鐘')
+  assert.equal((await op({ node: 'C', name: '沒開放', op: 'resume' })).error, 'no_launcher')
+  assert.equal((await op({ node: 'X', name: '別人離線', op: 'resume' })).error, 'not_found', '別租戶')
+  assert.equal((await op({ name: '家用收發室', op: 'resume' })).error, 'protected')
+  assert.equal((await op({ user: null, name: '小離', op: 'resume' })).error, 'forbidden', '沒簽章')
+  assert.equal((await op({ name: '小離', op: 'resume' })).error, 'busy', '同一位上一筆還沒完成')
+  // 改名過的夥伴：舊名 7 天內認得，超過就不認
+  assert.equal((await q('select current_session from relay.partners where current_name = $1', ['新名']))[0].current_session, 'sess-2222-bbbb')
+  const viaOld = await op({ name: '舊名', op: 'resume' })
+  assert.ok(viaOld.id, '7 天內的舊名')
+  assert.equal((await q('select session_id from relay.partner_ops where id = $1', [viaOld.id]))[0].session_id, 'sess-2222-bbbb')
+  assert.equal((await op({ name: '更舊', op: 'resume' })).error, 'not_found', '超過 7 天的舊名不認')
+  // 節點心跳新鮮但名單空的電腦也算在線
+  await q("update relay.nodes set last_seen_at = now() where id = 'D'")
+  assert.ok((await op({ node: 'D', name: '遠離', op: 'resume' })).id, '心跳在 3 分鐘內就算在線')
+})
+
 test('實跑（pglite）：忙碌與每小時上限', { skip }, async () => {
   const { op, q } = await boot()
   const a = await op({ op: 'info' })
@@ -133,6 +180,20 @@ test('實跑（pglite）：取走與回報——只動自己節點、逾時標�
   assert.equal((await res(a.id, 'H', 'ok', '完成', JSON.stringify({ pid: 7 }))).ok, true)
   assert.deepEqual((await q('select status, detail, result from relay.partner_ops where id = $1', [a.id]))[0], { status: 'ok', detail: '完成', result: { pid: 7 } })
   assert.equal((await res(a.id, 'H', 'failed', null, null)).error, 'not_found', '完成後不能再改')
+})
+
+test('實跑（pglite）：中途回報階段——只改自己節點、處理中那筆的 detail，只收固定格式，狀態不變', { skip }, async () => {
+  const { op, one, q } = await boot()
+  const a = await op({ op: 'handover' })
+  const prog = (node, id, d) => one('select public.irori_relay_partner_op_progress($1,$2,$3) r', [node, id, d]).then(x => x.r)
+  assert.equal((await prog('H', a.id, 'stage:handoff')).error, 'not_found', '還沒被取走（pending）不能回報階段')
+  await one(`select public.irori_relay_partner_op_pending('H') r`)
+  assert.equal((await prog('C', a.id, 'stage:handoff')).error, 'not_found', '別台不能改')
+  for (const bad of ['請前任寫交接', 'stage:', 'stage:Handoff', "stage:x'; drop", null]) assert.equal((await prog('H', a.id, bad)).error, 'bad_request', String(bad))
+  assert.equal((await prog('H', a.id, 'stage:closing')).ok, true)
+  assert.deepEqual((await q('select status, detail from relay.partner_ops where id = $1', [a.id]))[0], { status: 'taken', detail: 'stage:closing' })
+  await one('select public.irori_relay_partner_op_result($1,$2,$3,$4,$5::jsonb) r', ['H', a.id, 'ok', '完成', null])
+  assert.equal((await prog('H', a.id, 'stage:opening')).error, 'not_found', '完成後不能再改')
 })
 
 test('實跑（pglite）：查進度——要簽章、只回自己租戶、逾時顯示失敗', { skip }, async () => {

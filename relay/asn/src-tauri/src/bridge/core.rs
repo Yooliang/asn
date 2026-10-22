@@ -446,6 +446,9 @@ impl Core {
                 self.partner_warned = false;
                 self.partners = roster::parse_partners(&v);
                 self.corr.set_partners(self.partners.clone());
+                if let Some(p) = &self.partner_ops {
+                    p.set_partners(self.partners.clone());
+                }
             }
             Err(e) if crate::relay::set_name_unsupported(&e) => {
                 self.partner_off = true;

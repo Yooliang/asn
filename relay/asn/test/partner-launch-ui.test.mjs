@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import test from 'node:test'
-import { CONSOLE_QUERY_TIMEOUT_MS, buddyConsoleItem, consoleToggleLabel, withTimeout,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice } from '../ui/lib/partner-launch-ui.mjs'
+import { BUDDY_CONSOLE_LABEL, CONSOLE_QUERY_TIMEOUT_MS, buddyConsoleItem, consoleToggleLabel, withTimeout,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice } from '../ui/lib/partner-launch-ui.mjs'
 
 test('設備選單：本機排第一', () => {
   const rows = launchDeviceRows(
@@ -22,11 +22,13 @@ test('主控台選單文字顯示相反狀態', () => {
   assert.equal(consoleToggleLabel(false), '叫回前台')
 })
 
-test('右鍵選單的切換項目：檢查中與查不到都停用，查到才可按', () => {
-  assert.deepEqual(buddyConsoleItem('checking', true), { label: '檢查中…', disabled: true })
-  assert.deepEqual(buddyConsoleItem('none', true), { label: '這個視窗無法切換', disabled: true })
-  assert.deepEqual(buddyConsoleItem('toggle', true), { label: '切到背景', disabled: false })
-  assert.deepEqual(buddyConsoleItem('toggle', false), { label: '叫回前台', disabled: false })
+test('右鍵選單的「背景／前台切換」：文字固定不隨狀態改字，檢查中或切不了就反灰，查到才可按', () => {
+  assert.equal(BUDDY_CONSOLE_LABEL, '背景／前台切換')
+  for (const state of ['checking', 'none']) assert.deepEqual(buddyConsoleItem(state, true), { label: '背景／前台切換', disabled: true }, state)
+  for (const visible of [true, false]) assert.deepEqual(buddyConsoleItem('toggle', visible), { label: '背景／前台切換', disabled: false })
+  assert.ok(!/無法切換|檢查中|切到背景|叫回前台/.test(JSON.stringify(['checking', 'none', 'toggle'].map(x => buddyConsoleItem(x, true)))), '不出現「這個視窗無法切換」等會變的字')
+  const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
+  assert.match(html, /:disabled="buddyConsoleItemView.disabled"[^>]*>{{ buddyConsoleItemView.label }}/, '選單項目沒有 v-if（不隱藏）')
 })
 
 test('名單右鍵選單的固定項目不依賴查詢結果，而且查詢有逾時', () => {

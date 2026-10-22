@@ -590,7 +590,7 @@ pub fn build_launchers_body(ids: Option<&[String]>) -> Result<Value, String> {
 }
 
 /// 夥伴視窗管理的動作：詳情、改名、切換模型、關閉、轉交下一任（與後台同一份清單）
-pub const PARTNER_OPS: [&str; 5] = ["info", "rename", "model", "close", "handover"];
+pub const PARTNER_OPS: [&str; 6] = ["info", "rename", "model", "close", "handover", "resume"];
 /// 模型字串：1～60 字，只允許英數與 . _ [ ] -（與後台同一條規則）
 pub fn valid_model_str(s: &str) -> bool {
     let n = s.chars().count();
@@ -686,6 +686,7 @@ mod tests {
         assert_eq!(build_partner_op_body(&base("rename")).unwrap(), json!({ "node": "H", "name": "小文", "op": "rename", "new_name": "新名-2" }));
         assert_eq!(build_partner_op_body(&base("model")).unwrap(), json!({ "node": "H", "name": "小文", "op": "model", "model": "opus[1m]" }));
         assert_eq!(build_partner_op_body(&base("handover")).unwrap(), json!({ "node": "H", "name": "小文", "op": "handover", "note": "接著做" }));
+        assert_eq!(build_partner_op_body(&json!({ "node": "H", "name": "小文", "op": "resume", "session_id": "../x", "note": "n", "new_name": "x" })).unwrap(), json!({ "node": "H", "name": "小文", "op": "resume" }), "喚醒：session 由後台查，不收畫面傳的");
         assert_eq!(build_partner_op_body(&json!({ "node": "H", "name": "小文", "op": "handover", "note": "  " })).unwrap(), json!({ "node": "H", "name": "小文", "op": "handover" }));
         let bad = [
             json!({ "node": "H;x", "name": "a", "op": "close" }), json!({ "node": "H", "name": "", "op": "close" }), json!({ "node": "H", "name": "a

@@ -121,7 +121,7 @@ pub(super) fn ps_quote(s: &str) -> String {
 
 /// 去掉 Windows 的長路徑前綴（canonicalize 會加）；不少 CLI 對它處理不一致，工作資料夾也會被當成不同的專案路徑。
 #[cfg_attr(not(windows), allow(dead_code))]
-pub(super) fn strip_verbatim_prefix(p: &str) -> String {
+pub(crate) fn strip_verbatim_prefix(p: &str) -> String {
     if let Some(rest) = p.strip_prefix(r"\\?\UNC\") {
         return format!(r"\\{rest}");
     }

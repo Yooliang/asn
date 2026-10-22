@@ -209,32 +209,21 @@
     </div>
   </section>
   </div>
-  <ul class="av-menu buddy-menu" v-if="buddyMenu" :style="{ left: buddyMenuPos.x + 'px', top: buddyMenuPos.y + 'px' }" role="menu" @click.stop>
+  <!-- 右鍵選單與它的二級選單都放在最外層（position:fixed）：不會被 .tabbar 或任何 overflow 容器裁掉；位置由 lib/menu-place.mjs 算（右側不夠往左彈、下方不夠往上對齊） -->
+  <ul class="av-menu buddy-menu" v-if="buddyMenu" ref="buddyMenuEl" :style="{ left: buddyMenuPos.x + 'px', top: buddyMenuPos.y + 'px' }" role="menu" @click.stop>
     <li><button type="button" role="menuitem" @click="buddyMenuOpenChat">開啟對話</button></li>
     <li><button type="button" role="menuitem" :disabled="buddyConsoleItemView.disabled" @click="toggleBuddyConsole">{{ buddyConsoleItemView.label }}</button></li>
-    <li v-if="buddyCanSucceed"><button type="button" role="menuitem" @click="buddyMenuMarkSuccessor">這是誰的接班…</button></li>
+    <li v-for="it in buddyOpItems" :key="it.key"><button type="button" role="menuitem" :disabled="!it.ok" :title="it.reason" @click="openPartnerOp(it)">{{ it.label }}{{ it.key === 'resume' || it.key === 'close' ? '' : '…' }}</button></li>
     <li v-if="buddyModel.show" class="model-sub">
-      <button type="button" role="menuitem" aria-haspopup="true" :aria-expanded="buddyModel.open" :disabled="buddyModel.state === 'none' || buddyModel.state === 'checking'" :title="buddyModel.state === 'none' ? buddyModel.reason : ''" @click="buddyModel.open = !buddyModel.open">{{ buddyModelLabel }}</button>
-      <ul class="buddy-submenu" v-if="buddyModel.open && buddyModel.items.length" role="menu">
-        <li class="menu-note">目前：{{ buddyModel.current }}</li>
-        <li v-for="m in buddyModel.items" :key="m.id"><button type="button" role="menuitemradio" :aria-checked="m.checked" :disabled="m.disabled" @click="pickBuddyModel(m)">{{ m.checked ? '✓ ' : '　' }}{{ m.label }}</button></li>
-        <li class="menu-note" v-if="buddyModel.reason">{{ buddyModel.reason }}</li>
-      </ul>
+      <button type="button" role="menuitem" ref="buddyModelBtn" aria-haspopup="true" :aria-expanded="buddyModel.open" :disabled="buddyModel.state === 'none' || buddyModel.state === 'checking'" :title="buddyModel.state === 'none' ? buddyModel.reason : ''" @mouseenter="subEvent('hover')" @mouseleave="subEvent('leave', 180)" @click="subEvent('click')" @keydown.right.prevent="subEvent('right')" @keydown.left.prevent="subEvent('leave')">{{ buddyModelLabel }}</button>
     </li>
   </ul>
-  <asn-dialog v-if="succeedDlg.open" title="這是誰的接班" @close="closeSucceedDlg">
-    <p class="launch-notice-body">「{{ succeedDlg.nick }}」要接哪一位夥伴的班？接班後會沿用對方的往來記錄與身分，名字維持現在這個。請先把對方原本的視窗關掉。</p>
-    <p class="launch-notice-body" v-if="!succeedDlgOptions.length">目前沒有可以接班的夥伴（要先登入，且對方的視窗已關閉）。</p>
-    <select class="set-sel" v-model="succeedDlg.choice" aria-label="要接誰的班" v-if="succeedDlgOptions.length">
-      <option value="" disabled>請選擇…</option>
-      <option v-for="o in succeedDlgOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-    </select>
-    <p class="partner-err" v-if="succeedDlg.error" role="alert">{{ succeedDlg.error }}</p>
-    <div class="partner-actions">
-      <button class="aero-btn" type="button" :disabled="succeedDlg.busy" @click="closeSucceedDlg">取消</button>
-      <button class="aero-btn primary" type="button" :disabled="succeedDlg.busy || !succeedDlgOptions.length" @click="submitSucceedDlg">{{ succeedDlg.busy ? '設定中…' : '確定接班' }}</button>
-    </div>
-  </asn-dialog>
+  <ul class="av-menu buddy-menu buddy-subpop" v-if="buddyMenu && buddyModel.open && buddyModel.items.length" ref="buddySubEl" :style="{ left: buddySubPos.x + 'px', top: buddySubPos.y + 'px', visibility: buddySubPos.ready ? 'visible' : 'hidden' }" role="menu" @click.stop @mouseenter="subEvent('hover')" @mouseleave="subEvent('leave', 180)">
+    <li class="menu-note">目前：{{ buddyModel.current }}</li>
+    <li v-for="m in buddyModel.items" :key="m.id"><button type="button" role="menuitemradio" :aria-checked="m.checked" :disabled="m.disabled" @click="pickBuddyModel(m)">{{ m.checked ? '✓ ' : '　' }}{{ m.label }}</button></li>
+    <li class="menu-note" v-if="buddyModel.reason">{{ buddyModel.reason }}</li>
+  </ul>
+  <partner-op-dialog v-if="opDlg.open" :friend="opDlg.friend" :op="opDlg.op" :item="opDlg.item" :api="transport" @close="closeOpDlg"></partner-op-dialog>
   <asn-dialog v-if="modelDlg.open" :title="modelDlgText.title" @close="closeModelDlg">
     <p class="launch-notice-body" v-if="!modelDlg.done">{{ modelDlgText.lead }}</p>
     <ul class="model-points" v-if="!modelDlg.done && !modelDlg.error"><li v-for="p in modelDlgText.points" :key="p">{{ p }}</li></ul>
@@ -303,12 +292,6 @@
           <input type="radio" name="partner-display" :value="m.key" v-model="partnerDlg.display" :aria-label="m.label"> {{ m.label }}
         </label>
       </fieldset>
-      <label v-if="partnerSuccessorOptions.length">這是誰的接班（選填）
-        <select class="set-sel" v-model="partnerDlg.successorOf" aria-label="這是誰的接班">
-          <option value="">不是接班，是全新的夥伴</option>
-          <option v-for="o in partnerSuccessorOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-        </select>
-      </label>
       <label>第一句話（選填）<textarea class="set-area" rows="2" v-model="partnerDlg.firstMessage" maxlength="4000" aria-label="第一句話"></textarea></label>
       <p class="partner-err" v-if="partnerDlg.error" role="alert">{{ partnerDlg.error }}</p>
       <div class="partner-actions">

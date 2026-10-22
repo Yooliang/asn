@@ -1,21 +1,26 @@
-// 手機版「管理夥伴視窗」（對話頁右上角「⋯」選單：詳情、改名、切換模型、關閉視窗、轉交下一任）的純邏輯。
+// 手機版與電腦版「管理夥伴視窗」（手機對話頁右上角「⋯」選單、電腦版名單右鍵：詳情、改名、切換模型、關閉視窗、接班換手、喚醒）的純邏輯。
 // 視窗在那台電腦上，手機只下指令（後台 relay 的 partner_op／partner_ops，要本人簽章；設計見 docs/design/PARTNER-OPS.md）。
 // node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。給人看的文字純繁體中文，不顯示節點代號與夥伴 ID。
 import { NAME_RE } from './mobile-launch.mjs'
 import { isRelayRoom } from './roster.mjs'
 
-export const OPS = ['info', 'rename', 'model', 'close', 'handover']
-export const OP_LABEL = { info: '詳情', rename: '改名', model: '切換模型', close: '關閉視窗', handover: '轉交下一任' }
+export const OPS = ['info', 'rename', 'model', 'close', 'handover', 'resume']
+// 在線的 AI 夥伴五項；離線的只有「喚醒」
+export const ONLINE_OPS = ['info', 'rename', 'model', 'close', 'handover']
+export const OP_LABEL = { info: '詳情', rename: '改名', model: '切換模型', close: '關閉視窗', handover: '接班換手', resume: '喚醒' }
 export const NOTE_MAX = 1000
 export const MODEL_RE = /^[A-Za-z0-9._[\]-]{1,60}$/
 export const OP_POLL_MS = 3000
 export const OP_GIVE_UP_MS = 3 * 60 * 1000   // 後台 2 分鐘沒被取走會自己標失敗；這裡多留一分鐘
+export const HANDOVER_GIVE_UP_MS = 15 * 60 * 1000   // 接班換手要等前任寫交接（最久 10 分鐘），處理中的上限放寬
 
 export const REASON = {
   needLogin: '要先登入，才能管理夥伴視窗',
   unknown: '還沒查到這台電腦的設定，請稍後再試',
   offline: '這台電腦或這個視窗不在線',
   closed: '這台電腦沒有開放遠端管理視窗（要在那台電腦的設定打開「允許遠端開視窗與管理視窗」）',
+  deviceOffline: '那台電腦現在不在線，叫不醒（要那台電腦的 ASN 開著）',
+  notClaude: '這位夥伴用的引擎還不能喚醒',
   unsupported: '電腦端或收發室還不支援，請先更新',
 }
 export const STALE_TEXT = '那台電腦的 ASN 版本可能太舊，或沒有在跑'
@@ -35,13 +40,14 @@ export function isManageable(friend, ctx = {}) {
   return true
 }
 
-// 五個選單項目 { key, label, ok, reason }；不是能管理的視窗回空陣列（不顯示「⋯」）。
+// 選單項目 { key, label, ok, reason }：在線的 AI 夥伴五項；離線的 AI 夥伴只有「喚醒」；不是能管理的視窗回空陣列（不顯示「⋯」）。
 // ctx：{ machines（節點→設定）, loaded, signedIn, friends, asn, nonWindowNodes, supported（後台有沒有 partner_op；false＝舊後台） }
 export function menuItems(friend, ctx = {}) {
   if (!isManageable(friend, ctx)) return []
+  if (friend.status === 'offline') return resumeItems(friend, ctx)
   const base = baseReason(friend, ctx)
   const machine = ctx.machines?.[friend.node]
-  return OPS.map(key => {
+  return ONLINE_OPS.map(key => {
     let reason = base
     // 詳情是唯讀，不需要那台電腦開放；其餘要開放（launcher 不為空）。沒查到設定時也不能確定開放了沒
     if (!reason && key !== 'info') {
@@ -50,6 +56,19 @@ export function menuItems(friend, ctx = {}) {
     }
     return { key, label: OP_LABEL[key], ok: !reason, reason }
   })
+}
+
+// 離線夥伴的「喚醒」：要有登入、那台電腦在線且開放遠端管理；這位夥伴用的引擎還不能喚醒（名單上沒寫引擎就當 Claude）
+function resumeItems(friend, ctx) {
+  if (friend.engine && friend.engine !== 'claude') return []
+  let reason = ''
+  const machine = ctx.machines?.[friend.node]
+  if (ctx.signedIn === false) reason = REASON.needLogin
+  else if (ctx.supported === false) reason = REASON.unsupported
+  else if (!ctx.loaded) reason = REASON.unknown
+  else if (!machine || machine.online !== true) reason = REASON.deviceOffline
+  else if (!machine.launcher) reason = REASON.closed
+  return [{ key: 'resume', label: OP_LABEL.resume, ok: !reason, reason }]
 }
 
 function baseReason(friend, ctx) {
@@ -89,13 +108,6 @@ export function buildOpRequest(friend, op, input = {}) {
   return req
 }
 
-// 轉交的固定接班提示（電腦端開新 session 的第一句話；手機補的話接在後面）
-export const handoverPrompt = (name, note = '') => {
-  const base = `你是『${name}』的下一任，前任的上下文用完了。先讀你與收發室的往來記錄（信尾那行的路徑）和前任留下的交接檔，接著把手上的工作做下去。`
-  const extra = String(note ?? '').trim()
-  return extra ? `${base}\n\n${extra}` : base
-}
-
 // ---------- 錯誤與進度 ----------
 
 const CODE_TEXT = {
@@ -110,6 +122,10 @@ const CODE_TEXT = {
   busy: '這個視窗還有一個操作在進行中，等它完成再試',
   rate_limited: '這台電腦這個小時管理太多次了，稍後再試',
   protected: '收發室與 ASN 自己的視窗不能這樣操作',
+  already_online: '這位夥伴已經在線上，不需要喚醒',
+  no_session: '這位夥伴沒有可接回的對話紀錄，只能開新的夥伴',
+  not_claude: REASON.notClaude,
+  device_offline: REASON.deviceOffline,
   bad_request: '送出的內容不合格',
   internal: '收發室暫時有問題，稍後再試',
 }
@@ -130,7 +146,19 @@ const DONE_TEXT = {
   rename: '已改名。',
   model: '已切換模型。',
   close: '視窗已關閉，對話記錄還在。',
-  handover: '已交給下一任，新視窗開好了。',
+  handover: '接班換手完成，新視窗開好了。',
+  resume: '已喚醒，視窗開好了。',
+}
+// 接班換手的三個階段（電腦端用 detail 回報 stage:代號）
+export const HANDOVER_STEPS = [
+  { key: 'handoff', text: '請前任寫交接' },
+  { key: 'closing', text: '關閉前任視窗' },
+  { key: 'opening', text: '開新視窗' },
+]
+const stageOf = detail => /^stage:([a-z]+)$/.exec(String(detail ?? ''))?.[1] ?? ''
+const stepsAt = (stage, allDone = false) => {
+  const at = HANDOVER_STEPS.findIndex(s => s.key === stage)
+  return HANDOVER_STEPS.map((s, i) => ({ ...s, state: allDone || i < at ? 'done' : i === at ? 'active' : 'todo' }))
 }
 // 電腦端回報的原因：只留中文說明；'expired'（後台逾時）與看不懂的英文都換成固定句
 function reasonText(detail) {
@@ -142,14 +170,39 @@ function reasonText(detail) {
 
 // 進度：partner_ops 回的那一筆（status：pending／taken／ok／failed／unconfirmed）。
 // opts：{ op, sentAt（送出時間，毫秒）, now（毫秒）}；等太久還沒結果就當逾時
+// 接班換手的結果補充：交接檔位置（給人看）；前任沒寫完要說
+function handoverExtra(result) {
+  const r = result && typeof result === 'object' && !Array.isArray(result) ? result : {}
+  const lines = []
+  if (typeof r.handoff_path === 'string' && r.handoff_path) lines.push(`交接檔：${short(r.handoff_path, 300)}`)
+  if (r.handoff_done === false) lines.push('前任沒有寫完交接，新夥伴會以前任的對話紀錄為主。')
+  return lines
+}
+
+// 進度：回 { phase, done, text, steps?, extra? }。接班換手處理中依電腦端回報的階段（detail＝stage:代號）分段顯示：
+// 請前任寫交接 → 關閉前任視窗 → 開新視窗 → 完成；steps 是各階段的狀態（done／active／todo），完成時附交接檔位置
 export function progressView(row, { op = row?.op, sentAt = 0, now = Date.now() } = {}) {
   const waited = sentAt ? now - sentAt : 0
+  const limit = op === 'handover' && row?.status === 'taken' ? HANDOVER_GIVE_UP_MS : OP_GIVE_UP_MS
   switch (row?.status) {
-    case 'ok': return { phase: 'done', done: true, text: DONE_TEXT[op] ?? '完成。' }
+    case 'ok': {
+      const v = { phase: 'done', done: true, text: DONE_TEXT[op] ?? '完成。' }
+      if (op === 'handover') { v.steps = stepsAt('', true); v.extra = handoverExtra(row.result) }
+      return v
+    }
     case 'failed': return { phase: 'failed', done: true, text: `沒有成功：${reasonText(row.detail)}` }
-    case 'unconfirmed': return { phase: 'unconfirmed', done: true, text: '已經送出，但還沒確認結果；稍後看看名單。' }
+    case 'unconfirmed': {
+      const v = { phase: 'unconfirmed', done: true, text: '已經送出，但還沒確認結果；稍後看看名單。' }
+      if (op === 'handover') v.extra = handoverExtra(row.result)
+      return v
+    }
     case 'taken':
-      if (waited > OP_GIVE_UP_MS) return { phase: 'failed', done: true, text: `沒有成功：${STALE_TEXT}` }
+      if (waited > limit) return { phase: 'failed', done: true, text: `沒有成功：${STALE_TEXT}` }
+      if (op === 'handover') {
+        const stage = stageOf(row.detail)
+        const step = HANDOVER_STEPS.find(s => s.key === stage)
+        return { phase: 'working', done: false, text: step ? `${step.text}中…` : '那台電腦正在處理…', steps: stepsAt(stage) }
+      }
       return { phase: 'working', done: false, text: '那台電腦正在處理…' }
     default:
       if (waited > OP_GIVE_UP_MS) return { phase: 'failed', done: true, text: `沒有成功：${STALE_TEXT}` }

@@ -538,6 +538,22 @@ async fn relay_partner_succeed(app: State<'_, App>, auth: State<'_, auth::AuthSt
     let token = account::signing_token(&auth).await;
     r.partner_succeed(&predecessor, &node, &name, token.as_deref()).await
 }
+/// 電腦版名單右鍵管理夥伴視窗（詳情、改名、關閉、接班換手、喚醒）：和手機同一個後台動作，要本人簽章；沒登入回錯，不打後台。回 { id }
+#[cfg(desktop)]
+#[tauri::command]
+async fn relay_partner_op(app: State<'_, App>, auth: State<'_, auth::AuthState>, body: Value) -> Result<Value, String> {
+    let r = relay_of(&app)?;
+    let token = account::signing_token(&auth).await;
+    r.partner_op_signed(&body, token.as_deref()).await
+}
+/// 查管理操作的進度（最多 20 筆）。要本人簽章；沒登入回錯，不打後台。回 { ops: [...] }
+#[cfg(desktop)]
+#[tauri::command]
+async fn relay_partner_ops(app: State<'_, App>, auth: State<'_, auth::AuthState>, ids: Vec<String>) -> Result<Value, String> {
+    let r = relay_of(&app)?;
+    let token = account::signing_token(&auth).await;
+    r.partner_ops_signed(&ids, token.as_deref()).await
+}
 #[tauri::command]
 async fn relay_sent_status(app: State<'_, App>, ids: Vec<String>) -> Result<Value, String> {
     let rows = relay_of(&app)?.sent_status(&ids).await?;
@@ -829,7 +845,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_partner_list, relay_partner_succeed, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_mod::claude_mod_status,
             codex_accounts::codex_account_current, usage::usage_summary,

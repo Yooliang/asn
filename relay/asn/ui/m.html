@@ -136,9 +136,6 @@
             </fieldset>
             <label class="m-field">工作資料夾<select class="set-sel" v-model="lch.cwd"><option v-for="c in lchChoices.cwds" :key="c" :value="c">{{ c }}</option></select></label>
             <label class="m-field">名字<input class="set-input" v-model="lch.name" maxlength="40" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
-            <label class="m-field" v-if="lchSuccessors.length">這是誰的接班（選填）
-              <select class="set-sel" v-model="lch.successorOf"><option value="">不是接班，是全新的夥伴</option><option v-for="o in lchSuccessors" :key="o.value" :value="o.value">{{ o.label }}</option></select>
-            </label>
             <label class="m-field">第一句話（選填）<textarea class="set-area" v-model="lch.first" rows="3" maxlength="4000"></textarea></label>
           </template>
           <p class="m-err" v-if="lch.error" role="alert">{{ lch.error }}</p>

@@ -1,4 +1,4 @@
-// 遠端管理夥伴視窗（詳情、改名、切換模型、關閉、轉交下一任；設計見 docs/design/PARTNER-OPS.md）共用邏輯。
+// 遠端管理夥伴視窗（詳情、改名、切換模型、關閉、轉交下一任、喚醒；設計見 docs/design/PARTNER-OPS.md）共用邏輯。
 // 寫法與 launch.ts 同形：最後一道關在 migrations/20261022120000_partner_ops.sql 的函式（本人簽章、擁有節點、名單、開放、名字、忙碌、每小時上限、保護名單）；
 // 這裡負責：沒簽章在打資料庫之前就 401、輸入整理與第一層格式檢查、節點動作的分派、錯誤碼對應。電腦端執行前還會再驗一次。
 
@@ -7,11 +7,13 @@ type Json = any;
 
 import { LAUNCH_NAME_RE, NODE_ID_RE, type LaunchDeps, type Reply } from "./launch.ts";
 
-export const PARTNER_OPS = ["info", "rename", "model", "close", "handover"] as const;
+export const PARTNER_OPS = ["info", "rename", "model", "close", "handover", "resume"] as const;
 export const NOTE_MAX = 1000;
 export const RESULT_MAX_BYTES = 4096;
 // 模型字串：1～60 字，只允許英數與 . _ [ ] -（命令列旗標的值，不能夾空白、引號、分號）
 export const MODEL_RE = /^[A-Za-z0-9._\[\]-]{1,60}$/;
+// 階段代號：stage:handoff／closing／opening（detail 欄位只放這種固定格式，畫面依它顯示中文）
+const STAGE_RE = /^stage:[a-z]{1,20}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const ERROR_TEXT: Record<string, string> = {
@@ -26,12 +28,16 @@ const ERROR_TEXT: Record<string, string> = {
   busy: "這個視窗還有一個操作在進行中，等它完成再試",
   rate_limited: "這台電腦這個小時管理太多次了，稍後再試",
   protected: "收發室與 ASN 自己的視窗不能這樣操作",
+  already_online: "這位夥伴已經在線上，不需要喚醒",
+  no_session: "這位夥伴沒有可接回的對話紀錄，只能開新的夥伴",
+  not_claude: "這位夥伴用的引擎還不能喚醒",
+  device_offline: "那台電腦的 ASN 沒有開著，叫不醒",
   bad_request: "資料格式不對",
   internal: "伺服器發生錯誤",
 };
 export const partnerOpErrorText = (code: string) => ERROR_TEXT[code] ?? "操作失敗";
 const STATUS: Record<string, number> = {
-  unauthorized: 401, forbidden: 403, protected: 403, not_found: 404, no_launcher: 409, name_taken: 409, busy: 409, rate_limited: 429, internal: 500,
+  unauthorized: 401, forbidden: 403, protected: 403, not_found: 404, no_launcher: 409, name_taken: 409, busy: 409, already_online: 409, no_session: 409, not_claude: 409, device_offline: 409, rate_limited: 429, internal: 500,
 };
 export const fail = (code: string): Reply => ({ status: STATUS[code] ?? 400, body: { error: code, detail: partnerOpErrorText(code) } });
 
@@ -115,7 +121,7 @@ export function sanitizeResult(v: Json): Json | null | { error: string } {
 
 // 節點金鑰的動作（irori-relay）：
 //   partner_op／partner_ops：手機下令與查進度（要本人簽章，資料庫核對擁有關係）
-//   partner_op_pending／partner_op_result：電腦端內建收發室取走自己節點的待辦、回報結果（只動得到自己節點的）
+//   partner_op_pending／partner_op_result／partner_op_progress：電腦端內建收發室取走自己節點的待辦、回報結果與中途階段（只動得到自己節點的）
 export async function handleNodePartnerOpAction(deps: LaunchDeps, me: { id: string }, action: string, params: Json, signedUser: string | null = null): Promise<Reply> {
   if (action === "partner_op") return await requestPartnerOp(deps, me.id, params, signedUser);
   if (action === "partner_ops") return await listPartnerOps(deps, me.id, params?.ids, signedUser);
@@ -135,6 +141,14 @@ export async function handleNodePartnerOpAction(deps: LaunchDeps, me: { id: stri
     if (isReply(r)) return r;
     return { status: 200, body: { ok: true } };
   }
+  if (action === "partner_op_progress") {
+    // 中途回報階段（接班換手：請前任寫交接 → 關閉 → 開新視窗）：只收固定格式的階段代號，狀態仍是處理中
+    const { id, detail } = params ?? {};
+    if (typeof id !== "string" || !UUID_RE.test(id) || typeof detail !== "string" || !STAGE_RE.test(detail)) return fail("bad_request");
+    const r = await call(deps, "irori_relay_partner_op_progress", { p_node: me.id, p_id: id, p_detail: detail });
+    if (isReply(r)) return r;
+    return { status: 200, body: { ok: true } };
+  }
   return { status: 404, body: { error: "not_found" } };
 }
-export const PARTNER_OP_ACTIONS = new Set(["partner_op", "partner_ops", "partner_op_pending", "partner_op_result"]);
+export const PARTNER_OP_ACTIONS = new Set(["partner_op", "partner_ops", "partner_op_pending", "partner_op_result", "partner_op_progress"]);

@@ -49,6 +49,7 @@ Deno.test("parsePartnerOp：只留該動作用得到的欄位；格式不對在�
   assertEquals(parsePartnerOp({ node: "H", name: "小文", op: "handover", note: "x".repeat(1001) }), { error: "bad_note" });
   assertEquals((parsePartnerOp({ node: "H", name: "小文", op: "handover", note: "x".repeat(1000) }) as { note: string }).note.length, 1000);
   assertEquals(parsePartnerOp({ node: "H", name: "小文", op: "handover", note: 5 }), { error: "bad_note" });
+  assertEquals(parsePartnerOp({ node: "H", name: "小文", op: "resume", session_id: "../x", note: "z", new_name: "y" }), { node: "H", name: "小文", op: "resume", new_name: null, model: null, note: null }, "喚醒：只收 node／name／op，session 由後台從夥伴記錄查，不收用戶端的");
   assertEquals(parsePartnerOp({ ...OK, op: "kill" }), { error: "bad_request" });
   assertEquals(parsePartnerOp({ ...OK, node: "H;drop" }), { error: "bad_request" });
   assertEquals(parsePartnerOp({ ...OK, name: "" }), { error: "bad_request" });
@@ -65,7 +66,7 @@ Deno.test("requestPartnerOp：通過就呼叫資料庫函式（帶簽章者）�
 });
 
 Deno.test("requestPartnerOp：資料庫拒絕時對應狀態碼與中文說明，不敲門鈴", async () => {
-  for (const [code, status] of [["forbidden", 403], ["protected", 403], ["not_found", 404], ["no_launcher", 409], ["busy", 409], ["name_taken", 409], ["rate_limited", 429], ["bad_name", 400]] as const) {
+  for (const [code, status] of [["forbidden", 403], ["protected", 403], ["not_found", 404], ["no_launcher", 409], ["busy", 409], ["name_taken", 409], ["rate_limited", 429], ["bad_name", 400], ["already_online", 409], ["no_session", 409], ["device_offline", 409], ["not_claude", 409]] as const) {
     const { deps, rings } = fakeDeps(() => ({ error: code }));
     const r = await requestPartnerOp(deps, "P", OK, USER);
     assertEquals([r.status, r.body.error], [status, code]);
@@ -93,6 +94,12 @@ Deno.test("節點動作：pending／result 只帶自己的節點；result 狀態
   const ok = await handleNodePartnerOpAction(deps, { id: "H" }, "partner_op_result", { id: ID, status: "ok", detail: "完成", result: { pid: 1 }, node: "W" });
   assertEquals(ok.status, 200);
   assertEquals((await handleNodePartnerOpAction(deps, { id: "H" }, "partner_op_result", { id: ID, status: "taken" })).status, 400);
+  // 中途回報階段：只收固定格式，節點取自金鑰
+  const stage = await handleNodePartnerOpAction(deps, { id: "H" }, "partner_op_progress", { id: ID, detail: "stage:handoff", node: "W" });
+  assertEquals(stage, { status: 200, body: { ok: true } });
+  assertEquals(calls[calls.length - 1], { fn: "irori_relay_partner_op_progress", args: { p_node: "H", p_id: ID, p_detail: "stage:handoff" } });
+  for (const bad of ["請前任寫交接", "stage:", "stage:Handoff", "stage:a b", 5, null]) assertEquals((await handleNodePartnerOpAction(deps, { id: "H" }, "partner_op_progress", { id: ID, detail: bad })).status, 400, String(bad));
+  assertEquals((await handleNodePartnerOpAction(deps, { id: "H" }, "partner_op_progress", { id: "nope", detail: "stage:x" })).status, 400);
   assertEquals((await handleNodePartnerOpAction(deps, { id: "H" }, "partner_op_result", { id: "nope", status: "ok" })).status, 400);
   const before = calls.length;
   const big = await handleNodePartnerOpAction(deps, { id: "H" }, "partner_op_result", { id: ID, status: "ok", result: { x: "字".repeat(1400) } });

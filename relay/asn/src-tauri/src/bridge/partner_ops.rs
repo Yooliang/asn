@@ -1,7 +1,7 @@
 //! 遠端管理夥伴視窗（電腦端執行）：手機對話頁「⋯」選單下令，後台排進 `partner_op_pending`，這裡取走、在本機執行、回報 `partner_op_result`。
 //! 設計與安全規則見 docs/design/PARTNER-OPS.md；外掛控制檔格式見該文件「外掛控制檔格式」一節。
 //!
-//! 動作：info（唯讀）、rename、model、close、handover。作業系統動作（讀命令列、列程序、結束、開視窗）全走
+//! 動作：info（唯讀）、rename、model、close、handover（接班換手）、resume（喚醒：視窗已關，用同一個 sessionId 在原工作資料夾接回對話）。作業系統動作（讀命令列、列程序、結束、開視窗）全走
 //! `launch/switch.rs` 的 `Os` 介面與 `OpsEnv`，測試用假實作，不會真的開視窗或結束程序。
 //!
 //! 守門（每條都有單元測試與還原驗證）：
@@ -11,42 +11,67 @@
 //! 4. 除 info 外，本機設定「允許遠端開視窗」必須開著，執行前與動手前各驗一次；
 //! 5. 收發室視窗與 ASN 自己的視窗、不是 claude 的程序一律不動；
 //! 6. 每個操作都寫內建收發室 log 與該夥伴的往來記錄。
+//! 喚醒另有四道守門：sessionId 格式不合就不碰任何檔案；已有活著的同名或同 sessionId 視窗不開；
+//! 對話紀錄只比對檔名＝sessionId，工作資料夾必須在本機啟動設定的允許清單內；本機開關關著不開。
 
 
 use super::core::BridgeLog;
 use super::corrlog::{CorrLog, Dir, Entry};
 use super::roster;
-use crate::launch::config::valid_partner_name;
+use crate::launch::config::{canonical_launch_cwd, child_env, expand_vars, valid_partner_name, LaunchConfig};
+use crate::launch::profiles::LaunchMode;
 use crate::launch::console;
 use crate::launch::switch::{self, Os, Plan, Proc, SwitchRunReq, Timing};
 use crate::relay::Relay;
 use serde_json::{json, Value};
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::io::BufRead;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-const KNOWN_OPS: [&str; 5] = ["info", "rename", "model", "close", "handover"];
+const KNOWN_OPS: [&str; 6] = ["info", "rename", "model", "close", "handover", "resume"];
 pub(crate) const DETAIL_MAX: usize = 500;
 pub(crate) const RESULT_MAX_BYTES: usize = 4096;
 pub(crate) const CONSENT_OFF: &str = "這台電腦沒有開啟「允許遠端開視窗與管理視窗」";
+pub(crate) const HANDOFF_SUBDIR: &str = "交接";
 const PROTECTED: &str = "收發室與 ASN 自己的視窗不能操作";
 const CHAIN_MAX: usize = 12;
 
-/// 轉交的固定第一句話
-pub(crate) fn default_handover_note(name: &str) -> String {
-    format!("你是『{name}』的下一任，前任的上下文用完了。先讀你與收發室的往來記錄（信尾那行的路徑）和前任留下的交接檔，接著把手上的工作做下去。")
+/// 請前任寫交接的信
+pub(crate) fn ask_handoff_text(path: &Path) -> String {
+    format!("要換手了：請把交接寫到 {}，寫完回覆『交接完成』。", path.display())
 }
 
-/// 轉交的第一句話：固定文字；使用者補了話就換行附上「前任交代：…」
-pub(crate) fn handover_prompt(name: &str, note: &str) -> String {
-    let note = note.trim();
-    if note.is_empty() {
-        default_handover_note(name)
-    } else {
-        format!("{}
-前任交代：{}", default_handover_note(name), note.chars().take(1000).collect::<String>())
+/// 接班換手的第一句話：先讀前任最後一段對話紀錄（從最後往前看）和交接檔；沒寫完交接就明說；使用者補了話換行附上「前任交代：…」
+pub(crate) fn handover_prompt(name: &str, note: &str, transcript: Option<&Path>, handoff: &Path, complete: bool) -> String {
+    let mut s = match transcript {
+        Some(t) => format!("你是『{name}』的下一任，前任的上下文用完了。先讀前任最後一段對話紀錄 {}（從最後往前看）和交接檔 {}，接著把手上的工作做下去。", t.display(), handoff.display()),
+        None => format!("你是『{name}』的下一任，前任的上下文用完了（找不到前任的對話紀錄檔）。先讀交接檔 {}，接著把手上的工作做下去。", handoff.display()),
+    };
+    if !complete {
+        s.push_str("\n注意：前任沒有寫完交接，上面的交接檔可能不存在或不完整，請以對話紀錄為主。");
     }
+    let note = note.trim();
+    if !note.is_empty() {
+        s.push_str("\n前任交代：");
+        s.push_str(&note.chars().take(1000).collect::<String>());
+    }
+    s
+}
+
+/// 夥伴 ID（沒有就用視窗名）轉成資料夾名：只留英數、中文、- 與 _，其他一律換成 _，最長 60 字
+fn safe_key(s: &str) -> String {
+    let k: String = s.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).take(60).collect();
+    if k.trim_matches('_').is_empty() { "partner".to_string() } else { k }
+}
+
+/// 交接檔位置：`<handoff>/交接/<夥伴ID或視窗名>/<yyyyMMdd-HHmmss>.md`。算出來的路徑一定在那個資料夾內，否則回 None
+pub(crate) fn handoff_path(base: &Path, key: &str, now_ms: u64) -> Option<PathBuf> {
+    let root = base.join(HANDOFF_SUBDIR);
+    let p = root.join(safe_key(key)).join(format!("{}.md", super::corrlog::stamp_compact(now_ms)));
+    let inside = p.starts_with(&root) && p.components().all(|c| !matches!(c, std::path::Component::ParentDir));
+    inside.then_some(p)
 }
 
 /// 作業系統與本機設定這一側（測試換成假的）
@@ -60,10 +85,20 @@ pub(crate) trait OpsEnv: Send + Sync {
     fn timing(&self) -> Timing;
     /// 等外掛回報的最長時間
     fn mod_wait_ms(&self) -> u64;
+    /// 本機啟動設定（profile、工作資料夾允許清單）；每次現讀。喚醒用它決定能不能在原資料夾開、怎麼開
+    fn launch_config(&self) -> Result<LaunchConfig, String>;
+    /// 把一段話當成信送進某個視窗（接班換手時請前任寫交接）。失敗回原因
+    fn tell(&self, name: &str, text: &str) -> Result<(), String>;
+    /// 中途回報階段（只更新後台那筆的 detail，狀態仍是處理中）。失敗一律忽略（舊後台沒有這個動作）
+    fn progress(&self, op_id: &str, detail: &str);
+    /// 等前任寫完交接檔的最長時間與輪詢間隔
+    fn handoff_wait_ms(&self) -> u64;
+    fn handoff_poll_ms(&self) -> u64;
 }
 
 pub(crate) struct SystemOpsEnv {
     pub data_dir: PathBuf,
+    pub relay: Arc<Relay>,
 }
 
 impl OpsEnv for SystemOpsEnv {
@@ -85,6 +120,24 @@ impl OpsEnv for SystemOpsEnv {
     fn mod_wait_ms(&self) -> u64 {
         30_000
     }
+    fn launch_config(&self) -> Result<LaunchConfig, String> {
+        use super::launcher::LaunchEnv;
+        super::launcher::SystemEnv::new(self.data_dir.clone()).config(true)
+    }
+    fn tell(&self, name: &str, text: &str) -> Result<(), String> {
+        // 走收發室既有的投遞：寄一封給自己這台電腦、指定那個視窗的信，橋收到後照一般來信轉進視窗
+        let body = json!({ "to_node": self.relay.node, "to_agent": name, "body": text, "from_agent": self.relay.window_name(), "expects_reply": false });
+        tauri::async_runtime::block_on(self.relay.api("send", Some(body))).map(|_| ())
+    }
+    fn progress(&self, op_id: &str, detail: &str) {
+        let _ = tauri::async_runtime::block_on(self.relay.api("partner_op_progress", Some(json!({ "id": op_id, "detail": detail }))));
+    }
+    fn handoff_wait_ms(&self) -> u64 {
+        10 * 60 * 1000
+    }
+    fn handoff_poll_ms(&self) -> u64 {
+        2_000
+    }
 }
 
 pub(crate) struct OpsDirs {
@@ -94,6 +147,8 @@ pub(crate) struct OpsDirs {
     pub status: PathBuf,
     /// ~/.asn/control（橋寫、外掛讀）
     pub control: PathBuf,
+    /// ~/.claude/projects（Claude 的對話紀錄；喚醒只讀、只比對檔名）
+    pub projects: PathBuf,
 }
 
 /// 後台給的一筆待辦
@@ -104,6 +159,7 @@ pub(crate) struct Op {
     pub op: String,
     pub new_name: String,
     pub model: String,
+    pub session_id: String,
     pub note: String,
     pub by: String,
     pub by_label: String,
@@ -113,7 +169,7 @@ pub(crate) struct Op {
 impl Op {
     fn parse(v: &Value) -> Op {
         let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").trim().to_string();
-        Op { id: s("id"), name: s("name"), op: s("op"), new_name: s("new_name"), model: s("model"), note: s("note"), by: s("requested_by"), by_label: s("requested_by_label"), created_at: s("created_at") }
+        Op { id: s("id"), name: s("name"), op: s("op"), new_name: s("new_name"), model: s("model"), session_id: s("session_id"), note: s("note"), by: s("requested_by"), by_label: s("requested_by_label"), created_at: s("created_at") }
     }
     fn who(&self) -> String {
         let l = clean(&self.by_label, 40);
@@ -125,7 +181,8 @@ impl Op {
             "rename" => format!("改名為「{}」", clean(&self.new_name, 40)),
             "model" => format!("切換模型為 {}", clean(&self.model, 60)),
             "close" => "關閉視窗".into(),
-            "handover" => "轉交下一任".into(),
+            "handover" => "接班換手".into(),
+            "resume" => "喚醒視窗".into(),
             o => format!("不認得的動作 {}", clean(o, 20)),
         }
     }
@@ -157,6 +214,7 @@ pub(crate) struct PartnerOps {
     relay: Arc<Relay>,
     log: Arc<BridgeLog>,
     corr: CorrLog,
+    handoff_dir: PathBuf,
     env: Arc<dyn OpsEnv>,
     dirs: OpsDirs,
     /// (視窗名, pid) 是收發室視窗或 ASN 自己的視窗就回 true
@@ -172,7 +230,8 @@ impl PartnerOps {
         Arc::new(PartnerOps {
             relay,
             log,
-            corr: CorrLog::new(handoff_dir),
+            corr: CorrLog::new(handoff_dir.clone()),
+            handoff_dir,
             env,
             dirs,
             protect,
@@ -186,9 +245,20 @@ impl PartnerOps {
     /// 真實環境版：收發室視窗名與 ASN 自己的 worker pid 受保護
     pub(crate) fn system(relay: Arc<Relay>, log: Arc<BridgeLog>, data_dir: PathBuf, handoff_dir: PathBuf, sessions_dir: PathBuf, status_dir: PathBuf, mailbox_name: String, worker_pid: Arc<dyn Fn() -> u32 + Send + Sync>) -> Arc<PartnerOps> {
         let control = status_dir.parent().map(|p| p.join("control")).unwrap_or_else(|| status_dir.join("control"));
+        let projects = sessions_dir.parent().map(|p| p.join("projects")).unwrap_or_else(|| sessions_dir.join("projects"));
         let asn_window = relay.window_name();
         let protect: Arc<dyn Fn(&str, u32) -> bool + Send + Sync> = Arc::new(move |name, pid| name == mailbox_name || name == asn_window || (pid != 0 && pid == worker_pid()));
-        PartnerOps::new(relay, log, handoff_dir, Arc::new(SystemOpsEnv { data_dir }), OpsDirs { sessions: sessions_dir, status: status_dir, control }, protect)
+        let relay2 = relay.clone();
+        PartnerOps::new(relay, log, handoff_dir, Arc::new(SystemOpsEnv { data_dir, relay: relay2 }), OpsDirs { sessions: sessions_dir, status: status_dir, control, projects }, protect)
+    }
+
+    /// 後台回報的「視窗名 → 夥伴 ID」（往來記錄與交接檔資料夾都用它）
+    pub(crate) fn set_partners(&self, m: std::collections::BTreeMap<String, String>) {
+        self.corr.set_partners(m);
+    }
+
+    fn stage(&self, op: &Op, stage: &str) {
+        self.env.progress(&op.id, &format!("stage:{stage}"));
     }
 
     // ---- 輪詢 ------------------------------------------------------------------------------------
@@ -277,6 +347,9 @@ impl PartnerOps {
         }
         if op.op != "info" && !self.env.allow_remote() {
             return failed(CONSENT_OFF);
+        }
+        if op.op == "resume" {
+            return self.resume(op);
         }
         let target = match self.find_target(&op.name) {
             Ok(t) => t,
@@ -453,7 +526,7 @@ impl PartnerOps {
     // ---- 重開（改名退路、轉交）-------------------------------------------------------------------
 
     /// 關掉目標、照 `argv` 開新視窗、等同名的新視窗出現。new_sid_required＝新視窗的 sessionId 必須和舊的不同（轉交）
-    fn reopen(&self, t: &switch::Target, new_name: &str, argv: Vec<String>, new_sid_required: bool) -> OpResult {
+    fn reopen(&self, op: Option<&Op>, t: &switch::Target, new_name: &str, argv: Vec<String>, new_sid_required: bool) -> OpResult {
         let os = self.env.os();
         let (host, allowed, in_wt) = match self.guard(t) {
             Ok(g) => g,
@@ -468,8 +541,14 @@ impl PartnerOps {
             .filter(|s| matches!(s.get("name").and_then(Value::as_str), Some(n) if n == t.name || n == new_name))
             .filter_map(|s| s.get("pid").and_then(Value::as_u64).map(|p| p as u32))
             .collect();
+        if let Some(o) = op {
+            self.stage(o, "closing");
+        }
         if let Err(e) = switch::close_session(os, &self.env.timing(), t.pid, &allowed, host, host.is_some()) {
             return failed(e);
+        }
+        if let Some(o) = op {
+            self.stage(o, "opening");
         }
         if let Err(e) = self.env.launch(&plan) {
             return failed(format!("原視窗已關閉，但重開失敗：{e}"));
@@ -521,7 +600,7 @@ impl PartnerOps {
             Err(e) => return failed(e),
         };
         let argv = switch::rewrite_args_opts(&t2.args, Some(&t2.session_id), new, switch::current_model(&t2.args).as_deref(), None);
-        self.reopen(&t2, new, argv, false)
+        self.reopen(None, &t2, new, argv, false)
     }
 
     fn model(&self, op: &Op, t: switch::Target) -> OpResult {
@@ -557,12 +636,189 @@ impl PartnerOps {
         }
     }
 
-    fn handover(&self, op: &Op, t: switch::Target) -> OpResult {
-        let note = handover_prompt(&t.name, &op.note);
-        // 照原參數開新對話：不帶 --resume／--continue／--session-id，名字不變，模型不變，第一句話是接班提示
-        let argv = switch::rewrite_args_opts(&t.args, None, &t.name, switch::current_model(&t.args).as_deref(), Some(&note));
-        self.reopen(&t, &t.name.clone(), argv, true)
+    // ---- resume（喚醒）---------------------------------------------------------------------------
+
+    /// 視窗已經關了：用 `claude --resume <sessionId> -n <原名字>` 在原本的工作資料夾重開，同一段對話接回來。
+    /// 每一步都是守門：格式、已在線、對話紀錄（只認檔名）、資料夾白名單、本機開關，任何一關不過就什麼都不開。
+    fn resume(&self, op: &Op) -> OpResult {
+        let (name, sid) = (op.name.as_str(), op.session_id.as_str());
+        // 1. sessionId 要過格式才會被當檔名用；不合格就連資料夾都不碰
+        if !roster::valid_sid(sid) {
+            return failed("這位夥伴沒有可接回的對話編號，只能開新的夥伴");
+        }
+        if !valid_partner_name(name) {
+            return failed("視窗名格式不對，無法喚醒");
+        }
+        if (self.protect)(name, 0) {
+            return failed(PROTECTED);
+        }
+        // 2. 已經有活著的視窗用同一個 sessionId 或同名：不能再開（兩個視窗寫同一段對話會互相覆蓋）
+        let os = self.env.os();
+        let live = console::read_sessions(&self.dirs.sessions).iter().any(|s| {
+            let alive = s.get("pid").and_then(Value::as_u64).and_then(|p| u32::try_from(p).ok()).map(|p| p != 0 && os.alive(p)).unwrap_or(false);
+            alive && (s.get("name").and_then(Value::as_str) == Some(name) || s.get("sessionId").and_then(Value::as_str) == Some(sid))
+        });
+        if live {
+            return failed("這位夥伴已經在線上");
+        }
+        // 3. 找對話紀錄，從裡面取原本的工作資料夾
+        let Some(cwd) = find_transcript_cwd(&self.dirs.projects, sid) else {
+            return failed("找不到原本的對話紀錄，只能開新的夥伴");
+        };
+        // 4. 資料夾必須在本機啟動設定允許的清單內
+        let cfg = match self.env.launch_config() {
+            Ok(c) => c,
+            Err(e) => return failed(if e.is_empty() { "這台電腦還沒有可用的啟動設定".to_string() } else { e }),
+        };
+        let canon = match canonical_launch_cwd(&cwd) {
+            Ok(c) => c,
+            Err(_) => return failed("原本的工作資料夾不在這台電腦允許的清單內，不能從遠端喚醒"),
+        };
+        if !cfg.cwd_allow.iter().any(|a| *a == canon) {
+            return failed(format!("原本的工作資料夾（{}）不在這台電腦允許的清單內，不能從遠端喚醒；要先在電腦的設定加入，或到電腦前自己開", clean(&cwd, 120)));
+        }
+        if !canon.is_dir() {
+            return failed("原本的工作資料夾已經不存在了");
+        }
+        // 5. 用啟動設定的第一個 Claude 視窗型 profile（只拿指令與固定參數，名字與對話編號由我們補）
+        let Some(argv) = resume_argv(&cfg, name, sid) else {
+            return failed("這台電腦沒有可用的 Claude 啟動設定");
+        };
+        let plan = Plan { name: name.to_string(), cwd: PathBuf::from(crate::launch::local::strip_verbatim_prefix(&canon.to_string_lossy())), argv, in_wt: false };
+        // 6. 動手前再驗一次本機開關
+        if !self.env.allow_remote() {
+            return failed(CONSENT_OFF);
+        }
+        if let Err(e) = self.env.launch(&plan) {
+            return failed(format!("開不起來：{e}"));
+        }
+        // 7. 等名單出現同名視窗才算成功
+        let mut found: Option<(u32, String)> = None;
+        let appeared = switch::wait_until(os, self.env.timing().appear_wait_ms, self.env.timing().poll_ms, || {
+            for s in console::read_sessions(&self.dirs.sessions) {
+                if s.get("name").and_then(Value::as_str) != Some(name) || s.get("kind").and_then(Value::as_str).map(|k| k != "interactive").unwrap_or(false) {
+                    continue;
+                }
+                let Some(p) = s.get("pid").and_then(Value::as_u64).and_then(|p| u32::try_from(p).ok()) else { continue };
+                if p == 0 || !os.alive(p) {
+                    continue;
+                }
+                found = Some((p, s.get("sessionId").and_then(Value::as_str).unwrap_or("").to_string()));
+                return true;
+            }
+            false
+        });
+        match (appeared, found) {
+            (true, Some((pid, session))) => ok("視窗已喚醒", Some(json!({ "pid": pid, "session_id": session }))),
+            _ => unconfirmed("視窗已送出，但一直沒看到同名的視窗出現（可能卡在「是否信任此資料夾」，請到電腦前看一下）"),
+        }
     }
+
+    /// 接班換手：記下前任 → 請前任把交接寫到規範資料夾 → 等檔案出現且大小穩定（上限 10 分鐘，逾時照樣換手並註明）
+    /// → 關掉前任（沿用既有安全規則）→ 同名開新 session（不帶 --resume），第一句話指向前任對話紀錄與交接檔
+    fn handover(&self, op: &Op, t: switch::Target) -> OpResult {
+        let key = self.corr.pid_of(&t.name).unwrap_or_else(|| t.name.clone());
+        let Some(path) = handoff_path(&self.handoff_dir, &key, self.env.now_ms()) else {
+            return failed("交接檔的位置不安全，已取消");
+        };
+        if let Some(dir) = path.parent() {
+            if let Err(e) = std::fs::create_dir_all(dir) {
+                return failed(format!("建不起交接檔的資料夾：{e}"));
+            }
+        }
+        let transcript = find_transcript(&self.dirs.projects, &t.session_id).map(|(p, _)| p);
+        // 1. 請前任寫交接，等檔案出現且大小穩定
+        self.stage(op, "handoff");
+        let mut complete = false;
+        match self.env.tell(&t.name, &ask_handoff_text(&path)) {
+            Ok(()) => {
+                let mut last: Option<u64> = None;
+                complete = switch::wait_until(self.env.os(), self.env.handoff_wait_ms(), self.env.handoff_poll_ms(), || match std::fs::metadata(&path) {
+                    Ok(m) if m.is_file() && m.len() > 0 => {
+                        let same = last == Some(m.len());
+                        last = Some(m.len());
+                        same
+                    }
+                    _ => false,
+                });
+            }
+            Err(e) => self.log.line(&format!("partner_op handover: cannot ask {} to write handoff: {}", clean(&t.name, 40), clean(&e, 120))),
+        }
+        // 2. 等待期間視窗可能已經變了：重新確認還是同一個
+        let t2 = match self.find_target(&t.name) {
+            Ok(x) if x.pid == t.pid && x.session_id == t.session_id => x,
+            Ok(_) => return failed("這個視窗在等待交接期間換了，請重新操作"),
+            Err(e) => return failed(e),
+        };
+        // 3. 關前任、同名開新對話：不帶 --resume／--continue／--session-id，名字與模型不變
+        let prompt = handover_prompt(&t2.name, &op.note, transcript.as_deref(), &path, complete);
+        let argv = switch::rewrite_args_opts(&t2.args, None, &t2.name, switch::current_model(&t2.args).as_deref(), Some(&prompt));
+        let mut r = self.reopen(Some(op), &t2, &t2.name.clone(), argv, true);
+        if r.status != "failed" {
+            let extra = json!({ "handoff_path": path.to_string_lossy(), "handoff_done": complete });
+            match r.result.as_mut().and_then(Value::as_object_mut) {
+                Some(m) => {
+                    m.insert("handoff_path".into(), extra["handoff_path"].clone());
+                    m.insert("handoff_done".into(), extra["handoff_done"].clone());
+                }
+                None => r.result = Some(extra),
+            }
+        }
+        r
+    }
+}
+
+/// 喚醒用的啟動參數（含程式本身）：第一個 Claude 視窗型 profile（claude 優先），固定參數照啟動設定，
+/// 名字與 `--resume <sessionId>` 由這裡補（舊的 -n／--resume／--model 之外的旗標原樣保留，模型沿用設定裡的）。
+pub(crate) fn resume_argv(cfg: &LaunchConfig, name: &str, sid: &str) -> Option<Vec<String>> {
+    let mut ids: Vec<&String> = cfg.profiles.keys().collect();
+    ids.sort_by(|a, b| (a.as_str() != "claude").cmp(&(b.as_str() != "claude")).then(a.cmp(b)));
+    let p = ids.into_iter().map(|id| &cfg.profiles[id]).find(|p| p.mode == LaunchMode::Window && !p.disabled && (p.engine.is_empty() || p.engine == "claude"))?;
+    let mut full = vec![expand_vars(&p.command, &child_env())];
+    full.extend(p.args.iter().map(|a| a.replace("{name}", name)));
+    let model = switch::current_model(&full);
+    Some(switch::rewrite_args_opts(&full, Some(sid), name, model.as_deref(), None))
+}
+
+/// 在 `<projects>/*/<sessionId>.jsonl` 找對話紀錄（只比對檔名＝sessionId，sessionId 先過格式），
+/// 回前幾行 JSON 裡第一個 cwd 欄位。找不到、讀不了、沒有 cwd 都回 None。
+pub(crate) fn find_transcript_cwd(projects: &Path, sid: &str) -> Option<String> {
+    find_transcript(projects, sid).map(|(_, c)| c)
+}
+
+/// 同上，連對話紀錄的完整路徑一起回（接班換手要告訴新視窗去讀哪個檔）
+pub(crate) fn find_transcript(projects: &Path, sid: &str) -> Option<(PathBuf, String)> {
+    if !roster::valid_sid(sid) {
+        return None;
+    }
+    let file = format!("{sid}.jsonl");
+    for e in std::fs::read_dir(projects).ok()?.flatten() {
+        let dir = e.path();
+        let path = dir.join(&file);
+        if dir.is_dir() && path.is_file() {
+            if let Some(c) = first_cwd(&path) {
+                return Some((path, c));
+            }
+        }
+    }
+    None
+}
+
+fn first_cwd(path: &Path) -> Option<String> {
+    use std::io::Read;
+    let f = std::fs::File::open(path).ok()?;
+    let rd = std::io::BufReader::new(f.take(512 * 1024));
+    for line in rd.lines().take(40) {
+        let Ok(line) = line else { return None };
+        let Ok(v) = serde_json::from_str::<Value>(line.trim()) else { continue };
+        if let Some(c) = v.get("cwd").and_then(Value::as_str) {
+            let c = c.trim();
+            if !c.is_empty() && !c.chars().any(|ch| ch.is_control()) {
+                return Some(c.to_string());
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]

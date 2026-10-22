@@ -46,7 +46,7 @@ export const launchChoices = machine => ({ models: remoteModelRows(machine?.laun
 export const NAME_RE = /^[A-Za-z0-9一-鿿][A-Za-z0-9一-鿿-]{0,39}$/
 export const FIRST_MAX = 4000
 
-export const initialLaunch = () => ({ open: false, phase: 'form', node: '', deviceLabel: '', profile: '', cwd: '', name: '', first: '', successorOf: '', error: '', busy: false, id: '', text: '', detail: '', friendId: '', since: 0 })
+export const initialLaunch = () => ({ open: false, phase: 'form', node: '', deviceLabel: '', profile: '', cwd: '', name: '', first: '', error: '', busy: false, id: '', text: '', detail: '', friendId: '', since: 0 })
 
 // 送出前的檢查：不能開的電腦、缺欄位、名字格式都擋在這裡（不送出）。回中文錯誤，通過回空字串
 export function launchFormError(f, elig) {

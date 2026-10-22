@@ -44,13 +44,13 @@ test('功能列按鈕都有中文 aria-label 與提示，圖示檔存在且是 S
   assert.match(t, /:title="consoleView\.tip" :aria-label="consoleView\.label"/)
   assert.match(t, /role="toolbar" aria-label="代理功能列"/)
   const imgs = [...t.matchAll(/src="(img\/[^"]+)"/g)]
-  assert.equal(imgs.length, 4)
+  assert.equal(imgs.length, 5)
   for (const m of imgs) assert.match(fs.readFileSync(path.join(root, 'ui', m[1]), 'utf8'), /^<svg/, m[1])
   assert.ok(!/v-html|innerHTML/.test(t))
 })
 
-test('不放假按鈕：功能列只有通話、主控台、切換模型、子代理四個動作', () => {
-  assert.equal([...read('ui/lib/actionbar.mjs').matchAll(/class="abtn"/g)].length, 4)
+test('不放假按鈕：功能列只有通話、主控台、喚醒、切換模型、子代理五個動作', () => {
+  assert.equal([...read('ui/lib/actionbar.mjs').matchAll(/class="abtn"/g)].length, 5)
 })
 
 test('兩種對話視窗都把 transport 與本機節點傳給對話區，對話區放了功能列', () => {

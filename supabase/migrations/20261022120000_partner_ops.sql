@@ -1,4 +1,4 @@
--- 遠端管理夥伴視窗（詳情、改名、切換模型、關閉、轉交下一任；設計見 docs/design/PARTNER-OPS.md）。
+-- 遠端管理夥伴視窗（詳情、改名、切換模型、關閉、轉交下一任、喚醒；設計見 docs/design/PARTNER-OPS.md）。
 -- 手機下指令 → 這裡記一筆 partner_ops（pending）→ 敲那台電腦的門鈴 → 電腦端內建收發室取走（taken）→ 執行 → 回報（ok／failed／unconfirmed）。
 -- 與「遠端開視窗」（relay.launches）同形：下令一律要本人簽章（p_signed_user，Edge Function 驗過登入憑證才傳進來），
 -- 而且簽章的人要擁有「呼叫節點」與「目標節點」（asn_user_owns_node），兩台同租戶。
@@ -11,7 +11,8 @@ create table if not exists relay.partner_ops (
   requested_by text not null references relay.nodes(id),
   node text not null references relay.nodes(id),
   name text not null check (char_length(name) between 1 and 80),
-  op text not null check (op in ('info', 'rename', 'model', 'close', 'handover')),
+  op text not null check (op in ('info', 'rename', 'model', 'close', 'handover', 'resume')),
+  session_id text check (session_id is null or session_id ~ '^[A-Za-z0-9_-]{8,80}$'),
   new_name text check (new_name is null or char_length(new_name) between 1 and 40),
   model text check (model is null or char_length(model) between 1 and 60),
   note text check (note is null or char_length(note) between 1 and 1000),
@@ -39,8 +40,11 @@ declare
   v_l jsonb;
   v_topic text;
   v_id uuid;
+  v_sid text;
+  v_engine text;
+  v_online boolean;
 begin
-  if p_op is null or p_op not in ('info', 'rename', 'model', 'close', 'handover')
+  if p_op is null or p_op not in ('info', 'rename', 'model', 'close', 'handover', 'resume')
      or p_name is null or char_length(p_name) not between 1 and 80 then
     return jsonb_build_object('error', 'bad_request');
   end if;
@@ -65,17 +69,52 @@ begin
   if v_topic is null then
     return jsonb_build_object('error', 'not_found');
   end if;
-  -- 目標名字 3 分鐘內要在名單上
-  if not exists (select 1 from relay.roster where node = p_node and name = p_name and seen_at > now() - interval '3 minutes') then
-    return jsonb_build_object('error', 'not_found');
-  end if;
-  -- 收發室與 ASN 自己的視窗不能動（電腦端執行前還會再擋一次）
-  if exists (select 1 from relay.roster where node = p_node and name = p_name and engine = 'asn') or p_name ~ '收發室$' then
-    return jsonb_build_object('error', 'protected');
-  end if;
-  -- 詳情是唯讀，不需要開放；其餘要那台電腦打開「允許遠端開視窗與管理視窗」（launcher 不為 null）
-  if p_op <> 'info' and v_l is null then
-    return jsonb_build_object('error', 'no_launcher');
+  if p_op = 'resume' then
+    -- 喚醒：目標視窗已經關了（不能在名單上），用夥伴記錄裡的 session 在原本的資料夾接回同一段對話
+    if p_name ~ '收發室$' then
+      return jsonb_build_object('error', 'protected');
+    end if;
+    if exists (select 1 from relay.roster where node = p_node and lower(name) = lower(p_name) and seen_at > now() - interval '3 minutes') then
+      return jsonb_build_object('error', 'already_online');
+    end if;
+    -- 依「節點＋名字」找夥伴：目前的名字優先，其次 7 天內改掉的舊名（與寄信的解析同一套）
+    select p.current_session, p.engine into v_sid, v_engine from relay.partners p
+      where p.node = p_node and p.tenant_id is not distinct from v_t
+        and (p.current_name = p_name
+             or exists (select 1 from relay.partner_names pn where pn.partner_id = p.partner_id and pn.name = p_name and pn.renamed_at > now() - interval '7 days'))
+      order by (p.current_name = p_name) desc, p.updated_at desc limit 1;
+    if not found then
+      return jsonb_build_object('error', 'not_found');
+    end if;
+    if v_engine is not null and v_engine <> 'claude' then
+      return jsonb_build_object('error', 'not_claude');
+    end if;
+    if v_sid is null then
+      return jsonb_build_object('error', 'no_session');
+    end if;
+    if v_l is null then
+      return jsonb_build_object('error', 'no_launcher');
+    end if;
+    -- 那台電腦的 ASN 要在線（節點心跳或名單 3 分鐘內有回報），不然喚醒會卡到逾時
+    select coalesce(n.last_seen_at > now() - interval '3 minutes', false)
+           or exists (select 1 from relay.roster r where r.node = p_node and r.seen_at > now() - interval '3 minutes')
+      into v_online from relay.nodes n where n.id = p_node;
+    if not coalesce(v_online, false) then
+      return jsonb_build_object('error', 'device_offline');
+    end if;
+  else
+    -- 目標名字 3 分鐘內要在名單上
+    if not exists (select 1 from relay.roster where node = p_node and name = p_name and seen_at > now() - interval '3 minutes') then
+      return jsonb_build_object('error', 'not_found');
+    end if;
+    -- 收發室與 ASN 自己的視窗不能動（電腦端執行前還會再擋一次）
+    if exists (select 1 from relay.roster where node = p_node and name = p_name and engine = 'asn') or p_name ~ '收發室$' then
+      return jsonb_build_object('error', 'protected');
+    end if;
+    -- 詳情是唯讀，不需要開放；其餘要那台電腦打開「允許遠端開視窗與管理視窗」（launcher 不為 null）
+    if p_op <> 'info' and v_l is null then
+      return jsonb_build_object('error', 'no_launcher');
+    end if;
   end if;
   if p_op = 'rename' then
     if exists (select 1 from relay.roster where node = p_node and lower(name) = lower(p_new_name) and seen_at > now() - interval '3 minutes')
@@ -92,8 +131,9 @@ begin
   if (select count(*) from relay.partner_ops where node = p_node and created_at > now() - interval '1 hour') >= 30 then
     return jsonb_build_object('error', 'rate_limited');
   end if;
-  insert into relay.partner_ops (tenant_id, requested_by, node, name, op, new_name, model, note)
+  insert into relay.partner_ops (tenant_id, requested_by, node, name, op, session_id, new_name, model, note)
     values (v_t, p_actor, p_node, p_name, p_op,
+            case when p_op = 'resume' then v_sid end,
             case when p_op = 'rename' then p_new_name end,
             case when p_op = 'model' then p_model end,
             case when p_op = 'handover' then nullif(p_note, '') end)
@@ -144,10 +184,10 @@ begin
   with t as (
     update relay.partner_ops set status = 'taken', taken_at = now()
       where node = p_node and status = 'pending'
-      returning id, name, op, new_name, model, note, requested_by, created_at
+      returning id, name, op, session_id, new_name, model, note, requested_by, created_at
   )
   select coalesce(jsonb_agg(jsonb_build_object(
-      'id', t.id, 'name', t.name, 'op', t.op, 'new_name', t.new_name, 'model', t.model, 'note', t.note,
+      'id', t.id, 'name', t.name, 'op', t.op, 'session_id', t.session_id, 'new_name', t.new_name, 'model', t.model, 'note', t.note,
       'requested_by', t.requested_by,
       'requested_by_label', (select n.name from relay.nodes n where n.id = t.requested_by),
       'created_at', t.created_at) order by t.created_at), '[]'::jsonb)
@@ -179,6 +219,27 @@ begin
 end;
 $function$;
 
+-- 電腦端中途回報階段（只改自己節點、處理中那筆的 detail；狀態不變）
+create or replace function public.irori_relay_partner_op_progress(p_node text, p_id uuid, p_detail text)
+returns jsonb
+language plpgsql
+security definer
+set search_path to ''
+as $function$
+declare v_n int;
+begin
+  if p_detail is null or p_detail !~ '^stage:[a-z]{1,20}$' then
+    return jsonb_build_object('error', 'bad_request');
+  end if;
+  update relay.partner_ops set detail = p_detail where id = p_id and node = p_node and status = 'taken';
+  get diagnostics v_n = row_count;
+  if v_n = 0 then
+    return jsonb_build_object('error', 'not_found');
+  end if;
+  return jsonb_build_object('ok', true);
+end;
+$function$;
+
 revoke all on function public.irori_relay_partner_op(text, uuid, text, text, text, text, text, text) from public, anon, authenticated;
 grant execute on function public.irori_relay_partner_op(text, uuid, text, text, text, text, text, text) to service_role;
 revoke all on function public.irori_relay_partner_ops(text, uuid, uuid[]) from public, anon, authenticated;
@@ -187,5 +248,8 @@ revoke all on function public.irori_relay_partner_op_pending(text) from public, 
 grant execute on function public.irori_relay_partner_op_pending(text) to service_role;
 revoke all on function public.irori_relay_partner_op_result(text, uuid, text, text, jsonb) from public, anon, authenticated;
 grant execute on function public.irori_relay_partner_op_result(text, uuid, text, text, jsonb) to service_role;
+
+revoke all on function public.irori_relay_partner_op_progress(text, uuid, text) from public, anon, authenticated;
+grant execute on function public.irori_relay_partner_op_progress(text, uuid, text) to service_role;
 
 commit;

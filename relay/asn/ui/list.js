@@ -26,7 +26,9 @@ import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, r
 import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
 import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
 import { CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, buddyConsoleItem, engineForProfile,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice, withTimeout } from './lib/partner-launch-ui.mjs'
-import { SUCCESSION_GIVE_UP_MS, alreadyDone, canMarkSuccessor, giveUpNotice, newSuccession, readySuccessions, succeedOutcome, successorOptions } from './lib/succession.mjs'
+import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
+import { PartnerOpDialog, loadOpsContext } from './lib/partner-ops-ui.mjs'
+import { menuItems as opMenuItems } from './lib/partner-ops.mjs'
 import { backgroundRestoreNoticeText, collectLaunchFailures, findBackgroundTimeouts, launchFailedNoticeText } from './lib/partner-launch-notify.mjs'
 import { friendId } from './lib/roster.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher } from './lib/model-switch.mjs'
@@ -41,7 +43,7 @@ import { createUsageUi } from './lib/usage.mjs'
 import { CHECK_MS, autoCheckFromSaved, initialUpdateState, manualResultText, progressText, updateNoticeText, withAvailable, withFailure, withInstalling, withProgress, updateStatus } from './lib/update.mjs'
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL, normalizeCfg, shouldAutoSpeak, sttStatusText } from './lib/voice-prefs.mjs'
 
-const { createApp, reactive, ref, computed, watch } = Vue
+const { createApp, reactive, ref, computed, watch, nextTick } = Vue
 const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯示為離線' }
 const CONN_LABEL = { connecting: '連線中…', on: '已連線', off: '連線中斷，重試中' }
 
@@ -294,58 +296,7 @@ const launchToolRows = computed(() => MODEL_CATALOG.map(m => modelUiRow(m, cliTo
 const partnerModels = computed(() => launchToolRows.value)
 // 對話框裡的模型列：本機看偵測到的 CLI；別台設備看那台回報的 profile
 const dlgModels = computed(() => (partnerDlg.node && partnerDlg.node !== info.node ? remoteModelRows(remoteLaunchers.value[partnerDlg.node]) : partnerModels.value))
-const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '', display: 'foreground', successorOf: '' })
-// 「這是誰的接班」（#153）：後台回的夥伴清單（要登入；沒登入或後台還沒支援就是空的，介面不顯示這個選項）。夥伴 ID 只當選項的值，畫面只有名字與設備名
-const successors = ref([])
-async function refreshSuccessors() {
-  try { successors.value = await transport.partnerList() } catch (e) { successors.value = []; console.info('[ASN] 夥伴清單', e.message) }
-}
-const partnerSuccessorOptions = computed(() => successorOptions(successors.value))
-const successionPending = ref([])   // 等新視窗出現在名單後送出的接班設定
-const succeedDlg = reactive({ open: false, node: '', name: '', nick: '', partnerId: '', choice: '', busy: false, error: '' })
-const succeedDlgOptions = computed(() => successorOptions(successors.value, { exceptPartnerId: succeedDlg.partnerId }))
-const buddyCanSucceed = computed(() => canMarkSuccessor(buddyMenuFriend.value))
-function buddyMenuMarkSuccessor() {
-  const c = buddyMenuFriend.value
-  closeBuddyMenu()
-  if (!c || !canMarkSuccessor(c)) return
-  Object.assign(succeedDlg, { open: true, node: c.node, name: c.agent || c.nick, nick: c.nick, partnerId: c.partnerId, choice: '', busy: false, error: '' })
-  void refreshSuccessors()
-}
-function closeSucceedDlg() { if (!succeedDlg.busy) succeedDlg.open = false }
-async function submitSucceedDlg() {
-  if (!succeedDlg.choice) { succeedDlg.error = '請先選擇要接誰的班'; return }
-  succeedDlg.busy = true; succeedDlg.error = ''
-  try {
-    await transport.partnerSucceed(succeedDlg.choice, succeedDlg.node, succeedDlg.name)
-    succeedDlg.open = false
-    void refreshSuccessors()
-  } catch (e) { succeedDlg.error = succeedOutcome(e.message, succeedDlg.nick).text } finally { succeedDlg.busy = false }
-}
-// 開新夥伴時選了「這是誰的接班」：等新視窗出現在名單（後台認得它）才送出；前任視窗還開著就稍後再試，久等不到就通知使用者
-async function processSuccessions() {
-  if (!successionPending.value.length) return
-  const fl = friends.value
-  const now = Date.now()
-  const done = new Set(alreadyDone(successionPending.value, fl))
-  let list = successionPending.value.filter(s => !done.has(s))
-  for (const { s } of readySuccessions(list, fl)) {
-    try {
-      await transport.partnerSucceed(s.predecessor, s.node, s.name)
-      list = list.filter(x => x !== s)
-      void refreshSuccessors()
-    } catch (e) {
-      const o = succeedOutcome(e.message, s.name)
-      s.lastText = o.text
-      if (o.act === 'drop') { list = list.filter(x => x !== s); showLaunchNotice(giveUpNotice(s.name, o.text)) }
-    }
-  }
-  for (const s of list.filter(x => now - x.since > SUCCESSION_GIVE_UP_MS)) {
-    list = list.filter(x => x !== s)
-    showLaunchNotice(giveUpNotice(s.name, s.lastText || ''))
-  }
-  successionPending.value = list
-}
+const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '', display: 'foreground' })
 const partnerShowDisplay = computed(() => partnerDlg.node === info.node && showDisplayModeChoice(partnerDlg.profile))
 const launchCtx = computed(() => ({ selfNode: info.node, partnerModels: partnerModels.value, remoteLaunchers: remoteLaunchers.value }))
 const launchDeviceRowsList = computed(() => launchDeviceRows(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value }))
@@ -391,8 +342,6 @@ function openPartnerDlg(nodeKey) {
   partnerDlg.error = ''
   partnerDlg.busy = false
   partnerDlg.firstMessage = ''
-  partnerDlg.successorOf = ''
-  void refreshSuccessors()
   partnerDlg.display = launchPrefs.launchDisplay === 'background' ? 'background' : 'foreground'
   const first = dlgModels.value.find(m => m.installed) ?? dlgModels.value[0]
   if (first) pickPartnerModel(first)
@@ -433,18 +382,70 @@ function pickLaunchDevice(nodeKey) {
 const buddyMenu = ref('')
 const buddyMenuPos = reactive({ x: 0, y: 0 })
 const buddyMenuFriend = ref(null)
+let buddyMenuOrigin = { x: 0, y: 0 }
+const buddyMenuEl = ref(null)   // 主選單、二級選單都放在 overflow 容器外面（position:fixed），位置由 lib/menu-place.mjs 算（翻轉、夾在視窗內）
+const buddySubEl = ref(null)
+const buddyModelBtn = ref(null)
+const buddySubPos = reactive({ x: 0, y: 0, ready: false })
+const viewSize = () => ({ w: window.innerWidth, h: window.innerHeight })
+async function placeBuddyMenu() {
+  await nextTick()
+  const r = buddyMenuEl.value?.getBoundingClientRect()
+  if (!r) return
+  Object.assign(buddyMenuPos, placeMenu(buddyMenuOrigin, { w: r.width, h: r.height }, viewSize()))
+}
+// 夥伴管理（詳情、改名、關閉視窗、接班換手、喚醒）：項目與判斷全部來自 lib/partner-ops.mjs，和手機同一套
+const opsCtx = reactive({ machines: {}, loaded: false, signedIn: false })
+let opsCtxAt = 0
+async function refreshOpsCtx() {
+  if (Date.now() - opsCtxAt < 15000) return
+  opsCtxAt = Date.now()
+  Object.assign(opsCtx, await loadOpsContext(transport))
+}
+const buddyOpItems = computed(() => opMenuItems(buddyMenuFriend.value, { ...opsCtx, friends: friends.value, asn: asnMap.value }).filter(i => i.key !== 'model'))   // 切換模型沿用下面原本那個子選單
+const opDlg = reactive({ open: false, op: '', friend: null, item: null })
+function openPartnerOp(it) {
+  const f = buddyMenuFriend.value
+  closeBuddyMenu()
+  if (!f || !it?.ok) return
+  Object.assign(opDlg, { open: true, op: it.key, friend: f, item: it })
+}
+function closeOpDlg() { opDlg.open = false }
 // 右鍵選單立刻出現（固定有「開啟對話」）；主控台切換項目先顯示「檢查中…」，查到才可按，逾時／查不到就停用
 const buddyConsole = reactive({ state: 'none', visible: true })
-const buddyConsoleItemView = computed(() => buddyConsoleItem(buddyConsole.state, buddyConsole.visible))
+const buddyConsoleItemView = computed(() => buddyConsoleItem(buddyConsole.state))
 // 「切換模型 ▸」：只有本機的 Claude 視窗會出現；查詢逾時或查不到就停用並說明原因（共用 lib/model-switch.mjs，功能列 #40 也用它）
 const modelSwitcher = createModelSwitcher({ transport, log: m => console.info('[ASN]', m) })
 const buddyModel = reactive({ show: false, state: 'none', reason: '', current: '', items: [], open: false, st: null })
 function resetBuddyModel() { Object.assign(buddyModel, { show: false, state: 'none', reason: '', current: '', items: [], open: false, st: null }) }
+const buddySubEnabled = computed(() => buddyModel.state !== 'none' && buddyModel.state !== 'checking' && buddyModel.items.length > 0)
+let buddySubTimer = null
+watch([() => buddyOpItems.value.length, () => buddyConsole.state, () => buddyModel.show], () => { if (buddyMenu.value) void placeBuddyMenu() })
+async function placeBuddySub() {
+  Object.assign(buddySubPos, { x: 0, y: 0, ready: false })   // 先放回左上角再量：上一次的位置會把「靠右的剩餘寬度」壓窄，量到的寬度就不準
+  await nextTick()
+  const a = buddyModelBtn.value?.getBoundingClientRect()
+  const r = buddySubEl.value?.getBoundingClientRect()
+  if (!a || !r) return
+  Object.assign(buddySubPos, placeSubmenu(a, { w: r.width, h: r.height }, viewSize()), { ready: true })
+}
+// 二級選單：滑過（或點一下、鍵盤右鍵）在右側彈出，移開／選完／Esc 收起；移開有一點延遲，滑鼠從那一項移到子選單的途中不會收掉
+function subEvent(ev, delay = 0) {
+  clearTimeout(buddySubTimer)
+  const run = () => {
+    const r = submenuNext({ open: buddyModel.open }, ev, buddySubEnabled.value)
+    buddyModel.open = r.open
+    if (r.open) void placeBuddySub()
+  }
+  if (delay) buddySubTimer = setTimeout(run, delay)
+  else run()
+}
 const buddyModelLabel = computed(() => (buddyModel.state === 'checking' ? '切換模型（檢查中…）' : buddyModel.state === 'none' ? '切換模型（無法切換）' : '切換模型 ▸'))
 const modelDlg = reactive({ open: false, name: '', target: null, current: '', busy: false, error: '', manual: '', done: '', copied: false, st: null })
 const modelDlgText = computed(() => confirmText(modelDlg.name, modelDlg.current, modelDlg.target?.label ?? '', { ownWindow: Boolean(modelDlg.st?.raw?.ownWindow) }))
 function closeModelDlg() { if (!modelDlg.busy) modelDlg.open = false }
-function closeBuddyMenu() { buddyMenu.value = ''; buddyMenuFriend.value = null; buddyConsole.state = 'none'; resetBuddyModel() }
+const buddyConsoleState = () => buddyConsole.state
+function closeBuddyMenu() { clearTimeout(buddySubTimer); buddyMenu.value = ''; buddyMenuFriend.value = null; buddyConsole.state = 'none'; resetBuddyModel() }
 async function loadBuddyModel(c) {
   buddyModel.state = 'checking'
   const st = await modelSwitcher.query(c.agent || c.nick)
@@ -475,10 +476,13 @@ function buddyMenuOpenChat() {
 }
 async function openBuddyMenu(c, e) {
   closeLaunchPicker()
-  buddyMenuPos.x = e?.clientX ?? 0
-  buddyMenuPos.y = e?.clientY ?? 0
+  buddyMenuOrigin = { x: e?.clientX ?? 0, y: e?.clientY ?? 0 }
+  buddyMenuPos.x = buddyMenuOrigin.x
+  buddyMenuPos.y = buddyMenuOrigin.y
   buddyMenuFriend.value = c
   buddyMenu.value = c.id
+  void refreshOpsCtx()
+  void placeBuddyMenu()
   buddyConsole.visible = true
   const eng = c.engine || engineForProfile(c.launchProfile || 'claude')
   resetBuddyModel()
@@ -526,7 +530,6 @@ async function submitPartnerDlg() {
     }
     Object.assign(launchPrefs, bumpRecentCwd(launchPrefs, partnerDlg.cwd))
     void saveLaunchPrefs()
-    if (partnerDlg.successorOf) successionPending.value = [...successionPending.value, newSuccession({ node: partnerDlg.node, name: partnerDlg.name.trim(), predecessor: partnerDlg.successorOf })]
     closePartnerDlg()
     if (partnerDlg.node === info.node && partnerDlg.firstMessage.trim()) {
       setTimeout(async () => {
@@ -569,7 +572,6 @@ async function pollLaunchResults() {
     }).catch(() => {})
   }
   launchPending.value = still
-  void processSuccessions()
 }
 void refreshCliTools()
 void refreshLaunchers()
@@ -822,6 +824,14 @@ const app = createApp({
       if (deviceMenu.value && !el?.closest('.device-menu')) closeDeviceMenu()
     }, true)
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && chatTabMenu.value) closeChatTabMenu() })
+    // Esc：先收二級選單，再按一次才關主選單
+    document.addEventListener('keydown', e => {
+      if (e.key !== 'Escape' || !buddyMenu.value) return
+      const r = submenuNext({ open: buddyModel.open }, 'escape')
+      if (r.consumed) buddyModel.open = false
+      else closeBuddyMenu()
+      e.preventDefault(); e.stopPropagation()
+    }, true)
     window.addEventListener('blur', () => { if (chatTabMenu.value) closeChatTabMenu(); if (buddyMenu.value) closeBuddyMenu(); if (launchPicker.value) closeLaunchPicker(); if (deviceMenu.value) closeDeviceMenu() })
     const tabPinLabel = computed(() => (chatTabMenuPin.value ? '取消固定分頁' : '固定分頁'))
     const runTabMenu = fn => { const id = chatTabMenu.value; closeChatTabMenu(); if (id) fn(id) }
@@ -1025,7 +1035,7 @@ const app = createApp({
       DISPLAY_MODES, partnerShowDisplay,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
-      partnerSuccessorOptions, succeedDlg, succeedDlgOptions, buddyCanSucceed, buddyMenuMarkSuccessor, closeSucceedDlg, submitSucceedDlg,
+      opDlg, closeOpDlg, buddyOpItems, openPartnerOp, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddyConsoleItemView, buddyMenuOpenChat, toggleBuddyConsole,
       buddyModel, buddyModelLabel, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,
       launchToolRows, launchPrefs, launchCwdText, saveLaunchPrefs, setLaunchCwdText,
@@ -1034,6 +1044,7 @@ const app = createApp({
 })
 app.component('chat-pane', ChatPane)
 app.component('asn-dialog', AsnDialog)
+app.component('partner-op-dialog', PartnerOpDialog)
 app.component('guide-doc', GuideDoc)
 app.component('settings-panel', SettingsPanel)
 const root = app.mount('#app')

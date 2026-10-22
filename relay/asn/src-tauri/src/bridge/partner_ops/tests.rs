@@ -62,6 +62,16 @@ struct FakeEnv {
     appear: Mutex<Option<(u32, String)>>,
     sessions: PathBuf,
     mod_wait: u64,
+    /// 本機啟動設定（喚醒用）
+    cfg: Mutex<Result<LaunchConfig, String>>,
+    /// 送進視窗的信 (視窗名, 內文)、送信當下已結束的程序數、信裡的交接檔路徑、中途回報的階段
+    told: Mutex<Vec<(String, String)>>,
+    terminated_at_tell: Mutex<Option<usize>>,
+    told_path: Arc<Mutex<Option<String>>>,
+    progress: Mutex<Vec<String>>,
+    /// 模擬前任收到信就把交接寫好
+    write_on_tell: AtomicBool,
+    tell_fails: AtomicBool,
 }
 
 impl OpsEnv for FakeEnv {
@@ -88,6 +98,33 @@ impl OpsEnv for FakeEnv {
     fn mod_wait_ms(&self) -> u64 {
         self.mod_wait
     }
+    fn launch_config(&self) -> Result<LaunchConfig, String> {
+        self.cfg.lock().unwrap().clone()
+    }
+    fn tell(&self, name: &str, text: &str) -> Result<(), String> {
+        self.told.lock().unwrap().push((name.to_string(), text.to_string()));
+        *self.terminated_at_tell.lock().unwrap() = Some(self.os.terminated.lock().unwrap().len());
+        if self.tell_fails.load(Ordering::SeqCst) {
+            return Err("投遞失敗".into());
+        }
+        let path = text.strip_prefix("要換手了：請把交接寫到 ").and_then(|s| s.split("，寫完").next()).unwrap_or("").to_string();
+        *self.told_path.lock().unwrap() = Some(path.clone());
+        if self.write_on_tell.load(Ordering::SeqCst) {
+            std::fs::create_dir_all(Path::new(&path).parent().unwrap()).unwrap();
+            std::fs::write(&path, "# 交接
+前任寫的內容").unwrap();
+        }
+        Ok(())
+    }
+    fn progress(&self, _op_id: &str, detail: &str) {
+        self.progress.lock().unwrap().push(detail.to_string());
+    }
+    fn handoff_wait_ms(&self) -> u64 {
+        50
+    }
+    fn handoff_poll_ms(&self) -> u64 {
+        1
+    }
 }
 
 fn write_session(dir: &Path, pid: u32, sid: &str, name: &str, status: &str, cwd: &str) {
@@ -112,6 +149,7 @@ struct Rig {
     control: PathBuf,
     work: PathBuf,
     handoff: PathBuf,
+    projects: PathBuf,
 }
 
 impl Rig {
@@ -193,15 +231,32 @@ fn rig(o: Opt) -> Rig {
         appear: Mutex::new(Some((501, "sid-new".into()))),
         sessions: sessions.clone(),
         mod_wait: o.mod_wait,
+        cfg: Mutex::new(Ok(launch_cfg(&[&work]))),
+        told: Mutex::new(vec![]),
+        terminated_at_tell: Mutex::new(None),
+        told_path: Arc::new(Mutex::new(None)),
+        progress: Mutex::new(vec![]),
+        write_on_tell: AtomicBool::new(true),
+        tell_fails: AtomicBool::new(false),
     });
     let status = tmp.path().join("status");
     let control = tmp.path().join("control");
     let handoff = tmp.path().join("handoff");
+    let projects = tmp.path().join("projects");
     let log = Arc::new(BridgeLog::new(None));
     let relay = Arc::new(Relay::new("http://127.0.0.1:1/".into(), "fake-test-key".into(), "T".into(), "T-ASN".into()));
     let protect: Arc<dyn Fn(&str, u32) -> bool + Send + Sync> = Arc::new(|name, pid| name == "T-收發室" || name == "T-ASN" || pid == 777);
-    let ops = PartnerOps::new(relay, log.clone(), handoff.clone(), env.clone(), OpsDirs { sessions: sessions.clone(), status: status.clone(), control: control.clone() }, protect);
-    Rig { tmp, ops, env, log, sessions, status, control, work, handoff }
+    let ops = PartnerOps::new(relay, log.clone(), handoff.clone(), env.clone(), OpsDirs { sessions: sessions.clone(), status: status.clone(), control: control.clone(), projects: projects.clone() }, protect);
+    Rig { tmp, ops, env, log, sessions, status, control, work, handoff, projects }
+}
+
+/// 本機啟動設定：一個 claude profile（固定參數含 -n {name}），允許的資料夾由呼叫端給
+fn launch_cfg(allow: &[&Path]) -> LaunchConfig {
+    use crate::launch::profiles::Profile;
+    let mut profiles = HashMap::new();
+    profiles.insert("zzz".to_string(), Profile { label: "排在後面的".into(), command: "other.exe".into(), args: vec!["{name}".into()], engine: "claude".into(), mode: LaunchMode::Window, disabled: false, disabled_reason: String::new() });
+    profiles.insert("claude".to_string(), Profile { label: "Claude".into(), command: r"C:\fake\claude.exe".into(), args: vec!["--dangerously-skip-permissions".into(), "-n".into(), "{name}".into(), "--model".into(), "opus".into()], engine: "claude".into(), mode: LaunchMode::Window, disabled: false, disabled_reason: String::new() });
+    LaunchConfig { profiles, cwd_allow: allow.iter().map(|p| canonical_launch_cwd(&p.to_string_lossy()).unwrap()).collect(), max_per_hour: 6 }
 }
 
 fn argv_has(argv: &[String], pair: &[&str]) -> bool {
@@ -514,36 +569,127 @@ fn 切換模型_沒有外掛_走既有流程_換模型重開_忙碌時拒絕() {
 }
 
 // ================================================================================================
-// 轉交
+// 接班換手（handover）
 // ================================================================================================
 
-#[test]
-fn 轉交_開新_session_不帶_resume_名字與模型不變_第一句話是後台給的接班提示() {
-    let r = rig(Opt::default());
-    let res = r.run("handover", json!({ "note": "先看 PR 12。
-再跑測試。" }));
-    assert_eq!(res.status, "ok", "{}", res.detail);
-    let argv = r.launched().remove(0).2;
-    assert!(!argv.iter().any(|a| a == "--resume" || a == "sid-220" || a == "--continue"), "{argv:?}");
-    assert!(argv_has(&argv, &["-n", "目標"]) && argv_has(&argv, &["--model", "opus"]), "{argv:?}");
-    let want = format!("{}
-前任交代：先看 PR 12。
-再跑測試。", default_handover_note("目標"));
-    assert_eq!(&argv[argv.len() - 2..], ["--".to_string(), want]);
-    assert_eq!(res.result.unwrap()["session_id"], "sid-new");
+/// 前任（sid-220）的對話紀錄：projects/某資料夾/sid-220.jsonl
+fn write_old_transcript(r: &Rig) -> PathBuf {
+    let dir = r.projects.join("D--Github-工作");
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("sid-220.jsonl");
+    std::fs::write(&f, json!({ "type": "user", "cwd": r.work.to_string_lossy() }).to_string()).unwrap();
+    f
 }
 
 #[test]
-fn 轉交_沒給提示就用固定文字_新視窗_session_沒換不算成功() {
+fn 接班換手_請前任寫交接_等檔案_關前任_同名開新_不帶_resume_第一句話指向對話紀錄與交接檔() {
+    let r = rig(Opt::default());
+    let transcript = write_old_transcript(&r);
+    let res = r.run("handover", json!({ "note": "先看 PR 12。
+再跑測試。" }));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    // 1. 先請前任寫交接（還沒關任何程序），位置在規範資料夾內
+    let told = r.env.told.lock().unwrap().clone();
+    assert_eq!(told.len(), 1);
+    assert_eq!(told[0].0, "目標");
+    let root = r.handoff.join(HANDOFF_SUBDIR).join("目標");
+    let path = told[0].1.strip_prefix("要換手了：請把交接寫到 ").and_then(|s| s.strip_suffix("，寫完回覆『交接完成』。")).unwrap().to_string();
+    assert!(Path::new(&path).starts_with(&root) && path.ends_with(".md"), "{path}");
+    assert_eq!(*r.env.terminated_at_tell.lock().unwrap(), Some(0), "請前任寫交接時還沒關任何程序");
+    // 2. 關前任、同名開新對話
+    assert!(r.terminated().contains(&220));
+    let argv = r.launched().remove(0).2;
+    assert!(!argv.iter().any(|a| a == "--resume" || a == "sid-220" || a == "--continue" || a == "--session-id"), "同名開新，不帶 --resume：{argv:?}");
+    assert!(argv_has(&argv, &["-n", "目標"]) && argv_has(&argv, &["--model", "opus"]), "{argv:?}");
+    // 3. 第一句話：前任對話紀錄完整路徑（從最後往前看）＋交接檔＋補充的話；有寫完就不寫「沒有寫完」
+    let want = format!("你是『目標』的下一任，前任的上下文用完了。先讀前任最後一段對話紀錄 {}（從最後往前看）和交接檔 {path}，接著把手上的工作做下去。\n前任交代：先看 PR 12。\n再跑測試。", transcript.display());
+    assert_eq!(&argv[argv.len() - 2..], ["--".to_string(), want]);
+    let v = res.result.unwrap();
+    assert_eq!((v["session_id"].as_str(), v["handoff_path"].as_str(), v["handoff_done"].as_bool()), (Some("sid-new"), Some(path.as_str()), Some(true)));
+    // 4. 階段依序回報
+    assert_eq!(*r.env.progress.lock().unwrap(), vec!["stage:handoff", "stage:closing", "stage:opening"]);
+}
+
+#[test]
+fn 接班換手_前任沒寫完_逾時仍會換手_第一句話註明() {
+    for tell_fails in [false, true] {
+        let r = rig(Opt::default());
+        write_old_transcript(&r);
+        r.env.write_on_tell.store(false, Ordering::SeqCst);
+        r.env.tell_fails.store(tell_fails, Ordering::SeqCst);
+        let res = r.run("handover", json!({}));
+        assert_eq!(res.status, "ok", "逾時照樣換手：{}", res.detail);
+        let argv = r.launched().remove(0).2;
+        let prompt = argv.last().unwrap();
+        assert!(prompt.contains("前任沒有寫完交接"), "{prompt}");
+        assert!(r.terminated().contains(&220));
+        assert_eq!(res.result.unwrap()["handoff_done"], false);
+    }
+}
+
+#[test]
+fn 接班換手_交接檔大小還在變_不算寫完_穩定了才算() {
+    let r = rig(Opt::default());
+    write_old_transcript(&r);
+    // 每次輪詢（sleep）都把檔案加長，直到逾時：永遠不穩定
+    r.env.write_on_tell.store(false, Ordering::SeqCst);
+    let told = r.env.told_path.clone();
+    let growing = Arc::new(AtomicUsize::new(0));
+    let g2 = growing.clone();
+    *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || {
+        if let Some(p) = told.lock().unwrap().clone() {
+            let n = g2.fetch_add(1, Ordering::SeqCst) + 1;
+            std::fs::create_dir_all(Path::new(&p).parent().unwrap()).unwrap();
+            std::fs::write(&p, "x".repeat(n)).unwrap();
+        }
+    }));
+    let res = r.run("handover", json!({}));
+    assert_eq!(res.status, "ok");
+    assert_eq!(res.result.unwrap()["handoff_done"], false, "大小一直在變＝還沒寫完");
+}
+
+#[test]
+fn 接班換手_沒找到前任的對話紀錄_第一句話只指向交接檔() {
+    let r = rig(Opt::default());
+    let res = r.run("handover", json!({}));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    let prompt = r.launched().remove(0).2.pop().unwrap();
+    assert!(prompt.contains("找不到前任的對話紀錄檔") && prompt.contains("交接檔"), "{prompt}");
+}
+
+#[test]
+fn 接班換手_新視窗_session_沒換不算成功_仍回交接檔位置() {
     let r = rig(Opt::default());
     *r.env.appear.lock().unwrap() = Some((502, "sid-220".into()));
     let res = r.run("handover", json!({}));
     assert_eq!(res.status, "unconfirmed", "新視窗的 sessionId 和舊的一樣＝不是新對話");
-    let argv = r.launched().remove(0).2;
-    assert_eq!(argv.last().unwrap(), &default_handover_note("目標"));
-    assert_eq!(default_handover_note("目標"), "你是『目標』的下一任，前任的上下文用完了。先讀你與收發室的往來記錄（信尾那行的路徑）和前任留下的交接檔，接著把手上的工作做下去。");
-    assert_eq!(handover_prompt("目標", "  "), default_handover_note("目標"), "只有空白＝沒補話");
+    assert!(res.result.unwrap()["handoff_path"].as_str().is_some());
 }
+
+#[test]
+fn 接班換手守門_交接檔路徑只在規範資料夾內_檔名只有安全字元_有夥伴_id_用夥伴_id() {
+    let base = Path::new("handoff-base");
+    let root = base.join(HANDOFF_SUBDIR);
+    for key in ["../../evil", "a/b\\c", "..", "", "C:\\x", "名字 空白;rm", "p_0123456789abcdef0123", &"長".repeat(200)] {
+        let p = handoff_path(base, key, 1_800_000_000_000).unwrap();
+        assert!(p.starts_with(&root), "{key:?} -> {p:?}");
+        assert!(p.components().all(|c| !matches!(c, std::path::Component::ParentDir)), "{p:?}");
+        assert_eq!(p.parent().unwrap().parent().unwrap(), root, "只有一層夥伴資料夾：{p:?}");
+        let dir = p.parent().unwrap().file_name().unwrap().to_string_lossy().to_string();
+        assert!(dir.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_'), "{dir}");
+        let file = p.file_name().unwrap().to_string_lossy().to_string();
+        assert!(file.ends_with(".md") && file[..file.len() - 3].chars().all(|c| c.is_ascii_digit() || c == '-') && file.len() == "20270115-080000.md".len(), "{file}");
+    }
+    assert_eq!(handoff_path(base, "p_0123456789abcdef0123", 0).unwrap().parent().unwrap().file_name().unwrap(), "p_0123456789abcdef0123");
+    // 有夥伴 ID 時資料夾用夥伴 ID，不是視窗名
+    let r = rig(Opt::default());
+    r.ops.set_partners(std::collections::BTreeMap::from([("目標".to_string(), "p_00000000000000000042".to_string())]));
+    let res = r.run("handover", json!({}));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    let told = r.env.told.lock().unwrap()[0].1.clone();
+    assert!(told.contains("p_00000000000000000042") && !told.contains("交接\\目標") && !told.contains("交接/目標"), "{told}");
+}
+
 
 // ================================================================================================
 // 規則 6：每個操作都留紀錄
@@ -635,7 +781,7 @@ fn rig_with_server(o: Opt, st: Arc<Mutex<Srv>>) -> Rig {
     let url = start_srv(st);
     let relay = Arc::new(Relay::new(url, "fake-test-key".into(), "T".into(), "T-ASN".into()));
     let protect: Arc<dyn Fn(&str, u32) -> bool + Send + Sync> = Arc::new(|name, _| name == "T-收發室");
-    r.ops = PartnerOps::new(relay, r.log.clone(), r.handoff.clone(), r.env.clone(), OpsDirs { sessions: r.sessions.clone(), status: r.status.clone(), control: r.control.clone() }, protect);
+    r.ops = PartnerOps::new(relay, r.log.clone(), r.handoff.clone(), r.env.clone(), OpsDirs { sessions: r.sessions.clone(), status: r.status.clone(), control: r.control.clone(), projects: r.projects.clone() }, protect);
     r
 }
 
@@ -708,4 +854,165 @@ fn 重開用的參數_改寫函式的通用版_與舊版一致() {
     assert_eq!(switch::rewrite_args(&args, "s1", "新", "sonnet"), switch::rewrite_args_opts(&args, Some("s1"), "新", Some("sonnet"), None));
     let h = switch::rewrite_args_opts(&args, None, "新", None, Some("接班"));
     assert_eq!(h, ["claude.exe", "-n", "新", "--flag", "--", "接班"].map(String::from).to_vec());
+}
+
+// ================================================================================================
+// 喚醒（resume）：視窗已關，用同一個 sessionId 在原工作資料夾重開
+// ================================================================================================
+
+const SID: &str = "sid-offline-1";
+
+/// 離線夥伴「離線夥伴」：沒有活著的視窗，對話紀錄在 projects/某資料夾/<sid>.jsonl，第三行才有 cwd
+fn resume_rig(o: Opt) -> Rig {
+    let r = rig(o);
+    let dir = r.projects.join("D--Github-工作");
+    std::fs::create_dir_all(&dir).unwrap();
+    let lines = [json!({ "type": "summary", "summary": "x" }), json!({ "type": "queue-operation" }), json!({ "type": "user", "cwd": r.work.to_string_lossy(), "sessionId": SID })];
+    std::fs::write(dir.join(format!("{SID}.jsonl")), lines.iter().map(Value::to_string).collect::<Vec<_>>().join("\n")).unwrap();
+    *r.env.appear.lock().unwrap() = Some((501, SID.into()));
+    r
+}
+
+fn resume(r: &Rig, name: &str, sid: &str) -> OpResult {
+    r.ops.execute(&mk_op("resume", json!({ "name": name, "session_id": sid })))
+}
+
+#[test]
+fn 喚醒_成功_原資料夾用第一個_claude_profile_帶_resume_與_n_乾淨環境開_不結束任何程序() {
+    let r = resume_rig(Opt::default());
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    let l = r.launched();
+    assert_eq!(l.len(), 1);
+    let (name, cwd, argv) = &l[0];
+    assert_eq!(name, "離線夥伴");
+    assert_eq!(cwd.to_string_lossy().replace(r"\\?\", ""), r.work.canonicalize().unwrap().to_string_lossy().replace(r"\\?\", ""));
+    assert_eq!(argv[0], r"C:\fake\claude.exe", "claude 排第一，不是 zzz");
+    assert!(argv_has(argv, &["-n", "離線夥伴"]) && argv_has(argv, &["--resume", SID]), "{argv:?}");
+    assert_eq!(argv.iter().filter(|a| *a == "-n").count(), 1, "設定裡已有 -n，不重複：{argv:?}");
+    assert!(argv.iter().any(|a| a == "--dangerously-skip-permissions") && argv_has(argv, &["--model", "opus"]), "{argv:?}");
+    assert!(!argv.iter().any(|a| a == "--continue" || a == "{name}"));
+    assert!(r.terminated().is_empty() && r.os().closed.lock().unwrap().is_empty(), "不動任何程序");
+    let v = res.result.unwrap();
+    assert_eq!((v["pid"].as_u64(), v["session_id"].as_str()), (Some(501), Some(SID)));
+    // 記錄裡看得到「喚醒視窗」
+    r.ops.record(&mk_op("resume", json!({ "name": "離線夥伴" })), &ok("視窗已喚醒", None));
+    assert!(r.log.recent().join("\n").contains("op=resume"));
+    assert_eq!(mk_op("resume", json!({})).what(), "喚醒視窗");
+}
+
+#[test]
+fn 喚醒_新視窗一直沒出現_回未確認() {
+    let r = resume_rig(Opt::default());
+    *r.env.appear.lock().unwrap() = None;
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!(res.status, "unconfirmed", "{}", res.detail);
+    assert_eq!(r.launched().len(), 1);
+}
+
+#[test]
+fn 喚醒守門_工作資料夾不在本機啟動設定的允許清單_不開() {
+    let r = resume_rig(Opt::default());
+    let other = r.tmp.path().join("別的資料夾");
+    std::fs::create_dir_all(&other).unwrap();
+    *r.env.cfg.lock().unwrap() = Ok(launch_cfg(&[&other]));
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!(res.status, "failed");
+    assert!(res.detail.contains("不在這台電腦允許的清單內"), "{}", res.detail);
+    assert!(r.launched().is_empty(), "資料夾不在白名單就不開");
+    // 啟動設定整個讀不到也不開
+    *r.env.cfg.lock().unwrap() = Err("這台電腦還沒有可用的啟動設定".into());
+    assert_eq!(resume(&r, "離線夥伴", SID).status, "failed");
+    assert!(r.launched().is_empty());
+    // 上層資料夾在白名單不等於子資料夾在白名單
+    *r.env.cfg.lock().unwrap() = Ok(launch_cfg(&[r.tmp.path()]));
+    assert_eq!(resume(&r, "離線夥伴", SID).status, "failed", "只認完全相同的資料夾");
+    assert!(r.launched().is_empty());
+}
+
+#[test]
+fn 喚醒守門_已經在線_同名或同_sessionid_都不開() {
+    let r = resume_rig(Opt::default());
+    // 同名（活著的「目標」視窗）
+    let res = resume(&r, "目標", SID);
+    assert_eq!((res.status, res.detail.as_str()), ("failed", "這位夥伴已經在線上"));
+    // 同 sessionId（活著的 sid-220 被別的名字用著）
+    let dir = r.projects.join("D--Github-工作");
+    std::fs::write(dir.join("sid-220.jsonl"), json!({ "cwd": r.work.to_string_lossy() }).to_string()).unwrap();
+    let res = resume(&r, "離線夥伴", "sid-220");
+    assert_eq!((res.status, res.detail.as_str()), ("failed", "這位夥伴已經在線上"));
+    assert!(r.launched().is_empty());
+    // 死掉的同名記錄不算在線
+    write_session(&r.sessions, 900, "sid-dead", "離線夥伴", "idle", r.work.to_str().unwrap());
+    assert_eq!(resume(&r, "離線夥伴", SID).status, "ok", "程序已死的殘留記錄不擋");
+}
+
+#[test]
+fn 喚醒守門_sessionid_格式不合_不碰任何檔案() {
+    let r = resume_rig(Opt::default());
+    // 誘餌：用路徑穿越能碰到的檔案，裡面有合法的 cwd
+    std::fs::write(r.projects.join("escape.jsonl"), json!({ "cwd": r.work.to_string_lossy() }).to_string()).unwrap();
+    std::fs::write(r.projects.join("D--Github-工作").join("a b.jsonl"), json!({ "cwd": r.work.to_string_lossy() }).to_string()).unwrap();
+    for bad in ["../escape", "..\\escape", "a b", "", "a/b", "x.y", &"a".repeat(129), "與"] {
+        let res = resume(&r, "離線夥伴", bad);
+        assert_eq!(res.status, "failed", "{bad:?}");
+        assert!(r.launched().is_empty(), "{bad:?}");
+        assert_eq!(find_transcript_cwd(&r.projects, bad), None, "{bad:?}：連找都不找");
+    }
+    assert!(find_transcript_cwd(&r.projects, SID).is_some(), "合格的當然找得到");
+}
+
+#[test]
+fn 喚醒守門_本機開關關著_不開_動手前再驗一次() {
+    let r = resume_rig(Opt { allow_first: 0, ..Opt::default() });
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!((res.status, res.detail.as_str()), ("failed", CONSENT_OFF));
+    assert!(r.launched().is_empty());
+    // execute 開頭的檢查通過、動手前已被關掉
+    let r = resume_rig(Opt { allow_first: 1, ..Opt::default() });
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!((res.status, res.detail.as_str()), ("failed", CONSENT_OFF));
+    assert!(r.launched().is_empty(), "檢查之後被關掉就不開");
+}
+
+#[test]
+fn 喚醒守門_對話紀錄只比對檔名_內容寫著同一個_sessionid_的別的檔不算() {
+    let r = resume_rig(Opt::default());
+    let dir = r.projects.join("D--Github-工作");
+    std::fs::remove_file(dir.join(format!("{SID}.jsonl"))).unwrap();
+    // 檔名不是 sessionId，但內容寫著它；子資料夾裡的同名檔、projects 根目錄的同名檔也不算（只看 projects 底下一層資料夾）
+    std::fs::write(dir.join("別人的對話.jsonl"), json!({ "type": "user", "sessionId": SID, "cwd": r.work.to_string_lossy() }).to_string()).unwrap();
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    std::fs::write(dir.join("sub").join(format!("{SID}.jsonl")), json!({ "cwd": r.work.to_string_lossy() }).to_string()).unwrap();
+    std::fs::write(r.projects.join(format!("{SID}.jsonl")), json!({ "cwd": r.work.to_string_lossy() }).to_string()).unwrap();
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!((res.status, res.detail.as_str()), ("failed", "找不到原本的對話紀錄，只能開新的夥伴"));
+    assert!(r.launched().is_empty());
+}
+
+#[test]
+fn 喚醒_紀錄沒有_cwd_或_cwd_已不存在_收發室名字_都不開() {
+    let r = resume_rig(Opt::default());
+    let f = r.projects.join("D--Github-工作").join(format!("{SID}.jsonl"));
+    std::fs::write(&f, "{\"type\":\"summary\"}\nnot json\n").unwrap();
+    assert_eq!(resume(&r, "離線夥伴", SID).detail, "找不到原本的對話紀錄，只能開新的夥伴");
+    let gone = r.tmp.path().join("已刪除");
+    std::fs::write(&f, json!({ "cwd": gone.to_string_lossy() }).to_string()).unwrap();
+    *r.env.cfg.lock().unwrap() = Ok(LaunchConfig { cwd_allow: vec![canonical_launch_cwd(&gone.to_string_lossy()).unwrap()], ..launch_cfg(&[&r.work]) });
+    assert!(resume(&r, "離線夥伴", SID).detail.contains("已經不存在"));
+    assert_eq!(resume(&r, "T-收發室", SID).detail, PROTECTED);
+    assert_eq!(resume(&r, "T-ASN", SID).detail, PROTECTED);
+    assert!(r.launched().is_empty());
+}
+
+#[test]
+fn 喚醒_啟動設定只有非_claude_或背景型_profile_不開() {
+    let r = resume_rig(Opt::default());
+    let mut cfg = launch_cfg(&[&r.work]);
+    for p in cfg.profiles.values_mut() {
+        p.engine = "codex".into();
+    }
+    *r.env.cfg.lock().unwrap() = Ok(cfg);
+    assert_eq!(resume(&r, "離線夥伴", SID).status, "failed");
+    assert!(r.launched().is_empty());
 }

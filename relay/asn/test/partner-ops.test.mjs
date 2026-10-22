@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { OPS, OP_GIVE_UP_MS, REASON, STALE_TEXT, buildOpRequest, handoverPrompt, infoRows, isManageable, menuItems, opErrorText, opFormError, progressView } from '../ui/lib/partner-ops.mjs'
+import { HANDOVER_GIVE_UP_MS, ONLINE_OPS, OPS, OP_GIVE_UP_MS, REASON, STALE_TEXT, buildOpRequest, infoRows, isManageable, menuItems, opErrorText, opFormError, progressView } from '../ui/lib/partner-ops.mjs'
 import { machinesByNode } from '../ui/lib/mobile-launch.mjs'
 
 const LAUNCHER = { profiles: [{ id: 'claude' }], cwd_allow: ['D:\\Github\\asn'] }
@@ -10,10 +10,11 @@ const MACH = machinesByNode({ machines: [{ node: 'H', launcher: LAUNCHER, online
 const ctx = { machines: MACH, loaded: true, signedIn: true, asn: { H: [{ window_name: 'H-ASN' }] } }
 const W = (node, agent, extra = {}) => ({ id: `${node}/${agent}`, node, agent, nick: agent, status: 'online', engine: 'claude', kind: 'claude', device: `設備${node}`, ...extra })
 
-test('選單五項：詳情、改名、切換模型、關閉視窗、轉交下一任；都能用時全部 ok', () => {
+test('選單五項：詳情、改名、切換模型、關閉視窗、接班換手；都能用時全部 ok（在線的沒有喚醒）', () => {
   const items = menuItems(W('H', '小文'), ctx)
-  assert.deepEqual(items.map(i => i.key), OPS)
-  assert.deepEqual(items.map(i => i.label), ['詳情', '改名', '切換模型', '關閉視窗', '轉交下一任'])
+  assert.deepEqual(items.map(i => i.key), ONLINE_OPS)
+  assert.deepEqual(OPS, [...ONLINE_OPS, 'resume'])
+  assert.deepEqual(items.map(i => i.label), ['詳情', '改名', '切換模型', '關閉視窗', '接班換手'])
   assert.ok(items.every(i => i.ok && i.reason === ''))
 })
 
@@ -29,7 +30,6 @@ test('人、手機、雲端代理、群組、ASN／收發室視窗：空陣列�
 test('不能用就反灰並給中文原因：沒登入、離線、沒開放（詳情除外）、還沒查到設定、舊後台', () => {
   const rs = items => Object.fromEntries(items.map(i => [i.key, i.reason]))
   assert.ok(menuItems(W('H', 'a'), { ...ctx, signedIn: false }).every(i => !i.ok && i.reason === REASON.needLogin), '沒登入全反灰（含詳情）')
-  assert.ok(menuItems(W('H', 'a', { status: 'offline' }), ctx).every(i => !i.ok && i.reason === REASON.offline), '視窗離線')
   assert.ok(menuItems(W('W', 'a'), ctx).every(i => !i.ok && i.reason === REASON.offline), '那台電腦離線')
   const closed = menuItems(W('C', 'a'), ctx)
   assert.deepEqual(closed.map(i => i.ok), [true, false, false, false, false], '沒開放：只有詳情能用')
@@ -40,6 +40,24 @@ test('不能用就反灰並給中文原因：沒登入、離線、沒開放（�
   assert.ok(menuItems(W('H', 'a'), { ...ctx, supported: false }).every(i => !i.ok && i.reason === REASON.unsupported))
   for (const r of Object.values(REASON)) assert.ok(!/[A-Za-z]{4,}/.test(r), `純中文：${r}`)
   for (const i of menuItems(W('H', 'a'), ctx)) assert.ok(!/[A-Za-z]{4,}/.test(i.label))
+})
+
+test('離線的 AI 夥伴只有「喚醒」：有登入、那台電腦在線且開放才能按；其餘反灰並寫中文原因', () => {
+  const off = (node, extra = {}) => W(node, '小離', { status: 'offline', ...extra })
+  assert.deepEqual(menuItems(off('H'), ctx), [{ key: 'resume', label: '喚醒', ok: true, reason: '' }])
+  const one = (f, c = ctx) => menuItems(f, c).map(i => [i.key, i.ok, i.reason])
+  assert.deepEqual(one(off('H'), { ...ctx, signedIn: false }), [['resume', false, REASON.needLogin]])
+  assert.deepEqual(one(off('W')), [['resume', false, REASON.deviceOffline]], '那台電腦離線')
+  assert.deepEqual(one(off('Z')), [['resume', false, REASON.deviceOffline]], '查不到那台電腦')
+  assert.deepEqual(one(off('C')), [['resume', false, REASON.closed]], '沒開放')
+  assert.deepEqual(one(off('H'), { ...ctx, loaded: false }), [['resume', false, REASON.unknown]])
+  assert.deepEqual(one(off('H'), { ...ctx, supported: false }), [['resume', false, REASON.unsupported]])
+  assert.deepEqual(menuItems(off('H', { engine: 'codex' }), ctx), [], '只有 Claude 的夥伴能喚醒')
+  assert.equal(menuItems(off('H', { engine: null }), ctx).length, 1, '名單沒寫引擎（離線記得的）就當 Claude')
+  for (const f of [off('H', { kind: 'phone' }), off('H', { person: true }), off('H', { room: true }), off('H', { agent: '家用收發室' }), off('H', { engine: 'asn' })]) assert.deepEqual(menuItems(f, ctx), [], JSON.stringify(f))
+  assert.deepEqual(buildOpRequest(off('H'), 'resume', { newName: 'x', note: 'y' }), { node: 'H', name: '小離', op: 'resume' }, '喚醒只送節點、名字、動作（session 由後台查）')
+  assert.equal(opFormError(off('H'), 'resume', {}), '')
+  assert.equal(opFormError(off('H'), 'resume', {}, one(off('C'))[0] && menuItems(off('C'), ctx)[0]), REASON.closed)
 })
 
 test('送出前檢查與請求內容：只放該動作的欄位；節點與視窗名取自名單', () => {
@@ -62,11 +80,28 @@ test('送出前檢查與請求內容：只放該動作的欄位；節點與視�
   assert.equal(opFormError(W('C', 'a'), 'close', {}, blocked), REASON.closed, '反灰的項目不送出')
 })
 
-test('轉交的固定接班提示：名字放進去，手機補的話接在後面', () => {
-  const p = handoverPrompt('小文')
-  assert.equal(p, '你是『小文』的下一任，前任的上下文用完了。先讀你與收發室的往來記錄（信尾那行的路徑）和前任留下的交接檔，接著把手上的工作做下去。')
-  assert.equal(handoverPrompt('小文', '  先修測試  '), `${p}\n\n先修測試`)
-  assert.equal(handoverPrompt('小文', ' '), p)
+test('接班換手的進度分段：請前任寫交接 → 關閉前任視窗 → 開新視窗 → 完成（附交接檔位置）', () => {
+  const t0 = 1_000_000
+  const at = (detail, now = t0 + 1000) => progressView({ status: 'taken', detail }, { op: 'handover', sentAt: t0, now })
+  const states = v => v.steps.map(s => s.state)
+  assert.deepEqual([at('stage:handoff').text, states(at('stage:handoff'))], ['請前任寫交接中…', ['active', 'todo', 'todo']])
+  assert.deepEqual([at('stage:closing').text, states(at('stage:closing'))], ['關閉前任視窗中…', ['done', 'active', 'todo']])
+  assert.deepEqual([at('stage:opening').text, states(at('stage:opening'))], ['開新視窗中…', ['done', 'done', 'active']])
+  assert.equal(at('').text, '那台電腦正在處理…', '還沒回報階段')
+  assert.equal(at('stage:evil <b>').text, '那台電腦正在處理…', '看不懂的階段不外露')
+  const p = 'C:/Users/x/.asn/handoff/交接/p_1/20261022-101500.md'
+  const done = progressView({ status: 'ok', result: { handoff_path: p, handoff_done: true } }, { op: 'handover' })
+  assert.deepEqual([done.phase, done.text, states(done), done.extra], ['done', '接班換手完成，新視窗開好了。', ['done', 'done', 'done'], ['交接檔：' + p]])
+  const partial = progressView({ status: 'ok', result: { handoff_path: 'D:/h/a.md', handoff_done: false } }, { op: 'handover' })
+  assert.match(partial.extra.join(' '), /前任沒有寫完交接/)
+  assert.deepEqual(progressView({ status: 'ok' }, { op: 'handover' }).extra, [], '沒有結果也不壞')
+  assert.deepEqual(progressView({ status: 'ok' }, { op: 'resume' }), { phase: 'done', done: true, text: '已喚醒，視窗開好了。' })
+  // 處理中的上限：接班換手要等前任寫交接，放寬到 15 分鐘；其他動作仍是 3 分鐘
+  assert.equal(at('stage:handoff', t0 + OP_GIVE_UP_MS + 1).done, false)
+  assert.equal(at('stage:handoff', t0 + HANDOVER_GIVE_UP_MS + 1).done, true)
+  assert.equal(progressView({ status: 'taken' }, { op: 'rename', sentAt: t0, now: t0 + OP_GIVE_UP_MS + 1 }).done, true)
+  assert.equal(progressView({ status: 'pending' }, { op: 'handover', sentAt: t0, now: t0 + OP_GIVE_UP_MS + 1 }).done, true, '還沒被取走照舊 3 分鐘')
+  assert.equal(HANDOVER_GIVE_UP_MS > 10 * 60 * 1000, true)
 })
 
 test('錯誤翻成中文：後台代碼、沒登入、斷線、舊後台；看不懂的給通用句，不洩漏英文', () => {
@@ -76,6 +111,9 @@ test('錯誤翻成中文：後台代碼、沒登入、斷線、舊後台；看�
   assert.match(opErrorText('partner_op HTTP 401 unauthorized'), /登入/)
   assert.match(opErrorText('partner_op HTTP 409 no_launcher'), /沒有開放/)
   assert.match(opErrorText('partner_op HTTP 429 rate_limited'), /太多次/)
+  assert.match(opErrorText('partner_op HTTP 409 already_online'), /已經在線上/)
+  assert.match(opErrorText('partner_op HTTP 409 no_session'), /對話紀錄/)
+  assert.match(opErrorText('partner_op HTTP 409 device_offline'), /不在線/)
   assert.equal(opErrorText('partner_op HTTP 404 '), REASON.unsupported, '舊後台沒有這個動作')
   assert.equal(opErrorText('尚未登入，無法管理夥伴視窗'), REASON.needLogin)
   assert.match(opErrorText('partner_op 連線失敗：timeout'), /網路/)
@@ -91,7 +129,7 @@ test('進度：已送出 → 電腦正在處理 → 完成／失敗原因；等�
   assert.deepEqual(progressView({ status: 'taken' }, { sentAt: t0, now: t0 + 1000 }), { phase: 'working', done: false, text: '那台電腦正在處理…' })
   assert.equal(progressView({ status: 'ok' }, { op: 'rename' }).text, '已改名。')
   assert.match(progressView({ status: 'ok' }, { op: 'close' }).text, /已關閉/)
-  assert.match(progressView({ status: 'ok' }, { op: 'handover' }).text, /下一任/)
+  assert.match(progressView({ status: 'ok' }, { op: 'handover' }).text, /接班換手/)
   assert.equal(progressView({ status: 'ok', op: 'model' }).text, '已切換模型。', 'op 取自那一筆')
   assert.ok(progressView({ status: 'ok' }).done)
   assert.equal(progressView({ status: 'failed', detail: '找不到這個視窗' }).text, '沒有成功：找不到這個視窗')
