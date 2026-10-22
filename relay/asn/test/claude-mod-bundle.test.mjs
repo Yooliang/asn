@@ -43,6 +43,14 @@ test('版本：外掛 plugin.json 的 version 與 ASN 版本一致', () => {
   assert.equal(JSON.parse(fs.readFileSync(path.join(modDir, '.claude-plugin', 'plugin.json'), 'utf8')).version, asn)
 })
 
+test('asn 技能：SKILL.md 檔頭齊全，ASN 的 CHANGELOG.md 跟著打包進技能資料夾', () => {
+  const skill = fs.readFileSync(path.join(modDir, 'skills', 'asn', 'SKILL.md'), 'utf8')
+  assert.match(skill, /^---\r?\nname: asn\r?\ndescription: .+/m, 'SKILL.md 檔頭要有 name: asn 與 description')
+  assert.ok(skill.includes('CHANGELOG.md'), 'SKILL.md 要指向更新說明')
+  const res = JSON.parse(read('src-tauri/tauri.conf.json')).bundle.resources
+  assert.equal(res['../CHANGELOG.md'], 'claude-mod/skills/asn/CHANGELOG.md', '更新說明要跟外掛一起帶走，AI 才查得到各版新功能')
+})
+
 test('發版：bump.mjs 會把 plugin.json 的 version 一起改（在暫存複本裡跑，不動真的檔）', () => {
   const t = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-bump-'))
   try {

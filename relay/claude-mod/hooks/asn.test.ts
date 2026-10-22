@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { buildSendArgv, guardBash, mentionsPersonSignature } from './lib'
+import { buildSendArgv, guardBash, mentionsPersonSignature, startNotice } from './lib'
 
 const CLI = { asnCliPath: 'C:/ASN/asn-cli.exe' }
 const MJS = { sendMjsPath: '/r/relay/machine/send.mjs', nodePath: 'node' }
@@ -122,4 +122,45 @@ test('自動找預設 asn-cli：都沒有就回清楚的錯誤字串、不執行
   const r = (sent as { result: unknown }).result
   expect(typeof r).toBe('string')
   expect(r as string).toContain('尚未設定')
+})
+
+test('開窗提示：帶版本、指向 asn 技能；版本空白時不留空', () => {
+  expect(startNotice('0.1.33')).toContain('ASN 0.1.33')
+  expect(startNotice('0.1.33')).toContain('asn 技能')
+  expect(startNotice('  ')).toContain('（版本不明）')
+})
+
+test('開窗時附上提示（帶 plugin.json 的版本）', async ($, on) => {
+  const appended: unknown[] = []
+  on('env.get', () => ({ value: 'C:/Users/u' }) as never)
+  on('session.id', () => ({ value: 's1' }) as never)
+  on('fs.read', () => ({ value: JSON.stringify({ name: 'asn', version: '9.8.7' }) }) as never)
+  on('fs.write', () => ({ value: undefined }) as never)
+  on('ui.log', () => ({ value: undefined }) as never)
+  on('tool.register', () => ({ value: { tool: 'mcp__asn__asn_send' } }) as never)
+  on('session.append', (_: unknown, e: unknown, next: (x: unknown) => unknown) => {
+    appended.push(e)
+    return next(e) as never
+  })
+  on('session.start', (_: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect(appended.length).toBe(1)
+  const msg = (appended[0] as { message: { type: string; content: { type: string; text: string }[] } }).message
+  expect(msg.type).toBe('system')
+  expect(msg.content[0].text).toContain('ASN 9.8.7')
+})
+
+test('開窗提示附不上（引擎拒絕）不擋開窗', async ($, on) => {
+  on('env.get', () => ({ value: 'C:/Users/u' }) as never)
+  on('session.id', () => ({ value: 's1' }) as never)
+  on('fs.read', () => ({ value: '{"version":"1.0.0"}' }) as never)
+  on('fs.write', () => ({ value: undefined }) as never)
+  on('ui.log', () => ({ value: undefined }) as never)
+  on('tool.register', () => ({ value: { tool: 'mcp__asn__asn_send' } }) as never)
+  on('session.append', () => {
+    throw new Error('this session keeps no conversation to append to')
+  })
+  on('session.start', (_: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
+  const out = await $.session.start({ cwd: '/x', surface: 'terminal', isInteractive: true })
+  expect(out).toMatchObject({ cwd: '/x' })
 })

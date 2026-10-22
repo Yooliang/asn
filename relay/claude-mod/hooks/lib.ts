@@ -60,3 +60,9 @@ export function guardBash(command: string): string | undefined {
   if (hasTo && !hasFlag) return '請加 --reply 或 --no-reply，或改用 asn_send 工具'
   return undefined
 }
+
+// 開新視窗時附在對話裡的一句提示：讓沒有 ASN 原始碼的電腦上的 Claude 也知道有 asn 技能可看。
+export function startNotice(version: string): string {
+  const v = version.trim() || '（版本不明）'
+  return `這台電腦裝了 ASN ${v}（AI 夥伴與人互寄信件的收發室）。收到「[RELAY 來信]」、要寄信或回信、被問到 ASN 版本或新功能時，先看 asn 技能：裡面有 asn-cli 用法、信任等級規則與各版更新說明。`
+}
