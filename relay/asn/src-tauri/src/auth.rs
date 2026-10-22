@@ -178,6 +178,13 @@ pub fn classify_request(head: &str, expect_state: &str, port: u16) -> CallbackKi
 }
 
 const PAGE_OK: &str = "<!doctype html><meta charset=\"utf-8\"><title>ASN</title><body style=\"font-family:sans-serif;text-align:center;margin-top:20vh\"><h2>登入完成</h2><p>可以回到 ASN 了，這個分頁可以關掉。</p>";
+/// 安卓版的完成頁：瀏覽器停在這一頁，要把使用者帶回 ASN。先用 meta 轉址自動帶回；被瀏覽器擋下（沒有點擊動作）時，
+/// 大按鈕用 intent 網址（指定套件名）叫回 ASN。回 ASN 用的是 AndroidManifest 裡 MainActivity 的 `tw.yooliang.asn` 網址協定，不帶任何權杖。
+pub const PAGE_OK_ANDROID: &str = "<!doctype html><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"refresh\" content=\"1;url=intent://login-done#Intent;scheme=tw.yooliang.asn;package=tw.yooliang.asn;end\"><title>ASN</title><body style=\"font-family:sans-serif;text-align:center;margin-top:18vh\"><h2>登入完成</h2><p>正在回到 ASN…</p><p><a href=\"intent://login-done#Intent;scheme=tw.yooliang.asn;package=tw.yooliang.asn;end\" style=\"display:inline-block;padding:14px 28px;border-radius:10px;background:#2f6fb5;color:#fff;font-size:18px;text-decoration:none\">回到 ASN</a></p>";
+/// 回呼成功時回給瀏覽器的頁面：電腦版是「可以回到 ASN 了」，安卓版多帶一個回 App 的按鈕
+pub fn page_ok() -> &'static str {
+    if cfg!(target_os = "android") { PAGE_OK_ANDROID } else { PAGE_OK }
+}
 const PAGE_FAIL: &str = "<!doctype html><meta charset=\"utf-8\"><title>ASN</title><body style=\"font-family:sans-serif;text-align:center;margin-top:20vh\"><h2>登入沒有完成</h2><p>請回到 ASN 再試一次。</p>";
 const PAGE_BAD: &str = "<!doctype html><meta charset=\"utf-8\"><title>ASN</title><body><p>無效的請求。</p>";
 
@@ -242,7 +249,7 @@ pub fn wait_for_code(listener: TcpListener, port: u16, expect_state: &str, timeo
                 let head = String::from_utf8_lossy(&buf[..n]).into_owned();
                 match classify_request(&head, expect_state, port) {
                     CallbackKind::Code(c) => {
-                        respond(&mut s, 200, PAGE_OK);
+                        respond(&mut s, 200, page_ok());
                         return Ok(c);
                     }
                     CallbackKind::Failed(why) => {

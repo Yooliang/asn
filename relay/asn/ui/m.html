@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
+<meta name="theme-color" content="#8fbfec">
+<title>ASN</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="mobile.css">
+</head>
+<body class="m-body">
+<div id="app" class="m" v-cloak>
+  <!-- 啟動中、無法啟動 -->
+  <section class="m-center" v-if="screen === 'boot'"><img class="m-logo" src="img/logo.svg" alt=""><p>啟動中…</p></section>
+  <section class="m-center" v-else-if="screen === 'fatal'"><img class="m-logo" src="img/logo.svg" alt=""><p role="alert">ASN 無法啟動：{{ fatal }}</p></section>
+
+  <!-- 登入 -->
+  <section class="m-login" v-else-if="screen === 'login'">
+    <div class="m-login-card">
+      <div class="login-avatar is-logo"><img src="img/logo.svg" alt=""></div>
+      <h1 class="login-h">歡迎使用 ASN</h1>
+      <p class="login-sub">登入後，這支手機會自動出現在你的名單裡。</p>
+      <button v-for="p in PROVIDERS" :key="p.key" class="m-btn m-btn-big" type="button" :disabled="!canStart(login.phase)" @click="startLogin(p.key)">{{ p.label }}</button>
+      <p class="login-note" v-if="loginNote" role="status">{{ loginNote }}</p>
+      <button class="m-btn" type="button" v-if="login.phase === 'waiting'" @click="cancelLogin">取消</button>
+      <p class="login-err" v-if="login.phase === 'error'" role="alert">{{ login.error }}</p>
+    </div>
+  </section>
+
+  <!-- 登入後 -->
+  <template v-else>
+    <div class="m-banner" v-if="banner" role="status" @click="openBanner">
+      <span class="dp xs" :class="'st-' + banner.status"><span><img :src="avById(banner.id)" alt=""></span></span>
+      <span class="m-banner-tx"><b v-html="emo(banner.nick)"></b><small>{{ banner.line }}</small></span>
+    </div>
+
+    <!-- 名單與「我」 -->
+    <section class="m-page" v-show="!nav.chat">
+      <header class="m-head">
+        <button class="m-me" type="button" aria-label="我" @click="goMe"><span class="dp sm" :class="'st-' + me.status"><span><img :src="meAv" alt=""></span></span></button>
+        <div class="m-head-tx">
+          <div class="m-title" v-if="nav.tab === 'list'">ASN</div>
+          <div class="m-title" v-else>我</div>
+          <div class="m-conn" v-if="nav.tab === 'list'"><span class="dot" :class="conn === 'on' ? 'st-online' : conn === 'off' ? 'st-busy' : 'st-away'"></span>{{ CONN_LABEL[conn] }}</div>
+        </div>
+        <button class="m-icon-btn" type="button" aria-label="重新整理" v-if="nav.tab === 'list'" :disabled="refreshing" @click="refreshAll">⟳</button>
+      </header>
+
+      <div class="m-scroll" v-if="nav.tab === 'list'">
+        <div class="m-search"><input v-model="query" type="search" placeholder="搜尋聯絡人…" aria-label="搜尋聯絡人" enterkeyhint="search"></div>
+        <div v-for="g in groups" :key="g.key" class="m-group">
+          <button class="m-ghead" type="button" :aria-expanded="!collapsed[g.key]" @click="collapsed[g.key] = !collapsed[g.key]">
+            <span class="m-caret" :class="{ open: !collapsed[g.key] }">▸</span>{{ groupHeading(g) }}
+          </button>
+          <ul v-show="!collapsed[g.key]">
+            <li v-for="c in g.items" :key="c.id">
+              <button class="m-buddy" :class="{ offline: c.status === 'offline' }" type="button" @click="openChat(c.id)">
+                <span class="dp sm" :class="'st-' + c.status"><span><img :src="avOf(c)" alt=""></span></span>
+                <span class="b-text">
+                  <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-st" v-if="statusNote(c.status)">{{ statusNote(c.status) }}</span></span>
+                  <span class="b-psm" v-if="c.psm" v-html="emo(c.psm)"></span>
+                </span>
+                <span class="unread" v-if="c.unread">{{ c.unread }}</span>
+              </button>
+            </li>
+          </ul>
+        </div>
+        <div class="empty-list" v-if="!groups.length">{{ emptyText }}</div>
+      </div>
+
+      <div class="m-scroll m-meview" v-else>
+        <input ref="avFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden @change="pickAvatar">
+        <div class="m-card">
+          <button class="m-av-big" type="button" :disabled="avBusy" aria-label="換大頭貼" @click="avFile.click()"><span class="dp xl" :class="'st-' + me.status"><span><img :src="meAv" alt=""></span></span></button>
+          <p class="m-hint">點一下換大頭貼</p>
+          <button class="m-link" type="button" v-if="selfHasUpload" :disabled="avBusy" @click="removeAvatar">改回自動產生</button>
+          <p class="m-note" v-if="avMsg" role="status">{{ avMsg }}</p>
+        </div>
+        <div class="m-card m-form">
+          <label>暱稱（也是對外的名字）<input class="set-input" v-model="me.nick" maxlength="40" enterkeyhint="done" @change="commitNick" @keydown.enter="$event.target.blur()"></label>
+          <p class="m-err" v-if="nickErr" role="alert">{{ nickErr }}</p>
+          <label>狀態<select class="set-sel" v-model="me.status"><option v-for="(label, key) in STATUS" :key="key" :value="key">{{ label }}</option></select></label>
+          <label>個人訊息<input class="set-input" v-model="me.psm" maxlength="60" placeholder="輸入個人訊息" enterkeyhint="done" @keydown.enter="$event.target.blur()"></label>
+        </div>
+        <div class="m-card m-form">
+          <label class="m-check"><input type="checkbox" v-model="prefs.vibrateNudge"> 對方傳來「震動」時，手機跟著震動</label>
+          <label class="m-check"><input type="checkbox" v-model="prefs.vibrateMsg"> 收到新訊息時輕輕震一下</label>
+        </div>
+        <div class="m-card">
+          <p class="m-acct">{{ accountText }}</p>
+          <button class="m-btn m-danger" type="button" :disabled="loggingOut" @click="doLogout">登出</button>
+        </div>
+        <p class="m-ver">ASN {{ info.version }}</p>
+      </div>
+
+      <nav class="m-tabs" role="tablist" aria-label="分頁">
+        <button type="button" role="tab" :class="{ on: nav.tab === 'list' }" :aria-selected="nav.tab === 'list'" @click="goList"><span>名單</span><i class="red" v-if="unreadTotal"></i></button>
+        <button type="button" role="tab" :class="{ on: nav.tab === 'me' }" :aria-selected="nav.tab === 'me'" @click="goMe"><span>我</span></button>
+      </nav>
+    </section>
+
+    <!-- 對話 -->
+    <section class="m-chat" v-if="nav.chat" :class="{ shake }">
+      <header class="m-head m-chathead">
+        <button class="m-icon-btn" type="button" aria-label="返回" @click="back">‹</button>
+        <span class="dp sm" v-if="chatFriend" :class="'st-' + chatFriend.status"><span><img :src="avOf(chatFriend)" alt=""></span></span>
+        <div class="m-head-tx">
+          <div class="m-title" v-html="emo(chatFriend ? chatFriend.nick : '對話')"></div>
+          <div class="m-conn" v-if="chatFriend">{{ STATUS[chatFriend.status] }}<template v-if="chatFriend.psm"> · <span v-html="emo(chatFriend.psm)"></span></template></div>
+        </div>
+      </header>
+      <chat-pane :friend="chatFriend" :me="me" :log="chatLog" :friend-av="chatFriend ? avOf(chatFriend) : ''" :me-av="meAv"
+        dp-mode="inline" bubble="auto" toolbar="bottom" win-mode="merged" :active="false" :enter-sends="false" :photo-api="photoApi"
+        @send="text => sendTo(nav.chat, text)" @nudge="nudgeTo(nav.chat)" @attach="(p, cap) => sendAttachTo(nav.chat, p, cap)"></chat-pane>
+    </section>
+  </template>
+</div>
+<script src="vendor/vue.global.prod.js"></script>
+<script type="module" src="m.js"></script>
+</body>
+</html>

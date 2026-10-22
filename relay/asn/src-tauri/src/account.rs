@@ -105,11 +105,14 @@ pub fn claim_outcome(r: Result<Value, CallErr>) -> BindOutcome {
 
 // ---------- 本機檔案 ----------
 
+/// 讀不到設備名稱時用的名字：電腦版叫「我的電腦」，手機版叫「我的手機」
+pub const DEVICE_FALLBACK: &str = if cfg!(target_os = "android") { "我的手機" } else { "我的電腦" };
+
 /// 這台電腦的名字（給後台當節點顯示名與機器名）：Windows 電腦名稱；去控制字元、限 40 字
 pub fn computer_name(env: impl Fn(&str) -> Option<String>) -> String {
     let raw = env("COMPUTERNAME").or_else(|| env("HOSTNAME")).unwrap_or_default();
     let clean: String = raw.chars().filter(|c| !c.is_control()).collect::<String>().trim().chars().take(40).collect();
-    if clean.is_empty() { "我的電腦".to_string() } else { clean }
+    if clean.is_empty() { DEVICE_FALLBACK.to_string() } else { clean }
 }
 
 /// 每台電腦自己的亂數識別，存在資料夾裡；有就沿用（重送 node_create 時後台靠它認出同一台）
@@ -244,9 +247,9 @@ pub fn auth_status(auth: State<'_, AuthState>) -> AuthStatus {
 
 /// 開瀏覽器登入並等回呼（最多 5 分鐘）。provider＝google 或 github
 #[tauri::command]
-pub async fn auth_login(app: State<'_, App>, auth: State<'_, AuthState>, provider: String) -> Result<AuthStatus, String> {
+pub async fn auth_login(app: State<'_, App>, auth: State<'_, AuthState>, handle: AppHandle, provider: String) -> Result<AuthStatus, String> {
     let c = ctx()?;
-    let st = auth.login(&c.client, &c.auth_base, &c.anon, &provider, |u| crate::spawn_browser(u)).await?;
+    let st = auth.login(&c.client, &c.auth_base, &c.anon, &provider, |u| crate::open_in_browser(&handle, u)).await?;
     set_login_skipped(&app.data_dir, false)?;   // 登入了就不再是「暫時不登入」
     // 記住這次的登入方式與帳號頭像（下載失敗不擋登入；檔案裡沒有任何權杖）
     let avatar = match auth.session_avatar_url() {
@@ -285,6 +288,10 @@ pub async fn auth_logout(app: State<'_, App>, auth: State<'_, AuthState>, handle
 /// 晚一點再重新啟動，讓指令先把結果回給畫面（--shot 模式不重啟）
 fn restart_soon(app: &App, handle: AppHandle) {
     if app.shot.is_some() {
+        return;
+    }
+    // 安卓：行程不能由自己重新啟動（沒有可執行檔可再叫起）。由畫面請外殼重開（lib 的 android 模組），這裡不動
+    if cfg!(target_os = "android") {
         return;
     }
     tauri::async_runtime::spawn(async move {
