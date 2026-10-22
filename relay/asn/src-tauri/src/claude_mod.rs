@@ -295,6 +295,80 @@ pub fn run(runner: &dyn Runner, path_var: &OsStr, extra: &[PathBuf], mod_dir: &P
     out
 }
 
+/// 版本資料夾名稱：只收「數字.數字…」（例如 1.2.3），其他名稱一律不碰
+fn version_key(name: &str) -> Option<Vec<u64>> {
+    if name.is_empty() || name.len() > 32 {
+        return None;
+    }
+    name.split('.').map(|p| if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) { p.parse::<u64>().ok() } else { None }).collect()
+}
+
+/// 舊版快取的保護期：資料夾最後修改時間在這段時間內的版本一律保留
+/// （還開著的 Claude 視窗會一直讀它啟動時那一版，視窗可以開好幾天）
+pub const KEEP_RECENT: Duration = Duration::from_secs(7 * 24 * 3600);
+
+/// 清掉 Claude Code 外掛快取裡的舊版本資料夾（cache/asn/asn/<版本>/，每次發版都會多一份、從不清）。
+/// 只在確定新版已安裝成功之後呼叫。保留：目前版本、其餘版本裡最新的一版（前一版），
+/// 以及所有資料夾最後修改時間在 7 天內的版本；只刪超過 7 天的舊版。
+/// 讀不到修改時間、修改時間在未來的，一律當成新的而保留。
+/// 只動 cache_root 底下、名稱是版本號的真資料夾；連結、非版本名稱、路徑正規化後不在 cache_root 內的一律略過。回傳實際刪掉的資料夾名稱。
+pub fn prune_plugin_cache(cache_root: &Path, current: &str) -> Vec<String> {
+    prune_with(cache_root, current, std::time::SystemTime::now(), &|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
+}
+
+fn prune_with(cache_root: &Path, current: &str, now: std::time::SystemTime, mtime_of: &dyn Fn(&Path) -> Option<std::time::SystemTime>) -> Vec<String> {
+    let mut removed = Vec::new();
+    // 目前版本本身必須是版本號，而且資料夾真的存在；否則不敢刪任何東西
+    if version_key(current).is_none() || !cache_root.join(current).is_dir() {
+        return removed;
+    }
+    let Ok(root) = std::fs::canonicalize(cache_root) else { return removed };
+    let Ok(rd) = std::fs::read_dir(&root) else { return removed };
+    let mut found: Vec<(Vec<u64>, String, PathBuf)> = Vec::new();
+    for e in rd.flatten() {
+        let Some(name) = e.file_name().to_str().map(String::from) else { continue };
+        let Some(key) = version_key(&name) else { continue };
+        let Ok(meta) = std::fs::symlink_metadata(e.path()) else { continue };
+        if !meta.is_dir() || meta.file_type().is_symlink() {
+            continue;
+        }
+        // 正規化後必須正好是 root/名稱（擋連結、接合點、路徑穿越）
+        match std::fs::canonicalize(e.path()) {
+            Ok(real) if real == root.join(&name) => {}
+            _ => continue,
+        }
+        found.push((key, name, e.path()));
+    }
+    found.sort_by(|a, b| b.0.cmp(&a.0));
+    let mut kept_other = false;
+    for (_, name, path) in found {
+        if name == current {
+            continue;
+        }
+        if !kept_other {
+            kept_other = true; // 其餘版本裡最新的一版（前一版）留著
+            continue;
+        }
+        let recent = match mtime_of(&path) {
+            Some(t) => now.duration_since(t).map_or(true, |age| age < KEEP_RECENT),
+            None => true,
+        };
+        if recent {
+            continue;
+        }
+        match std::fs::remove_dir_all(&path) {
+            Ok(()) => removed.push(name),
+            Err(e) => eprintln!("[claude-mod] 清舊版快取失敗（{name}）：{e}"),
+        }
+    }
+    removed
+}
+
+/// Claude Code 外掛快取裡本外掛的資料夾（家目錄/.claude/plugins/cache/asn/asn）
+pub fn plugin_cache_root(home: &Path) -> PathBuf {
+    home.join(".claude").join("plugins").join("cache").join(MARKETPLACE).join("asn")
+}
+
 /// 安裝資料夾裡的外掛資料夾（執行檔旁邊的 claude-mod）
 pub fn bundled_dir() -> Option<PathBuf> {
     Some(std::env::current_exe().ok()?.parent()?.join("claude-mod"))
@@ -307,7 +381,15 @@ pub fn run_real(data_dir: &Path) -> Outcome {
     let home = crate::identity::home_dir();
     let extra = [home.join(".local").join("bin")];
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    run(&runner, &std::env::var_os("PATH").unwrap_or_default(), &extra, &mod_dir, data_dir, now)
+    let out = run(&runner, &std::env::var_os("PATH").unwrap_or_default(), &extra, &mod_dir, data_dir, now);
+    // 新版確定裝好了（含標記一致）才清舊版快取
+    if let Outcome::Installed(v) = &out {
+        let gone = prune_plugin_cache(&plugin_cache_root(&home), v);
+        if !gone.is_empty() {
+            eprintln!("[claude-mod] 已清掉舊版快取：{}", gone.join("、"));
+        }
+    }
+    out
 }
 
 #[tauri::command]
@@ -638,4 +720,101 @@ mod tests {
         assert_eq!(body.matches("\"install\"").count(), 1);
         assert_eq!(body.matches("fn first_install").count(), 1);
     }
+
+    fn mk_cache(names: &[&str]) -> (tempfile::TempDir, PathBuf) {
+        let t = tempfile::tempdir().unwrap();
+        let root = t.path().join("cache").join("asn").join("asn");
+        for n in names {
+            std::fs::create_dir_all(root.join(n).join("sub")).unwrap();
+            std::fs::write(root.join(n).join("sub").join("f.txt"), "x").unwrap();
+        }
+        (t, root)
+    }
+    fn left(root: &Path) -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(root).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn 清舊版_非版本名稱與檔案不碰_目前版本不存在就一個都不刪() {
+        let (_t, root) = mk_cache(&["1.0.0", "1.1.0", "1.2.0", "latest", "1.2.0-beta", "..x", "tmp.1"]);
+        std::fs::write(root.join("9.9.9"), "我是檔案").unwrap();
+        prune_with(&root, "1.2.0", std::time::SystemTime::now(), &|_| Some(std::time::UNIX_EPOCH));
+        assert_eq!(left(&root), vec!["..x", "1.1.0", "1.2.0", "1.2.0-beta", "9.9.9", "latest", "tmp.1"]);
+        let (_t2, root2) = mk_cache(&["1.0.0", "1.1.0", "1.2.0"]);
+        assert!(prune_plugin_cache(&root2, "2.0.0").is_empty(), "目前版本資料夾不存在＝新版沒裝好，不刪");
+        assert!(prune_plugin_cache(&root2, "../x").is_empty());
+        assert_eq!(left(&root2).len(), 3);
+        assert!(prune_plugin_cache(&root2.join("不存在"), "1.2.0").is_empty());
+    }
+
+    #[test]
+    fn 清舊版_只動快取資料夾底下_連結指到外面的不跟著刪() {
+        let (t, root) = mk_cache(&["1.0.0", "1.1.0", "1.2.0"]);
+        let outside = t.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("keep.txt"), "別碰").unwrap();
+        // 最舊的 0.5.0 是指向外面的連結（建立失敗的平台就略過這段）
+        #[cfg(unix)]
+        let linked = std::os::unix::fs::symlink(&outside, root.join("0.5.0")).is_ok();
+        #[cfg(windows)]
+        let linked = std::os::windows::fs::symlink_dir(&outside, root.join("0.5.0")).is_ok();
+        let gone = prune_with(&root, "1.2.0", std::time::SystemTime::now(), &|_| Some(std::time::UNIX_EPOCH));
+        assert_eq!(gone, vec!["1.0.0".to_string()]);
+        assert!(outside.join("keep.txt").is_file(), "連結目標不可被刪");
+        if linked {
+            assert!(root.join("0.5.0").exists() || std::fs::symlink_metadata(root.join("0.5.0")).is_ok(), "連結本身也不處理");
+        }
+        // 別的外掛與上層資料夾原封不動
+        std::fs::create_dir_all(root.parent().unwrap().join("other").join("0.0.1")).unwrap();
+        prune_with(&root, "1.2.0", std::time::SystemTime::now(), &|_| Some(std::time::UNIX_EPOCH));
+        assert!(root.parent().unwrap().join("other").join("0.0.1").is_dir());
+    }
+
+    #[test]
+    fn 清舊版_快取路徑與守門() {
+        assert_eq!(plugin_cache_root(Path::new("H")), Path::new("H").join(".claude").join("plugins").join("cache").join("asn").join("asn"));
+        let src = include_str!("claude_mod.rs");
+        let body = &src[..src.find("#[cfg(test)]").unwrap()];
+        assert!(body.contains("prune_plugin_cache(&plugin_cache_root(&home), v)"), "run_real 要在新版裝好後清舊版");
+    }
+    fn days(n: u64) -> Duration {
+        Duration::from_secs(n * 24 * 3600)
+    }
+
+    #[test]
+    fn 清舊版_保留目前版本_前一版_與七天內的版本_只刪超過七天的舊版_用數字排序() {
+        let (_t, root) = mk_cache(&["0.9.0", "0.10.0", "0.10.1", "0.10.2", "0.2.0", "0.3.0"]);
+        let now = std::time::SystemTime::now();
+        // 0.10.0 兩天前、0.3.0 六天又 23 小時前＝仍在保護期；其餘 10 天以上
+        let age = |p: &Path| -> Option<std::time::SystemTime> {
+            let d = match p.file_name().unwrap().to_str().unwrap() {
+                "0.10.0" => days(2),
+                "0.3.0" => days(7) - Duration::from_secs(3600),
+                _ => days(10),
+            };
+            Some(now - d)
+        };
+        let gone = prune_with(&root, "0.10.2", now, &age);
+        assert_eq!(left(&root), vec!["0.10.0".to_string(), "0.10.1".to_string(), "0.10.2".to_string(), "0.3.0".to_string()]);
+        assert_eq!(gone.len(), 2);
+        // 剛好滿 7 天就可以刪
+        let (_t2, root2) = mk_cache(&["1.0.0", "1.1.0", "1.2.0", "1.3.0"]);
+        let gone2 = prune_with(&root2, "1.3.0", now, &|_| Some(now - days(7)));
+        assert_eq!(left(&root2), vec!["1.2.0".to_string(), "1.3.0".to_string()]);
+        assert_eq!(gone2.len(), 2);
+    }
+
+    #[test]
+    fn 清舊版_讀不到修改時間或時間在未來_一律保留_剛建好的資料夾不會被刪() {
+        let (_t, root) = mk_cache(&["1.0.0", "1.1.0", "1.2.0", "1.3.0"]);
+        let now = std::time::SystemTime::now();
+        assert!(prune_with(&root, "1.3.0", now, &|_| None).is_empty());
+        assert!(prune_with(&root, "1.3.0", now, &|_| Some(now + days(3))).is_empty());
+        assert!(prune_plugin_cache(&root, "1.3.0").is_empty(), "真的修改時間＝剛剛，在保護期內");
+        assert_eq!(left(&root).len(), 4);
+    }
+
+
 }

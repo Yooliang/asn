@@ -11,6 +11,7 @@ import { ActionBar } from './actionbar.mjs'
 import { CallView } from './call-view.mjs'
 import { shotFileName } from './shot.mjs'
 import { statusTip, tierOf } from './sent-status.mjs'
+import { isAsnWindow, showsWaiting } from './roster.mjs'
 import { warnKind } from './head-tone.mjs'
 
 const { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } = Vue
@@ -43,6 +44,8 @@ export const ChatPane = {
   setup(props, { emit }) {
     const draft = ref(''), pickerOpen = ref(false), nudgeCooling = ref(false)
     const msgsEl = ref(null), composeEl = ref(null)
+    const isAsn = computed(() => isAsnWindow(props.friend))
+    const showWaiting = computed(() => showsWaiting(props.friend))
     const sideCol = computed(() => hasSideCol(props.dpMode))
     const composeHint = computed(() => composePlaceholder(props.winMode))
     const composeTitle = computed(() => composeHintTitle(props.winMode))
@@ -194,7 +197,7 @@ export const ChatPane = {
     const docEl = ref(null)
     // 訊息內文裡的連結：不在 WebView 導覽，一律交給系統瀏覽器（Rust 端 open_link 再驗一次協定）
     const onBodyClick = ev => handleLinkClick(ev, url => globalThis.__TAURI__?.core?.invoke?.('open_link', { url }))
-    return { warn, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { isAsn, showWaiting, warn, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -224,7 +227,7 @@ export const ChatPane = {
                 </button>
               </div>
               <div class="m-body" :class="['tone-' + lay(m.k).tone, 'md-on']" v-if="m.text" v-html="renderMarkdown(m.text)" @click="onBodyClick"></div>
-              <div class="unanswered" v-if="m.k === 'me' && m.unanswered != null">{{ m.unanswered > 0 ? '超過 ' + m.unanswered + ' 分鐘未回' : '對方視窗已關閉，未回' }}</div>
+              <div class="unanswered" v-if="m.k === 'me' && m.unanswered != null && !isAsn">{{ m.unanswered > 0 ? '超過 ' + m.unanswered + ' 分鐘未回' : '對方視窗已關閉，未回' }}</div>
               <div class="photos" v-if="m.photos && m.photos.length">
                 <template v-for="p in m.photos" :key="p.id">
                   <button v-if="p.kind === 'file'" type="button" class="filecard" :class="{ gone: expired(p) }" :title="photoTitle(p)" :aria-label="'檔案：' + photoTitle(p) + (expired(p) ? '（已過期）' : '，點一下下載並另存')" :disabled="expired(p) || !photoApi" @click="openPhoto(p)">
@@ -302,7 +305,7 @@ export const ChatPane = {
   <div class="typing" role="status">
     <template v-if="voiceNote">{{ voiceNote }}</template>
     <template v-else-if="photoMsg">{{ photoMsg }}<button v-if="savedHere" class="aero-btn" type="button" @click="revealSaved">開啟資料夾</button></template>
-    <template v-else-if="friend.waiting">✎ 已送出，等對方回信…</template>
+    <template v-else-if="showWaiting">✎ 已送出，等對方回信…</template>
     <template v-else-if="friend.lastAt">上次接收訊息是 {{ fmtDate(friend.lastAt) }}</template>
   </div>
   <call-view v-if="callActive" :state="call.state" :name="plain(friend.nick)" :avatar="friendAv" :hue="friend.hue" :status="friend.status" @hangup="hangUp" @mute="call.toggleMute()"></call-view>
