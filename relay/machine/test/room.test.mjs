@@ -42,8 +42,8 @@ async function fakeServer({ forbidRead = false } = {}) {
 }
 const newHome = () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-room-test-'))
-  fs.mkdirSync(path.join(home, '.irori-relay'), { recursive: true })
-  fs.writeFileSync(path.join(home, '.irori-relay', 'T.key'), 'fake-machine-key')
+  fs.mkdirSync(path.join(home, '.asn'), { recursive: true })
+  fs.writeFileSync(path.join(home, '.asn', 'T.key'), 'fake-machine-key')
   return home
 }
 function run(home, st, script, args) {

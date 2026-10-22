@@ -26,7 +26,7 @@ Say '=== ASN 收發室橋：移除 ===' 'Cyan'
 if ($preview) { Say '（預覽模式：只告訴你會做什麼，不會改動這台電腦，也不會連網。）' 'Yellow' }
 
 $home_ = Get-AsnHome $HomeDir
-$irori = Join-Path $home_ '.irori-relay'
+$irori = Get-AsnDataDir $HomeDir
 $id = $NodeId
 if (-not $id -and (Test-Path -LiteralPath (Join-Path $irori 'node'))) { $id = (Get-Content -LiteralPath (Join-Path $irori 'node') -Raw).Trim() }
 if (-not $id) {

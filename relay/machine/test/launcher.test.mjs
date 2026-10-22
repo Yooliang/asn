@@ -240,8 +240,8 @@ test('bridge 端到端：launch_pending → Start-Process 開假視窗（參數�
   const st = await fakeRelay([{ id: uid(7), requested_by: 'XISU', profile: 'fake', name: 'T-英雄-2', cwd: work, first_message: '先讀交接檔' }])
   const agentsFile = path.join(home, 'agents.json'), record = path.join(home, 'record.jsonl'), launchedFile = path.join(home, 'launched.jsonl')
   fs.writeFileSync(agentsFile, '[]'); fs.writeFileSync(record, ''); fs.writeFileSync(launchedFile, '')
-  fs.mkdirSync(path.join(home, '.irori-relay'), { recursive: true })
-  writeJson(path.join(home, '.irori-relay', 'launcher.json'), {
+  fs.mkdirSync(path.join(home, '.asn'), { recursive: true })
+  writeJson(path.join(home, '.asn', 'launcher.json'), {
     profiles: { fake: { label: '測試', command: process.execPath, args: [path.join(here, 'fake-launched.mjs'), '{name}', 'claude -n {name} --remote-control {name}'] } },
     cwd_allow: [work], max_per_hour: 3,
   })
@@ -273,7 +273,7 @@ test('bridge 端到端：launch_pending → Start-Process 開假視窗（參數�
     assert.deepEqual(withL.at(-1).launcher, { profiles: [{ id: 'fake', label: '測試' }], cwd_allow: [work], max_per_hour: 3 })
     assert.doesNotMatch(JSON.stringify(st.rosterPosts), /fake-launched|remote-control/)
     assert.ok(st.rosterPosts.at(-1).agents.some(a => a.name === 'T-英雄-2'), '新視窗要出現在名單上')
-    assert.match(fs.readFileSync(path.join(home, '.irori-relay', 'machine-T', 'launch.log'), 'utf8'), /"status":"ok"/)
+    assert.match(fs.readFileSync(path.join(home, '.asn', 'machine-T', 'launch.log'), 'utf8'), /"status":"ok"/)
   } finally {
     child.kill()
     await new Promise(r => child.once('exit', r))

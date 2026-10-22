@@ -46,7 +46,7 @@ function makeHome() {
   NAMES.forEach((name, i) => fs.writeFileSync(path.join(dir, `${92000 + i}.json`), JSON.stringify({ pid: 92000 + i, entrypoint: 'cli', kind: 'interactive', updatedAt: 1 })))
   fs.writeFileSync(path.join(home, 'agents.json'), JSON.stringify(NAMES.map((name, i) => ({ pid: 92000 + i, cwd: 'D:\\x', kind: 'interactive', startedAt: 1, name, status: 'idle' }))))
   fs.writeFileSync(path.join(home, 'inbound.jsonl'), ''); fs.writeFileSync(path.join(home, 'record.jsonl'), '')
-  const work = path.join(home, '.irori-relay', 'machine-T'); fs.mkdirSync(work, { recursive: true })
+  const work = path.join(home, '.asn', 'machine-T'); fs.mkdirSync(work, { recursive: true })
   return { home, pendingFile: path.join(work, 'pending.json') }
 }
 

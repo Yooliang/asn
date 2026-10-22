@@ -52,8 +52,8 @@ async function fakeServer(opts = {}) {
 }
 const newHome = () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-send-attach-'))
-  fs.mkdirSync(path.join(home, '.irori-relay'), { recursive: true })
-  fs.writeFileSync(path.join(home, '.irori-relay', 'T.key'), 'fake-machine-key')
+  fs.mkdirSync(path.join(home, '.asn'), { recursive: true })
+  fs.writeFileSync(path.join(home, '.asn', 'T.key'), 'fake-machine-key')
   return home
 }
 function runSend(home, st, args, stdin = '') {

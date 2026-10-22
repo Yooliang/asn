@@ -117,13 +117,19 @@ pub struct Ident {
 
 pub fn identity(env: &Env, need_key: bool) -> R<Ident> {
     let alive = env.alive.clone();
-    let node = crate::identity::machine_node(&env.relay_home, env.relay_id.clone(), move |p| alive(p)).map_err(|e| Fail::new(1, e))?;
-    if !crate::identity::valid_id(&node) {
-        return Err(Fail::new(1, format!("節點代號格式不對：{node}")));
-    }
-    let key = if need_key { crate::identity::read_key(&env.relay_home, &node, env.relay_key.clone()).map_err(|e| Fail::new(1, e))? } else { String::new() };
     let base_url = crate::identity::base_url(env.relay_url.clone());
-    let anon = crate::identity::read_anon(&env.relay_home, env.anon_key.clone(), &base_url);
+    // 主要位置找不到的項目回頭找後備位置（遷移被打斷時，Claude 外掛的 asn_send 走這裡，不能因此寄不出信）
+    let (node, key, anon) = crate::identity::resolve_parts(
+        &env.relay_home,
+        env.relay_home_fallback.as_deref(),
+        env.relay_id.clone(),
+        env.relay_key.clone(),
+        env.anon_key.clone(),
+        &base_url,
+        need_key,
+        &move |p| alive(p),
+    )
+    .map_err(|e| Fail::new(1, e))?;
     let work_dir = crate::identity::work_dir(&env.relay_home, &node);
     Ok(Ident { node, base_url, key, anon, work_dir })
 }

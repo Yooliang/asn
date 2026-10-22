@@ -15,6 +15,30 @@ function Get-AsnHome([string]$HomeDir) {
   return $env:USERPROFILE
 }
 
+# 使用者資料夾（金鑰、節點代號、橋的工作資料夾）：與 relay/machine/home.mjs 同一套解析順序（ONBOARDING 第 5.2 節）。
+# ASN_HOME（舊名 IRORI_HOME；指定了 -HomeDir 的測試不看環境變數）→ %USERPROFILE%\.asn → 舊的 %USERPROFILE%\.irori-relay。
+# 兩邊都在：舊的是連結或空資料夾就用 .asn；舊的是有內容的真資料夾（還沒遷移）就用舊的。不建立任何東西。
+function Get-AsnDataDir([string]$HomeDir) {
+  if (-not $HomeDir) {
+    $o = $env:ASN_HOME
+    if ([string]::IsNullOrWhiteSpace($o)) { $o = $env:IRORI_HOME }
+    if (-not [string]::IsNullOrWhiteSpace($o)) { return $o.Trim() }
+  }
+  $base = Get-AsnHome $HomeDir
+  $new = Join-Path $base '.asn'
+  $legacy = Join-Path $base '.irori-relay'
+  if (-not (Test-Path -LiteralPath $new)) {
+    if (Test-Path -LiteralPath $legacy) { return $legacy }
+    return $new
+  }
+  if (Test-Path -LiteralPath $legacy) {
+    $item = Get-Item -LiteralPath $legacy -Force
+    $isLink = [bool]($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
+    if (-not $isLink -and $item.PSIsContainer -and (Get-ChildItem -LiteralPath $legacy -Force | Select-Object -First 1)) { return $legacy }
+  }
+  return $new
+}
+
 # 舊函式名仍可用（別名）：Get-IroriHome／Stop-IroriBridge／Start-IroriTask
 Set-Alias -Name Get-IroriHome -Value Get-AsnHome -Scope Global
 Set-Alias -Name Stop-IroriBridge -Value Stop-AsnBridge -Scope Global

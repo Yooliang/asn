@@ -1,8 +1,9 @@
-// 一次性測試用：用 H 金鑰開邀請碼，註冊測試節點並把金鑰寫到 ~/.irori-relay/<id>.key（不印金鑰）
+// 一次性測試用：用 H 金鑰開邀請碼，註冊測試節點並把金鑰寫到 ~/.asn/<id>.key（不印金鑰）
 // 用法：node tools-provision.mjs <新代號> [顯示名]
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
+import { HOME_DIR } from './home.mjs'
 const URL_ = 'https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay'
-const dir = path.join(os.homedir(), '.irori-relay')
+const dir = HOME_DIR
 const hkey = fs.readFileSync(path.join(dir, 'H.key'), 'utf8').trim()
 const id = process.argv[2], name = process.argv[3] || id
 const inv = await (await fetch(`${URL_}?action=invite`, { method: 'POST', headers: { 'x-relay-key': hkey, 'content-type': 'application/json' }, body: JSON.stringify({ note: 'bridge test node' }) })).json()

@@ -1,5 +1,5 @@
 // 橋端到端的環境變數改名相容：只設舊名（IRORI_*）、只設新名（ASN_*）、兩個都設（以新名為準）。
-// 假伺服器只聽 127.0.0.1；home 指到暫存資料夾，不碰真的 ~/.irori-relay、~/.asn。
+// 假伺服器只聽 127.0.0.1；home 指到暫存資料夾，不碰真的 ~/.asn、~/.asn。
 // 執行：node --test relay/machine/test/
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

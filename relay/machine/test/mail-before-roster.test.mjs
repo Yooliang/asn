@@ -48,7 +48,7 @@ test('信先到、名單後到：名單到之前不 ack、不回找不到；名�
   const agentsFile = path.join(home, 'agents.json')   // 先不建立：假 claude 的 agents 指令會失敗＝名單讀取失敗
   const record = path.join(home, 'record.jsonl')
   fs.writeFileSync(path.join(home, 'inbound.jsonl'), ''); fs.writeFileSync(record, '')
-  const work = path.join(home, '.irori-relay', 'machine-T'); fs.mkdirSync(work, { recursive: true })
+  const work = path.join(home, '.asn', 'machine-T'); fs.mkdirSync(work, { recursive: true })
   const child = spawnTracked(process.execPath, [path.join(MACHINE, 'bridge.mjs')], {
     cwd: home, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true,
     env: {

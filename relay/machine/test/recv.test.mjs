@@ -46,8 +46,8 @@ async function fakeRelay({ filterAgent = true } = {}) {
 // 假視窗身分：用環境變數備援（CLAUDE_CODE_MESSAGING_SOCKET 對上還活著的 session），pid 用測試行程自己
 function newHome(name = 'T-視窗甲') {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-recv-test-'))
-  fs.mkdirSync(path.join(home, '.irori-relay'), { recursive: true })
-  fs.writeFileSync(path.join(home, '.irori-relay', 'T.key'), 'fake-machine-key')
+  fs.mkdirSync(path.join(home, '.asn'), { recursive: true })
+  fs.writeFileSync(path.join(home, '.asn', 'T.key'), 'fake-machine-key')
   const sdir = path.join(home, '.claude', 'sessions'); fs.mkdirSync(sdir, { recursive: true })
   fs.writeFileSync(path.join(sdir, `${process.pid}.json`), JSON.stringify({ pid: process.pid, name, kind: 'interactive', entrypoint: 'cli', messagingSocketPath: `\\\\.\\pipe\\fake-${process.pid}` }))
   return home
@@ -64,7 +64,7 @@ function spawnRecv(home, st, args, env = {}) {
 }
 const lines = c => c.out.split('\n').filter(Boolean).map(l => JSON.parse(l))
 async function until(f, ms = 8000) { const t0 = Date.now(); while (!f() && Date.now() - t0 < ms) await sleep(50); return f() }
-const hbPath = (home, name = 'T-視窗甲') => heartbeatFile(path.join(home, '.irori-relay', 'machine-T'), name)
+const hbPath = (home, name = 'T-視窗甲') => heartbeatFile(path.join(home, '.asn', 'machine-T'), name)
 
 test('--once：只印寄給本視窗的信（一行一個 JSON、含 id/trust/from/reply_to/body），只 ack 這些', async () => {
   const st = await fakeRelay(), home = newHome()
@@ -129,12 +129,12 @@ test('--watch：寫心跳（pid＋時間）、印已在信箱的信、之後新�
     // 同一視窗第二個 --watch：心跳有效就拒絕
     const dup = spawnRecv(home, st, ['--watch'], env)
     assert.equal(await dup.done, 3); assert.match(dup.err, /已經有一個 recv --watch/)
-    assert.equal(selfRecvAlive(path.join(home, '.irori-relay', 'machine-T'), 'T-視窗甲'), true)
+    assert.equal(selfRecvAlive(path.join(home, '.asn', 'machine-T'), 'T-視窗甲'), true)
   } finally {
     c.kill(); await c.done; await st.close()
   }
   // 被強制結束：心跳檔可能還在，但 pid 已死 → 橋不會再當成有人在收
-  assert.equal(selfRecvAlive(path.join(home, '.irori-relay', 'machine-T'), 'T-視窗甲'), false)
+  assert.equal(selfRecvAlive(path.join(home, '.asn', 'machine-T'), 'T-視窗甲'), false)
 })
 
 test('selfRecvAlive：新鮮且 pid 活著才算；過期、pid 已死、沒有檔、時間在未來都不算', () => {
@@ -159,7 +159,7 @@ async function bridgeRun({ heartbeat }) {
   const agentsFile = path.join(home, 'agents.json'), inboundFile = path.join(home, 'inbound.jsonl'), recordFile = path.join(home, 'record.jsonl')
   fs.writeFileSync(agentsFile, JSON.stringify([{ pid: 93001, cwd: 'D:\\x', kind: 'interactive', startedAt: 1, name: 'T-視窗甲', status: 'idle' }]))
   fs.writeFileSync(inboundFile, ''); fs.writeFileSync(recordFile, '')
-  if (heartbeat) writeHeartbeat(path.join(home, '.irori-relay', 'machine-T'), 'T-視窗甲', process.pid, Date.now() - heartbeat.ageMs)
+  if (heartbeat) writeHeartbeat(path.join(home, '.asn', 'machine-T'), 'T-視窗甲', process.pid, Date.now() - heartbeat.ageMs)
   const child = spawnTracked(process.execPath, [path.join(MACHINE, 'bridge.mjs')], {
     cwd: home, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true,
     env: {

@@ -41,8 +41,8 @@ fn fake() -> (String, Arc<Mutex<Vec<String>>>) {
 
 fn home(name: Option<&str>) -> tempfile::TempDir {
     let d = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(d.path().join(".irori-relay")).unwrap();
-    std::fs::write(d.path().join(".irori-relay").join("T.key"), "fake-machine-key").unwrap();
+    std::fs::create_dir_all(d.path().join(".asn")).unwrap();
+    std::fs::write(d.path().join(".asn").join("T.key"), "fake-machine-key").unwrap();
     let s = d.path().join(".claude").join("sessions");
     std::fs::create_dir_all(&s).unwrap();
     if let Some(n) = name {

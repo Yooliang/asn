@@ -8,8 +8,10 @@ pub type ProcTable = HashMap<u32, (u32, String)>;
 
 #[derive(Clone)]
 pub struct Env {
-    /// ~/.irori-relay
+    /// ~/.asn
     pub relay_home: PathBuf,
+    /// 後備資料夾（遷移被打斷、項目分在兩邊時才有；身分解析找不到再回頭找）
+    pub relay_home_fallback: Option<PathBuf>,
     /// ~/.claude/sessions
     pub sessions_dir: PathBuf,
     /// 本程式的 pid（找父行程鏈的起點）
@@ -56,11 +58,13 @@ pub const DEFAULT_BACKOFF_MS: [u64; 5] = [5_000, 10_000, 20_000, 40_000, 60_000]
 impl Env {
     pub fn from_process() -> Env {
         let home = crate::identity::home_dir();
+        let home_info = crate::home::resolve();
         let backoff: Vec<u64> = var("ASN_PULL_BACKOFF_MS")
             .map(|raw| raw.split(',').filter_map(|s| s.trim().parse::<u64>().ok()).filter(|n| *n > 0).collect())
             .unwrap_or_default();
         Env {
-            relay_home: crate::identity::relay_home(),
+            relay_home: home_info.primary,
+            relay_home_fallback: home_info.fallback,
             sessions_dir: home.join(".claude").join("sessions"),
             self_pid: std::process::id(),
             relay_id: var("ASN_RELAY_ID"),

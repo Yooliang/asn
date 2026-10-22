@@ -1,6 +1,6 @@
 // Windows 安裝／解除安裝程式（node --test tests/windows_installer.test.mjs）。
 // 把打好的 zip 解開到暫存資料夾，用暫存的家目錄（-HomeDir）跑 install.ps1／uninstall.ps1，對本機假伺服器註冊。
-// 不碰真的 ~/.irori-relay、不建任何排程（-NoSchedule）、不連真的仲介。只有 Windows 才跑。
+// 不碰真的 ~/.asn、~/.irori-relay、不建任何排程（-NoSchedule）、不連真的仲介。只有 Windows 才跑。
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -35,7 +35,7 @@ function ps(script, args, { stdin = '', timeoutMs = 90_000 } = {}) {
     child.stdin.end(stdin)
   })
 }
-const irori = home => path.join(home, '.irori-relay')
+const irori = home => path.join(home, '.asn')
 const dirEntries = dir => (fs.existsSync(dir) ? fs.readdirSync(dir).sort() : [])
 const base = ['-NonInteractive', '-NoSchedule']
 

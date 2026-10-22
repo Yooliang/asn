@@ -1,5 +1,5 @@
 //! 登入帳號的動作：呼叫後台的 account_bootstrap／node_create／node_claim，並把新節點金鑰存成本機檔案。
-//! 登入憑證只在這裡用（Authorization 標頭）；節點金鑰只經過這裡一次（寫進 ~/.irori-relay/<節點>.key，不回前端、不進 log）。
+//! 登入憑證只在這裡用（Authorization 標頭）；節點金鑰只經過這裡一次（寫進 ~/.asn/<節點>.key，不回前端、不進 log）。
 use crate::auth::{self, AuthState, AuthStatus};
 use crate::{identity, App};
 use serde::Serialize;

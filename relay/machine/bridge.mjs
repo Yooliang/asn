@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url'
 
 const NODE_ID = (envGet(process.env, 'RELAY_ID') || 'H').trim()
 const BASE_URL = (envGet(process.env, 'RELAY_URL') || 'https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay').replace(/\/+$/, '')
-const HOME_DIR = path.join(os.homedir(), '.irori-relay')
+import { HOME_DIR, locateHome } from './home.mjs'
 const WORK_DIR = path.join(HOME_DIR, `machine-${NODE_ID}`)
 const MAILBOX_NAME = envGet(process.env, 'MAILBOX_NAME') || `${NODE_ID}-收發室`
 const DEFAULT_AGENT = (envGet(process.env, 'RELAY_DEFAULT_AGENT') || '').trim()   // 沒指定收件視窗的信交給誰；空＝不丟給任何 session（留在信箱，等 ASN 視窗的本人處理）
@@ -58,7 +58,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms))
 function readSecret(env, file) {
   const v = (envGet(process.env, env) || '').trim()
   if (v) return v
-  try { return fs.readFileSync(path.join(HOME_DIR, file), 'utf8').trim() } catch { return '' }
+  try { return fs.readFileSync(locateHome(file), 'utf8').trim() } catch { return '' }
 }
 const KEY = readSecret('RELAY_KEY', `${NODE_ID}.key`)
 const ANON_KEY = pickAnon(BASE_URL, [envGet(process.env, 'RELAY_ANON_KEY'), readSecret('', 'anon.key')])   // 內建新後台的 anon；殘留的舊專案 anon.key 會被跳過
@@ -336,7 +336,7 @@ function pruneReplied(now) {
 }
 
 // ---- inbox -------------------------------------------------------------------------------------
-// ---- 遠端開視窗（launcher.mjs；指令只來自本機 ~/.irori-relay/launcher.json）--------------------------
+// ---- 遠端開視窗（launcher.mjs；指令只來自本機 ~/.asn/launcher.json）--------------------------
 // 視窗出現後：馬上刷新名單（手機看得到、也才轉交得到），有第一句話就當成 owner 的來信經收發室送進去（id＝launch id）
 // send：轉接器要主動寄信時用（acp 工作者的授權詢問、登入通知）；from_agent 預設是收發室名稱
 engines = await loadEngines({ log, workDir: WORK_DIR, mailboxName: MAILBOX_NAME, send: m => api('send', { method: 'POST', body: { to_node: m.to_node, to_agent: m.to_agent || undefined, body: m.body, reply_to: m.reply_to || undefined, from_agent: m.from_agent || MAILBOX_NAME } }) })
@@ -371,7 +371,7 @@ const partnerQueue = createPartnerQueue({
 })
 const canRemoteLaunch = openEngines.length || acpEngine
 launcher = !canRemoteLaunch ? launcher : createLauncher({
-  api, log, workDir: WORK_DIR, configPath: envGet(process.env, 'LAUNCHER_FILE') || path.join(HOME_DIR, 'launcher.json'),
+  api, log, workDir: WORK_DIR, configPath: envGet(process.env, 'LAUNCHER_FILE') || locateHome('launcher.json'),
   bootstrap: () => launchBootstrap,
   listNames: async () => {
     const sets = await Promise.all(engines.map(e => e.listNames()))

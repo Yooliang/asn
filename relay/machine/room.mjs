@@ -4,7 +4,7 @@
 //   node room.mjs --room-read <群組id|群組名> [--last 20 | --since <seq>] [--json]
 // 身分跟 send.mjs／recv.mjs 同一套（identity.mjs）：視窗名由父行程鏈／環境變數備援認出，不能自填；不是成員就被擋（仲介回 403）。
 // 只讀：呼叫 room_read 一律帶 since（不帶 since 仲介會把已讀推進），所以不動後端已讀位置，也不動機器橋的轉交游標。
-// 「新訊息數」用本機記錄（~/.irori-relay/machine-<節點>/room-seen.json，每次 --room-read 讀到哪記到哪），含自己發的。
+// 「新訊息數」用本機記錄（~/.asn/machine-<節點>/room-seen.json，每次 --room-read 讀到哪記到哪），含自己發的。
 // exit code：1 用法、2 認不出視窗、3 不是成員／找不到群組、4 後端錯誤。
 import fs from 'node:fs'
 import path from 'node:path'

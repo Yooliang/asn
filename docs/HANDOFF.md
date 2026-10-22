@@ -82,7 +82,7 @@ npx --yes http-server site/public -p 5179
 
 ## 注意事項（紅線）
 
-- **不讀、不印任何金鑰**：節點金鑰、service role、anon 以外的任何密鑰、`%USERPROFILE%\.irori-relay\` 目錄內容。提交前確認沒有金鑰進入歷史。
+- **不讀、不印任何金鑰**：節點金鑰、service role、anon 以外的任何密鑰、`%USERPROFILE%\.asn\`（舊位置 `.irori-relay` 同）目錄內容。提交前確認沒有金鑰進入歷史。
 - **只關自己啟動並記下 PID 的程序**；不要用程序名稱整批結束。橋的鎖檔 `bridge.pid` 不要手動刪。
 - 同一把節點金鑰同時只能有**一個**收信者（橋、ASN 以視窗名收信、channel 外掛不要搶同一個信箱）。
 - `relay/machine`、`relay/cloud-agent` 會在 Linux 上跑，檔案一律 LF（見 `.gitattributes`）。

@@ -1,5 +1,5 @@
 // 遠端開 Claude 視窗（#64，規劃見 docs/relay/LAUNCHER.md）：機器橋這一端。
-// - 讀 ~/.irori-relay/launcher.json（不進 repo）：每個 profile 的指令與參數、cwd 白名單、每小時上限
+// - 讀 ~/.asn/launcher.json（不進 repo）：每個 profile 的指令與參數、cwd 白名單、每小時上限
 // - 摘要（profile 名與標籤、cwd 白名單、上限；不含指令）附在 roster 回報給仲介，手機的表單才有下拉選單
 // - 門鈴／輪詢時 launch_pending 取走待辦 → 執行前再驗一次 → 開視窗 → 等它出現在 `claude agents` → launch_result 回報
 // 指令完全由本機 launcher.json 決定；仲介來的只有 profile 名、視窗名、cwd（必須在白名單裡）。{name} 是唯一的替換欄位。

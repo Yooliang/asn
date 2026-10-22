@@ -33,7 +33,7 @@ pub struct Fx {
 }
 impl Fx {
     pub fn rh(&self) -> PathBuf {
-        self.home.join(".irori-relay")
+        self.home.join(".asn")
     }
     pub fn work(&self) -> PathBuf {
         self.rh().join("machine-T")
@@ -44,8 +44,8 @@ impl Fx {
 pub fn fx(url: &str, window: Option<&str>) -> Fx {
     let d = tempfile::tempdir().unwrap();
     let home = d.path().to_path_buf();
-    std::fs::create_dir_all(home.join(".irori-relay")).unwrap();
-    std::fs::write(home.join(".irori-relay").join("T.key"), KEY).unwrap();
+    std::fs::create_dir_all(home.join(".asn")).unwrap();
+    std::fs::write(home.join(".asn").join("T.key"), KEY).unwrap();
     let sessions = home.join(".claude").join("sessions");
     std::fs::create_dir_all(&sessions).unwrap();
     let mut s = json!({"pid": CLAUDE_PID, "kind": "interactive", "entrypoint": "cli"});
@@ -57,7 +57,8 @@ pub fn fx(url: &str, window: Option<&str>) -> Fx {
     let f2 = flag.clone();
     let table: ProcTable = [(SELF_PID, (BASH_PID, "asn-cli.exe".to_string())), (BASH_PID, (CLAUDE_PID, "bash.exe".to_string())), (CLAUDE_PID, (1, "claude.exe".to_string()))].into_iter().collect();
     let env = Env {
-        relay_home: home.join(".irori-relay"),
+        relay_home: home.join(".asn"),
+        relay_home_fallback: None,
         sessions_dir: sessions,
         self_pid: SELF_PID,
         relay_id: Some("T".into()),

@@ -130,7 +130,7 @@ test('沒有節點金鑰的新電腦：只截登入畫面，不連真實後台�
   const r = await runShot(out, defaultExe, { noKey: true })
   assert.equal(r.code, 0, r.log)
   assert.equal(r.relay.reqs.length, 0, '登入畫面階段不打節點 API')
-  assert.ok(!fs.existsSync(path.join(r.home, '.irori-relay')), '沒登入就不建立任何金鑰檔')
+  assert.ok(!fs.existsSync(path.join(r.home, '.asn')), '沒登入就不建立任何金鑰檔')
   if (shotCaptureSupported) {
     assert.ok(r.files.includes('tabs-login.png'), `缺登入畫面截圖：${r.files}`)
     assertShotNotBlank(path.join(out, 'tabs-login.png'), { minBytes: 4000 })
@@ -169,7 +169,7 @@ test('已登入的舊電腦：啟動後自動 node_claim 綁到帳號（帶登�
   assert.equal(claim.key, 'fake-machine-key')
   assert.ok(r.relay.reqs.some(q => q.action === 'list'), '有進名單')
   assert.ok(!r.relay.reqs.some(q => q.action === 'node_create'), '已有金鑰就不建新節點')
-  const home = path.join(r.home, '.irori-relay')
+  const home = path.join(r.home, '.asn')
   assert.ok(!fs.existsSync(home) || !fs.readdirSync(home).some(f => f.endsWith('.key') || f === 'node'), '沒有寫任何金鑰檔')
 })
 
@@ -188,7 +188,7 @@ test('沒有金鑰的新電腦登入後：自動 node_create，把新金鑰寫�
   assert.ok(create, `沒有送 node_create：${r.relay.reqs.map(q => q.action)}`)
   assert.match(create.auth, /^Bearer \S+/)
   assert.ok(!r.relay.reqs.some(q => q.action === 'node_claim'))
-  const home = path.join(r.home, '.irori-relay')
+  const home = path.join(r.home, '.asn')
   assert.equal(fs.readFileSync(path.join(home, 't1-newnode01.key'), 'utf8'), 'fake-new-node-key')
   assert.equal(fs.readFileSync(path.join(home, 'node'), 'utf8'), 't1-newnode01')
 })
