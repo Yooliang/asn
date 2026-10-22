@@ -6,7 +6,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawnTracked } from './spawn-tracked.mjs'
 import { fileURLToPath } from 'node:url'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -26,7 +26,7 @@ async function fakeServer({ sendStatus = 200 } = {}) {
     if (a === 'room_list') return out(200, { rooms: [] })
     if (a === 'send') { const b = await readBody(req); st.sent.push(b); return sendStatus === 200 ? out(200, { id: 'aaaaaaaa-0000-0000-0000-000000000001' }) : out(sendStatus, { error: 'not_found' }) }
     if (a === 'room_post') { st.posts.push(await readBody(req)); return out(200, { seq: 7 }) }
-    if (a === 'roster' || a === 'ack') { await readBody(req); return out(200, { ok: true }) }
+    if (a === 'roster' || a === 'ack') { await readBody(req); if (a === 'roster') st.rostered = true; return out(200, { ok: true }) }
     out(404, {})
   })
   await new Promise(r => srv.listen(0, '127.0.0.1', r))
@@ -48,7 +48,7 @@ async function run({ st, inbound, env = {}, until, timeout = 15000, settle = 600
   const agentsFile = path.join(home, 'agents.json'), inboundFile = path.join(home, 'inbound.jsonl')
   fs.writeFileSync(agentsFile, JSON.stringify(SESSIONS.map(a => ({ pid: a.pid, cwd: 'D:\\x', kind: 'interactive', startedAt: 1, name: a.name, status: 'idle' }))))
   fs.writeFileSync(path.join(home, 'record.jsonl'), ''); fs.writeFileSync(inboundFile, '')
-  const child = spawn(process.execPath, [path.join(MACHINE, 'bridge.mjs')], {
+  const child = spawnTracked(process.execPath, [path.join(MACHINE, 'bridge.mjs')], {
     cwd: home, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true,
     env: {
       PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: home, USERPROFILE: home,
@@ -59,7 +59,8 @@ async function run({ st, inbound, env = {}, until, timeout = 15000, settle = 600
     },
   })
   let log = ''; child.stderr.on('data', d => log += d)
-  await sleep(1200)   // 讓橋拿到第一份名單
+  // 等橋第一次回報名單（名單已就緒）才餵話；固定等一段時間在負載高時不夠
+  for (let t = Date.now(); !st.rostered &&Date.now() - t < 20000;) await sleep(20)
   for (const m of inbound) { fs.appendFileSync(inboundFile, JSON.stringify(m) + '\n'); await sleep(80) }
   const t0 = Date.now()
   while (!until(records(home), log) && Date.now() - t0 < timeout) await sleep(50)

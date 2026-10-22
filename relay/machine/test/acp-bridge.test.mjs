@@ -8,7 +8,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawnTracked } from './spawn-tracked.mjs'
 import { fileURLToPath } from 'node:url'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -25,7 +25,7 @@ async function fakeRelay(inbox) {
     const out = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)) }
     const a = u.searchParams.get('action')
     if (a === 'whoami') return out(200, { node: 'T', bell_topic: 'bell-test' })
-    if (a === 'inbox') return out(200, { messages: inbox.filter(m => !st.acked.has(m.id)) })
+    if (a === 'inbox') return out(200, { messages: st.rosterPosts.length ? inbox.filter(m => !st.acked.has(m.id)) : [] })   // 橋第一次回報名單之後才交信（負載高時名單晚到，信會被判成找不到視窗）
     if (a === 'send') { st.sent.push(await readBody(req)); return out(200, { ok: true }) }
     if (a === 'ack') { (await readBody(req)).ids.forEach(i => st.acked.add(i)); return out(200, { ok: true }) }
     if (a === 'roster') { st.rosterPosts.push(await readBody(req)); return out(200, { ok: true }) }
@@ -44,7 +44,7 @@ async function run({ inbox, workers, until, env = {} }) {
   fs.mkdirSync(path.join(home, 'st'))
   const agents = path.join(home, 'agents.json')
   fs.writeFileSync(agents, JSON.stringify({ workers }))
-  const child = spawn(process.execPath, [path.join(MACHINE, 'bridge.mjs')], {
+  const child = spawnTracked(process.execPath, [path.join(MACHINE, 'bridge.mjs')], {
     cwd: home, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true,
     env: {
       PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: home, USERPROFILE: home,

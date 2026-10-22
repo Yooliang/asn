@@ -5,7 +5,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawnTracked } from './spawn-tracked.mjs'
 import { fileURLToPath } from 'node:url'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -55,7 +55,7 @@ const baseEnv = (home, st, extra = {}) => ({
 })
 
 function spawnRecv(home, st, args, env = {}) {
-  const c = spawn(process.execPath, [RECV, ...args], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: baseEnv(home, st, env) })
+  const c = spawnTracked(process.execPath, [RECV, ...args], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: baseEnv(home, st, env) })
   c.out = ''; c.err = ''; c.stdout.on('data', d => (c.out += d)); c.stderr.on('data', d => (c.err += d))
   c.done = new Promise(r => c.on('close', code => r(code)))
   return c

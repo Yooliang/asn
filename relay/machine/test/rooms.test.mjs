@@ -6,7 +6,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawnTracked } from './spawn-tracked.mjs'
 import { fileURLToPath } from 'node:url'
 import { roomUuid } from '../rooms.mjs'
 
@@ -55,7 +55,7 @@ async function runBridge({ script, workName, env = {}, st, setup, until, timeout
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'irori-rooms-test-'))
   const workDir = path.join(home, '.irori-relay', workName)
   const extra = setup ? setup(home, workDir) : {}
-  const child = spawn(process.execPath, [path.join(MACHINE, script)], {
+  const child = spawnTracked(process.execPath, [path.join(MACHINE, script)], {
     cwd: home, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true,
     env: {
       PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: home, USERPROFILE: home,
