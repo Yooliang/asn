@@ -6,7 +6,7 @@ import { ACCOUNT_ACTIONS, type AccountDeps, cleanDisplayName, handleAccountActio
 import { expectsReplyArgs } from "../_shared/expects_reply.ts";
 import { parseSelfName } from "../_shared/node_name.ts";
 import { parseAsnPresence } from "../_shared/asn_presence.ts";
-import { handlePartnerSync } from "../_shared/partners.ts";
+import { handlePartnerList, handlePartnerSucceed, handlePartnerSync } from "../_shared/partners.ts";
 import { bellTopicsOf, handleChatHistory, personArgs, sendWithPerson } from "../_shared/account_me.ts";
 import { normalizeRosterAgents } from "../_shared/roster.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
@@ -272,6 +272,15 @@ Deno.serve(async (req) => {
   // 夥伴 ID（#109）：ASN 內建橋回報視窗名單時順便送「名字＋session」，後端判斷是哪位夥伴並回夥伴 ID。節點一律是金鑰所屬的 me.id
   if (action === "partner_sync" && req.method === "POST") {
     const r = await handlePartnerSync({ rpc }, me, await req.json().catch(() => null));
+    return json(r.status, r.body);
+  }
+  // 夥伴 ID 第二期（#153）：指定「這是某某的接班」、列出可被接班的夥伴。都要本人簽章（x-asn-user），節點一律是金鑰所屬的 me.id
+  if (action === "partner_succeed" && req.method === "POST") {
+    const r = await handlePartnerSucceed({ rpc, verifyJwt: accountDeps.verifyJwt }, me, req.headers.get(SIGN_HEADER), await req.json().catch(() => null));
+    return json(r.status, r.body);
+  }
+  if (action === "partner_list" && req.method === "POST") {
+    const r = await handlePartnerList({ rpc, verifyJwt: accountDeps.verifyJwt }, me, req.headers.get(SIGN_HEADER));
     return json(r.status, r.body);
   }
   // 往來記錄（#108）：「我和某夥伴」90 天內的信，以後台為準。必須帶本人簽章（x-asn-user）：AI 視窗拿得到節點金鑰，拿不到登入憑證

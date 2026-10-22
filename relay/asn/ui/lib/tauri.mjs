@@ -15,7 +15,9 @@ export const transport = {
   ack: ids => invoke('relay_ack', { ids }),
   rooms: () => invoke('relay_rooms'),
   send: payload => invoke('relay_send', { payload }),
-  history: (node, agent) => invoke('relay_chat_history', { node, agent: agent || null }),   // 後台的往來記錄（要登入；本機只當快取）
+  history: (node, agent, partnerId) => invoke('relay_chat_history', { node, agent: agent || null, partnerId: partnerId || null }),   // 後台的往來記錄（要登入；本機只當快取）
+  partnerList: () => invoke('relay_partner_list').then(r => r?.partners ?? []),   // 可被接班的夥伴（要登入；#153）
+  partnerSucceed: (predecessor, node, name) => invoke('relay_partner_succeed', { predecessor, node, name }),   // 新視窗接前任的班（要本人簽章）
   sentStatus: ids => invoke('relay_sent_status', { ids }).then(r => r?.status ?? []),
   avatar: node => invoke('relay_avatar', { node }),                 // 某台設備上傳的大頭貼（按需取）
   setAvatar: avatar => invoke('relay_set_avatar', { avatar }),      // 上傳自己這台的大頭貼；null＝移除

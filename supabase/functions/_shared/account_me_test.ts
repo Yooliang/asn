@@ -63,10 +63,10 @@ Deno.test("bellTopicsOf：扇出回多個門鈴（去重）；舊版只有一個
 });
 
 Deno.test("parseHistoryQuery：夥伴節點必填且格式合格；視窗名可空；筆數上限 200", () => {
-  assertEquals(parseHistoryQuery({ node: "M", agent: "小文" }), { node: "M", agent: "小文", limit: 100 });
-  assertEquals(parseHistoryQuery({ node: "M" }), { node: "M", agent: null, limit: 100 });
-  assertEquals(parseHistoryQuery({ node: "M", agent: "" }), { node: "M", agent: null, limit: 100 });
-  assertEquals(parseHistoryQuery({ node: "M", limit: 9999 }), { node: "M", agent: null, limit: 200 });
+  assertEquals(parseHistoryQuery({ node: "M", agent: "小文" }), { node: "M", agent: "小文", limit: 100, partnerId: null });
+  assertEquals(parseHistoryQuery({ node: "M" }), { node: "M", agent: null, limit: 100, partnerId: null });
+  assertEquals(parseHistoryQuery({ node: "M", agent: "" }), { node: "M", agent: null, limit: 100, partnerId: null });
+  assertEquals(parseHistoryQuery({ node: "M", limit: 9999 }), { node: "M", agent: null, limit: 200, partnerId: null });
   assertEquals(parseHistoryQuery({ node: "M", limit: 5 })?.limit, 5);
   for (const b of [null, "x", {}, { node: 5 }, { node: "a/b" }, { node: "" }, { node: "x".repeat(33) }, { node: "M", agent: 5 },
     { node: "M", agent: "a\nb" }, { node: "M", agent: "x".repeat(101) }, { node: "M", limit: 0 }, { node: "M", limit: 1.5 }, { node: "M", limit: "9" }]) {
@@ -119,4 +119,33 @@ Deno.test("handleChatHistory：節點取自金鑰（me.id）、使用者取自�
   assertEquals((await handleChatHistory(deps(mkr(null, { code: "PGRST202" })), { id: "H" }, "Bearer tok-1234567890abcdef", { node: "M" })).status, 404);
   assertEquals((await quiet(() => handleChatHistory(deps(mkr(null, { code: "XX000" })), { id: "H" }, "Bearer tok-1234567890abcdef", { node: "M" }))).status, 500);
   assertEquals((await handleChatHistory(deps(mkr({}, null)), { id: "H" }, "Bearer tok-1234567890abcdef", { node: "M" })).body, { messages: [] });
+});
+
+const PID = "p_" + "ab".repeat(10);
+
+Deno.test("parseHistoryQuery：夥伴 ID 選填（#153），格式不對當沒帶、不拒絕整個請求", () => {
+  assertEquals(parseHistoryQuery({ node: "M", agent: "小文", partner_id: PID })?.partnerId, PID);
+  for (const v of ["p_XYZ", "x", 5, null, {}, "p_" + "ab".repeat(11)]) {
+    assertEquals(parseHistoryQuery({ node: "M", partner_id: v })?.partnerId, null, String(v));
+  }
+});
+
+Deno.test("handleChatHistory：帶夥伴 ID 才多傳 p_partner_id；資料庫還沒有六個參數的版本 → 退回不帶重呼叫（順序顛倒也不壞）", async () => {
+  const calls: Array<Record<string, unknown>> = [];
+  const rpc: RpcFn = (_fn, args) => { calls.push({ ...args }); return Promise.resolve({ data: { messages: [] }, error: null }); };
+  const deps = (r: RpcFn) => ({ rpc: r, verifyJwt: () => Promise.resolve(user()), withAttachments: (m: unknown) => Promise.resolve(m) });
+  await handleChatHistory(deps(rpc), { id: "H" }, "Bearer tok-1234567890abcdef", { node: "M", agent: "小文", partner_id: PID });
+  assertEquals(calls[0].p_partner_id, PID);
+  await handleChatHistory(deps(rpc), { id: "H" }, "Bearer tok-1234567890abcdef", { node: "M", agent: "小文" });
+  assertEquals("p_partner_id" in calls[1], false, "沒帶就不傳，舊資料庫函式也能照舊呼叫");
+  const seen: Array<Record<string, unknown>> = [];
+  const old: RpcFn = (_fn, args) => {
+    seen.push({ ...args });
+    return Promise.resolve("p_partner_id" in args ? { data: null, error: { code: "PGRST202" } } : { data: { messages: [{ id: "u1" }] }, error: null });
+  };
+  const r = await handleChatHistory(deps(old), { id: "H" }, "Bearer tok-1234567890abcdef", { node: "M", partner_id: PID });
+  assertEquals(r.status, 200);
+  assertEquals(r.body, { messages: [{ id: "u1" }] });
+  assertEquals(seen.length, 2);
+  assertEquals("p_partner_id" in seen[1], false);
 });

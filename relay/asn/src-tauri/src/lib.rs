@@ -425,10 +425,24 @@ async fn relay_send(app: State<'_, App>, auth: State<'_, auth::AuthState>, paylo
 }
 /// 「我和某夥伴」90 天內的往來（以後台為準，本機只當快取）。要登入憑證；沒登入或後台還沒支援就回錯，前端靜默沿用本機快取
 #[tauri::command]
-async fn relay_chat_history(app: State<'_, App>, auth: State<'_, auth::AuthState>, node: String, agent: Option<String>) -> Result<Value, String> {
+async fn relay_chat_history(app: State<'_, App>, auth: State<'_, auth::AuthState>, node: String, agent: Option<String>, partner_id: Option<String>) -> Result<Value, String> {
     let r = relay_of(&app)?;
     let token = account::signing_token(&auth).await;
-    r.chat_history(&node, agent.as_deref().unwrap_or(""), token.as_deref()).await
+    r.chat_history(&node, agent.as_deref().unwrap_or(""), partner_id.as_deref(), token.as_deref()).await
+}
+/// 可被接班的夥伴清單（#153，要登入）。沒登入或後台還沒支援就回錯，前端不顯示「接班」選項
+#[tauri::command]
+async fn relay_partner_list(app: State<'_, App>, auth: State<'_, auth::AuthState>) -> Result<Value, String> {
+    let r = relay_of(&app)?;
+    let token = account::signing_token(&auth).await;
+    r.partner_list(token.as_deref()).await
+}
+/// 指定「新視窗是某某的接班」（#153，要本人簽章）：夥伴 ID 沿用前任
+#[tauri::command]
+async fn relay_partner_succeed(app: State<'_, App>, auth: State<'_, auth::AuthState>, predecessor: String, node: String, name: String) -> Result<Value, String> {
+    let r = relay_of(&app)?;
+    let token = account::signing_token(&auth).await;
+    r.partner_succeed(&predecessor, &node, &name, token.as_deref()).await
 }
 #[tauri::command]
 async fn relay_sent_status(app: State<'_, App>, ids: Vec<String>) -> Result<Value, String> {
@@ -672,7 +686,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, ads::ads_fetch, set_window_name, set_presence, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_takeover, cli_info, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_partner_list, relay_partner_succeed, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, ads::ads_fetch, set_window_name, set_presence, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_takeover, cli_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_mod::claude_mod_status,
             codex_accounts::codex_account_current, usage::usage_summary,

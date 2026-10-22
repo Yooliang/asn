@@ -25,6 +25,7 @@ import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, r
 import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
 import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
 import { CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, buddyConsoleItem, engineForProfile,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice, withTimeout } from './lib/partner-launch-ui.mjs'
+import { SUCCESSION_GIVE_UP_MS, alreadyDone, canMarkSuccessor, giveUpNotice, newSuccession, readySuccessions, succeedOutcome, successorOptions } from './lib/succession.mjs'
 import { backgroundRestoreNoticeText, collectLaunchFailures, findBackgroundTimeouts, launchFailedNoticeText } from './lib/partner-launch-notify.mjs'
 import { friendId } from './lib/roster.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher } from './lib/model-switch.mjs'
@@ -281,7 +282,58 @@ const launchToolRows = computed(() => MODEL_CATALOG.map(m => modelUiRow(m, cliTo
 const partnerModels = computed(() => launchToolRows.value)
 // 對話框裡的模型列：本機看偵測到的 CLI；別台設備看那台回報的 profile
 const dlgModels = computed(() => (partnerDlg.node && partnerDlg.node !== info.node ? remoteModelRows(remoteLaunchers.value[partnerDlg.node]) : partnerModels.value))
-const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '', display: 'foreground' })
+const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '', display: 'foreground', successorOf: '' })
+// 「這是誰的接班」（#153）：後台回的夥伴清單（要登入；沒登入或後台還沒支援就是空的，介面不顯示這個選項）。夥伴 ID 只當選項的值，畫面只有名字與設備名
+const successors = ref([])
+async function refreshSuccessors() {
+  try { successors.value = await transport.partnerList() } catch (e) { successors.value = []; console.info('[ASN] 夥伴清單', e.message) }
+}
+const partnerSuccessorOptions = computed(() => successorOptions(successors.value))
+const successionPending = ref([])   // 等新視窗出現在名單後送出的接班設定
+const succeedDlg = reactive({ open: false, node: '', name: '', nick: '', partnerId: '', choice: '', busy: false, error: '' })
+const succeedDlgOptions = computed(() => successorOptions(successors.value, { exceptPartnerId: succeedDlg.partnerId }))
+const buddyCanSucceed = computed(() => canMarkSuccessor(buddyMenuFriend.value))
+function buddyMenuMarkSuccessor() {
+  const c = buddyMenuFriend.value
+  closeBuddyMenu()
+  if (!c || !canMarkSuccessor(c)) return
+  Object.assign(succeedDlg, { open: true, node: c.node, name: c.agent || c.nick, nick: c.nick, partnerId: c.partnerId, choice: '', busy: false, error: '' })
+  void refreshSuccessors()
+}
+function closeSucceedDlg() { if (!succeedDlg.busy) succeedDlg.open = false }
+async function submitSucceedDlg() {
+  if (!succeedDlg.choice) { succeedDlg.error = '請先選擇要接誰的班'; return }
+  succeedDlg.busy = true; succeedDlg.error = ''
+  try {
+    await transport.partnerSucceed(succeedDlg.choice, succeedDlg.node, succeedDlg.name)
+    succeedDlg.open = false
+    void refreshSuccessors()
+  } catch (e) { succeedDlg.error = succeedOutcome(e.message, succeedDlg.nick).text } finally { succeedDlg.busy = false }
+}
+// 開新夥伴時選了「這是誰的接班」：等新視窗出現在名單（後台認得它）才送出；前任視窗還開著就稍後再試，久等不到就通知使用者
+async function processSuccessions() {
+  if (!successionPending.value.length) return
+  const fl = friends.value
+  const now = Date.now()
+  const done = new Set(alreadyDone(successionPending.value, fl))
+  let list = successionPending.value.filter(s => !done.has(s))
+  for (const { s } of readySuccessions(list, fl)) {
+    try {
+      await transport.partnerSucceed(s.predecessor, s.node, s.name)
+      list = list.filter(x => x !== s)
+      void refreshSuccessors()
+    } catch (e) {
+      const o = succeedOutcome(e.message, s.name)
+      s.lastText = o.text
+      if (o.act === 'drop') { list = list.filter(x => x !== s); showLaunchNotice(giveUpNotice(s.name, o.text)) }
+    }
+  }
+  for (const s of list.filter(x => now - x.since > SUCCESSION_GIVE_UP_MS)) {
+    list = list.filter(x => x !== s)
+    showLaunchNotice(giveUpNotice(s.name, s.lastText || ''))
+  }
+  successionPending.value = list
+}
 const partnerShowDisplay = computed(() => partnerDlg.node === info.node && showDisplayModeChoice(partnerDlg.profile))
 const launchCtx = computed(() => ({ selfNode: info.node, partnerModels: partnerModels.value, remoteLaunchers: remoteLaunchers.value }))
 const launchDeviceRowsList = computed(() => launchDeviceRows(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value }))
@@ -327,6 +379,8 @@ function openPartnerDlg(nodeKey) {
   partnerDlg.error = ''
   partnerDlg.busy = false
   partnerDlg.firstMessage = ''
+  partnerDlg.successorOf = ''
+  void refreshSuccessors()
   partnerDlg.display = launchPrefs.launchDisplay === 'background' ? 'background' : 'foreground'
   const first = dlgModels.value.find(m => m.installed) ?? dlgModels.value[0]
   if (first) pickPartnerModel(first)
@@ -460,6 +514,7 @@ async function submitPartnerDlg() {
     }
     Object.assign(launchPrefs, bumpRecentCwd(launchPrefs, partnerDlg.cwd))
     void saveLaunchPrefs()
+    if (partnerDlg.successorOf) successionPending.value = [...successionPending.value, newSuccession({ node: partnerDlg.node, name: partnerDlg.name.trim(), predecessor: partnerDlg.successorOf })]
     closePartnerDlg()
     if (partnerDlg.node === info.node && partnerDlg.firstMessage.trim()) {
       setTimeout(async () => {
@@ -502,6 +557,7 @@ async function pollLaunchResults() {
     }).catch(() => {})
   }
   launchPending.value = still
+  void processSuccessions()
 }
 void refreshCliTools()
 void refreshLaunchers()
@@ -945,6 +1001,7 @@ const app = createApp({
       DISPLAY_MODES, partnerShowDisplay,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
+      partnerSuccessorOptions, succeedDlg, succeedDlgOptions, buddyCanSucceed, buddyMenuMarkSuccessor, closeSucceedDlg, submitSucceedDlg,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddyConsoleItemView, buddyMenuOpenChat, toggleBuddyConsole,
       buddyModel, buddyModelLabel, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,
       launchToolRows, launchPrefs, launchCwdText, saveLaunchPrefs, setLaunchCwdText,
