@@ -74,7 +74,7 @@ Log：`~/.irori-relay/machine-<ID>/bridge.log`（每個轉交、每一輪收發�
 node D:\Github\irori\relay\machine\bridge.mjs          # 前景跑（ASN_RELAY_ID 預設 H）
 powershell -File install-task.ps1                      # 預覽，不改任何東西
 powershell -File install-task.ps1 -DefaultAgent <名稱> -Apply   # 指定預設收件 session（不帶＝不指定，信留給 ASN 視窗的本人）；run-bridge.ps1 同名參數
-powershell -File install-task.ps1 -Apply               # 建立工作排程 IroriRelayMachine-H（登入時、隱藏視窗、失敗重啟）
+powershell -File install-task.ps1 -Apply               # 建立工作排程 AsnBridge-H（舊安裝的 IroriRelayMachine-H 重建時會被移除）（登入時、隱藏視窗、失敗重啟）
 powershell -File install-task.ps1 -Uninstall           # 移除
 ```
 
@@ -88,11 +88,11 @@ powershell -File install-task.ps1 -Uninstall           # 移除
 - **只在安全時才拉**：工作樹乾淨（追蹤中的檔沒改）、在 `main`、沒有沒推的本機 commit，才用 fast-forward 拉；否則跳過並在 `bridge.log` 記一行 `self-update skip: …`。只有別的目錄有新 commit 不動（那是開發視窗的事）。
 - 拉好之後：不再收新信（留在信箱），等手上「轉交中」的信送完（最多 5 分鐘），停掉收發室與工作者再結束；`run-bridge.ps1` 15 秒後用新版重啟。等回信的對應表本來就存在 `pending.json`，重啟後接著等。
 - **孤兒程序**：橋把自己的 pid 記在 `bridge.last`。下次啟動時，上一個橋已經不在、父程序還是它的（收發室 `claude -p`、Gemini 等工作者）會連同子孫一起結束，不會兩組同時收信（w02 10/06 遇過）。只看父 pid，不依名稱結束程序。
-- **手動重啟時不要刪 `bridge.pid`**：它是「同時只能有一個橋」的鎖，刪了舊的橋還活著，就會變成兩個。要停就用 `installer/irori-common.ps1` 的 `Stop-IroriBridge`（停排程，再只結束 `bridge.pid`、`mailbox.pid` 記的兩個程序）。
+- **手動重啟時不要刪 `bridge.pid`**：它是「同時只能有一個橋」的鎖，刪了舊的橋還活著，就會變成兩個。要停就用 `installer/asn-common.ps1` 的 `Stop-AsnBridge`（舊名 Stop-IroriBridge 為別名）（停排程，再只結束 `bridge.pid`、`mailbox.pid` 記的兩個程序）。
 - 一般使用者用 `installer/` 安裝的副本不是 git 工作樹，不會自己更新（`bridge.log` 會記一次 `self-update error`），照舊用新的安裝包更新。
 
 一般使用者不用手動做這些：`installer/` 是給一般人的 Windows 安裝程式（雙擊「安裝.cmd」＝邀請碼註冊＋複製程式＋建排程；`register.mjs` 是註冊小幫手），
-`node tools/release/build_downloads.mjs` 打成 `irori-windows.zip`。說明見 `docs/DOWNLOADS.md`。
+`node tools/release/build_downloads.mjs` 打成 `asn-windows.zip`（同時產出內容相同的舊檔名 `irori-windows.zip`）。說明見 `docs/DOWNLOADS.md`。
 
 ## 安全
 
@@ -182,7 +182,7 @@ powershell -File install-task.ps1 -Uninstall           # 移除
 - 共用邏輯在 `rooms.mjs`（游標、標頭格式、UUID、room_post）。
 - 轉交時（只有 `bridge.mjs`）在內文最後附「前面 5 則」當上下文（`rooms.context()`：`room_read` 帶 `since=seq-6&limit=5`，只讀；讀失敗就不附、照常轉交）與往回翻的指令。
 
-### 視窗主動查群組：irori-room（`room.mjs`）
+### 視窗主動查群組：asn-room（`room.mjs`；舊稱 irori-room）
 
 橋只轉 for_me 的訊息；視窗要看別人之間的對話、往回翻前後文，自己跑：
 ```
@@ -195,7 +195,7 @@ node room.mjs --room-read <群組id|群組名> [--last 20 | --since <seq>] [--js
 - 不需要改仲介、不需要部署 Edge Function。
 - exit code：1 用法、2 認不出視窗、3 不是成員／找不到群組、4 後端錯誤。測試：`test/room.test.mjs`。
 
-## 視窗主動寄信：irori-send（`send.mjs`）
+## 視窗主動寄信：asn-send（`send.mjs`；舊稱 irori-send）
 
 本機任何 Claude 視窗要主動寄信（回報給別人、寄給別台機器的視窗、貼到群組），用 Bash 直接跑 CLI，**不經收發室、不經任何模型、不花額度**（收信仍靠橋，回信照舊由橋經收發室轉進該視窗）。
 用 `--reply-to` 直接回某封信、寄成功後，會在 `machine-<節點>/replied/<信件id>` 留記號；橋看到就不再對那封寄「10 分鐘內沒有經收發室收到回覆」（2026-10-02 收件的人把真回信和這則通知一起轉述成「沒回」，使用者因此連問三次）。記號留一天。
@@ -227,7 +227,7 @@ node send.mjs --to XISU --file 報告.pdf --file 圖.webp --body "說明" --no-r
 - 判定呼叫者要讀一次行程表（Windows 用 PowerShell `Get-CimInstance`，約 0.6 秒）；整個指令約 1–2 秒。
 - 實作注意：結束時不呼叫 `process.exit()`（Windows 上 node 偶爾在關閉 handle 時 assertion 當掉），改設 `process.exitCode`。
 
-## 視窗自己收信：irori-recv（`recv.mjs`，#84）
+## 視窗自己收信：asn-recv（`recv.mjs`，#84；舊稱 irori-recv）
 
 仲介信箱是「一台機器一個節點」，橋收信後經收發室（`claude -p`，每封約 1 美分、多一層）轉給視窗。視窗也可以**自己收**寄給自己的信，不經收發室、不經模型：
 

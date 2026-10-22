@@ -1,5 +1,6 @@
-// 產生「下載區」的檔案到 %TEMP%\irori-downloads\（不上傳、不部署；上傳步驟見 docs/DOWNLOADS.md）：
-//   irori-windows.zip   Windows 小程式（收發室橋 + 安裝／解除安裝程式）
+// 產生「下載區」的檔案到 %TEMP%\asn-downloads\（不上傳、不部署；上傳步驟見 docs/DOWNLOADS.md）：
+//   asn-windows.zip     Windows 小程式（收發室橋 + 安裝／解除安裝程式）
+//   irori-windows.zip   舊檔名：內容與 asn-windows.zip 完全相同，只為了舊網址與舊連結仍可下載（D10）
 //   downloads.json      各檔版本（git 短 sha + 日期）、大小、sha256
 // 用法：node tools/release/build_downloads.mjs [--out <資料夾>] [--include <其他要列進 downloads.json 的檔案，例如 apk>]...
 // 同一個 commit 產出的 zip 內容固定（時間戳取 commit 日期），sha256 也會一樣。
@@ -14,7 +15,8 @@ import { buildZip } from './zip_lite.mjs'
 const here = path.dirname(fileURLToPath(import.meta.url))
 export const REPO = path.resolve(here, '..', '..')
 export const PUBLIC_BASE = 'https://irori.web.app/download'
-export const WINDOWS_ZIP = 'irori-windows.zip'
+export const WINDOWS_ZIP = 'asn-windows.zip'
+export const LEGACY_WINDOWS_ZIP = 'irori-windows.zip'
 
 const MACHINE = path.join('relay', 'machine')
 const INSTALLER = path.join(MACHINE, 'installer')
@@ -80,17 +82,22 @@ export function windowsEntries(repo = REPO, version = versionInfo(repo)) {
   return entries
 }
 
-export function buildDownloads({ outDir = path.join(os.tmpdir(), 'irori-downloads'), repo = REPO, include = [], now = new Date() } = {}) {
+export function buildDownloads({ outDir = path.join(os.tmpdir(), 'asn-downloads'), repo = REPO, include = [], now = new Date() } = {}) {
   fs.mkdirSync(outDir, { recursive: true })
   const version = versionInfo(repo)
   const zip = buildZip(windowsEntries(repo, version), `${version.date}T00:00:00Z`)
   const zipPath = path.join(outDir, WINDOWS_ZIP)
   fs.writeFileSync(zipPath, zip)
+  fs.writeFileSync(path.join(outDir, LEGACY_WINDOWS_ZIP), zip)
 
   const files = {
     [WINDOWS_ZIP]: {
       version: `${version.sha} (${version.date})`, size: zip.length, sha256: sha256(zip),
       url: `${PUBLIC_BASE}/${WINDOWS_ZIP}`, use: 'Windows 小程式（收發室橋）',
+    },
+    [LEGACY_WINDOWS_ZIP]: {
+      version: `${version.sha} (${version.date})`, size: zip.length, sha256: sha256(zip),
+      url: `${PUBLIC_BASE}/${LEGACY_WINDOWS_ZIP}`, use: '舊檔名，內容與 asn-windows.zip 相同（讓舊網址仍可下載）',
     },
   }
   for (const f of include) {

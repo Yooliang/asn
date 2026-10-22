@@ -149,7 +149,7 @@ test('轉交：onSent 先於回覆；佇列收到「原信全文＋編號標記�
     assert.equal(q.argv[q.argv.indexOf('--thread') + 1], A)
     const msg = messageOf(q)
     assert.ok(msg.startsWith(mailText(id, '請幫我看一下 A 專案')), '原信一字不改放在最前面')
-    assert.ok(msg.includes(`irori-mail:${id}`), '要有編號標記，回覆才對得上')
+    assert.ok(msg.includes(`asn-mail:${id}`), '要有編號標記，回覆才對得上')
   } finally { await s.stop(); fx.cleanup() }
 })
 

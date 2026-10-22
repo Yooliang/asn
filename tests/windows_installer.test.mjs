@@ -67,7 +67,7 @@ test('完整流程：註冊 → 金鑰與 node 檔 → 程式複製 → 再跑�
   assert.equal(fs.readFileSync(path.join(irori(home), 'node'), 'utf8'), 'T-pc1')
   assert.ok(fs.existsSync(path.join(irori(home), 'app', 'bridge.mjs')))
   assert.ok(fs.existsSync(path.join(irori(home), 'app', 'VERSION.json')))
-  assert.ok(fs.existsSync(path.join(irori(home), 'uninstall', 'uninstall.ps1')) && fs.existsSync(path.join(irori(home), 'uninstall', 'irori-common.ps1')))
+  assert.ok(fs.existsSync(path.join(irori(home), 'uninstall', 'uninstall.ps1')) && fs.existsSync(path.join(irori(home), 'uninstall', 'asn-common.ps1')) && fs.existsSync(path.join(irori(home), 'uninstall', 'irori-common.ps1')), '解除安裝資料夾要有新檔與舊檔名薄殼')
   assert.deepEqual(srv.registers.map(b => [b.id, b.name, b.kind]), [['T-pc1', '小美的筆電', 'other']])
   assert.ok(srv.reqs.some(q => q.action === 'whoami'), '裝完要確認連線')
 
@@ -80,7 +80,7 @@ test('完整流程：註冊 → 金鑰與 node 檔 → 程式複製 → 再跑�
 
   // 排程：只看 install-task.ps1 的預覽（不加 -Apply，不會真的建立），確認指到裝好的 run-bridge.ps1
   const tp = await ps(path.join(irori(home), "app", "install-task.ps1"), ["-NodeId", "T-pc1"])
-  assert.match(tp.out, /IroriRelayMachine-T-pc1/); assert.ok(tp.out.includes(path.join(irori(home), "app", "run-bridge.ps1")), tp.out)
+  assert.match(tp.out, /AsnBridge-T-pc1/); assert.ok(!/IroriRelayMachine/.test(tp.out), '新建的排程用新名'); assert.ok(tp.out.includes(path.join(irori(home), "app", "run-bridge.ps1")), tp.out)
 
   // 第二次：已安裝 → 更新模式。改掉 app 裡的檔案，更新後應被換回；不再註冊
   const regsBefore = srv.registers.length
@@ -197,10 +197,30 @@ test('沒有 Claude Code：提示後照樣安裝；沒解壓縮（缺 app 資料
   assert.ok(fs.existsSync(path.join(irori(home), 'NC1.key')))
   const lone = tmp('irori-lone-')
   fs.copyFileSync(path.join(x, 'install.ps1'), path.join(lone, 'install.ps1'))
-  fs.copyFileSync(path.join(x, 'irori-common.ps1'), path.join(lone, 'irori-common.ps1'))
+  fs.copyFileSync(path.join(x, 'asn-common.ps1'), path.join(lone, 'asn-common.ps1'))
   const nz = await ps(path.join(lone, 'install.ps1'), [...base, '-HomeDir', tmp('irori-home-')])
   assert.equal(nz.code, 1, nz.out); assert.match(nz.out, /解壓縮/)
   await srv.close()
+})
+
+test('舊檔名 irori-common.ps1 只是薄殼：載入後新舊函式名都能用（Get-AsnHome／Get-IroriHome、Stop-AsnBridge／Stop-IroriBridge）', { skip: !WIN }, async () => {
+  const x = extracted()
+  const shim = fs.readFileSync(path.join(x, 'irori-common.ps1'), 'utf8')
+  assert.ok(shim.includes('asn-common.ps1') && shim.split(/\r?\n/).length < 6, '薄殼只該 dot-source 新檔')
+  const probe = path.join(tmp('irori-probe-ps-'), 'probe.ps1')
+  fs.writeFileSync(probe, `. '${path.join(x, 'irori-common.ps1').replace(/'/g, "''")}'\r\n` +
+    `$a = Get-AsnHome 'C:\\h'; $b = Get-IroriHome 'C:\\h'\r\n` +
+    `$c = (Get-Command Stop-IroriBridge).ResolvedCommandName; $d = (Get-Command Stop-AsnBridge).Name\r\n` +
+    `Write-Output "$a|$b|$c|$d"\r\n`)
+  const r = await ps(probe, [])
+  assert.equal(r.code, 0, r.out)
+  assert.match(r.out, /C:\\h\|C:\\h\|Stop-AsnBridge\|Stop-AsnBridge/)
+})
+
+test('install-task.ps1 預覽：排程名是 AsnBridge-<代號>', { skip: !WIN }, async () => {
+  const x = extracted()
+  const tp = await ps(path.join(x, 'app', 'install-task.ps1'), ['-NodeId', 'Z1'])
+  assert.match(tp.out, /Task: AsnBridge-Z1/); assert.ok(!/Task: IroriRelayMachine/.test(tp.out))
 })
 
 test('register.mjs 命令列：邀請碼走環境變數、輸出一行 JSON、不含金鑰', { skip: !WIN }, async () => {

@@ -654,7 +654,7 @@ async fn codex_轉交_先_sent_再回覆_佇列收到原信全文加編號標記
     let m = Cx::message(&q[0]);
     assert!(m.starts_with("[RELAY 來信] trust=member from=W/W-政策 to=視窗甲 "), "{m}");
     assert!(m.contains("engine=codex reply=yes") && m.contains("請看一下 -- 這個"), "{m}");
-    assert!(m.contains(&format!("irori-mail:{}", uid(1))) && m.contains("最終回覆會由收發室自動寄回"), "{m}");
+    assert!(m.contains(&format!("asn-mail:{}", uid(1))) && m.contains("最終回覆會由收發室自動寄回"), "{m}");
     assert!(m.contains("你與收發室的往來記錄在"), "Codex 視窗讀得到檔案：附往來記錄路徑");
     let s = h.fr.sent();
     assert_eq!((s[0]["body"].as_str(), s[0]["reply_to"].as_str(), s[0]["from_agent"].as_str()), (Some("好的，已處理完畢"), Some(uid(1).as_str()), Some("視窗甲")));

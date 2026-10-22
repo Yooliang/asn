@@ -41,7 +41,7 @@ async function fakeRelay(inboxFailRemaining = 0) {
 }
 
 function newHome(name = 'T-視窗甲') {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'irori-recv-retry-'))
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-recv-retry-'))
   fs.mkdirSync(path.join(home, '.irori-relay'), { recursive: true })
   fs.writeFileSync(path.join(home, '.irori-relay', 'T.key'), 'fake-machine-key')
   const sdir = path.join(home, '.claude', 'sessions'); fs.mkdirSync(sdir, { recursive: true })

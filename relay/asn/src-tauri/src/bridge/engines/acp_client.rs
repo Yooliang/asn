@@ -102,7 +102,7 @@ impl AcpClient {
                     "protocolVersion": 1,
                     // 不提供 fs／terminal：agent 只能用自己的工具（且權限由政策決定）
                     "clientCapabilities": {},
-                    "clientInfo": { "name": "irori-relay", "title": "Irori relay", "version": "0.1.0" },
+                    "clientInfo": { "name": "asn", "title": "ASN", "version": "0.1.0" },
                 }),
                 REQUEST_TIMEOUT_MS,
             )

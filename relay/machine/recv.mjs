@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// irori-recv：本機 Claude 視窗自己收仲介寄給它的信，不經收發室、不經任何模型。
+// asn-recv：本機 Claude 視窗自己收仲介寄給它的信，不經收發室、不經任何模型。
 //   node recv.mjs --once     拉一次，每封印一行 JSON 到 stdout、印完 ack，然後結束
 //   node recv.mjs --watch    長駐：Realtime 門鈴＋輪詢；每封一行 JSON 到 stdout（給 Claude Code 的 Monitor 用）
 // 只收「to_agent＝本視窗名」的信（視窗名由父行程鏈／環境變數備援認出，和 send.mjs 同一套，不能自填）；

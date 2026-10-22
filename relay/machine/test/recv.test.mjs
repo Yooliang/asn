@@ -45,7 +45,7 @@ async function fakeRelay({ filterAgent = true } = {}) {
 
 // 假視窗身分：用環境變數備援（CLAUDE_CODE_MESSAGING_SOCKET 對上還活著的 session），pid 用測試行程自己
 function newHome(name = 'T-視窗甲') {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'irori-recv-test-'))
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-recv-test-'))
   fs.mkdirSync(path.join(home, '.irori-relay'), { recursive: true })
   fs.writeFileSync(path.join(home, '.irori-relay', 'T.key'), 'fake-machine-key')
   const sdir = path.join(home, '.claude', 'sessions'); fs.mkdirSync(sdir, { recursive: true })

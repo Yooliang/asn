@@ -1,4 +1,4 @@
-// irori-room CLI 測試（本機假伺服器）：身分自動判定、只看得到自己在的群組、只讀不動已讀（一定帶 since、不帶 mark）、
+// asn-room CLI 測試（本機假伺服器）：身分自動判定、只看得到自己在的群組、只讀不動已讀（一定帶 since、不帶 mark）、
 // --last／--since 範圍、群組名也可、不是成員擋下、本機新訊息數；以及機器橋 context() 讀失敗不擋。
 // 執行：node --test relay/machine/test/*.test.mjs
 import { test } from 'node:test'
@@ -41,7 +41,7 @@ async function fakeServer({ forbidRead = false } = {}) {
   return st
 }
 const newHome = () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'irori-room-test-'))
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-room-test-'))
   fs.mkdirSync(path.join(home, '.irori-relay'), { recursive: true })
   fs.writeFileSync(path.join(home, '.irori-relay', 'T.key'), 'fake-machine-key')
   return home

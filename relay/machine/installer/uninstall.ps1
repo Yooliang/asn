@@ -16,7 +16,7 @@ param(
   [switch]$NonInteractive
 )
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'irori-common.ps1')
+. (Join-Path $PSScriptRoot 'asn-common.ps1')
 Initialize-Console
 $preview = [bool]$WhatIfPreference
 $ni = [bool]$NonInteractive
@@ -25,7 +25,7 @@ Say ''
 Say '=== ASN 收發室橋：移除 ===' 'Cyan'
 if ($preview) { Say '（預覽模式：只告訴你會做什麼，不會改動這台電腦，也不會連網。）' 'Yellow' }
 
-$home_ = Get-IroriHome $HomeDir
+$home_ = Get-AsnHome $HomeDir
 $irori = Join-Path $home_ '.irori-relay'
 $id = $NodeId
 if (-not $id -and (Test-Path -LiteralPath (Join-Path $irori 'node'))) { $id = (Get-Content -LiteralPath (Join-Path $irori 'node') -Raw).Trim() }
@@ -33,9 +33,11 @@ if (-not $id) {
   Say '這台電腦看起來沒有安裝過收發室橋（找不到代號），沒有東西要移除。' 'Yellow'
   exit 0
 }
-$taskName = "IroriRelayMachine-$id"
+$taskName = "AsnBridge-$id"
+$legacyTaskName = "IroriRelayMachine-$id"   # 舊安裝的排程名，兩種都處理
 $workDir = Join-Path $irori "machine-$id"
 $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+$legacyTask = Get-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue
 Say "要移除的是：代號 $id"
 
 # ---- 1. 排程與程序 ----
@@ -46,9 +48,10 @@ if ($preview) {
     Say "（預覽）$f 記的程序：$(if ($p) { '還在執行（pid ' + $p.Id + '），會結束它' } else { '沒有在執行' })"
   }
 } else {
-  $killed = Stop-IroriBridge $workDir $taskName $false
+  $killed = Stop-AsnBridge $workDir $taskName $false
   if ($task) { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false; Say '已移除自動啟動的排程。' 'Green' }
-  else { Say '沒有找到自動啟動的排程（可能早就移除了）。' }
+  if ($legacyTask) { Unregister-ScheduledTask -TaskName $legacyTaskName -Confirm:$false; Say '已移除舊名的自動啟動排程。' 'Green' }
+  if (-not $task -and -not $legacyTask) { Say '沒有找到自動啟動的排程（可能早就移除了）。' }
   if ($killed.Count -gt 0) { Say "已停止橋與收發室（程序 $($killed -join '、')）。" 'Green' } else { Say '橋目前沒有在執行。' }
 }
 
