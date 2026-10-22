@@ -1,5 +1,5 @@
 import type { Register } from 'claude-code'
-import { buildSendArgv, guardBash } from './lib'
+import { buildSendArgv, guardBash, startNotice } from './lib'
 import { createStatus, questionDetail } from './status'
 
 const TOOL = 'mcp__asn__asn_send'
@@ -28,6 +28,16 @@ export const register: Register = (on, options) => {
         required: ['body'],
       },
     })
+    // 提示這台有 ASN 與 asn 技能；附不上（例如沒有對話可附）就算了，不影響開窗
+    try {
+      const version = await $.fs
+        .read(`${$.plugin.root}/.claude-plugin/plugin.json`)
+        .then(t => String(JSON.parse(String(t)).version ?? ''))
+        .catch(() => '')
+      await $.session.append({ message: { type: 'system', content: [{ type: 'text', text: startNotice(version) }] } })
+    } catch (err) {
+      $.ui.log(`asn：開窗提示沒附上（${String(err)}）`)
+    }
     return next(e)
   })
 

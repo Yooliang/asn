@@ -65,6 +65,14 @@ mod 把這個視窗的細部狀態寫到本機檔，給 ASN 內建橋讀進 rost
 - Bash 守門以命令字串判斷（含 `--to` 且無 `--reply`／`--no-reply` 旗標字樣），內文剛好含有這些字樣會放行；這是提醒用的守門，不是安全邊界。
 - 後續：第二期收件匣面板與身分段、第三期轉交改由 mod 收；詳見 #134。
 
+## asn 技能與開窗提示
+
+讓沒有 ASN 原始碼的電腦上的 Claude 也知道怎麼用收發室。
+
+- **`skills/asn/SKILL.md`**：收信格式與信任等級（owner／member）、`asn-cli` 各子命令、回信要回 `from=` 完整位址、查版本的方法。技能的說明文字每個視窗都會列出，Claude 自己會判斷何時讀。
+- **`skills/asn/CHANGELOG.md`**：不在 repo 裡，打包時把 `relay/asn/CHANGELOG.md`（ASN 版本更新記錄的唯一來源）帶進這個位置（`tauri.conf.json` 的 `bundle.resources`），所以更新說明跟著 ASN 發版自動更新，不用另外維護。
+- **開窗提示**：`session.start` 用 `$.session.append` 附一則系統提示「這台裝了 ASN x.y.z，看 asn 技能」。附不上（例如引擎說沒有對話可附）只記一行 log，不影響開窗。
+
 ## 開發
 
 ```
