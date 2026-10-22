@@ -12,6 +12,7 @@ import { normalizeRosterAgents } from "../_shared/roster.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
 import * as signal from "../_shared/signal.ts";
 import { handleNodeLaunchAction, LAUNCH_ACTIONS, sanitizeLauncher } from "../_shared/launch.ts";
+import { handleNodePartnerOpAction, PARTNER_OP_ACTIONS } from "../_shared/partner_ops.ts";
 import { ACCT_ACTIONS, handleAcctAction } from "../_shared/account_switch.ts";
 import {
   ACTIONS as ATTACH_ACTIONS, bindAttachments, handleAttachAction, prepareAttachments, type StorageDeps, withAttachments,
@@ -416,6 +417,15 @@ Deno.serve(async (req) => {
     // 本人簽章（選填）：手機與登入建立的電腦節點不是 owner 角色，靠簽章（資料庫再核對「節點與租戶都是這個人的」）證明本人；沒簽章＝與以前完全相同
     const signedLaunch = (action === "launch" || action === "launchers") ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
     const r = await handleNodeLaunchAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedLaunch);
+    return json(r.status, r.body);
+  }
+  // 遠端管理夥伴視窗（詳情、改名、切換模型、關閉、轉交）：partner_op／partner_ops 是手機下令與查進度（一定要本人簽章，沒簽章 401 不打資料庫）；
+  // partner_op_pending／partner_op_result 是電腦端內建收發室取待辦、回報結果（只動得到自己節點的）
+  if (action && PARTNER_OP_ACTIONS.has(action)) {
+    const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
+    const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
+    const signedOp = (action === "partner_op" || action === "partner_ops") ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
+    const r = await handleNodePartnerOpAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedOp);
     return json(r.status, r.body);
   }
   // 遠端切換 Claude 帳號（ASN 帳號管理，見 _shared/account_switch.ts）：

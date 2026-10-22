@@ -1,23 +1,23 @@
 // 手機版（安卓）的純邏輯：單欄導覽、名單分組、提示規則、外殼橋、登入後的下一步。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { EDGE_PX, TABS, TAB_LABEL, indicatorPos, lastMessage, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, threadRows, threadTime, SWIPE_BLOCK_SELECTOR, COMMIT_FRAC, ASN_BADGE, BACKFILL_MAX, LAST_WORDS_MAX, accountDisplayName, backfillQueue, lastWords, vendorBadgeHtml, PTR_LOADING_H, PTR_MAX, PTR_THRESHOLD, PULL_TEXT, UPDATE_LATEST, UPDATE_UNAVAILABLE, launchNav, pullHeight, pullPhase, pullRatio, shouldRefreshOnRelease, updateCheckErrorText } from '../ui/lib/mobile.mjs'
-import { BANNER_MS, DEFAULT_PREFS, MSG_VIBRATE_MS, NUDGE_VIBRATE_MS, UPDATE_CHECK_MS, afterBind, bannerText, buttonLabel, initialUpdate, installOutcome, progressText, shouldAutoCheck, withAvailable, withFailure, withProgress, androidBridge, chatNav, initialNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, totalUnread } from '../ui/lib/mobile.mjs'
+import { EDGE_PX, TABS, TAB_LABEL, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, SWIPE_BLOCK_SELECTOR, COMMIT_FRAC, ASN_BADGE, BACKFILL_MAX, LAST_WORDS_MAX, accountDisplayName, backfillQueue, lastWords, vendorBadgeHtml, PTR_LOADING_H, PTR_MAX, PTR_THRESHOLD, PULL_TEXT, UPDATE_LATEST, UPDATE_UNAVAILABLE, launchNav, opsNav, pullHeight, pullPhase, pullRatio, shouldRefreshOnRelease, updateCheckErrorText } from '../ui/lib/mobile.mjs'
+import { BANNER_MS, DEFAULT_PREFS, MSG_VIBRATE_MS, NUDGE_VIBRATE_MS, UPDATE_CHECK_MS, afterBind, bannerText, buttonLabel, initialUpdate, installOutcome, progressText, shouldAutoCheck, withAvailable, withFailure, withProgress, androidBridge, initialNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, totalUnread } from '../ui/lib/mobile.mjs'
 import { groupHeading } from '../ui/lib/tabs.mjs'
 
 const F = (id, node, nick, status = 'online', extra = {}) => ({ id, node, agent: nick, nick, status, device: `設備${node}`, unread: 0, ...extra })
 
-test('導覽：名單 → 對話、名單 → 我；瀏覽記錄裡的壞資料一律退回名單', () => {
-  assert.deepEqual(initialNav(), { tab: 'list', chat: '', sheet: '' })
-  assert.deepEqual(chatNav('A/x'), { tab: 'list', chat: 'A/x', sheet: '' })
-  assert.deepEqual(meNav(), { tab: 'me', chat: '', sheet: '' })
-  assert.deepEqual(launchNav(), { tab: 'list', chat: '', sheet: 'launch' })
+test('導覽：夥伴／對話／設置三個分頁、開新夥伴與「⋯」選單兩種浮層；瀏覽記錄裡的壞資料一律退回名單', () => {
+  assert.deepEqual(initialNav(), { tab: 'list', sheet: '' })
+  assert.deepEqual(meNav(), { tab: 'me', sheet: '' })
+  assert.deepEqual(launchNav(), { tab: 'list', sheet: 'launch' })
+  assert.deepEqual(opsNav(), { tab: 'chats', sheet: 'ops' })
   assert.deepEqual(normalizeNav({ sheet: 'launch', tab: 'me' }), launchNav())
+  assert.deepEqual(normalizeNav({ sheet: 'ops', tab: 'list' }), opsNav())
   assert.deepEqual(normalizeNav({ sheet: 'other' }), initialNav())
-  assert.deepEqual(normalizeNav({ tab: 'me', chat: '' }), meNav())
-  assert.deepEqual(normalizeNav({ chat: 'A/x', tab: 'chats' }), chatNav('A/x', 'chats'), '有對話就是對話層，並記得它下面是哪一頁')
-  assert.deepEqual(normalizeNav({ chat: 'A/x', tab: '亂寫' }), chatNav('A/x'))
-  assert.deepEqual(normalizeNav({ tab: 'chats' }), tabNav('chats')); assert.deepEqual(normalizeNav({ tab: 'me' }), meNav())
+  assert.deepEqual(normalizeNav({ tab: 'me' }), meNav())
+  assert.deepEqual(normalizeNav({ chat: 'A/x', tab: 'chats' }), tabNav('chats'), '舊的對話層不再有：只留分頁')
+  assert.deepEqual(normalizeNav({ tab: 'chats' }), tabNav('chats'))
   for (const bad of [null, undefined, 5, 'x', { tab: 'settings' }, { chat: 7 }, []]) assert.deepEqual(normalizeNav(bad), initialNav(), String(bad))
 })
 
@@ -215,26 +215,3 @@ test('滑動吸附：拖過一定比例或夠快才換頁；到頭不能再換�
   assert.equal(indicatorPos(0, 500, W), 0, '不會跑出左邊'); assert.equal(indicatorPos(2, -500, W), 2)
 })
 
-test('對話分頁：最近的對話串依最後訊息時間；雙方都算、自己寄的加「你：」；震動與系統提示不算；沒有訊息的夥伴不列', () => {
-  const lg = {
-    A: [{ k: 'them', text: '早', t: 1000 }, { k: 'me', text: '好', t: 2000 }, { k: 'sys', nudge: true, text: '震動', t: 3000 }],
-    B: [{ k: 'them', text: '最新的一句', t: 5000 }],
-    C: [{ k: 'sys', text: '甲 → 未指定收件人', t: 9000 }],
-    D: [{ k: 'me', text: '', photos: [{ kind: 'image' }], t: 4000 }],
-  }
-  const fl = ['A', 'B', 'C', 'D', 'E'].map(id => ({ id, nick: id, unread: id === 'B' ? 2 : 0, status: 'online' }))
-  const rows = threadRows(fl, id => lastMessage(lg[id]))
-  assert.deepEqual(rows.map(r => r.id), ['B', 'D', 'A'], '依時間新的在前；只有系統提示的 C 與沒有記錄的 E 不列')
-  assert.equal(rows[2].text, '你：好', '自己寄的前面加「你：」'); assert.equal(rows[0].text, '最新的一句'); assert.equal(rows[0].unread, 2)
-  assert.match(rows[1].text, /^你：.*照片/)
-  assert.equal(lastMessage([{ k: 'sys', text: 'x', t: 1 }]), null); assert.equal(lastMessage(undefined), null)
-  assert.equal(lastMessage([{ k: 'me', text: '字'.repeat(300), t: 1 }]).text.length, 80)
-})
-
-test('對話串時間：今天時:分、昨天、更早月/日', () => {
-  const now = new Date(2026, 9, 22, 15, 30).getTime()
-  assert.equal(threadTime(new Date(2026, 9, 22, 9, 5).getTime(), now), '9:05')
-  assert.equal(threadTime(new Date(2026, 9, 21, 23, 59).getTime(), now), '昨天')
-  assert.equal(threadTime(new Date(2026, 9, 3, 8, 0).getTime(), now), '10/3')
-  assert.equal(threadTime(NaN, now), '')
-})

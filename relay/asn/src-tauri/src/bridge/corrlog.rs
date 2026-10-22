@@ -88,6 +88,8 @@ pub enum Dir {
     Replied,
     /// 視窗自己用命令列回信或寄信，橋只看得到記號（沒有內文）
     Direct,
+    /// 手機下令的視窗管理操作（詳情、改名、切換模型、關閉、轉交）：誰下的令、做了什麼、結果
+    Op,
 }
 
 pub struct Entry<'a> {
@@ -150,7 +152,7 @@ pub fn stamp(ms: u64) -> String {
     let (y, mo, d, h, mi, s) = local_fields(ms);
     format!("{y:04}-{mo:02}-{d:02} {h:02}:{mi:02}:{s:02}")
 }
-fn stamp_compact(ms: u64) -> String {
+pub(crate) fn stamp_compact(ms: u64) -> String {
     let (y, mo, d, h, mi, s) = local_fields(ms);
     format!("{y:04}{mo:02}{d:02}-{h:02}{mi:02}{s:02}")
 }
@@ -180,6 +182,7 @@ fn render(e: &Entry) -> String {
         Dir::Received => "收到",
         Dir::Replied => "回覆",
         Dir::Direct => "自行回信",
+        Dir::Op => "視窗管理",
     };
     let mut s = format!("{MARK} {} {label}｜{} → {}｜id={}\n", stamp(e.ts_ms), e.from, e.to, e.id);
     if !e.attachments.is_empty() {
@@ -231,7 +234,7 @@ impl CorrLog {
     }
 
     /// 這個視窗名現在對應的夥伴 ID：後台回報的優先；後台暫時沒回，就看視窗名舊檔的檔頭
-    fn pid_of(&self, name: &str) -> Option<String> {
+    pub(crate) fn pid_of(&self, name: &str) -> Option<String> {
         if let Some(id) = self.partners.lock().unwrap_or_else(|p| p.into_inner()).get(name) {
             return Some(id.clone());
         }

@@ -264,30 +264,27 @@ test('名單每列：廠商小徽章疊在頭像右下角（約 40%、白底圓�
   assert.match(js, /BACKFILL_GAP_MS/)
 })
 
-test('三個大分頁：夥伴／對話／設置，橫向翻頁、底部指示條、對話畫面也能滑；邊緣留給系統、輸入與工具列不接手', () => {
+test('三個大分頁：夥伴／對話／設置，橫向翻頁、底部指示條；邊緣留給系統、輸入與工具列不接手', () => {
   const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
-  assert.deepEqual([...html.matchAll(/<section class="m-pg" aria-label="([^"]+)">/g)].map(m => m[1]), ['夥伴', '對話', '設置'])
+  assert.deepEqual([...html.matchAll(/<section class="m-pg" aria-label="([^"]+)">/g)].map(m => m[1]).concat([...html.matchAll(/<section class="m-pg m-chat" [^>]*aria-label="([^"]+)">/g)].map(m => m[1])).sort(), ['夥伴', '對話', '設置'].sort())
   assert.match(html, /<button v-for="t in TABS"[^>]*@click="goTab\(t\)"><span>\{\{ TAB_LABEL\[t\] \}\}<\/span>/, '底部分頁三個，可點')
   assert.match(html, /class="m-ind" :style="\{ transform: 'translateX\(' \+ indicator \* 100 \+ '%\)' \}"/, '指示條跟著滑動')
   assert.doesNotMatch(html, />\s*名單\s*<|>\s*我\s*<\/span>/, '舊的「名單／我」分頁拿掉')
-  // 手勢：頁面並排區與對話層都接觸控；對話層也能滑
+  // 手勢：頁面並排區接觸控（對話分頁在裡面，所以對話上也能左右滑；輸入框與工具列不接手）
   assert.match(html, /class="m-pager-wrap" @touchstart\.passive="swipeStart\(\$event, 'pager'\)" @touchmove="swipeMove" @touchend="swipeEnd" @touchcancel="swipeEnd"/)
-  assert.match(html, /class="m-chat"[^>]*@touchstart\.passive="swipeStart\(\$event, 'chat'\)" @touchmove="swipeMove" @touchend="swipeEnd"/, '單一對話裡也能左右滑')
-  assert.match(css, /\.m-pager-wrap\{[^}]*touch-action:pan-y/); assert.match(css, /\.m-chat\{[^}]*touch-action:pan-y/)
+  assert.match(css, /\.m-pager-wrap\{[^}]*touch-action:pan-y/)
   assert.match(css, /\.m-pager\{[^}]*width:300%[^}]*transition:transform/); assert.match(css, /\.m-pager\.dragging\{transition:none\}/, '拖動時沒有動畫（跟手）')
-  assert.match(css, /\.m-chat\{[^}]*position:fixed/, '對話是蓋在分頁上的一層')
+  assert.doesNotMatch(css, /\.m-chat\{[^}]*position:fixed/, '對話是第二個分頁本身，不再是蓋在分頁上的一層')
   // 邏輯接線：邊緣、輸入、選取、水平鎖定、吸附
   const start = /function swipeStart\(e, mode\) \{([\s\S]*?)\n    \}\n/.exec(js)[1]
   assert.match(start, /swipeStartOk\(t\.clientX, window\.innerWidth\)/, '邊緣不接手'); assert.match(start, /closest\?\.\(SWIPE_BLOCK_SELECTOR\)/); assert.match(start, /getSelection/, '正在選文字不接手')
   const move = /function swipeMove\(e\) \{([\s\S]*?)\n    \}\n/.exec(js)[1]
   assert.match(move, /swipeLock\(dx, dy\)/); assert.match(move, /if \(l === 'v'\) \{ sw\.mode = ''; return \}/, '垂直就放手給系統捲動')
   assert.match(js, /swipeTarget\(\{ index: idx\.value, dx, dt: Date\.now\(\) - t0, width \}\)/)
-  assert.match(js, /await backAsync\(\)\s*sw\.mode = ''\s*goTab\(TABS\[target\]\); sw\.shift = 0/, '對話滑走：先回到分頁，再切到隔壁那頁（同一瞬間、無動畫）')
   assert.match(css, /\.m-ind\{[^}]*z-index:2/, '指示條要在分頁按鈕上面（不然被選中的底色蓋住）')
   assert.match(js, /if \(sw\.locked === 'h'\) \{ y0 = null/, '左右滑動時不觸發下拉重整')
   // 返回：對話 → 回到分頁；非夥伴的分頁 → 回夥伴
   assert.match(js, /function goTab\(t\) \{[\s\S]*?if \(nav\.tab === 'list'\) go\(tabNav\(t\)\)[\s\S]*?else if \(t === 'list'\) history\.back\(\)/)
-  assert.match(js, /go\(chatNav\(id, nav\.tab\)\)/, '對話記得它下面是哪一頁')
   // 設置頁沒有下拉重整；舊的 goMe／goList 都不見了
   assert.doesNotMatch(js, /goMe|goList/)
 })
@@ -297,7 +294,7 @@ test('名字兩層、頭像圓角方形：我的名字（帳號層、唯讀）�
   assert.match(html, /<label>我的名字<input[^>]*:value="myName"[^>]*readonly/, '「我的名字」唯讀（改帳號名的後台動作還沒上線）')
   assert.match(html, /<label>這台設備的名稱<input[^>]*v-model="me\.nick"[^>]*@change="commitNick"/, '設備名稱照舊可改（就是視窗名）')
   assert.doesNotMatch(html, /暱稱（也是對外的名字）/)
-  assert.match(html, /<chat-pane :friend="chatFriend" :me="meForChat"/, '對話裡自己的名字用帳號名')
+  assert.match(html, /<chat-pane v-if="chatFriend" :friend="chatFriend" :me="meForChat"/, '對話裡自己的名字用帳號名')
   assert.match(js, /meForChat = computed\(\(\) => \(\{ \.\.\.me, nick: myName\.value \}\)\)/)
   assert.match(html, /<p class="m-who">\{\{ myName \}\}<\/p>/, '「我」分頁頂端顯示帳號名')
   assert.match(html, /<div class="m-title">\{\{ myName \}\}<\/div>/, '夥伴頁頂端用帳號名')
@@ -325,14 +322,14 @@ test('名單頁：群組標題沒有開新夥伴按鈕、標題列沒有重新�
   assert.doesNotMatch(html, /aria-label="重新整理"/)
   // 所有圖示按鈕（返回、＋）同一個類別與同尺寸：觸控區 48px、圖示 28px，且都用 SVG（不用字元，大小才會一致）
   for (const m of html.matchAll(/<button class="m-icon-btn"[^>]*>([\s\S]*?)<\/button>/g)) assert.match(m[1], /<svg class="m-ic" viewBox="0 0 24 24" width="28" height="28"/, m[0].slice(0, 80))
-  assert.ok(html.match(/<button class="m-icon-btn"/g).length >= 3, '返回（對話、開新夥伴）與＋')
+  assert.ok(html.match(/<button class="m-icon-btn"/g).length >= 3, '返回（開新夥伴）、＋與「⋯」')
   const rule = /\.m-icon-btn\{([^}]*)\}/.exec(css)[1]
   assert.match(rule, /width:48px/); assert.match(rule, /height:48px/)
   assert.match(css, /\.m-icon-btn \.m-ic\{width:28px;height:28px/)
   assert.doesNotMatch(css, /\.m-chathead \.m-icon-btn/, '返回鍵不另外放大，與「＋」同尺寸')
   // 下拉重整：觸控事件接在名單捲動區；動畫只用 transform／opacity；用我們自己的機器人（與 logo.svg 同一份圖形）
-  for (const z of ['pf', 'pc']) assert.match(html, new RegExp(`<ptr-zone :ptr="${z}\\.ptr"></ptr-zone>\\s*<div class="m-scroll" :ref="el => \\(${z}\\.ptr\\.el = el\\)" @touchstart\\.passive="${z}\\.start" @touchmove="${z}\\.move" @touchend="${z}\\.end" @touchcancel="${z}\\.end"`), `${z} 下拉重整接在夥伴／對話頁的捲動區`)
-  assert.equal(html.split('<ptr-zone').length - 1, 2, '只有夥伴與對話兩頁有下拉重整（設置頁沒有）')
+  assert.match(html, /<ptr-zone :ptr="pf\.ptr"><\/ptr-zone>\s*<div class="m-scroll" :ref="el => \(pf\.ptr\.el = el\)" @touchstart\.passive="pf\.start" @touchmove="pf\.move" @touchend="pf\.end" @touchcancel="pf\.end"/, 'pf 下拉重整接在夥伴頁的捲動區')
+  assert.equal(html.split('<ptr-zone').length - 1, 1, '只有夥伴頁有下拉重整（對話頁是單一對話、設置頁沒有）')
   assert.match(js, /class="m-ptr"/); assert.match(js, /ptr\.phase/)
   assert.match(js, /shouldRefreshOnRelease\(ptr\.h, refreshing\.value\)/); assert.match(js, /refreshAll\(\)/)
   assert.match(js, /if \(e\.cancelable\) e\.preventDefault\(\)/)

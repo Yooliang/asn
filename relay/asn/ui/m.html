@@ -83,31 +83,32 @@
             </div>
           </section>
 
-          <!-- 對話：最近的對話串（依最後訊息時間，雙方都算，自己寄的前面加「你：」） -->
-          <section class="m-pg" aria-label="對話">
-            <header class="m-head">
-              <button class="m-me" type="button" aria-label="設置" @click="goTab('me')"><img class="m-pic" :class="'st-' + me.status" :src="meAv" alt="" width="44" height="44"></button>
-              <div class="m-head-tx"><div class="m-title">對話</div></div>
+          <!-- 對話：最後使用的那一位的對話內容（從夥伴分頁點一位就成為最後使用）；右上角「⋯」管理這位的視窗 -->
+          <section class="m-pg m-chat" :class="{ shake }" aria-label="對話">
+            <header class="m-head m-chathead">
+              <template v-if="chatFriend">
+                <img class="m-pic" :class="'st-' + chatFriend.status" :src="avOf(chatFriend)" alt="" width="44" height="44">
+                <div class="m-head-tx">
+                  <div class="m-title" v-html="emo(chatFriend.nick)"></div>
+                  <div class="m-conn">{{ STATUS[chatFriend.status] }}<template v-if="chatFriend.psm"> · <span v-html="emo(chatFriend.psm)"></span></template></div>
+                </div>
+                <button class="m-icon-btn" type="button" aria-label="更多操作" v-if="opsItems.length" @click="openOps"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><circle cx="5" cy="12" r="2.4" fill="currentColor"/><circle cx="12" cy="12" r="2.4" fill="currentColor"/><circle cx="19" cy="12" r="2.4" fill="currentColor"/></svg></button>
+              </template>
+              <template v-else>
+                <button class="m-me" type="button" aria-label="設置" @click="goTab('me')"><img class="m-pic" :class="'st-' + me.status" :src="meAv" alt="" width="44" height="44"></button>
+                <div class="m-head-tx"><div class="m-title">對話</div></div>
+              </template>
             </header>
-            <ptr-zone :ptr="pc.ptr"></ptr-zone>
-            <div class="m-scroll" :ref="el => (pc.ptr.el = el)" @touchstart.passive="pc.start" @touchmove="pc.move" @touchend="pc.end" @touchcancel="pc.end">
-              <ul class="m-threads">
-                <li v-for="t in threads" :key="t.id">
-                  <button class="m-buddy m-thread" :class="{ offline: t.friend.status === 'offline' }" type="button" @click="openChat(t.id)">
-                    <span class="m-av-wrap">
-                      <span class="dp sm" :class="'st-' + t.friend.status"><span><img :src="avOf(t.friend)" alt=""></span></span>
-                      <span class="m-vendor" aria-hidden="true" v-html="vendorIcon(t.friend)"></span>
-                    </span>
-                    <span class="b-text">
-                      <span class="b-line"><span class="b-nick" v-html="emo(t.nick)"></span></span>
-                      <span class="b-last2">{{ t.text }}</span>
-                    </span>
-                    <span class="m-thread-side"><time>{{ threadTimeText(t.t) }}</time><span class="unread" v-if="t.unread">{{ t.unread }}</span></span>
-                  </button>
-                </li>
-              </ul>
-              <div class="empty-list" v-if="!threads.length">還沒有對話。到「夥伴」點一位開始聊。</div>
+            <div class="m-ops-run" v-if="opsBanner" :class="'is-' + opsBanner.phase" role="status">
+              <p class="m-ops-run-tx">{{ opsBanner.text }}</p>
+              <ol class="m-ops-steps" v-if="opsBanner.steps.length"><li v-for="s in opsBanner.steps" :key="s.key" :class="'is-' + s.state"><b aria-hidden="true">{{ s.mark }}</b>{{ s.text }}</li></ol>
+              <p class="m-ops-run-more" v-for="l in opsBanner.extra" :key="l">{{ l }}</p>
+              <button class="m-btn m-ops-run-btn" type="button" v-if="opsBanner.done" @click="dismissRun">知道了</button>
             </div>
+            <chat-pane v-if="chatFriend" :friend="chatFriend" :me="meForChat" :log="chatLog" :friend-av="avOf(chatFriend)" :me-av="meAv"
+              dp-mode="inline" bubble="auto" toolbar="bottom" win-mode="merged" :active="false" :enter-sends="false" :photo-api="photoApi"
+              @send="text => sendTo(chatFriend.id, text)" @nudge="nudgeTo(chatFriend.id)" @attach="(p, cap) => sendAttachTo(chatFriend.id, p, cap)"></chat-pane>
+            <div class="m-scroll" v-else><div class="empty-list">{{ chatEmptyText }}</div></div>
           </section>
 
           <!-- 設置 -->
@@ -179,9 +180,6 @@
             </fieldset>
             <label class="m-field">工作資料夾<select class="set-sel" v-model="lch.cwd"><option v-for="c in lchChoices.cwds" :key="c" :value="c">{{ c }}</option></select></label>
             <label class="m-field">名字<input class="set-input" v-model="lch.name" maxlength="40" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
-            <label class="m-field" v-if="lchSuccessors.length">這是誰的接班（選填）
-              <select class="set-sel" v-model="lch.successorOf"><option value="">不是接班，是全新的夥伴</option><option v-for="o in lchSuccessors" :key="o.value" :value="o.value">{{ o.label }}</option></select>
-            </label>
             <label class="m-field">第一句話（選填）<textarea class="set-area" v-model="lch.first" rows="3" maxlength="4000"></textarea></label>
           </template>
           <p class="m-err" v-if="lch.error" role="alert">{{ lch.error }}</p>
@@ -199,20 +197,44 @@
       </div>
     </section>
 
-    <!-- 對話 -->
-    <section class="m-chat" v-if="nav.chat" :class="{ shake, dragging: sw.dragging }" :style="chatStyle" @touchstart.passive="swipeStart($event, 'chat')" @touchmove="swipeMove" @touchend="swipeEnd" @touchcancel="swipeEnd">
-      <header class="m-head m-chathead">
-        <button class="m-icon-btn" type="button" aria-label="返回" @click="back"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M15 4.5L7.5 12 15 19.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-        <img class="m-pic" v-if="chatFriend" :class="'st-' + chatFriend.status" :src="avOf(chatFriend)" alt="" width="44" height="44">
-        <div class="m-head-tx">
-          <div class="m-title" v-html="emo(chatFriend ? chatFriend.nick : '對話')"></div>
-          <div class="m-conn" v-if="chatFriend">{{ STATUS[chatFriend.status] }}<template v-if="chatFriend.psm"> · <span v-html="emo(chatFriend.psm)"></span></template></div>
-        </div>
-      </header>
-      <chat-pane :friend="chatFriend" :me="meForChat" :log="chatLog" :friend-av="chatFriend ? avOf(chatFriend) : ''" :me-av="meAv"
-        dp-mode="inline" bubble="auto" toolbar="bottom" win-mode="merged" :active="false" :enter-sends="false" :photo-api="photoApi"
-        @send="text => sendTo(nav.chat, text)" @nudge="nudgeTo(nav.chat)" @attach="(p, cap) => sendAttachTo(nav.chat, p, cap)"></chat-pane>
-    </section>
+    <!-- 「⋯」選單：底部浮層，放在三個分頁之外（分頁排有 transform 與裁切，放裡面會被裁掉）；項目與可按條件全部來自 menuItems -->
+    <div class="m-ops" v-if="nav.sheet === 'ops'" @click.self="back">
+      <section class="m-ops-panel" role="dialog" aria-modal="true" :aria-label="opsTitle">
+        <h2 class="m-ops-h">{{ opsTitle }}</h2>
+        <template v-if="ops.phase === 'menu'">
+          <button v-for="i in opsItems" :key="i.key" type="button" class="m-ops-item" :class="{ off: !i.ok }" :disabled="!i.ok" @click="pickOp(i.key)"><span class="m-opt-t">{{ i.label }}</span><small class="m-opt-why" v-if="!i.ok">{{ i.reason }}</small></button>
+          <button type="button" class="m-btn m-ops-cancel" @click="back">取消</button>
+        </template>
+        <template v-else-if="ops.phase === 'rename'">
+          <p class="m-ops-lead">{{ opsText.lead }}</p>
+          <input class="set-input m-ops-input" v-model="ops.newName" maxlength="40" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="新名字" @keydown.enter.prevent="submitOp('rename')">
+          <p class="m-err" v-if="ops.error" role="alert">{{ ops.error }}</p>
+          <button type="button" class="m-btn m-btn-big" @click="submitOp('rename')">{{ opsText.ok }}</button>
+          <button type="button" class="m-btn m-ops-cancel" @click="ops.phase = 'menu'; ops.error = ''">返回</button>
+        </template>
+        <template v-else-if="ops.phase === 'model'">
+          <button v-for="m in opsModels" :key="m.id" type="button" class="m-ops-item" @click="ops.model = m.id; submitOp('model')"><span class="m-opt-t">{{ m.label }}</span></button>
+          <p class="m-note">{{ opsModelNote }}</p>
+          <p class="m-err" v-if="ops.error" role="alert">{{ ops.error }}</p>
+          <button type="button" class="m-btn m-ops-cancel" @click="ops.phase = 'menu'; ops.error = ''">返回</button>
+        </template>
+        <template v-else-if="ops.phase === 'close' || ops.phase === 'handover'">
+          <p class="m-ops-lead">{{ opsText.lead }}</p>
+          <ul class="m-ops-points" v-if="opsText.points.length"><li v-for="p in opsText.points" :key="p">{{ p }}</li></ul>
+          <label class="m-field" v-if="ops.phase === 'handover'">補充的話（選填，會附在新夥伴的第一句話後面）<textarea class="set-area" rows="3" v-model="ops.note" maxlength="1000"></textarea></label>
+          <p class="m-err" v-if="ops.error" role="alert">{{ ops.error }}</p>
+          <button type="button" class="m-btn m-btn-big" :class="{ 'm-danger': ops.phase === 'close' }" @click="submitOp(ops.phase)">{{ opsText.ok }}</button>
+          <button type="button" class="m-btn m-ops-cancel" @click="ops.phase = 'menu'; ops.error = ''">返回</button>
+        </template>
+        <template v-else>
+          <p class="m-prog" :class="ops.view ? 'is-' + ops.view.phase : ''" role="status">{{ ops.view ? ops.view.text : '' }}</p>
+          <dl class="m-ops-rows" v-if="ops.view && ops.view.rows && ops.view.rows.length"><template v-for="r in ops.view.rows" :key="r.label"><dt>{{ r.label }}</dt><dd>{{ r.value }}</dd></template></dl>
+          <p class="m-note" v-if="ops.view && ops.view.rows && !ops.view.rows.length">沒有更多資料。</p>
+          <div class="m-bar" v-if="ops.view && !ops.view.done" aria-hidden="true"><i></i></div>
+          <button type="button" class="m-btn m-ops-cancel" @click="back">{{ ops.view && ops.view.done ? '關閉' : '先關掉（照常進行）' }}</button>
+        </template>
+      </section>
+    </div>
   </template>
 </div>
 <script src="vendor/vue.global.prod.js"></script>

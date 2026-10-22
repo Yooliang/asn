@@ -522,6 +522,18 @@ impl Relay {
         let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法查詢電腦的啟動設定")?;
         self.api_signed("launchers", Some(b), Some(t)).await
     }
+    /// 遠端管理夥伴視窗（手機用，設計見 docs/design/PARTNER-OPS.md）：下令。一定要本人簽章；沒憑證在打後台之前就回錯。回 { id }
+    pub async fn partner_op_signed(&self, body: &Value, token: Option<&str>) -> Result<Value, String> {
+        let b = build_partner_op_body(body)?;
+        let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法管理夥伴視窗")?;
+        self.api_signed("partner_op", Some(b), Some(t)).await
+    }
+    /// 查管理操作的進度（手機用）：同樣要本人簽章。回 { ops: [...] }
+    pub async fn partner_ops_signed(&self, ids: &[String], token: Option<&str>) -> Result<Value, String> {
+        let b = build_partner_ops_body(ids)?;
+        let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法查詢管理操作的進度")?;
+        self.api_signed("partner_ops", Some(b), Some(t)).await
+    }
     pub async fn sent_status(&self, ids: &[String]) -> Result<Value, String> {
         let b = build_sent_status_body(ids)?;
         let v = self.api("sent_status", Some(b)).await?;
@@ -577,6 +589,70 @@ pub fn build_launchers_body(ids: Option<&[String]>) -> Result<Value, String> {
     }
 }
 
+/// 夥伴視窗管理的動作：詳情、改名、切換模型、關閉、轉交下一任（與後台同一份清單）
+pub const PARTNER_OPS: [&str; 6] = ["info", "rename", "model", "close", "handover", "resume"];
+/// 模型字串：1～60 字，只允許英數與 . _ [ ] -（與後台同一條規則）
+pub fn valid_model_str(s: &str) -> bool {
+    let n = s.chars().count();
+    (1..=60).contains(&n) && s.chars().all(|c| c.is_ascii_alphanumeric() || "._[]-".contains(c))
+}
+/// 下令的內容：只留 node／name／op 與該動作用得到的欄位（new_name／model／note），其餘一律丟掉；格式不對在打後台之前就回錯
+pub fn build_partner_op_body(raw: &Value) -> Result<Value, String> {
+    let o = raw.as_object().ok_or("管理視窗的內容格式不對")?;
+    let s = |k: &str| o.get(k).and_then(Value::as_str);
+    let node = s("node").unwrap_or("");
+    if !crate::identity::valid_id(node) {
+        return Err(format!("電腦代號格式不對：{node}"));
+    }
+    let name = s("name").unwrap_or("");
+    if name.is_empty() || name.chars().count() > 80 || name.chars().any(|c| c.is_control()) {
+        return Err("視窗名字不對".into());
+    }
+    let op = s("op").unwrap_or("");
+    if !PARTNER_OPS.contains(&op) {
+        return Err("不認得這個操作".into());
+    }
+    let mut b = json!({ "node": node, "name": name, "op": op });
+    match op {
+        "rename" => {
+            let n = s("new_name").unwrap_or("");
+            if !valid_launch_name(n) {
+                return Err("名字只能用英數、連字號、中文，1～40 字，不能以連字號開頭".into());
+            }
+            b["new_name"] = json!(n);
+        }
+        "model" => {
+            let m = s("model").unwrap_or("");
+            if !valid_model_str(m) {
+                return Err("模型名稱不對".into());
+            }
+            b["model"] = json!(m);
+        }
+        "handover" => match o.get("note") {
+            None | Some(Value::Null) => {}
+            Some(Value::String(t)) => {
+                let t = t.trim();
+                if t.chars().count() > 1000 {
+                    return Err("補充的話最多 1000 字".into());
+                }
+                if !t.is_empty() {
+                    b["note"] = json!(t);
+                }
+            }
+            Some(_) => return Err("補充的話格式不對".into()),
+        },
+        _ => {}
+    }
+    Ok(b)
+}
+pub fn build_partner_ops_body(ids: &[String]) -> Result<Value, String> {
+    if (1..=20).contains(&ids.len()) && ids.iter().all(|i| is_uuid_str(i)) {
+        Ok(json!({ "ids": ids }))
+    } else {
+        Err("查詢的編號格式不對".into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -602,6 +678,33 @@ mod tests {
         assert!(build_launchers_body(Some(&vec![id; 21])).is_err());
     }
 
+    #[test]
+    fn 管理視窗_請求只留該動作的欄位_格式擋在前面() {
+        let base = |op: &str| json!({ "node": "H", "name": "小文", "op": op, "new_name": "新名-2", "model": "opus[1m]", "note": " 接著做 ", "command": "calc.exe" });
+        assert_eq!(build_partner_op_body(&base("close")).unwrap(), json!({ "node": "H", "name": "小文", "op": "close" }));
+        assert_eq!(build_partner_op_body(&base("info")).unwrap(), json!({ "node": "H", "name": "小文", "op": "info" }));
+        assert_eq!(build_partner_op_body(&base("rename")).unwrap(), json!({ "node": "H", "name": "小文", "op": "rename", "new_name": "新名-2" }));
+        assert_eq!(build_partner_op_body(&base("model")).unwrap(), json!({ "node": "H", "name": "小文", "op": "model", "model": "opus[1m]" }));
+        assert_eq!(build_partner_op_body(&base("handover")).unwrap(), json!({ "node": "H", "name": "小文", "op": "handover", "note": "接著做" }));
+        assert_eq!(build_partner_op_body(&json!({ "node": "H", "name": "小文", "op": "resume", "session_id": "../x", "note": "n", "new_name": "x" })).unwrap(), json!({ "node": "H", "name": "小文", "op": "resume" }), "喚醒：session 由後台查，不收畫面傳的");
+        assert_eq!(build_partner_op_body(&json!({ "node": "H", "name": "小文", "op": "handover", "note": "  " })).unwrap(), json!({ "node": "H", "name": "小文", "op": "handover" }));
+        let bad = [
+            json!({ "node": "H;x", "name": "a", "op": "close" }), json!({ "node": "H", "name": "", "op": "close" }), json!({ "node": "H", "name": "a
+b", "op": "close" }),
+            json!({ "node": "H", "name": "a", "op": "kill" }), json!({ "node": "H", "name": "a", "op": "rename", "new_name": "-rf" }), json!({ "node": "H", "name": "a", "op": "rename" }),
+            json!({ "node": "H", "name": "a", "op": "model", "model": "a b" }), json!({ "node": "H", "name": "a", "op": "model", "model": "x;y" }), json!({ "node": "H", "name": "a", "op": "model" }),
+            json!({ "node": "H", "name": "a", "op": "model", "model": "m".repeat(61) }), json!({ "node": "H", "name": "a", "op": "handover", "note": "字".repeat(1001) }),
+            json!({ "node": "H", "name": "a", "op": "handover", "note": 5 }), json!([1]),
+        ];
+        for b in bad {
+            assert!(build_partner_op_body(&b).is_err(), "{b}");
+        }
+        assert!(valid_model_str("claude-opus-4-1[1m]") && valid_model_str(&"m".repeat(60)) && !valid_model_str("") && !valid_model_str("a b"));
+        let id = "11111111-1111-1111-1111-111111111111".to_string();
+        assert_eq!(build_partner_ops_body(&[id.clone()]).unwrap(), json!({ "ids": [id.clone()] }));
+        assert!(build_partner_ops_body(&[]).is_err() && build_partner_ops_body(&["x".to_string()]).is_err() && build_partner_ops_body(&vec![id; 21]).is_err());
+    }
+
     #[tokio::test]
     async fn 遠端開視窗_沒有本人簽章不送出_有簽章帶標頭() {
         let (url, seen) = fake_server(200);
@@ -617,6 +720,24 @@ mod tests {
         assert_eq!(s.len(), 2);
         assert!(s.iter().all(|q| q.to_lowercase().contains("x-asn-user: bearer usertoken-9") && q.to_lowercase().contains("x-relay-key: secret-key")));
         assert!(s[0].contains("action=launch ") || s[0].contains("action=launch\r") || s[0].contains("action=launch"), "{}", s[0]);
+    }
+
+    #[tokio::test]
+    async fn 管理視窗_沒有本人簽章不送出_有簽章帶標頭() {
+        let (url, seen) = fake_server(200);
+        let r = Relay::new(url, "secret-key".into(), "P".into(), "P-ASN".into());
+        let req = json!({ "node": "H", "name": "小文", "op": "close" });
+        let id = vec!["11111111-1111-1111-1111-111111111111".to_string()];
+        assert!(r.partner_op_signed(&req, None).await.unwrap_err().contains("尚未登入"));
+        assert!(r.partner_op_signed(&req, Some("")).await.is_err(), "空憑證等於沒有");
+        assert!(r.partner_ops_signed(&id, None).await.is_err());
+        assert!(seen.lock().unwrap().is_empty(), "沒簽章時完全沒有打後台");
+        r.partner_op_signed(&req, Some("usertoken-9")).await.unwrap();
+        r.partner_ops_signed(&id, Some("usertoken-9")).await.unwrap();
+        let s = seen.lock().unwrap();
+        assert_eq!(s.len(), 2);
+        assert!(s.iter().all(|q| q.to_lowercase().contains("x-asn-user: bearer usertoken-9") && q.to_lowercase().contains("x-relay-key: secret-key")));
+        assert!(s[0].contains("action=partner_op ") && s[1].contains("action=partner_ops "), "{} / {}", s[0], s[1]);
     }
 
     #[test]

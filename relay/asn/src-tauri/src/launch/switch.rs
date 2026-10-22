@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 // ---------------------------------------------------------------- 純邏輯：命令列
 
 /// 依 Windows 的 CommandLineToArgvW 規則切開命令列（引號、反斜線連續字元、`""` 規則）。
-pub(super) fn parse_cmdline(line: &str) -> Vec<String> {
+pub(crate) fn parse_cmdline(line: &str) -> Vec<String> {
     let chars: Vec<char> = line.chars().collect();
     let n = chars.len();
     let mut out = Vec::new();
@@ -95,13 +95,13 @@ pub(super) fn parse_cmdline(line: &str) -> Vec<String> {
     out
 }
 
-fn exe_stem(p: &str) -> String {
+pub(crate) fn exe_stem(p: &str) -> String {
     let base = p.rsplit(['\\', '/']).next().unwrap_or(p).to_lowercase();
     base.strip_suffix(".exe").map(str::to_string).unwrap_or(base)
 }
 
 /// 程式本身佔幾個參數：`claude.exe` 是 1；`node [旗標…] cli.js` 要連腳本一起算。
-pub(super) fn program_len(args: &[String]) -> usize {
+pub(crate) fn program_len(args: &[String]) -> usize {
     if args.is_empty() {
         return 0;
     }
@@ -117,7 +117,7 @@ pub(super) fn program_len(args: &[String]) -> usize {
 }
 
 /// 這條命令列看起來是不是 Claude Code 本體（守門：不是就不碰）。
-pub(super) fn looks_like_claude(args: &[String]) -> bool {
+pub(crate) fn looks_like_claude(args: &[String]) -> bool {
     let Some(first) = args.first() else { return false };
     let stem = exe_stem(first);
     if stem == "claude" {
@@ -130,7 +130,7 @@ pub(super) fn looks_like_claude(args: &[String]) -> bool {
 }
 
 /// 目前模型：最後一個 `--model <值>` 或 `--model=<值>`；沒有就是 None（顯示「預設」）。
-pub(super) fn current_model(args: &[String]) -> Option<String> {
+pub(crate) fn current_model(args: &[String]) -> Option<String> {
     let rest = &args[program_len(args).min(args.len())..];
     let mut found = None;
     let mut i = 0;
@@ -154,7 +154,7 @@ pub(super) fn current_model(args: &[String]) -> Option<String> {
 }
 
 /// 模型名稱可接受的字元（別名如 opus、完整名稱如 claude-opus-4-5、帶 [1m] 之類後綴）。
-pub(super) fn valid_model(m: &str) -> bool {
+pub(crate) fn valid_model(m: &str) -> bool {
     !m.is_empty()
         && m.chars().count() <= 64
         && !m.starts_with('-')
@@ -164,7 +164,13 @@ pub(super) fn valid_model(m: &str) -> bool {
 /// 照原參數重開用的新參數（含程式本身）：去掉舊的 --model／--resume／-r／--continue／-c／-n／--name／
 /// --session-id／--fork-session，在程式後面插入 `-n <名字> --resume <sessionId> --model <新模型>`；其餘參數原樣保留。
 /// 名字是空的就不加 -n（也不把舊的 -n 帶回來，因為舊的 -n 可能已被 /rename 改掉）。
-pub(super) fn rewrite_args(args: &[String], session_id: &str, name: &str, model: &str) -> Vec<String> {
+pub(crate) fn rewrite_args(args: &[String], session_id: &str, name: &str, model: &str) -> Vec<String> {
+    rewrite_args_opts(args, Some(session_id), name, Some(model), None)
+}
+
+/// `rewrite_args` 的通用版（遠端管理夥伴視窗用）：session_id＝None 不接續（開新對話）；model＝None 不指定模型；
+/// prompt＝Some 時，原本 `--` 之後的內容丟掉，換成 `-- <prompt>`（第一句話）。其餘行為與 `rewrite_args` 完全相同。
+pub(crate) fn rewrite_args_opts(args: &[String], session_id: Option<&str>, name: &str, model: Option<&str>, prompt: Option<&str>) -> Vec<String> {
     let plen = program_len(args).min(args.len());
     let rest = &args[plen..];
     let mut kept: Vec<String> = Vec::new();
@@ -205,27 +211,38 @@ pub(super) fn rewrite_args(args: &[String], session_id: &str, name: &str, model:
         out.push("-n".into());
         out.push(name.into());
     }
-    out.push("--resume".into());
-    out.push(session_id.into());
-    out.push("--model".into());
-    out.push(model.into());
+    if let Some(sid) = session_id {
+        out.push("--resume".into());
+        out.push(sid.into());
+    }
+    if let Some(m) = model {
+        out.push("--model".into());
+        out.push(m.into());
+    }
+    if let Some(p) = prompt {
+        if let Some(i) = kept.iter().position(|a| a == "--") {
+            kept.truncate(i);
+        }
+        kept.push("--".into());
+        kept.push(p.into());
+    }
     out.extend(kept);
     out
 }
 
 /// 閒置判斷：只有工作階段記錄的 status 明確是 idle 才算（缺欄位、busy、waiting 一律不算）。
-pub(super) fn is_idle(status: Option<&str>) -> bool {
+pub(crate) fn is_idle(status: Option<&str>) -> bool {
     status.map(|s| s.trim().eq_ignore_ascii_case("idle")).unwrap_or(false)
 }
 
 /// 可複製的手動重開指令（PowerShell）：不依賴我們自己，使用者貼進終端機就能接續對話。
-pub(super) fn manual_command(cwd: &str, argv: &[String]) -> String {
+pub(crate) fn manual_command(cwd: &str, argv: &[String]) -> String {
     let call = argv.iter().enumerate().map(|(i, a)| if i == 0 { format!("& {}", local::ps_quote(a)) } else { local::ps_quote(a) }).collect::<Vec<_>>().join(" ");
     format!("Set-Location -LiteralPath {}; {}", local::ps_quote(cwd), call)
 }
 
 /// 這條命令列是不是 ASN 自己開視窗時用的承載 PowerShell（-NoExit -EncodedCommand，腳本裡有結束提示）。
-pub(super) fn is_asn_host_cmdline(line: &str) -> bool {
+pub(crate) fn is_asn_host_cmdline(line: &str) -> bool {
     let args = parse_cmdline(line);
     let Some(i) = args.iter().position(|a| a.eq_ignore_ascii_case("-EncodedCommand")) else { return false };
     let Some(enc) = args.get(i + 1) else { return false };
@@ -238,19 +255,19 @@ pub(super) fn is_asn_host_cmdline(line: &str) -> bool {
 // ---------------------------------------------------------------- 程序表與守門
 
 #[derive(Clone, Debug)]
-pub(super) struct Proc {
+pub(crate) struct Proc {
     pub pid: u32,
     pub ppid: u32,
     /// 小寫的執行檔名，例如 windowsterminal.exe
     pub name: String,
 }
 
-fn parent_of(table: &[Proc], pid: u32) -> Option<&Proc> {
+pub(crate) fn parent_of(table: &[Proc], pid: u32) -> Option<&Proc> {
     let ppid = table.iter().find(|p| p.pid == pid)?.ppid;
     table.iter().find(|p| p.pid == ppid && p.pid != pid)
 }
 
-fn ancestors(table: &[Proc], pid: u32) -> Vec<u32> {
+pub(crate) fn ancestors(table: &[Proc], pid: u32) -> Vec<u32> {
     let mut v = Vec::new();
     let mut cur = pid;
     while let Some(p) = parent_of(table, cur) {
@@ -264,13 +281,13 @@ fn ancestors(table: &[Proc], pid: u32) -> Vec<u32> {
 }
 
 /// 往上最多幾層內有沒有 Windows Terminal（有就代表這個 Claude 在 WT 分頁裡）
-pub(super) fn in_windows_terminal(table: &[Proc], pid: u32) -> bool {
+pub(crate) fn in_windows_terminal(table: &[Proc], pid: u32) -> bool {
     ancestors(table, pid).iter().take(6).any(|a| table.iter().any(|p| p.pid == *a && p.name == "windowsterminal.exe"))
 }
 
 /// 守門：算出「這次允許結束的 pid」。只含已確認的 root、它的後代（子先孫後）、以及（若有）它的直接父殼 `host`。
 /// 永遠不含自己（ASN）、自己的祖先、pid 0／4，也不含其他同輩程序。
-pub(super) fn kill_set(table: &[Proc], root: u32, host: Option<u32>, own: u32) -> Vec<u32> {
+pub(crate) fn kill_set(table: &[Proc], root: u32, host: Option<u32>, own: u32) -> Vec<u32> {
     let mut forbidden: HashSet<u32> = ancestors(table, own).into_iter().collect();
     forbidden.insert(own);
     forbidden.insert(0);
@@ -303,7 +320,7 @@ pub(super) fn kill_set(table: &[Proc], root: u32, host: Option<u32>, own: u32) -
 
 // ---------------------------------------------------------------- 作業系統介面
 
-pub(super) trait Os {
+pub(crate) trait Os {
     fn cmdline(&self, pid: u32) -> Option<String>;
     fn processes(&self) -> Vec<Proc>;
     fn alive(&self, pid: u32) -> bool;
@@ -318,7 +335,8 @@ pub(super) trait Os {
     }
 }
 
-pub(super) struct Timing {
+#[derive(Clone, Copy)]
+pub(crate) struct Timing {
     pub close_grace_ms: u64,
     pub gone_wait_ms: u64,
     pub appear_wait_ms: u64,
@@ -326,12 +344,12 @@ pub(super) struct Timing {
 }
 
 impl Timing {
-    pub(super) fn real() -> Self {
+    pub(crate) fn real() -> Self {
         Timing { close_grace_ms: 4000, gone_wait_ms: 6000, appear_wait_ms: 45000, poll_ms: 300 }
     }
 }
 
-fn wait_until(os: &dyn Os, total_ms: u64, poll_ms: u64, mut cond: impl FnMut() -> bool) -> bool {
+pub(crate) fn wait_until(os: &dyn Os, total_ms: u64, poll_ms: u64, mut cond: impl FnMut() -> bool) -> bool {
     let t0 = Instant::now();
     loop {
         if cond() {
@@ -383,17 +401,17 @@ pub struct SwitchQuery {
     pub own_window: bool,
 }
 
-struct Target {
-    pid: u32,
-    session_id: String,
-    name: String,
-    cwd: String,
-    status: Option<String>,
-    args: Vec<String>,
+pub(crate) struct Target {
+    pub pid: u32,
+    pub session_id: String,
+    pub name: String,
+    pub cwd: String,
+    pub status: Option<String>,
+    pub args: Vec<String>,
 }
 
 /// 把「這個名字（或這個 pid）」對到一個活著的 Claude 工作階段，並讀出它的啟動參數。
-fn resolve(os: &dyn Os, dir: &Path, name: &str, want: Option<(u32, &str)>) -> Result<Target, String> {
+pub(crate) fn resolve(os: &dyn Os, dir: &Path, name: &str, want: Option<(u32, &str)>) -> Result<Target, String> {
     let sessions = console::read_sessions(dir);
     let s: &Value = match want {
         Some((pid, sid)) => {
@@ -445,7 +463,7 @@ fn resolve(os: &dyn Os, dir: &Path, name: &str, want: Option<(u32, &str)>) -> Re
     })
 }
 
-pub(super) fn query_with(os: &dyn Os, dir: &Path, req: &SwitchQueryReq) -> SwitchQuery {
+pub(crate) fn query_with(os: &dyn Os, dir: &Path, req: &SwitchQueryReq) -> SwitchQuery {
     if req.name.trim().is_empty() {
         return SwitchQuery { ok: false, reason: Some("缺少名字".into()), ..Default::default() };
     }
@@ -470,12 +488,12 @@ pub(super) fn query_with(os: &dyn Os, dir: &Path, req: &SwitchQueryReq) -> Switc
 }
 
 /// 這個 Claude 的直接父殼若是 ASN 自己開視窗用的承載 PowerShell，回傳它的 pid；使用者自己開的視窗回 None
-pub(super) fn asn_host_of(os: &dyn Os, table: &[Proc], pid: u32) -> Option<u32> {
+pub(crate) fn asn_host_of(os: &dyn Os, table: &[Proc], pid: u32) -> Option<u32> {
     parent_of(table, pid).filter(|p| (p.name == "powershell.exe" || p.name == "pwsh.exe") && os.cmdline(p.pid).map(|l| is_asn_host_cmdline(&l)).unwrap_or(false)).map(|p| p.pid)
 }
 
 /// 照原參數重開所需的資料
-pub(super) struct Plan {
+pub(crate) struct Plan {
     pub name: String,
     pub cwd: PathBuf,
     /// 含程式本身
@@ -484,11 +502,49 @@ pub(super) struct Plan {
     pub in_wt: bool,
 }
 
-fn fail(stage: &str, reason: impl Into<String>, manual: &str, closed: bool) -> Value {
+pub(crate) fn fail(stage: &str, reason: impl Into<String>, manual: &str, closed: bool) -> Value {
     json!({ "ok": false, "stage": stage, "reason": reason.into(), "manual": manual, "closed": closed })
 }
 
-pub(super) fn run_with(os: &dyn Os, dir: &Path, req: &SwitchRunReq, launch: &dyn Fn(&Plan) -> Result<(), String>, t: &Timing) -> Value {
+/// 關掉一個已確認的視窗：（polite 時）先送關閉訊息等幾秒；沒走就只強制結束 `allowed`（kill_set 算出來的）內的 pid；
+/// 承載殼（host）還在才補一刀；最後確認目標 pid 真的消失。回 Err(中文原因)。
+/// `polite=false`：不送關閉訊息，直接結束清單內的 pid（使用者自己開的視窗：關閉訊息會把使用者的終端機一起關掉）。
+pub(crate) fn close_session(os: &dyn Os, t: &Timing, target_pid: u32, allowed: &[u32], host: Option<u32>, polite: bool) -> Result<(), String> {
+    let sent = polite && os.close_window(target_pid);
+    if sent && wait_until(os, t.close_grace_ms, t.poll_ms, || !os.alive(target_pid)) {
+        // 視窗關了，連同承載的殼一起走；殼若還在才補一刀
+    } else {
+        for pid in allowed {
+            if *pid != target_pid || os.alive(*pid) {
+                if let Err(e) = os.terminate(*pid) {
+                    if os.alive(*pid) {
+                        return Err(format!("結束程序失敗：{e}"));
+                    }
+                }
+            }
+        }
+    }
+    if let Some(h) = host {
+        if os.alive(h) && allowed.contains(&h) {
+            let _ = os.terminate(h);
+        }
+    }
+    if !wait_until(os, t.gone_wait_ms, t.poll_ms, || !os.alive(target_pid)) {
+        return Err("原視窗沒有關掉".into());
+    }
+    Ok(())
+}
+
+/// 照 `argv` 重開所需的資料：工作資料夾要真的存在。`in_wt`＝原本在 Windows Terminal 分頁裡
+pub(crate) fn plan_for(target: &Target, name: &str, argv: Vec<String>, in_wt: bool) -> Result<Plan, String> {
+    let cwd = PathBuf::from(local::strip_verbatim_prefix(&target.cwd));
+    if target.cwd.is_empty() || !cwd.is_dir() {
+        return Err(format!("工作資料夾不存在：{}", target.cwd));
+    }
+    Ok(Plan { name: name.to_string(), cwd, argv, in_wt })
+}
+
+pub(crate) fn run_with(os: &dyn Os, dir: &Path, req: &SwitchRunReq, launch: &dyn Fn(&Plan) -> Result<(), String>, t: &Timing) -> Value {
     if !valid_model(&req.model) {
         return fail("check", "模型名稱不合法", "", false);
     }
@@ -516,27 +572,8 @@ pub(super) fn run_with(os: &dyn Os, dir: &Path, req: &SwitchRunReq, launch: &dyn
     let old_pids: HashSet<u32> = console::read_sessions(dir).iter().filter(|s| s.get("name").and_then(Value::as_str) == Some(target.name.as_str())).filter_map(|s| s.get("pid").and_then(Value::as_u64).map(|p| p as u32)).collect();
 
     // 2. 優雅關閉：先送關閉訊息給主控台視窗，等幾秒；沒走就只強制結束允許清單內的 pid
-    let polite = os.close_window(target.pid);
-    if polite && wait_until(os, t.close_grace_ms, t.poll_ms, || !os.alive(target.pid)) {
-        // 視窗關了，連同承載的殼一起走；殼若還在才補一刀
-    } else {
-        for pid in &allowed {
-            if *pid != target.pid || os.alive(*pid) {
-                if let Err(e) = os.terminate(*pid) {
-                    if os.alive(*pid) {
-                        return fail("close", format!("結束程序失敗：{e}"), &manual, false);
-                    }
-                }
-            }
-        }
-    }
-    if let Some(h) = host {
-        if os.alive(h) && allowed.contains(&h) {
-            let _ = os.terminate(h);
-        }
-    }
-    if !wait_until(os, t.gone_wait_ms, t.poll_ms, || !os.alive(target.pid)) {
-        return fail("close", "原視窗沒有關掉", &manual, false);
+    if let Err(reason) = close_session(os, t, target.pid, &allowed, host, true) {
+        return fail("close", reason, &manual, false);
     }
 
     // 3. 重開
@@ -587,7 +624,7 @@ pub fn model_switch_run(req: SwitchRunReq) -> Result<Value, String> {
 }
 
 /// WT 分頁用的 `wt.exe` 參數：開在最近使用的 Windows Terminal 視窗（沒有就新開一個）
-pub(super) fn wt_args(plan: &Plan) -> Vec<String> {
+pub(crate) fn wt_args(plan: &Plan) -> Vec<String> {
     let mut v: Vec<String> = ["-w", "0", "new-tab", "-d"].iter().map(|s| s.to_string()).collect();
     v.push(local::strip_verbatim_prefix(&plan.cwd.to_string_lossy()));
     v.push("--title".into());
@@ -597,7 +634,7 @@ pub(super) fn wt_args(plan: &Plan) -> Vec<String> {
     v
 }
 
-fn real_launch(plan: &Plan) -> Result<(), String> {
+pub(crate) fn real_launch(plan: &Plan) -> Result<(), String> {
     #[cfg(windows)]
     {
         use crate::nowin::NoWindow;
@@ -627,7 +664,7 @@ fn real_launch(plan: &Plan) -> Result<(), String> {
     local::start_window(&plan.name, &plan.argv[0], &plan.argv[1..], &plan.cwd, false).map(|_| ())
 }
 
-struct RealOs;
+pub(crate) struct RealOs;
 
 #[cfg(windows)]
 impl Os for RealOs {
@@ -668,7 +705,7 @@ impl Os for RealOs {
 }
 
 #[cfg(windows)]
-pub(super) mod winapi {
+pub(crate) mod winapi {
     use super::{console, Proc};
     use std::ffi::c_void;
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};

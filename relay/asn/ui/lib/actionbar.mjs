@@ -1,11 +1,13 @@
 // 對話視窗上方的大按鈕功能列（#40，仿舊 MSN 對話視窗頂端那排）。
 // 分層原則（小良哥 10/21）：只影響「這一則訊息」的（傳檔、截圖、表情、震動、語音）留在輸入框旁的小工具列；
-// 影響「整個代理」的才放這裡。這裡只放目前已經做好的：顯示／背景（主控台視窗）與切換模型。
+// 影響「整個代理」的才放這裡。這裡只放目前已經做好的：顯示／背景（主控台視窗）、切換模型、子代理，以及離線夥伴的「喚醒」。
 // 子代理（#27）已加；權限詢問等功能做好後再加按鈕，沒有功能就不放假按鈕。
 import { AsnDialog } from './dialog.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher } from './model-switch.mjs'
 import { SUBAGENT_POLL_MS, canOfferSubagents, subagentView } from './subagents.mjs'
 import { CONSOLE_QUERY_TIMEOUT_MS, consoleToggleLabel, engineForProfile, withTimeout } from './partner-launch-ui.mjs'
+import { menuItems } from './partner-ops.mjs'
+import { PartnerOpDialog, loadOpsContext } from './partner-ops-ui.mjs'
 
 /** 這位代理用哪一家的指令（名單上沒寫就看啟動設定，再沒有就當 Claude）。 */
 export function friendEngine(friend) {
@@ -25,6 +27,16 @@ export function canOfferCall(friend, { hasVoice = true } = {}) {
   return friend.status !== 'offline'
 }
 
+/**
+ * 喚醒按鈕：只有「離線的 AI 夥伴」才有（在線的不顯示）。可按的條件與右鍵選單同一套（lib/partner-ops.mjs 的 menuItems）：
+ * 有登入、那台電腦在線且開放遠端管理；不能按就反灰，原因寫在提示裡。回 { show, ok, reason }。
+ */
+export function wakeButtonView(friend, ctx = {}) {
+  if (!friend || friend.pending || friend.status !== 'offline') return { show: false, ok: false, reason: '' }
+  const it = menuItems(friend, ctx).find(i => i.key === 'resume')
+  return it ? { show: true, ok: it.ok, reason: it.reason } : { show: false, ok: false, reason: '' }
+}
+
 /** 顯示／背景按鈕的字與提示。 */
 export function consoleButtonView(visible) {
   return visible
@@ -34,7 +46,7 @@ export function consoleButtonView(visible) {
 
 export const ActionBar = {
   name: 'ActionBar',
-  components: { AsnDialog },
+  components: { AsnDialog, PartnerOpDialog },
   props: {
     friend: { type: Object, default: null },
     selfNode: { type: String, default: '' },
@@ -50,6 +62,8 @@ export const ActionBar = {
     const subs = reactive({ open: false, q: null })
     const dlg = reactive({ open: false, target: null, busy: false, error: '', manual: '', done: '', copied: false })
     const root = ref(null)
+    const opsCtx = reactive({ machines: {}, loaded: false, signedIn: false })
+    const wakeDlg = reactive({ open: false, item: null })
     const engine = computed(() => friendEngine(props.friend))
     const name = computed(() => props.friend?.agent || props.friend?.nick || '')
     const showConsole = computed(() => Boolean(props.api) && canOfferConsole(props.friend, props.selfNode) && cons.state === 'toggle')
@@ -57,7 +71,8 @@ export const ActionBar = {
     const showSubs = computed(() => Boolean(props.api?.subagentsQuery) && canOfferSubagents(props.friend, { selfNode: props.selfNode, engine: engine.value }))
     const subView = computed(() => subagentView(subs.q))
     const showCall = computed(() => canOfferCall(props.friend, { hasVoice: props.callable }))
-    const show = computed(() => showCall.value || showConsole.value || showModel.value || showSubs.value)
+    const wake = computed(() => (props.api ? wakeButtonView(props.friend, opsCtx) : { show: false, ok: false, reason: '' }))
+    const show = computed(() => showCall.value || showConsole.value || showModel.value || showSubs.value || wake.value.show)
     const consoleView = computed(() => consoleButtonView(cons.visible))
     const switcher = computed(() => (props.api ? createModelSwitcher({ transport: props.api, log: m => console.info('[ASN]', m) }) : null))
     const dlgText = computed(() => confirmText(name.value, model.current, dlg.target?.label ?? ''))
@@ -85,6 +100,17 @@ export const ActionBar = {
         const q = await withTimeout(props.api.subagentsQuery({ name: name.value }), CONSOLE_QUERY_TIMEOUT_MS)
         if (props.friend === f) subs.q = q
       } catch (e) { console.info('[ASN] 子代理查詢', e.message) }
+    }
+    async function loadWake() {
+      const f = props.friend
+      if (!props.api || !f || f.status !== 'offline') return
+      const ctx = await loadOpsContext(props.api)
+      if (props.friend === f) Object.assign(opsCtx, ctx)
+    }
+    function openWake() {
+      const it = menuItems(props.friend, opsCtx).find(i => i.key === 'resume')
+      if (!it?.ok) return
+      Object.assign(wakeDlg, { open: true, item: it })
     }
     function stopSubs() { if (subTimer) { clearInterval(subTimer); subTimer = null } }
     function startSubs() {
@@ -121,11 +147,12 @@ export const ActionBar = {
       try { await navigator.clipboard.writeText(dlg.manual); dlg.copied = true } catch (e) { console.info('[ASN] 複製失敗', e.message) }
     }
     const onDoc = e => { if ((model.open || subs.open) && root.value && !root.value.contains(e.target)) { model.open = false; subs.open = false } }
-    onMounted(() => { document.addEventListener('mousedown', onDoc, true); if (props.active) void loadConsole(); startSubs() })
+    onMounted(() => { document.addEventListener('mousedown', onDoc, true); if (props.active) void loadConsole(); startSubs(); void loadWake() })
     onBeforeUnmount(() => { document.removeEventListener('mousedown', onDoc, true); stopSubs() })
-    watch(() => props.active, a => { if (a) { void loadConsole(); void loadSubs() } })
-    watch(() => props.friend?.id, () => { model.open = false; subs.open = false; void loadConsole(); startSubs() })
-    return { root, showCall, startCall: () => emit('call'), cons, model, subs, subView, showSubs, toggleSubs, dlg, show, showConsole, showModel, consoleView, dlgText, toggleConsole, toggleModelMenu, pick, closeDlg, submit, copyManual }
+    watch(() => props.active, a => { if (a) { void loadConsole(); void loadSubs(); void loadWake() } })
+    watch(() => props.friend?.id, () => { model.open = false; subs.open = false; wakeDlg.open = false; void loadConsole(); startSubs(); void loadWake() })
+    watch(() => props.friend?.status, () => { void loadWake() })
+    return { root, wake, wakeDlg, openWake, showCall, startCall: () => emit('call'), cons, model, subs, subView, showSubs, toggleSubs, dlg, show, showConsole, showModel, consoleView, dlgText, toggleConsole, toggleModelMenu, pick, closeDlg, submit, copyManual }
   },
   template: `
 <div class="actionbar" ref="root" v-if="show" role="toolbar" aria-label="代理功能列">
@@ -135,6 +162,10 @@ export const ActionBar = {
   <button v-if="showConsole" class="abtn" type="button" :disabled="cons.busy" :title="consoleView.tip" :aria-label="consoleView.label" @click="toggleConsole">
     <img src="img/ab-window.svg" alt="" width="32" height="32"><span class="ab-name">{{ consoleView.label }}</span>
   </button>
+  <button v-if="wake.show" class="abtn" type="button" :disabled="!wake.ok" :title="wake.ok ? '叫醒這位夥伴：在原本的資料夾開視窗，接回原本的對話' : wake.reason" aria-label="喚醒" @click="openWake">
+    <img src="img/ab-wake.svg" alt="" width="32" height="32"><span class="ab-name">喚醒</span>
+  </button>
+  <partner-op-dialog v-if="wakeDlg.open" :friend="friend" op="resume" :item="wakeDlg.item" :api="api" @close="wakeDlg.open = false"></partner-op-dialog>
   <div class="ab-wrap" v-if="showModel">
     <button class="abtn" type="button" :class="{ on: model.open }" aria-haspopup="true" :aria-expanded="model.open" aria-label="切換模型" title="切換這個代理使用的模型（會關掉原視窗再接續對話）" @click="toggleModelMenu">
       <img src="img/ab-model.svg" alt="" width="32" height="32"><span class="ab-name">切換模型 ▾</span>

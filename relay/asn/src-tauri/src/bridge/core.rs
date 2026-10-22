@@ -5,6 +5,7 @@ use super::attach;
 use super::corrlog::{self, CorrLog, Dir, Entry};
 use super::engines::{EngineEvent, EngineSet};
 use super::launcher::{Launched, Launcher};
+use super::partner_ops::PartnerOps;
 use super::mail::{self, unaddressed_receipt, unaddressed_window_note, mail_head, parse_send_head, strip_reply_head, wants_reply, Mail, SendHead};
 use super::pending::{self, LastReq, Pending, RoomRef, State};
 use super::rooms::{self, Cursors};
@@ -197,6 +198,7 @@ pub struct Core {
     cursors: Cursors,
     cursor_warned: bool,
     launcher: Option<Arc<Launcher>>,
+    partner_ops: Option<Arc<PartnerOps>>,
     /// 其他引擎（ACP 工作者、Codex）；沒有就只有 Claude
     pub engines: Option<Arc<EngineSet>>,
     /// Claude 視窗（~/.claude/sessions）；roster ＝ 這個 ＋ 各引擎最近一次的名單
@@ -240,7 +242,7 @@ impl Core {
         let mut c = Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), unrouted: HashSet::new(),
-            last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, cursor_warned: false, launcher: None, engines: None, claude_roster: vec![], corr,
+            last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, cursor_warned: false, launcher: None, partner_ops: None, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false,
         };
         c.restore();
@@ -265,6 +267,11 @@ impl Core {
             EngineEvent::Reply { from, text, mail_id } => self.on_reply(&from, &text, mail_id).await,
             EngineEvent::RosterChanged => self.refresh_roster(now).await,
         }
+    }
+
+    /// 接上遠端管理夥伴視窗（詳情／改名／切換模型／關閉／轉交）。沒接＝不處理 partner_op_pending
+    pub fn set_partner_ops(&mut self, p: Arc<PartnerOps>) {
+        self.partner_ops = Some(p);
     }
 
     /// 接上遠端開視窗（第三段）。沒接＝名單回報 launcher 送 null、不處理 launch_pending
@@ -439,6 +446,9 @@ impl Core {
                 self.partner_warned = false;
                 self.partners = roster::parse_partners(&v);
                 self.corr.set_partners(self.partners.clone());
+                if let Some(p) = &self.partner_ops {
+                    p.set_partners(self.partners.clone());
+                }
             }
             Err(e) if crate::relay::set_name_unsupported(&e) => {
                 self.partner_off = true;
@@ -467,6 +477,9 @@ impl Core {
         // 遠端開視窗與群組跟信件各走各的：失敗只記 log，不影響信件的退避重試
         if let Some(l) = self.launcher.clone() {
             l.pull().await;
+        }
+        if let Some(p) = self.partner_ops.clone() {
+            p.pull().await;
         }
         self.pull_rooms(now).await;
         match r {

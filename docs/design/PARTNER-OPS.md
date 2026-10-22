@@ -1,0 +1,147 @@
+# 遠端管理夥伴視窗：詳情、改名、關視窗、接班換手、喚醒（手機對話頁「⋯」選單、電腦版名單右鍵）
+
+小良哥 2026-10-22 需求：手機對話畫面右上角加「⋯」選單，可以對這位 AI 夥伴「改名」「關視窗」「轉交下一任」。
+手機只下指令；視窗在電腦上，由那台電腦的 ASN 內建收發室執行。和「開新夥伴」（#158 第十三節）同一套路。
+
+## 一、三個動作在電腦上做什麼
+
+全部重用 `launch/switch.rs`（切換模型）已經驗過的機制：讀 `~/.claude/sessions/<pid>.json` 找到視窗 → 讀命令列 → 結束那個已確認的 pid（`kill_set`：只關 claude 那棵樹，不碰 ASN 本身）→ 照原參數重開（`rewrite_args`）。
+
+| 動作 | 電腦上做的事 | 夥伴 ID 怎麼延續 |
+|---|---|---|
+| 改名 | 結束舊 pid，照原參數重開：`--resume <同一個 sessionId> -n <新名字>`，模型不變 | 同 session、名字變了＝同一位夥伴改名（PARTNER-ID 規則 1）；舊名 7 天轉寄 |
+| 關視窗 | 先送關閉訊息（`post_close`），等不到再 `terminate`；只關那一棵 | 不變；夥伴 ID 留著，之後可以被接班 |
+| 接班換手（op 仍叫 `handover`；2026-10-22 小良哥裁示取代「轉交下一任」） | 見下方「接班換手流程」：先請前任自己寫交接，再關掉前任，用**同一個名字**開新 session（不帶 `--resume`／`--continue`） | 名字相同、session 換了＝同一位夥伴換 session（規則 2），不需要 `partner_succeed` |
+| 喚醒（op＝`resume`，小良哥 2026-10-22 追加） | 夥伴離線（視窗已關）但那台電腦的 ASN 開著：在原本的工作資料夾用 `claude --resume <sessionId> -n <原名字>` 重開，同一段對話接回來。見下方「喚醒流程」 | 同 session 自動延續（規則 1），夥伴 ID 不變 |
+
+| 切換模型（10-22 小良哥追加） | 優先「不重開」：內建收發室寫控制檔 `~/.asn/control/<sessionId>.json`，視窗裡的 ASN mod（relay/claude-mod）讀到後以 `$.command.run({ command: 'model', … })` 執行 /model（引擎排隊到閒置才跑，不重開、不搶輸入）；沒有 mod 的視窗（Codex、未裝 mod、mod 沒在 30 秒內回報）退回 `model_switch_run`（關掉後 `--resume` 同 session 換 `--model`） | 同 session，不變 |
+
+改名同理：有 mod 的視窗由 mod 執行 `/rename <新名字>`，不重開；沒有才走上表的重開。mod 執行後把結果寫回狀態檔（`~/.asn/status/<sessionId>.json` 已有），內建收發室據此回報 `ok`／`failed`。relay/claude-mod 歸家用正見，這段開 PR 給他審（或請他實作），控制檔格式先在本文件定案。
+
+| 詳情（10-22 小良哥追加，唯讀） | 同一條佇列的 `info` 動作：內建收發室回報 PID、模型（命令列 `--model`，mod 有回報就以 mod 為準）、引擎、工作資料夾、開啟時間、目前狀態、是 ASN 開的還是使用者自己開的、mod 有沒有裝；有 mod 時加上上下文用量；外殼鏈（從 PID 往上的祖先程序，用 `switch.rs` 的 `ancestors`，例如「Windows Terminal → PowerShell → pi → claude」「Orca → claude」），只列程式名稱、不列命令列參數 | 不動任何東西 |
+
+詳情不寫進名單（名單每輪都報，PID、完整路徑不必常駐後台），按下去才問、結果存在那筆請求的 `result`（jsonb，≤4 KB），與其他動作一樣 2 分鐘逾時；不需要「允許遠端管理」開關，但仍要本人簽章。
+
+### 接班換手流程（電腦端，`bridge/partner_ops.rs` 的 `handover`）
+
+1. 記下前任：sessionId、夥伴 ID（後台回報的對照，沒有就用視窗名）、名字、工作資料夾、啟動參數。
+2. 請前任寫交接：橋把一封信送進前任視窗（走收發室既有的投遞——寄給自己這台電腦、指定那個視窗的來信，橋照一般來信轉進視窗），內容固定：「要換手了：請把交接寫到 <路徑>，寫完回覆『交接完成』。」
+   交接檔位置：`~/.asn/handoff/交接/<夥伴ID>/<yyyyMMdd-HHmmss>.md`（夥伴 ID 沒有時用視窗名；資料夾名只留英數、中文、`-`、`_`，算出來的路徑一定在「交接」資料夾內，否則取消）。
+3. 等交接檔出現且大小穩定（連續兩次輪詢大小相同且大於 0），上限 10 分鐘；逾時照樣換手，新視窗第一句話註明「前任沒有寫完交接」。（沒有另外偵測前任回「交接完成」；只看檔案。外掛控制檔的投遞方式未做，走收發室信件。）
+4. 關掉前任（沿用既有安全規則：只關那一棵、使用者自己開的留終端機）。等待期間視窗若換了（pid 或 sessionId 不同）就取消。
+5. 用同一個名字開新 session（不帶 `--resume`），第一句話：「你是『<名字>』的下一任，前任的上下文用完了。先讀前任最後一段對話紀錄 <前任 sessionId 的 jsonl 完整路徑>（從最後往前看）和交接檔 <交接檔路徑>，接著把手上的工作做下去。」找不到前任的 jsonl 就只指向交接檔；有補充的話換行附「前任交代：…」；沒寫完交接再換行加註。
+6. 進度分段：電腦端每個階段用 `partner_op_progress` 回報 `detail = stage:handoff／closing／opening`（只更新處理中那筆的 detail，狀態仍是 taken）；畫面依它顯示「請前任寫交接中 → 關閉前任視窗中 → 開新視窗中 → 完成」，完成時附交接檔位置（結果 `handoff_path`、`handoff_done`）。處理中的放棄上限為 15 分鐘（其他動作 3 分鐘）。
+
+### 喚醒流程（電腦端，`resume`）
+
+後台（`partner_op`）：op＝`resume` 時目標**不能**在名單上（3 分鐘內在線回 `already_online` 409）；用「節點＋名字」從 `relay.partners` 找夥伴（現用名優先，其次 7 天內的舊名），取它的 `current_session` 寫進待辦的 `session_id`（沒有夥伴 `not_found` 404、不是 Claude `not_claude` 409、沒有 session `no_session` 409）；目標節點要開放遠端管理（`no_launcher`）且在線（節點心跳或名單 3 分鐘內有回報，否則 `device_offline` 409）。session 只由後台查，呼叫端傳的一律不收。`partner_op_pending` 多帶 `session_id`。
+
+電腦端執行（任何一關不過就什麼都不開）：
+1. 本機開關「允許遠端開視窗與管理視窗」要開著（動手前再驗一次）；`session_id` 先過 `roster::valid_sid`，不合格連資料夾都不碰；
+2. 沒有活著的視窗用同一個 sessionId 或同名，否則失敗「這位夥伴已經在線上」；收發室與 ASN 自己的視窗名不能喚醒；
+3. 在 `~/.claude/projects/*/<sessionId>.jsonl` 找對話紀錄（只比對檔名＝sessionId，只看 projects 底下一層），從前 40 行的 JSON 取第一個 `cwd`；找不到失敗「找不到原本的對話紀錄，只能開新的夥伴」；
+4. `cwd` 必須在本機啟動設定（launcher）的工作資料夾允許清單內（完全相同才算），而且資料夾還在；
+5. 用啟動設定的第一個 Claude 視窗型 profile（`claude` 優先），固定參數照設定，名字與 `--resume <sessionId>` 由我們補（舊的 `-n`／`--resume` 去掉不重複），一律 `child_env` 乾淨環境開；
+6. 等名單出現同名視窗才回 `ok`，逾時回 `unconfirmed`。寫 log 與往來記錄。
+
+## 一之一、安全規則（asn 主線 10-22 審查補充，每條都要有守門測試並做還原驗證）
+
+1. **只關名單上那一個 Claude 視窗的那棵樹**：用 `~/.claude/sessions/<pid>.json` 同時對上名字與 sessionId，對得上才動手；對不上回錯，不猜。**絕不用名稱或命令列字串比對去找程序**（曾因命令列比對誤殺 11 個 claude.exe）。
+2. **使用者自己開的視窗**（父殼不是 ASN 開的）照 #82：只結束 claude 與它的子孫，留下使用者的終端機；手機提示「原本的終端機分頁會留下」。
+3. **只收 owner 本人簽章**（後台 `asn_user_owns_node` 驗）；開關沿用「允許遠端開視窗」，設定頁文字改成「允許遠端開視窗與管理視窗」。
+4. **收發室視窗與 ASN 自己的視窗**不能被關、不能被改名、不能被接班換手；手機選單也不顯示（電腦端執行前再擋一次）。
+5. **改名後確認夥伴 ID 延續**：下一輪 `partner_sync` 帶新名字後確認仍是同一個夥伴 ID；往來記錄（#153 以夥伴 ID 為鍵）跟著新名字走。
+6. **每個操作都留紀錄**：寫進該夥伴的往來記錄與內建收發室 log（誰下的令、從哪台設備、何時、做了什麼、結果）。
+
+## 二、後台：新動作 `partner_op`（要本人簽章）
+
+新表 `relay.partner_ops`（與 `relay.launches` 同形）：id、tenant_id、requested_by、node、name（目標視窗目前名字）、op（`info`／`rename`／`model`／`close`／`handover`／`resume`）、session_id（喚醒才有，後台從夥伴記錄查）、new_name（改名才有）、note（轉交的補充，≤1000 字）、status（`pending`／`taken`／`ok`／`failed`）、detail、created_at、done_at。
+
+| 動作 | 誰呼叫 | 說明 |
+|---|---|---|
+| `partner_op` | 手機（帶 `x-asn-user` 本人簽章） | 資料庫函式核對：簽章的人擁有呼叫節點與目標節點（`asn_user_owns_node`）；目標節點有 `launcher`（＝打開了「允許我的其他設備替這台開新視窗」，同一個開關）；目標名字 3 分鐘內在名單上；改名的新名字過 `irori_relay_launch_name_ok`、不撞名；同一個視窗同時只能有一筆未完成（進行中的期限：接班換手 20 分鐘，其他 10 分鐘）；每小時上限與開視窗共用。成功敲門鈴、回 `{id}` |
+| `partner_ops` | 手機 | 查進度（ids，最多 20） |
+| `partner_op_pending`／`partner_op_result` | 內建收發室 | 取走自己節點的待辦、回報結果（只動得到自己節點的） |
+
+`partner_op_progress`（電腦端內建收發室、節點金鑰）只更新自己節點、處理中那筆的 `detail`，且只收 `stage:<小寫字母>` 格式。
+
+2 分鐘沒被取走自動標失敗（與 launches 同一個排程）。沒簽章一律 401（Edge Function 就擋）。
+
+## 三、內建收發室（Rust，`bridge/`）
+
+- 門鈴響或每輪輪詢時順便 `partner_op_pending`；後台回 404 就靜默停用到下次啟動（舊後台不壞）。
+- 執行前再驗一次：本機設定仍允許遠端操作、名字對得到一個活著的 claude 視窗、命令列看得出是 claude（`looks_like_claude`）、不是 ASN 自己。
+- 改名／接班換手：重開後等新視窗出現在 sessions 且名字正確才回 `ok`；逾時回 `unconfirmed`。
+- 開出去的視窗一律用 `child_env` 的乾淨環境（同開新夥伴）。
+
+## 四、手機介面（`ui/m.html`、`ui/m.js`、`ui/lib/` 新增純邏輯模組）
+
+- 「對話」分頁（最後使用的那一位的單一對話）標題列右邊「⋯」按鈕，點開底部浮層選單（放在分頁排之外，不被裁掉；項目觸控目標 ≥ 44px）：詳情…／改名…／切換模型…／關閉視窗／接班換手…；離線的夥伴只有「喚醒」（那台電腦在線且開放才能按）。
+- 只有「這位是 AI 視窗、在線、它那台電腦允許遠端操作、手機有登入」才可按；不能按的反灰並寫中文原因（與開新夥伴同一套 `launchEligibility`）。人、手機、雲端代理、群組不顯示這個按鈕。
+- 改名：輸入框（預設目前名字，同一條名字規則），確定後送出。切換模型：手機查不到那台電腦實際可用的清單，列常用的 Opus／Sonnet／Haiku 並註明；不支援的由電腦端回報失敗。詳情的結果留在選單裡；其他動作送出後選單收起，進度與結果顯示在對話頁頂端（完成或失敗都有，按「知道了」收起）。
+- 關閉視窗：確認框「關掉『名字』在『設備名』上的視窗？對話記錄會留著。」
+- 接班換手：確認框說明流程（先請它寫交接、再關掉、再用同名開新的），可補一段話給下一任（選填）。
+- 進度分段顯示：請前任寫交接中 → 關閉前任視窗 → 開新視窗 → 完成（附交接檔位置）。
+- 送出後在對話頁頂端顯示進度（已送出 → 電腦正在處理 → 完成／失敗原因）；完成時改名的對話自動跳到新名字（同一位夥伴 ID）。
+- 純中文、不顯示節點代號與夥伴 ID。
+
+## 五、相容
+
+| 情形 | 行為 |
+|---|---|
+| 舊後台（沒有 `partner_op`） | 手機選單項目反灰「電腦端還不支援」；內建收發室 404 靜默停用 |
+| 舊版 ASN 電腦版（沒有執行端） | 待辦 2 分鐘後被排程標失敗，手機顯示「那台電腦的 ASN 版本太舊」 |
+| 舊 Node 橋、雲端代理 | 不認這個動作，不受影響 |
+
+## 六、部署順序
+
+migration → relay 函式 → 發 ASN（電腦版與安卓同一版）。順序反過來也安全（見上表）。
+
+## 七、分工與檔案
+
+- 手機介面：`ui/m.html`、`ui/m.js`、`ui/mobile.css`、新 `ui/lib/partner-ops.mjs`＋測試（等 feat/158-android-polish 合併後開分支）。
+- Rust：`android.rs`（手機呼叫）、`bridge/` 新 `partner_ops.rs`＋接到輪詢、`launch/switch.rs` 抽出可重用的「關／重開」函式。動 `bridge/` 前先通知 asn 主線。
+- 後台：新 migration、`_shared/partner_ops.ts`＋測試、`relay/index.ts` 分派。動 `supabase/` 前先通知 asn 主線。
+
+
+## 八、電腦端實作現況與外掛控制檔格式（`bridge/partner_ops.rs`）
+
+### 外掛控制檔格式
+
+橋與視窗內的 ASN 外掛（relay/claude-mod，家用正見實作）用兩個檔案溝通，檔名都是 Claude 的 sessionId（只收英數、`-`、`_`，長度 ≤128）：
+
+| 檔案 | 誰寫 | 內容 |
+|---|---|---|
+| `~/.asn/control/<sessionId>.json` | 橋 | `{"id": "<請求編號>", "op": "rename" 或 "model", "arg": "<新名字或模型>", "at": <毫秒時間>}` |
+| `~/.asn/status/<sessionId>.json`（既有狀態檔） | 外掛 | 照舊的欄位，再加 `control: {"id": "<同一個請求編號>", "ok": true 或 false, "detail": "<中文說明，≤200 字>"}` |
+
+- 橋只在狀態檔有效（存在、完整 JSON、sessionId 相符、`at` 在 30 分鐘內、不是「已結束」）時才寫控制檔，也就是「有外掛」的判斷；沒有就直接退回重開。
+- 外掛讀到控制檔後，執行 `rename`（`/rename <arg>`）或 `model`（`/model <arg>`），完成後把 `control` 欄位寫進狀態檔。`id` 必須原樣回傳；橋只認 `control.id` 等於自己這筆的請求編號。
+- 橋最多等 30 秒。收到 `ok:true` 回報成功；`ok:false` 回報失敗並帶 `detail`（不再重開）；逾時才退回重開。
+- 橋在結果出來（或逾時）時**刪掉控制檔**。外掛要忽略 `at` 超過 2 分鐘的控制檔，也不要重複執行同一個 `id`。
+- 狀態檔可選的新欄位：`model`（目前模型，詳情以它為準）、`context`（上下文用量，物件 `{used, limit, percent}`，三個都是數字；沒給 percent 而有 limit 時由橋算出；其他欄位一律丟掉）。沒有就不顯示。
+
+### 詳情結果（`partner_op_result.result`，≤4 KB）
+
+`{pid, model, engine:"claude", cwd, started_at, status, opened_by:"asn"|"user", shell_chain:[程式名…], mod_installed, context?:{used, limit, percent}}`。
+`shell_chain` 由外往內排（例如 `windowsterminal.exe, powershell.exe, claude.exe`），只有執行檔名稱，不含路徑與命令列參數。關閉的結果是 `{pid, kept_terminal}`。
+
+### 接到橋的輪詢
+
+`PartnerOps::pull()` 與 launcher 的 `pull()` 同一形狀，接在 `bridge/core.rs` 的 `pull()` 裡 `l.pull().await` 之後（欄位 `partner_ops`、`set_partner_ops()`，約 10 行）；`bridge/mod.rs` 在建立 launcher 的地方呼叫 `PartnerOps::system(...)`（需要 bridge 設定的資料夾，沒有就不接）。後台回 404／400 就靜默停用到下次啟動，只記一次 log。
+
+## 九、電腦版名單右鍵與對話上方「喚醒」按鈕（`ui/list.html`、`ui/list.js`、`ui/lib/partner-ops-ui.mjs`、`ui/lib/actionbar.mjs`）
+
+判斷、請求內容、進度文字全部用手機同一個模組 `ui/lib/partner-ops.mjs`（`menuItems`／`buildOpRequest`／`opFormError`／`progressView`／`infoRows`），電腦版不另寫一套。
+
+| 對象 | 名單右鍵多出的項目 |
+|---|---|
+| 在線的 AI 夥伴 | 詳情…／改名…／關閉視窗／接班換手…；原本的「切換模型 ▸」保留（不重複），「背景／前台切換」文字固定，不能用就反灰 |
+| 離線的 AI 夥伴（只有 Claude） | 喚醒（有登入、那台電腦在線且開放才可按，否則反灰並在提示寫中文原因） |
+| 人、手機、雲端代理、群組、ASN／收發室視窗 | 不顯示 |
+
+- 電腦端 Tauri 指令 `relay_partner_op(body)`、`relay_partner_ops(ids)`（`#[cfg(desktop)]`，只在電腦版 invoke_handler；走和手機同一個後台動作、要本人簽章，沒登入在打後台之前就回錯）。
+- 改名用小對話框輸入新名字；關閉、接班換手用確認框（接班換手可補一段話）；詳情用對話框列出中文標籤列；送出後在同一個對話框輪詢 `relay_partner_ops`（每 3 秒）到完成或逾時，顯示分段進度與結果。對話框是 `PartnerOpDialog`（`partner-ops-ui.mjs`），純繁體中文，不顯示節點代號與夥伴 ID。
+- 「切換模型 ▸」是真正的二級選單：滑過（或點一下、鍵盤右鍵）在右側彈出，移開／選完／Esc 收起；位置由 `ui/lib/menu-place.mjs` 算（右側不夠往左彈、下方不夠往上對齊、夾在視窗內），主選單與二級選單都是 `list.html` 最外層的 `position:fixed` 元素，不放在 `.tabbar` 或任何 overflow 容器裡（與分頁右鍵選單同一做法）。
+- 對話上方功能列（`ui/lib/actionbar.mjs`）：離線的 AI 夥伴多一個「喚醒」大按鈕（圖示 `img/ab-wake.svg`），可按條件與右鍵相同，不能按就反灰並在提示寫原因；在線時不顯示。按下去走同一個 `resume` 動作，進度與結果顯示在對話框裡。
+- 舊的「這是誰的接班」介面（名單右鍵、開新夥伴對話框的選填欄位、手機開新夥伴表單的欄位、`succession.mjs`）整個拿掉；後台 `partner_succeed` 動作保留不刪，只是介面不再用。

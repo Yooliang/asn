@@ -1,4 +1,4 @@
-// 手機版（安卓）主程式：單一畫面——名單 → 點進對話 → 返回。和電腦版共用 AsnCore（收寄信、記錄）、ChatPane（對話版面）與 Rust 端指令；
+// 手機版（安卓）主程式：三個大分頁——夥伴、對話（最後使用的那一位）、設置。和電腦版共用 AsnCore（收寄信、記錄）、ChatPane（對話版面）與 Rust 端指令；
 // 電腦才有的功能（內建收發室、開 Claude 視窗、密碼小幫手、用量、系統匣、多視窗）手機沒有，這個檔案也不叫它們。
 // 打開 App 才收信：前景時照電腦版的節奏輪詢，加上門鈴一響就拉；回到前景時立刻拉一次（推播留給第二期）。
 import { AsnCore } from './lib/core.mjs'
@@ -6,10 +6,12 @@ import { ChatPane } from './lib/chatpane.mjs'
 import { avatarSrc, isAvatarDataUrl, removeAvatarUpload, selfAvatarSrc, uploadAvatarFile } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { PROVIDERS, canStart, errorText, phaseText } from './lib/login.mjs'
-import { BANNER_MS, DEFAULT_PREFS, TABS, TAB_LABEL, accountDisplayName, SWIPE_BLOCK_SELECTOR, indicatorPos, lastMessage, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, threadRows, threadTime, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, buttonLabel, chatNav, initialNav, initialUpdate, installOutcome, launchNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, vendorBadgeHtml, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
+import { BANNER_MS, DEFAULT_PREFS, TABS, TAB_LABEL, accountDisplayName, SWIPE_BLOCK_SELECTOR, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, buttonLabel, initialNav, opsNav, initialUpdate, installOutcome, launchNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, vendorBadgeHtml, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
 import { LAUNCH_GIVE_UP_MS, LAUNCH_POLL_MS, appearedIn, buildLaunchRequest, initialLaunch, launchChoices, launchDevices, launchEligibility, launchErrorText, launchFormError, machinesByNode, progressView } from './lib/mobile-launch.mjs'
 import { friendId } from './lib/roster.mjs'
-import { SUCCESSION_GIVE_UP_MS, newSuccession, readySuccessions, succeedOutcome, successorOptions } from './lib/succession.mjs'
+import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, showsInSheet } from './lib/mobile-ops.mjs'
+import { OP_LABEL, menuItems, opFormError } from './lib/partner-ops.mjs'
+import { opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
 import { defaultPartnerName } from './lib/partner.mjs'
 import { groupHeading, statusNote } from './lib/tabs.mjs'
 import { emo, plain } from './lib/text.mjs'
@@ -31,6 +33,11 @@ const transport = {
   avatar: node => invoke('relay_avatar', { node }),
   setAvatar: avatar => invoke('relay_set_avatar', { avatar }),
   sendAttachment: payload => invoke('relay_send_attachment', { payload }),
+}
+// 管理夥伴視窗（⋯ 選單）：手機只下指令，視窗在那台電腦上；要本人簽章（Rust 端沒憑證就不送）
+const opsTransport = {
+  partnerOp: body => invoke('android_partner_op', { body }),
+  partnerOps: ids => invoke('android_partner_ops', { ids }),
 }
 // 照片放大與收到的檔案：另存＝存進 App 私有資料夾，再請外殼複製到「下載/ASN」
 const photoApi = {
@@ -65,6 +72,7 @@ async function startLogin(key) {
 const cancelLogin = () => { void authApi.cancel(); login.phase = 'idle' }
 
 const nav = reactive(initialNav())
+const lastChat = ref('')   // 最後使用的那一位（對話分頁顯示它；存在手機本機設定，重開 App 仍記得）
 const me = reactive({ psm: '', status: 'online', nick: info.window_name })
 const prefs = reactive({ ...DEFAULT_PREFS })
 const friends = ref([]), conn = ref('connecting'), nodeOrder = ref([])
@@ -97,8 +105,7 @@ async function startUpdate() {
 }
 let core = null
 const lastMap = reactive({})   // 夥伴 id → 最後說的一句話（名單第三行）
-const threadMap = reactive({})   // 夥伴 id → 最後一則訊息（雙方都算；「對話」分頁用）
-const refreshLast = id => { const lg = core?.logOf(id); lastMap[id] = lastWords(lg); threadMap[id] = lastMessage(lg) }
+const refreshLast = id => { lastMap[id] = lastWords(core?.logOf(id)) }
 let startCore = null
 let bannerTimer = null
 
@@ -120,12 +127,13 @@ if (screen.value === 'main') {
   Object.assign(me, { psm: '', status: 'online', ...saved.me, nick: info.window_name })
   Object.assign(prefs, normalizePrefs(saved.mobilePrefs))
   ownerName.value = typeof saved.ownerName === 'string' ? saved.ownerName : ''
-  watch([me, prefs, ownerName], () => { const { nick, ...rest } = me; void meStore.save({ ...saved, me: rest, mobilePrefs: { ...prefs }, ownerName: ownerName.value }) }, { deep: true })
+  lastChat.value = normalizeLastChat(saved.lastChat)
+  watch([me, prefs, ownerName, lastChat], () => { const { nick, ...rest } = me; void meStore.save({ ...saved, me: rest, mobilePrefs: { ...prefs }, ownerName: ownerName.value, lastChat: lastChat.value }) }, { deep: true })
   watch(() => [me.status, me.psm], () => { void invoke('set_presence', { status: me.status, psm: me.psm ?? '' }).catch(() => {}) }, { immediate: true })
 
   core = new AsnCore({
     transport, store: store('chats'), selfNode: info.node, windowName: info.window_name,
-    isChatVisible: async id => document.visibilityState === 'visible' && nav.chat === id,   // 正在看那位的對話才算「看得到」（不算未讀）
+    isChatVisible: async id => document.visibilityState === 'visible' && nav.tab === 'chats' && lastChat.value === id,   // 正在看對話分頁那位才算「看得到」（不算未讀）
     aliases: info.old_names, pollMs: info.poll_ms, rosterMs: info.roster_ms,
     log: m => console.info('[ASN]', m),
   })
@@ -135,7 +143,7 @@ if (screen.value === 'main') {
   core.on('log', id => { pushLog(id); refreshLast(id) })
   core.on('avatars', () => { avatars.value = core.avatarMap() })
   core.on('notify', n => {
-    const plan = notifyPlan(n, { openId: nav.chat, foreground: document.visibilityState === 'visible', prefs })
+    const plan = notifyPlan(n, { openId: nav.tab === 'chats' ? lastChat.value : '', foreground: document.visibilityState === 'visible', prefs })
     if (plan.vibrate) { if (bridge) bridge.vibrate(plan.vibrate); else navigator.vibrate?.(plan.vibrate) }
     if (plan.shake) { shake.value = true; setTimeout(() => { shake.value = false }, 700) }
     if (plan.banner) { banner.value = plan.banner; clearTimeout(bannerTimer); bannerTimer = setTimeout(() => { banner.value = null }, BANNER_MS) }
@@ -148,26 +156,22 @@ if (screen.value === 'main') {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return
     void core.pull('resume'); void core.refreshRoster()
-    if (nav.chat) { core.markRead(nav.chat); void core.syncHistory(nav.chat) }
+    if (nav.tab === 'chats' && lastChat.value) { core.markRead(lastChat.value); void core.syncHistory(lastChat.value) }
   })
   startCore = async () => { void (shouldAutoCheck(upd, prefs) && checkUpdate()); await core.start(); sync() }   // 掛上畫面之後才開始（第一次收信要連網，不能讓畫面空等）
 }
 
 // ---------- 導覽：每往下一層就推一筆瀏覽記錄，系統返回鍵＝上一頁（名單層再按才退到背景） ----------
 history.replaceState(initialNav(), '')
-window.addEventListener('popstate', e => {
-  Object.assign(nav, normalizeNav(e.state))
-  if (nav.chat) core?.markRead(nav.chat)
-})
+window.addEventListener('popstate', e => { Object.assign(nav, normalizeNav(e.state)) })
 const go = next => { history.pushState(next, ''); Object.assign(nav, next) }
 // 切大分頁：從「夥伴」出去推一筆瀏覽記錄（返回鍵回到夥伴）；其他分頁之間互換不增加記錄
 function goTab(t) {
-  if (!TABS.includes(t) || t === nav.tab || nav.chat || nav.sheet) return
+  if (!TABS.includes(t) || t === nav.tab || nav.sheet) return
   if (nav.tab === 'list') go(tabNav(t))
   else if (t === 'list') history.back()
   else { const n = tabNav(t); history.replaceState(n, ''); Object.assign(nav, n) }
 }
-const backAsync = () => new Promise(res => { const h = () => { window.removeEventListener('popstate', h); res() }; window.addEventListener('popstate', h); history.back() })
 
 // 下拉重整的小動畫區（夥伴、對話兩頁各一個）：我們自己的機器人，只用 transform／opacity 動
 const PtrZone = {
@@ -188,7 +192,7 @@ const PtrZone = {
   </div>`,
 }
 
-// 左右滑動切換大分頁的手勢狀態（夥伴／對話／設置的橫向翻頁，以及對話畫面裡的滑動）
+// 左右滑動切換大分頁的手勢狀態（夥伴／對話／設置的橫向翻頁）
 const sw = reactive({ mode: '', locked: '', x0: 0, y0: 0, t0: 0, dx: 0, shift: 0, width: 360, dragging: false })
 
 const app = createApp({
@@ -199,18 +203,28 @@ const app = createApp({
     const avOf = f => avatarSrc(f, { avatars: avatars.value })
     const avById = id => { const f = friends.value.find(x => x.id === id); return f ? avOf(f) : '' }
     const meAv = computed(() => selfAvatarSrc({ selfNode: info.node, windowName: info.window_name, avatars: avatars.value }))
-    const chatFriend = computed(() => friends.value.find(f => f.id === nav.chat) ?? null)
-    const chatLog = computed(() => logs[nav.chat] ?? [])
+    const chatState = computed(() => chatPageState(friends.value, lastChat.value))
+    const chatFriend = computed(() => chatState.value.friend)
+    const chatEmptyText = computed(() => chatState.value.text)
+    const chatLog = computed(() => logs[lastChat.value] ?? [])
 
+    // 點夥伴（或橫幅）：那位成為「最後使用」，並切到對話分頁
     function openChat(id) {
       const f = core.friends.get(id); if (!f) return
-      core.markRead(id)
-      pushLog(id)
-      void core.syncHistory(id)   // 打開對話：向後台補這位夥伴 90 天的往來（以後台為準；失敗就用本機快取）
+      lastChat.value = id
       banner.value = null
-      go(chatNav(id, nav.tab))
+      goTab('chats')
     }
     const pushLog = id => { logs[id] = core.logOf(id).slice(-200) }
+    // 對話分頁正在顯示某位：標已讀、補往來。切到對話分頁、換了最後使用的那位、名單載入完都會跑
+    function showLastChat() {
+      const id = lastChat.value
+      if (nav.tab !== 'chats' || !id || !core?.friends.get(id)) return
+      core.markRead(id)
+      pushLog(id)
+      void core.syncHistory(id)   // 向後台補這位夥伴 90 天的往來（以後台為準；失敗就用本機快取）
+    }
+    watch([() => nav.tab, lastChat, () => friends.value.length], showLastChat, { immediate: true })
     const back = () => history.back()
     const openBanner = () => { const b = banner.value; banner.value = null; if (b) openChat(b.id) }
 
@@ -220,13 +234,11 @@ const app = createApp({
     // ---------- 開新夥伴（遠端開視窗）：手機只下指令，視窗開在那台電腦上。要本人簽章（Rust 端沒憑證就不送） ----------
     const lch = reactive({ ...initialLaunch(), vphase: 'sending' })
     const lchData = reactive({ machines: {}, loaded: false, error: '' })
-    const successors = ref([])
     const lchCtx = computed(() => ({ machines: lchData.machines, loaded: lchData.loaded, signedIn: acct.value.signed_in, friends: friends.value }))
     const lchDevices = computed(() => launchDevices(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value, ...lchCtx.value }))
     const lchElig = computed(() => (lch.node ? launchEligibility(lch.node, lchCtx.value) : { ok: false, reason: '' }))
     const lchFormErr = computed(() => (lch.node ? launchFormError(lch, lchElig.value) : ''))
     const lchChoices = computed(() => launchChoices(lchData.machines[lch.node]))
-    const lchSuccessors = computed(() => successorOptions(successors.value))
     async function loadLaunchers() {
       lchData.error = ''
       try { lchData.machines = machinesByNode(await invoke('android_launchers', {})); lchData.loaded = true } catch (e) { lchData.loaded = false; lchData.error = launchErrorText(e.message) }
@@ -244,19 +256,6 @@ const app = createApp({
       Object.assign(lch, initialLaunch(), { vphase: 'sending' })
       go(launchNav())
       void loadLaunchers().then(() => { if (node) pickLaunchDevice(node) })
-      void invoke('relay_partner_list').then(r => { successors.value = r?.partners ?? [] }).catch(() => { successors.value = [] })
-    }
-    const successionPending = ref([])
-    async function processSuccessions() {
-      const now = Date.now()
-      let list = successionPending.value
-      for (const { s } of readySuccessions(list, friends.value)) {
-        try { await invoke('relay_partner_succeed', { predecessor: s.predecessor, node: s.node, name: s.name }); list = list.filter(x => x !== s); lch.detail = '已指定接班。' } catch (e) {
-          const o = succeedOutcome(e.message, s.name)
-          if (o.act === 'drop') { list = list.filter(x => x !== s); lch.detail = o.text }
-        }
-      }
-      successionPending.value = list.filter(s => now - s.since <= SUCCESSION_GIVE_UP_MS)
     }
     const sleep = ms => new Promise(r => setTimeout(r, ms))
     async function trackLaunch(t) {
@@ -272,7 +271,6 @@ const app = createApp({
         Object.assign(lch, { vphase: v.phase, text: v.text })
         if (appeared) {
           lch.friendId = friendId(t.node, t.name)
-          await processSuccessions()
           if (nav.sheet !== 'launch') banner.value = { id: lch.friendId, nick: t.name, line: '已經開好了，點一下開始對話', status: 'online', hue: 200 }
           return
         }
@@ -289,11 +287,56 @@ const app = createApp({
         const r = await invoke('android_launch', { body: buildLaunchRequest(lch) })
         if (!r?.id) throw new Error('送出失敗')
         Object.assign(lch, { phase: 'progress', id: r.id, since: Date.now(), friendId: '', detail: '', ...(({ phase, text }) => ({ vphase: phase, text }))(progressView(null, false)) })
-        if (lch.successorOf) successionPending.value = [...successionPending.value, newSuccession({ node: lch.node, name, predecessor: lch.successorOf })]
         void trackLaunch({ id: r.id, node: lch.node, name })
       } catch (e) { lch.error = launchErrorText(e.message) } finally { lch.busy = false }
     }
     function openLaunched() { const id = lch.friendId; if (!id) return; history.back(); setTimeout(() => openChat(id), 50) }
+    // ---------- 「⋯」選單：管理這位夥伴的視窗（詳情、改名、切換模型、關閉視窗、接班換手；離線的只有喚醒） ----------
+    // 判斷全部用 lib/partner-ops.mjs 的 menuItems／opFormError／progressView，手機不另寫一套。手機只下指令，視窗在那台電腦上
+    const opsCtx = computed(() => ({ machines: lchData.machines, loaded: lchData.loaded, signedIn: acct.value.signed_in, friends: friends.value, nonWindowNodes: [info.node] }))
+    const opsItems = computed(() => (chatFriend.value ? menuItems(chatFriend.value, opsCtx.value) : []))
+    const ops = reactive({ phase: 'menu', newName: '', note: '', model: '', error: '', view: null })
+    const opsText = computed(() => opDialogText(ops.phase, chatFriend.value?.agent || chatFriend.value?.nick || '', chatFriend.value?.device || ''))
+    const opsTitle = computed(() => (ops.phase === 'menu' ? (chatFriend.value?.nick ?? '') : OP_LABEL[ops.phase] ?? ''))
+    const opsModels = phoneModels(), opsModelNote = MODEL_NOTE
+    const opsRun = ref(null)   // 對話頁頂端的進度：{ op, view }
+    const opsBanner = computed(() => runBanner(opsRun.value))
+    let opsToken = 0
+    function openOps() {
+      if (!opsItems.value.length || nav.sheet) return
+      Object.assign(ops, { phase: 'menu', newName: chatFriend.value?.agent ?? '', note: '', model: '', error: '', view: null })
+      opsToken++
+      go(opsNav())
+      void loadLaunchers()   // 各台電腦的在線與開放狀態（選單的可按條件）
+    }
+    function pickOp(op) {
+      const item = opsItems.value.find(i => i.key === op)
+      if (!item || !item.ok) return
+      ops.error = ''
+      if (opStep(op) === 'run') void submitOp(op)
+      else ops.phase = op
+    }
+    async function submitOp(op) {
+      const f = chatFriend.value
+      if (!f) return
+      const item = opsItems.value.find(i => i.key === op)
+      const input = { newName: ops.newName, model: ops.model, note: ops.note }
+      const err = opFormError(f, op, input, item)
+      if (err) { ops.error = err; return }
+      const token = ++opsToken
+      const inSheet = showsInSheet(op)
+      if (inSheet) ops.phase = 'info'
+      else history.back()
+      const set = v => { if (inSheet) { if (token === opsToken) ops.view = v } else opsRun.value = { op, view: v } }
+      set({ phase: 'sent', done: false, text: '已經送出，等那台電腦接手…' })
+      const v = await runPartnerOp(opsTransport, f, op, input, { onUpdate: set, cancelled: () => inSheet && token !== opsToken })
+      if (!inSheet && v?.phase === 'done') {
+        await core.refreshRoster()   // 狀態與名字變了：重新拉名單；改名後對話分頁跳到新名字
+        const next = renamedChatId(f, op, input, v)
+        if (next && core.friends.get(next)) lastChat.value = next
+      }
+    }
+    const dismissRun = () => { opsRun.value = null }
     // 名單第三行「最後一句話」：本機有記錄就用；沒有的（例如剛裝）向後台補一次往來（每位最多一次、依畫面順序、慢慢來、整個執行期有上限），補到的記錄存在本機當快取
     const lastOf = id => lastMap[id] ?? ''
     const backfillTried = new Set()
@@ -342,14 +385,12 @@ const app = createApp({
       }
       return { ptr, start, move, end }
     }
-    const pf = makePtr(), pc = makePtr()
+    const pf = makePtr()
 
-    // 左右滑動切換大分頁。夥伴／對話／設置三頁並排，手指拖動時整排跟著動，放開吸附到最近的一頁；
-    // 在單一對話畫面裡也能滑：對話滑走，回到它下面那一頁的左邊或右邊那一頁。
+    // 左右滑動切換大分頁。夥伴／對話／設置三頁並排，手指拖動時整排跟著動，放開吸附到最近的一頁。
     // 邊緣 24px 留給系統的返回手勢；輸入框、工具列、放大照片上不接手；水平位移要明顯大於垂直（2 倍）才算，所以上下捲動與文字選取不會被誤判。
     const idx = computed(() => tabIndex(nav.tab))
     const pagerStyle = computed(() => ({ transform: `translate3d(calc(${-idx.value * 100 / 3}% + ${sw.shift}px), 0, 0)` }))
-    const chatStyle = computed(() => (sw.mode === 'chat' || sw.shift ? { transform: `translate3d(${sw.mode === 'chat' ? sw.shift : 0}px, 0, 0)` } : {}))
     const indicator = computed(() => indicatorPos(idx.value, sw.mode === 'pager' ? sw.shift : 0, sw.width))
     function swipeStart(e, mode) {
       sw.mode = ''; sw.locked = ''
@@ -369,35 +410,20 @@ const app = createApp({
         if (l === 'v') { sw.mode = ''; return }
         if (l !== 'h') return
         sw.locked = 'h'; sw.dragging = true
-        for (const z of [pf, pc]) { z.ptr.dragging = false; if (z.ptr.h && !refreshing.value) { z.ptr.h = 0; z.ptr.ratio = 0; z.ptr.phase = 'idle' } }
+        for (const z of [pf]) { z.ptr.dragging = false; if (z.ptr.h && !refreshing.value) { z.ptr.h = 0; z.ptr.ratio = 0; z.ptr.phase = 'idle' } }
       }
       if (e.cancelable) e.preventDefault()
       sw.dx = dx
       sw.shift = pagerShift(idx.value, dx)
     }
-    async function swipeEnd() {
+    function swipeEnd() {
       const { mode, locked, dx, t0, width } = sw
       if (!mode || locked !== 'h') { sw.mode = ''; sw.locked = ''; sw.dragging = false; return }
       sw.dragging = false; sw.locked = ''
       const target = swipeTarget({ index: idx.value, dx, dt: Date.now() - t0, width })
-      if (mode === 'pager') {
-        sw.shift = 0; sw.mode = ''
-        if (target !== idx.value) goTab(TABS[target])
-        return
-      }
-      // 對話畫面：滑夠遠就把對話滑出去（底下的分頁排跟著一起滑，隔壁那一頁滑進來），再無動畫地換成「回到分頁、切到隔壁那頁」（畫面位置完全相同，不會閃）；不夠遠就彈回來
-      if (target === idx.value) { sw.shift = 0; sw.mode = ''; return }
-      sw.shift = dx > 0 ? width : -width
-      await new Promise(r => setTimeout(r, 220))
-      sw.dragging = true   // 換狀態這一瞬間不要動畫
-      await backAsync()
-      sw.mode = ''
-      goTab(TABS[target]); sw.shift = 0
-      await Vue.nextTick()
-      sw.dragging = false
+      sw.shift = 0; sw.mode = ''
+      if (target !== idx.value) goTab(TABS[target])
     }
-    const threads = computed(() => threadRows(friends.value, id => threadMap[id]))
-    const threadTimeText = t => threadTime(t)
 
     // 「我」：暱稱（Rust 端驗證，不合法就還原並提示）、大頭貼（裁成正方形縮成 96×96 上傳）
     const nickErr = ref('')
@@ -439,10 +465,10 @@ const app = createApp({
     return {
       screen, fatal, login, loginNote, PROVIDERS, canStart, startLogin, cancelLogin,
       upd, updText: computed(() => bannerText(upd)), updButton: computed(() => buttonLabel(upd)), startUpdate, checkUpdate,
-      pf, pc, sw, pagerStyle, chatStyle, indicator, swipeStart, swipeMove, swipeEnd, goTab, TABS, TAB_LABEL, threads, threadTimeText, myName, meForChat, lastOf, vendorIcon: vendorBadgeHtml,
+      pf, sw, pagerStyle, indicator, swipeStart, swipeMove, swipeEnd, goTab, TABS, TAB_LABEL, myName, meForChat, lastOf, vendorIcon: vendorBadgeHtml,
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, CONN_LABEL, info, banner, shake, refreshing,
-      avOf, avById, meAv, chatFriend, chatLog, photoApi, emo, groupHeading, statusNote,
-      lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchSuccessors, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
+      avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, ops, opsText, opsTitle, opsModels, opsModelNote, opsBanner, openOps, pickOp, submitOp, dismissRun, photoApi, emo, groupHeading, statusNote,
+      lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       openChat, back, openBanner, sendTo, nudgeTo, sendAttachTo, refreshAll,
       nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }
