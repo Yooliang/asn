@@ -149,7 +149,34 @@ pub fn resolve() -> Result<Identity, String> {
 /// 先看主要位置；節點代號、金鑰、anon 金鑰各自找不到時再看後備位置（遷移被打斷、項目分在兩邊的情況）。
 /// relay_home 仍是主要位置（橋的工作資料夾、紀錄都放那邊）。
 pub fn resolve_in(h: &crate::home::HomeInfo) -> Result<Identity, String> {
-    let dirs: Vec<&Path> = std::iter::once(h.primary.as_path()).chain(h.fallback.as_deref()).collect();
+    let url = base_url(crate::envc::get("ASN_RELAY_URL"));
+    let (node, key, anon) = resolve_parts(
+        &h.primary,
+        h.fallback.as_deref(),
+        crate::envc::get("ASN_RELAY_ID"),
+        crate::envc::get("ASN_RELAY_KEY"),
+        crate::envc::get("ASN_RELAY_ANON_KEY"),
+        &url,
+        true,
+        &pid_alive,
+    )?;
+    Ok(Identity { node, base_url: url, relay_home: h.primary.clone(), key, anon })
+}
+
+/// 節點代號、金鑰、anon 金鑰的共用解析（橋與 asn-cli 共用）：各項先看主要位置，找不到再看後備位置。
+/// need_key＝false 時不讀金鑰（回空字串）。
+#[allow(clippy::too_many_arguments)]
+pub fn resolve_parts(
+    primary: &Path,
+    fallback: Option<&Path>,
+    env_id: Option<String>,
+    env_key: Option<String>,
+    env_anon: Option<String>,
+    url: &str,
+    need_key: bool,
+    alive: &dyn Fn(u32) -> bool,
+) -> Result<(String, String, Option<String>), String> {
+    let dirs: Vec<&Path> = std::iter::once(primary).chain(fallback).collect();
     let pick = |f: &dyn Fn(&Path) -> Result<String, String>| -> Result<String, String> {
         let mut err = None;
         for d in &dirs {
@@ -160,15 +187,14 @@ pub fn resolve_in(h: &crate::home::HomeInfo) -> Result<Identity, String> {
         }
         Err(err.unwrap_or_default())
     };
-    let node = pick(&|d| machine_node(d, crate::envc::get("ASN_RELAY_ID"), pid_alive))?;
+    let node = pick(&|d| machine_node(d, env_id.clone(), alive))?;
     if !valid_id(&node) {
         return Err(format!("節點代號格式不對：{node}"));
     }
-    let key = pick(&|d| read_key(d, &node, crate::envc::get("ASN_RELAY_KEY")))?;
-    let url = base_url(crate::envc::get("ASN_RELAY_URL"));
-    let anon_dir = dirs.iter().find(|d| d.join("anon.key").exists()).copied().unwrap_or(h.primary.as_path());
-    let anon = read_anon(anon_dir, crate::envc::get("ASN_RELAY_ANON_KEY"), &url);
-    Ok(Identity { node, base_url: url, relay_home: h.primary.clone(), key, anon })
+    let key = if need_key { pick(&|d| read_key(d, &node, env_key.clone()))? } else { String::new() };
+    let anon_dir = dirs.iter().find(|d| d.join("anon.key").exists()).copied().unwrap_or(primary);
+    let anon = read_anon(anon_dir, env_anon, url);
+    Ok((node, key, anon))
 }
 
 #[cfg(test)]

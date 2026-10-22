@@ -46,3 +46,29 @@ fn 指令前綴_測試用固定值_其餘用執行檔旁邊的_asn_cli() {
     let p = e.prefix("room").unwrap();
     assert!(p.ends_with(" room") && (p.contains("asn-cli") || p.contains("asn")), "{p}");
 }
+
+#[test]
+fn 身分解析_主要位置缺金鑰與門鈴時回頭找後備位置_遷移搬到一半寄信不能失敗() {
+    let b = backend(200);
+    let f = fx(&b.url(), Some("T-視窗甲"));
+    let primary = f.home.join("primary-with-node-only");
+    std::fs::create_dir_all(&primary).unwrap();
+    std::fs::write(primary.join("node"), "T").unwrap();
+    // 後備位置（fx 的 .asn）有 T.key；再放一份假的 anon.key
+    std::fs::write(f.home.join(".asn").join("anon.key"), "fake-anon").unwrap();
+    let mut env = f.env.clone();
+    env.relay_id = None;
+    env.relay_key = None;
+    env.relay_home = primary.clone();
+
+    // 沒有後備：主要位置找不到金鑰 → 失敗
+    env.relay_home_fallback = None;
+    assert!(crate::cli::caller::identity(&env, true).is_err(), "沒有後備時應該失敗");
+
+    // 有後備：節點代號用主要位置的、金鑰與門鈴回頭找後備
+    env.relay_home_fallback = Some(f.home.join(".asn"));
+    let id = crate::cli::caller::identity(&env, true).ok().expect("有後備時應該成功");
+    assert_eq!((id.node.as_str(), id.key.as_str()), ("T", super::KEY));
+    assert_eq!(id.anon.as_deref(), Some("fake-anon"));
+    assert_eq!(id.work_dir, primary.join("machine-T"), "工作資料夾仍放主要位置");
+}

@@ -58,6 +58,7 @@ pub fn fx(url: &str, window: Option<&str>) -> Fx {
     let table: ProcTable = [(SELF_PID, (BASH_PID, "asn-cli.exe".to_string())), (BASH_PID, (CLAUDE_PID, "bash.exe".to_string())), (CLAUDE_PID, (1, "claude.exe".to_string()))].into_iter().collect();
     let env = Env {
         relay_home: home.join(".asn"),
+        relay_home_fallback: None,
         sessions_dir: sessions,
         self_pid: SELF_PID,
         relay_id: Some("T".into()),
