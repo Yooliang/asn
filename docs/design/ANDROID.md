@@ -1,0 +1,193 @@
+# 安卓版 ASN 設計筆記（#158 第一期）
+
+目標：同一份 Tauri 2 程式、同一份前端（`relay/asn/ui/`），多一個安卓建置，出可安裝的 APK。**套件名 `tw.yooliang.asn`，上架後不能改**。
+
+第一期做的事：登入、名單、對話、寄信、收檔案與照片、震動（對方傳來的「震動」讓手機震動）；打開 App 才收信。
+第一期**不做**：推播（第二期，FCM）、偽通話（#99）、上架（第三期）、遠端操作（遠端更新、切換模型、看子代理）。手機版也永遠不做：內建收發室橋、開 Claude／Codex 視窗、密碼小幫手、用量分頁、Claude 帳號切換、聽歌狀態、系統匣、截圖與語音輸入（這些是電腦端功能）。
+
+## 一、共用與隔開
+
+原則：**能共用就共用，電腦端的東西用編譯條件隔開，電腦版一個字不變。**
+
+| 層 | 共用 | 只有電腦版 | 只有手機版 |
+| --- | --- | --- | --- |
+| Rust（`src-tauri/src/`） | 收寄信（`relay`）、登入與權杖（`auth`、`account`）、附件（`attach`）、大頭貼、門鈴（`bell`）、心跳與改名、`identity` | `bridge`、`launch`、`askpass`、`cli`、`claude_*`、`codex_accounts`、`acct_remote`、`usage`、`tray`、`updater`、`wins`（多視窗）、`shot`、`stt`／`tts`／`voicecfg`、`ads`、`agent_tools`、`cloud_invite` | `android`（私有資料夾、開瀏覽器、收到的檔案）、`appdir`（算私有資料夾，電腦上也能測） |
+| 前端（`ui/`） | `lib/core.mjs`（收寄信與記錄）、`lib/chatpane.mjs`（對話版面）、頭像、照片、文字、登入文字 | `list.html`／`chat.html`／`login.html` 等多視窗頁面與設定面板 | `m.html`、`m.js`、`mobile.css`、`lib/mobile.mjs`（單欄、導覽、提示規則、外殼橋） |
+| 殼 | — | Windows／Linux 打包 | `src-tauri/gen/android/`（Kotlin 外殼 `MainActivity`、`AsnBridge`） |
+
+隔開的方式：
+
+- **模組**：`lib.rs` 把每個電腦端模組宣告成 `#[cfg(desktop)] mod …;`（`desktop` 是 Tauri 建置時給的條件，手機是 `mobile`）。手機建置根本不編譯它們。
+- **指令**：電腦版的 `generate_handler!` 清單不動；手機另有一份短清單（`#[cfg(not(desktop))]`），只有名單與對話需要的指令。電腦端指令在手機上不存在，叫了只會得到「找不到指令」。
+- **相依套件**：`Cargo.toml` 把系統匣（`tray-icon`）、自動更新、系統內建的加密連線（`native-tls`）放在 `cfg(not(target_os = "android"))`；安卓改用純 Rust 的加密連線（`rustls`，不用交叉編譯 OpenSSL）和「開網址」外掛。
+- **設定**：`tauri.android.conf.json` 會自動疊在 `tauri.conf.json` 上：套件名、單一視窗（首頁 `m.html`）、不帶電腦端的打包資源與更新器。電腦版設定檔沒改。
+- **畫面**：手機用另一個首頁 `m.html`，裡面**根本沒有**電腦端設定與按鈕（不是藏起來）；對話區共用 `ChatPane`，不傳功能列、語音、截圖三個屬性就沒有那些按鈕。唯一改到共用元件的地方：`ChatPane` 多一個屬性 `enterSends`（預設 `true`，電腦行為不變），手機傳 `false`，因為軟鍵盤的 Enter 是換行、傳送靠按鈕。
+- **守門測試**：`test/android.test.mjs` 檢查以上每一條（模組有掛條件、手機指令清單沒有電腦端指令、手機畫面不叫電腦端指令、套件名、權限、備份關閉……）；`test/mobile.test.mjs` 測手機的純邏輯。
+
+## 二、身分與資料夾
+
+電腦靠 `~/.irori-relay/<節點>.key` 認節點；手機沒有使用者資料夾，一律放在 **App 私有資料夾**（`/data/user/<使用者編號>/tw.yooliang.asn/files`，別的 App 讀不到，檔案另設 0600）：
+
+- 節點金鑰、節點代號、登入存檔、對話記錄、設定都在 `files/.irori-relay`、`files/.irori-asn` 底下（沿用電腦版的檔名與格式，所以 Rust 端的身分判定不用分平台）。
+- 資料夾位置由 `appdir.rs` 算：套件名取 `/proc/self/cmdline`，使用者編號取 uid ÷ 100000；讀不到時退回主要使用者與預設套件名。
+- 第一次打開沒有節點金鑰：登入 → 後台替這支手機建節點（電腦版同一條路：`account_bootstrap`＋`node_create`，名字預設「我的手機」）→ 存好金鑰。電腦版這時會自動重新啟動；**安卓行程不能自己重啟**，所以由畫面請外殼（`AsnBridge.relaunch`：先叫起新的 App，再結束舊行程）重開。外殼不在（例如在一般瀏覽器）就提示使用者自己重開。
+- `android:allowBackup="false"`：不讓系統備份把節點金鑰與登入存檔帶到別支手機（會變成兩支手機共用一把節點金鑰）。
+
+## 三、登入（手機怎麼做）
+
+沿用電腦版的流程，只換「開瀏覽器」與「回到 App」：
+
+1. 畫面按「用 Google 登入／用 GitHub 登入」→ Rust 產生 PKCE 驗證碼與 state，在本機回送位址（`127.0.0.1:49200～49219`，與電腦版同一組埠）開一個只收一次回呼的小伺服器。
+2. 用「開網址」外掛（系統的 Intent，會開預設瀏覽器）開後台的授權網址。
+3. 使用者在瀏覽器完成登入 → 後台把瀏覽器導回 `http://127.0.0.1:<埠>/callback?code=…&state=…` → 本機小伺服器驗 state、收授權碼、回一張完成頁。
+4. **完成頁（安卓版）帶使用者回 App**：頁面先用轉址、不行再用大按鈕（`intent://login-done#Intent;scheme=tw.yooliang.asn;package=tw.yooliang.asn;end`）喚起 `MainActivity`（`AndroidManifest.xml` 裡 `tw.yooliang.asn://login-done` 的 intent-filter）。這個網址不帶任何權杖或授權碼，只是叫 App 回到前景。
+5. Rust 用授權碼＋驗證碼換權杖，存取憑證只放記憶體，更新憑證存檔。
+
+為什麼用「本機回送位址」而不是自訂網址協定直接當回呼：後台（Supabase）的轉址白名單現在列的就是 `http://127.0.0.1:49200～49219/callback`，沿用代表**後台設定一個字都不用改、不用部署**；電腦版與手機版同一套程式、同一套測試。代價是瀏覽器要連回本機小伺服器，所以登入的幾十秒內 App 行程必須活著（前景離開到瀏覽器的短時間內，安卓不會凍結它）。
+
+**權杖存放與限制（照實寫）**：
+
+- 更新憑證存在 App 私有資料夾的 `login.bin`（非 Windows 的做法：不另外加密、0600 權限）；存取憑證只在記憶體。受保護的依據是安卓的 App 沙盒與整機儲存加密（檔案型加密，手機解鎖前讀不到）。
+- **沒有**用 Android Keystore 再包一層：Tauri 沒有官方的 Keystore 外掛，第三方外掛維護狀況不明，第一期不引入。已經 root 的手機、或能取得本 App 私有資料夾的惡意程式，就讀得到更新憑證。
+- 補強已做：關閉系統備份、權杖與金鑰不進 log 也不傳給前端、網頁畫面只拿得到「有沒有登入、email」。
+- 之後要補（第三期上架前評估）：寫一個小 Kotlin 外掛，用 Keystore 產生的金鑰加密 `login.bin` 與節點金鑰檔。
+
+## 四、收信（打開 App 才收）
+
+- 前景時：和電腦版相同的輪詢（收信 2 分鐘、名單 1 分鐘、已讀狀態 15 秒），加上門鈴（Realtime，一響就拉）。
+- 回到前景（`visibilitychange`）：立刻拉一次信、更新名單、補正在看的那位的往來記錄。
+- 背景時：Android 會凍結行程，**不收信、不推播**（這是第一期明確的取捨）。收發室會把信留著，下次打開 App 一次收到；扇出回信若這支手機超過 3 分鐘沒回報在線，會寄給帳號底下其他設備，打開對話時用往來記錄補看（#108 的既有行為）。
+- 第二期：FCM 推播（後台收到寄給本人的信時發推播），到時才會有鎖屏通知。
+
+## 五、「我」＝登入帳號（#108）
+
+手機的寄信與電腦版走同一條 Rust 路徑：
+
+- `relay_send`／`relay_send_attachment` 取登入憑證，寄信帶本人簽章與 `as_person`（`AsnCore` 的 `#personFlag` 不分平台）；沒登入時憑證為空，後台不認 `as_person`，照舊以視窗名寄出。
+- 打開對話呼叫 `chat_history`（`relay_chat_history`），向後台補「我和這位夥伴」90 天內的往來（本機只當快取）；收到扇出回信後也會補一次。
+- 手機這支裝置自己是帳號底下的一個節點、有自己的視窗名（預設「我的手機-ASN」，在「我」分頁改暱稱就是改對外名字，不顯示節點代號）。
+
+## 六、檔案、照片、震動
+
+- **傳照片**：沿用 `ChatPane` 的選圖（`<input type=file>`，安卓會讓使用者選相簿或相機），前端壓成 webp（長邊 2048、≤ 5 MB）後由 Rust 上傳寄出。**傳檔案**（pdf、txt、md、json、csv、zip、docx、xlsx、pptx，單檔 25 MB 內）同電腦版。
+- **收照片**：縮圖在對話裡，點開放大（Rust 換短效網址、下載、檢查，回 data URL）。
+- **收檔案／另存**：手機沒有「另存新檔」對話框。Rust 把檔案下載到 App 私有資料夾的 `received/`，外殼（`AsnBridge.exportFile`）再複製到系統的 **「下載/ASN」**（MediaStore，不用儲存權限；Android 9 以下因為要儲存權限而不支援，會明講）；畫面顯示「已存到：下載/ASN/檔名」，「開啟資料夾」打開系統的下載清單。
+- **震動**：對方傳來「震動」→ 手機震動兩下（`AsnBridge.vibrate`，用系統震動器，不受「網頁沒有點擊動作就不准震」的限制），正在看的對話畫面抖一下；自己按「傳送震動」鈕與電腦版相同。「我」分頁有兩個開關：對方傳震動時震（預設開）、收到新訊息時輕輕震（預設關）。
+
+## 七、手機版面
+
+單欄、直式、觸控目標至少 44px、輸入字級 16px（不會被放大）。沿用 MSN 的 Aero 玻璃配色。
+
+- **名單**（首頁）：上方是自己的大頭貼、連線狀態、重新整理；搜尋框；全部夥伴依設備分組（本機那組在最前，可收合；組內線上在前）；底下兩個分頁「名單」「我」。
+- **對話**：點夥伴進入，蓋滿整個畫面；上方「‹」返回（也是系統返回鍵：每往下一層在瀏覽記錄推一筆，返回＝上一頁，名單層再按才退到背景）；下面是訊息、工具列（表情、震動、照片、檔案）、輸入框與傳送鈕。頭像跟著每則訊息、對方與自己各一種底色。
+- **我**：大頭貼（點一下換）、暱稱、狀態、個人訊息、震動開關、登入的帳號與「登出」、版本。
+- **提示**：不在這位的對話時，來信會在畫面頂端跳橫幅（點了進去）；系統層級的通知列留給第二期的推播。
+- **外殼**：邊到邊顯示（Android 15 起強制）；`MainActivity` 把狀態列、導覽列、鍵盤的高度用內距讓出來，輸入框不會被鍵盤蓋住。
+
+## 八、工具鏈與建置
+
+這台（Windows）原有：Android SDK（`%LOCALAPPDATA%\Android\Sdk`，平台 34～36、build-tools 34～36）、NDK `28.2.13676358`、Android Studio 內建的 JBR 21。第一期補裝／下載的：
+
+- Rust 的四個安卓目標：`rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android`
+- Gradle 9.6.1（由專案的 `gradlew` 自動下載到使用者的 `.gradle`）、Android Gradle 外掛 9.3.1、Kotlin 2.2.10（Gradle 依 `gen/android` 的設定自動下載）
+- 沒有裝 `cmdline-tools`／`sdkmanager`（用不到）。`compileSdk`／`targetSdk` 設成 **36**（Tauri 預設的 37 這台沒有）；Google Play 現在要求 targetSdk 35 以上，36 符合。`minSdk` 26。
+
+環境變數（PowerShell）：
+
+```
+$env:JAVA_HOME    = "C:\Program Files\Android\Android Studio\jbr"
+$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
+$env:NDK_HOME     = "$env:ANDROID_HOME\ndk\28.2.13676358"
+```
+
+出除錯版 APK（**只用除錯簽章**，不帶正式簽章金鑰；第三期處理）：
+
+```
+cd relay/asn
+npm ci
+npx tauri android build --apk --debug --target aarch64     # 手機（arm64）
+# 要裝在 x86_64 模擬器：--target x86_64；四種都要（體積大）就不加 --target
+```
+
+APK 在 `src-tauri/gen/android/app/build/outputs/apk/universal/debug/` 底下。開發時 `npx tauri android dev` 會裝到連線的手機或模擬器（本期沒有做這件事）。
+
+`src-tauri/gen/android/` **進 git**（Tauri 的慣例）：我們改過 `AndroidManifest.xml`（權限、關閉備份、登入回來的網址協定）、`MainActivity.kt`、新增 `AsnBridge.kt`、把 `compileSdk`／`targetSdk` 改成 36。它自己的 `.gitignore` 擋掉建置輸出與本機設定；`src-tauri/gen/schemas/` 仍不進 git。重新執行 `tauri android init` 會覆蓋這些檔案，要用 git 還原我們的修改。
+
+`Cargo.toml` 的 `[lib]` 改成 `crate-type = ["cdylib", "rlib"]`（安卓要載入 `libasn_lib.so`）。電腦版仍從 rlib 連進執行檔，行為不變，只是 `cargo build` 多產生一個 `asn_lib.dll`／`.so`。
+
+## 九、已知限制（第一期）
+
+- 背景不收信、沒有通知列提示（推播留第二期）。
+- 權杖與節點金鑰沒有用 Keystore 再加密（見第三節）。
+- 收到的檔案要 Android 10 以上才能放進「下載/ASN」。
+- 沒有「開新夥伴」「切換模型」「看子代理」「遠端更新」等遠端操作；沒有語音輸入、念出訊息、截圖標註。
+- 登入要瀏覽器連回本機小伺服器：登入途中把 App 殺掉、或手機的省電設定在幾十秒內凍結了 App，登入會逾時（5 分鐘），重按即可。
+- 本期**沒有在真機或模擬器上跑過**（任務規定不啟動模擬器、不安裝到裝置）：Rust 能編譯、APK 能組出來、靜態與純邏輯測試全過，但畫面與外殼的實際行為要真機驗，見下一節。
+
+## 十、需要真機驗的事
+
+1. 安裝 APK、開啟：看到登入畫面，不閃退。
+2. 按「用 Google 登入」：開出瀏覽器；登入完成後頁面自動（或按大按鈕）回到 ASN；畫面接著設定手機並**自動重新開啟**，進到名單，名單裡看得到其他設備的夥伴。
+3. 名單：分組可收合、搜尋可用、點進對話；返回鍵（系統）從對話回到名單，名單再按退到背景。
+4. 對話：輸入框不被鍵盤蓋住；傳送鈕送出；Enter 是換行；對方回信後出現；打開對話補到 90 天往來；多設備（電腦、手機）看到同一個「我」。
+5. 照片：選相簿／拍照傳出，對方收到；收到的照片點開放大。
+6. 檔案：收到 pdf 後點「下載並另存」，「下載/ASN」資料夾出現檔案；「開啟資料夾」打得開。
+7. 震動：對方傳震動，手機震動兩下並抖畫面；自己按「傳送震動」鈕對方收到。
+8. 切到別的 App 再回來：立刻補收信；關掉 App 重開，仍是登入狀態。
+9. 「我」分頁：改暱稱、換大頭貼、改狀態、登出後回到登入畫面。
+10. 登入途中取消（按取消）能重來。
+
+## 十一、第二、三期
+
+- 第二期：FCM 推播（鎖屏收得到；後台收到寄給本人的信時發推播；Firebase 專案 `asnmessenger` 已存在）、偽通話（#99）。到時要加 Kotlin 推播服務、通知權限（Android 13 起要問）、後台記錄手機的推播代碼。
+- 第三期：正式簽章金鑰、隱私權政策（要寫手機版蒐集什麼）、商店頁素材、內部測試軌道 → 正式；評估 Keystore 加密；`versionCode` 依 `tauri.conf.json` 的版本自動算。
+
+## 十二、自動更新（自行安裝版）
+
+上架 Google Play 之前，APK 從官網下載自行安裝，所以 App 自己檢查更新。**Google Play 版不含這套**（Play 政策不允許 App 自己更新）。
+
+**兩種發行管道（建置時決定，程式碼與權限都分開）**
+
+| | 自行安裝版（sideload） | Google Play 版（play，預設） |
+| --- | --- | --- |
+| Rust | `--features sideload`：編進更新清單檢查、下載、驗 sha256 | 不開旗標：檢查指令只回 `enabled: false`、下載指令回「這個版本不提供自動更新」，下載與驗證程式碼不編進去 |
+| 外殼（Kotlin） | `src/sideload/java/…/SelfUpdate.kt`：叫系統安裝程式 | `src/play/java/…/SelfUpdate.kt`：空殼 |
+| 權限 | `REQUEST_INSTALL_PACKAGES` | 沒有 |
+| 畫面 | 更新橫幅、「我」分頁的「自動檢查新版本」與「檢查更新」 | 不出現（外殼回報沒有更新功能） |
+
+Gradle 以環境變數 `ORG_GRADLE_PROJECT_asnDist=sideload` 選管道（不設＝play），Rust 以 `--features sideload` 對應。`npm run release:android` 兩個都會帶。
+
+**流程**
+
+1. App 啟動時與每 6 小時（「我」分頁可關閉自動檢查）向 `https://asnmessenger.web.app/update/android.json` 取更新清單。
+2. 清單的版本碼比現在大才算有新版：頂端橫幅「有新版本 x.y.z：<說明第一行>」與「更新」鈕。**按了才下載**，橫幅顯示進度。
+3. Rust 端重新抓清單、依清單網址下載到 App 私有資料夾（`.irori-asn/updates/`），邊下載邊算 sha256；**對不上就刪檔、顯示錯誤、不安裝**。
+4. 通過後交給外殼用 FileProvider 叫出系統安裝畫面。第一次沒有「安裝未知應用程式」許可：外殼先開啟該許可的設定頁，橫幅提示「請在接下來的畫面允許 ASN 安裝應用程式，回來後再按一次『更新』」。
+
+**android.json 格式**（官網新檔）：`{ "version", "versionCode", "url", "sha256", "notes", "bytes" }`。App 端嚴格檢查：版本碼必須等於由版本號算出的值、sha256 為 64 位小寫十六進位、`url` 必須是官網 `update/` 底下的 https、檔案不超過 200 MB、清單不超過 64 KB；任何一項不合就整份拒絕。測試用：只有帶本機回送網址（`http://127.0.0.1:…`）時才收回送位址，畫面不會自己帶。
+
+**versionCode 規則**：與 Tauri 相同，主版 × 1,000,000 ＋ 次版 × 1,000 ＋ 修訂（0.1.32 → 1032），單調遞增；次版、修訂不可超過 999。發版腳本與 App 端各有一份同樣的算法，各有測試。
+
+**發版**：先發電腦版（`npm run release`），再在同一版本號下跑 `npm run release:android`（需要 JAVA_HOME、ANDROID_HOME、NDK_HOME 與四個 Rust 安卓目標）。它會：建 release APK（只有 arm64）→ zipalign → 用本機 debug 金鑰簽章並驗證 → 把 `ASN_<版本>_android.apk` 與 `android.json` 放進 `site/public/update/`。`--dry-run` 只放到 `src-tauri/target/release-dry/`。部署官網由人做；`site/firebase.json` 已設 `android.json` 不快取。
+
+**簽章與換管道（重要）**：這個「測試通道」用 Android 預設的 debug 金鑰（密碼是公開的 `android`），**不是**之後 Google Play 的正式簽章金鑰，兩者簽章不同。裝了自行安裝版的手機要換成 Play 版，必須先移除自行安裝版再從 Play 安裝；自行安裝版也因此永遠不能被 Play 版「更新」。debug 金鑰任何人都能簽出同樣簽章的 APK，所以這個通道只適合內部測試，不對外大量散布。
+
+**模擬器驗證（第一期做過）**：用 `127.0.0.1` 假伺服器（`adb reverse` 對應）提供假的 android.json 與一支 APK，走完「橫幅出現 → 按更新 → 無許可時開啟許可設定頁 → 有許可後下載 → 系統『要更新這個應用程式嗎？』」；把 sha256 改錯，確認顯示錯誤、不叫安裝畫面。
+
+Play 版（不設 asnDist）的合併後 manifest 已實測沒有 `REQUEST_INSTALL_PACKAGES`（`processUniversalReleaseMainManifest` 輸出）；自行安裝版的 APK 用 `aapt2 dump permissions` 看得到它。
+
+## 十三、幫電腦開新夥伴（遠端開視窗）
+
+手機上最重要的功能之一：視窗開在**那台電腦**上，手機只下指令，不跑任何電腦端模組。
+
+- 入口：名單頂端的「＋」，或每台電腦（設備群組）標題右邊的「＋ 開新夥伴」。
+- 流程（一頁表單）：選電腦 → 選模型（那台電腦回報的啟動設定 profile）→ 選工作資料夾（那台允許的清單）→ 名字（預設「夥伴-N」）→ 選填「這是誰的接班」（沿用 #153，新視窗出現後由手機送 `partner_succeed`）→ 選填第一句話 → 「開啟」。
+- 不能開就反灰並寫中文原因：沒登入（要先登入）、不在線（這台電腦不在線）、沒開放（這台電腦沒有開放遠端開視窗——橋沒跑或設定頁沒打開「允許我的其他設備替這台開新視窗」）、沒有模型、沒有資料夾。送出前一定先過表單檢查，不能開的電腦選不起來也送不出去。
+- 送出後顯示進度：已送出 → 那台電腦正在開視窗 → 等它出現在名單 → 「已經開好了」（可直接開始對話）；失敗顯示原因（後台 2 分鐘內沒被取走會自己標失敗）。可以先關閉表單，完成時頂端橫幅提示。
+- 走現有的後台動作 `launch`／`launchers`（沒有新增動作），手機的 Rust 指令是 `android_launch`／`android_launchers`：**沒有本人簽章在打後台之前就回錯**；內容只放行 node／profile／name／cwd／first_message 五個欄位，指令內容一律不帶。
+- **後台要補一個 migration**（`supabase/migrations/20261022070000_launch_signed.sql`，**尚未套用**）：原本只有 `role='owner'` 的節點准下令，而手機（與登入建立的電腦節點）是 `member`。新增「帶本人簽章、且簽章的人擁有這個節點與租戶（`asn_user_owns_node`）」也視同擁有者；沒簽章＝與以前完全相同。Edge Function `relay` 的 launch／launchers 會讀 `x-asn-user`。部署順序：先套 migration，再部署 relay 函式，再發新版 ASN（反過來也安全，沒簽章的舊行為不變）。Deno 測試：`supabase/functions/_shared/launch_test.ts`。
+
+## 十四、App 圖示與登入畫面 logo
+
+- App 圖示用 `ui/img/logo.svg` 的機器人：自適應圖示（前景＝機器人縮在 66dp 安全區內，背景＝淺藍單色 `#DCEBFA`）＋各密度的舊版方形與圓形圖示。由 `scripts/gen-android-icons.mjs` 產生（需要 `npm i --no-save @resvg/resvg-js`），不動電腦版 `src-tauri/icons`。
+- 登入畫面的 logo 只留一層玻璃框，機器人放大填滿。

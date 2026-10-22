@@ -160,12 +160,16 @@ mod tests {
     fn 登出保留這個檔案() {
         // 守門：登出指令與 sign_out 都不碰 last-login
         let acct = include_str!("account.rs");
+        // 只看這個函式本身（到它的結尾大括號為止；不用固定位元組數，免得前後文字一變就切到多位元組字元中間）
         let a = acct.find("pub async fn auth_logout").unwrap();
-        let body = &acct[a..a + 900];
+        let body = &acct[a..];
+        let body = &body[..body.find("\n}").unwrap()];
         assert!(!body.contains("lastlogin") && !body.contains("last-login"));
         let au = include_str!("auth.rs");
         let b = au.find("pub fn sign_out").unwrap();
-        assert!(!au[b..b + 300].contains("last-login"));
+        let sb = &au[b..];
+        let sb = &sb[..sb.find("\n    }").unwrap()];
+        assert!(!sb.contains("last-login"));
     }
 
     #[test]

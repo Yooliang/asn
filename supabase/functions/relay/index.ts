@@ -413,7 +413,9 @@ Deno.serve(async (req) => {
   if (action && LAUNCH_ACTIONS.has(action)) {
     const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
-    const r = await handleNodeLaunchAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params);
+    // 本人簽章（選填）：手機與登入建立的電腦節點不是 owner 角色，靠簽章（資料庫再核對「節點與租戶都是這個人的」）證明本人；沒簽章＝與以前完全相同
+    const signedLaunch = (action === "launch" || action === "launchers") ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
+    const r = await handleNodeLaunchAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedLaunch);
     return json(r.status, r.body);
   }
   // 遠端切換 Claude 帳號（ASN 帳號管理，見 _shared/account_switch.ts）：

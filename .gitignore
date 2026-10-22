@@ -12,4 +12,5 @@ site/.firebase/
 
 # ASN 自動更新：安裝檔與簽章不進 git（只有 latest.json 進）
 site/public/update/*.exe
+site/public/update/*.apk
 site/public/update/*.sig

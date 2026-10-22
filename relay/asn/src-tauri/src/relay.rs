@@ -55,7 +55,7 @@ pub fn encode_component(s: &str) -> String {
 pub const SIGN_HEADER: &str = "x-asn-user";
 pub const MAX_BODY: usize = 20000;
 /// 震動信第二行：請收到的 AI 回一個震動（與 ui/lib/text.mjs 的 NUDGE_HINT 同一句，test/logic.test.mjs 會比對）
-pub const NUDGE_HINT: &str = "想回應的話，就回一個震動：寄一封內文只有「（你的名字 傳送了一個震動）」的信，不用另外回信。";
+pub const NUDGE_HINT: &str = "對方在呼叫你：先回一個震動（寄一封內文只有「（你的名字 傳送了一個震動）」的信）。再想一下有沒有需要向對方報告的事——目前進度、卡住的地方、等對方決定的事；有的話另外寄一封簡短的信，沒有就只回震動。";
 
 /// 前端交來的寄信內容 → 要送給後端的 body。from_agent 一律換成本程式的視窗名（前端不能自填），
 /// 只放行 to_node／to_agent／body／reply_to／from_agent／expects_reply 六個欄位；expects_reply 一定要明說（布林）。
@@ -510,6 +510,18 @@ impl Relay {
         let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法取得夥伴清單")?;
         self.api_signed("partner_list", Some(json!({})), Some(t)).await
     }
+    /// 遠端開新夥伴（手機用，#158）：一定要本人簽章（後台用簽章證明這個節點是本人的才准下令）。沒憑證直接回錯，不打後台
+    pub async fn launch_signed(&self, body: &Value, token: Option<&str>) -> Result<Value, String> {
+        let b = build_launch_body(body)?;
+        let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法替電腦開新夥伴")?;
+        self.api_signed("launch", Some(b), Some(t)).await
+    }
+    /// 各電腦的啟動設定（模型、資料夾、在線）與最近開視窗的進度（手機用）：同樣要本人簽章
+    pub async fn launchers_signed(&self, ids: Option<&[String]>, token: Option<&str>) -> Result<Value, String> {
+        let b = build_launchers_body(ids)?;
+        let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法查詢電腦的啟動設定")?;
+        self.api_signed("launchers", Some(b), Some(t)).await
+    }
     pub async fn sent_status(&self, ids: &[String]) -> Result<Value, String> {
         let b = build_sent_status_body(ids)?;
         let v = self.api("sent_status", Some(b)).await?;
@@ -517,9 +529,95 @@ impl Relay {
     }
 }
 
+/// 視窗名：英數、連字號、中文，1～40 字，不能以連字號開頭（與後台、機器橋同一條規則）
+pub fn valid_launch_name(s: &str) -> bool {
+    let ok = |c: char, first: bool| c.is_ascii_alphanumeric() || ('\u{4e00}'..='\u{9fff}').contains(&c) || (!first && c == '-');
+    let n = s.chars().count();
+    (1..=40).contains(&n) && s.chars().enumerate().all(|(i, c)| ok(c, i == 0))
+}
+
+/// 前端交來的開視窗請求 → 送給後台的 body。只放行 node／profile／name／cwd／first_message 五個欄位（指令內容一律不帶），格式先在這裡擋
+pub fn build_launch_body(raw: &Value) -> Result<Value, String> {
+    let o = raw.as_object().ok_or("開視窗的內容格式不對")?;
+    let s = |k: &str| o.get(k).and_then(Value::as_str).unwrap_or("");
+    let node = s("node");
+    if !crate::identity::valid_id(node) {
+        return Err(format!("電腦代號格式不對：{node}"));
+    }
+    let (profile, name, cwd) = (s("profile"), s("name"), s("cwd"));
+    if profile.is_empty() || profile.chars().count() > 40 || profile.chars().any(|c| c.is_control()) {
+        return Err("模型選項不對".into());
+    }
+    if !valid_launch_name(name) {
+        return Err("名字只能用英數、連字號、中文，1～40 字，不能以連字號開頭".into());
+    }
+    if cwd.is_empty() || cwd.chars().count() > 260 || cwd.chars().any(|c| c.is_control()) {
+        return Err("工作資料夾不對".into());
+    }
+    let first = match o.get("first_message") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(t)) => Some(t.trim().to_string()).filter(|t| !t.is_empty()),
+        Some(_) => return Err("第一句話格式不對".into()),
+    };
+    if first.as_ref().is_some_and(|t| t.chars().count() > 4000) {
+        return Err("第一句話最多 4000 字".into());
+    }
+    Ok(json!({ "node": node, "profile": profile, "name": name, "cwd": cwd, "first_message": first }))
+}
+
+fn is_uuid_str(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 36 && b.iter().enumerate().all(|(i, c)| if [8, 13, 18, 23].contains(&i) { *c == b'-' } else { c.is_ascii_hexdigit() })
+}
+pub fn build_launchers_body(ids: Option<&[String]>) -> Result<Value, String> {
+    match ids {
+        None => Ok(json!({})),
+        Some(l) if l.len() <= 20 && l.iter().all(|i| is_uuid_str(i)) => Ok(json!({ "ids": l })),
+        Some(_) => Err("查詢的編號格式不對".into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 遠端開視窗_請求只留五個欄位_格式擋在前面() {
+        let ok = json!({ "node": "H", "profile": "claude", "name": "小幫手-2", "cwd": "D:\\Github\\asn", "first_message": "  開始吧 ", "command": "calc.exe", "args": ["x"] });
+        let b = build_launch_body(&ok).unwrap();
+        assert_eq!(b, json!({ "node": "H", "profile": "claude", "name": "小幫手-2", "cwd": "D:\\Github\\asn", "first_message": "開始吧" }));
+        assert_eq!(build_launch_body(&json!({ "node": "H", "profile": "p", "name": "a", "cwd": "c" })).unwrap()["first_message"], Value::Null);
+        for bad in [json!({ "node": "H;x", "profile": "p", "name": "a", "cwd": "c" }), json!({ "node": "H", "profile": "", "name": "a", "cwd": "c" }), json!({ "node": "H", "profile": "p", "name": "-rf", "cwd": "c" }), json!({ "node": "H", "profile": "p", "name": "a b", "cwd": "c" }), json!({ "node": "H", "profile": "p", "name": "a", "cwd": "" }), json!({ "node": "H", "profile": "p", "name": "a", "cwd": "c", "first_message": 5 }), json!({ "node": "H", "profile": "p", "name": "a", "cwd": "c", "first_message": "字".repeat(4001) }), json!([1])] {
+            assert!(build_launch_body(&bad).is_err(), "{bad}");
+        }
+        assert!(valid_launch_name("英雄-2") && valid_launch_name(&"X".repeat(40)) && !valid_launch_name(&"X".repeat(41)) && !valid_launch_name("") && !valid_launch_name("a/b"));
+    }
+
+    #[test]
+    fn 查詢進度的編號要是_uuid_最多_20_個() {
+        let id = "11111111-1111-1111-1111-111111111111".to_string();
+        assert_eq!(build_launchers_body(None).unwrap(), json!({}));
+        assert_eq!(build_launchers_body(Some(&[id.clone()])).unwrap(), json!({ "ids": [id.clone()] }));
+        assert!(build_launchers_body(Some(&["x".to_string()])).is_err());
+        assert!(build_launchers_body(Some(&vec![id; 21])).is_err());
+    }
+
+    #[tokio::test]
+    async fn 遠端開視窗_沒有本人簽章不送出_有簽章帶標頭() {
+        let (url, seen) = fake_server(200);
+        let r = Relay::new(url, "secret-key".into(), "P".into(), "P-ASN".into());
+        let req = json!({ "node": "H", "profile": "claude", "name": "夥伴-1", "cwd": "c" });
+        assert!(r.launch_signed(&req, None).await.unwrap_err().contains("尚未登入"));
+        assert!(r.launch_signed(&req, Some("")).await.is_err(), "空憑證等於沒有");
+        assert!(r.launchers_signed(None, None).await.is_err());
+        assert!(seen.lock().unwrap().is_empty(), "沒簽章時完全沒有打後台");
+        r.launch_signed(&req, Some("usertoken-9")).await.unwrap();
+        r.launchers_signed(None, Some("usertoken-9")).await.unwrap();
+        let s = seen.lock().unwrap();
+        assert_eq!(s.len(), 2);
+        assert!(s.iter().all(|q| q.to_lowercase().contains("x-asn-user: bearer usertoken-9") && q.to_lowercase().contains("x-relay-key: secret-key")));
+        assert!(s[0].contains("action=launch ") || s[0].contains("action=launch\r") || s[0].contains("action=launch"), "{}", s[0]);
+    }
 
     #[test]
     fn 設備名同步_內容只有視窗名_後台未部署靜默() {

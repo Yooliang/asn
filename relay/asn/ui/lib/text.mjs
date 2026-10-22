@@ -36,13 +36,14 @@ export const fmtDate = t => { const d = new Date(t); return `${d.getFullYear()}/
 // 收信端認：第一行是這句、其餘只能是空的或就是 NUDGE_HINT（AI 照提示回的震動只有第一行）；舊版 ASN 寄的 [震動] 內文含它就算。
 // 一般訊息裡提到這句話、或第二行是別的內容都不算。
 export const NUDGE_TAG = '[震動]'   // 舊格式，只用於辨識
-export const NUDGE_HINT = '想回應的話，就回一個震動：寄一封內文只有「（你的名字 傳送了一個震動）」的信，不用另外回信。'
+export const NUDGE_HINT = '對方在呼叫你：先回一個震動（寄一封內文只有「（你的名字 傳送了一個震動）」的信）。再想一下有沒有需要向對方報告的事——目前進度、卡住的地方、等對方決定的事；有的話另外寄一封簡短的信，沒有就只回震動。'
+const LEGACY_NUDGE_HINT = '想回應的話，就回一個震動：寄一封內文只有「（你的名字 傳送了一個震動）」的信，不用另外回信。'   // 舊版 ASN 寄的提示，收信端仍要認得
 export const nudgeBody = name => `（${String(name ?? '').trim()} 傳送了一個震動）\n${NUDGE_HINT}`
 const NUDGE_RE = /^（[^（）\r\n]{1,80} 傳送了一個震動）$/
 const isNewNudge = body => {
   const [first = '', ...rest] = String(body ?? '').trim().split(/\r?\n/)
   const tail = rest.join('\n').trim()
-  return NUDGE_RE.test(first.trim()) && (tail === '' || tail === NUDGE_HINT)
+  return NUDGE_RE.test(first.trim()) && (tail === '' || tail === NUDGE_HINT || tail === LEGACY_NUDGE_HINT)
 }
 export const hasNudge = body => String(body ?? '').includes(NUDGE_TAG) || isNewNudge(body)
 export const stripNudge = body => {

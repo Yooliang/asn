@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover,interactive-widget=resizes-content">
+<meta name="theme-color" content="#8fbfec">
+<title>ASN</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="mobile.css">
+</head>
+<body class="m-body">
+<!-- 開機畫面：放在 #app 外面，Vue 掛上去之前就看得到，掛上後由 m.js 移除（#app 在掛上前整個藏起來，不會露出樣板原文） -->
+<div id="splash" class="m-center"><img class="m-logo" src="img/logo.svg" alt=""><p>啟動中…</p></div>
+<div id="app" class="m" v-cloak>
+  <!-- 啟動中、無法啟動 -->
+  <section class="m-center" v-if="screen === 'fatal'"><img class="m-logo" src="img/logo.svg" alt=""><p role="alert">ASN 無法啟動：{{ fatal }}</p></section>
+
+  <!-- 登入 -->
+  <section class="m-login" v-else-if="screen === 'login'">
+    <div class="m-login-card">
+      <div class="login-avatar is-logo"><img src="img/logo.svg" alt=""></div>
+      <h1 class="login-h">歡迎使用 ASN</h1>
+      <p class="login-sub">登入後，這支手機會自動出現在你的名單裡。</p>
+      <button v-for="p in PROVIDERS" :key="p.key" class="m-btn m-btn-big" type="button" :disabled="!canStart(login.phase)" @click="startLogin(p.key)">{{ p.label }}</button>
+      <p class="login-note" v-if="loginNote" role="status">{{ loginNote }}</p>
+      <button class="m-btn" type="button" v-if="login.phase === 'waiting'" @click="cancelLogin">取消</button>
+      <p class="login-err" v-if="login.phase === 'error'" role="alert">{{ login.error }}</p>
+    </div>
+  </section>
+
+  <!-- 登入後 -->
+  <template v-else>
+    <div class="m-banner" v-if="banner" role="status" @click="openBanner">
+      <span class="dp xs" :class="'st-' + banner.status"><span><img :src="avById(banner.id)" alt=""></span></span>
+      <span class="m-banner-tx"><b v-html="emo(banner.nick)"></b><small>{{ banner.line }}</small></span>
+    </div>
+
+    <!-- 名單與「我」 -->
+    <section class="m-page" v-show="!nav.chat">
+      <div class="m-upd" v-if="upd.enabled && upd.phase !== 'idle'" role="status" :class="{ failed: upd.phase === 'failed' }">
+        <span class="m-upd-tx">{{ updText }}</span>
+        <button class="m-btn m-upd-btn" type="button" v-if="upd.phase !== 'downloading'" @click="startUpdate">{{ updButton }}</button>
+        <span class="m-upd-hint" v-if="upd.hint">{{ upd.hint }}</span>
+      </div>
+      <header class="m-head">
+        <button class="m-me" type="button" aria-label="我" @click="goMe"><img class="m-pic" :class="'st-' + me.status" :src="meAv" alt="" width="44" height="44"></button>
+        <div class="m-head-tx">
+          <div class="m-title" v-if="nav.tab === 'list'">{{ me.nick }}</div>
+          <div class="m-title" v-else>我</div>
+          <div class="m-conn" v-if="nav.tab === 'list'"><span class="dot" :class="conn === 'on' ? 'st-online' : conn === 'off' ? 'st-busy' : 'st-away'"></span><span class="m-conn-tx">{{ conn === 'on' ? STATUS[me.status] : CONN_LABEL[conn] }}<template v-if="conn === 'on' && me.psm"> · {{ me.psm }}</template></span></div>
+        </div>
+        <button class="m-icon-btn" type="button" aria-label="開新夥伴" v-if="nav.tab === 'list'" @click="openLaunch('')">＋</button>
+        <button class="m-icon-btn" type="button" aria-label="重新整理" v-if="nav.tab === 'list'" :disabled="refreshing" @click="refreshAll">⟳</button>
+      </header>
+
+      <div class="m-scroll" v-if="nav.tab === 'list'">
+        <div class="m-search"><input v-model="query" type="search" placeholder="搜尋聯絡人…" aria-label="搜尋聯絡人" enterkeyhint="search"></div>
+        <div v-for="g in groups" :key="g.key" class="m-group">
+          <div class="m-ghead-row">
+            <button class="m-ghead" type="button" :aria-expanded="!collapsed[g.key]" @click="collapsed[g.key] = !collapsed[g.key]">
+              <span class="m-caret" :class="{ open: !collapsed[g.key] }">▸</span>{{ groupHeading(g) }}
+            </button>
+            <button class="m-gplus" type="button" v-if="g.node && g.node !== info.node" aria-label="在這台電腦開新夥伴" @click="openLaunch(g.node)">＋ 開新夥伴</button>
+          </div>
+          <ul v-show="!collapsed[g.key]">
+            <li v-for="c in g.items" :key="c.id">
+              <button class="m-buddy" :class="{ offline: c.status === 'offline' }" type="button" @click="openChat(c.id)">
+                <span class="dp sm" :class="'st-' + c.status"><span><img :src="avOf(c)" alt=""></span></span>
+                <span class="b-text">
+                  <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-st" v-if="statusNote(c.status)">{{ statusNote(c.status) }}</span></span>
+                  <span class="b-psm" v-if="c.psm" v-html="emo(c.psm)"></span>
+                </span>
+                <span class="unread" v-if="c.unread">{{ c.unread }}</span>
+              </button>
+            </li>
+          </ul>
+        </div>
+        <div class="empty-list" v-if="!groups.length">{{ emptyText }}</div>
+      </div>
+
+      <div class="m-scroll m-meview" v-else>
+        <input ref="avFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden @change="pickAvatar">
+        <div class="m-card">
+          <button class="m-av-big" type="button" :disabled="avBusy" aria-label="換大頭貼" @click="avFile.click()"><img class="m-pic m-pic-lg" :class="'st-' + me.status" :src="meAv" alt="" width="112" height="112"></button>
+          <p class="m-hint">點一下換大頭貼</p>
+          <button class="m-link" type="button" v-if="selfHasUpload" :disabled="avBusy" @click="removeAvatar">改回自動產生</button>
+          <p class="m-note" v-if="avMsg" role="status">{{ avMsg }}</p>
+        </div>
+        <div class="m-card m-form">
+          <label>暱稱（也是對外的名字）<input class="set-input" v-model="me.nick" maxlength="40" enterkeyhint="done" @change="commitNick" @keydown.enter="$event.target.blur()"></label>
+          <p class="m-err" v-if="nickErr" role="alert">{{ nickErr }}</p>
+          <label>狀態<select class="set-sel" v-model="me.status"><option v-for="(label, key) in STATUS" :key="key" :value="key">{{ label }}</option></select></label>
+          <label>個人訊息<input class="set-input" v-model="me.psm" maxlength="60" placeholder="輸入個人訊息" enterkeyhint="done" @keydown.enter="$event.target.blur()"></label>
+        </div>
+        <div class="m-card m-form">
+          <label class="m-check"><input type="checkbox" v-model="prefs.vibrateNudge"> 對方傳來「震動」時，手機跟著震動</label>
+          <label class="m-check"><input type="checkbox" v-model="prefs.vibrateMsg"> 收到新訊息時輕輕震一下</label>
+        </div>
+        <div class="m-card m-form" v-if="upd.enabled">
+          <label class="m-check"><input type="checkbox" v-model="prefs.autoUpdate"> 自動檢查新版本</label>
+          <button class="m-btn" type="button" :disabled="upd.checking || upd.phase === 'downloading'" @click="checkUpdate(true)">{{ upd.checking ? '檢查中…' : '檢查更新' }}</button>
+          <p class="m-note" v-if="upd.manual" role="status">{{ upd.manual }}</p>
+        </div>
+        <div class="m-card">
+          <p class="m-acct">{{ accountText }}</p>
+          <button class="m-btn m-danger" type="button" :disabled="loggingOut" @click="doLogout">登出</button>
+        </div>
+        <p class="m-ver">ASN {{ info.version }}</p>
+      </div>
+
+      <nav class="m-tabs" role="tablist" aria-label="分頁">
+        <button type="button" role="tab" :class="{ on: nav.tab === 'list' }" :aria-selected="nav.tab === 'list'" @click="goList"><span>名單</span><i class="red" v-if="unreadTotal"></i></button>
+        <button type="button" role="tab" :class="{ on: nav.tab === 'me' }" :aria-selected="nav.tab === 'me'" @click="goMe"><span>我</span></button>
+      </nav>
+    </section>
+
+    <!-- 開新夥伴（遠端開視窗）：視窗開在選的那台電腦上，手機只下指令 -->
+    <section class="m-sheet" v-if="nav.sheet === 'launch'" role="dialog" aria-modal="true" aria-label="開新夥伴">
+      <header class="m-head m-chathead">
+        <button class="m-icon-btn" type="button" aria-label="返回" @click="back">‹</button>
+        <div class="m-head-tx"><div class="m-title">開新夥伴</div><div class="m-conn">視窗會開在你選的那台電腦上</div></div>
+      </header>
+      <div class="m-sheet-body">
+        <template v-if="lch.phase === 'form'">
+          <fieldset class="m-fs">
+            <legend>電腦</legend>
+            <button v-for="d in lchDevices" :key="d.key" type="button" class="m-opt" :class="{ on: lch.node === d.key, off: !d.ok }" :disabled="!d.ok" :aria-pressed="lch.node === d.key" @click="pickLaunchDevice(d.key)"><span class="m-opt-t">{{ d.label }}</span><small class="m-opt-why" v-if="!d.ok">{{ d.reason }}</small></button>
+            <p class="m-note" v-if="!lchDevices.length">名單上還沒有其他電腦。</p>
+            <p class="m-note" v-else-if="!lchData.loaded && !lchData.error">查詢各台電腦的設定中…</p>
+            <p class="m-err" v-if="lchData.error">{{ lchData.error }}</p>
+          </fieldset>
+          <template v-if="lch.node && lchElig.ok">
+            <fieldset class="m-fs">
+              <legend>模型</legend>
+              <button v-for="m in lchChoices.models" :key="m.profileId" type="button" class="m-opt" :class="{ on: lch.profile === m.profileId }" :aria-pressed="lch.profile === m.profileId" @click="lch.profile = m.profileId"><span class="m-opt-t">{{ m.label }}</span><small class="m-opt-why">{{ m.modeLabel }}</small></button>
+            </fieldset>
+            <label class="m-field">工作資料夾<select class="set-sel" v-model="lch.cwd"><option v-for="c in lchChoices.cwds" :key="c" :value="c">{{ c }}</option></select></label>
+            <label class="m-field">名字<input class="set-input" v-model="lch.name" maxlength="40" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+            <label class="m-field" v-if="lchSuccessors.length">這是誰的接班（選填）
+              <select class="set-sel" v-model="lch.successorOf"><option value="">不是接班，是全新的夥伴</option><option v-for="o in lchSuccessors" :key="o.value" :value="o.value">{{ o.label }}</option></select>
+            </label>
+            <label class="m-field">第一句話（選填）<textarea class="set-area" v-model="lch.first" rows="3" maxlength="4000"></textarea></label>
+          </template>
+          <p class="m-err" v-if="lch.error" role="alert">{{ lch.error }}</p>
+          <p class="m-note" v-else-if="lch.node && lchFormErr">{{ lchFormErr }}</p>
+          <button class="m-btn m-btn-big" type="button" :disabled="lch.busy || !!lchFormErr" @click="submitLaunch">{{ lch.busy ? '送出中…' : '開啟' }}</button>
+        </template>
+        <template v-else>
+          <p class="m-prog" :class="'is-' + lch.vphase" role="status">{{ lch.text }}</p>
+          <p class="m-note" v-if="lch.detail">{{ lch.detail }}</p>
+          <div class="m-bar" v-if="lch.vphase === 'sending' || lch.vphase === 'opening' || lch.vphase === 'waiting'" aria-hidden="true"><i></i></div>
+          <button class="m-btn m-btn-big" type="button" v-if="lch.vphase === 'done'" @click="openLaunched">開始對話</button>
+          <button class="m-btn" type="button" v-if="lch.vphase === 'failed'" @click="lch.phase = 'form'">再試一次</button>
+          <button class="m-btn" type="button" @click="back">{{ lch.vphase === 'done' || lch.vphase === 'failed' ? '關閉' : '先關閉（會在背景繼續）' }}</button>
+        </template>
+      </div>
+    </section>
+
+    <!-- 對話 -->
+    <section class="m-chat" v-if="nav.chat" :class="{ shake }">
+      <header class="m-head m-chathead">
+        <button class="m-icon-btn" type="button" aria-label="返回" @click="back">‹</button>
+        <img class="m-pic" v-if="chatFriend" :class="'st-' + chatFriend.status" :src="avOf(chatFriend)" alt="" width="44" height="44">
+        <div class="m-head-tx">
+          <div class="m-title" v-html="emo(chatFriend ? chatFriend.nick : '對話')"></div>
+          <div class="m-conn" v-if="chatFriend">{{ STATUS[chatFriend.status] }}<template v-if="chatFriend.psm"> · <span v-html="emo(chatFriend.psm)"></span></template></div>
+        </div>
+      </header>
+      <chat-pane :friend="chatFriend" :me="me" :log="chatLog" :friend-av="chatFriend ? avOf(chatFriend) : ''" :me-av="meAv"
+        dp-mode="inline" bubble="auto" toolbar="bottom" win-mode="merged" :active="false" :enter-sends="false" :photo-api="photoApi"
+        @send="text => sendTo(nav.chat, text)" @nudge="nudgeTo(nav.chat)" @attach="(p, cap) => sendAttachTo(nav.chat, p, cap)"></chat-pane>
+    </section>
+  </template>
+</div>
+<script src="vendor/vue.global.prod.js"></script>
+<script type="module" src="m.js"></script>
+</body>
+</html>

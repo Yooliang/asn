@@ -57,6 +57,32 @@ test('Bash 守門：本人簽章相關一律擋（即使有旗標）', () => {
   expect(mentionsPersonSignature('hello')).toBe(false)
 })
 
+test('Bash 守門：只認真正的指令呼叫，引號／heredoc 裡的字不算', () => {
+  const need = '請加 --reply 或 --no-reply，或改用 asn_send 工具'
+  // 不擋：commit 訊息、PR 描述、heredoc 內文、echo 裡出現寄信字樣
+  expect(guardBash('git commit -m "改 asn send --to X 的守門；send.mjs --to Y"')).toBeUndefined()
+  expect(guardBash("git commit -m 'asn-cli send --to X --body hi'")).toBeUndefined()
+  expect(guardBash('gh pr create --title t --body "用 node relay/machine/send.mjs --to X --body hi 寄信"')).toBeUndefined()
+  expect(guardBash('git commit -F - <<EOF\nnode send.mjs --to X --body hi\nasn send --to X\nEOF')).toBeUndefined()
+  expect(guardBash("git commit -F - <<'EOF'\nasn-cli send --to X --as_person\nEOF\ngit push")).toBeUndefined()
+  expect(guardBash('echo "asn send --to X"')).toBeUndefined()
+  // 要擋：真的指令呼叫（行首、&& 後、環境變數前導、Windows 路徑）沒旗標
+  expect(guardBash('node relay/machine/send.mjs --to X --body hi')).toBe(need)
+  expect(guardBash('cd x && asn-cli send --to X')).toBe(need)
+  expect(guardBash('echo hi; asn send --to X --body hi')).toBe(need)
+  expect(guardBash('cat f | node send.mjs --to X')).toBe(need)
+  expect(guardBash('FOO=1 asn-cli.exe send --to X')).toBe(need)
+  expect(guardBash('"C:\\ASN\\asn-cli.exe" send --to X --body hi')).toBe(need)
+  expect(guardBash('git commit -F - <<EOF\nx\nEOF\nasn send --to X')).toBe(need)
+  // 放行：有旗標、--room
+  expect(guardBash('cd x && asn-cli send --to X --no-reply')).toBeUndefined()
+  expect(guardBash('node relay/machine/send.mjs --to X --body hi --reply')).toBeUndefined()
+  expect(guardBash('asn send --room r --body hi')).toBeUndefined()
+  // 簽章字樣仍擋（在真正的呼叫裡）
+  expect(guardBash('cd x && asn-cli send --to X --no-reply --as_person')).toContain('本人簽章')
+  expect(guardBash('ASN_USER_TOKEN=1 asn send --room r --body hi')).toContain('本人簽章')
+})
+
 test('外掛本體：asn_send 走 $.process.run、缺欄位不執行', { options: { asn_cli_path: 'C:/ASN/asn-cli.exe' } }, async ($, on) => {
   const ran: string[][] = []
   on('tool.register', () => ({ value: { tool: 'mcp__asn__asn_send' } }) as never)

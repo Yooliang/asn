@@ -1,37 +1,68 @@
 //! ASN 即時通（Tauri 2）：金鑰、anon 金鑰、收發室 HTTP／WebSocket、心跳檔、設定與對話存檔都在 Rust 端；
 //! 前端（ui/）只拿得到「信件與名單」，拿不到任何金鑰。
-mod acct_remote;
+//! 電腦版（desktop）與安卓版共用同一份：電腦端才有的模組都掛 `#[cfg(desktop)]`，手機建置不編譯（設計見 docs/design/ANDROID.md）。
+// 手機版沒有電腦端的功能，那些共用程式裡只給電腦用的函式在手機建置會變成「沒人叫」：不當成警告
+#![cfg_attr(not(desktop), allow(dead_code, unused_variables, unused_imports))]
+// ---- 手機與電腦都有的模組 ----
 mod account;
-mod ads;
-mod agent_tools;
-pub mod askpass;
+mod android_update;
+mod appdir;
 mod attach;
 mod auth;
 mod avatar;
 mod bell;
-mod bridge;
 mod envc;
-pub mod cli;
-mod claude_accounts;
-mod claude_mod;
-mod claude_json;
-mod cloud_invite;
-mod codex_accounts;
 mod heartbeat;
 mod identity;
 mod lastlogin;
-mod launch;
 mod names;
-mod nowplaying;
 mod nowin;
+mod nowplaying;
 mod relay;
+// ---- 安卓版專屬 ----
+#[cfg(target_os = "android")]
+mod android;
+// ---- 只有電腦版有的模組（內建收發室橋、開 Claude／Codex 視窗與切換模型、密碼小幫手、Claude 帳號與外掛、用量、聽歌狀態、截圖、語音、系統匣、自動更新、多視窗）。
+// 手機建置不編譯它們；守門測試 test/android.test.mjs 會檢查每一個都掛著 cfg(desktop) ----
+#[cfg(desktop)]
+mod acct_remote;
+#[cfg(desktop)]
+mod ads;
+#[cfg(desktop)]
+mod agent_tools;
+#[cfg(desktop)]
+pub mod askpass;
+#[cfg(desktop)]
+mod bridge;
+#[cfg(desktop)]
+pub mod cli;
+#[cfg(desktop)]
+mod claude_accounts;
+#[cfg(desktop)]
+mod claude_json;
+#[cfg(desktop)]
+mod claude_mod;
+#[cfg(desktop)]
+mod cloud_invite;
+#[cfg(desktop)]
+mod codex_accounts;
+#[cfg(desktop)]
+mod launch;
+#[cfg(desktop)]
 mod shot;
+#[cfg(desktop)]
 mod stt;
+#[cfg(desktop)]
 mod tray;
+#[cfg(desktop)]
 mod tts;
+#[cfg(desktop)]
 mod updater;
+#[cfg(desktop)]
 mod usage;
+#[cfg(desktop)]
 mod voicecfg;
+#[cfg(desktop)]
 mod wins;
 
 use relay::Relay;
@@ -44,7 +75,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 /// 所有視窗共用的瀏覽器啟動參數（必須一致，否則第二扇視窗建不起來）。WebView2 才支援自動播放參數；Linux WebKitGTK 略過。
 #[cfg(windows)]
 pub const BROWSER_ARGS: &str = "--autoplay-policy=no-user-gesture-required";
-#[cfg(not(windows))]
+#[cfg(all(not(windows), desktop))]
 pub const BROWSER_ARGS: &str = "";
 
 pub struct App {
@@ -108,7 +139,7 @@ pub fn is_auto_node_id(id: &str) -> bool {
 pub fn default_window_name_for(node: &str, computer: &str) -> String {
     if is_auto_node_id(node) {
         let c: String = computer.chars().filter(|c| !c.is_control()).collect::<String>().trim().chars().take(36).collect();
-        let c = if c.is_empty() { "我的電腦".to_string() } else { c };
+        let c = if c.is_empty() { account::DEVICE_FALLBACK.to_string() } else { c };
         return format!("{c}-ASN");
     }
     default_window_name(node)
@@ -146,7 +177,7 @@ fn startup_info(app: State<'_, App>, auth: State<'_, auth::AuthState>) -> Startu
     }
 }
 
-fn relay_of(app: &App) -> Result<Arc<Relay>, String> {
+pub(crate) fn relay_of(app: &App) -> Result<Arc<Relay>, String> {
     app.relay.clone().ok_or_else(|| app.init_error.clone().unwrap_or_else(|| "尚未連上收發室".into()))
 }
 
@@ -168,11 +199,13 @@ async fn relay_rooms(app: State<'_, App>) -> Result<Value, String> {
     relay_of(&app)?.api("room_list", None).await
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 async fn relay_launch(app: State<'_, App>, body: Value) -> Result<Value, String> {
     launch::relay_launch(relay_of(&app)?.as_ref(), body).await
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 async fn relay_launchers(app: State<'_, App>, ids: Option<Vec<String>>) -> Result<Value, String> {
     launch::relay_launchers(relay_of(&app)?.as_ref(), ids).await
@@ -180,56 +213,68 @@ async fn relay_launchers(app: State<'_, App>, ids: Option<Vec<String>>) -> Resul
 
 // ---------- 遠端切換 Claude 帳號（設計見 acct_remote.rs；權杖只在各自那台搬，不進收發室） ----------
 /// 把本機帳號庫的清單（只有 email、方案、使用中）回報給收發室，讓擁有者設備看得到
+#[cfg(desktop)]
 #[tauri::command]
 async fn acct_remote_report(app: State<'_, App>) -> Result<Value, String> {
     let relay = relay_of(&app)?;
     let list = tauri::async_runtime::spawn_blocking(claude_accounts::local_list).await.map_err(|e| e.to_string())?;
     acct_remote::report(relay.as_ref(), &list).await
 }
+#[cfg(desktop)]
 #[tauri::command]
 async fn acct_remote_list(app: State<'_, App>, node: String) -> Result<Value, String> {
     acct_remote::remote_list(relay_of(&app)?.as_ref(), &node).await
 }
+#[cfg(desktop)]
 #[tauri::command]
 async fn acct_remote_request(app: State<'_, App>, node: String, email: String) -> Result<Value, String> {
     acct_remote::remote_request(relay_of(&app)?.as_ref(), &node, &email).await
 }
+#[cfg(desktop)]
 #[tauri::command]
 async fn acct_remote_status(app: State<'_, App>, ids: Vec<String>) -> Result<Value, String> {
     acct_remote::remote_status(relay_of(&app)?.as_ref(), ids).await
 }
+#[cfg(desktop)]
 #[tauri::command]
 async fn acct_remote_pending(app: State<'_, App>) -> Result<Vec<acct_remote::Pending>, String> {
     acct_remote::pending(relay_of(&app)?.as_ref(), &app.data_dir).await
 }
+#[cfg(desktop)]
 #[tauri::command]
 async fn acct_remote_apply(app: State<'_, App>, id: String, confirmed: bool) -> Result<Value, String> {
     acct_remote::apply(relay_of(&app)?.as_ref(), &app.data_dir, id, confirmed).await
 }
+#[cfg(desktop)]
 #[tauri::command]
 async fn acct_remote_decline(app: State<'_, App>, id: String) -> Result<(), String> {
     acct_remote::decline(relay_of(&app)?.as_ref(), id).await
 }
+#[cfg(desktop)]
 #[tauri::command]
 fn acct_remote_trust_get(app: State<'_, App>) -> bool {
     acct_remote::trust_own(&app.data_dir)
 }
+#[cfg(desktop)]
 #[tauri::command]
 fn acct_remote_trust_set(app: State<'_, App>, on: bool) -> Result<(), String> {
     acct_remote::set_trust_own(&app.data_dir, on)
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 async fn partner_launch_local(app: State<'_, App>, req: launch::LocalLaunchReq) -> Result<Value, String> {
     launch::partner_launch_local(app.node.clone(), app.work_dir.clone(), app.data_dir.clone(), req).await
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 async fn launch_cwd_candidates(app: State<'_, App>) -> Result<Vec<String>, String> {
     launch::launch_cwd_candidates(app.data_dir.clone()).await
 }
 
 /// 「瀏覽…」：在 Rust 端開「選擇資料夾」對話框；選好的資料夾寫進本機白名單並回傳，取消回 null。
+#[cfg(desktop)]
 #[tauri::command]
 async fn launch_cwd_browse(app: State<'_, App>, handle: AppHandle) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
@@ -249,41 +294,49 @@ async fn launch_cwd_browse(app: State<'_, App>, handle: AppHandle) -> Result<Opt
     }
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 async fn partner_console_query(req: launch::PartnerConsoleReq) -> Result<Value, String> {
     launch::partner_console_query(req).await
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 async fn partner_console_set(req: launch::PartnerConsoleReq) -> Result<Value, String> {
     launch::partner_console_set(req).await
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 async fn subagents_query(req: launch::SubagentsReq) -> Result<Value, String> {
     launch::subagents_query(req).await
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 async fn model_switch_query(req: launch::SwitchQueryReq) -> Result<Value, String> {
     launch::model_switch_query(req).await
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 async fn model_switch_run(req: launch::SwitchRunReq) -> Result<Value, String> {
     launch::model_switch_run(req).await
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 async fn launch_prefs_get(app: State<'_, App>) -> Result<Value, String> {
     launch::launch_prefs_get(app.data_dir.clone()).await
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 async fn launch_prefs_set(app: State<'_, App>, prefs: Value) -> Result<(), String> {
     launch::launch_prefs_set(app.data_dir.clone(), prefs).await
 }
 
+#[cfg(desktop)]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RelayLogPaths {
@@ -292,6 +345,7 @@ struct RelayLogPaths {
 }
 
 /// 收發橋與夥伴啟動相關紀錄的路徑（不含金鑰）。
+#[cfg(desktop)]
 #[tauri::command]
 fn relay_log_paths(app: State<'_, App>) -> RelayLogPaths {
     let machine_dir = app.work_dir.clone();
@@ -301,6 +355,7 @@ fn relay_log_paths(app: State<'_, App>) -> RelayLogPaths {
     }
 }
 
+#[cfg(desktop)]
 fn open_in_file_manager(path: &Path) -> Result<(), String> {
     if !path.is_dir() {
         return Err("路徑不是資料夾".into());
@@ -324,6 +379,7 @@ fn open_in_file_manager(path: &Path) -> Result<(), String> {
 }
 
 /// 唯一允許用檔案管理員開啟的 machine 記錄目錄；路徑只來自 Rust 端 work_dir，不接受前端傳入。
+#[cfg(desktop)]
 pub fn machine_log_dir_for(work_dir: &Path, relay_home: &Path) -> Result<PathBuf, String> {
     if !work_dir.starts_with(relay_home) {
         return Err("記錄資料夾路徑異常".into());
@@ -341,11 +397,13 @@ pub fn machine_log_dir_for(work_dir: &Path, relay_home: &Path) -> Result<PathBuf
     Ok(work_dir.to_path_buf())
 }
 
+#[cfg(desktop)]
 pub fn machine_log_dir(work_dir: &Path) -> Result<PathBuf, String> {
     machine_log_dir_for(work_dir, &identity::relay_home())
 }
 
 /// 用檔案管理員開啟本機 machine 資料夾（內含 bridge.log）；不接受任何路徑參數。
+#[cfg(desktop)]
 #[tauri::command]
 fn open_machine_log_dir(app: State<'_, App>) -> Result<(), String> {
     let dir = machine_log_dir(&app.work_dir)?;
@@ -373,6 +431,7 @@ fn shot_frontend_log(app: State<'_, App>, level: String, message: String) {
 
 /// 底部廣告可以開的網址：只准 https、沒有帳密、主機在網域允許清單內（見 ads.rs 的 ALLOWED_HOSTS）
 /// 用系統預設瀏覽器開（網址已比對白名單，不經 shell）
+#[cfg(desktop)]
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
     if !ads::url_allowed(&url) {
@@ -397,9 +456,22 @@ pub(crate) fn spawn_browser(url: &str) -> Result<(), String> {
     if r as isize > 32 { Ok(()) } else { Err(format!("無法開啟瀏覽器（代碼 {}）", r as isize)) }
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), desktop))]
 pub(crate) fn spawn_browser(url: &str) -> Result<(), String> {
     std::process::Command::new("xdg-open").arg(url).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// 登入用：開系統瀏覽器。電腦版直接叫系統開；安卓版經「開網址」外掛（走系統的 Intent，不能呼叫外部程式）
+pub(crate) fn open_in_browser(handle: &AppHandle, url: &str) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        android::open_url(handle, url)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = handle;
+        spawn_browser(url)
+    }
 }
 
 /// 某台設備上傳的大頭貼（名單只帶更新時間，圖按需取）。節點代號先驗格式才組網址
@@ -474,12 +546,14 @@ async fn relay_attachment_fetch(app: State<'_, App>, id: String) -> Result<Value
 }
 
 /// 另存新檔的記憶：上次存的資料夾（下次對話框的預設位置）。只在 Rust 端，前端拿不到、也不能設定。
+#[cfg(desktop)]
 #[derive(Default)]
 struct SaveDir(std::sync::Mutex<Option<PathBuf>>);
 
 /// 另存：跳出系統「另存新檔」對話框（預設＝上次存的資料夾，第一次是「下載\ASN」；預設檔名＝附件原檔名），
 /// 使用者選好才下載、存到他選的那個路徑；按取消就不下載。回存檔路徑，取消回 null。
 /// `name` 只是預設檔名的建議（外部資料，Rust 端清理過）；寫檔位置只來自對話框。
+#[cfg(desktop)]
 #[tauri::command]
 async fn relay_attachment_save(
     app: State<'_, App>,
@@ -513,6 +587,7 @@ async fn relay_attachment_save(
 }
 
 /// 開啟資料夾：只開「上次存檔的那個資料夾」，路徑由 Rust 記著、前端不能帶參數
+#[cfg(desktop)]
 #[tauri::command]
 fn relay_attachment_reveal(dir_state: State<'_, SaveDir>) -> Result<(), String> {
     let dir = dir_state.0.lock().ok().and_then(|g| g.clone()).ok_or("還沒有存過檔案")?;
@@ -521,6 +596,7 @@ fn relay_attachment_reveal(dir_state: State<'_, SaveDir>) -> Result<(), String> 
 
 /// 前端的狀態下拉與個人訊息：記在 Rust 端，由回報迴圈每 60 秒送出；改了就立刻回報一次
 /// 「顯示正在聽的歌」開關（預設關）。關著不讀系統媒體、不送；開了才讀。回傳目前的歌（沒在聽＝空字串）
+#[cfg(desktop)]
 #[tauri::command]
 fn set_now_playing(app: State<'_, App>, on: bool) -> Result<String, String> {
     let r = relay_of(&app)?;
@@ -567,10 +643,12 @@ fn store_save(app: State<'_, App>, name: String, text: String) -> Result<(), Str
 }
 
 /// 語音設定（念出訊息的聲音與自動念、語音輸入的語言與模型）；存在資料夾的 voice.json
+#[cfg(desktop)]
 #[tauri::command]
 fn voice_cfg_get(app: State<'_, App>) -> voicecfg::VoiceCfg {
     voicecfg::load(&app.data_dir)
 }
+#[cfg(desktop)]
 #[tauri::command]
 fn voice_cfg_set(app: State<'_, App>, cfg: voicecfg::VoiceCfg) -> Result<(), String> {
     voicecfg::save(&app.data_dir, &cfg)
@@ -583,38 +661,45 @@ fn quit_app(app: AppHandle) {
 }
 
 /// 命令列（asn-cli）的完整路徑與寄信範例（設定頁「寄信指令」用）
+#[cfg(desktop)]
 #[tauri::command]
 fn cli_info() -> serde_json::Value {
     cli::info()
 }
 /// 內建收發室橋的狀態（設定頁用）。預設關閉
+#[cfg(desktop)]
 #[tauri::command]
 fn bridge_status(m: State<'_, bridge::Manager>) -> bridge::Status {
     m.status()
 }
 /// 打開／關閉「讓 ASN 負責這台的收發室」
+#[cfg(desktop)]
 #[tauri::command]
 fn bridge_set_enabled(m: State<'_, bridge::Manager>, on: bool) -> Result<bridge::Status, String> {
     m.set_enabled(on)
 }
 /// 打開／關閉「允許我的其他設備替這台開新視窗」（預設關）
+#[cfg(desktop)]
 #[tauri::command]
 fn bridge_set_remote_launch(m: State<'_, bridge::Manager>, on: bool) -> Result<bridge::Status, String> {
     m.set_remote_launch(on)
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 fn bridge_set_unaddressed_to(m: State<'_, bridge::Manager>, name: String) -> Result<bridge::Status, String> {
     m.set_unaddressed_to(&name)
 }
 /// 「改由 ASN 負責」：停掉舊版收發室橋（要使用者確認、要設定開關放行）再啟動內建橋
+#[cfg(desktop)]
 #[tauri::command]
 async fn bridge_takeover(m: State<'_, bridge::Manager>, confirmed: bool) -> Result<bridge::Status, String> {
     m.takeover(confirmed).await
 }
 
 pub(crate) fn cleanup(app: &AppHandle) {
-    // 內建橋：只關自己啟動的收發室 worker、釋放收信鎖
+    // 內建橋：只關自己啟動的收發室 worker、釋放收信鎖（手機版沒有內建橋）
+    #[cfg(desktop)]
     app.state::<bridge::Manager>().shutdown();
     let st = app.state::<App>();
     if let Some(r) = &st.relay {
@@ -626,14 +711,16 @@ pub(crate) fn cleanup(app: &AppHandle) {
     }
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    #[cfg(not(windows))]
+    #[cfg(all(not(windows), desktop))]
     {
         // WebKitGTK 在 Xvfb 下用 scrot 擷圖時，不關合成／DMABUF 常拍到空白。
         std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
     let args: Vec<String> = std::env::args().collect();
+    #[cfg(desktop)]
     let background = args.iter().any(|a| a == tray::BACKGROUND_FLAG);
     let shot = args.iter().position(|a| a == "--shot").and_then(|i| args.get(i + 1)).map(PathBuf::from);
 
@@ -689,16 +776,24 @@ pub fn run() {
         }
     }
     let (now_wake, now_wake_rx) = std::sync::mpsc::channel::<()>();
+    #[cfg(desktop)]
     let now_wake_rx = std::sync::Mutex::new(Some(now_wake_rx));
+    #[cfg(not(desktop))]
+    drop(now_wake_rx);   // 手機版不讀系統媒體，沒有聽歌輪詢
     let state = App { relay: relay_obj.clone(), init_error, node: node.clone(), work_dir: work_dir.clone(), data_dir, shot, now_wake };
     let anon_url = relay_obj.as_ref().zip(anon).and_then(|(r, a)| bell::ws_url(r.base(), &a));
     if let Some(r) = &relay_obj {
         r.set_owner_dir(work_dir.clone());
     }
+    #[cfg(desktop)]
     let bridge_mgr = bridge::Manager::new(relay_obj.clone(), anon_url.clone(), node.clone(), work_dir.clone(), bridge_data_dir);
+    #[cfg(not(desktop))]
+    drop(bridge_data_dir);
 
-    let app = tauri::Builder::default()
-        .manage(state)
+    let builder = tauri::Builder::default().manage(state).manage(auth_state).plugin(tauri_plugin_dialog::init());
+    // 電腦版專屬的狀態與外掛（多視窗、系統匣、截圖、自動更新、內建橋、密碼小幫手）
+    #[cfg(desktop)]
+    let builder = builder
         .manage(wins::Slots::default())
         .manage(wins::Frame::default())
         .manage(tray::CloseToTray::default())
@@ -707,11 +802,14 @@ pub fn run() {
         .manage(updater::Pending::default())
         .manage(SaveDir::default())
         .manage(claude_mod::ModState::default())
-        .manage(auth_state)
         .manage(bridge_mgr)
         .manage(Arc::new(askpass::dialog::DialogState::default()))
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build());
+    // 安卓版專屬：開系統瀏覽器（登入、點連結）
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(tauri_plugin_opener::init());
+    #[cfg(desktop)]
+    let builder = builder
         .invoke_handler(tauri::generate_handler![
             startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_partner_list, relay_partner_succeed, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
@@ -724,9 +822,20 @@ pub fn run() {
             account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_bind, account::auth_skip_login, account::update_remote_request, account::update_remote_status,
             cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke,
             tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_set, updater::update_check, updater::update_install,
-        ])
+        ]);
+    // 手機只開放單欄名單與對話需要的指令；電腦端的指令（開視窗、橋、用量……）手機上根本不存在
+    #[cfg(not(desktop))]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        startup_info, relay_list, relay_inbox, relay_ack, relay_rooms, relay_send, relay_chat_history, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_avatar, relay_set_avatar,
+        set_presence, set_window_name, store_load, store_save, quit_app, capture_ui_ready, shot_frontend_log,
+        account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_bind,
+        android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_launch, relay_partner_list, relay_partner_succeed,
+    ]);
+    let builder = builder
         .setup(move |app| {
             let handle = app.handle().clone();
+            #[cfg(desktop)]
+            {
             // 視窗外框設定存在前端的 asn-me.json；沒有或壞掉就是自訂外框
             let native = std::fs::read_to_string(frame_data_dir.join("asn-me.json")).map(|t| wins::native_from_saved(&t)).unwrap_or(false);
             wins::init_frame(&handle, native);
@@ -760,6 +869,7 @@ pub fn run() {
                     let _ = w.hide();
                 }
             }
+            }
             // 已登入且這台有節點金鑰：每次啟動在背景綁一次到帳號（舊租戶還沒被認領時會失敗，不擋使用，下次啟動再試）
             if relay_obj.is_some() && handle.state::<auth::AuthState>().status().signed_in {
                 let h = handle.clone();
@@ -768,6 +878,8 @@ pub fn run() {
                     let _ = account::bind_this(&h.state::<App>(), &h.state::<auth::AuthState>()).await;
                 });
             }
+            #[cfg(desktop)]
+            {
             // 密碼小幫手的管道（git／ssh 的 askpass 請 ASN 跳窗收密碼）：--shot 截圖模式不啟動
             if handle.state::<App>().shot.is_none() {
                 askpass::dialog::start(&handle);
@@ -795,6 +907,7 @@ pub fn run() {
                     });
                 }
             }
+            }
             if let Some(r) = relay_obj.clone() {
                 // 心跳：每 30 秒寫一次（格式同 self-recv.mjs），pid 用本程式
                 let wd = work_dir.clone();
@@ -810,7 +923,8 @@ pub fn run() {
                     let every = std::time::Duration::from_millis(env_ms("ASN_PRESENCE_MS", 60_000));
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                     while r4.report_presence(env!("CARGO_PKG_VERSION"), std::time::Duration::from_secs(10)).await {
-                        // 本人在別台按了「更新」：用內建更新器自己下載、驗簽、安裝、重開（失敗回報原因）
+                        // 本人在別台按了「更新」：用內建更新器自己下載、驗簽、安裝、重開（失敗回報原因）。手機版沒有內建更新器（走應用程式商店）
+                        #[cfg(desktop)]
                         if r4.take_update_request() {
                             let (h, r5) = (up_handle.clone(), r4.clone());
                             tauri::async_runtime::spawn(async move {
@@ -865,7 +979,9 @@ pub fn run() {
                 }
             }
             Ok(())
-        })
+        });
+    #[cfg(desktop)]
+    let builder = builder
         .on_window_event(|w, ev| {
             // 關掉名單視窗：設定「縮到系統匣」（預設）就只藏起來，程序與收信照常；設「結束程式」才真的結束
             if w.label() == "list" {
@@ -880,7 +996,8 @@ pub fn run() {
                     }
                 }
             }
-        })
+        });
+    let app = builder
         .build(tauri::generate_context!())
         .expect("ASN 啟動失敗");
 

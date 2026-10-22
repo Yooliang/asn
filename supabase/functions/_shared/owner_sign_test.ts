@@ -42,8 +42,8 @@ Deno.test("relay 的 send 與 room_post 接上本人簽章，且在節點金鑰�
   assertEquals(room.includes("signedUserId(") && room.includes("irori_relay_room_post") && room.includes("signedArgs("), true);
 });
 
-Deno.test("簽章標頭只在 send／room_post 讀取（其他動作不碰）", async () => {
+Deno.test("簽章標頭只在 send／room_post／launch／launchers 讀取（其他動作不碰）", async () => {
   const src = await Deno.readTextFile(new URL("../relay/index.ts", import.meta.url));
-  assertEquals(src.split("signedUserId(").length - 1, 2);
-  assertEquals(src.split("SIGN_HEADER").length - 1, 6); // 匯入一次、五處讀取（send、room_post、chat_history、partner_succeed、partner_list）
+  assertEquals(src.split("signedUserId(").length - 1, 3); // send、room_post、遠端開視窗（launch／launchers）
+  assertEquals(src.split("SIGN_HEADER").length - 1, 7); // 匯入一次、六處讀取（send、room_post、chat_history、partner_succeed、partner_list、launch／launchers）
 });

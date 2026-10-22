@@ -1,11 +1,11 @@
 {
-  "version": "0.1.32",
-  "notes": "顯示正在聽的歌（預設關，#20）；密碼小幫手：git／ssh 要密碼時由 ASN 跳窗收，AI 看不到（#26 第一期）",
-  "pub_date": "2026-10-22T06:45:06.949Z",
+  "version": "0.1.33",
+  "notes": "登入畫面換成 MSN 風背景；震動提示改成「回震動後想一下有沒有要報告的」；Claude 外掛附 asn 技能說明；手機版（安卓）第一期",
+  "pub_date": "2026-10-22T10:16:59.858Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjBjRk9LVThmY3pjTW4xMGlRZ2xxMGNuR00xSUxMVFRmL0dsSE9ObEVtVkxCZDZuNUphaXRBQzJjRWppQjRGUVNDTi9RcGY1aFVVcEl0M2h4UG1nakFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjUxNTA2CWZpbGU6QVNOXzAuMS4zMl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjMyCmp5cEt4Wm9OY1dGbllFb3Q1RnBsaUx1WnAxbm9KeW9UVXhzaXRJYjNLUTV4b0xLQkZVNHZCaVovaTgvWEpZTjdnc0NTcjVsS052bDFQMnNKQ3lvOURBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.32_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybnk0dlJ3cFl1Tm02T2RJcC9sRkJvNkZld0lRQVlRNzBXNXllazZmdGdiZlFXYm5SYzllYkxwaDZHU3dIQkkvdEtRYXR6dWR6aEowSE41YkZiLzZmZWd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjY0MjE5CWZpbGU6QVNOXzAuMS4zM194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjMzClRvaHd2K1BmY0VxV3lhdHpQR1htUFc1NkltZlRqa2FvblVMaDAyUTJUWVk4ZmpnU3RHUlJ5bTlQVGRQTHEyMjRaUnJWUk81Z3RyK25qcTdRVzQ0dUFRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.33_x64-setup.exe"
     }
   }
 }

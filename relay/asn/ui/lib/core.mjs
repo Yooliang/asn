@@ -265,6 +265,8 @@ export class AsnCore {
   }
 
   // ---------- 往來記錄（以後台為準，本機只當快取） ----------
+  // 節點的設備名（名單上的，例如「Oppo 手機」）；名單裡沒有就空字串，由後台帶的名字補
+  #deviceName(node) { for (const f of this.friends.values()) if (f.node === node && f.device) return f.device; return '' }
   // 向後台取「我和這位夥伴」90 天內的信，補進本機記錄。沒登入、連不上、後台還沒支援都靜默略過（本機快取照用）。回補進幾則
   async syncHistory(id, { force = false } = {}) {
     const f = this.friends.get(id)
@@ -275,7 +277,7 @@ export class AsnCore {
     this.historyAt.set(id, this.now())
     try {
       const r = await this.transport.history(f.node, f.agent || '', f.partnerId || null)
-      const { log, added } = mergeHistory(this.logOf(id), r?.messages, f.nick)
+      const { log, added } = mergeHistory(this.logOf(id), r?.messages, f.nick, { selfNode: this.selfNode, deviceOf: node => this.#deviceName(node) })
       if (!added) return 0
       this.logs.set(id, log)
       f.known = true

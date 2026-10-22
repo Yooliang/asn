@@ -1,0 +1,150 @@
+/* 手機版（m.html）：單欄、直式小螢幕、觸控大小。沿用 style.css 的 Aero 玻璃配色與對話版面，只在這裡改尺寸與排法。
+   狀態列、導覽列、鍵盤的高度由安卓外殼（MainActivity）用內距讓出來，這裡不用處理。 */
+html,body.m-body{height:100%;margin:0;overflow:hidden;background:linear-gradient(180deg,var(--glass-top),var(--glass-bottom) 55%,#a9cdee);-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
+.m{display:flex;flex-direction:column;height:100dvh;min-height:0}
+/* .m 的 display:flex 和 style.css 的 [v-cloak] 一樣大，後寫的會贏，Vue 掛上之前整個樣板原文就露出來了：這裡明確壓過 */
+.m[v-cloak]{display:none!important}
+#splash{height:100dvh}
+.m button,.m input,.m select,.m textarea{font-size:16px}
+
+/* 啟動中、登入 */
+.m-center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;text-align:center;color:var(--title-fg)}
+.m-logo{width:72px;height:72px}
+.m-login{flex:1;display:flex;align-items:center;justify-content:center;padding:16px;overflow-y:auto}
+/* 登入畫面：直式背景圖鋪滿整個畫面，底部草地對齊畫面底部（連狀態列、手勢列內距那一圈也一起鋪） */
+.m.is-login{background:url(img/login-bg-mobile.webp) center bottom/cover no-repeat,linear-gradient(180deg,var(--glass-top),var(--glass-bottom))}
+.m-login-card{width:100%;max-width:420px;display:flex;flex-direction:column;align-items:stretch;gap:12px;padding:24px 20px;border:1px solid rgba(255,255,255,.85);border-radius:14px;background:rgba(255,255,255,.8);box-shadow:0 6px 24px rgba(0,30,70,.25);text-align:center}
+.m-login-card .login-avatar{align-self:center}
+.m-login-card .login-h{margin:0;font-size:22px}
+.m-login-card .login-sub,.m-login-card .login-note{margin:0;color:var(--muted);line-height:1.5}
+.m-login-card .login-err{margin:0;color:var(--busy);line-height:1.5}
+/* 登入畫面的 logo：只留外面那一層玻璃框（style.css 的 .login-avatar），裡面不再包第二個圓角方框；機器人放大填滿那一層 */
+.m-login-card .login-avatar{width:132px;height:132px;margin-bottom:2px}
+.m-login-card .login-avatar img{background:none;box-shadow:none;border-radius:0;padding:3px;object-fit:contain}
+.m-login-card .login-avatar::after{display:none}
+
+/* 按鈕：最小 44px 高 */
+.m-btn{min-height:44px;padding:0 18px;border:1px solid #7a9ec4;border-radius:8px;background:linear-gradient(#fdfeff 0 45%,#dfeaf6 50%,#eaf2fb);color:var(--title-fg);cursor:pointer}
+.m-btn:active:not(:disabled){background:linear-gradient(#c9def3,#e1eefb)}
+.m-btn:disabled{opacity:.55}
+.m-btn-big{min-height:50px;font-weight:700}
+.m-danger{color:#b3261e;border-color:#d79a95}
+.m-link{border:0;background:none;color:var(--link);min-height:44px;padding:0 12px;text-decoration:underline}
+.m-icon-btn{flex:none;width:44px;height:44px;border:0;border-radius:50%;background:transparent;color:var(--title-fg);font-size:28px;line-height:1;display:grid;place-items:center;cursor:pointer}
+.m-icon-btn:active:not(:disabled){background:rgba(255,255,255,.55)}
+.m-icon-btn:disabled{opacity:.5}
+
+/* 頁面骨架：上面標題列、中間可捲動、下面分頁列 */
+.m-page,.m-chat{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.m-head{flex:none;display:flex;align-items:center;gap:10px;height:60px;overflow:hidden;padding:6px 10px;color:var(--title-fg)}
+.m-head-tx{flex:1;min-width:0}
+.m-title{font-weight:800;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 0 8px #fff,0 0 2px #fff}
+.m-conn{display:flex;align-items:center;gap:5px;font-size:12px;color:#27496e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.m-conn .dot{margin-top:0}
+.m-me{flex:none;width:48px;height:48px;border:0;background:none;padding:2px;cursor:pointer;line-height:0;display:grid;place-items:center}
+/* 標題列的大頭貼：固定 44px 圓形（外框顏色＝狀態），不沿用電腦版的 .dp 相框，免得被撐滿 */
+/* （不能叫 .m-av：那是 ChatPane 訊息旁頭像的類別名） */
+.m-pic{--frame:var(--online);flex:none;display:block;width:44px;height:44px;max-width:44px;max-height:44px;object-fit:cover;border-radius:50%;border:3px solid var(--frame);background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.m-pic-lg{width:112px;height:112px;max-width:112px;max-height:112px;border-width:4px}
+.m-pic.st-busy{--frame:var(--busy)} .m-pic.st-away{--frame:var(--away)} .m-pic.st-offline{--frame:var(--offline);filter:grayscale(.65)}
+.m-conn-tx{min-width:0;overflow:hidden;text-overflow:ellipsis}
+/* 滿版：左右不留外框與外距，內容直接貼齊螢幕寬 */
+.m-scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;margin:0;background:var(--panel);border:0;border-top:1px solid var(--line);border-radius:0}
+.m-tabs{flex:none;display:flex;margin:0;border:0;border-top:1px solid var(--line);border-radius:0;overflow:hidden;background:var(--panel-soft)}
+.m-tabs button{position:relative;flex:1;min-height:52px;border:0;background:none;color:var(--muted);font-weight:600;cursor:pointer}
+.m-tabs button.on{color:var(--accent);background:var(--panel);box-shadow:inset 0 3px 0 var(--accent)}
+.m-tabs .red{top:10px;right:calc(50% - 30px)}
+
+/* 名單 */
+.m-search{position:sticky;top:0;z-index:2;padding:8px;background:var(--panel-soft);border-bottom:1px solid var(--line)}
+.m-search input{width:100%;min-height:44px;border:1px solid var(--line);border-radius:22px;padding:0 16px;background:var(--panel);user-select:text;-webkit-user-select:text}
+.m-ghead{display:flex;align-items:center;gap:6px;width:100%;min-height:44px;padding:0 12px;border:0;background:none;text-align:left;font-weight:700;color:var(--title-fg);cursor:pointer}
+.m-caret{display:inline-block;transition:transform .15s;font-size:12px;color:var(--muted)}
+.m-caret.open{transform:rotate(90deg)}
+.m-group ul{list-style:none;margin:0;padding:0}
+.m-ghead-row{display:flex;align-items:center}
+.m-ghead-row .m-ghead{flex:1;min-width:0}
+.m-gplus{flex:none;min-height:36px;margin-right:10px;padding:0 12px;border:1px solid #7a9ec4;border-radius:18px;background:linear-gradient(#fdfeff,#e3eef9);color:var(--title-fg);font-size:14px;cursor:pointer}
+.m-gplus:active{background:#cfe6fb}
+.m-buddy{display:flex;align-items:center;gap:12px;width:100%;min-height:60px;padding:6px 14px;border:0;border-top:1px solid #edf2f7;background:none;text-align:left;cursor:pointer}
+.m-buddy:active{background:#e6f1fc}
+.m-buddy.offline .b-nick{color:var(--muted)}
+.m-buddy .b-nick{font-size:16px}
+.m-buddy .b-psm{font-size:13px}
+.m-buddy .unread{min-width:22px;line-height:22px;font-size:12px}
+
+/* 我 */
+.m-meview{padding:0;display:flex;flex-direction:column;gap:0}
+.m-card{display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:16px;border:0;border-bottom:1px solid var(--line);border-radius:0;background:var(--panel-soft)}
+.m-card:first-child{align-items:center}
+.m-av-big{border:0;background:none;padding:0;line-height:0;cursor:pointer;display:grid;place-items:center}
+.m-hint,.m-note,.m-ver{margin:0;font-size:13px;color:var(--muted);text-align:center}
+.m-err{margin:0;font-size:13px;color:var(--busy)}
+.m-form label{display:flex;flex-direction:column;gap:6px;font-size:14px;color:var(--title-fg)}
+.m-form .set-input,.m-form .set-sel{min-height:44px;border:1px solid var(--line);border-radius:8px;padding:0 12px;background:var(--panel);user-select:text;-webkit-user-select:text}
+.m-check{flex-direction:row!important;align-items:center;gap:10px!important;min-height:44px}
+.m-check input{width:22px;height:22px;flex:none}
+.m-acct{margin:0;font-size:14px;word-break:break-all}
+
+/* 收到訊息的頂端橫幅 */
+.m-banner{position:fixed;z-index:80;left:8px;right:8px;top:calc(env(safe-area-inset-top,0px) + 8px);display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid rgba(40,80,130,.7);border-radius:10px;background:linear-gradient(180deg,var(--glass-top),var(--glass-bottom));box-shadow:0 6px 20px rgba(0,30,70,.35);animation:m-drop .3s ease both}
+.m-banner-tx{min-width:0;display:flex;flex-direction:column}
+.m-banner-tx b{color:var(--link);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.m-banner-tx small{color:var(--title-fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@keyframes m-drop{from{transform:translateY(-120%);opacity:0}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.m-banner{animation:none}}
+
+/* 開新夥伴：蓋滿整個畫面的表單 */
+.m-sheet{position:fixed;z-index:70;inset:0;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px);background:linear-gradient(180deg,var(--glass-top),var(--glass-bottom) 55%,#a9cdee)}
+.m-sheet-body{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:14px;padding:14px 16px 24px;background:var(--panel);border-top:1px solid var(--line)}
+.m-fs{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;border:0;min-width:0}
+.m-fs legend{padding:0;margin-bottom:6px;font-weight:700;color:var(--title-fg)}
+.m-opt{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;min-height:52px;padding:8px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel-soft);text-align:left;cursor:pointer}
+.m-opt.on{border-color:var(--accent);background:#e6f1fc;box-shadow:inset 0 0 0 1px var(--accent)}
+.m-opt.off{opacity:.6;background:#f1f3f6}
+.m-opt-t{font-size:16px;font-weight:600}
+.m-opt-why{font-size:13px;color:var(--muted)}
+.m-opt.off .m-opt-why{color:#9a3b14}
+.m-field{display:flex;flex-direction:column;gap:6px;font-size:14px;color:var(--title-fg)}
+.m-field .set-sel,.m-field .set-input,.m-field .set-area{min-height:44px;border:1px solid var(--line);border-radius:8px;padding:8px 12px;background:var(--panel);user-select:text;-webkit-user-select:text;width:100%}
+.m-prog{margin:12px 0 0;font-size:17px;line-height:1.5;color:var(--title-fg)}
+.m-prog.is-failed{color:var(--busy)}
+.m-prog.is-done{color:#1f7a2a;font-weight:700}
+.m-bar{height:6px;border-radius:3px;background:#d7e6f5;overflow:hidden}
+.m-bar i{display:block;width:40%;height:100%;background:var(--accent);animation:m-slide 1.2s ease-in-out infinite}
+@keyframes m-slide{0%{margin-left:-40%}100%{margin-left:100%}}
+@media (prefers-reduced-motion:reduce){.m-bar i{animation:none;width:100%;opacity:.5}}
+
+/* 更新橫幅（自行安裝版） */
+.m-upd{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:8px 12px;background:#fff5bf;border-bottom:1px solid #e3cf72;color:#3b3200}
+.m-upd.failed{background:#fde8e6;border-color:#e3a39d;color:#7a1710}
+.m-upd-tx{flex:1;min-width:0;font-size:14px;overflow-wrap:anywhere}
+.m-upd-btn{min-height:40px}
+.m-upd-hint{flex-basis:100%;font-size:13px}
+
+/* 對話：ChatPane 的版面在小螢幕上收緊，觸控目標放大 */
+.m-chathead{height:60px}
+.m-chat.shake{animation:m-shake .7s}
+@keyframes m-shake{0%,100%{transform:none}15%{transform:translateX(-10px)}30%{transform:translateX(9px)}45%{transform:translateX(-7px)}60%{transform:translateX(6px)}75%{transform:translateX(-3px)}}
+@media (prefers-reduced-motion:reduce){.m-chat.shake{animation:none}}
+.m-chat > .pane{margin:0;border:0;border-top:1px solid var(--line);border-radius:0}
+.m-chat .to-line{display:none}
+.m-chat .conv,.m-chat .compose-row{padding:0;background:var(--panel)}
+.m-chat .conv-main,.m-chat .compose-main{border:0;border-radius:0}
+.m-chat .compose-row{border-top:1px solid var(--line)}
+.m-chat .msgs{padding:10px 10px;gap:10px}
+.m-chat .dp-inline .m-main{max-width:84%}
+.m-chat .msg .m-body{font-size:16px;line-height:1.45}
+.m-chat .toolbar{flex-wrap:nowrap;overflow-x:auto;padding:2px 6px;gap:2px}
+.m-chat .tool.icon{min-width:44px;min-height:44px;justify-content:center;padding:0}
+.m-chat .tool.icon svg{width:26px;height:26px}
+.m-chat .composer{align-items:flex-end;padding:6px 8px;gap:8px}
+.m-chat .composer textarea{height:auto;min-height:44px;max-height:120px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--panel);font-size:16px;user-select:text;-webkit-user-select:text;field-sizing:content}
+.m-chat .composer .aero-btn{align-self:flex-end;min-width:68px;min-height:44px;border-radius:10px;font-size:16px}
+.m-chat .picker{grid-template-columns:repeat(6,1fr);left:8px;right:8px}
+.m-chat .picker button{height:44px;font-size:22px}
+.m-chat .typing{height:auto;min-height:22px}
+.m-chat .photo-viewer .aero-btn{min-height:44px;padding:0 16px}
+.m-chat .filecard,.m-chat .photo{min-height:44px}
+.m-chathead .m-icon-btn{font-size:40px;font-weight:700;width:48px}
