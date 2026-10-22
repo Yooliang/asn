@@ -114,7 +114,7 @@ export function openAdWith(ad, open) {
 // mode＝'status'：線上／忙碌／暫離／離線；mode＝'engine'：Claude／Gemini／Grok…（沒回報類型的歸「其他」，排最後）。空的組不列。
 const STATUS_GROUPS = [['online', '線上'], ['busy', '忙碌'], ['away', '暫離'], ['offline', '離線']]
 const ENGINE_ORDER = ['claude', 'gemini', 'grok', 'codex', 'deepseek']
-const ENGINE_LABEL = { claude: 'Claude', gemini: 'Gemini', grok: 'Grok', codex: 'Codex', deepseek: 'DeepSeek', gpt: 'GPT' }
+const ENGINE_LABEL = { claude: 'Claude', gemini: 'Gemini', grok: 'Grok', codex: 'Codex', deepseek: 'DeepSeek', gpt: 'GPT', acp: 'ACP', asn: 'ASN', pi: 'Pi' }
 // 節點回報的 kind 只有這幾個值可以拿來推斷廠商；'other' 不採用
 const KIND_VENDORS = ['claude', 'gpt', 'gemini', 'grok']
 // 廠商：好友自己回報的 engine 優先；沒回報（null）就用所在節點的 kind（claude／gpt／gemini／grok）；都沒有＝其他
