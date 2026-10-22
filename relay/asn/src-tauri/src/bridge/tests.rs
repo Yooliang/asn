@@ -822,17 +822,33 @@ async fn 寄給_asn_自己視窗的信_橋不碰() {
 }
 
 #[tokio::test]
-async fn 沒指定收件人_預設視窗在線就交給它_不在線改交最近有活動的_都沒有就留著() {
-    // 預設 T-甲 在線
+async fn 沒指定收件人_設定的視窗在線就交給它() {
+    // 環境變數（舊相容）指定的 T-甲 在線
     let mut h = harness(&[("T-甲", "idle"), ("T-乙", "idle")]).await;
     h.fr.put(mail(1, json!({"to_agent": null})));
     h.core.pull("test", T0).await;
     assert!(h.said()[0].contains("to=T-甲]"));
-    assert!(!h.said()[0].contains("原本要給"));
-    // 預設不在線：挑 updatedAt 最大的
+    assert!(h.said()[0].contains("[收發室] 這封信沒有指定收件視窗，依設定交給你（T-甲）處理。"));
+    // bridge.json 的設定優先於環境變數
     let fr = FakeRelay::start();
-    let work = tempfile::tempdir().unwrap();
-    let sessions = tempfile::tempdir().unwrap();
+    let (work, sessions, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    put_session(sessions.path(), 5001, "T-甲", "idle", 10);
+    put_session(sessions.path(), 5002, "T-丙", "idle", 99);
+    super::write_settings(data.path(), super::BridgeSettings { unaddressed_to: "T-丙".into(), ..Default::default() }).unwrap();
+    let sink = Arc::new(FakeSink::default());
+    let mut core = new_core(&fr, work.path(), sessions.path(), sink.clone(), T0);
+    core.cfg.data_dir = Some(data.path().to_path_buf());
+    core.refresh_roster(T0).await;
+    fr.put(mail(2, json!({"to_agent": null})));
+    core.pull("test", T0).await;
+    assert!(sink.said.lock().unwrap()[0].contains("to=T-丙]"), "設定檔指定的視窗優先");
+}
+
+#[tokio::test]
+async fn 沒指定收件人_沒設定或設定的視窗不在線_交給本人_不丟給隨便一個視窗_也不_ack() {
+    // 預設 T-甲 不在線，但有兩個別的互動式視窗：以前會挑最近有動作的，現在一個都不碰
+    let fr = FakeRelay::start();
+    let (work, sessions) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     put_session(sessions.path(), 5001, "T-舊", "idle", 10);
     put_session(sessions.path(), 5002, "T-新", "idle", 99);
     let sink = Arc::new(FakeSink::default());
@@ -840,18 +856,89 @@ async fn 沒指定收件人_預設視窗在線就交給它_不在線改交最近
     core.refresh_roster(T0).await;
     fr.put(mail(2, json!({"to_agent": null})));
     core.pull("test", T0).await;
-    let said = sink.said.lock().unwrap().clone();
-    assert!(said[0].contains("to=T-新]"));
-    assert!(said[0].contains("[收發室] 這封信原本要給「T-甲」，但它不在線，請你（T-新）代收並轉告／處理。"));
-    // 沒有任何互動式視窗：不 ack、留在 inbox
-    let fr2 = FakeRelay::start();
-    let s2 = tempfile::tempdir().unwrap();
-    let mut c2 = new_core(&fr2, work.path(), s2.path(), Arc::new(FakeSink::default()), T0);
-    c2.refresh_roster(T0).await;
-    fr2.put(mail(3, json!({"to_agent": null})));
-    c2.pull("test", T0).await;
-    assert!(fr2.acked().is_empty() && fr2.sent().is_empty());
-    assert!(c2.log.has("left in inbox"));
+    assert!(sink.said.lock().unwrap().is_empty(), "不能轉給任何 session");
+    assert!(fr.acked().is_empty(), "交給本人的信不能由橋 ack");
+    assert_eq!(core.relay.unaddressed_ids(), vec![uid(2)]);
+    let back = fr.sent();
+    assert_eq!(back.len(), 1);
+    assert_eq!((back[0]["to_node"].as_str(), back[0]["to_agent"].as_str()), (Some("W"), Some("W-政策")));
+    assert_eq!(back[0]["body"], "（這封信沒有指定收件視窗，已交給 T-ASN 本人）");
+    // 再拉一次：不重複通知、仍不 ack
+    core.pull("again", T0 + 1000).await;
+    assert_eq!(fr.sent().len(), 1);
+    assert!(fr.acked().is_empty());
+    // ASN 視窗收信：以「未指定收件人」交給畫面；畫面收下（ack）後才從信箱拿掉
+    let v = core.relay.inbox().await.unwrap();
+    let ms = v["messages"].as_array().unwrap();
+    assert_eq!(ms.len(), 1);
+    assert_eq!((ms[0]["to_agent"].as_str(), ms[0]["unaddressed"].as_bool(), ms[0]["from_agent"].as_str()), (Some("T-ASN"), Some(true), Some("W-政策")));
+    core.relay.ack(&[uid(2)]).await.unwrap();
+    assert_eq!(fr.acked(), vec![uid(2)]);
+    assert!(core.relay.unaddressed_ids().is_empty());
+    // 剛 ack 的信即使橋又看到一次舊回應，也不會再收回來
+    core.handle_mail(super::mail::Mail::from_json(&mail(2, json!({"to_agent": null}))).unwrap()).await;
+    assert!(core.relay.unaddressed_ids().is_empty());
+    // 設定的視窗不在線：同樣交給本人
+    let (data, work2) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    super::write_settings(data.path(), super::BridgeSettings { unaddressed_to: "T-不存在".into(), ..Default::default() }).unwrap();
+    let mut core2 = new_core(&fr, work2.path(), sessions.path(), sink.clone(), T0);
+    core2.cfg.data_dir = Some(data.path().to_path_buf());
+    core2.refresh_roster(T0).await;
+    fr.put(mail(3, json!({"to_agent": null})));
+    core2.pull("test", T0).await;
+    assert!(sink.said.lock().unwrap().is_empty());
+    assert_eq!(core2.relay.unaddressed_ids(), vec![uid(3)]);
+}
+
+#[tokio::test]
+async fn 沒指定收件人_不要回覆的信與收發室系統信_交給本人但不通知寄件人() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.fr.put(mail(1, json!({"to_agent": null, "expects_reply": false, "body": "只是告知"})));
+    h.fr.put(mail(2, json!({"to_agent": null, "from_agent": "W-收發室", "body": "系統通知"})));
+    h.core.pull("test", T0).await;
+    assert!(h.fr.sent().is_empty() && h.fr.acked().is_empty());
+    assert_eq!(h.core.relay.unaddressed_ids().len(), 2);
+}
+
+#[tokio::test]
+async fn 沒啟用內建橋的_asn_自己撈節點信箱_沒指定收件人的信出現在畫面_收下前沒人_ack() {
+    // 情境：工作機的舊版收發室橋在跑（它不 ack 這類信），ASN 開著但沒啟用內建橋
+    let fr = FakeRelay::start();
+    fr.put(mail(1, json!({"to_agent": null})));
+    fr.put(mail(2, json!({"to_agent": "T-乙"}))); // 寄給別的視窗：不是給本人的
+    fr.put(mail(3, json!({"to_agent": null, "from_agent": "W-收發室"}))); // 收發室系統信不算
+    let relay = Relay::new(fr.url.clone(), "fake-test-key".into(), "T".into(), "T-ASN".into());
+    let v = relay.inbox().await.unwrap();
+    let ms = v["messages"].as_array().unwrap();
+    assert_eq!(ms.len(), 1, "{ms:?}");
+    assert_eq!((ms[0]["id"].as_str(), ms[0]["to_agent"].as_str(), ms[0]["unaddressed"].as_bool()), (Some(uid(1).as_str()), Some("T-ASN"), Some(true)));
+    // 再收一次：同一封不重複
+    assert_eq!(relay.inbox().await.unwrap()["messages"].as_array().unwrap().len(), 1);
+    assert!(fr.acked().is_empty(), "畫面收下之前沒人 ack");
+    relay.ack(&[uid(1)]).await.unwrap();
+    assert_eq!(fr.acked(), vec![uid(1)]);
+    assert!(relay.inbox().await.unwrap()["messages"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn 內建橋在跑時_asn_不另外撈_同機另一個_asn_在撈時也不撈() {
+    let fr = FakeRelay::start();
+    fr.put(mail(1, json!({"to_agent": null})));
+    // 內建橋在跑：只有橋交來的才算（橋還沒處理就沒有）
+    let relay = Relay::new(fr.url.clone(), "fake-test-key".into(), "T".into(), "T-ASN".into());
+    relay.set_bridge_running(true);
+    assert!(relay.inbox().await.unwrap()["messages"].as_array().unwrap().is_empty());
+    // 同機另一個活著的 ASN 程式已經負責：這個不撈（避免同一封顯示兩次）；它不在了就接手
+    let d = tempfile::tempdir().unwrap();
+    let other = if cfg!(windows) { 4 } else { 1 };
+    if crate::heartbeat::pid_alive(other) && other != std::process::id() {
+        std::fs::write(d.path().join("owner-inbox.pid"), other.to_string()).unwrap();
+        let r2 = Relay::new(fr.url.clone(), "fake-test-key".into(), "T".into(), "T-ASN".into());
+        r2.set_owner_dir(d.path().to_path_buf());
+        assert!(r2.inbox().await.unwrap()["messages"].as_array().unwrap().is_empty());
+        std::fs::remove_file(d.path().join("owner-inbox.pid")).unwrap();
+        assert_eq!(r2.inbox().await.unwrap()["messages"].as_array().unwrap().len(), 1);
+    }
 }
 
 // ---- nonce 偽造 ------------------------------------------------------------------------------------
@@ -1010,8 +1097,8 @@ fn 真的子程序_啟動轉交回覆寄回_關閉時只關自己的_worker_並�
 #[test]
 fn 設定_預設關閉_壞檔當關閉() {
     let d = tempfile::tempdir().unwrap();
-    assert_eq!(super::read_settings(d.path()), super::BridgeSettings { enabled: false, allow_takeover: false, allow_remote_launch: false });
-    super::write_settings(d.path(), super::BridgeSettings { enabled: true, allow_takeover: false, allow_remote_launch: false }).unwrap();
+    assert_eq!(super::read_settings(d.path()), super::BridgeSettings::default());
+    super::write_settings(d.path(), super::BridgeSettings { enabled: true, ..Default::default() }).unwrap();
     assert!(super::read_settings(d.path()).enabled);
     std::fs::write(super::settings_path(d.path()), "壞").unwrap();
     assert!(!super::read_settings(d.path()).enabled);
@@ -1027,12 +1114,12 @@ fn 管理器_舊橋活著時不啟動_狀態顯示由舊版負責_設定關著�
     let m = super::Manager::new(Some(relay), None, "T".into(), work.path().to_path_buf(), data.path().to_path_buf());
     // 設定關：start_if_enabled 不啟動
     m.start_if_enabled();
-    assert_eq!(m.status(), super::Status { enabled: false, running: false, legacy: false, takeover_allowed: false, remote_launch: false, error: None });
+    assert_eq!(m.status(), super::Status { enabled: false, running: false, legacy: false, takeover_allowed: false, remote_launch: false, unaddressed_to: String::new(), error: None });
     // 另一個「活著的」pid 寫進 bridge.pid（找一個真的活著且不是自己的：init 類程序用 pid 4 在 Windows、1 在 Unix）
     let other = if cfg!(windows) { 4 } else { 1 };
     if crate::heartbeat::pid_alive(other) && other != std::process::id() {
         std::fs::write(super::lock::pid_file(work.path()), other.to_string()).unwrap();
-        super::write_settings(data.path(), super::BridgeSettings { enabled: true, allow_takeover: false, allow_remote_launch: false }).unwrap();
+        super::write_settings(data.path(), super::BridgeSettings { enabled: true, ..Default::default() }).unwrap();
         m.start_if_enabled();
         let st = m.status();
         assert!(st.enabled && !st.running && st.legacy && !st.takeover_allowed, "{st:?}");

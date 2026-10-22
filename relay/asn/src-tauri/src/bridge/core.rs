@@ -5,7 +5,7 @@ use super::attach;
 use super::corrlog::{self, CorrLog, Dir, Entry};
 use super::engines::{EngineEvent, EngineSet};
 use super::launcher::{Launched, Launcher};
-use super::mail::{self, fallback_note, mail_head, parse_send_head, strip_reply_head, wants_reply, Mail, SendHead};
+use super::mail::{self, unaddressed_receipt, unaddressed_window_note, mail_head, parse_send_head, strip_reply_head, wants_reply, Mail, SendHead};
 use super::pending::{self, LastReq, Pending, RoomRef, State};
 use super::rooms::{self, Cursors};
 use super::roster::{self, Window};
@@ -26,7 +26,10 @@ fn env_u64(k: &str, d: u64) -> u64 {
 pub struct Config {
     pub node: String,
     pub mailbox_name: String,
+    /// 沒指定收件視窗的信，環境變數 ASN_RELAY_DEFAULT_AGENT 指定的收件視窗（舊相容；預設空＝交給本人）。bridge.json 的設定優先
     pub default_agent: String,
+    /// 設定檔（bridge.json）所在資料夾；沒有就只看環境變數
+    pub data_dir: Option<PathBuf>,
     pub extra_allow: Vec<String>,
     pub work_dir: PathBuf,
     pub sessions_dir: PathBuf,
@@ -76,7 +79,8 @@ impl Config {
         Config {
             node: node.into(),
             mailbox_name: crate::envc::get("ASN_MAILBOX_NAME").filter(|s| !s.trim().is_empty()).unwrap_or_else(|| format!("{node}-收發室")),
-            default_agent: crate::envc::get("ASN_RELAY_DEFAULT_AGENT").filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "H-工頭-2".into()),
+            default_agent: crate::envc::get("ASN_RELAY_DEFAULT_AGENT").filter(|s| !s.trim().is_empty()).unwrap_or_default(),
+            data_dir: None,
             extra_allow: list("ASN_RELAY_ALLOW"),
             work_dir,
             sessions_dir: home.join(".claude").join("sessions"),
@@ -172,7 +176,7 @@ const DIRECT_NOTE: &str = "（這個視窗自己用命令列回了信，內文�
 
 pub struct Core {
     pub cfg: Config,
-    relay: Arc<Relay>,
+    pub(super) relay: Arc<Relay>,
     sink: Arc<dyn WorkerSink>,
     pub parser: Parser,
     pub log: Arc<BridgeLog>,
@@ -500,21 +504,18 @@ impl Core {
             if !self.roster_ok {
                 continue;
             }
-            self.handle_mail(m).await;
+            self.handle_mail_raw(m, Some(raw)).await;
         }
         self.ack_ids(&dup).await;
         Ok(())
     }
 
-    /// 預設收件視窗不在線時代收的視窗：最近有活動的互動式 session
-    fn fallback_window(&self) -> Option<Window> {
-        let mut best: Option<&Window> = None;
-        for w in self.roster.iter().filter(|w| !w.no_fallback) {
-            if best.map(|b| w.updated_at > b.updated_at).unwrap_or(true) {
-                best = Some(w);
-            }
-        }
-        best.cloned()
+    /// 沒指定收件視窗的信要交給誰：使用者在設定指定的視窗（bridge.json），沒有再看環境變數；兩者都空＝交給本人。
+    /// 指定的視窗不在線也不改丟給別的 session，退回交給本人
+    fn unaddressed_window(&self) -> Option<String> {
+        let set = self.cfg.data_dir.as_ref().map(|d| super::read_settings(d).unaddressed_to).unwrap_or_default();
+        let name = if set.trim().is_empty() { self.cfg.default_agent.trim().to_string() } else { set.trim().to_string() };
+        (!name.is_empty() && self.online_names().contains(name.as_str()) && !self.relay.active_names().contains(&name)).then_some(name)
     }
 
     /// 往來記錄：失敗只記 log，不影響轉交
@@ -557,6 +558,11 @@ impl Core {
     }
 
     pub async fn handle_mail(&mut self, m: Mail) {
+        self.handle_mail_raw(m, None).await
+    }
+
+    /// raw＝後端回的原始信件（交給本人時原樣保留時間、附件等欄位）；沒有就用解析後的欄位重組
+    pub async fn handle_mail_raw(&mut self, m: Mail, raw: Option<Value>) {
         if let Some(to) = m.to_agent.clone() {
             // 寄給 ASN 自己視窗的信：留給 ASN 自己的畫面收（不轉交、不 ack）
             if self.relay.active_names().contains(&to) {
@@ -573,21 +579,24 @@ impl Core {
                 return;
             }
         }
-        let mut target = m.to_agent.clone().unwrap_or_else(|| self.cfg.default_agent.clone());
-        let mut note = String::new();
-        if m.to_agent.is_none() && !self.online_names().contains(self.cfg.default_agent.as_str()) {
-            // 預設收件視窗不在線：改交給最近有活動的互動式 session，都沒有才留在 inbox
-            let Some(fb) = self.fallback_window() else {
-                if self.unrouted.insert(m.id.clone()) {
-                    self.log.line(&format!("id={} has no to_agent and {} is offline and no interactive session online: left in inbox", m.id, self.cfg.default_agent));
-                }
-                return;
-            };
-            target = fb.name.clone();
-            note = fallback_note(&self.cfg.default_agent, &fb.name);
-            self.log.line(&format!("id={} has no to_agent and {} is offline: fallback to most recently active session {}", m.id, self.cfg.default_agent, target));
-        }
         let from_agent = m.from_agent.clone().unwrap_or_default();
+        let mut note = String::new();
+        let target = match m.to_agent.clone() {
+            Some(t) => t,
+            None => match self.unaddressed_window() {
+                // 使用者指定了「沒指定收件人的信交給誰」而且那個視窗在線：照設定給它
+                Some(w) => {
+                    note = unaddressed_window_note(&w);
+                    self.log.line(&format!("id={} has no to_agent: handed to configured window {w}", m.id));
+                    w
+                }
+                // 否則交給本人（ASN 視窗）：信留在信箱不 ack，ASN 畫面收下才 ack。不再丟給隨便一個 session
+                None => {
+                    self.hand_to_owner(&m, raw, &from_agent).await;
+                    return;
+                }
+            },
+        };
         let no_reply = !wants_reply(m.expects_reply, &m.body) || Self::is_mailbox_sender(&from_agent);
         let mut p = Pending::new(&m.id, &m.from_node, &from_agent, &target, self.now, no_reply);
         if !self.forwardable(&target) {
@@ -620,6 +629,23 @@ impl Core {
                 self.remove(&m.id);
                 self.log.line(&format!("cannot hand id={}: {e} (left in inbox)", m.id));
             }
+        }
+    }
+
+    /// 沒指定收件視窗的信交給本人：留在信箱（不 ack、不轉交），ASN 畫面以「寄件人 → 未指定收件人」顯示並由本人決定；寄件人（要回覆的話）收到一次說明
+    async fn hand_to_owner(&mut self, m: &Mail, raw: Option<Value>, from_agent: &str) {
+        let raw = raw.unwrap_or_else(|| {
+            json!({ "id": m.id, "from_node": m.from_node, "from_agent": m.from_agent, "to_agent": null, "body": m.body, "trust": m.trust, "expects_reply": m.expects_reply,
+                "created_at": null })
+        });
+        if !self.relay.hold_unaddressed(raw) || !self.unrouted.insert(m.id.clone()) {
+            return;
+        }
+        let owner = self.relay.window_name();
+        self.log.line(&format!("id={} has no to_agent: kept in inbox for the owner ({owner}), not acked", m.id));
+        if wants_reply(m.expects_reply, &m.body) && !Self::is_mailbox_sender(from_agent) {
+            let p = Pending::new(&m.id, &m.from_node, from_agent, &owner, self.now, true);
+            self.send_back(&Origin::of(&p), &unaddressed_receipt(&owner), None, Some(false)).await;
         }
     }
 
@@ -917,16 +943,16 @@ impl Core {
         let mut note = String::new();
         let target;
         if window.is_empty() {
-            if self.online_names().contains(self.cfg.default_agent.as_str()) {
-                target = self.cfg.default_agent.clone();
-            } else {
-                let Some(fb) = self.fallback_window() else {
-                    self.log.line(&format!("room={room_id} #{seq} default agent offline and no session online: kept (cursor not advanced)"));
-                    return false;
-                };
-                note = fallback_note(&self.cfg.default_agent, &fb.name);
-                target = fb.name;
-            }
+            // 節點本身的成員沒有對應的視窗：只交給使用者在設定指定的視窗；沒有就留著（游標不前進），不丟給隨便一個 session
+            let Some(w) = self.unaddressed_window() else {
+                let key = format!("room:{room_id}:{seq}:{member}");
+                if self.unrouted.insert(key) {
+                    self.log.line(&format!("room={room_id} #{seq} member has no window and no configured window online: kept (cursor not advanced)"));
+                }
+                return false;
+            };
+            note = unaddressed_window_note(&w);
+            target = w;
         } else {
             if !self.forwardable(&window) {
                 self.log.line(&format!("room={room_id} #{seq} window {window} not forwardable: skipped"));

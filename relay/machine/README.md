@@ -45,7 +45,8 @@ relay send(reply_to) <──── bridge.mjs <──stdout── 收發室 <─
    - **視窗主動寄信（代寄）**：本機視窗用 SendMessage 傳給收發室（例如 `w02-收發室`），第一行寫 `[RELAY 寄信] to=<節點>[/<視窗>] reply=yes|no`（`[RELAY 回信]` 同義；加 ` re=<信件id>` 就是回那一封；`reply=` **必填**：yes＝在等回信、no＝只是告知；沒寫就不寄，收發室會通知寄件視窗補上，log `refused`），下面接內文。收發室把它當一封新信寄出，寄件人是這個視窗（名字取自 Claude Code 標記的 from-name，視窗無法冒名）。沒有這行頭的訊息照舊當回覆處理（對不上來信也沒有最近交辦者就丟棄）。`send.mjs` 照樣可用。
    - **要不要回信是信件的獨立欄位 `expects_reply`**（SQL 23；寄件人用 `send.mjs --reply`／`--no-reply`、代寄 `reply=yes|no` 明說，不往內文加標記）。`false`（只是告知）：照常轉交、成功即 ack，但不計時、不寄逾時通知（收發室之後也不再轉寄對方的回覆）；`true`：計時。欄位有值就**只看欄位**；欄位是 null（舊版寄件工具、舊信）才退回看內文的「（不需回覆）」「[no-reply]」（過渡期相容，之後拿掉）。逾時提醒（timeout／busy）結尾會提示「只是告知的信，寄件時用 --no-reply（代寄寫 reply=no）就不會提醒」。acp 轉接器（Gemini 工作者）用同一條規則決定要不要把回覆寄回。
    - **寄件人是收發室**（`from_agent` 以「收發室」結尾，即任何節點的 `<節點>-收發室`）的系統信：比照告知類，照常轉交、不計時、不寄逾時通知；轉交失敗／找不到視窗的說明也不回給收發室（只記 log），避免兩台收發室互相丟信。
-   - 沒有 `to_agent` → 交給 `ASN_RELAY_DEFAULT_AGENT`（預設 `H-工頭-2`）；它不在線就改交給**最近有活動**的互動式 session
+   - 沒有 `to_agent` → 只有設定了 `ASN_RELAY_DEFAULT_AGENT` 而且那個視窗在線，才交給它（內文前加一行「這封信沒有指定收件視窗，依設定交給你處理」）；
+     否則**不 ack、留在 inbox**，等 ASN 視窗的本人處理，不再丟給隨便一個 session。
      （依 `~/.claude/sessions/<pid>.json` 的 `updatedAt`，排除收發室），內文前加一行「原本要給 <預設> 但它不在線，請你代收並轉告／處理」；都沒有人在線才**不 ack、留在 inbox**。
    - 不在名單的 `to_agent` → 寄回「找不到這個 session（目前可達：…）」。
 4. 單一執行個體：`~/.irori-relay/machine-<ID>/bridge.pid` 有活著的 pid 就直接退出（exit 3）。
@@ -61,7 +62,7 @@ relay send(reply_to) <──── bridge.mjs <──stdout── 收發室 <─
 |---|---|
 | `<ID>.key` 或 `ASN_RELAY_KEY` | 節點金鑰（`ASN_RELAY_ID`，預設 `H`；家用機＝`H`）。**絕不印出** |
 | `anon.key` 或 `ASN_RELAY_ANON_KEY` | Realtime 門鈴用 anon 公開金鑰；沒有＝只剩 2 分鐘輪詢 |
-| `ASN_RELAY_DEFAULT_AGENT` | 沒指定收件 session 時的預設（`H-工頭-2`） |
+| `ASN_RELAY_DEFAULT_AGENT` | 沒指定收件 session 時交給哪個視窗（預設空＝不交給任何 session，信留在 inbox 給 ASN 視窗的本人） |
 | `ASN_RELAY_ALLOW` | 逗號分隔，額外允許轉交的 session 名（測試用；預設只允許名單內的互動式 session） |
 | `ASN_MAILBOX_NAME` / `ASN_MAILBOX_MODEL` | 收發室名稱／模型 |
 | `ASN_REPLY_TIMEOUT_MS` | 等回覆逾時（預設 600000） |
@@ -78,7 +79,7 @@ Log：`~/.irori-relay/machine-<ID>/bridge.log`（每個轉交、每一輪收發�
 ```
 node D:\Github\irori\relay\machine\bridge.mjs          # 前景跑（ASN_RELAY_ID 預設 H）
 powershell -File install-task.ps1                      # 預覽，不改任何東西
-powershell -File install-task.ps1 -DefaultAgent <名稱> -Apply   # 指定預設收件 session（不帶＝H-工頭-2）；run-bridge.ps1 同名參數
+powershell -File install-task.ps1 -DefaultAgent <名稱> -Apply   # 指定預設收件 session（不帶＝不指定，信留給 ASN 視窗的本人）；run-bridge.ps1 同名參數
 powershell -File install-task.ps1 -Apply               # 建立工作排程 IroriRelayMachine-H（登入時、隱藏視窗、失敗重啟）
 powershell -File install-task.ps1 -Uninstall           # 移除
 ```
@@ -180,7 +181,7 @@ powershell -File install-task.ps1 -Uninstall           # 移除
 
 仲介新增群組後，橋在每次 pull（門鈴／2 分鐘輪詢／啟動）多做一件事：`room_list` → 對 `mine` 的每個成員（節點本身 `H`、節點底下視窗 `H~視窗名`）用本地游標 `room_read(since=游標)` 取新訊息，**只轉後端標 `for_me=true` 的**（被點名，或帳號擁有者本人發的、且不是自己發的；橋不自己重算規則），再把游標推進到 `last_seq`。
 - 游標存 `WORK_DIR/rooms-cursor.json`（鍵 `房號|成員key`），重啟不重播；沒有游標用該項的 `read_seq`，`read_seq` 為 0 則從 `last_seq` 起算（不補播歷史）。不用 mark、不動後端已讀位置。
-- `bridge.mjs`：成員 key 是節點本身 → 轉給 `ASN_RELAY_DEFAULT_AGENT`（不在線就挑最近活動的視窗；都沒有就留著、游標不前進）；是視窗 key → 轉給該視窗（不在可轉交清單就略過、記 log、推進游標）。走同一個收發室 worker（id 為 `sha1(room:房號:seq:成員key)` 組的確定性 UUID）。
+- `bridge.mjs`：成員 key 是節點本身 → 只轉給 `ASN_RELAY_DEFAULT_AGENT`（沒設或不在線就留著、游標不前進，不丟給別的視窗）；是視窗 key → 轉給該視窗（不在可轉交清單就略過、記 log、推進游標）。走同一個收發室 worker（id 為 `sha1(room:房號:seq:成員key)` 組的確定性 UUID）。
   轉交文字：第一行 `[群組 名稱] trust=… from=… #seq`（`~` 顯示成 `/`，`~owner` 顯示主人的名字（沒帶名字就顯示「主人」）），第二行固定的「不需要回就不要回」提示，之後是內文。
   視窗回覆經收發室後，用 `room_post`（`from_agent`＝該視窗名）貼回群組；回覆含 `（不需回覆）`／`[no-reply]` 不貼；`room_post` 429（每成員每群組每小時 20 則）只記 log、不重試；群組訊息不寄逾時通知、轉交失敗也只記 log，不會貼到群組。
 - `bridge-aegis.mjs`：成員 key `aegis~名字` → `resolveSlug(名字)`、節點本身 → `IRORI_AEGIS_DEFAULT`；要在 `IRORI_AEGIS_ALLOW` 內才問（不在就略過、記 log、推進游標）；用同樣的標頭格式呼叫 `/ask`，answer 以 `room_post`（`from_agent`＝roster 上的名字）貼回；ask 失敗不貼。
@@ -281,7 +282,7 @@ node D:/Github/Yooliang/asn/relay/machine/recv.mjs --once     # 拉一次、印�
 | `start(handlers)` / `stop()` | 啟動／結束引擎的常駐部分；`handlers = { onSent(id), onFail(id, reason), onReply(fromWindow, text) }` | 啟動／結束收發室 worker（`claude -p`），自動重啟 |
 | `listWindows()` | 回傳 `null`（讀取失敗，橋沿用舊名單）或 `{ all, windows }`。`windows`＝可轉交的視窗，每筆 `{ name, status('busy'/'idle'…), cwd_label, engine, pid? }`；`all`＝引擎看得到的所有 session（含非互動式，給 `ASN_RELAY_ALLOW` 用） | `claude agents --json` 過濾互動式、`entrypoint=cli`、排除收發室自己 |
 | `listNames()` | 回傳所有 session 名的 `Set`（或 `null`），launcher 用來確認新視窗出現、擋同名 | 同上 |
-| `activityOf(window)` | 最近活動時間（ms），預設收件視窗不在線時挑最近活動的 | `~/.claude/sessions/<pid>.json` 的 `updatedAt` |
+| `activityOf(window)` | 最近活動時間（ms），目前橋不再用它挑代收視窗 | `~/.claude/sessions/<pid>.json` 的 `updatedAt` |
 | `deliver({ id, to, text })` | 轉交一封信（`text` 是含標頭的全文，一字不改交給視窗）。同步 throw＝引擎沒起來，橋把信留在 inbox 不 ack。結果非同步經 `handlers.onSent(id)`（交出去了）或 `onFail(id, reason)`（SENT／FAIL）回來；視窗的回覆經 `handlers.onReply(window, text)` 回來（Claude：帶 nonce 的 `<<REPLY-…>>` 區塊） | `BRIDGE-FORWARD nonce=… ` 給收發室 worker |
 | `openWindow(spec)`、`childEnv(env)` | 開新視窗（launcher 組好 `{command,args,cwd,env}` 後呼叫）與子行程環境清理；`capabilities().openWindow` 為 true 才需要 | `Start-Process`（`launcher.mjs` 的 `startWindow`）；清掉 `CLAUDE*` 環境變數 |
 | `identity` | 身分判定區塊 `{ engine, inspectCaller() }`，登記在 `engines/identity-providers.mjs`；`inspectCaller` 回傳 `{ viaChain, viaEnv, … }`，命中是 `{ pid, name }`。`identity.mjs` 的 `findCaller()` 依序問每個引擎，回傳 `{ pid, name, engine }` | 父行程鏈＋`CLAUDE_CODE_MESSAGING_SOCKET` 對 `~/.claude/sessions` |
@@ -327,7 +328,7 @@ node D:/Github/Yooliang/asn/relay/machine/recv.mjs --once     # 拉一次、印�
 ## 測試
 
 `node --test relay/machine/test/*.test.mjs`（Node 25 的目錄寫法 `relay/machine/test/` 會失敗，用 glob）：本機假伺服器（node 內建 http）模擬仲介與 Aegis，不碰真實金鑰與網路服務。
-涵蓋群組轉交（`rooms.test.mjs`）、白名單、成功帶 `reply_to`、error 重試一次、404、其他 status、無 `to_agent`、預設收件人不在線的退路、roster 403 只記一次。
+涵蓋群組轉交（`rooms.test.mjs`）、白名單、成功帶 `reply_to`、error 重試一次、404、其他 status、無 `to_agent`、沒指定收件人不丟給隨便的視窗、roster 403 只記一次。
 視窗自己收信（`recv.test.mjs`）：只印／只 ack 自己的信、舊仲介相容、心跳寫入與更新、重複 `--watch` 被擋、`selfRecvAlive` 判定、橋「有心跳不轉／過期照轉」。
 轉接器介面契約（`engine-contract.test.mjs`，假引擎 `fake-engine.mjs` 跑 bridge 主流程）：名單帶 engine、轉交＋回覆、onFail、找不到視窗、介面檢查、身分判定登記。
 遠端開視窗（`launcher.test.mjs`）：設定檔檢查、執行前再驗、環境清理、成功／失敗／卡信任確認後補成功／每小時上限；端到端真的經 Start-Process 開 `test/fake-launched.mjs`（隱藏視窗，`ASN_LAUNCH_WINDOW_STYLE=Hidden`）。
