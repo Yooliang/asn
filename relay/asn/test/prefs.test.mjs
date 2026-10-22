@@ -1,8 +1,8 @@
-// 視窗外框、音效、點自己的大頭貼換照片的純邏輯，以及對應的版面守門（整合分頁無縫、全部視窗都有外框切換）。
+// 視窗外框、通知、點自己的大頭貼換照片的純邏輯，以及對應的版面守門（整合分頁無縫、全部視窗都有外框切換）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_LABEL, isNativeFrame, normalizeFrame, soundChoice, soundFromChoice, soundFromSaved } from '../ui/lib/prefs.mjs'
+import { FRAMES, FRAME_LABEL, NOTIFY_ITEMS, NOTIFY_KEYS, isNativeFrame, normalizeFrame, notifyFromSaved, notifyPlan, notifySummary, notifyWith } from '../ui/lib/prefs.mjs'
 import { removeAvatarUpload, uploadAvatarFile } from '../ui/lib/avatar.mjs'
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')
@@ -18,17 +18,72 @@ test('視窗外框：預設自訂；沒有這個欄位的舊存檔與壞值都�
   assert.ok(FRAMES.every(f => FRAME_LABEL[f]))
 })
 
-test('音效：舊存檔的布林照舊讀，下拉選單只有開／關', () => {
-  assert.deepEqual(SOUND_CHOICES, ['on', 'off'])
-  assert.deepEqual(SOUND_CHOICES.map(c => SOUND_LABEL[c]), ['開', '關'])
-  assert.equal(soundFromSaved(undefined), true)   // 舊存檔沒這欄＝開
-  assert.equal(soundFromSaved(true), true)
-  assert.equal(soundFromSaved(false), false)
-  assert.equal(soundChoice(true), 'on')
-  assert.equal(soundChoice(false), 'off')
-  assert.equal(soundFromChoice('off'), false)
-  assert.equal(soundFromChoice('on'), true)
-  for (const on of [true, false]) assert.equal(soundFromChoice(soundChoice(on)), on)
+test('通知：四個開關，名稱與順序固定；預設全開', () => {
+  assert.deepEqual(NOTIFY_ITEMS.map(i => i.label), ['右下角通知', '通知聲音', '震動聲音', '收到檔案聲音'])
+  assert.deepEqual(notifyFromSaved(undefined), { toast: true, msg: true, nudge: true, file: true })
+  assert.deepEqual(notifyFromSaved({}), { toast: true, msg: true, nudge: true, file: true })
+})
+
+test('通知：舊存檔的布林 sound 轉過來不遺失（關＝三個聲音關、右下角通知維持開）', () => {
+  assert.deepEqual(notifyFromSaved({ sound: true }), { toast: true, msg: true, nudge: true, file: true })
+  assert.deepEqual(notifyFromSaved({ sound: false }), { toast: true, msg: false, nudge: false, file: false })
+  // 新欄位優先；缺的項目與壞值退回舊欄位／預設
+  assert.deepEqual(notifyFromSaved({ sound: false, notify: { toast: false, msg: true } }), { toast: false, msg: true, nudge: false, file: false })
+  assert.deepEqual(notifyFromSaved({ notify: { toast: 'no', msg: 1, nudge: null } }), { toast: true, msg: true, nudge: true, file: true })
+  for (const bad of [null, 'x', 5, []]) assert.deepEqual(notifyFromSaved({ notify: bad }), notifyFromSaved({}))
+  assert.deepEqual(notifyFromSaved(null), notifyFromSaved({}))
+})
+
+test('通知：改單一開關不動其他；認不得的鍵忽略；摘要用中文', () => {
+  const all = notifyFromSaved({})
+  const p = notifyWith(all, 'nudge', false)
+  assert.deepEqual(p, { toast: true, msg: true, nudge: false, file: true })
+  assert.deepEqual(all, notifyFromSaved({}), '不改原物件')
+  assert.equal(notifyWith(all, 'bogus', false), all)
+  assert.equal(notifyWith(all, 'msg', 'yes').msg, false, '非布林 true 一律當關')
+  assert.equal(notifySummary(all), '右下角通知、通知聲音、震動聲音、收到檔案聲音')
+  assert.equal(notifySummary(Object.fromEntries(NOTIFY_KEYS.map(k => [k, false]))), '全部關閉')
+})
+
+test('通知：每個開關各自管一件事（右下角通知／一般訊息／震動／檔案），忙碌中不出聲', () => {
+  const msg = { kind: 'msg', sound: 'msg', toast: true }
+  const nudge = { kind: 'nudge', sound: 'nudge', toast: true, shake: true }
+  const file = { kind: 'msg', sound: 'msg', toast: true, hasFile: true }
+  const login = { kind: 'login', sound: 'login', toast: true }
+  const all = notifyFromSaved({})
+  assert.deepEqual(notifyPlan(msg, all, 'online'), { sound: 'msg', toast: true })
+  assert.deepEqual(notifyPlan(nudge, all, 'online'), { sound: 'nudge', toast: true })
+  assert.deepEqual(notifyPlan(file, all, 'online'), { sound: 'file', toast: true }, '帶檔案用收到檔案的聲音')
+  assert.deepEqual(notifyPlan(login, all, 'online'), { sound: 'login', toast: true })
+  assert.deepEqual(notifyPlan(msg, all, 'busy'), { sound: null, toast: true })
+  assert.deepEqual(notifyPlan({ kind: 'login', toast: true }, all, 'online'), { sound: null, toast: true })
+  // 單獨關右下角通知：聲音照出
+  const noToast = notifyWith(all, 'toast', false)
+  assert.deepEqual(notifyPlan(msg, noToast, 'online'), { sound: 'msg', toast: false })
+  assert.equal(notifyPlan(login, noToast, 'online').toast, false)
+  // 單獨關通知聲音：震動與檔案聲音不受影響，訊息與登入提示音關
+  const noMsg = notifyWith(all, 'msg', false)
+  assert.equal(notifyPlan(msg, noMsg, 'online').sound, null)
+  assert.equal(notifyPlan(login, noMsg, 'online').sound, null)
+  assert.equal(notifyPlan(nudge, noMsg, 'online').sound, 'nudge')
+  assert.equal(notifyPlan(file, noMsg, 'online').sound, 'file')
+  // 單獨關震動聲音／檔案聲音
+  assert.equal(notifyPlan(nudge, notifyWith(all, 'nudge', false), 'online').sound, null)
+  assert.equal(notifyPlan(msg, notifyWith(all, 'nudge', false), 'online').sound, 'msg')
+  assert.equal(notifyPlan(file, notifyWith(all, 'file', false), 'online').sound, null)
+  assert.equal(notifyPlan(msg, notifyWith(all, 'file', false), 'online').sound, 'msg')
+})
+
+test('守門：樞紐用 notifyPlan 決定聲音與右下角通知，存檔寫 notify，不再有「音效」', () => {
+  const js = read('ui/list.js')
+  assert.match(js, /const plan = notifyPlan\(n, notifyPrefs\.value, me\.status\)/)
+  assert.match(js, /if \(plan\.sound\) SOUNDS\[plan\.sound\]/)
+  assert.match(js, /if \(plan\.toast\) void invoke\('show_toast'/)
+  assert.match(js, /notify: notifyPrefs\.value, frame:/)
+  assert.match(js, /notifyFromSaved\(savedMe\)/)
+  assert.match(js, /\bfile: \(\) =>/, '收到檔案有自己的聲音')
+  assert.doesNotMatch(js, /soundOn/)
+  assert.doesNotMatch(read('ui/lib/settings-panel.mjs'), /音效/)
 })
 
 test('點自己的大頭貼：選到圖 → 縮圖 → 上傳，成功與失敗都回中文訊息', async () => {
@@ -69,12 +124,11 @@ test('守門：名單頁點大頭貼走上傳流程、設定頁兩處共用同�
   assert.match(js, /removeAvatarUpload\(avApi\)/)
 })
 
-test('守門：設定頁的音效與視窗外框都是下拉，不再是按鈕', () => {
+test('守門：設定頁的通知是四個勾選、視窗外框是下拉，不再是按鈕', () => {
   const html = read('ui/lib/settings-panel.mjs') + read('ui/list.html')
-  assert.match(html, /aria-label="音效"/)
+  assert.match(html, /act\('notify', \{ key: i\.key, on: \$event\.target\.checked \}\)/)
   assert.match(html, /aria-label="視窗外框"/)
-  assert.doesNotMatch(html, /音效：/)
-  assert.doesNotMatch(html, /soundOn = !soundOn/)
+  assert.doesNotMatch(html, /aria-label="音效"/)
 })
 
 test('守門：名單與對話視窗都有調整大小把手與外框切換；原生外框時藏起自畫的標題列', () => {

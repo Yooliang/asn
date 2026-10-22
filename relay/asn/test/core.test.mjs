@@ -58,6 +58,17 @@ test('收信：對話視窗開著→不加未讀、不彈提示，但仍有音�
   await core.stop(); await relay.close()
 })
 
+test('收到檔案：帶檔案的信提示標 hasFile（選「收到檔案聲音」用），純照片與純文字不標', async () => {
+  const att = (n, kind) => ({ id: `00000000-0000-4000-8000-00000000000${n}`, kind, name: kind === 'file' ? 'a.pdf' : 'p.webp', mime: kind === 'file' ? 'application/pdf' : 'image/webp', bytes: 10 })
+  const { relay, core, notes } = await setup()
+  relay.mail(1, { body: '', attachments: [att(1, 'file')] })
+  relay.mail(2, { body: '', attachments: [att(2, 'image')] })
+  relay.mail(3, { body: '純文字' })
+  await core.start()
+  assert.deepEqual(notes.map(n => [n.kind, n.sound, Boolean(n.hasFile)]), [['msg', 'msg', true], ['msg', 'msg', false], ['msg', 'msg', false]])
+  await core.stop(); await relay.close()
+})
+
 test('震動：收到 [震動] 抖視窗（開著）或未讀＋提示（沒開）；標記不顯示在對話裡', async () => {
   const a = await setup({ visible: true })
   a.relay.mail(1, { body: '[震動]' })
