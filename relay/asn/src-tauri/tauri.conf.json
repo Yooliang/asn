@@ -33,6 +33,14 @@
     "active": true,
     "createUpdaterArtifacts": true,
     "targets": ["nsis", "deb", "appimage"],
+    "resources": {
+      "../../claude-mod/.claude-plugin/marketplace.json": "claude-mod/.claude-plugin/marketplace.json",
+      "../../claude-mod/.claude-plugin/plugin.json": "claude-mod/.claude-plugin/plugin.json",
+      "../../claude-mod/README.md": "claude-mod/README.md",
+      "../../claude-mod/hooks/hooks.json": "claude-mod/hooks/hooks.json",
+      "../../claude-mod/hooks/lib.ts": "claude-mod/hooks/lib.ts",
+      "../../claude-mod/hooks/register.ts": "claude-mod/hooks/register.ts"
+    },
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
     "windows": { "nsis": { "installMode": "currentUser", "languages": ["TradChinese"], "installerHooks": "installer-hooks.nsh" } }
   },

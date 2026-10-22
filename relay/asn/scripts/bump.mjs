@@ -17,4 +17,6 @@ const sub = (file, re, rep) => {
 sub(pkgFile, /"version": "[^"]+"/, `"version": "${next}"`)
 sub(path.join(root, 'src-tauri', 'tauri.conf.json'), /"version": "[^"]+"/, `"version": "${next}"`)
 sub(path.join(root, 'src-tauri', 'Cargo.toml'), /^version = "[^"]+"/m, `version = "${next}"`)
+// 隨安裝包帶出去的 Claude 外掛：版本號跟著 ASN（外掛本體程式不動，只改 plugin.json 的 version）
+sub(path.join(root, '..', 'claude-mod', '.claude-plugin', 'plugin.json'), /"version": "[^"]+"/, `"version": "${next}"`)
 console.log(`${cur} → ${next}`)

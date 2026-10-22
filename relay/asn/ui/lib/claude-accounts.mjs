@@ -42,11 +42,13 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     incoming: [],   // 等本機使用者按確認的遠端切換指令：{ id, email, from, fromLabel }
     savedSeq: 0,
     autoNote: '',   // 背景自動加入成功時的一行小字
+    mod: '',        // Claude 外掛自動安裝的狀態文字（Rust 背景工作寫好；空字串＝不顯示）
   })
   const refresh = async () => {
     try { s.list = await invoke('claude_accounts_list') } catch (e) { s.msg = errText(e) }
     try { s.current = (await invoke('claude_account_current')) ?? null } catch { s.current = null }
     try { s.codex = (await invoke('codex_account_current')) ?? null; s.codexErr = '' } catch (e) { s.codex = null; s.codexErr = errText(e) }
+    try { s.mod = (await invoke('claude_mod_status')) ?? '' } catch { /* 舊版 Rust 沒有這個指令就不顯示 */ }
   }
   // 帳號庫變了，就把新清單回報給收發室（讓擁有者設備看得到）；後台沒部署或沒連線都不吵使用者
   const report = async () => { try { await invoke('acct_remote_report') } catch { /* 略過 */ } }
