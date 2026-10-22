@@ -1139,4 +1139,5 @@ async fn 夥伴_id_暫時失敗_500_只記一次_下一輪再試_好了就接上
     assert_eq!(core.partner_id("T-乙"), Some(PID_B));
 }
 
+mod engines_it;
 mod rooms_launch;
