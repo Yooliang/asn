@@ -10,6 +10,23 @@ use sha2::{Digest, Sha256};
 
 pub const UPDATE_URL: &str = "https://asnmessenger.web.app/update/android.json";
 pub const UPDATE_PREFIX: &str = "https://asnmessenger.web.app/update/";
+/// 檢查更新時官網的回應怎麼處理：404（官網還沒有 android.json）＝目前沒有新版；其他錯誤＝暫時無法檢查（畫面不顯示原始錯誤）
+#[derive(Debug, PartialEq)]
+pub enum CheckStatus {
+    Ok,
+    NotFound,
+    Unavailable,
+}
+pub fn classify_status(code: u16) -> CheckStatus {
+    match code {
+        200..=299 => CheckStatus::Ok,
+        404 => CheckStatus::NotFound,
+        _ => CheckStatus::Unavailable,
+    }
+}
+pub const MSG_UNAVAILABLE: &str = "暫時無法檢查更新";
+pub const MSG_LATEST: &str = "目前已是最新版";
+
 /// 清單最大 64 KB、APK 最大 200 MB（防亂塞）
 pub const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 pub const MAX_APK_BYTES: u64 = 200 * 1024 * 1024;
@@ -187,6 +204,18 @@ mod tests {
         h2.update(b"ab");
         h2.update(b"c");
         assert_eq!(h2.hex(), hex, "分段送入結果相同");
+    }
+
+    #[test]
+    fn 檢查更新的回應處理_404是沒有新版_其他錯誤是暫時無法() {
+        assert_eq!(classify_status(200), CheckStatus::Ok);
+        assert_eq!(classify_status(404), CheckStatus::NotFound);
+        for c in [301, 400, 403, 500, 502, 503] {
+            assert_eq!(classify_status(c), CheckStatus::Unavailable, "{c}");
+        }
+        for m in [MSG_UNAVAILABLE, MSG_LATEST] {
+            assert!(!m.is_ascii() && !m.chars().any(|c| c.is_ascii_digit()), "純中文、不含狀態碼：{m}");
+        }
     }
 
     #[test]

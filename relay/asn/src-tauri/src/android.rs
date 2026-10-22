@@ -103,37 +103,45 @@ mod sideload {
     use std::path::Path;
     use tauri::{AppHandle, Emitter};
 
-    /// 抓並檢查清單。回（清單，是不是本機測試網址）
-    async fn fetch_manifest(client: &reqwest::Client, url: Option<String>) -> Result<(Manifest, bool), String> {
+    /// 抓並檢查清單。回 Some（清單，是不是本機測試網址）；官網還沒有清單（404）回 None＝沒有新版。
+    /// 連不上、其他錯誤、清單壞掉都只回「暫時無法檢查更新」，不把原始錯誤（狀態碼、英文）帶給畫面
+    async fn fetch_manifest(client: &reqwest::Client, url: Option<String>) -> Result<Option<(Manifest, bool)>, String> {
         let test = match url.as_deref() {
             Some(u) if is_loopback_url(u) => Some(u.to_string()),
             Some(_) => return Err("不接受這個測試網址".into()),
             None => None,
         };
         let target = test.clone().unwrap_or_else(|| UPDATE_URL.to_string());
-        let r = client.get(&target).timeout(std::time::Duration::from_secs(15)).send().await.map_err(|_| "連不上更新伺服器".to_string())?;
-        if !r.status().is_success() {
-            return Err(format!("更新伺服器回應異常（{}）", r.status().as_u16()));
+        let r = client.get(&target).timeout(std::time::Duration::from_secs(15)).send().await.map_err(|_| MSG_UNAVAILABLE.to_string())?;
+        match classify_status(r.status().as_u16()) {
+            CheckStatus::Ok => {}
+            CheckStatus::NotFound => return Ok(None),
+            CheckStatus::Unavailable => return Err(MSG_UNAVAILABLE.into()),
         }
-        let bytes = r.bytes().await.map_err(|_| "讀不到更新清單".to_string())?;
+        let bytes = r.bytes().await.map_err(|_| MSG_UNAVAILABLE.to_string())?;
         if bytes.len() > MAX_MANIFEST_BYTES {
-            return Err("更新清單太大".into());
+            return Err(MSG_UNAVAILABLE.into());
         }
-        let text = String::from_utf8(bytes.to_vec()).map_err(|_| "更新清單的格式不對".to_string())?;
-        Ok((parse_manifest(&text, test.is_some())?, test.is_some()))
+        let text = String::from_utf8(bytes.to_vec()).map_err(|_| MSG_UNAVAILABLE.to_string())?;
+        let m = parse_manifest(&text, test.is_some()).map_err(|_| MSG_UNAVAILABLE.to_string())?;
+        Ok(Some((m, test.is_some())))
     }
 
     pub async fn check(url: Option<String>) -> Result<Value, String> {
-        let (m, _) = fetch_manifest(&reqwest::Client::new(), url).await?;
+        let Some((m, _)) = fetch_manifest(&reqwest::Client::new(), url).await? else {
+            return Ok(json!({ "enabled": true, "available": false }));
+        };
         Ok(json!({ "enabled": true, "available": is_newer(&m, env!("CARGO_PKG_VERSION")), "version": m.version, "notes": m.notes, "line": first_line(&m.notes) }))
     }
 
     pub async fn download(handle: &AppHandle, data_dir: &Path, url: Option<String>) -> Result<Value, String> {
         let client = reqwest::Client::new();
         // 下載網址一律用「重新抓到的清單」裡的，不收畫面傳來的
-        let (m, _) = fetch_manifest(&client, url).await?;
+        let Some((m, _)) = fetch_manifest(&client, url).await? else {
+            return Err(MSG_LATEST.into());
+        };
         if !is_newer(&m, env!("CARGO_PKG_VERSION")) {
-            return Err("已經是最新版".into());
+            return Err(MSG_LATEST.into());
         }
         let dir = data_dir.join("updates");
         let _ = std::fs::remove_dir_all(&dir);

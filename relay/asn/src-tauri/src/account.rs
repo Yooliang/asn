@@ -200,6 +200,8 @@ pub struct AccountInfo {
     pub created: bool,
     pub node_count: usize,
     pub this_node_mine: bool,
+    /// 帳號層的名字（租戶稱呼，後台 account_bootstrap 的 tenant.owner_name）；所有設備共用。手機版顯示成「我的名字」
+    pub owner_name: Option<String>,
 }
 
 /// 後台回的名下節點是否包含這台的節點
@@ -209,6 +211,11 @@ pub fn computer_count(nodes: &Value) -> usize {
     nodes.as_array().map(|a| a.iter().filter(|n| {
         n.get("kind").and_then(Value::as_str) == Some("claude") || n.get("created_via").and_then(Value::as_str) == Some("login-device")
     }).count()).unwrap_or(0)
+}
+
+/// account_bootstrap 回應裡的帳號名字（tenant.owner_name）；沒有或空白回 None
+pub fn owner_name_of(v: &Value) -> Option<String> {
+    v.get("tenant").and_then(|t| t.get("owner_name")).and_then(Value::as_str).map(|s| s.trim().chars().filter(|c| !c.is_control()).take(40).collect::<String>()).filter(|s| !s.is_empty())
 }
 
 pub fn node_in_list(nodes: &Value, node: &str) -> bool {
@@ -322,6 +329,7 @@ pub async fn auth_account_info(app: State<'_, App>, auth: State<'_, AuthState>) 
         created: v.get("created").and_then(Value::as_bool).unwrap_or(false),
         node_count: computer_count(&nodes),
         this_node_mine: !app.node.is_empty() && node_in_list(&nodes, &app.node),
+        owner_name: owner_name_of(&v),
     })
 }
 
@@ -396,6 +404,15 @@ mod tests {
         assert!(error_text("whatever").contains("沒有接受"));
         assert!(error_text("not_found").contains("不在你的帳號") && error_text("asn_offline").contains("沒有開著") && error_text("rate_limited").contains("稍候"));
         assert!(error_text("unauthorized").contains("重新登入"));
+    }
+
+    #[test]
+    fn 帳號名字取自租戶稱呼() {
+        assert_eq!(owner_name_of(&json!({ "tenant": { "owner_name": " 啟良 " } })).as_deref(), Some("啟良"));
+        assert_eq!(owner_name_of(&json!({ "tenant": { "owner_name": "  " } })), None);
+        assert_eq!(owner_name_of(&json!({ "tenant": {} })), None);
+        assert_eq!(owner_name_of(&Value::Null), None);
+        assert_eq!(owner_name_of(&json!({ "tenant": { "owner_name": "a\nb" } })).as_deref(), Some("ab"), "控制字元去掉");
     }
 
     #[test]

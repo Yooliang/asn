@@ -2,20 +2,91 @@
 // 手機只有一個畫面：名單（和「我」）→ 點進對話 → 返回。沒有多視窗、系統匣、設定分頁。
 import { groupItems } from './dims.mjs'
 import { friendMatchesQuery, normalizeSearchQuery, sortFriends } from './search.mjs'
+import { engineKey } from './tabs.mjs'
+import { vendorIconSvg } from './vendor-icons.mjs'
+import { noticeOf } from './photo.mjs'
 
 // ---------- 單欄導覽 ----------
 // 狀態：{ tab: 'list' | 'me', chat: 好友 id | '', sheet: '' | 'launch' }。chat 有值＝正在看那位的對話（蓋在名單上）；sheet＝蓋在名單上的「開新夥伴」。
 // 每往下一層（名單→對話、名單→我、名單→開新夥伴）就在瀏覽記錄推一筆；系統的返回鍵＝瀏覽器上一頁，外殼（WryActivity）已接好，名單層再按才退到背景。
+// 三個大分頁：夥伴（list）、對話（chats）、設置（me）。tab＝目前（或對話下面那一層）的分頁。
+export const TABS = ['list', 'chats', 'me']
+export const TAB_LABEL = { list: '夥伴', chats: '對話', me: '設置' }
+export const tabIndex = t => Math.max(0, TABS.indexOf(t))
+export const normalizeTab = t => (TABS.includes(t) ? t : 'list')
 export const initialNav = () => ({ tab: 'list', chat: '', sheet: '' })
-export const chatNav = id => ({ tab: 'list', chat: String(id ?? ''), sheet: '' })
-export const meNav = () => ({ tab: 'me', chat: '', sheet: '' })
+export const tabNav = t => ({ tab: normalizeTab(t), chat: '', sheet: '' })
+export const chatNav = (id, tab = 'list') => ({ tab: normalizeTab(tab), chat: String(id ?? ''), sheet: '' })
+export const meNav = () => tabNav('me')
 export const launchNav = () => ({ tab: 'list', chat: '', sheet: 'launch' })
 // 瀏覽記錄裡讀回來的狀態可能是任何東西（壞資料、別的頁面留下的）：整理成合法的導覽狀態
 export function normalizeNav(raw) {
   const chat = typeof raw?.chat === 'string' ? raw.chat : ''
-  if (chat) return chatNav(chat)
+  if (chat) return chatNav(chat, raw?.tab)
   if (raw?.sheet === 'launch') return launchNav()
-  return raw?.tab === 'me' ? meNav() : initialNav()
+  return tabNav(raw?.tab)
+}
+
+// ---------- 左右滑動切換大分頁（跟手、放開吸附；對話畫面裡也能滑） ----------
+export const EDGE_PX = 24, LOCK_PX = 14, SWIPE_RATIO = 2, COMMIT_FRAC = 0.22, COMMIT_VELOCITY = 0.5, EDGE_RESIST = 0.3
+// 只有離螢幕左右邊緣一段距離才接手（邊緣留給安卓系統的返回手勢）
+export const swipeStartOk = (x, width, edge = EDGE_PX) => x >= edge && x <= width - edge
+// 這次手指動作算水平滑動（h）、垂直捲動（v），還是還看不出來（null）。水平位移要明顯大於垂直位移（SWIPE_RATIO 倍）才算 h；斜的算 v（文字選取、上下捲動不會被誤判）
+export function swipeLock(dx, dy) {
+  const ax = Math.abs(dx), ay = Math.abs(dy)
+  if (ax < LOCK_PX && ay < LOCK_PX) return null
+  if (ay >= LOCK_PX && ax < ay * SWIPE_RATIO) return 'v'
+  if (ax >= LOCK_PX && ax >= ay * SWIPE_RATIO) return 'h'
+  return null
+}
+// 跟手位移：到了最左或最右那一頁還往外拉，就打折（橡皮筋）
+export function pagerShift(index, dx, count = TABS.length) {
+  if ((index <= 0 && dx > 0) || (index >= count - 1 && dx < 0)) return dx * EDGE_RESIST
+  return dx
+}
+// 放開時吸附到哪一頁：拖過寬度的一定比例，或夠快（px/ms）
+export function swipeTarget({ index, dx, dt, width, count = TABS.length }) {
+  const v = dt > 0 ? Math.abs(dx) / dt : 0
+  const far = Math.abs(dx) >= width * COMMIT_FRAC || (v >= COMMIT_VELOCITY && Math.abs(dx) >= 30)
+  if (!far) return index
+  return Math.max(0, Math.min(count - 1, index + (dx < 0 ? 1 : -1)))
+}
+// 底部指示條的位置（以分頁為單位的小數，跟著手指）
+export const indicatorPos = (index, shift, width, count = TABS.length) => Math.max(0, Math.min(count - 1, index - (width > 0 ? shift / width : 0)))
+// 手指按下的地方能不能開始滑：輸入框、下拉選單、可橫向捲動的工具列、放大看照片的畫面都不接手
+export const SWIPE_BLOCK_SELECTOR = 'input, textarea, select, [contenteditable="true"], .toolbar, .photo-viewer, .picker'
+
+// ---------- 「對話」分頁：最近的對話串 ----------
+// 最後一則訊息（雙方都算；震動與系統提示不算）：{ mine, text, t }；沒有就 null。只有照片或檔案顯示「傳來了一張照片」之類
+export function lastMessage(log) {
+  for (let i = (log?.length ?? 0) - 1; i >= 0; i--) {
+    const m = log[i]
+    if (m?.k !== 'me' && m?.k !== 'them') continue
+    const t = String(m.text ?? '').replace(/\s+/g, ' ').trim()
+    const text = t || (Array.isArray(m.photos) && m.photos.length ? noticeOf(m.photos) : '')
+    if (text) return { mine: m.k === 'me', text: text.length > LAST_WORDS_MAX ? text.slice(0, LAST_WORDS_MAX) : text, t: Number(m.t) || 0 }
+  }
+  return null
+}
+// 對話串列表：有訊息的夥伴，依最後訊息時間新的在前；自己寄的前面加「你：」
+export function threadRows(friends, messageOf) {
+  const rows = []
+  for (const f of friends ?? []) {
+    const m = messageOf(f.id)
+    if (m) rows.push({ id: f.id, friend: f, nick: f.nick, text: `${m.mine ? '你：' : ''}${m.text}`, t: m.t, unread: f.unread || 0 })
+  }
+  return rows.sort((a, b) => b.t - a.t)
+}
+const pad2 = n => String(n).padStart(2, '0')
+// 時間：今天顯示 時:分、昨天顯示「昨天」、更早顯示 月/日
+export function threadTime(t, now = Date.now()) {
+  const d = new Date(t), n = new Date(now)
+  if (!Number.isFinite(d.getTime())) return ''
+  const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const diff = Math.round((day(n) - day(d)) / 86_400_000)
+  if (diff <= 0) return `${d.getHours()}:${pad2(d.getMinutes())}`
+  if (diff === 1) return '昨天'
+  return `${d.getMonth() + 1}/${d.getDate()}`
 }
 
 // ---------- 名單 ----------
@@ -27,6 +98,61 @@ export function rosterGroups(friends, { query = '', selfNode = '', selfName = ''
   return groupItems(items, 'device', { selfNode, selfName })
 }
 export const totalUnread = friends => (friends ?? []).reduce((n, f) => n + (Number.isInteger(f?.unread) && f.unread > 0 ? f.unread : 0), 0)
+
+// ---------- 名單每列：廠商小徽章與「最後一句話」 ----------
+// 廠商圖：電腦版已有的官方圖（vendor-icons.mjs）；ASN 自己的視窗用機器人 logo。回要放進徽章的 HTML（都是內建的固定字串，沒有外部資料）
+export const ASN_BADGE = '<img src="img/logo.svg" alt="" draggable="false">'
+export function vendorBadgeHtml(friend) {
+  const k = engineKey(friend)
+  return k === 'asn' ? ASN_BADGE : vendorIconSvg(k)
+}
+export const LAST_WORDS_MAX = 80
+// 這位夥伴最後說的一句話：只取對方寄來的（k:'them'）；自己寄的、震動、系統提示（k:'sys'）一律跳過找前一則；
+// 只有照片或檔案的信顯示「傳來了一張照片」「傳來了一個檔案」。換行與連續空白壓成一個空格，最多 LAST_WORDS_MAX 字
+export function lastWords(log) {
+  for (let i = (log?.length ?? 0) - 1; i >= 0; i--) {
+    const m = log[i]
+    if (m?.k !== 'them') continue
+    const t = String(m.text ?? '').replace(/\s+/g, ' ').trim()
+    if (t) return t.length > LAST_WORDS_MAX ? t.slice(0, LAST_WORDS_MAX) : t
+    if (Array.isArray(m.photos) && m.photos.length) return noticeOf(m.photos)
+  }
+  return ''
+}
+// 沒有本機記錄的夥伴要向後台補一次往來：依畫面順序、每位最多一次、整個執行期最多這麼多位（不一次對所有成員打請求）
+export const BACKFILL_MAX = 40, BACKFILL_GAP_MS = 600
+export function backfillQueue(friendsInOrder, { lastOf, tried = new Set(), max = BACKFILL_MAX } = {}) {
+  const out = []
+  for (const f of friendsInOrder ?? []) {
+    if (out.length + tried.size >= max) break
+    if (!f?.id || tried.has(f.id) || lastOf(f.id)) continue
+    out.push(f.id)
+  }
+  return out
+}
+
+// ---------- 名字：兩層 ----------
+// 「我的名字」＝帳號層（租戶稱呼，所有設備共用，例如「啟良」）：對話裡自己的訊息、「我」分頁頂端都用它。
+// 「這台設備的名稱」＝這支手機自己的名字（就是視窗名／節點顯示名，例如「手機」）：只用在「從 手機」小標與名單上的設備群組標題。
+// 帳號層的名字目前唯讀（後台「改帳號名」的動作上線後再接）。後台沒有取到、或還是建租戶時的預設稱呼「朋友」，退而用 email 的帳號部分，再沒有就「我」。
+export const PLACEHOLDER_NAMES = ['朋友', '主人']
+export function accountDisplayName(ownerName, email = '') {
+  const n = String(ownerName ?? '').trim()
+  if (n && !PLACEHOLDER_NAMES.includes(n)) return n
+  const local = String(email ?? '').split('@')[0].trim()
+  return local || '我'
+}
+
+// ---------- 下拉重整（名單頁） ----------
+// 手指往下拉 dy 像素 → 頂端那塊的高度（有阻尼，最多 PTR_MAX）；拉過門檻放開才會更新
+export const PTR_THRESHOLD = 64, PTR_MAX = 96, PTR_LOADING_H = 84
+export const pullHeight = dy => (dy > 0 ? Math.min(PTR_MAX, Math.round(dy * 0.5)) : 0)
+export const pullRatio = h => Math.max(0, Math.min(1, h / PTR_THRESHOLD))
+// pull＝還沒到門檻（下拉重新整理）、ready＝到了（放開重新整理）、loading＝更新中
+export const pullPhase = (h, loading = false) => (loading ? 'loading' : h >= PTR_THRESHOLD ? 'ready' : h > 0 ? 'pull' : 'idle')
+export const PULL_TEXT = { idle: '', pull: '下拉重新整理', ready: '放開重新整理', loading: '更新中…' }
+// 放開時要不要更新：只有到門檻（且沒在更新）才更新
+export const shouldRefreshOnRelease = (h, loading) => !loading && h >= PTR_THRESHOLD
 
 // ---------- 提示 ----------
 export const DEFAULT_PREFS = { vibrateMsg: false, vibrateNudge: true, autoUpdate: true }
@@ -82,6 +208,10 @@ export function afterBind(out, bridge) {
 
 // ---------- 自動更新（自行安裝版；Google Play 版不啟用，畫面上根本不出現） ----------
 export const UPDATE_CHECK_MS = 6 * 3600 * 1000
+// 檢查更新時官網連不上或回錯誤：不顯示原始錯誤，一律這句（官網還沒有 android.json＝404 時 Rust 端回「沒有新版」，畫面顯示「目前已是最新版」）
+export const UPDATE_UNAVAILABLE = '暫時無法檢查更新'
+export const UPDATE_LATEST = '目前已是最新版'
+export const updateCheckErrorText = () => UPDATE_UNAVAILABLE
 export const initialUpdate = () => ({ enabled: false, phase: 'idle', version: '', line: '', done: 0, total: 0, error: '', hint: '', checking: false, manual: '' })
 // phase：idle（沒有新版）→ available（有新版，等按「更新」）→ downloading → failed（可重試）；下載完交給系統安裝程式
 export const withAvailable = (u, found) => (found?.enabled === true && found.available === true

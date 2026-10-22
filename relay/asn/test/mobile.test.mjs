@@ -1,7 +1,7 @@
 // 手機版（安卓）的純邏輯：單欄導覽、名單分組、提示規則、外殼橋、登入後的下一步。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { launchNav } from '../ui/lib/mobile.mjs'
+import { EDGE_PX, TABS, TAB_LABEL, indicatorPos, lastMessage, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, threadRows, threadTime, SWIPE_BLOCK_SELECTOR, COMMIT_FRAC, ASN_BADGE, BACKFILL_MAX, LAST_WORDS_MAX, accountDisplayName, backfillQueue, lastWords, vendorBadgeHtml, PTR_LOADING_H, PTR_MAX, PTR_THRESHOLD, PULL_TEXT, UPDATE_LATEST, UPDATE_UNAVAILABLE, launchNav, pullHeight, pullPhase, pullRatio, shouldRefreshOnRelease, updateCheckErrorText } from '../ui/lib/mobile.mjs'
 import { BANNER_MS, DEFAULT_PREFS, MSG_VIBRATE_MS, NUDGE_VIBRATE_MS, UPDATE_CHECK_MS, afterBind, bannerText, buttonLabel, initialUpdate, installOutcome, progressText, shouldAutoCheck, withAvailable, withFailure, withProgress, androidBridge, chatNav, initialNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, totalUnread } from '../ui/lib/mobile.mjs'
 import { groupHeading } from '../ui/lib/tabs.mjs'
 
@@ -15,7 +15,9 @@ test('導覽：名單 → 對話、名單 → 我；瀏覽記錄裡的壞資料�
   assert.deepEqual(normalizeNav({ sheet: 'launch', tab: 'me' }), launchNav())
   assert.deepEqual(normalizeNav({ sheet: 'other' }), initialNav())
   assert.deepEqual(normalizeNav({ tab: 'me', chat: '' }), meNav())
-  assert.deepEqual(normalizeNav({ chat: 'A/x', tab: 'me' }), chatNav('A/x'), '有對話就是對話層')
+  assert.deepEqual(normalizeNav({ chat: 'A/x', tab: 'chats' }), chatNav('A/x', 'chats'), '有對話就是對話層，並記得它下面是哪一頁')
+  assert.deepEqual(normalizeNav({ chat: 'A/x', tab: '亂寫' }), chatNav('A/x'))
+  assert.deepEqual(normalizeNav({ tab: 'chats' }), tabNav('chats')); assert.deepEqual(normalizeNav({ tab: 'me' }), meNav())
   for (const bad of [null, undefined, 5, 'x', { tab: 'settings' }, { chat: 7 }, []]) assert.deepEqual(normalizeNav(bad), initialNav(), String(bad))
 })
 
@@ -124,4 +126,115 @@ test('自動更新：交給系統安裝程式的各種結果；沒有許可要�
   assert.equal(b.selfUpdateEnabled(), true); assert.equal(b.installApk('/x/a.apk'), 'ok')
   assert.equal(androidBridge({ AsnAndroid: { vibrate() {} } }).selfUpdateEnabled(), false, '外殼沒有這個方法＝沒有更新功能')
   assert.equal(androidBridge({ AsnAndroid: { vibrate() {} } }).installApk('/x'), 'error')
+})
+
+test('下拉重整：拉動有阻尼與上限；到門檻才算「放開重新整理」；沒到門檻或更新中放開不更新', () => {
+  assert.equal(pullHeight(-20), 0); assert.equal(pullHeight(0), 0)
+  assert.equal(pullHeight(100), 50); assert.equal(pullHeight(10_000), PTR_MAX, '有上限')
+  assert.ok(pullHeight(60) < 60, '有阻尼（手指拉得比畫面長得快）')
+  assert.equal(pullRatio(0), 0); assert.equal(pullRatio(PTR_THRESHOLD / 2), 0.5); assert.equal(pullRatio(9999), 1)
+  assert.equal(pullPhase(0), 'idle'); assert.equal(pullPhase(10), 'pull'); assert.equal(pullPhase(PTR_THRESHOLD), 'ready'); assert.equal(pullPhase(PTR_THRESHOLD, true), 'loading')
+  assert.equal(PULL_TEXT.pull, '下拉重新整理'); assert.equal(PULL_TEXT.ready, '放開重新整理'); assert.equal(PULL_TEXT.loading, '更新中…')
+  assert.equal(shouldRefreshOnRelease(PTR_THRESHOLD, false), true)
+  assert.equal(shouldRefreshOnRelease(PTR_THRESHOLD - 1, false), false)
+  assert.equal(shouldRefreshOnRelease(PTR_MAX, true), false, '更新中不重複觸發')
+  assert.ok(PTR_LOADING_H >= 76 && PTR_LOADING_H <= PTR_MAX, '更新中那塊要放得下機器人與文字（高度夠）')
+})
+
+test('檢查更新失敗：不顯示原始錯誤（狀態碼、英文），一律「暫時無法檢查更新」；沒有新版是「目前已是最新版」', () => {
+  for (const raw of ['更新伺服器回應異常（500）', 'error sending request for url (https://x)', 'HTTP 404', undefined, '']) assert.equal(updateCheckErrorText(raw), '暫時無法檢查更新')
+  assert.equal(UPDATE_UNAVAILABLE, '暫時無法檢查更新'); assert.equal(UPDATE_LATEST, '目前已是最新版')
+})
+
+test('我的名字（帳號層）：用租戶稱呼；還是預設稱呼或沒取到就退到 email 帳號部分，再沒有就「我」', () => {
+  assert.equal(accountDisplayName(' 啟良 ', 'a@b.c'), '啟良')
+  assert.equal(accountDisplayName('朋友', 'qiliang@example.com'), 'qiliang', '建租戶時的預設稱呼不當名字')
+  assert.equal(accountDisplayName('', 'qiliang@example.com'), 'qiliang')
+  assert.equal(accountDisplayName(undefined, ''), '我'); assert.equal(accountDisplayName(null, undefined), '我')
+})
+
+test('最後一句話：只取對方寄來的；自己寄的、震動、系統提示都跳過找前一則；只有照片就顯示「傳來了一張照片」；單行不超過 80 字', () => {
+  const log = [{ k: 'them', text: '早安\n今天先看哪一份？', t: 1 }, { k: 'me', text: '先看排程', t: 2 }, { k: 'sys', nudge: true, text: '甲 傳送了一個震動。', t: 3 }, { k: 'sys', text: '甲 → 未指定收件人', t: 4 }]
+  assert.equal(lastWords(log), '早安 今天先看哪一份？', '自己的、震動、系統提示都不算，往前找到對方最後一句')
+  assert.equal(lastWords([{ k: 'me', text: '嗨', t: 1 }]), '', '只有自己說的＝沒有')
+  assert.equal(lastWords([]), ''); assert.equal(lastWords(undefined), '')
+  assert.equal(lastWords([{ k: 'them', text: '  ', t: 1 }, { k: 'them', text: '前一則', t: 0 }]), '前一則', '空白的信跳過')
+  assert.match(lastWords([{ k: 'them', text: '', photos: [{ kind: 'image' }], t: 1 }]), /照片/)
+  assert.match(lastWords([{ k: 'them', text: '', photos: [{ kind: 'file' }], t: 1 }]), /檔案/)
+  assert.equal(lastWords([{ k: 'them', text: '字'.repeat(300), t: 1 }]).length, LAST_WORDS_MAX)
+})
+
+test('補往來的佇列：本機有最後一句話的不補；每位最多一次；整個執行期有上限；依畫面順序', () => {
+  const fl = ['A', 'B', 'C', 'D'].map(id => ({ id }))
+  const has = new Set(['B'])
+  const q = backfillQueue(fl, { lastOf: id => (has.has(id) ? '有' : ''), tried: new Set(['A']) })
+  assert.deepEqual(q.slice(0, 2), ['C', 'D'], '跳過已試過的 A 與本機已有的 B，照順序')
+  assert.deepEqual(backfillQueue(fl, { lastOf: () => '', tried: new Set(), max: 2 }), ['A', 'B'], '上限')
+  assert.deepEqual(backfillQueue(fl, { lastOf: () => '', tried: new Set(['x', 'y']), max: 2 }), [], '已用掉的額度也算')
+  assert.ok(BACKFILL_MAX >= 20 && BACKFILL_MAX <= 60)
+  assert.deepEqual(backfillQueue(null, { lastOf: () => '' }), [])
+})
+
+test('廠商徽章：各廠商用電腦版的官方圖，ASN 自己的視窗用機器人 logo，不認得的用通用圖', () => {
+  const svg = k => vendorBadgeHtml({ engine: k })
+  assert.match(svg('claude'), /^<svg/); assert.match(svg('gemini'), /^<svg/); assert.match(svg('codex'), /^<svg/); assert.match(svg('grok'), /^<svg/)
+  assert.notEqual(svg('claude'), svg('gemini'))
+  assert.equal(vendorBadgeHtml({ engine: 'asn' }), ASN_BADGE); assert.match(ASN_BADGE, /img\/logo\.svg/)
+  assert.match(vendorBadgeHtml({ engine: null, kind: 'claude' }), /^<svg/, '沒回報引擎就用節點種類')
+  assert.match(vendorBadgeHtml({}), /^<svg/, '都沒有＝通用圖，不會是空的')
+})
+
+test('大分頁：夥伴／對話／設置三個，順序固定，名稱純中文', () => {
+  assert.deepEqual(TABS, ['list', 'chats', 'me']); assert.deepEqual(TABS.map(t => TAB_LABEL[t]), ['夥伴', '對話', '設置'])
+  assert.deepEqual(TABS.map(tabIndex), [0, 1, 2]); assert.equal(tabIndex('亂寫'), 0)
+})
+
+test('滑動手勢：邊緣不接手、水平要明顯大於垂直才算、斜的與上下捲動算垂直', () => {
+  assert.equal(swipeStartOk(EDGE_PX - 1, 360), false, '離左邊緣太近（系統返回手勢）')
+  assert.equal(swipeStartOk(360 - EDGE_PX + 1, 360), false, '離右邊緣太近')
+  assert.equal(swipeStartOk(EDGE_PX, 360), true); assert.equal(swipeStartOk(180, 360), true)
+  assert.equal(swipeLock(4, 3), null, '還看不出來')
+  assert.equal(swipeLock(40, 8), 'h'); assert.equal(swipeLock(-60, 20), 'h')
+  assert.equal(swipeLock(40, 30), 'v', '斜的算垂直（選文字、上下捲動不誤判）')
+  assert.equal(swipeLock(10, 40), 'v'); assert.equal(swipeLock(0, -30), 'v')
+  assert.equal(swipeLock(20, 11), null, '水平夠但垂直還不到 2 倍：再看一下')
+  assert.match(SWIPE_BLOCK_SELECTOR, /input/); assert.match(SWIPE_BLOCK_SELECTOR, /textarea/); assert.match(SWIPE_BLOCK_SELECTOR, /\.toolbar/); assert.match(SWIPE_BLOCK_SELECTOR, /\.photo-viewer/)
+})
+
+test('滑動吸附：拖過一定比例或夠快才換頁；到頭不能再換；邊界有橡皮筋；指示條跟著手指', () => {
+  const W = 360
+  assert.equal(swipeTarget({ index: 0, dx: -W * COMMIT_FRAC - 1, dt: 600, width: W }), 1, '往左滑＝下一頁')
+  assert.equal(swipeTarget({ index: 1, dx: W * COMMIT_FRAC + 1, dt: 600, width: W }), 0, '往右滑＝上一頁')
+  assert.equal(swipeTarget({ index: 1, dx: -40, dt: 800, width: W }), 1, '拖得不夠、也不快＝彈回來')
+  assert.equal(swipeTarget({ index: 1, dx: -50, dt: 60, width: W }), 2, '很快的短滑（甩）也換頁')
+  assert.equal(swipeTarget({ index: 1, dx: -10, dt: 10, width: W }), 1, '太短的不算')
+  assert.equal(swipeTarget({ index: 0, dx: 200, dt: 100, width: W }), 0, '最左邊再往右滑還是第一頁')
+  assert.equal(swipeTarget({ index: 2, dx: -200, dt: 100, width: W }), 2, '最右邊再往左滑還是最後一頁')
+  assert.equal(pagerShift(1, 100), 100); assert.equal(pagerShift(0, 100), 30); assert.equal(pagerShift(2, -100), -30); assert.equal(pagerShift(0, -100), -100)
+  assert.equal(indicatorPos(1, 0, W), 1); assert.equal(indicatorPos(1, -W / 2, W), 1.5, '往左拖半頁，指示條走到一半')
+  assert.equal(indicatorPos(0, 500, W), 0, '不會跑出左邊'); assert.equal(indicatorPos(2, -500, W), 2)
+})
+
+test('對話分頁：最近的對話串依最後訊息時間；雙方都算、自己寄的加「你：」；震動與系統提示不算；沒有訊息的夥伴不列', () => {
+  const lg = {
+    A: [{ k: 'them', text: '早', t: 1000 }, { k: 'me', text: '好', t: 2000 }, { k: 'sys', nudge: true, text: '震動', t: 3000 }],
+    B: [{ k: 'them', text: '最新的一句', t: 5000 }],
+    C: [{ k: 'sys', text: '甲 → 未指定收件人', t: 9000 }],
+    D: [{ k: 'me', text: '', photos: [{ kind: 'image' }], t: 4000 }],
+  }
+  const fl = ['A', 'B', 'C', 'D', 'E'].map(id => ({ id, nick: id, unread: id === 'B' ? 2 : 0, status: 'online' }))
+  const rows = threadRows(fl, id => lastMessage(lg[id]))
+  assert.deepEqual(rows.map(r => r.id), ['B', 'D', 'A'], '依時間新的在前；只有系統提示的 C 與沒有記錄的 E 不列')
+  assert.equal(rows[2].text, '你：好', '自己寄的前面加「你：」'); assert.equal(rows[0].text, '最新的一句'); assert.equal(rows[0].unread, 2)
+  assert.match(rows[1].text, /^你：.*照片/)
+  assert.equal(lastMessage([{ k: 'sys', text: 'x', t: 1 }]), null); assert.equal(lastMessage(undefined), null)
+  assert.equal(lastMessage([{ k: 'me', text: '字'.repeat(300), t: 1 }]).text.length, 80)
+})
+
+test('對話串時間：今天時:分、昨天、更早月/日', () => {
+  const now = new Date(2026, 9, 22, 15, 30).getTime()
+  assert.equal(threadTime(new Date(2026, 9, 22, 9, 5).getTime(), now), '9:05')
+  assert.equal(threadTime(new Date(2026, 9, 21, 23, 59).getTime(), now), '昨天')
+  assert.equal(threadTime(new Date(2026, 9, 3, 8, 0).getTime(), now), '10/3')
+  assert.equal(threadTime(NaN, now), '')
 })

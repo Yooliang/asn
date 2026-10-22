@@ -247,6 +247,113 @@ test('手機開新夥伴：只走要本人簽章的指令；不用電腦版不�
   assert.match(read('..', '..', 'supabase', 'functions', 'relay', 'index.ts'), /action === "launch" \|\| action === "launchers"\) \? await signedUserId/)
 })
 
+test('名單每列：廠商小徽章疊在頭像右下角（約 40%、白底圓角）；第三行最後一句話單行省略、色淡；補往來有節制', () => {
+  const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
+  assert.match(css, /\.m-av-wrap \.dp\{display:block;width:38px;height:38px\}/, '包在 wrapper 裡的 .dp 要明確 display:block（inline 會忽略寬高）')
+  assert.match(html, /<span class="m-av-wrap">[\s\S]*?<span class="m-vendor" aria-hidden="true" v-html="vendorIcon\(c\)"><\/span>/)
+  const v = /\.m-vendor\{([^}]*)\}/.exec(css)[1]
+  assert.match(v, /position:absolute/); assert.match(v, /right:-?\d+px/); assert.match(v, /bottom:-?\d+px/); assert.match(v, /background:#fff/); assert.match(v, /border-radius:\d+px/)
+  const w = Number(/width:(\d+)px/.exec(v)[1]), a = Number(/\.m-av-wrap\{[^}]*width:(\d+)px/.exec(css)[1])
+  assert.ok(w / a >= 0.35 && w / a <= 0.45, `徽章約頭像寬的 40%（${w}/${a}）`)
+  assert.match(html, /<span class="b-last" v-if="lastOf\(c\.id\)">\{\{ lastOf\(c\.id\) \}\}<\/span>/)
+  const last = /\.m-buddy \.b-last\{([^}]*)\}/.exec(css)[1]
+  assert.match(last, /white-space:nowrap/); assert.match(last, /overflow:hidden/); assert.match(last, /text-overflow:ellipsis/); assert.match(last, /color:#9[0-9a-f]{5}/, '字色較淡')
+  // 補往來：登入才補、每位最多一次、有佇列上限，且 syncHistory 本身有最短間隔與快取
+  assert.match(js, /backfillQueue\(order, \{ lastOf, tried: backfillTried \}\)/); assert.match(js, /backfillTried\.add\(id\)[\s\S]*?await core\.syncHistory\(id\)/)
+  assert.match(js, /if \(backfilling \|\| !acct\.value\.signed_in\) return/)
+  assert.match(js, /BACKFILL_GAP_MS/)
+})
+
+test('三個大分頁：夥伴／對話／設置，橫向翻頁、底部指示條、對話畫面也能滑；邊緣留給系統、輸入與工具列不接手', () => {
+  const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
+  assert.deepEqual([...html.matchAll(/<section class="m-pg" aria-label="([^"]+)">/g)].map(m => m[1]), ['夥伴', '對話', '設置'])
+  assert.match(html, /<button v-for="t in TABS"[^>]*@click="goTab\(t\)"><span>\{\{ TAB_LABEL\[t\] \}\}<\/span>/, '底部分頁三個，可點')
+  assert.match(html, /class="m-ind" :style="\{ transform: 'translateX\(' \+ indicator \* 100 \+ '%\)' \}"/, '指示條跟著滑動')
+  assert.doesNotMatch(html, />\s*名單\s*<|>\s*我\s*<\/span>/, '舊的「名單／我」分頁拿掉')
+  // 手勢：頁面並排區與對話層都接觸控；對話層也能滑
+  assert.match(html, /class="m-pager-wrap" @touchstart\.passive="swipeStart\(\$event, 'pager'\)" @touchmove="swipeMove" @touchend="swipeEnd" @touchcancel="swipeEnd"/)
+  assert.match(html, /class="m-chat"[^>]*@touchstart\.passive="swipeStart\(\$event, 'chat'\)" @touchmove="swipeMove" @touchend="swipeEnd"/, '單一對話裡也能左右滑')
+  assert.match(css, /\.m-pager-wrap\{[^}]*touch-action:pan-y/); assert.match(css, /\.m-chat\{[^}]*touch-action:pan-y/)
+  assert.match(css, /\.m-pager\{[^}]*width:300%[^}]*transition:transform/); assert.match(css, /\.m-pager\.dragging\{transition:none\}/, '拖動時沒有動畫（跟手）')
+  assert.match(css, /\.m-chat\{[^}]*position:fixed/, '對話是蓋在分頁上的一層')
+  // 邏輯接線：邊緣、輸入、選取、水平鎖定、吸附
+  const start = /function swipeStart\(e, mode\) \{([\s\S]*?)\n    \}\n/.exec(js)[1]
+  assert.match(start, /swipeStartOk\(t\.clientX, window\.innerWidth\)/, '邊緣不接手'); assert.match(start, /closest\?\.\(SWIPE_BLOCK_SELECTOR\)/); assert.match(start, /getSelection/, '正在選文字不接手')
+  const move = /function swipeMove\(e\) \{([\s\S]*?)\n    \}\n/.exec(js)[1]
+  assert.match(move, /swipeLock\(dx, dy\)/); assert.match(move, /if \(l === 'v'\) \{ sw\.mode = ''; return \}/, '垂直就放手給系統捲動')
+  assert.match(js, /swipeTarget\(\{ index: idx\.value, dx, dt: Date\.now\(\) - t0, width \}\)/)
+  assert.match(js, /await backAsync\(\)\s*sw\.mode = ''\s*goTab\(TABS\[target\]\); sw\.shift = 0/, '對話滑走：先回到分頁，再切到隔壁那頁（同一瞬間、無動畫）')
+  assert.match(css, /\.m-ind\{[^}]*z-index:2/, '指示條要在分頁按鈕上面（不然被選中的底色蓋住）')
+  assert.match(js, /if \(sw\.locked === 'h'\) \{ y0 = null/, '左右滑動時不觸發下拉重整')
+  // 返回：對話 → 回到分頁；非夥伴的分頁 → 回夥伴
+  assert.match(js, /function goTab\(t\) \{[\s\S]*?if \(nav\.tab === 'list'\) go\(tabNav\(t\)\)[\s\S]*?else if \(t === 'list'\) history\.back\(\)/)
+  assert.match(js, /go\(chatNav\(id, nav\.tab\)\)/, '對話記得它下面是哪一頁')
+  // 設置頁沒有下拉重整；舊的 goMe／goList 都不見了
+  assert.doesNotMatch(js, /goMe|goList/)
+})
+
+test('名字兩層、頭像圓角方形：我的名字（帳號層、唯讀）與這台設備的名稱分開；對話與「我」頂端用帳號名；.m-pic 不是圓形', () => {
+  const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
+  assert.match(html, /<label>我的名字<input[^>]*:value="myName"[^>]*readonly/, '「我的名字」唯讀（改帳號名的後台動作還沒上線）')
+  assert.match(html, /<label>這台設備的名稱<input[^>]*v-model="me\.nick"[^>]*@change="commitNick"/, '設備名稱照舊可改（就是視窗名）')
+  assert.doesNotMatch(html, /暱稱（也是對外的名字）/)
+  assert.match(html, /<chat-pane :friend="chatFriend" :me="meForChat"/, '對話裡自己的名字用帳號名')
+  assert.match(js, /meForChat = computed\(\(\) => \(\{ \.\.\.me, nick: myName\.value \}\)\)/)
+  assert.match(html, /<p class="m-who">\{\{ myName \}\}<\/p>/, '「我」分頁頂端顯示帳號名')
+  assert.match(html, /<div class="m-title">\{\{ myName \}\}<\/div>/, '夥伴頁頂端用帳號名')
+  const rs = read('src-tauri', 'src', 'account.rs')
+  assert.match(rs, /owner_name: owner_name_of\(&v\)/, '帳號名字來自 account_bootstrap 的 tenant.owner_name')
+  // 頭像：MSN 風圓角方形加狀態色外框，不是圓形；也不回頭用電腦版的 .dp 相框
+  const pic = /\.m-pic\{([^}]*)\}/.exec(css)[1], lg = /\.m-pic-lg\{([^}]*)\}/.exec(css)[1]
+  assert.doesNotMatch(pic, /border-radius:\s*50%/); assert.doesNotMatch(lg, /border-radius:\s*50%/)
+  assert.match(pic, /border-radius:\d+px/); assert.match(lg, /border-radius:\d+px/)
+  assert.match(pic, /border:3px solid var\(--frame\)/, '外圈有狀態色邊框')
+  assert.doesNotMatch(css, /\.m-pic[^{]*\{[^}]*border-radius:\s*50%/)
+})
+
+test('名單頁：群組標題沒有開新夥伴按鈕、標題列沒有重新整理鈕、圖示按鈕同尺寸；下拉重整有接上', () => {
+  const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
+  // 群組標題只有收合鈕；開新夥伴只剩右上角那一個「＋」
+  const group = /<div v-for="g in groups"[\s\S]*?<ul v-show/.exec(html)[0]
+  assert.doesNotMatch(group, /開新夥伴|openLaunch|m-gplus/, '群組標題旁不放開新夥伴')
+  assert.doesNotMatch(css, /m-gplus/)
+  assert.equal(html.split("openLaunch('')").length - 1, 1, '只有標題列右上角一個入口')
+  assert.doesNotMatch(html, /openLaunch\((?!'')/, '不再有預選電腦的入口')
+  // 標題列沒有重新整理鈕（改下拉重整）
+  const head = /<header class="m-head">[\s\S]*?<\/header>/.exec(html)[0]
+  assert.doesNotMatch(head, /重新整理|refreshAll|⟳/)
+  assert.doesNotMatch(html, /aria-label="重新整理"/)
+  // 所有圖示按鈕（返回、＋）同一個類別與同尺寸：觸控區 48px、圖示 28px，且都用 SVG（不用字元，大小才會一致）
+  for (const m of html.matchAll(/<button class="m-icon-btn"[^>]*>([\s\S]*?)<\/button>/g)) assert.match(m[1], /<svg class="m-ic" viewBox="0 0 24 24" width="28" height="28"/, m[0].slice(0, 80))
+  assert.ok(html.match(/<button class="m-icon-btn"/g).length >= 3, '返回（對話、開新夥伴）與＋')
+  const rule = /\.m-icon-btn\{([^}]*)\}/.exec(css)[1]
+  assert.match(rule, /width:48px/); assert.match(rule, /height:48px/)
+  assert.match(css, /\.m-icon-btn \.m-ic\{width:28px;height:28px/)
+  assert.doesNotMatch(css, /\.m-chathead \.m-icon-btn/, '返回鍵不另外放大，與「＋」同尺寸')
+  // 下拉重整：觸控事件接在名單捲動區；動畫只用 transform／opacity；用我們自己的機器人（與 logo.svg 同一份圖形）
+  for (const z of ['pf', 'pc']) assert.match(html, new RegExp(`<ptr-zone :ptr="${z}\\.ptr"></ptr-zone>\\s*<div class="m-scroll" :ref="el => \\(${z}\\.ptr\\.el = el\\)" @touchstart\\.passive="${z}\\.start" @touchmove="${z}\\.move" @touchend="${z}\\.end" @touchcancel="${z}\\.end"`), `${z} 下拉重整接在夥伴／對話頁的捲動區`)
+  assert.equal(html.split('<ptr-zone').length - 1, 2, '只有夥伴與對話兩頁有下拉重整（設置頁沒有）')
+  assert.match(js, /class="m-ptr"/); assert.match(js, /ptr\.phase/)
+  assert.match(js, /shouldRefreshOnRelease\(ptr\.h, refreshing\.value\)/); assert.match(js, /refreshAll\(\)/)
+  assert.match(js, /if \(e\.cancelable\) e\.preventDefault\(\)/)
+  const logo = read('ui', 'img', 'logo.svg')
+  for (const d of ['M 180 270 C 180 270, 160 360, 250 360', 'rx="75"', 'M 205 200 L 215 190 L 225 200']) assert.ok(logo.includes(d) && js.includes(d), `機器人圖形與 logo.svg 一致：${d}`)
+  const anim = css.split('\n').filter(l => /^@keyframes m-ptr-/.test(l)).join('\n')
+  assert.ok(anim.length > 0); assert.doesNotMatch(anim, /(width|height|top|left|margin)\s*:/, '動畫只動 transform，不觸發排版')
+  assert.match(css, /prefers-reduced-motion[\s\S]*?m-ptr/)
+})
+
+test('檢查更新失敗的文字：404＝目前已是最新版；連不上或其他錯誤＝暫時無法檢查更新；原始錯誤不外洩', () => {
+  const rs = read('src-tauri', 'src', 'android.rs')
+  const f = /async fn fetch_manifest[\s\S]*?\n    \}\n/.exec(rs)[0]
+  assert.match(f, /CheckStatus::NotFound => return Ok\(None\)/); assert.match(f, /CheckStatus::Unavailable => return Err\(MSG_UNAVAILABLE/)
+  assert.doesNotMatch(f, /format!\(|連不上更新伺服器|回應異常/, '不再把狀態碼或內部說明帶給畫面')
+  assert.match(rs, /else \{\s*return Ok\(json!\(\{ "enabled": true, "available": false \}\)\);/, '404＝沒有新版')
+  const js = read('ui', 'm.js')
+  assert.match(js, /updateCheckErrorText\(e\.message\)/); assert.match(js, /目前已是最新版/)
+  assert.doesNotMatch(js, /upd\.manual = e\.message/)
+})
+
 test('登入畫面 logo 只有一層框；App 圖示是機器人（自適應圖示＋各密度）', () => {
   const css = read('ui', 'mobile.css')
   const img = /\.m-login-card \.login-avatar img\{([^}]*)\}/.exec(css)[1]
