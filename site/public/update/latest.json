@@ -1,11 +1,11 @@
 {
-  "version": "0.1.23",
-  "notes": "多台設備接同一串對話（#108）：登入同一帳號的電腦，AI 看到的是同一個你，回信每台都收得到",
-  "pub_date": "2026-10-22T00:12:34.209Z",
+  "version": "0.1.24",
+  "notes": "子代理按鈕：看各 Claude 視窗正在跑的子代理（#27）；設定新增「用量」分頁，估算 token 與費用（#52）",
+  "pub_date": "2026-10-22T01:04:57.104Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjV0TTlRdWxKZW1vV0VLVjNFZkxHYjdra2dLRjdmR28veEVMZ2svMGx3dFZ2NG5sV1VzZG1tZzRrNmQrcDFLaitKZ3JzaGk4VlVFQlprckY3TitNWEFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjI3OTUzCWZpbGU6QVNOXzAuMS4yM194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjIzClpCRWRZTmI4TzRwN0J3M0lLMVhGTk84N2hKeDhwSlVwNm95T2NkdER0UXozanhwSlFITFhUb3FYMWtRWFEwM2U1QmNtbHY0ZTBPUDhxei8zUmJMOENnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.23_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjB6Ty8xaVRQd2lpM254YVYyQzJQZ2dWMHhKZFlLc0NNSnU1ZWtOS21vM3pFYm1vQWRCSUdPYndZQnpneU5QWG1YQit4QlJsNkh3RWNaeDVpcjZ6TVFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjMxMDk2CWZpbGU6QVNOXzAuMS4yNF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjI0CkFWbEprSXlnWXZpMUZ2SUdFOHpCcGNPZFdJN0ZoQVVIb2tleERKVWx2eU5hY1hWTGJ1bGNJL3VsTUEwRklZLzF6MjJiUFN1dGVuQmJ6alR4K1gwNEFnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.24_x64-setup.exe"
     }
   }
 }
