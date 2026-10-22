@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-Hant" class="askpass-page">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ASN 密碼請求</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app" class="ap-win" v-cloak>
+  <form v-if="vm" class="ap-form" @submit.prevent="ok" autocomplete="off">
+    <h1 class="ap-h">{{ vm.title }}</h1>
+    <dl class="ap-info">
+      <dt>程式</dt><dd>{{ vm.program }}</dd>
+      <dt>工作資料夾</dt><dd>{{ vm.cwd }}</dd>
+      <dt>提示</dt><dd>{{ vm.prompt }}</dd>
+    </dl>
+    <input v-if="vm.kind === 'secret'" ref="box" class="ap-input" type="password" v-model="secret" autocomplete="off" spellcheck="false" aria-label="密碼" />
+    <p class="ap-note">輸入的內容只會交給上面這個程式，不會經過 AI、不會存成檔案。</p>
+    <p class="ap-left" role="status">{{ left }}</p>
+    <div class="ap-btns">
+      <button class="aero-btn" type="submit" :disabled="done">{{ vm.okText }}</button>
+      <button class="aero-btn" type="button" :disabled="done" @click="cancel">{{ vm.cancelText }}</button>
+    </div>
+  </form>
+  <p v-else class="ap-note">{{ err || '載入中…' }}</p>
+</div>
+<script src="vendor/vue.global.prod.js"></script>
+<script type="module" src="askpass.js"></script>
+</body>
+</html>

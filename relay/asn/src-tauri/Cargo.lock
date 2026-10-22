@@ -79,6 +79,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "windows-sys 0.59.0",
+ "zeroize",
  "zip 2.6.1",
 ]
 
