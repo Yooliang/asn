@@ -3,6 +3,7 @@
 // 金鑰與網路都在 Rust 端：這裡只送「要念的文字」、拿「base64 音檔」；語音輸入的聲音只交給本機的辨識引擎。
 import { TtsPlayer } from './tts-player.mjs'
 import { VoiceInput } from './voice-input.mjs'
+import { createCallSession, isCallActive } from './call-session.mjs'
 
 const MB = n => `${Math.round(n / 1048576)} MB`
 
@@ -14,10 +15,11 @@ export function createVoiceUi({ invoke, listen, createMic, createAudio, reactive
     install: { needed: false, busy: false, text: '' },   // 語音輸入還沒下載辨識引擎／模型時的提示
   })
 
+  const ttsListeners = new Set()   // 通話模式要知道念完了沒
   const player = new TtsPlayer({
     fetchAudio: text => invoke('tts_speak', { text }),
     createAudio,
-    onChange: p => { state.tts.key = p.key; state.tts.phase = p.phase; state.tts.error = p.error },
+    onChange: p => { state.tts.key = p.key; state.tts.phase = p.phase; state.tts.error = p.error; for (const f of [...ttsListeners]) f(p) },
   })
 
   const input = new VoiceInput({
@@ -59,6 +61,7 @@ export function createVoiceUi({ invoke, listen, createMic, createAudio, reactive
     /** 麥克風按鈕：第一次用要先下載；之後點一下開始、再點一下結束；準備中或辨識中再點一下＝取消。
      *  辨識完的文字交給 onText（填進輸入框，不送出）。狀態只看 VoiceInput 本身，錄音中的點擊不會再等任何東西。 */
     async toggleMic(onText) {
+      if (isCallActive()) { state.note = '通話中，不能同時用語音輸入。'; return undefined }
       if (input.state !== 'idle') { if (onText) pendingText = onText; return input.toggle() }
       if (checking) { checkGen++; checking = false; state.mic.phase = 'idle'; state.note = ''; return undefined }   // 還在檢查時又點＝取消
       if (!sttReady) {
@@ -79,6 +82,26 @@ export function createVoiceUi({ invoke, listen, createMic, createAudio, reactive
       pendingText = onText
       return input.toggle()
     },
+    /** 偽通話（#99）：建一個通話（每個對話面板一個）；send 是寄出的路徑（對話區的 send 事件）。同時只能有一個通話在進行 */
+    newCall: ({ send }) => createCallSession({
+      mic: createMic(),
+      player,
+      send,
+      reactive,
+      log,
+      onTts: fn => { ttsListeners.add(fn); return () => ttsListeners.delete(fn) },
+      sttStatus: async () => {
+        const st = await invoke('stt_status')
+        if (!st?.ready) state.install.needed = true   // 還沒下載辨識：顯示對話區上方現成的下載提示
+        else sttReady = true
+        return st
+      },
+      transcribe: async wav => {
+        try { return await invoke('stt_transcribe', { wav }) }
+        catch (e) { if (/還沒下載/.test(e?.message || '')) { sttReady = false; state.install.needed = true }; throw e }
+      },
+      canStart: () => (input.state !== 'idle' || checking ? '語音輸入進行中，請先結束再通話。' : ''),
+    }),
     /** 取消（Esc 或再按一下）：準備中／錄音中／辨識中都放棄，結果丟棄 */
     async cancelMic() {
       checkGen++; checking = false

@@ -583,3 +583,22 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .ad-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none;user-select:none}
 .hero-page{position:absolute;left:0;top:0;width:100%;height:calc(100% - 58px);border:0;background:transparent;pointer-events:none}
 .hero-page-cta{position:absolute;z-index:3;left:64px;bottom:10px;margin:0}
+
+/* 通話畫面（#99）：蓋在對話區上面 */
+.chatpane{position:relative}
+.callview{position:absolute;inset:0;z-index:30;display:flex;flex-direction:column;align-items:center;gap:10px;padding:14px 18px;background:linear-gradient(#f4f9ff,var(--panel-head));overflow:auto}
+.call-top{align-self:stretch;display:flex;justify-content:space-between;color:var(--title-fg);font-weight:bold}
+.call-time{font-variant-numeric:tabular-nums}
+.call-who{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}
+.call-who .dp.speaking{animation:call-pulse 1.2s ease-in-out infinite}
+.call-name{font-size:18px;font-weight:bold}
+.call-status{color:var(--title-fg)}
+.call-meter{width:140px;height:6px;border-radius:3px;background:rgba(0,0,0,.12);overflow:hidden}
+.call-meter i{display:block;height:100%;background:#2f9a45;transition:width .1s}
+.call-caps{align-self:stretch;max-height:35%;overflow:auto;font-size:13px}
+.call-cap{margin:2px 0}
+.call-note{margin:4px 0;color:#b3261e}
+.call-actions{display:flex;gap:12px}
+.call-hang{background:linear-gradient(#f08a84,#d9302b);color:#fff;border-color:#a8201c}
+@keyframes call-pulse{50%{transform:scale(1.04)}}
+@media (prefers-reduced-motion:reduce){.call-who .dp.speaking{animation:none}}
