@@ -44,8 +44,12 @@
       <span class="m-banner-tx"><b v-html="emo(banner.nick)"></b><small>{{ banner.line }}</small></span>
     </div>
 
-    <!-- 三個大分頁：夥伴／對話／設置。左右滑動切換（跟手，放開吸附到最近的分頁），也可以點底部分頁；下拉重整只在夥伴與對話兩頁 -->
+    <!-- 三個大分頁：夥伴／對話／設置。左右滑動切換（跟手，放開吸附到最近的分頁），也可以點上方分頁；下拉重整只在夥伴與對話兩頁 -->
     <section class="m-page">
+      <nav class="m-tabs" :class="{ dragging: sw.dragging }" role="tablist" aria-label="大分頁">
+        <i class="m-ind" :style="{ transform: 'translateX(' + indicator * 100 + '%)' }" aria-hidden="true"></i>
+        <button v-for="t in TABS" :key="t" type="button" role="tab" :class="{ on: nav.tab === t }" :aria-selected="nav.tab === t" @click="goTab(t)"><span>{{ TAB_LABEL[t] }}</span><i class="red" v-if="t === 'chats' && unreadTotal"></i></button>
+      </nav>
       <div class="m-upd" v-if="upd.enabled && upd.phase !== 'idle'" role="status" :class="{ failed: upd.phase === 'failed' }">
         <span class="m-upd-tx">{{ updText }}</span>
         <button class="m-btn m-upd-btn" type="button" v-if="upd.phase !== 'downloading'" @click="startUpdate">{{ updButton }}</button>
@@ -162,10 +166,6 @@
         </div>
       </div>
 
-      <nav class="m-tabs" :class="{ dragging: sw.dragging }" role="tablist" aria-label="大分頁">
-        <i class="m-ind" :style="{ transform: 'translateX(' + indicator * 100 + '%)' }" aria-hidden="true"></i>
-        <button v-for="t in TABS" :key="t" type="button" role="tab" :class="{ on: nav.tab === t }" :aria-selected="nav.tab === t" @click="goTab(t)"><span>{{ TAB_LABEL[t] }}</span><i class="red" v-if="t === 'chats' && unreadTotal"></i></button>
-      </nav>
     </section>
 
     <!-- 開新夥伴（遠端開視窗）：視窗開在選的那台電腦上，手機只下指令 -->

@@ -264,11 +264,19 @@ test('名單每列：廠商小徽章疊在頭像右下角（約 40%、白底圓�
   assert.match(js, /BACKFILL_GAP_MS/)
 })
 
-test('三個大分頁：夥伴／對話／設置，橫向翻頁、底部指示條；邊緣留給系統、輸入與工具列不接手', () => {
+test('三個大分頁：夥伴／對話／設置，橫向翻頁、頂部分頁列＋底線指示條；邊緣留給系統、輸入與工具列不接手', () => {
   const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
   assert.deepEqual([...html.matchAll(/<section class="m-pg" aria-label="([^"]+)">/g)].map(m => m[1]).concat([...html.matchAll(/<section class="m-pg m-chat" [^>]*aria-label="([^"]+)">/g)].map(m => m[1])).sort(), ['夥伴', '對話', '設置'].sort())
-  assert.match(html, /<button v-for="t in TABS"[^>]*@click="goTab\(t\)"><span>\{\{ TAB_LABEL\[t\] \}\}<\/span>/, '底部分頁三個，可點')
+  assert.match(html, /<button v-for="t in TABS"[^>]*@click="goTab\(t\)"><span>\{\{ TAB_LABEL\[t\] \}\}<\/span>/, '上方分頁三個，可點')
   assert.match(html, /class="m-ind" :style="\{ transform: 'translateX\(' \+ indicator \* 100 \+ '%\)' \}"/, '指示條跟著滑動')
+  // 分頁列在最上方（pager 之前），不留底部列；視覺高 32px、可點範圍 36px；輸入區貼底並讓出安全區
+  assert.ok(html.indexOf('<nav class="m-tabs"') > html.indexOf('<section class="m-page">') && html.indexOf('<nav class="m-tabs"') < html.indexOf('class="m-pager-wrap"'), '分頁列在 pager 之上')
+  assert.equal((html.match(/<nav class="m-tabs"/g) || []).length, 1, '只有一個分頁列')
+  assert.match(css, /\.m-tabs\{[^}]*height:32px[^}]*border-bottom:1px solid/, '分頁列矮（32px），底邊分隔')
+  assert.doesNotMatch(css, /\.m-tabs\{[^}]*border-top/, '不再是底部列')
+  assert.match(css, /\.m-ind\{[^}]*bottom:0/, '底線指示')
+  assert.match(css, /\.m-tabs button::after\{[^}]*top:-2px;bottom:-2px/, '可點範圍 32+4＝36px')
+  assert.match(css, /\.m-page\{[^}]*padding-bottom:env\(safe-area-inset-bottom/, '輸入區貼底並讓出手勢列')
   assert.doesNotMatch(html, />\s*名單\s*<|>\s*我\s*<\/span>/, '舊的「名單／我」分頁拿掉')
   // 手勢：頁面並排區接觸控（對話分頁在裡面，所以對話上也能左右滑；輸入框與工具列不接手）
   assert.match(html, /class="m-pager-wrap" @touchstart\.passive="swipeStart\(\$event, 'pager'\)" @touchmove="swipeMove" @touchend="swipeEnd" @touchcancel="swipeEnd"/)
