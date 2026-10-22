@@ -1,5 +1,6 @@
 // 名單搜尋：有關鍵字時跨所有分頁（設備／廠商／狀態）比對；沒有關鍵字時只顯示目前分頁。
 import { groupItems, pageItems } from './dims.mjs'
+import { withoutAsn } from './roster.mjs'
 
 export function normalizeSearchQuery(raw) {
   return String(raw ?? '').trim().toLowerCase()
@@ -21,7 +22,7 @@ export function sortFriends(items) {
 export function rosterListItems(friends, { tabDim, tabKey, query, plainText }) {
   const q = normalizeSearchQuery(query)
   const match = f => friendMatchesQuery(f, q, plainText)
-  if (q) return sortFriends(friends.filter(match))
+  if (q) return sortFriends(withoutAsn(friends).filter(match))
   return pageItems(friends, tabDim, tabKey, match)
 }
 

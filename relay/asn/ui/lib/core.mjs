@@ -5,7 +5,7 @@
 //   isChatVisible(id) → Promise<boolean>：該好友的對話視窗是否開著且沒最小化
 import { isAvatarDataUrl } from './avatar.mjs'
 import { asnByNode } from './presence.mjs'
-import { buildFriends, cleanPsm, mergeFriends } from './roster.mjs'
+import { buildFriends, cleanPsm, isAsnWindow, mergeFriends } from './roster.mjs'
 import { routeMail, stubFriend } from './routing.mjs'
 import { hasNudge, hueOf, initial, noReplyNoticeOf, plain, stripNudge, stripReplyHead, unwrapShell } from './text.mjs'
 import { noticeOf, expiresAt, fileMimeOf, friendlyPhotoError, normalizePhotos, stripPhotoLines } from './photo.mjs'
@@ -89,7 +89,7 @@ export class AsnCore {
       const old = this.friends.get(m.id)
       const f = this.#decorate({ unread: 0, waiting: false, replyTo: null, ...(old ?? {}), ...m })
       next.set(m.id, f)
-      if (this.rosterLoaded && f.status !== 'offline' && (prev.get(m.id) ?? 'offline') === 'offline') {
+      if (this.rosterLoaded && !isAsnWindow(f) && f.status !== 'offline' && (prev.get(m.id) ?? 'offline') === 'offline') {
         queueMicrotask(() => this.emit('notify', { kind: 'login', friend: f, line: '已經登入', sound: 'login', toast: true }))
       }
     }

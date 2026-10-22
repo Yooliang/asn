@@ -3,6 +3,7 @@
 import { groupItems } from './dims.mjs'
 import { friendMatchesQuery, normalizeSearchQuery, sortFriends } from './search.mjs'
 import { engineKey } from './tabs.mjs'
+import { withoutAsn } from './roster.mjs'
 import { vendorIconSvg } from './vendor-icons.mjs'
 import { noticeOf } from './photo.mjs'
 
@@ -61,10 +62,10 @@ export const SWIPE_BLOCK_SELECTOR = 'input, textarea, select, [contenteditable="
 // 組內線上在前、離線在後。回傳 [{ key, label, node, items }]
 export function rosterGroups(friends, { query = '', selfNode = '', selfName = '', plainText = s => s } = {}) {
   const q = normalizeSearchQuery(query)
-  const items = sortFriends((friends ?? []).filter(f => friendMatchesQuery(f, q, plainText)))
+  const items = sortFriends(withoutAsn(friends).filter(f => friendMatchesQuery(f, q, plainText)))
   return groupItems(items, 'device', { selfNode, selfName })
 }
-export const totalUnread = friends => (friends ?? []).reduce((n, f) => n + (Number.isInteger(f?.unread) && f.unread > 0 ? f.unread : 0), 0)
+export const totalUnread = friends => withoutAsn(friends).reduce((n, f) => n + (Number.isInteger(f?.unread) && f.unread > 0 ? f.unread : 0), 0)
 
 // ---------- 名單每列：廠商小徽章與「最後一句話」 ----------
 // 廠商圖：電腦版已有的官方圖（vendor-icons.mjs）；ASN 自己的視窗用機器人 logo。回要放進徽章的 HTML（都是內建的固定字串，沒有外部資料）

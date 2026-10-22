@@ -6,6 +6,11 @@ export const friendId = (node, agent) => `${node}/${agent ?? ''}`
 // 收發室自己（名字結尾「收發室」）不當好友
 export const isRelayRoom = name => /收發室$/.test(String(name ?? ''))
 
+// 「ASN 程式本身」的視窗（名單回報 engine＝asn，代表某台設備上的 ASN，不是 AI）：名單上的好友項目一律隱藏。
+// 設備分組、設備頁籤、遠端更新都以設備為單位，不受影響；往來記錄與好友資料照常保留，只是各處顯示的清單都不列它、也不算進人數與未讀。
+export const isAsnWindow = f => String(f?.engine ?? '').trim().toLowerCase() === 'asn'
+export const withoutAsn = friends => (Array.isArray(friends) ? friends : []).filter(f => !isAsnWindow(f))
+
 // 後端回報的視窗狀態 → 介面狀態：busy/working/running 之類＝忙碌，waiting 之類（等人回應）＝暫離，其餘（idle…）＝線上；不在名單＝離線（由 mergeFriends 決定）
 const BUSY = new Set(['busy', 'working', 'running', 'thinking'])
 const AWAY = new Set(['waiting', 'away', 'blocked', 'paused'])
