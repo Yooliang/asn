@@ -174,13 +174,16 @@ export class AsnCore {
     const photos = normalizePhotos(m.attachments)
     const text = stripPhotoLines(stripNudge(body), photos.length)
     const shown = Boolean(text) || photos.length > 0
+    // 往來記錄（打開對話／回前景）可能已先把這封補進記錄、後台還沒 ack 又回給 pull：記錄已有就不再推一列（提示與未讀照舊，這是新到的信）
+    const rid = m.fanout_id ?? m.id
+    const dup = lg.some(x => x.id === rid || x.id === m.id || x.rid === rid)
     // 沒指定收件視窗、由橋交給本人的信：先標出「寄件人 → 未指定收件人」，由使用者決定轉給誰或自己回
-    if (shown && m.unaddressed === true) lg.push({ k: 'sys', text: `${plain(f.nick)} → 未指定收件人`, t })
-    if (shown) { lg.push({ k: 'them', text, t, id: m.fanout_id ?? m.id, ...(photos.length ? { photos } : {}) }); f.lastAt = t; f.replyTo = m.id }
+    if (shown && !dup && m.unaddressed === true) lg.push({ k: 'sys', text: `${plain(f.nick)} → 未指定收件人`, t })
+    if (shown) { if (!dup) lg.push({ k: 'them', text, t, id: rid, ...(photos.length ? { photos } : {}) }); f.lastAt = t; f.replyTo = m.id }
     if (m.reply_to) this.#markReplied(m.reply_to, typeof m.created_at === 'string' ? m.created_at : new Date(t).toISOString())
     const visible = await this.isChatVisible(r.id)
     if (nudge) {
-      lg.push({ k: 'sys', nudge: true, text: `${plain(f.nick)} 傳送了一個震動。`, t })
+      if (!dup) lg.push({ k: 'sys', nudge: true, rid, text: `${plain(f.nick)} 傳送了一個震動。`, t })
       if (!shown && !visible) f.unread++
     }
     if (shown && !visible) f.unread++
