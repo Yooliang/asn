@@ -28,6 +28,7 @@ export const transport = {
   partnerConsoleSet: req => invoke('partner_console_set', { req }),
   modelSwitchQuery: req => invoke('model_switch_query', { req }),   // 讀這個 Claude 視窗的目前模型與是否閒置
   modelSwitchRun: req => invoke('model_switch_run', { req }),       // 關掉那一個視窗、照原參數重開（--resume＋新 --model）
+  subagentsQuery: req => invoke('subagents_query', { req }),         // 這個 Claude 視窗正在跑的子代理（讀對話記錄檔）
   launchCwdCandidates: () => invoke('launch_cwd_candidates'),   // 白名單＋自動建議（Rust 端合併、去重、略過不存在的）
   launchCwdBrowse: () => invoke('launch_cwd_browse'),   // Rust 端開「選擇資料夾」；→ 路徑（已寫進本機白名單）或 null
   launchPrefsGet: () => invoke('launch_prefs_get'),
