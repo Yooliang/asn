@@ -12,6 +12,7 @@ export const NOTE_MAX = 1000
 export const MODEL_RE = /^[A-Za-z0-9._[\]-]{1,60}$/
 export const OP_POLL_MS = 3000
 export const OP_GIVE_UP_MS = 3 * 60 * 1000   // 後台 2 分鐘沒被取走會自己標失敗；這裡多留一分鐘
+export const QUEUE_GIVE_UP_MS = 15 * 60 * 1000   // 改名、切換模型遇到視窗忙碌，外掛會排隊等閒置（電腦端最多等 10 分鐘），處理中的上限放寬
 export const HANDOVER_GIVE_UP_MS = 15 * 60 * 1000   // 接班換手要等前任寫交接（最久 10 分鐘），處理中的上限放寬
 
 export const REASON = {
@@ -183,7 +184,7 @@ function handoverExtra(result) {
 // 請前任寫交接 → 關閉前任視窗 → 開新視窗 → 完成；steps 是各階段的狀態（done／active／todo），完成時附交接檔位置
 export function progressView(row, { op = row?.op, sentAt = 0, now = Date.now() } = {}) {
   const waited = sentAt ? now - sentAt : 0
-  const limit = op === 'handover' && row?.status === 'taken' ? HANDOVER_GIVE_UP_MS : OP_GIVE_UP_MS
+  const limit = row?.status !== 'taken' ? OP_GIVE_UP_MS : op === 'handover' ? HANDOVER_GIVE_UP_MS : op === 'rename' || op === 'model' ? QUEUE_GIVE_UP_MS : OP_GIVE_UP_MS
   switch (row?.status) {
     case 'ok': {
       const v = { phase: 'done', done: true, text: DONE_TEXT[op] ?? '完成。' }
@@ -203,6 +204,7 @@ export function progressView(row, { op = row?.op, sentAt = 0, now = Date.now() }
         const step = HANDOVER_STEPS.find(s => s.key === stage)
         return { phase: 'working', done: false, text: step ? `${step.text}中…` : '那台電腦正在處理…', steps: stepsAt(stage) }
       }
+      if (stageOf(row.detail) === 'queued') return { phase: 'working', done: false, text: '排隊中，等它忙完…' }
       return { phase: 'working', done: false, text: '那台電腦正在處理…' }
     default:
       if (waited > OP_GIVE_UP_MS) return { phase: 'failed', done: true, text: `沒有成功：${STALE_TEXT}` }

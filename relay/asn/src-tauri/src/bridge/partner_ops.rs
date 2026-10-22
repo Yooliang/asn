@@ -83,7 +83,7 @@ pub(crate) trait OpsEnv: Send + Sync {
     fn launch(&self, plan: &Plan) -> Result<(), String>;
     fn now_ms(&self) -> u64;
     fn timing(&self) -> Timing;
-    /// 等外掛回報的最長時間
+    /// 等外掛回報的最長時間（外掛會排隊到視窗閒置才執行，預設 10 分鐘）
     fn mod_wait_ms(&self) -> u64;
     /// 本機啟動設定（profile、工作資料夾允許清單）；每次現讀。喚醒用它決定能不能在原資料夾開、怎麼開
     fn launch_config(&self) -> Result<LaunchConfig, String>;
@@ -118,7 +118,8 @@ impl OpsEnv for SystemOpsEnv {
         Timing::real()
     }
     fn mod_wait_ms(&self) -> u64 {
-        30_000
+        // 視窗忙碌時外掛會排隊等閒置：預設最多等 10 分鐘；環境變數 ASN_MOD_WAIT_MS（毫秒，1 秒到 1 小時）可調
+        std::env::var("ASN_MOD_WAIT_MS").ok().and_then(|v| v.trim().parse::<u64>().ok()).filter(|v| (1_000..=3_600_000).contains(v)).unwrap_or(600_000)
     }
     fn launch_config(&self) -> Result<LaunchConfig, String> {
         use super::launcher::LaunchEnv;
@@ -205,9 +206,49 @@ fn unconfirmed(detail: impl Into<String>) -> OpResult {
     OpResult { status: "unconfirmed", detail: detail.into(), result: None }
 }
 
+/// 外掛回報的文字：保留換行（其他控制字元變空白）、去頭尾空白、截短
+fn keep_text(s: &str, max: usize) -> String {
+    s.replace("\r\n", "\n").chars().map(|c| if c == '\n' { c } else if c == '\r' { '\n' } else if c.is_control() { ' ' } else { c }).collect::<String>().replace("\n\n\n", "\n\n").trim().chars().take(max).collect()
+}
+
+/// 等待時間的中文寫法（滿一分鐘用分鐘，否則秒）
+fn wait_text(ms: u64) -> String {
+    if ms >= 60_000 { format!("{} 分鐘", ms / 60_000) } else { format!("{} 秒", ms / 1000) }
+}
+
+enum Awaited {
+    Got(bool, String),
+    Lost,
+    Timeout,
+}
+
+enum ModRes {
+    Done(OpResult),
+    Fallback,
+}
+
+/// 外掛回報文字的長度上限（/指令的輸出最多 1500 字）
+pub(crate) const COMMAND_DETAIL_MAX: usize = 1500;
+
 /// 去掉控制字元、截短（給 log、往來記錄、回報用）
 fn clean(s: &str, max: usize) -> String {
     s.chars().map(|c| if c.is_control() { ' ' } else { c }).collect::<String>().trim().chars().take(max).collect()
+}
+
+/// 一封信裡的 /指令
+#[derive(Clone, Debug)]
+pub(crate) struct CommandJob {
+    pub mail_id: String,
+    pub window: String,
+    pub command: String,
+    pub args: String,
+    /// 寄件人（回信對象）
+    pub from_node: String,
+    pub from_agent: String,
+    /// 寄件人說明（給往來記錄看）
+    pub sender: String,
+    /// 回信用的寄件視窗名（收發室）
+    pub reply_from: String,
 }
 
 pub(crate) struct PartnerOps {
@@ -223,6 +264,8 @@ pub(crate) struct PartnerOps {
     warned: AtomicBool,
     seen: Mutex<HashSet<String>>,
     inflight: Mutex<HashSet<String>>,
+    /// 從信件來的 /指令：信件編號 → 是否已做完（做完才可以重 ack；做到一半的信再看到不能再執行）
+    cmds: Mutex<std::collections::HashMap<String, bool>>,
 }
 
 impl PartnerOps {
@@ -239,6 +282,7 @@ impl PartnerOps {
             warned: AtomicBool::new(false),
             seen: Mutex::new(HashSet::new()),
             inflight: Mutex::new(HashSet::new()),
+            cmds: Mutex::new(std::collections::HashMap::new()),
         })
     }
 
@@ -433,32 +477,158 @@ impl PartnerOps {
         Some(v)
     }
 
-    /// 有外掛的視窗：寫控制檔，等外掛在狀態檔回報 control:{id, ok, detail}。
-    /// 回 Some＝外掛處理了（成功或明確失敗）；None＝沒外掛或逾時，呼叫端退回重開。
-    fn via_mod(&self, op: &Op, t: &switch::Target, arg: &str) -> Option<OpResult> {
-        self.mod_status(&t.session_id)?;
-        let file = self.dirs.control.join(format!("{}.json", t.session_id));
-        let body = json!({ "id": op.id, "op": op.op, "arg": arg, "at": self.env.now_ms() });
-        crate::write_atomic(&file, &body.to_string()).ok()?;
-        let mut got: Option<(bool, String)> = None;
-        let os = self.env.os();
-        switch::wait_until(os, self.env.mod_wait_ms(), 500, || {
-            let Some(st) = self.mod_status(&t.session_id) else { return false };
-            let Some(c) = st.get("control") else { return false };
-            if c.get("id").and_then(Value::as_str) != Some(op.id.as_str()) {
-                return false;
+    /// 寫好控制檔後等外掛回報。視窗忙碌時外掛會排隊到閒置才執行，所以最多等 `mod_wait_ms`（預設 10 分鐘）。
+    /// 等的期間狀態檔變無效（過期、已結束）＝外掛真的沒了（Lost）；到時間還沒回報＝Timeout。
+    /// `on_slow` 在等了一小段時間（約 2 秒）還沒回報時呼叫一次（回報「排隊中」用）。結束後一律刪掉控制檔。
+    fn await_control(&self, sid: &str, id: &str, on_slow: &mut dyn FnMut()) -> Awaited {
+        let file = self.dirs.control.join(format!("{sid}.json"));
+        let mut res: Option<Awaited> = None;
+        let mut polls = 0u32;
+        switch::wait_until(self.env.os(), self.env.mod_wait_ms(), 500, || {
+            let Some(st) = self.mod_status(sid) else {
+                res = Some(Awaited::Lost);
+                return true;
+            };
+            if let Some(c) = st.get("control").filter(|c| c.get("id").and_then(Value::as_str) == Some(id)) {
+                let detail = keep_text(c.get("detail").and_then(Value::as_str).unwrap_or(""), COMMAND_DETAIL_MAX);
+                res = Some(Awaited::Got(c.get("ok").and_then(Value::as_bool).unwrap_or(false), detail));
+                return true;
             }
-            got = Some((c.get("ok").and_then(Value::as_bool).unwrap_or(false), clean(c.get("detail").and_then(Value::as_str).unwrap_or(""), 200)));
-            true
+            polls += 1;
+            if polls == 4 {
+                on_slow();
+            }
+            false
         });
-        // 不論結果都收掉控制檔：逾時退回重開後，新視窗的外掛不能再執行一次舊指令
+        // 不論結果都收掉控制檔：之後新視窗的外掛不能再執行一次舊指令
         let _ = std::fs::remove_file(&file);
-        let (good, detail) = got?;
-        Some(if good {
-            ok(if detail.is_empty() { "已由視窗內的外掛完成".to_string() } else { detail }, Some(json!({ "pid": t.pid, "via": "mod" })))
-        } else {
-            failed(if detail.is_empty() { "視窗內的外掛回報失敗".to_string() } else { detail })
-        })
+        res.unwrap_or(Awaited::Timeout)
+    }
+
+    fn write_control(&self, sid: &str, body: &Value) -> bool {
+        crate::write_atomic(&self.dirs.control.join(format!("{sid}.json")), &body.to_string()).is_ok()
+    }
+
+    /// 有外掛的視窗（改名、切換模型）：寫控制檔，等外掛在狀態檔回報 control:{id, ok, detail}，視窗忙碌就排隊等（回報 stage:queued）。
+    /// Fallback＝沒外掛或外掛真的沒回應，呼叫端退回重開；其餘都由外掛處理完（成功、明確失敗、等太久還在忙）。
+    fn via_mod(&self, op: &Op, t: &switch::Target, arg: &str) -> ModRes {
+        if self.mod_status(&t.session_id).is_none() {
+            return ModRes::Fallback;
+        }
+        let body = json!({ "id": op.id, "op": op.op, "arg": arg, "at": self.env.now_ms() });
+        if !self.write_control(&t.session_id, &body) {
+            return ModRes::Fallback;
+        }
+        match self.await_control(&t.session_id, &op.id, &mut || self.stage(op, "queued")) {
+            Awaited::Lost => ModRes::Fallback,
+            Awaited::Timeout => ModRes::Done(failed(format!("等了 {} 視窗還在忙，沒有{}", wait_text(self.env.mod_wait_ms()), if op.op == "rename" { "改名" } else { "切換模型" }))),
+            Awaited::Got(good, detail) => ModRes::Done(if good {
+                ok(if detail.is_empty() { "已由視窗內的外掛完成".to_string() } else { clean(&detail, 200) }, Some(json!({ "pid": t.pid, "via": "mod" })))
+            } else {
+                failed(if detail.is_empty() { "視窗內的外掛回報失敗".to_string() } else { clean(&detail, 200) })
+            }),
+        }
+    }
+
+    // ---- 信件來的 /指令 ---------------------------------------------------------------------------
+
+    /// 這個視窗現在能不能收 /指令：只有「名單上唯一一個活著的互動式 Claude 視窗，而且有有效的外掛狀態檔」才回它的 sessionId。
+    /// 收發室視窗與 ASN 自己的視窗一律不行。
+    pub(crate) fn command_target(&self, name: &str) -> Option<String> {
+        let os = self.env.os();
+        let hits: Vec<(u32, String)> = console::read_sessions(&self.dirs.sessions)
+            .iter()
+            .filter(|s| s.get("name").and_then(Value::as_str) == Some(name))
+            .filter(|s| s.get("kind").and_then(Value::as_str).map(|k| k == "interactive").unwrap_or(true))
+            .filter_map(|s| Some((u32::try_from(s.get("pid").and_then(Value::as_u64)?).ok()?, s.get("sessionId").and_then(Value::as_str).unwrap_or("").to_string())))
+            .filter(|(p, _)| *p != 0 && os.alive(*p))
+            .collect();
+        if hits.len() != 1 || (self.protect)(name, hits[0].0) || (self.protect)(name, 0) {
+            return None;
+        }
+        let sid = hits[0].1.clone();
+        self.mod_status(&sid).map(|_| sid)
+    }
+
+    /// 這封信的 /指令處理到哪：None＝還沒開始；Some(false)＝進行中；Some(true)＝做完了
+    pub(crate) fn command_state(&self, mail_id: &str) -> Option<bool> {
+        self.cmds.lock().unwrap().get(mail_id).copied()
+    }
+
+    /// 把 /指令交給視窗的外掛，放背景執行（不擋收信）：做完回信給寄件人（只告知）、寫往來記錄與 log，最後 ack 原信
+    pub(crate) fn start_command(self: &Arc<Self>, job: CommandJob, sid: String) {
+        {
+            let mut c = self.cmds.lock().unwrap();
+            if c.len() > 2000 {
+                c.retain(|_, done| !*done);
+            }
+            c.insert(job.mail_id.clone(), false);
+        }
+        let me = self.clone();
+        tokio::spawn(async move {
+            let (m2, j2) = (me.clone(), job.clone());
+            let (good, text) = tokio::task::spawn_blocking(move || m2.command_blocking(&j2, &sid)).await.unwrap_or_else(|e| (false, format!("沒執行 /{}：背景工作失敗：{e}", job.command)));
+            me.record_command(&job, good, &text);
+            let mut b = json!({ "to_node": job.from_node, "body": text, "reply_to": job.mail_id, "from_agent": job.reply_from, "expects_reply": false });
+            if !job.from_agent.is_empty() {
+                b["to_agent"] = json!(job.from_agent);
+            }
+            if let Err(e) = me.relay.api("send", Some(b)).await {
+                me.log.line(&format!("slash command reply failed id={}: {e}", job.mail_id));
+            }
+            match me.relay.api("ack", Some(json!({ "ids": [job.mail_id] }))).await {
+                Ok(_) => {
+                    me.cmds.lock().unwrap().insert(job.mail_id.clone(), true);
+                }
+                Err(e) => {
+                    // 沒 ack 成功：標成做完，下次再看到這封信時由橋重 ack，絕不再執行一次
+                    me.log.line(&format!("slash command ack failed id={}: {e}", job.mail_id));
+                    me.cmds.lock().unwrap().insert(job.mail_id.clone(), true);
+                }
+            }
+        });
+    }
+
+    /// 等同一個視窗前面的操作做完（控制檔一次只放一筆），再寫控制檔、等外掛回報。回要寄給寄件人的內文
+    fn command_blocking(&self, job: &CommandJob, sid: &str) -> (bool, String) {
+        let cmd = format!("/{}", job.command);
+        let key = job.window.to_lowercase();
+        let got_turn = switch::wait_until(self.env.os(), self.env.mod_wait_ms(), 500, || self.inflight.lock().unwrap().insert(key.clone()));
+        if !got_turn {
+            return (false, format!("等了 {} 視窗還在忙，沒執行 {cmd}", wait_text(self.env.mod_wait_ms())));
+        }
+        let text = self.command_turn(job, sid, &cmd);
+        self.inflight.lock().unwrap().remove(&key);
+        text
+    }
+
+    fn command_turn(&self, job: &CommandJob, sid: &str, cmd: &str) -> (bool, String) {
+        // 輪到的時候視窗還得是同一個、外掛還在
+        if self.command_target(&job.window).as_deref() != Some(sid) {
+            return (false, format!("沒執行 {cmd}：視窗已經關了、換了，或外掛沒有回報"));
+        }
+        let body = json!({ "id": job.mail_id, "op": "command", "command": job.command, "args": job.args, "at": self.env.now_ms() });
+        if !self.write_control(sid, &body) {
+            return (false, format!("沒執行 {cmd}：寫不出控制檔"));
+        }
+        match self.await_control(sid, &job.mail_id, &mut || {}) {
+            Awaited::Got(true, d) => (true, if d.is_empty() { format!("已執行 {cmd}") } else { d }),
+            Awaited::Got(false, d) => (false, format!("沒執行 {cmd}：{}", if d.is_empty() { "視窗的外掛回報失敗".to_string() } else { d })),
+            Awaited::Lost => (false, format!("沒執行 {cmd}：視窗的外掛已經沒有回應")),
+            Awaited::Timeout => (false, format!("等了 {} 視窗還在忙，沒執行 {cmd}", wait_text(self.env.mod_wait_ms()))),
+        }
+    }
+
+    /// 往來記錄與 log（照 record 的風格）：誰、何時、什麼指令、結果
+    fn record_command(&self, job: &CommandJob, ok_: bool, result: &str) {
+        self.log.line(&format!("slash_command id={} window={} command={} args_len={} by={} -> {}{}", clean(&job.mail_id, 40), clean(&job.window, 40), clean(&job.command, 64), job.args.chars().count(), clean(&job.sender, 40), if ok_ { "ok" } else { "failed" }, if ok_ { String::new() } else { format!(" ({})", clean(result, 120)) }));
+        let body = format!("下令：{}（從信件傳來的 /指令）
+動作：/{}{}
+結果：{}
+{}", clean(&job.sender, 40), clean(&job.command, 64), if job.args.is_empty() { String::new() } else { format!(" {}", clean(&job.args, 200)) }, if ok_ { "成功" } else { "失敗" }, keep_text(result, COMMAND_DETAIL_MAX));
+        if let Err(e) = self.corr.append(&job.window, &Entry { ts_ms: self.env.now_ms(), dir: Dir::Op, from: &job.sender, to: &job.window, id: &clean(&job.mail_id, 40), body: &body, attachments: &[] }) {
+            self.log.line(&format!("corr log failed window={}: {e}", clean(&job.window, 40)));
+        }
     }
 
     // ---- info ------------------------------------------------------------------------------------
@@ -590,7 +760,7 @@ impl PartnerOps {
         if !self.env.allow_remote() {
             return failed(CONSENT_OFF);
         }
-        if let Some(r) = self.via_mod(op, &t, new) {
+        if let ModRes::Done(r) = self.via_mod(op, &t, new) {
             return r;
         }
         // 退路：重開。等外掛的這段時間視窗可能已經變了，重新確認一次還是同一個
@@ -610,7 +780,7 @@ impl PartnerOps {
         if !self.env.allow_remote() {
             return failed(CONSENT_OFF);
         }
-        if let Some(r) = self.via_mod(op, &t, &op.model) {
+        if let ModRes::Done(r) = self.via_mod(op, &t, &op.model) {
             return r;
         }
         let t2 = match self.find_target(&t.name) {

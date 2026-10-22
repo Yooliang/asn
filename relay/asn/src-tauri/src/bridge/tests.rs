@@ -1460,3 +1460,247 @@ async fn 定時輪詢_整頁都是橋不處理的信也照樣每個週期再收�
     let _ = task.await;
     assert!(n >= 4, "沒有門鈴也要定時收，只收到 {n} 次");
 }
+
+// ---- /指令（本人簽章的單行斜線信，交給視窗的 ASN 外掛）---------------------------------------------
+
+mod slash_it {
+    use super::*;
+    use crate::bridge::partner_ops::{OpsDirs, OpsEnv, PartnerOps};
+    use crate::launch::config::LaunchConfig;
+    use crate::launch::switch::{Os, Plan, Proc, Timing};
+    use std::path::{Path, PathBuf};
+
+    struct NoOs;
+    impl Os for NoOs {
+        fn cmdline(&self, _pid: u32) -> Option<String> {
+            None
+        }
+        fn processes(&self) -> Vec<Proc> {
+            vec![]
+        }
+        fn alive(&self, pid: u32) -> bool {
+            pid < 90_000
+        }
+        fn close_window(&self, _pid: u32) -> bool {
+            false
+        }
+        fn terminate(&self, _pid: u32) -> Result<(), String> {
+            Err("測試不結束程序".into())
+        }
+        fn own_pid(&self) -> u32 {
+            1
+        }
+        fn sleep(&self, ms: u64) {
+            std::thread::sleep(std::time::Duration::from_millis(ms.min(5)));
+        }
+    }
+
+    struct Env {
+        wait: u64,
+    }
+    impl OpsEnv for Env {
+        fn os(&self) -> &dyn Os {
+            &NoOs
+        }
+        fn allow_remote(&self) -> bool {
+            true
+        }
+        fn launch(&self, _plan: &Plan) -> Result<(), String> {
+            Err("測試不開視窗".into())
+        }
+        fn now_ms(&self) -> u64 {
+            T0
+        }
+        fn timing(&self) -> Timing {
+            Timing { close_grace_ms: 0, gone_wait_ms: 0, appear_wait_ms: 0, poll_ms: 1 }
+        }
+        fn mod_wait_ms(&self) -> u64 {
+            self.wait
+        }
+        fn launch_config(&self) -> Result<LaunchConfig, String> {
+            Err("測試沒有啟動設定".into())
+        }
+        fn tell(&self, _name: &str, _text: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn progress(&self, _op_id: &str, _detail: &str) {}
+        fn handoff_wait_ms(&self) -> u64 {
+            0
+        }
+        fn handoff_poll_ms(&self) -> u64 {
+            1
+        }
+    }
+
+    const PERSON: &str = "u:3cda66252c34";
+
+    /// 兩個視窗：T-乙（sid-b）、T-丙（sid-c）；都沒有外掛，要的話用 with_mod 加
+    async fn rig(wait: u64) -> H {
+        let mut h = harness(&[("T-乙", "idle"), ("T-丙", "idle")]).await;
+        for (i, (n, sid)) in [("T-乙", "sid-b"), ("T-丙", "sid-c")].into_iter().enumerate() {
+            let pid = 5000 + i as u32;
+            std::fs::write(h.sessions.path().join(format!("{pid}.json")), json!({"pid": pid, "sessionId": sid, "name": n, "cwd": "D:\\x", "status": "idle", "kind": "interactive", "entrypoint": "cli", "updatedAt": 100 + i}).to_string()).unwrap();
+        }
+        let dirs = OpsDirs { sessions: h.sessions.path().to_path_buf(), status: h.core.cfg.status_dir.clone(), control: h.work.path().join("control"), projects: h.work.path().join("projects") };
+        let protect: Arc<dyn Fn(&str, u32) -> bool + Send + Sync> = Arc::new(|n, _| n == "T-收發室" || n == "T-ASN");
+        let ops = PartnerOps::new(h.core.relay.clone(), h.core.log.clone(), h.work.path().join("handoff"), Arc::new(Env { wait }), dirs, protect);
+        h.core.set_partner_ops(ops);
+        h
+    }
+
+    fn status_path(h: &H, sid: &str) -> PathBuf {
+        h.core.cfg.status_dir.join(format!("{sid}.json"))
+    }
+    fn with_mod(h: &H, sid: &str) {
+        std::fs::create_dir_all(&h.core.cfg.status_dir).unwrap();
+        std::fs::write(status_path(h, sid), json!({"sessionId": sid, "at": T0, "state": "busy"}).to_string()).unwrap();
+    }
+    /// 外掛回報
+    fn plugin_reply(h: &H, sid: &str, id: &str, ok: bool, detail: &str) {
+        std::fs::write(status_path(h, sid), json!({"sessionId": sid, "at": T0, "state": "idle", "control": {"id": id, "ok": ok, "detail": detail}}).to_string()).unwrap();
+    }
+    fn control_file(h: &H, sid: &str) -> Option<Value> {
+        serde_json::from_str(&std::fs::read_to_string(h.work.path().join("control").join(format!("{sid}.json"))).ok()?).ok()
+    }
+    fn owner(n: u32, body: &str, to: &str) -> Value {
+        mail(n, json!({"trust": "owner", "from_node": "T", "from_agent": PERSON, "sender_display": "小良", "body": body, "to_agent": to, "expects_reply": false}))
+    }
+    async fn until(mut f: impl FnMut() -> bool) -> bool {
+        for _ in 0..400 {
+            if f() {
+                return true;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        false
+    }
+    fn replies(h: &H, id: &str) -> Vec<Value> {
+        h.fr.sent().into_iter().filter(|s| s["reply_to"] == id).collect()
+    }
+    fn _unused(_: &Path) {}
+
+    #[tokio::test]
+    async fn 有外掛_本人簽章的斜線信_交給外掛_不投遞給視窗_成功回信_ack原信() {
+        let mut h = rig(10_000).await;
+        with_mod(&h, "sid-b");
+        let m = owner(1, "  /compact 全部 \n", "T-乙");
+        h.fr.put(m);
+        h.core.pull("test", T0).await;
+        assert!(h.said().is_empty(), "指令不當文字投遞：{:?}", h.said());
+        assert!(until(|| control_file(&h, "sid-b").is_some()).await, "寫了控制檔");
+        let c = control_file(&h, "sid-b").unwrap();
+        assert_eq!((c["id"].as_str(), c["op"].as_str(), c["command"].as_str(), c["args"].as_str(), c["at"].as_u64()), (Some(uid(1).as_str()), Some("command"), Some("compact"), Some("全部"), Some(T0)));
+        assert!(h.fr.acked().is_empty(), "還沒做完不 ack");
+        plugin_reply(&h, "sid-b", &uid(1), true, "已壓縮\n剩 40%");
+        assert!(until(|| h.fr.acked().contains(&uid(1))).await, "做完 ack 原信");
+        let r = replies(&h, &uid(1));
+        assert_eq!(r.len(), 1);
+        assert_eq!((r[0]["body"].as_str(), r[0]["to_node"].as_str(), r[0]["to_agent"].as_str(), r[0]["expects_reply"].as_bool()), (Some("已壓縮\n剩 40%"), Some("T"), Some(PERSON), Some(false)), "回信：只告知不等回、reply_to＝原信");
+        assert!(control_file(&h, "sid-b").is_none());
+        assert!(h.core.log.has("slash_command"), "寫了 log");
+    }
+
+    #[tokio::test]
+    async fn 不阻塞其他信_等外掛的期間別的信照常轉交_同一封信再拉不會重複執行() {
+        let mut h = rig(10_000).await;
+        with_mod(&h, "sid-b");
+        h.fr.put(owner(1, "/model opus", "T-乙"));
+        h.fr.put(mail(2, json!({"to_agent": "T-丙"})));
+        let t_start = std::time::Instant::now();
+        h.core.pull("test", T0).await;
+        assert!(t_start.elapsed() < std::time::Duration::from_secs(3), "pull 不能等外掛：{:?}", t_start.elapsed());
+        assert!(h.said().iter().any(|t| t.contains("內文-2")), "別的信照常轉交：{:?}", h.said());
+        assert!(h.said().iter().all(|t| !t.contains("/model")));
+        // 外掛還沒回：再拉兩次，不重複執行、不重複寫
+        h.core.pull("test", T0 + 1).await;
+        h.core.pull("test", T0 + 2).await;
+        assert!(until(|| control_file(&h, "sid-b").is_some()).await);
+        plugin_reply(&h, "sid-b", &uid(1), true, "已切換");
+        assert!(until(|| h.fr.acked().contains(&uid(1))).await);
+        assert_eq!(replies(&h, &uid(1)).len(), 1, "只回一次");
+        // 回信送出但 ack 後信箱仍回傳（模擬 ack 沒生效）：不再執行、不再回信
+        h.fr.st.lock().unwrap().sticky = true;
+        h.core.pull("test", T0 + 3).await;
+        assert!(control_file(&h, "sid-b").is_none());
+        assert_eq!(replies(&h, &uid(1)).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn 逾時_回等了多久視窗還在忙_沒執行_仍然_ack() {
+        let mut h = rig(60).await;
+        with_mod(&h, "sid-b");
+        h.fr.put(owner(1, "/compact", "T-乙"));
+        h.core.pull("test", T0).await;
+        assert!(until(|| h.fr.acked().contains(&uid(1))).await);
+        let r = replies(&h, &uid(1));
+        assert_eq!(r[0]["body"], "等了 0 秒 視窗還在忙，沒執行 /compact");
+        assert!(control_file(&h, "sid-b").is_none(), "逾時收掉控制檔");
+        assert!(h.said().is_empty());
+    }
+
+    #[tokio::test]
+    async fn 外掛回失敗_回沒執行加原因() {
+        let mut h = rig(10_000).await;
+        with_mod(&h, "sid-b");
+        h.fr.put(owner(1, "/zzz", "T-乙"));
+        h.core.pull("test", T0).await;
+        assert!(until(|| control_file(&h, "sid-b").is_some()).await);
+        plugin_reply(&h, "sid-b", &uid(1), false, "不認得這個指令");
+        assert!(until(|| h.fr.acked().contains(&uid(1))).await);
+        assert_eq!(replies(&h, &uid(1))[0]["body"], "沒執行 /zzz：不認得這個指令");
+    }
+
+    #[tokio::test]
+    async fn 視窗沒有外掛_當普通信投遞_另外回一封說明() {
+        let mut h = rig(10_000).await;
+        h.fr.put(owner(1, "/compact", "T-乙"));
+        h.core.pull("test", T0).await;
+        assert!(h.said().iter().any(|t| t.contains("/compact")), "照舊投遞：{:?}", h.said());
+        let r = replies(&h, &uid(1));
+        assert_eq!(r.len(), 1);
+        assert_eq!((r[0]["body"].as_str(), r[0]["expects_reply"].as_bool()), (Some("這個視窗沒有 ASN 外掛，/指令 只能當文字送過去"), Some(false)));
+        assert!(control_file(&h, "sid-b").is_none());
+        // 同一封信再拉一次：不重複說明
+        h.core.pull("test", T0 + 1).await;
+        assert_eq!(replies(&h, &uid(1)).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn 外掛狀態檔過期_算沒有外掛_當文字() {
+        let mut h = rig(10_000).await;
+        std::fs::create_dir_all(&h.core.cfg.status_dir).unwrap();
+        std::fs::write(status_path(&h, "sid-b"), json!({"sessionId": "sid-b", "at": T0 - 3_600_000, "state": "idle"}).to_string()).unwrap();
+        h.fr.put(owner(1, "/compact", "T-乙"));
+        h.core.pull("test", T0).await;
+        assert!(h.said().iter().any(|t| t.contains("/compact")));
+        assert!(control_file(&h, "sid-b").is_none());
+    }
+
+    #[tokio::test]
+    async fn 不是本人簽章或格式不合_一律當普通信_就算視窗有外掛() {
+        let mut h = rig(10_000).await;
+        with_mod(&h, "sid-b");
+        let cases = [
+            // trust=member（成員）、內文自稱本人
+            mail(1, json!({"to_agent": "T-乙", "body": "/compact"})),
+            // 擁有者角色節點、沒有本人簽章（沒有 sender_display）
+            mail(2, json!({"to_agent": "T-乙", "body": "/compact", "trust": "owner", "from_agent": "T-丙"})),
+            // 簽章的本人，但多行
+            owner(3, "/compact\n順便說一句", "T-乙"),
+            // 簽章的本人，但不是 / 開頭
+            owner(4, "請 /compact", "T-乙"),
+            // 指令名字不合
+            owner(5, "/壓縮", "T-乙"),
+            // 成員寄的、帶本人代號與顯示名稱也不算（trust 不是 owner）
+            mail(6, json!({"to_agent": "T-乙", "body": "/compact", "from_agent": PERSON, "sender_display": "小良"})),
+        ];
+        for m in cases {
+            h.fr.put(m);
+        }
+        h.core.pull("test", T0).await;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(control_file(&h, "sid-b").is_none(), "不寫控制檔");
+        assert_eq!(h.said().len(), 6, "全部當文字投遞：{:?}", h.said());
+        assert!(h.fr.sent().iter().all(|s| s["body"] != "這個視窗沒有 ASN 外掛，/指令 只能當文字送過去"), "有外掛的視窗不會收到沒外掛說明");
+    }
+}

@@ -523,13 +523,69 @@ fn 改名_沒有外掛_退回重開_同_session_換名字_模型不變() {
 }
 
 #[test]
-fn 改名_外掛逾時_退回重開_並收掉控制檔() {
-    let r = rig(Opt::default());
+fn 改名_外掛等到時間還沒回_視窗還在忙_不重開_回失敗並收掉控制檔() {
+    let r = rig(Opt { status: "busy", mod_wait: 30, ..Opt::default() });
+    r.status_file("sid-220", json!({ "sessionId": "sid-220", "at": NOW, "state": "busy" }));
+    let res = r.run("rename", json!({ "new_name": "新名字" }));
+    assert_eq!(res.status, "failed", "{}", res.detail);
+    assert!(res.detail.contains("還在忙") && res.detail.contains("沒有改名"), "{}", res.detail);
+    assert!(r.launched().is_empty() && r.terminated().is_empty(), "外掛還活著就不能硬重開（會打斷忙碌的對話）");
+    assert!(!r.control.join("sid-220.json").exists(), "新視窗的外掛不能再執行一次舊指令");
+}
+
+#[test]
+fn 改名_外掛真的沒回應_狀態檔等待中變無效_才退回重開() {
+    let r = rig(Opt { mod_wait: 5000, ..Opt::default() });
     r.status_file("sid-220", json!({ "sessionId": "sid-220", "at": NOW, "state": "idle" }));
+    let (status, calls) = (r.status.clone(), Arc::new(AtomicUsize::new(0)));
+    *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || {
+        if calls.fetch_add(1, Ordering::SeqCst) == 2 {
+            // 外掛結束了：狀態檔寫成「已結束」
+            std::fs::write(status.join("sid-220.json"), json!({ "sessionId": "sid-220", "at": NOW, "detail": "已結束" }).to_string()).unwrap();
+        }
+    }));
+    let res = r.run("rename", json!({ "new_name": "新名字" }));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert_eq!(r.launched().len(), 1, "退回重開");
+    assert!(!r.control.join("sid-220.json").exists());
+}
+
+#[test]
+fn 排隊_視窗忙碌時等外掛_回報排隊中_忙完後成功_不重開() {
+    for (op, extra) in [("rename", json!({ "new_name": "新名字" })), ("model", json!({ "model": "sonnet" }))] {
+        let r = rig(Opt { status: "busy", mod_wait: 60_000, ..Opt::default() });
+        r.status_file("sid-220", json!({ "sessionId": "sid-220", "at": NOW, "state": "busy" }));
+        let (status, calls) = (r.status.clone(), Arc::new(AtomicUsize::new(0)));
+        *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || {
+            // 等了十幾輪（視窗忙完了）外掛才執行並回報
+            if calls.fetch_add(1, Ordering::SeqCst) == 12 {
+                std::fs::write(status.join("sid-220.json"), json!({ "sessionId": "sid-220", "at": NOW, "state": "idle", "control": { "id": "op-1", "ok": true, "detail": "已完成" } }).to_string()).unwrap();
+            }
+        }));
+        let res = r.run(op, extra);
+        assert_eq!(res.status, "ok", "{op}：{}", res.detail);
+        assert_eq!(res.detail, "已完成");
+        assert!(r.launched().is_empty() && r.terminated().is_empty(), "{op}：排隊等到了就不重開");
+        assert_eq!(*r.env.progress.lock().unwrap(), vec!["stage:queued"], "{op}：只回報一次排隊中");
+        assert!(!r.control.join("sid-220.json").exists());
+    }
+}
+
+#[test]
+fn 排隊_立刻就回報的不送排隊中() {
+    let r = rig(Opt { mod_wait: 60_000, ..Opt::default() });
+    r.status_file("sid-220", json!({ "sessionId": "sid-220", "at": NOW, "state": "idle", "control": { "id": "op-1", "ok": true, "detail": "好" } }));
+    assert_eq!(r.run("model", json!({ "model": "sonnet" })).status, "ok");
+    assert!(r.env.progress.lock().unwrap().is_empty());
+}
+
+#[test]
+fn 沒有外掛的視窗_維持原本行為_不排隊_改名直接重開() {
+    let r = rig(Opt { mod_wait: 60_000, ..Opt::default() });
     let res = r.run("rename", json!({ "new_name": "新名字" }));
     assert_eq!(res.status, "ok", "{}", res.detail);
     assert_eq!(r.launched().len(), 1);
-    assert!(!r.control.join("sid-220.json").exists(), "新視窗的外掛不能再執行一次舊指令");
+    assert!(r.env.progress.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -1015,4 +1071,124 @@ fn 喚醒_啟動設定只有非_claude_或背景型_profile_不開() {
     *r.env.cfg.lock().unwrap() = Ok(cfg);
     assert_eq!(resume(&r, "離線夥伴", SID).status, "failed");
     assert!(r.launched().is_empty());
+}
+
+// ================================================================================================
+// 信件來的 /指令（slash）
+// ================================================================================================
+
+fn job(cmd: &str, args: &str) -> CommandJob {
+    CommandJob { mail_id: "mail-1".into(), window: "目標".into(), command: cmd.into(), args: args.into(), from_node: "T".into(), from_agent: "u:3cda66252c34".into(), sender: "小良（本人）".into(), reply_from: "T-收發室".into() }
+}
+
+/// 第 n 次輪詢時外掛回報 control
+fn reply_at(r: &Rig, n: usize, ok_: bool, detail: &str) {
+    let (status, calls, detail) = (r.status.clone(), Arc::new(AtomicUsize::new(0)), detail.to_string());
+    *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || {
+        if calls.fetch_add(1, Ordering::SeqCst) == n {
+            std::fs::write(status.join("sid-220.json"), json!({ "sessionId": "sid-220", "at": NOW, "state": "idle", "control": { "id": "mail-1", "ok": ok_, "detail": detail } }).to_string()).unwrap();
+        }
+    }));
+}
+
+fn with_mod(r: &Rig) {
+    r.status_file("sid-220", json!({ "sessionId": "sid-220", "at": NOW, "state": "busy" }));
+}
+
+#[test]
+fn 指令_有外掛_控制檔欄位_等閒置後成功_內文直接放外掛的輸出_保留換行() {
+    let r = rig(Opt { mod_wait: 60_000, ..Opt::default() });
+    with_mod(&r);
+    assert_eq!(r.ops.command_target("目標").as_deref(), Some("sid-220"));
+    let (control, seen) = (r.control.clone(), Arc::new(Mutex::new(None::<Value>)));
+    let (status, calls, seen2) = (r.status.clone(), Arc::new(AtomicUsize::new(0)), seen.clone());
+    *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || {
+        if calls.fetch_add(1, Ordering::SeqCst) == 8 {
+            *seen2.lock().unwrap() = serde_json::from_str(&std::fs::read_to_string(control.join("sid-220.json")).unwrap()).ok();
+            std::fs::write(status.join("sid-220.json"), json!({ "sessionId": "sid-220", "at": NOW, "state": "idle", "control": { "id": "mail-1", "ok": true, "detail": "第一行\n第二行\r\n第三行" } }).to_string()).unwrap();
+        }
+    }));
+    let (good, text) = r.ops.command_blocking(&job("compact", "全部 重點"), "sid-220");
+    assert!(good);
+    assert_eq!(text, "第一行\n第二行\n第三行", "內文直接放 detail、保留換行");
+    let c = seen.lock().unwrap().clone().expect("等待期間控制檔在");
+    assert_eq!(c["id"], "mail-1");
+    assert_eq!(c["op"], "command");
+    assert_eq!(c["command"], "compact");
+    assert_eq!(c["args"], "全部 重點");
+    assert_eq!(c["at"], NOW);
+    assert!(!r.control.join("sid-220.json").exists(), "結果出來就刪控制檔");
+    assert!(r.launched().is_empty() && r.terminated().is_empty());
+}
+
+#[test]
+fn 指令_外掛沒輸出_回已執行_輸出超過_1500_字截斷() {
+    let r = rig(Opt { mod_wait: 60_000, ..Opt::default() });
+    with_mod(&r);
+    reply_at(&r, 1, true, "");
+    assert_eq!(r.ops.command_blocking(&job("clear", ""), "sid-220"), (true, "已執行 /clear".to_string()));
+    let r = rig(Opt { mod_wait: 60_000, ..Opt::default() });
+    with_mod(&r);
+    reply_at(&r, 1, true, &"字".repeat(1800));
+    let (_, t) = r.ops.command_blocking(&job("cost", ""), "sid-220");
+    assert_eq!(t.chars().count(), 1500);
+}
+
+#[test]
+fn 指令_外掛回失敗_回沒執行加原因() {
+    let r = rig(Opt { mod_wait: 60_000, ..Opt::default() });
+    with_mod(&r);
+    reply_at(&r, 1, false, "不認得這個指令");
+    assert_eq!(r.ops.command_blocking(&job("zzz", ""), "sid-220"), (false, "沒執行 /zzz：不認得這個指令".to_string()));
+}
+
+#[test]
+fn 指令_等到時間視窗還在忙_回逾時說明_並收掉控制檔() {
+    let r = rig(Opt { mod_wait: 30, ..Opt::default() });
+    with_mod(&r);
+    let (good, t) = r.ops.command_blocking(&job("compact", ""), "sid-220");
+    assert!(!good);
+    assert_eq!(t, "等了 0 秒 視窗還在忙，沒執行 /compact");
+    assert!(!r.control.join("sid-220.json").exists(), "逾時後外掛不能再補做");
+    assert_eq!(wait_text(600_000), "10 分鐘");
+}
+
+#[test]
+fn 指令_外掛等待中沒了_回沒執行() {
+    let r = rig(Opt { mod_wait: 60_000, ..Opt::default() });
+    with_mod(&r);
+    let status = r.status.clone();
+    *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || {
+        std::fs::write(status.join("sid-220.json"), json!({ "sessionId": "sid-220", "at": NOW, "detail": "已結束" }).to_string()).unwrap();
+    }));
+    let (good, t) = r.ops.command_blocking(&job("compact", ""), "sid-220");
+    assert!(!good && t.contains("沒執行 /compact") && t.contains("沒有回應"), "{t}");
+}
+
+#[test]
+fn 指令_沒有外掛_過期_換成別人_收發室視窗_都不算有外掛() {
+    let r = rig(Opt::default());
+    assert_eq!(r.ops.command_target("目標"), None, "沒有狀態檔");
+    r.status_file("sid-220", json!({ "sessionId": "sid-220", "at": NOW - 3_600_000, "state": "idle" }));
+    assert_eq!(r.ops.command_target("目標"), None, "過期");
+    r.status_file("sid-220", json!({ "sessionId": "sid-999", "at": NOW, "state": "idle" }));
+    assert_eq!(r.ops.command_target("目標"), None, "sessionId 不符");
+    r.status_file("sid-220", json!({ "sessionId": "sid-220", "at": NOW, "detail": "已結束" }));
+    assert_eq!(r.ops.command_target("目標"), None, "已結束");
+    assert_eq!(r.ops.command_target("幽靈"), None);
+    write_session(&r.sessions, 240, "sid-240", "T-收發室", "idle", r.work.to_str().unwrap());
+    r.os().alive.lock().unwrap().insert(240);
+    r.status_file("sid-240", json!({ "sessionId": "sid-240", "at": NOW, "state": "idle" }));
+    assert_eq!(r.ops.command_target("T-收發室"), None, "收發室視窗不收");
+    r.status_file("sid-220", json!({ "sessionId": "sid-220", "at": NOW, "state": "idle" }));
+    assert_eq!(r.ops.command_target("目標").as_deref(), Some("sid-220"));
+}
+
+#[test]
+fn 指令_輪到時視窗已換掉_不寫控制檔() {
+    let r = rig(Opt { mod_wait: 60_000, ..Opt::default() });
+    with_mod(&r);
+    let (good, t) = r.ops.command_blocking(&job("compact", ""), "sid-OLD");
+    assert!(!good && t.contains("沒執行"), "{t}");
+    assert!(!r.control.join("sid-220.json").exists() && !r.control.join("sid-OLD.json").exists());
 }
