@@ -125,7 +125,9 @@ begin
     end if;
   end if;
   if exists (select 1 from relay.partner_ops where node = p_node and lower(name) = lower(p_name)
-             and status in ('pending', 'taken') and created_at > now() - interval '10 minutes') then
+             and status in ('pending', 'taken')
+             -- 未完成的操作多久之內還算「進行中」：接班換手最長會跑到 15 分鐘，所以放寬到 20 分鐘；其他動作 10 分鐘
+             and created_at > now() - case when op = 'handover' then interval '20 minutes' else interval '10 minutes' end) then
     return jsonb_build_object('error', 'busy');
   end if;
   if (select count(*) from relay.partner_ops where node = p_node and created_at > now() - interval '1 hour') >= 30 then

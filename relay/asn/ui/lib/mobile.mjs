@@ -1,5 +1,5 @@
 // 手機版（ui/m.html）的純邏輯：單欄導覽、名單分組、提示規則、安卓外殼橋。node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。
-// 手機只有一個畫面：名單（和「我」）→ 點進對話 → 返回。沒有多視窗、系統匣、設定分頁。
+// 手機三個大分頁：夥伴、對話（最後使用的那一位）、設置。沒有多視窗、系統匣、設定分頁。
 import { groupItems } from './dims.mjs'
 import { friendMatchesQuery, normalizeSearchQuery, sortFriends } from './search.mjs'
 import { engineKey } from './tabs.mjs'
@@ -7,23 +7,23 @@ import { vendorIconSvg } from './vendor-icons.mjs'
 import { noticeOf } from './photo.mjs'
 
 // ---------- 單欄導覽 ----------
-// 狀態：{ tab: 'list' | 'me', chat: 好友 id | '', sheet: '' | 'launch' }。chat 有值＝正在看那位的對話（蓋在名單上）；sheet＝蓋在名單上的「開新夥伴」。
-// 每往下一層（名單→對話、名單→我、名單→開新夥伴）就在瀏覽記錄推一筆；系統的返回鍵＝瀏覽器上一頁，外殼（WryActivity）已接好，名單層再按才退到背景。
-// 三個大分頁：夥伴（list）、對話（chats）、設置（me）。tab＝目前（或對話下面那一層）的分頁。
+// 狀態：{ tab: 'list' | 'chats' | 'me', sheet: '' | 'launch' | 'ops' }。sheet＝蓋在分頁上的一層：「開新夥伴」（滿版）、「⋯」選單（底部浮層）。
+// 對話不再是蓋在名單上的一層：第二個分頁「對話」就是最後使用的那一位的對話內容（見 lib/mobile-ops.mjs 的 chatPageState）。
+// 每往下一層（夥伴→其他分頁、名單→開新夥伴、對話→選單）就在瀏覽記錄推一筆；系統的返回鍵＝瀏覽器上一頁，外殼（WryActivity）已接好，名單層再按才退到背景。
+// 三個大分頁：夥伴（list）、對話（chats）、設置（me）。
 export const TABS = ['list', 'chats', 'me']
 export const TAB_LABEL = { list: '夥伴', chats: '對話', me: '設置' }
 export const tabIndex = t => Math.max(0, TABS.indexOf(t))
 export const normalizeTab = t => (TABS.includes(t) ? t : 'list')
-export const initialNav = () => ({ tab: 'list', chat: '', sheet: '' })
-export const tabNav = t => ({ tab: normalizeTab(t), chat: '', sheet: '' })
-export const chatNav = (id, tab = 'list') => ({ tab: normalizeTab(tab), chat: String(id ?? ''), sheet: '' })
+export const initialNav = () => ({ tab: 'list', sheet: '' })
+export const tabNav = t => ({ tab: normalizeTab(t), sheet: '' })
 export const meNav = () => tabNav('me')
-export const launchNav = () => ({ tab: 'list', chat: '', sheet: 'launch' })
+export const launchNav = () => ({ tab: 'list', sheet: 'launch' })
+export const opsNav = () => ({ tab: 'chats', sheet: 'ops' })
 // 瀏覽記錄裡讀回來的狀態可能是任何東西（壞資料、別的頁面留下的）：整理成合法的導覽狀態
 export function normalizeNav(raw) {
-  const chat = typeof raw?.chat === 'string' ? raw.chat : ''
-  if (chat) return chatNav(chat, raw?.tab)
   if (raw?.sheet === 'launch') return launchNav()
+  if (raw?.sheet === 'ops') return opsNav()
   return tabNav(raw?.tab)
 }
 
@@ -55,39 +55,6 @@ export function swipeTarget({ index, dx, dt, width, count = TABS.length }) {
 export const indicatorPos = (index, shift, width, count = TABS.length) => Math.max(0, Math.min(count - 1, index - (width > 0 ? shift / width : 0)))
 // 手指按下的地方能不能開始滑：輸入框、下拉選單、可橫向捲動的工具列、放大看照片的畫面都不接手
 export const SWIPE_BLOCK_SELECTOR = 'input, textarea, select, [contenteditable="true"], .toolbar, .photo-viewer, .picker'
-
-// ---------- 「對話」分頁：最近的對話串 ----------
-// 最後一則訊息（雙方都算；震動與系統提示不算）：{ mine, text, t }；沒有就 null。只有照片或檔案顯示「傳來了一張照片」之類
-export function lastMessage(log) {
-  for (let i = (log?.length ?? 0) - 1; i >= 0; i--) {
-    const m = log[i]
-    if (m?.k !== 'me' && m?.k !== 'them') continue
-    const t = String(m.text ?? '').replace(/\s+/g, ' ').trim()
-    const text = t || (Array.isArray(m.photos) && m.photos.length ? noticeOf(m.photos) : '')
-    if (text) return { mine: m.k === 'me', text: text.length > LAST_WORDS_MAX ? text.slice(0, LAST_WORDS_MAX) : text, t: Number(m.t) || 0 }
-  }
-  return null
-}
-// 對話串列表：有訊息的夥伴，依最後訊息時間新的在前；自己寄的前面加「你：」
-export function threadRows(friends, messageOf) {
-  const rows = []
-  for (const f of friends ?? []) {
-    const m = messageOf(f.id)
-    if (m) rows.push({ id: f.id, friend: f, nick: f.nick, text: `${m.mine ? '你：' : ''}${m.text}`, t: m.t, unread: f.unread || 0 })
-  }
-  return rows.sort((a, b) => b.t - a.t)
-}
-const pad2 = n => String(n).padStart(2, '0')
-// 時間：今天顯示 時:分、昨天顯示「昨天」、更早顯示 月/日
-export function threadTime(t, now = Date.now()) {
-  const d = new Date(t), n = new Date(now)
-  if (!Number.isFinite(d.getTime())) return ''
-  const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
-  const diff = Math.round((day(n) - day(d)) / 86_400_000)
-  if (diff <= 0) return `${d.getHours()}:${pad2(d.getMinutes())}`
-  if (diff === 1) return '昨天'
-  return `${d.getMonth() + 1}/${d.getDate()}`
-}
 
 // ---------- 名單 ----------
 // 單欄名單：所有設備的夥伴放在同一頁，依設備分組（本機那組在最前），有搜尋字就只留符合的。
