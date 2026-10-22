@@ -73,8 +73,13 @@ pub const RATE: u32 = 16_000;
 const MAX_WAV_BYTES: usize = (MAX_SECONDS as usize + 2) * RATE as usize * 2 + 44;
 /// 辨識程式最久跑多久：到了就結束那一個子程序並回「辨識逾時」（前端另有 75 秒的保險）
 const RUN_TIMEOUT: Duration = Duration::from_secs(60);
-/// 前端按「取消」時叫醒正在等辨識程式的那一個 `run_with_deadline`
+/// 前端按「取消」時叫醒正在等辨識程式的那一個 `run_with_deadline`（用 notify_one：先取消、後開始等也算數）
 static CANCEL: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// 發出取消。用 notify_one：會記住一張許可，通知比等待早到也不會落空
+fn request_cancel(n: &tokio::sync::Notify) {
+    n.notify_one();
+}
 
 pub fn stt_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("stt")
@@ -469,13 +474,16 @@ pub async fn stt_transcribe(app: State<'_, App>, wav: String) -> Result<String, 
 #[tauri::command]
 pub async fn stt_cancel() {
     if BUSY.load(Ordering::SeqCst) {
-        CANCEL.notify_waiters();
+        // notify_one 會記住一張許可：就算辨識那邊還在寫暫存檔、啟動子程序、尚未開始等，之後一開始等也會立刻醒來
+        request_cancel(&CANCEL);
         for _ in 0..60 {
             if !BUSY.load(Ordering::SeqCst) {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
+        // 辨識若是剛好自己跑完，那張許可沒人用掉；收掉它，免得下一段辨識一開始就被取消
+        let _ = tokio::time::timeout(Duration::ZERO, CANCEL.notified()).await;
     }
 }
 
@@ -713,14 +721,10 @@ mod tests {
     async fn 子程序被取消_也只結束那一個程序() {
         let n = std::sync::Arc::new(tokio::sync::Notify::new());
         let n2 = n.clone();
-        // notify_waiters 只叫醒「已經在等」的人；機器忙碌時 run_with_deadline 可能還沒開始等，一次通知會落空。
-        // 所以每 100ms 通知一次（最多 25 秒），測試結束就收掉
+        // 只通知一次：不論通知比 run_with_deadline 開始等早或晚，都要立刻取消
         let kicker = tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(300)).await;
-            for _ in 0..250 {
-                n2.notify_waiters();
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
+            n2.notify_one();
         });
         let pid = std::sync::atomic::AtomicU32::new(0);
         let t0 = std::time::Instant::now();
@@ -730,6 +734,21 @@ mod tests {
         // 逾時設 30 秒、假程式睡 40 秒；取消機制失效時會變成「辨識逾時」而不是「已取消」，上面那句就會紅
         assert!(t0.elapsed() < Duration::from_secs(25));
         assert!(!alive(pid.load(Ordering::SeqCst)));
+    }
+
+    #[tokio::test]
+    async fn 先取消_後才開始等_也立刻取消() {
+        let n = tokio::sync::Notify::new();
+        request_cancel(&n); // 通知發生在 run_with_deadline 開始等之前
+        let pid = std::sync::atomic::AtomicU32::new(0);
+        let t0 = std::time::Instant::now();
+        let e = run_with_deadline(sleeper(), Duration::from_secs(30), &n, |p| pid.store(p, Ordering::SeqCst)).await.unwrap_err();
+        assert_eq!(e, "已取消");
+        assert!(t0.elapsed() < Duration::from_secs(25), "不能等到逾時：{:?}", t0.elapsed());
+        assert!(!alive(pid.load(Ordering::SeqCst)));
+        // 許可只用一次：第二次不再被取消（用很短的逾時確認走的是逾時）
+        let e = run_with_deadline(sleeper(), Duration::from_millis(300), &n, |_| {}).await.unwrap_err();
+        assert_eq!(e, "辨識逾時");
     }
 
     #[tokio::test]
