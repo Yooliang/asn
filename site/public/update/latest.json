@@ -1,11 +1,11 @@
 {
-  "version": "0.1.25",
-  "notes": "內建收發室也能投遞給 Gemini（ACP）與 Codex 夥伴（#12 第五期）",
-  "pub_date": "2026-10-22T01:21:32.833Z",
+  "version": "0.1.26",
+  "notes": "設定「音效」改「通知」，四個開關（#125）；偽通話第一期：講話自動寄出、回信自動念出（#99）；asn-cli recv --peek 只看不收",
+  "pub_date": "2026-10-22T02:05:17.277Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjg2ZzZ5OUhtMWg2Mk52NmJjOTJBRm9UVExRdE9sZFY4RDN3WXVXYlFQSDJ4ekg1LzF2Q21ybjhwVklQK1dVM0NvZXorWmY3V3k5NUw5SEx6QmV6ekFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjMyMDkyCWZpbGU6QVNOXzAuMS4yNV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjI1CmNvYlZNdVJERUZOYjVBbjY5SFdCU0FIN1FqaUVhT2xNSXd4V2swSlhlMzB6Tm1QalBCSHdKZnVuR2czY3FOSE42TkZNRmVkNkl5cTBQY0JwY2FHL0FRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.25_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybi9UdEdVM0hCbUQzQW16T2oveTlqTE9JTDZ2OUxYcWxIWVZQZGtiSGdwb2xVQ0NqM1dJUk1PYk1ickgxMytJTUs2N29qelN3dnlNRFJTekE0VnVsS3c0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjM0NzE2CWZpbGU6QVNOXzAuMS4yNl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjI2CmFER28wVnI3L0xDeUl2YzdvRXpMeFhQRC9KOGh4TDFTbXFGTDZ6bTlxNHo3SDMyOWVFa0xuNnBSYWltR1JUZnk5ZlNQd3ZacXRROE5CQVQ5VE9vYUNBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.26_x64-setup.exe"
     }
   }
 }
