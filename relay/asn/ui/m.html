@@ -41,7 +41,8 @@
   <template v-else>
     <div class="m-banner" v-if="banner" role="status" @click="openBanner">
       <span class="dp xs" :class="'st-' + banner.status"><span><img :src="avById(banner.id)" alt=""></span></span>
-      <span class="m-banner-tx"><b v-html="emo(banner.nick)"></b><small>{{ banner.line }}</small></span>
+      <span class="m-banner-tx" :class="{ wrap: banner.handover }"><b v-html="emo(banner.nick)"></b><small>{{ banner.line }}</small></span>
+      <button class="m-banner-act" type="button" v-if="banner.handover" @click.stop="bannerHandover">接班換手</button>
     </div>
 
     <!-- 三個大分頁：夥伴／對話／設置。左右滑動切換（跟手，放開吸附到最近的分頁），也可以點上方分頁；下拉重整只在夥伴與對話兩頁 -->
@@ -84,7 +85,7 @@
                         <span class="m-vendor" aria-hidden="true" v-html="vendorIcon(c)"></span>
                       </span>
                       <span class="b-text">
-                        <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-st" v-if="statusNote(c.status)">{{ statusNote(c.status) }}</span></span>
+                        <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-ctx" :class="{ danger: contextLabel(c).danger }" v-if="contextLabel(c)">{{ contextLabel(c).text }}</span><span class="b-st" v-if="statusNote(c.status)">{{ statusNote(c.status) }}</span></span>
                         <span class="b-psm" v-if="c.psm" v-html="emo(c.psm)"></span>
                         <span class="b-last" v-if="lastOf(c.id)">{{ lastOf(c.id) }}</span>
                       </span>

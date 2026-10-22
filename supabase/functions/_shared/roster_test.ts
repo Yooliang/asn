@@ -11,8 +11,8 @@ Deno.test("roster：engine 合法就帶著，沒帶或格式不對＝null；多�
     { name: "D", engine: "codex" },
   ]);
   assertEquals(out.map((a) => a.engine), ["gemini", null, null, null, null, "codex"]);
-  assertEquals(out[0], { name: "Gemini", status: "idle", cwd_label: "工作者", engine: "gemini", detail: null });
-  assertEquals(out[1], { name: "H-Irori-2", status: "busy", cwd_label: null, engine: null, detail: null });
+  assertEquals(out[0], { name: "Gemini", status: "idle", cwd_label: "工作者", engine: "gemini", detail: null, context_pct: null });
+  assertEquals(out[1], { name: "H-Irori-2", status: "busy", cwd_label: null, engine: null, detail: null, context_pct: null });
 });
 
 Deno.test("roster：detail 選填，字串才收、去頭尾空白、截 80 字；非字串或空白＝null（舊版機器橋沒帶也不壞）", () => {
@@ -24,4 +24,17 @@ Deno.test("roster：detail 選填，字串才收、去頭尾空白、截 80 字�
     { name: "E" },
   ]);
   assertEquals(out.map((a) => a.detail), ["背景工作 2 件", "問".repeat(80), null, null, null]);
+});
+
+Deno.test("roster：context_pct 選填，0～100 的數字才收（四捨五入）；其餘＝null", () => {
+  const out = normalizeRosterAgents([
+    { name: "A", context_pct: 85 },
+    { name: "B", context_pct: 92.6 },
+    { name: "C", context_pct: -1 },
+    { name: "D", context_pct: 101 },
+    { name: "E", context_pct: "80" },
+    { name: "F" },
+    { name: "G", context_pct: 0 },
+  ]);
+  assertEquals(out.map((a) => a.context_pct), [85, 93, null, null, null, null, 0]);
 });

@@ -25,6 +25,8 @@ pub struct Window {
     pub cwd_label_override: Option<String>,
     /// Claude Code 外掛狀態檔給的補充說明（背景工作 2 件／等你回答…，最多 80 字）；沒有外掛或檔案無效就是 None，名單不帶這個欄位
     pub detail: Option<String>,
+    /// 外掛狀態檔 context.percent（上下文已用百分比，0～100 整數）；沒有或不合格就是 None，名單不帶這個欄位
+    pub context_pct: Option<u8>,
 }
 
 impl Window {
@@ -34,7 +36,7 @@ impl Window {
     }
     /// Claude 視窗（由 ~/.claude/sessions 讀出）
     pub fn claude(name: &str, status: Option<String>, cwd: &str, pid: u32, updated_at: u64, session_id: Option<String>) -> Window {
-        Window { name: name.into(), status, cwd: cwd.into(), pid, updated_at, session_id, engine: "claude".into(), engine_label: None, no_fallback: false, cwd_label_override: None, detail: None }
+        Window { name: name.into(), status, cwd: cwd.into(), pid, updated_at, session_id, engine: "claude".into(), engine_label: None, no_fallback: false, cwd_label_override: None, detail: None, context_pct: None }
     }
     pub fn cwd_label(&self) -> String {
         if let Some(l) = &self.cwd_label_override {
@@ -90,14 +92,15 @@ pub fn apply_mod_status(windows: &mut [Window], dir: &Path, now_ms: u64) {
         if !valid_sid(&sid) {
             continue;
         }
-        if let Some((status, detail)) = read_mod_status(&dir.join(format!("{sid}.json")), &sid, now_ms) {
+        if let Some((status, detail, ctx)) = read_mod_status(&dir.join(format!("{sid}.json")), &sid, now_ms) {
             w.status = Some(status);
             w.detail = detail;
+            w.context_pct = ctx;
         }
     }
 }
 
-fn read_mod_status(path: &Path, sid: &str, now_ms: u64) -> Option<(String, Option<String>)> {
+fn read_mod_status(path: &Path, sid: &str, now_ms: u64) -> Option<(String, Option<String>, Option<u8>)> {
     if std::fs::metadata(path).ok()?.len() > MOD_STATUS_MAX_BYTES {
         return None;
     }
@@ -116,7 +119,13 @@ fn read_mod_status(path: &Path, sid: &str, now_ms: u64) -> Option<(String, Optio
     let raw: String = v.get("detail").and_then(Value::as_str).unwrap_or("").chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
     let raw = raw.trim();
     let detail = if raw.is_empty() { default_detail.map(String::from) } else { Some(raw.chars().take(MOD_DETAIL_MAX_CHARS).collect()) };
-    Some((status.to_string(), detail))
+    Some((status.to_string(), detail, context_pct_of(&v)))
+}
+
+/// 狀態檔 context.percent → 0～100 整數（小數四捨五入）；不是數字、負數、超過 100、NaN 一律當沒有
+pub fn context_pct_of(v: &Value) -> Option<u8> {
+    let p = v.get("context")?.get("percent")?.as_f64()?;
+    if p.is_finite() && (0.0..=100.0).contains(&p) { Some(p.round() as u8) } else { None }
 }
 
 /// 順手清掉 `<dir>` 底下過時的狀態檔：只刪檔名是合法 sessionId 的 .json、內容是完整 JSON 且 sessionId 與檔名相符、
@@ -211,6 +220,9 @@ pub fn roster_body(windows: &[Window], asn_window: Option<&str>, launcher: Value
             let mut o = json!({ "name": w.name, "status": w.status, "cwd_label": w.cwd_label(), "engine": w.label() });
             if let Some(d) = &w.detail {
                 o["detail"] = json!(d); // 可選欄位：舊後台會丟掉，舊用戶端看不到也不壞
+            }
+            if let Some(p) = w.context_pct {
+                o["context_pct"] = json!(p); // 可選欄位：舊後台會丟掉，舊用戶端略過
             }
             o
         })
@@ -483,5 +495,39 @@ mod tests {
         let w2 = Window::claude("T-ASN", None, "", 2, 0, None);
         assert_eq!(roster_body(&[w2], Some("T-ASN"), Value::Null)["agents"].as_array().unwrap().len(), 1);
         assert!(is_busy_status(Some("Working")) && !is_busy_status(Some("idle")) && !is_busy_status(None));
+    }
+
+    #[test]
+    fn 外掛狀態檔_上下文百分比_合格才收_小數四捨五入_其餘當沒有() {
+        let d = tempfile::tempdir().unwrap();
+        let mut ws = [win("s1", "busy")];
+        for (ctx, want) in [
+            (json!({"used":1,"limit":2,"percent":85}), Some(85u8)),
+            (json!({"percent":92.6}), Some(93)),
+            (json!({"percent":0}), Some(0)),
+            (json!({"percent":100}), Some(100)),
+            (json!({"percent":-1}), None),
+            (json!({"percent":101}), None),
+            (json!({"percent":"80"}), None),
+            (json!({"used":5}), None),
+            (json!(7), None),
+        ] {
+            put_status(d.path(), "s1", json!({"sessionId":"s1","state":"busy","at":NOW,"context":ctx}));
+            ws[0].context_pct = Some(1);
+            apply_mod_status(&mut ws, d.path(), NOW);
+            assert_eq!(ws[0].context_pct, want, "{ctx}");
+        }
+        // 狀態檔沒有 context 欄位＝None
+        put_status(d.path(), "s1", json!({"sessionId":"s1","state":"idle","at":NOW}));
+        apply_mod_status(&mut ws, d.path(), NOW);
+        assert_eq!(ws[0].context_pct, None);
+    }
+
+    #[test]
+    fn 名單回報_有上下文百分比才帶_context_pct_欄位_沒有就和以前一模一樣() {
+        let mut w = Window::claude("T-甲", Some("busy".into()), "/a/b", 1, 0, None);
+        assert_eq!(roster_body(&[w.clone()], None, Value::Null)["agents"][0], json!({"name":"T-甲","status":"busy","cwd_label":"b","engine":"claude"}));
+        w.context_pct = Some(85);
+        assert_eq!(roster_body(&[w], None, Value::Null)["agents"][0], json!({"name":"T-甲","status":"busy","cwd_label":"b","engine":"claude","context_pct":85}));
     }
 }

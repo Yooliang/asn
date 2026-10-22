@@ -443,6 +443,7 @@ impl Inner {
                     no_fallback: false,
                     cwd_label_override: Some(cwd_label(&cwd)),
                     detail: None,
+                    context_pct: None,
                 },
                 CW { thread_id: id.clone(), path: th.get("path").and_then(Value::as_str).map(String::from) },
             ));
