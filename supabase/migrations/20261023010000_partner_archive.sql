@@ -108,22 +108,18 @@ as $function$
     'avatar_updated_at', case when n.avatar is null then null else n.avatar_updated_at end,
     'agents', coalesce((
       select jsonb_agg(jsonb_build_object('name', r.name, 'status', r.status, 'cwd_label', r.cwd_label, 'engine', r.engine, 'detail', r.detail,
-        'partner_id', pp.partner_id, 'online', true,
+        'partner_id', (select p.partner_id from relay.partners p where p.node = n.id and p.current_name = r.name), 'online', true,
         'archived', exists (select 1 from relay.partner_archives a where a.tenant_id is not distinct from p_tenant
-                              and a.key = coalesce(pp.partner_id, 'n:' || n.id || '/' || r.name))) order by r.name)
-      from relay.roster r
-      left join lateral (select p.partner_id from relay.partners p where p.node = n.id and p.current_name = r.name limit 1) pp on true
-      where r.node = n.id and r.seen_at > now() - interval '3 minutes'
+                              and a.key = coalesce((select p.partner_id from relay.partners p where p.node = n.id and p.current_name = r.name), 'n:' || n.id || '/' || r.name))) order by r.name)
+      from relay.roster r where r.node = n.id and r.seen_at > now() - interval '3 minutes'
     ), '[]'::jsonb),
     'offline_agents', coalesce((
       select jsonb_agg(jsonb_build_object('name', r.name, 'status', 'offline', 'cwd_label', r.cwd_label, 'engine', r.engine, 'detail', r.detail,
-        'partner_id', pp.partner_id, 'online', false,
+        'partner_id', (select p.partner_id from relay.partners p where p.node = n.id and p.current_name = r.name), 'online', false,
         'last_seen_at', r.seen_at,
         'archived', exists (select 1 from relay.partner_archives a where a.tenant_id is not distinct from p_tenant
-                              and a.key = coalesce(pp.partner_id, 'n:' || n.id || '/' || r.name))) order by r.name)
-      from relay.roster r
-      left join lateral (select p.partner_id from relay.partners p where p.node = n.id and p.current_name = r.name limit 1) pp on true
-      where r.node = n.id and r.seen_at <= now() - interval '3 minutes' and r.seen_at > now() - interval '30 days'
+                              and a.key = coalesce((select p.partner_id from relay.partners p where p.node = n.id and p.current_name = r.name), 'n:' || n.id || '/' || r.name))) order by r.name)
+      from relay.roster r where r.node = n.id and r.seen_at <= now() - interval '3 minutes' and r.seen_at > now() - interval '30 days'
     ), '[]'::jsonb),
     'asn', coalesce((
       select jsonb_agg(jsonb_build_object('window_name', p.window_name, 'version', p.version, 'status', p.status, 'psm', p.psm, 'updated_at', p.updated_at) order by p.window_name)
@@ -135,7 +131,14 @@ revoke all on function public.irori_relay_list(uuid) from public, anon, authenti
 grant execute on function public.irori_relay_list(uuid) to service_role;
 
 -- 自動解除 ①：視窗重新回報。不重貼那一大段規則：把原本的同步函式改名成 _core，用薄薄的新函式包起來（回傳完全相同），成功後再解除。
-alter function public.irori_relay_partner_sync(text, jsonb) rename to irori_relay_partner_sync_core;
+do $$
+begin
+  -- 可安全重跑：已經改過名（_core 存在）就不再改，否則第二次會把外面這層當成原本的同步函式
+  if not exists (select 1 from pg_proc p join pg_namespace s on s.oid = p.pronamespace where s.nspname = 'public' and p.proname = 'irori_relay_partner_sync_core') then
+    alter function public.irori_relay_partner_sync(text, jsonb) rename to irori_relay_partner_sync_core;
+  end if;
+end
+$$;
 revoke all on function public.irori_relay_partner_sync_core(text, jsonb) from public, anon, authenticated;
 
 create or replace function public.irori_relay_partner_sync(p_node text, p_windows jsonb)

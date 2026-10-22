@@ -19,6 +19,12 @@ test('名單轉換：後台的 archived 旗標變成 friend.archived；沒帶（
   assert.equal(out['小離'].status, 'offline')
 })
 
+test('封存與改名去重並存：同夥伴 ID 的舊名離線列只留一筆，且封存旗標跟著留下的那筆', () => {
+  const members = [{ id: 'H', name: '家用機', agents: [{ name: '新名', partner_id: PID, archived: true }], offline_agents: [{ name: '舊名', partner_id: PID, archived: true }, { name: '別位', archived: false }] }]
+  const f = buildFriends(members)
+  assert.deepEqual(f.map(x => [x.agent, x.archived]).sort(), [['別位', false], ['新名', true]])
+})
+
 test('分流與群組：名單不含已封存；底部一個「已封存」群組，沒有已封存就沒有群組', () => {
   const list = [F('H', '甲'), F('H', '乙', { archived: true }), F('H', '丙', { archived: true, status: 'offline' }), F('H', '丁', { archived: false })]
   assert.deepEqual(activeFriends(list).map(f => f.agent), ['甲', '丁'], '保持原順序')
@@ -106,3 +112,22 @@ test('守門：Rust 指令——電腦版只在電腦清單、手機只在手機
   assert.match(relay, /pub async fn partner_archive_signed[\s\S]*?ok_or\("尚未登入，無法封存夥伴"\)\?;[\s\S]*?api_signed\("partner_archive"/)
   assert.match(read('../../supabase/functions/relay/index.ts'), /action === "partner_archive"\) \? await signedUserId/)
 })
+
+test('守門：m.js 裡 watch 的來源只能取用「已經定義」的變數（來源函式會立刻執行；放在 const 之前會踩到初始化前取用，整個監看失效）', () => {
+  const lines = read('ui/m.js').split('\n')
+  const declAt = name => lines.findIndex(l => new RegExp(`^\\s*const ${name}\\b`).test(l))
+  let checked = 0
+  lines.forEach((l, i) => {
+    if (!/^\s*watch\(\[/.test(l)) return
+    const src = l.slice(0, l.indexOf('], ') + 1)   // 只看來源陣列
+    for (const m of src.matchAll(/\b(\w+)\.value\b/g)) {
+      const d = declAt(m[1])
+      if (d < 0) continue
+      checked++
+      assert.ok(d < i, `watch（第 ${i + 1} 行）用到 ${m[1]}，但它在第 ${d + 1} 行才定義`)
+    }
+  })
+  assert.ok(checked >= 1, '至少檢查到 acct')
+  assert.ok(lines.some(l => /^\s*watch\(\[\(\) => friends\.value\.length, \(\) => acct\.value\.signed_in\]/.test(l)), '補最後一句話的 watch 還在')
+})
+

@@ -383,7 +383,6 @@ const app = createApp({
         }
       } finally { backfilling = false }
     }
-    watch([() => friends.value.length, () => acct.value.signed_in], () => { void backfillLast() })
     const refreshAll = async () => { refreshing.value = true; try { await Promise.all([core.refreshRoster(), core.pull('manual')]) } finally { refreshing.value = false } }
     // 下拉重整：頁面捲到最上面時往下拉，頂端長出機器人；拉過門檻放開才更新，完成後收回。夥伴與對話兩頁各一組（設置頁沒有）
     function makePtr() {
@@ -486,6 +485,8 @@ const app = createApp({
       catch (e) { nameDraft.value = myName.value; nameErr.value = e.message; setTimeout(() => { nameErr.value = '' }, 5000) }
     }
     const acct = ref({ signed_in: false, email: '' })
+    // 要放在 acct 定義之後：watch 的來源函式會立刻執行一次，放前面會踩到「初始化之前就取用」而整個監看失效
+    watch([() => friends.value.length, () => acct.value.signed_in], () => { void backfillLast() })
     void authApi.status().then(s => { acct.value = s ?? acct.value }).catch(() => {})
     // 我的名字（帳號層）：先用上次存的，登入帳號的資料取到後更新並存起來（離線也有名字可顯示）
     void authApi.accountInfo().then(i => { if (typeof i?.owner_name === 'string') ownerName.value = i.owner_name }).catch(() => {})

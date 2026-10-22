@@ -37,6 +37,17 @@ test('靜態：下令要本人簽章（擁有呼叫節點與目標節點、同�
   assert.match(t, /exception when others then\s+null;/)
 })
 
+test('靜態：名單函式除了多帶 archived 之外，與上一版（線上定義）逐字相同；同步函式本體不動，只改名後包一層，改名可重跑', () => {
+  const body = (t, name) => { const s = t.indexOf('$function$', t.indexOf(`function public.${name}(`)); return t.slice(s, t.indexOf('$function$', s + 5) + 10).split('\n').map(l => l.trimEnd()).join('\n') }
+  const prev = body(read('20261022110000_list_offline_members.sql'), 'irori_relay_list')
+  const mine = body(sql, 'irori_relay_list')
+  const stripped = mine.replace(/,\n\s*'archived', exists \(select 1 from relay\.partner_archives a where a\.tenant_id is not distinct from p_tenant\n\s*and a\.key = coalesce\(\(select p\.partner_id from relay\.partners p where p\.node = n\.id and p\.current_name = r\.name\), 'n:' \|\| n\.id \|\| '\/' \|\| r\.name\)\)/g, '')
+  assert.equal((mine.match(/'archived', exists/g) ?? []).length, 2, 'agents 與 offline_agents 各一個')
+  assert.equal(stripped, prev, '拿掉 archived 後與上一版相同')
+  assert.match(sql, /do \$\$[\s\S]*?if not exists \(select 1 from pg_proc[\s\S]*?irori_relay_partner_sync_core[\s\S]*?rename to irori_relay_partner_sync_core;[\s\S]*?\$\$;/, '改名先檢查 _core 是否已存在')
+  assert.doesNotMatch(sql, /create or replace function public\.irori_relay_partner_sync_core/, '不重寫同步本體')
+})
+
 let PGlite = null
 try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
@@ -140,6 +151,18 @@ test('實跑（pglite）：自動解除——離線封存後重新回報解除�
   await db.exec(`insert into relay.messages(from_node, from_agent, to_node, to_agent, body) values ('H','無IDa','P','小良','hi')`)
   assert.deepEqual((await q('select name from relay.partner_archives')).map(r => r.name), ['在線'])
   assert.equal((await flags())['H/寄信'], false)
+})
+
+test('實跑（pglite）：migration 可以安全重跑——同步函式仍是外層、_core 仍是原本那支，封存照常', { skip }, async () => {
+  const { db, q, archive, sync } = await boot()
+  await db.exec(sql)
+  await db.exec(sql)
+  const names = (await q(`select proname from pg_proc where proname like 'irori_relay_partner_sync%' order by 1`)).map(r => r.proname)
+  assert.deepEqual(names, ['irori_relay_partner_sync', 'irori_relay_partner_sync_core'])
+  const r = await sync('H', [{ name: '小文', session_id: 'sess-0001-aaaa' }])
+  assert.equal(r.partners.length, 1)
+  assert.deepEqual(await archive({ pid: r.partners[0].partner_id }), { ok: true, archived: true })
+  assert.equal((await q('select count(*)::int c from pg_trigger where tgname = $1', ['messages_unarchive_sender']))[0].c, 1)
 })
 
 test('實跑（pglite）：解除的觸發器壞掉也不影響寄信', { skip }, async () => {
