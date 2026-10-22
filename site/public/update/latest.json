@@ -1,11 +1,11 @@
 {
-  "version": "0.1.35",
-  "notes": "- 手機版整修：夥伴／對話／設置三個分頁可左右滑動、下拉重新整理、名單顯示廠商小圖示與最後一句話、頭像改圓角方形、名字分兩層（帳號名稱＋設備名稱）；對話內容支援 Markdown（粗體、清單、表格、程式碼、連結，連結用系統瀏覽器開）",
-  "pub_date": "2026-10-22T15:11:37.151Z",
+  "version": "0.1.36",
+  "notes": "夥伴管理：手機「⋯」選單與電腦版右鍵可看詳情、改名、切換模型、關閉視窗、接班換手（先請前任寫交接再換新視窗）、喚醒離線夥伴；電腦版對話框上方新增「喚醒」按鈕、切換模型改成真正的二級選單；手機「對話」分頁直接顯示最後使用的那一位；修正同一則訊息與震動提示重複出現；依廠商分頁的 ASN 圖示改成小機器人",
+  "pub_date": "2026-10-22T15:48:04.644Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjFvQVh2alhMK2ptZmhWVE8xZ2lHZlpicVFOcklHNmM5UmVrMUYwWmVtdHp3dVFSSjFyb25TelMxS2U4MitsMHpEZWhkVU4vQ2lseitqRFM1bThRdFFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjgxODk2CWZpbGU6QVNOXzAuMS4zNV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjM1CnFwbEJKSUJjbG5oMzI5TmNtVkJwcHk5U01pT3JxVTdPVndLKzNoSnZINGNlNUNzV3JFZTBqSXNyRzhFbTBjYjNEQ2NTNGRIeFBwN1E4QnA5ZzBTeUJ3PT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.35_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybnp2WjZiZDUzcGF6NTZVTThsYVVBUDJHUVc2Q1hKellwRTVyMWw5ay9UWW5IaXY0R0tYVnBLMzV4dDdMbTdpek9XL00xMEowd0VLNG1pVFlFSzNqc2c0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjg0MDg0CWZpbGU6QVNOXzAuMS4zNl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjM2CmNhekl0ZTh2VEp1ZGZESHBhQVhReUNVWE45TDVLZGlTcHhQdmxJQjZkN0k3WFcwMmJYK0FuVGZ6c1pwbWZxdGVPaFNNcjhuMzUwbTN6RWJVUkhaY0RBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.36_x64-setup.exe"
     }
   }
 }
