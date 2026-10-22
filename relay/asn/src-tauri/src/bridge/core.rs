@@ -490,6 +490,10 @@ impl Core {
             if self.idx(&m.id).is_some() {
                 continue;
             }
+            // 還沒拿到第一份名單：收件視窗在空名單裡一定找不到，不能回「找不到」還 ack；先留在 inbox，等名單到了下一輪再處理（和群組一樣）
+            if !self.roster_ok {
+                continue;
+            }
             self.handle_mail(m).await;
         }
         self.ack_ids(&dup).await;

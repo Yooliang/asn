@@ -461,6 +461,33 @@ async fn 找不到收件視窗_寄回說明並_ack() {
 }
 
 #[tokio::test]
+async fn 信先到_名單後到_名單到之前不_ack_不回找不到_名單到後正常轉交() {
+    let fr = FakeRelay::start();
+    let work = tempfile::tempdir().unwrap();
+    let sessions = tempfile::tempdir().unwrap();
+    put_session(sessions.path(), 5000, "T-乙", "idle", 100);
+    let sink = Arc::new(FakeSink::default());
+    let mut core = new_core(&fr, work.path(), sessions.path(), sink.clone(), T0);
+    // 還沒 refresh_roster：roster_ok=false
+    assert!(!core.roster_ok);
+    fr.put(mail(1, json!({"to_agent": "T-乙"})));
+    core.pull("test", T0).await;
+    core.pull("again", T0 + 1).await;
+    assert!(fr.acked().is_empty(), "名單到之前不能 ack");
+    assert!(fr.sent().is_empty(), "名單到之前不能回找不到");
+    assert!(sink.said.lock().unwrap().is_empty());
+    assert!(core.pending.is_empty());
+    // 名單到了
+    core.refresh_roster(T0 + 2).await;
+    assert!(core.roster_ok);
+    core.pull("after-roster", T0 + 3).await;
+    assert_eq!(sink.said.lock().unwrap().len(), 1, "名單到後信正常轉交");
+    assert!(fr.sent().is_empty());
+    core.on_worker_line(res(&format!("SENT {}", uid(1))), T0 + 4).await;
+    assert!(!core.pending.is_empty() || fr.acked().contains(&uid(1)));
+}
+
+#[tokio::test]
 async fn worker_回報_fail_寄回失敗說明並_ack() {
     let mut h = harness(&[("T-乙", "idle")]).await;
     h.fr.put(mail(1, json!({})));

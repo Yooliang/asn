@@ -507,6 +507,8 @@ async function pull(why) {
       for (const m of messages) {
         if (seen.has(m.id)) { dup.push(m.id); continue }
         if (pending.has(m.id)) continue
+        // 還沒拿到第一份名單：收件視窗在空名單裡一定找不到，不能回「找不到」還 ack；先留在 inbox，名單到了下一輪再處理（和群組一樣）
+        if (!rosterOk) continue
         await handleMail(m)
       }
       await ackIds(dup)
