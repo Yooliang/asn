@@ -1,11 +1,11 @@
 {
-  "version": "0.1.22",
-  "notes": "對話視窗上方的大按鈕列（#40）；切換模型支援自己開的視窗、開同名夥伴預設接續上次對話（#82）",
-  "pub_date": "2026-10-22T00:02:07.413Z",
+  "version": "0.1.23",
+  "notes": "多台設備接同一串對話（#108）：登入同一帳號的電腦，AI 看到的是同一個你，回信每台都收得到",
+  "pub_date": "2026-10-22T00:12:34.209Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybit6VXVLVURjdnExT0VZM1NNSVZGUjZkdncyNGtXSGd6bktPenpndSt2SVkzY3MvMG91U2kwY0NNTWJERFJOZ3J1R1RBWUd3Ymg4MGhBVVNVaFJvNGdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjI3MzI3CWZpbGU6QVNOXzAuMS4yMl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjIyCm1FMXBlT3lZL2VjdGhTK1VCVHd4eXBnenlla2U4amkzVTJXdWVMRmF3b2d2Nkt1cmhnSEZtS3RlbnF6Z1YxZTlLZGhRMUs5WE5kc00ySkdMakovK0JRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.22_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjV0TTlRdWxKZW1vV0VLVjNFZkxHYjdra2dLRjdmR28veEVMZ2svMGx3dFZ2NG5sV1VzZG1tZzRrNmQrcDFLaitKZ3JzaGk4VlVFQlprckY3TitNWEFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjI3OTUzCWZpbGU6QVNOXzAuMS4yM194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjIzClpCRWRZTmI4TzRwN0J3M0lLMVhGTk84N2hKeDhwSlVwNm95T2NkdER0UXozanhwSlFITFhUb3FYMWtRWFEwM2U1QmNtbHY0ZTBPUDhxei8zUmJMOENnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.23_x64-setup.exe"
     }
   }
 }
