@@ -67,6 +67,8 @@ function resolveSlug(t) {
   for (const [slug, name] of memberNames) if (name && name === t) return slug
   return t
 }
+// 回信／名單上的名字：和 roster 回報的一致（中文名優先，沒有才用 slug），收件人才會看到同一個視窗回信
+const displayName = slug => memberNames.get(slug) || slug
 async function refreshMembers() {
   try {
     const res = await fetch(`${AEGIS_URL}/api/v1/members?scope=all`, { signal: AbortSignal.timeout(15_000) })
@@ -82,7 +84,7 @@ let rosterWarned = false
 async function refreshRoster() {
   await refreshMembers()
   // name＝中文名（沒有才用 slug）、cwd_label＝slug
-  const agents = ALLOW.filter(slug => slug !== SELF_MEMBER).map(slug => ({ name: memberNames.get(slug) || slug, status: 'idle', cwd_label: slug }))
+  const agents = ALLOW.filter(slug => slug !== SELF_MEMBER).map(slug => ({ name: displayName(slug), status: 'idle', cwd_label: slug }))
   try {
     await api('roster', { method: 'POST', body: { agents } })
     rosterWarned = false
@@ -143,12 +145,12 @@ async function handleMail(m) {
     if (r.http === 404) return replyAndAck(m, `[Aegis] 查無此成員（${slug}）`)
     if (askFailed(r)) {
       log(`id=${m.id} to=${slug} ask failed again (http=${r.http}): busy reply`)
-      return replyAndAck(m, '[Aegis] 對方忙線中，請稍後再問', slug)
+      return replyAndAck(m, '[Aegis] 對方忙線中，請稍後再問', displayName(slug))
     }
   }
   const status = r.data?.status
   const answer = String(r.data?.answer ?? '')
-  const from = r.data?.member || slug
+  const from = displayName(slug)   // 不用 Aegis 回的 member（是拼音 slug），否則回信會像另一個視窗寄的
   log(`id=${m.id} ${who} to=${slug} status=${status} (${Date.now() - t0}ms)`)
   if (r.http >= 200 && r.http < 300 && status === 'success') return replyAndAck(m, answer || '(空回覆)', from)
   return replyAndAck(m, `[Aegis] 對方回報狀態 ${status ?? `HTTP ${r.http}`}${answer ? `：${answer}` : ''}`, from)

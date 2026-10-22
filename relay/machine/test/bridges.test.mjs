@@ -114,9 +114,9 @@ test('aegis: 白名單、成功帶 reply_to、error 重試一次、404、其他 
     // 白名單擋下：沒有 ask 打到 Aegis
     assert.match(by(2)[0].body, /沒有開放聯絡/)
     assert.equal(st.asks.filter(a => a.target === 'secret').length, 0)
-    // 成功：reply_to、from_agent=member slug、寄回原寄件人；question 帶標頭、from_member、stream=false
+    // 成功：reply_to、from_agent＝名單上的名字（中文名優先，與 roster 一致）、寄回原寄件人；question 帶標頭、from_member、stream=false
     assert.equal(by(3).length, 1)
-    assert.equal(by(3)[0].body, '你好 alpha 的答案'); assert.equal(by(3)[0].from_agent, 'alpha')
+    assert.equal(by(3)[0].body, '你好 alpha 的答案'); assert.equal(by(3)[0].from_agent, '阿爾法')
     assert.equal(by(3)[0].to_node, 'W'); assert.equal(by(3)[0].to_agent, 'W-政策')
     const ask = st.asks.find(a => a.target === 'alpha')
     assert.equal(ask.question, '這是透過仲介轉來的信：from=W/W-政策 trust=member\n內文-3')
@@ -156,12 +156,12 @@ test('aegis: to_agent 可用中文名；沒有 to_agent 交給預設成員（要
       until: () => st.acked.size >= 3,
     })
     const by = n => st.sent.filter(s => s.reply_to === uid(n))
-    // 中文名 → slug：打到 Aegis 的 target 是 slug，回信 from_agent 是實際回答的成員
+    // 中文名 → slug：打到 Aegis 的 target 是 slug，回信 from_agent 是名單上的名字（中文名）
     assert.deepEqual(st.asks.filter(a => a.question.endsWith('內文-1')).map(a => a.target), ['alpha'])
-    assert.equal(by(1)[0].body, '阿爾法答'); assert.equal(by(1)[0].from_agent, 'alpha')
+    assert.equal(by(1)[0].body, '阿爾法答'); assert.equal(by(1)[0].from_agent, '阿爾法')
     // 沒有 to_agent → 預設成員 aegis
     assert.deepEqual(st.asks.filter(a => a.question.endsWith('內文-2')).map(a => a.target), ['aegis'])
-    assert.equal(by(2)[0].body, '總管答'); assert.equal(by(2)[0].from_agent, 'aegis')
+    assert.equal(by(2)[0].body, '總管答'); assert.equal(by(2)[0].from_agent, '愛吉絲')
     // 對不上的名字照舊擋下
     assert.match(by(3)[0].body, /沒有開放聯絡/)
     assert.equal(st.asks.length, 2)
