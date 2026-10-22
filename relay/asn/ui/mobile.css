@@ -9,7 +9,9 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;text-align:center;color:var(--title-fg)}
 .m-logo{width:72px;height:72px}
 .m-login{flex:1;display:flex;align-items:center;justify-content:center;padding:16px;overflow-y:auto}
-.m-login-card{width:100%;max-width:420px;display:flex;flex-direction:column;align-items:stretch;gap:12px;padding:24px 20px;border:1px solid var(--line);border-radius:10px;background:var(--panel);box-shadow:0 6px 24px rgba(0,30,70,.25);text-align:center}
+/* 登入畫面：直式背景圖鋪滿整個畫面，底部草地對齊畫面底部（連狀態列、手勢列內距那一圈也一起鋪） */
+.m.is-login{background:url(img/login-bg-mobile.webp) center bottom/cover no-repeat,linear-gradient(180deg,var(--glass-top),var(--glass-bottom))}
+.m-login-card{width:100%;max-width:420px;display:flex;flex-direction:column;align-items:stretch;gap:12px;padding:24px 20px;border:1px solid rgba(255,255,255,.85);border-radius:14px;background:rgba(255,255,255,.8);box-shadow:0 6px 24px rgba(0,30,70,.25);text-align:center}
 .m-login-card .login-avatar{align-self:center}
 .m-login-card .login-h{margin:0;font-size:22px}
 .m-login-card .login-sub,.m-login-card .login-note{margin:0;color:var(--muted);line-height:1.5}
@@ -29,13 +31,19 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-icon-btn:disabled{opacity:.5}
 
 /* 頁面骨架：上面標題列、中間可捲動、下面分頁列 */
-.m-page,.m-chat{flex:1;min-height:0;display:flex;flex-direction:column}
-.m-head{flex:none;display:flex;align-items:center;gap:10px;min-height:56px;padding:6px 10px;color:var(--title-fg)}
+.m-page,.m-chat{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.m-head{flex:none;display:flex;align-items:center;gap:10px;height:60px;overflow:hidden;padding:6px 10px;color:var(--title-fg)}
 .m-head-tx{flex:1;min-width:0}
-.m-title{font-weight:800;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 0 8px #fff,0 0 2px #fff}
+.m-title{font-weight:800;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 0 8px #fff,0 0 2px #fff}
 .m-conn{display:flex;align-items:center;gap:5px;font-size:12px;color:#27496e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .m-conn .dot{margin-top:0}
-.m-me{flex:none;border:0;background:none;padding:0;cursor:pointer;line-height:0}
+.m-me{flex:none;width:48px;height:48px;border:0;background:none;padding:2px;cursor:pointer;line-height:0;display:grid;place-items:center}
+/* 標題列的大頭貼：固定 44px 圓形（外框顏色＝狀態），不沿用電腦版的 .dp 相框，免得被撐滿 */
+/* （不能叫 .m-av：那是 ChatPane 訊息旁頭像的類別名） */
+.m-pic{--frame:var(--online);flex:none;display:block;width:44px;height:44px;max-width:44px;max-height:44px;object-fit:cover;border-radius:50%;border:3px solid var(--frame);background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.m-pic-lg{width:112px;height:112px;max-width:112px;max-height:112px;border-width:4px}
+.m-pic.st-busy{--frame:var(--busy)} .m-pic.st-away{--frame:var(--away)} .m-pic.st-offline{--frame:var(--offline);filter:grayscale(.65)}
+.m-conn-tx{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .m-scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;margin:0 8px;background:var(--panel);border:1px solid var(--line);border-bottom:0;border-radius:8px 8px 0 0}
 .m-tabs{flex:none;display:flex;margin:0 8px 8px;border:1px solid var(--line);border-top:0;border-radius:0 0 8px 8px;overflow:hidden;background:var(--panel-soft)}
 .m-tabs button{position:relative;flex:1;min-height:52px;border:0;background:none;color:var(--muted);font-weight:600;cursor:pointer}
@@ -60,7 +68,7 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-meview{padding:12px;display:flex;flex-direction:column;gap:12px}
 .m-card{display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--panel-soft)}
 .m-card:first-child{align-items:center}
-.m-av-big{border:0;background:none;padding:0;line-height:0;cursor:pointer}
+.m-av-big{border:0;background:none;padding:0;line-height:0;cursor:pointer;display:grid;place-items:center}
 .m-hint,.m-note,.m-ver{margin:0;font-size:13px;color:var(--muted);text-align:center}
 .m-err{margin:0;font-size:13px;color:var(--busy)}
 .m-form label{display:flex;flex-direction:column;gap:6px;font-size:14px;color:var(--title-fg)}
@@ -78,7 +86,7 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 @media (prefers-reduced-motion:reduce){.m-banner{animation:none}}
 
 /* 對話：ChatPane 的版面在小螢幕上收緊，觸控目標放大 */
-.m-chathead{min-height:56px}
+.m-chathead{height:60px}
 .m-chat.shake{animation:m-shake .7s}
 @keyframes m-shake{0%,100%{transform:none}15%{transform:translateX(-10px)}30%{transform:translateX(9px)}45%{transform:translateX(-7px)}60%{transform:translateX(6px)}75%{transform:translateX(-3px)}}
 @media (prefers-reduced-motion:reduce){.m-chat.shake{animation:none}}

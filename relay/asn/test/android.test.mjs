@@ -154,7 +154,34 @@ test('手機頁面：不載電腦端的樣式與腳本；觸控目標有放大�
   const css = read('ui', 'mobile.css')
   assert.match(css, /min-height:\s*44px/, '觸控目標至少 44px')
   assert.match(css, /\.m button,\.m input,\.m select,\.m textarea\{font-size:16px\}/, '16px 以上，輸入時不會被放大')
+  // 標題列的大頭貼固定小圓形：不用電腦版的 .dp 相框（曾被撐滿半個螢幕），且 CSS 明訂尺寸上限
+  assert.doesNotMatch(html, /class="m-(me|av-big)"[^>]*>\s*<span class="dp/, '按鈕裡的大頭貼不用 .dp 相框（手機上會被撐滿或縮成一條綠線）')
+  assert.doesNotMatch(html, /class="dp (xl|lg)/, '手機頁面不放電腦版的大尺寸相框')
+  assert.match(html, /<img class="m-pic"[^>]*width="44" height="44"/)
+  assert.match(html, /<img class="m-pic m-pic-lg"[^>]*width="112" height="112"/)
+  assert.doesNotMatch(css, /^\.m-av[\s,{:.]/m, '.m-av 是 ChatPane 訊息頭像的類別，不能拿來改')
+  const lg = /\.m-pic-lg\{[^}]*\}/.exec(css)[0]
+  assert.ok(Number(/max-width:(\d+)px/.exec(lg)[1]) <= 120, '「我」的大頭貼上限 120px')
+  const av = /\.m-pic\{[^}]*\}/.exec(css)[0]
+  const px = k => Number(new RegExp(`${k}:(\\d+)px`).exec(av)?.[1])
+  assert.ok(px('width') <= 48 && px('height') <= 48 && px('max-width') <= 48 && px('max-height') <= 48, '標題列大頭貼尺寸上限 48px')
+  assert.match(css, /\.m-head\{[^}]*height:\d+px;[^}]*overflow:hidden/, '標題列固定高度')
   for (const f of ['list.html', 'chat.html', 'login.html']) assert.doesNotMatch(read('ui', f), /mobile\.css|m\.js/, f)
+})
+
+test('登入畫面背景：電腦版與手機版各用一張 MSN 風背景，cover＋草地對齊底部；表單區有半透明白底保持可讀', () => {
+  for (const [f, w, h] of [['login-bg-desktop.webp', 1600, 1000], ['login-bg-mobile.webp', 1080, 2340]]) {
+    const b = fs.readFileSync(path.join(root, 'ui', 'img', f))
+    assert.equal(b.subarray(0, 4).toString(), 'RIFF'); assert.equal(b.subarray(8, 12).toString(), 'WEBP')
+    assert.ok(b.length < 100 * 1024, `${f} 不要太大`)
+  }
+  const style = read('ui', 'style.css'), mcss = read('ui', 'mobile.css')
+  assert.match(style, /\.login-pane\{[^}]*url\(img\/login-bg-desktop\.webp\) center bottom\/cover no-repeat/)
+  assert.match(mcss, /\.m\.is-login\{[^}]*url\(img\/login-bg-mobile\.webp\) center bottom\/cover no-repeat/)
+  assert.doesNotMatch(mcss, /login-bg-desktop/); assert.doesNotMatch(style, /login-bg-mobile/)
+  assert.match(style, /\.login-card\{[^}]*background:rgba\(255,255,255,\.\d+\)/)
+  assert.match(mcss, /\.m-login-card\{[^}]*background:rgba\(255,255,255,\.\d+\)/)
+  assert.match(read('ui', 'm.html'), /'is-login': screen === 'login'/)
 })
 
 test('文件與資源：設計文件存在，說明套件名、登入方式、限制', () => {

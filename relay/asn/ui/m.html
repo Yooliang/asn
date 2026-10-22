@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="mobile.css">
 </head>
 <body class="m-body">
-<div id="app" class="m" v-cloak>
+<div id="app" class="m" :class="{ 'is-login': screen === 'login' }" v-cloak>
   <!-- 啟動中、無法啟動 -->
   <section class="m-center" v-if="screen === 'boot'"><img class="m-logo" src="img/logo.svg" alt=""><p>啟動中…</p></section>
   <section class="m-center" v-else-if="screen === 'fatal'"><img class="m-logo" src="img/logo.svg" alt=""><p role="alert">ASN 無法啟動：{{ fatal }}</p></section>
@@ -37,11 +37,11 @@
     <!-- 名單與「我」 -->
     <section class="m-page" v-show="!nav.chat">
       <header class="m-head">
-        <button class="m-me" type="button" aria-label="我" @click="goMe"><span class="dp sm" :class="'st-' + me.status"><span><img :src="meAv" alt=""></span></span></button>
+        <button class="m-me" type="button" aria-label="我" @click="goMe"><img class="m-pic" :class="'st-' + me.status" :src="meAv" alt="" width="44" height="44"></button>
         <div class="m-head-tx">
-          <div class="m-title" v-if="nav.tab === 'list'">ASN</div>
+          <div class="m-title" v-if="nav.tab === 'list'">{{ me.nick }}</div>
           <div class="m-title" v-else>我</div>
-          <div class="m-conn" v-if="nav.tab === 'list'"><span class="dot" :class="conn === 'on' ? 'st-online' : conn === 'off' ? 'st-busy' : 'st-away'"></span>{{ CONN_LABEL[conn] }}</div>
+          <div class="m-conn" v-if="nav.tab === 'list'"><span class="dot" :class="conn === 'on' ? 'st-online' : conn === 'off' ? 'st-busy' : 'st-away'"></span><span class="m-conn-tx">{{ conn === 'on' ? STATUS[me.status] : CONN_LABEL[conn] }}<template v-if="conn === 'on' && me.psm"> · {{ me.psm }}</template></span></div>
         </div>
         <button class="m-icon-btn" type="button" aria-label="重新整理" v-if="nav.tab === 'list'" :disabled="refreshing" @click="refreshAll">⟳</button>
       </header>
@@ -71,7 +71,7 @@
       <div class="m-scroll m-meview" v-else>
         <input ref="avFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden @change="pickAvatar">
         <div class="m-card">
-          <button class="m-av-big" type="button" :disabled="avBusy" aria-label="換大頭貼" @click="avFile.click()"><span class="dp xl" :class="'st-' + me.status"><span><img :src="meAv" alt=""></span></span></button>
+          <button class="m-av-big" type="button" :disabled="avBusy" aria-label="換大頭貼" @click="avFile.click()"><img class="m-pic m-pic-lg" :class="'st-' + me.status" :src="meAv" alt="" width="112" height="112"></button>
           <p class="m-hint">點一下換大頭貼</p>
           <button class="m-link" type="button" v-if="selfHasUpload" :disabled="avBusy" @click="removeAvatar">改回自動產生</button>
           <p class="m-note" v-if="avMsg" role="status">{{ avMsg }}</p>
@@ -103,7 +103,7 @@
     <section class="m-chat" v-if="nav.chat" :class="{ shake }">
       <header class="m-head m-chathead">
         <button class="m-icon-btn" type="button" aria-label="返回" @click="back">‹</button>
-        <span class="dp sm" v-if="chatFriend" :class="'st-' + chatFriend.status"><span><img :src="avOf(chatFriend)" alt=""></span></span>
+        <img class="m-pic" v-if="chatFriend" :class="'st-' + chatFriend.status" :src="avOf(chatFriend)" alt="" width="44" height="44">
         <div class="m-head-tx">
           <div class="m-title" v-html="emo(chatFriend ? chatFriend.nick : '對話')"></div>
           <div class="m-conn" v-if="chatFriend">{{ STATUS[chatFriend.status] }}<template v-if="chatFriend.psm"> · <span v-html="emo(chatFriend.psm)"></span></template></div>
