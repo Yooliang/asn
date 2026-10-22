@@ -53,8 +53,16 @@ fn home(name: Option<&str>) -> tempfile::TempDir {
 }
 
 fn run(exe: &str, home: &std::path::Path, url: &str, args: &[&str]) -> (i32, String, String) {
+    run_with(exe, home, &[("IRORI_RELAY_ID", "T"), ("IRORI_RELAY_URL", url)], args)
+}
+
+/// envs＝要設的環境變數（其他一律清空）。舊名、新名、兩個都設的相容測試都走這裡。
+fn run_with(exe: &str, home: &std::path::Path, envs: &[(&str, &str)], args: &[&str]) -> (i32, String, String) {
     let mut c = Command::new(exe);
-    c.args(args).env_clear().env("USERPROFILE", home).env("HOME", home).env("IRORI_RELAY_ID", "T").env("IRORI_RELAY_URL", url);
+    c.args(args).env_clear().env("USERPROFILE", home).env("HOME", home);
+    for (k, v) in envs {
+        c.env(k, v);
+    }
     for k in ["PATH", "SystemRoot", "TEMP", "TMP"] {
         if let Some(v) = std::env::var_os(k) {
             c.env(k, v);
@@ -108,4 +116,26 @@ fn asn_主程式遇到子命令_不開視窗_直接跑命令列() {
     assert_eq!(code, 0, "{err}");
     assert!(out.starts_with("sent id="), "{out}");
     assert_eq!(seen.lock().unwrap().len(), 1);
+}
+
+/// 環境變數改名相容：只設舊名（上面的測試）、只設新名、兩個都設（以新名為準）都要能寄信。
+#[test]
+fn asn_cli_環境變數_只設新名也行_兩個都設以新名為準() {
+    let (url, seen) = fake();
+    let h = home(Some("T-測試視窗"));
+    // 只設新名
+    let (code, out, err) = run_with(env!("CARGO_BIN_EXE_asn-cli"), h.path(), &[("ASN_RELAY_ID", "T"), ("ASN_RELAY_URL", &url)], &["send", "--to", "XISU", "--body", "x", "--no-reply"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.starts_with("sent id="), "{out}");
+    assert_eq!(seen.lock().unwrap().len(), 1);
+    // 兩個都設：舊名指向不通的埠、舊代號不存在，仍以新名為準
+    let (code, out, err) = run_with(
+        env!("CARGO_BIN_EXE_asn-cli"),
+        h.path(),
+        &[("ASN_RELAY_ID", "T"), ("ASN_RELAY_URL", &url), ("IRORI_RELAY_ID", "NOPE"), ("IRORI_RELAY_URL", "http://127.0.0.1:9/relay")],
+        &["send", "--to", "XISU", "--body", "y", "--no-reply"],
+    );
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("from=T/T-測試視窗"), "{out}");
+    assert_eq!(seen.lock().unwrap().len(), 2);
 }

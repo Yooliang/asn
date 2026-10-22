@@ -30,7 +30,7 @@ export function readNameIndex(home) {
 const LOCK_RE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.lock$/i
 const PROBE_PS = [
   '$ErrorActionPreference = "Stop"',
-  'foreach ($f in ($env:IRORI_LOCK_FILES -split "`n")) {',
+  'foreach ($f in ($env:ASN_LOCK_FILES -split "`n")) {',
   '  if (-not $f) { continue }',
   '  try { $s = [System.IO.File]::Open($f, "Open", "ReadWrite", "None"); $s.Close() }',
   '  catch [System.IO.FileNotFoundException] { }',
@@ -55,7 +55,7 @@ export async function lockedThreadIds(home, { mode = 'auto', env = process.env, 
   const files = cands.map(x => path.join(dir, x.n)).join('\n')
   try {
     const out = await new Promise((resolve, reject) => execFile(psExe, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
-      { env: { ...env, IRORI_LOCK_FILES: files }, windowsHide: true, timeout: 15_000, encoding: 'utf8' }, (e, so) => (e ? reject(e) : resolve(so))))
+      { env: { ...env, ASN_LOCK_FILES: files, IRORI_LOCK_FILES: files }, windowsHide: true, timeout: 15_000, encoding: 'utf8' }, (e, so) => (e ? reject(e) : resolve(so))))
     return new Set(String(out).split(/\r?\n/).map(s => s.trim().toLowerCase()).filter(s => byFile.has(s)).map(s => byFile.get(s)))
   } catch (e) {
     log(`codex lock probe failed (${e.message.split('\n')[0]}); 退而求其次：只看鎖檔在不在`)

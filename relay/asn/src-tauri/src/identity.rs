@@ -1,6 +1,6 @@
 //! 本機身分：節點代號、節點金鑰、anon 金鑰、BASE_URL。判定順序照 relay/machine/identity.mjs：
-//! 節點＝IRORI_RELAY_ID → ~/.irori-relay/node → 橋正在跑的 machine-<ID> → 唯一有金鑰檔的 machine-<ID>。
-//! 金鑰＝IRORI_RELAY_KEY → ~/.irori-relay/<節點>.key。金鑰只在 Rust 記憶體，絕不進 log、不傳前端。
+//! 節點＝ASN_RELAY_ID（舊名 IRORI_RELAY_ID）→ ~/.irori-relay/node → 橋正在跑的 machine-<ID> → 唯一有金鑰檔的 machine-<ID>。
+//! 金鑰＝ASN_RELAY_KEY（舊名 IRORI_RELAY_KEY）→ ~/.irori-relay/<節點>.key。金鑰只在 Rust 記憶體，絕不進 log、不傳前端。
 use crate::heartbeat::pid_alive;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -62,7 +62,7 @@ pub fn machine_node(relay_home: &Path, env_id: Option<String>, alive: impl Fn(u3
     }
     let cand = if !live.is_empty() { live } else if !keyed.is_empty() { keyed } else { ids.iter().collect() };
     Err(format!(
-        "認不出這台機器的節點代號（候選：{}）：設環境變數 IRORI_RELAY_ID，或在 ~/.irori-relay/node 寫上節點代號",
+        "認不出這台機器的節點代號（候選：{}）：設環境變數 ASN_RELAY_ID，或在 ~/.irori-relay/node 寫上節點代號",
         if cand.is_empty() { "無".to_string() } else { cand.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("、") }
     ))
 }
@@ -135,13 +135,13 @@ pub struct Identity {
 
 pub fn resolve() -> Result<Identity, String> {
     let relay_home = relay_home();
-    let node = machine_node(&relay_home, std::env::var("IRORI_RELAY_ID").ok(), pid_alive)?;
+    let node = machine_node(&relay_home, crate::envc::get("ASN_RELAY_ID"), pid_alive)?;
     if !valid_id(&node) {
         return Err(format!("節點代號格式不對：{node}"));
     }
-    let key = read_key(&relay_home, &node, std::env::var("IRORI_RELAY_KEY").ok())?;
-    let url = base_url(std::env::var("IRORI_RELAY_URL").ok());
-    let anon = read_anon(&relay_home, std::env::var("IRORI_RELAY_ANON_KEY").ok(), &url);
+    let key = read_key(&relay_home, &node, crate::envc::get("ASN_RELAY_KEY"))?;
+    let url = base_url(crate::envc::get("ASN_RELAY_URL"));
+    let anon = read_anon(&relay_home, crate::envc::get("ASN_RELAY_ANON_KEY"), &url);
     Ok(Identity { node, base_url: url, relay_home, key, anon })
 }
 

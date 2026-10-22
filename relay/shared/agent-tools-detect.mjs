@@ -39,9 +39,15 @@ export function toolsList(map) {
   return LAUNCH_TOOL_IDS.map(id => map[id]).filter(Boolean)
 }
 
+// 測試用假執行檔資料夾：ASN_MOCK_BIN_DIR 優先，沒設才讀舊名 IRORI_ASN_MOCK_BIN_DIR（#14 第一期改名相容）
+export function mockBinDir(env = process.env) {
+  const n = String(env.ASN_MOCK_BIN_DIR ?? '').trim()
+  return n || String(env.IRORI_ASN_MOCK_BIN_DIR ?? '').trim()
+}
+
 async function defaultLookup(name, { platform, pathEnv }) {
-  if (process.env.IRORI_ASN_MOCK_BIN_DIR) {
-    const base = process.env.IRORI_ASN_MOCK_BIN_DIR
+  const base = mockBinDir()
+  if (base) {
     const win = path.join(base, `${name}.exe`)
     const nx = path.join(base, name)
     if (fs.existsSync(win)) return win

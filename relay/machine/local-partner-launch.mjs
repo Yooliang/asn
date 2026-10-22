@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // 本機開新夥伴（ASN 或命令列）：不經後台 launch 流程。
 // 互動視窗：直接 spawn；背景工作者：寫入 partner-queue.jsonl 由機器橋消化。
+import { envGet } from './env-compat.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -13,7 +14,7 @@ import { createPartnerQueue } from './partner-background.mjs'
 const here = path.dirname(fileURLToPath(import.meta.url))
 
 function parseArgs(argv) {
-  const out = { profile: '', name: '', cwd: '', node: process.env.IRORI_RELAY_ID || 'H', queueOnly: false, display: 'foreground' }
+  const out = { profile: '', name: '', cwd: '', node: envGet(process.env, 'RELAY_ID') || 'H', queueOnly: false, display: 'foreground' }
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--profile') out.profile = argv[++i] ?? ''
@@ -39,7 +40,7 @@ async function main() {
   }
   const home = path.join(os.homedir(), '.irori-relay')
   const workDir = path.join(home, `machine-${args.node}`)
-  const configPath = process.env.IRORI_LAUNCHER_FILE || path.join(home, 'launcher.json')
+  const configPath = envGet(process.env, 'LAUNCHER_FILE') || path.join(home, 'launcher.json')
   const tools = await detectAgentTools()
   const bootstrap = { profiles: buildDefaultProfiles(tools), cwd_allow: defaultCwdAllow(), max_per_hour: 6 }
   const { config, error } = loadConfig(configPath, bootstrap)
@@ -61,16 +62,16 @@ async function main() {
     console.log(JSON.stringify({ ok: true, mode: 'background', queued: true }))
     return
   }
-  const prevStyle = process.env.IRORI_LAUNCH_WINDOW_STYLE
-  if (args.display === 'background') process.env.IRORI_LAUNCH_WINDOW_STYLE = 'Hidden'
+  const prevStyle = envGet(process.env, 'LAUNCH_WINDOW_STYLE')
+  if (args.display === 'background') envGet(process.env, 'LAUNCH_WINDOW_STYLE') = 'Hidden'
   try {
     const spawnSpec = buildSpawn(config, req, process.env, childEnv)
     const started = await startWindow(spawnSpec)
     console.log(JSON.stringify({ ok: true, mode: 'window', pid: started.pid, display: args.display }))
   } finally {
     if (args.display === 'background') {
-      if (prevStyle === undefined) delete process.env.IRORI_LAUNCH_WINDOW_STYLE
-      else process.env.IRORI_LAUNCH_WINDOW_STYLE = prevStyle
+      if (prevStyle === undefined) delete envGet(process.env, 'LAUNCH_WINDOW_STYLE')
+      else envGet(process.env, 'LAUNCH_WINDOW_STYLE') = prevStyle
     }
   }
 }

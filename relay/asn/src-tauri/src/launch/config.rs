@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 const HOUR_MS: u64 = 3_600_000;
 
 pub fn launcher_config_path() -> PathBuf {
-    std::env::var_os("IRORI_LAUNCHER_FILE")
+    crate::envc::get_os("ASN_LAUNCHER_FILE")
         .map(PathBuf::from)
         .unwrap_or_else(|| relay_home().join("launcher.json"))
 }
@@ -227,11 +227,15 @@ pub fn child_env() -> std::collections::HashMap<String, String> {
 }
 
 pub fn child_env_from(vars: impl Iterator<Item = (String, String)>) -> std::collections::HashMap<String, String> {
-    vars.filter(|(k, _)| {
-        let u = k.to_ascii_uppercase();
-        u == "CLAUDE_CONFIG_DIR" || !(u.starts_with("CLAUDE") || u == "NO_COLOR" || u == "IRORI_RELAY_KEY" || u == "IRORI_RELAY_ANON_KEY")
-    })
-    .collect()
+    let mut out: std::collections::HashMap<String, String> = vars
+        .filter(|(k, _)| {
+            let u = k.to_ascii_uppercase();
+            u == "CLAUDE_CONFIG_DIR" || !(u.starts_with("CLAUDE") || u == "NO_COLOR" || crate::envc::is_secret(&u))
+        })
+        .collect();
+    // 登記過的非金鑰變數新舊名都帶（沒更新的舊程式照樣讀得到）
+    crate::envc::mirror(&mut out);
+    out
 }
 
 pub fn build_spawn_spec(config: &LaunchConfig, req: &LaunchReq<'_>) -> Result<(String, Vec<String>, PathBuf), String> {
@@ -257,6 +261,17 @@ mod child_env_tests {
         let mut keys: Vec<_> = env.keys().cloned().collect();
         keys.sort();
         assert_eq!(keys, ["CLAUDE_CONFIG_DIR", "PATH", "WT_SESSION"]);
+    }
+
+    #[test]
+    fn 金鑰新舊名都擋_非金鑰的改名變數新舊名都帶() {
+        let vars = [("PATH", "p"), ("ASN_RELAY_KEY", "k1"), ("asn_relay_anon_key", "a1"), ("IRORI_RELAY_KEY", "k2"), ("IRORI_RELAY_ANON_KEY", "a2"), ("ASN_RELAY_ID", "N"), ("IRORI_RELAY_URL", "http://127.0.0.1:1")];
+        let env = child_env_from(vars.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+        let mut keys: Vec<_> = env.keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, ["ASN_RELAY_ID", "ASN_RELAY_URL", "IRORI_RELAY_ID", "IRORI_RELAY_URL", "PATH"]);
+        assert_eq!(env["IRORI_RELAY_ID"], "N");
+        assert_eq!(env["ASN_RELAY_URL"], "http://127.0.0.1:1");
     }
 
     /// 守門：每個開視窗的地方（一般主控台、Linux 終端機、換模型重開的 WT 分頁）都要換成乾淨的環境，不然字會變純白

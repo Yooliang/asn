@@ -46,7 +46,7 @@ test('設定頁區塊：未登入只有登入鈕；已登入只有 email 與登�
   const notMine = accountView({ signed_in: true, email: 'a@b.c' }, { node_count: 3, this_node_mine: false })
   assert.equal(notMine.title, '已登入：a@b.c')
   assert.equal(notMine.detail, PENDING_HINT)
-  assert.match(PENDING_HINT, /尚未綁到你的帳號.*管理者認領後會自動完成/)
+  assert.match(PENDING_HINT, /尚未綁到你的帳號.*認領後會自動完成/)
   assert.ok(!('canClaim' in notMine), '沒有「連到帳號」按鈕這回事')
 
   const mine = accountView({ signed_in: true, email: 'a@b.c' }, { node_count: 16, this_node_mine: true })
@@ -111,7 +111,7 @@ test('守門：沒登入（且沒選暫時不登入）或沒有節點金鑰時�
 
 test('守門：只有 --shot 才有假登入，而且「暫時不登入」在沒有金鑰時會被 Rust 端擋下', () => {
   const lib = read('src-tauri/src/lib.rs')
-  const at = lib.indexOf('IRORI_ASN_SHOT_LOGIN')
+  const at = lib.indexOf('ASN_SHOT_LOGIN')
   assert.ok(at > 0 && lib.slice(Math.max(0, at - 200), at).includes('if shot.is_some()'))
   const acct = read('src-tauri/src/account.rs')
   const fn = acct.slice(acct.indexOf('pub fn auth_skip_login'), acct.indexOf('pub fn auth_skip_login') + 400)

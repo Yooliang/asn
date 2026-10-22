@@ -400,8 +400,9 @@ test('launcher.json：profile 可指定 engine；buildSpawn 帶出 name 與 engi
 
 test('子行程環境：清 OPENAI_API_KEY／CODEX_API_KEY／視窗識別／CLAUDE*／仲介金鑰，保留 CODEX_HOME 與其他', () => {
   const out = codexChildEnv({ PATH: 'p', CODEX_HOME: 'h', OPENAI_API_KEY: 'sk-x', CODEX_API_KEY: 'k', CODEX_THREAD_ID: 't', CODEX_SESSION_ID: 's', CODEX_CI: '1', CODEX_SANDBOX_NETWORK_DISABLED: '1',
-    CLAUDECODE: '1', NO_COLOR: '1', IRORI_RELAY_KEY: 'k', IRORI_RELAY_ANON_KEY: 'a', IRORI_RELAY_ID: 'H' })
-  assert.deepEqual(out, { PATH: 'p', CODEX_HOME: 'h', IRORI_RELAY_ID: 'H' })
+    CLAUDECODE: '1', NO_COLOR: '1', IRORI_RELAY_KEY: 'k', IRORI_RELAY_ANON_KEY: 'a', ASN_RELAY_KEY: 'k2', ASN_RELAY_ANON_KEY: 'a2', IRORI_RELAY_ID: 'H' })
+  // 金鑰新舊名都擋；非金鑰的改名變數新舊名都帶
+  assert.deepEqual(out, { PATH: 'p', CODEX_HOME: 'h', IRORI_RELAY_ID: 'H', ASN_RELAY_ID: 'H' })
 })
 
 // ---------------------------------------------------------------- 讓 bridge.mjs 載入 codex 轉接器跑主流程

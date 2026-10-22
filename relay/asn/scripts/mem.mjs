@@ -8,7 +8,7 @@ import { defaultExe, demoMembers } from './shot.mjs'
 
 const relay = await startFakeRelay({ node: 'H', members: demoMembers })
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-mem-'))
-const env = { ...process.env, IRORI_RELAY_URL: relay.url, IRORI_RELAY_ID: 'H', IRORI_RELAY_KEY: FAKE_KEY, IRORI_RELAY_ANON_KEY: '', USERPROFILE: tmp, HOME: tmp, IRORI_ASN_DATA: path.join(tmp, 'd'), WEBVIEW2_USER_DATA_FOLDER: path.join(tmp, 'w') }
+const env = { ...process.env, ASN_RELAY_URL: relay.url, ASN_RELAY_ID: 'H', ASN_RELAY_KEY: FAKE_KEY, ASN_RELAY_ANON_KEY: '', USERPROFILE: tmp, HOME: tmp, ASN_DATA: path.join(tmp, 'd'), WEBVIEW2_USER_DATA_FOLDER: path.join(tmp, 'w') }
 const child = spawn(process.argv[2] ?? defaultExe, [], { env, stdio: 'ignore' })
 await new Promise(r => setTimeout(r, 25_000))
 const ps = `$all=Get-CimInstance Win32_Process; $ids=@(${child.pid}); do{$n=$ids.Count; $ids=@($ids)+@($all|?{$ids -contains $_.ParentProcessId}|%{$_.ProcessId})|sort -Unique}while($ids.Count -gt $n); $all|?{$ids -contains $_.ProcessId}|%{ "$($_.Name) $($_.ProcessId) $([math]::Round($_.WorkingSetSize/1MB,1))" }`

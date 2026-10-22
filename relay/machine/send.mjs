@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // irori-send：本機 Claude 視窗主動寄信給仲介成員／群組，不經收發室、不經任何模型。
-//   node send.mjs --to XISU --body "內文" --reply|--no-reply [--reply-to <信件id>]
+//   node send.mjs --to PC1 --body "內文" --reply|--no-reply [--reply-to <信件id>]
 //   node send.mjs --to W/W-政策 --body-file msg.txt --no-reply
 //   node send.mjs --room <群組id> --body "內文"
-//   echo 內文 | node send.mjs --to XISU --body - --reply
+//   echo 內文 | node send.mjs --to PC1 --body - --reply
 //   node send.mjs --to W/W-政策 --file 報告.pdf --file 截圖.webp --body "說明" --no-reply   # 寄檔案／照片（內文可省略）
 // 寄給成員／視窗（--to，含回信 --reply-to）一定要明說要不要回信：--reply＝我在等回信（收發室 10 分鐘沒收到回覆會提醒）、
 // --no-reply＝只是告知；結果以 expects_reply 欄位送給後端，【不往內文加任何標記】（內文有沒有標記沒辦法用程式可靠判斷）。
@@ -11,6 +11,7 @@
 // 用這台機器的節點金鑰（~/.irori-relay/<節點>.key，橋用的同一把）直接呼叫 relay。
 // 寄件視窗名不能自填：沿父行程鏈往上找 claude 程序，對照 ~/.claude/sessions/<pid>.json 的 name 當 from_agent；找不到就拒絕。
 // 輸出 `sent id=…`（或 `posted room=… seq=…`）；錯誤印到 stderr，exit code：1 用法／內容、2 認不出呼叫者、3 超量、4 後端錯誤。
+import { envGet } from './env-compat.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -22,7 +23,7 @@ import { BASE_URL, Fail, HOME_DIR, findCaller, inspectCaller, machineNode, readM
 
 export { findCaller, inspectCaller }
 
-const LIMIT = Number(process.env.IRORI_SEND_PER_HOUR || 30)
+const LIMIT = Number(envGet(process.env, 'SEND_PER_HOUR') || 30)
 const MAX_BODY = 20000
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const ID_RE = /^[A-Za-z0-9_-]{1,32}$/
@@ -100,7 +101,7 @@ function takeRate(window) {
 }
 
 // 視窗直接回信（--reply-to）後在本機留記號：機器橋看到就不再寄「10 分鐘內沒有收到回覆」——
-// 不然對方會同時收到真的回信和一封「沒回」，希緒把兩封一起轉述時就說成沒回
+// 不然對方會同時收到真的回信和一封「沒回」，收件的人把兩封一起轉述時就說成沒回
 export const repliedDir = node => path.join(HOME_DIR, `machine-${node}`, 'replied')
 function markReplied(node, mailId) {
   try { fs.mkdirSync(repliedDir(node), { recursive: true }); fs.writeFileSync(path.join(repliedDir(node), mailId), String(Date.now())) } catch {}

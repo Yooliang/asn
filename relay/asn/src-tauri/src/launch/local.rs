@@ -200,8 +200,8 @@ fn start_window_windows(title: &str, command: &str, args: &[String], cwd: &Path,
     // 使用者只看到「沒有回傳 PID」。這裡 Stop + catch，錯誤原文走 stderr 並以結束碼 1 回報。
     let script = r#"
 $ErrorActionPreference = 'Stop'
-$a = $env:IRORI_LAUNCH_ARGS; $d = $env:IRORI_LAUNCH_DIR; $w = $env:IRORI_LAUNCH_STYLE
-Remove-Item env:IRORI_LAUNCH_ARGS, env:IRORI_LAUNCH_DIR, env:IRORI_LAUNCH_STYLE -ErrorAction SilentlyContinue
+$a = $env:ASN_LAUNCH_ARGS; $d = $env:ASN_LAUNCH_DIR; $w = $env:ASN_LAUNCH_STYLE
+Remove-Item env:ASN_LAUNCH_ARGS, env:ASN_LAUNCH_DIR, env:ASN_LAUNCH_STYLE, env:IRORI_LAUNCH_ARGS, env:IRORI_LAUNCH_DIR, env:IRORI_LAUNCH_STYLE -ErrorAction SilentlyContinue
 if (-not $w) { $w = 'Normal' }
 try {
   $p = Start-Process -FilePath ($env:SystemRoot + '\System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $a -WorkingDirectory $d -WindowStyle $w -PassThru
@@ -220,6 +220,9 @@ try {
         .env_clear()
         .envs(super::config::child_env())
         .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script])
+        .env("ASN_LAUNCH_ARGS", window_launcher_args(title, command, args))
+        .env("ASN_LAUNCH_DIR", &cwd_s)
+        .env("ASN_LAUNCH_STYLE", style)
         .env("IRORI_LAUNCH_ARGS", window_launcher_args(title, command, args))
         .env("IRORI_LAUNCH_DIR", &cwd_s)
         .env("IRORI_LAUNCH_STYLE", style)

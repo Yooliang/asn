@@ -3,6 +3,7 @@
 // - 摘要（profile 名與標籤、cwd 白名單、上限；不含指令）附在 roster 回報給仲介，手機的表單才有下拉選單
 // - 門鈴／輪詢時 launch_pending 取走待辦 → 執行前再驗一次 → 開視窗 → 等它出現在 `claude agents` → launch_result 回報
 // 指令完全由本機 launcher.json 決定；仲介來的只有 profile 名、視窗名、cwd（必須在白名單裡）。{name} 是唯一的替換欄位。
+import { envGet, isSecretEnvName, withBothNames } from './env-compat.mjs'
 import { execFile, spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -126,10 +127,10 @@ export function childEnv(env = process.env) {
   const out = {}
   for (const [k, v] of Object.entries(env)) {
     const u = k.toUpperCase()
-    if (u.startsWith('CLAUDE') || u === 'NO_COLOR' || u === 'IRORI_RELAY_KEY' || u === 'IRORI_RELAY_ANON_KEY') continue
+    if (u.startsWith('CLAUDE') || u === 'NO_COLOR' || isSecretEnvName(u)) continue
     out[k] = v
   }
-  return out
+  return withBothNames(out)   // 新舊名都帶，沒更新的子程式照樣讀得到（金鑰類已在上面濾掉）
 }
 
 // %VAR% 展開（只用在 command，例如 %SystemRoot%）
@@ -154,8 +155,8 @@ export function quoteArg(a) {
 // 用 Start-Process 開一個有自己主控台視窗的行程（跟 partner-relay 的 spawn-partner.ps1 一樣）。
 // 腳本是固定的；檔名、參數、資料夾都經環境變數傳進去，不拼進腳本，也就沒有引號跳脫的問題。回傳新視窗的 PID（之後只關自己記下的）
 const START_PS = [
-  "$f = $env:IRORI_LAUNCH_FILE; $a = $env:IRORI_LAUNCH_ARGS; $d = $env:IRORI_LAUNCH_DIR; $w = $env:IRORI_LAUNCH_STYLE",
-  "Remove-Item env:IRORI_LAUNCH_FILE, env:IRORI_LAUNCH_ARGS, env:IRORI_LAUNCH_DIR, env:IRORI_LAUNCH_STYLE",
+  "$f = $env:ASN_LAUNCH_FILE; $a = $env:ASN_LAUNCH_ARGS; $d = $env:ASN_LAUNCH_DIR; $w = $env:ASN_LAUNCH_STYLE",
+  "Remove-Item env:ASN_LAUNCH_FILE, env:ASN_LAUNCH_ARGS, env:ASN_LAUNCH_DIR, env:ASN_LAUNCH_STYLE, env:IRORI_LAUNCH_FILE, env:IRORI_LAUNCH_ARGS, env:IRORI_LAUNCH_DIR, env:IRORI_LAUNCH_STYLE -ErrorAction SilentlyContinue",
   "if (-not $w) { $w = 'Normal' }",
   "$p = if ($a) { Start-Process -FilePath $f -ArgumentList $a -WorkingDirectory $d -WindowStyle $w -PassThru } else { Start-Process -FilePath $f -WorkingDirectory $d -WindowStyle $w -PassThru }",
   "[Console]::Out.Write($p.Id)",
@@ -200,8 +201,9 @@ export function startWindow({ command, args, cwd, env }) {
   if (process.platform !== 'win32') return startWindowLinux({ command, args, cwd, env })
   const psExe = path.join(env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
   const encoded = Buffer.from(START_PS, 'utf16le').toString('base64')
-  const henv = { ...env, IRORI_LAUNCH_FILE: command, IRORI_LAUNCH_ARGS: args.map(quoteArg).join(' '), IRORI_LAUNCH_DIR: cwd,
-    IRORI_LAUNCH_STYLE: process.env.IRORI_LAUNCH_WINDOW_STYLE || 'Normal' }
+  const henvVals = { LAUNCH_FILE: command, LAUNCH_ARGS: args.map(quoteArg).join(' '), LAUNCH_DIR: cwd, LAUNCH_STYLE: envGet(process.env, 'LAUNCH_WINDOW_STYLE') || 'Normal' }
+  const henv = { ...env }
+  for (const [k, v] of Object.entries(henvVals)) { henv[`ASN_${k}`] = v; henv[`IRORI_${k}`] = v }
   return new Promise((resolve, reject) => {
     execFile(psExe, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
       { env: henv, cwd, windowsHide: true, timeout: 30_000 }, (err, out, errOut) => {

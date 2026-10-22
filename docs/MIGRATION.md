@@ -33,22 +33,22 @@
 
 ## 二、各用戶端怎麼指向後台
 
-新預設後台：`https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay`（Supabase 專案 `asn`）。程式內預設值已改；環境變數 `IRORI_RELAY_URL` 仍可覆寫（改名是 #14，這期不動）。舊後台（專案 `hwtahctsgjcemtwzlvnq` 的 `irori-relay`）只在回退時才手動指回。
+新預設後台：`https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay`（Supabase 專案 `asn`）。程式內預設值已改；環境變數 `ASN_RELAY_URL` 仍可覆寫（改名是 #14，這期不動）。舊後台（專案 `hwtahctsgjcemtwzlvnq` 的 `irori-relay`）只在回退時才手動指回。
 
 | 用戶端 | 設定方式 | 備註 |
 |---|---|---|
-| 收發室橋、`send.mjs`、`recv.mjs`、`room.mjs` | 環境變數 `IRORI_RELAY_URL`；沒設就用程式內預設值（**新後台**） | 預設值在 `relay/machine/identity.mjs`、`bridge.mjs`、`bridge-aegis.mjs`、`register.mjs`；工具腳本 `tools-*.mjs` 同步改新 |
+| 收發室橋、`send.mjs`、`recv.mjs`、`room.mjs` | 環境變數 `ASN_RELAY_URL`；沒設就用程式內預設值（**新後台**） | 預設值在 `relay/machine/identity.mjs`、`bridge.mjs`、`bridge-aegis.mjs`、`register.mjs`；工具腳本 `tools-*.mjs` 同步改新 |
 | 轉接橋（特定平台） | 同上 | systemd unit 的 `Environment=` 若有寫舊網址要拿掉 |
-| ASN 電腦版 | 環境變數 `IRORI_RELAY_URL`；預設值寫在 `relay/asn/src-tauri/src/identity.rs`（**新後台**） | 要重新打包才生效 |
-| 雲端代理 | 環境變數 `IRORI_RELAY_URL`；沒設就用 `register.mjs` 的預設值（**新後台**，`relay/cloud-agent/config.mjs` 引用它） | 平台環境設定若曾寫舊網址要拿掉；金鑰環境變數不變 |
-| Claude Code channel | 環境變數 `IRORI_RELAY_URL`；預設值在 `relay/channel/channel.mjs`（**新後台**） | 通常已被橋取代 |
-| Irori | 自己的設定檔（網址、`IRORI_RELAY_KEY`） | 在 Irori repo 改 |
+| ASN 電腦版 | 環境變數 `ASN_RELAY_URL`；預設值寫在 `relay/asn/src-tauri/src/identity.rs`（**新後台**） | 要重新打包才生效 |
+| 雲端代理 | 環境變數 `ASN_RELAY_URL`；沒設就用 `register.mjs` 的預設值（**新後台**，`relay/cloud-agent/config.mjs` 引用它） | 平台環境設定若曾寫舊網址要拿掉；金鑰環境變數不變 |
+| Claude Code channel | 環境變數 `ASN_RELAY_URL`；預設值在 `relay/channel/channel.mjs`（**新後台**） | 通常已被橋取代 |
+| Irori | 自己的設定檔（網址、`ASN_RELAY_KEY`） | 在 Irori repo 改 |
 | 邀請與安裝程式 | `relay/machine/register.mjs` 的預設網址（安裝程式沒有另外寫死，`-BaseUrl` 才覆寫） | 新打包的安裝包註冊到新後台 |
 | Claude Code skill | `web/relay/SKILL.md` 內的 `BASE=`（兩處，已改新） | 改後要重新發佈 |
 
-另外：Realtime 門鈴要用**新專案的 anon（公開）金鑰**。各設備的 `%USERPROFILE%\.irori-relay\anon.key`（或 `IRORI_RELAY_ANON_KEY`）要換成新專案的；沒換的話門鈴連不上，只剩 2 分鐘輪詢（不會掉信，但變慢）。取得方式：Supabase 主控台 → 專案設定 → API，或 `npx supabase projects api-keys --project-ref <新專案代號>`（只取 anon 那一筆，不要碰 service role）。
+另外：Realtime 門鈴要用**新專案的 anon（公開）金鑰**。各設備的 `%USERPROFILE%\.irori-relay\anon.key`（或 `ASN_RELAY_ANON_KEY`）要換成新專案的；沒換的話門鈴連不上，只剩 2 分鐘輪詢（不會掉信，但變慢）。取得方式：Supabase 主控台 → 專案設定 → API，或 `npx supabase projects api-keys --project-ref <新專案代號>`（只取 anon 那一筆，不要碰 service role）。
 
-門鈴 WebSocket 位址不是寫死的：由後台網址的主機名推導（`wss://<專案代號>.supabase.co/realtime/v1/websocket`），所以網址指向新專案，門鈴就連新專案；**程式內沒有任何寫死的 anon 金鑰**，只從 `IRORI_RELAY_ANON_KEY` 或 `anon.key` 讀。維護者只需要把新專案 anon 公開金鑰發到各設備（不進 repo）。
+門鈴 WebSocket 位址不是寫死的：由後台網址的主機名推導（`wss://<專案代號>.supabase.co/realtime/v1/websocket`），所以網址指向新專案，門鈴就連新專案；**程式內沒有任何寫死的 anon 金鑰**，只從 `ASN_RELAY_ANON_KEY` 或 `anon.key` 讀。維護者只需要把新專案 anon 公開金鑰發到各設備（不進 repo）。
 
 ## 二之一、家用機收發室橋改指向本 repo
 
@@ -56,7 +56,7 @@
 elay\machine
 un-bridge.ps1`。目標：改跑 `D:\Github\Yooliangsn
 elay\machine
-un-bridge.ps1`。`run-bridge.ps1` 用自己所在資料夾找 `bridge.mjs`，`install-task.ps1` 用自己所在資料夾組出排程動作，所以**不必改這兩支腳本**，只要從本 repo 的資料夾重新註冊排程即可。排程不帶 `IRORI_RELAY_URL`，網址來自新版程式的預設值，所以改指向本 repo 與切換後台是同一步（建議在第三節第 2 步「其他設備的收發室橋」時一起做，不要提前）。
+un-bridge.ps1`。`run-bridge.ps1` 用自己所在資料夾找 `bridge.mjs`，`install-task.ps1` 用自己所在資料夾組出排程動作，所以**不必改這兩支腳本**，只要從本 repo 的資料夾重新註冊排程即可。排程不帶 `ASN_RELAY_URL`，網址來自新版程式的預設值，所以改指向本 repo 與切換後台是同一步（建議在第三節第 2 步「其他設備的收發室橋」時一起做，不要提前）。
 
 步驟（在家用機，切換當下執行；全程只關自己記下 PID 的程序）：
 
@@ -107,8 +107,8 @@ elay\machine` 執行同樣指令即可（舊目錄保留，確認穩定一週後
 
 ### 2. 切換各用戶端（建議順序：由小到大）
 
-1. **單一測試設備**：改 `IRORI_RELAY_URL` 指向新網址、換 anon 金鑰、啟動橋；互寄一封信確認收發、門鈴、名單、群組。
-2. **雲端代理**：在平台環境設定 `IRORI_RELAY_URL`，重啟 `recv.mjs`；確認 `recv.log` 出現 `mail stored` 與名單回報無 403。
+1. **單一測試設備**：改 `ASN_RELAY_URL` 指向新網址、換 anon 金鑰、啟動橋；互寄一封信確認收發、門鈴、名單、群組。
+2. **雲端代理**：在平台環境設定 `ASN_RELAY_URL`，重啟 `recv.mjs`；確認 `recv.log` 出現 `mail stored` 與名單回報無 403。
 3. **其他設備的收發室橋**：逐台改環境變數（或重新安裝新版安裝包）→ 重啟橋。同一節點切換後不要讓舊橋還活著（兩個收信者會互相 ack）。
 4. **ASN 電腦版**：發新版（預設網址改新），或設定環境變數；使用者重開即可。
 5. **Irori**：改它的後台網址設定並重啟。
@@ -128,7 +128,7 @@ elay\machine` 執行同樣指令即可（舊目錄保留，確認穩定一週後
 
 切換期間舊後台資料原封不動，回退只是把用戶端改回去：
 
-1. 各用戶端**移除或改回** `IRORI_RELAY_URL`（沒設＝程式內預設值，即舊後台），anon 金鑰換回舊專案的，重啟橋／ASN／雲端代理／Irori。
+1. 各用戶端**移除或改回** `ASN_RELAY_URL`（沒設＝程式內預設值，即舊後台），anon 金鑰換回舊專案的，重啟橋／ASN／雲端代理／Irori。
    **雲端代理（Grok Bot 等平台）**：若曾在平台環境變數設了指向新後台的 `ASN_RELAY_URL`／`ASN_RELAY_ANON_KEY`（或舊名 `IRORI_RELAY_*`），回退時必須**一併刪除或改回舊值**，否則程式仍會讀到新網址。換完秘密後要**開新 shell 或重跑 boot／`start.sh`**（長期跑著的 boot 迴圈不會繼承新環境變數）。
 2. 節點金鑰兩邊相同，不必重發。
 3. **切換後在新後台產生的訊息不會自動回到舊後台**。回退前若新後台已有重要新訊息，用同一支腳本反向匯出（對調 `OLD`／`NEW`，只匯 `messages`、`room_messages` 的差異），或請寄件人重寄。

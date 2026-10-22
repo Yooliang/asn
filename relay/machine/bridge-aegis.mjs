@@ -1,6 +1,7 @@
 // Irori relay Aegis 轉接橋（Linux / Aegis 主機）。
 // 用一把仲介節點金鑰收信；每封信 = 一次 POST <aegis>/api/v1/agent-chat/ask（to_agent 當成員 slug），把 answer 用 reply_to 寄回。
 // 只有白名單（IRORI_AEGIS_ALLOW）內的成員能被問；不開 claude -p、不需要 claude CLI。
+import { envGet } from './env-compat.mjs'
 import { pickAnon } from './anon.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -9,8 +10,8 @@ import { createCore } from './relay-core.mjs'
 import { createLog } from './safe-log.mjs'
 import { createRooms, parseMember, roomText } from './rooms.mjs'
 
-const NODE_ID = (process.env.IRORI_RELAY_ID || 'AEGIS').trim()
-const BASE_URL = process.env.IRORI_RELAY_URL || 'https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay'
+const NODE_ID = (envGet(process.env, 'RELAY_ID') || 'AEGIS').trim()
+const BASE_URL = envGet(process.env, 'RELAY_URL') || 'https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay'
 const HOME_DIR = path.join(os.homedir(), '.irori-relay')
 const WORK_DIR = path.join(HOME_DIR, `aegis-${NODE_ID}`)
 const AEGIS_URL = (process.env.IRORI_AEGIS_URL || 'http://127.0.0.1:8899').replace(/\/+$/, '')
@@ -20,9 +21,9 @@ const SELF_MEMBER = (process.env.IRORI_AEGIS_SELF || 'xi-xu').trim()   // 希緒
 const DEFAULT_MEMBER = (process.env.IRORI_AEGIS_DEFAULT || 'aegis').trim()   // 沒有 to_agent 的信交給它（要在白名單內）
 const ASK_TIMEOUT_MS = Number(process.env.IRORI_AEGIS_TIMEOUT_MS || 300_000)
 const RETRY_MS = Number(process.env.IRORI_AEGIS_RETRY_MS || 60_000)
-const POLL_MS = Number(process.env.IRORI_RELAY_POLL_MS || 120_000)
-const ROSTER_MS = Number(process.env.IRORI_ROSTER_MS || 60_000)
-const LOG_FILE = process.env.IRORI_RELAY_LOG || path.join(WORK_DIR, 'bridge.log')
+const POLL_MS = Number(envGet(process.env, 'RELAY_POLL_MS') || 120_000)
+const ROSTER_MS = Number(envGet(process.env, 'ROSTER_MS') || 60_000)
+const LOG_FILE = envGet(process.env, 'RELAY_LOG') || path.join(WORK_DIR, 'bridge.log')
 
 fs.mkdirSync(WORK_DIR, { recursive: true })
 // 主控台寫不出去也不會進無限迴圈、檔案有上限會輪替（2026-10-13 bridge.log 長到 181 GB 的事故，見 safe-log.mjs）
@@ -30,12 +31,12 @@ const log = createLog(LOG_FILE)
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 function readSecret(env, file) {
-  const v = (process.env[env] || '').trim()
+  const v = (envGet(process.env, env) || '').trim()
   if (v) return v
   try { return fs.readFileSync(path.join(HOME_DIR, file), 'utf8').trim() } catch { return '' }
 }
-const KEY = readSecret('IRORI_RELAY_KEY', `${NODE_ID}.key`)
-const ANON_KEY = pickAnon(BASE_URL, [process.env.IRORI_RELAY_ANON_KEY, readSecret('', 'anon.key')])   // 內建新後台的 anon；殘留的舊專案 anon.key 會被跳過
+const KEY = readSecret('RELAY_KEY', `${NODE_ID}.key`)
+const ANON_KEY = pickAnon(BASE_URL, [envGet(process.env, 'RELAY_ANON_KEY'), readSecret('', 'anon.key')])   // 內建新後台的 anon；殘留的舊專案 anon.key 會被跳過
 if (!KEY) { console.error(`no relay key (${path.join(HOME_DIR, NODE_ID + '.key')})`); process.exit(2) }
 
 const core = createCore({ baseUrl: BASE_URL, key: KEY, anonKey: ANON_KEY, log, workDir: WORK_DIR })

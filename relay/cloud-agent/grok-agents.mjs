@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 列出這台電腦上的夥伴，輸出格式仿 `claude agents --json`。
 //   Grok 夥伴：讀 <GROK_AGENTS_DIR>/<uuid>/profile.json 的 name（只讀這個檔，不碰記憶、附件、資料庫）
-//   Claude Code（預設不列）：IRORI_CLOUD_ROSTER_CLAUDE=1 才跑 claude agents --json（interactive/cli、排除「收發室」結尾）
+//   Claude Code（預設不列）：ASN_CLOUD_ROSTER_CLAUDE=1（舊名 IRORI_CLOUD_ROSTER_CLAUDE） 才跑 claude agents --json（interactive/cli、排除「收發室」結尾）
 //   node grok-agents.mjs          JSON
 //   node grok-agents.mjs --names  只印名字
 import fs from 'node:fs'
