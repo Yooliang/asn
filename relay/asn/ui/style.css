@@ -147,6 +147,10 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .ab-menu button:hover:not(:disabled){background:linear-gradient(#f2f9ff,#cfe6fb)}
 .ab-menu button:disabled{opacity:.5;cursor:default}
 .ab-menu .menu-note{padding:2px 8px;font-size:11px;color:var(--muted);white-space:normal}
+.ab-subs{min-width:220px;max-width:340px}
+.ab-sub{display:flex;gap:8px;align-items:baseline;padding:4px 8px;border-radius:3px}
+.ab-sub-text{min-width:0;flex:1;overflow-wrap:anywhere}
+.ab-sub-kind{flex:none;font-size:11px;color:var(--muted)}
 .conv,.compose-row{display:flex;gap:8px;padding:8px;background:var(--panel-soft);min-height:0}
 .conv{flex:1}
 .compose-row{flex:none;padding-top:0}

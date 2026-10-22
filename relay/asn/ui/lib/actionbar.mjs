@@ -1,9 +1,10 @@
 // 對話視窗上方的大按鈕功能列（#40，仿舊 MSN 對話視窗頂端那排）。
 // 分層原則（小良哥 10/21）：只影響「這一則訊息」的（傳檔、截圖、表情、震動、語音）留在輸入框旁的小工具列；
 // 影響「整個代理」的才放這裡。這裡只放目前已經做好的：顯示／背景（主控台視窗）與切換模型。
-// 子代理、權限詢問等功能做好後再加按鈕，沒有功能就不放假按鈕。
+// 子代理（#27）已加；權限詢問等功能做好後再加按鈕，沒有功能就不放假按鈕。
 import { AsnDialog } from './dialog.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher } from './model-switch.mjs'
+import { SUBAGENT_POLL_MS, canOfferSubagents, subagentView } from './subagents.mjs'
 import { CONSOLE_QUERY_TIMEOUT_MS, consoleToggleLabel, engineForProfile, withTimeout } from './partner-launch-ui.mjs'
 
 /** 這位代理用哪一家的指令（名單上沒寫就看啟動設定，再沒有就當 Claude）。 */
@@ -38,13 +39,16 @@ export const ActionBar = {
     const { ref, computed, reactive, watch, onMounted, onBeforeUnmount } = globalThis.Vue
     const cons = reactive({ state: 'none', visible: true, busy: false })   // state：none／toggle
     const model = reactive({ open: false, state: 'none', reason: '', current: '', items: [], st: null })
+    const subs = reactive({ open: false, q: null })
     const dlg = reactive({ open: false, target: null, busy: false, error: '', manual: '', done: '', copied: false })
     const root = ref(null)
     const engine = computed(() => friendEngine(props.friend))
     const name = computed(() => props.friend?.agent || props.friend?.nick || '')
     const showConsole = computed(() => Boolean(props.api) && canOfferConsole(props.friend, props.selfNode) && cons.state === 'toggle')
     const showModel = computed(() => Boolean(props.api) && canOfferModelSwitch(props.friend, { selfNode: props.selfNode, engine: engine.value }))
-    const show = computed(() => showConsole.value || showModel.value)
+    const showSubs = computed(() => Boolean(props.api?.subagentsQuery) && canOfferSubagents(props.friend, { selfNode: props.selfNode, engine: engine.value }))
+    const subView = computed(() => subagentView(subs.q))
+    const show = computed(() => showConsole.value || showModel.value || showSubs.value)
     const consoleView = computed(() => consoleButtonView(cons.visible))
     const switcher = computed(() => (props.api ? createModelSwitcher({ transport: props.api, log: m => console.info('[ASN]', m) }) : null))
     const dlgText = computed(() => confirmText(name.value, model.current, dlg.target?.label ?? ''))
@@ -64,7 +68,26 @@ export const ActionBar = {
         if (r?.ok) cons.visible = Boolean(r.visible)
       } catch (e) { console.info('[ASN] 主控台切換', e.message) } finally { cons.busy = false }
     }
+    let subTimer = null
+    async function loadSubs() {
+      const f = props.friend
+      if (!props.active || !showSubs.value) return
+      try {
+        const q = await withTimeout(props.api.subagentsQuery({ name: name.value }), CONSOLE_QUERY_TIMEOUT_MS)
+        if (props.friend === f) subs.q = q
+      } catch (e) { console.info('[ASN] 子代理查詢', e.message) }
+    }
+    function stopSubs() { if (subTimer) { clearInterval(subTimer); subTimer = null } }
+    function startSubs() {
+      stopSubs()
+      subs.q = null
+      if (!showSubs.value) return
+      void loadSubs()
+      subTimer = setInterval(() => { if (props.active) void loadSubs() }, SUBAGENT_POLL_MS)
+    }
+    function toggleSubs() { subs.open = !subs.open; model.open = false; if (subs.open) void loadSubs() }
     async function toggleModelMenu() {
+      subs.open = false
       if (model.open) { model.open = false; return }
       model.open = true
       model.state = 'checking'
@@ -88,12 +111,12 @@ export const ActionBar = {
     async function copyManual() {
       try { await navigator.clipboard.writeText(dlg.manual); dlg.copied = true } catch (e) { console.info('[ASN] 複製失敗', e.message) }
     }
-    const onDoc = e => { if (model.open && root.value && !root.value.contains(e.target)) model.open = false }
-    onMounted(() => { document.addEventListener('mousedown', onDoc, true); if (props.active) void loadConsole() })
-    onBeforeUnmount(() => document.removeEventListener('mousedown', onDoc, true))
-    watch(() => props.active, a => { if (a) void loadConsole() })
-    watch(() => props.friend?.id, () => { model.open = false; void loadConsole() })
-    return { root, cons, model, dlg, show, showConsole, showModel, consoleView, dlgText, toggleConsole, toggleModelMenu, pick, closeDlg, submit, copyManual }
+    const onDoc = e => { if ((model.open || subs.open) && root.value && !root.value.contains(e.target)) { model.open = false; subs.open = false } }
+    onMounted(() => { document.addEventListener('mousedown', onDoc, true); if (props.active) void loadConsole(); startSubs() })
+    onBeforeUnmount(() => { document.removeEventListener('mousedown', onDoc, true); stopSubs() })
+    watch(() => props.active, a => { if (a) { void loadConsole(); void loadSubs() } })
+    watch(() => props.friend?.id, () => { model.open = false; subs.open = false; void loadConsole(); startSubs() })
+    return { root, cons, model, subs, subView, showSubs, toggleSubs, dlg, show, showConsole, showModel, consoleView, dlgText, toggleConsole, toggleModelMenu, pick, closeDlg, submit, copyManual }
   },
   template: `
 <div class="actionbar" ref="root" v-if="show" role="toolbar" aria-label="代理功能列">
@@ -114,6 +137,16 @@ export const ActionBar = {
           <li class="menu-note" v-if="model.reason">{{ model.reason }}</li>
         </template>
       </template>
+    </ul>
+  </div>
+  <div class="ab-wrap" v-if="showSubs">
+    <button class="abtn" type="button" :class="{ on: subs.open }" aria-haspopup="true" :aria-expanded="subs.open" :aria-label="subView.label" :title="subView.tip" @click="toggleSubs">
+      <img src="img/ab-agent.svg" alt="" width="32" height="32"><span class="ab-name">{{ subView.label }} ▾</span>
+    </button>
+    <ul class="ab-menu ab-subs" v-if="subs.open" role="menu">
+      <li class="menu-note" v-if="!subView.count">{{ subView.empty }}</li>
+      <li class="ab-sub" v-for="it in subView.items" :key="it.id" role="menuitem"><span class="ab-sub-text">{{ it.text }}</span><span class="ab-sub-kind" v-if="it.kind">{{ it.kind }}</span></li>
+      <li class="menu-note" v-if="subView.more">還有 {{ subView.more }} 個沒列出</li>
     </ul>
   </div>
   <asn-dialog v-if="dlg.open" :title="dlgText.title" @close="closeDlg">
