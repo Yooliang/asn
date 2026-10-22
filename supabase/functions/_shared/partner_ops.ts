@@ -124,6 +124,7 @@ export function sanitizeResult(v: Json): Json | null | { error: string } {
 //   partner_op_pending／partner_op_result／partner_op_progress：電腦端內建收發室取走自己節點的待辦、回報結果與中途階段（只動得到自己節點的）
 export async function handleNodePartnerOpAction(deps: LaunchDeps, me: { id: string }, action: string, params: Json, signedUser: string | null = null): Promise<Reply> {
   if (action === "partner_op") return await requestPartnerOp(deps, me.id, params, signedUser);
+  if (action === "partner_archive") return await requestPartnerArchive(deps, me.id, params, signedUser);
   if (action === "partner_ops") return await listPartnerOps(deps, me.id, params?.ids, signedUser);
   if (action === "partner_op_pending") {
     const r = await call(deps, "irori_relay_partner_op_pending", { p_node: me.id });
@@ -151,4 +152,31 @@ export async function handleNodePartnerOpAction(deps: LaunchDeps, me: { id: stri
   }
   return { status: 404, body: { error: "not_found" } };
 }
-export const PARTNER_OP_ACTIONS = new Set(["partner_op", "partner_ops", "partner_op_pending", "partner_op_result", "partner_op_progress"]);
+export const PARTNER_OP_ACTIONS = new Set(["partner_op", "partner_ops", "partner_archive", "partner_op_pending", "partner_op_result", "partner_op_progress"]);
+
+// ---- 封存夥伴（讓那一位從名單消失；記在帳號層，見 migrations/20261023010000_partner_archive.sql）----
+// partner_archive：要本人簽章（沒簽章 401、不打資料庫），資料庫核對「呼叫節點與目標節點都是簽章者的」。
+// 以夥伴 ID 為鍵；沒有夥伴 ID 的退而用「節點＋名字」。不需要那台電腦在線，也不敲門鈴（只是記一筆旗標）。
+const PARTNER_ID_RE = /^p_[0-9a-f]{20}$/;
+export type PartnerArchiveRequest = { node: string; name: string | null; partner_id: string | null; archived: boolean };
+export function parsePartnerArchive(b: Json): PartnerArchiveRequest | { error: string } {
+  if (!b || typeof b !== "object" || Array.isArray(b)) return { error: "bad_request" };
+  const { node, name, partner_id, archived } = b;
+  if (typeof node !== "string" || !NODE_ID_RE.test(node)) return { error: "bad_request" };
+  if (typeof archived !== "boolean") return { error: "bad_request" };
+  const pid = partner_id == null || partner_id === "" ? null : partner_id;
+  if (pid !== null && (typeof pid !== "string" || !PARTNER_ID_RE.test(pid))) return { error: "bad_request" };
+  const nameOk = typeof name === "string" && name.length >= 1 && name.length <= 80 && !hasControl(name);
+  if (pid === null && !nameOk) return { error: "bad_request" };
+  return { node, name: nameOk ? name : null, partner_id: pid, archived };
+}
+export async function requestPartnerArchive(deps: LaunchDeps, actor: string, raw: Json, signedUser: string | null): Promise<Reply> {
+  if (!signedUser) return fail("unauthorized");
+  const req = parsePartnerArchive(raw);
+  if ("error" in req) return fail(req.error);
+  const r = await call(deps, "irori_relay_partner_archive", {
+    p_actor: actor, p_signed_user: signedUser, p_node: req.node, p_name: req.name, p_partner_id: req.partner_id, p_archived: req.archived,
+  });
+  if (isReply(r)) return r;
+  return { status: 200, body: { ok: true, archived: r.data?.archived === true } };
+}

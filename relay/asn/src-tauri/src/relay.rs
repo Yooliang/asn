@@ -528,6 +528,12 @@ impl Relay {
         let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法管理夥伴視窗")?;
         self.api_signed("partner_op", Some(b), Some(t)).await
     }
+    /// 封存／取消封存夥伴（電腦與手機共用，記在帳號層）：要本人簽章；沒憑證在打後台之前就回錯。回 { ok, archived }
+    pub async fn partner_archive_signed(&self, body: &Value, token: Option<&str>) -> Result<Value, String> {
+        let b = build_partner_archive_body(body)?;
+        let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法封存夥伴")?;
+        self.api_signed("partner_archive", Some(b), Some(t)).await
+    }
     /// 查管理操作的進度（手機用）：同樣要本人簽章。回 { ops: [...] }
     pub async fn partner_ops_signed(&self, ids: &[String], token: Option<&str>) -> Result<Value, String> {
         let b = build_partner_ops_body(ids)?;
@@ -645,6 +651,33 @@ pub fn build_partner_op_body(raw: &Value) -> Result<Value, String> {
     }
     Ok(b)
 }
+/// 封存的內容：node、archived（布林）、夥伴 ID（有就帶，格式要對）、名字（沒有夥伴 ID 時必填）；其餘一律丟掉。格式不對在打後台之前就回錯
+pub fn build_partner_archive_body(raw: &Value) -> Result<Value, String> {
+    let o = raw.as_object().ok_or("封存的內容格式不對")?;
+    let node = o.get("node").and_then(Value::as_str).unwrap_or("");
+    if !crate::identity::valid_id(node) {
+        return Err(format!("電腦代號格式不對：{node}"));
+    }
+    let archived = o.get("archived").and_then(Value::as_bool).ok_or("要說明是封存還是取消封存")?;
+    let pid = match o.get("partner_id") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(s)) if s.is_empty() => None,
+        Some(Value::String(s)) if valid_partner_id(s) => Some(s.clone()),
+        Some(_) => return Err("夥伴編號格式不對".into()),
+    };
+    let name = o.get("name").and_then(Value::as_str).filter(|n| !n.is_empty() && n.chars().count() <= 80 && !n.chars().any(|c| c.is_control()));
+    if pid.is_none() && name.is_none() {
+        return Err("視窗名字不對".into());
+    }
+    let mut b = json!({ "node": node, "archived": archived });
+    if let Some(p) = pid {
+        b["partner_id"] = json!(p);
+    }
+    if let Some(n) = name {
+        b["name"] = json!(n);
+    }
+    Ok(b)
+}
 pub fn build_partner_ops_body(ids: &[String]) -> Result<Value, String> {
     if (1..=20).contains(&ids.len()) && ids.iter().all(|i| is_uuid_str(i)) {
         Ok(json!({ "ids": ids }))
@@ -738,6 +771,36 @@ b", "op": "close" }),
         assert_eq!(s.len(), 2);
         assert!(s.iter().all(|q| q.to_lowercase().contains("x-asn-user: bearer usertoken-9") && q.to_lowercase().contains("x-relay-key: secret-key")));
         assert!(s[0].contains("action=partner_op ") && s[1].contains("action=partner_ops "), "{} / {}", s[0], s[1]);
+    }
+
+    #[test]
+    fn 封存夥伴_請求內容只留該有的欄位_格式擋在前面() {
+        let pid = "p_0123456789abcdef0123";
+        assert_eq!(build_partner_archive_body(&json!({ "node": "H", "partner_id": pid, "name": "小文", "archived": true, "op": "kill" })).unwrap(), json!({ "node": "H", "archived": true, "partner_id": pid, "name": "小文" }));
+        assert_eq!(build_partner_archive_body(&json!({ "node": "H", "name": "小文", "archived": false })).unwrap(), json!({ "node": "H", "archived": false, "name": "小文" }));
+        assert_eq!(build_partner_archive_body(&json!({ "node": "H", "partner_id": "", "name": "小文", "archived": true })).unwrap(), json!({ "node": "H", "archived": true, "name": "小文" }));
+        let bad = [
+            json!({ "node": "H;x", "name": "a", "archived": true }), json!({ "node": "H", "archived": true }), json!({ "node": "H", "name": "", "archived": true }),
+            json!({ "node": "H", "name": "a" }), json!({ "node": "H", "name": "a", "archived": "true" }), json!({ "node": "H", "partner_id": "p_xyz", "archived": true }),
+            json!({ "node": "H", "name": "a\nb", "archived": true }), json!({ "node": "H", "name": "字".repeat(81), "archived": true }), json!([1]),
+        ];
+        for b in bad {
+            assert!(build_partner_archive_body(&b).is_err(), "{b}");
+        }
+    }
+
+    #[tokio::test]
+    async fn 封存夥伴_沒有本人簽章不送出_有簽章帶標頭() {
+        let (url, seen) = fake_server(200);
+        let r = Relay::new(url, "secret-key".into(), "P".into(), "P-ASN".into());
+        let req = json!({ "node": "H", "name": "小文", "archived": true });
+        assert!(r.partner_archive_signed(&req, None).await.unwrap_err().contains("尚未登入"));
+        assert!(r.partner_archive_signed(&req, Some("")).await.is_err(), "空憑證等於沒有");
+        assert!(seen.lock().unwrap().is_empty(), "沒簽章時完全沒有打後台");
+        r.partner_archive_signed(&req, Some("usertoken-9")).await.unwrap();
+        let s = seen.lock().unwrap();
+        assert_eq!(s.len(), 1);
+        assert!(s[0].to_lowercase().contains("x-asn-user: bearer usertoken-9") && s[0].contains("action=partner_archive"), "{}", s[0]);
     }
 
     #[test]

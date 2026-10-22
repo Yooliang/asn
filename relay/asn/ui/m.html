@@ -70,13 +70,14 @@
             </header>
             <ptr-zone :ptr="pf.ptr"></ptr-zone>
             <div class="m-scroll" :ref="el => (pf.ptr.el = el)" @touchstart.passive="pf.start" @touchmove="pf.move" @touchend="pf.end" @touchcancel="pf.end">
+              <p class="m-archive-note" v-if="archiveNote" role="status">{{ archiveNote }}</p>
               <div class="m-search"><input v-model="query" type="search" placeholder="搜尋聯絡人…" aria-label="搜尋聯絡人" enterkeyhint="search"></div>
               <div v-for="g in groups" :key="g.key" class="m-group">
                 <button class="m-ghead" type="button" :aria-expanded="!collapsed[g.key]" @click="collapsed[g.key] = !collapsed[g.key]">
                   <span class="m-caret" :class="{ open: !collapsed[g.key] }">▸</span>{{ groupHeading(g) }}
                 </button>
                 <ul v-show="!collapsed[g.key]">
-                  <li v-for="c in g.items" :key="c.id">
+                  <li v-for="c in g.items" :key="c.id" :class="{ 'm-archived-row': g.kind === 'archived' }">
                     <button class="m-buddy" :class="{ offline: c.status === 'offline' }" type="button" @click="openChat(c.id)">
                       <span class="m-av-wrap">
                         <span class="dp sm" :class="'st-' + c.status"><span><img :src="avOf(c)" alt=""></span></span>
@@ -89,6 +90,7 @@
                       </span>
                       <span class="unread" v-if="c.unread">{{ c.unread }}</span>
                     </button>
+                    <button class="m-unarchive" type="button" v-if="g.kind === 'archived'" :aria-label="'取消封存 ' + c.nick" @click="setArchived(c, false)">取消封存</button>
                   </li>
                 </ul>
               </div>

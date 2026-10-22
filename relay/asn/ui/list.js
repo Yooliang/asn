@@ -28,7 +28,7 @@ import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaun
 import { CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, buddyConsoleItem, engineForProfile,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice, withTimeout } from './lib/partner-launch-ui.mjs'
 import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
 import { PartnerOpDialog, loadOpsContext } from './lib/partner-ops-ui.mjs'
-import { menuItems as opMenuItems } from './lib/partner-ops.mjs'
+import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
 import { backgroundRestoreNoticeText, collectLaunchFailures, findBackgroundTimeouts, launchFailedNoticeText } from './lib/partner-launch-notify.mjs'
 import { ONBOARD_STORE, planOnboarding } from './lib/onboard.mjs'
 import { friendId } from './lib/roster.mjs'
@@ -411,13 +411,24 @@ async function refreshOpsCtx() {
   opsCtxAt = Date.now()
   Object.assign(opsCtx, await loadOpsContext(transport))
 }
-const buddyOpItems = computed(() => opMenuItems(buddyMenuFriend.value, { ...opsCtx, friends: friends.value, asn: asnMap.value }).filter(i => i.key !== 'model'))   // 切換模型沿用下面原本那個子選單
+const buddyOpItems = computed(() => manageItems(buddyMenuFriend.value, { ...opsCtx, friends: friends.value, asn: asnMap.value }).filter(i => i.key !== 'model'))   // 切換模型沿用下面原本那個子選單
 const opDlg = reactive({ open: false, op: '', friend: null, item: null })
 function openPartnerOp(it) {
   const f = buddyMenuFriend.value
   closeBuddyMenu()
   if (!f || !it?.ok) return
+  if (it.key === 'archive' || it.key === 'unarchive') { void setArchived(f, it.key === 'archive'); return }
   Object.assign(opDlg, { open: true, op: it.key, friend: f, item: it })
+}
+// 封存／取消封存：記在帳號層（後台），立刻重新拉名單；結果用名單上方的一行字說明
+const archiveNote = ref('')
+let archiveNoteTimer = null
+async function setArchived(f, archived) {
+  const r = await runArchive(transport, f, archived)
+  if (r.ok) await core.refreshRoster()
+  archiveNote.value = r.text
+  clearTimeout(archiveNoteTimer)
+  archiveNoteTimer = setTimeout(() => { archiveNote.value = '' }, 6000)
 }
 function closeOpDlg() { opDlg.open = false }
 // 右鍵選單立刻出現（固定有「開啟對話」）；主控台切換項目先顯示「檢查中…」，查到才可按，逾時／查不到就停用
@@ -730,7 +741,7 @@ const app = createApp({
     setInterval(() => void refreshRooms(), 60_000)
     void refreshRooms()
     const query = ref(''), nickErr = ref('')
-    const collapsed = reactive({})
+    const collapsed = reactive({ [ARCHIVE_GROUP_KEY]: true })   // 「已封存」群組預設收合
     const dev = pages
     const isDevice = computed(() => !FIXED_TABS.some(t => t.key === tab.value))   // 名單頁（設備／廠商／狀態的頁籤）；其餘是群組、指引、設定
     const moreOn = computed(() => dev.value.more.some(d => d.key === tab.value))
@@ -739,10 +750,11 @@ const app = createApp({
     watch(dev, d => { if (!normalizeTab(tab.value, d.all.map(x => x.key))) tab.value = d.all[0]?.key ?? '' }, { immediate: true })
     const shown = computed(() => {
       if (!isDevice.value) return []
-      const base = rosterShownGroups(friends.value, {
-        tabDim: dims.tabDim, tabKey: tab.value, groupDim: dims.groupDim, selfNode: info.node, selfName: info.window_name, query: query.value, plainText: plain,
-      })
-      return injectPendingGroups(base, launchPending.value.filter(p => !tab.value || p.node === tab.value))
+      const o = { tabDim: dims.tabDim, tabKey: tab.value, groupDim: dims.groupDim, selfNode: info.node, selfName: info.window_name, query: query.value, plainText: plain }
+      const base = rosterShownGroups(activeFriends(friends.value), o)
+      // 已封存的不放進名單，另成最底下一個預設收合的「已封存（N）」群組（同一個分頁與搜尋字）
+      const archived = rosterShownGroups(archivedFriends(friends.value), o).flatMap(g => g.items)
+      return withArchivedGroup(injectPendingGroups(base, launchPending.value.filter(p => !tab.value || p.node === tab.value)), archived)
     })
     const emptyText = computed(() => (normalizeSearchQuery(query.value) ? '沒有符合的聯絡人。' : conn.value !== 'on' ? '還沒連上收發室。' : '這一頁目前沒有視窗。'))
     const openAd = a => openAdWith(a, url => void invoke('open_url', { url }))
@@ -1044,7 +1056,7 @@ const app = createApp({
       DISPLAY_MODES, partnerShowDisplay,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
-      opDlg, closeOpDlg, buddyOpItems, openPartnerOp, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
+      opDlg, closeOpDlg, buddyOpItems, openPartnerOp, archiveNote, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddyConsoleItemView, buddyMenuOpenChat, toggleBuddyConsole,
       buddyModel, buddyModelLabel, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,
       launchToolRows, launchPrefs, launchCwdText, saveLaunchPrefs, setLaunchCwdText,

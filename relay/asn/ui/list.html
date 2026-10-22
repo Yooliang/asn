@@ -81,9 +81,10 @@
             <button class="search-ic" type="button" title="搜尋" aria-label="搜尋" @click="focusSearch"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
             <button class="search-ic" type="button" title="開新夥伴" aria-label="開新夥伴" @click.stop="openLaunchPicker"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>
           </div>
+          <p class="archive-note" v-if="archiveNote" role="status">{{ archiveNote }}</p>
           <div class="list">
             <div v-for="g in shown" :key="g.key">
-              <button class="g-head" type="button" @click="collapsed[g.key] = !collapsed[g.key]" @contextmenu.prevent="openDeviceMenu(g, $event)" :aria-expanded="!collapsed[g.key]">
+              <button class="g-head" type="button" @click="collapsed[g.key] = !collapsed[g.key]" @contextmenu.prevent="g.kind !== 'archived' && openDeviceMenu(g, $event)" :aria-expanded="!collapsed[g.key]">
                 <span class="box">{{ collapsed[g.key] ? '+' : '−' }}</span>{{ groupHeading(g) }}
                 <template v-if="g.kind === 'device' && asnBadge(g.node)"><span class="dot asn-dot" :class="'st-' + asnBadge(g.node).status" :title="asnBadge(g.node).tip" :aria-label="asnBadge(g.node).tip"></span><span class="asn-new" v-if="asnBadge(g.node).outdated" title="這台的 ASN 版本比你的舊">有新版</span><span class="asn-upd" :class="'tone-' + remoteBtn(g.node).tone" role="button" tabindex="0" v-if="remoteBtn(g.node)" :aria-disabled="remoteBtn(g.node).busy" :title="remoteBtn(g.node).title" @click.stop="requestRemoteUpdate(g.node)" @keydown.enter.stop.prevent="requestRemoteUpdate(g.node)" @keydown.space.stop.prevent="requestRemoteUpdate(g.node)">{{ remoteBtn(g.node).label }}</span></template>
               </button>
@@ -214,7 +215,7 @@
   <ul class="av-menu buddy-menu" v-if="buddyMenu" ref="buddyMenuEl" :style="{ left: buddyMenuPos.x + 'px', top: buddyMenuPos.y + 'px' }" role="menu" @click.stop>
     <li><button type="button" role="menuitem" @click="buddyMenuOpenChat">開啟對話</button></li>
     <li><button type="button" role="menuitem" :disabled="buddyConsoleItemView.disabled" @click="toggleBuddyConsole">{{ buddyConsoleItemView.label }}</button></li>
-    <li v-for="it in buddyOpItems" :key="it.key"><button type="button" role="menuitem" :disabled="!it.ok" :title="it.reason" @click="openPartnerOp(it)">{{ it.label }}{{ it.key === 'resume' || it.key === 'close' ? '' : '…' }}</button></li>
+    <li v-for="it in buddyOpItems" :key="it.key"><button type="button" role="menuitem" :disabled="!it.ok" :title="it.reason" @click="openPartnerOp(it)">{{ it.label }}{{ ['resume', 'close', 'archive', 'unarchive'].includes(it.key) ? '' : '…' }}</button></li>
     <li v-if="buddyModel.show" class="model-sub">
       <button type="button" role="menuitem" ref="buddyModelBtn" aria-haspopup="true" :aria-expanded="buddyModel.open" :disabled="buddyModel.state === 'none' || buddyModel.state === 'checking'" :title="buddyModel.state === 'none' ? buddyModel.reason : ''" @mouseenter="subEvent('hover')" @mouseleave="subEvent('leave', 180)" @click="subEvent('click')" @keydown.right.prevent="subEvent('right')" @keydown.left.prevent="subEvent('leave')">{{ buddyModelLabel }}</button>
     </li>

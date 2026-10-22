@@ -98,7 +98,7 @@ test('喚醒按鈕：只有離線的 AI 夥伴才顯示；條件與右鍵選單�
 
 test('接線：名單右鍵用 menuItems（不另寫判斷、不重複切換模型）；喚醒按鈕與圖示；接班舊介面已清掉', () => {
   const js = read('ui/list.js'), html = read('ui/list.html'), bar = read('ui/lib/actionbar.mjs')
-  assert.match(js, /opMenuItems\(buddyMenuFriend\.value, \{ \.\.\.opsCtx, friends: friends\.value, asn: asnMap\.value \}\)\.filter\(i => i\.key !== 'model'\)/)
+  assert.match(js, /manageItems\(buddyMenuFriend\.value, \{ \.\.\.opsCtx, friends: friends\.value, asn: asnMap\.value \}\)\.filter\(i => i\.key !== 'model'\)/)
   assert.match(html, /v-for="it in buddyOpItems"[^>]*>[\s\S]*?:disabled="!it\.ok" :title="it\.reason" @click="openPartnerOp\(it\)"/)
   assert.match(html, /<partner-op-dialog v-if="opDlg\.open"/)
   assert.match(js, /app\.component\('partner-op-dialog', PartnerOpDialog\)/)
