@@ -17,6 +17,7 @@ import { opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
 import { defaultPartnerName } from './lib/partner.mjs'
 import { groupHeading, statusNote } from './lib/tabs.mjs'
 import { emo, plain } from './lib/text.mjs'
+import { headTone } from './lib/head-tone.mjs'
 import { authApi, invoke, listen, store } from './lib/tauri.mjs'
 
 const { createApp, reactive, ref, computed, watch } = Vue
@@ -485,7 +486,7 @@ const app = createApp({
       screen, fatal, login, loginNote, PROVIDERS, canStart, startLogin, cancelLogin,
       upd, updText: computed(() => bannerText(upd)), updButton: computed(() => buttonLabel(upd)), startUpdate, checkUpdate,
       pf, sw, pagerStyle, indicator, swipeStart, swipeMove, swipeEnd, goTab, TABS, TAB_LABEL, myName, meForChat, lastOf, vendorIcon: vendorBadgeHtml,
-      nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, CONN_LABEL, info, banner, shake, refreshing,
+      nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, headTone, CONN_LABEL, info, banner, shake, refreshing,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, ops, opsText, opsTitle, opsModels, opsModelNote, opsBanner, openOps, pickOp, submitOp, dismissRun, photoApi, emo, groupHeading, statusNote,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       openChat, back, openBanner, sendTo, nudgeTo, sendAttachTo, refreshAll,
