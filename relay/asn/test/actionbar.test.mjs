@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { canOfferConsole, consoleButtonView, friendEngine } from '../ui/lib/actionbar.mjs'
+import { canOfferCall, canOfferConsole, consoleButtonView, friendEngine } from '../ui/lib/actionbar.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const read = f => fs.readFileSync(path.join(root, f), 'utf8')
@@ -15,6 +15,15 @@ test('主控台按鈕：只有本機、已開起來、非雲端代理的視窗',
   assert.equal(canOfferConsole({ node: 'H', engine: 'acp' }, 'H'), false)
   assert.equal(canOfferConsole({ node: 'H', pending: true }, 'H'), false)
   assert.equal(canOfferConsole(null, 'H'), false)
+})
+
+test('通話按鈕：夥伴在線、有語音功能才給；離線或等待中的不給', () => {
+  assert.equal(canOfferCall({ status: 'online' }), true)
+  assert.equal(canOfferCall({ status: 'busy' }), true)
+  assert.equal(canOfferCall({ status: 'offline' }), false)
+  assert.equal(canOfferCall({ status: 'online', pending: true }), false)
+  assert.equal(canOfferCall({ status: 'online' }, { hasVoice: false }), false)
+  assert.equal(canOfferCall(null), false)
 })
 
 test('主控台按鈕的字：看得到＝切到背景，看不到＝叫回前台，都有提示', () => {
@@ -35,13 +44,13 @@ test('功能列按鈕都有中文 aria-label 與提示，圖示檔存在且是 S
   assert.match(t, /:title="consoleView\.tip" :aria-label="consoleView\.label"/)
   assert.match(t, /role="toolbar" aria-label="代理功能列"/)
   const imgs = [...t.matchAll(/src="(img\/[^"]+)"/g)]
-  assert.equal(imgs.length, 3)
+  assert.equal(imgs.length, 4)
   for (const m of imgs) assert.match(fs.readFileSync(path.join(root, 'ui', m[1]), 'utf8'), /^<svg/, m[1])
   assert.ok(!/v-html|innerHTML/.test(t))
 })
 
-test('不放假按鈕：功能列只有主控台、切換模型、子代理三個動作', () => {
-  assert.equal([...read('ui/lib/actionbar.mjs').matchAll(/class="abtn"/g)].length, 3)
+test('不放假按鈕：功能列只有通話、主控台、切換模型、子代理四個動作', () => {
+  assert.equal([...read('ui/lib/actionbar.mjs').matchAll(/class="abtn"/g)].length, 4)
 })
 
 test('兩種對話視窗都把 transport 與本機節點傳給對話區，對話區放了功能列', () => {

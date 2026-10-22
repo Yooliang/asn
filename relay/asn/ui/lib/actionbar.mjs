@@ -19,6 +19,12 @@ export function canOfferConsole(friend, selfNode) {
   return friend.node === selfNode
 }
 
+/** 通話按鈕：夥伴要在線（離線的話信只會留在收發室，通話等不到回覆），而且這個環境有語音功能。 */
+export function canOfferCall(friend, { hasVoice = true } = {}) {
+  if (!hasVoice || !friend || friend.pending) return false
+  return friend.status !== 'offline'
+}
+
 /** 顯示／背景按鈕的字與提示。 */
 export function consoleButtonView(visible) {
   return visible
@@ -34,8 +40,10 @@ export const ActionBar = {
     selfNode: { type: String, default: '' },
     api: { type: Object, default: null },        // 要有 partnerConsoleQuery／partnerConsoleSet／modelSwitchQuery／modelSwitchRun（lib/tauri.mjs 的 transport）
     active: { type: Boolean, default: true },
+    callable: { type: Boolean, default: false },   // 這個視窗有語音功能（由對話區決定）
   },
-  setup(props) {
+  emits: ['call'],
+  setup(props, { emit }) {
     const { ref, computed, reactive, watch, onMounted, onBeforeUnmount } = globalThis.Vue
     const cons = reactive({ state: 'none', visible: true, busy: false })   // state：none／toggle
     const model = reactive({ open: false, state: 'none', reason: '', current: '', items: [], st: null })
@@ -48,7 +56,8 @@ export const ActionBar = {
     const showModel = computed(() => Boolean(props.api) && canOfferModelSwitch(props.friend, { selfNode: props.selfNode, engine: engine.value }))
     const showSubs = computed(() => Boolean(props.api?.subagentsQuery) && canOfferSubagents(props.friend, { selfNode: props.selfNode, engine: engine.value }))
     const subView = computed(() => subagentView(subs.q))
-    const show = computed(() => showConsole.value || showModel.value || showSubs.value)
+    const showCall = computed(() => canOfferCall(props.friend, { hasVoice: props.callable }))
+    const show = computed(() => showCall.value || showConsole.value || showModel.value || showSubs.value)
     const consoleView = computed(() => consoleButtonView(cons.visible))
     const switcher = computed(() => (props.api ? createModelSwitcher({ transport: props.api, log: m => console.info('[ASN]', m) }) : null))
     const dlgText = computed(() => confirmText(name.value, model.current, dlg.target?.label ?? ''))
@@ -116,10 +125,13 @@ export const ActionBar = {
     onBeforeUnmount(() => { document.removeEventListener('mousedown', onDoc, true); stopSubs() })
     watch(() => props.active, a => { if (a) { void loadConsole(); void loadSubs() } })
     watch(() => props.friend?.id, () => { model.open = false; subs.open = false; void loadConsole(); startSubs() })
-    return { root, cons, model, subs, subView, showSubs, toggleSubs, dlg, show, showConsole, showModel, consoleView, dlgText, toggleConsole, toggleModelMenu, pick, closeDlg, submit, copyManual }
+    return { root, showCall, startCall: () => emit('call'), cons, model, subs, subView, showSubs, toggleSubs, dlg, show, showConsole, showModel, consoleView, dlgText, toggleConsole, toggleModelMenu, pick, closeDlg, submit, copyManual }
   },
   template: `
 <div class="actionbar" ref="root" v-if="show" role="toolbar" aria-label="代理功能列">
+  <button v-if="showCall" class="abtn" type="button" aria-label="通話" title="語音通話：用說的跟這位夥伴對話，回信會念出來（再按掛斷）" @click="startCall">
+    <img src="img/ab-call.svg" alt="" width="32" height="32"><span class="ab-name">通話</span>
+  </button>
   <button v-if="showConsole" class="abtn" type="button" :disabled="cons.busy" :title="consoleView.tip" :aria-label="consoleView.label" @click="toggleConsole">
     <img src="img/ab-window.svg" alt="" width="32" height="32"><span class="ab-name">{{ consoleView.label }}</span>
   </button>

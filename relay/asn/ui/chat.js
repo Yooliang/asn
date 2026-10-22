@@ -7,6 +7,7 @@ import { plain } from './lib/text.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
+import { CALL_BEAT_MS } from './lib/call-beats.mjs'
 import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, transport } from './lib/tauri.mjs'
 
 const { createApp, ref, computed, onMounted, reactive } = Vue
@@ -30,9 +31,16 @@ const app = createApp({
       emit('asn:cmd', { op: 'hello', id })
       window.addEventListener('focus', () => emit('asn:cmd', { op: 'read', id }))
     })
+    // 通話中每 20 秒告訴名單視窗一聲（它的「自動念」這時要暫停，免得回信念兩次）
+    let callTimer = null
+    const callState = active => {
+      clearInterval(callTimer); callTimer = null
+      emit('asn:call', { id, active })
+      if (active) callTimer = setInterval(() => emit('asn:call', { id, active: true }), CALL_BEAT_MS)
+    }
     const selfNode = computed(() => snap.value?.selfNode ?? '')
     return {
-      f, me, transport, selfNode, log, look, friendAv, meAv, voice, photoApi, shotApi, plain, ctl, RESIZE_DIRS, resizeFrom,
+      callState, f, me, transport, selfNode, log, look, friendAv, meAv, voice, photoApi, shotApi, plain, ctl, RESIZE_DIRS, resizeFrom,
       send: text => emit('asn:cmd', { op: 'send', id, text }),
       nudge: () => emit('asn:cmd', { op: 'nudge', id }),
       attach: (photo, caption) => emit('asn:cmd', { op: 'attach', id, photo, caption }),

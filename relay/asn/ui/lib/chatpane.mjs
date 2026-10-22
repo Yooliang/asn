@@ -7,6 +7,7 @@ import { FILE_ACCEPT, formatBytes, photoExpired, photoTitle } from './photo.mjs'
 import { attachmentFromFile, imageFromBlob } from './photo-canvas.mjs'
 import { Annotator } from './annotator.mjs'
 import { ActionBar } from './actionbar.mjs'
+import { CallView } from './call-view.mjs'
 import { shotFileName } from './shot.mjs'
 import { statusTip, tierOf } from './sent-status.mjs'
 
@@ -15,7 +16,7 @@ const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯
 
 export const ChatPane = {
   name: 'ChatPane',
-  components: { Annotator, ActionBar },
+  components: { Annotator, ActionBar, CallView },
   props: {
     friend: { type: Object, default: null },
     me: { type: Object, default: () => ({ nick: '我', status: 'online' }) },
@@ -34,7 +35,7 @@ export const ChatPane = {
     selfNode: { type: String, default: '' },       // 這台設備的節點代號（只拿來判斷是不是本機的視窗，不顯示）
     voice: { type: Object, default: null },        // 語音功能（lib/voice-ui.mjs 的 createVoiceUi）；沒給就沒有念出訊息與麥克風
   },
-  emits: ['send', 'nudge', 'toggle-dp', 'attach'],
+  emits: ['send', 'nudge', 'toggle-dp', 'attach', 'call-state'],
   setup(props, { emit }) {
     const draft = ref(''), pickerOpen = ref(false), nudgeCooling = ref(false)
     const msgsEl = ref(null), composeEl = ref(null)
@@ -155,7 +156,19 @@ export const ChatPane = {
     const speak = (m, i) => props.voice && props.voice.speak(msgKey(m, i), m.text)
     const MIC_TIP = { starting: '準備麥克風…按一下取消', recording: '聆聽中…說完了，按一下辨識（Esc 取消）', recognizing: '辨識中…按一下取消' }
     const micTip = computed(() => MIC_TIP[props.voice?.state.mic.phase] || '語音輸入（按一下開始說話）')
-    const voiceNote = computed(() => props.voice?.state.note || props.voice?.state.tts.error || '')
+    // ---- 通話（#99）：每個面板自己一個通話；回信到達（log 變多）時交給通話念出來。換夥伴、切走分頁、關掉面板都自動掛斷 ----
+    const call = props.voice?.newCall ? props.voice.newCall({ send: t => emit('send', t) }) : null
+    const callActive = computed(() => !!call && call.state.active)
+    const startCall = () => { if (call && !call.state.active) void call.start(props.log) }
+    const hangUp = () => { if (call) void call.end() }
+    if (call) {
+      watch(callActive, a => emit('call-state', a))   // 分開模式：對話視窗廣播給名單視窗，通話中不重複自動念
+      watch([() => props.log, () => props.log.length], () => call.onLog(props.log))
+      watch(() => props.friend?.id, () => { void call.end() })
+      watch(() => props.active, a => { if (!a) void call.end() })
+      onBeforeUnmount(() => { void call.end() })
+    }
+    const voiceNote = computed(() => props.voice?.state.note || call?.state.note || props.voice?.state.tts.error || '')
     onMounted(() => {
       scrollDown(); if (props.active) composeEl.value && composeEl.value.focus()
       if (props.shotApi) props.shotApi.supported().then(v => { shotOk.value = v === true }).catch(() => {})
@@ -169,11 +182,11 @@ export const ChatPane = {
     }
     onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     const docEl = ref(null)
-    return { micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
-  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :active="active"></action-bar>
+  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :active="active" :callable="!!call" @call="startCall"></action-bar>
   <div class="chatpane-body">
   <div class="chatpane-main">
   <div class="conv">
@@ -280,6 +293,7 @@ export const ChatPane = {
     <template v-else-if="friend.waiting">✎ 已送出，等對方回信…</template>
     <template v-else-if="friend.lastAt">上次接收訊息是 {{ fmtDate(friend.lastAt) }}</template>
   </div>
+  <call-view v-if="callActive" :state="call.state" :name="plain(friend.nick)" :avatar="friendAv" :hue="friend.hue" :status="friend.status" @hangup="hangUp" @mute="call.toggleMute()"></call-view>
   <annotator v-if="annot" :blob="annot.blob" :caption="draft.trim()" :busy="annot.busy" :message="annot.msg" @done="annotDone" @cancel="annotCancel"></annotator>
   <div class="photo-viewer" v-if="viewer" @click.self="closeViewer" @keydown.esc="closeViewer" role="dialog" aria-modal="true" aria-label="放大看照片">
     <div class="pv-bar">
