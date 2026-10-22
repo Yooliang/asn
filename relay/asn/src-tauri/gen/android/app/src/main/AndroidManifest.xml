@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 對方傳來「震動」時讓手機震動 -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- 自行安裝版才有安裝權限（建置時 ORG_GRADLE_PROJECT_asnDist=sideload）；Google Play 版這一行換成 INTERNET（已有，重複無害），不含安裝權限 -->
+    <uses-permission android:name="${installPermission}" />
+
+    <!-- AndroidTV support -->
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+
+    <!-- allowBackup=false：節點金鑰與登入存檔放在 App 私有資料夾，不讓系統備份帶到別支手機（會變成兩支手機共用同一把節點金鑰） -->
+    <application
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.asn"
+        android:allowBackup="false"
+        android:usesCleartextTraffic="${usesCleartextTraffic}">
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+            android:launchMode="singleTask"
+            android:label="@string/main_activity_title"
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <!-- AndroidTV support -->
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+            <!-- 瀏覽器登入完成後，用 tw.yooliang.asn://login-done 把使用者帶回 ASN（這個網址不帶任何權杖，只是叫 App 回到前景） -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="tw.yooliang.asn" android:host="login-done" />
+            </intent-filter>
+        </activity>
+
+        <provider
+          android:name="androidx.core.content.FileProvider"
+          android:authorities="${applicationId}.fileprovider"
+          android:exported="false"
+          android:grantUriPermissions="true">
+          <meta-data
+            android:name="android.support.FILE_PROVIDER_PATHS"
+            android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+</manifest>

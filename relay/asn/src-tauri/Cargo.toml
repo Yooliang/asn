@@ -20,20 +20,25 @@ path = "src/bin/asn-cli.rs"
 name = "asn-askpass"
 path = "src/bin/asn-askpass.rs"
 
+# sideload＝自行安裝版（官網下載的 APK）：帶手機自動更新（下載、驗 sha256、交給系統安裝）。Google Play 版不開這個旗標，程式碼與安裝權限都不編進去
+[features]
+sideload = []
+
 [lib]
 name = "asn_lib"
-crate-type = ["rlib"]
+# cdylib：安卓版把它載成 libasn_lib.so（Tauri 行動版的規定）；電腦版仍用 rlib 連進 asn 執行檔
+crate-type = ["cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["time", "macros", "rt", "process", "sync", "io-util", "signal", "net"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
-tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tokio-tungstenite = { version = "0.26" }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 base64 = "0.22"
 getrandom = "0.3"
@@ -44,8 +49,20 @@ png = "0.17"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 tar = "0.4"
 zeroize = "1"
-tauri-plugin-updater = "=2.14.0"
 tauri-plugin-dialog = "=2.8.3"
+
+# 電腦版（Windows／Linux）專屬：系統匣、自動更新、系統內建的加密連線（OpenSSL／SChannel）。行為與手機版分開，見 docs/design/ANDROID.md
+[target.'cfg(not(target_os = "android"))'.dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-updater = "=2.14.0"
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+
+# 安卓版專屬：純 Rust 的加密連線（不用交叉編譯 OpenSSL）、開系統瀏覽器的外掛
+[target.'cfg(target_os = "android")'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+tauri-plugin-opener = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_Console", "Win32_Foundation", "Win32_System_Threading", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_Security_Cryptography", "Win32_UI_Shell", "Win32_System_Diagnostics_Debug", "Win32_System_Diagnostics_ToolHelp", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_Time", "Win32_System_Pipes", "Win32_Security_Authorization"] }

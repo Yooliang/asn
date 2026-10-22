@@ -8,3 +8,6 @@ relay/machine/README.md text eol=lf
 
 # relay/cloud-agent 在雲端 Linux 上跑：程式與 .sh 一律 LF
 relay/cloud-agent/** text eol=lf
+
+# 安卓專案的 gradlew 在 Linux／macOS 上直接執行：一律 LF（gradlew.bat 照 *.bat 規則用 CRLF）
+relay/asn/src-tauri/gen/android/gradlew text eol=lf

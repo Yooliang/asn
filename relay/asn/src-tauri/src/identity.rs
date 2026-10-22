@@ -8,7 +8,15 @@ use std::path::{Path, PathBuf};
 pub const DEFAULT_URL: &str = "https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay";
 
 pub fn home_dir() -> PathBuf {
-    std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from).unwrap_or_default()
+    // 安卓沒有「使用者資料夾」：一律放在這個 App 的私有資料夾（別的 App 讀不到）
+    #[cfg(target_os = "android")]
+    {
+        crate::android::files_dir()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from).unwrap_or_default()
+    }
 }
 pub fn relay_home() -> PathBuf {
     home_dir().join(".irori-relay")

@@ -34,6 +34,7 @@ export const ChatPane = {
     agentApi: { type: Object, default: null },     // 上方功能列用（lib/tauri.mjs 的 transport）；沒給就沒有功能列
     selfNode: { type: String, default: '' },       // 這台設備的節點代號（只拿來判斷是不是本機的視窗，不顯示）
     voice: { type: Object, default: null },        // 語音功能（lib/voice-ui.mjs 的 createVoiceUi）；沒給就沒有念出訊息與麥克風
+    enterSends: { type: Boolean, default: true },  // Enter 直接送出（電腦預設）；手機的軟鍵盤 Enter 是換行，傳送靠按鈕
   },
   emits: ['send', 'nudge', 'toggle-dp', 'attach', 'call-state'],
   setup(props, { emit }) {
@@ -55,6 +56,11 @@ export const ChatPane = {
       const text = draft.value.trim(); if (!text) return
       emit('send', text)
       draft.value = ''; pickerOpen.value = false
+    }
+    function onEnter(ev) {
+      if (!props.enterSends) return
+      ev.preventDefault()
+      send()
     }
     function nudge() {
       if (nudgeCooling.value) return
@@ -182,7 +188,7 @@ export const ChatPane = {
     }
     onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     const docEl = ref(null)
-    return { call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -267,7 +273,7 @@ export const ChatPane = {
         <button class="aero-btn" type="button" :disabled="voice.state.install.busy" @click="voice.dismissInstall()">取消</button>
       </div>
       <form class="composer" @submit.prevent="send">
-        <textarea ref="composeEl" v-model="draft" @keydown.enter.exact.prevent="send" @paste="onPaste" :placeholder="composeHint" :title="composeTitle || undefined" aria-label="輸入訊息"></textarea>
+        <textarea ref="composeEl" v-model="draft" @keydown.enter.exact="onEnter" @paste="onPaste" :placeholder="composeHint" :title="composeTitle || undefined" aria-label="輸入訊息"></textarea>
         <button class="aero-btn" type="submit" :disabled="!draft.trim()">傳送</button>
       </form>
     </div>

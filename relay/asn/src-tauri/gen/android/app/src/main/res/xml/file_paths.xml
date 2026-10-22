@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+  <external-path name="my_images" path="." />
+  <!-- 自行安裝版的更新檔：App 私有資料夾的 .irori-asn/updates/（只給系統安裝程式讀） -->
+  <files-path name="asn_updates" path=".irori-asn/updates/" />
+  <cache-path name="my_cache_images" path="." />
+</paths>

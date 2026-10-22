@@ -104,3 +104,42 @@ Deno.test("sanitizeLauncher：上傳的摘要只留 id／label／cwd_allow／max
   assertEquals(sanitizeLauncher(null), null);
   assertEquals(sanitizeLauncher({ profiles: "x" }), { error: "bad_request" });
 });
+
+Deno.test("本人簽章：有簽章才帶 p_signed_user（launch、launchers）；沒簽章與以前完全相同（不多帶任何參數）", async () => {
+  const USER = "22222222-2222-2222-2222-222222222222";
+  const a = fakeDeps();
+  assertEquals((await handleNodeLaunchAction(a.deps, { id: "P1" }, "launch", OK, USER)).status, 200);
+  assertEquals(a.calls[0].fn, "irori_relay_launch");
+  assertEquals(a.calls[0].args.p_signed_user, USER);
+  assertEquals(a.calls[0].args.p_actor, "P1", "actor 仍是金鑰所屬的節點，簽章只是證明這個節點是本人的");
+  const b = fakeDeps();
+  await handleNodeLaunchAction(b.deps, { id: "H" }, "launch", OK);
+  assert(!("p_signed_user" in b.calls[0].args), "沒簽章不帶參數：還沒套 migration 的資料庫、舊呼叫端照舊");
+  const c = fakeDeps(() => ({ machines: [], launches: [] }));
+  assertEquals((await handleNodeLaunchAction(c.deps, { id: "P1" }, "launchers", { ids: null }, USER)).status, 200);
+  assertEquals(c.calls[0].args.p_signed_user, USER);
+  const d = fakeDeps(() => ({ machines: [], launches: [] }));
+  await handleNodeLaunchAction(d.deps, { id: "H" }, "launchers", {});
+  assert(!("p_signed_user" in d.calls[0].args));
+  // 機器橋取待辦、回報結果的動作不受簽章影響
+  const e = fakeDeps(() => []);
+  await handleNodeLaunchAction(e.deps, { id: "H" }, "launch_pending", {}, USER);
+  assert(!("p_signed_user" in e.calls[0].args));
+});
+
+Deno.test("本人簽章：資料庫回 forbidden（簽章的人不擁有這個節點）時，照樣 403，不敲門鈴", async () => {
+  const { deps, rings } = fakeDeps(() => ({ error: "forbidden" }));
+  const r = await handleNodeLaunchAction(deps, { id: "P1" }, "launch", OK, "33333333-3333-3333-3333-333333333333");
+  assertEquals(r.status, 403);
+  assertEquals(rings.length, 0);
+});
+
+Deno.test("migration：launch／launchers 的擁有者判定＝role=owner 或 簽章的人擁有這個節點（舊的 owner 規則不變）", async () => {
+  const sql = await Deno.readTextFile(new URL("../../migrations/20261022070000_launch_signed.sql", import.meta.url));
+  assert(/drop function if exists public\.irori_relay_launch\(text, text, text, text, text, text\)/i.test(sql));
+  assert(/drop function if exists public\.irori_relay_launchers\(text, uuid\[\]\)/i.test(sql));
+  assert((sql.match(/role = 'owner' or public\.asn_user_owns_node\(p_signed_user, p_actor\)/g) ?? []).length === 2, "兩個函式都要這個判定");
+  assert(/p_signed_user uuid default null/i.test(sql));
+  assert(/grant execute on function public\.irori_relay_launch\(text, text, text, text, text, text, uuid\) to service_role/i.test(sql));
+  assert(!/to (anon|authenticated|public)/i.test(sql), "只授權 service_role");
+});

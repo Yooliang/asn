@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 自適應圖示的背景：淺藍單色（ASN 的 Aero 配色）。前景是機器人（mipmap-*/ic_launcher_foreground.png，由 scripts/gen-android-icons.mjs 產生） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#DCEBFA" />
+</shape>
