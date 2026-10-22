@@ -29,14 +29,22 @@ export function buildFriends(members, { selfNode, selfName } = {}) {
   const out = []
   for (const m of Array.isArray(members) ? members : []) {
     if (!m || typeof m.id !== 'string') continue
-    for (const a of Array.isArray(m.agents) ? m.agents : []) {
+    // 在線的 agents ＋ 離線但 30 天內出現過的 offline_agents（#167；舊後台沒有後者）。離線的一律 offline，同名以在線為準
+    const seen = new Set()
+    const rows = [
+      ...(Array.isArray(m.agents) ? m.agents : []).map(a => [a, false]),
+      ...(Array.isArray(m.offline_agents) ? m.offline_agents : []).map(a => [a, true]),
+    ]
+    for (const [a, off] of rows) {
       if (!a || typeof a.name !== 'string' || !a.name) continue
       if (isRelayRoom(a.name)) continue
       if (m.id === selfNode && a.name === selfName) continue
+      if (seen.has(a.name)) continue
+      seen.add(a.name)
       out.push({
         id: friendId(m.id, a.name), node: m.id, device: typeof m.name === 'string' && m.name.trim() ? m.name.trim() : '', agent: a.name, nick: a.name,
         psm: psmOf(a),
-        onRoster: true, engine: a.engine ?? null, kind: typeof m.kind === 'string' && m.kind ? m.kind : null, status: statusOf(a.status),
+        onRoster: true, engine: a.engine ?? null, kind: typeof m.kind === 'string' && m.kind ? m.kind : null, status: off || a.online === false ? 'offline' : statusOf(a.status),
         ...(PARTNER_ID.test(String(a.partner_id ?? '')) ? { partnerId: a.partner_id } : {}),   // 夥伴 ID（#153）：只在內部用來查往來記錄與指定接班，不顯示
       })
     }

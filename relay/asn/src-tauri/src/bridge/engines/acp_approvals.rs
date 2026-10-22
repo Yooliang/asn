@@ -53,12 +53,17 @@ pub fn parse_mail_text(text: &str) -> (String, String, String) {
                     agent = rest[node.len() + 1..].chars().take_while(|c| !c.is_whitespace()).collect();
                     break;
                 }
+                if !n.is_empty() {
+                    // 本人的位址是不帶節點的 u:xxx：node＝人代號、agent 空（與 Node 橋同）
+                    node = n;
+                    break;
+                }
             }
             from = s + 1;
         }
     }
     let mut body = text.to_string();
-    for pre in ["[RELAY 來信]", "[收發室]"] {
+    for pre in ["[RELAY 來信]", "寄件人：", "【要回信】", "[收發室]"] {
         if body.starts_with(pre) {
             body = match body.find('\n') {
                 Some(i) => body[i + 1..].to_string(),

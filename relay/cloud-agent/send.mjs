@@ -54,7 +54,7 @@ export async function main(argv, rawEnv = process.env) {
   if (a.replyTo && !UUID_RE.test(a.replyTo)) throw new Fail(1, '--reply-to 要是信件 id（uuid）')
   const i = a.to.indexOf('/')
   const toNode = i < 0 ? a.to : a.to.slice(0, i), toAgent = i < 0 ? '' : a.to.slice(i + 1)
-  if (!ID_RE.test(toNode)) throw new Fail(1, `--to ${a.to} 的節點代號格式不對`)
+  if (!ID_RE.test(toNode) && !/^u:[0-9a-f]{12}$/.test(toNode)) throw new Fail(1, `--to ${a.to} 的節點代號格式不對`)   // u:xxxxxxxxxxxx＝本人位址（與節點無關）
   const cfg = resolveConfig(env)
   if (toNode === cfg.node) throw new Fail(1, '收件人是自己這個節點')
   const key = readKey(cfg, env)

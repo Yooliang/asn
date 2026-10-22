@@ -44,9 +44,10 @@ pub struct Pending {
     pub no_reply: bool,
     pub replied: bool,
     pub notified_at: Option<u64>,
-    /// 逾時通知被延後（對方忙碌）；不存檔，重啟後重新判斷
-    pub deferred: bool,
-    pub idle_since: u64,
+    /// 已提醒過收件視窗（只提醒一次；存檔，重啟不重提醒）
+    pub nudged: bool,
+    /// 寄件人說明（給收件視窗提醒用；不存檔，沒有時退回寄件視窗名）
+    pub sender_desc: String,
     /// 群組訊息（沒有就是一般來信）
     pub room: Option<RoomRef>,
 }
@@ -55,7 +56,7 @@ impl Pending {
     pub fn new(id: &str, from_node: &str, from_agent: &str, target: &str, now: u64, no_reply: bool) -> Pending {
         Pending {
             id: id.into(), from_node: from_node.into(), from_agent: from_agent.into(), target: target.into(),
-            state: State::Forwarding, t0: now, t: now, no_reply, replied: false, notified_at: None, deferred: false, idle_since: 0, room: None,
+            state: State::Forwarding, t0: now, t: now, no_reply, replied: false, notified_at: None, nudged: false, sender_desc: String::new(), room: None,
         }
     }
 }
@@ -72,7 +73,7 @@ pub fn to_record(p: &Pending) -> Value {
     json!({
         "id": p.id, "from_node": p.from_node, "from_agent": p.from_agent, "target": p.target,
         "state": p.state.name(), "t0": p.t0, "t": p.t, "noReply": p.no_reply, "replied": p.replied,
-        "notifiedAt": p.notified_at,
+        "notifiedAt": p.notified_at, "nudged": p.nudged,
         "room": p.room.as_ref().map(|r| json!({ "id": r.id, "seq": r.seq, "window": if r.window.is_empty() { Value::Null } else { json!(r.window) } })),
     })
 }
@@ -113,7 +114,7 @@ fn from_record(r: &Value) -> Option<Pending> {
     Some(Pending {
         id: id.into(), from_node: s("from_node").unwrap_or("").into(), from_agent: s("from_agent").unwrap_or("").into(), target: target.into(),
         state, t0, t, no_reply: r.get("noReply").and_then(Value::as_bool).unwrap_or(false), replied: r.get("replied").and_then(Value::as_bool).unwrap_or(false),
-        notified_at: if state == State::Notified { notified_at } else { None }, deferred: false, idle_since: 0, room,
+        notified_at: if state == State::Notified { notified_at } else { None }, nudged: r.get("nudged").and_then(Value::as_bool).unwrap_or(false), sender_desc: String::new(), room,
     })
 }
 

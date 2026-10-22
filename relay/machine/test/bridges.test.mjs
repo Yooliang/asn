@@ -251,12 +251,12 @@ test('bridge: 完全沒設預設收件人 → 同樣留在信箱（不 ack、不
   } finally { await st.close() }
 })
 
-// ------------------------------------------------------------------------ 逾時通知（不需回覆／合併）
+// ------------------------------------------------------------------------ 逾時不再通知寄件人（寄件人看已讀狀態）
 const quick = { IRORI_RELAY_DEFAULT_AGENT: 'T-最近的', IRORI_REPLY_TIMEOUT_MS: '300', IRORI_BRIDGE_TICK_MS: '100' }
 const noticesOf = st => st.sent.filter(s => /沒有經收發室收到/.test(s.body))
 
 // 「要不要回信」是信件的獨立欄位 expects_reply：true／false 就只看欄位；null（舊版寄件工具、舊信）才退回看內文標記
-test('bridge: expects_reply=false → 不計時；=true → 計時（內文寫不需回覆也一樣）；null → 退回看內文標記；抬頭帶 reply=no|yes|?', async () => {
+test('bridge: 抬頭帶 reply=no|yes|?（欄位優先，null 才看內文標記）；逾時後一律不通知寄件人', async () => {
   const st = await fakeServer({ inbox: [
     mail(1, { body: '一般內文，沒有任何標記', expects_reply: false }),   // 欄位說只是告知 → 不計時
     mail(2, { body: '（不需回覆）但欄位說要等回信', expects_reply: true }),   // 欄位優先 → 計時
@@ -269,11 +269,10 @@ test('bridge: expects_reply=false → 不計時；=true → 計時（內文寫�
   let rec
   try {
     await runBridge({
-      script: 'bridge.mjs', st, setup: mainSetup(SESSIONS), env: { ...quick, IRORI_NOREPLY_WINDOW_MS: '0' }, settle: 1500,
-      until: ({ home }) => (rec = forwarded(home)).length >= 7 && st.acked.size >= 7 && noticesOf(st).length >= 4,
+      script: 'bridge.mjs', st, setup: mainSetup(SESSIONS), env: quick, settle: 1500,
+      until: ({ home, log }) => (rec = forwarded(home)).length >= 7 && st.acked.size >= 7 && (log.match(/reply wait over/g) || []).length >= 4,
     })
-    assert.deepEqual(noticesOf(st).map(s => s.reply_to).sort(), [uid(2), uid(4), uid(5), uid(7)].sort())
-    for (const s of noticesOf(st)) assert.ok(s.body.endsWith('只是告知的信，寄件時用 --no-reply（代寄寫 reply=no）就不會提醒'), s.body)
+    assert.equal(noticesOf(st).length, 0, '不再通知寄件人')
     // 抬頭：reply 欄位如實反映寄件人的明說（舊信是 ?），放在 engine= 後面
     const headOf = n => rec.find(r => r.id === uid(n)).text.split('\n').find(l => l.startsWith('[RELAY 來信]'))
     assert.match(headOf(1), / id=\S+ engine=claude reply=no$/)
@@ -307,7 +306,7 @@ test('bridge: 內文含（不需回覆）／[no-reply]（舊信，欄位是 null
   } finally { await st.close() }
 })
 
-test('bridge: 視窗已用 send.mjs --reply-to 直接回了（replied 記號）→ 不寄「沒有回覆」；沒記號的照寄', async () => {
+test('bridge: 視窗已用 send.mjs --reply-to 直接回了（replied 記號）→ log 記下；沒記號的也不通知寄件人', async () => {
   const st = await fakeServer({ inbox: [mail(1), mail(2)] })
   try {
     const setup = home => {
@@ -317,34 +316,24 @@ test('bridge: 視窗已用 send.mjs --reply-to 直接回了（replied 記號）�
       return env
     }
     const { log } = await runBridge({
-      script: 'bridge.mjs', st, setup, env: { ...quick, IRORI_NOREPLY_WINDOW_MS: '0' }, settle: 1500,
-      until: ({ log }) => noticesOf(st).length >= 1 && /no-reply notice skipped/.test(log),
+      script: 'bridge.mjs', st, setup, env: quick, settle: 1500,
+      until: ({ log }) => /reply wait over id=\S+: T-最近的 replied directly/.test(log) && new RegExp(`reply wait over id=${uid(2)} -> T-最近的: no notice`).test(log),
     })
-    assert.equal(noticesOf(st).length, 1)
-    assert.equal(noticesOf(st)[0].reply_to, uid(2))
-    assert.match(log, new RegExp(`no-reply notice skipped id=${uid(1)}: T-最近的 replied directly`))
+    assert.equal(noticesOf(st).length, 0)
+    assert.match(log, new RegExp(`reply wait over id=${uid(1)}: T-最近的 replied directly`))
   } finally { await st.close() }
 })
 
-test('bridge: 逾時通知 30 分鐘內同寄件人＋同收件視窗只報一次', async () => {
+test('bridge: 守門——多封信逾時也不寄任何「沒有經收發室收到回覆」給寄件人', async () => {
   const st = await fakeServer({ inbox: [mail(1), mail(2), mail(3)] })
   try {
     await runBridge({
       script: 'bridge.mjs', st, setup: mainSetup(SESSIONS), env: quick, settle: 1500,
-      until: () => st.acked.size >= 3 && noticesOf(st).length >= 1,
+      until: ({ log }) => st.acked.size >= 3 && (log.match(/reply wait over/g) || []).length >= 3,
     })
-    assert.equal(noticesOf(st).length, 1)
-    assert.match(noticesOf(st)[0].body, /對方若已另外回信可忽略/)
+    assert.equal(noticesOf(st).length, 0)
+    assert.ok(!st.sent.some(s => /\[收發室\]/.test(s.body) && /回覆/.test(s.body)))
   } finally { await st.close() }
-  // 視窗設 0：每封都報（確認合併確實來自視窗）
-  const st2 = await fakeServer({ inbox: [mail(4), mail(5)] })
-  try {
-    await runBridge({
-      script: 'bridge.mjs', st: st2, setup: mainSetup(SESSIONS), env: { ...quick, IRORI_NOREPLY_WINDOW_MS: '0' },
-      until: () => noticesOf(st2).length >= 2,
-    })
-    assert.equal(noticesOf(st2).length, 2)
-  } finally { await st2.close() }
 })
 
 // 照片（附件）：橋把信轉給視窗時，內文後面多一行「〔照片〕檔名＋下載指令」，和內文一起進外部資料區塊；沒附件的信不變
@@ -362,10 +351,11 @@ test('bridge: 信帶附件 → 轉給視窗的文字多一行〔照片〕提示�
     const block = t => t.slice(t.indexOf('<<<MAIL\n') + 8, t.lastIndexOf('\nMAIL>>>')).split('\n')
     const lines = block(withPhoto)
     assert.match(lines[0], /^\[RELAY 來信\]/)
-    assert.equal(lines[1], '看這隻')
-    assert.match(lines[2], new RegExp(`^〔照片〕cat\\.webp（image/webp，179 KB，1536×2048）下載：node ".*attach\\.mjs" --id ${att.id}$`))
-    assert.equal(lines.length, 3)
+    assert.equal(lines[1], '寄件人：W-政策（成員身分）')
+    assert.equal(lines[2], '看這隻')
+    assert.match(lines[3], new RegExp(`^〔照片〕cat\\.webp（image/webp，179 KB，1536×2048）下載：node ".*attach\\.mjs" --id ${att.id}$`))
+    assert.equal(lines.length, 4)
     assert.doesNotMatch(withPhoto, /SECRETTHUMB/)
-    assert.equal(block(rec.find(r => r.text.includes('內文-2')).text).length, 2, '沒附件的信：抬頭＋內文，沒有多餘的行')
+    assert.equal(block(rec.find(r => r.text.includes('內文-2')).text).length, 3, '沒附件的信：抬頭＋寄件人說明＋內文，沒有多餘的行')
   } finally { await st.close() }
 })

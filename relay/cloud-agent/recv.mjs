@@ -21,6 +21,8 @@ const recordOf = m => ({
   reply_to: m.reply_to ?? null, created_at: m.created_at ?? null,
   expects_reply: typeof m.expects_reply === 'boolean' ? m.expects_reply : null,   // true＝在等回信、false＝只是告知、null＝舊信沒說
   body: m.body, received_at: new Date().toISOString(),
+  // 寄件人說明（後台選填欄位，舊後台沒有）：inbox.mjs 顯示「寄件人：…」用
+  ...Object.fromEntries(['sender_display', 'sender_device', 'sender_engine'].filter(k => typeof m[k] === 'string' && m[k]).map(k => [k, m[k]])),
   // 附件（照片）：只存編號、檔名、型別、大小、尺寸（不存縮圖）；沒附件的信不加這個欄位。顯示與下載指令見 inbox.mjs、attach.mjs
   ...(normalizeAttachments(m.attachments).length ? { attachments: normalizeAttachments(m.attachments) } : {}),
 })

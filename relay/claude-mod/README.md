@@ -60,6 +60,16 @@ mod 把這個視窗的細部狀態寫到本機檔，給 ASN 內建橋讀進 rost
 - **寫檔方式**：直接覆蓋（無法先寫 `.tmp` 再改名），讀的一方讀到半份 JSON 要當沒有。任何寫檔失敗都吞掉（最多 `$.ui.log` 一行），不影響 Claude 運作。
 - **過期**：超過 30 分鐘沒更新的檔由讀的一方判為過期（ASN 內建橋負責），mod 不做清理。
 
+## 第三期：來信輪次自動回信
+
+由來信觸發的那一輪，做完時外掛自動把最後的回答寄回寄件人（#134）。
+
+- **記下來信**：`turn.start`（主迴圈，子代理忽略）解析開頭文字。要 `[RELAY 來信]` 開頭、`trust=member|owner`，且 `reply=yes`，或有新版「【要回信】」行（帶回信位址與 id，優先於第一行的 `from`／`id`；舊版只有第一行也能用）。`reply=no`／`?`、寄件人含「收發室」、內文以「［收發室］」開頭、trust 不是 member／owner 的一律不記。使用者自己打字的輪次不記。
+- **本輪已回就不寄**：`asn_send` 的 `to` 等於寄件人或 `reply_to` 等於信件 id；或 Bash 的 send.mjs／asn send／asn-cli send 帶 `--reply-to <id>`／`--to <寄件人>`（成功才算）。
+- **`turn.complete`（同一 turnId、主迴圈）**：`answer` 且沒有背景工作／排程（`classic.Stop`）→ 把 answer 寄回（`--to <from> --reply-to <id>`）；結尾是問句（`?`／`？`，或最後一句含嗎、呢、要不要、是否）→ `--reply` 並在內文前加「（對方在問）」，否則 `--no-reply`；answer 為空寄「（這一輪沒有文字回覆）」；超過 20000 字截斷並註明。`aborted`／`error`／`refusal` → 寄一行「這封信的處理中斷了／出錯了／被拒答了」（`--no-reply`）。
+- **簽章**：自動寄出走同一個 `buildSendArgv`，簽章守門照舊（一律成員身分）。寄信失敗吞掉，最多 `$.ui.log` 一行。
+- **限制**：Stop 與 turn.complete 的先後沒保證，Stop 還沒到時最多等 0.6 秒。有背景工作或排程時整輪不寄，之後真正做完的那一輪若不是同一個 turnId（不是來信觸發）也不會寄；第一版不處理。【要回信】行格式已由 ASN 主線定案：第三行 `【要回信】回信位址=<位址> 信件編號=<id>：…`，只認這兩個欄位（值不含空白，遇空白或全形冒號結束）；第二行「寄件人：」說明含「收發室」也算系統信。
+
 ## 限制
 
 - Bash 守門以命令字串判斷（含 `--to` 且無 `--reply`／`--no-reply` 旗標字樣），內文剛好含有這些字樣會放行；這是提醒用的守門，不是安全邊界。
@@ -80,4 +90,4 @@ claude plugin validate relay/claude-mod
 claude plugin test relay/claude-mod
 ```
 
-寄信純邏輯在 `hooks/lib.ts`，視窗狀態檔邏輯在 `hooks/status.ts`；測試在 `hooks/asn.test.ts`、`hooks/status.test.ts`。
+寄信與來信解析的純邏輯在 `hooks/lib.ts`，視窗狀態檔邏輯在 `hooks/status.ts`；測試在 `hooks/asn.test.ts`、`hooks/status.test.ts`、`hooks/reply.test.ts`。

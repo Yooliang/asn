@@ -11,7 +11,7 @@ const num = v => typeof v === 'number' && Number.isFinite(v)
 export function toRecord(p) {
   return {
     id: p.mail.id, from_node: p.mail.from_node ?? '', from_agent: p.mail.from_agent ?? '', target: p.target,
-    state: p.state, t0: p.t0, t: p.t, noReply: !!p.noReply, replied: !!p.replied, notifiedAt: p.notifiedAt ?? null,
+    state: p.state, t0: p.t0, t: p.t, noReply: !!p.noReply, replied: !!p.replied, nudged: !!p.nudged, notifiedAt: p.notifiedAt ?? null,
     room: p.room ? { id: p.room.id, seq: p.room.seq, window: p.room.window ?? null } : null,
   }
 }
@@ -30,6 +30,7 @@ function fromRecord(r) {
     mail: { id: r.id, from_node: str(r.from_node) ? r.from_node : '', from_agent: str(r.from_agent) ? r.from_agent : '' },
     target: r.target, state: r.state, t0: r.t0, t: r.t, noReply: !!r.noReply, replied: !!r.replied,
   }
+  if (r.nudged) p.nudged = true
   if (r.state === 'notified') p.notifiedAt = r.notifiedAt
   if (room) p.room = room
   return p

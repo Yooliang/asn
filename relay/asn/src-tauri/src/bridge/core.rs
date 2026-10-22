@@ -39,11 +39,10 @@ pub struct Config {
     pub roster_ms: u64,
     pub tick_ms: u64,
     pub reply_timeout_ms: u64,
-    pub notice_window_ms: u64,
     pub late_keep_ms: u64,
     pub late_max: usize,
-    pub busy_grace_ms: u64,
-    pub busy_max_ms: u64,
+    /// 轉交後多久還沒回就提醒收件視窗一次（reply=yes 的信；10 分鐘的寄件人通知照舊）
+    pub nudge_ms: u64,
     pub forward_timeout_ms: u64,
     pub pull_backoff_ms: Vec<u64>,
     pub claude_bin: String,
@@ -89,11 +88,9 @@ impl Config {
             roster_ms: env_u64("ASN_ROSTER_MS", 60_000),
             tick_ms: env_u64("ASN_BRIDGE_TICK_MS", 5_000),
             reply_timeout_ms: env_u64("ASN_REPLY_TIMEOUT_MS", 600_000),
-            notice_window_ms: env_u64("ASN_NOREPLY_WINDOW_MS", 1_800_000),
             late_keep_ms: env_u64("ASN_LATE_KEEP_MS", 86_400_000),
             late_max: env_u64("ASN_LATE_MAX", 200) as usize,
-            busy_grace_ms: env_u64("ASN_BUSY_GRACE_MS", 120_000),
-            busy_max_ms: env_u64("ASN_BUSY_MAX_MS", 3_600_000),
+            nudge_ms: env_u64("ASN_NUDGE_MS", 300_000),
             forward_timeout_ms: env_u64("ASN_FORWARD_TIMEOUT_MS", 120_000),
             pull_backoff_ms: vec![5_000, 10_000, 20_000, 40_000, 60_000],
             claude_bin: std::env::var("CLAUDE_BIN").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "claude".into()),
@@ -188,7 +185,6 @@ pub struct Core {
     seen: HashSet<String>,
     pub pending: Vec<Pending>,
     pub last_requester: BTreeMap<String, LastReq>,
-    noticed: HashMap<String, (u64, u32)>,
     notice_ids: HashMap<String, u64>,
     notice_windows: HashMap<String, u64>,
     self_handled: HashSet<String>,
@@ -243,7 +239,7 @@ impl Core {
         let corr = CorrLog::new(cfg.handoff_dir.clone());
         let mut c = Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
-            last_requester: BTreeMap::new(), noticed: HashMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), unrouted: HashSet::new(),
+            last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), unrouted: HashSet::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, cursor_warned: false, launcher: None, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false,
         };
@@ -599,6 +595,7 @@ impl Core {
         };
         let no_reply = !wants_reply(m.expects_reply, &m.body) || Self::is_mailbox_sender(&from_agent);
         let mut p = Pending::new(&m.id, &m.from_node, &from_agent, &target, self.now, no_reply);
+        p.sender_desc = mail::sender_line(&m).trim_start_matches("寄件人：").to_string();
         if !self.forwardable(&target) {
             let names = if self.roster.is_empty() { "(無)".to_string() } else { self.roster.iter().map(|w| w.name.as_str()).collect::<Vec<_>>().join("、") };
             p.state = State::Done;
@@ -617,7 +614,7 @@ impl Core {
         self.persist();
         // 照片／檔案：內文後面多一行「〔照片〕檔名＋下載指令」，和內文一起在外部資料區塊內
         let body = attach::notes_for(&m.body, &m.attachments, self.cfg.attach_cmd.as_deref());
-        let text = format!("{}\n{}{}", mail_head(&m, &self.engine_label_of(&target)), if note.is_empty() { String::new() } else { format!("{note}\n") }, body);
+        let text = format!("{}\n{}{}{}", mail_head(&m, &self.engine_label_of(&target)), mail::preamble(&m, &self.engine_of(&target)),if note.is_empty() { String::new() } else { format!("{note}\n") }, body);
         let text = self.with_path_line(text, &target);
         match self.deliver(&m.id, &target, &text) {
             Ok(_) => {
@@ -832,7 +829,7 @@ impl Core {
         };
         let late = self.pending[i].state == State::Notified;
         self.pending[i].replied = true;
-        let (o, t0, target) = (Origin::of(&self.pending[i]), self.pending[i].t0, self.pending[i].target.clone());
+        let (o, t0) = (Origin::of(&self.pending[i]), self.pending[i].t0);
         let room = self.pending[i].room.clone();
         if late {
             self.remove(&o.id); // 遲到的回覆寄回後就清掉
@@ -852,7 +849,7 @@ impl Core {
             self.log.line(&format!("room reply from {from} -> room={} #{} posted={ok}", r.id, r.seq));
             return;
         }
-        let body = if late { format!("（遲到的回覆：{target} 在收發室寄出「沒有回覆」通知之後才回）\n{text}") } else { text.clone() };
+        let body = text.clone();
         let ok = self.send_back(&o, &body, Some(from), expects).await;
         if ok {
             self.corr_note(from, Dir::Replied, from, &Self::node_agent(&o.from_node, &o.from_agent), &o.id, &text, &[]);
@@ -1037,38 +1034,36 @@ impl Core {
         self.now = now;
         self.refresh_roster(now).await;
         if let Some(body) = ev.first_message {
-            let m = Mail { id: ev.id, from_node: ev.requested_by, from_agent: None, to_agent: Some(ev.name), body, trust: "owner".into(), expects_reply: None, attachments: vec![] };
+            let m = Mail { id: ev.id, from_node: ev.requested_by, from_agent: None, to_agent: Some(ev.name), body, trust: "owner".into(), expects_reply: None, attachments: vec![], ..Default::default() };
             self.handle_mail(m).await;
         }
     }
 
     // ---- 逾時 ----
-    async fn notice_no_reply(&mut self, o: &Origin, target: &str, p_t: u64, reason: &str) {
-        let now = self.now;
-        let key = format!("{}/{}|{target}", o.from_node, o.from_agent);
-        if let Some(prev) = self.noticed.get_mut(&key) {
-            if now.saturating_sub(prev.0) < self.cfg.notice_window_ms {
-                prev.1 += 1;
-                self.log.line(&format!("no-reply notice suppressed id={} ({key})", o.id));
-                return;
-            }
+    /// 轉交後 nudge_ms 還沒看到回覆、收件視窗已回到閒置：提醒收件視窗一次（同一份 pending 狀態機，旗標 nudged 不重複）。
+    /// 視窗忙碌（或狀態不是 idle，例如使用者正在打字）不插話，下一輪再看；回了就不提醒
+    async fn nudge_window(&mut self, id: &str) {
+        let Some(i) = self.idx(id) else { return };
+        let p = self.pending[i].clone();
+        if p.replied || self.replied_directly(id) || self.sent_to_sender(&p) {
+            self.pending[i].nudged = true;
+            return;
         }
-        let skipped = self.noticed.get(&key).map(|x| x.1).unwrap_or(0);
-        let more = if skipped > 0 { format!("；另有 {skipped} 封也還沒回") } else { String::new() };
-        self.noticed.insert(key.clone(), (now, 0));
-        let mins = ((now.saturating_sub(p_t)) as f64 / 60000.0).round().max(1.0) as u64;
-        let tip = mail::NO_REPLY_TIP;
-        let text = match reason {
-            "window-closed" => format!("[收發室] 對方視窗「{target}」已關閉，沒有經收發室收到回覆{more}"),
-            "timeout" => format!("[收發室] {} 分鐘內沒有經收發室收到 {target} 的回覆（對方若已另外回信可忽略）{more}。{tip}", (self.cfg.reply_timeout_ms as f64 / 60000.0).round() as u64),
-            _ => format!("[收發室] {target} 先前一直在忙，等了約 {mins} 分鐘仍沒有經收發室收到回覆（對方若已另外回信可忽略）{more}。{tip}"),
-        };
-        let ok = self.send_back(o, &text, None, None).await;
-        self.log.line(&format!("no-reply notice sent id={} ({key}) reason={reason} sent={ok}", o.id));
+        let idle = self.agent_of(&p.target).is_some_and(|a| a.status.as_deref().is_some_and(|s| s.eq_ignore_ascii_case("idle")));
+        if !idle {
+            return;
+        }
+        self.pending[i].nudged = true;
+        let who = if p.sender_desc.is_empty() { if p.from_agent.is_empty() { "對方".to_string() } else { p.from_agent.clone() } } else { p.sender_desc.clone() };
+        let text = format!("（收發室提醒）你還沒回覆 {who} 的信 {id}，若已處理完請用 asn_send 寄回結果");
+        self.tell_window(&p.target, &text);
+        self.log.line(&format!("nudged window {} for id={id}", p.target));
+        self.persist();
     }
 
-    /// 一封「超過等待時間還沒回」的信：決定現在寄通知、延後、還是不用寄
-    async fn judge_timeout(&mut self, id: &str) {
+    /// 一封「超過等待時間還沒回」的信：不再通知寄件人（寄件人看已讀狀態就知道；小良哥 10/22 裁示）。
+    /// 只把信轉成 Notified（保留著等遲到的回覆照常寄回）；已經回過的直接清掉
+    async fn settle_timeout(&mut self, id: &str) {
         let Some(i) = self.idx(id) else { return };
         let now = self.now;
         if self.pending[i].replied {
@@ -1079,45 +1074,20 @@ impl Core {
         if self.replied_directly(id) {
             self.remove(id);
             self.corr_note(&p.target, Dir::Direct, &p.target, &Self::node_agent(&p.from_node, &p.from_agent), id, DIRECT_NOTE, &[]);
-            self.log.line(&format!("no-reply notice skipped id={id}: {} replied directly (asn send --reply-to)", p.target));
+            self.log.line(&format!("reply wait over id={id}: {} replied directly (asn send --reply-to)", p.target));
             return;
         }
         if self.sent_to_sender(&p) {
             self.remove(id);
             self.corr_note(&p.target, Dir::Direct, &p.target, &Self::node_agent(&p.from_node, &p.from_agent), id, DIRECT_NOTE, &[]);
-            self.log.line(&format!("no-reply notice skipped id={id}: {} sent mail to {}/{} after forward", p.target, p.from_node, p.from_agent));
+            self.log.line(&format!("reply wait over id={id}: {} sent mail to {}/{} after forward", p.target, p.from_node, p.from_agent));
             return;
         }
-        let a = self.agent_of(&p.target).cloned();
-        let mut reason = "timeout";
-        if a.is_none() && self.roster_ok {
-            reason = "window-closed";
-        } else if let Some(a) = a.filter(|a| a.is_busy()) {
-            if now.saturating_sub(p.t) < self.cfg.busy_max_ms {
-                if !p.deferred {
-                    self.pending[i].deferred = true;
-                    self.log.line(&format!("no-reply notice deferred id={id}: {} is busy (status={})", p.target, a.status.clone().unwrap_or_default()));
-                }
-                self.pending[i].idle_since = 0;
-                return;
-            }
-            reason = "busy-max";
-        } else if p.deferred {
-            if p.idle_since == 0 {
-                self.pending[i].idle_since = now;
-                return;
-            }
-            if now.saturating_sub(p.idle_since) < self.cfg.busy_grace_ms {
-                return;
-            }
-            reason = "busy-idle-grace";
-        }
-        // 決定要通知：信留著等遲到的回覆（先改狀態，免得 await 期間下一輪又處理同一封）
         self.pending[i].state = State::Notified;
         self.pending[i].notified_at = Some(now);
         self.persist();
         self.evict_notified();
-        self.notice_no_reply(&Origin::of(&p), &p.target, p.t, reason).await;
+        self.log.line(&format!("reply wait over id={id} -> {}: no notice to sender (read status shows)", p.target));
     }
 
     fn evict_notified(&mut self) {
@@ -1162,8 +1132,10 @@ impl Core {
                 if p.room.is_some() {
                     self.remove(&id); // 群組訊息逾時不通知，直接清掉
                 } else {
-                    self.judge_timeout(&id).await;
+                    self.settle_timeout(&id).await;
                 }
+            } else if p.state == State::Waiting && !p.nudged && !p.no_reply && p.room.is_none() && now.saturating_sub(p.t) > self.cfg.nudge_ms {
+                self.nudge_window(&id).await;
             } else if p.state == State::Notified && now.saturating_sub(p.notified_at.unwrap_or(now)) > self.cfg.late_keep_ms {
                 self.remove(&id);
                 self.log.line(&format!("late-reply slot expired id={id}"));

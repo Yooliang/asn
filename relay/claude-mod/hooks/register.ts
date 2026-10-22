@@ -1,5 +1,5 @@
 import type { Register } from 'claude-code'
-import { buildSendArgv, guardBash, startNotice } from './lib'
+import { bashRepliedTo, buildSendArgv, guardBash, planAutoReply, resolveCli, sendRepliedTo, startNotice, trackFromText, type ReplyTrack, type StopLike } from './lib'
 import { createStatus, questionDetail } from './status'
 
 const TOOL = 'mcp__asn__asn_send'
@@ -7,6 +7,10 @@ const TOOL = 'mcp__asn__asn_send'
 export const register: Register = (on, options) => {
   const str = (k: string): string => (typeof options[k] === 'string' ? (options[k] as string) : '')
   const st = createStatus() // 視窗狀態檔，見 status.ts
+  // 來信輪次自動回信（見 README「第三期」）：turn.start 記下來信、本輪寄過就標已回、turn.complete 才寄
+  let track: ReplyTrack | undefined
+  let replied = false
+  let stopSeen: StopLike | undefined
   const cfg = () => ({ asnCliPath: str('asn_cli_path'), sendMjsPath: str('send_mjs_path'), nodePath: str('node_path') })
 
   on('session.start', async ($, e, next) => {
@@ -44,42 +48,67 @@ export const register: Register = (on, options) => {
   }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: TOOL }, async ($, e) => {
-    const c = cfg()
-    if (!c.asnCliPath.trim()) {
-      // asn_cli_path 沒設：找安裝器的預設位置 LOCALAPPDATA 下 ASN 資料夾的 asn-cli.exe，存在才用，否則維持空（退 send.mjs）
-      const base = await $.env.get('LOCALAPPDATA')
-      if (base) {
-        const guess = `${base.replace(/[\\/]+$/, '')}\\ASN\\asn-cli.exe`
-        const st = await $.fs.stat(guess).catch(() => undefined)
-        if (st && st.kind === 'file') c.asnCliPath = guess
-      }
-    }
+    const c = await resolveCli(cfg(), () => $.env.get('LOCALAPPDATA'), p => $.fs.stat(p) as never)
     const built = buildSendArgv(e as never, c)
     if ('error' in built) return { result: `asn_send 失敗：${built.error}`, isError: true } as never
     const r = await $.process.run(built.argv, { timeoutMs: 60000 })
     const ok = r.exitCode === 0
+    if (ok && track && sendRepliedTo(e as never, track)) replied = true
     const text = ok ? r.stdout.trim() : `asn_send 失敗（exit ${r.exitCode}）：${(r.stderr || r.stdout).trim()}`
     return { result: text, ...(ok ? {} : { isError: true }) } as never
   }).catch(($, e, next) => (next.called ? next(e) : { deny: 'asn_send 發生內部錯誤' }))
 
-  on('tool.call', { tool: 'Bash' }, ($, e, next) => {
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const why = guardBash(e.command)
-    return why ? { deny: why } : next(e)
+    if (why) return { deny: why }
+    const r = await next(e)
+    if (track && bashRepliedTo(e.command, track) && !(r as { isError?: boolean } | undefined)?.isError) replied = true
+    return r
   }).catch(($, e, next) => (next.called ? next(e) : { deny: 'asn 寄信守門發生內部錯誤' }))
 
   // ───── 視窗狀態檔（只看主迴圈 e.agentId === undefined；全部純觀察、一律 next(e)）─────
   on('turn.start', ($, e, next) => {
+    if (e.agentId === undefined) {
+      replied = false
+      stopSeen = undefined
+      track = trackFromText(e.text, e.turnId)
+    }
     if (e.agentId === undefined) st.turnStart({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root }, e.turnId)
     return next(e)
   }).catch(($, e, next) => next(e))
 
   on('classic.Stop', ($, e, next) => {
+    stopSeen = { background_tasks: e.background_tasks, session_crons: e.session_crons }
     st.stop({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root }, e)
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  on('turn.complete', ($, e, next) => {
+  on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) st.turnComplete({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root }, e.reason)
+    const t = e.agentId === undefined && track && track.turnId === e.turnId ? track : undefined
+    if (t) {
+      track = undefined
+      try {
+        // classic.Stop 與 turn.complete 的先後沒保證：Stop 還沒到就稍等一下再判斷有沒有背景工作
+        if (e.reason === 'answer' && stopSeen === undefined) await $.clock.sleep(600).catch(() => undefined)
+        const plan = planAutoReply(e.reason, e.answer, stopSeen, replied)
+        if ('body' in plan) {
+          const c = await resolveCli(cfg(), () => $.env.get('LOCALAPPDATA'), p => $.fs.stat(p) as never)
+          const built = buildSendArgv({ to: t.from, body: plan.body, expects_reply: plan.expects_reply, reply_to: t.id }, c)
+          if ('error' in built) $.ui.log(`asn 自動回信略過：${built.error}`)
+          else {
+            const r = await $.process.run(built.argv, { timeoutMs: 60000 })
+            if (r.exitCode !== 0) $.ui.log(`asn 自動回信失敗（exit ${r.exitCode}）`)
+          }
+        }
+      } catch (err) {
+        try {
+          $.ui.log(`asn 自動回信失敗：${err instanceof Error ? err.message : String(err)}`)
+        } catch {
+          /* 吞掉 */
+        }
+      }
+    }
     return next(e)
   }).catch(($, e, next) => next(e))
 

@@ -197,7 +197,7 @@ pub async fn main(argv: &[String], env: &Env, io: &mut Io<'_>) -> R<i32> {
             Some((n, w)) => (to_node, to_agent) = (n.to_string(), w.to_string()),
             None => to_node = to.clone(),
         }
-        if !valid_id(&to_node) {
+        if !valid_id(&to_node) && !crate::bridge::mail::is_person_alias(&to_node) {
             return Err(Fail::new(1, format!("--to {to} 的成員代號格式不對")));
         }
     }
