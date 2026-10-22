@@ -52,12 +52,117 @@ export function buildSendArgv(i: SendInput, c: SendConfig): BuildResult {
 
 const SEND_CMD_RE = /send\.mjs|asn-cli(\.exe)?["']?\s+send\b|(^|[\s;&|"'])asn\s+send\b/i
 
+export type CmdSegment = { tokens: string[]; raw: string }
+
+// 把 Bash 命令依 &&、||、;、|、換行切成幾段，每段拆成詞（引號內算同一個詞、去掉引號）。
+// heredoc 內文（<<WORD … WORD）整段略過；引號裡的文字不會被當成運算子。
+export function splitCommand(command: string): CmdSegment[] {
+  const out: CmdSegment[] = []
+  let tokens: string[] = []
+  let cur = ''
+  let has = false
+  let segStart = 0
+  const heredocs: { word: string; dash: boolean }[] = []
+  const endTok = () => {
+    if (has) tokens.push(cur)
+    cur = ''
+    has = false
+  }
+  const endSeg = (i: number) => {
+    endTok()
+    if (tokens.length) out.push({ tokens, raw: command.slice(segStart, i) })
+    tokens = []
+    segStart = i + 1
+  }
+  const n = command.length
+  let i = 0
+  while (i < n) {
+    const c = command[i]
+    if (c === "'") {
+      has = true
+      const j = command.indexOf("'", i + 1)
+      const end = j < 0 ? n : j
+      cur += command.slice(i + 1, end)
+      i = end + 1
+    } else if (c === '"') {
+      has = true
+      i++
+      while (i < n && command[i] !== '"') {
+        if (command[i] === '\\' && i + 1 < n && (command[i + 1] === '"' || command[i + 1] === '\\')) i++
+        cur += command[i]
+        i++
+      }
+      i++
+    } else if (c === '\n') {
+      endSeg(i)
+      i++
+      // 換行之後先把待處理的 heredoc 內文跳過
+      while (heredocs.length) {
+        const h = heredocs.shift()!
+        while (i < n) {
+          let e = command.indexOf('\n', i)
+          if (e < 0) e = n
+          const line = command.slice(i, e).replace(/\r$/, '')
+          i = Math.min(e + 1, n)
+          if ((h.dash ? line.trim() : line) === h.word) break
+        }
+      }
+      segStart = i
+    } else if (c === ';' || c === '|' || (c === '&' && command[i + 1] === '&')) {
+      endSeg(i)
+      if ((c === '|' || c === '&') && command[i + 1] === c) i++
+      segStart = i + 1
+      i++
+    } else if (c === '<' && command[i + 1] === '<' && command[i + 2] !== '<') {
+      endTok()
+      i += 2
+      const dash = command[i] === '-'
+      if (dash) i++
+      while (command[i] === ' ' || command[i] === '\t') i++
+      const q = command[i] === "'" || command[i] === '"' ? command[i] : ''
+      if (q) i++
+      let w = ''
+      while (i < n && !/[\s;&|<>'"]/.test(command[i])) w += command[i++]
+      if (q && command[i] === q) i++
+      if (w) heredocs.push({ word: w, dash })
+    } else if (c === ' ' || c === '\t' || c === '\r') {
+      endTok()
+      i++
+    } else {
+      has = true
+      cur += c
+      i++
+    }
+  }
+  endSeg(n)
+  return out
+}
+
+const baseName = (t: string): string => t.replace(/\\/g, '/').split('/').pop() ?? ''
+
+// 真正的寄信指令呼叫：段首詞（去掉前導環境變數賦值）是 asn-cli／asn-cli.exe／asn（後接 send）或 node（後接 *send.mjs）
+export function sendInvocations(command: string): CmdSegment[] {
+  return splitCommand(command).filter(seg => {
+    const t = seg.tokens
+    let k = 0
+    while (k < t.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(t[k])) k++
+    const head = baseName(t[k] ?? '').toLowerCase()
+    if (head === 'asn-cli' || head === 'asn-cli.exe' || head === 'asn') return t[k + 1] === 'send'
+    if (head === 'node' || head === 'node.exe') {
+      const script = t.slice(k + 1).find(x => !x.startsWith('-'))
+      return script !== undefined && /send\.mjs$/i.test(baseName(script))
+    }
+    return false
+  })
+}
+
 export function guardBash(command: string): string | undefined {
-  if (!SEND_CMD_RE.test(command)) return undefined
-  if (mentionsPersonSignature(command)) return '寄信命令不得帶本人簽章相關參數或環境變數（as_person／x-asn-user），請改用 asn_send 工具'
-  const hasTo = /(^|\s)--to(\s|=)/.test(command)
-  const hasFlag = /(?<![\w-])--(no-)?reply(?![\w-])/.test(command)
-  if (hasTo && !hasFlag) return '請加 --reply 或 --no-reply，或改用 asn_send 工具'
+  for (const seg of sendInvocations(command)) {
+    if (mentionsPersonSignature(seg.raw)) return '寄信命令不得帶本人簽章相關參數或環境變數（as_person／x-asn-user），請改用 asn_send 工具'
+    const hasTo = seg.tokens.some(x => x === '--to' || x.startsWith('--to='))
+    const hasFlag = seg.tokens.some(x => /^--(no-)?reply(=|$)/.test(x))
+    if (hasTo && !hasFlag) return '請加 --reply 或 --no-reply，或改用 asn_send 工具'
+  }
   return undefined
 }
 
