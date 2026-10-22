@@ -181,3 +181,7 @@ node --test tests/edge_tts_drm.test.mjs      # Worker 的 Sec-MS-GEC 簽章對 P
 - **按住說話、串流辨識、說話時打斷 TTS**（Irori 有「開口就打斷」的做法，見 `Interrupter`）。
 - **Windows 內建辨識**當作沒有下載模型時的備案。
 - **對話自動朗讀的細節**：只念指定好友、長訊息只念摘要。
+
+## 三、偽通話（#99）
+
+對話上方「通話」鈕：麥克風一直開著，說完一句自動辨識並寄出，回信自動念出。設計見 `docs/design/PSEUDO-CALL.md`。

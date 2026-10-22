@@ -32,6 +32,8 @@ import { vendorIconSvg } from './lib/vendor-icons.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
+import { createCallBeats } from './lib/call-beats.mjs'
+import { isCallActive } from './lib/call-session.mjs'
 import { accountLine, codexLine, createAccountsUi } from './lib/claude-accounts.mjs'
 import { createUsageUi } from './lib/usage.mjs'
 import { CHECK_MS, autoCheckFromSaved, initialUpdateState, manualResultText, progressText, updateNoticeText, withAvailable, withFailure, withInstalling, withProgress, updateStatus } from './lib/update.mjs'
@@ -507,11 +509,13 @@ void loadLaunchPrefs()
 setInterval(() => { void refreshLaunchers(); void pollLaunchResults() }, 15_000)
 // 語音：整合模式的對話分頁用這一份；設定存在 Rust 端的 voice.json（對話視窗也讀同一份）
 const voice = createVoiceUi({ invoke, listen, createMic, createAudio: browserAudio, reactive })
+const callBeats = createCallBeats({ isLocalCall: isCallActive })   // 通話中（本視窗或對話視窗）不自動念，通話自己會念回信
+await listen('asn:call', p => callBeats.onBeat(p))
 const voiceCfg = reactive(normalizeCfg(await invoke('voice_cfg_get').catch(() => null)))
 core.on('notify', n => {
   const plan = notifyPlan(n, notifyPrefs.value, me.status)
   if (plan.sound) SOUNDS[plan.sound]?.()
-  if (shouldAutoSpeak(n, voiceCfg, me.status)) voice.speakAuto(`auto:${n.friend.id}:${Date.now()}`, n.line)   // 預設關
+  if (shouldAutoSpeak(n, voiceCfg, me.status) && !callBeats.anyCall()) voice.speakAuto(`auto:${n.friend.id}:${Date.now()}`, n.line)   // 預設關
   if (n.shake) void invoke('shake', { id: n.friend.id, main: ui.mode === 'merged' })   // 整合模式抖整個主視窗
   if (plan.toast) void invoke('show_toast', { toast: { cid: n.friend.id, title: plain(n.friend.nick), line: n.line, status: n.friend.status, hue: n.friend.hue, dp: n.friend.dp, av: (a => (a.kind === 'upload' ? a.src : null))(avatarFor(n.friend, { avatars: avatars.value })) } })
 })

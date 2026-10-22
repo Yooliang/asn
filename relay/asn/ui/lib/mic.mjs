@@ -20,7 +20,10 @@ export function createMic() {
     if (c) c.close().catch(() => {})
   }
   return {
-    async start() {
+    /** 取樣率（開始錄音之後才有；通話模式用它換算每一塊的秒數） */
+    get rate() { return ctx?.sampleRate ?? 0 },
+    /** onChunk（選填，通話模式用）：每收到一塊就交給它、不再累積，長時間收音不會吃光記憶體；沒給就照舊累積到 stop() 一次交回 */
+    async start({ onChunk } = {}) {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error('這個環境不支援麥克風錄音。')
       const my = ++session   // 授權視窗等很久的時候被 stop()（取消）了，晚到的麥克風要立刻放掉
       let got
@@ -36,7 +39,7 @@ export function createMic() {
       src = ctx.createMediaStreamSource(stream)
       // ScriptProcessor 雖然被標為過時，但不需要另外載入 worklet 檔案（受 CSP 限制），WebView2 長期支援
       node = ctx.createScriptProcessor(4096, 1, 1)
-      node.onaudioprocess = ev => { chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0))) }
+      node.onaudioprocess = ev => { const c = new Float32Array(ev.inputBuffer.getChannelData(0)); if (onChunk) onChunk(c); else chunks.push(c) }
       mute = ctx.createGain(); mute.gain.value = 0   // 要接到輸出才會觸發處理，但不要把麥克風聲音播出來
       src.connect(node); node.connect(mute); mute.connect(ctx.destination)
     },
