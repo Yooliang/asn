@@ -504,6 +504,12 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 /* 設定頁：Claude 帳號 */
 .acct-set{display:flex;flex-direction:column;gap:10px}
 .acct-set .set-card{gap:8px}
+.usage-set{display:flex;flex-direction:column;gap:10px}
+.usage-card{gap:6px}
+.usage-cost{font-weight:600}
+.usage-tbl{width:100%;border-collapse:collapse;font-size:12px}
+.usage-tbl th,.usage-tbl td{padding:3px 6px;text-align:right;border-top:1px solid var(--line)}
+.usage-tbl th:first-child,.usage-tbl td:first-child{text-align:left;word-break:break-all}
 .vendor-h{display:flex;align-items:baseline;gap:8px}
 .vendor-h small{color:var(--muted)}
 .acct-warn{color:#a86f00}

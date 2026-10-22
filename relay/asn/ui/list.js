@@ -33,6 +33,7 @@ import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
 import { accountLine, codexLine, createAccountsUi } from './lib/claude-accounts.mjs'
+import { createUsageUi } from './lib/usage.mjs'
 import { CHECK_MS, autoCheckFromSaved, initialUpdateState, manualResultText, progressText, updateNoticeText, withAvailable, withFailure, withInstalling, withProgress, updateStatus } from './lib/update.mjs'
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL, normalizeCfg, shouldAutoSpeak, sttStatusText } from './lib/voice-prefs.mjs'
 
@@ -810,6 +811,8 @@ const app = createApp({
       nodeLabel: n => launchDeviceRowsList.value.find(d => d.key === n)?.label ?? n,
     })
     void accounts.refresh()
+    // 設定頁「用量」：打開那一頁才讀本機記錄（Rust 端有快取，不會每次重掃）
+    const usage = createUsageUi({ invoke, reactive })
     void accounts.loadTrust()
     // 本機帳號庫清單定期回報給收發室（只有 email、方案、使用中）；別台送來的切換指令定期取走（預設要本機按確認才切）。--shot 不輪詢指令。
     setTimeout(() => void accounts.report(), 5_000)
@@ -861,6 +864,7 @@ const app = createApp({
       bridge: bridge.shown ? { enabled: bridge.enabled, running: bridge.running, legacy: bridge.legacy, takeoverAllowed: bridge.takeoverAllowed, remoteLaunch: bridge.remoteLaunch, error: bridge.error, busy: bridge.busy, confirm: bridge.confirm } : null,
       cli: cliInfo.shown ? { path: cliInfo.path, example: cliInfo.example, copied: cliInfo.copied } : null,
       autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual, status: updateStatus({ checking: upd.checking, phase: upd.phase, info: upd.info, lastCheck: upd.lastCheck, error: upd.checkErr, current: info.version }) },
+      usage: { loading: usage.state.loading, error: usage.state.error, data: usage.state.data, updated: usage.state.updated },
       launch: { tools: launchToolRows.value, maxPerHour: launchPrefs.maxPerHour, cwdText: launchCwdText.value },
       version: info.version,
       log: buildLogView({ entries: changelogEntries.value, current: info.version, available: upd.phase === 'idle' ? null : upd.info }),
@@ -894,6 +898,7 @@ const app = createApp({
         case 'cli-copy': await copyCliExample(); break
         case 'autoCheck': autoCheck.value = value === true; break
         case 'check-update': await checkUpdate(true); break
+        case 'usage-refresh': await usage.refresh(); break
         case 'launch-max': launchPrefs.maxPerHour = Number.isFinite(value) ? value : 6; await saveLaunchPrefs(); break
         case 'launch-cwd': setLaunchCwdText(String(value ?? '')); break
         case 'avatar-remove': await removeAvatar(); break
@@ -902,6 +907,7 @@ const app = createApp({
       }
     }
     // 分離模式的指引、設定視窗：開起來先問一聲（hello），樞紐回目前要顯示哪一篇與設定快照；之後設定一變就推新快照
+    watch(() => ui.panel.setting, k => { if (k === 'usage') void usage.refresh() }, { immediate: true })
     const pushSettings = () => { if (ui.mode === 'split') emit('asn:settings', settingsState.value) }
     watch(settingsState, pushSettings, { deep: true })
     void listen('asn:cmd', c => {

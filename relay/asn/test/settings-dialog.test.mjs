@@ -11,9 +11,9 @@ import { closesDialog } from '../ui/lib/dialog.mjs'
 
 const read = f => fs.readFileSync(new URL(`../ui/${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
-test('分類：十類、順序與鍵固定、標題與圖示都有、鍵不重複', () => {
-  assert.deepEqual(SETTING_KEYS, ['me', 'accounts', 'look', 'tabs', 'sound', 'voice', 'window', 'launch', 'update', 'about'])
-  assert.deepEqual(SETTING_CATS.map(c => c.title), ['個人', '帳號', '外觀', '分頁與分組', '音效', '語音', '視窗與系統匣', '啟動設定', '更新', '關於'])
+test('分類：十一類、順序與鍵固定、標題與圖示都有、鍵不重複', () => {
+  assert.deepEqual(SETTING_KEYS, ['me', 'accounts', 'look', 'tabs', 'sound', 'voice', 'window', 'launch', 'usage', 'update', 'about'])
+  assert.deepEqual(SETTING_CATS.map(c => c.title), ['個人', '帳號', '外觀', '分頁與分組', '音效', '語音', '視窗與系統匣', '啟動設定', '用量', '更新', '關於'])
   assert.equal(new Set(SETTING_KEYS).size, SETTING_CATS.length)
   for (const c of SETTING_CATS) assert.ok(/^M[0-9A-Za-z .,-]+$/.test(c.icon), `${c.key} 圖示`)
   assert.equal(catByKey('voice').title, '語音')
@@ -72,6 +72,7 @@ const fullState = () => ({
   closeTo: 'tray', trayOk: true, autostart: { supported: true, on: false, busy: false },
   autoCheck: true, upd: { checking: false, installing: false, manual: '', status: { tone: 'ok', head: '已是最新版', lines: ['目前版本 9.9.9', '最後檢查：今天 14:03'] } },
   launch: { tools: [{ id: 'claude', label: 'Claude Code', installed: true, version: '2.0', installHint: '' }, { id: 'gemini', label: 'Gemini', installed: false, version: '', installHint: '先安裝 Gemini CLI' }], maxPerHour: 6, cwdText: 'D:/a\nD:/b' },
+  usage: { loading: false, error: '', updated: '14:05', data: { empty: '', unpriced: '', priceLine: '價目依 Anthropic 官方公開定價（2026-10-22 抄錄）', periods: [{ key: 'today', label: '今天', cost: '$1.20', tokens: '3,000', messages: 2, detail: '輸入 1', models: [{ model: 'claude-opus-4-5', cost: '$1.20', tokens: '3,000', messages: 2, priced: true }] }] } },
   version: '9.9.9',
 })
 const render = async (catKey, st = fullState()) => {
@@ -90,6 +91,7 @@ test('設定表單：每一類都轉得出來，各類原本的項目都在', as
     voice: ['念出訊息的聲音', '收到新訊息自動念', '語音輸入的語言', '語音辨識模型', '下載語音辨識', '曉曉', '尚未安裝'],
     window: ['關閉視窗時', '登入時自動啟動 ASN'],
     launch: ['每小時開新夥伴上限', '工作資料夾白名單', 'Claude Code', '先安裝 Gemini CLI'],
+    usage: ['重新整理', '不是帳單', '更新於 14:05', '今天', '約 $1.20', 'claude-opus-4-5', '價目依 Anthropic 官方公開定價'],
     update: ['自動檢查更新', '立即檢查', '已是最新版', '目前版本 9.9.9', '最後檢查：今天 14:03', '版本更新記錄'],
     about: ['版本 9.9.9'],
   }

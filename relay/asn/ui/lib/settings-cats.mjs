@@ -15,6 +15,7 @@ export const SETTING_CATS = [
   { key: 'voice', title: '語音', icon: 'M12 3a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM6 11a6 6 0 0 0 12 0M12 17v4' },
   { key: 'window', title: '視窗與系統匣', icon: 'M3 5h18v14H3zM3 9h18' },
   { key: 'launch', title: '啟動設定', icon: 'M6 4l14 8-14 8z' },
+  { key: 'usage', title: '用量', icon: 'M4 20V10M10 20V4M16 20v-7M22 20H2' },
   { key: 'update', title: '更新', icon: 'M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5' },
   { key: 'about', title: '關於', icon: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v6M12 7.5v.5' },
 ]
@@ -53,6 +54,8 @@ export function catSummary(key, s = {}) {
       const cwd = Number.isInteger(s.cwdCount) ? s.cwdCount : 0
       return `每小時上限 ${Number.isInteger(s.maxPerHour) ? s.maxPerHour : '-'} 個、白名單 ${cwd} 個資料夾`
     }
+    case 'usage':
+      return s.usageLine || '本機 Claude 用量估算'
     case 'update':
       return `自動檢查：${onOff(s.autoCheck)}`
     case 'about':
