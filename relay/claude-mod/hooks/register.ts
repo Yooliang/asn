@@ -28,18 +28,20 @@ export const register: Register = (on, options) => {
         required: ['body'],
       },
     })
-    // 提示這台有 ASN 與 asn 技能；附不上（例如沒有對話可附）就算了，不影響開窗
-    try {
-      const version = await $.fs
-        .read(`${$.plugin.root}/.claude-plugin/plugin.json`)
-        .then(t => String(JSON.parse(String(t)).version ?? ''))
-        .catch(() => '')
-      await $.session.append({ message: { type: 'system', content: [{ type: 'text', text: startNotice(version) }] } })
-    } catch (err) {
-      $.ui.log(`asn：開窗提示沒附上（${String(err)}）`)
-    }
     return next(e)
   })
+
+  // 這台有 ASN 與 asn 技能的提示：放系統提示（每次請求都帶；/clear 後 session.start 不再觸發、append 的列也會被清掉或壓縮摘掉）
+  let versionP: Promise<string> | undefined
+  on('prompt.compose', async ($, e, next) => {
+    const r = await next(e)
+    versionP ??= $.fs
+      .read(`${$.plugin.root}/.claude-plugin/plugin.json`)
+      .then(t => String(JSON.parse(String(t)).version ?? ''))
+      .catch(() => '')
+    const version = await versionP
+    return { ...r, sections: [...r.sections, { id: 'asn:installed', scope: 'session' as const, text: startNotice(version) }] }
+  }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: TOOL }, async ($, e) => {
     const c = cfg()
