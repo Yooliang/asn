@@ -6,7 +6,7 @@
     "asn_cli_path": {
       "type": "string",
       "title": "asn-cli 路徑",
-      "description": "ASN 安裝資料夾裡的 asn-cli.exe 完整路徑（ASN 設定頁「寄信指令」可複製）。優先使用。",
+      "description": "ASN 安裝資料夾裡的 asn-cli.exe 完整路徑（ASN 設定頁「寄信指令」可複製）。優先使用。留空會自動找 %LOCALAPPDATA%\\ASN\\asn-cli.exe。",
       "default": ""
     },
     "send_mjs_path": {

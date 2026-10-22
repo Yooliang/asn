@@ -29,7 +29,17 @@ export const register: Register = (on, options) => {
   })
 
   on('tool.call', { tool: TOOL }, async ($, e) => {
-    const built = buildSendArgv(e as never, cfg())
+    const c = cfg()
+    if (!c.asnCliPath.trim()) {
+      // asn_cli_path 沒設：找安裝器的預設位置 LOCALAPPDATA 下 ASN 資料夾的 asn-cli.exe，存在才用，否則維持空（退 send.mjs）
+      const base = await $.env.get('LOCALAPPDATA')
+      if (base) {
+        const guess = `${base.replace(/[\\/]+$/, '')}\\ASN\\asn-cli.exe`
+        const st = await $.fs.stat(guess).catch(() => undefined)
+        if (st && st.kind === 'file') c.asnCliPath = guess
+      }
+    }
+    const built = buildSendArgv(e as never, c)
     if ('error' in built) return { result: `asn_send 失敗：${built.error}`, isError: true } as never
     const r = await $.process.run(built.argv, { timeoutMs: 60000 })
     const ok = r.exitCode === 0
