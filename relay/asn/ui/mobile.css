@@ -37,8 +37,8 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-icon-btn:active:not(:disabled){background:rgba(255,255,255,.55)}
 .m-icon-btn:disabled{opacity:.5}
 
-/* 頁面骨架：上面標題列、中間可捲動、下面分頁列 */
-.m-page{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+/* 頁面骨架：最上面分頁列、其下標題列、中間可捲動（對話輸入區貼齊底部） */
+.m-page{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding-bottom:env(safe-area-inset-bottom,0px)}
 /* 三個大分頁並排（夥伴／對話／設置），整排用 transform 平移：手指拖動時跟手、放開吸附。只動 transform，捲動與動畫都不觸發排版 */
 .m-pager-wrap{flex:1;min-height:0;overflow:hidden;position:relative;touch-action:pan-y}
 .m-pager{display:flex;width:300%;height:100%;will-change:transform;transition:transform .28s cubic-bezier(.2,.8,.3,1)}
@@ -61,12 +61,14 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-conn-tx{min-width:0;overflow:hidden;text-overflow:ellipsis}
 /* 滿版：左右不留外框與外距，內容直接貼齊螢幕寬 */
 .m-scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;margin:0;background:var(--panel);border:0;border-top:1px solid var(--line);border-radius:0}
-.m-tabs{position:relative;flex:none;display:flex;margin:0;border:0;border-top:1px solid var(--line);border-radius:0;overflow:hidden;background:var(--panel-soft)}
-.m-ind{position:absolute;z-index:2;top:0;left:0;width:33.3333%;height:3px;background:var(--accent);transition:transform .28s cubic-bezier(.2,.8,.3,1);will-change:transform;pointer-events:none}
+/* 分頁列在頁面最上方：視覺高 32px（舊 52px 的 0.6 倍），按鈕用 ::after 上下各多 2px，可點範圍 36px */
+.m-tabs{position:relative;flex:none;display:flex;height:32px;margin:0;border:0;border-bottom:1px solid var(--line);border-radius:0;background:var(--panel-soft)}
+.m-ind{position:absolute;z-index:2;bottom:0;left:0;width:33.3333%;height:3px;background:var(--accent);transition:transform .28s cubic-bezier(.2,.8,.3,1);will-change:transform;pointer-events:none}
 .m-tabs.dragging .m-ind{transition:none}
-.m-tabs button{position:relative;flex:1;min-height:52px;border:0;background:none;color:var(--muted);font-weight:600;cursor:pointer}
+.m-tabs button{position:relative;flex:1;height:32px;padding:0;border:0;background:none;color:var(--muted);font-size:15px;font-weight:600;cursor:pointer}
+.m-tabs button::after{content:"";position:absolute;left:0;right:0;top:-2px;bottom:-2px}
 .m-tabs button.on{color:var(--accent);background:var(--panel)}
-.m-tabs .red{top:10px;right:calc(50% - 30px)}
+.m-tabs .red{top:6px;right:calc(50% - 30px)}
 /* 名單 */
 .m-search{position:sticky;top:0;z-index:2;padding:8px;background:var(--panel-soft);border-bottom:1px solid var(--line)}
 .m-search input{width:100%;min-height:44px;border:1px solid var(--line);border-radius:22px;padding:0 16px;background:var(--panel);user-select:text;-webkit-user-select:text}
