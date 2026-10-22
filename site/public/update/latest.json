@@ -1,11 +1,11 @@
 {
-  "version": "0.1.21",
-  "notes": "夥伴 ID（#109）：同一個視窗改名、換電腦後仍認得是同一位夥伴",
-  "pub_date": "2026-10-21T22:56:08.839Z",
+  "version": "0.1.24",
+  "notes": "子代理按鈕：看各 Claude 視窗正在跑的子代理（#27）；設定新增「用量」分頁，估算 token 與費用（#52）",
+  "pub_date": "2026-10-22T01:04:57.104Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjJ1ckNMTGxaR0RsTGViSzIzRFRKMDkzOUxSMjdzaUl4YlExRGh6Y3I4bWNkMkE2aFYzS3QrcXNRT3d6V0pGWG5YSWE0OSs2RHF2VzZaQnpJWjhlNXdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjIzMzY4CWZpbGU6QVNOXzAuMS4yMV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjIxClFzMGpHNXZWU2hQTHdZVjNuYmZ6QisrT0NrYnloQldDdmJnNkxmWm1qUkY4VE9uNFFKUHVPaU9TTTM3RWg5WnBSWlFtWGxZbmc4aDY5dGRwaFlpT0F3PT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.21_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjB6Ty8xaVRQd2lpM254YVYyQzJQZ2dWMHhKZFlLc0NNSnU1ZWtOS21vM3pFYm1vQWRCSUdPYndZQnpneU5QWG1YQit4QlJsNkh3RWNaeDVpcjZ6TVFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjMxMDk2CWZpbGU6QVNOXzAuMS4yNF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjI0CkFWbEprSXlnWXZpMUZ2SUdFOHpCcGNPZFdJN0ZoQVVIb2tleERKVWx2eU5hY1hWTGJ1bGNJL3VsTUEwRklZLzF6MjJiUFN1dGVuQmJ6alR4K1gwNEFnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.24_x64-setup.exe"
     }
   }
 }

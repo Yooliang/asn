@@ -7,6 +7,7 @@ import { expectsReplyArgs } from "../_shared/expects_reply.ts";
 import { parseSelfName } from "../_shared/node_name.ts";
 import { parseAsnPresence } from "../_shared/asn_presence.ts";
 import { handlePartnerSync } from "../_shared/partners.ts";
+import { bellTopicsOf, handleChatHistory, personArgs, sendWithPerson } from "../_shared/account_me.ts";
 import { normalizeRosterAgents } from "../_shared/roster.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
 import * as signal from "../_shared/signal.ts";
@@ -273,6 +274,14 @@ Deno.serve(async (req) => {
     const r = await handlePartnerSync({ rpc }, me, await req.json().catch(() => null));
     return json(r.status, r.body);
   }
+  // 往來記錄（#108）：「我和某夥伴」90 天內的信，以後台為準。必須帶本人簽章（x-asn-user）：AI 視窗拿得到節點金鑰，拿不到登入憑證
+  if (action === "chat_history" && req.method === "POST") {
+    const r = await handleChatHistory(
+      { rpc, verifyJwt: accountDeps.verifyJwt, withAttachments: async (m) => await withAttachments({ rpc }, m as never) },
+      me, req.headers.get(SIGN_HEADER), await req.json().catch(() => null),
+    );
+    return json(r.status, r.body);
+  }
   if (action === "leave" && req.method === "POST") {
     const { error } = await db.rpc("irori_relay_leave", { p_node: me.id });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
@@ -365,8 +374,10 @@ Deno.serve(async (req) => {
     if (!att.ok) return json(att.reply.status, att.reply.body);
     // 本人簽章（選填）：ASN 視窗另帶登入憑證；驗過才傳使用者 id，資料庫再核對擁有關係。沒帶或驗不過＝照舊，不擋寄送
     const signed = await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER));
-    const { data, error } = await db.rpc("irori_relay_send", {
+    // 以「人」寄出（#108）：新版 ASN 明說 as_person 且簽章有效，資料庫才把寄件視窗名換成人代號；沒說＝與以前完全一樣
+    const { data, error } = await sendWithPerson(rpc, {
       ...signedArgs(signed),
+      ...personArgs(b.as_person, signed),
       p_from_node: me.id, // from_node in the body is ignored on purpose
       p_from_agent: str(b.from_agent),
       p_to_node: b.to_node,
@@ -376,11 +387,13 @@ Deno.serve(async (req) => {
       ...er,
     });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
-    if (data?.error === "rate_limited") return json(429, { error: "rate_limited" });
-    if (data?.error) return json(400, { error: data.error });
-    await bindAttachments({ rpc }, me.id, att.ids, { messageId: data.id });
-    await ring(data.bell_topic);
-    return json(200, { id: data.id });
+    const sent = data as { id: string; bell_topic: string; error?: string };
+    if (sent?.error === "rate_limited") return json(429, { error: "rate_limited" });
+    if (sent?.error) return json(400, { error: sent.error });
+    await bindAttachments({ rpc }, me.id, att.ids, { messageId: sent.id });
+    // 回信寄給人代號時會扇出給這個帳號所有在線的 ASN，每台的門鈴都敲
+    for (const t of bellTopicsOf(sent)) await ring(t);
+    return json(200, { id: sent.id });
   }
   // 遠端開視窗：launch／launchers 只有 owner 節點（SQL 判斷）；launch_pending／launch_result 是機器橋取待辦、回報結果
   if (action && LAUNCH_ACTIONS.has(action)) {

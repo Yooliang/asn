@@ -25,6 +25,7 @@ mod stt;
 mod tray;
 mod tts;
 mod updater;
+mod usage;
 mod voicecfg;
 mod wins;
 
@@ -252,6 +253,11 @@ async fn partner_console_set(req: launch::PartnerConsoleReq) -> Result<Value, St
 }
 
 #[tauri::command]
+async fn subagents_query(req: launch::SubagentsReq) -> Result<Value, String> {
+    launch::subagents_query(req).await
+}
+
+#[tauri::command]
 async fn model_switch_query(req: launch::SwitchQueryReq) -> Result<Value, String> {
     launch::model_switch_query(req).await
 }
@@ -413,6 +419,13 @@ async fn relay_send(app: State<'_, App>, auth: State<'_, auth::AuthState>, paylo
     // 人在視窗裡打的字：盡力帶登入憑證讓後台標成本人（取不到就照舊寄，不擋）
     let token = account::signing_token(&auth).await;
     r.send_signed(&payload, token.as_deref()).await
+}
+/// 「我和某夥伴」90 天內的往來（以後台為準，本機只當快取）。要登入憑證；沒登入或後台還沒支援就回錯，前端靜默沿用本機快取
+#[tauri::command]
+async fn relay_chat_history(app: State<'_, App>, auth: State<'_, auth::AuthState>, node: String, agent: Option<String>) -> Result<Value, String> {
+    let r = relay_of(&app)?;
+    let token = account::signing_token(&auth).await;
+    r.chat_history(&node, agent.as_deref().unwrap_or(""), token.as_deref()).await
 }
 #[tauri::command]
 async fn relay_sent_status(app: State<'_, App>, ids: Vec<String>) -> Result<Value, String> {
@@ -655,10 +668,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, ads::ads_fetch, set_window_name, set_presence, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_takeover, cli_info, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, ads::ads_fetch, set_window_name, set_presence, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_takeover, cli_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete,
-            codex_accounts::codex_account_current,
+            codex_accounts::codex_account_current, usage::usage_summary,
             acct_remote_report, acct_remote_list, acct_remote_request, acct_remote_status, acct_remote_pending, acct_remote_apply, acct_remote_decline, acct_remote_trust_get, acct_remote_trust_set,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,

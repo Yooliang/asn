@@ -45,7 +45,7 @@ export function modelMenuState(q, models = CLAUDE_MODELS) {
 }
 
 /** 確認視窗的文字（會關掉原視窗、正在打的字會不見、對話會接續）。 */
-export function confirmText(name, currentLabel, targetLabel) {
+export function confirmText(name, currentLabel, targetLabel, { ownWindow = false } = {}) {
   return {
     title: '切換模型',
     lead: `要把「${name}」從 ${currentLabel} 切換成 ${targetLabel} 嗎？`,
@@ -53,6 +53,8 @@ export function confirmText(name, currentLabel, targetLabel) {
       '會關掉原本的視窗，再開一個新的。',
       '這個視窗裡正在打的字會不見。',
       '對話內容會接續，名字與工作資料夾不變。',
+      // 使用者自己開的視窗：只結束裡面的 Claude，原本的終端機分頁會留著
+      ...(ownWindow ? ['這是你自己開的視窗：原本的終端機分頁會留下，可以自己關掉；新視窗開在另一個分頁或視窗。'] : []),
     ],
     ok: '關掉並切換',
     cancel: '取消',

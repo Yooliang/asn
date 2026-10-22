@@ -1,6 +1,6 @@
 // ASN 狀態核心（瀏覽器與 node 都能跑）：好友、對話、未讀、收信、寄信、震動。
 // 不碰網路細節：transport 由外面注入（桌面版＝Rust 命令，金鑰留在 Rust；測試＝連本機假 relay）。
-//   transport: { list(), inbox(), ack(ids), send(payload), avatar?(node), setAvatar?(dataUrl|null), sendAttachment?(payload) }
+//   transport: { list(), inbox(), ack(ids), send(payload), avatar?(node), setAvatar?(dataUrl|null), sendAttachment?(payload), history?(node, agent) }
 //   store:     { load() → 物件|null, save(物件) }
 //   isChatVisible(id) → Promise<boolean>：該好友的對話視窗是否開著且沒最小化
 import { isAvatarDataUrl } from './avatar.mjs'
@@ -10,10 +10,12 @@ import { routeMail, stubFriend } from './routing.mjs'
 import { hasNudge, hueOf, initial, noReplyNoticeOf, plain, stripNudge, stripReplyHead, unwrapShell } from './text.mjs'
 import { noticeOf, expiresAt, fileMimeOf, friendlyPhotoError, normalizePhotos, stripPhotoLines } from './photo.mjs'
 import { applyStatusRow, chunkIds, collectPollIds } from './sent-status.mjs'
+import { historyUnsupported, mergeHistory } from './history.mjs'
 
 export const MAX_BODY = 20000
 const LOG_KEEP = 200
 const STATUS_POLL_MS = 15_000
+const HISTORY_MIN_GAP_MS = 20_000   // 同一位夥伴的往來記錄，兩次向後台取的最短間隔（強制重取除外）
 
 export class AsnCore {
   constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, statusPollMs = STATUS_POLL_MS, aliases = [] }) {
@@ -33,6 +35,9 @@ export class AsnCore {
     this.statusPulling = false
     this.statusAgain = false
     this.saveTimer = null
+    this.historyAt = new Map()   // 好友 id → 上次向後台取往來記錄的時間
+    this.historyOff = false      // 後台還沒支援往來記錄（404／400）：這次執行不再問
+    this.historyBusy = new Set()
   }
 
   on(evt, fn) { (this.handlers[evt] ??= []).push(fn); return this }
@@ -169,7 +174,7 @@ export class AsnCore {
     const photos = normalizePhotos(m.attachments)
     const text = stripPhotoLines(stripNudge(body), photos.length)
     const shown = Boolean(text) || photos.length > 0
-    if (shown) { lg.push({ k: 'them', text, t, id: m.id, ...(photos.length ? { photos } : {}) }); f.lastAt = t; f.replyTo = m.id }
+    if (shown) { lg.push({ k: 'them', text, t, id: m.fanout_id ?? m.id, ...(photos.length ? { photos } : {}) }); f.lastAt = t; f.replyTo = m.id }
     if (m.reply_to) this.#markReplied(m.reply_to, typeof m.created_at === 'string' ? m.created_at : new Date(t).toISOString())
     const visible = await this.isChatVisible(r.id)
     if (nudge) {
@@ -182,6 +187,8 @@ export class AsnCore {
     this.emit('log', r.id)
     if (shown) this.emit('notify', { kind: 'msg', friend: f, line: text ? plain(text) : noticeOf(photos), sound: 'msg', toast: !visible })
     if (nudge) this.emit('notify', { kind: 'nudge', friend: f, line: '傳送了一個震動', sound: 'nudge', toast: !visible, shake: visible })
+    // 回信是扇出給我所有設備的：我在別台設備上說的話這台還沒有，順手補一次（人在別台說、這台只看到 AI 的回覆就會斷掉）
+    if (typeof m.fanout_id === 'string') void this.syncHistory(r.id, { force: true })
   }
 
   // ---------- 寄信 ----------
@@ -190,7 +197,7 @@ export class AsnCore {
     const text = String(raw ?? '').trim()
     if (!f || !text) return { ok: false, error: '沒有內容或找不到好友' }
     if (text.length > MAX_BODY) return { ok: false, error: `內文超過 ${MAX_BODY} 字` }
-    const payload = { to_node: f.node, to_agent: f.agent || undefined, body: text, reply_to: f.replyTo || undefined, from_agent: this.windowName, expects_reply: true }
+    const payload = { to_node: f.node, to_agent: f.agent || undefined, body: text, reply_to: f.replyTo || undefined, from_agent: this.windowName, expects_reply: true, ...this.#personFlag(f) }
     let sent
     try { sent = await this.transport.send(payload) } catch (e) { return this.#fail(id, e) }
     const mid = typeof sent?.id === 'string' ? sent.id : null
@@ -213,7 +220,7 @@ export class AsnCore {
     const cap = String(caption ?? '').trim()
     if (cap.length > MAX_BODY - 200) return { ok: false, error: `說明文字超過 ${MAX_BODY - 200} 字` }
     if (typeof this.transport.sendAttachment !== "function") return { ok: false, error: "這個版本不能傳照片或檔案" }
-    const payload = { kind: photo.kind === 'file' ? 'file' : 'image', to_node: f.node, to_agent: f.agent || undefined, reply_to: f.replyTo || undefined, caption: cap, name: photo.name, data: photo.data, width: photo.width, height: photo.height, thumb: photo.thumb || undefined }
+    const payload = { ...this.#personFlag(f), kind: photo.kind === 'file' ? 'file' : 'image', to_node: f.node, to_agent: f.agent || undefined, reply_to: f.replyTo || undefined, caption: cap, name: photo.name, data: photo.data, width: photo.width, height: photo.height, thumb: photo.thumb || undefined }
     let r
     try { r = await this.transport.sendAttachment(payload) } catch (e) {
       const msg = friendlyPhotoError(e.message)
@@ -240,13 +247,47 @@ export class AsnCore {
   async nudge(id) {
     const f = this.friends.get(id)
     if (!f) return { ok: false, error: '找不到好友' }
-    try { await this.transport.send({ to_node: f.node, to_agent: f.agent || undefined, nudge: true, from_agent: this.windowName, expects_reply: false }) }
+    try { await this.transport.send({ to_node: f.node, to_agent: f.agent || undefined, nudge: true, from_agent: this.windowName, expects_reply: false, ...this.#personFlag(f) }) }
     catch (e) { return this.#fail(id, e) }
     this.#log(id).push({ k: 'sys', nudge: true, mine: true, text: '你已傳送震動。', t: this.now() })
     f.known = true
     this.#scheduleSave()
     this.emit('log', id)
     return { ok: true }
+  }
+
+  // 以「人」寄出（#108）：登入時由 Rust 端帶憑證才會生效（沒登入＝照舊以這台設備的視窗名寄出）。寄給自己帳號另一台 ASN 的設備互聊不套用（對方要看到是哪台設備）
+  #personFlag(f) {
+    const peer = (this.asn[f.node] ?? []).some(w => w.window_name === f.agent)
+    return peer ? {} : { person: true }
+  }
+
+  // ---------- 往來記錄（以後台為準，本機只當快取） ----------
+  // 向後台取「我和這位夥伴」90 天內的信，補進本機記錄。沒登入、連不上、後台還沒支援都靜默略過（本機快取照用）。回補進幾則
+  async syncHistory(id, { force = false } = {}) {
+    const f = this.friends.get(id)
+    if (!f || !this.transport.history || this.historyOff || this.historyBusy.has(id)) return 0
+    const last = this.historyAt.get(id) ?? 0
+    if (!force && this.now() - last < HISTORY_MIN_GAP_MS) return 0
+    this.historyBusy.add(id)
+    this.historyAt.set(id, this.now())
+    try {
+      const r = await this.transport.history(f.node, f.agent || '')
+      const { log, added } = mergeHistory(this.logOf(id), r?.messages, f.nick)
+      if (!added) return 0
+      this.logs.set(id, log)
+      f.known = true
+      const lastThem = [...log].reverse().find(m => m.k === 'them')
+      if (lastThem && (f.lastAt ?? 0) < lastThem.t) f.lastAt = lastThem.t
+      this.#scheduleSave()
+      this.emit('state')
+      this.emit('log', id)
+      return added
+    } catch (e) {
+      if (historyUnsupported(e.message)) this.historyOff = true
+      this.log(`history ${id} failed: ${e.message}`)
+      return 0
+    } finally { this.historyBusy.delete(id) }
   }
 
   #fail(id, e) {

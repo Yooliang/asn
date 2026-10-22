@@ -8,12 +8,13 @@ import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_L
 import { DIMS, groupOptions } from './dims.mjs'
 import { LoginPanel } from './login-panel.mjs'
 import { OTHER_VENDORS, VENDOR_UNSUPPORTED, accountLine } from './claude-accounts.mjs'
+import { USAGE_NOTE } from './usage.mjs'
 
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
 export const SETTING_OPS = [
   'sound', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-add', 'acct-auto', 'acct-remote-node', 'acct-remote-switch', 'acct-trust',
-  'closeTo', 'autostart', 'bridge-enable', 'bridge-launch', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'cli-copy', 'autoCheck', 'check-update', 'launch-max', 'launch-cwd', 'avatar-remove',
+  'closeTo', 'autostart', 'bridge-enable', 'bridge-launch', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'cli-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'avatar-remove',
 ]
 
 export const SettingsPanel = {
@@ -26,7 +27,7 @@ export const SettingsPanel = {
     const act = (op, value) => emit('act', op, value)
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return {
-      fileEl, act, pickFile, accountLine, soundChoice, groupOptions, OTHER_VENDORS, VENDOR_UNSUPPORTED,
+      fileEl, act, pickFile, USAGE_NOTE, accountLine, soundChoice, groupOptions, OTHER_VENDORS, VENDOR_UNSUPPORTED,
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL,
       CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_LABEL, DIMS,
@@ -215,6 +216,30 @@ export const SettingsPanel = {
           <label>工作資料夾白名單（一行一個）
             <textarea class="set-area" rows="4" :value="st.launch.cwdText" @change="act('launch-cwd', $event.target.value)"></textarea>
           </label>
+        </div>
+      </template>
+      <template v-if="catKey === 'usage'">
+        <div class="usage-set">
+          <div class="upd-row">
+            <button class="aero-btn" type="button" @click="act('usage-refresh')" :disabled="st.usage.loading">重新整理</button>
+            <small role="status">{{ st.usage.loading ? '正在讀取本機記錄…' : (st.usage.updated ? '更新於 ' + st.usage.updated : '') }}</small>
+          </div>
+          <small>{{ USAGE_NOTE }}</small>
+          <small v-if="st.usage.error" class="acct-warn">{{ st.usage.error }}</small>
+          <template v-if="st.usage.data">
+            <small v-if="st.usage.data.empty">{{ st.usage.data.empty }}</small>
+            <section class="set-card usage-card" v-for="p in st.usage.data.periods" :key="p.key" :aria-label="p.label">
+              <header class="vendor-h"><b>{{ p.label }}</b><span class="usage-cost">約 {{ p.cost }}</span></header>
+              <small>{{ p.tokens }} 個 token、{{ p.messages }} 則回覆</small>
+              <small>{{ p.detail }}</small>
+              <table class="usage-tbl" v-if="p.models.length">
+                <thead><tr><th>模型</th><th>token</th><th>估算成本</th></tr></thead>
+                <tbody><tr v-for="m in p.models" :key="m.model"><td>{{ m.model }}</td><td>{{ m.tokens }}</td><td>{{ m.cost }}</td></tr></tbody>
+              </table>
+            </section>
+            <small v-if="st.usage.data.unpriced">{{ st.usage.data.unpriced }}</small>
+            <small>{{ st.usage.data.priceLine }}</small>
+          </template>
         </div>
       </template>
       <template v-if="catKey === 'about'">

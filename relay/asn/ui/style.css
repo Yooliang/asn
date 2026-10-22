@@ -134,6 +134,23 @@ textarea,input{user-select:text;-webkit-user-select:text}
 /* ---------- 對話視窗 ---------- */
 .chatpane-body{flex:1;min-height:0;display:flex;gap:0;min-width:0}
 .chatpane-main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
+/* 對話上方的大按鈕功能列（仿舊 MSN）：圖示在上、字在下；只放「影響整個代理」的功能 */
+.actionbar{position:relative;z-index:6;flex:none;display:flex;flex-wrap:wrap;align-items:stretch;gap:2px;padding:4px 8px;border-bottom:1px solid var(--line);background:linear-gradient(#fbfdff 0 45%,var(--panel-head) 50%,var(--panel-soft))}
+.ab-wrap{position:relative;display:flex}
+.abtn{flex:none;min-width:64px;display:flex;flex-direction:column;align-items:center;gap:2px;padding:3px 8px 2px;border:1px solid transparent;border-radius:4px;background:none;color:var(--title-fg);font-size:12px;cursor:pointer}
+.abtn img{display:block;width:32px;height:32px}
+.abtn:hover:not(:disabled),.abtn.on{border-color:#8fb6de;background:linear-gradient(#fbfdff 0 45%,#d6e8fa 50%,#e6f1fc);box-shadow:inset 0 0 0 1px rgba(255,255,255,.7)}
+.abtn:active:not(:disabled){background:linear-gradient(#c9def3,#e1eefb)}
+.abtn:disabled{opacity:.5;cursor:default}
+.ab-menu{position:absolute;top:100%;left:0;z-index:20;list-style:none;margin:2px 0 0;padding:3px;min-width:150px;background:var(--panel);border:1px solid #7a9ec4;border-radius:4px;box-shadow:0 6px 18px rgba(0,30,70,.25)}
+.ab-menu button{display:block;width:100%;text-align:left;border:0;background:none;padding:4px 10px;border-radius:3px;cursor:pointer;white-space:nowrap}
+.ab-menu button:hover:not(:disabled){background:linear-gradient(#f2f9ff,#cfe6fb)}
+.ab-menu button:disabled{opacity:.5;cursor:default}
+.ab-menu .menu-note{padding:2px 8px;font-size:11px;color:var(--muted);white-space:normal}
+.ab-subs{min-width:220px;max-width:340px}
+.ab-sub{display:flex;gap:8px;align-items:baseline;padding:4px 8px;border-radius:3px}
+.ab-sub-text{min-width:0;flex:1;overflow-wrap:anywhere}
+.ab-sub-kind{flex:none;font-size:11px;color:var(--muted)}
 .conv,.compose-row{display:flex;gap:8px;padding:8px;background:var(--panel-soft);min-height:0}
 .conv{flex:1}
 .compose-row{flex:none;padding-top:0}
@@ -487,6 +504,12 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 /* 設定頁：Claude 帳號 */
 .acct-set{display:flex;flex-direction:column;gap:10px}
 .acct-set .set-card{gap:8px}
+.usage-set{display:flex;flex-direction:column;gap:10px}
+.usage-card{gap:6px}
+.usage-cost{font-weight:600}
+.usage-tbl{width:100%;border-collapse:collapse;font-size:12px}
+.usage-tbl th,.usage-tbl td{padding:3px 6px;text-align:right;border-top:1px solid var(--line)}
+.usage-tbl th:first-child,.usage-tbl td:first-child{text-align:left;word-break:break-all}
 .vendor-h{display:flex;align-items:baseline;gap:8px}
 .vendor-h small{color:var(--muted)}
 .acct-warn{color:#a86f00}

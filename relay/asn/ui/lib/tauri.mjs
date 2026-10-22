@@ -15,6 +15,7 @@ export const transport = {
   ack: ids => invoke('relay_ack', { ids }),
   rooms: () => invoke('relay_rooms'),
   send: payload => invoke('relay_send', { payload }),
+  history: (node, agent) => invoke('relay_chat_history', { node, agent: agent || null }),   // 後台的往來記錄（要登入；本機只當快取）
   sentStatus: ids => invoke('relay_sent_status', { ids }).then(r => r?.status ?? []),
   avatar: node => invoke('relay_avatar', { node }),                 // 某台設備上傳的大頭貼（按需取）
   setAvatar: avatar => invoke('relay_set_avatar', { avatar }),      // 上傳自己這台的大頭貼；null＝移除
@@ -27,6 +28,7 @@ export const transport = {
   partnerConsoleSet: req => invoke('partner_console_set', { req }),
   modelSwitchQuery: req => invoke('model_switch_query', { req }),   // 讀這個 Claude 視窗的目前模型與是否閒置
   modelSwitchRun: req => invoke('model_switch_run', { req }),       // 關掉那一個視窗、照原參數重開（--resume＋新 --model）
+  subagentsQuery: req => invoke('subagents_query', { req }),         // 這個 Claude 視窗正在跑的子代理（讀對話記錄檔）
   launchCwdCandidates: () => invoke('launch_cwd_candidates'),   // 白名單＋自動建議（Rust 端合併、去重、略過不存在的）
   launchCwdBrowse: () => invoke('launch_cwd_browse'),   // Rust 端開「選擇資料夾」；→ 路徑（已寫進本機白名單）或 null
   launchPrefsGet: () => invoke('launch_prefs_get'),

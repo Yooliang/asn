@@ -92,7 +92,7 @@ test('寄信：body／to_node／to_agent／from_agent／expects_reply／reply_to
   await core.start()
   const id = 'W/W-政策'
   assert.equal((await core.send(id, '  好的，在做 :)  ')).ok, true)
-  assert.deepEqual(relay.sent[0], { to_node: 'W', to_agent: 'W-政策', body: '好的，在做 :)', reply_to: U(7), from_agent: NAME, expects_reply: true })
+  assert.deepEqual(relay.sent[0], { to_node: 'W', to_agent: 'W-政策', body: '好的，在做 :)', reply_to: U(7), from_agent: NAME, expects_reply: true, person: true })
   assert.equal(relay.reqs.at(-1).key, 'fake-machine-key')
   assert.equal(core.snapshot().friends.find(f => f.id === id).waiting, true)
   await core.send(id, '再補一句')
@@ -108,7 +108,7 @@ test('寄震動：內文「（某某 傳送了一個震動）」（測試用傳�
   const { relay, core } = await setup()
   await core.start()
   assert.equal((await core.nudge('W/W-政策')).ok, true)
-  assert.deepEqual(relay.sent[0], { to_node: 'W', to_agent: 'W-政策', body: nudgeBody(NAME), from_agent: NAME, expects_reply: false })
+  assert.deepEqual(relay.sent[0], { to_node: 'W', to_agent: 'W-政策', body: nudgeBody(NAME), from_agent: NAME, expects_reply: false, person: true })
   await core.stop(); await relay.close()
 })
 

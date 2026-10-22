@@ -379,6 +379,8 @@ pub struct SwitchQuery {
     /// 啟動參數裡的 --model；None＝沒指定（前端顯示「預設」）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// true＝這是使用者自己開的視窗（不是 ASN 開的承載視窗）：重開會在新視窗／新分頁，原本的終端機分頁會留下空的命令列
+    pub own_window: bool,
 }
 
 struct Target {
@@ -461,9 +463,15 @@ pub(super) fn query_with(os: &dyn Os, dir: &Path, req: &SwitchQueryReq) -> Switc
                 cwd: Some(t.cwd.clone()),
                 status: t.status.clone(),
                 model: current_model(&t.args),
+                own_window: asn_host_of(os, &os.processes(), t.pid).is_none(),
             }
         }
     }
+}
+
+/// 這個 Claude 的直接父殼若是 ASN 自己開視窗用的承載 PowerShell，回傳它的 pid；使用者自己開的視窗回 None
+pub(super) fn asn_host_of(os: &dyn Os, table: &[Proc], pid: u32) -> Option<u32> {
+    parent_of(table, pid).filter(|p| (p.name == "powershell.exe" || p.name == "pwsh.exe") && os.cmdline(p.pid).map(|l| is_asn_host_cmdline(&l)).unwrap_or(false)).map(|p| p.pid)
 }
 
 /// 照原參數重開所需的資料
@@ -500,7 +508,7 @@ pub(super) fn run_with(os: &dyn Os, dir: &Path, req: &SwitchRunReq, launch: &dyn
     let manual = manual_command(&cwd.to_string_lossy(), &argv);
     let table = os.processes();
     let in_wt = in_windows_terminal(&table, target.pid);
-    let host = parent_of(&table, target.pid).filter(|p| (p.name == "powershell.exe" || p.name == "pwsh.exe") && os.cmdline(p.pid).map(|l| is_asn_host_cmdline(&l)).unwrap_or(false)).map(|p| p.pid);
+    let host = asn_host_of(os, &table, target.pid);
     let allowed = kill_set(&table, target.pid, host, os.own_pid());
     if !allowed.contains(&target.pid) {
         return fail("check", "守門：這個程序不允許結束", &manual, false);
@@ -1111,6 +1119,38 @@ mod tests {
         let j = serde_json::to_value(&q).unwrap();
         assert_eq!(j["canSwitch"], true, "回給前端的是 camelCase");
         assert_eq!(j["sessionId"], "sid-220");
+    }
+
+    #[test]
+    fn 查詢_使用者自己開的視窗與承載殼開的視窗分得出來() {
+        // 預設的程序表：父殼是使用者的 pwsh，不是 ASN 承載殼
+        let (e, f) = env("idle");
+        let q = query_with(&f, &e.dir, &SwitchQueryReq { name: "小良哥".into() });
+        assert!(q.can_switch && q.own_window, "使用者自己開的視窗");
+        assert_eq!(serde_json::to_value(&q).unwrap()["ownWindow"], true);
+        // 父殼是 ASN 的承載殼
+        let (e, mut f) = env("idle");
+        f.cmd.borrow_mut().insert(210, format!("powershell.exe {}", local::window_launcher_args("小良哥", "claude.exe", &v(&["--model", "opus"]))));
+        f.table = vec![p(4, 0, "system"), p(100, 4, "explorer.exe"), p(210, 100, "powershell.exe"), p(220, 210, "claude.exe"), p(300, 100, "asn.exe")];
+        let q = query_with(&f, &e.dir, &SwitchQueryReq { name: "小良哥".into() });
+        assert!(q.can_switch && !q.own_window, "ASN 開的視窗");
+    }
+
+    /// 使用者自己開的視窗（沒有 ASN 的承載殼）也能切：只結束 claude 那棵，不碰使用者的殼，並照原參數接續重開
+    #[test]
+    fn 切換_使用者自己開的視窗_不碰使用者的殼() {
+        let (e, f) = env("idle");
+        let dir = e.dir.clone();
+        let work = e.work.clone();
+        let r = run_with(&f, &e.dir, &run_req(), &|plan| {
+            assert!(plan.argv.windows(2).any(|w| w == ["--resume", "sid-220"]));
+            write_session(&dir, 503, "sid-220", &plan.name, "idle", work.to_str().unwrap());
+            f.alive.borrow_mut().insert(503);
+            Ok(())
+        }, &quick());
+        assert_eq!(r["ok"], true, "{r}");
+        let killed = f.terminated.borrow().clone();
+        assert!(killed.contains(&220) && !killed.contains(&210) && !killed.contains(&200), "{killed:?}");
     }
 
     #[test]

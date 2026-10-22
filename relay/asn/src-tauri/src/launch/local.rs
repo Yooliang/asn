@@ -29,12 +29,15 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
     }
 
     let display_bg = req.display == "background";
-    let (command, args, cwd) = build_spawn_spec(&config, &launch_req)?;
+    let (command, mut args, cwd) = build_spawn_spec(&config, &launch_req)?;
+    // 預設接續同名夥伴上一段對話（issue #82）；沒有舊對話才新開
+    let resumed = if req.fresh { None } else { super::resume::apply_resume_real(&mut args, &command, prof.engine.as_str(), &req.name, &launch_req.cwd) };
     let pid = start_window(&req.name, &command, &args, &cwd, display_bg)?;
     Ok(json!({
         "ok": true,
         "mode": "window",
         "pid": pid,
+        "resumed": resumed.is_some(),
         "display": if display_bg { "background" } else { "foreground" }
     }))
 }
@@ -47,7 +50,11 @@ pub fn start_remote_window(config: &super::config::LaunchConfig, profile: &str, 
     // 沒寫 engine 的自訂 profile 與 Node 橋相同，視為 Claude
     maybe_trust_claude_cwd(if prof.engine.is_empty() { "claude" } else { prof.engine.as_str() }, cwd);
     let req = LaunchReq { profile, name, cwd: cwd.to_string() };
-    let (command, args, cwd) = build_spawn_spec(config, &req)?;
+    let (command, mut args, cwd) = build_spawn_spec(config, &req)?;
+    // 同本機開窗：預設接續同名夥伴上一段對話；hidden（測試用）不查真實的對話檔
+    if !hidden {
+        super::resume::apply_resume_real(&mut args, &command, if prof.engine.is_empty() { "claude" } else { prof.engine.as_str() }, name, &cwd.to_string_lossy());
+    }
     start_window(name, &command, &args, &cwd, hidden)
 }
 
