@@ -10,17 +10,28 @@
 claude --plugin-dir D:/Github/Yooliang/asn/relay/claude-mod
 ```
 
-或在 Claude 視窗用 `/plugin install` 從本機資料夾／marketplace 安裝。第一次載入要使用者在畫面按「開啟」；`claude -p` 與雲端代理不適用。
+正式安裝（本機資料夾 marketplace，只做一次）：
+
+```
+claude plugin marketplace add <ASN 安裝資料夾>\claude-mod
+claude plugin install asn@asn
+```
+
+- `claude-mod` 資料夾裡的 `.claude-plugin/marketplace.json` 把它自己宣告成名為 `asn` 的 marketplace，外掛 `asn` 的 `source` 是相對路徑 `./`，所以語法是 `外掛名@marketplace名` ＝ `asn@asn`。
+- `source` 是相對路徑時，Claude Code 直接讀該資料夾，不另存副本；ASN 更新時覆蓋檔案後，在視窗執行 `/reload-plugins`（新開 session 會自動讀）就生效，不必重裝。
+- 預設裝在 user scope（`--scope user`），之後每個新視窗都會自動載入。
+- 要停用：`claude plugin disable asn`；再啟用 `claude plugin enable asn`。
+- 第一次載入要使用者在畫面按「開啟」；`claude -p` 與雲端代理不適用。
 
 ## 設定（userConfig）
 
 | 欄位 | 說明 |
 | --- | --- |
-| `asn_cli_path` | ASN 安裝資料夾的 `asn-cli.exe` 完整路徑（ASN 設定頁「寄信指令」可複製）。**優先使用**。 |
+| `asn_cli_path` | ASN 安裝資料夾的 `asn-cli.exe` 完整路徑（ASN 設定頁「寄信指令」可複製）。**優先使用**。留空會自動找 `%LOCALAPPDATA%\ASN\asn-cli.exe`，檔案存在才用。 |
 | `send_mjs_path` | 沒設 asn-cli 時的退路：`relay/machine/send.mjs` 完整路徑（需要 node）。 |
 | `node_path` | 跑 send.mjs 的 node 指令，預設 `node`。 |
 
-兩個路徑都沒設，`asn_send` 會回「尚未設定」而不寄信。
+順序：`asn_cli_path` → 預設位置的 `asn-cli.exe` → `send_mjs_path`；都沒有，`asn_send` 會回「尚未設定」而不寄信。
 
 ## 第一期做了什麼
 

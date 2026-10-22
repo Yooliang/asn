@@ -82,3 +82,44 @@ test('外掛本體：asn_send 走 $.process.run、缺欄位不執行', { options
   await $.tool.call({ tool: 'mcp__asn__asn_send', to: 'XISU', body: 'hi' } as never)
   expect(ran.length).toBe(1)
 })
+
+// asn_cli_path 留空：自動找 LOCALAPPDATA 下 ASN 資料夾的 asn-cli.exe（存在才用），否則退 send.mjs
+const DEFAULT_CLI = 'C:\\Users\\u\\AppData\\Local\\ASN\\asn-cli.exe'
+const autoFind = async ($: any, on: any, present: boolean) => {
+  const ran: string[][] = []
+  on('tool.register', () => ({ value: { tool: 'mcp__asn__asn_send' } }) as never)
+  on('session.start', (_: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
+  on('env.get', () => ({ value: 'C:\\Users\\u\\AppData\\Local' }) as never)
+  on('fs.stat', (_: unknown, e: { path: string }) => {
+    if (present && e.path === DEFAULT_CLI) return { value: { kind: 'file', size: 1, mtimeMs: 0, isLink: false } } as never
+    throw new Error('ENOENT')
+  })
+  on('process.run', (_: unknown, e: { argv: string[] }) => {
+    ran.push([...e.argv])
+    return { value: { exitCode: 0, stdout: 'sent id=2\n', stderr: '' } } as never
+  })
+  on('tool.call', () => ({ result: {} }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const sent = await $.tool.call({ tool: 'mcp__asn__asn_send', to: 'XISU', body: 'hi', expects_reply: false } as never)
+  return { ran, sent }
+}
+
+test('自動找預設 asn-cli：LOCALAPPDATA 下存在就用它', { options: { asn_cli_path: '', send_mjs_path: '/r/send.mjs' } }, async ($, on) => {
+  const { ran, sent } = await autoFind($, on, true)
+  expect(ran).toEqual([[DEFAULT_CLI, 'send', '--to', 'XISU', '--body', 'hi', '--no-reply']])
+  expect(typeof (sent as { result: unknown }).result).toBe('string')
+})
+
+test('自動找預設 asn-cli：不存在就退回 node send.mjs', { options: { asn_cli_path: '', send_mjs_path: '/r/send.mjs' } }, async ($, on) => {
+  const { ran, sent } = await autoFind($, on, false)
+  expect(ran).toEqual([['node', '/r/send.mjs', '--to', 'XISU', '--body', 'hi', '--no-reply']])
+  expect(typeof (sent as { result: unknown }).result).toBe('string')
+})
+
+test('自動找預設 asn-cli：都沒有就回清楚的錯誤字串、不執行', { options: { asn_cli_path: '', send_mjs_path: '' } }, async ($, on) => {
+  const { ran, sent } = await autoFind($, on, false)
+  expect(ran.length).toBe(0)
+  const r = (sent as { result: unknown }).result
+  expect(typeof r).toBe('string')
+  expect(r as string).toContain('尚未設定')
+})

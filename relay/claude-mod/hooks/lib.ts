@@ -34,7 +34,7 @@ export function buildSendArgv(i: SendInput, c: SendConfig): BuildResult {
   let head: string[]
   if (cli) head = [cli, 'send']
   else if (mjs) head = [(c.nodePath ?? '').trim() || 'node', mjs]
-  else return { error: '尚未設定 asn_cli_path 或 send_mjs_path（/plugin 設定頁）' }
+  else return { error: '尚未設定 asn_cli_path 或 send_mjs_path，也找不到預設的 %LOCALAPPDATA%\\ASN\\asn-cli.exe（/plugin 設定頁）' }
 
   const argv = [...head]
   if (to) argv.push('--to', to)
