@@ -1,8 +1,8 @@
 {
-  "version": "0.1.34",
-  "versionCode": 1034,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.34_android.apk",
-  "sha256": "5965b9c105413e899ca2efe0fa71a6bb8dbbec02f21babb34a36f78e1e2e093c",
-  "notes": "離線成員也列出來、同一封信不再重複、標出寄件設備",
-  "bytes": 8801764
+  "version": "0.1.35",
+  "versionCode": 1035,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.35_android.apk",
+  "sha256": "3483e3522dfee141d9e91266e2ba6f39486bb15334fdb8ad573f25a9c5ba280b",
+  "notes": "- 手機版整修：夥伴／對話／設置三個分頁可左右滑動、下拉重新整理、名單顯示廠商小圖示與最後一句話、頭像改圓角方形、名字分兩層（帳號名稱＋設備名稱）；對話內容支援 Markdown（粗體、清單、表格、程式碼、連結，連結用系統瀏覽器開）",
+  "bytes": 8822244
 }
