@@ -38,6 +38,7 @@
       "../../claude-mod/.claude-plugin/plugin.json": "claude-mod/.claude-plugin/plugin.json",
       "../../claude-mod/README.md": "claude-mod/README.md",
       "../../claude-mod/hooks/hooks.json": "claude-mod/hooks/hooks.json",
+      "../../claude-mod/hooks/control.ts": "claude-mod/hooks/control.ts",
       "../../claude-mod/hooks/lib.ts": "claude-mod/hooks/lib.ts",
       "../../claude-mod/hooks/register.ts": "claude-mod/hooks/register.ts",
       "../../claude-mod/hooks/status.ts": "claude-mod/hooks/status.ts",

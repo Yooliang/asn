@@ -16,7 +16,15 @@ export type StatusDoc = {
   at: number
   turnId: string
   plugin: string
+  // 以下三個是選填：拿得到才寫（見 PARTNER-OPS 第八節）
+  model?: string
+  context?: { used: number; limit: number; percent: number }
+  control?: ControlResult
 }
+
+// 外掛控制檔（control.ts）的執行結果：id 原樣回傳，detail 為中文且 ≤200 字
+export type ControlResult = { id: string; ok: boolean; detail: string }
+export type ContextUsage = { used: number; limit: number; percent: number }
 
 export type CronLike = { schedule?: string; recurring?: boolean }
 export type StopInfo = { background_tasks?: readonly unknown[]; session_crons?: readonly CronLike[] }
@@ -28,6 +36,7 @@ export function statusPath(home: string, sessionId: string): string {
 export function buildStatus(
   p: { sessionId: string; state: WinState; detail?: string; turnId?: string; version?: string },
   now: number,
+  extra: { model?: string; context?: ContextUsage; control?: ControlResult } = {},
 ): StatusDoc {
   return {
     sessionId: p.sessionId,
@@ -36,7 +45,18 @@ export function buildStatus(
     at: now,
     turnId: p.turnId ?? '',
     plugin: `asn@${p.version || 'unknown'}`,
+    ...(extra.model ? { model: extra.model } : {}),
+    ...(extra.context ? { context: extra.context } : {}),
+    ...(extra.control ? { control: extra.control } : {}),
   }
+}
+
+// $.session.usage().context → {used, limit, percent}；三個都是數字才給，拿不到回 undefined
+export function contextOf(u: unknown): ContextUsage | undefined {
+  const c = (u as { context?: { tokens?: unknown; window?: unknown; percent?: unknown } } | undefined)?.context
+  if (!c || typeof c.tokens !== 'number' || typeof c.window !== 'number' || !Number.isFinite(c.tokens) || !Number.isFinite(c.window) || c.window <= 0) return undefined
+  const percent = typeof c.percent === 'number' && Number.isFinite(c.percent) ? c.percent : Math.round((c.tokens / c.window) * 100)
+  return { used: c.tokens, limit: c.window, percent }
 }
 
 export function questionDetail(e: { questions?: unknown }): string {
@@ -74,6 +94,9 @@ export type Io = {
   sid: () => Promise<string>
   log: (text: string) => void
   root: string
+  // 選填：目前模型與上下文用量（拿不到就不寫這兩欄；任何錯誤都吞掉）
+  model?: () => Promise<string>
+  usage?: () => Promise<unknown>
 }
 
 // 狀態機＋寫檔。回傳的 promise 永不 reject；寫檔的任何錯誤只 log 一行。
@@ -83,9 +106,12 @@ export function createStatus() {
   let turnId = ''
   let stop: StopInfo | undefined
   let ended: string | undefined // 本輪 turn.complete 的 reason；undefined＝還沒結束
+  let control: ControlResult | undefined // 最近一次控制檔結果；之後每次寫檔都保留，橋只認 id
+  let last: { state: WinState; detail: string } = { state: 'idle', detail: '' }
 
   // 寫檔排進同一條鏈，順序不亂
   const write = (io: Io, state: WinState, detail: string): Promise<unknown> => {
+    last = { state, detail }
     chain = chain
       .then(async () => {
         const home = await io.home()
@@ -97,7 +123,9 @@ export function createStatus() {
             .catch(() => '')
         }
         const sid = await io.sid()
-        const doc = buildStatus({ sessionId: sid, state, detail, turnId, version }, Date.now())
+        const model = await Promise.resolve().then(() => io.model?.()).then(m => (typeof m === 'string' ? m : ''), () => '')
+        const context = await Promise.resolve().then(() => io.usage?.()).then(contextOf, () => undefined)
+        const doc = buildStatus({ sessionId: sid, state, detail, turnId, version }, Date.now(), { model, context, control })
         await io.write(statusPath(home, sid), JSON.stringify(doc))
       })
       .catch((err: unknown) => {
@@ -117,6 +145,11 @@ export function createStatus() {
 
   return {
     write,
+    // 控制檔執行完：記下結果並用目前的狀態重寫一次（其餘欄位照舊）
+    setControl(io: Io, r: ControlResult): Promise<unknown> {
+      control = r
+      return write(io, last.state, last.detail)
+    },
     sessionStart(io: Io): void {
       turnId = ''
       stop = undefined

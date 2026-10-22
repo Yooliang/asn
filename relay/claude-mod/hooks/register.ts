@@ -1,5 +1,6 @@
 import type { Register } from 'claude-code'
 import { bashRepliedTo, buildSendArgv, guardBash, planAutoReply, resolveCli, sendRepliedTo, startNotice, trackFromText, type ReplyTrack, type StopLike } from './lib'
+import { createControl, POLL_MS } from './control'
 import { createStatus, questionDetail } from './status'
 
 const TOOL = 'mcp__asn__asn_send'
@@ -7,6 +8,8 @@ const TOOL = 'mcp__asn__asn_send'
 export const register: Register = (on, options) => {
   const str = (k: string): string => (typeof options[k] === 'string' ? (options[k] as string) : '')
   const st = createStatus() // 視窗狀態檔，見 status.ts
+  const ctl = createControl(st) // 橋寫的控制檔（rename／model），見 control.ts
+  let ctlTimer: { cancel: () => void } | undefined
   // 來信輪次自動回信（見 README「第三期」）：turn.start 記下來信、本輪寄過就標已回、turn.complete 才寄
   let track: ReplyTrack | undefined
   let replied = false
@@ -14,7 +17,16 @@ export const register: Register = (on, options) => {
   const cfg = () => ({ asnCliPath: str('asn_cli_path'), sendMjsPath: str('send_mjs_path'), nodePath: str('node_path') })
 
   on('session.start', async ($, e, next) => {
-    st.sessionStart({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root })
+    st.sessionStart({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage() })
+    // 控制檔輪詢：每 POLL_MS 看一次 ~/.asn/control/<sessionId>.json；重載時先停舊的
+    try {
+      ctlTimer?.cancel()
+      ctlTimer = $.clock.every(POLL_MS, () => {
+        void ctl.poll({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage(), run: (command, args) => $.command.run({ command, args }), now: () => Date.now() })
+      })
+    } catch (err) {
+      $.ui.log(`asn 控制檔輪詢啟動失敗：${err instanceof Error ? err.message : String(err)}`)
+    }
     await $.tool.register({
       name: 'asn_send',
       isDeferred: false,
@@ -73,18 +85,18 @@ export const register: Register = (on, options) => {
       stopSeen = undefined
       track = trackFromText(e.text, e.turnId)
     }
-    if (e.agentId === undefined) st.turnStart({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root }, e.turnId)
+    if (e.agentId === undefined) st.turnStart({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage() }, e.turnId)
     return next(e)
   }).catch(($, e, next) => next(e))
 
   on('classic.Stop', ($, e, next) => {
     stopSeen = { background_tasks: e.background_tasks, session_crons: e.session_crons }
-    st.stop({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root }, e)
+    st.stop({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage() }, e)
     return next(e)
   }).catch(($, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {
-    if (e.agentId === undefined) st.turnComplete({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root }, e.reason)
+    if (e.agentId === undefined) st.turnComplete({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage() }, e.reason)
     const t = e.agentId === undefined && track && track.turnId === e.turnId ? track : undefined
     if (t) {
       track = undefined
@@ -114,7 +126,7 @@ export const register: Register = (on, options) => {
 
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
     const isMain = e.agentId === undefined
-    const io = { home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: (p: string) => $.fs.read(p), write: (p: string, t: string) => $.fs.write(p, t), sid: () => $.session.id(), log: (t: string) => $.ui.log(t), root: $.plugin.root }
+    const io = { home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: (p: string) => $.fs.read(p), write: (p: string, t: string) => $.fs.write(p, t), sid: () => $.session.id(), log: (t: string) => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage() }
     if (isMain) void st.write(io, 'waiting_user', questionDetail(e as never))
     try {
       return await next(e)
@@ -125,7 +137,7 @@ export const register: Register = (on, options) => {
 
   on('session.end', async ($, e, next) => {
     // 引擎給 session.end 約 1.5 秒：等寫完再放行
-    await st.write({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root }, 'idle', '已結束')
+    await st.write({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage() }, 'idle', '已結束')
     return next(e)
   }).catch(($, e, next) => next(e))
 }

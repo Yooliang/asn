@@ -70,6 +70,16 @@ mod 把這個視窗的細部狀態寫到本機檔，給 ASN 內建橋讀進 rost
 - **簽章**：自動寄出走同一個 `buildSendArgv`，簽章守門照舊（一律成員身分）。寄信失敗吞掉，最多 `$.ui.log` 一行。
 - **限制**：Stop 與 turn.complete 的先後沒保證，Stop 還沒到時最多等 0.6 秒。有背景工作或排程時整輪不寄，之後真正做完的那一輪若不是同一個 turnId（不是來信觸發）也不會寄；第一版不處理。【要回信】行格式已由 ASN 主線定案：第三行 `【要回信】回信位址=<位址> 信件編號=<id>：…`，只認這兩個欄位（值不含空白，遇空白或全形冒號結束）；第二行「寄件人：」說明含「收發室」也算系統信。
 
+## 外掛控制檔（rename／model）
+
+ASN 橋（`bridge/partner_ops.rs`，格式見 `docs/design/PARTNER-OPS.md` 第八節）要改這個視窗的名字或模型時，寫 `~/.asn/control/<sessionId>.json`：`{"id","op":"rename"|"model","arg","at"}`。
+
+- **偵測**：`session.start` 起每 1.5 秒讀一次（`$.clock.every`）；檔案不存在、JSON 壞掉、sessionId 不是英數／`-`／`_`（≤128）一律安靜忽略。
+- **執行**：`rename` → `$.command.run({ command: 'rename', args: arg })`；`model` → `command: 'model'`。完成後在狀態檔加 `control: {id, ok, detail}`（id 原樣回傳、detail 中文 ≤200 字），其餘欄位照舊，之後的狀態更新也會保留這個欄位。
+- **規則**：`at` 超過 2 分鐘的忽略；同一個 `id` 只執行一次；op 不認得、arg 空白／含控制字元／rename 超過 100 字／model 格式不合法 → `ok:false` 帶中文說明，不執行。外掛不刪控制檔（橋會刪）。
+- **選填欄位**：狀態檔另有 `model`（`$.session.model()`）與 `context: {used, limit, percent}`（`$.session.usage()`），拿不到就不寫。
+- 程式在 `hooks/control.ts`，測試在 `hooks/control.test.ts`。
+
 ## 限制
 
 - Bash 守門以命令字串判斷（含 `--to` 且無 `--reply`／`--no-reply` 旗標字樣），內文剛好含有這些字樣會放行；這是提醒用的守門，不是安全邊界。
