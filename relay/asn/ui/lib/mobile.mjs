@@ -27,8 +27,8 @@ export function rosterGroups(friends, { query = '', selfNode = '', selfName = ''
 export const totalUnread = friends => (friends ?? []).reduce((n, f) => n + (Number.isInteger(f?.unread) && f.unread > 0 ? f.unread : 0), 0)
 
 // ---------- 提示 ----------
-export const DEFAULT_PREFS = { vibrateMsg: false, vibrateNudge: true }
-export const normalizePrefs = raw => ({ vibrateMsg: raw?.vibrateMsg === true, vibrateNudge: raw?.vibrateNudge !== false })
+export const DEFAULT_PREFS = { vibrateMsg: false, vibrateNudge: true, autoUpdate: true }
+export const normalizePrefs = raw => ({ vibrateMsg: raw?.vibrateMsg === true, vibrateNudge: raw?.vibrateNudge !== false, autoUpdate: raw?.autoUpdate !== false })
 export const NUDGE_VIBRATE_MS = 300
 export const MSG_VIBRATE_MS = 60
 
@@ -58,6 +58,8 @@ export function androidBridge(win) {
     exportFile: path => String(call('exportFile', path) ?? ''),
     openDownloads: () => call('openDownloads'),
     relaunch: () => call('relaunch'),
+    selfUpdateEnabled: () => call('selfUpdateEnabled') === true,   // 自行安裝版才有（Google Play 版是 false）
+    installApk: path => String(call('installApk', path) ?? 'error'),   // ok／need_permission／error／unsupported
   }
 }
 
@@ -75,3 +77,27 @@ export function afterBind(out, bridge) {
   if (bridge) return { action: 'relaunch' }
   return { action: 'ask', text: '登入完成，請關掉 ASN 再重新打開。' }
 }
+
+// ---------- 自動更新（自行安裝版；Google Play 版不啟用，畫面上根本不出現） ----------
+export const UPDATE_CHECK_MS = 6 * 3600 * 1000
+export const initialUpdate = () => ({ enabled: false, phase: 'idle', version: '', line: '', done: 0, total: 0, error: '', hint: '', checking: false, manual: '' })
+// phase：idle（沒有新版）→ available（有新版，等按「更新」）→ downloading → failed（可重試）；下載完交給系統安裝程式
+export const withAvailable = (u, found) => (found?.enabled === true && found.available === true
+  ? { ...u, enabled: true, phase: 'available', version: String(found.version ?? ''), line: String(found.line ?? ''), error: '', hint: '' }
+  : { ...u, enabled: found?.enabled === true, phase: u.phase === 'downloading' ? u.phase : 'idle' })
+export const withProgress = (u, p) => ({ ...u, phase: 'downloading', done: Number(p?.done) || 0, total: Number(p?.total) || 0 })
+export const withFailure = (u, msg) => ({ ...u, phase: 'failed', error: String(msg ?? '更新失敗') })
+export const progressText = (done, total) => (total > 0 ? `下載中 ${Math.min(100, Math.floor((done / total) * 100))}%` : '下載中…')
+export const bannerText = u => (u.phase === 'available' ? `有新版本 ${u.version}${u.line ? `：${u.line}` : ''}` : u.phase === 'downloading' ? progressText(u.done, u.total) : u.phase === 'failed' ? `更新失敗：${u.error}` : '')
+export const buttonLabel = u => (u.phase === 'failed' ? '重試' : '更新')
+// 交給系統安裝程式的結果 → 給人看的提示（ok 時系統會接手，畫面不用多說）
+export function installOutcome(result) {
+  switch (result) {
+    case 'ok': return { ok: true, hint: '' }
+    case 'need_permission': return { ok: false, hint: '請在接下來的畫面允許 ASN 安裝應用程式，回來後再按一次「更新」。' }
+    case 'unsupported': return { ok: false, hint: '這個版本不提供自動更新。' }
+    default: return { ok: false, hint: '沒辦法叫出安裝畫面，請再試一次。' }
+  }
+}
+// 該不該自動檢查：這個版本有更新功能、使用者沒關、不在下載中
+export const shouldAutoCheck = (u, prefs) => u.enabled && prefs.autoUpdate !== false && u.phase !== 'downloading'

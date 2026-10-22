@@ -20,6 +20,10 @@ path = "src/bin/asn-cli.rs"
 name = "asn-askpass"
 path = "src/bin/asn-askpass.rs"
 
+# sideload＝自行安裝版（官網下載的 APK）：帶手機自動更新（下載、驗 sha256、交給系統安裝）。Google Play 版不開這個旗標，程式碼與安裝權限都不編進去
+[features]
+sideload = []
+
 [lib]
 name = "asn_lib"
 # cdylib：安卓版把它載成 libasn_lib.so（Tauri 行動版的規定）；電腦版仍用 rlib 連進 asn 執行檔

@@ -6,7 +6,7 @@ import { ChatPane } from './lib/chatpane.mjs'
 import { avatarSrc, isAvatarDataUrl, removeAvatarUpload, selfAvatarSrc, uploadAvatarFile } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { PROVIDERS, canStart, errorText, phaseText } from './lib/login.mjs'
-import { BANNER_MS, DEFAULT_PREFS, afterBind, androidBridge, chatNav, initialNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, totalUnread } from './lib/mobile.mjs'
+import { BANNER_MS, DEFAULT_PREFS, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, buttonLabel, chatNav, initialNav, initialUpdate, installOutcome, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, shouldAutoCheck, totalUnread, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
 import { groupHeading, statusNote } from './lib/tabs.mjs'
 import { emo, plain } from './lib/text.mjs'
 import { authApi, invoke, listen, store } from './lib/tauri.mjs'
@@ -68,6 +68,28 @@ const logs = reactive({})
 const avatars = ref({})
 const query = ref(''), collapsed = reactive({})
 const banner = ref(null), shake = ref(false), refreshing = ref(false)
+// 自動更新（自行安裝版才有；Rust 端與外殼都沒編進 Google Play 版）。測試用的清單網址只收 127.0.0.1（Rust 端再擋一次）
+const upd = reactive(initialUpdate())
+const updTestUrl = (() => { try { return localStorage.getItem('asnUpdateTestUrl') || null } catch { return null } })()
+const updArgs = () => (updTestUrl ? { url: updTestUrl } : {})
+async function checkUpdate(manual = false) {
+  if (!upd.enabled || upd.checking || upd.phase === 'downloading') return
+  upd.checking = true; if (manual) upd.manual = ''
+  try {
+    const found = await invoke('android_update_check', updArgs())
+    Object.assign(upd, withAvailable(upd, found))
+    if (manual) upd.manual = found?.available ? `有新版本 ${found.version}。` : '已經是最新版。'
+  } catch (e) { if (manual) upd.manual = e.message } finally { upd.checking = false }
+}
+async function startUpdate() {
+  if (upd.phase === 'downloading') return
+  Object.assign(upd, withProgress(upd, { done: 0, total: 0 }), { error: '', hint: '' })
+  try {
+    const r = await invoke('android_update_download', updArgs())   // Rust 端下載並驗 sha256，不符就拒絕
+    const out = installOutcome(bridge ? bridge.installApk(r.path) : 'unsupported')
+    upd.phase = 'available'; upd.hint = out.hint
+  } catch (e) { Object.assign(upd, withFailure(upd, e.message)) }
+}
 let core = null
 let startCore = null
 let bannerTimer = null
@@ -110,13 +132,16 @@ if (screen.value === 'main') {
     if (plan.banner) { banner.value = plan.banner; clearTimeout(bannerTimer); bannerTimer = setTimeout(() => { banner.value = null }, BANNER_MS) }
   })
   await listen('relay-bell', () => void core.pull('bell'))   // Rust 端的門鈴（前景時有效）
+  await listen('android-update-progress', p => { if (upd.phase === 'downloading') Object.assign(upd, withProgress(upd, p)) })   // 下載完才到的進度事件不能把畫面又拉回「下載中」
+  upd.enabled = bridge?.selfUpdateEnabled() === true
+  setInterval(() => { if (shouldAutoCheck(upd, prefs)) void checkUpdate() }, UPDATE_CHECK_MS)
   // 回到前景：立刻拉一次信、更新名單、補正在看的那位的往來記錄
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return
     void core.pull('resume'); void core.refreshRoster()
     if (nav.chat) { core.markRead(nav.chat); void core.syncHistory(nav.chat) }
   })
-  startCore = async () => { await core.start(); sync() }   // 掛上畫面之後才開始（第一次收信要連網，不能讓畫面空等）
+  startCore = async () => { void (shouldAutoCheck(upd, prefs) && checkUpdate()); await core.start(); sync() }   // 掛上畫面之後才開始（第一次收信要連網，不能讓畫面空等）
 }
 
 // ---------- 導覽：每往下一層就推一筆瀏覽記錄，系統返回鍵＝上一頁（名單層再按才退到背景） ----------
@@ -192,6 +217,7 @@ const app = createApp({
 
     return {
       screen, fatal, login, loginNote, PROVIDERS, canStart, startLogin, cancelLogin,
+      upd, updText: computed(() => bannerText(upd)), updButton: computed(() => buttonLabel(upd)), startUpdate, checkUpdate,
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, CONN_LABEL, info, banner, shake, refreshing,
       avOf, avById, meAv, chatFriend, chatLog, photoApi, emo, groupHeading, statusNote,
       openChat, back, goMe, goList, openBanner, sendTo, nudgeTo, sendAttachTo, refreshAll,

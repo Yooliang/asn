@@ -37,6 +37,11 @@
 
     <!-- 名單與「我」 -->
     <section class="m-page" v-show="!nav.chat">
+      <div class="m-upd" v-if="upd.enabled && upd.phase !== 'idle'" role="status" :class="{ failed: upd.phase === 'failed' }">
+        <span class="m-upd-tx">{{ updText }}</span>
+        <button class="m-btn m-upd-btn" type="button" v-if="upd.phase !== 'downloading'" @click="startUpdate">{{ updButton }}</button>
+        <span class="m-upd-hint" v-if="upd.hint">{{ upd.hint }}</span>
+      </div>
       <header class="m-head">
         <button class="m-me" type="button" aria-label="我" @click="goMe"><img class="m-pic" :class="'st-' + me.status" :src="meAv" alt="" width="44" height="44"></button>
         <div class="m-head-tx">
@@ -86,6 +91,11 @@
         <div class="m-card m-form">
           <label class="m-check"><input type="checkbox" v-model="prefs.vibrateNudge"> 對方傳來「震動」時，手機跟著震動</label>
           <label class="m-check"><input type="checkbox" v-model="prefs.vibrateMsg"> 收到新訊息時輕輕震一下</label>
+        </div>
+        <div class="m-card m-form" v-if="upd.enabled">
+          <label class="m-check"><input type="checkbox" v-model="prefs.autoUpdate"> 自動檢查新版本</label>
+          <button class="m-btn" type="button" :disabled="upd.checking || upd.phase === 'downloading'" @click="checkUpdate(true)">{{ upd.checking ? '檢查中…' : '檢查更新' }}</button>
+          <p class="m-note" v-if="upd.manual" role="status">{{ upd.manual }}</p>
         </div>
         <div class="m-card">
           <p class="m-acct">{{ accountText }}</p>

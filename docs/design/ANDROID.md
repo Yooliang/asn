@@ -141,3 +141,37 @@ APK 在 `src-tauri/gen/android/app/build/outputs/apk/universal/debug/` 底下。
 
 - 第二期：FCM 推播（鎖屏收得到；後台收到寄給本人的信時發推播；Firebase 專案 `asnmessenger` 已存在）、偽通話（#99）。到時要加 Kotlin 推播服務、通知權限（Android 13 起要問）、後台記錄手機的推播代碼。
 - 第三期：正式簽章金鑰、隱私權政策（要寫手機版蒐集什麼）、商店頁素材、內部測試軌道 → 正式；評估 Keystore 加密；`versionCode` 依 `tauri.conf.json` 的版本自動算。
+
+## 十二、自動更新（自行安裝版）
+
+上架 Google Play 之前，APK 從官網下載自行安裝，所以 App 自己檢查更新。**Google Play 版不含這套**（Play 政策不允許 App 自己更新）。
+
+**兩種發行管道（建置時決定，程式碼與權限都分開）**
+
+| | 自行安裝版（sideload） | Google Play 版（play，預設） |
+| --- | --- | --- |
+| Rust | `--features sideload`：編進更新清單檢查、下載、驗 sha256 | 不開旗標：檢查指令只回 `enabled: false`、下載指令回「這個版本不提供自動更新」，下載與驗證程式碼不編進去 |
+| 外殼（Kotlin） | `src/sideload/java/…/SelfUpdate.kt`：叫系統安裝程式 | `src/play/java/…/SelfUpdate.kt`：空殼 |
+| 權限 | `REQUEST_INSTALL_PACKAGES` | 沒有 |
+| 畫面 | 更新橫幅、「我」分頁的「自動檢查新版本」與「檢查更新」 | 不出現（外殼回報沒有更新功能） |
+
+Gradle 以環境變數 `ORG_GRADLE_PROJECT_asnDist=sideload` 選管道（不設＝play），Rust 以 `--features sideload` 對應。`npm run release:android` 兩個都會帶。
+
+**流程**
+
+1. App 啟動時與每 6 小時（「我」分頁可關閉自動檢查）向 `https://asnmessenger.web.app/update/android.json` 取更新清單。
+2. 清單的版本碼比現在大才算有新版：頂端橫幅「有新版本 x.y.z：<說明第一行>」與「更新」鈕。**按了才下載**，橫幅顯示進度。
+3. Rust 端重新抓清單、依清單網址下載到 App 私有資料夾（`.irori-asn/updates/`），邊下載邊算 sha256；**對不上就刪檔、顯示錯誤、不安裝**。
+4. 通過後交給外殼用 FileProvider 叫出系統安裝畫面。第一次沒有「安裝未知應用程式」許可：外殼先開啟該許可的設定頁，橫幅提示「請在接下來的畫面允許 ASN 安裝應用程式，回來後再按一次『更新』」。
+
+**android.json 格式**（官網新檔）：`{ "version", "versionCode", "url", "sha256", "notes", "bytes" }`。App 端嚴格檢查：版本碼必須等於由版本號算出的值、sha256 為 64 位小寫十六進位、`url` 必須是官網 `update/` 底下的 https、檔案不超過 200 MB、清單不超過 64 KB；任何一項不合就整份拒絕。測試用：只有帶本機回送網址（`http://127.0.0.1:…`）時才收回送位址，畫面不會自己帶。
+
+**versionCode 規則**：與 Tauri 相同，主版 × 1,000,000 ＋ 次版 × 1,000 ＋ 修訂（0.1.32 → 1032），單調遞增；次版、修訂不可超過 999。發版腳本與 App 端各有一份同樣的算法，各有測試。
+
+**發版**：先發電腦版（`npm run release`），再在同一版本號下跑 `npm run release:android`（需要 JAVA_HOME、ANDROID_HOME、NDK_HOME 與四個 Rust 安卓目標）。它會：建 release APK（只有 arm64）→ zipalign → 用本機 debug 金鑰簽章並驗證 → 把 `ASN_<版本>_android.apk` 與 `android.json` 放進 `site/public/update/`。`--dry-run` 只放到 `src-tauri/target/release-dry/`。部署官網由人做；`site/firebase.json` 已設 `android.json` 不快取。
+
+**簽章與換管道（重要）**：這個「測試通道」用 Android 預設的 debug 金鑰（密碼是公開的 `android`），**不是**之後 Google Play 的正式簽章金鑰，兩者簽章不同。裝了自行安裝版的手機要換成 Play 版，必須先移除自行安裝版再從 Play 安裝；自行安裝版也因此永遠不能被 Play 版「更新」。debug 金鑰任何人都能簽出同樣簽章的 APK，所以這個通道只適合內部測試，不對外大量散布。
+
+**模擬器驗證（第一期做過）**：用 `127.0.0.1` 假伺服器（`adb reverse` 對應）提供假的 android.json 與一支 APK，走完「橫幅出現 → 按更新 → 無許可時開啟許可設定頁 → 有許可後下載 → 系統『要更新這個應用程式嗎？』」；把 sha256 改錯，確認顯示錯誤、不叫安裝畫面。
+
+Play 版（不設 asnDist）的合併後 manifest 已實測沒有 `REQUEST_INSTALL_PACKAGES`（`processUniversalReleaseMainManifest` 輸出）；自行安裝版的 APK 用 `aapt2 dump permissions` 看得到它。

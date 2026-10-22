@@ -17,6 +17,14 @@
         ]
       },
       {
+        "source": "update/android.json",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+      },
+      {
+        "source": "update/*.apk",
+        "headers": [{ "key": "Content-Type", "value": "application/vnd.android.package-archive" }]
+      },
+      {
         "source": "update/latest.json",
         "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
       },

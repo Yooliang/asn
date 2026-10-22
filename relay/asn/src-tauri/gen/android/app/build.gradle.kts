@@ -14,11 +14,18 @@ val tauriProperties = Properties().apply {
     }
 }
 
+// 發行管道：play（預設，Google Play 版，不含自動更新與安裝權限）／sideload（官網下載的自行安裝版，帶自動更新）。
+// 建置時用環境變數 ORG_GRADLE_PROJECT_asnDist=sideload 指定（同時 Rust 要帶 --features sideload）；見 docs/design/ANDROID.md
+val asnDist = (findProperty("asnDist") as String?) ?: "play"
+require(asnDist == "play" || asnDist == "sideload") { "asnDist 只能是 play 或 sideload" }
+
 android {
     compileSdk = 36
+    sourceSets.getByName("main").java.srcDir("src/$asnDist/java")
     namespace = "tw.yooliang.asn"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
+        manifestPlaceholders["installPermission"] = if (asnDist == "sideload") "android.permission.REQUEST_INSTALL_PACKAGES" else "android.permission.INTERNET"
         applicationId = "tw.yooliang.asn"
         minSdk = 26
         targetSdk = 36

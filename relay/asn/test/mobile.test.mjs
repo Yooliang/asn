@@ -1,7 +1,7 @@
 // 手機版（安卓）的純邏輯：單欄導覽、名單分組、提示規則、外殼橋、登入後的下一步。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { BANNER_MS, DEFAULT_PREFS, MSG_VIBRATE_MS, NUDGE_VIBRATE_MS, afterBind, androidBridge, chatNav, initialNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, totalUnread } from '../ui/lib/mobile.mjs'
+import { BANNER_MS, DEFAULT_PREFS, MSG_VIBRATE_MS, NUDGE_VIBRATE_MS, UPDATE_CHECK_MS, afterBind, bannerText, buttonLabel, initialUpdate, installOutcome, progressText, shouldAutoCheck, withAvailable, withFailure, withProgress, androidBridge, chatNav, initialNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, totalUnread } from '../ui/lib/mobile.mjs'
 import { groupHeading } from '../ui/lib/tabs.mjs'
 
 const F = (id, node, nick, status = 'online', extra = {}) => ({ id, node, agent: nick, nick, status, device: `設備${node}`, unread: 0, ...extra })
@@ -50,9 +50,9 @@ test('提示：只有訊息與震動會提示；正在看的對話不跳橫幅�
 })
 
 test('設定：壞值退回預設，震動提示預設只開對方傳來的震動', () => {
-  assert.deepEqual(normalizePrefs(null), { vibrateMsg: false, vibrateNudge: true })
-  assert.deepEqual(normalizePrefs({ vibrateMsg: true, vibrateNudge: false }), { vibrateMsg: true, vibrateNudge: false })
-  assert.deepEqual(normalizePrefs({ vibrateMsg: 'yes', vibrateNudge: 0 }), { vibrateMsg: false, vibrateNudge: true }, '只認真正的布林')
+  assert.deepEqual(normalizePrefs(null), { vibrateMsg: false, vibrateNudge: true, autoUpdate: true })
+  assert.deepEqual(normalizePrefs({ vibrateMsg: true, vibrateNudge: false, autoUpdate: false }), { vibrateMsg: true, vibrateNudge: false, autoUpdate: false }, '自動檢查可以關')
+  assert.deepEqual(normalizePrefs({ vibrateMsg: 'yes', vibrateNudge: 0, autoUpdate: 'no' }), { vibrateMsg: false, vibrateNudge: true, autoUpdate: true }, '只認真正的布林')
 })
 
 test('外殼橋：沒有 AsnAndroid 就是 null；有的話包一層，呼叫出錯不外洩', () => {
@@ -86,4 +86,38 @@ test('登入後：新建節點要重開（有外殼自動重開），已有節�
   assert.equal(ask.action, 'ask'); assert.match(ask.text, /重新打開/)
   for (const s of ['bound', 'pending', undefined]) assert.deepEqual(afterBind({ state: s }, b), { action: 'enter' })
   assert.deepEqual(afterBind(null, b), { action: 'enter' })
+})
+
+test('自動更新：發現新版 → 橫幅文字與按鈕；下載中顯示進度；失敗可重試；沒有新版或 Play 版什麼都不顯示', () => {
+  let u = initialUpdate()
+  assert.equal(bannerText(u), '')
+  u = withAvailable(u, { enabled: true, available: true, version: '0.1.33', line: '修正登入' })
+  assert.equal(u.phase, 'available'); assert.equal(bannerText(u), '有新版本 0.1.33：修正登入'); assert.equal(buttonLabel(u), '更新')
+  assert.equal(bannerText({ ...u, line: '' }), '有新版本 0.1.33')
+  u = withProgress(u, { done: 2_500_000, total: 10_000_000 })
+  assert.equal(u.phase, 'downloading'); assert.equal(bannerText(u), '下載中 25%')
+  assert.equal(progressText(5, 0), '下載中…'); assert.equal(progressText(20, 10), '下載中 100%')
+  assert.equal(withAvailable(u, { enabled: true, available: false }).phase, 'downloading', '下載中查到「沒有新版」不打斷下載')
+  u = withFailure(u, '下載中斷')
+  assert.equal(bannerText(u), '更新失敗：下載中斷'); assert.equal(buttonLabel(u), '重試')
+  assert.equal(withAvailable(initialUpdate(), { enabled: true, available: false }).phase, 'idle')
+  const play = withAvailable(initialUpdate(), { enabled: false })
+  assert.deepEqual([play.enabled, play.phase], [false, 'idle'], 'Play 版：Rust 回 enabled:false，畫面不出現更新')
+  assert.ok(UPDATE_CHECK_MS === 6 * 3600 * 1000)
+})
+
+test('自動更新：交給系統安裝程式的各種結果；沒有許可要引導使用者；自動檢查可關', () => {
+  assert.deepEqual(installOutcome('ok'), { ok: true, hint: '' })
+  assert.match(installOutcome('need_permission').hint, /允許/)
+  assert.match(installOutcome('unsupported').hint, /不提供/)
+  for (const r of ['error', undefined, '']) assert.equal(installOutcome(r).ok, false)
+  const on = { ...initialUpdate(), enabled: true }
+  assert.equal(shouldAutoCheck(on, { autoUpdate: true }), true)
+  assert.equal(shouldAutoCheck(on, { autoUpdate: false }), false, '設定可關閉自動檢查')
+  assert.equal(shouldAutoCheck({ ...on, phase: 'downloading' }, { autoUpdate: true }), false)
+  assert.equal(shouldAutoCheck(initialUpdate(), { autoUpdate: true }), false, '沒有更新功能（Play 版）就不查')
+  const b = androidBridge({ AsnAndroid: { vibrate() {}, selfUpdateEnabled: () => true, installApk: p => (p.endsWith('.apk') ? 'ok' : 'error') } })
+  assert.equal(b.selfUpdateEnabled(), true); assert.equal(b.installApk('/x/a.apk'), 'ok')
+  assert.equal(androidBridge({ AsnAndroid: { vibrate() {} } }).selfUpdateEnabled(), false, '外殼沒有這個方法＝沒有更新功能')
+  assert.equal(androidBridge({ AsnAndroid: { vibrate() {} } }).installApk('/x'), 'error')
 })

@@ -71,6 +71,14 @@ class AsnBridge(private val activity: MainActivity) {
     }
   }
 
+  /** 自行安裝版的自動更新：這個版本有沒有（Play 版回 false） */
+  @JavascriptInterface
+  fun selfUpdateEnabled(): Boolean = SelfUpdate.ENABLED
+
+  /** 把下載好的更新檔交給系統安裝程式。回 ok／need_permission／error／unsupported */
+  @JavascriptInterface
+  fun installApk(path: String): String = SelfUpdate.install(activity, path)
+
   /** 重新開啟 ASN（第一次登入建好這支手機的節點後，Rust 端要重新讀身分）。先叫起新的，再結束這個行程 */
   @JavascriptInterface
   fun relaunch() {

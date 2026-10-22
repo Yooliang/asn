@@ -193,6 +193,37 @@ test('滿版：名單、我、對話三頁左右不留外距與外框', () => {
   assert.doesNotMatch(css, /\.m-(scroll|tabs)\{[^}]*margin:0 8px/)
 })
 
+test('自動更新只在自行安裝版：Rust 旗標、Gradle 管道、安裝權限、空殼分開；Play 版不含更新程式與安裝權限', () => {
+  assert.match(cargo, /\[features\]\nsideload = \[\]/)
+  const rs = read('src-tauri', 'src', 'android.rs')
+  assert.match(rs, /#\[cfg\(feature = "sideload"\)\]\nmod sideload/, '下載與驗證程式只在 sideload 編進去')
+  assert.match(rs, /#\[cfg\(not\(feature = "sideload"\)\)\][\s\S]*?"enabled": false/, 'Play 版：檢查指令只回 enabled:false')
+  assert.match(rs, /Err\("這個版本不提供自動更新"\.into\(\)\)/)
+  assert.match(rs, /verify_sha256\(&hasher\.hex\(\), &m\.sha256\)/, '下載完一定驗 sha256')
+  assert.match(rs, /return fail\(&part, e\)/, 'sha256 不符就刪檔、回錯誤，不會走到改名與安裝')
+  assert.doesNotMatch(rs.split('mod sideload')[0], /reqwest::Client::new\(\)\.get\(&m\.url/, '下載網址只在 sideload 模組裡用')
+  const g = read('src-tauri', 'gen', 'android', 'app', 'build.gradle.kts')
+  assert.match(g, /val asnDist = \(findProperty\("asnDist"\) as String\?\) \?: "play"/, '預設是 Play 版')
+  assert.match(g, /src\/\$asnDist\/java/)
+  assert.match(g, /if \(asnDist == "sideload"\) "android\.permission\.REQUEST_INSTALL_PACKAGES" else "android\.permission\.INTERNET"/)
+  const manifest = read('src-tauri', 'gen', 'android', 'app', 'src', 'main', 'AndroidManifest.xml')
+  assert.doesNotMatch(manifest, /REQUEST_INSTALL_PACKAGES/, '主 manifest 不直接寫安裝權限，由管道決定')
+  assert.match(manifest, /\$\{installPermission\}/)
+  const d = ['gen', 'android', 'app', 'src']
+  const play = read('src-tauri', ...d, 'play', 'java', 'tw', 'yooliang', 'asn', 'SelfUpdate.kt')
+  const side = read('src-tauri', ...d, 'sideload', 'java', 'tw', 'yooliang', 'asn', 'SelfUpdate.kt')
+  assert.match(play, /ENABLED = false/); assert.doesNotMatch(play.replace(/\/\/.*$/gm, ''), /Intent|FileProvider|canRequestPackageInstalls|INSTALL/, 'Play 版空殼不含安裝程式碼')
+  assert.match(side, /ENABLED = true/); assert.match(side, /canRequestPackageInstalls/); assert.match(side, /application\/vnd\.android\.package-archive/)
+  assert.match(side, /startsWith\(updates\.path/, '只安裝更新資料夾裡的 APK')
+  assert.match(read('src-tauri', ...d, 'main', 'res', 'xml', 'file_paths.xml'), /asn_updates/)
+  const main = fs.readdirSync(path.join(root, 'src-tauri', ...d, 'main', 'java', 'tw', 'yooliang', 'asn'))
+  assert.ok(!main.includes('SelfUpdate.kt'), '安裝程式不能放進共用的 main')
+  // 發版腳本：自行安裝版帶 sideload 旗標與管道變數；只用 debug 金鑰，不產生金鑰
+  const rel = read('scripts', 'release-android.mjs')
+  assert.match(rel, /ORG_GRADLE_PROJECT_asnDist: 'sideload'/); assert.match(rel, /'--features', 'sideload'/)
+  assert.match(rel, /debug\.keystore/); assert.doesNotMatch(rel, /keytool|genkey|-genkeypair/, '不產生金鑰')
+})
+
 test('登入畫面背景：電腦版與手機版各用一張 MSN 風背景，cover＋草地對齊底部；表單區有半透明白底保持可讀', () => {
   for (const [f, w, h] of [['login-bg-desktop.webp', 1600, 1000], ['login-bg-mobile.webp', 1080, 2340]]) {
     const b = fs.readFileSync(path.join(root, 'ui', 'img', f))

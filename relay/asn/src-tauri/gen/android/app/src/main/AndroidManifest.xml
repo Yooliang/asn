@@ -4,6 +4,9 @@
     <!-- 對方傳來「震動」時讓手機震動 -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- 自行安裝版才有安裝權限（建置時 ORG_GRADLE_PROJECT_asnDist=sideload）；Google Play 版這一行換成 INTERNET（已有，重複無害），不含安裝權限 -->
+    <uses-permission android:name="${installPermission}" />
+
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 
