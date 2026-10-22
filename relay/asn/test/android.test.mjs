@@ -73,7 +73,7 @@ test('Cargo：系統匣、自動更新、系統加密連線只在非安卓；安
 
 test('設定：電腦版識別與視窗不變；安卓套件名固定 tw.yooliang.asn、首頁是 m.html、不帶電腦端的打包資源與更新器', () => {
   const desk = JSON.parse(read('src-tauri', 'tauri.conf.json'))
-  assert.equal(desk.identifier, 'tw.irori.asn', '電腦版識別不能變（資料夾與安裝位置靠它）')
+  assert.equal(desk.identifier, 'tw.yooliang.asn', '電腦版識別（資料夾靠它；安裝位置靠 publisher 釘住，見 identifier-migration.test.mjs）')
   assert.equal(desk.app.windows[0].url, 'list.html')
   const and = JSON.parse(read('src-tauri', 'tauri.android.conf.json'))
   assert.equal(and.identifier, 'tw.yooliang.asn', '上架後不能改的套件名')

@@ -11,6 +11,7 @@ mod attach;
 mod auth;
 mod avatar;
 mod bell;
+mod datadir;
 mod envc;
 mod heartbeat;
 mod home;
@@ -794,9 +795,8 @@ pub fn run() {
         }
     }
 
-    let data_dir = crate::envc::get_os("ASN_DATA").map(PathBuf::from).unwrap_or_else(|| {
-        std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("tw.irori.asn")).unwrap_or_else(|| identity::home_dir().join(".irori-asn"))
-    });
+    // 資料資料夾：Windows 是 %APPDATA%\tw.yooliang.asn（舊識別資料夾的內容首次啟動時複製過來，見 datadir.rs）
+    let data_dir = crate::envc::get_os("ASN_DATA").map(PathBuf::from).unwrap_or_else(|| datadir::startup(&work_dir, shot.is_some()));
 
     let relay_obj = base.map(|(url, key)| {
         let name = read_settings_name(&data_dir).unwrap_or_else(|| default_window_name_for(&node, &account::computer_name(|k| std::env::var(k).ok())));
