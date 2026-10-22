@@ -1,11 +1,11 @@
 {
-  "version": "0.1.31",
-  "notes": "夥伴改名、換 session、換電腦都延續同一位：往來記錄跟著走、寄給舊名字的信自動改送新名字，開新夥伴可選「這是誰的接班」（#153）",
-  "pub_date": "2026-10-22T05:45:57.755Z",
+  "version": "0.1.32",
+  "notes": "顯示正在聽的歌（預設關，#20）；密碼小幫手：git／ssh 要密碼時由 ASN 跳窗收，AI 看不到（#26 第一期）",
+  "pub_date": "2026-10-22T06:45:06.949Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybndlaU9lcSs0UmtQTFVNc04rRXA2dEJJTWNsS0w4NVRSRi9GejdhY1FKcUZ2WlJVZXRjUTRQV1JqRThGa1BtZXNZK3FSRVJ0bkhHR2lVc1BCd3VkOWd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjQ3OTU3CWZpbGU6QVNOXzAuMS4zMV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjMxCjFvZWQ5RXZCOXRxcWZwRHZyUUhOeTZYeFVqTU9aWHVYa1ZqYXY2d3BuTXFXZEtyQUIzT1ZZcUxwSVFSSGg4bFBHaWVWREt6S3R3WlJpb2M1RS9GY0JBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.31_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjBjRk9LVThmY3pjTW4xMGlRZ2xxMGNuR00xSUxMVFRmL0dsSE9ObEVtVkxCZDZuNUphaXRBQzJjRWppQjRGUVNDTi9RcGY1aFVVcEl0M2h4UG1nakFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjUxNTA2CWZpbGU6QVNOXzAuMS4zMl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjMyCmp5cEt4Wm9OY1dGbllFb3Q1RnBsaUx1WnAxbm9KeW9UVXhzaXRJYjNLUTV4b0xLQkZVNHZCaVovaTgvWEpZTjdnc0NTcjVsS052bDFQMnNKQ3lvOURBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.32_x64-setup.exe"
     }
   }
 }
