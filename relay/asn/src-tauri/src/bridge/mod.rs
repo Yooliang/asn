@@ -1,9 +1,10 @@
-//! ASN 內建收發室橋（全 Rust，只做 Claude 引擎）。設計見 docs/design/BRIDGE-RUST.md。
+//! ASN 內建收發室橋（全 Rust）。Claude 引擎見 worker.rs；ACP 背景工作者與 Codex 見 engines/。設計見 docs/design/BRIDGE-RUST.md、BRIDGE-ENGINES.md。
 //! 預設關閉：設定「讓 ASN 負責這台的收發室」打開才啟動；關閉時 ASN 的行為與以前完全一樣。
 //! 舊 Node 橋在跑（bridge.pid 的 pid 活著）時內建橋不啟動，設定頁顯示由舊版負責。
 pub mod attach;
 pub mod core;
 pub mod corrlog;
+pub mod engines;
 pub mod handoff;
 pub mod launcher;
 pub mod lock;
@@ -19,6 +20,7 @@ mod tests;
 
 use crate::relay::Relay;
 use core::{BridgeLog, Config, Core};
+use engines::{EngineCtx, EngineEvent, EngineSet, Notice};
 use launcher::{LaunchEnv, Launched, Launcher};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -59,6 +61,7 @@ pub struct Running {
     worker: ProcWorker,
     lock: lock::BridgeLock,
     tasks: Vec<tauri::async_runtime::JoinHandle<()>>,
+    engines: Option<Arc<EngineSet>>,
     #[cfg_attr(not(test), allow(dead_code))]
     pub log: Arc<BridgeLog>,
 }
@@ -69,6 +72,9 @@ impl Running {
         self.shutdown.notify_one();
         for t in &self.tasks {
             t.abort();
+        }
+        if let Some(e) = &self.engines {
+            e.stop(); // 只關自己啟動並記下 PID 的引擎子程序
         }
         self.worker.stop();
         self.lock.release();
@@ -96,7 +102,10 @@ pub fn start_with(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>, laun
         lock::LockError::Io(m) => StartError::Other(format!("拿不到收信鎖：{m}")),
     })?;
     let log = Arc::new(BridgeLog::new(Some(cfg.work_dir.join("bridge.log"))));
-    // 上一個橋（被硬砍的 ASN）留下的收發室 worker 先收掉，免得兩組同時收信；然後把自己的 pid 記進 bridge.last
+    // 上一個橋（被硬砍的 ASN）留下的收發室 worker 與引擎子程序先收掉，免得兩組同時收信；然後把自己的 pid 記進 bridge.last
+    for l in engines::cleanup_orphans(&cfg.work_dir, std::process::id(), &orphans::process_table(), orphans::kill_tree) {
+        log.line(&l);
+    }
     for l in orphans::cleanup_and_mark(&cfg.work_dir, std::process::id(), orphans::process_table, orphans::kill_tree) {
         log.line(&l);
     }
@@ -129,8 +138,45 @@ pub fn start_with(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>, laun
         core.set_launcher(l);
         rx
     });
+    // 其他引擎（ACP 背景工作者、Codex）：沒有設定檔也沒有 ~/.codex 就是 None，行為和以前完全一樣
+    let (ev_tx, ev_rx) = mpsc::unbounded_channel::<EngineEvent>();
+    let notify: engines::Notifier = {
+        let (r, l) = (relay.clone(), log.clone());
+        Arc::new(move |n: Notice| {
+            let (r, l) = (r.clone(), l.clone());
+            tauri::async_runtime::spawn(async move {
+                let mut b = json!({ "to_node": n.to_node, "body": n.body, "from_agent": n.from_agent });
+                if let Some(a) = &n.to_agent {
+                    b["to_agent"] = json!(a);
+                }
+                if let Err(e) = r.api("send", Some(b)).await {
+                    l.line(&format!("engine notice to {} failed: {e}", n.to_node));
+                }
+            });
+        })
+    };
+    let ectx = EngineCtx {
+        log: {
+            let l = log.clone();
+            Arc::new(move |m: String| l.line(&m))
+        },
+        work_dir: cfg.work_dir.clone(),
+        home: cfg.home.clone(),
+        agents_file: cfg.agents_file.clone(),
+        env: Arc::new(cfg.engine_env.clone()),
+        events: ev_tx,
+        notify,
+        pids: engines::PidBook::new(&cfg.work_dir),
+    };
+    let engine_set = engines::build(&ectx, cfg.engines.as_deref());
+    if let Some(e) = &engine_set {
+        core.set_engines(e.clone());
+    }
     let mut tasks = vec![];
-    tasks.push(tauri::async_runtime::spawn(run_loop(core, lines, launched_rx, wake.clone(), shutdown.clone())));
+    tasks.push(tauri::async_runtime::spawn(run_loop(core, lines, launched_rx, ev_rx, wake.clone(), shutdown.clone())));
+    if let Some(e) = &engine_set {
+        tasks.push(e.spawn_refresher(cfg.engine_refresh_ms));
+    }
     match anon_url {
         Some(url) => {
             let (w2, l2) = (wake, log.clone());
@@ -152,7 +198,7 @@ pub fn start_with(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>, laun
         }
         None => log.line("no anon key: doorbell off, polling only"),
     }
-    Ok(Running { shutdown, worker: w, lock, tasks, log })
+    Ok(Running { shutdown, worker: w, lock, tasks, engines: engine_set, log })
 }
 
 fn now() -> u64 {
@@ -160,7 +206,7 @@ fn now() -> u64 {
 }
 
 /// 主迴圈：worker 輸出、門鈴、2 分鐘輪詢、名單、逾時檢查，全部在同一個任務裡依序處理
-pub async fn run_loop(mut core: Core, mut lines: mpsc::UnboundedReceiver<WorkerLine>, launched: Option<mpsc::UnboundedReceiver<Launched>>, wake: Arc<Notify>, shutdown: Arc<Notify>) {
+pub async fn run_loop(mut core: Core, mut lines: mpsc::UnboundedReceiver<WorkerLine>, launched: Option<mpsc::UnboundedReceiver<Launched>>, mut engine_events: mpsc::UnboundedReceiver<EngineEvent>, wake: Arc<Notify>, shutdown: Arc<Notify>) {
     // 沒接遠端開視窗就給一個永遠不會有東西的接收端（送端留在這裡，不會關）
     let (_keep, idle) = mpsc::unbounded_channel::<Launched>();
     let mut launched = launched.unwrap_or(idle);
@@ -173,12 +219,18 @@ pub async fn run_loop(mut core: Core, mut lines: mpsc::UnboundedReceiver<WorkerL
     poll.tick().await;
     roster.tick().await;
     tick.tick().await;
+    // 其他引擎先啟動並列一次名單（最多等 8 秒，慢的引擎之後由背景重列補上），第一次回報的名單才不缺 Gemini／Codex
+    if let Some(e) = core.engines.clone() {
+        e.start();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(8), e.refresh_all()).await;
+    }
     core.refresh_roster(now()).await;
     core.pull("startup", now()).await;
     loop {
         tokio::select! {
             Some(l) = lines.recv() => core.on_worker_line(l, now()).await,
             Some(ev) = launched.recv() => core.on_launched(ev, now()).await,
+            Some(ev) = engine_events.recv() => core.on_engine_event(ev, now()).await,
             _ = wake.notified() => core.pull("bell", now()).await,
             _ = poll.tick() => core.pull("poll", now()).await,
             _ = roster.tick() => core.refresh_roster(now()).await,

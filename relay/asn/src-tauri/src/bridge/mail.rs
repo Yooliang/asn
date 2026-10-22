@@ -38,6 +38,25 @@ pub fn wants_reply(field: Option<bool>, body: &str) -> bool {
     }
 }
 
+/// 從轉交給引擎的信件全文取出抬頭上的 reply 欄位：yes→Some(true)、no→Some(false)、`?` 或不是來信抬頭→None。
+/// 只認第一行【最後面】那個 reply=（橋寫在最後；寄件人自填的視窗名就算含 " reply=no" 也排在它前面，騙不到）
+pub fn head_reply(text: &str) -> Option<bool> {
+    let first = text.lines().next().unwrap_or("");
+    if !first.starts_with("[RELAY 來信]") {
+        return None;
+    }
+    let line = first.trim_end_matches([' ', '\t', '\r']);
+    let i = line.rfind("reply=")?;
+    if i == 0 || !line[..i].ends_with(|c: char| c.is_whitespace()) {
+        return None;
+    }
+    match &line[i + 6..] {
+        "yes" => Some(true),
+        "no" => Some(false),
+        _ => None,
+    }
+}
+
 /// 一封信（後端 inbox 回的欄位，只取橋用得到的）
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Mail {
