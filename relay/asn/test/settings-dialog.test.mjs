@@ -12,8 +12,8 @@ import { closesDialog } from '../ui/lib/dialog.mjs'
 const read = f => fs.readFileSync(new URL(`../ui/${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
 test('分類：十一類、順序與鍵固定、標題與圖示都有、鍵不重複', () => {
-  assert.deepEqual(SETTING_KEYS, ['me', 'accounts', 'look', 'tabs', 'sound', 'voice', 'window', 'launch', 'usage', 'update', 'about'])
-  assert.deepEqual(SETTING_CATS.map(c => c.title), ['個人', '帳號', '外觀', '分頁與分組', '音效', '語音', '視窗與系統匣', '啟動設定', '用量', '更新', '關於'])
+  assert.deepEqual(SETTING_KEYS, ['me', 'accounts', 'look', 'tabs', 'notify', 'voice', 'window', 'launch', 'usage', 'update', 'about'])
+  assert.deepEqual(SETTING_CATS.map(c => c.title), ['個人', '帳號', '外觀', '分頁與分組', '通知', '語音', '視窗與系統匣', '啟動設定', '用量', '更新', '關於'])
   assert.equal(new Set(SETTING_KEYS).size, SETTING_CATS.length)
   for (const c of SETTING_CATS) assert.ok(/^M[0-9A-Za-z .,-]+$/.test(c.icon), `${c.key} 圖示`)
   assert.equal(catByKey('voice').title, '語音')
@@ -40,8 +40,8 @@ test('摘要：照目前的值顯示', () => {
   const look = catSummary('look', { frame: 'native', mode: 'merged', dpMode: 'side', toolbar: 'top', bubble: 'bubble' })
   assert.ok(look.includes('Windows 原生'), look)
   assert.equal(catSummary('tabs', { tabDim: 'device', groupDim: 'status' }), '分頁依設備、分組依狀態')
-  assert.equal(catSummary('sound', { soundOn: true }), '音效：開')
-  assert.equal(catSummary('sound', { soundOn: false }), '音效：關')
+  assert.equal(catSummary('notify', { notify: { toast: true, msg: true, nudge: false, file: false } }), '右下角通知、通知聲音')
+  assert.equal(catSummary('notify', { notify: { toast: false, msg: false, nudge: false, file: false } }), '全部關閉')
   assert.equal(catSummary('voice', { voiceEnabled: false }), '念出訊息尚未啟用')
   assert.equal(catSummary('voice', { voiceEnabled: true, ttsAuto: true, sttLang: 'en' }), '自動念：開、輸入語言：英文')
   assert.equal(catSummary('window', { closeTo: 'tray', trayOk: true, autostartSupported: true, autostartOn: true }), '關閉時縮到系統匣、開機啟動：開')
@@ -61,7 +61,7 @@ test('對話框元件還在（開新夥伴失敗提示用）：只有 Esc 會關
 // ---------- 設定表單元件：用 Vue 真的轉成 HTML ----------
 const fullState = () => ({
   status: 'online', hasUpload: false, avBusy: false, avMsg: '',
-  soundOn: true, frame: 'custom', mode: 'merged', dpMode: 'left', toolbar: 'top', bubble: 'none', tabDim: 'device', groupDim: 'status',
+  notify: { toast: true, msg: true, nudge: true, file: true }, frame: 'custom', mode: 'merged', dpMode: 'left', toolbar: 'top', bubble: 'none', tabDim: 'device', groupDim: 'status',
   voice: { cfg: { tts_voice: '', tts_auto: false, stt_lang: 'zh', stt_model: 'base' }, enabled: true, voices: [{ id: 'v1', label: '曉曉' }], sttReady: false, installBusy: false, note: '尚未安裝' },
   accounts: {
     list: [{ email: 'a@b.c', plan: 'Max', current: true, saved: true }, { email: 'p@b.c', plan: '', current: false, saved: true }],
@@ -87,7 +87,7 @@ test('設定表單：每一類都轉得出來，各類原本的項目都在', as
     accounts: ['登入狀態', '尚未登入', '用 Google 登入', '用 GitHub 登入', 'Claude 帳號', '使用中', '加入目前登入的帳號', '自動加入', '切換', '刪除', 'a@b.c', 'OpenAI（Codex）帳號', 'x@openai.test · plus', 'Gemini', '尚未支援', '遠端設備', 'w@b.c', '信任我自己的設備'],
     look: ['視窗外框', '視窗模式', '頭像模式', '工具列位置', '文字底色'],
     tabs: ['分頁依', '分組依'],
-    sound: ['音效'],
+    notify: ['右下角通知', '通知聲音', '震動聲音', '收到檔案聲音'],
     voice: ['念出訊息的聲音', '收到新訊息自動念', '語音輸入的語言', '語音辨識模型', '下載語音辨識', '曉曉', '尚未安裝'],
     window: ['關閉視窗時', '登入時自動啟動 ASN'],
     launch: ['每小時開新夥伴上限', '工作資料夾白名單', 'Claude Code', '先安裝 Gemini CLI'],
@@ -119,6 +119,14 @@ test('設定表單：照目前的值顯示（選中項、勾選、數字、文�
   assert.ok((await render('voice', off)).includes('念出訊息要由維護者在後台啟用'))
 })
 
+test('設定表單：通知四個勾選照目前的值顯示', async () => {
+  const st = fullState(); st.notify = { toast: false, msg: true, nudge: false, file: true }
+  const html = await render('notify', st)
+  const boxes = [...html.matchAll(/<input type="checkbox"([^>]*)>/g)].map(m => [/aria-label="([^"]+)"/.exec(m[1])[1], /\bchecked\b/.test(m[1])])
+  assert.deepEqual(boxes, [['右下角通知', false], ['通知聲音', true], ['震動聲音', false], ['收到檔案聲音', true]])
+  assert.ok(!html.includes('音效'))
+})
+
 test('設定表單：認不得的類別不顯示任何表單項目', async () => {
   const html = await render('nope')
   assert.ok(!/<select|<input|<textarea|<button/.test(html))
@@ -137,11 +145,11 @@ test('守門：元件送出的每個指令，樞紐的 applySetting 都接得住
 test('守門：每個舊設定項目的行為綁定都還在（改走樞紐指令，存檔欄位不變）', () => {
   const hub = read('list.js')
   for (const k of ['setFrame(value)', 'setMode(value)', 'setTabDim(value)', 'saveVoice(value)', 'installFromSettings()', 'accounts.switchTo(value)', 'accounts.remove(value)', 'accounts.addCurrent()', 'accounts.remoteSwitch(', 'accounts.setTrust(',
-    'setCloseTo(value)', 'setAutostart(', 'checkUpdate(true)', 'saveLaunchPrefs()', 'setLaunchCwdText(', 'removeAvatar()', 'soundFromChoice(value)', 'normalizeDpMode(value)', 'normalizeBubble(value)']) {
+    'setCloseTo(value)', 'setAutostart(', 'checkUpdate(true)', 'saveLaunchPrefs()', 'setLaunchCwdText(', 'removeAvatar()', 'notifyWith(notifyPrefs.value', 'normalizeDpMode(value)', 'normalizeBubble(value)']) {
     assert.ok(hub.includes(k), `樞紐缺 ${k}`)
   }
   // 存檔格式不變：還是這些欄位
-  for (const f of ['sound: soundOn.value', 'frame: frame.value', 'closeTo: closeTo.value', 'autoUpdate: autoCheck.value', 'tabDim: dims.tabDim', 'groupDim: dims.groupDim', 'winMode: ui.mode', 'dpMode: ui.dpMode', 'bubble: ui.bubble', 'toolbar: ui.toolbar', 'splitSize: sizes.split', 'mergedSize: sizes.merged']) {
+  for (const f of ['notify: notifyPrefs.value', 'frame: frame.value', 'closeTo: closeTo.value', 'autoUpdate: autoCheck.value', 'tabDim: dims.tabDim', 'groupDim: dims.groupDim', 'winMode: ui.mode', 'dpMode: ui.dpMode', 'bubble: ui.bubble', 'toolbar: ui.toolbar', 'splitSize: sizes.split', 'mergedSize: sizes.merged']) {
     assert.ok(hub.includes(f), `存檔欄位 ${f}`)
   }
 })

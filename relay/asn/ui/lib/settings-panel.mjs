@@ -4,7 +4,7 @@
 // 這個檔在 node 也要能載入（測試），所以 Vue 只在元件 setup 裡才取用。
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL } from './voice-prefs.mjs'
 import { BUBBLES, BUBBLE_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, TOOLBARS, TOOLBAR_LABEL } from './merge.mjs'
-import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_LABEL, soundChoice } from './prefs.mjs'
+import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS } from './prefs.mjs'
 import { DIMS, groupOptions } from './dims.mjs'
 import { LoginPanel } from './login-panel.mjs'
 import { OTHER_VENDORS, VENDOR_UNSUPPORTED, accountLine } from './claude-accounts.mjs'
@@ -12,7 +12,7 @@ import { USAGE_NOTE } from './usage.mjs'
 
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
 export const SETTING_OPS = [
-  'sound', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
+  'notify', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-add', 'acct-auto', 'acct-remote-node', 'acct-remote-switch', 'acct-trust',
   'closeTo', 'autostart', 'bridge-enable', 'bridge-launch', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'cli-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'avatar-remove',
 ]
@@ -27,10 +27,10 @@ export const SettingsPanel = {
     const act = (op, value) => emit('act', op, value)
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return {
-      fileEl, act, pickFile, USAGE_NOTE, accountLine, soundChoice, groupOptions, OTHER_VENDORS, VENDOR_UNSUPPORTED,
+      fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions, OTHER_VENDORS, VENDOR_UNSUPPORTED,
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL,
-      CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, SOUND_CHOICES, SOUND_LABEL, DIMS,
+      CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS, DIMS,
     }
   },
   template: `<div class="list settings panel-set">
@@ -48,10 +48,8 @@ export const SettingsPanel = {
           <small role="status">{{ st.avMsg || (st.hasUpload ? '目前用的是這台設備上傳的大頭貼。' : '目前用的是自動產生的大頭貼。') }}</small>
         </div>
       </template>
-      <template v-if="catKey === 'sound'">
-        <label>音效
-          <select class="set-sel" :value="soundChoice(st.soundOn)" @change="act('sound', $event.target.value)" aria-label="音效"><option v-for="c in SOUND_CHOICES" :key="c" :value="c">{{ SOUND_LABEL[c] }}</option></select>
-        </label>
+      <template v-if="catKey === 'notify'">
+        <label v-for="i in NOTIFY_ITEMS" :key="i.key" class="chk"><input type="checkbox" :checked="st.notify[i.key]" @change="act('notify', { key: i.key, on: $event.target.checked })" :aria-label="i.label" /><span>{{ i.label }}</span></label>
       </template>
       <template v-if="catKey === 'voice'">
         <div class="voice-set">

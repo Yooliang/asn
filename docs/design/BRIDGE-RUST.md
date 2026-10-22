@@ -12,7 +12,7 @@ issue #12 第二期。目標：打開 ASN ＝ 這台設備的收發室就上線�
 | 第二段（本 PR） | 群組轉送（`rooms.mjs`）；附件（照片）下載提示行；孤兒程序清理（`bridge.last`）；舊橋退出後自動接手（設定開著時，每 5 秒看一次舊橋還在不在） | 完成；「自己更新」不搬（ASN 的更新由 ASN 自己的更新機制負責，見第 6 節第 6 點） |
 | 第三段（本 PR） | 遠端開視窗：`launcher.mjs` 的 `launch_pending`／`launch_result`、本機啟動設定、白名單與每小時上限、roster 的 `launcher` 摘要、開出視窗後的第一句話；別台的「開新夥伴」對話框列出那台回報的 profile 與資料夾；設定頁新增「允許我的其他設備替這台開新視窗」 | 完成，預設關（見第 7 節） |
 | 第四段（本 PR） | `asn send`／`asn recv`／`asn room`／`asn attach` 命令列取代 `send.mjs`／`recv.mjs`／`room.mjs`／`attach.mjs`（含 `replied/`、`sent/` 記號、`--file` 附件、父行程鏈身分判定、`--watch` 心跳）；獨立的 console 子系統執行檔 `asn-cli.exe`；橋轉交信件裡的附件下載提示與群組翻頁提示改成這個命令 | 完成（見第 10 節） |
-| 第五段 | 其他引擎：Codex、ACP（Gemini／Grok 背景夥伴）；opt-in 後把預設改為開、淘汰安裝程式的工作排程 | 未開工 |
+| 第五段 | 其他引擎：Codex、ACP（Gemini 等背景夥伴）的名單、投遞、回信，見 `BRIDGE-ENGINES.md`；遠端開這些夥伴、opt-in 後把預設改為開、淘汰安裝程式的工作排程仍待辦 | 引擎已完成（PR feat/12-bridge-engines）；其餘未開工 |
 
 每段都維持「預設關、關著時 ASN 行為與以前完全一樣」，直到第五段才討論預設值。
 
@@ -48,7 +48,7 @@ issue #12 第二期。目標：打開 ASN ＝ 這台設備的收發室就上線�
 | 孤兒清理 `bridge.last`（`self-update.mjs` 的 `orphansOf`／`killTree`） | `orphans.rs` | 第二段已搬（`self-update.mjs` 的 git 自動更新不搬） |
 | 遠端開視窗 `launcher.mjs`（驗證、歷史、紀錄、等視窗出現） | `launcher.rs`；設定與啟動沿用 `launch/`（`config.rs`、`cwds.rs`、`prefs.rs`、`local.rs`） | 第三段已搬（背景夥伴 `partner-*.mjs` 留到第五段） |
 | `send.mjs`／`recv.mjs`／`room.mjs`／`attach.mjs`、`identity.mjs`、`self-recv.mjs`、`attach-upload.mjs`／`attach-download.mjs` | `cli/`（`send.rs`、`recv.rs`、`room.rs`、`attach_cmd.rs`、`upload.rs`、`caller.rs`） | 第四段已搬（Node 版保留給雲端／Linux 無畫面節點） |
-| Codex／ACP 引擎 | — | 第五段 |
+| Codex／ACP 引擎（`engines/`） | `engines/`（`acp*.rs`、`codex*.rs`、`rpc.rs`），設計見 `BRIDGE-ENGINES.md` | 第五段已搬（遠端開 Codex／背景夥伴不搬，見該文件第 5 節） |
 
 ### 主迴圈
 
@@ -172,7 +172,7 @@ Rust 測試在各模組的 `#[cfg(test)]`，整合測試在 `bridge/tests.rs`（
 
 ## 8. 留到後面的段
 
-- 第五段：Codex、ACP（Gemini／Grok 背景夥伴）引擎；遠端開視窗支援它們；opt-in 後把預設改為開、淘汰安裝程式的工作排程。
+- 第五段（引擎部分已完成，見 `BRIDGE-ENGINES.md`）：遠端開視窗支援 Codex 與背景夥伴；opt-in 後把預設改為開、淘汰安裝程式的工作排程。
 - 遠端開視窗在 Linux／macOS 的實機驗證（程式沿用 `start_window_unix`，沒有在真機跑過）。
 
 ## 9. 真機驗證步驟（第二段＋第三段）
@@ -219,7 +219,7 @@ Claude 的 Bash／PowerShell 工具都要「等指令結束並拿結束碼」（
 - 寄件／收件視窗名不能自填：沿父行程鏈（Windows 用 Toolhelp 行程快照，不再呼叫 PowerShell，約快 0.5 秒）找 `~/.claude/sessions/<pid>.json` 登記的 claude 程序；鏈斷了用 `CLAUDE_CODE_MESSAGING_SOCKET` 對上還活著的 session；`--whoami` 印判定過程。
 - 記號檔與橋相容：`machine-<節點>/replied/<信件id>`、`machine-<節點>/sent/<sha1([寄件視窗,節點,視窗])>`（與 Node 的 `sentMarkName` 逐字相同，測試內有 Node 算出的向量）、`send-rate.json`、`room-seen.json`、`self-recv/<視窗名>.json` 心跳（`recv --watch` 每 30 秒寫，格式同 `self-recv.mjs`）。
 - `recv --watch` 的失敗退避、單一實例（exit 3）、視窗本體不在就自己結束、結束時清心跳，都與 Node 版相同。
-- 沒搬的：Codex 視窗的身分判定（`CODEX_THREAD_ID`，第五段）；照片轉 webp（命令列與 Node 版一樣只收已是 webp 的照片）。
+- 沒搬的：Codex 視窗的身分判定（`CODEX_THREAD_ID`，`BRIDGE-ENGINES.md` 第 5 節）；照片轉 webp（命令列與 Node 版一樣只收已是 webp 的照片）。
 
 ### 10.3 在哪裡找到命令列
 

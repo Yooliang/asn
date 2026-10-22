@@ -3,6 +3,7 @@
 //! 對後端只透過 [`Relay`]（HTTP），對 worker 只透過 [`WorkerSink`]，所以測試可用本機假後端與假 worker。
 use super::attach;
 use super::corrlog::{self, CorrLog, Dir, Entry};
+use super::engines::{EngineEvent, EngineSet};
 use super::launcher::{Launched, Launcher};
 use super::mail::{self, fallback_note, mail_head, parse_send_head, strip_reply_head, wants_reply, Mail, SendHead};
 use super::pending::{self, LastReq, Pending, RoomRef, State};
@@ -52,11 +53,22 @@ pub struct Config {
     pub room_cmd: Option<String>,
     /// 依視窗名的往來記錄資料夾（預設 `~/.asn/handoff`；測試一律指到暫存資料夾）
     pub handoff_dir: PathBuf,
+    /// 其他引擎（第五段）：IRORI_ENGINES 的值（逗號分隔的 acp／codex）；None＝自動（有 agents.json 載 acp、有 ~/.codex 載 codex）
+    pub engines: Option<String>,
+    /// 引擎子程序環境的來源（啟動時的環境變數快照）
+    pub engine_env: Vec<(String, String)>,
+    /// ACP 工作者設定檔（預設 `~/.irori-relay/agents.json`，與舊橋同一份；IRORI_AGENTS_FILE 可改）
+    pub agents_file: PathBuf,
+    /// 使用者家目錄（找 ~/.codex；測試指到暫存資料夾）
+    pub home: PathBuf,
+    /// 引擎名單重列的間隔
+    pub engine_refresh_ms: u64,
 }
 
 impl Config {
     pub fn from_env(node: &str, work_dir: PathBuf) -> Config {
         let test_handoff = work_dir.join("handoff");
+        let (work_dir_agents, work_dir_home) = (work_dir.join("agents.json"), work_dir.join("home"));
         let home = crate::identity::home_dir();
         let list = |k: &str| std::env::var(k).unwrap_or_default().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect::<Vec<_>>();
         Config {
@@ -86,6 +98,12 @@ impl Config {
             room_cmd: attach::room_cmd_from_env(),
             // 測試時絕不碰真實家目錄：往來記錄放進工作資料夾底下
             handoff_dir: if cfg!(test) { test_handoff } else { corrlog::default_dir() },
+            // 測試時絕不碰真實的設定與 ~/.codex：只載 Claude，路徑都放進工作資料夾底下
+            engines: if cfg!(test) { Some("claude".into()) } else { std::env::var("IRORI_ENGINES").ok().filter(|s| !s.trim().is_empty()) },
+            engine_env: std::env::vars().collect(),
+            agents_file: if cfg!(test) { work_dir_agents } else { std::env::var_os("IRORI_AGENTS_FILE").filter(|s| !s.is_empty()).map(PathBuf::from).unwrap_or_else(|| crate::identity::relay_home().join("agents.json")) },
+            home: if cfg!(test) { work_dir_home } else { home },
+            engine_refresh_ms: env_u64("IRORI_ROSTER_MS", 60_000),
         }
     }
 }
@@ -176,6 +194,10 @@ pub struct Core {
     cursors: Cursors,
     cursor_warned: bool,
     launcher: Option<Arc<Launcher>>,
+    /// 其他引擎（ACP 工作者、Codex）；沒有就只有 Claude
+    pub engines: Option<Arc<EngineSet>>,
+    /// Claude 視窗（~/.claude/sessions）；roster ＝ 這個 ＋ 各引擎最近一次的名單
+    claude_roster: Vec<Window>,
     corr: CorrLog,
     /// 視窗名 → 夥伴 ID（#109；每次回報名單時向後端對一次，只放記憶體）
     partners: BTreeMap<String, String>,
@@ -215,7 +237,7 @@ impl Core {
         let mut c = Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
             last_requester: BTreeMap::new(), noticed: HashMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), unrouted: HashSet::new(),
-            last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, cursor_warned: false, launcher: None, corr,
+            last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, cursor_warned: false, launcher: None, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false,
         };
         c.restore();
@@ -224,6 +246,22 @@ impl Core {
 
     pub fn sink(&self) -> Arc<dyn WorkerSink> {
         self.sink.clone()
+    }
+
+    /// 接上其他引擎（第五段）。沒接＝只有 Claude 視窗
+    pub fn set_engines(&mut self, e: Arc<EngineSet>) {
+        self.engines = Some(e);
+    }
+
+    /// 引擎回報：已轉交／失敗／回覆／名單有變
+    pub async fn on_engine_event(&mut self, ev: EngineEvent, now: u64) {
+        self.now = now;
+        match ev {
+            EngineEvent::Sent(id) => self.on_sent(&id).await,
+            EngineEvent::Fail(id, reason) => self.on_fail(&id, &reason).await,
+            EngineEvent::Reply { from, text, mail_id } => self.on_reply(&from, &text, mail_id).await,
+            EngineEvent::RosterChanged => self.refresh_roster(now).await,
+        }
     }
 
     /// 接上遠端開視窗（第三段）。沒接＝名單回報 launcher 送 null、不處理 launch_pending
@@ -351,7 +389,19 @@ impl Core {
     pub async fn refresh_roster(&mut self, now: u64) {
         self.now = now;
         let alive = self.alive.clone();
-        let Some(list) = roster::read_sessions(&self.cfg.sessions_dir, |p| alive(p), self.sink.pid(), &self.cfg.mailbox_name) else { return };
+        let claude = roster::read_sessions(&self.cfg.sessions_dir, |p| alive(p), self.sink.pid(), &self.cfg.mailbox_name);
+        let engine_ok = self.engines.as_ref().map(|e| e.has_result()).unwrap_or(false);
+        // Claude 讀不到、其他引擎也還沒有任何結果：名單不動（和以前一樣）
+        if claude.is_none() && !engine_ok {
+            return;
+        }
+        if let Some(l) = claude {
+            self.claude_roster = l;
+        }
+        let mut list = self.claude_roster.clone();
+        if let Some(e) = &self.engines {
+            list.extend(e.windows().into_iter().filter(|w| w.name != self.cfg.mailbox_name));
+        }
         self.roster = list;
         self.roster_ok = true;
         let asn = self.cfg.report_asn_window.then(|| self.relay.window_name());
@@ -449,7 +499,7 @@ impl Core {
     /// 預設收件視窗不在線時代收的視窗：最近有活動的互動式 session
     fn fallback_window(&self) -> Option<Window> {
         let mut best: Option<&Window> = None;
-        for w in &self.roster {
+        for w in self.roster.iter().filter(|w| !w.no_fallback) {
             if best.map(|b| w.updated_at > b.updated_at).unwrap_or(true) {
                 best = Some(w);
             }
@@ -467,7 +517,31 @@ impl Core {
         if agent.is_empty() { node.to_string() } else { format!("{node}/{agent}") }
     }
 
+    /// 視窗背後的引擎代號（名單上沒有的名字，例如 extra_allow，當 Claude）
+    fn engine_of(&self, name: &str) -> String {
+        self.agent_of(name).map(|w| w.engine.clone()).unwrap_or_else(|| "claude".into())
+    }
+    /// 名單上顯示的引擎名（信件抬頭 engine= 用）
+    fn engine_label_of(&self, name: &str) -> String {
+        self.agent_of(name).map(|w| w.label().to_string()).unwrap_or_else(|| "claude".into())
+    }
+
+    /// 信件最後多一行「往來記錄在哪」。ACP 背景工作者只能讀自己的工作資料夾，讀不到那個檔，所以不附
+    fn with_path_line(&self, text: String, target: &str) -> String {
+        if self.engine_of(target) == "acp" {
+            return text;
+        }
+        format!("{text}\n{}", self.corr.path_line(target))
+    }
+
     fn deliver(&mut self, id: &str, to: &str, text: &str) -> Result<(), String> {
+        let eng = self.engine_of(to);
+        if eng != "claude" {
+            return match &self.engines {
+                Some(e) => e.deliver(&eng, id, to, text),
+                None => Err(format!("沒有載入「{eng}」引擎")),
+            };
+        }
         self.parser.register(id, to);
         self.sink.say(forward_text(&self.parser.nonce, id, to, text))
     }
@@ -481,8 +555,8 @@ impl Core {
                 }
                 return;
             }
-            // 這個視窗自己在收信（recv 心跳 90 秒內且 pid 活著）：橋不轉、不 ack；心跳過期就照舊轉交
-            if crate::heartbeat::read_heartbeat(&self.cfg.work_dir, &to).map(|h| crate::heartbeat::alive_fresh(&h, self.now, crate::heartbeat::stale_ms(), |p| (self.alive)(p))).unwrap_or(false) {
+            // 這個視窗自己在收信（recv 心跳 90 秒內且 pid 活著）：橋不轉、不 ack；心跳過期就照舊轉交（只有 Claude 視窗會自己收信）
+            if self.engine_of(&to) == "claude" && crate::heartbeat::read_heartbeat(&self.cfg.work_dir, &to).map(|h| crate::heartbeat::alive_fresh(&h, self.now, crate::heartbeat::stale_ms(), |p| (self.alive)(p))).unwrap_or(false) {
                 if self.self_handled.insert(m.id.clone()) {
                     self.log.line(&format!("id={} to={to} window receives by itself (recv heartbeat): bridge skips", m.id));
                 }
@@ -524,8 +598,8 @@ impl Core {
         self.persist();
         // 照片／檔案：內文後面多一行「〔照片〕檔名＋下載指令」，和內文一起在外部資料區塊內
         let body = attach::notes_for(&m.body, &m.attachments, self.cfg.attach_cmd.as_deref());
-        let text = format!("{}\n{}{}", mail_head(&m, "claude"), if note.is_empty() { String::new() } else { format!("{note}\n") }, body);
-        let text = format!("{text}\n{}", self.corr.path_line(&target));
+        let text = format!("{}\n{}{}", mail_head(&m, &self.engine_label_of(&target)), if note.is_empty() { String::new() } else { format!("{note}\n") }, body);
+        let text = self.with_path_line(text, &target);
         match self.deliver(&m.id, &target, &text) {
             Ok(_) => {
                 self.log.line(&format!("handed id={} from={}/{} to={target}", m.id, m.from_node, from_agent));
@@ -865,7 +939,7 @@ impl Core {
             if note.is_empty() { String::new() } else { format!("\n{note}") },
             rooms::context_text(&room_id, &prev, self.cfg.room_cmd.as_deref())
         );
-        let text = format!("{text}\n{}", self.corr.path_line(&target));
+        let text = self.with_path_line(text, &target);
         match self.deliver(&id, &target, &text) {
             Ok(_) => {
                 self.log.line(&format!("handed room={room_id} #{seq} member={member} to={target}"));
