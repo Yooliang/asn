@@ -50,8 +50,10 @@ run(path.join(bt, `zipalign${ext.exe}`), ['-f', '-p', '4', unsigned, aligned])
 const keystore = path.join(os.homedir(), '.android', 'debug.keystore')
 if (!fs.existsSync(keystore)) fail(`找不到 Android 預設的 debug 金鑰：${keystore}（不要另外產生正式金鑰，這個通道只用 debug 金鑰）`)
 // debug 金鑰的密碼是公開的預設值 android（不是祕密）
-run(path.join(bt, `apksigner${ext.bat}`), ['sign', '--ks', keystore, '--ks-pass', 'pass:android', '--key-pass', 'pass:android', '--ks-key-alias', 'androiddebugkey', '--out', finalApk, aligned])
-run(path.join(bt, `apksigner${ext.bat}`), ['verify', finalApk])
+// apksigner.bat 在 Windows 上 spawn（shell:false）會被 Node 拒絕執行，所以直接用 JDK 跑裡面的 apksigner.jar
+const apksigner = args => run(path.join(process.env.JAVA_HOME, 'bin', `java${ext.exe}`), ['-jar', path.join(bt, 'lib', 'apksigner.jar'), ...args])
+apksigner(['sign', '--ks', keystore, '--ks-pass', 'pass:android', '--key-pass', 'pass:android', '--ks-key-alias', 'androiddebugkey', '--out', finalApk, aligned])
+apksigner(['verify', finalApk])
 fs.rmSync(aligned, { force: true }); fs.rmSync(`${finalApk}.idsig`, { force: true })
 
 const buf = fs.readFileSync(finalApk)
