@@ -1,8 +1,8 @@
 {
-  "version": "0.1.37",
-  "versionCode": 1037,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.37_android.apk",
-  "sha256": "9dac2ddc44c8fcfce5ce36123e638c33f970b4fed03f9ba1a8985c3d6d090921",
-  "notes": "- 首次登入引導：新帳號第一次登入先設「你的名字」（帳號已有名字就跳過）與這台設備的名稱；手機「設置」與電腦設定頁可以修改帳號名字；開發版不能再設定開機自動啟動",
+  "version": "0.1.39",
+  "versionCode": 1039,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.39_android.apk",
+  "sha256": "b63244ad81bda83d168ba35604196e30bb737b7f869ec686f5fcab9944084001",
+  "notes": "手機版三個頁籤移到畫面上方、變得更緊湊",
   "bytes": 8875492
 }
