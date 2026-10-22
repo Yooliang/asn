@@ -1,5 +1,6 @@
 // 名單視窗的頁籤、群組列與廣告輪播（純邏輯，node 與瀏覽器都能跑）。
 import { UNNAMED_DEVICE } from './text.mjs'
+import { isAsnWindow } from './roster.mjs'
 
 // 固定在設備頁籤之後的頁籤（群組只有在有唯讀 API 時才放，目前有 room_list）
 export const FIXED_TABS = [
@@ -40,6 +41,7 @@ export function deviceTabs(friends, { selfNode, selfName = '', nodeOrder = [], m
   slot(selfNode, selfName)   // 本機這頁籤＝自己的視窗名；其他設備＝該設備 ASN 設的名字，沒有就「未命名設備」，不顯示節點代號
   for (const f of friends) {
     const t = slot(f.node ?? '', (f.node ?? '') === selfNode && selfName ? selfName : f.device)
+    if (isAsnWindow(f)) continue   // ASN 視窗隱藏：設備頁籤照開，但不算進人數與未讀
     t.total++
     if (f.status !== 'offline') t.online++
     t.unread += f.unread || 0
@@ -58,7 +60,7 @@ export const moreUnread = more => more.reduce((n, t) => n + tabUnread(t), 0)
 // 某設備的好友清單：線上／忙碌在前、離線在後（同級照名字）；match 為搜尋
 export function deviceItems(friends, key, match = () => true) {
   const rank = s => (s === 'offline' ? 1 : 0)
-  return friends.filter(f => (f.node ?? '') === key && match(f)).sort((a, b) => rank(a.status) - rank(b.status) || a.nick.localeCompare(b.nick, 'zh-Hant'))
+  return friends.filter(f => !isAsnWindow(f) && (f.node ?? '') === key && match(f)).sort((a, b) => rank(a.status) - rank(b.status) || a.nick.localeCompare(b.nick, 'zh-Hant'))
 }
 
 // ---------- 群組列（room_list 的唯讀結果）：最近有動靜的在前 ----------

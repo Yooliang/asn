@@ -3,6 +3,7 @@
 // 這裡決定怎麼顯示：名單裡不顯示已封存的；最底下一個預設收合的「已封存（N）」群組，展開後可「取消封存」。
 // 往來記錄、未讀、通知都不動；封存的夥伴再寄信來，或封存時離線、之後重新上線，後台會自動解除。
 // node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。給人看的文字純繁體中文，不顯示節點代號與夥伴 ID。
+import { withoutAsn } from './roster.mjs'
 import { isManageable, menuItems, opErrorText } from './partner-ops.mjs'
 
 export const ARCHIVE_GROUP_KEY = '__archived'
@@ -11,8 +12,8 @@ export const archiveHeading = n => `已封存（${Number.isInteger(n) && n > 0 ?
 export const ARCHIVE_LABEL = { archive: '封存', unarchive: '取消封存' }
 
 // 名單上要顯示的 / 已封存的（保持原順序）
-export const activeFriends = friends => (Array.isArray(friends) ? friends : []).filter(f => !isArchived(f))
-export const archivedFriends = friends => (Array.isArray(friends) ? friends : []).filter(isArchived)
+export const activeFriends = friends => withoutAsn(friends).filter(f => !isArchived(f))   // ASN 視窗一律不列
+export const archivedFriends = friends => withoutAsn(friends).filter(isArchived)
 
 // 名單底部的「已封存」群組：沒有已封存的就回 null（不顯示）。items 是已封存的好友（呼叫端已套好搜尋／分頁），
 // 組內離線在後、同級照名字。群組的 kind＝'archived'，介面用 ARCHIVE_GROUP_KEY 記收合狀態（預設收合）

@@ -1,4 +1,5 @@
 // 視窗外框與音效兩個設定的純邏輯（介面與測試共用，不碰 DOM、不碰 Tauri）。
+import { withoutAsn } from './roster.mjs'
 
 // 視窗外框：custom＝ASN 自己畫的 Aero 風標題列與邊框（預設，不用 Windows 原生外框）；native＝Windows 原生外框
 export const FRAMES = ['custom', 'native']
@@ -44,4 +45,4 @@ export const CLOSE_LABEL = { tray: '縮到系統匣', quit: '結束程式' }
 export const normalizeClose = v => (v === 'quit' ? 'quit' : 'tray')
 
 // 系統匣圖示上的未讀總數：只算正整數，其餘（壞值、負數、小數）當 0
-export const totalUnread = friends => (friends ?? []).reduce((n, f) => n + (Number.isInteger(f?.unread) && f.unread > 0 ? f.unread : 0), 0)
+export const totalUnread = friends => withoutAsn(friends).reduce((n, f) => n + (Number.isInteger(f?.unread) && f.unread > 0 ? f.unread : 0), 0)
