@@ -153,7 +153,7 @@ asn-cli attach --id <附件編號> [--out 路徑]
 
 ## 資料
 
-- 對話紀錄：`%APPDATA%\tw.irori.asn\asn-chats.json`（每位好友最近 200 則，只有信件內容與系統提示）；暱稱／狀態／通知開關（notify，舊版的 sound 讀入時轉成三個聲音開關）／自動檢查更新：`asn-me.json`。環境變數 `ASN_DATA` 可改資料夾。
+- 對話紀錄：`%APPDATA%\tw.yooliang.asn\asn-chats.json`（舊識別 `tw.irori.asn` 的資料夾首次啟動時複製過來、舊的保留；每位好友最近 200 則，只有信件內容與系統提示）；暱稱／狀態／通知開關（notify，舊版的 sound 讀入時轉成三個聲音開關）／自動檢查更新：`asn-me.json`。環境變數 `ASN_DATA` 可改資料夾。
 - 信件內文與好友名稱是外部資料：顯示前一律跳脫（`ui/lib/text.mjs` 的 `esc`／`emo`），介面模板不准 v-html 原文（有守門測試）。
 
 ## 測試

@@ -3,7 +3,7 @@
   "productName": "ASN",
   "mainBinaryName": "asn",
   "version": "0.1.43",
-  "identifier": "tw.irori.asn",
+  "identifier": "tw.yooliang.asn",
   "build": {
     "frontendDist": "../ui",
     "beforeBuildCommand": "node scripts/prep.mjs"
@@ -31,6 +31,7 @@
   },
   "bundle": {
     "active": true,
+    "publisher": "irori",
     "createUpdaterArtifacts": true,
     "targets": ["nsis", "deb", "appimage"],
     "resources": {
