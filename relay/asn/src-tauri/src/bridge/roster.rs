@@ -59,7 +59,7 @@ const MOD_DETAIL_MAX_CHARS: usize = 80;
 /// 外掛在 session 結束時寫的說明（外掛刪不了檔，只能寫 idle＋這句）；看到它就不採用，名單照 sessions/<pid>.json
 pub const MOD_ENDED_DETAIL: &str = "已結束";
 
-fn valid_sid(sid: &str) -> bool {
+pub fn valid_sid(sid: &str) -> bool {
     !sid.is_empty() && sid.len() <= 128 && sid.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
