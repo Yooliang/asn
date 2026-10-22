@@ -4,15 +4,17 @@ import { groupItems } from './dims.mjs'
 import { friendMatchesQuery, normalizeSearchQuery, sortFriends } from './search.mjs'
 
 // ---------- 單欄導覽 ----------
-// 狀態：{ tab: 'list' | 'me', chat: 好友 id | '' }。chat 有值＝正在看那位的對話（蓋在名單上）。
-// 每往下一層（名單→對話、名單→我）就在瀏覽記錄推一筆；系統的返回鍵＝瀏覽器上一頁，外殼（WryActivity）已接好，名單層再按才退到背景。
-export const initialNav = () => ({ tab: 'list', chat: '' })
-export const chatNav = id => ({ tab: 'list', chat: String(id ?? '') })
-export const meNav = () => ({ tab: 'me', chat: '' })
+// 狀態：{ tab: 'list' | 'me', chat: 好友 id | '', sheet: '' | 'launch' }。chat 有值＝正在看那位的對話（蓋在名單上）；sheet＝蓋在名單上的「開新夥伴」。
+// 每往下一層（名單→對話、名單→我、名單→開新夥伴）就在瀏覽記錄推一筆；系統的返回鍵＝瀏覽器上一頁，外殼（WryActivity）已接好，名單層再按才退到背景。
+export const initialNav = () => ({ tab: 'list', chat: '', sheet: '' })
+export const chatNav = id => ({ tab: 'list', chat: String(id ?? ''), sheet: '' })
+export const meNav = () => ({ tab: 'me', chat: '', sheet: '' })
+export const launchNav = () => ({ tab: 'list', chat: '', sheet: 'launch' })
 // 瀏覽記錄裡讀回來的狀態可能是任何東西（壞資料、別的頁面留下的）：整理成合法的導覽狀態
 export function normalizeNav(raw) {
   const chat = typeof raw?.chat === 'string' ? raw.chat : ''
   if (chat) return chatNav(chat)
+  if (raw?.sheet === 'launch') return launchNav()
   return raw?.tab === 'me' ? meNav() : initialNav()
 }
 

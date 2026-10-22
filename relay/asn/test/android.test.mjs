@@ -15,7 +15,7 @@ const cargo = read('src-tauri', 'Cargo.toml')
 // 電腦端才有的 Rust 模組：手機建置一個都不能編進去
 const DESKTOP_MODS = ['acct_remote', 'ads', 'agent_tools', 'askpass', 'bridge', 'cli', 'claude_accounts', 'claude_json', 'claude_mod', 'cloud_invite', 'codex_accounts', 'launch', 'shot', 'stt', 'tray', 'tts', 'updater', 'usage', 'voicecfg', 'wins']
 // 電腦端才有的指令（手機的指令清單、手機畫面都不能出現）
-const DESKTOP_CMDS = ['bridge_status', 'bridge_set_enabled', 'bridge_set_remote_launch', 'bridge_set_unaddressed_to', 'bridge_takeover', 'cli_info', 'askpass_info', 'askpass_answer', 'askpass_helper_info', 'relay_launch', 'relay_launchers', 'partner_launch_local', 'launch_cwd_candidates', 'launch_cwd_browse', 'partner_console_query', 'partner_console_set', 'subagents_query', 'model_switch_query', 'model_switch_run', 'launch_prefs_get', 'launch_prefs_set', 'usage_summary', 'claude_accounts_list', 'claude_account_current', 'claude_account_save', 'claude_account_switch', 'claude_account_delete', 'claude_mod_status', 'codex_account_current', 'acct_remote_report', 'acct_remote_list', 'acct_remote_request', 'acct_remote_apply', 'ai_cli_detect', 'ai_cli_install', 'ai_cli_login', 'set_now_playing', 'open_machine_log_dir', 'relay_log_paths', 'open_url', 'ads_fetch', 'tray_available', 'set_close_to_tray', 'set_tray_unread', 'autostart_get', 'autostart_set', 'update_check', 'update_install', 'open_chat', 'open_panel', 'win_ctl', 'frame_native', 'set_frame', 'show_toast', 'shake', 'shot_begin', 'shot_supported', 'stt_transcribe', 'stt_install', 'tts_speak', 'tts_voices', 'voice_cfg_get', 'voice_cfg_set', 'cloud_agent_create', 'cloud_agent_list', 'cloud_agent_revoke', 'relay_attachment_reveal', 'auth_skip_login', 'update_remote_request', 'update_remote_status', 'relay_partner_list', 'relay_partner_succeed']
+const DESKTOP_CMDS = ['bridge_status', 'bridge_set_enabled', 'bridge_set_remote_launch', 'bridge_set_unaddressed_to', 'bridge_takeover', 'cli_info', 'askpass_info', 'askpass_answer', 'askpass_helper_info', 'relay_launch', 'relay_launchers', 'partner_launch_local', 'launch_cwd_candidates', 'launch_cwd_browse', 'partner_console_query', 'partner_console_set', 'subagents_query', 'model_switch_query', 'model_switch_run', 'launch_prefs_get', 'launch_prefs_set', 'usage_summary', 'claude_accounts_list', 'claude_account_current', 'claude_account_save', 'claude_account_switch', 'claude_account_delete', 'claude_mod_status', 'codex_account_current', 'acct_remote_report', 'acct_remote_list', 'acct_remote_request', 'acct_remote_apply', 'ai_cli_detect', 'ai_cli_install', 'ai_cli_login', 'set_now_playing', 'open_machine_log_dir', 'relay_log_paths', 'open_url', 'ads_fetch', 'tray_available', 'set_close_to_tray', 'set_tray_unread', 'autostart_get', 'autostart_set', 'update_check', 'update_install', 'open_chat', 'open_panel', 'win_ctl', 'frame_native', 'set_frame', 'show_toast', 'shake', 'shot_begin', 'shot_supported', 'stt_transcribe', 'stt_install', 'tts_speak', 'tts_voices', 'voice_cfg_get', 'voice_cfg_set', 'cloud_agent_create', 'cloud_agent_list', 'cloud_agent_revoke', 'relay_attachment_reveal', 'auth_skip_login', 'update_remote_request', 'update_remote_status']
 
 test('電腦端模組：每一個都掛 cfg(desktop)，手機建置不編譯', () => {
   for (const m of DESKTOP_MODS) {
@@ -130,7 +130,7 @@ test('手機畫面（m.html／m.js／mobile.mjs）：不叫任何電腦端指令
     const text = code(raw)
     for (const c of DESKTOP_CMDS) assert.doesNotMatch(text, new RegExp(`['"\`]${c}['"\`]`), `${f} 不能叫電腦端指令 ${c}`)
     assert.doesNotMatch(text, /data-tauri-drag-region|class="titlebar"|ctl\('min'\)|settings-panel|SettingsPanel|ActionBar|action-bar|createVoiceUi|Annotator|shotApi/, `${f} 不放電腦端的標題列、設定面板、功能列、語音、截圖`)
-    assert.doesNotMatch(text, /內建收發室|密碼小幫手|用量|Claude 帳號|開新夥伴|系統匣|開機自動/, `${f} 不顯示電腦端設定的字樣`)
+    assert.doesNotMatch(text, /內建收發室|密碼小幫手|用量|Claude 帳號|系統匣|開機自動/, `${f} 不顯示電腦端設定的字樣`)
   }
   // m.js 用到的每個指令（直接 invoke 或經 authApi）都必須在手機的指令清單裡
   const m = /#\[cfg\(not\(desktop\)\)\]\n\s*let builder = builder\.invoke_handler\(tauri::generate_handler!\[([\s\S]*?)\]\);/.exec(lib)
@@ -222,6 +222,55 @@ test('自動更新只在自行安裝版：Rust 旗標、Gradle 管道、安裝�
   const rel = read('scripts', 'release-android.mjs')
   assert.match(rel, /ORG_GRADLE_PROJECT_asnDist: 'sideload'/); assert.match(rel, /'--features', 'sideload'/)
   assert.match(rel, /debug\.keystore/); assert.doesNotMatch(rel, /keytool|genkey|-genkeypair/, '不產生金鑰')
+})
+
+test('手機開新夥伴：只走要本人簽章的指令；不用電腦版不簽章的 relay_launch；不在線／未開放／沒登入不送出', () => {
+  const m = /#\[cfg\(not\(desktop\)\)\]\n\s*let builder = builder\.invoke_handler\(tauri::generate_handler!\[([\s\S]*?)\]\);/.exec(lib)
+  const names = m[1].split(',').map(s => s.trim().replace(/^\w+::/, '')).filter(Boolean)
+  assert.ok(names.includes('android_launch') && names.includes('android_launchers'), '手機要有遠端開視窗的兩個指令')
+  assert.ok(names.includes('relay_partner_list') && names.includes('relay_partner_succeed'), '接班設定（#153）也走簽章指令')
+  assert.ok(!names.includes('relay_launch') && !names.includes('relay_launchers') && !names.includes('partner_launch_local'), '手機不用電腦版的（不簽章／本機開視窗）指令')
+  const rs = read('src-tauri', 'src', 'android.rs')
+  assert.match(rs, /signing_token\(&auth\)\.await[\s\S]*?launch_signed\(&body, token\.as_deref\(\)\)/, 'android_launch 取本人憑證交給 launch_signed')
+  assert.match(rs, /signing_token\(&auth\)\.await[\s\S]*?launchers_signed\(ids\.as_deref\(\), token\.as_deref\(\)\)/)
+  const relay = read('src-tauri', 'src', 'relay.rs')
+  assert.match(relay, /pub async fn launch_signed[\s\S]*?ok_or\("尚未登入，無法替電腦開新夥伴"\)\?;[\s\S]*?api_signed\("launch"/, '沒憑證在打後台之前就回錯')
+  assert.match(relay, /pub async fn launchers_signed[\s\S]*?ok_or\("尚未登入，無法查詢電腦的啟動設定"\)\?;[\s\S]*?api_signed\("launchers"/)
+  // 畫面：送出前一定先過 lchFormErr（不在線、沒開放、沒登入、欄位不對都在這裡擋下）
+  const js = read('ui', 'm.js')
+  const sub = /async function submitLaunch\(\) \{([\s\S]*?)\n    \}\n/.exec(js)[1]
+  assert.ok(sub.indexOf('lchFormErr.value') >= 0 && sub.indexOf('lchFormErr.value') < sub.indexOf("invoke('android_launch'"), '先檢查再送出')
+  assert.match(sub, /if \(lch\.error \|\| lch\.busy\) return/)
+  assert.match(js, /pickLaunchDevice\(node\) \{\s*if \(!launchEligibility\(node, lchCtx\.value\)\.ok\) return/, '不能開的電腦選不起來')
+  assert.match(read('ui', 'm.html'), /:disabled="!d\.ok"/, '不能開的電腦按鈕反灰')
+  // 後台：簽章證明本人才多認一條（migration 與 Edge Function）
+  assert.match(read('..', '..', 'supabase', 'functions', 'relay', 'index.ts'), /action === "launch" \|\| action === "launchers"\) \? await signedUserId/)
+})
+
+test('登入畫面 logo 只有一層框；App 圖示是機器人（自適應圖示＋各密度）', () => {
+  const css = read('ui', 'mobile.css')
+  const img = /\.m-login-card \.login-avatar img\{([^}]*)\}/.exec(css)[1]
+  assert.match(img, /background:none/); assert.match(img, /box-shadow:none/); assert.match(img, /border-radius:0/, '內層不再有自己的底色、陰影、圓角框')
+  assert.match(css, /\.m-login-card \.login-avatar::after\{display:none\}/)
+  const res = ['src-tauri', 'gen', 'android', 'app', 'src', 'main', 'res']
+  for (const d of ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi']) {
+    for (const f of ['ic_launcher.png', 'ic_launcher_round.png', 'ic_launcher_foreground.png']) {
+      const b = fs.readFileSync(path.join(root, ...res, `mipmap-${d}`, f))
+      assert.equal(b.subarray(1, 4).toString(), 'PNG', `${d}/${f}`)
+    }
+  }
+  const px = (d, f) => fs.readFileSync(path.join(root, ...res, `mipmap-${d}`, f)).readUInt32BE(16)
+  assert.deepEqual([px('mdpi', 'ic_launcher_foreground.png'), px('xxxhdpi', 'ic_launcher_foreground.png')], [108, 432], '自適應前景 108dp 畫布')
+  assert.deepEqual([px('mdpi', 'ic_launcher.png'), px('xxxhdpi', 'ic_launcher.png')], [48, 192])
+  for (const f of ['ic_launcher.xml', 'ic_launcher_round.xml']) {
+    const x = read(...res, 'mipmap-anydpi-v26', f)
+    assert.match(x, /<adaptive-icon/); assert.match(x, /@mipmap\/ic_launcher_foreground/); assert.match(x, /@drawable\/ic_launcher_background/)
+  }
+  assert.match(read(...res, 'drawable', 'ic_launcher_background.xml'), /#DCEBFA/)
+  assert.ok(!fs.existsSync(path.join(root, ...res, 'drawable-v24', 'ic_launcher_foreground.xml')), 'Tauri 預設圖示的前景不能留著')
+  assert.match(read('scripts', 'gen-android-icons.mjs'), /ui', 'img', 'logo\.svg/, '圖示由機器人 logo 產生')
+  // 電腦版圖示檔沒被動到
+  assert.ok(fs.existsSync(path.join(root, 'src-tauri', 'icons', 'icon.ico')))
 })
 
 test('登入畫面背景：電腦版與手機版各用一張 MSN 風背景，cover＋草地對齊底部；表單區有半透明白底保持可讀', () => {

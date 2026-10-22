@@ -6,7 +6,11 @@ import { ChatPane } from './lib/chatpane.mjs'
 import { avatarSrc, isAvatarDataUrl, removeAvatarUpload, selfAvatarSrc, uploadAvatarFile } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { PROVIDERS, canStart, errorText, phaseText } from './lib/login.mjs'
-import { BANNER_MS, DEFAULT_PREFS, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, buttonLabel, chatNav, initialNav, initialUpdate, installOutcome, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, shouldAutoCheck, totalUnread, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
+import { BANNER_MS, DEFAULT_PREFS, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, buttonLabel, chatNav, initialNav, initialUpdate, installOutcome, launchNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, shouldAutoCheck, totalUnread, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
+import { LAUNCH_GIVE_UP_MS, LAUNCH_POLL_MS, appearedIn, buildLaunchRequest, initialLaunch, launchChoices, launchDevices, launchEligibility, launchErrorText, launchFormError, machinesByNode, progressView } from './lib/mobile-launch.mjs'
+import { friendId } from './lib/roster.mjs'
+import { SUCCESSION_GIVE_UP_MS, newSuccession, readySuccessions, succeedOutcome, successorOptions } from './lib/succession.mjs'
+import { defaultPartnerName } from './lib/partner.mjs'
 import { groupHeading, statusNote } from './lib/tabs.mjs'
 import { emo, plain } from './lib/text.mjs'
 import { authApi, invoke, listen, store } from './lib/tauri.mjs'
@@ -63,7 +67,7 @@ const cancelLogin = () => { void authApi.cancel(); login.phase = 'idle' }
 const nav = reactive(initialNav())
 const me = reactive({ psm: '', status: 'online', nick: info.window_name })
 const prefs = reactive({ ...DEFAULT_PREFS })
-const friends = ref([]), conn = ref('connecting')
+const friends = ref([]), conn = ref('connecting'), nodeOrder = ref([])
 const logs = reactive({})
 const avatars = ref({})
 const query = ref(''), collapsed = reactive({})
@@ -120,7 +124,7 @@ if (screen.value === 'main') {
     aliases: info.old_names, pollMs: info.poll_ms, rosterMs: info.roster_ms,
     log: m => console.info('[ASN]', m),
   })
-  const sync = () => { const s = core.snapshot(); friends.value = s.friends; conn.value = s.conn }
+  const sync = () => { const s = core.snapshot(); friends.value = s.friends; conn.value = s.conn; nodeOrder.value = s.nodeOrder }
   const pushLog = id => { logs[id] = core.logOf(id).slice(-200) }
   core.on('state', sync)
   core.on('log', pushLog)
@@ -180,6 +184,83 @@ const app = createApp({
     const sendTo = async (id, text) => { const r = await core.send(id, text); if (!r.ok) console.info('[ASN] send failed', r.error) }
     const nudgeTo = id => core.nudge(id)
     const sendAttachTo = async (id, item, caption) => { const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
+    // ---------- 開新夥伴（遠端開視窗）：手機只下指令，視窗開在那台電腦上。要本人簽章（Rust 端沒憑證就不送） ----------
+    const lch = reactive({ ...initialLaunch(), vphase: 'sending' })
+    const lchData = reactive({ machines: {}, loaded: false, error: '' })
+    const successors = ref([])
+    const lchCtx = computed(() => ({ machines: lchData.machines, loaded: lchData.loaded, signedIn: acct.value.signed_in, friends: friends.value }))
+    const lchDevices = computed(() => launchDevices(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value, ...lchCtx.value }))
+    const lchElig = computed(() => (lch.node ? launchEligibility(lch.node, lchCtx.value) : { ok: false, reason: '' }))
+    const lchFormErr = computed(() => (lch.node ? launchFormError(lch, lchElig.value) : ''))
+    const lchChoices = computed(() => launchChoices(lchData.machines[lch.node]))
+    const lchSuccessors = computed(() => successorOptions(successors.value))
+    async function loadLaunchers() {
+      lchData.error = ''
+      try { lchData.machines = machinesByNode(await invoke('android_launchers', {})); lchData.loaded = true } catch (e) { lchData.loaded = false; lchData.error = launchErrorText(e.message) }
+    }
+    function pickLaunchDevice(node) {
+      if (!launchEligibility(node, lchCtx.value).ok) return
+      const c = launchChoices(lchData.machines[node])
+      Object.assign(lch, { node, deviceLabel: lchDevices.value.find(d => d.key === node)?.label ?? '', error: '' })
+      if (!c.models.some(m => m.profileId === lch.profile)) lch.profile = c.models[0]?.profileId ?? ''
+      if (!c.cwds.includes(lch.cwd)) lch.cwd = c.cwds[0] ?? ''
+      if (!lch.name.trim()) lch.name = defaultPartnerName(friends.value, lch.profile)
+    }
+    function openLaunch(node) {
+      if (lch.phase === 'progress' && lch.vphase !== 'done' && lch.vphase !== 'failed') { go(launchNav()); return }   // 還在開：回到進度畫面
+      Object.assign(lch, initialLaunch(), { vphase: 'sending' })
+      go(launchNav())
+      void loadLaunchers().then(() => { if (node) pickLaunchDevice(node) })
+      void invoke('relay_partner_list').then(r => { successors.value = r?.partners ?? [] }).catch(() => { successors.value = [] })
+    }
+    const successionPending = ref([])
+    async function processSuccessions() {
+      const now = Date.now()
+      let list = successionPending.value
+      for (const { s } of readySuccessions(list, friends.value)) {
+        try { await invoke('relay_partner_succeed', { predecessor: s.predecessor, node: s.node, name: s.name }); list = list.filter(x => x !== s); lch.detail = '已指定接班。' } catch (e) {
+          const o = succeedOutcome(e.message, s.name)
+          if (o.act === 'drop') { list = list.filter(x => x !== s); lch.detail = o.text }
+        }
+      }
+      successionPending.value = list.filter(s => now - s.since <= SUCCESSION_GIVE_UP_MS)
+    }
+    const sleep = ms => new Promise(r => setTimeout(r, ms))
+    async function trackLaunch(t) {
+      const stop = Date.now() + LAUNCH_GIVE_UP_MS
+      while (lch.id === t.id && Date.now() < stop) {
+        await sleep(LAUNCH_POLL_MS)
+        let row = null
+        try { row = ((await invoke('android_launchers', { ids: [t.id] }))?.launches ?? []).find(l => l.id === t.id) } catch { /* 下一輪再問 */ }
+        if (row?.status === 'ok' || row?.status === 'unconfirmed') await core.refreshRoster()
+        const appeared = appearedIn(friends.value, t.node, t.name)
+        const v = progressView(row, appeared, t.name)
+        if (lch.id !== t.id) return
+        Object.assign(lch, { vphase: v.phase, text: v.text })
+        if (appeared) {
+          lch.friendId = friendId(t.node, t.name)
+          await processSuccessions()
+          if (nav.sheet !== 'launch') banner.value = { id: lch.friendId, nick: t.name, line: '已經開好了，點一下開始對話', status: 'online', hue: 200 }
+          return
+        }
+        if (v.phase === 'failed') return
+      }
+      if (lch.id === t.id) Object.assign(lch, { vphase: 'waiting', text: '還沒看到新視窗出現在名單上。可以稍後再看看名單。' })
+    }
+    async function submitLaunch() {
+      lch.error = lchFormErr.value
+      if (lch.error || lch.busy) return   // 不能開的電腦（不在線、沒開放、沒登入）或欄位不對：不送出
+      lch.busy = true
+      try {
+        const name = lch.name.trim()
+        const r = await invoke('android_launch', { body: buildLaunchRequest(lch) })
+        if (!r?.id) throw new Error('送出失敗')
+        Object.assign(lch, { phase: 'progress', id: r.id, since: Date.now(), friendId: '', detail: '', ...(({ phase, text }) => ({ vphase: phase, text }))(progressView(null, false)) })
+        if (lch.successorOf) successionPending.value = [...successionPending.value, newSuccession({ node: lch.node, name, predecessor: lch.successorOf })]
+        void trackLaunch({ id: r.id, node: lch.node, name })
+      } catch (e) { lch.error = launchErrorText(e.message) } finally { lch.busy = false }
+    }
+    function openLaunched() { const id = lch.friendId; if (!id) return; history.back(); setTimeout(() => openChat(id), 50) }
     const refreshAll = async () => { refreshing.value = true; try { await Promise.all([core.refreshRoster(), core.pull('manual')]) } finally { refreshing.value = false } }
 
     // 「我」：暱稱（Rust 端驗證，不合法就還原並提示）、大頭貼（裁成正方形縮成 96×96 上傳）
@@ -220,6 +301,7 @@ const app = createApp({
       upd, updText: computed(() => bannerText(upd)), updButton: computed(() => buttonLabel(upd)), startUpdate, checkUpdate,
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, CONN_LABEL, info, banner, shake, refreshing,
       avOf, avById, meAv, chatFriend, chatLog, photoApi, emo, groupHeading, statusNote,
+      lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchSuccessors, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       openChat, back, goMe, goList, openBanner, sendTo, nudgeTo, sendAttachTo, refreshAll,
       nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }

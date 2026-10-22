@@ -175,3 +175,19 @@ Gradle 以環境變數 `ORG_GRADLE_PROJECT_asnDist=sideload` 選管道（不設�
 **模擬器驗證（第一期做過）**：用 `127.0.0.1` 假伺服器（`adb reverse` 對應）提供假的 android.json 與一支 APK，走完「橫幅出現 → 按更新 → 無許可時開啟許可設定頁 → 有許可後下載 → 系統『要更新這個應用程式嗎？』」；把 sha256 改錯，確認顯示錯誤、不叫安裝畫面。
 
 Play 版（不設 asnDist）的合併後 manifest 已實測沒有 `REQUEST_INSTALL_PACKAGES`（`processUniversalReleaseMainManifest` 輸出）；自行安裝版的 APK 用 `aapt2 dump permissions` 看得到它。
+
+## 十三、幫電腦開新夥伴（遠端開視窗）
+
+手機上最重要的功能之一：視窗開在**那台電腦**上，手機只下指令，不跑任何電腦端模組。
+
+- 入口：名單頂端的「＋」，或每台電腦（設備群組）標題右邊的「＋ 開新夥伴」。
+- 流程（一頁表單）：選電腦 → 選模型（那台電腦回報的啟動設定 profile）→ 選工作資料夾（那台允許的清單）→ 名字（預設「夥伴-N」）→ 選填「這是誰的接班」（沿用 #153，新視窗出現後由手機送 `partner_succeed`）→ 選填第一句話 → 「開啟」。
+- 不能開就反灰並寫中文原因：沒登入（要先登入）、不在線（這台電腦不在線）、沒開放（這台電腦沒有開放遠端開視窗——橋沒跑或設定頁沒打開「允許我的其他設備替這台開新視窗」）、沒有模型、沒有資料夾。送出前一定先過表單檢查，不能開的電腦選不起來也送不出去。
+- 送出後顯示進度：已送出 → 那台電腦正在開視窗 → 等它出現在名單 → 「已經開好了」（可直接開始對話）；失敗顯示原因（後台 2 分鐘內沒被取走會自己標失敗）。可以先關閉表單，完成時頂端橫幅提示。
+- 走現有的後台動作 `launch`／`launchers`（沒有新增動作），手機的 Rust 指令是 `android_launch`／`android_launchers`：**沒有本人簽章在打後台之前就回錯**；內容只放行 node／profile／name／cwd／first_message 五個欄位，指令內容一律不帶。
+- **後台要補一個 migration**（`supabase/migrations/20261022070000_launch_signed.sql`，**尚未套用**）：原本只有 `role='owner'` 的節點准下令，而手機（與登入建立的電腦節點）是 `member`。新增「帶本人簽章、且簽章的人擁有這個節點與租戶（`asn_user_owns_node`）」也視同擁有者；沒簽章＝與以前完全相同。Edge Function `relay` 的 launch／launchers 會讀 `x-asn-user`。部署順序：先套 migration，再部署 relay 函式，再發新版 ASN（反過來也安全，沒簽章的舊行為不變）。Deno 測試：`supabase/functions/_shared/launch_test.ts`。
+
+## 十四、App 圖示與登入畫面 logo
+
+- App 圖示用 `ui/img/logo.svg` 的機器人：自適應圖示（前景＝機器人縮在 66dp 安全區內，背景＝淺藍單色 `#DCEBFA`）＋各密度的舊版方形與圓形圖示。由 `scripts/gen-android-icons.mjs` 產生（需要 `npm i --no-save @resvg/resvg-js`），不動電腦版 `src-tauri/icons`。
+- 登入畫面的 logo 只留一層玻璃框，機器人放大填滿。

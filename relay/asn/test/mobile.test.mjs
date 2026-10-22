@@ -1,15 +1,19 @@
 // 手機版（安卓）的純邏輯：單欄導覽、名單分組、提示規則、外殼橋、登入後的下一步。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { launchNav } from '../ui/lib/mobile.mjs'
 import { BANNER_MS, DEFAULT_PREFS, MSG_VIBRATE_MS, NUDGE_VIBRATE_MS, UPDATE_CHECK_MS, afterBind, bannerText, buttonLabel, initialUpdate, installOutcome, progressText, shouldAutoCheck, withAvailable, withFailure, withProgress, androidBridge, chatNav, initialNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, totalUnread } from '../ui/lib/mobile.mjs'
 import { groupHeading } from '../ui/lib/tabs.mjs'
 
 const F = (id, node, nick, status = 'online', extra = {}) => ({ id, node, agent: nick, nick, status, device: `設備${node}`, unread: 0, ...extra })
 
 test('導覽：名單 → 對話、名單 → 我；瀏覽記錄裡的壞資料一律退回名單', () => {
-  assert.deepEqual(initialNav(), { tab: 'list', chat: '' })
-  assert.deepEqual(chatNav('A/x'), { tab: 'list', chat: 'A/x' })
-  assert.deepEqual(meNav(), { tab: 'me', chat: '' })
+  assert.deepEqual(initialNav(), { tab: 'list', chat: '', sheet: '' })
+  assert.deepEqual(chatNav('A/x'), { tab: 'list', chat: 'A/x', sheet: '' })
+  assert.deepEqual(meNav(), { tab: 'me', chat: '', sheet: '' })
+  assert.deepEqual(launchNav(), { tab: 'list', chat: '', sheet: 'launch' })
+  assert.deepEqual(normalizeNav({ sheet: 'launch', tab: 'me' }), launchNav())
+  assert.deepEqual(normalizeNav({ sheet: 'other' }), initialNav())
   assert.deepEqual(normalizeNav({ tab: 'me', chat: '' }), meNav())
   assert.deepEqual(normalizeNav({ chat: 'A/x', tab: 'me' }), chatNav('A/x'), '有對話就是對話層')
   for (const bad of [null, undefined, 5, 'x', { tab: 'settings' }, { chat: 7 }, []]) assert.deepEqual(normalizeNav(bad), initialNav(), String(bad))

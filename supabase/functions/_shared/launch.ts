@@ -65,11 +65,14 @@ async function call(deps: LaunchDeps, fn: string, args: Record<string, unknown>)
 const isReply = (x: { data: Json } | Reply): x is Reply => "status" in x;
 
 // 下令開視窗（actor 是 owner 節點；不是的話 SQL 回 forbidden）。成功就敲那台機器的門鈴
-export async function requestLaunch(deps: LaunchDeps, actor: string, raw: Json): Promise<Reply> {
+// signedUser：本人簽章驗過的使用者 id（手機與用登入建立的電腦節點是 member 不是 owner，靠簽章證明「這個節點是這個人的」才准下令；
+// 資料庫再核對一次擁有關係）。沒有簽章就不帶 p_signed_user，行為與以前完全相同（只有 role=owner 的節點准）
+export async function requestLaunch(deps: LaunchDeps, actor: string, raw: Json, signedUser: string | null = null): Promise<Reply> {
   const req = parseLaunch(raw);
   if ("error" in req) return fail(req.error);
   const r = await call(deps, "irori_relay_launch", {
     p_actor: actor, p_node: req.node, p_profile: req.profile, p_name: req.name, p_cwd: req.cwd, p_first: req.first_message,
+    ...(signedUser ? { p_signed_user: signedUser } : {}),
   });
   if (isReply(r)) return r;
   await deps.ring(r.data.bell_topic);
@@ -77,14 +80,14 @@ export async function requestLaunch(deps: LaunchDeps, actor: string, raw: Json):
 }
 
 // 各機器的啟動設定與最近紀錄（owner 限定）；ids 給了就只回那幾筆（查進度）
-export async function listLaunchers(deps: LaunchDeps, actor: string, ids?: unknown): Promise<Reply> {
+export async function listLaunchers(deps: LaunchDeps, actor: string, ids?: unknown, signedUser: string | null = null): Promise<Reply> {
   let p_ids: string[] | null = null;
   if (ids != null) {
     const list = Array.isArray(ids) ? ids : String(ids).split(",");
     if (list.length > 20 || !list.every((i) => typeof i === "string" && UUID_RE.test(i))) return fail("bad_request");
     p_ids = list as string[];
   }
-  const r = await call(deps, "irori_relay_launchers", { p_actor: actor, p_ids });
+  const r = await call(deps, "irori_relay_launchers", { p_actor: actor, p_ids, ...(signedUser ? { p_signed_user: signedUser } : {}) });
   if (isReply(r)) return r;
   return { status: 200, body: r.data };
 }
@@ -102,9 +105,9 @@ export function sanitizeLauncher(l: Json): Json | null | { error: string } {
 // 節點金鑰的動作（irori-relay）：
 //   launch／launchers：只有 owner 節點（SQL 判斷）
 //   launch_pending／launch_result：機器橋取走自己的待辦、回報結果（只動得到自己節點的）
-export async function handleNodeLaunchAction(deps: LaunchDeps, me: { id: string }, action: string, params: Json): Promise<Reply> {
-  if (action === "launch") return await requestLaunch(deps, me.id, params);
-  if (action === "launchers") return await listLaunchers(deps, me.id, params?.ids);
+export async function handleNodeLaunchAction(deps: LaunchDeps, me: { id: string }, action: string, params: Json, signedUser: string | null = null): Promise<Reply> {
+  if (action === "launch") return await requestLaunch(deps, me.id, params, signedUser);
+  if (action === "launchers") return await listLaunchers(deps, me.id, params?.ids, signedUser);
   if (action === "launch_pending") {
     const r = await call(deps, "irori_relay_launch_pending", { p_node: me.id });
     if (isReply(r)) return r;

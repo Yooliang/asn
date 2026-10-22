@@ -46,6 +46,24 @@ pub async fn relay_attachment_save(app: State<'_, App>, id: String, name: Option
     Ok(saved.map(|p| p.display().to_string()))
 }
 
+// ---------- 幫電腦開新夥伴（遠端開視窗；視窗開在那台電腦上，手機只下指令） ----------
+
+/// 各電腦的啟動設定（模型、允許的資料夾、在不在線）與最近開視窗的進度。要本人簽章；沒登入回錯，不打後台
+#[tauri::command]
+pub async fn android_launchers(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>, ids: Option<Vec<String>>) -> Result<serde_json::Value, String> {
+    let r = relay_of(&app)?;
+    let token = crate::account::signing_token(&auth).await;
+    r.launchers_signed(ids.as_deref(), token.as_deref()).await
+}
+
+/// 下令在某台電腦開新夥伴（後台再驗一次：本人、那台有這個模型與資料夾、名字沒重、每小時上限）。要本人簽章；沒登入回錯，不打後台。回 { id }
+#[tauri::command]
+pub async fn android_launch(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>, body: serde_json::Value) -> Result<serde_json::Value, String> {
+    let r = relay_of(&app)?;
+    let token = crate::account::signing_token(&auth).await;
+    r.launch_signed(&body, token.as_deref()).await
+}
+
 // ---------- 手機自動更新（只有 `sideload` 版；Play 版這兩個指令只回「不提供」） ----------
 
 /// 查官網的更新清單。`url`＝本機測試用的清單網址（只收 http://127.0.0.1…，正式畫面不帶）。
