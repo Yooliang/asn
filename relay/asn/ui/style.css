@@ -166,6 +166,25 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .msg .who .from-dev{margin-left:6px;font-size:11px;opacity:.75}
 .msg .m-body{padding-left:12px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px}
 .msg.mine .m-body{color:#1b3d6e}
+/* ---- 訊息內文的 Markdown（lib/markdown.mjs；issue #169）---- */
+.msg .m-body.md-on{white-space:normal;min-width:0}
+.m-body.md-on>:first-child{margin-top:0}.m-body.md-on>:last-child{margin-bottom:0}
+.m-body.md-on p{margin:.4em 0}
+.m-body.md-on h1,.m-body.md-on h2,.m-body.md-on h3,.m-body.md-on h4,.m-body.md-on h5,.m-body.md-on h6{margin:.6em 0 .25em;font-weight:700;line-height:1.3}
+.m-body.md-on h1{font-size:1.25em}.m-body.md-on h2{font-size:1.15em}.m-body.md-on h3{font-size:1.07em}.m-body.md-on h4,.m-body.md-on h5,.m-body.md-on h6{font-size:1em}
+.m-body.md-on ul,.m-body.md-on ol{margin:.3em 0;padding-left:1.5em}.m-body.md-on li{margin:.1em 0}.m-body.md-on li>ul,.m-body.md-on li>ol{margin:.1em 0}
+.m-body.md-on blockquote{margin:.4em 0;padding:.1em 0 .1em .7em;border-left:3px solid rgba(74,93,115,.35);color:var(--muted)}
+.m-body.md-on hr{border:0;border-top:1px solid rgba(74,93,115,.35);margin:.6em 0}
+.m-body.md-on code{font-family:ui-monospace,SFMono-Regular,Consolas,"Courier New",monospace;font-size:.92em;background:rgba(0,0,0,.07);padding:.05em .3em;border-radius:3px}
+.m-body.md-on pre.md-code{margin:.4em 0;padding:8px 10px;background:rgba(0,0,0,.08);border-radius:6px;overflow-x:auto;max-width:100%;white-space:pre;overflow-wrap:normal;tab-size:4;-webkit-overflow-scrolling:touch}
+.m-body.md-on pre.md-code code{background:none;padding:0;font-size:.9em}
+.m-body.md-on .md-tablewrap{margin:.4em 0;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.m-body.md-on table{border-collapse:collapse;font-size:.95em}
+.m-body.md-on th,.m-body.md-on td{border:1px solid rgba(74,93,115,.3);padding:3px 8px;text-align:left;white-space:nowrap}
+.m-body.md-on th{background:rgba(0,0,0,.06);font-weight:700}
+.m-body.md-on .al-c{text-align:center}.m-body.md-on .al-r{text-align:right}
+.m-body.md-on a{color:#1a5fb4;text-decoration:underline;overflow-wrap:anywhere;cursor:pointer}
+@media (prefers-color-scheme:dark){.m-body.md-on a{color:#7db7ff}.m-body.md-on code,.m-body.md-on pre.md-code{background:rgba(255,255,255,.1)}}
 .msg-st{margin-left:4px;font-size:11px;letter-spacing:-2px;color:var(--msg-st-muted);cursor:default}
 .msg-st.st-read,.msg-st.st-replied{color:var(--msg-st-read)}
 @media (prefers-color-scheme:dark){
