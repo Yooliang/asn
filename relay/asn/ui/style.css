@@ -163,6 +163,7 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .msgs{flex:1;min-height:0;overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:8px;user-select:text;-webkit-user-select:text}
 .msg .who{color:var(--muted);font-size:12px}
 .msg .who time{margin-left:6px;opacity:.75;font-variant-numeric:tabular-nums}
+.msg .who .from-dev{margin-left:6px;font-size:11px;opacity:.75}
 .msg .m-body{padding-left:12px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px}
 .msg.mine .m-body{color:#1b3d6e}
 .msg-st{margin-left:4px;font-size:11px;letter-spacing:-2px;color:var(--msg-st-muted);cursor:default}
