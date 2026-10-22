@@ -28,8 +28,9 @@ export function entriesOf(row, friendNick = '', from = '') {
   const nudge = hasNudge(body)
   const text = stripPhotoLines(nudge ? stripNudge(body) : body, row.photos.length)
   const out = []
+  const rid = row.fanoutId ?? row.id
   if (text || row.photos.length) {
-    const e = { k: row.dir, text, t: row.t, id: row.fanoutId ?? row.id }   // 記錄用的 id 與收信一致（扇出回信＝群組 id）
+    const e = { k: row.dir, text, t: row.t, id: rid }   // 記錄用的 id 與收信一致（扇出回信＝群組 id）
     if (row.photos.length) e.photos = row.photos
     if (row.dir === 'me') {
       if (row.deliveredAt) e.deliveredAt = row.deliveredAt
@@ -38,7 +39,7 @@ export function entriesOf(row, friendNick = '', from = '') {
     }
     out.push(e)
   }
-  if (nudge) out.push(row.dir === 'me' ? { k: 'sys', nudge: true, mine: true, text: '你已傳送震動。', t: row.t } : { k: 'sys', nudge: true, text: `${plain(friendNick)} 傳送了一個震動。`, t: row.t })
+  if (nudge) out.push(row.dir === 'me' ? { k: 'sys', nudge: true, mine: true, rid, text: '你已傳送震動。', t: row.t } : { k: 'sys', nudge: true, rid, text: `${plain(friendNick)} 傳送了一個震動。`, t: row.t })
   return out
 }
 
@@ -52,7 +53,7 @@ export function fromDeviceOf(row, selfNode, deviceOf) {
 // 回 { log, added }；log 依時間排好（穩定排序，同時間維持原順序）。selfNode／deviceOf 用來標「從哪台設備寄出」
 export function mergeHistory(log, rows, friendNick = '', { selfNode = '', deviceOf = null } = {}) {
   const have = new Set()
-  for (const m of log) if (m?.id) have.add(m.id)
+  for (const m of log) { if (m?.id) have.add(m.id); if (m?.rid) have.add(m.rid) }   // rid＝震動提示列帶的信件 id（它自己沒有文字列可比對）
   const fresh = []
   for (const raw of Array.isArray(rows) ? rows : []) {
     const row = cleanRow(raw)
