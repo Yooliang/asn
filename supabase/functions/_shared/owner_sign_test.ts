@@ -31,7 +31,7 @@ Deno.test("signedArgs：有 id 才帶 p_signed_user", () => {
 Deno.test("relay 的 send 與 room_post 接上本人簽章，且在節點金鑰驗證之後", async () => {
   const src = await Deno.readTextFile(new URL("../relay/index.ts", import.meta.url));
   assertEquals(SIGN_HEADER, "x-asn-user");
-  const keyAuth = src.indexOf('db.rpc("irori_relay_auth"');
+  const keyAuth = src.indexOf('db.rpc("asn_relay_auth"');
   const sendAt = src.indexOf('action === "send" && req.method');
   const roomAt = src.indexOf('action?.startsWith("room_")');
   assertEquals(keyAuth > 0 && sendAt > keyAuth && roomAt > keyAuth, true);
@@ -39,7 +39,7 @@ Deno.test("relay 的 send 與 room_post 接上本人簽章，且在節點金鑰�
   assertEquals(send.includes("signedUserId(") && send.includes("...signedArgs("), true);
   assertEquals(send.indexOf("signedUserId(") < send.indexOf("sendWithPerson("), true);
   const room = src.slice(roomAt);
-  assertEquals(room.includes("signedUserId(") && room.includes("irori_relay_room_post") && room.includes("signedArgs("), true);
+  assertEquals(room.includes("signedUserId(") && room.includes("asn_relay_room_post") && room.includes("signedArgs("), true);
 });
 
 Deno.test("簽章標頭只在 send／room_post／launch／launchers／partner_op／partner_ops 讀取（其他動作不碰）", async () => {

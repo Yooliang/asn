@@ -11,10 +11,10 @@ function fakeDb(rows: Row[]) {
   const deps: AgentInboxDeps = {
     rpc: (fn, args) => {
       calls.push({ fn, args });
-      if (fn === "irori_relay_inbox_agent") {
+      if (fn === "asn_relay_inbox_agent") {
         return Promise.resolve({ data: rows.filter((r) => r.to_node === args.p_node && r.to_agent === args.p_agent && !r.acked).map((r) => ({ id: r.id, to_agent: r.to_agent })), error: null });
       }
-      if (fn === "irori_relay_ack_agent") {
+      if (fn === "asn_relay_ack_agent") {
         let n = 0;
         for (const r of rows) {
           if (r.to_node === args.p_node && r.to_agent === args.p_agent && (args.p_ids as string[]).includes(r.id) && !r.acked) { r.acked = true; n++; }
@@ -53,7 +53,7 @@ Deno.test("節點一律取自金鑰（me.id），agent 參數改不了節點", a
   const { deps, calls } = fakeDb(seed());
   await handleAgentInbox(deps, { id: "H" }, "inbox", "H-甲");
   await handleAgentInbox(deps, { id: "H" }, "ack", "H-甲", { ids: [U(1)] });
-  assertEquals(calls.map((c) => [c.fn, c.args.p_node, c.args.p_agent]), [["irori_relay_inbox_agent", "H", "H-甲"], ["irori_relay_ack_agent", "H", "H-甲"]]);
+  assertEquals(calls.map((c) => [c.fn, c.args.p_node, c.args.p_agent]), [["asn_relay_inbox_agent", "H", "H-甲"], ["asn_relay_ack_agent", "H", "H-甲"]]);
 });
 
 Deno.test("agent 空白或格式不對 → 400，不碰資料庫（不會退化成整個節點信箱）", async () => {
@@ -91,7 +91,7 @@ Deno.test("08_agent_inbox.sql：inbox 與 ack 都有 to_node = p_node 且 to_age
 
 // ---- inbox_peek（asn-cli recv --peek）：只看不收 ----
 
-Deno.test("inbox_peek：只呼叫唯讀的 irori_relay_inbox_peek，節點取自金鑰，不碰 inbox／ack、不改任何信的狀態", async () => {
+Deno.test("inbox_peek：只呼叫唯讀的 asn_relay_inbox_peek，節點取自金鑰，不碰 inbox／ack、不改任何信的狀態", async () => {
   const rows = seed();
   const before = JSON.stringify(rows);
   const calls: { fn: string; args: Record<string, unknown> }[] = [];
@@ -105,7 +105,7 @@ Deno.test("inbox_peek：只呼叫唯讀的 irori_relay_inbox_peek，節點取自
   const r = await handleAgentInbox(deps, { id: "H" }, "inbox_peek", "H-甲");
   assertEquals(r.status, 200);
   assertEquals((r.body as { count: number }).count, 1);
-  assertEquals(calls.map((c) => [c.fn, c.args.p_node, c.args.p_agent]), [["irori_relay_inbox_peek", "H", "H-甲"]]);
+  assertEquals(calls.map((c) => [c.fn, c.args.p_node, c.args.p_agent]), [["asn_relay_inbox_peek", "H", "H-甲"]]);
   assertEquals(JSON.stringify(rows), before); // 信的狀態一個位元都沒變
 });
 
@@ -140,10 +140,10 @@ Deno.test("relay/index.ts 與 agent_inbox.ts：inbox_peek 路徑絕不 ack、不
   const i = src.indexOf('action === "inbox_peek"');
   assert(i >= 0, "缺 inbox_peek 路由");
   const block = src.slice(i, src.indexOf("\n  }\n", i));
-  assert(block.includes('"inbox_peek"') && !/"ack"|irori_relay_inbox\b|irori_relay_ack/.test(block), "peek 路由不可 ack 或走會設 delivered_at 的函式");
+  assert(block.includes('"inbox_peek"') && !/"ack"|asn_relay_inbox\b|asn_relay_ack/.test(block), "peek 路由不可 ack 或走會設 delivered_at 的函式");
   const h = lf(await Deno.readTextFile(new URL("./agent_inbox.ts", import.meta.url)));
   const j = h.indexOf('if (action === "inbox_peek")');
   assert(j >= 0, "handler 缺 peek 分支");
   const hb = h.slice(j, h.indexOf("\n  }\n", j));
-  assert(hb.includes("irori_relay_inbox_peek") && !/irori_relay_ack|irori_relay_inbox_agent|"irori_relay_inbox"/.test(hb), "peek 分支不可呼叫 ack／inbox 函式");
+  assert(hb.includes("asn_relay_inbox_peek") && !/asn_relay_ack|asn_relay_inbox_agent|"asn_relay_inbox"/.test(hb), "peek 分支不可呼叫 ack／inbox 函式");
 });

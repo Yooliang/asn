@@ -21,9 +21,9 @@ export function parseExclude(raw: string | null | undefined): string[] | null {
 
 export async function readNodeInbox(rpc: InboxRpc, nodeId: string, rawExclude: string | null | undefined): Promise<{ data: unknown; error: unknown }> {
   const ex = parseExclude(rawExclude);
-  if (!ex) return await rpc("irori_relay_inbox", { p_node: nodeId });
-  const r = await rpc("irori_relay_inbox", { p_node: nodeId, p_exclude_agents: ex });
+  if (!ex) return await rpc("asn_relay_inbox", { p_node: nodeId });
+  const r = await rpc("asn_relay_inbox", { p_node: nodeId, p_exclude_agents: ex });
   // migration 還沒套（函式沒有這個參數）時退回原本的讀法，不讓收信整個壞掉
-  if (r.error) return await rpc("irori_relay_inbox", { p_node: nodeId });
+  if (r.error) return await rpc("asn_relay_inbox", { p_node: nodeId });
   return r;
 }

@@ -93,10 +93,10 @@ export async function postMessage(
   deps: RoomDeps, who: { node: string; agent?: string | null; owner?: boolean }, room: string, body: string,
 ): Promise<Reply> {
   const who3 = { p_node: who.node, p_agent: who.agent ?? null, p_room: room, p_owner: Boolean(who.owner) };
-  const mem = await call(deps, "irori_relay_room_members", who3);
+  const mem = await call(deps, "asn_relay_room_members", who3);
   if (isReply(mem)) return mem;
   const mentions = parseMentions(body, mem.data.members ?? []);
-  const res = await call(deps, "irori_relay_room_post", { ...who3, p_body: body, p_mentions: mentions });
+  const res = await call(deps, "asn_relay_room_post", { ...who3, p_body: body, p_mentions: mentions });
   if (isReply(res)) return res;
   if (deps.beforeRing) await deps.beforeRing(res.data.seq);
   await Promise.all((res.data.bell_topics ?? []).map((t: string) => deps.ring(t)));
@@ -115,15 +115,15 @@ export async function handleNodeRoomAction(deps: RoomDeps, me: { id: string }, a
   if (action !== "room_list" && !ROOM_ID_RE.test(room)) return err(400, "bad_request");
 
   if (action === "room_list") {
-    const r = await call(deps, "irori_relay_room_list", { p_node: me.id, p_owner: false });
+    const r = await call(deps, "asn_relay_room_list", { p_node: me.id, p_owner: false });
     return isReply(r) ? r : { status: 200, body: r.data };
   }
   if (action === "room_pin_get") {
-    const r = await call(deps, "irori_relay_room_pin_get", { p_node: me.id, p_agent: agent, p_room: room, p_owner: false });
+    const r = await call(deps, "asn_relay_room_pin_get", { p_node: me.id, p_agent: agent, p_room: room, p_owner: false });
     return isReply(r) ? r : { status: 200, body: r.data };
   }
   if (action === "room_read") {
-    const r = await call(deps, "irori_relay_room_read", {
+    const r = await call(deps, "asn_relay_room_read", {
       p_node: me.id, p_agent: agent, p_room: room, p_since: num(params.since), p_limit: num(params.limit),
       p_owner: false, p_tail: false, p_mark: params.mark === "1" || params.mark === true ? true : null,
     });
@@ -170,10 +170,10 @@ export function matchAutoJoins(rules: { room: string; prefixes: string[] }[], wi
 // 套用某節點目前的視窗名單：符合的自動入群；原本自動入群、視窗已消失的標為離開（資料庫端處理）。出錯只記 log，不影響呼叫端
 export async function syncNodeAuto(deps: RoomDeps, node: string, windows: string[]): Promise<void> {
   try {
-    const rules = await deps.rpc("irori_relay_room_auto_rules", { p_node: node });
+    const rules = await deps.rpc("asn_relay_room_auto_rules", { p_node: node });
     if (rules.error) throw rules.error;
     const joins = matchAutoJoins(rules.data ?? [], windows);
-    const res = await deps.rpc("irori_relay_room_auto_apply", { p_node: node, p_joins: joins });
+    const res = await deps.rpc("asn_relay_room_auto_apply", { p_node: node, p_joins: joins });
     if (res.error) throw res.error;
   } catch (e) {
     console.error("auto join sync failed", node, String(e));

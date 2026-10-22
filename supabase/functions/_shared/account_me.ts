@@ -28,10 +28,10 @@ export async function sendWithPerson(
   rpc: RpcFn,
   args: Record<string, unknown>,
 ): Promise<{ data: unknown; error: unknown }> {
-  const r = await rpc("irori_relay_send", args);
+  const r = await rpc("asn_relay_send", args);
   if (r.error && "p_as_person" in args && rpcMissing(r.error)) {
     const { p_as_person: _drop, ...rest } = args;
-    return await rpc("irori_relay_send", rest);
+    return await rpc("asn_relay_send", rest);
   }
   return r;
 }

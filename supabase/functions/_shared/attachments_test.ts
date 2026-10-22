@@ -125,13 +125,13 @@ Deno.test("parseAttachmentIds：沒給＝空；1～4 個不重複 uuid 通過；
 
 Deno.test("attach_init：驗證通過才呼叫資料庫；金鑰所屬節點、配額由伺服器端常數帶；回一次性上傳網址", async () => {
   const { deps, calls } = fakeDeps({
-    rpc: (fn) => fn === "irori_relay_attach_init" ? { id: U(7), path: "t/H/" + U(7) + ".webp", expires_at: "2026-11-19T00:00:00Z" } : [],
+    rpc: (fn) => fn === "asn_relay_attach_init" ? { id: U(7), path: "t/H/" + U(7) + ".webp", expires_at: "2026-11-19T00:00:00Z" } : [],
   });
   const r = await handleAttachAction(deps, { id: "H", role: "member" }, "attach_init", { kind: "image", mime: "image/webp", name: "a.webp", bytes: 1000, thumb: THUMB, p_node: "X", owner_node: "X" });
   assertEquals(r.status, 200);
   assertEquals(r.body.id, U(7));
   assertEquals(r.body.upload_url, `https://s.example/up/t/H/${U(7)}.webp?token=t`);
-  const init = calls.find((c) => c.fn === "irori_relay_attach_init")!;
+  const init = calls.find((c) => c.fn === "asn_relay_attach_init")!;
   assertEquals(init.args.p_node, "H", "上傳者一律是金鑰所屬節點");
   assertEquals([init.args.p_quota_bytes, init.args.p_quota_count], [QUOTA_BYTES, QUOTA_COUNT]);
   assertEquals(init.args.p_bytes, 1000);
@@ -156,7 +156,7 @@ Deno.test("attach_init：格式不對不碰資料庫；超大 413、型別 400�
 Deno.test("attach_commit：已確認直接成功；沒上傳 409；大小型別一致才確認；不符就刪檔並回 400；不是自己的 404", async () => {
   const mk = (peek: unknown, commit: unknown, info?: { size: number; mime: string } | null) => fakeDeps({
     info,
-    rpc: (fn, a) => fn === "irori_relay_attach_commit" ? (a.p_bytes === null ? peek : commit) : null,
+    rpc: (fn, a) => fn === "asn_relay_attach_commit" ? (a.p_bytes === null ? peek : commit) : null,
   });
   const ready = mk({ peek: true, path: "p", status: "ready" }, null);
   assertEquals((await handleAttachAction(ready.deps, { id: "H" }, "attach_commit", { id: U(1) })).status, 200);
@@ -164,7 +164,7 @@ Deno.test("attach_commit：已確認直接成功；沒上傳 409；大小型別�
   assertEquals((await handleAttachAction(missing.deps, { id: "H" }, "attach_commit", { id: U(1) })).status, 409);
   const good = mk({ peek: true, path: "p", status: "pending" }, { ok: true }, { size: 777, mime: "image/webp; charset=x" });
   assertEquals((await handleAttachAction(good.deps, { id: "H" }, "attach_commit", { id: U(1) })).status, 200);
-  const c = good.calls.filter((x) => x.fn === "irori_relay_attach_commit")[1];
+  const c = good.calls.filter((x) => x.fn === "asn_relay_attach_commit")[1];
   assertEquals([c.args.p_bytes, c.args.p_mime, c.args.p_node], [777, "image/webp", "H"]);
   const bad = mk({ peek: true, path: "t/H/x.webp", status: "pending" }, { error: "size_mismatch" }, { size: 9, mime: "image/webp" });
   const r = await handleAttachAction(bad.deps, { id: "H" }, "attach_commit", { id: U(1) });
@@ -191,16 +191,16 @@ Deno.test("attach_url：有權限發 300 秒網址；沒權限與不存在都是
 
 Deno.test("attach_sweep：只有 owner 角色節點；清理時先刪檔、成功才記 removed_at；刪檔失敗不記", async () => {
   const rows = [{ id: U(1), path: "a" }, { id: U(2), path: "b" }];
-  const f = (removeOk = true) => fakeDeps({ removeOk, rpc: (fn) => fn === "irori_relay_attach_sweep" ? rows : { marked: 2 } });
+  const f = (removeOk = true) => fakeDeps({ removeOk, rpc: (fn) => fn === "asn_relay_attach_sweep" ? rows : { marked: 2 } });
   assertEquals((await handleAttachAction(f().deps, { id: "H", role: "member" }, "attach_sweep", {})).status, 403);
   const a = f();
   const r = await handleAttachAction(a.deps, { id: "X", role: "owner" }, "attach_sweep", {});
   assertEquals([r.status, r.body.removed], [200, 2]);
   assertEquals(a.removed, [["a", "b"]]);
-  assertEquals(a.calls.find((c) => c.fn === "irori_relay_attach_swept")!.args.p_ids, [U(1), U(2)]);
+  assertEquals(a.calls.find((c) => c.fn === "asn_relay_attach_swept")!.args.p_ids, [U(1), U(2)]);
   const b = f(false);
   assertEquals(await sweepExpired(b.deps), 0);
-  assertEquals(b.calls.some((c) => c.fn === "irori_relay_attach_swept"), false);
+  assertEquals(b.calls.some((c) => c.fn === "asn_relay_attach_swept"), false);
   assertEquals(await sweepExpired(fakeDeps({ rpc: () => [] }).deps), 0);
 });
 
@@ -255,7 +255,7 @@ const read = (rel: string) => Deno.readTextFile(new URL(rel, import.meta.url));
 Deno.test("relay/index.ts：附件動作在節點驗證之後；send 寄出前驗、寄出後綁、綁完才敲門鈴；inbox 與 room_read 會附帶附件", async () => {
   const src = await read("../relay/index.ts");
   const at = (s: string, from = 0) => src.indexOf(s, from);
-  assert(at("ATTACH_ACTIONS.has(action)") > at("irori_relay_auth"), "附件動作要在金鑰驗證之後");
+  assert(at("ATTACH_ACTIONS.has(action)") > at("asn_relay_auth"), "附件動作要在金鑰驗證之後");
   const send = src.slice(at('action === "send"'), at("// 遠端開視窗"));
   assert(send.includes("prepareAttachments") && send.includes("bindAttachments") && send.includes("ring(t)"));
   assert(send.indexOf("prepareAttachments") < send.indexOf("sendWithPerson("), "先驗附件再寄信");

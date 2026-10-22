@@ -53,7 +53,7 @@ Deno.test("封存：帶本人簽章呼叫資料庫函式，不敲門鈴；錯誤
   const { deps, calls, rings } = fakeDeps();
   const r = await requestPartnerArchive(deps, "P", { node: "H", partner_id: PID, archived: true, extra: "丟掉" }, USER);
   assertEquals([r.status, r.body], [200, { ok: true, archived: true }]);
-  assertEquals(calls, [{ fn: "irori_relay_partner_archive", args: { p_actor: "P", p_signed_user: USER, p_node: "H", p_name: null, p_partner_id: PID, p_archived: true } }]);
+  assertEquals(calls, [{ fn: "asn_relay_partner_archive", args: { p_actor: "P", p_signed_user: USER, p_node: "H", p_name: null, p_partner_id: PID, p_archived: true } }]);
   assertEquals(rings, []);
   for (const [code, status] of [["forbidden", 403], ["not_found", 404], ["protected", 403], ["rate_limited", 429], ["bad_request", 400]] as const) {
     const f = fakeDeps(() => ({ error: code }));

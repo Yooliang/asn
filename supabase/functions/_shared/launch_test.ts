@@ -44,7 +44,7 @@ Deno.test("requestLaunch：通過就呼叫 irori_relay_launch（actor 由呼叫�
   const { deps, calls, rings } = fakeDeps();
   const r = await requestLaunch(deps, "XISU", { ...OK, first_message: "hi", requested_by: "偽造" });
   assertEquals(r, { status: 200, body: { id: "11111111-1111-1111-1111-111111111111" } });
-  assertEquals(calls, [{ fn: "irori_relay_launch", args: { p_actor: "XISU", p_node: "H", p_profile: "default", p_name: "H-英雄-2", p_cwd: OK.cwd, p_first: "hi" } }]);
+  assertEquals(calls, [{ fn: "asn_relay_launch", args: { p_actor: "XISU", p_node: "H", p_profile: "default", p_name: "H-英雄-2", p_cwd: OK.cwd, p_first: "hi" } }]);
   assertEquals(rings, ["bell-H"]);
 });
 
@@ -62,20 +62,20 @@ Deno.test("requestLaunch：資料庫拒絕時對應狀態碼，不敲門鈴；�
 });
 
 Deno.test("節點動作：launch_pending／launch_result 只帶自己的節點；result 狀態與 id 要對", async () => {
-  const { deps, calls } = fakeDeps(({ fn }) => (fn === "irori_relay_launch_pending" ? [{ id: "x" }] : { ok: true }));
+  const { deps, calls } = fakeDeps(({ fn }) => (fn === "asn_relay_launch_pending" ? [{ id: "x" }] : { ok: true }));
   assertEquals(await handleNodeLaunchAction(deps, { id: "H" }, "launch_pending", { node: "W" }), { status: 200, body: { launches: [{ id: "x" }] } });
   const id = "22222222-2222-2222-2222-222222222222";
   assertEquals((await handleNodeLaunchAction(deps, { id: "H" }, "launch_result", { id, status: "ok", detail: "已開啟", node: "W" })).status, 200);
   assertEquals((await handleNodeLaunchAction(deps, { id: "H" }, "launch_result", { id, status: "taken" })).status, 400);
   assertEquals((await handleNodeLaunchAction(deps, { id: "H" }, "launch_result", { id: "nope", status: "ok" })).status, 400);
   assertEquals(calls, [
-    { fn: "irori_relay_launch_pending", args: { p_node: "H" } },
-    { fn: "irori_relay_launch_result", args: { p_node: "H", p_id: id, p_status: "ok", p_detail: "已開啟" } },
+    { fn: "asn_relay_launch_pending", args: { p_node: "H" } },
+    { fn: "asn_relay_launch_result", args: { p_node: "H", p_id: id, p_status: "ok", p_detail: "已開啟" } },
   ]);
 });
 
 Deno.test("節點動作：launch／launchers 用節點自己的身分（owner 與否交給 SQL）", async () => {
-  const { deps, calls } = fakeDeps(({ fn }) => (fn === "irori_relay_launch" ? { error: "forbidden" } : { machines: [], launches: [] }));
+  const { deps, calls } = fakeDeps(({ fn }) => (fn === "asn_relay_launch" ? { error: "forbidden" } : { machines: [], launches: [] }));
   assertEquals((await handleNodeLaunchAction(deps, { id: "w02" }, "launch", OK)).status, 403);
   assertEquals((await handleNodeLaunchAction(deps, { id: "w02" }, "launchers", {})).status, 200);
   assertEquals(calls.map((c) => c.args.p_actor), ["w02", "w02"]);
@@ -109,7 +109,7 @@ Deno.test("本人簽章：有簽章才帶 p_signed_user（launch、launchers）�
   const USER = "22222222-2222-2222-2222-222222222222";
   const a = fakeDeps();
   assertEquals((await handleNodeLaunchAction(a.deps, { id: "P1" }, "launch", OK, USER)).status, 200);
-  assertEquals(a.calls[0].fn, "irori_relay_launch");
+  assertEquals(a.calls[0].fn, "asn_relay_launch");
   assertEquals(a.calls[0].args.p_signed_user, USER);
   assertEquals(a.calls[0].args.p_actor, "P1", "actor 仍是金鑰所屬的節點，簽章只是證明這個節點是本人的");
   const b = fakeDeps();

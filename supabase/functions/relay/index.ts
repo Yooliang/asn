@@ -57,7 +57,7 @@ const roomDeps = (): RoomDeps => ({
   rpc: async (fn, args) => await db.rpc(fn, args),
   ring,
   rosterHas: async (node, agent) => {
-    const { data, error } = await db.rpc("irori_relay_roster_has", { p_node: node, p_name: agent });
+    const { data, error } = await db.rpc("asn_relay_roster_has", { p_node: node, p_name: agent });
     return !error && data === true;
   },
 });
@@ -127,11 +127,11 @@ Deno.serve(async (req) => {
     const bellTopic = "relay-bell-" + b64u(18);
     const ipHash = await sha256Hex("ip:" + ip);
     const { data, error } = reissue
-      ? await db.rpc("irori_relay_redeem_reissue", {
+      ? await db.rpc("asn_relay_redeem_reissue", {
         p_ip_hash: ipHash, p_code_hash: await sha256Hex(b.reissue), p_id: b.id,
         p_key_hash: await sha256Hex(key), p_bell_topic: bellTopic,
       })
-      : await db.rpc("irori_relay_register", {
+      : await db.rpc("asn_relay_register", {
         p_ip_hash: ipHash,
         p_code_hash: await sha256Hex(b.invite),
         p_id: b.id,
@@ -161,7 +161,7 @@ Deno.serve(async (req) => {
 
   const key = req.headers.get("x-relay-key");
   if (!key) return json(401, { error: "unauthorized" });
-  const { data: nodes, error: aerr } = await db.rpc("irori_relay_auth", { p_key_hash: await sha256Hex(key) });
+  const { data: nodes, error: aerr } = await db.rpc("asn_relay_auth", { p_key_hash: await sha256Hex(key) });
   if (aerr) { console.error(aerr); return json(500, { error: "internal" }); }
   if (!nodes || nodes.length === 0) return json(401, { error: "unauthorized" });
   const me = nodes[0] as { id: string; bell_topic: string; role: string; tenant_id: string | null };
@@ -179,7 +179,7 @@ Deno.serve(async (req) => {
     return json(200, { node: me.id, bell_topic: me.bell_topic });
   }
   if (action === "list" && req.method === "GET") {
-    const { data, error } = await db.rpc("irori_relay_list", { p_tenant: me.tenant_id });
+    const { data, error } = await db.rpc("asn_relay_list", { p_tenant: me.tenant_id });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     return json(200, { members: data });
   }
@@ -190,7 +190,7 @@ Deno.serve(async (req) => {
     if (!b || typeof b !== "object" || !("avatar" in b)) return json(400, { error: "bad_request" });
     const c = checkAvatar(b.avatar);
     if (!c.ok) return json(400, { error: c.error });
-    const { data, error } = await db.rpc("irori_relay_set_avatar", { p_node: me.id, p_avatar: c.avatar });
+    const { data, error } = await db.rpc("asn_relay_set_avatar", { p_node: me.id, p_avatar: c.avatar });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     if (data?.error === "forbidden") return json(403, { error: "forbidden" });
     if (data?.error === "bad_avatar") return json(400, { error: "bad_avatar_format" });
@@ -200,7 +200,7 @@ Deno.serve(async (req) => {
   if (action === "avatar" && req.method === "GET") {
     const node = url.searchParams.get("node") ?? "";
     if (!ID_RE.test(node)) return json(400, { error: "bad_request" });
-    const { data, error } = await db.rpc("irori_relay_get_avatar", { p_tenant: me.tenant_id, p_node: node });
+    const { data, error } = await db.rpc("asn_relay_get_avatar", { p_tenant: me.tenant_id, p_node: node });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     if (data?.error === "not_found") return json(404, { error: "not_found" });
     return json(200, data);
@@ -215,7 +215,7 @@ Deno.serve(async (req) => {
     const b = await req.json().catch(() => null);
     if (!b || !Array.isArray(b.agents)) return json(400, { error: "bad_request" });
     const agents = normalizeRosterAgents(b.agents); // name／status／cwd_label／engine（舊版機器橋沒帶 engine ＝ null）
-    const { data, error } = await db.rpc("irori_relay_roster", { p_node: me.id, p_agents: agents });
+    const { data, error } = await db.rpc("asn_relay_roster", { p_node: me.id, p_agents: agents });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     if (data?.error === "forbidden") return json(403, { error: "forbidden" });
     if (data?.error) return json(400, { error: data.error });
@@ -223,7 +223,7 @@ Deno.serve(async (req) => {
     if ("launcher" in b) {
       const l = sanitizeLauncher(b.launcher);
       if (l && "error" in l) return json(400, { error: "bad_request" });
-      const { data: ld, error: le } = await db.rpc("irori_relay_set_launcher", { p_node: me.id, p_launcher: l });
+      const { data: ld, error: le } = await db.rpc("asn_relay_set_launcher", { p_node: me.id, p_launcher: l });
       if (le) console.error(le);
       else if (ld?.error) console.warn("set_launcher", me.id, ld.error);
     }
@@ -236,7 +236,7 @@ Deno.serve(async (req) => {
     const b = await req.json().catch(() => null);
     const name = parseSelfName(b?.name);
     if (name === null) return json(400, { error: "bad_request" });
-    const { data, error } = await db.rpc("irori_relay_set_self_name", { p_node: me.id, p_name: name });
+    const { data, error } = await db.rpc("asn_relay_set_self_name", { p_node: me.id, p_name: name });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     if (data?.error === "not_found") return json(404, { error: "not_found" });
     if (data?.error) return json(400, { error: data.error });
@@ -246,7 +246,7 @@ Deno.serve(async (req) => {
   if (action === "asn_presence" && req.method === "POST") {
     const p = parseAsnPresence(await req.json().catch(() => null));
     if (p === null) return json(400, { error: "bad_request" });
-    const { data, error } = await db.rpc("irori_relay_asn_presence_set", {
+    const { data, error } = await db.rpc("asn_relay_asn_presence_set", {
       p_node: me.id, p_window: p.window_name, p_version: p.version, p_status: p.status, p_psm: p.psm,
     });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
@@ -256,7 +256,7 @@ Deno.serve(async (req) => {
     // 順便回報「本人有沒有要這台更新」（遠端更新；失敗不影響在線回報）。offline 不問
     let update_requested = false;
     if (p.status !== "offline") {
-      const u = await db.rpc("irori_relay_asn_update_poll", { p_node: me.id, p_version: p.version });
+      const u = await db.rpc("asn_relay_asn_update_poll", { p_node: me.id, p_version: p.version });
       if (u.error) console.error(u.error);
       else update_requested = u.data?.requested === true;
     }
@@ -266,7 +266,7 @@ Deno.serve(async (req) => {
   if (action === "asn_update_result" && req.method === "POST") {
     const b = await req.json().catch(() => null);
     if (!b || typeof b !== "object" || typeof b.ok !== "boolean" || (b.detail != null && typeof b.detail !== "string")) return json(400, { error: "bad_request" });
-    const { data, error } = await db.rpc("irori_relay_asn_update_result", { p_node: me.id, p_ok: b.ok, p_detail: b.detail ?? null });
+    const { data, error } = await db.rpc("asn_relay_asn_update_result", { p_node: me.id, p_ok: b.ok, p_detail: b.detail ?? null });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     if (data?.error) return json(400, { error: data.error });
     return json(200, { ok: true });
@@ -294,14 +294,14 @@ Deno.serve(async (req) => {
     return json(r.status, r.body);
   }
   if (action === "leave" && req.method === "POST") {
-    const { error } = await db.rpc("irori_relay_leave", { p_node: me.id });
+    const { error } = await db.rpc("asn_relay_leave", { p_node: me.id });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     return json(200, { ok: true });
   }
   if (action === "update" && req.method === "POST") {
     const b = await req.json().catch(() => null);
     if (!b || typeof b.id !== "string" || !ID_RE.test(b.id)) return json(400, { error: "bad_request" });
-    const { data, error } = await db.rpc("irori_relay_update", {
+    const { data, error } = await db.rpc("asn_relay_update", {
       p_node: me.id, p_id: b.id, p_machine: typeof b.machine === "string" ? b.machine : null,
       p_name: typeof b.name === "string" ? b.name : null,
     });
@@ -314,7 +314,7 @@ Deno.serve(async (req) => {
   if (action === "invite" && req.method === "POST") {
     const b = await req.json().catch(() => ({}));
     const code = b64u(24);
-    const { data, error } = await db.rpc("irori_relay_invite", {
+    const { data, error } = await db.rpc("asn_relay_invite", {
       p_node: me.id, p_code_hash: await sha256Hex(code), p_note: optStr(b?.note, 200),
     });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
@@ -326,7 +326,7 @@ Deno.serve(async (req) => {
     const b = await req.json().catch(() => null);
     if (!b || typeof b.id !== "string" || !ID_RE.test(b.id)) return json(400, { error: "bad_request" });
     const code = b64u(24);
-    const { data, error } = await db.rpc("irori_relay_reissue", {
+    const { data, error } = await db.rpc("asn_relay_reissue", {
       p_node: me.id, p_code_hash: await sha256Hex(code), p_id: b.id,
     });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
@@ -362,7 +362,7 @@ Deno.serve(async (req) => {
     if (!Array.isArray(ids) || ids.length > 100 || !ids.every((i: unknown) => typeof i === "string" && UUID.test(i))) {
       return json(400, { error: "bad_ids" });
     }
-    const { data, error } = await db.rpc("irori_relay_ack", { p_node: me.id, p_ids: ids });
+    const { data, error } = await db.rpc("asn_relay_ack", { p_node: me.id, p_ids: ids });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     return json(200, { acked: data });
   }
@@ -373,7 +373,7 @@ Deno.serve(async (req) => {
     if (!Array.isArray(ids) || ids.length > 50 || !ids.every((i: unknown) => typeof i === "string" && UUID.test(i))) {
       return json(400, { error: "bad_ids" });
     }
-    const { data, error } = await db.rpc("irori_relay_sent_status", { p_node: me.id, p_ids: ids });
+    const { data, error } = await db.rpc("asn_relay_sent_status", { p_node: me.id, p_ids: ids });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     return json(200, { status: data });
   }
@@ -447,7 +447,7 @@ Deno.serve(async (req) => {
       const signed = await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER));
       if (signed) {
         deps.rpc = async (fn, args) =>
-          await db.rpc(fn, fn === "irori_relay_room_post" ? { ...args, ...signedArgs(signed) } : args);
+          await db.rpc(fn, fn === "asn_relay_room_post" ? { ...args, ...signedArgs(signed) } : args);
       }
     }
     // 群組發言帶附件：寄出前先驗；訊息寫入後、敲門鈴前綁到這則訊息

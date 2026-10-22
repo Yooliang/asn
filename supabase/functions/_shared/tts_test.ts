@@ -122,7 +122,7 @@ Deno.test("tts_voices：只列白名單聲音，並說明有沒有啟用", async
 // relay/index.ts 是 Deno.serve 入口、無法直接 import：守「tts 動作在金鑰驗證之後、用共用邏輯、只傳金鑰所屬節點」
 Deno.test("relay/index.ts：tts 動作排在金鑰驗證之後，節點代號取自金鑰（me.id）", async () => {
   const src = await Deno.readTextFile(new URL("../relay/index.ts", import.meta.url));
-  const auth = src.indexOf("irori_relay_auth");
+  const auth = src.indexOf("asn_relay_auth");
   const tts = src.indexOf('action === "tts"');
   const voices = src.indexOf('action === "tts_voices"');
   assertEquals(auth > 0 && tts > auth && voices > auth, true, "tts 要在金鑰驗證之後");

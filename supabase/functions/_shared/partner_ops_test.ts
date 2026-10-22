@@ -61,7 +61,7 @@ Deno.test("requestPartnerOp：通過就呼叫資料庫函式（帶簽章者）�
   const { deps, calls, rings } = fakeDeps();
   const r = await requestPartnerOp(deps, "P", { ...OK, requested_by: "偽造", p_actor: "偽造" }, USER);
   assertEquals(r, { status: 200, body: { id: "11111111-1111-1111-1111-111111111111" } });
-  assertEquals(calls, [{ fn: "irori_relay_partner_op", args: { p_actor: "P", p_signed_user: USER, p_node: "H", p_name: "小文", p_op: "close", p_new_name: null, p_model: null, p_note: null } }]);
+  assertEquals(calls, [{ fn: "asn_relay_partner_op", args: { p_actor: "P", p_signed_user: USER, p_node: "H", p_name: "小文", p_op: "close", p_new_name: null, p_model: null, p_note: null } }]);
   assertEquals(rings, ["bell-H"]);
 });
 
@@ -82,14 +82,14 @@ Deno.test("requestPartnerOp：資料庫拒絕時對應狀態碼與中文說明�
 Deno.test("listPartnerOps：ids 要是 1～20 個 uuid；回資料庫給的 ops", async () => {
   const { deps, calls } = fakeDeps(() => ({ ops: [{ id: ID }] }));
   assertEquals(await listPartnerOps(deps, "P", [ID], USER), { status: 200, body: { ops: [{ id: ID }] } });
-  assertEquals(calls[0], { fn: "irori_relay_partner_ops", args: { p_actor: "P", p_signed_user: USER, p_ids: [ID] } });
+  assertEquals(calls[0], { fn: "asn_relay_partner_ops", args: { p_actor: "P", p_signed_user: USER, p_ids: [ID] } });
   assertEquals((await listPartnerOps(deps, "P", `${ID},${ID}`, USER)).status, 200);
   for (const bad of [[], undefined, "nope", ["x"], Array(21).fill(ID), [5]]) assertEquals((await listPartnerOps(deps, "P", bad, USER)).status, 400);
   assertEquals((await listPartnerOps(deps, "P", Array(20).fill(ID), USER)).status, 200);
 });
 
 Deno.test("節點動作：pending／result 只帶自己的節點；result 狀態與 id 要對，超過 4KB 拒絕", async () => {
-  const { deps, calls } = fakeDeps(({ fn }) => (fn === "irori_relay_partner_op_pending" ? [{ id: "x" }] : { ok: true }));
+  const { deps, calls } = fakeDeps(({ fn }) => (fn === "asn_relay_partner_op_pending" ? [{ id: "x" }] : { ok: true }));
   assertEquals(await handleNodePartnerOpAction(deps, { id: "H" }, "partner_op_pending", { node: "W" }), { status: 200, body: { ops: [{ id: "x" }] } });
   const ok = await handleNodePartnerOpAction(deps, { id: "H" }, "partner_op_result", { id: ID, status: "ok", detail: "完成", result: { pid: 1 }, node: "W" });
   assertEquals(ok.status, 200);
@@ -97,7 +97,7 @@ Deno.test("節點動作：pending／result 只帶自己的節點；result 狀態
   // 中途回報階段：只收固定格式，節點取自金鑰
   const stage = await handleNodePartnerOpAction(deps, { id: "H" }, "partner_op_progress", { id: ID, detail: "stage:handoff", node: "W" });
   assertEquals(stage, { status: 200, body: { ok: true } });
-  assertEquals(calls[calls.length - 1], { fn: "irori_relay_partner_op_progress", args: { p_node: "H", p_id: ID, p_detail: "stage:handoff" } });
+  assertEquals(calls[calls.length - 1], { fn: "asn_relay_partner_op_progress", args: { p_node: "H", p_id: ID, p_detail: "stage:handoff" } });
   for (const bad of ["請前任寫交接", "stage:", "stage:Handoff", "stage:a b", 5, null]) assertEquals((await handleNodePartnerOpAction(deps, { id: "H" }, "partner_op_progress", { id: ID, detail: bad })).status, 400, String(bad));
   assertEquals((await handleNodePartnerOpAction(deps, { id: "H" }, "partner_op_progress", { id: "nope", detail: "stage:x" })).status, 400);
   assertEquals((await handleNodePartnerOpAction(deps, { id: "H" }, "partner_op_result", { id: "nope", status: "ok" })).status, 400);
@@ -106,8 +106,8 @@ Deno.test("節點動作：pending／result 只帶自己的節點；result 狀態
   assertEquals([big.status, big.body.error], [400, "bad_request"]);
   assertEquals((await handleNodePartnerOpAction(deps, { id: "H" }, "partner_op_result", { id: ID, status: "ok", result: [1] })).status, 400);
   assertEquals(calls.length, before, "超過上限不碰資料庫");
-  assertEquals(calls[0], { fn: "irori_relay_partner_op_pending", args: { p_node: "H" } });
-  assertEquals(calls[1], { fn: "irori_relay_partner_op_result", args: { p_node: "H", p_id: ID, p_status: "ok", p_detail: "完成", p_result: { pid: 1 } } });
+  assertEquals(calls[0], { fn: "asn_relay_partner_op_pending", args: { p_node: "H" } });
+  assertEquals(calls[1], { fn: "asn_relay_partner_op_result", args: { p_node: "H", p_id: ID, p_status: "ok", p_detail: "完成", p_result: { pid: 1 } } });
   assertEquals((await handleNodePartnerOpAction(deps, { id: "H" }, "nope", {})).status, 404);
 });
 

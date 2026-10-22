@@ -8,7 +8,7 @@ type Json = any;
 
 export const NODE_ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-// 跟 ASN 的 normalize_email、資料庫的 irori_relay_acct_email_ok 同一條規則（小寫、一個 @、不含空白／控制字元／檔名禁用字元）
+// 跟 ASN 的 normalize_email、資料庫的 asn_relay_acct_email_ok 同一條規則（小寫、一個 @、不含空白／控制字元／檔名禁用字元）
 export const EMAIL_RE = /^[^@\s\p{Cc}/:*?"<>|\\]+@[^@\s\p{Cc}/:*?"<>|\\]+$/u;
 export const MAX_ACCOUNTS = 20;
 export const PLAN_MAX = 30;
@@ -90,30 +90,30 @@ export async function handleAcctAction(deps: AcctDeps, me: { id: string }, actio
   if (action === "acct_report") {
     const accounts = parseReport(params);
     if (!accounts) return fail("bad_request");
-    const r = await call(deps, "irori_relay_acct_report", { p_node: me.id, p_accounts: accounts });
+    const r = await call(deps, "asn_relay_acct_report", { p_node: me.id, p_accounts: accounts });
     return isReply(r) ? r : { status: 200, body: { ok: true, count: r.data?.count ?? accounts.length } };
   }
   if (action === "acct_list") {
     if (typeof params?.node !== "string" || !NODE_ID_RE.test(params.node)) return fail("bad_request");
-    const r = await call(deps, "irori_relay_acct_list", { p_actor: me.id, p_node: params.node });
+    const r = await call(deps, "asn_relay_acct_list", { p_actor: me.id, p_node: params.node });
     return isReply(r) ? r : { status: 200, body: r.data };
   }
   if (action === "acct_switch") {
     const req = parseSwitch(params);
     if ("error" in req) return fail(req.error);
-    const r = await call(deps, "irori_relay_acct_switch", { p_actor: me.id, p_node: req.node, p_vendor: req.vendor, p_email: req.email });
+    const r = await call(deps, "asn_relay_acct_switch", { p_actor: me.id, p_node: req.node, p_vendor: req.vendor, p_email: req.email });
     if (isReply(r)) return r;
     await deps.ring(r.data.bell_topic);
     return { status: 200, body: { id: r.data.id } };
   }
   if (action === "acct_switch_pending") {
-    const r = await call(deps, "irori_relay_acct_switch_pending", { p_node: me.id });
+    const r = await call(deps, "asn_relay_acct_switch_pending", { p_node: me.id });
     return isReply(r) ? r : { status: 200, body: { requests: r.data?.requests ?? [] } };
   }
   if (action === "acct_switch_result") {
     const { id, status, detail } = params ?? {};
     if (typeof id !== "string" || !UUID_RE.test(id) || !["ok", "failed", "denied"].includes(status)) return fail("bad_request");
-    const r = await call(deps, "irori_relay_acct_switch_result", {
+    const r = await call(deps, "asn_relay_acct_switch_result", {
       p_node: me.id, p_id: id, p_status: status, p_detail: typeof detail === "string" ? detail.slice(0, 300) : null,
     });
     return isReply(r) ? r : { status: 200, body: { ok: true } };
@@ -122,7 +122,7 @@ export async function handleAcctAction(deps: AcctDeps, me: { id: string }, actio
     const ids = params?.ids;
     const list = Array.isArray(ids) ? ids : typeof ids === "string" ? ids.split(",") : null;
     if (!list || list.length < 1 || list.length > 20 || !list.every((i) => typeof i === "string" && UUID_RE.test(i))) return fail("bad_request");
-    const r = await call(deps, "irori_relay_acct_switch_status", { p_actor: me.id, p_ids: list });
+    const r = await call(deps, "asn_relay_acct_switch_status", { p_actor: me.id, p_ids: list });
     return isReply(r) ? r : { status: 200, body: r.data };
   }
   return { status: 404, body: { error: "not_found" } };

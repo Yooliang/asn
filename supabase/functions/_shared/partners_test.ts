@@ -37,7 +37,7 @@ Deno.test("handlePartnerSync：節點取自 me.id；成功回 partners；格式�
   assertEquals(r.status, 200);
   assertEquals(r.body, { ok: true, partners: [{ name: "甲", partner_id: "p_" + "a".repeat(20) }] });
   assertEquals(calls.length, 1);
-  assertEquals(calls[0][0], "irori_relay_partner_sync");
+  assertEquals(calls[0][0], "asn_relay_partner_sync");
   assertEquals(calls[0][1].p_node, "T");
   assertEquals(calls[0][1].p_windows, [{ name: "甲", session_id: S1, engine: null, model: null }]);
   const bad = await handlePartnerSync({ rpc }, { id: "T" }, { windows: [{ name: "" }] });
@@ -148,7 +148,7 @@ Deno.test("handlePartnerSucceed：沒簽章 401 且不打資料庫；使用者�
   assertEquals(calls.length, 0, "沒簽章不打資料庫");
   const r = await handlePartnerSucceed(deps, { id: "H" }, SIGNED, body);
   assertEquals(r, { status: 200, body: { ok: true } });
-  assertEquals(calls, [["irori_relay_partner_succeed", { p_user: UID, p_caller: "H", p_predecessor: PID1, p_node: "H2", p_name: "小文二號" }]]);
+  assertEquals(calls, [["asn_relay_partner_succeed", { p_user: UID, p_caller: "H", p_predecessor: PID1, p_node: "H2", p_name: "小文二號" }]]);
   assertEquals((await handlePartnerSucceed(deps, { id: "H" }, SIGNED, { node: "H" })).status, 400);
 });
 
@@ -170,7 +170,7 @@ Deno.test("handlePartnerList：要簽章；呼叫節點取自金鑰；回清單"
   assertEquals(calls.length, 0);
   const r = await handlePartnerList({ rpc, verifyJwt: okUser }, { id: "H" }, SIGNED);
   assertEquals(r, { status: 200, body: { partners: [{ partner_id: PID1, name: "小文" }] } });
-  assertEquals(calls, [["irori_relay_partner_list", { p_user: UID, p_caller: "H" }]]);
+  assertEquals(calls, [["asn_relay_partner_list", { p_user: UID, p_caller: "H" }]]);
   const mk = (data: unknown, error: unknown = null): RpcFn => () => Promise.resolve({ data, error });
   assertEquals((await handlePartnerList({ rpc: mk({ error: "forbidden" }), verifyJwt: okUser }, { id: "H" }, SIGNED)).status, 403);
   assertEquals((await handlePartnerList({ rpc: mk(null, { code: "42883" }), verifyJwt: okUser }, { id: "H" }, SIGNED)).status, 404);
