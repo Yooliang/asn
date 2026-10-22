@@ -1,8 +1,8 @@
 {
-  "version": "0.1.36",
-  "versionCode": 1036,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.36_android.apk",
-  "sha256": "4fee589f94fd0d229515dd546af4074931feb62d053d63791b9fb94e089aae62",
-  "notes": "- 夥伴管理：手機「⋯」選單與電腦版右鍵可看詳情、改名、切換模型、關閉視窗、接班換手（先請前任寫交接再換新視窗）、喚醒離線夥伴；電腦版對話框上方新增「喚醒」按鈕、切換模型改成真正的二級選單；手機「對話」分頁直接顯示最後使用的那一位；修正同一則訊息與震動提示重複出現；依廠商分頁的 ASN 圖示改成小機器人",
-  "bytes": 8859108
+  "version": "0.1.37",
+  "versionCode": 1037,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.37_android.apk",
+  "sha256": "9dac2ddc44c8fcfce5ce36123e638c33f970b4fed03f9ba1a8985c3d6d090921",
+  "notes": "- 首次登入引導：新帳號第一次登入先設「你的名字」（帳號已有名字就跳過）與這台設備的名稱；手機「設置」與電腦設定頁可以修改帳號名字；開發版不能再設定開機自動啟動",
+  "bytes": 8875492
 }
