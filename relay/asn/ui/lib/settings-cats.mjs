@@ -30,7 +30,7 @@ const join = parts => parts.filter(Boolean).join('、')
 export function catSummary(key, s = {}) {
   switch (key) {
     case 'me':
-      return s.hasUpload ? '已上傳大頭貼' : '自動產生的大頭貼'
+      return (s.hasUpload ? '已上傳大頭貼' : '自動產生的大頭貼') + (s.nowPlayingOn ? '、顯示正在聽的歌' : '')
     case 'accounts': {
       const n = Number.isInteger(s.accountCount) ? s.accountCount : 0
       if (!n) return s.accountCurrent ? `使用中：${s.accountCurrent}（還沒加入帳號庫）` : '還沒有加入過帳號'

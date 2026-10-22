@@ -34,6 +34,8 @@ pub struct Relay {
     /// 後台在回報回應裡說「本人要這台更新」：記下來等迴圈取走（只取一次，後台也只回一次）
     update_requested: AtomicBool,
     pub presence_wake: tokio::sync::Notify,
+    /// 正在聽的歌（預設關；開了才有值，回報時蓋過個人訊息）
+    pub now_playing: std::sync::Arc<crate::nowplaying::NowPlaying>,
 }
 
 /// 與 JS encodeURIComponent 相同：只留 A-Za-z0-9 -_.!~*'()
@@ -214,7 +216,7 @@ impl Relay {
         Relay {
             client: reqwest::Client::new(), base, key, node, window: Mutex::new(window), old: Mutex::new(vec![]), ack_agent: Mutex::new(HashMap::new()), unaddressed: Mutex::new(vec![]), unaddressed_acked: Mutex::new(vec![]), bridge_on: AtomicBool::new(false), owner_dir: Mutex::new(None),
             presence: Mutex::new(("online".into(), String::new())), presence_off: AtomicBool::new(false), presence_closed: AtomicBool::new(false), update_requested: AtomicBool::new(false),
-            presence_wake: tokio::sync::Notify::new(),
+            presence_wake: tokio::sync::Notify::new(), now_playing: Default::default(),
         }
     }
     /// 前端改了狀態或個人訊息：記下來並叫醒回報迴圈立刻回報
@@ -228,6 +230,7 @@ impl Relay {
             return false;
         }
         let (status, psm) = self.presence.lock().unwrap().clone();
+        let psm = crate::nowplaying::compose_psm(&psm, &self.now_playing.current());
         let body = build_presence_body(&self.window_name(), version, &status, &psm);
         match self.api_with("asn_presence", Some(body), timeout).await {
             Ok(v) => {
@@ -564,6 +567,36 @@ mod tests {
             }
         });
         (url, seen)
+    }
+
+    #[tokio::test]
+    async fn 在線回報_正在聽的歌_關著送自己的個人訊息_開了只送歌名加歌手() {
+        use crate::nowplaying::{MediaSource, Track};
+        struct Fake;
+        impl MediaSource for Fake {
+            fn playing(&self) -> Option<Track> {
+                Some(Track { title: "夜曲".into(), artist: "周杰倫".into() })
+            }
+        }
+        let (url, seen) = fake_server(200);
+        let r = Relay::new(url, "k".into(), "H".into(), "H-ASN".into());
+        r.set_presence("online", "寫程式");
+        r.now_playing.tick(&Fake); // 開關預設關：不讀、沒值
+        assert!(r.report_presence("0.1.13", Duration::from_secs(5)).await);
+        r.now_playing.set_enabled(true);
+        r.now_playing.tick(&Fake);
+        assert!(r.report_presence("0.1.13", Duration::from_secs(5)).await);
+        r.now_playing.set_enabled(false);
+        assert!(r.report_presence("0.1.13", Duration::from_secs(5)).await);
+        let s = seen.lock().unwrap();
+        assert!(s[0].contains(r#""psm":"寫程式""#) && !s[0].contains("正在聽") && !s[0].contains("夜曲"), "關著不送歌");
+        assert!(s[1].contains(r#""psm":"♪ 正在聽：夜曲 - 周杰倫""#), "{}", s[1]);
+        assert!(s[2].contains(r#""psm":"寫程式""#) && !s[2].contains("夜曲"), "關掉立刻恢復");
+        drop(s);
+        let v = build_presence_body("H-ASN", "0.1.13", "online", &crate::nowplaying::compose_psm("", "夜曲 - 周杰倫"));
+        let mut keys: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, ["psm", "status", "version", "window_name"], "沒有多餘欄位（無專輯圖、應用程式、進度）");
     }
 
     #[tokio::test]

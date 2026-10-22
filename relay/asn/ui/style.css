@@ -62,6 +62,7 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .status-sel{flex:none;font-size:12px;color:var(--muted);max-width:96px}
 /* 暱稱改名不合法的提示 */
 .nick-err{font-size:11px;color:var(--busy)}
+.me-np{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .psm-input{font-size:12px;color:var(--muted);font-style:italic}
 .search{padding:6px 8px;border-bottom:1px solid var(--line);background:var(--panel-soft)}
 .search{display:flex;gap:4px;align-items:center}

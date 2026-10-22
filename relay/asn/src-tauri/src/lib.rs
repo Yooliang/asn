@@ -21,6 +21,7 @@ mod identity;
 mod lastlogin;
 mod launch;
 mod names;
+mod nowplaying;
 mod nowin;
 mod relay;
 mod shot;
@@ -52,6 +53,8 @@ pub struct App {
     pub work_dir: PathBuf,
     pub data_dir: PathBuf,
     pub shot: Option<PathBuf>,
+    /// 叫醒「正在聽的歌」輪詢（開關切換時立刻讀一次）
+    pub now_wake: std::sync::mpsc::Sender<()>,
 }
 
 #[derive(Serialize)]
@@ -516,6 +519,18 @@ fn relay_attachment_reveal(dir_state: State<'_, SaveDir>) -> Result<(), String> 
 }
 
 /// 前端的狀態下拉與個人訊息：記在 Rust 端，由回報迴圈每 60 秒送出；改了就立刻回報一次
+/// 「顯示正在聽的歌」開關（預設關）。關著不讀系統媒體、不送；開了才讀。回傳目前的歌（沒在聽＝空字串）
+#[tauri::command]
+fn set_now_playing(app: State<'_, App>, on: bool) -> Result<String, String> {
+    let r = relay_of(&app)?;
+    let changed = r.now_playing.set_enabled(on);
+    let _ = app.now_wake.send(());
+    if changed {
+        r.presence_wake.notify_one();
+    }
+    Ok(r.now_playing.current())
+}
+
 #[tauri::command]
 fn set_presence(app: State<'_, App>, status: String, psm: String) -> Result<(), String> {
     relay_of(&app)?.set_presence(&status, &psm);
@@ -672,7 +687,9 @@ pub fn run() {
             }
         }
     }
-    let state = App { relay: relay_obj.clone(), init_error, node: node.clone(), work_dir: work_dir.clone(), data_dir, shot };
+    let (now_wake, now_wake_rx) = std::sync::mpsc::channel::<()>();
+    let now_wake_rx = std::sync::Mutex::new(Some(now_wake_rx));
+    let state = App { relay: relay_obj.clone(), init_error, node: node.clone(), work_dir: work_dir.clone(), data_dir, shot, now_wake };
     let anon_url = relay_obj.as_ref().zip(anon).and_then(|(r, a)| bell::ws_url(r.base(), &a));
     if let Some(r) = &relay_obj {
         r.set_owner_dir(work_dir.clone());
@@ -694,7 +711,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_partner_list, relay_partner_succeed, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, ads::ads_fetch, set_window_name, set_presence, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_partner_list, relay_partner_succeed, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_mod::claude_mod_status,
             codex_accounts::codex_account_current, usage::usage_summary,
@@ -760,6 +777,17 @@ pub fn run() {
                         h2.state::<bridge::Manager>().poll_handoff();
                     }
                 });
+            }
+            // 正在聽的歌：輪詢執行緒常駐，但開關預設關（前端交來開才讀）；--shot 截圖模式不啟動
+            if let (Some(r), Some(rx)) = (relay_obj.clone(), now_wake_rx.lock().unwrap().take()) {
+                if handle.state::<App>().shot.is_none() {
+                    let h = handle.clone();
+                    let r6 = r.clone();
+                    nowplaying::spawn_poller(r.now_playing.clone(), rx, move |v| {
+                        r6.presence_wake.notify_one();
+                        let _ = h.emit("asn:now-playing", v);
+                    });
+                }
             }
             if let Some(r) = relay_obj.clone() {
                 // 心跳：每 30 秒寫一次（格式同 self-recv.mjs），pid 用本程式
