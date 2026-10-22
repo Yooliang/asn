@@ -1,10 +1,10 @@
-// 登入帳號的動作（人類動作）：account_bootstrap、node_create、node_claim、遠端更新，以及雲端代理邀請（cloud_node_create／list／revoke）。
+// 登入帳號的動作（人類動作）：account_bootstrap、account_name（讀／改帳號層的名字）、node_create、node_claim、遠端更新，以及雲端代理邀請（cloud_node_create／list／revoke）。
 // 身分一律來自 Supabase 登入憑證（Authorization: Bearer <access_token>）驗證後的使用者，body 裡不收使用者 id；
 // node_claim 另外要 x-relay-key（現有節點金鑰）證明擁有；node_create 發新金鑰，只在這次回應裡出現一次，資料庫只存雜湊。
 // 所有資料庫存取經 SECURITY DEFINER 函式（只授權 service_role）。見 docs/AUTH.md。
 import { parseSelfName } from "./node_name.ts";
 
-export const ACCOUNT_ACTIONS = new Set(["account_bootstrap", "node_create", "node_claim", "node_update_request", "node_update_status", "cloud_node_create", "cloud_node_list", "cloud_node_revoke"]);
+export const ACCOUNT_ACTIONS = new Set(["account_bootstrap", "node_create", "node_claim", "node_update_request", "node_update_status", "cloud_node_create", "cloud_node_list", "cloud_node_revoke", "account_name"]);
 
 export interface AuthUser {
   id: string;
@@ -128,6 +128,23 @@ export async function handleAccountAction(
     const d = data as Record<string, unknown>;
     if (typeof d?.error === "string") return mapError(d.error);
     return { status: 200, body: { id: d.id, key, bell_topic: d.bell_topic, rotated: d.rotated === true } };
+  }
+
+  // 帳號層的「我的名字」（所有設備共用，migration 20261022090000_owner_sender_display.sql）：
+  // body 帶 name ＝改；沒帶＝讀。一律要本人的登入憑證（上面已驗過）。預設值取登入資料的 name，沒有就 email @ 前面那段。
+  if (action === "account_name") {
+    const o = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+    let name: string | null = null;
+    if (o.name !== undefined && o.name !== null) {
+      name = cleanDisplayName(o.name);
+      if (name === null) return { status: 400, body: { error: "bad_request" } };
+    }
+    const fallback = cleanDisplayName(user.name) ?? cleanDisplayName((user.email ?? "").split("@")[0]);
+    const { data, error } = await deps.rpc("asn_account_name", { p_user: user.id, p_name: name, p_default: fallback });
+    if (error) { console.error("account_name", error); return { status: 500, body: { error: "internal" } }; }
+    const d = data as Record<string, unknown>;
+    if (typeof d?.error === "string") return mapError(d.error);
+    return { status: 200, body: { name: d.name } };
   }
 
   // 遠端更新（見 supabase/migrations/20261021070000_asn_remote_update.sql）：只有自己帳號名下的節點；對別人的節點一律 not_found

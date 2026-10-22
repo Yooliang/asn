@@ -28,17 +28,13 @@ relay send(reply_to) <──── bridge.mjs <──stdout── 收發室 <─
    - 收發室回報 `SENT <id>` 才 ack；失敗（`FAIL`）、找不到 session、轉交逾時（2 分鐘），都寄一封說明給原寄件人再 ack。
    - 對方回覆（收發室收到的 `<cross-session-message>` 那一輪）→ `relay send` 帶 `reply_to` 寄回原寄件人，`from_agent` 填對方 session 名。
      之後同一 session 的追加回覆（10 分鐘內）也一併轉寄。
-   - 逾時（預設 10 分鐘）沒有經收發室收到回覆 → 先判斷要不要寄「［收發室］10 分鐘內沒有經收發室收到 X 的回覆（對方若已另外回信可忽略）」：
-     - 已經用 `send.mjs --reply-to` 回了（`replied/<id>` 記號）→ 不寄。
-     - 收件視窗在轉交之後曾用 `send.mjs` 寄過信給原寄件人（`sent/` 記號，不論有沒有帶 `--reply-to`；寄給同一視窗，或只寄給該節點都算）→ 視為已回覆，不寄。
-       取捨：只要寄過信給同一個人就算，不比對內容，所以對方寄的若是別件事，會少報一次「沒回」；寧可漏報也不誤報（誤報會被收件的人轉述成「他沒回」）。記號只比「轉交之後」的，舊的不算。
-     - 收件視窗**正在忙**（`claude agents --json` 的 `status` 符合 `ASN_BUSY_STATUS_RE`，預設 `busy|working|running`）→ **延後**不寄（log `no-reply notice deferred`）；
-       它變閒（idle 等）之後再過 `ASN_BUSY_GRACE_MS`（預設 2 分鐘）仍沒回、也沒有上述記號才寄；從轉交起算滿 `ASN_BUSY_MAX_MS`（預設 60 分鐘）無論如何寄一次。
-     - 收件視窗已不在名單（關掉了）→ 直接寄，文字改成「對方視窗「X」已關閉，沒有經收發室收到回覆」。
-     - 每封寄出的通知都記 log：`no-reply notice sent id=… (寄件人|收件視窗) reason=timeout|window-closed|busy-idle-grace|busy-max`；被合併掉的記 `suppressed`。
-     同一寄件人＋同一收件視窗 30 分鐘內只報一次（`ASN_NOREPLY_WINDOW_MS` 可調），被合併的下次報時帶「另有 N 封也還沒回」。
-   - **遲到的回覆不會被丟掉**：通知寄出（或被合併）後，這封信的對應仍保留 `ASN_LATE_KEEP_MS`（預設 24 小時），最多 `ASN_LATE_MAX`（預設 200）筆（超過清最舊）；
-     期間對方經收發室回覆，照常寄回原寄件人，內文前加一行「（遲到的回覆：X 在收發室寄出「沒有回覆」通知之後才回）」，寄回後清掉。同一視窗有還在等的信時，回覆先對給還在等的，沒有才對給保留中的（先進先出）。
+   - **不再通知寄件人「沒有回覆」**（小良哥 10/22 裁示：寄件人看已讀狀態就知道）。逾時（預設 10 分鐘）沒收到回覆，只是把這封信轉成「等遲到回覆」並記 log
+     `reply wait over id=… -> 收件視窗: no notice to sender`；已經回了（`replied/<id>` 記號）或收件視窗在轉交後寄過信給原寄件人（`sent/` 記號）就直接清掉，也記 log。
+   - **收件視窗提醒**：`reply=yes` 的信轉交後 `ASN_NUDGE_MS`（預設 5 分鐘）還沒回、收件視窗狀態是 `idle` → 提醒收件視窗一次：
+     `（收發室提醒）你還沒回覆 <寄件人說明> 的信 <信件id>，若已處理完請用 asn_send 寄回結果`（log `nudged window`）。忙碌（或狀態不是 idle，例如使用者正在打字）不插話，下一輪再看；已回覆就不提醒；`reply=no` 的信、收發室系統信不提醒。
+   - **來信信頭**：第一行機器可讀（回信位址 `from=` 本人是 `u:xxxxxxxxxxxx`，其他是 `節點/視窗名`），第二行 `寄件人：…` 說明，`reply=yes` 的信（收件是 Claude 視窗）第三行 `【要回信】…`。格式固定，規格見 `docs/design/MAIL-HEADER.md`。
+   - **遲到的回覆不會被丟掉**：逾時後這封信的對應仍保留 `ASN_LATE_KEEP_MS`（預設 24 小時），最多 `ASN_LATE_MAX`（預設 200）筆（超過清最舊）；
+     期間對方經收發室回覆，照常（原文，不加說明）寄回原寄件人，寄回後清掉。同一視窗有還在等的信時，回覆先對給還在等的，沒有才對給保留中的（先進先出）。
    - **對應表跨重啟（`WORK_DIR/pending.json`）**：還在等回覆、已通知「沒回」的信（含群組訊息）的對應，每次變動就原子寫入（先寫暫存檔再 rename），只存信件 id、寄件節點／視窗、收件視窗、時間、狀態、群組資訊，**不存信件內文**。橋啟動時載回並清掉超過 `ASN_LATE_KEEP_MS` 的；檔案損毀就忽略（log 記 `pending.json unreadable, ignored`）並重新開始。所以更新程式、改設定而重啟橋，長任務視窗之後才到的回覆仍會寄回。
    - **對不上的回覆轉給最近交辦者**：收發室另記每個視窗「最近一次交辦它的寄件人」（`lastRequester`，同存於 pending.json，保留同樣的期限；「不需回覆」信與收發室系統信不算）。視窗的回覆找不到對應的信時（例如長任務每小時回一則進度），若 24 小時內有這位寄件人，就寄給他（`reply_to` 用那封最近的信 id，內文前加「（收發室：這則回覆對不上特定來信，依最近一次交辦轉給你）」，log 記 `-> last requester`）；沒有才丟棄，log 寫 `dropped: no pending mail and no requester…`。
    - **更新 send.mjs 時，每台機器的橋也要 `git pull` 並重啟**（`git pull` 兩個檔一起換，但正在跑的舊橋行程要重啟才換新）：新 send.mjs 的 `--no-reply` 不在內文留標記，還在跑舊橋（只看內文）的機器會對只是告知的信誤報「沒有收到回覆」。
@@ -66,10 +62,8 @@ relay send(reply_to) <──── bridge.mjs <──stdout── 收發室 <─
 | `ASN_RELAY_ALLOW` | 逗號分隔，額外允許轉交的 session 名（測試用；預設只允許名單內的互動式 session） |
 | `ASN_MAILBOX_NAME` / `ASN_MAILBOX_MODEL` | 收發室名稱／模型 |
 | `ASN_REPLY_TIMEOUT_MS` | 等回覆逾時（預設 600000） |
-| `ASN_NOREPLY_WINDOW_MS` | 逾時通知合併視窗（預設 1800000）；`ASN_BRIDGE_TICK_MS` 逾時檢查間隔（預設 5000，測試用） |
-| `ASN_LATE_KEEP_MS` / `ASN_LATE_MAX` | 寄過逾時通知後，保留信件對應以便寄回遲到回覆的時間（預設 86400000＝24 小時）／最多筆數（預設 200） |
-| `ASN_BUSY_STATUS_RE` | 視為「忙碌」的 session status 正規式（預設 `^(busy\|working\|running)$`，不分大小寫）。**實機 `claude agents --json` 的 status 值請對照後調整** |
-| `ASN_BUSY_GRACE_MS` / `ASN_BUSY_MAX_MS` | 對方忙碌時延後通知：閒下來後的寬限（預設 120000）／從轉交起算的總上限（預設 3600000） |
+| `ASN_NUDGE_MS` | 轉交後多久還沒回就提醒收件視窗一次（預設 300000＝5 分鐘）；`ASN_BRIDGE_TICK_MS` 逾時檢查間隔（預設 5000，測試用） |
+| `ASN_LATE_KEEP_MS` / `ASN_LATE_MAX` | 逾時後，保留信件對應以便寄回遲到回覆的時間（預設 86400000＝24 小時）／最多筆數（預設 200） |
 | `CLAUDE_BIN` | claude 執行檔（預設 `claude`） |
 
 Log：`~/.irori-relay/machine-<ID>/bridge.log`（每個轉交、每一輪收發室的耗時與費用都有一行）。
@@ -121,7 +115,7 @@ powershell -File install-task.ps1 -Uninstall           # 移除
 | **每則成本（收發室，暖）** | 約 **$0.01**（轉交＋收回覆），不含目標 session 自己的用量 |
 | 無 `to_agent` → 預設 session | 通 |
 | 不存在的 `to_agent` | 7 s 內寄回「找不到…（目前可達：…）」 |
-| 對方不回覆 | 逾時後寄「對方沒有回覆」（測試用 45 s 逾時，實際預設 10 分鐘） |
+| 對方不回覆 | 逾時後不通知寄件人（寄件人看已讀狀態）；5 分鐘閒置沒回會提醒收件視窗一次 |
 | 信件內偽造橋接指令＋要求轉給真 session | 沒有被執行，只照常轉交給指定的測試 session |
 | 收發室 worker 被強殺 | 約 2 秒自動重啟，之後往返正常（冷啟動那輪 19.5 s） |
 | roster 回報 | H 金鑰單次 POST 成功（200，count=4）；測試節點非 `can_invite` 回 403 forbidden（符合後端規則） |

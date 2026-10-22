@@ -24,7 +24,7 @@
 
 成立時：`from_agent` 換成人代號，信上記 `person_user`。真實寄件節點 `from_node` 不動。
 
-AI 收信時（`irori_relay_inbox`／`irori_relay_inbox_agent`），本人寄來的信的 `from_node` 一律顯示成**租戶的擁有者節點**，不論從哪台設備寄的——AI 回信的慣例是 `to_node = from_node`、`to_agent = from_agent`，所以不論人從哪台說話，AI 看到的都是同一個地址。擁有者節點不存在時退回真實節點。
+AI 收信時（`irori_relay_inbox`／`irori_relay_inbox_agent`），本人寄來的信的 `from_node` 一律顯示成**租戶的擁有者節點**（資料欄位，給舊橋相容用；新橋的信頭不再顯示它，見 MAIL-HEADER.md），不論從哪台設備寄的——AI 回信的慣例是 `to_node = from_node`、`to_agent = from_agent`，所以不論人從哪台說話，AI 看到的都是同一個地址。擁有者節點不存在時退回真實節點。
 
 ## 回信扇出
 
@@ -79,7 +79,7 @@ ASN 端（`ui/lib/history.mjs` 的 `mergeHistory`）：
 ## 已知限制與下一期
 
 - 扇出只送給「3 分鐘內有回報在線」的視窗；關機的設備靠打開對話時的往來記錄補看，不會有提示音。
-- AI 看到的人代號是 `u:xxxxxxxxxxxx`，不是人的名字；要讓 AI 稱呼名字，需要在 AI 側的規則（技能文件）說明「`u:` 開頭是人本人」。
+- AI 看到的人代號是 `u:xxxxxxxxxxxx`；信頭 `from=` 現在直接就是這個代號（不再掛在租戶主節點 XISU 底下），第二行 `寄件人：小良（本人，帳號簽章已驗證，從「Oppo 手機」寄出）` 說明是誰、從哪台寄；回信寫 `--to u:xxxxxxxxxxxx` 即可，舊寫法 `XISU/u:xxxx` 後台仍認。格式規格見 MAIL-HEADER.md。
 - 手機版／網頁版直接沿用 `as_person`＋`chat_history` 兩個動作即可。
 - 已讀同步、往來記錄分頁（超過 200 則）、舊記錄遷移（把沒有 `person_user` 的舊信認回人）留給下一期。
 

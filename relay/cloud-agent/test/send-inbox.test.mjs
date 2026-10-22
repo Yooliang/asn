@@ -76,3 +76,35 @@ test('inbox：預設只列未處理；--done 後消失；--all 還看得到；�
     assert.match((await run('inbox.mjs', ['--unread'], { env })).stdout, /沒有未處理/)
   } finally { await st.close(); rm(root) }
 })
+
+test('send：--to 本人位址 u:xxxxxxxxxxxx 放行（與節點無關）；格式不對的 u: 位址仍擋', async () => {
+  const st = await startFakeRelay()
+  const { root, env } = tmpEnv(st.url, KEY)
+  try {
+    const r = await run('send.mjs', ['--to', 'u:3cda66252c34', '--body', '收到', '--no-reply', '--reply-to', U(5)], { env })
+    assert.equal(r.code, 0, r.stderr)
+    assert.equal(st.sent[0].to_node, 'u:3cda66252c34')
+    for (const bad of ['u:3CDA66252C34', 'u:3cda6625', 'u:zzzzzzzzzzzz']) {
+      assert.equal((await run('send.mjs', ['--to', bad, '--body', 'x', '--no-reply'], { env })).code, 1, bad)
+    }
+    assert.equal(st.sent.length, 1)
+  } finally { await st.close(); rm(root) }
+})
+
+test('inbox：本人的信 from= 是人代號、第二行是寄件人說明；舊信（沒有說明欄位）照舊、不含節點代號 XISU', async () => {
+  const st = await startFakeRelay()
+  const { root, env, cfg } = tmpEnv(st.url)
+  try {
+    fs.mkdirSync(cfg.mailDir, { recursive: true })
+    const rows = [
+      { id: U(1), from_node: 'XISU', from_agent: 'u:3cda66252c34', trust: 'owner', body: '本人說', expects_reply: true, created_at: 'T', sender_display: '小良', sender_device: 'Oppo 手機' },
+      { id: U(2), from_node: 'W', from_agent: 'W-政策', trust: 'member', body: '成員說', expects_reply: false, created_at: 'T' },
+    ]
+    fs.writeFileSync(cfg.inboxFile, rows.map(r => JSON.stringify(r)).join('\n') + '\n')
+    const r = await run('inbox.mjs', ['--all'], { env })
+    assert.equal(r.code, 0, r.stderr)
+    assert.match(r.stdout, /from=u:3cda66252c34 \(要回信\)[^\n]*\n寄件人：小良（本人，帳號簽章已驗證，從「Oppo 手機」寄出）\n本人說/)
+    assert.match(r.stdout, /from=W\/W-政策 \(只是告知\)[^\n]*\n寄件人：W-政策（成員身分）\n成員說/)
+    assert.ok(!r.stdout.includes('XISU'))
+  } finally { await st.close(); rm(root) }
+})

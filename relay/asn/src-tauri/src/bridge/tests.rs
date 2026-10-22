@@ -262,11 +262,9 @@ fn cfg(work: &std::path::Path, sessions: &std::path::Path) -> Config {
     c.status_dir = work.join("mod-status"); // 測試不碰真的 ~/.asn
     c.extra_allow = vec![];
     c.reply_timeout_ms = 600_000;
-    c.notice_window_ms = 1_800_000;
     c.late_keep_ms = 86_400_000;
     c.late_max = 200;
-    c.busy_grace_ms = 120_000;
-    c.busy_max_ms = 3_600_000;
+    c.nudge_ms = 300_000;
     c.forward_timeout_ms = 120_000;
     c.pull_backoff_ms = vec![5_000, 10_000, 20_000];
     // 下載指令與群組「要看更多」的指令固定寫死（不依執行檔位置去找）
@@ -398,7 +396,8 @@ async fn 收信轉交_內文包在外部資料區塊_sent_之後才_ack() {
     assert_eq!(said.len(), 1);
     assert!(said[0].starts_with(&format!("[BRIDGE-FORWARD nonce={NONCE} id={} to=T-乙]\n<<<MAIL\n", uid(1))));
     assert!(said[0].ends_with("\nMAIL>>>"));
-    assert!(said[0].contains(&format!("[RELAY 來信] trust=member from=W/W-政策 to=T-乙 id={} engine=claude reply=yes\n內文-1", uid(1))));
+    assert!(said[0].contains(&format!("[RELAY 來信] trust=member from=W/W-政策 to=T-乙 id={} engine=claude reply=yes\n寄件人：W-政策（成員身分）\n【要回信】回信位址=W/W-政策 信件編號={}：", uid(1), uid(1))));
+    assert!(said[0].contains("\n內文-1"));
     assert!(h.fr.acked().is_empty(), "worker 還沒回報 SENT 之前不 ack");
     h.core.on_worker_line(res(&format!("SENT {}", uid(1))), T0 + 50).await;
     assert_eq!(h.fr.acked(), vec![uid(1)]);
@@ -603,31 +602,26 @@ async fn 視窗自己加的回覆抬頭會被拆掉_並用它指的信件() {
 }
 
 #[tokio::test]
-async fn 逾時沒回_寄通知_信保留_同寄件人加視窗_30_分鐘內只報一次() {
+async fn 逾時沒回_不再通知寄件人_信保留等遲到的回覆() {
     let mut h = harness(&[("T-乙", "idle")]).await;
     h.forward(mail(1, json!({})), T0).await;
     h.forward(mail(2, json!({})), T0 + 1000).await;
-    h.core.tick(T0 + 599_000).await;
-    assert!(h.fr.sent().is_empty());
     h.core.tick(T0 + 601_500).await;
-    let s = h.fr.sent();
-    assert_eq!(s.len(), 1, "第二封被合併");
-    assert!(s[0]["body"].as_str().unwrap().starts_with("[收發室] 10 分鐘內沒有經收發室收到 T-乙 的回覆（對方若已另外回信可忽略）"));
-    assert!(s[0]["body"].as_str().unwrap().ends_with(super::mail::NO_REPLY_TIP));
-    assert!(h.core.log.has("no-reply notice sent") && h.core.log.has("reason=timeout") && h.core.log.has("suppressed"));
-    assert!(h.core.pending.iter().all(|p| p.state == State::Notified), "通知後信仍保留，等遲到的回覆");
+    assert!(h.fr.sent().is_empty(), "寄件人看已讀狀態，不再收「沒有回覆」通知");
+    assert!(h.core.log.has("no notice to sender"));
+    assert!(h.core.pending.iter().all(|p| p.state == State::Notified), "信仍保留，等遲到的回覆");
 }
 
 #[tokio::test]
-async fn 遲到的回覆照寄_帶說明_寄後清掉() {
+async fn 遲到的回覆照寄_原文不加說明_寄後清掉() {
     let mut h = harness(&[("T-乙", "idle")]).await;
     h.forward(mail(1, json!({})), T0).await;
     h.core.tick(T0 + 601_000).await;
     h.core.on_worker_line(res(&reply_block("T-乙", "我來晚了")), T0 + 700_000).await;
     let s = h.fr.sent();
-    assert_eq!(s.len(), 2);
-    assert_eq!(s[1]["body"], "（遲到的回覆：T-乙 在收發室寄出「沒有回覆」通知之後才回）\n我來晚了");
-    assert_eq!(s[1]["reply_to"], uid(1));
+    assert_eq!(s.len(), 1, "只有這封回信，沒有通知");
+    assert_eq!(s[0]["body"], "我來晚了");
+    assert_eq!(s[0]["reply_to"], uid(1));
     assert!(h.core.pending.is_empty());
 }
 
@@ -635,7 +629,6 @@ async fn 遲到的回覆照寄_帶說明_寄後清掉() {
 async fn 遲到回覆的保留期與筆數上限() {
     let mut h = harness(&[("T-乙", "idle")]).await;
     h.core.cfg.late_max = 2;
-    h.core.cfg.notice_window_ms = 0;
     for n in 1..=3 {
         h.forward(mail(n, json!({"from_agent": format!("W-{n}")})), T0).await;
     }
@@ -652,45 +645,110 @@ async fn 遲到回覆的保留期與筆數上限() {
 }
 
 #[tokio::test]
-async fn 對方視窗已關閉_逾時直接寄_文字說明已關閉() {
+async fn 對方視窗已關閉或忙碌_逾時都不通知寄件人() {
     let mut h = harness(&[("T-乙", "idle"), ("T-甲", "idle")]).await;
     h.forward(mail(1, json!({})), T0).await;
     std::fs::remove_file(h.sessions.path().join("5000.json")).unwrap();
     h.core.refresh_roster(T0 + 1000).await;
     h.core.tick(T0 + 601_000).await;
-    assert_eq!(h.fr.sent()[0]["body"], "[收發室] 對方視窗「T-乙」已關閉，沒有經收發室收到回覆");
-    assert!(h.core.log.has("reason=window-closed"));
-}
-
-#[tokio::test]
-async fn 對方忙碌_逾時延後_閒下來過寬限才寄_忙到上限一定寄() {
-    let mut h = harness(&[("T-乙", "busy")]).await;
-    h.forward(mail(1, json!({})), T0).await;
-    h.core.tick(T0 + 601_000).await;
-    assert!(h.fr.sent().is_empty());
-    assert!(h.core.log.has("no-reply notice deferred"));
-    // 變閒：先記下閒下來的時間，過寬限仍沒回才寄
-    put_session(h.sessions.path(), 5000, "T-乙", "idle", 9);
-    h.core.refresh_roster(T0 + 700_000).await;
-    h.core.tick(T0 + 700_000).await;
-    assert!(h.fr.sent().is_empty());
-    h.core.tick(T0 + 700_000 + 119_000).await;
-    assert!(h.fr.sent().is_empty());
-    h.core.tick(T0 + 700_000 + 121_000).await;
-    let s = h.fr.sent();
-    assert_eq!(s.len(), 1);
-    assert!(s[0]["body"].as_str().unwrap().contains("先前一直在忙"));
-    assert!(h.core.log.has("reason=busy-idle-grace"));
-
-    // 一直忙：到總上限無論如何寄一次
+    assert!(h.fr.sent().is_empty(), "視窗關了也不通知");
+    // 忙碌、一直忙到很久：同樣不通知
     let mut g = harness(&[("T-乙", "working")]).await;
     g.forward(mail(1, json!({})), T0).await;
     g.core.tick(T0 + 601_000).await;
-    g.core.tick(T0 + 3_599_000).await;
-    assert!(g.fr.sent().is_empty());
     g.core.tick(T0 + 3_601_000).await;
-    assert_eq!(g.fr.sent().len(), 1);
-    assert!(g.core.log.has("reason=busy-max"));
+    assert!(g.fr.sent().is_empty());
+}
+
+// 守門：任何情況都不再寄「[收發室] … 沒有經收發室收到回覆」給寄件人
+#[tokio::test]
+async fn 守門_任何情況都不寄沒有收到回覆的通知() {
+    for st in ["idle", "busy", "working"] {
+        let mut h = harness(&[("T-乙", st)]).await;
+        h.forward(mail(1, json!({})), T0).await;
+        for t in [300_001u64, 601_000, 3_700_000, 90_000_000] {
+            h.core.tick(T0 + t).await;
+        }
+        let bad = h.fr.sent().iter().any(|m| m["body"].as_str().unwrap_or("").contains("沒有經收發室收到"));
+        assert!(!bad, "status={st}");
+        assert!(h.fr.sent().is_empty(), "status={st}");
+    }
+}
+
+// ---- 收件視窗提醒（轉交後 5 分鐘、閒置、沒回 → 提醒一次）----
+
+#[tokio::test]
+async fn 收件視窗提醒_五分鐘閒置沒回_只提醒一次() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.forward(mail(1, json!({})), T0).await;
+    let base = h.said().len();
+    h.core.tick(T0 + 299_000).await;
+    assert_eq!(h.said().len(), base, "未滿 5 分鐘不提醒");
+    h.core.tick(T0 + 301_000).await;
+    let said = h.said();
+    assert_eq!(said.len(), base + 1);
+    assert!(said[base].contains(&format!("\n（收發室提醒）你還沒回覆 W-政策（成員身分） 的信 {}，若已處理完請用 asn_send 寄回結果\n", uid(1))), "{}", said[base]);
+    h.core.tick(T0 + 350_000).await;
+    h.core.tick(T0 + 450_000).await;
+    assert_eq!(h.said().len(), base + 1, "只提醒一次");
+    h.core.tick(T0 + 601_000).await;
+    assert!(h.fr.sent().is_empty(), "10 分鐘也不通知寄件人");
+}
+
+#[tokio::test]
+async fn 收件視窗提醒_回覆後不再提醒() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.forward(mail(1, json!({})), T0).await;
+    let base = h.said().len();
+    h.core.on_worker_line(res(&reply_block("T-乙", "好了")), T0 + 100_000).await;
+    h.core.tick(T0 + 301_000).await;
+    h.core.tick(T0 + 601_000).await;
+    assert_eq!(h.said().len(), base, "已回覆就不提醒");
+    assert_eq!(h.fr.sent().len(), 1, "只有那封回信");
+}
+
+#[tokio::test]
+async fn 收件視窗提醒_忙碌或不是閒置不插話_閒下來才提醒() {
+    let mut h = harness(&[("T-乙", "busy")]).await;
+    h.forward(mail(1, json!({})), T0).await;
+    let base = h.said().len();
+    h.core.tick(T0 + 301_000).await;
+    h.core.tick(T0 + 400_000).await;
+    assert_eq!(h.said().len(), base, "忙碌中不插話");
+    put_session(h.sessions.path(), 5000, "T-乙", "idle", 9);
+    h.core.refresh_roster(T0 + 450_000).await;
+    h.core.tick(T0 + 460_000).await;
+    assert_eq!(h.said().len(), base + 1, "閒下來後提醒一次");
+    // reply=no 的信不提醒
+    let mut g = harness(&[("T-乙", "idle")]).await;
+    g.forward(mail(1, json!({"expects_reply": false})), T0).await;
+    let b2 = g.said().len();
+    g.core.tick(T0 + 301_000).await;
+    assert_eq!(g.said().len(), b2);
+}
+
+// ---- 信頭／寄件人說明／要回信那行 ----
+
+#[tokio::test]
+async fn 轉交的信頭_本人信用人代號位址_不含_xisu_要回信行格式固定() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    let alias = "u:3cda66252c34";
+    h.forward(mail(1, json!({"trust": "owner", "from_node": "XISU", "from_agent": alias, "sender_display": "小良", "sender_device": "Oppo 手機"})), T0).await;
+    let t = h.said().iter().filter_map(|x| x.split("<<<MAIL\n").nth(1).map(|b| b.to_string())).next().unwrap();
+    let lines: Vec<&str> = t.lines().collect();
+    assert_eq!(lines[0], format!("[RELAY 來信] trust=owner from={alias} to=T-乙 id={} engine=claude reply=yes", uid(1)));
+    assert_eq!(lines[1], "寄件人：小良（本人，帳號簽章已驗證，從「Oppo 手機」寄出）");
+    assert_eq!(lines[2], format!("【要回信】回信位址={alias} 信件編號={}：在視窗裡直接回答，對方看不到；請用 asn_send（to=回信位址、reply_to=信件編號）或 asn-cli send --to {alias} --reply-to {} --no-reply 寄回。", uid(1), uid(1)));
+    assert!(!lines[0].contains("XISU") && !lines[1].contains("XISU"));
+    // member：說明行含「成員身分」、不含節點代號；reply=no 沒有要回信那行
+    let mut g = harness(&[("T-乙", "idle")]).await;
+    g.forward(mail(2, json!({"from_node": "H", "from_agent": "asn", "sender_device": "小良的家用機", "sender_engine": "claude", "expects_reply": false})), T0).await;
+    let t = g.said().iter().filter_map(|x| x.split("<<<MAIL\n").nth(1).map(|b| b.to_string())).next().unwrap();
+    let lines: Vec<&str> = t.lines().collect();
+    assert!(lines[0].contains("trust=member from=H/asn "));
+    assert_eq!(lines[1], "寄件人：asn（「小良的家用機」上的 Claude 視窗，成員身分）");
+    assert!(!lines[1].contains('H') || lines[1].contains("成員身分"));
+    assert!(!t.contains("【要回信】"));
 }
 
 #[tokio::test]
@@ -713,7 +771,8 @@ async fn 視窗在轉交後曾寄信給原寄件人_視為已回覆_舊記號不
     // 比轉交時間早的記號不算
     std::fs::write(h.work.path().join("sent").join(super::core::sent_mark_name("T-乙", "W", "W-政策")), (T0 + 500).to_string()).unwrap();
     h.core.tick(T0 + 700_000).await;
-    assert_eq!(h.fr.sent().len(), 1, "舊記號不算已回覆，照寄通知");
+    assert!(h.fr.sent().is_empty(), "舊記號不算已回覆：信轉成等遲到的回覆，但不通知寄件人");
+    assert!(h.core.pending.iter().all(|p| p.state == State::Notified));
     // 轉交之後才寄的（只寄給該節點也算）
     let mut g = harness(&[("T-乙", "idle")]).await;
     g.forward(mail(1, json!({})), T0 + 1000).await;
@@ -982,7 +1041,7 @@ async fn 重啟_已通知沒回的信_遲到回覆仍寄回_損毀檔案忽略()
     let sink2 = Arc::new(FakeSink::default());
     let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), sink2, T0 + 700_000);
     c2.on_worker_line(res(&reply_block("T-乙", "遲到")), T0 + 700_000).await;
-    assert!(h.fr.sent().last().unwrap()["body"].as_str().unwrap().starts_with("（遲到的回覆："));
+    assert!(h.fr.sent().last().unwrap()["body"].as_str().unwrap()== "遲到");
     // 損毀
     std::fs::write(h.work.path().join("pending.json"), "{壞掉").unwrap();
     let c3 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0);

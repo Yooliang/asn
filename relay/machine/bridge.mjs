@@ -12,7 +12,7 @@ import path from 'node:path'
 import { unaddressedWindowNote } from './unaddressed.mjs'
 import { createLog } from './safe-log.mjs'
 import { contextText, createRooms, parseMember, roomText, roomUuid, NO_REPLY_RE as ROOM_NO_REPLY_RE } from './rooms.mjs'
-import { NO_REPLY_TIP, mailHead, parseSendHead, stripReplyHead, wantsReply } from './mail-format.mjs'
+import { mailHead, parseSendHead, mailPreamble, senderLine, stripReplyHead, wantsReply } from './mail-format.mjs'
 import { bodyWithNotes } from './attach-format.mjs'
 import { createLauncher } from './launcher.mjs'
 import { detectAgentTools } from '../shared/agent-tools-detect.mjs'
@@ -38,13 +38,10 @@ const ROSTER_MS = Number(envGet(process.env, 'ROSTER_MS') || 60_000)
 const HEARTBEAT_MS = 25_000
 const MAX_BACKOFF_MS = 30_000
 const REPLY_TIMEOUT_MS = Number(envGet(process.env, 'REPLY_TIMEOUT_MS') || 600_000)
-const NOTICE_WINDOW_MS = Number(envGet(process.env, 'NOREPLY_WINDOW_MS') || 1_800_000)   // 同一寄件人＋同一收件視窗，這段時間內只報一次「沒有回覆」
-// 逾時之後的處理：遲到回覆保留期／筆數上限；對方忙碌時延後通知（閒下來後的寬限、總上限）
+// 逾時之後的處理：遲到回覆保留期／筆數上限（不再通知寄件人，寄件人看已讀狀態）
 const LATE_KEEP_MS = Number(envGet(process.env, 'LATE_KEEP_MS') || 86_400_000)
 const LATE_MAX = Number(envGet(process.env, 'LATE_MAX') || 200)
-const BUSY_GRACE_MS = Number(envGet(process.env, 'BUSY_GRACE_MS') || 120_000)
-const BUSY_MAX_MS = Number(envGet(process.env, 'BUSY_MAX_MS') || 3_600_000)
-const BUSY_STATUS_RE = new RegExp(envGet(process.env, 'BUSY_STATUS_RE') || '^(busy|working|running)$', 'i')
+const NUDGE_MS = Number(envGet(process.env, 'NUDGE_MS') || 300_000)   // 轉交後多久還沒回就提醒收件視窗一次（reply=yes 的信；只提醒一次）
 const TICK_MS = Number(envGet(process.env, 'BRIDGE_TICK_MS') || 5_000)
 const FORWARD_TIMEOUT_MS = Number(envGet(process.env, 'FORWARD_TIMEOUT_MS') || 120_000)   // 收發室多久沒回報 SENT 就算轉交逾時
 const LOG_FILE = envGet(process.env, 'RELAY_LOG') || path.join(WORK_DIR, 'bridge.log')
@@ -147,7 +144,6 @@ const lastRequester = {}           // 收件視窗 -> {from_node, from_agent, ma
   if (st.pending.length || Object.keys(st.lastRequester).length || st.dropped)
     log(`pending restored: ${st.pending.length} (waiting ${st.pending.length - n}, notified ${n}), lastRequester ${Object.keys(st.lastRequester).length}, expired/invalid dropped ${st.dropped}`)
 }
-const noticed = new Map()     // 寄件人|收件視窗 -> {t, skipped}（逾時通知合併用）
 // 要不要計時看信件的 expects_reply 欄位（寄件人明說；判斷在 mail-format.mjs 的 wantsReply）：true／false 就只看欄位，
 // 欄位是 null（舊版寄件工具、舊信）才退回看內文的「（不需回覆）」「[no-reply]」標記——過渡期相容，之後拿掉。
 // 寄件人是任何節點的收發室（<節點>-收發室）：系統信，照常轉交但不計時、不互相寄通知
@@ -259,54 +255,33 @@ async function onReply(from, text, mailId) {
     log(`room reply from ${from} -> room=${p.room.id} #${p.room.seq} posted=${ok}`)
     return
   }
-  const ok = await sendBack(p, late ? `（遲到的回覆：${p.target} 在收發室寄出「沒有回覆」通知之後才回）\n${text}` : text, from, expectsReply)
+  const ok = await sendBack(p, text, from, expectsReply)
   log(`${late ? 'late ' : ''}reply from ${from} -> ${p.mail.from_node} id=${p.mail.id} sent=${ok} (${Date.now() - p.t0}ms total)`)
 }
 
-// reason：timeout（照常逾時）／window-closed（對方視窗已不在名單）／busy-idle-grace（忙完閒下來後寬限到了）／busy-max（忙碌延後到總上限）
-async function noticeNoReply(p, now, reason) {
-  const key = `${p.mail.from_node}/${p.mail.from_agent ?? ''}|${p.target}`
-  const prev = noticed.get(key)
-  if (prev && now - prev.t < NOTICE_WINDOW_MS) { prev.skipped++; log(`no-reply notice suppressed id=${p.mail.id} (${key})`); return }
-  const more = prev?.skipped ? `；另有 ${prev.skipped} 封也還沒回` : ''
-  noticed.set(key, { t: now, skipped: 0 })
-  const mins = Math.max(1, Math.round((now - p.t) / 60000))
-  // timeout 與 busy 兩種結尾多一句：只是告知的信別等回信（寄件時用 --no-reply／代寄寫 reply=no），就不會有這個提醒
-  const text = reason === 'window-closed' ? `[收發室] 對方視窗「${p.target}」已關閉，沒有經收發室收到回覆${more}`
-    : reason === 'timeout' ? `[收發室] ${Math.round(REPLY_TIMEOUT_MS / 60000)} 分鐘內沒有經收發室收到 ${p.target} 的回覆（對方若已另外回信可忽略）${more}。${NO_REPLY_TIP}`
-    : `[收發室] ${p.target} 先前一直在忙，等了約 ${mins} 分鐘仍沒有經收發室收到回覆（對方若已另外回信可忽略）${more}。${NO_REPLY_TIP}`
-  const ok = await sendBack(p, text)
-  log(`no-reply notice sent id=${p.mail.id} (${key}) reason=${reason} sent=${ok}`)
-}
-
 const agentOf = name => agents.find(a => a.name === name)
-const isBusy = a => !!a && BUSY_STATUS_RE.test(String(a.status ?? ''))
 
-// 一封「超過等待時間還沒回」的信：決定現在寄通知、延後、還是不用寄
-async function judgeTimeout(id, p, now) {
+// 一封「超過等待時間還沒回」的信：不再通知寄件人（寄件人看已讀狀態就知道；小良哥 10/22 裁示）。
+// 只是把信轉成 notified（保留著等遲到的回覆照常寄回），已經回過的直接清掉
+function settleTimeout(id, p, now) {
   if (p.replied) { pending.delete(id); return }
-  if (repliedDirectly(id)) { pending.delete(id); log(`no-reply notice skipped id=${id}: ${p.target} replied directly (send.mjs --reply-to)`); return }
-  if (sentToSender(p)) { pending.delete(id); log(`no-reply notice skipped id=${id}: ${p.target} sent mail to ${p.mail.from_node}/${p.mail.from_agent ?? ''} after forward`); return }
-  const a = agentOf(p.target)
-  let reason = 'timeout'
-  if (!a && rosterOk) reason = 'window-closed'
-  else if (a && isBusy(a)) {
-    if (now - p.t < BUSY_MAX_MS) {
-      if (!p.deferred) { p.deferred = true; log(`no-reply notice deferred id=${id}: ${p.target} is busy (status=${a.status})`) }
-      p.idleSince = 0
-      return
-    }
-    reason = 'busy-max'
-  } else if (p.deferred) {
-    if (!p.idleSince) { p.idleSince = now; return }
-    if (now - p.idleSince < BUSY_GRACE_MS) return
-    reason = 'busy-idle-grace'
-  }
-  // 決定要通知：信留著等遲到的回覆（先改 state，免得 await 期間下一輪又處理同一封）
+  if (repliedDirectly(id)) { pending.delete(id); log(`reply wait over id=${id}: ${p.target} replied directly (send.mjs --reply-to)`); return }
+  if (sentToSender(p)) { pending.delete(id); log(`reply wait over id=${id}: ${p.target} sent mail to ${p.mail.from_node}/${p.mail.from_agent ?? ''} after forward`); return }
   p.state = 'notified'; p.notifiedAt = now
   persist()
   evictNotified()
-  await noticeNoReply(p, now, reason)
+  log(`reply wait over id=${id} -> ${p.target}: no notice to sender (read status shows)`)
+}
+// 轉交後 NUDGE_MS 還沒看到回覆、收件視窗已回到閒置：提醒收件視窗一次（同一份 pending，旗標 nudged 不重複）。
+// 視窗忙碌（或狀態不是 idle，例如使用者正在打字）不插話，下一輪再看；回了就不提醒
+function nudgeWindow(id, p) {
+  if (p.replied || repliedDirectly(id) || sentToSender(p)) { p.nudged = true; persist(); return }
+  const a = agentOf(p.target)
+  if (!a || !/^idle$/i.test(String(a.status ?? ''))) return
+  p.nudged = true
+  tellWindow(p.target, `（收發室提醒）你還沒回覆 ${p.senderDesc || p.mail.from_agent || '對方'} 的信 ${id}，若已處理完請用 asn_send 寄回結果`)
+  log(`nudged window ${p.target} for id=${id}`)
+  persist()
 }
 function evictNotified() {
   const list = [...pending.entries()].filter(([, p]) => p.state === 'notified').sort((a, b) => a[1].notifiedAt - b[1].notifiedAt)
@@ -326,7 +301,9 @@ setInterval(async () => {
       await ackIds([id]); pending.delete(id)
     } else if (p.state === 'waiting' && now - p.t > REPLY_TIMEOUT_MS) {
       if (p.room) pending.delete(id)
-      else await judgeTimeout(id, p, now)
+      else settleTimeout(id, p, now)
+    } else if (p.state === 'waiting' && !p.nudged && !p.noReply && !p.room && now - p.t > NUDGE_MS) {
+      nudgeWindow(id, p)
     } else if (p.state === 'notified' && now - p.notifiedAt > LATE_KEEP_MS) {
       pending.delete(id); log(`late-reply slot expired id=${id}`)
     }
@@ -432,7 +409,7 @@ async function handleMail(m) {
     target = DEFAULT_AGENT
     note = unaddressedWindowNote(DEFAULT_AGENT)
   }
-  const p = { mail: m, target, state: 'forwarding', t0: Date.now(), t: Date.now(), replied: false, noReply: !wantsReply(m.expects_reply, m.body) || isMailboxSender(m) }
+  const p = { mail: m, target, state: 'forwarding', t0: Date.now(), t: Date.now(), replied: false, senderDesc: senderLine(m).replace(/^寄件人：/, ''), noReply: !wantsReply(m.expects_reply, m.body) || isMailboxSender(m) }
   if (!forwardable(target)) {
     const names = roster.map(a => a.name).join('、') || '(無)'
     p.state = 'done'
@@ -445,7 +422,7 @@ async function handleMail(m) {
   if (!p.noReply) { lastRequester[target] = { from_node: m.from_node, from_agent: m.from_agent ?? '', mail_id: m.id, t: Date.now() }; persist() }
   try {
     const eng = engineOfWindow(target)
-    eng.deliver({ id: m.id, to: target, text: `${mailHead(m, engineLabelOf(windowOf(target)) ?? eng.id)}\n${note ? note + '\n' : ''}${bodyWithNotes(m.body, m.attachments)}` })   // 照片：內文後面多一行「〔照片〕檔名＋下載指令」，一起在外部資料區塊內
+    eng.deliver({ id: m.id, to: target, text: `${mailHead(m, engineLabelOf(windowOf(target)) ?? eng.id)}\n${mailPreamble(m, eng.id)}${note ? note + '\n' : ''}${bodyWithNotes(m.body, m.attachments)}` })   // 照片：內文後面多一行「〔照片〕檔名＋下載指令」，一起在外部資料區塊內
     log(`handed id=${m.id} from=${m.from_node}/${m.from_agent ?? ''} to=${target}`)
   } catch (e) {
     pending.delete(m.id); log(`cannot hand id=${m.id}: ${e.message} (left in inbox)`)

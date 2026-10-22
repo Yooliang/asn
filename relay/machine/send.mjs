@@ -27,6 +27,7 @@ const LIMIT = Number(envGet(process.env, 'SEND_PER_HOUR') || 30)
 const MAX_BODY = 20000
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const ID_RE = /^[A-Za-z0-9_-]{1,32}$/
+const PERSON_RE = /^u:[0-9a-f]{12}$/   // 本人位址（與節點無關），後台認得
 const USAGE = `用法：
   node send.mjs --to <成員代號 | 節點/視窗名> --body "<內文>" (--reply | --no-reply) [--reply-to <信件id>]
   node send.mjs --room <群組id> --body "<內文>"
@@ -142,7 +143,7 @@ export async function main(argv) {
   if (a.to) {
     const i = a.to.indexOf('/')
     toNode = i < 0 ? a.to : a.to.slice(0, i); toAgent = i < 0 ? '' : a.to.slice(i + 1)
-    if (!ID_RE.test(toNode)) throw new Fail(1, `--to ${a.to} 的成員代號格式不對`)
+    if (!ID_RE.test(toNode) && !PERSON_RE.test(toNode)) throw new Fail(1, `--to ${a.to} 的成員代號格式不對`)
   }
   const node = machineNode()
   const key = readMachineKey(node)
