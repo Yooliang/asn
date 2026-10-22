@@ -205,3 +205,74 @@ test('command：過期與重複 id 規則沿用', async () => {
   await r.ctl.poll(r.io)
   expect(r.runs.length).toBe(1)
 })
+
+// 模擬引擎：$.command.run 排到閒置才跑，真正執行前會經過外掛的 command.run hook（gate）
+const queued = (r: ReturnType<typeof rig>, before: () => void, after: () => void = () => undefined) => {
+  const ran: string[] = []
+  r.io.run = async (command: string, args: string) => {
+    before()
+    if (!(await r.ctl.gate(r.io, { command, args, origin: { kind: 'plugin' } }))) return { text: '沒有執行' }
+    ran.push(command)
+    after()
+    return { text: '輸出' }
+  }
+  return ran
+}
+
+test('執行前控制檔已被橋刪掉：不執行、不寫結果', async () => {
+  let file: string | undefined = cmd()
+  const r = rig({ control: () => { if (file === undefined) throw new Error('ENOENT'); return file } })
+  const ran = queued(r, () => { file = undefined })
+  await r.ctl.poll(r.io)
+  expect(ran).toEqual([])
+  expect(r.writes).toEqual([])
+})
+
+test('執行前控制檔換成別的 id：不執行、不寫結果', async () => {
+  let file = cmd()
+  const r = rig({ control: () => file })
+  const ran = queued(r, () => { file = cmd({ id: 'c2' }) })
+  await r.ctl.poll(r.io)
+  expect(ran).toEqual([])
+  expect(r.writes.filter(w => (w.control as { id?: string } | undefined)?.id === 'c1')).toEqual([])
+})
+
+test('執行中橋放棄（跑完控制檔已不在）：照樣寫結果，detail 開頭加註', async () => {
+  let file: string | undefined = req()
+  const r = rig({ control: () => { if (file === undefined) throw new Error('ENOENT'); return file } })
+  const ran = queued(r, () => undefined, () => { file = undefined })
+  await r.ctl.poll(r.io)
+  expect(ran).toEqual(['rename'])
+  const c = r.last().control as { id: string; ok: boolean; detail: string }
+  expect(c).toMatchObject({ id: 'r1', ok: true })
+  expect(c.detail.startsWith('（橋已放棄等待）')).toBe(true)
+})
+
+test('控制檔還在：正常執行，detail 不加註', async () => {
+  const r = rig({ control: cmd() })
+  const ran = queued(r, () => undefined)
+  await r.ctl.poll(r.io)
+  expect(ran).toEqual(['status'])
+  expect(r.last()).toMatchObject({ control: { id: 'c1', ok: true, detail: '輸出' } })
+})
+
+test('gate 只管自己排的那一筆：使用者自己打的、別的指令、沒有排隊中的一律放行', async () => {
+  const r = rig({ control: () => { throw new Error('ENOENT') } })
+  // 沒有排隊中的：控制檔不在也放行
+  expect(await r.ctl.gate(r.io, { command: 'status', args: '', origin: { kind: 'plugin' } })).toBe(true)
+  const c = rig({ control: cmd() })
+  let inner: boolean[] = []
+  c.io.run = async (command: string, args: string) => {
+    // 排隊中但控制檔已不在：只有「外掛來源＋同指令同參數」會被擋
+    c.io.read = async () => { throw new Error('ENOENT') }
+    inner = [
+      await c.ctl.gate(c.io, { command, args, origin: { kind: 'composer' } }),
+      await c.ctl.gate(c.io, { command: 'other', args, origin: { kind: 'plugin' } }),
+      await c.ctl.gate(c.io, { command, args: 'x', origin: { kind: 'plugin' } }),
+      await c.ctl.gate(c.io, { command, args, origin: { kind: 'plugin' } }),
+    ]
+    return { text: '' }
+  }
+  await c.ctl.poll(c.io)
+  expect(inner).toEqual([true, true, true, false])
+})
