@@ -829,7 +829,7 @@ pub fn run() {
         startup_info, relay_list, relay_inbox, relay_ack, relay_rooms, relay_send, relay_chat_history, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_avatar, relay_set_avatar,
         set_presence, set_window_name, store_load, store_save, quit_app, capture_ui_ready, shot_frontend_log,
         account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_bind,
-        android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_launch, relay_partner_list, relay_partner_succeed,
+        android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_launch, android::android_partner_op, android::android_partner_ops, relay_partner_list, relay_partner_succeed,
     ]);
     let builder = builder
         .setup(move |app| {

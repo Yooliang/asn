@@ -64,6 +64,24 @@ pub async fn android_launch(app: State<'_, App>, auth: State<'_, crate::auth::Au
     r.launch_signed(&body, token.as_deref()).await
 }
 
+// ---------- 遠端管理夥伴視窗（詳情、改名、切換模型、關閉、轉交下一任；動作在那台電腦上，手機只下指令） ----------
+
+/// 下令管理某台電腦上的某個夥伴視窗（後台再驗一次：本人、兩台都是你的、名單上有、有開放、名字、忙碌、每小時上限）。要本人簽章；沒登入回錯，不打後台。回 { id }
+#[tauri::command]
+pub async fn android_partner_op(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>, body: serde_json::Value) -> Result<serde_json::Value, String> {
+    let r = relay_of(&app)?;
+    let token = crate::account::signing_token(&auth).await;
+    r.partner_op_signed(&body, token.as_deref()).await
+}
+
+/// 查管理操作的進度（最多 20 筆）。要本人簽章；沒登入回錯，不打後台。回 { ops: [...] }
+#[tauri::command]
+pub async fn android_partner_ops(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>, ids: Vec<String>) -> Result<serde_json::Value, String> {
+    let r = relay_of(&app)?;
+    let token = crate::account::signing_token(&auth).await;
+    r.partner_ops_signed(&ids, token.as_deref()).await
+}
+
 // ---------- 手機自動更新（只有 `sideload` 版；Play 版這兩個指令只回「不提供」） ----------
 
 /// 查官網的更新清單。`url`＝本機測試用的清單網址（只收 http://127.0.0.1…，正式畫面不帶）。
