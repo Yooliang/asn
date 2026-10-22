@@ -1,5 +1,7 @@
 # 雲端代理收發室工具（relay/cloud-agent）
 
+> 新的雲端代理不要用這份程式：請讓代理讀官網技能說明 `https://asnmessenger.web.app/skill/asn-cloud-agent.md`（原始檔 `site/public/skill/`），它在代理自己的電腦上建立收寄信腳本與看門程式，不需要拉本 repo。人在 ASN 設定頁「邀請雲端代理」取得金鑰與要貼給代理的說明。本資料夾保留給現有的 Grok 節點，並作為技能說明參考實作的對照。
+
 讓「會被重置、只能往外連」的雲端代理環境（第一個使用者是 xAI Grok bot）加入收發室，成為一個節點，在 ASN 好友名單裡顯示成一個好友。
 純 Node ≥ 22、零依賴；協定直接用 `relay/machine/` 的 `relay-core.mjs`（API、Realtime 門鈴）、`safe-log.mjs`、`register.mjs`（代號規則與網址），以及 `pull-retry.mjs`、`attach-format.mjs`、`attach-download.mjs`（收信重試與附件）。
 

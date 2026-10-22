@@ -7,6 +7,7 @@ import { BUBBLES, BUBBLE_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, TOOLBARS,
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS } from './prefs.mjs'
 import { DIMS, groupOptions } from './dims.mjs'
 import { LoginPanel } from './login-panel.mjs'
+import { CloudInvitePanel } from './cloud-invite.mjs'
 import { OTHER_VENDORS, VENDOR_UNSUPPORTED, accountLine } from './claude-accounts.mjs'
 import { USAGE_NOTE } from './usage.mjs'
 
@@ -18,7 +19,7 @@ export const SETTING_OPS = [
 ]
 
 export const SettingsPanel = {
-  components: { LoginPanel },
+  components: { LoginPanel, CloudInvitePanel },
   props: { st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
@@ -78,6 +79,7 @@ export const SettingsPanel = {
       <template v-if="catKey === 'accounts'">
         <div class="acct-set">
           <login-panel></login-panel>
+          <cloud-invite-panel></cloud-invite-panel>
           <section class="set-card" aria-label="Claude 帳號">
             <header class="vendor-h"><b>Claude 帳號</b><small>Anthropic</small></header>
             <ul class="acct-list" v-if="st.accounts.list.length">

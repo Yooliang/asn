@@ -60,6 +60,12 @@ export const authApi = {
   setLastAvatar: avatar => invoke('last_login_set_avatar', { avatar }),   // 這台大頭貼有變 → 同步到「上次登入」的記憶
   skip: () => invoke('auth_skip_login'),                     // 「暫時不登入」（這台已有節點金鑰時才准）
 }
+// 邀請雲端代理（設定頁）：登入憑證在 Rust 端。create 的結果裡有一次性的金鑰，只給畫面顯示一次，不存任何地方
+export const cloudApi = {
+  create: name => invoke('cloud_agent_create', { name }),   // → { id, name, key, invite }
+  list: () => invoke('cloud_agent_list'),                    // → { nodes: [{ id, name, last_seen_at, online }] }
+  revoke: node => invoke('cloud_agent_revoke', { node }),
+}
 export const store = name => ({
   load: async () => { const s = await invoke('store_load', { name }); try { return s ? JSON.parse(s) : null } catch { return null } },
   save: data => invoke('store_save', { name, text: JSON.stringify(data) }),

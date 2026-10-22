@@ -1,10 +1,10 @@
-// 登入帳號的動作（人類動作）：account_bootstrap、node_create、node_claim。
+// 登入帳號的動作（人類動作）：account_bootstrap、node_create、node_claim、遠端更新，以及雲端代理邀請（cloud_node_create／list／revoke）。
 // 身分一律來自 Supabase 登入憑證（Authorization: Bearer <access_token>）驗證後的使用者，body 裡不收使用者 id；
 // node_claim 另外要 x-relay-key（現有節點金鑰）證明擁有；node_create 發新金鑰，只在這次回應裡出現一次，資料庫只存雜湊。
 // 所有資料庫存取經 SECURITY DEFINER 函式（只授權 service_role）。見 docs/AUTH.md。
 import { parseSelfName } from "./node_name.ts";
 
-export const ACCOUNT_ACTIONS = new Set(["account_bootstrap", "node_create", "node_claim", "node_update_request", "node_update_status"]);
+export const ACCOUNT_ACTIONS = new Set(["account_bootstrap", "node_create", "node_claim", "node_update_request", "node_update_status", "cloud_node_create", "cloud_node_list", "cloud_node_revoke"]);
 
 export interface AuthUser {
   id: string;
@@ -145,6 +145,38 @@ export async function handleAccountAction(
     const { data, error } = await deps.rpc("asn_update_status", { p_user: user.id });
     if (error) { console.error("node_update_status", error); return { status: 500, body: { error: "internal" } }; }
     return { status: 200, body: { nodes: Array.isArray(data) ? data : [] } };
+  }
+
+  // 雲端代理邀請（issue #13，migration 20261022050000_cloud_agent_invite.sql）：
+  // 一律要登入憑證的本人（上面已驗過）；節點金鑰拿不到登入憑證，所以 AI 視窗與代理自己都做不了這三件事。
+  // cloud_node_create 發新金鑰，只在這次回應裡出現一次，資料庫只存雜湊；list 不含任何金鑰；revoke 只動自己邀請建立的雲端代理。
+  if (action === "cloud_node_create") {
+    const name = cleanDisplayName(body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>).name : null);
+    if (name === null) return { status: 400, body: { error: "bad_request" } };
+    const { key, bellTopic } = deps.newSecrets();
+    const { data, error } = await deps.rpc("asn_cloud_node_create", {
+      p_user: user.id, p_name: name, p_key_hash: await deps.sha256Hex(key), p_bell_topic: bellTopic,
+    });
+    if (error) { console.error("cloud_node_create", error); return { status: 500, body: { error: "internal" } }; }
+    const d = data as Record<string, unknown>;
+    if (typeof d?.error === "string") return mapError(d.error);
+    return { status: 200, body: { id: d.id, name: d.name, key } };
+  }
+
+  if (action === "cloud_node_list") {
+    const { data, error } = await deps.rpc("asn_cloud_node_list", { p_user: user.id });
+    if (error) { console.error("cloud_node_list", error); return { status: 500, body: { error: "internal" } }; }
+    return { status: 200, body: { nodes: Array.isArray(data) ? data : [] } };
+  }
+
+  if (action === "cloud_node_revoke") {
+    const node = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>).node : null;
+    if (typeof node !== "string" || !/^[A-Za-z0-9_-]{1,32}$/.test(node)) return { status: 400, body: { error: "bad_request" } };
+    const { data, error } = await deps.rpc("asn_cloud_node_revoke", { p_user: user.id, p_node: node });
+    if (error) { console.error("cloud_node_revoke", error); return { status: 500, body: { error: "internal" } }; }
+    const d = data as Record<string, unknown>;
+    if (typeof d?.error === "string") return mapError(d.error);
+    return { status: 200, body: { ok: true } };
   }
 
   return { status: 404, body: { error: "not_found" } };

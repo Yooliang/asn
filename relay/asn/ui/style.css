@@ -391,6 +391,9 @@ html.frame-native .titlebar,html.frame-native .rz{display:none}
 .login-skip{align-self:center;margin-top:4px;padding:2px 4px;border:0;background:none;font:inherit;font-size:12px;color:var(--link);opacity:.85;text-decoration:underline;cursor:pointer}
 .login-skip:hover{opacity:1}
 .login-set .login-state{margin:4px 0;font-weight:600}
+.cloud-set .cloud-step{margin:10px 0 2px;font-weight:600}
+.cloud-set .cloud-key{display:flex;gap:6px;align-items:center}
+.cloud-set .cloud-key .set-code{flex:1;min-width:0}
 html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .ctab.home img{display:block;flex:none}
 .chat-stack > .pane:only-child{background:linear-gradient(var(--panel-head),var(--panel) 80px)}

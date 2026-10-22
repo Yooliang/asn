@@ -14,6 +14,7 @@ pub mod cli;
 mod claude_accounts;
 mod claude_mod;
 mod claude_json;
+mod cloud_invite;
 mod codex_accounts;
 mod heartbeat;
 mod identity;
@@ -680,6 +681,7 @@ pub fn run() {
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
             wins::open_chat, wins::open_panel, wins::close_panels, wins::chat_visible, wins::close_chats, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,
             account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_bind, account::auth_skip_login, account::update_remote_request, account::update_remote_status,
+            cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke,
             tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_set, updater::update_check, updater::update_install,
         ])
         .setup(move |app| {
