@@ -35,3 +35,14 @@ test('接線：設定頁有兩個控制項，存檔欄位 closeTo，Rust 端註�
   }
   assert.match(lib, /prevent_close\(\)/, '縮到系統匣時攔下關閉')
 })
+
+test('守門：開發版（target 資料夾底下的執行檔）不能寫開機啟動，設定頁顯示原因並反灰', () => {
+  const tray = read('src-tauri/src/tray.rs'), js = read('ui/list.js'), panel = read('ui/lib/settings-panel.mjs'), lib = read('src-tauri/src/lib.rs')
+  const fn = tray.slice(tray.indexOf('pub fn autostart_set'), tray.indexOf('/// 開發版（cargo'))
+  assert.ok(fn.includes('autostart_check(on, &exe)?;') && fn.indexOf('autostart_check') < fn.indexOf('sys::set'), '寫入前先檢查')
+  assert.ok(tray.includes('開發版不能設定開機自動啟動，請用正式安裝的 ASN'))
+  assert.ok(lib.includes('tray::autostart_blocked'))
+  assert.ok(js.includes("invoke('autostart_blocked')") && js.includes('blocked: autostart.blocked'))
+  assert.match(panel, /st\.autostart\.blocked/)
+  assert.match(panel, /:disabled="st\.autostart\.busy \|\| \(!!st\.autostart\.blocked && !st\.autostart\.on\)"/, '開發版反灰（但已誤寫的項目仍能關掉）')
+})

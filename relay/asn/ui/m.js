@@ -8,6 +8,8 @@ import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { PROVIDERS, canStart, errorText, phaseText } from './lib/login.mjs'
 import { BANNER_MS, DEFAULT_PREFS, TABS, TAB_LABEL, accountDisplayName, SWIPE_BLOCK_SELECTOR, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, buttonLabel, initialNav, opsNav, initialUpdate, installOutcome, launchNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, vendorBadgeHtml, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
 import { LAUNCH_GIVE_UP_MS, LAUNCH_POLL_MS, appearedIn, buildLaunchRequest, initialLaunch, launchChoices, launchDevices, launchEligibility, launchErrorText, launchFormError, machinesByNode, progressView } from './lib/mobile-launch.mjs'
+import { OnboardCard } from './lib/onboard-card.mjs'
+import { ONBOARD_STORE, TEXT as ONBOARD_TEXT, checkName, markOnboarded, planOnboarding } from './lib/onboard.mjs'
 import { friendId } from './lib/roster.mjs'
 import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, showsInSheet } from './lib/mobile-ops.mjs'
 import { OP_LABEL, menuItems, opFormError } from './lib/partner-ops.mjs'
@@ -51,6 +53,9 @@ document.title = 'ASN'
 
 const screen = ref('boot'), fatal = ref('')
 const login = reactive({ phase: 'idle', provider: '', error: '' })
+const onboard = reactive({ steps: [] })   // 首次登入引導要走的步驟（空＝不用）
+const onboardApi = { setAccountName: name => authApi.setAccountName(name), setDeviceName: name => (name === info.window_name ? Promise.resolve() : invoke('set_window_name', { name })) }
+const finishOnboard = async () => { await markOnboarded(store(ONBOARD_STORE)).catch(() => {}); location.reload() }
 const loginNote = computed(() => (login.phase === 'waiting' ? `${phaseText('waiting', login.provider)}（瀏覽器登入完會自動回到 ASN；沒有回來的話，請自己切回來。）` : phaseText(login.phase, login.provider)))
 
 async function finishLogin() {
@@ -118,7 +123,9 @@ if (info.needs_login) {
   fatal.value = info.error
   screen.value = 'fatal'
 } else {
-  screen.value = 'main'
+  // 登入後第一次進來：先走首次登入引導（帳號名稱＋設備名稱）；旗標已設、帳號與設備都有名字、取不到帳號資料就直接進名單
+  const plan = await planOnboarding({ store: store(ONBOARD_STORE), status: authApi.status, accountInfo: authApi.accountInfo, startup: info })
+  if (plan.steps.length) { onboard.steps = plan.steps; screen.value = 'onboard' } else screen.value = 'main'
 }
 
 if (screen.value === 'main') {
@@ -448,11 +455,22 @@ const app = createApp({
       try { say((await removeAvatarUpload(avApi)).message) } finally { avBusy.value = false }
     }
 
+    // 我的名字（帳號層）可改：走後台 account_name，所有設備共用；不合格或失敗就還原並提示
+    const nameErr = ref('')
+    const nameDraft = ref('')
+    const commitName = async () => {
+      const c = checkName(nameDraft.value)
+      if (!c.ok) { nameErr.value = c.error; nameDraft.value = myName.value; setTimeout(() => { nameErr.value = '' }, 5000); return }
+      if (c.name === myName.value) { nameDraft.value = myName.value; nameErr.value = ''; return }
+      try { ownerName.value = await authApi.setAccountName(c.name); nameErr.value = ''; nameDraft.value = c.name }
+      catch (e) { nameDraft.value = myName.value; nameErr.value = e.message; setTimeout(() => { nameErr.value = '' }, 5000) }
+    }
     const acct = ref({ signed_in: false, email: '' })
     void authApi.status().then(s => { acct.value = s ?? acct.value }).catch(() => {})
     // 我的名字（帳號層）：先用上次存的，登入帳號的資料取到後更新並存起來（離線也有名字可顯示）
     void authApi.accountInfo().then(i => { if (typeof i?.owner_name === 'string') ownerName.value = i.owner_name }).catch(() => {})
     const myName = computed(() => accountDisplayName(ownerName.value, acct.value.email))
+    watch(myName, v => { nameDraft.value = v }, { immediate: true })
     const meForChat = computed(() => ({ ...me, nick: myName.value }))   // 對話裡自己的名字用帳號名；設備名只在「從 …」小標
     const accountText = computed(() => (acct.value.signed_in ? `已登入：${acct.value.email || '（沒有 email）'}` : '尚未登入'))
     const loggingOut = ref(false)
@@ -463,6 +481,7 @@ const app = createApp({
     }
 
     return {
+      onboard, onboardApi, finishOnboard, ONBOARD_TEXT, nameDraft, nameErr, commitName,
       screen, fatal, login, loginNote, PROVIDERS, canStart, startLogin, cancelLogin,
       upd, updText: computed(() => bannerText(upd)), updButton: computed(() => buttonLabel(upd)), startUpdate, checkUpdate,
       pf, sw, pagerStyle, indicator, swipeStart, swipeMove, swipeEnd, goTab, TABS, TAB_LABEL, myName, meForChat, lastOf, vendorIcon: vendorBadgeHtml,
@@ -475,9 +494,10 @@ const app = createApp({
   },
 })
 app.component('chat-pane', ChatPane)
+app.component('onboard-card', OnboardCard)
 app.component('ptr-zone', PtrZone)
 app.mount('#app')
 // 根元素（#app）自己的屬性不在 Vue 編譯的樣板裡，:class 綁不上去；登入畫面的背景類別在這裡手動切
-watch(screen, s => document.getElementById('app').classList.toggle('is-login', s === 'login'), { immediate: true })
+watch(screen, s => document.getElementById('app').classList.toggle('is-login', s === 'login' || s === 'onboard'), { immediate: true })
 document.getElementById('splash')?.remove()
 void startCore?.()

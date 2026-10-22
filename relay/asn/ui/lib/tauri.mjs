@@ -59,6 +59,7 @@ export const authApi = {
   cancel: () => invoke('auth_cancel'),
   logout: () => invoke('auth_logout'),                       // 只清登入權杖，不刪節點金鑰；之後自動重新啟動，回到登入畫面
   accountInfo: () => invoke('auth_account_info'),            // → { email, created, node_count, this_node_mine }
+  setAccountName: name => invoke('auth_account_name_set', { name }),   // 改帳號名稱（我的名字，所有設備共用）→ 存好的名字
   bind: () => invoke('auth_bind'),                           // 登入後自動處理金鑰 → { state: created | bound | pending, note }；created 時稍後自動重新啟動
   setLastAvatar: avatar => invoke('last_login_set_avatar', { avatar }),   // 這台大頭貼有變 → 同步到「上次登入」的記憶
   skip: () => invoke('auth_skip_login'),                     // 「暫時不登入」（這台已有節點金鑰時才准）

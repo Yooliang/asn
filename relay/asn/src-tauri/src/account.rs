@@ -333,6 +333,31 @@ pub async fn auth_account_info(app: State<'_, App>, auth: State<'_, AuthState>) 
     })
 }
 
+/// 帳號名稱（所有設備共用的「我的名字」）：去頭尾空白、1～40 字、不含控制字元；與後台 asn_account_name 的規則一致
+pub fn clean_account_name(raw: &str) -> Result<String, String> {
+    let n = raw.trim().to_string();
+    if n.is_empty() {
+        return Err("名字不能是空的".into());
+    }
+    if n.chars().count() > 40 {
+        return Err("名字最多 40 個字".into());
+    }
+    if n.chars().any(|c| c.is_control()) {
+        return Err("名字不能含控制字元".into());
+    }
+    Ok(n)
+}
+
+/// 改帳號名稱（後台 account_name 動作，要本人登入憑證）：回存好的名字
+#[tauri::command]
+pub async fn auth_account_name_set(auth: State<'_, AuthState>, name: String) -> Result<String, String> {
+    let name = clean_account_name(&name)?;
+    let c = ctx()?;
+    let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
+    let v = call(&c.client, &c.relay_url, &token, "account_name", None, json!({ "name": name })).await?;
+    Ok(v.get("name").and_then(Value::as_str).map(String::from).unwrap_or(name))
+}
+
 /// 登入後自動處理金鑰（使用者不用按任何鈕）：
 /// - 這台已有節點金鑰 → node_claim 綁到帳號；失敗（含舊租戶還沒被認領）都不擋使用，回 pending，下次啟動再試
 /// - 沒有節點金鑰 → node_create 建新節點、存好金鑰（呼叫端稍後重新啟動）
@@ -396,6 +421,15 @@ pub async fn auth_bind(app: State<'_, App>, auth: State<'_, AuthState>, handle: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 帳號名稱驗證() {
+        assert_eq!(clean_account_name("  啟良 ").unwrap(), "啟良");
+        assert!(clean_account_name("").is_err() && clean_account_name("   ").is_err());
+        assert!(clean_account_name(&"字".repeat(40)).is_ok());
+        assert!(clean_account_name(&"字".repeat(41)).is_err());
+        assert!(clean_account_name("a\nb").is_err());
+    }
 
     #[test]
     fn 錯誤碼對映成中文() {

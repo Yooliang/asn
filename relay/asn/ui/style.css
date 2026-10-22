@@ -650,3 +650,15 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .ap-input{border:1px solid var(--line);border-radius:3px;padding:6px 8px;font-size:14px}
 .ap-note,.ap-left{margin:0;font-size:12px;color:var(--muted)}
 .ap-btns{display:flex;justify-content:flex-end;gap:8px}
+
+/* 首次登入引導、設定頁的帳號名稱 */
+.onboard-form{display:flex;flex-direction:column;gap:10px;text-align:left}
+.onboard-field{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--title-fg)}
+.onboard-field .set-input{min-height:32px;padding:4px 8px;font-size:14px}
+.onboard-progress{text-align:center;color:var(--muted)}
+.onboard-hint{margin:0;text-align:center}
+.onboard-form .login-note{text-align:center;color:var(--muted)}
+.login-name{display:flex;flex-direction:column;gap:4px}
+.login-name-row{display:flex;gap:6px}
+.login-name-row .set-input{flex:1;min-width:0}
+.autostart-blocked{color:#b3261e}

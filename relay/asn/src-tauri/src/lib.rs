@@ -93,6 +93,8 @@ pub struct App {
 struct StartupInfo {
     node: String,
     window_name: String,
+    /// 設備名稱是使用者自己取過的（settings.json 有 window_name）；沒取過＝系統偵測的預設名
+    window_name_custom: bool,
     old_names: Vec<String>,
     error: Option<String>,
     /// 要先顯示登入畫面：沒有節點金鑰，或有金鑰但還沒登入（除非選了「暫時不登入」）
@@ -165,6 +167,7 @@ fn startup_info(app: State<'_, App>, auth: State<'_, auth::AuthState>) -> Startu
     StartupInfo {
         node: app.node.clone(),
         window_name: app.relay.as_ref().map(|r| r.window_name()).unwrap_or_default(),
+        window_name_custom: read_settings_name(&app.data_dir).is_some(),
         old_names: app.relay.as_ref().map(|r| r.active_names().into_iter().skip(1).collect()).unwrap_or_default(),
         error: app.init_error.clone(),
         needs_login: account::needs_login(app.relay.is_some(), auth.status().signed_in, account::login_skipped(&app.data_dir)),
@@ -853,16 +856,16 @@ pub fn run() {
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
             wins::open_chat, wins::open_panel, wins::close_panels, wins::chat_visible, wins::close_chats, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,
-            account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_bind, account::auth_skip_login, account::update_remote_request, account::update_remote_status,
+            account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_bind, account::auth_skip_login, account::update_remote_request, account::update_remote_status,
             cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke,
-            tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_set, updater::update_check, updater::update_install,
+            tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_blocked, tray::autostart_set, updater::update_check, updater::update_install,
         ]);
     // 手機只開放單欄名單與對話需要的指令；電腦端的指令（開視窗、橋、用量……）手機上根本不存在
     #[cfg(not(desktop))]
     let builder = builder.invoke_handler(tauri::generate_handler![
         startup_info, relay_list, relay_inbox, relay_ack, relay_rooms, relay_send, relay_chat_history, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_avatar, relay_set_avatar,
         set_presence, set_window_name, store_load, store_save, quit_app, capture_ui_ready, shot_frontend_log, open_link,
-        account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_bind,
+        account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_bind,
         android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_launch, android::android_partner_op, android::android_partner_ops, relay_partner_list, relay_partner_succeed,
     ]);
     let builder = builder

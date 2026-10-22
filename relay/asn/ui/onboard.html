@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agent Sync Network Messenger</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app" class="win" v-cloak>
+  <i class="rz" v-for="d in RESIZE_DIRS" :key="d" :class="'rz-' + d" @mousedown.left.prevent="resizeFrom(d)"></i>
+  <header class="titlebar" data-tauri-drag-region>
+    <span class="t-icon"></span><span class="t-text"><span class="brand">Agent Sync Network Messenger</span></span>
+    <span class="t-btns">
+      <button class="tb" @click="ctl('min')" aria-label="最小化" title="最小化"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="2" y="8" width="8" height="2" rx=".5" fill="currentColor"/></svg></button>
+      <button class="tb close" @click="quit" aria-label="關閉並結束" title="關閉"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.6 2.6l6.8 6.8M9.4 2.6l-6.8 6.8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+    </span>
+  </header>
+  <div class="pane login-pane">
+    <div class="login-card" v-if="steps.length">
+      <div class="login-avatar is-logo"><img src="img/logo.svg" alt="" draggable="false"></div>
+      <h1 class="login-h">{{ TEXT.title }}</h1>
+      <onboard-card :steps="steps" :device-default="deviceDefault" :api="api" @done="finish"></onboard-card>
+    </div>
+    <div class="login-card" v-else-if="failed">
+      <h1 class="login-h">{{ TEXT.title }}</h1>
+      <p class="login-err" role="alert">{{ failed }}</p>
+    </div>
+  </div>
+</div>
+<script src="vendor/vue.global.prod.js"></script>
+<script type="module" src="onboard.js"></script>
+</body>
+</html>
