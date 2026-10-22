@@ -26,7 +26,7 @@ ASN 從 Irori 專案（github.com/cwen0708/irori）拆出，保留 git 歷史。
 |---|---|---|
 | `relay/machine/` | 每台設備的收發室橋、收寄信指令（`send.mjs`、`recv.mjs`、`room.mjs`）、引擎轉接器、Windows 安裝程式 | `relay/machine/README.md` |
 | `relay/cloud-agent/` | 雲端 Linux 代理（例如 Grok）用的收寄信腳本 | `relay/cloud-agent/README.md` |
-| `relay/channel/` | Claude Code channel 外掛（早期做法，被收發室橋取代，仍保留） | `relay/channel/README.md` |
+| `archive/relay-channel/` | 已封存的早期 Claude Code channel 外掛（已停用，見該資料夾 README） | `archive/relay-channel/README.md` |
 | `relay/asn/` | ASN 電腦版（Tauri 2 + Vue 3） | `relay/asn/README.md` |
 | `cloudflare/edge-tts/` | 念出訊息用的 Edge TTS 代理（Cloudflare Worker，僅個人用、預設不啟用） | [VOICE.md](VOICE.md) |
 | `supabase/migrations/` | 新後台的 migration（Supabase CLI 格式） | [BACKEND.md](BACKEND.md) |

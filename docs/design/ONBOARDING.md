@@ -362,7 +362,7 @@ AUTH.md 已建議：人類動作不要塞進現有 `relay` 函式的金鑰驗證
 | `relay/asn/src-tauri/` | `identity.rs` 路徑與環境變數、`lib.rs` 資料夾與開網址白名單、`tauri.conf.json` 識別、`Cargo.toml`／`package.json` 名稱；Rust 測試 | 中 |
 | `relay/asn/` 其他 | `guides.mjs`、`tabs.mjs`、測試、`scripts/shot.mjs`、README | 中 |
 | `relay/cloud-agent/` | 6 個程式檔、8 個測試檔、`boot.example.sh` 日誌前綴、README | 中 |
-| `relay/channel/` | 早期做法，建議封存（第 7.4 節） | 小 |
+| `relay/channel/` | 早期做法，已封存到 `archive/relay-channel/`（第 7.4 節、R8） | 小 |
 | `supabase/functions/` | `_shared` 約 11 個檔（函式名、註解）、`relay/index.ts`；`irori-relay/` 舊函式切換後移除 | 中 |
 | `supabase/migrations/` | 新增改名 migration（若 D9 採用）；舊 migration 不改 | 小 |
 | `supabase/sql/`、`irori-relay/` | 舊後台用，切換後整批移除（不改名） | 移除 |
@@ -466,9 +466,16 @@ ASN 獨立後的定義：
 
 早期做法，已被橋取代，且只能與橋二選一。建議**封存**（移到 `docs/archive` 或刪除並在 HANDOFF 記一筆），不花力氣去 Irori 化。若維護者要保留，至少改 `channel.mjs` 兩處提示文字與 README 範例。
 
+**已執行（R8）**：已用 `git mv` 移到 `archive/relay-channel/`，資料夾內 README 與 `channel.mjs` 檔頭註明已停用與替代方案（收發室橋、`recv.mjs --watch`、ASN 電腦版）；現行文件、安裝程式、測試、打包清單已無引用（原本就沒有測試與打包引用它）。
+
 ### 7.5 `bridge-aegis.mjs` 與相關
 
 Aegis 主機轉接橋服務的是 Irori 的 Aegis，與 ASN 產品無關，且依賴 `xi-xu` 等 Irori 角色。建議**移出本 repo**（交給 Aegis 專案維護，共用 `relay-core.mjs` 的部分用文件說明介面），本 repo 只保留通用的轉接器介面說明。若維護者暫不想移，則先保留、不改名，列入附錄「可保留（與 Irori 互通）」。
+
+**R8 判斷：本期不移出，標記為之後移出。** 依據：`irori-relay-aegis.service` 的啟動指令指向 Aegis 主機上的 `/home/cwen0708/irori/relay/machine/bridge-aegis.mjs`，也就是那台機器上的本 repo 複本；本 repo 內沒有任何程式或文件能證明該複本改指向別處，且 `bridge-aegis.mjs` 本身不含自我更新（自我更新在 `bridge.mjs`，由 `self-update.mjs` 監看 `relay/machine/`）。若在本 repo 刪掉這兩個檔，Aegis 那台一旦把複本更新到新版，服務就會因找不到檔案而停擺。移出步驟（需要在 Aegis 機器上做，本 repo 無法代勞）：
+1. 在 Aegis 專案建立新位置，複製 `bridge-aegis.mjs`、`irori-relay-aegis.service`、`test/aegis-reply-name.test.mjs` 及它依賴的 `relay-core.mjs`、`rooms.mjs`、`env-compat.mjs`、`anon.mjs`、`home.mjs`、`safe-log.mjs`（或改為引用發佈的共用套件）。
+2. 在 Aegis 機器上改 service 的 `ExecStart` 指向新位置，`daemon-reload` 後重啟，確認 log 出現 `doorbell joined`。
+3. 確認 Aegis 機器不再從本 repo 的 `relay/machine/` 更新後，才能在本 repo 刪除這些檔。
 
 ### 7.6 底部廣告（`tabs.mjs` 的 `ADS`）與開網址白名單
 
@@ -555,7 +562,7 @@ Aegis 主機轉接橋服務的是 Irori 的 Aegis，與 ASN 產品無關，且�
 | R5 | 其他字串：使用者代理字串 `irori-relay-installer/1`／`irori-relay-client/1`、Codex 標記 `irori-mail:`（兩種都讀、只寫新的）、日誌前綴 `[irori]`、暫存資料夾 `irori-probe-*`、ACP `clientInfo` 的 `irori-relay`、說明名稱 `irori-send`／`irori-recv`／`irori-room`；技能 `irori-relay` → `asn-relay`／`asn-cloud-agent`（D12） | 已完成。使用者代理字串改 `asn-installer/1`、`asn-client/1`（後台沒有依 UA 判斷的程式）；Codex 標記只寫 `asn-mail:`、讀取新舊兩種（Node `hasMark`、Rust `has_mark`）；暫存資料夾 `asn-probe-*`；ACP／Codex `clientInfo` 改 `asn`；說明名稱改 `asn-send`／`asn-recv`／`asn-room`（指令檔名 `send.mjs` 等本來就沒帶舊名）；公開技能 `web/relay` 改名 `asn-relay`（舊 `irori-relay` 資料夾已安裝者照常可用，`asn-cloud-agent` 本來就在官網 `/skill/`）。日誌前綴 `[irori]` 在程式內已不存在，無需改。 |
 | R6 | 資料庫函式 `irori_relay_*` → `asn_relay_*`（D9，一個 migration 加 `alter function … rename`，同一發佈內更新 `supabase/functions/_shared`、`relay/index.ts` 的所有呼叫；要在切換前做）；relay function 名稱（`irori-relay`、`irori-api`）隨舊後台移除 | 待做 |
 | R7 | **信任與角色模型**（D5）：`human` 節點、`trust=owner` 真的代表人本人、`rooms.ts` 的點名別名「希緒」與 `~owner` 顯示名寫死、`role='owner'` 的 XISU 角色節點降級；測試與歷史文件裡的範例收件人 `XISU`。R1 只改了提示文字，沒動資料模型 | 待做（獨立一期，完整測試） |
-| R8 | `relay/channel` 封存、`bridge-aegis.mjs` 與 `irori-relay-aegis.service` 移出本 repo（D11；期間 `IRORI_AEGIS_*` 不改名，共用的 `RELAY_*` 已走相容層） | 待做 |
+| R8 | `relay/channel` 封存、`bridge-aegis.mjs` 與 `irori-relay-aegis.service` 移出本 repo（D11；期間 `IRORI_AEGIS_*` 不改名，共用的 `RELAY_*` 已走相容層） | 部分完成。channel 已封存到 `archive/relay-channel/`（含說明）；Aegis 橋與 service 因 Aegis 主機仍依賴，只標記「之後移出」並在第 7.5 節記下移出步驟，需在 Aegis 機器改部署來源後才能真的刪。 |
 | R9 | 移除相容層（D10：至少兩個正式版、切換後 90 天、日誌確認無舊名）：刪除三處對照表（`env-compat.mjs` ×2、`envc.rs`）、守門測試改成 repo 內（除歷史文件外）不得出現 `IRORI_`、`.irori-relay` | 待做 |
 
 R1 的環境變數對照表（新名 ← 舊名）：一律把 `IRORI_` 換成 `ASN_`；`IRORI_ASN_*` 去掉重複的 ASN（`IRORI_ASN_DATA` → `ASN_DATA`、`IRORI_ASN_POLL_MS` → `ASN_POLL_MS`…）；唯一的例外是電腦版的 `IRORI_ASN_ROSTER_MS` → `ASN_APP_ROSTER_MS`（`ASN_ROSTER_MS` 已是橋的名單間隔）。`IRORI_AEGIS_*`、`IRORI_FIREBASE_*`、`IRORI_SIGNAL_*`、`IRORI_WAKE_*` 本期不改名。

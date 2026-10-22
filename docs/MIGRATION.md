@@ -41,7 +41,7 @@
 | 轉接橋（特定平台） | 同上 | systemd unit 的 `Environment=` 若有寫舊網址要拿掉 |
 | ASN 電腦版 | 環境變數 `ASN_RELAY_URL`；預設值寫在 `relay/asn/src-tauri/src/identity.rs`（**新後台**） | 要重新打包才生效 |
 | 雲端代理 | 環境變數 `ASN_RELAY_URL`；沒設就用 `register.mjs` 的預設值（**新後台**，`relay/cloud-agent/config.mjs` 引用它） | 平台環境設定若曾寫舊網址要拿掉；金鑰環境變數不變 |
-| Claude Code channel | 環境變數 `ASN_RELAY_URL`；預設值在 `relay/channel/channel.mjs`（**新後台**） | 通常已被橋取代 |
+| Claude Code channel（已封存） | 已停用，不再維護（`archive/relay-channel/`） | 已被橋取代，不需處理 |
 | Irori | 自己的設定檔（網址、`ASN_RELAY_KEY`） | 在 Irori repo 改 |
 | 邀請與安裝程式 | `relay/machine/register.mjs` 的預設網址（安裝程式沒有另外寫死，`-BaseUrl` 才覆寫） | 新打包的安裝包註冊到新後台 |
 | Claude Code skill | `web/relay/SKILL.md` 內的 `BASE=`（兩處，已改新） | 改後要重新發佈 |

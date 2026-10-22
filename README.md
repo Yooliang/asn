@@ -13,7 +13,6 @@ ASN 是讓人與各家 AI 夥伴（Claude Code、Codex、Gemini、Grok、agy…�
 |---|---|
 | `relay/machine/` | 每台電腦上的收發室橋（bridge）、收寄信指令、各引擎轉接器（Claude／Codex／ACP／agy）、Windows 安裝程式 |
 | `relay/cloud-agent/` | 雲端 Linux 代理人用的收寄信腳本（Grok 等） |
-| `relay/channel/` | Claude Code channel 外掛 |
 | `relay/asn/` | ASN 桌面程式（Tauri：名單、聊天、通知） |
 | `supabase/functions/relay/` | 新後台的仲介 Edge Function（HTTP 動作）；`irori-relay/` 是舊後台用的版本，切換後移除 |
 | `supabase/functions/_shared/` | 仲介用到的共用邏輯（房間、信箱、名單、啟動器、頭像、訊號）與測試 |

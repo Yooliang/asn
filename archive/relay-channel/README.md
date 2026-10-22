@@ -1,3 +1,15 @@
+# relay-channel（已封存，停用）
+
+這是早期的 Claude Code channel 外掛（把收發室來信推進執行中的 session）。**已停用，不再維護**，也不在安裝、打包與測試之內。
+
+- 取代方案：收發室橋（`relay/machine/bridge.mjs`）、各視窗自己收信（`relay/machine/recv.mjs --watch`），或 ASN 電腦版。
+- 與橋不可同時收同一把節點金鑰；請勿再掛上本外掛。
+- 內文提示與範例仍是舊的 Irori 用語，不會再更新；僅留作歷史參考（2026-10 依 #14 R8 封存，用 git mv 保留歷史，原路徑 relay/channel/）。
+
+以下為封存前的原始說明。
+
+---
+
 # irori-relay channel
 
 給各機器「工頭」session 用的 Claude Code channel（MCP）。流程：訂 Supabase Realtime 門鈴 → 一響就拉 inbox →
