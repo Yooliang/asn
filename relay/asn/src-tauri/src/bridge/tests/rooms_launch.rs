@@ -264,9 +264,11 @@ fn fake_orphan_parent() {
         c.no_window().arg("60");
         c
     };
-    // 跟父程序的主控台脫鉤（DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP），父程序結束時它才不會跟著走
+    // 跟父程序的主控台脫鉤（CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP），父程序結束時它才不會跟著走。
+    // 不用 DETACHED_PROCESS：cmd 沒有主控台時，它開的 ping 會自己要一個新主控台，
+    // 預設終端機是 Windows Terminal 時就冒出分頁，孤兒被收掉後還停在錯誤 0x800700e8 等人按 Enter。
     #[cfg(windows)]
-    std::os::windows::process::CommandExt::creation_flags(&mut c, 0x0000_0008 | 0x0000_0200);
+    std::os::windows::process::CommandExt::creation_flags(&mut c, 0x0800_0000 | 0x0000_0200);
     let child = c.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap();
     // 第一行孫子（孤兒）的 pid、第二行自己（上一個橋）的 pid：Linux 上孤兒會改掛 init，從程序表讀不到原本的父 pid
     std::fs::write(std::env::var("ASN_ORPHAN_OUT").unwrap(), format!("{}
