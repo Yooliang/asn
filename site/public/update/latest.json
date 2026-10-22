@@ -1,11 +1,11 @@
 {
-  "version": "0.1.26",
-  "notes": "設定「音效」改「通知」，四個開關（#125）；偽通話第一期：講話自動寄出、回信自動念出（#99）；asn-cli recv --peek 只看不收",
-  "pub_date": "2026-10-22T02:05:17.277Z",
+  "version": "0.1.27",
+  "notes": "修正：收發室剛啟動、還沒拿到視窗名單時寄來的信不會再被誤判找不到而丟掉；環境變數改用 ASN_*（舊的 IRORI_* 照樣能用，#14 第一期）",
+  "pub_date": "2026-10-22T02:57:11.522Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybi9UdEdVM0hCbUQzQW16T2oveTlqTE9JTDZ2OUxYcWxIWVZQZGtiSGdwb2xVQ0NqM1dJUk1PYk1ickgxMytJTUs2N29qelN3dnlNRFJTekE0VnVsS3c0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjM0NzE2CWZpbGU6QVNOXzAuMS4yNl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjI2CmFER28wVnI3L0xDeUl2YzdvRXpMeFhQRC9KOGh4TDFTbXFGTDZ6bTlxNHo3SDMyOWVFa0xuNnBSYWltR1JUZnk5ZlNQd3ZacXRROE5CQVQ5VE9vYUNBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.26_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjgrZ0I3SmlnckZ5cUx4Q0V2MlYrM1pmRUhtaVlFTkg2ZTE0UzF5eG4xVUZsbzBicVI4TmVNUXpjdzMvZklDdVlvalhNdmYvNHphWTFkMXMyWE1GR0FNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjM3ODMxCWZpbGU6QVNOXzAuMS4yN194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjI3CldSa1UrVGFkTHROQ2xhNXEzZTNsbzJmMEZNVnh2dk4vOFk4Z2JxVlByQ0NYRmpoT1V6NjhGTVJTRkpucklkcTVhRnhMbWVXN2luRXMrVndnc1NCb0JnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.27_x64-setup.exe"
     }
   }
 }
