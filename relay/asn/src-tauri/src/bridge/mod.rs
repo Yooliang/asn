@@ -13,6 +13,7 @@ pub mod orphans;
 pub mod partner_ops;
 pub mod pending;
 pub mod roster;
+pub mod slash;
 pub mod rooms;
 pub mod worker;
 

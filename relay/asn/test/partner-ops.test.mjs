@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { HANDOVER_GIVE_UP_MS, ONLINE_OPS, OPS, OP_GIVE_UP_MS, REASON, STALE_TEXT, buildOpRequest, infoRows, isManageable, menuItems, opErrorText, opFormError, progressView } from '../ui/lib/partner-ops.mjs'
+import { HANDOVER_GIVE_UP_MS, ONLINE_OPS, OPS, OP_GIVE_UP_MS, QUEUE_GIVE_UP_MS, REASON, STALE_TEXT, buildOpRequest, infoRows, isManageable, menuItems, opErrorText, opFormError, progressView } from '../ui/lib/partner-ops.mjs'
 import { machinesByNode } from '../ui/lib/mobile-launch.mjs'
 
 const LAUNCHER = { profiles: [{ id: 'claude' }], cwd_allow: ['D:\\Github\\asn'] }
@@ -99,7 +99,14 @@ test('接班換手的進度分段：請前任寫交接 → 關閉前任視窗 �
   // 處理中的上限：接班換手要等前任寫交接，放寬到 15 分鐘；其他動作仍是 3 分鐘
   assert.equal(at('stage:handoff', t0 + OP_GIVE_UP_MS + 1).done, false)
   assert.equal(at('stage:handoff', t0 + HANDOVER_GIVE_UP_MS + 1).done, true)
-  assert.equal(progressView({ status: 'taken' }, { op: 'rename', sentAt: t0, now: t0 + OP_GIVE_UP_MS + 1 }).done, true)
+  assert.equal(progressView({ status: 'taken' }, { op: 'close', sentAt: t0, now: t0 + OP_GIVE_UP_MS + 1 }).done, true)
+  // 改名、切換模型遇到忙碌視窗會排隊等（電腦端最多 10 分鐘）：回報 stage:queued 顯示排隊中，上限放寬到 15 分鐘
+  for (const op of ['rename', 'model']) {
+    const q = progressView({ status: 'taken', detail: 'stage:queued' }, { op, sentAt: t0, now: t0 + OP_GIVE_UP_MS + 1 })
+    assert.deepEqual([q.phase, q.done, q.text], ['working', false, '排隊中，等它忙完…'], op)
+    assert.equal(progressView({ status: 'taken', detail: 'stage:queued' }, { op, sentAt: t0, now: t0 + QUEUE_GIVE_UP_MS + 1 }).done, true, op)
+  }
+  assert.equal(QUEUE_GIVE_UP_MS > 10 * 60 * 1000, true)
   assert.equal(progressView({ status: 'pending' }, { op: 'handover', sentAt: t0, now: t0 + OP_GIVE_UP_MS + 1 }).done, true, '還沒被取走照舊 3 分鐘')
   assert.equal(HANDOVER_GIVE_UP_MS > 10 * 60 * 1000, true)
 })

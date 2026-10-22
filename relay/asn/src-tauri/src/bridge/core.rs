@@ -5,7 +5,8 @@ use super::attach;
 use super::corrlog::{self, CorrLog, Dir, Entry};
 use super::engines::{EngineEvent, EngineSet};
 use super::launcher::{Launched, Launcher};
-use super::partner_ops::PartnerOps;
+use super::partner_ops::{CommandJob, PartnerOps};
+use super::slash;
 use super::mail::{self, unaddressed_receipt, unaddressed_window_note, mail_head, parse_send_head, strip_reply_head, wants_reply, Mail, SendHead};
 use super::pending::{self, LastReq, Pending, RoomRef, State};
 use super::rooms::{self, Cursors};
@@ -177,6 +178,8 @@ impl Origin {
 }
 
 const NOTICE_TTL_MS: u64 = 600_000;
+/// 本人傳的 /指令，但目標視窗沒有 ASN 外掛：照普通信投遞，另外回這句
+const NO_MOD_NOTICE: &str = "這個視窗沒有 ASN 外掛，/指令 只能當文字送過去";
 const DIRECT_NOTE: &str = "（這個視窗自己用命令列回了信，內文只在對方那邊，收發室看不到）";
 
 pub struct Core {
@@ -659,6 +662,31 @@ impl Core {
             self.ack_ids(&[m.id.clone()]).await;
             return None;
         }
+        // 本人傳來的「/指令」：目標是有 ASN 外掛的 Claude 視窗就交給外掛執行（背景等它做完，不擋其他信）；
+        // 其他視窗（沒有外掛、Codex、Gemini 等）照舊當普通信投遞，並另外回一封說明
+        let mut no_mod_notice = false;
+        if let Some(cmd) = slash::parse(&m) {
+            let po = self.partner_ops.clone();
+            if let Some(done) = po.as_ref().and_then(|po| po.command_state(&m.id)) {
+                // 已經在處理或做完了：不再執行；做完了但 ack 沒成功的，這裡補 ack
+                if done {
+                    self.ack_ids(&[m.id.clone()]).await;
+                    return None;
+                }
+                return Some(target);
+            }
+            let sid = if self.engine_of(&target) == "claude" { po.as_ref().and_then(|po| po.command_target(&target)) } else { None };
+            match (po, sid) {
+                (Some(po), Some(sid)) => {
+                    self.log.line(&format!("id={} from={}/{} is a slash command /{} for {target}: handed to the window's plugin", m.id, m.from_node, from_agent, cmd.command));
+                    let sender = p.sender_desc.clone();
+                    po.start_command(CommandJob { mail_id: m.id.clone(), window: target.clone(), command: cmd.command, args: cmd.args, from_node: m.from_node.clone(), from_agent: from_agent.clone(), sender, reply_from: self.cfg.mailbox_name.clone() }, sid);
+                    return Some(target);
+                }
+                _ => no_mod_notice = true,
+            }
+        }
+        let origin = Origin::of(&p);
         self.pending.push(p);
         if !no_reply {
             self.last_requester.insert(target.clone(), LastReq { from_node: m.from_node.clone(), from_agent: from_agent.clone(), mail_id: m.id.clone(), t: self.now });
@@ -673,6 +701,9 @@ impl Core {
                 self.log.line(&format!("handed id={} from={}/{} to={target}", m.id, m.from_node, from_agent));
                 let names: Vec<String> = m.attachments.iter().map(|a| a.name.clone()).collect();
                 self.corr_note(&target, Dir::Received, &Self::node_agent(&m.from_node, &from_agent), &target, &m.id, &m.body, &names);
+                if no_mod_notice {
+                    self.send_back(&origin, NO_MOD_NOTICE, None, Some(false)).await;
+                }
             }
             Err(e) => {
                 self.remove(&m.id);
