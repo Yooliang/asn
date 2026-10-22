@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
+use std::path::PathBuf;
 
 pub struct Relay {
     client: reqwest::Client,
@@ -20,6 +21,10 @@ pub struct Relay {
     unaddressed: Mutex<Vec<Value>>,
     /// 剛 ack 掉的未指定收件人信件 id（橋晚一步才處理到同一封舊回應時，不能再把它收回來）
     unaddressed_acked: Mutex<Vec<String>>,
+    /// 這個程式的內建橋正在跑（橋自己負責把沒指定收件人的信交給本人，這裡不再另外去節點信箱撈）
+    bridge_on: AtomicBool,
+    /// 存「誰負責撈節點信箱裡沒指定收件人的信」記號檔的資料夾（橋的工作資料夾）；None＝不做互斥（測試）
+    owner_dir: Mutex<Option<PathBuf>>,
     /// 在線狀態回報：目前的狀態與個人訊息（前端改了就更新並叫醒回報迴圈）
     presence: Mutex<(String, String)>,
     /// 後台還沒部署 asn_presence（404／400）：靜默停止回報，直到下次啟動
@@ -180,7 +185,7 @@ pub fn build_presence_body(window: &str, version: &str, status: &str, psm: &str)
 impl Relay {
     pub fn new(base: String, key: String, node: String, window: String) -> Relay {
         Relay {
-            client: reqwest::Client::new(), base, key, node, window: Mutex::new(window), old: Mutex::new(vec![]), ack_agent: Mutex::new(HashMap::new()), unaddressed: Mutex::new(vec![]), unaddressed_acked: Mutex::new(vec![]),
+            client: reqwest::Client::new(), base, key, node, window: Mutex::new(window), old: Mutex::new(vec![]), ack_agent: Mutex::new(HashMap::new()), unaddressed: Mutex::new(vec![]), unaddressed_acked: Mutex::new(vec![]), bridge_on: AtomicBool::new(false), owner_dir: Mutex::new(None),
             presence: Mutex::new(("online".into(), String::new())), presence_off: AtomicBool::new(false), presence_closed: AtomicBool::new(false), update_requested: AtomicBool::new(false),
             presence_wake: tokio::sync::Notify::new(),
         }
@@ -327,12 +332,48 @@ impl Relay {
         held.push(raw);
         true
     }
+    pub fn set_bridge_running(&self, on: bool) {
+        self.bridge_on.store(on, Ordering::Relaxed);
+    }
+    pub fn set_owner_dir(&self, dir: PathBuf) {
+        *self.owner_dir.lock().unwrap() = Some(dir);
+    }
+    /// 同一個節點上只讓一個 ASN 程式去撈沒指定收件人的信（免得兩個視窗各顯示一次）：記號檔 owner-inbox.pid 放負責的 pid。
+    /// 內建橋在跑的程式一律拿走記號；沒跑橋的程式只在記號檔沒人（或那個 pid 已死）時才拿
+    fn owns_unaddressed(&self) -> bool {
+        let Some(dir) = self.owner_dir.lock().unwrap().clone() else { return true };
+        let (f, me) = (dir.join("owner-inbox.pid"), std::process::id());
+        if !self.bridge_on.load(Ordering::Relaxed) {
+            let other = std::fs::read_to_string(&f).ok().and_then(|s| s.trim().parse::<u32>().ok());
+            if other.map(|p| p != me && crate::heartbeat::pid_alive(p)).unwrap_or(false) {
+                return false;
+            }
+        }
+        let _ = std::fs::write(&f, me.to_string());
+        true
+    }
+    /// 沒有內建橋的 ASN（舊版收發室橋在跑，或沒有橋）自己去節點信箱撈沒指定收件人的信，一樣交給本人。
+    /// 讀法是既有的節點信箱讀取（不新增後台動作、舊後端照用），只取 to_agent 為空的；舊橋不會 ack 這類信
+    async fn pull_unaddressed(&self) {
+        if self.bridge_on.load(Ordering::Relaxed) || !self.owns_unaddressed() {
+            return;
+        }
+        let Ok(v) = self.api("inbox", None).await else { return };
+        for m in v.get("messages").and_then(Value::as_array).cloned().unwrap_or_default() {
+            let none = m.get("to_agent").and_then(Value::as_str).map(str::is_empty).unwrap_or(true);
+            let from = m.get("from_agent").and_then(Value::as_str).unwrap_or("");
+            if none && !from.ends_with("收發室") {
+                self.hold_unaddressed(m);
+            }
+        }
+    }
     /// 目前等著交給本人的信件 id
     pub fn unaddressed_ids(&self) -> Vec<String> {
         self.unaddressed.lock().unwrap().iter().filter_map(|m| m.get("id").and_then(Value::as_str).map(String::from)).collect()
     }
     pub async fn inbox(&self) -> Result<Value, String> {
         let names = self.active_names();
+        self.pull_unaddressed().await;
         let mut all: Vec<Value> = vec![];
         let mut map = HashMap::new();
         for (i, w) in names.iter().enumerate() {

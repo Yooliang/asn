@@ -325,6 +325,9 @@ impl Manager {
         match start_with(cfg, relay, self.anon_url.clone(), Some(env)) {
             Ok(r) => {
                 g.running = Some(r);
+                if let Some(rl) = &self.relay {
+                    rl.set_bridge_running(true);
+                }
                 g.waiting_legacy = false;
             }
             Err(StartError::HeldBy(_)) => g.waiting_legacy = true, // 舊橋在跑：不啟動，狀態顯示由舊版負責；舊橋退出後自動接手
@@ -402,6 +405,9 @@ impl Manager {
 
     pub fn stop(&self) {
         let r = self.inner.lock().unwrap().running.take();
+        if let Some(rl) = &self.relay {
+            rl.set_bridge_running(false);
+        }
         if let Some(r) = r {
             r.stop();
         }

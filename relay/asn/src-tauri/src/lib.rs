@@ -660,6 +660,9 @@ pub fn run() {
     }
     let state = App { relay: relay_obj.clone(), init_error, node: node.clone(), work_dir: work_dir.clone(), data_dir, shot };
     let anon_url = relay_obj.as_ref().zip(anon).and_then(|(r, a)| bell::ws_url(r.base(), &a));
+    if let Some(r) = &relay_obj {
+        r.set_owner_dir(work_dir.clone());
+    }
     let bridge_mgr = bridge::Manager::new(relay_obj.clone(), anon_url.clone(), node.clone(), work_dir.clone(), bridge_data_dir);
 
     let app = tauri::Builder::default()

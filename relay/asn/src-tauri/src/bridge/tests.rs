@@ -900,6 +900,47 @@ async fn 沒指定收件人_不要回覆的信與收發室系統信_交給本人
     assert_eq!(h.core.relay.unaddressed_ids().len(), 2);
 }
 
+#[tokio::test]
+async fn 沒啟用內建橋的_asn_自己撈節點信箱_沒指定收件人的信出現在畫面_收下前沒人_ack() {
+    // 情境：工作機的舊版收發室橋在跑（它不 ack 這類信），ASN 開著但沒啟用內建橋
+    let fr = FakeRelay::start();
+    fr.put(mail(1, json!({"to_agent": null})));
+    fr.put(mail(2, json!({"to_agent": "T-乙"}))); // 寄給別的視窗：不是給本人的
+    fr.put(mail(3, json!({"to_agent": null, "from_agent": "W-收發室"}))); // 收發室系統信不算
+    let relay = Relay::new(fr.url.clone(), "fake-test-key".into(), "T".into(), "T-ASN".into());
+    let v = relay.inbox().await.unwrap();
+    let ms = v["messages"].as_array().unwrap();
+    assert_eq!(ms.len(), 1, "{ms:?}");
+    assert_eq!((ms[0]["id"].as_str(), ms[0]["to_agent"].as_str(), ms[0]["unaddressed"].as_bool()), (Some(uid(1).as_str()), Some("T-ASN"), Some(true)));
+    // 再收一次：同一封不重複
+    assert_eq!(relay.inbox().await.unwrap()["messages"].as_array().unwrap().len(), 1);
+    assert!(fr.acked().is_empty(), "畫面收下之前沒人 ack");
+    relay.ack(&[uid(1)]).await.unwrap();
+    assert_eq!(fr.acked(), vec![uid(1)]);
+    assert!(relay.inbox().await.unwrap()["messages"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn 內建橋在跑時_asn_不另外撈_同機另一個_asn_在撈時也不撈() {
+    let fr = FakeRelay::start();
+    fr.put(mail(1, json!({"to_agent": null})));
+    // 內建橋在跑：只有橋交來的才算（橋還沒處理就沒有）
+    let relay = Relay::new(fr.url.clone(), "fake-test-key".into(), "T".into(), "T-ASN".into());
+    relay.set_bridge_running(true);
+    assert!(relay.inbox().await.unwrap()["messages"].as_array().unwrap().is_empty());
+    // 同機另一個活著的 ASN 程式已經負責：這個不撈（避免同一封顯示兩次）；它不在了就接手
+    let d = tempfile::tempdir().unwrap();
+    let other = if cfg!(windows) { 4 } else { 1 };
+    if crate::heartbeat::pid_alive(other) && other != std::process::id() {
+        std::fs::write(d.path().join("owner-inbox.pid"), other.to_string()).unwrap();
+        let r2 = Relay::new(fr.url.clone(), "fake-test-key".into(), "T".into(), "T-ASN".into());
+        r2.set_owner_dir(d.path().to_path_buf());
+        assert!(r2.inbox().await.unwrap()["messages"].as_array().unwrap().is_empty());
+        std::fs::remove_file(d.path().join("owner-inbox.pid")).unwrap();
+        assert_eq!(r2.inbox().await.unwrap()["messages"].as_array().unwrap().len(), 1);
+    }
+}
+
 // ---- nonce 偽造 ------------------------------------------------------------------------------------
 
 #[tokio::test]
