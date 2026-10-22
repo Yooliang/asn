@@ -1,6 +1,6 @@
 // 設定頁的分類定義與每類「一行目前值摘要」（純邏輯，node 與瀏覽器都能跑）。
 // 設定頁只列分類，點一類才開對話框顯示詳細項目；存檔格式與各設定的行為都不在這裡動。
-import { FRAME_LABEL, CLOSE_LABEL, SOUND_LABEL } from './prefs.mjs'
+import { FRAME_LABEL, CLOSE_LABEL, notifySummary } from './prefs.mjs'
 import { MODE_LABEL, DP_LABEL, TOOLBAR_LABEL, BUBBLE_LABEL } from './merge.mjs'
 import { DIMS } from './dims.mjs'
 import { AUTO_LABEL, STT_LANG_LABEL } from './voice-prefs.mjs'
@@ -11,7 +11,7 @@ export const SETTING_CATS = [
   { key: 'accounts', title: '帳號', icon: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 20c0-3.3 2.7-5 6-5s6 1.7 6 5M16 5.5a3 3 0 0 1 0 5.5M18 15c2 .5 3 2 3 5' },
   { key: 'look', title: '外觀', icon: 'M12 3a9 9 0 1 0 0 18c1.5 0 2-1 1.5-2s0-2 1.5-2h2a3 3 0 0 0 3-3c0-5-4-11-8-11z' },
   { key: 'tabs', title: '分頁與分組', icon: 'M3 6h7l2 2h9v11H3z' },
-  { key: 'sound', title: '音效', icon: 'M4 9v6h4l5 4V5L8 9zM16 9c1.5 1.5 1.5 4.5 0 6' },
+  { key: 'notify', title: '通知', icon: 'M6 9a6 6 0 0 1 12 0c0 6 2 7 2 7H4s2-1 2-7zM10 19a2 2 0 0 0 4 0' },
   { key: 'voice', title: '語音', icon: 'M12 3a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM6 11a6 6 0 0 0 12 0M12 17v4' },
   { key: 'window', title: '視窗與系統匣', icon: 'M3 5h18v14H3zM3 9h18' },
   { key: 'launch', title: '啟動設定', icon: 'M6 4l14 8-14 8z' },
@@ -40,8 +40,8 @@ export function catSummary(key, s = {}) {
       return join([FRAME_LABEL[s.frame] ?? FRAME_LABEL.custom, MODE_LABEL[s.mode], `頭像${DP_LABEL[s.dpMode] ?? ''}`, `工具列${TOOLBAR_LABEL[s.toolbar] ?? ''}`, `底色${BUBBLE_LABEL[s.bubble] ?? ''}`])
     case 'tabs':
       return `分頁依${dimLabel(s.tabDim)}、分組依${dimLabel(s.groupDim)}`
-    case 'sound':
-      return `音效：${SOUND_LABEL[s.soundOn ? 'on' : 'off']}`
+    case 'notify':
+      return notifySummary(s.notify)
     case 'voice': {
       if (s.voiceEnabled === false) return '念出訊息尚未啟用'
       return join([`自動念：${AUTO_LABEL[s.ttsAuto ? 'on' : 'off']}`, `輸入語言：${STT_LANG_LABEL[s.sttLang] ?? STT_LANG_LABEL.zh}`])
