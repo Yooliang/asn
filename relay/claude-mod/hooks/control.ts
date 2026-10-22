@@ -8,12 +8,15 @@ export const POLL_MS = 1500
 const SID_RE = /^[A-Za-z0-9_-]{1,128}$/
 const MODEL_RE = /^[A-Za-z0-9._:/\[\]-]{1,100}$/
 const MAX_NAME = 100
+const COMMAND_RE = /^[A-Za-z0-9:_-]{1,64}$/
+const MAX_ARGS = 2000
+const MAX_OUTPUT = 1500
 const SEEN_MAX = 200
 
 export type ControlRequest =
   | { kind: 'ignore' }
   | { kind: 'reject'; id: string; detail: string }
-  | { kind: 'run'; id: string; op: 'rename' | 'model'; arg: string }
+  | { kind: 'run'; id: string; op: 'rename' | 'model' | 'command'; command: string; args: string }
 
 export function validSessionId(sid: unknown): sid is string {
   return typeof sid === 'string' && SID_RE.test(sid)
@@ -36,16 +39,25 @@ export function parseControl(text: string, now: number): ControlRequest {
     return { kind: 'ignore' }
   }
   if (!o || typeof o !== 'object' || Array.isArray(o)) return { kind: 'ignore' }
-  const { id, op, arg, at } = o as Record<string, unknown>
+  const { id, op, arg, at, command, args } = o as Record<string, unknown>
   if (typeof id !== 'string' || id === '' || [...id].length > 200) return { kind: 'ignore' }
   if (typeof at !== 'number' || !Number.isFinite(at) || now - at > CONTROL_MAX_AGE_MS) return { kind: 'ignore' }
+  if (op === 'command') {
+    // 從手機傳 / 指令：command 不含開頭斜線，args 可空（電腦端只轉本人簽章、以 / 開頭的信）
+    if (typeof command !== 'string' || !COMMAND_RE.test(command)) return { kind: 'reject', id, detail: '指令名稱不合法（只收英數與 : _ -，上限 64 字，不含開頭斜線）' }
+    if (args !== undefined && typeof args !== 'string') return { kind: 'reject', id, detail: '指令參數必須是文字' }
+    const g = (args ?? '').trim()
+    if ([...g].length > MAX_ARGS) return { kind: 'reject', id, detail: `指令參數太長（上限 ${MAX_ARGS} 字）` }
+    if (/[\u0000-\u001f\u007f]/.test(g)) return { kind: 'reject', id, detail: '參數含有控制字元，不執行' }
+    return { kind: 'run', id, op, command, args: g }
+  }
   if (op !== 'rename' && op !== 'model') return { kind: 'reject', id, detail: clip(`不認得的操作：${typeof op === 'string' ? clip(op, 30) : '（空）'}`) }
   if (typeof arg !== 'string' || arg.trim() === '') return { kind: 'reject', id, detail: op === 'rename' ? '新名字不能是空的' : '模型名稱不能是空的' }
   const a = arg.trim()
   if (/[\u0000-\u001f\u007f]/.test(a)) return { kind: 'reject', id, detail: '參數含有控制字元，不執行' }
   if (op === 'rename' && [...a].length > MAX_NAME) return { kind: 'reject', id, detail: `新名字太長（上限 ${MAX_NAME} 字）` }
   if (op === 'model' && !MODEL_RE.test(a)) return { kind: 'reject', id, detail: '模型名稱格式不合法（只收英數與 . _ : / [ ] -，上限 100 字）' }
-  return { kind: 'run', id, op, arg: a }
+  return { kind: 'run', id, op, command: op, args: a }
 }
 
 export type ControlIo = Io & {
@@ -83,10 +95,16 @@ export function createControl(st: Writer) {
       }
       let result: ControlResult
       try {
-        const r = (await io.run(req.op, req.arg)) as { text?: unknown } | undefined
-        const said = typeof r?.text === 'string' ? r.text.replace(/\s+/g, ' ').trim() : ''
-        const base = req.op === 'rename' ? `已改名為「${clip(req.arg, 60)}」` : `已切換模型為 ${req.arg}`
-        result = { id: req.id, ok: true, detail: clip(said ? `${base}：${said}` : base) }
+        const r = (await io.run(req.command, req.args)) as { text?: unknown } | undefined
+        const raw = typeof r?.text === 'string' ? r.text.trim() : ''
+        if (req.op === 'command') {
+          // 指令輸出原樣（保留換行）截 MAX_OUTPUT 字；沒有輸出文字就說已執行
+          result = { id: req.id, ok: true, detail: raw ? clip(raw, MAX_OUTPUT) : `已執行 /${req.command}` }
+        } else {
+          const said = raw.replace(/\s+/g, ' ')
+          const base = req.op === 'rename' ? `已改名為「${clip(req.args, 60)}」` : `已切換模型為 ${req.args}`
+          result = { id: req.id, ok: true, detail: clip(said ? `${base}：${said}` : base) }
+        }
       } catch (err) {
         result = { id: req.id, ok: false, detail: clip(`執行失敗：${err instanceof Error ? err.message : String(err)}`) }
       }
