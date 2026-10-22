@@ -36,6 +36,7 @@
           </select>
         </div>
         <input class="ghost psm-input" v-model="me.psm" maxlength="60" placeholder="&lt;輸入個人訊息&gt;" aria-label="個人訊息">
+        <div class="me-np" v-if="nowPlayingText" role="status">{{ nowPlayingText }}</div>
         <div class="nick-err" v-if="nickErr" role="alert">{{ nickErr }}</div>
         <div class="av-note" v-if="avMsg" role="status">{{ avMsg }}</div>
       </div>

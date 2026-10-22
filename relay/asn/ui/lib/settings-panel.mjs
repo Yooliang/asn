@@ -13,7 +13,7 @@ import { USAGE_NOTE } from './usage.mjs'
 
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
 export const SETTING_OPS = [
-  'notify', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
+  'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-add', 'acct-auto', 'acct-remote-node', 'acct-remote-switch', 'acct-trust',
   'closeTo', 'autostart', 'bridge-enable', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'cli-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'avatar-remove',
 ]
@@ -47,6 +47,13 @@ export const SettingsPanel = {
             </div>
           </div>
           <small role="status">{{ st.avMsg || (st.hasUpload ? '目前用的是這台設備上傳的大頭貼。' : '目前用的是自動產生的大頭貼。') }}</small>
+        </div>
+      </template>
+      <template v-if="catKey === 'me'">
+        <div class="np-set">
+          <b>正在聽的歌</b>
+          <label class="chk"><input type="checkbox" :checked="st.nowPlaying?.on === true" @change="act('now-playing', $event.target.checked)" aria-label="顯示正在聽的歌" /><span>顯示正在聽的歌</span></label>
+          <small>開啟後，好友會在你的狀態看到「♪ 正在聽：歌名 - 歌手」。只送歌名與歌手，播放中才顯示，暫停就不顯示；預設關閉。</small>
         </div>
       </template>
       <template v-if="catKey === 'notify'">

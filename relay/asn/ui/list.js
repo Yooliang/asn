@@ -20,6 +20,7 @@ import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatar
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, switchMode, tabVisible, toggleCollapsed } from './lib/merge.mjs'
 import { chatTabSameZone, closeAllChatTabs, dropInsertBefore, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
+import { nowPlayingLine, normalizeNowPlaying } from './lib/now-playing.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, normalizeClose, normalizeFrame, totalUnread, notifyFromSaved, notifyPlan, notifyWith } from './lib/prefs.mjs'
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
@@ -94,6 +95,8 @@ await initFrame()
 // 關閉視窗時：縮到系統匣（預設，含舊存檔）／結束程式；登入時自動啟動以系統上的真實設定為準（不存檔）。程式在 tray.rs
 const closeTo = ref(normalizeClose(savedMe.closeTo))
 const trayOk = ref(true)
+const showNowPlaying = ref(normalizeNowPlaying(savedMe.showNowPlaying))   // 顯示正在聽的歌（預設關；開了 Rust 端才去讀系統媒體、才送出）
+const nowPlaying = ref('')   // 目前正在聽的「歌名 - 歌手」（Rust 端輪詢後推來；沒在聽＝空）
 const autoAddClaude = ref(savedMe.autoAddClaude !== false)   // Claude 帳號自動加入／回存（預設開；Rust 背景工作每分鐘讀同一份存檔看開關）
 const autostart = reactive({ supported: false, on: false, busy: false })
 try {
@@ -662,11 +665,17 @@ if (ui.mode === 'merged') await invoke('main_layout', { merged: true, w: sizes.m
 await listen('relay-bell', () => void core.pull('bell'))   // Rust 端的 Realtime 門鈴
 await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 
-watch([me, notifyPrefs, frame, closeTo, autoAddClaude, autoCheck, dims, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, notify: notifyPrefs.value, frame: frame.value, closeTo: closeTo.value, autoAddClaude: autoAddClaude.value, autoUpdate: autoCheck.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting }); sync() }, { deep: true })
+watch([me, showNowPlaying, notifyPrefs, frame, closeTo, autoAddClaude, autoCheck, dims, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, showNowPlaying: showNowPlaying.value, notify: notifyPrefs.value, frame: frame.value, closeTo: closeTo.value, autoAddClaude: autoAddClaude.value, autoUpdate: autoCheck.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting }); sync() }, { deep: true })
 // 系統匣圖示的提示文字帶未讀總數
 watch(() => totalUnread(friends.value), n => { void invoke('set_tray_unread', { n }).catch(() => {}) }, { immediate: true })
 // 在線狀態：狀態下拉與個人訊息交給 Rust 端回報（每 60 秒一次，改了立刻送；後台沒部署就靜默不送）
 watch(() => [me.status, me.psm], () => { void invoke('set_presence', { status: me.status, psm: me.psm ?? '' }).catch(() => {}) }, { immediate: true })
+// 正在聽的歌：開關交給 Rust 端（關著不讀不送）；歌變了 Rust 端推 asn:now-playing，自己的名單頭顯示
+await listen('asn:now-playing', ev => { nowPlaying.value = showNowPlaying.value ? String(ev.payload ?? '') : '' })
+watch(showNowPlaying, on => {
+  if (!on) nowPlaying.value = ''
+  void invoke('set_now_playing', { on }).then(t => { nowPlaying.value = on ? String(t ?? '') : '' }).catch(() => {})
+}, { immediate: true })
 // 設定頁改「分頁依」：分組若撞到自動換成剩下兩個裡的第一個
 const setTabDim = v => Object.assign(dims, withTabDim(dims, v))
 const pages = computed(() => pageTabs(friends.value, dims.tabDim, { selfNode: info.node, selfName: info.window_name, nodeOrder: nodeOrder.value }))
@@ -766,7 +775,7 @@ const app = createApp({
     // 指引、設定的聊天窗（openPanel／closePanel 在上面）：列表只負責「點一項就開」，內容在右邊分頁或獨立視窗
     const panelGuide = computed(() => panelItem('guide', ui.panel.guide))
     const catSub = key => catSummary(key, {
-      hasUpload: selfHasUpload.value, accountCount: accounts.state.list.length, accountCurrent: accounts.state.current?.email ?? '',
+      hasUpload: selfHasUpload.value, nowPlayingOn: showNowPlaying.value, accountCount: accounts.state.list.length, accountCurrent: accounts.state.current?.email ?? '',
       frame: frame.value, mode: ui.mode, dpMode: ui.dpMode, toolbar: ui.toolbar, bubble: ui.bubble, tabDim: dims.tabDim, groupDim: dims.groupDim,
       notify: notifyPrefs.value, voiceEnabled: ttsVoices.value.enabled, ttsAuto: voiceCfg.tts_auto, sttLang: voiceCfg.stt_lang,
       closeTo: closeTo.value, trayOk: trayOk.value, autostartSupported: autostart.supported, autostartOn: autostart.on,
@@ -915,6 +924,7 @@ const app = createApp({
     // 設定的狀態與動作都留在這裡（名單視窗的樞紐）。整合模式的分頁直接讀這份快照；分離模式的設定視窗用 asn:settings 事件收同一份，
     // 改了什麼用 asn:set 事件送回來，一律進同一個 applySetting。金鑰、存檔、Rust 指令都不離開這個視窗。
     const settingsState = computed(() => ({
+      nowPlaying: { on: showNowPlaying.value, current: nowPlaying.value },
       status: me.status, hasUpload: selfHasUpload.value, avBusy: avBusy.value, avMsg: avMsg.value,
       notify: notifyPrefs.value, frame: frame.value, mode: ui.mode, dpMode: ui.dpMode, toolbar: ui.toolbar, bubble: ui.bubble,
       tabDim: dims.tabDim, groupDim: dims.groupDim,
@@ -936,6 +946,7 @@ const app = createApp({
     const applySetting = async (op, value) => {
       switch (op) {
         case 'notify': notifyPrefs.value = notifyWith(notifyPrefs.value, value?.key, value?.on); break
+        case 'now-playing': showNowPlaying.value = value === true; break
         case 'frame': await setFrame(value); break
         case 'mode': await setMode(value); break
         case 'dpMode': ui.dpMode = normalizeDpMode(value); break
@@ -995,7 +1006,7 @@ const app = createApp({
       ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo, nudgeTo, sendAttachTo, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
       chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuTogglePin, isChatTabPinned,
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
-      STATUS, CONN_LABEL, FIXED_TABS, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, notifyPrefs, friends, conn, shown, query, collapsed, nickErr, commitNick,
+      STATUS, CONN_LABEL, FIXED_TABS, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr, commitNick,
       tab, adI, rooms, roomsErr, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,
       GUIDES, view, SETTING_CATS, catSub, PANEL_KINDS, panelTabId, panelGuide, panelTitle, openPanel, closePanel, settingsState, applySetting, pickAvatarFile,
       selfNode: info.node, transport, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg,
