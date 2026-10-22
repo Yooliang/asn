@@ -23,6 +23,8 @@ pub struct Window {
     pub no_fallback: bool,
     /// 名單上顯示的資料夾標籤（ACP 工作者用設定的 label，不用資料夾名）
     pub cwd_label_override: Option<String>,
+    /// Claude Code 外掛狀態檔給的補充說明（背景工作 2 件／等你回答…，最多 80 字）；沒有外掛或檔案無效就是 None，名單不帶這個欄位
+    pub detail: Option<String>,
 }
 
 impl Window {
@@ -32,7 +34,7 @@ impl Window {
     }
     /// Claude 視窗（由 ~/.claude/sessions 讀出）
     pub fn claude(name: &str, status: Option<String>, cwd: &str, pid: u32, updated_at: u64, session_id: Option<String>) -> Window {
-        Window { name: name.into(), status, cwd: cwd.into(), pid, updated_at, session_id, engine: "claude".into(), engine_label: None, no_fallback: false, cwd_label_override: None }
+        Window { name: name.into(), status, cwd: cwd.into(), pid, updated_at, session_id, engine: "claude".into(), engine_label: None, no_fallback: false, cwd_label_override: None, detail: None }
     }
     pub fn cwd_label(&self) -> String {
         if let Some(l) = &self.cwd_label_override {
@@ -48,6 +50,107 @@ impl Window {
 /// 忙碌狀態（Node 橋預設 `^(busy|working|running)$`，不分大小寫）
 pub fn is_busy_status(s: Option<&str>) -> bool {
     matches!(s.map(|x| x.to_lowercase()).as_deref(), Some("busy") | Some("working") | Some("running"))
+}
+
+/// 外掛狀態檔多久內算有效（毫秒）
+pub const MOD_STATUS_MAX_AGE_MS: u64 = 30 * 60 * 1000;
+const MOD_STATUS_MAX_BYTES: u64 = 16 * 1024;
+const MOD_DETAIL_MAX_CHARS: usize = 80;
+/// 外掛在 session 結束時寫的說明（外掛刪不了檔，只能寫 idle＋這句）；看到它就不採用，名單照 sessions/<pid>.json
+pub const MOD_ENDED_DETAIL: &str = "已結束";
+
+fn valid_sid(sid: &str) -> bool {
+    !sid.is_empty() && sid.len() <= 128 && sid.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+/// 狀態檔的 state → (名單狀態, 預設說明)。
+/// busy→busy、idle→idle、waiting_user→waiting（等人回答，名單上是暫離）、background／scheduled→busy（還有事在跑／排程中）。
+/// 投遞語意（is_busy 只有 busy／working／running 算忙碌）：background／scheduled 算忙碌，所以「沒回覆」提醒會先等；
+/// waiting_user 不算忙碌：視窗停在等人，不會自己回覆，提醒照常在逾時後送回寄件者（提醒是送給寄件者，不是插進這個視窗，不會打擾提問）。
+fn map_mod_state(state: &str) -> Option<(&'static str, Option<&'static str>)> {
+    Some(match state {
+        "busy" => ("busy", None),
+        "idle" => ("idle", None),
+        "waiting_user" => ("waiting", Some("等你回答")),
+        "background" => ("busy", Some("背景工作中")),
+        "scheduled" => ("busy", Some("排程等待中")),
+        _ => return None,
+    })
+}
+
+/// 讀 `<dir>/<sessionId>.json`（Claude Code 外掛寫的狀態檔），合進視窗的狀態與說明。
+/// 檔案不存在、讀到半份、JSON 壞、過期、sessionId 不符、state 不認得：整個忽略，維持 sessions/<pid>.json 給的 status。永遠不回錯。
+pub fn apply_mod_status(windows: &mut [Window], dir: &Path, now_ms: u64) {
+    for w in windows.iter_mut() {
+        if w.engine != "claude" {
+            continue;
+        }
+        let Some(sid) = w.session_id.clone() else { continue };
+        // sessionId 要當檔名用：只收一般字元，擋掉路徑分隔與 ..
+        if !valid_sid(&sid) {
+            continue;
+        }
+        if let Some((status, detail)) = read_mod_status(&dir.join(format!("{sid}.json")), &sid, now_ms) {
+            w.status = Some(status);
+            w.detail = detail;
+        }
+    }
+}
+
+fn read_mod_status(path: &Path, sid: &str, now_ms: u64) -> Option<(String, Option<String>)> {
+    if std::fs::metadata(path).ok()?.len() > MOD_STATUS_MAX_BYTES {
+        return None;
+    }
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+    if v.get("sessionId").and_then(Value::as_str) != Some(sid) {
+        return None;
+    }
+    let at = v.get("at").and_then(Value::as_u64)?;
+    if now_ms.abs_diff(at) > MOD_STATUS_MAX_AGE_MS {
+        return None; // 過期（或時間離譜地在未來）
+    }
+    if v.get("detail").and_then(Value::as_str).map(str::trim) == Some(MOD_ENDED_DETAIL) {
+        return None; // session 已結束：不採用
+    }
+    let (status, default_detail) = map_mod_state(v.get("state").and_then(Value::as_str)?)?;
+    let raw: String = v.get("detail").and_then(Value::as_str).unwrap_or("").chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    let raw = raw.trim();
+    let detail = if raw.is_empty() { default_detail.map(String::from) } else { Some(raw.chars().take(MOD_DETAIL_MAX_CHARS).collect()) };
+    Some((status.to_string(), detail))
+}
+
+/// 順手清掉 `<dir>` 底下過時的狀態檔：只刪檔名是合法 sessionId 的 .json、內容是完整 JSON 且 sessionId 與檔名相符、
+/// 而且 `at` 已超過有效期，再加上（已結束，或這個 session 已不在現行視窗名單）。讀不了、半份、壞檔一律不動。
+/// live_sids＝這一輪 sessions/<pid>.json 讀到的 sessionId；呼叫端讀 sessions 失敗時不要呼叫。回傳刪掉幾個。
+pub fn cleanup_mod_status(dir: &Path, live_sids: &[String], now_ms: u64) -> usize {
+    let Ok(rd) = std::fs::read_dir(dir) else { return 0 };
+    let mut n = 0;
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        let Some(stem) = name.strip_suffix(".json") else { continue };
+        if !valid_sid(stem) {
+            continue;
+        }
+        let path = e.path();
+        let Ok(meta) = std::fs::metadata(&path) else { continue };
+        if !meta.is_file() || meta.len() > MOD_STATUS_MAX_BYTES {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else { continue };
+        let Ok(v) = serde_json::from_str::<Value>(&text) else { continue };
+        if v.get("sessionId").and_then(Value::as_str) != Some(stem) {
+            continue;
+        }
+        let Some(at) = v.get("at").and_then(Value::as_u64) else { continue };
+        if now_ms < at || now_ms - at <= MOD_STATUS_MAX_AGE_MS {
+            continue;
+        }
+        let ended = v.get("detail").and_then(Value::as_str).map(str::trim) == Some(MOD_ENDED_DETAIL);
+        if (ended || !live_sids.iter().any(|s| s == stem)) && std::fs::remove_file(&path).is_ok() {
+            n += 1;
+        }
+    }
+    n
 }
 
 fn parse_session(v: &Value) -> Option<Window> {
@@ -102,7 +205,16 @@ pub fn read_sessions(dir: &Path, alive: impl Fn(u32) -> bool, exclude_pid: u32, 
 /// roster 動作的請求內容。asn_window＝ASN 自己的視窗名（也列進名單，別台看得到這台的 ASN；engine 標 asn）。
 /// launcher＝遠端開視窗的摘要（profile 名與標籤、cwd 白名單、上限；不含指令），沒有可用設定送 null，仲介就清掉。
 pub fn roster_body(windows: &[Window], asn_window: Option<&str>, launcher: Value) -> Value {
-    let mut agents: Vec<Value> = windows.iter().map(|w| json!({ "name": w.name, "status": w.status, "cwd_label": w.cwd_label(), "engine": w.label() })).collect();
+    let mut agents: Vec<Value> = windows
+        .iter()
+        .map(|w| {
+            let mut o = json!({ "name": w.name, "status": w.status, "cwd_label": w.cwd_label(), "engine": w.label() });
+            if let Some(d) = &w.detail {
+                o["detail"] = json!(d); // 可選欄位：舊後台會丟掉，舊用戶端看不到也不壞
+            }
+            o
+        })
+        .collect();
     if let Some(n) = asn_window {
         if !windows.iter().any(|w| w.name == n) {
             agents.push(json!({ "name": n, "status": "idle", "cwd_label": "", "engine": "asn" }));
@@ -192,6 +304,127 @@ mod tests {
         assert_eq!(by("T-有").as_deref(), Some("11111111-aaaa"));
         assert_eq!(by("T-無"), None);
         assert_eq!(by("T-空"), None);
+    }
+
+    fn put_status(d: &Path, sid: &str, v: Value) {
+        std::fs::write(d.join(format!("{sid}.json")), v.to_string()).unwrap();
+    }
+
+    fn win(sid: &str, status: &str) -> Window {
+        Window::claude("T-甲", Some(status.into()), "", 1, 0, Some(sid.into()))
+    }
+
+    const NOW: u64 = 10_000_000_000;
+
+    #[test]
+    fn 外掛狀態檔_有效就以它為準_state_對照與預設說明() {
+        let d = tempfile::tempdir().unwrap();
+        for (state, want, detail) in [
+            ("busy", "busy", None),
+            ("idle", "idle", None),
+            ("waiting_user", "waiting", Some("等你回答")),
+            ("background", "busy", Some("背景工作中")),
+            ("scheduled", "busy", Some("排程等待中")),
+        ] {
+            put_status(d.path(), "s1", json!({"sessionId":"s1","state":state,"at":NOW - 1000}));
+            let mut ws = [win("s1", "idle")];
+            apply_mod_status(&mut ws, d.path(), NOW);
+            assert_eq!(ws[0].status.as_deref(), Some(want), "{state}");
+            assert_eq!(ws[0].detail.as_deref(), detail, "{state}");
+        }
+        put_status(d.path(), "s1", json!({"sessionId":"s1","state":"background","detail":"背景工作 2 件\n第二行","at":NOW}));
+        let mut ws = [win("s1", "idle")];
+        apply_mod_status(&mut ws, d.path(), NOW);
+        assert_eq!(ws[0].detail.as_deref(), Some("背景工作 2 件 第二行"));
+        assert!(ws[0].is_busy());
+        // waiting 不算忙碌（提醒照送）
+        put_status(d.path(), "s1", json!({"sessionId":"s1","state":"waiting_user","at":NOW}));
+        apply_mod_status(&mut ws, d.path(), NOW);
+        assert!(!ws[0].is_busy());
+    }
+
+    #[test]
+    fn 外掛狀態檔_說明截_80_字() {
+        let d = tempfile::tempdir().unwrap();
+        put_status(d.path(), "s1", json!({"sessionId":"s1","state":"waiting_user","detail":"問".repeat(200),"at":NOW}));
+        let mut ws = [win("s1", "idle")];
+        apply_mod_status(&mut ws, d.path(), NOW);
+        assert_eq!(ws[0].detail.as_ref().unwrap().chars().count(), 80);
+    }
+
+    #[test]
+    fn 外掛狀態檔_不存在_半份_壞_過期_不符_全部忽略並保留原狀態() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        put_status(p, "old", json!({"sessionId":"old","state":"busy","at":NOW - MOD_STATUS_MAX_AGE_MS - 1}));
+        put_status(p, "mismatch", json!({"sessionId":"other","state":"busy","at":NOW}));
+        put_status(p, "badstate", json!({"sessionId":"badstate","state":"flying","at":NOW}));
+        put_status(p, "noat", json!({"sessionId":"noat","state":"busy"}));
+        put_status(p, "future", json!({"sessionId":"future","state":"busy","at":NOW + MOD_STATUS_MAX_AGE_MS + 1}));
+        std::fs::write(p.join("half.json"), "{\"sessionId\":\"half\",\"sta").unwrap();
+        std::fs::write(p.join("junk.json"), "不是 json").unwrap();
+        std::fs::write(p.join("big.json"), format!("{{\"sessionId\":\"big\",\"state\":\"busy\",\"at\":{NOW},\"detail\":\"{}\"}}", "x".repeat(20_000))).unwrap();
+        for sid in ["gone", "old", "mismatch", "badstate", "noat", "future", "half", "junk", "big", "..", "a/b", "a\\b", ""] {
+            let mut ws = [win(sid, "idle")];
+            apply_mod_status(&mut ws, p, NOW);
+            assert_eq!(ws[0].status.as_deref(), Some("idle"), "{sid}");
+            assert_eq!(ws[0].detail, None, "{sid}");
+        }
+        // 沒有 sessionId：不碰
+        let mut ws = [Window::claude("T", Some("idle".into()), "", 1, 0, None)];
+        apply_mod_status(&mut ws, p, NOW);
+        assert_eq!(ws[0].status.as_deref(), Some("idle"));
+        // 狀態資料夾不存在
+        let mut ws = [win("s1", "busy")];
+        apply_mod_status(&mut ws, &p.join("none"), NOW);
+        assert_eq!(ws[0].status.as_deref(), Some("busy"));
+    }
+
+    #[test]
+    fn 外掛狀態檔_已結束不採用_同輪連寫以最後內容為準() {
+        let d = tempfile::tempdir().unwrap();
+        put_status(d.path(), "s1", json!({"sessionId":"s1","state":"idle","detail":"已結束","at":NOW}));
+        let mut ws = [win("s1", "busy")];
+        apply_mod_status(&mut ws, d.path(), NOW);
+        assert_eq!((ws[0].status.as_deref(), ws[0].detail.as_deref()), (Some("busy"), None));
+        // 連寫兩次：後寫的內容就是現況（即使 at 較小，只要仍在有效期內）
+        put_status(d.path(), "s1", json!({"sessionId":"s1","state":"busy","at":NOW}));
+        put_status(d.path(), "s1", json!({"sessionId":"s1","state":"waiting_user","at":NOW - 5}));
+        apply_mod_status(&mut ws, d.path(), NOW);
+        assert_eq!(ws[0].status.as_deref(), Some("waiting"));
+    }
+
+    #[test]
+    fn 清理過時狀態檔_只刪合法檔名且完整且過期且已結束或_session_不在() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        let old = NOW - MOD_STATUS_MAX_AGE_MS - 1;
+        put_status(p, "ended-old", json!({"sessionId":"ended-old","state":"idle","detail":"已結束","at":old}));
+        put_status(p, "ended-live", json!({"sessionId":"ended-live","state":"idle","detail":"已結束","at":old}));
+        put_status(p, "gone-old", json!({"sessionId":"gone-old","state":"busy","at":old}));
+        put_status(p, "live-old", json!({"sessionId":"live-old","state":"busy","at":old}));
+        put_status(p, "ended-new", json!({"sessionId":"ended-new","state":"idle","detail":"已結束","at":NOW - 1000}));
+        put_status(p, "gone-new", json!({"sessionId":"gone-new","state":"busy","at":NOW - 1000}));
+        put_status(p, "mismatch", json!({"sessionId":"other","state":"busy","at":old}));
+        std::fs::write(p.join("half.json"), "{\"sessionId\":\"half\",\"sta").unwrap();
+        std::fs::write(p.join("bad name.json"), json!({"sessionId":"bad name","at":old}).to_string()).unwrap();
+        std::fs::write(p.join("notes.txt"), "x").unwrap();
+        let n = cleanup_mod_status(p, &["live-old".to_string(), "ended-live".to_string()], NOW);
+        assert_eq!(n, 3);
+        let left = |f: &str| p.join(f).exists();
+        assert!(!left("ended-old.json") && !left("gone-old.json") && !left("ended-live.json"));
+        for f in ["live-old.json", "ended-new.json", "gone-new.json", "mismatch.json", "half.json", "bad name.json", "notes.txt"] {
+            assert!(left(f), "{f} 不該被刪");
+        }
+        assert_eq!(cleanup_mod_status(&p.join("none"), &[], NOW), 0);
+    }
+
+    #[test]
+    fn 名單回報_有說明才帶_detail_欄位_沒有就和以前一模一樣() {
+        let mut w = Window::claude("T-甲", Some("busy".into()), "D:\\a\\b", 1, 0, None);
+        assert_eq!(roster_body(&[w.clone()], None, Value::Null)["agents"][0], json!({"name":"T-甲","status":"busy","cwd_label":"b","engine":"claude"}));
+        w.detail = Some("背景工作 2 件".into());
+        assert_eq!(roster_body(&[w], None, Value::Null)["agents"][0], json!({"name":"T-甲","status":"busy","cwd_label":"b","engine":"claude","detail":"背景工作 2 件"}));
     }
 
     #[test]

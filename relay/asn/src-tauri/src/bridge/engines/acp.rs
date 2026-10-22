@@ -238,6 +238,7 @@ impl AcpEngine {
             engine_label: Some(cfg.roster_engine.clone()),
             no_fallback: true,
             cwd_label_override: Some(cfg.label.clone()),
+            detail: None,
         }
     }
 

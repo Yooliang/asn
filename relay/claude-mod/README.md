@@ -43,6 +43,23 @@ claude plugin install asn@asn
 
 `recv --once`／`--watch` 都會 ack，不能拿來輪詢。現在 asn-cli 有唯讀的 **`asn-cli recv --peek`**：列出本視窗目前未讀的信，一行 JSON `{"count":N,"messages":[{"id","from","at","preview"}]}`（preview 截 80 字），**不 ack、不改任何狀態、不寫記號**；加 `--count-only` 只輸出 `{"count":N}`。狀態列腳本可直接輪詢它。後端要先部署 `inbox_peek` 動作（migration `20261022030000_inbox_peek.sql`）；還沒部署時 asn-cli 會印中文錯誤並以結束碼 4 離開，這時狀態列就不要顯示數字。
 
+## 視窗狀態檔
+
+mod 把這個視窗的細部狀態寫到本機檔，給 ASN 內建橋讀進 roster。
+
+- **路徑**：`~/.asn/status/<sessionId>.json`（`~` 取 `USERPROFILE`，沒有再取 `HOME`；資料夾不存在會自動建）。
+- **格式**：`{ "sessionId", "state", "detail", "at", "turnId", "plugin" }`
+  - `state`：`busy`｜`idle`｜`waiting_user`｜`background`｜`scheduled`
+  - `detail`：人看得懂的短字串，例如 `背景工作 2 件`、`ScheduleWakeup 13:20`、`AskUserQuestion：<問題前 80 字>`、`中斷`、`出錯`、`已結束`
+  - `at`：寫檔時間（epoch 毫秒）；`turnId`：目前這一輪；`plugin`：`asn@<plugin.json 的 version>`
+- **狀態轉換**（只看主迴圈，子代理輪次一律忽略）：
+  - `session.start` → `idle`；`turn.start` → `busy`。
+  - `AskUserQuestion` 呼叫前 → `waiting_user`，使用者答完回來 → `busy`。純觀察，不改也不擋該工具。
+  - `turn.complete`：該輪的 `classic.Stop` 帶有 `background_tasks` → `background`；否則有 `session_crons` → `scheduled`；否則 `idle`。結束原因是中斷或出錯一律 `idle`（detail 註明）。`Stop` 與 `turn.complete` 的先後沒有保證：`turn.complete` 先寫一次，`Stop` 晚到會重算並覆蓋。
+  - `session.end` → 寫 `state:"idle"`、`detail:"已結束"`（引擎沒有刪檔與改名的介面，所以不刪檔）。
+- **寫檔方式**：直接覆蓋（無法先寫 `.tmp` 再改名），讀的一方讀到半份 JSON 要當沒有。任何寫檔失敗都吞掉（最多 `$.ui.log` 一行），不影響 Claude 運作。
+- **過期**：超過 30 分鐘沒更新的檔由讀的一方判為過期（ASN 內建橋負責），mod 不做清理。
+
 ## 限制
 
 - Bash 守門以命令字串判斷（含 `--to` 且無 `--reply`／`--no-reply` 旗標字樣），內文剛好含有這些字樣會放行；這是提醒用的守門，不是安全邊界。
@@ -55,4 +72,4 @@ claude plugin validate relay/claude-mod
 claude plugin test relay/claude-mod
 ```
 
-純邏輯在 `hooks/lib.ts`，測試在 `hooks/asn.test.ts`。
+寄信純邏輯在 `hooks/lib.ts`，視窗狀態檔邏輯在 `hooks/status.ts`；測試在 `hooks/asn.test.ts`、`hooks/status.test.ts`。
