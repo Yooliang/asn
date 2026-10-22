@@ -22,7 +22,7 @@ export type StatusDoc = {
   control?: ControlResult
 }
 
-// 外掛控制檔（control.ts）的執行結果：id 原樣回傳，detail 為中文且 ≤200 字
+// 外掛控制檔（control.ts）的執行結果：id 原樣回傳，detail 為中文且 ≤200 字（op:'command' 成功時放指令輸出，≤1500 字）
 export type ControlResult = { id: string; ok: boolean; detail: string }
 export type ContextUsage = { used: number; limit: number; percent: number }
 

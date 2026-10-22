@@ -7,7 +7,7 @@ const SID = 'sess-1'
 const NOW = 1_800_000_000_000
 type Doc = Record<string, unknown>
 
-const rig = (o: { control?: string | (() => string); sid?: string; runFails?: boolean; model?: string; usage?: unknown; now?: number } = {}) => {
+const rig = (o: { control?: string | (() => string); sid?: string; runFails?: boolean; runText?: string; model?: string; usage?: unknown; now?: number } = {}) => {
   const writes: Doc[] = []
   const reads: string[] = []
   const runs: { command: string; args: string }[] = []
@@ -30,7 +30,7 @@ const rig = (o: { control?: string | (() => string); sid?: string; runFails?: bo
     run: async (command: string, args: string) => {
       runs.push({ command, args })
       if (o.runFails) throw new Error('boom')
-      return { text: '' }
+      return { text: o.runText ?? '' }
     },
     now: () => o.now ?? NOW,
   }
@@ -43,7 +43,7 @@ test('純函式：sessionId 格式、路徑、解析', () => {
   for (const bad of ['', '../x', 'a/b', 'a.b', 'a b', 'x'.repeat(129), 5, undefined]) expect(validSessionId(bad)).toBe(false)
   expect(validSessionId('x'.repeat(128))).toBe(true)
   expect(controlPath('C:\\Users\\u\\', 'a')).toBe('C:\\Users\\u/.asn/control/a.json')
-  expect(parseControl(req(), NOW)).toEqual({ kind: 'run', id: 'r1', op: 'rename', arg: '新名字' })
+  expect(parseControl(req(), NOW)).toEqual({ kind: 'run', id: 'r1', op: 'rename', command: 'rename', args: '新名字' })
   expect(parseControl('{壞掉', NOW)).toEqual({ kind: 'ignore' })
   expect(parseControl('[]', NOW)).toEqual({ kind: 'ignore' })
   expect(contextOf({ context: { tokens: 50, window: 200, percent: 25 } })).toEqual({ used: 50, limit: 200, percent: 25 })
@@ -158,4 +158,50 @@ test('model／context 拿不到就不寫這兩欄', async () => {
   expect('model' in r.last()).toBe(false)
   expect('context' in r.last()).toBe(false)
   expect('control' in r.last()).toBe(false)
+})
+
+const cmd = (extra: Doc = {}) => JSON.stringify({ id: 'c1', op: 'command', command: 'status', at: NOW - 1000, ...extra })
+
+test('command：執行任意 / 指令，detail 放輸出文字（保留換行、截 1500 字）', async () => {
+  const r = rig({ control: cmd({ command: 'model', args: ' opus ' }), runText: '第一行\n第二行' })
+  await r.ctl.poll(r.io)
+  expect(r.runs).toEqual([{ command: 'model', args: 'opus' }])
+  expect(r.last()).toMatchObject({ control: { id: 'c1', ok: true, detail: '第一行\n第二行' } })
+  const long = rig({ control: cmd(), runText: '字'.repeat(3000) })
+  await long.ctl.poll(long.io)
+  expect(long.runs).toEqual([{ command: 'status', args: '' }])
+  expect([...(long.last().control as { detail: string }).detail].length).toBe(1500)
+  const quiet = rig({ control: cmd({ command: 'compact' }) })
+  await quiet.ctl.poll(quiet.io)
+  expect(quiet.last()).toMatchObject({ control: { ok: true, detail: '已執行 /compact' } })
+})
+
+test('command：指令被拒（未知指令）→ ok:false 帶原因', async () => {
+  const r = rig({ control: cmd({ command: 'nope' }), runFails: true })
+  await r.ctl.poll(r.io)
+  expect(r.last()).toMatchObject({ control: { id: 'c1', ok: false } })
+  expect((r.last().control as { detail: string }).detail).toContain('boom')
+})
+
+test('command：名稱或參數不合法 → ok:false，不執行', async () => {
+  const cases: Doc[] = [{ command: '/model' }, { command: '' }, { command: undefined }, { command: 'a b' }, { command: 'x'.repeat(65) }, { command: 'rm;ls' }, { args: 5 }, { args: 'a\u0007b' }, { args: 'x'.repeat(2001) }]
+  for (const [i, c] of cases.entries()) {
+    const r = rig({ control: cmd({ id: `cb${i}`, ...c }) })
+    await r.ctl.poll(r.io)
+    expect(r.runs).toEqual([])
+    expect(r.last()).toMatchObject({ control: { id: `cb${i}`, ok: false } })
+  }
+  const ok = rig({ control: cmd({ command: 'plugin:do-thing_2', args: 'x'.repeat(2000) }) })
+  await ok.ctl.poll(ok.io)
+  expect(ok.runs.length).toBe(1)
+})
+
+test('command：過期與重複 id 規則沿用', async () => {
+  const old = rig({ control: cmd({ at: NOW - CONTROL_MAX_AGE_MS - 1 }) })
+  await old.ctl.poll(old.io)
+  expect(old.runs).toEqual([])
+  const r = rig({ control: cmd() })
+  await r.ctl.poll(r.io)
+  await r.ctl.poll(r.io)
+  expect(r.runs.length).toBe(1)
 })
