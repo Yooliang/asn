@@ -141,7 +141,7 @@ export function createCallSession({
       const say = speakableText(text, CALL_SPEAK_MAX)
       if (!say) continue
       speakFlag = true; dropUtterance()
-      player.enqueue(`call:${++spoken}`, say)
+      player.enqueue(`call:${++spoken}`, say, { stream: true })   // 切句分段，第一句好了就先念
     }
     refresh()
   }

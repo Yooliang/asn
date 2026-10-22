@@ -39,6 +39,7 @@ import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
 import { createCallBeats } from './lib/call-beats.mjs'
+import { startCallPoll } from './lib/call-poll.mjs'
 import { isCallActive } from './lib/call-session.mjs'
 import { accountLine, codexLine, createAccountsUi } from './lib/claude-accounts.mjs'
 import { createUsageUi } from './lib/usage.mjs'
@@ -602,6 +603,7 @@ setInterval(() => { void refreshLaunchers(); void pollLaunchResults() }, 15_000)
 const voice = createVoiceUi({ invoke, listen, createMic, createAudio: browserAudio, reactive })
 const callBeats = createCallBeats({ isLocalCall: isCallActive })   // 通話中（本視窗或對話視窗）不自動念，通話自己會念回信
 await listen('asn:call', p => callBeats.onBeat(p))
+startCallPoll({ anyCall: () => callBeats.anyCall(), pull: why => core.pull(why) })   // 通話中每 2 秒多收一次信，結束就停
 const voiceCfg = reactive(normalizeCfg(await invoke('voice_cfg_get').catch(() => null)))
 core.on('notify', n => {
   const plan = notifyPlan(n, notifyPrefs.value, me.status)
