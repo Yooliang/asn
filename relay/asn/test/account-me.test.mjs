@@ -36,10 +36,10 @@ test('合併：壞資料整列丟掉；來信照一般收信的整理（去回�
   const bad = [null, 5, {}, { id: 'x', dir: 'me', body: 'a', created_at: T0 }, { ...row(1, 'x', 'a', T0) }, { ...row(1, 'me', 5, T0) }, { ...row(1, 'me', 'a', 'not-a-date') }]
   assert.equal(mergeHistory([], bad).added, 0)
   assert.equal(cleanRow(row(1, 'me', 'a', T0)).t, Date.parse(T0))
-  const nudge = entriesOf(cleanRow(row(2, 'them', '（小文 傳送了一個震動）\n想回應的話，就回一個震動：寄一封內文只有「（你的名字 傳送了一個震動）」的信，不用另外回信。', T0)), '小文')
+  const nudge = entriesOf(cleanRow(row(2, 'them', '（小文 傳送了一個震動）\n對方在呼叫你：先回一個震動（寄一封內文只有「（你的名字 傳送了一個震動）」的信）。再想一下有沒有需要向對方報告的事——目前進度、卡住的地方、等對方決定的事；有的話另外寄一封簡短的信，沒有就只回震動。', T0)), '小文')
   assert.deepEqual(nudge.map(e => [e.k, e.nudge === true]), [['sys', true]])
   assert.equal(nudge[0].text, '小文 傳送了一個震動。')
-  const mine = entriesOf(cleanRow(row(3, 'me', '（小良 傳送了一個震動）\n想回應的話，就回一個震動：寄一封內文只有「（你的名字 傳送了一個震動）」的信，不用另外回信。', T0)), '小文')
+  const mine = entriesOf(cleanRow(row(3, 'me', '（小良 傳送了一個震動）\n對方在呼叫你：先回一個震動（寄一封內文只有「（你的名字 傳送了一個震動）」的信）。再想一下有沒有需要向對方報告的事——目前進度、卡住的地方、等對方決定的事；有的話另外寄一封簡短的信，沒有就只回震動。', T0)), '小文')
   assert.deepEqual(mine.map(e => [e.k, e.mine === true]), [['sys', true]])
   // 已送達／已讀狀態一併帶進自己寄的信
   const st = entriesOf(cleanRow(row(4, 'me', '嗨', T0, { delivered_at: T1, acked_at: T2 })))[0]
