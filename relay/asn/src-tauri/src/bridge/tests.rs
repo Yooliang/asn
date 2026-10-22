@@ -41,6 +41,12 @@ struct FState {
     partner_posts: Vec<Value>,
     partner_resp: Option<Value>,
     partner_fail: bool,
+    /// 節點信箱一次最多回幾封（0＝不限；真後台是 50，由舊到新）
+    inbox_page: usize,
+    /// 新後台：認得 inbox 的 exclude 參數，不回寄給這些視窗名的信（舊後台＝false，參數被忽略）
+    honor_exclude: bool,
+    /// 每次 inbox 請求的完整請求行
+    inbox_queries: Vec<String>,
 }
 
 fn pct_decode(s: &str) -> String {
@@ -144,9 +150,14 @@ fn handle_conn(mut c: std::net::TcpStream, st: Arc<Mutex<FState>>) {
                 s.fail_inbox -= 1;
                 (500, json!({"error": "internal"}))
             } else {
+                s.inbox_queries.push(line.to_string());
                 let sticky = s.sticky;
                 let acked = s.acked.clone();
-                let msgs: Vec<Value> = s.inbox.iter().filter(|m| sticky || !acked.contains(&m["id"].as_str().unwrap_or("").to_string())).cloned().collect();
+                let skip: Vec<String> = if s.honor_exclude { q.get("exclude").map(|e| e.split(',').map(String::from).collect()).unwrap_or_default() } else { vec![] };
+                let mut msgs: Vec<Value> = s.inbox.iter().filter(|m| sticky || !acked.contains(&m["id"].as_str().unwrap_or("").to_string())).filter(|m| !m["to_agent"].as_str().map(|t| skip.iter().any(|x| x == t)).unwrap_or(false)).cloned().collect();
+                if s.inbox_page > 0 {
+                    msgs.truncate(s.inbox_page);
+                }
                 (200, json!({"messages": msgs}))
             }
         }
@@ -1344,3 +1355,108 @@ async fn 夥伴_id_暫時失敗_500_只記一次_下一輪再試_好了就接上
 
 mod engines_it;
 mod rooms_launch;
+
+
+// ---- 信箱行頭堵塞（寄給別人的新信被一整頁「橋不處理」的舊信擋在後面）----------------------------------------
+
+/// 寄給指定視窗的信 from..to（連續編號）
+fn put_many(fr: &FakeRelay, from: u32, to: u32, window: &str) {
+    for n in from..to {
+        fr.put(mail(n, json!({"to_agent": window})));
+    }
+}
+fn inbox_query_count(fr: &FakeRelay) -> usize {
+    fr.st.lock().unwrap().inbox_queries.len()
+}
+
+#[tokio::test]
+async fn 信箱堵塞_asn_自己視窗的信占滿一頁_橋帶_exclude_請後台略過_後面寄給別人的信照常進來() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    {
+        let mut s = h.fr.st.lock().unwrap();
+        s.inbox_page = 50;
+        s.honor_exclude = true;
+    }
+    put_many(&h.fr, 1, 61, "T-ASN"); // 60 封寄給 ASN 自己的視窗（橋不 ack，留給畫面）
+    h.fr.put(mail(500, json!({"to_agent": "T-乙"})));
+    h.core.pull("test", T0).await;
+    assert_eq!(h.said().len(), 1, "寄給 T-乙 的新信被轉交
+{}", h.core.log.recent().join("
+"));
+    assert!(h.said()[0].contains(&uid(500)));
+    let q = h.fr.st.lock().unwrap().inbox_queries.clone();
+    assert!(q[0].contains("exclude=T-ASN"), "{q:?}");
+    assert!(h.fr.acked().is_empty(), "ASN 視窗的信不能被橋 ack");
+}
+
+#[tokio::test]
+async fn 信箱堵塞_舊後台不認得_exclude_行為照舊_不報錯_ack_與轉交都沒壞() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    put_many(&h.fr, 1, 6, "T-ASN");
+    h.fr.put(mail(500, json!({"to_agent": "T-乙"})));
+    h.core.pull("test", T0).await;
+    h.core.on_worker_line(res(&format!("SENT {}", uid(500))), T0).await;
+    assert_eq!(h.said().len(), 1);
+    assert!(!h.core.log.has("pull failed"));
+    assert!(h.fr.acked().iter().all(|i| *i == uid(500)) || h.fr.acked().is_empty());
+    assert_eq!(inbox_query_count(&h.fr), 1, "沒有占滿一頁就不多拿");
+}
+
+#[tokio::test]
+async fn 信箱堵塞_視窗自己在收信的信占滿一頁_橋把那個視窗名加進排除再拿下一批() {
+    let mut h = harness(&[("T-乙", "idle"), ("T-丙", "idle")]).await;
+    {
+        let mut s = h.fr.st.lock().unwrap();
+        s.inbox_page = 50;
+        s.honor_exclude = true;
+    }
+    // T-丙 的 recv 心跳新鮮且 pid 活著（假 alive：pid < 90000）→ 橋不轉、不 ack
+    crate::heartbeat::write_heartbeat(h.work.path(), "T-丙", 4242, T0).unwrap();
+    put_many(&h.fr, 1, 61, "T-丙");
+    h.fr.put(mail(500, json!({"to_agent": "T-乙"})));
+    h.core.pull("test", T0).await;
+    assert_eq!(h.said().len(), 1, "{}", h.core.log.recent().join("
+"));
+    assert!(h.said()[0].contains(&uid(500)));
+    let q = h.fr.st.lock().unwrap().inbox_queries.clone();
+    assert!(q.len() >= 2 && q[1].contains("T-%E4%B8%99") , "第二次請求排除了 T-丙：{q:?}");
+}
+
+#[tokio::test]
+async fn 信箱堵塞_後台不認排除參數時有上限_不會無限重拿() {
+    let mut h = harness(&[("T-丙", "idle")]).await;
+    h.fr.st.lock().unwrap().inbox_page = 50; // 舊後台：不認 exclude，永遠回同一頁
+    crate::heartbeat::write_heartbeat(h.work.path(), "T-丙", 4242, T0).unwrap();
+    put_many(&h.fr, 1, 61, "T-丙");
+    h.core.pull("test", T0).await;
+    let n = inbox_query_count(&h.fr);
+    assert!((1..=5).contains(&n), "請求次數 {n}");
+    assert!(!h.core.log.has("pull failed"));
+}
+
+#[tokio::test]
+async fn 定時輪詢_整頁都是橋不處理的信也照樣每個週期再收一次_不會停排程() {
+    let fr = FakeRelay::start();
+    let work = tempfile::tempdir().unwrap();
+    let sessions = tempfile::tempdir().unwrap();
+    put_session(sessions.path(), 5000, "T-乙", "idle", 1);
+    put_many(&fr, 1, 61, "T-ASN");
+    fr.st.lock().unwrap().inbox_page = 50;
+    let relay = Arc::new(Relay::new(fr.url.clone(), "fake-test-key".into(), "T".into(), "T-ASN".into()));
+    let alive: Arc<dyn Fn(u32) -> bool + Send + Sync> = Arc::new(|p| p < 90_000);
+    let mut c = cfg(work.path(), sessions.path());
+    (c.poll_ms, c.roster_ms, c.tick_ms) = (100, 100, 100);
+    let core = Core::new(c, relay, Arc::new(FakeSink::default()), NONCE, Arc::new(BridgeLog::new(None)), alive, T0);
+    let (_ltx, lrx) = tokio::sync::mpsc::unbounded_channel();
+    let (_etx, erx) = tokio::sync::mpsc::unbounded_channel();
+    let (wake, stop) = (Arc::new(tokio::sync::Notify::new()), Arc::new(tokio::sync::Notify::new()));
+    let task = tokio::spawn(super::run_loop(core, lrx, None, erx, wake, stop.clone()));
+    let t0 = std::time::Instant::now();
+    while inbox_query_count(&fr) < 4 && t0.elapsed() < std::time::Duration::from_secs(20) {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let n = inbox_query_count(&fr);
+    stop.notify_one();
+    let _ = task.await;
+    assert!(n >= 4, "沒有門鈴也要定時收，只收到 {n} 次");
+}

@@ -16,10 +16,24 @@ export const MAX_BODY = 20000
 const LOG_KEEP = 200
 const STATUS_POLL_MS = 15_000
 const HISTORY_MIN_GAP_MS = 20_000   // 同一位夥伴的往來記錄，兩次向後台取的最短間隔（強制重取除外）
+const STEP_MS = 60_000              // 收信流程裡任何一個「等外面回應」的步驟最久等多久；超過就放棄這一步，不讓 pulling 旗標永遠卡住、定時收信整個停擺
+
+// 等一個承諾，最久 ms 毫秒；逾時就以錯誤結束（原承諾若之後才回來，結果丟掉）
+function withTimeout(p, ms, what) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${what} 逾時`)), ms)
+    Promise.resolve(p).then(v => { clearTimeout(t); resolve(v) }, e => { clearTimeout(t); reject(e) })
+  })
+}
 
 export class AsnCore {
-  constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, statusPollMs = STATUS_POLL_MS, aliases = [] }) {
-    Object.assign(this, { aliases: new Set(aliases), transport, store, selfNode, windowName, isChatVisible, now, log, pollMs, rosterMs, statusPollMs })
+  constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, statusPollMs = STATUS_POLL_MS, aliases = [], stepMs = STEP_MS }) {
+    // 讀取類的呼叫一律加逾時（寄信、寄檔另有自己的流程，不在這裡限時）。收信（inbox、ack）可能一次要走好幾個名字，給兩倍時間
+    const guarded = { ...transport }
+    for (const k of ['list', 'inbox', 'ack', 'sentStatus', 'avatar', 'history']) {
+      if (typeof transport[k] === 'function') guarded[k] = (...a) => withTimeout(transport[k](...a), k === 'inbox' || k === 'ack' ? stepMs * 2 : stepMs, k)
+    }
+    Object.assign(this, { aliases: new Set(aliases), transport: guarded, store, selfNode, windowName, isChatVisible, now, log, pollMs, rosterMs, statusPollMs, stepMs })
     this.friends = new Map()   // id → 好友
     this.logs = new Map()      // id → 訊息陣列
     this.seen = new Set()      // 已處理過的信件 id（ack 失敗重拉時不重複顯示）
@@ -45,7 +59,7 @@ export class AsnCore {
 
   // ---------- 啟動／停止 ----------
   async start() {
-    const saved = await this.store.load()
+    const saved = await withTimeout(this.store.load(), this.stepMs, 'load').catch(e => { this.log(`load failed: ${e.message}`); return null })
     for (const f of saved?.friends ?? []) this.friends.set(f.id, this.#decorate({ ...f, psm: cleanPsm(f.psm, f.node), status: 'offline', unread: 0, waiting: false, replyTo: null }))
     for (const [id, l] of Object.entries(saved?.logs ?? {})) this.logs.set(id, l)
     this.emit('state')
@@ -211,7 +225,8 @@ export class AsnCore {
     if (shown && !dup && m.unaddressed === true) lg.push({ k: 'sys', text: `${plain(f.nick)} → 未指定收件人`, t })
     if (shown) { if (!dup) lg.push({ k: 'them', text, t, id: rid, ...(photos.length ? { photos } : {}) }); f.lastAt = t; f.replyTo = m.id }
     if (m.reply_to) this.#markReplied(m.reply_to, typeof m.created_at === 'string' ? m.created_at : new Date(t).toISOString())
-    const visible = await this.isChatVisible(r.id)
+    // 視窗狀態查不到（沒回應、出錯）就當沒看見：照常記進對話、算未讀，不卡住收信
+    const visible = await withTimeout(this.isChatVisible(r.id), this.stepMs, 'isChatVisible').catch(() => false)
     if (nudge) {
       if (!dup) lg.push({ k: 'sys', nudge: true, rid, text: `${plain(f.nick)} 傳送了一個震動。`, t })
       if (!shown && !visible) f.unread++
@@ -390,10 +405,10 @@ export class AsnCore {
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null }
     const withLog = [...this.friends.values()].filter(f => this.logs.has(f.id) || f.known)
     try {
-      await this.store.save({
+      await withTimeout(this.store.save({
         friends: withLog.map(f => ({ id: f.id, node: f.node, agent: f.agent, nick: f.nick, psm: f.psm, engine: f.engine, ...(f.partnerId ? { partnerId: f.partnerId } : {}), lastAt: f.lastAt ?? 0, known: true, onRoster: f.onRoster === true })),
         logs: Object.fromEntries(withLog.filter(f => this.logs.has(f.id)).map(f => [f.id, this.logs.get(f.id).slice(-LOG_KEEP)])),
-      })
+      }), this.stepMs, 'save')
     } catch (e) { this.log(`save failed: ${e.message}`) }
   }
 }
