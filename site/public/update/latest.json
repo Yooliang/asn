@@ -1,11 +1,11 @@
 {
-  "version": "0.1.37",
-  "notes": "首次登入引導：新帳號第一次登入先設「你的名字」（帳號已有名字就跳過）與這台設備的名稱；手機「設置」與電腦設定頁可以修改帳號名字；開發版不能再設定開機自動啟動",
-  "pub_date": "2026-10-22T16:14:46.742Z",
+  "version": "0.1.38",
+  "notes": "語音輸入按「取消」不會再漏掉；收發室內部名稱去掉 Irori（舊名照常可用）",
+  "pub_date": "2026-10-22T17:03:02.455Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnpBZm95cjFNVmJ5OEh6c05OcWpBcSsyblRncVA1a2NXVjNHU0ZleXFGdHBkZFRDckxhOVRlTXM3d1dEQXpMRWRYc3M1N3hmbHlaNmxteUx3bTkrdEFnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjg1Njg2CWZpbGU6QVNOXzAuMS4zN194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjM3CkNJTllrOXp0ZU9GRjVDTUJVamhCZm54cnpIalI3eG8zM29hR1dadE51aDlHa0NQOFQ4U1AxeEFObVdaSFV3N3l6UTlwNHd4RlJXL0p5c3p2VWdGOEFnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.37_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjVRVWpPVzZrNkNNMTllcEJWa3BMbW5uRGpFM3BsYTV0ZTU0OTJIeGtTQTYzL014cDNzeDJKOWNzZ2xiWDRsT0dPa282Q1pXQUxSM3RSVXVzV1U1Qnc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjg4NTgyCWZpbGU6QVNOXzAuMS4zOF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjM4ClZXeFhwUHJyQlZIcnR2VmxyRXViVmpzeFgwUDlpRHljZ1FkME44QXlwRFBEcGhvVUg5ZmZGcERYUTl3SmRyazl2U2plbFQwajFFWFFQYnNEemdCUkNRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.38_x64-setup.exe"
     }
   }
 }
