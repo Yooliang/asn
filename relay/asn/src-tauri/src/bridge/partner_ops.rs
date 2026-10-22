@@ -11,7 +11,7 @@
 //! 4. 除 info 外，本機設定「允許遠端開視窗」必須開著，執行前與動手前各驗一次；
 //! 5. 收發室視窗與 ASN 自己的視窗、不是 claude 的程序一律不動；
 //! 6. 每個操作都寫內建收發室 log 與該夥伴的往來記錄。
-#![allow(dead_code)] // 等 core.rs 的輪詢接上（見 PARTNER-OPS.md 第八節）後移除
+
 
 use super::core::BridgeLog;
 use super::corrlog::{CorrLog, Dir, Entry};
@@ -33,9 +33,20 @@ pub(crate) const CONSENT_OFF: &str = "這台電腦沒有開啟「允許遠端開
 const PROTECTED: &str = "收發室與 ASN 自己的視窗不能操作";
 const CHAIN_MAX: usize = 12;
 
-/// 轉交的固定第一句話（後台沒給接班提示時用）
+/// 轉交的固定第一句話
 pub(crate) fn default_handover_note(name: &str) -> String {
-    format!("你是『{name}』的下一任，前任的 context 用完了。先讀你與收發室的往來記錄（信尾那行的路徑）和前任留下的交接檔，接著把手上的工作做下去。")
+    format!("你是『{name}』的下一任，前任的上下文用完了。先讀你與收發室的往來記錄（信尾那行的路徑）和前任留下的交接檔，接著把手上的工作做下去。")
+}
+
+/// 轉交的第一句話：固定文字；使用者補了話就換行附上「前任交代：…」
+pub(crate) fn handover_prompt(name: &str, note: &str) -> String {
+    let note = note.trim();
+    if note.is_empty() {
+        default_handover_note(name)
+    } else {
+        format!("{}
+前任交代：{}", default_handover_note(name), note.chars().take(1000).collect::<String>())
+    }
 }
 
 /// 作業系統與本機設定這一側（測試換成假的）
@@ -402,9 +413,19 @@ impl PartnerOps {
             "shell_chain": chain,
             "mod_installed": st.is_some(),
         });
-        if let Some(c) = st.as_ref().and_then(|s| s.get("context")) {
-            if c.to_string().len() <= 1024 {
-                r["context"] = c.clone();
+        if let Some(c) = st.as_ref().and_then(|s| s.get("context")).and_then(Value::as_object) {
+            // 只收三個數字欄位：used、limit、percent（沒給 percent 且有 limit 就算出來）
+            let num = |k: &str| c.get(k).and_then(Value::as_f64).filter(|n| n.is_finite() && *n >= 0.0);
+            let (used, limit) = (num("used"), num("limit"));
+            let percent = num("percent").or_else(|| used.zip(limit).filter(|(_, l)| *l > 0.0).map(|(u, l)| (u / l * 100.0).round()));
+            let mut ctx = serde_json::Map::new();
+            for (k, v) in [("used", used), ("limit", limit), ("percent", percent)] {
+                if let Some(v) = v {
+                    ctx.insert(k.into(), if v.fract() == 0.0 { json!(v as u64) } else { json!(v) });
+                }
+            }
+            if !ctx.is_empty() {
+                r["context"] = Value::Object(ctx);
             }
         }
         if r.to_string().len() > RESULT_MAX_BYTES {
@@ -537,7 +558,7 @@ impl PartnerOps {
     }
 
     fn handover(&self, op: &Op, t: switch::Target) -> OpResult {
-        let note = if op.note.is_empty() { default_handover_note(&t.name) } else { op.note.chars().take(1200).collect() };
+        let note = handover_prompt(&t.name, &op.note);
         // 照原參數開新對話：不帶 --resume／--continue／--session-id，名字不變，模型不變，第一句話是接班提示
         let argv = switch::rewrite_args_opts(&t.args, None, &t.name, switch::current_model(&t.args).as_deref(), Some(&note));
         self.reopen(&t, &t.name.clone(), argv, true)

@@ -23,6 +23,7 @@ use crate::relay::Relay;
 use core::{BridgeLog, Config, Core};
 use engines::{EngineCtx, EngineEvent, EngineSet, Notice};
 use launcher::{LaunchEnv, Launched, Launcher};
+use partner_ops::PartnerOps;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -139,6 +140,10 @@ pub fn start_with(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>, laun
         });
         let (l, rx) = Launcher::new(relay.clone(), log.clone(), cfg.work_dir.clone(), env, names);
         core.set_launcher(l);
+        if let Some(dd) = cfg.data_dir.clone() {
+            let sink3 = core.sink();
+            core.set_partner_ops(PartnerOps::system(relay.clone(), log.clone(), dd, cfg.handoff_dir.clone(), cfg.sessions_dir.clone(), cfg.status_dir.clone(), cfg.mailbox_name.clone(), Arc::new(move || sink3.pid())));
+        }
         rx
     });
     // 其他引擎（ACP 背景工作者、Codex）：沒有設定檔也沒有 ~/.codex 就是 None，行為和以前完全一樣

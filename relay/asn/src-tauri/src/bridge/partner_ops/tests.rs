@@ -236,12 +236,12 @@ fn 詳情_唯讀_不需要遠端開關_欄位齊全_外殼鏈只有程式名() {
 #[test]
 fn 詳情_asn_開的視窗_與_外掛狀態檔的模型和_context() {
     let r = rig(Opt { asn_host: true, ..Opt::default() });
-    r.status_file("sid-220", json!({ "sessionId": "sid-220", "at": NOW - 1000, "state": "idle", "model": "claude-sonnet-4-5", "context": { "used": 120000, "max": 200000 } }));
+    r.status_file("sid-220", json!({ "sessionId": "sid-220", "at": NOW - 1000, "state": "idle", "model": "claude-sonnet-4-5", "context": { "used": 120000, "limit": 200000, "junk": "x" } }));
     let v = r.run("info", json!({})).result.unwrap();
     assert_eq!(v["opened_by"], "asn");
     assert_eq!(v["mod_installed"], true);
     assert_eq!(v["model"], "claude-sonnet-4-5", "外掛有回報就以外掛為準");
-    assert_eq!(v["context"]["used"], 120000);
+    assert_eq!(v["context"], json!({ "used": 120000, "limit": 200000, "percent": 60 }), "只收 used／limit／percent，percent 可由前兩者算出");
     // 過期的狀態檔不算有外掛
     r.status_file("sid-220", json!({ "sessionId": "sid-220", "at": NOW - 3_600_000, "state": "idle" }));
     assert_eq!(r.run("info", json!({})).result.unwrap()["mod_installed"], false);
@@ -329,6 +329,7 @@ fn 規則2_轉交使用者自己的視窗_同樣留下終端機() {
     let r = rig(Opt::default());
     assert_eq!(r.run("handover", json!({})).status, "ok");
     assert!(!r.terminated().contains(&110) && !r.terminated().contains(&100));
+    assert!(r.os().closed.lock().unwrap().is_empty(), "不送關閉訊息，免得把使用者的終端機一起關掉");
 }
 
 // ================================================================================================
@@ -519,12 +520,16 @@ fn 切換模型_沒有外掛_走既有流程_換模型重開_忙碌時拒絕() {
 #[test]
 fn 轉交_開新_session_不帶_resume_名字與模型不變_第一句話是後台給的接班提示() {
     let r = rig(Opt::default());
-    let res = r.run("handover", json!({ "note": "你是『目標』的下一任。補充：先看 PR。" }));
+    let res = r.run("handover", json!({ "note": "先看 PR 12。
+再跑測試。" }));
     assert_eq!(res.status, "ok", "{}", res.detail);
     let argv = r.launched().remove(0).2;
     assert!(!argv.iter().any(|a| a == "--resume" || a == "sid-220" || a == "--continue"), "{argv:?}");
     assert!(argv_has(&argv, &["-n", "目標"]) && argv_has(&argv, &["--model", "opus"]), "{argv:?}");
-    assert_eq!(&argv[argv.len() - 2..], ["--".to_string(), "你是『目標』的下一任。補充：先看 PR。".to_string()]);
+    let want = format!("{}
+前任交代：先看 PR 12。
+再跑測試。", default_handover_note("目標"));
+    assert_eq!(&argv[argv.len() - 2..], ["--".to_string(), want]);
     assert_eq!(res.result.unwrap()["session_id"], "sid-new");
 }
 
@@ -536,7 +541,8 @@ fn 轉交_沒給提示就用固定文字_新視窗_session_沒換不算成功() 
     assert_eq!(res.status, "unconfirmed", "新視窗的 sessionId 和舊的一樣＝不是新對話");
     let argv = r.launched().remove(0).2;
     assert_eq!(argv.last().unwrap(), &default_handover_note("目標"));
-    assert!(default_handover_note("目標").starts_with("你是『目標』的下一任，前任的 context 用完了。"));
+    assert_eq!(default_handover_note("目標"), "你是『目標』的下一任，前任的上下文用完了。先讀你與收發室的往來記錄（信尾那行的路徑）和前任留下的交接檔，接著把手上的工作做下去。");
+    assert_eq!(handover_prompt("目標", "  "), default_handover_note("目標"), "只有空白＝沒補話");
 }
 
 // ================================================================================================

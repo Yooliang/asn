@@ -21,8 +21,9 @@
 
 詳情不寫進名單（名單每輪都報，PID、完整路徑不必常駐後台），按下去才問、結果存在那筆請求的 `result`（jsonb，≤4 KB），與其他動作一樣 2 分鐘逾時；不需要「允許遠端管理」開關，但仍要本人簽章。
 
-轉交的第一句話（固定文字，手機可以再補一段）：
-「你是『<名字>』的下一任，前任的 context 用完了。先讀你與收發室的往來記錄（信尾那行的路徑）和前任留下的交接檔，接著把手上的工作做下去。」
+轉交的第一句話由電腦端組（固定文字；手機補的話換行附在後面，後台只傳補的那段 `note`）：
+「你是『<名字>』的下一任，前任的上下文用完了。先讀你與收發室的往來記錄（信尾那行的路徑）和前任留下的交接檔，接著把手上的工作做下去。」
+有補話時接著換行：「前任交代：<補的話>」。
 
 不做「先叫前任寫交接檔再關」：前任 context 快滿時寫交接常常失敗，而且要等它回覆，流程會卡住。前任要寫交接，小良哥可以先在對話裡叫它寫，再按轉交。
 
@@ -98,19 +99,13 @@ migration → relay 函式 → 發 ASN（電腦版與安卓同一版）。順序
 - 外掛讀到控制檔後，執行 `rename`（`/rename <arg>`）或 `model`（`/model <arg>`），完成後把 `control` 欄位寫進狀態檔。`id` 必須原樣回傳；橋只認 `control.id` 等於自己這筆的請求編號。
 - 橋最多等 30 秒。收到 `ok:true` 回報成功；`ok:false` 回報失敗並帶 `detail`（不再重開）；逾時才退回重開。
 - 橋在結果出來（或逾時）時**刪掉控制檔**。外掛要忽略 `at` 超過 2 分鐘的控制檔，也不要重複執行同一個 `id`。
-- 狀態檔可選的新欄位：`model`（目前模型，詳情以它為準）、`context`（context 用量，任意小物件，≤1 KB，原樣放進詳情結果）。沒有就不顯示。
+- 狀態檔可選的新欄位：`model`（目前模型，詳情以它為準）、`context`（上下文用量，物件 `{used, limit, percent}`，三個都是數字；沒給 percent 而有 limit 時由橋算出；其他欄位一律丟掉）。沒有就不顯示。
 
 ### 詳情結果（`partner_op_result.result`，≤4 KB）
 
-`{pid, model, engine:"claude", cwd, started_at, status, opened_by:"asn"|"user", shell_chain:[程式名…], mod_installed, context?}`。
+`{pid, model, engine:"claude", cwd, started_at, status, opened_by:"asn"|"user", shell_chain:[程式名…], mod_installed, context?:{used, limit, percent}}`。
 `shell_chain` 由外往內排（例如 `windowsterminal.exe, powershell.exe, claude.exe`），只有執行檔名稱，不含路徑與命令列參數。關閉的結果是 `{pid, kept_terminal}`。
 
-### 接到橋的輪詢（等 core.rs 那支合併後再接）
+### 接到橋的輪詢
 
-`PartnerOps::pull()` 與 launcher 的 `pull()` 同一形狀。core.rs 要加：
-
-1. `Core` 欄位 `partner_ops: Option<Arc<PartnerOps>>`（建構時 `None`）與 `set_partner_ops()`；
-2. `pull()` 裡 `l.pull().await` 旁邊：`if let Some(p) = self.partner_ops.clone() { p.pull().await; }`；
-3. `bridge/mod.rs` 建立 launcher 的地方旁邊：`core.set_partner_ops(PartnerOps::system(relay.clone(), log.clone(), cfg.data_dir…, handoff_dir, cfg.sessions_dir.clone(), cfg.status_dir.clone(), cfg.mailbox_name.clone(), worker_pid))`。
-
-`partner_ops.rs` 檔頭的 `#![allow(dead_code)]` 接上後移除。
+`PartnerOps::pull()` 與 launcher 的 `pull()` 同一形狀，接在 `bridge/core.rs` 的 `pull()` 裡 `l.pull().await` 之後（欄位 `partner_ops`、`set_partner_ops()`，約 10 行）；`bridge/mod.rs` 在建立 launcher 的地方呼叫 `PartnerOps::system(...)`（需要 bridge 設定的資料夾，沒有就不接）。後台回 404／400 就靜默停用到下次啟動，只記一次 log。
