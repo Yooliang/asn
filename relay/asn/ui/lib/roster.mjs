@@ -16,6 +16,13 @@ export function statusOf(raw) {
 // 舊存檔的個人訊息是「節點／資料夾」或單獨節點名；設備已由頁籤表示，只留資料夾
 export const cleanPsm = (psm, node) => { const s = String(psm ?? ''); return s === node ? '' : s.replace(/^[^／]*／/, '') }
 
+// 個人訊息＝資料夾；Claude Code 外掛回報了說明（背景工作中／等你回答…，純中文、最多 80 字）就接在後面。舊後台沒有 detail 欄位＝只有資料夾
+export function psmOf(a) {
+  const cwd = a?.cwd_label ? String(a.cwd_label) : ''
+  const d = typeof a?.detail === 'string' ? a.detail.replace(/\s+/g, ' ').trim().slice(0, 80) : ''
+  return cwd && d ? `${cwd}・${d}` : cwd || d
+}
+
 // 一個視窗一列；名字＝視窗名，個人訊息＝資料夾（cwd_label，沒有就空）
 export function buildFriends(members, { selfNode, selfName } = {}) {
   const out = []
@@ -27,7 +34,7 @@ export function buildFriends(members, { selfNode, selfName } = {}) {
       if (m.id === selfNode && a.name === selfName) continue
       out.push({
         id: friendId(m.id, a.name), node: m.id, device: typeof m.name === 'string' && m.name.trim() ? m.name.trim() : '', agent: a.name, nick: a.name,
-        psm: a.cwd_label ? String(a.cwd_label) : '',
+        psm: psmOf(a),
         onRoster: true, engine: a.engine ?? null, kind: typeof m.kind === 'string' && m.kind ? m.kind : null, status: statusOf(a.status),
       })
     }
