@@ -169,6 +169,30 @@ test('手機頁面：不載電腦端的樣式與腳本；觸控目標有放大�
   for (const f of ['list.html', 'chat.html', 'login.html']) assert.doesNotMatch(read('ui', f), /mobile\.css|m\.js/, f)
 })
 
+test('縮放鎖定：viewport 與 WebView 都關掉縮放；輸入框 16px 以上；#app 掛上前整個藏起來', () => {
+  const html = read('ui', 'm.html'), css = read('ui', 'mobile.css')
+  assert.match(html, /name="viewport" content="[^"]*maximum-scale=1[^"]*user-scalable=no/)
+  const act = read('src-tauri', 'gen', 'android', 'app', 'src', 'main', 'java', 'tw', 'yooliang', 'asn', 'MainActivity.kt')
+  assert.match(act, /setSupportZoom\(false\)/); assert.match(act, /builtInZoomControls = false/); assert.match(act, /displayZoomControls = false/)
+  assert.doesNotMatch(act.replace(/\/\/.*$/gm, ''), /textZoom/, '不鎖文字大小，尊重系統字型設定')
+  assert.match(css, /\.m button,\.m input,\.m select,\.m textarea\{font-size:16px\}/)
+  assert.doesNotMatch(css, /\.(composer textarea|m-search input)[^}]*font-size:(1[0-5]|[0-9])px/, '輸入框不小於 16px')
+  assert.match(css, /\.m\[v-cloak\]\{display:none!important\}/, '.m 的 display:flex 會蓋掉 [v-cloak]，必須明確壓過')
+  assert.match(html, /<div id="splash"/); assert.match(read('ui', 'm.js'), /getElementById\('splash'\)\?\.remove\(\)/)
+  assert.ok(read('ui', 'm.js').indexOf("app.mount('#app')") < read('ui', 'm.js').indexOf('startCore?.()'), '先掛畫面，再開始收信')
+})
+
+test('滿版：名單、我、對話三頁左右不留外距與外框', () => {
+  const css = read('ui', 'mobile.css')
+  for (const sel of ['.m-scroll', '.m-tabs', '.m-chat > .pane']) {
+    const rule = css.split('\n').find(l => l.startsWith(`${sel}{`))
+    assert.ok(rule, sel)
+    assert.match(rule, /margin:0[;}]/, `${sel} 不留外距`)
+    assert.match(rule, /border-radius:0/, `${sel} 不留圓角外框`)
+  }
+  assert.doesNotMatch(css, /\.m-(scroll|tabs)\{[^}]*margin:0 8px/)
+})
+
 test('登入畫面背景：電腦版與手機版各用一張 MSN 風背景，cover＋草地對齊底部；表單區有半透明白底保持可讀', () => {
   for (const [f, w, h] of [['login-bg-desktop.webp', 1600, 1000], ['login-bg-mobile.webp', 1080, 2340]]) {
     const b = fs.readFileSync(path.join(root, 'ui', 'img', f))
@@ -181,7 +205,8 @@ test('登入畫面背景：電腦版與手機版各用一張 MSN 風背景，cov
   assert.doesNotMatch(mcss, /login-bg-desktop/); assert.doesNotMatch(style, /login-bg-mobile/)
   assert.match(style, /\.login-card\{[^}]*background:rgba\(255,255,255,\.\d+\)/)
   assert.match(mcss, /\.m-login-card\{[^}]*background:rgba\(255,255,255,\.\d+\)/)
-  assert.match(read('ui', 'm.html'), /'is-login': screen === 'login'/)
+  assert.doesNotMatch(read('ui', 'm.html'), /<div id="app"[^>]*:class/, '#app 自己的屬性不會被 Vue 處理，:class 綁了也沒用')
+  assert.match(read('ui', 'm.js'), /classList\.toggle\('is-login', s === 'login'\)/)
 })
 
 test('文件與資源：設計文件存在，說明套件名、登入方式、限制', () => {

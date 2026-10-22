@@ -3,6 +3,9 @@
 html,body.m-body{height:100%;margin:0;overflow:hidden;background:linear-gradient(180deg,var(--glass-top),var(--glass-bottom) 55%,#a9cdee);-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
 body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m{display:flex;flex-direction:column;height:100dvh;min-height:0}
+/* .m 的 display:flex 和 style.css 的 [v-cloak] 一樣大，後寫的會贏，Vue 掛上之前整個樣板原文就露出來了：這裡明確壓過 */
+.m[v-cloak]{display:none!important}
+#splash{height:100dvh}
 .m button,.m input,.m select,.m textarea{font-size:16px}
 
 /* 啟動中、登入 */
@@ -44,8 +47,9 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-pic-lg{width:112px;height:112px;max-width:112px;max-height:112px;border-width:4px}
 .m-pic.st-busy{--frame:var(--busy)} .m-pic.st-away{--frame:var(--away)} .m-pic.st-offline{--frame:var(--offline);filter:grayscale(.65)}
 .m-conn-tx{min-width:0;overflow:hidden;text-overflow:ellipsis}
-.m-scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;margin:0 8px;background:var(--panel);border:1px solid var(--line);border-bottom:0;border-radius:8px 8px 0 0}
-.m-tabs{flex:none;display:flex;margin:0 8px 8px;border:1px solid var(--line);border-top:0;border-radius:0 0 8px 8px;overflow:hidden;background:var(--panel-soft)}
+/* 滿版：左右不留外框與外距，內容直接貼齊螢幕寬 */
+.m-scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;margin:0;background:var(--panel);border:0;border-top:1px solid var(--line);border-radius:0}
+.m-tabs{flex:none;display:flex;margin:0;border:0;border-top:1px solid var(--line);border-radius:0;overflow:hidden;background:var(--panel-soft)}
 .m-tabs button{position:relative;flex:1;min-height:52px;border:0;background:none;color:var(--muted);font-weight:600;cursor:pointer}
 .m-tabs button.on{color:var(--accent);background:var(--panel);box-shadow:inset 0 3px 0 var(--accent)}
 .m-tabs .red{top:10px;right:calc(50% - 30px)}
@@ -65,8 +69,8 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-buddy .unread{min-width:22px;line-height:22px;font-size:12px}
 
 /* 我 */
-.m-meview{padding:12px;display:flex;flex-direction:column;gap:12px}
-.m-card{display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--panel-soft)}
+.m-meview{padding:0;display:flex;flex-direction:column;gap:0}
+.m-card{display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:16px;border:0;border-bottom:1px solid var(--line);border-radius:0;background:var(--panel-soft)}
 .m-card:first-child{align-items:center}
 .m-av-big{border:0;background:none;padding:0;line-height:0;cursor:pointer;display:grid;place-items:center}
 .m-hint,.m-note,.m-ver{margin:0;font-size:13px;color:var(--muted);text-align:center}
@@ -90,7 +94,7 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-chat.shake{animation:m-shake .7s}
 @keyframes m-shake{0%,100%{transform:none}15%{transform:translateX(-10px)}30%{transform:translateX(9px)}45%{transform:translateX(-7px)}60%{transform:translateX(6px)}75%{transform:translateX(-3px)}}
 @media (prefers-reduced-motion:reduce){.m-chat.shake{animation:none}}
-.m-chat > .pane{margin:0 8px 8px;border-radius:8px}
+.m-chat > .pane{margin:0;border:0;border-top:1px solid var(--line);border-radius:0}
 .m-chat .to-line{display:none}
 .m-chat .conv,.m-chat .compose-row{padding:0;background:var(--panel)}
 .m-chat .conv-main,.m-chat .compose-main{border:0;border-radius:0}
@@ -109,3 +113,4 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-chat .typing{height:auto;min-height:22px}
 .m-chat .photo-viewer .aero-btn{min-height:44px;padding:0 16px}
 .m-chat .filecard,.m-chat .photo{min-height:44px}
+.m-chathead .m-icon-btn{font-size:40px;font-weight:700;width:48px}

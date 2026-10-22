@@ -69,6 +69,7 @@ const avatars = ref({})
 const query = ref(''), collapsed = reactive({})
 const banner = ref(null), shake = ref(false), refreshing = ref(false)
 let core = null
+let startCore = null
 let bannerTimer = null
 
 if (info.needs_login) {
@@ -115,8 +116,7 @@ if (screen.value === 'main') {
     void core.pull('resume'); void core.refreshRoster()
     if (nav.chat) { core.markRead(nav.chat); void core.syncHistory(nav.chat) }
   })
-  await core.start()
-  sync()
+  startCore = async () => { await core.start(); sync() }   // 掛上畫面之後才開始（第一次收信要連網，不能讓畫面空等）
 }
 
 // ---------- 導覽：每往下一層就推一筆瀏覽記錄，系統返回鍵＝上一頁（名單層再按才退到背景） ----------
@@ -201,3 +201,7 @@ const app = createApp({
 })
 app.component('chat-pane', ChatPane)
 app.mount('#app')
+// 根元素（#app）自己的屬性不在 Vue 編譯的樣板裡，:class 綁不上去；登入畫面的背景類別在這裡手動切
+watch(screen, s => document.getElementById('app').classList.toggle('is-login', s === 'login'), { immediate: true })
+document.getElementById('splash')?.remove()
+void startCore?.()

@@ -2,17 +2,18 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
+<meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover,interactive-widget=resizes-content">
 <meta name="theme-color" content="#8fbfec">
 <title>ASN</title>
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="mobile.css">
 </head>
 <body class="m-body">
-<div id="app" class="m" :class="{ 'is-login': screen === 'login' }" v-cloak>
+<!-- 開機畫面：放在 #app 外面，Vue 掛上去之前就看得到，掛上後由 m.js 移除（#app 在掛上前整個藏起來，不會露出樣板原文） -->
+<div id="splash" class="m-center"><img class="m-logo" src="img/logo.svg" alt=""><p>啟動中…</p></div>
+<div id="app" class="m" v-cloak>
   <!-- 啟動中、無法啟動 -->
-  <section class="m-center" v-if="screen === 'boot'"><img class="m-logo" src="img/logo.svg" alt=""><p>啟動中…</p></section>
-  <section class="m-center" v-else-if="screen === 'fatal'"><img class="m-logo" src="img/logo.svg" alt=""><p role="alert">ASN 無法啟動：{{ fatal }}</p></section>
+  <section class="m-center" v-if="screen === 'fatal'"><img class="m-logo" src="img/logo.svg" alt=""><p role="alert">ASN 無法啟動：{{ fatal }}</p></section>
 
   <!-- 登入 -->
   <section class="m-login" v-else-if="screen === 'login'">

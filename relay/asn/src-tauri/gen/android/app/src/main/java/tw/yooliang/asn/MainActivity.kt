@@ -25,5 +25,9 @@ class MainActivity : TauriActivity() {
 
   override fun onWebViewCreate(webView: WebView) {
     webView.addJavascriptInterface(AsnBridge(this), "AsnAndroid")
+    // 鎖定縮放（雙指縮放、雙擊放大）；系統的「字型大小」無障礙設定照常生效（textZoom 不動）
+    webView.settings.setSupportZoom(false)
+    webView.settings.builtInZoomControls = false
+    webView.settings.displayZoomControls = false
   }
 }
