@@ -10,9 +10,23 @@ import { fileURLToPath } from 'node:url'
 const installSh = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'install-cloud-node.sh')
 const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 
+// Windows 的 PATH 上常是 WSL 的 bash.exe 轉接器（沒有發行版時直接失敗），
+// 所以在 Windows 只認 Git for Windows 附的 bash；找不到就以明確原因略過（腳本本身只在 Linux 雲端代理上跑）。
+function findBash() {
+  if (process.platform !== 'win32') return 'bash'
+  const roots = [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Programs')]
+  for (const r of roots.filter(Boolean)) {
+    const p = path.join(r, 'Git', 'bin', 'bash.exe')
+    if (fs.existsSync(p)) return p
+  }
+  return null
+}
+const BASH = findBash()
+const SKIP = BASH ? false : '安裝腳本需要 bash；本機（Windows）找不到 Git for Windows 的 bash（PATH 上的 bash.exe 是 WSL 轉接器，不可用）'
+
 function runInstall(args, { env = process.env } = {}) {
   return new Promise((resolve, reject) => {
-    const c = spawn('bash', [installSh, ...args], {
+    const c = spawn(BASH, [installSh, ...args], {
       env: { ...process.env, ...env },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
@@ -37,7 +51,7 @@ function seedNode22(home) {
   return nodeDir
 }
 
-test('install --use-checkout：複製 relay/machine 全部 .mjs（含 anon.mjs）', async () => {
+test('install --use-checkout：複製 relay/machine 全部 .mjs（含 anon.mjs）', { skip: SKIP }, async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'install-home-'))
   const app = path.join(home, 'asn-relay')
   seedNode22(home)
@@ -54,7 +68,7 @@ test('install --use-checkout：複製 relay/machine 全部 .mjs（含 anon.mjs�
   } finally { rmDir(home) }
 })
 
-test('install --migrate-from：只 grep 信件目錄、不 source relay.env；同目錄略過 cp', async () => {
+test('install --migrate-from：只 grep 信件目錄、不 source relay.env；同目錄略過 cp', { skip: SKIP }, async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'install-migrate-'))
   const app = path.join(home, 'asn-relay')
   const mail = path.join(home, 'relay')
@@ -84,7 +98,7 @@ test('install --migrate-from：只 grep 信件目錄、不 source relay.env；�
   } finally { rmDir(home) }
 })
 
-test('install --migrate-from：不同 MAIL_DIR 時複製 inbox', async () => {
+test('install --migrate-from：不同 MAIL_DIR 時複製 inbox', { skip: SKIP }, async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'install-migrate2-'))
   const app = path.join(home, 'asn-relay')
   const mail = path.join(home, 'relay-new')
@@ -108,7 +122,7 @@ test('install --migrate-from：不同 MAIL_DIR 時複製 inbox', async () => {
   } finally { rmDir(home) }
 })
 
-test('install --hook-boot：追加 bash 子行程而非 source', async () => {
+test('install --hook-boot：追加 bash 子行程而非 source', { skip: SKIP }, async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'install-hook-'))
   const app = path.join(home, 'asn-relay')
   const boot = path.join(home, 'boot.sh')
@@ -129,7 +143,7 @@ test('install --hook-boot：追加 bash 子行程而非 source', async () => {
   } finally { rmDir(home) }
 })
 
-test('install：拒絕刪除 HOME 外的 NODE_DIR（不真的下載 Node）', async () => {
+test('install：拒絕刪除 HOME 外的 NODE_DIR（不真的下載 Node）', { skip: SKIP }, async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'install-safe-'))
   const app = path.join(home, 'asn-relay')
   const evilNode = '/tmp/asn-install-evil-node-' + process.pid

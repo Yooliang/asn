@@ -702,7 +702,8 @@ mod tests {
         let t0 = std::time::Instant::now();
         let e = run_with_deadline(sleeper(), Duration::from_millis(400), &n, |p| pid.store(p, Ordering::SeqCst)).await.unwrap_err();
         assert_eq!(e, "辨識逾時");
-        assert!(t0.elapsed() < Duration::from_secs(10), "不能等到睡醒：{:?}", t0.elapsed());
+        // 假程式睡 40 秒；上限放寬到 30 秒容納機器忙碌時的啟動與排程延遲。逾時機制若失效，要等滿 40 秒才會回，仍會紅
+        assert!(t0.elapsed() < Duration::from_secs(30), "不能等到睡醒：{:?}", t0.elapsed());
         let pid = pid.load(Ordering::SeqCst);
         assert!(pid != 0 && pid != std::process::id());
         assert!(!alive(pid), "逾時後那個子程序要真的結束");
@@ -712,15 +713,22 @@ mod tests {
     async fn 子程序被取消_也只結束那一個程序() {
         let n = std::sync::Arc::new(tokio::sync::Notify::new());
         let n2 = n.clone();
-        tokio::spawn(async move {
+        // notify_waiters 只叫醒「已經在等」的人；機器忙碌時 run_with_deadline 可能還沒開始等，一次通知會落空。
+        // 所以每 100ms 通知一次（最多 25 秒），測試結束就收掉
+        let kicker = tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(300)).await;
-            n2.notify_waiters();
+            for _ in 0..250 {
+                n2.notify_waiters();
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
         });
         let pid = std::sync::atomic::AtomicU32::new(0);
         let t0 = std::time::Instant::now();
         let e = run_with_deadline(sleeper(), Duration::from_secs(30), &n, |p| pid.store(p, Ordering::SeqCst)).await.unwrap_err();
+        kicker.abort();
         assert_eq!(e, "已取消");
-        assert!(t0.elapsed() < Duration::from_secs(10));
+        // 逾時設 30 秒、假程式睡 40 秒；取消機制失效時會變成「辨識逾時」而不是「已取消」，上面那句就會紅
+        assert!(t0.elapsed() < Duration::from_secs(25));
         assert!(!alive(pid.load(Ordering::SeqCst)));
     }
 

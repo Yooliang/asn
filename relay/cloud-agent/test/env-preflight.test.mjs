@@ -82,3 +82,10 @@ test('env.mjs CLI：print recv', () => {
     process.env = prev
   } finally { rm(root) }
 })
+
+// 讓前面測試關閉的連線與計時器在行程結束前收乾淨：
+// --test-force-exit 會在最後一個測試一結束就 process.exit，Windows 上 libuv 偶爾在
+// 仍有控制代碼正在關閉時中止（Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)）。
+test('收尾：等已關閉的控制代碼清乾淨', async () => {
+  await new Promise(r => setTimeout(r, 200))
+})
