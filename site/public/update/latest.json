@@ -1,11 +1,11 @@
 {
-  "version": "0.1.44",
-  "notes": "外掛：視窗外送的 /指令 若收發室已放棄等待就不再執行；程式內部識別改為 tw.yooliang.asn（設定與聊天記錄自動複製到新資料夾，舊的保留）",
-  "pub_date": "2026-10-22T22:49:36.085Z",
+  "version": "0.1.45",
+  "notes": "通話中每 2 秒收一次信、AI 回覆第一句好了就先念；寄給 ASN 程式本身不再顯示等回信；自動清掉 7 天以前的外掛舊版快取",
+  "pub_date": "2026-10-22T23:28:28.343Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnpVVkNrekExWFozWVR2T3NrRXhzL0gvbm9ST1hRUkpneTFYSWU2U2ZKcWc3VWRsVTVOVm9yNit3d0dIcVU2NFhRcEhsUEZuMGpFRzVtdnZEaEFjTUF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzA5Mzc1CWZpbGU6QVNOXzAuMS40NF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjQ0CjFxYkQyZVlUdTl3RkpnOGVGWEdGd1MrekdteHlvWXF6c25kWUNmYllQc3BHMGNKRkxFc3ZFLzN6RElZZGlYcDhrQklSSzZWU2U3cktGTzJtNTVJaEFnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.44_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnhlOHJrYStvalc1Z00rdHZ3NnI4Z0JrS0JKNTBvSFEwQmpMSnNxYlhPOVR0bUdNOGREQTFRbmV6UjlTeGpYbkZPbCtnN2pJWG1ENzEzV2Nib05BcndZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzExNzA4CWZpbGU6QVNOXzAuMS40NV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjQ1CjZqTWcvb1gyTGZLbVNPMlZ4MXBYWUdTWHMxS1dEYk9relVTakdvN21sV1V6S0p5dTZJQnFZalBTOUVIK0lITFZQTTFGWVlMaStUQ3ZFTjZNbHBWTUJRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.45_x64-setup.exe"
     }
   }
 }

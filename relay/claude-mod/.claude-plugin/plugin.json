@@ -1,6 +1,6 @@
 {
   "name": "asn",
-  "version": "0.1.44",
+  "version": "0.1.45",
   "description": "ASN 收發室接進 Claude 視窗：asn_send 寄信工具＋寄信旗標守門（#134 第一期）",
   "userConfig": {
     "asn_cli_path": {

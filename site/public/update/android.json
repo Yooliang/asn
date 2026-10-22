@@ -1,8 +1,8 @@
 {
-  "version": "0.1.43",
-  "versionCode": 1043,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.43_android.apk",
-  "sha256": "217c7bc87dc37e8a2ac17ab896b49f08cfff07b0472e3c3c8bffa28c19f7d78a",
-  "notes": "- 名單直接顯示 Claude 視窗的上下文用量（70% 以上顯示、90% 以上紅字），升破 90% 時提醒一次，手機可直接按接班換手",
-  "bytes": 8895972
+  "version": "0.1.45",
+  "versionCode": 1045,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.45_android.apk",
+  "sha256": "320d3619dd5f646992d114ed02c29c94b438cb0d2631d8ae80146839923ea98e",
+  "notes": "- 通話中每 2 秒收一次信、AI 回覆第一句好了就先念；寄給 ASN 程式本身不再顯示等回信；自動清掉 7 天以前的外掛舊版快取",
+  "bytes": 8920548
 }
