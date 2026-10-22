@@ -239,6 +239,7 @@ impl AcpEngine {
             no_fallback: true,
             cwd_label_override: Some(cfg.label.clone()),
             detail: None,
+            context_pct: None,
         }
     }
 

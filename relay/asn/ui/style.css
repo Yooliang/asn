@@ -262,6 +262,8 @@ html.toast-page,html.toast-page body{background:transparent}
 .b-line{display:flex;align-items:baseline;gap:5px;min-width:0}
 .b-line .b-nick{min-width:0}
 .b-st{flex:none;color:#9aa5b1;font-size:12px}
+.b-ctx{flex:none;color:#b7791f;font-size:12px}
+.b-ctx.danger{color:#d93025;font-weight:600}
 .room{display:flex;gap:7px;padding:5px 8px 5px 12px}
 .room-ic{flex:none;width:14px;height:14px;margin-top:3px;border-radius:4px;background:linear-gradient(135deg,#f0b040,#6fb6f0)}
 .list.settings{flex:1;border:0;gap:10px;padding:10px;background:var(--panel);display:flex;flex-direction:column;align-items:stretch}

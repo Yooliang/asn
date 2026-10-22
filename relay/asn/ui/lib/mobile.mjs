@@ -133,6 +133,8 @@ export const MSG_VIBRATE_MS = 60
 // 「對方登入」類的提示不打擾手機（不跳、不震）。
 export function notifyPlan(n, { openId = '', foreground = true, prefs = DEFAULT_PREFS } = {}) {
   const none = { banner: null, vibrate: 0, shake: false }
+  // 上下文快滿的提醒：前景時跳橫幅（帶「接班換手」按鈕），不震動；正在看那位的對話也要提醒（那正是用量在漲的地方）
+  if (n?.kind === 'context') return { banner: foreground ? { ...bannerOf(n), handover: true, ms: CONTEXT_BANNER_MS } : null, vibrate: 0, shake: false }
   if (!n || (n.kind !== 'msg' && n.kind !== 'nudge')) return none
   const id = n.friend?.id ?? ''
   const watching = foreground && openId !== '' && openId === id
@@ -143,6 +145,7 @@ export function notifyPlan(n, { openId = '', foreground = true, prefs = DEFAULT_
 }
 const bannerOf = n => ({ id: n.friend.id, nick: n.friend.nick, line: String(n.line ?? ''), status: n.friend.status, hue: n.friend.hue })
 export const BANNER_MS = 4000
+export const CONTEXT_BANNER_MS = 10000   // 帶按鈕的橫幅多留一會兒，來得及按
 
 // ---------- 安卓外殼橋（MainActivity 掛上的 window.AsnAndroid；沒有就是在一般瀏覽器或測試裡） ----------
 export function androidBridge(win) {

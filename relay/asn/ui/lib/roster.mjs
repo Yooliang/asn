@@ -1,5 +1,6 @@
 // 收發室名單（list 動作的 members）→ 好友與狀態。純函式。
 import { UNNAMED_DEVICE, hueOf, initial } from './text.mjs'
+import { pctOf } from './context-usage.mjs'
 
 const PARTNER_ID = /^p_[0-9a-f]{20}$/
 export const friendId = (node, agent) => `${node}/${agent ?? ''}`
@@ -56,7 +57,7 @@ export function buildFriends(members, { selfNode, selfName } = {}) {
       seen.add(a.name)
       out.push({
         id: friendId(m.id, a.name), node: m.id, device: typeof m.name === 'string' && m.name.trim() ? m.name.trim() : '', agent: a.name, nick: a.name,
-        psm: psmOf(a),
+        psm: psmOf(a), contextPct: isOff || a.online === false ? null : pctOf(a.context_pct),   // 上下文已用％（選填；離線或舊後台沒有＝null）
         onRoster: true, engine: a.engine ?? null, kind: typeof m.kind === 'string' && m.kind ? m.kind : null, status: off || a.online === false ? 'offline' : statusOf(a.status),
         archived: a.archived === true,   // 封存（記在帳號層；舊後台沒有這個鍵＝沒封存）。每次名單都明寫，才不會被記住的舊值蓋掉
         ...(PARTNER_ID.test(String(a.partner_id ?? '')) ? { partnerId: a.partner_id } : {}),   // 夥伴 ID（#153）：只在內部用來查往來記錄與交接檔資料夾，不顯示

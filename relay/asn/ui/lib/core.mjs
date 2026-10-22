@@ -6,6 +6,7 @@
 import { isAvatarDataUrl } from './avatar.mjs'
 import { asnByNode } from './presence.mjs'
 import { buildFriends, cleanPsm, isAsnWindow, mergeFriends } from './roster.mjs'
+import { contextAlertText, createContextWatch } from './context-usage.mjs'
 import { routeMail, stubFriend } from './routing.mjs'
 import { hasNudge, hueOf, initial, noReplyNoticeOf, plain, stripNudge, stripReplyHead, unwrapShell } from './text.mjs'
 import { noticeOf, expiresAt, fileMimeOf, friendlyPhotoError, normalizePhotos, stripPhotoLines } from './photo.mjs'
@@ -42,6 +43,7 @@ export class AsnCore {
     this.avatars = new Map()   // 節點 → { at, data }：各設備上傳的大頭貼（名單只帶更新時間，圖按需取、依更新時間快取）
     this.conn = 'connecting'   // connecting | on | off
     this.rosterLoaded = false
+    this.contextWatch = createContextWatch()   // 上下文升破 90％的提醒記錄（只在記憶體）
     this.handlers = {}
     this.timers = []
     this.pulling = false
@@ -87,13 +89,17 @@ export class AsnCore {
     const next = new Map()
     for (const m of merged) {
       const old = this.friends.get(m.id)
-      const f = this.#decorate({ unread: 0, waiting: false, replyTo: null, ...(old ?? {}), ...m })
+      const f = this.#decorate({ unread: 0, waiting: false, replyTo: null, ...(old ?? {}), ...m, contextPct: m.contextPct ?? null })   // 上下文用量每輪以名單為準，不沿用舊值
       next.set(m.id, f)
       if (this.rosterLoaded && !isAsnWindow(f) && f.status !== 'offline' && (prev.get(m.id) ?? 'offline') === 'offline') {
         queueMicrotask(() => this.emit('notify', { kind: 'login', friend: f, line: '已經登入', sound: 'login', toast: true }))
       }
     }
     this.friends = next
+    for (const a of this.contextWatch.update([...next.values()].filter(f => !isAsnWindow(f)))) {
+      const f = next.get(a.id)
+      queueMicrotask(() => this.emit('notify', { kind: 'context', friend: f, line: contextAlertText(f.nick, a.pct), pct: a.pct, toast: true }))
+    }
     this.rosterLoaded = true
     this.emit('state')
     await this.#syncAvatars(members)

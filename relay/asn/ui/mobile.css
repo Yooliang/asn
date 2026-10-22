@@ -129,6 +129,8 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-banner-tx{min-width:0;display:flex;flex-direction:column}
 .m-banner-tx b{color:var(--link);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .m-banner-tx small{color:var(--title-fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.m-banner-tx.wrap small{white-space:normal}
+.m-banner-act{flex:none;margin-left:auto;padding:6px 12px;border:1px solid rgba(40,80,130,.7);border-radius:8px;background:var(--link);color:#fff;font:inherit;font-size:14px}
 @keyframes m-drop{from{transform:translateY(-120%);opacity:0}to{transform:none;opacity:1}}
 @media (prefers-reduced-motion:reduce){.m-banner{animation:none}}
 
