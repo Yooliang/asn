@@ -89,7 +89,7 @@ test('契約：轉交一封信 → deliver 收到全文與標頭（含 engine）
   assert.equal(r.records.length, 1)
   assert.equal(r.records[0].id, uid(1))
   assert.equal(r.records[0].to, '假視窗甲')
-  assert.match(r.records[0].text, /^\[RELAY 來信\] trust=member from=W\/W-政策 to=假視窗甲 id=00000000-0000-0000-0000-000000000001 engine=fake reply=\?\n內文-1$/)
+  assert.match(r.records[0].text, /^\[RELAY 來信\] trust=member from=W\/W-政策 to=假視窗甲 id=00000000-0000-0000-0000-000000000001 engine=fake reply=\?\n寄件人：W-政策（成員身分）\n內文-1$/)
   const back = r.st.sent.find(s => s.reply_to === uid(1))
   assert.equal(back.to_node, 'W'); assert.equal(back.to_agent, 'W-政策'); assert.equal(back.body, '收到了'); assert.equal(back.from_agent, '假視窗甲')
 })

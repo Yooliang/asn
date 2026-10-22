@@ -40,7 +40,7 @@ async function handle(line) {
   saveTurns(conv, turns)
   out({ event: 'step_update', step_update: { conversation_id: conv, step_index: step++, state: 'DONE', step_type: 'user_input' } })
   const mail = content.includes('\n---\n') ? content.slice(content.indexOf('\n---\n') + 5) : content
-  const body = mail.replace(/^\[RELAY 來信\][^\n]*\n?/, '')
+  const body = mail.replace(/^\[RELAY 來信\][^\n]*\n?/, '').replace(/^寄件人：[^\n]*\n?/, '').replace(/^【要回信】[^\n]*\n?/, '')
   const resultOf = (response, extra = {}) => out({ event: 'result', result: { conversation_id: conv, status: 'SUCCESS', response, duration_seconds: 0.01, num_turns: 1, usage: { input_tokens: 1 }, ...extra } })
   const fail = (err, code) => { out({ event: 'result', result: { conversation_id: '', status: 'ERROR', response: '', error: err } }); setTimeout(() => process.exit(code), 20) }
   const flags = `${flag('--dangerously-skip-permissions') ? 'full' : 'normal'}${opt('--model') ? `/${opt('--model')}` : ''}`

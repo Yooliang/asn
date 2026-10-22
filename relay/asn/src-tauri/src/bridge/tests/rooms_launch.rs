@@ -68,12 +68,13 @@ async fn 信帶附件_轉給視窗的文字多一行提示_替代文字行不重
     assert_eq!(f.len(), 2);
     let lines: Vec<&str> = f[0].2.lines().collect();
     assert!(lines[0].starts_with("[RELAY 來信]"));
-    assert_eq!(lines[1], "看這隻");
-    assert_eq!(lines[2], format!("〔照片〕cat.webp（image/webp，179 KB，1536×2048）下載：/x/asn-cli attach --id {}", uid(0x50)));
-    assert_eq!(lines[3], crate::bridge::corrlog::path_line(&h.core.cfg.handoff_dir, "T-乙"), "最後多一行往來記錄的路徑");
-    assert_eq!(lines.len(), 4);
+    assert_eq!(lines[1], "寄件人：W-政策（成員身分）");
+    assert_eq!(lines[2], "看這隻");
+    assert_eq!(lines[3], format!("〔照片〕cat.webp（image/webp，179 KB，1536×2048）下載：/x/asn-cli attach --id {}", uid(0x50)));
+    assert_eq!(lines[4], crate::bridge::corrlog::path_line(&h.core.cfg.handoff_dir, "T-乙"), "最後多一行往來記錄的路徑");
+    assert_eq!(lines.len(), 5);
     assert!(!h.said().join("\n").contains("SECRETTHUMB"));
-    assert_eq!(f[1].2.lines().count(), 3, "沒附件的信：抬頭＋內文＋往來記錄路徑，沒有多餘的行");
+    assert_eq!(f[1].2.lines().count(), 4, "沒附件的信：抬頭＋寄件人說明＋內文＋往來記錄路徑，沒有多餘的行");
 }
 
 // ================================================================================================

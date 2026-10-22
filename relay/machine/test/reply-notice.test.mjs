@@ -1,4 +1,5 @@
-// 「沒有經收發室收到回覆」通知的行為：遲到回覆照寄、對方忙碌時延後、視窗已關閉、收發室系統信不計時、寄出有 log、寄給原寄件人視為已回覆。
+// 逾時不再通知寄件人（小良哥 10/22 裁示：寄件人看已讀狀態）：遲到回覆照寄（原文、不加說明）、收發室系統信不計時、寄給原寄件人視為已回覆；
+// 新增「收件視窗提醒」：轉交後 IRORI_NUDGE_MS 沒回、視窗閒置 → 提醒收件視窗一次。
 // 用假仲介伺服器＋假 claude（agents.json 可在執行中改 status）；用 IRORI_REPLY_TIMEOUT_MS / IRORI_BRIDGE_TICK_MS 縮短時間。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -79,20 +80,20 @@ async function go({ st, env = {}, step, agents = NAMES.map(n => [n, 'idle']), ti
 }
 const notices = st => st.sent.filter(s => /沒有經收發室收到/.test(s.body))
 
-test('遲到的回覆：逾時通知後信仍保留，對方之後才回 → 照常寄回（帶「遲到的回覆」）並清掉；log 記下通知寄出', async () => {
+test('遲到的回覆：逾時後信仍保留（不通知寄件人），對方之後才回 → 照常寄回（原文，不加說明）並清掉', async () => {
   const st = await fakeServer([mail(1)])
   try {
     let said = false
     const { log } = await go({
       st, step: c => {
-        if (!said && notices(c.st).length >= 1) { said = true; c.says('終於做完了') }
+        if (!said && /reply wait over/.test(c.log)) { said = true; c.says('終於做完了') }
         return /late reply from T-對方/.test(c.log)
       },
     })
-    assert.equal(notices(st).length, 1)
-    assert.match(log, new RegExp(`no-reply notice sent id=${uid(1)} \\(W/W-政策\\|T-對方\\) reason=timeout`))
+    assert.equal(notices(st).length, 0)
+    assert.match(log, new RegExp(`reply wait over id=${uid(1)} -> T-對方: no notice to sender`))
     const back = st.sent.filter(s => s.reply_to === uid(1) && /終於做完了/.test(s.body))
-    assert.equal(back.length, 1); assert.match(back[0].body, /^（遲到的回覆/); assert.equal(back[0].from_agent, 'T-對方')
+    assert.equal(back.length, 1); assert.equal(back[0].body, '終於做完了'); assert.equal(back[0].from_agent, 'T-對方')
     assert.doesNotMatch(log, /unmatched reply/)
   } finally { await st.close() }
 })
@@ -119,59 +120,23 @@ test('遲到回覆的保留筆數有上限（IRORI_LATE_MAX）：超過就清掉
   } finally { await st.close() }
 })
 
-test('對方忙碌：逾時不寄、延後；閒下來後過寬限仍沒回才寄（reason=busy-idle-grace）', async () => {
-  const st = await fakeServer([mail(1)])
-  try {
-    let idleAt = 0
-    const { log } = await go({
-      st, agents: [['T-對方', 'busy'], ['T-別人', 'idle']], env: { IRORI_BUSY_GRACE_MS: '700', IRORI_BUSY_MAX_MS: '60000' },
-      step: c => {
-        if (!idleAt && /no-reply notice deferred/.test(c.log)) { assert.equal(notices(c.st).length, 0); idleAt = Date.now(); c.setAgents([['T-對方', 'idle'], ['T-別人', 'idle']]) }
-        return notices(c.st).length >= 1
-      },
-    })
-    assert.match(log, /deferred id=.*T-對方 is busy/)
-    assert.match(log, /reason=busy-idle-grace/)
-    assert.match(notices(st)[0].body, /先前一直在忙/)
-  } finally { await st.close() }
-})
-
-test('對方忙碌延後期間又變忙 → 寬限重算；忙到總上限（IRORI_BUSY_MAX_MS）無論如何寄一次（reason=busy-max）', async () => {
-  const st = await fakeServer([mail(1)])
-  try {
-    const { log } = await go({ st, agents: [['T-對方', 'busy'], ['T-別人', 'idle']], env: { IRORI_BUSY_MAX_MS: '1200' }, step: c => notices(c.st).length >= 1 })
-    assert.match(log, /reason=busy-max/)
-  } finally { await st.close() }
-})
-
-test('對方在延後期間回覆了 → 不寄通知', async () => {
-  const st = await fakeServer([mail(1)])
-  try {
-    let said = false
-    const { log } = await go({
-      st, agents: [['T-對方', 'busy'], ['T-別人', 'idle']], step: c => {
-        if (!said && /no-reply notice deferred/.test(c.log)) { said = true; c.says('忙完了，回你') }
-        return /reply from T-對方 -> W/.test(c.log)
-      },
-    })
-    assert.equal(notices(st).length, 0)
-    assert.equal(st.sent.filter(s => /忙完了/.test(s.body))[0].body.startsWith('（遲到'), false)
-  } finally { await st.close() }
-})
-
-test('對方視窗已經不在名單（關掉了）→ 逾時直接寄，文字說明視窗已關閉', async () => {
-  const st = await fakeServer([mail(1)])
-  try {
-    let closed = false
-    const { log } = await go({
-      st, step: c => {
-        if (!closed && c.forwarded() >= 1) { closed = true; c.setAgents([['T-別人', 'idle']]) }
-        return notices(c.st).length >= 1
-      },
-    })
-    assert.match(notices(st)[0].body, /對方視窗「T-對方」已關閉/)
-    assert.match(log, /reason=window-closed/)
-  } finally { await st.close() }
+test('任何情況都不通知寄件人：閒置、忙碌、視窗關掉，逾時後都只記 log', async () => {
+  for (const mode of ['idle', 'busy', 'closed']) {
+    const st = await fakeServer([mail(1)])
+    try {
+      let closed = false
+      const { log } = await go({
+        st, agents: [['T-對方', mode === 'busy' ? 'busy' : 'idle'], ['T-別人', 'idle']], settle: 800,
+        step: c => {
+          if (mode === 'closed' && !closed && c.forwarded() >= 1) { closed = true; c.setAgents([['T-別人', 'idle']]) }
+          return /reply wait over/.test(c.log)
+        },
+      })
+      assert.equal(notices(st).length, 0, mode)
+      assert.ok(!st.sent.some(x => /\[收發室\]/.test(x.body)), mode)
+      assert.doesNotMatch(log, /no-reply notice sent/, mode)
+    } finally { await st.close() }
+  }
 })
 
 test('寄件人是收發室（W-收發室／T-收發室）→ 照常轉交並 ack，但不計時、不寄逾時通知', async () => {
@@ -183,7 +148,7 @@ test('寄件人是收發室（W-收發室／T-收發室）→ 照常轉交並 ac
   } finally { await st.close() }
 })
 
-test('對方在轉交後曾用 send.mjs 寄信給原寄件人（sent 記號，沒帶 --reply-to）→ 視為已回覆，不寄通知', async () => {
+test('對方在轉交後曾用 send.mjs 寄信給原寄件人（sent 記號，沒帶 --reply-to）→ 視為已回覆（log 記下）；沒記號的那封也不通知', async () => {
   const st = await fakeServer([mail(1), mail(2, { from_node: 'Z', from_agent: 'Z-別窗' })])
   try {
     let marked = false
@@ -195,15 +160,15 @@ test('對方在轉交後曾用 send.mjs 寄信給原寄件人（sent 記號，�
           // 只寄給節點 W（沒指定視窗）也算回了第一封（寄件人 W/W-政策）；第二封（Z/Z-別窗）沒有任何記號
           fs.writeFileSync(path.join(dir, sentMarkName('T-對方', 'W', '')), String(Date.now()))
         }
-        return notices(c.st).length >= 1 && /sent mail to W\/W-政策/.test(c.log)
+        return /sent mail to W\/W-政策 after forward/.test(c.log) && new RegExp(`reply wait over id=${uid(2)} -> T-對方: no notice`).test(c.log)
       },
     })
-    assert.equal(notices(st).length, 1); assert.equal(notices(st)[0].reply_to, uid(2))
+    assert.equal(notices(st).length, 0)
     assert.match(log, /sent mail to W\/W-政策 after forward/)
   } finally { await st.close() }
 })
 
-test('sent 記號早於轉交時間（舊的寄信）不算已回覆', async () => {
+test('sent 記號早於轉交時間（舊的寄信）不算已回覆：信轉成等遲到的回覆，仍不通知', async () => {
   const st = await fakeServer([mail(1)])
   try {
     const { log } = await go({
@@ -211,10 +176,11 @@ test('sent 記號早於轉交時間（舊的寄信）不算已回覆', async () 
         const dir = path.join(c.home, '.irori-relay', 'machine-T', 'sent'); fs.mkdirSync(dir, { recursive: true })
         const f = path.join(dir, sentMarkName('T-對方', 'W', 'W-政策'))
         if (!fs.existsSync(f)) fs.writeFileSync(f, String(Date.now() - 3_600_000))
-        return notices(c.st).length >= 1
+        return /reply wait over id=.* no notice to sender/.test(c.log)
       },
     })
-    assert.match(log, /reason=timeout/)
+    assert.doesNotMatch(log, /sent mail to/)
+    assert.equal(notices(st).length, 0)
   } finally { await st.close() }
 })
 
@@ -277,7 +243,6 @@ test('視窗傳給收發室「[RELAY 寄信] to=節點/視窗」→ 當成新信
 })
 
 // 10/05：代寄一定要寫 reply=yes|no（小良哥：「要不要回信」由寄件人明說，收發室自己決定要不要計時）
-const TIP = '只是告知的信，寄件時用 --no-reply（代寄寫 reply=no）就不會提醒'
 const recordOf = home => fs.readFileSync(path.join(home, 'record.jsonl'), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l))
 
 test('代寄 [RELAY 寄信] to=… reply=no|yes → 寄出時帶 expects_reply（false／true），內文一字不改、不補任何標記', async () => {
@@ -367,26 +332,73 @@ test('代寄回信 [RELAY 回信] to=… re=<id> reply=no → 回給那封信的
   } finally { await st.close() }
 })
 
-test('逾時提醒（timeout 與 busy 兩種）結尾多一句怎麼避免誤報；視窗已關閉那種不加', async () => {
+// ---- 收件視窗提醒 ----
+const nudges = home => recordOf(home).filter(r => r.to === 'T-對方' && /（收發室提醒）/.test(r.text))
+
+test('收件視窗提醒：轉交後 NUDGE_MS 沒回、視窗閒置 → 提醒一次（文字正確）；之後不重複、也不通知寄件人', async () => {
   const st = await fakeServer([mail(1)])
   try {
-    await go({ st, step: c => notices(c.st).length >= 1 })
-    assert.ok(notices(st)[0].body.endsWith(`。${TIP}`), notices(st)[0].body)
-    assert.match(notices(st)[0].body, /分鐘內沒有經收發室收到 T-對方 的回覆/)
+    let first = 0, all = []
+    await go({
+      st, env: { IRORI_NUDGE_MS: '400', IRORI_REPLY_TIMEOUT_MS: '60000' },
+      step: c => { all = nudges(c.home); if (all.length && !first) first = Date.now(); return first && Date.now() - first > 1500 },
+    })
+    assert.equal(all.length, 1, '只提醒一次')
+    assert.ok(all[0].text.includes(`（收發室提醒）你還沒回覆 W-政策（成員身分） 的信 ${uid(1)}，若已處理完請用 asn_send 寄回結果`), all[0].text)
+    assert.equal(notices(st).length, 0)
+  } finally { await st.close() }
+})
+
+test('收件視窗提醒：忙碌中不插話，閒下來才提醒；回覆後不提醒；reply=no 的信不提醒', async () => {
+  const st = await fakeServer([mail(1)])
+  try {
+    let idleSet = false, busyChecked = 0
+    await go({
+      st, agents: [['T-對方', 'busy'], ['T-別人', 'idle']], env: { IRORI_NUDGE_MS: '300', IRORI_REPLY_TIMEOUT_MS: '60000' },
+      step: c => {
+        if (!idleSet && c.forwarded() >= 1 && !busyChecked) busyChecked = Date.now()
+        if (!idleSet && busyChecked && Date.now() - busyChecked > 1200) { assert.equal(nudges(c.home).length, 0, '忙碌中不插話'); idleSet = true; c.setAgents([['T-對方', 'idle'], ['T-別人', 'idle']]) }
+        return idleSet && nudges(c.home).length >= 1
+      },
+    })
   } finally { await st.close() }
   const st2 = await fakeServer([mail(1)])
   try {
-    let idle = false
+    let said = false, t0 = 0
     await go({
-      st: st2, agents: [['T-對方', 'busy'], ['T-別人', 'idle']], env: { IRORI_BUSY_GRACE_MS: '300', IRORI_BUSY_MAX_MS: '60000' },
-      step: c => { if (!idle && /no-reply notice deferred/.test(c.log)) { idle = true; c.setAgents([['T-對方', 'idle'], ['T-別人', 'idle']]) } return notices(c.st).length >= 1 },
+      st: st2, env: { IRORI_NUDGE_MS: '400', IRORI_REPLY_TIMEOUT_MS: '60000' },
+      step: c => {
+        if (!said && c.forwarded() >= 1) { said = true; t0 = Date.now(); c.says('好了') }
+        return said && Date.now() - t0 > 1500
+      },
     })
-    assert.match(notices(st2)[0].body, /先前一直在忙/); assert.ok(notices(st2)[0].body.endsWith(`。${TIP}`), notices(st2)[0].body)
+    assert.equal(st2.sent.filter(x => x.reply_to === uid(1)).length, 1)
   } finally { await st2.close() }
-  const st3 = await fakeServer([mail(1)])
+  const st3 = await fakeServer([mail(1, { expects_reply: false })])
   try {
-    let closed = false
-    await go({ st: st3, step: c => { if (!closed && c.forwarded() >= 1) { closed = true; c.setAgents([['T-別人', 'idle']]) } return notices(c.st).length >= 1 } })
-    assert.match(notices(st3)[0].body, /已關閉/); assert.ok(!notices(st3)[0].body.includes(TIP))
+    let t0 = 0, last = 0
+    await go({ st: st3, env: { IRORI_NUDGE_MS: '300', IRORI_REPLY_TIMEOUT_MS: '60000' }, step: c => { if (!t0 && c.forwarded() >= 1) t0 = Date.now(); last = nudges(c.home).length; return t0 && Date.now() - t0 > 1500 } })
+    assert.equal(last, 0)
   } finally { await st3.close() }
+})
+
+test('信頭與說明行：本人信的位址是人代號、不含節點代號；member 有「成員身分」；reply=yes 才有【要回信】行', async () => {
+  const alias = 'u:3cda66252c34'
+  const st = await fakeServer([
+    mail(1, { trust: 'owner', from_node: 'XISU', from_agent: alias, sender_display: '小良', sender_device: 'Oppo 手機', expects_reply: true }),
+    mail(2, { from_node: 'H', from_agent: 'asn', sender_device: '小良的家用機', sender_engine: 'claude', expects_reply: false }),
+  ])
+  try {
+    let rec = []
+    await go({ st, env: { IRORI_REPLY_TIMEOUT_MS: '60000' }, step: c => { rec = recordOf(c.home); return rec.filter(r => r.text.includes('[RELAY 來信]')).length >= 2 } })
+    const block = t => t.slice(t.indexOf('<<<MAIL\n') + 8, t.lastIndexOf('\nMAIL>>>')).split('\n')
+    const t1 = block(rec.find(r => r.text.includes(`id=${uid(1)}`)).text), t2 = block(rec.find(r => r.text.includes(`id=${uid(2)}`)).text)
+    assert.equal(t1[0], `[RELAY 來信] trust=owner from=${alias} to=T-對方 id=${uid(1)} engine=claude reply=yes`)
+    assert.equal(t1[1], '寄件人：小良（本人，帳號簽章已驗證，從「Oppo 手機」寄出）')
+    assert.equal(t1[2], `【要回信】回信位址=${alias} 信件編號=${uid(1)}：在視窗裡直接回答，對方看不到；請用 asn_send（to=回信位址、reply_to=信件編號）或 asn-cli send --to ${alias} --reply-to ${uid(1)} --no-reply 寄回。`)
+    assert.ok(!t1.slice(0, 3).join('\n').includes('XISU'))
+    assert.match(t2[0], /^\[RELAY 來信\] trust=member from=H\/asn /)
+    assert.equal(t2[1], '寄件人：asn（「小良的家用機」上的 Claude 視窗，成員身分）')
+    assert.ok(!t2.some(l => l.startsWith('【要回信】')))
+  } finally { await st.close() }
 })

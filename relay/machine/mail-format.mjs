@@ -8,9 +8,6 @@
 // 所有寄件工具與機器都換成會帶 expects_reply 的版本之後，這份正則與 wantsReply 的退路就可以拿掉。
 export const NO_REPLY_RE = /（不需回覆）|\[no-reply\]/i
 
-// 逾時提醒結尾那句：告訴寄件人怎麼避免誤報
-export const NO_REPLY_TIP = '只是告知的信，寄件時用 --no-reply（代寄寫 reply=no）就不會提醒'
-
 // 欄位值 → true／false／null。接受 boolean，也接受抬頭上的 yes／no 字樣；其他一律當「不知道」
 export const toReplyFlag = v => (v === true || v === 'yes' ? true : v === false || v === 'no' ? false : null)
 
@@ -24,9 +21,56 @@ export function wantsReply(field, body) {
   return !NO_REPLY_RE.test(String(body ?? ''))
 }
 
+// 本人代號：u: 加十二位十六進位（後台 asn_person_alias）。與節點無關的本人位址，回信寫 --to u:xxxxxxxxxxxx 即可
+export const PERSON_ALIAS_RE = /^u:[0-9a-f]{12}$/
+
+// 本人簽章的信（後台回了 sender_display）且寄件視窗名是人代號 → 回信位址就是人代號本身，不掛在任何節點底下
+// （舊寫法 `節點/u:xxx` 後台仍認，舊 AI 照舊信頭回信不會壞）。其餘信一律 `節點/視窗名`
+export const isPersonMail = m => m?.trust === 'owner' && !!cleanLabel(m?.sender_display) && PERSON_ALIAS_RE.test(String(m?.from_agent ?? ''))
+export const fromAddress = m => isPersonMail(m) ? m.from_agent : `${m.from_node}/${m.from_agent ?? ''}`
+
 // 來信抬頭（第一行）。reply 放在最後（engine= 之後），前面各欄位的順序不動，舊的前綴式解析照樣有效
 export const mailHead = (m, engine = 'claude') =>
-  `[RELAY 來信] trust=${m.trust} from=${m.from_node}/${m.from_agent ?? ''} to=${m.to_agent ?? ''} id=${m.id} engine=${engine} reply=${replyLabel(m.expects_reply)}`
+  `[RELAY 來信] trust=${m.trust} from=${fromAddress(m)} to=${m.to_agent ?? ''} id=${m.id} engine=${engine} reply=${replyLabel(m.expects_reply)}`
+
+// 給人看的名稱：換行與控制字元變空白、拿掉會干擾抬頭的括號引號、最長 40 字
+export const cleanLabel = v => typeof v === 'string'
+  ? v.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').replace(/[「」『』\[\]【】]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40)
+  : ''
+
+const ENGINE_NAMES = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', grok: 'Grok', agy: 'Antigravity' }
+
+// 抬頭下一行的「寄件人：…」說明（給 AI 看懂這封信是誰、從哪、什麼身分；機器可讀部分仍在抬頭）。
+//   本人：寄件人：小良（本人，帳號簽章已驗證，從「Oppo 手機」寄出）
+//   成員：寄件人：asn（「小良的家用機」上的 Claude 視窗，成員身分）／雲端代理／收發室通知
+// 設備名只用後台給的 sender_device（節點的名稱，不是節點代號）；與節點代號相同就省略。沒有的部分省略，不拿節點代號湊
+export function senderLine(m) {
+  const agent = cleanLabel(m?.from_agent)
+  let dev = cleanLabel(m?.sender_device)
+  if (dev && dev === cleanLabel(m?.from_node)) dev = ''
+  if (m?.trust === 'owner' && cleanLabel(m?.sender_display)) {
+    return `寄件人：${cleanLabel(m.sender_display)}（本人，帳號簽章已驗證${dev ? `，從「${dev}」寄出` : ''}）`
+  }
+  const status = m?.trust === 'owner' ? '擁有者身分' : '成員身分'
+  if (agent.endsWith('收發室')) return `寄件人：收發室通知（${status}）`
+  const name = agent || '未具名視窗'
+  if (m?.sender_engine === 'cloud') return `寄件人：${name}（雲端代理，${status}）`
+  const eng = ENGINE_NAMES[m?.sender_engine] ?? cleanLabel(m?.sender_engine)
+  const where = `${dev ? `「${dev}」上的` : ''}${dev && eng ? ' ' : ''}${eng ? `${eng} ` : ''}${dev || eng ? '視窗' : ''}`
+  return `寄件人：${name}（${where ? `${where}，` : ''}${status}）`
+}
+
+// reply=yes 的信在寄件人說明後面多一行明確指示（地址與信件 id 直接填好，AI 照抄）。其他信回 ''
+export const replyLine = m => {
+  if (toReplyFlag(m?.expects_reply) !== true) return ''
+  const a = fromAddress(m)
+  // 格式固定（docs/design/MAIL-HEADER.md；外掛逐字解析 `回信位址=`、`信件編號=`，值不含空白，以空白或全形冒號結束）
+  return `【要回信】回信位址=${a} 信件編號=${m.id}：在視窗裡直接回答，對方看不到；請用 asn_send（to=回信位址、reply_to=信件編號）或 asn-cli send --to ${a} --reply-to ${m.id} --no-reply 寄回。`
+}
+
+// 抬頭之後、內文之前的說明行（每行以換行結尾）：寄件人說明＋（reply=yes 且收件的是 Claude 視窗才有的）要回信指示。
+// 背景工作者、Codex 這類轉接器的回答由橋自動寄回，不能叫它們用 asn_send，所以只有 claude 引擎加這行
+export const mailPreamble = (m, engineId = 'claude') => `${senderLine(m)}\n${engineId === 'claude' && replyLine(m) ? replyLine(m) + '\n' : ''}`
 
 // 從轉接器收到的信件全文取出抬頭上的 reply 欄位：'yes'｜'no'｜'?'；不是來信抬頭或沒有這個欄位回 null。
 // 只認第一行【最後面】那個 reply=（橋寫在最後；寄件人自填的視窗名就算含 " reply=no" 也排在它前面，騙不到）

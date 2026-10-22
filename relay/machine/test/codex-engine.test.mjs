@@ -450,7 +450,7 @@ test('橋整合：IRORI_ENGINES=codex → 名單上報帶 engine=codex；來信�
     const roster = st.rosterPosts[0]   // 轉交之前的第一次上報（之後視窗甲處理信時會是 busy）
     assert.deepEqual(roster.agents.map(a => [a.name, a.status, a.engine]), [['視窗甲', 'idle', 'codex'], ['視窗乙', 'busy', 'codex']])
     const q = fx.readCalls().find(c => c.cmd === 'queue')
-    assert.match(messageOf(q), /^\[RELAY 來信\] trust=member from=W\/W-政策 to=視窗甲 id=00000000-0000-7000-8000-0000000000f1 engine=codex reply=\?\n內文-F1/)
+    assert.match(messageOf(q), /^\[RELAY 來信\] trust=member from=W\/W-政策 to=視窗甲 id=00000000-0000-7000-8000-0000000000f1 engine=codex reply=\?\n寄件人：W-政策（成員身分）\n內文-F1/)
   } finally {
     child.kill(); await new Promise(r => child.once('exit', r)); await st.close(); fx.cleanup()
   }

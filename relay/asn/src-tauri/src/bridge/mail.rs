@@ -8,9 +8,6 @@ pub fn has_legacy_no_reply_mark(body: &str) -> bool {
     body.contains("（不需回覆）") || body.to_lowercase().contains("[no-reply]")
 }
 
-/// 逾時提醒結尾那句
-pub const NO_REPLY_TIP: &str = "只是告知的信，寄件時用 --no-reply（代寄寫 reply=no）就不會提醒";
-
 /// 欄位值 → true／false／null。接受布林，也接受字串 yes／no
 pub fn to_reply_flag(v: &Value) -> Option<bool> {
     match v {
@@ -67,6 +64,10 @@ pub struct Mail {
     pub body: String,
     pub trust: String,
     pub expects_reply: Option<bool>,
+    /// 後台給的寄件人說明（選填；舊後台沒有）：sender_display 只有本人簽章的信才有；device＝寄出節點的名稱；engine＝名單裡的引擎（雲端代理是 cloud）
+    pub sender_display: Option<String>,
+    pub sender_device: Option<String>,
+    pub sender_engine: Option<String>,
     /// 清理過的附件清單（縮圖丟掉、編號必須是 uuid、最多 4 筆）
     pub attachments: Vec<super::attach::Attachment>,
 }
@@ -82,8 +83,43 @@ impl Mail {
             body: s("body").unwrap_or_default(),
             trust: s("trust").unwrap_or_else(|| "member".into()),
             expects_reply: v.get("expects_reply").and_then(to_reply_flag),
+            sender_display: s("sender_display"),
+            sender_device: s("sender_device"),
+            sender_engine: s("sender_engine"),
             attachments: super::attach::normalize(v.get("attachments")),
         })
+    }
+}
+
+/// 本人代號：`u:` 加十二位小寫十六進位（後台 asn_person_alias）
+pub fn is_person_alias(s: &str) -> bool {
+    s.strip_prefix("u:").is_some_and(|h| h.len() == 12 && h.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+}
+
+/// 給人看的名稱：控制字元與換行變空白、拿掉會干擾抬頭的括號引號、空白收斂、最長 40 字（對應 mail-format.mjs 的 cleanLabel）
+pub fn clean_label(v: &str) -> String {
+    let t: String = v
+        .chars()
+        .map(|c| if c.is_control() || c == '\u{2028}' || c == '\u{2029}' { ' ' } else { c })
+        .filter(|c| !"「」『』[]【】".contains(*c))
+        .collect();
+    t.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(40).collect()
+}
+
+fn label(v: &Option<String>) -> String {
+    v.as_deref().map(clean_label).unwrap_or_default()
+}
+
+/// 本人簽章的信（有 sender_display）且寄件視窗名是人代號 → 回信位址是人代號本身，不掛在任何節點底下；其餘 `節點/視窗名`
+pub fn is_person_mail(m: &Mail) -> bool {
+    m.trust == "owner" && !label(&m.sender_display).is_empty() && is_person_alias(m.from_agent.as_deref().unwrap_or(""))
+}
+
+pub fn from_address(m: &Mail) -> String {
+    if is_person_mail(m) {
+        m.from_agent.clone().unwrap_or_default()
+    } else {
+        format!("{}/{}", m.from_node, m.from_agent.as_deref().unwrap_or(""))
     }
 }
 
@@ -95,15 +131,90 @@ pub fn mail_head(m: &Mail, engine: &str) -> String {
         None => "?",
     };
     format!(
-        "[RELAY 來信] trust={} from={}/{} to={} id={} engine={} reply={}",
+        "[RELAY 來信] trust={} from={} to={} id={} engine={} reply={}",
         m.trust,
-        m.from_node,
-        m.from_agent.as_deref().unwrap_or(""),
+        from_address(m),
         m.to_agent.as_deref().unwrap_or(""),
         m.id,
         engine,
         flag
     )
+}
+
+/// 抬頭下一行的「寄件人：…」說明（對應 mail-format.mjs 的 senderLine，兩邊逐字一致）。
+/// 設備名只用後台給的 sender_device（節點名稱，不是節點代號），與節點代號相同就省略；沒有的部分省略
+pub fn sender_line(m: &Mail) -> String {
+    let agent = label(&m.from_agent);
+    let mut dev = label(&m.sender_device);
+    if dev == clean_label(&m.from_node) {
+        dev.clear();
+    }
+    let display = label(&m.sender_display);
+    if m.trust == "owner" && !display.is_empty() {
+        let from = if dev.is_empty() { String::new() } else { format!("，從「{dev}」寄出") };
+        return format!("寄件人：{display}（本人，帳號簽章已驗證{from}）");
+    }
+    let status = if m.trust == "owner" { "擁有者身分" } else { "成員身分" };
+    if agent.ends_with("收發室") {
+        return format!("寄件人：收發室通知（{status}）");
+    }
+    let name = if agent.is_empty() { "未具名視窗".to_string() } else { agent };
+    let engine_raw = m.sender_engine.as_deref().unwrap_or("");
+    if engine_raw == "cloud" {
+        return format!("寄件人：{name}（雲端代理，{status}）");
+    }
+    let eng = match engine_raw {
+        "claude" => "Claude".to_string(),
+        "codex" => "Codex".to_string(),
+        "gemini" => "Gemini".to_string(),
+        "grok" => "Grok".to_string(),
+        "agy" => "Antigravity".to_string(),
+        other => clean_label(other),
+    };
+    let mut where_ = String::new();
+    if !dev.is_empty() {
+        where_ += &format!("「{dev}」上的");
+    }
+    if !dev.is_empty() && !eng.is_empty() {
+        where_ += " ";
+    }
+    if !eng.is_empty() {
+        where_ += &format!("{eng} ");
+    }
+    if !dev.is_empty() || !eng.is_empty() {
+        where_ += "視窗";
+    }
+    if where_.is_empty() {
+        format!("寄件人：{name}（{status}）")
+    } else {
+        format!("寄件人：{name}（{where_}，{status}）")
+    }
+}
+
+/// reply=yes 的信在寄件人說明後面多一行明確指示（地址與信件 id 直接填好，AI 照抄）。其他信回 None
+pub fn reply_line(m: &Mail) -> Option<String> {
+    if m.expects_reply != Some(true) {
+        return None;
+    }
+    let a = from_address(m);
+    // 格式固定（docs/design/MAIL-HEADER.md；外掛逐字解析 `回信位址=`、`信件編號=`，值不含空白，以空白或全形冒號結束）
+    Some(format!(
+        "【要回信】回信位址={a} 信件編號={id}：在視窗裡直接回答，對方看不到；請用 asn_send（to=回信位址、reply_to=信件編號）或 asn-cli send --to {a} --reply-to {id} --no-reply 寄回。",
+        id = m.id
+    ))
+}
+
+/// 抬頭之後、內文之前的說明行（各行以換行結尾）：寄件人說明＋（reply=yes 才有的）要回信指示
+pub fn preamble(m: &Mail, engine_id: &str) -> String {
+    let mut out = format!("{}\n", sender_line(m));
+    // 背景工作者、Codex 這類轉接器的回答由橋自動寄回，不能叫它們用 asn_send，所以只有 claude 引擎加這行
+    if engine_id == "claude" {
+        if let Some(r) = reply_line(m) {
+            out += &r;
+            out.push('\n');
+        }
+    }
+    out
 }
 
 /// 視窗代寄抬頭解析結果
@@ -243,6 +354,87 @@ mod tests {
         let old = Mail::from_json(&json!({"id": ID, "from_node": "W", "body": "x"})).unwrap();
         assert!(mail_head(&old, "claude").ends_with("engine=claude reply=?"));
         assert!(Mail::from_json(&json!({"from_node": "W"})).is_none());
+    }
+
+    #[test]
+    fn 本人的信_位址是人代號_說明行有名字和設備_舊信頭不壞() {
+        let alias = "u:3cda66252c34";
+        let m = Mail::from_json(&json!({"id": ID, "from_node": "XISU", "from_agent": alias, "to_agent": "T-甲", "trust": "owner", "expects_reply": true,
+            "sender_display": "小良", "sender_device": "Oppo 手機", "body": "x"})).unwrap();
+        assert_eq!(mail_head(&m, "claude"), format!("[RELAY 來信] trust=owner from={alias} to=T-甲 id={ID} engine=claude reply=yes"));
+        assert_eq!(sender_line(&m), "寄件人：小良（本人，帳號簽章已驗證，從「Oppo 手機」寄出）");
+        assert_eq!(
+            reply_line(&m).unwrap(),
+            format!("【要回信】回信位址={alias} 信件編號={ID}：在視窗裡直接回答，對方看不到；請用 asn_send（to=回信位址、reply_to=信件編號）或 asn-cli send --to {alias} --reply-to {ID} --no-reply 寄回。")
+        );
+        assert!(!mail_head(&m, "claude").contains("XISU") && !sender_line(&m).contains("XISU"));
+        // 後台沒給 sender_display（舊後台）：信頭完全照舊，位址仍是 節點/視窗名
+        let old = Mail::from_json(&json!({"id": ID, "from_node": "XISU", "from_agent": alias, "trust": "owner", "expects_reply": false, "body": "x"})).unwrap();
+        assert!(mail_head(&old, "claude").contains(&format!("from=XISU/{alias} ")));
+        assert_eq!(reply_line(&old), None);
+        // 人代號格式
+        assert!(is_person_alias(alias) && !is_person_alias("u:3CDA66252C34") && !is_person_alias("u:3cda6625") && !is_person_alias("XISU"));
+    }
+
+    // 守門：docs/design/MAIL-HEADER.md 的範本（外掛逐字解析）要和實際輸出字面一致
+    #[test]
+    fn 規格文件的信頭範本_和實際輸出字面一致() {
+        let doc = include_str!("../../../../../docs/design/MAIL-HEADER.md").replace("\r\n", "\n");
+        let blocks: Vec<&str> = doc.split("```\n").skip(1).step_by(2).collect();
+        let tpl = |pre: &str| blocks.iter().find(|b| b.starts_with(pre)).unwrap_or_else(|| panic!("文件裡找不到範本 {pre}")).trim_end();
+        let alias = "u:3cda66252c34";
+        let m = Mail::from_json(&json!({"id": ID, "from_node": "XISU", "from_agent": alias, "to_agent": "T-甲", "trust": "owner", "expects_reply": true,
+            "sender_display": "小良", "sender_device": "Oppo 手機", "body": "x"})).unwrap();
+        let fill = |t: &str| t.replace("<回信位址>", alias).replace("<信件id>", ID).replace("<信件編號>", ID);
+        assert_eq!(reply_line(&m).unwrap(), fill(tpl("【要回信】")));
+        let want = fill(tpl("[RELAY 來信]")).replace("trust=<owner|member>", "trust=owner").replace("to=<視窗>", "to=T-甲").replace("engine=<引擎>", "engine=claude").replace("reply=<yes|no|?>", "reply=yes");
+        assert_eq!(mail_head(&m, "claude"), want);
+        // 文件範例表裡每一句「寄件人：…」都由 sender_line 產生（與 Node 橋同一組向量）
+        let mk = |extra: Value| {
+            let mut v = json!({"id": ID, "from_node": "H", "from_agent": "asn", "trust": "member", "sender_device": "小良的家用機", "sender_engine": "claude"});
+            for (k, x) in extra.as_object().unwrap() {
+                v[k] = x.clone();
+            }
+            Mail::from_json(&v).unwrap()
+        };
+        let mut mo = m.clone();
+        let mut owner_no_dev = m.clone();
+        mo.sender_device = Some("Oppo 手機".into());
+        owner_no_dev.sender_device = None;
+        let expected = [
+            sender_line(&mo), sender_line(&owner_no_dev), sender_line(&mk(json!({}))),
+            sender_line(&mk(json!({"sender_engine": null}))), sender_line(&mk(json!({"sender_device": null, "sender_engine": "gemini"}))),
+            sender_line(&mk(json!({"sender_device": null, "sender_engine": null}))),
+            sender_line(&mk(json!({"from_agent": "Grok", "sender_engine": "cloud"}))), sender_line(&mk(json!({"from_agent": "H-收發室"}))),
+        ];
+        let in_doc: Vec<&str> = doc.split('`').skip(1).step_by(2).filter(|s| s.starts_with("寄件人：") && !s.contains('<')).collect();
+        assert!(in_doc.len() >= 8, "文件範例只有 {} 句", in_doc.len());
+        for s in in_doc {
+            assert!(expected.iter().any(|e| e == s), "文件範例「{s}」不是 sender_line 的輸出");
+        }
+    }
+
+    #[test]
+    fn 成員的信_說明行寫成員身分_不含節點代號() {
+        let m = |extra: Value| {
+            let mut v = json!({"id": ID, "from_node": "H", "from_agent": "asn", "to_agent": "T", "trust": "member", "expects_reply": false, "body": "x"});
+            for (k, x) in extra.as_object().unwrap() {
+                v[k] = x.clone();
+            }
+            Mail::from_json(&v).unwrap()
+        };
+        assert_eq!(sender_line(&m(json!({"sender_device": "小良的家用機", "sender_engine": "claude"}))), "寄件人：asn（「小良的家用機」上的 Claude 視窗，成員身分）");
+        assert_eq!(sender_line(&m(json!({"sender_device": "小良的家用機"}))), "寄件人：asn（「小良的家用機」上的視窗，成員身分）");
+        assert_eq!(sender_line(&m(json!({"sender_engine": "gemini"}))), "寄件人：asn（Gemini 視窗，成員身分）");
+        assert_eq!(sender_line(&m(json!({}))), "寄件人：asn（成員身分）");
+        assert_eq!(sender_line(&m(json!({"from_agent": "Grok", "sender_engine": "cloud", "sender_device": "grok"}))), "寄件人：Grok（雲端代理，成員身分）");
+        assert_eq!(sender_line(&m(json!({"from_agent": "H-收發室"}))), "寄件人：收發室通知（成員身分）");
+        // 設備名和節點代號相同就省略；換行與括號被清掉
+        assert_eq!(sender_line(&m(json!({"sender_device": "H"}))), "寄件人：asn（成員身分）");
+        assert_eq!(sender_line(&m(json!({"sender_device": "甲\n「乙」"}))), "寄件人：asn（「甲 乙」上的視窗，成員身分）");
+        assert!(reply_line(&m(json!({}))).is_none());
+        let yes = reply_line(&m(json!({"expects_reply": true}))).unwrap();
+        assert!(yes.starts_with(&format!("【要回信】回信位址=H/asn 信件編號={ID}：")));
     }
 
     #[test]
