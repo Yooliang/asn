@@ -35,7 +35,8 @@ supabase/
 
 ### 函式與權限
 
-- `relay` 內部輔助函式（schema `relay`）與 `public.irori_relay_*`（約 38 個）全部 SECURITY DEFINER，**只授權 service_role**。
+- `relay` 內部輔助函式（schema `relay`）與 `public.asn_relay_*`（69 支）全部 SECURITY DEFINER，**只授權 service_role**。
+- 改名（#14 R6）：函式原名 `irori_relay_*`，migration `20261023040000_asn_relay_rename.sql` 改為 `asn_relay_*`，並在舊名留同簽章的薄包裝（只呼叫新名），讓舊版 Edge Function 在部署空檔照常運作；Edge Function 只准用新名（守門 `_shared/rpc_names_test.ts`）。部署順序：先套 migration、再部署 Edge Function、確認沒有舊名呼叫後另開 migration 刪舊名包裝。部署前用 `tools/migrate/list_irori_functions.sql` 對照線上清單。
 - Edge Function `relay` 不驗 JWT（`verify_jwt = false`），自己用節點金鑰驗證；用 service role 呼叫上述函式。
 - 動作一覽（`?action=`）：`register`、`whoami`、`list`、`roster`、`set_avatar`、`avatar`、`leave`、`update`、`invite`、`reissue`、`inbox`、`ack`、`sent_status`、`send`、啟動器（`launch_*`）、群組（`room_list／room_read／room_post／room_pin_get` 等）。誰能用哪個動作以 `index.ts` 與 `_shared/` 為準。
 
@@ -95,5 +96,5 @@ npx supabase db query --linked "select count(*) from relay.messages"
 
 - 函式名稱由 `irori-relay` 改為 `relay`，網址路徑跟著變。
 - 不帶 Irori 專用的函式（讀寫 Irori 自己資料表的 inbound／outbound／mark_read、`account_view`）。
-- 無參數的 `irori_relay_room_auto_rules()` 內含租戶 1 的固定識別碼，之後可移除。
+- 無參數的 `asn_relay_room_auto_rules()` 內含租戶 1 的固定識別碼，之後可移除。
 - 新增 `nodes.owner_user`。

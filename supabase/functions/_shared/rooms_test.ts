@@ -76,7 +76,7 @@ Deno.test("權限：節點（AI，含希緒 XISU 的金鑰）呼叫建群組／�
 });
 
 Deno.test("權限：節點發言永遠不能用 owner 身分（p_owner 一律 false），body 裡塞 owner／p_owner 也沒用", async () => {
-  const { deps, calls } = fake({ irori_relay_room_members: membersOk, irori_relay_room_post: () => ({ seq: 1, bell_topics: [] }) });
+  const { deps, calls } = fake({ asn_relay_room_members: membersOk, asn_relay_room_post: () => ({ seq: 1, bell_topics: [] }) });
   const r = await handleNodeRoomAction(deps, ME, "room_post", { room: "r1", body: "hi", owner: true, p_owner: true, as_owner: "1" });
   assertEquals(r.status, 200);
   for (const c of calls) assertEquals(c.args.p_owner, false, c.fn);
@@ -92,28 +92,28 @@ Deno.test("視窗代發：視窗名不在該節點 roster → 403 且不寫入�
     const r = await handleNodeRoomAction(bad.deps, ME, "room_post", { room: "r1", body: "hi", from_agent: evil });
     assertEquals([r.status, r.body.error], [400, "bad_agent"]);
   }
-  const ok = fake({ irori_relay_room_members: membersOk, irori_relay_room_post: () => ({ seq: 7, bell_topics: ["t1", "t2"] }) });
+  const ok = fake({ asn_relay_room_members: membersOk, asn_relay_room_post: () => ({ seq: 7, bell_topics: ["t1", "t2"] }) });
   const r2 = await handleNodeRoomAction(ok.deps, ME, "room_post", { room: "r1", body: "@小牧 看一下，@小良哥 請看", from_agent: "H-視窗" });
   assertEquals([r2.status, r2.body.seq], [200, 7]);
-  const post = ok.calls.find((c) => c.fn === "irori_relay_room_post")!;
+  const post = ok.calls.find((c) => c.fn === "asn_relay_room_post")!;
   assertEquals([post.args.p_agent, post.args.p_mentions], ["H-視窗", ["aegis~小牧", "~owner"]]);
   assertEquals(ok.rung.sort(), ["t1", "t2"]);
 });
 
 Deno.test("限流與非成員：資料庫回 rate_limited → 429（不敲門鈴），not_member → 403", async () => {
-  const limited = fake({ irori_relay_room_members: membersOk, irori_relay_room_post: () => ({ error: "rate_limited" }) });
+  const limited = fake({ asn_relay_room_members: membersOk, asn_relay_room_post: () => ({ error: "rate_limited" }) });
   const r = await handleNodeRoomAction(limited.deps, ME, "room_post", { room: "r1", body: "hi" });
   assertEquals([r.status, r.body.error], [429, "rate_limited"]);
   assertEquals(limited.rung.length, 0);
-  const out = fake({ irori_relay_room_members: () => ({ error: "not_member" }) });
+  const out = fake({ asn_relay_room_members: () => ({ error: "not_member" }) });
   const r2 = await handleNodeRoomAction(out.deps, ME, "room_post", { room: "r1", body: "hi" });
   assertEquals([r2.status, r2.body.error], [403, "not_member"]);
-  assertEquals(out.calls.some((c) => c.fn === "irori_relay_room_post"), false);
+  assertEquals(out.calls.some((c) => c.fn === "asn_relay_room_post"), false);
 });
 
 Deno.test("讀紀錄：每則帶 for_me（被點名或 owner 發的才為 true）", async () => {
   const { deps } = fake({
-    irori_relay_room_read: () => ({
+    asn_relay_room_read: () => ({
       key: "w02", last_seq: 3,
       messages: [
         { seq: 1, from: "aegis~小牧", trust: "member", body: "閒聊", mentions: [] },
@@ -154,10 +154,10 @@ Deno.test("自動收入：開頭字串驗證（空字串、全空白、含 ~、�
 });
 
 Deno.test("自動收入：syncNodeAuto 用規則算出該入群的視窗交給資料庫；規則取不到只記 log 不丟錯", async () => {
-  const { deps, calls } = fake({ irori_relay_room_auto_rules: () => [{ room: "g36", prefixes: ["g36-"] }] });
+  const { deps, calls } = fake({ asn_relay_room_auto_rules: () => [{ room: "g36", prefixes: ["g36-"] }] });
   await syncNodeAuto(deps, "H", ["g36-前端", "別的"]);
-  assertEquals(calls.find((c) => c.fn === "irori_relay_room_auto_rules")!.args, { p_node: "H" }, "規則只取這個節點所屬租戶的群組");
-  const apply = calls.find((c) => c.fn === "irori_relay_room_auto_apply")!;
+  assertEquals(calls.find((c) => c.fn === "asn_relay_room_auto_rules")!.args, { p_node: "H" }, "規則只取這個節點所屬租戶的群組");
+  const apply = calls.find((c) => c.fn === "asn_relay_room_auto_apply")!;
   assertEquals(apply.args, { p_node: "H", p_joins: [{ room: "g36", name: "g36-前端" }] });
   const broken: RoomDeps = { ...deps, rpc: () => Promise.resolve({ data: null, error: new Error("boom") }) };
   await syncNodeAuto(broken, "H", ["x"]); // 不丟

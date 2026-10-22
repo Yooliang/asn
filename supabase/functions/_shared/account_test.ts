@@ -198,7 +198,7 @@ Deno.test("遠端更新：動作登錄在帳號動作、presence 回旗標、結
   assert(ACCOUNT_ACTIONS.has("node_update_request") && ACCOUNT_ACTIONS.has("node_update_status"));
   const src = await Deno.readTextFile(new URL("../relay/index.ts", import.meta.url));
   assert(src.includes("p_node: me.id, p_version: p.version") && src.includes("update_requested"), "presence 用金鑰所屬節點問更新旗標");
-  assert(/irori_relay_asn_update_result", \{ p_node: me\.id/.test(src), "結果只寫金鑰所屬的節點");
+  assert(/asn_relay_asn_update_result", \{ p_node: me\.id/.test(src), "結果只寫金鑰所屬的節點");
   const sql = await Deno.readTextFile(new URL("../../migrations/20261021070000_asn_remote_update.sql", import.meta.url));
   for (const fn of ["asn_update_request(uuid, text)", "asn_update_status(uuid)", "irori_relay_asn_update_poll(text, text)", "irori_relay_asn_update_result(text, boolean, text)"]) {
     assert(sql.includes(`revoke all on function public.${fn} from public, anon, authenticated;`), fn);

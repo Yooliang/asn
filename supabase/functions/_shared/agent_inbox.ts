@@ -22,13 +22,13 @@ export async function handleAgentInbox(
   const agent = parseAgentName(agentRaw);
   if (!agent) return { status: 400, body: { error: "bad_agent" } };
   if (action === "inbox") {
-    const { data, error } = await deps.rpc("irori_relay_inbox_agent", { p_node: me.id, p_agent: agent });
+    const { data, error } = await deps.rpc("asn_relay_inbox_agent", { p_node: me.id, p_agent: agent });
     if (error) { console.error(error); return { status: 500, body: { error: "internal" } }; }
     return { status: 200, body: { messages: data } };
   }
   if (action === "inbox_peek") {
-    // 只看不收（asn-cli recv --peek）：只呼叫唯讀的 irori_relay_inbox_peek，不 ack、不設 delivered_at
-    const { data, error } = await deps.rpc("irori_relay_inbox_peek", { p_node: me.id, p_agent: agent });
+    // 只看不收（asn-cli recv --peek）：只呼叫唯讀的 asn_relay_inbox_peek，不 ack、不設 delivered_at
+    const { data, error } = await deps.rpc("asn_relay_inbox_peek", { p_node: me.id, p_agent: agent });
     if (error) { console.error(error); return { status: 500, body: { error: "internal" } }; }
     return { status: 200, body: data };
   }
@@ -36,7 +36,7 @@ export async function handleAgentInbox(
   if (!Array.isArray(ids) || ids.length > 100 || !ids.every((i) => typeof i === "string" && UUID.test(i))) {
     return { status: 400, body: { error: "bad_ids" } };
   }
-  const { data, error } = await deps.rpc("irori_relay_ack_agent", { p_node: me.id, p_agent: agent, p_ids: ids });
+  const { data, error } = await deps.rpc("asn_relay_ack_agent", { p_node: me.id, p_agent: agent, p_ids: ids });
   if (error) { console.error(error); return { status: 500, body: { error: "internal" } }; }
   return { status: 200, body: { acked: data } };
 }

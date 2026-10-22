@@ -70,7 +70,7 @@ const isReply = (x: { data: Json } | Reply): x is Reply => "status" in x;
 export async function requestLaunch(deps: LaunchDeps, actor: string, raw: Json, signedUser: string | null = null): Promise<Reply> {
   const req = parseLaunch(raw);
   if ("error" in req) return fail(req.error);
-  const r = await call(deps, "irori_relay_launch", {
+  const r = await call(deps, "asn_relay_launch", {
     p_actor: actor, p_node: req.node, p_profile: req.profile, p_name: req.name, p_cwd: req.cwd, p_first: req.first_message,
     ...(signedUser ? { p_signed_user: signedUser } : {}),
   });
@@ -87,7 +87,7 @@ export async function listLaunchers(deps: LaunchDeps, actor: string, ids?: unkno
     if (list.length > 20 || !list.every((i) => typeof i === "string" && UUID_RE.test(i))) return fail("bad_request");
     p_ids = list as string[];
   }
-  const r = await call(deps, "irori_relay_launchers", { p_actor: actor, p_ids, ...(signedUser ? { p_signed_user: signedUser } : {}) });
+  const r = await call(deps, "asn_relay_launchers", { p_actor: actor, p_ids, ...(signedUser ? { p_signed_user: signedUser } : {}) });
   if (isReply(r)) return r;
   return { status: 200, body: r.data };
 }
@@ -109,14 +109,14 @@ export async function handleNodeLaunchAction(deps: LaunchDeps, me: { id: string 
   if (action === "launch") return await requestLaunch(deps, me.id, params, signedUser);
   if (action === "launchers") return await listLaunchers(deps, me.id, params?.ids, signedUser);
   if (action === "launch_pending") {
-    const r = await call(deps, "irori_relay_launch_pending", { p_node: me.id });
+    const r = await call(deps, "asn_relay_launch_pending", { p_node: me.id });
     if (isReply(r)) return r;
     return { status: 200, body: { launches: r.data ?? [] } };
   }
   if (action === "launch_result") {
     const { id, status, detail } = params ?? {};
     if (typeof id !== "string" || !UUID_RE.test(id) || !["ok", "failed", "unconfirmed"].includes(status)) return fail("bad_request");
-    const r = await call(deps, "irori_relay_launch_result", {
+    const r = await call(deps, "asn_relay_launch_result", {
       p_node: me.id, p_id: id, p_status: status, p_detail: typeof detail === "string" ? detail.slice(0, 500) : null,
     });
     if (isReply(r)) return r;

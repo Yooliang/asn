@@ -54,7 +54,7 @@ Deno.test("acct_report：節點取自金鑰（body 指定的節點被忽略）",
   const { deps, calls } = fakeDeps(() => ({ ok: true, count: 1 }));
   const r = await handleAcctAction(deps, { id: "W" }, "acct_report", { node: "H", accounts: [{ vendor: "claude", email: "a@x.test", plan: "max", current: true }] });
   assertEquals(r, { status: 200, body: { ok: true, count: 1 } });
-  assertEquals(calls, [{ fn: "irori_relay_acct_report", args: { p_node: "W", p_accounts: [{ vendor: "claude", email: "a@x.test", plan: "max", current: true }] } }]);
+  assertEquals(calls, [{ fn: "asn_relay_acct_report", args: { p_node: "W", p_accounts: [{ vendor: "claude", email: "a@x.test", plan: "max", current: true }] } }]);
   const bad = fakeDeps();
   assertEquals((await handleAcctAction(bad.deps, { id: "W" }, "acct_report", { accounts: [{ vendor: "claude", email: "x" }] })).status, 400);
   assertEquals(bad.calls, [], "格式不對不碰資料庫");
@@ -64,7 +64,7 @@ Deno.test("acct_switch：actor 由金鑰決定；通過就敲對方門鈴、回�
   const { deps, calls, rings } = fakeDeps();
   const r = await handleAcctAction(deps, { id: "H" }, "acct_switch", { node: "W", vendor: "claude", email: "B@x.test", requested_by: "偽造" });
   assertEquals(r, { status: 200, body: { id: ID } });
-  assertEquals(calls, [{ fn: "irori_relay_acct_switch", args: { p_actor: "H", p_node: "W", p_vendor: "claude", p_email: "b@x.test" } }]);
+  assertEquals(calls, [{ fn: "asn_relay_acct_switch", args: { p_actor: "H", p_node: "W", p_vendor: "claude", p_email: "b@x.test" } }]);
   assertEquals(rings, ["bell-W"]);
 });
 
@@ -84,7 +84,7 @@ Deno.test("acct_switch：資料庫拒絕時對應狀態碼與中文原因，不�
 Deno.test("acct_list／acct_switch_status／pending／result 的參數檢查與轉送", async () => {
   const a = fakeDeps(() => ({ node: "W", accounts: [], reported_at: null, asn_online: false }));
   assertEquals((await handleAcctAction(a.deps, { id: "H" }, "acct_list", { node: "W" })).status, 200);
-  assertEquals(a.calls[0], { fn: "irori_relay_acct_list", args: { p_actor: "H", p_node: "W" } });
+  assertEquals(a.calls[0], { fn: "asn_relay_acct_list", args: { p_actor: "H", p_node: "W" } });
   assertEquals((await handleAcctAction(a.deps, { id: "H" }, "acct_list", { node: "W W" })).status, 400);
 
   const s = fakeDeps(() => ({ switches: [] }));
@@ -96,7 +96,7 @@ Deno.test("acct_list／acct_switch_status／pending／result 的參數檢查與�
   const p = fakeDeps(() => ({ requests: [{ id: ID, requested_by: "H", vendor: "claude", email: "b@x.test" }] }));
   const pr = await handleAcctAction(p.deps, { id: "W" }, "acct_switch_pending", {});
   assertEquals(pr.body.requests.length, 1);
-  assertEquals(p.calls[0], { fn: "irori_relay_acct_switch_pending", args: { p_node: "W" } });
+  assertEquals(p.calls[0], { fn: "asn_relay_acct_switch_pending", args: { p_node: "W" } });
 
   const res = fakeDeps(() => ({ ok: true }));
   assertEquals((await handleAcctAction(res.deps, { id: "W" }, "acct_switch_result", { id: ID, status: "ok", detail: "x".repeat(900) })).status, 200);
@@ -109,7 +109,7 @@ Deno.test("acct_list／acct_switch_status／pending／result 的參數檢查與�
 // relay/index.ts 是 Deno.serve 入口、無法直接 import：守「帳號動作在金鑰驗證之後、行動者只取自金鑰（me）」
 Deno.test("relay/index.ts：帳號動作排在金鑰驗證之後，行動者是 me（不接受 body 指定）", async () => {
   const src = await Deno.readTextFile(new URL("../relay/index.ts", import.meta.url));
-  const auth = src.indexOf("irori_relay_auth");
+  const auth = src.indexOf("asn_relay_auth");
   const at = src.indexOf("ACCT_ACTIONS.has(action)");
   assert(auth > 0 && at > auth, "帳號動作要在金鑰驗證之後");
   const block = src.slice(at, at + 500);

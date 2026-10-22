@@ -1,5 +1,5 @@
 // 夥伴 ID（#109 第一期）：ASN 內建橋回報視窗名單時，順便送來「名字＋session」，後端判斷是哪位夥伴並回傳夥伴 ID。
-// 動作 partner_sync：節點取自金鑰（me.id），body 不收節點。規則在資料庫函式 irori_relay_partner_sync：
+// 動作 partner_sync：節點取自金鑰（me.id），body 不收節點。規則在資料庫函式 asn_relay_partner_sync：
 //   同 session 改名＝同一位；同名換 session＝同一位（記交接）；名字與 session 都換＝新夥伴；同台兩個同名＝不處理。
 // 這個檔案做：格式整理（先擋掉、少打一次資料庫）、錯誤對應、以及規則的純函式版（decidePartner，測試用來釘住規則，
 // 與 SQL 逐項對照；SQL 本身另有 tests/partner_id_pglite.test.mjs 實跑）。
@@ -61,7 +61,7 @@ export async function handlePartnerSync(
 ): Promise<{ status: number; body: unknown }> {
   const windows = parsePartnerSync(body);
   if (windows === null) return { status: 400, body: { error: "bad_request" } };
-  const { data, error } = await deps.rpc("irori_relay_partner_sync", { p_node: me.id, p_windows: windows });
+  const { data, error } = await deps.rpc("asn_relay_partner_sync", { p_node: me.id, p_windows: windows });
   if (error) {
     if (rpcMissing(error)) return { status: 404, body: { error: "not_found" } };
     console.error(error);
@@ -109,7 +109,7 @@ export async function handlePartnerSucceed(
   if (!q) return { status: 400, body: { error: "bad_request" } };
   const user = await signedUserId(deps.verifyJwt, signHeader);
   if (!user) return { status: 401, body: { error: "unauthorized" } };
-  const { data, error } = await deps.rpc("irori_relay_partner_succeed", {
+  const { data, error } = await deps.rpc("asn_relay_partner_succeed", {
     p_user: user, p_caller: me.id, p_predecessor: q.predecessor, p_node: q.node, p_name: q.name,
   });
   if (error) {
@@ -129,7 +129,7 @@ export async function handlePartnerList(
 ): Promise<{ status: number; body: unknown }> {
   const user = await signedUserId(deps.verifyJwt, signHeader);
   if (!user) return { status: 401, body: { error: "unauthorized" } };
-  const { data, error } = await deps.rpc("irori_relay_partner_list", { p_user: user, p_caller: me.id });
+  const { data, error } = await deps.rpc("asn_relay_partner_list", { p_user: user, p_caller: me.id });
   if (error) {
     if (rpcMissing(error)) return { status: 404, body: { error: "not_found" } };
     console.error(error);

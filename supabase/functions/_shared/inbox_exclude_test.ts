@@ -41,7 +41,7 @@ Deno.test("readNodeInbox：migration 還沒套（帶參數呼叫出錯）時退�
 Deno.test("relay/index.ts：沒帶 agent 的 inbox 走 readNodeInbox 並傳 exclude 參數；舊的直接呼叫已不存在", async () => {
   const src = await Deno.readTextFile(new URL("../relay/index.ts", import.meta.url));
   assert(src.includes('readNodeInbox((fn, args) => db.rpc(fn, args), me.id, url.searchParams.get("exclude"))'));
-  assert(!src.includes('db.rpc("irori_relay_inbox", { p_node: me.id })'));
+  assert(!src.includes('db.rpc("asn_relay_inbox", { p_node: me.id })'));
 });
 
 Deno.test("migration 20261023020000：舊的單參數版拿掉、新版選填、null 與沒指定收件人的信保留、只授權 service_role、其餘與上一版逐字相同", async () => {

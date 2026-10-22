@@ -90,7 +90,7 @@ Deno.test("handleChatHistory：沒有有效簽章一律 401，不打資料庫（
 // index.ts 是 Deno.serve 入口、無法直接 import，這裡守「真的接上了」
 Deno.test("relay/index.ts：chat_history 在節點金鑰驗證之後且走本人簽章；send 只在有簽章時帶 as_person；扇出的門鈴逐一敲", async () => {
   const src = await Deno.readTextFile(new URL("../relay/index.ts", import.meta.url));
-  const keyAuth = src.indexOf('db.rpc("irori_relay_auth"');
+  const keyAuth = src.indexOf('db.rpc("asn_relay_auth"');
   const hist = src.indexOf('action === "chat_history"');
   assertEquals(keyAuth > 0 && hist > keyAuth, true);
   const h = src.slice(hist, src.indexOf('action === "leave"'));

@@ -145,13 +145,13 @@ const publicInfo = (a: Json): AttachmentInfo => ({
 
 /** 清理過期與放棄的上傳：向 Storage 真的刪檔，成功才記 removed_at。回處理筆數。 */
 export async function sweepExpired(deps: AttachDeps, limit = 50): Promise<number> {
-  const { data, error } = await deps.rpc("irori_relay_attach_sweep", { p_limit: limit });
+  const { data, error } = await deps.rpc("asn_relay_attach_sweep", { p_limit: limit });
   if (error) { console.error("attach_sweep", error); return 0; }
   const rows = (Array.isArray(data) ? data : []) as { id: string; path: string }[];
   if (!rows.length) return 0;
   const ok = await deps.storage.remove(rows.map((r) => r.path));
   if (!ok) return 0;
-  const { error: e2 } = await deps.rpc("irori_relay_attach_swept", { p_ids: rows.map((r) => r.id) });
+  const { error: e2 } = await deps.rpc("asn_relay_attach_swept", { p_ids: rows.map((r) => r.id) });
   if (e2) { console.error("attach_swept", e2); return 0; }
   return rows.length;
 }
@@ -164,7 +164,7 @@ export async function handleAttachAction(
       const c = checkAttachInit(params);
       if (!c.ok) return err(c.error === "file_too_large" ? 413 : 400, c.error);
       const v = c.value;
-      const { data, error } = await deps.rpc("irori_relay_attach_init", {
+      const { data, error } = await deps.rpc("asn_relay_attach_init", {
         p_node: me.id, p_kind: v.kind, p_mime: v.mime, p_name: v.name, p_bytes: v.bytes, p_width: v.width, p_height: v.height,
         p_thumb: v.thumb, p_sha256: v.sha256, p_quota_bytes: QUOTA_BYTES, p_quota_count: QUOTA_COUNT,
       });
@@ -180,14 +180,14 @@ export async function handleAttachAction(
     }
     case "attach_commit": {
       if (!isUuid(params?.id)) return err(400, "bad_request");
-      const peek = await deps.rpc("irori_relay_attach_commit", { p_node: me.id, p_id: params.id, p_bytes: null, p_mime: null });
+      const peek = await deps.rpc("asn_relay_attach_commit", { p_node: me.id, p_id: params.id, p_bytes: null, p_mime: null });
       if (peek.error) { console.error(action, peek.error); return err(500, "internal"); }
       if (peek.data?.error === "not_found") return err(404, "not_found");
       if (peek.data?.status === "ready") return { status: 200, body: { ok: true, id: params.id } };
       const path = peek.data?.path as string;
       const info = await deps.storage.info(path);
       if (!info) return err(409, "not_uploaded");
-      const { data, error } = await deps.rpc("irori_relay_attach_commit", { p_node: me.id, p_id: params.id, p_bytes: info.size, p_mime: mimeBase(info.mime) });
+      const { data, error } = await deps.rpc("asn_relay_attach_commit", { p_node: me.id, p_id: params.id, p_bytes: info.size, p_mime: mimeBase(info.mime) });
       if (error) { console.error(action, error); return err(500, "internal"); }
       if (data?.error === "size_mismatch") {
         await deps.storage.remove([path]); // 大小或型別跟申報的不符：刪檔、作廢
@@ -200,7 +200,7 @@ export async function handleAttachAction(
     }
     case "attach_url": {
       if (!isUuid(params?.id)) return err(400, "bad_request");
-      const { data, error } = await deps.rpc("irori_relay_attach_access", { p_node: me.id, p_id: params.id });
+      const { data, error } = await deps.rpc("asn_relay_attach_access", { p_node: me.id, p_id: params.id });
       if (error) { console.error(action, error); return err(500, "internal"); }
       if (data?.error === "not_found") return err(404, "not_found");
       if (data?.error === "expired") return err(410, "expired");
@@ -225,7 +225,7 @@ export async function prepareAttachments(
   const ids = parseAttachmentIds(raw);
   if (ids === null) return { ok: false, reply: err(400, "bad_attachment_ids") };
   if (!ids.length) return { ok: true, ids };
-  const { data, error } = await deps.rpc("irori_relay_attach_claim", { p_node: nodeId, p_ids: ids });
+  const { data, error } = await deps.rpc("asn_relay_attach_claim", { p_node: nodeId, p_ids: ids });
   if (error) { console.error("attach_claim", error); return { ok: false, reply: err(500, "internal") }; }
   if (data?.error) return { ok: false, reply: err(400, "bad_attachment") };
   return { ok: true, ids };
@@ -237,7 +237,7 @@ export async function bindAttachments(
 ): Promise<number> {
   if (!ids.length) return 0;
   const room = "room" in target;
-  const { data, error } = await deps.rpc("irori_relay_attach_bind", {
+  const { data, error } = await deps.rpc("asn_relay_attach_bind", {
     p_node: nodeId, p_ids: ids, p_message_id: room ? null : target.messageId, p_room: room ? target.room : null, p_seq: room ? target.seq : null,
   });
   if (error) { console.error("attach_bind", error); return 0; }
@@ -249,7 +249,7 @@ export async function withAttachments(deps: { rpc: Rpc }, messages: Json): Promi
   if (!Array.isArray(messages) || !messages.length) return messages;
   const ids = messages.map((m) => m?.id).filter(isUuid);
   if (!ids.length) return messages;
-  const { data, error } = await deps.rpc("irori_relay_attach_for", { p_message_ids: ids, p_room: null, p_seqs: null });
+  const { data, error } = await deps.rpc("asn_relay_attach_for", { p_message_ids: ids, p_room: null, p_seqs: null });
   if (error || !Array.isArray(data)) { if (error) console.error("attach_for", error); return messages; }
   const by = new Map<string, AttachmentInfo[]>();
   for (const a of data) if (a?.message_id) by.set(a.message_id, [...(by.get(a.message_id) ?? []), publicInfo(a)]);
@@ -261,7 +261,7 @@ export async function withRoomAttachments(deps: { rpc: Rpc }, room: string, mess
   if (!Array.isArray(messages) || !messages.length) return messages;
   const seqs = messages.map((m) => m?.seq).filter((s) => typeof s === "number");
   if (!seqs.length) return messages;
-  const { data, error } = await deps.rpc("irori_relay_attach_for", { p_message_ids: null, p_room: room, p_seqs: seqs });
+  const { data, error } = await deps.rpc("asn_relay_attach_for", { p_message_ids: null, p_room: room, p_seqs: seqs });
   if (error || !Array.isArray(data)) { if (error) console.error("attach_for", error); return messages; }
   const by = new Map<number, AttachmentInfo[]>();
   for (const a of data) if (typeof a?.room_seq === "number") by.set(a.room_seq, [...(by.get(a.room_seq) ?? []), publicInfo(a)]);

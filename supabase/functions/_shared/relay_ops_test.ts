@@ -21,24 +21,24 @@ function fake(handlers: Record<string, (args: Record<string, unknown>) => Json>)
 }
 
 Deno.test("send：寄件節點永遠是呼叫端給的角色節點（body 的 from_node 無效）、成功才敲門鈴、錯誤對應狀態碼", async () => {
-  const f = fake({ irori_relay_send: () => ({ id: UUID, bell_topic: "bell-x" }) });
+  const f = fake({ asn_relay_send: () => ({ id: UUID, bell_topic: "bell-x" }) });
   const r = await nodeAction(f.deps, WHO, "send", { to_node: "H", body: "hi", from_node: "evil", from_agent: "希緒", reply_to: "nope" });
   assertEquals([r.status, r.body], [200, { id: UUID }]);
   assertEquals(f.calls[0].args.p_from_node, "XISU");
   assertEquals(f.calls[0].args.p_reply_to, null);
   assertEquals(f.rung, ["bell-x"]);
   assertEquals((await nodeAction(f.deps, WHO, "send", { to_node: 1, body: "x" })).status, 400);
-  const rl = fake({ irori_relay_send: () => ({ error: "rate_limited" }) });
+  const rl = fake({ asn_relay_send: () => ({ error: "rate_limited" }) });
   assertEquals((await nodeAction(rl.deps, WHO, "send", { to_node: "H", body: "x" })).status, 429);
   assertEquals(rl.rung, []);
-  const un = fake({ irori_relay_send: () => ({ error: "unknown_to_node" }) });
+  const un = fake({ asn_relay_send: () => ({ error: "unknown_to_node" }) });
   assertEquals((await nodeAction(un.deps, WHO, "send", { to_node: "H", body: "x" })).body, { error: "unknown_to_node" });
 });
 
 Deno.test("list／whoami 用租戶；inbox／ack／sent_status 用節點；ids 要是 uuid", async () => {
   const f = fake({
-    irori_relay_list: () => [{ id: "H" }], irori_relay_whoami: () => ({ node: "XISU", bell_topic: "b" }),
-    irori_relay_inbox: () => [], irori_relay_ack: () => 1, irori_relay_sent_status: () => [],
+    asn_relay_list: () => [{ id: "H" }], asn_relay_whoami: () => ({ node: "XISU", bell_topic: "b" }),
+    asn_relay_inbox: () => [], asn_relay_ack: () => 1, asn_relay_sent_status: () => [],
   });
   assertEquals((await nodeAction(f.deps, WHO, "list")).body, { members: [{ id: "H" }] });
   assertEquals(f.calls[0].args, { p_tenant: "ta" });
@@ -49,13 +49,13 @@ Deno.test("list／whoami 用租戶；inbox／ack／sent_status 用節點；ids �
   assertEquals((await nodeAction(f.deps, WHO, "ack", { ids: ["x"] })).status, 400);
   assertEquals((await nodeAction(f.deps, WHO, "sent_status", { ids: Array(51).fill(UUID) })).status, 400);
   assertEquals((await nodeAction(f.deps, WHO, "nope")).status, 404);
-  const none = fake({ irori_relay_whoami: () => null });
+  const none = fake({ asn_relay_whoami: () => null });
   assertEquals((await nodeAction(none.deps, WHO, "whoami")).status, 401);
 });
 
 Deno.test("invite／reissue／update：碼只以雜湊進資料庫；forbidden／not_found 對應 403／404", async () => {
   const f = fake({
-    irori_relay_invite: () => ({ expires_at: "2030", prefix: "t2-" }), irori_relay_reissue: () => ({ expires_at: "2030" }), irori_relay_update: () => ({ ok: true }),
+    asn_relay_invite: () => ({ expires_at: "2030", prefix: "t2-" }), asn_relay_reissue: () => ({ expires_at: "2030" }), asn_relay_update: () => ({ ok: true }),
   });
   const inv = await nodeAction(f.deps, WHO, "invite", { note: "x" });
   assertEquals(inv.status, 200);
@@ -65,7 +65,7 @@ Deno.test("invite／reissue／update：碼只以雜湊進資料庫；forbidden�
   assertEquals(f.calls[1].args.p_code_hash, await sha256Hex(re.body.code));
   assertEquals((await nodeAction(f.deps, WHO, "reissue", { id: "bad id!" })).status, 400);
   assertEquals((await nodeAction(f.deps, WHO, "update", { id: "H", machine: "書房" })).body, { ok: true });
-  const nf = fake({ irori_relay_update: () => ({ error: "not_found" }), irori_relay_invite: () => ({ error: "forbidden" }) });
+  const nf = fake({ asn_relay_update: () => ({ error: "not_found" }), asn_relay_invite: () => ({ error: "forbidden" }) });
   assertEquals((await nodeAction(nf.deps, WHO, "update", { id: "H", name: "x" })).status, 404);
   assertEquals((await nodeAction(nf.deps, WHO, "invite", {})).status, 403);
 });
@@ -79,7 +79,7 @@ Deno.test("資料庫錯誤回 500 internal（不外洩細節）；b64u／sha256H
 });
 
 Deno.test("send：expects_reply（寄件人明說要不要等回信）true／false 帶進資料庫函式；沒給或 null 不帶；型別不對 400 且不碰資料庫", async () => {
-  const f = fake({ irori_relay_send: () => ({ id: UUID, bell_topic: "bell-x" }) });
+  const f = fake({ asn_relay_send: () => ({ id: UUID, bell_topic: "bell-x" }) });
   assertEquals((await nodeAction(f.deps, WHO, "send", { to_node: "H", body: "請回我", expects_reply: true })).status, 200);
   assertEquals(f.calls.at(-1)!.args.p_expects_reply, true);
   assertEquals((await nodeAction(f.deps, WHO, "send", { to_node: "H", body: "告知", expects_reply: false })).status, 200);
@@ -100,6 +100,6 @@ Deno.test("send：expects_reply（寄件人明說要不要等回信）true／fal
 
 Deno.test("inbox：資料庫回來的信帶 expects_reply（true／false／null）原樣交給呼叫端，不加工", async () => {
   const mails = [{ id: UUID, body: "a", expects_reply: true }, { id: UUID, body: "b", expects_reply: false }, { id: UUID, body: "舊信", expects_reply: null }];
-  const f = fake({ irori_relay_inbox: () => mails });
+  const f = fake({ asn_relay_inbox: () => mails });
   assertEquals((await nodeAction(f.deps, WHO, "inbox")).body, { messages: mails });
 });

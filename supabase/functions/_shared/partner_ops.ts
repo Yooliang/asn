@@ -87,7 +87,7 @@ export async function requestPartnerOp(deps: LaunchDeps, actor: string, raw: Jso
   if (!signedUser) return fail("unauthorized");
   const req = parsePartnerOp(raw);
   if ("error" in req) return fail(req.error);
-  const r = await call(deps, "irori_relay_partner_op", {
+  const r = await call(deps, "asn_relay_partner_op", {
     p_actor: actor, p_signed_user: signedUser, p_node: req.node, p_name: req.name, p_op: req.op,
     p_new_name: req.new_name, p_model: req.model, p_note: req.note,
   });
@@ -101,7 +101,7 @@ export async function listPartnerOps(deps: LaunchDeps, actor: string, ids: unkno
   if (!signedUser) return fail("unauthorized");
   const list = Array.isArray(ids) ? ids : typeof ids === "string" ? ids.split(",") : null;
   if (!list || list.length < 1 || list.length > 20 || !list.every((i) => typeof i === "string" && UUID_RE.test(i))) return fail("bad_request");
-  const r = await call(deps, "irori_relay_partner_ops", { p_actor: actor, p_signed_user: signedUser, p_ids: list });
+  const r = await call(deps, "asn_relay_partner_ops", { p_actor: actor, p_signed_user: signedUser, p_ids: list });
   if (isReply(r)) return r;
   return { status: 200, body: r.data };
 }
@@ -127,7 +127,7 @@ export async function handleNodePartnerOpAction(deps: LaunchDeps, me: { id: stri
   if (action === "partner_archive") return await requestPartnerArchive(deps, me.id, params, signedUser);
   if (action === "partner_ops") return await listPartnerOps(deps, me.id, params?.ids, signedUser);
   if (action === "partner_op_pending") {
-    const r = await call(deps, "irori_relay_partner_op_pending", { p_node: me.id });
+    const r = await call(deps, "asn_relay_partner_op_pending", { p_node: me.id });
     if (isReply(r)) return r;
     return { status: 200, body: { ops: r.data ?? [] } };
   }
@@ -136,7 +136,7 @@ export async function handleNodePartnerOpAction(deps: LaunchDeps, me: { id: stri
     if (typeof id !== "string" || !UUID_RE.test(id) || !["ok", "failed", "unconfirmed"].includes(status)) return fail("bad_request");
     const res = sanitizeResult(result);
     if (res && "error" in res) return fail("bad_request");
-    const r = await call(deps, "irori_relay_partner_op_result", {
+    const r = await call(deps, "asn_relay_partner_op_result", {
       p_node: me.id, p_id: id, p_status: status, p_detail: typeof detail === "string" ? detail.slice(0, 500) : null, p_result: res,
     });
     if (isReply(r)) return r;
@@ -146,7 +146,7 @@ export async function handleNodePartnerOpAction(deps: LaunchDeps, me: { id: stri
     // 中途回報階段（接班換手：請前任寫交接 → 關閉 → 開新視窗）：只收固定格式的階段代號，狀態仍是處理中
     const { id, detail } = params ?? {};
     if (typeof id !== "string" || !UUID_RE.test(id) || typeof detail !== "string" || !STAGE_RE.test(detail)) return fail("bad_request");
-    const r = await call(deps, "irori_relay_partner_op_progress", { p_node: me.id, p_id: id, p_detail: detail });
+    const r = await call(deps, "asn_relay_partner_op_progress", { p_node: me.id, p_id: id, p_detail: detail });
     if (isReply(r)) return r;
     return { status: 200, body: { ok: true } };
   }
@@ -174,7 +174,7 @@ export async function requestPartnerArchive(deps: LaunchDeps, actor: string, raw
   if (!signedUser) return fail("unauthorized");
   const req = parsePartnerArchive(raw);
   if ("error" in req) return fail(req.error);
-  const r = await call(deps, "irori_relay_partner_archive", {
+  const r = await call(deps, "asn_relay_partner_archive", {
     p_actor: actor, p_signed_user: signedUser, p_node: req.node, p_name: req.name, p_partner_id: req.partner_id, p_archived: req.archived,
   });
   if (isReply(r)) return r;

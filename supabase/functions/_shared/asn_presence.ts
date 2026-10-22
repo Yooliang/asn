@@ -1,5 +1,5 @@
 // ASN 回報在線狀態與版本（relay 的 asn_presence 動作）。節點取自金鑰（me.id），body 不收節點。
-// 規則同資料庫函式 irori_relay_asn_presence_set（這裡先擋掉，少打一次資料庫）：
+// 規則同資料庫函式 asn_relay_asn_presence_set（這裡先擋掉，少打一次資料庫）：
 // 視窗名同 ASN 視窗名（去頭尾空白、1～40 字、不含控制字元）；版本 x.y.z（可接 -預發布）；狀態白名單；個人訊息 ≤ 80 字、可空。
 // offline＝ASN 關閉時的最後一次回報，後端刪掉那一列。
 import { parseSelfName } from "./node_name.ts";
