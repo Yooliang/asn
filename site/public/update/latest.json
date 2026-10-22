@@ -1,11 +1,11 @@
 {
-  "version": "0.1.38",
-  "notes": "語音輸入按「取消」不會再漏掉；收發室內部名稱去掉 Irori（舊名照常可用）",
-  "pub_date": "2026-10-22T17:03:02.455Z",
+  "version": "0.1.39",
+  "notes": "使用者資料夾從 .irori-relay 搬到 .asn（舊位置留相容連結，舊路徑照常可用）",
+  "pub_date": "2026-10-22T17:32:16.747Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjVRVWpPVzZrNkNNMTllcEJWa3BMbW5uRGpFM3BsYTV0ZTU0OTJIeGtTQTYzL014cDNzeDJKOWNzZ2xiWDRsT0dPa282Q1pXQUxSM3RSVXVzV1U1Qnc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjg4NTgyCWZpbGU6QVNOXzAuMS4zOF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjM4ClZXeFhwUHJyQlZIcnR2VmxyRXViVmpzeFgwUDlpRHljZ1FkME44QXlwRFBEcGhvVUg5ZmZGcERYUTl3SmRyazl2U2plbFQwajFFWFFQYnNEemdCUkNRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.38_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjhpdUhsZ1F0c0JQZG12aHVnQXBXMDNrUzJ6Y2dPSlhpUVRTcXdjaDcyeHFYTnhWWjBmdmhKMFp6WjJXNUZMdGhaYzBtSzF0bCtlK0l1ZnV6Q0ZTR2d3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjkwMzM2CWZpbGU6QVNOXzAuMS4zOV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjM5ClZHT2JZcDlzSldqZ2N1V0YwSzVaWHNEdmlmaVhxSkRTT3d0SG80S2VSRzM4bTJLT2cyQWVUemhsQ2krcDJFVnZTZzlmZzBiQnRPWGYvK09oTGJ4R0NBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.39_x64-setup.exe"
     }
   }
 }
