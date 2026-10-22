@@ -164,3 +164,68 @@ test('守門：往來記錄與以人寄出只在 ASN 視窗的前端（core／ta
     assert.ok(!t.includes('as_person') && !t.includes('chat_history'), `${f} 不該碰以人寄出／往來記錄`)
   }
 })
+
+// ---------- 多設備修正：同 fanout_id 只顯示一次、別台設備寄的標「從 …」 ----------
+const FO = U(700)
+const fan = (n, extra = {}) => row(n, 'them', '震動回信', T1, { fanout_id: FO, ids: [U(n), FO], ...extra })   // 舊後台可能把同一則回成多列；每列的 ids 不一定列全
+const fanAll = n => fan(n, { ids: [U(701), U(702), U(703)] })
+
+test('同一個 fanout_id 去重：後台一次回三列也只收一則；震動只出現一次', () => {
+  const rows = [fan(701), fan(702), fan(703)]
+  const r = mergeHistory([], rows)
+  assert.equal(r.added, 1)
+  assert.deepEqual(r.log.map(m => [m.k, m.text, m.id]), [['them', '震動回信', FO]], '記錄 id＝fanout_id，與收信一致')
+  const nudge = '（小文 傳送了一個震動）\n對方在呼叫你：先回一個震動（寄一封內文只有「（你的名字 傳送了一個震動）」的信）。再想一下有沒有需要向對方報告的事——目前進度、卡住的地方、等對方決定的事；有的話另外寄一封簡短的信，沒有就只回震動。'
+  const n = mergeHistory([], [701, 702, 703].map(i => fan(i, { body: nudge })), '小文')
+  assert.equal(n.log.filter(m => m.nudge).length, 1, '一個震動只顯示一次')
+  // 沒有 fanout_id 的照舊用 id 去重
+  const plainRows = [row(1, 'them', 'a', T0), row(1, 'them', 'a', T0), row(2, 'them', 'a', T0)]
+  assert.equal(mergeHistory([], plainRows).added, 2)
+})
+
+test('同一個 fanout_id：本機已有的那則優先（不論本機存的是群組 id 還是某個複本 id），也不動未讀', async () => {
+  for (const localId of [FO, U(702)]) {
+    const log = [{ k: 'them', text: '震動回信', t: Date.parse(T1), id: localId }]
+    const r = mergeHistory(log, [fanAll(701)])
+    assert.equal(r.added, 0)
+    assert.equal(r.log, log)
+  }
+  const { relay, core } = await setup()
+  const notes = []
+  core.on('notify', n => notes.push(n))
+  relay.mail(1, { to_agent: NAME, from_node: 'W', from_agent: 'W-政策', fanout_id: FO, body: '震動回信', created_at: T1 })
+  relay.historyRows = [fan(701), fan(702), fan(703)]
+  await core.start()
+  await new Promise(r => setTimeout(r, 100))
+  assert.equal(core.logOf('W/W-政策').filter(m => m.text === '震動回信').length, 1)
+  assert.equal(core.snapshot().friends.find(f => f.id === 'W/W-政策').unread, 1, '收到一則就是一則未讀，補歷史不加')
+  assert.equal(notes.filter(n => n.kind === 'msg').length, 1)
+  await core.stop(); await relay.close()
+})
+
+test('自己寄的信：寄出設備不是這台就標設備名；這台寄的不標；對方寄的不標；名單的設備名優先', () => {
+  const rows = [
+    row(1, 'me', '手機上說的', T0, { from_node: 'P', from_node_name: 'Oppo 手機' }),
+    row(2, 'me', '這台說的', T1, { from_node: 'T', from_node_name: '本機' }),
+    row(3, 'them', '回', T2, { from_node: 'W', from_node_name: '公司機' }),
+    row(4, 'me', '舊後台沒帶節點', T2),
+    row(5, 'me', '名單有名字', '2026-10-22T08:03:00Z', { from_node: 'H', from_node_name: '舊名' }),
+    row(6, 'me', '節點在名單外', '2026-10-22T08:04:00Z', { from_node: 'Z' }),
+  ]
+  const r = mergeHistory([], rows, '小文', { selfNode: 'T', deviceOf: n => (n === 'H' ? '小良的家用機' : '') })
+  const by = t => r.log.find(m => m.text === t)
+  assert.equal(by('手機上說的').from, 'Oppo 手機')
+  assert.ok(!('from' in by('這台說的')))
+  assert.ok(!('from' in by('回')))
+  assert.ok(!('from' in by('舊後台沒帶節點')))
+  assert.equal(by('名單有名字').from, '小良的家用機')
+  assert.equal(by('節點在名單外').from, '另一台設備')
+  assert.ok(!r.log.some(m => /^u:|^[A-Za-z]$/.test(m.from ?? '')), '不顯示節點代號')
+})
+
+test('守門：對話版面有「從 …」標記、只標自己寄的；core 把本機節點與名單傳給合併', () => {
+  const pane = fs.readFileSync(new URL('../ui/lib/chatpane.mjs', import.meta.url), 'utf8')
+  assert.match(pane, /v-if="m\.k === 'me' && m\.from">從 \{\{ plain\(m\.from\) \}\}/)
+  const core = fs.readFileSync(new URL('../ui/lib/core.mjs', import.meta.url), 'utf8')
+  assert.match(core, /mergeHistory\(.*selfNode: this\.selfNode, deviceOf/)
+})
