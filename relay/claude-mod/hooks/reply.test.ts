@@ -90,6 +90,10 @@ test('Bash 回過判斷：--reply-to <id> 或 --to <from>', () => {
   expect(bashRepliedTo('asn-cli send --to W/W-政策 --body hi --no-reply', t)).toBe(true)
   expect(bashRepliedTo('asn-cli send --to W/W-政策2 --body hi --no-reply', t)).toBe(false)
   expect(bashRepliedTo('ls', t)).toBe(false)
+  // 只算真正的寄信呼叫：echo／grep 字串裡出現參數不算回過
+  expect(bashRepliedTo(`echo "asn-cli send --reply-to ${ID}"`, t)).toBe(false)
+  expect(bashRepliedTo(`grep -- '--to W/W-政策' log.txt`, t)).toBe(false)
+  expect(bashRepliedTo(`cd x && "C:/ASN/asn-cli.exe" send --reply-to=${ID} --body ok --no-reply`, t)).toBe(true)
 })
 
 // ───── 外掛本體（假引擎）─────

@@ -50,8 +50,6 @@ export function buildSendArgv(i: SendInput, c: SendConfig): BuildResult {
   return { argv }
 }
 
-const SEND_CMD_RE = /send\.mjs|asn-cli(\.exe)?["']?\s+send\b|(^|[\s;&|"'])asn\s+send\b/i
-
 export type CmdSegment = { tokens: string[]; raw: string }
 
 // 把 Bash 命令依 &&、||、;、|、換行切成幾段，每段拆成詞（引號內算同一個詞、去掉引號）。
@@ -237,13 +235,19 @@ export function trackFromText(text: string, turnId: string): ReplyTrack | undefi
   return { turnId, from, id }
 }
 
-const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-
-// 本輪這個 Bash 命令是不是已回過這封信（send.mjs／asn send／asn-cli send 帶 --reply-to <id> 或 --to <from>）
+// 本輪這個 Bash 命令是不是已回過這封信：只看真正的寄信呼叫（sendInvocations），帶 --reply-to <id> 或 --to <from>
 export function bashRepliedTo(command: string, t: ReplyTrack): boolean {
-  if (!SEND_CMD_RE.test(command)) return false
-  const opt = (name: string, v: string) => new RegExp(`(^|\\s)--${name}(\\s+|=)["']?${esc(v)}(?![\\w/-])`, 'i').test(command)
-  return opt('reply-to', t.id) || opt('to', t.from)
+  const val = (tokens: string[], name: string): string[] => {
+    const out: string[] = []
+    tokens.forEach((x, k) => {
+      if (x === `--${name}` && k + 1 < tokens.length) out.push(tokens[k + 1])
+      else if (x.startsWith(`--${name}=`)) out.push(x.slice(name.length + 3))
+    })
+    return out
+  }
+  return sendInvocations(command).some(seg =>
+    val(seg.tokens, 'reply-to').some(v => v.trim().toLowerCase() === t.id) ||
+    val(seg.tokens, 'to').some(v => v.trim() === t.from))
 }
 
 // asn_send 的輸入是不是已回過這封信
