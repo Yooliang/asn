@@ -1,11 +1,11 @@
 {
-  "version": "0.1.24",
-  "notes": "子代理按鈕：看各 Claude 視窗正在跑的子代理（#27）；設定新增「用量」分頁，估算 token 與費用（#52）",
-  "pub_date": "2026-10-22T01:04:57.104Z",
+  "version": "0.1.25",
+  "notes": "內建收發室也能投遞給 Gemini（ACP）與 Codex 夥伴（#12 第五期）",
+  "pub_date": "2026-10-22T01:21:32.833Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjB6Ty8xaVRQd2lpM254YVYyQzJQZ2dWMHhKZFlLc0NNSnU1ZWtOS21vM3pFYm1vQWRCSUdPYndZQnpneU5QWG1YQit4QlJsNkh3RWNaeDVpcjZ6TVFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjMxMDk2CWZpbGU6QVNOXzAuMS4yNF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjI0CkFWbEprSXlnWXZpMUZ2SUdFOHpCcGNPZFdJN0ZoQVVIb2tleERKVWx2eU5hY1hWTGJ1bGNJL3VsTUEwRklZLzF6MjJiUFN1dGVuQmJ6alR4K1gwNEFnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.24_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjg2ZzZ5OUhtMWg2Mk52NmJjOTJBRm9UVExRdE9sZFY4RDN3WXVXYlFQSDJ4ekg1LzF2Q21ybjhwVklQK1dVM0NvZXorWmY3V3k5NUw5SEx6QmV6ekFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjMyMDkyCWZpbGU6QVNOXzAuMS4yNV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjI1CmNvYlZNdVJERUZOYjVBbjY5SFdCU0FIN1FqaUVhT2xNSXd4V2swSlhlMzB6Tm1QalBCSHdKZnVuR2czY3FOSE42TkZNRmVkNkl5cTBQY0JwY2FHL0FRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.25_x64-setup.exe"
     }
   }
 }
