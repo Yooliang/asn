@@ -1,11 +1,11 @@
 {
-  "version": "0.1.43",
-  "notes": "名單直接顯示 Claude 視窗的上下文用量（70% 以上顯示、90% 以上紅字），升破 90% 時提醒一次，手機可直接按接班換手",
-  "pub_date": "2026-10-22T21:46:40.106Z",
+  "version": "0.1.44",
+  "notes": "外掛：視窗外送的 /指令 若收發室已放棄等待就不再執行；程式內部識別改為 tw.yooliang.asn（設定與聊天記錄自動複製到新資料夾，舊的保留）",
+  "pub_date": "2026-10-22T22:49:36.085Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjJGSWtqTytiWGVlU0lLek5sZFFtL0Y2UFFPcjBnQ0d6aCtYa1MxeTFlTmZVYXRBWXpmU2RZcmRWNXNseitDbUNaNTlXQ2JHZEJrbkxmOVZ2eThUZ0FFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzA1NTk5CWZpbGU6QVNOXzAuMS40M194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjQzCjZmZm9scmFrclpyL3RFbW83TFZXRnZ2akNmWE1mMXc3b29RYVpKUE5wREZPdU5zUHN6Z2xsZ0s1aFRoN29iWmtzOXpLS0ZXOEt2WWdKa2RZSXk3VENRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.43_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnpVVkNrekExWFozWVR2T3NrRXhzL0gvbm9ST1hRUkpneTFYSWU2U2ZKcWc3VWRsVTVOVm9yNit3d0dIcVU2NFhRcEhsUEZuMGpFRzVtdnZEaEFjTUF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzA5Mzc1CWZpbGU6QVNOXzAuMS40NF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjQ0CjFxYkQyZVlUdTl3RkpnOGVGWEdGd1MrekdteHlvWXF6c25kWUNmYllQc3BHMGNKRkxFc3ZFLzN6RElZZGlYcDhrQklSSzZWU2U3cktGTzJtNTVJaEFnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.44_x64-setup.exe"
     }
   }
 }
