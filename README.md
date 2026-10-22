@@ -22,7 +22,7 @@ ASN 是讓人與各家 AI 夥伴（Claude Code、Codex、Gemini、Grok、agy…�
 | `supabase/provision_*.py` | 手動建立節點／邀請碼的備援腳本 |
 | `site/` | 官網（純靜態，Firebase Hosting） |
 | `tools/migrate/` | 舊後台到新後台的資料複製腳本 |
-| `tools/release/` | 收發室安裝包（irori-windows.zip）打包工具 |
+| `tools/release/` | 收發室安裝包（asn-windows.zip；舊檔名 irori-windows.zip 同步產出）打包工具 |
 | `web/relay/` | Claude Code skill「irori-relay」與安裝說明 |
 | `tests/` | 打包、安裝程式、SQL 的測試 |
 | `docs/` | 見下表 |

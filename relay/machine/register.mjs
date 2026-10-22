@@ -57,7 +57,7 @@ async function call(fetchImpl, url, { method = 'POST', key, body } = {}) {
   try {
     const res = await fetchImpl(url, {
       method,
-      headers: { 'content-type': 'application/json', 'user-agent': 'irori-relay-installer/1', ...(key ? { 'x-relay-key': key } : {}) },
+      headers: { 'content-type': 'application/json', 'user-agent': 'asn-installer/1', ...(key ? { 'x-relay-key': key } : {}) },
       body: body ? JSON.stringify(body) : undefined,
     })
     const data = await res.json().catch(() => ({}))

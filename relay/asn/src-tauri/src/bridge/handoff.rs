@@ -1,14 +1,19 @@
 //! 與舊 Node 橋共存與交接。
 //! - 偵測：`bridge.pid` 記的 pid 活著、而且不是 ASN 自己 ＝ 這台的收發室由舊版收發室橋負責（內建橋不啟動）。
 //! - 接手（使用者按「改由 ASN 負責」才做，要確認，且受設定開關 allow_takeover 保護、預設關）：
-//!   1. 停用工作排程 `IroriRelayMachine-<節點>`（只停用，不刪除；Windows 才有）。
+//!   1. 停用工作排程 `AsnBridge-<節點>` 與舊名 `IroriRelayMachine-<節點>`（兩種都處理、只停用不刪除；Windows 才有；不存在的視為完成）。
 //!   2. 只結束 `bridge.pid` 與 `mailbox.pid` 兩個檔案記的 PID（不用名稱比對、不整批結束、不連同子程序一起殺）。
 //!   3. 等舊橋的 pid 消失，之後才由內建橋拿鎖。
 //!   任何一步失敗就停手並回報，不繼續下一步。
 use crate::nowin::NoWindow;
 use std::path::Path;
 
+/// 工作排程名：新名 `AsnBridge-<節點>`；舊安裝留下的 `IroriRelayMachine-<節點>` 仍要處理（D10 相容）
 pub fn task_name(node: &str) -> String {
+    format!("AsnBridge-{node}")
+}
+
+pub fn legacy_task_name(node: &str) -> String {
     format!("IroriRelayMachine-{node}")
 }
 
@@ -111,6 +116,7 @@ pub fn takeover(work_dir: &Path, node: &str, my_pid: u32, alive: impl Fn(u32) ->
     }
     let Legacy::Running { bridge_pid, mailbox_pid } = legacy_status(work_dir, my_pid, &alive) else { return Err(TakeoverError::NothingToDo) };
     exec.disable_task(&task_name(node)).map_err(TakeoverError::Failed)?;
+    exec.disable_task(&legacy_task_name(node)).map_err(TakeoverError::Failed)?;
     let mut stopped = vec![];
     if let Some(m) = mailbox_pid {
         if m != my_pid {
@@ -176,12 +182,12 @@ mod tests {
     }
 
     #[test]
-    fn 接手_只停用排程_只殺兩個記下的_pid_先收發室後橋() {
+    fn 接手_新舊兩個排程名都停用_只殺兩個記下的_pid_先收發室後橋() {
         let d = setup("100", Some("101"));
         let f = Fake::default();
         let stopped = takeover(d.path(), "H", 7, |_| true, &f, true, true).unwrap();
         assert_eq!(stopped, vec![101, 100]);
-        assert_eq!(*f.calls.borrow(), vec!["disable IroriRelayMachine-H", "kill 101", "kill 100"]);
+        assert_eq!(*f.calls.borrow(), vec!["disable AsnBridge-H", "disable IroriRelayMachine-H", "kill 101", "kill 100"]);
     }
 
     #[test]
@@ -190,7 +196,7 @@ mod tests {
         let f = Fake { fail_kill: Some(101), ..Default::default() };
         let e = takeover(d.path(), "H", 7, |_| true, &f, true, true).unwrap_err();
         assert_eq!(e, TakeoverError::Failed("拒絕存取".into()));
-        assert_eq!(*f.calls.borrow(), vec!["disable IroriRelayMachine-H", "kill 101"], "收發室 worker 殺不掉就不去動橋");
+        assert_eq!(*f.calls.borrow(), vec!["disable AsnBridge-H", "disable IroriRelayMachine-H", "kill 101"], "收發室 worker 殺不掉就不去動橋");
     }
 
     #[test]
@@ -198,7 +204,7 @@ mod tests {
         let d = setup("100", None);
         let f = Fake::default();
         assert_eq!(takeover(d.path(), "w02", 7, |_| true, &f, true, true).unwrap(), vec![100]);
-        assert_eq!(*f.calls.borrow(), vec!["disable IroriRelayMachine-w02", "kill 100"]);
+        assert_eq!(*f.calls.borrow(), vec!["disable AsnBridge-w02", "disable IroriRelayMachine-w02", "kill 100"]);
     }
 
     #[test]

@@ -36,8 +36,19 @@ fn cwd_label(p: &str) -> String {
     p.split(['\\', '/']).filter(|s| !s.is_empty()).last().unwrap_or("").to_string()
 }
 
+/// 寫進信文的編號標記（新名 `asn-mail:`）
 pub fn mark_of(id: &str) -> String {
+    format!("asn-mail:{id}")
+}
+
+/// 舊版橋寫過的標記（`irori-mail:`）：讀取時仍認得，只是不再寫
+pub fn legacy_mark_of(id: &str) -> String {
     format!("irori-mail:{id}")
+}
+
+/// 這一輪的使用者文字是否帶有這封信的標記（新舊兩種都認）
+pub fn has_mark(user_text: &str, id: &str) -> bool {
+    user_text.contains(&mark_of(id)) || user_text.contains(&legacy_mark_of(id))
 }
 
 /// "codex-cli 0.154.0" → (major, minor, patch, 文字)
@@ -334,7 +345,7 @@ impl Inner {
                 .map_err(|e| format!("codex app-server 起不來：{e}"))?;
                 pid_cell.store(r.pid(), Ordering::SeqCst);
                 self.ctx.pids.add(r.pid());
-                let init = r.request("initialize", json!({ "clientInfo": { "name": "irori-relay", "title": "irori-relay", "version": "0.1.0" } }), 20_000).await;
+                let init = r.request("initialize", json!({ "clientInfo": { "name": "asn", "title": "asn", "version": "0.1.0" } }), 20_000).await;
                 if let Err(e) = init {
                     r.stop();
                     return Err(e.message);
@@ -545,8 +556,7 @@ impl Inner {
                     Some(o) => o.name.clone(),
                     None => continue,
                 };
-                let mark = mark_of(&id);
-                let Some(t) = turns.iter().find(|x| user_text_of(x).contains(&mark)) else {
+                let Some(t) = turns.iter().find(|x| has_mark(&user_text_of(x), &id)) else {
                     let mut g = self.outstanding.lock().unwrap();
                     if let Some(o) = g.get_mut(&id) {
                         if !o.warned && now.saturating_sub(o.t0) > self.drain_warn_ms {
@@ -664,6 +674,14 @@ mod tests {
         assert!(turn_failure(&json!({"status":"failed","error":{"codexErrorInfo":{"unauthorized":{}}}})).contains("登入失效"));
         assert!(turn_failure(&json!({"status":"interrupted"})).contains("中斷"));
         assert!(turn_failure(&json!({"status":"failed","error":{"message":"boom"}})).contains("boom"));
+    }
+
+    #[test]
+    fn 標記_新名寫入_新舊兩種都認() {
+        assert_eq!(mark_of("U1"), "asn-mail:U1");
+        assert!(has_mark("（asn-mail:U1｜說明）", "U1"), "新標記");
+        assert!(has_mark("（irori-mail:U1）", "U1"), "舊版橋寫的標記要還認得");
+        assert!(!has_mark("（asn-mail:U2）", "U1"));
     }
 
     #[test]

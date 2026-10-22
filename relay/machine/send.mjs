@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// irori-send：本機 Claude 視窗主動寄信給仲介成員／群組，不經收發室、不經任何模型。
+// asn-send：本機 Claude 視窗主動寄信給仲介成員／群組，不經收發室、不經任何模型。
 //   node send.mjs --to PC1 --body "內文" --reply|--no-reply [--reply-to <信件id>]
 //   node send.mjs --to W/W-政策 --body-file msg.txt --no-reply
 //   node send.mjs --room <群組id> --body "內文"

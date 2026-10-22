@@ -22,9 +22,9 @@ test('送一句拿回覆；權限請求被拒絕；update 種類被記錄', asyn
     const init = await c.initialize()
     assert.equal(init.agentInfo.name, 'fake-acp')
     const s = await c.newSession(os.tmpdir())
-    const r = await c.prompt(s.sessionId, 'irori-probe ping', 10_000)
+    const r = await c.prompt(s.sessionId, 'asn-probe ping', 10_000)
     assert.equal(r.stopReason, 'end_turn')
-    assert.equal(r.text, '收到：irori-probe ping（權限被拒）')
+    assert.equal(r.text, '收到：asn-probe ping（權限被拒）')
     assert.ok(c.updates.includes('agent_message_chunk'))
   } finally { c.stop() }
 })

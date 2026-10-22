@@ -1,4 +1,4 @@
-// irori-send CLI 測試（本機假伺服器）：寄件視窗名取自父行程鏈上的 claude 視窗、不可自填、找不到就拒絕、每視窗每小時上限、格式檢查。
+// asn-send CLI 測試（本機假伺服器）：寄件視窗名取自父行程鏈上的 claude 視窗、不可自填、找不到就拒絕、每視窗每小時上限、格式檢查。
 // 執行：node --test relay/machine/test/
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -28,7 +28,7 @@ async function fakeServer({ status = 200 } = {}) {
   return st
 }
 const newHome = (node = 'T') => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'irori-send-test-'))
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-send-test-'))
   fs.mkdirSync(path.join(home, '.irori-relay'), { recursive: true })
   fs.writeFileSync(path.join(home, '.irori-relay', `${node}.key`), 'fake-machine-key')
   return home

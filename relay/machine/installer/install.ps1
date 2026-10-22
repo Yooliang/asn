@@ -22,7 +22,7 @@ param(
   [switch]$NonInteractive
 )
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'irori-common.ps1')
+. (Join-Path $PSScriptRoot 'asn-common.ps1')
 Initialize-Console
 $preview = [bool]$WhatIfPreference
 $ni = [bool]$NonInteractive
@@ -68,7 +68,7 @@ if ($hasClaude) {
 }
 
 # ---- 4. 位置與模式 ----
-$home_ = Get-IroriHome $HomeDir
+$home_ = Get-AsnHome $HomeDir
 $irori = Join-Path $home_ '.irori-relay'
 $appDst = Join-Path $irori 'app'
 $existingId = ''
@@ -87,23 +87,29 @@ function Install-AppFiles {
   # 解除安裝程式留一份在 .irori-relay\uninstall，下載的資料夾刪掉了也能移除
   $un = Join-Path $irori 'uninstall'
   New-Item -ItemType Directory -Force -Path $un | Out-Null
-  foreach ($f in @('uninstall.ps1', 'irori-common.ps1', '解除安裝.cmd')) {
+  foreach ($f in @('uninstall.ps1', 'asn-common.ps1', 'irori-common.ps1', '解除安裝.cmd')) {
     $s = Join-Path $PSScriptRoot $f
     if (Test-Path -LiteralPath $s) { Copy-Item -LiteralPath $s -Destination $un -Force }
   }
 }
 
-function Start-IroriTask([string]$Id) {
+function Start-AsnTask([string]$Id) {
   # 沿用 install-task.ps1 的排程設定（登入時執行、conhost --headless 沒有視窗、失敗 1 分鐘後重啟最多 5 次）
   try {
     & (Join-Path $appDst 'install-task.ps1') -NodeId $Id -Apply | Out-Null
-    Start-ScheduledTask -TaskName "IroriRelayMachine-$Id"
+    # 舊名排程（IroriRelayMachine-<代號>）若還在就移除，免得兩個排程同時拉起橋
+    if (Get-ScheduledTask -TaskName "IroriRelayMachine-$Id" -ErrorAction SilentlyContinue) {
+      Unregister-ScheduledTask -TaskName "IroriRelayMachine-$Id" -Confirm:$false -ErrorAction SilentlyContinue
+    }
+    Start-ScheduledTask -TaskName "AsnBridge-$Id"
     return $true
   } catch {
     Say "建立自動啟動的排程沒有成功：$($_.Exception.Message)" 'Red'
     return $false
   }
 }
+
+Set-Alias -Name Start-IroriTask -Value Start-AsnTask   # 舊函式名別名
 
 function Wait-BridgeUp([string]$Id) {
   for ($i = 0; $i -lt 20; $i++) {
@@ -123,11 +129,11 @@ if ($installed) {
     Say "（預覽）會停止目前的橋（只停它自己記錄的程序）、把程式換成新版（$newVer）、重新啟動。金鑰與設定不動。"
     exit 0
   }
-  $null = Stop-IroriBridge (Join-Path $irori "machine-$id") "IroriRelayMachine-$id" ([bool]$NoSchedule)
+  $null = Stop-AsnBridge (Join-Path $irori "machine-$id") "AsnBridge-$id" ([bool]$NoSchedule)
   Install-AppFiles
   if ($AnonKey) { Set-Content -LiteralPath (Join-Path $irori 'anon.key') -Value $AnonKey -NoNewline -Encoding ASCII }
   if (-not $NoSchedule) {
-    if (-not (Start-IroriTask $id)) { Stop-Install '程式已更新，但自動啟動排程建立失敗。' }
+    if (-not (Start-AsnTask $id)) { Stop-Install '程式已更新，但自動啟動排程建立失敗。' }
     if (Wait-BridgeUp $id) { Say '橋已重新啟動。' 'Green' } else { Say "橋還沒看到啟動，請稍等一分鐘；若一直沒有，可看 $irori\machine-$id\bridge.log。" 'Yellow' }
   }
   $chk = Invoke-RegisterTool $nodeExe $register (@('--check', '--id', $id) + $urlArgs + $homeArgs)
@@ -145,7 +151,7 @@ if ($preview) {
   Say '  1. 請你貼上邀請碼（帳號擁有者給的，15 分鐘內有效、只能用一次），並輸入這台電腦的名稱'
   Say "  2. 用邀請碼向 ASN 註冊這台電腦（建議代號：$sugg），金鑰存到 $irori\<代號>.key，不會顯示在畫面上"
   Say "  3. 把程式放到 $appDst（版本 $newVer）"
-  Say "  4. 建立「登入時自動執行」的排程 IroriRelayMachine-<代號> 並立刻啟動"
+  Say "  4. 建立「登入時自動執行」的排程 AsnBridge-<代號> 並立刻啟動"
   Say '  5. 檢查連線並告訴你結果'
   exit 0
 }
@@ -207,7 +213,7 @@ Say "程式已放到 $appDst" 'Green'
 
 $started = $true
 if (-not $NoSchedule) {
-  $started = Start-IroriTask $id
+  $started = Start-AsnTask $id
   if ($started) {
     if (Wait-BridgeUp $id) { Say '橋已啟動，之後每次登入 Windows 都會自動執行。' 'Green' }
     else { Say "橋還沒看到啟動，請稍等一分鐘；若一直沒有，可看 $irori\machine-$id\bridge.log。" 'Yellow' }

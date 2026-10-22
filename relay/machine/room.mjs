@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// irori-room：本機 Claude 視窗主動查自己所在的群組（只讀，不經收發室、不經任何模型）。
+// asn-room：本機 Claude 視窗主動查自己所在的群組（只讀，不經收發室、不經任何模型）。
 //   node room.mjs --rooms                              列出我（節點~視窗名）在的群組、新訊息數、最後一則
 //   node room.mjs --room-read <群組id|群組名> [--last 20 | --since <seq>] [--json]
 // 身分跟 send.mjs／recv.mjs 同一套（identity.mjs）：視窗名由父行程鏈／環境變數備援認出，不能自填；不是成員就被擋（仲介回 403）。

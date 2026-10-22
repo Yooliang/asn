@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process'
 
 export class AppServerClient {
   // codex：resolveCodex() 的結果；env：給子行程的環境
-  constructor({ codex, env, cwd, log = () => {}, requestTimeoutMs = 20_000, clientName = 'irori-relay' }) {
+  constructor({ codex, env, cwd, log = () => {}, requestTimeoutMs = 20_000, clientName = 'asn' }) {
     Object.assign(this, { codex, env, cwd, log, requestTimeoutMs, clientName })
     this.proc = null
     this.ready = null

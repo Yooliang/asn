@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { buildDownloads, windowsEntries, FORBIDDEN_IN_ZIP, WINDOWS_ZIP } from '../tools/release/build_downloads.mjs'
+import { buildDownloads, windowsEntries, FORBIDDEN_IN_ZIP, WINDOWS_ZIP, LEGACY_WINDOWS_ZIP } from '../tools/release/build_downloads.mjs'
 import { buildZip, listZip } from '../tools/release/zip_lite.mjs'
 import { registerNode, checkNode, leaveNode, suggestNodeId, applyPrefix } from '../relay/machine/register.mjs'
 import { fakeRelay } from './_fake_relay.mjs'
@@ -35,7 +35,7 @@ test('zip_lite：中文檔名、空檔、壓不下去的檔案都能來回，CRC
 
 test('Windows zip：必要的檔案都在（程式、安裝／解除安裝、使用說明、版本）', () => {
   const names = zipNames()
-  for (const must of ['安裝.cmd', '解除安裝.cmd', 'install.ps1', 'uninstall.ps1', 'irori-common.ps1', '使用說明.txt',
+  for (const must of ['安裝.cmd', '解除安裝.cmd', 'install.ps1', 'uninstall.ps1', 'asn-common.ps1', 'irori-common.ps1', '使用說明.txt',
     'app/bridge.mjs', 'app/send.mjs', 'app/recv.mjs', 'app/room.mjs', 'app/identity.mjs', 'app/register.mjs',
     'app/install-task.ps1', 'app/run-bridge.ps1', 'app/package.json', 'app/README.md', 'app/VERSION.json', 'app/engines/claude.mjs', 'app/engines/index.mjs']) {
     assert.ok(names.includes(must), `缺 ${must}`)
@@ -68,7 +68,7 @@ test('排除規則：用假的專案目錄塞進金鑰／測試／紀錄／開�
 
 test('文字檔格式：.ps1／.txt 有 UTF-8 BOM、.cmd／.ps1 是 CRLF、.cmd 只有 ASCII（Windows 才不會亂碼）', () => {
   const files = Object.fromEntries(listZip(fs.readFileSync(build().zipPath)).map(e => [e.name, e.data]))
-  for (const n of ['install.ps1', 'uninstall.ps1', 'irori-common.ps1', 'app/install-task.ps1', 'app/run-bridge.ps1', '使用說明.txt']) {
+  for (const n of ['install.ps1', 'uninstall.ps1', 'asn-common.ps1', 'irori-common.ps1', 'app/install-task.ps1', 'app/run-bridge.ps1', '使用說明.txt']) {
     assert.deepEqual([...files[n].subarray(0, 3)], [0xef, 0xbb, 0xbf], `${n} 缺 BOM`)
   }
   for (const n of ['安裝.cmd', '解除安裝.cmd']) {
@@ -102,7 +102,12 @@ test('downloads.json：版本（git 短 sha＋日期）、大小、sha256 與實
   assert.equal(w.size, buf.length)
   assert.equal(w.sha256, sha(buf))
   assert.match(w.version, /^[0-9a-f]{7,}(-dirty)? \(\d{4}-\d{2}-\d{2}\)$/)
-  assert.equal(w.url, 'https://irori.web.app/download/irori-windows.zip')
+  assert.equal(w.url, 'https://irori.web.app/download/asn-windows.zip')
+  // 舊檔名仍產出、內容與新檔名一模一樣（舊網址與舊連結不會壞）
+  const old = manifest.files[LEGACY_WINDOWS_ZIP]
+  assert.equal(old.url, 'https://irori.web.app/download/irori-windows.zip')
+  assert.equal(old.sha256, w.sha256)
+  assert.ok(fs.readFileSync(path.join(outDir, LEGACY_WINDOWS_ZIP)).equals(buf))
   const v = JSON.parse(listZip(buf).find(e => e.name === 'app/VERSION.json').data.toString())
   assert.equal(w.version, `${v.sha} (${v.date})`)
   assert.ok(!('irori-relay-skill.zip' in manifest.files))
@@ -130,7 +135,7 @@ test('firebase.json：Windows zip、downloads.json 轉址到 Supabase 公開 dow
   const page = fs.readFileSync(new URL('../web/download/index.html', import.meta.url), 'utf8').toLowerCase()
   assert.ok(!page.includes('github') && page.includes('href="/download/irori-windows.zip"'))  // 10/04 小良哥：下載、skill、Windows 收發室同一頁
   const install = fs.readFileSync(new URL('../web/relay/INSTALL.txt', import.meta.url), 'utf8')
-  assert.ok(install.includes('https://irori.web.app/relay/SKILL.md') && install.includes('name: irori-relay'))
+  assert.ok(install.includes('https://irori.web.app/relay/SKILL.md') && install.includes('name: asn-relay'))
 })
 
 // ---- 註冊小幫手（假伺服器）----

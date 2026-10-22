@@ -118,7 +118,7 @@ export class AcpClient {
     this.initResult = await this.request('initialize', {
       protocolVersion: 1,
       clientCapabilities: {},                                        // 不提供 fs／terminal：agent 只能用自己的工具（且權限一律被拒）
-      clientInfo: { name: 'irori-relay', title: 'Irori relay', version: '0.1.0' },
+      clientInfo: { name: 'asn', title: 'ASN', version: '0.1.0' },
     })
     return this.initResult
   }
