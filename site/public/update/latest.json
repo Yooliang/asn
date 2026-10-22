@@ -1,11 +1,11 @@
 {
-  "version": "0.1.39",
-  "notes": "使用者資料夾從 .irori-relay 搬到 .asn（舊位置留相容連結，舊路徑照常可用）",
-  "pub_date": "2026-10-22T17:32:16.747Z",
+  "version": "0.1.40",
+  "notes": "Claude 視窗切換模型、改名不用重開（由視窗內的 ASN 外掛直接執行；外掛沒回應才退回重開）；「詳情」可看到目前模型與上下文用量",
+  "pub_date": "2026-10-22T17:57:00.373Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjhpdUhsZ1F0c0JQZG12aHVnQXBXMDNrUzJ6Y2dPSlhpUVRTcXdjaDcyeHFYTnhWWjBmdmhKMFp6WjJXNUZMdGhaYzBtSzF0bCtlK0l1ZnV6Q0ZTR2d3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjkwMzM2CWZpbGU6QVNOXzAuMS4zOV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjM5ClZHT2JZcDlzSldqZ2N1V0YwSzVaWHNEdmlmaVhxSkRTT3d0SG80S2VSRzM4bTJLT2cyQWVUemhsQ2krcDJFVnZTZzlmZzBiQnRPWGYvK09oTGJ4R0NBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.39_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjM3OTF5enVSWlZmR2E0NU94cGttRnBMRVNaQmptNHNYd1RrV0hmMWRSRXMrM2JxUzBsd051WXVtQjBUdGFxV21aQWNrMGpzRk1WdndMYzQ5YUI5bkFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjkxODIwCWZpbGU6QVNOXzAuMS40MF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjQwCll5REZOL1lHOXNEZWNScGxIYjErS2Fabk9mY0pDem9pblFpTTNadEVWczZtNG55b3hOejBIUHpHMFhCSkgwVFVBT21hZFpuZ2ZuRXJtOFNqUklRdkNRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.40_x64-setup.exe"
     }
   }
 }
