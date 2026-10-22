@@ -30,11 +30,11 @@ export const register: Register = (on, options) => {
 
   on('tool.call', { tool: TOOL }, async ($, e) => {
     const built = buildSendArgv(e as never, cfg())
-    if ('error' in built) return { result: { error: built.error }, isError: true, text: `asn_send 失敗：${built.error}` } as never
+    if ('error' in built) return { result: `asn_send 失敗：${built.error}`, isError: true } as never
     const r = await $.process.run(built.argv, { timeoutMs: 60000 })
     const ok = r.exitCode === 0
     const text = ok ? r.stdout.trim() : `asn_send 失敗（exit ${r.exitCode}）：${(r.stderr || r.stdout).trim()}`
-    return { result: { text }, text, ...(ok ? {} : { isError: true }) } as never
+    return { result: text, ...(ok ? {} : { isError: true }) } as never
   }).catch(($, e, next) => (next.called ? next(e) : { deny: 'asn_send 發生內部錯誤' }))
 
   on('tool.call', { tool: 'Bash' }, ($, e, next) => {
