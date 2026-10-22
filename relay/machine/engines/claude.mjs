@@ -1,6 +1,7 @@
 // Claude Code 轉接器（第一個轉接器；介面定義見 engines/README 段落於 relay/machine/README.md「轉接器介面」）。
 // 從 bridge.mjs 原樣搬來：`claude agents --json` 名單、收發室 worker（claude -p，只有 ListAgents／SendMessage）、
 // BRIDGE-FORWARD／nonce 回覆區塊、開視窗用的 launcher 零件、身分判定。行為不變。
+import { envGet } from '../env-compat.mjs'
 import { execFile, spawn } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
@@ -14,9 +15,9 @@ const cwdLabel = p => String(p ?? '').split(/[\\/]+/).filter(Boolean).pop() || '
 
 // ctx：{ log, workDir, mailboxName, model?, env? }。工作用的外部設定（測試腳本、claude 執行檔）從 env 讀，與舊版同名。
 export function createEngine({ log, workDir, mailboxName, model, env = process.env }) {
-  const MODEL = model || env.IRORI_MAILBOX_MODEL || 'haiku'
-  // 測試用：IRORI_CLAUDE_SCRIPT 指向一支 node 腳本時，用 node 跑它來取代 claude 執行檔
-  const CLAUDE_SCRIPT = env.IRORI_CLAUDE_SCRIPT || ''
+  const MODEL = model || envGet(env, 'MAILBOX_MODEL') || 'haiku'
+  // 測試用：ASN_CLAUDE_SCRIPT 指向一支 node 腳本時，用 node 跑它來取代 claude 執行檔
+  const CLAUDE_SCRIPT = envGet(env, 'CLAUDE_SCRIPT') || ''
   const CLAUDE_BIN = CLAUDE_SCRIPT ? process.execPath : (env.CLAUDE_BIN || 'claude')
   const CLAUDE_PRE = CLAUDE_SCRIPT ? [CLAUDE_SCRIPT] : []
   const sessionFile = pid => path.join(os.homedir(), '.claude', 'sessions', `${pid}.json`)

@@ -178,7 +178,7 @@ MCP 管的是「agent 呼叫外部工具」，不是「外部把訊息送給 age
 ## 7. 原型：最小 ACP 用戶端
 
 - `engines/acp-client.mjs`：`initialize`（宣告不提供 fs／terminal 能力）→ `authenticate`（選用）→ `session/new` → `session/prompt`，收集 `session/update` 裡的 `agent_message_chunk` 文字；agent 發出的 `session/request_permission` **一律選拒絕**；agent 要求沒宣告的用戶端方法（fs／terminal）回 method not found；行程掛掉時等待中的請求會被拒絕，不會卡死。
-- **子行程環境是白名單**（`cleanEnv`：只留 PATH、HOME/USERPROFILE、APPDATA、TEMP 等系統變數）。任何 `*_API_KEY`、`*_TOKEN`、`IRORI_RELAY_*` 一律不帶；登入狀態讀各 CLI 自己在家目錄的憑證檔。這比 `codexChildEnv` 的黑名單更嚴，建議新引擎都用白名單。
+- **子行程環境是白名單**（`cleanEnv`：只留 PATH、HOME/USERPROFILE、APPDATA、TEMP 等系統變數）。任何 `*_API_KEY`、`*_TOKEN`、`ASN_RELAY_*` 一律不帶；登入狀態讀各 CLI 自己在家目錄的憑證檔。這比 `codexChildEnv` 的黑名單更嚴，建議新引擎都用白名單。
 - `tools-acp-probe.mjs`：
   ```
   node tools-acp-probe.mjs init   gemini                       # 只 initialize，印能力，不花額度
@@ -215,7 +215,7 @@ MCP 管的是「agent 呼叫外部工具」，不是「外部把訊息送給 age
 
 ### 8.3 遷移成本與對現有 Claude 轉接器的影響
 
-- **對現有 Claude 轉接器（SendMessage、名單、收發室）：零影響。** ACP 轉接器是新增一個引擎，`IRORI_ENGINES=claude,codex,acp` 並存；Claude 不動。
+- **對現有 Claude 轉接器（SendMessage、名單、收發室）：零影響。** ACP 轉接器是新增一個引擎，`ASN_ENGINES=claude,codex,acp` 並存；Claude 不動。
 - 新增工作：`engines/acp.mjs`（約 200 行，沿用 `acp-client.mjs`，實作 `capabilities`／`start`／`stop`／`listWindows`／`listNames`／`activityOf`／`deliver`）、啟動指令設定檔（例如 `~/.irori-relay/acp-agents.json`：名稱 → 指令、參數、模型、權限策略）、契約測試（照 `engine-contract.test.mjs`）、README 一節。
 - 名單裡的 ACP 工作者視窗名：建議 `工作者-<引擎>`（例如 `Gemini-工作者`），引擎欄位 `engine=acp:gemini`。
 
@@ -223,7 +223,7 @@ MCP 管的是「agent 呼叫外部工具」，不是「外部把訊息送給 age
 
 | 期 | 內容 | 前提／驗收 |
 |---|---|---|
-| **一（已實作，第 9 節）** | `engines/acp.mjs` 通用轉接器＋ agy 工作者（主線＝直連 agy 原生 stream-json，備援＝標準 ACP 驅動；選擇理由見 9.1）；權限一律拒絕；每信一個 `session/new`（無狀態）或每寄件人一個 session（有記憶，需設計回收）；契約測試 | `IRORI_ENGINES=claude,acp` 時，Irori 手機對 `Gemini-工作者` 送一句、收到回覆；不影響 Claude |
+| **一（已實作，第 9 節）** | `engines/acp.mjs` 通用轉接器＋ agy 工作者（主線＝直連 agy 原生 stream-json，備援＝標準 ACP 驅動；選擇理由見 9.1）；權限一律拒絕；每信一個 `session/new`（無狀態）或每寄件人一個 session（有記憶，需設計回收）；契約測試 | `ASN_ENGINES=claude,acp` 時，Irori 手機對 `Gemini-工作者` 送一句、收到回覆；不影響 Claude |
 | **二** | ① pi：`irori-inbox` 擴充（已開視窗）＋ `pi --mode rpc` 工作者；② Grok：裝官方 Grok Build（先處理 `grok` 名稱衝突）、登入、實測 `grok agent stdio`，Windows 若不穩就退到 `grok -p --resume`；③ `irori-mail` MCP 伺服器讓各引擎自己回信 | 每個都先跑 `tools-acp-probe.mjs`／RPC probe 再寫轉接器 |
 | **三** | 評估 Orca 當「已開視窗」通用入口（`orca terminal send`，限 Orca 內嵌終端機）；Claude Channels 轉正式後評估是否取代收發室 worker | Orca 是否支援使用者手動開的終端機待查；Channels 仍是研究預覽 |
 
@@ -289,7 +289,7 @@ ACP 路線（標準 ACP agent）的權限是**真的預防**：agent 要做事�
 ```
 
 - 類別：`read`（讀、搜尋、思考）、`write`（寫、刪、搬）、`execute`（執行指令）、`network`（抓網頁／搜尋）、`other`（分不出類別）。
-- `ask`＝問人：轉接器把「哪個工作者想做什麼（檔案或指令的摘要，已遮蔽疑似金鑰／token）」寄給 `ask.notify`（預設 `"sender"`＝原寄件人；可寫 `{"node":"XISU"}` 寄給希緒，由她在手機上問你），**回信寫給工作者**：「允許 ABCD」「拒絕 ABCD」「全部允許 ABCD」（全部允許＝這一輪之後的同類請求都放行，下一輪重新問）。只有被問的節點的回覆算數（別人冒名不算，會被當成一般來信送進模型）；沒附編號時只認單純的一個表態（「允許」「拒絕」「好」「ok」），免得「好的，我晚點看」被當成放行。`ask.timeout_ms`（預設 5 分鐘）內沒回就**自動拒絕**並通知被問的人。
+- `ask`＝問人：轉接器把「哪個工作者想做什麼（檔案或指令的摘要，已遮蔽疑似金鑰／token）」寄給 `ask.notify`（預設 `"sender"`＝原寄件人；可寫 `{"node":"PC1"}` 寄給指定的節點（例如帳號擁有者的 ASN），由他決定），**回信寫給工作者**：「允許 ABCD」「拒絕 ABCD」「全部允許 ABCD」（全部允許＝這一輪之後的同類請求都放行，下一輪重新問）。只有被問的節點的回覆算數（別人冒名不算，會被當成一般來信送進模型）；沒附編號時只認單純的一個表態（「允許」「拒絕」「好」「ok」），免得「好的，我晚點看」被當成放行。`ask.timeout_ms`（預設 5 分鐘）內沒回就**自動拒絕**並通知被問的人。
 - **agy-stream 的限制**：agy 無頭模式不能在執行中暫停，所以 `write`、`network`、`other` 設 `ask` 會自動降成 `deny`（log 提醒）。`execute:"ask"` 以「事後問」實作：指令被 agy 擋下後，問你要不要放行，同意就用放行模式（`--dangerously-skip-permissions`，只這一輪、resume 同一段對話）請它重做，之後回到一般模式。
 - **標準 ACP 路線**：`write`／`execute`／`network` 都能真的「先問再做」。要用真能問的 agent（例如 Grok Build `grok agent stdio`，**這台沒裝、未實測**；社群 agy 包裝不會送請求，設 ask 也不會被問）。
 - 範本與預設政策：唯讀，`network:allow`（只讀資訊；提示注入若引誘它把資料帶進網址有外洩風險，要全封閉就設 `deny`）。
@@ -315,11 +315,11 @@ ACP 路線（標準 ACP agent）的權限是**真的預防**：agent 要做事�
 
 1. **先確認 agy 本身能用**：終端機執行 `agy --version`，再 `agy -p "只回 PONG"` 要回 PONG（沒登入就先照 9.4 登入）。
 2. **放設定檔**：複製 `relay/machine/agents.example.json` 到 `%USERPROFILE%\.irori-relay\agents.json`，至少改 `cwd` 與 `allow_dirs`（把 `你` 換成使用者名稱）。`cwd` 請用**專用的空資料夾**（不存在會自動建），不要指到專案。
-3. **載入轉接器**：橋要用 `IRORI_ENGINES=claude,acp` 啟動。用排程／手動啟動的話：`run-bridge.ps1 -NodeId <ID> -Engines claude,acp`（新增的 `-Engines` 參數）；或在使用者環境變數設 `IRORI_ENGINES`。**重啟橋才會生效**（橋有單一執行個體鎖，先正常關掉舊的再開）。
+3. **載入轉接器**：橋要用 `ASN_ENGINES=claude,acp` 啟動。用排程／手動啟動的話：`run-bridge.ps1 -NodeId <ID> -Engines claude,acp`（新增的 `-Engines` 參數）；或在使用者環境變數設 `ASN_ENGINES`。**重啟橋才會生效**（橋有單一執行個體鎖，先正常關掉舊的再開）。
 4. **看 log**：`%USERPROFILE%\.irori-relay\machine-<ID>\bridge.log`，搜尋 `acp:`。啟動時會有 `acp: 工作者 Gemini 啟動（protocol=agy-stream cwd=… 權限 read=allow write=deny …）`；設定有問題會有 `acp: 設定有問題，已跳過：…`／`設定提醒：…`。之後每封信有 `handed id=… to=Gemini`、`[Gemini] …` 行（權限請求、等授權、狀態變化、失敗原因都在這裡）。對話的 session id 存在 `machine-<ID>\acp-workers.json`（刪掉＝下次從新對話開始）。
 5. **確認名單**：幾十秒內，手機 Irori Chat「聯絡人」那台電腦底下出現 `Gemini`（頭像右下有 ✦ 角標；要先部署 9.6 的前後端，沒部署時它會被當成 Claude 視窗顯示，功能照常）。
 6. **試一封**：從手機對 Gemini 傳一句話，或在那台電腦用 `node relay/machine/send.mjs`（見 README）寄一封，等幾秒收到回信。
-7. **關掉**：把 `agents.json` 裡該工作者加 `"enabled": false`，或移除 `IRORI_ENGINES` 裡的 `acp`，然後重啟橋；Claude 的收發室完全不受影響（兩者是獨立的轉接器）。緊急時直接結束橋，工作者子行程會跟著結束。
+7. **關掉**：把 `agents.json` 裡該工作者加 `"enabled": false`，或移除 `ASN_ENGINES` 裡的 `acp`，然後重啟橋；Claude 的收發室完全不受影響（兩者是獨立的轉接器）。緊急時直接結束橋，工作者子行程會跟著結束。
 
 ### 9.6 手機聯絡人顯示（後端 deno、前端 node，已實作、**未部署**）
 
@@ -329,7 +329,7 @@ ACP 路線（標準 ACP agent）的權限是**真的預防**：agent 要做事�
 |---|---|---|
 | 資料庫 | `relay.roster` 加 `engine` 欄位；`irori_relay_roster` 收 `engine`（格式 `^[a-z][a-z0-9_-]{0,19}$`，不對就當 null，不拒整份名單）；`irori_relay_list(uuid)` 回傳 `engine`。可重複執行、只加欄位 | `supabase/sql/19_roster_engine.sql` |
 | 仲介函式 | roster 動作多帶 `engine` | `supabase/functions/irori-relay/index.ts`、`_shared/roster.ts` |
-| 後端 API | 視窗聯絡人的 `kind` 依 engine（gemini→gemini、codex→gpt、grok→grok、不認得→other、沒帶→claude）並多一個 `engine` 欄位；給希緒看的聯絡人清單寫成「Gemini 背景工作者」，狀態 `login-required`／`quota` 講明白 | `supabase/functions/irori-api/relay.ts` |
+| 後端 API | 視窗聯絡人的 `kind` 依 engine（gemini→gemini、codex→gpt、grok→grok、不認得→other、沒帶→claude）並多一個 `engine` 欄位；給使用者看的聯絡人清單寫成「Gemini 背景工作者」，狀態 `login-required`／`quota` 講明白 | `supabase/functions/irori-api/relay.ts` |
 | 前端 | 非 Claude 視窗的頭像加引擎角標、詳細頁多一行「種類：Gemini 背景工作者（由電腦啟動，不是開著的視窗）」、狀態字（需要登入／額度用完） | `web/js/phone/engine_logic.js`、`app_chat.js`、`web/style.css` |
 
 **部署順序**（這次沒做）：① 跑 `npx supabase db query --linked -f supabase/sql/19_roster_engine.sql` → ② 部署 `irori-relay`、`irori-api` 兩個函式 → ③ 部署前端。SQL 先上線時舊函式照常運作（只是沒有 engine）；前後端對沒有 engine 的資料（舊版機器橋）完全維持原樣。回復：重跑 `04_roster.sql`、`16_tenants.sql` 裡的同名函式（欄位留著無妨）。

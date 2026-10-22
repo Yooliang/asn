@@ -11,7 +11,7 @@ use tauri::{AppHandle, State};
 pub fn error_text(code: &str) -> String {
     match code {
         "unauthorized" => "登入已失效，請重新登入",
-        "tenant_not_yours" => "這個節點還在舊的收發室租戶底下，要等管理者把舊租戶認領到你的帳號",
+        "tenant_not_yours" => "這個節點還在舊的收發室租戶底下，要等舊租戶認領到你的帳號",
         "already_claimed" => "這個節點已經被別的帳號認領了",
         "invalid_key" => "這台電腦的節點金鑰後台不認得（可能已被換掉）",
         "too_many" => "這個帳號的電腦數量已達上限",
@@ -99,7 +99,7 @@ pub fn claim_outcome(r: Result<Value, CallErr>) -> BindOutcome {
     match r {
         Ok(v) if v.get("already").and_then(Value::as_bool) == Some(true) => BindOutcome { state: "bound", note: "這台電腦本來就在你的帳號底下".into() },
         Ok(_) => BindOutcome { state: "bound", note: "已把這台電腦連到你的帳號".into() },
-        Err(e) => BindOutcome { state: "pending", note: if e.code == "tenant_not_yours" { "這台電腦尚未綁到你的帳號（管理者認領後會自動完成）".into() } else { e.text } },
+        Err(e) => BindOutcome { state: "pending", note: if e.code == "tenant_not_yours" { "這台電腦尚未綁到你的帳號（認領後會自動完成）".into() } else { e.text } },
     }
 }
 
@@ -220,8 +220,8 @@ struct Ctx {
 }
 
 fn ctx() -> Result<Ctx, String> {
-    let relay_url = identity::base_url(std::env::var("IRORI_RELAY_URL").ok());
-    let anon = identity::read_anon(&identity::relay_home(), std::env::var("IRORI_RELAY_ANON_KEY").ok(), &relay_url).ok_or("找不到後台的公開金鑰（anon），沒辦法登入")?;
+    let relay_url = identity::base_url(crate::envc::get("ASN_RELAY_URL"));
+    let anon = identity::read_anon(&identity::relay_home(), crate::envc::get("ASN_RELAY_ANON_KEY"), &relay_url).ok_or("找不到後台的公開金鑰（anon），沒辦法登入")?;
     Ok(Ctx { client: reqwest::Client::new(), auth_base: auth::auth_base_from(&relay_url), relay_url, anon })
 }
 

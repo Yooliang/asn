@@ -533,6 +533,24 @@ Aegis 主機轉接橋服務的是 Irori 的 Aegis，與 ASN 產品無關，且�
 | D15 | 程式碼簽署憑證與更新檔存放位置（期 6 前置） | 先決定授權條款與發版流程（README 開源前檢查清單），再買憑證；更新檔放物件儲存 |
 | D16 | Windows 之外（macOS、Linux 桌面）是否納入 | **先不納入**；Tauri 可跨平台，等 Windows 穩定再評估 |
 
+### 9.4 去 Irori 化（#14）實作分期
+
+整個 #14 拆成下表的小期，每期獨立上線；舊名一律持續可用（D10），任何現有部署不改設定也要照常運作。
+
+| 期 | 內容 | 狀態 |
+|---|---|---|
+| R1 | **環境變數改名相容**：`relay/machine`（`env-compat.mjs` 的 `envGet`）、`relay/asn`（`src-tauri/src/envc.rs`）、`relay/cloud-agent`（既有 `env-compat.mjs`，補對照表守門）、`relay/shared`（`mockBinDir`）一律「新名優先、沒有才讀舊名」；交給子程序的環境新舊名都帶；子程序環境清理同時擋新舊金鑰名（`ASN_RELAY_KEY`／`ASN_RELAY_ANON_KEY`／`IRORI_RELAY_KEY`／`IRORI_RELAY_ANON_KEY`）；給人看的文字去掉「希緒」「經希緒轉達」「管理者」「irori-windows.zip」等 Irori 專屬字眼（指引頁、群組提示、註冊錯誤訊息、安裝程式與說明、技能文件、README）。底部廣告已是 ASN 自己的內容，開網址白名單只有 `asnmessenger.web.app` 與 `policy-tw.web.app`，不用再動 | 已完成 |
+| R2 | 資料夾 `~/.irori-relay` → `~/.asn` 搬家與相容連結（第 5.3 節）；`ASN_HOME`；各處硬寫路徑（`identity.mjs`、`identity.rs`、`cli`、`bridge`、雲端腳本、安裝程式）一併改成經單一函式解析 | 待做 |
+| R3 | 程式識別 `tw.irori.asn` → `tw.yooliang.asn`（D8）、套件名 `irori-asn` → `asn`；首次啟動把 `%APPDATA%\tw.irori.asn` 的聊天與設定複製過來。**不能直接改**：改了資料夾會換、設定會丟 | 待做 |
+| R4 | 獨立安裝版的排程名 `IroriRelayMachine-*` → `AsnBridge-*`（`bridge/handoff.rs` 要同時認得兩種）、PowerShell 函式 `Get-IroriHome`／`Stop-IroriBridge`／`Start-IroriTask`、`irori-common.ps1` 檔名、安裝包檔名 `irori-windows.zip` 與下載網址（`tools/release`、`docs/DOWNLOADS.md`）；安裝程式整體在期 6 退役，只做最小改名 | 待做 |
+| R5 | 其他字串：使用者代理字串 `irori-relay-installer/1`／`irori-relay-client/1`、Codex 標記 `irori-mail:`（兩種都讀、只寫新的）、日誌前綴 `[irori]`、暫存資料夾 `irori-probe-*`、ACP `clientInfo` 的 `irori-relay`、說明名稱 `irori-send`／`irori-recv`／`irori-room`；技能 `irori-relay` → `asn-relay`／`asn-cloud-agent`（D12） | 待做 |
+| R6 | 資料庫函式 `irori_relay_*` → `asn_relay_*`（D9，一個 migration 加 `alter function … rename`，同一發佈內更新 `supabase/functions/_shared`、`relay/index.ts` 的所有呼叫；要在切換前做）；relay function 名稱（`irori-relay`、`irori-api`）隨舊後台移除 | 待做 |
+| R7 | **信任與角色模型**（D5）：`human` 節點、`trust=owner` 真的代表人本人、`rooms.ts` 的點名別名「希緒」與 `~owner` 顯示名寫死、`role='owner'` 的 XISU 角色節點降級；測試與歷史文件裡的範例收件人 `XISU`。R1 只改了提示文字，沒動資料模型 | 待做（獨立一期，完整測試） |
+| R8 | `relay/channel` 封存、`bridge-aegis.mjs` 與 `irori-relay-aegis.service` 移出本 repo（D11；期間 `IRORI_AEGIS_*` 不改名，共用的 `RELAY_*` 已走相容層） | 待做 |
+| R9 | 移除相容層（D10：至少兩個正式版、切換後 90 天、日誌確認無舊名）：刪除三處對照表（`env-compat.mjs` ×2、`envc.rs`）、守門測試改成 repo 內（除歷史文件外）不得出現 `IRORI_`、`.irori-relay` | 待做 |
+
+R1 的環境變數對照表（新名 ← 舊名）：一律把 `IRORI_` 換成 `ASN_`；`IRORI_ASN_*` 去掉重複的 ASN（`IRORI_ASN_DATA` → `ASN_DATA`、`IRORI_ASN_POLL_MS` → `ASN_POLL_MS`…）；唯一的例外是電腦版的 `IRORI_ASN_ROSTER_MS` → `ASN_APP_ROSTER_MS`（`ASN_ROSTER_MS` 已是橋的名單間隔）。`IRORI_AEGIS_*`、`IRORI_FIREBASE_*`、`IRORI_SIGNAL_*`、`IRORI_WAKE_*` 本期不改名。
+
 ---
 
 ## 10. 指引頁（`guides.mjs`）改寫

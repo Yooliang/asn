@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 const name = process.argv[2]
-const leaked = Object.keys(process.env).filter(k => /^CLAUDE|^NO_COLOR$|^IRORI_RELAY_KEY$|^IRORI_LAUNCH_(FILE|ARGS|DIR|STYLE)$/i.test(k))
+const leaked = Object.keys(process.env).filter(k => /^CLAUDE|^NO_COLOR$|^(ASN|IRORI)_RELAY_(ANON_)?KEY$|^(ASN|IRORI)_LAUNCH_(FILE|ARGS|DIR|STYLE)$/i.test(k))
 fs.appendFileSync(process.env.FAKE_LAUNCHED, JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), leaked }) + '\n')
 if (process.env.FAKE_LAUNCH_NO_APPEAR !== '1') {
   const pid = 95000 + Math.floor(Math.random() * 4000)

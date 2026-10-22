@@ -3,7 +3,7 @@
 //   node inbox.mjs [--unread]        列出還沒處理的信（預設）
 //   node inbox.mjs --all             列出全部（已處理的標 [已處理]）
 //   node inbox.mjs --json            改成每封一行 JSON（可搭配 --unread／--all）
-//   node inbox.mjs --agent <名>      只看寄給這位代理的信（沒指定收件代理的信算給預設那位，IRORI_CLOUD_ROSTER_NAME）
+//   node inbox.mjs --agent <名>      只看寄給這位代理的信（沒指定收件代理的信算給預設那位，ASN_CLOUD_ROSTER_NAME，舊名 IRORI_CLOUD_ROSTER_NAME）
 //   node inbox.mjs --done <id> [<id>…]   把信標成已處理（可給前 8 碼以上、唯一的前綴）
 // 回信：node send.mjs --to <from_node>/<from_agent> --reply-to <id> --body "…" (--reply|--no-reply)
 import path from 'node:path'

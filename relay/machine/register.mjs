@@ -5,7 +5,7 @@
 //   同一網路位址每小時最多 10 次（429）。邀請碼 15 分鐘有效、只能用一次。
 // 金鑰只寫進 ~/.irori-relay/<代號>.key（寫完讀回比對），絕不印出、不放進回傳值。
 //
-// CLI（邀請碼走環境變數 IRORI_INVITE，不放命令列）：
+// CLI（邀請碼走環境變數 ASN_INVITE（舊名 IRORI_INVITE），不放命令列）：
 //   node register.mjs --id <代號> --name <顯示名> --machine <電腦名> [--kind other] [--url <仲介網址>] [--home <家目錄>] [--reissue] [--set-node]
 //   ~/.irori-relay/node（這台電腦自己的節點代號）：還沒有才寫；已經有就不動，除非帶 --set-node（安裝程式註冊這台電腦時會帶）。
 //   在管理電腦上替別台（例如雲端代理 grok）註冊時不要帶，否則這台電腦的身分會被改成別台（10/20 家用機 H 曾被改成 grok）
@@ -13,6 +13,7 @@
 //   node register.mjs --check --id <代號>                        用已存的金鑰呼叫 whoami，確認連得上
 //   node register.mjs --leave --id <代號>                        離開名單（金鑰立即作廢）
 // 每個模式都在標準輸出印一行 JSON（不含金鑰）；成功 exit 0，失敗 exit 1。
+import { envGet } from './env-compat.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -25,15 +26,15 @@ const KINDS = ['claude', 'gpt', 'gemini', 'grok', 'other']
 // 後端錯誤碼 → 給一般人看的白話（不含系統內部名詞）
 const MESSAGES = {
   bad_request: '填的資料有問題（代號只能用英文、數字、-、_，最多 32 個字；電腦名稱最多 40 個字）。',
-  invalid_invite: '邀請碼不對、已經過期（15 分鐘有效）或已經用過。請向希緒或管理者再要一組新的。',
+  invalid_invite: '邀請碼不對、已經過期（15 分鐘有效）或已經用過。請向帳號擁有者再要一組新的。',
   bad_id_prefix: '這組邀請碼只能註冊指定開頭的代號。',
-  id_taken: '這個代號已經有人用了，請換一個。如果是這台電腦以前裝過，請請管理者幫你重發金鑰。',
+  id_taken: '這個代號已經有人用了，請換一個。如果是這台電腦以前裝過，請帳號擁有者幫你重發金鑰。',
   rate_limited: '試太多次了，請一小時後再試。',
   network: '連不上伺服器，請檢查網路後再試一次。',
   unauthorized: '金鑰無效或已經作廢。',
   internal: '伺服器暫時有問題，請稍後再試。',
 }
-const friendly = code => MESSAGES[code] ?? '註冊沒有成功，請稍後再試，或請管理者協助。'
+const friendly = code => MESSAGES[code] ?? '註冊沒有成功，請稍後再試，或請帳號擁有者協助。'
 
 const homeDirOf = home => path.join(home || os.homedir(), '.irori-relay')
 const apiUrl = (base, action) => `${String(base || DEFAULT_URL).replace(/\/+$/, '')}?action=${action}`
@@ -121,7 +122,7 @@ export async function registerNode({ baseUrl, invite, id, name, machine, kind = 
   fs.writeFileSync(keyFile, r.data.key, 'utf8')
   try { fs.chmodSync(keyFile, 0o600) } catch {}
   if (fs.readFileSync(keyFile, 'utf8').trim() !== r.data.key) {
-    return { ok: false, error: 'write_mismatch', message: '金鑰存到這台電腦後讀回不一致，請管理者重發金鑰。' }
+    return { ok: false, error: 'write_mismatch', message: '金鑰存到這台電腦後讀回不一致，請帳號擁有者重發金鑰。' }
   }
   const nodeFile = path.join(dir, 'node')
   if (setNode || !fs.existsSync(nodeFile)) fs.writeFileSync(nodeFile, id, 'utf8')
@@ -144,13 +145,13 @@ function parseArgs(argv) {
 
 export async function main(argv, env = process.env) {
   const a = parseArgs(argv)
-  const baseUrl = a.url || env.IRORI_RELAY_URL || DEFAULT_URL
+  const baseUrl = a.url || envGet(env, 'RELAY_URL') || DEFAULT_URL
   const home = a.home || undefined
   if (a.suggest !== undefined) return { ok: true, id: suggestNodeId(a.suggest, a.prefix || '') }
   if (a.check) return await checkNode({ baseUrl, id: a.id, home })
   if (a.leave) return await leaveNode({ baseUrl, id: a.id, home })
   return await registerNode({
-    baseUrl, invite: env.IRORI_INVITE, id: a.id, name: a.name, machine: a.machine, kind: a.kind || 'other', home, reissue: !!a.reissue, setNode: !!a['set-node'],
+    baseUrl, invite: envGet(env, 'INVITE'), id: a.id, name: a.name, machine: a.machine, kind: a.kind || 'other', home, reissue: !!a.reissue, setNode: !!a['set-node'],
   })
 }
 

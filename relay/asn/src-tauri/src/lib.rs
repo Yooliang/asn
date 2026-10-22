@@ -9,6 +9,7 @@ mod auth;
 mod avatar;
 mod bell;
 mod bridge;
+mod envc;
 pub mod cli;
 mod claude_accounts;
 mod claude_json;
@@ -70,7 +71,7 @@ struct StartupInfo {
 }
 
 fn env_ms(k: &str, d: u64) -> u64 {
-    std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
+    crate::envc::get(k).and_then(|v| v.parse().ok()).unwrap_or(d)
 }
 
 /// 視窗名：預設 `<節點>-ASN`；設定檔 settings.json 的 window_name 可改
@@ -133,8 +134,8 @@ fn startup_info(app: State<'_, App>, auth: State<'_, auth::AuthState>) -> Startu
         can_skip_login: app.relay.is_some(),
         last_login: lastlogin::view(&app.data_dir),
         shot: app.shot.is_some(),
-        poll_ms: env_ms("IRORI_ASN_POLL_MS", 120_000),
-        roster_ms: env_ms("IRORI_ASN_ROSTER_MS", 60_000),
+        poll_ms: env_ms("ASN_POLL_MS", 120_000),
+        roster_ms: env_ms("ASN_APP_ROSTER_MS", 60_000),
         version: env!("CARGO_PKG_VERSION").into(),
     }
 }
@@ -611,15 +612,15 @@ pub fn run() {
     // --shot 只准連本機假後端（紅線：測試不碰真實 relay）
     if shot.is_some() {
         // 看環境變數指的後台網址（沒有金鑰、模擬新電腦的截圖也要擋住真實後台）
-        let u = identity::base_url(std::env::var("IRORI_RELAY_URL").ok());
+        let u = identity::base_url(crate::envc::get("ASN_RELAY_URL"));
         let ok = u.starts_with("http://127.0.0.1") || u.starts_with("http://localhost");
         if !ok {
-            eprintln!("--shot 只能搭配指向本機假後端的 IRORI_RELAY_URL（http://127.0.0.1…）");
+            eprintln!("--shot 只能搭配指向本機假後端的 ASN_RELAY_URL（http://127.0.0.1…）");
             std::process::exit(5);
         }
     }
 
-    let data_dir = std::env::var_os("IRORI_ASN_DATA").map(PathBuf::from).unwrap_or_else(|| {
+    let data_dir = crate::envc::get_os("ASN_DATA").map(PathBuf::from).unwrap_or_else(|| {
         std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("tw.irori.asn")).unwrap_or_else(|| identity::home_dir().join(".irori-asn"))
     });
 
@@ -644,7 +645,7 @@ pub fn run() {
     let auth_state = auth::AuthState::new(auth::default_store(&data_dir));
     // 端到端測試用：--shot 模式下假裝已登入（只連本機假後端；正式執行沒有這條路）
     if shot.is_some() {
-        if let Ok(email) = std::env::var("IRORI_ASN_SHOT_LOGIN") {
+        if let Some(email) = crate::envc::get("ASN_SHOT_LOGIN") {
             if !email.trim().is_empty() {
                 auth_state.seed_shot_session(email.trim());
             }
@@ -691,7 +692,7 @@ pub fn run() {
             // Claude 帳號自動加入／回存：啟動後 15 秒起每 60 秒一次（asn-me.json 的 autoAddClaude 開著才動，預設開）；--shot 截圖模式不動
             if handle.state::<App>().shot.is_none() {
                 let h = handle.clone();
-                let every = std::time::Duration::from_millis(env_ms("IRORI_ASN_CLAUDE_AUTO_MS", 60_000));
+                let every = std::time::Duration::from_millis(env_ms("ASN_CLAUDE_AUTO_MS", 60_000));
                 tauri::async_runtime::spawn(claude_accounts::auto_loop(auto_acct_dir.clone(), std::time::Duration::from_secs(15), every, move |o| {
                     let _ = h.emit("claude-account-auto", o);
                 }));
@@ -734,7 +735,7 @@ pub fn run() {
                 let r4 = r.clone();
                 let up_handle = handle.clone();
                 tauri::async_runtime::spawn(async move {
-                    let every = std::time::Duration::from_millis(env_ms("IRORI_ASN_PRESENCE_MS", 60_000));
+                    let every = std::time::Duration::from_millis(env_ms("ASN_PRESENCE_MS", 60_000));
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                     while r4.report_presence(env!("CARGO_PKG_VERSION"), std::time::Duration::from_secs(10)).await {
                         // 本人在別台按了「更新」：用內建更新器自己下載、驗簽、安裝、重開（失敗回報原因）

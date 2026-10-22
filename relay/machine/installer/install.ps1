@@ -1,4 +1,4 @@
-﻿# Irori 收發室橋：Windows 安裝程式（給一般人用，雙擊「安裝.cmd」就會跑這支）。
+﻿# ASN 收發室橋：Windows 安裝程式（給一般人用，雙擊「安裝.cmd」就會跑這支）。
 # 做的事：檢查 Node.js → 用邀請碼註冊這台電腦 → 把程式放進 %USERPROFILE%\.irori-relay\app → 建立「登入時自動執行」的排程並啟動。
 # 已經裝過就是「更新程式」模式：只換程式、重啟橋，不重新註冊。
 #
@@ -36,7 +36,7 @@ function Stop-Install([string]$Why) {
 }
 
 Say ''
-Say '=== Irori 收發室橋：安裝 ===' 'Cyan'
+Say '=== ASN 收發室橋：安裝 ===' 'Cyan'
 if ($preview) { Say '（預覽模式：只告訴你會做什麼，不會改動這台電腦，也不會連網。）' 'Yellow' }
 
 # ---- 1. 程式檔在不在（沒解壓縮就雙擊的人最常遇到）----
@@ -64,7 +64,7 @@ $hasClaude = [bool](Get-Command $ClaudeCommand -ErrorAction SilentlyContinue)
 if ($hasClaude) {
   Say '已找到 Claude Code。' 'Green'
 } else {
-  Say '這台電腦還沒有 Claude Code。可以先裝，橋會先連上希緒、把收到的信留著，等你裝好 Claude Code 並開一個視窗後才有地方轉信（裝好之後再雙擊一次「安裝.cmd」讓橋重新啟動）。' 'Yellow'
+  Say '這台電腦還沒有 Claude Code。可以先裝，橋會先連上 ASN、把收到的信留著，等你裝好 Claude Code 並開一個視窗後才有地方轉信（裝好之後再雙擊一次「安裝.cmd」讓橋重新啟動）。' 'Yellow'
 }
 
 # ---- 4. 位置與模式 ----
@@ -133,7 +133,7 @@ if ($installed) {
   $chk = Invoke-RegisterTool $nodeExe $register (@('--check', '--id', $id) + $urlArgs + $homeArgs)
   Say ''
   if ($oldVer -or $newVer) { Say "程式版本：$oldVer -> $newVer" }
-  if ($chk.ok) { Say '更新完成，這台電腦已連上希緒。' 'Green' } else { Say "更新完成，但目前連不上希緒（$($chk.message)）。橋會自動重試。" 'Yellow' }
+  if ($chk.ok) { Say '更新完成，這台電腦已連上 ASN。' 'Green' } else { Say "更新完成，但目前連不上 ASN（$($chk.message)）。橋會自動重試。" 'Yellow' }
   exit 0
 }
 
@@ -142,8 +142,8 @@ if ($preview) {
   $sugg = (Invoke-RegisterTool $nodeExe $register @('--suggest', $env:COMPUTERNAME)).id
   Say ''
   Say '（預覽）第一次安裝會依序做：' 'Yellow'
-  Say '  1. 請你貼上邀請碼（希緒或管理者給的，15 分鐘內有效、只能用一次），並輸入這台電腦的名稱'
-  Say "  2. 用邀請碼向希緒註冊這台電腦（建議代號：$sugg），金鑰存到 $irori\<代號>.key，不會顯示在畫面上"
+  Say '  1. 請你貼上邀請碼（帳號擁有者給的，15 分鐘內有效、只能用一次），並輸入這台電腦的名稱'
+  Say "  2. 用邀請碼向 ASN 註冊這台電腦（建議代號：$sugg），金鑰存到 $irori\<代號>.key，不會顯示在畫面上"
   Say "  3. 把程式放到 $appDst（版本 $newVer）"
   Say "  4. 建立「登入時自動執行」的排程 IroriRelayMachine-<代號> 並立刻啟動"
   Say '  5. 檢查連線並告訴你結果'
@@ -151,13 +151,13 @@ if ($preview) {
 }
 
 Say ''
-Say '第一次安裝。邀請碼由希緒或管理者提供，15 分鐘內有效、只能用一次。' 'Cyan'
-if ($Reissue) { Say '（重新安裝模式：請貼上管理者給你的「重設碼」，代號要跟以前一樣。）' 'Yellow' }
+Say '第一次安裝。邀請碼由帳號擁有者提供，15 分鐘內有效、只能用一次。' 'Cyan'
+if ($Reissue) { Say '（重新安裝模式：請貼上帳號擁有者給你的「重設碼」，代號要跟以前一樣。）' 'Yellow' }
 
 $code = $InviteCode
 if (-not $code) { $code = Read-Answer $(if ($Reissue) { '請貼上重設碼' } else { '請貼上邀請碼' }) '' $ni }
-if (-not $code) { Stop-Install '沒有填邀請碼。請向希緒或管理者要一組。' }
-# 貼的是希緒產生的整行（「邀請碼：xxxx（只能用一次…）」）也可以：只取冒號後面那一串
+if (-not $code) { Stop-Install '沒有填邀請碼。請向帳號擁有者要一組。' }
+# 貼的是 ASN 產生的整行（「邀請碼：xxxx（只能用一次…）」）也可以：只取冒號後面那一串
 if ($code -match '碼\s*[:：]\s*([^\s（(]+)') { $code = $Matches[1] }
 $code = $code.Trim()
 
@@ -174,12 +174,12 @@ if (-not $id) { Stop-Install '沒有代號。' }
 
 $res = $null
 for ($try = 1; $try -le 4; $try++) {
-  $env:IRORI_INVITE = $code
+  $env:ASN_INVITE = $code; $env:IRORI_INVITE = $code
   try {
     $args_ = @('--id', $id, '--name', $name, '--machine', $name, '--kind', 'other', '--set-node') + $urlArgs + $homeArgs   # 註冊的就是這台電腦：node 檔要寫成它
     if ($Reissue) { $args_ += '--reissue' }
     $res = Invoke-RegisterTool $nodeExe $register $args_
-  } finally { Remove-Item Env:\IRORI_INVITE -ErrorAction SilentlyContinue }
+  } finally { Remove-Item Env:\ASN_INVITE, Env:\IRORI_INVITE -ErrorAction SilentlyContinue }
   if ($res.ok) { break }
   Say ''
   Say $res.message 'Yellow'
@@ -217,12 +217,12 @@ if (-not $NoSchedule) {
 $chk = Invoke-RegisterTool $nodeExe $register (@('--check', '--id', $id) + $urlArgs + $homeArgs)
 Say ''
 if ($res.verified -or $chk.ok) {
-  Say '裝好了！這台電腦已經連上希緒。' 'Green'
-  Say "怎麼確認：到希緒那邊的名單，約一兩分鐘內會看到「$name」顯示在線。"
-  Say '如果名單裡看得到這台電腦、卻看不到上面開著的 Claude 視窗，請告訴管理者：這個代號需要開通「回報視窗」。'
+  Say '裝好了！這台電腦已經連上 ASN。' 'Green'
+  Say "怎麼確認：到ASN 的名單，約一兩分鐘內會看到「$name」顯示在線。"
+  Say '如果名單裡看得到這台電腦、卻看不到上面開著的 Claude 視窗，請告訴帳號擁有者：這個代號需要開通「回報視窗」。'
   if (-not $hasClaude) { Say '提醒：這台電腦還沒有 Claude Code，裝好後請再雙擊一次「安裝.cmd」。' 'Yellow' }
 } else {
-  Say "已經註冊並安裝，但現在連不上希緒（$($chk.message)）。橋會自動重試，一兩分鐘後再到名單看看。" 'Yellow'
+  Say "已經註冊並安裝，但現在連不上 ASN（$($chk.message)）。橋會自動重試，一兩分鐘後再到名單看看。" 'Yellow'
 }
-if (-not $started) { Stop-Install '自動啟動排程建立失敗，請把這個畫面截圖給管理者。' }
+if (-not $started) { Stop-Install '自動啟動排程建立失敗，請把這個畫面截圖給帳號擁有者。' }
 exit 0

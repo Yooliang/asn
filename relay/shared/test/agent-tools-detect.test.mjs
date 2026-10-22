@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { detectAgentTools } from '../agent-tools-detect.mjs'
+import { detectAgentTools, mockBinDir } from '../agent-tools-detect.mjs'
 import { buildDefaultProfiles } from '../launcher-profiles.mjs'
 import { loadConfig } from '../../machine/launcher.mjs'
 import fs from 'node:fs'
@@ -36,4 +36,12 @@ test('loadConfig：沒有 launcher.json 時用 bootstrap', () => {
   const { config } = loadConfig(file, bootstrap)
   assert.equal(config.max_per_hour, 3)
   assert.equal(config.profiles.claude.command, 'claude')
+})
+
+test('mockBinDir：只設舊名也行、只設新名也行、兩個都設以新名為準', () => {
+  assert.equal(mockBinDir({ IRORI_ASN_MOCK_BIN_DIR: '/old' }), '/old')
+  assert.equal(mockBinDir({ ASN_MOCK_BIN_DIR: '/new' }), '/new')
+  assert.equal(mockBinDir({ ASN_MOCK_BIN_DIR: '/new', IRORI_ASN_MOCK_BIN_DIR: '/old' }), '/new')
+  assert.equal(mockBinDir({ ASN_MOCK_BIN_DIR: '  ', IRORI_ASN_MOCK_BIN_DIR: '/old' }), '/old')
+  assert.equal(mockBinDir({}), '')
 })

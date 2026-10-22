@@ -1,5 +1,5 @@
 // 收發室自己更新、自己重啟（小良哥 10/05：收發室不要再靠別的 AI 來更新重啟，那個 AI 又得靠收發室傳指令，會互相卡住）。
-// 橋每隔一段時間（IRORI_SELF_UPDATE_MS，預設 10 分鐘；0＝關掉）到 origin/main 看 relay/machine/ 有沒有新版：
+// 橋每隔一段時間（ASN_SELF_UPDATE_MS，預設 10 分鐘；0＝關掉）到 origin/main 看 relay/machine/ 有沒有新版：
 //   - 只在「乾淨、在 main、沒有本機 commit」時用 fast-forward 拉下來，不碰有人正在改的工作樹（髒、別的分支、有本機 commit 都跳過並記 log）
 //   - 只看 relay/machine/ 的變動：別的目錄有新 commit 不動（那是開發視窗的事，不替他們拉）
 //   - 拉好之後由橋自己收尾：不再收新信、等手上「轉交中」的信送完（最多 RESTART_DRAIN_MS），停掉收發室與工作者再結束；

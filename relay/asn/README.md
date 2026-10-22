@@ -3,6 +3,10 @@
 懷舊風格的 Windows 桌面即時通。好友＝收發室（relay）名單上的 Claude 視窗，聊天＝收發室的信。
 Tauri 2（Rust）＋ Vue 3；多視窗：好友名單一扇、每位好友的對話各一扇、右下角提示一扇（置頂、不搶焦點、不進工作列）。
 
+## 環境變數（`ASN_` 前綴，舊名 `IRORI_` 仍可用）
+
+本文件寫的環境變數都是新名（`ASN_<名>`；舊名 `IRORI_<名>`，`IRORI_ASN_*` 的重複 ASN 去掉，其中電腦版自己的名單輪詢間隔 `IRORI_ASN_ROSTER_MS` 改為 `ASN_APP_ROSTER_MS`，以免與橋的 `ASN_ROSTER_MS` 混用）。規則：新名優先，沒設（或只有空白）才讀舊名，兩個都設以新名為準；對照表在 `src-tauri/src/envc.rs`。ASN 開給子程序（視窗、Codex）的環境，已改名的變數兩個名字都帶，金鑰（新舊名）一律不帶。
+
 ## 安裝與執行
 
 ### Windows
@@ -40,7 +44,7 @@ npm run build        # 出 asn 二進位、bundle/deb/*.deb、bundle/appimage/*.
 
 ## 身分與心跳
 
-- 節點、金鑰、`IRORI_RELAY_URL` 的判定與 `relay/machine/identity.mjs` 相同：`IRORI_RELAY_ID` → `~/.irori-relay/node` → 橋正在跑的 `machine-<ID>` → 唯一有金鑰檔的節點；金鑰讀 `IRORI_RELAY_KEY` 或 `~/.irori-relay/<節點>.key`；`IRORI_RELAY_ANON_KEY` 或 `~/.irori-relay/anon.key` 用來訂 Realtime 門鈴（沒有就只輪詢）。
+- 節點、金鑰、`ASN_RELAY_URL` 的判定與 `relay/machine/identity.mjs` 相同：`ASN_RELAY_ID` → `~/.irori-relay/node` → 橋正在跑的 `machine-<ID>` → 唯一有金鑰檔的節點；金鑰讀 `ASN_RELAY_KEY` 或 `~/.irori-relay/<節點>.key`；`ASN_RELAY_ANON_KEY` 或 `~/.irori-relay/anon.key` 用來訂 Realtime 門鈴（沒有就只輪詢）。
 - **金鑰只存在 Rust 的記憶體**：HTTP（reqwest）與 WebSocket 都在 Rust 端做，前端拿不到金鑰，也不寫 log。
 - 暱稱＝視窗名＝對外寄信的 `from_agent`／收信的 agent 名：只有名單最上面那一格，預設 `<節點>-ASN`（登入時系統自動產生代號的新電腦改用 `<電腦名稱>-ASN`，畫面不會出現代號），直接改就是改對外名字（Rust 端驗證：去頭尾空白、1～40 字、不能結尾是「收發室」、不含控制字元；不合法就還原並提示），存在資料夾的 `settings.json`。介面其他地方不顯示節點代號或視窗名（設備名只在左側頁籤）。
 - 改名後舊名繼續收信：`settings.json` 的 `old_names` 記改名前用過的名字（最多 5 個、保留 7 天），每個舊名照樣用 `inbox&agent=<舊名>` 收信（ack 對同一個名字）並各寫一份心跳；過期就停。用 `inbox&agent=<視窗名>` 只收寄給這個名字的信，收到存檔後才 `ack&agent=`。
@@ -141,7 +145,7 @@ asn-cli attach --id <附件編號> [--out 路徑]
 
 ## 資料
 
-- 對話紀錄：`%APPDATA%\tw.irori.asn\asn-chats.json`（每位好友最近 200 則，只有信件內容與系統提示）；暱稱／狀態／通知開關（notify，舊版的 sound 讀入時轉成三個聲音開關）／自動檢查更新：`asn-me.json`。環境變數 `IRORI_ASN_DATA` 可改資料夾。
+- 對話紀錄：`%APPDATA%\tw.irori.asn\asn-chats.json`（每位好友最近 200 則，只有信件內容與系統提示）；暱稱／狀態／通知開關（notify，舊版的 sound 讀入時轉成三個聲音開關）／自動檢查更新：`asn-me.json`。環境變數 `ASN_DATA` 可改資料夾。
 - 信件內文與好友名稱是外部資料：顯示前一律跳脫（`ui/lib/text.mjs` 的 `esc`／`emo`），介面模板不准 v-html 原文（有守門測試）。
 
 ## 測試
@@ -154,7 +158,7 @@ node scripts/shot.mjs <資料夾>   # （環境變數 ASN_SHOT_AVATARS=1 會示�
 node scripts/mem.mjs             # 量閒置記憶體
 ```
 
-所有測試與截圖只連 `127.0.0.1` 的假 relay（`test/fake-relay.mjs`），不碰真實後端；`--shot` 若 `IRORI_RELAY_URL` 不是本機會直接拒絕。
+所有測試與截圖只連 `127.0.0.1` 的假 relay（`test/fake-relay.mjs`），不碰真實後端；`--shot` 若 `ASN_RELAY_URL` 不是本機會直接拒絕。
 
 ## 發版與自動更新
 

@@ -4,7 +4,7 @@
 //! 接在內文後面，和內文一起放進既有的外部資料區塊（橋的 <<<MAIL … MAIL>>>）。
 //!
 //! 下載指令是 ASN 自己的命令列：`<asn-cli 完整路徑> attach --id <編號>`（第四段；不再需要 Node）。
-//! 指令前綴的來源：環境變數 `IRORI_ATTACH_CMD`（整串，原樣使用）→ 和 ASN 同資料夾的 asn-cli。
+//! 指令前綴的來源：環境變數 `ASN_ATTACH_CMD`（舊名 IRORI_ATTACH_CMD；整串，原樣使用）→ 和 ASN 同資料夾的 asn-cli。
 use serde_json::Value;
 
 pub const MAX_ATTACHMENTS: usize = 4;
@@ -147,17 +147,17 @@ pub fn notes_for(body: &str, list: &[Attachment], cmd: Option<&str>) -> String {
 
 // ---- 命令列的位置 ------------------------------------------------------------------------------------
 
-/// 下載指令前綴：`IRORI_ATTACH_CMD` 整串優先；否則 ASN 自己的命令列（`<asn-cli 完整路徑> attach`，見 cli::cmd_prefix）
+/// 下載指令前綴：`ASN_ATTACH_CMD`（舊名 IRORI_ATTACH_CMD）整串優先；否則 ASN 自己的命令列（`<asn-cli 完整路徑> attach`，見 cli::cmd_prefix）
 pub fn attach_cmd_from_env() -> Option<String> {
-    if let Some(c) = std::env::var("IRORI_ATTACH_CMD").ok().filter(|s| !s.trim().is_empty()) {
+    if let Some(c) = crate::envc::get("ASN_ATTACH_CMD").filter(|s| !s.trim().is_empty()) {
         return Some(c.trim().to_string());
     }
     crate::cli::cmd_prefix("attach")
 }
 
-/// 群組「要看更多」用的指令前綴：`IRORI_ROOM_CMD` 整串優先；否則 `<asn-cli 完整路徑> room`
+/// 群組「要看更多」用的指令前綴：`ASN_ROOM_CMD`（舊名 IRORI_ROOM_CMD）整串優先；否則 `<asn-cli 完整路徑> room`
 pub fn room_cmd_from_env() -> Option<String> {
-    if let Some(c) = std::env::var("IRORI_ROOM_CMD").ok().filter(|s| !s.trim().is_empty()) {
+    if let Some(c) = crate::envc::get("ASN_ROOM_CMD").filter(|s| !s.trim().is_empty()) {
         return Some(c.trim().to_string());
     }
     crate::cli::cmd_prefix("room")

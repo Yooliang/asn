@@ -8,7 +8,7 @@ use sha1::{Digest, Sha1};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-pub const ROOM_HINT: &str = "（群組訊息；只有被點名或主人／希緒發問才需要回，回覆會經收發室貼回群組；不需要回就不要回）";
+pub const ROOM_HINT: &str = "（群組訊息；只有被點名或帳號擁有者本人發問才需要回，回覆會經收發室貼回群組；不需要回就不要回）";
 /// 轉交點名訊息時附的上下文：前面最近幾則
 pub const CONTEXT_COUNT: usize = 5;
 

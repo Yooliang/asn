@@ -1,10 +1,11 @@
+import { envGet } from './env-compat.mjs'
 // 收信 pull 失敗時的短退避重試（cloud-agent recv 與 machine recv 共用）。
 // 預設 5s→10s→20s→40s→60s（上限）；成功後重置。等待退避期間的門鈴會合併成一次 pull，且永不並行兩個 pull。
 export const DEFAULT_PULL_BACKOFF_MS = [5_000, 10_000, 20_000, 40_000, 60_000]
 
-// IRORI_PULL_BACKOFF_MS="5,10,20"（毫秒，逗號分隔）；測試用短間隔
+// ASN_PULL_BACKOFF_MS（舊名 IRORI_PULL_BACKOFF_MS）="5,10,20"（毫秒，逗號分隔）；測試用短間隔
 export function parsePullBackoffMs(env = process.env) {
-  const raw = (env.IRORI_PULL_BACKOFF_MS || '').trim()
+  const raw = (envGet(env, 'PULL_BACKOFF_MS') || '').trim()
   if (!raw) return undefined
   const arr = raw.split(',').map(s => Number(s.trim())).filter(n => Number.isFinite(n) && n > 0)
   return arr.length ? arr : undefined

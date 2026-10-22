@@ -39,25 +39,25 @@ issue #12 內建橋第五期。`BRIDGE-RUST.md` 的第一至四段讓 ASN 內建
 
 ## 3. 設計決定
 
-1. **載入規則**：沒設 `IRORI_ENGINES` 時自動判斷——`agents.json`（或 `IRORI_AGENTS_FILE`）存在才載 ACP、`~/.codex`（或 `CODEX_HOME`）資料夾存在才載 Codex。設了就照它（逗號分隔的 `acp`、`codex`；Claude 一律載入，`IRORI_ENGINES=claude` 即關掉其他引擎）。舊橋預設只載 Claude、靠 `run-bridge.ps1 -Engines` 開；內建橋改成自動，是因為換手後使用者不該再去改啟動參數。環境變數名稱仍沿用 `IRORI_*`（與 `core.rs` 其他設定一致，改名統一由 ONBOARDING 的 `ASN_` 計畫處理）。
+1. **載入規則**：沒設 `ASN_ENGINES`（舊名 `IRORI_ENGINES`）時自動判斷——`agents.json`（或 `ASN_AGENTS_FILE`）存在才載 ACP、`~/.codex`（或 `CODEX_HOME`）資料夾存在才載 Codex。設了就照它（逗號分隔的 `acp`、`codex`；Claude 一律載入，`ASN_ENGINES=claude` 即關掉其他引擎）。舊橋預設只載 Claude、靠 `run-bridge.ps1 -Engines` 開；內建橋改成自動，是因為換手後使用者不該再去改啟動參數。環境變數名稱改為 `ASN_*`，舊名 `IRORI_*` 照樣能用（#14 第一期，見 ONBOARDING 第 5 節與 `envc.rs`）。
 2. **設定與狀態沿用舊檔**：`agents.json`、`machine-<ID>/acp-workers.json`（各工作者的 session 編號，換橋後接續同一段對話；指令或協定換了就不沿用）。換手時使用者不用搬任何東西。
 3. **子程序一律無視窗＋乾淨環境**（守門測試 `守門_引擎的每個子程序都先清環境…`）：
    - ACP（兩種驅動）：`env_clear` 後只套用白名單（`PATH`、`USERPROFILE`、`HOME`、`APPDATA`…），不帶任何 `*_KEY`／`*_TOKEN`；設定檔 `env_pass` 列的才多帶，且名稱像金鑰的會被拒絕。登入狀態讀各 CLI 自己的憑證檔。
    - Codex：`env_clear` 後套用過濾清單——清掉 `OPENAI_API_KEY`／`CODEX_API_KEY`（帳務要走使用者的 ChatGPT 登入額度）、繼承來的 `CODEX_THREAD_ID` 等視窗識別、`NO_COLOR`、`CLAUDE*`、仲介金鑰；保留 `CODEX_HOME`。
 4. **只關自己記下的 PID**：每個引擎子程序的 PID 寫進 `machine-<ID>/engine.pids`，結束時劃掉；ASN 正常結束只停這些（先關 stdin 讓對方收尾，1.5 秒後仍在才強制結束並連子孫一起收，Windows 上 codex 是 node 包原生程式）。ASN 被硬砍後，下次啟動只關「帳本記著、仍活著、父程序是上一個橋」的子程序。不用名稱比對、不 `taskkill /IM`。
-5. **名單不卡住收信**：各引擎的名單由背景任務每 `IRORI_ROSTER_MS`（預設 60 秒）重列並快取，核心回報名單時只讀快取；名單有變（新增／消失／狀態／引擎名）立刻補報一次。啟動時第一次回報最多等 8 秒讓引擎先列一次，才不會把 Gemini、Codex 漏在第一份名單外。Codex 讀名單可能要啟動 `codex app-server`，慢不會拖住門鈴與輪詢。
+5. **名單不卡住收信**：各引擎的名單由背景任務每 `ASN_ROSTER_MS`（預設 60 秒）重列並快取，核心回報名單時只讀快取；名單有變（新增／消失／狀態／引擎名）立刻補報一次。啟動時第一次回報最多等 8 秒讓引擎先列一次，才不會把 Gemini、Codex 漏在第一份名單外。Codex 讀名單可能要啟動 `codex app-server`，慢不會拖住門鈴與輪詢。
 6. **預設代收者**：沒指定收件人且預設視窗不在線時，ACP 背景工作者**不代收**（`no_fallback`，同舊橋）；Codex 視窗可以（依 `updatedAt` 排最近有活動的）。
 7. **往來記錄路徑行**（#108 的 `corrlog`）：ACP 工作者只能讀自己的工作資料夾，讀不到 `~/.asn/handoff`，所以信件最後不附那一行；記錄本身照常寫。Claude、Codex 照舊附。
 8. **Codex 轉交一次一封、依收到的順序**：`codex queue` 由單一任務依序執行，對方視窗才會照順序處理；回覆帶著信件編號（`Reply.mail_id`），同一視窗連續兩封不會串（舊橋靠先進先出猜）。
 9. **登入／額度失敗後換新驅動**：ACP 工作者回報 `auth`／`quota` 後把驅動停掉，下一封重新啟動——使用者在終端機登入好之後，新啟動的行程才讀得到新的登入狀態。
-10. **Codex 的安全閘門不放寬**：視窗是「完全存取（沒有沙盒）」或讀不到權限設定一律不轉外部來信（fail-closed），`IRORI_CODEX_ALLOW_FULL_ACCESS=1` 才放行；信太長（預設 12000 字，命令列放不下）直接失敗；額度用完、沒登入在轉交時明確回報，不無聲失敗。
+10. **Codex 的安全閘門不放寬**：視窗是「完全存取（沒有沙盒）」或讀不到權限設定一律不轉外部來信（fail-closed），`ASN_CODEX_ALLOW_FULL_ACCESS=1` 才放行；信太長（預設 12000 字，命令列放不下）直接失敗；額度用完、沒登入在轉交時明確回報，不無聲失敗。
 11. **Windows 鎖檔判斷不開 PowerShell**：舊橋用 PowerShell 試開鎖檔判斷誰在用；內建橋直接以共用模式 0 開檔（`ERROR_SHARING_VIOLATION` 即持有中），少一個子程序、不閃視窗。非 Windows 只看檔案在不在。
 
 ## 4. 跟舊橋的行為差異
 
 | 項目 | 舊橋 | 內建橋 |
 |---|---|---|
-| 引擎載入 | 預設只有 claude，靠 `-Engines` | 自動（見上）；`IRORI_ENGINES` 可限縮 |
+| 引擎載入 | 預設只有 claude，靠 `-Engines` | 自動（見上）；`ASN_ENGINES` 可限縮 |
 | Codex 回覆對應 | 不帶信件編號，核心先進先出 | 帶信件編號，精確對上 |
 | 標準 ACP 的指令不存在 | 回報一般錯誤，工作者仍留在名單上 | 與 agy 一樣標為不可用、不列名單，約每分鐘重試一次 |
 | 登入／額度失敗後 | 沿用同一個驅動 | 換新驅動（見 3-9） |
@@ -78,7 +78,7 @@ issue #12 內建橋第五期。`BRIDGE-RUST.md` 的第一至四段讓 ASN 內建
 3. Gemini 要保持登入：ASN 是背景程式，不會替它開瀏覽器登入；失效時寄信會收到「需要登入…請到這台電腦前登入」並在名單標 `login-required`。
 4. Codex 要在 `~/.codex`（或 `CODEX_HOME`）有資料、版本 ≥ 0.154（已驗證 0.154.0）；視窗要先 `/rename` 取名才會列入名單，且必須是**普通沙盒**（完全存取的視窗不收外部來信）。Codex 預設沙盒沒有網路，視窗裡的程式連不上仲介，所以回信一律走橋自動寄回。
 5. 換手後先看 `machine-<ID>\bridge.log` 的 `acp:`、`codex` 開頭的行：設定錯誤、跳過的條目、版本不符、起不來的原因都記在這裡。
-6. 想回到舊行為：把 `IRORI_ENGINES=claude` 設在 ASN 的環境，或停掉內建橋、重新啟動舊橋（`bridge.pid` 的鎖會自動讓出）。
+6. 想回到舊行為：把 `ASN_ENGINES=claude` 設在 ASN 的環境，或停掉內建橋、重新啟動舊橋（`bridge.pid` 的鎖會自動讓出）。
 
 ## 7. 測試
 

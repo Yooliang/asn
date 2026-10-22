@@ -77,7 +77,7 @@ async function handle(line) {
   if (/@@CRASH/.test(body)) { process.stderr.write('fatal: boom\n'); process.exit(3) }
   if (/@@SLEEP/.test(body)) { out({ event: 'step_update', step_update: { conversation_id: conv, step_index: step++, state: 'ACTIVE', step_type: 'agent_response', text_delta: 'zzz' } }); return }
   if ((t = /@@ENV\s+(\S+)/.exec(body))) return resultOf(`[env ${t[1]}=${process.env[t[1]] ? 'present' : 'absent'}]`)
-  const hadPreamble = content.includes('Irori 收發室替你啟動的背景工作者')
+  const hadPreamble = content.includes('ASN 收發室替你啟動的背景工作者')
   out({ event: 'step_update', step_update: { conversation_id: conv, step_index: step++, state: 'DONE', step_type: 'agent_response', text_delta: 'x' } })
   resultOf(`收到：${body.trim().slice(0, 80)} [第${turns}輪 ${flags}${hadPreamble ? ' 含說明' : ''} cwd=${path.basename(process.cwd())}]`)
 }

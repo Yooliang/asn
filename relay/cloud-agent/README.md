@@ -78,7 +78,7 @@ node relay/cloud-agent/preflight.mjs
 
 會印出**後台主機代號**（Supabase 專案代號，不是完整網址）、本節點 whoami 是否成功、名冊上各節點是否在線。
 
-節點 `grok`（名稱「Grok 雲端」、kind grok）已註冊，金鑰由小良哥設成 `IRORI_RELAY_KEY`，所以這邊不用也不能註冊。
+節點 `grok`（名稱「Grok 雲端」、kind grok）已註冊，金鑰由小良哥設成 `ASN_RELAY_KEY`，所以這邊不用也不能註冊。
 （註冊用 `relay/machine/register.mjs`，在管理者自己的電腦跑，不是在雲端環境跑；roster 權限見 `supabase/sql/29_grok_roster.sql`，2026-10-20 已手動套用。）
 
 ## 三、讓它開機自動跑
@@ -124,19 +124,19 @@ echo "很長的內容" | node relay/cloud-agent/send.mjs --to W/W-政策 --body 
 **預設（自動掃描）**：`recv.mjs` 每 60 秒掃 Grok 夥伴並合併 `agents.json` 後回報收發室：
 
 1. **Grok 夥伴**：在 `GROK_AGENTS_DIR`（預設 `/home/box/agent-data/agents`）底下，每個 UUID 子目錄只讀 `profile.json` 的 `name`（不讀記憶、附件或資料庫）。
-2. **Claude Code 視窗**：預設**不列**（`IRORI_CLOUD_ROSTER_CLAUDE=1` 才執行 `claude agents --json`；雲端目前沒有把信轉進 Claude 視窗，開了會讓 ASN 看得到但收不到信）。
+2. **Claude Code 視窗**：預設**不列**（`ASN_CLOUD_ROSTER_CLAUDE=1` 才執行 `claude agents --json`；雲端目前沒有把信轉進 Claude 視窗，開了會讓 ASN 看得到但收不到信）。
 
-**與 agents.json 合併**（掃描開著時）：名字以掃描為主，`agents.json` 多列的也會收進名單；**同名**時 `status`、`cwd_label` 以 `agents.json` 為準（方便前台標忙碌）。掃描與手動都空時，才只回報預設那位（`IRORI_CLOUD_ROSTER_NAME`，預設 `Grok`）。
+**與 agents.json 合併**（掃描開著時）：名字以掃描為主，`agents.json` 多列的也會收進名單；**同名**時 `status`、`cwd_label` 以 `agents.json` 為準（方便前台標忙碌）。掃描與手動都空時，才只回報預設那位（`ASN_CLOUD_ROSTER_NAME`，預設 `Grok`）。
 
 手動檢查掃描結果：`node relay/cloud-agent/grok-agents.mjs`（JSON）或 `--names`。
 
-**關閉自動掃描**（只用固定名單）：設 `IRORI_CLOUD_ROSTER_AUTO=0`，在 `<信件目錄>/agents.json` 列出名單（每次讀取都重讀，改了不用重啟 recv）：
+**關閉自動掃描**（只用固定名單）：設 `ASN_CLOUD_ROSTER_AUTO=0`，在 `<信件目錄>/agents.json` 列出名單（每次讀取都重讀，改了不用重啟 recv）：
 
 ```json
 [{"name": "小真"}, {"name": "正見", "cwd_label": "policy"}, {"name": "牧陽"}, {"name": "檔案"}, {"name": "島作", "status": "busy"}]
 ```
 
-- 也可以用環境變數 `IRORI_CLOUD_AGENTS="小真,正見,牧陽"`；檔案優先於環境變數。關閉掃描且都沒有＝只有 `Grok` 一位。
+- 也可以用環境變數 `ASN_CLOUD_AGENTS="小真,正見,牧陽"`；檔案優先於環境變數。關閉掃描且都沒有＝只有 `Grok` 一位。
 - `status` 只認 `idle`（線上）、`busy`（忙碌）、`waiting`（暫離），其餘當 `idle`。掃描到的 Grok 夥伴預設 `idle`；要改狀態請在 `agents.json` 寫同名覆寫。
 - 看某一位的信：`node inbox.mjs --agent 正見`。沒指定收件代理、或收件代理不在名單上的信，算給預設那位（`Grok`），不會漏掉。
 - 以某一位的名義回信：`send.mjs … --from 正見`。寄件人必須在名單上，打錯字會被擋。
@@ -153,7 +153,7 @@ echo "很長的內容" | node relay/cloud-agent/send.mjs --to W/W-政策 --body 
 node --test "relay/cloud-agent/test/*.test.mjs"
 ```
 
-只連 127.0.0.1 的假後端，路徑全指到暫存資料夾（`tmpEnv` 預設 `IRORI_CLOUD_ROSTER_AUTO=0`、空的 `GROK_AGENTS_DIR`、假 Claude CLI），不會讀 Grok 雲端本機的 `/home/box/agent-data/agents` 或真的 `claude`。
+只連 127.0.0.1 的假後端，路徑全指到暫存資料夾（`tmpEnv` 預設 `ASN_CLOUD_ROSTER_AUTO=0`、空的 `GROK_AGENTS_DIR`、假 Claude CLI），不會讀 Grok 雲端本機的 `/home/box/agent-data/agents` 或真的 `claude`。
 `childEnv` 會先剔除 shell 裡的 `IRORI_*` 與 `ASN_*`（含 `start.sh` export 的金鑰與路徑），再套用測試值，所以在已設生產金鑰的環境裡跑測試也安全。Windows 也能跑。
 
 本 PR 只改 **relay/cloud-agent** 的改名相容；ASN 桌面版、machine 橋、channel、資料庫函式等全 repo 改名見 ONBOARDING 總表，不在此 PR 範圍。

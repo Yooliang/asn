@@ -27,8 +27,8 @@ export function errorText(e) {
 // 登入畫面按鈕是否可按（等待中不可再按；按「取消」才能重來）
 export const canStart = phase => phase === 'idle' || phase === 'error'
 
-// 這台電腦還沒綁到帳號時的小字提示（舊租戶還沒被管理者認領；登入後每次啟動會自動再試，不用按任何鈕）
-export const PENDING_HINT = '這台電腦尚未綁到你的帳號（管理者認領後會自動完成）'
+// 這台電腦還沒綁到帳號時的小字提示（舊租戶還沒被認領；登入後每次啟動會自動再試，不用按任何鈕）
+export const PENDING_HINT = '這台電腦尚未綁到你的帳號（認領後會自動完成）'
 
 // 設定頁「帳號登入」區塊：只顯示登入狀態（已登入的 email、登出；或尚未登入與登入鈕）
 //   status：{ signed_in, email }；info：{ node_count, this_node_mine } 或 null（還沒取到）

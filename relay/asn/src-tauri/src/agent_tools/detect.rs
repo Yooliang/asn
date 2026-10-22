@@ -21,7 +21,7 @@ fn pick_windows_candidate(where_output: &str) -> Option<String> {
 
 /// PATH 上第一個可執行檔路徑（與 agent-tools-detect.mjs 的 lookup 對齊）。
 pub fn resolve_binary(name: &str) -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("IRORI_ASN_MOCK_BIN_DIR") {
+    if let Some(p) = crate::envc::get("ASN_MOCK_BIN_DIR") {
         let base = PathBuf::from(p);
         let win = base.join(format!("{name}.exe"));
         if win.is_file() {

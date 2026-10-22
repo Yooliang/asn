@@ -195,7 +195,7 @@ test('守門：前端每個 invoke 的 relay_ 指令都有在 Rust 的 generate_
 test('守門：金鑰只在 Rust——前端沒有任何 x-relay-key、沒有 fetch 打收發室或儲存端；照片放大與另存走 Rust', () => {
   for (const f of ['ui/lib/photo.mjs', 'ui/lib/photo-canvas.mjs', 'ui/lib/chatpane.mjs', 'ui/lib/core.mjs', 'ui/lib/tauri.mjs']) {
     const src = read(f)
-    assert.ok(!/x-relay-key|IRORI_RELAY_KEY|(?<![.\w])fetch\s*\(|XMLHttpRequest|WebSocket/.test(src), `${f} 不該直接連網路或碰金鑰`)
+    assert.ok(!/x-relay-key|IRORI_RELAY_KEY|ASN_RELAY_KEY|(?<![.\w])fetch\s*\(|XMLHttpRequest|WebSocket/.test(src), `${f} 不該直接連網路或碰金鑰`)
   }
   const pane = read('ui/lib/chatpane.mjs')
   assert.ok(pane.includes('photoApi.fetch') && pane.includes('photoApi.save'))
