@@ -1,11 +1,11 @@
 {
-  "version": "0.1.41",
-  "notes": "封存：電腦右鍵與手機「⋯」可把夥伴從名單隱藏（帳號同步，對方上線或來信自動回到名單，名單底部可找回）；收信不再被 ASN 視窗自己的信擋住；改名後名單只留一筆；手機對話頁對方忙碌時標題列改黃底",
-  "pub_date": "2026-10-22T18:46:48.463Z",
+  "version": "0.1.42",
+  "notes": "從手機傳「/指令 參數」可直接在 Claude 視窗執行（限本人、等視窗閒置，做完回報結果）；改名、切換模型遇到視窗忙碌時改成排隊；名單不再列出 ASN 程式本身那一筆",
+  "pub_date": "2026-10-22T19:09:14.292Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjZ5SXhueFpWVm0vVmJ1UEY2U0p2V21sUnpLSW8ySFRnUzlhWFZxREFnR1c5VzA1RnM2WUl0YXAvR2xQaVU1RlZiTDlkT1lDNUdQWmFoVWVza0twNGdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjk0ODA4CWZpbGU6QVNOXzAuMS40MV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjQxClM4OG4vNHgva1VIOS9RK0sxcVFkSTRFakt5WFUwTXplS1V0d3MrR1Y3WkhMY2JCK3hGSEUyNzNQaXcvRVdiVW1pUVhtNENTMXVNbnA0TEwrYm9FcEFBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.41_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjlpYjcwQ0tYWjhnQzhYdUFjOTl0blFxVVZlNlhyZHBlQ2t5eGJ1RTVQVjJzbmVoUWhFMTFLdDNmSDV5NEVSVUIvY2NBOXpPMU5wQVdLaEY1S0hBdkF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjk2MTU0CWZpbGU6QVNOXzAuMS40Ml94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjQyCkVMU2VEOVE4VTBwV3hJOFd5RjBHKzZSQkNqQjcwV094RzVzOUxzb2xIMHNuUWsrd0NHRXk1eFZzTHVWeU9XczVSY2duTjEwK3hsMVNmaU5Ga1ZnTEFnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.42_x64-setup.exe"
     }
   }
 }
