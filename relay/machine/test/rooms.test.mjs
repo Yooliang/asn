@@ -144,6 +144,25 @@ test('bridge 群組：只轉 for_me；點名轉給對的視窗；owner 發的轉
   } finally { await st.close() }
 })
 
+test('bridge 群組：節點本身的訊息沒設預設收件視窗 → 不丟給任何 session（有一堆在線的），游標不前進；點名視窗的照轉', async () => {
+  const st = await fakeServer({
+    rooms: [room([
+      msg(2, { forMe: { '': true } }),                // 節點本身
+      msg(3, { forMe: { 'T-視窗甲': true } }),         // 點名視窗甲
+    ], [{ member: 'T~T-視窗甲', read_seq: 1 }, { member: 'T', read_seq: 1 }])],
+  })
+  try {
+    const { rec, cursor, log } = await runBridge({
+      script: 'bridge.mjs', workName: 'machine-T', st, setup: mainSetup, env: {},
+      until: ({ home, log }) => forwarded(home).length >= 1 && /member has no window and no default window online: kept/.test(log),
+    })
+    assert.deepEqual(rec.map(r => r.to), ['T-視窗甲'], '節點本身那則不能轉給 T-預設 或任何別的視窗')
+    assert.equal(cursor['R1|T'], 1, '節點成員游標不前進')
+    assert.equal(cursor['R1|T~T-視窗甲'], 3)
+    assert.doesNotMatch(log, /fallback/)
+  } finally { await st.close() }
+})
+
 test('bridge 群組：沒有游標且 read_seq=0 → 從 last_seq 起算不補播；既有游標檔不重播；視窗不可轉交→略過並推進游標', async () => {
   const st = await fakeServer({
     rooms: [room([

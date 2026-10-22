@@ -9,7 +9,7 @@ import { pickAnon } from './anon.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { pickFallbackAgent, fallbackNote } from './pick-fallback.mjs'
+import { unaddressedWindowNote } from './unaddressed.mjs'
 import { createLog } from './safe-log.mjs'
 import { contextText, createRooms, parseMember, roomText, roomUuid, NO_REPLY_RE as ROOM_NO_REPLY_RE } from './rooms.mjs'
 import { NO_REPLY_TIP, mailHead, parseSendHead, stripReplyHead, wantsReply } from './mail-format.mjs'
@@ -31,7 +31,7 @@ const BASE_URL = (envGet(process.env, 'RELAY_URL') || 'https://etccgmkrosbzpltud
 const HOME_DIR = path.join(os.homedir(), '.irori-relay')
 const WORK_DIR = path.join(HOME_DIR, `machine-${NODE_ID}`)
 const MAILBOX_NAME = envGet(process.env, 'MAILBOX_NAME') || `${NODE_ID}-收發室`
-const DEFAULT_AGENT = envGet(process.env, 'RELAY_DEFAULT_AGENT') || 'H-工頭-2'
+const DEFAULT_AGENT = (envGet(process.env, 'RELAY_DEFAULT_AGENT') || '').trim()   // 沒指定收件視窗的信交給誰；空＝不丟給任何 session（留在信箱，等 ASN 視窗的本人處理）
 const EXTRA_ALLOW = (envGet(process.env, 'RELAY_ALLOW') || '').split(',').map(s => s.trim()).filter(Boolean)
 const POLL_MS = Number(envGet(process.env, 'RELAY_POLL_MS') || 120_000)
 const ROSTER_MS = Number(envGet(process.env, 'ROSTER_MS') || 60_000)
@@ -91,7 +91,6 @@ const windowOf = name => roster.find(a => a.name === name) ?? agents.find(a => a
 const engineOfWindow = name => engineById(windowOf(name)?.engine) ?? engines[0]
 // 名單上顯示的引擎名：轉接器可用 engine_label 另外標示（例如 acp 轉接器的 Gemini 工作者回報 gemini）；路由仍依 engine（轉接器代號）
 const engineLabelOf = w => w?.engine_label ?? w?.engine
-const activityOf = w => (engineById(w.engine) ?? engines[0]).activityOf(w)
 const perEngine = new Map()   // engine id -> { all, windows }（最近一次成功的結果）
 let rosterWarned = false
 let rosterOk = false   // 第一次成功取得本機 session 清單前，群組訊息先不處理（避免把視窗誤判成不可轉交而跳過）
@@ -154,7 +153,7 @@ const noticed = new Map()     // 寄件人|收件視窗 -> {t, skipped}（逾時
 // 寄件人是任何節點的收發室（<節點>-收發室）：系統信，照常轉交但不計時、不互相寄通知
 const isMailboxSender = m => String(m?.from_agent ?? '').endsWith('收發室')
 const selfHandled = new Set() // mail ids already logged as left to the window's own recv
-const unrouted = new Set()   // mail ids already logged as waiting for the default agent
+const unrouted = new Set()   // mail ids already logged as kept in the inbox for the owner
 
 // 來信抬頭（mailHead，mail-format.mjs）：…id=<id> engine=<引擎> reply=yes|no|?（?＝舊信沒有 expects_reply 欄位）
 
@@ -422,18 +421,16 @@ async function handleMail(m) {
     if (!selfHandled.has(m.id)) { selfHandled.add(m.id); log(`id=${m.id} to=${m.to_agent} window receives by itself (recv heartbeat): bridge skips`) }
     return
   }
-  let target = m.to_agent || DEFAULT_AGENT
+  let target = m.to_agent
   let note = ''
-  if (!m.to_agent && !onlineNames().has(DEFAULT_AGENT)) {
-    // 預設收件視窗不在線：改交給最近有活動的互動式 session，都沒有才留在 inbox
-    const fb = pickFallbackAgent(roster, activityOf)
-    if (!fb) {
-      if (!unrouted.has(m.id)) { unrouted.add(m.id); log(`id=${m.id} has no to_agent and ${DEFAULT_AGENT} is offline and no interactive session online: left in inbox`) }
+  if (!target) {
+    // 沒指定收件視窗：只有設定了預設收件視窗而且它在線才交給它；否則不 ack、留在信箱給本人（ASN 視窗），不丟給隨便一個 session
+    if (!DEFAULT_AGENT || !onlineNames().has(DEFAULT_AGENT)) {
+      if (!unrouted.has(m.id)) { unrouted.add(m.id); log(`id=${m.id} has no to_agent: kept in inbox for the owner (ASN window), not acked`) }
       return
     }
-    target = fb.name
-    note = fallbackNote(DEFAULT_AGENT, fb.name)
-    log(`id=${m.id} has no to_agent and ${DEFAULT_AGENT} is offline: fallback to most recently active session ${fb.name}`)
+    target = DEFAULT_AGENT
+    note = unaddressedWindowNote(DEFAULT_AGENT)
   }
   const p = { mail: m, target, state: 'forwarding', t0: Date.now(), t: Date.now(), replied: false, noReply: !wantsReply(m.expects_reply, m.body) || isMailboxSender(m) }
   if (!forwardable(target)) {
@@ -461,13 +458,14 @@ async function handleRoomMsg(room, member, msg) {
   const { window } = parseMember(member)
   let target, note = ''
   if (!window) {
-    target = DEFAULT_AGENT
-    if (!onlineNames().has(DEFAULT_AGENT)) {
-      const fb = pickFallbackAgent(roster, activityOf)
-      if (!fb) { log(`room=${room.id} #${msg.seq} default agent offline and no session online: kept (cursor not advanced)`); return false }
-      target = fb.name
-      note = fallbackNote(DEFAULT_AGENT, fb.name)
+    // 節點本身的成員沒有對應的視窗：只交給設定的預設收件視窗；沒設或不在線就留著（游標不前進），不丟給隨便一個 session
+    if (!DEFAULT_AGENT || !onlineNames().has(DEFAULT_AGENT)) {
+      const key = `room:${room.id}:${msg.seq}:${member}`
+      if (!unrouted.has(key)) { unrouted.add(key); log(`room=${room.id} #${msg.seq} member has no window and no default window online: kept (cursor not advanced)`) }
+      return false
     }
+    target = DEFAULT_AGENT
+    note = unaddressedWindowNote(DEFAULT_AGENT)
   } else {
     target = window
     if (!forwardable(target)) { log(`room=${room.id} #${msg.seq} window ${target} not forwardable: skipped`); return true }

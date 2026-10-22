@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
+use std::path::PathBuf;
 
 pub struct Relay {
     client: reqwest::Client,
@@ -16,6 +17,14 @@ pub struct Relay {
     old: Mutex<Vec<OldName>>,
     /// 最近一次收信時「信件 id → 是從哪個名字的信箱拿到的」，ack 要對同一個名字送
     ack_agent: Mutex<HashMap<String, String>>,
+    /// 沒指定收件視窗、橋決定「交給本人」的信（原始內容）。ASN 視窗收信時一併交給畫面，由本人決定轉給誰或自己回；畫面確認收下（ack）才移除
+    unaddressed: Mutex<Vec<Value>>,
+    /// 剛 ack 掉的未指定收件人信件 id（橋晚一步才處理到同一封舊回應時，不能再把它收回來）
+    unaddressed_acked: Mutex<Vec<String>>,
+    /// 這個程式的內建橋正在跑（橋自己負責把沒指定收件人的信交給本人，這裡不再另外去節點信箱撈）
+    bridge_on: AtomicBool,
+    /// 存「誰負責撈節點信箱裡沒指定收件人的信」記號檔的資料夾（橋的工作資料夾）；None＝不做互斥（測試）
+    owner_dir: Mutex<Option<PathBuf>>,
     /// 在線狀態回報：目前的狀態與個人訊息（前端改了就更新並叫醒回報迴圈）
     presence: Mutex<(String, String)>,
     /// 後台還沒部署 asn_presence（404／400）：靜默停止回報，直到下次啟動
@@ -203,7 +212,7 @@ pub fn build_presence_body(window: &str, version: &str, status: &str, psm: &str)
 impl Relay {
     pub fn new(base: String, key: String, node: String, window: String) -> Relay {
         Relay {
-            client: reqwest::Client::new(), base, key, node, window: Mutex::new(window), old: Mutex::new(vec![]), ack_agent: Mutex::new(HashMap::new()),
+            client: reqwest::Client::new(), base, key, node, window: Mutex::new(window), old: Mutex::new(vec![]), ack_agent: Mutex::new(HashMap::new()), unaddressed: Mutex::new(vec![]), unaddressed_acked: Mutex::new(vec![]), bridge_on: AtomicBool::new(false), owner_dir: Mutex::new(None),
             presence: Mutex::new(("online".into(), String::new())), presence_off: AtomicBool::new(false), presence_closed: AtomicBool::new(false), update_requested: AtomicBool::new(false),
             presence_wake: tokio::sync::Notify::new(),
         }
@@ -337,8 +346,61 @@ impl Relay {
     pub async fn list(&self) -> Result<Value, String> {
         self.api("list", None).await
     }
+    /// 橋把一封沒指定收件視窗的信交給本人：留在信箱（不 ack），等 ASN 畫面收下。回傳 true＝新收到（同一封重複交來回 false）
+    pub fn hold_unaddressed(&self, raw: Value) -> bool {
+        let Some(id) = raw.get("id").and_then(Value::as_str).map(String::from) else { return false };
+        if self.unaddressed_acked.lock().unwrap().contains(&id) {
+            return false;
+        }
+        let mut held = self.unaddressed.lock().unwrap();
+        if held.iter().any(|m| m.get("id").and_then(Value::as_str) == Some(id.as_str())) {
+            return false;
+        }
+        held.push(raw);
+        true
+    }
+    pub fn set_bridge_running(&self, on: bool) {
+        self.bridge_on.store(on, Ordering::Relaxed);
+    }
+    pub fn set_owner_dir(&self, dir: PathBuf) {
+        *self.owner_dir.lock().unwrap() = Some(dir);
+    }
+    /// 同一個節點上只讓一個 ASN 程式去撈沒指定收件人的信（免得兩個視窗各顯示一次）：記號檔 owner-inbox.pid 放負責的 pid。
+    /// 內建橋在跑的程式一律拿走記號；沒跑橋的程式只在記號檔沒人（或那個 pid 已死）時才拿
+    fn owns_unaddressed(&self) -> bool {
+        let Some(dir) = self.owner_dir.lock().unwrap().clone() else { return true };
+        let (f, me) = (dir.join("owner-inbox.pid"), std::process::id());
+        if !self.bridge_on.load(Ordering::Relaxed) {
+            let other = std::fs::read_to_string(&f).ok().and_then(|s| s.trim().parse::<u32>().ok());
+            if other.map(|p| p != me && crate::heartbeat::pid_alive(p)).unwrap_or(false) {
+                return false;
+            }
+        }
+        let _ = std::fs::write(&f, me.to_string());
+        true
+    }
+    /// 沒有內建橋的 ASN（舊版收發室橋在跑，或沒有橋）自己去節點信箱撈沒指定收件人的信，一樣交給本人。
+    /// 讀法是既有的節點信箱讀取（不新增後台動作、舊後端照用），只取 to_agent 為空的；舊橋不會 ack 這類信
+    async fn pull_unaddressed(&self) {
+        if self.bridge_on.load(Ordering::Relaxed) || !self.owns_unaddressed() {
+            return;
+        }
+        let Ok(v) = self.api("inbox", None).await else { return };
+        for m in v.get("messages").and_then(Value::as_array).cloned().unwrap_or_default() {
+            let none = m.get("to_agent").and_then(Value::as_str).map(str::is_empty).unwrap_or(true);
+            let from = m.get("from_agent").and_then(Value::as_str).unwrap_or("");
+            if none && !from.ends_with("收發室") {
+                self.hold_unaddressed(m);
+            }
+        }
+    }
+    /// 目前等著交給本人的信件 id
+    pub fn unaddressed_ids(&self) -> Vec<String> {
+        self.unaddressed.lock().unwrap().iter().filter_map(|m| m.get("id").and_then(Value::as_str).map(String::from)).collect()
+    }
     pub async fn inbox(&self) -> Result<Value, String> {
         let names = self.active_names();
+        self.pull_unaddressed().await;
         let mut all: Vec<Value> = vec![];
         let mut map = HashMap::new();
         for (i, w) in names.iter().enumerate() {
@@ -359,6 +421,15 @@ impl Relay {
                 }
             }
         }
+        // 沒指定收件視窗的信：以本視窗名義交給畫面（標記 unaddressed）；ack 走節點信箱（對應名字留空）
+        for raw in self.unaddressed.lock().unwrap().iter() {
+            let Some(id) = raw.get("id").and_then(Value::as_str) else { continue };
+            let mut m = raw.clone();
+            m["to_agent"] = json!(names[0]);
+            m["unaddressed"] = json!(true);
+            map.insert(id.to_string(), String::new());
+            all.push(m);
+        }
         *self.ack_agent.lock().unwrap() = map;
         Ok(json!({ "messages": all }))
     }
@@ -378,8 +449,18 @@ impl Relay {
         }
         let mut acked = 0u64;
         for (agent, group) in by {
-            let r = self.api(&format!("ack&agent={}", encode_component(&agent)), Some(build_ack_body(&group)?)).await?;
+            let action = if agent.is_empty() { "ack".to_string() } else { format!("ack&agent={}", encode_component(&agent)) };
+            let r = self.api(&action, Some(build_ack_body(&group)?)).await?;
             acked += r.get("acked").and_then(Value::as_u64).unwrap_or(0);
+            if agent.is_empty() {
+                self.unaddressed.lock().unwrap().retain(|m| !m.get("id").and_then(Value::as_str).map(|i| group.iter().any(|g| g == i)).unwrap_or(false));
+                let mut done = self.unaddressed_acked.lock().unwrap();
+                done.extend(group.iter().cloned());
+                let n = done.len();
+                if n > 200 {
+                    done.drain(..n - 200);
+                }
+            }
         }
         Ok(json!({ "acked": acked }))
     }

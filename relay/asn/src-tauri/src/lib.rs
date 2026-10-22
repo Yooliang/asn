@@ -586,6 +586,11 @@ fn bridge_set_enabled(m: State<'_, bridge::Manager>, on: bool) -> Result<bridge:
 fn bridge_set_remote_launch(m: State<'_, bridge::Manager>, on: bool) -> Result<bridge::Status, String> {
     m.set_remote_launch(on)
 }
+
+#[tauri::command]
+fn bridge_set_unaddressed_to(m: State<'_, bridge::Manager>, name: String) -> Result<bridge::Status, String> {
+    m.set_unaddressed_to(&name)
+}
 /// 「改由 ASN 負責」：停掉舊版收發室橋（要使用者確認、要設定開關放行）再啟動內建橋
 #[tauri::command]
 async fn bridge_takeover(m: State<'_, bridge::Manager>, confirmed: bool) -> Result<bridge::Status, String> {
@@ -669,6 +674,9 @@ pub fn run() {
     }
     let state = App { relay: relay_obj.clone(), init_error, node: node.clone(), work_dir: work_dir.clone(), data_dir, shot };
     let anon_url = relay_obj.as_ref().zip(anon).and_then(|(r, a)| bell::ws_url(r.base(), &a));
+    if let Some(r) = &relay_obj {
+        r.set_owner_dir(work_dir.clone());
+    }
     let bridge_mgr = bridge::Manager::new(relay_obj.clone(), anon_url.clone(), node.clone(), work_dir.clone(), bridge_data_dir);
 
     let app = tauri::Builder::default()
@@ -686,7 +694,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_partner_list, relay_partner_succeed, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, ads::ads_fetch, set_window_name, set_presence, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_takeover, cli_info, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_partner_list, relay_partner_succeed, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, ads::ads_fetch, set_window_name, set_presence, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_mod::claude_mod_status,
             codex_accounts::codex_account_current, usage::usage_summary,

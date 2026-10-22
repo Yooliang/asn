@@ -1,11 +1,11 @@
 {
-  "version": "0.1.29",
-  "notes": "設定「帳號」新增「邀請雲端代理」：產生給代理的說明與只顯示一次的金鑰、可撤銷（#13）；Claude 外掛跟著 ASN 一起更新",
-  "pub_date": "2026-10-22T04:25:07.624Z",
+  "version": "0.1.30",
+  "notes": "沒指定收件視窗的信改交給本人（顯示「未指定收件人」），不再丟給隨便一個視窗；可在設定指定交給哪個視窗",
+  "pub_date": "2026-10-22T05:28:33.111Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjA2NTZWWlFFdWJPQTZXSmhMb3phS1M4MVR0TlgvNnlzZXhsWTRrM3k4WmNkVHZaYlpzMmZhMGVPS1VPL2pHNmFHWFRnTkJGTThLVEFoWVViTmtQK0E4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjQzMTA3CWZpbGU6QVNOXzAuMS4yOV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjI5CjhJSjNucFY5c2VlMGRXcDJ0RW15K0QwVXM4VDJhdGVDanFrU29meUpTMVByYXkwODRVRlhYN1JpeW5pZE9ZcktPNmxuM1Z6Nm5rZVIwODJGSmZyWkJRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.29_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjBydUhqYXlrMm00Q0J2eWtHMHI0ZENaekEySmcva01iZytHaHIyVkZVT0FEeUhZOFgrZWhGSUpYNXI0UEt2bnpITnllTEw5Z3RwQml5U29RZFc4cndNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNjQ2OTEzCWZpbGU6QVNOXzAuMS4zMF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjMwCldpWUtrL045OCtEQk52N2sxZHBQMFpnRjJwMEpIZ0VHT0ppNi9oMlN6bkJMMnh2a2xyM2pHdmVOUE1KZ2oydzYyRWpMR21hdEIwN05PN0NmelZnRUR3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.30_x64-setup.exe"
     }
   }
 }

@@ -95,8 +95,8 @@ test('橋＋acp：沒登入——寄件人收到說明（不吞信），信被 a
   assert.match(note.body, /^\[收發室\] 轉交給 Gemini 失敗：Gemini 需要登入/)
 })
 
-test('橋＋acp：沒指定收件人且預設視窗不在線——背景工作者不代收（信留在 inbox）', async () => {
-  const r = await run({ inbox: [mail(1, { to_agent: null })], workers: [worker()], until: c => /no interactive session online/.test(c.log) })
+test('橋＋acp：沒指定收件人——背景工作者不代收（信留在 inbox 給本人）', async () => {
+  const r = await run({ inbox: [mail(1, { to_agent: null })], workers: [worker()], until: c => /kept in inbox for the owner/.test(c.log) })
   assert.equal(r.st.acked.has(uid(1)), false)
   assert.equal(r.st.sent.length, 0)
 })

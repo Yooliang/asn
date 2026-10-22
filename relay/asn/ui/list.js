@@ -103,9 +103,9 @@ try {
   if (autostart.supported) autostart.on = await invoke('autostart_get')
 } catch { /* 沒有這些指令（舊版後端）就不顯示 */ }
 // 內建收發室橋（預設關）：狀態以 Rust 端為準，不存檔。程式在 bridge/
-const bridge = reactive({ enabled: false, running: false, legacy: false, takeoverAllowed: false, remoteLaunch: false, error: '', busy: false, confirm: false, shown: false })
+const bridge = reactive({ enabled: false, running: false, legacy: false, takeoverAllowed: false, remoteLaunch: false, unaddressedTo: '', error: '', busy: false, confirm: false, shown: false })
 const applyBridgeStatus = s => {
-  Object.assign(bridge, { enabled: s.enabled === true, running: s.running === true, legacy: s.legacy === true, takeoverAllowed: s.takeover_allowed === true, remoteLaunch: s.remote_launch === true, error: s.error || '', shown: true })
+  Object.assign(bridge, { enabled: s.enabled === true, running: s.running === true, legacy: s.legacy === true, takeoverAllowed: s.takeover_allowed === true, remoteLaunch: s.remote_launch === true, unaddressedTo: typeof s.unaddressed_to === 'string' ? s.unaddressed_to : '', error: s.error || '', shown: true })
 }
 try { applyBridgeStatus(await invoke('bridge_status')) } catch { /* 舊版後端沒有這個指令就不顯示 */ }
 // 命令列（asn-cli）：Claude 視窗用它寄信、收信、看群組、下載附件。設定頁顯示完整路徑，可複製。程式在 cli/
@@ -761,6 +761,7 @@ const app = createApp({
     }
     const setBridgeEnabled = on => runBridge(() => invoke('bridge_set_enabled', { on }))
     const setBridgeRemoteLaunch = on => runBridge(() => invoke('bridge_set_remote_launch', { on }))
+    const setBridgeUnaddressed = name => runBridge(() => invoke('bridge_set_unaddressed_to', { name: String(name ?? '') }))
     const takeoverBridge = () => runBridge(() => invoke('bridge_takeover', { confirmed: true }))
     // 指引、設定的聊天窗（openPanel／closePanel 在上面）：列表只負責「點一項就開」，內容在右邊分頁或獨立視窗
     const panelGuide = computed(() => panelItem('guide', ui.panel.guide))
@@ -924,7 +925,7 @@ const app = createApp({
         remote: { node: accounts.state.remote.node, devices: accounts.remoteNodes(), list: accounts.state.remote.list, loading: accounts.state.remote.loading, busy: accounts.state.remote.busy, msg: accounts.state.remote.msg },
       },
       closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy },
-      bridge: bridge.shown ? { enabled: bridge.enabled, running: bridge.running, legacy: bridge.legacy, takeoverAllowed: bridge.takeoverAllowed, remoteLaunch: bridge.remoteLaunch, error: bridge.error, busy: bridge.busy, confirm: bridge.confirm } : null,
+      bridge: bridge.shown ? { enabled: bridge.enabled, running: bridge.running, legacy: bridge.legacy, takeoverAllowed: bridge.takeoverAllowed, remoteLaunch: bridge.remoteLaunch, unaddressedTo: bridge.unaddressedTo, error: bridge.error, busy: bridge.busy, confirm: bridge.confirm } : null,
       cli: cliInfo.shown ? { path: cliInfo.path, example: cliInfo.example, copied: cliInfo.copied } : null,
       autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual, status: updateStatus({ checking: upd.checking, phase: upd.phase, info: upd.info, lastCheck: upd.lastCheck, error: upd.checkErr, current: info.version }) },
       usage: { loading: usage.state.loading, error: usage.state.error, data: usage.state.data, updated: usage.state.updated },
@@ -955,6 +956,7 @@ const app = createApp({
         case 'autostart': await setAutostart(value === true); break
         case 'bridge-enable': await setBridgeEnabled(value === true); break
         case 'bridge-launch': await setBridgeRemoteLaunch(value === true); break
+        case 'bridge-unaddressed': await setBridgeUnaddressed(value); break
         case 'bridge-takeover': bridge.confirm = true; break
         case 'bridge-takeover-yes': await takeoverBridge(); break
         case 'bridge-takeover-no': bridge.confirm = false; break

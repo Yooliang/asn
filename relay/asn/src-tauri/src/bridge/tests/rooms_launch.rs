@@ -229,18 +229,19 @@ async fn 群組_橋重啟後還在等的群組訊息回覆仍貼得回_群組項
 }
 
 #[tokio::test]
-async fn 群組_預設收件視窗不在線_節點本身的訊息改交最近有活動的視窗_都沒有就留著不前進() {
+async fn 群組_節點本身的訊息_只交給設定的視窗_不在線就留著不前進_不丟給隨便一個視窗() {
     let mut h = harness(&[("T-乙", "idle")]).await; // 預設 T-甲 不在線
     set_rooms(&h, vec![room(vec![rmsg(2, json!({"forMe": {"": true}}))], json!([{"member": "T", "read_seq": 1}]))]);
     h.core.pull("test", T0).await;
-    let f = fwd(&h.said());
-    assert_eq!(f[0].1, "T-乙");
-    assert!(f[0].2.contains("[收發室] 這封信原本要給「T-甲」，但它不在線，請你（T-乙）代收並轉告／處理。"), "有代收說明：{}", f[0].2);
-    let mut g = harness(&[]).await;
+    assert!(h.said().is_empty(), "T-乙 不是被指定的視窗，不能代收");
+    assert_eq!(cursor_file(&h)["R1|T"].as_u64(), Some(1), "游標不前進");
+    // 預設視窗在線：照舊交給它，附說明
+    let mut g = harness(&[("T-甲", "idle"), ("T-乙", "idle")]).await;
     set_rooms(&g, vec![room(vec![rmsg(2, json!({"forMe": {"": true}}))], json!([{"member": "T", "read_seq": 1}]))]);
     g.core.pull("test", T0).await;
-    assert!(g.said().is_empty());
-    assert_eq!(cursor_file(&g)["R1|T"].as_u64(), Some(1));
+    let f = fwd(&g.said());
+    assert_eq!(f[0].1, "T-甲");
+    assert!(f[0].2.contains("[收發室] 這封信沒有指定收件視窗，依設定交給你（T-甲）處理。"), "有說明：{}", f[0].2);
 }
 
 // ================================================================================================
@@ -672,7 +673,7 @@ async fn 遠端開視窗_真的開一個隱藏視窗_假視窗程式登記成_se
 fn 設定_允許遠端開視窗預設關_來回一致() {
     let d = tempfile::tempdir().unwrap();
     assert!(!super::super::read_settings(d.path()).allow_remote_launch);
-    super::super::write_settings(d.path(), super::super::BridgeSettings { enabled: true, allow_takeover: false, allow_remote_launch: true }).unwrap();
+    super::super::write_settings(d.path(), super::super::BridgeSettings { enabled: true, allow_remote_launch: true, ..Default::default() }).unwrap();
     let s = super::super::read_settings(d.path());
     assert!(s.enabled && s.allow_remote_launch && !s.allow_takeover);
     // 舊版寫的檔（沒有這個欄位）當作關

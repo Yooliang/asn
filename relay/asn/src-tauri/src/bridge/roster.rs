@@ -11,7 +11,7 @@ pub struct Window {
     pub status: Option<String>,
     pub cwd: String,
     pub pid: u32,
-    /// 最後活動時間（毫秒），預設收件視窗不在線時挑最近活動的
+    /// 最後活動時間（毫秒）
     pub updated_at: u64,
     /// Claude 的 session 編號（session 檔的 sessionId）；夥伴 ID 用它判斷「同一位夥伴換名或換 session」（#109）
     pub session_id: Option<String>,
