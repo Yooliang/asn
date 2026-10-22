@@ -4,29 +4,69 @@ import { bashRepliedTo, endsWithQuestion, parseRelayHead, planAutoReply, trackFr
 const ID = '11111111-2222-3333-4444-555555555555'
 const ID2 = '99999999-2222-3333-4444-555555555555'
 const CLI = 'C:/ASN/asn-cli.exe'
-const head = (o: { trust?: string; from?: string; reply?: string } = {}) =>
-  `[RELAY 來信] trust=${o.trust ?? 'member'} from=${o.from ?? 'W/W-政策'} to=T-甲 id=${ID} engine=claude reply=${o.reply ?? 'yes'}`
+// 逐字樣本：第一行；第二行寄件人說明；第三行（只有 reply=yes）【要回信】
+const head = (o: { trust?: string; from?: string; reply?: string; sender?: string; id?: string } = {}) => {
+  const from = o.from ?? 'W/W-政策'
+  const id = o.id ?? ID
+  const reply = o.reply ?? 'yes'
+  const l1 = `[RELAY 來信] trust=${o.trust ?? 'member'} from=${from} to=T-甲 id=${id} engine=claude reply=${reply}`
+  const l2 = `寄件人：${o.sender ?? 'asn（「小良的家用機」上的 Claude 視窗，成員身分）'}`
+  const l3 = `【要回信】回信位址=${from} 信件編號=${id}：在視窗裡直接回答，對方看不到；請用 asn_send 寄回。`
+  return reply === 'yes' ? `${l1}
+${l2}
+${l3}` : `${l1}
+${l2}`
+}
 
-test('信頭解析：舊版一行、新版加【要回信】行、舊信沒有 reply 欄位', () => {
-  expect(parseRelayHead(`${head()}\n內文`)).toMatchObject({ trust: 'member', from: 'W/W-政策', id: ID, reply: 'yes', body: '內文' })
-  const n = parseRelayHead(`${head({ reply: '?' })}\n【要回信】請回給 Z/Z-乙（reply-to ${ID2}）\n內文`)
+test('信頭解析：新版三行、舊信只有第一行、無 reply 欄位', () => {
+  expect(parseRelayHead(`${head()}
+內文`)).toMatchObject({ trust: 'member', from: 'W/W-政策', id: ID, reply: 'yes', replyLine: { to: 'W/W-政策', id: ID }, body: '內文' })
+  expect(parseRelayHead(`${head()}
+內文`)?.sender).toContain('成員身分')
+  // 第三行以它為準（欄位遇空白或全形冒號結束）
+  const n = parseRelayHead(`[RELAY 來信] trust=member from=A/B to=C id=${ID} engine=claude reply=yes
+寄件人：x
+【要回信】回信位址=Z/Z-乙 信件編號=${ID2}：在視窗裡
+內文`)
   expect(n?.replyLine).toEqual({ to: 'Z/Z-乙', id: ID2 })
   expect(n?.body).toBe('內文')
-  const m = parseRelayHead(`${head()}\n【要回信】asn-cli send --to Q/Q-丙 --reply-to ${ID2}\nx`)
-  expect(m?.replyLine).toEqual({ to: 'Q/Q-丙', id: ID2 })
-  expect(parseRelayHead(`[RELAY 來信] trust=member from=A/B to=C id=${ID} engine=claude\nhi`)?.reply).toBe('')
+  // 舊信：只有第一行
+  const old = parseRelayHead(`[RELAY 來信] trust=member from=A/B to=C id=${ID} engine=claude reply=yes
+hi`)
+  expect(old).toMatchObject({ from: 'A/B', reply: 'yes', body: 'hi' })
+  expect(old?.replyLine).toBeUndefined()
+  expect(parseRelayHead(`[RELAY 來信] trust=member from=A/B to=C id=${ID} engine=claude
+hi`)?.reply).toBe('')
   expect(parseRelayHead('隨便打的字')).toBeUndefined()
+  // 舊的猜測寫法不再認
+  expect(parseRelayHead(`${head({ reply: 'no' })}
+【要回信】請回給 Z/Z-乙（reply-to ${ID2}）
+內文`)?.replyLine).toBeUndefined()
 })
 
-test('記不記：reply=yes 或有【要回信】才記；no／?／收發室／系統信／非 member 不記', () => {
-  expect(trackFromText(`${head()}\n做事`, 't1')).toEqual({ turnId: 't1', from: 'W/W-政策', id: ID })
-  expect(trackFromText(`${head({ reply: '?' })}\n【要回信】回給 Z/Z-乙 id=${ID2}\n做事`, 't1')).toEqual({ turnId: 't1', from: 'Z/Z-乙', id: ID2 })
-  expect(trackFromText(`${head({ reply: 'no' })}\n做事`, 't1')).toBeUndefined()
-  expect(trackFromText(`${head({ reply: '?' })}\n做事`, 't1')).toBeUndefined()
-  expect(trackFromText(`${head({ from: '收發室/系統' })}\n做事`, 't1')).toBeUndefined()
-  expect(trackFromText(`${head()}\n［收發室］你有一封信逾時`, 't1')).toBeUndefined()
-  expect(trackFromText(`${head()}\n[收發室] 提醒`, 't1')).toBeUndefined()
-  expect(trackFromText(`${head({ trust: 'system' })}\n做事`, 't1')).toBeUndefined()
+test('記不記：reply=yes 才記（第三行為準）；no／舊信 ?／收發室／系統信／非 member 不記', () => {
+  expect(trackFromText(`${head()}
+做事`, 't1')).toEqual({ turnId: 't1', from: 'W/W-政策', id: ID })
+  expect(trackFromText(`[RELAY 來信] trust=member from=A/B to=C id=${ID} engine=claude reply=yes
+寄件人：x
+【要回信】回信位址=Z/Z-乙 信件編號=${ID2}：x
+做事`, 't1')).toEqual({ turnId: 't1', from: 'Z/Z-乙', id: ID2 })
+  expect(trackFromText(`${head({ from: 'u:ab12cd', trust: 'owner', sender: '小良（本人，帳號簽章已驗證，從「Oppo 手機」寄出）' })}
+做事`, 't1')?.from).toBe('u:ab12cd')
+  expect(trackFromText(`${head({ reply: 'no' })}
+做事`, 't1')).toBeUndefined()
+  expect(trackFromText(`[RELAY 來信] trust=member from=A/B to=C id=${ID} engine=claude reply=?
+做事`, 't1')).toBeUndefined()
+  expect(trackFromText(`${head({ from: '收發室/系統' })}
+做事`, 't1')).toBeUndefined()
+  expect(trackFromText(`${head({ sender: '收發室（系統通知）' })}
+做事`, 't1')).toBeUndefined()
+  expect(trackFromText(`${head()}
+［收發室］你有一封信逾時`, 't1')).toBeUndefined()
+  expect(trackFromText(`${head()}
+[收發室] 提醒`, 't1')).toBeUndefined()
+  expect(trackFromText(`${head({ trust: 'system' })}
+做事`, 't1')).toBeUndefined()
   expect(trackFromText('我自己打的字', 't1')).toBeUndefined()
 })
 
@@ -98,12 +138,30 @@ test('答案是問句：--reply 並加「（對方在問）」', OPT, async ($, 
   expect(r.ran).toEqual([[CLI, 'send', '--to', 'W/W-政策', '--body', '（對方在問）要用 A 還是 B？', '--reply', '--reply-to', ID]])
 })
 
-test('新版【要回信】行：寄到行內位址、帶行內 id', OPT, async ($, on) => {
+test('新版第三行：寄到行內位址、帶行內 id', OPT, async ($, on) => {
   const r = await rig($, on)
-  await $.turn.start({ text: `${head({ reply: '?' })}\n【要回信】請回給 Z/Z-乙（reply-to ${ID2}）\n內文`, turnId: 't1' })
+  await $.turn.start({ text: `[RELAY 來信] trust=member from=A/B to=C id=${ID} engine=claude reply=yes
+寄件人：x
+【要回信】回信位址=Z/Z-乙 信件編號=${ID2}：x
+內文`, turnId: 't1' })
   await done($, 'ok')
-  expect(r.ran[0].slice(0, 4)).toEqual([CLI, 'send', '--to', 'Z/Z-乙'])
-  expect(r.ran[0]).toContain(ID2)
+  expect(r.ran).toEqual([[CLI, 'send', '--to', 'Z/Z-乙', '--body', 'ok', '--no-reply', '--reply-to', ID2]])
+})
+
+test('本人寄的信：回信位址 u:xxxx 原樣帶進 --to', OPT, async ($, on) => {
+  const r = await rig($, on)
+  await $.turn.start({ text: `${head({ from: 'u:ab12cd', trust: 'owner', sender: '小良（本人，帳號簽章已驗證，從「Oppo 手機」寄出）' })}
+幫我查`, turnId: 't1' })
+  await done($, '查好了')
+  expect(r.ran).toEqual([[CLI, 'send', '--to', 'u:ab12cd', '--body', '查好了', '--no-reply', '--reply-to', ID]])
+})
+
+test('寄件人說明含「收發室」：當系統信，不寄', OPT, async ($, on) => {
+  const r = await rig($, on)
+  await $.turn.start({ text: `${head({ sender: '收發室（系統通知）' })}
+逾時提醒`, turnId: 't1' })
+  await done($, 'ok')
+  expect(r.ran.length).toBe(0)
 })
 
 test('本輪已用 asn_send 回過：不重複寄', OPT, async ($, on) => {

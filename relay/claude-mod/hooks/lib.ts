@@ -180,17 +180,18 @@ export type RelayHead = {
   from: string
   id: string
   reply: 'yes' | 'no' | '?' | ''
-  // 新版信頭另有一行「【要回信】…」：帶回信位址與信件 id（任一缺就退回第一行的 from／id）
+  sender?: string // 第二行「寄件人：<可讀說明>」
+  // 第三行（只有 reply=yes 才有）：【要回信】回信位址=<位址> 信件編號=<id>：…；有它就以它為準
   replyLine?: { to?: string; id?: string }
   body: string
 }
 
 const UUID = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
-const ADDR = '([^\\s"\'，,。;；（）()「」]+)'
 
 // 解析開頭文字。不是 `[RELAY 來信]` 開頭回 undefined。
-// 第一行：[RELAY 來信] trust=… from=<節點>/<代理> to=… id=<uuid> engine=… reply=yes|no|?（舊信沒有 reply 欄位）
-// 新版另有一行（開頭 6 行內）：【要回信】…（內含回信位址與 id；位址可寫 `--to X`、`to=X`、`回給 X`、`寄給 X`）
+// 第一行：[RELAY 來信] trust=<owner|member> from=<回信位址> to=<視窗> id=<信件id> engine=… reply=<yes|no>（舊信沒有 reply 欄位）
+// 第二行：寄件人：<可讀說明>
+// 第三行（只有 reply=yes）：【要回信】回信位址=<位址> 信件編號=<id>：…（值不含空白，遇空白或全形冒號結束）
 export function parseRelayHead(text: string): RelayHead | undefined {
   const s = String(text ?? '').replace(/^﻿/, '').trimStart()
   const lines = s.split(/\r?\n/)
@@ -200,23 +201,22 @@ export function parseRelayHead(text: string): RelayHead | undefined {
   const from = /\sfrom=(.*?)\s+to=/.exec(first)?.[1]?.trim() ?? /\sfrom=(\S+)/.exec(first)?.[1] ?? ''
   const id = new RegExp(`\\sid=(${UUID})`).exec(first)?.[1]?.toLowerCase() ?? ''
   const reply = (/\sreply=(yes|no|\?)[ \t]*$/.exec(first)?.[1] ?? '') as RelayHead['reply']
-  let replyLine: RelayHead['replyLine']
   let bodyStart = 1
-  for (let i = 1; i < Math.min(lines.length, 7); i++) {
-    const m = /^\s*【要回信】(.*)$/.exec(lines[i])
-    if (m) {
-      const rest = m[1]
-      const to =
-        new RegExp(`--to[ =]+${ADDR}`).exec(rest)?.[1] ??
-        new RegExp(`\\bto=${ADDR}`).exec(rest)?.[1] ??
-        new RegExp(`(?:回給|寄給|回信給|回信位址|位址)[:：\\s]*${ADDR}`).exec(rest)?.[1]
-      const rid = new RegExp(`(${UUID})`).exec(rest)?.[1]?.toLowerCase()
-      replyLine = { ...(to ? { to } : {}), ...(rid ? { id: rid } : {}) }
-      bodyStart = i + 1
-      break
-    }
+  let sender: string | undefined
+  const sm = /^寄件人：(.*)$/.exec((lines[1] ?? '').trim())
+  if (sm) {
+    sender = sm[1].trim()
+    bodyStart = 2
   }
-  return { trust, from, id, reply, ...(replyLine ? { replyLine } : {}), body: lines.slice(bodyStart).join('\n').trim() }
+  let replyLine: RelayHead['replyLine']
+  const l3 = lines[bodyStart] ?? ''
+  if (/^\s*【要回信】/.test(l3)) {
+    const to = /回信位址=([^\s：]+)/.exec(l3)?.[1]
+    const rid = /信件編號=([^\s：]+)/.exec(l3)?.[1]
+    if (to || rid) replyLine = { ...(to ? { to } : {}), ...(rid ? { id: rid } : {}) }
+    bodyStart++
+  }
+  return { trust, from, id, reply, ...(sender !== undefined ? { sender } : {}), ...(replyLine ? { replyLine } : {}), body: lines.slice(bodyStart).join('\n').trim() }
 }
 
 export type ReplyTrack = { turnId: string; from: string; id: string }
@@ -226,12 +226,12 @@ export function trackFromText(text: string, turnId: string): ReplyTrack | undefi
   const h = parseRelayHead(text)
   if (!h) return undefined
   if (h.trust !== 'member' && h.trust !== 'owner') return undefined
-  if (h.from.includes('收發室')) return undefined
+  if (h.from.includes('收發室') || (h.sender ?? '').includes('收發室')) return undefined
   if (/^\s*[［[]收發室[］\]]/.test(h.body)) return undefined
   const wants = h.reply === 'yes' || (h.replyLine !== undefined && h.reply !== 'no')
   if (!wants) return undefined
   const from = h.replyLine?.to || h.from
-  const id = h.replyLine?.id || h.id
+  const id = (h.replyLine?.id || h.id).toLowerCase()
   if (!from || !id) return undefined
   if (from.includes('收發室')) return undefined
   return { turnId, from, id }
