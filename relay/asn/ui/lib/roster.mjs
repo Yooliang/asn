@@ -11,6 +11,9 @@ export const isRelayRoom = name => /收發室$/.test(String(name ?? ''))
 // 設備分組、設備頁籤、遠端更新都以設備為單位，不受影響；往來記錄與好友資料照常保留，只是各處顯示的清單都不列它、也不算進人數與未讀。
 export const isAsnWindow = f => String(f?.engine ?? '').trim().toLowerCase() === 'asn'
 export const withoutAsn = friends => (Array.isArray(friends) ? friends : []).filter(f => !isAsnWindow(f))
+// 寄給 ASN 程式本身的信不期待回信（它不是 AI）：寄信一律 expects_reply＝false，畫面也不顯示「等對方回信」與「未回」提示。
+export const expectsReplyTo = f => !isAsnWindow(f)
+export const showsWaiting = f => Boolean(f?.waiting) && !isAsnWindow(f)
 
 // 後端回報的視窗狀態 → 介面狀態：busy/working/running 之類＝忙碌，waiting 之類（等人回應）＝暫離，其餘（idle…）＝線上；不在名單＝離線（由 mergeFriends 決定）
 const BUSY = new Set(['busy', 'working', 'running', 'thinking'])

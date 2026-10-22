@@ -5,7 +5,7 @@
 //   isChatVisible(id) → Promise<boolean>：該好友的對話視窗是否開著且沒最小化
 import { isAvatarDataUrl } from './avatar.mjs'
 import { asnByNode } from './presence.mjs'
-import { buildFriends, cleanPsm, isAsnWindow, mergeFriends } from './roster.mjs'
+import { buildFriends, cleanPsm, expectsReplyTo, isAsnWindow, mergeFriends } from './roster.mjs'
 import { contextAlertText, createContextWatch } from './context-usage.mjs'
 import { routeMail, stubFriend } from './routing.mjs'
 import { hasNudge, hueOf, initial, noReplyNoticeOf, plain, stripNudge, stripReplyHead, unwrapShell } from './text.mjs'
@@ -253,12 +253,12 @@ export class AsnCore {
     const text = String(raw ?? '').trim()
     if (!f || !text) return { ok: false, error: '沒有內容或找不到好友' }
     if (text.length > MAX_BODY) return { ok: false, error: `內文超過 ${MAX_BODY} 字` }
-    const payload = { to_node: f.node, to_agent: f.agent || undefined, body: text, reply_to: f.replyTo || undefined, from_agent: this.windowName, expects_reply: true, ...this.#personFlag(f) }
+    const payload = { to_node: f.node, to_agent: f.agent || undefined, body: text, reply_to: f.replyTo || undefined, from_agent: this.windowName, expects_reply: expectsReplyTo(f), ...this.#personFlag(f) }
     let sent
     try { sent = await this.transport.send(payload) } catch (e) { return this.#fail(id, e) }
     const mid = typeof sent?.id === 'string' ? sent.id : null
     this.#log(id).push({ k: 'me', text, t: this.now(), ...(mid ? { id: mid } : {}) })
-    f.waiting = true
+    f.waiting = expectsReplyTo(f)
     f.replyTo = null
     f.known = true
     this.#scheduleSave()
@@ -290,7 +290,7 @@ export class AsnCore {
     const photos = normalizePhotos([mine])
     const mid = typeof r?.id === 'string' ? r.id : null
     this.#log(id).push({ k: 'me', text: cap, t: now, ...(mid ? { id: mid } : {}), ...(photos.length ? { photos } : {}) })
-    f.waiting = true
+    f.waiting = expectsReplyTo(f)
     f.replyTo = null
     f.known = true
     this.#scheduleSave()
