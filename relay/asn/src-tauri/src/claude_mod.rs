@@ -1,13 +1,17 @@
 //! 自動幫 Claude Code 安裝 ASN 外掛（relay/claude-mod，#134）。
 //!
 //! 外掛檔案隨 ASN 安裝包放在安裝資料夾的 `claude-mod\`（見 tauri.conf.json 的 bundle.resources）。
-//! ASN 啟動後在背景做一次：找 `claude` → 查有沒有裝 `asn@asn` → 沒裝就 `marketplace add` + `install --scope user`。
+//! ASN 啟動後在背景做一次：找 `claude` → 查有沒有裝 `asn@asn`。
 //! 規矩：
-//! - 只有「第一次安裝」才預設啟用；之後留下標記檔 `claude-mod.json`，有標記就不再碰 Claude Code，
-//!   所以使用者停用（disable）之後不會被重新啟用，也不會重複安裝。
-//! - 外掛檔案在安裝資料夾裡，ASN 更新時檔案跟著換新（marketplace 的 source 是 `./`），不必重裝。
+//! - 第一次（沒有標記檔 `claude-mod.json`）才預設安裝：`marketplace add` + `install --scope user`，裝好就是啟用。
+//! - Claude Code 會把外掛複製進自己的快取（~/.claude/plugins/cache/...），不是直接讀 ASN 安裝資料夾，
+//!   所以 ASN 更新後要主動讓它更新：標記裡的版本和安裝資料夾的外掛版本不同時，
+//!   已安裝（不論啟用或停用）→ `marketplace update asn` 再 `update asn@asn --scope <list 給的>`；
+//!   使用者已自行解除安裝 → 不重裝，只更新標記版本。
+//! - 絕不 enable／disable：使用者停用的維持停用。
+//! - 失敗不更新標記，下次啟動再試。
 //! - 所有子程序：不開視窗、乾淨環境（同 launch/config.rs 的 child_env）、stdin 接空、有逾時；逾時只殺自己啟動的那個子程序。
-//! - 找不到 claude、或安裝失敗都不擋 ASN，只記一行 log 並把原因顯示在設定頁。
+//! - 找不到 claude、或安裝／更新失敗都不擋 ASN，只記一行 log 並把原因顯示在設定頁。
 use crate::nowin::NoWindow;
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -19,24 +23,33 @@ use std::time::{Duration, Instant};
 
 /// 外掛在 marketplace 裡的識別（外掛名@marketplace 名）
 pub const PLUGIN_ID: &str = "asn@asn";
+/// marketplace 名（`plugin marketplace update` 用）
+pub const MARKETPLACE: &str = "asn";
 /// 單一 claude 指令的逾時
 pub const CMD_TIMEOUT: Duration = Duration::from_secs(60);
 const MARKER_FILE: &str = "claude-mod.json";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
-    Installed,
+    /// 已安裝（版本＝標記／外掛資料夾的版本）
+    Installed(String),
+    /// 使用者自行解除安裝了：不重裝
+    Uninstalled,
     NoClaude,
     Failed(String),
+    UpdateFailed(String),
 }
 
 impl Outcome {
     /// 設定頁那一行（純中文）
     pub fn line(&self) -> String {
         match self {
-            Outcome::Installed => "Claude 外掛：已安裝".into(),
+            Outcome::Installed(v) if v.is_empty() => "Claude 外掛：已安裝".into(),
+            Outcome::Installed(v) => format!("Claude 外掛：已安裝（版本 {v}）"),
+            Outcome::Uninstalled => "Claude 外掛：未安裝（已由使用者解除安裝，不會自動重裝）".into(),
             Outcome::NoClaude => "Claude 外掛：未安裝（找不到 Claude Code）".into(),
             Outcome::Failed(why) => format!("Claude 外掛：安裝失敗：{why}"),
+            Outcome::UpdateFailed(why) => format!("Claude 外掛：更新失敗：{why}"),
         }
     }
 }
@@ -125,10 +138,12 @@ fn plugin_version(mod_dir: &Path) -> Option<String> {
     v.get("version")?.as_str().map(String::from)
 }
 
-fn marker_matches(data_dir: &Path, mod_dir: &Path) -> bool {
-    let Ok(t) = std::fs::read_to_string(data_dir.join(MARKER_FILE)) else { return false };
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) else { return false };
-    v.get("installedVersion").and_then(|x| x.as_str()).is_some() && v.get("dir").and_then(|x| x.as_str()).map_or(true, |d| d == mod_dir.to_string_lossy())
+/// 標記檔裡的 (installedVersion, dir)；沒有或壞掉＝None（視為第一次）
+fn read_marker(data_dir: &Path) -> Option<(String, Option<String>)> {
+    let t = std::fs::read_to_string(data_dir.join(MARKER_FILE)).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&t).ok()?;
+    let ver = v.get("installedVersion")?.as_str()?.to_string();
+    Some((ver, v.get("dir").and_then(|x| x.as_str()).map(String::from)))
 }
 
 fn write_marker(data_dir: &Path, mod_dir: &Path, now_secs: u64) {
@@ -152,21 +167,87 @@ fn fail_text(what: &str, r: &RunOut) -> String {
     }
 }
 
-/// 主流程（可用假的 Runner 測）。`claude` 是已找到的執行檔路徑。
-pub fn install_with(runner: &dyn Runner, claude: &Path, mod_dir: &Path, data_dir: &Path, now_secs: u64) -> Outcome {
-    // 查「已安裝」：先用 --json，不支援就退回純文字；找字串 asn@asn（不管格式）。已安裝（含被使用者停用）一律不動，只補標記。
+/// `claude plugin list` 裡 asn@asn 那一項
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Listed {
+    pub scope: String,
+    pub version: Option<String>,
+}
+
+/// 解析 `plugin list` 輸出。`--json`（陣列，每項有 id／enabled／scope／version／installPath）優先；
+/// 不是 JSON 才退回純文字（找得到 asn@asn 就算已安裝，scope 當 user）。
+fn parse_listing(stdout: &str) -> Option<Listed> {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(stdout.trim()) {
+        if let Some(arr) = v.as_array() {
+            return arr.iter().find(|e| e.get("id").and_then(|x| x.as_str()).is_some_and(|i| i.eq_ignore_ascii_case(PLUGIN_ID))).map(|e| Listed {
+                scope: e.get("scope").and_then(|x| x.as_str()).filter(|s| !s.is_empty()).unwrap_or("user").to_string(),
+                version: e.get("version").and_then(|x| x.as_str()).map(String::from),
+            });
+        }
+    }
+    stdout.to_ascii_lowercase().contains(PLUGIN_ID).then(|| Listed { scope: "user".into(), version: None })
+}
+
+fn list_asn(runner: &dyn Runner, claude: &Path) -> Result<Option<Listed>, String> {
     let listed = match runner.run(claude, &["plugin", "list", "--json"]) {
         Ok(r) if r.code == Some(0) => r,
         _ => match runner.run(claude, &["plugin", "list"]) {
             Ok(r) if r.code == Some(0) => r,
-            Ok(r) => return Outcome::Failed(fail_text("查詢已安裝外掛", &r)),
-            Err(e) => return Outcome::Failed(e),
+            Ok(r) => return Err(fail_text("查詢已安裝外掛", &r)),
+            Err(e) => return Err(e),
         },
     };
-    if listed.stdout.to_ascii_lowercase().contains(PLUGIN_ID) {
-        write_marker(data_dir, mod_dir, now_secs);
-        return Outcome::Installed;
+    Ok(parse_listing(&listed.stdout))
+}
+
+/// 已安裝（含使用者停用的）→ 更新到安裝資料夾的版本。只跑 marketplace update 與 update，絕不 enable／disable。
+fn update_installed(runner: &dyn Runner, claude: &Path, scope: &str) -> Result<(), String> {
+    // 外掛來源是本機資料夾，先讓 Claude Code 重讀來源，update 才看得到新版
+    match runner.run(claude, &["plugin", "marketplace", "update", MARKETPLACE]) {
+        Ok(r) if r.code == Some(0) => {}
+        Ok(r) => return Err(fail_text("重新整理外掛來源", &r)),
+        Err(e) => return Err(e),
     }
+    match runner.run(claude, &["plugin", "update", PLUGIN_ID, "--scope", scope]) {
+        Ok(r) if r.code == Some(0) => Ok(()),
+        Ok(r) => Err(fail_text("更新外掛", &r)),
+        Err(e) => Err(e),
+    }
+}
+
+/// 主流程（可用假的 Runner 測）。`claude` 是已找到的執行檔路徑。`first`＝沒有標記檔（第一次）。
+pub fn install_with(runner: &dyn Runner, claude: &Path, mod_dir: &Path, data_dir: &Path, now_secs: u64, first: bool) -> Outcome {
+    let want = plugin_version(mod_dir).unwrap_or_default();
+    let listed = match list_asn(runner, claude) {
+        Ok(l) => l,
+        Err(e) => return if first { Outcome::Failed(e) } else { Outcome::UpdateFailed(e) },
+    };
+    match listed {
+        Some(p) => {
+            // 第一次且版本已經一樣：只補標記
+            if first && p.version.as_deref() == Some(want.as_str()) {
+                write_marker(data_dir, mod_dir, now_secs);
+                return Outcome::Installed(want);
+            }
+            match update_installed(runner, claude, &p.scope) {
+                Ok(()) => {
+                    write_marker(data_dir, mod_dir, now_secs);
+                    Outcome::Installed(want)
+                }
+                Err(e) => Outcome::UpdateFailed(e),
+            }
+        }
+        None if !first => {
+            // 使用者自己解除安裝了：尊重，不重裝；更新標記版本避免每次啟動都來查
+            eprintln!("[claude-mod] 使用者已解除安裝 {PLUGIN_ID}，不重裝，只更新標記版本為 {want}");
+            write_marker(data_dir, mod_dir, now_secs);
+            Outcome::Uninstalled
+        }
+        None => first_install(runner, claude, mod_dir, data_dir, now_secs, want),
+    }
+}
+
+fn first_install(runner: &dyn Runner, claude: &Path, mod_dir: &Path, data_dir: &Path, now_secs: u64, want: String) -> Outcome {
     let dir = mod_dir.to_string_lossy().into_owned();
     match runner.run(claude, &["plugin", "marketplace", "add", &dir]) {
         Ok(r) if r.code == Some(0) => {}
@@ -185,27 +266,31 @@ pub fn install_with(runner: &dyn Runner, claude: &Path, mod_dir: &Path, data_dir
     match runner.run(claude, &["plugin", "install", PLUGIN_ID, "--scope", "user"]) {
         Ok(r) if r.code == Some(0) => {
             write_marker(data_dir, mod_dir, now_secs);
-            Outcome::Installed
+            Outcome::Installed(want)
         }
         Ok(r) => Outcome::Failed(fail_text("安裝外掛", &r)),
         Err(e) => Outcome::Failed(e),
     }
 }
 
-/// 入口：已有標記就直接回「已安裝」（不碰 Claude Code）；否則找 claude、檢查外掛檔案、安裝。
+/// 入口：標記的版本和資料夾一致就不碰 Claude Code；沒標記＝第一次安裝；標記版本不同＝更新（或尊重解除安裝）。
 pub fn run(runner: &dyn Runner, path_var: &OsStr, extra: &[PathBuf], mod_dir: &Path, data_dir: &Path, now_secs: u64) -> Outcome {
-    if marker_matches(data_dir, mod_dir) {
-        return Outcome::Installed;
+    let want = plugin_version(mod_dir);
+    let marker = read_marker(data_dir);
+    if let (Some((mv, md)), Some(w)) = (&marker, &want) {
+        if mv == w && md.as_ref().map_or(true, |d| *d == mod_dir.to_string_lossy()) {
+            return Outcome::Installed(w.clone());
+        }
     }
     let Some(claude) = find_claude(path_var, extra) else {
         eprintln!("[claude-mod] 找不到 claude 指令，略過外掛安裝");
         return Outcome::NoClaude;
     };
-    if plugin_version(mod_dir).is_none() {
+    if want.is_none() {
         eprintln!("[claude-mod] 安裝資料夾裡沒有外掛檔案：{}", mod_dir.display());
         return Outcome::Failed("安裝資料夾裡找不到外掛檔案".into());
     }
-    let out = install_with(runner, &claude, mod_dir, data_dir, now_secs);
+    let out = install_with(runner, &claude, mod_dir, data_dir, now_secs, marker.is_none());
     eprintln!("[claude-mod] {}", out.line());
     out
 }
@@ -279,8 +364,9 @@ mod tests {
     fn 沒裝過_先查再加來源再安裝_參數與順序正確_且不帶disable() {
         let (_t, m, d) = dirs();
         let f = Fake::new(vec![ok("[]")]);
-        let r = install_with(&f, Path::new(CLAUDE), &m, &d, 77);
-        assert_eq!(r, Outcome::Installed);
+        let r = install_with(&f, Path::new(CLAUDE), &m, &d, 77, true);
+        assert_eq!(r, Outcome::Installed("1.2.3".into()));
+        assert_eq!(r.line(), "Claude 外掛：已安裝（版本 1.2.3）");
         assert_eq!(f.log(), vec!["plugin list --json".to_string(), format!("plugin marketplace add {}", m.display()), "plugin install asn@asn --scope user".to_string()]);
         assert!(!f.log().iter().any(|l| l.contains("disable")));
         let mk = marker(&d).expect("要留標記");
@@ -288,13 +374,103 @@ mod tests {
         assert_eq!(mk["installedAt"], 77);
     }
 
+    /// 一個舊標記（版本 1.0.0）：模擬「ASN 更新了，外掛資料夾是 1.2.3」
+    fn old_marker(d: &Path, m: &Path) {
+        let body = serde_json::json!({ "installedVersion": "1.0.0", "installedAt": 1, "dir": m.to_string_lossy() });
+        std::fs::write(d.join(MARKER_FILE), body.to_string()).unwrap();
+    }
+    fn no_toggle(f: &Fake) {
+        assert!(!f.log().iter().any(|l| l.contains("enable") || l.contains("disable") || l.contains("install ")), "不可 enable／disable／install：{:?}", f.log());
+    }
+
     #[test]
-    fn 已安裝但被使用者停用_不重新啟用也不重裝_只補標記() {
+    fn 第一次且已安裝版本相同_只補標記_不動任何東西() {
         let (_t, m, d) = dirs();
-        let f = Fake::new(vec![ok(r#"[{"id":"asn@asn","enabled":false}]"#)]);
-        assert_eq!(install_with(&f, Path::new(CLAUDE), &m, &d, 1), Outcome::Installed);
-        assert_eq!(f.log(), vec!["plugin list --json".to_string()], "只查詢，不 enable、不 install、不 marketplace add");
+        let f = Fake::new(vec![ok(r#"[{"id":"asn@asn","enabled":false,"scope":"user","version":"1.2.3"}]"#)]);
+        assert_eq!(install_with(&f, Path::new(CLAUDE), &m, &d, 1, true), Outcome::Installed("1.2.3".into()));
+        assert_eq!(f.log(), vec!["plugin list --json".to_string()]);
         assert!(marker(&d).is_some());
+    }
+
+    #[test]
+    fn 版本變了_已安裝且被使用者停用_走更新_不enable_scope照list() {
+        let (_t, m, d) = dirs();
+        old_marker(&d, &m);
+        let f = Fake::new(vec![ok(r#"[{"id":"other@x","enabled":true,"scope":"user"},{"id":"asn@asn","enabled":false,"scope":"project","version":"1.0.0","installPath":"x"}]"#)]);
+        let r = run_with_claude(&f, &m, &d);
+        assert_eq!(r, Outcome::Installed("1.2.3".into()));
+        assert_eq!(f.log(), vec!["plugin list --json".to_string(), "plugin marketplace update asn".to_string(), "plugin update asn@asn --scope project".to_string()]);
+        no_toggle(&f);
+        assert_eq!(marker(&d).unwrap()["installedVersion"], "1.2.3", "成功才更新標記");
+    }
+
+    #[test]
+    fn 版本變了_已安裝且啟用_同樣走更新() {
+        let (_t, m, d) = dirs();
+        old_marker(&d, &m);
+        let f = Fake::new(vec![ok(r#"[{"id":"asn@asn","enabled":true,"scope":"user","version":"1.0.0"}]"#)]);
+        assert_eq!(run_with_claude(&f, &m, &d), Outcome::Installed("1.2.3".into()));
+        assert_eq!(f.log().last().unwrap(), "plugin update asn@asn --scope user");
+        no_toggle(&f);
+    }
+
+    #[test]
+    fn 版本變了_使用者已解除安裝_不重裝_只更新標記() {
+        let (_t, m, d) = dirs();
+        old_marker(&d, &m);
+        let f = Fake::new(vec![ok(r#"[{"id":"other@x","enabled":true,"scope":"user"}]"#)]);
+        let r = run_with_claude(&f, &m, &d);
+        assert_eq!(r, Outcome::Uninstalled);
+        assert_eq!(f.log(), vec!["plugin list --json".to_string()], "不 marketplace add、不 install、不 update");
+        assert_eq!(marker(&d).unwrap()["installedVersion"], "1.2.3");
+        // 下次啟動標記版本一致，就完全不碰 claude
+        let f2 = Fake::new(vec![]);
+        assert_eq!(run_with_claude(&f2, &m, &d), Outcome::Installed("1.2.3".into()));
+        assert!(f2.log().is_empty());
+    }
+
+    #[test]
+    fn 更新失敗_不更新標記_顯示原因_下次再試() {
+        let (_t, m, d) = dirs();
+        old_marker(&d, &m);
+        let f = Fake::new(vec![ok(r#"[{"id":"asn@asn","enabled":true,"scope":"user","version":"1.0.0"}]"#), ok(""), bad("network down")]);
+        let r = run_with_claude(&f, &m, &d);
+        assert_eq!(r, Outcome::UpdateFailed("更新外掛失敗：network down".into()));
+        assert_eq!(r.line(), "Claude 外掛：更新失敗：更新外掛失敗：network down");
+        assert_eq!(marker(&d).unwrap()["installedVersion"], "1.0.0");
+        // 下次啟動會再試
+        let f2 = Fake::new(vec![ok(r#"[{"id":"asn@asn","enabled":true,"scope":"user","version":"1.0.0"}]"#)]);
+        assert_eq!(run_with_claude(&f2, &m, &d), Outcome::Installed("1.2.3".into()));
+        assert!(f2.log().iter().any(|l| l.starts_with("plugin update")));
+    }
+
+    #[test]
+    fn 來源重新整理失敗_就不跑update_也不更新標記() {
+        let (_t, m, d) = dirs();
+        old_marker(&d, &m);
+        let f = Fake::new(vec![ok(r#"[{"id":"asn@asn","enabled":true,"scope":"user","version":"1.0.0"}]"#), bad("no such marketplace")]);
+        let r = run_with_claude(&f, &m, &d);
+        assert_eq!(r, Outcome::UpdateFailed("重新整理外掛來源失敗：no such marketplace".into()));
+        assert_eq!(f.log().len(), 2);
+        assert_eq!(marker(&d).unwrap()["installedVersion"], "1.0.0");
+    }
+
+    #[test]
+    fn 解析list輸出() {
+        let j = r#"[{"id":"asn@asn","enabled":false,"scope":"user","version":"0.1.5","installPath":"C:/x"}]"#;
+        assert_eq!(parse_listing(j), Some(Listed { scope: "user".into(), version: Some("0.1.5".into()) }));
+        assert_eq!(parse_listing("[]"), None);
+        assert_eq!(parse_listing(r#"[{"id":"asn@other"}]"#), None, "JSON 要比對 id，不是找子字串");
+        assert_eq!(parse_listing("  asn@asn  v0.1.0  enabled"), Some(Listed { scope: "user".into(), version: None }));
+        assert_eq!(parse_listing("No plugins installed"), None);
+    }
+
+    /// 走入口 run()：用暫存資料夾放一個假的 claude 檔讓 find_claude 找得到（Fake 不會真的執行它）
+    fn run_with_claude(f: &Fake, m: &Path, d: &Path) -> Outcome {
+        let bin = d.parent().unwrap().join("fakebin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join(if cfg!(windows) { "claude.exe" } else { "claude" }), "").unwrap();
+        run(f, bin.as_os_str(), &[], m, d, 9)
     }
 
     #[test]
@@ -304,7 +480,7 @@ mod tests {
         let f = Fake::new(vec![]);
         // PATH 故意是空的：有標記時連找 claude 都不做
         let r = run(&f, OsStr::new(""), &[], &m, &d, 9);
-        assert_eq!(r, Outcome::Installed);
+        assert_eq!(r, Outcome::Installed("1.2.3".into()));
         assert!(f.log().is_empty());
         assert_eq!(marker(&d).unwrap()["installedAt"], 5, "標記不被改寫");
     }
@@ -320,18 +496,19 @@ mod tests {
     }
 
     #[test]
-    fn list不支援json_退回純文字查詢() {
+    fn list不支援json_退回純文字查詢_版本不明就走更新() {
         let (_t, m, d) = dirs();
         let f = Fake::new(vec![bad("unknown option --json"), ok("  asn@asn  v0.1.0  enabled")]);
-        assert_eq!(install_with(&f, Path::new(CLAUDE), &m, &d, 1), Outcome::Installed);
-        assert_eq!(f.log(), vec!["plugin list --json".to_string(), "plugin list".to_string()]);
+        assert_eq!(install_with(&f, Path::new(CLAUDE), &m, &d, 1, true), Outcome::Installed("1.2.3".into()));
+        assert_eq!(f.log(), vec!["plugin list --json".to_string(), "plugin list".to_string(), "plugin marketplace update asn".to_string(), "plugin update asn@asn --scope user".to_string()]);
+        no_toggle(&f);
     }
 
     #[test]
     fn 來源已存在_加入失敗但列表有asn_就繼續安裝() {
         let (_t, m, d) = dirs();
         let f = Fake::new(vec![ok("[]"), bad("marketplace asn already exists"), ok("asn  (local)")]);
-        assert_eq!(install_with(&f, Path::new(CLAUDE), &m, &d, 1), Outcome::Installed);
+        assert_eq!(install_with(&f, Path::new(CLAUDE), &m, &d, 1, true), Outcome::Installed("1.2.3".into()));
         assert_eq!(f.log().last().unwrap(), "plugin install asn@asn --scope user");
     }
 
@@ -339,7 +516,7 @@ mod tests {
     fn 安裝失敗_回報原因_不留標記_下次啟動會再試() {
         let (_t, m, d) = dirs();
         let f = Fake::new(vec![ok("[]"), ok(""), bad("\nboom: 需要互動設定\nmore")]);
-        let r = install_with(&f, Path::new(CLAUDE), &m, &d, 1);
+        let r = install_with(&f, Path::new(CLAUDE), &m, &d, 1, true);
         assert_eq!(r, Outcome::Failed("安裝外掛失敗：boom: 需要互動設定".into()));
         assert_eq!(r.line(), "Claude 外掛：安裝失敗：安裝外掛失敗：boom: 需要互動設定");
         assert!(marker(&d).is_none());
@@ -358,7 +535,7 @@ mod tests {
 
     #[test]
     fn 狀態文字都是純中文() {
-        for o in [Outcome::Installed, Outcome::NoClaude, Outcome::Failed("逾時".into())] {
+        for o in [Outcome::Installed("1.0.0".into()), Outcome::Uninstalled, Outcome::NoClaude, Outcome::Failed("逾時".into()), Outcome::UpdateFailed("逾時".into())] {
             assert!(o.line().starts_with("Claude 外掛："));
         }
     }
@@ -410,7 +587,7 @@ mod tests {
         let home_s = fake_home.to_string_lossy().into_owned();
         let runner = RealRunner { env: test_env(&[("USERPROFILE", &home_s), ("HOME", &home_s)]), timeout: Duration::from_secs(30) };
         let r = run(&runner, bin_dir.as_os_str(), &[], &m, &d, 3);
-        assert_eq!(r, Outcome::Installed, "{r:?}");
+        assert_eq!(r, Outcome::Installed("1.2.3".into()), "{r:?}");
         let calls: Vec<String> = std::fs::read_to_string(&log).unwrap().lines().map(|l| l.trim().to_string()).collect();
         assert_eq!(calls, vec!["plugin list --json".to_string(), format!("plugin marketplace add {}", m.display()), "plugin install asn@asn --scope user".to_string()]);
         let envs = std::fs::read_to_string(&envlog).unwrap();
@@ -454,7 +631,10 @@ mod tests {
         let src = include_str!("claude_mod.rs");
         let body = &src[..src.find("#[cfg(test)]").unwrap()];
         let calls: Vec<&str> = body.lines().filter(|l| l.contains("runner.run(")).collect();
-        assert!(calls.len() >= 4);
-        assert!(calls.iter().all(|l| !l.contains("\"enable\"") && !l.contains("\"disable\"") && !l.contains("\"update\"")), "不可自動啟用或停用外掛");
+        assert!(calls.len() >= 7, "少看到呼叫：{}", calls.len());
+        assert!(calls.iter().all(|l| !l.contains("\"enable\"") && !l.contains("\"disable\"")), "不可自動啟用或停用外掛");
+        // 只有更新路徑可以呼叫 update；重裝（install）只准出現在 first_install 一處
+        assert_eq!(body.matches("\"install\"").count(), 1);
+        assert_eq!(body.matches("fn first_install").count(), 1);
     }
 }
