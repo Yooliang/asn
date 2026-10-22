@@ -24,9 +24,11 @@ test('純函式：ASN 視窗不期待回信、不顯示等待；一般視窗照�
   assert.equal(showsWaiting(null), false)
 })
 
-test('寄給 ASN 視窗：expects_reply＝false、waiting＝false；一般視窗不受影響', async () => {
+test('寄給 ASN 視窗：expects_reply＝false、waiting＝false；一般視窗不受影響', async (t) => {
   const relay = await startFakeRelay({ node: 'T', members })
   const core = new AsnCore({ transport: httpTransport(relay.url, NAME), store: memStore(), selfNode: 'T', windowName: NAME, isChatVisible: async () => false, pollMs: 60_000, rosterMs: 60_000 })
+  // 斷言失敗時也要關掉：否則假伺服器與輪詢計時器會讓測試程序卡到逾時
+  t.after(async () => { await core.stop(); await relay.close() })
   await core.start()
   const id = 'W/W-ASN'
   assert.ok(core.snapshot().friends.some(f => f.id === id), '好友資料仍在')
@@ -37,7 +39,6 @@ test('寄給 ASN 視窗：expects_reply＝false、waiting＝false；一般視窗
   assert.equal((await core.send('W/W-政策', '一般視窗')).ok, true)
   assert.equal(relay.sent[1].expects_reply, true)
   assert.equal(core.snapshot().friends.find(f => f.id === 'W/W-政策').waiting, true)
-  await core.stop(); await relay.close()
 })
 
 test('畫面接線：chatpane 的等待提示與未回都以 ASN 判斷把關', () => {
