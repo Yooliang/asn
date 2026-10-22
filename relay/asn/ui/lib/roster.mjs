@@ -27,6 +27,10 @@ export function psmOf(a) {
 // 一個視窗一列；名字＝視窗名，個人訊息＝資料夾（cwd_label，沒有就空）
 export function buildFriends(members, { selfNode, selfName } = {}) {
   const out = []
+  // 同一個夥伴 ID 只留一筆（改名後後台的離線成員還掛著舊名）：先掃一遍記下「有在線的夥伴 ID」，離線的同夥伴不列
+  const livePids = new Set()
+  for (const m of Array.isArray(members) ? members : []) for (const a of Array.isArray(m?.agents) ? m.agents : []) if (a && a.online !== false && PARTNER_ID.test(String(a.partner_id ?? ''))) livePids.add(a.partner_id)
+  const pidDone = new Set()
   for (const m of Array.isArray(members) ? members : []) {
     if (!m || typeof m.id !== 'string') continue
     // 在線的 agents ＋ 離線但 30 天內出現過的 offline_agents（#167；舊後台沒有後者）。離線的一律 offline，同名以在線為準
@@ -40,6 +44,10 @@ export function buildFriends(members, { selfNode, selfName } = {}) {
       if (isRelayRoom(a.name)) continue
       if (m.id === selfNode && a.name === selfName) continue
       if (seen.has(a.name)) continue
+      const pid = PARTNER_ID.test(String(a.partner_id ?? '')) ? a.partner_id : ''
+      const isOff = off || a.online === false
+      if (pid && (isOff ? livePids.has(pid) : pidDone.has(pid))) continue
+      if (pid && !isOff) pidDone.add(pid)
       seen.add(a.name)
       out.push({
         id: friendId(m.id, a.name), node: m.id, device: typeof m.name === 'string' && m.name.trim() ? m.name.trim() : '', agent: a.name, nick: a.name,

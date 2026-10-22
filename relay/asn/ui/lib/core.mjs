@@ -66,6 +66,7 @@ export class AsnCore {
     this.nodeOrder = (Array.isArray(members) ? members : []).map(m => m?.id).filter(x => typeof x === 'string')
     this.asn = asnByNode(members)
     const live = buildFriends(members, { selfNode: this.selfNode, selfName: this.windowName })
+    this.#mergeRenamed(live)
     const prev = new Map([...this.friends].map(([id, f]) => [id, f.status]))
     const known = [...this.friends.values()].filter(f => this.logs.has(f.id) || f.known)
     const merged = mergeFriends(known, live)
@@ -82,6 +83,35 @@ export class AsnCore {
     this.rosterLoaded = true
     this.emit('state')
     await this.#syncAvatars(members)
+  }
+
+  // 改名合併（夥伴 ID）：本機記住的舊名那筆若夥伴 ID 和名單上某位成員相同，就是同一位夥伴改了名——
+  // 往來記錄、未讀、最後時間併進新名那筆，舊鍵移除並存檔。沒有夥伴 ID 的舊資料不動。
+  #mergeRenamed(live) {
+    const byPid = new Map(live.filter(l => l.partnerId).map(l => [l.partnerId, l]))
+    let changed = false
+    for (const old of [...this.friends.values()]) {
+      const l = old.partnerId && byPid.get(old.partnerId)
+      if (!l || l.id === old.id) continue
+      const to = this.friends.get(l.id) ?? this.#decorate({ ...l, unread: 0, waiting: false, replyTo: null })
+      to.unread = (to.unread || 0) + (old.unread || 0)
+      to.lastAt = Math.max(to.lastAt ?? 0, old.lastAt ?? 0)
+      to.waiting = Boolean(to.waiting || old.waiting)
+      to.replyTo = to.replyTo ?? old.replyTo ?? null
+      to.known = true
+      to.partnerId = old.partnerId
+      const seenIds = new Set()
+      const merged = [...(this.logs.get(to.id) ?? []), ...(this.logs.get(old.id) ?? [])]
+        .filter(m => { if (!m.id) return true; if (seenIds.has(m.id)) return false; seenIds.add(m.id); return true })
+        .map((m, i) => [m, i]).sort((a, b) => (a[0].t ?? 0) - (b[0].t ?? 0) || a[1] - b[1]).map(x => x[0])
+      if (merged.length) this.logs.set(to.id, merged)
+      this.logs.delete(old.id)
+      this.friends.delete(old.id)
+      this.historyAt.delete(old.id)
+      this.friends.set(to.id, to)
+      changed = true
+    }
+    if (changed) this.#scheduleSave()
   }
 
   // ---------- 設備大頭貼 ----------
