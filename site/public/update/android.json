@@ -1,8 +1,8 @@
 {
-  "version": "0.1.39",
-  "versionCode": 1039,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.39_android.apk",
-  "sha256": "b63244ad81bda83d168ba35604196e30bb737b7f869ec686f5fcab9944084001",
-  "notes": "手機版三個頁籤移到畫面上方、變得更緊湊",
-  "bytes": 8875492
+  "version": "0.1.41",
+  "versionCode": 1041,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.41_android.apk",
+  "sha256": "8ab728b3e26bace8924c7c2142b1b94f5039b35921c9004b29953ce5c06e276a",
+  "notes": "- 封存：電腦右鍵與手機「⋯」可把夥伴從名單隱藏（帳號同步，對方上線或來信自動回到名單，名單底部可找回）；收信不再被 ASN 視窗自己的信擋住；改名後名單只留一筆；手機對話頁對方忙碌時標題列改黃底",
+  "bytes": 8895972
 }
