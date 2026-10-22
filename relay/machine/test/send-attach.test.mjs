@@ -7,7 +7,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawnTracked } from './spawn-tracked.mjs'
 import { fileURLToPath } from 'node:url'
 import { AttachFail } from '../attach-download.mjs'
 import { attachmentText, cleanUploadName, prepareFile, prepareFiles, uploadItems } from '../attach-upload.mjs'
@@ -58,7 +58,7 @@ const newHome = () => {
 }
 function runSend(home, st, args, stdin = '') {
   return new Promise(res => {
-    const c = spawn(process.execPath, [WINDOW, 'T-視窗甲', ...args], {
+    const c = spawnTracked(process.execPath, [WINDOW, 'T-視窗甲', ...args], {
       stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
       env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: home, USERPROFILE: home, IRORI_RELAY_ID: 'T', IRORI_RELAY_URL: `http://127.0.0.1:${st.port}/relay` },
     })

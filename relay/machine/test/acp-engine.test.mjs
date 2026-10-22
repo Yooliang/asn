@@ -55,6 +55,13 @@ function rig(workers, { env = {} } = {}) {
         await sleep(20)
       }
     },
+    async waitForAsync(pred, what = '條件', ms = 8000) {
+      const t0 = Date.now()
+      while (!(await pred())) {
+        if (Date.now() - t0 > ms) throw new Error(`等不到：${what}\n--- events ---\n${JSON.stringify(events, null, 1)}\n--- sent ---\n${JSON.stringify(sent)}\n--- logs ---\n${logs.join('\n')}`)
+        await sleep(20)
+      }
+    },
     async waitReplies(n) { await r.waitFor(() => r.replies().length >= n, `${n} 則回覆`) },
     async done() { r.engine.stop(); await sleep(150); try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* ignore */ } },
     status: async () => (await r.engine.listWindows()).windows[0]?.status,
@@ -202,6 +209,7 @@ test('agy：execute=ask——逾時當拒絕，並通知被問的人已自動拒
     r.mail(ID(1), '@@RUN rm -rf x')
     await r.waitFor(() => r.fails().length === 1, '逾時拒絕')
     assert.match(r.fails()[0].reason, /被政策拒絕/)
+    await r.waitFor(() => r.sent.length >= 2, '自動拒絕通知寄出')
     assert.equal(r.sent.length, 2)
     assert.match(r.sent[1].body, /逾時，已自動拒絕/)
   } finally { await r.done() }
@@ -213,13 +221,16 @@ test('agy：沒登入——回給寄件人說明、名單狀態 login-required�
     r.mail(ID(1), '@@AUTH')
     await r.waitFor(() => r.fails().length === 1, '登入失敗回報')
     assert.match(r.fails()[0].reason, /Gemini 需要登入.*執行 agy 完成 Google 瀏覽器登入/)
-    assert.equal(await r.status(), 'login-required')
+    // 失敗回報（onFail）與名單狀態、通知寄出是分開的步驟，不保證同時完成：各自等到成立
+    await r.waitForAsync(async () => (await r.status()) === 'login-required', '名單標成需要登入')
+    await r.waitFor(() => r.sent.length >= 1, '登入通知寄出')
     assert.equal(r.sent.length, 1); assert.equal(r.sent[0].to_node, 'XISU'); assert.match(r.sent[0].body, /需要登入/)
     r.mail(ID(2), '@@AUTH')                                         // 一小時內不重複通知
     await r.waitFor(() => r.fails().length === 2, '第二次回報')
+    await sleep(300)                                                // 「不再通知」是反向斷言：給它一點時間才有意義
     assert.equal(r.sent.length, 1)
     r.mail(ID(3), '登入好了'); await r.waitReplies(1)
-    assert.equal(await r.status(), 'idle')
+    await r.waitForAsync(async () => (await r.status()) === 'idle', '恢復 idle')
   } finally { await r.done() }
 })
 
@@ -229,12 +240,13 @@ test('agy：額度用完——回報並標示 quota', async () => {
     r.mail(ID(1), '@@QUOTA')
     await r.waitFor(() => r.fails().length === 1, '額度回報')
     assert.match(r.fails()[0].reason, /額度用完/)
-    assert.equal(await r.status(), 'quota')
+    await r.waitForAsync(async () => (await r.status()) === 'quota', '名單標成 quota')
   } finally { await r.done() }
 })
 
 test('agy：太久沒動靜——中止這一輪並回報，之後仍可用', async () => {
-  const r = rig([agy({ turn_timeout_ms: 400 })])
+  // 逾時要大於「負載下起一個 node 子程序到第一個事件」的時間，否則第二封正常的信也會被看門狗中止
+  const r = rig([agy({ turn_timeout_ms: 3000 })])
   try {
     r.mail(ID(1), '@@SLEEP')
     await r.waitFor(() => r.fails().length === 1, '逾時')
@@ -274,7 +286,7 @@ test('agy：佇列——一次一輪、依序回覆、忙碌時名單是 busy、
     assert.equal(await r.status(), 'busy')
     await r.waitFor(() => r.replies().length === 3, '三封都回覆')
     assert.deepEqual(r.replies().map(t => /收到：(\w)/.exec(t)[1]), ['a', 'b', 'c'])
-    assert.equal(await r.status(), 'idle')
+    await r.waitForAsync(async () => (await r.status()) === 'idle', '回到 idle')
   } finally { await r.done() }
 })
 
@@ -416,7 +428,7 @@ test('acp：啟動時要求登入——名單標 login-required，寄信得到�
 })
 
 test('acp：太久沒動靜——取消並中止，之後仍可用', async () => {
-  const r = rig([acp({ turn_timeout_ms: 400 })])
+  const r = rig([acp({ turn_timeout_ms: 3000 })])
   try {
     r.mail(ID(1), '@@SLEEP')
     await r.waitFor(() => r.fails().length === 1, '逾時')

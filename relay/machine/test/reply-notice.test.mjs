@@ -6,7 +6,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawnTracked } from './spawn-tracked.mjs'
 import { fileURLToPath } from 'node:url'
 import { sentMarkName } from '../sent-mark.mjs'
 
@@ -17,10 +17,11 @@ const readBody = req => new Promise(r => { let b = ''; req.on('data', d => b += 
 const uid = n => `00000000-0000-0000-0000-${n.toString(16).padStart(12, '0')}`
 const mail = (n, extra = {}) => ({ id: uid(n), from_node: 'W', from_agent: 'W-政策', to_agent: 'T-對方', trust: 'member', body: `內文-${n}`, ...extra })
 
-// 信件晚一點才放進 inbox：橋要先拿到第一份 session 名單，不然會誤判「找不到視窗」
+// 信件等橋第一次回報 roster 才放進 inbox：橋要先拿到第一份 session 名單，不然會誤判「找不到視窗」
+// （原本固定等 1200ms，負載高時橋啟動比這慢，信就先被拉走並判成找不到；roster 回報＝名單已就緒）
 async function fakeServer(mails) {
   const inbox = []
-  setTimeout(() => inbox.push(...mails), 1200)
+  let released = false
   const st = { acked: new Set(), sent: [] }
   const srv = http.createServer(async (req, res) => {
     const a = new URL(req.url, 'http://x').searchParams.get('action')
@@ -29,7 +30,7 @@ async function fakeServer(mails) {
     if (a === 'inbox') return out(200, { messages: inbox.filter(m => !st.acked.has(m.id)) })
     if (a === 'send') { st.sent.push(await readBody(req)); return out(200, { ok: true }) }
     if (a === 'ack') { (await readBody(req)).ids.forEach(i => st.acked.add(i)); return out(200, { ok: true }) }
-    if (a === 'roster') { await readBody(req); return out(200, { ok: true }) }
+    if (a === 'roster') { await readBody(req); if (!released) { released = true; inbox.push(...mails) } return out(200, { ok: true }) }
     out(404, {})
   })
   await new Promise(r => srv.listen(0, '127.0.0.1', r))
@@ -49,7 +50,7 @@ async function go({ st, env = {}, step, agents = NAMES.map(n => [n, 'idle']), ti
   agents.forEach(([name], i) => fs.writeFileSync(path.join(dir, `${92000 + i}.json`), JSON.stringify({ pid: 92000 + i, entrypoint: 'cli', kind: 'interactive', updatedAt: 1 })))
   writeAgents(home, agents)
   const inbound = path.join(home, 'inbound.jsonl'); fs.writeFileSync(inbound, ''); fs.writeFileSync(path.join(home, 'record.jsonl'), '')
-  const child = spawn(process.execPath, [path.join(MACHINE, 'bridge.mjs')], {
+  const child = spawnTracked(process.execPath, [path.join(MACHINE, 'bridge.mjs')], {
     cwd: home, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true,
     env: {
       PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: home, USERPROFILE: home,

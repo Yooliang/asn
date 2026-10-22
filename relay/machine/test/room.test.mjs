@@ -7,7 +7,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawnTracked } from './spawn-tracked.mjs'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from '../room.mjs'
 import { createRooms } from '../rooms.mjs'
@@ -48,7 +48,7 @@ const newHome = () => {
 }
 function run(home, st, script, args) {
   return new Promise(res => {
-    const c = spawn(process.execPath, [script, ...args], {
+    const c = spawnTracked(process.execPath, [script, ...args], {
       stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
       env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: home, USERPROFILE: home, IRORI_RELAY_ID: 'T', IRORI_RELAY_URL: `http://127.0.0.1:${st.port}/relay`, FAKE_WINDOW_SCRIPT: 'room.mjs' },
     })

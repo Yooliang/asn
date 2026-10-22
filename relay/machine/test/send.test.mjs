@@ -6,7 +6,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawnTracked } from './spawn-tracked.mjs'
 import { fileURLToPath } from 'node:url'
 import { sentMarkName } from '../sent-mark.mjs'
 import { parseArgs, resolveReplyFlag } from '../send.mjs'
@@ -36,7 +36,7 @@ const newHome = (node = 'T') => {
 // 執行 script，收 stdout/stderr/exit code
 function run(home, st, script, args, { env = {}, stdin } = {}) {
   return new Promise(res => {
-    const c = spawn(process.execPath, [script, ...args], {
+    const c = spawnTracked(process.execPath, [script, ...args], {
       stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
       env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: home, USERPROFILE: home, IRORI_RELAY_URL: `http://127.0.0.1:${st.port}/relay`, ...env },
     })
@@ -167,7 +167,7 @@ test('環境變數備援：孤兒行程帶著視窗專屬的 messaging socket �
   const st = await fakeServer(), home = newHome()
   const sdir = path.join(home, '.claude', 'sessions'); fs.mkdirSync(sdir, { recursive: true })
   const put = (pid, sock, name) => fs.writeFileSync(path.join(sdir, `${pid}.json`), JSON.stringify({ pid, name, kind: 'interactive', entrypoint: 'cli', messagingSocketPath: sock }))
-  const alive = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore', windowsHide: true })   // 還活著、但不是 send.mjs 祖先的程序
+  const alive = spawnTracked(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore', windowsHide: true })   // 還活著、但不是 send.mjs 祖先的程序
   put(alive.pid, '\\.\pipe\LOCAL\cc-msg-fake', 'T-備援視窗')
   put(999999, '\\.\pipe\LOCAL\cc-msg-dead', 'T-死掉的視窗')       // pid 不存在
   const env = { IRORI_RELAY_ID: 'T' }

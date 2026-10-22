@@ -7,7 +7,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawnTracked } from './spawn-tracked.mjs'
 import { fileURLToPath } from 'node:url'
 import { buildSpawn, canonicalLaunchCwd, check, childEnv, createLauncher, loadConfig, NAME_RE, quoteArg, summary, TRUST_HINT } from '../launcher.mjs'
 
@@ -245,7 +245,7 @@ test('bridge 端到端：launch_pending → Start-Process 開假視窗（參數�
     profiles: { fake: { label: '測試', command: process.execPath, args: [path.join(here, 'fake-launched.mjs'), '{name}', 'claude -n {name} --remote-control {name}'] } },
     cwd_allow: [work], max_per_hour: 3,
   })
-  const child = spawn(process.execPath, [path.join(MACHINE, 'bridge.mjs')], {
+  const child = spawnTracked(process.execPath, [path.join(MACHINE, 'bridge.mjs')], {
     cwd: home, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true,
     env: {
       PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: home, USERPROFILE: home,
@@ -288,7 +288,7 @@ test('bridge 端到端：沒有 launcher.json → 名單回報 launcher:null（�
   const st = await fakeRelay([{ id: uid(8), requested_by: 'XISU', profile: 'default', name: 'T-x', cwd: home, first_message: null }])
   const agentsFile = path.join(home, 'agents.json'), record = path.join(home, 'record.jsonl')
   fs.writeFileSync(agentsFile, '[]'); fs.writeFileSync(record, '')
-  const child = spawn(process.execPath, [path.join(MACHINE, 'bridge.mjs')], {
+  const child = spawnTracked(process.execPath, [path.join(MACHINE, 'bridge.mjs')], {
     cwd: home, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true,
     env: {
       PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: home, USERPROFILE: home,

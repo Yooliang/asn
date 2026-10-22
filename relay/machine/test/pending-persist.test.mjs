@@ -6,7 +6,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawnTracked } from './spawn-tracked.mjs'
 import { fileURLToPath } from 'node:url'
 import { snapshot, loadState, saveAtomic } from '../pending-store.mjs'
 
@@ -18,8 +18,9 @@ const uid = n => `00000000-0000-0000-0000-${n.toString(16).padStart(12, '0')}`
 const mail = (n, extra = {}) => ({ id: uid(n), from_node: 'W', from_agent: 'W-政策', to_agent: 'T-對方', trust: 'member', body: `機密內文-${n}`, ...extra })
 
 async function fakeServer(mails = []) {
+  // 信等橋第一次回報 roster（名單已就緒）才放進 inbox；固定等 1200ms 在負載高時會讓信先被拉走、判成找不到視窗
   const inbox = []
-  setTimeout(() => inbox.push(...mails), 1200)
+  let released = false
   const st = { acked: new Set(), sent: [], posts: [] }
   const srv = http.createServer(async (req, res) => {
     const a = new URL(req.url, 'http://x').searchParams.get('action')
@@ -29,7 +30,7 @@ async function fakeServer(mails = []) {
     if (a === 'send') { st.sent.push(await readBody(req)); return out(200, { ok: true }) }
     if (a === 'room_post') { st.posts.push(await readBody(req)); return out(200, { ok: true }) }
     if (a === 'ack') { (await readBody(req)).ids.forEach(i => st.acked.add(i)); return out(200, { ok: true }) }
-    if (a === 'roster') { await readBody(req); return out(200, { ok: true }) }
+    if (a === 'roster') { await readBody(req); if (!released) { released = true; inbox.push(...mails) }; return out(200, { ok: true }) }
     out(404, {})
   })
   await new Promise(r => srv.listen(0, '127.0.0.1', r))
@@ -50,7 +51,7 @@ function makeHome() {
 }
 
 function startBridge(h, st, env = {}) {
-  const child = spawn(process.execPath, [path.join(MACHINE, 'bridge.mjs')], {
+  const child = spawnTracked(process.execPath, [path.join(MACHINE, 'bridge.mjs')], {
     cwd: h.home, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true,
     env: {
       PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: h.home, USERPROFILE: h.home,

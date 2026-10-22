@@ -7,7 +7,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawnTracked } from './spawn-tracked.mjs'
 import { fileURLToPath } from 'node:url'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -26,7 +26,7 @@ async function fakeServer({ inbox, aegis = {}, members }) {
     if (u.pathname === '/relay') {
       const a = u.searchParams.get('action')
       if (a === 'whoami') return out(200, { node: 'T', bell_topic: 'bell-test' })
-      if (a === 'inbox') return out(200, { messages: st.inbox.filter(m => !st.acked.has(m.id)) })
+      if (a === 'inbox') return out(200, { messages: st.rosterPosts.length ? st.inbox.filter(m => !st.acked.has(m.id)) : [] })   // 橋第一次回報名單之後才交信（負載高時名單晚到，信會被判成找不到視窗）
       if (a === 'send') { st.sent.push(await readBody(req)); return out(200, { ok: true }) }
       if (a === 'ack') { (await readBody(req)).ids.forEach(i => st.acked.add(i)); return out(200, { ok: true }) }
       if (a === 'roster') { st.rosterPosts.push(await readBody(req)); return out(403, { error: 'forbidden' }) }
@@ -53,7 +53,7 @@ async function fakeServer({ inbox, aegis = {}, members }) {
 async function runBridge({ script, env = {}, st, setup, until, timeout = 15000, settle = 800 }) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'irori-bridge-test-'))
   const extra = setup ? setup(home) : {}
-  const child = spawn(process.execPath, [path.join(MACHINE, script)], {
+  const child = spawnTracked(process.execPath, [path.join(MACHINE, script)], {
     cwd: home, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true,
     env: {
       PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: home, USERPROFILE: home,
