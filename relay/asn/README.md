@@ -75,6 +75,14 @@ asn-cli attach --id <附件編號> [--out 路徑]
 - 找不到命令列時：設定「視窗」分類的「寄信指令」顯示完整路徑，可複製。橋轉交的信件裡附件下載提示與群組翻頁提示也都是完整路徑。
 - Node 版（`relay/machine/*.mjs`）保留給雲端代理與沒有 ASN 的 Linux 無畫面節點。
 
+## 密碼小幫手（`asn-askpass`）：git／ssh 要密碼時由 ASN 跳窗收（#26 第一期）
+
+`asn-askpass.exe`（和 `asn-cli.exe` 同一個資料夾）可設成 `GIT_ASKPASS`／`SSH_ASKPASS`：git／ssh 要密碼時呼叫它，它經本機管道（只允許同一個 Windows 使用者）請**正在執行的 ASN** 跳出確認窗，使用者輸入的密碼直接經管道回給它、再印到標準輸出給 git／ssh。密碼不進模型、信件、記錄、log、檔案、指令列參數、環境變數、剪貼簿。ASN 沒開時它直接失敗（結束碼 1），不會自己收密碼。
+
+- 設定：設定「視窗」分類的「密碼小幫手」顯示 `setx GIT_ASKPASS "<完整路徑>"`，可複製路徑。**ASN 不會自動改使用者的環境變數或 git 設定。**
+- 程式在 `src-tauri/src/askpass/`（管道、排隊與逾時、小幫手、確認窗）與 `ui/askpass.html`；結束碼：1 ASN 沒開、2 使用者取消、3 逾時、4 忙碌或不支援、5 管道對面不是 ASN。
+- 威脅模型、限制（同一個 Windows 使用者下惡意程式理論上可攔截）、層級 2～4 的設計與真機驗證清單見 [docs/design/SECRETS.md](../../docs/design/SECRETS.md)。
+
 ## 介面
 
 - 左側直立頁籤，「設定」頁可選**分頁依**與**分組依**（記在 asn-me.json 的 tabDim／groupDim，舊存檔的 groupMode 會自動轉換）。三個維度：狀態（線上／忙碌／暫離／離線）、廠商（Claude、Gemini、Grok、Codex、DeepSeek，其他照字母，「其他」最後；好友沒回報 engine 時用節點 kind 推斷，kind=other 不採用）、設備。

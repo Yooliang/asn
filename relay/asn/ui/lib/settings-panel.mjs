@@ -15,7 +15,7 @@ import { USAGE_NOTE } from './usage.mjs'
 export const SETTING_OPS = [
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-add', 'acct-auto', 'acct-remote-node', 'acct-remote-switch', 'acct-trust',
-  'closeTo', 'autostart', 'bridge-enable', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'cli-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'avatar-remove',
+  'closeTo', 'autostart', 'bridge-enable', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'cli-copy', 'askpass-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'avatar-remove',
 ]
 
 export const SettingsPanel = {
@@ -181,6 +181,11 @@ export const SettingsPanel = {
           <code class="set-code">{{ st.cli.path }}</code>
           <code class="set-code">{{ st.cli.example }}</code>
           <button class="aero-btn" type="button" @click="act('cli-copy')">{{ st.cli.copied ? '已複製' : '複製寄信指令' }}</button>
+        </section>
+        <section class="set-card" aria-label="密碼小幫手" v-if="st.askpass">
+          <small>git 或 ssh 要密碼時由 ASN 跳窗請你輸入，密碼不會經過 AI。想用的話，在終端機執行下面這行（只對之後開的視窗生效；ASN 不會自動改你的設定）：</small>
+          <code class="set-code">{{ st.askpass.example }}</code>
+          <button class="aero-btn" type="button" @click="act('askpass-copy')">{{ st.askpass.copied ? '已複製' : '複製路徑' }}</button>
         </section>
       </template>
       <template v-if="catKey === 'update'">

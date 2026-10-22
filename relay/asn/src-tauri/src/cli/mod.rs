@@ -18,7 +18,8 @@ mod testsupport;
 #[cfg(test)]
 mod tests;
 
-pub use env::Env;
+pub use caller::process_table;
+pub use env::{Env, ProcTable};
 
 use std::io::{Read, Write};
 

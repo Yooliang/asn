@@ -120,6 +120,15 @@ try {
 async function copyCliExample() {
   try { await navigator.clipboard.writeText(cliInfo.example); cliInfo.copied = true; setTimeout(() => { cliInfo.copied = false }, 2500) } catch (e) { console.info('[ASN] 複製失敗', e.message) }
 }
+// 密碼小幫手（asn-askpass）：git／ssh 要密碼時請 ASN 跳窗收。設定頁顯示設定指令，可複製路徑；ASN 不會自動改環境變數。程式在 askpass/
+const askpassInfo = reactive({ shown: false, path: '', example: '', copied: false })
+try {
+  const a = await invoke('askpass_helper_info')
+  if (a?.path) Object.assign(askpassInfo, { shown: true, path: String(a.path), example: String(a.example || '') })
+} catch { /* 舊版後端沒有這個指令就不顯示 */ }
+async function copyAskpassPath() {
+  try { await navigator.clipboard.writeText(askpassInfo.path); askpassInfo.copied = true; setTimeout(() => { askpassInfo.copied = false }, 2500) } catch (e) { console.info('[ASN] 複製失敗', e.message) }
+}
 // 自動更新：啟動與每 6 小時檢查；有新版只在名單上方顯示一條通知，使用者按「更新」才下載安裝（--shot 模式不檢查）。程式在 updater.rs
 const autoCheck = ref(autoCheckFromSaved(savedMe.autoUpdate))
 const upd = reactive({ ...initialUpdateState(), checking: false, manual: '', lastCheck: 0, checkErr: '' })
@@ -937,6 +946,7 @@ const app = createApp({
       closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy },
       bridge: bridge.shown ? { enabled: bridge.enabled, running: bridge.running, legacy: bridge.legacy, takeoverAllowed: bridge.takeoverAllowed, remoteLaunch: bridge.remoteLaunch, unaddressedTo: bridge.unaddressedTo, error: bridge.error, busy: bridge.busy, confirm: bridge.confirm } : null,
       cli: cliInfo.shown ? { path: cliInfo.path, example: cliInfo.example, copied: cliInfo.copied } : null,
+      askpass: askpassInfo.shown ? { path: askpassInfo.path, example: askpassInfo.example, copied: askpassInfo.copied } : null,
       autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual, status: updateStatus({ checking: upd.checking, phase: upd.phase, info: upd.info, lastCheck: upd.lastCheck, error: upd.checkErr, current: info.version }) },
       usage: { loading: usage.state.loading, error: usage.state.error, data: usage.state.data, updated: usage.state.updated },
       launch: { tools: launchToolRows.value, maxPerHour: launchPrefs.maxPerHour, cwdText: launchCwdText.value },
@@ -972,6 +982,7 @@ const app = createApp({
         case 'bridge-takeover-yes': await takeoverBridge(); break
         case 'bridge-takeover-no': bridge.confirm = false; break
         case 'cli-copy': await copyCliExample(); break
+        case 'askpass-copy': await copyAskpassPath(); break
         case 'autoCheck': autoCheck.value = value === true; break
         case 'check-update': await checkUpdate(true); break
         case 'usage-refresh': await usage.refresh(); break

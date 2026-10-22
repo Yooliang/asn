@@ -606,3 +606,15 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .call-hang{background:linear-gradient(#f08a84,#d9302b);color:#fff;border-color:#a8201c}
 @keyframes call-pulse{50%{transform:scale(1.04)}}
 @media (prefers-reduced-motion:reduce){.call-who .dp.speaking{animation:none}}
+
+/* 密碼請求確認窗（#26） */
+html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
+.ap-win{padding:14px 18px}
+.ap-form{display:flex;flex-direction:column;gap:8px}
+.ap-h{margin:0;font-size:16px;color:var(--title-fg)}
+.ap-info{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin:0;font-size:13px}
+.ap-info dt{color:var(--muted)}
+.ap-info dd{margin:0;word-break:break-all;user-select:text}
+.ap-input{border:1px solid var(--line);border-radius:3px;padding:6px 8px;font-size:14px}
+.ap-note,.ap-left{margin:0;font-size:12px;color:var(--muted)}
+.ap-btns{display:flex;justify-content:flex-end;gap:8px}
