@@ -15,6 +15,7 @@ mod room_tests;
 mod secret_tests;
 mod send_tests;
 mod unit_tests;
+mod usage_tests;
 
 pub const SELF_PID: u32 = 9001;
 pub const BASH_PID: u32 = 9002;

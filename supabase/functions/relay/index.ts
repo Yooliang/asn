@@ -18,6 +18,7 @@ import { handleNodeLaunchAction, LAUNCH_ACTIONS, sanitizeLauncher } from "../_sh
 import { handleNodePartnerOpAction, PARTNER_OP_ACTIONS } from "../_shared/partner_ops.ts";
 import { ACCT_ACTIONS, handleAcctAction } from "../_shared/account_switch.ts";
 import { handleSecretAction, SECRET_ACTIONS } from "../_shared/secret_remote.ts";
+import { handleUsageAction, USAGE_ACTIONS } from "../_shared/usage.ts";
 import {
   ACTIONS as ATTACH_ACTIONS, bindAttachments, handleAttachAction, prepareAttachments, type StorageDeps, withAttachments,
   withRoomAttachments,
@@ -450,6 +451,14 @@ Deno.serve(async (req) => {
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
     const signedOp = (action === "partner_op" || action === "partner_ops" || action === "partner_archive") ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
     const r = await handleNodePartnerOpAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedOp);
+    return json(r.status, r.body);
+  }
+  // 無頭節點每小時用量回報（見 _shared/usage.ts）：usage_report 只寫金鑰所屬的自己節點，usage_list 只讀自己的。
+  if (action && USAGE_ACTIONS.has(action)) {
+    if (action === "usage_report" && req.method !== "POST") return json(405, { error: "method_not_allowed" });
+    const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
+    const params = action === "usage_report" ? raw : { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
+    const r = await handleUsageAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params);
     return json(r.status, r.body);
   }
   // 遠端一次性密碼傳遞（#26 第二期，見 _shared/secret_remote.ts）：secret_request／secret_fetch 是請求端；secret_pending／secret_reply 是本人設備，一定要本人簽章（沒簽章 401 不打資料庫）。
