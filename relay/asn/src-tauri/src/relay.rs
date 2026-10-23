@@ -3,7 +3,7 @@
 use serde_json::{json, Map, Value};
 use crate::names::{prune, OldName};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 use std::path::PathBuf;
@@ -36,6 +36,27 @@ pub struct Relay {
     pub presence_wake: tokio::sync::Notify,
     /// 正在聽的歌（預設關；開了才有值，回報時蓋過個人訊息）
     pub now_playing: std::sync::Arc<crate::nowplaying::NowPlaying>,
+    /// 畫面端最近一次呼叫收信（relay_inbox）的時間（毫秒）；0＝這次啟動以來畫面從沒收過
+    ui_inbox_ms: AtomicU64,
+    /// 這個 Relay 建立的時間（毫秒），畫面從沒收過信時拿來算「已經多久沒人收」
+    started_ms: u64,
+    /// 畫面沒在收信時由 Rust 代收的信（已向後台 ack）。畫面下次收信時原樣交給畫面，畫面確認收下才移除；存檔 window-spool.json，重開程式不遺失
+    spool: Mutex<Vec<Value>>,
+}
+
+/// 畫面端超過這麼久沒收信，Rust 就代收寄給 ASN 視窗的信（畫面自己每 120 秒收一次，留足餘裕）
+pub const UI_STALE_MS: u64 = 300_000;
+/// 代收存放最多留幾封（超過丟最舊的）
+const SPOOL_MAX: usize = 500;
+const SPOOL_FILE: &str = "window-spool.json";
+
+/// 要不要代收：畫面最後一次收信（或從沒收過就從程式啟動算起）已經超過門檻
+pub fn fallback_due(now: u64, last_ui_ms: u64, started_ms: u64, stale_ms: u64) -> bool {
+    now.saturating_sub(last_ui_ms.max(started_ms)) >= stale_ms
+}
+/// 診斷文字：畫面端多久前收過信（給橋的 log 用）
+pub fn ui_seen_text(now: u64, last_ui_ms: u64) -> String {
+    if last_ui_ms == 0 { "畫面端本次啟動以來從未收過信".into() } else { format!("畫面端 {} 秒前收過信", now.saturating_sub(last_ui_ms) / 1000) }
 }
 
 /// 與 JS encodeURIComponent 相同：只留 A-Za-z0-9 -_.!~*'()
@@ -245,6 +266,7 @@ impl Relay {
             client: reqwest::Client::new(), base, key, node, window: Mutex::new(window), old: Mutex::new(vec![]), ack_agent: Mutex::new(HashMap::new()), unaddressed: Mutex::new(vec![]), unaddressed_acked: Mutex::new(vec![]), bridge_on: AtomicBool::new(false), owner_dir: Mutex::new(None),
             presence: Mutex::new(("online".into(), String::new())), presence_off: AtomicBool::new(false), presence_closed: AtomicBool::new(false), update_requested: AtomicBool::new(false),
             presence_wake: tokio::sync::Notify::new(), now_playing: Default::default(),
+            ui_inbox_ms: AtomicU64::new(0), started_ms: crate::heartbeat::now_ms(), spool: Mutex::new(vec![]),
         }
     }
     /// 前端改了狀態或個人訊息：記下來並叫醒回報迴圈立刻回報
@@ -394,7 +416,60 @@ impl Relay {
         self.bridge_on.store(on, Ordering::Relaxed);
     }
     pub fn set_owner_dir(&self, dir: PathBuf) {
+        // 讀回上次代收還沒交給畫面的信（壞檔當沒有）
+        if let Some(v) = std::fs::read_to_string(dir.join(SPOOL_FILE)).ok().and_then(|t| serde_json::from_str::<Vec<Value>>(&t).ok()) {
+            *self.spool.lock().unwrap() = v;
+        }
         *self.owner_dir.lock().unwrap() = Some(dir);
+    }
+    /// 畫面端最近一次收信的時間（0＝從沒收過）
+    pub fn ui_inbox_at(&self) -> u64 {
+        self.ui_inbox_ms.load(Ordering::Relaxed)
+    }
+    /// 目前代收、還沒交給畫面的信件數
+    pub fn spool_len(&self) -> usize {
+        self.spool.lock().unwrap().len()
+    }
+    fn save_spool(&self) {
+        let Some(dir) = self.owner_dir.lock().unwrap().clone() else { return };
+        let t = serde_json::to_string(&*self.spool.lock().unwrap()).unwrap_or_else(|_| "[]".into());
+        if let Err(e) = std::fs::write(dir.join(SPOOL_FILE), t) {
+            eprintln!("spool save failed: {e}");
+        }
+    }
+    /// 畫面沒在收信時代收寄給本機 ASN 視窗的信：存進代收區、存檔、再向後台 ack（delivered_at 才會有值）。
+    /// 畫面一開始收信（inbox）就把代收區交給它，所以兩邊不會各處理一次。回傳這次新代收的封數
+    pub async fn fallback_tick(&self, now: u64, stale_ms: u64) -> Result<usize, String> {
+        if !fallback_due(now, self.ui_inbox_at(), self.started_ms, stale_ms) {
+            return Ok(0);
+        }
+        let mut added = 0usize;
+        for w in self.active_names() {
+            let v = self.api(&format!("inbox&agent={}", encode_component(&w)), None).await?;
+            let mine: Vec<Value> = v.get("messages").and_then(Value::as_array).cloned().unwrap_or_default().into_iter().filter(|m| m.get("to_agent").and_then(Value::as_str) == Some(w.as_str())).collect();
+            let ids: Vec<String> = mine.iter().filter_map(|m| m.get("id").and_then(Value::as_str).map(String::from)).collect();
+            if ids.is_empty() {
+                continue;
+            }
+            {
+                let mut sp = self.spool.lock().unwrap();
+                for m in mine {
+                    let id = m.get("id").and_then(Value::as_str).unwrap_or("");
+                    if !sp.iter().any(|x| x.get("id").and_then(Value::as_str) == Some(id)) {
+                        sp.push(m);
+                        added += 1;
+                    }
+                }
+                let n = sp.len();
+                if n > SPOOL_MAX {
+                    sp.drain(..n - SPOOL_MAX);
+                }
+            }
+            self.save_spool();
+            // 先存好再 ack：ack 失敗下一輪重抓，代收區以信件 id 去重
+            self.api(&format!("ack&agent={}", encode_component(&w)), Some(build_ack_body(&ids)?)).await?;
+        }
+        Ok(added)
     }
     /// 同一個節點上只讓一個 ASN 程式去撈沒指定收件人的信（免得兩個視窗各顯示一次）：記號檔 owner-inbox.pid 放負責的 pid。
     /// 內建橋在跑的程式一律拿走記號；沒跑橋的程式只在記號檔沒人（或那個 pid 已死）時才拿
@@ -431,6 +506,7 @@ impl Relay {
         self.unaddressed.lock().unwrap().iter().filter_map(|m| m.get("id").and_then(Value::as_str).map(String::from)).collect()
     }
     pub async fn inbox(&self) -> Result<Value, String> {
+        self.ui_inbox_ms.store(crate::heartbeat::now_ms(), Ordering::Relaxed);
         let names = self.active_names();
         self.pull_unaddressed().await;
         let mut all: Vec<Value> = vec![];
@@ -462,11 +538,32 @@ impl Relay {
             map.insert(id.to_string(), String::new());
             all.push(m);
         }
+        // Rust 代收的信（已 ack 過後台）：交給畫面；畫面確認收下才從代收區移除
+        for m in self.spool.lock().unwrap().iter() {
+            if !m.get("id").and_then(Value::as_str).map(|i| all.iter().any(|a| a.get("id").and_then(Value::as_str) == Some(i))).unwrap_or(true) {
+                all.push(m.clone());
+            }
+        }
         *self.ack_agent.lock().unwrap() = map;
         Ok(json!({ "messages": all }))
     }
     pub async fn ack(&self, ids: &[String]) -> Result<Value, String> {
         build_ack_body(ids)?;
+        // 代收區的信後台早已 ack：只從代收區移除，不再送後台
+        let spooled: Vec<String> = {
+            let mut sp = self.spool.lock().unwrap();
+            let had: Vec<String> = ids.iter().filter(|i| sp.iter().any(|m| m.get("id").and_then(Value::as_str) == Some(i.as_str()))).cloned().collect();
+            sp.retain(|m| !m.get("id").and_then(Value::as_str).map(|i| had.iter().any(|h| h == i)).unwrap_or(false));
+            had
+        };
+        if !spooled.is_empty() {
+            self.save_spool();
+        }
+        let ids: Vec<String> = ids.iter().filter(|i| !spooled.contains(i)).cloned().collect();
+        let ids = &ids[..];
+        if ids.is_empty() {
+            return Ok(json!({ "acked": spooled.len() }));
+        }
         let cur = self.window_name();
         let mut by: Vec<(String, Vec<String>)> = vec![];
         {
@@ -494,7 +591,7 @@ impl Relay {
                 }
             }
         }
-        Ok(json!({ "acked": acked }))
+        Ok(json!({ "acked": acked + spooled.len() as u64 }))
     }
     /// 把這台設備的顯示名（nodes.name）設成目前的視窗名，名單才會讓別台設備的前台顯示這台的 ASN 視窗名。
     /// 只改自己這個節點的 name。後台還沒部署（404／400）當作不支援、靜默略過；其他失敗只記 log 並稍後再試，不打擾使用者。

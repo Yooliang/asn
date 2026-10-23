@@ -669,7 +669,7 @@ impl Core {
             // 寄給 ASN 自己視窗的信：留給 ASN 自己的畫面收（不轉交、不 ack）
             if self.relay.active_names().contains(&to) {
                 if self.self_handled.insert(m.id.clone()) {
-                    self.log.line(&format!("id={} to={to} is ASN's own window: bridge skips", m.id));
+                    self.log.line(&format!("id={} to={to} is ASN's own window: bridge skips ({})", m.id, crate::relay::ui_seen_text(crate::heartbeat::now_ms(), self.relay.ui_inbox_at())));
                 }
                 return Some(to);
             }
