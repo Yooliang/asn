@@ -5,6 +5,7 @@ import { PROVIDERS, accountView, errorText } from './login.mjs'
 import { authApi, invoke } from './tauri.mjs'
 import { checkName } from './onboard.mjs'
 import { accountDisplayName } from './mobile.mjs'
+import { checkAiWakeLimit, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE } from './ai-wake-limit.mjs'
 
 export const LoginPanel = {
   setup() {
@@ -12,12 +13,14 @@ export const LoginPanel = {
     const status = ref(null), info = ref(null), busy = ref(false), msg = ref(''), waiting = ref(false)
     // 帳號名稱（我的名字，所有設備共用）：登入後才有；改了走後台 account_name
     const nameText = ref(''), nameBusy = ref(false), nameMsg = ref('')
+    // 群組裡 AI 之間互相叫醒的上限（帳號層設定）
+    const wakeText = ref('5'), wakeBusy = ref(false), wakeMsg = ref('')
     const view = computed(() => accountView(status.value, info.value))
     const refresh = async () => {
       try {
         status.value = await authApi.status()
         info.value = null
-        if (status.value?.signed_in) { info.value = await authApi.accountInfo(); nameText.value = accountDisplayName(info.value?.owner_name, '') === '我' ? '' : accountDisplayName(info.value?.owner_name, '') }
+        if (status.value?.signed_in) { info.value = await authApi.accountInfo(); void authApi.getAiWakeLimit().then(n => { wakeText.value = String(n) }).catch(() => {}); nameText.value = accountDisplayName(info.value?.owner_name, '') === '我' ? '' : accountDisplayName(info.value?.owner_name, '') }
       } catch (e) { msg.value = errorText(e) }
     }
     const run = async (fn, ok = '') => {
@@ -35,8 +38,15 @@ export const LoginPanel = {
       nameBusy.value = true; nameMsg.value = ''
       try { nameText.value = await authApi.setAccountName(c.name); nameMsg.value = '已儲存。' } catch (e) { nameMsg.value = errorText(e) } finally { nameBusy.value = false }
     }
+    const saveWake = async () => {
+      if (wakeBusy.value) return
+      const c = checkAiWakeLimit(wakeText.value)
+      if (!c.ok) { wakeMsg.value = c.error; return }
+      wakeBusy.value = true; wakeMsg.value = ''
+      try { wakeText.value = String(await authApi.setAiWakeLimit(c.value)); wakeMsg.value = '已儲存。' } catch (e) { wakeMsg.value = errorText(e) } finally { wakeBusy.value = false }
+    }
     onMounted(refresh)
-    return { nameText, nameBusy, nameMsg, saveName, PROVIDERS, view, busy, msg, waiting, login, cancel: () => authApi.cancel() }
+    return { wakeText, wakeBusy, wakeMsg, saveWake, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE, nameText, nameBusy, nameMsg, saveName, PROVIDERS, view, busy, msg, waiting, login, cancel: () => authApi.cancel() }
   },
   template: `<section class="set-card login-set" aria-label="登入狀態">
       <header class="vendor-h"><b>登入狀態</b><small>Google／GitHub</small></header>
@@ -50,6 +60,11 @@ export const LoginPanel = {
         <span class="login-name-row"><input class="set-input" type="text" maxlength="40" v-model="nameText" :disabled="nameBusy" placeholder="例如：啟良" aria-label="帳號名稱" @keydown.enter.prevent="saveName"><button class="aero-btn" type="button" :disabled="nameBusy" @click="saveName">儲存</button></span>
         <small>帳號的名字，所有設備共用。</small>
       </label>
+      <label class="login-name" v-if="view.signedIn">{{ AI_WAKE_LIMIT_LABEL }}
+        <span class="login-name-row"><input class="set-input" type="number" min="0" max="20" step="1" v-model="wakeText" :disabled="wakeBusy" aria-label="AI 之間互相叫醒的上限" @keydown.enter.prevent="saveWake"><button class="aero-btn" type="button" :disabled="wakeBusy" @click="saveWake">儲存</button></span>
+        <small>{{ AI_WAKE_LIMIT_NOTE }}</small>
+      </label>
+      <small v-if="wakeMsg" role="status">{{ wakeMsg }}</small>
       <small v-if="nameMsg" role="status">{{ nameMsg }}</small>
       <small v-if="waiting" role="status">請在瀏覽器完成登入，完成後回到這裡。</small>
       <small role="status">{{ msg }}</small>

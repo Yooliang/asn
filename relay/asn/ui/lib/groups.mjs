@@ -158,8 +158,8 @@ export const kindOf = m => (m?.from_kind === 'ai' || m?.from_kind === 'human' ? 
 export const safeLabel = s => String(s ?? '').replace(/\bx:[0-9a-f-]{8,}\b/gi, '').replace(/\S+~\S+/g, t => t.slice(t.indexOf('~') + 1)).trim()
 
 // ---------- 附件 ----------
-// 群組裡能不能傳附件：有外部成員（別人的帳號）一律不行；這版的群組對話也還沒有附件上傳（friend.attachments 為 true 才開）
-export const roomAttachAllowed = f => !f?.room || (f.external !== true && f.attachments === true)
+// 群組裡能不能傳附件：只有 external=true（有外部成員＝別人的帳號）才隱藏；只有本人與自己的 AI 的群組照常能傳
+export const roomAttachAllowed = f => !f?.room || f.external !== true
 
 // ---------- 主持人確認 ----------
 export const CONFIRM_STATUS_TEXT = { pending: '等待主持人確認', approved: '主持人已同意', denied: '主持人已拒絕', expired: '已過期' }

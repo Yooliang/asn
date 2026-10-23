@@ -275,12 +275,13 @@ export const ChatPane = {
   <div class="chatpane-main">
   <div class="conv">
     <div class="conv-main">
-      <div class="to-line"><span v-html="emo(friend.nick)"></span>
+      <div class="to-line" :class="{ 'is-offline': !isRoom && friend.status === 'offline' }"><span v-html="emo(friend.nick)"></span>
         <span class="to-psm" v-if="friend.psm" v-html="emo(friend.psm)"></span>
         <span class="to-menu" v-if="groupMenu && canInvite">
           <button class="to-menu-btn" type="button" @click="menuOpen = !menuOpen" :aria-expanded="menuOpen" aria-label="更多：邀請與成員" title="更多">⋯</button>
           <span class="to-menu-pop" v-if="menuOpen" role="menu">
             <button type="button" role="menuitem" @click="pickMenu('invite')">邀請別人加入</button>
+            <button type="button" role="menuitem" v-if="isRoom" @click="pickMenu('addai')">加我的另一個 AI</button>
             <button type="button" role="menuitem" v-if="isRoom" @click="pickMenu('manage')">成員與設定</button>
           </span>
         </span>

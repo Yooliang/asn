@@ -36,6 +36,12 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-icon-btn .m-ic{width:28px;height:28px;display:block}
 .m-icon-btn:active:not(:disabled){background:rgba(255,255,255,.55)}
 .m-icon-btn:disabled{opacity:.5}
+.m-plus-wrap{position:relative;flex:none}
+.m-plus-back{position:fixed;inset:0;z-index:30}
+.m-plus-menu{position:absolute;right:0;top:50px;z-index:31;min-width:200px;white-space:nowrap;display:flex;flex-direction:column;background:#fff;color:#1d2733;border:1px solid rgba(0,0,0,.14);border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.22);overflow:hidden}
+.m-plus-menu button{border:0;background:transparent;text-align:left;padding:13px 16px;font:inherit;font-size:15px;color:inherit;border-bottom:1px solid rgba(0,0,0,.07)}
+.m-plus-menu button:last-child{border-bottom:0}
+.m-plus-menu button:active{background:rgba(0,0,0,.07)}
 
 /* 頁面骨架：最上面分頁列、其下標題列、中間可捲動（對話輸入區貼齊底部） */
 .m-page{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding-bottom:env(safe-area-inset-bottom,0px)}
@@ -47,7 +53,7 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 @media (prefers-reduced-motion:reduce){.m-pager{transition:none}}
 /* 對話：第二個大分頁本身（最後使用的那一位），和其他兩頁一起左右翻 */
 .m-chat{overflow:hidden}
-.m-head{flex:none;display:flex;align-items:center;gap:10px;height:60px;overflow:hidden;padding:6px 10px;color:var(--title-fg)}
+.m-head{flex:none;display:flex;align-items:center;gap:10px;height:60px;overflow:visible;padding:6px 10px;color:var(--title-fg)}
 .m-head-tx{flex:1;min-width:0}
 .m-title{font-weight:800;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 0 8px #fff,0 0 2px #fff}
 .m-conn{display:flex;align-items:center;gap:5px;font-size:12px;color:#27496e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -170,6 +176,11 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-chathead.is-busy .m-title{color:#3a2a00;text-shadow:none}
 .m-chathead.is-busy .m-conn{color:#4a3600}
 .m-chathead.is-busy .m-icon-btn{color:#3a2a00}
+/* 對方離線：疊灰色半透明（底圖仍看得到、不用 url 背景），一眼看出離線 */
+.m-chathead.is-offline{background:rgba(120,128,140,.5);border-bottom:1px solid rgba(88,96,108,.65);color:#262c34}
+.m-chathead.is-offline .m-title{color:#262c34;text-shadow:none}
+.m-chathead.is-offline .m-conn{color:#323a44}
+.m-chathead.is-offline .m-icon-btn{color:#262c34}
 .m-chat.shake{animation:m-shake .7s}
 @keyframes m-shake{0%,100%{transform:none}15%{transform:translateX(-10px)}30%{transform:translateX(9px)}45%{transform:translateX(-7px)}60%{transform:translateX(6px)}75%{transform:translateX(-3px)}}
 @media (prefers-reduced-motion:reduce){.m-chat.shake{animation:none}}

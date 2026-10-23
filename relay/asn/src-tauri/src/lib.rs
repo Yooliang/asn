@@ -1033,7 +1033,7 @@ pub fn run() {
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
             wins::open_chat, wins::open_panel, wins::close_panels, wins::chat_visible, wins::close_chats, wins::open_windows, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,
-            account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_bind, account::auth_skip_login, account::update_remote_request, account::update_remote_status,
+            account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_bind, account::auth_skip_login, account::update_remote_request, account::update_remote_status,
             cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke,
             tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_blocked, tray::autostart_set, updater::update_check, updater::update_install,
         ]);
@@ -1042,7 +1042,7 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         startup_info, relay_list, relay_inbox, relay_ack, relay_rooms, relay_group, invite_pending, relay_send, relay_chat_history, relay_read_sync, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_avatar, relay_set_avatar,
         set_presence, set_window_name, store_load, store_save, quit_app, capture_ui_ready, shot_frontend_log, open_link,
-        account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_bind,
+        account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_bind,
         android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, android::android_secret_pending, android::android_secret_reply, android::android_room_read, android::android_room_post, relay_partner_list, relay_partner_succeed,
     ]);
     let builder = builder

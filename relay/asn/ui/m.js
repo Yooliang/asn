@@ -25,6 +25,7 @@ import { defaultPartnerName } from './lib/partner.mjs'
 import { groupHeading, statusNote } from './lib/tabs.mjs'
 import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
+import { RECENT_GROUP_KEY, RECENT_GROUP_LABEL, recentActivity } from './lib/recent.mjs'
 import { authApi, invoke, listen, store } from './lib/tauri.mjs'
 import { ROOM_GROUP_KEY, ROOM_GROUP_LABEL, ROOM_POLL_MS, ROOM_EMPTY_HINT, ROOM_EMPTY_TEXT, ROOM_LOAD_FAIL_TEXT, isRoomChat, roomChatId, roomIdOf, roomPseudoFriend, totalUnreadWithRooms } from './lib/mobile-rooms.mjs'
 import { GroupSheet } from './lib/group-sheet.mjs'
@@ -33,6 +34,7 @@ import { canInviteFrom, copyText, createGroupApi } from './lib/groups.mjs'
 import { createRoomHub } from './lib/room-hub.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, guideNav, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
 import { applyRename } from './lib/rename.mjs'
+import { checkAiWakeLimit, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE } from './lib/ai-wake-limit.mjs'
 import { GuideDoc } from './lib/guide-doc.mjs'
 
 const { createApp, reactive, ref, computed, watch } = Vue
@@ -250,6 +252,12 @@ const app = createApp({
     const roomsLoaded = computed(() => hub.st.loaded), roomsErr = computed(() => hub.st.err)
     const roomLogs = hub.st.logs   // 群組代號 → 對話記錄
     const roomNote = computed({ get: () => hub.st.note, set: v => { hub.st.note = v } })   // 對話頁上方的一行提示（讀不到、發言失敗）
+    // 最近有活動：24 小時內有往來的夥伴與群組（名單最上面；同一位在設備分組照常出現）
+    const recentTick = ref(Date.now())
+    setInterval(() => { recentTick.value = Date.now() }, 60_000)
+    const recentRows = computed(() => recentActivity({ friends: groups.value.filter(g => g.kind !== 'archived').flatMap(g => g.items), logOf: id => { void lastMap[id]; return core?.logOf(id) ?? [] }, rooms: roomRows.value, now: Math.max(recentTick.value, Date.now()) }))
+    const plusOpen = ref(false)   // 名單右上角「＋」選單
+    const pickPlus = op => { plusOpen.value = false; if (op === 'create') groupFlow.openCreate(); else if (op === 'join') groupFlow.openJoin(); else openLaunch('') }
     const roomRows = computed(() => hub.rows({ query: query.value, plainText: plain }))
     const roomRowOf = id => hub.rowOf(id)
     const roomEmptyText = computed(() => (query.value.trim() ? '找不到符合的群組。' : hub.st.err ? ROOM_LOAD_FAIL_TEXT : ROOM_EMPTY_HINT))
@@ -281,7 +289,7 @@ const app = createApp({
     const groupItems = computed(() => {
       const f = chatFriend.value
       if (!f) return []
-      if (f.room) return [{ key: 'invite', label: '邀請別人加入' }, { key: 'manage', label: '成員與設定' }]
+      if (f.room) return [{ key: 'invite', label: '邀請別人加入' }, { key: 'addai', label: '加我的另一個 AI' }, { key: 'manage', label: '成員與設定' }]
       return canInviteFrom(f) ? [{ key: 'invite', label: '邀請別人加入' }] : []
     })
     function pickGroup(key) {
@@ -290,6 +298,7 @@ const app = createApp({
       history.back()   // 先收起「⋯」選單，再開群組對話框
       setTimeout(() => {
         if (key === 'manage' && f.room) groupFlow.openManage(roomIdOf(f.id))
+        else if (key === 'addai' && f.room) groupFlow.openManage(roomIdOf(f.id), { focusAdd: true })
         else if (f.room) groupFlow.openInvite({ type: 'room', roomId: roomIdOf(f.id), name: f.nick })
         else groupFlow.openInvite({ type: 'friend', friend: f })
       }, 80)
@@ -365,7 +374,7 @@ const app = createApp({
     const onCallState = on => { callOn.value = on; bridge?.keepAwake(on) }
     const sendTo = async (id, text, opts) => { if (isRoomChat(id)) return postRoom(id, text); const r = await core.send(id, text, opts); if (!r.ok) console.info('[ASN] send failed', r.error) }
     const nudgeTo = id => { if (!isRoomChat(id)) core.nudge(id) }   // 群組沒有震動與傳檔（工具列的鈕在群組畫面已藏起來）
-    const sendAttachTo = async (id, item, caption) => { if (isRoomChat(id)) return; const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
+    const sendAttachTo = async (id, item, caption) => { if (isRoomChat(id)) { await hub.postAttachment(roomIdOf(id), item, caption); if (nav.tab === 'chats') void showRoom(); return } const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
     // ---------- 使用指引：設置分頁的一個項目，點進去是獨立一頁（先列篇目，再看內文），內容沿用電腦版的篇目 ----------
     const guides = phoneGuideList()
     const guideOpen = computed(() => (nav.sheet === 'guide' ? phoneGuide(nav.guide) : null))
@@ -643,6 +652,16 @@ const app = createApp({
       try { ownerName.value = await authApi.setAccountName(c.name); nameErr.value = ''; nameDraft.value = c.name }
       catch (e) { nameDraft.value = myName.value; nameErr.value = e.message; setTimeout(() => { nameErr.value = '' }, 5000) }
     }
+    // 群組裡 AI 之間互相叫醒的上限（帳號層設定，預設 5）：改了存後台；不合格或失敗就還原並提示
+    const wakeDraft = ref('5'), wakeErr = ref('')
+    const commitWake = async () => {
+      const c = checkAiWakeLimit(wakeDraft.value)
+      if (!c.ok) { wakeErr.value = c.error; setTimeout(() => { wakeErr.value = '' }, 5000); void loadWake(); return }
+      try { wakeDraft.value = String(await authApi.setAiWakeLimit(c.value)); wakeErr.value = '' }
+      catch (e) { wakeErr.value = e.message; setTimeout(() => { wakeErr.value = '' }, 5000); void loadWake() }
+    }
+    const loadWake = () => authApi.getAiWakeLimit().then(n => { wakeDraft.value = String(n) }).catch(() => {})
+    void loadWake()
     const acct = ref({ signed_in: false, email: '', known: false, error: '' })
     // 要放在 acct 定義之後：watch 的來源函式會立刻執行一次，放前面會踩到「初始化之前就取用」而整個監看失效
     watch([() => friends.value.length, () => acct.value.signed_in], () => { void backfillLast() })
@@ -661,7 +680,7 @@ const app = createApp({
     }
 
     return {
-      onboard, onboardApi, finishOnboard, ONBOARD_TEXT, nameDraft, nameErr, commitName,
+      onboard, onboardApi, finishOnboard, ONBOARD_TEXT, nameDraft, nameErr, commitName, wakeDraft, wakeErr, commitWake, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE,
       screen, fatal, login, loginNote, PROVIDERS, canStart, startLogin, cancelLogin,
       upd, updText: computed(() => bannerText(upd)), updButton: computed(() => buttonLabel(upd)), startUpdate, checkUpdate,
       pf, sw, pagerStyle, indicator, swipeStart, swipeMove, swipeEnd, goTab, TABS, TAB_LABEL, myName, meForChat, lastOf, vendorIcon: vendorBadgeHtml,
@@ -669,7 +688,7 @@ const app = createApp({
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, ops, opsText, opsTitle, opsModels, opsModelNote, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
-      rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
+      recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }

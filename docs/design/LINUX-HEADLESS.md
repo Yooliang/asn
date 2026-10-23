@@ -251,6 +251,47 @@
 - 注意：`relay/machine/` 的其他檔案（`bridge.mjs` 等）仍是 Windows 工作機／Linux 家用機的橋，**不在這一階段刪**；cloud-agent 目前會 `import` machine 的 `relay-core.mjs` 等，刪 cloud-agent 不影響 machine，反向則會。
 - 退路：git 歷史；單元檔與二進位版本在 Release 保留。
 
+## 階段 2：Aegis 並行試跑
+
+目的：不動現有 Node 版（`irori-relay-aegis`，節點 `aegis`），另起 Rust 版（`asn-bridge-shadow`，節點 `aegis-rs`，設備名「Aegis（試跑）」），兩邊都問同一個 Aegis 本機 API；用寄給 `aegis-rs` 的測試信與寄給 `aegis` 的同題對照，只比結構，確認一致後才切換。狀態：腳本與單元已備妥，尚未部署、尚未建立測試節點。
+
+### 2-A 建立試跑節點與金鑰（金鑰不經過對話與 log）
+
+兩個動作需要人：(1) 開邀請碼（需要有開邀請權限的節點金鑰，例如帳號擁有者那台電腦的金鑰；後台 `invite` 動作，邀請碼 15 分鐘有效、只能用一次，後端只存雜湊）；(2) 把邀請碼交給 Aegis 去註冊。登入本人簽章（ASN 電腦版設定頁「新增無畫面主機」）是另一條路，但它由後台自動取代號（`n` 開頭加亂碼），不能指定 `aegis-rs`，只當備案。
+
+正規流程（金鑰由 Aegis 自己產生、直接寫檔，從不離開 Aegis）：
+
+1. 小良哥在有開邀請權限金鑰的電腦上，用管道把邀請碼直接送進 Aegis，邀請碼不印在畫面、不貼進對話：開邀請碼的小程式讀本機金鑰檔、呼叫 `?action=invite`、只把 `invite` 欄位寫到標準輸出，接上 `gcloud compute ssh aegis-tokyo --zone asia-northeast1-a --tunnel-through-iap --command "<第 2 步>"` 的標準輸入。（`relay/machine/tools-provision.mjs` 是同類寫法的參考，但它會在本機註冊；此處要改成只開邀請碼並送出。）
+2. Aegis 上執行（邀請碼從標準輸入讀進環境變數，不進命令列、不進 shell 歷史）：
+   `umask 077; mkdir -p /home/cwen0708/.asn-rs; ASN_HOME=/home/cwen0708/.asn-rs ASN_INVITE="$(cat)" /opt/node22/bin/node /home/cwen0708/asn/relay/machine/register.mjs --id aegis-rs --name "Aegis（試跑）" --machine aegis-tokyo --kind other --set-node`
+   `register.mjs` 只輸出一行不含金鑰的 JSON；金鑰寫進 `/home/cwen0708/.asn-rs/aegis-rs.key` 並設為 600（寫完讀回比對）。若回 `bad_id_prefix`，代號要加上回報的前綴（`register.mjs --suggest`）；回 `id_taken` 換名。
+3. 確認：`ASN_HOME=/home/cwen0708/.asn-rs node register.mjs --check --id aegis-rs`（只回 ok 與節點資訊）；`ls -l /home/cwen0708/.asn-rs` 應見 `aegis-rs.key` 為 `-rw-------`、資料夾 700。
+4. 另一個專用寄件節點（建議代號 `asn-tester`，不能有別的收信者，否則會搶信）用同樣流程在「跑對照腳本的那台電腦」註冊，金鑰存在該電腦的 `~/.asn/asn-tester.key`。
+5. 選配：節點預設沒有 `can_roster`，Rust 版回報名單會得到 403（只記一次 log，不影響收信）；要讓聯絡人看見「Aegis（試跑）」需帳號擁有者在後台開啟，屬寫後台動作，另行決定。
+
+### 2-B 部署與對照
+
+- 部署（在 `relay/asn`）：`node scripts/aegis/deploy-shadow.mjs --dry-run` 先看指令；去掉 `--dry-run` 才真的執行：本機 `npm run build:linux-bridge` → `gcloud compute scp`（`--tunnel-through-iap`）到 `~/asn-bridge/` → 遠端驗 sha256、`chmod 755`、換檔 → 安裝 `asn-bridge-shadow.service` → `daemon-reload` → `enable --now`。遠端缺 `aegis-rs.key` 就停手。換新版用 `--restart`。腳本從不讀、傳、印金鑰，也不動 `irori-relay-aegis`。
+- 單元：`relay/asn/scripts/aegis/asn-bridge-shadow.service`（`ASN_HOME=/home/cwen0708/.asn-rs`、`ASN_ENGINES=aegis`、`ASN_AEGIS_ALLOW` 與正式單元相同、`Restart=on-failure`）。刻意沒有 `Conflicts=`，兩個單元可同時跑；兩個節點各用各的金鑰與資料夾，不違反「同一把金鑰只能一個收信者」。
+- 對照：`node scripts/aegis/compare-shadow.mjs --dry-run` 先看題目；實跑時對 `aegis` 與 `aegis-rs` 各寄同一組題（預設 3 題，`--questions 檔.json`、`--rounds N` 可加量），收回覆（以 `reply_to` 對應、收到即 ack），輸出對照表。比的項目：有沒有回、回幾封（拆分）、寄件人顯示名、有沒有內容完全相同的重複回、第一封耗時是否同量級（差 20 秒內或不超過 3 倍）；不比內容。結束碼 0＝全部一致。
+
+### 2-C 驗收標準
+
+1. 連續 3 天，每天至少跑一輪對照（每輪不少於 10 題，混合短答與需要拆分的長答），全部題目結構一致。
+2. 無漏信：每題兩邊都有回；仲介上 `aegis-rs` 收件匣沒有積壓未處理的信。
+3. 無重複回：每題每邊沒有內容完全相同的重複回信；重啟單元一次後仍然不重問、不重複回。
+4. 異常路徑各測一次且與 Node 版文案一致：白名單外成員、查無成員、希緒自己、沒指定收件人。
+5. 兩個單元連續 3 天 `NRestarts=0`（或重啟原因可說明）；`aegis-rs` 的記憶體與 CPU 不高於 Node 版。
+6. 兩邊對 Aegis 的 `status=success` 次數與延遲同量級。
+
+### 2-D 退路
+
+停掉試跑：`sudo systemctl disable --now asn-bridge-shadow`。Node 版從頭到尾沒被動過，不需任何還原。要徹底清掉：刪 `/etc/systemd/system/asn-bridge-shadow.service`、`~/asn-bridge`、`~/.asn-rs`，並請帳號擁有者讓 `aegis-rs` 節點離開名單（`register.mjs --leave`，金鑰立即作廢）。
+
+### 2-E 切換程序
+
+之後再寫（驗收通過後）。要點預告：切換仍是「停一邊、啟另一邊」的單向開關，正式節點 `aegis` 的金鑰同一時間只能有一個收信者。
+
 ## 8. 部署：systemd 單元草稿（Aegis）
 
 ```

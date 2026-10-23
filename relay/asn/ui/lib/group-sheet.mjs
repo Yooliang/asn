@@ -86,12 +86,11 @@ export const GroupSheet = {
           </li>
           <li class="gs-empty" v-if="!s.members.some(x => x.kind === 'ai')">還沒有 AI 夥伴。</li>
         </ul>
-        <template v-if="s.addable.length">
-          <h3 class="gs-h">帶我的夥伴進來</h3>
-          <ul class="gs-members">
-            <li v-for="a in s.addable" :key="a.key"><span class="gs-av ai" aria-hidden="true">{{ a.label.slice(0, 1) }}</span><span class="gs-name">{{ a.label }}</span><button class="gs-btn small" type="button" :disabled="s.busy" @click="flow.addAi(a.key)">帶進來</button></li>
-          </ul>
-        </template>
+        <h3 class="gs-h" :class="{ 'gs-focus': s.focusAdd }">加我的另一個 AI</h3>
+        <ul class="gs-members">
+          <li v-for="a in s.addable" :key="a.key"><span class="gs-av ai" aria-hidden="true">{{ a.label.slice(0, 1) }}</span><span class="gs-name">{{ a.label }}</span><button class="gs-btn small" type="button" :disabled="s.busy" @click="flow.addAi(a.key)">帶進來</button></li>
+          <li class="gs-empty" v-if="!s.addable.length">你名下沒有其他在線的夥伴可以帶進來。</li>
+        </ul>
         <p class="gs-note">{{ PRIVACY_NOTE }}</p>
         <p class="gs-warn" v-if="s.leaving">確定要退出這個群組嗎？你和你帶進來的夥伴都會一起退出。</p>
       </template>

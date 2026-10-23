@@ -1168,7 +1168,7 @@ impl Core {
             Ok(_) => {
                 self.log.line(&format!("handed room={room_id} #{seq} member={member} to={target}"));
                 let names: Vec<String> = attach::normalize(msg.get("attachments")).iter().map(|a| a.name.clone()).collect();
-                let from = rooms::display_from(msg.get("from").and_then(Value::as_str).unwrap_or(""));
+                let from = rooms::from_text(msg);
                 self.corr_note(&target, Dir::Received, &format!("群組 {room_name} {from}"), &target, &id, msg.get("body").and_then(Value::as_str).unwrap_or(""), &names);
                 true
             }

@@ -678,6 +678,7 @@ async function openGroupMenu(chatId, what) {
   if (isRoomChat(chatId)) {
     const rid = roomIdOf(chatId), r = hub.raw(rid)
     if (what === 'manage') groupFlow.openManage(rid)
+    else if (what === 'addai') groupFlow.openManage(rid, { focusAdd: true })
     else groupFlow.openInvite({ type: 'room', roomId: rid, name: String(r?.name ?? '') })
     return
   }
@@ -759,7 +760,7 @@ const sendMsg = async (id, text, opts) => {
   await sendTo(id, text, opts)
 }
 const nudgeTo = id => (isRoomChat(id) ? undefined : core.nudge(id))
-const sendAttachTo = async (id, item, caption) => { if (isRoomChat(id)) return; const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
+const sendAttachTo = async (id, item, caption) => { if (isRoomChat(id)) { await hub.postAttachment(roomIdOf(id), item, caption); pushLog(id); return } const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
 const activateTab = id => { ui.active = id; core.markRead(id); sync() }   // 指引、設定的分頁 id 不是好友，markRead 會直接略過
 const closeOneChatTab = id => { Object.assign(ui, closeChatTab(ui, id)); if (ui.active) core.markRead(ui.active); sync() }
 const applyChatTabClose = patch => { Object.assign(ui, patch); if (ui.active) core.markRead(ui.active); sync() }

@@ -172,7 +172,7 @@ test('手機頁面：不載電腦端的樣式與腳本；觸控目標有放大�
   const av = /\.m-pic\{[^}]*\}/.exec(css)[0]
   const px = k => Number(new RegExp(`${k}:(\\d+)px`).exec(av)?.[1])
   assert.ok(px('width') <= 48 && px('height') <= 48 && px('max-width') <= 48 && px('max-height') <= 48, '標題列大頭貼尺寸上限 48px')
-  assert.match(css, /\.m-head\{[^}]*height:\d+px;[^}]*overflow:hidden/, '標題列固定高度')
+  assert.match(css, /\.m-head\{[^}]*height:\d+px;/, '標題列固定高度')   // overflow 改 visible：右上「＋」選單要往下展開
   for (const f of ['list.html', 'chat.html', 'login.html']) assert.doesNotMatch(read('ui', f), /mobile\.css|m\.js/, f)
 })
 
@@ -331,7 +331,8 @@ test('名單頁：群組標題沒有開新夥伴按鈕、標題列沒有重新�
   const group = /<div v-for="g in groups"[\s\S]*?<ul v-show/.exec(html)[0]
   assert.doesNotMatch(group, /開新夥伴|openLaunch|m-gplus/, '群組標題旁不放開新夥伴')
   assert.doesNotMatch(css, /m-gplus/)
-  assert.equal(html.split("openLaunch('')").length - 1, 1, '只有標題列右上角一個入口')
+  assert.equal(html.split("pickPlus('launch')").length - 1, 1, '只有標題列右上角「＋」選單一個入口')
+  assert.equal(html.split("openLaunch('')").length - 1, 0, '開新夥伴不再直接散在名單上')
   assert.doesNotMatch(html, /openLaunch\((?!'')/, '不再有預選電腦的入口')
   // 標題列沒有重新整理鈕（改下拉重整）
   const head = /<header class="m-head">[\s\S]*?<\/header>/.exec(html)[0]

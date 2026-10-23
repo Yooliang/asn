@@ -47,7 +47,7 @@
 1. 發言寫入 `room_messages`，同時對「群組內所有成員節點」的門鈴主題敲門鈴（`room_post` 尾端；只查同租戶節點，`n.tenant_id is not distinct from v_t`）。
 2. 內建橋（`relay/asn/src-tauri/src/bridge/rooms.rs`）／機器橋（`relay/machine/rooms.mjs`）對每個「我所在的群組成員身分」用本地游標呼叫 `room_read`，只處理後端標 `for_me=true` 的訊息。
 3. `for_me` 由 `shouldRespond` 決定（`_shared/rooms.ts` 第 56～62 行）：自己發的不回；有點名時只有被點名的回；沒點名時只有 `trust=owner` 的訊息大家都可回。
-4. 轉給視窗的文字帶 `[群組 名稱] trust=… from=… #seq` 與固定提示 `ROOM_HINT`（`rooms.rs` 第 11、43～52 行）：只有被點名或擁有者本人發問才需要回。
+4. 轉給視窗的文字帶 `[群組 名稱] trust=… from=… #seq` 與固定提示 `ROOM_HINT`（`rooms.rs`；逐字內容見 MAIL-HEADER.md「群組信抬頭」）：先看歷史紀錄，確定跟自己有關（被點名、或是在回自己剛才說的事）才回覆。AI 點名另一個 AI 也會叫醒對方，但以「真人最近一次發言」為起點，AI 之間最多互相叫醒 N 輪（帳號設定 `ai_wake_limit`，預設 5，0～20，0＝不能互相叫醒；跨租戶群組取主持人的設定），超過就只記未讀不叫醒，真人再發言才重新起算。
 5. `@點名` 由 `parseMentions` 解析（顯示名或成員鍵，最長名字優先；`rooms.ts` 第 28～50 行）。
 
 ### 1.5 手機與電腦版的群組畫面
@@ -366,3 +366,5 @@ relay.friendships      新增（第 2 期）：user_a、user_b（已排序）、
 | ROADMAP 5 附件 | 跨租戶附件在本設計第 3 期 |
 | ROADMAP 6 簽章 | 成員鍵以帳號識別，將來可與節點公鑰綁定 |
 | ONBOARDING 第 7 節 | 「群組裡誰的提問該回」的規則在多租戶下改為 2.5 的規則 |
+
+**第 1c 段（分支 fix/groups-p1c）補第一期缺口**：橋給 AI 的群組信頭改用 `from_label`＋`relation`（見 MAIL-HEADER.md「群組信抬頭」）；成員清單回報各 AI 的 `allow_others`（migration 20261023180000）；介面加「加我的另一個 AI」（⋯ 選單）；只有 `external=true` 的群組才隱藏附件（群組傳附件走 `relay_send_attachment` 帶 `room`，真人成員的設備補上下載授權）；手機名單「＋」選單、群組對話排在設備分組前、本人列第二行「狀態・設備名」；對話頁頭離線疊灰。

@@ -5,7 +5,7 @@ import { confirmCards } from './groups.mjs'
 import { ROOM_FIRST_LOAD, ROOM_LOAD_FAIL_TEXT, mergeRoomLog, memberIdentity, needsRead, postError, readSince, roomErrorText, roomItems, roomLog } from './mobile-rooms.mjs'
 import { groupErrorText } from './groups.mjs'
 
-export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd = 'relay_room_read', postCmd = 'relay_room_post', visible = () => true, reactive = x => x }) {
+export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd = 'relay_room_read', postCmd = 'relay_room_post', attachCmd = 'relay_send_attachment', visible = () => true, reactive = x => x }) {
   const st = reactive({ rooms: [], loaded: false, err: false, logs: {}, cards: {}, note: '', deciding: false })
   const raw = id => st.rooms.find(r => r?.id === id) ?? null
   const rows = (opts = {}) => roomItems(st.rooms, opts)
@@ -65,6 +65,20 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
     } catch (e) { st.note = roomErrorText(e?.message); return false }
   }
 
+  // 在群組傳照片或檔案：Rust 端上傳後以本人簽章發言（附件編號由 Rust 填，前端不能自填）
+  async function postAttachment(id, item, caption = '') {
+    const ident = identityOf(id)
+    const err = postError('附件', { signedIn: true, identity: ident })
+    if (err) { st.note = err; return false }
+    if (!item?.data) { st.note = '沒有內容'; return false }
+    try {
+      await invoke(attachCmd, { payload: { room: id, ...(ident.agent ? { from_agent: ident.agent } : {}), kind: item.kind === 'file' ? 'file' : 'image', caption: String(caption ?? '').trim(), name: item.name, data: item.data, width: item.width, height: item.height, thumb: item.thumb || undefined } })
+      st.note = ''
+      await refresh(); await read(id, { force: true })
+      return true
+    } catch (e) { st.note = roomErrorText(e?.message); return false }
+  }
+
   // 主持人按「同意」「拒絕」：後台用本人簽章核對，不是主持人或沒簽章會被擋
   async function decide(id, cardId, approve) {
     if (st.deciding) return false
@@ -77,5 +91,5 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
     } catch (e) { st.note = groupErrorText(e?.message); await loadCards(id); return false } finally { st.deciding = false }
   }
 
-  return { st, raw, rows, rowOf, identityOf, refresh, read, loadCards, open, post, decide }
+  return { st, raw, rows, rowOf, identityOf, refresh, read, loadCards, open, post, postAttachment, decide }
 }
