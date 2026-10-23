@@ -197,8 +197,8 @@ mod tests {
     #[test]
     fn 資料夾_環境變數指定優先且不看舊位置() {
         let d = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(d.path().join(".irori-relay")).unwrap();
-        std::fs::write(d.path().join(".irori-relay").join("x"), "1").unwrap();
+        std::fs::create_dir_all(d.path().join(crate::home::LEGACY_NAME)).unwrap();
+        std::fs::write(d.path().join(crate::home::LEGACY_NAME).join("x"), "1").unwrap();
         let h = resolve_home_at(d.path(), Some("/custom/dir"));
         assert_eq!(h.primary, PathBuf::from("/custom/dir"));
         assert!(h.fallback.is_none());
@@ -207,9 +207,9 @@ mod tests {
     #[test]
     fn 資料夾_只有舊位置就用舊的() {
         let d = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(d.path().join(".irori-relay")).unwrap();
+        std::fs::create_dir_all(d.path().join(crate::home::LEGACY_NAME)).unwrap();
         let h = resolve_home_at(d.path(), None);
-        assert_eq!(h.primary, d.path().join(".irori-relay"));
+        assert_eq!(h.primary, d.path().join(crate::home::LEGACY_NAME));
     }
 
     #[test]
@@ -225,10 +225,10 @@ mod tests {
     fn 資料夾_新舊都有而舊的有內容_用舊的新的當後備() {
         let d = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(d.path().join(".asn")).unwrap();
-        std::fs::create_dir_all(d.path().join(".irori-relay")).unwrap();
-        std::fs::write(d.path().join(".irori-relay").join("aegis.key"), "x").unwrap();
+        std::fs::create_dir_all(d.path().join(crate::home::LEGACY_NAME)).unwrap();
+        std::fs::write(d.path().join(crate::home::LEGACY_NAME).join("aegis.key"), "x").unwrap();
         let h = resolve_home_at(d.path(), None);
-        assert_eq!(h.primary, d.path().join(".irori-relay"));
+        assert_eq!(h.primary, d.path().join(crate::home::LEGACY_NAME));
         assert_eq!(h.fallback, Some(d.path().join(".asn")));
     }
 
