@@ -12,7 +12,7 @@ import path from 'node:path'
 import { unaddressedWindowNote } from './unaddressed.mjs'
 import { createLog } from './safe-log.mjs'
 import { contextText, createRooms, parseMember, roomText, roomUuid, NO_REPLY_RE as ROOM_NO_REPLY_RE } from './rooms.mjs'
-import { mailHead, parseSendHead, mailPreamble, senderLine, stripReplyHead, wantsReply } from './mail-format.mjs'
+import { escapeBody, mailHead, parseSendHead, mailPreamble, senderLine, stripReplyHead, wantsReply } from './mail-format.mjs'
 import { bodyWithNotes } from './attach-format.mjs'
 import { createLauncher } from './launcher.mjs'
 import { detectAgentTools } from '../shared/agent-tools-detect.mjs'
@@ -422,7 +422,7 @@ async function handleMail(m) {
   if (!p.noReply) { lastRequester[target] = { from_node: m.from_node, from_agent: m.from_agent ?? '', mail_id: m.id, t: Date.now() }; persist() }
   try {
     const eng = engineOfWindow(target)
-    eng.deliver({ id: m.id, to: target, text: `${mailHead(m, engineLabelOf(windowOf(target)) ?? eng.id)}\n${mailPreamble(m, eng.id)}${note ? note + '\n' : ''}${bodyWithNotes(m.body, m.attachments)}` })   // 照片：內文後面多一行「〔照片〕檔名＋下載指令」，一起在外部資料區塊內
+    eng.deliver({ id: m.id, to: target, text: `${mailHead(m, engineLabelOf(windowOf(target)) ?? eng.id)}\n${mailPreamble(m, eng.id)}${note ? note + '\n' : ''}${bodyWithNotes(escapeBody(m.body), m.attachments)}` })   // 照片：內文後面多一行「〔照片〕檔名＋下載指令」，一起在外部資料區塊內
     log(`handed id=${m.id} from=${m.from_node}/${m.from_agent ?? ''} to=${target}`)
   } catch (e) {
     pending.delete(m.id); log(`cannot hand id=${m.id}: ${e.message} (left in inbox)`)
