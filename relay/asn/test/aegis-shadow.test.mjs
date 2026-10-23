@@ -47,13 +47,13 @@ test('部署計畫：步驟順序與指令組法', () => {
   assert.deepEqual(plan[0].args, ['run', 'build:linux-bridge'])
   const scp = plan[2].args
   assert.deepEqual(scp.slice(0, 3), ['compute', 'scp', '/b/asn-bridge'])
-  assert.equal(scp[3], 'cwen0708@aegis-tokyo:/home/cwen0708/asn-bridge/asn-bridge.new')
+  assert.equal(scp[3], 'aegis-tokyo:/tmp/asn-bridge.new')
   for (const s of plan.slice(1)) {
     assert.ok(s.args.includes('--tunnel-through-iap'))
     assert.ok(s.args.includes('--zone') && s.args.includes('asia-northeast1-a'))
   }
   const last = plan[4].args[plan[4].args.indexOf('--command') + 1]
-  for (const frag of ['test -f /home/cwen0708/.asn-rs/aegis-rs.key', 'sha256sum', 'abc123', 'chmod 755', 'systemctl daemon-reload', 'systemctl enable --now asn-bridge-shadow.service']) {
+  for (const frag of ['sudo test -f /home/cwen0708/.asn-rs/aegis-rs.key', 'sha256sum', 'abc123', 'install -o cwen0708 -g cwen0708 -m 755', 'systemctl daemon-reload', 'systemctl enable --now asn-bridge-shadow.service']) {
     assert.ok(last.includes(frag), frag)
   }
   assert.ok(!last.includes('restart'))
