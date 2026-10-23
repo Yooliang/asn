@@ -100,7 +100,10 @@ export type Io = {
 }
 
 // 狀態機＋寫檔。回傳的 promise 永不 reject；寫檔的任何錯誤只 log 一行。
-export function createStatus() {
+// 心跳：狀態沒變時也至少每 5 分鐘重寫一次（只更新 at，內容照舊），橋看到的 at 才不會過期
+export const HEARTBEAT_MS = 5 * 60 * 1000
+
+export function createStatus(clock: () => number = Date.now) {
   let version: string | undefined
   let chain: Promise<unknown> = Promise.resolve()
   let turnId = ''
@@ -108,6 +111,7 @@ export function createStatus() {
   let ended: string | undefined // 本輪 turn.complete 的 reason；undefined＝還沒結束
   let control: ControlResult | undefined // 最近一次控制檔結果；之後每次寫檔都保留，橋只認 id
   let last: { state: WinState; detail: string } = { state: 'idle', detail: '' }
+  let kept: { path: string; doc: StatusDoc } | undefined // 最近一次實際寫出去的內容（心跳只換 at）
 
   // 寫檔排進同一條鏈，順序不亂
   const write = (io: Io, state: WinState, detail: string): Promise<unknown> => {
@@ -125,8 +129,10 @@ export function createStatus() {
         const sid = await io.sid()
         const model = await Promise.resolve().then(() => io.model?.()).then(m => (typeof m === 'string' ? m : ''), () => '')
         const context = await Promise.resolve().then(() => io.usage?.()).then(contextOf, () => undefined)
-        const doc = buildStatus({ sessionId: sid, state, detail, turnId, version }, Date.now(), { model, context, control })
-        await io.write(statusPath(home, sid), JSON.stringify(doc))
+        const doc = buildStatus({ sessionId: sid, state, detail, turnId, version }, clock(), { model, context, control })
+        const path = statusPath(home, sid)
+        await io.write(path, JSON.stringify(doc))
+        kept = { path, doc }
       })
       .catch((err: unknown) => {
         try {
@@ -149,6 +155,25 @@ export function createStatus() {
     setControl(io: Io, r: ControlResult): Promise<unknown> {
       control = r
       return write(io, last.state, last.detail)
+    },
+    // 狀態沒變也定時重寫：只把 at 換成現在，其餘欄位照上次寫出去的內容。還沒寫過或還沒到 5 分鐘就不動
+    heartbeat(io: Io): Promise<unknown> {
+      if (!kept || clock() - kept.doc.at < HEARTBEAT_MS) return chain
+      chain = chain
+        .then(async () => {
+          if (!kept || clock() - kept.doc.at < HEARTBEAT_MS) return
+          const doc = { ...kept.doc, at: clock() }
+          await io.write(kept.path, JSON.stringify(doc))
+          kept = { path: kept.path, doc }
+        })
+        .catch((err: unknown) => {
+          try {
+            io.log(`asn 狀態檔心跳失敗：${err instanceof Error ? err.message : String(err)}`)
+          } catch {
+            /* 吞掉 */
+          }
+        })
+      return chain
     },
     sessionStart(io: Io): void {
       turnId = ''

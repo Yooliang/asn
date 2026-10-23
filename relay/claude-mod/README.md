@@ -79,6 +79,7 @@ ASN 橋（`bridge/partner_ops.rs`，格式見 `docs/design/PARTNER-OPS.md` 第�
 - **command**（從手機傳 / 指令）：`{"id","op":"command","command","args","at"}`，`command` 只收 `[A-Za-z0-9:_-]{1,64}`（不含開頭斜線），`args` 可空、≤2000 字、不含控制字元；用 `$.command.run({ command, args })` 執行（一樣排到閒置才跑），成功時 `detail` 放指令輸出文字（保留換行，截 1500 字；沒有輸出寫「已執行 /指令」），引擎拒絕（例如未知指令）回 `ok:false` 帶原因。只有本人簽章、以 / 開頭的信會被電腦端轉成這種控制檔。
 - **規則**：`at` 超過 2 分鐘的忽略；同一個 `id` 只執行一次；op 不認得、arg 空白／含控制字元／rename 超過 100 字／model 格式不合法 → `ok:false` 帶中文說明，不執行。外掛不刪控制檔（橋會刪）。
 - **橋放棄等待**：`$.command.run` 排到閒置才跑，橋可能已逾時刪掉控制檔。外掛的 `command.run` hook 在真正執行前再讀一次控制檔，不在或 `id` 不同就不執行、不寫結果（只擋自己排進去的那一筆：來源是外掛、指令與參數相同）；已經開始執行無法取消的，跑完發現控制檔不在照樣寫 `control`，`detail` 開頭加「（橋已放棄等待）」。
+- **心跳**：狀態檔沒有變化時，計時器每 5 分鐘只把 `at` 換成現在重寫一次（其餘欄位照上次寫出去的內容），讓收發室不會把閒置超過 30 分鐘的視窗當成沒外掛。還沒寫過狀態、或寫入失敗沒留下內容就不重寫。
 - **選填欄位**：狀態檔另有 `model`（`$.session.model()`）與 `context: {used, limit, percent}`（`$.session.usage()`），拿不到就不寫。
 - 程式在 `hooks/control.ts`，測試在 `hooks/control.test.ts`。
 
