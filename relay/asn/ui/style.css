@@ -674,3 +674,10 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 
 .set-adv{margin-top:4px}.set-adv>summary{cursor:pointer;color:var(--muted,inherit);font-size:12px;margin-bottom:8px}
 .dev-card .acct-list li{align-items:center}
+
+/* ---------- Frutiger Aero 背景（全 App 共用一張、對話區另一張）：圖貼頂，往下漸變成白色，下半部留白 ---------- */
+.win{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff 55%),url(img/bg-app.webp) top center/max(100%,720px) auto no-repeat,#fff}
+.pane{background:rgba(255,255,255,.6)}
+.chatpane-main{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff 62%),url(img/bg-chat.webp) left top/max(100%,640px) auto no-repeat,#fff}
+.conv,.compose-row{background:transparent}
+.conv-main,.compose-main{background:rgba(255,255,255,.62)}
