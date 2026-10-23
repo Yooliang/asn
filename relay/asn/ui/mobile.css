@@ -256,3 +256,11 @@ body > .callview.mobile{position:fixed;inset:0;z-index:90;padding:calc(env(safe-
 .m-guide-badge.is-phone{background:#e5f5e8;border-color:#a9d6b2;color:#2f7d3c}
 .m-guide-note{margin:0 0 6px;padding:8px 10px;border:1px solid var(--warn-line);border-radius:6px;background:var(--warn-bg);font-size:13px;line-height:1.5}
 .m-guide .guide-article{padding-bottom:24px}
+
+/* ---------- Frutiger Aero 背景（手機）：全 App 共用一張貼頂，對話分頁另用一張貼左上；皆往下漸變成白色 ---------- */
+html,body.m-body{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff 55%),url(img/bg-app.webp) top center/max(100%,720px) auto no-repeat,#fff}
+.m-scroll{background:rgba(255,255,255,.62)}
+.m-card{background:rgba(238,245,252,.72)}
+.m-chat{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff 62%),url(img/bg-chat.webp) left top/max(100%,520px) auto no-repeat,#fff}
+.m-chat .conv,.m-chat .compose-row{background:transparent}
+.m-chat .conv-main,.m-chat .compose-main{background:rgba(255,255,255,.62)}

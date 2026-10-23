@@ -208,6 +208,10 @@ pub struct Core {
     notice_ids: HashMap<String, u64>,
     notice_windows: HashMap<String, u64>,
     self_handled: HashSet<String>,
+    /// 「寄回成功才 ack」的引擎（Aegis）：還在等回覆的信編號
+    ack_wait: HashSet<String>,
+    /// 其中已經有一封回覆寄失敗的（不再寄後面的、也不 ack）
+    reply_fail: HashSet<String>,
     unrouted: HashSet<String>,
     last_saved: String,
     persist_failed: bool,
@@ -267,7 +271,7 @@ impl Core {
         let corr = CorrLog::new(cfg.handoff_dir.clone());
         let mut c = Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
-            last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), unrouted: HashSet::new(),
+            last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false,
         };
@@ -295,6 +299,11 @@ impl Core {
             EngineEvent::Fail(id, reason) => self.on_fail(&id, &reason).await,
             EngineEvent::Reply { from, text, mail_id } => self.on_reply(&from, &text, mail_id).await,
             EngineEvent::RosterChanged => self.refresh_roster(now).await,
+            EngineEvent::Replied(id) => {
+                if self.ack_wait.remove(&id) && !self.reply_fail.remove(&id) {
+                    self.ack_ids(&[id]).await;
+                }
+            }
         }
     }
 
@@ -618,7 +627,10 @@ impl Core {
     /// 指定的視窗不在線也不改丟給別的 session，退回交給本人
     fn unaddressed_window(&self) -> Option<String> {
         let set = self.cfg.data_dir.as_ref().map(|d| super::read_settings(d).unaddressed_to).unwrap_or_default();
-        let name = if set.trim().is_empty() { self.cfg.default_agent.trim().to_string() } else { set.trim().to_string() };
+        let mut name = if set.trim().is_empty() { self.cfg.default_agent.trim().to_string() } else { set.trim().to_string() };
+        if name.is_empty() {
+            name = self.engines.as_ref().and_then(|e| e.default_window()).unwrap_or_default(); // 引擎自己的預設成員（Aegis）
+        }
         (!name.is_empty() && self.online_names().contains(name.as_str()) && !self.relay.active_names().contains(&name)).then_some(name)
     }
 
@@ -643,7 +655,7 @@ impl Core {
 
     /// 信件最後多一行「往來記錄在哪」。ACP 背景工作者只能讀自己的工作資料夾，讀不到那個檔，所以不附
     fn with_path_line(&self, text: String, target: &str) -> String {
-        if self.engine_of(target) == "acp" {
+        if matches!(self.engine_of(target).as_str(), "acp" | "aegis") {
             return text;
         }
         format!("{text}\n{}", self.corr.path_line(target))
@@ -687,7 +699,7 @@ impl Core {
         let from_agent = m.from_agent.clone().unwrap_or_default();
         let mut note = String::new();
         let target = match m.to_agent.clone() {
-            Some(t) => t,
+            Some(t) => self.engines.as_ref().map(|e| e.canonical_name(&t)).unwrap_or(t),
             None => match self.unaddressed_window() {
                 // 使用者指定了「沒指定收件人的信交給誰」而且那個視窗在線：照設定給它
                 Some(w) => {
@@ -832,7 +844,16 @@ impl Core {
         }
         self.log.line(&format!("forwarded id={id} -> {target} ({}ms)", self.now.saturating_sub(t0)));
         self.pending[i].t = self.now;
+        if self.defers_ack(&target) {
+            self.ack_wait.insert(id.to_string()); // 寄回成功才 ack（Replied 事件）
+            return;
+        }
         self.ack_ids(&[id.to_string()]).await;
+    }
+
+    fn defers_ack(&self, target: &str) -> bool {
+        let eng = self.engine_of(target);
+        self.engines.as_ref().is_some_and(|e| e.ack_after_reply(&eng))
     }
 
     pub async fn on_fail(&mut self, id: &str, reason: &str) {
@@ -989,7 +1010,15 @@ impl Core {
             return;
         }
         let body = text.clone();
+        let deferred = self.ack_wait.contains(&o.id);
+        if deferred && self.reply_fail.contains(&o.id) {
+            self.log.line(&format!("reply from {from} id={} not sent: an earlier part failed (mail stays in inbox)", o.id));
+            return;
+        }
         let ok = self.send_back(&o, &body, Some(from), expects).await;
+        if deferred && !ok {
+            self.reply_fail.insert(o.id.clone());
+        }
         if ok {
             self.corr_note(from, Dir::Replied, from, &Self::node_agent(&o.from_node, &o.from_agent), &o.id, &text, &[]);
         }
@@ -1273,7 +1302,7 @@ impl Core {
                 } else {
                     self.settle_timeout(&id).await;
                 }
-            } else if p.state == State::Waiting && !p.nudged && !p.no_reply && p.room.is_none() && now.saturating_sub(p.t) > self.cfg.nudge_ms {
+            } else if p.state == State::Waiting && !p.nudged && !p.no_reply && p.room.is_none() && now.saturating_sub(p.t) > self.cfg.nudge_ms && !self.defers_ack(&p.target) {
                 self.nudge_window(&id).await;
             } else if p.state == State::Notified && now.saturating_sub(p.notified_at.unwrap_or(now)) > self.cfg.late_keep_ms {
                 self.remove(&id);

@@ -3,6 +3,7 @@
 //! 非同步回報「已轉交／失敗／回覆」。Claude 引擎仍走原本的收發室 worker（worker.rs），不在這裡。
 //! 所有引擎的子程序都是無視窗、乾淨環境（ACP 用白名單、Codex 用過濾清單），PID 記進 engine.pids，ASN 結束或下次啟動時只關記下的 PID。
 pub mod acp;
+pub mod aegis;
 pub mod acp_admin;
 pub mod acp_agy;
 pub mod acp_approvals;
@@ -34,6 +35,8 @@ pub enum EngineEvent {
     Reply { from: String, text: String, mail_id: Option<String> },
     /// 名單有變（核心立刻重新回報）
     RosterChanged,
+    /// 這封信的回覆都交給核心了（只有 [`Engine::ack_after_reply`] 的引擎用）：核心確認寄回都成功才 ack
+    Replied(String),
 }
 pub type EventTx = mpsc::UnboundedSender<EngineEvent>;
 
@@ -58,6 +61,18 @@ pub trait Engine: Send + Sync {
     fn stop(&self);
     /// 遠端管理這個引擎的工作者（只有 ACP 有）
     fn acp_admin(&self) -> Option<Arc<dyn acp_admin::AcpAdmin>> {
+        None
+    }
+    /// true＝轉交（Sent）時核心不 ack，等引擎報 [`EngineEvent::Replied`] 且回覆都寄成功才 ack；也不對它送「還沒回覆」的提醒（Aegis 引擎）。其他引擎維持原行為
+    fn ack_after_reply(&self) -> bool {
+        false
+    }
+    /// 信上的收件名（例如成員代號）換成名單上的名字；不認得回 None
+    fn canonical_name(&self, _name: &str) -> Option<String> {
+        None
+    }
+    /// 沒指定收件人的信的預設視窗名（使用者沒另外指定時才用）
+    fn default_window(&self) -> Option<String> {
         None
     }
 }
@@ -212,6 +227,16 @@ impl EngineSet {
         }
         changed
     }
+    /// 這個引擎代號的信是不是「寄回成功才 ack」
+    pub fn ack_after_reply(&self, engine: &str) -> bool {
+        self.engines.iter().any(|e| e.id() == engine && e.ack_after_reply())
+    }
+    pub fn canonical_name(&self, name: &str) -> String {
+        self.engines.iter().find_map(|e| e.canonical_name(name)).unwrap_or_else(|| name.to_string())
+    }
+    pub fn default_window(&self) -> Option<String> {
+        self.engines.iter().find_map(|e| e.default_window())
+    }
     /// ACP 工作者的遠端管理入口（沒載入 ACP 引擎回 None）
     pub fn acp_admin(&self) -> Option<Arc<dyn acp_admin::AcpAdmin>> {
         self.engines.iter().find_map(|e| e.acp_admin())
@@ -259,6 +284,10 @@ pub fn build(ctx: &EngineCtx, spec: Option<&str>) -> Option<Arc<EngineSet>> {
     let home = codex::codex_home(&ctx.env, &ctx.home);
     let (want_acp, want_codex) = selected(spec, &ctx.agents_file, &home);
     let mut v: Vec<Arc<dyn Engine>> = vec![];
+    // aegis 不自動載入：一定要 ASN_ENGINES 明寫
+    if spec.is_some_and(|s| s.split(',').any(|x| x.trim().eq_ignore_ascii_case("aegis"))) {
+        v.push(Arc::new(aegis::AegisEngine::new(ctx.clone())));
+    }
     if want_acp {
         v.push(Arc::new(acp::AcpEngine::new(ctx.clone(), None)));
     }

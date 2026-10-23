@@ -47,6 +47,8 @@ struct FState {
     honor_exclude: bool,
     /// 每次 inbox 請求的完整請求行
     inbox_queries: Vec<String>,
+    /// send 的 reply_to 在這份名單內就回 500（模擬寄回失敗；Aegis 引擎測「寄回成功才 ack」用）
+    send_fail_reply_to: Vec<String>,
 }
 
 fn pct_decode(s: &str) -> String {
@@ -168,6 +170,7 @@ fn handle_conn(mut c: std::net::TcpStream, st: Arc<Mutex<FState>>) {
             s.acked.extend(ids);
             (200, json!({"acked": n}))
         }
+        "send" if body["reply_to"].as_str().is_some_and(|r| s.send_fail_reply_to.iter().any(|x| x == r)) => (500, json!({"error": "internal"})),
         "send" => {
             s.sent.push(body);
             (200, json!({"id": uid(900 + s.sent.len() as u32)}))
@@ -1418,6 +1421,7 @@ async fn 夥伴_id_暫時失敗_500_只記一次_下一輪再試_好了就接上
     assert_eq!(core.partner_id("T-乙"), Some(PID_B));
 }
 
+mod aegis_it;
 mod engines_it;
 mod rooms_launch;
 
