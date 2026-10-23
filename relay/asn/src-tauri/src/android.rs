@@ -112,8 +112,9 @@ pub async fn android_secret_reply(app: State<'_, App>, auth: State<'_, crate::au
 
 /// 讀群組訊息（限成員）：一定帶 since；mark＝讀完標已讀。回 { messages, last_seq }
 #[tauri::command]
-pub async fn android_room_read(app: State<'_, App>, room: String, agent: Option<String>, since: u64, limit: Option<u64>, mark: bool) -> Result<serde_json::Value, String> {
-    relay_of(&app)?.room_read(&room, agent.as_deref(), since, limit, mark).await
+pub async fn android_room_read(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>, room: String, agent: Option<String>, since: u64, limit: Option<u64>, mark: bool) -> Result<serde_json::Value, String> {
+    let token = crate::account::signing_token(&auth).await;
+    relay_of(&app)?.room_read_as(&room, agent.as_deref(), since, limit, mark, token.as_deref()).await
 }
 
 /// 在群組發言（限成員）：要本人簽章，後台才標成本人發言；沒登入回錯，不打後台。回 { seq, mentions }
