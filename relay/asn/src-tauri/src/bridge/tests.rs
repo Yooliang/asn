@@ -1006,6 +1006,55 @@ async fn 沒啟用內建橋的_asn_自己撈節點信箱_沒指定收件人的�
     assert!(relay.inbox().await.unwrap()["messages"].as_array().unwrap().is_empty());
 }
 
+#[test]
+fn 畫面代收的門檻_從沒收過從啟動算起_收過就從最後一次算起() {
+    use crate::relay::{fallback_due, ui_seen_text};
+    assert!(!fallback_due(1_000_000 + 299_999, 0, 1_000_000, 300_000));
+    assert!(fallback_due(1_000_000 + 300_000, 0, 1_000_000, 300_000));
+    assert!(!fallback_due(2_000_000, 1_900_000, 1_000_000, 300_000));
+    assert!(fallback_due(2_000_000, 1_700_000, 1_000_000, 300_000));
+    assert!(ui_seen_text(5_000, 0).contains("從未收過"));
+    assert!(ui_seen_text(15_000, 5_000).contains("10 秒前"));
+}
+
+#[tokio::test]
+async fn 畫面沒在收信時_rust_代收寄給_asn_視窗的信並_ack_畫面一收信就交回且不重複() {
+    let fr = FakeRelay::start();
+    fr.put(mail(1, json!({"to_agent": "T-ASN"})));
+    fr.put(mail(2, json!({"to_agent": "T-乙"}))); // 別的視窗：不碰
+    let d = tempfile::tempdir().unwrap();
+    let relay = Relay::new(fr.url.clone(), "fake-test-key".into(), "T".into(), "T-ASN".into());
+    relay.set_owner_dir(d.path().to_path_buf());
+    let t0 = crate::heartbeat::now_ms();
+    // 畫面還沒超過門檻沒收信：不代收
+    assert_eq!(relay.fallback_tick(t0 + 1_000, 300_000).await.unwrap(), 0);
+    assert!(fr.acked().is_empty());
+    // 超過門檻：代收這一封並 ack，別人的不動
+    assert_eq!(relay.fallback_tick(t0 + 400_000, 300_000).await.unwrap(), 1);
+    assert_eq!(fr.acked(), vec![uid(1)]);
+    assert_eq!(relay.spool_len(), 1);
+    // 再來一輪：已 ack，不重複代收
+    assert_eq!(relay.fallback_tick(t0 + 430_000, 300_000).await.unwrap(), 0);
+    // 重開程式：代收區從檔案讀回
+    let again = Relay::new(fr.url.clone(), "fake-test-key".into(), "T".into(), "T-ASN".into());
+    again.set_owner_dir(d.path().to_path_buf());
+    assert_eq!(again.spool_len(), 1);
+    // 畫面開始收信：代收的信交給畫面，同時記下畫面收過（之後不再代收）
+    let ms = relay.inbox().await.unwrap();
+    let ids: Vec<&str> = ms["messages"].as_array().unwrap().iter().filter_map(|m| m["id"].as_str()).collect();
+    assert_eq!(ids, vec![uid(1).as_str()]);
+    assert!(relay.ui_inbox_at() > 0);
+    assert_eq!(relay.fallback_tick(crate::heartbeat::now_ms() + 100_000, 300_000).await.unwrap(), 0);
+    // 畫面確認收下：只清代收區，不再向後台重複 ack
+    relay.ack(&[uid(1)]).await.unwrap();
+    assert_eq!(relay.spool_len(), 0);
+    assert_eq!(fr.acked(), vec![uid(1)]);
+    assert!(relay.inbox().await.unwrap()["messages"].as_array().unwrap().is_empty());
+    let after = Relay::new(fr.url.clone(), "fake-test-key".into(), "T".into(), "T-ASN".into());
+    after.set_owner_dir(d.path().to_path_buf());
+    assert_eq!(after.spool_len(), 0);
+}
+
 #[tokio::test]
 async fn 內建橋在跑時_asn_不另外撈_同機另一個_asn_在撈時也不撈() {
     let fr = FakeRelay::start();

@@ -917,6 +917,28 @@ pub fn run() {
             let to_tray = std::fs::read_to_string(frame_data_dir.join("asn-me.json")).map(|t| tray::close_to_tray_from_saved(&t)).unwrap_or(true);
             tray::init(&handle, to_tray);
             tray::build(&handle);
+            // 畫面端（名單視窗）超過 5 分鐘沒收信（開機自啟縮在系統匣、畫面沒在跑）：Rust 代收寄給本機 ASN 視窗的信並 ack，
+            // 存進代收區等畫面下次收信時交給它；匣圖示提示框顯示未讀數，並通知畫面（開著時立刻補收）。--shot 截圖模式不動
+            if handle.state::<App>().shot.is_none() {
+                let h = handle.clone();
+                let every = std::time::Duration::from_millis(env_ms("ASN_WINDOW_FALLBACK_MS", 30_000));
+                let stale = env_ms("ASN_WINDOW_STALE_MS", relay::UI_STALE_MS);
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        tokio::time::sleep(every).await;
+                        let Some(r) = h.state::<App>().relay.clone() else { return };
+                        match r.fallback_tick(heartbeat::now_ms(), stale).await {
+                            Ok(n) if n > 0 => {
+                                eprintln!("window fallback: took {n} mail(s) for ASN window, spool={}", r.spool_len());
+                                tray::set_tray_unread(h.clone(), r.spool_len() as u32);
+                                let _ = h.emit("window-spool", r.spool_len());
+                            }
+                            Ok(_) => {}
+                            Err(e) => eprintln!("window fallback failed: {e}"),
+                        }
+                    }
+                });
+            }
             // Claude 帳號自動加入／回存：啟動後 15 秒起每 60 秒一次（asn-me.json 的 autoAddClaude 開著才動，預設開）；--shot 截圖模式不動
             if handle.state::<App>().shot.is_none() {
                 let h = handle.clone();
