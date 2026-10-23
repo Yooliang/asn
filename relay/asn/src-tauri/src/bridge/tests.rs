@@ -371,7 +371,7 @@ async fn 名單回報_外掛狀態檔有效就蓋過_sessions_的_status_並帶_
     core.refresh_roster(T0).await;
     let posts = fr.st.lock().unwrap().rosters.clone();
     let agents = posts[0]["agents"].as_array().unwrap().clone();
-    assert!(agents.contains(&json!({"name":"T-甲","status":"waiting","cwd_label":"x","engine":"claude","detail":"AskUserQuestion：要刪嗎"})), "{agents:?}");
+    assert!(agents.contains(&json!({"name":"T-甲","status":"waiting","cwd_label":"x","engine":"claude","detail":"AskUserQuestion：要刪嗎","mod_loaded":true})), "{agents:?}");
     assert!(agents.contains(&json!({"name":"T-乙","status":"idle","cwd_label":"x","engine":"claude"})), "{agents:?}");
     assert!(agents.contains(&json!({"name":"T-丙","status":"idle","cwd_label":"x","engine":"claude"})), "{agents:?}");
 }
@@ -1703,4 +1703,28 @@ mod slash_it {
         assert_eq!(h.said().len(), 6, "全部當文字投遞：{:?}", h.said());
         assert!(h.fr.sent().iter().all(|s| s["body"] != "這個視窗沒有 ASN 外掛，/指令 只能當文字送過去"), "有外掛的視窗不會收到沒外掛說明");
     }
+
+#[tokio::test]
+async fn 名單回報_外掛狀態只在第一次與變化時附_沒有狀態或失敗不附_也不擋名單() {
+    let fr = FakeRelay::start();
+    let work = tempfile::tempdir().unwrap();
+    let sessions = tempfile::tempdir().unwrap();
+    put_session(sessions.path(), 5001, "T-甲", "idle", 1);
+    let mut core = new_core(&fr, work.path(), sessions.path(), Arc::new(FakeSink::default()), T0);
+    let cur: Arc<std::sync::Mutex<Option<Value>>> = Arc::new(std::sync::Mutex::new(None));
+    let c2 = cur.clone();
+    core.set_mod_source(Arc::new(move || c2.lock().unwrap().clone()));
+    core.refresh_roster(T0).await; // 還沒有狀態（截圖模式）：不附
+    *cur.lock().unwrap() = Some(json!({"state":"checking"}));
+    core.refresh_roster(T0 + 60_000).await; // 第一次有狀態：附
+    core.refresh_roster(T0 + 120_000).await; // 沒變化：不附
+    *cur.lock().unwrap() = Some(json!({"state":"installed","version":"0.4.2"}));
+    core.refresh_roster(T0 + 180_000).await; // 變了：附
+    core.refresh_roster(T0 + 240_000).await; // 沒變化：不附
+    core.refresh_roster(T0 + 180_000 + 30 * 60_000).await; // 滿 30 分鐘：補報
+    let posts = fr.st.lock().unwrap().rosters.clone();
+    let mods: Vec<Value> = posts.iter().map(|p| p.get("mod").cloned().unwrap_or(Value::Null)).collect();
+    assert_eq!(mods, vec![Value::Null, json!({"state":"checking"}), Value::Null, json!({"state":"installed","version":"0.4.2"}), Value::Null, json!({"state":"installed","version":"0.4.2"})]);
+    assert!(posts.iter().all(|p| p["agents"][0]["name"] == "T-甲"), "名單內容照舊");
+}
 }

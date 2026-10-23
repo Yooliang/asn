@@ -54,6 +54,39 @@ impl Outcome {
     }
 }
 
+impl Outcome {
+    /// 回報給後台的狀態（名單回報的 mod 欄位）：state 是固定代號，version 只有已安裝才有，reason 是簡短中文原因
+    pub fn report(&self) -> serde_json::Value {
+        use serde_json::json;
+        match self {
+            Outcome::Installed(v) if v.is_empty() => json!({ "state": "installed" }),
+            Outcome::Installed(v) => json!({ "state": "installed", "version": v }),
+            Outcome::Uninstalled => json!({ "state": "removed" }),
+            Outcome::NoClaude => json!({ "state": "no_claude" }),
+            Outcome::Failed(why) => json!({ "state": "failed", "reason": report_reason(why) }),
+            Outcome::UpdateFailed(why) => json!({ "state": "update_failed", "reason": report_reason(why) }),
+        }
+    }
+}
+
+/// 原因只留第一行、最多 100 字（後台上限 120 字），不帶換行與控制字元
+fn report_reason(s: &str) -> String {
+    short(s).chars().filter(|c| !c.is_control()).take(100).collect()
+}
+
+/// 這台電腦目前的外掛狀態（給內建收發室回報用）。None＝沒在檢查（例如 --shot 截圖模式），不回報。
+static REPORT: Mutex<Option<serde_json::Value>> = Mutex::new(None);
+
+pub fn set_report(v: Option<serde_json::Value>) {
+    if let Ok(mut g) = REPORT.lock() {
+        *g = v;
+    }
+}
+
+pub fn current_report() -> Option<serde_json::Value> {
+    REPORT.lock().ok().and_then(|g| g.clone())
+}
+
 /// 設定頁讀的狀態文字（還沒跑完時是「檢查中」；--shot 模式不跑，維持空字串）
 #[derive(Default)]
 pub struct ModState(pub Mutex<String>);
@@ -816,5 +849,24 @@ mod tests {
         assert_eq!(left(&root).len(), 4);
     }
 
+    #[test]
+    fn 回報給後台的外掛狀態_代號固定_版本只有已安裝才有_原因只留第一行且截斷() {
+        use serde_json::json;
+        assert_eq!(Outcome::Installed("0.4.2".into()).report(), json!({"state":"installed","version":"0.4.2"}));
+        assert_eq!(Outcome::Installed(String::new()).report(), json!({"state":"installed"}));
+        assert_eq!(Outcome::Uninstalled.report(), json!({"state":"removed"}));
+        assert_eq!(Outcome::NoClaude.report(), json!({"state":"no_claude"}));
+        assert_eq!(Outcome::Failed("安裝外掛失敗：網路不通\n第二行".into()).report(), json!({"state":"failed","reason":"安裝外掛失敗：網路不通"}));
+        assert_eq!(Outcome::UpdateFailed("更新外掛失敗：x".into()).report(), json!({"state":"update_failed","reason":"更新外掛失敗：x"}));
+        let long = Outcome::Failed("字".repeat(500)).report();
+        assert_eq!(long["reason"].as_str().unwrap().chars().count(), 100, "後台上限 120 字，這邊先截 100");
+    }
 
+    #[test]
+    fn 全域狀態_設定後讀得到_清掉就是沒有() {
+        set_report(Some(serde_json::json!({"state":"checking"})));
+        assert_eq!(current_report(), Some(serde_json::json!({"state":"checking"})));
+        set_report(None);
+        assert_eq!(current_report(), None);
+    }
 }

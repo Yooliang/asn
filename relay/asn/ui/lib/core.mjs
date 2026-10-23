@@ -100,7 +100,7 @@ export class AsnCore {
     const next = new Map()
     for (const m of merged) {
       const old = this.friends.get(m.id)
-      const f = this.#decorate({ unread: 0, waiting: false, replyTo: null, ...(old ?? {}), ...m, contextPct: m.contextPct ?? null })   // 上下文用量每輪以名單為準，不沿用舊值
+      const f = this.#decorate({ unread: 0, waiting: false, replyTo: null, ...(old ?? {}), ...m, contextPct: m.contextPct ?? null, modLoaded: m.modLoaded ?? null, deviceMod: m.deviceMod ?? null })   // 上下文用量每輪以名單為準，不沿用舊值
       next.set(m.id, f)
       if (this.rosterLoaded && !isAsnWindow(f) && f.status !== 'offline' && (prev.get(m.id) ?? 'offline') === 'offline') {
         queueMicrotask(() => this.emit('notify', { kind: 'login', friend: f, line: '已經登入', sound: 'login', toast: true }))

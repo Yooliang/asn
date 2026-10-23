@@ -914,9 +914,12 @@ pub fn run() {
                 let h = handle.clone();
                 let dir = auto_acct_dir.clone();
                 *handle.state::<claude_mod::ModState>().0.lock().unwrap() = "Claude 外掛：檢查中…".into();
+                claude_mod::set_report(Some(serde_json::json!({ "state": "checking" })));   // 內建收發室下一輪名單回報時帶給後台
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                    let line = tauri::async_runtime::spawn_blocking(move || claude_mod::run_real(&dir).line()).await.unwrap_or_else(|_| "Claude 外掛：安裝失敗：背景工作中斷".into());
+                    let out = tauri::async_runtime::spawn_blocking(move || claude_mod::run_real(&dir)).await.unwrap_or_else(|_| claude_mod::Outcome::Failed("背景工作中斷".into()));
+                    claude_mod::set_report(Some(out.report()));
+                    let line = out.line();
                     *h.state::<claude_mod::ModState>().0.lock().unwrap() = line.clone();
                     let _ = h.emit("claude-mod-status", line);
                 });

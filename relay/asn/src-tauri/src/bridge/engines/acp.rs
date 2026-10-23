@@ -240,6 +240,7 @@ impl AcpEngine {
             cwd_label_override: Some(cfg.label.clone()),
             detail: None,
             context_pct: None,
+            mod_loaded: false,
         }
     }
 
