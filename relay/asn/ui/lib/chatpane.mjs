@@ -12,6 +12,7 @@ import { CallView } from './call-view.mjs'
 import { canCallPartner } from './mobile-call.mjs'
 import { isVoiceMsg } from './voice-mark.mjs'
 import { shotFileName } from './shot.mjs'
+import { buildNameHints } from './stt-text.mjs'
 import { statusTip, tierOf } from './sent-status.mjs'
 import { isAsnWindow, showsWaiting } from './roster.mjs'
 import { warnKind } from './head-tone.mjs'
@@ -43,6 +44,7 @@ export const ChatPane = {
     hideBusyWarn: { type: Boolean, default: false },  // 手機版：對方忙碌時不顯示黃色說明條（標題列已改黃底）
     callApi: { type: Object, default: null },      // 手機版的通話（lib/mobile-call.mjs 的 createMobileCall 工廠，另帶 phaseText）；電腦版不給，通話走 voice.newCall
     loadOlder: { type: Function, default: null },  // 往上捲到頂載入更舊的信：(好友 id) => Promise<{ more, added, busy?, error? }>；沒給就不載入
+    hintNames: { type: Array, default: () => [] },  // 名單上的夥伴（給語音辨識偏向名字用，選填）；通話對象自己一定會帶
     enterSends: { type: Boolean, default: true },  // Enter 直接送出（電腦預設）；手機的軟鍵盤 Enter 是換行，傳送靠按鈕
   },
   emits: ['send', 'nudge', 'toggle-dp', 'attach', 'call-state'],
@@ -207,7 +209,7 @@ export const ChatPane = {
     const MIC_TIP = { starting: '準備麥克風…按一下取消', recording: '聆聽中…說完了，按一下辨識（Esc 取消）', recognizing: '辨識中…按一下取消' }
     const micTip = computed(() => MIC_TIP[props.voice?.state.mic.phase] || '語音輸入（按一下開始說話）')
     // ---- 通話（#99）：每個面板自己一個通話；回信到達（log 變多）時交給通話念出來。換夥伴、切走分頁、關掉面板都自動掛斷 ----
-    const call = props.callApi?.newCall ? props.callApi.newCall() : props.voice?.newCall ? props.voice.newCall({ send: (t, o) => emit('send', t, o) }) : null
+    const call = props.callApi?.newCall ? props.callApi.newCall({ hints: () => buildNameHints(props.friend, props.hintNames) }) : props.voice?.newCall ? props.voice.newCall({ send: (t, o) => emit('send', t, o), hints: () => buildNameHints(props.friend, props.hintNames) }) : null
     const showCallBtn = computed(() => !!props.callApi && !!call && canCallPartner(props.friend))   // 手機：工具列的「通話」鈕，只有 AI 夥伴才有
     const callActive = computed(() => !!call && call.state.active)
     const startCall = () => { if (call && !call.state.active) void call.start(props.log) }

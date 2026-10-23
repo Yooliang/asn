@@ -177,7 +177,7 @@ function callBridge(win, b) {
     available: () => run('callAvailable') === true,
     micState: () => (run('callMicState') === 'granted' ? 'granted' : 'ask'),
     requestMic: () => run('callRequestMic'),
-    listen: () => run('callListen'),
+    listen: names => run('callListen', typeof names === 'string' ? names : '[]'),   // names：名字的 JSON 陣列字串（安卓 13 以上用來偏向辨識）
     stopListen: () => run('callStopListen'),
     speak: (id, text) => run('callSpeak', String(id), String(text)),
     stopSpeak: () => run('callStopSpeak'),

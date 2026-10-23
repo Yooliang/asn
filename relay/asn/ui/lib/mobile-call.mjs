@@ -55,6 +55,7 @@ export function createMobileCall({
   setTimer = (f, ms) => setTimeout(f, ms), clearTimer = id => clearTimeout(id),
   setTick = (f, ms) => setInterval(f, ms), clearTick = id => clearInterval(id), now = () => Date.now(), log = () => {},
   canStart = () => '',
+  hints = () => [],   // 這次通話要偏向的名字（通話對象＋名單上的夥伴）；每次開始聽時現取，交給外殼（安卓 13 以上才會用）
 }) {
   const state = reactive({ active: false, phase: 'idle', muted: false, seconds: 0, note: '', level: 0, heard: '', reply: '' })
   let gen = 0, t0 = 0, tick = null, unsub = null
@@ -72,10 +73,11 @@ export function createMobileCall({
   }
   const canListen = () => state.active && !!t0 && !state.muted && !speakingNow() && !guard && !sending && awaiting === 0 && !relistenTimer
 
+  const namesJson = () => { try { const v = hints(); return JSON.stringify(Array.isArray(v) ? v : []) } catch { return '[]' } }
   function listenIfDue() {
     if (listening || !canListen()) return
     listening = true
-    try { native.listen() } catch (e) { listening = false; log(`通話開始聽失敗：${e?.message}`) }
+    try { native.listen(namesJson()) } catch (e) { listening = false; log(`通話開始聽失敗：${e?.message}`) }
   }
   function stopListening() {
     if (!listening) return

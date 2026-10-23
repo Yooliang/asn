@@ -85,7 +85,7 @@ class AsnBridge(private val activity: MainActivity) {
   /** 麥克風權限：granted／ask */
   @JavascriptInterface fun callMicState(): String = activity.callVoice.micState()
   @JavascriptInterface fun callRequestMic() = activity.callVoice.requestMic()
-  @JavascriptInterface fun callListen() = activity.callVoice.listen()
+  @JavascriptInterface fun callListen(names: String) = activity.callVoice.listen(names)
   @JavascriptInterface fun callStopListen() = activity.callVoice.stopListen()
   @JavascriptInterface fun callSpeak(id: String, text: String) = activity.callVoice.speak(id, text)
   @JavascriptInterface fun callStopSpeak() = activity.callVoice.stopSpeak()
