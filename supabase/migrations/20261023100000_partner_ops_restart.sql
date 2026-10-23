@@ -28,7 +28,7 @@ begin
      or p_name is null or char_length(p_name) not between 1 and 80 then
     return jsonb_build_object('error', 'bad_request');
   end if;
-  if p_op = 'rename' and not public.irori_relay_launch_name_ok(p_new_name) then
+  if p_op = 'rename' and not public.asn_relay_launch_name_ok(p_new_name) then
     return jsonb_build_object('error', 'bad_name');
   end if;
   if p_op = 'model' and (p_model is null or p_model !~ '^[A-Za-z0-9._\[\]-]{1,60}$') then

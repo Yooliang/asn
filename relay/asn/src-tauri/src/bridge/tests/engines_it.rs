@@ -930,7 +930,7 @@ async fn acp_遠端管理_詳情_重開只結束記在帳本的程序且對話�
     let info = admin.info("Gemini").unwrap();
     assert_eq!((info["engine"].as_str(), info["model"].as_str(), info["kind"].as_str()), (Some("gemini"), Some("gemini-2.5-pro"), Some("acp")));
     assert_eq!((info["has_session"].clone(), info["load_session"].clone(), info["process_running"].clone()), (json!(true), json!(true), json!(true)));
-    assert_eq!(info["permissions"], json!({ "read": "allow", "write": "deny", "execute": "deny", "network": "allow" }), "預設唯讀");
+    assert_eq!(info["permissions"], json!({ "read": "allow", "write": "allow", "execute": "allow", "network": "allow" }), "預設開放讀寫執行（限工作資料夾）");
     assert_eq!(info["cwd"].as_str().map(|c| c.ends_with("Gemini")), Some(true), "{info}");
     let before = std::fs::read_to_string(h.work.path().join("engine.pids")).unwrap();
     assert!(before.lines().any(|l| l.trim() == pid1.to_string()), "帳本記著這個 pid");
@@ -993,9 +993,9 @@ async fn agy_遠端管理_重開保留對話_接班換手換新對話() {
     admin.restart("Gemini").unwrap();
     h.put_pull(to_agent(2, "Gemini", "二")).await;
     h.wait("回覆2", |h| h.fr.sent().len() == 2).await;
-    assert!(h.bodies()[1].contains("[第2輪 normal"), "{}", h.bodies()[1]);
+    assert!(h.bodies()[1].contains("[第2輪 full"), "{}", h.bodies()[1]);
     admin.handover("Gemini", "").unwrap();
     h.put_pull(to_agent(3, "Gemini", "三")).await;
     h.wait("回覆3", |h| h.fr.sent().len() == 3).await;
-    assert!(h.bodies()[2].contains("[第1輪 normal 含說明"), "{}", h.bodies()[2]);
+    assert!(h.bodies()[2].contains("[第1輪 full 含說明"), "{}", h.bodies()[2]);
 }
