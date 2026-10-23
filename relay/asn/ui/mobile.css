@@ -164,8 +164,9 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 
 /* 對話：ChatPane 的版面在小螢幕上收緊，觸控目標放大 */
 .m-chathead{height:60px}
-/* 對方忙碌：標題列改黃底（深色字對黃底對比充足），取代原本另外一條黃色說明條 */
-.m-chathead.is-busy{background:#ffd54a;border-bottom:1px solid #d9b02a;color:#3a2a00}
+/* 標題列與下面的對話區共用 .m-chat 同一張背景圖（連成一片）；正常疊白色半透明讓圖淡一點，對方忙碌改疊黃色半透明（圖仍看得到）。深色字對淺黃白疊色對比充足 */
+.m-chathead{background:rgba(255,255,255,.5);border-bottom:1px solid rgba(255,255,255,.7)}
+.m-chathead.is-busy{background:rgba(255,213,74,.58);border-bottom:1px solid rgba(217,176,42,.7);color:#3a2a00}
 .m-chathead.is-busy .m-title{color:#3a2a00;text-shadow:none}
 .m-chathead.is-busy .m-conn{color:#4a3600}
 .m-chathead.is-busy .m-icon-btn{color:#3a2a00}
@@ -189,7 +190,7 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-chat .picker{grid-template-columns:repeat(6,1fr);left:8px;right:8px}
 .m-chat .picker button{height:44px;font-size:22px}
 .m-chat .typing{height:auto;min-height:22px}
-.m-chat .photo-viewer .aero-btn{min-height:44px;padding:0 16px}
+.m-body .photo-viewer .aero-btn{min-height:44px;padding:0 16px}
 .m-chat .filecard,.m-chat .photo{min-height:44px}
 /* ---- 訊息內文的 Markdown（手機）：issue #169，獨立區塊方便合併 ---- */
 .m-chat .msg .m-body.md-on{font-size:16px;line-height:1.45;max-width:100%}
