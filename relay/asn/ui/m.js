@@ -250,6 +250,8 @@ const app = createApp({
     const roomsLoaded = computed(() => hub.st.loaded), roomsErr = computed(() => hub.st.err)
     const roomLogs = hub.st.logs   // 群組代號 → 對話記錄
     const roomNote = computed({ get: () => hub.st.note, set: v => { hub.st.note = v } })   // 對話頁上方的一行提示（讀不到、發言失敗）
+    const plusOpen = ref(false)   // 名單右上角「＋」選單
+    const pickPlus = op => { plusOpen.value = false; if (op === 'create') groupFlow.openCreate(); else if (op === 'join') groupFlow.openJoin(); else openLaunch('') }
     const roomRows = computed(() => hub.rows({ query: query.value, plainText: plain }))
     const roomRowOf = id => hub.rowOf(id)
     const roomEmptyText = computed(() => (query.value.trim() ? '找不到符合的群組。' : hub.st.err ? ROOM_LOAD_FAIL_TEXT : ROOM_EMPTY_HINT))
@@ -281,7 +283,7 @@ const app = createApp({
     const groupItems = computed(() => {
       const f = chatFriend.value
       if (!f) return []
-      if (f.room) return [{ key: 'invite', label: '邀請別人加入' }, { key: 'manage', label: '成員與設定' }]
+      if (f.room) return [{ key: 'invite', label: '邀請別人加入' }, { key: 'addai', label: '加我的另一個 AI' }, { key: 'manage', label: '成員與設定' }]
       return canInviteFrom(f) ? [{ key: 'invite', label: '邀請別人加入' }] : []
     })
     function pickGroup(key) {
@@ -290,6 +292,7 @@ const app = createApp({
       history.back()   // 先收起「⋯」選單，再開群組對話框
       setTimeout(() => {
         if (key === 'manage' && f.room) groupFlow.openManage(roomIdOf(f.id))
+        else if (key === 'addai' && f.room) groupFlow.openManage(roomIdOf(f.id), { focusAdd: true })
         else if (f.room) groupFlow.openInvite({ type: 'room', roomId: roomIdOf(f.id), name: f.nick })
         else groupFlow.openInvite({ type: 'friend', friend: f })
       }, 80)
@@ -365,7 +368,7 @@ const app = createApp({
     const onCallState = on => { callOn.value = on; bridge?.keepAwake(on) }
     const sendTo = async (id, text, opts) => { if (isRoomChat(id)) return postRoom(id, text); const r = await core.send(id, text, opts); if (!r.ok) console.info('[ASN] send failed', r.error) }
     const nudgeTo = id => { if (!isRoomChat(id)) core.nudge(id) }   // 群組沒有震動與傳檔（工具列的鈕在群組畫面已藏起來）
-    const sendAttachTo = async (id, item, caption) => { if (isRoomChat(id)) return; const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
+    const sendAttachTo = async (id, item, caption) => { if (isRoomChat(id)) { await hub.postAttachment(roomIdOf(id), item, caption); if (nav.tab === 'chats') void showRoom(); return } const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
     // ---------- 使用指引：設置分頁的一個項目，點進去是獨立一頁（先列篇目，再看內文），內容沿用電腦版的篇目 ----------
     const guides = phoneGuideList()
     const guideOpen = computed(() => (nav.sheet === 'guide' ? phoneGuide(nav.guide) : null))
@@ -669,7 +672,7 @@ const app = createApp({
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, ops, opsText, opsTitle, opsModels, opsModelNote, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
-      rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
+      plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }

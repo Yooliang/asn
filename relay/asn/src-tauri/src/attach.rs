@@ -226,10 +226,24 @@ pub async fn send_attachment_signed(relay: &Relay, http: &reqwest::Client, paylo
     let caption = payload.get("caption").and_then(Value::as_str).unwrap_or("");
     // 先把寄信欄位檢查完（收件人、說明文字長度），免得白傳一張圖才發現信寄不出去
     let text = photo_text(photo.kind, &photo.name, caption);
-    let mut send = payload.as_object().cloned().unwrap_or_default();
-    send.insert("body".into(), json!(text));
-    send.insert("expects_reply".into(), json!(true));
-    let mut body = crate::relay::build_send_body(&Value::Object(send), &relay.window_name())?;
+    // 群組（payload.room）：走群組發言，一定要本人簽章；內文與一般信同一個替代文字，附件編號在上傳後才加
+    let room = payload.get("room").and_then(Value::as_str).filter(|r| !r.is_empty()).map(String::from);
+    let signed = token.map_or(false, |t| !t.is_empty());
+    let mut body = if room.is_some() {
+        if !signed {
+            return Err("尚未登入，無法在群組傳照片或檔案".into());
+        }
+        let mut rp = json!({ "room": room, "body": text });
+        if let Some(g) = payload.get("from_agent") {
+            rp["from_agent"] = g.clone();
+        }
+        crate::relay::build_room_post_body(&rp)?
+    } else {
+        let mut send = payload.as_object().cloned().unwrap_or_default();
+        send.insert("body".into(), json!(text));
+        send.insert("expects_reply".into(), json!(true));
+        crate::relay::build_send_body(&Value::Object(send), &relay.window_name())?
+    };
 
     let init = relay.api("attach_init", Some(init_body(&photo))).await.map_err(|e| explain(&e))?;
     let id = init.get("id").and_then(Value::as_str).filter(|s| is_uuid(s)).ok_or("收發室沒有給附件編號")?.to_string();
@@ -252,7 +266,11 @@ pub async fn send_attachment_signed(relay: &Relay, http: &reqwest::Client, paylo
     if let Value::Object(m) = &mut body {
         m.insert("attachment_ids".into(), json!([id]));
     }
-    let body = if token.map_or(false, |t| !t.is_empty()) { body } else { crate::relay::without_person(body) };
+    if room.is_some() {
+        let sent = relay.api_signed("room_post", Some(body), token).await.map_err(|e| explain(&e))?;
+        return Ok(json!({ "seq": sent.get("seq"), "attachment_id": id, "name": photo.name, "bytes": photo.bytes.len() }));
+    }
+    let body = if signed { body } else { crate::relay::without_person(body) };
     let sent = relay.api_signed("send", Some(body), token).await.map_err(|e| explain(&e))?;
     Ok(json!({ "id": sent.get("id"), "attachment_id": id, "name": photo.name, "bytes": photo.bytes.len() }))
 }
@@ -764,6 +782,37 @@ mod tests {
         assert_eq!(send["from_agent"], "T-ASN", "寄件視窗名由程式決定");
         assert_eq!(send["to_node"], "W");
         assert_eq!(send["expects_reply"], true);
+    }
+
+    #[tokio::test]
+    async fn 寄照片到群組_走群組發言_要本人簽章_沒簽章完全不連線() {
+        let port_cell = Arc::new(Mutex::new(0u16));
+        let pc = port_cell.clone();
+        let (port, log) = serve(move |r, _| {
+            let port = *pc.lock().unwrap();
+            if r.path.starts_with("/storage/up") { return (200, b"{}".to_vec(), "application/json"); }
+            if r.path.contains("action=attach_init") { return (200, format!(r#"{{"id":"{ID}","upload_url":"http://127.0.0.1:{port}/storage/up?token=t"}}"#).into_bytes(), "application/json"); }
+            if r.path.contains("action=attach_commit") { return (200, br#"{"ok":true}"#.to_vec(), "application/json"); }
+            if r.path.contains("action=room_post") { return (200, br#"{"seq":7}"#.to_vec(), "application/json"); }
+            (404, b"{}".to_vec(), "application/json")
+        });
+        *port_cell.lock().unwrap() = port;
+        let relay = relay_at(port);
+        let p = payload(json!({ "room": "g-1", "from_agent": "T-ASN", "attachment_ids": ["x"] }));
+        let e = send_attachment_signed(&relay, &reqwest::Client::new(), &p, None).await.unwrap_err();
+        assert!(e.contains("尚未登入"), "{e}");
+        assert!(log.lock().unwrap().is_empty(), "沒簽章時完全沒有打後台");
+        let r = send_attachment_signed(&relay, &reqwest::Client::new(), &p, Some("tok-1")).await.unwrap();
+        assert_eq!(r["seq"], 7);
+        let g = log.lock().unwrap();
+        let order: Vec<String> = g.iter().map(|q| q.path.split('&').next().unwrap().to_string()).collect();
+        assert_eq!(order, ["/relay?action=attach_init", "/storage/up?token=t", "/relay?action=attach_commit", "/relay?action=room_post"]);
+        let post: Value = serde_json::from_slice(&g[3].body).unwrap();
+        assert_eq!(post["room"], "g-1");
+        assert_eq!(post["body"], "〔照片〕貓 1 .webp\n看這隻");
+        assert_eq!(post["attachment_ids"], json!([ID]), "前端自填的編號不算");
+        assert_eq!(post["from_agent"], "T-ASN");
+        assert!(post.get("to_node").is_none());
     }
 
     #[tokio::test]

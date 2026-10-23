@@ -56,9 +56,17 @@ test('畫面不顯示成員鍵與代號：樣板的插值裡沒有 key／ref／m
 
 test('入口：手機群組分組永遠顯示並有建立／加入；電腦群組分頁可點進對話；對話標頭有邀請', () => {
   const m = read('ui', 'm.html')
-  assert.doesNotMatch(m, /m-rooms"\s+v-if=/, '群組分組不能再用 v-if 藏起來')
-  assert.match(m, /<div class="m-group m-rooms">/)
-  assert.match(m, /groupFlow\.openCreate\(\)/); assert.match(m, /groupFlow\.openJoin\(\)/)
+  // 手機：建立／加入在右上角「＋」選單；群組對話分組在各設備分組之前，沒有群組就整組不顯示（不放空提示列）
+  assert.match(m, /<div class="m-group m-rooms" v-if="roomRows\.length">/)
+  assert.ok(m.indexOf('m-group m-rooms') < m.indexOf('v-for="g in groups"'), '群組對話排在設備分組之前')
+  assert.doesNotMatch(m, /m-rooms-actions|m-rooms-empty/, '名單裡不再有建立／加入按鈕與空提示')
+  const plus = m.slice(m.indexOf('m-plus-wrap'), m.indexOf('</header>'))
+  assert.match(plus, /pickPlus\('create'\)/); assert.match(plus, /pickPlus\('join'\)/); assert.match(plus, /pickPlus\('launch'\)/)
+  assert.match(plus, /建立群組/); assert.match(plus, /加入群組／貼邀請碼/); assert.match(plus, /開新夥伴/)
+  assert.match(read('ui', 'm.js'), /pickPlus = op => \{[^}]*groupFlow\.openCreate\(\)[^}]*groupFlow\.openJoin\(\)[^}]*openLaunch\(''\)/)
+  // 本人資訊列：第一行帳號名稱、第二行「狀態・設備名稱」
+  assert.match(m, /<div class="m-title">\{\{ myName \}\}<\/div>/)
+  assert.match(m, /STATUS\[me\.status\] : CONN_LABEL\[conn\] \}\}<template v-if="conn === 'on' && me\.nick">・\{\{ me\.nick \}\}<\/template>/)
   assert.match(m, /<group-sheet :flow="groupFlow">/)
   assert.match(m, /v-if="opsItems\.length \|\| groupItems\.length"/, '一對一與群組對話的「⋯」')
   const l = read('ui', 'list.html')
@@ -85,4 +93,13 @@ test('頁面腳本語法正確（list.js、m.js、chat.js 與群組模組）：�
   for (const f of ['ui/list.js', 'ui/m.js', 'ui/chat.js', 'ui/lib/chatpane.mjs', 'ui/lib/groups.mjs', 'ui/lib/group-flow.mjs', 'ui/lib/group-sheet.mjs', 'ui/lib/room-hub.mjs', 'ui/lib/mobile-rooms.mjs']) {
     assert.doesNotThrow(() => transformSync(read(...f.split('/')), { loader: 'js', format: 'esm', target: 'esnext' }), f)
   }
+})
+
+test('加我的另一個 AI 入口＋群組附件放行：選單項目、聚焦區塊、旗標不再整個群組禁用', () => {
+  assert.match(read('ui', 'lib', 'chatpane.mjs'), /pickMenu\('addai'\)[^<]*>加我的另一個 AI/)
+  assert.match(read('ui', 'list.js'), /what === 'addai'\) groupFlow\.openManage\(rid, \{ focusAdd: true \}\)/)
+  assert.match(read('ui', 'm.js'), /key: 'addai', label: '加我的另一個 AI'/); assert.match(read('ui', 'm.js'), /key === 'addai' && f\.room\) groupFlow\.openManage/)
+  assert.match(read('ui', 'lib', 'group-sheet.mjs'), /<h3 class="gs-h"[^>]*>加我的另一個 AI<\/h3>/)
+  assert.doesNotMatch(read('ui', 'lib', 'mobile-rooms.mjs'), /attachments: false/, '假夥伴不再寫死 attachments:false（只有 external 才隱藏附件鈕）')
+  assert.match(read('ui', 'list.js'), /hub\.postAttachment\(roomIdOf\(id\), item, caption\)/); assert.match(read('ui', 'm.js'), /hub\.postAttachment\(roomIdOf\(id\), item, caption\)/)
 })

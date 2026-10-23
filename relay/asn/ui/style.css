@@ -682,6 +682,8 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .chatpane-main{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff 62%),url(img/bg-chat.webp) left top/max(100%,640px) auto no-repeat,#fff}
 /* 對話區上方的收件人列與提醒條：透出同一張背景圖；正常疊白色半透明，忙碌／暫離／離線提醒疊黃色半透明 */
 .conv-main .to-line{background:rgba(255,255,255,.4);border-bottom-color:rgba(255,255,255,.7)}
+/* 對方離線：收件人列疊灰色半透明（底圖仍看得到） */
+.conv-main .to-line.is-offline{background:rgba(120,128,140,.42);border-bottom-color:rgba(88,96,108,.6)}
 .conv-main .warn{background:rgba(255,213,74,.42);border-bottom-color:rgba(217,176,42,.6)}
 .conv,.compose-row{background:transparent}
 .conv-main,.compose-main{background:rgba(255,255,255,.62)}

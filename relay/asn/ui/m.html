@@ -66,14 +66,40 @@
               <button class="m-me" type="button" aria-label="設置" @click="goTab('me')"><img class="m-pic" :class="'st-' + me.status" :src="meAv" alt="" width="44" height="44"></button>
               <div class="m-head-tx">
                 <div class="m-title">{{ myName }}</div>
-                <div class="m-conn"><span class="dot" :class="conn === 'on' ? 'st-online' : conn === 'off' ? 'st-busy' : 'st-away'"></span><span class="m-conn-tx">{{ conn === 'on' ? STATUS[me.status] : CONN_LABEL[conn] }}<template v-if="conn === 'on' && me.psm"> · {{ me.psm }}</template></span></div>
+                <div class="m-conn"><span class="dot" :class="conn === 'on' ? 'st-online' : conn === 'off' ? 'st-busy' : 'st-away'"></span><span class="m-conn-tx">{{ conn === 'on' ? STATUS[me.status] : CONN_LABEL[conn] }}<template v-if="conn === 'on' && me.nick">・{{ me.nick }}</template><template v-if="conn === 'on' && me.psm"> · {{ me.psm }}</template></span></div>
               </div>
-              <button class="m-icon-btn" type="button" aria-label="開新夥伴" @click="openLaunch('')"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M12 4.5v15M4.5 12h15" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg></button>
+              <div class="m-plus-wrap">
+                <button class="m-icon-btn" type="button" aria-label="新增" aria-haspopup="menu" :aria-expanded="plusOpen" @click="plusOpen = !plusOpen"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M12 4.5v15M4.5 12h15" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg></button>
+                <div class="m-plus-back" v-if="plusOpen" @click="plusOpen = false"></div>
+                <div class="m-plus-menu" v-if="plusOpen" role="menu">
+                  <button type="button" role="menuitem" @click="pickPlus('create')">建立群組</button>
+                  <button type="button" role="menuitem" @click="pickPlus('join')">加入群組／貼邀請碼</button>
+                  <button type="button" role="menuitem" @click="pickPlus('launch')">開新夥伴</button>
+                </div>
+              </div>
             </header>
             <ptr-zone :ptr="pf.ptr"></ptr-zone>
             <div class="m-scroll" :ref="el => (pf.ptr.el = el)" @touchstart.passive="pf.start" @touchmove="pf.move" @touchend="pf.end" @touchcancel="pf.end">
               <p class="m-archive-note" v-if="archiveNote" role="status">{{ archiveNote }}</p>
               <div class="m-search"><input v-model="query" type="search" placeholder="搜尋聯絡人…" aria-label="搜尋聯絡人" enterkeyhint="search"></div>
+              <!-- 群組對話：我參加的群組，放在各設備分組之前（建立／加入在右上角「＋」選單）；沒有群組就整組不顯示；點進去在對話分頁看訊息、發言 -->
+              <div class="m-group m-rooms" v-if="roomRows.length">
+                <button class="m-ghead" type="button" :aria-expanded="!collapsed[ROOM_GROUP_KEY]" @click="collapsed[ROOM_GROUP_KEY] = !collapsed[ROOM_GROUP_KEY]">
+                  <span class="m-caret" :class="{ open: !collapsed[ROOM_GROUP_KEY] }">▸</span>{{ ROOM_GROUP_LABEL }}（{{ roomRows.length }}）
+                </button>
+                <ul v-show="!collapsed[ROOM_GROUP_KEY]">
+                  <li v-for="r in roomRows" :key="r.id">
+                    <button class="m-buddy" type="button" @click="openRoom(r.chatId)">
+                      <span class="m-av-wrap"><span class="m-room-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24"><circle cx="9" cy="9" r="3.2" fill="currentColor"/><circle cx="16.5" cy="10" r="2.6" fill="currentColor" opacity=".7"/><path d="M3.5 19c.4-3.2 2.7-5 5.5-5s5.1 1.8 5.5 5zM14.6 14.4c.6-.2 1.3-.3 1.9-.3 2.3 0 4 1.5 4.3 4.9h-4.4c-.1-1.9-.7-3.5-1.8-4.6z" fill="currentColor"/></svg></span></span>
+                      <span class="b-text">
+                        <span class="b-line"><span class="b-nick" v-html="emo(r.name)"></span><span class="b-st">{{ r.count }} 位成員</span></span>
+                        <span class="b-last" v-if="r.last">{{ r.last }}</span>
+                      </span>
+                      <span class="unread" v-if="r.unread">{{ r.unread }}</span>
+                    </button>
+                  </li>
+                </ul>
+              </div>
               <div v-for="g in groups" :key="g.key" class="m-group">
                 <button class="m-ghead" type="button" :aria-expanded="!collapsed[g.key]" @click="collapsed[g.key] = !collapsed[g.key]">
                   <span class="m-caret" :class="{ open: !collapsed[g.key] }">▸</span>{{ groupHeading(g) }}
@@ -96,36 +122,13 @@
                   </li>
                 </ul>
               </div>
-              <!-- 群組對話：我參加的群組，放在各設備分組之後；點進去在對話分頁看訊息、發言 -->
-              <div class="m-group m-rooms">
-                <button class="m-ghead" type="button" :aria-expanded="!collapsed[ROOM_GROUP_KEY]" @click="collapsed[ROOM_GROUP_KEY] = !collapsed[ROOM_GROUP_KEY]">
-                  <span class="m-caret" :class="{ open: !collapsed[ROOM_GROUP_KEY] }">▸</span>{{ ROOM_GROUP_LABEL }}（{{ roomRows.length }}）
-                </button>
-                <div class="m-rooms-actions" v-show="!collapsed[ROOM_GROUP_KEY]">
-                  <button class="m-btn" type="button" @click="groupFlow.openCreate()">建立群組</button>
-                  <button class="m-btn" type="button" @click="groupFlow.openJoin()">加入群組</button>
-                </div>
-                <p class="m-note m-rooms-empty" v-if="!roomRows.length" v-show="!collapsed[ROOM_GROUP_KEY]">{{ roomEmptyText }}</p>
-                <ul v-show="!collapsed[ROOM_GROUP_KEY]">
-                  <li v-for="r in roomRows" :key="r.id">
-                    <button class="m-buddy" type="button" @click="openRoom(r.chatId)">
-                      <span class="m-av-wrap"><span class="m-room-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24"><circle cx="9" cy="9" r="3.2" fill="currentColor"/><circle cx="16.5" cy="10" r="2.6" fill="currentColor" opacity=".7"/><path d="M3.5 19c.4-3.2 2.7-5 5.5-5s5.1 1.8 5.5 5zM14.6 14.4c.6-.2 1.3-.3 1.9-.3 2.3 0 4 1.5 4.3 4.9h-4.4c-.1-1.9-.7-3.5-1.8-4.6z" fill="currentColor"/></svg></span></span>
-                      <span class="b-text">
-                        <span class="b-line"><span class="b-nick" v-html="emo(r.name)"></span><span class="b-st">{{ r.count }} 位成員</span></span>
-                        <span class="b-last" v-if="r.last">{{ r.last }}</span>
-                      </span>
-                      <span class="unread" v-if="r.unread">{{ r.unread }}</span>
-                    </button>
-                  </li>
-                </ul>
-              </div>
               <div class="empty-list" v-if="!groups.length">{{ emptyText }}</div>
             </div>
           </section>
 
           <!-- 對話：最後使用的那一位的對話內容（從夥伴分頁點一位就成為最後使用）；右上角「⋯」管理這位的視窗 -->
           <section class="m-pg m-chat" :class="{ shake, 'is-room': chatFriend && chatFriend.room }" aria-label="對話">
-            <header class="m-head m-chathead" :class="{ 'is-busy': chatFriend && headTone(chatFriend.status) === 'busy' }">
+            <header class="m-head m-chathead" :class="{ 'is-busy': chatFriend && headTone(chatFriend.status) === 'busy', 'is-offline': chatFriend && !chatFriend.room && headTone(chatFriend.status) === 'offline' }">
               <template v-if="chatFriend">
                 <img class="m-pic" :class="'st-' + chatFriend.status" :src="avOf(chatFriend)" alt="" width="44" height="44">
                 <div class="m-head-tx">

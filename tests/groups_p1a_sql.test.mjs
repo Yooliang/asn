@@ -532,3 +532,47 @@ test('還原驗證：拿掉一次性 → 同一個邀請能被第二個人接受
   const second = await accept(db, inv.h, U3, R3)
   assert.ok(second.room_id, '拿掉一次性後第二個人也進得去——正式版必須回 invite_used')
 })
+
+// ===== 第 1c 期補強 =====
+const M_P1C = '20261023180000_groups_p1c_allow_others.sql'
+
+test('實跑：成員清單回報各 AI 的 allow_others（真人為 null）；自己與別人的視角都有', { skip }, async () => {
+  const db = await boot()
+  const room = await twoTenantRoom(db)
+  const before = await membersAs(db, { node: P1, room, signed: U1 })
+  assert.ok(before.members.filter(m => m.member_kind === 'ai').every(m => m.allow_others === true), '預設都接受別人點名')
+  assert.ok(before.members.filter(m => m.member_kind === 'human').every(m => m.allow_others === null))
+  const off = await rpc(db, 'asn_relay_group_allow_others', { p_user: U1, p_node: P1, p_room: room, p_key: `${W1}~財務`, p_allow: false })
+  assert.equal(off.ok, true)
+  const m1 = await membersAs(db, { node: P1, room, signed: U1 })
+  assert.equal(m1.members.find(m => m.key === `${W1}~財務`).allow_others, false)
+  assert.equal(m1.members.find(m => m.key === `${W1}~同名`).allow_others, true)
+  // 財務員（別的帳號）看到小良的 AI：值也在，且仍不含節點代號
+  const m2 = await membersAs(db, { node: Q2, room, signed: U2 })
+  const theirs = m2.members.find(m => m.name === '財務' && m.mine === false)
+  assert.equal(theirs.allow_others, false)
+  assert.ok(!JSON.stringify(m2).includes(W1))
+})
+
+test('實跑：沒有外部成員的群組恢復附件——本人的其他設備能下載群組附件；外部成員的群組仍禁止', { skip }, async () => {
+  const db = await boot()
+  const g = await rpc(db, 'asn_relay_group_create', { p_user: U1, p_node: P1, p_name: '自家', p_ai: [`${W1}~財務`] })
+  assert.equal(await rpc(db, 'asn_relay_group_has_external', { p_node: P1, p_room: g.id }), false, '只有本人與自己的 AI＝不是外部')
+  const id = '99999999-9999-9999-9999-999999999999'
+  await db.exec(`insert into relay.attachments(id, tenant_id, owner_node, kind, mime, name, bytes, storage_path, status, room_id, room_seq)
+    values ('${id}', '${T1}', '${W1}', 'file', 'application/pdf', 'a.pdf', 10, 'p/a.pdf', 'ready', '${g.id}', 1)`)
+  assert.equal((await rpc(db, 'asn_relay_attach_access', { p_node: P1, p_id: id })).path, 'p/a.pdf', '本人的手機（非成員節點前綴）也能下載')
+  assert.equal((await rpc(db, 'asn_relay_attach_access', { p_node: R3, p_id: id })).error, 'not_found', '別的租戶不行')
+})
+
+test('還原驗證：拿掉 allow_others 欄位／下載授權補丁 → 上面兩個測試要變紅', { skip }, async () => {
+  const db = await boot({ mutate: { [M_P1C]: s => s.replace(/^\s*'allow_others'.*$/gm, '').replace(/or exists \(select 1 from relay.room_members rm join relay.rooms r[\s\S]*?is not distinct from v_t\);/, ';') } })
+  const room = await twoTenantRoom(db)
+  const m = await membersAs(db, { node: P1, room, signed: U1 })
+  assert.equal(m.members.find(x => x.member_kind === 'ai').allow_others, undefined, '欄位被拿掉了')
+  const g = await rpc(db, 'asn_relay_group_create', { p_user: U1, p_node: P1, p_name: '自家', p_ai: [`${W1}~財務`] })
+  const id = '99999999-9999-9999-9999-999999999999'
+  await db.exec(`insert into relay.attachments(id, tenant_id, owner_node, kind, mime, name, bytes, storage_path, status, room_id, room_seq)
+    values ('${id}', '${T1}', '${W1}', 'file', 'application/pdf', 'a.pdf', 10, 'p/a.pdf', 'ready', '${g.id}', 1)`)
+  assert.equal((await rpc(db, 'asn_relay_attach_access', { p_node: P1, p_id: id })).error, 'not_found', '補丁拿掉後本人的手機下載不到')
+})

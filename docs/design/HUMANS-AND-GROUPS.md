@@ -366,3 +366,5 @@ relay.friendships      新增（第 2 期）：user_a、user_b（已排序）、
 | ROADMAP 5 附件 | 跨租戶附件在本設計第 3 期 |
 | ROADMAP 6 簽章 | 成員鍵以帳號識別，將來可與節點公鑰綁定 |
 | ONBOARDING 第 7 節 | 「群組裡誰的提問該回」的規則在多租戶下改為 2.5 的規則 |
+
+**第 1c 段（分支 fix/groups-p1c）補第一期缺口**：橋給 AI 的群組信頭改用 `from_label`＋`relation`（見 MAIL-HEADER.md「群組信抬頭」）；成員清單回報各 AI 的 `allow_others`（migration 20261023180000）；介面加「加我的另一個 AI」（⋯ 選單）；只有 `external=true` 的群組才隱藏附件（群組傳附件走 `relay_send_attachment` 帶 `room`，真人成員的設備補上下載授權）；手機名單「＋」選單、群組對話排在設備分組前、本人列第二行「狀態・設備名」；對話頁頭離線疊灰。

@@ -109,8 +109,9 @@ test('訊息轉對話記錄：真人與 AI 用不同徽章；我的 AI 也有發
 test('附件：有外部成員的群組一律不能傳；一對一不受影響', () => {
   assert.equal(roomAttachAllowed({ room: true, external: true, attachments: true }), false)
   assert.equal(roomAttachAllowed({ room: true, external: false, attachments: true }), true)
-  assert.equal(roomAttachAllowed({ room: true, external: false, attachments: false }), false, '這版群組對話還沒有傳附件')
-  assert.equal(roomAttachAllowed({ room: true }), false)
+  assert.equal(roomAttachAllowed({ room: true, external: false }), true, '只有本人與自己的 AI 的群組能傳附件')
+  assert.equal(roomAttachAllowed({ room: true, attachments: false }), true, '舊的 attachments 旗標不再擋')
+  assert.equal(roomAttachAllowed({ room: true }), true)
   assert.equal(roomAttachAllowed({ node: 'T', agent: 'a' }), true); assert.equal(roomAttachAllowed(null), true)
 })
 

@@ -190,3 +190,28 @@ test('群組列表壞了不炸：連不上就標記失敗，列表維持原樣',
   const hub = createRoomHub({ invoke: async () => { throw new Error('relay_rooms 連線失敗') }, groupApi: createGroupApi(async () => ({})), selfNode: 'T', windowName: 'w' })
   await hub.refresh(); assert.equal(hub.st.err, true); assert.deepEqual(hub.rows(), [])
 })
+test('群組傳附件：走 relay_send_attachment 帶 room（編號由 Rust 填，前端不帶）；沒有內容不送', async () => {
+  const { hub, calls } = hubSetup()
+  const sent = []
+  const invoke = async (cmd, args) => { if (cmd === 'relay_send_attachment') { sent.push(args); return { seq: 4 } } return {} }
+  await hub.refresh()
+  assert.equal(await hub.postAttachment('g1', null, ''), false)
+  assert.equal(sent.length, 0)
+  assert.ok(calls.length > 0)
+  // 直接用帶假 invoke 的中樞驗送出內容
+  const h2 = createRoomHub({ invoke: async (c, a) => (c === 'relay_rooms' ? { rooms: [JSON.parse(JSON.stringify(ROOM))] } : c === 'relay_send_attachment' ? (sent.push(a), { seq: 4 }) : c === 'relay_room_read' ? { messages: [], last_seq: 3 } : {}), groupApi: createGroupApi(async () => ({})), selfNode: 'T', windowName: '我的電腦' })
+  await h2.refresh()
+  assert.equal(await h2.postAttachment('g1', { kind: 'file', name: 'a.pdf', data: 'QUJD', width: undefined, thumb: '' }, ' 看一下 '), true)
+  const p = sent.at(-1).payload
+  assert.equal(p.room, 'g1'); assert.equal(p.kind, 'file'); assert.equal(p.caption, '看一下'); assert.equal(p.name, 'a.pdf')
+  assert.ok(!('attachment_ids' in p) && !('from_agent' in p), '真人身分不帶視窗名，也不帶自填編號')
+})
+
+test('加我的另一個 AI：⋯ 選單（電腦版與手機版）有入口，開成員與設定並聚焦「加」區塊', async () => {
+  const room = { id: 'g1', name: '財務小組', is_host: true, members: [{ key: '~u:me', label: '牧陽', member_kind: 'human', role: 'owner', mine: true }] }
+  const t = setup({ rooms: [room] })
+  t.flow.openManage('g1', { focusAdd: true })
+  assert.equal(t.flow.state.view, 'manage'); assert.equal(t.flow.state.focusAdd, true)
+  assert.deepEqual(t.flow.state.addable.map(a => a.label).sort(), ['報表', '財務'])
+  t.flow.openManage('g1'); assert.equal(t.flow.state.focusAdd, false)
+})

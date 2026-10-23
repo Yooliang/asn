@@ -14,7 +14,7 @@ const blank = () => ({
   // 加入
   input: '', code: '', join: null,
   // 成員與設定
-  roomId: '', roomName: '', members: [], addable: [], host: false, external: false, leaving: false,
+  roomId: '', roomName: '', members: [], addable: [], host: false, external: false, leaving: false, focusAdd: false,
 })
 
 export function createGroupFlow({ api, copy, openRoom, refreshRooms, getFriends, getRoom, logOf, reactive = x => x }) {
@@ -100,8 +100,8 @@ export function createGroupFlow({ api, copy, openRoom, refreshRooms, getFriends,
     state.addable = addableAi(getFriends(), r.members)
     state.host = r.is_host === true; state.external = r.external === true
   }
-  function openManage(roomId) {
-    reset({ view: 'manage', roomId })
+  function openManage(roomId, { focusAdd = false } = {}) {
+    reset({ view: 'manage', roomId, focusAdd })
     loadManage()
   }
   const afterChange = async () => { await refreshRooms(); loadManage() }
