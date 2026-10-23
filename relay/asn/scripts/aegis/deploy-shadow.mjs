@@ -58,29 +58,32 @@ export function parseArgs(argv) {
   return o
 }
 
-/** 遠端路徑（全部寫死在使用者家目錄底下，與舊的 ~/.irori-relay 分開）。 */
+/** 遠端路徑：成品放在目標使用者家目錄底下（與舊的 ~/.irori-relay 分開）；傳輸先落在 /tmp，再用 sudo 安裝。 */
 export function remotePaths(user, nodeId) {
   const home = `/home/${user}`
   return {
     dir: `${home}/asn-bridge`,
     bin: `${home}/asn-bridge/asn-bridge`,
-    binNew: `${home}/asn-bridge/asn-bridge.new`,
-    unit: `${home}/asn-bridge/${UNIT_NAME}`,
+    tmpBin: '/tmp/asn-bridge.new',
+    tmpUnit: `/tmp/${UNIT_NAME}`,
     asnHome: `${home}/.asn-rs`,
     keyFile: `${home}/.asn-rs/${nodeId}.key`,
   }
 }
 
-/** 遠端安裝腳本（單行、只用單引號以外的簡單語法，經 gcloud compute ssh --command 執行）。 */
+/**
+ * 遠端安裝腳本（單行，經 gcloud compute ssh --command 執行）。
+ * 登入的 OS Login 帳號不是目標使用者，所以家目錄內的動作一律 sudo 成目標使用者。
+ */
 export function remoteInstallScript({ user, nodeId, sha, restart }) {
   const p = remotePaths(user, nodeId)
   const parts = [
-    `test -f ${p.keyFile} || { echo 缺少試跑節點金鑰檔，請先做註冊步驟; exit 3; }`,
-    `test "$(sha256sum ${p.binNew} | cut -d' ' -f1)" = ${sha} || { echo 傳輸後 sha256 不符; exit 4; }`,
-    `chmod 755 ${p.binNew}`,
-    `mv -f ${p.binNew} ${p.bin}`,
-    `${p.bin} --version`,
-    `sudo install -m 644 ${p.unit} /etc/systemd/system/${UNIT_NAME}`,
+    `sudo test -f ${p.keyFile} || { echo 缺少試跑節點金鑰檔，請先做註冊步驟; exit 3; }`,
+    `test "$(sha256sum ${p.tmpBin} | cut -d' ' -f1)" = ${sha} || { echo 傳輸後 sha256 不符; exit 4; }`,
+    `sudo install -o ${user} -g ${user} -m 755 ${p.tmpBin} ${p.bin}`,
+    `sudo -u ${user} ${p.bin} --version`,
+    `sudo install -m 644 ${p.tmpUnit} /etc/systemd/system/${UNIT_NAME}`,
+    `rm -f ${p.tmpBin} ${p.tmpUnit}`,
     'sudo systemctl daemon-reload',
     `sudo systemctl enable --now ${UNIT_NAME}`,
   ]
@@ -101,14 +104,15 @@ function gcloudBase(o) {
 export function buildPlan(o, { binary, sha = '<sha256>', asnRoot = ASN_ROOT } = {}) {
   const p = remotePaths(o.user, o.nodeId)
   const g = gcloudBase(o)
-  const target = `${o.user}@${o.instance}`
+  // 不指定登入使用者：指定 user@ 會變成另一個 OS Login 帳號而沒有權限寫目標家目錄
+  const target = o.instance
   const ssh = command => ['compute', 'ssh', target, ...g.zone, ...g.extra, ...g.tunnel, '--command', command]
   const scp = (src, dst) => ['compute', 'scp', src, `${target}:${dst}`, ...g.zone, ...g.extra, ...g.tunnel]
   const steps = []
   if (!o.skipBuild) steps.push({ desc: '本機建置 Linux 靜態版 asn-bridge', cmd: 'npm', args: ['run', 'build:linux-bridge'], cwd: asnRoot })
-  steps.push({ desc: '遠端建立資料夾（權限 700）', cmd: 'gcloud', args: ssh(`umask 077 && mkdir -p ${p.dir} ${p.asnHome} && chmod 700 ${p.asnHome}`) })
-  steps.push({ desc: '傳送二進位檔（先放 .new）', cmd: 'gcloud', args: scp(binary, p.binNew) })
-  steps.push({ desc: '傳送 systemd 單元', cmd: 'gcloud', args: scp(UNIT_FILE, p.unit) })
+  steps.push({ desc: '遠端建立資料夾（權限 700）', cmd: 'gcloud', args: ssh(`sudo -u ${o.user} mkdir -p ${p.dir} ${p.asnHome} && sudo chmod 700 ${p.asnHome}`) })
+  steps.push({ desc: '傳送二進位檔（先放 /tmp）', cmd: 'gcloud', args: scp(binary, p.tmpBin) })
+  steps.push({ desc: '傳送 systemd 單元', cmd: 'gcloud', args: scp(UNIT_FILE, p.tmpUnit) })
   steps.push({ desc: '遠端驗證 sha256、安裝、啟動（不動 irori-relay-aegis）', cmd: 'gcloud', args: ssh(remoteInstallScript({ user: o.user, nodeId: o.nodeId, sha, restart: o.restart })) })
   return steps
 }
