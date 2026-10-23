@@ -83,6 +83,9 @@ asn-cli attach --id <附件編號> [--out 路徑]
 - 程式在 `src-tauri/src/askpass/`（管道、排隊與逾時、小幫手、確認窗）與 `ui/askpass.html`；結束碼：1 ASN 沒開、2 使用者取消、3 逾時、4 忙碌或不支援、5 管道對面不是 ASN。
 - 威脅模型、限制（同一個 Windows 使用者下惡意程式理論上可攔截）、層級 2～4 的設計與真機驗證清單見 [docs/design/SECRETS.md](../../docs/design/SECRETS.md)。
 
+## 遠端一次性密碼傳遞（#26 第二期）：別台電腦／雲端代理向你要密碼
+ `asn-cli secret request --purpose <用途說明> [--program <程式名稱>] [--ttl <秒>]`：它產生一次性鑰匙對、只把公鑰與說明送上收發室，**你本人的設備**（電腦 ASN 或手機）跳出確認窗（哪台電腦、哪個程式、要做什麼、核對碼），你輸入的密碼在你的設備上加密後送回，請求端解密並只印到標準輸出（失敗時標準輸出是空的；結束碼 1 用法、3 被拒絕或過期、4 後端錯誤或解不開）。收發室與後台只轉密文，看不到原文；要本人簽章才能回覆。設計與威脅模型見 `docs/design/SECRET-REMOTE.md`；程式在 `src-tauri/src/secret_remote/`。
+
 ## 介面
 
 - 左側直立頁籤，「設定」頁可選**分頁依**與**分組依**（記在 asn-me.json 的 tabDim／groupDim，舊存檔的 groupMode 會自動轉換）。三個維度：狀態（線上／忙碌／暫離／離線）、廠商（Claude、Gemini、Grok、Codex、DeepSeek，其他照字母，「其他」最後；好友沒回報 engine 時用節點 kind 推斷，kind=other 不採用）、設備。

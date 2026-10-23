@@ -100,7 +100,7 @@ test('實跑（pglite）：待確認——只有本人的設備看得到；只�
   const a = await request()
   const p = await pending()
   assert.equal(p.requests.length, 1)
-  assert.deepEqual(Object.keys(p.requests[0]).sort(), ['created_at', 'expires_at', 'id', 'node', 'node_name', 'program', 'pub', 'purpose'])
+  assert.deepEqual(Object.keys(p.requests[0]).sort(), ['created_at', 'expires_at', 'id', 'node', 'node_name', 'program', 'pub', 'purpose', 'seconds_left'])
   assert.deepEqual([p.requests[0].id, p.requests[0].node, p.requests[0].node_name, p.requests[0].pub], [a.id, 'CLOUD', '雲端代理', pub(1)])
   assert.equal((await pending('PC', null)).error, 'forbidden', '沒簽章')
   assert.equal((await pending('PC', U2)).error, 'forbidden', '簽章的人不擁有這台設備')

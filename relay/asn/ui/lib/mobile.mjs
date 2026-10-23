@@ -21,10 +21,12 @@ export const tabNav = t => ({ tab: normalizeTab(t), sheet: '' })
 export const meNav = () => tabNav('me')
 export const launchNav = () => ({ tab: 'list', sheet: 'launch' })
 export const opsNav = () => ({ tab: 'chats', sheet: 'ops' })
+export const secretNav = () => ({ tab: 'chats', sheet: 'secret' })
 // 瀏覽記錄裡讀回來的狀態可能是任何東西（壞資料、別的頁面留下的）：整理成合法的導覽狀態
 export function normalizeNav(raw) {
   if (raw?.sheet === 'launch') return launchNav()
   if (raw?.sheet === 'ops') return opsNav()
+  if (raw?.sheet === 'secret') return secretNav()
   return tabNav(raw?.tab)
 }
 

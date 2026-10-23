@@ -90,7 +90,7 @@ begin
     select bell_topic from relay.nodes
       where owner_user = v_owner and status = 'active' and tenant_id is not distinct from v_t and id <> p_node and bell_topic is not null
       limit 20) n;
-  return jsonb_build_object('id', v_id, 'expires_at', v_exp, 'bell_topics', v_topics);
+  return jsonb_build_object('id', v_id, 'expires_at', v_exp, 'seconds_left', p_ttl_seconds, 'bell_topics', v_topics);
 end;
 $function$;
 
@@ -109,7 +109,8 @@ begin
   end if;
   select coalesce(jsonb_agg(jsonb_build_object(
       'id', r.id, 'node', r.requester_node, 'node_name', (select n.name from relay.nodes n where n.id = r.requester_node),
-      'program', r.program, 'purpose', r.purpose, 'pub', r.pub, 'created_at', r.created_at, 'expires_at', r.expires_at)
+      'program', r.program, 'purpose', r.purpose, 'pub', r.pub, 'created_at', r.created_at, 'expires_at', r.expires_at,
+      'seconds_left', greatest(0, floor(extract(epoch from (r.expires_at - now()))))::int)
       order by r.created_at), '[]'::jsonb)
     into v_out from relay.secret_requests r
     where r.owner_user = p_signed_user and r.status = 'pending' and r.expires_at > now()

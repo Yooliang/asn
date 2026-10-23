@@ -11,10 +11,11 @@ mod caller;
 mod env;
 mod recv;
 mod room;
+mod secret;
 mod send;
 mod upload;
 #[cfg(test)]
-mod testsupport;
+pub(crate) mod testsupport;
 #[cfg(test)]
 mod tests;
 
@@ -53,7 +54,7 @@ impl Io<'_> {
     }
 }
 
-pub const SUBCOMMANDS: [&str; 4] = ["send", "recv", "room", "attach"];
+pub const SUBCOMMANDS: [&str; 5] = ["send", "recv", "room", "attach", "secret"];
 
 /// 第一個參數是子命令才算命令列呼叫（asn.exe 據此決定要不要跑命令列）
 pub fn is_subcommand(args: &[String]) -> bool {
@@ -67,6 +68,7 @@ const TOP_USAGE: &str = "用法：
   asn recv   --once | --watch | --peek [--count-only]
   asn room   --rooms | --room-read <群組id|群組名> [--last N | --since SEQ] [--json]
   asn attach --id <附件編號> [--out <路徑>]
+  asn secret request --purpose <用途說明> [--program <程式名稱>] [--ttl <秒>]
 各子命令加 --help 看詳細說明。身分（節點、寄件視窗名）自動判定，不能自填。";
 
 /// 跑一個子命令；回結束碼。不論成功失敗，錯誤都印到 io.err
@@ -89,6 +91,7 @@ pub fn run(args: &[String], env: &Env, io: &mut Io) -> i32 {
             "recv" => recv::main(rest, env, io).await,
             "room" => room::main(rest, env, io).await,
             "attach" => attach_cmd::main(rest, env, io).await,
+            "secret" => secret::main(rest, env, io).await,
             "--help" | "-h" | "help" => {
                 io.outln(TOP_USAGE);
                 Ok(0)

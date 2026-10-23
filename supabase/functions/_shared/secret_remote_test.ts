@@ -47,10 +47,10 @@ Deno.test("有簽章：簽章者的 id 與節點一律取自驗證結果，不�
 });
 
 Deno.test("請求：節點一律是金鑰所屬的自己，欄位整理過；成功敲本人其他設備的門鈴，回應不含密文", async () => {
-  const { deps, calls, rings } = fakeDeps(() => ({ data: { id: ID, expires_at: "2026-10-23T00:00:00Z", bell_topics: ["b1", "b2"], cipher: "不該外洩" } }));
+  const { deps, calls, rings } = fakeDeps(() => ({ data: { id: ID, expires_at: "2026-10-23T00:00:00Z", seconds_left: 120, bell_topics: ["b1", "b2"], cipher: "不該外洩" } }));
   const r = await handleSecretAction(deps, { id: "CLOUD" }, "secret_request", { ...REQ, node: "evil", ttl: 120, extra: 1 }, null);
   assertEquals(r.status, 200);
-  assertEquals(r.body, { id: ID, expires_at: "2026-10-23T00:00:00Z" });
+  assertEquals(r.body, { id: ID, expires_at: "2026-10-23T00:00:00Z", seconds_left: 120 });
   assertEquals(calls[0].args, { p_node: "CLOUD", p_pub: PUB, p_program: "git.exe", p_purpose: "git push 到 github", p_ttl_seconds: 120 });
   assertEquals(rings, ["b1", "b2"]);
 });

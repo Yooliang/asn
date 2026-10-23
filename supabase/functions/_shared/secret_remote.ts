@@ -97,7 +97,7 @@ export async function handleSecretAction(deps: LaunchDeps, me: { id: string }, a
     });
     if (isReply(r)) return r;
     for (const t of Array.isArray(r.data?.bell_topics) ? r.data.bell_topics : []) if (typeof t === "string") await deps.ring(t);
-    return { status: 200, body: { id: r.data.id, expires_at: r.data.expires_at } };
+    return { status: 200, body: { id: r.data.id, expires_at: r.data.expires_at, seconds_left: r.data.seconds_left } };
   }
   if (action === "secret_fetch") {
     const id = params?.id;
