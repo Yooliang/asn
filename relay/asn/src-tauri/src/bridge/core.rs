@@ -46,6 +46,10 @@ pub struct Config {
     pub status_dir: PathBuf,
     pub poll_ms: u64,
     pub roster_ms: u64,
+    /// 本機視窗狀態監看的間隔（毫秒，預設 1000；0＝不監看）：狀態檔的 state 一變就立刻回報名單，不等 roster_ms
+    pub watch_ms: u64,
+    /// 立即回報的防抖間隔（毫秒，預設 1500）：連續快速變化合併成這段時間最多報一次
+    pub watch_gap_ms: u64,
     pub tick_ms: u64,
     pub reply_timeout_ms: u64,
     pub late_keep_ms: u64,
@@ -95,6 +99,8 @@ impl Config {
             status_dir: home.join(".asn").join("status"),
             poll_ms: env_u64("ASN_RELAY_POLL_MS", 120_000),
             roster_ms: env_u64("ASN_ROSTER_MS", 60_000),
+            watch_ms: 1_000,
+            watch_gap_ms: 1_500,
             tick_ms: env_u64("ASN_BRIDGE_TICK_MS", 5_000),
             reply_timeout_ms: env_u64("ASN_REPLY_TIMEOUT_MS", 600_000),
             late_keep_ms: env_u64("ASN_LATE_KEEP_MS", 86_400_000),
@@ -223,6 +229,9 @@ pub struct Core {
     mod_src: Arc<dyn Fn() -> Option<Value> + Send + Sync>,
     /// 上次成功回報的外掛狀態（內容, 時間）；沒變化就不重報
     mod_sent: Option<(String, u64)>,
+    /// 上次回報名單時本機 Claude 視窗的指紋與時間（即時監看用）
+    roster_fp: Option<String>,
+    roster_at: u64,
 }
 
 /// JSON 數字（整數、浮點或數字字串）→ u64；不是數字回 0
@@ -256,7 +265,7 @@ impl Core {
         let mut c = Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), unrouted: HashSet::new(),
-            last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, engines: None, claude_roster: vec![], corr,
+            last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false,
         };
         c.restore();
@@ -420,6 +429,21 @@ impl Core {
     }
 
     // ---- 名單 ----
+    /// 即時監看（每 watch_ms 一次）：只讀本機 sessions 與外掛狀態檔，名字／狀態／說明和上次回報時不同
+    /// （心跳只改 at，不算）且距上次回報已過防抖間隔，就立刻整份回報名單（後台再通知別台設備重拉）。回傳有沒有回報。
+    pub async fn watch_local(&mut self, now: u64) -> bool {
+        let alive = self.alive.clone();
+        let Some(l) = roster::read_local(&self.cfg.sessions_dir, &self.cfg.status_dir, |p| alive(p), self.sink.pid(), &self.cfg.mailbox_name, now) else {
+            return false;
+        };
+        let fp = roster::local_fingerprint(&l);
+        if !roster::push_due(&fp, self.roster_fp.as_deref(), now, self.roster_at, self.cfg.watch_gap_ms) {
+            return false;
+        }
+        self.refresh_roster(now).await;
+        true
+    }
+
     pub async fn refresh_roster(&mut self, now: u64) {
         self.now = now;
         let alive = self.alive.clone();
@@ -433,6 +457,8 @@ impl Core {
             roster::apply_mod_status(&mut l, &self.cfg.status_dir, now);
             let live: Vec<String> = l.iter().filter_map(|w| w.session_id.clone()).collect();
             roster::cleanup_mod_status(&self.cfg.status_dir, &live, now);
+            self.roster_fp = Some(roster::local_fingerprint(&l));
+            self.roster_at = now;
             self.claude_roster = l;
         }
         let mut list = self.claude_roster.clone();

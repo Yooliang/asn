@@ -6,7 +6,8 @@
 import { isAvatarDataUrl } from './avatar.mjs'
 import { renamedInfo } from './rename.mjs'
 import { asnByNode } from './presence.mjs'
-import { buildFriends, cleanPsm, expectsReplyTo, isAsnWindow, mergeFriends } from './roster.mjs'
+import { coalesced, overlayLocal } from './local-status.mjs'
+import { buildFriends, cleanPsm, expectsReplyTo, friendId, isAsnWindow, mergeFriends } from './roster.mjs'
 import { contextAlertText, createContextWatch } from './context-usage.mjs'
 import { routeMail, stubFriend } from './routing.mjs'
 import { hasNudge, hueOf, initial, noReplyNoticeOf, plain, stripNudge, stripReplyHead, unwrapShell } from './text.mjs'
@@ -31,13 +32,16 @@ function withTimeout(p, ms, what) {
 }
 
 export class AsnCore {
-  constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, statusPollMs = STATUS_POLL_MS, aliases = [], stepMs = STEP_MS }) {
+  constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, localMs = 2_000, soonGapMs = 1_000, statusPollMs = STATUS_POLL_MS, aliases = [], stepMs = STEP_MS }) {
     // 讀取類的呼叫一律加逾時（寄信、寄檔另有自己的流程，不在這裡限時）。收信（inbox、ack）可能一次要走好幾個名字，給兩倍時間
     const guarded = { ...transport }
     for (const k of ['list', 'inbox', 'ack', 'sentStatus', 'avatar', 'history', 'readSync']) {
       if (typeof transport[k] === 'function') guarded[k] = (...a) => withTimeout(transport[k](...a), k === 'inbox' || k === 'ack' ? stepMs * 2 : stepMs, k)
     }
-    Object.assign(this, { aliases: new Set(aliases), transport: guarded, store, selfNode, windowName, isChatVisible, now, log, pollMs, rosterMs, statusPollMs, stepMs })
+    Object.assign(this, { aliases: new Set(aliases), transport: guarded, store, selfNode, windowName, isChatVisible, now, log, pollMs, rosterMs, localMs, statusPollMs, stepMs })
+    this.cwdOf = new Map()   // 好友 id → 資料夾標籤（後台名單給的），本機現讀狀態時用來重組個人訊息
+    // 門鈴響、回到前景時立刻重拉名單；1 秒內多次合併成一次
+    this.refreshRosterSoon = coalesced(() => this.refreshRoster(), soonGapMs)
     this.friends = new Map()   // id → 好友
     this.logs = new Map()      // id → 訊息陣列
     this.seen = new Set()      // 已處理過的信件 id（ack 失敗重拉時不重複顯示）
@@ -81,6 +85,8 @@ export class AsnCore {
     await this.pull('startup')
     await this.refreshSentStatus('startup')
     this.timers.push(setInterval(() => void this.refreshRoster(), this.rosterMs))
+    // 這台電腦的視窗直接讀本機狀態（沒有 localWindows 的平台＝手機，不啟動）
+    if (typeof this.transport.localWindows === 'function' && this.localMs > 0) this.timers.push(setInterval(() => void this.refreshLocal(), this.localMs))
     this.timers.push(setInterval(() => void this.pull('poll'), this.pollMs))
     this.timers.push(setInterval(() => void this.refreshSentStatus('poll'), this.statusPollMs))
   }
@@ -120,10 +126,24 @@ export class AsnCore {
       const f = next.get(a.id)
       queueMicrotask(() => this.emit('notify', { kind: 'context', friend: f, line: contextAlertText(f.nick, a.pct), pct: a.pct, toast: true }))
     }
+    this.cwdOf = new Map(live.map(l => [l.id, '']))
+    for (const m of Array.isArray(members) ? members : []) for (const a of Array.isArray(m?.agents) ? m.agents : []) if (a && typeof a.name === 'string' && a.cwd_label) this.cwdOf.set(friendId(m.id, a.name), String(a.cwd_label))
+    await this.refreshLocal(true)   // 本機視窗以本機現讀為準，蓋掉後台稍舊的狀態
     this.rosterLoaded = true
     this.emit('state')
     void this.syncReads()   // 定期順便取回別台設備的已讀、補送沒送出的
     await this.#syncAvatars(members)
+  }
+
+  // 本機視窗現讀：名單上「這台電腦」的夥伴，狀態以本機狀態檔為準（延遲 ≤ localMs，不經後台）。讀失敗就維持名單給的
+  async refreshLocal(quiet = false) {
+    if (typeof this.transport.localWindows !== 'function') return
+    let locals
+    try { locals = await this.transport.localWindows() } catch { return }
+    const next = overlayLocal(this.friends, this.selfNode, locals, this.cwdOf)
+    if (!next) return
+    this.friends = next
+    if (!quiet) this.emit('state')
   }
 
   // 改名合併（夥伴 ID）：本機記住的舊名那筆若夥伴 ID 和名單上某位成員相同，就是同一位夥伴改了名——

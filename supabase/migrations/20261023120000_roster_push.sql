@@ -1,0 +1,74 @@
+-- 名單即時推播：視窗狀態（忙碌／閒置／說明）一變，回報名單後通知同帳號其他設備立刻重拉。
+-- 相容：只加一個可空欄位；asn_relay_roster 照舊驗證與寫入，回傳多帶 changed 與 bell_topics 兩個鍵
+--   （舊 Edge Function 只讀 count／error，多的鍵略過；新 Edge Function 對舊資料庫拿不到鍵就不敲門鈴）。
+-- 判斷「有變」：名字／狀態／說明三項的集合與上次不同（上下文百分比、外掛載入旗標、cwd 不算，心跳式的重報不會敲門鈴）。
+-- 頻率限制：同一個節點 2 秒內最多敲一次（relay.nodes.roster_bell_at）；只通知同租戶、啟用中、10 分鐘內有心跳的其他節點。
+-- 先不套用：部署由負責的 session 處理（順序：本 migration → relay Edge Function → 電腦版／手機版）。
+begin;
+
+alter table relay.nodes add column if not exists roster_bell_at timestamptz;
+
+CREATE OR REPLACE FUNCTION public.asn_relay_roster(p_node text, p_agents jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+declare
+  v_n int;
+  v_old jsonb;
+  v_new jsonb;
+  v_changed boolean;
+  v_tenant uuid;
+  v_topics jsonb := '[]'::jsonb;
+begin
+  if not exists (select 1 from relay.nodes where id = p_node and status = 'active' and (can_invite or can_roster)) then
+    return jsonb_build_object('error', 'forbidden');
+  end if;
+  if p_agents is null or jsonb_typeof(p_agents) <> 'array' or jsonb_array_length(p_agents) > 100 then
+    return jsonb_build_object('error', 'bad_request');
+  end if;
+  if exists (
+    select 1 from jsonb_array_elements(p_agents) a
+    where jsonb_typeof(a) <> 'object' or jsonb_typeof(a->'name') is distinct from 'string'
+       or char_length(a->>'name') not between 1 and 60
+       or char_length(coalesce(a->>'status', '')) > 20 or char_length(coalesce(a->>'cwd_label', '')) > 80
+  ) then
+    return jsonb_build_object('error', 'bad_request');
+  end if;
+  select coalesce(jsonb_agg(jsonb_build_array(r.name, coalesce(r.status, ''), coalesce(r.detail, '')) order by r.name), '[]'::jsonb)
+    into v_old from relay.roster r where r.node = p_node;
+  delete from relay.roster where node = p_node;
+  -- same name twice in one report: the last one wins；engine 格式不對就當沒帶；detail 不是字串就當沒帶、過長截斷；context_pct 不是 0～100 的數字就當沒帶
+  insert into relay.roster (node, name, status, cwd_label, engine, detail, context_pct, mod_loaded)
+    select distinct on (a.v->>'name') p_node, a.v->>'name', nullif(a.v->>'status', ''), nullif(a.v->>'cwd_label', ''),
+           case when a.v->>'engine' ~ '^[a-z][a-z0-9_-]{0,19}$' then a.v->>'engine' end,
+           case when jsonb_typeof(a.v->'detail') = 'string' then nullif(left(btrim(a.v->>'detail'), 80), '') end,
+           case when jsonb_typeof(a.v->'context_pct') = 'number' and (a.v->>'context_pct')::numeric between 0 and 100 then round((a.v->>'context_pct')::numeric)::smallint end,
+           case when jsonb_typeof(a.v->'mod_loaded') = 'boolean' then (a.v->>'mod_loaded')::boolean end
+    from jsonb_array_elements(p_agents) with ordinality as a(v, ord)
+    order by a.v->>'name', a.ord desc;
+  get diagnostics v_n = row_count;
+  select coalesce(jsonb_agg(jsonb_build_array(r.name, coalesce(r.status, ''), coalesce(r.detail, '')) order by r.name), '[]'::jsonb)
+    into v_new from relay.roster r where r.node = p_node;
+  v_changed := v_old is distinct from v_new;
+  if v_changed then
+    -- 2 秒內最多敲一次：搶到更新權的那次才回門鈴清單
+    update relay.nodes set roster_bell_at = now()
+      where id = p_node and (roster_bell_at is null or roster_bell_at < now() - interval '2 seconds')
+      returning tenant_id into v_tenant;
+    if found then
+      select coalesce(jsonb_agg(distinct o.bell_topic), '[]'::jsonb) into v_topics
+        from relay.nodes o
+        where o.id <> p_node and o.status = 'active' and o.bell_topic is not null
+          and o.tenant_id is not distinct from v_tenant
+          and o.last_seen_at > now() - interval '10 minutes';
+    end if;
+  end if;
+  return jsonb_build_object('count', v_n, 'changed', v_changed, 'bell_topics', v_topics);
+end;
+$function$;
+revoke all on function public.asn_relay_roster(text, jsonb) from public, anon, authenticated;
+grant execute on function public.asn_relay_roster(text, jsonb) to service_role;
+
+commit;

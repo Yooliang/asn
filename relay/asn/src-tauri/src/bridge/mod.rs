@@ -225,9 +225,13 @@ pub async fn run_loop(mut core: Core, mut lines: mpsc::UnboundedReceiver<WorkerL
         i
     };
     let (mut poll, mut roster, mut tick) = (every(core.cfg.poll_ms), every(core.cfg.roster_ms), every(core.cfg.tick_ms));
+    // 本機視窗狀態監看（0＝關）：狀態一變就立刻回報名單
+    let watch_on = core.cfg.watch_ms > 0;
+    let mut watch = every(core.cfg.watch_ms);
     poll.tick().await;
     roster.tick().await;
     tick.tick().await;
+    watch.tick().await;
     // 其他引擎先啟動並列一次名單（最多等 8 秒，慢的引擎之後由背景重列補上），第一次回報的名單才不缺 Gemini／Codex
     if let Some(e) = core.engines.clone() {
         e.start();
@@ -243,6 +247,7 @@ pub async fn run_loop(mut core: Core, mut lines: mpsc::UnboundedReceiver<WorkerL
             _ = wake.notified() => core.pull("bell", now()).await,
             _ = poll.tick() => core.pull("poll", now()).await,
             _ = roster.tick() => core.refresh_roster(now()).await,
+            _ = watch.tick(), if watch_on => { core.watch_local(now()).await; }
             _ = tick.tick() => {
                 core.tick(now()).await;
                 if core.retry_due(now()) { core.pull("retry", now()).await }

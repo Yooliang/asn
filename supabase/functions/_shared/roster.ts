@@ -6,6 +6,13 @@ export type RosterAgent = { name: unknown; status: unknown; cwd_label: unknown; 
 
 export const DETAIL_MAX = 80;
 
+/** 名單回報後要敲的門鈴：資料庫回 bell_topics（只有名單有變且過了頻率限制才有）；不是字串陣列或舊資料庫沒有＝空，最多 20 個 */
+export function rosterBellTopics(data: unknown): string[] {
+  const l = (data as { bell_topics?: unknown } | null)?.bell_topics;
+  if (!Array.isArray(l)) return [];
+  return [...new Set(l.filter((t): t is string => typeof t === "string" && t.length > 0 && t.length <= 100))].slice(0, 20);
+}
+
 // 上下文已用百分比：只收 0～100 的有限數字（四捨五入成整數），其餘＝null，不因此拒絕整份名單
 export function contextPct(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 100 ? Math.round(v) : null;
