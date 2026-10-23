@@ -44,6 +44,7 @@ import { createCallBeats } from './lib/call-beats.mjs'
 import { startCallPoll } from './lib/call-poll.mjs'
 import { isCallActive } from './lib/call-session.mjs'
 import { accountLine, codexLine, createAccountsUi } from './lib/claude-accounts.mjs'
+import { dialogTitle as deviceAcctTitle, dialogView as deviceAcctViewOf, CONFIRM_NOTE as DEVICE_CONFIRM_NOTE, CLOSE_NOTE as DEVICE_CLOSE_NOTE } from './lib/device-acct-dialog.mjs'
 import { applyRename } from './lib/rename.mjs'
 import { createUsageUi } from './lib/usage.mjs'
 import { CHECK_MS, autoCheckFromSaved, initialUpdateState, manualResultText, progressText, updateNoticeText, withAvailable, withFailure, withInstalling, withProgress, updateStatus } from './lib/update.mjs'
@@ -972,6 +973,7 @@ const app = createApp({
     // 名單設備標題右鍵：切換那台設備的 Claude 帳號
     const deviceMenu = ref('')
     const deviceMenuPos = reactive({ x: 0, y: 0 })
+    const deviceAcct = reactive({ node: '', label: '', selected: '' })   // 右鍵「切換這台的 Claude 帳號」的專屬對話框
     const openDeviceMenu = (g, e) => {
       if (g.kind !== 'device' || g.node === info.node || !asnMap.value[g.node]) return
       closeBuddyMenu(); closeLaunchPicker()
@@ -983,9 +985,13 @@ const app = createApp({
       const node = deviceMenu.value
       closeDeviceMenu()
       if (!node) return
-      await openPanel('setting', 'accounts')
+      deviceAcct.node = node; deviceAcct.label = accounts.remoteNodes().find(d => d.key === node)?.label ?? node; deviceAcct.selected = ''
       await accounts.remoteSelect(node)
     }
+    const closeDeviceAcct = () => { deviceAcct.node = '' }
+    const deviceAcctView = computed(() => deviceAcctViewOf(accounts.state.remote, deviceAcct.selected))
+    const deviceAcctTitleText = computed(() => deviceAcctTitle(deviceAcct.label))
+    const deviceAcctSubmit = () => { const v = deviceAcctView.value; if (v.canSwitch) void accounts.remoteSwitch(v.switchEmail) }
     const installFromSettings = async () => {
       voiceMsg.value = '正在下載…'
       await voice.installStt()
@@ -1073,7 +1079,7 @@ const app = createApp({
     })
     const pickAvatarFile = file => applySetting('avatar-upload', file)
     return {
-      version: info.version, accounts, accountLine, deviceMenu, deviceMenuPos, openDeviceMenu, closeDeviceMenu, deviceMenuSwitch, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
+      version: info.version, accounts, accountLine, deviceMenu, deviceMenuPos, openDeviceMenu, closeDeviceMenu, deviceMenuSwitch, deviceAcct, deviceAcctView, deviceAcctTitleText, closeDeviceAcct, deviceAcctSubmit, DEVICE_CONFIRM_NOTE, DEVICE_CLOSE_NOTE, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       upd, autoCheck, checkUpdate, installUpdate, updateNoticeText, progressText,
       frame, FRAMES, FRAME_LABEL, setFrame, closeTo, CLOSE_CHOICES, CLOSE_LABEL, setCloseTo, trayOk, autostart, setAutostart, RESIZE_DIRS, resizeFrom, avMenu,
       contextLabel, avOf, meAv, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar,

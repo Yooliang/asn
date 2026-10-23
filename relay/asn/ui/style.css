@@ -562,6 +562,7 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .acct-txt small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .acct-list .aero-btn{white-space:nowrap;font-size:12px;padding:3px 8px}
 .acct-add{display:flex;gap:6px}
+.acct-list .chk{display:flex;flex-direction:row;align-items:center;gap:8px;flex:1;min-width:0}
 .upd-bar{display:flex;gap:6px;align-items:center;padding:4px 8px;background:#fff6d6;border-bottom:1px solid #d9c26a;font-size:12px}
 .upd-bar.failed{background:#fde4e0;border-bottom-color:#d98a80}
 .upd-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
