@@ -240,8 +240,28 @@ function contextText(c) {
 const pick = (o, ...keys) => { for (const k of keys) if (o[k] != null && o[k] !== '') return o[k] }
 const short = (v, n = 200) => String(v).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, n)
 
+// 「Claude 外掛」一列的文字。mod＝這台電腦回報的外掛狀態（modOf 的結果）；loaded＝這個視窗有沒有載入（true／false／null 不知道）。純中文
+export function claudeModText(mod, loaded = null) {
+  if (!mod || typeof mod !== 'object') return ''
+  const why = /[一-鿿]/.test(mod.reason ?? '') ? short(mod.reason, 60) : ''
+  const ver = mod.version ? ` ${short(mod.version, 32)}` : ''
+  switch (mod.state) {
+    case 'installed':
+      return loaded === true ? `已安裝${ver}，這個視窗已載入`
+        : loaded === false ? `已安裝${ver}，但這個視窗是安裝前開的，重開後才會載入`
+        : `已安裝${ver}`
+    case 'removed': return '已被使用者移除，不會自動重裝'
+    case 'no_claude': return '這台電腦找不到 Claude'
+    case 'failed': return why ? `安裝失敗：${why}` : '安裝失敗'
+    case 'update_failed': return why ? `更新失敗：${why}` : '更新失敗'
+    case 'checking': return '檢查中'
+    default: return ''
+  }
+}
+
 // 詳情結果 → 中文標籤列 [{ label, value }]；沒有的欄位不列。外殼只列程式名稱，不列命令列參數
-export function infoRows(result) {
+// friend＝名單上的這位（帶 deviceMod 與 modLoaded；舊後台沒有就維持原本的「ASN 外掛」一列）
+export function infoRows(result, friend = null) {
   const r = result && typeof result === 'object' && !Array.isArray(result) ? result : {}
   const rows = []
   const add = (label, value) => { if (value !== '' && value != null) rows.push({ label, value: String(value) }) }
@@ -266,7 +286,12 @@ export function infoRows(result) {
   add('外殼', names.join(' → '))
   const mod = pick(r, 'mod', 'mod_installed', 'asn_mod')
   const modOn = typeof mod === 'boolean' ? mod : mod && typeof mod === 'object' ? mod.installed !== false : null
-  if (modOn != null) add('ASN 外掛', modOn ? '已安裝' : '沒有安裝')
+  const devMod = friend && typeof friend === 'object' ? friend.deviceMod : null
+  if (devMod) {
+    // 這個視窗有沒有載入：詳情是電腦當場查的，優先；沒有才用名單帶的
+    const loaded = modOn != null ? modOn : typeof friend.modLoaded === 'boolean' ? friend.modLoaded : null
+    add('Claude 外掛', claudeModText(devMod, loaded))
+  } else if (modOn != null) add('ASN 外掛', modOn ? '已安裝' : '沒有安裝')
   add('上下文用量', contextText(pick(r, 'context', 'context_usage')))
   return rows
 }

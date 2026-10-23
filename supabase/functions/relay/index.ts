@@ -10,6 +10,7 @@ import { parseAsnPresence } from "../_shared/asn_presence.ts";
 import { handlePartnerList, handlePartnerSucceed, handlePartnerSync } from "../_shared/partners.ts";
 import { bellTopicsOf, handleChatHistory, personArgs, sendWithPerson } from "../_shared/account_me.ts";
 import { normalizeRosterAgents } from "../_shared/roster.ts";
+import { sanitizeClaudeMod } from "../_shared/claude_mod.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
 import * as signal from "../_shared/signal.ts";
 import { handleNodeLaunchAction, LAUNCH_ACTIONS, sanitizeLauncher } from "../_shared/launch.ts";
@@ -226,6 +227,15 @@ Deno.serve(async (req) => {
       const { data: ld, error: le } = await db.rpc("asn_relay_set_launcher", { p_node: me.id, p_launcher: l });
       if (le) console.error(le);
       else if (ld?.error) console.warn("set_launcher", me.id, ld.error);
+    }
+    // 這台電腦的 Claude 外掛狀態（選填 mod；啟動檢查完與狀態變化時才帶）。格式不對或舊資料庫沒有這支函式都只記 log，不影響名單
+    if ("mod" in b) {
+      const cm = sanitizeClaudeMod(b.mod);
+      if (cm) {
+        const { data: md, error: me2 } = await db.rpc("asn_relay_set_claude_mod", { p_node: me.id, p_mod: cm });
+        if (me2) console.warn("set_claude_mod", me.id, me2.message ?? me2);
+        else if (md?.error) console.warn("set_claude_mod", me.id, md.error);
+      }
     }
     // 視窗名單更新後：符合群組「自動收入」開頭字串的視窗自動入群，消失的標為離開（不是 AI 加人，是比對 roster）
     await syncNodeAuto(roomDeps(), me.id, agents.map((a: { name: unknown }) => a.name).filter((n: unknown): n is string => typeof n === "string"));

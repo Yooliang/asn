@@ -2,7 +2,7 @@
 // engine＝這個視窗背後是哪家 AI（claude／codex／gemini／grok…）。格式不對或沒帶（舊版機器橋）就是 null，
 // 不因此拒絕整份名單；detail（選填，最多 80 字）同理；資料庫那邊也有同樣的格式檢查（supabase/sql/19_roster_engine.sql）。
 
-export type RosterAgent = { name: unknown; status: unknown; cwd_label: unknown; engine: string | null; detail: string | null; context_pct: number | null };
+export type RosterAgent = { name: unknown; status: unknown; cwd_label: unknown; engine: string | null; detail: string | null; context_pct: number | null; mod_loaded: boolean | null };
 
 export const DETAIL_MAX = 80;
 
@@ -22,5 +22,7 @@ export function normalizeRosterAgents(agents: Array<Record<string, unknown>>): R
     // 可選的補充說明（Claude Code 外掛狀態）：不是字串或空白＝null，過長截斷，不因此拒絕整份名單
     detail: typeof a?.detail === "string" && a.detail.trim() ? [...a.detail.trim()].slice(0, DETAIL_MAX).join("") : null,
     context_pct: contextPct(a?.context_pct),
+    // 這個視窗有沒有載入 ASN 外掛（選填，只收布林；舊版機器橋沒帶＝null）
+    mod_loaded: typeof a?.mod_loaded === "boolean" ? a.mod_loaded : null,
   }));
 }

@@ -31,7 +31,7 @@ export async function runPartnerOp(api, friend, op, input, { onUpdate = () => {}
     let row = null
     try { row = ((await api.partnerOps([id]))?.ops ?? []).find(o => o?.id === id) ?? null } catch { /* 暫時連不上：繼續等，太久由 progressView 判逾時 */ }
     const v = progressView(row ?? { status: 'pending' }, { op, sentAt, now: now() })
-    if (op === 'info' && row?.status === 'ok') v.rows = infoRows(row.result)
+    if (op === 'info' && row?.status === 'ok') v.rows = infoRows(row.result, friend)
     onUpdate(v)
     if (v.done) return v
   }
