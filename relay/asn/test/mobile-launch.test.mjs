@@ -31,7 +31,7 @@ test('可選的電腦：不含手機自己；照名單順序；不能開的列�
   assert.equal(rows[0].label, '設備H'); assert.equal(rows[1].reason, REASON.offline)
 })
 
-test('選項：模型與資料夾用那台電腦回報的設定', () => {
+test('選項：模型與資料夾用電腦回報的設定', () => {
   const c = launchChoices(ctx.machines.H)
   assert.deepEqual(c.models.map(m => [m.profileId, m.label]), [['claude', 'Claude'], ['gemini', 'Gemini']])
   assert.deepEqual(c.cwds, LAUNCHER.cwd_allow)

@@ -30,7 +30,7 @@ test('人、手機、雲端代理、群組、ASN／收發室視窗：空陣列�
 test('不能用就反灰並給中文原因：沒登入、離線、沒開放（詳情除外）、還沒查到設定、舊後台', () => {
   const rs = items => Object.fromEntries(items.map(i => [i.key, i.reason]))
   assert.ok(menuItems(W('H', 'a'), { ...ctx, signedIn: false }).every(i => !i.ok && i.reason === REASON.needLogin), '沒登入全反灰（含詳情）')
-  assert.ok(menuItems(W('W', 'a'), ctx).every(i => !i.ok && i.reason === REASON.offline), '那台電腦離線')
+  assert.ok(menuItems(W('W', 'a'), ctx).every(i => !i.ok && i.reason === REASON.offline), '電腦離線')
   const closed = menuItems(W('C', 'a'), ctx)
   assert.deepEqual(closed.map(i => i.ok), [true, false, false, false, false], '沒開放：只有詳情能用')
   assert.equal(rs(closed).rename, REASON.closed)
@@ -42,13 +42,13 @@ test('不能用就反灰並給中文原因：沒登入、離線、沒開放（�
   for (const i of menuItems(W('H', 'a'), ctx)) assert.ok(!/[A-Za-z]{4,}/.test(i.label))
 })
 
-test('離線的 AI 夥伴只有「喚醒」：有登入、那台電腦在線且開放才能按；其餘反灰並寫中文原因', () => {
+test('離線的 AI 夥伴只有「喚醒」：有登入、電腦在線且開放才能按；其餘反灰並寫中文原因', () => {
   const off = (node, extra = {}) => W(node, '小離', { status: 'offline', ...extra })
   assert.deepEqual(menuItems(off('H'), ctx), [{ key: 'resume', label: '喚醒', ok: true, reason: '' }])
   const one = (f, c = ctx) => menuItems(f, c).map(i => [i.key, i.ok, i.reason])
   assert.deepEqual(one(off('H'), { ...ctx, signedIn: false }), [['resume', false, REASON.needLogin]])
-  assert.deepEqual(one(off('W')), [['resume', false, REASON.deviceOffline]], '那台電腦離線')
-  assert.deepEqual(one(off('Z')), [['resume', false, REASON.deviceOffline]], '查不到那台電腦')
+  assert.deepEqual(one(off('W')), [['resume', false, REASON.deviceOffline]], '電腦離線')
+  assert.deepEqual(one(off('Z')), [['resume', false, REASON.deviceOffline]], '查不到電腦')
   assert.deepEqual(one(off('C')), [['resume', false, REASON.closed]], '沒開放')
   assert.deepEqual(one(off('H'), { ...ctx, loaded: false }), [['resume', false, REASON.unknown]])
   assert.deepEqual(one(off('H'), { ...ctx, supported: false }), [['resume', false, REASON.unsupported]])
@@ -87,8 +87,8 @@ test('接班換手的進度分段：請前任寫交接 → 關閉前任視窗 �
   assert.deepEqual([at('stage:handoff').text, states(at('stage:handoff'))], ['請前任寫交接中…', ['active', 'todo', 'todo']])
   assert.deepEqual([at('stage:closing').text, states(at('stage:closing'))], ['關閉前任視窗中…', ['done', 'active', 'todo']])
   assert.deepEqual([at('stage:opening').text, states(at('stage:opening'))], ['開新視窗中…', ['done', 'done', 'active']])
-  assert.equal(at('').text, '那台電腦正在處理…', '還沒回報階段')
-  assert.equal(at('stage:evil <b>').text, '那台電腦正在處理…', '看不懂的階段不外露')
+  assert.equal(at('').text, '正在處理…', '還沒回報階段')
+  assert.equal(at('stage:evil <b>').text, '正在處理…', '看不懂的階段不外露')
   const p = 'C:/Users/x/.asn/handoff/交接/p_1/20261022-101500.md'
   const done = progressView({ status: 'ok', result: { handoff_path: p, handoff_done: true } }, { op: 'handover' })
   assert.deepEqual([done.phase, done.text, states(done), done.extra], ['done', '接班換手完成，新視窗開好了。', ['done', 'done', 'done'], ['交接檔：' + p]])
@@ -132,8 +132,8 @@ test('錯誤翻成中文：後台代碼、沒登入、斷線、舊後台；看�
 
 test('進度：已送出 → 電腦正在處理 → 完成／失敗原因；等太久顯示版本可能太舊', () => {
   const t0 = 1_000_000
-  assert.deepEqual(progressView({ status: 'pending' }, { sentAt: t0, now: t0 + 1000 }), { phase: 'sent', done: false, text: '已經送出，等那台電腦接手…' })
-  assert.deepEqual(progressView({ status: 'taken' }, { sentAt: t0, now: t0 + 1000 }), { phase: 'working', done: false, text: '那台電腦正在處理…' })
+  assert.deepEqual(progressView({ status: 'pending' }, { sentAt: t0, now: t0 + 1000 }), { phase: 'sent', done: false, text: '正在發送指令…' })
+  assert.deepEqual(progressView({ status: 'taken' }, { sentAt: t0, now: t0 + 1000 }), { phase: 'working', done: false, text: '正在處理…' })
   assert.equal(progressView({ status: 'ok' }, { op: 'rename' }).text, '已改名。')
   assert.match(progressView({ status: 'ok' }, { op: 'close' }).text, /已關閉/)
   assert.match(progressView({ status: 'ok' }, { op: 'handover' }).text, /接班換手/)
@@ -148,7 +148,7 @@ test('進度：已送出 → 電腦正在處理 → 完成／失敗原因；等�
     const v = progressView({ status: s }, { sentAt: t0, now: t0 + OP_GIVE_UP_MS + 1 })
     assert.deepEqual([v.phase, v.done, v.text], ['failed', true, `沒有成功：${STALE_TEXT}`])
   }
-  assert.equal(STALE_TEXT, '那台電腦的 ASN 版本可能太舊，或沒有在跑')
+  assert.equal(STALE_TEXT, 'ASN 版本可能太舊，或沒有在跑')
 })
 
 test('詳情列：中文標籤；沒有的欄位不列；外殼只列程式名稱不列參數', () => {

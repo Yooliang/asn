@@ -27,7 +27,7 @@ export const opStep = op => OP_STEP[op] ?? ''
 export const showsInSheet = op => op === 'info'
 
 // 手機沒有本機查詢（電腦版右鍵是問那台電腦現在能切哪些），所以只列常用的三個；實際能不能用以那台電腦的回報為準
-export const MODEL_NOTE = '手機查不到那台電腦實際可用的模型，這裡只列常用的幾個；那台電腦不支援的會回報失敗。'
+export const MODEL_NOTE = '手機查不到電腦實際可用的模型，這裡只列常用的幾個；電腦不支援的會回報失敗。'
 export const phoneModels = () => CLAUDE_MODELS.map(m => ({ id: m.id, label: m.label }))
 
 // 改名完成後，對話分頁要跳到新名字（同一位夥伴）。回新的 id；不是改名或沒完成就回空字串

@@ -19,7 +19,7 @@ pub fn error_text(code: &str) -> String {
         "bad_request" => "送出的內容不合格",
         "internal" => "後台暫時有問題，請稍後再試",
         "not_found" => "找不到這台設備（它不在你的帳號底下）",
-        "asn_offline" => "那台電腦的 ASN 目前沒有開著，等它上線再試",
+        "asn_offline" => "電腦上的 ASN 目前沒有開著，等它上線再試",
         "rate_limited" => "剛剛更新失敗，請稍候一分鐘再試",
         _ => "後台沒有接受這個要求",
     }

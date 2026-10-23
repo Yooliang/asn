@@ -29,7 +29,7 @@ export function canOfferCall(friend, { hasVoice = true } = {}) {
 
 /**
  * 喚醒按鈕：只有「離線的 AI 夥伴」才有（在線的不顯示）。可按的條件與右鍵選單同一套（lib/partner-ops.mjs 的 menuItems）：
- * 有登入、那台電腦在線且開放遠端管理；不能按就反灰，原因寫在提示裡。回 { show, ok, reason }。
+ * 有登入、電腦在線且開放遠端管理；不能按就反灰，原因寫在提示裡。回 { show, ok, reason }。
  */
 export function wakeButtonView(friend, ctx = {}) {
   if (!friend || friend.pending || friend.status !== 'offline') return { show: false, ok: false, reason: '' }

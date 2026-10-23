@@ -19,12 +19,12 @@ export const REASON = {
   needLogin: '要先登入，才能管理夥伴視窗',
   unknown: '還沒查到這台電腦的設定，請稍後再試',
   offline: '這台電腦或這個視窗不在線',
-  closed: '這台電腦沒有開放遠端管理視窗（要在那台電腦的設定打開「允許遠端開視窗與管理視窗」）',
-  deviceOffline: '那台電腦現在不在線，叫不醒（要那台電腦的 ASN 開著）',
+  closed: '這台電腦沒有開放遠端管理視窗（要到電腦的設定打開「允許遠端開視窗與管理視窗」）',
+  deviceOffline: '電腦現在不在線，叫不醒（要讓電腦的 ASN 開著）',
   notClaude: '這位夥伴用的引擎還不能喚醒',
   unsupported: '電腦端或收發室還不支援，請先更新',
 }
-export const STALE_TEXT = '那台電腦的 ASN 版本可能太舊，或沒有在跑'
+export const STALE_TEXT = 'ASN 版本可能太舊，或沒有在跑'
 
 // 不是「電腦上的 AI 視窗」的對象：人、手機、雲端代理（節點種類），群組、ASN 與收發室視窗
 const NON_WINDOW_KINDS = new Set(['owner', 'person', 'human', 'phone', 'mobile', 'android', 'cloud', 'cloud-agent', 'grok', 'room', 'group'])
@@ -59,7 +59,7 @@ export function menuItems(friend, ctx = {}) {
   })
 }
 
-// 離線夥伴的「喚醒」：要有登入、那台電腦在線且開放遠端管理；這位夥伴用的引擎還不能喚醒（名單上沒寫引擎就當 Claude）
+// 離線夥伴的「喚醒」：要有登入、電腦在線且開放遠端管理；這位夥伴用的引擎還不能喚醒（名單上沒寫引擎就當 Claude）
 function resumeItems(friend, ctx) {
   if (friend.engine && friend.engine !== 'claude') return []
   let reason = ''
@@ -114,12 +114,12 @@ export function buildOpRequest(friend, op, input = {}) {
 const CODE_TEXT = {
   unauthorized: REASON.needLogin,
   forbidden: '只有本人能管理夥伴視窗，請確認已登入同一個帳號',
-  not_found: '找不到這個視窗（可能剛關掉，或那台電腦不在線）',
+  not_found: '找不到這個視窗（可能剛關掉，或電腦不在線）',
   no_launcher: REASON.closed,
   bad_name: '名字只能用英數、連字號、中文，1～40 字，不能以連字號開頭',
   bad_model: '模型名稱只能用英數與 . _ [ ] -，1～60 字',
   bad_note: `補充的話最多 ${NOTE_MAX} 字`,
-  name_taken: '那台電腦已經有同名的視窗，換個名字',
+  name_taken: '電腦上已經有同名的視窗，換個名字',
   busy: '這個視窗還有一個操作在進行中，等它完成再試',
   rate_limited: '這台電腦這個小時管理太多次了，稍後再試',
   protected: '收發室與 ASN 自己的視窗不能這樣操作',
@@ -202,13 +202,13 @@ export function progressView(row, { op = row?.op, sentAt = 0, now = Date.now() }
       if (op === 'handover') {
         const stage = stageOf(row.detail)
         const step = HANDOVER_STEPS.find(s => s.key === stage)
-        return { phase: 'working', done: false, text: step ? `${step.text}中…` : '那台電腦正在處理…', steps: stepsAt(stage) }
+        return { phase: 'working', done: false, text: step ? `${step.text}中…` : '正在處理…', steps: stepsAt(stage) }
       }
       if (stageOf(row.detail) === 'queued') return { phase: 'working', done: false, text: '排隊中，等它忙完…' }
-      return { phase: 'working', done: false, text: '那台電腦正在處理…' }
+      return { phase: 'working', done: false, text: '正在處理…' }
     default:
       if (waited > OP_GIVE_UP_MS) return { phase: 'failed', done: true, text: `沒有成功：${STALE_TEXT}` }
-      return { phase: 'sent', done: false, text: '已經送出，等那台電腦接手…' }
+      return { phase: 'sent', done: false, text: '正在發送指令…' }
   }
 }
 

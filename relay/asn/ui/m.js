@@ -355,7 +355,7 @@ const app = createApp({
       if (inSheet) ops.phase = 'info'
       else history.back()
       const set = v => { if (inSheet) { if (token === opsToken) ops.view = v } else opsRun.value = { op, view: v } }
-      set({ phase: 'sent', done: false, text: '已經送出，等那台電腦接手…' })
+      set({ phase: 'sent', done: false, text: '正在發送指令…' })
       const v = await runPartnerOp(opsTransport, f, op, input, { onUpdate: set, cancelled: () => inSheet && token !== opsToken })
       if (!inSheet && v?.phase === 'done') {
         await core.refreshRoster()   // 狀態與名字變了：重新拉名單；改名後對話分頁跳到新名字

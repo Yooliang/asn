@@ -93,8 +93,8 @@ export function progressView(row, appeared, name = '') {
     case 'failed': return { phase: 'failed', text: `沒有開成功：${friendlyDetail(row.detail)}` }
     case 'ok': return { phase: 'waiting', text: '視窗已經開好，等它出現在名單上…' }
     case 'unconfirmed': return { phase: 'waiting', text: '已經送出，但還沒確認視窗出現；等一下看看名單。' }
-    case 'taken': return { phase: 'opening', text: '那台電腦正在開視窗…' }
-    default: return { phase: 'sending', text: '已經送出，等那台電腦接手…' }
+    case 'taken': return { phase: 'opening', text: '正在開視窗…' }
+    default: return { phase: 'sending', text: '正在發送指令…' }
   }
 }
 const friendlyDetail = d => String(d ?? '').trim().slice(0, 200) || '沒有說明原因'

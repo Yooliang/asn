@@ -33,7 +33,7 @@ test('送出並輪詢：只送 node／name／op 與該動作的欄位，進度�
   const { v, seen } = await run(api, F('H', '小文'), 'handover', { note: ' 先看 PR ', newName: 'x', model: 'y' })
   assert.deepEqual(api.calls.op, [{ node: 'H', name: '小文', op: 'handover', note: '先看 PR' }])
   assert.deepEqual(api.calls.ops, [['op-1'], ['op-1'], ['op-1'], ['op-1']])
-  assert.deepEqual(seen.map(x => x.text), ['已經送出，等那台電腦接手…', '已經送出，等那台電腦接手…', '請前任寫交接中…', '關閉前任視窗中…', '接班換手完成，新視窗開好了。'])
+  assert.deepEqual(seen.map(x => x.text), ['正在發送指令…', '正在發送指令…', '請前任寫交接中…', '關閉前任視窗中…', '接班換手完成，新視窗開好了。'])
   assert.equal(v.phase, 'done'); assert.deepEqual(v.extra, ['交接檔：D:/h/a.md'])
 })
 
