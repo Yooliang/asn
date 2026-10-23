@@ -92,3 +92,23 @@ test('群組列表：未讀徽章垂直置中、不被拉長；大頭像與個�
   assert.equal(roomHue('abc'), roomHue('abc'))
   assert.ok(roomHue('團購群') >= 0 && roomHue('團購群') < 360)
 })
+
+test('一對一「管理」選單：夥伴管理項目（沿用名單右鍵 manageItems）排前面、分隔線、再接邀請；切換模型與喚醒不重複；反灰原因照原邏輯', async () => {
+  const { managePanelItems } = await import('../ui/lib/actionbar.mjs')
+  const f = { id: 'H/a', node: 'H', agent: 'asn-2', window: 'w1', status: 'online' }
+  const ctx = { loaded: true, signedIn: true, machines: { H: { online: true, launcher: true } } }
+  const inv = opsMenuItems(f)
+  const it = managePanelItems(f, ctx, inv)
+  assert.deepEqual(it.map(i => i.key), ['p:info', 'p:rename', 'p:close', 'p:handover', 'p:archive', 'invite'])
+  assert.equal(it.find(i => i.key === 'invite').sep, true, '邀請前有分隔線')
+  assert.ok(!it.some(i => i.sep && i.key !== 'invite'))
+  const off = managePanelItems(f, { ...ctx, signedIn: false }, inv).find(i => i.key === 'p:rename')
+  assert.equal(off.ok, false)
+  assert.match(off.reason, /登入/)
+  assert.equal(managePanelItems({ room: true }, ctx, opsMenuItems({ room: true }))[0].sep, false, '群組沒有夥伴項目，不畫分隔線')
+  const t = read('ui/lib/actionbar.mjs')
+  assert.match(t, /from '\.\/archive\.mjs'/)
+  assert.match(t, /<partner-op-dialog v-if="wakeDlg\.open" :friend="friend" :op="wakeDlg\.item\.key"/)
+  assert.match(t, /role="separator"/)
+})
+

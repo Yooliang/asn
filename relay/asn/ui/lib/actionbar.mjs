@@ -7,6 +7,7 @@ import { canOfferModelSwitch, confirmText, createModelSwitcher } from './model-s
 import { SUBAGENT_POLL_MS, canOfferSubagents, subagentView } from './subagents.mjs'
 import { CONSOLE_QUERY_TIMEOUT_MS, consoleToggleLabel, engineForProfile, withTimeout } from './partner-launch-ui.mjs'
 import { initialOpsCtx, menuItems } from './partner-ops.mjs'
+import { manageItems, runArchive } from './archive.mjs'
 import { PartnerOpDialog, loadOpsContext } from './partner-ops-ui.mjs'
 import { canInviteFrom } from './groups.mjs'
 import { placeMenu } from './menu-place.mjs'
@@ -59,6 +60,18 @@ export function opsMenuItems(friend) {
   return canInviteFrom(friend) ? [{ key: 'invite', label: '邀請別人加入' }] : []
 }
 
+/**
+ * 「管理」選單的完整項目：夥伴管理（沿用名單右鍵的 manageItems：詳情、改名、關閉視窗、接班換手、封存等，反灰與原因照原邏輯）
+ * ＋分隔線＋邀請等（opsMenuItems）。切換模型、喚醒在大按鈕區已有自己的按鈕，這裡不重複。
+ * 夥伴項目的 key 加「p:」前綴，避免和邀請等項目撞名；第一個邀請項目帶 sep:true（前面有夥伴項目時才畫分隔線）。
+ */
+export function managePanelItems(friend, ctx = {}, extra = []) {
+  const partner = manageItems(friend, ctx).filter(i => i.key !== 'model' && i.key !== 'resume')
+    .map(i => ({ key: `p:${i.key}`, label: `${i.label}${['close', 'archive', 'unarchive'].includes(i.key) ? '' : '…'}`, ok: i.ok, reason: i.reason }))
+  const rest = extra.map((i, n) => ({ ...i, ok: true, reason: '', sep: n === 0 && partner.length > 0 }))
+  return [...partner, ...rest]
+}
+
 /** 顯示／背景按鈕的字與提示。 */
 export function consoleButtonView(visible) {
   return visible
@@ -98,7 +111,7 @@ export const OpsMenuButton = {
   </button>
   <teleport to="body">
     <ul class="ab-menu ab-ops" v-if="open" ref="pop" role="menu" :style="{ left: pos.x + 'px', top: pos.y + 'px', visibility: pos.ready ? 'visible' : 'hidden' }">
-      <li v-for="it in items" :key="it.key"><button type="button" role="menuitem" @click="pick(it)">{{ it.label }}</button></li>
+      <template v-for="it in items" :key="it.key"><li class="ab-sep" v-if="it.sep" role="separator"></li><li><button type="button" role="menuitem" :disabled="it.ok === false" :title="it.ok === false ? it.reason : ''" @click="pick(it)">{{ it.label }}</button></li></template>
     </ul>
   </teleport>
 </div>`,
@@ -124,7 +137,8 @@ export const ActionBar = {
     const dlg = reactive({ open: false, target: null, busy: false, error: '', manual: '', done: '', copied: false })
     const root = ref(null)
     const opsCtx = reactive(initialOpsCtx())
-    const wakeDlg = reactive({ open: false, item: null })
+    const wakeDlg = reactive({ open: false, item: null })   // 夥伴管理的對話框（喚醒也用這個）
+    const archiveNote = ref('')
     const engine = computed(() => friendEngine(props.friend))
     const name = computed(() => props.friend?.agent || props.friend?.nick || '')
     const showConsole = computed(() => Boolean(props.api) && canOfferConsole(props.friend, props.selfNode) && cons.state === 'toggle')
@@ -134,7 +148,8 @@ export const ActionBar = {
     const subView = computed(() => subagentView(subs.q))
     const showCall = computed(() => canOfferCall(props.friend, { hasVoice: props.callable }))
     const wake = computed(() => (props.api && !isRoom.value ? wakeButtonView(props.friend, opsCtx) : { show: false, ok: false, reason: '' }))
-    const show = computed(() => showCall.value || showConsole.value || showModel.value || showSubs.value || wake.value.show || props.ops.length > 0)
+    const opsAll = computed(() => (props.api && !isRoom.value ? managePanelItems(props.friend, opsCtx, props.ops) : props.ops.map(i => ({ ...i, ok: true, reason: '' }))))
+    const show = computed(() => showCall.value || showConsole.value || showModel.value || showSubs.value || wake.value.show || opsAll.value.length > 0)
     const consoleView = computed(() => consoleButtonView(cons.visible))
     const switcher = computed(() => (props.api ? createModelSwitcher({ transport: props.api, log: m => console.info('[ASN]', m) }) : null))
     const dlgText = computed(() => confirmText(name.value, model.current, dlg.target?.label ?? ''))
@@ -166,17 +181,31 @@ export const ActionBar = {
     let wakeRetry = null
     async function loadWake() {
       const f = props.friend
-      if (!props.api || !f || f.status !== 'offline') return
+      if (!props.api || !f || f.room === true) return
       const ctx = await loadOpsContext(props.api)
       if (!sameFriend(props.friend, f)) return
       Object.assign(opsCtx, ctx)
       // 查詢失敗（登入狀態或電腦設定）：幾秒後自動再查，直到查到為止
-      if (ctx.signedIn === null || !ctx.loaded) { clearTimeout(wakeRetry); wakeRetry = setTimeout(() => { if (props.friend?.status === 'offline') void loadWake() }, 5000) }
+      if (ctx.signedIn === null || !ctx.loaded) { clearTimeout(wakeRetry); wakeRetry = setTimeout(() => { if (props.friend) void loadWake() }, 5000) }
     }
     function openWake() {
       const it = menuItems(props.friend, opsCtx).find(i => i.key === 'resume')
       if (!it?.ok) return
       Object.assign(wakeDlg, { open: true, item: it })
+    }
+    let noteTimer = null
+    async function pickOps(key) {
+      if (!key.startsWith('p:')) { emit('ops', key); return }
+      const it = managePanelItems(props.friend, opsCtx).find(i => i.key === key)
+      if (!it?.ok) return
+      const op = key.slice(2)
+      if (op === 'archive' || op === 'unarchive') {
+        const r = await runArchive(props.api, props.friend, op === 'archive')
+        archiveNote.value = r.text
+        clearTimeout(noteTimer); noteTimer = setTimeout(() => { archiveNote.value = '' }, 6000)
+        return
+      }
+      Object.assign(wakeDlg, { open: true, item: { key: op, ok: true, reason: '' } })
     }
     function stopSubs() { if (subTimer) { clearInterval(subTimer); subTimer = null } }
     function startSubs() {
@@ -218,7 +247,7 @@ export const ActionBar = {
     watch(() => props.active, a => { if (a) { void loadConsole(); void loadSubs(); void loadWake() } })
     watch(() => props.friend?.id, () => { model.open = false; subs.open = false; wakeDlg.open = false; void loadConsole(); startSubs(); void loadWake() })
     watch(() => props.friend?.status, () => { void loadWake() })
-    return { root, isRoom, wake, wakeDlg, openWake, showCall, startCall: () => emit('call'), cons, model, subs, subView, showSubs, toggleSubs, dlg, show, showConsole, showModel, consoleView, dlgText, toggleConsole, toggleModelMenu, pick, closeDlg, submit, copyManual }
+    return { root, isRoom, opsAll, pickOps, archiveNote, wake, wakeDlg, openWake, showCall, startCall: () => emit('call'), cons, model, subs, subView, showSubs, toggleSubs, dlg, show, showConsole, showModel, consoleView, dlgText, toggleConsole, toggleModelMenu, pick, closeDlg, submit, copyManual }
   },
   template: `
 <div class="actionbar" ref="root" v-if="show" role="toolbar" aria-label="代理功能列">
@@ -231,7 +260,7 @@ export const ActionBar = {
   <button v-if="wake.show" class="abtn" type="button" :disabled="!wake.ok" :title="wake.ok ? '叫醒這位夥伴：在原本的資料夾開視窗，接回原本的對話' : wake.reason" aria-label="喚醒" @click="openWake">
     <img src="img/ab-wake.svg" alt="" width="32" height="32"><span class="ab-name">喚醒</span>
   </button>
-  <partner-op-dialog v-if="wakeDlg.open" :friend="friend" op="resume" :item="wakeDlg.item" :api="api" @close="wakeDlg.open = false"></partner-op-dialog>
+  <partner-op-dialog v-if="wakeDlg.open" :friend="friend" :op="wakeDlg.item.key" :item="wakeDlg.item" :api="api" @close="wakeDlg.open = false"></partner-op-dialog>
   <div class="ab-wrap" v-if="showModel">
     <button class="abtn" type="button" :class="{ on: model.open }" aria-haspopup="true" :aria-expanded="model.open" aria-label="切換模型" title="切換這個代理使用的模型（會關掉原視窗再接續對話）" @click="toggleModelMenu">
       <img src="img/ab-model.svg" alt="" width="32" height="32"><span class="ab-name">切換模型 ▾</span>
@@ -258,7 +287,8 @@ export const ActionBar = {
       <li class="menu-note" v-if="subView.more">還有 {{ subView.more }} 個沒列出</li>
     </ul>
   </div>
-  <ops-menu-button v-if="ops.length" :items="ops" @pick="k => $emit('ops', k)"></ops-menu-button>
+  <ops-menu-button v-if="opsAll.length" :items="opsAll" @pick="pickOps"></ops-menu-button>
+  <span class="ab-note" v-if="archiveNote" role="status">{{ archiveNote }}</span>
   <asn-dialog v-if="dlg.open" :title="dlgText.title" @close="closeDlg">
     <p class="launch-notice-body" v-if="!dlg.done">{{ dlgText.lead }}</p>
     <ul class="model-points" v-if="!dlg.done && !dlg.error"><li v-for="p in dlgText.points" :key="p">{{ p }}</li></ul>
