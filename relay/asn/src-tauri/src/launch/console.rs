@@ -84,6 +84,16 @@ pub(crate) fn pick_session_pid(sessions: &[Value], name: &str, alive: impl Fn(u3
         .map(|(_, pid)| pid)
 }
 
+/// 找得到夥伴程序卻找不到傳統主控台視窗時的原因。Windows Terminal 的分頁共用同一個終端機視窗，
+/// 夥伴自己沒有視窗可收（隱藏整個終端機會連別的分頁一起消失），所以只說明、不硬切。
+pub(crate) fn no_window_reason(in_windows_terminal: bool) -> &'static str {
+    if in_windows_terminal {
+        "這個視窗開在 Windows Terminal 的分頁裡，分頁沒有獨立視窗可收到背景（收起來會連同其他分頁一起消失），所以不能切換"
+    } else {
+        "找不到這個夥伴的主控台視窗（可能不是用傳統主控台開的）"
+    }
+}
+
 fn query_console(engine: &str, name: &str) -> Result<ConsoleQuery, String> {
     if name.is_empty() {
         return Ok(ConsoleQuery { ok: false, can_toggle: None, visible: None, reason: Some("缺少名字".into()), pid: None, hwnd: None });
@@ -103,7 +113,10 @@ fn query_console(engine: &str, name: &str) -> Result<ConsoleQuery, String> {
         let Some(pid) = pick_session_pid(&read_sessions(&dir), name, win::pid_alive) else {
             return Ok(ConsoleQuery::no(NOT_FOUND, None));
         };
-        let Some(w) = win::find_console(pid) else { return Ok(ConsoleQuery::no(NOT_FOUND, Some(pid))) };
+        let Some(w) = win::find_console(pid) else {
+            let table = super::switch::winapi::process_table();
+            return Ok(ConsoleQuery::no(no_window_reason(super::switch::in_windows_terminal(&table, pid)), Some(pid)));
+        };
         Ok(ConsoleQuery { ok: true, can_toggle: Some(true), visible: Some(w.visible), reason: None, pid: Some(pid), hwnd: Some(w.hwnd) })
     }
 }
@@ -258,6 +271,14 @@ mod tests {
     #[test]
     fn 沒有記錄資料夾_回空() {
         assert!(read_sessions(Path::new("Z:/不存在的資料夾/sessions")).is_empty());
+    }
+
+    #[test]
+    fn 找不到視窗的原因_Windows_Terminal_要講清楚() {
+        let wt = no_window_reason(true);
+        assert!(wt.contains("Windows Terminal") && wt.contains("分頁"));
+        assert_ne!(wt, no_window_reason(false));
+        assert!(!no_window_reason(false).contains("Windows Terminal"));
     }
 
     #[test]
