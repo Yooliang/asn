@@ -83,8 +83,8 @@ const render = async (catKey, st = fullState()) => {
 
 test('設定表單：每一類都轉得出來，各類原本的項目都在', async () => {
   const want = {
-    me: ['大頭貼', '選擇圖片', '移除，改回自動產生', '目前用的是自動產生的大頭貼。'],
-    accounts: ['登入狀態', '尚未登入', '用 Google 登入', '用 GitHub 登入', 'Claude 帳號', '使用中', '加入目前登入的帳號', '自動加入', '切換', '刪除', 'a@b.c', 'OpenAI（Codex）帳號', 'x@openai.test · plus', 'Gemini', '尚未支援', '遠端設備', 'w@b.c', '信任我自己的設備'],
+    me: ['登入狀態', '尚未登入', '用 Google 登入', '用 GitHub 登入', '大頭貼', '選擇圖片', '移除，改回自動產生', '目前用的是自動產生的大頭貼。'],
+    accounts: ['Claude 帳號', '使用中', '加入目前登入的帳號', '自動加入', '切換', '刪除', 'a@b.c', 'OpenAI（Codex）帳號', 'x@openai.test · plus', 'Gemini', '尚未支援', '遠端設備', 'w@b.c', '信任我自己的設備'],
     look: ['視窗外框', '視窗模式', '頭像模式', '工具列位置', '文字底色'],
     tabs: ['分頁依', '分組依'],
     notify: ['右下角通知', '通知聲音', '震動聲音', '收到檔案聲音'],
@@ -182,4 +182,29 @@ test('開網址不用 explorer.exe（長網址會被當成路徑開成檔案總�
   const lib = fs.readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8')
   assert.ok(!lib.includes('Command::new("explorer.exe")'), '不能再用 explorer.exe 開網址')
   assert.ok(lib.includes('ShellExecuteW('))
+})
+
+test('守門：電腦設定第一頁——登入帳號資訊與我的名字同處、登出鈕獨立在最下面；帳號分類不再放登入狀態', () => {
+  const src = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+  const me = src.slice(src.indexOf("catKey === 'me'"), src.indexOf("catKey === 'notify'"))
+  const accts = src.slice(src.indexOf("catKey === 'accounts'"), src.indexOf("catKey === 'look'"))
+  assert.ok(me.indexOf('<login-panel>') >= 0 && me.indexOf('<login-panel>') < me.indexOf('class="av-set"'), '登入狀態（含我的名字）在第一頁最前面')
+  assert.ok(me.indexOf('<logout-panel>') > me.indexOf('class="np-set"'), '登出鈕在第一頁所有項目之後')
+  assert.ok(!accts.includes('<login-panel>') && !accts.includes('<logout-panel>'), '帳號分類不再放登入狀態與登出')
+  assert.ok(accts.includes('<cloud-invite-panel>') && accts.includes('Claude 帳號'), '帳號分類其他項目留在原位')
+  const lp = fs.readFileSync(new URL('../ui/lib/login-panel.mjs', import.meta.url), 'utf8')
+  assert.ok(lp.includes('LogoutPanel') && /logout-btn/.test(lp))
+  assert.match(fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8'), /\.logout-set\{margin-top:3\d+px/)
+})
+
+test('守門：手機設置頁——帳號在名字下、版本與檢查更新同卡、登出獨立在最下面', () => {
+  const html = fs.readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+  const pg = html.slice(html.indexOf('<section class="m-pg" aria-label="設置">'))
+  const nameAt = pg.indexOf('我的名字<input'), acctAt = pg.indexOf('{{ accountText }}'), verAt = pg.indexOf('{{ info.version }}'), updAt = pg.indexOf('檢查更新'), outAt = pg.indexOf('doLogout')
+  const formEnd = pg.indexOf('</div>', nameAt)
+  assert.ok(nameAt > 0 && acctAt > nameAt && pg.slice(nameAt, acctAt).indexOf('m-card') < 0, '帳號文字緊接在我的名字之後、同一張卡')
+  assert.ok(formEnd > acctAt, '帳號文字與名字在同一個卡片內')
+  assert.ok(updAt > 0 && verAt > updAt && pg.slice(updAt, verAt).indexOf('m-card') < 0, '版本號與檢查更新同一張卡')
+  assert.ok(outAt > verAt && pg.slice(verAt, outAt).includes('class="m-logout"'), '登出鈕在版本卡之後、自成一塊')
+  assert.match(fs.readFileSync(new URL('../ui/mobile.css', import.meta.url), 'utf8'), /\.m-logout\{[^}]*margin-top:(2[4-9]|[3-9]\d)px/)
 })
