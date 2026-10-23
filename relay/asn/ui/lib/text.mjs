@@ -33,22 +33,27 @@ export const fmtDate = t => { const d = new Date(t); return `${d.getFullYear()}/
 
 // 震動：寄出的內文兩行——第一行「（<視窗名> 傳送了一個震動）」，第二行 NUDGE_HINT 請收到的 AI 回一個震動
 // （expects_reply:false，不計時；內文由 Rust 端 relay.rs 用視窗名組成，第二行與 NUDGE_HINT 同一句）。
-// 收信端認：第一行是這句、其餘只能是空的或就是 NUDGE_HINT（AI 照提示回的震動只有第一行）；舊版 ASN 寄的 [震動] 內文含它就算。
-// 一般訊息裡提到這句話、或第二行是別的內容都不算。
+// 收信端認：第一行是這句就算震動；後面是空的或 NUDGE_HINT＝純震動，後面還有文字＝震動加一則文字訊息（AI 回震動時順便報告，stripNudge 只留文字）；
+// 舊版 ASN 寄的 [震動] 內文含它就算。一般訊息中間提到這句話（不在第一行）不算。
 export const NUDGE_TAG = '[震動]'   // 舊格式，只用於辨識
 export const NUDGE_HINT = '對方在呼叫你：先回一個震動（寄一封內文只有「（你的名字 傳送了一個震動）」的信）。再想一下有沒有需要向對方報告的事——目前進度、卡住的地方、等對方決定的事；有的話另外寄一封簡短的信，沒有就只回震動。'
 const LEGACY_NUDGE_HINT = '想回應的話，就回一個震動：寄一封內文只有「（你的名字 傳送了一個震動）」的信，不用另外回信。'   // 舊版 ASN 寄的提示，收信端仍要認得
 export const nudgeBody = name => `（${String(name ?? '').trim()} 傳送了一個震動）\n${NUDGE_HINT}`
 const NUDGE_RE = /^（[^（）\r\n]{1,80} 傳送了一個震動）$/
-const isNewNudge = body => {
+// 拆開新格式：第一行是震動句才算；後面是空的或提示＝純震動（rest 為空），後面還有實質文字＝震動＋一段話（AI 回震動時順便報告）
+const splitNewNudge = body => {
   const [first = '', ...rest] = String(body ?? '').trim().split(/\r?\n/)
+  if (!NUDGE_RE.test(first.trim())) return null
   const tail = rest.join('\n').trim()
-  return NUDGE_RE.test(first.trim()) && (tail === '' || tail === NUDGE_HINT || tail === LEGACY_NUDGE_HINT)
+  return { rest: tail === NUDGE_HINT || tail === LEGACY_NUDGE_HINT ? '' : tail }
 }
+const isNewNudge = body => splitNewNudge(body) !== null
 export const hasNudge = body => String(body ?? '').includes(NUDGE_TAG) || isNewNudge(body)
 export const stripNudge = body => {
   const s = String(body ?? '').trim()
-  return isNewNudge(s) ? '' : s.split(NUDGE_TAG).join('').trim()
+  const sp = splitNewNudge(s)
+  if (sp) return sp.rest
+  return s.split(NUDGE_TAG).join('').trim()
 }
 
 // 經機器橋轉回來的回信，內文整段包著 <cross-session-message …>…</cross-session-message>（斜線可能寫成 <\ 與 <\/）。

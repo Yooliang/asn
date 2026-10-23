@@ -10,6 +10,7 @@ import path from 'node:path'
 import { createCore } from './relay-core.mjs'
 import { createLog } from './safe-log.mjs'
 import { createRooms, parseMember, roomText } from './rooms.mjs'
+import { splitNudgeAnswer } from './nudge.mjs'
 
 const NODE_ID = (envGet(process.env, 'RELAY_ID') || 'AEGIS').trim()
 const BASE_URL = envGet(process.env, 'RELAY_URL') || 'https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay'
@@ -84,8 +85,8 @@ async function refreshMembers() {
 let rosterWarned = false
 async function refreshRoster() {
   await refreshMembers()
-  // name＝中文名（沒有才用 slug）、cwd_label＝slug
-  const agents = ALLOW.filter(slug => slug !== SELF_MEMBER).map(slug => ({ name: displayName(slug), status: 'idle', cwd_label: slug }))
+  // name＝中文名（沒有才用 slug）；cwd_label 留空：畫面會把它當標題副標露出，slug 是內部代號不給人看
+  const agents = ALLOW.filter(slug => slug !== SELF_MEMBER).map(slug => ({ name: displayName(slug), status: 'idle', cwd_label: '' }))
   try {
     await api('roster', { method: 'POST', body: { agents } })
     rosterWarned = false
@@ -153,7 +154,16 @@ async function handleMail(m) {
   const answer = String(r.data?.answer ?? '')
   const from = displayName(slug)   // 不用 Aegis 回的 member（是拼音 slug），否則回信會像另一個視窗寄的
   log(`id=${m.id} ${who} to=${slug} status=${status} (${Date.now() - t0}ms)`)
-  if (r.http >= 200 && r.http < 300 && status === 'success') return replyAndAck(m, answer || '(空回覆)', from)
+  if (r.http >= 200 && r.http < 300 && status === 'success') {
+    // 成員一個問題只能回一個答案：照提示把「震動」和報告寫在同一封時，拆成兩封——先一個純震動，後面的文字另寄一般信
+    const sp = splitNudgeAnswer(answer, from)
+    if (sp) {
+      if (!(await sendBack(m, sp.nudge, from))) return
+      if (!sp.rest) return ackIds([m.id])
+      return replyAndAck(m, sp.rest, from)
+    }
+    return replyAndAck(m, answer || '(空回覆)', from)
+  }
   return replyAndAck(m, `[Aegis] 對方回報狀態 ${status ?? `HTTP ${r.http}`}${answer ? `：${answer}` : ''}`, from)
 }
 
