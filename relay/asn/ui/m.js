@@ -21,6 +21,9 @@ import { groupHeading, statusNote } from './lib/tabs.mjs'
 import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
 import { authApi, invoke, listen, store } from './lib/tauri.mjs'
+import { ROOM_GROUP_KEY, ROOM_GROUP_LABEL, ROOM_POLL_MS, ROOM_FIRST_LOAD, ROOM_EMPTY_TEXT, ROOM_LOAD_FAIL_TEXT, isRoomChat, roomIdOf, roomItems, roomPseudoFriend, memberIdentity, roomLog, mergeRoomLog, readSince, needsRead, postError, roomErrorText, totalUnreadWithRooms } from './lib/mobile-rooms.mjs'
+import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, guideNav, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
+import { GuideDoc } from './lib/guide-doc.mjs'
 
 const { createApp, reactive, ref, computed, watch } = Vue
 const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯示為離線' }
@@ -114,6 +117,7 @@ async function startUpdate() {
   } catch (e) { Object.assign(upd, withFailure(upd, e.message)) }
 }
 let core = null
+const roomsHook = {}   // 群組更新的入口（畫面掛上後才有；門鈴與回到前景用）
 const lastMap = reactive({})   // 夥伴 id → 最後說的一句話（名單第三行）
 const refreshLast = id => { lastMap[id] = lastWords(core?.logOf(id)) }
 let startCore = null
@@ -160,14 +164,14 @@ if (screen.value === 'main') {
     if (plan.shake) { shake.value = true; setTimeout(() => { shake.value = false }, 700) }
     if (plan.banner) { banner.value = plan.banner; clearTimeout(bannerTimer); bannerTimer = setTimeout(() => { banner.value = null }, plan.banner.ms ?? BANNER_MS) }
   })
-  await listen('relay-bell', () => void core.pull('bell'))   // Rust 端的門鈴（前景時有效）
+  await listen('relay-bell', () => { void core.pull('bell'); void roomsHook.refresh?.() })   // Rust 端的門鈴（前景時有效）
   await listen('android-update-progress', p => { if (upd.phase === 'downloading') Object.assign(upd, withProgress(upd, p)) })   // 下載完才到的進度事件不能把畫面又拉回「下載中」
   upd.enabled = bridge?.selfUpdateEnabled() === true
   setInterval(() => { if (shouldAutoCheck(upd, prefs)) void checkUpdate() }, UPDATE_CHECK_MS)
   // 回到前景：立刻拉一次信、更新名單、補正在看的那位的往來記錄
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return
-    void core.pull('resume'); void core.refreshRoster()
+    void core.pull('resume'); void core.refreshRoster(); void roomsHook.refresh?.()
     if (nav.tab === 'chats' && lastChat.value) { core.markRead(lastChat.value); void core.syncHistory(lastChat.value) }
   })
   startCore = async () => { void (shouldAutoCheck(upd, prefs) && checkUpdate()); await core.start(); sync() }   // 掛上畫面之後才開始（第一次收信要連網，不能讓畫面空等）
@@ -214,15 +218,70 @@ const app = createApp({
       const o = { query: query.value, selfNode: info.node, selfName: info.window_name, plainText: plain }
       return withArchivedGroup(rosterGroups(activeFriends(friends.value), o), rosterGroups(archivedFriends(friends.value), o).flatMap(g => g.items))
     })
-    const unreadTotal = computed(() => totalUnread(friends.value))
+    // ---------- 群組對話：名單裡的一個分組；點進去在對話分頁看訊息、發言（lastChat 記成 room:<代號>） ----------
+    const rooms = ref([]), roomsLoaded = ref(false), roomsErr = ref(false)
+    const roomLogs = reactive({})   // 群組代號 → 對話記錄
+    const roomNote = ref('')        // 對話頁上方的一行提示（讀不到、發言失敗）
+    const roomRows = computed(() => roomItems(rooms.value, { query: query.value, plainText: plain }))
+    const roomRowOf = id => roomItems(rooms.value).find(r => r.id === id) ?? null
+    const rawRoom = id => rooms.value.find(r => r?.id === id) ?? null
+    async function refreshRooms() {
+      try { const r = await invoke('relay_rooms'); rooms.value = Array.isArray(r?.rooms) ? r.rooms : []; roomsErr.value = false; roomsLoaded.value = true }
+      catch { roomsErr.value = true }
+      if (isRoomChat(lastChat.value) && nav.tab === 'chats') await showRoom()
+    }
+    roomsHook.refresh = refreshRooms
+    // 讀這個群組新的訊息（接在已有的後面）；在看的時候順便標已讀
+    let roomReading = false
+    async function showRoom() {
+      const id = roomIdOf(lastChat.value), raw = rawRoom(id), row = roomRowOf(id)
+      if (!raw || !row || roomReading) return
+      const ident = memberIdentity(raw, info.node, info.window_name)
+      if (!ident.key) { roomNote.value = '這支手機不在這個群組裡。'; return }
+      const log = roomLogs[id] ?? []
+      const unread = row.unread > 0, first = !log.length
+      if (!first && !needsRead(log, row.lastSeq) && !unread) { roomNote.value = ''; return }
+      roomReading = true
+      try {
+        const since = unread && !first ? Math.max(0, readSince(log, row.lastSeq) - 1) : readSince(log, row.lastSeq)   // 後台只在讀到新訊息時才標已讀：未讀還在就多讀最後一則
+        const r = await invoke('android_room_read', { room: id, agent: ident.agent || null, since, limit: first ? ROOM_FIRST_LOAD : 200, mark: document.visibilityState === 'visible' })
+        const mine = (raw.mine ?? []).map(m => m.member)
+        roomLogs[id] = mergeRoomLog(log, roomLog(r?.messages, mine))
+        for (const m of raw.mine ?? []) if (m.member === ident.key) m.unread = 0
+        roomNote.value = ''
+      } catch (e) { roomNote.value = roomErrorText(e.message) || ROOM_LOAD_FAIL_TEXT } finally { roomReading = false }
+    }
+    async function postRoom(chatId, text) {
+      const id = roomIdOf(chatId), raw = rawRoom(id)
+      const ident = raw ? memberIdentity(raw, info.node, info.window_name) : { key: '', agent: '' }
+      const err = postError(text, { signedIn: acct.value.signed_in, identity: ident })
+      if (err) { roomNote.value = err; return }
+      try {
+        await invoke('android_room_post', { body: { room: id, body: text, ...(ident.agent ? { from_agent: ident.agent } : {}) } })
+        roomNote.value = ''
+        await refreshRooms()
+      } catch (e) { roomNote.value = roomErrorText(e.message) }
+    }
+    if (screen.value === 'main') {
+      setInterval(() => { if (document.visibilityState === 'visible') void refreshRooms() }, ROOM_POLL_MS)
+      void refreshRooms()
+    }
+    const unreadTotal = computed(() => totalUnreadWithRooms(totalUnread(friends.value), rooms.value))
     const emptyText = computed(() => (query.value.trim() ? '找不到符合的聯絡人。' : conn.value === 'off' ? '連不上收發室，請檢查網路。' : '名單上還沒有夥伴。'))
     const avOf = f => avatarSrc(f, { avatars: avatars.value })
     const avById = id => { const f = friends.value.find(x => x.id === id); return f ? avOf(f) : '' }
     const meAv = computed(() => selfAvatarSrc({ selfNode: info.node, windowName: info.window_name, avatars: avatars.value }))
-    const chatState = computed(() => chatPageState(friends.value, lastChat.value))
+    const chatState = computed(() => {
+      if (!isRoomChat(lastChat.value)) return chatPageState(friends.value, lastChat.value)
+      const row = roomRowOf(roomIdOf(lastChat.value))
+      if (row) return { kind: 'friend', friend: roomPseudoFriend(row), text: '' }
+      return roomsLoaded.value ? { kind: 'empty', friend: null, text: ROOM_EMPTY_TEXT } : { kind: 'loading', friend: null, text: roomsErr.value ? ROOM_LOAD_FAIL_TEXT : '載入中…' }
+    })
     const chatFriend = computed(() => chatState.value.friend)
     const chatEmptyText = computed(() => chatState.value.text)
-    const chatLog = computed(() => logs[lastChat.value] ?? [])
+    const chatLog = computed(() => (isRoomChat(lastChat.value) ? roomLogs[roomIdOf(lastChat.value)] : logs[lastChat.value]) ?? [])
+    // 點名單上的群組：成為「最後使用」並切到對話分頁
+    function openRoom(chatId) { lastChat.value = chatId; banner.value = null; roomNote.value = ''; goTab('chats') }
 
     // 點夥伴（或橫幅）：那位成為「最後使用」，並切到對話分頁
     function openChat(id) {
@@ -235,12 +294,13 @@ const app = createApp({
     // 對話分頁正在顯示某位：標已讀、補往來。切到對話分頁、換了最後使用的那位、名單載入完都會跑
     function showLastChat() {
       const id = lastChat.value
+      if (isRoomChat(id)) { if (nav.tab === 'chats') void showRoom(); return }
       if (nav.tab !== 'chats' || !id || !core?.friends.get(id)) return
       core.markRead(id)
       pushLog(id)
       void core.syncHistory(id)   // 向後台補這位夥伴 90 天的往來（以後台為準；失敗就用本機快取）
     }
-    watch([() => nav.tab, lastChat, () => friends.value.length], showLastChat, { immediate: true })
+    watch([() => nav.tab, lastChat, () => friends.value.length, () => rooms.value.length], showLastChat, { immediate: true })
     const back = () => history.back()
     const openBanner = () => { const b = banner.value; banner.value = null; if (b) openChat(b.id) }
     // 橫幅上的「接班換手」：開啟那位的對話，直接帶到「接班換手」的確認框（不能換手時停在「⋯」選單，由選單說明原因）
@@ -254,9 +314,14 @@ const app = createApp({
       if (opsItems.value.find(i => i.key === 'handover')?.ok) pickOp('handover')
     }
 
-    const sendTo = async (id, text) => { const r = await core.send(id, text); if (!r.ok) console.info('[ASN] send failed', r.error) }
-    const nudgeTo = id => core.nudge(id)
-    const sendAttachTo = async (id, item, caption) => { const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
+    const sendTo = async (id, text) => { if (isRoomChat(id)) return postRoom(id, text); const r = await core.send(id, text); if (!r.ok) console.info('[ASN] send failed', r.error) }
+    const nudgeTo = id => { if (!isRoomChat(id)) core.nudge(id) }   // 群組沒有震動與傳檔（工具列的鈕在群組畫面已藏起來）
+    const sendAttachTo = async (id, item, caption) => { if (isRoomChat(id)) return; const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
+    // ---------- 使用指引：設置分頁的一個項目，點進去是獨立一頁（先列篇目，再看內文），內容沿用電腦版的篇目 ----------
+    const guides = phoneGuideList()
+    const guideOpen = computed(() => (nav.sheet === 'guide' ? phoneGuide(nav.guide) : null))
+    const openGuides = () => { if (!nav.sheet) go(guideNav()) }
+    const openGuide = key => go(guideNav(key))
     // ---------- 開新夥伴（遠端開視窗）：手機只下指令，視窗開在那台電腦上。要本人簽章（Rust 端沒憑證就不送） ----------
     const lch = reactive({ ...initialLaunch(), vphase: 'sending' })
     const lchData = reactive({ machines: {}, loaded: false, error: '' })
@@ -520,6 +585,7 @@ const app = createApp({
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, headTone, CONN_LABEL, info, banner, shake, refreshing,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, ops, opsText, opsTitle, opsModels, opsModelNote, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
+      rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, refreshAll,
       nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }
@@ -527,6 +593,7 @@ const app = createApp({
 })
 app.component('chat-pane', ChatPane)
 app.component('onboard-card', OnboardCard)
+app.component('guide-doc', GuideDoc)
 app.component('ptr-zone', PtrZone)
 app.mount('#app')
 // 根元素（#app）自己的屬性不在 Vue 編譯的樣板裡，:class 綁不上去；登入畫面的背景類別在這裡手動切

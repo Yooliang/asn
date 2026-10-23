@@ -551,6 +551,16 @@ impl Relay {
         let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法查詢管理操作的進度")?;
         self.api_signed("partner_ops", Some(b), Some(t)).await
     }
+    /// 讀群組訊息（手機用）：和電腦版同一條路（節點金鑰，限成員）。回 { messages, last_seq }
+    pub async fn room_read(&self, room: &str, agent: Option<&str>, since: u64, limit: Option<u64>, mark: bool) -> Result<Value, String> {
+        self.api(&build_room_read_action(room, agent, since, limit, mark)?, None).await
+    }
+    /// 群組發言（手機用）：一定要本人簽章（後台才會標成本人發言）。沒憑證在打後台之前就回錯
+    pub async fn room_post_signed(&self, body: &Value, token: Option<&str>) -> Result<Value, String> {
+        let b = build_room_post_body(body)?;
+        let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法在群組發言")?;
+        self.api_signed("room_post", Some(b), Some(t)).await
+    }
     pub async fn sent_status(&self, ids: &[String]) -> Result<Value, String> {
         let b = build_sent_status_body(ids)?;
         let v = self.api("sent_status", Some(b)).await?;
@@ -697,6 +707,52 @@ pub fn build_partner_ops_body(ids: &[String]) -> Result<Value, String> {
     }
 }
 
+/// 群組代號：英數、底線、連字號，1～32 字（與後台同一條規則）
+pub fn valid_room_id(s: &str) -> bool {
+    (1..=32).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+/// 視窗代發的視窗名：不含「~」、不含控制字元、最多 60 字
+fn valid_room_agent(s: &str) -> bool {
+    s.chars().count() <= 60 && !s.contains('~') && !s.chars().any(|c| c.is_control())
+}
+/// 讀群組訊息的動作字串（手機用）：一定帶 since（沒帶後台會把已讀推進），mark＝讀完要不要標已讀
+pub fn build_room_read_action(room: &str, agent: Option<&str>, since: u64, limit: Option<u64>, mark: bool) -> Result<String, String> {
+    if !valid_room_id(room) {
+        return Err("群組代號格式不對".into());
+    }
+    let mut a = format!("room_read&room={}&since={}&limit={}", encode_component(room), since.min(999_999_999), limit.unwrap_or(50).clamp(1, 200));
+    if let Some(g) = agent.filter(|g| !g.is_empty()) {
+        if !valid_room_agent(g) {
+            return Err("視窗名格式不對".into());
+        }
+        a.push_str(&format!("&as_agent={}", encode_component(g)));
+    }
+    if mark {
+        a.push_str("&mark=1");
+    }
+    Ok(a)
+}
+/// 群組發言的內容（手機用）：只放行 room／body／from_agent 三個欄位
+pub fn build_room_post_body(raw: &Value) -> Result<Value, String> {
+    let o = raw.as_object().ok_or("發言的內容格式不對")?;
+    let room = o.get("room").and_then(Value::as_str).unwrap_or("");
+    if !valid_room_id(room) {
+        return Err("群組代號格式不對".into());
+    }
+    let body = o.get("body").and_then(Value::as_str).unwrap_or("");
+    if body.trim().is_empty() || body.chars().count() > 20_000 {
+        return Err("訊息要 1 到 20000 字".into());
+    }
+    let mut b = json!({ "room": room, "body": body });
+    match o.get("from_agent") {
+        None | Some(Value::Null) => {}
+        Some(Value::String(g)) if g.is_empty() => {}
+        Some(Value::String(g)) if valid_room_agent(g) => b["from_agent"] = json!(g),
+        Some(_) => return Err("視窗名格式不對".into()),
+    }
+    Ok(b)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -798,6 +854,36 @@ b", "op": "close" }),
         for b in bad {
             assert!(build_partner_archive_body(&b).is_err(), "{b}");
         }
+    }
+
+    #[test]
+    fn 群組讀寫_動作與內容只留必要欄位_格式擋在前面() {
+        assert_eq!(build_room_read_action("r-1", None, 0, None, false).unwrap(), "room_read&room=r-1&since=0&limit=50");
+        assert_eq!(build_room_read_action("r_1", Some("手機"), 7, Some(999), true).unwrap(), "room_read&room=r_1&since=7&limit=200&as_agent=%E6%89%8B%E6%A9%9F&mark=1");
+        assert!(build_room_read_action("a&action=x", None, 0, None, false).is_err() && build_room_read_action("", None, 0, None, false).is_err());
+        assert!(build_room_read_action("r", Some("a~b"), 0, None, false).is_err());
+        let b = build_room_post_body(&json!({ "room": "r1", "body": "嗨", "from_agent": "手機", "as_owner": true, "command": "x" })).unwrap();
+        assert_eq!(b, json!({ "room": "r1", "body": "嗨", "from_agent": "手機" }));
+        assert_eq!(build_room_post_body(&json!({ "room": "r1", "body": "嗨", "from_agent": "" })).unwrap(), json!({ "room": "r1", "body": "嗨" }));
+        for bad in [json!({ "room": "r 1", "body": "嗨" }), json!({ "room": "r1", "body": "  " }), json!({ "room": "r1", "body": "字".repeat(20_001) }), json!({ "room": "r1", "body": "a", "from_agent": "x~y" }), json!({ "room": "r1", "body": "a", "from_agent": 5 }), json!([1])] {
+            assert!(build_room_post_body(&bad).is_err(), "{bad}");
+        }
+    }
+
+    #[tokio::test]
+    async fn 群組發言_沒有本人簽章不送出_有簽章帶標頭_讀取不帶簽章() {
+        let (url, seen) = fake_server(200);
+        let r = Relay::new(url, "secret-key".into(), "P".into(), "P-ASN".into());
+        let req = json!({ "room": "r1", "body": "嗨" });
+        assert!(r.room_post_signed(&req, None).await.unwrap_err().contains("尚未登入"));
+        assert!(r.room_post_signed(&req, Some("")).await.is_err(), "空憑證等於沒有");
+        assert!(seen.lock().unwrap().is_empty(), "沒簽章時完全沒有打後台");
+        r.room_post_signed(&req, Some("usertoken-9")).await.unwrap();
+        r.room_read("r1", None, 3, Some(20), true).await.unwrap();
+        let s = seen.lock().unwrap();
+        assert_eq!(s.len(), 2);
+        assert!(s[0].to_lowercase().contains("x-asn-user: bearer usertoken-9") && s[0].contains("action=room_post"), "{}", s[0]);
+        assert!(s[1].contains("action=room_read") && s[1].contains("since=3") && !s[1].to_lowercase().contains("x-asn-user"), "{}", s[1]);
     }
 
     #[tokio::test]

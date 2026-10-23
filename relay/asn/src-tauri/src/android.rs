@@ -90,6 +90,22 @@ pub async fn android_partner_ops(app: State<'_, App>, auth: State<'_, crate::aut
     r.partner_ops_signed(&ids, token.as_deref()).await
 }
 
+// ---------- 群組對話（讀沿用電腦版的節點金鑰路徑；發言要本人簽章） ----------
+
+/// 讀群組訊息（限成員）：一定帶 since；mark＝讀完標已讀。回 { messages, last_seq }
+#[tauri::command]
+pub async fn android_room_read(app: State<'_, App>, room: String, agent: Option<String>, since: u64, limit: Option<u64>, mark: bool) -> Result<serde_json::Value, String> {
+    relay_of(&app)?.room_read(&room, agent.as_deref(), since, limit, mark).await
+}
+
+/// 在群組發言（限成員）：要本人簽章，後台才標成本人發言；沒登入回錯，不打後台。回 { seq, mentions }
+#[tauri::command]
+pub async fn android_room_post(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>, body: serde_json::Value) -> Result<serde_json::Value, String> {
+    let r = relay_of(&app)?;
+    let token = crate::account::signing_token(&auth).await;
+    r.room_post_signed(&body, token.as_deref()).await
+}
+
 // ---------- 手機自動更新（只有 `sideload` 版；Play 版這兩個指令只回「不提供」） ----------
 
 /// 查官網的更新清單。`url`＝本機測試用的清單網址（只收 http://127.0.0.1…，正式畫面不帶）。
