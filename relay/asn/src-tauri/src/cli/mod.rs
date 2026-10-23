@@ -10,6 +10,7 @@ mod attach_cmd;
 mod caller;
 mod env;
 mod recv;
+mod confirm;
 mod room;
 mod secret;
 mod send;
@@ -67,6 +68,8 @@ const TOP_USAGE: &str = "用法：
   asn send   --whoami
   asn recv   --once | --watch | --peek [--count-only]
   asn room   --rooms | --room-read <群組id|群組名> [--last N | --since SEQ] [--json]
+  asn room   confirm-request --room <群組id|群組名> --kind <類別> --summary \"<一句話>\"   （危險操作前請主持人確認）
+  asn room   confirm-status <id> [--peek]
   asn attach --id <附件編號> [--out <路徑>]
   asn secret request --purpose <用途說明> [--program <程式名稱>] [--ttl <秒>]
 各子命令加 --help 看詳細說明。身分（節點、寄件視窗名）自動判定，不能自填。";

@@ -39,6 +39,14 @@
                 <!-- AndroidTV support -->
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
+            <!-- 邀請連結（Android App Links）：https://asnmessenger.web.app/i/<碼> 直接開 ASN；網址只帶一組一次性、24 小時內有效的邀請碼，不帶權杖。
+                 要通過網域驗證，官網 /.well-known/assetlinks.json 必須列出這個 App 的簽章憑證指紋（沒通過時會退回瀏覽器，官網 /i/ 頁有「打開 ASN」與複製邀請碼） -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="asnmessenger.web.app" android:pathPrefix="/i/" />
+            </intent-filter>
             <!-- 瀏覽器登入完成後，用 tw.yooliang.asn://login-done 把使用者帶回 ASN（這個網址不帶任何權杖，只是叫 App 回到前景） -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />

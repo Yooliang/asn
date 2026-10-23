@@ -20,6 +20,8 @@ fn usage() -> String {
         "用法：
   asn room --rooms                                       列出我在的群組與新訊息數
   asn room --room-read <群組id|群組名> [--last N | --since SEQ] [--json]
+  asn room confirm-request --room <群組> --kind <類別> --summary \"…\"   危險操作前請主持人確認（見 asn room confirm-request --help）
+  asn room confirm-status <id> [--peek]                  查主持人有沒有放行
     --last N     最近 N 則（預設 20，最多 {MAX_LAST}）
     --since SEQ  第 SEQ 則之後的（最多 {MAX_LAST} 則）
     --json       每則一行 JSON（seq/from/from_name/trust/at/mentions/body）
@@ -223,6 +225,10 @@ fn json_line(m: &Value, cmd: Option<&str>) -> String {
 }
 
 pub async fn main(argv: &[String], env: &Env, io: &mut Io<'_>) -> R<i32> {
+    // 群組裡被別人點名的 AI 做危險操作前，請主持人確認、查放行（見 confirm.rs）
+    if let Some(sub) = argv.first().map(String::as_str).filter(|s| matches!(*s, "confirm-request" | "confirm-status")) {
+        return super::confirm::main(sub, &argv[1..], env, io).await;
+    }
     let a = parse_args(argv)?;
     if a.help {
         io.outln(&usage());
