@@ -19,6 +19,18 @@ test('對話頁頭部：與對話區共用同一張背景，正常疊白色半�
   assert.match(s, /\.conv-main \.warn\{background:rgba\(255,213,74,\.\d+\)/)
 })
 
+test('手機對話頁整頁只有一層背景圖：bg-chat 只在 .m-chat 貼一次，共用的 .chatpane-main 在手機要拿掉；頭部與對話區不得再引用背景圖', () => {
+  const m = read('ui', 'mobile.css')
+  assert.equal((m.match(/bg-chat\.webp/g) || []).length, 1)
+  assert.match(m, /\.m-chat\{background:linear-gradient[^}]*bg-chat\.webp/)
+  assert.match(m, /\.m-chat \.chatpane-main\{background:none\}/, '電腦版的 .chatpane-main 背景圖在手機要拿掉，否則接縫處重複')
+  for (const rule of m.match(/[^{}]*\.m-(?:chathead|scroll)[^{}]*\{[^}]*\}/g) || []) assert.ok(!/url\(/.test(rule), rule)
+  const s = read('ui', 'style.css')
+  assert.equal((s.match(/bg-chat\.webp/g) || []).length, 1, '電腦版 bg-chat 只貼在 .chatpane-main 一處')
+  assert.match(s, /\.chatpane-main\{background:linear-gradient[^}]*bg-chat\.webp/)
+  for (const rule of s.match(/\.conv-main \.(?:to-line|warn)\{[^}]*\}/g) || []) assert.ok(!/url\(/.test(rule), rule)
+})
+
 test('看圖檢視層：搬到 body、固定蓋滿視窗、層級高過頭部，手機與電腦版共用', () => {
   const pane = read('ui', 'lib', 'chatpane.mjs')
   assert.match(pane, /<teleport to="body" v-if="viewer">\s*<div class="photo-viewer"/)
