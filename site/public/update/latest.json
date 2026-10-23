@@ -1,11 +1,11 @@
 {
-  "version": "0.1.54",
-  "notes": "修正：手機版 0.1.53 打開只剩背景、畫面不出來的問題。",
-  "pub_date": "2026-10-23T13:36:36.383Z",
+  "version": "0.1.55",
+  "notes": "修正：電腦版「我的狀態與偏好、開著的分頁」存檔失敗（重開後沒有回到原本分頁）；發版前新增啟動冒煙測試，手機與電腦每個畫面都要能正常打開才會發出。",
+  "pub_date": "2026-10-23T13:51:24.837Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjFsRDl0UVN0djlMcngyQmRpbytQY0ZuZU1mZ1BLd25vUFZkaGNRc0VvN01ISW1OMG5WRHNFRFh5SGhCaHcwUU5MNTIvMjJCSzNDWmNwUjk4Si9lakFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzYyNTk2CWZpbGU6QVNOXzAuMS41NF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjU0CkJGMTkvWC81NVRrNVk0VjFXOTlVZlV0b3NYb1N0anowNTRrSEY1bXUwNHExVjVuekpWVG5sL3E1b1ZvWmFCRlFSNG9GSDh0YVkrVE9uUkExUFB0VUNnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.54_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjk2R3FyM2ZoVHRRRjEvT2RzRWxVQ1NieTV5RGMwdlNRemxnMk5odDVLczdiM0o1dWdTNlkrRXhmcVVmbUJOY2txTVlEOEVteHlXUDI2ejRlZnVVa1FRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzYzNDg0CWZpbGU6QVNOXzAuMS41NV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjU1CkU1a05UeHl1d0o3QU9rWjdpK1RWU3FZNms2bTlXU3RmZjV6ZEJzMTFOL1dLNGQzdGlHWjAxSllQUjl2MC9zclBORzJqRzIxaXorTmdtQ1dCcVdyYkFRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.55_x64-setup.exe"
     }
   }
 }

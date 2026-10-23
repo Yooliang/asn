@@ -1,8 +1,8 @@
 {
-  "version": "0.1.54",
-  "versionCode": 1054,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.54_android.apk",
-  "sha256": "3e7455d91effe5e6bd153e202ec7bd00fa87836e9b0955d64b6a42b31d7798a8",
-  "notes": "- 修正：手機版 0.1.53 打開只剩背景、畫面不出來的問題。",
+  "version": "0.1.55",
+  "versionCode": 1055,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.55_android.apk",
+  "sha256": "98282b188d1a89825f9954cf1db1e44cca92647b70f43d313a81572ee34c36b4",
+  "notes": "- 修正：電腦版「我的狀態與偏好、開著的分頁」存檔失敗（重開後沒有回到原本分頁）；發版前新增啟動冒煙測試，手機與電腦每個畫面都要能正常打開才會發出。",
   "bytes": 9268708
 }
