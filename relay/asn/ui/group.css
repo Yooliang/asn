@@ -55,18 +55,13 @@
 .gc-act{display:flex;gap:8px;justify-content:flex-end}
 .gc-wait{font-size:12px;color:var(--muted)}
 /* 電腦版對話上方的「⋯」 */
-.to-menu{position:relative;margin-left:auto;display:inline-block}
-.to-menu-btn{border:1px solid transparent;background:none;border-radius:3px;padding:0 8px;font-size:16px;line-height:20px;cursor:pointer;color:var(--title-fg)}
-.to-menu-btn:hover{border-color:#8fb6de;background:#e6f1fc}
-.to-menu-pop{position:absolute;right:0;top:100%;z-index:6;display:flex;flex-direction:column;min-width:130px;padding:3px;background:var(--panel);border:1px solid #7a9ec4;border-radius:4px;box-shadow:0 6px 18px rgba(0,30,70,.25)}
-.to-menu-pop button{border:0;background:none;text-align:left;padding:6px 10px;cursor:pointer;border-radius:3px;white-space:nowrap}
-.to-menu-pop button:hover{background:#e6f1fc}
 /* 群組分頁（電腦）與名單上的入口 */
 .gl-actions{display:flex;gap:6px;padding:6px 8px;border-bottom:1px solid var(--line)}
 .gl-actions .gs-btn{padding:4px 10px;font-size:12px}
 .gl-empty-hint{padding:8px 12px;font-size:12px;color:var(--muted);line-height:1.5}
-.room-btn{display:flex;gap:7px;width:100%;border:0;background:none;text-align:left;padding:5px 8px 5px 12px;cursor:pointer}
+.room-btn{display:flex;align-items:center;gap:7px;width:100%;border:0;background:none;text-align:left;padding:5px 8px 5px 12px;cursor:pointer}
 .room-btn:hover{background:#e6f1fc}
+.room-btn .unread{align-self:center;height:18px;box-sizing:border-box}
 @media (prefers-color-scheme:dark){
   .gc-list{background:#3a3418}.gc-card{background:#232a33}.gs-input{background:#1c232b}
 }

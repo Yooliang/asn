@@ -7,10 +7,10 @@ import { foldBarArrow, hasSideCol, isCollapsed, msgLayout, paneClasses, sideOf }
 import { FILE_ACCEPT, formatBytes, photoExpired, photoTitle } from './photo.mjs'
 import { attachmentFromFile, imageFromBlob } from './photo-canvas.mjs'
 import { Annotator } from './annotator.mjs'
-import { ActionBar } from './actionbar.mjs'
+import { ActionBar, opsMenuItems } from './actionbar.mjs'
 import { CallView } from './call-view.mjs'
 import { ConfirmCards } from './group-sheet.mjs'
-import { canInviteFrom, roomAttachAllowed } from './groups.mjs'
+import { roomAttachAllowed } from './groups.mjs'
 import { canCallPartner } from './mobile-call.mjs'
 import { CALL_END_NOTE, splitCallEnd } from './call-end.mjs'
 import { DICT_PHASE_TEXT, DICT_TIP, appendDictation } from './mobile-dictation.mjs'
@@ -60,9 +60,8 @@ export const ChatPane = {
     const msgsEl = ref(null), composeEl = ref(null)
     const isRoom = computed(() => props.friend?.room === true)
     const attachOk = computed(() => roomAttachAllowed(props.friend))   // 群組有外部成員（別的帳號）時沒有附件鈕
-    const menuOpen = ref(false)
-    const canInvite = computed(() => isRoom.value || canInviteFrom(props.friend))
-    const pickMenu = op => { menuOpen.value = false; emit('group-menu', op) }
+    const opsItems = computed(() => (props.groupMenu ? opsMenuItems(props.friend) : []))   // 大按鈕區的「管理」選單
+    const pickMenu = op => emit('group-menu', op)
     const isAsn = computed(() => isAsnWindow(props.friend))
     const showWaiting = computed(() => showsWaiting(props.friend))
     const sideCol = computed(() => hasSideCol(props.dpMode))
@@ -266,25 +265,17 @@ export const ChatPane = {
     const docEl = ref(null)
     // 訊息內文裡的連結：不在 WebView 導覽，一律交給系統瀏覽器（Rust 端 open_link 再驗一次協定）
     const onBodyClick = ev => handleLinkClick(ev, url => globalThis.__TAURI__?.core?.invoke?.('open_link', { url }))
-    return { isRoom, attachOk, menuOpen, canInvite, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { isRoom, attachOk, opsItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
-  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :active="active" :callable="!!call && !callApi" v-if="!isRoom" @call="startCall"></action-bar>
+  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :active="active" :callable="!!call && !callApi" v-if="!isRoom || opsItems.length" :ops="opsItems" @ops="pickMenu" @call="startCall"></action-bar>
   <div class="chatpane-body">
   <div class="chatpane-main">
   <div class="conv">
     <div class="conv-main">
       <div class="to-line" :class="{ 'is-offline': !isRoom && friend.status === 'offline' }"><span v-html="emo(friend.nick)"></span>
         <span class="to-psm" v-if="friend.psm" v-html="emo(friend.psm)"></span>
-        <span class="to-menu" v-if="groupMenu && canInvite">
-          <button class="to-menu-btn" type="button" @click="menuOpen = !menuOpen" :aria-expanded="menuOpen" aria-label="更多：邀請與成員" title="更多">⋯</button>
-          <span class="to-menu-pop" v-if="menuOpen" role="menu">
-            <button type="button" role="menuitem" @click="pickMenu('invite')">邀請別人加入</button>
-            <button type="button" role="menuitem" v-if="isRoom" @click="pickMenu('addai')">加我的另一個 AI</button>
-            <button type="button" role="menuitem" v-if="isRoom" @click="pickMenu('manage')">成員與設定</button>
-          </span>
-        </span>
       </div>
       <confirm-cards v-if="isRoom" :cards="roomCards" @decide="(id, ok) => $emit('group-decide', id, ok)"></confirm-cards>
       <div class="warn" v-if="warn">
