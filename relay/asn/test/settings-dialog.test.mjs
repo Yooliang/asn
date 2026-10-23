@@ -11,9 +11,9 @@ import { closesDialog } from '../ui/lib/dialog.mjs'
 
 const read = f => fs.readFileSync(new URL(`../ui/${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
-test('分類：十一類、順序與鍵固定、標題與圖示都有、鍵不重複', () => {
-  assert.deepEqual(SETTING_KEYS, ['me', 'accounts', 'look', 'tabs', 'notify', 'voice', 'window', 'launch', 'usage', 'update', 'about'])
-  assert.deepEqual(SETTING_CATS.map(c => c.title), ['個人', '帳號', '外觀', '分頁與分組', '通知', '語音', '視窗與系統匣', '啟動設定', '用量', '更新', '關於'])
+test('分類：十二類、順序與鍵固定、標題與圖示都有、鍵不重複', () => {
+  assert.deepEqual(SETTING_KEYS, ['me', 'accounts', 'devices', 'look', 'tabs', 'notify', 'voice', 'window', 'launch', 'usage', 'update', 'about'])
+  assert.deepEqual(SETTING_CATS.map(c => c.title), ['個人', '帳號', '設備', '外觀', '分頁與分組', '通知', '語音', '視窗與系統匣', '啟動設定', '用量', '更新', '關於'])
   assert.equal(new Set(SETTING_KEYS).size, SETTING_CATS.length)
   for (const c of SETTING_CATS) assert.ok(/^M[0-9A-Za-z .,-]+$/.test(c.icon), `${c.key} 圖示`)
   assert.equal(catByKey('voice').title, '語音')
@@ -74,6 +74,13 @@ const fullState = () => ({
   launch: { tools: [{ id: 'claude', label: 'Claude Code', installed: true, version: '2.0', installHint: '' }, { id: 'gemini', label: 'Gemini', installed: false, version: '', installHint: '先安裝 Gemini CLI' }], maxPerHour: 6, cwdText: 'D:/a\nD:/b' },
   usage: { loading: false, error: '', updated: '14:05', data: { empty: '', unpriced: '', priceLine: '價目依 Anthropic 官方公開定價（2026-10-22 抄錄）', periods: [{ key: 'today', label: '今天', cost: '$1.20', tokens: '3,000', messages: 2, detail: '輸入 1', models: [{ model: 'claude-opus-4-5', cost: '$1.20', tokens: '3,000', messages: 2, priced: true }] }] } },
   version: '9.9.9',
+  askpass: { path: 'C:/x/asn-askpass.exe', example: 'setx SSH_ASKPASS "C:/x/asn-askpass.exe"', copied: false },
+  devices: [
+    { key: 'W', label: '工作機', self: false, kind: '電腦', online: true, onlineText: '在線', reportedText: '帳號最後回報：3 分鐘前', empty: '', vendors: [
+      { key: 'claude', label: 'Claude', account: 'w@b.c · pro', reported: true, extra: '另有 1 個帳號：z@b.c', switchable: true, switchHint: '' },
+      { key: 'codex', label: 'OpenAI（Codex）', account: '未回報', reported: false, extra: '', switchable: false, switchHint: '' }] },
+    { key: 'P', label: '手機一號', self: false, kind: '手機', online: false, onlineText: '離線', reportedText: '', empty: '這台設備還沒有回報任何廠商', vendors: [] },
+  ],
 })
 const render = async (catKey, st = fullState()) => {
   globalThis.Vue = Vue
@@ -85,6 +92,7 @@ test('設定表單：每一類都轉得出來，各類原本的項目都在', as
   const want = {
     me: ['登入狀態', '尚未登入', '用 Google 登入', '用 GitHub 登入', '大頭貼', '選擇圖片', '移除，改回自動產生', '目前用的是自動產生的大頭貼。'],
     accounts: ['Claude 帳號', '使用中', '加入目前登入的帳號', '自動加入', '切換', '刪除', 'a@b.c', 'OpenAI（Codex）帳號', 'x@openai.test · plus', 'Gemini', '尚未支援', '遠端設備', 'w@b.c', '信任我自己的設備'],
+    devices: ['重新整理', '工作機', '手機一號', 'Claude：w@b.c · pro', 'OpenAI（Codex）：未回報', '只有 Claude 帳號能從這裡切換'],
     look: ['視窗外框', '視窗模式', '頭像模式', '工具列位置', '文字底色'],
     tabs: ['分頁依', '分組依'],
     notify: ['右下角通知', '通知聲音', '震動聲音', '收到檔案聲音'],
@@ -116,6 +124,12 @@ test('設定表單：照目前的值顯示（選中項、勾選、數字、文�
   const off = fullState(); off.trayOk = false; off.autostart.supported = false; off.voice.enabled = false
   assert.ok((await render('window', off)).includes('建不起系統匣圖示'))
   assert.ok(!(await render('window', off)).includes('登入時自動啟動'))
+  // 視窗與系統匣不再放任何命令列（寄信指令、密碼小幫手的設定指令）
+  const win = await render('window')
+  assert.ok(!win.includes('<code') && !win.includes('寄信指令') && !win.includes('密碼小幫手') && !win.includes('asn-cli') && !win.includes('SSH_ASKPASS'))
+  // 密碼小幫手收進「啟動設定」的進階（收合）
+  const ln = await render('launch')
+  assert.ok(ln.includes('<details') && ln.includes('進階') && ln.includes('密碼小幫手') && ln.includes('SSH_ASKPASS'))
   assert.ok((await render('voice', off)).includes('念出訊息要由維護者在後台啟用'))
 })
 

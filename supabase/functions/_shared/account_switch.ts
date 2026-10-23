@@ -42,13 +42,13 @@ export function cleanEmail(v: unknown): string | null {
   return e.length >= 3 && e.length <= 120 && EMAIL_RE.test(e) ? e : null;
 }
 
-export type ReportedAccount = { vendor: "claude"; email: string; plan: string; current: boolean };
+export type ReportedAccount = { vendor: "claude" | "codex"; email: string; plan: string; current: boolean };
 // 回報的清單：每筆只留 vendor／email／plan／current；任何一筆不合格整份退回（回 null）
 export function parseReport(b: Json): ReportedAccount[] | null {
   if (!b || typeof b !== "object" || !Array.isArray(b.accounts) || b.accounts.length > MAX_ACCOUNTS) return null;
   const out: ReportedAccount[] = [];
   for (const a of b.accounts) {
-    if (!a || typeof a !== "object" || a.vendor !== "claude") return null;
+    if (!a || typeof a !== "object" || (a.vendor !== "claude" && a.vendor !== "codex")) return null;
     const email = cleanEmail(a.email);
     if (!email) return null;
     let plan = "";
@@ -57,7 +57,7 @@ export function parseReport(b: Json): ReportedAccount[] | null {
       plan = a.plan.trim();
     }
     if (a.current != null && typeof a.current !== "boolean") return null;
-    out.push({ vendor: "claude", email, plan, current: a.current === true });
+    out.push({ vendor: a.vendor, email, plan, current: a.current === true });
   }
   return out;
 }

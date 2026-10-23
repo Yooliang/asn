@@ -671,3 +671,6 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 
 .logout-set{margin-top:32px;display:flex;flex-direction:column;gap:6px}
 .logout-set .logout-btn{color:#b3261e;border-color:#d79a95}
+
+.set-adv{margin-top:4px}.set-adv>summary{cursor:pointer;color:var(--muted,inherit);font-size:12px;margin-bottom:8px}
+.dev-card .acct-list li{align-items:center}

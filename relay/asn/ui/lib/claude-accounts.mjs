@@ -40,6 +40,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     trustOwn: false,
     remote: { node: '', list: [], reportedAt: '', asnOnline: false, loading: false, busy: false, msg: '' },
     incoming: [],   // 等本機使用者按確認的遠端切換指令：{ id, email, from, fromLabel }
+    reports: {},    // 節點 → 那台電腦的帳號回報（設備分類用）：{ error, asnOnline, reportedAt, accounts }
     savedSeq: 0,
     autoNote: '',   // 背景自動加入成功時的一行小字
     mod: '',        // Claude 外掛自動安裝的狀態文字（Rust 背景工作寫好；空字串＝不顯示）
@@ -69,12 +70,22 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     try {
       const v = await invoke('acct_remote_list', { node: r.node })
       r.list = (v?.accounts ?? []).filter(a => a.vendor === 'claude')
+      s.reports[r.node] = { error: '', asnOnline: v?.asn_online === true, reportedAt: v?.reported_at ?? '', accounts: v?.accounts ?? [] }
       r.asnOnline = v?.asn_online === true
       r.reportedAt = v?.reported_at ?? ''
       if (!r.asnOnline) r.msg = '對方電腦的 ASN 目前沒有在線，無法切換。'
       else if (!r.list.length) r.msg = '對方電腦還沒有帳號（請對方先在設定的「帳號」頁按「加入目前登入的帳號」）。'
     } catch (e) { r.list = []; r.msg = errText(e) }
     r.loading = false
+  }
+  // 設備分類：一次讀好幾台的帳號回報（讀不到就記錯誤，介面顯示「未回報」）
+  const loadReports = async nodes => {
+    await Promise.all([...new Set(nodes)].filter(Boolean).map(async node => {
+      try {
+        const v = await invoke('acct_remote_list', { node })
+        s.reports[node] = { error: '', asnOnline: v?.asn_online === true, reportedAt: v?.reported_at ?? '', accounts: v?.accounts ?? [] }
+      } catch (e) { s.reports[node] = { error: errText(e), asnOnline: false, reportedAt: '', accounts: [] } }
+    }))
   }
   const remoteSelect = async node => { s.remote.node = node || ''; await remoteLoad() }
   const remoteSwitch = async email => {
@@ -137,7 +148,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
   }
   return {
     state: s,
-    refresh, report, onAuto, remoteNodes, remoteSelect, remoteLoad, remoteSwitch, pollIncoming, approve, decline, loadTrust, setTrust,
+    refresh, report, onAuto, loadReports, remoteNodes, remoteSelect, remoteLoad, remoteSwitch, pollIncoming, approve, decline, loadTrust, setTrust,
     addCurrent: () => run(async () => { const a = await invoke('claude_account_save'); s.savedSeq++; return `已加入 ${a.email}。` }),
     switchTo: email => run(async () => { const r = await invoke('claude_account_switch', { email }); return `已切換到 ${r.email}。${SWITCH_NOTICE}` }),
     // 刪除要按兩次（第一次變成「確認刪除」），避免誤觸

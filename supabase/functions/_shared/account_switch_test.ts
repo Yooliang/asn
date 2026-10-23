@@ -34,8 +34,9 @@ Deno.test("parseReport：每筆只留四個欄位，權杖類的多餘欄位丟�
     { vendor: "claude", email: "b@x.test", plan: "", current: false },
   ]);
   assert(!JSON.stringify(r).includes("SECRET"));
+  assertEquals(parseReport({ accounts: [{ vendor: "codex", email: "C@x.test", plan: "plus", current: true, id_token: "SECRET" }] }), [{ vendor: "codex", email: "c@x.test", plan: "plus", current: true }]);
   assertEquals(parseReport({ accounts: [] }), []);
-  for (const bad of [null, {}, { accounts: "x" }, { accounts: [{ vendor: "codex", email: "a@x.test" }] }, { accounts: [{ vendor: "claude", email: "bad" }] },
+  for (const bad of [null, {}, { accounts: "x" }, { accounts: [{ vendor: "gemini", email: "a@x.test" }] }, { accounts: [{ vendor: "claude", email: "bad" }] },
     { accounts: [{ vendor: "claude", email: "a@x.test", plan: 5 }] }, { accounts: [{ vendor: "claude", email: "a@x.test", plan: "x\n" }] },
     { accounts: [{ vendor: "claude", email: "a@x.test", current: "yes" }] }, { accounts: Array.from({ length: 21 }, () => ({ vendor: "claude", email: "a@x.test" })) }]) {
     assertEquals(parseReport(bad), null, JSON.stringify(bad));
