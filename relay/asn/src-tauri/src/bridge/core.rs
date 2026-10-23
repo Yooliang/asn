@@ -709,12 +709,25 @@ impl Core {
                 }
                 // 否則交給本人（ASN 視窗）：信留在信箱不 ack，ASN 畫面收下才 ack。不再丟給隨便一個 session
                 None => {
+                    // 僅引擎模式（Aegis 主機沒有本人視窗）：引擎自己說明怎麼指定收件人，不留在信箱
+                    if let Some(text) = self.engine_only_reply(|e| e.unaddressed_reply()) {
+                        self.log.line(&format!("id={} has no to_agent: engine asked sender to specify", m.id));
+                        if !Self::is_mailbox_sender(&from_agent) {
+                            let o = Origin { id: m.id.clone(), from_node: m.from_node.clone(), from_agent: from_agent.clone() };
+                            if !self.send_back(&o, &text, None, None).await {
+                                return None; // 寄回失敗：留在信箱，下次補拉再來
+                            }
+                        }
+                        self.ack_ids(&[m.id.clone()]).await;
+                        return None;
+                    }
                     self.hand_to_owner(&m, raw, &from_agent).await;
                     return None;
                 }
             },
         };
-        let no_reply = !wants_reply(m.expects_reply, &m.body) || Self::is_mailbox_sender(&from_agent);
+        // 「寄回成功才 ack」的引擎（Aegis）：寄件人說不需回覆也照問、照回（和 Node 版一樣）；其他引擎維持原行為
+        let no_reply = (!wants_reply(m.expects_reply, &m.body) && !self.defers_ack(&target)) || Self::is_mailbox_sender(&from_agent);
         let mut p = Pending::new(&m.id, &m.from_node, &from_agent, &target, self.now, no_reply);
         p.sender_desc = mail::sender_line(&m).trim_start_matches("寄件人：").to_string();
         if !self.forwardable(&target) {
@@ -723,7 +736,8 @@ impl Core {
             if Self::is_mailbox_sender(&from_agent) {
                 self.log.line(&format!("id={} target {target} not found; notice to mailbox sender not sent", m.id));
             } else {
-                self.send_back(&Origin::of(&p), &format!("[收發室] 找不到名叫「{target}」的 session（目前可達：{names}）"), None, None).await;
+                let text = self.engine_only_reply(|e| e.unreachable_reply(&target)).unwrap_or_else(|| format!("[收發室] 找不到名叫「{target}」的 session（目前可達：{names}）"));
+                self.send_back(&Origin::of(&p), &text, None, None).await;
             }
             self.ack_ids(&[m.id.clone()]).await;
             return None;
@@ -849,6 +863,14 @@ impl Core {
             return;
         }
         self.ack_ids(&[id.to_string()]).await;
+    }
+
+    /// 僅引擎模式才問引擎的專屬說明文字（有本人視窗或 Claude 視窗時維持核心的文字）
+    fn engine_only_reply(&self, f: impl Fn(&EngineSet) -> Option<String>) -> Option<String> {
+        if !self.cfg.engine_only {
+            return None;
+        }
+        self.engines.as_ref().and_then(|e| f(e))
     }
 
     fn defers_ack(&self, target: &str) -> bool {
@@ -1104,7 +1126,8 @@ impl Core {
         let room_id = room.get("id").and_then(Value::as_str).unwrap_or("").to_string();
         let room_name = room.get("name").and_then(Value::as_str).unwrap_or("").to_string();
         let seq = json_u64(msg.get("seq"));
-        let window = rooms::member_window(member);
+        // 成員代號（slug）也認：換成名單上的名字（Aegis；其他引擎原樣）
+        let window = self.engines.as_ref().map(|e| e.canonical_name(&rooms::member_window(member))).unwrap_or_else(|| rooms::member_window(member));
         let mut note = String::new();
         let target;
         if window.is_empty() {

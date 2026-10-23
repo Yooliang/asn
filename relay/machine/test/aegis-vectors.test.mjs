@@ -25,10 +25,10 @@ test('向量：震動拆分', () => {
   }
 })
 
-async function fakeServer(mails, failSend = new Set()) {
-  const st = { acked: new Set(), sent: [], rosterPosts: [], asks: [], calls: {} }
-  const inbox = mails.map((m, i) => {
-    const x = { id: uid(i + 1), from_node: V.config.mail.from_node, from_agent: V.config.mail.from_agent, trust: V.config.mail.trust, expects_reply: V.config.mail.expects_reply, body: m.body }
+async function fakeServer(mails, failSend = new Set(), room = null) {
+  const st = { acked: new Set(), sent: [], rosterPosts: [], asks: [], calls: {}, roomPosts: [] }
+  const inbox = (room ? [] : mails).map((m, i) => {
+    const x = { id: uid(i + 1), from_node: V.config.mail.from_node, from_agent: V.config.mail.from_agent, trust: V.config.mail.trust, expects_reply: m.expects_reply ?? V.config.mail.expects_reply, body: m.body }
     if (m.to_agent) x.to_agent = m.to_agent
     return x
   })
@@ -41,6 +41,9 @@ async function fakeServer(mails, failSend = new Set()) {
       if (a === 'inbox') return out(200, { messages: st.rosterPosts.length ? inbox.filter(m => !st.acked.has(m.id)) : [] })
       if (a === 'send') { const b = await readBody(req); if (failSend.has(b.reply_to)) return out(500, { error: 'x' }); st.sent.push(b); return out(200, { ok: true }) }
       if (a === 'ack') { (await readBody(req)).ids.forEach(i => st.acked.add(i)); return out(200, { ok: true }) }
+      if (a === 'room_list') return out(200, { rooms: room ? [{ id: 'R1', name: '專案群', last_seq: 2, mine: [{ member: `T~${room.window}`, read_seq: 1 }] }] : [] })
+      if (a === 'room_read') return out(200, { last_seq: 2, messages: [{ seq: 2, from: 'W~W-政策', from_name: '政策', trust: 'member', body: '群組問題', mentions: [], for_me: true }] })
+      if (a === 'room_post') { st.roomPosts.push(await readBody(req)); return out(200, { seq: 99 }) }
       if (a === 'roster') { st.rosterPosts.push(await readBody(req)); return out(200, { ok: true }) }
     }
     if (u.pathname === '/api/v1/agent-chat/ask') {
@@ -100,7 +103,6 @@ test('向量：每封信的問答、回信、ack、名單', async () => {
       assert.equal(got.length, m.replies.length, label)
       m.replies.forEach((e, k) => {
         if ('body' in e) assert.equal(got[k].body, e.body, label)
-        if ('body_has_node' in e) assert.ok(got[k].body.includes(e.body_has_node), `${label}: ${got[k].body}`)
         if ('from_agent' in e) assert.equal(got[k].from_agent, e.from_agent, label)
         if ('to_node' in e) assert.equal(got[k].to_node, e.to_node, label)
         if ('to_agent' in e) assert.equal(got[k].to_agent, e.to_agent, label)
@@ -121,3 +123,28 @@ test('向量：寄回失敗就不 ack（留在信箱）；寄回成功才 ack', 
     assert.equal(st.acked.size, 0, '寄回失敗不 ack')
   } finally { await st.close() }
 })
+
+test('向量：沒有預設成員時，沒指定收件人的信得到請指定成員清單', async () => {
+  const nd = V.no_default
+  const st = await fakeServer([{ body: nd.mail.body, aegis: {} }])
+  try {
+    await runBridge(st, { until: () => st.acked.size >= 1, env: { IRORI_AEGIS_ALLOW: nd.allow } })
+    assert.equal(st.asks.length, 0)
+    assert.equal(st.sent.length, nd.replies.length)
+    nd.replies.forEach((e, k) => { for (const f of ['body', 'to_node', 'to_agent']) assert.equal(st.sent[k][f], e[f], f) })
+  } finally { await st.close() }
+})
+
+for (const rc of V.rooms) {
+  test(`向量：${rc.name}`, async () => {
+    const st = await fakeServer([{ body: '群組問題', aegis: { [rc.target]: [{ http: 200, json: { answer: rc.answer, status: 'success' } }] } }], new Set(), { window: rc.window })
+    try {
+      await runBridge(st, { until: () => st.roomPosts.length >= 1 })
+      assert.equal(st.asks.length, 1)
+      assert.equal(st.asks[0].target, rc.target)
+      assert.equal(st.roomPosts[0].body, rc.answer)
+      assert.equal(st.roomPosts[0].from_agent, rc.post_from_agent)
+      assert.equal(st.acked.size, 0, '群組沒有信箱，不 ack')
+    } finally { await st.close() }
+  })
+}

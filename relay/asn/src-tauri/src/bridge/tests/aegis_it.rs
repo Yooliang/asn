@@ -149,6 +149,7 @@ async fn aboot(members: Value, env: &[(&str, &str)]) -> AH {
     };
     let set = engines::build(&ctx, Some("aegis")).expect("有載入 aegis 引擎");
     let mut core = new_core(&fr, work.path(), sessions.path(), Arc::new(FakeSink::default()), now());
+    core.cfg.engine_only = true; // Aegis 主機的跑法：沒有本人視窗，說明文字由引擎給
     core.cfg.default_agent.clear(); // 測試用設定預設指到 T-甲；Aegis 機沒有設，改由引擎的預設成員接
     core.set_engines(set.clone());
     set.start();
@@ -202,7 +203,7 @@ fn vec_cfg() -> (Value, String, String) {
 
 fn mail_from(v: &Value, n: usize, m: &Value) -> Value {
     let c = &v["config"]["mail"];
-    let mut x = json!({"id": uid(n as u32), "from_node": c["from_node"], "from_agent": c["from_agent"], "trust": c["trust"], "expects_reply": c["expects_reply"], "body": m["body"]});
+    let mut x = json!({"id": uid(n as u32), "from_node": c["from_node"], "from_agent": c["from_agent"], "trust": c["trust"], "expects_reply": m.get("expects_reply").unwrap_or(&c["expects_reply"]), "body": m["body"]});
     if let Some(t) = m["to_agent"].as_str() {
         x["to_agent"] = json!(t);
     }
@@ -261,9 +262,6 @@ async fn 向量_每封信的問答_回信_ack_名單_與_node_版相同() {
         for (g, e) in got.iter().zip(reps) {
             if let Some(b) = e.get("body") {
                 assert_eq!(g["body"], *b, "{label}");
-            }
-            if let Some(b) = e.get("body_has_rust").and_then(Value::as_str) {
-                assert!(g["body"].as_str().unwrap().contains(b), "{label}: {}", g["body"]);
             }
             for k in ["from_agent", "to_node", "to_agent"] {
                 if let Some(x) = e.get(k) {
@@ -340,7 +338,7 @@ async fn 白名單預設空_全部擋下_沒有任何問答() {
     h.put_pull(mail(1, json!({"to_agent": "alpha"}))).await;
     h.wait("擋下並 ack", |h| !h.fr.acked().is_empty()).await;
     assert!(h.ag.asks().is_empty());
-    assert!(h.fr.sent()[0]["body"].as_str().unwrap().contains("找不到名叫"));
+    assert_eq!(h.fr.sent()[0]["body"], "[Aegis] 這位成員沒有開放聯絡（alpha）");
 }
 
 // ---- 群組 ------------------------------------------------------------------------------------
@@ -376,4 +374,42 @@ async fn 群組_被點名就問_答案貼回群組_不_ack_失敗不貼回也不
     k.core.pull("test", now()).await;
     k.settle(300).await;
     assert!(k.ag.asks().is_empty() && k.fr.st.lock().unwrap().room_posts.is_empty());
+}
+
+#[tokio::test]
+async fn 向量_沒有預設成員時請指定成員_與_node_版相同() {
+    let v = vectors();
+    let nd = &v["no_default"];
+    let members = v["config"]["members"].clone();
+    let mut h = aboot(members, &[("ASN_AEGIS_ALLOW", nd["allow"].as_str().unwrap())]).await;
+    let c = &v["config"]["mail"];
+    h.put_pull(json!({"id": uid(1), "from_node": c["from_node"], "from_agent": c["from_agent"], "trust": c["trust"], "expects_reply": true, "body": nd["mail"]["body"]})).await;
+    h.wait("回覆並 ack", |h| !h.fr.acked().is_empty()).await;
+    assert!(h.ag.asks().is_empty());
+    let sent = h.fr.sent();
+    let want = nd["replies"].as_array().unwrap();
+    assert_eq!(sent.len(), want.len());
+    for (g, e) in sent.iter().zip(want) {
+        for k in ["body", "to_node", "to_agent"] {
+            assert_eq!(g[k], e[k], "{k}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn 向量_群組_視窗寫代號或中文名都問得到_以中文名貼回() {
+    let v = vectors();
+    let (members, allow, retry) = vec_cfg();
+    for rc in v["rooms"].as_array().unwrap() {
+        let mut h = aboot(members.clone(), &[("ASN_AEGIS_ALLOW", &allow), ("ASN_AEGIS_RETRY_MS", &retry)]).await;
+        h.ag.script("", rc["target"].as_str().unwrap(), vec![(200, json!({"answer": rc["answer"], "status": "success"}))]);
+        h.fr.st.lock().unwrap().rooms = vec![room_with(rc["window"].as_str().unwrap())];
+        h.core.pull("test", now()).await;
+        h.wait("貼回群組", |h| !h.fr.st.lock().unwrap().room_posts.is_empty()).await;
+        let p = h.fr.st.lock().unwrap().room_posts[0].clone();
+        assert_eq!((p["body"].as_str(), p["from_agent"].as_str()), (rc["answer"].as_str(), rc["post_from_agent"].as_str()), "{}", rc["name"]);
+        assert_eq!(h.ag.asks().len(), 1);
+        assert_eq!(h.ag.asks()[0]["target"], rc["target"]);
+        assert!(h.fr.acked().is_empty());
+    }
 }

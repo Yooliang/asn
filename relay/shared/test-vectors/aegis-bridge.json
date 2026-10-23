@@ -1,5 +1,5 @@
 {
- "說明": "Aegis 橋的共用測試向量：Node（relay/machine/test/aegis-vectors.test.mjs）與 Rust（bridge/tests/aegis_it.rs、engines/aegis.rs）都讀這一份。每封信都會被 ack（寄回成功才 ack）。replies 的 body_has_node／body_has_rust＝兩邊對同一情況的說明文字不同、只比關鍵詞；沒寫 from_agent 就不比。",
+ "說明": "Aegis 橋的共用測試向量：Node（relay/machine/test/aegis-vectors.test.mjs）與 Rust（bridge/tests/aegis_it.rs、engines/aegis.rs）都讀這一份。每封信都會被 ack（寄回成功才 ack）。replies 的 body 逐字比對（Node 與 Rust 同文）；沒寫 from_agent 就不比。mail 的 expects_reply 可覆蓋 config.mail（寄件人明說不需回覆也照問照回）。no_default＝白名單沒有預設成員時，沒指定收件人的信要得到「請指定成員」清單。rooms＝群組訊息：視窗寫成員代號或中文名都要問到同一位成員，並以中文名貼回群組。",
  "config": {
   "allow": "alpha,flaky,busy,ghost,weird,xiao-liang,aegis,xi-xu",
   "retry_ms": 100,
@@ -612,8 +612,7 @@
    "asks": [],
    "replies": [
     {
-     "body_has_node": "沒有開放聯絡",
-     "body_has_rust": "找不到名叫"
+     "body": "[Aegis] 這位成員沒有開放聯絡（secret）"
     }
    ]
   },
@@ -625,8 +624,7 @@
    "asks": [],
    "replies": [
     {
-     "body_has_node": "不能自己問自己",
-     "body_has_rust": "找不到名叫"
+     "body": "[Aegis] 這是希緒自己，不能自己問自己"
     }
    ]
   },
@@ -660,6 +658,69 @@
      "from_agent": "愛吉絲"
     }
    ]
+  },
+  {
+   "name": "寄件人明說不需回覆也照問照回",
+   "to_agent": "阿爾法",
+   "body": "內文-18",
+   "expects_reply": false,
+   "aegis": {
+    "alpha": [
+     {
+      "http": 200,
+      "json": {
+       "answer": "不需回覆也回",
+       "status": "success",
+       "member": "x"
+      }
+     }
+    ]
+   },
+   "asks": [
+    {
+     "target": "alpha",
+     "question": "這是透過仲介轉來的信：from=W/W-政策 trust=member\n內文-18",
+     "from_member": "xi-xu",
+     "stream": false
+    }
+   ],
+   "replies": [
+    {
+     "body": "不需回覆也回",
+     "from_agent": "阿爾法",
+     "to_node": "W",
+     "to_agent": "W-政策"
+    }
+   ]
+  }
+ ],
+ "no_default": {
+  "allow": "alpha,xi-xu",
+  "mail": {
+   "body": "內文-19"
+  },
+  "replies": [
+   {
+    "body": "[Aegis] 請指定要問的成員（to_agent）。目前開放聯絡：alpha（阿爾法）、xi-xu（希緒）",
+    "to_node": "W",
+    "to_agent": "W-政策"
+   }
+  ]
+ },
+ "rooms": [
+  {
+   "name": "群組：成員代號",
+   "window": "alpha",
+   "target": "alpha",
+   "answer": "群組答案-代號",
+   "post_from_agent": "阿爾法"
+  },
+  {
+   "name": "群組：中文名",
+   "window": "阿爾法",
+   "target": "alpha",
+   "answer": "群組答案-中文名",
+   "post_from_agent": "阿爾法"
   }
  ]
 }
