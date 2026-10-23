@@ -50,15 +50,53 @@ export const STT_PROMPTS = ['以下是繁體中文的句子，請使用正確的
 export const PROMPT_FRAGMENT_MIN = 5
 const PROMPT_CORES = STT_PROMPTS.map(core)
 
-/** 辨識結果是不是提示詞本身、提示詞的一段，或提示詞重複好幾遍 */
-export function isPromptEcho(raw) {
+/** 動態加進提示詞的名字子句前綴；要和 stt.rs 的 NAME_HINT_PREFIX 一字不差（有測試對照）。完整子句：`相關人名：甲、乙、丙。` */
+export const NAME_HINT_PREFIX = '相關人名：'
+export const NAME_HINT_MAX_NAMES = 20       // 最多帶幾個名字
+export const NAME_HINT_MAX_EACH = 16        // 單一名字最長（字數），超過的略過
+export const NAME_HINT_MAX_TOTAL = 120      // 名字總長上限（字數）
+
+/**
+ * 整理要偏向的名字：先放通話對象，再放名單上的夥伴；去掉控制字元與括號引號、去頭尾空白、去重（不分大小寫）、
+ * 空的與過長的略過；最多 NAME_HINT_MAX_NAMES 個、總長不超過 NAME_HINT_MAX_TOTAL。stt.rs 的 clean_names 規則相同。
+ */
+export function buildNameHints(target, roster = []) {
+  const out = [], seen = new Set()
+  let total = 0
+  const nameOf = x => (typeof x === 'string' ? x : x?.nick)
+  for (const x of [target, ...(Array.isArray(roster) ? roster : [])]) {
+    const raw = nameOf(x)
+    if (typeof raw !== 'string') continue
+    const n = raw.replace(/[\p{Cc}"'「」『』()（）\[\]【】<>、，。]/gu, ' ').replace(/\s+/g, ' ').trim()
+    const len = [...n].length
+    if (!n || len > NAME_HINT_MAX_EACH || seen.has(n.toLowerCase())) continue
+    if (out.length >= NAME_HINT_MAX_NAMES || total + len > NAME_HINT_MAX_TOTAL) continue
+    seen.add(n.toLowerCase()); out.push(n); total += len
+  }
+  return out
+}
+
+/**
+ * 辨識結果是不是提示詞本身、提示詞的一段，或提示詞重複好幾遍。
+ * names＝這次動態加進提示詞的名字：名字子句的片段也算；但整段只由名字組成（單獨念一個夥伴名字）是正常說話，不算回音。
+ */
+export function isPromptEcho(raw, names = []) {
   if (!raw || !String(raw).trim()) return false
+  const nameCores = (Array.isArray(names) ? names : []).map(core).filter(Boolean)
+  const prompts = nameCores.length ? [...PROMPT_CORES, ...PROMPT_CORES.map(p => p + core(NAME_HINT_PREFIX) + nameCores.join(''))] : PROMPT_CORES
+  const onlyNames = c => {
+    if (!nameCores.length) return false
+    let rest = c
+    for (const n of [...nameCores].sort((a, b) => b.length - a.length)) rest = rest.split(n).join('')
+    return rest === ''
+  }
   const test = c => {
     if (!c) return false
     const a = [...c]
     if (a.length > 300) return false
+    if (onlyNames(c)) return false
     // 整段能切成若干片段，每片都是提示詞的一段（至少 PROMPT_FRAGMENT_MIN 字）
-    return PROMPT_CORES.some(p => {
+    return prompts.some(p => {
       const ok = [true]
       for (let i = 1; i <= a.length; i++) {
         ok[i] = false
@@ -74,9 +112,9 @@ export function isPromptEcho(raw) {
  * 整句是不是 Whisper 的靜音幻覺（「（字幕製作:貝爾）」「謝謝觀看」「請不吝點贊 訂閱 轉發 打賞支持明鏡與點點欄目」「由 Amara.org 社群提供的字幕」…）。
  * 括號不論全形半形、配不配對都算。空字串不算。
  */
-export function isHallucination(raw) {
+export function isHallucination(raw, names = []) {
   if (!raw || !String(raw).trim()) return false
-  if (isPromptEcho(raw)) return true
+  if (isPromptEcho(raw, names)) return true
   // 原文與轉繁體後各比一次（轉換表會把「群」轉成「羣」之類的，兩邊都要能對到）
   return whole(core(raw)) || whole(core(s2t(raw)))
 }
@@ -90,10 +128,10 @@ export function fullWidthPunctuation(s) {
 }
 
 /** 整理好的文字；沒有內容（含被當成幻覺丟掉）回空字串 */
-export function normalize(raw) {
+export function normalize(raw, names = []) {
   if (!raw || !String(raw).trim()) return ''
   let s = String(raw).replace(NOISE, ' ').replace(/\s+/g, ' ').trim()
-  if (isHallucination(raw)) return ''
+  if (isHallucination(raw, names)) return ''
   s = s2t(s)
   // 中文字之間 Whisper 偶爾留空白：拿掉（中英交界的空白保留）
   const chars = [...s]

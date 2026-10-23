@@ -252,7 +252,7 @@ test('守門：通話程式不碰金鑰、不直接連網；按鈕與畫面接�
   }
   const pane = read('lib/chatpane.mjs')
   assert.match(pane, /<call-view v-if="callActive"/)
-  assert.match(pane, /newCall\(\{ send: t => emit\('send', t\) \}\)/, '寄信走對話區原本的 send 事件')
+  assert.match(pane, /newCall\(\{ send: t => emit\('send', t\), hints: \(\) => buildNameHints\(props\.friend, props\.hintNames\) \}\)/, '寄信走對話區原本的 send 事件')
   assert.match(read('lib/actionbar.mjs'), /aria-label="通話"[^>]*title="[^"]*[一-鿿]/)
   assert.match(read('list.js'), /!callBeats\.anyCall\(\)/, '自動念要讓路給通話')
   assert.match(read('chat.html'), /@call-state="callState"/)
@@ -275,4 +275,34 @@ test('通話：剛開始的按鍵聲不收；太短的聲音不送辨識；辨�
   await flush()
   assert.equal(r.transcribed, 1)
   assert.deepEqual(r.sent, [])
+  await r.call.end()   // 同時只能有一個通話：不掛斷會擋住後面的測試
+})
+
+test('通話辨識：有名字就帶給 stt_transcribe（names），沒有名字照舊只帶 wav；單獨念名字不被當回音', async () => {
+  for (const withHints of [true, false]) {
+    const argsSeen = []
+    const take = build([0.6, 0.002, false], [1.5, 0.1, true], [1.5, 0.002, false])
+    let onChunk
+    const ui = createVoiceUi({
+      invoke: async (cmd, args) => {
+        if (cmd === 'stt_status') return { ready: true }
+        if (cmd === 'stt_transcribe') { argsSeen.push(args); return '正見' }
+        throw new Error('unexpected ' + cmd)
+      },
+      listen: async () => {},
+      createMic: () => ({ rate: RATE, start: async o => { onChunk = o.onChunk }, stop: async () => ({ samples: new Float32Array(0), rate: RATE }) }),
+      createAudio: () => ({ play: async () => {}, stop() {}, onended: null }),
+    })
+    const sent = []
+    const call = ui.newCall({ send: t => sent.push(t), hints: withHints ? () => ['希緒', '正見'] : undefined })
+    assert.equal(await call.start([]), true)
+    for (let i = 0; i < take.samples.length; i += CHUNK) onChunk(take.samples.slice(i, i + CHUNK))
+    await flush()
+    assert.equal(argsSeen.length, 1)
+    if (withHints) assert.deepEqual(argsSeen[0].names, ['希緒', '正見'])
+    else assert.deepEqual(Object.keys(argsSeen[0]), ['wav'], '舊呼叫不帶 names')
+    assert.equal(sent.length, 1, '只念「正見」兩個字要照常寄出')
+    assert.ok(sent[0].endsWith('正見'))
+    await call.end()
+  }
 })

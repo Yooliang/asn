@@ -3,6 +3,7 @@ package tw.yooliang.asn
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -11,6 +12,7 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
 
@@ -91,8 +93,25 @@ class CallVoice(private val activity: MainActivity) {
     recognizer = null
   }
 
-  fun listen() {
+  /** 網頁傳來的名字（JSON 陣列字串）整理成清單：最多 20 個、每個最長 16 字、去空去重；壞掉的輸入回空清單 */
+  private fun parseNames(json: String?): ArrayList<String> {
+    val out = ArrayList<String>()
+    try {
+      val a = JSONArray(json ?: "[]")
+      for (i in 0 until a.length()) {
+        val n = a.optString(i, "").trim()
+        if (n.isEmpty() || n.codePointCount(0, n.length) > 16 || out.contains(n)) continue
+        out.add(n)
+        if (out.size >= 20) break
+      }
+    } catch (e: Exception) { }
+    return out
+  }
+
+  /** names：通話對象與名單上夥伴的名字（JSON 陣列字串）。安卓 13（API 33）以上用 EXTRA_BIASING_STRINGS 讓辨識偏向這些詞；舊版略過。不做自動替換。 */
+  fun listen(names: String? = null) {
     inCall = true
+    val hints = parseNames(names)
     activity.runOnUiThread {
       try {
         val r = recognizer ?: SpeechRecognizer.createSpeechRecognizer(activity).also {
@@ -107,6 +126,9 @@ class CallVoice(private val activity: MainActivity) {
           putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
           putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, activity.packageName)
           putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
+          if (hints.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, hints)
+          }
         }
         r.startListening(intent)
       } catch (e: Exception) {

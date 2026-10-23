@@ -54,11 +54,14 @@ const concat = chunks => {
   return out
 }
 
+const safeNames = f => { try { const v = f(); return Array.isArray(v) ? v : [] } catch { return [] } }
+
 export function createCallSession({
   mic, transcribe, sttStatus, player, onTts, send,
   reactive = x => x, setTimer = (f, ms) => setTimeout(f, ms), clearTimer = id => clearTimeout(id),
   setTick = (f, ms) => setInterval(f, ms), clearTick = id => clearInterval(id), now = () => Date.now(), log = () => {},
   canStart = () => '',
+  hints = () => [],   // 這次通話要偏向的名字（通話對象＋名單上的夥伴）；每句辨識時現取
 }) {
   const state = reactive({ active: false, phase: 'idle', muted: false, seconds: 0, note: '', level: 0, heard: '', reply: '' })
   const ep = createEndpointer()
@@ -111,9 +114,10 @@ export function createCallSession({
     const r = analyze(take)
     if (!r.hasSpeech || r.voicedSeconds < MIN_VOICED_SECONDS_CALL) return   // 咳嗽、碰桌子：不送
     let raw, timer
+    const names = safeNames(hints)
     try {
       const late = new Promise((_, rej) => { timer = setTimer(() => rej(new Error('辨識逾時，這句沒有送出。')), RECOGNIZE_TIMEOUT_MS) })
-      raw = await Promise.race([Promise.resolve(transcribe(takeToWavBase64(trim(take, r)))), late])
+      raw = await Promise.race([Promise.resolve(transcribe(takeToWavBase64(trim(take, r)), names)), late])
     } catch (e) {
       if (my !== gen) return
       if (/還沒下載/.test(e?.message || '')) { state.note = '語音辨識還沒準備好，通話已結束。'; void end({ keepNote: true }); return }
@@ -121,8 +125,8 @@ export function createCallSession({
       return
     } finally { clearTimer(timer) }
     if (my !== gen) return
-    const text = normalize(raw)
-    if (!text) { if (isHallucination(raw)) log('通話：丟掉靜音幻覺'); return }
+    const text = normalize(raw, names)
+    if (!text) { if (isHallucination(raw, names)) log('通話：丟掉靜音幻覺'); return }
     state.note = ''
     state.heard = text
     awaiting++

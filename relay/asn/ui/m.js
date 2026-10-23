@@ -329,8 +329,8 @@ const app = createApp({
 
     const callApi = bridge?.call?.available() ? {
       phaseText: MOBILE_PHASE_TEXT,
-      newCall: () => (liveCall = createMobileCall({
-        native: bridge.call, reactive, log: m => console.info('[ASN]', m),
+      newCall: ({ hints } = {}) => (liveCall = createMobileCall({
+        hints, native: bridge.call, reactive, log: m => console.info('[ASN]', m),
         send: async text => { const r = await core.send(lastChat.value, text); if (!r.ok) throw new Error(r.error || '寄信失敗') },   // 寄給目前這位；換人時通話會先掛斷
       })),
     } : null
@@ -642,7 +642,7 @@ const app = createApp({
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, ops, opsText, opsTitle, opsModels, opsModelNote, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
-      callApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
+      friends, callApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }
   },

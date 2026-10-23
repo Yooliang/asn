@@ -18,6 +18,7 @@ const app = createApp({
   setup() {
     const snap = ref(null), log = ref([])
     const f = computed(() => snap.value?.friends.find(x => x.id === id) ?? null)
+    const roster = computed(() => snap.value?.friends ?? [])   // 名單上的夥伴：通話辨識偏向這些名字
     const me = computed(() => snap.value?.me ?? { nick: '我', status: 'online' })
     const look = computed(() => normalizeLook(snap.value?.ui))   // 頭像模式／文字底色／收合：由樞紐（設定頁）決定
     const avatars = ref({})   // 各設備上傳的大頭貼（節點 → data URL），由樞紐推送
@@ -48,7 +49,7 @@ const app = createApp({
       emit('asn:cmd', { op: 'older', id: fid })
     })
     return {
-      callState, f, me, transport, selfNode, loadOlder, log, look, friendAv, meAv, voice, photoApi, shotApi, plain, ctl, RESIZE_DIRS, resizeFrom,
+      callState, f, roster, me, transport, selfNode, loadOlder, log, look, friendAv, meAv, voice, photoApi, shotApi, plain, ctl, RESIZE_DIRS, resizeFrom,
       send: text => emit('asn:cmd', { op: 'send', id, text }),
       nudge: () => emit('asn:cmd', { op: 'nudge', id }),
       attach: (photo, caption) => emit('asn:cmd', { op: 'attach', id, photo, caption }),

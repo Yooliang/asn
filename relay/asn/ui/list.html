@@ -175,7 +175,7 @@
       <li v-if="!chatTabMenuPanel"><button type="button" role="menuitem" @click="menuTogglePin">{{ tabPinLabel }}</button></li>
     </ul>
     <div class="chat-stack">
-      <chat-pane v-for="t in mergedTabs" :key="t.id" v-show="view === 'chat' && t.id === ui.active" :friend="t" :me="me" :log="logs[t.id] || []" :friend-av="avOf(t)" :me-av="meAv" :win-mode="ui.mode" :dp-mode="ui.dpMode" :bubble="ui.bubble" :toolbar="ui.toolbar" :dp-collapsed="ui.collapsed" :active="view === 'chat' && t.id === ui.active" :voice="voice" :agent-api="transport" :self-node="selfNode"
+      <chat-pane v-for="t in mergedTabs" :key="t.id" v-show="view === 'chat' && t.id === ui.active" :friend="t" :me="me" :log="logs[t.id] || []" :friend-av="avOf(t)" :me-av="meAv" :win-mode="ui.mode" :dp-mode="ui.dpMode" :bubble="ui.bubble" :toolbar="ui.toolbar" :dp-collapsed="ui.collapsed" :active="view === 'chat' && t.id === ui.active" :voice="voice" :hint-names="friends" :agent-api="transport" :self-node="selfNode"
         :photo-api="photoApi" :shot-api="shotApi" :load-older="loadOlder" @call-state="on => setPaneCall(t.id, on)" @send="text => sendTo(t.id, text)" @nudge="nudgeTo(t.id)" @attach="(p, cap) => sendAttachTo(t.id, p, cap)" @toggle-dp="toggleDp"></chat-pane>
       <!-- 指引、設定的聊天窗（整合模式）：跟好友的對話分頁同一套，各最多一個，內容換成被點的那一篇／那一類 -->
       <template v-for="k in PANEL_KINDS" :key="k">
