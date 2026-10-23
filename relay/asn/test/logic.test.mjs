@@ -26,7 +26,9 @@ test('震動標記：新格式整段內文才算、舊 [震動] 含有就算，�
   assert.equal(NUDGE_TAG, '[震動]')
   assert.equal(nudgeBody('H-ASN'), '（H-ASN 傳送了一個震動）\n' + NUDGE_HINT)
   assert.ok(hasNudge(nudgeBody('H-ASN')) && stripNudge(nudgeBody('H-ASN')) === '', '帶提示的兩行震動要認得、整段不顯示')
-  assert.ok(!hasNudge('（H-ASN 傳送了一個震動）\n另外我想問一件事'), '第二行是別的內容就不是震動')
+  assert.ok(hasNudge('（H-ASN 傳送了一個震動）\n另外我想問一件事'), '震動加一段話：仍是震動')
+  assert.equal(stripNudge('（H-ASN 傳送了一個震動）\n另外我想問一件事'), '另外我想問一件事', '只留那段話當文字訊息')
+  assert.equal(stripNudge('（H-ASN 傳送了一個震動）\r\n\r\n第一行\n第二行'), '第一行\n第二行')
   assert.ok(hasNudge('（H-ASN 傳送了一個震動）\n想回應的話，就回一個震動：寄一封內文只有「（你的名字 傳送了一個震動）」的信，不用另外回信。'), '舊版提示的震動仍認得')
   // Rust 端組的第二行要跟前端同一句
   assert.ok(fs.readFileSync(new URL('../src-tauri/src/relay.rs', import.meta.url), 'utf8').includes(`pub const NUDGE_HINT: &str = "${NUDGE_HINT}";`))

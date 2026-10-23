@@ -137,7 +137,8 @@ test('aegis: 白名單、成功帶 reply_to、error 重試一次、404、其他 
     const r = st.rosterPosts[0].agents
     // name＝中文名（沒有中文名才用 slug）、cwd_label＝slug
     assert.deepEqual(r.map(a => a.name), ['阿爾法', 'err', '不穩', 'ghost', 'weird'])
-    assert.deepEqual(r.map(a => a.cwd_label), ['alpha', 'err', 'flaky', 'ghost', 'weird'])
+    // cwd_label 一律空：畫面會把它當標題副標露出，不能是 slug
+    assert.deepEqual(r.map(a => a.cwd_label), ['', '', '', '', ''])
     assert.equal((log.match(/roster post failed/g) || []).length, 1)
   } finally { await st.close() }
 })
@@ -177,9 +178,36 @@ test('aegis: 希緒自己不列進 roster，寄給她的信回「不能自己問
       env: { IRORI_AEGIS_URL: `http://127.0.0.1:${st.port}`, IRORI_AEGIS_ALLOW: 'alpha,xi-xu' },
       until: () => st.acked.size >= 2 && st.rosterPosts.length >= 1,
     })
-    assert.deepEqual(st.rosterPosts[0].agents.map(a => a.cwd_label), ['alpha'])
+    assert.deepEqual(st.rosterPosts[0].agents.map(a => a.name), ['阿爾法'])
     for (const n of [1, 2]) assert.match(st.sent.find(s => s.reply_to === uid(n)).body, /不能自己問自己/)
     assert.equal(st.asks.length, 0)
+  } finally { await st.close() }
+})
+
+test('aegis: 成員答案第一行是震動句＋報告 → 拆成純震動＋一般信兩封；只有震動就一封；一般答案不動', async () => {
+  const ans = {
+    1: '（小良 傳送了一個震動）\n目前沒有進度要回報。',
+    2: '（小良 傳送了一個震動）',
+    3: '一般答案，順便提到（小良 傳送了一個震動）',
+    4: '（小良 傳送了一個震動）\n第一行\n第二行',
+  }
+  const st = await fakeServer({
+    inbox: [1, 2, 3, 4].map(n => mail(n, { to_agent: 'xiao-liang' })),
+    members: [{ slug: 'xiao-liang', name: '小良' }],
+    aegis: { 'xiao-liang': (n, b) => ({ json: { answer: ans[Number(b.question.match(/內文-(\d)/)[1])], status: 'success', member: 'xiao-liang' } }) },
+  })
+  try {
+    await runBridge({
+      script: 'bridge-aegis.mjs', st,
+      env: { IRORI_AEGIS_URL: `http://127.0.0.1:${st.port}`, IRORI_AEGIS_ALLOW: 'xiao-liang' },
+      until: () => st.acked.size >= 4 && st.rosterPosts.length >= 1,
+    })
+    const by = n => st.sent.filter(s => s.reply_to === uid(n)).map(s => s.body)
+    assert.deepEqual(by(1), ['（小良 傳送了一個震動）', '目前沒有進度要回報。'])
+    assert.deepEqual(by(2), ['（小良 傳送了一個震動）'])
+    assert.deepEqual(by(3), [ans[3]])
+    assert.deepEqual(by(4), ['（小良 傳送了一個震動）', '第一行\n第二行'])
+    for (const s of st.sent) { assert.equal(s.from_agent, '小良'); assert.equal(s.to_agent, 'W-政策') }
   } finally { await st.close() }
 })
 
