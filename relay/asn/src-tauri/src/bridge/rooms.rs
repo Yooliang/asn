@@ -8,7 +8,7 @@ use sha1::{Digest, Sha1};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-pub const ROOM_HINT: &str = "（群組訊息；只有被點名或帳號擁有者本人發問才需要回，回覆會經收發室貼回群組；不需要回就不要回）";
+pub const ROOM_HINT: &str = "這是一則群組訊息。請先看下面的歷史紀錄，確定這件事跟你有關（被點名、或是在回你剛才說的事）才回覆；跟你無關就不要回。";
 /// 轉交點名訊息時附的上下文：前面最近幾則
 pub const CONTEXT_COUNT: usize = 5;
 
@@ -162,6 +162,14 @@ mod tests {
         assert_eq!(room_text("專案群", &msg, None), format!("[群組 專案群] trust=member from=W/W-政策 #3\n{ROOM_HINT}\n群組內文-3"));
         let owner = json!({"seq": 4, "from": "~owner", "trust": "owner", "body": "x"});
         assert!(room_text("專案群", &owner, None).starts_with("[群組 專案群] trust=owner from=主人 #4\n"));
+    }
+
+    #[test]
+    fn 提示行逐字固定_與_node_及規格文件相同() {
+        let hint = "這是一則群組訊息。請先看下面的歷史紀錄，確定這件事跟你有關（被點名、或是在回你剛才說的事）才回覆；跟你無關就不要回。";
+        assert_eq!(ROOM_HINT, hint);
+        let doc = include_str!("../../../../../docs/design/MAIL-HEADER.md");
+        assert!(doc.contains(hint), "規格文件要有同一句");
     }
 
     #[test]

@@ -33,6 +33,7 @@ import { canInviteFrom, copyText, createGroupApi } from './lib/groups.mjs'
 import { createRoomHub } from './lib/room-hub.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, guideNav, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
 import { applyRename } from './lib/rename.mjs'
+import { checkAiWakeLimit, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE } from './lib/ai-wake-limit.mjs'
 import { GuideDoc } from './lib/guide-doc.mjs'
 
 const { createApp, reactive, ref, computed, watch } = Vue
@@ -646,6 +647,16 @@ const app = createApp({
       try { ownerName.value = await authApi.setAccountName(c.name); nameErr.value = ''; nameDraft.value = c.name }
       catch (e) { nameDraft.value = myName.value; nameErr.value = e.message; setTimeout(() => { nameErr.value = '' }, 5000) }
     }
+    // 群組裡 AI 之間互相叫醒的上限（帳號層設定，預設 5）：改了存後台；不合格或失敗就還原並提示
+    const wakeDraft = ref('5'), wakeErr = ref('')
+    const commitWake = async () => {
+      const c = checkAiWakeLimit(wakeDraft.value)
+      if (!c.ok) { wakeErr.value = c.error; setTimeout(() => { wakeErr.value = '' }, 5000); void loadWake(); return }
+      try { wakeDraft.value = String(await authApi.setAiWakeLimit(c.value)); wakeErr.value = '' }
+      catch (e) { wakeErr.value = e.message; setTimeout(() => { wakeErr.value = '' }, 5000); void loadWake() }
+    }
+    const loadWake = () => authApi.getAiWakeLimit().then(n => { wakeDraft.value = String(n) }).catch(() => {})
+    void loadWake()
     const acct = ref({ signed_in: false, email: '', known: false, error: '' })
     // 要放在 acct 定義之後：watch 的來源函式會立刻執行一次，放前面會踩到「初始化之前就取用」而整個監看失效
     watch([() => friends.value.length, () => acct.value.signed_in], () => { void backfillLast() })
@@ -664,7 +675,7 @@ const app = createApp({
     }
 
     return {
-      onboard, onboardApi, finishOnboard, ONBOARD_TEXT, nameDraft, nameErr, commitName,
+      onboard, onboardApi, finishOnboard, ONBOARD_TEXT, nameDraft, nameErr, commitName, wakeDraft, wakeErr, commitWake, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE,
       screen, fatal, login, loginNote, PROVIDERS, canStart, startLogin, cancelLogin,
       upd, updText: computed(() => bannerText(upd)), updButton: computed(() => buttonLabel(upd)), startUpdate, checkUpdate,
       pf, sw, pagerStyle, indicator, swipeStart, swipeMove, swipeEnd, goTab, TABS, TAB_LABEL, myName, meForChat, lastOf, vendorIcon: vendorBadgeHtml,

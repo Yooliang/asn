@@ -4,7 +4,7 @@
 // 所有資料庫存取經 SECURITY DEFINER 函式（只授權 service_role）。見 docs/AUTH.md。
 import { parseSelfName } from "./node_name.ts";
 
-export const ACCOUNT_ACTIONS = new Set(["account_bootstrap", "node_create", "node_claim", "node_update_request", "node_update_status", "cloud_node_create", "cloud_node_list", "cloud_node_revoke", "account_name"]);
+export const ACCOUNT_ACTIONS = new Set(["account_bootstrap", "node_create", "node_claim", "node_update_request", "node_update_status", "cloud_node_create", "cloud_node_list", "cloud_node_revoke", "account_name", "account_settings"]);
 
 export interface AuthUser {
   id: string;
@@ -145,6 +145,24 @@ export async function handleAccountAction(
     const d = data as Record<string, unknown>;
     if (typeof d?.error === "string") return mapError(d.error);
     return { status: 200, body: { name: d.name } };
+  }
+
+  // 帳號層設定（migration 20261023190000_group_ai_wake_limit.sql）：目前只有「AI 之間互相叫醒的上限」ai_wake_limit（0～20，預設 5）。
+  // body 帶 ai_wake_limit ＝改；沒帶＝讀。一律要本人的登入憑證（上面已驗過）。
+  if (action === "account_settings") {
+    const o = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+    let limit: number | null = null;
+    if (o.ai_wake_limit !== undefined && o.ai_wake_limit !== null) {
+      if (typeof o.ai_wake_limit !== "number" || !Number.isInteger(o.ai_wake_limit) || o.ai_wake_limit < 0 || o.ai_wake_limit > 20) {
+        return { status: 400, body: { error: "bad_request" } };
+      }
+      limit = o.ai_wake_limit;
+    }
+    const { data, error } = await deps.rpc("asn_account_settings", { p_user: user.id, p_ai_wake_limit: limit });
+    if (error) { console.error("account_settings", error); return { status: 500, body: { error: "internal" } }; }
+    const d = data as Record<string, unknown>;
+    if (typeof d?.error === "string") return mapError(d.error);
+    return { status: 200, body: { ai_wake_limit: d.ai_wake_limit } };
   }
 
   // 遠端更新（見 supabase/migrations/20261021070000_asn_remote_update.sql）：只有自己帳號名下的節點；對別人的節點一律 not_found

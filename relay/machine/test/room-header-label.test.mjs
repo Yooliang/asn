@@ -27,6 +27,12 @@ test('上下文行也用標示', () => {
   const t = contextText(room, [{ seq: 1, from: '/u:abc', from_label: '小良哥', body: 'x' }])
   assert.match(t, /#1 小良哥：x/)
 })
+test('提示行逐字固定（Rust、Node、規格文件三邊相同）', () => {
+  const HINT = '這是一則群組訊息。請先看下面的歷史紀錄，確定這件事跟你有關（被點名、或是在回你剛才說的事）才回覆；跟你無關就不要回。'
+  assert.equal(ROOM_HINT, HINT)
+  assert.ok(fs.readFileSync(path.join(here, '../../asn/src-tauri/src/bridge/rooms.rs'), 'utf8').includes(HINT))
+  assert.ok(fs.readFileSync(path.join(here, '../../../docs/design/MAIL-HEADER.md'), 'utf8').includes(HINT))
+})
 test('與 Rust 內建橋的固定文字逐字一致、規格文件有寫', () => {
   const rs = fs.readFileSync(path.join(here, '../../asn/src-tauri/src/bridge/rooms.rs'), 'utf8')
   assert.ok(rs.includes(RELATION_HINT))
