@@ -237,3 +237,48 @@ Google Play 資料安全性申報要補：「音訊：語音或聲音錄音」�
 - **群組對話**：不新增分頁，放在「夥伴」分頁各設備分組之後的一個分組「群組對話」（可收合，搜尋字比對群組名）。每列：群組名、人數、最後一句、未讀數；群組未讀併入「對話」頁籤的總未讀紅點。點進去＝對話分頁（`lastChat` 記成 `room:<代號>`），版面沿用 `ChatPane`；群組沒有震動、傳照片、傳檔案，工具列的鈕以 CSS 藏起來，只留表情符號。純邏輯在 `ui/lib/mobile-rooms.mjs`。
 - **資料與發言**：列表沿用電腦版的 `relay_rooms`（節點金鑰、限成員，每 60 秒與門鈴、回到前景時更新）；訊息讀取走新指令 `android_room_read`（動作 `room_read`，一定帶 since，讀完標已讀）；發言走新指令 `android_room_post`（動作 `room_post`，**要本人簽章**，沒登入在打後台前就回錯；內容只放行 room、body、from_agent）。發言用的成員身分：優先「這台節點~這支手機的視窗名」，其次節點本身，其次節點底下任一個。群組上限（每人每群組每小時 20 則）由後台擋，畫面顯示中文說明。
 - **使用指引**：「設置」分頁的一個項目，點進去是滿版獨立一頁（左上返回；先列篇目，再看內文），篇目與內文沿用 `lib/guides.mjs`（不複製），內文用 `guide-doc`（不用 v-html）。`lib/mobile-guides.mjs` 替每一篇標示手機適用程度：安裝收發室橋、讓雲端代理加入標「電腦版功能」，開始使用標「部分是電腦版功能」，群組、常見問題手機也適用。導覽 `{ tab: 'me', sheet: 'guide', guide: <篇目> }`，系統返回鍵先回篇目列表再回設置。
+
+## 十九、自動上傳 Play
+
+發版時把 Play 版 AAB 自動上傳到 Google Play「內部測試」軌道並直接發布，不用人去 Play Console 點。實作在 `relay/asn/scripts/play-upload.mjs`，用 Google Play Developer API（androidpublisher v3），不新增相依套件。
+
+**指令**（在 `relay/asn`）：
+
+- `npm run release:play -- --upload`：建置簽章 AAB 後接著上傳。
+- `npm run publish:play`：只上傳已建好的 `src-tauri/target/play/ASN_<版本>_play.aab`（可加 `--aab=<路徑>` 指定檔案）。
+
+**流程**：`edits.insert` → `edits.bundles.upload`（media 上傳）→ `edits.tracks.update`（`internal`、狀態 `completed`、`zh-TW` 更新說明取 `CHANGELOG.md` 最新一段，上限 500 字）→ `edits.commit`。任何一步失敗就不提交，並用 `edits.delete` 清掉半成品。請求有逾時（120 秒），只重試網路錯誤與 5xx（最多 3 次）。套件名 `tw.yooliang.asn`。版本碼（versionCode）由 Play 在上傳時回報，同一個版本碼不能重複上傳，所以重發前要先調高版本。
+
+**金鑰安全**：服務帳戶 JSON 只讀進記憶體，用 `node:crypto` 簽 JWT（RS256，範圍 `https://www.googleapis.com/auth/androidpublisher`）換存取權杖；不印出、不寫 log，錯誤訊息只有 HTTP 狀態與 Google 的錯誤代碼。
+
+**一次性設定**：
+
+1. Google Cloud Console 選（或建立）一個專案，啟用「Google Play Android Developer API」。
+2. 「IAM 與管理」→「服務帳戶」→ 建立服務帳戶（名稱例如 asn-play-upload），不必給專案角色。
+3. 進該服務帳戶 →「金鑰」→「新增金鑰」→ JSON，下載檔案。
+4. 把檔案存成 `%USERPROFILE%\.asn\play\play-service-account.json`（與上傳金鑰同一個限本人存取的資料夾；要放別處就設環境變數 `ASN_PLAY_SA_FILE`）。不進 repo。
+5. Play Console →「使用者和權限」→ 邀請新使用者，信箱填服務帳戶的 `client_email`；在「應用程式權限」加入 ASN，勾「發布到測試軌道」（內部測試）；送出邀請。權限生效可能要等數分鐘到數小時。
+6. 第一次必須已在 Play Console 手動建立過該 App 並上傳過第一版（API 不能建立新 App）。
+
+找不到金鑰檔時，指令會用中文說明並以非 0 結束。
+
+**GitHub Actions 恢復後**（同一支腳本直接用）：把服務帳戶 JSON 的全文存成 repo secret `ASN_PLAY_SA_JSON`，上傳金鑰檔與密碼另存為 `ASN_PLAY_UPLOAD_JKS`（base64）、`ASN_PLAY_UPLOAD_PASSWORD`。工作流程的步驟：
+
+```yaml
+- name: 還原 Play 金鑰
+  shell: bash
+  run: |
+    mkdir -p "$HOME/.asn/play"
+    printf '%s' "$ASN_PLAY_SA_JSON" > "$HOME/.asn/play/play-service-account.json"
+    printf '%s' "$ASN_PLAY_UPLOAD_JKS" | base64 -d > "$HOME/.asn/play/upload.jks"
+    printf '%s' "$ASN_PLAY_UPLOAD_PASSWORD" > "$HOME/.asn/play/upload.jks.password"
+  env:
+    ASN_PLAY_SA_JSON: ${{ secrets.ASN_PLAY_SA_JSON }}
+    ASN_PLAY_UPLOAD_JKS: ${{ secrets.ASN_PLAY_UPLOAD_JKS }}
+    ASN_PLAY_UPLOAD_PASSWORD: ${{ secrets.ASN_PLAY_UPLOAD_PASSWORD }}
+- name: 建置並上傳 Play 版
+  working-directory: relay/asn
+  run: npm run release:play -- --upload
+```
+
+只想在 CI 上傳（建置在別處）時，省略上傳金鑰那兩項，直接跑 `npm run publish:play`。

@@ -57,4 +57,10 @@ fs.mkdirSync(out, { recursive: true })
 const signed = path.join(out, `ASN_${version}_play.aab`)
 run(jdk('jarsigner'), ['-keystore', keystore, '-storepass:file', passFile, '-keypass:file', passFile, '-sigalg', 'SHA256withRSA', '-digestalg', 'SHA-256', '-signedjar', signed, unsigned, 'upload'])
 run(jdk('jarsigner'), ['-verify', signed])
-console.log(`已產生：${signed}（${(fs.statSync(signed).size / 1048576).toFixed(1)} MB）\n下一步：在 Play Console 的測試版本上傳這個檔。`)
+console.log(`已產生：${signed}（${(fs.statSync(signed).size / 1048576).toFixed(1)} MB）`)
+if (process.argv.includes('--upload')) {
+  // 接著自動上傳到 Play 內部測試並發布（設定見 docs/design/ANDROID.md「自動上傳 Play」）
+  run(process.execPath, ['scripts/play-upload.mjs', `--aab=${signed}`])
+} else {
+  console.log('下一步：在 Play Console 的測試版本上傳這個檔，或執行 npm run publish:play 自動上傳。')
+}

@@ -12,6 +12,7 @@
     "release": "node scripts/release.mjs",
     "release:android": "node scripts/release-android.mjs",
     "release:play": "node scripts/release-play.mjs",
+    "publish:play": "node scripts/play-upload.mjs",
     "pretest": "node scripts/prep.mjs",
     "test": "node scripts/run-tests.mjs",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml"
