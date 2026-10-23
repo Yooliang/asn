@@ -122,7 +122,7 @@ export function restoreSession(saved, { friends = [], pinned = [] } = {}) {
 export const sameSession = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 
 /** 尾端節流：連續呼叫只在安靜 ms 之後執行最後一次；flush 立刻執行還沒執行的 */
-export function trailingThrottle(fn, ms, timers = { set: setTimeout, clear: clearTimeout }) {
+export function trailingThrottle(fn, ms, timers = { set: (f, ms) => setTimeout(f, ms), clear: t => clearTimeout(t) }) {
   let t = null
   const run = () => { t = null; fn() }
   const call = () => { if (t !== null) timers.clear(t); t = timers.set(run, ms) }

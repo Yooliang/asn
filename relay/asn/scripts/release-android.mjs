@@ -10,13 +10,15 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { smokeGate, splitSkipFlag } from './smoke-gate.mjs'
 import { ANDROID_JSON, androidApkName, androidNotes, buildAndroidJson, parseAndroidArgs } from './release-android-lib.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const siteUpdate = path.join(root, '..', '..', 'site', 'public', 'update')
 const fail = m => { console.error(`發版中止：${m}`); process.exit(1) }
 let opts
-try { opts = parseAndroidArgs(process.argv.slice(2)) } catch (e) { fail(e.message) }
+const { skip: skipSmoke, rest: androidArgv } = splitSkipFlag(process.argv.slice(2))
+try { opts = parseAndroidArgs(androidArgv) } catch (e) { fail(e.message) }
 
 const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version
 const conf = JSON.parse(fs.readFileSync(path.join(root, 'src-tauri', 'tauri.conf.json'), 'utf8'))
@@ -32,6 +34,7 @@ if (!env.NDK_HOME && fs.existsSync(ndkDir)) env.NDK_HOME = path.join(ndkDir, fs.
 const run = (cmd, args) => { const r = spawnSync(cmd, args, { cwd: root, stdio: 'inherit', env, shell: false }); if (r.status !== 0) fail(`${path.basename(cmd)} 失敗（結束碼 ${r.status}）`) }
 const node = process.execPath
 
+if (!smokeGate({ root, skip: skipSmoke }).ok) fail('啟動冒煙測試沒過（用 npm run smoke:ui 重現；確定要略過可加 --skip-smoke）')
 run(node, ['scripts/prep.mjs'])
 // --features sideload：Rust 端編進自動更新；ORG_GRADLE_PROJECT_asnDist=sideload：外殼帶安裝權限與安裝程式碼（Play 版兩者都沒有）
 run(node, [path.join('node_modules', '@tauri-apps', 'cli', 'tauri.js'), 'android', 'build', '--apk', '--target', 'aarch64', '--features', 'sideload', '--ci'])
