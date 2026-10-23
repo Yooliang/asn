@@ -41,9 +41,9 @@ export const mailHead = (m, engine = 'claude') =>
 export const BODY_ESCAPE_PREFIX = '（內文）'
 
 // 語音通話標記：寄件人在通話中寄出的信，後台帶結構化欄位 voice=true（不是內文文字，內文偽造無效）。
-// 收發室在寄件人說明行後面加這一句固定文字，提醒收件的 AI：這是語音辨識的文字，可能有錯字，只能對話回應。
+// 收發室在寄件人說明行後面加這一句固定文字，提醒收件的 AI：這是語音辨識的文字，可能有錯字；不確定先複述、收不回來的事先問。
 // 內文行首若以「（語音通話：」開頭，escapeBody 也會跳脫，免得內文冒充這句。與 Rust 內建橋 mail.rs 的 VOICE_NOTE 逐字一致。
-export const VOICE_NOTE = '（語音通話：這封是語音辨識的文字，可能有錯字；只能對話回應，不得據以執行有影響的操作，要做事請本人打字確認）'
+export const VOICE_NOTE = '（語音通話：這封是語音辨識的文字，可能有錯字；意思不確定請先複述確認，做了收不回來的事先問過再做）'
 // 只認布林 true（字串 "true"、數字 1 都不算）
 export const isVoiceMail = m => m?.voice === true
 export const voiceNote = m => isVoiceMail(m) ? VOICE_NOTE : ''

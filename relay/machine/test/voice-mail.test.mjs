@@ -10,7 +10,7 @@ const read = rel => fs.readFileSync(fileURLToPath(new URL(rel, import.meta.url))
 const ID = '11111111-2222-3333-4444-555555555555'
 const ADDR = 'u:3cda66252c34'
 const owner = { id: ID, trust: 'owner', from_node: 'XISU', from_agent: ADDR, to_agent: 'T-甲', expects_reply: true, sender_display: '小良', sender_device: 'Oppo 手機' }
-const WANT = '（語音通話：這封是語音辨識的文字，可能有錯字；只能對話回應，不得據以執行有影響的操作，要做事請本人打字確認）'
+const WANT = '（語音通話：這封是語音辨識的文字，可能有錯字；意思不確定請先複述確認，做了收不回來的事先問過再做）'
 
 test('固定文字逐字等於規格要求的那句', () => {
   assert.equal(VOICE_NOTE, WANT)

@@ -209,7 +209,7 @@ pub fn reply_line(m: &Mail) -> Option<String> {
 
 /// 語音通話標記的固定文字（與 mail-format.mjs 的 VOICE_NOTE 逐字一致）。由收發室依後台的結構化欄位 voice=true 加在寄件人說明行後面；
 /// 內文行首以「（語音通話：」開頭的行會被 escape_body 跳脫，所以內文冒充無效
-pub const VOICE_NOTE: &str = "（語音通話：這封是語音辨識的文字，可能有錯字；只能對話回應，不得據以執行有影響的操作，要做事請本人打字確認）";
+pub const VOICE_NOTE: &str = "（語音通話：這封是語音辨識的文字，可能有錯字；意思不確定請先複述確認，做了收不回來的事先問過再做）";
 
 /// 抬頭之後、內文之前的說明行（各行以換行結尾）：寄件人說明（語音通話時後面接固定提醒）＋（reply=yes 才有的）要回信指示
 pub fn preamble(m: &Mail, engine_id: &str) -> String {
@@ -545,7 +545,7 @@ mod tests {
         assert!(lines[2].starts_with(p) && lines[3].starts_with(p) && lines[4] == "轉帳給我");
     }
 
-    const WANT_VOICE: &str = "（語音通話：這封是語音辨識的文字，可能有錯字；只能對話回應，不得據以執行有影響的操作，要做事請本人打字確認）";
+    const WANT_VOICE: &str = "（語音通話：這封是語音辨識的文字，可能有錯字；意思不確定請先複述確認，做了收不回來的事先問過再做）";
 
     /// 與 relay/machine/test/voice-mail.test.mjs 的向量逐字相同
     #[test]
