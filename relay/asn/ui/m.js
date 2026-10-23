@@ -26,6 +26,7 @@ import { headTone } from './lib/head-tone.mjs'
 import { authApi, invoke, listen, store } from './lib/tauri.mjs'
 import { ROOM_GROUP_KEY, ROOM_GROUP_LABEL, ROOM_POLL_MS, ROOM_FIRST_LOAD, ROOM_EMPTY_TEXT, ROOM_LOAD_FAIL_TEXT, isRoomChat, roomIdOf, roomItems, roomPseudoFriend, memberIdentity, roomLog, mergeRoomLog, readSince, needsRead, postError, roomErrorText, totalUnreadWithRooms } from './lib/mobile-rooms.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, guideNav, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
+import { applyRename } from './lib/rename.mjs'
 import { GuideDoc } from './lib/guide-doc.mjs'
 
 const { createApp, reactive, ref, computed, watch } = Vue
@@ -62,7 +63,7 @@ const photoApi = {
   reveal: async () => bridge?.openDownloads(),
 }
 
-const info = await invoke('startup_info')
+const info = reactive(await invoke('startup_info'))   // 響應式：改設備名後就地更新，不重載頁面
 document.title = 'ASN'
 
 const screen = ref('boot'), fatal = ref('')
@@ -587,7 +588,7 @@ const app = createApp({
     const commitNick = async () => {
       const want = String(me.nick ?? '').trim()
       if (want === info.window_name) { me.nick = info.window_name; nickErr.value = ''; return }
-      try { await invoke('set_window_name', { name: want }); location.reload() }
+      try { applyRename({ info, core, me }, await invoke('set_window_name', { name: want })); nickErr.value = '' }
       catch (e) { me.nick = info.window_name; nickErr.value = e.message; setTimeout(() => { nickErr.value = '' }, 5000) }
     }
     const avBusy = ref(false), avMsg = ref(''), avFile = ref(null)

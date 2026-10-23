@@ -4,6 +4,7 @@
 //   store:     { load() → 物件|null, save(物件) }
 //   isChatVisible(id) → Promise<boolean>：該好友的對話視窗是否開著且沒最小化
 import { isAvatarDataUrl } from './avatar.mjs'
+import { renamedInfo } from './rename.mjs'
 import { asnByNode } from './presence.mjs'
 import { buildFriends, cleanPsm, expectsReplyTo, isAsnWindow, mergeFriends } from './roster.mjs'
 import { contextAlertText, createContextWatch } from './context-usage.mjs'
@@ -82,6 +83,14 @@ export class AsnCore {
     this.timers.push(setInterval(() => void this.refreshRoster(), this.rosterMs))
     this.timers.push(setInterval(() => void this.pull('poll'), this.pollMs))
     this.timers.push(setInterval(() => void this.refreshSentStatus('poll'), this.statusPollMs))
+  }
+  // 改名後就地換名：記下舊名（改名前寄來的回信還要收）、立刻通知畫面、重抓名單（自己的視窗名要從名單濾掉）。不重載頁面
+  setWindowName(name) {
+    const r = renamedInfo({ window_name: this.windowName, old_names: [...this.aliases] }, name)
+    this.windowName = r.window_name
+    this.aliases = new Set(r.old_names)
+    this.emit('state')
+    void this.refreshRoster()
   }
   async stop() { this.timers.forEach(clearInterval); this.timers = []; await this.flush() }
 

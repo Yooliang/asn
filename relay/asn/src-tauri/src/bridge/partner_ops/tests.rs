@@ -1433,3 +1433,17 @@ fn 沒接_acp_管理入口_restart_一律不支援() {
     let res = acp_run(&r, "restart", json!({}));
     assert_eq!((res.status, res.detail.as_str()), ("failed", UNSUPPORTED));
 }
+
+#[test]
+fn 保護名單_ASN視窗名改名後跟著換() {
+    let d = tempfile::tempdir().unwrap();
+    let w = tempfile::tempdir().unwrap();
+    let relay = Arc::new(Relay::new("http://127.0.0.1:1/".into(), "fake-test-key".into(), "T".into(), "T-ASN".into()));
+    let r = relay.clone();
+    let protect = move |name: &str| is_protected(name, 0, "T-收發室", &r.window_name(), 0);
+    assert!(protect("T-ASN") && protect("T-收發室") && !protect("小希"));
+    crate::names::rename(&relay, d.path(), w.path(), "小希", NOW).unwrap();
+    assert!(protect("小希"), "改名後新的 ASN 視窗名要受保護");
+    assert!(!protect("T-ASN"), "舊名不再是 ASN 視窗");
+    assert!(is_protected("x", 77, "m", "a", 77) && !is_protected("x", 0, "m", "a", 0));
+}
