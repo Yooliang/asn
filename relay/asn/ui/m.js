@@ -15,6 +15,7 @@ import { startCallPoll } from './lib/call-poll.mjs'
 import { ONBOARD_STORE, TEXT as ONBOARD_TEXT, checkName, markOnboarded, planOnboarding } from './lib/onboard.mjs'
 import { POLL_MS as SECRET_POLL_MS, TEXT as SECRET_TEXT, countdownText as secretCountdown, errorText as secretError, normalizeList as secretList, nextToAsk as secretNext, secretError as secretValidate } from './lib/secret-ask.mjs'
 import { friendId } from './lib/roster.mjs'
+import { restoreMobileTab } from './lib/session.mjs'
 import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, showsInSheet } from './lib/mobile-ops.mjs'
 import { OP_LABEL, opFormError, partnerEngine } from './lib/partner-ops.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
@@ -90,6 +91,7 @@ async function startLogin(key) {
 }
 const cancelLogin = () => { void authApi.cancel(); login.phase = 'idle' }
 
+let savedTab = 'list'   // 上次離開時的大分頁（讀存檔後才知道）
 const nav = reactive(initialNav())
 const lastChat = ref('')   // 最後使用的那一位（對話分頁顯示它；存在手機本機設定，重開 App 仍記得）
 const me = reactive({ psm: '', status: 'online', nick: info.window_name })
@@ -151,7 +153,9 @@ if (screen.value === 'main') {
   Object.assign(prefs, normalizePrefs(saved.mobilePrefs))
   ownerName.value = typeof saved.ownerName === 'string' ? saved.ownerName : ''
   lastChat.value = normalizeLastChat(saved.lastChat)
-  watch([me, prefs, ownerName, lastChat], () => { const { nick, ...rest } = me; void meStore.save({ ...saved, me: rest, mobilePrefs: { ...prefs }, ownerName: ownerName.value, lastChat: lastChat.value }) }, { deep: true })
+  // 重開 App 回到上次的大分頁（名單／對話／設置）；對話那頁的對象就是 lastChat
+savedTab = restoreMobileTab(saved.navTab)
+watch([me, prefs, ownerName, lastChat, () => nav.tab], () => { const { nick, ...rest } = me; void meStore.save({ ...saved, me: rest, mobilePrefs: { ...prefs }, ownerName: ownerName.value, lastChat: lastChat.value, navTab: nav.tab }) }, { deep: true })
   watch(() => [me.status, me.psm], () => { void invoke('set_presence', { status: me.status, psm: me.psm ?? '' }).catch(() => {}) }, { immediate: true })
 
   core = new AsnCore({
@@ -187,6 +191,8 @@ if (screen.value === 'main') {
 
 // ---------- 導覽：每往下一層就推一筆瀏覽記錄，系統返回鍵＝上一頁（名單層再按才退到背景） ----------
 history.replaceState(initialNav(), '')
+// 回到上次的大分頁：名單那層先放著，再推一筆，系統返回鍵還是回到名單
+if (savedTab !== 'list') { const next = tabNav(savedTab); history.pushState(next, ''); Object.assign(nav, next) }
 window.addEventListener('popstate', e => {
   // 通話中按返回鍵＝掛斷，畫面留在原處（不跳到上一頁）
   if (callOn.value) { void liveCall?.end(); history.pushState({ tab: nav.tab, sheet: nav.sheet }, ''); return }
