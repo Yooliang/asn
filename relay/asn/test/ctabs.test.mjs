@@ -1,8 +1,13 @@
 // 整合模式對話分頁：固定、排序、右鍵選單批次關閉
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import {
   closeAllChatTabs,
+  closeIdleChatTabs,
+  idleTabIds,
+  isTabBusy,
+  withCallState,
   closeChatTab,
   closeOtherChatTabs,
   closeRightChatTabs,
@@ -124,4 +129,49 @@ test('拖到右半＝插在後面；拖到該區最後一個的右半＝放到�
   // 固定區最後一個的右半：只到固定區最後，不跑進一般區
   assert.equal(dropInsertBefore(tabs, pinned, 'p2', true), '')
   assert.deepEqual(moveChatTab(tabs, pinned, 'p1', dropInsertBefore(tabs, pinned, 'p2', true)).pinned, ['p2', 'p1'])
+})
+
+test('關閉閒置：忙碌、等回信、啟動中、通話中、已固定都留下', () => {
+  const fr = { a: { status: 'online' }, b: { status: 'busy' }, c: { status: 'away', waiting: true }, d: { status: 'online', inCall: true }, e: { status: 'online' }, f: { status: 'online' }, g: { status: 'online', pending: true } }
+  const of = id => fr[id]
+  assert.deepEqual(idleTabIds(['a', 'b', 'c', 'd', 'e', 'f', 'g'], ['e'], of), ['a', 'f'])
+  const r = closeIdleChatTabs({ tabs: ['a', 'b', 'e', 'f'], active: 'a' }, ['e'], of)
+  assert.deepEqual(r.tabs, ['b', 'e'])
+  assert.equal(r.active, 'b')   // 目前分頁閒置也關，換到鄰近留下的
+})
+
+test('關閉閒置：全是閒置＝同全部關閉；沒有閒置＝不動；找不到好友算閒置', () => {
+  const of = () => ({ status: 'online' })
+  const st = { tabs: ['a', 'b', 'p'], active: 'a' }
+  assert.deepEqual(closeIdleChatTabs(st, ['p'], of), closeAllChatTabs(st, ['p']))
+  assert.deepEqual(closeIdleChatTabs({ tabs: ['a'], active: 'a' }, [], of), { tabs: [], active: '' })
+  assert.deepEqual(closeIdleChatTabs({ tabs: ['a'], active: 'a' }, [], () => ({ status: 'busy' })), { tabs: ['a'], active: 'a' })
+  assert.deepEqual(idleTabIds(['x'], [], () => undefined), ['x'])
+  assert.equal(isTabBusy({ panel: 'guide', status: 'busy' }), false)
+})
+
+test('關閉閒置：通話中的分頁（整合模式 chat-pane 的 call-state、分開模式對話視窗的廣播）算忙碌，不被關', async () => {
+  const { createCallBeats, CALL_BEAT_EXPIRE_MS } = await import('../ui/lib/call-beats.mjs')
+  let t = 1000
+  const beats = createCallBeats({ now: () => t })
+  const merged = { b: true }
+  const fr = { a: { id: 'a', status: 'online' }, b: { id: 'b', status: 'online' }, c: { id: 'c', status: 'online' } }
+  const of = id => withCallState(fr[id], merged[id] || beats.isCalling(id))
+  // b 在整合模式通話中、c 在分開視窗通話中：只剩 a 可關
+  beats.onBeat({ id: 'c', active: true })
+  assert.deepEqual(idleTabIds(['a', 'b', 'c'], [], of), ['a'])
+  // c 掛斷（active:false）、b 的 chat-pane 回報結束：都變閒置
+  beats.onBeat({ id: 'c', active: false }); delete merged.b
+  assert.deepEqual(idleTabIds(['a', 'b', 'c'], [], of), ['a', 'b', 'c'])
+  // 視窗被直接關掉沒廣播結束：超過期限就當作結束，不會永遠卡著關不掉
+  beats.onBeat({ id: 'c', active: true }); t += CALL_BEAT_EXPIRE_MS
+  assert.equal(beats.isCalling('c'), false)
+  assert.equal(withCallState(undefined, true), undefined, '找不到好友仍當作閒置')
+  assert.equal(isTabBusy(withCallState({ status: 'online' }, true)), true)
+})
+
+test('關閉閒置：名單視窗真的把通話狀態接到分頁（接線守門）', () => {
+  const js = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8'), html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
+  assert.match(html, /@call-state="on => setPaneCall\(t\.id, on\)"/, '整合模式的 chat-pane 通話事件要接上')
+  assert.match(js, /tabFriendOf = id => withCallState\([^\n]*callBeats\.isCalling\(id\)/, '分開模式的廣播也要算進去')
 })

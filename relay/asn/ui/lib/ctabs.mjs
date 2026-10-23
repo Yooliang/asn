@@ -89,6 +89,32 @@ export function closeAllChatTabs(st, pinned) {
   return { tabs, active }
 }
 
+/**
+ * 這個分頁「在忙」嗎：對方視窗忙碌中（status＝busy）、正在等對方回信（waiting）、夥伴還在啟動（pending），
+ * 或通話中（inCall）。找不到好友資料（f 為空）就當作閒置。指引、設定的面板分頁沒有對方，一律閒置。
+ */
+export function isTabBusy(f) {
+  if (!f || f.panel) return false
+  return f.status === 'busy' || Boolean(f.waiting) || Boolean(f.pending) || Boolean(f.inCall)
+}
+
+/** 把「通話中」標到好友物件上（isTabBusy 讀 inCall）；找不到好友（空）原樣回傳，不憑空造 */
+export function withCallState(f, inCall) {
+  return f && inCall ? { ...f, inCall: true } : f
+}
+
+/** 關閉閒置用：回傳可關的閒置分頁 id（已固定的不動；忙碌的留下）。friendOf(id) 回該分頁的好友物件 */
+export function idleTabIds(tabs, pinned, friendOf) {
+  const pinSet = new Set(normalizePinned(pinned))
+  return tabs.filter(id => !pinSet.has(id) && !isTabBusy(friendOf(id)))
+}
+
+/** 關閉閒置：只關 idleTabIds 列出的；目前分頁若閒置也關，全關光時行為同「全部關閉」（只留已固定） */
+export function closeIdleChatTabs(st, pinned, friendOf) {
+  const idle = new Set(idleTabIds(st.tabs, pinned, friendOf))
+  return closeWhere(st, pinned, id => idle.has(id))
+}
+
 /** 切換固定；回傳新 pinned 與重排後的 tabs */
 export function toggleChatPin(st, id, pinned) {
   const pin = normalizePinned(pinned)
