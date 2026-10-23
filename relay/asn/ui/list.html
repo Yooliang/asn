@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Agent Sync Network Messenger</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="group.css">
 </head>
 <body>
 <div id="app" class="win" v-cloak @click="avMenu = false; closeChatTabMenu(); closeBuddyMenu(); closeLaunchPicker()">
@@ -105,13 +106,21 @@
           </div>
         </template>
         <div class="list" v-else-if="tab === 'groups'">
+          <div class="gl-actions">
+            <button class="gs-btn" type="button" @click.stop="groupFlow.openCreate()">建立群組</button>
+            <button class="gs-btn" type="button" @click.stop="groupFlow.openJoin()">加入群組</button>
+          </div>
           <ul>
-            <li v-for="r in rooms" :key="r.id" class="room">
-              <span class="room-ic"></span>
-              <span class="b-text"><span class="b-line"><span class="b-nick" v-html="emo(r.name)"></span><span class="b-st">({{ r.count }} 人)</span></span><span class="b-psm" v-if="r.last" v-html="emo(r.last)"></span></span>
+            <li v-for="r in roomRows" :key="r.id" class="room-item">
+              <button class="room-btn" type="button" @click="openChat(r.chatId)">
+                <span class="room-ic"></span>
+                <span class="b-text"><span class="b-line"><span class="b-nick" v-html="emo(r.name)"></span><span class="b-st">({{ r.count }} 人)</span></span><span class="b-psm" v-if="r.last" v-html="emo(r.last)"></span></span>
+                <span class="unread" v-if="r.unread">{{ r.unread }}</span>
+              </button>
             </li>
           </ul>
-          <div class="empty-list" v-if="!rooms.length">{{ roomsErr ? '讀不到群組。' : '目前不在任何群組。' }}</div>
+          <div class="empty-list" v-if="!roomRows.length">{{ hub.st.err ? '讀不到群組。' : '還沒有群組。' }}</div>
+          <p class="gl-empty-hint" v-if="!roomRows.length && !hub.st.err">自己建立一個，或貼上別人給你的邀請連結加入。</p>
         </div>
         <div class="list guide-list" v-else-if="tab === 'guide'">
           <ul>
@@ -176,6 +185,7 @@
     </ul>
     <div class="chat-stack">
       <chat-pane v-for="t in mergedTabs" :key="t.id" v-show="view === 'chat' && t.id === ui.active" :friend="t" :me="me" :log="logs[t.id] || []" :friend-av="avOf(t)" :me-av="meAv" :win-mode="ui.mode" :dp-mode="ui.dpMode" :bubble="ui.bubble" :toolbar="ui.toolbar" :dp-collapsed="ui.collapsed" :active="view === 'chat' && t.id === ui.active" :voice="voice" :hint-names="friends" :agent-api="transport" :self-node="selfNode"
+        :room-cards="hub.st.cards[t.id.slice(5)] || []" :group-menu="true" @group-menu="op => openGroupMenu(t.id, op)" @group-decide="(cid, ok) => decideCard(t.id, cid, ok)"
         :photo-api="photoApi" :shot-api="shotApi" :load-older="loadOlder" @call-state="on => setPaneCall(t.id, on)" @send="(text, opts) => sendTo(t.id, text, opts)" @nudge="nudgeTo(t.id)" @attach="(p, cap) => sendAttachTo(t.id, p, cap)" @toggle-dp="toggleDp"></chat-pane>
       <!-- 指引、設定的聊天窗（整合模式）：跟好友的對話分頁同一套，各最多一個，內容換成被點的那一篇／那一類 -->
       <template v-for="k in PANEL_KINDS" :key="k">
@@ -316,6 +326,7 @@
       </div>
     </div>
   </div>
+<group-sheet :flow="groupFlow"></group-sheet>
 </div>
 <script src="vendor/vue.global.prod.js"></script>
 <script type="module" src="list.js"></script>

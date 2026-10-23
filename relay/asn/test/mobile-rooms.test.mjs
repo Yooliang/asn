@@ -51,7 +51,7 @@ test('訊息轉對話記錄：自己的成員身分算我（不顯示名字）�
     { seq: 3, from: '~owner', body: '看圖', at: '2026-10-20T10:02:00Z', attachments: [{ name: 'a.png' }, {}] },
     { seq: 'x', body: '壞的' }, null,
   ], ['P~我的手機-ASN', 'P'])
-  assert.deepEqual(log.map(e => [e.seq, e.k, e.who]), [[1, 'them', '小文'], [2, 'me', ''], [3, 'them', '帳號擁有者']])
+  assert.deepEqual(log.map(e => [e.seq, e.k, e.who]), [[1, 'them', '小文'], [2, 'me', ''], [3, 'them', '成員']])
   assert.equal(log[2].text, '看圖\n（附件：a.png，請用電腦版查看）')
   assert.equal(log[0].t, Date.parse('2026-10-20T10:00:00Z')); assert.equal(log[0].id, 'room-1')
   assert.deepEqual(roomLog(null, []), [])

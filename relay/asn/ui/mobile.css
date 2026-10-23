@@ -241,6 +241,10 @@ body > .callview.mobile{position:fixed;inset:0;z-index:90;padding:calc(env(safe-
 /* 群組對話：名單裡的群組列、對話頁（沿用對話版面，群組沒有震動、傳照片、傳檔案、語音，工具列只留表情符號） */
 .m-room-ic{display:flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:12px;color:#fff;background:linear-gradient(160deg,#6fb6f0,#2f6fb8);box-shadow:0 0 0 2px #cfe3f7}
 .m-chat.is-room .toolbar>.tool{display:none}
+.m-rooms-actions{display:flex;gap:8px;padding:6px 14px 8px}
+.m-rooms-actions .m-btn{flex:1}
+.m-rooms-empty{padding:2px 14px 8px;margin:0}
+.m-chat .gc-list{max-height:46%}
 .m-room-note{padding:6px 14px;background:var(--warn-bg);border-bottom:1px solid var(--warn-line)}
 
 /* 設置分頁的「使用指引」入口與滿版指引頁 */
