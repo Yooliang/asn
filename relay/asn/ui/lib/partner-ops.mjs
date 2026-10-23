@@ -4,10 +4,12 @@
 import { NAME_RE } from './mobile-launch.mjs'
 import { isRelayRoom } from './roster.mjs'
 
-export const OPS = ['info', 'rename', 'model', 'close', 'handover', 'resume']
-// 在線的 AI 夥伴五項；離線的只有「喚醒」
+export const OPS = ['info', 'rename', 'model', 'close', 'handover', 'resume', 'restart']
+// Claude 視窗：在線的五項；離線的只有「喚醒」
 export const ONLINE_OPS = ['info', 'rename', 'model', 'close', 'handover']
-export const OP_LABEL = { info: '詳情', rename: '改名', model: '切換模型', close: '關閉視窗', handover: '接班換手', resume: '喚醒' }
+// ACP 工作者（Gemini 等收發室自己跑的背景工作者）：只有詳情、重開、接班換手；其餘電腦端會回「這類夥伴不支援」，所以畫面不顯示
+export const ACP_OPS = ['info', 'restart', 'handover']
+export const OP_LABEL = { info: '詳情', rename: '改名', model: '切換模型', close: '關閉視窗', handover: '接班換手', resume: '喚醒', restart: '重開' }
 export const NOTE_MAX = 1000
 export const MODEL_RE = /^[A-Za-z0-9._[\]-]{1,60}$/
 export const OP_POLL_MS = 3000
@@ -20,15 +22,19 @@ export const REASON = {
   unknown: '還沒查到這台電腦的設定，請稍後再試',
   checking: '查詢中，請稍候…',
   offline: '這台電腦或這個視窗不在線',
-  closed: '這台電腦沒有開放遠端管理視窗（要在那台電腦的設定打開「允許遠端開視窗與管理視窗」）',
-  deviceOffline: '那台電腦現在不在線，叫不醒（要那台電腦的 ASN 開著）',
+  closed: '這台電腦沒有開放遠端管理視窗（要到電腦的設定打開「允許遠端開視窗與管理視窗」）',
+  deviceOffline: '電腦現在不在線，叫不醒（要讓電腦的 ASN 開著）',
   notClaude: '這位夥伴用的引擎還不能喚醒',
   unsupported: '電腦端或收發室還不支援，請先更新',
 }
-export const STALE_TEXT = '那台電腦的 ASN 版本可能太舊，或沒有在跑'
+export const STALE_TEXT = 'ASN 版本可能太舊，或沒有在跑'
 
-// 不是「電腦上的 AI 視窗」的對象：人、手機、雲端代理（節點種類），群組、ASN 與收發室視窗
-const NON_WINDOW_KINDS = new Set(['owner', 'person', 'human', 'phone', 'mobile', 'android', 'cloud', 'cloud-agent', 'grok', 'room', 'group'])
+// 不是 AI 夥伴的對象：人、手機，群組、ASN 與收發室視窗
+const NON_AI_KINDS = new Set(['owner', 'person', 'human', 'phone', 'mobile', 'android', 'room', 'group'])
+// 雲端代理（Grok 等）：名單 engine 或節點種類是這些。不在電腦上跑，沒有視窗可管，只能封存
+const CLOUD_ENGINES = new Set(['cloud', 'cloud-agent', 'grok'])
+// 由內建收發室自己跑的背景工作者（ACP）：名單 engine 是它們的引擎名
+const ACP_ENGINES = new Set(['gemini', 'agy', 'antigravity', 'acp'])
 
 // 查詢前的初始環境：登入狀態還不知道（null），不是「沒登入」；checking＝第一次查詢還沒回來
 export const initialOpsCtx = () => ({ machines: {}, loaded: false, signedIn: null, checking: true, authError: '', loadError: '' })
@@ -46,26 +52,44 @@ export function loadBlock(ctx = {}) {
   return ctx.checking ? REASON.checking : REASON.unknown
 }
 
-// 是不是能管理的 AI 視窗。ctx.asn＝節點→在線的 ASN 視窗（名單帶的）；ctx.nonWindowNodes＝已知是手機／雲端代理的節點（選填）
-export function isManageable(friend, ctx = {}) {
+// 這位夥伴屬於哪一類：claude（名單沒寫引擎也算）、acp、cloud，其他（Codex 等）回 other
+export function partnerEngine(friend) {
+  const engine = String(friend?.engine ?? '').trim().toLowerCase()
+  const kind = String(friend?.kind ?? '').trim().toLowerCase()
+  if (CLOUD_ENGINES.has(engine) || CLOUD_ENGINES.has(kind)) return 'cloud'
+  if (!engine || engine === 'claude') return 'claude'
+  if (ACP_ENGINES.has(engine)) return 'acp'
+  return 'other'
+}
+
+// 是不是 AI 夥伴（任何引擎都算，雲端代理也算；封存對它們都可用）。ctx.asn＝節點→在線的 ASN 視窗（名單帶的）；ctx.nonWindowNodes＝已知是手機的節點（選填）
+export function isAiPartner(friend, ctx = {}) {
   const f = friend ?? {}
   if (!f.node || !f.agent) return false
   if (f.room || f.group || f.isRoom || f.person || f.isPerson) return false
-  if (f.kind && NON_WINDOW_KINDS.has(String(f.kind).toLowerCase())) return false
+  if (f.kind && NON_AI_KINDS.has(String(f.kind).toLowerCase())) return false
   if ((ctx.nonWindowNodes ?? []).includes(f.node)) return false
   if (f.engine === 'asn' || isRelayRoom(f.agent)) return false
   if ((ctx.asn?.[f.node] ?? []).some(w => w?.window_name === f.agent)) return false
   return true
 }
 
-// 選單項目 { key, label, ok, reason }：在線的 AI 夥伴五項；離線的 AI 夥伴只有「喚醒」；不是能管理的視窗回空陣列（不顯示「⋯」）。
+// 能不能顯示「⋯」與右鍵的管理項目：AI 夥伴，而且是 Claude 視窗或 ACP 工作者。雲端代理與其他引擎不顯示（按了也只會失敗）
+export function isManageable(friend, ctx = {}) {
+  if (!isAiPartner(friend, ctx)) return false
+  const e = partnerEngine(friend)
+  return e === 'claude' || e === 'acp'
+}
+
+// 選單項目 { key, label, ok, reason }：Claude 視窗在線五項、離線只有「喚醒」；ACP 工作者只有詳情、重開、接班換手；不是能管理的夥伴回空陣列（不顯示「⋯」）。
 // ctx：{ machines（節點→設定）, loaded, signedIn, friends, asn, nonWindowNodes, supported（後台有沒有 partner_op；false＝舊後台） }
 export function menuItems(friend, ctx = {}) {
   if (!isManageable(friend, ctx)) return []
-  if (friend.status === 'offline') return resumeItems(friend, ctx)
+  const acp = partnerEngine(friend) === 'acp'
+  if (friend.status === 'offline') return acp ? [] : resumeItems(friend, ctx)
   const base = baseReason(friend, ctx)
   const machine = ctx.machines?.[friend.node]
-  return ONLINE_OPS.map(key => {
+  return (acp ? ACP_OPS : ONLINE_OPS).map(key => {
     let reason = base
     // 詳情是唯讀，不需要那台電腦開放；其餘要開放（launcher 不為空）。沒查到設定時也不能確定開放了沒
     if (!reason && key !== 'info') {
@@ -76,7 +100,7 @@ export function menuItems(friend, ctx = {}) {
   })
 }
 
-// 離線夥伴的「喚醒」：要有登入、那台電腦在線且開放遠端管理；這位夥伴用的引擎還不能喚醒（名單上沒寫引擎就當 Claude）
+// 離線夥伴的「喚醒」：要有登入、電腦在線且開放遠端管理；這位夥伴用的引擎還不能喚醒（名單上沒寫引擎就當 Claude）
 function resumeItems(friend, ctx) {
   if (friend.engine && friend.engine !== 'claude') return []
   let reason = ''
@@ -131,12 +155,12 @@ export function buildOpRequest(friend, op, input = {}) {
 const CODE_TEXT = {
   unauthorized: REASON.needLogin,
   forbidden: '只有本人能管理夥伴視窗，請確認已登入同一個帳號',
-  not_found: '找不到這個視窗（可能剛關掉，或那台電腦不在線）',
+  not_found: '找不到這個視窗（可能剛關掉，或電腦不在線）',
   no_launcher: REASON.closed,
   bad_name: '名字只能用英數、連字號、中文，1～40 字，不能以連字號開頭',
   bad_model: '模型名稱只能用英數與 . _ [ ] -，1～60 字',
   bad_note: `補充的話最多 ${NOTE_MAX} 字`,
-  name_taken: '那台電腦已經有同名的視窗，換個名字',
+  name_taken: '電腦上已經有同名的視窗，換個名字',
   busy: '這個視窗還有一個操作在進行中，等它完成再試',
   rate_limited: '這台電腦這個小時管理太多次了，稍後再試',
   protected: '收發室與 ASN 自己的視窗不能這樣操作',
@@ -166,6 +190,7 @@ const DONE_TEXT = {
   close: '視窗已關閉，對話記錄還在。',
   handover: '接班換手完成，新視窗開好了。',
   resume: '已喚醒，視窗開好了。',
+  restart: '已重開，對話保留。',
 }
 // 接班換手的三個階段（電腦端用 detail 回報 stage:代號）
 export const HANDOVER_STEPS = [
@@ -193,7 +218,7 @@ function handoverExtra(result) {
   const r = result && typeof result === 'object' && !Array.isArray(result) ? result : {}
   const lines = []
   if (typeof r.handoff_path === 'string' && r.handoff_path) lines.push(`交接檔：${short(r.handoff_path, 300)}`)
-  if (r.handoff_done === false) lines.push('前任沒有寫完交接，新夥伴會以前任的對話紀錄為主。')
+  if (r.handoff_done === false) lines.push(r.kind === 'acp' ? '這類夥伴沒有請前任寫交接，新對話從空白開始，第一句是接班說明。' : '前任沒有寫完交接，新夥伴會以前任的對話紀錄為主。')
   return lines
 }
 
@@ -219,13 +244,13 @@ export function progressView(row, { op = row?.op, sentAt = 0, now = Date.now() }
       if (op === 'handover') {
         const stage = stageOf(row.detail)
         const step = HANDOVER_STEPS.find(s => s.key === stage)
-        return { phase: 'working', done: false, text: step ? `${step.text}中…` : '那台電腦正在處理…', steps: stepsAt(stage) }
+        return { phase: 'working', done: false, text: step ? `${step.text}中…` : '正在處理…', steps: stepsAt(stage) }
       }
       if (stageOf(row.detail) === 'queued') return { phase: 'working', done: false, text: '排隊中，等它忙完…' }
-      return { phase: 'working', done: false, text: '那台電腦正在處理…' }
+      return { phase: 'working', done: false, text: '正在處理…' }
     default:
       if (waited > OP_GIVE_UP_MS) return { phase: 'failed', done: true, text: `沒有成功：${STALE_TEXT}` }
-      return { phase: 'sent', done: false, text: '已經送出，等那台電腦接手…' }
+      return { phase: 'sent', done: false, text: '正在發送指令…' }
   }
 }
 
@@ -254,6 +279,8 @@ function contextText(c) {
   const tail = Number.isFinite(used) && Number.isFinite(limit) && limit > 0 ? `${tokensText(used)} / ${tokensText(limit)}` : ''
   return head && tail ? `${head}（${tail}）` : head || tail
 }
+const PERM_LABEL = { read: '讀取', write: '寫入', execute: '執行', network: '上網' }
+const VERDICT_TEXT = { allow: '允許', ask: '詢問', deny: '拒絕' }
 const pick = (o, ...keys) => { for (const k of keys) if (o[k] != null && o[k] !== '') return o[k] }
 const short = (v, n = 200) => String(v).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, n)
 
@@ -310,5 +337,15 @@ export function infoRows(result, friend = null) {
     add('Claude 外掛', claudeModText(devMod, loaded))
   } else if (modOn != null) add('ASN 外掛', modOn ? '已安裝' : '沒有安裝')
   add('上下文用量', contextText(pick(r, 'context', 'context_usage')))
+  // 收發室自己跑的背景工作者（ACP）另有的欄位
+  const perm = r.permissions && typeof r.permissions === 'object' && !Array.isArray(r.permissions) ? r.permissions : null
+  if (perm) {
+    const text = ['read', 'write', 'execute', 'network'].filter(k => VERDICT_TEXT[perm[k]]).map(k => `${PERM_LABEL[k]}${VERDICT_TEXT[perm[k]]}`).join('、')
+    add('權限', text)
+  }
+  if (typeof r.process_running === 'boolean') add('程序', r.process_running ? '執行中' : '沒有在跑')
+  if (typeof r.has_session === 'boolean') {
+    add('對話接續', !r.has_session ? '還沒有對話紀錄' : r.load_session === true ? '重開後接續上次的對話' : r.load_session === false ? '重開後會開新的對話' : '')
+  }
   return rows
 }

@@ -16,7 +16,7 @@ import { ONBOARD_STORE, TEXT as ONBOARD_TEXT, checkName, markOnboarded, planOnbo
 import { POLL_MS as SECRET_POLL_MS, TEXT as SECRET_TEXT, countdownText as secretCountdown, errorText as secretError, normalizeList as secretList, nextToAsk as secretNext, secretError as secretValidate } from './lib/secret-ask.mjs'
 import { friendId } from './lib/roster.mjs'
 import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, showsInSheet } from './lib/mobile-ops.mjs'
-import { OP_LABEL, opFormError } from './lib/partner-ops.mjs'
+import { OP_LABEL, opFormError, partnerEngine } from './lib/partner-ops.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
 import { opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
 import { defaultPartnerName } from './lib/partner.mjs'
@@ -409,7 +409,7 @@ const app = createApp({
     const opsCtx = computed(() => ({ machines: lchData.machines, loaded: lchData.loaded, signedIn: acctSigned(), authError: acct.value.error, friends: friends.value, nonWindowNodes: [info.node] }))
     const opsItems = computed(() => (chatFriend.value ? manageItems(chatFriend.value, opsCtx.value) : []))
     const ops = reactive({ phase: 'menu', newName: '', note: '', model: '', error: '', view: null })
-    const opsText = computed(() => opDialogText(ops.phase, chatFriend.value?.agent || chatFriend.value?.nick || '', chatFriend.value?.device || ''))
+    const opsText = computed(() => opDialogText(ops.phase, chatFriend.value?.agent || chatFriend.value?.nick || '', chatFriend.value?.device || '', partnerEngine(chatFriend.value)))
     const opsTitle = computed(() => (ops.phase === 'menu' ? (chatFriend.value?.nick ?? '') : OP_LABEL[ops.phase] ?? ''))
     const opsModels = phoneModels(), opsModelNote = MODEL_NOTE
     const opsRun = ref(null)   // 對話頁頂端的進度：{ op, view }
@@ -442,7 +442,7 @@ const app = createApp({
       if (inSheet) ops.phase = 'info'
       else history.back()
       const set = v => { if (inSheet) { if (token === opsToken) ops.view = v } else opsRun.value = { op, view: v } }
-      set({ phase: 'sent', done: false, text: '已經送出，等那台電腦接手…' })
+      set({ phase: 'sent', done: false, text: '正在發送指令…' })
       const v = await runPartnerOp(opsTransport, f, op, input, { onUpdate: set, cancelled: () => inSheet && token !== opsToken })
       if (!inSheet && v?.phase === 'done') {
         await core.refreshRoster()   // 狀態與名字變了：重新拉名單；改名後對話分頁跳到新名字

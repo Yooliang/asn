@@ -33,7 +33,7 @@ test('送出並輪詢：只送 node／name／op 與該動作的欄位，進度�
   const { v, seen } = await run(api, F('H', '小文'), 'handover', { note: ' 先看 PR ', newName: 'x', model: 'y' })
   assert.deepEqual(api.calls.op, [{ node: 'H', name: '小文', op: 'handover', note: '先看 PR' }])
   assert.deepEqual(api.calls.ops, [['op-1'], ['op-1'], ['op-1'], ['op-1']])
-  assert.deepEqual(seen.map(x => x.text), ['已經送出，等那台電腦接手…', '已經送出，等那台電腦接手…', '請前任寫交接中…', '關閉前任視窗中…', '接班換手完成，新視窗開好了。'])
+  assert.deepEqual(seen.map(x => x.text), ['正在發送指令…', '正在發送指令…', '請前任寫交接中…', '關閉前任視窗中…', '接班換手完成，新視窗開好了。'])
   assert.equal(v.phase, 'done'); assert.deepEqual(v.extra, ['交接檔：D:/h/a.md'])
 })
 
@@ -167,4 +167,14 @@ test('三個畫面都用「未知」當初始值，不再寫死 signedIn:false',
   const m = read('ui/m.js')
   assert.ok(m.includes('acctSigned()') && !/signedIn:\s*acct\.value\.signed_in/.test(m), '手機版要區分「還沒查到」')
   assert.ok(!/props\.friend [!=]== f/.test(read('ui/lib/actionbar.mjs')), '查詢回來要比夥伴 ID，不能比物件')
+})
+
+test('對話框文字：重開要確認、接班換手依引擎說不同的事（ACP 不請前任寫交接）', () => {
+  const r = opDialogText('restart', 'Gemini', '家用機', 'acp')
+  assert.equal(r.auto, false); assert.equal(r.title, '重開'); assert.match(r.lead, /背景工作者/); assert.match(r.lead, /對話會保留/)
+  const acp = opDialogText('handover', 'Gemini', '', 'acp')
+  assert.ok(acp.points.some(p => /不會請前任寫交接/.test(p)))
+  const claude = opDialogText('handover', '小文', '')
+  assert.ok(claude.points.some(p => /先請它把交接寫到一個檔案/.test(p)))
+  for (const t of [r, acp, claude]) for (const s of [t.title, t.lead, t.ok, ...t.points]) assert.ok(!/[A-Za-z]{4,}/.test(s.replace('Gemini', '')), `純中文：${s}`)
 })

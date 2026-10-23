@@ -3,7 +3,7 @@
 // 純繁體中文；不顯示節點代號與夥伴 ID。node 也要能載入（測試），所以 Vue 只在元件 setup 裡才取用。
 import { AsnDialog } from './dialog.mjs'
 import { machinesByNode } from './mobile-launch.mjs'
-import { OP_LABEL, OP_POLL_MS, buildOpRequest, infoRows, opErrorText, opFormError, progressView } from './partner-ops.mjs'
+import { OP_LABEL, OP_POLL_MS, buildOpRequest, infoRows, opErrorText, opFormError, partnerEngine, progressView } from './partner-ops.mjs'
 
 const errText = e => String(e?.message ?? e ?? '').replace(/\s+/g, ' ').trim().slice(0, 80) || '原因不明'
 
@@ -45,13 +45,17 @@ export async function runPartnerOp(api, friend, op, input, { onUpdate = () => {}
 }
 
 // 各動作的對話框文字（給人看；device＝設備名）。confirm＝要先確認；auto＝不用確認直接送出
-export function opDialogText(op, name, device = '') {
+export function opDialogText(op, name, device = '', engine = 'claude') {
   const where = device ? `在「${device}」上的` : ''
-  const title = { info: `${name} 的詳情`, rename: '改名', close: '關閉視窗', handover: '接班換手', resume: '喚醒' }[op] ?? OP_LABEL[op] ?? ''
+  const title = { info: `${name} 的詳情`, rename: '改名', close: '關閉視窗', handover: '接班換手', resume: '喚醒', restart: '重開' }[op] ?? OP_LABEL[op] ?? ''
   switch (op) {
     case 'rename': return { title, lead: `要把「${name}」改成什麼名字？名字只能用英數、連字號、中文，1～40 字，不能以連字號開頭。`, points: [], ok: '改名', auto: false }
     case 'close': return { title, lead: `關掉「${name}」${where}視窗？對話記錄會留著。`, points: [], ok: '關閉視窗', auto: false }
-    case 'handover': return {
+    case 'restart': return { title, lead: `要重開「${name}」${where}背景工作者嗎？會先結束它的程序，再由收發室重新啟動，對話會保留。`, points: [], ok: '重開', auto: false }
+    case 'handover': return engine === 'acp' ? {
+      title, lead: `要讓「${name}」${where}背景工作者接班換手嗎？`, ok: '開始換手', auto: false,
+      points: ['這類夥伴不會請前任寫交接，也沒有前任的對話紀錄可讀', '清掉目前的對話，結束它的程序，由收發室重新啟動', '新的對話第一句會是接班說明，請它先向寄件人確認進度'],
+    } : {
       title, lead: `要讓「${name}」${where}視窗接班換手嗎？`, ok: '開始換手', auto: false,
       points: ['先請它把交接寫到一個檔案（最久等十分鐘，沒寫完也會繼續）', '再關掉它的視窗', '用同一個名字開一個新的，新夥伴會先讀交接檔和前任最後的對話紀錄，接著把工作做下去'],
     }
@@ -73,7 +77,7 @@ export const PartnerOpDialog = {
   setup(props, { emit }) {
     const { ref, reactive, computed, onMounted, onBeforeUnmount } = globalThis.Vue
     const name = props.friend.agent || props.friend.nick
-    const text = computed(() => opDialogText(props.op, name, props.friend.device))
+    const text = computed(() => opDialogText(props.op, name, props.friend.device, partnerEngine(props.friend)))
     const form = reactive({ newName: name, note: '' })
     const st = reactive({ phase: 'form', error: '', busy: false, view: null })
     let closed = false

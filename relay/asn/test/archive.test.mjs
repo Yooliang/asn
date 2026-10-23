@@ -131,3 +131,17 @@ test('守門：m.js 裡 watch 的來源只能取用「已經定義」的變數�
   assert.ok(lines.some(l => /^\s*watch\(\[\(\) => friends\.value\.length, \(\) => acct\.value\.signed_in\]/.test(l)), '補最後一句話的 watch 還在')
 })
 
+test('選單依引擎：雲端代理只有封存；ACP 工作者是詳情、重開、接班換手加封存；Codex 只有封存；Claude 全部加封存', () => {
+  const ctx = { machines: { H: { online: true, launcher: { profiles: [] } } }, loaded: true, signedIn: true }
+  const keys = f => manageItems(f, ctx).map(i => i.key)
+  assert.deepEqual(keys(F('G', 'Grok', { engine: 'grok', kind: 'grok' })), ['archive'])
+  assert.deepEqual(keys(F('G', 'Grok', { engine: 'cloud', archived: true })), ['unarchive'])
+  assert.deepEqual(keys(F('G', 'Grok', { engine: 'claude', kind: 'cloud-agent' })), ['archive'])
+  assert.deepEqual(keys(F('H', 'Gemini', { engine: 'gemini' })), ['info', 'restart', 'handover', 'archive'])
+  assert.deepEqual(keys(F('H', 'Gemini', { engine: 'agy' })), ['info', 'restart', 'handover', 'archive'])
+  assert.deepEqual(keys(F('H', 'Gemini', { engine: 'gemini', status: 'offline' })), ['archive'], '離線的 ACP 工作者沒有管理項目')
+  assert.deepEqual(keys(F('H', '小碼', { engine: 'codex' })), ['archive'])
+  assert.deepEqual(keys(F('H', '小文')), ['info', 'rename', 'model', 'close', 'handover', 'archive'])
+  assert.deepEqual(keys(F('P', '手機', { kind: 'phone' })), [], '手機不是 AI 夥伴')
+  assert.deepEqual(keys(F('H', '家用收發室', { engine: 'gemini' })), [])
+})

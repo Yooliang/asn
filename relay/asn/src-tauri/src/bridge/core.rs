@@ -269,6 +269,9 @@ impl Core {
 
     /// 接上其他引擎（第五段）。沒接＝只有 Claude 視窗
     pub fn set_engines(&mut self, e: Arc<EngineSet>) {
+        if let (Some(p), Some(a)) = (&self.partner_ops, e.acp_admin()) {
+            p.set_acp(a);
+        }
         self.engines = Some(e);
     }
 
@@ -285,6 +288,9 @@ impl Core {
 
     /// 接上遠端管理夥伴視窗（詳情／改名／切換模型／關閉／轉交）。沒接＝不處理 partner_op_pending
     pub fn set_partner_ops(&mut self, p: Arc<PartnerOps>) {
+        if let Some(a) = self.engines.as_ref().and_then(|e| e.acp_admin()) {
+            p.set_acp(a);
+        }
         self.partner_ops = Some(p);
     }
 

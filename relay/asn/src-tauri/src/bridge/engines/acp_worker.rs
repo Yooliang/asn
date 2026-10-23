@@ -47,6 +47,14 @@ pub trait Driver: Send + Sync {
     fn session_id(&self) -> String;
     fn resume_lost(&self) -> bool;
     fn alive(&self) -> bool;
+    /// 這個驅動的子程序 pid（收發室自己啟動、記在帳本的那一個；沒在跑回 0）。遠端管理夥伴用它回報，不用名稱找程序
+    fn pid(&self) -> u32 {
+        0
+    }
+    /// 對方宣告能不能接續舊對話（標準 ACP 的 loadSession；agy 靠 conversation 編號）。還不知道回 None
+    fn load_session(&self) -> Option<bool> {
+        None
+    }
     /// 有人在等授權：重設「沒動靜」的計時
     fn touch(&self);
     fn start(&self) -> BoxFut<'_, Result<(), WorkerError>>;
@@ -102,6 +110,9 @@ impl Store {
     pub fn set(&self, cfg: &WorkerCfg, id: &str) {
         let mut g = self.state.lock().unwrap();
         g.insert(cfg.name.clone(), (id.to_string(), cfg.protocol.clone(), cfg.command.clone()));
+        self.persist(&g);
+    }
+    fn persist(&self, g: &HashMap<String, (String, String, String)>) {
         let workers: serde_json::Map<String, serde_json::Value> = g
             .iter()
             .map(|(k, (i, p, c))| (k.clone(), serde_json::json!({ "session_id": i, "protocol": p, "command": c, "updated": now_ms() })))
@@ -165,6 +176,8 @@ struct St {
     turn_grant: HashSet<String>,
     driver: Option<Arc<dyn Driver>>,
     driver_gen: u64,
+    /// 接班換手後的第一則提示（新對話成功處理第一輪才清掉）
+    handover: Option<String>,
 }
 
 pub struct WorkerInit {
@@ -205,6 +218,7 @@ impl Worker {
                 turn_grant: HashSet::new(),
                 driver: None,
                 driver_gen: 0,
+                handover: None,
             }),
             i,
             start_lock: tokio::sync::Mutex::new(()),
@@ -478,7 +492,14 @@ impl Worker {
         let cfg = self.i.cfg.clone();
         self.st.lock().unwrap().turn_grant.clear();
         let mut d = self.ensure_driver(self.base_full()).await?;
-        let first = if self.st.lock().unwrap().need_preamble { preamble_for(&cfg) } else { String::new() }; // ensure_driver 之後才判斷：resume 失敗會把它設回 true
+        let first = {
+            let s = self.st.lock().unwrap();
+            // ensure_driver 之後才判斷：resume 失敗會把它設回 true
+            if s.need_preamble { format!("{}{}", preamble_for(&cfg), s.handover.as_deref().map(|h| format!("{h}
+
+---
+")).unwrap_or_default()) } else { String::new() }
+        };
         let remember = |d: &Arc<dyn Driver>| {
             let id = d.session_id();
             if !id.is_empty() && id != self.i.store.get(&cfg) {
@@ -488,7 +509,11 @@ impl Worker {
         let r = d.turn(format!("{first}{}", job.text), cfg.turn_timeout_ms, cfg.turn_max_ms).await;
         remember(&d);
         let mut res = r?;
-        self.st.lock().unwrap().need_preamble = false;
+        {
+            let mut s = self.st.lock().unwrap();
+            s.need_preamble = false;
+            s.handover = None;
+        }
         // agy 的指令被它自己拒絕了，而政策是 ask：事後問人，同意就用放行模式重跑這一輪
         let exec_denied: Vec<Denied> = res.denied.iter().filter(|x| x.category == "execute").cloned().collect();
         if !exec_denied.is_empty() && cfg.permissions.rule("execute") == Verdict::Ask && d.supports_retry_with_grant() && !job.no_reply {
@@ -644,3 +669,6 @@ impl Guard for WorkerGuard {
         Err(format!("{}不被允許：{reason}", category_label(c)))
     }
 }
+
+// 遠端管理夥伴（詳情、重開、接班換手）用的方法放在子模組，才能讀這裡的私有欄位
+mod admin;

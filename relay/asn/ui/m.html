@@ -218,7 +218,7 @@
     <section class="m-sheet" v-if="nav.sheet === 'launch'" role="dialog" aria-modal="true" aria-label="開新夥伴">
       <header class="m-head m-chathead">
         <button class="m-icon-btn" type="button" aria-label="返回" @click="back"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M15 4.5L7.5 12 15 19.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-        <div class="m-head-tx"><div class="m-title">開新夥伴</div><div class="m-conn">視窗會開在你選的那台電腦上</div></div>
+        <div class="m-head-tx"><div class="m-title">開新夥伴</div><div class="m-conn">視窗會開在你選的電腦上</div></div>
       </header>
       <div class="m-sheet-body">
         <template v-if="lch.phase === 'form'">
@@ -274,7 +274,7 @@
           <p class="m-err" v-if="ops.error" role="alert">{{ ops.error }}</p>
           <button type="button" class="m-btn m-ops-cancel" @click="ops.phase = 'menu'; ops.error = ''">返回</button>
         </template>
-        <template v-else-if="ops.phase === 'close' || ops.phase === 'handover'">
+        <template v-else-if="ops.phase === 'close' || ops.phase === 'handover' || ops.phase === 'restart'">
           <p class="m-ops-lead">{{ opsText.lead }}</p>
           <ul class="m-ops-points" v-if="opsText.points.length"><li v-for="p in opsText.points" :key="p">{{ p }}</li></ul>
           <label class="m-field" v-if="ops.phase === 'handover'">補充的話（選填，會附在新夥伴的第一句話後面）<textarea class="set-area" rows="3" v-model="ops.note" maxlength="1000"></textarea></label>
