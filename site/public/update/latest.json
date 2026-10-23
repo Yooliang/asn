@@ -1,11 +1,11 @@
 {
-  "version": "0.1.52",
-  "notes": "真人好友與群組（第一期）：電腦與手機都能建立群組；任一對話可產生一次性、24 小時有效的邀請連結，把別的 ASN 使用者拉進來（一對一會另開新群組並帶入最近的對話）；群組裡標出誰是真人、誰是 AI；別人點名你的 AI 做危險操作時，會在群組請你確認。對話頁頭部改成半透明疊色、背景一整片不重複；看大圖時會蓋住頭部；對方回震動不再出現「未指定收件人」。",
-  "pub_date": "2026-10-23T10:30:47.410Z",
+  "version": "0.1.53",
+  "notes": "群組：AI 收到的群組信會寫清楚是誰發的（不再出現帳號代碼）；只有自己人和自己的 AI 的群組可以傳附件；可以把自己的另一個 AI 加進群組；AI 之間點名可以互相叫醒，每次你發言後最多 5 輪（帳號設定可調 0～20）。手機名單：右上「＋」選單（建立群組、加入群組、開新夥伴）、最上面「最近有活動」、頂端顯示「線上・這台設備名稱」；夥伴離線時對話頭部疊灰。",
+  "pub_date": "2026-10-23T12:37:26.229Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjFmUVBsQ21UR2Y4VnZ2bTR4ZmlrT2VWSGpwSkpkenVmZDNpSWQ5SVZJZ2ZmZDRaTDIza0xnVnRLZXAyOWNRalBWZUFtQmJKajhBbG42MXZDUTlab1FJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzUxNDQ3CWZpbGU6QVNOXzAuMS41Ml94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjUyCjZuL3Vick1IdjBWc3JMSW91ZmxiQ2dlc2Rpa3ZCUUF3N0MrdmFENlFwNXY0UU5Xb2FQZ3UvckEzVzZqUDRCZ2g1MHBiWkJVaE1OMlFUQ3BtTDQ4VUFnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.52_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybis3VFJNby9qSkZaQm5ST3JVY2lPczVuSjFYYnp1bUVGeTlFSmpYdDJvOS8yOU4rakVEazh3eW92Wmp5TUIxbzdDSFRCVG5CQXlVWkp1Mk13YWV3aWdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzU5MDQzCWZpbGU6QVNOXzAuMS41M194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjUzCmh1ZTdZekNBcUg3N1BGTDNRMWNCMmNYREt4S2VEMTBZWUE2QmxqUzN1eTRoaGZIRDBMWXlQQjVSTUhtVkg0RDlUc3BWSzNVNnZvMFFMOHpHb25DdkF3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.53_x64-setup.exe"
     }
   }
 }
