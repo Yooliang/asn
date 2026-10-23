@@ -1,0 +1,665 @@
+{
+ "說明": "Aegis 橋的共用測試向量：Node（relay/machine/test/aegis-vectors.test.mjs）與 Rust（bridge/tests/aegis_it.rs、engines/aegis.rs）都讀這一份。每封信都會被 ack（寄回成功才 ack）。replies 的 body_has_node／body_has_rust＝兩邊對同一情況的說明文字不同、只比關鍵詞；沒寫 from_agent 就不比。",
+ "config": {
+  "allow": "alpha,flaky,busy,ghost,weird,xiao-liang,aegis,xi-xu",
+  "retry_ms": 100,
+  "members": [
+   {
+    "slug": "alpha",
+    "name": "阿爾法"
+   },
+   {
+    "slug": "flaky",
+    "name": "不穩"
+   },
+   {
+    "slug": "busy",
+    "name": "忙"
+   },
+   {
+    "slug": "weird",
+    "name": ""
+   },
+   {
+    "slug": "xiao-liang",
+    "name": "小良"
+   },
+   {
+    "slug": "aegis",
+    "name": "愛吉絲"
+   },
+   {
+    "slug": "xi-xu",
+    "name": "希緒"
+   }
+  ],
+  "mail": {
+   "from_node": "W",
+   "from_agent": "W-政策",
+   "trust": "member",
+   "expects_reply": true
+  },
+  "roster_names": [
+   "阿爾法",
+   "不穩",
+   "忙",
+   "ghost",
+   "weird",
+   "小良",
+   "愛吉絲"
+  ]
+ },
+ "nudge_split": [
+  {
+   "answer": "（小良 傳送了一個震動）",
+   "name": "小良",
+   "split": {
+    "nudge": "（小良 傳送了一個震動）",
+    "rest": ""
+   }
+  },
+  {
+   "answer": "（小良 傳送了一個震動）\n目前沒有進度要回報。",
+   "name": "小良",
+   "split": {
+    "nudge": "（小良 傳送了一個震動）",
+    "rest": "目前沒有進度要回報。"
+   }
+  },
+  {
+   "answer": "（小良 傳送了一個震動）\r\n\r\n第一行\r\n第二行",
+   "name": "小良",
+   "split": {
+    "nudge": "（小良 傳送了一個震動）",
+    "rest": "第一行\n第二行"
+   }
+  },
+  {
+   "answer": "（小良 傳送了一個震動）\n對方在呼叫你：先回一個震動（寄一封內文只有「（你的名字 傳送了一個震動）」的信）。再想一下有沒有需要向對方報告的事——目前進度、卡住的地方、等對方決定的事；有的話另外寄一封簡短的信，沒有就只回震動。",
+   "name": "小良",
+   "split": {
+    "nudge": "（小良 傳送了一個震動）",
+    "rest": ""
+   }
+  },
+  {
+   "answer": "（小良 傳送了一個震動）\n想回應的話，就回一個震動：寄一封內文只有「（你的名字 傳送了一個震動）」的信，不用另外回信。",
+   "name": "小良",
+   "split": {
+    "nudge": "（小良 傳送了一個震動）",
+    "rest": ""
+   }
+  },
+  {
+   "answer": "前面有字（小良 傳送了一個震動）",
+   "name": "小良",
+   "split": null
+  },
+  {
+   "answer": "（傳送了一個震動）",
+   "name": "小良",
+   "split": null
+  },
+  {
+   "answer": "你好",
+   "name": "小良",
+   "split": null
+  },
+  {
+   "answer": "",
+   "name": "小良",
+   "split": null
+  },
+  {
+   "answer": "（W-政策 傳送了一個震動）",
+   "name": "小良",
+   "split": {
+    "nudge": "（小良 傳送了一個震動）",
+    "rest": ""
+   }
+  },
+  {
+   "answer": "  （小良 傳送了一個震動）  \n報告\n  ",
+   "name": "小良",
+   "split": {
+    "nudge": "（小良 傳送了一個震動）",
+    "rest": "報告"
+   }
+  },
+  {
+   "answer": "（字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字 傳送了一個震動）",
+   "name": "小良",
+   "split": {
+    "nudge": "（小良 傳送了一個震動）",
+    "rest": ""
+   }
+  },
+  {
+   "answer": "（字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字 傳送了一個震動）",
+   "name": "小良",
+   "split": null
+  },
+  {
+   "answer": "（小（良 傳送了一個震動）\nx",
+   "name": "小良",
+   "split": null
+  }
+ ],
+ "mails": [
+  {
+   "name": "一般問答（中文名）",
+   "to_agent": "阿爾法",
+   "body": "內文-1",
+   "aegis": {
+    "alpha": [
+     {
+      "http": 200,
+      "json": {
+       "answer": "你好 alpha 的答案",
+       "status": "success",
+       "member": "x"
+      }
+     }
+    ]
+   },
+   "asks": [
+    {
+     "target": "alpha",
+     "question": "這是透過仲介轉來的信：from=W/W-政策 trust=member\n內文-1",
+     "from_member": "xi-xu",
+     "stream": false
+    }
+   ],
+   "replies": [
+    {
+     "body": "你好 alpha 的答案",
+     "from_agent": "阿爾法",
+     "to_node": "W",
+     "to_agent": "W-政策"
+    }
+   ]
+  },
+  {
+   "name": "一般問答（成員代號）",
+   "to_agent": "alpha",
+   "body": "內文-2",
+   "aegis": {
+    "alpha": [
+     {
+      "http": 200,
+      "json": {
+       "answer": "答2",
+       "status": "success",
+       "member": "x"
+      }
+     }
+    ]
+   },
+   "asks": [
+    {
+     "target": "alpha",
+     "question": "這是透過仲介轉來的信：from=W/W-政策 trust=member\n內文-2",
+     "from_member": "xi-xu",
+     "stream": false
+    }
+   ],
+   "replies": [
+    {
+     "body": "答2",
+     "from_agent": "阿爾法"
+    }
+   ]
+  },
+  {
+   "name": "重試一次後成功",
+   "to_agent": "不穩",
+   "body": "內文-3",
+   "aegis": {
+    "flaky": [
+     {
+      "http": 200,
+      "json": {
+       "answer": "",
+       "status": "error",
+       "member": "x"
+      }
+     },
+     {
+      "http": 200,
+      "json": {
+       "answer": "第二次成功",
+       "status": "success",
+       "member": "x"
+      }
+     }
+    ]
+   },
+   "asks": [
+    {
+     "target": "flaky",
+     "question": "這是透過仲介轉來的信：from=W/W-政策 trust=member\n內文-3",
+     "from_member": "xi-xu",
+     "stream": false
+    },
+    {
+     "target": "flaky",
+     "question": "這是透過仲介轉來的信：from=W/W-政策 trust=member\n內文-3",
+     "from_member": "xi-xu",
+     "stream": false
+    }
+   ],
+   "replies": [
+    {
+     "body": "第二次成功",
+     "from_agent": "不穩"
+    }
+   ]
+  },
+  {
+   "name": "兩次都失敗回忙線",
+   "to_agent": "忙",
+   "body": "內文-4",
+   "aegis": {
+    "busy": [
+     {
+      "http": 200,
+      "json": {
+       "answer": "",
+       "status": "error",
+       "member": "x"
+      }
+     }
+    ]
+   },
+   "asks": [
+    {
+     "target": "busy",
+     "question": "這是透過仲介轉來的信：from=W/W-政策 trust=member\n內文-4",
+     "from_member": "xi-xu",
+     "stream": false
+    },
+    {
+     "target": "busy",
+     "question": "這是透過仲介轉來的信：from=W/W-政策 trust=member\n內文-4",
+     "from_member": "xi-xu",
+     "stream": false
+    }
+   ],
+   "replies": [
+    {
+     "body": "[Aegis] 對方忙線中，請稍後再問",
+     "from_agent": "忙"
+    }
+   ]
+  },
+  {
+   "name": "5xx 也算失敗",
+   "to_agent": "忙",
+   "body": "內文-5",
+   "aegis": {
+    "busy": [
+     {
+      "http": 503,
+      "json": {
+       "detail": "down"
+      }
+     }
+    ]
+   },
+   "asks": [
+    {
+     "target": "busy",
+     "question": "這是透過仲介轉來的信：from=W/W-政策 trust=member\n內文-5",
+     "from_member": "xi-xu",
+     "stream": false
+    },
+    {
+     "target": "busy",
+     "question": "這是透過仲介轉來的信：from=W/W-政策 trust=member\n內文-5",
+     "from_member": "xi-xu",
+     "stream": false
+    }
+   ],
+   "replies": [
+    {
+     "body": "[Aegis] 對方忙線中，請稍後再問",
+     "from_agent": "忙"
+    }
+   ]
+  },
+  {
+   "name": "查無成員不重試",
+   "to_agent": "ghost",
+   "body": "內文-6",
+   "aegis": {
+    "ghost": [
+     {
+      "http": 404,
+      "json": {
+       "detail": "nope"
+      }
+     }
+    ]
+   },
+   "asks": [
+    {
+     "target": "ghost",
+     "question": "這是透過仲介轉來的信：from=W/W-政策 trust=member\n內文-6",
+     "from_member": "xi-xu",
+     "stream": false
+    }
+   ],
+   "replies": [
+    {
+     "body": "[Aegis] 查無此成員（ghost）"
+    }
+   ]
+  },
+  {
+   "name": "其他狀態照實回報",
+   "to_agent": "weird",
+   "body": "內文-7",
+   "aegis": {
+    "weird": [
+     {
+      "http": 200,
+      "json": {
+       "answer": "半途",
+       "status": "timeout"
+      }
+     }
+    ]
+   },
+   "asks": [
+    {
+     "target": "weird",
+     "question": "這是透過仲介轉來的信：from=W/W-政策 trust=member\n內文-7",
+     "from_member": "xi-xu",
+     "stream": false
+    }
+   ],
+   "replies": [
+    {
+     "body": "[Aegis] 對方回報狀態 timeout：半途",
+     "from_agent": "weird"
+    }
+   ]
+  },
+  {
+   "name": "沒有狀態欄位回 HTTP 碼",
+   "to_agent": "weird",
+   "body": "內文-8",
+   "aegis": {
+    "weird": [
+     {
+      "http": 400,
+      "json": {
+       "detail": "bad"
+      }
+     }
+    ]
+   },
+   "asks": [
+    {
+     "target": "weird",
+     "question": "這是透過仲介轉來的信：from=W/W-政策 trust=member\n內文-8",
+     "from_member": "xi-xu",
+     "stream": false
+    }
+   ],
+   "replies": [
+    {
+     "body": "[Aegis] 對方回報狀態 HTTP 400",
+     "from_agent": "weird"
+    }
+   ]
+  },
+  {
+   "name": "震動加報告拆兩封",
+   "to_agent": "小良",
+   "body": "內文-9",
+   "aegis": {
+    "xiao-liang": [
+     {
+      "http": 200,
+      "json": {
+       "answer": "（小良 傳送了一個震動）\n目前沒有進度要回報。",
+       "status": "success",
+       "member": "x"
+      }
+     }
+    ]
+   },
+   "asks": [
+    {
+     "target": "xiao-liang",
+     "question": "這是透過仲介轉來的信：from=W/W-政策 trust=member\n內文-9",
+     "from_member": "xi-xu",
+     "stream": false
+    }
+   ],
+   "replies": [
+    {
+     "body": "（小良 傳送了一個震動）",
+     "from_agent": "小良"
+    },
+    {
+     "body": "目前沒有進度要回報。",
+     "from_agent": "小良"
+    }
+   ]
+  },
+  {
+   "name": "只有震動一封",
+   "to_agent": "小良",
+   "body": "內文-10",
+   "aegis": {
+    "xiao-liang": [
+     {
+      "http": 200,
+      "json": {
+       "answer": "（小良 傳送了一個震動）",
+       "status": "success",
+       "member": "x"
+      }
+     }
+    ]
+   },
+   "asks": [
+    {
+     "target": "xiao-liang",
+     "question": "這是透過仲介轉來的信：from=W/W-政策 trust=member\n內文-10",
+     "from_member": "xi-xu",
+     "stream": false
+    }
+   ],
+   "replies": [
+    {
+     "body": "（小良 傳送了一個震動）",
+     "from_agent": "小良"
+    }
+   ]
+  },
+  {
+   "name": "震動加提示原文只回震動",
+   "to_agent": "小良",
+   "body": "內文-11",
+   "aegis": {
+    "xiao-liang": [
+     {
+      "http": 200,
+      "json": {
+       "answer": "（小良 傳送了一個震動）\n對方在呼叫你：先回一個震動（寄一封內文只有「（你的名字 傳送了一個震動）」的信）。再想一下有沒有需要向對方報告的事——目前進度、卡住的地方、等對方決定的事；有的話另外寄一封簡短的信，沒有就只回震動。",
+       "status": "success",
+       "member": "x"
+      }
+     }
+    ]
+   },
+   "asks": [
+    {
+     "target": "xiao-liang",
+     "question": "這是透過仲介轉來的信：from=W/W-政策 trust=member\n內文-11",
+     "from_member": "xi-xu",
+     "stream": false
+    }
+   ],
+   "replies": [
+    {
+     "body": "（小良 傳送了一個震動）"
+    }
+   ]
+  },
+  {
+   "name": "句中有震動不拆",
+   "to_agent": "小良",
+   "body": "內文-12",
+   "aegis": {
+    "xiao-liang": [
+     {
+      "http": 200,
+      "json": {
+       "answer": "一般答案，順便提到（小良 傳送了一個震動）",
+       "status": "success",
+       "member": "x"
+      }
+     }
+    ]
+   },
+   "asks": [
+    {
+     "target": "xiao-liang",
+     "question": "這是透過仲介轉來的信：from=W/W-政策 trust=member\n內文-12",
+     "from_member": "xi-xu",
+     "stream": false
+    }
+   ],
+   "replies": [
+    {
+     "body": "一般答案，順便提到（小良 傳送了一個震動）"
+    }
+   ]
+  },
+  {
+   "name": "震動加多行報告",
+   "to_agent": "小良",
+   "body": "內文-13",
+   "aegis": {
+    "xiao-liang": [
+     {
+      "http": 200,
+      "json": {
+       "answer": "（小良 傳送了一個震動）\n第一行\n第二行",
+       "status": "success",
+       "member": "x"
+      }
+     }
+    ]
+   },
+   "asks": [
+    {
+     "target": "xiao-liang",
+     "question": "這是透過仲介轉來的信：from=W/W-政策 trust=member\n內文-13",
+     "from_member": "xi-xu",
+     "stream": false
+    }
+   ],
+   "replies": [
+    {
+     "body": "（小良 傳送了一個震動）"
+    },
+    {
+     "body": "第一行\n第二行"
+    }
+   ]
+  },
+  {
+   "name": "成功但空答案",
+   "to_agent": "阿爾法",
+   "body": "內文-14",
+   "aegis": {
+    "alpha": [
+     {
+      "http": 200,
+      "json": {
+       "answer": "",
+       "status": "success",
+       "member": "x"
+      }
+     }
+    ]
+   },
+   "asks": [
+    {
+     "target": "alpha",
+     "question": "這是透過仲介轉來的信：from=W/W-政策 trust=member\n內文-14",
+     "from_member": "xi-xu",
+     "stream": false
+    }
+   ],
+   "replies": [
+    {
+     "body": "(空回覆)",
+     "from_agent": "阿爾法"
+    }
+   ]
+  },
+  {
+   "name": "白名單外不問",
+   "to_agent": "secret",
+   "body": "內文-15",
+   "aegis": {},
+   "asks": [],
+   "replies": [
+    {
+     "body_has_node": "沒有開放聯絡",
+     "body_has_rust": "找不到名叫"
+    }
+   ]
+  },
+  {
+   "name": "希緒自己不能問",
+   "to_agent": "希緒",
+   "body": "內文-16",
+   "aegis": {},
+   "asks": [],
+   "replies": [
+    {
+     "body_has_node": "不能自己問自己",
+     "body_has_rust": "找不到名叫"
+    }
+   ]
+  },
+  {
+   "name": "沒有收件人交給預設成員",
+   "to_agent": null,
+   "body": "內文-17",
+   "aegis": {
+    "aegis": [
+     {
+      "http": 200,
+      "json": {
+       "answer": "總管答",
+       "status": "success",
+       "member": "x"
+      }
+     }
+    ]
+   },
+   "asks": [
+    {
+     "target": "aegis",
+     "question": "這是透過仲介轉來的信：from=W/W-政策 trust=member\n內文-17",
+     "from_member": "xi-xu",
+     "stream": false
+    }
+   ],
+   "replies": [
+    {
+     "body": "總管答",
+     "from_agent": "愛吉絲"
+    }
+   ]
+  }
+ ]
+}
