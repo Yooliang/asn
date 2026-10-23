@@ -281,7 +281,8 @@ const app = createApp({
     // ---------- 開新夥伴（遠端開視窗）：手機只下指令，視窗開在那台電腦上。要本人簽章（Rust 端沒憑證就不送） ----------
     const lch = reactive({ ...initialLaunch(), vphase: 'sending' })
     const lchData = reactive({ machines: {}, loaded: false, error: '' })
-    const lchCtx = computed(() => ({ machines: lchData.machines, loaded: lchData.loaded, signedIn: acct.value.signed_in, friends: friends.value }))
+    const acctSigned = () => (acct.value.known ? acct.value.signed_in : null)   // 還沒查到登入狀態＝null，不是「沒登入」
+    const lchCtx = computed(() => ({ machines: lchData.machines, loaded: lchData.loaded, signedIn: acctSigned(), authError: acct.value.error, friends: friends.value }))
     const lchDevices = computed(() => launchDevices(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value, ...lchCtx.value }))
     const lchElig = computed(() => (lch.node ? launchEligibility(lch.node, lchCtx.value) : { ok: false, reason: '' }))
     const lchFormErr = computed(() => (lch.node ? launchFormError(lch, lchElig.value) : ''))
@@ -340,7 +341,7 @@ const app = createApp({
     function openLaunched() { const id = lch.friendId; if (!id) return; history.back(); setTimeout(() => openChat(id), 50) }
     // ---------- 「⋯」選單：管理這位夥伴的視窗（詳情、改名、切換模型、關閉視窗、接班換手；離線的只有喚醒） ----------
     // 判斷全部用 lib/partner-ops.mjs 的 menuItems／opFormError／progressView，手機不另寫一套。手機只下指令，視窗在那台電腦上
-    const opsCtx = computed(() => ({ machines: lchData.machines, loaded: lchData.loaded, signedIn: acct.value.signed_in, friends: friends.value, nonWindowNodes: [info.node] }))
+    const opsCtx = computed(() => ({ machines: lchData.machines, loaded: lchData.loaded, signedIn: acctSigned(), authError: acct.value.error, friends: friends.value, nonWindowNodes: [info.node] }))
     const opsItems = computed(() => (chatFriend.value ? manageItems(chatFriend.value, opsCtx.value) : []))
     const ops = reactive({ phase: 'menu', newName: '', note: '', model: '', error: '', view: null })
     const opsText = computed(() => opDialogText(ops.phase, chatFriend.value?.agent || chatFriend.value?.nick || '', chatFriend.value?.device || ''))
@@ -549,10 +550,10 @@ const app = createApp({
       try { ownerName.value = await authApi.setAccountName(c.name); nameErr.value = ''; nameDraft.value = c.name }
       catch (e) { nameDraft.value = myName.value; nameErr.value = e.message; setTimeout(() => { nameErr.value = '' }, 5000) }
     }
-    const acct = ref({ signed_in: false, email: '' })
+    const acct = ref({ signed_in: false, email: '', known: false, error: '' })
     // 要放在 acct 定義之後：watch 的來源函式會立刻執行一次，放前面會踩到「初始化之前就取用」而整個監看失效
     watch([() => friends.value.length, () => acct.value.signed_in], () => { void backfillLast() })
-    void authApi.status().then(s => { acct.value = s ?? acct.value }).catch(() => {})
+    void authApi.status().then(s => { acct.value = s ? { ...s, known: true, error: '' } : { ...acct.value, error: '沒有收到回應' } }).catch(e => { acct.value = { ...acct.value, error: String(e?.message ?? e).slice(0, 80) } })
     // 我的名字（帳號層）：先用上次存的，登入帳號的資料取到後更新並存起來（離線也有名字可顯示）
     void authApi.accountInfo().then(i => { if (typeof i?.owner_name === 'string') ownerName.value = i.owner_name }).catch(() => {})
     const myName = computed(() => accountDisplayName(ownerName.value, acct.value.email))

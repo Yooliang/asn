@@ -4,7 +4,7 @@
 // 往來記錄、未讀、通知都不動；封存的夥伴再寄信來，或封存時離線、之後重新上線，後台會自動解除。
 // node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。給人看的文字純繁體中文，不顯示節點代號與夥伴 ID。
 import { withoutAsn } from './roster.mjs'
-import { isManageable, menuItems, opErrorText } from './partner-ops.mjs'
+import { isManageable, loginBlock, menuItems, opErrorText } from './partner-ops.mjs'
 
 export const ARCHIVE_GROUP_KEY = '__archived'
 export const isArchived = f => f?.archived === true
@@ -38,6 +38,7 @@ export function archiveMenuItem(friend, ctx = {}) {
   const key = isArchived(friend) ? 'unarchive' : 'archive'
   let reason = ''
   if (ctx.signedIn === false) reason = '要先登入，才能封存夥伴'
+  else if (loginBlock(ctx)) reason = loginBlock(ctx)
   else if (ctx.supported === false) reason = '電腦端或收發室還不支援，請先更新'
   return { key, label: ARCHIVE_LABEL[key], ok: !reason, reason }
 }

@@ -18,6 +18,7 @@ export const HANDOVER_GIVE_UP_MS = 15 * 60 * 1000   // 接班換手要等前任�
 export const REASON = {
   needLogin: '要先登入，才能管理夥伴視窗',
   unknown: '還沒查到這台電腦的設定，請稍後再試',
+  checking: '查詢中，請稍候…',
   offline: '這台電腦或這個視窗不在線',
   closed: '這台電腦沒有開放遠端管理視窗（要在那台電腦的設定打開「允許遠端開視窗與管理視窗」）',
   deviceOffline: '那台電腦現在不在線，叫不醒（要那台電腦的 ASN 開著）',
@@ -28,6 +29,22 @@ export const STALE_TEXT = '那台電腦的 ASN 版本可能太舊，或沒有在
 
 // 不是「電腦上的 AI 視窗」的對象：人、手機、雲端代理（節點種類），群組、ASN 與收發室視窗
 const NON_WINDOW_KINDS = new Set(['owner', 'person', 'human', 'phone', 'mobile', 'android', 'cloud', 'cloud-agent', 'grok', 'room', 'group'])
+
+// 查詢前的初始環境：登入狀態還不知道（null），不是「沒登入」；checking＝第一次查詢還沒回來
+export const initialOpsCtx = () => ({ machines: {}, loaded: false, signedIn: null, checking: true, authError: '', loadError: '' })
+
+// 登入條件擋不擋：只有「真的查到沒登入」才說要先登入；還沒查到說查詢中；查詢失敗說真正原因。undefined（舊呼叫端沒給）當作沒擋。
+export function loginBlock(ctx = {}) {
+  if (ctx.signedIn === false) return REASON.needLogin
+  if (ctx.signedIn === null) return ctx.authError ? `查不到登入狀態：${ctx.authError}` : REASON.checking
+  return ''
+}
+// 電腦設定還沒查到的說明：失敗說原因、查詢中說查詢中、其餘用舊說法
+export function loadBlock(ctx = {}) {
+  if (ctx.loaded) return ''
+  if (ctx.loadError) return `查不到這台電腦的設定：${ctx.loadError}`
+  return ctx.checking ? REASON.checking : REASON.unknown
+}
 
 // 是不是能管理的 AI 視窗。ctx.asn＝節點→在線的 ASN 視窗（名單帶的）；ctx.nonWindowNodes＝已知是手機／雲端代理的節點（選填）
 export function isManageable(friend, ctx = {}) {
@@ -52,7 +69,7 @@ export function menuItems(friend, ctx = {}) {
     let reason = base
     // 詳情是唯讀，不需要那台電腦開放；其餘要開放（launcher 不為空）。沒查到設定時也不能確定開放了沒
     if (!reason && key !== 'info') {
-      if (!ctx.loaded) reason = REASON.unknown
+      if (!ctx.loaded) reason = loadBlock(ctx)
       else if (!machine?.launcher) reason = REASON.closed
     }
     return { key, label: OP_LABEL[key], ok: !reason, reason }
@@ -64,16 +81,16 @@ function resumeItems(friend, ctx) {
   if (friend.engine && friend.engine !== 'claude') return []
   let reason = ''
   const machine = ctx.machines?.[friend.node]
-  if (ctx.signedIn === false) reason = REASON.needLogin
+  if (loginBlock(ctx)) reason = loginBlock(ctx)
   else if (ctx.supported === false) reason = REASON.unsupported
-  else if (!ctx.loaded) reason = REASON.unknown
+  else if (!ctx.loaded) reason = loadBlock(ctx)
   else if (!machine || machine.online !== true) reason = REASON.deviceOffline
   else if (!machine.launcher) reason = REASON.closed
   return [{ key: 'resume', label: OP_LABEL.resume, ok: !reason, reason }]
 }
 
 function baseReason(friend, ctx) {
-  if (ctx.signedIn === false) return REASON.needLogin
+  if (loginBlock(ctx)) return loginBlock(ctx)
   if (ctx.supported === false) return REASON.unsupported
   if (friend.status === 'offline') return REASON.offline
   const machine = ctx.machines?.[friend.node]

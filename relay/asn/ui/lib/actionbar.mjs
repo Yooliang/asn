@@ -6,12 +6,18 @@ import { AsnDialog } from './dialog.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher } from './model-switch.mjs'
 import { SUBAGENT_POLL_MS, canOfferSubagents, subagentView } from './subagents.mjs'
 import { CONSOLE_QUERY_TIMEOUT_MS, consoleToggleLabel, engineForProfile, withTimeout } from './partner-launch-ui.mjs'
-import { menuItems } from './partner-ops.mjs'
+import { initialOpsCtx, menuItems } from './partner-ops.mjs'
 import { PartnerOpDialog, loadOpsContext } from './partner-ops-ui.mjs'
 
 /** 這位代理用哪一家的指令（名單上沒寫就看啟動設定，再沒有就當 Claude）。 */
 export function friendEngine(friend) {
   return friend?.engine || engineForProfile(friend?.launchProfile || 'claude')
+}
+
+/** 查詢回來時，畫面上的還是同一位夥伴嗎（名單每次更新會換新物件，不能只比物件本身）。 */
+export function sameFriend(a, b) {
+  if (!a || !b) return false
+  return a === b || (Boolean(a.id) && a.id === b.id)
 }
 
 /** 能不能切換主控台視窗：只有本機、非雲端代理、已經開起來的視窗。 */
@@ -62,7 +68,7 @@ export const ActionBar = {
     const subs = reactive({ open: false, q: null })
     const dlg = reactive({ open: false, target: null, busy: false, error: '', manual: '', done: '', copied: false })
     const root = ref(null)
-    const opsCtx = reactive({ machines: {}, loaded: false, signedIn: false })
+    const opsCtx = reactive(initialOpsCtx())
     const wakeDlg = reactive({ open: false, item: null })
     const engine = computed(() => friendEngine(props.friend))
     const name = computed(() => props.friend?.agent || props.friend?.nick || '')
@@ -81,7 +87,7 @@ export const ActionBar = {
       const f = props.friend
       if (!props.api || !canOfferConsole(f, props.selfNode)) { cons.state = 'none'; return }
       const q = await withTimeout(props.api.partnerConsoleQuery({ engine: engine.value, name: name.value }), CONSOLE_QUERY_TIMEOUT_MS)
-      if (props.friend !== f) return
+      if (!sameFriend(props.friend, f)) return
       if (q?.can_toggle ?? q?.canToggle) { cons.state = 'toggle'; cons.visible = Boolean(q.visible) } else cons.state = 'none'
     }
     async function toggleConsole() {
@@ -98,14 +104,18 @@ export const ActionBar = {
       if (!props.active || !showSubs.value) return
       try {
         const q = await withTimeout(props.api.subagentsQuery({ name: name.value }), CONSOLE_QUERY_TIMEOUT_MS)
-        if (props.friend === f) subs.q = q
+        if (sameFriend(props.friend, f)) subs.q = q
       } catch (e) { console.info('[ASN] 子代理查詢', e.message) }
     }
+    let wakeRetry = null
     async function loadWake() {
       const f = props.friend
       if (!props.api || !f || f.status !== 'offline') return
       const ctx = await loadOpsContext(props.api)
-      if (props.friend === f) Object.assign(opsCtx, ctx)
+      if (!sameFriend(props.friend, f)) return
+      Object.assign(opsCtx, ctx)
+      // 查詢失敗（登入狀態或電腦設定）：幾秒後自動再查，直到查到為止
+      if (ctx.signedIn === null || !ctx.loaded) { clearTimeout(wakeRetry); wakeRetry = setTimeout(() => { if (props.friend?.status === 'offline') void loadWake() }, 5000) }
     }
     function openWake() {
       const it = menuItems(props.friend, opsCtx).find(i => i.key === 'resume')
@@ -148,7 +158,7 @@ export const ActionBar = {
     }
     const onDoc = e => { if ((model.open || subs.open) && root.value && !root.value.contains(e.target)) { model.open = false; subs.open = false } }
     onMounted(() => { document.addEventListener('mousedown', onDoc, true); if (props.active) void loadConsole(); startSubs(); void loadWake() })
-    onBeforeUnmount(() => { document.removeEventListener('mousedown', onDoc, true); stopSubs() })
+    onBeforeUnmount(() => { document.removeEventListener('mousedown', onDoc, true); stopSubs(); clearTimeout(wakeRetry) })
     watch(() => props.active, a => { if (a) { void loadConsole(); void loadSubs(); void loadWake() } })
     watch(() => props.friend?.id, () => { model.open = false; subs.open = false; wakeDlg.open = false; void loadConsole(); startSubs(); void loadWake() })
     watch(() => props.friend?.status, () => { void loadWake() })
