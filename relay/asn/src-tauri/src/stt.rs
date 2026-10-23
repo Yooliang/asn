@@ -286,6 +286,50 @@ pub fn check_wav(b: &[u8]) -> Result<f32, String> {
     Ok(n as f32 / (RATE as f32 * 2.0))
 }
 
+/// 太短或太小聲的錄音不送辨識：Whisper 在這種聲音上會把提示詞念回來。回傳 true＝不送。
+/// 假設 `check_wav` 已通過（16 位元單聲道、44 位元組標頭）。
+pub const MIN_STT_SECONDS: f32 = 0.5;
+pub const MIN_STT_PEAK: i16 = 262; // 約 0.008（滿刻度 32768）
+pub fn too_short_or_quiet(b: &[u8]) -> bool {
+    if b.len() < 44 {
+        return true;
+    }
+    let data = &b[44..];
+    if (data.len() as f32) / (RATE as f32 * 2.0) < MIN_STT_SECONDS {
+        return true;
+    }
+    let peak = data.chunks_exact(2).map(|c| i16::from_le_bytes([c[0], c[1]]).unsigned_abs()).max().unwrap_or(0);
+    peak < MIN_STT_PEAK as u16
+}
+
+/// 辨識結果是不是提示詞本身、提示詞的一段（至少 5 個字）或提示詞重複：是就丟掉。
+/// 前端 stt-text.mjs 的 isPromptEcho 做同樣的事（雙保險），提示詞要兩邊一致。
+pub fn is_prompt_echo(text: &str) -> bool {
+    let core = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).flat_map(|c| c.to_lowercase()).collect::<String>();
+    let c = core(text);
+    if c.is_empty() {
+        return false;
+    }
+    // 整段能切成若干片段，每片都是提示詞的一段（至少 5 字）
+    let a: Vec<char> = c.chars().collect();
+    if a.len() > 300 {
+        return false;
+    }
+    ["zh"].iter().filter_map(|l| prompt_for(l)).map(core).any(|p| {
+        let mut ok = vec![false; a.len() + 1];
+        ok[0] = true;
+        for i in 1..=a.len() {
+            for j in 0..i.saturating_sub(4) {
+                if ok[j] && p.contains(&a[j..i].iter().collect::<String>()) {
+                    ok[i] = true;
+                    break;
+                }
+            }
+        }
+        ok[a.len()]
+    })
+}
+
 pub fn prompt_for(lang: &str) -> Option<&'static str> {
     match lang {
         "zh" => Some("以下是繁體中文的句子，請使用正確的標點符號。"),
@@ -365,7 +409,7 @@ async fn run_engine(data_dir: &Path, model: &Model, wav: &[u8], lang: &str) -> R
     let res = match run_with_deadline(cmd, RUN_TIMEOUT, &CANCEL, |_| {}).await {
         Err(e) => Err(e),
         Ok(s) if !s.success() => Err("辨識引擎執行失敗".to_string()),
-        Ok(_) => std::fs::read_to_string(&txt_path).map(|t| read_transcript(&t)).map_err(|_| "辨識沒有產生結果".to_string()),
+        Ok(_) => std::fs::read_to_string(&txt_path).map(|t| read_transcript(&t)).map(|t| if is_prompt_echo(&t) { String::new() } else { t }).map_err(|_| "辨識沒有產生結果".to_string()),
     };
     let _ = std::fs::remove_file(&wav_path);
     let _ = std::fs::remove_file(&txt_path);
@@ -462,6 +506,9 @@ pub async fn stt_transcribe(app: State<'_, App>, wav: String) -> Result<String, 
     }
     let bytes = base64::engine::general_purpose::STANDARD.decode(wav.as_bytes()).map_err(|_| "錄音格式不對")?;
     check_wav(&bytes)?;
+    if too_short_or_quiet(&bytes) {
+        return Ok(String::new()); // 太短或太小聲：不送辨識（會念回提示詞），當作沒聽到
+    }
     let cfg = crate::voicecfg::load(&app.data_dir);
     let model = model_of(&cfg.stt_model).ok_or("語音輸入的模型不認得")?;
     if !engine_ready(&app.data_dir) || !model_ready(&app.data_dir, model) {
@@ -560,6 +607,35 @@ mod tests {
         assert!(!en.contains(&"--prompt".to_string()), "只有中文才帶繁體提示");
         assert_eq!(read_transcript(" 你好\n\n 世界 \r\n"), "你好 世界");
         assert_eq!(read_transcript("\n \n"), "");
+    }
+
+    #[test]
+    fn prompt_echo_is_dropped() {
+        let p = prompt_for("zh").unwrap();
+        assert!(is_prompt_echo(p));
+        assert!(is_prompt_echo("請使用正確的標點符號。"));
+        assert!(is_prompt_echo("以下是繁體中文的句子，"));
+        assert!(is_prompt_echo(&format!("{p} {p}")));
+        assert!(!is_prompt_echo(""));
+        assert!(!is_prompt_echo("標點符號"));
+        assert!(!is_prompt_echo("你好，今天天氣很好"));
+    }
+
+    #[test]
+    fn short_or_quiet_wav_is_skipped() {
+        // wav() 產生的是全零（靜音）
+        assert!(too_short_or_quiet(&wav(2.0)), "靜音");
+        let mut loud = wav(2.0);
+        for i in (44..loud.len()).step_by(2) {
+            let v: i16 = if (i / 2) % 40 < 20 { 3000 } else { -3000 };
+            loud[i..i + 2].copy_from_slice(&v.to_le_bytes());
+        }
+        assert!(!too_short_or_quiet(&loud));
+        let mut short = wav(0.3);
+        for i in (44..short.len()).step_by(2) {
+            short[i..i + 2].copy_from_slice(&3000i16.to_le_bytes());
+        }
+        assert!(too_short_or_quiet(&short), "太短");
     }
 
     /// 起一個只服務一次的本機 HTTP 伺服器

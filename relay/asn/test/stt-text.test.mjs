@@ -53,3 +53,21 @@ test('中文字之間的空白拿掉、中英交界保留；半形標點接在�
   assert.equal(fullWidthPunctuation('hello, world.'), 'hello, world.')
   assert.equal(normalize('今天天氣好嗎?'), '今天天氣好嗎？')
 })
+
+test('提示詞被念回來：整句、片段、重複都丟掉；短片段與真的話保留', async () => {
+  const { isPromptEcho } = await import('../ui/lib/stt-text.mjs')
+  for (const raw of ['請使用正確的標點符號。', '以下是繁体中文的句子，请使用正確的標點符號。', '以下是繁體中文的句子，', '請使用正確的標點符號。 請使用正確的標點符號。', ' 請使用正確的標點符號 ']) {
+    assert.equal(isPromptEcho(raw), true, raw)
+    assert.equal(isHallucination(raw), true, raw)
+    assert.equal(normalize(raw), '', raw)
+  }
+  for (const raw of ['標點符號', '請使用正確的方法開門', '', '。', '你好']) assert.equal(isPromptEcho(raw), false, raw)
+  for (const raw of ['。', '，', '?', '', '  ', '…']) assert.equal(normalize(raw), '', raw)
+})
+
+test('提示詞要和 Rust 的 stt.rs 一致', async () => {
+  const { STT_PROMPTS } = await import('../ui/lib/stt-text.mjs')
+  const fs = await import('node:fs')
+  const rs = fs.readFileSync(new URL('../src-tauri/src/stt.rs', import.meta.url), 'utf8')
+  for (const p of STT_PROMPTS) assert.ok(rs.includes('"' + p + '"'), p)
+})

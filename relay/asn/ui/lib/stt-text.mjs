@@ -42,11 +42,41 @@ const core = s => [...s].filter(c => LETTER_OR_DIGIT.test(c)).join('').toLowerCa
 const whole = c => c.length > 0 && [...c].length <= 60 && c.replace(HALLUCINATION_PART, '') === ''
 
 /**
+ * 送給本機辨識（Rust 的 stt.rs prompt_for）的提示詞。Whisper 在靜音或極短的聲音上會把提示詞「念回來」，
+ * 通話一開始的按鍵聲就曾因此寄出「請使用正確的標點符號。」。這份要和 stt.rs 的 prompt_for("zh") 一字不差（有測試對照）。
+ */
+export const STT_PROMPTS = ['以下是繁體中文的句子，請使用正確的標點符號。']
+/** 提示詞的片段至少要這麼長（字數）才算念回來；太短的（例如「標點符號」）可能是真的話 */
+export const PROMPT_FRAGMENT_MIN = 5
+const PROMPT_CORES = STT_PROMPTS.map(core)
+
+/** 辨識結果是不是提示詞本身、提示詞的一段，或提示詞重複好幾遍 */
+export function isPromptEcho(raw) {
+  if (!raw || !String(raw).trim()) return false
+  const test = c => {
+    if (!c) return false
+    const a = [...c]
+    if (a.length > 300) return false
+    // 整段能切成若干片段，每片都是提示詞的一段（至少 PROMPT_FRAGMENT_MIN 字）
+    return PROMPT_CORES.some(p => {
+      const ok = [true]
+      for (let i = 1; i <= a.length; i++) {
+        ok[i] = false
+        for (let j = 0; j <= i - PROMPT_FRAGMENT_MIN && !ok[i]; j++) ok[i] = ok[j] && p.includes(a.slice(j, i).join(''))
+      }
+      return ok[a.length]
+    })
+  }
+  return test(core(raw)) || test(core(s2t(raw)))
+}
+
+/**
  * 整句是不是 Whisper 的靜音幻覺（「（字幕製作:貝爾）」「謝謝觀看」「請不吝點贊 訂閱 轉發 打賞支持明鏡與點點欄目」「由 Amara.org 社群提供的字幕」…）。
  * 括號不論全形半形、配不配對都算。空字串不算。
  */
 export function isHallucination(raw) {
   if (!raw || !String(raw).trim()) return false
+  if (isPromptEcho(raw)) return true
   // 原文與轉繁體後各比一次（轉換表會把「群」轉成「羣」之類的，兩邊都要能對到）
   return whole(core(raw)) || whole(core(s2t(raw)))
 }
