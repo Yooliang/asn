@@ -14,6 +14,16 @@ pub enum Cmd {
     Help,
     Version,
     Run(RunOpts),
+    /// 裝置授權登入：印短碼、等人在已登入的 ASN 核准、把金鑰存進資料夾
+    Login(LoginOpts),
+}
+
+#[derive(Debug, PartialEq, Eq, Default, Clone)]
+pub struct LoginOpts {
+    /// 後端網址（沒給就看 ASN_RELAY_URL，再沒有用預設）
+    pub url: Option<String>,
+    /// 存金鑰的資料夾（沒給就看 ASN_HOME，再沒有用 ~/.asn）
+    pub home: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, Default, Clone)]
@@ -24,7 +34,8 @@ pub struct RunOpts {
     pub inbox: bool,
 }
 
-const USAGE: &str = "用法：asn-bridge run [--engine-only | --inbox]\n\
+const USAGE: &str = "用法：asn-bridge run [--engine-only | --inbox]\n       asn-bridge login [--url <後端網址>] [--home <資料夾>]\n\
+  login          還沒有金鑰時用：印出短碼，請人在已登入的 ASN 輸入核准，金鑰自動存進資料夾的 <代號>.key（權限 600，不會顯示）\n\
   run            讀資料夾（ASN_HOME，預設 ~/.asn，舊的 ~/.irori-relay 也認）裡的節點金鑰，啟動內建收發室核心（收信、門鈴、名單回報）\n\
   --engine-only  只有引擎：不啟動 claude -p 收發室 worker（也可設環境變數 ASN_BRIDGE_ENGINE_ONLY=1）\n\
   --inbox        收件匣模式：不啟動 worker、不需 Aegis；信先存進 <ASN_HOME>/inbox/inbox.jsonl（fsync 後才 ack），代理用 asn-cli inbox 讀、asn-cli send 回信\n\
@@ -43,6 +54,17 @@ pub fn parse_args_env(args: &[String], env_engine_only: Option<&str>, env_inbox:
     match it.next().map(String::as_str) {
         None | Some("-h") | Some("--help") | Some("help") => Ok(Cmd::Help),
         Some("-V") | Some("--version") | Some("version") => Ok(Cmd::Version),
+        Some("login") => {
+            let mut o = LoginOpts::default();
+            while let Some(a) = it.next() {
+                match a.as_str() {
+                    "--url" => o.url = Some(it.next().ok_or("--url 後面要接網址")?.clone()),
+                    "--home" => o.home = Some(it.next().ok_or("--home 後面要接資料夾")?.clone()),
+                    other => return Err(format!("不認得的參數：{other}")),
+                }
+            }
+            Ok(Cmd::Login(o))
+        }
         Some("run") => {
             let mut o = RunOpts { engine_only: truthy(env_engine_only), inbox: truthy(env_inbox) };
             for a in it {
@@ -89,11 +111,37 @@ pub fn main_with(args: &[String]) -> i32 {
             0
         }
         Ok(Cmd::Run(o)) => run(o),
+        Ok(Cmd::Login(o)) => login(o),
         Err(e) => {
             say(&format!("{e}\n{USAGE}"));
             2
         }
     }
+}
+
+/// `asn-bridge login`：結束碼 0 成功、1 沒成功（過期、連不上、被拒）、2 設定錯
+fn login(o: LoginOpts) -> i32 {
+    let url = crate::identity::base_url(o.url.or_else(|| crate::envc::get("ASN_RELAY_URL")));
+    let dir = match o.home.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(h) => std::path::PathBuf::from(h),
+        None => crate::home::resolve().primary,
+    };
+    let client = match reqwest::Client::builder().user_agent("asn-bridge-login/1").build() {
+        Ok(c) => c,
+        Err(_) => {
+            say("asn-bridge：建不了網路連線");
+            return 2;
+        }
+    };
+    crate::rt::block_on(async move {
+        match crate::device_login::login(&client, &url, &dir, &say).await {
+            Ok(_) => 0,
+            Err(e) => {
+                say(&format!("asn-bridge login：{e}"));
+                1
+            }
+        }
+    })
 }
 
 fn run(o: RunOpts) -> i32 {
@@ -260,6 +308,18 @@ mod tests {
         assert_eq!(parse_args_env(&a(&["run"]), None, Some("1")).unwrap(), Cmd::Run(inbox));
         assert_eq!(parse_args_env(&a(&["run"]), None, Some("0")).unwrap(), Cmd::Run(RunOpts::default()));
         assert!(parse_args(&a(&["run", "--inbox", "--engine-only"]), None).is_err());
+    }
+
+    #[test]
+    fn login_子命令與參數() {
+        assert_eq!(parse_args(&a(&["login"]), None).unwrap(), Cmd::Login(LoginOpts::default()));
+        assert_eq!(
+            parse_args(&a(&["login", "--url", "http://x/relay", "--home", "/h"]), None).unwrap(),
+            Cmd::Login(LoginOpts { url: Some("http://x/relay".into()), home: Some("/h".into()) })
+        );
+        assert!(parse_args(&a(&["login", "--url"]), None).is_err());
+        assert!(parse_args(&a(&["login", "--bogus"]), None).is_err());
+        assert!(USAGE.contains("asn-bridge login"));
     }
 
     #[test]

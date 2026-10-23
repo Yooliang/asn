@@ -74,6 +74,7 @@ export const cloudApi = {
   create: name => invoke('cloud_agent_create', { name }),   // → { id, name, key, invite }
   list: () => invoke('cloud_agent_list'),                    // → { nodes: [{ id, name, last_seen_at, online }] }
   revoke: node => invoke('cloud_agent_revoke', { node }),
+  approve: (code, name, nodeId) => invoke('cloud_agent_approve', { code, name, nodeId: nodeId || null }),   // 核准無畫面主機的短碼 → { id, name }（金鑰不經過這裡）
 }
 export const store = name => ({
   load: async () => { const s = await invoke('store_load', { name }); try { return s ? JSON.parse(s) : null } catch { return null } },

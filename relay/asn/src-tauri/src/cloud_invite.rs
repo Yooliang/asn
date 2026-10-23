@@ -51,7 +51,7 @@ pub fn error_text(code: &str) -> String {
     match code {
         "too_many" => "雲端代理（或電腦）的數量已達上限，請先撤銷用不到的".to_string(),
         "not_found" => "找不到這個雲端代理（可能已經撤銷了）".to_string(),
-        _ => account::error_text(code),
+        _ => crate::device_login::approve_error_text(code).unwrap_or_else(|| account::error_text(code)),
     }
 }
 fn err(e: CallErr) -> String {
@@ -94,6 +94,18 @@ pub async fn revoke(client: &reqwest::Client, relay_url: &str, token: &str, node
     account::call(client, relay_url, token, "cloud_node_revoke", None, json!({ "node": node })).await.map(|_| ()).map_err(err)
 }
 
+/// 核准無畫面主機的短碼（主機上跑 asn-bridge login 會印出短碼）。用登入憑證呼叫 device_code_approve；
+/// 金鑰不經過這裡——主機自己輪詢拿，所以回傳只有節點代號與名字。
+pub async fn approve_device(client: &reqwest::Client, relay_url: &str, token: &str, code: &str, name: &str, node_id: &str) -> Result<Value, String> {
+    let body = crate::device_login::approve_body(code, name, node_id)?;
+    let v = account::call(client, relay_url, token, "device_code_approve", None, body).await.map_err(err)?;
+    let id = v.get("id").and_then(Value::as_str).unwrap_or("");
+    if id.is_empty() {
+        return Err("後台回的資料格式不對".into());
+    }
+    Ok(json!({ "id": id, "name": v.get("name").and_then(Value::as_str).unwrap_or("") }))
+}
+
 // ---------- 指令 ----------
 
 fn no_shot(app: &App) -> Result<(), String> {
@@ -107,6 +119,15 @@ pub async fn cloud_agent_create(app: State<'_, App>, auth: State<'_, AuthState>,
     let c = account::ctx()?;
     let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
     create(&c.client, &c.relay_url, &token, &name).await
+}
+
+/// 核准無畫面主機的短碼。→ { id, name }
+#[tauri::command]
+pub async fn cloud_agent_approve(app: State<'_, App>, auth: State<'_, AuthState>, code: String, name: String, node_id: Option<String>) -> Result<Value, String> {
+    no_shot(&app)?;
+    let c = account::ctx()?;
+    let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
+    approve_device(&c.client, &c.relay_url, &token, &code, &name, node_id.as_deref().unwrap_or("")).await
 }
 
 /// 已加入的雲端代理。沒登入、--shot 模式回空清單（不報錯）
