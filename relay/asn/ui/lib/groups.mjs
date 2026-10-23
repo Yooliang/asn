@@ -230,3 +230,11 @@ export async function copyText(text) {
   ta.remove()
   if (!ok) throw new Error('copy failed')
 }
+
+// ---------- 群組列表的大頭像（跟個人名單一樣用 .dp xs 方框，裡面放群組名第一個字、底色依名稱固定） ----------
+export const roomInitial = name => (Array.from(String(name ?? '').trim())[0] ?? '群')
+export function roomHue(name) {
+  let h = 0
+  for (const ch of String(name ?? '')) h = (h * 31 + ch.codePointAt(0)) % 360
+  return h
+}

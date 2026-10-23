@@ -96,7 +96,7 @@ test('頁面腳本語法正確（list.js、m.js、chat.js 與群組模組）：�
 })
 
 test('加我的另一個 AI 入口＋群組附件放行：選單項目、聚焦區塊、旗標不再整個群組禁用', () => {
-  assert.match(read('ui', 'lib', 'chatpane.mjs'), /pickMenu\('addai'\)[^<]*>加我的另一個 AI/)
+  assert.match(read('ui', 'lib', 'actionbar.mjs'), /key: 'addai', label: '加我的另一個 AI'/)
   assert.match(read('ui', 'list.js'), /what === 'addai'\) groupFlow\.openManage\(rid, \{ focusAdd: true \}\)/)
   assert.match(read('ui', 'm.js'), /key: 'addai', label: '加我的另一個 AI'/); assert.match(read('ui', 'm.js'), /key === 'addai' && f\.room\) groupFlow\.openManage/)
   assert.match(read('ui', 'lib', 'group-sheet.mjs'), /<h3 class="gs-h"[^>]*>加我的另一個 AI<\/h3>/)

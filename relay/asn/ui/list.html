@@ -113,7 +113,7 @@
           <ul>
             <li v-for="r in roomRows" :key="r.id" class="room-item">
               <button class="room-btn" type="button" @click="openChat(r.chatId)">
-                <span class="room-ic"></span>
+                <span class="dp xs room-av st-online" :style="{ '--h': roomHue(r.name) }" aria-hidden="true"><span>{{ roomInitial(r.name) }}</span></span>
                 <span class="b-text"><span class="b-line"><span class="b-nick" v-html="emo(r.name)"></span><span class="b-st">({{ r.count }} 人)</span></span><span class="b-psm" v-if="r.last" v-html="emo(r.last)"></span></span>
                 <span class="unread" v-if="r.unread">{{ r.unread }}</span>
               </button>

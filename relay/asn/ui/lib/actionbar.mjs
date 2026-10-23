@@ -8,6 +8,8 @@ import { SUBAGENT_POLL_MS, canOfferSubagents, subagentView } from './subagents.m
 import { CONSOLE_QUERY_TIMEOUT_MS, consoleToggleLabel, engineForProfile, withTimeout } from './partner-launch-ui.mjs'
 import { initialOpsCtx, menuItems } from './partner-ops.mjs'
 import { PartnerOpDialog, loadOpsContext } from './partner-ops-ui.mjs'
+import { canInviteFrom } from './groups.mjs'
+import { placeMenu } from './menu-place.mjs'
 
 /** 這位代理用哪一家的指令（名單上沒寫就看啟動設定，再沒有就當 Claude）。 */
 export function friendEngine(friend) {
@@ -22,14 +24,14 @@ export function sameFriend(a, b) {
 
 /** 能不能切換主控台視窗：只有本機、非雲端代理、已經開起來的視窗。 */
 export function canOfferConsole(friend, selfNode) {
-  if (!friend || friend.pending) return false
+  if (!friend || friend.pending || friend.room === true) return false
   if (friend.engine === 'acp') return false
   return friend.node === selfNode
 }
 
 /** 通話按鈕：夥伴要在線（離線的話信只會留在收發室，通話等不到回覆），而且這個環境有語音功能。 */
 export function canOfferCall(friend, { hasVoice = true } = {}) {
-  if (!hasVoice || !friend || friend.pending) return false
+  if (!hasVoice || !friend || friend.pending || friend.room === true) return false
   return friend.status !== 'offline'
 }
 
@@ -38,9 +40,23 @@ export function canOfferCall(friend, { hasVoice = true } = {}) {
  * 有登入、電腦在線且開放遠端管理；不能按就反灰，原因寫在提示裡。回 { show, ok, reason }。
  */
 export function wakeButtonView(friend, ctx = {}) {
-  if (!friend || friend.pending || friend.status !== 'offline') return { show: false, ok: false, reason: '' }
+  if (!friend || friend.pending || friend.room === true || friend.status !== 'offline') return { show: false, ok: false, reason: '' }
   const it = menuItems(friend, ctx).find(i => i.key === 'resume')
   return it ? { show: true, ok: it.ok, reason: it.reason } : { show: false, ok: false, reason: '' }
+}
+
+/**
+ * 「管理」大按鈕的選單項目（原本在收件人列的「⋯」，小良哥 10/23 改搬到大按鈕區，下拉才不會被下面的東西蓋住）。
+ * 群組：邀請別人加入、加我的另一個 AI、成員與設定；一對一：只有能邀請的夥伴才有「邀請別人加入」；沒有項目就不放按鈕。
+ */
+export function opsMenuItems(friend) {
+  if (!friend) return []
+  if (friend.room === true) return [
+    { key: 'invite', label: '邀請別人加入' },
+    { key: 'addai', label: '加我的另一個 AI' },
+    { key: 'manage', label: '成員與設定' },
+  ]
+  return canInviteFrom(friend) ? [{ key: 'invite', label: '邀請別人加入' }] : []
 }
 
 /** 顯示／背景按鈕的字與提示。 */
@@ -50,17 +66,56 @@ export function consoleButtonView(visible) {
     : { label: consoleToggleLabel(false), tip: '把這個代理的視窗叫回前台' }
 }
 
+/** 「管理」大按鈕＋選單：選單搬到 body 用 position:fixed 定位（不被對話區的捲動容器、輸入框蓋住或裁掉）。 */
+export const OpsMenuButton = {
+  name: 'OpsMenuButton',
+  props: { items: { type: Array, default: () => [] } },
+  emits: ['pick'],
+  setup(props, { emit }) {
+    const { ref, reactive, nextTick, onMounted, onBeforeUnmount } = globalThis.Vue
+    const open = ref(false)
+    const btn = ref(null), pop = ref(null)
+    const pos = reactive({ x: 0, y: 0, ready: false })
+    async function place() {
+      await nextTick()
+      if (!btn.value || !pop.value) return
+      const r = btn.value.getBoundingClientRect(), w = pop.value.offsetWidth, h = pop.value.offsetHeight
+      const p = placeMenu({ x: r.left, y: r.bottom + 2 }, { w, h }, { w: window.innerWidth, h: window.innerHeight })
+      Object.assign(pos, { x: p.x, y: p.y, ready: true })
+    }
+    function toggle() { open.value = !open.value; pos.ready = false; if (open.value) void place() }
+    function pick(it) { open.value = false; emit('pick', it.key) }
+    const onDoc = e => { if (open.value && !btn.value?.contains(e.target) && !pop.value?.contains(e.target)) open.value = false }
+    const onKey = e => { if (e.key === 'Escape') open.value = false }
+    onMounted(() => { document.addEventListener('mousedown', onDoc, true); window.addEventListener('keydown', onKey); window.addEventListener('resize', place) })
+    onBeforeUnmount(() => { document.removeEventListener('mousedown', onDoc, true); window.removeEventListener('keydown', onKey); window.removeEventListener('resize', place) })
+    return { open, btn, pop, pos, toggle, pick }
+  },
+  template: `
+<div class="ab-wrap">
+  <button class="abtn" type="button" ref="btn" :class="{ on: open }" aria-haspopup="true" :aria-expanded="open" aria-label="管理" title="邀請別人加入、成員與設定等管理動作" @click="toggle">
+    <img src="img/ab-more.svg" alt="" width="32" height="32"><span class="ab-name">管理 ▾</span>
+  </button>
+  <teleport to="body">
+    <ul class="ab-menu ab-ops" v-if="open" ref="pop" role="menu" :style="{ left: pos.x + 'px', top: pos.y + 'px', visibility: pos.ready ? 'visible' : 'hidden' }">
+      <li v-for="it in items" :key="it.key"><button type="button" role="menuitem" @click="pick(it)">{{ it.label }}</button></li>
+    </ul>
+  </teleport>
+</div>`,
+}
+
 export const ActionBar = {
   name: 'ActionBar',
-  components: { AsnDialog, PartnerOpDialog },
+  components: { AsnDialog, PartnerOpDialog, OpsMenuButton },
   props: {
     friend: { type: Object, default: null },
     selfNode: { type: String, default: '' },
     api: { type: Object, default: null },        // 要有 partnerConsoleQuery／partnerConsoleSet／modelSwitchQuery／modelSwitchRun（lib/tauri.mjs 的 transport）
     active: { type: Boolean, default: true },
     callable: { type: Boolean, default: false },   // 這個視窗有語音功能（由對話區決定）
+    ops: { type: Array, default: () => [] },       // 「管理」按鈕的選單項目（opsMenuItems）；空的就不放按鈕
   },
-  emits: ['call'],
+  emits: ['call', 'ops'],
   setup(props, { emit }) {
     const { ref, computed, reactive, watch, onMounted, onBeforeUnmount } = globalThis.Vue
     const cons = reactive({ state: 'none', visible: true, busy: false })   // state：none／toggle
@@ -73,12 +128,13 @@ export const ActionBar = {
     const engine = computed(() => friendEngine(props.friend))
     const name = computed(() => props.friend?.agent || props.friend?.nick || '')
     const showConsole = computed(() => Boolean(props.api) && canOfferConsole(props.friend, props.selfNode) && cons.state === 'toggle')
-    const showModel = computed(() => Boolean(props.api) && canOfferModelSwitch(props.friend, { selfNode: props.selfNode, engine: engine.value }))
-    const showSubs = computed(() => Boolean(props.api?.subagentsQuery) && canOfferSubagents(props.friend, { selfNode: props.selfNode, engine: engine.value }))
+    const isRoom = computed(() => props.friend?.room === true)
+    const showModel = computed(() => !isRoom.value && Boolean(props.api) && canOfferModelSwitch(props.friend, { selfNode: props.selfNode, engine: engine.value }))
+    const showSubs = computed(() => !isRoom.value && Boolean(props.api?.subagentsQuery) && canOfferSubagents(props.friend, { selfNode: props.selfNode, engine: engine.value }))
     const subView = computed(() => subagentView(subs.q))
     const showCall = computed(() => canOfferCall(props.friend, { hasVoice: props.callable }))
-    const wake = computed(() => (props.api ? wakeButtonView(props.friend, opsCtx) : { show: false, ok: false, reason: '' }))
-    const show = computed(() => showCall.value || showConsole.value || showModel.value || showSubs.value || wake.value.show)
+    const wake = computed(() => (props.api && !isRoom.value ? wakeButtonView(props.friend, opsCtx) : { show: false, ok: false, reason: '' }))
+    const show = computed(() => showCall.value || showConsole.value || showModel.value || showSubs.value || wake.value.show || props.ops.length > 0)
     const consoleView = computed(() => consoleButtonView(cons.visible))
     const switcher = computed(() => (props.api ? createModelSwitcher({ transport: props.api, log: m => console.info('[ASN]', m) }) : null))
     const dlgText = computed(() => confirmText(name.value, model.current, dlg.target?.label ?? ''))
@@ -162,7 +218,7 @@ export const ActionBar = {
     watch(() => props.active, a => { if (a) { void loadConsole(); void loadSubs(); void loadWake() } })
     watch(() => props.friend?.id, () => { model.open = false; subs.open = false; wakeDlg.open = false; void loadConsole(); startSubs(); void loadWake() })
     watch(() => props.friend?.status, () => { void loadWake() })
-    return { root, wake, wakeDlg, openWake, showCall, startCall: () => emit('call'), cons, model, subs, subView, showSubs, toggleSubs, dlg, show, showConsole, showModel, consoleView, dlgText, toggleConsole, toggleModelMenu, pick, closeDlg, submit, copyManual }
+    return { root, isRoom, wake, wakeDlg, openWake, showCall, startCall: () => emit('call'), cons, model, subs, subView, showSubs, toggleSubs, dlg, show, showConsole, showModel, consoleView, dlgText, toggleConsole, toggleModelMenu, pick, closeDlg, submit, copyManual }
   },
   template: `
 <div class="actionbar" ref="root" v-if="show" role="toolbar" aria-label="代理功能列">
@@ -202,6 +258,7 @@ export const ActionBar = {
       <li class="menu-note" v-if="subView.more">還有 {{ subView.more }} 個沒列出</li>
     </ul>
   </div>
+  <ops-menu-button v-if="ops.length" :items="ops" @pick="k => $emit('ops', k)"></ops-menu-button>
   <asn-dialog v-if="dlg.open" :title="dlgText.title" @close="closeDlg">
     <p class="launch-notice-body" v-if="!dlg.done">{{ dlgText.lead }}</p>
     <ul class="model-points" v-if="!dlg.done && !dlg.error"><li v-for="p in dlgText.points" :key="p">{{ p }}</li></ul>

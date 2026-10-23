@@ -156,6 +156,7 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .abtn:active:not(:disabled){background:linear-gradient(#c9def3,#e1eefb)}
 .abtn:disabled{opacity:.5;cursor:default}
 .ab-menu{position:absolute;top:100%;left:0;z-index:20;list-style:none;margin:2px 0 0;padding:3px;min-width:150px;background:var(--panel);border:1px solid #7a9ec4;border-radius:4px;box-shadow:0 6px 18px rgba(0,30,70,.25)}
+.ab-ops{position:fixed;z-index:70;margin:0;max-height:calc(100vh - 16px);overflow:auto}
 .ab-menu button{display:block;width:100%;text-align:left;border:0;background:none;padding:4px 10px;border-radius:3px;cursor:pointer;white-space:nowrap}
 .ab-menu button:hover:not(:disabled){background:linear-gradient(#f2f9ff,#cfe6fb)}
 .ab-menu button:disabled{opacity:.5;cursor:default}
