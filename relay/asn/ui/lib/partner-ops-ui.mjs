@@ -5,11 +5,18 @@ import { AsnDialog } from './dialog.mjs'
 import { machinesByNode } from './mobile-launch.mjs'
 import { OP_LABEL, OP_POLL_MS, buildOpRequest, infoRows, opErrorText, opFormError, progressView } from './partner-ops.mjs'
 
+const errText = e => String(e?.message ?? e ?? '').replace(/\s+/g, ' ').trim().slice(0, 80) || '原因不明'
+
 // 查「能不能管理」要用的設定：有沒有登入、各台電腦在線與否與開放與否。查不到的一律當沒查到（loaded:false → 反灰並說明）
 export async function loadOpsContext(api) {
-  const out = { machines: {}, loaded: false, signedIn: false }
-  try { out.signedIn = (await api.authStatus?.())?.signed_in === true } catch { out.signedIn = false }
-  try { out.machines = machinesByNode(await api.launchers()); out.loaded = true } catch { out.loaded = false }
+  const out = { machines: {}, loaded: false, signedIn: null, checking: false, authError: '', loadError: '' }
+  // 查詢失敗不能當成「沒登入」：登入狀態維持未知（null），並記下真正的原因
+  try {
+    const st = await api.authStatus?.()
+    if (st && typeof st.signed_in === 'boolean') out.signedIn = st.signed_in
+    else out.authError = '沒有收到回應'
+  } catch (e) { out.authError = errText(e) }
+  try { out.machines = machinesByNode(await api.launchers()); out.loaded = true } catch (e) { out.loadError = errText(e) }
   return out
 }
 

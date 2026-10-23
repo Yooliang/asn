@@ -28,6 +28,7 @@ import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaun
 import { CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, buddyConsoleItem, engineForProfile,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice, withTimeout } from './lib/partner-launch-ui.mjs'
 import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
 import { PartnerOpDialog, loadOpsContext } from './lib/partner-ops-ui.mjs'
+import { initialOpsCtx } from './lib/partner-ops.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
 import { backgroundRestoreNoticeText, collectLaunchFailures, findBackgroundTimeouts, launchFailedNoticeText } from './lib/partner-launch-notify.mjs'
@@ -406,12 +407,14 @@ async function placeBuddyMenu() {
   Object.assign(buddyMenuPos, placeMenu(buddyMenuOrigin, { w: r.width, h: r.height }, viewSize()))
 }
 // 夥伴管理（詳情、改名、關閉視窗、接班換手、喚醒）：項目與判斷全部來自 lib/partner-ops.mjs，和手機同一套
-const opsCtx = reactive({ machines: {}, loaded: false, signedIn: false })
+const opsCtx = reactive(initialOpsCtx())
 let opsCtxAt = 0
 async function refreshOpsCtx() {
   if (Date.now() - opsCtxAt < 15000) return
   opsCtxAt = Date.now()
-  Object.assign(opsCtx, await loadOpsContext(transport))
+  const ctx = await loadOpsContext(transport)
+  Object.assign(opsCtx, ctx)
+  if (ctx.signedIn === null || !ctx.loaded) opsCtxAt = 0   // 查詢失敗不要擋住下一次重查
 }
 const buddyOpItems = computed(() => manageItems(buddyMenuFriend.value, { ...opsCtx, friends: friends.value, asn: asnMap.value }).filter(i => i.key !== 'model'))   // 切換模型沿用下面原本那個子選單
 const opDlg = reactive({ open: false, op: '', friend: null, item: null })

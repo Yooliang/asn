@@ -98,6 +98,9 @@ impl OpsEnv for FakeEnv {
     fn mod_wait_ms(&self) -> u64 {
         self.mod_wait
     }
+    fn mod_probe_ms(&self) -> u64 {
+        40
+    }
     fn launch_config(&self) -> Result<LaunchConfig, String> {
         self.cfg.lock().unwrap().clone()
     }
@@ -1170,7 +1173,10 @@ fn 指令_沒有外掛_過期_換成別人_收發室視窗_都不算有外掛() 
     let r = rig(Opt::default());
     assert_eq!(r.ops.command_target("目標"), None, "沒有狀態檔");
     r.status_file("sid-220", json!({ "sessionId": "sid-220", "at": NOW - 3_600_000, "state": "idle" }));
-    assert_eq!(r.ops.command_target("目標"), None, "過期");
+    assert_eq!(r.ops.command_target("目標").as_deref(), Some("sid-220"), "過期但視窗還活著：外掛只在狀態改變時寫檔，先試外掛");
+    r.os().alive.lock().unwrap().remove(&220);
+    assert_eq!(r.ops.command_target("目標"), None, "過期而且視窗程序已死");
+    r.os().alive.lock().unwrap().insert(220);
     r.status_file("sid-220", json!({ "sessionId": "sid-999", "at": NOW, "state": "idle" }));
     assert_eq!(r.ops.command_target("目標"), None, "sessionId 不符");
     r.status_file("sid-220", json!({ "sessionId": "sid-220", "at": NOW, "detail": "已結束" }));
@@ -1191,4 +1197,107 @@ fn 指令_輪到時視窗已換掉_不寫控制檔() {
     let (good, t) = r.ops.command_blocking(&job("compact", ""), "sid-OLD");
     assert!(!good && t.contains("沒執行"), "{t}");
     assert!(!r.control.join("sid-220.json").exists() && !r.control.join("sid-OLD.json").exists());
+}
+
+// ================================================================================================
+// 狀態檔過期（外掛只在狀態改變時寫檔，閒置超過 30 分鐘就老了）：控制用途不能因此退回重開
+// ================================================================================================
+
+const OLD: u64 = NOW - 3 * 3_600_000;
+
+fn stale_status(r: &Rig, state: &str) {
+    r.status_file("sid-220", json!({ "sessionId": "sid-220", "at": OLD, "state": state }));
+}
+
+#[test]
+fn 過期_閒置視窗的外掛還活著_照樣由外掛切換_不重開() {
+    for (op, extra) in [("rename", json!({ "new_name": "新名字" })), ("model", json!({ "model": "sonnet" }))] {
+        let r = rig(Opt { mod_wait: 60_000, ..Opt::default() });
+        stale_status(&r, "idle");
+        let (status, calls) = (r.status.clone(), Arc::new(AtomicUsize::new(0)));
+        *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || {
+            // 外掛輪詢到控制檔：執行完把結果寫進狀態檔（at 也跟著更新）
+            if calls.fetch_add(1, Ordering::SeqCst) == 1 {
+                std::fs::write(status.join("sid-220.json"), json!({ "sessionId": "sid-220", "at": NOW, "state": "idle", "control": { "id": "op-1", "ok": true, "detail": "已切換" } }).to_string()).unwrap();
+            }
+        }));
+        let res = r.run(op, extra);
+        assert_eq!(res.status, "ok", "{op}：{}", res.detail);
+        assert_eq!(res.detail, "已切換");
+        assert!(r.launched().is_empty() && r.terminated().is_empty(), "{op}：不可退回重開");
+        assert!(!r.control.join("sid-220.json").exists());
+    }
+}
+
+#[test]
+fn 過期_閒置視窗_外掛完全沒動靜_短逾時就退回重開_不白等() {
+    let r = rig(Opt { mod_wait: 600_000, ..Opt::default() });
+    stale_status(&r, "idle");
+    let t0 = std::time::Instant::now();
+    let res = r.run("rename", json!({ "new_name": "新名字" }));
+    assert!(t0.elapsed() < std::time::Duration::from_secs(5), "探測逾時要短，不是等滿 10 分鐘：{:?}", t0.elapsed());
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert_eq!(r.launched().len(), 1, "外掛不在才退回重開");
+    assert!(!r.control.join("sid-220.json").exists(), "退回前收掉控制檔");
+}
+
+#[test]
+fn 過期_外掛有動靜_狀態檔更新_就解除探測_繼續等到忙完() {
+    let r = rig(Opt { mod_wait: 60_000, ..Opt::default() });
+    stale_status(&r, "idle");
+    let (status, calls) = (r.status.clone(), Arc::new(AtomicUsize::new(0)));
+    *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        match calls.fetch_add(1, Ordering::SeqCst) {
+            // 外掛接手：開始執行，狀態變忙（at 變了）
+            1 => std::fs::write(status.join("sid-220.json"), json!({ "sessionId": "sid-220", "at": NOW, "state": "busy" }).to_string()).unwrap(),
+            // 超過探測時間（40ms）很久之後才忙完回報
+            100 => std::fs::write(status.join("sid-220.json"), json!({ "sessionId": "sid-220", "at": NOW, "state": "idle", "control": { "id": "op-1", "ok": true, "detail": "好了" } }).to_string()).unwrap(),
+            _ => {}
+        }
+    }));
+    let res = r.run("model", json!({ "model": "sonnet" }));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert_eq!(res.detail, "好了");
+    assert!(r.launched().is_empty() && r.terminated().is_empty());
+}
+
+#[test]
+fn 過期_最後狀態是忙碌_外掛可能在排隊_不探測_等滿後回失敗_不重開() {
+    let r = rig(Opt { mod_wait: 300, ..Opt::default() });
+    stale_status(&r, "busy");
+    let res = r.run("model", json!({ "model": "sonnet" }));
+    assert_eq!(res.status, "failed");
+    assert!(res.detail.contains("還在忙"), "{}", res.detail);
+    assert!(r.launched().is_empty() && r.terminated().is_empty(), "重開會打斷對話");
+}
+
+#[test]
+fn 過期_視窗程序已死或標了結束_不寫控制檔_直接退回() {
+    let r = rig(Opt { mod_wait: 60_000, ..Opt::default() });
+    stale_status(&r, "idle");
+    r.status_file("sid-220", json!({ "sessionId": "sid-220", "at": OLD, "detail": "已結束" }));
+    let res = r.run("rename", json!({ "new_name": "新名字" }));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert_eq!(r.launched().len(), 1);
+}
+
+#[test]
+fn 過期_指令_外掛還活著就送_沒動靜短逾時回沒有回應() {
+    let r = rig(Opt { mod_wait: 60_000, ..Opt::default() });
+    stale_status(&r, "idle");
+    let (status, calls) = (r.status.clone(), Arc::new(AtomicUsize::new(0)));
+    *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || {
+        if calls.fetch_add(1, Ordering::SeqCst) == 1 {
+            std::fs::write(status.join("sid-220.json"), json!({ "sessionId": "sid-220", "at": NOW, "state": "idle", "control": { "id": "mail-1", "ok": true, "detail": "ok了" } }).to_string()).unwrap();
+        }
+    }));
+    assert_eq!(r.ops.command_blocking(&job("compact", ""), "sid-220"), (true, "ok了".to_string()));
+    let r = rig(Opt { mod_wait: 600_000, ..Opt::default() });
+    stale_status(&r, "idle");
+    let t0 = std::time::Instant::now();
+    let (good, t) = r.ops.command_blocking(&job("compact", ""), "sid-220");
+    assert!(!good && t.contains("沒有回應"), "{t}");
+    assert!(t0.elapsed() < std::time::Duration::from_secs(5));
+    assert!(!r.control.join("sid-220.json").exists());
 }

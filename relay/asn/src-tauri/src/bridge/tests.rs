@@ -1517,6 +1517,9 @@ mod slash_it {
         fn mod_wait_ms(&self) -> u64 {
             self.wait
         }
+        fn mod_probe_ms(&self) -> u64 {
+            40
+        }
         fn launch_config(&self) -> Result<LaunchConfig, String> {
             Err("測試沒有啟動設定".into())
         }
@@ -1666,13 +1669,23 @@ mod slash_it {
     }
 
     #[tokio::test]
-    async fn 外掛狀態檔過期_算沒有外掛_當文字() {
+    async fn 外掛狀態檔過期_但視窗還活著_先試外掛_不當文字_沒動靜短逾時回沒執行() {
+        // 閒置超過 30 分鐘外掛不會再寫狀態檔，不能因此把控制指令當成文字投給視窗
         let mut h = rig(10_000).await;
         std::fs::create_dir_all(&h.core.cfg.status_dir).unwrap();
         std::fs::write(status_path(&h, "sid-b"), json!({"sessionId": "sid-b", "at": T0 - 3_600_000, "state": "idle"}).to_string()).unwrap();
         h.fr.put(owner(1, "/compact", "T-乙"));
         h.core.pull("test", T0).await;
-        assert!(h.said().iter().any(|t| t.contains("/compact")));
+        assert!(!h.said().iter().any(|t| t.contains("/compact")), "不當文字投遞：{:?}", h.said());
+        // 外掛一直沒動靜：探測逾時（測試環境 40 毫秒）後回「沒執行」，並收掉控制檔
+        let mut got = vec![];
+        for _ in 0..100 {
+            got = replies(&h, &uid(1));
+            if !got.is_empty() { break }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert_eq!(got.len(), 1, "{:?}", h.fr.sent());
+        assert!(got[0]["body"].as_str().unwrap().contains("沒執行 /compact"), "{:?}", got[0]);
         assert!(control_file(&h, "sid-b").is_none());
     }
 
