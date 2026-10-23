@@ -1,11 +1,11 @@
 {
-  "version": "0.1.47",
-  "notes": "按下通話不再誤寄「請使用正確的標點符號。」（按鍵聲與靜音不送辨識、提示詞回音丟掉）；語音通話寄出的信帶標記，收件的夥伴知道可能有錯字或同音字，畫面顯示「🎤 語音」；改設備名稱不再重新載入畫面；重新開啟 ASN 會回到原本開著的分頁與對話視窗；名單的忙碌／閒置約 3 秒內更新；已封存的夥伴不會再從本機舊紀錄冒出來；前台／背景切換不能用時，滑鼠提示會說明原因。",
-  "pub_date": "2026-10-23T05:11:56.915Z",
+  "version": "0.1.48",
+  "notes": "語音通話時把通話對象與夥伴名稱交給語音辨識，減少「正見」被聽成「政見」這類同音字；名單上設備右鍵「切換這台的 Claude 帳號」改成專屬對話框，標題寫明是哪一台；ASN 縮在系統匣時也照常收信（隱藏視窗不再被系統節流，另有保底代收）；按一次震動不再顯示兩行。",
+  "pub_date": "2026-10-23T06:03:05.656Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjUwWkdkODlJWWVQSjVCSE5CU0Q2UmZRT25LNHo5dWltajZUOUZpbnFTcnFLOWJTUjV6VDF2WVRYZzBRQ21sUmtIRnJCRXlKR20yblNjdnJtaVh6MlFBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzMyMzE2CWZpbGU6QVNOXzAuMS40N194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjQ3CmhTejFPTlJBcFNqNG5yQ1dYa1grK1dEcERiM2lkcWtnOXpLbEFtdkE0RnAvdENnS0Vpc3p6Y2ZFUkJDb25tVDZQZXo5eGs2dXNkeGJXc01veG54ZUNnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.47_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnpPbTRwMWx2eWtlbnhyb1lWWDFyaUM3c2F2cnJGczhYUU9XUWJzR2pkWUpLTEtZUU1xb3hVYkdUc2EyV0hTK1NaVXJra011SUdNY3BvenBDZ2czd1FBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzM1Mzg1CWZpbGU6QVNOXzAuMS40OF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjQ4CmFURnlHTWZ1UzZqWG5JcGdocURBNkdkVHp3NDBJTWsrZjIzMnk1K21sbVNOcHRtMDc5VDZnT1cvN253am1HbzJaTDFFUGk0V0F1cHEyQzI2ekppV0JBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.48_x64-setup.exe"
     }
   }
 }
