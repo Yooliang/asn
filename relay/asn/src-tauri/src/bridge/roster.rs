@@ -244,6 +244,11 @@ pub fn read_local(sessions_dir: &Path, status_dir: &Path, alive: impl Fn(u32) ->
 /// roster 動作的請求內容。asn_window＝ASN 自己的視窗名（也列進名單，別台看得到這台的 ASN；engine 標 asn）。
 /// launcher＝遠端開視窗的摘要（profile 名與標籤、cwd 白名單、上限；不含指令），沒有可用設定送 null，仲介就清掉。
 pub fn roster_body(windows: &[Window], asn_window: Option<&str>, launcher: Value) -> Value {
+    roster_body_with_procs(windows, asn_window, launcher, &[])
+}
+
+/// 同 roster_body，另附本機掃到的執行中代理（僅顯示：`kind:"process"`、`receivable:false`）；名字與既有條目相同的略過，不干擾視窗
+pub fn roster_body_with_procs(windows: &[Window], asn_window: Option<&str>, launcher: Value, procs: &[super::procscan::ProcAgent]) -> Value {
     let mut agents: Vec<Value> = windows
         .iter()
         .map(|w| {
@@ -263,6 +268,12 @@ pub fn roster_body(windows: &[Window], asn_window: Option<&str>, launcher: Value
     if let Some(n) = asn_window {
         if !windows.iter().any(|w| w.name == n) {
             agents.push(json!({ "name": n, "status": "idle", "cwd_label": "", "engine": "asn" }));
+        }
+    }
+    for p in procs {
+        let name = p.name();
+        if !agents.iter().any(|a| a["name"] == json!(name)) {
+            agents.push(p.to_json());
         }
     }
     json!({ "agents": agents, "launcher": launcher })

@@ -485,7 +485,9 @@ impl Core {
             Some(l) => tokio::task::spawn_blocking(move || l.summary()).await.unwrap_or(Value::Null),
             None => Value::Null,
         };
-        let mut body = roster::roster_body(&self.roster, asn.as_deref(), launcher);
+        // 本機執行中的代理（claude -p／pi／codex／gemini…）：僅顯示、不可收信；讀程序放背景執行緒，開關見 procscan::enabled
+        let procs = tokio::task::spawn_blocking(super::procscan::scan_system).await.unwrap_or_default();
+        let mut body = roster::roster_body_with_procs(&self.roster, asn.as_deref(), launcher, &procs);
         // 這台電腦的 Claude 外掛狀態：啟動檢查完與狀態變化時才附（舊後台會丟掉這個欄位，不壞）
         let due = roster::mod_report_due((self.mod_src)(), self.mod_sent.as_ref(), now);
         if let Some(m) = &due {
