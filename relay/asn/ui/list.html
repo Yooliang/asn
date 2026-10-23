@@ -171,7 +171,7 @@
       <li><button type="button" role="menuitem" @click="menuCloseTab">關閉</button></li>
       <li><button type="button" role="menuitem" @click="menuCloseOther">關閉其他</button></li>
       <li><button type="button" role="menuitem" @click="menuCloseRight">關閉右側</button></li>
-      <li><button type="button" role="menuitem" @click="menuCloseAll">全部關閉</button></li>
+      <li><button type="button" role="menuitem" @click="menuCloseAll">全部關閉</button></li><li><button type="button" role="menuitem" :disabled="!hasIdleTabs" @click="menuCloseIdle">關閉閒置</button></li>
       <li v-if="!chatTabMenuPanel"><button type="button" role="menuitem" @click="menuTogglePin">{{ tabPinLabel }}</button></li>
     </ul>
     <div class="chat-stack">

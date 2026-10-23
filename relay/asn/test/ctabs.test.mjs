@@ -3,6 +3,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   closeAllChatTabs,
+  closeIdleChatTabs,
+  idleTabIds,
+  isTabBusy,
   closeChatTab,
   closeOtherChatTabs,
   closeRightChatTabs,
@@ -124,4 +127,23 @@ test('拖到右半＝插在後面；拖到該區最後一個的右半＝放到�
   // 固定區最後一個的右半：只到固定區最後，不跑進一般區
   assert.equal(dropInsertBefore(tabs, pinned, 'p2', true), '')
   assert.deepEqual(moveChatTab(tabs, pinned, 'p1', dropInsertBefore(tabs, pinned, 'p2', true)).pinned, ['p2', 'p1'])
+})
+
+test('關閉閒置：忙碌、等回信、啟動中、通話中、已固定都留下', () => {
+  const fr = { a: { status: 'online' }, b: { status: 'busy' }, c: { status: 'away', waiting: true }, d: { status: 'online', inCall: true }, e: { status: 'online' }, f: { status: 'online' }, g: { status: 'online', pending: true } }
+  const of = id => fr[id]
+  assert.deepEqual(idleTabIds(['a', 'b', 'c', 'd', 'e', 'f', 'g'], ['e'], of), ['a', 'f'])
+  const r = closeIdleChatTabs({ tabs: ['a', 'b', 'e', 'f'], active: 'a' }, ['e'], of)
+  assert.deepEqual(r.tabs, ['b', 'e'])
+  assert.equal(r.active, 'b')   // 目前分頁閒置也關，換到鄰近留下的
+})
+
+test('關閉閒置：全是閒置＝同全部關閉；沒有閒置＝不動；找不到好友算閒置', () => {
+  const of = () => ({ status: 'online' })
+  const st = { tabs: ['a', 'b', 'p'], active: 'a' }
+  assert.deepEqual(closeIdleChatTabs(st, ['p'], of), closeAllChatTabs(st, ['p']))
+  assert.deepEqual(closeIdleChatTabs({ tabs: ['a'], active: 'a' }, [], of), { tabs: [], active: '' })
+  assert.deepEqual(closeIdleChatTabs({ tabs: ['a'], active: 'a' }, [], () => ({ status: 'busy' })), { tabs: ['a'], active: 'a' })
+  assert.deepEqual(idleTabIds(['x'], [], () => undefined), ['x'])
+  assert.equal(isTabBusy({ panel: 'guide', status: 'busy' }), false)
 })
