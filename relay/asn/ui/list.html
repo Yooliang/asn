@@ -245,6 +245,20 @@
   <ul class="av-menu device-menu" v-if="deviceMenu" :style="{ left: deviceMenuPos.x + 'px', top: deviceMenuPos.y + 'px' }" role="menu" @click.stop>
     <li><button type="button" role="menuitem" @click="deviceMenuSwitch">切換這台的 Claude 帳號…</button></li>
   </ul>
+  <asn-dialog v-if="deviceAcct.node" :title="deviceAcctTitleText" @close="closeDeviceAcct">
+    <p class="launch-notice-body">{{ deviceAcctView.onlineText }}<br>{{ deviceAcctView.currentText }}<br>{{ deviceAcctView.reportedText }}</p>
+    <ul class="acct-list" v-if="deviceAcctView.rows.length">
+      <li v-for="a in deviceAcctView.rows" :key="a.email">
+        <label class="chk"><input type="radio" name="device-acct" :value="a.email" :checked="a.picked" :disabled="a.current || accounts.state.remote.busy" @change="deviceAcct.selected = a.email" /><span class="acct-txt"><span class="acct-name">{{ a.email }}<em v-if="a.current">使用中</em></span><small v-if="a.plan">{{ a.plan }}</small></span></label>
+      </li>
+    </ul>
+    <p class="launch-notice-body" role="status">{{ deviceAcctView.status }}</p>
+    <p class="launch-notice-body">{{ DEVICE_CONFIRM_NOTE }}{{ DEVICE_CLOSE_NOTE }}</p>
+    <div class="partner-actions">
+      <button class="aero-btn" type="button" @click="closeDeviceAcct">關閉</button>
+      <button class="aero-btn primary" type="button" :disabled="!deviceAcctView.canSwitch" @click="deviceAcctSubmit">切換</button>
+    </div>
+  </asn-dialog>
   <asn-dialog v-if="accounts.state.incoming.length" title="有人要切換這台的 Claude 帳號" @close="accounts.decline(accounts.state.incoming[0].id)">
     <p class="launch-notice-body">「{{ accounts.state.incoming[0].fromLabel }}」要求把這台電腦的 Claude 帳號切換成 {{ accounts.state.incoming[0].email }}。</p>
     <p class="launch-notice-body">同意後，這台開著的 Claude 視窗要關掉重開，才會用新帳號。不是你本人操作就按拒絕。</p>
