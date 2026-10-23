@@ -39,11 +39,14 @@ Deno.test("relay 的 send 與 room_post 接上本人簽章，且在節點金鑰�
   assertEquals(send.includes("signedUserId(") && send.includes("...signedArgs("), true);
   assertEquals(send.indexOf("signedUserId(") < send.indexOf("sendWithPerson("), true);
   const room = src.slice(roomAt);
-  assertEquals(room.includes("signedUserId(") && room.includes("asn_relay_room_post") && room.includes("signedArgs("), true);
+  // 群組第一期起，room_post／room_read／room_list 的簽章經 groups.ts 的 signedRpc 帶 p_signed_user（對照表含 asn_relay_room_post）
+  assertEquals(room.includes("signedUserId(") && room.includes("signedRpc("), true);
+  const groups = await Deno.readTextFile(new URL("./groups.ts", import.meta.url));
+  assertEquals(/asn_relay_room_post: "asn_relay_room_post"/.test(groups) && groups.includes("p_signed_user: signed"), true);
 });
 
-Deno.test("簽章標頭只在 send／room_post／launch／launchers／partner_op／partner_ops／secret_pending／secret_reply／read_sync 讀取（其他動作不碰）", async () => {
+Deno.test("簽章標頭只在 send／room_post／launch／launchers／partner_op／partner_ops／secret_pending／secret_reply／read_sync／群組動作（group_*）讀取；room_read／room_list 也帶（其他動作不碰）", async () => {
   const src = await Deno.readTextFile(new URL("../relay/index.ts", import.meta.url));
-  assertEquals(src.split("signedUserId(").length - 1, 6); // send、room_post、遠端開視窗（launch／launchers）、管理夥伴視窗（partner_op／partner_ops）、遠端密碼確認（secret_pending／secret_reply）、已讀同步（read_sync）
-  assertEquals(src.split("SIGN_HEADER").length - 1, 10); // 匯入一次、九處讀取（send、room_post、chat_history、partner_succeed、partner_list、launch／launchers、partner_op／partner_ops、secret_pending／secret_reply、read_sync）
+  assertEquals(src.split("signedUserId(").length - 1, 7); // send、room_post／room_read／room_list、遠端開視窗（launch／launchers）、管理夥伴視窗（partner_op／partner_ops）、遠端密碼確認（secret_pending／secret_reply）、已讀同步（read_sync）、真人群組動作（group_*）
+  assertEquals(src.split("SIGN_HEADER").length - 1, 11); // 匯入一次、十處讀取（send、room_post／read／list、chat_history、partner_succeed、partner_list、launch／launchers、partner_op／partner_ops、secret_pending／secret_reply、read_sync、group_*）
 });

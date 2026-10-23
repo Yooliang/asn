@@ -75,6 +75,14 @@ pub trait Engine: Send + Sync {
     fn default_window(&self) -> Option<String> {
         None
     }
+    /// 收件名在名單上找不到時，這個引擎要寄回的說明（核心只在「僅引擎」模式採用；Aegis 沿用 Node 版文字）；None＝用核心的「找不到」
+    fn unreachable_reply(&self, _name: &str) -> Option<String> {
+        None
+    }
+    /// 沒指定收件人、又沒有可用的預設視窗時，這個引擎要寄回的說明（只在「僅引擎」模式採用）；None＝交給本人
+    fn unaddressed_reply(&self) -> Option<String> {
+        None
+    }
 }
 
 // ---- 記下自己開的子程序 PID ----------------------------------------------------------------------
@@ -236,6 +244,12 @@ impl EngineSet {
     }
     pub fn default_window(&self) -> Option<String> {
         self.engines.iter().find_map(|e| e.default_window())
+    }
+    pub fn unreachable_reply(&self, name: &str) -> Option<String> {
+        self.engines.iter().find_map(|e| e.unreachable_reply(name))
+    }
+    pub fn unaddressed_reply(&self) -> Option<String> {
+        self.engines.iter().find_map(|e| e.unaddressed_reply())
     }
     /// ACP 工作者的遠端管理入口（沒載入 ACP 引擎回 None）
     pub fn acp_admin(&self) -> Option<Arc<dyn acp_admin::AcpAdmin>> {

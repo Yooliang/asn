@@ -1,6 +1,7 @@
 // Relay broker. Node key goes in the x-relay-key header; the sender node is decided by the key.
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { handleNodeRoomAction, type RoomDeps, syncNodeAuto } from "../_shared/rooms.ts";
+import { GROUP_ACTIONS, handleGroupAction, signedRpc } from "../_shared/groups.ts";
 import { handleAgentInbox } from "../_shared/agent_inbox.ts";
 import { readNodeInbox } from "../_shared/inbox_exclude.ts";
 import { ACCOUNT_ACTIONS, type AccountDeps, cleanDisplayName, handleAccountAction } from "../_shared/account.ts";
@@ -468,17 +469,28 @@ Deno.serve(async (req) => {
     const r = await handleAcctAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params);
     return json(r.status, r.body);
   }
+  // 真人的群組動作（建群組、邀請、接受邀請、一對一升級、退出、帶自己的 AI、主持人確認；見 _shared/groups.ts）：
+  // 一定要本人簽章（x-asn-user），節點金鑰單獨呼叫一律 401（沒簽章在打資料庫之前就擋）
+  if (action && GROUP_ACTIONS.has(action)) {
+    if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
+    const raw = await req.json().catch(() => null);
+    const r = await handleGroupAction({
+      rpc: async (fn, args) => await db.rpc(fn, args), ring,
+      signedUser: async () => await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)),
+      sha256Hex, newCode: () => b64u(24),
+    }, me, action, raw);
+    return json(r.status, r.body);
+  }
   // 群組：建群組、改置頂、加人、移人對節點金鑰一律 403（見 _shared/rooms.ts）；其餘（列表、讀、發言、讀置頂）限成員
   if (action?.startsWith("room_")) {
     const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
     const deps = roomDeps();
-    // 本人簽章（選填，只有發言用）：驗過就在寫入訊息的資料庫呼叫多帶使用者 id；其餘 room_ 動作不讀這個標頭
-    if (action === "room_post") {
+    // 本人簽章（選填，發言、讀、列表用）：驗過就在這幾個資料庫呼叫多帶使用者 id（後台再核對節點是這個人的；本人在跨租戶群組用 ~u:<帳號> 的身分）；其餘 room_ 動作不讀這個標頭
+    if (action === "room_post" || action === "room_read" || action === "room_list") {
       const signed = await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER));
       if (signed) {
-        deps.rpc = async (fn, args) =>
-          await db.rpc(fn, fn === "asn_relay_room_post" ? { ...args, ...signedArgs(signed) } : args);
+        deps.rpc = signedRpc(async (fn, args) => await db.rpc(fn, args), signed);
       }
     }
     // 群組發言帶附件：寄出前先驗；訊息寫入後、敲門鈴前綁到這則訊息
@@ -488,6 +500,11 @@ Deno.serve(async (req) => {
       if (!att.ok) return json(att.reply.status, att.reply.body);
       attIds = att.ids;
       const roomId = typeof params.room === "string" ? params.room : "";
+      // 有別的租戶的成員的群組，第 1 期禁止傳附件（下載授權目前以租戶過濾）
+      if (attIds.length) {
+        const ext = await db.rpc("asn_relay_group_has_external", { p_node: me.id, p_room: roomId });
+        if (ext.data === true) return json(403, { error: "external_no_attachments", detail: "這個群組有外部成員，暫不支援附件" });
+      }
       if (attIds.length) deps.beforeRing = async (seq) => { await bindAttachments({ rpc }, me.id, attIds, { room: roomId, seq }); };
     }
     const r = await handleNodeRoomAction(deps, me, action, params);
