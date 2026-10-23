@@ -98,10 +98,10 @@ test('agy：名單上以工作者出現（engine=gemini 供顯示、路由用 ac
     r.mail(ID(1), '你好')
     await r.waitReplies(1)
     assert.deepEqual(r.events[0], { t: 'sent', id: ID(1) })
-    assert.match(r.replies()[0], /收到：你好 \[第1輪 normal 含說明 cwd=Gemini\]/)
+    assert.match(r.replies()[0], /收到：你好 \[第1輪 full 含說明 cwd=Gemini\]/)
     r.mail(ID(2), '再問一個')
     await r.waitReplies(2)
-    assert.match(r.replies()[1], /收到：再問一個 \[第2輪 normal cwd=Gemini\]/)   // 沒有「含說明」＝同一段對話、不重複附說明
+    assert.match(r.replies()[1], /收到：再問一個 \[第2輪 full cwd=Gemini\]/)   // 沒有「含說明」＝同一段對話、不重複附說明
     assert.equal(r.events.find(e => e.t === 'reply').from, 'Gemini')
   } finally { await r.done() }
 })
@@ -112,7 +112,7 @@ test('agy：橋重啟後 resume 同一段對話（輪數接續、不再附說明
     r.mail(ID(1), 'one'); await r.waitReplies(1)
     r.restart()
     r.mail(ID(2), 'two'); await r.waitReplies(2)
-    assert.match(r.replies()[1], /\[第2輪 normal cwd=Gemini\]/)
+    assert.match(r.replies()[1], /\[第2輪 full cwd=Gemini\]/)
     const saved = JSON.parse(fs.readFileSync(path.join(r.dir, 'acp-workers.json'), 'utf8'))
     assert.match(saved.workers.Gemini.session_id, /^conv-/)
   } finally { await r.done() }
@@ -126,7 +126,7 @@ test('agy：子行程環境是白名單（呼叫端的金鑰不外洩），env_p
   } finally { await r.done() }
 })
 
-test('agy：預設唯讀——寫檔（資料夾外）被絆線中止並明確回報，檔案沒寫成；下一封仍可用且接續對話', async () => {
+test('agy：預設開放仍擋資料夾外——寫檔（資料夾外）被絆線中止並明確回報，檔案沒寫成；下一封仍可用且接續對話', async () => {
   const r = rig([agy()])
   try {
     const target = path.join(r.dir, 'outside.txt')
@@ -156,8 +156,8 @@ test('agy：write=allow 時資料夾內可寫；資料夾外仍被擋（白名�
   } finally { await r.done() }
 })
 
-test('agy：指令預設被拒絕——回報「沒有回覆內容＋被政策拒絕的動作」', async () => {
-  const r = rig([agy()])
+test('agy：execute 明寫 deny——回報「沒有回覆內容＋被政策拒絕的動作」', async () => {
+  const r = rig([agy({ permissions: { execute: 'deny' } })])
   try {
     r.mail(ID(1), '@@RUN echo hi')
     await r.waitFor(() => r.fails().length === 1, '指令被拒')
@@ -323,8 +323,8 @@ test('agy：抬頭 reply=no → 內文沒標記也不寄回；reply=yes → 內�
 
 // ---- 標準 ACP（備援／其他 agent）-------------------------------------------------------------------------
 
-test('acp：收信回覆；預設政策——edit 被拒、讀資料夾內放行、資料夾外被拒；回信附上被拒動作的備註', async () => {
-  const r = rig([acp()])
+test('acp：收信回覆；write 明寫 deny——edit 被拒、讀資料夾內放行、資料夾外被拒；回信附上被拒動作的備註', async () => {
+  const r = rig([acp({ permissions: { write: 'deny' } })])
   try {
     const inside = path.join(r.dir, 'workers', 'Gemini', 'a.txt')
     r.mail(ID(1), `@@READ ${inside} @@EDIT ${inside}`); await r.waitReplies(1)
@@ -335,8 +335,23 @@ test('acp：收信回覆；預設政策——edit 被拒、讀資料夾內放行
   } finally { await r.done() }
 })
 
-test('acp：write=allow 且在白名單內放行，白名單外仍拒；fetch 預設放行、network=deny 時拒；execute 預設拒', async () => {
-  const r = rig([acp({ permissions: { write: 'allow', network: 'deny' } })])
+test('acp：全用預設——資料夾內讀寫與執行放行，資料夾外的讀寫仍拒', async () => {
+  const r = rig([acp()])
+  try {
+    const inside = path.join(r.dir, 'workers', 'Gemini', 'a.txt')
+    r.mail(ID(1), `@@READ ${inside} @@EDIT ${inside}`); await r.waitReplies(1)
+    assert.match(r.replies()[0], /edit:allowed,read:allowed/)
+    r.mail(ID(2), '@@EXEC ls'); await r.waitReplies(2)
+    assert.match(r.replies()[1], /execute:allowed/)
+    r.mail(ID(3), `@@EDIT ${path.join(r.dir, 'x.txt')}`); await r.waitReplies(3)
+    assert.match(r.replies()[2], /edit:denied/)
+    r.mail(ID(4), `@@READ ${path.join(r.dir, 'elsewhere.txt')}`); await r.waitReplies(4)
+    assert.match(r.replies()[3], /read:denied/)
+  } finally { await r.done() }
+})
+
+test('acp：write=allow 且在白名單內放行，白名單外仍拒；network=deny 時 fetch 拒；execute 明寫 deny 拒', async () => {
+  const r = rig([acp({ permissions: { write: 'allow', network: 'deny', execute: 'deny' } })])
   try {
     const inside = path.join(r.dir, 'workers', 'Gemini', 'a.txt')
     r.mail(ID(1), `@@EDIT ${inside}`); await r.waitReplies(1)

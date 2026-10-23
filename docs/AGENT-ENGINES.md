@@ -264,7 +264,7 @@ MCP 管的是「agent 呼叫外部工具」，不是「外部把訊息送給 age
 
 ### 9.2 權限的現實（實測，重要）
 
-預設政策＝**唯讀放行、寫檔／執行拒絕**。但 agy 在無頭模式（stream-json）**自己只擋指令**：
+預設政策＝**讀、寫、執行、上網都放行，限工作者自己的工作資料夾**（2026-10-23 小良哥裁示；agents.json 明寫的照寫，明寫 deny 就是 deny）。但 agy 在無頭模式（stream-json）**自己只擋指令**：
 
 | 動作 | agy 無頭模式的實際行為（這台，使用者設定 `allowNonWorkspaceAccess:true`） | 我們怎麼擋 |
 |---|---|---|
@@ -283,7 +283,7 @@ ACP 路線（標準 ACP agent）的權限是**真的預防**：agent 要做事�
 
 ```jsonc
 "permissions": {
-  "read": "allow", "write": "deny", "execute": "deny", "network": "allow", "other": "deny",   // 每類 allow / deny / ask
+  "read": "allow", "write": "allow", "execute": "allow", "network": "allow", "other": "deny",   // 每類 allow / deny / ask
   "allow_dirs": ["C:\\...\\workers\\Gemini"]   // 白名單資料夾：有路徑的讀／寫請求，路徑在這些資料夾外一律拒絕（預設只有 cwd）
 }
 ```
@@ -292,7 +292,7 @@ ACP 路線（標準 ACP agent）的權限是**真的預防**：agent 要做事�
 - `ask`＝問人：轉接器把「哪個工作者想做什麼（檔案或指令的摘要，已遮蔽疑似金鑰／token）」寄給 `ask.notify`（預設 `"sender"`＝原寄件人；可寫 `{"node":"PC1"}` 寄給指定的節點（例如帳號擁有者的 ASN），由他決定），**回信寫給工作者**：「允許 ABCD」「拒絕 ABCD」「全部允許 ABCD」（全部允許＝這一輪之後的同類請求都放行，下一輪重新問）。只有被問的節點的回覆算數（別人冒名不算，會被當成一般來信送進模型）；沒附編號時只認單純的一個表態（「允許」「拒絕」「好」「ok」），免得「好的，我晚點看」被當成放行。`ask.timeout_ms`（預設 5 分鐘）內沒回就**自動拒絕**並通知被問的人。
 - **agy-stream 的限制**：agy 無頭模式不能在執行中暫停，所以 `write`、`network`、`other` 設 `ask` 會自動降成 `deny`（log 提醒）。`execute:"ask"` 以「事後問」實作：指令被 agy 擋下後，問你要不要放行，同意就用放行模式（`--dangerously-skip-permissions`，只這一輪、resume 同一段對話）請它重做，之後回到一般模式。
 - **標準 ACP 路線**：`write`／`execute`／`network` 都能真的「先問再做」。要用真能問的 agent（例如 Grok Build `grok agent stdio`，**這台沒裝、未實測**；社群 agy 包裝不會送請求，設 ask 也不會被問）。
-- 範本與預設政策：唯讀，`network:allow`（只讀資訊；提示注入若引誘它把資料帶進網址有外洩風險，要全封閉就設 `deny`）。
+- 範本與預設政策：`read`、`write`、`execute`、`network` 預設 `allow`，`other` 預設 `deny`；有路徑的讀寫以 `allow_dirs`（預設只有工作資料夾）為界，資料夾外一律拒絕。**執行指令沒有路徑可查，工作資料夾不是沙盒**：agy 開著放行模式時指令能碰到資料夾外，邊界只靠專用空資料夾、角色說明與可信的寄件人。要收緊就在 agents.json 明寫 `deny`。提示注入若引誘它把資料帶進網址有外洩風險，要全封閉就把 `network` 設 `deny`。
 
 ### 9.4 登入／額度／其他失敗怎麼偵測、怎麼回報（不是 ACP 權限請求的那一類）
 

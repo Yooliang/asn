@@ -1,8 +1,8 @@
 // ACP 工作者的權限政策（純函式，不碰檔案、不碰行程，方便測試）。
 // 政策＝每個「類別」一個決定 allow／deny／ask，外加「白名單資料夾」（有路徑的請求，路徑在白名單外一律拒絕）。
 //   read     讀檔、搜尋、思考         預設 allow
-//   write    寫檔、刪檔、搬檔         預設 deny
-//   execute  執行指令                 預設 deny
+//   write    寫檔、刪檔、搬檔         預設 allow（有路徑的請求以白名單資料夾為界，預設只有工作資料夾）
+//   execute  執行指令                 預設 allow（指令沒有路徑可查，邊界只靠工作資料夾與明寫設定）
 //   network  上網抓網頁、搜尋         預設 allow（只讀資訊；要全封閉就設 deny）
 //   other    分不出類別的請求         預設 deny
 // ask＝問人：轉接器把請求摘要寄給指定的人，等回覆（見 acp-approvals.mjs）；逾時一律當拒絕。
@@ -10,7 +10,7 @@ import path from 'node:path'
 
 export const CATEGORIES = ['read', 'write', 'execute', 'network', 'other']
 export const VERDICTS = ['allow', 'deny', 'ask']
-export const DEFAULT_RULES = Object.freeze({ read: 'allow', write: 'deny', execute: 'deny', network: 'allow', other: 'deny' })
+export const DEFAULT_RULES = Object.freeze({ read: 'allow', write: 'allow', execute: 'allow', network: 'allow', other: 'deny' })
 
 const CATEGORY_LABEL = { read: '讀取', write: '寫入', execute: '執行指令', network: '上網', other: '其他動作' }
 export const categoryLabel = c => CATEGORY_LABEL[c] ?? c
