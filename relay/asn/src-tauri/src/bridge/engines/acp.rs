@@ -12,7 +12,7 @@ use super::{acp_clean_env, BoxFut, Engine, EngineCtx, EngineEvent};
 use crate::bridge::mail::{head_reply, wants_reply};
 use crate::bridge::roster::Window;
 use serde_json::Value;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 fn now_ms() -> u64 {
@@ -33,6 +33,8 @@ struct Shared {
     denied: Mutex<Option<Vec<Denied>>>,
     last_activity: AtomicU64,
     stopped: AtomicBool,
+    /// agent 宣告的 loadSession：0＝還不知道、1＝支援、2＝不支援
+    can_load: AtomicU8,
 }
 
 pub struct AcpDriver {
@@ -43,7 +45,7 @@ pub struct AcpDriver {
 impl AcpDriver {
     pub fn new(a: DriverArgs) -> AcpDriver {
         let sid = a.session_id.clone();
-        AcpDriver { a, sh: Arc::new(Shared { sid: Mutex::new(sid), resume_lost: AtomicBool::new(false), client: Mutex::new(None), denied: Mutex::new(None), last_activity: AtomicU64::new(0), stopped: AtomicBool::new(false) }) }
+        AcpDriver { a, sh: Arc::new(Shared { sid: Mutex::new(sid), resume_lost: AtomicBool::new(false), client: Mutex::new(None), denied: Mutex::new(None), last_activity: AtomicU64::new(0), stopped: AtomicBool::new(false), can_load: AtomicU8::new(0) }) }
     }
 
     fn classify(&self, e: &RpcError, ctx: &str) -> WorkerError {
@@ -65,6 +67,16 @@ impl Driver for AcpDriver {
     }
     fn alive(&self) -> bool {
         self.sh.client.lock().unwrap().as_ref().map(|c| c.alive()).unwrap_or(false)
+    }
+    fn pid(&self) -> u32 {
+        self.sh.client.lock().unwrap().as_ref().filter(|c| c.alive()).map(|c| c.pid()).unwrap_or(0)
+    }
+    fn load_session(&self) -> Option<bool> {
+        match self.sh.can_load.load(Ordering::SeqCst) {
+            1 => Some(true),
+            2 => Some(false),
+            _ => None,
+        }
     }
     fn touch(&self) {
         self.sh.last_activity.store(now_ms(), Ordering::SeqCst);
@@ -123,6 +135,7 @@ impl Driver for AcpDriver {
                     client.authenticate(&cfg.auth_method).await?;
                 }
                 let can_load = init.pointer("/agentCapabilities/loadSession").and_then(Value::as_bool) == Some(true);
+                self.sh.can_load.store(if can_load { 1 } else { 2 }, Ordering::SeqCst);
                 let cwd = cfg.cwd.to_string_lossy().to_string();
                 let mut sid = self.sh.sid.lock().unwrap().clone();
                 if !sid.is_empty() && can_load {
@@ -217,12 +230,12 @@ pub struct AcpEngine {
     ctx: EngineCtx,
     approvals: Arc<Approvals>,
     make_driver: MakeDriver,
-    workers: Mutex<Vec<(String, WorkerHandle)>>,
+    workers: Arc<Mutex<Vec<(String, WorkerHandle)>>>,
 }
 
 impl AcpEngine {
     pub fn new(ctx: EngineCtx, make_driver: Option<MakeDriver>) -> AcpEngine {
-        AcpEngine { ctx, approvals: Approvals::new(), make_driver: make_driver.unwrap_or_else(default_make_driver), workers: Mutex::new(vec![]) }
+        AcpEngine { ctx, approvals: Approvals::new(), make_driver: make_driver.unwrap_or_else(default_make_driver), workers: Arc::new(Mutex::new(vec![])) }
     }
 
     fn window_of(w: &Worker) -> Window {
@@ -298,6 +311,10 @@ impl Engine for AcpEngine {
             w.start();
             self.ctx.log(line);
         }
+    }
+
+    fn acp_admin(&self) -> Option<Arc<dyn super::acp_admin::AcpAdmin>> {
+        Some(Arc::new(super::acp_admin::AcpAdminImpl { workers: self.workers.clone() }))
     }
 
     fn stop(&self) {

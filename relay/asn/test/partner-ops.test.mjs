@@ -223,3 +223,22 @@ test('重開：只送節點、名字、動作；送出前不用填任何東西�
   assert.equal(opFormError(f, 'restart', {}), '')
   assert.equal(progressView({ status: 'ok' }, { op: 'restart' }).text, '已重開，對話保留。')
 })
+
+test('ACP 工作者的詳情：引擎、模型、權限、工作資料夾、程序、對話接續都是中文標籤；沒有的欄位不列', () => {
+  const rows = Object.fromEntries(infoRows({
+    pid: 4321, model: 'gemini-2.5-pro', engine: 'gemini', cwd: 'D:\\w\\Gemini', status: 'idle', kind: 'acp',
+    permissions: { read: 'allow', write: 'deny', execute: 'ask', network: 'allow', other: 'allow' }, process_running: true, has_session: true, load_session: true,
+  }).map(r => [r.label, r.value]))
+  assert.deepEqual(rows, { PID: '4321', 模型: 'gemini-2.5-pro', 引擎: 'Gemini', 工作資料夾: 'D:\\w\\Gemini', 狀態: '閒置', 權限: '讀取允許、寫入拒絕、執行詢問、上網允許', 程序: '執行中', 對話接續: '重開後接續上次的對話' })
+  const none = Object.fromEntries(infoRows({ engine: 'gemini', process_running: false, has_session: false, permissions: { read: 'evil' } }).map(r => [r.label, r.value]))
+  assert.deepEqual(none, { 引擎: 'Gemini', 程序: '沒有在跑', 對話接續: '還沒有對話紀錄' }, '看不懂的權限值不列')
+  assert.equal(Object.fromEntries(infoRows({ has_session: true, load_session: false }).map(r => [r.label, r.value])).對話接續, '重開後會開新的對話')
+  assert.ok(!infoRows({ has_session: true, load_session: null }).some(r => r.label === '對話接續'), '還不知道就不列')
+})
+
+test('接班換手完成：ACP 工作者沒有請前任寫交接，說明新對話從空白開始', () => {
+  const v = progressView({ status: 'ok', result: { kind: 'acp', handoff_done: false } }, { op: 'handover' })
+  assert.deepEqual(v.extra, ['這類夥伴沒有請前任寫交接，新對話從空白開始，第一句是接班說明。'])
+  const c = progressView({ status: 'ok', result: { handoff_done: false } }, { op: 'handover' })
+  assert.deepEqual(c.extra, ['前任沒有寫完交接，新夥伴會以前任的對話紀錄為主。'])
+})

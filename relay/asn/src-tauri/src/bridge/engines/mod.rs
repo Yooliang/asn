@@ -3,6 +3,7 @@
 //! 非同步回報「已轉交／失敗／回覆」。Claude 引擎仍走原本的收發室 worker（worker.rs），不在這裡。
 //! 所有引擎的子程序都是無視窗、乾淨環境（ACP 用白名單、Codex 用過濾清單），PID 記進 engine.pids，ASN 結束或下次啟動時只關記下的 PID。
 pub mod acp;
+pub mod acp_admin;
 pub mod acp_agy;
 pub mod acp_approvals;
 pub mod acp_client;
@@ -55,6 +56,10 @@ pub trait Engine: Send + Sync {
     /// 在 tokio 執行環境裡呼叫：啟動長駐的工作者／偵測
     fn start(&self);
     fn stop(&self);
+    /// 遠端管理這個引擎的工作者（只有 ACP 有）
+    fn acp_admin(&self) -> Option<Arc<dyn acp_admin::AcpAdmin>> {
+        None
+    }
 }
 
 // ---- 記下自己開的子程序 PID ----------------------------------------------------------------------
@@ -206,6 +211,10 @@ impl EngineSet {
             }
         }
         changed
+    }
+    /// ACP 工作者的遠端管理入口（沒載入 ACP 引擎回 None）
+    pub fn acp_admin(&self) -> Option<Arc<dyn acp_admin::AcpAdmin>> {
+        self.engines.iter().find_map(|e| e.acp_admin())
     }
     /// 至少有一個引擎成功列過名單
     pub fn has_result(&self) -> bool {

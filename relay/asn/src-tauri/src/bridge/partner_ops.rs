@@ -17,6 +17,7 @@
 
 use super::core::BridgeLog;
 use super::corrlog::{CorrLog, Dir, Entry};
+use super::engines::acp_admin::AcpAdmin;
 use super::roster;
 use crate::launch::config::{canonical_launch_cwd, child_env, expand_vars, valid_partner_name, LaunchConfig};
 use crate::launch::profiles::LaunchMode;
@@ -30,11 +31,13 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-const KNOWN_OPS: [&str; 6] = ["info", "rename", "model", "close", "handover", "resume"];
+const KNOWN_OPS: [&str; 7] = ["info", "rename", "model", "close", "handover", "resume", "restart"];
 pub(crate) const DETAIL_MAX: usize = 500;
 pub(crate) const RESULT_MAX_BYTES: usize = 4096;
 pub(crate) const CONSENT_OFF: &str = "這台電腦沒有開啟「允許遠端開視窗與管理視窗」";
 pub(crate) const HANDOFF_SUBDIR: &str = "交接";
+/// ACP 工作者（收發室自己跑的背景工作者）只支援詳情、重開、接班換手；其他操作與 Claude 以外的夥伴一律回這句
+pub(crate) const UNSUPPORTED: &str = "這類夥伴不支援這個操作";
 const PROTECTED: &str = "收發室與 ASN 自己的視窗不能操作";
 const CHAIN_MAX: usize = 12;
 
@@ -184,6 +187,7 @@ impl Op {
             "close" => "關閉視窗".into(),
             "handover" => "接班換手".into(),
             "resume" => "喚醒視窗".into(),
+            "restart" => "重開".into(),
             o => format!("不認得的動作 {}", clean(o, 20)),
         }
     }
@@ -266,6 +270,8 @@ pub(crate) struct PartnerOps {
     inflight: Mutex<HashSet<String>>,
     /// 從信件來的 /指令：信件編號 → 是否已做完（做完才可以重 ack；做到一半的信再看到不能再執行）
     cmds: Mutex<std::collections::HashMap<String, bool>>,
+    /// 收發室管理的 ACP 工作者（沒載入 ACP 引擎＝None）
+    acp: Mutex<Option<Arc<dyn AcpAdmin>>>,
 }
 
 impl PartnerOps {
@@ -283,6 +289,7 @@ impl PartnerOps {
             seen: Mutex::new(HashSet::new()),
             inflight: Mutex::new(HashSet::new()),
             cmds: Mutex::new(std::collections::HashMap::new()),
+            acp: Mutex::new(None),
         })
     }
 
@@ -299,6 +306,55 @@ impl PartnerOps {
     /// 後台回報的「視窗名 → 夥伴 ID」（往來記錄與交接檔資料夾都用它）
     pub(crate) fn set_partners(&self, m: std::collections::BTreeMap<String, String>) {
         self.corr.set_partners(m);
+    }
+
+    /// 接上 ACP 工作者的管理入口（引擎載入後呼叫）
+    pub(crate) fn set_acp(&self, a: Arc<dyn AcpAdmin>) {
+        *self.acp.lock().unwrap() = Some(a);
+    }
+
+    fn acp_admin(&self) -> Option<Arc<dyn AcpAdmin>> {
+        self.acp.lock().unwrap().clone()
+    }
+
+    /// 名字對得上收發室管理的 ACP 工作者：只支援詳情、重開、接班換手，其餘回「這類夥伴不支援」。
+    /// 動的是工作者驅動記錄在案的 pid，不找程序、不比對名稱；同名的 Claude 視窗還活著時不猜
+    fn execute_acp(&self, op: &Op, acp: &dyn AcpAdmin) -> OpResult {
+        if (self.protect)(&op.name, 0) {
+            return failed(PROTECTED);
+        }
+        let os = self.env.os();
+        if console::read_sessions(&self.dirs.sessions).iter().any(|s| s.get("name").and_then(Value::as_str) == Some(op.name.as_str()) && s.get("pid").and_then(Value::as_u64).map(|p| p != 0 && os.alive(p as u32)).unwrap_or(false)) {
+            return failed("有同名的 Claude 視窗，無法確定是哪一個，請先在電腦上處理");
+        }
+        match op.op.as_str() {
+            "info" => match acp.info(&op.name) {
+                Some(r) => ok("", Some(r)),
+                None => failed("找不到這個工作者"),
+            },
+            "restart" | "handover" => {
+                // 守門 4：動手前再驗一次本機開關
+                if !self.env.allow_remote() {
+                    return failed(CONSENT_OFF);
+                }
+                if op.op == "restart" {
+                    self.stage(op, "closing");
+                    return match acp.restart(&op.name) {
+                        Ok(r) => ok("已結束工作者的程序，收發室會重新啟動它，對話保留", Some(r)),
+                        Err(e) => failed(e),
+                    };
+                }
+                self.stage(op, "closing");
+                match acp.handover(&op.name, &op.note) {
+                    Ok(r) => {
+                        self.stage(op, "opening");
+                        ok("已清掉前任的對話並重開；這類夥伴沒有請前任寫交接，新對話收到接班說明", Some(r))
+                    }
+                    Err(e) => failed(e),
+                }
+            }
+            _ => failed(UNSUPPORTED),
+        }
     }
 
     fn stage(&self, op: &Op, stage: &str) {
@@ -391,6 +447,12 @@ impl PartnerOps {
         }
         if op.op != "info" && !self.env.allow_remote() {
             return failed(CONSENT_OFF);
+        }
+        if let Some(acp) = self.acp_admin().filter(|a| a.has_worker(&op.name)) {
+            return self.execute_acp(op, &*acp);
+        }
+        if op.op == "restart" {
+            return failed(UNSUPPORTED);
         }
         if op.op == "resume" {
             return self.resume(op);

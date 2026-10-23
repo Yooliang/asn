@@ -1192,3 +1192,135 @@ fn 指令_輪到時視窗已換掉_不寫控制檔() {
     assert!(!good && t.contains("沒執行"), "{t}");
     assert!(!r.control.join("sid-220.json").exists() && !r.control.join("sid-OLD.json").exists());
 }
+
+// ================================================================================================
+// ACP 工作者（收發室自己跑的 Gemini、agy 等）：只支援詳情、重開、接班換手
+// ================================================================================================
+
+struct FakeAcp {
+    names: Vec<String>,
+    calls: Mutex<Vec<String>>,
+    fail_with: Mutex<Option<String>>,
+}
+
+impl AcpAdmin for FakeAcp {
+    fn has_worker(&self, name: &str) -> bool {
+        self.names.iter().any(|n| n == name)
+    }
+    fn info(&self, name: &str) -> Option<Value> {
+        self.has_worker(name).then(|| json!({ "pid": 4321, "engine": "gemini", "model": null, "cwd": "D:/w", "status": "idle", "permissions": { "read": "allow", "write": "deny", "execute": "deny", "network": "allow" }, "process_running": true, "has_session": true, "load_session": true }))
+    }
+    fn restart(&self, name: &str) -> Result<Value, String> {
+        self.calls.lock().unwrap().push(format!("restart {name}"));
+        match self.fail_with.lock().unwrap().clone() {
+            Some(e) => Err(e),
+            None => Ok(json!({ "kind": "acp", "pid": 4321, "kept_session": true })),
+        }
+    }
+    fn handover(&self, name: &str, note: &str) -> Result<Value, String> {
+        self.calls.lock().unwrap().push(format!("handover {name} [{note}]"));
+        Ok(json!({ "kind": "acp", "pid": 4321, "handoff_done": false }))
+    }
+}
+
+fn with_acp(r: &Rig, names: &[&str]) -> Arc<FakeAcp> {
+    let a = Arc::new(FakeAcp { names: names.iter().map(|s| s.to_string()).collect(), calls: Mutex::new(vec![]), fail_with: Mutex::new(None) });
+    r.ops.set_acp(a.clone());
+    a
+}
+
+fn acp_run(r: &Rig, op: &str, extra: Value) -> OpResult {
+    let mut v = json!({ "name": "Gemini" });
+    for (k, x) in extra.as_object().cloned().unwrap_or_default() {
+        v[k] = x;
+    }
+    r.run(op, v)
+}
+
+#[test]
+fn acp_詳情_重開_接班換手_交給工作者管理入口_不碰任何程序() {
+    let r = rig(Opt::default());
+    let a = with_acp(&r, &["Gemini"]);
+    let v = acp_run(&r, "info", json!({})).result.unwrap();
+    assert_eq!((v["pid"].as_u64(), v["engine"].as_str()), (Some(4321), Some("gemini")));
+    let res = acp_run(&r, "restart", json!({}));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert_eq!(res.result.unwrap()["kept_session"], true);
+    let res = acp_run(&r, "handover", json!({ "note": "別動資料庫" }));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert_eq!(res.result.unwrap()["handoff_done"], false);
+    assert_eq!(*a.calls.lock().unwrap(), vec!["restart Gemini".to_string(), "handover Gemini [別動資料庫]".to_string()]);
+    assert!(r.terminated().is_empty() && r.launched().is_empty() && r.os().closed.lock().unwrap().is_empty(), "不用名稱找程序、不結束任何程序、不開視窗");
+    assert!(r.env.progress.lock().unwrap().iter().any(|s| s == "stage:opening"), "接班換手有回報階段");
+}
+
+#[test]
+fn acp_改名_切換模型_關閉_喚醒_一律這類夥伴不支援() {
+    let r = rig(Opt::default());
+    let a = with_acp(&r, &["Gemini"]);
+    for (op, extra) in [("rename", json!({ "new_name": "新名字" })), ("model", json!({ "model": "gemini-2.5" })), ("close", json!({})), ("resume", json!({ "session_id": "sid-zzzzzzzz" }))] {
+        let res = acp_run(&r, op, extra);
+        assert_eq!((res.status, res.detail.as_str()), ("failed", UNSUPPORTED), "{op}");
+    }
+    assert!(a.calls.lock().unwrap().is_empty());
+    assert!(r.terminated().is_empty() && r.launched().is_empty());
+}
+
+#[test]
+fn acp_重開與接班換手要本機開放遠端管理_詳情不用_動手前再驗一次() {
+    let r = rig(Opt { allow_first: 0, ..Opt::default() });
+    let a = with_acp(&r, &["Gemini"]);
+    assert_eq!(acp_run(&r, "info", json!({})).status, "ok");
+    for op in ["restart", "handover"] {
+        let res = acp_run(&r, op, json!({}));
+        assert_eq!((res.status, res.detail.as_str()), ("failed", CONSENT_OFF), "{op}");
+    }
+    assert!(a.calls.lock().unwrap().is_empty());
+    // 第一次驗過、動手前第二次關掉了
+    let r = rig(Opt { allow_first: 1, ..Opt::default() });
+    let a = with_acp(&r, &["Gemini"]);
+    assert_eq!(acp_run(&r, "restart", json!({})).detail, CONSENT_OFF);
+    assert!(a.calls.lock().unwrap().is_empty());
+}
+
+#[test]
+fn acp_名字對不上收發室管理的工作者_restart_不支援_也不會動_claude_視窗() {
+    let r = rig(Opt::default());
+    let a = with_acp(&r, &["Gemini"]);
+    // 目標是 Claude 視窗：restart 不支援，程序沒被碰
+    let res = r.run("restart", json!({}));
+    assert_eq!((res.status, res.detail.as_str()), ("failed", UNSUPPORTED));
+    // 沒有這個名字的工作者：照 Claude 的流程找不到視窗
+    let res = acp_run(&r, "handover", json!({ "name": "幽靈" }));
+    assert_eq!(res.status, "failed");
+    assert!(res.detail.contains("找不到"), "{}", res.detail);
+    assert!(a.calls.lock().unwrap().is_empty() && r.terminated().is_empty());
+}
+
+#[test]
+fn acp_同名的_claude_視窗還活著_不猜_收發室名字受保護() {
+    let r = rig(Opt::default());
+    let a = with_acp(&r, &["目標", "T-收發室"]);
+    let res = r.run("restart", json!({}));
+    assert_eq!(res.status, "failed");
+    assert!(res.detail.contains("同名"), "{}", res.detail);
+    let res = acp_run(&r, "restart", json!({ "name": "T-收發室" }));
+    assert_eq!(res.detail, PROTECTED);
+    assert!(a.calls.lock().unwrap().is_empty() && r.terminated().is_empty(), "兩種情況都沒動手");
+}
+
+#[test]
+fn acp_工作者忙碌等原因由管理入口回報_原樣當失敗() {
+    let r = rig(Opt::default());
+    let a = with_acp(&r, &["Gemini"]);
+    *a.fail_with.lock().unwrap() = Some("工作者正在處理信件，等它做完再試".into());
+    let res = acp_run(&r, "restart", json!({}));
+    assert_eq!((res.status, res.detail.as_str()), ("failed", "工作者正在處理信件，等它做完再試"));
+}
+
+#[test]
+fn 沒接_acp_管理入口_restart_一律不支援() {
+    let r = rig(Opt::default());
+    let res = acp_run(&r, "restart", json!({}));
+    assert_eq!((res.status, res.detail.as_str()), ("failed", UNSUPPORTED));
+}

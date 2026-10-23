@@ -201,7 +201,7 @@ function handoverExtra(result) {
   const r = result && typeof result === 'object' && !Array.isArray(result) ? result : {}
   const lines = []
   if (typeof r.handoff_path === 'string' && r.handoff_path) lines.push(`交接檔：${short(r.handoff_path, 300)}`)
-  if (r.handoff_done === false) lines.push('前任沒有寫完交接，新夥伴會以前任的對話紀錄為主。')
+  if (r.handoff_done === false) lines.push(r.kind === 'acp' ? '這類夥伴沒有請前任寫交接，新對話從空白開始，第一句是接班說明。' : '前任沒有寫完交接，新夥伴會以前任的對話紀錄為主。')
   return lines
 }
 
@@ -262,6 +262,8 @@ function contextText(c) {
   const tail = Number.isFinite(used) && Number.isFinite(limit) && limit > 0 ? `${tokensText(used)} / ${tokensText(limit)}` : ''
   return head && tail ? `${head}（${tail}）` : head || tail
 }
+const PERM_LABEL = { read: '讀取', write: '寫入', execute: '執行', network: '上網' }
+const VERDICT_TEXT = { allow: '允許', ask: '詢問', deny: '拒絕' }
 const pick = (o, ...keys) => { for (const k of keys) if (o[k] != null && o[k] !== '') return o[k] }
 const short = (v, n = 200) => String(v).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, n)
 
@@ -293,5 +295,15 @@ export function infoRows(result) {
   const modOn = typeof mod === 'boolean' ? mod : mod && typeof mod === 'object' ? mod.installed !== false : null
   if (modOn != null) add('ASN 外掛', modOn ? '已安裝' : '沒有安裝')
   add('上下文用量', contextText(pick(r, 'context', 'context_usage')))
+  // 收發室自己跑的背景工作者（ACP）另有的欄位
+  const perm = r.permissions && typeof r.permissions === 'object' && !Array.isArray(r.permissions) ? r.permissions : null
+  if (perm) {
+    const text = ['read', 'write', 'execute', 'network'].filter(k => VERDICT_TEXT[perm[k]]).map(k => `${PERM_LABEL[k]}${VERDICT_TEXT[perm[k]]}`).join('、')
+    add('權限', text)
+  }
+  if (typeof r.process_running === 'boolean') add('程序', r.process_running ? '執行中' : '沒有在跑')
+  if (typeof r.has_session === 'boolean') {
+    add('對話接續', !r.has_session ? '還沒有對話紀錄' : r.load_session === true ? '重開後接續上次的對話' : r.load_session === false ? '重開後會開新的對話' : '')
+  }
   return rows
 }

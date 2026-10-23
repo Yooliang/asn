@@ -13,7 +13,7 @@ import { OnboardCard } from './lib/onboard-card.mjs'
 import { ONBOARD_STORE, TEXT as ONBOARD_TEXT, checkName, markOnboarded, planOnboarding } from './lib/onboard.mjs'
 import { friendId } from './lib/roster.mjs'
 import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, showsInSheet } from './lib/mobile-ops.mjs'
-import { OP_LABEL, opFormError } from './lib/partner-ops.mjs'
+import { OP_LABEL, opFormError, partnerEngine } from './lib/partner-ops.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
 import { opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
 import { defaultPartnerName } from './lib/partner.mjs'
@@ -322,7 +322,7 @@ const app = createApp({
     const opsCtx = computed(() => ({ machines: lchData.machines, loaded: lchData.loaded, signedIn: acct.value.signed_in, friends: friends.value, nonWindowNodes: [info.node] }))
     const opsItems = computed(() => (chatFriend.value ? manageItems(chatFriend.value, opsCtx.value) : []))
     const ops = reactive({ phase: 'menu', newName: '', note: '', model: '', error: '', view: null })
-    const opsText = computed(() => opDialogText(ops.phase, chatFriend.value?.agent || chatFriend.value?.nick || '', chatFriend.value?.device || ''))
+    const opsText = computed(() => opDialogText(ops.phase, chatFriend.value?.agent || chatFriend.value?.nick || '', chatFriend.value?.device || '', partnerEngine(chatFriend.value)))
     const opsTitle = computed(() => (ops.phase === 'menu' ? (chatFriend.value?.nick ?? '') : OP_LABEL[ops.phase] ?? ''))
     const opsModels = phoneModels(), opsModelNote = MODEL_NOTE
     const opsRun = ref(null)   // 對話頁頂端的進度：{ op, view }

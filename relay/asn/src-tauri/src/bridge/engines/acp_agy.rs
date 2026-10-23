@@ -200,6 +200,13 @@ impl Driver for AgyDriver {
     fn alive(&self) -> bool {
         self.sh.rpc.lock().unwrap().as_ref().map(|r| r.alive()).unwrap_or(false)
     }
+    fn pid(&self) -> u32 {
+        self.sh.rpc.lock().unwrap().as_ref().filter(|r| r.alive()).map(|r| r.pid()).unwrap_or(0)
+    }
+    fn load_session(&self) -> Option<bool> {
+        // agy 靠 conversation 編號接續
+        Some(true)
+    }
     fn touch(&self) {
         self.sh.last_activity.store(now_ms(), Ordering::SeqCst);
     }

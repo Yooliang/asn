@@ -899,3 +899,103 @@ fn 整條路徑_start_接上引擎_信送進_gemini_回覆寄回_結束時只關
         assert!(!crate::heartbeat::pid_alive(pids[0]), "結束時 Gemini 子程序被關掉");
     });
 }
+
+// ================================================================================================
+// 遠端管理 ACP 工作者：詳情、重開、接班換手（真的啟動假的工作者程序）
+// ================================================================================================
+
+async fn wait_pid(admin: &Arc<dyn engines::acp_admin::AcpAdmin>, name: &str, f: impl Fn(u64) -> bool) -> u64 {
+    for _ in 0..600 {
+        if let Some(i) = admin.info(name) {
+            let pid = i["pid"].as_u64().unwrap_or(0);
+            if i["process_running"] == true && f(pid) {
+                return pid;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("等不到工作者程序");
+}
+
+#[tokio::test]
+async fn acp_遠端管理_詳情_重開只結束記在帳本的程序且對話保留_接班換手開新對話並附接班說明() {
+    let state = tempfile::tempdir().unwrap();
+    let st = state.path().display().to_string();
+    let mut h = eh(Some(json!([worker("Gemini", "acp", json!({ "model": "gemini-2.5-pro" }))])), &[("FAKE_ACP_STATE", &st), ("FAKE_ACP_LOAD", "1")], "acp", &[("T-甲", "idle")]).await;
+    let admin = h.set.acp_admin().expect("有載入 ACP 引擎");
+    assert!(admin.has_worker("Gemini") && !admin.has_worker("T-甲"), "只認收發室管理的工作者");
+    h.put_pull(to_agent(1, "Gemini", "one")).await;
+    h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
+    let pid1 = wait_pid(&admin, "Gemini", |_| true).await;
+    let info = admin.info("Gemini").unwrap();
+    assert_eq!((info["engine"].as_str(), info["model"].as_str(), info["kind"].as_str()), (Some("gemini"), Some("gemini-2.5-pro"), Some("acp")));
+    assert_eq!((info["has_session"].clone(), info["load_session"].clone(), info["process_running"].clone()), (json!(true), json!(true), json!(true)));
+    assert_eq!(info["permissions"], json!({ "read": "allow", "write": "deny", "execute": "deny", "network": "allow" }), "預設唯讀");
+    assert_eq!(info["cwd"].as_str().map(|c| c.ends_with("Gemini")), Some(true), "{info}");
+    let before = std::fs::read_to_string(h.work.path().join("engine.pids")).unwrap();
+    assert!(before.lines().any(|l| l.trim() == pid1.to_string()), "帳本記著這個 pid");
+    // 重開：結束的就是帳本上的那個 pid，之後起新的，對話接續
+    let r = admin.restart("Gemini").unwrap();
+    assert_eq!(r["pid"].as_u64(), Some(pid1));
+    let pid2 = wait_pid(&admin, "Gemini", |p| p != pid1).await;
+    assert!(!crate::heartbeat::pid_alive(pid1 as u32), "舊程序真的結束了");
+    h.put_pull(to_agent(2, "Gemini", "two")).await;
+    h.wait("回覆2", |h| h.fr.sent().len() == 2).await;
+    assert!(h.bodies()[1].contains("[第2輪]") && !h.bodies()[1].contains("含說明"), "重開後接續同一段對話：{}", h.bodies()[1]);
+    let sid1 = serde_json::from_str::<Value>(&std::fs::read_to_string(h.work.path().join("acp-workers.json")).unwrap()).unwrap()["workers"]["Gemini"]["session_id"].as_str().unwrap().to_string();
+    // 接班換手：清掉對話、結束程序、開新的；第一則提示附接班說明（含使用者補的話）
+    let r = admin.handover("Gemini", "別動資料庫").unwrap();
+    assert_eq!((r["pid"].as_u64(), r["handoff_done"].clone()), (Some(pid2), json!(false)));
+    wait_pid(&admin, "Gemini", |p| p != pid2).await;
+    assert!(!crate::heartbeat::pid_alive(pid2 as u32));
+    h.put_pull(to_agent(3, "Gemini", "three")).await;
+    h.wait("回覆3", |h| h.fr.sent().len() == 3).await;
+    assert!(h.bodies()[2].contains("[第1輪 含說明 接班]"), "新對話、第一則是接班說明：{}", h.bodies()[2]);
+    let sid2 = serde_json::from_str::<Value>(&std::fs::read_to_string(h.work.path().join("acp-workers.json")).unwrap()).unwrap()["workers"]["Gemini"]["session_id"].as_str().unwrap().to_string();
+    assert_ne!(sid1, sid2, "對話編號換了");
+    // 接班說明只在新對話的第一輪：第二輪不再附
+    h.put_pull(to_agent(4, "Gemini", "four")).await;
+    h.wait("回覆4", |h| h.fr.sent().len() == 4).await;
+    assert!(h.bodies()[3].contains("[第2輪]") && !h.bodies()[3].contains("接班"), "{}", h.bodies()[3]);
+    // Claude 視窗名字不是工作者
+    assert!(admin.restart("T-甲").is_err() && admin.handover("T-甲", "").is_err() && admin.info("T-甲").is_none());
+}
+
+#[tokio::test]
+async fn acp_遠端管理_正在處理信件時不重開_不換手_程序沒被碰() {
+    let mut h = eh(Some(json!([worker("Gemini", "acp", json!({}))])), &[], "acp", &[]).await;
+    let admin = h.set.acp_admin().unwrap();
+    h.put_pull(to_agent(1, "Gemini", "@@SLEEP")).await;
+    h.wait("已轉交", |h| h.fr.acked().len() == 1).await;
+    let pid = wait_pid(&admin, "Gemini", |_| true).await;
+    for _ in 0..100 {
+        if admin.info("Gemini").unwrap()["status"] == "busy" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    }
+    let e = admin.restart("Gemini").unwrap_err();
+    assert!(e.contains("處理信件"), "{e}");
+    assert!(admin.handover("Gemini", "").unwrap_err().contains("處理信件"));
+    assert!(crate::heartbeat::pid_alive(pid as u32), "程序沒被結束");
+}
+
+#[tokio::test]
+async fn agy_遠端管理_重開保留對話_接班換手換新對話() {
+    let state = tempfile::tempdir().unwrap();
+    let st = state.path().display().to_string();
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[("FAKE_AGY_STATE", &st)], "acp", &[]).await;
+    let admin = h.set.acp_admin().unwrap();
+    h.put_pull(to_agent(1, "Gemini", "一")).await;
+    h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
+    let info = admin.info("Gemini").unwrap();
+    assert_eq!((info["has_session"].clone(), info["load_session"].clone()), (json!(true), json!(true)));
+    admin.restart("Gemini").unwrap();
+    h.put_pull(to_agent(2, "Gemini", "二")).await;
+    h.wait("回覆2", |h| h.fr.sent().len() == 2).await;
+    assert!(h.bodies()[1].contains("[第2輪 normal"), "{}", h.bodies()[1]);
+    admin.handover("Gemini", "").unwrap();
+    h.put_pull(to_agent(3, "Gemini", "三")).await;
+    h.wait("回覆3", |h| h.fr.sent().len() == 3).await;
+    assert!(h.bodies()[2].contains("[第1輪 normal 含說明"), "{}", h.bodies()[2]);
+}
