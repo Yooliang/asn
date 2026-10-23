@@ -15,6 +15,7 @@ import * as signal from "../_shared/signal.ts";
 import { handleNodeLaunchAction, LAUNCH_ACTIONS, sanitizeLauncher } from "../_shared/launch.ts";
 import { handleNodePartnerOpAction, PARTNER_OP_ACTIONS } from "../_shared/partner_ops.ts";
 import { ACCT_ACTIONS, handleAcctAction } from "../_shared/account_switch.ts";
+import { handleSecretAction, SECRET_ACTIONS } from "../_shared/secret_remote.ts";
 import {
   ACTIONS as ATTACH_ACTIONS, bindAttachments, handleAttachAction, prepareAttachments, type StorageDeps, withAttachments,
   withRoomAttachments,
@@ -427,6 +428,15 @@ Deno.serve(async (req) => {
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
     const signedOp = (action === "partner_op" || action === "partner_ops" || action === "partner_archive") ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
     const r = await handleNodePartnerOpAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedOp);
+    return json(r.status, r.body);
+  }
+  // 遠端一次性密碼傳遞（#26 第二期，見 _shared/secret_remote.ts）：secret_request／secret_fetch 是請求端；secret_pending／secret_reply 是本人設備，一定要本人簽章（沒簽章 401 不打資料庫）。
+  // 密文只轉不看：不進 log，只出現在 secret_reply 的資料庫參數與 secret_fetch 的回應。
+  if (action && SECRET_ACTIONS.has(action)) {
+    if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
+    const raw = await req.json().catch(() => null);
+    const signedSecret = (action === "secret_pending" || action === "secret_reply") ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
+    const r = await handleSecretAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, raw, signedSecret);
     return json(r.status, r.body);
   }
   // 遠端切換 Claude 帳號（ASN 帳號管理，見 _shared/account_switch.ts）：
