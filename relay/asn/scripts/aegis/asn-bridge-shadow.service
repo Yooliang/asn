@@ -1,0 +1,33 @@
+# Aegis「兩版並行試跑」單元（草稿，見 docs/design/LINUX-HEADLESS.md「階段 2：Aegis 並行試跑」）。
+# Rust 版 asn-bridge 用另一個測試節點（aegis-rs）收信，與現有 Node 版 irori-relay-aegis（節點 aegis）同時跑；
+# 兩邊各用各的金鑰、各自的資料夾，都問同一個 Aegis 本機 API。刻意不寫 Conflicts=：兩個單元要能同時啟動。
+# 金鑰不寫在這裡：放在 ASN_HOME 底下的 aegis-rs.key（權限 600），由註冊步驟直接在 Aegis 上產生。
+[Unit]
+Description=ASN 無視窗橋（Aegis 引擎，並行試跑，節點 aegis-rs）
+After=network-online.target aegis.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cwen0708
+# 試跑節點的資料夾，與舊的 ~/.irori-relay 分開
+Environment=ASN_HOME=/home/cwen0708/.asn-rs
+Environment=ASN_RELAY_ID=aegis-rs
+Environment=ASN_RELAY_URL=https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay
+Environment=ASN_ENGINES=aegis
+# 白名單與現有單元相同（逗號分隔的成員代號）
+Environment=ASN_AEGIS_ALLOW=aegis,xiao-liang,xiao-yin,xiao-mu,hen,li-li,xiao-hui,xiao-wen,xiao-zhen,xi-xu
+ExecStart=/home/cwen0708/asn-bridge/asn-bridge run --engine-only
+Restart=on-failure
+RestartSec=15
+# 撞到另一個執行個體（結束碼 3）、設定錯誤（結束碼 2）不要一直重啟
+RestartPreventExitStatus=3 2
+# 收尾：先停收信、等轉交中的信再退出
+TimeoutStopSec=330
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/cwen0708/.asn-rs
+
+[Install]
+WantedBy=multi-user.target
