@@ -232,3 +232,22 @@ body > .callview.mobile{position:fixed;inset:0;z-index:90;padding:calc(env(safe-
 .callview.mobile .call-actions{align-self:stretch;gap:14px}
 .callview.mobile .call-actions .aero-btn{flex:1;min-height:56px;border-radius:14px;font-size:18px}
 .m-chat .tool.icon.call{min-width:44px}
+
+/* 群組對話：名單裡的群組列、對話頁（沿用對話版面，群組沒有震動、傳照片、傳檔案、語音，工具列只留表情符號） */
+.m-room-ic{display:flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:12px;color:#fff;background:linear-gradient(160deg,#6fb6f0,#2f6fb8);box-shadow:0 0 0 2px #cfe3f7}
+.m-chat.is-room .toolbar>.tool{display:none}
+.m-room-note{padding:6px 14px;background:var(--warn-bg);border-bottom:1px solid var(--warn-line)}
+
+/* 設置分頁的「使用指引」入口與滿版指引頁 */
+.m-row-btn{display:flex;align-items:center;gap:10px;width:100%;min-height:52px;padding:6px 4px;border:0;background:none;text-align:left;color:inherit;cursor:pointer}
+.m-row-btn:active{background:#e6f1fc}
+.m-row-tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.m-row-tx b{font-size:16px;color:var(--title-fg)}
+.m-row-tx small{font-size:13px;color:var(--muted)}
+.m-guide-list{list-style:none;margin:0;padding:0}
+.m-guide-list li+li{border-top:1px solid #edf2f7}
+.m-guide-badge{align-self:flex-start;margin-top:3px;padding:1px 8px;border-radius:9px;font-size:12px;font-style:normal;background:var(--panel-soft);border:1px solid var(--line);color:var(--muted)}
+.m-guide-badge.is-desktop{background:var(--warn-bg);border-color:var(--warn-line)}
+.m-guide-badge.is-phone{background:#e5f5e8;border-color:#a9d6b2;color:#2f7d3c}
+.m-guide-note{margin:0 0 6px;padding:8px 10px;border:1px solid var(--warn-line);border-radius:6px;background:var(--warn-bg);font-size:13px;line-height:1.5}
+.m-guide .guide-article{padding-bottom:24px}

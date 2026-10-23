@@ -447,3 +447,22 @@ test('通話鈕只在對話頁工具列、只給 AI 夥伴；手機對話頁把�
   assert.match(read('ui', 'm.js'), /startCallPoll\(\{ anyCall: \(\) => callOn\.value/, '通話中每 2 秒收信')
   for (const f of ['list.html', 'chat.html']) assert.doesNotMatch(read('ui', f), /call-api/, `${f} 是電腦版頁面，沒有手機的通話`)
 })
+
+test('手機群組對話：讀走節點金鑰、發言走要本人簽章的專用指令；手機清單沒有電腦端模組；畫面不叫沒簽章的發言路徑', () => {
+  const m = /#\[cfg\(not\(desktop\)\)\]\n\s*let builder = builder\.invoke_handler\(tauri::generate_handler!\[([\s\S]*?)\]\);/.exec(lib)
+  const names = m[1].split(',').map(s => s.trim().replace(/^\w+::/, '')).filter(Boolean)
+  for (const c of ['relay_rooms', 'android_room_read', 'android_room_post']) assert.ok(names.includes(c), `手機要有 ${c}`)
+  const droid = read('src-tauri', 'src', 'android.rs')
+  const post = /pub async fn android_room_post[\s\S]*?\n\}/.exec(droid)[0]
+  assert.match(post, /signing_token/, '發言要取登入憑證')
+  assert.match(post, /room_post_signed/, '發言走簽章版')
+  assert.doesNotMatch(post, /\.api\(/, '發言不能繞過簽章直接打後台')
+  const relay = read('src-tauri', 'src', 'relay.rs')
+  assert.match(/pub async fn room_post_signed[\s\S]*?\n    \}/.exec(relay)[0], /ok_or\("尚未登入/, '沒憑證在打後台之前就回錯')
+  const js = read('ui', 'm.js')
+  assert.match(js, /invoke\('android_room_post'/); assert.match(js, /invoke\('android_room_read'/); assert.match(js, /invoke\('relay_rooms'/)
+  assert.doesNotMatch(js, /invoke\('relay_send'[^\n]*room/i, '群組發言不經一般寄信')
+  const html = read('ui', 'm.html'), css = read('ui', 'mobile.css')
+  assert.match(html, /ROOM_GROUP_KEY/, '夥伴分頁有群組對話分組'); assert.match(html, /is-room/)
+  assert.match(css, /\.m-chat\.is-room \.toolbar>\.tool\{display:none\}/, '群組沒有震動、傳照片、傳檔案：工具列的鈕藏起來')
+})

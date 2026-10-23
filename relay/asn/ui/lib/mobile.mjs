@@ -6,6 +6,7 @@ import { engineKey } from './tabs.mjs'
 import { withoutAsn } from './roster.mjs'
 import { vendorIconSvg } from './vendor-icons.mjs'
 import { noticeOf } from './photo.mjs'
+import { guideNav } from './mobile-guides.mjs'
 
 // ---------- 單欄導覽 ----------
 // 狀態：{ tab: 'list' | 'chats' | 'me', sheet: '' | 'launch' | 'ops' }。sheet＝蓋在分頁上的一層：「開新夥伴」（滿版）、「⋯」選單（底部浮層）。
@@ -27,6 +28,7 @@ export function normalizeNav(raw) {
   if (raw?.sheet === 'launch') return launchNav()
   if (raw?.sheet === 'ops') return opsNav()
   if (raw?.sheet === 'secret') return secretNav()
+  if (raw?.sheet === 'guide') return guideNav(raw?.guide)   // 設置分頁的「使用指引」滿版頁
   return tabNav(raw?.tab)
 }
 
