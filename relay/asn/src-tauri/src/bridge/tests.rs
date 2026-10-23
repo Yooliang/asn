@@ -1757,3 +1757,57 @@ async fn 名單回報_外掛狀態只在第一次與變化時附_沒有狀態或
     assert!(posts.iter().all(|p| p["agents"][0]["name"] == "T-甲"), "名單內容照舊");
 }
 }
+
+// ---- 名單即時回報（外掛狀態檔一變就報）------------------------------------------------------------
+
+fn put_mod_state(work: &std::path::Path, sid: &str, state: &str, at: u64) {
+    let d = work.join("mod-status");
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(d.join(format!("{sid}.json")), json!({"sessionId": sid, "state": state, "at": at}).to_string()).unwrap();
+}
+
+#[tokio::test]
+async fn 即時回報_狀態檔_state_一變就報_心跳與防抖內不報_防抖後補報() {
+    let fr = FakeRelay::start();
+    let work = tempfile::tempdir().unwrap();
+    let sessions = tempfile::tempdir().unwrap();
+    put_session_with_id(sessions.path(), 5001, "T-乙", "sess-0001-aaaa");
+    put_mod_state(work.path(), "sess-0001-aaaa", "idle", T0);
+    let mut core = new_core(&fr, work.path(), sessions.path(), Arc::new(FakeSink::default()), T0);
+    core.refresh_roster(T0).await;
+    let n = || fr.st.lock().unwrap().rosters.len();
+    assert_eq!(n(), 1);
+    // 沒變：不報
+    assert!(!core.watch_local(T0 + 2_000).await);
+    // 只有心跳（at 變、state 不變）：不報
+    put_mod_state(work.path(), "sess-0001-aaaa", "idle", T0 + 3_000);
+    assert!(!core.watch_local(T0 + 3_000).await);
+    assert_eq!(n(), 1);
+    // 閒置 → 忙碌：立刻報，內容是 busy
+    put_mod_state(work.path(), "sess-0001-aaaa", "busy", T0 + 4_000);
+    assert!(core.watch_local(T0 + 4_000).await);
+    assert_eq!(n(), 2);
+    assert_eq!(fr.st.lock().unwrap().rosters[1]["agents"][0]["status"], "busy");
+    // 防抖內又變回閒置：先不報；過了間隔補報
+    put_mod_state(work.path(), "sess-0001-aaaa", "idle", T0 + 4_300);
+    assert!(!core.watch_local(T0 + 4_300).await);
+    assert_eq!(n(), 2);
+    assert!(core.watch_local(T0 + 4_000 + core.cfg.watch_gap_ms).await);
+    assert_eq!(n(), 3);
+    assert_eq!(fr.st.lock().unwrap().rosters[2]["agents"][0]["status"], "idle");
+    // 補報後穩定：不再報
+    assert!(!core.watch_local(T0 + 20_000).await);
+}
+
+#[tokio::test]
+async fn 即時回報_視窗新增也算變化() {
+    let fr = FakeRelay::start();
+    let work = tempfile::tempdir().unwrap();
+    let sessions = tempfile::tempdir().unwrap();
+    put_session(sessions.path(), 5001, "T-甲", "idle", 1);
+    let mut core = new_core(&fr, work.path(), sessions.path(), Arc::new(FakeSink::default()), T0);
+    core.refresh_roster(T0).await;
+    put_session(sessions.path(), 5002, "T-乙", "idle", 2);
+    assert!(core.watch_local(T0 + 5_000).await);
+    assert!(fr.st.lock().unwrap().rosters[1]["agents"].as_array().unwrap().iter().any(|a| a["name"] == "T-乙"));
+}

@@ -300,6 +300,20 @@ async fn launch_cwd_browse(app: State<'_, App>, handle: AppHandle) -> Result<Opt
     }
 }
 
+/// 本機視窗的即時狀態（不經後台）：讀 ~/.claude/sessions 與外掛狀態檔，給名單上「這台電腦」的夥伴蓋過後台的舊值。
+/// 只回名字、狀態、說明、上下文百分比；讀不到就回空清單（前端照舊用後台的名單）。
+#[cfg(desktop)]
+#[tauri::command]
+async fn local_windows() -> Result<Value, String> {
+    let home = identity::home_dir();
+    let list = tokio::task::spawn_blocking(move || {
+        bridge::roster::read_local(&home.join(".claude").join("sessions"), &home.join(".asn").join("status"), heartbeat::pid_alive, 0, "", heartbeat::now_ms()).unwrap_or_default()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(Value::Array(list.iter().map(|w| serde_json::json!({ "name": w.name, "status": w.status, "detail": w.detail, "context_pct": w.context_pct })).collect()))
+}
+
 #[cfg(desktop)]
 #[tauri::command]
 async fn partner_console_query(req: launch::PartnerConsoleReq) -> Result<Value, String> {
@@ -869,7 +883,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_mod::claude_mod_status,
             codex_accounts::codex_account_current, usage::usage_summary,

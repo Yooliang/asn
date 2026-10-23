@@ -704,7 +704,8 @@ window.addEventListener('resize', () => {
 })
 if (ui.mode === 'merged') await invoke('main_layout', { merged: true, w: sizes.merged.w, h: sizes.merged.h, recenter: true })
 
-await listen('relay-bell', () => void core.pull('bell'))   // Rust 端的 Realtime 門鈴
+await listen('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon() })   // Rust 端的 Realtime 門鈴：收信，也立刻重拉名單（別台設備的忙碌／閒置變了也是敲這個鈴）
+window.addEventListener('focus', () => core.refreshRosterSoon())   // 回到前景立刻更新名單
 await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 
 watch([me, showNowPlaying, notifyPrefs, frame, closeTo, autoAddClaude, autoCheck, dims, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, showNowPlaying: showNowPlaying.value, notify: notifyPrefs.value, frame: frame.value, closeTo: closeTo.value, autoAddClaude: autoAddClaude.value, autoUpdate: autoCheck.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting }); sync() }, { deep: true })

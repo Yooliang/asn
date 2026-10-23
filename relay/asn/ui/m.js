@@ -172,14 +172,14 @@ if (screen.value === 'main') {
     if (plan.banner) { banner.value = plan.banner; clearTimeout(bannerTimer); bannerTimer = setTimeout(() => { banner.value = null }, plan.banner.ms ?? BANNER_MS) }
   })
   startCallPoll({ anyCall: () => callOn.value, pull: why => core.pull(why) })   // 通話中每 2 秒多收一次信，結束就停
-  await listen('relay-bell', () => { void core.pull('bell'); void roomsHook.refresh?.() })   // Rust 端的門鈴（前景時有效）
+  await listen('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon(); void roomsHook.refresh?.() })   // Rust 端的門鈴（前景時有效）
   await listen('android-update-progress', p => { if (upd.phase === 'downloading') Object.assign(upd, withProgress(upd, p)) })   // 下載完才到的進度事件不能把畫面又拉回「下載中」
   upd.enabled = bridge?.selfUpdateEnabled() === true
   setInterval(() => { if (shouldAutoCheck(upd, prefs)) void checkUpdate() }, UPDATE_CHECK_MS)
   // 回到前景：立刻拉一次信、更新名單、補正在看的那位的往來記錄
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return
-    void core.pull('resume'); void core.refreshRoster(); void roomsHook.refresh?.()
+    void core.pull('resume'); core.refreshRosterSoon(); void roomsHook.refresh?.()
     if (nav.tab === 'chats' && lastChat.value) { core.markRead(lastChat.value); void core.syncHistory(lastChat.value) }
   })
   startCore = async () => { void (shouldAutoCheck(upd, prefs) && checkUpdate()); await core.start(); sync() }   // 掛上畫面之後才開始（第一次收信要連網，不能讓畫面空等）
