@@ -12,9 +12,10 @@ import { isHallucination, normalize } from './stt-text.mjs'
 import { takeToWavBase64 } from './wav.mjs'
 import { speakableText } from './tts-player.mjs'
 import { createEndpointer, rmsOf } from './call-vad.mjs'
+import { CALL_END_MARKER, CALL_END_NOTE, splitCallEnd } from './call-end.mjs'
 
 /** 每封信前面附的一行，請對方用適合念出來的口氣回答 */
-export const CALL_MARKER = '（語音通話中，請簡短口語回答）'
+export const CALL_MARKER = `（語音通話中，請簡短口語回答；談完了想結束通話，就在回覆最後單獨一行寫${CALL_END_MARKER}）`
 export const CALL_SPEAK_MAX = 300           // 通話中一則回覆最多念這麼多字，其餘照常留在對話裡
 export const PRE_ROLL_SECONDS = 0.5         // 開始說話前先留的一小段，不吃掉字頭
 export const START_SKIP_SECONDS = 0.5      // 通話剛開始的這段聲音不收（按「通話」的點擊聲、麥克風剛開的爆音）
@@ -71,6 +72,7 @@ export function createCallSession({
   let speakFlag = false, guard = false, guardTimer = null, replyTimer = null, spoken = 0
   let seen = new Set()
   let unsub = null
+  let sentCalls = 0, closing = false   // sentCalls：這次通話已寄出幾封語音信（對方的結束記號只認這之後的回信）；closing：對方要掛斷，念完就結束
 
   const refresh = () => {
     if (!state.active) { state.phase = 'idle'; return }
@@ -129,7 +131,7 @@ export function createCallSession({
     if (!text) { if (isHallucination(raw, names)) log('通話：丟掉靜音幻覺'); return }
     state.note = ''
     state.heard = text
-    awaiting++
+    awaiting++; sentCalls++
     clearTimer(replyTimer)
     replyTimer = setTimer(() => { awaiting = 0; state.note = '對方還沒回信，你可以繼續說。'; refresh() }, REPLY_TIMEOUT_MS)
     try { send(`${CALL_MARKER}\n${text}`, { voice: true }) } catch (e) { awaiting = Math.max(0, awaiting - 1); state.note = `寄不出去：${e?.message || '失敗'}` }
@@ -144,7 +146,9 @@ export function createCallSession({
       const key = logKey(m)
       if (seen.has(key)) continue
       seen.add(key)
-      const text = String(m.text ?? '').trim()
+      const cut = splitCallEnd(m.text)
+      const text = cut.text.trim()
+      if (cut.ends && sentCalls > 0) closing = true   // 通話對象回覆通話中的信、最後一行是結束記號：念完掛斷
       if (!text) continue
       awaiting = 0; clearTimer(replyTimer); state.reply = text; state.note = ''
       const say = speakableText(text, CALL_SPEAK_MAX)
@@ -153,6 +157,12 @@ export function createCallSession({
       player.enqueue(`call:${++spoken}`, say, { stream: true })   // 切句分段，第一句好了就先念
     }
     refresh()
+    maybeFinish()
+  }
+
+  /** 對方要掛斷：最後一句念完（或沒有可念的）就結束通話 */
+  function maybeFinish() {
+    if (closing && state.active && !speakFlag) { state.note = CALL_END_NOTE; void end({ keepNote: true }) }
   }
 
   function onPlayer() {
@@ -165,6 +175,7 @@ export function createCallSession({
       dropUtterance(); guard = true
       clearTimer(guardTimer); guardTimer = setTimer(() => { guard = false }, ECHO_GUARD_MS)
       refresh()
+      maybeFinish()
     })
   }
 
@@ -173,6 +184,7 @@ export function createCallSession({
     const why = activeSession ? '另一個通話正在進行。' : canStart()
     if (why) { state.note = why; return false }
     state.note = ''; state.heard = ''; state.reply = ''
+    sentCalls = 0; closing = false
     const my = ++gen
     activeSession = api
     Object.assign(state, { active: true, phase: 'starting', muted: false, seconds: 0, level: 0 })
@@ -211,7 +223,7 @@ export function createCallSession({
     if (unsub) unsub()
     tick = unsub = replyTimer = guardTimer = null
     if (speakFlag) player.stop()
-    speakFlag = false; guard = false; pending = 0; awaiting = 0; t0 = 0; dropUtterance()
+    speakFlag = false; guard = false; closing = false; pending = 0; awaiting = 0; t0 = 0; dropUtterance()
     if (activeSession === api) activeSession = null
     try { await mic.stop() } catch { /* 已停 */ }
     return { seconds }

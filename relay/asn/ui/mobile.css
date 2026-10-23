@@ -232,6 +232,11 @@ body > .callview.mobile{position:fixed;inset:0;z-index:90;padding:calc(env(safe-
 .callview.mobile .call-actions{align-self:stretch;gap:14px}
 .callview.mobile .call-actions .aero-btn{flex:1;min-height:56px;border-radius:14px;font-size:18px}
 .m-chat .tool.icon.call{min-width:44px}
+.m-chat .tool.icon.dict{min-width:44px;gap:6px}
+.m-chat .tool.icon.dict.rec{padding:0 12px;border-color:#d9302b;background:linear-gradient(#fff3f2,#f6c9c6);color:#c0211c}
+.m-chat .tool.icon.dict.busy{opacity:.6}
+.m-chat .tool.icon.dict .dict-state{font-size:14px;font-weight:600;white-space:nowrap}
+.m-chat .call-end-note{text-align:center;font-size:13px;color:var(--title-fg);opacity:.7;margin:4px 0}
 
 /* 群組對話：名單裡的群組列、對話頁（沿用對話版面，群組沒有震動、傳照片、傳檔案、語音，工具列只留表情符號） */
 .m-room-ic{display:flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:12px;color:#fff;background:linear-gradient(160deg,#6fb6f0,#2f6fb8);box-shadow:0 0 0 2px #cfe3f7}

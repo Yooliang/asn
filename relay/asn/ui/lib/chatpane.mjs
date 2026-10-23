@@ -10,6 +10,8 @@ import { Annotator } from './annotator.mjs'
 import { ActionBar } from './actionbar.mjs'
 import { CallView } from './call-view.mjs'
 import { canCallPartner } from './mobile-call.mjs'
+import { CALL_END_NOTE, splitCallEnd } from './call-end.mjs'
+import { DICT_PHASE_TEXT, DICT_TIP, appendDictation } from './mobile-dictation.mjs'
 import { isVoiceMsg } from './voice-mark.mjs'
 import { shotFileName } from './shot.mjs'
 import { buildNameHints } from './stt-text.mjs'
@@ -43,6 +45,7 @@ export const ChatPane = {
     voice: { type: Object, default: null },        // 語音功能（lib/voice-ui.mjs 的 createVoiceUi）；沒給就沒有念出訊息與麥克風
     hideBusyWarn: { type: Boolean, default: false },  // 手機版：對方忙碌時不顯示黃色說明條（標題列已改黃底）
     callApi: { type: Object, default: null },      // 手機版的通話（lib/mobile-call.mjs 的 createMobileCall 工廠，另帶 phaseText）；電腦版不給，通話走 voice.newCall
+    dictApi: { type: Object, default: null },     // 手機版的語音輸入（{ newDictation({ hints, onText }) }，工廠見 lib/mobile-dictation.mjs）；沒給或這支手機沒有語音辨識服務就沒有語音輸入鈕
     loadOlder: { type: Function, default: null },  // 往上捲到頂載入更舊的信：(好友 id) => Promise<{ more, added, busy?, error? }>；沒給就不載入
     hintNames: { type: Array, default: () => [] },  // 名單上的夥伴（給語音辨識偏向名字用，選填）；通話對象自己一定會帶
     enterSends: { type: Boolean, default: true },  // Enter 直接送出（電腦預設）；手機的軟鍵盤 Enter 是換行，傳送靠按鈕
@@ -221,7 +224,24 @@ export const ChatPane = {
       watch(() => props.active, a => { if (!a) void call.end() })
       onBeforeUnmount(() => { void call.end() })
     }
-    const voiceNote = computed(() => props.voice?.state.note || call?.state.note || props.voice?.state.tts.error || '')
+    // ---- 語音輸入（手機）：辨識完的字接在輸入框後面，不自動送出；通話中不給按（外殼的事件接收者只有一個） ----
+    const dict = props.dictApi?.newDictation ? props.dictApi.newDictation({
+      hints: () => buildNameHints(props.friend, props.hintNames),
+      onText: text => { draft.value = appendDictation(draft.value, text); nextTick(() => composeEl.value && composeEl.value.focus()) },
+    }) : null
+    const showDictBtn = computed(() => !!dict)
+    const dictPhase = computed(() => dict?.state.phase || 'idle')
+    const dictLabel = computed(() => DICT_PHASE_TEXT[dictPhase.value] || '')
+    const dictTip = computed(() => DICT_TIP[dictPhase.value] || DICT_TIP.idle)
+    const dictClick = () => { if (dict && !callActive.value) void dict.toggle() }
+    if (dict) {
+      watch(() => props.friend?.id, () => dict.stop())
+      watch(() => props.active, a => { if (!a) dict.stop() })
+      onBeforeUnmount(() => dict.stop())
+    }
+    // 對方（通話對象）回信最後一行的結束記號不顯示在對話裡，改顯示一行小提示
+    const shownBody = m => (m?.k === 'them' ? splitCallEnd(m.text) : { text: String(m?.text ?? ''), ends: false })
+    const voiceNote = computed(() => props.voice?.state.note || call?.state.note || dict?.state.note || props.voice?.state.tts.error || '')
     onMounted(() => {
       scrollDown(); if (props.active) composeEl.value && composeEl.value.focus()
       if (props.shotApi) props.shotApi.supported().then(v => { shotOk.value = v === true }).catch(() => {})
@@ -237,7 +257,7 @@ export const ChatPane = {
     const docEl = ref(null)
     // 訊息內文裡的連結：不在 WebView 導覽，一律交給系統瀏覽器（Rust 端 open_link 再驗一次協定）
     const onBodyClick = ev => handleLinkClick(ev, url => globalThis.__TAURI__?.core?.invoke?.('open_link', { url }))
-    return { isVoiceMsg, showCallBtn, isAsn, showWaiting, warn, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -267,7 +287,8 @@ export const ChatPane = {
                   <svg v-else viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/></svg>
                 </button>
               </div>
-              <div class="m-body" :class="['tone-' + lay(m.k).tone, 'md-on']" v-if="m.text" v-html="renderMarkdown(m.text)" @click="onBodyClick"></div>
+              <div class="m-body" :class="['tone-' + lay(m.k).tone, 'md-on']" v-if="shownBody(m).text" v-html="renderMarkdown(shownBody(m).text)" @click="onBodyClick"></div>
+              <div class="call-end-note" v-if="shownBody(m).ends">{{ CALL_END_NOTE }}</div>
               <div class="unanswered" v-if="m.k === 'me' && m.unanswered != null && !isAsn">{{ m.unanswered > 0 ? '超過 ' + m.unanswered + ' 分鐘未回' : '對方視窗已關閉，未回' }}</div>
               <div class="photos" v-if="m.photos && m.photos.length">
                 <template v-for="p in m.photos" :key="p.id">
@@ -295,8 +316,12 @@ export const ChatPane = {
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="9.5" fill="#ffd84a" stroke="#b58a00"/><circle cx="8.6" cy="9.6" r="1.4" fill="#5a3b00"/><circle cx="15.4" cy="9.6" r="1.4" fill="#5a3b00"/><path d="M7.2 14c1.2 2.6 3 3.6 4.8 3.6s3.6-1 4.8-3.6" fill="none" stroke="#5a3b00" stroke-width="1.6" stroke-linecap="round"/></svg>
           </button>
         </span>
-        <button class="tool icon call" type="button" v-if="showCallBtn" @click="startCall" :disabled="callActive" aria-label="通話" title="通話：用說的跟這位夥伴對話，回信會念出來">
+        <button class="tool icon call" type="button" v-if="showCallBtn" @click="startCall" :disabled="callActive || dictPhase !== 'idle'" aria-label="通話" title="通話：用說的跟這位夥伴對話，回信會念出來">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6.6 3.5l2.4-.6 1.7 4.2-1.9 1.6a11.5 11.5 0 0 0 5.5 5.5l1.6-1.9 4.2 1.7-.6 2.4a2.6 2.6 0 0 1-2.6 2C10.1 18.4 5.6 13.9 4.6 6.1a2.6 2.6 0 0 1 2-2.6z" fill="#2f9a45" stroke="#1f6b2f" stroke-width="1.2" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="tool icon dict" :class="{ rec: dictPhase === 'listening', busy: dictPhase === 'starting' }" type="button" v-if="showDictBtn" @click="dictClick" :disabled="callActive" :aria-pressed="dictPhase === 'listening'" aria-label="語音輸入" :title="dictTip">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="9" y="3.5" width="6" height="11" rx="3" fill="currentColor"/><path d="M5.8 11.5a6.2 6.2 0 0 0 12.4 0M12 17.7v3M8.6 20.7h6.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          <span class="dict-state" v-if="dictLabel">{{ dictLabel }}</span>
         </button>
         <button class="tool icon" type="button" @click="nudge" :disabled="nudgeCooling" aria-label="傳送震動" title="傳送震動">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="8.2" y="4.5" width="7.6" height="15" rx="1.8" fill="#dfeaf6" stroke="#4a5d73" stroke-width="1.4"/><circle cx="12" cy="16.6" r="1" fill="#4a5d73"/><path d="M4.6 8.5l-2 3.5 2 3.5M19.4 8.5l2 3.5-2 3.5" fill="none" stroke="#d9302b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
