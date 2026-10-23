@@ -304,3 +304,25 @@ WantedBy=multi-user.target
 3. 切換時段：Aegis 切換選在非上班時間（信量低）。
 4. `bridge-aegis.mjs` 檔頭「之後移出本 repo（#14 R8，D11）」與本案的先後順序。
 5. 是否要順便把 Aegis 的家目錄從 `~/.irori-relay` 遷到 `~/.asn`（建議另一步）。
+
+## 本機交叉編譯（不靠 CI）
+
+GitHub Actions 停擺時，可在 Windows／macOS／Linux 本機直接編出 Linux x86_64 靜態的 `asn-bridge`（musl，不依賴 glibc 版本，Aegis 的 Ubuntu 24.04 與未知沙盒都能跑）。
+
+需要的工具（只用官方來源）：
+
+| 工具 | 安裝 | 本次版本 |
+|---|---|---|
+| Rust 目標 | `rustup target add x86_64-unknown-linux-musl` | rust 1.99.1 |
+| zig（當連結器，ring 的 C 程式也靠它編） | `pip install ziglang`（PyPI 官方包） | 0.16.0 |
+| cargo-zigbuild | `cargo install cargo-zigbuild`（crates.io） | 0.24.0 |
+
+指令（在 `relay/asn`）：`npm run build:linux-bridge`。可選參數：`--target <三元組>`（例如 `x86_64-unknown-linux-gnu.2.17`）、`--target-dir <路徑>`、`--skip-build`（只驗證既有產物）。cargo 目標資料夾可用環境變數 `CARGO_TARGET_DIR` 指定。找不到 `zig` 時腳本會自動從 Python 的 ziglang 套件找。
+
+等同的 cargo 指令：`cargo zigbuild --manifest-path relay/asn/src-tauri/Cargo.toml --release --no-default-features --bin asn-bridge --target x86_64-unknown-linux-musl`。
+
+產物：`relay/asn/src-tauri/target/linux/asn-bridge`（在忽略清單內，不進 git）。
+
+驗證（腳本內建，失敗就不複製產物）：讀 ELF 標頭確認是 x86-64、64 位元小端；程式標頭沒有 PT_INTERP 與 PT_DYNAMIC（即靜態連結）；檔內不含 webkit、gtk、libsoup、libssl 字串；最後印出大小與 sha256。本機（Windows）不執行它；實際執行請在 Linux 上以 `asn-bridge --version` 確認。
+
+首次實測（2026-10-23）：冷編約 2 分 30 秒，產物 3,352,880 位元組。
