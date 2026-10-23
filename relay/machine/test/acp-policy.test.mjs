@@ -14,10 +14,10 @@ import { categoryOfAcpKind, categoryOfAgyTool, decide, describeAcpRequest, descr
 const WORK = path.join(os.tmpdir(), 'irori-acp-policy-test')
 const base = { name: 'Gemini', engine: 'acp', protocol: 'agy-stream', command: 'agy' }
 
-test('設定：預設值（唯讀、工作資料夾在 workDir/workers/<name>、roster 引擎預設 acp）', () => {
+test('設定：預設值（預設開放、工作資料夾在 workDir/workers/<name>、roster 引擎預設 acp）', () => {
   const { worker, warnings } = normalizeWorker(base, { workDir: WORK, index: 0 })
   assert.equal(worker.cwd, path.resolve(WORK, 'workers', 'Gemini'))
-  assert.deepEqual(worker.permissions.rules, { read: 'allow', write: 'deny', execute: 'deny', network: 'allow', other: 'deny' })
+  assert.deepEqual(worker.permissions.rules, { read: 'allow', write: 'allow', execute: 'allow', network: 'allow', other: 'deny' })
   assert.deepEqual(worker.permissions.allowDirs, [worker.cwd])
   assert.equal(worker.rosterEngine, 'acp')
   assert.deepEqual(worker.ask.notify, [{ sender: true }])
@@ -75,7 +75,7 @@ test('範本 agents.example.json 載得進來：只有 Gemini 開著，備援條
   assert.deepEqual(r.workers.map(w => w.name), ['Gemini'])
   assert.equal(r.workers[0].protocol, 'agy-stream')
   assert.equal(r.workers[0].rosterEngine, 'gemini')
-  assert.equal(r.workers[0].permissions.rules.write, 'deny')
+  assert.equal(r.workers[0].permissions.rules.write, 'allow')
 })
 
 test('政策：類別對照', () => {
@@ -96,7 +96,7 @@ test('政策：類別對照', () => {
   assert.equal(categoryOfAgyTool('totally_new_thing'), 'internal')
 })
 
-test('政策：decide——預設唯讀；白名單資料夾外的讀寫一律拒絕；ask 原樣回傳', () => {
+test('政策：decide——預設開放；白名單資料夾外的讀寫一律拒絕；ask 原樣回傳', () => {
   const cwd = path.resolve(WORK, 'w')
   const p = normalizePermissions({ write: 'ask', execute: 'allow' }, cwd)
   assert.equal(decide(p, { category: 'read', paths: [path.join(cwd, 'a.txt')] }, cwd).verdict, 'allow')
@@ -109,7 +109,11 @@ test('政策：decide——預設唯讀；白名單資料夾外的讀寫一律�
   assert.equal(decide(p, { category: 'other', paths: [] }, cwd).verdict, 'deny')
   assert.equal(decide(p, { category: 'internal', paths: [] }, cwd).verdict, 'allow')
   const dflt = normalizePermissions(undefined, cwd)
-  assert.equal(decide(dflt, { category: 'write', paths: [] }, cwd).verdict, 'deny')
+  assert.equal(decide(dflt, { category: 'write', paths: [path.join(cwd, 'a.txt')] }, cwd).verdict, 'allow')
+  assert.equal(decide(dflt, { category: 'write', paths: [path.resolve(WORK, 'x')] }, cwd).verdict, 'deny', '預設開放仍擋資料夾外的寫入')
+  assert.equal(decide(dflt, { category: 'read', paths: ['/etc/passwd'] }, cwd).verdict, 'deny')
+  assert.equal(decide(dflt, { category: 'execute', paths: [] }, cwd).verdict, 'allow')
+  assert.equal(decide(dflt, { category: 'other', paths: [] }, cwd).verdict, 'deny')
   assert.equal(decide(dflt, { category: 'network', paths: [] }, cwd).verdict, 'allow')
 })
 
@@ -117,7 +121,7 @@ test('政策：自訂白名單資料夾；壞值被忽略並提醒', () => {
   const cwd = path.resolve(WORK, 'w')
   const extra = path.resolve(WORK, 'shared')
   const p = normalizePermissions({ read: 'allow', allow_dirs: [cwd, extra], write: 'maybe', bogus: 1 }, cwd)
-  assert.equal(p.rules.write, 'deny')
+  assert.equal(p.rules.write, 'allow')  // 壞值改用預設（現在是 allow）
   assert.equal(p.warnings.length, 2)
   assert.equal(decide(p, { category: 'read', paths: [path.join(extra, 'f')] }, cwd).verdict, 'allow')
 })

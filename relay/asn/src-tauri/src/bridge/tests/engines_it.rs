@@ -200,8 +200,8 @@ async fn acp_子程序的_pid_記在帳本_關掉引擎後行程真的結束() {
 }
 
 #[tokio::test]
-async fn acp_預設政策_唯讀_資料夾外的寫入被拒_讀資料夾內放行_回信附被拒動作的備註() {
-    let mut h = eh(Some(json!([worker("Gemini", "acp", json!({}))])), &[], "acp", &[]).await;
+async fn acp_write_明寫_deny_資料夾內的寫入被拒_讀資料夾內放行_回信附被拒動作的備註() {
+    let mut h = eh(Some(json!([worker("Gemini", "acp", json!({"permissions": {"write": "deny"}}))])), &[], "acp", &[]).await;
     let cwd = h.work.path().join("workers").join("Gemini");
     let outside = h.work.path().join("outside.txt");
     h.put_pull(to_agent(1, "Gemini", &format!("@@EDIT {}\n@@READ {}", outside.display(), cwd.join("a.txt").display()))).await;
@@ -212,8 +212,8 @@ async fn acp_預設政策_唯讀_資料夾外的寫入被拒_讀資料夾內放�
 }
 
 #[tokio::test]
-async fn acp_write_allow_白名單內放行_白名單外仍拒_fetch_預設放行_network_deny_時拒_execute_預設拒() {
-    let perms = json!({"write": "allow"});
+async fn acp_write_allow_白名單內放行_白名單外仍拒_fetch_預設放行_network_deny_時拒_execute_明寫_deny_拒() {
+    let perms = json!({"write": "allow", "execute": "deny"});
     let mut h = eh(Some(json!([worker("Gemini", "acp", json!({"permissions": perms}))])), &[], "acp", &[]).await;
     let cwd = h.work.path().join("workers").join("Gemini");
     let outside = h.work.path().join("o.txt");
@@ -380,14 +380,14 @@ async fn agy_收信回覆_同一段對話_重啟後_resume() {
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[("FAKE_AGY_STATE", &st)], "acp", &[]).await;
     h.put_pull(to_agent(1, "Gemini", "你好")).await;
     h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
-    assert!(h.bodies()[0].contains("收到：你好 [第1輪 normal 含說明 cwd=Gemini]"), "{}", h.bodies()[0]);
+    assert!(h.bodies()[0].contains("收到：你好 [第1輪 full 含說明 cwd=Gemini]"), "{}", h.bodies()[0]);
     h.put_pull(to_agent(2, "Gemini", "再問")).await;
     h.wait("回覆2", |h| h.fr.sent().len() == 2).await;
-    assert!(h.bodies()[1].contains("收到：再問 [第2輪 normal cwd=Gemini]"), "{}", h.bodies()[1]);
+    assert!(h.bodies()[1].contains("收到：再問 [第2輪 full cwd=Gemini]"), "{}", h.bodies()[1]);
     h.restart().await;
     h.put_pull(to_agent(3, "Gemini", "三")).await;
     h.wait("回覆3", |h| h.fr.sent().len() == 3).await;
-    assert!(h.bodies()[2].contains("[第3輪 normal cwd=Gemini]"), "{}", h.bodies()[2]);
+    assert!(h.bodies()[2].contains("[第3輪 full cwd=Gemini]"), "{}", h.bodies()[2]);
     let saved: Value = serde_json::from_str(&std::fs::read_to_string(h.work.path().join("acp-workers.json")).unwrap()).unwrap();
     assert!(saved["workers"]["Gemini"]["session_id"].as_str().unwrap().starts_with("conv-"));
 }
@@ -407,7 +407,7 @@ async fn agy_子行程環境是白名單_金鑰不外洩_env_pass_才帶() {
 }
 
 #[tokio::test]
-async fn agy_預設唯讀_資料夾外寫檔被絆線中止並明確回報_檔案沒寫成_下一封仍可用() {
+async fn agy_預設開放_資料夾外寫檔被絆線中止並明確回報_檔案沒寫成_下一封仍可用() {
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
     let target = h.work.path().join("outside.txt");
     h.put_pull(to_agent(1, "Gemini", &format!("@@WRITE {}", target.display()))).await;
@@ -435,13 +435,13 @@ async fn agy_write_allow_資料夾內可寫_資料夾外仍被擋() {
 }
 
 #[tokio::test]
-async fn agy_指令預設被拒_回報沒有回覆內容加被政策拒絕的動作_execute_allow_用放行旗標() {
-    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+async fn agy_指令明寫_deny_被拒_回報沒有回覆內容加被政策拒絕的動作_預設_execute_allow_用放行旗標() {
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({"permissions": {"execute": "deny"}}))])), &[], "acp", &[]).await;
     h.put_pull(to_agent(1, "Gemini", "@@RUN dir")).await;
     h.wait("失敗說明", |h| h.bodies().iter().any(|b| b.contains("沒有產出回覆文字"))).await;
     let b = h.bodies().remove(0);
     assert!(b.contains("被政策拒絕") && b.contains("指令：dir"), "{b}");
-    let mut h2 = eh(Some(json!([worker("Gemini", "agy-stream", json!({"permissions": {"execute": "allow"}}))])), &[], "acp", &[]).await;
+    let mut h2 = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
     h2.put_pull(to_agent(1, "Gemini", "@@RUN dir")).await;
     h2.wait("放行", |h| h.bodies().iter().any(|b| b.contains("ran: dir (full)"))).await;
 }

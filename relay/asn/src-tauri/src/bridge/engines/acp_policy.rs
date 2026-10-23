@@ -1,7 +1,7 @@
 //! ACP 工作者的權限政策與錯誤分類（純函式，不碰檔案、不碰行程）。對應 engines/acp-policy.mjs、acp-errors.mjs。
 //! 政策＝每個「類別」一個決定 allow／deny／ask，外加「白名單資料夾」（有路徑的讀寫請求，路徑在白名單外一律拒絕）。
-//!   read 讀檔搜尋思考（預設 allow）／write 寫刪搬（預設 deny）／execute 執行指令（預設 deny）／
-//!   network 上網（預設 allow）／other 分不出類別（預設 deny）。
+//!   read 讀檔搜尋思考、write 寫刪搬、execute 執行指令、network 上網（預設都是 allow）；other 分不出類別（預設 deny）。
+//!   寫入以白名單資料夾（預設只有工作者自己的工作資料夾）為界；執行指令沒有路徑可查，邊界只靠工作資料夾與 agents.json 的明寫設定。
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
@@ -34,7 +34,7 @@ impl Verdict {
 
 fn default_rule(c: &str) -> Verdict {
     match c {
-        "read" | "network" => Verdict::Allow,
+        "read" | "write" | "execute" | "network" => Verdict::Allow,
         _ => Verdict::Deny,
     }
 }
@@ -417,7 +417,7 @@ mod tests {
     }
 
     #[test]
-    fn 預設政策_唯讀_白名單外一律拒絕() {
+    fn 預設政策_開放_白名單外一律拒絕() {
         let cwd = Path::new("/w/Gemini");
         let (p, warn) = normalize_permissions(None, cwd);
         assert!(warn.is_empty());
@@ -425,8 +425,10 @@ mod tests {
         assert_eq!(decide(&p, &req("read", &["/w/Gemini/a.txt"]), cwd).0, Verdict::Allow);
         assert_eq!(decide(&p, &req("read", &["/etc/passwd"]), cwd).0, Verdict::Deny);
         assert_eq!(decide(&p, &req("read", &["/w/Gemini/../x"]), cwd).0, Verdict::Deny, ".. 逃出白名單");
-        assert_eq!(decide(&p, &req("write", &["/w/Gemini/a.txt"]), cwd).0, Verdict::Deny);
-        assert_eq!(decide(&p, &req("execute", &[]), cwd).0, Verdict::Deny);
+        assert_eq!(decide(&p, &req("write", &["/w/Gemini/a.txt"]), cwd).0, Verdict::Allow);
+        assert_eq!(decide(&p, &req("write", &["/etc/x"]), cwd).0, Verdict::Deny, "預設開放仍擋資料夾外的寫入");
+        assert_eq!(decide(&p, &req("write", &["/w/Gemini/../x"]), cwd).0, Verdict::Deny);
+        assert_eq!(decide(&p, &req("execute", &[]), cwd).0, Verdict::Allow);
         assert_eq!(decide(&p, &req("network", &[]), cwd).0, Verdict::Allow);
         assert_eq!(decide(&p, &req("internal", &[]), cwd).0, Verdict::Allow);
         assert_eq!(decide(&p, &req("other", &[]), cwd).0, Verdict::Deny);
@@ -438,7 +440,7 @@ mod tests {
         let raw = json!({"write": "ask", "execute": "maybe", "weird": 1, "allow_dirs": ["/w/G", "/shared"]});
         let (p, warn) = normalize_permissions(Some(&raw), cwd);
         assert_eq!(p.rule("write"), Verdict::Ask);
-        assert_eq!(p.rule("execute"), Verdict::Deny);
+        assert_eq!(p.rule("execute"), Verdict::Allow);
         assert_eq!(warn.len(), 2);
         assert_eq!(decide(&p, &Req { category: "write".into(), paths: vec!["/shared/x".into()], summary: String::new() }, cwd).0, Verdict::Ask);
     }

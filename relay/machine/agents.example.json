@@ -13,8 +13,8 @@
       "model": "",
       "permissions": {
         "read": "allow",
-        "write": "deny",
-        "execute": "deny",
+        "write": "allow",
+        "execute": "allow",
         "network": "allow",
         "other": "deny",
         "allow_dirs": ["C:\\Users\\你\\.irori-relay\\workers\\Gemini"]
