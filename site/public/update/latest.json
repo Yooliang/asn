@@ -1,11 +1,11 @@
 {
-  "version": "0.1.50",
-  "notes": "手機對話頁新增「語音輸入」：說話轉成文字放進輸入框，看過再送出；語音通話時 AI 談完可以自己結束通話（回覆最後一行寫〔結束通話〕，念完自動掛斷）；Aegis 的成員回震動時，震動與報告會分開顯示；對話標題不再露出 Aegis 成員的拼音代號。",
-  "pub_date": "2026-10-23T07:32:16.972Z",
+  "version": "0.1.51",
+  "notes": "新背景：名單、設定、對話換成天空藍波紋、往下淡成白色的背景；語音通話中，AI 談完可以自己結束通話（ASN 技能已寫明用法）。",
+  "pub_date": "2026-10-23T09:22:25.859Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnhYQ29DcEdFcWlGMklxQUh1VlhVVEVyTitiSHZENDI4dG9jMTNjZTd6WXZkdXBZQ0tBeHZwL0gyL1pXNFBjUVNtZUxEWUYxTzhFL1JmdWJFclJXRFFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzQwNzM2CWZpbGU6QVNOXzAuMS41MF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjUwClcxalJGS216WTh3TTVza1YySkdSTnlNRlprWElmZTU5RnY5WFlTWHRlQk5uOWo2cTdOaGZzMnp3bVVsZWM5Q1NtYmRjZkFGTlVEb2NXQ2F0cmR4R0JBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.50_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjJ0SWJYR1JzWm1tWk94QmlEaEhVWUlnV0IzejZWYTc4RUxUbEp4TGt2TGZKS0dyOUl5KzBtRzNyUlJ3bGE3UmwwT3FUSXhOc3U1SDhTVVF4cndzM0FjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzQ3MzQ1CWZpbGU6QVNOXzAuMS41MV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjUxCnQrSlJDalE3b04yc0lZN2FFL044ZHhFQ2VTSDFvZ0hZUjVjems2REZEclBZbENoNy9LZXhBU1VQZG5rSG9ZQ2tRUS9VdHlFSHQwV2M4N2pFOUp6QkRRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.51_x64-setup.exe"
     }
   }
 }

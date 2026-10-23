@@ -1,8 +1,8 @@
 {
-  "version": "0.1.50",
-  "versionCode": 1050,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.50_android.apk",
-  "sha256": "defe98232b0ca6ab5343b3ab647059163d8f5bae5ac26108af57112ca08c0da2",
-  "notes": "- 手機對話頁新增「語音輸入」：說話轉成文字放進輸入框，看過再送出；語音通話時 AI 談完可以自己結束通話（回覆最後一行寫〔結束通話〕，念完自動掛斷）；Aegis 的成員回震動時，震動與報告會分開顯示；對話標題不再露出 Aegis 成員的拼音代號。",
-  "bytes": 9043428
+  "version": "0.1.51",
+  "versionCode": 1051,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.51_android.apk",
+  "sha256": "ef9c84aca2a0e47c49647086e242df989f3e77e48d6c41f045c85728e3b4a50c",
+  "notes": "- 新背景：名單、設定、對話換成天空藍波紋、往下淡成白色的背景；語音通話中，AI 談完可以自己結束通話（ASN 技能已寫明用法）。",
+  "bytes": 9104868
 }
