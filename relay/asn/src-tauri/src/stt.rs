@@ -302,20 +302,79 @@ pub fn too_short_or_quiet(b: &[u8]) -> bool {
     peak < MIN_STT_PEAK as u16
 }
 
+/// 動態加進提示詞的名字子句前綴；要和前端 stt-text.mjs 的 NAME_HINT_PREFIX 一字不差（有測試對照）。完整子句：`相關人名：甲、乙、丙。`
+pub const NAME_HINT_PREFIX: &str = "相關人名：";
+pub const NAME_HINT_MAX_NAMES: usize = 20; // 最多帶幾個名字
+pub const NAME_HINT_MAX_EACH: usize = 16; // 單一名字最長（字數），超過的略過
+pub const NAME_HINT_MAX_TOTAL: usize = 120; // 名字總長上限（字數）
+
+/// 整理要偏向的名字（前端已整理過一次，這裡再擋一次）：去掉控制字元與括號引號、去頭尾空白、去重（不分大小寫）、
+/// 空的與過長的略過；最多 20 個、總長不超過 120 字。規則和前端 buildNameHints 相同。
+pub fn clean_names(names: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut total = 0usize;
+    for raw in names {
+        let spaced: String = raw.chars().map(|c| if c.is_control() || "\"'「」『』()（）[]【】<>、，。".contains(c) { ' ' } else { c }).collect();
+        let n = spaced.split_whitespace().collect::<Vec<_>>().join(" ");
+        let len = n.chars().count();
+        if n.is_empty() || len > NAME_HINT_MAX_EACH || out.iter().any(|x| x.to_lowercase() == n.to_lowercase()) {
+            continue;
+        }
+        if out.len() >= NAME_HINT_MAX_NAMES || total + len > NAME_HINT_MAX_TOTAL {
+            continue;
+        }
+        total += len;
+        out.push(n);
+    }
+    out
+}
+
+/// 實際送給辨識引擎的提示詞：基本提示詞，加上名字子句（有名字才加）。名字只是讓模型偏向這些詞，不做任何替換。
+pub fn prompt_with_names(lang: &str, names: &[String]) -> Option<String> {
+    let base = prompt_for(lang)?;
+    let names = clean_names(names);
+    if names.is_empty() {
+        return Some(base.to_string());
+    }
+    Some(format!("{base}{NAME_HINT_PREFIX}{}。", names.join("、")))
+}
+
+fn core_of(s: &str) -> String {
+    s.chars().filter(|c| c.is_alphanumeric()).flat_map(|c| c.to_lowercase()).collect::<String>()
+}
+
 /// 辨識結果是不是提示詞本身、提示詞的一段（至少 5 個字）或提示詞重複：是就丟掉。
+/// `names`＝這次動態加進提示詞的名字：名字子句的片段也算；但整段只由名字組成（單獨念出一個夥伴名字）是正常說話，不算回音。
 /// 前端 stt-text.mjs 的 isPromptEcho 做同樣的事（雙保險），提示詞要兩邊一致。
-pub fn is_prompt_echo(text: &str) -> bool {
-    let core = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).flat_map(|c| c.to_lowercase()).collect::<String>();
-    let c = core(text);
+pub fn is_prompt_echo(text: &str, names: &[String]) -> bool {
+    let c = core_of(text);
     if c.is_empty() {
         return false;
     }
-    // 整段能切成若干片段，每片都是提示詞的一段（至少 5 字）
     let a: Vec<char> = c.chars().collect();
     if a.len() > 300 {
         return false;
     }
-    ["zh"].iter().filter_map(|l| prompt_for(l)).map(core).any(|p| {
+    let name_cores: Vec<String> = clean_names(names).iter().map(|n| core_of(n)).filter(|n| !n.is_empty()).collect();
+    if !name_cores.is_empty() {
+        // 整段只由名字組成：是人在叫名字，不是提示詞回音（先換掉長的名字，免得短名字切碎長名字）
+        let mut sorted = name_cores.clone();
+        sorted.sort_by_key(|n| std::cmp::Reverse(n.chars().count()));
+        let mut rest = c.clone();
+        for n in &sorted {
+            rest = rest.replace(n.as_str(), "");
+        }
+        if rest.is_empty() {
+            return false;
+        }
+    }
+    let mut prompts: Vec<String> = ["zh"].iter().filter_map(|l| prompt_for(l)).map(core_of).collect();
+    if !name_cores.is_empty() {
+        let with_names: Vec<String> = prompts.iter().map(|p| format!("{p}{}{}", core_of(NAME_HINT_PREFIX), name_cores.join(""))).collect();
+        prompts.extend(with_names);
+    }
+    // 整段能切成若干片段，每片都是提示詞的一段（至少 5 字）
+    prompts.iter().any(|p| {
         let mut ok = vec![false; a.len() + 1];
         ok[0] = true;
         for i in 1..=a.len() {
@@ -337,10 +396,10 @@ pub fn prompt_for(lang: &str) -> Option<&'static str> {
     }
 }
 
-/// whisper-cli 的參數：不印時間軸與進度、輸出純文字檔 `<out_base>.txt`
-pub fn build_args(model: &Path, wav: &Path, out_base: &Path, lang: &str, threads: usize) -> Vec<OsString> {
+/// whisper-cli 的參數：不印時間軸與進度、輸出純文字檔 `<out_base>.txt`。names 是要偏向的名字（沒有就傳空的）
+pub fn build_args(model: &Path, wav: &Path, out_base: &Path, lang: &str, threads: usize, names: &[String]) -> Vec<OsString> {
     let mut a: Vec<OsString> = vec!["-m".into(), model.into(), "-f".into(), wav.into(), "-l".into(), lang.into(), "-t".into(), threads.to_string().into(), "-nt".into(), "-np".into(), "-otxt".into(), "-of".into(), out_base.into()];
-    if let Some(p) = prompt_for(lang) {
+    if let Some(p) = prompt_with_names(lang, names) {
         a.push("--prompt".into());
         a.push(p.into());
     }
@@ -386,7 +445,7 @@ pub async fn run_with_deadline(mut cmd: tokio::process::Command, timeout: Durati
     }
 }
 
-async fn run_engine(data_dir: &Path, model: &Model, wav: &[u8], lang: &str) -> Result<String, String> {
+async fn run_engine(data_dir: &Path, model: &Model, wav: &[u8], lang: &str, names: &[String]) -> Result<String, String> {
     let _g = BusyGuard::take().ok_or("上一段還在辨識中")?;
     let dir = engine_dir(data_dir);
     let tmp = stt_dir(data_dir).join("tmp");
@@ -398,7 +457,7 @@ async fn run_engine(data_dir: &Path, model: &Model, wav: &[u8], lang: &str) -> R
     std::fs::write(&wav_path, wav).map_err(|e| format!("寫入暫存失敗：{e}"))?;
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(1, 8);
     let mut cmd = tokio::process::Command::new(dir.join(engine_cli_name()));
-    cmd.args(build_args(&model_path(data_dir, model), &wav_path, &out_base, lang, threads))
+    cmd.args(build_args(&model_path(data_dir, model), &wav_path, &out_base, lang, threads, names))
         .current_dir(&dir)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -409,7 +468,7 @@ async fn run_engine(data_dir: &Path, model: &Model, wav: &[u8], lang: &str) -> R
     let res = match run_with_deadline(cmd, RUN_TIMEOUT, &CANCEL, |_| {}).await {
         Err(e) => Err(e),
         Ok(s) if !s.success() => Err("辨識引擎執行失敗".to_string()),
-        Ok(_) => std::fs::read_to_string(&txt_path).map(|t| read_transcript(&t)).map(|t| if is_prompt_echo(&t) { String::new() } else { t }).map_err(|_| "辨識沒有產生結果".to_string()),
+        Ok(_) => std::fs::read_to_string(&txt_path).map(|t| read_transcript(&t)).map(|t| if is_prompt_echo(&t, names) { String::new() } else { t }).map_err(|_| "辨識沒有產生結果".to_string()),
     };
     let _ = std::fs::remove_file(&wav_path);
     let _ = std::fs::remove_file(&txt_path);
@@ -498,9 +557,9 @@ pub async fn stt_install(app: State<'_, App>, handle: AppHandle) -> Result<(), S
     Ok(())
 }
 
-/// 辨識一段錄音（base64 的 WAV）。回傳原始文字；過濾幻覺字、簡轉繁在前端做（有測試）
+/// 辨識一段錄音（base64 的 WAV）。names（選填）＝通話對象與名單上夥伴的名字，加進提示詞讓模型偏向這些詞（不做替換）；舊呼叫不帶照舊。回傳原始文字；過濾幻覺字、簡轉繁在前端做（有測試）
 #[tauri::command]
-pub async fn stt_transcribe(app: State<'_, App>, wav: String) -> Result<String, String> {
+pub async fn stt_transcribe(app: State<'_, App>, wav: String, names: Option<Vec<String>>) -> Result<String, String> {
     if wav.len() > MAX_WAV_BYTES * 4 / 3 + 16 {
         return Err(format!("錄音太長（上限 {MAX_SECONDS} 秒）"));
     }
@@ -514,7 +573,7 @@ pub async fn stt_transcribe(app: State<'_, App>, wav: String) -> Result<String, 
     if !engine_ready(&app.data_dir) || !model_ready(&app.data_dir, model) {
         return Err("還沒下載語音辨識".into());
     }
-    run_engine(&app.data_dir, model, &bytes, &cfg.stt_lang).await
+    run_engine(&app.data_dir, model, &bytes, &cfg.stt_lang, &names.unwrap_or_default()).await
 }
 
 /// 取消正在進行的辨識：結束那個 whisper-cli 子程序，並等它收乾淨（最多 3 秒），這樣馬上再錄一段不會撞到「上一段還在辨識中」
@@ -597,13 +656,13 @@ mod tests {
 
     #[test]
     fn 辨識參數與結果讀取() {
-        let a: Vec<String> = build_args(Path::new("m.bin"), Path::new("a.wav"), Path::new("out"), "zh", 4).iter().map(|s| s.to_string_lossy().to_string()).collect();
+        let a: Vec<String> = build_args(Path::new("m.bin"), Path::new("a.wav"), Path::new("out"), "zh", 4, &[]).iter().map(|s| s.to_string_lossy().to_string()).collect();
         assert_eq!(&a[..4], ["-m", "m.bin", "-f", "a.wav"]);
         for flag in ["-nt", "-np", "-otxt", "--prompt"] {
             assert!(a.contains(&flag.to_string()), "{flag}");
         }
         assert!(a.windows(2).any(|w| w == ["-l", "zh"]) && a.windows(2).any(|w| w == ["-t", "4"]));
-        let en: Vec<String> = build_args(Path::new("m"), Path::new("a"), Path::new("o"), "en", 2).iter().map(|s| s.to_string_lossy().to_string()).collect();
+        let en: Vec<String> = build_args(Path::new("m"), Path::new("a"), Path::new("o"), "en", 2, &ns(&["正見"])).iter().map(|s| s.to_string_lossy().to_string()).collect();
         assert!(!en.contains(&"--prompt".to_string()), "只有中文才帶繁體提示");
         assert_eq!(read_transcript(" 你好\n\n 世界 \r\n"), "你好 世界");
         assert_eq!(read_transcript("\n \n"), "");
@@ -612,13 +671,58 @@ mod tests {
     #[test]
     fn prompt_echo_is_dropped() {
         let p = prompt_for("zh").unwrap();
-        assert!(is_prompt_echo(p));
-        assert!(is_prompt_echo("請使用正確的標點符號。"));
-        assert!(is_prompt_echo("以下是繁體中文的句子，"));
-        assert!(is_prompt_echo(&format!("{p} {p}")));
-        assert!(!is_prompt_echo(""));
-        assert!(!is_prompt_echo("標點符號"));
-        assert!(!is_prompt_echo("你好，今天天氣很好"));
+        assert!(is_prompt_echo(p, &[]));
+        assert!(is_prompt_echo("請使用正確的標點符號。", &[]));
+        assert!(is_prompt_echo("以下是繁體中文的句子，", &[]));
+        assert!(is_prompt_echo(&format!("{p} {p}"), &[]));
+        assert!(!is_prompt_echo("", &[]));
+        assert!(!is_prompt_echo("標點符號", &[]));
+        assert!(!is_prompt_echo("你好，今天天氣很好", &[]));
+    }
+
+    fn ns(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn 名字整理_去重_上限() {
+        assert_eq!(clean_names(&ns(&["正見", " 正見 ", "ASN", "asn", "", "（希緒）", "「」"])), ["正見", "ASN", "希緒"]);
+        let many: Vec<String> = (0..40).map(|i| format!("夥伴{i}")).collect();
+        assert_eq!(clean_names(&many).len(), NAME_HINT_MAX_NAMES);
+        assert!(clean_names(&ns(&["一二三四五六七八九十一二三四五六七"])).is_empty(), "單一名字太長略過");
+        let long: Vec<String> = (0..20).map(|i| format!("很長的夥伴名字{:02}", i)).collect(); // 每個 9 字
+        let c = clean_names(&long);
+        assert!(c.iter().map(|n| n.chars().count()).sum::<usize>() <= NAME_HINT_MAX_TOTAL && c.len() == 13, "總長上限：{}", c.len());
+    }
+
+    #[test]
+    fn 提示詞帶名字_沒名字照舊() {
+        assert_eq!(prompt_with_names("zh", &[]).as_deref(), prompt_for("zh"));
+        let p = prompt_with_names("zh", &ns(&["正見", "希緒"])).unwrap();
+        assert!(p.starts_with(prompt_for("zh").unwrap()) && p.ends_with("相關人名：正見、希緒。"), "{p}");
+        assert!(prompt_with_names("en", &ns(&["正見"])).is_none(), "非中文不帶提示詞");
+        let a: Vec<String> = build_args(Path::new("m"), Path::new("a"), Path::new("o"), "zh", 2, &ns(&["正見"])).iter().map(|s| s.to_string_lossy().to_string()).collect();
+        assert!(a.windows(2).any(|w| w[0] == "--prompt" && w[1].contains("正見")));
+    }
+
+    #[test]
+    fn 動態提示詞回音_單獨念名字不算() {
+        let names = ns(&["正見", "希緒", "Claude 夥伴小幫手"]);
+        // 名字子句被念回來（含前綴）：算回音
+        assert!(is_prompt_echo("相關人名：正見、希緒。", &names));
+        assert!(is_prompt_echo("相關人名正見希緒", &names));
+        assert!(is_prompt_echo("請使用正確的標點符號。相關人名：正見、希緒。", &names));
+        // 整段都是提示詞：照舊算回音
+        assert!(is_prompt_echo(prompt_for("zh").unwrap(), &names));
+        // 單獨念名字（含長名字、多個名字）是正常說話
+        assert!(!is_prompt_echo("正見", &names));
+        assert!(!is_prompt_echo("希緒。", &names));
+        assert!(!is_prompt_echo("Claude 夥伴小幫手", &names));
+        assert!(!is_prompt_echo("正見，希緒", &names));
+        // 名字加真的話：不是回音
+        assert!(!is_prompt_echo("正見你好嗎", &names));
+        // 沒帶名字時，名字子句不算提示詞（沒送出去就不會被念回來）
+        assert!(!is_prompt_echo("相關人名：正見、希緒。", &[]));
     }
 
     #[test]

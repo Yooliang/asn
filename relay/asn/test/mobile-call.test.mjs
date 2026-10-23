@@ -316,3 +316,19 @@ test('外殼橋：事件用字串推進來；外殼太舊沒有通話方法就�
   off(); assert.equal(win.__asnCallEvent, null)
   assert.equal(androidBridge({ AsnAndroid: { vibrate() {} } }).call, null)
 })
+
+test('手機通話：開始聽時把名字（JSON 陣列字串）交給外殼；沒給就是空陣列', async () => {
+  const seen = []
+  const mk = hints => {
+    const native = fakeNative()
+    native.listen = names => { seen.push(names) }
+    const c = clock()
+    return createMobileCall({ native, send: async () => {}, ...c, hints })
+  }
+  const a = mk(() => ['希緒', '正見'])
+  assert.equal(await a.start([]), true)
+  const b = mk(undefined)
+  assert.equal(await b.start([]), true)
+  assert.deepEqual(seen, ['["希緒","正見"]', '[]'])
+  await a.end(); await b.end()
+})

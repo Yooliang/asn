@@ -71,3 +71,42 @@ test('提示詞要和 Rust 的 stt.rs 一致', async () => {
   const rs = fs.readFileSync(new URL('../src-tauri/src/stt.rs', import.meta.url), 'utf8')
   for (const p of STT_PROMPTS) assert.ok(rs.includes('"' + p + '"'), p)
 })
+
+test('名字提示：通話對象排第一、去重、上限、過長與空的略過', async () => {
+  const { buildNameHints, NAME_HINT_MAX_NAMES, NAME_HINT_MAX_TOTAL } = await import('../ui/lib/stt-text.mjs')
+  const roster = [{ nick: '正見' }, { nick: '希緒' }, { nick: ' 正見 ' }, { nick: 'ASN' }, { nick: 'asn' }, { nick: '' }, { nick: '（好友）' }, {}, null]
+  assert.deepEqual(buildNameHints({ nick: '希緒' }, roster), ['希緒', '正見', 'ASN', '好友'])
+  assert.deepEqual(buildNameHints(null, []), [])
+  assert.deepEqual(buildNameHints(undefined, undefined), [])
+  const many = Array.from({ length: 40 }, (_, i) => ({ nick: `夥伴${i}` }))
+  assert.equal(buildNameHints(null, many).length, NAME_HINT_MAX_NAMES)
+  assert.deepEqual(buildNameHints(null, [{ nick: '一二三四五六七八九十一二三四五六七' }]), [], '單一名字太長略過')
+  const long = Array.from({ length: 20 }, (_, i) => ({ nick: `很長的夥伴名字${String(i).padStart(2, '0')}` }))
+  const out = buildNameHints(null, long)
+  assert.ok(out.join('').length <= NAME_HINT_MAX_TOTAL && out.length === 13, String(out.length))
+})
+
+test('動態提示詞回音：名字子句被念回來算回音；單獨念名字是正常說話', async () => {
+  const { isPromptEcho, isHallucination, normalize, STT_PROMPTS } = await import('../ui/lib/stt-text.mjs')
+  const names = ['正見', '希緒', 'Claude 夥伴小幫手']
+  for (const raw of ['相關人名：正見、希緒。', '相關人名正見希緒', '請使用正確的標點符號。相關人名：正見、希緒。', STT_PROMPTS[0]]) {
+    assert.equal(isPromptEcho(raw, names), true, raw)
+    assert.equal(normalize(raw, names), '', raw)
+  }
+  for (const raw of ['正見', '希緒。', 'Claude 夥伴小幫手', '正見，希緒', '正見你好嗎']) {
+    assert.equal(isPromptEcho(raw, names), false, raw)
+    assert.equal(isHallucination(raw, names), false, raw)
+    assert.notEqual(normalize(raw, names), '', raw)
+  }
+  assert.equal(isPromptEcho('相關人名：正見、希緒。'), false, '沒帶名字就沒有名字子句')
+})
+
+test('名字子句前綴與上限要和 Rust 的 stt.rs 一致', async () => {
+  const { NAME_HINT_PREFIX, NAME_HINT_MAX_NAMES, NAME_HINT_MAX_EACH, NAME_HINT_MAX_TOTAL } = await import('../ui/lib/stt-text.mjs')
+  const fs = await import('node:fs')
+  const rs = fs.readFileSync(new URL('../src-tauri/src/stt.rs', import.meta.url), 'utf8')
+  assert.ok(rs.includes(`NAME_HINT_PREFIX: &str = "${NAME_HINT_PREFIX}"`))
+  assert.ok(rs.includes(`NAME_HINT_MAX_NAMES: usize = ${NAME_HINT_MAX_NAMES};`))
+  assert.ok(rs.includes(`NAME_HINT_MAX_EACH: usize = ${NAME_HINT_MAX_EACH};`))
+  assert.ok(rs.includes(`NAME_HINT_MAX_TOTAL: usize = ${NAME_HINT_MAX_TOTAL};`))
+})

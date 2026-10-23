@@ -83,7 +83,8 @@ export function createVoiceUi({ invoke, listen, createMic, createAudio, reactive
       return input.toggle()
     },
     /** 偽通話（#99）：建一個通話（每個對話面板一個）；send 是寄出的路徑（對話區的 send 事件）。同時只能有一個通話在進行 */
-    newCall: ({ send }) => createCallSession({
+    newCall: ({ send, hints }) => createCallSession({
+      hints,
       mic: createMic(),
       player,
       send,
@@ -96,8 +97,8 @@ export function createVoiceUi({ invoke, listen, createMic, createAudio, reactive
         else sttReady = true
         return st
       },
-      transcribe: async wav => {
-        try { return await invoke('stt_transcribe', { wav }) }
+      transcribe: async (wav, names) => {
+        try { return await invoke('stt_transcribe', names?.length ? { wav, names } : { wav }) }   // 沒有名字就照舊不帶
         catch (e) { if (/還沒下載/.test(e?.message || '')) { sttReady = false; state.install.needed = true }; throw e }
       },
       canStart: () => (input.state !== 'idle' || checking ? '語音輸入進行中，請先結束再通話。' : ''),
