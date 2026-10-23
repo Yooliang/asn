@@ -43,6 +43,7 @@ import { createCallBeats } from './lib/call-beats.mjs'
 import { startCallPoll } from './lib/call-poll.mjs'
 import { isCallActive } from './lib/call-session.mjs'
 import { accountLine, codexLine, createAccountsUi } from './lib/claude-accounts.mjs'
+import { applyRename } from './lib/rename.mjs'
 import { createUsageUi } from './lib/usage.mjs'
 import { CHECK_MS, autoCheckFromSaved, initialUpdateState, manualResultText, progressText, updateNoticeText, withAvailable, withFailure, withInstalling, withProgress, updateStatus } from './lib/update.mjs'
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL, normalizeCfg, shouldAutoSpeak, sttStatusText } from './lib/voice-prefs.mjs'
@@ -75,7 +76,7 @@ const SOUNDS = {
   nudge: () => { for (let i = 0; i < 7; i++) tone(95 + (i % 2) * 35, i * 0.07, 0.09, 'square', 0.05) },
 }
 
-const info = await invoke('startup_info')
+const info = reactive(await invoke('startup_info'))   // 響應式：改設備名後就地更新，不重載頁面
 document.title = `Agent Sync Network Messenger (${info.version})`
 if (info.shot) {
   const logFe = (level, msg) => invoke('shot_frontend_log', { level, message: String(msg) }).catch(() => {})
@@ -773,7 +774,7 @@ const app = createApp({
     const commitNick = async () => {
       const want = String(me.nick ?? '').trim()
       if (want === info.window_name) { me.nick = info.window_name; nickErr.value = ''; return }
-      try { await invoke('set_window_name', { name: want }); location.reload() }
+      try { applyRename({ info, core, me }, await invoke('set_window_name', { name: want })); nickErr.value = '' }
       catch (e) { me.nick = info.window_name; nickErr.value = e.message; setTimeout(() => { nickErr.value = '' }, 5000) }
     }
     // 設定頁「大頭貼」：選圖 → 前端裁成正方形縮成 96×96（webp／png，≤ 32 KB）→ 上傳；也可以移除改回自動產生

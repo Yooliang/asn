@@ -674,6 +674,8 @@ fn set_presence(app: State<'_, App>, status: String, psm: String) -> Result<(), 
 fn set_window_name(app: State<'_, App>, name: String) -> Result<String, String> {
     let relay = relay_of(&app)?;
     let n = names::rename(relay.as_ref(), &app.data_dir, &app.work_dir, &name, heartbeat::now_ms())?;
+    // 改名成功後立刻叫醒在線狀態回報（名單上別台設備馬上看到新名）
+    relay.presence_wake.notify_one();
     // 改名成功後把新視窗名同步成這台設備的顯示名；失敗只記 log，不影響改名
     tauri::async_runtime::spawn(async move { relay.sync_device_name().await });
     Ok(n)
