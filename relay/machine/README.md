@@ -149,7 +149,7 @@ powershell -File install-task.ps1 -Uninstall           # 移除
 | 其他 status | 照實回報 |
 | 寄回失敗 | 不 ack，留在 inbox 等下次補拉 |
 
-名單回報（roster）只列白名單成員（`name`=中文名，沒有中文名才用 slug；`cwd_label`=slug），聯絡人因此顯示中文名；白名單仍以 slug 判斷。希緒自己（`IRORI_AEGIS_SELF`，預設 `xi-xu`）不列進名單，寄給她的信回「這是希緒自己，不能自己問自己」。節點需要 `can_roster`（`supabase/sql/04_roster.sql`）才能回報，否則 403 只記一次 log。
+名單回報（roster）只列白名單成員（`name`=中文名，沒有中文名才用 slug；`cwd_label`=slug），聯絡人因此顯示中文名；白名單仍以 slug 判斷。Aegis 主機轉接橋自己的成員（`IRORI_AEGIS_SELF`，預設 `xi-xu`，Irori 生態專用）不列進名單，寄給它的信會被擋回。節點需要 `can_roster`（`supabase/sql/04_roster.sql`）才能回報，否則 403 只記一次 log。
 
 環境變數：`ASN_RELAY_ID`（預設 `AEGIS`）、`IRORI_AEGIS_ALLOW`（逗號分隔 slug，**預設空＝全部擋下**）、`IRORI_AEGIS_URL`、
 `IRORI_AEGIS_DEFAULT`、`IRORI_AEGIS_FROM_MEMBER`、`IRORI_AEGIS_TIMEOUT_MS`、`IRORI_AEGIS_RETRY_MS`、`ASN_RELAY_KEY`／`ASN_RELAY_ANON_KEY`（也可用檔案）。
@@ -206,11 +206,11 @@ node room.mjs --room-read <群組id|群組名> [--last 20 | --since <seq>] [--js
 另外每次寄給節點／視窗（不論有沒有 `--reply-to`）也會在 `machine-<節點>/sent/<雜湊>` 留「誰寄給誰」的記號，橋據此判斷「對方已直接寄信給原寄件人」（檔名由 `sent-mark.mjs` 產生，send 與橋共用）：
 
 ```
-node D:/Github/Yooliang/asn/relay/machine/send.mjs --to XISU --body "內文" --reply|--no-reply [--reply-to <信件id>]
+node D:/Github/Yooliang/asn/relay/machine/send.mjs --to PC1 --body "內文" --reply|--no-reply [--reply-to <信件id>]
 node D:/Github/Yooliang/asn/relay/machine/send.mjs --to W/W-政策 --body-file msg.txt --no-reply   # 節點/視窗名
 node D:/Github/Yooliang/asn/relay/machine/send.mjs --room <群組id> --body "內文"            # 貼到群組（room_post）
-echo 內文 | node send.mjs --to XISU --body - --reply                                 # 內文從 stdin 讀
-node send.mjs --to XISU --file 報告.pdf --file 圖.webp --body "說明" --no-reply        # 寄檔案／照片
+echo 內文 | node send.mjs --to PC1 --body - --reply                                 # 內文從 stdin 讀
+node send.mjs --to PC1 --file 報告.pdf --file 圖.webp --body "說明" --no-reply        # 寄檔案／照片
 ```
 
 **寄附件（`--file <路徑>`，可重複，一封至多 4 個，`--to`、`--room` 都能用）**：共用邏輯在 `attach-upload.mjs`（對應下載端 `attach-download.mjs`），規則同 `docs/ATTACHMENTS.md` 與 `supabase/functions/_shared/attachments.ts`。

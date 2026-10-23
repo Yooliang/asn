@@ -11,14 +11,14 @@ test('argv：--reply／--no-reply／--reply-to／--room', () => {
   assert.deepEqual(buildSendArgv({ to: 'W/W-政策', body: 'hi', expects_reply: true }, CLI), {
     argv: ['C:/ASN/asn-cli.exe', 'send', '--to', 'W/W-政策', '--body', 'hi', '--reply'],
   })
-  assert.deepEqual(buildSendArgv({ to: 'XISU', body: 'hi', expects_reply: false, reply_to: '  abc ' }, CLI), {
-    argv: ['C:/ASN/asn-cli.exe', 'send', '--to', 'XISU', '--body', 'hi', '--no-reply', '--reply-to', 'abc'],
+  assert.deepEqual(buildSendArgv({ to: 'PC1', body: 'hi', expects_reply: false, reply_to: '  abc ' }, CLI), {
+    argv: ['C:/ASN/asn-cli.exe', 'send', '--to', 'PC1', '--body', 'hi', '--no-reply', '--reply-to', 'abc'],
   })
   assert.deepEqual(buildSendArgv({ room: 'r1', body: 'hi' }, CLI), {
     argv: ['C:/ASN/asn-cli.exe', 'send', '--room', 'r1', '--body', 'hi'],
   })
-  assert.deepEqual(buildSendArgv({ to: 'XISU', body: 'hi', expects_reply: true }, MJS), {
-    argv: ['node', '/r/relay/machine/send.mjs', '--to', 'XISU', '--body', 'hi', '--reply'],
+  assert.deepEqual(buildSendArgv({ to: 'PC1', body: 'hi', expects_reply: true }, MJS), {
+    argv: ['node', '/r/relay/machine/send.mjs', '--to', 'PC1', '--body', 'hi', '--reply'],
   })
 })
 
@@ -58,11 +58,11 @@ test('設定：env 優先、Windows 預設 LOCALAPPDATA、Linux 無預設', () =
 
 test('bash 守門：--to 沒旗標擋、有旗標與 --room 放行', () => {
   const need = '請加 --reply 或 --no-reply，或改用 asn_send 工具'
-  assert.equal(guardBash('node relay/machine/send.mjs --to XISU --body hi'), need)
-  assert.equal(guardBash('asn send --to XISU --body hi'), need)
-  assert.equal(guardBash('"C:/ASN/asn-cli.exe" send --to XISU --reply-to abc --body hi'), need)
-  assert.equal(guardBash('node send.mjs --to XISU --body hi --reply'), undefined)
-  assert.equal(guardBash('asn send --to XISU --body hi --no-reply'), undefined)
+  assert.equal(guardBash('node relay/machine/send.mjs --to PC1 --body hi'), need)
+  assert.equal(guardBash('asn send --to PC1 --body hi'), need)
+  assert.equal(guardBash('"C:/ASN/asn-cli.exe" send --to PC1 --reply-to abc --body hi'), need)
+  assert.equal(guardBash('node send.mjs --to PC1 --body hi --reply'), undefined)
+  assert.equal(guardBash('asn send --to PC1 --body hi --no-reply'), undefined)
   assert.equal(guardBash('node send.mjs --room r1 --body hi'), undefined)
   assert.equal(guardBash('ls -la'), undefined)
   assert.equal(guardBash('asn recv --once'), undefined)

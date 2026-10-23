@@ -230,14 +230,14 @@ test('視窗傳給收發室「[RELAY 寄信] to=節點/視窗」→ 當成新信
       st, step: c => {
         if (!said && /bridge starting|whoami/.test(c.log)) {
           said = true
-          c.says('[RELAY 寄信] to=XISU/希緒 reply=no\n希緒你好，這是新信')
+          c.says('[RELAY 寄信] to=PC1/夥伴甲 reply=no\n夥伴甲你好，這是新信')
           c.says('沒有寄信頭的一般訊息')
         }
         return c.st.sent.length >= 1 && /unmatched reply from T-對方/.test(c.log)
       },
     })
     assert.equal(st.sent.length, 1)
-    assert.deepEqual([st.sent[0].to_node, st.sent[0].to_agent, st.sent[0].from_agent, st.sent[0].body, st.sent[0].reply_to], ['XISU', '希緒', 'T-對方', '希緒你好，這是新信', undefined])
+    assert.deepEqual([st.sent[0].to_node, st.sent[0].to_agent, st.sent[0].from_agent, st.sent[0].body, st.sent[0].reply_to], ['PC1', '夥伴甲', 'T-對方', '夥伴甲你好，這是新信', undefined])
     assert.strictEqual(st.sent[0].expects_reply, false)
   } finally { await st.close() }
 })
@@ -253,15 +253,15 @@ test('代寄 [RELAY 寄信] to=… reply=no|yes → 寄出時帶 expects_reply�
       st, step: c => {
         if (!said && /bridge starting|whoami/.test(c.log)) {
           said = true
-          c.says('[RELAY 寄信] to=XISU/希緒 reply=no\n希緒你好，這是告知')
+          c.says('[RELAY 寄信] to=PC1/夥伴甲 reply=no\n夥伴甲你好，這是告知')
           c.says('[RELAY 寄信] to=W/W-政策 reply=yes\n請你回我')
         }
         return c.st.sent.length >= 2
       },
     })
     assert.equal(st.sent.length, 2)
-    const a = st.sent.find(s => s.to_node === 'XISU'), b = st.sent.find(s => s.to_node === 'W')
-    assert.deepEqual([a.to_agent, a.from_agent, a.body, a.reply_to, a.expects_reply], ['希緒', 'T-對方', '希緒你好，這是告知', undefined, false])
+    const a = st.sent.find(s => s.to_node === 'PC1'), b = st.sent.find(s => s.to_node === 'W')
+    assert.deepEqual([a.to_agent, a.from_agent, a.body, a.reply_to, a.expects_reply], ['夥伴甲', 'T-對方', '夥伴甲你好，這是告知', undefined, false])
     assert.deepEqual([b.to_agent, b.from_agent, b.body, b.expects_reply], ['W-政策', 'T-對方', '請你回我', true])
   } finally { await st.close() }
 })
@@ -275,16 +275,16 @@ test('代寄沒寫 reply=（或寫錯）→ 不寄出、log 記下，並用 deli
         rec = recordOf(c.home)
         if (!said && /bridge starting|whoami/.test(c.log)) {
           said = true
-          c.says('[RELAY 寄信] to=XISU/希緒\n忘了寫 reply 的信')
-          c.says('[RELAY 寄信] to=XISU reply=maybe\n寫錯值的信')
+          c.says('[RELAY 寄信] to=PC1/夥伴甲\n忘了寫 reply 的信')
+          c.says('[RELAY 寄信] to=PC1 reply=maybe\n寫錯值的信')
         }
-        if (said && !fixed && (c.log.match(/refused/g) || []).length >= 2) { fixed = true; c.says('[RELAY 寄信] to=XISU/希緒 reply=no\n補上了') }
+        if (said && !fixed && (c.log.match(/refused/g) || []).length >= 2) { fixed = true; c.says('[RELAY 寄信] to=PC1/夥伴甲 reply=no\n補上了') }
         return c.st.sent.length >= 1
       },
     })
     assert.equal(st.sent.length, 1)                                      // 前兩封沒寄，只有補上 reply 的那封
     assert.deepEqual([st.sent[0].body, st.sent[0].expects_reply], ['補上了', false])
-    assert.match(log, /new mail from T-對方 to XISU refused: no reply=yes\|no/)
+    assert.match(log, /new mail from T-對方 to PC1 refused: no reply=yes\|no/)
     const notices = rec.filter(r => r.to === 'T-對方' && /代寄信沒有寄出/.test(r.text))
     assert.equal(notices.length, 2, '兩封都要通知寄件視窗')
     assert.match(notices[0].text, /reply=yes/); assert.match(notices[0].text, /reply=no/); assert.match(notices[0].text, /不用回覆/)   // 說清楚怎麼補、這則通知本身不用回
@@ -300,7 +300,7 @@ test('視窗回了「少了 reply=」的通知 → 那則回覆丟掉（不轉�
       st, step: c => {
         if (said === 0 && c.forwarded() >= 1) { said = 1; c.says('做完了') }                                  // 先正常回掉 W 的交辦（留下 lastRequester）
         if (said === 1 && c.st.sent.some(x => x.reply_to === uid(1))) { said = 2; t2 = Date.now() }
-        if (said === 2 && Date.now() - t2 > 900) { said = 2.5; c.says('[RELAY 寄信] to=XISU 忘了寫 reply') }   // 等已回覆的信過了計時被清掉，之後的回覆才會「對不上」
+        if (said === 2 && Date.now() - t2 > 900) { said = 2.5; c.says('[RELAY 寄信] to=PC1 忘了寫 reply') }   // 等已回覆的信過了計時被清掉，之後的回覆才會「對不上」
         if (said === 2.5 && /refused/.test(c.log)) { said = 3; c.says('好的，我補上') }                         // 視窗回覆通知
         return /answer to a bridge notice/.test(c.log)
       },

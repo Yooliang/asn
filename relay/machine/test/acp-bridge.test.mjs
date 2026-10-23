@@ -101,22 +101,22 @@ test('橋＋acp：沒指定收件人——背景工作者不代收（信留在 i
   assert.equal(r.st.sent.length, 0)
 })
 
-test('橋＋acp：問我模式——詢問信寄給 XISU，XISU 回「允許」後放行，確認信與最後回覆各自寄對地方', async () => {
+test('橋＋acp：問我模式——詢問信寄給 PC1，PC1 回「允許」後放行，確認信與最後回覆各自寄對地方', async () => {
   const inbox = [mail(1, { body: '@@RUN echo hi' })]
-  const w = worker({ permissions: { execute: 'ask' }, ask: { notify: [{ node: 'XISU', agent: '希緒' }], timeout_ms: 20000 } })
+  const w = worker({ permissions: { execute: 'ask' }, ask: { notify: [{ node: 'PC1', agent: '夥伴甲' }], timeout_ms: 20000 } })
   let injected = false
   const r = await run({
     inbox, workers: [w],
     until: c => {
-      const ask = c.st.sent.find(s => s.to_node === 'XISU' && /授權詢問/.test(s.body))
+      const ask = c.st.sent.find(s => s.to_node === 'PC1' && /授權詢問/.test(s.body))
       if (ask && !injected) {
         injected = true
         const id = /授權詢問 ([0-9A-F]{4})/.exec(ask.body)[1]
-        inbox.push({ id: uid(2), from_node: 'XISU', from_agent: '希緒', trust: 'owner', to_agent: 'Gemini', body: `允許 ${id}` })
+        inbox.push({ id: uid(2), from_node: 'PC1', from_agent: '夥伴甲', trust: 'owner', to_agent: 'Gemini', body: `允許 ${id}` })
       }
       return c.st.sent.some(s => s.reply_to === uid(1) && /ran-after-grant/.test(s.body)) && c.st.sent.some(s => s.reply_to === uid(2) && /已收到：允許/.test(s.body))
     },
   })
-  assert.equal(r.st.sent.find(s => s.reply_to === uid(2)).to_node, 'XISU')
+  assert.equal(r.st.sent.find(s => s.reply_to === uid(2)).to_node, 'PC1')
   assert.equal(r.st.sent.find(s => s.reply_to === uid(1)).to_node, 'W')
 })

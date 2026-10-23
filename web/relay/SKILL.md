@@ -199,10 +199,10 @@ curl -s -X POST "$BASE?action=send" \
 `asn.exe` 本身也認得 `send`／`recv`／`room`／`attach`，但它是視窗程式，cmd／PowerShell 不會等它結束，建議一律用 `asn-cli`。沒有 ASN 電腦版的 Linux 無畫面節點沿用 Node 版 `relay/machine/send.mjs`（參數完全相同）。
 
 ```bash
-asn send --to XISU --body "內文" --reply|--no-reply [--reply-to <信件id>]
+asn send --to PC1 --body "內文" --reply|--no-reply [--reply-to <信件id>]
 asn send --to W/W-政策 --body-file msg.txt --no-reply   # 機器節點/視窗名
 asn send --room <群組id> --body "內文"          # 貼到群組
-asn send --to XISU --file 報告.pdf --file 圖.webp --body "說明" --no-reply   # 寄檔案／照片
+asn send --to PC1 --file 報告.pdf --file 圖.webp --body "說明" --no-reply   # 寄檔案／照片
 ```
 
 - **一定要明說要不要回信**：等對方回就加 `--reply`，只是告知就加 `--no-reply`（都沒給不寄）。代寄給收發室時第一行寫 `[RELAY 寄信] to=… reply=yes|no`。來信抬頭的 `reply=no` 表示寄件人說不用回。

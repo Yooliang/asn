@@ -41,13 +41,13 @@ test('來信抬頭：欄位照舊、reply 加在最後（engine= 之後），前
 })
 
 test('來信抬頭 reply：欄位 true → yes、false → no、null／沒有 → ?（只看欄位，不看內文）；預設引擎 claude；沒有寄件視窗時 from 後面是空的', () => {
-  const m = (expects_reply, body = '請處理') => ({ trust: 'owner', from_node: 'XISU', id: ID, to_agent: 'T', body, expects_reply })
+  const m = (expects_reply, body = '請處理') => ({ trust: 'owner', from_node: 'PC1', id: ID, to_agent: 'T', body, expects_reply })
   assert.match(mailHead(m(true), 'codex'), / engine=codex reply=yes$/)
   assert.match(mailHead(m(false), 'codex'), / engine=codex reply=no$/)
   assert.match(mailHead(m(null)), / engine=claude reply=\?$/)
   assert.match(mailHead({ ...m(true), expects_reply: undefined }), / reply=\?$/)
   assert.match(mailHead(m(null, '（不需回覆）舊信有標記')), / reply=\?$/)   // 抬頭如實反映欄位，舊信的退路由收發室內部處理
-  assert.match(mailHead(m(true)), /^\[RELAY 來信\] trust=owner from=XISU\/ to=T /)
+  assert.match(mailHead(m(true)), /^\[RELAY 來信\] trust=owner from=PC1\/ to=T /)
 })
 
 test('headReply：取抬頭最後的 reply 欄位；沒有／不是來信抬頭回 null；視窗名裡自帶的 reply=no 騙不到', () => {
@@ -65,35 +65,35 @@ test('headReply：取抬頭最後的 reply 欄位；沒有／不是來信抬頭�
 })
 
 test('代寄抬頭：原有寫法照舊（to=節點、節點/視窗、re=、[RELAY 回信]、同一行後面接文字就當內文）；reply 沒寫就是 undefined', () => {
-  assert.deepEqual(parseSendHead('[RELAY 寄信] to=XISU/希緒\n希緒你好'), { to_node: 'XISU', to_agent: '希緒', re: undefined, reply: undefined, body: '希緒你好' })
-  assert.deepEqual(parseSendHead('[RELAY 寄信] to=XISU\n內文\n第二行'), { to_node: 'XISU', to_agent: undefined, re: undefined, reply: undefined, body: '內文\n第二行' })
+  assert.deepEqual(parseSendHead('[RELAY 寄信] to=PC1/夥伴甲\n夥伴甲你好'), { to_node: 'PC1', to_agent: '夥伴甲', re: undefined, reply: undefined, body: '夥伴甲你好' })
+  assert.deepEqual(parseSendHead('[RELAY 寄信] to=PC1\n內文\n第二行'), { to_node: 'PC1', to_agent: undefined, re: undefined, reply: undefined, body: '內文\n第二行' })
   const withRe = parseSendHead(`[RELAY 回信] to=W/W-政策 re=${ID}\r\n好了`)
   assert.deepEqual([withRe.to_node, withRe.to_agent, withRe.re, withRe.reply, withRe.body], ['W', 'W-政策', ID, undefined, '好了'])
-  assert.equal(parseSendHead('  \n[RELAY 寄信] to=XISU\nx').to_node, 'XISU')   // 前面有空白行也認
-  assert.equal(parseSendHead('[RELAY 寄信] to=XISU 同一行的字\n下一行').body, '同一行的字\n下一行')
+  assert.equal(parseSendHead('  \n[RELAY 寄信] to=PC1\nx').to_node, 'PC1')   // 前面有空白行也認
+  assert.equal(parseSendHead('[RELAY 寄信] to=PC1 同一行的字\n下一行').body, '同一行的字\n下一行')
   assert.equal(parseSendHead('一般訊息，沒有寄信頭'), null)
-  assert.equal(parseSendHead('x [RELAY 寄信] to=XISU\n內文'), null)
+  assert.equal(parseSendHead('x [RELAY 寄信] to=PC1\n內文'), null)
 })
 
 test('代寄抬頭 reply=yes|no：放最後（有無 re= 都行）、放 re= 前面也行；大小寫不拘；不認得的值當內文', () => {
-  const a = parseSendHead('[RELAY 寄信] to=XISU/希緒 reply=no\n通知你一下')
-  assert.deepEqual([a.to_node, a.to_agent, a.re, a.reply, a.body], ['XISU', '希緒', undefined, 'no', '通知你一下'])
+  const a = parseSendHead('[RELAY 寄信] to=PC1/夥伴甲 reply=no\n通知你一下')
+  assert.deepEqual([a.to_node, a.to_agent, a.re, a.reply, a.body], ['PC1', '夥伴甲', undefined, 'no', '通知你一下'])
   const b = parseSendHead(`[RELAY 寄信] to=W/W-政策 re=${ID} reply=yes\n好了`)
   assert.deepEqual([b.to_node, b.to_agent, b.re, b.reply, b.body], ['W', 'W-政策', ID, 'yes', '好了'])
   const c = parseSendHead(`[RELAY 回信] to=W reply=no re=${ID}\n好了`)
   assert.deepEqual([c.to_node, c.to_agent, c.re, c.reply, c.body], ['W', undefined, ID, 'no', '好了'])
-  assert.equal(parseSendHead('[RELAY 寄信] to=XISU reply=NO\nx').reply, 'no')
-  assert.equal(parseSendHead('[RELAY 寄信] to=XISU reply=no\r\nx').body, 'x')
-  const d = parseSendHead('[RELAY 寄信] to=XISU reply=maybe\n內文')
+  assert.equal(parseSendHead('[RELAY 寄信] to=PC1 reply=NO\nx').reply, 'no')
+  assert.equal(parseSendHead('[RELAY 寄信] to=PC1 reply=no\r\nx').body, 'x')
+  const d = parseSendHead('[RELAY 寄信] to=PC1 reply=maybe\n內文')
   assert.equal(d.reply, undefined); assert.equal(d.body, 'reply=maybe\n內文')
   // 值後面要有邊界：reply=yesx／reply=nope 不能被當成 yes／no
   for (const v of ['yesx', 'nope', 'no1']) {
-    const x = parseSendHead(`[RELAY 寄信] to=XISU reply=${v}\n內文`)
+    const x = parseSendHead(`[RELAY 寄信] to=PC1 reply=${v}\n內文`)
     assert.equal(x.reply, undefined, v); assert.equal(x.body, `reply=${v}\n內文`, v)
   }
-  assert.equal(parseSendHead('[RELAY 寄信] to=XISU reply=no').reply, 'no')   // 行尾（沒有換行）也算邊界
+  assert.equal(parseSendHead('[RELAY 寄信] to=PC1 reply=no').reply, 'no')   // 行尾（沒有換行）也算邊界
   // 只認抬頭那一行：內文第二行開頭的 reply=no 是內文
-  const e = parseSendHead('[RELAY 寄信] to=XISU\nreply=no 這是內文的第一行')
+  const e = parseSendHead('[RELAY 寄信] to=PC1\nreply=no 這是內文的第一行')
   assert.equal(e.reply, undefined); assert.equal(e.body, 'reply=no 這是內文的第一行')
 })
 

@@ -249,7 +249,7 @@ mod tests {
 
     #[test]
     fn ask_notify_解析_壞值被忽略() {
-        let (w, warn) = one(json!({"name": "A", "engine": "acp", "command": "x", "ask": {"notify": ["sender", {"node": "XISU", "agent": "希緒"}, 5], "timeout_ms": 2000}})).unwrap();
+        let (w, warn) = one(json!({"name": "A", "engine": "acp", "command": "x", "ask": {"notify": ["sender", {"node": "PC1", "agent": "夥伴甲"}, 5], "timeout_ms": 2000}})).unwrap();
         assert_eq!(w.ask.notify.len(), 2);
         assert_eq!(w.ask.timeout_ms, 2000);
         assert_eq!(warn.len(), 1);

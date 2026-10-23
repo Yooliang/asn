@@ -48,8 +48,8 @@ test('設定：agy-stream 的 write／network 設 ask 會降成 deny 並提醒�
 })
 
 test('設定：ask.notify 解析、壞值被忽略', () => {
-  const r = normalizeWorker({ ...base, ask: { notify: ['sender', { node: 'XISU', agent: '希緒' }, { nope: 1 }], timeout_ms: 5000 } }, { workDir: WORK, index: 0 })
-  assert.deepEqual(r.worker.ask.notify, [{ sender: true }, { node: 'XISU', agent: '希緒' }])
+  const r = normalizeWorker({ ...base, ask: { notify: ['sender', { node: 'PC1', agent: '夥伴甲' }, { nope: 1 }], timeout_ms: 5000 } }, { workDir: WORK, index: 0 })
+  assert.deepEqual(r.worker.ask.notify, [{ sender: true }, { node: 'PC1', agent: '夥伴甲' }])
   assert.equal(r.worker.ask.timeoutMs, 5000)
   assert.equal(r.warnings.length, 1)
 })
@@ -145,44 +145,44 @@ test('授權簿：回覆解析', () => {
 })
 
 test('授權簿：信件標頭解析', () => {
-  const p = parseMailText('[RELAY 來信] trust=owner from=XISU/希緒 to=Gemini id=abc engine=gemini\n允許 A1B2')
-  assert.deepEqual(p, { node: 'XISU', agent: '希緒', body: '允許 A1B2' })
+  const p = parseMailText('[RELAY 來信] trust=owner from=PC1/夥伴甲 to=Gemini id=abc engine=gemini\n允許 A1B2')
+  assert.deepEqual(p, { node: 'PC1', agent: '夥伴甲', body: '允許 A1B2' })
   // 抬頭多了 reply=yes|no|?（要不要回信）也照樣解析；欄位本身由 mail-format.mjs 的 headReply 取
-  const q = parseMailText('[RELAY 來信] trust=owner from=XISU/希緒 to=Gemini id=abc engine=gemini reply=no\n允許 A1B2')
-  assert.deepEqual(q, { node: 'XISU', agent: '希緒', body: '允許 A1B2' })
+  const q = parseMailText('[RELAY 來信] trust=owner from=PC1/夥伴甲 to=Gemini id=abc engine=gemini reply=no\n允許 A1B2')
+  assert.deepEqual(q, { node: 'PC1', agent: '夥伴甲', body: '允許 A1B2' })
   assert.deepEqual(parseMailText('沒有標頭'), { node: '', agent: '', body: '沒有標頭' })
 })
 
 test('授權簿：只認被問的人；編號、單筆自動對應、多筆要編號；逾時＝timeout', async () => {
   let timers = []
   const ap = createApprovals({ setTimer: (fn, ms) => { const t = { fn, ms, unref() {} }; timers.push(t); return t }, clearTimer: t => { t.cleared = true }, newId: (() => { let n = 0; return () => `ID0${++n}` })() })
-  const a1 = ap.ask({ worker: 'G', summary: '寫入：a', targets: [{ node: 'XISU', agent: '希緒' }], timeoutMs: 1000 })
+  const a1 = ap.ask({ worker: 'G', summary: '寫入：a', targets: [{ node: 'PC1', agent: '夥伴甲' }], timeoutMs: 1000 })
   assert.equal(a1.id, 'ID01')
   assert.equal(timers[0].ms, 1000)
   // 別的節點、別的視窗：不算
-  assert.equal(ap.handleReply({ worker: 'G', from: { node: 'EVIL', agent: '希緒' }, text: '允許' }).handled, false)
-  assert.equal(ap.handleReply({ worker: 'G', from: { node: 'XISU', agent: '別人' }, text: '允許' }).handled, false)
-  assert.equal(ap.handleReply({ worker: 'OTHER', from: { node: 'XISU', agent: '希緒' }, text: '允許' }).handled, false)
+  assert.equal(ap.handleReply({ worker: 'G', from: { node: 'EVIL', agent: '夥伴甲' }, text: '允許' }).handled, false)
+  assert.equal(ap.handleReply({ worker: 'G', from: { node: 'PC1', agent: '別人' }, text: '允許' }).handled, false)
+  assert.equal(ap.handleReply({ worker: 'OTHER', from: { node: 'PC1', agent: '夥伴甲' }, text: '允許' }).handled, false)
   // 不是授權回覆的話：不攔
-  assert.equal(ap.handleReply({ worker: 'G', from: { node: 'XISU', agent: '希緒' }, text: '今天天氣如何' }).handled, false)
-  assert.equal(ap.handleReply({ worker: 'G', from: { node: 'XISU', agent: '希緒' }, text: '好的，我晚點看' }).handled, false)
+  assert.equal(ap.handleReply({ worker: 'G', from: { node: 'PC1', agent: '夥伴甲' }, text: '今天天氣如何' }).handled, false)
+  assert.equal(ap.handleReply({ worker: 'G', from: { node: 'PC1', agent: '夥伴甲' }, text: '好的，我晚點看' }).handled, false)
   // 單筆：不用編號
-  const r = ap.handleReply({ worker: 'G', from: { node: 'XISU', agent: '希緒' }, text: '允許' })
+  const r = ap.handleReply({ worker: 'G', from: { node: 'PC1', agent: '夥伴甲' }, text: '允許' })
   assert.equal(r.handled, true); assert.equal(r.verdict, 'allow')
   assert.equal(await a1.promise, 'allow')
   assert.equal(ap.size(), 0)
   // 兩筆：要編號
-  const b1 = ap.ask({ worker: 'G', summary: 'x', targets: [{ node: 'XISU' }], timeoutMs: 1000 })
-  const b2 = ap.ask({ worker: 'G', summary: 'y', targets: [{ node: 'XISU' }], timeoutMs: 1000 })
-  const amb = ap.handleReply({ worker: 'G', from: { node: 'XISU', agent: 'x' }, text: '允許' })
+  const b1 = ap.ask({ worker: 'G', summary: 'x', targets: [{ node: 'PC1' }], timeoutMs: 1000 })
+  const b2 = ap.ask({ worker: 'G', summary: 'y', targets: [{ node: 'PC1' }], timeoutMs: 1000 })
+  const amb = ap.handleReply({ worker: 'G', from: { node: 'PC1', agent: 'x' }, text: '允許' })
   assert.equal(amb.handled, true); assert.equal(amb.id, undefined); assert.match(amb.note, /編號/)
   assert.equal(ap.size(), 2)
-  ap.handleReply({ worker: 'G', from: { node: 'XISU', agent: 'x' }, text: `拒絕 ${b2.id}` })
+  ap.handleReply({ worker: 'G', from: { node: 'PC1', agent: 'x' }, text: `拒絕 ${b2.id}` })
   assert.equal(await b2.promise, 'deny')
-  ap.handleReply({ worker: 'G', from: { node: 'XISU', agent: 'x' }, text: `全部允許 ${b1.id}` })
+  ap.handleReply({ worker: 'G', from: { node: 'PC1', agent: 'x' }, text: `全部允許 ${b1.id}` })
   assert.equal(await b1.promise, 'allow_all')
   // 逾時
-  const c = ap.ask({ worker: 'G', summary: 'z', targets: [{ node: 'XISU' }], timeoutMs: 50 })
+  const c = ap.ask({ worker: 'G', summary: 'z', targets: [{ node: 'PC1' }], timeoutMs: 50 })
   timers.at(-1).fn()
   assert.equal(await c.promise, 'timeout')
   assert.equal(ap.size(), 0)

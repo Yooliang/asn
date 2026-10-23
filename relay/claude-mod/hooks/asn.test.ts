@@ -8,15 +8,15 @@ test('argv：--reply／--no-reply／--reply-to／--room', () => {
   expect(buildSendArgv({ to: 'W/W-政策', body: 'hi', expects_reply: true }, CLI)).toEqual({
     argv: ['C:/ASN/asn-cli.exe', 'send', '--to', 'W/W-政策', '--body', 'hi', '--reply'],
   })
-  expect(buildSendArgv({ to: 'XISU', body: 'hi', expects_reply: false, reply_to: '  abc ' }, CLI)).toEqual({
-    argv: ['C:/ASN/asn-cli.exe', 'send', '--to', 'XISU', '--body', 'hi', '--no-reply', '--reply-to', 'abc'],
+  expect(buildSendArgv({ to: 'PC1', body: 'hi', expects_reply: false, reply_to: '  abc ' }, CLI)).toEqual({
+    argv: ['C:/ASN/asn-cli.exe', 'send', '--to', 'PC1', '--body', 'hi', '--no-reply', '--reply-to', 'abc'],
   })
   expect(buildSendArgv({ room: 'r1', body: 'hi' }, CLI)).toEqual({
     argv: ['C:/ASN/asn-cli.exe', 'send', '--room', 'r1', '--body', 'hi'],
   })
   // 沒設 asn-cli 就退回 node send.mjs
-  expect(buildSendArgv({ to: 'XISU', body: 'hi', expects_reply: true }, MJS)).toEqual({
-    argv: ['node', '/r/relay/machine/send.mjs', '--to', 'XISU', '--body', 'hi', '--reply'],
+  expect(buildSendArgv({ to: 'PC1', body: 'hi', expects_reply: true }, MJS)).toEqual({
+    argv: ['node', '/r/relay/machine/send.mjs', '--to', 'PC1', '--body', 'hi', '--reply'],
   })
 })
 
@@ -39,11 +39,11 @@ test('argv：本人簽章字樣被擋（路徑、to、reply_to），內文不受
 
 test('Bash 守門：--to 沒旗標擋、有旗標與 --room 放行', () => {
   const need = '請加 --reply 或 --no-reply，或改用 asn_send 工具'
-  expect(guardBash('node relay/machine/send.mjs --to XISU --body hi')).toBe(need)
-  expect(guardBash('asn send --to XISU --body hi')).toBe(need)
-  expect(guardBash('"C:/ASN/asn-cli.exe" send --to XISU --reply-to abc --body hi')).toBe(need)
-  expect(guardBash('node send.mjs --to XISU --body hi --reply')).toBeUndefined()
-  expect(guardBash('asn send --to XISU --body hi --no-reply')).toBeUndefined()
+  expect(guardBash('node relay/machine/send.mjs --to PC1 --body hi')).toBe(need)
+  expect(guardBash('asn send --to PC1 --body hi')).toBe(need)
+  expect(guardBash('"C:/ASN/asn-cli.exe" send --to PC1 --reply-to abc --body hi')).toBe(need)
+  expect(guardBash('node send.mjs --to PC1 --body hi --reply')).toBeUndefined()
+  expect(guardBash('asn send --to PC1 --body hi --no-reply')).toBeUndefined()
   expect(guardBash('node send.mjs --room r1 --body hi')).toBeUndefined()
   expect(guardBash('ls -la')).toBeUndefined()
   expect(guardBash('asn recv --once')).toBeUndefined()
@@ -99,13 +99,13 @@ test('外掛本體：asn_send 走 $.process.run、缺欄位不執行', { options
   const ok = await $.tool.call({ tool: 'Bash', command: 'node send.mjs --to X --body hi --no-reply' })
   expect(ok.deny).toBeUndefined()
 
-  const sent = await $.tool.call({ tool: 'mcp__asn__asn_send', to: 'XISU', body: 'hi', expects_reply: false } as never)
-  expect(ran).toEqual([['C:/ASN/asn-cli.exe', 'send', '--to', 'XISU', '--body', 'hi', '--no-reply']])
+  const sent = await $.tool.call({ tool: 'mcp__asn__asn_send', to: 'PC1', body: 'hi', expects_reply: false } as never)
+  expect(ran).toEqual([['C:/ASN/asn-cli.exe', 'send', '--to', 'PC1', '--body', 'hi', '--no-reply']])
   expect(JSON.stringify(sent)).toContain('sent id=1')
   // 註冊工具沒有輸出 schema：引擎只收字串或內容區塊陣列（10-22 實際載入時物件被拒）
   expect(typeof (sent as { result: unknown }).result).toBe('string')
 
-  await $.tool.call({ tool: 'mcp__asn__asn_send', to: 'XISU', body: 'hi' } as never)
+  await $.tool.call({ tool: 'mcp__asn__asn_send', to: 'PC1', body: 'hi' } as never)
   expect(ran.length).toBe(1)
 })
 
@@ -126,19 +126,19 @@ const autoFind = async ($: any, on: any, present: boolean) => {
   })
   on('tool.call', () => ({ result: {} }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const sent = await $.tool.call({ tool: 'mcp__asn__asn_send', to: 'XISU', body: 'hi', expects_reply: false } as never)
+  const sent = await $.tool.call({ tool: 'mcp__asn__asn_send', to: 'PC1', body: 'hi', expects_reply: false } as never)
   return { ran, sent }
 }
 
 test('自動找預設 asn-cli：LOCALAPPDATA 下存在就用它', { options: { asn_cli_path: '', send_mjs_path: '/r/send.mjs' } }, async ($, on) => {
   const { ran, sent } = await autoFind($, on, true)
-  expect(ran).toEqual([[DEFAULT_CLI, 'send', '--to', 'XISU', '--body', 'hi', '--no-reply']])
+  expect(ran).toEqual([[DEFAULT_CLI, 'send', '--to', 'PC1', '--body', 'hi', '--no-reply']])
   expect(typeof (sent as { result: unknown }).result).toBe('string')
 })
 
 test('自動找預設 asn-cli：不存在就退回 node send.mjs', { options: { asn_cli_path: '', send_mjs_path: '/r/send.mjs' } }, async ($, on) => {
   const { ran, sent } = await autoFind($, on, false)
-  expect(ran).toEqual([['node', '/r/send.mjs', '--to', 'XISU', '--body', 'hi', '--no-reply']])
+  expect(ran).toEqual([['node', '/r/send.mjs', '--to', 'PC1', '--body', 'hi', '--no-reply']])
   expect(typeof (sent as { result: unknown }).result).toBe('string')
 })
 

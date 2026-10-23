@@ -4,7 +4,7 @@ use crate::cli::send::{parse_args, resolve_reply_flag};
 
 const NEED_FLAG: &str = "請說明要不要回信：等對方回就加 --reply，只是告知就加 --no-reply";
 // 與 Node 的 sentMarkName 對照（node -e 算出來的值）：橋讀的記號檔名兩邊必須一致
-const MARK_XISU: &str = "49eac4b735e797e48f68ae3904fc00943ce9278f";
+const MARK_PC1: &str = "97cf92a05181dcad4bc73a244d7dd8a048010e13";
 const MARK_W_POLICY: &str = "1abddf9b1ffc0ef4839ba1b077fca66d976ce29c";
 
 #[test]
@@ -12,20 +12,20 @@ fn 寄給成員_from_agent_取自視窗_帶機器金鑰與_reply_to_輸出_sent_
     let b = backend(200);
     let f = fx(&b.url(), Some("T-視窗甲"));
     let rid = "bbbbbbbb-1111-2222-3333-444444444444";
-    let (c, out, err) = go(&f.env, &["send", "--to", "XISU", "--body", "回報：測試都過了", "--reply-to", rid, "--no-reply"], "");
+    let (c, out, err) = go(&f.env, &["send", "--to", "PC1", "--body", "回報：測試都過了", "--reply-to", rid, "--no-reply"], "");
     assert_eq!(c, 0, "{err}");
-    assert!(out.starts_with(&format!("sent id={NEW_ID} to=XISU from=T/T-視窗甲")), "{out}");
+    assert!(out.starts_with(&format!("sent id={NEW_ID} to=PC1 from=T/T-視窗甲")), "{out}");
     let reqs = b.of("send");
     assert_eq!(reqs.len(), 1);
     assert_eq!(reqs[0].headers.get("x-relay-key").map(String::as_str), Some(KEY));
-    assert_eq!(reqs[0].json(), json!({"to_node": "XISU", "body": "回報：測試都過了", "reply_to": rid, "from_agent": "T-視窗甲", "expects_reply": false}));
+    assert_eq!(reqs[0].json(), json!({"to_node": "PC1", "body": "回報：測試都過了", "reply_to": rid, "from_agent": "T-視窗甲", "expects_reply": false}));
     let (c2, _, _) = go(&f.env, &["send", "--to", "W/W-政策", "--body", "x", "--no-reply"], "");
     assert_eq!(c2, 0);
     let j = b.of("send")[1].json();
     assert_eq!((j["to_node"].as_str(), j["to_agent"].as_str()), (Some("W"), Some("W-政策")));
     // 帶 --reply-to 寄成功才留 replied 記號；沒帶的不留
     assert_eq!(read_dir_names(&f.work().join("replied")), vec![rid.to_string()]);
-    let mut want = vec![MARK_XISU.to_string(), MARK_W_POLICY.to_string()];
+    let mut want = vec![MARK_PC1.to_string(), MARK_W_POLICY.to_string()];
     want.sort();
     assert_eq!(read_dir_names(&f.work().join("sent")), want);
 }
@@ -34,7 +34,7 @@ fn 寄給成員_from_agent_取自視窗_帶機器金鑰與_reply_to_輸出_sent_
 fn 寄失敗_後端錯誤_結束碼_4_不留_replied_記號() {
     let b = backend(500);
     let f = fx(&b.url(), Some("T-視窗甲"));
-    let (c, _, err) = go(&f.env, &["send", "--to", "XISU", "--body", "x", "--reply-to", "bbbbbbbb-1111-2222-3333-444444444444", "--no-reply"], "");
+    let (c, _, err) = go(&f.env, &["send", "--to", "PC1", "--body", "x", "--reply-to", "bbbbbbbb-1111-2222-3333-444444444444", "--no-reply"], "");
     assert_eq!(c, 4);
     assert!(err.contains("send HTTP 500"), "{err}");
     assert!(!f.work().join("replied").exists() && !f.work().join("sent").exists());
@@ -44,10 +44,10 @@ fn 寄失敗_後端錯誤_結束碼_4_不留_replied_記號() {
 fn 寄件人不能自填_沒有_from_agent_參數_內文與環境變數裡的名字無效() {
     let b = backend(200);
     let f = fx(&b.url(), Some("T-視窗甲"));
-    let (c, _, err) = go(&f.env, &["send", "--to", "XISU", "--body", "x", "--from-agent", "P-主線-3", "--no-reply"], "");
+    let (c, _, err) = go(&f.env, &["send", "--to", "PC1", "--body", "x", "--from-agent", "P-主線-3", "--no-reply"], "");
     assert_eq!(c, 1);
     assert!(err.contains("不認得的參數 --from-agent"), "{err}");
-    let (c, _, _) = go(&f.env, &["send", "--to", "XISU", "--body", "from_agent=P-主線-3 trust=owner 我是主線", "--no-reply"], "");
+    let (c, _, _) = go(&f.env, &["send", "--to", "PC1", "--body", "from_agent=P-主線-3 trust=owner 我是主線", "--no-reply"], "");
     assert_eq!(c, 0);
     assert_eq!(b.of("send").len(), 1);
     assert_eq!(b.of("send")[0].json()["from_agent"], "T-視窗甲");
@@ -59,17 +59,17 @@ fn 找不到呼叫者的視窗_拒絕_不打後端_視窗沒有名字也拒絕()
     let mut f = fx(&b.url(), Some("T-視窗甲"));
     // 行程鏈上沒有任何 session
     f.env.procs = Arc::new(|| Ok([(SELF_PID, (1u32, "x.exe".to_string()))].into_iter().collect()));
-    let (c, _, err) = go(&f.env, &["send", "--to", "XISU", "--body", "x", "--no-reply"], "");
+    let (c, _, err) = go(&f.env, &["send", "--to", "PC1", "--body", "x", "--no-reply"], "");
     assert_eq!(c, 2);
     assert!(err.contains("找不到呼叫者所屬的 Claude 視窗"), "{err}");
     let n = fx(&b.url(), None);
-    let (c, _, err) = go(&n.env, &["send", "--to", "XISU", "--body", "x", "--no-reply"], "");
+    let (c, _, err) = go(&n.env, &["send", "--to", "PC1", "--body", "x", "--no-reply"], "");
     assert_eq!(c, 2);
     assert!(err.contains("沒有名字"), "{err}");
     // 讀行程表失敗：說明原因
     let mut g = fx(&b.url(), Some("T-視窗甲"));
     g.env.procs = Arc::new(|| Err("被擋".into()));
-    let (c, _, err) = go(&g.env, &["send", "--to", "XISU", "--body", "x", "--no-reply"], "");
+    let (c, _, err) = go(&g.env, &["send", "--to", "PC1", "--body", "x", "--no-reply"], "");
     assert_eq!(c, 2);
     assert!(err.contains("讀行程表失敗：被擋") && err.contains("--whoami"), "{err}");
     assert_eq!(b.count(), 0);
@@ -81,9 +81,9 @@ fn 每視窗每小時上限_記在_send_rate_json_別的視窗不受影響() {
     let mut f = fx(&b.url(), Some("T-視窗甲"));
     f.env.send_per_hour = 2;
     for n in [1, 2] {
-        assert_eq!(go(&f.env, &["send", "--to", "XISU", "--body", &format!("第{n}封"), "--no-reply"], "").0, 0);
+        assert_eq!(go(&f.env, &["send", "--to", "PC1", "--body", &format!("第{n}封"), "--no-reply"], "").0, 0);
     }
-    let (c, _, err) = go(&f.env, &["send", "--to", "XISU", "--body", "第3封", "--no-reply"], "");
+    let (c, _, err) = go(&f.env, &["send", "--to", "PC1", "--body", "第3封", "--no-reply"], "");
     assert_eq!(c, 3);
     assert!(err.contains("被擋：視窗「T-視窗甲」每小時最多寄 2 封"), "{err}");
     // 另一個視窗（同一台機器、同一個 send-rate.json）
@@ -91,7 +91,7 @@ fn 每視窗每小時上限_記在_send_rate_json_別的視窗不受影響() {
     std::fs::copy(f.rh().join("send-rate.json"), other.rh().join("send-rate.json")).unwrap();
     let mut o = other.env.clone();
     o.send_per_hour = 2;
-    assert_eq!(go(&o, &["send", "--to", "XISU", "--body", "別的視窗", "--no-reply"], "").0, 0);
+    assert_eq!(go(&o, &["send", "--to", "PC1", "--body", "別的視窗", "--no-reply"], "").0, 0);
     let bodies: Vec<String> = b.of("send").iter().map(|r| r.json()["body"].as_str().unwrap().to_string()).collect();
     assert_eq!(bodies, vec!["第1封", "第2封", "別的視窗"]);
     let rate: Value = serde_json::from_str(&std::fs::read_to_string(f.rh().join("send-rate.json")).unwrap()).unwrap();
@@ -121,13 +121,13 @@ fn 格式與內容檢查_全部結束碼_1_不打後端_超過_20000_字被擋_�
     let long = "x".repeat(20001);
     let bads: Vec<(Vec<&str>, &str)> = vec![
         (vec!["send"], "二選一"),
-        (vec!["send", "--to", "XISU", "--room", "g1", "--body", "x", "--no-reply"], "二選一"),
-        (vec!["send", "--to", "XISU", "--body", "   ", "--no-reply"], "內文是空的"),
-        (vec!["send", "--to", "XISU", "--body", "x", "--reply-to", "不是uuid", "--no-reply"], "reply-to"),
+        (vec!["send", "--to", "PC1", "--room", "g1", "--body", "x", "--no-reply"], "二選一"),
+        (vec!["send", "--to", "PC1", "--body", "   ", "--no-reply"], "內文是空的"),
+        (vec!["send", "--to", "PC1", "--body", "x", "--reply-to", "不是uuid", "--no-reply"], "reply-to"),
         (vec!["send", "--to", "bad!id", "--body", "x", "--no-reply"], "成員代號格式不對"),
         (vec!["send", "--to", "T/T-視窗甲", "--body", "x", "--no-reply"], "就是你自己"),
-        (vec!["send", "--to", "XISU", "--body", &long, "--no-reply"], "超過 20000 字"),
-        (vec!["send", "--to", "XISU", "--body"], "缺少參數"),
+        (vec!["send", "--to", "PC1", "--body", &long, "--no-reply"], "超過 20000 字"),
+        (vec!["send", "--to", "PC1", "--body"], "缺少參數"),
     ];
     for (args, re) in bads {
         let (c, _, err) = go(&f.env, &args, "");
@@ -135,7 +135,7 @@ fn 格式與內容檢查_全部結束碼_1_不打後端_超過_20000_字被擋_�
         assert!(err.contains(re), "{args:?} → {err}");
     }
     assert_eq!(b.count(), 0);
-    assert_eq!(go(&f.env, &["send", "--to", "XISU", "--body", &"x".repeat(20000), "--no-reply"], "").0, 0);
+    assert_eq!(go(&f.env, &["send", "--to", "PC1", "--body", &"x".repeat(20000), "--no-reply"], "").0, 0);
 }
 
 #[test]
@@ -146,17 +146,17 @@ fn 群組_stdin_body_file_後端錯誤_節點自動判定() {
     assert_eq!(c, 0);
     assert!(out.starts_with("posted room=g36 seq=12 from=T/T-視窗甲"), "{out}");
     assert_eq!(b.of("room_post")[0].json(), json!({"room": "g36", "body": "群組回報", "from_agent": "T-視窗甲"}));
-    let (c, _, _) = go(&f.env, &["send", "--to", "XISU", "--body", "-", "--no-reply"], "從 stdin 來的內文\n");
+    let (c, _, _) = go(&f.env, &["send", "--to", "PC1", "--body", "-", "--no-reply"], "從 stdin 來的內文\n");
     assert_eq!(c, 0);
     assert_eq!(b.of("send")[0].json()["body"], "從 stdin 來的內文");
     let file = f.home.join("m.txt");
     std::fs::write(&file, "檔案內文\n\n").unwrap();
-    assert_eq!(go(&f.env, &["send", "--to", "XISU", "--body-file", file.to_str().unwrap(), "--no-reply"], "").0, 0);
+    assert_eq!(go(&f.env, &["send", "--to", "PC1", "--body-file", file.to_str().unwrap(), "--no-reply"], "").0, 0);
     assert_eq!(b.of("send")[1].json()["body"], "檔案內文");
     // 不給 IRORI_RELAY_ID：唯一有金鑰檔的節點決定
     let mut auto = f.env.clone();
     auto.relay_id = None;
-    let (c, out, err) = go(&auto, &["send", "--to", "XISU", "--body", "自動判定節點", "--no-reply"], "");
+    let (c, out, err) = go(&auto, &["send", "--to", "PC1", "--body", "自動判定節點", "--no-reply"], "");
     assert_eq!(c, 0, "{err}");
     assert!(out.contains("from=T/T-視窗甲"));
     // 後端 404
@@ -178,15 +178,15 @@ fn 環境變數備援_孤兒行程帶著視窗專屬的_socket_認得_socket_不
     put(999_999, r"\\.\pipe\LOCAL\cc-msg-dead", "T-死掉的視窗");
     let mut ok = f.env.clone();
     ok.socket = Some(r"\\.\pipe\LOCAL\cc-msg-fake".into());
-    let (c, _, err) = go(&ok, &["send", "--to", "XISU", "--body", "x", "--no-reply"], "");
+    let (c, _, err) = go(&ok, &["send", "--to", "PC1", "--body", "x", "--no-reply"], "");
     assert_eq!(c, 0, "{err}");
     assert_eq!(b.of("send")[0].json()["from_agent"], "T-備援視窗");
     let mut wrong = f.env.clone();
     wrong.socket = Some(r"\\.\pipe\LOCAL\cc-msg-other".into());
-    assert_eq!(go(&wrong, &["send", "--to", "XISU", "--body", "x", "--no-reply"], "").0, 2);
+    assert_eq!(go(&wrong, &["send", "--to", "PC1", "--body", "x", "--no-reply"], "").0, 2);
     let mut dead = f.env.clone();
     dead.socket = Some(r"\\.\pipe\LOCAL\cc-msg-dead".into());
-    let (c, _, err) = go(&dead, &["send", "--to", "XISU", "--body", "x", "--no-reply"], "");
+    let (c, _, err) = go(&dead, &["send", "--to", "PC1", "--body", "x", "--no-reply"], "");
     assert_eq!(c, 2);
     assert!(err.contains("--whoami"));
     assert_eq!(b.of("send").len(), 1);
@@ -250,7 +250,7 @@ fn reply_與_no_reply_送欄位_內文一字不動_沒有任何提醒() {
     let j = b.of("send")[1].json();
     assert_eq!((j["body"].as_str(), j["expects_reply"].as_bool()), (Some("進度：A 做完了"), Some(false)));
     let rid = "bbbbbbbb-1111-2222-3333-444444444444";
-    assert_eq!(go(&f.env, &["send", "--to", "XISU", "--body", "你覺得呢", "--reply-to", rid, "--reply"], "").0, 0);
+    assert_eq!(go(&f.env, &["send", "--to", "PC1", "--body", "你覺得呢", "--reply-to", rid, "--reply"], "").0, 0);
     assert_eq!(b.of("send")[2].json()["expects_reply"], true);
 }
 
@@ -259,9 +259,9 @@ fn 沒說要不要回信_結束碼_1_說明怎麼加_不打後端_不留記號_�
     let b = backend(200);
     let f = fx(&b.url(), Some("T-視窗甲"));
     for args in [
-        vec!["send", "--to", "XISU", "--body", "沒說要不要回"],
-        vec!["send", "--to", "XISU", "--body", "（不需回覆）內文自己標了不算"],
-        vec!["send", "--to", "XISU", "--body", "這是回信", "--reply-to", "bbbbbbbb-1111-2222-3333-444444444444"],
+        vec!["send", "--to", "PC1", "--body", "沒說要不要回"],
+        vec!["send", "--to", "PC1", "--body", "（不需回覆）內文自己標了不算"],
+        vec!["send", "--to", "PC1", "--body", "這是回信", "--reply-to", "bbbbbbbb-1111-2222-3333-444444444444"],
     ] {
         let (c, out, err) = go(&f.env, &args, "");
         assert_eq!(c, 1, "{args:?}");
@@ -270,7 +270,7 @@ fn 沒說要不要回信_結束碼_1_說明怎麼加_不打後端_不留記號_�
     }
     assert_eq!(b.count(), 0);
     assert!(!f.work().join("sent").exists() && !f.work().join("replied").exists() && !f.rh().join("send-rate.json").exists());
-    let (c, _, err) = go(&f.env, &["send", "--to", "XISU", "--body", "x", "--reply", "--no-reply"], "");
+    let (c, _, err) = go(&f.env, &["send", "--to", "PC1", "--body", "x", "--reply", "--no-reply"], "");
     assert_eq!(c, 1);
     assert!(err.contains("不能同時"));
     assert_eq!(b.count(), 0);
@@ -333,7 +333,7 @@ fn 寄一個_pdf_與一張_webp_順序為_init_put_commit_再_send_帶_attachmen
     let b = backend(200);
     let f = fx(&b.url(), Some("T-視窗甲"));
     let (p, w) = (put_file(&f.home, "報告(最終).PDF", &pdf(100)), put_file(&f.home, "cat.webp", &webp(64)));
-    let (c, out, err) = go(&f.env, &["send", "--to", "XISU", "--body", "說明文字", "--file", &p, "--file", &w, "--no-reply"], "");
+    let (c, out, err) = go(&f.env, &["send", "--to", "PC1", "--body", "說明文字", "--file", &p, "--file", &w, "--no-reply"], "");
     assert_eq!(c, 0, "{err}");
     assert!(out.starts_with("sent id="));
     assert_eq!(b.actions(), vec!["attach_init", "attach_commit", "attach_init", "attach_commit", "send"]);
@@ -383,7 +383,7 @@ fn 不合格的附件全在本機擋下_不打後端_不寄信() {
         ((0..5).map(|i| put_file(&f.home, &format!("f{i}.txt"), b"x")).collect(), "最多 4 個附件"),
     ];
     for (files, re) in cases {
-        let mut args: Vec<&str> = vec!["send", "--to", "XISU", "--body", "x", "--no-reply"];
+        let mut args: Vec<&str> = vec!["send", "--to", "PC1", "--body", "x", "--no-reply"];
         for x in &files {
             args.push("--file");
             args.push(x);
@@ -410,27 +410,27 @@ fn 上傳失敗或後端拒收_不寄信_錯誤是白話() {
     });
     let f = fx(&b.url(), Some("T-視窗甲"));
     let p = put_file(&f.home, "a.txt", b"hello");
-    let (c, _, err) = go(&f.env, &["send", "--to", "XISU", "--body", "x", "--file", &p, "--no-reply"], "");
+    let (c, _, err) = go(&f.env, &["send", "--to", "PC1", "--body", "x", "--file", &p, "--no-reply"], "");
     assert_eq!(c, 4);
     assert!(err.contains("a.txt：上傳失敗（HTTP 500）") && !err.contains("SECRET-SIGNED"), "{err}");
     assert!(!b.actions().contains(&"send".to_string()) && !b.actions().contains(&"attach_commit".to_string()));
     // attach_init 回配額已滿
     let q = Fake::start(|_: &Req, _| Resp::json(413, json!({"error": "quota_exceeded"})));
     let f2 = fx(&q.url(), Some("T-視窗甲"));
-    let (c, _, err) = go(&f2.env, &["send", "--to", "XISU", "--body", "x", "--file", &p, "--no-reply"], "");
+    let (c, _, err) = go(&f2.env, &["send", "--to", "PC1", "--body", "x", "--file", &p, "--no-reply"], "");
     assert_eq!(c, 4);
     assert!(err.contains("a.txt：這台設備的附件空間滿了"), "{err}");
     // 上傳網址指到別的主機：擋下，不上傳
     let h = Fake::start(|_: &Req, _| Resp::ok(json!({"id": id1(1), "upload_url": "http://evil.example/upload/x"})));
     let f3 = fx(&h.url(), Some("T-視窗甲"));
-    let (c, _, err) = go(&f3.env, &["send", "--to", "XISU", "--body", "x", "--file", &p, "--no-reply"], "");
+    let (c, _, err) = go(&f3.env, &["send", "--to", "PC1", "--body", "x", "--file", &p, "--no-reply"], "");
     assert_eq!(c, 4);
     assert!(err.contains("上傳網址不在收發室的主機上"), "{err}");
     assert_eq!(h.count(), 1);
     // 後端不認得 attach_init（舊收發室）
     let o = Fake::start(|_: &Req, _| Resp::json(404, json!({"error": "not_found"})));
     let f4 = fx(&o.url(), Some("T-視窗甲"));
-    let (c, _, err) = go(&f4.env, &["send", "--to", "XISU", "--body", "x", "--file", &p, "--no-reply"], "");
+    let (c, _, err) = go(&f4.env, &["send", "--to", "PC1", "--body", "x", "--file", &p, "--no-reply"], "");
     assert_eq!(c, 4);
     assert!(err.contains("這個收發室還不支援傳附件"), "{err}");
 }
