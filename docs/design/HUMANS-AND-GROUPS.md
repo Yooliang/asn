@@ -301,6 +301,12 @@ relay.friendships      新增（第 2 期）：user_a、user_b（已排序）、
 **Migration**（三支，可回復）：`20261023170000_groups_p1a_schema.sql`（欄位、表、內部輔助函式）、`20261023170100_groups_p1a_rooms.sql`（群組讀寫函式改看成員表；帶本人簽章的讀取是新函式 `asn_relay_group_read／list／members`，原 `asn_relay_room_read／list／members` 簽章不變、改為轉呼叫它）、`20261023170200_groups_p1a_actions.sql`（人的動作與主持人確認）；回復腳本 `supabase/sql/rollback/20261023170000_groups_p1a_down.sql`。只加欄、加表、加函式，不刪既有資料。
 實作與本節原設計的差異：`~owner` 沒有回填成 `~u:<帳號>`（舊群組照舊、舊用戶端相容；新群組的真人成員一律 `~u:<帳號>`，`~owner` 仍當建立地租戶擁有者的別名）；邀請預設改一人使用、24 小時；同名消歧的「#2」「（2）」後綴留到 1b 的介面顯示（1a 提供 `label`，同名時點名只認完整標示）；每人跨群組每小時 100 則未做（列入第 2 期）。
 
+**第 1b 段（介面，分支 feat/groups-p1b）已做**：
+- 共用邏輯在 `relay/asn/ui/lib/`：`groups.mjs`（邀請碼與連結、錯誤中文、可帶的夥伴、預覽、發言者標示與同名「（2）」、附件鈕、確認卡片、成員清單、`relay_group` 呼叫包裝）、`group-flow.mjs`（建立、邀請、加入、成員與設定四個對話框的狀態機）、`room-hub.mjs`（群組列表、對話記錄、確認卡片、發言、同意／拒絕）、`group-sheet.mjs`（畫面）；電腦版與手機版共用。
+- Rust：`relay_group`（12 個人的動作，一律本人簽章、欄位先整理）、帶簽章的 `relay_rooms`／讀取、電腦版 `relay_room_read`／`relay_room_post`；`invite_link.rs` 收 `asn://invite/<碼>` 與 App Links（deep-link 外掛），第二個 ASN 以信箱檔轉交。
+- 官網 `/i/<碼>`（`site/public/i/`）與 `/.well-known/assetlinks.json`（改寫到 `wk/`）；AndroidManifest 加 `https://asnmessenger.web.app/i/` 的 autoVerify 意圖。
+- AI 端：技能「群組裡被別人點名」＋ `asn-cli room confirm-request／confirm-status`。
+- 與原設計的差異：邀請預覽的內容取本機這段對話最近 N 則（實際複製的是雲端最後 N 則）；群組對話第 1 期不傳附件（不只外部成員的群組）；「加我的另一個 AI」（`group_upgrade`）沒有介面；後台的成員清單沒有回報各 AI 目前的「接受別人點名」開關值（畫面預設開著，後台補欄位 `allow_others` 後會自動帶出）；橋給 AI 的群組信頭還沒帶 `relation`／`from_label`。
 **Edge Function**：`relay`（新增人的動作與 `room_read` 輸出）；`_shared/rooms.ts` 新規則與測試。
 
 **測試**
