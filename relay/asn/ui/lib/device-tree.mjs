@@ -15,7 +15,7 @@ const PHONE_KINDS = new Set(['phone', 'mobile', 'android'])
 // 引擎名稱 → 廠商鍵（gpt 與 codex 是同一家）；asn 視窗與其他不算廠商
 const VENDOR_OF = { gpt: 'codex' }
 const SKIP = new Set(['asn', 'other', ''])
-export const VENDOR_LABEL = { claude: 'Claude', codex: 'OpenAI（Codex）', gemini: 'Gemini', grok: 'Grok', pi: 'Pi', acp: 'ACP 工作者', deepseek: 'DeepSeek', minimax: 'MiniMax' }
+export const VENDOR_LABEL = { claude: 'Claude', codex: 'OpenAI（Codex）', gemini: 'Gemini', grok: 'Grok', pi: 'Pi', acp: 'ACP 工作者', deepseek: 'DeepSeek', minimax: 'MiniMax', aegis: 'Aegis' }
 const vendorLabel = k => VENDOR_LABEL[k] ?? k.charAt(0).toUpperCase() + k.slice(1)
 const vendorKey = e => { const k = String(e ?? '').trim().toLowerCase(); return VENDOR_OF[k] ?? k }
 
