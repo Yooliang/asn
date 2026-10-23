@@ -1,8 +1,8 @@
 {
-  "version": "0.1.51",
-  "versionCode": 1051,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.51_android.apk",
-  "sha256": "ef9c84aca2a0e47c49647086e242df989f3e77e48d6c41f045c85728e3b4a50c",
-  "notes": "- 新背景：名單、設定、對話換成天空藍波紋、往下淡成白色的背景；語音通話中，AI 談完可以自己結束通話（ASN 技能已寫明用法）。",
-  "bytes": 9104868
+  "version": "0.1.52",
+  "versionCode": 1052,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.52_android.apk",
+  "sha256": "cb0e63d1587f7f3e72dc5751e04385edc7750ed9f67a985906d274e0bb56b03b",
+  "notes": "- 真人好友與群組（第一期）：電腦與手機都能建立群組；任一對話可產生一次性、24 小時有效的邀請連結，把別的 ASN 使用者拉進來（一對一會另開新群組並帶入最近的對話）；群組裡標出誰是真人、誰是 AI；別人點名你的 AI 做危險操作時，會在群組請你確認。對話頁頭部改成半透明疊色、背景一整片不重複；看大圖時會蓋住頭部；對方回震動不再出現「未指定收件人」。",
+  "bytes": 9248228
 }

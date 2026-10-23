@@ -1,11 +1,11 @@
 {
-  "version": "0.1.51",
-  "notes": "新背景：名單、設定、對話換成天空藍波紋、往下淡成白色的背景；語音通話中，AI 談完可以自己結束通話（ASN 技能已寫明用法）。",
-  "pub_date": "2026-10-23T09:22:25.859Z",
+  "version": "0.1.52",
+  "notes": "真人好友與群組（第一期）：電腦與手機都能建立群組；任一對話可產生一次性、24 小時有效的邀請連結，把別的 ASN 使用者拉進來（一對一會另開新群組並帶入最近的對話）；群組裡標出誰是真人、誰是 AI；別人點名你的 AI 做危險操作時，會在群組請你確認。對話頁頭部改成半透明疊色、背景一整片不重複；看大圖時會蓋住頭部；對方回震動不再出現「未指定收件人」。",
+  "pub_date": "2026-10-23T10:30:47.410Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjJ0SWJYR1JzWm1tWk94QmlEaEhVWUlnV0IzejZWYTc4RUxUbEp4TGt2TGZKS0dyOUl5KzBtRzNyUlJ3bGE3UmwwT3FUSXhOc3U1SDhTVVF4cndzM0FjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzQ3MzQ1CWZpbGU6QVNOXzAuMS41MV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjUxCnQrSlJDalE3b04yc0lZN2FFL044ZHhFQ2VTSDFvZ0hZUjVjems2REZEclBZbENoNy9LZXhBU1VQZG5rSG9ZQ2tRUS9VdHlFSHQwV2M4N2pFOUp6QkRRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.51_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjFmUVBsQ21UR2Y4VnZ2bTR4ZmlrT2VWSGpwSkpkenVmZDNpSWQ5SVZJZ2ZmZDRaTDIza0xnVnRLZXAyOWNRalBWZUFtQmJKajhBbG42MXZDUTlab1FJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzUxNDQ3CWZpbGU6QVNOXzAuMS41Ml94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjUyCjZuL3Vick1IdjBWc3JMSW91ZmxiQ2dlc2Rpa3ZCUUF3N0MrdmFENlFwNXY0UU5Xb2FQZ3UvckEzVzZqUDRCZ2g1MHBiWkJVaE1OMlFUQ3BtTDQ4VUFnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.52_x64-setup.exe"
     }
   }
 }
