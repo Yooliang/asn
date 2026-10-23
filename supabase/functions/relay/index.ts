@@ -8,8 +8,8 @@ import { expectsReplyArgs } from "../_shared/expects_reply.ts";
 import { parseSelfName } from "../_shared/node_name.ts";
 import { parseAsnPresence } from "../_shared/asn_presence.ts";
 import { handlePartnerList, handlePartnerSucceed, handlePartnerSync } from "../_shared/partners.ts";
-import { bellTopicsOf, handleChatHistory, personArgs, sendWithPerson } from "../_shared/account_me.ts";
-import { normalizeRosterAgents } from "../_shared/roster.ts";
+import { bellTopicsOf, handleChatHistory, personArgs, sendWithPerson, voiceArgs } from "../_shared/account_me.ts";
+import { normalizeRosterAgents, rosterBellTopics } from "../_shared/roster.ts";
 import { sanitizeClaudeMod } from "../_shared/claude_mod.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
 import * as signal from "../_shared/signal.ts";
@@ -222,6 +222,8 @@ Deno.serve(async (req) => {
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     if (data?.error === "forbidden") return json(403, { error: "forbidden" });
     if (data?.error) return json(400, { error: data.error });
+    // 名單有變（忙碌／閒置／說明）：資料庫回同帳號其他設備的門鈴（已做 2 秒頻率限制），敲一下讓它們立刻重拉名單。舊資料庫沒這個鍵＝不敲
+    for (const t of rosterBellTopics(data)) await ring(t);
     // 機器橋把本機 launcher.json 的摘要（profile 名、cwd 白名單、每小時上限）附在名單一起回報；沒帶 launcher 欄位就不動
     if ("launcher" in b) {
       const l = sanitizeLauncher(b.launcher);
@@ -406,6 +408,7 @@ Deno.serve(async (req) => {
     const { data, error } = await sendWithPerson(rpc, {
       ...signedArgs(signed),
       ...personArgs(b.as_person, signed),
+      ...voiceArgs(b.voice), // 語音通話標記（選填布林）：舊後台沒有 asn_relay_send_voice 時退回一般寄信
       p_from_node: me.id, // from_node in the body is ignored on purpose
       p_from_agent: str(b.from_agent),
       p_to_node: b.to_node,

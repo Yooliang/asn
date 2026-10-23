@@ -252,11 +252,27 @@ test('守門：通話程式不碰金鑰、不直接連網；按鈕與畫面接�
   }
   const pane = read('lib/chatpane.mjs')
   assert.match(pane, /<call-view v-if="callActive"/)
-  assert.match(pane, /newCall\(\{ send: t => emit\('send', t\) \}\)/, '寄信走對話區原本的 send 事件')
+  assert.match(pane, /newCall\(\{ send: \(t, o\) => emit\('send', t, o\) \}\)/, '寄信走對話區原本的 send 事件')
   assert.match(read('lib/actionbar.mjs'), /aria-label="通話"[^>]*title="[^"]*[一-鿿]/)
   assert.match(read('list.js'), /!callBeats\.anyCall\(\)/, '自動念要讓路給通話')
   assert.match(read('chat.html'), /@call-state="callState"/)
   assert.match(fs.readFileSync(new URL('../ui/img/ab-call.svg', import.meta.url), 'utf8'), /^<svg/)
   const view = read('lib/call-view.mjs')
   assert.doesNotMatch(view, /節點/)
+})
+
+test('通話：剛開始的按鍵聲不收；太短的聲音不送辨識；辨識念回提示詞不寄', async () => {
+  const r = rig()
+  await r.call.start()
+  r.feed(build([0.4, 0.3, true], [1.5, 0.002, false]))   // 按鍵聲（前 0.5 秒內）
+  await flush()
+  assert.equal(r.transcribed, 0)
+  r.feed(build([0.6, 0.002, false], [0.2, 0.2, true], [1.5, 0.002, false]))   // 太短
+  await flush()
+  assert.equal(r.transcribed, 0)
+  r.recognized = '請使用正確的標點符號。'
+  r.feed(oneSentence())
+  await flush()
+  assert.equal(r.transcribed, 1)
+  assert.deepEqual(r.sent, [])
 })

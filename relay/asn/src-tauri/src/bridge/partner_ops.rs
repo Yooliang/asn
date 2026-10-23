@@ -64,6 +64,11 @@ pub(crate) fn handover_prompt(name: &str, note: &str, transcript: Option<&Path>,
 }
 
 /// 夥伴 ID（沒有就用視窗名）轉成資料夾名：只留英數、中文、- 與 _，其他一律換成 _，最長 60 字
+/// 受保護的視窗：收發室、目前的 ASN 視窗名、ASN 自己的工作者程序（遠端管理不得關閉／清除）
+pub(crate) fn is_protected(name: &str, pid: u32, mailbox: &str, asn_window: &str, worker_pid: u32) -> bool {
+    name == mailbox || name == asn_window || (pid != 0 && pid == worker_pid)
+}
+
 fn safe_key(s: &str) -> String {
     let k: String = s.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).take(60).collect();
     if k.trim_matches('_').is_empty() { "partner".to_string() } else { k }
@@ -321,10 +326,11 @@ impl PartnerOps {
     pub(crate) fn system(relay: Arc<Relay>, log: Arc<BridgeLog>, data_dir: PathBuf, handoff_dir: PathBuf, sessions_dir: PathBuf, status_dir: PathBuf, mailbox_name: String, worker_pid: Arc<dyn Fn() -> u32 + Send + Sync>) -> Arc<PartnerOps> {
         let control = status_dir.parent().map(|p| p.join("control")).unwrap_or_else(|| status_dir.join("control"));
         let projects = sessions_dir.parent().map(|p| p.join("projects")).unwrap_or_else(|| sessions_dir.join("projects"));
-        let asn_window = relay.window_name();
-        let protect: Arc<dyn Fn(&str, u32) -> bool + Send + Sync> = Arc::new(move |name, pid| name == mailbox_name || name == asn_window || (pid != 0 && pid == worker_pid()));
         let relay2 = relay.clone();
-        PartnerOps::new(relay, log, handoff_dir, Arc::new(SystemOpsEnv { data_dir, relay: relay2 }), OpsDirs { sessions: sessions_dir, status: status_dir, control, projects }, protect)
+        let relay3 = relay.clone();
+        // ASN 視窗名每次判斷時現讀（改名後立刻跟著換，不能啟動時抓一次就固定）
+        let protect: Arc<dyn Fn(&str, u32) -> bool + Send + Sync> = Arc::new(move |name, pid| is_protected(name, pid, &mailbox_name, &relay.window_name(), worker_pid()));
+        PartnerOps::new(relay3, log, handoff_dir, Arc::new(SystemOpsEnv { data_dir, relay: relay2 }), OpsDirs { sessions: sessions_dir, status: status_dir, control, projects }, protect)
     }
 
     /// 後台回報的「視窗名 → 夥伴 ID」（往來記錄與交接檔資料夾都用它）

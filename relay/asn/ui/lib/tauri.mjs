@@ -11,6 +11,7 @@ export const ctl = op => invoke('win_ctl', { op })
 // 給 AsnCore 的 transport：HTTP 與金鑰都在 Rust 端，這裡拿不到金鑰
 export const transport = {
   list: () => invoke('relay_list'),
+  localWindows: () => invoke('local_windows'),   // 電腦版：直接讀本機視窗狀態（手機沒有這個指令）
   inbox: () => invoke('relay_inbox'),
   ack: ids => invoke('relay_ack', { ids }),
   rooms: () => invoke('relay_rooms'),

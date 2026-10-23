@@ -83,8 +83,10 @@ export const CONSOLE_QUERY_TIMEOUT_MS = 1500
 
 /** 右鍵選單的「背景／前台切換」項目：文字固定、不隨狀態改字；能切換才可按，檢查中或切不了就反灰 */
 export const BUDDY_CONSOLE_LABEL = '背景／前台切換'
-export function buddyConsoleItem(state) {
-  return { label: BUDDY_CONSOLE_LABEL, disabled: state !== 'toggle' }
+export function buddyConsoleItem(state, reason = '') {
+  const disabled = state !== 'toggle'
+  const tip = state === 'checking' ? '檢查中…' : disabled ? (reason || '找不到這個夥伴的主控台視窗') : ''
+  return { label: BUDDY_CONSOLE_LABEL, disabled, tip }
 }
 
 /** 等 promise 最多 ms 毫秒；逾時或失敗一律回 null（右鍵選單不能被慢的查詢卡住） */

@@ -58,6 +58,9 @@ pub fn is_busy_status(s: Option<&str>) -> bool {
 
 /// 外掛狀態檔多久內算有效（毫秒）
 pub const MOD_STATUS_MAX_AGE_MS: u64 = 30 * 60 * 1000;
+/// 「忙碌類」狀態（busy／background／scheduled）的有效期：外掛每 5 分鐘至少重寫一次 at（心跳），
+/// 超過 10 分鐘沒更新就是外掛停了或視窗卡死，不能一直顯示忙碌——不採用，回到 sessions/<pid>.json 給的狀態
+pub const MOD_BUSY_MAX_AGE_MS: u64 = 10 * 60 * 1000;
 const MOD_STATUS_MAX_BYTES: u64 = 16 * 1024;
 const MOD_DETAIL_MAX_CHARS: usize = 80;
 /// 外掛在 session 結束時寫的說明（外掛刪不了檔，只能寫 idle＋這句）；看到它就不採用，名單照 sessions/<pid>.json
@@ -119,6 +122,9 @@ fn read_mod_status(path: &Path, sid: &str, now_ms: u64) -> Option<(String, Optio
         return None; // session 已結束：不採用
     }
     let (status, default_detail) = map_mod_state(v.get("state").and_then(Value::as_str)?)?;
+    if is_busy_status(Some(status)) && now_ms.abs_diff(at) > MOD_BUSY_MAX_AGE_MS {
+        return None; // 忙碌太久沒心跳：不信
+    }
     let raw: String = v.get("detail").and_then(Value::as_str).unwrap_or("").chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
     let raw = raw.trim();
     let detail = if raw.is_empty() { default_detail.map(String::from) } else { Some(raw.chars().take(MOD_DETAIL_MAX_CHARS).collect()) };
@@ -212,6 +218,27 @@ pub fn read_sessions(dir: &Path, alive: impl Fn(u32) -> bool, exclude_pid: u32, 
     }
     out.sort_by(|a, b| a.name.cmp(&b.name).then(a.pid.cmp(&b.pid)));
     Some(out)
+}
+
+/// 名單「有意義的變化」指紋：名字、狀態、說明三項（上下文百分比、at 心跳、pid 不算）。
+/// 外掛每 5 分鐘只更新 at 的心跳不會改變指紋，所以不會觸發額外回報。
+pub fn local_fingerprint(windows: &[Window]) -> String {
+    let mut v: Vec<String> = windows.iter().map(|w| format!("{}\u{1}{}\u{1}{}", w.name, w.status.as_deref().unwrap_or(""), w.detail.as_deref().unwrap_or(""))).collect();
+    v.sort();
+    v.join("\u{2}")
+}
+
+/// 本機視窗狀態變了要不要立刻回報名單：指紋和上次回報時不同，而且距上次回報已過防抖間隔（頭一次變化馬上報，
+/// 連續快速變化合併成每 gap 毫秒最多一次，最後一次變化一定會在間隔過後補報）
+pub fn push_due(fp: &str, last_fp: Option<&str>, now_ms: u64, last_at: u64, gap_ms: u64) -> bool {
+    last_fp.map(|l| l != fp).unwrap_or(false) && now_ms.saturating_sub(last_at) >= gap_ms
+}
+
+/// 只讀本機：sessions ＋ 外掛狀態檔組出視窗清單（給即時監看與前端直接讀本機狀態用，不寫檔、不碰後台）
+pub fn read_local(sessions_dir: &Path, status_dir: &Path, alive: impl Fn(u32) -> bool, exclude_pid: u32, exclude_name: &str, now_ms: u64) -> Option<Vec<Window>> {
+    let mut l = read_sessions(sessions_dir, alive, exclude_pid, exclude_name)?;
+    apply_mod_status(&mut l, status_dir, now_ms);
+    Some(l)
 }
 
 /// roster 動作的請求內容。asn_window＝ASN 自己的視窗名（也列進名單，別台看得到這台的 ASN；engine 標 asn）。
@@ -374,6 +401,54 @@ mod tests {
         put_status(d.path(), "s1", json!({"sessionId":"s1","state":"waiting_user","at":NOW}));
         apply_mod_status(&mut ws, d.path(), NOW);
         assert!(!ws[0].is_busy());
+    }
+
+    #[test]
+    fn 忙碌類狀態超過_10_分鐘沒心跳就不採用_閒置類仍可到_30_分鐘() {
+        let d = tempfile::tempdir().unwrap();
+        for state in ["busy", "background", "scheduled"] {
+            put_status(d.path(), "s1", json!({"sessionId":"s1","state":state,"at":NOW - MOD_BUSY_MAX_AGE_MS - 1}));
+            let mut ws = [win("s1", "idle")];
+            apply_mod_status(&mut ws, d.path(), NOW);
+            assert!(!ws[0].mod_loaded && ws[0].status.as_deref() == Some("idle"), "{state} 過期要回到原狀態");
+            put_status(d.path(), "s1", json!({"sessionId":"s1","state":state,"at":NOW - MOD_BUSY_MAX_AGE_MS}));
+            let mut ws = [win("s1", "idle")];
+            apply_mod_status(&mut ws, d.path(), NOW);
+            assert_eq!(ws[0].status.as_deref(), Some("busy"), "{state} 邊界內仍採用");
+        }
+        for state in ["idle", "waiting_user"] {
+            put_status(d.path(), "s1", json!({"sessionId":"s1","state":state,"at":NOW - MOD_BUSY_MAX_AGE_MS - 1}));
+            let mut ws = [win("s1", "busy")];
+            apply_mod_status(&mut ws, d.path(), NOW);
+            assert!(ws[0].mod_loaded, "{state} 不受忙碌期限影響");
+        }
+    }
+
+    #[test]
+    fn 指紋只看名字_狀態_說明_心跳與上下文不算_順序無關() {
+        let mk = |st: &str, d: Option<&str>, pct: Option<u8>| { let mut w = win("s1", st); w.detail = d.map(String::from); w.context_pct = pct; w.updated_at = 5; w };
+        let a = vec![mk("idle", None, Some(10)), { let mut w = Window::claude("T-乙", Some("busy".into()), "", 2, 0, None); w.detail = None; w }];
+        let mut b = a.clone();
+        b.reverse();
+        b[1].context_pct = Some(90);
+        b[1].updated_at = 99;
+        assert_eq!(local_fingerprint(&a), local_fingerprint(&b));
+        let mut c = a.clone();
+        c[0].status = Some("busy".into());
+        assert_ne!(local_fingerprint(&a), local_fingerprint(&c));
+        let mut e = a.clone();
+        e[0].detail = Some("背景工作中".into());
+        assert_ne!(local_fingerprint(&a), local_fingerprint(&e));
+        assert_ne!(local_fingerprint(&a), local_fingerprint(&a[..1]));
+    }
+
+    #[test]
+    fn 立即回報時機_沒變不報_變了且過防抖就報_防抖內等到間隔後補報_沒有基準不報() {
+        assert!(!push_due("x", Some("x"), 10_000, 0, 1500));
+        assert!(push_due("y", Some("x"), 10_000, 0, 1500));
+        assert!(!push_due("y", Some("x"), 10_000, 9_000, 1500));
+        assert!(push_due("y", Some("x"), 10_500, 9_000, 1500));
+        assert!(!push_due("y", None, 10_000, 0, 1500));
     }
 
     #[test]

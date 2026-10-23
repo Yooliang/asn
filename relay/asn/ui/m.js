@@ -15,6 +15,7 @@ import { startCallPoll } from './lib/call-poll.mjs'
 import { ONBOARD_STORE, TEXT as ONBOARD_TEXT, checkName, markOnboarded, planOnboarding } from './lib/onboard.mjs'
 import { POLL_MS as SECRET_POLL_MS, TEXT as SECRET_TEXT, countdownText as secretCountdown, errorText as secretError, normalizeList as secretList, nextToAsk as secretNext, secretError as secretValidate } from './lib/secret-ask.mjs'
 import { friendId } from './lib/roster.mjs'
+import { restoreMobileTab } from './lib/session.mjs'
 import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, showsInSheet } from './lib/mobile-ops.mjs'
 import { OP_LABEL, opFormError, partnerEngine } from './lib/partner-ops.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
@@ -26,6 +27,7 @@ import { headTone } from './lib/head-tone.mjs'
 import { authApi, invoke, listen, store } from './lib/tauri.mjs'
 import { ROOM_GROUP_KEY, ROOM_GROUP_LABEL, ROOM_POLL_MS, ROOM_FIRST_LOAD, ROOM_EMPTY_TEXT, ROOM_LOAD_FAIL_TEXT, isRoomChat, roomIdOf, roomItems, roomPseudoFriend, memberIdentity, roomLog, mergeRoomLog, readSince, needsRead, postError, roomErrorText, totalUnreadWithRooms } from './lib/mobile-rooms.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, guideNav, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
+import { applyRename } from './lib/rename.mjs'
 import { GuideDoc } from './lib/guide-doc.mjs'
 
 const { createApp, reactive, ref, computed, watch } = Vue
@@ -62,7 +64,7 @@ const photoApi = {
   reveal: async () => bridge?.openDownloads(),
 }
 
-const info = await invoke('startup_info')
+const info = reactive(await invoke('startup_info'))   // 響應式：改設備名後就地更新，不重載頁面
 document.title = 'ASN'
 
 const screen = ref('boot'), fatal = ref('')
@@ -90,6 +92,7 @@ async function startLogin(key) {
 }
 const cancelLogin = () => { void authApi.cancel(); login.phase = 'idle' }
 
+let savedTab = 'list'   // 上次離開時的大分頁（讀存檔後才知道）
 const nav = reactive(initialNav())
 const lastChat = ref('')   // 最後使用的那一位（對話分頁顯示它；存在手機本機設定，重開 App 仍記得）
 const me = reactive({ psm: '', status: 'online', nick: info.window_name })
@@ -151,7 +154,9 @@ if (screen.value === 'main') {
   Object.assign(prefs, normalizePrefs(saved.mobilePrefs))
   ownerName.value = typeof saved.ownerName === 'string' ? saved.ownerName : ''
   lastChat.value = normalizeLastChat(saved.lastChat)
-  watch([me, prefs, ownerName, lastChat], () => { const { nick, ...rest } = me; void meStore.save({ ...saved, me: rest, mobilePrefs: { ...prefs }, ownerName: ownerName.value, lastChat: lastChat.value }) }, { deep: true })
+  // 重開 App 回到上次的大分頁（名單／對話／設置）；對話那頁的對象就是 lastChat
+savedTab = restoreMobileTab(saved.navTab)
+watch([me, prefs, ownerName, lastChat, () => nav.tab], () => { const { nick, ...rest } = me; void meStore.save({ ...saved, me: rest, mobilePrefs: { ...prefs }, ownerName: ownerName.value, lastChat: lastChat.value, navTab: nav.tab }) }, { deep: true })
   watch(() => [me.status, me.psm], () => { void invoke('set_presence', { status: me.status, psm: me.psm ?? '' }).catch(() => {}) }, { immediate: true })
 
   core = new AsnCore({
@@ -172,14 +177,14 @@ if (screen.value === 'main') {
     if (plan.banner) { banner.value = plan.banner; clearTimeout(bannerTimer); bannerTimer = setTimeout(() => { banner.value = null }, plan.banner.ms ?? BANNER_MS) }
   })
   startCallPoll({ anyCall: () => callOn.value, pull: why => core.pull(why) })   // 通話中每 2 秒多收一次信，結束就停
-  await listen('relay-bell', () => { void core.pull('bell'); void roomsHook.refresh?.() })   // Rust 端的門鈴（前景時有效）
+  await listen('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon(); void roomsHook.refresh?.() })   // Rust 端的門鈴（前景時有效）
   await listen('android-update-progress', p => { if (upd.phase === 'downloading') Object.assign(upd, withProgress(upd, p)) })   // 下載完才到的進度事件不能把畫面又拉回「下載中」
   upd.enabled = bridge?.selfUpdateEnabled() === true
   setInterval(() => { if (shouldAutoCheck(upd, prefs)) void checkUpdate() }, UPDATE_CHECK_MS)
   // 回到前景：立刻拉一次信、更新名單、補正在看的那位的往來記錄
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return
-    void core.pull('resume'); void core.refreshRoster(); void roomsHook.refresh?.()
+    void core.pull('resume'); core.refreshRosterSoon(); void roomsHook.refresh?.()
     if (nav.tab === 'chats' && lastChat.value) { core.markRead(lastChat.value); void core.syncHistory(lastChat.value) }
   })
   startCore = async () => { void (shouldAutoCheck(upd, prefs) && checkUpdate()); await core.start(); sync() }   // 掛上畫面之後才開始（第一次收信要連網，不能讓畫面空等）
@@ -187,6 +192,8 @@ if (screen.value === 'main') {
 
 // ---------- 導覽：每往下一層就推一筆瀏覽記錄，系統返回鍵＝上一頁（名單層再按才退到背景） ----------
 history.replaceState(initialNav(), '')
+// 回到上次的大分頁：名單那層先放著，再推一筆，系統返回鍵還是回到名單
+if (savedTab !== 'list') { const next = tabNav(savedTab); history.pushState(next, ''); Object.assign(nav, next) }
 window.addEventListener('popstate', e => {
   // 通話中按返回鍵＝掛斷，畫面留在原處（不跳到上一頁）
   if (callOn.value) { void liveCall?.end(); history.pushState({ tab: nav.tab, sheet: nav.sheet }, ''); return }
@@ -331,11 +338,11 @@ const app = createApp({
       phaseText: MOBILE_PHASE_TEXT,
       newCall: () => (liveCall = createMobileCall({
         native: bridge.call, reactive, log: m => console.info('[ASN]', m),
-        send: async text => { const r = await core.send(lastChat.value, text); if (!r.ok) throw new Error(r.error || '寄信失敗') },   // 寄給目前這位；換人時通話會先掛斷
+        send: async (text, opts) => { const r = await core.send(lastChat.value, text, opts); if (!r.ok) throw new Error(r.error || '寄信失敗') },   // 寄給目前這位；換人時通話會先掛斷
       })),
     } : null
     const onCallState = on => { callOn.value = on; bridge?.keepAwake(on) }
-    const sendTo = async (id, text) => { if (isRoomChat(id)) return postRoom(id, text); const r = await core.send(id, text); if (!r.ok) console.info('[ASN] send failed', r.error) }
+    const sendTo = async (id, text, opts) => { if (isRoomChat(id)) return postRoom(id, text); const r = await core.send(id, text, opts); if (!r.ok) console.info('[ASN] send failed', r.error) }
     const nudgeTo = id => { if (!isRoomChat(id)) core.nudge(id) }   // 群組沒有震動與傳檔（工具列的鈕在群組畫面已藏起來）
     const sendAttachTo = async (id, item, caption) => { if (isRoomChat(id)) return; const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
     // ---------- 使用指引：設置分頁的一個項目，點進去是獨立一頁（先列篇目，再看內文），內容沿用電腦版的篇目 ----------
@@ -587,7 +594,7 @@ const app = createApp({
     const commitNick = async () => {
       const want = String(me.nick ?? '').trim()
       if (want === info.window_name) { me.nick = info.window_name; nickErr.value = ''; return }
-      try { await invoke('set_window_name', { name: want }); location.reload() }
+      try { applyRename({ info, core, me }, await invoke('set_window_name', { name: want })); nickErr.value = '' }
       catch (e) { me.nick = info.window_name; nickErr.value = e.message; setTimeout(() => { nickErr.value = '' }, 5000) }
     }
     const avBusy = ref(false), avMsg = ref(''), avFile = ref(null)

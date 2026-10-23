@@ -173,6 +173,28 @@ pub fn close_chats(app: AppHandle) -> Vec<String> {
     ids
 }
 
+/// 從視窗標籤清單挑出開著的對話視窗（好友 id）與指引、設定視窗（種類），各自排序（記住分頁用）
+pub fn open_window_sets<'a>(labels: impl Iterator<Item = &'a str>) -> (Vec<String>, Vec<String>) {
+    let (mut chats, mut panels) = (vec![], vec![]);
+    for label in labels {
+        if let Some(id) = chat_id_of(label) {
+            chats.push(id);
+        } else if let Some(k) = label.strip_prefix("panel-").filter(|k| PANEL_KINDS.contains(k)) {
+            panels.push(k.to_string());
+        }
+    }
+    chats.sort();
+    panels.sort();
+    (chats, panels)
+}
+
+/// 目前開著的對話視窗與指引、設定視窗（不關掉）；前端存「重啟後要開回哪些視窗」
+#[tauri::command]
+pub fn open_windows(app: AppHandle) -> (Vec<String>, Vec<String>) {
+    let wins = app.webview_windows();
+    open_window_sets(wins.keys().map(|k| k.as_str()))
+}
+
 /// 主視窗（名單／整合模式的唯一視窗）是否開著且沒最小化
 #[tauri::command]
 pub fn main_visible(app: AppHandle) -> bool {
@@ -446,6 +468,14 @@ mod tests {
         for bad in ["list", "chat-", "chat-4", "chat-zz", "toast-0-1", "chat-ff"] {
             assert_eq!(chat_id_of(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn 開著的視窗分成對話與面板() {
+        let labels = ["list", "chat-6162", "panel-guide", "toast-0-1", "panel-x", "chat-6161"];
+        let (c, p) = open_window_sets(labels.into_iter());
+        assert_eq!(c, vec!["aa".to_string(), "ab".to_string()]);
+        assert_eq!(p, vec!["guide".to_string()]);
     }
 
     #[test]

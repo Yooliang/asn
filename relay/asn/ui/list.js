@@ -19,6 +19,7 @@ import { ChatPane } from './lib/chatpane.mjs'
 import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatarFile, selfAvatarSrc } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, switchMode, tabVisible, toggleCollapsed } from './lib/merge.mjs'
+import { normalizeSession, restoreSession, sameSession, snapshotSession, trailingThrottle } from './lib/session.mjs'
 import { chatTabSameZone, closeAllChatTabs, closeIdleChatTabs, idleTabIds, withCallState, dropInsertBefore, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
 import { nowPlayingLine, normalizeNowPlaying } from './lib/now-playing.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, normalizeClose, normalizeFrame, totalUnread, notifyFromSaved, notifyPlan, notifyWith } from './lib/prefs.mjs'
@@ -43,6 +44,7 @@ import { createCallBeats } from './lib/call-beats.mjs'
 import { startCallPoll } from './lib/call-poll.mjs'
 import { isCallActive } from './lib/call-session.mjs'
 import { accountLine, codexLine, createAccountsUi } from './lib/claude-accounts.mjs'
+import { applyRename } from './lib/rename.mjs'
 import { createUsageUi } from './lib/usage.mjs'
 import { CHECK_MS, autoCheckFromSaved, initialUpdateState, manualResultText, progressText, updateNoticeText, withAvailable, withFailure, withInstalling, withProgress, updateStatus } from './lib/update.mjs'
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL, normalizeCfg, shouldAutoSpeak, sttStatusText } from './lib/voice-prefs.mjs'
@@ -75,7 +77,7 @@ const SOUNDS = {
   nudge: () => { for (let i = 0; i < 7; i++) tone(95 + (i % 2) * 35, i * 0.07, 0.09, 'square', 0.05) },
 }
 
-const info = await invoke('startup_info')
+const info = reactive(await invoke('startup_info'))   // 響應式：改設備名後就地更新，不重載頁面
 document.title = `Agent Sync Network Messenger (${info.version})`
 if (info.shot) {
   const logFe = (level, msg) => invoke('shot_frontend_log', { level, message: String(msg) }).catch(() => {})
@@ -206,6 +208,17 @@ const ui = reactive({ mode: normalizeMode(savedMe.winMode), ...normalizeLook(sav
 const sizes = reactive({ split: normalizeSize(savedMe.splitSize, 'split'), merged: normalizeSize(savedMe.mergedSize, 'merged'), guide: normalizePanelSize(savedMe.guideSize), setting: normalizePanelSize(savedMe.settingSize) })   // guide／setting＝分離模式兩扇視窗的大小
 const winSize = () => ({ w: window.innerWidth, h: window.innerHeight })
 let switching = false
+// 記住開著的分頁與對話視窗（重啟後回到原狀態）：存在 asn-me.json 的 session。還原完成前不寫新的，免得把上次的狀態蓋成空的
+const sess = reactive({ saved: normalizeSession(savedMe.session), ready: false, wins: [], panelWins: [] })
+const currentSession = () => snapshotSession({ tabs: ui.tabs, active: ui.active, panel: ui.panel, windows: sess.wins, panelWindows: sess.panelWins }, id => core.friends.get(id))
+async function pollOpenWindows() {   // 分開模式開著哪些對話視窗，由 Rust 端的視窗清單為準
+  if (!sess.ready || ui.mode !== 'split') { if (sess.wins.length || sess.panelWins.length) { sess.wins = []; sess.panelWins = [] } ; return }
+  try {
+    const [chats, panels] = await invoke('open_windows')
+    if (JSON.stringify(chats) !== JSON.stringify(sess.wins)) sess.wins = chats
+    if (JSON.stringify(panels) !== JSON.stringify(sess.panelWins)) sess.panelWins = panels
+  } catch { /* 取不到就維持上次 */ }
+}
 
 const core = new AsnCore({
   transport, store: store('chats'), selfNode: info.node, windowName: info.window_name,
@@ -438,8 +451,8 @@ async function setArchived(f, archived) {
 }
 function closeOpDlg() { opDlg.open = false }
 // 右鍵選單立刻出現（固定有「開啟對話」）；主控台切換項目先顯示「檢查中…」，查到才可按，逾時／查不到就停用
-const buddyConsole = reactive({ state: 'none', visible: true })
-const buddyConsoleItemView = computed(() => buddyConsoleItem(buddyConsole.state))
+const buddyConsole = reactive({ state: 'none', visible: true, reason: '' })
+const buddyConsoleItemView = computed(() => buddyConsoleItem(buddyConsole.state, buddyConsole.reason))
 // 「切換模型 ▸」：只有本機的 Claude 視窗會出現；查詢逾時或查不到就停用並說明原因（共用 lib/model-switch.mjs，功能列 #40 也用它）
 const modelSwitcher = createModelSwitcher({ transport, log: m => console.info('[ASN]', m) })
 const buddyModel = reactive({ show: false, state: 'none', reason: '', current: '', items: [], open: false, st: null })
@@ -516,6 +529,7 @@ async function openBuddyMenu(c, e) {
   if (buddyModel.show) void loadBuddyModel(c)
   if (c.node !== info.node || c.engine === 'acp' || c.pending) { buddyConsole.state = 'none'; return }
   buddyConsole.state = 'checking'
+  buddyConsole.reason = ''
   const q = await withTimeout(transport.partnerConsoleQuery({ engine: eng, name: c.agent || c.nick }), CONSOLE_QUERY_TIMEOUT_MS)
   if (buddyMenuFriend.value !== c) return   // 使用者已經關掉或換開別人的選單
   if (q?.can_toggle ?? q?.canToggle) {
@@ -523,6 +537,7 @@ async function openBuddyMenu(c, e) {
     buddyConsole.visible = Boolean(q.visible)
   } else {
     buddyConsole.state = 'none'
+    buddyConsole.reason = String(q?.reason || '')
   }
 }
 async function toggleBuddyConsole() {
@@ -660,12 +675,12 @@ await listen('asn:cmd', async c => {
   if (c.op === 'hello') { sync(); emit('asn:avatars', avatars.value); pushLog(c.id); core.markRead(c.id) }
   else if (c.op === 'read') core.markRead(c.id)
   else if (c.op === 'dp') ui.collapsed = toggleCollapsed(ui.collapsed)
-  else if (c.op === 'send') { const r = await core.send(c.id, c.text); if (!r.ok) console.info('[ASN] send failed', r.error) }
+  else if (c.op === 'send') { const r = await core.send(c.id, c.text, { voice: c.voice === true }); if (!r.ok) console.info('[ASN] send failed', r.error) }
   else if (c.op === 'nudge') await core.nudge(c.id)
   else if (c.op === 'attach') await sendAttachTo(c.id, c.photo, c.caption)
   else if (c.op === 'older') { const r = await core.loadOlder(c.id); emit('asn:older', { id: c.id, ...r }) }
 })
-const sendTo = async (id, text) => { const r = await core.send(id, text); if (!r.ok) console.info('[ASN] send failed', r.error) }
+const sendTo = async (id, text, opts) => { const r = await core.send(id, text, opts); if (!r.ok) console.info('[ASN] send failed', r.error) }
 const nudgeTo = id => core.nudge(id)
 const sendAttachTo = async (id, item, caption) => { const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
 const activateTab = id => { ui.active = id; core.markRead(id); sync() }   // 指引、設定的分頁 id 不是好友，markRead 會直接略過
@@ -704,10 +719,13 @@ window.addEventListener('resize', () => {
 })
 if (ui.mode === 'merged') await invoke('main_layout', { merged: true, w: sizes.merged.w, h: sizes.merged.h, recenter: true })
 
-await listen('relay-bell', () => void core.pull('bell'))   // Rust 端的 Realtime 門鈴
+await listen('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon() })   // Rust 端的 Realtime 門鈴：收信，也立刻重拉名單（別台設備的忙碌／閒置變了也是敲這個鈴）
+window.addEventListener('focus', () => core.refreshRosterSoon())   // 回到前景立刻更新名單
 await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 
-watch([me, showNowPlaying, notifyPrefs, frame, closeTo, autoAddClaude, autoCheck, dims, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, showNowPlaying: showNowPlaying.value, notify: notifyPrefs.value, frame: frame.value, closeTo: closeTo.value, autoAddClaude: autoAddClaude.value, autoUpdate: autoCheck.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting }); sync() }, { deep: true })
+watch([me, showNowPlaying, notifyPrefs, frame, closeTo, autoAddClaude, autoCheck, dims, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes, () => ui.tabs, () => ui.active, () => ui.panel, () => sess.wins, () => sess.panelWins, () => sess.ready], () => { sync(); saveMe() }, { deep: true })
+const saveMe = trailingThrottle(() => { const { nick, ...rest } = me; void meStore.save({ me: rest, showNowPlaying: showNowPlaying.value, notify: notifyPrefs.value, frame: frame.value, closeTo: closeTo.value, autoAddClaude: autoAddClaude.value, autoUpdate: autoCheck.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting, session: sess.ready ? currentSession() : sess.saved }) }, 600)
+addEventListener('pagehide', () => saveMe.flush())
 // 系統匣圖示的提示文字帶未讀總數
 watch(() => totalUnread(friends.value), n => { void invoke('set_tray_unread', { n }).catch(() => {}) }, { immediate: true })
 // 在線狀態：狀態下拉與個人訊息交給 Rust 端回報（每 60 秒一次，改了立刻送；後台沒部署就靜默不送）
@@ -773,7 +791,7 @@ const app = createApp({
     const commitNick = async () => {
       const want = String(me.nick ?? '').trim()
       if (want === info.window_name) { me.nick = info.window_name; nickErr.value = ''; return }
-      try { await invoke('set_window_name', { name: want }); location.reload() }
+      try { applyRename({ info, core, me }, await invoke('set_window_name', { name: want })); nickErr.value = '' }
       catch (e) { me.nick = info.window_name; nickErr.value = e.message; setTimeout(() => { nickErr.value = '' }, 5000) }
     }
     // 設定頁「大頭貼」：選圖 → 前端裁成正方形縮成 96×96（webp／png，≤ 32 KB）→ 上傳；也可以移除改回自動產生
@@ -1086,6 +1104,31 @@ const root = app.mount('#app')
 
 await core.start()
 sync()
+
+// 還原上次開著的分頁與對話視窗：要等名單載入（夥伴 ID 才對得上）；名單一直連不上就維持存檔不動，不會把它蓋掉
+async function restoreOpenSession() {
+  const r = restoreSession(sess.saved, { friends: core.friends, pinned: ui.pinnedChat })
+  if (JSON.stringify(r.pinned) !== JSON.stringify(ui.pinnedChat)) ui.pinnedChat = r.pinned
+  for (const k of PANEL_KINDS) if (!ui.panel[k]) ui.panel[k] = r.panel[k]
+  if (ui.mode === 'merged') {
+    const tabs = orderTabs([...r.tabs, ...ui.tabs.filter(id => !r.tabs.includes(id))], ui.pinnedChat)
+    ui.tabs = tabs
+    if (!ui.active || !tabs.includes(ui.active)) ui.active = r.active || tabs.at(-1) || ''
+    for (const id of tabs) if (!isPanelTab(id)) pushLog(id)
+    if (ui.active && !isPanelTab(ui.active)) { core.markRead(ui.active); void core.syncHistory(ui.active) }
+  } else {
+    for (const id of r.windows) await openChat(id)
+    for (const kind of r.panelWindows) await openPanel(kind, ui.panel[kind])
+  }
+  sess.ready = true
+  sync()
+}
+if (!info.shot) {
+  let restoring = false
+  const go = () => { if (restoring || !core.rosterLoaded) return; restoring = true; void restoreOpenSession() }
+  go(); core.on('state', go)
+  setInterval(() => void pollOpenWindows(), 3000)
+}
 
 // ---------- --shot 模式：開一個對話、寄一封信＋一個震動、彈一則提示，然後截圖並結束 ----------
 // 設定檔（asn-me.json）可帶：winMode（'merged' 才是整合模式，欄位名就是 winMode，不是 mode）、shotNoChat（true＝不開任何對話，

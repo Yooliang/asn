@@ -17,6 +17,9 @@ import { createEndpointer, rmsOf } from './call-vad.mjs'
 export const CALL_MARKER = '（語音通話中，請簡短口語回答）'
 export const CALL_SPEAK_MAX = 300           // 通話中一則回覆最多念這麼多字，其餘照常留在對話裡
 export const PRE_ROLL_SECONDS = 0.5         // 開始說話前先留的一小段，不吃掉字頭
+export const START_SKIP_SECONDS = 0.5      // 通話剛開始的這段聲音不收（按「通話」的點擊聲、麥克風剛開的爆音）
+export const MIN_TAKE_SECONDS = 0.5         // 一句短於這個就不送辨識（太短只會讓辨識念出提示詞）
+export const MIN_VOICED_SECONDS_CALL = 0.3   // 有聲音的部分短於這個（一聲喀、碰到麥克風）不送辨識
 export const ECHO_GUARD_MS = 600            // 念完之後再等一下才開始聽，避免喇叭尾音被當成人聲
 export const REPLY_TIMEOUT_MS = 180_000     // 寄出後這麼久對方都沒回，就不再顯示「思考中」
 export const RECOGNIZE_TIMEOUT_MS = 75_000
@@ -59,7 +62,7 @@ export function createCallSession({
 }) {
   const state = reactive({ active: false, phase: 'idle', muted: false, seconds: 0, note: '', level: 0, heard: '', reply: '' })
   const ep = createEndpointer()
-  let gen = 0, rate = 48000, t0 = 0, tick = null
+  let gen = 0, rate = 48000, t0 = 0, tick = null, heardSec = 0
   let preroll = [], prerollLen = 0, utter = null
   let pending = 0, awaiting = 0, chain = Promise.resolve()
   let speakFlag = false, guard = false, guardTimer = null, replyTimer = null, spoken = 0
@@ -76,6 +79,8 @@ export function createCallSession({
   function onChunk(f32) {
     if (!state.active || !t0) return
     state.level = Math.min(1, rmsOf(f32) * 8)
+    heardSec += f32.length / rate
+    if (heardSec <= START_SKIP_SECONDS) return   // 剛開始的按鍵聲不收
     if (state.muted || speakFlag || guard) { dropUtterance(); return }
     const dt = f32.length / rate
     const ev = ep.push(rmsOf(f32), dt)
@@ -102,9 +107,9 @@ export function createCallSession({
   }
 
   async function recognize(take, my) {
-    if (my !== gen || secondsOf(take) < 0.3 || peakOf(take) < SILENCE_PEAK) return
+    if (my !== gen || secondsOf(take) < MIN_TAKE_SECONDS || peakOf(take) < SILENCE_PEAK) return
     const r = analyze(take)
-    if (!r.hasSpeech) return   // 咳嗽、碰桌子：不送
+    if (!r.hasSpeech || r.voicedSeconds < MIN_VOICED_SECONDS_CALL) return   // 咳嗽、碰桌子：不送
     let raw, timer
     try {
       const late = new Promise((_, rej) => { timer = setTimer(() => rej(new Error('辨識逾時，這句沒有送出。')), RECOGNIZE_TIMEOUT_MS) })
@@ -123,7 +128,7 @@ export function createCallSession({
     awaiting++
     clearTimer(replyTimer)
     replyTimer = setTimer(() => { awaiting = 0; state.note = '對方還沒回信，你可以繼續說。'; refresh() }, REPLY_TIMEOUT_MS)
-    try { send(`${CALL_MARKER}\n${text}`) } catch (e) { awaiting = Math.max(0, awaiting - 1); state.note = `寄不出去：${e?.message || '失敗'}` }
+    try { send(`${CALL_MARKER}\n${text}`, { voice: true }) } catch (e) { awaiting = Math.max(0, awaiting - 1); state.note = `寄不出去：${e?.message || '失敗'}` }
     refresh()
   }
 
@@ -183,6 +188,7 @@ export function createCallSession({
     } finally { clearTimer(timer) }
     if (my !== gen) { Promise.resolve().then(() => mic.stop()).catch(() => {}); return false }   // 等麥克風的時候已經掛斷了
     rate = mic.rate > 0 ? mic.rate : 48000
+    heardSec = 0
     t0 = now()
     unsub = onTts(onPlayer)
     tick = setTick(() => { state.seconds = Math.floor((now() - t0) / 1000) }, 1000)

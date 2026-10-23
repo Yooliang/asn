@@ -97,7 +97,7 @@ export function createMobileCall({
     clearTimer(replyTimer)
     replyTimer = setTimer(() => { awaiting = 0; state.note = '對方還沒回信，你可以繼續說。'; refresh(); relistenSoon(RELISTEN_MS) }, REPLY_TIMEOUT_MS)
     refresh()
-    try { await send(`${CALL_MARKER}\n${text}`) } catch (e) {
+    try { await send(`${CALL_MARKER}\n${text}`, { voice: true }) } catch (e) {
       if (my !== gen) return
       awaiting = Math.max(0, awaiting - 1); clearTimer(replyTimer)
       state.note = `寄不出去：${e?.message || '失敗'}`
