@@ -76,16 +76,16 @@ fn run_with(exe: &str, home: &std::path::Path, envs: &[(&str, &str)], args: &[&s
 fn asn_cli_寄信_父行程就是視窗_輸出與結束碼走管線() {
     let (url, seen) = fake();
     let h = home(Some("T-測試視窗"));
-    let (code, out, err) = run(env!("CARGO_BIN_EXE_asn-cli"), h.path(), &url, &["send", "--to", "XISU", "--body", "你好", "--no-reply"]);
+    let (code, out, err) = run(env!("CARGO_BIN_EXE_asn-cli"), h.path(), &url, &["send", "--to", "PC1", "--body", "你好", "--no-reply"]);
     assert_eq!(code, 0, "{err}");
-    assert_eq!(out.trim(), "sent id=aaaaaaaa-0000-0000-0000-000000000009 to=XISU from=T/T-測試視窗");
+    assert_eq!(out.trim(), "sent id=aaaaaaaa-0000-0000-0000-000000000009 to=PC1 from=T/T-測試視窗");
     let reqs = seen.lock().unwrap().clone();
     assert_eq!(reqs.len(), 1);
     assert!(reqs[0].starts_with("POST /relay?action=send"), "{}", reqs[0]);
     assert!(reqs[0].to_lowercase().contains("x-relay-key: fake-machine-key"));
     assert!(reqs[0].contains(r#""from_agent":"T-測試視窗""#) && reqs[0].contains(r#""expects_reply":false"#), "{}", reqs[0]);
     // 錯誤碼：沒說要不要回信 = 1；
-    let (code, _, err) = run(env!("CARGO_BIN_EXE_asn-cli"), h.path(), &url, &["send", "--to", "XISU", "--body", "x"]);
+    let (code, _, err) = run(env!("CARGO_BIN_EXE_asn-cli"), h.path(), &url, &["send", "--to", "PC1", "--body", "x"]);
     assert_eq!(code, 1);
     assert!(err.contains("請說明要不要回信"));
     // 收信一次
@@ -98,7 +98,7 @@ fn asn_cli_寄信_父行程就是視窗_輸出與結束碼走管線() {
 fn asn_cli_不在_claude_視窗裡_結束碼_2_不打後端() {
     let (url, seen) = fake();
     let h = home(None);
-    let (code, _, err) = run(env!("CARGO_BIN_EXE_asn-cli"), h.path(), &url, &["send", "--to", "XISU", "--body", "x", "--no-reply"]);
+    let (code, _, err) = run(env!("CARGO_BIN_EXE_asn-cli"), h.path(), &url, &["send", "--to", "PC1", "--body", "x", "--no-reply"]);
     assert_eq!(code, 2);
     assert!(err.contains("找不到呼叫者所屬的 Claude 視窗"), "{err}");
     assert!(seen.lock().unwrap().is_empty());
@@ -112,7 +112,7 @@ fn asn_cli_不在_claude_視窗裡_結束碼_2_不打後端() {
 fn asn_主程式遇到子命令_不開視窗_直接跑命令列() {
     let (url, seen) = fake();
     let h = home(Some("T-測試視窗"));
-    let (code, out, err) = run(env!("CARGO_BIN_EXE_asn"), h.path(), &url, &["send", "--to", "XISU", "--body", "經由 asn", "--no-reply"]);
+    let (code, out, err) = run(env!("CARGO_BIN_EXE_asn"), h.path(), &url, &["send", "--to", "PC1", "--body", "經由 asn", "--no-reply"]);
     assert_eq!(code, 0, "{err}");
     assert!(out.starts_with("sent id="), "{out}");
     assert_eq!(seen.lock().unwrap().len(), 1);
@@ -124,7 +124,7 @@ fn asn_cli_環境變數_只設新名也行_兩個都設以新名為準() {
     let (url, seen) = fake();
     let h = home(Some("T-測試視窗"));
     // 只設新名
-    let (code, out, err) = run_with(env!("CARGO_BIN_EXE_asn-cli"), h.path(), &[("ASN_RELAY_ID", "T"), ("ASN_RELAY_URL", &url)], &["send", "--to", "XISU", "--body", "x", "--no-reply"]);
+    let (code, out, err) = run_with(env!("CARGO_BIN_EXE_asn-cli"), h.path(), &[("ASN_RELAY_ID", "T"), ("ASN_RELAY_URL", &url)], &["send", "--to", "PC1", "--body", "x", "--no-reply"]);
     assert_eq!(code, 0, "{err}");
     assert!(out.starts_with("sent id="), "{out}");
     assert_eq!(seen.lock().unwrap().len(), 1);
@@ -133,7 +133,7 @@ fn asn_cli_環境變數_只設新名也行_兩個都設以新名為準() {
         env!("CARGO_BIN_EXE_asn-cli"),
         h.path(),
         &[("ASN_RELAY_ID", "T"), ("ASN_RELAY_URL", &url), ("IRORI_RELAY_ID", "NOPE"), ("IRORI_RELAY_URL", "http://127.0.0.1:9/relay")],
-        &["send", "--to", "XISU", "--body", "y", "--no-reply"],
+        &["send", "--to", "PC1", "--body", "y", "--no-reply"],
     );
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("from=T/T-測試視窗"), "{out}");

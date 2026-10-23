@@ -135,8 +135,8 @@ test('寄單一 pdf（內文空）：init → PUT → commit → send，帶 atta
   const st = await fakeServer(), home = newHome(), d = tmpDir()
   try {
     const f = put(d, '報告.pdf', pdf(300))
-    const r = await runSend(home, st, ['--to', 'XISU', '--file', f, '--no-reply'])
-    assert.equal(r.code, 0, r.err); assert.match(r.out, /^sent id=aaaaaaaa-0000-0000-0000-000000000009 to=XISU from=T\/T-視窗甲/)
+    const r = await runSend(home, st, ['--to', 'PC1', '--file', f, '--no-reply'])
+    assert.equal(r.code, 0, r.err); assert.match(r.out, /^sent id=aaaaaaaa-0000-0000-0000-000000000009 to=PC1 from=T\/T-視窗甲/)
     assert.deepEqual(actions(st), ['attach_init', 'attach_commit', 'send'])
     assert.deepEqual(st.reqs[0].body, { kind: 'file', mime: 'application/pdf', name: '報告.pdf', bytes: 300 })
     assert.equal(st.puts.length, 1); assert.equal(st.puts[0].type, 'application/pdf'); assert.ok(st.puts[0].bytes.equals(fs.readFileSync(f)))
@@ -172,9 +172,9 @@ test('照片＋檔案＋說明文字：兩個附件依序上傳，內文＝清�
 test('沒有附件的寄信不帶 attachment_ids；沒內文也沒附件仍報錯', async () => {
   const st = await fakeServer(), home = newHome()
   try {
-    const r = await runSend(home, st, ['--to', 'XISU', '--body', '純文字', '--no-reply'])
+    const r = await runSend(home, st, ['--to', 'PC1', '--body', '純文字', '--no-reply'])
     assert.equal(r.code, 0, r.err); assert.equal('attachment_ids' in st.reqs[0].body, false)
-    const e = await runSend(home, st, ['--to', 'XISU', '--no-reply'])
+    const e = await runSend(home, st, ['--to', 'PC1', '--no-reply'])
     assert.equal(e.code, 1); assert.match(e.err, /內文是空的/)
   } finally { await st.close() }
 })
@@ -189,15 +189,15 @@ test('本機檢查不過（超過上限、白名單外、png、偽裝、第 5 �
       [put(d, 'x.pdf', Buffer.from('MZ')), /對不上/],
     ]
     for (const [f, re] of cases) {
-      const r = await runSend(home, st, ['--to', 'XISU', '--file', f, '--body', '附上', '--no-reply'])
+      const r = await runSend(home, st, ['--to', 'PC1', '--file', f, '--body', '附上', '--no-reply'])
       assert.equal(r.code, 1, r.err); assert.match(r.err, re)
     }
     // 一個好的加一個壞的：好的也不能先傳
     const good = put(d, 'ok.txt', Buffer.from('ok'))
-    const r = await runSend(home, st, ['--to', 'XISU', '--file', good, '--file', path.join(d, 'x.exe'), '--no-reply'])
+    const r = await runSend(home, st, ['--to', 'PC1', '--file', good, '--file', path.join(d, 'x.exe'), '--no-reply'])
     assert.equal(r.code, 1); assert.deepEqual(st.reqs, []); assert.deepEqual(st.puts, [])
     const files = Array.from({ length: 5 }, (_, i) => put(d, `f${i}.txt`, Buffer.from('x'))).flatMap(f => ['--file', f])
-    const r5 = await runSend(home, st, ['--to', 'XISU', ...files, '--no-reply'])
+    const r5 = await runSend(home, st, ['--to', 'PC1', ...files, '--no-reply'])
     assert.equal(r5.code, 1); assert.match(r5.err, /最多 4 個/); assert.deepEqual(st.reqs, [])
   } finally { await st.close(); fs.rmSync(d, { recursive: true, force: true }) }
 })
@@ -205,7 +205,7 @@ test('本機檢查不過（超過上限、白名單外、png、偽裝、第 5 �
 test('上傳失敗（PUT 回 500）：不 commit、不 send，exit 4，錯誤訊息不含簽名網址', async () => {
   const st = await fakeServer({ putStatus: 500 }), home = newHome(), d = tmpDir()
   try {
-    const r = await runSend(home, st, ['--to', 'XISU', '--file', put(d, 'a.pdf', pdf(50)), '--body', '附上', '--no-reply'])
+    const r = await runSend(home, st, ['--to', 'PC1', '--file', put(d, 'a.pdf', pdf(50)), '--body', '附上', '--no-reply'])
     assert.equal(r.code, 4); assert.match(r.err, /a\.pdf：上傳失敗（HTTP 500）/); assert.ok(!/SECRET-SIGNED|token/.test(r.err))
     assert.deepEqual(actions(st), ['attach_init'])
   } finally { await st.close(); fs.rmSync(d, { recursive: true, force: true }) }
@@ -214,7 +214,7 @@ test('上傳失敗（PUT 回 500）：不 commit、不 send，exit 4，錯誤訊
 test('第二個附件上傳失敗：整封信不寄', async () => {
   const st = await fakeServer({ putFailNth: 2 }), home = newHome(), d = tmpDir()
   try {
-    const r = await runSend(home, st, ['--to', 'XISU', '--file', put(d, 'a.pdf', pdf(50)), '--file', put(d, 'b.txt', Buffer.from('x')), '--no-reply'])
+    const r = await runSend(home, st, ['--to', 'PC1', '--file', put(d, 'a.pdf', pdf(50)), '--file', put(d, 'b.txt', Buffer.from('x')), '--no-reply'])
     assert.equal(r.code, 4); assert.match(r.err, /b\.txt：上傳失敗/)
     assert.deepEqual(actions(st), ['attach_init', 'attach_commit', 'attach_init'])
     assert.ok(!actions(st).includes('send'))
@@ -233,7 +233,7 @@ test('後端拒收：額度滿、型別不收、舊後端 404、commit 失敗 �
     ]) {
       const st = await fakeServer(opts)
       try {
-        const r = await runSend(home, st, ['--to', 'XISU', '--file', f, '--body', 'x', '--no-reply'])
+        const r = await runSend(home, st, ['--to', 'PC1', '--file', f, '--body', 'x', '--no-reply'])
         assert.equal(r.code, 4, r.err); assert.match(r.err, re); assert.deepEqual(actions(st), expectActions)
       } finally { await st.close() }
     }

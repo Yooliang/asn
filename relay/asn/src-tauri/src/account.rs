@@ -206,7 +206,7 @@ pub struct AccountInfo {
 
 /// 後台回的名下節點是否包含這台的節點
 /// 名下「電腦」數：只算電腦本身（舊的機器節點 kind=claude，登入後建的 created_via=login-device），
-/// 雲端代理（grok）、服務（aegis）、角色（希緒）不算電腦
+/// 雲端代理（grok）、服務（aegis）、舊租戶的角色節點不算電腦
 pub fn computer_count(nodes: &Value) -> usize {
     nodes.as_array().map(|a| a.iter().filter(|n| {
         n.get("kind").and_then(Value::as_str) == Some("claude") || n.get("created_via").and_then(Value::as_str) == Some("login-device")

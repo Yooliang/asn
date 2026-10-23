@@ -471,7 +471,7 @@ async fn agy_execute_ask_指令被拒後事後問人_同意就用放行模式重
 
 #[tokio::test]
 async fn agy_沒登入_額度用完_回報並標示狀態_通知指定的人() {
-    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({"ask": {"notify": [{"node": "XISU"}]}}))])), &[], "acp", &[]).await;
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({"ask": {"notify": [{"node": "PC1"}]}}))])), &[], "acp", &[]).await;
     h.put_pull(to_agent(1, "Gemini", "@@AUTH")).await;
     h.wait("需要登入", |h| h.bodies().iter().any(|b| b.contains("需要登入"))).await;
     let b = h.bodies().into_iter().find(|b| b.contains("需要登入")).unwrap();
@@ -480,7 +480,7 @@ async fn agy_沒登入_額度用完_回報並標示狀態_通知指定的人() {
     h.core.refresh_roster(now()).await;
     assert_eq!(h.last_roster()["agents"][0]["status"], "login-required");
     let n = h.notices.lock().unwrap().clone();
-    assert!(n.iter().any(|x| x.to_node == "XISU" && x.body.starts_with("［工作者狀態］")), "{n:?}");
+    assert!(n.iter().any(|x| x.to_node == "PC1" && x.body.starts_with("［工作者狀態］")), "{n:?}");
     // 好了之後下一封成功並恢復 idle（agy 重新啟動；@@AUTH 只會讓那一封失敗）
     h.put_pull(to_agent(2, "Gemini", "好了")).await;
     h.wait("成功", |h| h.bodies().iter().any(|b| b.contains("收到：好了"))).await;

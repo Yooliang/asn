@@ -35,8 +35,8 @@ test('結束碼與關鍵訊息兩邊一致', () => {
 
 test('橋讀的記號檔名：sent/ 的 sha1 與 Node 的 sentMarkName 同一個算法（Rust 測試內有 Node 算出的向量）', async () => {
   const { sentMarkName } = await import(new URL('../../machine/sent-mark.mjs', import.meta.url))
-  const sha1 = JSON.stringify(['T-視窗甲', 'XISU', ''])
-  assert.equal(sentMarkName('T-視窗甲', 'XISU', ''), crypto.createHash('sha1').update(sha1).digest('hex'))
+  const sha1 = JSON.stringify(['T-視窗甲', 'PC1', ''])
+  assert.equal(sentMarkName('T-視窗甲', 'PC1', ''), crypto.createHash('sha1').update(sha1).digest('hex'))
   const t = rust('tests/send_tests.rs'.replace('tests/', 'tests/'))
-  assert.ok(t.includes(sentMarkName('T-視窗甲', 'XISU', '')) && t.includes(sentMarkName('T-視窗甲', 'W', 'W-政策')))
+  assert.ok(t.includes(sentMarkName('T-視窗甲', 'PC1', '')) && t.includes(sentMarkName('T-視窗甲', 'W', 'W-政策')))
 })

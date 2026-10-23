@@ -1,6 +1,6 @@
 // 仲介動作的「直接呼叫」版（多使用者第一期，設計見 docs/MULTI-USER.md 2.4）：
-// irori-api 手上有 service role，可以直接呼叫 public.asn_relay_* 資料庫函式，身分是這個租戶的角色節點（希緒）——
-// 不必再繞一圈 HTTP 打 irori-relay、也不需要保管角色節點的金鑰（它根本沒有金鑰）。
+// irori-api 手上有 service role，可以直接呼叫 public.asn_relay_* 資料庫函式，身分是這個租戶的角色節點（舊後台留下的做法）——
+// 不必再繞一圈 HTTP 打 irori-relay、也不需要保管角色節點的金鑰（它根本沒有金鑰）。角色節點寄的信不再是 trust=owner（#14 R7）。
 // 動作的名稱、參數、回應格式與 irori-relay 的 HTTP 動作一致（whoami、list、inbox、ack、sent_status、send、invite、reissue、update），
 // 所以 irori-api/relay.ts 的呼叫端不用關心走的是哪一條路。租戶一律由呼叫端（登入者的帳號）決定，不接受任何來自 body 的租戶或節點。
 

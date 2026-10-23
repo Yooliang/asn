@@ -141,7 +141,7 @@ function harness({ appear = true, appearAfter = 0, names = [], startFails = fals
   return { d, L, results, starts, launched, logs, push: (...ls) => pending.push(...ls), done: () => fs.rmSync(d, { recursive: true, force: true }) }
 }
 const waitFor = async (f, ms = 3000) => { const t = Date.now(); while (!f() && Date.now() - t < ms) await sleep(20); assert.ok(f(), 'condition not reached') }
-const req = (n, extra = {}) => ({ id: uid(n), requested_by: 'XISU', profile: 'default', name: `T-${n}`, cwd: null, ...extra })
+const req = (n, extra = {}) => ({ id: uid(n), requested_by: 'PC1', profile: 'default', name: `T-${n}`, cwd: null, ...extra })
 
 test('流程：取走 → 開視窗 → 出現在名單 → 回報 ok、呼叫 onLaunched、留紀錄', async () => {
   const h = harness()
@@ -154,7 +154,7 @@ test('流程：取走 → 開視窗 → 出現在名單 → 回報 ok、呼叫 o
     assert.equal(h.starts.length, 1)
     const lines = fs.readFileSync(path.join(h.d, 'launch.log'), 'utf8').trim().split('\n').map(l => JSON.parse(l))
     assert.deepEqual(lines.map(l => l.status), ['spawned', 'ok'])
-    assert.equal(lines[0].by, 'XISU')
+    assert.equal(lines[0].by, 'PC1')
   } finally { h.done() }
 })
 
@@ -237,7 +237,7 @@ async function fakeRelay(launches) {
 test('bridge 端到端：launch_pending → Start-Process 開假視窗（參數、資料夾、環境都對）→ ok → 名單附摘要 → 第一句話送進新視窗', { skip: process.platform !== 'win32' && '只在 Windows 跑（Start-Process）' }, async () => {
   const home = tmp()
   const work = path.join(home, 'proj'); fs.mkdirSync(work)
-  const st = await fakeRelay([{ id: uid(7), requested_by: 'XISU', profile: 'fake', name: 'T-英雄-2', cwd: work, first_message: '先讀交接檔' }])
+  const st = await fakeRelay([{ id: uid(7), requested_by: 'PC1', profile: 'fake', name: 'T-英雄-2', cwd: work, first_message: '先讀交接檔' }])
   const agentsFile = path.join(home, 'agents.json'), record = path.join(home, 'record.jsonl'), launchedFile = path.join(home, 'launched.jsonl')
   fs.writeFileSync(agentsFile, '[]'); fs.writeFileSync(record, ''); fs.writeFileSync(launchedFile, '')
   fs.mkdirSync(path.join(home, '.asn'), { recursive: true })
@@ -266,7 +266,7 @@ test('bridge 端到端：launch_pending → Start-Process 開假視窗（參數�
     const f = forwarded()
     assert.equal(f.length, 1)
     assert.equal(f[0].id, uid(7)); assert.equal(f[0].to, 'T-英雄-2')
-    assert.match(f[0].text, /\[RELAY 來信\] trust=owner from=XISU\/ to=T-英雄-2/)
+    assert.match(f[0].text, /\[RELAY 來信\] trust=owner from=PC1\/ to=T-英雄-2/)
     assert.match(f[0].text, /先讀交接檔/)
     const withL = st.rosterPosts.filter(p => p.launcher)
     assert.ok(withL.length > 0)
@@ -285,7 +285,7 @@ test('bridge 端到端：launch_pending → Start-Process 開假視窗（參數�
 
 test('bridge 端到端：沒有 launcher.json → 名單回報 launcher:null（仲介清掉），pending 驗不過回 failed', async () => {
   const home = tmp()
-  const st = await fakeRelay([{ id: uid(8), requested_by: 'XISU', profile: 'default', name: 'T-x', cwd: home, first_message: null }])
+  const st = await fakeRelay([{ id: uid(8), requested_by: 'PC1', profile: 'default', name: 'T-x', cwd: home, first_message: null }])
   const agentsFile = path.join(home, 'agents.json'), record = path.join(home, 'record.jsonl')
   fs.writeFileSync(agentsFile, '[]'); fs.writeFileSync(record, '')
   const child = spawnTracked(process.execPath, [path.join(MACHINE, 'bridge.mjs')], {

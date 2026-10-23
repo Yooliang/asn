@@ -49,7 +49,7 @@
       "args": ["agent", "stdio"],
       "cwd": "C:\\Users\\你\\.irori-relay\\workers\\Grok",
       "permissions": { "write": "ask", "execute": "ask", "network": "allow" },
-      "ask": { "notify": [{ "node": "XISU" }], "timeout_ms": 300000 }
+      "ask": { "notify": [{ "node": "PC1" }], "timeout_ms": 300000 }
     }
   ]
 }

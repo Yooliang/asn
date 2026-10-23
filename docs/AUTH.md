@@ -180,7 +180,7 @@ auth.users（人）  1 ──< N  relay.nodes（設備／代理）   以 nodes.o
 
 ## 本人簽章（issue #118）
 
-在 ASN 視窗裡人打的字，信上標 `trust=owner`；AI 用 `send.mjs`、`asn-cli` 寄的照舊是 `member`。
+在 ASN 視窗裡人打的字，信上標 `trust=owner`；AI 用 `send.mjs`、`asn-cli` 寄的照舊是 `member`。**`trust=owner` 只認本人簽章**（#14 R7，migration `20261023050000_trust_owner_signed_only.sql`）：寄件節點的 `role` 是 `owner`（Irori 時代的角色節點）不再讓信變成 owner；該角色仍可做遠端開視窗、切換帳號等特權動作，但那是授權，不是信任標記。
 
 - 用戶端：只有 ASN 視窗的寄信指令（`relay_send`、`relay_send_attachment`）在 Rust 端盡力取登入憑證，放在標頭 `x-asn-user: Bearer <憑證>`（`Authorization` 要留給平台閘道）。取不到（沒登入、過期、逾時）就不帶，照舊寄。`asn-cli`、內建橋、機器橋不碰憑證；`relay.rs` 的守門測試掃 `cli/`、`bin/`、`bridge/` 原始碼確認。
 - 後端：節點金鑰驗證照舊必備。`send`、`room_post` 讀 `x-asn-user`，驗證過才把使用者 id 傳給資料庫函式；函式再核對「這個節點的擁有者與所屬租戶的擁有者都是這個人」才標 owner（信件記在 `relay.messages.owner_signed`，群組訊息直接記 trust）。驗證失敗一律當沒帶，不擋寄送。

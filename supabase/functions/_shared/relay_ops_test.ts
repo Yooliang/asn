@@ -3,7 +3,7 @@ import { b64u, nodeAction, type OpsDeps, sha256Hex } from "./relay_ops.ts";
 
 // deno-lint-ignore no-explicit-any
 type Json = any;
-const WHO = { tenant: "ta", node: "XISU" };
+const WHO = { tenant: "ta", node: "ROLE1" };
 const UUID = "11111111-1111-4111-8111-111111111111";
 
 function fake(handlers: Record<string, (args: Record<string, unknown>) => Json>) {
@@ -22,9 +22,9 @@ function fake(handlers: Record<string, (args: Record<string, unknown>) => Json>)
 
 Deno.test("send：寄件節點永遠是呼叫端給的角色節點（body 的 from_node 無效）、成功才敲門鈴、錯誤對應狀態碼", async () => {
   const f = fake({ asn_relay_send: () => ({ id: UUID, bell_topic: "bell-x" }) });
-  const r = await nodeAction(f.deps, WHO, "send", { to_node: "H", body: "hi", from_node: "evil", from_agent: "希緒", reply_to: "nope" });
+  const r = await nodeAction(f.deps, WHO, "send", { to_node: "H", body: "hi", from_node: "evil", from_agent: "角色", reply_to: "nope" });
   assertEquals([r.status, r.body], [200, { id: UUID }]);
-  assertEquals(f.calls[0].args.p_from_node, "XISU");
+  assertEquals(f.calls[0].args.p_from_node, "ROLE1");
   assertEquals(f.calls[0].args.p_reply_to, null);
   assertEquals(f.rung, ["bell-x"]);
   assertEquals((await nodeAction(f.deps, WHO, "send", { to_node: 1, body: "x" })).status, 400);
@@ -37,14 +37,14 @@ Deno.test("send：寄件節點永遠是呼叫端給的角色節點（body 的 fr
 
 Deno.test("list／whoami 用租戶；inbox／ack／sent_status 用節點；ids 要是 uuid", async () => {
   const f = fake({
-    asn_relay_list: () => [{ id: "H" }], asn_relay_whoami: () => ({ node: "XISU", bell_topic: "b" }),
+    asn_relay_list: () => [{ id: "H" }], asn_relay_whoami: () => ({ node: "ROLE1", bell_topic: "b" }),
     asn_relay_inbox: () => [], asn_relay_ack: () => 1, asn_relay_sent_status: () => [],
   });
   assertEquals((await nodeAction(f.deps, WHO, "list")).body, { members: [{ id: "H" }] });
   assertEquals(f.calls[0].args, { p_tenant: "ta" });
-  assertEquals((await nodeAction(f.deps, WHO, "whoami")).body, { node: "XISU", bell_topic: "b" });
+  assertEquals((await nodeAction(f.deps, WHO, "whoami")).body, { node: "ROLE1", bell_topic: "b" });
   await nodeAction(f.deps, WHO, "inbox");
-  assertEquals(f.calls.at(-1)!.args, { p_node: "XISU" });
+  assertEquals(f.calls.at(-1)!.args, { p_node: "ROLE1" });
   assertEquals((await nodeAction(f.deps, WHO, "ack", { ids: [UUID] })).body, { acked: 1 });
   assertEquals((await nodeAction(f.deps, WHO, "ack", { ids: ["x"] })).status, 400);
   assertEquals((await nodeAction(f.deps, WHO, "sent_status", { ids: Array(51).fill(UUID) })).status, 400);

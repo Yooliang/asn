@@ -1,8 +1,8 @@
 //! `asn send`：本機 Claude 視窗主動寄信給仲介成員／群組，不經收發室、不經任何模型（對應 relay/machine/send.mjs）。
-//!   asn send --to XISU --body "內文" --reply|--no-reply [--reply-to <信件id>]
+//!   asn send --to PC1 --body "內文" --reply|--no-reply [--reply-to <信件id>]
 //!   asn send --to W/W-政策 --body-file msg.txt --no-reply
 //!   asn send --room <群組id> --body "內文"
-//!   asn send --to XISU --file 報告.pdf --file 截圖.webp --body "說明" --no-reply
+//!   asn send --to PC1 --file 報告.pdf --file 截圖.webp --body "說明" --no-reply
 //! 寄給成員／視窗（含回信）一定要明說要不要回信；結果以 expects_reply 欄位送給後端，不往內文加任何標記。
 //! 寄件視窗名不能自填：沿父行程鏈找 ~/.claude/sessions 登記的 claude 程序（備援 CLAUDE_CODE_MESSAGING_SOCKET）。
 //! 輸出 `sent id=…`（或 `posted room=… seq=…`）；錯誤印到 stderr，結束碼：1 用法／內容、2 認不出呼叫者、3 超量、4 後端錯誤。

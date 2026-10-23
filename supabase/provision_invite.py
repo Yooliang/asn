@@ -1,6 +1,6 @@
 """Fallback: create a one-time relay invite directly in the DB (15 minutes). The invitee picks its own id/name.
 
-Usage: py -3.12 provision_invite.py [--by XISU] [--prefix W-]   (--prefix limits the id the invitee may pick)
+Usage: py -3.12 provision_invite.py --by <邀請人的節點代號> [--prefix W-]   (--prefix limits the id the invitee may pick)
 Prints the invite code in plaintext ONCE; only its sha256 is stored. Never commit it.
 """
 import argparse
@@ -19,7 +19,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def main() -> None:
     ap = argparse.ArgumentParser(usage=__doc__)
     ap.add_argument("--prefix")
-    ap.add_argument("--by", default="XISU")
+    ap.add_argument("--by", required=True)
     a = ap.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", a.by) or (a.prefix and not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", a.prefix)):
         sys.exit("bad id")

@@ -42,7 +42,7 @@ export const demoMembers = [
 
 export const demoRooms = [
   { id: 'room-policy', name: '正見群', created_at: '2026-10-10T00:00:00Z', last_at: '2026-10-20T07:30:00Z', last_from_name: 'W-政策', last_body: '今天的資料都補完了', members: [{}, {}, {}, {}] },
-  { id: 'room-irori', name: '希緒開發', created_at: '2026-10-12T00:00:00Z', members: [{}, {}] },
+  { id: 'room-irori', name: '專案討論', created_at: '2026-10-12T00:00:00Z', members: [{}, {}] },
 ]
 
 // me：預先寫進 asn-me.json 的設定（例如 { tabDim: 'engine', groupDim: 'device' }），截圖時用來切換維度

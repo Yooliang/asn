@@ -422,7 +422,7 @@ async fn lharness(make: impl FnOnce(&Path, &Path) -> Arc<FakeEnv>, timing: (u64,
     LH { h, env, rx, proj }
 }
 fn lreq(n: u32, name: &str, cwd: &Path, extra: Value) -> Value {
-    let mut v = json!({"id": uid(n), "requested_by": "XISU", "profile": "claude", "name": name, "cwd": cwd.display().to_string(), "first_message": null});
+    let mut v = json!({"id": uid(n), "requested_by": "PC1", "profile": "claude", "name": name, "cwd": cwd.display().to_string(), "first_message": null});
     for (k, x) in extra.as_object().unwrap() {
         v[k] = x.clone();
     }
@@ -454,12 +454,12 @@ async fn 遠端開視窗_取走_開視窗_出現在名單_回報_ok_名單附摘
     assert_eq!(l.env.commands.lock().unwrap()[0], ("C:\\fake\\claude.exe".to_string(), ["-n", "T-英雄-2", "--remote-control", "T-英雄-2"].map(String::from).to_vec()), "命令只來自本機設定");
     // 視窗出現後：事件交回核心 → 刷新名單 → 第一句話當成 owner 來信送進新視窗
     let ev = tokio::time::timeout(std::time::Duration::from_secs(5), l.rx.recv()).await.unwrap().unwrap();
-    assert_eq!((ev.id.as_str(), ev.name.as_str(), ev.requested_by.as_str(), ev.first_message.as_deref()), (uid(7).as_str(), "T-英雄-2", "XISU", Some("先讀交接檔")));
+    assert_eq!((ev.id.as_str(), ev.name.as_str(), ev.requested_by.as_str(), ev.first_message.as_deref()), (uid(7).as_str(), "T-英雄-2", "PC1", Some("先讀交接檔")));
     l.h.core.on_launched(ev, T0 + 100).await;
     let f = fwd(&l.h.said());
     assert_eq!(f.len(), 1);
     assert_eq!((f[0].0.as_str(), f[0].1.as_str()), (uid(7).as_str(), "T-英雄-2"));
-    assert!(f[0].2.starts_with("[RELAY 來信] trust=owner from=XISU/ to=T-英雄-2 id="), "{}", f[0].2);
+    assert!(f[0].2.starts_with("[RELAY 來信] trust=owner from=PC1/ to=T-英雄-2 id="), "{}", f[0].2);
     assert!(f[0].2.contains("先讀交接檔"));
     // 名單：新視窗在上面；launcher 摘要有 profile／cwd／上限，沒有指令
     let rosters = l.h.fr.rosters();

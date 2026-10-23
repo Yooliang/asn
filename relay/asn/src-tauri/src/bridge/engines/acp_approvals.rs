@@ -225,8 +225,8 @@ mod tests {
 
     #[test]
     fn 信件標頭解析() {
-        let (n, a, b) = parse_mail_text("[RELAY 來信] trust=member from=XISU/希緒 to=Gemini id=1 engine=gemini reply=yes\n內文第一行\n第二行");
-        assert_eq!((n.as_str(), a.as_str(), b.as_str()), ("XISU", "希緒", "內文第一行\n第二行"));
+        let (n, a, b) = parse_mail_text("[RELAY 來信] trust=member from=PC1/夥伴甲 to=Gemini id=1 engine=gemini reply=yes\n內文第一行\n第二行");
+        assert_eq!((n.as_str(), a.as_str(), b.as_str()), ("PC1", "夥伴甲", "內文第一行\n第二行"));
         let (n, a, _) = parse_mail_text("[RELAY 來信] trust=x from=W/ to=G id=1");
         assert_eq!((n.as_str(), a.as_str()), ("W", ""));
         assert_eq!(parse_mail_text("沒有標頭").0, "");
@@ -235,23 +235,23 @@ mod tests {
     #[tokio::test]
     async fn 只認被問的人_編號_單筆自動對應_多筆要編號_逾時() {
         let ap = Approvals::new();
-        let t = vec![Target { node: "XISU".into(), agent: None }];
+        let t = vec![Target { node: "PC1".into(), agent: None }];
         let (id, rx) = ap.ask("G", "寫入：a", t.clone(), 60_000);
         assert_eq!(id.len(), 4);
         // 不是被問的人
         assert!(!ap.handle_reply("G", "別人", "x", "允許").handled);
         // 單筆、單純表態：自動對應
-        let r = ap.handle_reply("G", "XISU", "希緒", "好的");
+        let r = ap.handle_reply("G", "PC1", "夥伴甲", "好的");
         assert!(r.handled && r.note.unwrap().contains("已收到：允許"));
         assert_eq!(rx.await.unwrap(), Answer::Allow);
         // 沒編號又不是單純表態：不算
         let (_id2, _rx2) = ap.ask("G", "執行", t.clone(), 60_000);
-        assert!(!ap.handle_reply("G", "XISU", "", "好的，我晚點看").handled);
+        assert!(!ap.handle_reply("G", "PC1", "", "好的，我晚點看").handled);
         // 多筆：要編號
         let (id3, rx3) = ap.ask("G", "執行 b", t.clone(), 60_000);
-        let r = ap.handle_reply("G", "XISU", "", "允許");
+        let r = ap.handle_reply("G", "PC1", "", "允許");
         assert!(r.handled && r.note.unwrap().contains("請附上編號"));
-        let r = ap.handle_reply("G", "XISU", "", &format!("拒絕 {id3}"));
+        let r = ap.handle_reply("G", "PC1", "", &format!("拒絕 {id3}"));
         assert!(r.handled);
         assert_eq!(rx3.await.unwrap(), Answer::Deny);
         // 逾時
