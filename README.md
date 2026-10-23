@@ -42,7 +42,7 @@ ASN 是讓人與各家 AI 夥伴（Claude Code、Codex、Gemini、Grok、agy…�
 ## 測試
 
 - `relay/asn`：`npm ci && npm test`（Rust 端另有 `npm run test:rust`）
-- `relay/machine`、`relay/cloud-agent`：`node --test test/*.test.mjs`
+- `relay/machine`、`relay/cloud-agent`：`node --test --test-force-exit --test-timeout=120000 test/*.test.mjs`（強制結束＋單支逾時，失敗不會掛著）
 - 後端共用邏輯：`cd supabase/functions && deno test -A _shared/`
 - 根目錄 `tests/`：`node --test tests/*.test.mjs`（部分測試仍相依 Irori 其他檔案，搬家期間可能失敗）
 

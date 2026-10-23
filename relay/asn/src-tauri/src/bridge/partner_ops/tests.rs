@@ -98,6 +98,9 @@ impl OpsEnv for FakeEnv {
     fn mod_wait_ms(&self) -> u64 {
         self.mod_wait
     }
+    fn mod_probe_ms(&self) -> u64 {
+        40
+    }
     fn launch_config(&self) -> Result<LaunchConfig, String> {
         self.cfg.lock().unwrap().clone()
     }
@@ -1170,7 +1173,10 @@ fn 指令_沒有外掛_過期_換成別人_收發室視窗_都不算有外掛() 
     let r = rig(Opt::default());
     assert_eq!(r.ops.command_target("目標"), None, "沒有狀態檔");
     r.status_file("sid-220", json!({ "sessionId": "sid-220", "at": NOW - 3_600_000, "state": "idle" }));
-    assert_eq!(r.ops.command_target("目標"), None, "過期");
+    assert_eq!(r.ops.command_target("目標").as_deref(), Some("sid-220"), "過期但視窗還活著：外掛只在狀態改變時寫檔，先試外掛");
+    r.os().alive.lock().unwrap().remove(&220);
+    assert_eq!(r.ops.command_target("目標"), None, "過期而且視窗程序已死");
+    r.os().alive.lock().unwrap().insert(220);
     r.status_file("sid-220", json!({ "sessionId": "sid-999", "at": NOW, "state": "idle" }));
     assert_eq!(r.ops.command_target("目標"), None, "sessionId 不符");
     r.status_file("sid-220", json!({ "sessionId": "sid-220", "at": NOW, "detail": "已結束" }));
@@ -1191,4 +1197,239 @@ fn 指令_輪到時視窗已換掉_不寫控制檔() {
     let (good, t) = r.ops.command_blocking(&job("compact", ""), "sid-OLD");
     assert!(!good && t.contains("沒執行"), "{t}");
     assert!(!r.control.join("sid-220.json").exists() && !r.control.join("sid-OLD.json").exists());
+}
+
+// ================================================================================================
+// 狀態檔過期（外掛只在狀態改變時寫檔，閒置超過 30 分鐘就老了）：控制用途不能因此退回重開
+// ================================================================================================
+
+const OLD: u64 = NOW - 3 * 3_600_000;
+
+fn stale_status(r: &Rig, state: &str) {
+    r.status_file("sid-220", json!({ "sessionId": "sid-220", "at": OLD, "state": state }));
+}
+
+#[test]
+fn 過期_閒置視窗的外掛還活著_照樣由外掛切換_不重開() {
+    for (op, extra) in [("rename", json!({ "new_name": "新名字" })), ("model", json!({ "model": "sonnet" }))] {
+        let r = rig(Opt { mod_wait: 60_000, ..Opt::default() });
+        stale_status(&r, "idle");
+        let (status, calls) = (r.status.clone(), Arc::new(AtomicUsize::new(0)));
+        *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || {
+            // 外掛輪詢到控制檔：執行完把結果寫進狀態檔（at 也跟著更新）
+            if calls.fetch_add(1, Ordering::SeqCst) == 1 {
+                std::fs::write(status.join("sid-220.json"), json!({ "sessionId": "sid-220", "at": NOW, "state": "idle", "control": { "id": "op-1", "ok": true, "detail": "已切換" } }).to_string()).unwrap();
+            }
+        }));
+        let res = r.run(op, extra);
+        assert_eq!(res.status, "ok", "{op}：{}", res.detail);
+        assert_eq!(res.detail, "已切換");
+        assert!(r.launched().is_empty() && r.terminated().is_empty(), "{op}：不可退回重開");
+        assert!(!r.control.join("sid-220.json").exists());
+    }
+}
+
+#[test]
+fn 過期_閒置視窗_外掛完全沒動靜_短逾時就退回重開_不白等() {
+    let r = rig(Opt { mod_wait: 600_000, ..Opt::default() });
+    stale_status(&r, "idle");
+    let t0 = std::time::Instant::now();
+    let res = r.run("rename", json!({ "new_name": "新名字" }));
+    assert!(t0.elapsed() < std::time::Duration::from_secs(5), "探測逾時要短，不是等滿 10 分鐘：{:?}", t0.elapsed());
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert_eq!(r.launched().len(), 1, "外掛不在才退回重開");
+    assert!(!r.control.join("sid-220.json").exists(), "退回前收掉控制檔");
+}
+
+#[test]
+fn 過期_外掛有動靜_狀態檔更新_就解除探測_繼續等到忙完() {
+    let r = rig(Opt { mod_wait: 60_000, ..Opt::default() });
+    stale_status(&r, "idle");
+    let (status, calls) = (r.status.clone(), Arc::new(AtomicUsize::new(0)));
+    *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        match calls.fetch_add(1, Ordering::SeqCst) {
+            // 外掛接手：開始執行，狀態變忙（at 變了）
+            1 => std::fs::write(status.join("sid-220.json"), json!({ "sessionId": "sid-220", "at": NOW, "state": "busy" }).to_string()).unwrap(),
+            // 超過探測時間（40ms）很久之後才忙完回報
+            100 => std::fs::write(status.join("sid-220.json"), json!({ "sessionId": "sid-220", "at": NOW, "state": "idle", "control": { "id": "op-1", "ok": true, "detail": "好了" } }).to_string()).unwrap(),
+            _ => {}
+        }
+    }));
+    let res = r.run("model", json!({ "model": "sonnet" }));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert_eq!(res.detail, "好了");
+    assert!(r.launched().is_empty() && r.terminated().is_empty());
+}
+
+#[test]
+fn 過期_最後狀態是忙碌_外掛可能在排隊_不探測_等滿後回失敗_不重開() {
+    let r = rig(Opt { mod_wait: 300, ..Opt::default() });
+    stale_status(&r, "busy");
+    let res = r.run("model", json!({ "model": "sonnet" }));
+    assert_eq!(res.status, "failed");
+    assert!(res.detail.contains("還在忙"), "{}", res.detail);
+    assert!(r.launched().is_empty() && r.terminated().is_empty(), "重開會打斷對話");
+}
+
+#[test]
+fn 過期_視窗程序已死或標了結束_不寫控制檔_直接退回() {
+    let r = rig(Opt { mod_wait: 60_000, ..Opt::default() });
+    stale_status(&r, "idle");
+    r.status_file("sid-220", json!({ "sessionId": "sid-220", "at": OLD, "detail": "已結束" }));
+    let res = r.run("rename", json!({ "new_name": "新名字" }));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert_eq!(r.launched().len(), 1);
+}
+
+#[test]
+fn 過期_指令_外掛還活著就送_沒動靜短逾時回沒有回應() {
+    let r = rig(Opt { mod_wait: 60_000, ..Opt::default() });
+    stale_status(&r, "idle");
+    let (status, calls) = (r.status.clone(), Arc::new(AtomicUsize::new(0)));
+    *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || {
+        if calls.fetch_add(1, Ordering::SeqCst) == 1 {
+            std::fs::write(status.join("sid-220.json"), json!({ "sessionId": "sid-220", "at": NOW, "state": "idle", "control": { "id": "mail-1", "ok": true, "detail": "ok了" } }).to_string()).unwrap();
+        }
+    }));
+    assert_eq!(r.ops.command_blocking(&job("compact", ""), "sid-220"), (true, "ok了".to_string()));
+    let r = rig(Opt { mod_wait: 600_000, ..Opt::default() });
+    stale_status(&r, "idle");
+    let t0 = std::time::Instant::now();
+    let (good, t) = r.ops.command_blocking(&job("compact", ""), "sid-220");
+    assert!(!good && t.contains("沒有回應"), "{t}");
+    assert!(t0.elapsed() < std::time::Duration::from_secs(5));
+    assert!(!r.control.join("sid-220.json").exists());
+}
+
+// ================================================================================================
+// ACP 工作者（收發室自己跑的 Gemini、agy 等）：只支援詳情、重開、接班換手
+// ================================================================================================
+
+struct FakeAcp {
+    names: Vec<String>,
+    calls: Mutex<Vec<String>>,
+    fail_with: Mutex<Option<String>>,
+}
+
+impl AcpAdmin for FakeAcp {
+    fn has_worker(&self, name: &str) -> bool {
+        self.names.iter().any(|n| n == name)
+    }
+    fn info(&self, name: &str) -> Option<Value> {
+        self.has_worker(name).then(|| json!({ "pid": 4321, "engine": "gemini", "model": null, "cwd": "D:/w", "status": "idle", "permissions": { "read": "allow", "write": "deny", "execute": "deny", "network": "allow" }, "process_running": true, "has_session": true, "load_session": true }))
+    }
+    fn restart(&self, name: &str) -> Result<Value, String> {
+        self.calls.lock().unwrap().push(format!("restart {name}"));
+        match self.fail_with.lock().unwrap().clone() {
+            Some(e) => Err(e),
+            None => Ok(json!({ "kind": "acp", "pid": 4321, "kept_session": true })),
+        }
+    }
+    fn handover(&self, name: &str, note: &str) -> Result<Value, String> {
+        self.calls.lock().unwrap().push(format!("handover {name} [{note}]"));
+        Ok(json!({ "kind": "acp", "pid": 4321, "handoff_done": false }))
+    }
+}
+
+fn with_acp(r: &Rig, names: &[&str]) -> Arc<FakeAcp> {
+    let a = Arc::new(FakeAcp { names: names.iter().map(|s| s.to_string()).collect(), calls: Mutex::new(vec![]), fail_with: Mutex::new(None) });
+    r.ops.set_acp(a.clone());
+    a
+}
+
+fn acp_run(r: &Rig, op: &str, extra: Value) -> OpResult {
+    let mut v = json!({ "name": "Gemini" });
+    for (k, x) in extra.as_object().cloned().unwrap_or_default() {
+        v[k] = x;
+    }
+    r.run(op, v)
+}
+
+#[test]
+fn acp_詳情_重開_接班換手_交給工作者管理入口_不碰任何程序() {
+    let r = rig(Opt::default());
+    let a = with_acp(&r, &["Gemini"]);
+    let v = acp_run(&r, "info", json!({})).result.unwrap();
+    assert_eq!((v["pid"].as_u64(), v["engine"].as_str()), (Some(4321), Some("gemini")));
+    let res = acp_run(&r, "restart", json!({}));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert_eq!(res.result.unwrap()["kept_session"], true);
+    let res = acp_run(&r, "handover", json!({ "note": "別動資料庫" }));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert_eq!(res.result.unwrap()["handoff_done"], false);
+    assert_eq!(*a.calls.lock().unwrap(), vec!["restart Gemini".to_string(), "handover Gemini [別動資料庫]".to_string()]);
+    assert!(r.terminated().is_empty() && r.launched().is_empty() && r.os().closed.lock().unwrap().is_empty(), "不用名稱找程序、不結束任何程序、不開視窗");
+    assert!(r.env.progress.lock().unwrap().iter().any(|s| s == "stage:opening"), "接班換手有回報階段");
+}
+
+#[test]
+fn acp_改名_切換模型_關閉_喚醒_一律這類夥伴不支援() {
+    let r = rig(Opt::default());
+    let a = with_acp(&r, &["Gemini"]);
+    for (op, extra) in [("rename", json!({ "new_name": "新名字" })), ("model", json!({ "model": "gemini-2.5" })), ("close", json!({})), ("resume", json!({ "session_id": "sid-zzzzzzzz" }))] {
+        let res = acp_run(&r, op, extra);
+        assert_eq!((res.status, res.detail.as_str()), ("failed", UNSUPPORTED), "{op}");
+    }
+    assert!(a.calls.lock().unwrap().is_empty());
+    assert!(r.terminated().is_empty() && r.launched().is_empty());
+}
+
+#[test]
+fn acp_重開與接班換手要本機開放遠端管理_詳情不用_動手前再驗一次() {
+    let r = rig(Opt { allow_first: 0, ..Opt::default() });
+    let a = with_acp(&r, &["Gemini"]);
+    assert_eq!(acp_run(&r, "info", json!({})).status, "ok");
+    for op in ["restart", "handover"] {
+        let res = acp_run(&r, op, json!({}));
+        assert_eq!((res.status, res.detail.as_str()), ("failed", CONSENT_OFF), "{op}");
+    }
+    assert!(a.calls.lock().unwrap().is_empty());
+    // 第一次驗過、動手前第二次關掉了
+    let r = rig(Opt { allow_first: 1, ..Opt::default() });
+    let a = with_acp(&r, &["Gemini"]);
+    assert_eq!(acp_run(&r, "restart", json!({})).detail, CONSENT_OFF);
+    assert!(a.calls.lock().unwrap().is_empty());
+}
+
+#[test]
+fn acp_名字對不上收發室管理的工作者_restart_不支援_也不會動_claude_視窗() {
+    let r = rig(Opt::default());
+    let a = with_acp(&r, &["Gemini"]);
+    // 目標是 Claude 視窗：restart 不支援，程序沒被碰
+    let res = r.run("restart", json!({}));
+    assert_eq!((res.status, res.detail.as_str()), ("failed", UNSUPPORTED));
+    // 沒有這個名字的工作者：照 Claude 的流程找不到視窗
+    let res = acp_run(&r, "handover", json!({ "name": "幽靈" }));
+    assert_eq!(res.status, "failed");
+    assert!(res.detail.contains("找不到"), "{}", res.detail);
+    assert!(a.calls.lock().unwrap().is_empty() && r.terminated().is_empty());
+}
+
+#[test]
+fn acp_同名的_claude_視窗還活著_不猜_收發室名字受保護() {
+    let r = rig(Opt::default());
+    let a = with_acp(&r, &["目標", "T-收發室"]);
+    let res = r.run("restart", json!({}));
+    assert_eq!(res.status, "failed");
+    assert!(res.detail.contains("同名"), "{}", res.detail);
+    let res = acp_run(&r, "restart", json!({ "name": "T-收發室" }));
+    assert_eq!(res.detail, PROTECTED);
+    assert!(a.calls.lock().unwrap().is_empty() && r.terminated().is_empty(), "兩種情況都沒動手");
+}
+
+#[test]
+fn acp_工作者忙碌等原因由管理入口回報_原樣當失敗() {
+    let r = rig(Opt::default());
+    let a = with_acp(&r, &["Gemini"]);
+    *a.fail_with.lock().unwrap() = Some("工作者正在處理信件，等它做完再試".into());
+    let res = acp_run(&r, "restart", json!({}));
+    assert_eq!((res.status, res.detail.as_str()), ("failed", "工作者正在處理信件，等它做完再試"));
+}
+
+#[test]
+fn 沒接_acp_管理入口_restart_一律不支援() {
+    let r = rig(Opt::default());
+    let res = acp_run(&r, "restart", json!({}));
+    assert_eq!((res.status, res.detail.as_str()), ("failed", UNSUPPORTED));
 }

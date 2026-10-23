@@ -90,6 +90,40 @@ pub async fn android_partner_ops(app: State<'_, App>, auth: State<'_, crate::aut
     r.partner_ops_signed(&ids, token.as_deref()).await
 }
 
+// ---------- 遠端密碼請求的確認（#26 第二期；別台電腦／雲端代理要密碼，由手機本人確認；設計見 docs/design/SECRET-REMOTE.md） ----------
+
+/// 待確認的密碼請求（哪台電腦、哪個程式、要做什麼、公鑰指紋、剩幾秒；沒有任何機密）。要本人簽章；沒登入回錯，不打後台。回 { requests: [...] }
+#[tauri::command]
+pub async fn android_secret_pending(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>) -> Result<serde_json::Value, String> {
+    let r = relay_of(&app)?;
+    let token = crate::account::signing_token(&auth).await;
+    crate::secret_remote::confirm::list_for_ui(r.as_ref(), token.as_deref()).await
+}
+
+/// 本人按了確定（secret 有值）或取消（null）：在這裡（Rust 端）用請求公鑰加密後才送後台，畫面只拿到成功或失敗。要本人簽章；沒登入回錯，不打後台
+#[tauri::command]
+pub async fn android_secret_reply(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>, id: String, secret: Option<String>) -> Result<(), String> {
+    let r = relay_of(&app)?;
+    let token = crate::account::signing_token(&auth).await;
+    crate::secret_remote::confirm::answer_from_ui(r.as_ref(), token.as_deref(), &id, secret.map(zeroize::Zeroizing::new)).await
+}
+
+// ---------- 群組對話（讀沿用電腦版的節點金鑰路徑；發言要本人簽章） ----------
+
+/// 讀群組訊息（限成員）：一定帶 since；mark＝讀完標已讀。回 { messages, last_seq }
+#[tauri::command]
+pub async fn android_room_read(app: State<'_, App>, room: String, agent: Option<String>, since: u64, limit: Option<u64>, mark: bool) -> Result<serde_json::Value, String> {
+    relay_of(&app)?.room_read(&room, agent.as_deref(), since, limit, mark).await
+}
+
+/// 在群組發言（限成員）：要本人簽章，後台才標成本人發言；沒登入回錯，不打後台。回 { seq, mentions }
+#[tauri::command]
+pub async fn android_room_post(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>, body: serde_json::Value) -> Result<serde_json::Value, String> {
+    let r = relay_of(&app)?;
+    let token = crate::account::signing_token(&auth).await;
+    r.room_post_signed(&body, token.as_deref()).await
+}
+
 // ---------- 手機自動更新（只有 `sideload` 版；Play 版這兩個指令只回「不提供」） ----------
 
 /// 查官網的更新清單。`url`＝本機測試用的清單網址（只收 http://127.0.0.1…，正式畫面不帶）。

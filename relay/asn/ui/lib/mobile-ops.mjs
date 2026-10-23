@@ -21,13 +21,13 @@ export function chatPageState(friends, lastId) {
 
 // ---------- 「⋯」選單 ----------
 // 每個項目點下去的下一步：form＝要先填（改名）、pick＝要先選（切換模型）、confirm＝要先確認（關閉、接班換手）、run＝直接送出（詳情、喚醒）
-export const OP_STEP = { rename: 'form', model: 'pick', close: 'confirm', handover: 'confirm', info: 'run', resume: 'run' }
+export const OP_STEP = { rename: 'form', model: 'pick', close: 'confirm', handover: 'confirm', restart: 'confirm', info: 'run', resume: 'run' }
 export const opStep = op => OP_STEP[op] ?? ''
 // 詳情的結果留在選單裡看；其他動作送出後選單收起，進度顯示在對話頁頂端
 export const showsInSheet = op => op === 'info'
 
 // 手機沒有本機查詢（電腦版右鍵是問那台電腦現在能切哪些），所以只列常用的三個；實際能不能用以那台電腦的回報為準
-export const MODEL_NOTE = '手機查不到那台電腦實際可用的模型，這裡只列常用的幾個；那台電腦不支援的會回報失敗。'
+export const MODEL_NOTE = '手機查不到電腦實際可用的模型，這裡只列常用的幾個；電腦不支援的會回報失敗。'
 export const phoneModels = () => CLAUDE_MODELS.map(m => ({ id: m.id, label: m.label }))
 
 // 改名完成後，對話分頁要跳到新名字（同一位夥伴）。回新的 id；不是改名或沒完成就回空字串

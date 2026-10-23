@@ -11,10 +11,12 @@ import { routeMail, stubFriend } from './routing.mjs'
 import { hasNudge, hueOf, initial, noReplyNoticeOf, plain, stripNudge, stripReplyHead, unwrapShell } from './text.mjs'
 import { noticeOf, expiresAt, fileMimeOf, friendlyPhotoError, normalizePhotos, stripPhotoLines } from './photo.mjs'
 import { applyStatusRow, chunkIds, collectPollIds } from './sent-status.mjs'
-import { historyUnsupported, mergeHistory } from './history.mjs'
+import { OLDER_PAGE, historyUnsupported, judgeOlder, mergeHistory, olderBeforeIso, olderCursor } from './history.mjs'
+import { READ_DEBOUNCE_MS, batchOf, cleanMarks, lastIncomingAt, readKey, readSyncSignedOut, readSyncUnsupported, unreadAfter } from './read-sync.mjs'
 
 export const MAX_BODY = 20000
-const LOG_KEEP = 200
+const LOG_KEEP = 2000   // 存檔最多留幾列（往上捲載入的也算）
+export const VIEW_BASE = 200   // 畫面預設顯示最近幾列；往上載入更舊的之後，依載入範圍加寬
 const STATUS_POLL_MS = 15_000
 const HISTORY_MIN_GAP_MS = 20_000   // 同一位夥伴的往來記錄，兩次向後台取的最短間隔（強制重取除外）
 const STEP_MS = 60_000              // 收信流程裡任何一個「等外面回應」的步驟最久等多久；超過就放棄這一步，不讓 pulling 旗標永遠卡住、定時收信整個停擺
@@ -31,7 +33,7 @@ export class AsnCore {
   constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, statusPollMs = STATUS_POLL_MS, aliases = [], stepMs = STEP_MS }) {
     // 讀取類的呼叫一律加逾時（寄信、寄檔另有自己的流程，不在這裡限時）。收信（inbox、ack）可能一次要走好幾個名字，給兩倍時間
     const guarded = { ...transport }
-    for (const k of ['list', 'inbox', 'ack', 'sentStatus', 'avatar', 'history']) {
+    for (const k of ['list', 'inbox', 'ack', 'sentStatus', 'avatar', 'history', 'readSync']) {
       if (typeof transport[k] === 'function') guarded[k] = (...a) => withTimeout(transport[k](...a), k === 'inbox' || k === 'ack' ? stepMs * 2 : stepMs, k)
     }
     Object.assign(this, { aliases: new Set(aliases), transport: guarded, store, selfNode, windowName, isChatVisible, now, log, pollMs, rosterMs, statusPollMs, stepMs })
@@ -54,6 +56,14 @@ export class AsnCore {
     this.historyAt = new Map()   // 好友 id → 上次向後台取往來記錄的時間
     this.historyOff = false      // 後台還沒支援往來記錄（404／400）：這次執行不再問
     this.historyBusy = new Set()
+    this.readMarks = {}          // 對話鍵 → 已讀位置（毫秒）：本機與後台合併後的結果，只往前（見 lib/read-sync.mjs）
+    this.readDirty = {}          // 還沒送上後台的已讀位置（離線或剛讀完在等節流）
+    this.readOff = false         // 後台還沒支援已讀同步（404）：這次執行不再問
+    this.readTimer = null
+    this.readBusy = false
+    this.olderBusy = new Set()     // 正在往上載入更舊的信的好友（同一時間只跑一個）
+    this.olderDone = new Set()     // 後台已沒有更早的信（或不支援往上載入）的好友：這次執行不再問
+    this.olderExtra = new Map()    // 好友 id → 往上載入而多顯示的列數（畫面顯示 = 最近 VIEW_BASE + 這個數字）
   }
 
   on(evt, fn) { (this.handlers[evt] ??= []).push(fn); return this }
@@ -64,6 +74,7 @@ export class AsnCore {
     const saved = await withTimeout(this.store.load(), this.stepMs, 'load').catch(e => { this.log(`load failed: ${e.message}`); return null })
     for (const f of saved?.friends ?? []) this.friends.set(f.id, this.#decorate({ ...f, psm: cleanPsm(f.psm, f.node), status: 'offline', unread: 0, waiting: false, replyTo: null }))
     for (const [id, l] of Object.entries(saved?.logs ?? {})) this.logs.set(id, l)
+    this.readDirty = cleanMarks(saved?.readDirty)   // 上次離線時沒送出的已讀位置，連線後補送
     this.emit('state')
     await this.refreshRoster()
     await this.pull('startup')
@@ -89,7 +100,7 @@ export class AsnCore {
     const next = new Map()
     for (const m of merged) {
       const old = this.friends.get(m.id)
-      const f = this.#decorate({ unread: 0, waiting: false, replyTo: null, ...(old ?? {}), ...m, contextPct: m.contextPct ?? null })   // 上下文用量每輪以名單為準，不沿用舊值
+      const f = this.#decorate({ unread: 0, waiting: false, replyTo: null, ...(old ?? {}), ...m, contextPct: m.contextPct ?? null, modLoaded: m.modLoaded ?? null, deviceMod: m.deviceMod ?? null })   // 上下文用量每輪以名單為準，不沿用舊值
       next.set(m.id, f)
       if (this.rosterLoaded && !isAsnWindow(f) && f.status !== 'offline' && (prev.get(m.id) ?? 'offline') === 'offline') {
         queueMicrotask(() => this.emit('notify', { kind: 'login', friend: f, line: '已經登入', sound: 'login', toast: true }))
@@ -102,6 +113,7 @@ export class AsnCore {
     }
     this.rosterLoaded = true
     this.emit('state')
+    void this.syncReads()   // 定期順便取回別台設備的已讀、補送沒送出的
     await this.#syncAvatars(members)
   }
 
@@ -128,6 +140,7 @@ export class AsnCore {
       this.logs.delete(old.id)
       this.friends.delete(old.id)
       this.historyAt.delete(old.id)
+      this.olderDone.delete(old.id); this.olderExtra.delete(old.id)
       this.friends.set(to.id, to)
       changed = true
     }
@@ -233,11 +246,14 @@ export class AsnCore {
     if (m.reply_to) this.#markReplied(m.reply_to, typeof m.created_at === 'string' ? m.created_at : new Date(t).toISOString())
     // 視窗狀態查不到（沒回應、出錯）就當沒看見：照常記進對話、算未讀，不卡住收信
     const visible = await withTimeout(this.isChatVisible(r.id), this.stepMs, 'isChatVisible').catch(() => false)
+    // 這封信的時間不晚於帳號的已讀位置（別台設備已經讀過）：不算未讀
+    const already = (this.readMarks[readKey(f) ?? ''] ?? 0) >= t
     if (nudge) {
       if (!dup) lg.push({ k: 'sys', nudge: true, rid, text: `${plain(f.nick)} 傳送了一個震動。`, t })
-      if (!shown && !visible) f.unread++
+      if (!shown && !visible && !already) f.unread++
     }
-    if (shown && !visible) f.unread++
+    if (shown && !visible && !already) f.unread++
+    if (visible && (shown || nudge)) this.#advanceRead(r.id)   // 對話開著正在看，等於當場讀了：別台設備也跟著消
     this.#scheduleSave()
     this.emit('state')
     this.emit('log', r.id)
@@ -348,6 +364,38 @@ export class AsnCore {
     } finally { this.historyBusy.delete(id) }
   }
 
+  // 往上捲載入更舊的信：以目前記錄最早一則的時間當 before，向後台要 OLDER_PAGE 則，去重後接在前面。
+  // 回 { more, added, busy?, error? }：more＝可能還有更多（回來不到一頁＝沒有了）；busy＝已有一個在跑；error＝這次失敗（連不上、沒登入），可以稍後再試。
+  // 後台還沒支援（404／400，或舊後台忽略 before 回了最新那批）→ more＝false，這次執行不再問
+  async loadOlder(id) {
+    const f = this.friends.get(id)
+    if (!f || !this.transport.history || this.historyOff || this.olderDone.has(id)) return { more: false, added: 0 }
+    if (this.olderBusy.has(id)) return { more: true, added: 0, busy: true }
+    this.olderBusy.add(id)
+    try {
+      for (let i = 0; i < 100 && this.historyBusy.has(id); i++) await new Promise(r => setTimeout(r, 100))   // 打開對話時的那次補記錄還在跑：等它先完成，錨點才準
+      const cursor = olderCursor(this.logOf(id))
+      if (cursor === null) return { more: false, added: 0 }
+      const r = await this.transport.history(f.node, f.agent || '', f.partnerId || null, olderBeforeIso(cursor), OLDER_PAGE)
+      const verdict = judgeOlder(r?.messages, cursor, OLDER_PAGE)
+      if (!verdict.supported) { this.olderDone.add(id); this.log(`history older ${id}: 後台忽略 before，停止往上載入`); return { more: false, added: 0 } }
+      const { log, added } = mergeHistory(this.logOf(id), r?.messages, f.nick, { selfNode: this.selfNode, deviceOf: node => this.#deviceName(node) })
+      if (added) {
+        this.logs.set(id, log)
+        this.olderExtra.set(id, (this.olderExtra.get(id) ?? 0) + added)
+        this.#scheduleSave()
+        this.emit('log', id)
+      }
+      const more = verdict.more && added > 0   // 一則都沒補進來也算到底（免得一直問）
+      if (!more) this.olderDone.add(id)
+      return { more, added }
+    } catch (e) {
+      this.log(`history older ${id} failed: ${e.message}`)
+      if (historyUnsupported(e.message)) { this.olderDone.add(id); return { more: false, added: 0 } }
+      return { more: true, added: 0, error: true }
+    } finally { this.olderBusy.delete(id) }
+  }
+
   #fail(id, e) {
     this.#log(id).push({ k: 'sys', text: `訊息沒有送到：${e.message}`, t: this.now() })
     this.emit('log', id)
@@ -400,9 +448,62 @@ export class AsnCore {
   }
 
   // ---------- 讀取 ----------
-  markRead(id) { const f = this.friends.get(id); if (f && f.unread) { f.unread = 0; this.emit('state') } }
+  markRead(id) {
+    const f = this.friends.get(id)
+    if (f) this.#advanceRead(id)
+    if (f && f.unread) { f.unread = 0; this.emit('state') }
+  }
+
+  // ---------- 已讀多端同步（設計見 docs/design/READ-SYNC.md） ----------
+  // 本機讀到這位最後一則收到的信：位置只往前，記進待送清單，等節流計時到了一次送出
+  #advanceRead(id) {
+    const f = this.friends.get(id)
+    const key = f && readKey(f)
+    const at = lastIncomingAt(this.logs.get(id))
+    if (!key || !at || at <= (this.readMarks[key] ?? 0)) return
+    this.readMarks[key] = at
+    this.readDirty[key] = at
+    this.#scheduleReadSync()
+    this.#scheduleSave()
+  }
+  #scheduleReadSync() {
+    if (this.readOff || this.readTimer || typeof this.transport.readSync !== 'function') return
+    this.readTimer = setTimeout(() => { this.readTimer = null; void this.syncReads() }, READ_DEBOUNCE_MS)
+  }
+  // 一次呼叫＝送出待送的已讀位置＋取回整個帳號的已讀位置，合併（取較新）後把已經在別台讀過的未讀消掉。
+  // 沒登入（本機行為不變）、後台還沒支援（404，這次執行不再問）、連不上（待送清單留著，下次補送）都靜默
+  async syncReads() {
+    if (this.readOff || this.readBusy || typeof this.transport.readSync !== 'function') return
+    this.readBusy = true
+    try {
+      const marks = batchOf(this.readDirty)
+      const r = await this.transport.readSync({ marks })
+      for (const m of marks) if (this.readDirty[m.key] === m.at) delete this.readDirty[m.key]
+      if (marks.length) this.#scheduleSave()
+      this.#applyRemoteMarks(cleanMarks(r?.marks))
+      if (Object.keys(this.readDirty).length) this.#scheduleReadSync()
+    } catch (e) {
+      if (readSyncUnsupported(e.message)) this.readOff = true
+      else if (!readSyncSignedOut(e.message)) this.log(`read_sync failed: ${e.message}`)
+    } finally { this.readBusy = false }
+  }
+  #applyRemoteMarks(remote) {
+    let changed = false
+    for (const [k, v] of Object.entries(remote)) if (v > (this.readMarks[k] ?? 0)) this.readMarks[k] = v
+    for (const f of this.friends.values()) {
+      if (!f.unread) continue
+      const key = readKey(f)
+      const mark = key ? this.readMarks[key] : 0
+      if (!mark) continue
+      const left = unreadAfter(this.logs.get(f.id), mark)
+      if (left < f.unread) { f.unread = left; changed = true }
+    }
+    if (changed) this.emit('state')
+  }
   #log(id) { if (!this.logs.has(id)) this.logs.set(id, []); return this.logs.get(id) }
   logOf(id) { return this.logs.get(id) ?? [] }
+  // 畫面要顯示的範圍：最近 VIEW_BASE 列，加上往上載入而多出來的
+  viewOf(id) { return this.logOf(id).slice(-(VIEW_BASE + (this.olderExtra.get(id) ?? 0))) }
   snapshot() { return { conn: this.conn, windowName: this.windowName, selfNode: this.selfNode, nodeOrder: [...this.nodeOrder], asn: this.asn, friends: [...this.friends.values()].map(f => ({ ...f })) } }
 
   // ---------- 存檔 ----------
@@ -414,6 +515,7 @@ export class AsnCore {
       await withTimeout(this.store.save({
         friends: withLog.map(f => ({ id: f.id, node: f.node, agent: f.agent, nick: f.nick, psm: f.psm, engine: f.engine, ...(f.partnerId ? { partnerId: f.partnerId } : {}), lastAt: f.lastAt ?? 0, known: true, onRoster: f.onRoster === true })),
         logs: Object.fromEntries(withLog.filter(f => this.logs.has(f.id)).map(f => [f.id, this.logs.get(f.id).slice(-LOG_KEEP)])),
+        ...(Object.keys(this.readDirty).length ? { readDirty: this.readDirty } : {}),
       }), this.stepMs, 'save')
     } catch (e) { this.log(`save failed: ${e.message}`) }
   }

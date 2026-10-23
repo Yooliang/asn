@@ -3,8 +3,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { loadOpsContext, opDialogText, runPartnerOp } from '../ui/lib/partner-ops-ui.mjs'
-import { wakeButtonView } from '../ui/lib/actionbar.mjs'
-import { REASON, menuItems } from '../ui/lib/partner-ops.mjs'
+import { sameFriend, wakeButtonView } from '../ui/lib/actionbar.mjs'
+import { REASON, initialOpsCtx, loginBlock, menuItems } from '../ui/lib/partner-ops.mjs'
 import { machinesByNode } from '../ui/lib/mobile-launch.mjs'
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -33,7 +33,7 @@ test('送出並輪詢：只送 node／name／op 與該動作的欄位，進度�
   const { v, seen } = await run(api, F('H', '小文'), 'handover', { note: ' 先看 PR ', newName: 'x', model: 'y' })
   assert.deepEqual(api.calls.op, [{ node: 'H', name: '小文', op: 'handover', note: '先看 PR' }])
   assert.deepEqual(api.calls.ops, [['op-1'], ['op-1'], ['op-1'], ['op-1']])
-  assert.deepEqual(seen.map(x => x.text), ['已經送出，等那台電腦接手…', '已經送出，等那台電腦接手…', '請前任寫交接中…', '關閉前任視窗中…', '接班換手完成，新視窗開好了。'])
+  assert.deepEqual(seen.map(x => x.text), ['正在發送指令…', '正在發送指令…', '請前任寫交接中…', '關閉前任視窗中…', '接班換手完成，新視窗開好了。'])
   assert.equal(v.phase, 'done'); assert.deepEqual(v.extra, ['交接檔：D:/h/a.md'])
 })
 
@@ -63,8 +63,8 @@ test('詳情：完成時附中文詳情列', async () => {
 })
 
 test('設定載入：沒登入、查不到的都當沒查到（反灰說明），不丟錯', async () => {
-  assert.deepEqual(await loadOpsContext({ authStatus: async () => ({ signed_in: true }), launchers: async () => ({ machines: [{ node: 'H', launcher: LAUNCHER, online: true }] }) }), { machines: { H: { node: 'H', launcher: LAUNCHER, online: true } }, loaded: true, signedIn: true })
-  assert.deepEqual(await loadOpsContext({ authStatus: async () => { throw new Error('x') }, launchers: async () => { throw new Error('y') } }), { machines: {}, loaded: false, signedIn: false })
+  assert.deepEqual(await loadOpsContext({ authStatus: async () => ({ signed_in: true }), launchers: async () => ({ machines: [{ node: 'H', launcher: LAUNCHER, online: true }] }) }), { machines: { H: { node: 'H', launcher: LAUNCHER, online: true } }, loaded: true, signedIn: true, checking: false, authError: '', loadError: '' })
+  assert.deepEqual(await loadOpsContext({ authStatus: async () => { throw new Error('x') }, launchers: async () => { throw new Error('y') } }), { machines: {}, loaded: false, signedIn: null, checking: false, authError: 'x', loadError: 'y' })
 })
 
 test('對話框文字：接班換手說明流程、全部純中文、不出現節點代號與夥伴 ID', () => {
@@ -118,4 +118,63 @@ test('電腦端指令：relay_partner_op／relay_partner_ops 只在電腦版清�
   assert.match(d, /relay_partner_op, relay_partner_ops,/)
   const m = /#\[cfg\(not\(desktop\)\)\]\n\s*let builder = builder\.invoke_handler\(tauri::generate_handler!\[([\s\S]*?)\]\);/.exec(lib)[1]
   assert.doesNotMatch(m, /\brelay_partner_ops?\b/, '電腦端指令不能進手機清單')
+})
+
+// ---------- 喚醒按鈕「要先登入」誤報（0.1.45） ----------
+
+const OFFLINE = F('H', '小文', { status: 'offline' })
+
+test('還沒查到登入狀態：喚醒顯示查詢中，不是要先登入', () => {
+  const v = wakeButtonView(OFFLINE, initialOpsCtx())
+  assert.equal(v.show, true); assert.equal(v.ok, false)
+  assert.equal(v.reason, REASON.checking)
+  assert.notEqual(v.reason, REASON.needLogin)
+  assert.deepEqual(menuItems(F('H', '小文'), initialOpsCtx()).map(i => i.reason), Array(5).fill(REASON.checking))
+})
+
+test('登入狀態查詢失敗：顯示真正原因，不當成沒登入；查到真的沒登入才說要先登入', async () => {
+  const bad = await loadOpsContext({ authStatus: async () => { throw new Error('讀不到登入存檔') }, launchers: async () => ({ machines: [{ node: 'H', launcher: LAUNCHER, online: true }] }) })
+  assert.equal(bad.signedIn, null)
+  const r = wakeButtonView(OFFLINE, bad).reason
+  assert.match(r, /查不到登入狀態：讀不到登入存檔/)
+  const no = await loadOpsContext({ authStatus: async () => ({ signed_in: false }), launchers: async () => ({ machines: [] }) })
+  assert.equal(wakeButtonView(OFFLINE, no).reason, REASON.needLogin)
+  const empty = await loadOpsContext({ authStatus: async () => undefined, launchers: async () => ({ machines: [] }) })
+  assert.equal(empty.signedIn, null)
+  assert.equal(loginBlock({ signedIn: true }), '')
+  assert.equal(loginBlock({}), '', '舊呼叫端沒給就不擋')
+})
+
+test('已登入、電腦設定查到、那台在線且開放：喚醒可按；設定查詢失敗顯示原因', async () => {
+  const ok = await loadOpsContext({ authStatus: async () => ({ signed_in: true }), launchers: async () => ({ machines: [{ node: 'H', launcher: LAUNCHER, online: true }] }) })
+  assert.equal(wakeButtonView(OFFLINE, ok).ok, true)
+  const bad = await loadOpsContext({ authStatus: async () => ({ signed_in: true }), launchers: async () => { throw new Error('連不上收發室') } })
+  assert.equal(wakeButtonView(OFFLINE, bad).reason, '查不到這台電腦的設定：連不上收發室')
+})
+
+test('查詢回來時名單物件已換新：以夥伴 ID 判斷是同一位，結果不丟掉', () => {
+  assert.equal(sameFriend({ id: 'H/小文', a: 1 }, { id: 'H/小文', a: 2 }), true)
+  assert.equal(sameFriend({ id: 'H/小文' }, { id: 'H/別人' }), false)
+  assert.equal(sameFriend(null, { id: 'x' }), false)
+})
+
+test('三個畫面都用「未知」當初始值，不再寫死 signedIn:false', () => {
+  for (const f of ['ui/lib/actionbar.mjs', 'ui/list.js']) {
+    const t = read(f)
+    assert.ok(t.includes('initialOpsCtx()'), f)
+    assert.ok(!/signedIn:\s*false/.test(t), `${f} 不可把初始登入狀態寫成 false`)
+  }
+  const m = read('ui/m.js')
+  assert.ok(m.includes('acctSigned()') && !/signedIn:\s*acct\.value\.signed_in/.test(m), '手機版要區分「還沒查到」')
+  assert.ok(!/props\.friend [!=]== f/.test(read('ui/lib/actionbar.mjs')), '查詢回來要比夥伴 ID，不能比物件')
+})
+
+test('對話框文字：重開要確認、接班換手依引擎說不同的事（ACP 不請前任寫交接）', () => {
+  const r = opDialogText('restart', 'Gemini', '家用機', 'acp')
+  assert.equal(r.auto, false); assert.equal(r.title, '重開'); assert.match(r.lead, /背景工作者/); assert.match(r.lead, /對話會保留/)
+  const acp = opDialogText('handover', 'Gemini', '', 'acp')
+  assert.ok(acp.points.some(p => /不會請前任寫交接/.test(p)))
+  const claude = opDialogText('handover', '小文', '')
+  assert.ok(claude.points.some(p => /先請它把交接寫到一個檔案/.test(p)))
+  for (const t of [r, acp, claude]) for (const s of [t.title, t.lead, t.ok, ...t.points]) assert.ok(!/[A-Za-z]{4,}/.test(s.replace('Gemini', '')), `純中文：${s}`)
 })

@@ -219,6 +219,10 @@ pub struct Core {
     /// 後台還沒支援夥伴 ID（404／400）：靜默停止，直到下次啟動
     partner_off: bool,
     partner_warned: bool,
+    /// 這台電腦的外掛狀態從哪裡來（預設讀 claude_mod 的全域狀態；測試可換）
+    mod_src: Arc<dyn Fn() -> Option<Value> + Send + Sync>,
+    /// 上次成功回報的外掛狀態（內容, 時間）；沒變化就不重報
+    mod_sent: Option<(String, u64)>,
 }
 
 /// JSON 數字（整數、浮點或數字字串）→ u64；不是數字回 0
@@ -252,7 +256,7 @@ impl Core {
         let mut c = Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), unrouted: HashSet::new(),
-            last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, cursor_warned: false, launcher: None, partner_ops: None, engines: None, claude_roster: vec![], corr,
+            last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false,
         };
         c.restore();
@@ -265,6 +269,9 @@ impl Core {
 
     /// 接上其他引擎（第五段）。沒接＝只有 Claude 視窗
     pub fn set_engines(&mut self, e: Arc<EngineSet>) {
+        if let (Some(p), Some(a)) = (&self.partner_ops, e.acp_admin()) {
+            p.set_acp(a);
+        }
         self.engines = Some(e);
     }
 
@@ -281,10 +288,17 @@ impl Core {
 
     /// 接上遠端管理夥伴視窗（詳情／改名／切換模型／關閉／轉交）。沒接＝不處理 partner_op_pending
     pub fn set_partner_ops(&mut self, p: Arc<PartnerOps>) {
+        if let Some(a) = self.engines.as_ref().and_then(|e| e.acp_admin()) {
+            p.set_acp(a);
+        }
         self.partner_ops = Some(p);
     }
 
     /// 接上遠端開視窗（第三段）。沒接＝名單回報 launcher 送 null、不處理 launch_pending
+    pub fn set_mod_source(&mut self, f: Arc<dyn Fn() -> Option<Value> + Send + Sync>) {
+        self.mod_src = f;
+    }
+
     pub fn set_launcher(&mut self, l: Arc<Launcher>) {
         self.launcher = Some(l);
     }
@@ -433,8 +447,19 @@ impl Core {
             Some(l) => tokio::task::spawn_blocking(move || l.summary()).await.unwrap_or(Value::Null),
             None => Value::Null,
         };
-        match self.relay.api("roster", Some(roster::roster_body(&self.roster, asn.as_deref(), launcher))).await {
-            Ok(_) => self.roster_warned = false,
+        let mut body = roster::roster_body(&self.roster, asn.as_deref(), launcher);
+        // 這台電腦的 Claude 外掛狀態：啟動檢查完與狀態變化時才附（舊後台會丟掉這個欄位，不壞）
+        let due = roster::mod_report_due((self.mod_src)(), self.mod_sent.as_ref(), now);
+        if let Some(m) = &due {
+            body["mod"] = m.clone();
+        }
+        match self.relay.api("roster", Some(body)).await {
+            Ok(_) => {
+                self.roster_warned = false;
+                if let Some(m) = due {
+                    self.mod_sent = Some((m.to_string(), now));
+                }
+            }
             Err(e) => {
                 if !self.roster_warned {
                     self.log.line(&format!("roster post failed: {e} (will keep trying quietly)"));
@@ -693,7 +718,7 @@ impl Core {
         }
         self.persist();
         // 照片／檔案：內文後面多一行「〔照片〕檔名＋下載指令」，和內文一起在外部資料區塊內
-        let body = attach::notes_for(&m.body, &m.attachments, self.cfg.attach_cmd.as_deref());
+        let body = attach::notes_for(&mail::escape_body(&m.body), &m.attachments, self.cfg.attach_cmd.as_deref());
         let text = format!("{}\n{}{}{}", mail_head(&m, &self.engine_label_of(&target)), mail::preamble(&m, &self.engine_of(&target)),if note.is_empty() { String::new() } else { format!("{note}\n") }, body);
         let text = self.with_path_line(text, &target);
         match self.deliver(&m.id, &target, &text) {

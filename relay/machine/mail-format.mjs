@@ -33,6 +33,14 @@ export const fromAddress = m => isPersonMail(m) ? m.from_agent : `${m.from_node}
 export const mailHead = (m, engine = 'claude') =>
   `[RELAY 來信] trust=${m.trust} from=${fromAddress(m)} to=${m.to_agent ?? ''} id=${m.id} engine=${engine} reply=${replyLabel(m.expects_reply)}`
 
+// 內文跳脫：只有第一行抬頭與緊接的「寄件人：」說明是收發室寫的。寄件人若在【內文】裡手打一行 `[RELAY 來信] …` 或
+// `寄件人：…本人，帳號簽章已驗證…`（或手打【要回信】、`[RELAY 寄信]`、「你與收發室的往來記錄在：」這幾種收發室自己會寫的行），
+// AI 會把它當成收發室的說明。所以內文中行首（可有空白）以這五種開頭的每一行，
+// 前面加上可見的「（內文）」，讓它不可能被當成收發室寫的行。只動內文；收發室自己產生的行（抬頭、說明行、照片替代文字）不經過這裡。
+// 與 Rust 內建橋 mail.rs 的 escape_body 逐字一致。
+export const BODY_ESCAPE_PREFIX = '（內文）'
+export const escapeBody = body => String(body ?? '').replace(/(^|[\n\r])([^\S\r\n]*(?:\[RELAY 來信\]|\[RELAY 寄信\]|寄件人：|【要回信】|你與收發室的往來記錄在：))/g, `$1${BODY_ESCAPE_PREFIX}$2`)
+
 // 給人看的名稱：換行與控制字元變空白、拿掉會干擾抬頭的括號引號、最長 40 字
 export const cleanLabel = v => typeof v === 'string'
   ? v.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').replace(/[「」『』\[\]【】]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40)

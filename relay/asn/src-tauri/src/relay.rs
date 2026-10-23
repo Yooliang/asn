@@ -138,6 +138,20 @@ pub fn with_partner_id(mut body: Value, partner_id: Option<&str>) -> Value {
     body
 }
 
+/// 「早於」時間（往上捲載入更舊的信）：後台吃 ISO 8601（例如 2026-10-23T01:02:03.456Z）。格式明顯不對就不送（後台也會再驗一次）
+pub fn valid_before(s: &str) -> bool {
+    let b = s.as_bytes();
+    s.len() >= 17 && s.len() <= 40 && b[0].is_ascii_digit() && s.contains('T') && b.iter().all(|c| c.is_ascii_digit() || matches!(c, b'T' | b':' | b'.' | b'-' | b'+' | b'Z'))
+}
+
+/// 往來記錄請求加上「早於」時間（選填）：沒帶或格式不對就不送，後台回最近的那批（行為與從前相同）
+pub fn with_before(mut body: Value, before: Option<&str>) -> Value {
+    if let (Some(o), Some(t)) = (body.as_object_mut(), before.filter(|t| valid_before(t))) {
+        o.insert("before".into(), json!(t));
+    }
+    body
+}
+
 /// 「這是某某的接班」請求內容（#153）：前任夥伴 ID、新視窗的節點與名字；格式不對就不送
 pub fn build_succeed_body(predecessor: &str, node: &str, name: &str) -> Result<Value, String> {
     if !valid_partner_id(predecessor) {
@@ -505,8 +519,9 @@ impl Relay {
         self.api_signed("send", Some(b), token).await
     }
     /// 往來記錄（#108）：一定要登入憑證（後台用簽章認人；節點金鑰 AI 也拿得到，不夠）。沒憑證直接回錯，不打後台
-    pub async fn chat_history(&self, node: &str, agent: &str, partner_id: Option<&str>, token: Option<&str>) -> Result<Value, String> {
-        let body = with_partner_id(build_history_body(node, agent, None)?, partner_id);
+    /// before＝只要早於這個時間的（往上捲載入更舊的信）、limit＝筆數（後台上限 200）；都沒給就和從前一樣取最近的一批
+    pub async fn chat_history(&self, node: &str, agent: &str, partner_id: Option<&str>, before: Option<&str>, limit: Option<u64>, token: Option<&str>) -> Result<Value, String> {
+        let body = with_before(with_partner_id(build_history_body(node, agent, limit)?, partner_id), before);
         let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法取得雲端的往來記錄")?;
         self.api_signed("chat_history", Some(body), Some(t)).await
     }
@@ -545,11 +560,27 @@ impl Relay {
         let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法封存夥伴")?;
         self.api_signed("partner_archive", Some(b), Some(t)).await
     }
+    /// 已讀多端同步（電腦與手機共用）：要本人簽章；沒憑證在打後台之前就回錯。送出 marks（可空，只取回），回 { ok, marks }
+    pub async fn read_sync_signed(&self, body: &Value, token: Option<&str>) -> Result<Value, String> {
+        let b = build_read_sync_body(body)?;
+        let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法同步已讀")?;
+        self.api_signed("read_sync", Some(b), Some(t)).await
+    }
     /// 查管理操作的進度（手機用）：同樣要本人簽章。回 { ops: [...] }
     pub async fn partner_ops_signed(&self, ids: &[String], token: Option<&str>) -> Result<Value, String> {
         let b = build_partner_ops_body(ids)?;
         let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法查詢管理操作的進度")?;
         self.api_signed("partner_ops", Some(b), Some(t)).await
+    }
+    /// 讀群組訊息（手機用）：和電腦版同一條路（節點金鑰，限成員）。回 { messages, last_seq }
+    pub async fn room_read(&self, room: &str, agent: Option<&str>, since: u64, limit: Option<u64>, mark: bool) -> Result<Value, String> {
+        self.api(&build_room_read_action(room, agent, since, limit, mark)?, None).await
+    }
+    /// 群組發言（手機用）：一定要本人簽章（後台才會標成本人發言）。沒憑證在打後台之前就回錯
+    pub async fn room_post_signed(&self, body: &Value, token: Option<&str>) -> Result<Value, String> {
+        let b = build_room_post_body(body)?;
+        let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法在群組發言")?;
+        self.api_signed("room_post", Some(b), Some(t)).await
     }
     pub async fn sent_status(&self, ids: &[String]) -> Result<Value, String> {
         let b = build_sent_status_body(ids)?;
@@ -662,6 +693,28 @@ pub fn build_partner_op_body(raw: &Value) -> Result<Value, String> {
     }
     Ok(b)
 }
+/// 已讀同步的內容：只留 marks（最多 100 筆，每筆 key 3～140 字且無控制字元、at 為正整數毫秒）；格式不對在打後台之前就回錯
+pub fn build_read_sync_body(raw: &Value) -> Result<Value, String> {
+    let list = match raw.get("marks") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(a)) => a.clone(),
+        Some(_) => return Err("已讀記錄的格式不對".into()),
+    };
+    if list.len() > 100 {
+        return Err("一次最多同步 100 筆已讀".into());
+    }
+    let mut out = Vec::new();
+    for m in &list {
+        let key = m.get("key").and_then(Value::as_str).unwrap_or("");
+        let n = key.chars().count();
+        if !(3..=140).contains(&n) || key.chars().any(|c| c.is_control()) {
+            return Err("已讀記錄的鍵不對".into());
+        }
+        let at = m.get("at").and_then(Value::as_u64).filter(|a| *a > 0 && *a <= 4_102_444_800_000).ok_or("已讀位置不對")?;
+        out.push(json!({ "key": key, "at": at }));
+    }
+    Ok(json!({ "marks": out }))
+}
 /// 封存的內容：node、archived（布林）、夥伴 ID（有就帶，格式要對）、名字（沒有夥伴 ID 時必填）；其餘一律丟掉。格式不對在打後台之前就回錯
 pub fn build_partner_archive_body(raw: &Value) -> Result<Value, String> {
     let o = raw.as_object().ok_or("封存的內容格式不對")?;
@@ -695,6 +748,52 @@ pub fn build_partner_ops_body(ids: &[String]) -> Result<Value, String> {
     } else {
         Err("查詢的編號格式不對".into())
     }
+}
+
+/// 群組代號：英數、底線、連字號，1～32 字（與後台同一條規則）
+pub fn valid_room_id(s: &str) -> bool {
+    (1..=32).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+/// 視窗代發的視窗名：不含「~」、不含控制字元、最多 60 字
+fn valid_room_agent(s: &str) -> bool {
+    s.chars().count() <= 60 && !s.contains('~') && !s.chars().any(|c| c.is_control())
+}
+/// 讀群組訊息的動作字串（手機用）：一定帶 since（沒帶後台會把已讀推進），mark＝讀完要不要標已讀
+pub fn build_room_read_action(room: &str, agent: Option<&str>, since: u64, limit: Option<u64>, mark: bool) -> Result<String, String> {
+    if !valid_room_id(room) {
+        return Err("群組代號格式不對".into());
+    }
+    let mut a = format!("room_read&room={}&since={}&limit={}", encode_component(room), since.min(999_999_999), limit.unwrap_or(50).clamp(1, 200));
+    if let Some(g) = agent.filter(|g| !g.is_empty()) {
+        if !valid_room_agent(g) {
+            return Err("視窗名格式不對".into());
+        }
+        a.push_str(&format!("&as_agent={}", encode_component(g)));
+    }
+    if mark {
+        a.push_str("&mark=1");
+    }
+    Ok(a)
+}
+/// 群組發言的內容（手機用）：只放行 room／body／from_agent 三個欄位
+pub fn build_room_post_body(raw: &Value) -> Result<Value, String> {
+    let o = raw.as_object().ok_or("發言的內容格式不對")?;
+    let room = o.get("room").and_then(Value::as_str).unwrap_or("");
+    if !valid_room_id(room) {
+        return Err("群組代號格式不對".into());
+    }
+    let body = o.get("body").and_then(Value::as_str).unwrap_or("");
+    if body.trim().is_empty() || body.chars().count() > 20_000 {
+        return Err("訊息要 1 到 20000 字".into());
+    }
+    let mut b = json!({ "room": room, "body": body });
+    match o.get("from_agent") {
+        None | Some(Value::Null) => {}
+        Some(Value::String(g)) if g.is_empty() => {}
+        Some(Value::String(g)) if valid_room_agent(g) => b["from_agent"] = json!(g),
+        Some(_) => return Err("視窗名格式不對".into()),
+    }
+    Ok(b)
 }
 
 #[cfg(test)]
@@ -798,6 +897,62 @@ b", "op": "close" }),
         for b in bad {
             assert!(build_partner_archive_body(&b).is_err(), "{b}");
         }
+    }
+
+    #[test]
+    fn 已讀同步_內容整理_壞格式在打後台前擋下() {
+        assert_eq!(build_read_sync_body(&json!({})).unwrap(), json!({ "marks": [] }));
+        assert_eq!(build_read_sync_body(&json!({ "marks": [{ "key": "p_0123456789abcdef0123", "at": 1700000000000u64, "x": 1 }] })).unwrap(), json!({ "marks": [{ "key": "p_0123456789abcdef0123", "at": 1700000000000u64 }] }));
+        for bad in [json!({ "marks": "x" }), json!({ "marks": [{ "key": "ab", "at": 5 }] }), json!({ "marks": [{ "key": "abc", "at": 0 }] }), json!({ "marks": [{ "key": "abc", "at": -1 }] }), json!({ "marks": [{ "key": "abc", "at": 1.5 }] }), json!({ "marks": [{ "key": "a
+b", "at": 5 }] }), json!({ "marks": [{ "at": 5 }] })] {
+            assert!(build_read_sync_body(&bad).is_err(), "{bad}");
+        }
+        let many: Vec<Value> = (0..101).map(|i| json!({ "key": format!("n:H/{i}"), "at": 5 })).collect();
+        assert!(build_read_sync_body(&json!({ "marks": many })).is_err());
+    }
+
+    #[tokio::test]
+    async fn 已讀同步_沒有本人簽章不送出_有簽章帶標頭() {
+        let (url, seen) = fake_server(200);
+        let r = Relay::new(url, "secret-key".into(), "P".into(), "P-ASN".into());
+        let req = json!({ "marks": [] });
+        assert!(r.read_sync_signed(&req, None).await.unwrap_err().contains("尚未登入"));
+        assert!(r.read_sync_signed(&req, Some("")).await.is_err(), "空憑證等於沒有");
+        assert!(seen.lock().unwrap().is_empty(), "沒簽章時完全沒有打後台");
+        r.read_sync_signed(&req, Some("usertoken-9")).await.unwrap();
+        let s = seen.lock().unwrap();
+        assert_eq!(s.len(), 1);
+        assert!(s[0].to_lowercase().contains("x-asn-user: bearer usertoken-9") && s[0].contains("action=read_sync"), "{}", s[0]);
+    }
+
+    #[test]
+    fn 群組讀寫_動作與內容只留必要欄位_格式擋在前面() {
+        assert_eq!(build_room_read_action("r-1", None, 0, None, false).unwrap(), "room_read&room=r-1&since=0&limit=50");
+        assert_eq!(build_room_read_action("r_1", Some("手機"), 7, Some(999), true).unwrap(), "room_read&room=r_1&since=7&limit=200&as_agent=%E6%89%8B%E6%A9%9F&mark=1");
+        assert!(build_room_read_action("a&action=x", None, 0, None, false).is_err() && build_room_read_action("", None, 0, None, false).is_err());
+        assert!(build_room_read_action("r", Some("a~b"), 0, None, false).is_err());
+        let b = build_room_post_body(&json!({ "room": "r1", "body": "嗨", "from_agent": "手機", "as_owner": true, "command": "x" })).unwrap();
+        assert_eq!(b, json!({ "room": "r1", "body": "嗨", "from_agent": "手機" }));
+        assert_eq!(build_room_post_body(&json!({ "room": "r1", "body": "嗨", "from_agent": "" })).unwrap(), json!({ "room": "r1", "body": "嗨" }));
+        for bad in [json!({ "room": "r 1", "body": "嗨" }), json!({ "room": "r1", "body": "  " }), json!({ "room": "r1", "body": "字".repeat(20_001) }), json!({ "room": "r1", "body": "a", "from_agent": "x~y" }), json!({ "room": "r1", "body": "a", "from_agent": 5 }), json!([1])] {
+            assert!(build_room_post_body(&bad).is_err(), "{bad}");
+        }
+    }
+
+    #[tokio::test]
+    async fn 群組發言_沒有本人簽章不送出_有簽章帶標頭_讀取不帶簽章() {
+        let (url, seen) = fake_server(200);
+        let r = Relay::new(url, "secret-key".into(), "P".into(), "P-ASN".into());
+        let req = json!({ "room": "r1", "body": "嗨" });
+        assert!(r.room_post_signed(&req, None).await.unwrap_err().contains("尚未登入"));
+        assert!(r.room_post_signed(&req, Some("")).await.is_err(), "空憑證等於沒有");
+        assert!(seen.lock().unwrap().is_empty(), "沒簽章時完全沒有打後台");
+        r.room_post_signed(&req, Some("usertoken-9")).await.unwrap();
+        r.room_read("r1", None, 3, Some(20), true).await.unwrap();
+        let s = seen.lock().unwrap();
+        assert_eq!(s.len(), 2);
+        assert!(s[0].to_lowercase().contains("x-asn-user: bearer usertoken-9") && s[0].contains("action=room_post"), "{}", s[0]);
+        assert!(s[1].contains("action=room_read") && s[1].contains("since=3") && !s[1].to_lowercase().contains("x-asn-user"), "{}", s[1]);
     }
 
     #[tokio::test]
@@ -1025,10 +1180,10 @@ b", "op": "close" }),
     async fn 往來記錄_一定要憑證_沒憑證不打後台_有憑證帶簽章標頭() {
         let (url, seen) = fake_server_with(200, r#"{"messages":[]}"#);
         let r = Relay::new(url, "secret-key".into(), "H".into(), "H-ASN".into());
-        assert!(r.chat_history("M", "小文", None, None).await.is_err());
-        assert!(r.chat_history("M", "小文", None, Some("")).await.is_err());
+        assert!(r.chat_history("M", "小文", None, None, None, None).await.is_err());
+        assert!(r.chat_history("M", "小文", None, None, None, Some("")).await.is_err());
         assert_eq!(seen.lock().unwrap().len(), 0, "沒憑證不送出任何請求");
-        let v = r.chat_history("M", "小文", Some("p_0123456789abcdef0123"), Some("USERTOKEN-123")).await.unwrap();
+        let v = r.chat_history("M", "小文", Some("p_0123456789abcdef0123"), None, None, Some("USERTOKEN-123")).await.unwrap();
         assert_eq!(v, json!({ "messages": [] }));
         let s = seen.lock().unwrap();
         let low = s[0].to_lowercase();
@@ -1044,6 +1199,30 @@ b", "op": "close" }),
         assert_eq!(with_partner_id(b.clone(), Some("p_0123456789abcdef0123"))["partner_id"], "p_0123456789abcdef0123");
         assert_eq!(with_partner_id(b.clone(), Some("p_XYZ")), b);
         assert_eq!(with_partner_id(b.clone(), None), b);
+    }
+
+    #[test]
+    fn 往來記錄請求_早於時間與筆數_格式對才送_沒帶就和從前一樣() {
+        let b = build_history_body("M", "小文", None).unwrap();
+        let t = "2026-10-23T01:02:03.456Z";
+        assert_eq!(with_before(b.clone(), Some(t))["before"], t);
+        assert_eq!(with_before(b.clone(), Some("2026-10-23T09:02:03+08:00"))["before"], "2026-10-23T09:02:03+08:00");
+        for bad in ["", "昨天", "yesterday", "2026-10-23", "2026-10-23T01:02:03Z; drop table", &"2".repeat(41)] {
+            assert_eq!(with_before(b.clone(), Some(bad)), b, "{bad}");
+        }
+        assert_eq!(with_before(b.clone(), None), b, "沒帶就一個鍵都不多");
+        assert_eq!(build_history_body("M", "小文", Some(50)).unwrap()["limit"], 50);
+    }
+
+    #[tokio::test]
+    async fn 往來記錄_早於時間與筆數有轉送到請求本文() {
+        let (url, seen) = fake_server_with(200, r#"{"messages":[]}"#);
+        let r = Relay::new(url, "secret-key".into(), "H".into(), "H-ASN".into());
+        r.chat_history("M", "小文", None, Some("2026-10-23T01:02:03.456Z"), Some(50), Some("USERTOKEN-123")).await.unwrap();
+        r.chat_history("M", "小文", None, None, None, Some("USERTOKEN-123")).await.unwrap();
+        let s = seen.lock().unwrap();
+        assert!(s[0].contains(r#""before":"2026-10-23T01:02:03.456Z""#) && s[0].contains(r#""limit":50"#), "{}", s[0]);
+        assert!(!s[1].contains("before") && !s[1].contains("limit"), "沒帶就不送：{}", s[1]);
     }
 
     #[test]

@@ -27,6 +27,8 @@ pub struct Window {
     pub detail: Option<String>,
     /// 外掛狀態檔 context.percent（上下文已用百分比，0～100 整數）；沒有或不合格就是 None，名單不帶這個欄位
     pub context_pct: Option<u8>,
+    /// 這個視窗有載入 ASN 外掛（外掛狀態檔有效）；名單只在 true 時帶 mod_loaded
+    pub mod_loaded: bool,
 }
 
 impl Window {
@@ -36,7 +38,7 @@ impl Window {
     }
     /// Claude 視窗（由 ~/.claude/sessions 讀出）
     pub fn claude(name: &str, status: Option<String>, cwd: &str, pid: u32, updated_at: u64, session_id: Option<String>) -> Window {
-        Window { name: name.into(), status, cwd: cwd.into(), pid, updated_at, session_id, engine: "claude".into(), engine_label: None, no_fallback: false, cwd_label_override: None, detail: None, context_pct: None }
+        Window { name: name.into(), status, cwd: cwd.into(), pid, updated_at, session_id, engine: "claude".into(), engine_label: None, no_fallback: false, cwd_label_override: None, detail: None, context_pct: None, mod_loaded: false }
     }
     pub fn cwd_label(&self) -> String {
         if let Some(l) = &self.cwd_label_override {
@@ -96,6 +98,7 @@ pub fn apply_mod_status(windows: &mut [Window], dir: &Path, now_ms: u64) {
             w.status = Some(status);
             w.detail = detail;
             w.context_pct = ctx;
+            w.mod_loaded = true;
         }
     }
 }
@@ -224,6 +227,9 @@ pub fn roster_body(windows: &[Window], asn_window: Option<&str>, launcher: Value
             if let Some(p) = w.context_pct {
                 o["context_pct"] = json!(p); // 可選欄位：舊後台會丟掉，舊用戶端略過
             }
+            if w.mod_loaded {
+                o["mod_loaded"] = json!(true); // 可選欄位：這個視窗有載入外掛；舊後台會丟掉，舊用戶端略過
+            }
             o
         })
         .collect();
@@ -233,6 +239,21 @@ pub fn roster_body(windows: &[Window], asn_window: Option<&str>, launcher: Value
         }
     }
     json!({ "agents": agents, "launcher": launcher })
+}
+
+/// 外掛狀態回報的間隔：沒變化時最久每 30 分鐘補報一次（後台有存，補報只是保險，不高頻）
+pub const MOD_REPORT_REFRESH_MS: u64 = 30 * 60 * 1000;
+
+/// 這一輪名單回報要不要附上這台電腦的外掛狀態（`mod` 欄位）。
+/// report＝目前狀態（None＝沒在檢查，例如截圖模式，不報）；last＝上次成功回報的（內容, 時間）。
+/// 內容有變、或距上次超過 MOD_REPORT_REFRESH_MS 才報，否則回 None（名單照舊不帶這個欄位）。
+pub fn mod_report_due(report: Option<Value>, last: Option<&(String, u64)>, now_ms: u64) -> Option<Value> {
+    let r = report?;
+    let text = r.to_string();
+    match last {
+        Some((t, at)) if *t == text && now_ms.saturating_sub(*at) < MOD_REPORT_REFRESH_MS => None,
+        _ => Some(r),
+    }
 }
 
 /// partner_sync 的請求內容（#109）：每個視窗的名字、session 編號（沒有就不送）、引擎。節點由後端依金鑰決定，這裡不送。
@@ -529,5 +550,34 @@ mod tests {
         assert_eq!(roster_body(&[w.clone()], None, Value::Null)["agents"][0], json!({"name":"T-甲","status":"busy","cwd_label":"b","engine":"claude"}));
         w.context_pct = Some(85);
         assert_eq!(roster_body(&[w], None, Value::Null)["agents"][0], json!({"name":"T-甲","status":"busy","cwd_label":"b","engine":"claude","context_pct":85}));
+    }
+
+    #[test]
+    fn 外掛狀態檔有效才算視窗有載入外掛_名單只在有載入時帶_mod_loaded() {
+        let d = tempfile::tempdir().unwrap();
+        put_status(d.path(), "s1", json!({"sessionId":"s1","state":"idle","at":NOW}));
+        let mut ws = vec![win("s1", "idle"), win("s2", "idle")];
+        apply_mod_status(&mut ws, d.path(), NOW);
+        assert_eq!([ws[0].mod_loaded, ws[1].mod_loaded], [true, false], "只有狀態檔有效的那個");
+        let b = roster_body(&ws, None, Value::Null);
+        assert_eq!(b["agents"][0]["mod_loaded"], json!(true));
+        assert!(b["agents"][1].get("mod_loaded").is_none(), "沒外掛不帶欄位，和以前一模一樣");
+        // 過期的狀態檔不算
+        let mut old = vec![win("s1", "idle")];
+        apply_mod_status(&mut old, d.path(), NOW + MOD_STATUS_MAX_AGE_MS + 1);
+        assert!(!old[0].mod_loaded);
+    }
+
+    #[test]
+    fn 外掛狀態回報時機_第一次與有變化才報_沒變化超過_30_分鐘補報_沒有狀態不報() {
+        let a = json!({"state":"checking"});
+        let b = json!({"state":"installed","version":"0.4.2"});
+        assert_eq!(mod_report_due(None, None, 1000), None, "沒有在檢查（截圖模式）不報");
+        assert_eq!(mod_report_due(Some(a.clone()), None, 1000), Some(a.clone()), "第一次");
+        let last = (a.to_string(), 1000);
+        assert_eq!(mod_report_due(Some(a.clone()), Some(&last), 1000 + 60_000), None, "沒變化、一分鐘後不重報");
+        assert_eq!(mod_report_due(Some(a.clone()), Some(&last), 1000 + MOD_REPORT_REFRESH_MS - 1), None);
+        assert_eq!(mod_report_due(Some(a.clone()), Some(&last), 1000 + MOD_REPORT_REFRESH_MS), Some(a.clone()), "滿 30 分鐘補報");
+        assert_eq!(mod_report_due(Some(b.clone()), Some(&last), 2000), Some(b), "有變化立刻報");
     }
 }

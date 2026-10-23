@@ -12,7 +12,7 @@ import { Fail, resolveCloudAgents, resolveConfig, rosterScanEnvFrom } from './co
 import { applyEnvCompat } from './env-compat.mjs'
 import { appendLineDurable, ensureDir, readJsonl } from './lib.mjs'
 import { bodyWithNotes } from '../machine/attach-format.mjs'
-import { isPersonMail, senderLine } from '../machine/mail-format.mjs'
+import { escapeBody, isPersonMail, senderLine } from '../machine/mail-format.mjs'
 import { cloudCmd } from './attach.mjs'
 
 const USAGE = `用法：
@@ -38,7 +38,7 @@ ${USAGE}`) }
 
 const fmt = m => {
   const reply = m.expects_reply === true ? '要回信' : m.expects_reply === false ? '只是告知' : '未說明'
-  return `[${m.id}] ${m.created_at ?? ''} to=${m.to_agent || '（未指定）'} from=${isPersonMail(m) ? m.from_agent : m.from_node + (m.from_agent ? '/' + m.from_agent : '')} (${reply})${m.reply_to ? ` reply_to=${m.reply_to}` : ''}\n${senderLine(m)}\n${bodyWithNotes(m.body, m.attachments, cloudCmd())}\n`   // 照片：內文後面多一行「〔照片〕檔名＋下載指令」（外部資料，同內文）
+  return `[${m.id}] ${m.created_at ?? ''} to=${m.to_agent || '（未指定）'} from=${isPersonMail(m) ? m.from_agent : m.from_node + (m.from_agent ? '/' + m.from_agent : '')} (${reply})${m.reply_to ? ` reply_to=${m.reply_to}` : ''}\n${senderLine(m)}\n${bodyWithNotes(escapeBody(m.body), m.attachments, cloudCmd())}\n`   // 照片：內文後面多一行「〔照片〕檔名＋下載指令」（外部資料，同內文）
 }
 
 export async function main(argv, rawEnv = process.env, out = s => process.stdout.write(s + '\n')) {

@@ -10,16 +10,19 @@ import { parseAsnPresence } from "../_shared/asn_presence.ts";
 import { handlePartnerList, handlePartnerSucceed, handlePartnerSync } from "../_shared/partners.ts";
 import { bellTopicsOf, handleChatHistory, personArgs, sendWithPerson } from "../_shared/account_me.ts";
 import { normalizeRosterAgents } from "../_shared/roster.ts";
+import { sanitizeClaudeMod } from "../_shared/claude_mod.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
 import * as signal from "../_shared/signal.ts";
 import { handleNodeLaunchAction, LAUNCH_ACTIONS, sanitizeLauncher } from "../_shared/launch.ts";
 import { handleNodePartnerOpAction, PARTNER_OP_ACTIONS } from "../_shared/partner_ops.ts";
 import { ACCT_ACTIONS, handleAcctAction } from "../_shared/account_switch.ts";
+import { handleSecretAction, SECRET_ACTIONS } from "../_shared/secret_remote.ts";
 import {
   ACTIONS as ATTACH_ACTIONS, bindAttachments, handleAttachAction, prepareAttachments, type StorageDeps, withAttachments,
   withRoomAttachments,
 } from "../_shared/attachments.ts";
 import { SIGN_HEADER, signedArgs, signedUserId } from "../_shared/owner_sign.ts";
+import { requestReadSync } from "../_shared/read_sync.ts";
 import { handleTts, TtsLimiter, ttsVoicesResponse } from "../_shared/tts.ts";
 
 const ttsLimiter = new TtsLimiter();
@@ -227,6 +230,15 @@ Deno.serve(async (req) => {
       if (le) console.error(le);
       else if (ld?.error) console.warn("set_launcher", me.id, ld.error);
     }
+    // 這台電腦的 Claude 外掛狀態（選填 mod；啟動檢查完與狀態變化時才帶）。格式不對或舊資料庫沒有這支函式都只記 log，不影響名單
+    if ("mod" in b) {
+      const cm = sanitizeClaudeMod(b.mod);
+      if (cm) {
+        const { data: md, error: me2 } = await db.rpc("asn_relay_set_claude_mod", { p_node: me.id, p_mod: cm });
+        if (me2) console.warn("set_claude_mod", me.id, me2.message ?? me2);
+        else if (md?.error) console.warn("set_claude_mod", me.id, md.error);
+      }
+    }
     // 視窗名單更新後：符合群組「自動收入」開頭字串的視窗自動入群，消失的標為離開（不是 AI 加人，是比對 roster）
     await syncNodeAuto(roomDeps(), me.id, agents.map((a: { name: unknown }) => a.name).filter((n: unknown): n is string => typeof n === "string"));
     return json(200, { ok: true, count: data.count });
@@ -420,6 +432,13 @@ Deno.serve(async (req) => {
     const r = await handleNodeLaunchAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedLaunch);
     return json(r.status, r.body);
   }
+  // 已讀多端同步（_shared/read_sync.ts）：要本人簽章，沒簽章 401 不打資料庫；一次寫入我這端的已讀位置並取回整個帳號的
+  if (action === "read_sync") {
+    const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
+    const signedRead = await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER));
+    const r = await requestReadSync({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me.id, raw, signedRead);
+    return json(r.status, r.body);
+  }
   // 遠端管理夥伴視窗（詳情、改名、切換模型、關閉、轉交）：partner_op／partner_ops 是手機下令與查進度（一定要本人簽章，沒簽章 401 不打資料庫）；
   // partner_op_pending／partner_op_result 是電腦端內建收發室取待辦、回報結果（只動得到自己節點的）
   if (action && PARTNER_OP_ACTIONS.has(action)) {
@@ -427,6 +446,15 @@ Deno.serve(async (req) => {
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
     const signedOp = (action === "partner_op" || action === "partner_ops" || action === "partner_archive") ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
     const r = await handleNodePartnerOpAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedOp);
+    return json(r.status, r.body);
+  }
+  // 遠端一次性密碼傳遞（#26 第二期，見 _shared/secret_remote.ts）：secret_request／secret_fetch 是請求端；secret_pending／secret_reply 是本人設備，一定要本人簽章（沒簽章 401 不打資料庫）。
+  // 密文只轉不看：不進 log，只出現在 secret_reply 的資料庫參數與 secret_fetch 的回應。
+  if (action && SECRET_ACTIONS.has(action)) {
+    if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
+    const raw = await req.json().catch(() => null);
+    const signedSecret = (action === "secret_pending" || action === "secret_reply") ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
+    const r = await handleSecretAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, raw, signedSecret);
     return json(r.status, r.body);
   }
   // 遠端切換 Claude 帳號（ASN 帳號管理，見 _shared/account_switch.ts）：

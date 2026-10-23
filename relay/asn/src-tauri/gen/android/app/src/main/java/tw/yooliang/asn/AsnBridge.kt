@@ -10,6 +10,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.MediaStore
+import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.MimeTypeMap
 import java.io.File
@@ -78,6 +79,26 @@ class AsnBridge(private val activity: MainActivity) {
   /** 把下載好的更新檔交給系統安裝程式。回 ok／need_permission／error／unsupported */
   @JavascriptInterface
   fun installApk(path: String): String = SelfUpdate.install(activity, path)
+
+  // ---------- 偽通話（#99）：安卓內建的語音辨識與語音合成，見 CallVoice.kt；事件由它推回網頁 ----------
+  @JavascriptInterface fun callAvailable(): Boolean = activity.callVoice.available()
+  /** 麥克風權限：granted／ask */
+  @JavascriptInterface fun callMicState(): String = activity.callVoice.micState()
+  @JavascriptInterface fun callRequestMic() = activity.callVoice.requestMic()
+  @JavascriptInterface fun callListen() = activity.callVoice.listen()
+  @JavascriptInterface fun callStopListen() = activity.callVoice.stopListen()
+  @JavascriptInterface fun callSpeak(id: String, text: String) = activity.callVoice.speak(id, text)
+  @JavascriptInterface fun callStopSpeak() = activity.callVoice.stopSpeak()
+  @JavascriptInterface fun callEnd() = activity.callVoice.end()
+
+  /** 通話中讓螢幕保持亮著（不然自己暗掉就會被當成切到背景而結束通話） */
+  @JavascriptInterface
+  fun keepAwake(on: Boolean) {
+    activity.runOnUiThread {
+      if (on) activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+      else activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+  }
 
   /** 重新開啟 ASN（第一次登入建好這支手機的節點後，Rust 端要重新讀身分）。先叫起新的，再結束這個行程 */
   @JavascriptInterface

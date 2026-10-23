@@ -92,7 +92,12 @@ test('安卓專案：套件名、權限、關閉備份、登入回來的網址�
   assert.match(manifest, /android\.permission\.INTERNET/); assert.match(manifest, /android\.permission\.VIBRATE/)
   assert.match(manifest, /android:allowBackup="false"/, '節點金鑰與登入存檔不能被系統備份帶到別支手機')
   assert.match(manifest, /android:scheme="tw\.yooliang\.asn"/, '瀏覽器登入完成後帶回 App 的網址協定')
-  assert.doesNotMatch(manifest, /READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|RECORD_AUDIO|CAMERA|READ_CONTACTS/, '不多要權限')
+  assert.doesNotMatch(manifest, /READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|CAMERA|READ_CONTACTS/, '不多要權限')
+  // 麥克風只為「通話」（#99）要：必須有，而且只有這一個多出來的危險權限
+  assert.match(manifest, /<uses-permission android:name="android\.permission\.RECORD_AUDIO" \/>/, '通話需要麥克風權限（Play 版與自行安裝版共用這份清單）')
+  assert.match(manifest, /android\.hardware\.microphone"\s+android:required="false"/, '沒有麥克風的裝置也要能裝')
+  assert.match(manifest, /android\.speech\.RecognitionService/); assert.match(manifest, /android\.intent\.action\.TTS_SERVICE/)   // Android 11 以上看得到系統語音服務
+  assert.deepEqual([...manifest.matchAll(/uses-permission android:name="android\.permission\.(\w+)"/g)].map(m => m[1]).sort(), ['INTERNET', 'RECORD_AUDIO', 'VIBRATE'], '權限只有網路、震動、麥克風（另有安裝權限的置換字串）')
   const gradle = g('app', 'build.gradle.kts')
   assert.match(gradle, /applicationId = "tw\.yooliang\.asn"/); assert.match(gradle, /namespace = "tw\.yooliang\.asn"/)
   assert.doesNotMatch(gradle, /storeFile|signingConfigs|keystore/i, '第一期只用除錯簽章，不帶正式簽章金鑰')
@@ -415,4 +420,49 @@ test('登入完成頁（安卓）：把使用者帶回 App 的按鈕，不帶權
   assert.match(m[1], /intent:\/\/login-done#Intent;scheme=tw\.yooliang\.asn;package=tw\.yooliang\.asn;end/)
   assert.doesNotMatch(m[1], /code|token|state|verifier/i)
   assert.match(auth, /fn page_ok\(\)[\s\S]*cfg!\(target_os = "android"\)/)
+})
+
+test('通話（#99）：麥克風執行期才問、語音走系統內建，手機不編進電腦端的語音模組與指令', () => {
+  const dir = ['src-tauri', 'gen', 'android', 'app', 'src', 'main', 'java', 'tw', 'yooliang', 'asn']
+  const voice = read(...dir, 'CallVoice.kt'), bridgeKt = read(...dir, 'AsnBridge.kt'), act = read(...dir, 'MainActivity.kt')
+  assert.match(voice, /requestPermissions\([^)]*RECORD_AUDIO/, '第一次通話才詢問麥克風權限')
+  assert.match(voice, /"zh-TW"/); assert.match(voice, /SpeechRecognizer/); assert.match(voice, /TextToSpeech/)
+  assert.match(act, /onRequestPermissionsResult/); assert.match(act, /override fun onStop\(\)[\s\S]*callVoice\.onBackground\(\)/, '螢幕關閉或切到背景要結束通話')
+  for (const m of ['callAvailable', 'callMicState', 'callRequestMic', 'callListen', 'callStopListen', 'callSpeak', 'callStopSpeak', 'callEnd', 'keepAwake']) assert.match(bridgeKt, new RegExp(`@JavascriptInterface\\s+fun ${m}\\b`), `外殼橋有 ${m}`)
+  // 手機的通話邏輯是純邏輯：不碰電腦端的收音、辨識、念出（stt／tts 是電腦端模組，指令手機不存在）
+  const logic = read('ui', 'lib', 'mobile-call.mjs').replace(/(^|\s)\/\/.*$/gm, '$1')
+  assert.doesNotMatch(logic, /from '\.\/(mic|voice-ui|voice-input|tauri|wav)\.mjs'/, '不編進電腦端的收音與 Tauri')
+  assert.doesNotMatch(logic, /invoke\(|stt_|tts_|voice_cfg/, '不叫電腦端的語音指令')
+  const mjs = read('ui', 'm.js').replace(/(^|\s)\/\/.*$/gm, '$1')
+  assert.doesNotMatch(mjs, /['"`](stt_\w+|tts_\w+|voice_\w+)['"`]/)
+  for (const c of ['stt', 'tts', 'voicecfg']) assert.match(lib, new RegExp(`#\\[cfg\\(desktop\\)\\]\\s*mod ${c};`), `${c} 仍然只有電腦版`)
+})
+
+test('通話鈕只在對話頁工具列、只給 AI 夥伴；手機對話頁把通話接上', () => {
+  const pane = read('ui', 'lib', 'chatpane.mjs')
+  assert.match(pane, /v-if="showCallBtn"[^>]*@click="startCall"/, '工具列的通話鈕')
+  assert.match(pane, /const showCallBtn = computed\(\(\) => !!props\.callApi && !!call && canCallPartner\(props\.friend\)\)/, '顯示條件：手機傳了通話、對方是 AI 夥伴')
+  assert.match(pane, /:callable="!!call && !callApi"/, '手機沒有上方功能列，不會多出第二顆通話鈕')
+  assert.match(read('ui', 'm.html'), /<chat-pane[^>]*:call-api="callApi"[^>]*@call-state="onCallState"/)
+  assert.match(read('ui', 'm.js'), /startCallPoll\(\{ anyCall: \(\) => callOn\.value/, '通話中每 2 秒收信')
+  for (const f of ['list.html', 'chat.html']) assert.doesNotMatch(read('ui', f), /call-api/, `${f} 是電腦版頁面，沒有手機的通話`)
+})
+
+test('手機群組對話：讀走節點金鑰、發言走要本人簽章的專用指令；手機清單沒有電腦端模組；畫面不叫沒簽章的發言路徑', () => {
+  const m = /#\[cfg\(not\(desktop\)\)\]\n\s*let builder = builder\.invoke_handler\(tauri::generate_handler!\[([\s\S]*?)\]\);/.exec(lib)
+  const names = m[1].split(',').map(s => s.trim().replace(/^\w+::/, '')).filter(Boolean)
+  for (const c of ['relay_rooms', 'android_room_read', 'android_room_post']) assert.ok(names.includes(c), `手機要有 ${c}`)
+  const droid = read('src-tauri', 'src', 'android.rs')
+  const post = /pub async fn android_room_post[\s\S]*?\n\}/.exec(droid)[0]
+  assert.match(post, /signing_token/, '發言要取登入憑證')
+  assert.match(post, /room_post_signed/, '發言走簽章版')
+  assert.doesNotMatch(post, /\.api\(/, '發言不能繞過簽章直接打後台')
+  const relay = read('src-tauri', 'src', 'relay.rs')
+  assert.match(/pub async fn room_post_signed[\s\S]*?\n    \}/.exec(relay)[0], /ok_or\("尚未登入/, '沒憑證在打後台之前就回錯')
+  const js = read('ui', 'm.js')
+  assert.match(js, /invoke\('android_room_post'/); assert.match(js, /invoke\('android_room_read'/); assert.match(js, /invoke\('relay_rooms'/)
+  assert.doesNotMatch(js, /invoke\('relay_send'[^\n]*room/i, '群組發言不經一般寄信')
+  const html = read('ui', 'm.html'), css = read('ui', 'mobile.css')
+  assert.match(html, /ROOM_GROUP_KEY/, '夥伴分頁有群組對話分組'); assert.match(html, /is-room/)
+  assert.match(css, /\.m-chat\.is-room \.toolbar>\.tool\{display:none\}/, '群組沒有震動、傳照片、傳檔案：工具列的鈕藏起來')
 })

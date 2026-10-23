@@ -34,6 +34,7 @@ mod ads;
 mod agent_tools;
 #[cfg(desktop)]
 pub mod askpass;
+pub mod secret_remote;
 #[cfg(desktop)]
 mod bridge;
 #[cfg(desktop)]
@@ -524,10 +525,17 @@ async fn relay_send(app: State<'_, App>, auth: State<'_, auth::AuthState>, paylo
 }
 /// 「我和某夥伴」90 天內的往來（以後台為準，本機只當快取）。要登入憑證；沒登入或後台還沒支援就回錯，前端靜默沿用本機快取
 #[tauri::command]
-async fn relay_chat_history(app: State<'_, App>, auth: State<'_, auth::AuthState>, node: String, agent: Option<String>, partner_id: Option<String>) -> Result<Value, String> {
+async fn relay_chat_history(app: State<'_, App>, auth: State<'_, auth::AuthState>, node: String, agent: Option<String>, partner_id: Option<String>, before: Option<String>, limit: Option<u64>) -> Result<Value, String> {
     let r = relay_of(&app)?;
     let token = account::signing_token(&auth).await;
-    r.chat_history(&node, agent.as_deref().unwrap_or(""), partner_id.as_deref(), token.as_deref()).await
+    r.chat_history(&node, agent.as_deref().unwrap_or(""), partner_id.as_deref(), before.as_deref(), limit, token.as_deref()).await
+}
+/// 已讀多端同步（設計見 docs/design/READ-SYNC.md）：送出這台的已讀位置、取回整個帳號的。電腦與手機共用；要本人簽章，沒登入回錯（不打後台），舊後台回 404，前端都靜默
+#[tauri::command]
+async fn relay_read_sync(app: State<'_, App>, auth: State<'_, auth::AuthState>, body: Value) -> Result<Value, String> {
+    let r = relay_of(&app)?;
+    let token = account::signing_token(&auth).await;
+    r.read_sync_signed(&body, token.as_deref()).await
 }
 /// 可被接班的夥伴清單（#153，要登入）。沒登入或後台還沒支援就回錯，前端不顯示「接班」選項
 #[tauri::command]
@@ -861,7 +869,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_mod::claude_mod_status,
             codex_accounts::codex_account_current, usage::usage_summary,
@@ -876,10 +884,10 @@ pub fn run() {
     // 手機只開放單欄名單與對話需要的指令；電腦端的指令（開視窗、橋、用量……）手機上根本不存在
     #[cfg(not(desktop))]
     let builder = builder.invoke_handler(tauri::generate_handler![
-        startup_info, relay_list, relay_inbox, relay_ack, relay_rooms, relay_send, relay_chat_history, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_avatar, relay_set_avatar,
+        startup_info, relay_list, relay_inbox, relay_ack, relay_rooms, relay_send, relay_chat_history, relay_read_sync, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_avatar, relay_set_avatar,
         set_presence, set_window_name, store_load, store_save, quit_app, capture_ui_ready, shot_frontend_log, open_link,
         account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_bind,
-        android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, relay_partner_list, relay_partner_succeed,
+        android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, android::android_secret_pending, android::android_secret_reply, android::android_room_read, android::android_room_post, relay_partner_list, relay_partner_succeed,
     ]);
     let builder = builder
         .setup(move |app| {
@@ -906,9 +914,12 @@ pub fn run() {
                 let h = handle.clone();
                 let dir = auto_acct_dir.clone();
                 *handle.state::<claude_mod::ModState>().0.lock().unwrap() = "Claude 外掛：檢查中…".into();
+                claude_mod::set_report(Some(serde_json::json!({ "state": "checking" })));   // 內建收發室下一輪名單回報時帶給後台
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                    let line = tauri::async_runtime::spawn_blocking(move || claude_mod::run_real(&dir).line()).await.unwrap_or_else(|_| "Claude 外掛：安裝失敗：背景工作中斷".into());
+                    let out = tauri::async_runtime::spawn_blocking(move || claude_mod::run_real(&dir)).await.unwrap_or_else(|_| claude_mod::Outcome::Failed("背景工作中斷".into()));
+                    claude_mod::set_report(Some(out.report()));
+                    let line = out.line();
                     *h.state::<claude_mod::ModState>().0.lock().unwrap() = line.clone();
                     let _ = h.emit("claude-mod-status", line);
                 });
@@ -1008,6 +1019,9 @@ pub fn run() {
                         tokio::time::sleep(std::time::Duration::from_millis(heartbeat::heartbeat_ms())).await;
                     }
                 });
+                // 遠端密碼請求（#26 第二期）的確認端：門鈴響或每 60 秒保底查一次待確認；沒登入就不打後台。--shot 截圖模式不啟動
+                #[cfg(desktop)]
+                let secret_wake = if handle.state::<App>().shot.is_none() { Some(secret_remote::desktop::start(&handle, r.clone())) } else { None };
                 // 門鈴：有 anon 金鑰才開；一響就叫前端去拉信
                 if let Some(url) = anon_url {
                     let h = handle.clone();
@@ -1023,6 +1037,10 @@ pub fn run() {
                         };
                         bell::run(url, topic, move |_| {
                             let _ = h.emit("relay-bell", ());
+                            #[cfg(desktop)]
+                            if let Some(w) = &secret_wake {
+                                w.notify_one();
+                            }
                         })
                         .await;
                     });

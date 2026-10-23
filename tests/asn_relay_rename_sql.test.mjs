@@ -82,7 +82,8 @@ test('實跑：改名前有 60 支以上的 irori_relay_ 函式；改名後新�
     assert.ok(old.prosecdef && String(old.proconfig).includes('search_path'), '包裝要 security definer＋search_path 空：' + b.proname)
     assert.doesNotMatch(nu.prosrc, /irori_relay_/, '新名內容不得還有舊名：' + nu.proname)
   }
-  assert.equal(now.filter(x => x.proname.startsWith('asn_relay_')).length, before.length)
+  // 改名之後的 migration 會直接用新名新增函式（沒有舊名包裝），所以新名只要求「每支舊函式都有對應」，不要求總數相等
+  assert.equal(now.filter(x => x.proname.startsWith('asn_relay_') && before.some(b => newName(b.proname) === x.proname && b.ident === x.ident)).length, before.length)
   assert.equal(now.filter(x => x.proname.startsWith('irori_relay_')).length, before.length)
   // 內部呼叫已改新名
   const sync = now.find(x => x.proname === 'asn_relay_partner_sync')

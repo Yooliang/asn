@@ -17,7 +17,9 @@ export const LAUNCH_GIVE_UP_MS = 3 * 60 * 1000   // 後台 2 分鐘內沒被取�
 export const machinesByNode = body => Object.fromEntries((Array.isArray(body?.machines) ? body.machines : []).filter(m => m && typeof m.node === 'string').map(m => [m.node, m]))
 
 // 這台電腦現在能不能開新夥伴；不能就回中文原因。ctx：{ machines（節點→設定）, loaded（查過了）, signedIn, friends }
-export function launchEligibility(node, { machines = {}, loaded = false, signedIn = true, friends = [] } = {}) {
+export function launchEligibility(node, { machines = {}, loaded = false, signedIn = true, friends = [], authError = '' } = {}) {
+  // null＝登入狀態還沒查到（或查詢失敗）：不能說成「要先登入」
+  if (signedIn === null) return { ok: false, reason: authError ? `查不到登入狀態：${authError}` : '查詢中，請稍候…' }
   if (!signedIn) return { ok: false, reason: REASON.needLogin }
   if (!loaded) return { ok: false, reason: REASON.unknown }
   const m = machines[node]
@@ -93,8 +95,8 @@ export function progressView(row, appeared, name = '') {
     case 'failed': return { phase: 'failed', text: `沒有開成功：${friendlyDetail(row.detail)}` }
     case 'ok': return { phase: 'waiting', text: '視窗已經開好，等它出現在名單上…' }
     case 'unconfirmed': return { phase: 'waiting', text: '已經送出，但還沒確認視窗出現；等一下看看名單。' }
-    case 'taken': return { phase: 'opening', text: '那台電腦正在開視窗…' }
-    default: return { phase: 'sending', text: '已經送出，等那台電腦接手…' }
+    case 'taken': return { phase: 'opening', text: '正在開視窗…' }
+    default: return { phase: 'sending', text: '正在發送指令…' }
   }
 }
 const friendlyDetail = d => String(d ?? '').trim().slice(0, 200) || '沒有說明原因'

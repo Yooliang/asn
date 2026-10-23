@@ -11,12 +11,21 @@
   <form v-if="vm" class="ap-form" @submit.prevent="ok" autocomplete="off">
     <h1 class="ap-h">{{ vm.title }}</h1>
     <dl class="ap-info">
-      <dt>程式</dt><dd>{{ vm.program }}</dd>
-      <dt>工作資料夾</dt><dd>{{ vm.cwd }}</dd>
-      <dt>提示</dt><dd>{{ vm.prompt }}</dd>
+      <template v-if="vm.remote">
+        <dt>哪台電腦</dt><dd>{{ vm.origin }}</dd>
+        <dt>程式（對方自報）</dt><dd>{{ vm.program }}</dd>
+        <dt>要做什麼（對方自報）</dt><dd>{{ vm.prompt }}</dd>
+        <dt>核對碼</dt><dd>{{ vm.fingerprint }}</dd>
+      </template>
+      <template v-else>
+        <dt>程式</dt><dd>{{ vm.program }}</dd>
+        <dt>工作資料夾</dt><dd>{{ vm.cwd }}</dd>
+        <dt>提示</dt><dd>{{ vm.prompt }}</dd>
+      </template>
     </dl>
     <input v-if="vm.kind === 'secret'" ref="box" class="ap-input" type="password" v-model="secret" autocomplete="off" spellcheck="false" aria-label="密碼" />
-    <p class="ap-note">輸入的內容只會交給上面這個程式，不會經過 AI、不會存成檔案。</p>
+    <p class="ap-note" v-if="vm.remote">輸入的密碼會在這台電腦上加密後才送出，收發室只轉密文；請求端的畫面若顯示同一組核對碼，才表示是同一個請求。</p>
+    <p class="ap-note" v-else>輸入的內容只會交給上面這個程式，不會經過 AI、不會存成檔案。</p>
     <p class="ap-left" role="status">{{ left }}</p>
     <div class="ap-btns">
       <button class="aero-btn" type="submit" :disabled="done">{{ vm.okText }}</button>

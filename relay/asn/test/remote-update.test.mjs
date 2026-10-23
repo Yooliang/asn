@@ -39,7 +39,7 @@ test('remoteUpdateView：進度文字（已送出→更新中→失敗可重試�
   assert.deepEqual([v({ state: 'taken' }).label, v({ state: 'taken' }).busy], ['更新中…', true])
   const f = v({ state: 'failed', detail: '下載或驗簽失敗' })
   assert.deepEqual([f.label, f.busy, f.title], ['更新失敗，重試', false, '下載或驗簽失敗'])
-  assert.equal(remoteUpdateView({ W: null }, 'W', true, '那台電腦的 ASN 目前沒有開著').title, '那台電腦的 ASN 目前沒有開著')
+  assert.equal(remoteUpdateView({ W: null }, 'W', true, '電腦上的 ASN 目前沒有開著').title, '電腦上的 ASN 目前沒有開著')
   for (const s of ['更新', '已送出更新要求', '更新中…', '更新失敗，重試']) assert.doesNotMatch(s, /[A-Za-z]/, '介面文字純中文')
 })
 

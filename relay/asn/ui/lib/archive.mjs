@@ -4,7 +4,7 @@
 // 往來記錄、未讀、通知都不動；封存的夥伴再寄信來，或封存時離線、之後重新上線，後台會自動解除。
 // node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。給人看的文字純繁體中文，不顯示節點代號與夥伴 ID。
 import { withoutAsn } from './roster.mjs'
-import { isManageable, menuItems, opErrorText } from './partner-ops.mjs'
+import { isAiPartner, loginBlock, menuItems, opErrorText } from './partner-ops.mjs'
 
 export const ARCHIVE_GROUP_KEY = '__archived'
 export const isArchived = f => f?.archived === true
@@ -38,14 +38,16 @@ export function archiveMenuItem(friend, ctx = {}) {
   const key = isArchived(friend) ? 'unarchive' : 'archive'
   let reason = ''
   if (ctx.signedIn === false) reason = '要先登入，才能封存夥伴'
+  else if (loginBlock(ctx)) reason = loginBlock(ctx)
   else if (ctx.supported === false) reason = '電腦端或收發室還不支援，請先更新'
   return { key, label: ARCHIVE_LABEL[key], ok: !reason, reason }
 }
 
-// 完整選單（電腦版右鍵與手機「⋯」共用）：能管理的 AI 視窗＝原本的項目＋最後一項「封存／取消封存」；離線的夥伴就算不能喚醒（沒有引擎記錄之外的引擎），也能封存。
-// 不是能管理的視窗（人、手機、收發室、ASN 自己的視窗）回空陣列
+// 完整選單（電腦版右鍵與手機「⋯」共用）：AI 夥伴＝依引擎決定的管理項目（menuItems）＋最後一項「封存／取消封存」。
+// 雲端代理（Grok 等）與其他不支援遠端管理的引擎沒有管理項目，只剩封存；離線的夥伴就算不能喚醒，也能封存。
+// 不是 AI 夥伴（人、手機、收發室、ASN 自己的視窗）回空陣列
 export function manageItems(friend, ctx = {}) {
-  if (!isManageable(friend, ctx)) return []
+  if (!isAiPartner(friend, ctx)) return []
   return [...menuItems(friend, ctx), archiveMenuItem(friend, ctx)]
 }
 

@@ -17,6 +17,7 @@
 
 use super::core::BridgeLog;
 use super::corrlog::{CorrLog, Dir, Entry};
+use super::engines::acp_admin::AcpAdmin;
 use super::roster;
 use crate::launch::config::{canonical_launch_cwd, child_env, expand_vars, valid_partner_name, LaunchConfig};
 use crate::launch::profiles::LaunchMode;
@@ -30,11 +31,13 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-const KNOWN_OPS: [&str; 6] = ["info", "rename", "model", "close", "handover", "resume"];
+const KNOWN_OPS: [&str; 7] = ["info", "rename", "model", "close", "handover", "resume", "restart"];
 pub(crate) const DETAIL_MAX: usize = 500;
 pub(crate) const RESULT_MAX_BYTES: usize = 4096;
 pub(crate) const CONSENT_OFF: &str = "這台電腦沒有開啟「允許遠端開視窗與管理視窗」";
 pub(crate) const HANDOFF_SUBDIR: &str = "交接";
+/// ACP 工作者（收發室自己跑的背景工作者）只支援詳情、重開、接班換手；其他操作與 Claude 以外的夥伴一律回這句
+pub(crate) const UNSUPPORTED: &str = "這類夥伴不支援這個操作";
 const PROTECTED: &str = "收發室與 ASN 自己的視窗不能操作";
 const CHAIN_MAX: usize = 12;
 
@@ -85,6 +88,8 @@ pub(crate) trait OpsEnv: Send + Sync {
     fn timing(&self) -> Timing;
     /// 等外掛回報的最長時間（外掛會排隊到視窗閒置才執行，預設 10 分鐘）
     fn mod_wait_ms(&self) -> u64;
+    /// 狀態檔已過期的視窗：控制檔寫出後，外掛若完全沒有動靜（沒回報、狀態檔也沒更新），最多等這麼久就當外掛不在
+    fn mod_probe_ms(&self) -> u64;
     /// 本機啟動設定（profile、工作資料夾允許清單）；每次現讀。喚醒用它決定能不能在原資料夾開、怎麼開
     fn launch_config(&self) -> Result<LaunchConfig, String>;
     /// 把一段話當成信送進某個視窗（接班換手時請前任寫交接）。失敗回原因
@@ -120,6 +125,9 @@ impl OpsEnv for SystemOpsEnv {
     fn mod_wait_ms(&self) -> u64 {
         // 視窗忙碌時外掛會排隊等閒置：預設最多等 10 分鐘；環境變數 ASN_MOD_WAIT_MS（毫秒，1 秒到 1 小時）可調
         std::env::var("ASN_MOD_WAIT_MS").ok().and_then(|v| v.trim().parse::<u64>().ok()).filter(|v| (1_000..=3_600_000).contains(v)).unwrap_or(600_000)
+    }
+    fn mod_probe_ms(&self) -> u64 {
+        15_000
     }
     fn launch_config(&self) -> Result<LaunchConfig, String> {
         use super::launcher::LaunchEnv;
@@ -184,6 +192,7 @@ impl Op {
             "close" => "關閉視窗".into(),
             "handover" => "接班換手".into(),
             "resume" => "喚醒視窗".into(),
+            "restart" => "重開".into(),
             o => format!("不認得的動作 {}", clean(o, 20)),
         }
     }
@@ -220,6 +229,25 @@ enum Awaited {
     Got(bool, String),
     Lost,
     Timeout,
+}
+
+/// 外掛狀態檔對「控制用途」的判斷（不同於名單顯示的 30 分鐘新鮮度）
+struct ModLive {
+    status: Value,
+    /// 狀態檔 `at` 在 30 分鐘內
+    fresh: bool,
+}
+
+impl ModLive {
+    /// 過期、且最後狀態是閒置：外掛只在狀態改變時才寫檔，閒置的視窗狀態檔本來就會老，
+    /// 這種情況外掛多半還活著，但也可能是外掛已經沒了，所以要用短逾時探測；回探測起點的 `at`。
+    /// 過期而最後狀態不是閒置（長時間忙碌）：外掛可能正在排隊，不能當它不在，照常等滿。
+    fn probe_baseline(&self) -> Option<u64> {
+        if self.fresh || self.status.get("state").and_then(Value::as_str) != Some("idle") {
+            return None;
+        }
+        self.status.get("at").and_then(Value::as_u64)
+    }
 }
 
 enum ModRes {
@@ -266,6 +294,8 @@ pub(crate) struct PartnerOps {
     inflight: Mutex<HashSet<String>>,
     /// 從信件來的 /指令：信件編號 → 是否已做完（做完才可以重 ack；做到一半的信再看到不能再執行）
     cmds: Mutex<std::collections::HashMap<String, bool>>,
+    /// 收發室管理的 ACP 工作者（沒載入 ACP 引擎＝None）
+    acp: Mutex<Option<Arc<dyn AcpAdmin>>>,
 }
 
 impl PartnerOps {
@@ -283,6 +313,7 @@ impl PartnerOps {
             seen: Mutex::new(HashSet::new()),
             inflight: Mutex::new(HashSet::new()),
             cmds: Mutex::new(std::collections::HashMap::new()),
+            acp: Mutex::new(None),
         })
     }
 
@@ -299,6 +330,55 @@ impl PartnerOps {
     /// 後台回報的「視窗名 → 夥伴 ID」（往來記錄與交接檔資料夾都用它）
     pub(crate) fn set_partners(&self, m: std::collections::BTreeMap<String, String>) {
         self.corr.set_partners(m);
+    }
+
+    /// 接上 ACP 工作者的管理入口（引擎載入後呼叫）
+    pub(crate) fn set_acp(&self, a: Arc<dyn AcpAdmin>) {
+        *self.acp.lock().unwrap() = Some(a);
+    }
+
+    fn acp_admin(&self) -> Option<Arc<dyn AcpAdmin>> {
+        self.acp.lock().unwrap().clone()
+    }
+
+    /// 名字對得上收發室管理的 ACP 工作者：只支援詳情、重開、接班換手，其餘回「這類夥伴不支援」。
+    /// 動的是工作者驅動記錄在案的 pid，不找程序、不比對名稱；同名的 Claude 視窗還活著時不猜
+    fn execute_acp(&self, op: &Op, acp: &dyn AcpAdmin) -> OpResult {
+        if (self.protect)(&op.name, 0) {
+            return failed(PROTECTED);
+        }
+        let os = self.env.os();
+        if console::read_sessions(&self.dirs.sessions).iter().any(|s| s.get("name").and_then(Value::as_str) == Some(op.name.as_str()) && s.get("pid").and_then(Value::as_u64).map(|p| p != 0 && os.alive(p as u32)).unwrap_or(false)) {
+            return failed("有同名的 Claude 視窗，無法確定是哪一個，請先在電腦上處理");
+        }
+        match op.op.as_str() {
+            "info" => match acp.info(&op.name) {
+                Some(r) => ok("", Some(r)),
+                None => failed("找不到這個工作者"),
+            },
+            "restart" | "handover" => {
+                // 守門 4：動手前再驗一次本機開關
+                if !self.env.allow_remote() {
+                    return failed(CONSENT_OFF);
+                }
+                if op.op == "restart" {
+                    self.stage(op, "closing");
+                    return match acp.restart(&op.name) {
+                        Ok(r) => ok("已結束工作者的程序，收發室會重新啟動它，對話保留", Some(r)),
+                        Err(e) => failed(e),
+                    };
+                }
+                self.stage(op, "closing");
+                match acp.handover(&op.name, &op.note) {
+                    Ok(r) => {
+                        self.stage(op, "opening");
+                        ok("已清掉前任的對話並重開；這類夥伴沒有請前任寫交接，新對話收到接班說明", Some(r))
+                    }
+                    Err(e) => failed(e),
+                }
+            }
+            _ => failed(UNSUPPORTED),
+        }
     }
 
     fn stage(&self, op: &Op, stage: &str) {
@@ -392,6 +472,12 @@ impl PartnerOps {
         if op.op != "info" && !self.env.allow_remote() {
             return failed(CONSENT_OFF);
         }
+        if let Some(acp) = self.acp_admin().filter(|a| a.has_worker(&op.name)) {
+            return self.execute_acp(op, &*acp);
+        }
+        if op.op == "restart" {
+            return failed(UNSUPPORTED);
+        }
         if op.op == "resume" {
             return self.resume(op);
         }
@@ -448,6 +534,11 @@ impl PartnerOps {
         Ok((host, allowed, switch::in_windows_terminal(&table, t.pid)))
     }
 
+    /// sessionId 目前對到的程序（名單上的工作階段檔）
+    fn session_pid(&self, sid: &str) -> Option<u32> {
+        console::read_sessions(&self.dirs.sessions).iter().find(|s| s.get("sessionId").and_then(Value::as_str) == Some(sid)).and_then(|s| s.get("pid").and_then(Value::as_u64)).and_then(|p| u32::try_from(p).ok())
+    }
+
     fn session_rec(&self, pid: u32) -> Option<Value> {
         console::read_sessions(&self.dirs.sessions).into_iter().find(|s| s.get("pid").and_then(Value::as_u64) == Some(pid as u64))
     }
@@ -477,22 +568,60 @@ impl PartnerOps {
         Some(v)
     }
 
+    /// 控制用途的外掛判斷：狀態檔存在、完整、sessionId 相符、沒標結束；新鮮度不設限，
+    /// 但過期的必須該視窗的程序還活著（pid 為 0 或已死＝不算）。
+    fn mod_live(&self, sid: &str, pid: u32) -> Option<ModLive> {
+        if !roster::valid_sid(sid) {
+            return None;
+        }
+        let path = self.dirs.status.join(format!("{sid}.json"));
+        if std::fs::metadata(&path).ok()?.len() > 16 * 1024 {
+            return None;
+        }
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).ok()?).ok()?;
+        if v.get("sessionId").and_then(Value::as_str) != Some(sid) {
+            return None;
+        }
+        let at = v.get("at").and_then(Value::as_u64)?;
+        if v.get("detail").and_then(Value::as_str).map(str::trim) == Some(roster::MOD_ENDED_DETAIL) {
+            return None;
+        }
+        let fresh = self.env.now_ms().abs_diff(at) <= roster::MOD_STATUS_MAX_AGE_MS;
+        if !fresh && (pid == 0 || !self.env.os().alive(pid)) {
+            return None;
+        }
+        Some(ModLive { status: v, fresh })
+    }
+
     /// 寫好控制檔後等外掛回報。視窗忙碌時外掛會排隊到閒置才執行，所以最多等 `mod_wait_ms`（預設 10 分鐘）。
     /// 等的期間狀態檔變無效（過期、已結束）＝外掛真的沒了（Lost）；到時間還沒回報＝Timeout。
     /// `on_slow` 在等了一小段時間（約 2 秒）還沒回報時呼叫一次（回報「排隊中」用）。結束後一律刪掉控制檔。
-    fn await_control(&self, sid: &str, id: &str, on_slow: &mut dyn FnMut()) -> Awaited {
+    fn await_control(&self, sid: &str, pid: u32, id: &str, probe_at: Option<u64>, on_slow: &mut dyn FnMut()) -> Awaited {
         let file = self.dirs.control.join(format!("{sid}.json"));
         let mut res: Option<Awaited> = None;
         let mut polls = 0u32;
+        // 探測中（狀態檔已過期的閒置視窗）：外掛有任何動靜（狀態檔 at 變了）就解除探測，照常等；一直沒動靜到時間就當外掛不在
+        let mut probing = probe_at;
+        let t0 = std::time::Instant::now();
+        let probe_ms = self.env.mod_probe_ms();
         switch::wait_until(self.env.os(), self.env.mod_wait_ms(), 500, || {
-            let Some(st) = self.mod_status(sid) else {
+            let Some(live) = self.mod_live(sid, pid) else {
                 res = Some(Awaited::Lost);
                 return true;
             };
+            let st = live.status;
             if let Some(c) = st.get("control").filter(|c| c.get("id").and_then(Value::as_str) == Some(id)) {
                 let detail = keep_text(c.get("detail").and_then(Value::as_str).unwrap_or(""), COMMAND_DETAIL_MAX);
                 res = Some(Awaited::Got(c.get("ok").and_then(Value::as_bool).unwrap_or(false), detail));
                 return true;
+            }
+            if let Some(at0) = probing {
+                if st.get("at").and_then(Value::as_u64) != Some(at0) {
+                    probing = None;
+                } else if t0.elapsed() >= std::time::Duration::from_millis(probe_ms) {
+                    res = Some(Awaited::Lost);
+                    return true;
+                }
             }
             polls += 1;
             if polls == 4 {
@@ -512,14 +641,14 @@ impl PartnerOps {
     /// 有外掛的視窗（改名、切換模型）：寫控制檔，等外掛在狀態檔回報 control:{id, ok, detail}，視窗忙碌就排隊等（回報 stage:queued）。
     /// Fallback＝沒外掛或外掛真的沒回應，呼叫端退回重開；其餘都由外掛處理完（成功、明確失敗、等太久還在忙）。
     fn via_mod(&self, op: &Op, t: &switch::Target, arg: &str) -> ModRes {
-        if self.mod_status(&t.session_id).is_none() {
+        let Some(live) = self.mod_live(&t.session_id, t.pid) else {
             return ModRes::Fallback;
-        }
+        };
         let body = json!({ "id": op.id, "op": op.op, "arg": arg, "at": self.env.now_ms() });
         if !self.write_control(&t.session_id, &body) {
             return ModRes::Fallback;
         }
-        match self.await_control(&t.session_id, &op.id, &mut || self.stage(op, "queued")) {
+        match self.await_control(&t.session_id, t.pid, &op.id, live.probe_baseline(), &mut || self.stage(op, "queued")) {
             Awaited::Lost => ModRes::Fallback,
             Awaited::Timeout => ModRes::Done(failed(format!("等了 {} 視窗還在忙，沒有{}", wait_text(self.env.mod_wait_ms()), if op.op == "rename" { "改名" } else { "切換模型" }))),
             Awaited::Got(good, detail) => ModRes::Done(if good {
@@ -547,7 +676,7 @@ impl PartnerOps {
             return None;
         }
         let sid = hits[0].1.clone();
-        self.mod_status(&sid).map(|_| sid)
+        self.mod_live(&sid, hits[0].0).map(|_| sid)
     }
 
     /// 這封信的 /指令處理到哪：None＝還沒開始；Some(false)＝進行中；Some(true)＝做完了
@@ -611,7 +740,9 @@ impl PartnerOps {
         if !self.write_control(sid, &body) {
             return (false, format!("沒執行 {cmd}：寫不出控制檔"));
         }
-        match self.await_control(sid, &job.mail_id, &mut || {}) {
+        let probe = self.session_pid(sid).and_then(|pid| self.mod_live(sid, pid)).and_then(|l| l.probe_baseline());
+        let pid = self.session_pid(sid).unwrap_or(0);
+        match self.await_control(sid, pid, &job.mail_id, probe, &mut || {}) {
             Awaited::Got(true, d) => (true, if d.is_empty() { format!("已執行 {cmd}") } else { d }),
             Awaited::Got(false, d) => (false, format!("沒執行 {cmd}：{}", if d.is_empty() { "視窗的外掛回報失敗".to_string() } else { d })),
             Awaited::Lost => (false, format!("沒執行 {cmd}：視窗的外掛已經沒有回應")),

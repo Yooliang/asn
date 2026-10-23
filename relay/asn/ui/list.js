@@ -19,7 +19,7 @@ import { ChatPane } from './lib/chatpane.mjs'
 import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatarFile, selfAvatarSrc } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, switchMode, tabVisible, toggleCollapsed } from './lib/merge.mjs'
-import { chatTabSameZone, closeAllChatTabs, dropInsertBefore, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
+import { chatTabSameZone, closeAllChatTabs, closeIdleChatTabs, idleTabIds, withCallState, dropInsertBefore, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
 import { nowPlayingLine, normalizeNowPlaying } from './lib/now-playing.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, normalizeClose, normalizeFrame, totalUnread, notifyFromSaved, notifyPlan, notifyWith } from './lib/prefs.mjs'
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
@@ -28,6 +28,7 @@ import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaun
 import { CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, buddyConsoleItem, engineForProfile,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice, withTimeout } from './lib/partner-launch-ui.mjs'
 import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
 import { PartnerOpDialog, loadOpsContext } from './lib/partner-ops-ui.mjs'
+import { initialOpsCtx } from './lib/partner-ops.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
 import { backgroundRestoreNoticeText, collectLaunchFailures, findBackgroundTimeouts, launchFailedNoticeText } from './lib/partner-launch-notify.mjs'
@@ -229,7 +230,8 @@ const sync = () => {
   emit('asn:state', { ...s, me: { ...me }, ui: { dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, collapsed: ui.collapsed } })
 }
 const logs = reactive({})   // 整合模式的分頁直接讀這份；分開模式的對話視窗走 asn:log 事件
-const pushLog = id => { const l = core.logOf(id).slice(-200); logs[id] = l; emit('asn:log', { id, log: l }) }
+const pushLog = id => { const l = core.viewOf(id); logs[id] = l; emit('asn:log', { id, log: l }) }
+const loadOlder = id => core.loadOlder(id)   // 對話往上捲到頂：載入更舊的信（分開模式的對話視窗經事件請樞紐代跑）
 
 // 設備大頭貼：節點 → data URL。好友顯示用哪張由 avatar.mjs 的規則決定（AI 視窗一律自動產生；名單外的寄件人用他那台設備的圖）
 const avatars = ref({})
@@ -406,12 +408,14 @@ async function placeBuddyMenu() {
   Object.assign(buddyMenuPos, placeMenu(buddyMenuOrigin, { w: r.width, h: r.height }, viewSize()))
 }
 // 夥伴管理（詳情、改名、關閉視窗、接班換手、喚醒）：項目與判斷全部來自 lib/partner-ops.mjs，和手機同一套
-const opsCtx = reactive({ machines: {}, loaded: false, signedIn: false })
+const opsCtx = reactive(initialOpsCtx())
 let opsCtxAt = 0
 async function refreshOpsCtx() {
   if (Date.now() - opsCtxAt < 15000) return
   opsCtxAt = Date.now()
-  Object.assign(opsCtx, await loadOpsContext(transport))
+  const ctx = await loadOpsContext(transport)
+  Object.assign(opsCtx, ctx)
+  if (ctx.signedIn === null || !ctx.loaded) opsCtxAt = 0   // 查詢失敗不要擋住下一次重查
 }
 const buddyOpItems = computed(() => manageItems(buddyMenuFriend.value, { ...opsCtx, friends: friends.value, asn: asnMap.value }).filter(i => i.key !== 'model'))   // 切換模型沿用下面原本那個子選單
 const opDlg = reactive({ open: false, op: '', friend: null, item: null })
@@ -601,8 +605,11 @@ void loadLaunchPrefs()
 setInterval(() => { void refreshLaunchers(); void pollLaunchResults() }, 15_000)
 // 語音：整合模式的對話分頁用這一份；設定存在 Rust 端的 voice.json（對話視窗也讀同一份）
 const voice = createVoiceUi({ invoke, listen, createMic, createAudio: browserAudio, reactive })
+const callTick = ref(0)                 // 通話狀態變動時加一，讓「關閉閒置」的可用判斷重算
+const mergedCalls = reactive({})        // 整合模式：哪些分頁的 chat-pane 正在通話（chat-pane 的 call-state 事件）
+const setPaneCall = (id, on) => { if (on) mergedCalls[id] = true; else delete mergedCalls[id]; callTick.value++ }
 const callBeats = createCallBeats({ isLocalCall: isCallActive })   // 通話中（本視窗或對話視窗）不自動念，通話自己會念回信
-await listen('asn:call', p => callBeats.onBeat(p))
+await listen('asn:call', p => { callBeats.onBeat(p); callTick.value++ })   // 分開模式：對話視窗的通話廣播
 startCallPoll({ anyCall: () => callBeats.anyCall(), pull: why => core.pull(why) })   // 通話中每 2 秒多收一次信，結束就停
 const voiceCfg = reactive(normalizeCfg(await invoke('voice_cfg_get').catch(() => null)))
 core.on('notify', n => {
@@ -656,6 +663,7 @@ await listen('asn:cmd', async c => {
   else if (c.op === 'send') { const r = await core.send(c.id, c.text); if (!r.ok) console.info('[ASN] send failed', r.error) }
   else if (c.op === 'nudge') await core.nudge(c.id)
   else if (c.op === 'attach') await sendAttachTo(c.id, c.photo, c.caption)
+  else if (c.op === 'older') { const r = await core.loadOlder(c.id); emit('asn:older', { id: c.id, ...r }) }
 })
 const sendTo = async (id, text) => { const r = await core.send(id, text); if (!r.ok) console.info('[ASN] send failed', r.error) }
 const nudgeTo = id => core.nudge(id)
@@ -863,6 +871,9 @@ const app = createApp({
     const menuCloseOther = () => runTabMenu(id => applyChatTabClose(closeOtherChatTabs(ui, id, ui.pinnedChat)))
     const menuCloseRight = () => runTabMenu(id => applyChatTabClose(closeRightChatTabs(ui, id, ui.pinnedChat)))
     const menuCloseAll = () => { closeChatTabMenu(); applyChatTabClose(closeAllChatTabs(ui, ui.pinnedChat)) }
+    const tabFriendOf = id => withCallState(friends.value.find(f => f.id === id), mergedCalls[id] || callBeats.isCalling(id))   // 通話中的分頁算忙碌，關閉閒置不關
+    const hasIdleTabs = computed(() => callTick.value >= 0 && idleTabIds(ui.tabs, ui.pinnedChat, tabFriendOf).length > 0)
+    const menuCloseIdle = () => { closeChatTabMenu(); applyChatTabClose(closeIdleChatTabs(ui, ui.pinnedChat, tabFriendOf)) }
     const menuTogglePin = () => runTabMenu(id => { const r = toggleChatPin(ui, id, ui.pinnedChat); ui.pinnedChat = r.pinned; ui.tabs = r.tabs })
     const chatTabMenuPanel = computed(() => isPanelTab(chatTabMenu.value))   // 指引、設定的分頁不能固定，選單不給「固定分頁」
     const isChatTabPinned = id => isPinned(id, ui.pinnedChat)
@@ -1048,8 +1059,8 @@ const app = createApp({
       upd, autoCheck, checkUpdate, installUpdate, updateNoticeText, progressText,
       frame, FRAMES, FRAME_LABEL, setFrame, closeTo, CLOSE_CHOICES, CLOSE_LABEL, setCloseTo, trayOk, autostart, setAutostart, RESIZE_DIRS, resizeFrom, avMenu,
       contextLabel, avOf, meAv, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar,
-      ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo, nudgeTo, sendAttachTo, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
-      chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuTogglePin, isChatTabPinned,
+      ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo, nudgeTo, sendAttachTo, loadOlder, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
+      chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuCloseIdle, hasIdleTabs, setPaneCall, menuTogglePin, isChatTabPinned,
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
       STATUS, CONN_LABEL, FIXED_TABS, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr, commitNick,
       tab, adI, rooms, roomsErr, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,

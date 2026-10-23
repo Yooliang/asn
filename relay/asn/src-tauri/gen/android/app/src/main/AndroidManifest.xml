@@ -3,6 +3,16 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- 對方傳來「震動」時讓手機震動 -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- 偽通話（#99）：用說的跟 AI 夥伴對話。麥克風只在通話中使用，第一次按「通話」才詢問；Play 版與自行安裝版都有 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- 沒有麥克風的裝置也能裝（只是沒有通話鈕），不要被 Play 擋掉 -->
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+
+    <!-- Android 11 以上要先宣告才看得到系統的語音辨識與語音合成服務 -->
+    <queries>
+        <intent><action android:name="android.speech.RecognitionService" /></intent>
+        <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
+    </queries>
 
     <!-- 自行安裝版才有安裝權限（建置時 ORG_GRADLE_PROJECT_asnDist=sideload）；Google Play 版這一行換成 INTERNET（已有，重複無害），不含安裝權限 -->
     <uses-permission android:name="${installPermission}" />

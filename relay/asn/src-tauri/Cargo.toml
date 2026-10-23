@@ -49,6 +49,8 @@ png = "0.17"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 tar = "0.4"
 zeroize = "1"
+# 遠端機密傳遞（#26 第二期）：X25519 金鑰協議＋HKDF＋AES-256-GCM 全用 ring（本來就在相依樹內），不自己寫密碼學
+ring = "0.17"
 tauri-plugin-dialog = "=2.8.3"
 
 # 電腦版（Windows／Linux）專屬：系統匣、自動更新、系統內建的加密連線（OpenSSL／SChannel）。行為與手機版分開，見 docs/design/ANDROID.md

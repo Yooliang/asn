@@ -34,6 +34,13 @@ Deno.test("R6：程式碼用到的每個 asn_relay_ 名稱都在改名 migration
   const names = new Set<string>();
   for (const s of await sources()) for (const m of s.code.matchAll(/asn_relay_\w+/g)) names.add(m[0]);
   assert(names.size > 20, "應該掃得到二十個以上的呼叫：" + names.size);
-  const missing = [...names].filter((n) => !migration.includes(`'irori_relay_${n.slice("asn_relay_".length)}'`));
+  // 改名之後新建的函式（直接用新名建立）：從改名 migration 之後的 migration 檔裡找 create function 宣告
+  const later = new Set<string>();
+  for await (const e of Deno.readDir(new URL("../../migrations/", import.meta.url))) {
+    if (!e.isFile || !e.name.endsWith(".sql") || e.name <= "20261023040000_asn_relay_rename.sql") continue;
+    const sql = await Deno.readTextFile(new URL(`../../migrations/${e.name}`, import.meta.url));
+    for (const m of sql.matchAll(/create (?:or replace )?function public\.(asn_relay_\w+)/gi)) later.add(m[1]);
+  }
+  const missing = [...names].filter((n) => !later.has(n) && !migration.includes(`'irori_relay_${n.slice("asn_relay_".length)}'`));
   assertEquals(missing, [], "migration 清單缺：" + missing.join("、"));
 });

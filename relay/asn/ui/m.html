@@ -95,18 +95,37 @@
                   </li>
                 </ul>
               </div>
-              <div class="empty-list" v-if="!groups.length">{{ emptyText }}</div>
+              <!-- 群組對話：我參加的群組，放在各設備分組之後；點進去在對話分頁看訊息、發言 -->
+              <div class="m-group m-rooms" v-if="roomRows.length">
+                <button class="m-ghead" type="button" :aria-expanded="!collapsed[ROOM_GROUP_KEY]" @click="collapsed[ROOM_GROUP_KEY] = !collapsed[ROOM_GROUP_KEY]">
+                  <span class="m-caret" :class="{ open: !collapsed[ROOM_GROUP_KEY] }">▸</span>{{ ROOM_GROUP_LABEL }}（{{ roomRows.length }}）
+                </button>
+                <ul v-show="!collapsed[ROOM_GROUP_KEY]">
+                  <li v-for="r in roomRows" :key="r.id">
+                    <button class="m-buddy" type="button" @click="openRoom(r.chatId)">
+                      <span class="m-av-wrap"><span class="m-room-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24"><circle cx="9" cy="9" r="3.2" fill="currentColor"/><circle cx="16.5" cy="10" r="2.6" fill="currentColor" opacity=".7"/><path d="M3.5 19c.4-3.2 2.7-5 5.5-5s5.1 1.8 5.5 5zM14.6 14.4c.6-.2 1.3-.3 1.9-.3 2.3 0 4 1.5 4.3 4.9h-4.4c-.1-1.9-.7-3.5-1.8-4.6z" fill="currentColor"/></svg></span></span>
+                      <span class="b-text">
+                        <span class="b-line"><span class="b-nick" v-html="emo(r.name)"></span><span class="b-st">{{ r.count }} 位成員</span></span>
+                        <span class="b-last" v-if="r.last">{{ r.last }}</span>
+                      </span>
+                      <span class="unread" v-if="r.unread">{{ r.unread }}</span>
+                    </button>
+                  </li>
+                </ul>
+              </div>
+              <div class="empty-list" v-if="!groups.length && !roomRows.length">{{ emptyText }}</div>
             </div>
           </section>
 
           <!-- 對話：最後使用的那一位的對話內容（從夥伴分頁點一位就成為最後使用）；右上角「⋯」管理這位的視窗 -->
-          <section class="m-pg m-chat" :class="{ shake }" aria-label="對話">
+          <section class="m-pg m-chat" :class="{ shake, 'is-room': chatFriend && chatFriend.room }" aria-label="對話">
             <header class="m-head m-chathead" :class="{ 'is-busy': chatFriend && headTone(chatFriend.status) === 'busy' }">
               <template v-if="chatFriend">
                 <img class="m-pic" :class="'st-' + chatFriend.status" :src="avOf(chatFriend)" alt="" width="44" height="44">
                 <div class="m-head-tx">
                   <div class="m-title" v-html="emo(chatFriend.nick)"></div>
-                  <div class="m-conn">{{ STATUS[chatFriend.status] }}<template v-if="chatFriend.psm"> · <span v-html="emo(chatFriend.psm)"></span></template></div>
+                  <div class="m-conn" v-if="chatFriend.room">{{ chatFriend.psm }}</div>
+                  <div class="m-conn" v-else>{{ STATUS[chatFriend.status] }}<template v-if="chatFriend.psm"> · <span v-html="emo(chatFriend.psm)"></span></template></div>
                 </div>
                 <button class="m-icon-btn" type="button" aria-label="更多操作" v-if="opsItems.length" @click="openOps"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><circle cx="5" cy="12" r="2.4" fill="currentColor"/><circle cx="12" cy="12" r="2.4" fill="currentColor"/><circle cx="19" cy="12" r="2.4" fill="currentColor"/></svg></button>
               </template>
@@ -121,8 +140,9 @@
               <p class="m-ops-run-more" v-for="l in opsBanner.extra" :key="l">{{ l }}</p>
               <button class="m-btn m-ops-run-btn" type="button" v-if="opsBanner.done" @click="dismissRun">知道了</button>
             </div>
+            <p class="m-err m-room-note" v-if="roomNote && chatFriend && chatFriend.room" role="alert">{{ roomNote }}</p>
             <chat-pane v-if="chatFriend" :friend="chatFriend" :me="meForChat" :log="chatLog" :friend-av="avOf(chatFriend)" :me-av="meAv"
-              dp-mode="inline" bubble="auto" toolbar="bottom" win-mode="merged" :hide-busy-warn="true" :active="false" :enter-sends="false" :photo-api="photoApi"
+              dp-mode="inline" bubble="auto" toolbar="bottom" win-mode="merged" :hide-busy-warn="true" :active="false" :enter-sends="false" :photo-api="photoApi" :call-api="callApi" @call-state="onCallState" :load-older="loadOlder"
               @send="text => sendTo(chatFriend.id, text)" @nudge="nudgeTo(chatFriend.id)" @attach="(p, cap) => sendAttachTo(chatFriend.id, p, cap)"></chat-pane>
             <div class="m-scroll" v-else><div class="empty-list">{{ chatEmptyText }}</div></div>
           </section>
@@ -163,6 +183,9 @@
                 </template>
                 <p class="m-ver">ASN {{ info.version }}</p>
               </div>
+              <div class="m-card m-form m-guide-entry">
+                <button class="m-row-btn" type="button" @click="openGuides"><span class="m-row-tx"><b>{{ GUIDE_ENTRY_LABEL }}</b><small>{{ GUIDE_ENTRY_SUB }}</small></span><span class="m-caret" aria-hidden="true">▸</span></button>
+              </div>
               <div class="m-logout">
                 <button class="m-btn m-danger" type="button" :disabled="loggingOut" @click="doLogout">登出</button>
               </div>
@@ -173,11 +196,29 @@
 
     </section>
 
+    <!-- 使用指引：滿版的獨立一頁（左上返回）；先列篇目，點一篇看內文。內文一律當純文字（guide-doc 不用 v-html） -->
+    <section class="m-sheet m-guide" v-if="nav.sheet === 'guide'" role="dialog" aria-modal="true" :aria-label="GUIDE_ENTRY_LABEL">
+      <header class="m-head m-chathead">
+        <button class="m-icon-btn" type="button" aria-label="返回" @click="back"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M15 4.5L7.5 12 15 19.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="m-head-tx"><div class="m-title">{{ guideOpen ? guideOpen.guide.title : GUIDE_ENTRY_LABEL }}</div><div class="m-conn" v-if="!guideOpen">{{ GUIDE_ENTRY_SUB }}</div></div>
+      </header>
+      <div class="m-sheet-body">
+        <template v-if="guideOpen">
+          <p class="m-guide-note" v-if="guideOpen.note" role="note">{{ guideOpen.note }}</p>
+          <guide-doc :guide="guideOpen.guide"></guide-doc>        </template>
+        <ul class="m-guide-list" v-else>
+          <li v-for="g in guides" :key="g.key">
+            <button class="m-row-btn" type="button" @click="openGuide(g.key)"><span class="m-row-tx"><b>{{ g.title }}</b><small>{{ g.sub }}</small><em class="m-guide-badge" :class="'is-' + g.fit" v-if="g.badge">{{ g.badge }}</em></span><span class="m-caret" aria-hidden="true">▸</span></button>
+          </li>
+        </ul>
+      </div>
+    </section>
+
     <!-- 開新夥伴（遠端開視窗）：視窗開在選的那台電腦上，手機只下指令 -->
     <section class="m-sheet" v-if="nav.sheet === 'launch'" role="dialog" aria-modal="true" aria-label="開新夥伴">
       <header class="m-head m-chathead">
         <button class="m-icon-btn" type="button" aria-label="返回" @click="back"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M15 4.5L7.5 12 15 19.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-        <div class="m-head-tx"><div class="m-title">開新夥伴</div><div class="m-conn">視窗會開在你選的那台電腦上</div></div>
+        <div class="m-head-tx"><div class="m-title">開新夥伴</div><div class="m-conn">視窗會開在你選的電腦上</div></div>
       </header>
       <div class="m-sheet-body">
         <template v-if="lch.phase === 'form'">
@@ -233,7 +274,7 @@
           <p class="m-err" v-if="ops.error" role="alert">{{ ops.error }}</p>
           <button type="button" class="m-btn m-ops-cancel" @click="ops.phase = 'menu'; ops.error = ''">返回</button>
         </template>
-        <template v-else-if="ops.phase === 'close' || ops.phase === 'handover'">
+        <template v-else-if="ops.phase === 'close' || ops.phase === 'handover' || ops.phase === 'restart'">
           <p class="m-ops-lead">{{ opsText.lead }}</p>
           <ul class="m-ops-points" v-if="opsText.points.length"><li v-for="p in opsText.points" :key="p">{{ p }}</li></ul>
           <label class="m-field" v-if="ops.phase === 'handover'">補充的話（選填，會附在新夥伴的第一句話後面）<textarea class="set-area" rows="3" v-model="ops.note" maxlength="1000"></textarea></label>
@@ -248,6 +289,26 @@
           <div class="m-bar" v-if="ops.view && !ops.view.done" aria-hidden="true"><i></i></div>
           <button type="button" class="m-btn m-ops-cancel" @click="back">{{ ops.view && ops.view.done ? '關閉' : '先關掉（照常進行）' }}</button>
         </template>
+      </section>
+    </div>
+
+    <!-- 別台電腦／雲端代理要密碼（#26 第二期）：底部浮層，樣式沿用「⋯」選單。哪台電腦由後台查出，程式與用途是對方自報（標示出來）；密碼在手機上加密才送出 -->
+    <div class="m-ops" v-if="nav.sheet === 'secret' && sec.cur" @click.self="laterSecret">
+      <section class="m-ops-panel" role="dialog" aria-modal="true" :aria-label="SECRET_TEXT.title">
+        <h2 class="m-ops-h">{{ SECRET_TEXT.title }}</h2>
+        <p class="m-ops-lead">{{ SECRET_TEXT.lead }}</p>
+        <dl class="m-ops-rows">
+          <dt>{{ SECRET_TEXT.deviceLabel }}</dt><dd>{{ sec.cur.nodeName }}</dd>
+          <dt>{{ SECRET_TEXT.programLabel }}</dt><dd>{{ sec.cur.program }}</dd>
+          <dt>{{ SECRET_TEXT.purposeLabel }}</dt><dd>{{ sec.cur.purpose }}</dd>
+          <dt>{{ SECRET_TEXT.fpLabel }}</dt><dd>{{ sec.cur.fingerprint }}</dd>
+        </dl>
+        <p class="m-note">{{ SECRET_TEXT.fpNote }}　{{ secCountdown }}</p>
+        <label class="m-field">{{ SECRET_TEXT.inputLabel }}<input class="set-input m-ops-input" type="password" v-model="sec.secret" autocomplete="off" autocapitalize="off" spellcheck="false" :disabled="sec.busy" @keydown.enter.prevent="answerSecret(false)"></label>
+        <p class="m-err" v-if="sec.error" role="alert">{{ sec.error }}</p>
+        <button type="button" class="m-btn m-btn-big" :disabled="sec.busy" @click="answerSecret(false)">{{ SECRET_TEXT.ok }}</button>
+        <button type="button" class="m-btn m-ops-cancel m-danger" :disabled="sec.busy" @click="answerSecret(true)">{{ SECRET_TEXT.deny }}</button>
+        <button type="button" class="m-btn m-ops-cancel" :disabled="sec.busy" @click="laterSecret">{{ SECRET_TEXT.later }}</button>
       </section>
     </div>
   </template>

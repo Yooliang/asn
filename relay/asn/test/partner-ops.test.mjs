@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { HANDOVER_GIVE_UP_MS, ONLINE_OPS, OPS, OP_GIVE_UP_MS, QUEUE_GIVE_UP_MS, REASON, STALE_TEXT, buildOpRequest, infoRows, isManageable, menuItems, opErrorText, opFormError, progressView } from '../ui/lib/partner-ops.mjs'
+import { HANDOVER_GIVE_UP_MS, ONLINE_OPS, OPS, OP_GIVE_UP_MS, QUEUE_GIVE_UP_MS, REASON, STALE_TEXT, buildOpRequest, infoRows, isAiPartner, isManageable, menuItems, opErrorText, opFormError, partnerEngine, progressView } from '../ui/lib/partner-ops.mjs'
 import { machinesByNode } from '../ui/lib/mobile-launch.mjs'
 
 const LAUNCHER = { profiles: [{ id: 'claude' }], cwd_allow: ['D:\\Github\\asn'] }
@@ -13,7 +13,7 @@ const W = (node, agent, extra = {}) => ({ id: `${node}/${agent}`, node, agent, n
 test('選單五項：詳情、改名、切換模型、關閉視窗、接班換手；都能用時全部 ok（在線的沒有喚醒）', () => {
   const items = menuItems(W('H', '小文'), ctx)
   assert.deepEqual(items.map(i => i.key), ONLINE_OPS)
-  assert.deepEqual(OPS, [...ONLINE_OPS, 'resume'])
+  assert.deepEqual(OPS, [...ONLINE_OPS, 'resume', 'restart'])
   assert.deepEqual(items.map(i => i.label), ['詳情', '改名', '切換模型', '關閉視窗', '接班換手'])
   assert.ok(items.every(i => i.ok && i.reason === ''))
 })
@@ -30,7 +30,7 @@ test('人、手機、雲端代理、群組、ASN／收發室視窗：空陣列�
 test('不能用就反灰並給中文原因：沒登入、離線、沒開放（詳情除外）、還沒查到設定、舊後台', () => {
   const rs = items => Object.fromEntries(items.map(i => [i.key, i.reason]))
   assert.ok(menuItems(W('H', 'a'), { ...ctx, signedIn: false }).every(i => !i.ok && i.reason === REASON.needLogin), '沒登入全反灰（含詳情）')
-  assert.ok(menuItems(W('W', 'a'), ctx).every(i => !i.ok && i.reason === REASON.offline), '那台電腦離線')
+  assert.ok(menuItems(W('W', 'a'), ctx).every(i => !i.ok && i.reason === REASON.offline), '電腦離線')
   const closed = menuItems(W('C', 'a'), ctx)
   assert.deepEqual(closed.map(i => i.ok), [true, false, false, false, false], '沒開放：只有詳情能用')
   assert.equal(rs(closed).rename, REASON.closed)
@@ -42,13 +42,13 @@ test('不能用就反灰並給中文原因：沒登入、離線、沒開放（�
   for (const i of menuItems(W('H', 'a'), ctx)) assert.ok(!/[A-Za-z]{4,}/.test(i.label))
 })
 
-test('離線的 AI 夥伴只有「喚醒」：有登入、那台電腦在線且開放才能按；其餘反灰並寫中文原因', () => {
+test('離線的 AI 夥伴只有「喚醒」：有登入、電腦在線且開放才能按；其餘反灰並寫中文原因', () => {
   const off = (node, extra = {}) => W(node, '小離', { status: 'offline', ...extra })
   assert.deepEqual(menuItems(off('H'), ctx), [{ key: 'resume', label: '喚醒', ok: true, reason: '' }])
   const one = (f, c = ctx) => menuItems(f, c).map(i => [i.key, i.ok, i.reason])
   assert.deepEqual(one(off('H'), { ...ctx, signedIn: false }), [['resume', false, REASON.needLogin]])
-  assert.deepEqual(one(off('W')), [['resume', false, REASON.deviceOffline]], '那台電腦離線')
-  assert.deepEqual(one(off('Z')), [['resume', false, REASON.deviceOffline]], '查不到那台電腦')
+  assert.deepEqual(one(off('W')), [['resume', false, REASON.deviceOffline]], '電腦離線')
+  assert.deepEqual(one(off('Z')), [['resume', false, REASON.deviceOffline]], '查不到電腦')
   assert.deepEqual(one(off('C')), [['resume', false, REASON.closed]], '沒開放')
   assert.deepEqual(one(off('H'), { ...ctx, loaded: false }), [['resume', false, REASON.unknown]])
   assert.deepEqual(one(off('H'), { ...ctx, supported: false }), [['resume', false, REASON.unsupported]])
@@ -87,8 +87,8 @@ test('接班換手的進度分段：請前任寫交接 → 關閉前任視窗 �
   assert.deepEqual([at('stage:handoff').text, states(at('stage:handoff'))], ['請前任寫交接中…', ['active', 'todo', 'todo']])
   assert.deepEqual([at('stage:closing').text, states(at('stage:closing'))], ['關閉前任視窗中…', ['done', 'active', 'todo']])
   assert.deepEqual([at('stage:opening').text, states(at('stage:opening'))], ['開新視窗中…', ['done', 'done', 'active']])
-  assert.equal(at('').text, '那台電腦正在處理…', '還沒回報階段')
-  assert.equal(at('stage:evil <b>').text, '那台電腦正在處理…', '看不懂的階段不外露')
+  assert.equal(at('').text, '正在處理…', '還沒回報階段')
+  assert.equal(at('stage:evil <b>').text, '正在處理…', '看不懂的階段不外露')
   const p = 'C:/Users/x/.asn/handoff/交接/p_1/20261022-101500.md'
   const done = progressView({ status: 'ok', result: { handoff_path: p, handoff_done: true } }, { op: 'handover' })
   assert.deepEqual([done.phase, done.text, states(done), done.extra], ['done', '接班換手完成，新視窗開好了。', ['done', 'done', 'done'], ['交接檔：' + p]])
@@ -132,8 +132,8 @@ test('錯誤翻成中文：後台代碼、沒登入、斷線、舊後台；看�
 
 test('進度：已送出 → 電腦正在處理 → 完成／失敗原因；等太久顯示版本可能太舊', () => {
   const t0 = 1_000_000
-  assert.deepEqual(progressView({ status: 'pending' }, { sentAt: t0, now: t0 + 1000 }), { phase: 'sent', done: false, text: '已經送出，等那台電腦接手…' })
-  assert.deepEqual(progressView({ status: 'taken' }, { sentAt: t0, now: t0 + 1000 }), { phase: 'working', done: false, text: '那台電腦正在處理…' })
+  assert.deepEqual(progressView({ status: 'pending' }, { sentAt: t0, now: t0 + 1000 }), { phase: 'sent', done: false, text: '正在發送指令…' })
+  assert.deepEqual(progressView({ status: 'taken' }, { sentAt: t0, now: t0 + 1000 }), { phase: 'working', done: false, text: '正在處理…' })
   assert.equal(progressView({ status: 'ok' }, { op: 'rename' }).text, '已改名。')
   assert.match(progressView({ status: 'ok' }, { op: 'close' }).text, /已關閉/)
   assert.match(progressView({ status: 'ok' }, { op: 'handover' }).text, /接班換手/)
@@ -148,7 +148,7 @@ test('進度：已送出 → 電腦正在處理 → 完成／失敗原因；等�
     const v = progressView({ status: s }, { sentAt: t0, now: t0 + OP_GIVE_UP_MS + 1 })
     assert.deepEqual([v.phase, v.done, v.text], ['failed', true, `沒有成功：${STALE_TEXT}`])
   }
-  assert.equal(STALE_TEXT, '那台電腦的 ASN 版本可能太舊，或沒有在跑')
+  assert.equal(STALE_TEXT, 'ASN 版本可能太舊，或沒有在跑')
 })
 
 test('詳情列：中文標籤；沒有的欄位不列；外殼只列程式名稱不列參數', () => {
@@ -185,4 +185,60 @@ test('守門：手機指令清單有兩個簽章指令；沒有電腦端指令�
   assert.match(relay, /pub async fn partner_op_signed[\s\S]*?ok_or\("尚未登入，無法管理夥伴視窗"\)\?;[\s\S]*?api_signed\("partner_op"/, '沒憑證在打後台之前就回錯')
   assert.match(relay, /pub async fn partner_ops_signed[\s\S]*?ok_or\("尚未登入，無法查詢管理操作的進度"\)\?;[\s\S]*?api_signed\("partner_ops"/)
   assert.match(read('..', '..', 'supabase', 'functions', 'relay', 'index.ts'), /action === "partner_op" \|\| action === "partner_ops" \|\| action === "partner_archive"\) \? await signedUserId/)
+})
+
+test('依引擎決定項目：Claude 全部；ACP 工作者只有詳情、重開、接班換手；雲端代理與其他引擎沒有管理項目', () => {
+  const keys = f => menuItems(f, ctx).map(i => i.key)
+  assert.deepEqual(keys(W('H', '小文')), ['info', 'rename', 'model', 'close', 'handover'])
+  assert.deepEqual(keys(W('H', '小文', { engine: null })), ['info', 'rename', 'model', 'close', 'handover'], '沒寫引擎當 Claude')
+  for (const engine of ['gemini', 'agy', 'acp', 'Gemini']) {
+    const items = menuItems(W('H', 'Gemini', { engine, kind: 'claude' }), ctx)
+    assert.deepEqual(items.map(i => i.key), ['info', 'restart', 'handover'], engine)
+    assert.deepEqual(items.map(i => i.label), ['詳情', '重開', '接班換手'])
+    assert.ok(items.every(i => i.ok), engine)
+    assert.equal(partnerEngine(W('H', 'g', { engine })), 'acp')
+  }
+  for (const f of [W('G', 'Grok', { engine: 'grok', kind: 'grok' }), W('G', 'Grok', { engine: 'cloud' }), W('G', 'Grok', { engine: 'claude', kind: 'cloud-agent' }), W('H', '小碼', { engine: 'codex' }), W('H', '小皮', { engine: 'pi' })]) {
+    assert.deepEqual(menuItems(f, ctx), [], JSON.stringify(f))
+    assert.equal(isManageable(f, ctx), false)
+    assert.equal(isAiPartner(f, ctx), true, '還是 AI 夥伴（封存用）')
+  }
+  assert.equal(partnerEngine(W('G', 'Grok', { engine: 'grok' })), 'cloud')
+  assert.equal(partnerEngine(W('H', '小碼', { engine: 'codex' })), 'other')
+})
+
+test('ACP 工作者的項目也受登入、開放、離線的條件管；離線的 ACP 工作者沒有項目（不能喚醒）', () => {
+  const g = (node, extra = {}) => W(node, 'Gemini', { engine: 'gemini', ...extra })
+  const closed = menuItems(g('C'), ctx)
+  assert.deepEqual(closed.map(i => i.ok), [true, false, false], '沒開放：只有詳情能用')
+  assert.equal(closed[1].reason, REASON.closed)
+  assert.ok(menuItems(g('H'), { ...ctx, signedIn: false }).every(i => !i.ok && i.reason === REASON.needLogin))
+  assert.ok(menuItems(g('W'), ctx).every(i => !i.ok && i.reason === REASON.offline))
+  assert.deepEqual(menuItems(g('H', { status: 'offline' }), ctx), [])
+})
+
+test('重開：只送節點、名字、動作；送出前不用填任何東西；進度完成文字', () => {
+  const f = W('H', 'Gemini', { engine: 'gemini' })
+  assert.deepEqual(buildOpRequest(f, 'restart', { newName: 'x', note: 'y', model: 'z' }), { node: 'H', name: 'Gemini', op: 'restart' })
+  assert.equal(opFormError(f, 'restart', {}), '')
+  assert.equal(progressView({ status: 'ok' }, { op: 'restart' }).text, '已重開，對話保留。')
+})
+
+test('ACP 工作者的詳情：引擎、模型、權限、工作資料夾、程序、對話接續都是中文標籤；沒有的欄位不列', () => {
+  const rows = Object.fromEntries(infoRows({
+    pid: 4321, model: 'gemini-2.5-pro', engine: 'gemini', cwd: 'D:\\w\\Gemini', status: 'idle', kind: 'acp',
+    permissions: { read: 'allow', write: 'deny', execute: 'ask', network: 'allow', other: 'allow' }, process_running: true, has_session: true, load_session: true,
+  }).map(r => [r.label, r.value]))
+  assert.deepEqual(rows, { PID: '4321', 模型: 'gemini-2.5-pro', 引擎: 'Gemini', 工作資料夾: 'D:\\w\\Gemini', 狀態: '閒置', 權限: '讀取允許、寫入拒絕、執行詢問、上網允許', 程序: '執行中', 對話接續: '重開後接續上次的對話' })
+  const none = Object.fromEntries(infoRows({ engine: 'gemini', process_running: false, has_session: false, permissions: { read: 'evil' } }).map(r => [r.label, r.value]))
+  assert.deepEqual(none, { 引擎: 'Gemini', 程序: '沒有在跑', 對話接續: '還沒有對話紀錄' }, '看不懂的權限值不列')
+  assert.equal(Object.fromEntries(infoRows({ has_session: true, load_session: false }).map(r => [r.label, r.value])).對話接續, '重開後會開新的對話')
+  assert.ok(!infoRows({ has_session: true, load_session: null }).some(r => r.label === '對話接續'), '還不知道就不列')
+})
+
+test('接班換手完成：ACP 工作者沒有請前任寫交接，說明新對話從空白開始', () => {
+  const v = progressView({ status: 'ok', result: { kind: 'acp', handoff_done: false } }, { op: 'handover' })
+  assert.deepEqual(v.extra, ['這類夥伴沒有請前任寫交接，新對話從空白開始，第一句是接班說明。'])
+  const c = progressView({ status: 'ok', result: { handoff_done: false } }, { op: 'handover' })
+  assert.deepEqual(c.extra, ['前任沒有寫完交接，新夥伴會以前任的對話紀錄為主。'])
 })

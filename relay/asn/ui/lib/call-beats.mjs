@@ -9,6 +9,13 @@ export function createCallBeats({ now = () => Date.now(), isLocalCall = () => fa
   return {
     /** 收到 asn:call 廣播 */
     onBeat(p) { if (!p?.id) return; if (p.active) beats.set(String(p.id), now()); else beats.delete(String(p.id)) },
+    /** 這一位的對話現在有沒有在通話（對話視窗的廣播還沒過期）：給「關閉閒置」判斷分頁忙不忙 */
+    isCalling(id) {
+      const t = beats.get(String(id))
+      if (t === undefined) return false
+      if (now() - t >= CALL_BEAT_EXPIRE_MS) { beats.delete(String(id)); return false }
+      return true
+    },
     /** 現在有沒有任何通話（本視窗內的，或別的視窗廣播過來還沒過期的） */
     anyCall() {
       if (isLocalCall()) return true
