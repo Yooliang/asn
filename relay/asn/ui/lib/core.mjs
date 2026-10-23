@@ -273,16 +273,18 @@ export class AsnCore {
   }
 
   // ---------- 寄信 ----------
-  async send(id, raw) {
+  // opts.voice＝true：語音通話中辨識出來的句子。寄信帶結構化旗標 voice（收信端的收發室據此提醒夥伴），本機記錄也標上，畫面顯示「語音」小標示
+  async send(id, raw, opts = {}) {
+    const voice = opts?.voice === true
     const f = this.friends.get(id)
     const text = String(raw ?? '').trim()
     if (!f || !text) return { ok: false, error: '沒有內容或找不到好友' }
     if (text.length > MAX_BODY) return { ok: false, error: `內文超過 ${MAX_BODY} 字` }
-    const payload = { to_node: f.node, to_agent: f.agent || undefined, body: text, reply_to: f.replyTo || undefined, from_agent: this.windowName, expects_reply: expectsReplyTo(f), ...this.#personFlag(f) }
+    const payload = { to_node: f.node, to_agent: f.agent || undefined, body: text, reply_to: f.replyTo || undefined, from_agent: this.windowName, expects_reply: expectsReplyTo(f), ...this.#personFlag(f), ...(voice ? { voice: true } : {}) }
     let sent
     try { sent = await this.transport.send(payload) } catch (e) { return this.#fail(id, e) }
     const mid = typeof sent?.id === 'string' ? sent.id : null
-    this.#log(id).push({ k: 'me', text, t: this.now(), ...(mid ? { id: mid } : {}) })
+    this.#log(id).push({ k: 'me', text, t: this.now(), ...(mid ? { id: mid } : {}), ...(voice ? { voice: true } : {}) })
     f.waiting = expectsReplyTo(f)
     f.replyTo = null
     f.known = true

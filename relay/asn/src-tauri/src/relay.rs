@@ -58,7 +58,7 @@ pub const MAX_BODY: usize = 20000;
 pub const NUDGE_HINT: &str = "對方在呼叫你：先回一個震動（寄一封內文只有「（你的名字 傳送了一個震動）」的信）。再想一下有沒有需要向對方報告的事——目前進度、卡住的地方、等對方決定的事；有的話另外寄一封簡短的信，沒有就只回震動。";
 
 /// 前端交來的寄信內容 → 要送給後端的 body。from_agent 一律換成本程式的視窗名（前端不能自填），
-/// 只放行 to_node／to_agent／body／reply_to／from_agent／expects_reply 六個欄位；expects_reply 一定要明說（布林）。
+/// 只放行 to_node／to_agent／body／reply_to／from_agent／expects_reply（外加選填 as_person、voice）；expects_reply 一定要明說（布林）。
 pub fn build_send_body(payload: &Value, window: &str) -> Result<Value, String> {
     let o = payload.as_object().ok_or("寄信內容格式不對")?;
     let to_node = o.get("to_node").and_then(Value::as_str).unwrap_or("");
@@ -94,6 +94,10 @@ pub fn build_send_body(payload: &Value, window: &str) -> Result<Value, String> {
     // 以「人」寄出（#108）：前端說 person:true 才送 as_person。真正生效要有登入憑證（見 without_person）
     if o.get("person").and_then(Value::as_bool) == Some(true) {
         m.insert("as_person".into(), json!(true));
+    }
+    // 語音通話標記（選填布林，只有 true 才送；震動不帶）：收信端的收發室據此在抬頭說明行加固定提醒。舊後台不認得這個欄位會忽略
+    if !nudge && o.get("voice").and_then(Value::as_bool) == Some(true) {
+        m.insert("voice".into(), json!(true));
     }
     Ok(Value::Object(m))
 }
@@ -1308,6 +1312,24 @@ b", "at": 5 }] }), json!({ "marks": [{ "at": 5 }] })] {
         let p = json!({"to_node":"W","to_agent":"W-政策","body":"  嗨  \n","reply_to":"","from_agent":"偽造","expects_reply":true,"extra":1});
         let b = build_send_body(&p, "H-ASN").unwrap();
         assert_eq!(b, json!({"to_node":"W","to_agent":"W-政策","body":"  嗨","from_agent":"H-ASN","expects_reply":true}));
+    }
+
+    #[test]
+    fn 寄信_語音旗標只認布林true_震動不帶() {
+        let base = json!({"to_node":"W","body":"嗨","expects_reply":true});
+        let with = |v: Value| { let mut p = base.clone(); p["voice"] = v; build_send_body(&p, "H-ASN").unwrap() };
+        assert_eq!(with(json!(true))["voice"], true);
+        for bad in [json!(false), json!("true"), json!(1), json!(null)] {
+            assert!(with(bad.clone()).get("voice").is_none(), "{bad}");
+        }
+        assert!(build_send_body(&base, "H-ASN").unwrap().get("voice").is_none(), "沒說就不帶");
+        let n = build_send_body(&json!({"to_node":"W","nudge":true,"expects_reply":false,"voice":true}), "H-ASN").unwrap();
+        assert!(n.get("voice").is_none(), "震動不帶語音旗標");
+        // 沒有登入憑證時 voice 照送（它只是提醒收信端的標記，不是身分）；as_person 才會被拿掉
+        let mut p = base.clone(); p["voice"] = json!(true); p["person"] = json!(true);
+        let b = without_person(build_send_body(&p, "H-ASN").unwrap());
+        assert_eq!(b["voice"], true);
+        assert!(b.get("as_person").is_none());
     }
 
     #[test]

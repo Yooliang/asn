@@ -128,7 +128,7 @@ export function createCallSession({
     awaiting++
     clearTimer(replyTimer)
     replyTimer = setTimer(() => { awaiting = 0; state.note = '對方還沒回信，你可以繼續說。'; refresh() }, REPLY_TIMEOUT_MS)
-    try { send(`${CALL_MARKER}\n${text}`) } catch (e) { awaiting = Math.max(0, awaiting - 1); state.note = `寄不出去：${e?.message || '失敗'}` }
+    try { send(`${CALL_MARKER}\n${text}`, { voice: true }) } catch (e) { awaiting = Math.max(0, awaiting - 1); state.note = `寄不出去：${e?.message || '失敗'}` }
     refresh()
   }
 

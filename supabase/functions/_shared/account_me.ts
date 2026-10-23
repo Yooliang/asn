@@ -28,12 +28,23 @@ export async function sendWithPerson(
   rpc: RpcFn,
   args: Record<string, unknown>,
 ): Promise<{ data: unknown; error: unknown }> {
-  const r = await rpc("asn_relay_send", args);
-  if (r.error && "p_as_person" in args && rpcMissing(r.error)) {
-    const { p_as_person: _drop, ...rest } = args;
+  // 語音通話標記：args 帶 p_voice＝true 時走 asn_relay_send_voice（同一交易內寄出並標記）；後台還沒套用（找不到函式）→ 去掉標記走一般寄信，信照寄
+  if (args.p_voice === true) {
+    const v = await rpc("asn_relay_send_voice", args);
+    if (!(v.error && rpcMissing(v.error))) return v;
+  }
+  const { p_voice: _v, ...plain } = args;
+  const r = await rpc("asn_relay_send", plain);
+  if (r.error && "p_as_person" in plain && rpcMissing(r.error)) {
+    const { p_as_person: _drop, ...rest } = plain;
     return await rpc("asn_relay_send", rest);
   }
   return r;
+}
+
+/** voice 只認布林 true 才傳（資料庫預設 false）；其餘一律不傳 */
+export function voiceArgs(voice: unknown): Record<string, boolean> {
+  return voice === true ? { p_voice: true } : {};
 }
 
 /** 寄信成功後要敲的門鈴：扇出時資料庫回 bell_topics（去重）；舊版只有 bell_topic */

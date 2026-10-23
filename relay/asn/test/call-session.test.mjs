@@ -252,7 +252,7 @@ test('守門：通話程式不碰金鑰、不直接連網；按鈕與畫面接�
   }
   const pane = read('lib/chatpane.mjs')
   assert.match(pane, /<call-view v-if="callActive"/)
-  assert.match(pane, /newCall\(\{ send: t => emit\('send', t\) \}\)/, '寄信走對話區原本的 send 事件')
+  assert.match(pane, /newCall\(\{ send: \(t, o\) => emit\('send', t, o\) \}\)/, '寄信走對話區原本的 send 事件')
   assert.match(read('lib/actionbar.mjs'), /aria-label="通話"[^>]*title="[^"]*[一-鿿]/)
   assert.match(read('list.js'), /!callBeats\.anyCall\(\)/, '自動念要讓路給通話')
   assert.match(read('chat.html'), /@call-state="callState"/)

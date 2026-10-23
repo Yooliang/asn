@@ -49,7 +49,7 @@ const app = createApp({
     })
     return {
       callState, f, me, transport, selfNode, loadOlder, log, look, friendAv, meAv, voice, photoApi, shotApi, plain, ctl, RESIZE_DIRS, resizeFrom,
-      send: text => emit('asn:cmd', { op: 'send', id, text }),
+      send: (text, opts) => emit('asn:cmd', { op: 'send', id, text, voice: opts?.voice === true }),
       nudge: () => emit('asn:cmd', { op: 'nudge', id }),
       attach: (photo, caption) => emit('asn:cmd', { op: 'attach', id, photo, caption }),
       toggleDp: () => emit('asn:cmd', { op: 'dp' }),

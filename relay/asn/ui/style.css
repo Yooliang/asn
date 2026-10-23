@@ -176,6 +176,7 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .msg .who{color:var(--muted);font-size:12px}
 .msg .who time{margin-left:6px;opacity:.75;font-variant-numeric:tabular-nums}
 .msg .who .from-dev{margin-left:6px;font-size:11px;opacity:.75}
+.msg .who .voice-tag{margin-left:6px;font-size:11px;opacity:.75}
 .msg .m-body{padding-left:12px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px}
 .msg.mine .m-body{color:#1b3d6e}
 /* ---- 訊息內文的 Markdown（lib/markdown.mjs；issue #169）---- */
