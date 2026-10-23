@@ -10,6 +10,8 @@ import { contextLabel } from './lib/context-usage.mjs'
 import { BANNER_MS, DEFAULT_PREFS, TABS, TAB_LABEL, accountDisplayName, SWIPE_BLOCK_SELECTOR, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, buttonLabel, initialNav, opsNav, initialUpdate, installOutcome, launchNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, vendorBadgeHtml, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
 import { LAUNCH_GIVE_UP_MS, LAUNCH_POLL_MS, appearedIn, buildLaunchRequest, initialLaunch, launchChoices, launchDevices, launchEligibility, launchErrorText, launchFormError, machinesByNode, progressView } from './lib/mobile-launch.mjs'
 import { OnboardCard } from './lib/onboard-card.mjs'
+import { MOBILE_PHASE_TEXT, createMobileCall } from './lib/mobile-call.mjs'
+import { startCallPoll } from './lib/call-poll.mjs'
 import { ONBOARD_STORE, TEXT as ONBOARD_TEXT, checkName, markOnboarded, planOnboarding } from './lib/onboard.mjs'
 import { friendId } from './lib/roster.mjs'
 import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, showsInSheet } from './lib/mobile-ops.mjs'
@@ -26,6 +28,9 @@ const { createApp, reactive, ref, computed, watch } = Vue
 const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯示為離線' }
 const CONN_LABEL = { connecting: '連線中…', on: '已連線', off: '連線中斷，重試中' }
 const bridge = androidBridge(window)
+// 偽通話（#99）：用手機內建的語音辨識與念出（外殼 CallVoice.kt）。外殼沒有、或這支手機沒有辨識服務就沒有通話鈕
+const callOn = ref(false)   // 現在有沒有通話（通話中每 2 秒多收一次信）
+let liveCall = null
 
 // 手機只用得到這幾個 Rust 指令（金鑰與權杖都在 Rust 端，這裡拿不到）
 const transport = {
@@ -160,6 +165,7 @@ if (screen.value === 'main') {
     if (plan.shake) { shake.value = true; setTimeout(() => { shake.value = false }, 700) }
     if (plan.banner) { banner.value = plan.banner; clearTimeout(bannerTimer); bannerTimer = setTimeout(() => { banner.value = null }, plan.banner.ms ?? BANNER_MS) }
   })
+  startCallPoll({ anyCall: () => callOn.value, pull: why => core.pull(why) })   // 通話中每 2 秒多收一次信，結束就停
   await listen('relay-bell', () => void core.pull('bell'))   // Rust 端的門鈴（前景時有效）
   await listen('android-update-progress', p => { if (upd.phase === 'downloading') Object.assign(upd, withProgress(upd, p)) })   // 下載完才到的進度事件不能把畫面又拉回「下載中」
   upd.enabled = bridge?.selfUpdateEnabled() === true
@@ -175,7 +181,11 @@ if (screen.value === 'main') {
 
 // ---------- 導覽：每往下一層就推一筆瀏覽記錄，系統返回鍵＝上一頁（名單層再按才退到背景） ----------
 history.replaceState(initialNav(), '')
-window.addEventListener('popstate', e => { Object.assign(nav, normalizeNav(e.state)) })
+window.addEventListener('popstate', e => {
+  // 通話中按返回鍵＝掛斷，畫面留在原處（不跳到上一頁）
+  if (callOn.value) { void liveCall?.end(); history.pushState({ tab: nav.tab, sheet: nav.sheet }, ''); return }
+  Object.assign(nav, normalizeNav(e.state))
+})
 const go = next => { history.pushState(next, ''); Object.assign(nav, next) }
 // 切大分頁：從「夥伴」出去推一筆瀏覽記錄（返回鍵回到夥伴）；其他分頁之間互換不增加記錄
 function goTab(t) {
@@ -254,6 +264,14 @@ const app = createApp({
       if (opsItems.value.find(i => i.key === 'handover')?.ok) pickOp('handover')
     }
 
+    const callApi = bridge?.call?.available() ? {
+      phaseText: MOBILE_PHASE_TEXT,
+      newCall: () => (liveCall = createMobileCall({
+        native: bridge.call, reactive, log: m => console.info('[ASN]', m),
+        send: async text => { const r = await core.send(lastChat.value, text); if (!r.ok) throw new Error(r.error || '寄信失敗') },   // 寄給目前這位；換人時通話會先掛斷
+      })),
+    } : null
+    const onCallState = on => { callOn.value = on; bridge?.keepAwake(on) }
     const sendTo = async (id, text) => { const r = await core.send(id, text); if (!r.ok) console.info('[ASN] send failed', r.error) }
     const nudgeTo = id => core.nudge(id)
     const sendAttachTo = async (id, item, caption) => { const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
@@ -520,7 +538,7 @@ const app = createApp({
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, headTone, CONN_LABEL, info, banner, shake, refreshing,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, ops, opsText, opsTitle, opsModels, opsModelNote, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
-      openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, refreshAll,
+      callApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, refreshAll,
       nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }
   },

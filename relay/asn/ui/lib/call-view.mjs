@@ -12,16 +12,17 @@ export const CallView = {
     avatar: { type: String, default: '' },
     hue: { type: [Number, String], default: 205 },
     status: { type: String, default: 'online' },
+    phaseText: { type: Object, default: null },  // 各階段的說法（手機版有自己的）；沒給就用電腦版的
   },
   emits: ['hangup', 'mute'],
   setup(props) {
-    const statusText = computed(() => (props.state.muted && props.state.phase !== 'speaking' && props.state.phase !== 'starting' ? '已靜音：你說的話不會送出' : PHASE_TEXT[props.state.phase] || ''))
+    const statusText = computed(() => (props.state.muted && props.state.phase !== 'speaking' && props.state.phase !== 'starting' ? '已靜音：你說的話不會送出' : (props.phaseText || PHASE_TEXT)[props.state.phase] || ''))
     const time = computed(() => formatCallTime(props.state.seconds))
     const level = computed(() => (props.state.muted ? 0 : Math.round((props.state.level || 0) * 100)))
     return { statusText, time, level }
   },
   template: `
-<div class="callview" role="dialog" aria-modal="true" :aria-label="'與 ' + name + ' 通話中'">
+<div class="callview" :class="{ mobile: !!phaseText }" role="dialog" aria-modal="true" :aria-label="'與 ' + name + ' 通話中'">
   <div class="call-top">通話中<span class="call-time" aria-label="通話時間">{{ time }}</span></div>
   <div class="call-who">
     <div class="dp xl" :class="[ 'st-' + status, { speaking: state.phase === 'speaking' } ]" :style="{ '--h': hue }"><span><img :src="avatar" alt=""></span></div>
