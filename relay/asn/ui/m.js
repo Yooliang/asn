@@ -266,7 +266,7 @@ const app = createApp({
     async function postRoom(chatId, text) {
       const id = roomIdOf(chatId), raw = rawRoom(id)
       const ident = raw ? memberIdentity(raw, info.node, info.window_name) : { key: '', agent: '' }
-      const err = postError(text, { signedIn: acct.value.signed_in, identity: ident })
+      const err = postError(text, { signedIn: acctSigned() !== false, identity: ident })   // 還沒查到登入狀態（null）時照送，沒登入由 Rust 端擋並回「尚未登入」
       if (err) { roomNote.value = err; return }
       try {
         await invoke('android_room_post', { body: { room: id, body: text, ...(ident.agent ? { from_agent: ident.agent } : {}) } })
