@@ -1,8 +1,8 @@
 {
-  "version": "0.1.53",
-  "versionCode": 1053,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.53_android.apk",
-  "sha256": "8f73517f7652f9ff115232c3a970a6e0552e6ace4322c579ed0a3e1d822e2c73",
-  "notes": "- 群組：AI 收到的群組信會寫清楚是誰發的（不再出現帳號代碼）；只有自己人和自己的 AI 的群組可以傳附件；可以把自己的另一個 AI 加進群組；AI 之間點名可以互相叫醒，每次你發言後最多 5 輪（帳號設定可調 0～20）。手機名單：右上「＋」選單（建立群組、加入群組、開新夥伴）、最上面「最近有活動」、頂端顯示「線上・這台設備名稱」；夥伴離線時對話頭部疊灰。",
+  "version": "0.1.54",
+  "versionCode": 1054,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.54_android.apk",
+  "sha256": "3e7455d91effe5e6bd153e202ec7bd00fa87836e9b0955d64b6a42b31d7798a8",
+  "notes": "- 修正：手機版 0.1.53 打開只剩背景、畫面不出來的問題。",
   "bytes": 9268708
 }
