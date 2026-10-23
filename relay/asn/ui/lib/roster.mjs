@@ -82,12 +82,23 @@ export function buildFriends(members, { selfNode, selfName } = {}) {
   return out
 }
 
+// 後台每台電腦帶的「已封存的鍵」（archived_keys：夥伴 ID 或 n:節點/名字）→ 一個集合。舊後台沒有＝空集合。
+// 名單上沒有的夥伴（早已離線超過期限、改名殘留、本機存檔裡有往來記錄的舊好友）靠它判斷有沒有封存。
+export function archivedKeysOf(members) {
+  const out = new Set()
+  for (const m of Array.isArray(members) ? members : []) for (const k of Array.isArray(m?.archived_keys) ? m.archived_keys : []) if (typeof k === 'string' && k) out.add(k)
+  return out
+}
+// 夥伴 ID 與「n:節點/名字」兩種鍵，任一個在集合裡就算已封存
+export const isKeyArchived = (keys, f) => Boolean(keys && keys.size && ((f?.partnerId && keys.has(f.partnerId)) || keys.has(`n:${f?.node}/${f?.agent}`)))
+
 // 把「這次名單」和「記得的好友（有過對話）」合併：名單裡的 → 線上／忙碌；記得但不在名單 → 離線
-export function mergeFriends(known, live) {
+// archivedKeys：後台的封存鍵（archivedKeysOf）。封存旗標每次重算：名單自己帶的 archived，或任一種鍵命中；不沿用記住的舊值
+export function mergeFriends(known, live, archivedKeys = new Set()) {
   const map = new Map()
-  for (const k of known) map.set(k.id, { ...k, status: 'offline' })
+  for (const k of known) map.set(k.id, { ...k, status: 'offline', archived: false })
   for (const l of live) map.set(l.id, { ...(map.get(l.id) ?? {}), ...l })
-  return [...map.values()].map(f => ({ ...f, hue: hueOf(f.id), dp: initial(f.nick) }))
+  return [...map.values()].map(f => ({ ...f, archived: f.archived === true || isKeyArchived(archivedKeys, f), hue: hueOf(f.id), dp: initial(f.nick) }))
     .sort((a, b) => a.nick.localeCompare(b.nick, 'zh-Hant'))
 }
 
