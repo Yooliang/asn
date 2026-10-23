@@ -35,6 +35,7 @@ const transport = {
   send: payload => invoke('relay_send', { payload }),
   history: (node, agent, partnerId) => invoke('relay_chat_history', { node, agent: agent || null, partnerId: partnerId || null }),   // 後台的往來記錄（90 天；要登入，本機只當快取）
   sentStatus: ids => invoke('relay_sent_status', { ids }).then(r => r?.status ?? []),
+  readSync: body => invoke('relay_read_sync', { body }),   // 已讀多端同步（要本人簽章；沒登入或舊後台就回錯，前端靜默）
   avatar: node => invoke('relay_avatar', { node }),
   setAvatar: avatar => invoke('relay_set_avatar', { avatar }),
   sendAttachment: payload => invoke('relay_send_attachment', { payload }),
