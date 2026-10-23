@@ -1,11 +1,11 @@
 {
-  "version": "0.1.45",
-  "notes": "通話中每 2 秒收一次信、AI 回覆第一句好了就先念；寄給 ASN 程式本身不再顯示等回信；自動清掉 7 天以前的外掛舊版快取",
-  "pub_date": "2026-10-22T23:28:28.343Z",
+  "version": "0.1.46",
+  "notes": "- 密碼保管第二期：別台電腦的程式要密碼時，由你本人的設備確認後加密送達；已讀狀態多端同步；手機版加上通話按鈕、群組對話、使用指引；對話往上捲自動載入更早的訊息；夥伴詳情多一列「Claude 外掛」狀態；切換模型不再誤判沒外掛而關掉重開；喚醒不再誤顯示要先登入；Gemini 與 agy 預設可讀寫、執行（限工作資料夾），夥伴選單依引擎只顯示能用的項目；分頁右鍵多「關閉閒置」；信件內文裡偽造的收發室抬頭會被標成內文。",
+  "pub_date": "2026-10-23T04:12:36.246Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnhlOHJrYStvalc1Z00rdHZ3NnI4Z0JrS0JKNTBvSFEwQmpMSnNxYlhPOVR0bUdNOGREQTFRbmV6UjlTeGpYbkZPbCtnN2pJWG1ENzEzV2Nib05BcndZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzExNzA4CWZpbGU6QVNOXzAuMS40NV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjQ1CjZqTWcvb1gyTGZLbVNPMlZ4MXBYWUdTWHMxS1dEYk9relVTakdvN21sV1V6S0p5dTZJQnFZalBTOUVIK0lITFZQTTFGWVlMaStUQ3ZFTjZNbHBWTUJRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.45_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjJnaWlkZG45MnQvWmUrVEZ5dWgyRVE2T1RYUHM3UEx1Yll3Mno1dmZWQStuZDdmeFZwaXplb1RYWEJFNDAxTjJPeUdVRUpocTZxY09mbXAydHZ2NGcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzI4NzU2CWZpbGU6QVNOXzAuMS40Nl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjQ2CjY5eUJWNjVZQUdCVnVPMkhIRDkvUFBzSVRJZHRZbXlCMWVnMzVHMTg1VFpaeXQ1ckYybkpCUWc2QkhVd1pzOUExRXkxZ2RITURabEs4QTE3cUprQ0R3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.46_x64-setup.exe"
     }
   }
 }

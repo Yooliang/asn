@@ -1,8 +1,19 @@
 //! 與後台往來的格式：請求內容整理（格式擋在送出之前）、回應解析，以及 [`Backend`]——請求端與確認端對後台的四個動作。
 //! 正式版是 `Relay`（節點金鑰；確認端另帶本人簽章），測試換成記憶體假後端。
 //! 錯誤字串只含動作名、狀態碼與後台的錯誤代碼（見 `Relay::api`），不含任何請求或回應內容。
+// 顯示文字清理沿用密碼小幫手的同一份（askpass 是電腦版模組；手機建置用 #[path] 編同一個檔，不另寫一份）
+#[cfg(desktop)]
 use crate::askpass::proto::clean_display;
+#[cfg(not(desktop))]
+#[allow(dead_code)]
+#[path = "../askpass/proto.rs"]
+mod askpass_proto;
+#[cfg(not(desktop))]
+use askpass_proto::clean_display;
+#[cfg(desktop)]
 use crate::askpass::server::BoxFut;
+#[cfg(not(desktop))]
+pub type BoxFut<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
 use crate::relay::Relay;
 use serde_json::{json, Value};
 

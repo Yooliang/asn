@@ -4,6 +4,8 @@
 //! 一定要本人簽章：沒有登入憑證時 [`Backend`] 在送出之前就回錯，一個請求都不會打到後台。
 use super::crypto::{fingerprint, seal, MAX_SECRET};
 use super::wire::{self, Backend, PendingReq};
+// 確認窗型別只在電腦版有（askpass 是電腦版模組）；手機的確認畫面走 list_for_ui／answer_from_ui
+#[cfg(desktop)]
 use crate::askpass::server::{ConfirmKind, ConfirmRequest, Confirmer, Verdict};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -56,6 +58,7 @@ pub async fn answer(be: &dyn Backend, token: Option<&str>, req: &PendingReq, sec
 }
 
 /// 查一次待確認清單，逐筆跳窗（一次只跳一扇）。已處理過的請求不重複跳窗
+#[cfg(desktop)]
 pub async fn run_round(be: &dyn Backend, token: Option<&str>, confirmer: &dyn Confirmer, seen: &Seen) -> Result<Round, String> {
     let list = wire::parse_pending(&be.pending(token).await?);
     seen.retain_only(&list);
