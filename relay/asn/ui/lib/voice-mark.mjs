@@ -3,4 +3,5 @@
 // 退而看內文第一行是不是通話提示（只影響自己這邊的畫面，收信端只認結構化旗標，不看內文）。
 import { CALL_MARKER } from './call-session.mjs'
 
-export const isVoiceMsg = m => m?.voice === true || (m?.k === 'me' && typeof m?.text === 'string' && m.text.startsWith(CALL_MARKER))
+const LEGACY_MARKER = '（語音通話中，請簡短口語回答）'   // 舊版的提示行，舊記錄還認得
+export const isVoiceMsg = m => m?.voice === true || (m?.k === 'me' && typeof m?.text === 'string' && (m.text.startsWith(CALL_MARKER) || m.text.startsWith(LEGACY_MARKER)))

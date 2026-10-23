@@ -16,6 +16,7 @@ import { speakableText } from './tts-player.mjs'
 import { speechSegments } from './speech-split.mjs'
 import { engineKey } from './tabs.mjs'
 import { isAsnWindow } from './roster.mjs'
+import { CALL_END_NOTE, splitCallEnd } from './call-end.mjs'
 
 export const MOBILE_PHASE_TEXT = {
   starting: '準備中…',
@@ -61,6 +62,7 @@ export function createMobileCall({
   let gen = 0, t0 = 0, tick = null, unsub = null
   let listening = false, sending = false, awaiting = 0, guard = false
   let silent = 0, errors = 0, busyCount = 0, spoken = 0
+  let sentCalls = 0, closing = false   // sentCalls：這次通話已寄出幾封語音信（對方的結束記號只認這之後的回信）；closing：對方要掛斷，念完就結束
   const outstanding = new Set()
   let seen = new Set()
   let relistenTimer = null, guardTimer = null, replyTimer = null, speakDog = null, permWait = null
@@ -71,7 +73,7 @@ export function createMobileCall({
     if (!t0) { state.phase = 'starting'; return }
     state.phase = speakingNow() ? 'speaking' : sending ? 'sending' : awaiting > 0 ? 'waiting' : 'listening'
   }
-  const canListen = () => state.active && !!t0 && !state.muted && !speakingNow() && !guard && !sending && awaiting === 0 && !relistenTimer
+  const canListen = () => state.active && !!t0 && !state.muted && !closing && !speakingNow() && !guard && !sending && awaiting === 0 && !relistenTimer
 
   const namesJson = () => { try { const v = hints(); return JSON.stringify(Array.isArray(v) ? v : []) } catch { return '[]' } }
   function listenIfDue() {
@@ -95,7 +97,7 @@ export function createMobileCall({
     if (!text) { silent++; return silentCheck() }
     silent = 0; errors = 0; busyCount = 0
     state.note = ''; state.heard = text
-    sending = true; awaiting++
+    sending = true; awaiting++; sentCalls++
     clearTimer(replyTimer)
     replyTimer = setTimer(() => { awaiting = 0; state.note = '對方還沒回信，你可以繼續說。'; refresh(); relistenSoon(RELISTEN_MS) }, REPLY_TIMEOUT_MS)
     refresh()
@@ -133,6 +135,11 @@ export function createMobileCall({
     guard = true
     clearTimer(guardTimer); guardTimer = setTimer(() => { guard = false; refresh(); listenIfDue() }, ECHO_GUARD_MS)
     refresh()
+    maybeFinish()
+  }
+  /** 對方要掛斷：最後一句念完（或沒有可念的）就結束通話 */
+  function maybeFinish() {
+    if (closing && state.active && !speakingNow()) { state.note = CALL_END_NOTE; void end({ keepNote: true }) }
   }
 
   function onEvent(e) {
@@ -172,7 +179,9 @@ export function createMobileCall({
       const key = logKey(m)
       if (seen.has(key)) continue
       seen.add(key)
-      const text = String(m.text ?? '').trim()
+      const cut = splitCallEnd(m.text)
+      const text = cut.text.trim()
+      if (cut.ends && sentCalls > 0) closing = true   // 通話對象回覆通話中的信、最後一行是結束記號：念完掛斷
       if (!text) continue
       fresh = true
       awaiting = 0; clearTimer(replyTimer); state.reply = text; state.note = ''
@@ -189,6 +198,7 @@ export function createMobileCall({
       speakDog = setTimer(() => { speakDog = null; if (speakingNow()) { outstanding.clear(); try { native.stopSpeak() } catch { /* 已停 */ } speakDone() } }, SPEAK_DOG_BASE_MS + [...say].length * SPEAK_DOG_PER_CHAR_MS)
     }
     refresh()
+    if (closing) { maybeFinish(); return }
     if (fresh && !speakingNow()) relistenSoon(RELISTEN_MS)   // 這則沒有可以念的字：直接回到聽你說
   }
 
@@ -206,7 +216,7 @@ export function createMobileCall({
     const my = ++gen
     Object.assign(state, { active: true, phase: 'starting', muted: false, seconds: 0, level: 0 })
     seen = new Set((entries ?? []).filter(m => m?.k === 'them').map(logKey))
-    listening = sending = guard = false; awaiting = 0; silent = errors = busyCount = 0; outstanding.clear()
+    listening = sending = guard = closing = false; awaiting = 0; sentCalls = 0; silent = errors = busyCount = 0; outstanding.clear()
     const fail = async msg => {
       state.note = msg
       if (my === gen) await end({ keepNote: true })
@@ -238,7 +248,7 @@ export function createMobileCall({
     if (permWait) permWait(false)
     if (unsub) unsub()
     tick = unsub = relistenTimer = guardTimer = replyTimer = speakDog = null
-    listening = sending = guard = false; awaiting = 0; t0 = 0; outstanding.clear()
+    listening = sending = guard = closing = false; awaiting = 0; t0 = 0; outstanding.clear()
     try { native?.end() } catch { /* 已停 */ }
     return { seconds }
   }
