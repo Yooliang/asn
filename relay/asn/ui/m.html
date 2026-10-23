@@ -82,6 +82,37 @@
             <div class="m-scroll" :ref="el => (pf.ptr.el = el)" @touchstart.passive="pf.start" @touchmove="pf.move" @touchend="pf.end" @touchcancel="pf.end">
               <p class="m-archive-note" v-if="archiveNote" role="status">{{ archiveNote }}</p>
               <div class="m-search"><input v-model="query" type="search" placeholder="搜尋聯絡人…" aria-label="搜尋聯絡人" enterkeyhint="search"></div>
+              <!-- 最近有活動：24 小時內有往來的夥伴與群組（最多 8 個、新到舊）；下方設備分組照常列出同一位。沒有近期活動就不顯示 -->
+              <div class="m-group m-recent" v-if="recentRows.length">
+                <button class="m-ghead" type="button" :aria-expanded="!collapsed[RECENT_GROUP_KEY]" @click="collapsed[RECENT_GROUP_KEY] = !collapsed[RECENT_GROUP_KEY]">
+                  <span class="m-caret" :class="{ open: !collapsed[RECENT_GROUP_KEY] }">▸</span>{{ RECENT_GROUP_LABEL }}（{{ recentRows.length }}）
+                </button>
+                <ul v-show="!collapsed[RECENT_GROUP_KEY]">
+                  <li v-for="x in recentRows" :key="x.id">
+                    <button class="m-buddy" :class="{ offline: x.kind === 'friend' && x.friend.status === 'offline' }" type="button" @click="x.kind === 'room' ? openRoom(x.room.chatId) : openChat(x.id)">
+                      <template v-if="x.kind === 'friend'">
+                        <span class="m-av-wrap">
+                          <span class="dp sm" :class="'st-' + x.friend.status"><span><img :src="avOf(x.friend)" alt=""></span></span>
+                          <span class="m-vendor" aria-hidden="true" v-html="vendorIcon(x.friend)"></span>
+                        </span>
+                        <span class="b-text">
+                          <span class="b-line"><span class="b-nick" v-html="emo(x.friend.nick)"></span><span class="b-st" v-if="statusNote(x.friend.status)">{{ statusNote(x.friend.status) }}</span></span>
+                          <span class="b-last" v-if="lastOf(x.id)">{{ lastOf(x.id) }}</span>
+                        </span>
+                        <span class="unread" v-if="x.friend.unread">{{ x.friend.unread }}</span>
+                      </template>
+                      <template v-else>
+                        <span class="m-av-wrap"><span class="m-room-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24"><circle cx="9" cy="9" r="3.2" fill="currentColor"/><circle cx="16.5" cy="10" r="2.6" fill="currentColor" opacity=".7"/><path d="M3.5 19c.4-3.2 2.7-5 5.5-5s5.1 1.8 5.5 5zM14.6 14.4c.6-.2 1.3-.3 1.9-.3 2.3 0 4 1.5 4.3 4.9h-4.4c-.1-1.9-.7-3.5-1.8-4.6z" fill="currentColor"/></svg></span></span>
+                        <span class="b-text">
+                          <span class="b-line"><span class="b-nick" v-html="emo(x.room.name)"></span><span class="b-st">{{ x.room.count }} 位成員</span></span>
+                          <span class="b-last" v-if="x.room.last">{{ x.room.last }}</span>
+                        </span>
+                        <span class="unread" v-if="x.room.unread">{{ x.room.unread }}</span>
+                      </template>
+                    </button>
+                  </li>
+                </ul>
+              </div>
               <!-- 群組對話：我參加的群組，放在各設備分組之前（建立／加入在右上角「＋」選單）；沒有群組就整組不顯示；點進去在對話分頁看訊息、發言 -->
               <div class="m-group m-rooms" v-if="roomRows.length">
                 <button class="m-ghead" type="button" :aria-expanded="!collapsed[ROOM_GROUP_KEY]" @click="collapsed[ROOM_GROUP_KEY] = !collapsed[ROOM_GROUP_KEY]">

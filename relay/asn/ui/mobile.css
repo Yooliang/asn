@@ -38,7 +38,7 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-icon-btn:disabled{opacity:.5}
 .m-plus-wrap{position:relative;flex:none}
 .m-plus-back{position:fixed;inset:0;z-index:30}
-.m-plus-menu{position:absolute;right:0;top:50px;z-index:31;min-width:168px;display:flex;flex-direction:column;background:#fff;color:#1d2733;border:1px solid rgba(0,0,0,.14);border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.22);overflow:hidden}
+.m-plus-menu{position:absolute;right:0;top:50px;z-index:31;min-width:200px;white-space:nowrap;display:flex;flex-direction:column;background:#fff;color:#1d2733;border:1px solid rgba(0,0,0,.14);border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.22);overflow:hidden}
 .m-plus-menu button{border:0;background:transparent;text-align:left;padding:13px 16px;font:inherit;font-size:15px;color:inherit;border-bottom:1px solid rgba(0,0,0,.07)}
 .m-plus-menu button:last-child{border-bottom:0}
 .m-plus-menu button:active{background:rgba(0,0,0,.07)}
