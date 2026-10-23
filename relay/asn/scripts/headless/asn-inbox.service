@@ -1,0 +1,36 @@
+# ASN 收件匣模式單元範本（Linux 上 claude -p 這類代理收信用；說明見 docs/design/LINUX-HEADLESS.md「收件匣模式」）。
+# 使用方式：複製成 /etc/systemd/system/asn-inbox.service，把下面三個 <佔位> 換成實際值，再 daemon-reload、enable --now。
+#   <USER>      跑代理的 Linux 帳號
+#   <HOME>      該帳號的家目錄（ASN 資料夾放 <HOME>/.asn）
+#   <NODE_ID>   這台主機的節點代號
+# 金鑰不寫在單元裡：放在 <HOME>/.asn/<NODE_ID>.key（權限 600，資料夾 700），或由平台祕密機制設成環境變數 ASN_RELAY_KEY
+# （例如 EnvironmentFile=/etc/asn/inbox.env，該檔權限 600、只有 root 讀得到，內容 ASN_RELAY_KEY=…；本檔不收任何祕密）。
+# 收到的信存在 <HOME>/.asn/inbox/inbox.jsonl；代理用 asn-cli inbox 讀、asn-cli inbox --done <id> 標處理完、asn-cli send 回信。
+[Unit]
+Description=ASN 收件匣模式（節點 <NODE_ID>）
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=<USER>
+Environment=ASN_HOME=<HOME>/.asn
+Environment=ASN_RELAY_ID=<NODE_ID>
+# 名單上的視窗名（預設用節點代號）；有多位代理時，各自的名字由代理的視窗名決定，這裡只是收件匣本身
+#Environment=ASN_INBOX_NAME=<NODE_ID>
+# 金鑰（選用，二選一；不設就讀 ASN_HOME 底下的 <NODE_ID>.key）
+#EnvironmentFile=/etc/asn/inbox.env
+ExecStart=/usr/local/bin/asn-bridge run --inbox
+Restart=on-failure
+RestartSec=15
+# 撞到另一個收信者（結束碼 3）、設定錯誤（結束碼 2，例如找不到金鑰）不要一直重啟
+RestartPreventExitStatus=3 2
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+# 資料夾要可寫；~/.claude/sessions 只需讀（名單回報用），ProtectSystem=strict 不影響家目錄的讀取
+ReadWritePaths=<HOME>/.asn
+
+[Install]
+WantedBy=multi-user.target

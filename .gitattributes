@@ -14,3 +14,6 @@ relay/asn/src-tauri/gen/android/gradlew text eol=lf
 
 # Aegis 試跑用的單元與腳本（在 Linux 主機上執行）：一律 LF
 relay/asn/scripts/aegis/* text eol=lf
+
+# Linux 無視窗橋的單元範本：一律 LF
+relay/asn/scripts/headless/*.service text eol=lf

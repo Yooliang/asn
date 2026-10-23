@@ -14,7 +14,20 @@
 - 新增執行檔 `asn-bridge`（`src/bin/asn_bridge.rs`，主體在 `src/headless.rs`）：`asn-bridge run [--engine-only]`、`--version`、`--help`。資料夾解析沿用 `home.rs`（與 `relay/machine/home.mjs` 同一套規則）；結束碼 0／2（設定錯）／3（另一個收信者在跑）。無視窗模式關閉主控台切換、UI 自動化、遠端開視窗、系統匣，並在 log 記一行。
 - TLS：Linux 一律改用 `rustls-tls-webpki-roots`（同安卓，不用 OpenSSL）。**注意：這會改變 Linux 電腦版（deb／AppImage）的憑證驗證來源**（由系統憑證改為內建根憑證）；Windows 與 macOS 維持系統內建加密連線。若要讓 Linux 視窗版繼續用系統憑證，要另拆功能旗標，需評估安卓建置（預設功能會一併開啟）。
 - 驗證：`cargo check --no-default-features --bin asn-bridge`、預設 `cargo check`、`--target x86_64-unknown-linux-gnu`（本機沒有 Linux C 交叉編譯器，`ring` 的建置腳本需要 C 編譯器，檢查時以假的 CC／AR 略過；真正連結留給 CI 的 ubuntu 與 musl）。Linux 目標的相依樹不含 tauri／webkit／openssl。
-- 尚未做：Aegis 引擎、收件匣模式、`asn-cli inbox`、CI 的 musl 建置與靜態連結檢查、`--check`（preflight）、任何部署。
+- 尚未做：Aegis 引擎、CI 的 musl 建置與靜態連結檢查、`--check`（preflight）、任何部署。
+
+收件匣模式（對應 §4 第 6～12、20 項；分支 `worktree-agent-a0167dc1ae690c409`，未部署）：
+
+- `asn-bridge run --inbox`（或環境變數 `ASN_BRIDGE_INBOX=1`；不能和 `--engine-only` 同用）：不啟動 claude worker、不需 Aegis。主體在 `src/inbox_mode.rs`（不依賴 Tauri）。
+  - 收信：Realtime 門鈴＋每 2 分鐘補拉（`ASN_RELAY_POLL_MS`）；失敗退避 5/10/20/40/60 秒重試。每封信「先 append 到 `<ASN_HOME>/inbox/inbox.jsonl` 並 fsync，成功才 ack」；寫失敗不 ack（信留在收發室信箱）；以信件 id 去重，重啟時由檔案重建（ack 沒送達的信重啟後只補 ack、不重複寫）。壞行（寫到一半被砍斷）略過，下一筆自動補換行。
+  - 檔案格式與 `cloud-agent/recv.mjs` 的 `recordOf` 相同（`id／trust／from_node／from_agent／to_agent／reply_to／created_at／expects_reply／body／received_at`，另有選填的 `sender_display／sender_device／sender_engine／voice`，附件只存 `id／kind／name／mime／bytes／width／height／expired`，不存縮圖），所以現有 Grok 的 `inbox.mjs` 過渡期也讀得懂。
+  - 名單：每 60 秒（`ASN_ROSTER_MS`）回報。內容＝收件匣視窗（`ASN_INBOX_NAME`，預設節點代號；引擎名 `ASN_INBOX_ENGINE`，預設 `claude`；狀態 idle）加本機執行中的 Claude 視窗（沿用電腦版的 `bridge/roster.rs`：讀 `~/.claude/sessions/<pid>.json`，只留互動式 CLI 視窗；Linux 以 `/proc/<pid>` 驗證 pid 還活著；外掛狀態檔 `~/.asn/status` 有效時一併帶出忙／閒、上下文百分比）。欄位與電腦版同一個函式產生（`name／status／cwd_label／engine`，選填 `detail／context_pct／mod_loaded`），所以電腦版介面不用改。名單回 403（節點沒有 `can_roster`）只記一次 log，之後每小時才試一次。
+  - 結束碼沿用：0 正常、2 設定錯（找不到金鑰、建不了資料夾）、3 另一個收信者在跑。
+- `asn-cli inbox [--all|--unread|--json|--done <id>…]`：讀 `inbox.jsonl`、標記已處理（寫 `done.jsonl`，可給前 8 碼以上唯一前綴）。只讀本機檔案，不連後台。輸出格式照 `inbox.mjs`（抬頭、寄件人說明、內文跳脫、附件下載提示）。回信是代理自己呼叫 `asn-cli send --to <from_node>/<from_agent> --reply-to <id> … (--reply|--no-reply)`，橋不自動回。
+- 單元範本 `relay/asn/scripts/headless/asn-inbox.service`：使用者與路徑用 `<USER>／<HOME>／<NODE_ID>` 佔位；金鑰不在單元內；`Restart=on-failure`、`RestartPreventExitStatus=3 2`。
+- 測試：`inbox_mode::tests`（去重、ack 當下信已在檔案、寫失敗不 ack 且修好後補收、重啟重建、壞行、紀錄格式與附件、名單內容、主迴圈端到端含門鈴喚醒與退避重試、403 只試一次、done 標記）、`cli::tests::inbox_tests`、`headless::tests::收件匣旗標與環境變數`。
+- 與 Windows 版名單的差異（勘查結果）：電腦版只回報「互動式、有名字的 Claude 視窗」（`~/.claude/sessions`）＋ ASN 自己的視窗＋ ACP／Codex／Aegis 這類**橋自己轉交的引擎**。`agent-tools-detect`／`agent_tools/detect.rs` 只查「PATH 上有沒有裝 claude／pi／codex／gemini」（給設定頁安裝與登入按鈕用），**不掃執行中的程序**；所以電腦版也看不到「正在跑的 pi」。`claude -p`（`entrypoint` 不是 `cli`、沒有名字）同樣不會出現在名單，這和電腦版一致。若要「查得到有多少 pi 之類的代理在跑」，需要新增程序掃描（`/proc/*/comm` 比對 pi／codex／gemini），並決定名單怎麼命名（名單上的名字同時是收信地址），屬新功能，這一版沒做。
+- 「連上帳號」現況（勘查結果，未新增後端）：後台**沒有**裝置授權碼流程（沒有 `asn-bridge login` 印短碼、讓已登入的 ASN 輸入確認那種）。現有的路：(1) 邀請碼：`invite` 動作（要有開邀請權限的節點金鑰）→ `relay/machine/register.mjs --invite …` 註冊，金鑰由主機自己產生、直接寫檔（§2-A 正規流程）；(2) 登入本人簽章：`cloud_node_create`（電腦版設定頁的「邀請雲端代理」，`cloud_invite.rs`）由登入憑證建立節點，金鑰只在回應裡出現一次，要人把金鑰設成主機的 `ASN_RELAY_KEY` 或存成 `<ASN_HOME>/<節點>.key`。ONBOARDING.md 說的設定頁「新增無畫面主機」與這條同一套流程（`node_type=server`），但目前程式裡只有雲端代理版本的按鈕。建議：要做到「Linux 自己上線」，需新增後台的裝置授權流程（`device_code_start` 發短碼＋輪詢、`device_code_approve` 由已登入的 ASN 用登入憑證核准並發節點金鑰一次），再加 `asn-bridge login`；這涉及後端 migration 與 Edge Function，已列為待決，這一版不動。
 
 ## 1. 目標
 
