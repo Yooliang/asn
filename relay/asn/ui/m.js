@@ -331,11 +331,11 @@ const app = createApp({
       phaseText: MOBILE_PHASE_TEXT,
       newCall: () => (liveCall = createMobileCall({
         native: bridge.call, reactive, log: m => console.info('[ASN]', m),
-        send: async text => { const r = await core.send(lastChat.value, text); if (!r.ok) throw new Error(r.error || '寄信失敗') },   // 寄給目前這位；換人時通話會先掛斷
+        send: async (text, opts) => { const r = await core.send(lastChat.value, text, opts); if (!r.ok) throw new Error(r.error || '寄信失敗') },   // 寄給目前這位；換人時通話會先掛斷
       })),
     } : null
     const onCallState = on => { callOn.value = on; bridge?.keepAwake(on) }
-    const sendTo = async (id, text) => { if (isRoomChat(id)) return postRoom(id, text); const r = await core.send(id, text); if (!r.ok) console.info('[ASN] send failed', r.error) }
+    const sendTo = async (id, text, opts) => { if (isRoomChat(id)) return postRoom(id, text); const r = await core.send(id, text, opts); if (!r.ok) console.info('[ASN] send failed', r.error) }
     const nudgeTo = id => { if (!isRoomChat(id)) core.nudge(id) }   // 群組沒有震動與傳檔（工具列的鈕在群組畫面已藏起來）
     const sendAttachTo = async (id, item, caption) => { if (isRoomChat(id)) return; const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
     // ---------- 使用指引：設置分頁的一個項目，點進去是獨立一頁（先列篇目，再看內文），內容沿用電腦版的篇目 ----------

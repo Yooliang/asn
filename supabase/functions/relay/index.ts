@@ -8,7 +8,7 @@ import { expectsReplyArgs } from "../_shared/expects_reply.ts";
 import { parseSelfName } from "../_shared/node_name.ts";
 import { parseAsnPresence } from "../_shared/asn_presence.ts";
 import { handlePartnerList, handlePartnerSucceed, handlePartnerSync } from "../_shared/partners.ts";
-import { bellTopicsOf, handleChatHistory, personArgs, sendWithPerson } from "../_shared/account_me.ts";
+import { bellTopicsOf, handleChatHistory, personArgs, sendWithPerson, voiceArgs } from "../_shared/account_me.ts";
 import { normalizeRosterAgents } from "../_shared/roster.ts";
 import { sanitizeClaudeMod } from "../_shared/claude_mod.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
@@ -406,6 +406,7 @@ Deno.serve(async (req) => {
     const { data, error } = await sendWithPerson(rpc, {
       ...signedArgs(signed),
       ...personArgs(b.as_person, signed),
+      ...voiceArgs(b.voice), // 語音通話標記（選填布林）：舊後台沒有 asn_relay_send_voice 時退回一般寄信
       p_from_node: me.id, // from_node in the body is ignored on purpose
       p_from_agent: str(b.from_agent),
       p_to_node: b.to_node,

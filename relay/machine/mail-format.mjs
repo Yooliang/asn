@@ -39,7 +39,15 @@ export const mailHead = (m, engine = 'claude') =>
 // 前面加上可見的「（內文）」，讓它不可能被當成收發室寫的行。只動內文；收發室自己產生的行（抬頭、說明行、照片替代文字）不經過這裡。
 // 與 Rust 內建橋 mail.rs 的 escape_body 逐字一致。
 export const BODY_ESCAPE_PREFIX = '（內文）'
-export const escapeBody = body => String(body ?? '').replace(/(^|[\n\r])([^\S\r\n]*(?:\[RELAY 來信\]|\[RELAY 寄信\]|寄件人：|【要回信】|你與收發室的往來記錄在：))/g, `$1${BODY_ESCAPE_PREFIX}$2`)
+
+// 語音通話標記：寄件人在通話中寄出的信，後台帶結構化欄位 voice=true（不是內文文字，內文偽造無效）。
+// 收發室在寄件人說明行後面加這一句固定文字，提醒收件的 AI：這是語音辨識的文字，可能有錯字，只能對話回應。
+// 內文行首若以「（語音通話：」開頭，escapeBody 也會跳脫，免得內文冒充這句。與 Rust 內建橋 mail.rs 的 VOICE_NOTE 逐字一致。
+export const VOICE_NOTE = '（語音通話：這封是語音辨識的文字，可能有錯字；只能對話回應，不得據以執行有影響的操作，要做事請本人打字確認）'
+// 只認布林 true（字串 "true"、數字 1 都不算）
+export const isVoiceMail = m => m?.voice === true
+export const voiceNote = m => isVoiceMail(m) ? VOICE_NOTE : ''
+export const escapeBody = body => String(body ?? '').replace(/(^|[\n\r])([^\S\r\n]*(?:\[RELAY 來信\]|\[RELAY 寄信\]|寄件人：|【要回信】|你與收發室的往來記錄在：|（語音通話：))/g, `$1${BODY_ESCAPE_PREFIX}$2`)
 
 // 給人看的名稱：換行與控制字元變空白、拿掉會干擾抬頭的括號引號、最長 40 字
 export const cleanLabel = v => typeof v === 'string'
@@ -78,7 +86,7 @@ export const replyLine = m => {
 
 // 抬頭之後、內文之前的說明行（每行以換行結尾）：寄件人說明＋（reply=yes 且收件的是 Claude 視窗才有的）要回信指示。
 // 背景工作者、Codex 這類轉接器的回答由橋自動寄回，不能叫它們用 asn_send，所以只有 claude 引擎加這行
-export const mailPreamble = (m, engineId = 'claude') => `${senderLine(m)}\n${engineId === 'claude' && replyLine(m) ? replyLine(m) + '\n' : ''}`
+export const mailPreamble = (m, engineId = 'claude') => `${senderLine(m)}${voiceNote(m)}\n${engineId === 'claude' && replyLine(m) ? replyLine(m) + '\n' : ''}`
 
 // 從轉接器收到的信件全文取出抬頭上的 reply 欄位：'yes'｜'no'｜'?'；不是來信抬頭或沒有這個欄位回 null。
 // 只認第一行【最後面】那個 reply=（橋寫在最後；寄件人自填的視窗名就算含 " reply=no" 也排在它前面，騙不到）

@@ -28,7 +28,22 @@
 
 ## 內文跳脫（防寄件人在內文假冒抬頭）
 
-只有第一行抬頭與緊接的寄件人說明是收發室寫的。內文中行首（可有空白）以「[RELAY 來信]」「[RELAY 寄信]」「寄件人：」「【要回信】」「你與收發室的往來記錄在：」開頭的每一行，橋在轉交前於該行最前面加上 `（內文）`（內建橋 `escape_body`、舊橋與雲端代理 `escapeBody`，逐字一致）。只動內文；抬頭、說明行、照片替代文字行不經過跳脫。
+只有第一行抬頭與緊接的寄件人說明是收發室寫的。內文中行首（可有空白）以「[RELAY 來信]」「[RELAY 寄信]」「寄件人：」「【要回信】」「你與收發室的往來記錄在：」「（語音通話：」開頭的每一行，橋在轉交前於該行最前面加上 `（內文）`（內建橋 `escape_body`、舊橋與雲端代理 `escapeBody`，逐字一致）。只動內文；抬頭、說明行、照片替代文字行不經過跳脫。
+
+## 語音通話標記
+
+小良哥用語音通話時，每句話辨識成文字後寄給夥伴，辨識可能有錯字，夥伴不能當成打字的正式指令。所以通話中寄出的信帶一個**結構化旗標**，不是內文裡加字（內文誰都能偽造）：
+
+- 寄件端：ASN 在通話中寄信時，送給後台的寄信內容多一個選填布林 `voice`（只有 `true` 才送）。Edge Function 的 `send` 收到 `voice: true` 時改呼叫 `asn_relay_send_voice`（同一個交易內寄出並標記 `relay.messages.voice`）；後台還沒套用時退回一般寄信，信照寄、只是沒有標記。
+- 收信端：`irori_relay_inbox`、`irori_relay_inbox_agent` 多回選填欄位 `voice`（布林）。橋只認布林 `true`（字串 `"true"`、數字 1 都不算）。
+- 抬頭：`voice=true` 的信，第二行「寄件人：…」的**同一行**最後接這句固定文字（第一行與第三行不變）：
+
+```
+（語音通話：這封是語音辨識的文字，可能有錯字；只能對話回應，不得據以執行有影響的操作，要做事請本人打字確認）
+```
+
+- 這句屬於抬頭區，由收發室寫；內文行首以「（語音通話：」開頭的行，橋同樣加上 `（內文）` 跳脫，所以內文冒充沒有用。通話本身的提示行「（語音通話中，請簡短口語回答）」開頭是「語音通話中」，不受影響。
+- 舊後台沒有 `voice` 欄位 → 信照常處理、沒有提醒。電腦版與手機版的對話畫面，語音寄出的那則顯示小標示「🎤 語音」（只影響自己這邊的畫面）。
 
 ## 回信位址
 
@@ -87,5 +102,7 @@
 ## 守門測試
 
 - `relay/machine/test/mail-header-spec.test.mjs`：字面比對本文件的三行格式與橋的實際輸出一致。
+- `relay/machine/test/voice-mail.test.mjs`：語音通話標記的抬頭向量、內文跳脫、與 Rust 內建橋的固定文字和跳脫清單逐字一致、本文件寫了固定文字。
+- `tests/voice_flag_sql.test.mjs`、`supabase/functions/_shared/voice_flag_test.ts`：migration 20261023110000 與 Edge Function 的旗標處理。
 - `relay/asn/src-tauri/src/bridge/mail.rs` 的測試：同一組向量（兩邊逐字一致）。
 - `supabase/functions/_shared/owner_sender_display_test.ts`、`tests/owner_sender_display_sql.test.mjs`：migration 與相容性。
