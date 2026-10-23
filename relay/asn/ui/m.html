@@ -233,7 +233,7 @@
           <p class="m-err" v-if="ops.error" role="alert">{{ ops.error }}</p>
           <button type="button" class="m-btn m-ops-cancel" @click="ops.phase = 'menu'; ops.error = ''">返回</button>
         </template>
-        <template v-else-if="ops.phase === 'close' || ops.phase === 'handover'">
+        <template v-else-if="ops.phase === 'close' || ops.phase === 'handover' || ops.phase === 'restart'">
           <p class="m-ops-lead">{{ opsText.lead }}</p>
           <ul class="m-ops-points" v-if="opsText.points.length"><li v-for="p in opsText.points" :key="p">{{ p }}</li></ul>
           <label class="m-field" v-if="ops.phase === 'handover'">補充的話（選填，會附在新夥伴的第一句話後面）<textarea class="set-area" rows="3" v-model="ops.note" maxlength="1000"></textarea></label>

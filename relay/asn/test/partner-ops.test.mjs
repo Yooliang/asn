@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { HANDOVER_GIVE_UP_MS, ONLINE_OPS, OPS, OP_GIVE_UP_MS, QUEUE_GIVE_UP_MS, REASON, STALE_TEXT, buildOpRequest, infoRows, isManageable, menuItems, opErrorText, opFormError, progressView } from '../ui/lib/partner-ops.mjs'
+import { HANDOVER_GIVE_UP_MS, ONLINE_OPS, OPS, OP_GIVE_UP_MS, QUEUE_GIVE_UP_MS, REASON, STALE_TEXT, buildOpRequest, infoRows, isAiPartner, isManageable, menuItems, opErrorText, opFormError, partnerEngine, progressView } from '../ui/lib/partner-ops.mjs'
 import { machinesByNode } from '../ui/lib/mobile-launch.mjs'
 
 const LAUNCHER = { profiles: [{ id: 'claude' }], cwd_allow: ['D:\\Github\\asn'] }
@@ -13,7 +13,7 @@ const W = (node, agent, extra = {}) => ({ id: `${node}/${agent}`, node, agent, n
 test('選單五項：詳情、改名、切換模型、關閉視窗、接班換手；都能用時全部 ok（在線的沒有喚醒）', () => {
   const items = menuItems(W('H', '小文'), ctx)
   assert.deepEqual(items.map(i => i.key), ONLINE_OPS)
-  assert.deepEqual(OPS, [...ONLINE_OPS, 'resume'])
+  assert.deepEqual(OPS, [...ONLINE_OPS, 'resume', 'restart'])
   assert.deepEqual(items.map(i => i.label), ['詳情', '改名', '切換模型', '關閉視窗', '接班換手'])
   assert.ok(items.every(i => i.ok && i.reason === ''))
 })
@@ -185,4 +185,41 @@ test('守門：手機指令清單有兩個簽章指令；沒有電腦端指令�
   assert.match(relay, /pub async fn partner_op_signed[\s\S]*?ok_or\("尚未登入，無法管理夥伴視窗"\)\?;[\s\S]*?api_signed\("partner_op"/, '沒憑證在打後台之前就回錯')
   assert.match(relay, /pub async fn partner_ops_signed[\s\S]*?ok_or\("尚未登入，無法查詢管理操作的進度"\)\?;[\s\S]*?api_signed\("partner_ops"/)
   assert.match(read('..', '..', 'supabase', 'functions', 'relay', 'index.ts'), /action === "partner_op" \|\| action === "partner_ops" \|\| action === "partner_archive"\) \? await signedUserId/)
+})
+
+test('依引擎決定項目：Claude 全部；ACP 工作者只有詳情、重開、接班換手；雲端代理與其他引擎沒有管理項目', () => {
+  const keys = f => menuItems(f, ctx).map(i => i.key)
+  assert.deepEqual(keys(W('H', '小文')), ['info', 'rename', 'model', 'close', 'handover'])
+  assert.deepEqual(keys(W('H', '小文', { engine: null })), ['info', 'rename', 'model', 'close', 'handover'], '沒寫引擎當 Claude')
+  for (const engine of ['gemini', 'agy', 'acp', 'Gemini']) {
+    const items = menuItems(W('H', 'Gemini', { engine, kind: 'claude' }), ctx)
+    assert.deepEqual(items.map(i => i.key), ['info', 'restart', 'handover'], engine)
+    assert.deepEqual(items.map(i => i.label), ['詳情', '重開', '接班換手'])
+    assert.ok(items.every(i => i.ok), engine)
+    assert.equal(partnerEngine(W('H', 'g', { engine })), 'acp')
+  }
+  for (const f of [W('G', 'Grok', { engine: 'grok', kind: 'grok' }), W('G', 'Grok', { engine: 'cloud' }), W('G', 'Grok', { engine: 'claude', kind: 'cloud-agent' }), W('H', '小碼', { engine: 'codex' }), W('H', '小皮', { engine: 'pi' })]) {
+    assert.deepEqual(menuItems(f, ctx), [], JSON.stringify(f))
+    assert.equal(isManageable(f, ctx), false)
+    assert.equal(isAiPartner(f, ctx), true, '還是 AI 夥伴（封存用）')
+  }
+  assert.equal(partnerEngine(W('G', 'Grok', { engine: 'grok' })), 'cloud')
+  assert.equal(partnerEngine(W('H', '小碼', { engine: 'codex' })), 'other')
+})
+
+test('ACP 工作者的項目也受登入、開放、離線的條件管；離線的 ACP 工作者沒有項目（不能喚醒）', () => {
+  const g = (node, extra = {}) => W(node, 'Gemini', { engine: 'gemini', ...extra })
+  const closed = menuItems(g('C'), ctx)
+  assert.deepEqual(closed.map(i => i.ok), [true, false, false], '沒開放：只有詳情能用')
+  assert.equal(closed[1].reason, REASON.closed)
+  assert.ok(menuItems(g('H'), { ...ctx, signedIn: false }).every(i => !i.ok && i.reason === REASON.needLogin))
+  assert.ok(menuItems(g('W'), ctx).every(i => !i.ok && i.reason === REASON.offline))
+  assert.deepEqual(menuItems(g('H', { status: 'offline' }), ctx), [])
+})
+
+test('重開：只送節點、名字、動作；送出前不用填任何東西；進度完成文字', () => {
+  const f = W('H', 'Gemini', { engine: 'gemini' })
+  assert.deepEqual(buildOpRequest(f, 'restart', { newName: 'x', note: 'y', model: 'z' }), { node: 'H', name: 'Gemini', op: 'restart' })
+  assert.equal(opFormError(f, 'restart', {}), '')
+  assert.equal(progressView({ status: 'ok' }, { op: 'restart' }).text, '已重開，對話保留。')
 })

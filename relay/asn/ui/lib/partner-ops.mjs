@@ -4,10 +4,12 @@
 import { NAME_RE } from './mobile-launch.mjs'
 import { isRelayRoom } from './roster.mjs'
 
-export const OPS = ['info', 'rename', 'model', 'close', 'handover', 'resume']
-// 在線的 AI 夥伴五項；離線的只有「喚醒」
+export const OPS = ['info', 'rename', 'model', 'close', 'handover', 'resume', 'restart']
+// Claude 視窗：在線的五項；離線的只有「喚醒」
 export const ONLINE_OPS = ['info', 'rename', 'model', 'close', 'handover']
-export const OP_LABEL = { info: '詳情', rename: '改名', model: '切換模型', close: '關閉視窗', handover: '接班換手', resume: '喚醒' }
+// ACP 工作者（Gemini 等收發室自己跑的背景工作者）：只有詳情、重開、接班換手；其餘電腦端會回「這類夥伴不支援」，所以畫面不顯示
+export const ACP_OPS = ['info', 'restart', 'handover']
+export const OP_LABEL = { info: '詳情', rename: '改名', model: '切換模型', close: '關閉視窗', handover: '接班換手', resume: '喚醒', restart: '重開' }
 export const NOTE_MAX = 1000
 export const MODEL_RE = /^[A-Za-z0-9._[\]-]{1,60}$/
 export const OP_POLL_MS = 3000
@@ -26,29 +28,51 @@ export const REASON = {
 }
 export const STALE_TEXT = 'ASN 版本可能太舊，或沒有在跑'
 
-// 不是「電腦上的 AI 視窗」的對象：人、手機、雲端代理（節點種類），群組、ASN 與收發室視窗
-const NON_WINDOW_KINDS = new Set(['owner', 'person', 'human', 'phone', 'mobile', 'android', 'cloud', 'cloud-agent', 'grok', 'room', 'group'])
+// 不是 AI 夥伴的對象：人、手機，群組、ASN 與收發室視窗
+const NON_AI_KINDS = new Set(['owner', 'person', 'human', 'phone', 'mobile', 'android', 'room', 'group'])
+// 雲端代理（Grok 等）：名單 engine 或節點種類是這些。不在電腦上跑，沒有視窗可管，只能封存
+const CLOUD_ENGINES = new Set(['cloud', 'cloud-agent', 'grok'])
+// 由內建收發室自己跑的背景工作者（ACP）：名單 engine 是它們的引擎名
+const ACP_ENGINES = new Set(['gemini', 'agy', 'antigravity', 'acp'])
 
-// 是不是能管理的 AI 視窗。ctx.asn＝節點→在線的 ASN 視窗（名單帶的）；ctx.nonWindowNodes＝已知是手機／雲端代理的節點（選填）
-export function isManageable(friend, ctx = {}) {
+// 這位夥伴屬於哪一類：claude（名單沒寫引擎也算）、acp、cloud，其他（Codex 等）回 other
+export function partnerEngine(friend) {
+  const engine = String(friend?.engine ?? '').trim().toLowerCase()
+  const kind = String(friend?.kind ?? '').trim().toLowerCase()
+  if (CLOUD_ENGINES.has(engine) || CLOUD_ENGINES.has(kind)) return 'cloud'
+  if (!engine || engine === 'claude') return 'claude'
+  if (ACP_ENGINES.has(engine)) return 'acp'
+  return 'other'
+}
+
+// 是不是 AI 夥伴（任何引擎都算，雲端代理也算；封存對它們都可用）。ctx.asn＝節點→在線的 ASN 視窗（名單帶的）；ctx.nonWindowNodes＝已知是手機的節點（選填）
+export function isAiPartner(friend, ctx = {}) {
   const f = friend ?? {}
   if (!f.node || !f.agent) return false
   if (f.room || f.group || f.isRoom || f.person || f.isPerson) return false
-  if (f.kind && NON_WINDOW_KINDS.has(String(f.kind).toLowerCase())) return false
+  if (f.kind && NON_AI_KINDS.has(String(f.kind).toLowerCase())) return false
   if ((ctx.nonWindowNodes ?? []).includes(f.node)) return false
   if (f.engine === 'asn' || isRelayRoom(f.agent)) return false
   if ((ctx.asn?.[f.node] ?? []).some(w => w?.window_name === f.agent)) return false
   return true
 }
 
-// 選單項目 { key, label, ok, reason }：在線的 AI 夥伴五項；離線的 AI 夥伴只有「喚醒」；不是能管理的視窗回空陣列（不顯示「⋯」）。
+// 能不能顯示「⋯」與右鍵的管理項目：AI 夥伴，而且是 Claude 視窗或 ACP 工作者。雲端代理與其他引擎不顯示（按了也只會失敗）
+export function isManageable(friend, ctx = {}) {
+  if (!isAiPartner(friend, ctx)) return false
+  const e = partnerEngine(friend)
+  return e === 'claude' || e === 'acp'
+}
+
+// 選單項目 { key, label, ok, reason }：Claude 視窗在線五項、離線只有「喚醒」；ACP 工作者只有詳情、重開、接班換手；不是能管理的夥伴回空陣列（不顯示「⋯」）。
 // ctx：{ machines（節點→設定）, loaded, signedIn, friends, asn, nonWindowNodes, supported（後台有沒有 partner_op；false＝舊後台） }
 export function menuItems(friend, ctx = {}) {
   if (!isManageable(friend, ctx)) return []
-  if (friend.status === 'offline') return resumeItems(friend, ctx)
+  const acp = partnerEngine(friend) === 'acp'
+  if (friend.status === 'offline') return acp ? [] : resumeItems(friend, ctx)
   const base = baseReason(friend, ctx)
   const machine = ctx.machines?.[friend.node]
-  return ONLINE_OPS.map(key => {
+  return (acp ? ACP_OPS : ONLINE_OPS).map(key => {
     let reason = base
     // 詳情是唯讀，不需要那台電腦開放；其餘要開放（launcher 不為空）。沒查到設定時也不能確定開放了沒
     if (!reason && key !== 'info') {
@@ -149,6 +173,7 @@ const DONE_TEXT = {
   close: '視窗已關閉，對話記錄還在。',
   handover: '接班換手完成，新視窗開好了。',
   resume: '已喚醒，視窗開好了。',
+  restart: '已重開，對話保留。',
 }
 // 接班換手的三個階段（電腦端用 detail 回報 stage:代號）
 export const HANDOVER_STEPS = [
