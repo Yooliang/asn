@@ -7,10 +7,11 @@ import { avatarSrc, isAvatarDataUrl, removeAvatarUpload, selfAvatarSrc, uploadAv
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { PROVIDERS, canStart, errorText, phaseText } from './lib/login.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
-import { BANNER_MS, DEFAULT_PREFS, TABS, TAB_LABEL, accountDisplayName, SWIPE_BLOCK_SELECTOR, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, buttonLabel, initialNav, opsNav, initialUpdate, installOutcome, launchNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, vendorBadgeHtml, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
+import { BANNER_MS, DEFAULT_PREFS, TABS, TAB_LABEL, accountDisplayName, SWIPE_BLOCK_SELECTOR, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, buttonLabel, initialNav, opsNav, secretNav, initialUpdate, installOutcome, launchNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, vendorBadgeHtml, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
 import { LAUNCH_GIVE_UP_MS, LAUNCH_POLL_MS, appearedIn, buildLaunchRequest, initialLaunch, launchChoices, launchDevices, launchEligibility, launchErrorText, launchFormError, machinesByNode, progressView } from './lib/mobile-launch.mjs'
 import { OnboardCard } from './lib/onboard-card.mjs'
 import { ONBOARD_STORE, TEXT as ONBOARD_TEXT, checkName, markOnboarded, planOnboarding } from './lib/onboard.mjs'
+import { POLL_MS as SECRET_POLL_MS, TEXT as SECRET_TEXT, countdownText as secretCountdown, errorText as secretError, normalizeList as secretList, nextToAsk as secretNext, secretError as secretValidate } from './lib/secret-ask.mjs'
 import { friendId } from './lib/roster.mjs'
 import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, showsInSheet } from './lib/mobile-ops.mjs'
 import { OP_LABEL, opFormError } from './lib/partner-ops.mjs'
@@ -375,6 +376,39 @@ const app = createApp({
       opsRun.value = { op: 'archive', view: { phase: r.ok ? 'done' : 'failed', done: true, text: r.text } }
     }
     const dismissRun = () => { opsRun.value = null }
+    // ---------- 別台電腦／雲端代理要密碼（#26 第二期）：跳出確認面板，本人輸入後在 Rust 端加密才送出 ----------
+    // 查清單、取公鑰、加密、送回全在 Rust 端（android_secret_*）；這裡只顯示說明與收輸入。沒登入或後台還沒部署就靜默略過
+    const sec = reactive({ cur: null, secret: '', error: '', busy: false, left: 0 })
+    const secDismissed = new Set()
+    let secTimer = 0
+    const secCountdown = computed(() => secretCountdown(sec.left))
+    const secClose = () => { clearInterval(secTimer); sec.secret = ''; sec.cur = null; sec.busy = false }
+    async function checkSecrets() {
+      if (sec.busy || sec.cur || nav.sheet || !acct.value.signed_in || document.visibilityState !== 'visible') return
+      let list
+      try { list = secretList(await invoke('android_secret_pending')) } catch { return }
+      const next = secretNext(list, secDismissed)
+      if (!next || nav.sheet) return
+      Object.assign(sec, { cur: next, secret: '', error: '', busy: false, left: next.secondsLeft })
+      clearInterval(secTimer)
+      secTimer = setInterval(() => { if (sec.left > 0) sec.left -= 1; else { secDismissed.add(sec.cur?.id); history.back() } }, 1000)
+      go(secretNav())
+    }
+    async function answerSecret(deny) {
+      const cur = sec.cur
+      if (!cur || sec.busy) return
+      if (!deny) { const err = secretValidate(sec.secret); if (err) { sec.error = err; return } }
+      sec.busy = true; sec.error = ''
+      const value = deny ? null : sec.secret
+      sec.secret = ''
+      try { await invoke('android_secret_reply', { id: cur.id, secret: value }); history.back() }
+      catch (e) { sec.error = secretError(e); sec.busy = false }
+    }
+    const laterSecret = () => { if (sec.cur) secDismissed.add(sec.cur.id); history.back() }
+    watch(() => nav.sheet, s => { if (s !== 'secret' && sec.cur) secClose() })
+    document.addEventListener('visibilitychange', () => { void checkSecrets() })
+    setInterval(() => { void checkSecrets() }, SECRET_POLL_MS)
+    void listen('relay-bell', () => { void checkSecrets() })
     // 名單第三行「最後一句話」：本機有記錄就用；沒有的（例如剛裝）向後台補一次往來（每位最多一次、依畫面順序、慢慢來、整個執行期有上限），補到的記錄存在本機當快取
     const lastOf = id => lastMap[id] ?? ''
     const backfillTried = new Set()
@@ -518,6 +552,7 @@ const app = createApp({
       upd, updText: computed(() => bannerText(upd)), updButton: computed(() => buttonLabel(upd)), startUpdate, checkUpdate,
       pf, sw, pagerStyle, indicator, swipeStart, swipeMove, swipeEnd, goTab, TABS, TAB_LABEL, myName, meForChat, lastOf, vendorIcon: vendorBadgeHtml,
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, headTone, CONN_LABEL, info, banner, shake, refreshing,
+      sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, ops, opsText, opsTitle, opsModels, opsModelNote, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, refreshAll,

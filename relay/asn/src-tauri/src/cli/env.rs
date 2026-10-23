@@ -34,6 +34,8 @@ pub struct Env {
     pub alive: Arc<dyn Fn(u32) -> bool + Send + Sync>,
     /// recv --watch 的輪詢間隔（ASN_RECV_POLL_MS）
     pub poll_ms: u64,
+    /// asn secret request 等本人確認時的輪詢間隔（正式固定 2 秒，測試縮短）
+    pub secret_poll_ms: u64,
     /// recv --watch 的心跳間隔（ASN_RECV_HEARTBEAT_MS）
     pub heartbeat_ms: u64,
     /// 心跳多久沒更新算過期（ASN_RECV_STALE_MS）
@@ -76,6 +78,7 @@ impl Env {
             procs: Arc::new(super::caller::process_table),
             alive: Arc::new(crate::heartbeat::pid_alive),
             poll_ms: num("ASN_RECV_POLL_MS", 120_000),
+            secret_poll_ms: 2_000,
             heartbeat_ms: crate::heartbeat::heartbeat_ms(),
             stale_ms: crate::heartbeat::stale_ms(),
             window_check_ms: 10_000,

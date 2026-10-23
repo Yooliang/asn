@@ -11,6 +11,7 @@ use std::sync::Arc;
 mod attach_tests;
 mod recv_tests;
 mod room_tests;
+mod secret_tests;
 mod send_tests;
 mod unit_tests;
 
@@ -70,6 +71,7 @@ pub fn fx(url: &str, window: Option<&str>) -> Fx {
         procs: Arc::new(move || Ok(table.clone())),
         alive: Arc::new(move |p| if p == CLAUDE_PID { f2.load(Ordering::SeqCst) } else { p != 999_999 }),
         poll_ms: 120_000,
+        secret_poll_ms: 20,
         heartbeat_ms: 30_000,
         stale_ms: 90_000,
         window_check_ms: 10_000,

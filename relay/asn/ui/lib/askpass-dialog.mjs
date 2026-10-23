@@ -8,7 +8,11 @@ export function viewModel(info) {
   const text = (v, empty) => (typeof v === 'string' && v.trim() ? v.trim() : empty)
   return {
     kind,
-    title: kind === 'permission' ? '有程式要求權限' : '有程式要密碼',
+    // 遠端請求（#26 第二期）：別台電腦／雲端代理要密碼。設備名稱由後台查出，程式與用途是對方自報；核對碼是請求端公鑰指紋
+    remote: typeof i.origin === 'string' && i.origin.trim() !== '',
+    origin: text(i.origin, ''),
+    fingerprint: text(i.fingerprint, ''),
+    title: kind === 'permission' ? '有程式要求權限' : (typeof i.origin === 'string' && i.origin.trim() ? '別台電腦在向你要密碼' : '有程式要密碼'),
     program: text(i.program, '（無法辨識）'),
     cwd: text(i.cwd, '（沒有提供）'),
     prompt: text(i.prompt, '（程式沒有提供提示文字）'),

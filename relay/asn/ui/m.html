@@ -250,6 +250,26 @@
         </template>
       </section>
     </div>
+
+    <!-- 別台電腦／雲端代理要密碼（#26 第二期）：底部浮層，樣式沿用「⋯」選單。哪台電腦由後台查出，程式與用途是對方自報（標示出來）；密碼在手機上加密才送出 -->
+    <div class="m-ops" v-if="nav.sheet === 'secret' && sec.cur" @click.self="laterSecret">
+      <section class="m-ops-panel" role="dialog" aria-modal="true" :aria-label="SECRET_TEXT.title">
+        <h2 class="m-ops-h">{{ SECRET_TEXT.title }}</h2>
+        <p class="m-ops-lead">{{ SECRET_TEXT.lead }}</p>
+        <dl class="m-ops-rows">
+          <dt>{{ SECRET_TEXT.deviceLabel }}</dt><dd>{{ sec.cur.nodeName }}</dd>
+          <dt>{{ SECRET_TEXT.programLabel }}</dt><dd>{{ sec.cur.program }}</dd>
+          <dt>{{ SECRET_TEXT.purposeLabel }}</dt><dd>{{ sec.cur.purpose }}</dd>
+          <dt>{{ SECRET_TEXT.fpLabel }}</dt><dd>{{ sec.cur.fingerprint }}</dd>
+        </dl>
+        <p class="m-note">{{ SECRET_TEXT.fpNote }}　{{ secCountdown }}</p>
+        <label class="m-field">{{ SECRET_TEXT.inputLabel }}<input class="set-input m-ops-input" type="password" v-model="sec.secret" autocomplete="off" autocapitalize="off" spellcheck="false" :disabled="sec.busy" @keydown.enter.prevent="answerSecret(false)"></label>
+        <p class="m-err" v-if="sec.error" role="alert">{{ sec.error }}</p>
+        <button type="button" class="m-btn m-btn-big" :disabled="sec.busy" @click="answerSecret(false)">{{ SECRET_TEXT.ok }}</button>
+        <button type="button" class="m-btn m-ops-cancel m-danger" :disabled="sec.busy" @click="answerSecret(true)">{{ SECRET_TEXT.deny }}</button>
+        <button type="button" class="m-btn m-ops-cancel" :disabled="sec.busy" @click="laterSecret">{{ SECRET_TEXT.later }}</button>
+      </section>
+    </div>
   </template>
 </div>
 <script src="vendor/vue.global.prod.js"></script>

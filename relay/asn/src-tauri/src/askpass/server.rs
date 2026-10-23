@@ -30,6 +30,10 @@ pub struct ConfirmRequest {
     /// 要什麼（git／ssh 的提示文字，已清理過）
     pub prompt: String,
     pub timeout: Duration,
+    /// 遠端密碼請求（#26 第二期）才有：哪台設備在要（後台查出的設備名稱）；本機小幫手的請求是 None
+    pub origin: Option<String>,
+    /// 遠端密碼請求才有：請求端公鑰指紋，供使用者與請求端核對
+    pub fingerprint: Option<String>,
 }
 
 /// 確認窗的結果。自訂 Debug：密碼不會被印出來
@@ -161,6 +165,8 @@ impl Broker {
             cwd: clean_display(&req.cwd, 200),
             prompt: clean_display(&req.prompt, 300),
             timeout: self.timeout,
+            origin: None,
+            fingerprint: None,
         };
         drop(req);
         let verdict = tokio::select! {

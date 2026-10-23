@@ -20,6 +20,9 @@ pub struct DialogInfo {
     pub cwd: String,
     pub prompt: String,
     pub seconds_left: u64,
+    /// 遠端請求才有：請求設備名稱與公鑰指紋（本機小幫手為 null）
+    pub origin: Option<String>,
+    pub fingerprint: Option<String>,
 }
 
 struct Slot {
@@ -55,6 +58,8 @@ impl DialogState {
             cwd: s.req.cwd.clone(),
             prompt: s.req.prompt.clone(),
             seconds_left: s.deadline.saturating_duration_since(Instant::now()).as_secs(),
+            origin: s.req.origin.clone(),
+            fingerprint: s.req.fingerprint.clone(),
         })
     }
 
@@ -112,7 +117,7 @@ impl Confirmer for TauriConfirmer {
             let _cleanup = Cleanup { app: self.app.clone(), state: self.state.clone(), id };
             let built = WebviewWindowBuilder::new(&self.app, label(id), WebviewUrl::App(format!("askpass.html?id={id}").into()))
                 .title("ASN 密碼請求")
-                .inner_size(460.0, 330.0)
+                .inner_size(460.0, 400.0)
                 .resizable(false)
                 .always_on_top(true)
                 .center()

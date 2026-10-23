@@ -34,6 +34,7 @@ mod ads;
 mod agent_tools;
 #[cfg(desktop)]
 pub mod askpass;
+pub mod secret_remote;
 #[cfg(desktop)]
 mod bridge;
 #[cfg(desktop)]
@@ -879,7 +880,7 @@ pub fn run() {
         startup_info, relay_list, relay_inbox, relay_ack, relay_rooms, relay_send, relay_chat_history, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_avatar, relay_set_avatar,
         set_presence, set_window_name, store_load, store_save, quit_app, capture_ui_ready, shot_frontend_log, open_link,
         account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_bind,
-        android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, relay_partner_list, relay_partner_succeed,
+        android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, android::android_secret_pending, android::android_secret_reply, relay_partner_list, relay_partner_succeed,
     ]);
     let builder = builder
         .setup(move |app| {
@@ -1008,6 +1009,9 @@ pub fn run() {
                         tokio::time::sleep(std::time::Duration::from_millis(heartbeat::heartbeat_ms())).await;
                     }
                 });
+                // 遠端密碼請求（#26 第二期）的確認端：門鈴響或每 60 秒保底查一次待確認；沒登入就不打後台。--shot 截圖模式不啟動
+                #[cfg(desktop)]
+                let secret_wake = if handle.state::<App>().shot.is_none() { Some(secret_remote::desktop::start(&handle, r.clone())) } else { None };
                 // 門鈴：有 anon 金鑰才開；一響就叫前端去拉信
                 if let Some(url) = anon_url {
                     let h = handle.clone();
@@ -1023,6 +1027,10 @@ pub fn run() {
                         };
                         bell::run(url, topic, move |_| {
                             let _ = h.emit("relay-bell", ());
+                            #[cfg(desktop)]
+                            if let Some(w) = &secret_wake {
+                                w.notify_one();
+                            }
                         })
                         .await;
                     });
