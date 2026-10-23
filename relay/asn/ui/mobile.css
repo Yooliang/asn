@@ -219,3 +219,4 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-ops-steps li{display:flex;gap:8px;color:var(--muted)} .m-ops-steps li.is-active{color:var(--title-fg);font-weight:700} .m-ops-steps li.is-done{color:#1f7a2a}
 .m-ops-steps b{width:1.2em;text-align:center}
 .m-ops-run-btn{align-self:flex-start;min-height:44px}
+.m-logout{display:flex;flex-direction:column;align-items:stretch;margin-top:32px;padding:0 16px 24px}

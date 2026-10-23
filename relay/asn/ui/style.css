@@ -665,3 +665,6 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .login-name-row{display:flex;gap:6px}
 .login-name-row .set-input{flex:1;min-width:0}
 .autostart-blocked{color:#b3261e}
+
+.logout-set{margin-top:32px;display:flex;flex-direction:column;gap:6px}
+.logout-set .logout-btn{color:#b3261e;border-color:#d79a95}

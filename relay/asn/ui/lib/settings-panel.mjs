@@ -6,7 +6,7 @@ import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MO
 import { BUBBLES, BUBBLE_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, TOOLBARS, TOOLBAR_LABEL } from './merge.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS } from './prefs.mjs'
 import { DIMS, groupOptions } from './dims.mjs'
-import { LoginPanel } from './login-panel.mjs'
+import { LoginPanel, LogoutPanel } from './login-panel.mjs'
 import { CloudInvitePanel } from './cloud-invite.mjs'
 import { OTHER_VENDORS, VENDOR_UNSUPPORTED, accountLine } from './claude-accounts.mjs'
 import { USAGE_NOTE } from './usage.mjs'
@@ -19,7 +19,7 @@ export const SETTING_OPS = [
 ]
 
 export const SettingsPanel = {
-  components: { LoginPanel, CloudInvitePanel },
+  components: { LoginPanel, LogoutPanel, CloudInvitePanel },
   props: { st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
@@ -36,6 +36,7 @@ export const SettingsPanel = {
   },
   template: `<div class="list settings panel-set">
       <template v-if="catKey === 'me'">
+        <login-panel></login-panel>
         <div class="av-set">
           <b>大頭貼</b>
           <input ref="fileEl" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden @change="pickFile">
@@ -55,6 +56,7 @@ export const SettingsPanel = {
           <label class="chk"><input type="checkbox" :checked="st.nowPlaying?.on === true" @change="act('now-playing', $event.target.checked)" aria-label="顯示正在聽的歌" /><span>顯示正在聽的歌</span></label>
           <small>開啟後，好友會在你的狀態看到「♪ 正在聽：歌名 - 歌手」。只送歌名與歌手，播放中才顯示，暫停就不顯示；預設關閉。</small>
         </div>
+        <logout-panel></logout-panel>
       </template>
       <template v-if="catKey === 'notify'">
         <label v-for="i in NOTIFY_ITEMS" :key="i.key" class="chk"><input type="checkbox" :checked="st.notify[i.key]" @change="act('notify', { key: i.key, on: $event.target.checked })" :aria-label="i.label" /><span>{{ i.label }}</span></label>
@@ -85,7 +87,6 @@ export const SettingsPanel = {
       </template>
       <template v-if="catKey === 'accounts'">
         <div class="acct-set">
-          <login-panel></login-panel>
           <cloud-invite-panel></cloud-invite-panel>
           <section class="set-card" aria-label="Claude 帳號">
             <header class="vendor-h"><b>Claude 帳號</b><small>Anthropic</small></header>
