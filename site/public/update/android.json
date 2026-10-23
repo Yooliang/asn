@@ -1,8 +1,8 @@
 {
-  "version": "0.1.49",
-  "versionCode": 1049,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.49_android.apk",
-  "sha256": "76ec2503ebad1d6639b042422da9ec893aa24da27d3d3f08a0fe47080a5ee9df",
-  "notes": "- 設定新增「設備」分類：一眼看到帳號下有哪些設備、每台用了哪些廠商、各用哪個帳號，Claude 帳號可直接切換；其他設備的 OpenAI（Codex）登入帳號也會回報；設定「視窗與系統匣」拿掉技術指令文字，密碼小幫手移到「啟動設定」的「進階」。",
-  "bytes": 9039332
+  "version": "0.1.50",
+  "versionCode": 1050,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.50_android.apk",
+  "sha256": "defe98232b0ca6ab5343b3ab647059163d8f5bae5ac26108af57112ca08c0da2",
+  "notes": "- 手機對話頁新增「語音輸入」：說話轉成文字放進輸入框，看過再送出；語音通話時 AI 談完可以自己結束通話（回覆最後一行寫〔結束通話〕，念完自動掛斷）；Aegis 的成員回震動時，震動與報告會分開顯示；對話標題不再露出 Aegis 成員的拼音代號。",
+  "bytes": 9043428
 }
