@@ -680,7 +680,7 @@ const app = createApp({
     }
 
     return {
-      onboard, onboardApi, finishOnboard, ONBOARD_TEXT, nameDraft, nameErr, commitName, wakeDraft, wakeErr, commitWake, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE,
+      onboard, onboardApi, finishOnboard, ONBOARD_TEXT, acct, nameDraft, nameErr, commitName, wakeDraft, wakeErr, commitWake, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE,
       screen, fatal, login, loginNote, PROVIDERS, canStart, startLogin, cancelLogin,
       upd, updText: computed(() => bannerText(upd)), updButton: computed(() => buttonLabel(upd)), startUpdate, checkUpdate,
       pf, sw, pagerStyle, indicator, swipeStart, swipeMove, swipeEnd, goTab, TABS, TAB_LABEL, myName, meForChat, lastOf, vendorIcon: vendorBadgeHtml,
