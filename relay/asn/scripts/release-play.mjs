@@ -10,6 +10,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { smokeGate, splitSkipFlag } from './smoke-gate.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const fail = m => { console.error(`建置中止：${m}`); process.exit(1) }
@@ -17,6 +18,9 @@ const fail = m => { console.error(`建置中止：${m}`); process.exit(1) }
 const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version
 const conf = JSON.parse(fs.readFileSync(path.join(root, 'src-tauri', 'tauri.conf.json'), 'utf8'))
 if (conf.version !== version) fail(`package.json（${version}）與 tauri.conf.json（${conf.version}）版本不一致`)
+
+// 打包（含產生上傳金鑰）之前先過啟動冒煙測試；沒過就中止
+if (!smokeGate({ root, skip: splitSkipFlag(process.argv.slice(2)).skip }).ok) fail('啟動冒煙測試沒過（用 npm run smoke:ui 重現；確定要略過可加 --skip-smoke）')
 
 const sdk = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || path.join(process.env.LOCALAPPDATA || os.homedir(), 'Android', 'Sdk')
 if (!process.env.JAVA_HOME) fail('沒有設 JAVA_HOME（Android Studio 的 jbr 資料夾）')

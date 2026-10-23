@@ -9,6 +9,7 @@
     "start": "node scripts/prep.mjs && tauri dev",
     "tauri": "tauri",
     "build": "node scripts/prep.mjs && tauri build --config src-tauri/tauri.nosign.conf.json",
+    "smoke:ui": "node scripts/prep.mjs && node scripts/smoke-ui.mjs",
     "release": "node scripts/release.mjs",
     "release:android": "node scripts/release-android.mjs",
     "release:play": "node scripts/release-play.mjs",

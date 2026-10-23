@@ -9,6 +9,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { smokeGate, splitSkipFlag } from './smoke-gate.mjs'
 import { buildLatestJson, installerName, parseArgs, resolveNotes } from './release-lib.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -16,7 +17,8 @@ const siteUpdate = path.join(root, '..', '..', 'site', 'public', 'update')
 const fail = m => { console.error(`發版中止：${m}`); process.exit(1) }
 
 let opts
-try { opts = parseArgs(process.argv.slice(2)) } catch (e) { fail(e.message) }
+const { skip: skipSmoke, rest: releaseArgv } = splitSkipFlag(process.argv.slice(2))
+try { opts = parseArgs(releaseArgv) } catch (e) { fail(e.message) }
 
 const changelogFile = path.join(root, 'CHANGELOG.md')
 const readChangelog = () => (fs.existsSync(changelogFile) ? fs.readFileSync(changelogFile, 'utf8') : '')
@@ -43,6 +45,9 @@ const run = (cmd, args, extra = {}) => {
   if (r.status !== 0) fail(`${path.basename(args[0] ?? cmd)} 失敗（結束碼 ${r.status}）`)
 }
 const node = process.execPath
+
+// 打包前先過啟動冒煙測試（在改版本號之前；沒過就中止）
+if (!smokeGate({ root, skip: skipSmoke }).ok) fail('啟動冒煙測試沒過（用 npm run smoke:ui 重現；確定要略過可加 --skip-smoke）')
 
 if (!opts.dryRun && !opts.noBump) run(node, ['scripts/bump.mjs'])
 const version = readVersion()
