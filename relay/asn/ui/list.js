@@ -438,8 +438,8 @@ async function setArchived(f, archived) {
 }
 function closeOpDlg() { opDlg.open = false }
 // 右鍵選單立刻出現（固定有「開啟對話」）；主控台切換項目先顯示「檢查中…」，查到才可按，逾時／查不到就停用
-const buddyConsole = reactive({ state: 'none', visible: true })
-const buddyConsoleItemView = computed(() => buddyConsoleItem(buddyConsole.state))
+const buddyConsole = reactive({ state: 'none', visible: true, reason: '' })
+const buddyConsoleItemView = computed(() => buddyConsoleItem(buddyConsole.state, buddyConsole.reason))
 // 「切換模型 ▸」：只有本機的 Claude 視窗會出現；查詢逾時或查不到就停用並說明原因（共用 lib/model-switch.mjs，功能列 #40 也用它）
 const modelSwitcher = createModelSwitcher({ transport, log: m => console.info('[ASN]', m) })
 const buddyModel = reactive({ show: false, state: 'none', reason: '', current: '', items: [], open: false, st: null })
@@ -516,6 +516,7 @@ async function openBuddyMenu(c, e) {
   if (buddyModel.show) void loadBuddyModel(c)
   if (c.node !== info.node || c.engine === 'acp' || c.pending) { buddyConsole.state = 'none'; return }
   buddyConsole.state = 'checking'
+  buddyConsole.reason = ''
   const q = await withTimeout(transport.partnerConsoleQuery({ engine: eng, name: c.agent || c.nick }), CONSOLE_QUERY_TIMEOUT_MS)
   if (buddyMenuFriend.value !== c) return   // 使用者已經關掉或換開別人的選單
   if (q?.can_toggle ?? q?.canToggle) {
@@ -523,6 +524,7 @@ async function openBuddyMenu(c, e) {
     buddyConsole.visible = Boolean(q.visible)
   } else {
     buddyConsole.state = 'none'
+    buddyConsole.reason = String(q?.reason || '')
   }
 }
 async function toggleBuddyConsole() {

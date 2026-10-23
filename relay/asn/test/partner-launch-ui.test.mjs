@@ -24,9 +24,15 @@ test('主控台選單文字顯示相反狀態', () => {
 
 test('右鍵選單的「背景／前台切換」：文字固定不隨狀態改字，檢查中或切不了就反灰，查到才可按', () => {
   assert.equal(BUDDY_CONSOLE_LABEL, '背景／前台切換')
-  for (const state of ['checking', 'none']) assert.deepEqual(buddyConsoleItem(state, true), { label: '背景／前台切換', disabled: true }, state)
-  for (const visible of [true, false]) assert.deepEqual(buddyConsoleItem('toggle', visible), { label: '背景／前台切換', disabled: false })
-  assert.ok(!/無法切換|檢查中|切到背景|叫回前台/.test(JSON.stringify(['checking', 'none', 'toggle'].map(x => buddyConsoleItem(x, true)))), '不出現「這個視窗無法切換」等會變的字')
+  for (const state of ['checking', 'none']) assert.equal(buddyConsoleItem(state).label, '背景／前台切換', state)
+  for (const state of ['checking', 'none']) assert.equal(buddyConsoleItem(state).disabled, true, state)
+  assert.deepEqual(buddyConsoleItem('toggle'), { label: '背景／前台切換', disabled: false, tip: '' })
+  assert.ok(!/無法切換|檢查中|切到背景|叫回前台/.test(JSON.stringify(['checking', 'none', 'toggle'].map(x => buddyConsoleItem(x).label))), '文字不隨狀態改字')
+  // 反灰時滑鼠提示要說明原因：Rust 回的原因原樣顯示，沒有就用預設說明
+  const why = '這個視窗開在 Windows Terminal 的分頁裡，不能切換'
+  assert.equal(buddyConsoleItem('none', why).tip, why)
+  assert.match(buddyConsoleItem('none').tip, /找不到/)
+  assert.equal(buddyConsoleItem('toggle', why).tip, '', '能按的時候不放提示')
   const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
   assert.match(html, /:disabled="buddyConsoleItemView.disabled"[^>]*>{{ buddyConsoleItemView.label }}/, '選單項目沒有 v-if（不隱藏）')
 })
@@ -71,4 +77,12 @@ test('開新夥伴對話框：模型列依設備切換（本機偵測／別台�
   const js = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
   assert.match(js, /remoteModelRows\(remoteLaunchers\.value\[partnerDlg\.node\]\)/)
   assert.match(js, /void refreshLaunchers\(\)\.then\(/)
+})
+
+test('右鍵選單反灰時把原因接到滑鼠提示（list.js 存 reason、list.html 綁 title）', () => {
+  const js = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
+  const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
+  assert.match(js, /buddyConsole\.reason = String\(q\?\.reason/)
+  assert.match(js, /buddyConsoleItem\(buddyConsole\.state, buddyConsole\.reason\)/)
+  assert.match(html, /:title="buddyConsoleItemView\.tip"/)
 })
