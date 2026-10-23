@@ -25,6 +25,7 @@ import {
 } from "../_shared/attachments.ts";
 import { SIGN_HEADER, signedArgs, signedUserId } from "../_shared/owner_sign.ts";
 import { requestReadSync } from "../_shared/read_sync.ts";
+import { DEVICE_CODE_ACTIONS, handleDeviceCodeAction, randomUserCode } from "../_shared/device_code.ts";
 import { handleTts, TtsLimiter, ttsVoicesResponse } from "../_shared/tts.ts";
 
 const ttsLimiter = new TtsLimiter();
@@ -154,6 +155,17 @@ Deno.serve(async (req) => {
     if (data?.error === "bad_id_prefix") return json(403, { error: "bad_id_prefix", prefix: data.prefix });
     if (data?.error) return json(400, { error: data.error });
     return json(200, { id: data.id, key, bell_topic: data.bell_topic });
+  }
+
+  // 裝置授權登入（給沒有畫面的主機，見 _shared/device_code.ts）：start、poll 不需要金鑰；approve 要登入憑證。
+  if (action && DEVICE_CODE_ACTIONS.has(action)) {
+    if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
+    const ip = (req.headers.get("x-forwarded-for") ?? "unknown").split(",")[0].trim();
+    const r = await handleDeviceCodeAction(
+      { rpc: async (fn, args) => await db.rpc(fn, args), verifyJwt: accountDeps.verifyJwt, sha256Hex, newCodes: () => ({ userCode: randomUserCode(), deviceCode: b64u(32) }), newSecrets: accountDeps.newSecrets },
+      action, { ip, authHeader: req.headers.get("authorization"), body: await req.json().catch(() => null) },
+    );
+    return json(r.status, r.body);
   }
 
   // 登入帳號的動作（在節點金鑰驗證之前：身分來自登入憑證，見 _shared/account.ts）
@@ -422,6 +434,8 @@ Deno.serve(async (req) => {
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     const sent = data as { id: string; bell_topic: string; error?: string };
     if (sent?.error === "rate_limited") return json(429, { error: "rate_limited" });
+    // 收件條目標為 receivable=false（只報狀態、不收信，見 20261024110000_roster_kind.sql）：明確錯誤碼，信沒有寄出
+    if (sent?.error === "not_receivable") return json(409, { error: "not_receivable" });
     if (sent?.error) return json(400, { error: sent.error });
     await bindAttachments({ rpc }, me.id, att.ids, { messageId: sent.id });
     // 回信寄給人代號時會扇出給這個帳號所有在線的 ASN，每台的門鈴都敲

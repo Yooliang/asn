@@ -95,10 +95,24 @@ export const CloudInvitePanel = {
         await refresh()
       } catch (e) { msg.value = errText(e) } finally { busy.value = false }
     }
+    // 核准無畫面主機：主機上跑 asn-bridge login 會印出短碼；這裡輸入短碼、替主機取名。金鑰不經過這裡（主機自己輪詢拿）
+    const approveForm = ref(false), code = ref(''), hostName = ref(''), hostId = ref(''), approved = ref('')
+    const approve = async () => {
+      if (busy.value) return
+      const n = cleanName(hostName.value)
+      if (!n) { msg.value = '請輸入這台主機的名字（1 到 40 個字）'; return }
+      if (!code.value.trim()) { msg.value = '請輸入主機上顯示的短碼'; return }
+      busy.value = true; msg.value = ''; approved.value = ''
+      try {
+        const r = await cloudApi.approve(code.value, n, hostId.value.trim())
+        approved.value = '已核准「' + (r?.name || n) + '」（' + (r?.id || '') + '），主機會自動拿到金鑰，不用再貼任何東西。'
+        approveForm.value = false; code.value = ''; hostName.value = ''; hostId.value = ''
+      } catch (e) { msg.value = errText(e) } finally { busy.value = false }
+    }
     const justJoined = computed(() => !!created.value && joined(rows.value, created.value.id))
     onMounted(() => { refresh(); timer = setInterval(refresh, POLL_MS) })
     onUnmounted(() => { clearInterval(timer); created.value = null })
-    return { signedIn, rows, busy, msg, form, name, created, reveal, copiedKey, copiedInvite, confirmId, justJoined, COPY_NOTE, INVITE_NOTE, create, copyKey, copyInvite, done, revoke }
+    return { signedIn, rows, busy, msg, form, name, created, reveal, copiedKey, copiedInvite, confirmId, justJoined, COPY_NOTE, INVITE_NOTE, create, copyKey, copyInvite, done, revoke, approveForm, code, hostName, hostId, approved, approve }
   },
   template: `<section class="set-card cloud-set" aria-label="雲端代理">
       <header class="vendor-h"><b>雲端代理</b><small>讓跑在雲端的 AI 代理加入收發室</small></header>
@@ -131,6 +145,23 @@ export const CloudInvitePanel = {
           </div>
         </div>
         <div v-else class="av-btns"><button class="aero-btn" type="button" :disabled="busy" @click="form = true">邀請雲端代理</button></div>
+        <div v-if="approveForm" class="cloud-form">
+          <label>主機上顯示的短碼
+            <input class="set-sel" type="text" v-model="code" maxlength="12" placeholder="ABCD-2345" aria-label="短碼" autocomplete="off" spellcheck="false" @keydown.enter.prevent="approve">
+          </label>
+          <label>主機的名字
+            <input class="set-sel" type="text" v-model="hostName" maxlength="40" aria-label="主機的名字" @keydown.enter.prevent="approve">
+          </label>
+          <label>節點代號（可留空，系統自動取）
+            <input class="set-sel" type="text" v-model="hostId" maxlength="32" aria-label="節點代號" autocomplete="off" spellcheck="false" @keydown.enter.prevent="approve">
+          </label>
+          <div class="av-btns">
+            <button class="aero-btn" type="button" :disabled="busy" @click="approve">核准</button>
+            <button class="aero-btn" type="button" :disabled="busy" @click="approveForm = false">取消</button>
+          </div>
+        </div>
+        <div v-else class="av-btns"><button class="aero-btn" type="button" :disabled="busy" @click="approveForm = true; approved = ''">輸入短碼核准主機</button></div>
+        <small v-if="approved" role="status">{{ approved }}</small>
         <ul class="acct-list" v-if="rows.length" aria-label="已加入的雲端代理">
           <li v-for="r in rows" :key="r.id">
             <span class="acct-txt"><span class="acct-name">{{ r.name }}<em v-if="r.state === 'online'">在線</em></span><small :title="r.title">{{ r.status }}</small></span>

@@ -102,3 +102,15 @@ test('Rust 端：只用登入憑證（Authorization）呼叫後台三個動作�
   assert.ok(prod.includes('https://asnmessenger.web.app/skill/asn-cloud-agent.md'))
   assert.ok(!prod.includes('x-relay-key') && !prod.includes('Some(&id.key)'), '雲端代理邀請不碰節點金鑰')
 })
+
+test('核准無畫面主機：前端指令有登錄、走登入憑證、畫面有入口、金鑰不經過這裡', async () => {
+  assert.ok(read('ui/lib/tauri.mjs').includes("invoke('cloud_agent_approve'"))
+  assert.ok(read('src-tauri/src/lib.rs').includes('cloud_invite::cloud_agent_approve'))
+  const rs = read('src-tauri/src/cloud_invite.rs')
+  assert.match(rs, /pub async fn cloud_agent_approve\(/)
+  assert.ok(rs.includes('"device_code_approve"'))
+  const js = read('ui/lib/cloud-invite.mjs')
+  assert.ok(js.includes('輸入短碼核准主機') && js.includes('cloudApi.approve('))
+  const ap = js.slice(js.indexOf('const approve = async'), js.indexOf('const justJoined'))
+  assert.ok(!/\.key\b/.test(ap), '核准流程不碰金鑰')
+})

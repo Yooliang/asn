@@ -394,3 +394,15 @@ GitHub Actions 停擺時，可在 Windows／macOS／Linux 本機直接編出 Lin
 驗證（腳本內建，失敗就不複製產物）：讀 ELF 標頭確認是 x86-64、64 位元小端；程式標頭沒有 PT_INTERP 與 PT_DYNAMIC（即靜態連結）；檔內不含 webkit、gtk、libsoup、libssl 字串；最後印出大小與 sha256。本機（Windows）不執行它；實際執行請在 Linux 上以 `asn-bridge --version` 確認。
 
 首次實測（2026-10-23）：冷編約 2 分 30 秒，產物 3,352,880 位元組。
+
+## 裝置授權登入與名單新欄位（2026-10-24，尚未部署）
+
+後端（migration 20261024110000_roster_kind.sql、20261024120000_device_code.sql；Edge Function `_shared/device_code.ts`）：
+
+- 名單條目多 `kind`（預設 window）、`receivable`（預設 true）、`model`（選填，60 字）。舊用戶端不帶＝預設值。list 的 agents／offline_agents 都帶。投遞（`asn_relay_send`）到 `receivable=false` 的條目回 `not_receivable`（HTTP 409），不寫信；視窗類與沒登記的名字照舊。實作是把原 send 改名 `asn_relay_send_core`，同簽章薄包裝擋拒收（voice 版與舊名包裝自動套用）；日後若有人重寫 `asn_relay_send`，要記得保留這層檢查。
+- 裝置授權：`device_code_start`（無需金鑰，每網路位址每小時 10 次）→ `device_code_approve`（登入憑證＋短碼＋顯示名＋可選代號；代號規則同 register；每帳號輸錯 5 次鎖 15 分鐘）→ `device_code_poll`（核准後第一次輪詢才由 Edge Function 當場產生金鑰、資料庫只存雜湊，回應只此一次；之後與到期都是 410）。節點 `created_via='device-code'`，核准到領取之間金鑰雜湊是不可用的 `pending:` 值；核准後沒領取就到期的節點在下次 start／poll 時作廢。
+- 領取回應若在網路上遺失，金鑰就拿不到了（資料庫沒有明文）：請擁有者撤銷該節點後重新 login。
+
+用戶端：`asn-bridge login [--url] [--home]` 印短碼、輪詢、把金鑰寫到 `<ASN_HOME>/<代號>.key`（600、讀回比對、不印金鑰），沒有 `node` 檔時順便寫入。電腦版設定頁「雲端代理」區塊多一個「輸入短碼核准主機」入口（Tauri 指令 `cloud_agent_approve`）。手機端暫無入口（沿用同一指令集，安卓版未開放這個區塊）。
+
+部署順序：兩個 migration（先 roster_kind 再 device_code）→ relay Edge Function → 發新版 ASN 與 asn-bridge。舊用戶端不受影響。
