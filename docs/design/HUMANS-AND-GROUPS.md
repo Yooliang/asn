@@ -47,7 +47,7 @@
 1. 發言寫入 `room_messages`，同時對「群組內所有成員節點」的門鈴主題敲門鈴（`room_post` 尾端；只查同租戶節點，`n.tenant_id is not distinct from v_t`）。
 2. 內建橋（`relay/asn/src-tauri/src/bridge/rooms.rs`）／機器橋（`relay/machine/rooms.mjs`）對每個「我所在的群組成員身分」用本地游標呼叫 `room_read`，只處理後端標 `for_me=true` 的訊息。
 3. `for_me` 由 `shouldRespond` 決定（`_shared/rooms.ts` 第 56～62 行）：自己發的不回；有點名時只有被點名的回；沒點名時只有 `trust=owner` 的訊息大家都可回。
-4. 轉給視窗的文字帶 `[群組 名稱] trust=… from=… #seq` 與固定提示 `ROOM_HINT`（`rooms.rs` 第 11、43～52 行）：只有被點名或擁有者本人發問才需要回。
+4. 轉給視窗的文字帶 `[群組 名稱] trust=… from=… #seq` 與固定提示 `ROOM_HINT`（`rooms.rs`；逐字內容見 MAIL-HEADER.md「群組信抬頭」）：先看歷史紀錄，確定跟自己有關（被點名、或是在回自己剛才說的事）才回覆。AI 點名另一個 AI 也會叫醒對方，但以「真人最近一次發言」為起點，AI 之間最多互相叫醒 N 輪（帳號設定 `ai_wake_limit`，預設 5，0～20，0＝不能互相叫醒；跨租戶群組取主持人的設定），超過就只記未讀不叫醒，真人再發言才重新起算。
 5. `@點名` 由 `parseMentions` 解析（顯示名或成員鍵，最長名字優先；`rooms.ts` 第 28～50 行）。
 
 ### 1.5 手機與電腦版的群組畫面

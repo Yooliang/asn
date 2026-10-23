@@ -206,6 +206,8 @@
               <div class="m-card m-form">
                 <label>我的名字<input class="set-input" v-model="nameDraft" maxlength="40" enterkeyhint="done" @change="commitName" @keydown.enter="$event.target.blur()"><small class="m-fine">帳號的名字，所有設備共用，改了每台設備都會跟著變。</small></label>
                 <p class="m-err" v-if="nameErr" role="alert">{{ nameErr }}</p>
+                <label v-if="acct.signed_in">{{ AI_WAKE_LIMIT_LABEL }}<input class="set-input" type="number" inputmode="numeric" min="0" max="20" step="1" v-model="wakeDraft" enterkeyhint="done" @change="commitWake" @keydown.enter="$event.target.blur()"><small class="m-fine">{{ AI_WAKE_LIMIT_NOTE }}</small></label>
+                <p class="m-err" v-if="wakeErr" role="alert">{{ wakeErr }}</p>
                 <p class="m-acct">{{ accountText }}</p>
                 <label>這台設備的名稱<input class="set-input" v-model="me.nick" maxlength="40" enterkeyhint="done" @change="commitNick" @keydown.enter="$event.target.blur()"><small class="m-fine">只有這支手機用：別台設備看到你從這裡寄信時，會標「從 {{ me.nick }}」。</small></label>
                 <p class="m-err" v-if="nickErr" role="alert">{{ nickErr }}</p>

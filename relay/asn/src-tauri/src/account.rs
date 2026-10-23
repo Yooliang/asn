@@ -358,6 +358,34 @@ pub async fn auth_account_name_set(auth: State<'_, AuthState>, name: String) -> 
     Ok(v.get("name").and_then(Value::as_str).map(String::from).unwrap_or(name))
 }
 
+/// 「AI 之間互相叫醒的上限」：0～20 的整數（0＝AI 不能互相叫醒）；與後台 asn_account_settings 的規則一致
+pub fn clean_ai_wake_limit(n: i64) -> Result<i64, String> {
+    if (0..=20).contains(&n) {
+        Ok(n)
+    } else {
+        Err("上限要在 0 到 20 之間".into())
+    }
+}
+
+/// 讀帳號設定裡 AI 互相叫醒的上限（後台 account_settings 動作，要本人登入憑證）；沒設過是 5
+#[tauri::command]
+pub async fn auth_ai_wake_limit_get(auth: State<'_, AuthState>) -> Result<i64, String> {
+    let c = ctx()?;
+    let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
+    let v = call(&c.client, &c.relay_url, &token, "account_settings", None, json!({})).await?;
+    Ok(v.get("ai_wake_limit").and_then(Value::as_i64).unwrap_or(5))
+}
+
+/// 改帳號設定裡 AI 互相叫醒的上限：回存好的值
+#[tauri::command]
+pub async fn auth_ai_wake_limit_set(auth: State<'_, AuthState>, limit: i64) -> Result<i64, String> {
+    let limit = clean_ai_wake_limit(limit)?;
+    let c = ctx()?;
+    let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
+    let v = call(&c.client, &c.relay_url, &token, "account_settings", None, json!({ "ai_wake_limit": limit })).await?;
+    Ok(v.get("ai_wake_limit").and_then(Value::as_i64).unwrap_or(limit))
+}
+
 /// 登入後自動處理金鑰（使用者不用按任何鈕）：
 /// - 這台已有節點金鑰 → node_claim 綁到帳號；失敗（含舊租戶還沒被認領）都不擋使用，回 pending，下次啟動再試
 /// - 沒有節點金鑰 → node_create 建新節點、存好金鑰（呼叫端稍後重新啟動）
@@ -429,6 +457,14 @@ mod tests {
         assert!(clean_account_name(&"字".repeat(40)).is_ok());
         assert!(clean_account_name(&"字".repeat(41)).is_err());
         assert!(clean_account_name("a\nb").is_err());
+    }
+
+    #[test]
+    fn 互相叫醒上限驗證() {
+        assert_eq!(clean_ai_wake_limit(0), Ok(0));
+        assert_eq!(clean_ai_wake_limit(5), Ok(5));
+        assert_eq!(clean_ai_wake_limit(20), Ok(20));
+        assert!(clean_ai_wake_limit(-1).is_err() && clean_ai_wake_limit(21).is_err());
     }
 
     #[test]

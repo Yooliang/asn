@@ -7,7 +7,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { bodyWithNotes } from './attach-format.mjs'
 
-export const ROOM_HINT = '（群組訊息；只有被點名或帳號擁有者本人發問才需要回，回覆會經收發室貼回群組；不需要回就不要回）'
+export const ROOM_HINT = '這是一則群組訊息。請先看下面的歷史紀錄，確定這件事跟你有關（被點名、或是在回你剛才說的事）才回覆；跟你無關就不要回。'
 export const NO_REPLY_RE = /（不需回覆）|\[no-reply\]/i
 
 // 成員 key：節點本身 `H`、視窗 `H~H-主線-3`。回 {window}：視窗名；節點本身 window=''
