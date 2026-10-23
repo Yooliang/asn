@@ -1,8 +1,8 @@
 {
-  "version": "0.1.55",
-  "versionCode": 1055,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.55_android.apk",
-  "sha256": "98282b188d1a89825f9954cf1db1e44cca92647b70f43d313a81572ee34c36b4",
-  "notes": "- 修正：電腦版「我的狀態與偏好、開著的分頁」存檔失敗（重開後沒有回到原本分頁）；發版前新增啟動冒煙測試，手機與電腦每個畫面都要能正常打開才會發出。",
-  "bytes": 9268708
+  "version": "0.1.56",
+  "versionCode": 1056,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.56_android.apk",
+  "sha256": "5996afec14818bbaa1c0c8a2c6479525499e1f99ba1e8df9c8f0ef59bf98632c",
+  "notes": "- 電腦版：對話上方大按鈕區新增「管理」（一對一：詳情、改名、關閉視窗、接班換手、封存、邀請別人加入；群組：邀請別人加入、加我的另一個 AI、成員與設定），選單不再被蓋住；群組列表未讀數改單行、大頭像與個人一樣大。",
+  "bytes": 9272804
 }

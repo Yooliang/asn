@@ -1,11 +1,11 @@
 {
-  "version": "0.1.55",
-  "notes": "修正：電腦版「我的狀態與偏好、開著的分頁」存檔失敗（重開後沒有回到原本分頁）；發版前新增啟動冒煙測試，手機與電腦每個畫面都要能正常打開才會發出。",
-  "pub_date": "2026-10-23T13:51:24.837Z",
+  "version": "0.1.56",
+  "notes": "電腦版：對話上方大按鈕區新增「管理」（一對一：詳情、改名、關閉視窗、接班換手、封存、邀請別人加入；群組：邀請別人加入、加我的另一個 AI、成員與設定），選單不再被蓋住；群組列表未讀數改單行、大頭像與個人一樣大。",
+  "pub_date": "2026-10-23T15:54:34.169Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjk2R3FyM2ZoVHRRRjEvT2RzRWxVQ1NieTV5RGMwdlNRemxnMk5odDVLczdiM0o1dWdTNlkrRXhmcVVmbUJOY2txTVlEOEVteHlXUDI2ejRlZnVVa1FRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzYzNDg0CWZpbGU6QVNOXzAuMS41NV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjU1CkU1a05UeHl1d0o3QU9rWjdpK1RWU3FZNms2bTlXU3RmZjV6ZEJzMTFOL1dLNGQzdGlHWjAxSllQUjl2MC9zclBORzJqRzIxaXorTmdtQ1dCcVdyYkFRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.55_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjR3bmJnSmhTa2dKaDh4QjkrNWxiVTkrYkNTSjY0VGpabXUxZU9jY2tzU2UvaVRmREJGSk9ubXoxM3NFbkN4OWRuLytpNWFTWlZ5Vm1BTnJmb3ZaNEEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzcwODczCWZpbGU6QVNOXzAuMS41Nl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjU2CnY2ZzA5VnY3MUtYK3pwY1U4UllTTkFpSytxem1YK1lqbjNHck42dUZZOGNBeDhOTUsvYndpdS9Ib05rUDI0VUV1NkEveEI1STFHWGNlWjJ2TFhoSER3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.56_x64-setup.exe"
     }
   }
 }
