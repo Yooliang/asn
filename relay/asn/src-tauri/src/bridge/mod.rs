@@ -12,6 +12,7 @@ pub mod mail;
 pub mod orphans;
 pub mod partner_ops;
 pub mod pending;
+pub mod procscan;
 pub mod roster;
 pub mod slash;
 pub mod rooms;

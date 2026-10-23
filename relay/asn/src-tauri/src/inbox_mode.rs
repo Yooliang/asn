@@ -241,7 +241,10 @@ async fn roster_once<A: MailApi>(api: &A, cfg: &InboxCfg, blocked_until: &mut u6
     let (name, engine, sd, st) = (cfg.name.clone(), cfg.engine.clone(), cfg.sessions_dir.clone(), cfg.status_dir.clone());
     // 讀資料夾與 /proc 放背景執行緒，不卡住收信
     let windows = tokio::task::spawn_blocking(move || roster_windows(&name, &engine, &sd, &st, crate::heartbeat::pid_alive, now_ms())).await.unwrap_or_default();
-    match api.call("roster", Some(roster_body_of(&windows))).await {
+    // 本機執行中的代理（僅顯示、不可收信；開關見 procscan::enabled）
+    let procs = tokio::task::spawn_blocking(crate::bridge::procscan::scan_system).await.unwrap_or_default();
+    let body = crate::bridge::roster::roster_body_with_procs(&windows, None, Value::Null, &procs);
+    match api.call("roster", Some(body)).await {
         Ok(_) => {
             if *warned {
                 log("roster ok again");
