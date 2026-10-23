@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { buildStatus, cronDetail, finalState, questionDetail, statusPath } from './status'
+import { buildStatus, createStatus, cronDetail, finalState, HEARTBEAT_MS, questionDetail, statusPath } from './status'
 
 // 假引擎：env.get 給家目錄、fs.read 給 plugin.json、fs.write 收進 writes（可設成失敗）
 const SID = 'sess-1'
@@ -154,4 +154,58 @@ test('寫檔失敗不拋錯、事件照常通過', async ($, on) => {
   await $.session.end({ reason: 'other', sessionId: SID, resume: {} } as never)
   await r.flush()
   expect(r.writes.length).toBe(0)
+})
+
+// 心跳：不經引擎，直接用假時鐘驅動 createStatus
+test('心跳：狀態沒變、超過 5 分鐘才重寫 at，其餘欄位照舊', async () => {
+  let now = 1_000_000
+  const writes: { path: string; doc: Record<string, unknown> }[] = []
+  const io = {
+    home: async () => 'C:/Users/u',
+    sid: async () => SID,
+    read: async () => JSON.stringify({ version: '9.8.7' }),
+    write: async (p: string, t: string) => void writes.push({ path: p, doc: JSON.parse(t) }),
+    log: () => undefined,
+    root: '/root',
+    model: async () => 'opus',
+  }
+  const st = createStatus(() => now)
+  await st.write(io, 'waiting_user', '等你回答')
+  await st.heartbeat(io)
+  expect(writes.length).toBe(1)
+  now += HEARTBEAT_MS - 1
+  await st.heartbeat(io)
+  expect(writes.length).toBe(1)
+  now += 1
+  await st.heartbeat(io)
+  expect(writes.length).toBe(2)
+  expect(writes[1].path).toBe(writes[0].path)
+  expect(writes[1].doc).toMatchObject({ state: 'waiting_user', detail: '等你回答', model: 'opus', at: now })
+  await st.heartbeat(io)
+  expect(writes.length).toBe(2)
+})
+
+test('心跳：還沒寫過狀態就不寫；寫入失敗不拋錯', async () => {
+  let now = 0
+  const writes: unknown[] = []
+  const io = {
+    home: async () => 'C:/Users/u',
+    sid: async () => SID,
+    read: async () => JSON.stringify({ version: '9.8.7' }),
+    write: async (_p: string, t: string) => {
+      writes.push(JSON.parse(t))
+      throw new Error('EACCES')
+    },
+    log: () => undefined,
+    root: '/root',
+  }
+  const st = createStatus(() => now)
+  await st.heartbeat(io)
+  expect(writes.length).toBe(0)
+  now = 0
+  await st.write(io, 'idle', '')
+  now = 10 * 60 * 1000
+  await st.heartbeat(io)
+  // 寫入失敗沒有留下可重寫的內容，心跳不會再試
+  expect(writes.length).toBe(1)
 })

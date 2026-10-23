@@ -22,6 +22,8 @@ export const register: Register = (on, options) => {
     try {
       ctlTimer?.cancel()
       ctlTimer = $.clock.every(POLL_MS, () => {
+        // 心跳：狀態沒變超過 5 分鐘也重寫一次 at（見 status.ts heartbeat），讓收發室不把閒置視窗當成沒外掛
+        void st.heartbeat({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage() })
         void ctl.poll({ home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: p => $.fs.read(p), write: (p, t) => $.fs.write(p, t), sid: () => $.session.id(), log: t => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage(), run: (command, args) => $.command.run({ command, args }), now: () => Date.now() })
       })
     } catch (err) {
