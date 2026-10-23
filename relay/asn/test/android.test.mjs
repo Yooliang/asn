@@ -63,10 +63,12 @@ test('Cargo：系統匣、自動更新、系統加密連線只在非安卓；安
     return j < 0 ? rest : rest.slice(0, j)
   }
   const common = section('dependencies')
-  const desktop = section(`target.'cfg(not(target_os = "android"))'.dependencies`)
+  const desktop = section(`target.'cfg(not(any(target_os = "android", target_os = "linux")))'.dependencies`)
+  const linux = section(`target.'cfg(target_os = "linux")'.dependencies`)
   const android = section(`target.'cfg(target_os = "android")'.dependencies`)
   assert.doesNotMatch(common, /tray-icon|tauri-plugin-updater|native-tls|rustls|opener/, '共用區不放平台專屬的東西')
   assert.match(desktop, /tray-icon/); assert.match(desktop, /tauri-plugin-updater/); assert.match(desktop, /reqwest[^\n]*native-tls/); assert.match(desktop, /tokio-tungstenite[^\n]*native-tls/)
+  assert.match(linux, /reqwest[^\n]*rustls/); assert.doesNotMatch(linux, /native-tls/, 'Linux 一律純 Rust 加密連線（無視窗橋不裝 OpenSSL）')
   assert.match(android, /reqwest[^\n]*rustls/); assert.match(android, /tokio-tungstenite[^\n]*rustls/); assert.match(android, /tauri-plugin-opener/)
   assert.doesNotMatch(android, /native-tls|tray-icon|updater/, '安卓不用 OpenSSL（交叉編譯很痛）、沒有系統匣與自動更新')
 })
@@ -199,7 +201,7 @@ test('滿版：名單、我、對話三頁左右不留外距與外框', () => {
 })
 
 test('自動更新只在自行安裝版：Rust 旗標、Gradle 管道、安裝權限、空殼分開；Play 版不含更新程式與安裝權限', () => {
-  assert.match(cargo, /\[features\]\nsideload = \[\]/)
+  assert.match(cargo, /\[features\][\s\S]*?\nsideload = \[\]/)
   const rs = read('src-tauri', 'src', 'android.rs')
   assert.match(rs, /#\[cfg\(feature = "sideload"\)\]\nmod sideload/, '下載與驗證程式只在 sideload 編進去')
   assert.match(rs, /#\[cfg\(not\(feature = "sideload"\)\)\][\s\S]*?"enabled": false/, 'Play 版：檢查指令只回 enabled:false')

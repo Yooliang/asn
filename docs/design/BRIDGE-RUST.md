@@ -2,7 +2,7 @@
 
 issue #12 第二期。目標：打開 ASN ＝ 這台設備的收發室就上線，不用另外裝、另外管 Node 的收發室橋；ASN 縮在系統匣保持活動（#61 已有）。別台的 ASN 看得到這台上線，之後可以遠端替這台開新的 Claude 視窗並對談。
 
-決策沿革：`ONBOARDING.md` 3.5 原本推薦「隨附 Node 執行檔」（方案甲），之後小良哥改裁**全 Rust、不帶 Node**（D1）。本文件是那個裁決的實作設計。Node 橋（`relay/machine/bridge.mjs`）繼續存在，Linux 雲端環境與 Aegis 主機仍在用，不在本文件範圍。
+決策沿革：`ONBOARDING.md` 3.5 原本推薦「隨附 Node 執行檔」（方案甲），之後小良哥改裁**全 Rust、不帶 Node**（D1）。本文件是那個裁決的實作設計。方向更新（2026-10-23）：Linux 雲端環境（Grok）與 Aegis 主機的 Node 橋，也改由同一份 Rust 內建橋取代，做成不連 Tauri 的「無視窗版」`asn-bridge`（cargo 功能旗標 `gui` 關掉即可），以後只維護 Rust 一份。規劃與階段見 `LINUX-HEADLESS.md`；Node 橋（`relay/machine/bridge.mjs`、`bridge-aegis.mjs`、`relay/cloud-agent/`）在 Rust 版於各環境驗收通過前繼續存在、隨時可切回，之後依該文件的階段 3 刪除。
 
 ## 1. 分段計畫
 
@@ -47,7 +47,7 @@ issue #12 第二期。目標：打開 ASN ＝ 這台設備的收發室就上線�
 | 附件下載提示行（`attach-format.mjs`） | `attach.rs`（清理檔名、白名單欄位、uuid 檢查、最多 4 筆、過期不給指令）；來信與群組訊息都用 | 第二段已搬 |
 | 孤兒清理 `bridge.last`（`self-update.mjs` 的 `orphansOf`／`killTree`） | `orphans.rs` | 第二段已搬（`self-update.mjs` 的 git 自動更新不搬） |
 | 遠端開視窗 `launcher.mjs`（驗證、歷史、紀錄、等視窗出現） | `launcher.rs`；設定與啟動沿用 `launch/`（`config.rs`、`cwds.rs`、`prefs.rs`、`local.rs`） | 第三段已搬（背景夥伴 `partner-*.mjs` 留到第五段） |
-| `send.mjs`／`recv.mjs`／`room.mjs`／`attach.mjs`、`identity.mjs`、`self-recv.mjs`、`attach-upload.mjs`／`attach-download.mjs` | `cli/`（`send.rs`、`recv.rs`、`room.rs`、`attach_cmd.rs`、`upload.rs`、`caller.rs`） | 第四段已搬（Node 版保留給雲端／Linux 無畫面節點） |
+| `send.mjs`／`recv.mjs`／`room.mjs`／`attach.mjs`、`identity.mjs`、`self-recv.mjs`、`attach-upload.mjs`／`attach-download.mjs` | `cli/`（`send.rs`、`recv.rs`、`room.rs`、`attach_cmd.rs`、`upload.rs`、`caller.rs`） | 第四段已搬（Node 版在無視窗版驗收通過前暫留給雲端／Linux 無畫面節點，之後刪除，見 `LINUX-HEADLESS.md`） |
 | Codex／ACP 引擎（`engines/`） | `engines/`（`acp*.rs`、`codex*.rs`、`rpc.rs`），設計見 `BRIDGE-ENGINES.md` | 第五段已搬（遠端開 Codex／背景夥伴不搬，見該文件第 5 節） |
 
 ### 主迴圈
@@ -229,7 +229,7 @@ Claude 的 Bash／PowerShell 工具都要「等指令結束並拿結束碼」（
 
 ### 10.4 測試
 
-`cargo test`：`cli/tests/` 底下由 Node 版的 `send.test.mjs`／`send-attach.test.mjs`／`recv.test.mjs`／`room.test.mjs`／`attach.test.mjs` 改寫（本機假後端，只連 127.0.0.1），另有 `tests/cli_bin.rs` 真的跑 `asn-cli`／`asn`（父行程當 Claude 視窗）。Node 版的測試保留，因為 Node 版還在（雲端、Linux 無畫面節點）。
+`cargo test`：`cli/tests/` 底下由 Node 版的 `send.test.mjs`／`send-attach.test.mjs`／`recv.test.mjs`／`room.test.mjs`／`attach.test.mjs` 改寫（本機假後端，只連 127.0.0.1），另有 `tests/cli_bin.rs` 真的跑 `asn-cli`／`asn`（父行程當 Claude 視窗）。Node 版的測試暫時保留，因為 Node 版還在（雲端、Linux 無畫面節點），無視窗版驗收通過後一併刪除。
 
 ### 10.5 真機驗證步驟
 

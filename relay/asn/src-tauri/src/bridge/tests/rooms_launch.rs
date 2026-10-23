@@ -723,7 +723,7 @@ fn 管理器_舊橋退出後自動接手_設定關著或舊橋還在就不動() 
     std::fs::write(super::super::lock::pid_file(work.path()), old.id().to_string()).unwrap();
     let old = Mutex::new(Some(old));
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        tauri::async_runtime::block_on(async {
+        crate::rt::block_on(async {
             // 設定關著：什麼都不做，連輪詢接手也不動
             m.start_if_enabled();
             m.poll_handoff();

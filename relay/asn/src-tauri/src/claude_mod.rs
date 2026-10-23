@@ -425,6 +425,7 @@ pub fn run_real(data_dir: &Path) -> Outcome {
     out
 }
 
+#[cfg(feature = "gui")]
 #[tauri::command]
 pub fn claude_mod_status(s: tauri::State<'_, ModState>) -> String {
     s.0.lock().map(|g| g.clone()).unwrap_or_default()

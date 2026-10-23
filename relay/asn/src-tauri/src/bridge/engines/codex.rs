@@ -591,7 +591,7 @@ impl Inner {
             return;
         }
         let me = self.clone();
-        tauri::async_runtime::spawn(async move {
+        crate::rt::spawn(async move {
             loop {
                 tokio::time::sleep(std::time::Duration::from_millis(me.poll_ms)).await;
                 if me.stopped.load(Ordering::SeqCst) {
@@ -614,7 +614,7 @@ impl Engine for CodexEngine {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(String, String, String)>();
         *self.i.queue_tx.lock().unwrap() = Some(tx);
         let i = self.i.clone();
-        tauri::async_runtime::spawn(async move {
+        crate::rt::spawn(async move {
             i.ensure_probed().await;
             while let Some((id, to, text)) = rx.recv().await {
                 if i.stopped.load(Ordering::SeqCst) {
@@ -629,7 +629,7 @@ impl Engine for CodexEngine {
         self.i.polling.store(false, Ordering::SeqCst);
         self.i.queue_tx.lock().unwrap().take();
         let i = self.i.clone();
-        tauri::async_runtime::spawn(async move {
+        crate::rt::spawn(async move {
             if let Some(r) = i.reader.lock().await.take() {
                 r.stop();
             }

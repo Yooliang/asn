@@ -874,7 +874,7 @@ fn 整條路徑_start_接上引擎_信送進_gemini_回覆寄回_結束時只關
     c.engine_env = eenv(&[]);
     c.engine_refresh_ms = 200;
     let relay = Arc::new(Relay::new(fr.url.clone(), "fake-test-key".into(), "T".into(), "T-ASN".into()));
-    tauri::async_runtime::block_on(async {
+    crate::rt::block_on(async {
         let run = super::super::start(c, relay, None).expect("內建橋啟動");
         let t0 = std::time::Instant::now();
         while fr.sent().is_empty() && t0.elapsed() < std::time::Duration::from_secs(60) {

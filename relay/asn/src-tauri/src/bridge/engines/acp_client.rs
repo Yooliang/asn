@@ -58,7 +58,7 @@ impl AcpClient {
                 if method == "session/request_permission" {
                     let params = m.get("params").cloned().unwrap_or(Value::Null);
                     let fut = perm(params.clone());
-                    tauri::async_runtime::spawn(async move {
+                    crate::rt::spawn(async move {
                         let allow = fut.await;
                         let opts = params.get("options").and_then(Value::as_array).cloned().unwrap_or_default();
                         let kind = |o: &Value| o.get("kind").and_then(Value::as_str).unwrap_or("").to_string();

@@ -401,7 +401,7 @@ impl Worker {
     }
     fn warm(self: &Arc<Self>) {
         let me = self.clone();
-        tauri::async_runtime::spawn(async move {
+        crate::rt::spawn(async move {
             match me.ensure_driver(me.base_full()).await {
                 Ok(_) => {
                     if me.st.lock().unwrap().health == Health::Unavailable {
@@ -540,7 +540,7 @@ impl Worker {
 
     fn pump(self: &Arc<Self>) {
         let me = self.clone();
-        tauri::async_runtime::spawn(async move { me.pump_inner().await });
+        crate::rt::spawn(async move { me.pump_inner().await });
     }
 
     async fn pump_inner(self: Arc<Self>) {

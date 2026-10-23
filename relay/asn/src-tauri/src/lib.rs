@@ -3,8 +3,12 @@
 //! 電腦版（desktop）與安卓版共用同一份：電腦端才有的模組都掛 `#[cfg(desktop)]`，手機建置不編譯（設計見 docs/design/ANDROID.md）。
 // 手機版沒有電腦端的功能，那些共用程式裡只給電腦用的函式在手機建置會變成「沒人叫」：不當成警告
 #![cfg_attr(not(desktop), allow(dead_code, unused_variables, unused_imports))]
+// 無視窗版（沒有 gui）不編視窗與指令那一半，留下的共用函式與型別在這裡看起來「沒人叫」：不當成警告
+#![cfg_attr(not(feature = "gui"), allow(dead_code, unused_variables, unused_imports))]
 // ---- 手機與電腦都有的模組 ----
+#[cfg(feature = "gui")]
 mod account;
+#[cfg(feature = "gui")]
 mod android_update;
 mod appdir;
 mod attach;
@@ -21,6 +25,7 @@ mod names;
 mod nowin;
 mod nowplaying;
 mod relay;
+pub mod rt;
 // ---- 安卓版專屬 ----
 #[cfg(target_os = "android")]
 mod android;
@@ -28,6 +33,7 @@ mod android;
 // 手機建置不編譯它們；守門測試 test/android.test.mjs 會檢查每一個都掛著 cfg(desktop) ----
 #[cfg(desktop)]
 mod acct_remote;
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 mod ads;
 #[cfg(desktop)]
@@ -38,6 +44,8 @@ pub mod secret_remote;
 #[cfg(desktop)]
 mod bridge;
 #[cfg(desktop)]
+pub mod headless;
+#[cfg(desktop)]
 pub mod cli;
 #[cfg(desktop)]
 mod claude_accounts;
@@ -45,26 +53,34 @@ mod claude_accounts;
 mod claude_json;
 #[cfg(desktop)]
 mod claude_mod;
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 mod cloud_invite;
 #[cfg(desktop)]
 mod codex_accounts;
 #[cfg(desktop)]
 mod launch;
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 mod shot;
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 mod stt;
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 mod tray;
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 mod tts;
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 mod updater;
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 mod usage;
 #[cfg(desktop)]
 mod voicecfg;
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 mod wins;
 
@@ -73,6 +89,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+#[cfg(feature = "gui")]
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// 所有視窗共用的瀏覽器啟動參數（必須一致，否則第二扇視窗建不起來）。WebView2 才支援這些參數（自動播放，以及關掉隱藏／被遮住時的計時器節流與背景降權，讓縮在系統匣的名單畫面照常收信）；Linux WebKitGTK 略過。必須與 tauri.conf.json 名單視窗的 additionalBrowserArgs 一字不差（test/window-throttling.test.mjs 守著）。
@@ -141,6 +158,7 @@ pub fn is_auto_node_id(id: &str) -> bool {
 }
 
 /// 視窗名預設值：手動取代號的舊電腦＝`<代號>-ASN`；自動產生代號的新電腦改用電腦名稱（`<電腦名>-ASN`），畫面上不會出現節點代號
+#[cfg(feature = "gui")]
 pub fn default_window_name_for(node: &str, computer: &str) -> String {
     if is_auto_node_id(node) {
         let c: String = computer.chars().filter(|c| !c.is_control()).collect::<String>().trim().chars().take(36).collect();
@@ -165,6 +183,7 @@ pub fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
     std::fs::rename(&tmp, path)
 }
 
+#[cfg(feature = "gui")]
 #[tauri::command]
 fn startup_info(app: State<'_, App>, auth: State<'_, auth::AuthState>) -> StartupInfo {
     StartupInfo {
@@ -187,30 +206,36 @@ pub(crate) fn relay_of(app: &App) -> Result<Arc<Relay>, String> {
     app.relay.clone().ok_or_else(|| app.init_error.clone().unwrap_or_else(|| "尚未連上收發室".into()))
 }
 
+#[cfg(feature = "gui")]
 #[tauri::command]
 async fn relay_list(app: State<'_, App>) -> Result<Value, String> {
     relay_of(&app)?.list().await
 }
+#[cfg(feature = "gui")]
 #[tauri::command]
 async fn relay_inbox(app: State<'_, App>) -> Result<Value, String> {
     relay_of(&app)?.inbox().await
 }
+#[cfg(feature = "gui")]
 #[tauri::command]
 async fn relay_ack(app: State<'_, App>, ids: Vec<String>) -> Result<Value, String> {
     relay_of(&app)?.ack(&ids).await
 }
 /// 群組列表：只讀（GET room_list），後端只回節點自己所在的群組
+#[cfg(feature = "gui")]
 #[tauri::command]
 async fn relay_rooms(app: State<'_, App>) -> Result<Value, String> {
     relay_of(&app)?.api("room_list", None).await
 }
 
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn relay_launch(app: State<'_, App>, body: Value) -> Result<Value, String> {
     launch::relay_launch(relay_of(&app)?.as_ref(), body).await
 }
 
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn relay_launchers(app: State<'_, App>, ids: Option<Vec<String>>) -> Result<Value, String> {
@@ -219,6 +244,7 @@ async fn relay_launchers(app: State<'_, App>, ids: Option<Vec<String>>) -> Resul
 
 // ---------- 遠端切換 Claude 帳號（設計見 acct_remote.rs；權杖只在各自那台搬，不進收發室） ----------
 /// 把本機帳號庫的清單（只有 email、方案、使用中）回報給收發室，讓擁有者設備看得到
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn acct_remote_report(app: State<'_, App>) -> Result<Value, String> {
@@ -228,53 +254,63 @@ async fn acct_remote_report(app: State<'_, App>) -> Result<Value, String> {
     let codex = tauri::async_runtime::spawn_blocking(codex_accounts::codex_account_current).await.ok().and_then(|r| r.ok()).flatten();
     acct_remote::report(relay.as_ref(), &list, codex.as_ref()).await
 }
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn acct_remote_list(app: State<'_, App>, node: String) -> Result<Value, String> {
     acct_remote::remote_list(relay_of(&app)?.as_ref(), &node).await
 }
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn acct_remote_request(app: State<'_, App>, node: String, email: String) -> Result<Value, String> {
     acct_remote::remote_request(relay_of(&app)?.as_ref(), &node, &email).await
 }
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn acct_remote_status(app: State<'_, App>, ids: Vec<String>) -> Result<Value, String> {
     acct_remote::remote_status(relay_of(&app)?.as_ref(), ids).await
 }
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn acct_remote_pending(app: State<'_, App>) -> Result<Vec<acct_remote::Pending>, String> {
     acct_remote::pending(relay_of(&app)?.as_ref(), &app.data_dir).await
 }
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn acct_remote_apply(app: State<'_, App>, id: String, confirmed: bool) -> Result<Value, String> {
     acct_remote::apply(relay_of(&app)?.as_ref(), &app.data_dir, id, confirmed).await
 }
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn acct_remote_decline(app: State<'_, App>, id: String) -> Result<(), String> {
     acct_remote::decline(relay_of(&app)?.as_ref(), id).await
 }
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 fn acct_remote_trust_get(app: State<'_, App>) -> bool {
     acct_remote::trust_own(&app.data_dir)
 }
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 fn acct_remote_trust_set(app: State<'_, App>, on: bool) -> Result<(), String> {
     acct_remote::set_trust_own(&app.data_dir, on)
 }
 
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn partner_launch_local(app: State<'_, App>, req: launch::LocalLaunchReq) -> Result<Value, String> {
     launch::partner_launch_local(app.node.clone(), app.work_dir.clone(), app.data_dir.clone(), req).await
 }
 
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn launch_cwd_candidates(app: State<'_, App>) -> Result<Vec<String>, String> {
@@ -282,6 +318,7 @@ async fn launch_cwd_candidates(app: State<'_, App>) -> Result<Vec<String>, Strin
 }
 
 /// 「瀏覽…」：在 Rust 端開「選擇資料夾」對話框；選好的資料夾寫進本機白名單並回傳，取消回 null。
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn launch_cwd_browse(app: State<'_, App>, handle: AppHandle) -> Result<Option<String>, String> {
@@ -304,6 +341,7 @@ async fn launch_cwd_browse(app: State<'_, App>, handle: AppHandle) -> Result<Opt
 
 /// 本機視窗的即時狀態（不經後台）：讀 ~/.claude/sessions 與外掛狀態檔，給名單上「這台電腦」的夥伴蓋過後台的舊值。
 /// 只回名字、狀態、說明、上下文百分比；讀不到就回空清單（前端照舊用後台的名單）。
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn local_windows() -> Result<Value, String> {
@@ -316,42 +354,49 @@ async fn local_windows() -> Result<Value, String> {
     Ok(Value::Array(list.iter().map(|w| serde_json::json!({ "name": w.name, "status": w.status, "detail": w.detail, "context_pct": w.context_pct })).collect()))
 }
 
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn partner_console_query(req: launch::PartnerConsoleReq) -> Result<Value, String> {
     launch::partner_console_query(req).await
 }
 
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn partner_console_set(req: launch::PartnerConsoleReq) -> Result<Value, String> {
     launch::partner_console_set(req).await
 }
 
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn subagents_query(req: launch::SubagentsReq) -> Result<Value, String> {
     launch::subagents_query(req).await
 }
 
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn model_switch_query(req: launch::SwitchQueryReq) -> Result<Value, String> {
     launch::model_switch_query(req).await
 }
 
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn model_switch_run(req: launch::SwitchRunReq) -> Result<Value, String> {
     launch::model_switch_run(req).await
 }
 
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn launch_prefs_get(app: State<'_, App>) -> Result<Value, String> {
     launch::launch_prefs_get(app.data_dir.clone()).await
 }
 
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn launch_prefs_set(app: State<'_, App>, prefs: Value) -> Result<(), String> {
@@ -367,6 +412,7 @@ struct RelayLogPaths {
 }
 
 /// 收發橋與夥伴啟動相關紀錄的路徑（不含金鑰）。
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 fn relay_log_paths(app: State<'_, App>) -> RelayLogPaths {
@@ -425,6 +471,7 @@ pub fn machine_log_dir(work_dir: &Path) -> Result<PathBuf, String> {
 }
 
 /// 用檔案管理員開啟本機 machine 資料夾（內含 bridge.log）；不接受任何路徑參數。
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 fn open_machine_log_dir(app: State<'_, App>) -> Result<(), String> {
@@ -433,6 +480,7 @@ fn open_machine_log_dir(app: State<'_, App>) -> Result<(), String> {
 }
 
 /// `--shot` 模式：前端標記「這一刻可以截」（例如對話框已掛上 DOM）。
+#[cfg(feature = "gui")]
 #[tauri::command]
 fn capture_ui_ready(app: State<'_, App>, tag: String) -> Result<(), String> {
     let dir = app.shot.clone().ok_or("不在 --shot 模式")?;
@@ -444,6 +492,7 @@ fn capture_ui_ready(app: State<'_, App>, tag: String) -> Result<(), String> {
 }
 
 /// `--shot` 模式：前端錯誤印到 stderr，方便 shot.mjs 除錯。
+#[cfg(feature = "gui")]
 #[tauri::command]
 fn shot_frontend_log(app: State<'_, App>, level: String, message: String) {
     if app.shot.is_some() {
@@ -453,6 +502,7 @@ fn shot_frontend_log(app: State<'_, App>, level: String, message: String) {
 
 /// 底部廣告可以開的網址：只准 https、沒有帳密、主機在網域允許清單內（見 ads.rs 的 ALLOWED_HOSTS）
 /// 用系統預設瀏覽器開（網址已比對白名單，不經 shell）
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
@@ -472,6 +522,7 @@ pub(crate) fn link_allowed(url: &str) -> bool {
     matches!(u.scheme(), "http" | "https") && u.host_str().is_some() && u.username().is_empty() && u.password().is_none()
 }
 
+#[cfg(feature = "gui")]
 #[tauri::command]
 fn open_link(handle: AppHandle, url: String) -> Result<(), String> {
     if !link_allowed(&url) {
@@ -502,6 +553,7 @@ pub(crate) fn spawn_browser(url: &str) -> Result<(), String> {
 }
 
 /// 登入用：開系統瀏覽器。電腦版直接叫系統開；安卓版經「開網址」外掛（走系統的 Intent，不能呼叫外部程式）
+#[cfg(feature = "gui")]
 pub(crate) fn open_in_browser(handle: &AppHandle, url: &str) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
@@ -515,6 +567,7 @@ pub(crate) fn open_in_browser(handle: &AppHandle, url: &str) -> Result<(), Strin
 }
 
 /// 某台設備上傳的大頭貼（名單只帶更新時間，圖按需取）。節點代號先驗格式才組網址
+#[cfg(feature = "gui")]
 #[tauri::command]
 async fn relay_avatar(app: State<'_, App>, node: String) -> Result<Value, String> {
     if !identity::valid_id(&node) {
@@ -524,6 +577,7 @@ async fn relay_avatar(app: State<'_, App>, node: String) -> Result<Value, String
 }
 
 /// 上傳（或 null＝移除）自己這台設備的大頭貼：格式與大小在這裡檢查，通過才送出；只能改自己的節點（後端由金鑰決定是誰）
+#[cfg(feature = "gui")]
 #[tauri::command]
 async fn relay_set_avatar(app: State<'_, App>, avatar: Option<String>) -> Result<Value, String> {
     if let Some(a) = &avatar {
@@ -532,6 +586,7 @@ async fn relay_set_avatar(app: State<'_, App>, avatar: Option<String>) -> Result
     relay_of(&app)?.api("set_avatar", Some(serde_json::json!({ "avatar": avatar }))).await
 }
 
+#[cfg(feature = "gui")]
 #[tauri::command]
 async fn relay_send(app: State<'_, App>, auth: State<'_, auth::AuthState>, payload: Value) -> Result<Value, String> {
     let r = relay_of(&app)?;
@@ -540,6 +595,7 @@ async fn relay_send(app: State<'_, App>, auth: State<'_, auth::AuthState>, paylo
     r.send_signed(&payload, token.as_deref()).await
 }
 /// 「我和某夥伴」90 天內的往來（以後台為準，本機只當快取）。要登入憑證；沒登入或後台還沒支援就回錯，前端靜默沿用本機快取
+#[cfg(feature = "gui")]
 #[tauri::command]
 async fn relay_chat_history(app: State<'_, App>, auth: State<'_, auth::AuthState>, node: String, agent: Option<String>, partner_id: Option<String>, before: Option<String>, limit: Option<u64>) -> Result<Value, String> {
     let r = relay_of(&app)?;
@@ -547,6 +603,7 @@ async fn relay_chat_history(app: State<'_, App>, auth: State<'_, auth::AuthState
     r.chat_history(&node, agent.as_deref().unwrap_or(""), partner_id.as_deref(), before.as_deref(), limit, token.as_deref()).await
 }
 /// 已讀多端同步（設計見 docs/design/READ-SYNC.md）：送出這台的已讀位置、取回整個帳號的。電腦與手機共用；要本人簽章，沒登入回錯（不打後台），舊後台回 404，前端都靜默
+#[cfg(feature = "gui")]
 #[tauri::command]
 async fn relay_read_sync(app: State<'_, App>, auth: State<'_, auth::AuthState>, body: Value) -> Result<Value, String> {
     let r = relay_of(&app)?;
@@ -554,6 +611,7 @@ async fn relay_read_sync(app: State<'_, App>, auth: State<'_, auth::AuthState>, 
     r.read_sync_signed(&body, token.as_deref()).await
 }
 /// 可被接班的夥伴清單（#153，要登入）。沒登入或後台還沒支援就回錯，前端不顯示「接班」選項
+#[cfg(feature = "gui")]
 #[tauri::command]
 async fn relay_partner_list(app: State<'_, App>, auth: State<'_, auth::AuthState>) -> Result<Value, String> {
     let r = relay_of(&app)?;
@@ -561,6 +619,7 @@ async fn relay_partner_list(app: State<'_, App>, auth: State<'_, auth::AuthState
     r.partner_list(token.as_deref()).await
 }
 /// 指定「新視窗是某某的接班」（#153，要本人簽章）：夥伴 ID 沿用前任
+#[cfg(feature = "gui")]
 #[tauri::command]
 async fn relay_partner_succeed(app: State<'_, App>, auth: State<'_, auth::AuthState>, predecessor: String, node: String, name: String) -> Result<Value, String> {
     let r = relay_of(&app)?;
@@ -568,6 +627,7 @@ async fn relay_partner_succeed(app: State<'_, App>, auth: State<'_, auth::AuthSt
     r.partner_succeed(&predecessor, &node, &name, token.as_deref()).await
 }
 /// 電腦版名單右鍵管理夥伴視窗（詳情、改名、關閉、接班換手、喚醒）：和手機同一個後台動作，要本人簽章；沒登入回錯，不打後台。回 { id }
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn relay_partner_op(app: State<'_, App>, auth: State<'_, auth::AuthState>, body: Value) -> Result<Value, String> {
@@ -576,6 +636,7 @@ async fn relay_partner_op(app: State<'_, App>, auth: State<'_, auth::AuthState>,
     r.partner_op_signed(&body, token.as_deref()).await
 }
 /// 電腦版名單右鍵「封存」「取消封存」：記在帳號層（同租戶所有設備同步），要本人簽章；沒登入回錯，不打後台。回 { ok, archived }
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn relay_partner_archive(app: State<'_, App>, auth: State<'_, auth::AuthState>, body: Value) -> Result<Value, String> {
@@ -584,6 +645,7 @@ async fn relay_partner_archive(app: State<'_, App>, auth: State<'_, auth::AuthSt
     r.partner_archive_signed(&body, token.as_deref()).await
 }
 /// 查管理操作的進度（最多 20 筆）。要本人簽章；沒登入回錯，不打後台。回 { ops: [...] }
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn relay_partner_ops(app: State<'_, App>, auth: State<'_, auth::AuthState>, ids: Vec<String>) -> Result<Value, String> {
@@ -591,6 +653,7 @@ async fn relay_partner_ops(app: State<'_, App>, auth: State<'_, auth::AuthState>
     let token = account::signing_token(&auth).await;
     r.partner_ops_signed(&ids, token.as_deref()).await
 }
+#[cfg(feature = "gui")]
 #[tauri::command]
 async fn relay_sent_status(app: State<'_, App>, ids: Vec<String>) -> Result<Value, String> {
     let rows = relay_of(&app)?.sent_status(&ids).await?;
@@ -598,6 +661,7 @@ async fn relay_sent_status(app: State<'_, App>, ids: Vec<String>) -> Result<Valu
 }
 
 /// 寄照片：前端已壓縮成 webp；格式與大小在 attach.rs 檢查，通過才依序要上傳網址、上傳、確認、寄信（金鑰只在這裡）
+#[cfg(feature = "gui")]
 #[tauri::command]
 async fn relay_send_attachment(app: State<'_, App>, auth: State<'_, auth::AuthState>, payload: Value) -> Result<Value, String> {
     let r = relay_of(&app)?;
@@ -606,6 +670,7 @@ async fn relay_send_attachment(app: State<'_, App>, auth: State<'_, auth::AuthSt
 }
 
 /// 放大看：換短效下載網址、下載、檢查，回前端 <img> 能直接用的 data URL（只有寄件人與收件人換得到網址）
+#[cfg(feature = "gui")]
 #[tauri::command]
 async fn relay_attachment_fetch(app: State<'_, App>, id: String) -> Result<Value, String> {
     let r = relay_of(&app)?;
@@ -624,6 +689,7 @@ struct SaveDir(std::sync::Mutex<Option<PathBuf>>);
 /// 另存：跳出系統「另存新檔」對話框（預設＝上次存的資料夾，第一次是「下載\ASN」；預設檔名＝附件原檔名），
 /// 使用者選好才下載、存到他選的那個路徑；按取消就不下載。回存檔路徑，取消回 null。
 /// `name` 只是預設檔名的建議（外部資料，Rust 端清理過）；寫檔位置只來自對話框。
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn relay_attachment_save(
@@ -658,6 +724,7 @@ async fn relay_attachment_save(
 }
 
 /// 開啟資料夾：只開「上次存檔的那個資料夾」，路徑由 Rust 記著、前端不能帶參數
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 fn relay_attachment_reveal(dir_state: State<'_, SaveDir>) -> Result<(), String> {
@@ -667,6 +734,7 @@ fn relay_attachment_reveal(dir_state: State<'_, SaveDir>) -> Result<(), String> 
 
 /// 前端的狀態下拉與個人訊息：記在 Rust 端，由回報迴圈每 60 秒送出；改了就立刻回報一次
 /// 「顯示正在聽的歌」開關（預設關）。關著不讀系統媒體、不送；開了才讀。回傳目前的歌（沒在聽＝空字串）
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 fn set_now_playing(app: State<'_, App>, on: bool) -> Result<String, String> {
@@ -679,6 +747,7 @@ fn set_now_playing(app: State<'_, App>, on: bool) -> Result<String, String> {
     Ok(r.now_playing.current())
 }
 
+#[cfg(feature = "gui")]
 #[tauri::command]
 fn set_presence(app: State<'_, App>, status: String, psm: String) -> Result<(), String> {
     relay_of(&app)?.set_presence(&status, &psm);
@@ -686,6 +755,7 @@ fn set_presence(app: State<'_, App>, status: String, psm: String) -> Result<(), 
 }
 
 /// 改暱稱＝改對外名字（驗證在 names::validate_name；不合法就回錯誤字串，介面還原並提示）
+#[cfg(feature = "gui")]
 #[tauri::command]
 fn set_window_name(app: State<'_, App>, name: String) -> Result<String, String> {
     let relay = relay_of(&app)?;
@@ -703,10 +773,12 @@ fn store_path(app: &App, name: &str) -> Result<PathBuf, String> {
     }
     Ok(app.data_dir.join(format!("asn-{name}.json")))
 }
+#[cfg(feature = "gui")]
 #[tauri::command]
 fn store_load(app: State<'_, App>, name: String) -> Result<Option<String>, String> {
     Ok(std::fs::read_to_string(store_path(&app, &name)?).ok())
 }
+#[cfg(feature = "gui")]
 #[tauri::command]
 fn store_save(app: State<'_, App>, name: String, text: String) -> Result<(), String> {
     if text.len() > 8_000_000 {
@@ -716,17 +788,20 @@ fn store_save(app: State<'_, App>, name: String, text: String) -> Result<(), Str
 }
 
 /// 語音設定（念出訊息的聲音與自動念、語音輸入的語言與模型）；存在資料夾的 voice.json
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 fn voice_cfg_get(app: State<'_, App>) -> voicecfg::VoiceCfg {
     voicecfg::load(&app.data_dir)
 }
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 fn voice_cfg_set(app: State<'_, App>, cfg: voicecfg::VoiceCfg) -> Result<(), String> {
     voicecfg::save(&app.data_dir, &cfg)
 }
 
+#[cfg(feature = "gui")]
 #[tauri::command]
 fn quit_app(app: AppHandle) {
     cleanup(&app);
@@ -734,42 +809,49 @@ fn quit_app(app: AppHandle) {
 }
 
 /// 命令列（asn-cli）的完整路徑與寄信範例（設定頁「寄信指令」用）
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 fn cli_info() -> serde_json::Value {
     cli::info()
 }
 /// 內建收發室橋的狀態（設定頁用）。預設關閉
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 fn bridge_status(m: State<'_, bridge::Manager>) -> bridge::Status {
     m.status()
 }
 /// 打開／關閉「讓 ASN 負責這台的收發室」
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 fn bridge_set_enabled(m: State<'_, bridge::Manager>, on: bool) -> Result<bridge::Status, String> {
     m.set_enabled(on)
 }
 /// 打開／關閉「允許我的其他設備替這台開新視窗」（預設關）
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 fn bridge_set_remote_launch(m: State<'_, bridge::Manager>, on: bool) -> Result<bridge::Status, String> {
     m.set_remote_launch(on)
 }
 
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 fn bridge_set_unaddressed_to(m: State<'_, bridge::Manager>, name: String) -> Result<bridge::Status, String> {
     m.set_unaddressed_to(&name)
 }
 /// 「改由 ASN 負責」：停掉舊版收發室橋（要使用者確認、要設定開關放行）再啟動內建橋
+#[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn bridge_takeover(m: State<'_, bridge::Manager>, confirmed: bool) -> Result<bridge::Status, String> {
     m.takeover(confirmed).await
 }
 
+#[cfg(feature = "gui")]
 pub(crate) fn cleanup(app: &AppHandle) {
     // 內建橋：只關自己啟動的收發室 worker、釋放收信鎖（手機版沒有內建橋）
     #[cfg(desktop)]
@@ -784,6 +866,7 @@ pub(crate) fn cleanup(app: &AppHandle) {
     }
 }
 
+#[cfg(feature = "gui")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(all(not(windows), desktop))]
@@ -1116,7 +1199,7 @@ pub fn run() {
     });
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "gui"))]
 mod tests {
     use super::*;
 

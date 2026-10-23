@@ -80,6 +80,8 @@ pub struct Config {
     pub home: PathBuf,
     /// 引擎名單重列的間隔
     pub engine_refresh_ms: u64,
+    /// 「只有引擎」模式（無視窗橋）：不啟動 `claude -p` 收發室 worker；沒指定收件人的信交給預設成員（default_agent／bridge.json 的 unaddressed_to）
+    pub engine_only: bool,
 }
 
 impl Config {
@@ -123,6 +125,7 @@ impl Config {
             agents_file: if cfg!(test) { work_dir_agents } else { crate::envc::get_os("ASN_AGENTS_FILE").filter(|s| !s.is_empty()).map(PathBuf::from).unwrap_or_else(|| crate::identity::relay_home().join("agents.json")) },
             home: if cfg!(test) { work_dir_home } else { home },
             engine_refresh_ms: env_u64("ASN_ROSTER_MS", 60_000),
+            engine_only: false,
         }
     }
 }
