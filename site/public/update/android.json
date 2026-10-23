@@ -1,8 +1,8 @@
 {
-  "version": "0.1.48",
-  "versionCode": 1048,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.48_android.apk",
-  "sha256": "d53b18492ceb721f081f8dd58bcc7595e47ba295ce4151daa5f25ca9296f1c5b",
-  "notes": "- 語音通話時把通話對象與夥伴名稱交給語音辨識，減少「正見」被聽成「政見」這類同音字；名單上設備右鍵「切換這台的 Claude 帳號」改成專屬對話框，標題寫明是哪一台；ASN 縮在系統匣時也照常收信（隱藏視窗不再被系統節流，另有保底代收）；按一次震動不再顯示兩行。",
-  "bytes": 9035236
+  "version": "0.1.49",
+  "versionCode": 1049,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.49_android.apk",
+  "sha256": "76ec2503ebad1d6639b042422da9ec893aa24da27d3d3f08a0fe47080a5ee9df",
+  "notes": "- 設定新增「設備」分類：一眼看到帳號下有哪些設備、每台用了哪些廠商、各用哪個帳號，Claude 帳號可直接切換；其他設備的 OpenAI（Codex）登入帳號也會回報；設定「視窗與系統匣」拿掉技術指令文字，密碼小幫手移到「啟動設定」的「進階」。",
+  "bytes": 9039332
 }

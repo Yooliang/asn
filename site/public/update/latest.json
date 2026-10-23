@@ -1,11 +1,11 @@
 {
-  "version": "0.1.48",
-  "notes": "語音通話時把通話對象與夥伴名稱交給語音辨識，減少「正見」被聽成「政見」這類同音字；名單上設備右鍵「切換這台的 Claude 帳號」改成專屬對話框，標題寫明是哪一台；ASN 縮在系統匣時也照常收信（隱藏視窗不再被系統節流，另有保底代收）；按一次震動不再顯示兩行。",
-  "pub_date": "2026-10-23T06:03:05.656Z",
+  "version": "0.1.49",
+  "notes": "設定新增「設備」分類：一眼看到帳號下有哪些設備、每台用了哪些廠商、各用哪個帳號，Claude 帳號可直接切換；其他設備的 OpenAI（Codex）登入帳號也會回報；設定「視窗與系統匣」拿掉技術指令文字，密碼小幫手移到「啟動設定」的「進階」。",
+  "pub_date": "2026-10-23T07:09:06.061Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnpPbTRwMWx2eWtlbnhyb1lWWDFyaUM3c2F2cnJGczhYUU9XUWJzR2pkWUpLTEtZUU1xb3hVYkdUc2EyV0hTK1NaVXJra011SUdNY3BvenBDZ2czd1FBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzM1Mzg1CWZpbGU6QVNOXzAuMS40OF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjQ4CmFURnlHTWZ1UzZqWG5JcGdocURBNkdkVHp3NDBJTWsrZjIzMnk1K21sbVNOcHRtMDc5VDZnT1cvN253am1HbzJaTDFFUGk0V0F1cHEyQzI2ekppV0JBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.48_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnlQNFRaYzhEdGpsZE9YK2hqY2tSSGl1UVdMczhhdjBkWDFZTDBZbXNaTE56L2VGMTNTQkdkYUNTUFkzVmIxQjlUQnMxVHNsVmV0aThseU1aWXYxSVFzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzM5MzQ1CWZpbGU6QVNOXzAuMS40OV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjQ5CmNLcCtCREFFRkVSRjFOQkl4QW0rNjB5dmZUZTBDVXNLMVBVZFp0eHYzQm4vLzlBdFRqaWhSMFNKZWJuZFFQdmJvdjZZUFlWd2UvVW5Eb1pja2dBVENnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.49_x64-setup.exe"
     }
   }
 }
