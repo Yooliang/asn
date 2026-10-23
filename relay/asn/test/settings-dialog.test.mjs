@@ -162,7 +162,7 @@ test('守門：設定不再用彈出對話框，點分類列表的一項就開�
   assert.ok(!/openSettingDlg|dlg\.kind|dlg\.key|closeDlg|dlgTitle/.test(html + js), '舊的對話框接線都拿掉了')
   // 對話框元件只剩開新夥伴失敗提示在用
   const uses = [...html.matchAll(/<asn-dialog v-if="([^"]+)"/g)].map(m => m[1])
-  assert.deepEqual(uses, ['modelDlg.open', 'accounts.state.incoming.length', 'launchNotice.open'])   // 切換模型的確認框、別台要求切換帳號的確認框、開新夥伴失敗提示
+  assert.deepEqual(uses, ['modelDlg.open', 'deviceAcct.node', 'accounts.state.incoming.length', 'launchNotice.open'])   // 切換模型的確認框、右鍵切換某台的 Claude 帳號、別台要求切換帳號的確認框、開新夥伴失敗提示
   assert.match(js, /app\.component\('asn-dialog', AsnDialog\)/)
   // 整合模式右邊的設定窗用同一個元件
   assert.ok(html.includes('<settings-panel :st="settingsState"') && js.includes("app.component('settings-panel', SettingsPanel)"))
