@@ -198,13 +198,19 @@ test('後端斷線：連線狀態變 off，不丟例外', async () => {
   await core.stop()
 })
 
-test('未指定收件人的信（橋交給本人）：對話先顯示「寄件人 → 未指定收件人」，再顯示內文；一般信不加這行', async () => {
+test('未指定收件人的信（橋交給本人）：對話先顯示「XX 寄來的信沒有指定收件人」，再顯示內文；一般信不加這行；震動信（含附帶文字）只顯示震動，不出現未指定收件人', async () => {
   const { relay, core } = await setup()
   relay.mail(1, { body: '沒人指定我要給誰', unaddressed: true })
   relay.mail(2, { body: '正常信' })
+  relay.mail(3, { body: '[震動]\n順便說一聲', unaddressed: true })
+  relay.mail(4, { body: '（W-政策 傳送了一個震動）\n別的提示字樣', unaddressed: true })
   await core.start()
   const lg = core.logOf('W/W-政策')
-  assert.deepEqual(lg.map(m => `${m.k}:${m.text}`), ['sys:W-政策 → 未指定收件人', 'them:沒人指定我要給誰', 'them:正常信'])
+  assert.deepEqual(lg.slice(0, 3).map(m => `${m.k}:${m.text}`), ['sys:W-政策 寄來的信沒有指定收件人', 'them:沒人指定我要給誰', 'them:正常信'])
+  const all = lg.map(m => m.text).join('|')
+  assert.ok(!all.includes('→ 未指定收件人'), all)
+  assert.equal(lg.filter(m => m.nudge).length, 2)
+  assert.equal(lg.filter(m => m.text?.includes('沒有指定收件人')).length, 1, '震動信不加未指定收件人這行')
   await core.stop()
   await relay.close()
 })
