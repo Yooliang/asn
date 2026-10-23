@@ -44,7 +44,7 @@ test('說明文字講清楚對方會跳出確認', () => {
 
 test('接線：右鍵項目打開專屬對話框，不再打開設定頁；切換走原本的 remoteSwitch', () => {
   const js = read('ui/list.js'), html = read('ui/list.html')
-  const fn = js.slice(js.indexOf('const deviceMenuSwitch'), js.indexOf('const installFromSettings'))
+  const fn = js.slice(js.indexOf('const openDeviceAcct'), js.indexOf('const installFromSettings'))
   assert.ok(fn.includes('deviceAcct.node = node'), '右鍵要設定對話框對象')
   assert.ok(fn.includes('accounts.remoteSelect(node)'), '要沿用 remoteSelect 載入清單')
   assert.ok(!fn.includes("openPanel('setting'"), '不可再打開整個設定頁')
