@@ -1,0 +1,72 @@
+/* 群組（真人好友與群組 1b）：對話框（建立、邀請、加入、成員與設定）、待主持人確認卡片、發言者徽章、對話上方的「⋯」。電腦版與手機版共用。
+   顏色沿用 style.css 的變數；窄視窗（手機、窄的名單視窗）對話框從底部升起，寬視窗置中。 */
+.gs-back{position:fixed;z-index:90;inset:0;display:flex;align-items:flex-end;justify-content:center;background:rgba(15,30,50,.45)}
+.gs-panel{display:flex;flex-direction:column;width:100%;max-width:440px;max-height:88dvh;background:var(--panel);color:var(--fg);border-radius:14px 14px 0 0;border-top:1px solid var(--line);box-shadow:0 -4px 16px rgba(0,0,0,.25);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (min-width:560px){.gs-back{align-items:center}.gs-panel{border-radius:10px;border:1px solid var(--line);box-shadow:0 10px 30px rgba(0,30,70,.35)}}
+.gs-head{flex:none;display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);background:linear-gradient(var(--panel-soft),var(--panel-head));border-radius:inherit}
+.gs-title{flex:1;margin:0;font-size:15px;font-weight:700;color:var(--title-fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gs-x{flex:none;border:0;background:none;font-size:16px;line-height:1;padding:6px;cursor:pointer;color:var(--muted)}
+.gs-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:12px 14px;display:flex;flex-direction:column;gap:10px;user-select:text;-webkit-user-select:text}
+.gs-foot{flex:none;display:flex;gap:8px;justify-content:flex-end;padding:10px 14px;border-top:1px solid var(--line);background:var(--panel-soft)}
+.gs-field{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+.gs-input{width:100%;border:1px solid #7a9ec4;border-radius:4px;padding:7px 9px;font-size:14px;background:#fff;color:var(--fg)}
+.gs-input:focus{outline:2px solid var(--accent);outline-offset:0}
+.gs-num{width:90px}
+.gs-link{font-size:13px}
+.gs-fs{border:1px solid var(--line);border-radius:6px;padding:6px 10px;margin:0;display:flex;flex-direction:column;gap:2px}
+.gs-fs legend{font-size:12px;color:var(--muted);padding:0 4px}
+.gs-pick{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14px}
+.gs-pick-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gs-sub{color:var(--muted);font-size:11px}.gs-sub.off{color:var(--offline)}
+.gs-lead{margin:0;font-size:14px;line-height:1.55}
+.gs-note{margin:0;font-size:12px;line-height:1.5;color:var(--muted)}
+.gs-err{margin:0;font-size:13px;color:var(--close);font-weight:600}
+.gs-warn{margin:0;font-size:13px;color:#8a5a00;background:var(--warn-bg);border:1px solid var(--warn-line);border-radius:6px;padding:6px 8px}
+.gs-h{margin:4px 0 0;font-size:12px;color:var(--muted);font-weight:700}
+.gs-code{font-family:Consolas,monospace;font-size:12px;word-break:break-all;background:var(--panel-soft);padding:1px 4px;border-radius:3px}
+.gs-seedlist{margin:0;padding:6px 8px;list-style:none;max-height:190px;overflow-y:auto;border:1px solid var(--line);border-radius:6px;background:var(--panel-soft);display:flex;flex-direction:column;gap:5px}
+.gs-seedlist li{display:flex;flex-direction:column;font-size:12px;line-height:1.4}
+.gs-seedlist b{color:var(--title-fg);font-size:11px}
+.gs-members{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+.gs-members li{display:flex;align-items:center;gap:8px;font-size:14px;min-height:30px}
+.gs-members .gs-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gs-empty{color:var(--muted);font-size:13px}
+.gs-badge{flex:none;font-size:10px;padding:1px 6px;border-radius:9px;background:var(--panel-head);color:var(--title-fg)}
+.gs-allow{flex:none;display:flex;align-items:center;gap:4px;font-size:12px;color:var(--muted)}
+.gs-av,.spk-av{flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;font-size:12px;font-weight:700;color:#fff;vertical-align:middle}
+.gs-av.human,.spk-av.is-human{border-radius:50%;background:#3b82c4}
+.gs-av.ai,.spk-av.is-ai{border-radius:7px;background:#7b6bc9}
+.spk-av{width:18px;height:18px;font-size:11px;margin-right:5px}
+.who-badge{display:inline-block;margin-left:5px;padding:0 6px;font-size:10px;line-height:15px;border-radius:8px;vertical-align:1px;color:#fff;font-weight:600}
+.who-badge.is-human{background:#3b82c4}.who-badge.is-ai{background:#7b6bc9}
+.gs-btn{border:1px solid #7a9ec4;border-radius:5px;padding:7px 14px;background:linear-gradient(#fdfeff 0 45%,#dfeaf6 50%,#eaf2fb);cursor:pointer;color:var(--title-fg);font-size:14px;flex:none}
+.gs-btn:disabled{opacity:.55;cursor:default}
+.gs-btn.primary{border-color:#1f6fc0;background:linear-gradient(#5aa9ee,#1f7ad6);color:#fff;font-weight:600}
+.gs-btn.danger{border-color:#c8352b;color:var(--close)}
+.gs-btn.small{padding:3px 9px;font-size:12px}
+/* 待主持人確認卡片 */
+.gc-list{flex:none;display:flex;flex-direction:column;gap:8px;padding:8px 10px;border-bottom:1px solid var(--warn-line);background:#fffbe6;max-height:42%;overflow-y:auto}
+.gc-card{border:1px solid var(--warn-line);border-left:4px solid #e0a000;border-radius:6px;background:#fff;padding:8px 10px;display:flex;flex-direction:column;gap:5px;user-select:text;-webkit-user-select:text}
+.gc-card.is-approved{border-left-color:#3cb521}.gc-card.is-denied,.gc-card.is-expired{border-left-color:#9aa5b1;opacity:.8}
+.gc-top{display:flex;align-items:center;gap:8px;font-size:12px}
+.gc-kind{color:#8a5a00}.gc-st{margin-left:auto;color:var(--muted)}
+.gc-sum{margin:0;font-size:14px;line-height:1.5;word-break:break-word}
+.gc-who{font-size:12px;color:var(--muted)}
+.gc-act{display:flex;gap:8px;justify-content:flex-end}
+.gc-wait{font-size:12px;color:var(--muted)}
+/* 電腦版對話上方的「⋯」 */
+.to-menu{position:relative;margin-left:auto;display:inline-block}
+.to-menu-btn{border:1px solid transparent;background:none;border-radius:3px;padding:0 8px;font-size:16px;line-height:20px;cursor:pointer;color:var(--title-fg)}
+.to-menu-btn:hover{border-color:#8fb6de;background:#e6f1fc}
+.to-menu-pop{position:absolute;right:0;top:100%;z-index:6;display:flex;flex-direction:column;min-width:130px;padding:3px;background:var(--panel);border:1px solid #7a9ec4;border-radius:4px;box-shadow:0 6px 18px rgba(0,30,70,.25)}
+.to-menu-pop button{border:0;background:none;text-align:left;padding:6px 10px;cursor:pointer;border-radius:3px;white-space:nowrap}
+.to-menu-pop button:hover{background:#e6f1fc}
+/* 群組分頁（電腦）與名單上的入口 */
+.gl-actions{display:flex;gap:6px;padding:6px 8px;border-bottom:1px solid var(--line)}
+.gl-actions .gs-btn{padding:4px 10px;font-size:12px}
+.gl-empty-hint{padding:8px 12px;font-size:12px;color:var(--muted);line-height:1.5}
+.room-btn{display:flex;gap:7px;width:100%;border:0;background:none;text-align:left;padding:5px 8px 5px 12px;cursor:pointer}
+.room-btn:hover{background:#e6f1fc}
+@media (prefers-color-scheme:dark){
+  .gc-list{background:#3a3418}.gc-card{background:#232a33}.gs-input{background:#1c232b}
+}

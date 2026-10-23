@@ -9,6 +9,8 @@ import { attachmentFromFile, imageFromBlob } from './photo-canvas.mjs'
 import { Annotator } from './annotator.mjs'
 import { ActionBar } from './actionbar.mjs'
 import { CallView } from './call-view.mjs'
+import { ConfirmCards } from './group-sheet.mjs'
+import { canInviteFrom, roomAttachAllowed } from './groups.mjs'
 import { canCallPartner } from './mobile-call.mjs'
 import { CALL_END_NOTE, splitCallEnd } from './call-end.mjs'
 import { DICT_PHASE_TEXT, DICT_TIP, appendDictation } from './mobile-dictation.mjs'
@@ -25,7 +27,7 @@ const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯
 
 export const ChatPane = {
   name: 'ChatPane',
-  components: { Annotator, ActionBar, CallView },
+  components: { Annotator, ActionBar, CallView, ConfirmCards },
   props: {
     friend: { type: Object, default: null },
     me: { type: Object, default: () => ({ nick: '我', status: 'online' }) },
@@ -49,11 +51,18 @@ export const ChatPane = {
     loadOlder: { type: Function, default: null },  // 往上捲到頂載入更舊的信：(好友 id) => Promise<{ more, added, busy?, error? }>；沒給就不載入
     hintNames: { type: Array, default: () => [] },  // 名單上的夥伴（給語音辨識偏向名字用，選填）；通話對象自己一定會帶
     enterSends: { type: Boolean, default: true },  // Enter 直接送出（電腦預設）；手機的軟鍵盤 Enter 是換行，傳送靠按鈕
+    roomCards: { type: Array, default: () => [] },  // 群組：待主持人確認的請求卡片（lib/groups.mjs 的 confirmCards）；非群組不用
+    groupMenu: { type: Boolean, default: false },   // 電腦版：對話上方的「⋯」（邀請別人加入、成員與設定）；手機版有自己的「⋯」，不開這個
   },
-  emits: ['send', 'nudge', 'toggle-dp', 'attach', 'call-state'],
+  emits: ['send', 'nudge', 'toggle-dp', 'attach', 'call-state', 'group-decide', 'group-menu'],
   setup(props, { emit }) {
     const draft = ref(''), pickerOpen = ref(false), nudgeCooling = ref(false)
     const msgsEl = ref(null), composeEl = ref(null)
+    const isRoom = computed(() => props.friend?.room === true)
+    const attachOk = computed(() => roomAttachAllowed(props.friend))   // 群組有外部成員（別的帳號）時沒有附件鈕
+    const menuOpen = ref(false)
+    const canInvite = computed(() => isRoom.value || canInviteFrom(props.friend))
+    const pickMenu = op => { menuOpen.value = false; emit('group-menu', op) }
     const isAsn = computed(() => isAsnWindow(props.friend))
     const showWaiting = computed(() => showsWaiting(props.friend))
     const sideCol = computed(() => hasSideCol(props.dpMode))
@@ -257,18 +266,26 @@ export const ChatPane = {
     const docEl = ref(null)
     // 訊息內文裡的連結：不在 WebView 導覽，一律交給系統瀏覽器（Rust 端 open_link 再驗一次協定）
     const onBodyClick = ev => handleLinkClick(ev, url => globalThis.__TAURI__?.core?.invoke?.('open_link', { url }))
-    return { isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { isRoom, attachOk, menuOpen, canInvite, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
-  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :active="active" :callable="!!call && !callApi" @call="startCall"></action-bar>
+  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :active="active" :callable="!!call && !callApi" v-if="!isRoom" @call="startCall"></action-bar>
   <div class="chatpane-body">
   <div class="chatpane-main">
   <div class="conv">
     <div class="conv-main">
       <div class="to-line"><span v-html="emo(friend.nick)"></span>
         <span class="to-psm" v-if="friend.psm" v-html="emo(friend.psm)"></span>
+        <span class="to-menu" v-if="groupMenu && canInvite">
+          <button class="to-menu-btn" type="button" @click="menuOpen = !menuOpen" :aria-expanded="menuOpen" aria-label="更多：邀請與成員" title="更多">⋯</button>
+          <span class="to-menu-pop" v-if="menuOpen" role="menu">
+            <button type="button" role="menuitem" @click="pickMenu('invite')">邀請別人加入</button>
+            <button type="button" role="menuitem" v-if="isRoom" @click="pickMenu('manage')">成員與設定</button>
+          </span>
+        </span>
       </div>
+      <confirm-cards v-if="isRoom" :cards="roomCards" @decide="(id, ok) => $emit('group-decide', id, ok)"></confirm-cards>
       <div class="warn" v-if="warn">
         <i>i</i>
         <span v-if="warn === 'offline'">{{ plain(friend.nick) }} 目前離線，訊息會先留在收發室，對方上線後才收得到。</span>
@@ -279,9 +296,9 @@ export const ChatPane = {
         <template v-for="(m, i) in log" :key="i">
           <div v-if="m.k === 'sys'" class="sys" :class="{ nudge: m.nudge }">{{ m.text }}</div>
           <div v-else class="msg" :class="['al-' + lay(m.k).align, { mine: m.k === 'me' }]">
-            <div class="m-av" v-if="lay(m.k).avatar"><div class="dp xs" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span><img :src="friendAv" alt=""></span></div></div>
+            <div class="m-av" v-if="lay(m.k).avatar && !m.badge"><div class="dp xs" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span><img :src="friendAv" alt=""></span></div></div>
             <div class="m-main">
-              <div class="who">{{ m.k === 'me' ? plain(me.nick) : plain(m.who || friend.nick) }}：<time>{{ fmt(m.t) }}</time><span class="from-dev" v-if="m.k === 'me' && m.from">從 {{ plain(m.from) }}</span><span class="voice-tag" v-if="m.k === 'me' && isVoiceMsg(m)" title="這則是通話中說的，辨識成文字後寄出">🎤 語音</span><span v-if="m.k === 'me' && msgTier(m) && msgTier(m) !== 'sent'" class="msg-st" :class="'st-' + msgTier(m)" :title="msgStatusTip(m)" :aria-label="msgStatusTip(m)">{{ msgTier(m) === 'delivered' ? '✓' : '✓✓' }}</span>
+              <div class="who"><span class="spk-av" :class="'is-' + m.kind" v-if="m.badge" aria-hidden="true">{{ initial(plain(m.who || friend.nick)) }}</span>{{ m.k === 'me' ? plain(me.nick) : plain(m.who || friend.nick) }}<span class="who-badge" :class="'is-' + m.kind" v-if="m.badge">{{ m.badge }}</span>：<time>{{ fmt(m.t) }}</time><span class="from-dev" v-if="m.k === 'me' && m.from">從 {{ plain(m.from) }}</span><span class="voice-tag" v-if="m.k === 'me' && isVoiceMsg(m)" title="這則是通話中說的，辨識成文字後寄出">🎤 語音</span><span v-if="m.k === 'me' && msgTier(m) && msgTier(m) !== 'sent'" class="msg-st" :class="'st-' + msgTier(m)" :title="msgStatusTip(m)" :aria-label="msgStatusTip(m)">{{ msgTier(m) === 'delivered' ? '✓' : '✓✓' }}</span>
                 <button v-if="voice && m.k === 'them' && m.text" class="spk" :class="{ on: speaking(m, i) }" type="button" @click="speak(m, i)" :aria-label="speakTip(m, i)" :title="speakTip(m, i)">
                   <svg v-if="!speaking(m, i)" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 9.5v5h3.6L12 18.5v-13L7.6 9.5z" fill="currentColor"/><path d="M15 9.2a4 4 0 0 1 0 5.6M17.4 6.8a7.4 7.4 0 0 1 0 10.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
                   <svg v-else viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/></svg>
@@ -323,20 +340,20 @@ export const ChatPane = {
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="9" y="3.5" width="6" height="11" rx="3" fill="currentColor"/><path d="M5.8 11.5a6.2 6.2 0 0 0 12.4 0M12 17.7v3M8.6 20.7h6.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
           <span class="dict-state" v-if="dictLabel">{{ dictLabel }}</span>
         </button>
-        <button class="tool icon" type="button" @click="nudge" :disabled="nudgeCooling" aria-label="傳送震動" title="傳送震動">
+        <button class="tool icon" type="button" v-if="!isRoom" @click="nudge" :disabled="nudgeCooling" aria-label="傳送震動" title="傳送震動">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="8.2" y="4.5" width="7.6" height="15" rx="1.8" fill="#dfeaf6" stroke="#4a5d73" stroke-width="1.4"/><circle cx="12" cy="16.6" r="1" fill="#4a5d73"/><path d="M4.6 8.5l-2 3.5 2 3.5M19.4 8.5l2 3.5-2 3.5" fill="none" stroke="#d9302b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
-        <button class="tool icon" type="button" @click="fileEl && fileEl.click()" :disabled="photoBusy" aria-label="傳照片" title="傳照片（也可以直接貼上圖片）">
+        <button class="tool icon" type="button" v-if="attachOk" @click="fileEl && fileEl.click()" :disabled="photoBusy" aria-label="傳照片" title="傳照片（也可以直接貼上圖片）">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" fill="#e8f3ff" stroke="#4a5d73" stroke-width="1.4"/><circle cx="8.5" cy="10" r="1.7" fill="#f2b632"/><path d="M4.5 17l4.6-4.4 3.2 3 2.6-2.4 4.6 3.8" fill="none" stroke="#2f7d3c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <input ref="fileEl" type="file" accept="image/*" hidden @change="pickPhoto" aria-hidden="true" tabindex="-1">
-        <button class="tool icon" type="button" @click="docEl && docEl.click()" :disabled="photoBusy" aria-label="傳送檔案" title="傳送檔案（pdf、txt、md、json、csv、zip、docx、xlsx、pptx，單檔 25 MB 內）">
+        <button class="tool icon" type="button" v-if="attachOk" @click="docEl && docEl.click()" :disabled="photoBusy" aria-label="傳送檔案" title="傳送檔案（pdf、txt、md、json、csv、zip、docx、xlsx、pptx，單檔 25 MB 內）">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 2.5h8.5L19 7v14.5H6z" fill="#fff" stroke="#4a5d73" stroke-width="1.4" stroke-linejoin="round"/><path d="M14.5 2.5V7H19" fill="none" stroke="#4a5d73" stroke-width="1.4" stroke-linejoin="round"/><path d="M9 12h7M9 15.5h7" stroke="#2f7d3c" stroke-width="1.5" stroke-linecap="round"/></svg>
         </button>
         <input ref="docEl" type="file" :accept="FILE_ACCEPT + ',image/*'" hidden @change="pickPhoto" aria-hidden="true" tabindex="-1">
-        <button class="tool icon" type="button" v-if="shotApi && shotOk" @click="startShot" :disabled="photoBusy || !!annot" aria-label="截圖" title="截圖（框選螢幕任一區域，可畫筆標註後傳送）">
+        <template v-if="attachOk"><button class="tool icon" type="button" v-if="shotApi && shotOk" @click="startShot" :disabled="photoBusy || !!annot" aria-label="截圖" title="截圖（框選螢幕任一區域，可畫筆標註後傳送）">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M7 3v14h14M3 7h14v14" fill="none" stroke="#4a5d73" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 14l4-4" stroke="#d9302b" stroke-width="1.8" stroke-linecap="round"/></svg>
-        </button>
+        </button></template>
         <button class="tool icon mic" :class="{ rec: voice && voice.state.mic.phase === 'recording', busy: voice && (voice.state.mic.phase === 'recognizing' || voice.state.mic.phase === 'starting') }" type="button" v-if="voice" @click="micClick" :aria-label="micTip" :aria-pressed="voice.state.mic.phase === 'recording'" :title="micTip">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="9" y="3.5" width="6" height="11" rx="3" fill="currentColor"/><path d="M5.8 11.5a6.2 6.2 0 0 0 12.4 0M12 17.7v3M8.6 20.7h6.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
         </button>

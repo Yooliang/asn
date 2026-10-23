@@ -20,6 +20,7 @@ mod envc;
 mod heartbeat;
 mod home;
 mod identity;
+mod invite_link;
 mod lastlogin;
 mod names;
 mod nowin;
@@ -221,11 +222,60 @@ async fn relay_inbox(app: State<'_, App>) -> Result<Value, String> {
 async fn relay_ack(app: State<'_, App>, ids: Vec<String>) -> Result<Value, String> {
     relay_of(&app)?.ack(&ids).await
 }
-/// 群組列表：只讀（GET room_list），後端只回節點自己所在的群組
+/// 群組列表（GET room_list）：有登入就帶本人簽章，後台才會把本人在跨租戶群組的成員身分一起列出
 #[cfg(feature = "gui")]
 #[tauri::command]
-async fn relay_rooms(app: State<'_, App>) -> Result<Value, String> {
-    relay_of(&app)?.api("room_list", None).await
+async fn relay_rooms(app: State<'_, App>, auth: State<'_, auth::AuthState>) -> Result<Value, String> {
+    let token = account::signing_token(&auth).await;
+    relay_of(&app)?.rooms_as(token.as_deref()).await
+}
+/// 真人的群組動作（建群組、邀請、接受邀請、退出、帶自己的 AI、主持人確認…）：一定要本人簽章，沒登入回錯、不打後台
+#[cfg(feature = "gui")]
+#[tauri::command]
+async fn relay_group(app: State<'_, App>, auth: State<'_, auth::AuthState>, action: String, body: Value) -> Result<Value, String> {
+    let token = account::signing_token(&auth).await;
+    relay_of(&app)?.group_signed(&action, &body, token.as_deref()).await
+}
+/// 讀群組訊息（電腦版對話用）：有登入就帶本人簽章；一定帶 since；mark＝讀完標已讀
+#[cfg(feature = "gui")]
+#[tauri::command]
+async fn relay_room_read(app: State<'_, App>, auth: State<'_, auth::AuthState>, room: String, agent: Option<String>, since: u64, limit: Option<u64>, mark: bool) -> Result<Value, String> {
+    let token = account::signing_token(&auth).await;
+    relay_of(&app)?.room_read_as(&room, agent.as_deref(), since, limit, mark, token.as_deref()).await
+}
+/// 在群組發言（電腦版對話用）：要本人簽章，沒登入回錯、不打後台
+#[cfg(feature = "gui")]
+#[tauri::command]
+async fn relay_room_post(app: State<'_, App>, auth: State<'_, auth::AuthState>, body: Value) -> Result<Value, String> {
+    let token = account::signing_token(&auth).await;
+    relay_of(&app)?.room_post_signed(&body, token.as_deref()).await
+}
+
+/// 還沒交給畫面的邀請碼（第一次點連結時畫面可能還沒載入）。畫面啟動時取走；之後的連結走 asn:invite 事件
+#[cfg(feature = "gui")]
+#[derive(Default)]
+struct InviteInbox(std::sync::Mutex<Option<String>>);
+#[cfg(feature = "gui")]
+#[tauri::command]
+fn invite_pending(inbox: State<'_, InviteInbox>) -> Option<String> {
+    inbox.0.lock().ok().and_then(|mut g| g.take())
+}
+/// 收到邀請連結：記下來並通知畫面（畫面沒載入也不會漏）。把名單視窗叫到前面
+#[cfg(feature = "gui")]
+fn deliver_invite(app: &tauri::AppHandle, code: String) {
+    use tauri::{Emitter, Manager};
+    if let Some(inbox) = app.try_state::<InviteInbox>() {
+        if let Ok(mut g) = inbox.0.lock() {
+            *g = Some(code.clone());
+        }
+    }
+    let _ = app.emit("asn:invite", code);
+    #[cfg(desktop)]
+    if let Some(w) = app.get_webview_window("list") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
 }
 
 #[cfg(feature = "gui")]
@@ -914,9 +964,14 @@ pub fn run() {
         Arc::new(r)
     });
 
-    // 同一個視窗名只留一個 ASN（另一個還活著就退出，同 recv.mjs 的 exit 3）
+    // 同一個視窗名只留一個 ASN（另一個還活著就退出，同 recv.mjs 的 exit 3）。
+    // 這個新開的是被邀請連結叫起來的（asn://invite/<碼>）：先把碼放進信箱檔，正在跑的那個 ASN 會取走並跳出「加入群組」
     if let Some(r) = &relay_obj {
         if let Some(h) = heartbeat::other_instance(&work_dir, &r.window_name(), std::process::id()) {
+            let args: Vec<String> = std::env::args().skip(1).collect();
+            if let Some(code) = invite_link::invite_code_from_args(&args) {
+                let _ = invite_link::drop_in_inbox(&work_dir, &code);
+            }
             eprintln!("視窗「{}」已經有一個 ASN 在跑（pid {}）", r.window_name(), h.pid);
             std::process::exit(3);
         }
@@ -949,7 +1004,7 @@ pub fn run() {
     #[cfg(not(desktop))]
     drop(bridge_data_dir);
 
-    let builder = tauri::Builder::default().manage(state).manage(auth_state).plugin(tauri_plugin_dialog::init());
+    let builder = tauri::Builder::default().manage(state).manage(auth_state).manage(InviteInbox::default()).plugin(tauri_plugin_dialog::init()).plugin(tauri_plugin_deep_link::init());
     // 電腦版專屬的狀態與外掛（多視窗、系統匣、截圖、自動更新、內建橋、密碼小幫手）
     #[cfg(desktop)]
     let builder = builder
@@ -970,7 +1025,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_mod::claude_mod_status,
             codex_accounts::codex_account_current, usage::usage_summary,
@@ -985,7 +1040,7 @@ pub fn run() {
     // 手機只開放單欄名單與對話需要的指令；電腦端的指令（開視窗、橋、用量……）手機上根本不存在
     #[cfg(not(desktop))]
     let builder = builder.invoke_handler(tauri::generate_handler![
-        startup_info, relay_list, relay_inbox, relay_ack, relay_rooms, relay_send, relay_chat_history, relay_read_sync, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_avatar, relay_set_avatar,
+        startup_info, relay_list, relay_inbox, relay_ack, relay_rooms, relay_group, invite_pending, relay_send, relay_chat_history, relay_read_sync, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_avatar, relay_set_avatar,
         set_presence, set_window_name, store_load, store_save, quit_app, capture_ui_ready, shot_frontend_log, open_link,
         account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_bind,
         android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, android::android_secret_pending, android::android_secret_reply, android::android_room_read, android::android_room_post, relay_partner_list, relay_partner_succeed,
@@ -993,6 +1048,40 @@ pub fn run() {
     let builder = builder
         .setup(move |app| {
             let handle = app.handle().clone();
+            // 邀請連結一鍵開啟：asn://invite/<碼>（電腦）、https://asnmessenger.web.app/i/<碼>（安卓 App Links）。
+            // 三個來源：這次啟動的連結（冷啟動）、執行中收到的連結（外掛事件）、第二個 ASN 轉交的信箱檔。碼一律先過格式檢查才交給畫面
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let dl = handle.deep_link();
+                let mut first: Vec<String> = dl.get_current().ok().flatten().map(|v| v.iter().map(|u| u.to_string()).collect()).unwrap_or_default();
+                first.extend(std::env::args().skip(1));
+                if let Some(code) = invite_link::invite_code_from_args(&first) {
+                    deliver_invite(&handle, code);
+                }
+                let h = handle.clone();
+                dl.on_open_url(move |ev| {
+                    let urls: Vec<String> = ev.urls().iter().map(|u| u.to_string()).collect();
+                    if let Some(code) = invite_link::invite_code_from_args(&urls) {
+                        deliver_invite(&h, code);
+                    }
+                });
+                // 沒經過安裝程式（開發、綠色版）也讓 asn:// 指到這個程式；失敗不影響其他功能
+                #[cfg(any(windows, target_os = "linux"))]
+                let _ = dl.register("asn");
+            }
+            #[cfg(desktop)]
+            if handle.state::<App>().shot.is_none() {
+                let h = handle.clone();
+                let dir = handle.state::<App>().work_dir.clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                        if let Some(code) = invite_link::take_from_inbox(&dir) {
+                            deliver_invite(&h, code);
+                        }
+                    }
+                });
+            }
             #[cfg(desktop)]
             {
             // 視窗外框設定存在前端的 asn-me.json；沒有或壞掉就是自訂外框

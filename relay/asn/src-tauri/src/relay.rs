@@ -677,7 +677,27 @@ impl Relay {
     pub async fn room_read(&self, room: &str, agent: Option<&str>, since: u64, limit: Option<u64>, mark: bool) -> Result<Value, String> {
         self.api(&build_room_read_action(room, agent, since, limit, mark)?, None).await
     }
-    /// 群組發言（手機用）：一定要本人簽章（後台才會標成本人發言）。沒憑證在打後台之前就回錯
+    /// 讀群組訊息（電腦與手機）：有登入憑證就帶上（本人在跨租戶群組用 ~u:<帳號> 的身分才讀得到）；沒憑證＝照舊用節點金鑰
+    pub async fn room_read_as(&self, room: &str, agent: Option<&str>, since: u64, limit: Option<u64>, mark: bool, token: Option<&str>) -> Result<Value, String> {
+        let a = build_room_read_action(room, agent, since, limit, mark)?;
+        match token.filter(|t| !t.is_empty()) {
+            Some(t) => self.api_signed(&a, None, Some(t)).await,
+            None => self.api(&a, None).await,
+        }
+    }
+    /// 群組列表（電腦與手機）：有登入憑證就帶上，後台才會把「本人是成員」的跨租戶群組一起列出（含 external、is_host）
+    pub async fn rooms_as(&self, token: Option<&str>) -> Result<Value, String> {
+        match token.filter(|t| !t.is_empty()) {
+            Some(t) => self.api_signed("room_list", None, Some(t)).await,
+            None => self.api("room_list", None).await,
+        }
+    }
+    /// 真人的群組動作（建群組、邀請、接受邀請、退出、帶自己的 AI、主持人確認…）：一定要本人簽章；沒憑證在打後台之前就回錯。動作與內容先整理、格式擋在前面
+    pub async fn group_signed(&self, action: &str, raw: &Value, token: Option<&str>) -> Result<Value, String> {
+        let b = build_group_body(action, raw)?;
+        let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法使用群組")?;
+        self.api_signed(action, Some(b), Some(t)).await
+    }    /// 群組發言（手機用）：一定要本人簽章（後台才會標成本人發言）。沒憑證在打後台之前就回錯
     pub async fn room_post_signed(&self, body: &Value, token: Option<&str>) -> Result<Value, String> {
         let b = build_room_post_body(body)?;
         let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法在群組發言")?;
@@ -897,6 +917,132 @@ pub fn build_room_post_body(raw: &Value) -> Result<Value, String> {
     Ok(b)
 }
 
+/// 真人群組動作的名稱（與後台 _shared/groups.ts 的 GROUP_ACTIONS 同一組）
+pub const GROUP_ACTIONS: [&str; 12] = [
+    "group_create", "group_invite_create", "group_invite_revoke", "group_invite_preview", "group_invite_accept",
+    "group_upgrade", "group_leave", "group_ai_add", "group_ai_remove", "group_allow_others", "group_confirm_decide", "group_confirm_list",
+];
+/// 邀請碼：英數、底線、連字號，16～64 字
+pub fn valid_invite_code(s: &str) -> bool {
+    (16..=64).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+/// 視窗成員鍵「節點~視窗名」：恰好一個 ~、不以 ~ 開頭或結尾、不含控制字元、最多 120 字
+fn valid_window_key(k: &str) -> bool {
+    let n = k.chars().count();
+    (3..=120).contains(&n) && k.matches('~').count() == 1 && !k.starts_with('~') && !k.ends_with('~') && !k.chars().any(|c| c.is_control())
+}
+fn window_keys(v: Option<&Value>, min: usize, max: usize) -> Result<Vec<String>, String> {
+    let arr = match v {
+        None | Some(Value::Null) if min == 0 => return Ok(vec![]),
+        Some(Value::Array(a)) => a,
+        _ => return Err("夥伴清單格式不對".into()),
+    };
+    let mut out: Vec<String> = vec![];
+    for x in arr {
+        let k = x.as_str().filter(|k| valid_window_key(k)).ok_or("夥伴清單格式不對")?;
+        if !out.iter().any(|o| o == k) {
+            out.push(k.to_string());
+        }
+    }
+    if out.len() < min || out.len() > max {
+        return Err("夥伴清單的數量不對".into());
+    }
+    Ok(out)
+}
+fn group_room(o: &serde_json::Map<String, Value>) -> Result<&str, String> {
+    o.get("room").and_then(Value::as_str).filter(|r| valid_room_id(r)).ok_or_else(|| "群組代號格式不對".to_string())
+}
+fn group_node_agent(o: &serde_json::Map<String, Value>, b: &mut Value) -> Result<(), String> {
+    if let Some(n) = o.get("node").filter(|n| !n.is_null()) {
+        let n = n.as_str().filter(|n| valid_room_id(n)).ok_or("節點格式不對")?;
+        b["node"] = json!(n);
+    }
+    if let Some(a) = o.get("agent").filter(|a| !a.is_null()) {
+        let a = a.as_str().ok_or("視窗名格式不對")?;
+        if !a.is_empty() {
+            if !valid_room_agent(a) {
+                return Err("視窗名格式不對".into());
+            }
+            b["agent"] = json!(a);
+        }
+    }
+    Ok(())
+}
+fn group_seed(o: &serde_json::Map<String, Value>, b: &mut Value) -> Result<(), String> {
+    if let Some(s) = o.get("seed").filter(|s| !s.is_null()) {
+        let n = s.as_u64().filter(|n| *n <= 50).ok_or("複製的訊息數要在 0 到 50 之間")?;
+        b["seed"] = json!(n);
+    }
+    Ok(())
+}
+/// 前端交來的群組動作內容 → 送給後台的 body。只放行每個動作需要的欄位，格式先在這裡擋（金鑰與憑證都不在這裡）
+pub fn build_group_body(action: &str, raw: &Value) -> Result<Value, String> {
+    if !GROUP_ACTIONS.contains(&action) {
+        return Err("不認得的群組動作".into());
+    }
+    let o = raw.as_object().ok_or("群組動作的內容格式不對")?;
+    let uuid = |k: &str| o.get(k).and_then(Value::as_str).filter(|v| is_uuid_str(v)).map(String::from).ok_or_else(|| "編號格式不對".to_string());
+    let mut b = json!({});
+    match action {
+        "group_create" => {
+            let name = o.get("name").and_then(Value::as_str).map(str::trim).unwrap_or("");
+            if name.is_empty() || name.chars().count() > 60 {
+                return Err("群組名稱要 1 到 60 字".into());
+            }
+            b["name"] = json!(name);
+            b["ai"] = json!(window_keys(o.get("ai"), 0, 20)?);
+        }
+        "group_invite_create" => {
+            match o.get("kind").and_then(Value::as_str) {
+                Some("room") => {
+                    b["kind"] = json!("room");
+                    b["room"] = json!(group_room(o)?);
+                }
+                Some("conversation") => {
+                    b["kind"] = json!("conversation");
+                    group_node_agent(o, &mut b)?;
+                }
+                _ => return Err("邀請的種類不對".into()),
+            }
+            group_seed(o, &mut b)?;
+        }
+        "group_invite_revoke" => b["id"] = json!(uuid("id")?),
+        "group_invite_preview" | "group_invite_accept" => {
+            let c = o.get("code").and_then(Value::as_str).filter(|c| valid_invite_code(c)).ok_or("邀請碼格式不對")?;
+            b["code"] = json!(c);
+        }
+        "group_upgrade" => {
+            group_node_agent(o, &mut b)?;
+            group_seed(o, &mut b)?;
+            b["extra"] = json!(window_keys(o.get("extra"), 1, 10)?);
+            if let Some(n) = o.get("name").filter(|n| !n.is_null()) {
+                let n = n.as_str().map(str::trim).filter(|n| !n.is_empty() && n.chars().count() <= 60).ok_or("群組名稱要 1 到 60 字")?;
+                b["name"] = json!(n);
+            }
+        }
+        "group_leave" | "group_confirm_list" => b["room"] = json!(group_room(o)?),
+        "group_ai_add" => {
+            b["room"] = json!(group_room(o)?);
+            b["keys"] = json!(window_keys(o.get("keys"), 1, 10)?);
+        }
+        "group_ai_remove" | "group_allow_others" => {
+            b["room"] = json!(group_room(o)?);
+            let k = o.get("key").and_then(Value::as_str).filter(|k| valid_window_key(k)).ok_or("夥伴格式不對")?;
+            b["key"] = json!(k);
+            if action == "group_allow_others" {
+                b["allow"] = json!(o.get("allow").and_then(Value::as_bool).ok_or("缺少開關的值")?);
+            }
+        }
+        "group_confirm_decide" => {
+            b["room"] = json!(group_room(o)?);
+            b["id"] = json!(uuid("id")?);
+            b["approve"] = json!(o.get("approve").and_then(Value::as_bool).ok_or("缺少同意或拒絕")?);
+        }
+        _ => return Err("不認得的群組動作".into()),
+    }
+    Ok(b)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1054,6 +1200,52 @@ b", "at": 5 }] }), json!({ "marks": [{ "at": 5 }] })] {
         assert_eq!(s.len(), 2);
         assert!(s[0].to_lowercase().contains("x-asn-user: bearer usertoken-9") && s[0].contains("action=room_post"), "{}", s[0]);
         assert!(s[1].contains("action=room_read") && s[1].contains("since=3") && !s[1].to_lowercase().contains("x-asn-user"), "{}", s[1]);
+    }
+
+    #[test]
+    fn 群組動作_內容只留必要欄位_格式擋在前面() {
+        let u = "0b9c8f3a-1111-4222-8333-444455556666";
+        assert_eq!(build_group_body("group_create", &json!({ "name": " 財務群 ", "ai": ["T~財務", "T~財務", "T~報表"], "x": 1 })).unwrap(), json!({ "name": "財務群", "ai": ["T~財務", "T~報表"] }));
+        assert_eq!(build_group_body("group_create", &json!({ "name": "空群" })).unwrap(), json!({ "name": "空群", "ai": [] }));
+        assert_eq!(build_group_body("group_invite_create", &json!({ "kind": "conversation", "node": "T", "agent": "財務", "seed": 40, "z": 1 })).unwrap(), json!({ "kind": "conversation", "node": "T", "agent": "財務", "seed": 40 }));
+        assert_eq!(build_group_body("group_invite_create", &json!({ "kind": "room", "room": "g-1", "seed": 0, "node": "T" })).unwrap(), json!({ "kind": "room", "room": "g-1", "seed": 0 }));
+        assert_eq!(build_group_body("group_invite_preview", &json!({ "code": "abcdefgh12345678" })).unwrap(), json!({ "code": "abcdefgh12345678" }));
+        assert_eq!(build_group_body("group_confirm_decide", &json!({ "room": "g1", "id": u, "approve": false })).unwrap(), json!({ "room": "g1", "id": u, "approve": false }));
+        assert_eq!(build_group_body("group_allow_others", &json!({ "room": "g1", "key": "T~財務", "allow": true })).unwrap(), json!({ "room": "g1", "key": "T~財務", "allow": true }));
+        assert_eq!(build_group_body("group_leave", &json!({ "room": "g1", "p_user": "偷塞" })).unwrap(), json!({ "room": "g1" }));
+        for (a, bad) in [
+            ("group_create", json!({ "name": "  " })), ("group_create", json!({ "name": "字".repeat(61) })), ("group_create", json!({ "name": "a", "ai": ["沒有波浪"] })), ("group_create", json!({ "name": "a", "ai": ["~開頭"] })), ("group_create", json!({ "name": "a", "ai": "x" })),
+            ("group_invite_create", json!({ "kind": "friend" })), ("group_invite_create", json!({ "kind": "room" })), ("group_invite_create", json!({ "kind": "conversation", "seed": 51 })), ("group_invite_create", json!({ "kind": "conversation", "seed": -1 })), ("group_invite_create", json!({ "kind": "conversation", "agent": "a~b" })),
+            ("group_invite_revoke", json!({ "id": "不是編號" })), ("group_invite_accept", json!({ "code": "短" })), ("group_invite_accept", json!({ "code": "abcdefgh1234567/" })),
+            ("group_upgrade", json!({ "extra": [] })), ("group_ai_add", json!({ "room": "g1", "keys": [] })), ("group_ai_remove", json!({ "room": "g1" })), ("group_allow_others", json!({ "room": "g1", "key": "T~a" })),
+            ("group_confirm_decide", json!({ "room": "g1", "id": u })), ("group_confirm_decide", json!({ "room": "a&b", "id": u, "approve": true })), ("group_leave", json!({})), ("group_不存在", json!({})), ("group_leave", json!([1])),
+        ] {
+            assert!(build_group_body(a, &bad).is_err(), "{a} {bad}");
+        }
+    }
+
+    #[tokio::test]
+    async fn 群組動作_沒有本人簽章不送出_有簽章帶標頭_列表與讀取有憑證才帶() {
+        let (url, seen) = fake_server(200);
+        let r = Relay::new(url, "secret-key".into(), "P".into(), "P-ASN".into());
+        let req = json!({ "name": "財務群" });
+        assert!(r.group_signed("group_create", &req, None).await.unwrap_err().contains("尚未登入"));
+        assert!(r.group_signed("group_create", &req, Some("")).await.is_err(), "空憑證等於沒有");
+        assert!(r.group_signed("group_create", &json!({ "name": "" }), Some("t")).await.is_err(), "格式錯在打後台前擋下");
+        assert!(seen.lock().unwrap().is_empty(), "沒簽章或格式錯時完全沒有打後台");
+        r.group_signed("group_create", &req, Some("usertoken-9")).await.unwrap();
+        r.rooms_as(Some("usertoken-9")).await.unwrap();
+        r.rooms_as(None).await.unwrap();
+        r.room_read_as("r1", None, 3, Some(20), true, Some("usertoken-9")).await.unwrap();
+        r.room_read_as("r1", None, 3, Some(20), true, None).await.unwrap();
+        let s = seen.lock().unwrap();
+        assert_eq!(s.len(), 5);
+        let signed = |i: usize| s[i].to_lowercase().contains("x-asn-user: bearer usertoken-9");
+        assert!(signed(0) && s[0].contains("action=group_create"), "{}", s[0]);
+        assert!(signed(1) && s[1].contains("action=room_list"), "{}", s[1]);
+        assert!(!signed(2), "沒憑證就不帶");
+        assert!(signed(3) && s[3].contains("action=room_read"), "{}", s[3]);
+        assert!(!signed(4));
     }
 
     #[tokio::test]

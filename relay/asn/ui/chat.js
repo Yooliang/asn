@@ -28,6 +28,8 @@ const app = createApp({
     listen('asn:avatars', a => { avatars.value = a ?? {} })
     listen('asn:state', s => { snap.value = s })
     listen('asn:log', p => { if (p.id === id) log.value = p.log })
+    const cards = ref([])   // 群組：待主持人確認的卡片（名單視窗的樞紐讀好推來）
+    listen('asn:room', p => { if (p.id === id) cards.value = p.cards ?? [] })
     onMounted(() => {
       emit('asn:cmd', { op: 'hello', id })
       window.addEventListener('focus', () => emit('asn:cmd', { op: 'read', id }))
@@ -49,6 +51,9 @@ const app = createApp({
       emit('asn:cmd', { op: 'older', id: fid })
     })
     return {
+      cards,
+      groupMenu: op => emit('asn:cmd', { op: 'group-menu', id, what: op }),
+      groupDecide: (cardId, approve) => emit('asn:cmd', { op: 'group-decide', id, cardId, approve }),
       callState, f, roster, me, transport, selfNode, loadOlder, log, look, friendAv, meAv, voice, photoApi, shotApi, plain, ctl, RESIZE_DIRS, resizeFrom,
       send: (text, opts) => emit('asn:cmd', { op: 'send', id, text, voice: opts?.voice === true }),
       nudge: () => emit('asn:cmd', { op: 'nudge', id }),

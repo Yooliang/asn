@@ -66,7 +66,7 @@ test('接線：對話分頁是單一對話（不是列表）；「⋯」只在�
   assert.match(html, /<section class="m-pg m-chat" [^>]*aria-label="對話"/, '第二頁就是對話本身')
   assert.doesNotMatch(html, /m-threads|m-thread|threads|threadTimeText/, '對話列表拿掉')
   assert.match(html, /<chat-pane v-if="chatFriend"/); assert.match(html, /\{\{ chatEmptyText \}\}/)
-  assert.match(html, /<button class="m-icon-btn" type="button" aria-label="更多操作" v-if="opsItems\.length" @click="openOps">/, '只有選單有項目才顯示「⋯」')
+  assert.match(html, /<button class="m-icon-btn" type="button" aria-label="更多操作" v-if="opsItems\.length \|\| groupItems\.length" @click="openOps">/, '只有選單有項目（夥伴管理或邀請別人）才顯示「⋯」')
   assert.match(html, /<circle[\s\S]*?<circle[\s\S]*?<circle/, '「⋯」是三個點的 SVG（與其他圖示按鈕同一套）')
   // 選單是 position:fixed 的最外層元素，不放在 pager 裡（pager 有 transform 與 overflow:hidden，會裁掉）
   assert.ok(html.indexOf('class="m-ops"') > html.indexOf('<nav class="m-tabs"'), '選單在三個分頁之外')

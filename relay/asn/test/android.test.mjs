@@ -461,8 +461,10 @@ test('手機群組對話：讀走節點金鑰、發言走要本人簽章的專�
   assert.doesNotMatch(post, /\.api\(/, '發言不能繞過簽章直接打後台')
   const relay = read('src-tauri', 'src', 'relay.rs')
   assert.match(/pub async fn room_post_signed[\s\S]*?\n    \}/.exec(relay)[0], /ok_or\("尚未登入/, '沒憑證在打後台之前就回錯')
-  const js = read('ui', 'm.js')
-  assert.match(js, /invoke\('android_room_post'/); assert.match(js, /invoke\('android_room_read'/); assert.match(js, /invoke\('relay_rooms'/)
+  // 群組的讀寫經 lib/room-hub.mjs（電腦版共用）；手機在建立時指定自己的兩個指令名
+  const js = read('ui', 'm.js'), hub = read('ui', 'lib', 'room-hub.mjs')
+  assert.match(js, /readCmd: 'android_room_read'/); assert.match(js, /postCmd: 'android_room_post'/)
+  assert.match(hub, /invoke\(postCmd/); assert.match(hub, /invoke\(readCmd/); assert.match(hub, /invoke\('relay_rooms'/)
   assert.doesNotMatch(js, /invoke\('relay_send'[^\n]*room/i, '群組發言不經一般寄信')
   const html = read('ui', 'm.html'), css = read('ui', 'mobile.css')
   assert.match(html, /ROOM_GROUP_KEY/, '夥伴分頁有群組對話分組'); assert.match(html, /is-room/)

@@ -16,6 +16,11 @@ import { deviceAsn } from './lib/presence.mjs'
 import { POLL_MS as REMOTE_UPD_POLL_MS, mineFromStatus, remoteUpdateView } from './lib/remote-update.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
+import { GroupSheet } from './lib/group-sheet.mjs'
+import { createGroupFlow } from './lib/group-flow.mjs'
+import { copyText, createGroupApi } from './lib/groups.mjs'
+import { createRoomHub } from './lib/room-hub.mjs'
+import { isRoomChat, roomIdOf, roomPseudoFriend } from './lib/mobile-rooms.mjs'
 import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatarFile, selfAvatarSrc } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, switchMode, tabVisible, toggleCollapsed } from './lib/merge.mjs'
@@ -222,6 +227,14 @@ const core = new AsnCore({
   log: m => console.info('[ASN]', m),
 })
 
+// ---------- 群組（真人好友與群組）：群組在名單的「群組」分頁，點進去在對話分頁（整合）或對話視窗（分開）聊 ----------
+// 群組對話用「假夥伴」接上既有的對話窗：id 是 room:<群組代號>。發言、讀取、同意／拒絕都走 Rust 指令並帶本人簽章
+const groupApi = createGroupApi(invoke)
+const hub = createRoomHub({ invoke, groupApi, selfNode: info.node, windowName: info.window_name, reactive, visible: () => document.visibilityState === 'visible' })
+const roomRows = computed(() => hub.rows())
+const roomFriends = computed(() => roomRows.value.map(r => ({ ...roomPseudoFriend(r), unread: r.unread })))
+const openedRooms = new Set()   // 開過的群組對話（整合模式的分頁、分開模式的視窗）：這些要持續讀新訊息
+
 const friends = ref([])
 const nodeOrder = ref([])
 const asnBadge = node => deviceAsn(asnMap.value[node], info.version)
@@ -233,11 +246,17 @@ const sync = () => {
   nodeOrder.value = s.nodeOrder
   asnMap.value = s.asn ?? {}
   conn.value = s.conn
-  emit('asn:state', { ...s, me: { ...me }, ui: { dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, collapsed: ui.collapsed } })
+  emit('asn:state', { ...s, friends: [...s.friends, ...roomFriends.value], me: { ...me }, ui: { dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, collapsed: ui.collapsed } })
 }
 const logs = reactive({})   // 整合模式的分頁直接讀這份；分開模式的對話視窗走 asn:log 事件
-const pushLog = id => { const l = core.viewOf(id); logs[id] = l; emit('asn:log', { id, log: l }) }
-const loadOlder = id => core.loadOlder(id)   // 對話往上捲到頂：載入更舊的信（分開模式的對話視窗經事件請樞紐代跑）
+const pushLog = id => {
+  const room = isRoomChat(id)
+  const l = room ? (hub.st.logs[roomIdOf(id)] ?? []) : core.viewOf(id)
+  logs[id] = l; emit('asn:log', { id, log: l })
+  if (room) emit('asn:room', { id, cards: hub.st.cards[roomIdOf(id)] ?? [], note: hub.st.note })
+}
+const loadOlder = id => (isRoomChat(id) ? Promise.resolve({ more: false, added: 0 }) : core.loadOlder(id))
+const tabFriend = id => friends.value.find(f => f.id === id) ?? roomFriends.value.find(f => f.id === id)   // 對話往上捲到頂：載入更舊的信（分開模式的對話視窗經事件請樞紐代跑）
 
 // 設備大頭貼：節點 → data URL。好友顯示用哪張由 avatar.mjs 的規則決定（AI 視窗一律自動產生；名單外的寄件人用他那台設備的圖）
 const avatars = ref({})
@@ -253,9 +272,16 @@ const meAv = computed(() => selfAvatarSrc({ selfNode: info.node, windowName: inf
 
 core.on('state', sync)
 core.on('log', pushLog)
-const rooms = ref([]), roomsErr = ref(false)
+// 重抓群組列表，並更新開著的群組對話的新訊息與待主持人確認的卡片
 async function refreshRooms() {
-  try { rooms.value = groupRows((await invoke('relay_rooms'))?.rooms); roomsErr.value = false } catch { roomsErr.value = true }
+  await hub.refresh()
+  for (const id of openedRooms) {
+    const rid = roomIdOf(id)
+    if (!hub.raw(rid)) continue
+    await hub.read(rid); await hub.loadCards(rid)
+    pushLog(id)
+  }
+  sync()
 }
 
 // ---------- 開新夥伴 ----------
@@ -628,7 +654,55 @@ core.on('notify', n => {
   if (plan.toast) void invoke('show_toast', { toast: { cid: n.friend.id, title: plain(n.friend.nick), line: n.line, status: n.friend.status, hue: n.friend.hue, dp: n.friend.dp, av: (a => (a.kind === 'upload' ? a.src : null))(avatarFor(n.friend, { avatars: avatars.value })) } })
 })
 
+// 打開一個群組的對話（整合模式開分頁、分開模式開視窗），並讀它的新訊息與確認卡片
+async function openRoomChat(id) {
+  const rid = roomIdOf(id)
+  const f = roomFriends.value.find(x => x.id === id)
+  if (!f) return
+  openedRooms.add(id)
+  if (ui.mode === 'merged') {
+    Object.assign(ui, openChatTab(ui, id, ui.pinnedChat))
+    pushLog(id)
+    await invoke('show_main')
+    sync()
+  } else {
+    await invoke('open_chat', { id, title: `${plain(f.nick)} - 對話` })
+    sync(); pushLog(id)
+  }
+  await hub.open(rid)
+  pushLog(id); sync()
+}
+// 對話上方「⋯」：邀請別人加入、成員與設定（開在名單視窗；分開模式的對話視窗也是請名單視窗代開）
+async function openGroupMenu(chatId, what) {
+  await invoke('show_main').catch(() => {})
+  if (isRoomChat(chatId)) {
+    const rid = roomIdOf(chatId), r = hub.raw(rid)
+    if (what === 'manage') groupFlow.openManage(rid)
+    else groupFlow.openInvite({ type: 'room', roomId: rid, name: String(r?.name ?? '') })
+    return
+  }
+  const f = friends.value.find(x => x.id === chatId)
+  if (f) groupFlow.openInvite({ type: 'friend', friend: f })
+}
+async function decideCard(chatId, cardId, approve) {
+  await hub.decide(roomIdOf(chatId), cardId, approve)
+  pushLog(chatId)
+}
+const groupFlow = createGroupFlow({
+  api: groupApi, copy: copyText, reactive,
+  openRoom: rid => void openChat(`room:${rid}`),
+  refreshRooms: () => refreshRooms(),
+  getFriends: () => friends.value,
+  getRoom: rid => hub.raw(rid),
+  logOf: f => core.viewOf(f.id),
+})
+// 邀請連結一鍵開啟（asn://invite/<碼>）：Rust 端收到後通知；啟動前就收到的用 invite_pending 補取
+const onInviteCode = code => { if (typeof code === 'string' && code) { void invoke('show_main').catch(() => {}); groupFlow.openJoin(code) } }
+await listen('asn:invite', onInviteCode)
+void invoke('invite_pending').then(onInviteCode).catch(() => {})
+
 async function openChat(id) {
+  if (isRoomChat(id)) return openRoomChat(id)
   if (String(id).startsWith('pending:')) return
   const f = core.friends.get(id); if (!f) return
   core.markRead(id)
@@ -668,14 +742,24 @@ await listen('asn:cmd', async c => {
   if (c.op === 'hello') { sync(); emit('asn:avatars', avatars.value); pushLog(c.id); core.markRead(c.id) }
   else if (c.op === 'read') core.markRead(c.id)
   else if (c.op === 'dp') ui.collapsed = toggleCollapsed(ui.collapsed)
-  else if (c.op === 'send') { const r = await core.send(c.id, c.text, { voice: c.voice === true }); if (!r.ok) console.info('[ASN] send failed', r.error) }
-  else if (c.op === 'nudge') await core.nudge(c.id)
+  else if (c.op === 'send') {
+    if (isRoomChat(c.id)) { await hub.post(roomIdOf(c.id), c.text); pushLog(c.id) }
+    else { const r = await core.send(c.id, c.text, { voice: c.voice === true }); if (!r.ok) console.info('[ASN] send failed', r.error) }
+  }
+  else if (c.op === 'group-menu') await openGroupMenu(c.id, c.what)
+  else if (c.op === 'group-decide') await decideCard(c.id, c.cardId, c.approve === true)
+  else if (c.op === 'nudge') { if (!isRoomChat(c.id)) await core.nudge(c.id) }
   else if (c.op === 'attach') await sendAttachTo(c.id, c.photo, c.caption)
-  else if (c.op === 'older') { const r = await core.loadOlder(c.id); emit('asn:older', { id: c.id, ...r }) }
+  else if (c.op === 'older') { const r = isRoomChat(c.id) ? { more: false, added: 0 } : await core.loadOlder(c.id); emit('asn:older', { id: c.id, ...r }) }
 })
 const sendTo = async (id, text, opts) => { const r = await core.send(id, text, opts); if (!r.ok) console.info('[ASN] send failed', r.error) }
-const nudgeTo = id => core.nudge(id)
-const sendAttachTo = async (id, item, caption) => { const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
+// 對話窗的送出：群組走群組發言（本人簽章），其餘照舊寄信給夥伴
+const sendMsg = async (id, text, opts) => {
+  if (isRoomChat(id)) { await hub.post(roomIdOf(id), text); pushLog(id); return }
+  await sendTo(id, text, opts)
+}
+const nudgeTo = id => (isRoomChat(id) ? undefined : core.nudge(id))
+const sendAttachTo = async (id, item, caption) => { if (isRoomChat(id)) return; const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
 const activateTab = id => { ui.active = id; core.markRead(id); sync() }   // 指引、設定的分頁 id 不是好友，markRead 會直接略過
 const closeOneChatTab = id => { Object.assign(ui, closeChatTab(ui, id)); if (ui.active) core.markRead(ui.active); sync() }
 const applyChatTabClose = patch => { Object.assign(ui, patch); if (ui.active) core.markRead(ui.active); sync() }
@@ -712,7 +796,7 @@ window.addEventListener('resize', () => {
 })
 if (ui.mode === 'merged') await invoke('main_layout', { merged: true, w: sizes.merged.w, h: sizes.merged.h, recenter: true })
 
-await listen('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon() })   // Rust 端的 Realtime 門鈴：收信，也立刻重拉名單（別台設備的忙碌／閒置變了也是敲這個鈴）
+await listen('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon(); void refreshRooms() })   // Rust 端的 Realtime 門鈴：收信，也立刻重拉名單（別台設備的忙碌／閒置變了也是敲這個鈴）
 window.addEventListener('focus', () => core.refreshRosterSoon())   // 回到前景立刻更新名單
 await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 
@@ -851,7 +935,7 @@ const app = createApp({
     const pageDone = a => { pageLoaded[a.key] = true }
     const pageBroken = a => { pageFail[a.key] = true }
     // 分頁列：好友的對話分頁，加上「指引：…」「設定：…」兩種面板分頁（各最多一個）
-    const tabItems = computed(() => ui.tabs.map(id => (isPanelTab(id) ? panelTabItem(id.slice(1), ui.panel[id.slice(1)]) : friends.value.find(f => f.id === id))).filter(Boolean))
+    const tabItems = computed(() => ui.tabs.map(id => (isPanelTab(id) ? panelTabItem(id.slice(1), ui.panel[id.slice(1)]) : tabFriend(id))).filter(Boolean))
     const mergedTabs = computed(() => tabItems.value.filter(t => !t.panel))   // 只有好友的對話才有對話窗
     const chatTabMenu = ref('')
     const chatTabMenuPin = computed(() => (chatTabMenu.value ? isPinned(chatTabMenu.value, ui.pinnedChat) : false))
@@ -883,7 +967,7 @@ const app = createApp({
     const menuCloseOther = () => runTabMenu(id => applyChatTabClose(closeOtherChatTabs(ui, id, ui.pinnedChat)))
     const menuCloseRight = () => runTabMenu(id => applyChatTabClose(closeRightChatTabs(ui, id, ui.pinnedChat)))
     const menuCloseAll = () => { closeChatTabMenu(); applyChatTabClose(closeAllChatTabs(ui, ui.pinnedChat)) }
-    const tabFriendOf = id => withCallState(friends.value.find(f => f.id === id), mergedCalls[id] || callBeats.isCalling(id))   // 通話中的分頁算忙碌，關閉閒置不關
+    const tabFriendOf = id => withCallState(tabFriend(id), mergedCalls[id] || callBeats.isCalling(id))   // 通話中的分頁算忙碌，關閉閒置不關
     const hasIdleTabs = computed(() => callTick.value >= 0 && idleTabIds(ui.tabs, ui.pinnedChat, tabFriendOf).length > 0)
     const menuCloseIdle = () => { closeChatTabMenu(); applyChatTabClose(closeIdleChatTabs(ui, ui.pinnedChat, tabFriendOf)) }
     const menuTogglePin = () => runTabMenu(id => { const r = toggleChatPin(ui, id, ui.pinnedChat); ui.pinnedChat = r.pinned; ui.tabs = r.tabs })
@@ -1097,11 +1181,11 @@ const app = createApp({
       upd, autoCheck, checkUpdate, installUpdate, updateNoticeText, progressText,
       frame, FRAMES, FRAME_LABEL, setFrame, closeTo, CLOSE_CHOICES, CLOSE_LABEL, setCloseTo, trayOk, autostart, setAutostart, RESIZE_DIRS, resizeFrom, avMenu,
       contextLabel, avOf, meAv, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar,
-      ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo, nudgeTo, sendAttachTo, loadOlder, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
+      ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo: sendMsg, nudgeTo, sendAttachTo, loadOlder, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
       chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuCloseIdle, hasIdleTabs, setPaneCall, menuTogglePin, isChatTabPinned,
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
       STATUS, CONN_LABEL, FIXED_TABS, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr, commitNick,
-      tab, adI, rooms, roomsErr, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,
+      tab, adI, hub, roomRows, groupFlow, openGroupMenu, decideCard, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,
       GUIDES, view, SETTING_CATS, catSub, PANEL_KINDS, panelTabId, panelGuide, panelTitle, openPanel, closePanel, settingsState, applySetting, pickAvatarFile,
       selfNode: info.node, transport, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg,
       searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickLaunchDevice,
@@ -1116,6 +1200,7 @@ const app = createApp({
   },
 })
 app.component('chat-pane', ChatPane)
+app.component('group-sheet', GroupSheet)
 app.component('asn-dialog', AsnDialog)
 app.component('partner-op-dialog', PartnerOpDialog)
 app.component('guide-doc', GuideDoc)
