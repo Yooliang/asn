@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const tests = fs.readdirSync(path.join(root, 'test')).filter(f => f.endsWith('.test.mjs')).sort().map(f => path.join('test', f))
-const nodeArgs = ['--test', ...tests]
+// 強制結束＋單支逾時：測試失敗沒關假後台時不會一直掛著（曾掛十二小時）
+const nodeArgs = ['--test', '--test-force-exit', '--test-timeout=120000', ...tests]
 const useXvfb = process.platform === 'linux' && !process.env.DISPLAY
 const env = { ...process.env }
 if (process.platform === 'linux') {
