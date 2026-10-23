@@ -350,9 +350,12 @@ export class AsnCore {
   async nudge(id) {
     const f = this.friends.get(id)
     if (!f) return { ok: false, error: '找不到好友' }
-    try { await this.transport.send({ to_node: f.node, to_agent: f.agent || undefined, nudge: true, from_agent: this.windowName, expects_reply: false, ...this.#personFlag(f) }) }
+    let sent
+    try { sent = await this.transport.send({ to_node: f.node, to_agent: f.agent || undefined, nudge: true, from_agent: this.windowName, expects_reply: false, ...this.#personFlag(f) }) }
     catch (e) { return this.#fail(id, e) }
-    this.#log(id).push({ k: 'sys', nudge: true, mine: true, text: '你已傳送震動。', t: this.now() })
+    // 帶上寄出的信件 id（rid）：之後往來記錄回來同一則才認得是它，不會再多一行
+    const rid = typeof sent?.id === 'string' ? sent.id : null
+    this.#log(id).push({ k: 'sys', nudge: true, mine: true, text: '你已傳送震動。', t: this.now(), ...(rid ? { rid } : {}) })
     f.known = true
     this.#scheduleSave()
     this.emit('log', id)

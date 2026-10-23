@@ -66,3 +66,15 @@ test('震動（只有系統提示）：往來記錄與 pull 不論誰先到，�
     await core.stop(); await relay.close()
   }
 })
+
+test('自己按震動：本機先插的那列，之後往來記錄回來同一則（有信件 id）不再多出第二行「你已傳送震動」', async () => {
+  const { relay, core } = await setup()
+  await core.start()
+  assert.equal((await core.nudge(FID)).ok, true)
+  relay.historyRows = [row(901, 'me', nudgeBody(NAME), new Date().toISOString())]   // 假後台寄出的第一封 id＝U(901)
+  await core.syncHistory(FID, { force: true })
+  assert.equal(core.logOf(FID).filter(m => m.nudge && m.mine).length, 1)
+  await core.syncHistory(FID, { force: true })
+  assert.equal(core.logOf(FID).filter(m => m.nudge && m.mine).length, 1)
+  await core.stop(); await relay.close()
+})
