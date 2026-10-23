@@ -269,8 +269,8 @@ export class AsnCore {
     // 往來記錄（打開對話／回前景）可能已先把這封補進記錄、後台還沒 ack 又回給 pull：記錄已有就不再推一列（提示與未讀照舊，這是新到的信）
     const rid = m.fanout_id ?? m.id
     const dup = lg.some(x => x.id === rid || x.id === m.id || x.rid === rid)
-    // 沒指定收件視窗、由橋交給本人的信：先標出「寄件人 → 未指定收件人」，由使用者決定轉給誰或自己回
-    if (shown && !dup && m.unaddressed === true) lg.push({ k: 'sys', text: `${plain(f.nick)} → 未指定收件人`, t })
+    // 沒指定收件視窗、由橋交給本人的信：先標出「XX 寄來的信沒有指定收件人」，由使用者決定轉給誰或自己回；震動信一律只顯示「傳送了一個震動」，不加這行
+    if (shown && !nudge && !dup && m.unaddressed === true) lg.push({ k: 'sys', text: `${plain(f.nick)} 寄來的信沒有指定收件人`, t })
     if (shown) { if (!dup) lg.push({ k: 'them', text, t, id: rid, ...(photos.length ? { photos } : {}) }); f.lastAt = t; f.replyTo = m.id }
     if (m.reply_to) this.#markReplied(m.reply_to, typeof m.created_at === 'string' ? m.created_at : new Date(t).toISOString())
     // 視窗狀態查不到（沒回應、出錯）就當沒看見：照常記進對話、算未讀，不卡住收信

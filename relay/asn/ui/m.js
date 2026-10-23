@@ -26,7 +26,11 @@ import { groupHeading, statusNote } from './lib/tabs.mjs'
 import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
 import { authApi, invoke, listen, store } from './lib/tauri.mjs'
-import { ROOM_GROUP_KEY, ROOM_GROUP_LABEL, ROOM_POLL_MS, ROOM_FIRST_LOAD, ROOM_EMPTY_TEXT, ROOM_LOAD_FAIL_TEXT, isRoomChat, roomIdOf, roomItems, roomPseudoFriend, memberIdentity, roomLog, mergeRoomLog, readSince, needsRead, postError, roomErrorText, totalUnreadWithRooms } from './lib/mobile-rooms.mjs'
+import { ROOM_GROUP_KEY, ROOM_GROUP_LABEL, ROOM_POLL_MS, ROOM_EMPTY_HINT, ROOM_EMPTY_TEXT, ROOM_LOAD_FAIL_TEXT, isRoomChat, roomChatId, roomIdOf, roomPseudoFriend, totalUnreadWithRooms } from './lib/mobile-rooms.mjs'
+import { GroupSheet } from './lib/group-sheet.mjs'
+import { createGroupFlow } from './lib/group-flow.mjs'
+import { canInviteFrom, copyText, createGroupApi } from './lib/groups.mjs'
+import { createRoomHub } from './lib/room-hub.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, guideNav, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
 import { applyRename } from './lib/rename.mjs'
 import { GuideDoc } from './lib/guide-doc.mjs'
@@ -238,52 +242,64 @@ const app = createApp({
       const o = { query: query.value, selfNode: info.node, selfName: info.window_name, plainText: plain }
       return withArchivedGroup(rosterGroups(activeFriends(friends.value), o), rosterGroups(archivedFriends(friends.value), o).flatMap(g => g.items))
     })
-    // ---------- 群組對話：名單裡的一個分組；點進去在對話分頁看訊息、發言（lastChat 記成 room:<代號>） ----------
-    const rooms = ref([]), roomsLoaded = ref(false), roomsErr = ref(false)
-    const roomLogs = reactive({})   // 群組代號 → 對話記錄
-    const roomNote = ref('')        // 對話頁上方的一行提示（讀不到、發言失敗）
-    const roomRows = computed(() => roomItems(rooms.value, { query: query.value, plainText: plain }))
-    const roomRowOf = id => roomItems(rooms.value).find(r => r.id === id) ?? null
-    const rawRoom = id => rooms.value.find(r => r?.id === id) ?? null
+    // ---------- 群組對話：名單裡的一個分組（永遠顯示，沒有群組時有「建立群組」「加入群組」）；點進去在對話分頁看訊息、發言（lastChat 記成 room:<代號>） ----------
+    // 資料與動作都在 lib/room-hub.mjs（電腦版共用）；發言與讀取走 Rust 指令並帶本人簽章
+    const groupApi = createGroupApi(invoke)
+    const hub = createRoomHub({ invoke, groupApi, selfNode: info.node, windowName: info.window_name, readCmd: 'android_room_read', postCmd: 'android_room_post', reactive, visible: () => document.visibilityState === 'visible' })
+    const rooms = computed(() => hub.st.rooms)
+    const roomsLoaded = computed(() => hub.st.loaded), roomsErr = computed(() => hub.st.err)
+    const roomLogs = hub.st.logs   // 群組代號 → 對話記錄
+    const roomNote = computed({ get: () => hub.st.note, set: v => { hub.st.note = v } })   // 對話頁上方的一行提示（讀不到、發言失敗）
+    const roomRows = computed(() => hub.rows({ query: query.value, plainText: plain }))
+    const roomRowOf = id => hub.rowOf(id)
+    const roomEmptyText = computed(() => (query.value.trim() ? '找不到符合的群組。' : hub.st.err ? ROOM_LOAD_FAIL_TEXT : ROOM_EMPTY_HINT))
     async function refreshRooms() {
-      try { const r = await invoke('relay_rooms'); rooms.value = Array.isArray(r?.rooms) ? r.rooms : []; roomsErr.value = false; roomsLoaded.value = true }
-      catch { roomsErr.value = true }
+      await hub.refresh()
       if (isRoomChat(lastChat.value) && nav.tab === 'chats') await showRoom()
     }
     roomsHook.refresh = refreshRooms
-    // 讀這個群組新的訊息（接在已有的後面）；在看的時候順便標已讀
-    let roomReading = false
-    async function showRoom() {
-      const id = roomIdOf(lastChat.value), raw = rawRoom(id), row = roomRowOf(id)
-      if (!raw || !row || roomReading) return
-      const ident = memberIdentity(raw, info.node, info.window_name)
-      if (!ident.key) { roomNote.value = '這支手機不在這個群組裡。'; return }
-      const log = roomLogs[id] ?? []
-      const unread = row.unread > 0, first = !log.length
-      if (!first && !needsRead(log, row.lastSeq) && !unread) { roomNote.value = ''; return }
-      roomReading = true
-      try {
-        const since = unread && !first ? Math.max(0, readSince(log, row.lastSeq) - 1) : readSince(log, row.lastSeq)   // 後台只在讀到新訊息時才標已讀：未讀還在就多讀最後一則
-        const r = await invoke('android_room_read', { room: id, agent: ident.agent || null, since, limit: first ? ROOM_FIRST_LOAD : 200, mark: document.visibilityState === 'visible' })
-        const mine = (raw.mine ?? []).map(m => m.member)
-        roomLogs[id] = mergeRoomLog(log, roomLog(r?.messages, mine))
-        for (const m of raw.mine ?? []) if (m.member === ident.key) m.unread = 0
-        roomNote.value = ''
-      } catch (e) { roomNote.value = roomErrorText(e.message) || ROOM_LOAD_FAIL_TEXT } finally { roomReading = false }
+    // 讀這個群組新的訊息（接在已有的後面）與待主持人確認的卡片；在看的時候順便標已讀
+    async function showRoom() { const id = roomIdOf(lastChat.value); await hub.read(id); await hub.loadCards(id) }
+    const postRoom = (chatId, text) => hub.post(roomIdOf(chatId), text)
+    const chatCards = computed(() => (isRoomChat(lastChat.value) ? hub.st.cards[roomIdOf(lastChat.value)] : null) ?? [])
+    const decideCard = (chatId, cardId, approve) => hub.decide(roomIdOf(chatId), cardId, approve)
+    // 群組的對話框（建立、邀請、加入、成員與設定）：蓋在畫面上的一層，系統返回鍵＝關掉它
+    const groupFlow = createGroupFlow({
+      api: groupApi, copy: copyText, reactive,
+      openRoom: rid => openRoom(roomChatId(rid)),
+      refreshRooms: () => refreshRooms(),
+      getFriends: () => friends.value,
+      getRoom: rid => hub.raw(rid),
+      logOf: f => logs[f.id] ?? [],
+    })
+    watch(() => groupFlow.state.view, v => {
+      if (v && nav.sheet !== 'group') go({ tab: nav.tab, sheet: 'group' })
+      else if (!v && nav.sheet === 'group') history.back()
+    })
+    watch(() => nav.sheet, s => { if (s !== 'group' && groupFlow.state.view) groupFlow.close() })
+    // 對話標頭「⋯」多出的項目：一對一對話「邀請別人加入」；群組再加「成員與設定」
+    const groupItems = computed(() => {
+      const f = chatFriend.value
+      if (!f) return []
+      if (f.room) return [{ key: 'invite', label: '邀請別人加入' }, { key: 'manage', label: '成員與設定' }]
+      return canInviteFrom(f) ? [{ key: 'invite', label: '邀請別人加入' }] : []
+    })
+    function pickGroup(key) {
+      const f = chatFriend.value
+      if (!f) return
+      history.back()   // 先收起「⋯」選單，再開群組對話框
+      setTimeout(() => {
+        if (key === 'manage' && f.room) groupFlow.openManage(roomIdOf(f.id))
+        else if (f.room) groupFlow.openInvite({ type: 'room', roomId: roomIdOf(f.id), name: f.nick })
+        else groupFlow.openInvite({ type: 'friend', friend: f })
+      }, 80)
     }
-    async function postRoom(chatId, text) {
-      const id = roomIdOf(chatId), raw = rawRoom(id)
-      const ident = raw ? memberIdentity(raw, info.node, info.window_name) : { key: '', agent: '' }
-      const err = postError(text, { signedIn: acctSigned() !== false, identity: ident })   // 還沒查到登入狀態（null）時照送，沒登入由 Rust 端擋並回「尚未登入」
-      if (err) { roomNote.value = err; return }
-      try {
-        await invoke('android_room_post', { body: { room: id, body: text, ...(ident.agent ? { from_agent: ident.agent } : {}) } })
-        roomNote.value = ''
-        await refreshRooms()
-      } catch (e) { roomNote.value = roomErrorText(e.message) }
-    }
+    // 邀請連結（Android App Links：https://asnmessenger.web.app/i/<碼>）：外殼收到後由 Rust 通知；啟動前就收到的用 invite_pending 補取
+    const onInviteCode = code => { if (typeof code === 'string' && code && screen.value === 'main') groupFlow.openJoin(code) }
     if (screen.value === 'main') {
       setInterval(() => { if (document.visibilityState === 'visible') void refreshRooms() }, ROOM_POLL_MS)
+      void listen('asn:invite', onInviteCode)
+      void invoke('invite_pending').then(onInviteCode).catch(() => {})
       void refreshRooms()
     }
     const unreadTotal = computed(() => totalUnreadWithRooms(totalUnread(friends.value), rooms.value))
@@ -428,7 +444,7 @@ const app = createApp({
     const opsBanner = computed(() => runBanner(opsRun.value))
     let opsToken = 0
     function openOps() {
-      if (!opsItems.value.length || nav.sheet) return
+      if ((!opsItems.value.length && !groupItems.value.length) || nav.sheet) return
       Object.assign(ops, { phase: 'menu', newName: chatFriend.value?.agent ?? '', note: '', model: '', error: '', view: null })
       opsToken++
       go(opsNav())
@@ -653,13 +669,14 @@ const app = createApp({
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, ops, opsText, opsTitle, opsModels, opsModelNote, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
-      rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
+      rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }
   },
 })
 app.component('chat-pane', ChatPane)
+app.component('group-sheet', GroupSheet)
 app.component('onboard-card', OnboardCard)
 app.component('guide-doc', GuideDoc)
 app.component('ptr-zone', PtrZone)

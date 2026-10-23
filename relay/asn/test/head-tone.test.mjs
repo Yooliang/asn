@@ -33,7 +33,7 @@ test('接線守門：手機版傳 hide-busy-warn、標題列掛 is-busy、樣式
   assert.match(html, /<chat-pane [^>]*:hide-busy-warn="true"/s)
   assert.match(html, /m-chathead" :class="\{ 'is-busy': chatFriend && headTone\(chatFriend\.status\) === 'busy' \}"/)
   assert.match(read('m.js'), /headTone/)
-  assert.match(read('mobile.css'), /\.m-chathead\.is-busy\{background:#ffd54a/)
+  assert.match(read('mobile.css'), /\.m-chathead\.is-busy\{background:rgba\(255,213,74,\.\d+\)/)
   const cp = read('lib/chatpane.mjs')
   assert.match(cp, /hideBusyWarn: \{ type: Boolean, default: false \}/)
   assert.match(cp, /<div class="warn" v-if="warn">/)

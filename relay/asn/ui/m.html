@@ -7,6 +7,7 @@
 <title>ASN</title>
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="mobile.css">
+<link rel="stylesheet" href="group.css">
 </head>
 <body class="m-body">
 <!-- 開機畫面：放在 #app 外面，Vue 掛上去之前就看得到，掛上後由 m.js 移除（#app 在掛上前整個藏起來，不會露出樣板原文） -->
@@ -96,10 +97,15 @@
                 </ul>
               </div>
               <!-- 群組對話：我參加的群組，放在各設備分組之後；點進去在對話分頁看訊息、發言 -->
-              <div class="m-group m-rooms" v-if="roomRows.length">
+              <div class="m-group m-rooms">
                 <button class="m-ghead" type="button" :aria-expanded="!collapsed[ROOM_GROUP_KEY]" @click="collapsed[ROOM_GROUP_KEY] = !collapsed[ROOM_GROUP_KEY]">
                   <span class="m-caret" :class="{ open: !collapsed[ROOM_GROUP_KEY] }">▸</span>{{ ROOM_GROUP_LABEL }}（{{ roomRows.length }}）
                 </button>
+                <div class="m-rooms-actions" v-show="!collapsed[ROOM_GROUP_KEY]">
+                  <button class="m-btn" type="button" @click="groupFlow.openCreate()">建立群組</button>
+                  <button class="m-btn" type="button" @click="groupFlow.openJoin()">加入群組</button>
+                </div>
+                <p class="m-note m-rooms-empty" v-if="!roomRows.length" v-show="!collapsed[ROOM_GROUP_KEY]">{{ roomEmptyText }}</p>
                 <ul v-show="!collapsed[ROOM_GROUP_KEY]">
                   <li v-for="r in roomRows" :key="r.id">
                     <button class="m-buddy" type="button" @click="openRoom(r.chatId)">
@@ -113,7 +119,7 @@
                   </li>
                 </ul>
               </div>
-              <div class="empty-list" v-if="!groups.length && !roomRows.length">{{ emptyText }}</div>
+              <div class="empty-list" v-if="!groups.length">{{ emptyText }}</div>
             </div>
           </section>
 
@@ -127,7 +133,7 @@
                   <div class="m-conn" v-if="chatFriend.room">{{ chatFriend.psm }}</div>
                   <div class="m-conn" v-else>{{ STATUS[chatFriend.status] }}<template v-if="chatFriend.psm"> · <span v-html="emo(chatFriend.psm)"></span></template></div>
                 </div>
-                <button class="m-icon-btn" type="button" aria-label="更多操作" v-if="opsItems.length" @click="openOps"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><circle cx="5" cy="12" r="2.4" fill="currentColor"/><circle cx="12" cy="12" r="2.4" fill="currentColor"/><circle cx="19" cy="12" r="2.4" fill="currentColor"/></svg></button>
+                <button class="m-icon-btn" type="button" aria-label="更多操作" v-if="opsItems.length || groupItems.length" @click="openOps"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><circle cx="5" cy="12" r="2.4" fill="currentColor"/><circle cx="12" cy="12" r="2.4" fill="currentColor"/><circle cx="19" cy="12" r="2.4" fill="currentColor"/></svg></button>
               </template>
               <template v-else>
                 <button class="m-me" type="button" aria-label="設置" @click="goTab('me')"><img class="m-pic" :class="'st-' + me.status" :src="meAv" alt="" width="44" height="44"></button>
@@ -143,7 +149,8 @@
             <p class="m-err m-room-note" v-if="roomNote && chatFriend && chatFriend.room" role="alert">{{ roomNote }}</p>
             <chat-pane v-if="chatFriend" :friend="chatFriend" :me="meForChat" :log="chatLog" :friend-av="avOf(chatFriend)" :me-av="meAv"
               dp-mode="inline" bubble="auto" toolbar="bottom" win-mode="merged" :hide-busy-warn="true" :active="false" :enter-sends="false" :photo-api="photoApi" :call-api="callApi" :dict-api="dictApi" :hint-names="friends" @call-state="onCallState" :load-older="loadOlder"
-              @send="(text, opts) => sendTo(chatFriend.id, text, opts)" @nudge="nudgeTo(chatFriend.id)" @attach="(p, cap) => sendAttachTo(chatFriend.id, p, cap)"></chat-pane>
+              @send="(text, opts) => sendTo(chatFriend.id, text, opts)" @nudge="nudgeTo(chatFriend.id)" @attach="(p, cap) => sendAttachTo(chatFriend.id, p, cap)"
+              :room-cards="chatCards" @group-decide="(cid, ok) => decideCard(chatFriend.id, cid, ok)"></chat-pane>
             <div class="m-scroll" v-else><div class="empty-list">{{ chatEmptyText }}</div></div>
           </section>
 
@@ -258,6 +265,7 @@
       <section class="m-ops-panel" role="dialog" aria-modal="true" :aria-label="opsTitle">
         <h2 class="m-ops-h">{{ opsTitle }}</h2>
         <template v-if="ops.phase === 'menu'">
+          <button v-for="g in groupItems" :key="g.key" type="button" class="m-ops-item" @click="pickGroup(g.key)"><span class="m-opt-t">{{ g.label }}</span></button>
           <button v-for="i in opsItems" :key="i.key" type="button" class="m-ops-item" :class="{ off: !i.ok }" :disabled="!i.ok" @click="pickOp(i.key)"><span class="m-opt-t">{{ i.label }}</span><small class="m-opt-why" v-if="!i.ok">{{ i.reason }}</small></button>
           <button type="button" class="m-btn m-ops-cancel" @click="back">取消</button>
         </template>
@@ -311,6 +319,7 @@
         <button type="button" class="m-btn m-ops-cancel" :disabled="sec.busy" @click="laterSecret">{{ SECRET_TEXT.later }}</button>
       </section>
     </div>
+    <group-sheet :flow="groupFlow"></group-sheet>
   </template>
 </div>
 <script src="vendor/vue.global.prod.js"></script>

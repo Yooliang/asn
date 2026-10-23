@@ -1,0 +1,15 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "tw.yooliang.asn",
+      "sha256_cert_fingerprints": [
+        "FE:56:C7:86:B5:5C:6A:84:F9:D6:E1:DE:BE:AA:4E:30:0E:23:B0:C3:D0:A3:7C:D4:0B:A2:D3:BF:AC:95:D1:7F",
+        "A0:C9:0C:F8:96:6C:80:6F:59:6D:FC:CB:57:9F:1F:3E:DD:D5:FF:8D:FB:88:E8:30:81:FC:8E:33:4A:AE:21:EB"
+      ]
+    }
+  }
+]

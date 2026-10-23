@@ -164,8 +164,9 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 
 /* 對話：ChatPane 的版面在小螢幕上收緊，觸控目標放大 */
 .m-chathead{height:60px}
-/* 對方忙碌：標題列改黃底（深色字對黃底對比充足），取代原本另外一條黃色說明條 */
-.m-chathead.is-busy{background:#ffd54a;border-bottom:1px solid #d9b02a;color:#3a2a00}
+/* 標題列與下面的對話區共用 .m-chat 同一張背景圖（連成一片）；正常疊白色半透明讓圖淡一點，對方忙碌改疊黃色半透明（圖仍看得到）。深色字對淺黃白疊色對比充足 */
+.m-chathead{background:rgba(255,255,255,.5);border-bottom:1px solid rgba(255,255,255,.7)}
+.m-chathead.is-busy{background:rgba(255,213,74,.58);border-bottom:1px solid rgba(217,176,42,.7);color:#3a2a00}
 .m-chathead.is-busy .m-title{color:#3a2a00;text-shadow:none}
 .m-chathead.is-busy .m-conn{color:#4a3600}
 .m-chathead.is-busy .m-icon-btn{color:#3a2a00}
@@ -189,7 +190,7 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-chat .picker{grid-template-columns:repeat(6,1fr);left:8px;right:8px}
 .m-chat .picker button{height:44px;font-size:22px}
 .m-chat .typing{height:auto;min-height:22px}
-.m-chat .photo-viewer .aero-btn{min-height:44px;padding:0 16px}
+.m-body .photo-viewer .aero-btn{min-height:44px;padding:0 16px}
 .m-chat .filecard,.m-chat .photo{min-height:44px}
 /* ---- 訊息內文的 Markdown（手機）：issue #169，獨立區塊方便合併 ---- */
 .m-chat .msg .m-body.md-on{font-size:16px;line-height:1.45;max-width:100%}
@@ -241,6 +242,10 @@ body > .callview.mobile{position:fixed;inset:0;z-index:90;padding:calc(env(safe-
 /* 群組對話：名單裡的群組列、對話頁（沿用對話版面，群組沒有震動、傳照片、傳檔案、語音，工具列只留表情符號） */
 .m-room-ic{display:flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:12px;color:#fff;background:linear-gradient(160deg,#6fb6f0,#2f6fb8);box-shadow:0 0 0 2px #cfe3f7}
 .m-chat.is-room .toolbar>.tool{display:none}
+.m-rooms-actions{display:flex;gap:8px;padding:6px 14px 8px}
+.m-rooms-actions .m-btn{flex:1}
+.m-rooms-empty{padding:2px 14px 8px;margin:0}
+.m-chat .gc-list{max-height:46%}
 .m-room-note{padding:6px 14px;background:var(--warn-bg);border-bottom:1px solid var(--warn-line)}
 
 /* 設置分頁的「使用指引」入口與滿版指引頁 */
@@ -262,5 +267,7 @@ html,body.m-body{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff
 .m-scroll{background:rgba(255,255,255,.62)}
 .m-card{background:rgba(238,245,252,.72)}
 .m-chat{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff 62%),url(img/bg-chat.webp) left top/max(100%,520px) auto no-repeat,#fff}
+/* 手機對話頁整頁只有 .m-chat 這一層背景圖：電腦版共用的 .chatpane-main 也貼一份 bg-chat，在手機會從頭部下緣再貼一次、接縫處圖重複，這裡明確拿掉 */
+.m-chat .chatpane-main{background:none}
 .m-chat .conv,.m-chat .compose-row{background:transparent}
 .m-chat .conv-main,.m-chat .compose-main{background:rgba(255,255,255,.62)}

@@ -183,7 +183,7 @@ export const SettingsPanel = {
           <label>沒指定收件人的信交給
             <input class="set-sel" type="text" maxlength="100" :value="st.bridge.unaddressedTo" :disabled="st.bridge.busy" placeholder="留空＝交給我本人" @change="act('bridge-unaddressed', $event.target.value)" aria-label="沒指定收件人的信交給哪個視窗" />
           </label>
-          <small>寄來的信沒有指定收件視窗時，預設交給你本人，在對話裡顯示為「未指定收件人」。指定的視窗不在線時也會交給你本人。</small>
+          <small>寄來的信沒有指定收件視窗時，預設交給你本人，在對話裡標示「沒有指定收件人」。指定的視窗不在線時也會交給你本人。</small>
           <small v-if="st.bridge.running">這台的收發室目前由 ASN 負責。</small>
           <small v-else-if="st.bridge.legacy">這台的收發室目前由舊版收發室橋負責。</small>
           <template v-if="st.bridge.legacy && st.bridge.takeoverAllowed">
