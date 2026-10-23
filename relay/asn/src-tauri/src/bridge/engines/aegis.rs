@@ -141,7 +141,7 @@ impl Inner {
 
     async fn refresh_members(&self) {
         let r: Result<Vec<(String, String)>, String> = async {
-            let res = self.client.get(format!("{}/api/v1/members?scope=all", self.cfg.url)).timeout(Duration::from_secs(6)).send().await.map_err(|e| e.to_string())?;
+            let res = self.client.get(format!("{}/api/v1/members?scope=all", self.cfg.url)).timeout(Duration::from_secs(15)).send().await.map_err(|e| e.to_string())?;
             if !res.status().is_success() {
                 return Err(String::new()); // Node 版：非 2xx 靜默沿用舊名單
             }
@@ -319,6 +319,38 @@ impl Engine for AegisEngine {
     fn canonical_name(&self, name: &str) -> Option<String> {
         let c = &self.i.cfg;
         (name != c.self_member && c.allow.iter().any(|s| s == name)).then(|| self.i.display_name(name))
+    }
+
+    /// 白名單外與希緒自己：和 Node 版同文（只在僅引擎模式由核心採用）
+    fn unreachable_reply(&self, name: &str) -> Option<String> {
+        let c = &self.i.cfg;
+        let slug = self.i.resolve_slug(name);
+        if slug == c.self_member {
+            Some("[Aegis] 這是希緒自己，不能自己問自己".into())
+        } else if !c.allow.contains(&slug) {
+            Some(format!("[Aegis] 這位成員沒有開放聯絡（{slug}）"))
+        } else {
+            None
+        }
+    }
+
+    /// 沒指定收件人又沒有預設成員：列出開放聯絡的成員請寄件人指定（名單照 Node 版：整份白名單，含代號與中文名）
+    fn unaddressed_reply(&self) -> Option<String> {
+        let c = &self.i.cfg;
+        if c.allow.contains(&c.default_member) {
+            return (c.default_member == c.self_member).then(|| "[Aegis] 這是希緒自己，不能自己問自己".into());
+        }
+        let list = c
+            .allow
+            .iter()
+            .map(|s| match self.i.display_name(s) {
+                n if n != *s => format!("{s}（{n}）"),
+                _ => s.clone(),
+            })
+            .collect::<Vec<_>>()
+            .join("、");
+        let list = if list.is_empty() { "(目前沒有開放任何成員)".to_string() } else { list };
+        Some(format!("[Aegis] 請指定要問的成員（to_agent）。目前開放聯絡：{list}"))
     }
 
     fn default_window(&self) -> Option<String> {
