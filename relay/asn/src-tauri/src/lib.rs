@@ -525,10 +525,10 @@ async fn relay_send(app: State<'_, App>, auth: State<'_, auth::AuthState>, paylo
 }
 /// 「我和某夥伴」90 天內的往來（以後台為準，本機只當快取）。要登入憑證；沒登入或後台還沒支援就回錯，前端靜默沿用本機快取
 #[tauri::command]
-async fn relay_chat_history(app: State<'_, App>, auth: State<'_, auth::AuthState>, node: String, agent: Option<String>, partner_id: Option<String>) -> Result<Value, String> {
+async fn relay_chat_history(app: State<'_, App>, auth: State<'_, auth::AuthState>, node: String, agent: Option<String>, partner_id: Option<String>, before: Option<String>, limit: Option<u64>) -> Result<Value, String> {
     let r = relay_of(&app)?;
     let token = account::signing_token(&auth).await;
-    r.chat_history(&node, agent.as_deref().unwrap_or(""), partner_id.as_deref(), token.as_deref()).await
+    r.chat_history(&node, agent.as_deref().unwrap_or(""), partner_id.as_deref(), before.as_deref(), limit, token.as_deref()).await
 }
 /// 已讀多端同步（設計見 docs/design/READ-SYNC.md）：送出這台的已讀位置、取回整個帳號的。電腦與手機共用；要本人簽章，沒登入回錯（不打後台），舊後台回 404，前端都靜默
 #[tauri::command]

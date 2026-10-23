@@ -65,6 +65,8 @@ migration `20261022060000_partner_succession.sql`（尚未套用）。四件事�
 
 `asn_chat_history` 多一個選填的 `p_partner_id`（舊的五參數版本先 drop，否則兩版並存會「函式不唯一」）。帶了而且夥伴屬於同一個租戶，就在原本的名字比對之外再 OR 上「我寄給這位夥伴（`to_partner_id`）」「這位夥伴寄給我（`from_partner_id`）」，所以改名前後、換 session 前後的往來都拿得到；第一期以前沒有夥伴欄位的舊信仍靠名字比對。別租戶的夥伴 ID、格式不對的，當沒帶。Edge Function 只在請求帶了合格的 `partner_id` 才傳；資料庫還沒有第六個參數（找不到函式）就退回不帶重呼叫。
 
+往上捲載入更舊的信（migration `20261023070000_chat_history_before.sql`，尚未套用）：`asn_chat_history` 再多一個選填的 `p_before`（timestamptz，預設 null＝行為與上一版相同；舊的六參數版本先 drop）。帶了就只回 `created_at` 早於它的最近 N 則（仍受 90 天與上限 200 限制）。Edge Function 接受請求本文的 `before`（ISO 時間，格式不對就忽略），只在有帶時才傳 `p_before`。ASN 的對話畫面捲到距頂端 120px 內，就以目前最早一則的時間（加 1 毫秒，免得漏掉同一毫秒內的信，重疊的由去重處理）向後台要 50 則，接在前面；回來不到一頁、回來的信全都不早於目前最早一則（舊後台忽略 before）、或後台 404／400，都視為到盡頭並停止。部署順序：先套用 migration，再部署 Edge Function；反過來則帶 before 的請求回 404，前端靜默停止往上載入，其餘照舊。舊版 ASN 不帶 before，行為不變。
+
 名單 `irori_relay_list` 的每個 agent 多帶 `partner_id`（沒同步到的是 null），ASN 用它查往來記錄與指定接班；舊用戶端多一個鍵會直接略過。
 
 ### 4. ASN 介面：這是某某的接班（要本人簽章）

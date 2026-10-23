@@ -14,8 +14,9 @@ import { shotFileName } from './shot.mjs'
 import { statusTip, tierOf } from './sent-status.mjs'
 import { isAsnWindow, showsWaiting } from './roster.mjs'
 import { warnKind } from './head-tone.mjs'
+import { keepScroll, olderNote, rearmed, wantsOlder } from './scrollback.mjs'
 
-const { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } = Vue
+const { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, reactive } = Vue
 const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯示為離線' }
 
 export const ChatPane = {
@@ -40,6 +41,7 @@ export const ChatPane = {
     voice: { type: Object, default: null },        // 語音功能（lib/voice-ui.mjs 的 createVoiceUi）；沒給就沒有念出訊息與麥克風
     hideBusyWarn: { type: Boolean, default: false },  // 手機版：對方忙碌時不顯示黃色說明條（標題列已改黃底）
     callApi: { type: Object, default: null },      // 手機版的通話（lib/mobile-call.mjs 的 createMobileCall 工廠，另帶 phaseText）；電腦版不給，通話走 voice.newCall
+    loadOlder: { type: Function, default: null },  // 往上捲到頂載入更舊的信：(好友 id) => Promise<{ more, added, busy?, error? }>；沒給就不載入
     enterSends: { type: Boolean, default: true },  // Enter 直接送出（電腦預設）；手機的軟鍵盤 Enter 是換行，傳送靠按鈕
   },
   emits: ['send', 'nudge', 'toggle-dp', 'attach', 'call-state'],
@@ -59,8 +61,40 @@ export const ChatPane = {
     const foldTip = computed(() => (collapsed.value ? '展開大頭貼' : '收起大頭貼'))
     const lay = k => msgLayout(k, { dpMode: props.dpMode, bubble: props.bubble })
     const scrollDown = () => nextTick(() => { const el = msgsEl.value; if (el) el.scrollTop = el.scrollHeight })
-    watch(() => props.log, scrollDown)
-    watch(() => props.active, a => { if (a) { scrollDown(); nextTick(() => composeEl.value && composeEl.value.focus()) } })
+    // ---- 往上捲自動載入更舊的信：捲到距頂端 120px 內就向樞紐要；載入後停在原本看的那一則 ----
+    const older = reactive({})   // 好友 id → 'loading'｜'done'（沒有更早的了）
+    let armed = true, keep = null   // armed：上次失敗後要先離開頂端才再試；keep：載入前的 scrollTop／scrollHeight（載入完成後補償）
+    const noteText = computed(() => olderNote(older[props.friend?.id], props.log.length > 0))
+    function applyKeep() {
+      const el = msgsEl.value
+      if (el && keep) el.scrollTop = keepScroll(keep.top, keep.h, el.scrollHeight)
+      keep = null
+    }
+    async function checkTop() {
+      const el = msgsEl.value, f = props.friend
+      if (!el || !f || !props.loadOlder || keep) return
+      if (!wantsOlder({ top: el.scrollTop, state: older[f.id], armed, visible: el.clientHeight > 0, hasLog: props.log.length > 0 })) return
+      const id = f.id
+      older[id] = 'loading'
+      await nextTick()   // 頂端的小字長出來之後再量高度
+      keep = { top: el.scrollTop, h: el.scrollHeight }
+      let r
+      try { r = await props.loadOlder(id) } catch { r = { more: true, added: 0, error: true } }
+      if (r?.error) armed = false
+      older[id] = r && r.more === false ? 'done' : undefined
+      await nextTick()
+      applyKeep()
+      await checkTop()   // 補償後仍在頂端附近（例如這批很短）就接著載入下一批
+    }
+    function onScroll() {
+      const el = msgsEl.value
+      if (!el) return
+      if (rearmed(el.scrollTop)) armed = true
+      void checkTop()
+    }
+    watch(() => props.log, () => { if (!keep) scrollDown(); nextTick(checkTop) })   // 載入中的更新由載入完成後補償位置，不跳到底
+    watch(() => props.friend?.id, () => { armed = true; nextTick(checkTop) })
+    watch(() => props.active, a => { if (a) { scrollDown(); nextTick(() => { composeEl.value && composeEl.value.focus(); checkTop() }) } })
     function send() {
       const text = draft.value.trim(); if (!text) return
       emit('send', text)
@@ -200,7 +234,7 @@ export const ChatPane = {
     const docEl = ref(null)
     // 訊息內文裡的連結：不在 WebView 導覽，一律交給系統瀏覽器（Rust 端 open_link 再驗一次協定）
     const onBodyClick = ev => handleLinkClick(ev, url => globalThis.__TAURI__?.core?.invoke?.('open_link', { url }))
-    return { showCallBtn, isAsn, showWaiting, warn, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { showCallBtn, isAsn, showWaiting, warn, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -217,7 +251,8 @@ export const ChatPane = {
         <span v-if="warn === 'offline'">{{ plain(friend.nick) }} 目前離線，訊息會先留在收發室，對方上線後才收得到。</span>
         <span v-else>{{ plain(friend.nick) }} 的狀態是{{ STATUS[friend.status] }}，可能無法馬上回應。</span>
       </div>
-      <div class="msgs" ref="msgsEl" aria-live="polite">
+      <div class="msgs" ref="msgsEl" aria-live="polite" @scroll.passive="onScroll">
+        <div class="older-note" v-if="noteText">{{ noteText }}</div>
         <template v-for="(m, i) in log" :key="i">
           <div v-if="m.k === 'sys'" class="sys" :class="{ nudge: m.nudge }">{{ m.text }}</div>
           <div v-else class="msg" :class="['al-' + lay(m.k).align, { mine: m.k === 'me' }]">

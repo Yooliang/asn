@@ -39,8 +39,16 @@ const app = createApp({
       if (active) callTimer = setInterval(() => emit('asn:call', { id, active: true }), CALL_BEAT_MS)
     }
     const selfNode = computed(() => snap.value?.selfNode ?? '')
+    // 往上捲到頂載入更舊的信：請名單視窗的樞紐代跑，等它回報（它補進記錄的更新會先經 asn:log 到這裡）
+    const loadOlder = fid => new Promise(resolve => {
+      let un = null, timer = null
+      const done = r => { clearTimeout(timer); if (un) un(); resolve(r) }
+      timer = setTimeout(() => done({ more: true, added: 0, error: true }), 60_000)
+      Promise.resolve(listen('asn:older', r => { if (r?.id === fid) done(r) })).then(u => { un = typeof u === 'function' ? u : null })
+      emit('asn:cmd', { op: 'older', id: fid })
+    })
     return {
-      callState, f, me, transport, selfNode, log, look, friendAv, meAv, voice, photoApi, shotApi, plain, ctl, RESIZE_DIRS, resizeFrom,
+      callState, f, me, transport, selfNode, loadOlder, log, look, friendAv, meAv, voice, photoApi, shotApi, plain, ctl, RESIZE_DIRS, resizeFrom,
       send: text => emit('asn:cmd', { op: 'send', id, text }),
       nudge: () => emit('asn:cmd', { op: 'nudge', id }),
       attach: (photo, caption) => emit('asn:cmd', { op: 'attach', id, photo, caption }),

@@ -1,7 +1,7 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import type { AuthUser } from "./account.ts";
 import {
-  bellTopicsOf, handleChatHistory, parseHistoryQuery, personArgs, type RpcFn, rpcMissing, sendWithPerson,
+  bellTopicsOf, handleChatHistory, parseBefore, parseHistoryQuery, personArgs, type RpcFn, rpcMissing, sendWithPerson,
 } from "./account_me.ts";
 
 const UID = "11111111-1111-1111-1111-111111111111";
@@ -148,4 +148,29 @@ Deno.test("handleChatHistory：帶夥伴 ID 才多傳 p_partner_id；資料庫�
   assertEquals(r.body, { messages: [{ id: "u1" }] });
   assertEquals(seen.length, 2);
   assertEquals("p_partner_id" in seen[1], false);
+});
+
+Deno.test("往上捲載入更舊的信：before 合格才收（標準化成毫秒），格式不對當沒帶、不拒絕請求、查詢物件不多鍵", () => {
+  assertEquals(parseBefore("2026-10-23T01:02:03.456Z"), "2026-10-23T01:02:03.456Z");
+  assertEquals(parseBefore("2026-10-23T09:02:03+08:00"), "2026-10-23T01:02:03.000Z");
+  assertEquals(parseBefore("2026-10-23T01:02:03.123456Z"), "2026-10-23T01:02:03.123Z");
+  for (const v of ["", "yesterday", "2026-10-23", "2026-13-45T00:00:00Z", 5, null, {}, "2026-10-23T01:02:03Z; drop table"]) {
+    assertEquals(parseBefore(v), null, String(v));
+  }
+  assertEquals(parseHistoryQuery({ node: "M", before: "2026-10-23T01:02:03.456Z" })?.before, "2026-10-23T01:02:03.456Z");
+  assertEquals("before" in (parseHistoryQuery({ node: "M", before: "壞的" }) ?? {}), false);
+  assertEquals("before" in (parseHistoryQuery({ node: "M" }) ?? {}), false);
+});
+
+Deno.test("handleChatHistory：帶 before 才多傳 p_before；沒帶的呼叫與從前完全相同", async () => {
+  const calls: Array<Record<string, unknown>> = [];
+  const rpc: RpcFn = (_fn, args) => { calls.push({ ...args }); return Promise.resolve({ data: { messages: [] }, error: null }); };
+  const deps = { rpc, verifyJwt: () => Promise.resolve(user()), withAttachments: (m: unknown) => Promise.resolve(m) };
+  await handleChatHistory(deps, { id: "H" }, "Bearer tok-1234567890abcdef", { node: "M", limit: 50, before: "2026-10-23T01:02:03.456Z" });
+  assertEquals(calls[0].p_before, "2026-10-23T01:02:03.456Z");
+  assertEquals(calls[0].p_limit, 50);
+  await handleChatHistory(deps, { id: "H" }, "Bearer tok-1234567890abcdef", { node: "M", before: "壞的" });
+  assertEquals("p_before" in calls[1], false);
+  await handleChatHistory(deps, { id: "H" }, "Bearer tok-1234567890abcdef", { node: "M" });
+  assertEquals("p_before" in calls[2], false);
 });

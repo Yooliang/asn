@@ -53,9 +53,19 @@ export interface HistoryQuery {
   limit: number;
   /** 夥伴 ID（#153，選填）：格式不對當沒帶；有就以「帳號＋夥伴 ID」查，改名前後的往來都拿得到 */
   partnerId: string | null;
+  /** 往上捲載入更舊的信：只要早於這個時間（ISO，標準化成毫秒精度）的；沒帶或格式不對＝不出現這個鍵（行為與從前相同） */
+  before?: string;
 }
 
 const PARTNER_ID_RE = /^p_[0-9a-f]{20}$/;
+const BEFORE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/;
+
+/** 「早於」的時間：ISO 格式且是真的時間才收，標準化成 UTC 毫秒；其餘當沒帶（不拒絕整個請求） */
+export function parseBefore(v: unknown): string | null {
+  if (typeof v !== "string" || !BEFORE_RE.test(v)) return null;
+  const t = Date.parse(v);
+  return Number.isFinite(t) ? new Date(t).toISOString() : null;
+}
 
 /** 夥伴的節點與視窗名（視窗名可空＝找總機）；格式不對回 null */
 export function parseHistoryQuery(b: unknown): HistoryQuery | null {
@@ -73,7 +83,8 @@ export function parseHistoryQuery(b: unknown): HistoryQuery | null {
     limit = Math.min(o.limit, HISTORY_MAX);
   }
   const partnerId = typeof o.partner_id === "string" && PARTNER_ID_RE.test(o.partner_id) ? o.partner_id : null;
-  return { node: o.node, agent, limit, partnerId };
+  const before = parseBefore(o.before);
+  return { node: o.node, agent, limit, partnerId, ...(before ? { before } : {}) };
 }
 
 export interface HistoryDeps {
@@ -97,6 +108,7 @@ export async function handleChatHistory(
     p_user: user, p_node: me.id, p_partner_node: q.node, p_partner_agent: q.agent, p_limit: q.limit,
   };
   if (q.partnerId) args.p_partner_id = q.partnerId;
+  if (q.before) args.p_before = q.before;   // 只在有帶時才傳：沒帶時呼叫與從前完全相同（資料庫還沒套用新參數也不壞）
   let { data, error } = await deps.rpc("asn_chat_history", args);
   // 資料庫還沒套用第六個參數的版本（找不到函式）：退回不帶夥伴 ID 重呼叫，只用名字比對（順序顛倒也不壞）
   if (error && q.partnerId && rpcMissing(error)) {

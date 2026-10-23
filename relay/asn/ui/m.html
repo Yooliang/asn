@@ -122,7 +122,7 @@
               <button class="m-btn m-ops-run-btn" type="button" v-if="opsBanner.done" @click="dismissRun">知道了</button>
             </div>
             <chat-pane v-if="chatFriend" :friend="chatFriend" :me="meForChat" :log="chatLog" :friend-av="avOf(chatFriend)" :me-av="meAv"
-              dp-mode="inline" bubble="auto" toolbar="bottom" win-mode="merged" :hide-busy-warn="true" :active="false" :enter-sends="false" :photo-api="photoApi" :call-api="callApi" @call-state="onCallState"
+              dp-mode="inline" bubble="auto" toolbar="bottom" win-mode="merged" :hide-busy-warn="true" :active="false" :enter-sends="false" :photo-api="photoApi" :call-api="callApi" @call-state="onCallState" :load-older="loadOlder"
               @send="text => sendTo(chatFriend.id, text)" @nudge="nudgeTo(chatFriend.id)" @attach="(p, cap) => sendAttachTo(chatFriend.id, p, cap)"></chat-pane>
             <div class="m-scroll" v-else><div class="empty-list">{{ chatEmptyText }}</div></div>
           </section>
