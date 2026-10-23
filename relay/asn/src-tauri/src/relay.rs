@@ -545,6 +545,12 @@ impl Relay {
         let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法封存夥伴")?;
         self.api_signed("partner_archive", Some(b), Some(t)).await
     }
+    /// 已讀多端同步（電腦與手機共用）：要本人簽章；沒憑證在打後台之前就回錯。送出 marks（可空，只取回），回 { ok, marks }
+    pub async fn read_sync_signed(&self, body: &Value, token: Option<&str>) -> Result<Value, String> {
+        let b = build_read_sync_body(body)?;
+        let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法同步已讀")?;
+        self.api_signed("read_sync", Some(b), Some(t)).await
+    }
     /// 查管理操作的進度（手機用）：同樣要本人簽章。回 { ops: [...] }
     pub async fn partner_ops_signed(&self, ids: &[String], token: Option<&str>) -> Result<Value, String> {
         let b = build_partner_ops_body(ids)?;
@@ -661,6 +667,28 @@ pub fn build_partner_op_body(raw: &Value) -> Result<Value, String> {
         _ => {}
     }
     Ok(b)
+}
+/// 已讀同步的內容：只留 marks（最多 100 筆，每筆 key 3～140 字且無控制字元、at 為正整數毫秒）；格式不對在打後台之前就回錯
+pub fn build_read_sync_body(raw: &Value) -> Result<Value, String> {
+    let list = match raw.get("marks") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(a)) => a.clone(),
+        Some(_) => return Err("已讀記錄的格式不對".into()),
+    };
+    if list.len() > 100 {
+        return Err("一次最多同步 100 筆已讀".into());
+    }
+    let mut out = Vec::new();
+    for m in &list {
+        let key = m.get("key").and_then(Value::as_str).unwrap_or("");
+        let n = key.chars().count();
+        if !(3..=140).contains(&n) || key.chars().any(|c| c.is_control()) {
+            return Err("已讀記錄的鍵不對".into());
+        }
+        let at = m.get("at").and_then(Value::as_u64).filter(|a| *a > 0 && *a <= 4_102_444_800_000).ok_or("已讀位置不對")?;
+        out.push(json!({ "key": key, "at": at }));
+    }
+    Ok(json!({ "marks": out }))
 }
 /// 封存的內容：node、archived（布林）、夥伴 ID（有就帶，格式要對）、名字（沒有夥伴 ID 時必填）；其餘一律丟掉。格式不對在打後台之前就回錯
 pub fn build_partner_archive_body(raw: &Value) -> Result<Value, String> {
@@ -798,6 +826,32 @@ b", "op": "close" }),
         for b in bad {
             assert!(build_partner_archive_body(&b).is_err(), "{b}");
         }
+    }
+
+    #[test]
+    fn 已讀同步_內容整理_壞格式在打後台前擋下() {
+        assert_eq!(build_read_sync_body(&json!({})).unwrap(), json!({ "marks": [] }));
+        assert_eq!(build_read_sync_body(&json!({ "marks": [{ "key": "p_0123456789abcdef0123", "at": 1700000000000u64, "x": 1 }] })).unwrap(), json!({ "marks": [{ "key": "p_0123456789abcdef0123", "at": 1700000000000u64 }] }));
+        for bad in [json!({ "marks": "x" }), json!({ "marks": [{ "key": "ab", "at": 5 }] }), json!({ "marks": [{ "key": "abc", "at": 0 }] }), json!({ "marks": [{ "key": "abc", "at": -1 }] }), json!({ "marks": [{ "key": "abc", "at": 1.5 }] }), json!({ "marks": [{ "key": "a
+b", "at": 5 }] }), json!({ "marks": [{ "at": 5 }] })] {
+            assert!(build_read_sync_body(&bad).is_err(), "{bad}");
+        }
+        let many: Vec<Value> = (0..101).map(|i| json!({ "key": format!("n:H/{i}"), "at": 5 })).collect();
+        assert!(build_read_sync_body(&json!({ "marks": many })).is_err());
+    }
+
+    #[tokio::test]
+    async fn 已讀同步_沒有本人簽章不送出_有簽章帶標頭() {
+        let (url, seen) = fake_server(200);
+        let r = Relay::new(url, "secret-key".into(), "P".into(), "P-ASN".into());
+        let req = json!({ "marks": [] });
+        assert!(r.read_sync_signed(&req, None).await.unwrap_err().contains("尚未登入"));
+        assert!(r.read_sync_signed(&req, Some("")).await.is_err(), "空憑證等於沒有");
+        assert!(seen.lock().unwrap().is_empty(), "沒簽章時完全沒有打後台");
+        r.read_sync_signed(&req, Some("usertoken-9")).await.unwrap();
+        let s = seen.lock().unwrap();
+        assert_eq!(s.len(), 1);
+        assert!(s[0].to_lowercase().contains("x-asn-user: bearer usertoken-9") && s[0].contains("action=read_sync"), "{}", s[0]);
     }
 
     #[tokio::test]

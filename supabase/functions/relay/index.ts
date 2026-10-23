@@ -21,6 +21,7 @@ import {
   withRoomAttachments,
 } from "../_shared/attachments.ts";
 import { SIGN_HEADER, signedArgs, signedUserId } from "../_shared/owner_sign.ts";
+import { requestReadSync } from "../_shared/read_sync.ts";
 import { handleTts, TtsLimiter, ttsVoicesResponse } from "../_shared/tts.ts";
 
 const ttsLimiter = new TtsLimiter();
@@ -419,6 +420,13 @@ Deno.serve(async (req) => {
     // 本人簽章（選填）：手機與登入建立的電腦節點不是 owner 角色，靠簽章（資料庫再核對「節點與租戶都是這個人的」）證明本人；沒簽章＝與以前完全相同
     const signedLaunch = (action === "launch" || action === "launchers") ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
     const r = await handleNodeLaunchAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedLaunch);
+    return json(r.status, r.body);
+  }
+  // 已讀多端同步（_shared/read_sync.ts）：要本人簽章，沒簽章 401 不打資料庫；一次寫入我這端的已讀位置並取回整個帳號的
+  if (action === "read_sync") {
+    const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
+    const signedRead = await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER));
+    const r = await requestReadSync({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me.id, raw, signedRead);
     return json(r.status, r.body);
   }
   // 遠端管理夥伴視窗（詳情、改名、切換模型、關閉、轉交）：partner_op／partner_ops 是手機下令與查進度（一定要本人簽章，沒簽章 401 不打資料庫）；

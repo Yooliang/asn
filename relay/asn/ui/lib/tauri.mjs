@@ -18,6 +18,7 @@ export const transport = {
   history: (node, agent, partnerId) => invoke('relay_chat_history', { node, agent: agent || null, partnerId: partnerId || null }),   // 後台的往來記錄（要登入；本機只當快取）
   partnerOp: body => invoke('relay_partner_op', { body }),          // 管理夥伴視窗（詳情、改名、關閉、接班換手、喚醒；要本人簽章）→ { id }
   partnerOps: ids => invoke('relay_partner_ops', { ids }),          // 查上面那些操作的進度 → { ops: [...] }
+  readSync: body => invoke('relay_read_sync', { body }),            // 已讀多端同步：送出我這端的已讀位置、取回整個帳號的（要本人簽章；沒登入或舊後台就回錯，前端靜默）
   partnerArchive: body => invoke('relay_partner_archive', { body }),  // 封存／取消封存夥伴（記在帳號層，要本人簽章）→ { ok, archived }
   authStatus: () => invoke('auth_status'),                           // → { signed_in, email }
   sentStatus: ids => invoke('relay_sent_status', { ids }).then(r => r?.status ?? []),
