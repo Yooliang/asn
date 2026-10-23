@@ -224,7 +224,9 @@ async fn relay_launchers(app: State<'_, App>, ids: Option<Vec<String>>) -> Resul
 async fn acct_remote_report(app: State<'_, App>) -> Result<Value, String> {
     let relay = relay_of(&app)?;
     let list = tauri::async_runtime::spawn_blocking(claude_accounts::local_list).await.map_err(|e| e.to_string())?;
-    acct_remote::report(relay.as_ref(), &list).await
+    // Codex 目前登入（只有 email／方案）；讀不到或沒登入就不放，不影響 Claude 的回報
+    let codex = tauri::async_runtime::spawn_blocking(codex_accounts::codex_account_current).await.ok().and_then(|r| r.ok()).flatten();
+    acct_remote::report(relay.as_ref(), &list, codex.as_ref()).await
 }
 #[cfg(desktop)]
 #[tauri::command]

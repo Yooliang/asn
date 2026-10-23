@@ -11,6 +11,7 @@
 //! 指令只帶目標帳號的 email；本機只接受「自己剛從收發室取走、尚未處理」的指令編號，
 //! 所以介面端無法憑空要求切換，每個編號只能處理一次。
 use crate::claude_accounts::{self, AccountInfo};
+use crate::codex_accounts::CodexLogin;
 use crate::relay::Relay;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -32,9 +33,17 @@ pub fn valid_node(s: &str) -> bool {
     (1..=32).contains(&s.len()) && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
-/// 回報的內容：只有廠商、email、方案、是否使用中
-pub fn build_report(list: &[AccountInfo]) -> Value {
-    let rows: Vec<Value> = list.iter().take(20).map(|a| json!({ "vendor": "claude", "email": a.email, "plan": a.plan, "current": a.current })).collect();
+/// 回報的內容：只有廠商、email、方案、是否使用中。
+/// Codex 只放「目前登入」那一個（用 ChatGPT 帳號登入且有 email 才放；API 金鑰模式沒有帳號可顯示就不放）；
+/// 權杖、金鑰、帳號編號一律不碰：`CodexLogin` 本身就只有 email／方案／登入方式三個欄位。
+pub fn build_report(list: &[AccountInfo], codex: Option<&CodexLogin>) -> Value {
+    let mut rows: Vec<Value> = list.iter().take(19).map(|a| json!({ "vendor": "claude", "email": a.email, "plan": a.plan, "current": a.current })).collect();
+    if let Some(c) = codex.filter(|c| c.mode == "chatgpt") {
+        if let Some(email) = claude_accounts::normalize_email(&c.email) {
+            let plan: String = c.plan.chars().filter(|ch| !ch.is_control()).take(30).collect();
+            rows.push(json!({ "vendor": "codex", "email": email, "plan": plan, "current": true }));
+        }
+    }
     json!({ "accounts": rows })
 }
 
@@ -88,8 +97,14 @@ pub fn decide(taken: &mut HashMap<String, (String, Instant)>, id: &str, allowed:
 }
 
 // ---------- 送給收發室的動作 ----------
-pub async fn report(relay: &Relay, list: &[AccountInfo]) -> Result<Value, String> {
-    relay.api("acct_report", Some(build_report(list))).await
+pub async fn report(relay: &Relay, list: &[AccountInfo], codex: Option<&CodexLogin>) -> Result<Value, String> {
+    let full = build_report(list, codex);
+    let has_codex = full["accounts"].as_array().is_some_and(|a| a.iter().any(|r| r["vendor"] == "codex"));
+    match relay.api("acct_report", Some(full)).await {
+        // 舊後台只認 claude，看到 codex 會整份退回：退一步只回報 Claude，不讓原本的回報壞掉
+        Err(_) if has_codex => relay.api("acct_report", Some(build_report(list, None))).await,
+        r => r,
+    }
 }
 pub async fn remote_list(relay: &Relay, node: &str) -> Result<Value, String> {
     if !valid_node(node) {
@@ -181,12 +196,52 @@ mod tests {
 
     #[test]
     fn 回報只有廠商_email_方案_使用中() {
-        let v = build_report(&[acct("a@x.test", true), acct("b@x.test", false)]);
+        let v = build_report(&[acct("a@x.test", true), acct("b@x.test", false)], None);
         assert_eq!(v, json!({ "accounts": [
             { "vendor": "claude", "email": "a@x.test", "plan": "max", "current": true },
             { "vendor": "claude", "email": "b@x.test", "plan": "max", "current": false },
         ] }));
         assert!(!v.to_string().contains("ORG-SECRET"), "組織名稱不外送");
+    }
+
+    fn codex(email: &str, plan: &str, mode: &str) -> CodexLogin {
+        CodexLogin { email: email.into(), plan: plan.into(), mode: mode.into() }
+    }
+
+    #[test]
+    fn 回報帶_codex_目前登入_且不含任何憑證類欄位() {
+        let v = build_report(&[acct("a@x.test", true)], Some(&codex(" C@X.test ", "plus", "chatgpt")));
+        assert_eq!(v["accounts"][1], json!({ "vendor": "codex", "email": "c@x.test", "plan": "plus", "current": true }));
+        // 守門：每一列的鍵只准是這四個；整份內容不出現 token／key／secret 類字樣
+        for r in v["accounts"].as_array().unwrap() {
+            let mut keys: Vec<&String> = r.as_object().unwrap().keys().collect();
+            keys.sort();
+            assert_eq!(keys, ["current", "email", "plan", "vendor"]);
+        }
+        let low = v.to_string().to_lowercase();
+        for bad in ["token", "secret", "api_key", "apikey", "password", "refresh", "account_id", "mode"] {
+            assert!(!low.contains(bad), "回報不該含 {bad}");
+        }
+    }
+
+    #[test]
+    fn codex_沒登入_或_api_金鑰模式_或_email_壞掉_就不放() {
+        let base = build_report(&[acct("a@x.test", true)], None);
+        assert_eq!(base["accounts"].as_array().unwrap().len(), 1);
+        for c in [codex("", "", "api_key"), codex("c@x.test", "plus", "api_key"), codex("", "", "chatgpt"), codex("壞", "", "chatgpt")] {
+            assert_eq!(build_report(&[acct("a@x.test", true)], Some(&c)), base);
+        }
+    }
+
+    #[test]
+    fn 合計不超過_20_筆_且_codex_方案字串被清乾淨() {
+        let many: Vec<AccountInfo> = (0..25).map(|i| acct(&format!("u{i}@x.test"), i == 0)).collect();
+        let v = build_report(&many, Some(&codex("c@x.test", &format!("p\nl{}", "x".repeat(40)), "chatgpt")));
+        let rows = v["accounts"].as_array().unwrap();
+        assert_eq!(rows.len(), 20);
+        assert_eq!(rows[19]["vendor"], "codex");
+        let plan = rows[19]["plan"].as_str().unwrap();
+        assert!(plan.chars().count() <= 30 && !plan.contains('\n'));
     }
 
     #[test]

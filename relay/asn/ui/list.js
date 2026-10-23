@@ -44,6 +44,7 @@ import { createCallBeats } from './lib/call-beats.mjs'
 import { startCallPoll } from './lib/call-poll.mjs'
 import { isCallActive } from './lib/call-session.mjs'
 import { accountLine, codexLine, createAccountsUi } from './lib/claude-accounts.mjs'
+import { buildDeviceTree } from './lib/device-tree.mjs'
 import { dialogTitle as deviceAcctTitle, dialogView as deviceAcctViewOf, CONFIRM_NOTE as DEVICE_CONFIRM_NOTE, CLOSE_NOTE as DEVICE_CLOSE_NOTE } from './lib/device-acct-dialog.mjs'
 import { applyRename } from './lib/rename.mjs'
 import { createUsageUi } from './lib/usage.mjs'
@@ -128,16 +129,7 @@ const applyBridgeStatus = s => {
   Object.assign(bridge, { enabled: s.enabled === true, running: s.running === true, legacy: s.legacy === true, takeoverAllowed: s.takeover_allowed === true, remoteLaunch: s.remote_launch === true, unaddressedTo: typeof s.unaddressed_to === 'string' ? s.unaddressed_to : '', error: s.error || '', shown: true })
 }
 try { applyBridgeStatus(await invoke('bridge_status')) } catch { /* 舊版後端沒有這個指令就不顯示 */ }
-// 命令列（asn-cli）：Claude 視窗用它寄信、收信、看群組、下載附件。設定頁顯示完整路徑，可複製。程式在 cli/
-const cliInfo = reactive({ shown: false, path: '', example: '', copied: false })
-try {
-  const c = await invoke('cli_info')
-  if (c?.path) Object.assign(cliInfo, { shown: true, path: String(c.path), example: String(c.example || '') })
-} catch { /* 舊版後端沒有這個指令就不顯示 */ }
-async function copyCliExample() {
-  try { await navigator.clipboard.writeText(cliInfo.example); cliInfo.copied = true; setTimeout(() => { cliInfo.copied = false }, 2500) } catch (e) { console.info('[ASN] 複製失敗', e.message) }
-}
-// 密碼小幫手（asn-askpass）：git／ssh 要密碼時請 ASN 跳窗收。設定頁顯示設定指令，可複製路徑；ASN 不會自動改環境變數。程式在 askpass/
+// 密碼小幫手（asn-askpass）：git／ssh 要密碼時請 ASN 跳窗收。設定頁「啟動設定」的進階裡顯示設定指令，可複製路徑；ASN 不會自動改環境變數。程式在 askpass/
 const askpassInfo = reactive({ shown: false, path: '', example: '', copied: false })
 try {
   const a = await invoke('askpass_helper_info')
@@ -837,6 +829,7 @@ const app = createApp({
     // 指引、設定的聊天窗（openPanel／closePanel 在上面）：列表只負責「點一項就開」，內容在右邊分頁或獨立視窗
     const panelGuide = computed(() => panelItem('guide', ui.panel.guide))
     const catSub = key => catSummary(key, {
+      devices: deviceTree.value,
       hasUpload: selfHasUpload.value, nowPlayingOn: showNowPlaying.value, accountCount: accounts.state.list.length, accountCurrent: accounts.state.current?.email ?? '',
       frame: frame.value, mode: ui.mode, dpMode: ui.dpMode, toolbar: ui.toolbar, bubble: ui.bubble, tabDim: dims.tabDim, groupDim: dims.groupDim,
       notify: notifyPrefs.value, voiceEnabled: ttsVoices.value.enabled, ttsAuto: voiceCfg.tts_auto, sttLang: voiceCfg.stt_lang,
@@ -981,13 +974,33 @@ const app = createApp({
       deviceMenu.value = g.node
     }
     const closeDeviceMenu = () => { deviceMenu.value = '' }
+    // 打開「切換這台的 Claude 帳號」專屬對話框（名單右鍵與設定的「設備」分類共用）
+    const openDeviceAcct = async node => {
+      if (!node) return
+      deviceAcct.node = node; deviceAcct.label = deviceTree.value.find(d => d.key === node)?.label ?? accounts.remoteNodes().find(d => d.key === node)?.label ?? ''; deviceAcct.selected = ''
+      void invoke('show_main').catch(() => {})
+      await accounts.remoteSelect(node)
+    }
     const deviceMenuSwitch = async () => {
       const node = deviceMenu.value
       closeDeviceMenu()
-      if (!node) return
-      deviceAcct.node = node; deviceAcct.label = accounts.remoteNodes().find(d => d.key === node)?.label ?? node; deviceAcct.selected = ''
-      await accounts.remoteSelect(node)
+      await openDeviceAcct(node)
     }
+    // 設定「設備」分類：設備 → 廠商 → 帳號。其他設備的帳號回報在有新設備出現時讀一次，也可按「重新整理」
+    const deviceTree = computed(() => buildDeviceTree({
+      friends: friends.value, nodeOrder: nodeOrder.value, selfNode: info.node, asn: asnMap.value, launchers: {
+        ...remoteLaunchers.value,
+        [info.node]: { profiles: partnerModels.value.filter(m => m.installed).map(m => ({ id: m.profileId ?? m.id })) },
+      },
+      reports: accounts.state.reports,
+      self: { claude: accounts.state.list, codex: { loggedIn: Boolean(accounts.state.codex), text: codexLine(accounts.state.codex, accounts.state.codexErr) } },
+    }))
+    const otherDeviceNodes = () => launchDeviceRowsList.value.map(d => d.key).filter(k => k && k !== info.node).slice(0, 20)
+    const refreshDeviceReports = () => accounts.loadReports(otherDeviceNodes())
+    watch(() => otherDeviceNodes().join(','), () => {
+      const missing = otherDeviceNodes().filter(k => !accounts.state.reports[k])
+      if (missing.length) void accounts.loadReports(missing)
+    }, { immediate: true })
     const closeDeviceAcct = () => { deviceAcct.node = '' }
     const deviceAcctView = computed(() => deviceAcctViewOf(accounts.state.remote, deviceAcct.selected))
     const deviceAcctTitleText = computed(() => deviceAcctTitle(deviceAcct.label))
@@ -1007,6 +1020,7 @@ const app = createApp({
       notify: notifyPrefs.value, frame: frame.value, mode: ui.mode, dpMode: ui.dpMode, toolbar: ui.toolbar, bubble: ui.bubble,
       tabDim: dims.tabDim, groupDim: dims.groupDim,
       voice: { cfg: { tts_voice: voiceCfg.tts_voice, tts_auto: voiceCfg.tts_auto, stt_lang: voiceCfg.stt_lang, stt_model: voiceCfg.stt_model }, enabled: ttsVoices.value.enabled, voices: ttsVoices.value.voices, sttReady: Boolean(sttSt.value?.ready), installBusy: voice.state.install.busy, note: voice.state.install.text || voiceMsg.value || sttText.value },
+      devices: deviceTree.value,
       accounts: {
         list: accounts.state.list, current: accounts.state.current, codexLine: codexLine(accounts.state.codex, accounts.state.codexErr),
         busy: accounts.state.busy, confirmDel: accounts.state.confirmDel, msg: accounts.state.msg, trustOwn: accounts.state.trustOwn, autoAdd: autoAddClaude.value, autoNote: accounts.state.autoNote,
@@ -1014,7 +1028,6 @@ const app = createApp({
       },
       closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy, blocked: autostart.blocked },
       bridge: bridge.shown ? { enabled: bridge.enabled, running: bridge.running, legacy: bridge.legacy, takeoverAllowed: bridge.takeoverAllowed, remoteLaunch: bridge.remoteLaunch, unaddressedTo: bridge.unaddressedTo, error: bridge.error, busy: bridge.busy, confirm: bridge.confirm } : null,
-      cli: cliInfo.shown ? { path: cliInfo.path, example: cliInfo.example, copied: cliInfo.copied } : null,
       askpass: askpassInfo.shown ? { path: askpassInfo.path, example: askpassInfo.example, copied: askpassInfo.copied } : null,
       autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual, status: updateStatus({ checking: upd.checking, phase: upd.phase, info: upd.info, lastCheck: upd.lastCheck, error: upd.checkErr, current: info.version }) },
       usage: { loading: usage.state.loading, error: usage.state.error, data: usage.state.data, updated: usage.state.updated },
@@ -1042,6 +1055,8 @@ const app = createApp({
         case 'acct-remote-node': await accounts.remoteSelect(String(value ?? '')); break
         case 'acct-remote-switch': await accounts.remoteSwitch(String(value ?? '')); break
         case 'acct-trust': await accounts.setTrust(value === true); break
+        case 'devices-refresh': await refreshDeviceReports(); break
+        case 'device-switch': await openDeviceAcct(String(value ?? '')); break
         case 'closeTo': await setCloseTo(value); break
         case 'autostart': await setAutostart(value === true); break
         case 'bridge-enable': await setBridgeEnabled(value === true); break
@@ -1050,7 +1065,6 @@ const app = createApp({
         case 'bridge-takeover': bridge.confirm = true; break
         case 'bridge-takeover-yes': await takeoverBridge(); break
         case 'bridge-takeover-no': bridge.confirm = false; break
-        case 'cli-copy': await copyCliExample(); break
         case 'askpass-copy': await copyAskpassPath(); break
         case 'autoCheck': autoCheck.value = value === true; break
         case 'check-update': await checkUpdate(true); break

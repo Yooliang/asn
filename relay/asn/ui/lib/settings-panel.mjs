@@ -14,8 +14,8 @@ import { USAGE_NOTE } from './usage.mjs'
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
 export const SETTING_OPS = [
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
-  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-add', 'acct-auto', 'acct-remote-node', 'acct-remote-switch', 'acct-trust',
-  'closeTo', 'autostart', 'bridge-enable', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'cli-copy', 'askpass-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'avatar-remove',
+  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-add', 'acct-auto', 'acct-remote-node', 'acct-remote-switch', 'acct-trust', 'devices-refresh', 'device-switch',
+  'closeTo', 'autostart', 'bridge-enable', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'avatar-remove',
 ]
 
 export const SettingsPanel = {
@@ -135,6 +135,24 @@ export const SettingsPanel = {
           </section>
         </div>
       </template>
+      <template v-if="catKey === 'devices'">
+        <div class="dev-set">
+          <div class="upd-row"><button class="aero-btn" type="button" @click="act('devices-refresh')">重新整理</button></div>
+          <small v-if="!st.devices.length">還沒有設備。</small>
+          <section class="set-card dev-card" v-for="d in st.devices" :key="d.key" :aria-label="d.label">
+            <header class="vendor-h"><b>{{ d.label }}</b><small>{{ d.kind }}{{ d.self ? '（這台）' : '' }}、{{ d.onlineText }}</small></header>
+            <small v-if="d.reportedText">{{ d.reportedText }}</small>
+            <small v-if="d.empty">{{ d.empty }}</small>
+            <ul class="acct-list dev-vendors" v-if="d.vendors.length">
+              <li v-for="v in d.vendors" :key="v.key">
+                <span class="acct-txt"><span class="acct-name">{{ v.label }}：{{ v.account }}</span><small v-if="v.extra">{{ v.extra }}</small><small v-if="v.switchHint">{{ v.switchHint }}</small></span>
+                <button class="aero-btn" type="button" v-if="v.switchable" @click="act('device-switch', d.key)">切換</button>
+              </li>
+            </ul>
+          </section>
+          <small>只有 Claude 帳號能從這裡切換；其他廠商目前只顯示，沒回報的會寫「未回報」。</small>
+        </div>
+      </template>
       <template v-if="catKey === 'look'">
         <label>視窗外框
           <select class="set-sel" :value="st.frame" @change="act('frame', $event.target.value)" aria-label="視窗外框"><option v-for="f in FRAMES" :key="f" :value="f">{{ FRAME_LABEL[f] }}</option></select>
@@ -177,17 +195,6 @@ export const SettingsPanel = {
             </div>
           </template>
           <small v-if="st.bridge.error">{{ st.bridge.error }}</small>
-        </section>
-        <section class="set-card" aria-label="寄信指令" v-if="st.cli">
-          <small>Claude 視窗用這個命令列寄信、收信、看群組、下載附件，不必另外安裝任何東西：</small>
-          <code class="set-code">{{ st.cli.path }}</code>
-          <code class="set-code">{{ st.cli.example }}</code>
-          <button class="aero-btn" type="button" @click="act('cli-copy')">{{ st.cli.copied ? '已複製' : '複製寄信指令' }}</button>
-        </section>
-        <section class="set-card" aria-label="密碼小幫手" v-if="st.askpass">
-          <small>git 或 ssh 要密碼時由 ASN 跳窗請你輸入，密碼不會經過 AI。想用的話，在終端機執行下面這行（只對之後開的視窗生效；ASN 不會自動改你的設定）：</small>
-          <code class="set-code">{{ st.askpass.example }}</code>
-          <button class="aero-btn" type="button" @click="act('askpass-copy')">{{ st.askpass.copied ? '已複製' : '複製路徑' }}</button>
         </section>
       </template>
       <template v-if="catKey === 'update'">
@@ -235,6 +242,14 @@ export const SettingsPanel = {
           <label>工作資料夾白名單（一行一個）
             <textarea class="set-area" rows="4" :value="st.launch.cwdText" @change="act('launch-cwd', $event.target.value)"></textarea>
           </label>
+        <details class="set-adv" v-if="st.askpass">
+          <summary>進階</summary>
+          <section class="set-card" aria-label="密碼小幫手">
+            <small>git 或 ssh 要密碼時由 ASN 跳窗請你輸入，密碼不會經過 AI。想用的話，在終端機執行下面這行（只對之後開的視窗生效；ASN 不會自動改你的設定）：</small>
+            <code class="set-code">{{ st.askpass.example }}</code>
+            <button class="aero-btn" type="button" @click="act('askpass-copy')">{{ st.askpass.copied ? '已複製' : '複製路徑' }}</button>
+          </section>
+        </details>
         </div>
       </template>
       <template v-if="catKey === 'usage'">
