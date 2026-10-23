@@ -141,10 +141,10 @@ impl OpsEnv for SystemOpsEnv {
     fn tell(&self, name: &str, text: &str) -> Result<(), String> {
         // 走收發室既有的投遞：寄一封給自己這台電腦、指定那個視窗的信，橋收到後照一般來信轉進視窗
         let body = json!({ "to_node": self.relay.node, "to_agent": name, "body": text, "from_agent": self.relay.window_name(), "expects_reply": false });
-        tauri::async_runtime::block_on(self.relay.api("send", Some(body))).map(|_| ())
+        crate::rt::block_on(self.relay.api("send", Some(body))).map(|_| ())
     }
     fn progress(&self, op_id: &str, detail: &str) {
-        let _ = tauri::async_runtime::block_on(self.relay.api("partner_op_progress", Some(json!({ "id": op_id, "detail": detail }))));
+        let _ = crate::rt::block_on(self.relay.api("partner_op_progress", Some(json!({ "id": op_id, "detail": detail }))));
     }
     fn handoff_wait_ms(&self) -> u64 {
         10 * 60 * 1000

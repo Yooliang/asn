@@ -232,9 +232,9 @@ impl EngineSet {
         }
     }
     /// 背景定時重列名單；有變就通知核心立刻回報。回傳的任務在 ASN 結束時被中止
-    pub fn spawn_refresher(self: &Arc<Self>, every_ms: u64) -> tauri::async_runtime::JoinHandle<()> {
+    pub fn spawn_refresher(self: &Arc<Self>, every_ms: u64) -> crate::rt::JoinHandle<()> {
         let me = self.clone();
-        tauri::async_runtime::spawn(async move {
+        crate::rt::spawn(async move {
             loop {
                 tokio::time::sleep(std::time::Duration::from_millis(every_ms.max(50))).await;
                 if me.refresh_all().await {

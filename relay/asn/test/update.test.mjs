@@ -130,7 +130,7 @@ test('設定：公鑰在設定檔、來源固定 https、產 .sig；私鑰不在
   const cap = read('src-tauri/capabilities/default.json')
   assert.doesNotMatch(cap, /updater:/, '前端不直接用外掛指令，只走自訂命令')
   const cargo = read('src-tauri/Cargo.toml')
-  assert.match(cargo, /tauri-plugin-updater = "=\d+\.\d+\.\d+"/, '版本固定')
+  assert.match(cargo, /tauri-plugin-updater = [^\n]*"=\d+\.\d+\.\d+"/, '版本固定')
   const ignore = fs.readFileSync(new URL('../../../.gitignore', import.meta.url), 'utf8')
   assert.match(ignore, /^\*\.key$/m)
   assert.match(ignore, /^site\/public\/update\/\*\.exe$/m)

@@ -61,11 +61,20 @@ pub fn write_settings(data_dir: &Path, s: BridgeSettings) -> Result<(), String> 
 
 // ---- 執行 --------------------------------------------------------------------------------------
 
+/// 「只有引擎」模式用的空殼：沒有收發室 worker，要交給它的信一律回失敗（核心會照轉交失敗處理）
+struct NoWorker;
+impl WorkerSink for NoWorker {
+    fn say(&self, _text: String) -> Result<(), String> {
+        Err("沒有啟用收發室 worker（只有引擎模式）".into())
+    }
+    fn kill(&self) {}
+}
+
 pub struct Running {
     shutdown: Arc<Notify>,
-    worker: ProcWorker,
+    worker: Option<ProcWorker>,
     lock: lock::BridgeLock,
-    tasks: Vec<tauri::async_runtime::JoinHandle<()>>,
+    tasks: Vec<crate::rt::JoinHandle<()>>,
     engines: Option<Arc<EngineSet>>,
     #[cfg_attr(not(test), allow(dead_code))]
     pub log: Arc<BridgeLog>,
@@ -81,7 +90,9 @@ impl Running {
         if let Some(e) = &self.engines {
             e.stop(); // 只關自己啟動並記下 PID 的引擎子程序
         }
-        self.worker.stop();
+        if let Some(w) = &self.worker {
+            w.stop();
+        }
         self.lock.release();
     }
 }
@@ -125,8 +136,15 @@ pub fn start_with(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>, laun
         extra_env: cfg.extra_env.clone(),
     };
     let wlog = log.clone();
-    let (w, lines) = ProcWorker::spawn(spec, move |l| wlog.line(&l));
-    let sink: Arc<dyn WorkerSink> = Arc::new(w.clone());
+    // 只有引擎（無視窗橋）：不啟動 claude -p 收發室 worker；核心拿到不會做事的空殼，通道的送端不留，等於永遠沒有 worker 輸出
+    let (w, sink, lines): (Option<ProcWorker>, Arc<dyn WorkerSink>, mpsc::UnboundedReceiver<WorkerLine>) = if cfg.engine_only {
+        log.line("engine-only mode: no claude mailbox worker");
+        (None, Arc::new(NoWorker), mpsc::unbounded_channel().1)
+    } else {
+        let (w, lines) = ProcWorker::spawn(spec, move |l| wlog.line(&l));
+        let sink: Arc<dyn WorkerSink> = Arc::new(w.clone());
+        (Some(w), sink, lines)
+    };
     log.line(&format!("bridge starting node={} mailbox={} (ASN built-in)", cfg.node, cfg.mailbox_name));
     let alive: Arc<dyn Fn(u32) -> bool + Send + Sync> = Arc::new(crate::heartbeat::pid_alive);
     let wake = Arc::new(Notify::new());
@@ -153,7 +171,7 @@ pub fn start_with(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>, laun
         let (r, l) = (relay.clone(), log.clone());
         Arc::new(move |n: Notice| {
             let (r, l) = (r.clone(), l.clone());
-            tauri::async_runtime::spawn(async move {
+            crate::rt::spawn(async move {
                 let mut b = json!({ "to_node": n.to_node, "body": n.body, "from_agent": n.from_agent });
                 if let Some(a) = &n.to_agent {
                     b["to_agent"] = json!(a);
@@ -182,14 +200,14 @@ pub fn start_with(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>, laun
         core.set_engines(e.clone());
     }
     let mut tasks = vec![];
-    tasks.push(tauri::async_runtime::spawn(run_loop(core, lines, launched_rx, ev_rx, wake.clone(), shutdown.clone())));
+    tasks.push(crate::rt::spawn(run_loop(core, lines, launched_rx, ev_rx, wake.clone(), shutdown.clone())));
     if let Some(e) = &engine_set {
         tasks.push(e.spawn_refresher(cfg.engine_refresh_ms));
     }
     match anon_url {
         Some(url) => {
             let (w2, l2) = (wake, log.clone());
-            tasks.push(tauri::async_runtime::spawn(async move {
+            tasks.push(crate::rt::spawn(async move {
                 let topic = loop {
                     match relay.api("whoami", None).await {
                         Ok(v) => match v.get("bell_topic").and_then(Value::as_str) {

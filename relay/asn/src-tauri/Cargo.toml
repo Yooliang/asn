@@ -9,6 +9,7 @@ default-run = "asn"
 [[bin]]
 name = "asn"
 path = "src/main.rs"
+required-features = ["gui"]
 
 # 命令列（寄信／收信／群組／附件）：console 子系統的獨立小執行檔，cmd／PowerShell／Claude 的 Bash 都會等它結束、拿得到結束碼
 [[bin]]
@@ -20,8 +21,16 @@ path = "src/bin/asn-cli.rs"
 name = "asn-askpass"
 path = "src/bin/asn-askpass.rs"
 
+# 無視窗橋（Linux 伺服器用）：和電腦版共用同一份收發室核心，但不編進 Tauri／視窗／系統匣。設計見 docs/design/LINUX-HEADLESS.md
+[[bin]]
+name = "asn-bridge"
+path = "src/bin/asn_bridge.rs"
+
 # sideload＝自行安裝版（官網下載的 APK）：帶手機自動更新（下載、驗 sha256、交給系統安裝）。Google Play 版不開這個旗標，程式碼與安裝權限都不編進去
 [features]
+# gui（預設開）＝ Tauri 視窗版（電腦版與安卓版）。關掉（--no-default-features）就只剩收發室核心，供 asn-bridge 使用，不連 webkit／gtk
+default = ["gui"]
+gui = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-dialog", "dep:tauri-plugin-updater", "dep:tauri-plugin-opener"]
 sideload = []
 
 [lib]
@@ -30,13 +39,13 @@ name = "asn_lib"
 crate-type = ["cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2", features = [], optional = true }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = [], optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["time", "macros", "rt", "process", "sync", "io-util", "signal", "net"] }
+tokio = { version = "1", features = ["time", "macros", "rt", "rt-multi-thread", "process", "sync", "io-util", "signal", "net"] }
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 tokio-tungstenite = { version = "0.26" }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
@@ -51,20 +60,27 @@ tar = "0.4"
 zeroize = "1"
 # 遠端機密傳遞（#26 第二期）：X25519 金鑰協議＋HKDF＋AES-256-GCM 全用 ring（本來就在相依樹內），不自己寫密碼學
 ring = "0.17"
-tauri-plugin-dialog = "=2.8.3"
+tauri-plugin-dialog = { version = "=2.8.3", optional = true }
 
-# 電腦版（Windows／Linux）專屬：系統匣、自動更新、系統內建的加密連線（OpenSSL／SChannel）。行為與手機版分開，見 docs/design/ANDROID.md
-[target.'cfg(not(target_os = "android"))'.dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-updater = "=2.14.0"
+# 電腦版（Windows／macOS）專屬：系統匣、自動更新、系統內建的加密連線（SChannel／系統框架）。行為與手機版分開，見 docs/design/ANDROID.md
+[target.'cfg(not(any(target_os = "android", target_os = "linux")))'.dependencies]
+tauri = { version = "2", features = ["tray-icon"], optional = true }
+tauri-plugin-updater = { version = "=2.14.0", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+
+# Linux：一律用純 Rust 的 rustls（內建根憑證）。無視窗橋要在沒有 OpenSSL 的伺服器上跑、也要能編成靜態執行檔；做法同安卓版（已驗證）。Windows／macOS 仍用系統內建的加密連線
+[target.'cfg(target_os = "linux")'.dependencies]
+tauri = { version = "2", features = ["tray-icon"], optional = true }
+tauri-plugin-updater = { version = "=2.14.0", optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 
 # 安卓版專屬：純 Rust 的加密連線（不用交叉編譯 OpenSSL）、開系統瀏覽器的外掛
 [target.'cfg(target_os = "android")'.dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots"] }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
-tauri-plugin-opener = "2"
+tauri-plugin-opener = { version = "2", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_Console", "Win32_Foundation", "Win32_System_Threading", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_Security_Cryptography", "Win32_UI_Shell", "Win32_System_Diagnostics_Debug", "Win32_System_Diagnostics_ToolHelp", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_Time", "Win32_System_Pipes", "Win32_Security_Authorization"] }

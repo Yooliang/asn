@@ -324,7 +324,7 @@ impl ProcWorker {
         let (line_tx, line_rx) = mpsc::unbounded_channel();
         let w = ProcWorker { sh: sh.clone(), work_dir: spec.work_dir.clone() };
         let log = Arc::new(log);
-        tauri::async_runtime::spawn(supervise(spec, sh, line_tx, log));
+        crate::rt::spawn(supervise(spec, sh, line_tx, log));
         (w, line_rx)
     }
     /// 結束：不再重啟，關掉自己啟動的 worker（只關記下的 PID）並刪 mailbox.pid

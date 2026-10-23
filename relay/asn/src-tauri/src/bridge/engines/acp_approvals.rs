@@ -123,7 +123,7 @@ impl Approvals {
         g.insert(id.clone(), Item { worker: worker.into(), summary: summary.into(), targets, tx: Some(tx) });
         drop(g);
         let (me, id2) = (self.clone(), id.clone());
-        tauri::async_runtime::spawn(async move {
+        crate::rt::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(timeout_ms)).await;
             me.finish(&id2, Answer::Timeout);
         });

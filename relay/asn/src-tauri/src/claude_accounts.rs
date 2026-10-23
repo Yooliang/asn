@@ -634,26 +634,26 @@ pub async fn auto_loop(data_dir: PathBuf, first: std::time::Duration, every: std
 
 // ---------- Tauri 指令（前端只拿得到 AccountInfo） ----------
 
-#[tauri::command]
+#[cfg_attr(feature = "gui", tauri::command)]
 pub fn claude_accounts_list() -> Vec<AccountInfo> {
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     list(&claude_home())
 }
-#[tauri::command]
+#[cfg_attr(feature = "gui", tauri::command)]
 pub fn claude_account_current() -> Option<AccountInfo> {
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     current_login(&claude_home())
 }
-#[tauri::command]
+#[cfg_attr(feature = "gui", tauri::command)]
 pub fn claude_account_save() -> Result<AccountInfo, String> {
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     save_current(&claude_home()).map_err(|e| e.to_string())
 }
-#[tauri::command]
+#[cfg_attr(feature = "gui", tauri::command)]
 pub fn claude_account_switch(email: String) -> Result<SwitchOutcome, String> {
     local_switch(&email)
 }
-#[tauri::command]
+#[cfg_attr(feature = "gui", tauri::command)]
 pub fn claude_account_delete(email: String) -> Result<(), String> {
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     delete(&claude_home(), &email).map_err(|e| e.to_string())

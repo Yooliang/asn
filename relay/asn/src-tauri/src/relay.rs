@@ -318,7 +318,7 @@ impl Relay {
         let me = self.clone();
         let body = build_presence_body(&self.window_name(), version, "offline", "");
         let h = std::thread::spawn(move || {
-            tauri::async_runtime::block_on(async move {
+            crate::rt::block_on(async move {
                 let _ = me.api_with("asn_presence", Some(body), Duration::from_secs(3)).await;
             });
         });

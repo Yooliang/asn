@@ -45,7 +45,7 @@ pub fn detect_snapshot() -> ToolsDetectSnapshot {
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "gui", tauri::command)]
 pub async fn ai_cli_detect() -> ToolsDetectSnapshot {
     tokio::task::spawn_blocking(detect_snapshot)
         .await
@@ -55,7 +55,7 @@ pub async fn ai_cli_detect() -> ToolsDetectSnapshot {
         })
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "gui", tauri::command)]
 pub async fn ai_cli_install(tool_id: String) -> Result<InstallResult, String> {
     if tool(&tool_id).is_none() {
         return Err("不認得這個工具。".into());
@@ -66,7 +66,7 @@ pub async fn ai_cli_install(tool_id: String) -> Result<InstallResult, String> {
 }
 
 /// 僅開啟登入用終端機（不是「啟動 CLI 工作階段」捷徑）。
-#[tauri::command]
+#[cfg_attr(feature = "gui", tauri::command)]
 pub async fn ai_cli_login(tool_id: String) -> Result<(), String> {
     let def = tool(&tool_id).ok_or_else(|| "不認得這個工具。".to_string())?.clone();
     if def.login_argv.is_empty() {

@@ -88,7 +88,7 @@ impl Rpc {
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
         // 寫入：寫不進去（對方已結束）就靜默放棄，結束由 wait 任務處理
-        tauri::async_runtime::spawn(async move {
+        crate::rt::spawn(async move {
             while let Some(line) = rx.recv().await {
                 let Some(s) = stdin.as_mut() else { break };
                 if s.write_all(line.as_bytes()).await.is_err() || s.flush().await.is_err() {
@@ -99,7 +99,7 @@ impl Rpc {
         });
         if let Some(out) = stdout {
             let (r, inc, raw) = (rpc.clone(), o.on_incoming.clone(), o.on_json_line.clone());
-            tauri::async_runtime::spawn(async move {
+            crate::rt::spawn(async move {
                 let mut lines = BufReader::new(out).lines();
                 while let Ok(Some(l)) = lines.next_line().await {
                     let l = l.trim();
@@ -119,7 +119,7 @@ impl Rpc {
         }
         if let Some(err) = stderr {
             let (r, log) = (rpc.clone(), o.log.clone());
-            tauri::async_runtime::spawn(async move {
+            crate::rt::spawn(async move {
                 let mut lines = BufReader::new(err).lines();
                 let mut n = 0;
                 while let Ok(Some(l)) = lines.next_line().await {
@@ -141,7 +141,7 @@ impl Rpc {
             });
         }
         let (r, on_exit, on_end) = (rpc.clone(), o.on_exit.clone(), o.on_end.clone());
-        tauri::async_runtime::spawn(async move {
+        crate::rt::spawn(async move {
             let why = tokio::select! {
                 st = child.wait() => match st { Ok(s) => format!("行程結束了（code={}）", s.code().map(|c| c.to_string()).unwrap_or_else(|| "?".into())), Err(e) => format!("行程結束了：{e}") },
                 _ = r.0.kill.notified() => {
@@ -263,7 +263,7 @@ impl Rpc {
         self.fail_all(RpcError { message: "被停止了".into(), code: None });
         self.0.tx.lock().unwrap().take();
         let me = self.clone();
-        tauri::async_runtime::spawn(async move {
+        crate::rt::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
             me.0.kill_tree.store(true, Ordering::SeqCst);
             me.0.kill.notify_one();

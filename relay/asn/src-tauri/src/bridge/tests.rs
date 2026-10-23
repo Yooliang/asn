@@ -1198,7 +1198,7 @@ fn 真的子程序_啟動轉交回覆寄回_關閉時只關自己的_worker_並�
     c.roster_ms = 100;
     c.tick_ms = 100;
     let relay = Arc::new(Relay::new(fr.url.clone(), "fake-test-key".into(), "T".into(), "T-ASN".into()));
-    tauri::async_runtime::block_on(async {
+    crate::rt::block_on(async {
         let run = super::start(c, relay, None).expect("內建橋啟動");
         assert!(super::lock::read_pid(&super::lock::pid_file(work.path())) == Some(std::process::id()), "拿到收信鎖");
         // 第二個橋（同一個工作資料夾）拿不到鎖
@@ -1859,4 +1859,34 @@ async fn 即時回報_視窗新增也算變化() {
     put_session(sessions.path(), 5002, "T-乙", "idle", 2);
     assert!(core.watch_local(T0 + 5_000).await);
     assert!(fr.st.lock().unwrap().rosters[1]["agents"].as_array().unwrap().iter().any(|a| a["name"] == "T-乙"));
+}
+
+#[test]
+fn 只有引擎模式_不啟動收發室_worker_但照常收信回報名單() {
+    let fr = FakeRelay::start();
+    let work = tempfile::tempdir().unwrap();
+    let sessions = tempfile::tempdir().unwrap();
+    let mut c = cfg(work.path(), sessions.path());
+    c.engine_only = true;
+    // 就算有 claude 也不准被啟動：指到一個不存在的程式，若真的去啟動會在 log 留下啟動失敗
+    c.claude_bin = "no-such-claude-binary".into();
+    c.poll_ms = 100;
+    c.roster_ms = 100;
+    c.tick_ms = 100;
+    let relay = Arc::new(Relay::new(fr.url.clone(), "fake-test-key".into(), "T".into(), "T-ASN".into()));
+    crate::rt::block_on(async {
+        let run = super::start(c, relay, None).expect("內建橋啟動");
+        let t0 = std::time::Instant::now();
+        while fr.st.lock().unwrap().rosters.is_empty() && t0.elapsed() < std::time::Duration::from_secs(20) {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        let log = run.log.recent().join("\n");
+        assert!(run.worker.is_none(), "不產生 worker\n{log}");
+        assert!(log.contains("engine-only"), "{log}");
+        assert!(!log.contains("no-such-claude-binary"), "不該嘗試啟動 claude\n{log}");
+        assert!(!super::lock::mailbox_pid_file(work.path()).exists(), "沒有 mailbox.pid");
+        assert!(!fr.st.lock().unwrap().rosters.is_empty(), "名單照常回報");
+        run.stop();
+        assert!(!super::lock::pid_file(work.path()).exists(), "bridge.pid 已清");
+    });
 }

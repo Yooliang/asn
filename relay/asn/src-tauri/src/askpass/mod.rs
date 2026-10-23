@@ -7,6 +7,7 @@
 //! 密碼永遠不進：模型、信件、往來記錄、log、檔案、指令列參數、環境變數、剪貼簿。
 //! 本資料夾除了 `tests.rs` 以外的程式碼受守門測試掃描（見 tests.rs「守門」），不准出現上述去處。
 pub mod client;
+#[cfg(feature = "gui")]
 pub mod dialog;
 pub mod pipe;
 pub mod proto;

@@ -53,7 +53,7 @@ pub fn current(dir: &Path) -> Result<Option<CodexLogin>, String> {
     Ok(None)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "gui", tauri::command)]
 pub fn codex_account_current() -> Result<Option<CodexLogin>, String> {
     current(&codex_home())
 }

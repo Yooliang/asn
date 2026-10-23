@@ -7,7 +7,7 @@
 //! 密碼與密文永遠不進：log、往來記錄、檔案、指令列參數、環境變數、剪貼簿、信件。
 //! 本資料夾除了 `tests.rs` 以外的程式碼受守門測試掃描（見 tests.rs「守門」）。
 pub mod confirm;
-#[cfg(desktop)]
+#[cfg(all(desktop, feature = "gui"))]
 pub mod desktop;
 pub mod crypto;
 pub mod requester;
