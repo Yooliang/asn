@@ -75,9 +75,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-/// 所有視窗共用的瀏覽器啟動參數（必須一致，否則第二扇視窗建不起來）。WebView2 才支援自動播放參數；Linux WebKitGTK 略過。
+/// 所有視窗共用的瀏覽器啟動參數（必須一致，否則第二扇視窗建不起來）。WebView2 才支援這些參數（自動播放，以及關掉隱藏／被遮住時的計時器節流與背景降權，讓縮在系統匣的名單畫面照常收信）；Linux WebKitGTK 略過。必須與 tauri.conf.json 名單視窗的 additionalBrowserArgs 一字不差（test/window-throttling.test.mjs 守著）。
 #[cfg(windows)]
-pub const BROWSER_ARGS: &str = "--autoplay-policy=no-user-gesture-required";
+pub const BROWSER_ARGS: &str = "--autoplay-policy=no-user-gesture-required --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --disable-features=CalculateNativeWinOcclusion";
 #[cfg(all(not(windows), desktop))]
 pub const BROWSER_ARGS: &str = "";
 
