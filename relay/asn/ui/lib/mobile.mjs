@@ -161,6 +161,30 @@ export function androidBridge(win) {
     relaunch: () => call('relaunch'),
     selfUpdateEnabled: () => call('selfUpdateEnabled') === true,   // 自行安裝版才有（Google Play 版是 false）
     installApk: path => String(call('installApk', path) ?? 'error'),   // ok／need_permission／error／unsupported
+    call: callBridge(win, b),   // 偽通話用的語音辨識與念出（沒有就是 null，畫面不出現通話鈕）
+    keepAwake: on => call('keepAwake', on === true),   // 通話中螢幕不要自己暗掉
+  }
+}
+
+// 通話的外殼橋（CallVoice.kt）：安卓內建的語音辨識與語音合成。事件由外殼用 window.__asnCallEvent(json字串) 推進來。
+// 外殼太舊（沒有這些方法）就回 null。
+function callBridge(win, b) {
+  if (typeof b.callAvailable !== 'function') return null
+  const run = (fn, ...a) => { try { return typeof b[fn] === 'function' ? b[fn](...a) : undefined } catch { return undefined } }
+  return {
+    available: () => run('callAvailable') === true,
+    micState: () => (run('callMicState') === 'granted' ? 'granted' : 'ask'),
+    requestMic: () => run('callRequestMic'),
+    listen: () => run('callListen'),
+    stopListen: () => run('callStopListen'),
+    speak: (id, text) => run('callSpeak', String(id), String(text)),
+    stopSpeak: () => run('callStopSpeak'),
+    end: () => run('callEnd'),
+    onEvent(fn) {
+      const h = s => { let e = null; try { e = JSON.parse(s) } catch { return } fn(e) }
+      win.__asnCallEvent = h
+      return () => { if (win.__asnCallEvent === h) win.__asnCallEvent = null }
+    },
   }
 }
 
