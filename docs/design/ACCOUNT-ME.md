@@ -24,7 +24,7 @@
 
 成立時：`from_agent` 換成人代號，信上記 `person_user`。真實寄件節點 `from_node` 不動。
 
-AI 收信時（`irori_relay_inbox`／`irori_relay_inbox_agent`），本人寄來的信的 `from_node` 一律顯示成**租戶的擁有者節點**（資料欄位，給舊橋相容用；新橋的信頭不再顯示它，見 MAIL-HEADER.md），不論從哪台設備寄的——AI 回信的慣例是 `to_node = from_node`、`to_agent = from_agent`，所以不論人從哪台說話，AI 看到的都是同一個地址。擁有者節點不存在時退回真實節點。
+AI 收信時（`asn_relay_inbox`／`asn_relay_inbox_agent`），本人寄來的信的 `from_node` 是**實際寄出的設備節點**（migration `20261023140000_reply_to_person.sql` 起；之前是租戶擁有者節點 XISU，害回信寄到已不在線的角色節點）。AI 回信的慣例仍是 `to_node = from_node`、`to_agent = from_agent`，`to_agent` 是人代號就走下面的扇出；舊用戶端只寫節點（沒有視窗）寄給租戶角色節點的信，後台保底改寄本人位址。角色節點 XISU 在 `20261023150000_drop_xisu.sql` 拿掉，舊寫法 `XISU`、`XISU/u:xxxx` 仍視同寄給本人。
 
 ## 回信扇出
 
