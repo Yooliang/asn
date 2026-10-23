@@ -20,27 +20,40 @@ pub enum Cmd {
 pub struct RunOpts {
     /// 只有引擎：不啟動 `claude -p` 收發室 worker
     pub engine_only: bool,
+    /// 收件匣模式：不啟動 worker、不需 Aegis，收到的信存進 `<ASN_HOME>/inbox/inbox.jsonl`，由代理用 `asn-cli inbox` 讀、自己用 `asn-cli send` 回信
+    pub inbox: bool,
 }
 
-const USAGE: &str = "用法：asn-bridge run [--engine-only]\n\
+const USAGE: &str = "用法：asn-bridge run [--engine-only | --inbox]\n\
   run            讀資料夾（ASN_HOME，預設 ~/.asn，舊的 ~/.irori-relay 也認）裡的節點金鑰，啟動內建收發室核心（收信、門鈴、名單回報）\n\
   --engine-only  只有引擎：不啟動 claude -p 收發室 worker（也可設環境變數 ASN_BRIDGE_ENGINE_ONLY=1）\n\
+  --inbox        收件匣模式：不啟動 worker、不需 Aegis；信先存進 <ASN_HOME>/inbox/inbox.jsonl（fsync 後才 ack），代理用 asn-cli inbox 讀、asn-cli send 回信\n\
+                 （視窗名取 ASN_INBOX_NAME，預設節點代號；也可設環境變數 ASN_BRIDGE_INBOX=1）\n\
   --version      顯示版本\n\
   --help         顯示這段說明";
 
 /// 解析命令列（不含程式名）。`env_engine_only`＝環境變數 ASN_BRIDGE_ENGINE_ONLY 的值
 pub fn parse_args(args: &[String], env_engine_only: Option<&str>) -> Result<Cmd, String> {
+    parse_args_env(args, env_engine_only, None)
+}
+
+/// 同上，另外帶環境變數 ASN_BRIDGE_INBOX 的值
+pub fn parse_args_env(args: &[String], env_engine_only: Option<&str>, env_inbox: Option<&str>) -> Result<Cmd, String> {
     let mut it = args.iter();
     match it.next().map(String::as_str) {
         None | Some("-h") | Some("--help") | Some("help") => Ok(Cmd::Help),
         Some("-V") | Some("--version") | Some("version") => Ok(Cmd::Version),
         Some("run") => {
-            let mut o = RunOpts { engine_only: truthy(env_engine_only) };
+            let mut o = RunOpts { engine_only: truthy(env_engine_only), inbox: truthy(env_inbox) };
             for a in it {
                 match a.as_str() {
                     "--engine-only" => o.engine_only = true,
+                    "--inbox" => o.inbox = true,
                     other => return Err(format!("不認得的參數：{other}")),
                 }
+            }
+            if o.inbox && o.engine_only {
+                return Err("--inbox 與 --engine-only 不能同時用".into());
             }
             Ok(Cmd::Run(o))
         }
@@ -65,7 +78,8 @@ fn say(msg: &str) {
 /// 進入點：回傳結束碼
 pub fn main_with(args: &[String]) -> i32 {
     let env_only = crate::envc::get("ASN_BRIDGE_ENGINE_ONLY");
-    match parse_args(args, env_only.as_deref()) {
+    let env_inbox = crate::envc::get("ASN_BRIDGE_INBOX");
+    match parse_args_env(args, env_only.as_deref(), env_inbox.as_deref()) {
         Ok(Cmd::Help) => {
             say(USAGE);
             0
@@ -100,6 +114,9 @@ fn run(o: RunOpts) -> i32 {
     let relay = Arc::new(crate::relay::Relay::new(id.base_url.clone(), id.key.clone(), id.node.clone(), window));
     relay.set_owner_dir(work_dir.clone());
     let anon_url = id.anon.as_deref().and_then(|a| crate::bell::ws_url(relay.base(), a));
+    if o.inbox {
+        return run_inbox(&id.node, &home.primary, work_dir, relay, anon_url);
+    }
 
     let mut cfg = crate::bridge::core::Config::from_env(&id.node, work_dir.clone());
     cfg.data_dir = Some(work_dir.clone());
@@ -127,6 +144,54 @@ fn run(o: RunOpts) -> i32 {
         say("asn-bridge：收到停止訊號，收尾中");
         relay.set_bridge_running(false);
         running.stop();
+        0
+    })
+}
+
+/// 收件匣模式：不啟動 worker 與引擎，只收信存檔、回報名單。結束碼沿用：2 設定錯、3 另一個收信者在跑
+fn run_inbox(node: &str, relay_home: &std::path::Path, work_dir: std::path::PathBuf, relay: Arc<crate::relay::Relay>, anon_url: Option<String>) -> i32 {
+    use crate::bridge::{core::BridgeLog, lock};
+    let base = crate::bridge::core::Config::from_env(node, work_dir.clone());
+    let cfg = crate::inbox_mode::InboxCfg::from_env(node, relay_home, &base);
+    let store = match crate::inbox_mode::InboxStore::open(&cfg.dir) {
+        Ok(s) => s,
+        Err(e) => {
+            say(&format!("asn-bridge：建不了收件匣資料夾 {}：{e}", cfg.dir.display()));
+            return 2;
+        }
+    };
+    let lock = match lock::BridgeLock::acquire(&work_dir, std::process::id(), crate::heartbeat::pid_alive) {
+        Ok(l) => l,
+        Err(lock::LockError::HeldBy(pid)) => {
+            say(&format!("asn-bridge：另一個收信者（pid {pid}）已在跑，退出"));
+            return 3;
+        }
+        Err(lock::LockError::Io(m)) => {
+            say(&format!("asn-bridge：拿不到收信鎖：{m}"));
+            return 2;
+        }
+    };
+    let log = Arc::new(BridgeLog::new(Some(work_dir.join("bridge.log"))));
+    log.line(&format!("inbox mode starting node={node} window={} inbox={} known={}", cfg.name, cfg.dir.display(), store.len()));
+    say(&format!("asn-bridge {} 啟動（收件匣模式）：節點 {node}，視窗名 {}，信存在 {}", env!("CARGO_PKG_VERSION"), cfg.name, cfg.dir.display()));
+    crate::rt::block_on(async move {
+        let (wake, shutdown) = (Arc::new(tokio::sync::Notify::new()), Arc::new(tokio::sync::Notify::new()));
+        let bell = match anon_url {
+            Some(url) => Some(crate::inbox_mode::spawn_bell(relay.clone(), url, wake.clone(), log.clone())),
+            None => {
+                log.line("no anon key: doorbell off, polling only");
+                None
+            }
+        };
+        let main = crate::rt::spawn(crate::inbox_mode::run_loop(relay.clone(), store, cfg, log.clone(), wake, shutdown.clone()));
+        wait_for_stop().await;
+        say("asn-bridge：收到停止訊號，收尾中");
+        shutdown.notify_one();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), main).await;
+        if let Some(b) = bell {
+            b.abort();
+        }
+        lock.release();
         0
     })
 }
@@ -176,16 +241,25 @@ mod tests {
 
     #[test]
     fn run_預設會開收發室_worker() {
-        assert_eq!(parse_args(&a(&["run"]), None).unwrap(), Cmd::Run(RunOpts { engine_only: false }));
+        assert_eq!(parse_args(&a(&["run"]), None).unwrap(), Cmd::Run(RunOpts { engine_only: false, inbox: false }));
     }
 
     #[test]
     fn 旗標與環境變數都能開只有引擎() {
-        assert_eq!(parse_args(&a(&["run", "--engine-only"]), None).unwrap(), Cmd::Run(RunOpts { engine_only: true }));
-        assert_eq!(parse_args(&a(&["run"]), Some("1")).unwrap(), Cmd::Run(RunOpts { engine_only: true }));
-        assert_eq!(parse_args(&a(&["run"]), Some("true")).unwrap(), Cmd::Run(RunOpts { engine_only: true }));
-        assert_eq!(parse_args(&a(&["run"]), Some("0")).unwrap(), Cmd::Run(RunOpts { engine_only: false }));
-        assert_eq!(parse_args(&a(&["run"]), Some("")).unwrap(), Cmd::Run(RunOpts { engine_only: false }));
+        assert_eq!(parse_args(&a(&["run", "--engine-only"]), None).unwrap(), Cmd::Run(RunOpts { engine_only: true, inbox: false }));
+        assert_eq!(parse_args(&a(&["run"]), Some("1")).unwrap(), Cmd::Run(RunOpts { engine_only: true, inbox: false }));
+        assert_eq!(parse_args(&a(&["run"]), Some("true")).unwrap(), Cmd::Run(RunOpts { engine_only: true, inbox: false }));
+        assert_eq!(parse_args(&a(&["run"]), Some("0")).unwrap(), Cmd::Run(RunOpts { engine_only: false, inbox: false }));
+        assert_eq!(parse_args(&a(&["run"]), Some("")).unwrap(), Cmd::Run(RunOpts { engine_only: false, inbox: false }));
+    }
+
+    #[test]
+    fn 收件匣旗標與環境變數() {
+        let inbox = RunOpts { engine_only: false, inbox: true };
+        assert_eq!(parse_args(&a(&["run", "--inbox"]), None).unwrap(), Cmd::Run(inbox.clone()));
+        assert_eq!(parse_args_env(&a(&["run"]), None, Some("1")).unwrap(), Cmd::Run(inbox));
+        assert_eq!(parse_args_env(&a(&["run"]), None, Some("0")).unwrap(), Cmd::Run(RunOpts::default()));
+        assert!(parse_args(&a(&["run", "--inbox", "--engine-only"]), None).is_err());
     }
 
     #[test]

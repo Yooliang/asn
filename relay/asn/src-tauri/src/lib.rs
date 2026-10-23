@@ -46,6 +46,7 @@ pub mod secret_remote;
 mod bridge;
 #[cfg(desktop)]
 pub mod headless;
+pub mod inbox_mode;
 #[cfg(desktop)]
 pub mod cli;
 #[cfg(desktop)]
