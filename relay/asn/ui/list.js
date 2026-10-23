@@ -19,6 +19,7 @@ import { ChatPane } from './lib/chatpane.mjs'
 import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatarFile, selfAvatarSrc } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, switchMode, tabVisible, toggleCollapsed } from './lib/merge.mjs'
+import { normalizeSession, restoreSession, sameSession, snapshotSession, trailingThrottle } from './lib/session.mjs'
 import { chatTabSameZone, closeAllChatTabs, closeIdleChatTabs, idleTabIds, withCallState, dropInsertBefore, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
 import { nowPlayingLine, normalizeNowPlaying } from './lib/now-playing.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, normalizeClose, normalizeFrame, totalUnread, notifyFromSaved, notifyPlan, notifyWith } from './lib/prefs.mjs'
@@ -207,6 +208,17 @@ const ui = reactive({ mode: normalizeMode(savedMe.winMode), ...normalizeLook(sav
 const sizes = reactive({ split: normalizeSize(savedMe.splitSize, 'split'), merged: normalizeSize(savedMe.mergedSize, 'merged'), guide: normalizePanelSize(savedMe.guideSize), setting: normalizePanelSize(savedMe.settingSize) })   // guide／setting＝分離模式兩扇視窗的大小
 const winSize = () => ({ w: window.innerWidth, h: window.innerHeight })
 let switching = false
+// 記住開著的分頁與對話視窗（重啟後回到原狀態）：存在 asn-me.json 的 session。還原完成前不寫新的，免得把上次的狀態蓋成空的
+const sess = reactive({ saved: normalizeSession(savedMe.session), ready: false, wins: [], panelWins: [] })
+const currentSession = () => snapshotSession({ tabs: ui.tabs, active: ui.active, panel: ui.panel, windows: sess.wins, panelWindows: sess.panelWins }, id => core.friends.get(id))
+async function pollOpenWindows() {   // 分開模式開著哪些對話視窗，由 Rust 端的視窗清單為準
+  if (!sess.ready || ui.mode !== 'split') { if (sess.wins.length || sess.panelWins.length) { sess.wins = []; sess.panelWins = [] } ; return }
+  try {
+    const [chats, panels] = await invoke('open_windows')
+    if (JSON.stringify(chats) !== JSON.stringify(sess.wins)) sess.wins = chats
+    if (JSON.stringify(panels) !== JSON.stringify(sess.panelWins)) sess.panelWins = panels
+  } catch { /* 取不到就維持上次 */ }
+}
 
 const core = new AsnCore({
   transport, store: store('chats'), selfNode: info.node, windowName: info.window_name,
@@ -708,7 +720,9 @@ if (ui.mode === 'merged') await invoke('main_layout', { merged: true, w: sizes.m
 await listen('relay-bell', () => void core.pull('bell'))   // Rust 端的 Realtime 門鈴
 await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 
-watch([me, showNowPlaying, notifyPrefs, frame, closeTo, autoAddClaude, autoCheck, dims, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes], () => { const { nick, ...rest } = me; void meStore.save({ me: rest, showNowPlaying: showNowPlaying.value, notify: notifyPrefs.value, frame: frame.value, closeTo: closeTo.value, autoAddClaude: autoAddClaude.value, autoUpdate: autoCheck.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting }); sync() }, { deep: true })
+watch([me, showNowPlaying, notifyPrefs, frame, closeTo, autoAddClaude, autoCheck, dims, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes, () => ui.tabs, () => ui.active, () => ui.panel, () => sess.wins, () => sess.panelWins, () => sess.ready], () => { sync(); saveMe() }, { deep: true })
+const saveMe = trailingThrottle(() => { const { nick, ...rest } = me; void meStore.save({ me: rest, showNowPlaying: showNowPlaying.value, notify: notifyPrefs.value, frame: frame.value, closeTo: closeTo.value, autoAddClaude: autoAddClaude.value, autoUpdate: autoCheck.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting, session: sess.ready ? currentSession() : sess.saved }) }, 600)
+addEventListener('pagehide', () => saveMe.flush())
 // 系統匣圖示的提示文字帶未讀總數
 watch(() => totalUnread(friends.value), n => { void invoke('set_tray_unread', { n }).catch(() => {}) }, { immediate: true })
 // 在線狀態：狀態下拉與個人訊息交給 Rust 端回報（每 60 秒一次，改了立刻送；後台沒部署就靜默不送）
@@ -1087,6 +1101,31 @@ const root = app.mount('#app')
 
 await core.start()
 sync()
+
+// 還原上次開著的分頁與對話視窗：要等名單載入（夥伴 ID 才對得上）；名單一直連不上就維持存檔不動，不會把它蓋掉
+async function restoreOpenSession() {
+  const r = restoreSession(sess.saved, { friends: core.friends, pinned: ui.pinnedChat })
+  if (JSON.stringify(r.pinned) !== JSON.stringify(ui.pinnedChat)) ui.pinnedChat = r.pinned
+  for (const k of PANEL_KINDS) if (!ui.panel[k]) ui.panel[k] = r.panel[k]
+  if (ui.mode === 'merged') {
+    const tabs = orderTabs([...r.tabs, ...ui.tabs.filter(id => !r.tabs.includes(id))], ui.pinnedChat)
+    ui.tabs = tabs
+    if (!ui.active || !tabs.includes(ui.active)) ui.active = r.active || tabs.at(-1) || ''
+    for (const id of tabs) if (!isPanelTab(id)) pushLog(id)
+    if (ui.active && !isPanelTab(ui.active)) { core.markRead(ui.active); void core.syncHistory(ui.active) }
+  } else {
+    for (const id of r.windows) await openChat(id)
+    for (const kind of r.panelWindows) await openPanel(kind, ui.panel[kind])
+  }
+  sess.ready = true
+  sync()
+}
+if (!info.shot) {
+  let restoring = false
+  const go = () => { if (restoring || !core.rosterLoaded) return; restoring = true; void restoreOpenSession() }
+  go(); core.on('state', go)
+  setInterval(() => void pollOpenWindows(), 3000)
+}
 
 // ---------- --shot 模式：開一個對話、寄一封信＋一個震動、彈一則提示，然後截圖並結束 ----------
 // 設定檔（asn-me.json）可帶：winMode（'merged' 才是整合模式，欄位名就是 winMode，不是 mode）、shotNoChat（true＝不開任何對話，
