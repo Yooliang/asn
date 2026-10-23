@@ -138,6 +138,20 @@ pub fn with_partner_id(mut body: Value, partner_id: Option<&str>) -> Value {
     body
 }
 
+/// 「早於」時間（往上捲載入更舊的信）：後台吃 ISO 8601（例如 2026-10-23T01:02:03.456Z）。格式明顯不對就不送（後台也會再驗一次）
+pub fn valid_before(s: &str) -> bool {
+    let b = s.as_bytes();
+    s.len() >= 17 && s.len() <= 40 && b[0].is_ascii_digit() && s.contains('T') && b.iter().all(|c| c.is_ascii_digit() || matches!(c, b'T' | b':' | b'.' | b'-' | b'+' | b'Z'))
+}
+
+/// 往來記錄請求加上「早於」時間（選填）：沒帶或格式不對就不送，後台回最近的那批（行為與從前相同）
+pub fn with_before(mut body: Value, before: Option<&str>) -> Value {
+    if let (Some(o), Some(t)) = (body.as_object_mut(), before.filter(|t| valid_before(t))) {
+        o.insert("before".into(), json!(t));
+    }
+    body
+}
+
 /// 「這是某某的接班」請求內容（#153）：前任夥伴 ID、新視窗的節點與名字；格式不對就不送
 pub fn build_succeed_body(predecessor: &str, node: &str, name: &str) -> Result<Value, String> {
     if !valid_partner_id(predecessor) {
@@ -505,8 +519,9 @@ impl Relay {
         self.api_signed("send", Some(b), token).await
     }
     /// 往來記錄（#108）：一定要登入憑證（後台用簽章認人；節點金鑰 AI 也拿得到，不夠）。沒憑證直接回錯，不打後台
-    pub async fn chat_history(&self, node: &str, agent: &str, partner_id: Option<&str>, token: Option<&str>) -> Result<Value, String> {
-        let body = with_partner_id(build_history_body(node, agent, None)?, partner_id);
+    /// before＝只要早於這個時間的（往上捲載入更舊的信）、limit＝筆數（後台上限 200）；都沒給就和從前一樣取最近的一批
+    pub async fn chat_history(&self, node: &str, agent: &str, partner_id: Option<&str>, before: Option<&str>, limit: Option<u64>, token: Option<&str>) -> Result<Value, String> {
+        let body = with_before(with_partner_id(build_history_body(node, agent, limit)?, partner_id), before);
         let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法取得雲端的往來記錄")?;
         self.api_signed("chat_history", Some(body), Some(t)).await
     }
@@ -1025,10 +1040,10 @@ b", "op": "close" }),
     async fn 往來記錄_一定要憑證_沒憑證不打後台_有憑證帶簽章標頭() {
         let (url, seen) = fake_server_with(200, r#"{"messages":[]}"#);
         let r = Relay::new(url, "secret-key".into(), "H".into(), "H-ASN".into());
-        assert!(r.chat_history("M", "小文", None, None).await.is_err());
-        assert!(r.chat_history("M", "小文", None, Some("")).await.is_err());
+        assert!(r.chat_history("M", "小文", None, None, None, None).await.is_err());
+        assert!(r.chat_history("M", "小文", None, None, None, Some("")).await.is_err());
         assert_eq!(seen.lock().unwrap().len(), 0, "沒憑證不送出任何請求");
-        let v = r.chat_history("M", "小文", Some("p_0123456789abcdef0123"), Some("USERTOKEN-123")).await.unwrap();
+        let v = r.chat_history("M", "小文", Some("p_0123456789abcdef0123"), None, None, Some("USERTOKEN-123")).await.unwrap();
         assert_eq!(v, json!({ "messages": [] }));
         let s = seen.lock().unwrap();
         let low = s[0].to_lowercase();
@@ -1044,6 +1059,30 @@ b", "op": "close" }),
         assert_eq!(with_partner_id(b.clone(), Some("p_0123456789abcdef0123"))["partner_id"], "p_0123456789abcdef0123");
         assert_eq!(with_partner_id(b.clone(), Some("p_XYZ")), b);
         assert_eq!(with_partner_id(b.clone(), None), b);
+    }
+
+    #[test]
+    fn 往來記錄請求_早於時間與筆數_格式對才送_沒帶就和從前一樣() {
+        let b = build_history_body("M", "小文", None).unwrap();
+        let t = "2026-10-23T01:02:03.456Z";
+        assert_eq!(with_before(b.clone(), Some(t))["before"], t);
+        assert_eq!(with_before(b.clone(), Some("2026-10-23T09:02:03+08:00"))["before"], "2026-10-23T09:02:03+08:00");
+        for bad in ["", "昨天", "yesterday", "2026-10-23", "2026-10-23T01:02:03Z; drop table", &"2".repeat(41)] {
+            assert_eq!(with_before(b.clone(), Some(bad)), b, "{bad}");
+        }
+        assert_eq!(with_before(b.clone(), None), b, "沒帶就一個鍵都不多");
+        assert_eq!(build_history_body("M", "小文", Some(50)).unwrap()["limit"], 50);
+    }
+
+    #[tokio::test]
+    async fn 往來記錄_早於時間與筆數有轉送到請求本文() {
+        let (url, seen) = fake_server_with(200, r#"{"messages":[]}"#);
+        let r = Relay::new(url, "secret-key".into(), "H".into(), "H-ASN".into());
+        r.chat_history("M", "小文", None, Some("2026-10-23T01:02:03.456Z"), Some(50), Some("USERTOKEN-123")).await.unwrap();
+        r.chat_history("M", "小文", None, None, None, Some("USERTOKEN-123")).await.unwrap();
+        let s = seen.lock().unwrap();
+        assert!(s[0].contains(r#""before":"2026-10-23T01:02:03.456Z""#) && s[0].contains(r#""limit":50"#), "{}", s[0]);
+        assert!(!s[1].contains("before") && !s[1].contains("limit"), "沒帶就不送：{}", s[1]);
     }
 
     #[test]

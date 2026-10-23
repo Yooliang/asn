@@ -202,6 +202,7 @@ textarea,input{user-select:text;-webkit-user-select:text}
 @media (prefers-color-scheme:dark){
   :root{--msg-st-muted:#a8b4c4;--msg-st-read:#6eb5ff}
 }
+.older-note{flex:none;align-self:center;color:var(--muted);font-size:12px;line-height:18px;padding:2px 0}
 .sys{color:var(--muted);font-size:12px;padding:2px 0;border-top:1px dotted var(--line);border-bottom:1px dotted var(--line)}
 .sys.nudge{color:var(--busy);font-weight:600}
 .msg .unanswered{color:var(--muted);font-size:11px;margin-top:2px}

@@ -11,10 +11,11 @@ import { routeMail, stubFriend } from './routing.mjs'
 import { hasNudge, hueOf, initial, noReplyNoticeOf, plain, stripNudge, stripReplyHead, unwrapShell } from './text.mjs'
 import { noticeOf, expiresAt, fileMimeOf, friendlyPhotoError, normalizePhotos, stripPhotoLines } from './photo.mjs'
 import { applyStatusRow, chunkIds, collectPollIds } from './sent-status.mjs'
-import { historyUnsupported, mergeHistory } from './history.mjs'
+import { OLDER_PAGE, historyUnsupported, judgeOlder, mergeHistory, olderBeforeIso, olderCursor } from './history.mjs'
 
 export const MAX_BODY = 20000
-const LOG_KEEP = 200
+const LOG_KEEP = 2000   // 存檔最多留幾列（往上捲載入的也算）
+export const VIEW_BASE = 200   // 畫面預設顯示最近幾列；往上載入更舊的之後，依載入範圍加寬
 const STATUS_POLL_MS = 15_000
 const HISTORY_MIN_GAP_MS = 20_000   // 同一位夥伴的往來記錄，兩次向後台取的最短間隔（強制重取除外）
 const STEP_MS = 60_000              // 收信流程裡任何一個「等外面回應」的步驟最久等多久；超過就放棄這一步，不讓 pulling 旗標永遠卡住、定時收信整個停擺
@@ -54,6 +55,9 @@ export class AsnCore {
     this.historyAt = new Map()   // 好友 id → 上次向後台取往來記錄的時間
     this.historyOff = false      // 後台還沒支援往來記錄（404／400）：這次執行不再問
     this.historyBusy = new Set()
+    this.olderBusy = new Set()     // 正在往上載入更舊的信的好友（同一時間只跑一個）
+    this.olderDone = new Set()     // 後台已沒有更早的信（或不支援往上載入）的好友：這次執行不再問
+    this.olderExtra = new Map()    // 好友 id → 往上載入而多顯示的列數（畫面顯示 = 最近 VIEW_BASE + 這個數字）
   }
 
   on(evt, fn) { (this.handlers[evt] ??= []).push(fn); return this }
@@ -128,6 +132,7 @@ export class AsnCore {
       this.logs.delete(old.id)
       this.friends.delete(old.id)
       this.historyAt.delete(old.id)
+      this.olderDone.delete(old.id); this.olderExtra.delete(old.id)
       this.friends.set(to.id, to)
       changed = true
     }
@@ -348,6 +353,38 @@ export class AsnCore {
     } finally { this.historyBusy.delete(id) }
   }
 
+  // 往上捲載入更舊的信：以目前記錄最早一則的時間當 before，向後台要 OLDER_PAGE 則，去重後接在前面。
+  // 回 { more, added, busy?, error? }：more＝可能還有更多（回來不到一頁＝沒有了）；busy＝已有一個在跑；error＝這次失敗（連不上、沒登入），可以稍後再試。
+  // 後台還沒支援（404／400，或舊後台忽略 before 回了最新那批）→ more＝false，這次執行不再問
+  async loadOlder(id) {
+    const f = this.friends.get(id)
+    if (!f || !this.transport.history || this.historyOff || this.olderDone.has(id)) return { more: false, added: 0 }
+    if (this.olderBusy.has(id)) return { more: true, added: 0, busy: true }
+    this.olderBusy.add(id)
+    try {
+      for (let i = 0; i < 100 && this.historyBusy.has(id); i++) await new Promise(r => setTimeout(r, 100))   // 打開對話時的那次補記錄還在跑：等它先完成，錨點才準
+      const cursor = olderCursor(this.logOf(id))
+      if (cursor === null) return { more: false, added: 0 }
+      const r = await this.transport.history(f.node, f.agent || '', f.partnerId || null, olderBeforeIso(cursor), OLDER_PAGE)
+      const verdict = judgeOlder(r?.messages, cursor, OLDER_PAGE)
+      if (!verdict.supported) { this.olderDone.add(id); this.log(`history older ${id}: 後台忽略 before，停止往上載入`); return { more: false, added: 0 } }
+      const { log, added } = mergeHistory(this.logOf(id), r?.messages, f.nick, { selfNode: this.selfNode, deviceOf: node => this.#deviceName(node) })
+      if (added) {
+        this.logs.set(id, log)
+        this.olderExtra.set(id, (this.olderExtra.get(id) ?? 0) + added)
+        this.#scheduleSave()
+        this.emit('log', id)
+      }
+      const more = verdict.more && added > 0   // 一則都沒補進來也算到底（免得一直問）
+      if (!more) this.olderDone.add(id)
+      return { more, added }
+    } catch (e) {
+      this.log(`history older ${id} failed: ${e.message}`)
+      if (historyUnsupported(e.message)) { this.olderDone.add(id); return { more: false, added: 0 } }
+      return { more: true, added: 0, error: true }
+    } finally { this.olderBusy.delete(id) }
+  }
+
   #fail(id, e) {
     this.#log(id).push({ k: 'sys', text: `訊息沒有送到：${e.message}`, t: this.now() })
     this.emit('log', id)
@@ -403,6 +440,8 @@ export class AsnCore {
   markRead(id) { const f = this.friends.get(id); if (f && f.unread) { f.unread = 0; this.emit('state') } }
   #log(id) { if (!this.logs.has(id)) this.logs.set(id, []); return this.logs.get(id) }
   logOf(id) { return this.logs.get(id) ?? [] }
+  // 畫面要顯示的範圍：最近 VIEW_BASE 列，加上往上載入而多出來的
+  viewOf(id) { return this.logOf(id).slice(-(VIEW_BASE + (this.olderExtra.get(id) ?? 0))) }
   snapshot() { return { conn: this.conn, windowName: this.windowName, selfNode: this.selfNode, nodeOrder: [...this.nodeOrder], asn: this.asn, friends: [...this.friends.values()].map(f => ({ ...f })) } }
 
   // ---------- 存檔 ----------

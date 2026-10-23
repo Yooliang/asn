@@ -33,7 +33,7 @@ const transport = {
   inbox: () => invoke('relay_inbox'),
   ack: ids => invoke('relay_ack', { ids }),
   send: payload => invoke('relay_send', { payload }),
-  history: (node, agent, partnerId) => invoke('relay_chat_history', { node, agent: agent || null, partnerId: partnerId || null }),   // 後台的往來記錄（90 天；要登入，本機只當快取）
+  history: (node, agent, partnerId, before, limit) => invoke('relay_chat_history', { node, agent: agent || null, partnerId: partnerId || null, before: before || null, limit: limit || null }),   // 後台的往來記錄（90 天；要登入，本機只當快取）
   sentStatus: ids => invoke('relay_sent_status', { ids }).then(r => r?.status ?? []),
   avatar: node => invoke('relay_avatar', { node }),
   setAvatar: avatar => invoke('relay_set_avatar', { avatar }),
@@ -150,7 +150,7 @@ if (screen.value === 'main') {
     log: m => console.info('[ASN]', m),
   })
   const sync = () => { const s = core.snapshot(); friends.value = s.friends; conn.value = s.conn; nodeOrder.value = s.nodeOrder; for (const f of s.friends) refreshLast(f.id) }
-  const pushLog = id => { logs[id] = core.logOf(id).slice(-200) }
+  const pushLog = id => { logs[id] = core.viewOf(id) }
   core.on('state', sync)
   core.on('log', id => { pushLog(id); refreshLast(id) })
   core.on('avatars', () => { avatars.value = core.avatarMap() })
@@ -231,7 +231,8 @@ const app = createApp({
       banner.value = null
       goTab('chats')
     }
-    const pushLog = id => { logs[id] = core.logOf(id).slice(-200) }
+    const pushLog = id => { logs[id] = core.viewOf(id) }
+    const loadOlder = id => core.loadOlder(id)   // 對話往上捲到頂：載入更舊的信
     // 對話分頁正在顯示某位：標已讀、補往來。切到對話分頁、換了最後使用的那位、名單載入完都會跑
     function showLastChat() {
       const id = lastChat.value
@@ -520,7 +521,7 @@ const app = createApp({
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, headTone, CONN_LABEL, info, banner, shake, refreshing,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, ops, opsText, opsTitle, opsModels, opsModelNote, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
-      openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, refreshAll,
+      openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }
   },

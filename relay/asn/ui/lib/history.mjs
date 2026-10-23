@@ -67,5 +67,32 @@ export function mergeHistory(log, rows, friendNick = '', { selfNode = '', device
   return { log: merged, added: fresh.length }
 }
 
+// ---- 往上捲載入更舊的信 ----
+export const OLDER_PAGE = 50   // 每次向後台要幾則
+
+// 目前記錄裡最早一則真正的信（me／them）的時間（毫秒）；沒有就 null。系統提示行是本機寫的，不拿來當錨點
+export function olderCursor(log) {
+  let min = null
+  for (const m of Array.isArray(log) ? log : []) {
+    if ((m?.k === 'me' || m?.k === 'them') && Number.isFinite(m.t) && (min === null || m.t < min)) min = m.t
+  }
+  return min
+}
+
+// 要給後台的 before：比最早那則晚 1 毫秒（後台時間有微秒，用剛好的毫秒會漏掉同一毫秒內更早的信；重疊的由去重處理）
+export const olderBeforeIso = cursorMs => new Date(cursorMs + 1).toISOString()
+
+// 判斷後台這次回來的一批：
+//  supported＝false：回來的信一則都不早於目前最早那則（舊後台忽略 before，回的是最新那批）→ 停止，不要拿來合併
+//  more＝是否可能還有更多（回來的列數不到一頁＝沒有了）
+// 回來完全沒有信：supported 視為 true、more＝false（真的沒有更早的了）
+export function judgeOlder(rows, cursorMs, page = OLDER_PAGE) {
+  const list = Array.isArray(rows) ? rows : []
+  const times = list.map(r => cleanRow(r)).filter(Boolean).map(r => r.t)
+  if (!list.length) return { supported: true, more: false }
+  if (!times.some(t => t < cursorMs)) return { supported: false, more: false }
+  return { supported: true, more: list.length >= page }
+}
+
 // 後台不支援（還沒部署）的錯誤：之後這次執行不再問。沒登入／連不上不算，下次打開對話再試
 export const historyUnsupported = msg => /HTTP (404|400)\b/.test(String(msg ?? ''))
