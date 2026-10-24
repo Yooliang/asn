@@ -19,7 +19,7 @@ import { friendId } from './lib/roster.mjs'
 import { restoreMobileTab } from './lib/session.mjs'
 import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, showsInSheet } from './lib/mobile-ops.mjs'
 import { OP_LABEL, opFormError, partnerEngine } from './lib/partner-ops.mjs'
-import { ACCT_TEXT, acctButtonDevices, acctVendorSections, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch } from './lib/mobile-acct.mjs'
+import { ACCT_TEXT, ACCT_PAGE_TITLE, acctButtonDevices, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch } from './lib/mobile-acct.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
 import { opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
 import { defaultPartnerName } from './lib/partner.mjs'
@@ -424,31 +424,56 @@ const app = createApp({
     }
     // ---------- 設備卡「切換 Claude 帳號」：選帳號 → 確認 → 送出並等對方電腦回報 ----------
     const acctKeys = computed(() => new Set(acctButtonDevices(groups.value, info.node).map(g => g.key)))
-    const acctSections = computed(() => acctVendorSections())
-    const acctSw = reactive({ phase: 'pick', node: '', label: '', picked: '', remote: { loading: false, asnOnline: false, reportedAt: '', msg: '', list: [] }, view: null })
-    const acctView = computed(() => acctSheetView(acctSw.remote, acctSw.picked))
-    const acctConfirm = computed(() => acctConfirmText(acctSw.label, acctView.value.currentEmail, acctView.value.pickEmail))
-    let acctToken = 0
+    // 整頁＝電腦版「設備與帳號」：資料用電腦版同一份整理函式；別台電腦的帳號逐台向後台讀（只讀選到的那台）
+    const acctSw = reactive({ phase: 'pick', node: '', picked: '', reports: {}, view: null })
+    const acctDevs = computed(() => acctDeviceTree({ friends: friends.value, nodeOrder: nodeOrder.value, selfNode: info.node, reports: acctSw.reports, launchers: lchData.machines }))
+    const acctCur = computed(() => acctPickDevice(acctDevs.value, acctSw.node))
+    const acctLabel = computed(() => acctCur.value?.label ?? '')
+    const acctRep = computed(() => acctSw.reports[acctCur.value?.key] ?? null)
+    const acctView = computed(() => acctSheetView(acctClaudeRemote(acctRep.value), acctSw.picked))
+    const acctConfirm = computed(() => acctConfirmText(acctLabel.value, acctView.value.currentEmail, acctView.value.pickEmail))
+    let acctToken = 0, acctEpoch = 0
+    async function loadAcct(node, force = false) {
+      if (!acctNeedsLoad(acctDevs.value.find(d => d.key === node))) return
+      const old = acctSw.reports[node]
+      if (!force && old && (old.loading || !old.msg)) return   // 讀過或正在讀就不重讀；上次失敗的再點一次會重試
+      const epoch = acctEpoch
+      acctSw.reports[node] = { loading: true, asnOnline: false, reportedAt: '', msg: '', list: [] }
+      try {
+        const v = await acctTransport.acctList(node)
+        if (epoch === acctEpoch) acctSw.reports[node] = { loading: false, asnOnline: v?.asn_online === true, reportedAt: v?.reported_at ?? '', msg: '', list: v?.accounts ?? [] }
+      } catch (e) { if (epoch === acctEpoch) acctSw.reports[node] = { loading: false, asnOnline: false, reportedAt: '', msg: acctErrorText(e), list: [] } }
+    }
     async function openAcct(g) {
       if (nav.sheet) return
-      Object.assign(acctSw, { phase: 'pick', node: g.node, label: g.label, picked: '', view: null, remote: { loading: true, asnOnline: false, reportedAt: '', msg: '', list: [] } })
-      const token = ++acctToken
+      acctEpoch++
+      Object.assign(acctSw, { phase: 'pick', picked: '', view: null, reports: {} })
+      acctSw.node = g.node   // 從夥伴列表某台設備旁的「選項」進來：預選那一台的頁籤
       go(acctNav())
-      try {
-        const v = await acctTransport.acctList(g.node)
-        if (token !== acctToken) return
-        acctSw.remote = { loading: false, asnOnline: v?.asn_online === true, reportedAt: v?.reported_at ?? '', msg: '', list: (v?.accounts ?? []).filter(a => a.vendor === 'claude') }
-      } catch (e) { if (token === acctToken) acctSw.remote = { loading: false, asnOnline: false, reportedAt: '', msg: acctErrorText(e), list: [] } }
+      if (!lchData.loaded) void loadLaunchers()
+      void loadAcct(g.node)
     }
-    const pickAcct = email => { if (acctSw.phase === 'pick') acctSw.picked = acctSw.picked === email ? '' : email }
-    const acctToConfirm = () => { if (acctView.value.canPick && acctView.value.pickEmail) acctSw.phase = 'confirm' }
+    function pickAcctDevice(key) {
+      if (acctSw.phase !== 'pick') return
+      acctSw.node = key; acctSw.picked = ''
+      void loadAcct(key)
+    }
+    const refreshAcct = () => { if (acctSw.phase === 'pick' && acctCur.value) void loadAcct(acctCur.value.key, true) }
+    // 點某個帳號的「切換」＝選好它並進確認畫面（要先看過確認才能送出）
+    function startAcctSwitch(email) {
+      if (acctSw.phase !== 'pick') return
+      acctSw.picked = email
+      if (acctView.value.canPick && acctView.value.pickEmail) acctSw.phase = 'confirm'
+      else acctSw.picked = ''
+    }
+    const acctBackToPick = () => { acctSw.phase = 'pick'; acctSw.picked = '' }
     async function submitAcct() {
       if (acctSw.phase !== 'confirm' || !acctView.value.pickEmail) return   // 一定要先看過確認畫面才送
-      const token = ++acctToken, email = acctView.value.pickEmail
+      const token = ++acctToken, email = acctView.value.pickEmail, node = acctCur.value.key
       acctSw.phase = 'run'
-      acctSw.view = await runAcctSwitch(acctTransport, acctSw.node, email, { onUpdate: v => { if (token === acctToken) acctSw.view = v }, cancelled: () => token !== acctToken })
+      acctSw.view = await runAcctSwitch(acctTransport, node, email, { onUpdate: v => { if (token === acctToken) acctSw.view = v }, cancelled: () => token !== acctToken })
     }
-    watch(() => nav.sheet, s => { if (s !== 'acct') acctToken++ })
+    watch(() => nav.sheet, s => { if (s !== 'acct') { acctToken++; acctEpoch++ } })
     const sleep = ms => new Promise(r => setTimeout(r, ms))
     async function trackLaunch(t) {
       const stop = Date.now() + LAUNCH_GIVE_UP_MS
@@ -729,7 +754,7 @@ const app = createApp({
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, headTone, CONN_LABEL, info, banner, shake, refreshing,
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, ops, opsText, opsTitle, opsModels, opsModelNote, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
-      acctSw, acctSections, vendorIconSvg, acctKeys, acctView, acctConfirm, ACCT_TEXT, openAcct, pickAcct, acctToConfirm, submitAcct,
+      acctSw, acctDevs, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, ACCT_PAGE_TITLE, vendorIconSvg, acctKeys, openAcct, pickAcctDevice, refreshAcct, startAcctSwitch, acctBackToPick, submitAcct,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,

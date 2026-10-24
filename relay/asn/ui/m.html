@@ -195,34 +195,64 @@
             <template v-if="nav.sheet === 'acct'">
               <header class="m-head m-chathead">
                 <button class="m-icon-btn" type="button" aria-label="返回" @click="back"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M15 4.5L7.5 12 15 19.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-                <div class="m-head-tx"><div class="m-title">{{ ACCT_TEXT.title(acctSw.label) }}</div></div>
+                <div class="m-head-tx"><div class="m-title">{{ ACCT_PAGE_TITLE }}</div></div>
               </header>
-          <div class="m-sheet-body">
-            <section class="m-acct-vendor" v-for="v in acctSections" :key="v.key" :aria-label="v.name">
-            <h3 class="m-acct-vh"><span class="m-acct-vi" aria-hidden="true" v-html="vendorIconSvg(v.key)"></span>{{ v.name }}</h3>
+          <div class="m-sheet-body m-dv">
             <template v-if="acctSw.phase === 'pick'">
-              <p class="m-note">{{ acctView.onlineText }}<template v-if="acctView.reportedText">；{{ acctView.reportedText }}</template></p>
-              <p class="m-ops-lead" v-if="acctView.rows.length">{{ acctView.currentText }}</p>
-              <p class="m-note" v-if="acctView.rows.length">{{ ACCT_TEXT.pick }}</p>
-              <button v-for="r in acctView.rows" :key="r.email" type="button" class="m-ops-item" :class="{ off: r.current || !acctView.canPick, picked: r.picked }" :disabled="r.current || !acctView.canPick" :aria-pressed="r.picked" @click="pickAcct(r.email)"><span class="m-opt-t">{{ r.picked ? '✓ ' : '' }}{{ r.email }}</span><small class="m-opt-why">{{ r.current ? '使用中' : r.plan }}</small></button>
-              <p class="m-note" v-if="acctView.empty">{{ acctView.empty }}</p>
-              <p class="m-err" v-if="acctView.status" role="alert">{{ acctView.status }}</p>
-              <p class="m-note" v-if="acctView.rows.length">{{ ACCT_TEXT.quotaNote }}</p>
-              <button type="button" class="m-btn m-btn-big" :disabled="!acctView.pickEmail" @click="acctToConfirm">下一步</button>
+              <div class="m-dv-bar">
+                <small class="m-fine">只有 Claude 能從這裡切換帳號；其他廠商只顯示，沒回報的會寫「目前未回報任何帳號」。</small>
+                <button type="button" class="m-dv-refresh" @click="refreshAcct">重新整理</button>
+              </div>
+              <p class="m-note" v-if="!acctDevs.length">還沒有設備。</p>
+              <div class="m-dv-tabs" role="tablist" aria-label="設備" v-if="acctDevs.length">
+                <button v-for="d in acctDevs" :key="d.key" type="button" role="tab" class="m-dv-tab" :class="{ sel: acctCur && d.key === acctCur.key, off: !d.online }" :aria-selected="acctCur && d.key === acctCur.key ? 'true' : 'false'" @click="pickAcctDevice(d.key)">{{ d.label }}<span class="m-dv-dot" :class="d.online ? 'on' : 'off'" :title="d.onlineText"></span></button>
+              </div>
+              <section class="m-dv-dev" v-if="acctCur" role="tabpanel" :aria-label="acctCur.label">
+                <div class="m-dv-dh">
+                  <h3 class="m-dv-name">{{ acctCur.label }}</h3>
+                  <span class="m-dv-tag">{{ acctCur.kind }}</span>
+                  <span class="m-dv-tag" :class="acctCur.online ? 'on' : 'off'">{{ acctCur.onlineText }}</span>
+                  <span class="m-dv-tag me" v-if="acctCur.self">這支手機</span>
+                </div>
+                <p class="m-fine" v-if="acctCur.reportedText">{{ acctCur.reportedText }}</p>
+                <p class="m-err" v-if="acctRep && acctRep.msg" role="alert">{{ acctRep.msg }}</p>
+                <div class="m-dv-body" :class="{ off: !acctCur.online }">
+                  <div class="m-dv-empty" v-if="!acctCur.vendors.length"><span>{{ acctRep && acctRep.loading ? '讀取中…' : (acctCur.empty || '這台設備還沒有回報任何廠商') }}</span></div>
+                  <ul class="m-dv-vendors" v-else>
+                    <li class="m-dv-vendor" :class="'v-' + v.key" v-for="v in acctCur.vendors" :key="v.key">
+                      <header class="m-dv-vh"><span class="m-dv-vi" aria-hidden="true" v-html="vendorIconSvg(v.key)"></span><b>{{ v.label }}</b></header>
+                      <div class="m-dv-vb">
+                        <ul class="m-dv-accts" v-if="v.accounts.length">
+                          <li class="m-dv-acct" :class="{ cur: a.current }" v-for="a in v.accounts" :key="a.email">
+                            <span class="m-dv-mail">{{ a.email }}</span>
+                            <span class="m-dv-side">
+                              <span class="m-dv-plan" v-if="a.plan">{{ a.plan }}</span>
+                              <span class="m-dv-cur" v-if="a.current">使用中</span>
+                              <button type="button" class="m-dv-sw" v-else-if="v.key === 'claude' && (v.switchable || v.switchHint)" :disabled="!v.switchable" @click="startAcctSwitch(a.email)">切換</button>
+                            </span>
+                          </li>
+                        </ul>
+                        <div class="m-dv-none" v-else>{{ acctRep && acctRep.loading ? '讀取中…' : '目前未回報任何帳號' }}</div>
+                        <small class="m-fine" v-if="v.switchHint">{{ v.switchHint }}</small>
+                        <small class="m-fine" v-if="v.key === 'claude' && v.accounts.length && v.switchable">{{ ACCT_TEXT.quotaNote }}</small>
+                      </div>
+                    </li>
+                  </ul>
+                </div>
+              </section>
               <button type="button" class="m-btn m-ops-cancel" @click="back">{{ ACCT_TEXT.close }}</button>
             </template>
             <template v-else-if="acctSw.phase === 'confirm'">
               <p class="m-ops-lead">{{ acctConfirm.lead }}</p>
               <ul class="m-ops-points"><li v-for="p in acctConfirm.points" :key="p">{{ p }}</li></ul>
               <button type="button" class="m-btn m-btn-big" @click="submitAcct">{{ ACCT_TEXT.confirmOk }}</button>
-              <button type="button" class="m-btn m-ops-cancel" @click="acctSw.phase = 'pick'">{{ ACCT_TEXT.back }}</button>
+              <button type="button" class="m-btn m-ops-cancel" @click="acctBackToPick">{{ ACCT_TEXT.back }}</button>
             </template>
             <template v-else>
               <p class="m-prog" :class="acctSw.view ? 'is-' + acctSw.view.phase : ''" role="status">{{ acctSw.view ? acctSw.view.text : '' }}</p>
               <div class="m-bar" v-if="acctSw.view && !acctSw.view.done" aria-hidden="true"><i></i></div>
               <button type="button" class="m-btn m-ops-cancel" @click="back">{{ acctSw.view && acctSw.view.done ? ACCT_TEXT.close : ACCT_TEXT.later }}</button>
             </template>
-            </section>
           </div>
             </template>
           </section>

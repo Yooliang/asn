@@ -5,10 +5,10 @@
 import { agoText } from './cloud-invite.mjs'
 import { CLOSE_NOTE } from './device-acct-dialog.mjs'
 import { isFinalStatus, remoteStatusText } from './claude-accounts.mjs'
+import { buildDeviceTree, SELF_LABEL } from './device-tree.mjs'
 
 export const ACCT_TEXT = {
   button: '選項',
-  title: label => `切換「${label || '這台設備'}」的 Claude 帳號`,
   empty: '這台電腦還沒有可切換的帳號（請在那台電腦的設定「帳號」頁，按「加入目前登入的帳號」）。',
   needTwo: '這台電腦只有一個帳號，沒有可以換的。',
   // 老實說：後台目前只回報 email、方案、是否使用中，沒有各帳號的剩餘額度
@@ -20,10 +20,34 @@ export const ACCT_TEXT = {
   later: '先關掉（照常進行）',
 }
 
-// 「選項」頁依廠商分區：一區＝廠商小圖＋名稱＋帳號列表＋切換。現在只有 Claude 有遠端切換能力；
-// 以後別家（Gemini、Grok…）有了，在這裡加一筆就多一區。沒有能力的廠商不列，不顯示假區塊。
-export const ACCT_VENDORS = [{ key: 'claude', name: 'Claude' }]
-export const acctVendorSections = (vendors = ACCT_VENDORS) => (Array.isArray(vendors) ? vendors : []).filter(v => v?.key && v?.name)
+// 「選項」整頁＝電腦版「設備與帳號」：橫向設備頁籤 → 廠商卡片 → 帳號列。資料用電腦版同一份整理函式（device-tree），不另寫一套。
+// 手機拿得到的資料比電腦少：沒有「在線的 ASN 視窗」清單（在線只看名單狀態）、沒有本機帳號庫（手機本機頁籤只顯示）；
+// 別台電腦的帳號要逐台向後台讀（android_acct_list），所以只讀選到的那一台。
+export const ACCT_PAGE_TITLE = '設備與帳號'
+const PHONE_LABEL = '這支手機'
+
+// reports：節點 → { loading, asnOnline, reportedAt, msg, list:[{vendor,email,plan,current}] }（手機自己存的形狀）
+export const acctReportOf = r => (r && !r.loading ? { error: r.msg || '', asnOnline: r.asnOnline === true, reportedAt: r.reportedAt || '', accounts: Array.isArray(r.list) ? r.list : [] } : undefined)
+// 切換流程只認 Claude：把某台的回報濾成 acctSheetView 要的形狀
+export const acctClaudeRemote = r => ({ loading: r?.loading === true, asnOnline: r?.asnOnline === true, reportedAt: r?.reportedAt ?? '', msg: r?.msg ?? '', list: (Array.isArray(r?.list) ? r.list : []).filter(a => a?.vendor === 'claude') })
+
+export function acctDeviceTree({ friends = [], nodeOrder = [], selfNode = '', reports = {}, launchers = {}, now = Date.now() } = {}) {
+  const rep = Object.fromEntries(Object.entries(reports).map(([k, r]) => [k, acctReportOf(r)]).filter(([, r]) => r))
+  return buildDeviceTree({ friends, nodeOrder, selfNode, launchers, reports: rep, now }).map(d => ({
+    ...d,
+    label: d.self && d.label === SELF_LABEL ? PHONE_LABEL : d.label,
+    // 手機（本機與別支）只顯示，不提供切換，也不顯示「ASN 沒有在線」的提示
+    vendors: d.kind === '手機' ? d.vendors.map(v => ({ ...v, switchable: false, switchHint: '' })) : d.vendors,
+  }))
+}
+
+// 預設頁籤：指定的設備 → 第一台別台設備 → 第一個
+export function acctPickDevice(devs, node = '') {
+  const list = Array.isArray(devs) ? devs : []
+  return list.find(d => d.key === node) ?? list.find(d => !d.self) ?? list[0] ?? null
+}
+// 要不要向後台讀這台的帳號：別台電腦才讀（本機與手機不讀）
+export const acctNeedsLoad = d => Boolean(d && !d.self && d.kind !== '手機')
 
 // 有「選項」按鈕的設備卡：別台電腦（本機與手機不算）。groups 是名單分組，只看 kind 為 device 的
 export function acctButtonDevices(groups, selfNode) {

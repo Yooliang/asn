@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { ACCT_VENDORS, acctVendorSections, ACCT_TEXT, acctButtonDevices, acctErrorText, acctSheetView, confirmText, runAcctSwitch } from '../ui/lib/mobile-acct.mjs'
+import { ACCT_TEXT, acctButtonDevices, acctErrorText, acctSheetView, confirmText, runAcctSwitch } from '../ui/lib/mobile-acct.mjs'
 import { acctNav, normalizeNav, tabLabel, tabNav } from '../ui/lib/mobile.mjs'
 
 const read = (...p) => fs.readFileSync(new URL(`../${p.join('/')}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -133,15 +133,3 @@ test('入口改成低調的「選項」小按鈕，按下切到第二個分頁�
   assert.doesNotMatch(rule, /border-radius:\s*18px/)
 })
 
-test('選項頁依廠商分區：現在只有 Claude 一區，資料驅動、沒有假區塊', () => {
-  assert.deepEqual(acctVendorSections().map(v => v.key), ['claude'])
-  assert.deepEqual(ACCT_VENDORS.map(v => v.key), ['claude'])
-  // 之後加一家（資料裡多一筆）就多一區；缺名稱或鍵的不列
-  assert.deepEqual(acctVendorSections([...ACCT_VENDORS, { key: 'grok', name: 'Grok' }, { key: '', name: '壞' }]).map(v => v.key), ['claude', 'grok'])
-  const html = read('ui', 'm.html')
-  assert.match(html, /v-for="v in acctSections"/)
-  assert.match(html, /vendorIconSvg\(v\.key\)/)
-  assert.match(html, /\{\{ v\.name \}\}/)
-  assert.doesNotMatch(html, /Gemini|Grok/, '頁面不放寫死的別家區塊')
-  assert.match(html, /ACCT_TEXT\.title\(acctSw\.label\)/, '標題寫設備名')
-})
