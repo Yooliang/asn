@@ -171,6 +171,7 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .conv{flex:1}
 .compose-row{flex:none;padding-top:0}
 .conv-main,.compose-main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:3px;overflow:hidden}
+.compose-main{overflow:visible}   /* @ 選單往上展開，不能被裁掉 */
 .to-line{padding:5px 10px;border-bottom:1px solid var(--line);background:linear-gradient(var(--panel-head),var(--panel-soft));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .to-psm{margin-left:8px;font-size:12px;color:var(--muted)}
 .to-busy{margin-left:8px;padding:1px 8px;border-radius:9px;font-size:12px;background:rgba(255,213,74,.75);border:1px solid rgba(217,176,42,.8);color:var(--fg,#333)}
@@ -220,7 +221,7 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .picker{position:absolute;bottom:calc(100% + 4px);left:8px;z-index:5;display:grid;grid-template-columns:repeat(6,36px);gap:2px;padding:6px;background:var(--panel);border:1px solid #7a9ec4;border-radius:4px;box-shadow:0 6px 18px rgba(0,30,70,.25)}
 .picker button{border:1px solid transparent;background:none;border-radius:3px;height:32px;font-size:18px;cursor:pointer}
 .picker button:hover{border-color:#8fb6de;background:#e6f1fc}
-.composer{display:flex;gap:8px;padding:4px 8px}
+.composer{display:flex;gap:8px;padding:4px 8px;position:relative}
 .composer textarea{flex:1;min-width:0;resize:none;height:64px;border:0;outline:none;background:transparent;border-radius:0;padding:4px 6px;font-size:14px}
 .composer textarea::placeholder{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .composer .aero-btn{align-self:stretch;padding:0 18px;font-weight:600}
