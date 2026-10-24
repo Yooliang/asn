@@ -736,6 +736,10 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dv-mail{min-width:0;overflow-wrap:anywhere}
 .dv-side{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .dv-plan{padding:1px 7px;border:1px solid var(--line);border-radius:4px;font-size:11px;color:var(--muted)}
+.dv-quota{flex:1 0 100%;font-size:12px;line-height:1.5;color:var(--fg)}
+.dv-quota.stale{color:var(--muted);font-style:italic}
+.dv-quota.out{color:#b3261e;font-weight:600}
+@media (prefers-color-scheme:dark){.dv-quota.out{color:#ff9a90}.dv-quota.stale{color:#b4c0cc}}
 .dv-cur{padding:1px 8px;border-radius:4px;font-size:11px;font-weight:600;background:var(--accent);color:#fff}
 .dv-none{display:flex;align-items:center;gap:6px;padding:8px 10px;border:1px dashed var(--line);border-radius:5px;color:var(--muted);font-size:12px;font-style:italic}
 .dv-empty{display:flex;flex-direction:column;align-items:center;gap:8px;padding:28px 12px;border:1px dashed var(--line);border-radius:6px;background:var(--panel-soft);color:var(--muted)}

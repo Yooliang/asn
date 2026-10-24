@@ -9,6 +9,7 @@ import { engineKey, engineRank } from './tabs.mjs'
 import { agoText } from './cloud-invite.mjs'
 import { accountLine } from './claude-accounts.mjs'
 import { UNNAMED_DEVICE } from './text.mjs'
+import { quotaView } from './account-quota.mjs'
 
 export const NOT_REPORTED = '未回報'
 export const SELF_LABEL = '這台電腦'
@@ -57,7 +58,7 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
     }
     const accts = {}
     if (isSelf) {
-      accts.claude = (self.claude ?? []).map(a => ({ email: a.email, plan: a.plan, current: a.current === true }))
+      accts.claude = (self.claude ?? []).map(a => ({ email: a.email, plan: a.plan, current: a.current === true, quota: quotaView(a, now) }))
       if (accts.claude.length) keys.add('claude')
       if (self.codex?.loggedIn) { keys.add('codex'); accts.codex = [{ email: self.codex.text, plan: '', current: true }] }
     } else if (rep && !rep.error) {
@@ -65,7 +66,7 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
         const k = vendorKey(a?.vendor)
         if (SKIP.has(k) || !a?.email) continue
         keys.add(k)
-        ;(accts[k] ??= []).push({ email: a.email, plan: a.plan, current: a.current === true })
+        ;(accts[k] ??= []).push({ email: a.email, plan: a.plan, current: a.current === true, ...(k === 'claude' ? { quota: quotaView(a, now) } : {}) })
       }
     }
     const ago = !isSelf && rep && !rep.error ? agoText(rep.reportedAt, now) : ''

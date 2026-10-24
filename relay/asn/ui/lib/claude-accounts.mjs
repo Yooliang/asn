@@ -1,6 +1,8 @@
 // 設定頁「帳號」：Claude 帳號（加入目前登入、切換、刪除）、OpenAI（Codex）目前登入、遠端設備的 Claude 帳號切換。
 // 檔案操作全在 Rust（claude_accounts.rs、codex_accounts.rs、acct_remote.rs），這裡只呼叫指令並整理訊息。
 // 帳號以 email 識別；介面只會拿到 email／方案／是否使用中，權杖不經過前端。
+import { quotaOf } from './account-quota.mjs'
+
 export const SWITCH_NOTICE = '開著的 Claude 視窗要關掉重開，才會用新帳號。'
 
 export function accountLine(a) {
@@ -50,6 +52,11 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     try { s.current = (await invoke('claude_account_current')) ?? null } catch { s.current = null }
     try { s.codex = (await invoke('codex_account_current')) ?? null; s.codexErr = '' } catch (e) { s.codex = null; s.codexErr = errText(e) }
     try { s.mod = (await invoke('claude_mod_status')) ?? '' } catch { /* 舊版 Rust 沒有這個指令就不顯示 */ }
+    // 各帳號上次記下的額度（沒有紀錄或舊版 Rust 沒有這個指令就維持「額度未知」）
+    try {
+      const q = (await invoke('claude_quota_all')) ?? {}
+      s.list = s.list.map(a => ({ ...a, ...quotaOf(q[a.email]) }))
+    } catch { /* 略過 */ }
   }
   // 帳號庫變了，就把新清單回報給收發室（讓擁有者設備看得到）；後台沒部署或沒連線都不吵使用者
   const report = async () => { try { await invoke('acct_remote_report') } catch { /* 略過 */ } }

@@ -5,14 +5,14 @@
 import { agoText } from './cloud-invite.mjs'
 import { CLOSE_NOTE } from './device-acct-dialog.mjs'
 import { isFinalStatus, remoteStatusText } from './claude-accounts.mjs'
+import { QUOTA_NOTE } from './account-quota.mjs'
 import { buildDeviceTree, SELF_LABEL } from './device-tree.mjs'
 
 export const ACCT_TEXT = {
   button: '選項',
   empty: '這台電腦還沒有可切換的帳號（請在那台電腦開著 ASN，一分鐘內會自動加入目前登入的帳號）。',
   needTwo: '這台電腦只有一個帳號，沒有可以換的。',
-  // 老實說：後台目前只回報 email、方案、是否使用中，沒有各帳號的剩餘額度
-  quotaNote: '手機上看不到各帳號的剩餘額度，只顯示方案；要看額度請在電腦上查。',
+  quotaNote: QUOTA_NOTE,
   pick: '點選要換成哪一個帳號',
   confirmOk: '確定切換',
   back: '返回',

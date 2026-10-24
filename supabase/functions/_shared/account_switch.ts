@@ -1,7 +1,7 @@
 // 遠端切換 Claude 帳號（ASN 帳號管理）共用邏輯。設計與流程見 supabase/migrations/20261021040000_asn_account_switch.sql。
 // 最後一道關在資料庫函式（擁有者限定、同租戶、對方 ASN 在線、email 在對方回報的清單裡、頻率）；
 // 這裡負責：輸入整理與第一層格式檢查、動作分派、錯誤碼對應。
-// 權杖絕不經過這裡：回報與指令都只有廠商、email、方案、是否使用中；多餘欄位一律丟掉。
+// 權杖絕不經過這裡：回報與指令都只有廠商、email、方案、是否使用中（Claude 另可選填剩餘額度四欄）；多餘欄位一律丟掉。
 
 // deno-lint-ignore no-explicit-any
 type Json = any;
@@ -42,7 +42,26 @@ export function cleanEmail(v: unknown): string | null {
   return e.length >= 3 && e.length <= 120 && EMAIL_RE.test(e) ? e : null;
 }
 
-export type ReportedAccount = { vendor: "claude" | "codex"; email: string; plan: string; current: boolean };
+export type ReportedAccount = { vendor: "claude" | "codex"; email: string; plan: string; current: boolean; five_hour_pct?: number; weekly_pct?: number; reset_at?: string; at?: string };
+
+// 剩餘額度（#228，全部選填）：five_hour_pct／weekly_pct 是 0～100 的剩餘百分比，reset_at 是重置時間，at 是那台電腦記下數字的時間。
+// 只收 Claude。不合格的欄位單獨丟掉（不退回整份，免得額度壞掉拖累帳號清單）；沒有合格的百分比或沒有合格的 at 就整組不收。
+const FUTURE_SLACK_MS = 10 * 60 * 1000;
+function isoOrNull(v: unknown, maxFutureMs: number | null): string | null {
+  if (typeof v !== "string" || v.length > 40) return null;
+  const t = Date.parse(v);
+  if (!Number.isFinite(t)) return null;
+  if (maxFutureMs != null && t > Date.now() + maxFutureMs) return null;
+  return new Date(t).toISOString();
+}
+const pctOrNull = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 100 ? Math.round(v) : null);
+export function parseQuota(a: Json): Pick<ReportedAccount, "five_hour_pct" | "weekly_pct" | "reset_at" | "at"> {
+  const five = pctOrNull(a.five_hour_pct), week = pctOrNull(a.weekly_pct);
+  const at = isoOrNull(a.at, FUTURE_SLACK_MS);
+  if ((five == null && week == null) || at == null) return {};
+  const reset = isoOrNull(a.reset_at, null);
+  return { ...(five != null ? { five_hour_pct: five } : {}), ...(week != null ? { weekly_pct: week } : {}), ...(reset != null ? { reset_at: reset } : {}), at };
+}
 // 回報的清單：每筆只留 vendor／email／plan／current；任何一筆不合格整份退回（回 null）
 export function parseReport(b: Json): ReportedAccount[] | null {
   if (!b || typeof b !== "object" || !Array.isArray(b.accounts) || b.accounts.length > MAX_ACCOUNTS) return null;
@@ -57,7 +76,7 @@ export function parseReport(b: Json): ReportedAccount[] | null {
       plan = a.plan.trim();
     }
     if (a.current != null && typeof a.current !== "boolean") return null;
-    out.push({ vendor: a.vendor, email, plan, current: a.current === true });
+    out.push({ vendor: a.vendor, email, plan, current: a.current === true, ...(a.vendor === "claude" ? parseQuota(a) : {}) });
   }
   return out;
 }
