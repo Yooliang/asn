@@ -11,6 +11,7 @@ import { isProcessName, archivedKeysOf, buildFriends, cleanPsm, expectsReplyTo, 
 import { contextAlertText, createContextWatch } from './context-usage.mjs'
 import { routeMail, stubFriend } from './routing.mjs'
 import { hasNudge, hueOf, initial, noReplyNoticeOf, plain, stripNudge, stripReplyHead, unwrapShell } from './text.mjs'
+import { friendlySendError } from './display-only.mjs'
 import { noticeOf, expiresAt, fileMimeOf, friendlyPhotoError, normalizePhotos, stripPhotoLines } from './photo.mjs'
 import { applyStatusRow, chunkIds, collectPollIds } from './sent-status.mjs'
 import { OLDER_PAGE, historyUnsupported, judgeOlder, mergeHistory, olderBeforeIso, olderCursor } from './history.mjs'
@@ -433,7 +434,7 @@ export class AsnCore {
   }
 
   #fail(id, e) {
-    this.#log(id).push({ k: 'sys', text: `訊息沒有送到：${e.message}`, t: this.now() })
+    this.#log(id).push({ k: 'sys', text: `訊息沒有送到：${friendlySendError(e.message)}`, t: this.now() })
     this.emit('log', id)
     return { ok: false, error: e.message }
   }

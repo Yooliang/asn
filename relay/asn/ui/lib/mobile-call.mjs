@@ -16,6 +16,7 @@ import { speakableText } from './tts-player.mjs'
 import { speechSegments } from './speech-split.mjs'
 import { engineKey } from './tabs.mjs'
 import { isAsnWindow } from './roster.mjs'
+import { isDisplayOnly } from './display-only.mjs'
 import { CALL_END_NOTE, splitCallEnd } from './call-end.mjs'
 
 export const MOBILE_PHASE_TEXT = {
@@ -39,7 +40,7 @@ export const SPEAK_DOG_PER_CHAR_MS = 400
 /** 只有 AI 夥伴能通話：人、ASN 程式本身、還在開的、離線的都不行（離線的信只會留在收發室，等不到回覆） */
 export function canCallPartner(friend) {
   if (!friend || friend.pending) return false
-  if (isAsnWindow(friend)) return false
+  if (isAsnWindow(friend) || isDisplayOnly(friend)) return false
   if (friend.status === 'offline') return false
   return engineKey(friend) !== 'other'   // 沒有已知的 AI 引擎＝不是 AI 夥伴
 }

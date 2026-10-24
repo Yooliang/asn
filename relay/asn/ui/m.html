@@ -163,7 +163,7 @@
           <!-- 對話：最後使用的那一位的對話內容（從夥伴分頁點一位就成為最後使用）；右上角「⋯」管理這位的視窗 -->
           <section class="m-pg m-chat" :class="{ shake, 'is-room': chatFriend && chatFriend.room }" :aria-label="tabLabel('chats')">
             <div class="m-keep" :hidden="nav.sheet === 'acct'">
-            <header class="m-head m-chathead" :class="{ 'is-busy': chatFriend && headTone(chatFriend.status) === 'busy', 'is-offline': chatFriend && !chatFriend.room && headTone(chatFriend.status) === 'offline' }">
+            <header class="m-head m-chathead" :class="{ 'is-busy': chatFriend && headTone(chatFriend.status, chatFriend) === 'busy', 'is-offline': chatFriend && !chatFriend.room && headTone(chatFriend.status, chatFriend) === 'offline' }">
               <template v-if="chatFriend">
                 <img class="m-pic" :class="'st-' + chatFriend.status" :src="avOf(chatFriend)" alt="" width="44" height="44">
                 <div class="m-head-tx">
