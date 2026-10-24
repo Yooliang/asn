@@ -84,6 +84,40 @@ pub fn pid_alive(pid: u32) -> bool {
     Path::new(&format!("/proc/{pid}")).exists()
 }
 
+/// 程序的建立時間（Unix 毫秒）；查不到（沒權限、程序已不在、非 Windows）回 None
+#[cfg(windows)]
+pub fn process_started_ms(pid: u32) -> Option<u64> {
+    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
+    use windows_sys::Win32::System::Threading::{GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    if pid == 0 {
+        return None;
+    }
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            return None;
+        }
+        let z = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+        let (mut c, mut e, mut k, mut u) = (z, z, z, z);
+        let ok = GetProcessTimes(h, &mut c, &mut e, &mut k, &mut u) != 0;
+        CloseHandle(h);
+        if !ok {
+            return None;
+        }
+        let ticks = ((c.dwHighDateTime as u64) << 32) | c.dwLowDateTime as u64; // 1601 年起算的 100 奈秒
+        (ticks / 10_000).checked_sub(11_644_473_600_000)
+    }
+}
+#[cfg(not(windows))]
+pub fn process_started_ms(_pid: u32) -> Option<u64> {
+    None
+}
+
+/// session 檔記的 pid 現在還是「那個視窗的程序」：程序活著，而且不是 session 開始之後才建立的（pid 被重用）
+pub fn session_alive(pid: u32, started_at_ms: u64) -> bool {
+    pid_alive(pid) && crate::bridge::roster::same_process(started_at_ms, process_started_ms(pid))
+}
+
 /// 這個 pid 的執行檔是不是 asn（查不到回 None，呼叫端當作「可能是」）
 #[cfg(windows)]
 pub fn is_asn_process(pid: u32) -> Option<bool> {

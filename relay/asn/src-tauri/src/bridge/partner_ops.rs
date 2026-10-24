@@ -387,6 +387,28 @@ impl PartnerOps {
         }
     }
 
+    /// sessions/<pid>.json 的這一筆現在還有活著的程序，而且就是它當初記錄的那個（pid 被別的程序重用不算）
+    fn session_live(&self, s: &Value) -> bool {
+        let os = self.env.os();
+        let Some(pid) = s.get("pid").and_then(Value::as_u64).and_then(|p| u32::try_from(p).ok()) else { return false };
+        pid != 0 && os.alive(pid) && roster::same_process(s.get("startedAt").and_then(Value::as_u64).unwrap_or(0), os.started_ms(pid))
+    }
+
+    /// 剛結束的視窗留下的 sessions/<pid>.json 清掉：強制結束的 claude 來不及自己刪，檔案會一直留著，
+    /// 日後 pid 被別的程序重用就會被當成活著的視窗。只刪「檔名 pid＝內容 pid＝剛結束的 pid、sessionId 相同、而且該 pid 已經不在」的那一個檔。
+    fn forget_session(&self, t: &switch::Target) {
+        if t.pid == 0 || self.env.os().alive(t.pid) {
+            return;
+        }
+        let path = self.dirs.sessions.join(format!("{}.json", t.pid));
+        let Ok(text) = std::fs::read_to_string(&path) else { return };
+        let Ok(v) = serde_json::from_str::<Value>(&text) else { return };
+        let same_sid = v.get("sessionId").and_then(Value::as_str).map(|x| x == t.session_id).unwrap_or(t.session_id.is_empty());
+        if v.get("pid").and_then(Value::as_u64) == Some(t.pid as u64) && same_sid {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+
     fn stage(&self, op: &Op, stage: &str) {
         self.env.progress(&op.id, &format!("stage:{stage}"));
     }
@@ -509,6 +531,7 @@ impl PartnerOps {
             .iter()
             .filter(|s| s.get("name").and_then(Value::as_str) == Some(name))
             .filter(|s| s.get("kind").and_then(Value::as_str).map(|k| k == "interactive").unwrap_or(true))
+            .filter(|s| self.session_live(s))
             .filter_map(|s| Some((u32::try_from(s.get("pid").and_then(Value::as_u64)?).ok()?, s.get("sessionId").and_then(Value::as_str).unwrap_or("").to_string())))
             .filter(|(p, _)| *p != 0 && os.alive(*p))
             .collect();
@@ -675,6 +698,7 @@ impl PartnerOps {
             .iter()
             .filter(|s| s.get("name").and_then(Value::as_str) == Some(name))
             .filter(|s| s.get("kind").and_then(Value::as_str).map(|k| k == "interactive").unwrap_or(true))
+            .filter(|s| self.session_live(s))
             .filter_map(|s| Some((u32::try_from(s.get("pid").and_then(Value::as_u64)?).ok()?, s.get("sessionId").and_then(Value::as_str).unwrap_or("").to_string())))
             .filter(|(p, _)| *p != 0 && os.alive(*p))
             .collect();
@@ -826,6 +850,7 @@ impl PartnerOps {
         if let Err(e) = switch::close_session(self.env.os(), &self.env.timing(), t.pid, &allowed, host, host.is_some()) {
             return failed(e);
         }
+        self.forget_session(t);
         let kept = host.is_none();
         ok(if kept { "已結束 Claude；原本的終端機分頁會留下" } else { "已關閉視窗" }, Some(json!({ "pid": t.pid, "kept_terminal": kept })))
     }
@@ -854,6 +879,7 @@ impl PartnerOps {
         if let Err(e) = switch::close_session(os, &self.env.timing(), t.pid, &allowed, host, host.is_some()) {
             return failed(e);
         }
+        self.forget_session(t);
         if let Some(o) = op {
             self.stage(o, "opening");
         }
@@ -962,8 +988,7 @@ impl PartnerOps {
         // 2. 已經有活著的視窗用同一個 sessionId 或同名：不能再開（兩個視窗寫同一段對話會互相覆蓋）
         let os = self.env.os();
         let live = console::read_sessions(&self.dirs.sessions).iter().any(|s| {
-            let alive = s.get("pid").and_then(Value::as_u64).and_then(|p| u32::try_from(p).ok()).map(|p| p != 0 && os.alive(p)).unwrap_or(false);
-            alive && (s.get("name").and_then(Value::as_str) == Some(name) || s.get("sessionId").and_then(Value::as_str) == Some(sid))
+            self.session_live(s) && (s.get("name").and_then(Value::as_str) == Some(name) || s.get("sessionId").and_then(Value::as_str) == Some(sid))
         });
         if live {
             return failed("這位夥伴已經在線上");

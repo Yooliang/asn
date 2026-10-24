@@ -355,6 +355,24 @@ async fn 名單回報_格式與_node_橋相同_含_asn_視窗_排除死掉的視
 }
 
 #[tokio::test]
+async fn 名單回報_pid_被別的程序重用的_session_檔不列() {
+    let fr = FakeRelay::start();
+    let work = tempfile::tempdir().unwrap();
+    let sessions = tempfile::tempdir().unwrap();
+    let st = 1_800_000_000_000u64;
+    let put = |pid: u32, name: &str| std::fs::write(sessions.path().join(format!("{pid}.json")), json!({"pid": pid, "name": name, "cwd": "/x", "status": "idle", "kind": "interactive", "entrypoint": "cli", "startedAt": st}).to_string()).unwrap();
+    put(5001, "T-真的");
+    put(5002, "T-幽靈");
+    let mut core = new_core(&fr, work.path(), sessions.path(), Arc::new(FakeSink::default()), T0);
+    // 5002 現在是 session 開始一小時之後才建立的別的程序；5001 是同一個
+    core.set_created(Arc::new(move |p| if p == 5002 { Some(st + 3_600_000) } else { Some(st - 1_000) }));
+    core.refresh_roster(T0).await;
+    let posts = fr.st.lock().unwrap().rosters.clone();
+    let names: Vec<String> = posts[0]["agents"].as_array().unwrap().iter().map(|a| a["name"].as_str().unwrap().to_string()).collect();
+    assert_eq!(names, vec!["T-真的".to_string(), "T-ASN".to_string()], "幽靈 session 檔不列進名單");
+}
+
+#[tokio::test]
 async fn 名單回報_外掛狀態檔有效就蓋過_sessions_的_status_並帶_detail_壞檔忽略() {
     let fr = FakeRelay::start();
     let work = tempfile::tempdir().unwrap();

@@ -167,7 +167,7 @@ pub fn start_with(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>, laun
     let launched_rx = launch_env.map(|env| {
         let (sessions, mailbox, r2, sink2, alive2) = (cfg.sessions_dir.clone(), cfg.mailbox_name.clone(), relay.clone(), core.sink(), alive.clone());
         let names: Arc<dyn Fn() -> Option<Vec<String>> + Send + Sync> = Arc::new(move || {
-            let ws = roster::read_sessions(&sessions, |p| alive2(p), sink2.pid(), &mailbox)?;
+            let ws = roster::read_sessions_with(&sessions, |p, st| alive2(p) && roster::same_process(st, crate::heartbeat::process_started_ms(p)), sink2.pid(), &mailbox)?;
             Some(ws.into_iter().map(|w| w.name).chain(r2.active_names()).collect())
         });
         let (l, rx) = Launcher::new(relay.clone(), log.clone(), cfg.work_dir.clone(), env, names);

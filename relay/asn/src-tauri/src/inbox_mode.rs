@@ -183,7 +183,7 @@ pub async fn pull_once<A: MailApi>(api: &A, store: &mut InboxStore, now_iso: &(d
 /// 回報用視窗名單：收件匣視窗（閒置）＋本機執行中的 Claude 視窗（pid 以 alive 驗證；Linux 是 /proc）。
 /// 讀不到 sessions 資料夾（不是不存在）時只報收件匣視窗。
 pub fn roster_windows(name: &str, engine: &str, sessions_dir: &Path, status_dir: &Path, alive: impl Fn(u32) -> bool, now_ms: u64) -> Vec<Window> {
-    let mut list: Vec<Window> = roster::read_local(sessions_dir, status_dir, alive, 0, name, now_ms).unwrap_or_default();
+    let mut list: Vec<Window> = roster::read_local_with(sessions_dir, status_dir, |p, st| alive(p) && roster::same_process(st, crate::heartbeat::process_started_ms(p)), 0, name, now_ms).unwrap_or_default();
     let mut me = Window::claude(name, Some("idle".into()), "", 0, now_ms, None);
     me.engine = engine.to_string();
     list.insert(0, me);

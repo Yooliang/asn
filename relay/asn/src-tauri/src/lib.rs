@@ -393,17 +393,19 @@ async fn launch_cwd_browse(app: State<'_, App>, handle: AppHandle) -> Result<Opt
 }
 
 /// 本機視窗的即時狀態（不經後台）：讀 ~/.claude/sessions 與外掛狀態檔，給名單上「這台電腦」的夥伴蓋過後台的舊值。
-/// 只回名字、狀態、說明、上下文百分比；讀不到就回空清單（前端照舊用後台的名單）。
+/// 只回名字、狀態、說明、上下文百分比；讀不到就回錯誤（前端照舊用後台的名單，不把讀失敗當成視窗都關了）。
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn local_windows() -> Result<Value, String> {
     let home = identity::home_dir();
     let list = tokio::task::spawn_blocking(move || {
-        bridge::roster::read_local(&home.join(".claude").join("sessions"), &home.join(".asn").join("status"), heartbeat::pid_alive, 0, "", heartbeat::now_ms()).unwrap_or_default()
+        bridge::roster::read_local_with(&home.join(".claude").join("sessions"), &home.join(".asn").join("status"), heartbeat::session_alive, 0, "", heartbeat::now_ms())
     })
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())?
+    // 讀不到要明說（回錯誤）：前端把「本機沒有這個視窗」當成已關閉，不能把讀失敗當成空清單
+    .ok_or_else(|| "讀不到本機視窗清單".to_string())?;
     Ok(Value::Array(list.iter().map(|w| serde_json::json!({ "name": w.name, "status": w.status, "detail": w.detail, "context_pct": w.context_pct })).collect()))
 }
 
