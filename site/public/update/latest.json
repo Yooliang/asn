@@ -1,11 +1,11 @@
 {
-  "version": "0.1.57",
-  "notes": "無頭主機（Linux）可用短碼連上帳號、設定頁可輸入短碼核准主機；名單可標示僅顯示的條目；新增 MiniMax、Aegis 廠商小圖",
-  "pub_date": "2026-10-23T23:23:43.280Z",
+  "version": "0.1.58",
+  "notes": "群組：訊息顯示大頭照、輸入 @ 選成員並顯示小標記、可針對單則訊息回覆（自動標記原作者）；手機可替各電腦切換 Claude 帳號；Linux 無頭主機可收信與發言",
+  "pub_date": "2026-10-24T01:56:33.750Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjB5d1lnKzdUNDE5aEtPVHVLZ1NRVGVCWUFiY0ExdnVKQ05XU0UrSXVoN2Y1RmplZUNYRVNpUGtVcDJDQnBHSUhJRW8wNHdLSUZ6WTFuMzVKUk5HQnd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzk3ODIzCWZpbGU6QVNOXzAuMS41N194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjU3CkV2aUFXVUZpa2kxTUduMkRxd3JhQlhnWUVldkNUZXc0Vk5DTHRRc2VaL3JBb2I5TEhnbzNSZVkycTVDY0RiRXUySVpqd2E2NHRDUDFvV2JZcUxhTUFBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.57_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybi9IZVhmM0ZsdEV0cXl4TkxKTnJ3a3pQRFloUkRmWWxWbmQ3anptZHhzemRpWk9SaExsZG9EWHc1TC83WjNTOXQwdWdzM1daN2JOWjAwbzdMOS9lK2c0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyODA2OTkzCWZpbGU6QVNOXzAuMS41OF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjU4Ckdvb1NZN0oyMDQzejVhQ1p3RFRwczBmR0tySStBKzZxWml0SVcvS1Q1ZnBtdXRvbmlZOEJEN1VzRlRxS09vNHYySWRuMVpuQ0FkRnVDSnN4Rm5pcUFBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.58_x64-setup.exe"
     }
   }
 }

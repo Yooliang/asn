@@ -1,8 +1,8 @@
 {
-  "version": "0.1.57",
-  "versionCode": 1057,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.57_android.apk",
-  "sha256": "a219ace9a78760fb98657ec918de44bd1cd550e10fa072db749815ce4af8731a",
-  "notes": "名單可標示僅顯示的條目；新增 MiniMax、Aegis 廠商小圖",
-  "bytes": 9272804
+  "version": "0.1.58",
+  "versionCode": 1058,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.58_android.apk",
+  "sha256": "87b19c73ceb235e3b73076fc4600edbe0b8ab61d4e606c568b44b9729513563b",
+  "notes": "群組：大頭照、@ 標記、回覆引用；手機可替各電腦切換 Claude 帳號",
+  "bytes": 9317860
 }
