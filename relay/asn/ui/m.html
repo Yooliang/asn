@@ -383,7 +383,8 @@
         <h2 class="m-ops-h">{{ opsTitle }}</h2>
         <template v-if="ops.phase === 'menu'">
           <button v-for="g in groupItems" :key="g.key" type="button" class="m-ops-item" @click="pickGroup(g.key)"><span class="m-opt-t">{{ g.label }}</span></button>
-          <button v-for="i in opsRows" :key="i.key" type="button" class="m-ops-item" :class="{ off: !i.ok }" :aria-disabled="i.ok ? 'false' : 'true'" :aria-describedby="i.ok ? null : 'ops-why-' + i.key" @click="pickOp(i.key)"><span class="m-opt-t">{{ i.label }}</span><small class="m-opt-why" :id="'ops-why-' + i.key" v-if="!i.ok">{{ i.reason }}</small></button>
+          <p class="m-ops-shared" v-for="n in opsView.notes" :key="n" role="note">{{ n }}</p>
+          <button v-for="i in opsView.rows" :key="i.key" type="button" class="m-ops-item" :class="{ off: !i.ok }" :aria-disabled="i.ok ? 'false' : 'true'" :aria-describedby="i.ok ? null : 'ops-why-' + i.key" @click="pickOp(i.key)"><span class="m-opt-t">{{ i.label }}</span><small class="m-opt-why" :id="'ops-why-' + i.key" v-if="!i.ok && i.why">{{ i.why }}</small></button>
           <button type="button" class="m-btn m-ops-cancel" @click="back">取消</button>
         </template>
         <template v-else-if="ops.phase === 'rename'">

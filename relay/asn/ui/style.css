@@ -72,6 +72,7 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .buddy-menu,.launch-picker,.device-menu{position:fixed;z-index:62;margin:0;max-width:min(320px,calc(100vw - 16px))}
 /* 二級選單：放在主選單外面（fixed），比主選單高一層；位置由 lib/menu-place.mjs 算 */
 .buddy-subpop{z-index:63;list-style:none;padding:2px 0;width:max-content}
+.menu-shared{display:block;max-width:260px;padding:3px 12px 5px;font-size:11px;line-height:1.35;color:var(--muted);white-space:normal;list-style:none;border-bottom:1px solid rgba(0,0,0,.08)}
 .buddy-subpop .menu-note{padding:2px 8px;font-size:11px;color:var(--muted);white-space:normal}
 /* 夥伴管理對話框：接班換手的分段進度、詳情列 */
 .op-field{display:flex;flex-direction:column;gap:4px;font-size:12px}

@@ -13,6 +13,10 @@ export function modOf(m) {
     reason: typeof m.reason === 'string' ? m.reason.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 120) : '',
   }
 }
+// 本機程序掃描的條目是暫時性的顯示（程式結束就該消失），不是會留下往來的好友：
+// 名單標 kind＝process 的，以及舊版掃描條目的名字格式（「引擎 #pid」「引擎 · 供應商 #pid」，可帶（前景）／（背景））
+export const PROCESS_NAME_RE = /^[A-Za-z0-9._-]+(?: · [A-Za-z0-9._-]+)? #\d+(?:（[^）]*）)?$/
+export const isProcessName = name => PROCESS_NAME_RE.test(String(name ?? ''))
 export const friendId = (node, agent) => `${node}/${agent ?? ''}`
 // 收發室自己（名字結尾「收發室」）不當好友
 export const isRelayRoom = name => /收發室$/.test(String(name ?? ''))
@@ -62,6 +66,7 @@ export function buildFriends(members, { selfNode, selfName } = {}) {
       if (!a || typeof a.name !== 'string' || !a.name) continue
       if (isRelayRoom(a.name)) continue
       if (m.id === selfNode && a.name === selfName) continue
+      if (off && (a.kind === 'process' || isProcessName(a.name))) continue   // 程序條目消失就消失：不進離線列（含舊版留下、沒標 kind 的殘影）
       if (seen.has(a.name)) continue
       const pid = PARTNER_ID.test(String(a.partner_id ?? '')) ? a.partner_id : ''
       const isOff = off || a.online === false

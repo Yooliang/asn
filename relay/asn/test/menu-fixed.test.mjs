@@ -73,7 +73,7 @@ test('離線的背景工作者、其他引擎不會冒出「喚醒」大按鈕�
 test('接線：三處選單都用 aria-disabled＋說明小字，不靠隱藏；點反灰項目不送出也不收起選單', () => {
   const lhtml = read('ui/list.html'), ljs = read('ui/list.js'), mhtml = read('ui/m.html'), mjs = read('ui/m.js')
   // 電腦版右鍵：每一列都有 aria-disabled 與說明；切換模型與背景／前台切換不再 v-if 隱藏
-  assert.match(lhtml, /:aria-disabled="it\.ok \? 'false' : 'true'"[^>]*>[\s\S]*?<small class="menu-why"[^>]*v-if="!it\.ok">\{\{ it\.reason \}\}<\/small>/)
+  assert.match(lhtml, /:aria-disabled="it\.ok \? 'false' : 'true'"[^>]*>[\s\S]*?<small class="menu-why"[^>]*v-if="!it\.ok && buddyWhyOf\(it\.key\)">\{\{ buddyWhyOf\(it\.key\) \}\}<\/small>/)
   assert.match(lhtml, /aria-describedby="buddy-why-console"/)
   assert.doesNotMatch(lhtml, /<li v-if="buddyModel\.show"/, '切換模型不再看狀態隱藏')
   assert.doesNotMatch(lhtml, /<button[^>]*role="menuitem"[^>]*:disabled="!it\.ok"/, '右鍵項目不用原生 disabled')
@@ -84,7 +84,7 @@ test('接線：三處選單都用 aria-disabled＋說明小字，不靠隱藏；
   const tog = ljs.slice(ljs.indexOf('async function toggleBuddyConsole'), ljs.indexOf('async function submitPartnerDlg'))
   assert.match(tog, /buddyConsole\.state !== 'toggle'\) return/, '反灰的前景／背景切換什麼都不做')
   // 手機
-  assert.match(mhtml, /v-for="i in opsRows"/)
+  assert.match(mhtml, /v-for="i in opsView\.rows"/)
   assert.match(mjs, /const opsRows = computed\(\(\) => \(opsItems\.value\.length \? \[\{ key: 'console'/, '手機也固定列出背景／前台切換（反灰）')
   assert.match(mjs, /function pickOp\(op\) \{\s*\n\s*const item = opsItems\.value\.find\(i => i\.key === op\)\s*\n\s*if \(!item \|\| !item\.ok\) return/, '手機點反灰項目不送出')
 })

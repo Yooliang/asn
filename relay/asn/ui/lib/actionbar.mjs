@@ -6,7 +6,7 @@ import { AsnDialog } from './dialog.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher, modelSwitchBlock } from './model-switch.mjs'
 import { SUBAGENT_POLL_MS, canOfferSubagents, subagentView } from './subagents.mjs'
 import { BUDDY_CONSOLE_LABEL, CONSOLE_QUERY_TIMEOUT_MS, consoleReq, consoleToggleLabel, engineForProfile, withTimeout } from './partner-launch-ui.mjs'
-import { initialOpsCtx, menuItems, partnerEngine } from './partner-ops.mjs'
+import { initialOpsCtx, menuItems, partnerEngine, sharedWhy } from './partner-ops.mjs'
 import { manageItems, runArchive } from './archive.mjs'
 import { PartnerOpDialog, loadOpsContext } from './partner-ops-ui.mjs'
 import { canInviteFrom } from './groups.mjs'
@@ -101,7 +101,7 @@ export const OpsMenuButton = {
   props: { items: { type: Array, default: () => [] } },
   emits: ['pick'],
   setup(props, { emit }) {
-    const { ref, reactive, nextTick, onMounted, onBeforeUnmount } = globalThis.Vue
+    const { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount } = globalThis.Vue
     const open = ref(false)
     const btn = ref(null), pop = ref(null)
     const pos = reactive({ x: 0, y: 0, ready: false })
@@ -119,7 +119,8 @@ export const OpsMenuButton = {
     const onKey = e => { if (e.key === 'Escape') open.value = false }
     onMounted(() => { document.addEventListener('mousedown', onDoc, true); window.addEventListener('keydown', onKey); window.addEventListener('resize', place) })
     onBeforeUnmount(() => { document.removeEventListener('mousedown', onDoc, true); window.removeEventListener('keydown', onKey); window.removeEventListener('resize', place) })
-    return { open, btn, pop, pos, toggle, pick }
+    const view = computed(() => sharedWhy(props.items))
+    return { open, btn, pop, pos, toggle, pick, view }
   },
   template: `
 <div class="ab-wrap">
@@ -128,7 +129,8 @@ export const OpsMenuButton = {
   </button>
   <teleport to="body">
     <ul class="ab-menu ab-ops" v-if="open" ref="pop" role="menu" :style="{ left: pos.x + 'px', top: pos.y + 'px', visibility: pos.ready ? 'visible' : 'hidden' }">
-      <template v-for="it in items" :key="it.key"><li class="ab-sep" v-if="it.sep" role="separator"></li><li><button type="button" role="menuitem" :class="{ off: it.ok === false }" :aria-disabled="it.ok === false ? 'true' : 'false'" :aria-describedby="it.ok === false ? 'ops-why-' + it.key : null" :title="it.ok === false ? it.reason : ''" @click="pick(it)"><span class="mi-t">{{ it.label }}</span><small class="menu-why" v-if="it.ok === false" :id="'ops-why-' + it.key">{{ it.reason }}</small></button></li></template>
+      <li class="menu-note menu-shared" v-for="n in view.notes" :key="n" role="note">{{ n }}</li>
+      <template v-for="it in view.rows" :key="it.key"><li class="ab-sep" v-if="it.sep" role="separator"></li><li><button type="button" role="menuitem" :class="{ off: it.ok === false }" :aria-disabled="it.ok === false ? 'true' : 'false'" :aria-describedby="it.ok === false ? 'ops-why-' + it.key : null" :title="it.ok === false ? it.reason : ''" @click="pick(it)"><span class="mi-t">{{ it.label }}</span><small class="menu-why" v-if="it.ok === false && it.why" :id="'ops-why-' + it.key">{{ it.why }}</small></button></li></template>
     </ul>
   </teleport>
 </div>`,

@@ -63,6 +63,25 @@ export function loadBlock(ctx = {}) {
   return ctx.checking ? REASON.checking : REASON.unknown
 }
 
+// 本機程序掃描出來的條目（名單 kind＝process，例如「pi #30784（前景）」）：使用者自己在這台電腦開的，ASN 只能顯示
+export const isProcessEntry = f => String(f?.entryKind ?? '').trim().toLowerCase() === 'process' || String(f?.kind ?? '').trim().toLowerCase() === 'process'
+export function processReason(f) {
+  const name = String(f?.agent ?? f?.nick ?? '')
+  const eng = String(f?.engine ?? '').trim() || (/^([A-Za-z0-9._-]+)/.exec(name)?.[1] ?? '程式')
+  const place = /（([^）]+)）\s*$/.exec(name)?.[1]
+  return `這是這台電腦上自己開的 ${eng}${place ? `（${place}）` : ''}：ASN 只能顯示，不能從這裡管理`
+}
+
+// 同一個原因影響多個項目時只寫一次：回 { notes（共用說明，每個原因一行）, rows（項目加 why：只剩各自獨有的原因）}
+export function sharedWhy(items) {
+  const list = Array.isArray(items) ? items : []
+  const count = new Map()
+  for (const i of list) if (i && i.ok === false && i.reason) count.set(i.reason, (count.get(i.reason) ?? 0) + 1)
+  const notes = [...count].filter(([, n]) => n >= 2).map(([r]) => r)
+  const rows = list.map(i => ({ ...i, why: i && i.ok === false && i.reason && !notes.includes(i.reason) ? i.reason : '' }))
+  return { notes, rows }
+}
+
 // 這位夥伴屬於哪一類：claude（名單沒寫引擎也算）、acp、cloud，其他（Codex 等）回 other
 export function partnerEngine(friend) {
   const engine = String(friend?.engine ?? '').trim().toLowerCase()
@@ -109,6 +128,7 @@ export function menuItems(friend, ctx = {}) {
 
 // 這一項為什麼不能用（能用回空字串）。先看夥伴的種類，再看登入與電腦，最後才是這一項自己的條件
 function itemReason(key, friend, engine, offline, ctx) {
+  if (isProcessEntry(friend)) return processReason(friend)   // 本機程序條目：一律是「自己開的，只能顯示」，不看引擎種類（絕不說雲端）
   if (engine === 'cloud') return REASON.cloud
   if (engine === 'other') return REASON.otherEngine
   const label = OP_LABEL[key]

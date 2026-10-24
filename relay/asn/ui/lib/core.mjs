@@ -7,7 +7,7 @@ import { isAvatarDataUrl } from './avatar.mjs'
 import { renamedInfo } from './rename.mjs'
 import { asnByNode } from './presence.mjs'
 import { coalesced, overlayLocal } from './local-status.mjs'
-import { archivedKeysOf, buildFriends, cleanPsm, expectsReplyTo, friendId, isAsnWindow, mergeFriends } from './roster.mjs'
+import { isProcessName, archivedKeysOf, buildFriends, cleanPsm, expectsReplyTo, friendId, isAsnWindow, mergeFriends } from './roster.mjs'
 import { contextAlertText, createContextWatch } from './context-usage.mjs'
 import { routeMail, stubFriend } from './routing.mjs'
 import { hasNudge, hueOf, initial, noReplyNoticeOf, plain, stripNudge, stripReplyHead, unwrapShell } from './text.mjs'
@@ -111,7 +111,7 @@ export class AsnCore {
     const live = buildFriends(members, { selfNode: this.selfNode, selfName: this.windowName })
     this.#mergeRenamed(live)
     const prev = new Map([...this.friends].map(([id, f]) => [id, f.status]))
-    const known = [...this.friends.values()].filter(f => this.logs.has(f.id) || f.known)
+    const known = [...this.friends.values()].filter(f => (this.logs.has(f.id) || f.known) && !(f.entryKind === 'process' || (isProcessName(f.agent) && !this.logs.get(f.id)?.length)))   // 程序條目不當離線好友記住；舊殘影（名字符合格式、沒有對話）也不留
     const merged = mergeFriends(known, live, archivedKeysOf(members))
     const next = new Map()
     for (const m of merged) {

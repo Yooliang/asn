@@ -117,7 +117,7 @@ test('一對一「管理」選單：夥伴管理項目（沿用名單右鍵 mana
   assert.match(t, /role="separator"/)
   // 反灰：aria-disabled 加說明小字，點了不送出（OpsMenuButton.pick 與 pickOps 都擋）
   assert.match(t, /:aria-disabled="it\.ok === false \? 'true' : 'false'"/)
-  assert.match(t, /<small class="menu-why" v-if="it\.ok === false" :id="'ops-why-' \+ it\.key">\{\{ it\.reason \}\}<\/small>/)
+  assert.match(t, /<small class="menu-why" v-if="it\.ok === false && it\.why" :id="'ops-why-' \+ it\.key">\{\{ it\.why \}\}<\/small>/)
   assert.doesNotMatch(t, /:disabled="it\.ok === false"/, '不用原生 disabled')
   assert.match(t, /function pick\(it\) \{ if \(it\.ok === false\) return;/)
   assert.match(t, /const it = opsAll\.value\.find\(i => i\.key === key\)\s*\n\s*if \(!it\?\.ok\) return/)

@@ -84,9 +84,9 @@ test('接線：送出走手機的 Rust 指令、先過 opFormError、輪詢用 r
   const fn = /async function submitOp\(op\) \{([\s\S]*?)\n    \}\n/.exec(js)[1]
   assert.ok(fn.indexOf('opFormError(') >= 0 && fn.indexOf('opFormError(') < fn.indexOf('runPartnerOp('), '先檢查再送出')
   assert.match(fn, /if \(err\)/)
-  assert.match(html, /v-for="i in opsRows"[^>]*:aria-disabled="i\.ok \? 'false' : 'true'"[^>]*:aria-describedby="i\.ok \? null : 'ops-why-' \+ i\.key"/, '不能按的項目反灰（aria-disabled）並連到說明')
-  assert.doesNotMatch(html, /v-for="i in opsRows"[^>]*:disabled=/, '不用原生 disabled（讀得到說明、仍可聚焦）')
-  assert.match(html, /<small class="m-opt-why" :id="'ops-why-' \+ i\.key" v-if="!i\.ok">\{\{ i\.reason \}\}<\/small>/, '手機沒有 hover，原因寫在項目下面的小字')
+  assert.match(html, /v-for="i in opsView\.rows"[^>]*:aria-disabled="i\.ok \? 'false' : 'true'"[^>]*:aria-describedby="i\.ok \? null : 'ops-why-' \+ i\.key"/, '不能按的項目反灰（aria-disabled）並連到說明')
+  assert.doesNotMatch(html, /v-for="i in opsView\.rows"[^>]*:disabled=/, '不用原生 disabled（讀得到說明、仍可聚焦）')
+  assert.match(html, /<small class="m-opt-why" :id="'ops-why-' \+ i\.key" v-if="!i\.ok && i\.why">\{\{ i\.why \}\}<\/small>/, '手機沒有 hover，原因寫在項目下面的小字')
   assert.match(js, /if \(!item \|\| !item\.ok\) return/, '點反灰的項目不送出任何動作')
   assert.match(html, /v-for="m in opsModels"/); assert.match(html, /\{\{ opsModelNote \}\}/)
   assert.match(html, /v-model="ops\.newName"/); assert.match(html, /v-model="ops\.note"/)
