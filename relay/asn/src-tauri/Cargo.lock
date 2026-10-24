@@ -58,7 +58,7 @@ dependencies = [
 
 [[package]]
 name = "asn"
-version = "0.1.62"
+version = "0.1.64"
 dependencies = [
  "base64 0.22.1",
  "flate2",

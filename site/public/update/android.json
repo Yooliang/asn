@@ -1,8 +1,8 @@
 {
-  "version": "0.1.62",
-  "versionCode": 1062,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.62_android.apk",
-  "sha256": "a6e4040f96ecc3f1068845b901721811e61826c351b6a86854a43ee87d951ea4",
-  "notes": "手機選項頁改成設備與帳號頁、群組訊息間距縮短",
-  "bytes": 9321956
+  "version": "0.1.64",
+  "versionCode": 1064,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.64_android.apk",
+  "sha256": "ddaf2faf7a95932268aae8eae371233268ec72c8adb9a8ab97fcf24498f1b15c",
+  "notes": "群組已讀人數、設備名稱、未讀數修正、設備排序",
+  "bytes": 9326052
 }

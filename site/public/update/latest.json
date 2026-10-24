@@ -1,11 +1,11 @@
 {
-  "version": "0.1.62",
-  "notes": "手機「選項」整頁改成電腦版同款的設備與帳號頁；群組訊息下方順序標籤與回覆同一行、縮短間距；失敗通知用對方視窗名義；Grok 可作為收發室工作者",
-  "pub_date": "2026-10-24T07:53:54.343Z",
+  "version": "0.1.64",
+  "notes": "群組：已讀人數（已讀 N）、設備名稱後綴、回覆鈕放最前面；設備頁籤排序：本機第一、有人在線的在前；名單顯示本機執行中的 pi／claude／codex／gemini；視窗改名後群組成員跟著改；設定頁拿掉不再需要的項目；已連線在連線正常時不顯示",
+  "pub_date": "2026-10-24T10:24:59.384Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybitPcUwvaFJnYTgxb3VveE9wOWRMdDJxb2o1UHJxSzQ1QjNkNEdUTS9Bd2NLeXBPM3MwY2hMZ21XRyt0NzVlNVdJYUdXQ3diME8raG0vS3BTWDJWSVFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyODI4NDM0CWZpbGU6QVNOXzAuMS42Ml94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjYyCnlwaGpWaVlyYmU1czd1UUZtUkdYRlR4K2FyYXdGSEN6M0RsTzRtRHdCK1JsT0NjUjMvVUlSYU44L2lUeGpDQ2h2VlU5d3hUbTlLNjl3c05TSStNYkNRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.62_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybi8xZUdQbG1QcHoxc205WWE0YnVKeHdXTktKTGFEK1Jsa1VCTStaN3RLMVAxODVmNU93NU4wbXNqSG83SnhTSUVnb1REZDVTMWVQb25zRXNTL280WXdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyODM3NDk5CWZpbGU6QVNOXzAuMS42NF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjY0ClpISHJrdjMxa25oNVFWR3ZCdGJXOXRqczdIQ05YRjlNS0dyWFVrMHY4KzI5T1IyQmpydXJmZzdpa096cGdEOFlPVXlRdDhHZlNmRGhMN21TUVJGTURBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.64_x64-setup.exe"
     }
   }
 }
