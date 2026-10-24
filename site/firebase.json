@@ -29,6 +29,14 @@
         ]
       },
       {
+        "source": "/link{,/**}",
+        "headers": [
+          { "key": "Content-Security-Policy", "value": "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src https://etccgmkrosbzpltudlgt.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'none'" },
+          { "key": "Referrer-Policy", "value": "no-referrer" },
+          { "key": "Cache-Control", "value": "no-store" }
+        ]
+      },
+      {
         "source": "/.well-known/assetlinks.json",
         "headers": [
           { "key": "Content-Type", "value": "application/json" },

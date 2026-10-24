@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertNotEquals } from "jsr:@std/assert@1";
-import { type DeviceCodeDeps, handleDeviceCodeAction, normalizeUserCode, USER_CODE_RE } from "./device_code.ts";
+import { approveCorsHeaders, type DeviceCodeDeps, handleDeviceCodeAction, normalizeUserCode, USER_CODE_RE } from "./device_code.ts";
 
 const sha = async (s: string) => "H(" + s + ")";
 
@@ -120,4 +120,20 @@ Deno.test("守門：index.ts 在節點金鑰驗證之前接上三個動作；sen
   assert(src.includes('"not_receivable"') && src.includes("409"), "send 要把 not_receivable 回 409");
   const mod = await Deno.readTextFile(new URL("./device_code.ts", import.meta.url));
   assertEquals(/console\.\w+\([^)]*(key|code)/i.test(mod.replace(/console\.error\("device_code_\w+", error\)/g, "")), false);
+});
+
+Deno.test("網頁核准頁的跨來源許可：只有官網網域、只有 approve 動作；其他一律不給", () => {
+  const ok = approveCorsHeaders("https://asnmessenger.web.app", "device_code_approve");
+  assert(ok !== null);
+  assertEquals(ok!["access-control-allow-origin"], "https://asnmessenger.web.app");
+  assertEquals(ok!["access-control-allow-headers"], "authorization, content-type");
+  assertEquals(ok!["access-control-allow-methods"], "POST, OPTIONS");
+  assertEquals(ok!["vary"], "origin");
+  assert(!("access-control-allow-credentials" in ok!), "不帶 cookie 憑證");
+  assertEquals(approveCorsHeaders("https://evil.example", "device_code_approve"), null);
+  assertEquals(approveCorsHeaders("https://asnmessenger.web.app.evil.example", "device_code_approve"), null);
+  assertEquals(approveCorsHeaders(null, "device_code_approve"), null);
+  assertEquals(approveCorsHeaders("https://asnmessenger.web.app", "device_code_start"), null, "start 不開網頁");
+  assertEquals(approveCorsHeaders("https://asnmessenger.web.app", "device_code_poll"), null, "poll 會回金鑰，絕不開網頁");
+  assertEquals(approveCorsHeaders("https://asnmessenger.web.app", "whoami"), null);
 });

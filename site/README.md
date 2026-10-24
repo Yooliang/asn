@@ -8,6 +8,7 @@
 | 首頁 | `public/index.html` |
 | 隱私權政策 | `public/privacy.html`（網址 `/privacy`） |
 | 服務條款 | `public/terms.html`（網址 `/terms`） |
+| 主機核准頁 | `public/link/`（`/link/?code=ABCD-2345`；測試 `tests/approve_page.test.mjs`；Supabase Redirect URLs 要加 `https://asnmessenger.web.app/link/`） |
 | 雲端代理技能說明 | `public/skill/`（`/skill/`；說明本體 `asn-cloud-agent.md`，輕量檢查 `version.json`） |
 
 ## 本機預覽

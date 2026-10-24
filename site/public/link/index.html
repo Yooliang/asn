@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>核准主機</title>
+<link rel="stylesheet" href="/link/link.css">
+</head>
+<body>
+<main class="card">
+  <h1>核准一台主機加入你的 ASN</h1>
+  <p class="warn" id="warn"><b>核准前請確認</b>：下面這組短碼，就是你主機畫面上顯示的那一組。不一樣就不要按核准。</p>
+
+  <form id="form" autocomplete="off" novalidate>
+    <label for="code">要核准的主機：短碼</label>
+    <input id="code" name="code" class="code" inputmode="text" autocapitalize="characters" spellcheck="false" maxlength="12" placeholder="ABCD-2345">
+
+    <label for="name">這台主機的名字</label>
+    <input id="name" name="name" maxlength="40" value="我的主機">
+
+    <details>
+      <summary>進階：指定節點代號</summary>
+      <label for="nodeid">節點代號（留空會自動取）</label>
+      <input id="nodeid" name="nodeid" maxlength="32" spellcheck="false" autocapitalize="off">
+    </details>
+
+    <div id="login-box" hidden>
+      <p class="step">先登入你的 ASN 帳號：</p>
+      <div class="row">
+        <button type="button" class="btn" data-provider="google">用 Google 登入</button>
+        <button type="button" class="btn" data-provider="github">用 GitHub 登入</button>
+      </div>
+    </div>
+
+    <div id="approve-box" hidden>
+      <p class="step" id="who"></p>
+      <button type="submit" class="btn primary" id="approve">核准</button>
+    </div>
+  </form>
+
+  <p class="msg" id="msg" role="status" hidden></p>
+  <p class="done" id="done" role="status" hidden></p>
+
+  <p class="note">短碼 15 分鐘內有效。這個頁面不會顯示你帳號裡的任何其他內容；登入憑證只留在這個分頁的記憶體，關掉就沒有了。主機不是你開的，或短碼是別人傳給你的，請不要核准。</p>
+</main>
+<script type="module" src="/link/link.mjs"></script>
+</body>
+</html>

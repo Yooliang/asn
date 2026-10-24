@@ -172,12 +172,32 @@ fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
     std::fs::write(path, text)
 }
 
+/// 網頁核准頁（官網 site/public/link）。短碼放在網址的 code 參數；網址不帶任何別的資訊
+pub const APPROVE_PAGE: &str = "https://asnmessenger.web.app/link/";
+
+pub fn approve_url(user_code: &str) -> String {
+    format!("{APPROVE_PAGE}?code={user_code}")
+}
+
+/// 主機上印給人看的說明：方法一網址（手機或電腦瀏覽器，登入後按「核准」），方法二電腦版輸入短碼。兩種都印，短碼一定在。
+pub fn instructions(user_code: &str, expires_in: u64) -> Vec<String> {
+    vec![
+        "要讓這台主機加入你的 ASN，請擇一核准（兩種都需要登入你的 ASN 帳號）：".to_string(),
+        "方法一：用手機或電腦的瀏覽器打開下面的網址，登入後按「核准」。".to_string(),
+        format!("  {}", approve_url(user_code)),
+        "方法二：在已登入的 ASN 電腦版，打開「設定 → 帳號 → 雲端代理」，按「輸入短碼核准主機」，輸入下面的短碼並為這台主機取名。".to_string(),
+        format!("短碼：{user_code}"),
+        "核准前請確認：核准畫面上的短碼，必須和這裡顯示的一模一樣；不一樣就不要核准。".to_string(),
+        format!("（{} 分鐘內有效；等待核准中，按 Ctrl+C 可取消）", (expires_in / 60).max(1)),
+    ]
+}
+
 /// 整個流程：start → 說明 → 輪詢 → 存金鑰。成功回節點代號。`say` 輸出給人看的話（不含金鑰）。
 pub async fn login(client: &reqwest::Client, url: &str, dir: &Path, say: &dyn Fn(&str)) -> Result<String, String> {
     let st = start(client, url).await?;
-    say("請在已登入的 ASN（電腦版或手機版）打開「設定 → 新增無畫面主機」，輸入下面的短碼，並為這台主機取名。");
-    say(&format!("短碼：{}", st.user_code));
-    say(&format!("（{} 分鐘內有效；等待核准中，按 Ctrl+C 可取消）", (st.expires_in / 60).max(1)));
+    for line in instructions(&st.user_code, st.expires_in) {
+        say(&line);
+    }
     let started = Instant::now();
     let deadline = Duration::from_secs(st.expires_in);
     loop {
@@ -310,6 +330,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(d.path().join("t1-box.key")).unwrap(), "SECRETKEY_once_only");
         let out = said.lock().unwrap().clone();
         assert!(out.contains("ABCD-2345") && out.contains("t1-box"), "{out}");
+        assert!(out.contains("https://asnmessenger.web.app/link/?code=ABCD-2345"), "login 要印出核准網址\n{out}");
         assert!(!out.contains("SECRETKEY_once_only") && !out.contains("DEVICECODE_secret"), "輸出不含金鑰與裝置碼");
         assert_eq!(seen.lock().unwrap().len(), 4);
     }
@@ -321,6 +342,22 @@ mod tests {
         let e = login(&reqwest::Client::new(), &url, d.path(), &|_| {}).await.unwrap_err();
         assert!(e.contains("過期"), "{e}");
         assert_eq!(std::fs::read_dir(d.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn 說明_網址帶短碼_備案短碼也印_並提醒核對() {
+        assert_eq!(APPROVE_PAGE, "https://asnmessenger.web.app/link/");
+        assert_eq!(approve_url("ABCD-2345"), "https://asnmessenger.web.app/link/?code=ABCD-2345");
+        let t = instructions("ABCD-2345", 900).join("\n");
+        assert!(t.contains("https://asnmessenger.web.app/link/?code=ABCD-2345"), "{t}");
+        assert!(t.contains("短碼：ABCD-2345"), "備案：電腦版輸入短碼也要印\n{t}");
+        assert!(t.contains("輸入短碼核准主機"), "{t}");
+        assert!(t.contains("必須和這裡顯示的一模一樣"), "要提醒核對短碼\n{t}");
+        assert!(t.contains("15 分鐘"), "{t}");
+        // 網址除了短碼不帶任何東西
+        let u = approve_url("ABCD-2345");
+        assert_eq!(u.matches('?').count(), 1);
+        assert!(!u.contains('&') && !u.contains('#'));
     }
 
     #[test]

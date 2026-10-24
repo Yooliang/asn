@@ -27,7 +27,7 @@ import {
 } from "../_shared/attachments.ts";
 import { SIGN_HEADER, signedArgs, signedUserId } from "../_shared/owner_sign.ts";
 import { requestReadSync } from "../_shared/read_sync.ts";
-import { DEVICE_CODE_ACTIONS, handleDeviceCodeAction, randomUserCode } from "../_shared/device_code.ts";
+import { approveCorsHeaders, DEVICE_CODE_ACTIONS, handleDeviceCodeAction, randomUserCode } from "../_shared/device_code.ts";
 import { handleTts, TtsLimiter, ttsVoicesResponse } from "../_shared/tts.ts";
 
 const ttsLimiter = new TtsLimiter();
@@ -179,13 +179,18 @@ Deno.serve(async (req) => {
 
   // 裝置授權登入（給沒有畫面的主機，見 _shared/device_code.ts）：start、poll 不需要金鑰；approve 要登入憑證。
   if (action && DEVICE_CODE_ACTIONS.has(action)) {
+    // 官網核准頁（瀏覽器跨來源）：只有 approve 且來源是官網才回許可標頭
+    const cors = approveCorsHeaders(req.headers.get("origin"), action);
+    if (req.method === "OPTIONS") return cors ? new Response(null, { status: 204, headers: cors }) : json(403, { error: "forbidden" });
     if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
     const ip = (req.headers.get("x-forwarded-for") ?? "unknown").split(",")[0].trim();
     const r = await handleDeviceCodeAction(
       { rpc: async (fn, args) => await db.rpc(fn, args), verifyJwt: accountDeps.verifyJwt, sha256Hex, newCodes: () => ({ userCode: randomUserCode(), deviceCode: b64u(32) }), newSecrets: accountDeps.newSecrets },
       action, { ip, authHeader: req.headers.get("authorization"), body: await req.json().catch(() => null) },
     );
-    return json(r.status, r.body);
+    const res = json(r.status, r.body);
+    if (cors) for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
+    return res;
   }
 
   // 登入帳號的動作（在節點金鑰驗證之前：身分來自登入憑證，見 _shared/account.ts）
