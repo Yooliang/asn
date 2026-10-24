@@ -3,6 +3,7 @@
 
 // deno-lint-ignore no-explicit-any
 type Json = any;
+import { noteHeld, type RankInput, type RoomRank } from "./wake_rank.ts";
 
 export const OWNER_KEY = "~owner"; // 帳號擁有者本人的成員 key（節點代號不可能含 ~）；顯示名取租戶的帳號名稱
 export const WINDOW_SEP = "~";
@@ -77,24 +78,42 @@ export function shouldRespond(
 // 被叫醒的集合＝這個讀者看得到的成員裡 shouldRespond 為真的 AI（真人不占順位；wake_ok 只有讀者自己的那份知道，別人的當成可叫醒）。
 // 排序用顯示標示（label，沒有就 name、key），不用成員 key：跨租戶時 key 是讀者視角的相對身分，不同讀者會排出不同順序。
 // 同一封信、同一份成員名單算出的結果固定；沒被叫醒回 null
-export type Wake = { rank: number; total: number; before: string[] };
+export type Wake = { rank: number; total: number; before: string[]; score?: number; hold?: true };
 const isAiMember = (m: RoomMember) => !m.key.startsWith("~") && m.kind !== "owner" && m.kind !== "human" && m.member_kind !== "human";
 const wakeSortKey = (m: RoomMember) => m.label || m.name || m.key;
-export function wakeOrder(
-  msg: { from: string; trust: string; mentions?: string[]; is_seed?: boolean; from_kind?: string; wake_ok?: boolean },
-  members: RoomMember[],
-  selfKey: string,
-): Wake | null {
+type WakeMsg = { from: string; trust: string; mentions?: string[]; is_seed?: boolean; from_kind?: string; wake_ok?: boolean };
+const labelCmp = (a: RoomMember, b: RoomMember) => {
+  const x = wakeSortKey(a), y = wakeSortKey(b);
+  return x < y ? -1 : x > y ? 1 : a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
+};
+/** 被這則訊息叫醒的 AI（含讀者自己），依固定規則（顯示標示）排序；讀者自己不在叫醒範圍回 null */
+export function wokenAis(msg: WakeMsg, members: RoomMember[], selfKey: string): RoomMember[] | null {
   if (!shouldRespond(msg, selfKey)) return null;
   const woken = members.filter((m) => m.key === selfKey || (isAiMember(m) && shouldRespond({ ...msg, wake_ok: true }, m.key)));
   const uniq = [...new Map(woken.map((m) => [m.key, m])).values()];
-  uniq.sort((a, b) => {
-    const x = wakeSortKey(a), y = wakeSortKey(b);
-    return x < y ? -1 : x > y ? 1 : a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
-  });
-  const i = uniq.findIndex((m) => m.key === selfKey);
-  if (i < 0) return null;
-  return { rank: i + 1, total: uniq.length, before: uniq.slice(0, i).map(wakeSortKey) };
+  uniq.sort(labelCmp);
+  return uniq.some((m) => m.key === selfKey) ? uniq : null;
+}
+/** 排序判斷的分數（以顯示標示為鍵）與門檻；有給就按分數排，沒給＝固定順位 */
+export type WakeScores = { scores: Record<string, number>; min: number; exemptMentioned?: boolean };
+export function wakeOrder(msg: WakeMsg, members: RoomMember[], selfKey: string, rank?: WakeScores): Wake | null {
+  const uniq = wokenAis(msg, members, selfKey);
+  if (!uniq) return null;
+  if (!rank) {
+    const i = uniq.findIndex((m) => m.key === selfKey);
+    return { rank: i + 1, total: uniq.length, before: uniq.slice(0, i).map(wakeSortKey) };
+  }
+  const sc = (m: RoomMember) => rank.scores[wakeSortKey(m)];
+  const exempt = (m: RoomMember) => !!rank.exemptMentioned && (msg.mentions ?? []).includes(m.key);
+  const passes = (m: RoomMember) => sc(m) === undefined || sc(m) >= rank.min || exempt(m);
+  const passers = uniq.filter(passes);
+  // 分數高的在前；同分用固定規則穩定排序
+  passers.sort((a, b) => (sc(b) ?? 0) - (sc(a) ?? 0) || labelCmp(a, b));
+  const me = uniq.find((m) => m.key === selfKey)!;
+  const score = sc(me);
+  if (!passes(me)) return { rank: 0, total: passers.length, before: [], score, hold: true };
+  const i = passers.findIndex((m) => m.key === selfKey);
+  return { rank: i + 1, total: passers.length, before: passers.slice(0, i).map(wakeSortKey), ...(score === undefined ? {} : { score }) };
 }
 
 export type RoomDeps = {
@@ -103,6 +122,8 @@ export type RoomDeps = {
   rosterHas: (node: string, agent: string) => Promise<boolean>;
   /** 選填：訊息寫入後、敲門鈴前呼叫（附件在這裡綁到訊息，收信端一響就看得到附件） */
   beforeRing?: (seq: number) => Promise<void>;
+  /** 選填：叫醒順位的排序判斷（#230，Jev）；沒給或失敗＝固定順位 */
+  rank?: RoomRank | null;
 };
 export type Reply = { status: number; body: Json };
 
@@ -203,10 +224,33 @@ export async function handleNodeRoomAction(deps: RoomDeps, me: { id: string }, a
     if (messages.some((m: { for_me: boolean }) => m.for_me)) {
       const mem = await deps.rpc("asn_relay_room_members", { p_node: me.id, p_agent: agent, p_room: room, p_owner: false });
       const members: RoomMember[] | null = !mem.error && Array.isArray(mem.data?.members) ? mem.data.members : null;
-      if (members) messages = messages.map((m: RoomMessage & { for_me: boolean }) => {
-        const wake = m.for_me ? wakeOrder(m, members, selfKey) : null;
-        return wake ? { ...m, wake } : m;
-      });
+      if (members) {
+        const out: (RoomMessage & { for_me: boolean; wake?: Wake })[] = [];
+        for (let i = 0; i < messages.length; i++) {
+          const m = messages[i] as RoomMessage & { for_me: boolean };
+          let scores: WakeScores | undefined;
+          const woken = m.for_me ? wokenAis(m, members, selfKey) : null;
+          if (woken && deps.rank) {
+            const rk = deps.rank;
+            const exempt = (x: RoomMember) => rk.cfg.exemptMentioned && (m.mentions ?? []).includes(x.key);
+            // 只剩一位且他免評就不必問；其餘都問
+            if (woken.length > 1 || woken.some((x) => !exempt(x))) {
+              const input: RankInput = {
+                body: m.body,
+                recent: messages.slice(Math.max(0, i - 6), i).map((x: RoomMessage) => ({ from: x.from_name ?? x.from, body: x.body })),
+                candidates: [...new Map(woken.map((x) => [wakeSortKey(x), { id: wakeSortKey(x), label: wakeSortKey(x) }])).values()],
+                mentioned: (m.mentions ?? []).map((k: string) => members.find((x) => x.key === k)).filter(Boolean).map((x: RoomMember | undefined) => wakeSortKey(x as RoomMember)),
+              };
+              const sc = await rk.score(`${room}:${m.seq}:${input.candidates.map((c) => c.id).sort().join("|")}`, input);
+              if (sc) scores = { scores: sc, min: rk.cfg.min, exemptMentioned: rk.cfg.exemptMentioned };
+            }
+          }
+          const wake = m.for_me ? wakeOrder(m, members, selfKey, scores) : null;
+          if (wake?.hold) noteHeld(1);
+          out.push(wake ? { ...m, wake } : m);
+        }
+        messages = out;
+      }
     }
     return { status: 200, body: { messages, last_seq: r.data.last_seq } };
   }

@@ -1,6 +1,7 @@
 // Relay broker. Node key goes in the x-relay-key header; the sender node is decided by the key.
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { handleNodeRoomAction, type RoomDeps, syncNodeAuto } from "../_shared/rooms.ts";
+import { rankFromEnv } from "../_shared/wake_rank.ts";
 import { GROUP_ACTIONS, handleGroupAction, signedRpc } from "../_shared/groups.ts";
 import { handleAgentInbox } from "../_shared/agent_inbox.ts";
 import { readNodeInbox } from "../_shared/inbox_exclude.ts";
@@ -59,7 +60,10 @@ async function ring(topic: string) {
   signal.background(signal.putBell(topic));
 }
 
+// 叫醒順位的排序判斷（#230）：JEV_RANK_ENABLED 沒開或缺 JEV_URL／JEV_KEY 時等於固定順位
+const wakeRank = rankFromEnv();
 const roomDeps = (): RoomDeps => ({
+  rank: wakeRank,
   rpc: async (fn, args) => await db.rpc(fn, args),
   ring,
   rosterHas: async (node, agent) => {
