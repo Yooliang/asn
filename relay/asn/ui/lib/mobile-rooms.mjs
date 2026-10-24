@@ -90,6 +90,37 @@ export function wakeTags(info) {
   return [...on, ...off].map(({ label, off: o }) => ({ label, off: o }))
 }
 const replyOf = (r, labels) => (r && Number.isInteger(r.seq) ? { seq: r.seq, author: safeLabel(labels.get(r.from) || r.from_display_label || r.from_label || '') || '成員', excerpt: oneLine(r.excerpt, 80) } : null)
+// 後台的已讀狀況 → 畫面用的 { n, total, by, un }；沒有（舊後台、系統訊息）或格式不對回 null。名單過 safeLabel，不會出現節點代號或 x: 代號
+export function readInfo(e) {
+  if (!e || !Number.isInteger(e.read_count) || !Number.isInteger(e.read_total) || e.read_total < 0) return null
+  const names = a => (Array.isArray(a) ? a : []).map(x => safeLabel(typeof x === 'string' ? x : '')).filter(x => x && !/^x:/.test(x))
+  return { n: Math.min(e.read_count, e.read_total), total: e.read_total, by: names(e.read_by), un: names(e.unread_by) }
+}
+// 訊息下方小字：N＝0 不顯示；全部都讀了顯示「全部已讀」；否則「已讀 N」
+export function readLabel(rd) {
+  if (!rd || !(rd.n > 0)) return ''
+  return rd.total > 0 && rd.n >= rd.total ? '全部已讀' : `已讀 ${rd.n}`
+}
+// 滑鼠移上去（電腦版）的提示：誰讀了、誰還沒；沒有名單（舊後台）回空字串
+export function readTitle(rd) {
+  if (!rd || (!rd.by.length && !rd.un.length)) return ''
+  return [rd.by.length ? `已讀：${rd.by.join('、')}` : '', rd.un.length ? `未讀：${rd.un.join('、')}` : ''].filter(Boolean).join('\n')
+}
+// 把後台 reads（讀者這邊最近發的訊息的已讀狀況）套到對話記錄上；回新陣列（沒有變動回原陣列）
+export function applyReads(log, reads) {
+  if (!Array.isArray(log) || !Array.isArray(reads) || !reads.length) return log
+  const by = new Map(reads.map(e => [e?.seq, readInfo(e)]))
+  let changed = false
+  const out = log.map(e => {
+    const rd = e && e.k === 'me' ? by.get(e.seq) : null
+    if (!rd || JSON.stringify(rd) === JSON.stringify(e.rd)) return e
+    changed = true
+    return { ...e, rd }
+  })
+  return changed ? out : log
+}
+// 還有人沒讀的自己的訊息（最近 40 則內）：有的話值得在沒有新訊息時也問一次後台
+export const hasPendingReads = log => (Array.isArray(log) ? log.slice(-40) : []).some(e => e?.k === 'me' && e.rd && e.rd.n < e.rd.total)
 export function roomLog(messages, myKeys, members) {
   const mine = new Set(myKeys ?? [])
   const list = (Array.isArray(messages) ? messages : []).filter(m => m && Number.isInteger(m.seq))
@@ -102,7 +133,7 @@ export function roomLog(messages, myKeys, members) {
     if (m.from_kind === 'system' || m.relation === 'system') { out.push({ k: 'sys', text, t, id, seq: m.seq }); continue }
     const isMe = m.relation ? m.relation === 'mine' : mine.has(m.from)
     const kind = kindOf(m)
-    out.push({ k: isMe ? 'me' : 'them', who: isMe ? '' : (labels.get(m.from) || fromLabel(m)), kind, badge: isMe ? '' : KIND_BADGE[kind] ?? '', av: isMe ? '' : speakerAvatarSeed(m.from), reply: replyOf(m.reply_to, labels), wake: wakeTags(m.wake_info), text, t, id, seq: m.seq, seed: m.is_seed === true })
+    out.push({ k: isMe ? 'me' : 'them', who: isMe ? '' : (labels.get(m.from) || fromLabel(m)), kind, badge: isMe ? '' : KIND_BADGE[kind] ?? '', av: isMe ? '' : speakerAvatarSeed(m.from), reply: replyOf(m.reply_to, labels), wake: wakeTags(m.wake_info), rd: isMe && !m.is_seed ? readInfo(m) : null, text, t, id, seq: m.seq, seed: m.is_seed === true })
   }
   return out
 }

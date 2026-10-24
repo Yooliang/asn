@@ -128,6 +128,22 @@ Deno.test("讀紀錄：每則帶 for_me（被點名或 owner 發的才為 true�
   assertEquals(r.body.messages.map((m: { for_me: boolean }) => m.for_me), [false, true, true]);
 });
 
+Deno.test("讀紀錄：已讀人數欄位與 reads 原樣帶給用戶端；舊後台沒有 reads 就不附（#224）", async () => {
+  const { deps } = fake({
+    asn_relay_room_read: () => ({
+      key: "w02", last_seq: 1, reads: [{ seq: 1, read_count: 2, read_total: 3, read_by: ["甲", "乙"], unread_by: ["丙"] }],
+      messages: [{ seq: 1, from: "aegis~小牧", trust: "member", body: "閒聊", mentions: [], read_count: 2, read_total: 3 }],
+    }),
+  });
+  const r = await handleNodeRoomAction(deps, ME, "room_read", { room: "r1", since: "0" });
+  assertEquals(r.body.messages[0].read_count, 2);
+  assertEquals(r.body.messages[0].read_total, 3);
+  assertEquals(r.body.reads, [{ seq: 1, read_count: 2, read_total: 3, read_by: ["甲", "乙"], unread_by: ["丙"] }]);
+  const old = fake({ asn_relay_room_read: () => ({ key: "w02", last_seq: 1, messages: [] }) });
+  const r2 = await handleNodeRoomAction(old.deps, ME, "room_read", { room: "r1", since: "0" });
+  assertEquals("reads" in r2.body, false);
+});
+
 // ── 同時叫醒多個 AI 的順位（#230）：後台給每封 for_me 的信一個穩定的順位，橋依順位延遲 ──
 const AIS: RoomMember[] = [
   { key: "~owner", name: "啟良", kind: "owner" },
