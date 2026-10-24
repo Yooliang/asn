@@ -113,6 +113,7 @@ pub fn process_started_ms(_pid: u32) -> Option<u64> {
     None
 }
 
+#[cfg(desktop)]
 /// session 檔記的 pid 現在還是「那個視窗的程序」：程序活著，而且不是 session 開始之後才建立的（pid 被重用）
 pub fn session_alive(pid: u32, started_at_ms: u64) -> bool {
     pid_alive(pid) && crate::bridge::roster::same_process(started_at_ms, process_started_ms(pid))

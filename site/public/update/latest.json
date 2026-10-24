@@ -1,11 +1,11 @@
 {
-  "version": "0.1.64",
-  "notes": "群組：已讀人數（已讀 N）、設備名稱後綴、回覆鈕放最前面；設備頁籤排序：本機第一、有人在線的在前；名單顯示本機執行中的 pi／claude／codex／gemini；視窗改名後群組成員跟著改；設定頁拿掉不再需要的項目；已連線在連線正常時不顯示",
-  "pub_date": "2026-10-24T10:24:59.384Z",
+  "version": "0.1.65",
+  "notes": "夥伴操作選單項目固定（不適用的反灰並說明）；設備頁籤可手動排序、整台離線且全封存的設備自動隱藏；關閉與接手後殘留的舊視窗修正；背景／前台切換擴到 pi、Grok 等，ASN 開的夥伴各自一個 Windows Terminal 視窗；pi 擴充可收信；Grok 可作為工作者",
+  "pub_date": "2026-10-24T11:34:32.203Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybi8xZUdQbG1QcHoxc205WWE0YnVKeHdXTktKTGFEK1Jsa1VCTStaN3RLMVAxODVmNU93NU4wbXNqSG83SnhTSUVnb1REZDVTMWVQb25zRXNTL280WXdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyODM3NDk5CWZpbGU6QVNOXzAuMS42NF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjY0ClpISHJrdjMxa25oNVFWR3ZCdGJXOXRqczdIQ05YRjlNS0dyWFVrMHY4KzI5T1IyQmpydXJmZzdpa096cGdEOFlPVXlRdDhHZlNmRGhMN21TUVJGTURBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.64_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjl1M25KS2VEUDV4QWh1d2c5YjY3WmJ0RmVaYkZvV0hqYWlUb2FRWDc2cUM1MW5lUjZQR3JkVnpTVW43KytvNzg5dzRHaEdRdDlScXAzWXcyMDl3VlFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyODQxNjcxCWZpbGU6QVNOXzAuMS42NV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjY1CnJ5M0VjeGFVQnVSUWN4eUJPb1A0U3Zpci9WMW84ZTltWFVxMmJjTlhkNFllcVVaZzRzdXFadGJPTEhxK2R5STZyMGpTSGJHTmhWU1N1WndrRlQ0TUJRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.65_x64-setup.exe"
     }
   }
 }
