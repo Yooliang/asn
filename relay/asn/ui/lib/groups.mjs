@@ -136,7 +136,7 @@ export function previewView(p) {
 }
 
 // ---------- 發言者標示 ----------
-const baseLabel = m => String(m?.from_label || m?.label || m?.from_name || m?.name || '').trim()
+const baseLabel = m => String(m?.from_display_label || m?.display_label || m?.from_label || m?.label || m?.from_name || m?.name || '').trim()
 // 成員與訊息裡的每個發言者（以 from／key 區分）→ 顯示標示。同一個標示出現在不同發言者身上，第二位起加「（2）」「（3）」…
 export function speakerLabels(messages, members) {
   const seen = new Map()   // 標示 → 已經有幾位用了
@@ -192,7 +192,7 @@ export const pendingCount = list => confirmCards(list).filter(c => c.status === 
 export function memberRows(members) {
   const labels = speakerLabels([], members)   // 同名的成員第二位起加「（2）」
   const rows = (Array.isArray(members) ? members : []).filter(Boolean).map(m => ({
-    ref: String(m.key ?? ''), label: safeLabel(labels.get(m.key) || m.label || m.name) || '未知的成員', kind: m.member_kind === 'ai' || (m.member_kind !== 'human' && (m.kind === 'window' || m.kind === 'ai')) ? 'ai' : 'human',
+    ref: String(m.key ?? ''), label: safeLabel(labels.get(m.key) || m.display_label || m.label || m.name) || '未知的成員', kind: m.member_kind === 'ai' || (m.member_kind !== 'human' && (m.kind === 'window' || m.kind === 'ai')) ? 'ai' : 'human',
     host: m.role === 'owner', mine: m.mine === true, allowOthers: m.allow_others !== false,
   }))
   return [...rows.filter(r => r.kind === 'human'), ...rows.filter(r => r.kind === 'ai')]

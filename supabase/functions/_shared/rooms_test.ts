@@ -265,3 +265,15 @@ Deno.test("回覆某則訊息（#225）：帶有效的 reply_to 走 asn_relay_ro
     assert(!b.calls.some((c) => c.fn === "asn_relay_room_post_reply"), `reply_to=${JSON.stringify(bad)} 不該走回覆版`);
   }
 });
+
+Deno.test("parseMentions：新標示（夥伴名（設備名））與舊標示都解析到同一位成員，同名時只認完整標示", () => {
+  const ms: RoomMember[] = [
+    { key: "W~財務", name: "財務", label: "財務（小良）", display_label: "財務（家用機）", member_kind: "ai" },
+    { key: "V~財務", name: "財務", label: "財務（小良）", display_label: "財務（VM測試機）", member_kind: "ai" },
+    { key: "x:ext", name: "報表", label: "報表（阿明）", display_label: "報表（阿明）", member_kind: "ai" },
+  ];
+  assertEquals(parseMentions("@財務（家用機） 看一下", ms), ["W~財務"]);
+  assertEquals(parseMentions("@財務（VM測試機）、@報表（阿明）", ms), ["V~財務", "x:ext"]);
+  assertEquals(parseMentions("@財務 看一下", ms), [], "同名只打夥伴名不吃");
+  assertEquals(parseMentions("@報表（阿明） 舊版客戶端打的", [{ key: "x:ext", name: "報表", label: "報表（阿明）", member_kind: "ai" }]), ["x:ext"], "沒有 display_label 的舊後台照舊");
+});

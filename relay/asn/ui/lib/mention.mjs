@@ -1,6 +1,6 @@
 // 群組裡的 @ 點名（#226）的純邏輯：輸入時的成員選單、選好後寫回輸入框、訊息裡 @名字 變成小標記。
 // 後台本來就會從內文解析「@名字」（supabase/functions/_shared/rooms.ts 的 parseMentions），所以這裡只負責輸入與顯示，不另送欄位。
-// 名字一律用成員的完整標示（真人＝帳號名、AI＝「夥伴名（主人名）」），與後台解析用的名字同一份；不顯示任何成員鍵。
+// 名字一律用成員的完整標示（真人＝帳號名、自己的 AI＝「夥伴名（設備名）」、別人帳號的 AI＝「夥伴名（主人名）」，後台的 display_label，舊後台退回 label），與後台解析用的名字同一份；不顯示任何成員鍵。
 import { KIND_BADGE, safeLabel } from './groups.mjs'
 import { esc } from './text.mjs'
 
@@ -14,7 +14,7 @@ export function mentionTargets(members) {
     if (!m) continue
     const kind = m.member_kind === 'ai' || (m.member_kind !== 'human' && (m.kind === 'window' || m.kind === 'ai')) ? 'ai' : 'human'
     if (kind === 'human' && m.mine === true) continue
-    const label = safeLabel(m.label || m.name)
+    const label = safeLabel(m.display_label || m.label || m.name)
     if (!label || /\s{2,}|[@\n]/.test(label) || seen.has(label)) continue
     seen.add(label); out.push({ label, kind })
   }

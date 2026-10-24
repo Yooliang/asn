@@ -25,7 +25,7 @@ test('靜態：在交易內、不刪資料、只授權 service_role、只在尚�
   assert.doesNotMatch(code, /grant execute[^;]*to (anon|authenticated|public)/i)
   assert.match(sql, /add column if not exists wake_info jsonb/)
   assert.match(sql, /and wake_info is null/)
-  assert.ok(files.indexOf(MIG) === files.length - 1, '時間戳要是最新')
+  assert.ok(MIG > '20261024140000', '時間戳比上一個 reply_quote 新') // 之後還會有更新的 migration，不能再要求自己是最後一個
 })
 
 let PGlite = null

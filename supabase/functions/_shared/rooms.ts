@@ -17,11 +17,11 @@ export const OWNER_ONLY_ACTIONS = new Set(["room_create", "room_add", "room_remo
 // 危險操作類別（規格 2.5.1）：被別人點名的 AI 做這些之前，必須先請主持人在群組確認
 export const CONFIRM_KINDS = ["data_change", "deploy", "spend", "external_send", "account_config", "other"] as const;
 
-export type RoomMember = { key: string; name: string; role?: string; kind?: string; node_role?: string; label?: string; member_kind?: string };
+export type RoomMember = { key: string; name: string; role?: string; kind?: string; node_role?: string; label?: string; display_label?: string; member_kind?: string };
 export type RoomMessage = {
   seq: number; from: string; from_name?: string; trust: string; body: string; mentions: string[]; at: string;
   // 第 1a 期（多租戶群組）新增，舊後台沒有
-  from_kind?: string; relation?: string; from_label?: string; from_owner_name?: string | null; is_seed?: boolean; wake_ok?: boolean;
+  from_kind?: string; relation?: string; from_label?: string; from_display_label?: string; from_owner_name?: string | null; is_seed?: boolean; wake_ok?: boolean;
   // #231：第一次算出的叫醒結果（讀者看得到的成員，依順序；略過者 hold）。舊後台沒有
   wake_info?: { key: string; label: string; rank: number; hold: boolean; fb?: boolean }[] | null;
 };
@@ -42,6 +42,7 @@ export function parseMentions(body: string, members: RoomMember[], max = MAX_MEN
     const names = new Set([m.key]);
     if (m.name && (nameCount.get(m.name) ?? 0) < 2) names.add(m.name);
     if (m.label) names.add(m.label);
+    if (m.display_label) names.add(m.display_label); // 夥伴名（設備名）；舊標示 label 仍認，所以舊版用戶端打的點名照樣解析
     if (m.key === OWNER_KEY) names.add("主人"); // 顯示名來自租戶的帳號名稱（m.name）；「主人」是通用的備用叫法
     for (const n of names) if (n) cands.push({ text: n.toLowerCase(), key: m.key });
   }
