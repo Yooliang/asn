@@ -50,13 +50,13 @@ test('手機名單：不列 ASN 視窗；設備分組標題人數不算它；只
 
 test('電腦名單：設備頁籤照開、人數與未讀不算 ASN；頁內與搜尋都不列', () => {
   const t = deviceTabs(FRIENDS, { selfNode: 'H', selfName: '小良的家用機', nodeOrder: ['H', 'P', 'W'] })
-  assert.deepEqual(t.all.map(x => x.key), ['H', 'P', 'W'], '只有 ASN 視窗的設備頁籤也在')
+  assert.deepEqual(t.all.map(x => x.key), ['H', 'W', 'P'], '只有 ASN 視窗的設備（P）頁籤也在；沒有人在線的排在有人在線的後面')
   const by = Object.fromEntries(t.all.map(x => [x.key, x]))
   assert.deepEqual([by.H.total, by.H.online, by.H.unread], [2, 1, 1])
   assert.deepEqual([by.P.total, by.P.online], [0, 0])
   assert.equal(by.W.total, 1)
   const dev = pageTabs(FRIENDS, 'device', { selfNode: 'H', selfName: '小良的家用機', nodeOrder: ['H', 'P', 'W'] })
-  assert.deepEqual(dev.all.map(x => x.key), ['H', 'P', 'W'])
+  assert.deepEqual(dev.all.map(x => x.key), ['H', 'W', 'P'])
   assert.deepEqual(names(deviceItems(FRIENDS, 'H')), ['甲', '乙'])
   assert.deepEqual(names(pageItems(FRIENDS, 'device', 'H')), ['甲', '乙'])
   assert.deepEqual(names(rosterListItems(FRIENDS, { tabDim: 'device', tabKey: 'P', query: '', plainText: O.plainText })), [])

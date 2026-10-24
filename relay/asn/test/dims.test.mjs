@@ -80,9 +80,9 @@ test('分頁依狀態：四個固定、沒人的標 empty、未讀彙總', () =>
   assert.ok(none.all.every(x => x.empty))
 })
 
-test('分頁依設備：跟舊的一樣，本機第一、本機沒人也不灰', () => {
+test('分頁依設備：本機第一、有人在線的設備在前、整台都離線的排後面（W 全離線）、本機沒人也不灰', () => {
   const t = pageTabs(SAMPLE, 'device', { selfNode: 'H', nodeOrder: ['W', 'H', 'G', 'A'] })
-  assert.deepEqual(t.all.map(x => x.key), ['H', 'W', 'G', 'A'])
+  assert.deepEqual(t.all.map(x => x.key), ['H', 'G', 'A', 'W'])
   assert.equal(pageTabs([], 'device', { selfNode: 'H' }).all[0].empty, false)
 })
 
@@ -103,4 +103,13 @@ test('分組：設備組用設備名、本機排第一；標題規則照 groupHe
   assert.deepEqual(st.map(x => groupHeading(x)), ['線上 (2)'])
   const en = groupItems(pageItems(SAMPLE, 'status', 'online'), 'engine')
   assert.deepEqual(en.map(x => groupHeading(x)), ['Claude (1/1)', 'DeepSeek (1/1)', '其他 (1/1)'])
+})
+
+test('設備順序規則共用：設定的設備頁籤與手機也是本機第一、有人在線的在前、整台離線的在後', async () => {
+  const { launchDeviceRows } = await import('../ui/lib/partner-launch-ui.mjs')
+  const friends = [
+    { node: 'W', device: '工作機', status: 'offline' }, { node: 'H', device: '家用機', status: 'online' },
+    { node: 'G', device: 'Grok', status: 'online' }, { node: 'A', device: 'Aegis', status: 'busy' },
+  ]
+  assert.deepEqual(launchDeviceRows(friends, { selfNode: 'H', nodeOrder: ['W', 'H', 'G', 'A'] }).map(r => r.key), ['H', 'G', 'A', 'W'])
 })

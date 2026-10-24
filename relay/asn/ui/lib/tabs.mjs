@@ -26,7 +26,7 @@ export function groupHeading(g) {
 }
 
 // ---------- 設備頁籤 ----------
-// 每台設備一個頁籤：本機永遠第一，其餘照收發室名單順序，名單裡已消失但有對話紀錄的（好友全離線）排在最後。
+// 每台設備一個頁籤：本機永遠第一，其餘「有人在線」的在前、整台都離線的排後面，各組內照收發室名單順序，名單裡已消失但有對話紀錄的排在該組最後。
 // 超過 DEVICE_TAB_MAX 個時，第 DEVICE_TAB_MAX 個起收進「更多」；本機不會被收進去。
 // 回傳 { all, visible, more }：每項 { key, label, short, unread, online, total }；more 為空代表不需要「更多」。
 export const shortOf = label => Array.from(String(label ?? '').trim())[0]?.toUpperCase() ?? '?'
@@ -50,7 +50,9 @@ export function deviceTabs(friends, { selfNode, selfName = '', nodeOrder = [], m
   const rest = [...by.values()].filter(t => t.key !== selfNode)
   const inRoster = rest.filter(t => rank.has(t.key)).sort((a, b) => rank.get(a.key) - rank.get(b.key))
   const gone = rest.filter(t => !rank.has(t.key)).sort((a, b) => a.label.localeCompare(b.label, 'zh-Hant'))
-  const all = [by.get(selfNode), ...inRoster, ...gone].map(t => ({ ...t, short: shortOf(t.label) }))
+  // 本機第一；其餘有人在線的設備在前、整台都離線的排後面（各組內維持名單順序）；與設定的設備頁籤、手機同一個規則
+  const ordered = [...inRoster, ...gone].map((t, i) => ({ t, i })).sort((a, b) => (a.t.online > 0 ? 0 : 1) - (b.t.online > 0 ? 0 : 1) || a.i - b.i).map(x => x.t)
+  const all = [by.get(selfNode), ...ordered].map(t => ({ ...t, short: shortOf(t.label) }))
   if (all.length <= max) return { all, visible: all, more: [] }
   return { all, visible: all.slice(0, max - 1), more: all.slice(max - 1) }
 }
