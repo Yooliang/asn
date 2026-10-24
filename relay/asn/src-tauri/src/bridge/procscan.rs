@@ -180,6 +180,12 @@ fn model_of(args: &[String]) -> (Option<String>, Option<String>) {
 /// 從程序清單找出執行中的代理。排除：本程序的後代（橋自己開的 worker／引擎，已在名單上）、
 /// 父程序也是同引擎的子程序（npm 包裝 → node 這種重複）
 pub fn scan(table: &[ProcInfo], self_pid: u32) -> Vec<ProcAgent> {
+    scan_excluding(table, self_pid, &[])
+}
+
+/// 同 [`scan`]，另排除「已登記成可收信視窗」的程序（pi 擴充登記的 pid），免得同一個 pi 在名單上出現兩次：
+/// skip 裡的 pid 本身，以及它往上同引擎的包裝程序（pi.cmd → node 這種）都不列
+pub fn scan_excluding(table: &[ProcInfo], self_pid: u32, skip: &[u32]) -> Vec<ProcAgent> {
     let by_pid: HashMap<u32, &ProcInfo> = table.iter().map(|p| (p.pid, p)).collect();
     let ids: HashMap<u32, (&'static str, Vec<String>)> = table.iter().filter_map(|p| identify(p).filter(|(e, a)| is_run(e, a)).map(|x| (p.pid, x))).collect();
     let descends_from_self = |pid: u32| {
@@ -196,10 +202,23 @@ pub fn scan(table: &[ProcInfo], self_pid: u32) -> Vec<ProcAgent> {
         }
         false
     };
+    let mut skipped: std::collections::HashSet<u32> = skip.iter().copied().collect();
+    for s in skip {
+        let mut cur = *s;
+        for _ in 0..8 {
+            let Some(p) = by_pid.get(&cur) else { break };
+            let same = ids.get(&p.ppid).zip(ids.get(&cur)).is_some_and(|(a, b)| a.0 == b.0);
+            if !same || p.ppid == cur {
+                break;
+            }
+            skipped.insert(p.ppid);
+            cur = p.ppid;
+        }
+    }
     let mut out: Vec<ProcAgent> = vec![];
     for p in table {
         let Some((engine, args)) = ids.get(&p.pid) else { continue };
-        if p.pid == self_pid || descends_from_self(p.pid) {
+        if p.pid == self_pid || descends_from_self(p.pid) || skipped.contains(&p.pid) {
             continue;
         }
         if ids.get(&p.ppid).map(|(e, _)| e == engine).unwrap_or(false) {
@@ -224,6 +243,14 @@ pub fn scan_system() -> Vec<ProcAgent> {
         return vec![];
     }
     scan(&system_table(), std::process::id())
+}
+
+/// 同 [`scan_system`]，排除已登記成可收信視窗的 pid（見 [`scan_excluding`]）
+pub fn scan_system_excluding(skip: &[u32]) -> Vec<ProcAgent> {
+    if !enabled() {
+        return vec![];
+    }
+    scan_excluding(&system_table(), std::process::id(), skip)
 }
 
 #[cfg(not(windows))]
@@ -362,6 +389,23 @@ mod tests {
 
     fn p(pid: u32, ppid: u32, exe: &str, cmd: &str) -> ProcInfo {
         ProcInfo { pid, ppid, exe: exe.into(), cmdline: cmd.split_whitespace().map(String::from).collect() }
+    }
+
+    #[test]
+    fn 已登記成可收信視窗的_pi_不再列成僅顯示條目_包裝程序也排除_其他照列() {
+        let t = vec![
+            p(10, 1, "pi.exe", "pi --provider minimax"),
+            p(11, 10, "node.exe", "node C:/n/pi-coding-agent/dist/cli.js --provider minimax"),
+            p(20, 1, "node.exe", "node C:/n/pi-coding-agent/dist/cli.js -m other"),
+            p(30, 1, "codex.exe", "codex exec x"),
+        ];
+        let base = scan(&t, 999);
+        assert_eq!(base.iter().map(|a| a.pid).collect::<Vec<_>>(), vec![30, 10, 20], "沒排除時 pi 都列");
+        let out = scan_excluding(&t, 999, &[11]);
+        assert_eq!(out.iter().map(|a| a.pid).collect::<Vec<_>>(), vec![30, 20], "登記的 node 子程序與它的 pi 包裝都排除");
+        let out = scan_excluding(&t, 999, &[20]);
+        assert_eq!(out.iter().map(|a| a.pid).collect::<Vec<_>>(), vec![30, 10]);
+        assert_eq!(scan_excluding(&t, 999, &[12345]).len(), 3, "不認得的 pid 不影響");
     }
 
     #[test]

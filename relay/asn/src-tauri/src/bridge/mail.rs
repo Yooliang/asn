@@ -214,8 +214,8 @@ pub const VOICE_NOTE: &str = "（語音通話：這封是語音辨識的文字�
 /// 抬頭之後、內文之前的說明行（各行以換行結尾）：寄件人說明（語音通話時後面接固定提醒）＋（reply=yes 才有的）要回信指示
 pub fn preamble(m: &Mail, engine_id: &str) -> String {
     let mut out = format!("{}{}\n", sender_line(m), if m.voice { VOICE_NOTE } else { "" });
-    // 背景工作者、Codex 這類轉接器的回答由橋自動寄回，不能叫它們用 asn_send，所以只有 claude 引擎加這行
-    if engine_id == "claude" {
+    // 背景工作者、Codex 這類轉接器的回答由橋自動寄回，不能叫它們用 asn_send，所以只有自己會寄信的 claude、pi 視窗加這行
+    if matches!(engine_id, "claude" | "pi") {
         if let Some(r) = reply_line(m) {
             out += &r;
             out.push('\n');

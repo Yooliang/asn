@@ -1,10 +1,11 @@
-// ASN pi 擴充（#135 第一期）：asn_send 寄信工具＋bash 守門。純邏輯在 lib.mjs。
+// ASN pi 擴充：第一期 asn_send 寄信工具＋bash 守門（lib.mjs）；第二期視窗登記＋收信（inbox.mjs）。
 import { execFile } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { Type } from 'typebox'
+import { ackEntry, formatInjection, nextEntries, pruneDone, removeWindow, resolveWindowName, validSessionId, windowRecord, writeWindow } from './inbox.mjs'
 import { buildSendArgv, guardAsnSendInput, guardBash, resolveConfig, runSend } from './lib.mjs'
 
 function loadFileConfig(): Record<string, string> {
@@ -54,4 +55,68 @@ export default function (pi: ExtensionAPI) {
       if (why) return { block: true, reason: why }
     }
   })
+}
+
+// ---- 第二期：讓互動中的 pi 變成 ASN 名單上可收信的視窗 ----
+// 背景資源（計時器）只在 session_start 起、session_shutdown 清；只在互動（tui）與 rpc 模式登記，
+// -p／json 是單次執行，不登記（見 README）。
+function registerInbox(pi: ExtensionAPI) {
+  const asnDir = join(homedir(), '.asn')
+  const windowsDir = join(asnDir, 'pi-windows')
+  const inboxDir = join(asnDir, 'pi-inbox')
+  let timers: ReturnType<typeof setInterval>[] = []
+  let sid = ''
+  let state: 'idle' | 'busy' = 'idle'
+  let beat: () => void = () => {}
+  const seen = new Set<string>()
+
+  const stop = () => {
+    for (const t of timers) clearInterval(t)
+    timers = []
+    beat = () => {}
+    if (sid) removeWindow(windowsDir, sid)
+    sid = ''
+  }
+
+  pi.on('session_start', async (_event, ctx) => {
+    stop()
+    if (ctx.mode !== 'tui' && ctx.mode !== 'rpc') return
+    const id = String(ctx.sessionManager.getSessionId())
+    if (!validSessionId(id)) return
+    sid = id
+    beat = () => {
+      try {
+        const name = resolveWindowName({ env: process.env, sessionName: pi.getSessionName(), cwd: ctx.cwd })
+        writeWindow(windowsDir, windowRecord({ sessionId: id, name, pid: process.pid, cwd: ctx.cwd, state, model: ctx.model?.id, at: Date.now() }))
+      } catch {}
+    }
+    const poll = () => {
+      try {
+        for (const e of nextEntries(inboxDir, id, seen, 5)) {
+          // 忙碌時排在整輪做完之後（followUp），不打斷進行中的工作；閒置時立刻開一輪
+          pi.sendMessage(
+            { customType: 'asn-mail', content: formatInjection(e), display: true, details: { id: e.id } },
+            { triggerTurn: true, deliverAs: ctx.isIdle() ? undefined : 'followUp' },
+          )
+          ackEntry(inboxDir, id, e.id) // 已交給 pi 才標記處理過
+          if (ctx.hasUI) ctx.ui.notify(`ASN 來信 ${e.id.slice(0, 8)}`, 'info')
+        }
+      } catch {}
+    }
+    beat()
+    pruneDone(inboxDir, id, Date.now(), DONE_KEEP_MS)
+    timers.push(setInterval(() => beat(), HEARTBEAT_MS), setInterval(poll, POLL_MS))
+    for (const t of timers) t.unref?.()
+    if (ctx.hasUI) ctx.ui.setStatus('asn', 'ASN 可收信')
+  })
+
+  pi.on('agent_start', async () => {
+    state = 'busy'
+    beat()
+  })
+  pi.on('agent_settled', async () => {
+    state = 'idle'
+    beat()
+  })
+  pi.on('session_shutdown', async () => stop())
 }
