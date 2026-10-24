@@ -90,9 +90,9 @@
 }
 /* 訊息下方的叫醒順序標籤（#231）：灰色小字依序列出；被略過的更淡 */
 .wake-tags{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;margin:2px 0 0 12px;font-size:11px;line-height:1.5;color:#6b7b8c}
-.wake-tag{white-space:nowrap}
-.wake-tag.off{color:#a9b4c0}
+.wake-tag{white-space:nowrap;padding:0 7px;border-radius:9px;background:rgba(107,123,140,.14)}
+.wake-tag.off{color:#a9b4c0;background:rgba(169,180,192,.12)}
 .wake-arrow{color:#98a5b3}
 @media (prefers-color-scheme:dark){
-  .wake-tags{color:#9fb0c3}.wake-tag.off{color:#6d7e91}.wake-arrow{color:#7d8ea1}
+  .wake-tags{color:#9fb0c3}.wake-tag.off{color:#6d7e91;background:rgba(109,126,145,.14)}.wake-tag{background:rgba(159,176,195,.14)}.wake-arrow{color:#7d8ea1}
 }
