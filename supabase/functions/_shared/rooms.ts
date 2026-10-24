@@ -22,6 +22,8 @@ export type RoomMessage = {
   seq: number; from: string; from_name?: string; trust: string; body: string; mentions: string[]; at: string;
   // 第 1a 期（多租戶群組）新增，舊後台沒有
   from_kind?: string; relation?: string; from_label?: string; from_owner_name?: string | null; is_seed?: boolean; wake_ok?: boolean;
+  // #231：第一次算出的叫醒結果（讀者看得到的成員，依順序；略過者 hold）。舊後台沒有
+  wake_info?: { key: string; label: string; rank: number; hold: boolean }[] | null;
 };
 
 export const keyOf = (node: string, agent?: string | null) => (agent ? `${node}${WINDOW_SEP}${agent}` : node);
@@ -96,24 +98,36 @@ export function wokenAis(msg: WakeMsg, members: RoomMember[], selfKey: string): 
 }
 /** 排序判斷的分數（以顯示標示為鍵）與門檻；有給就按分數排，沒給＝固定順位 */
 export type WakeScores = { scores: Record<string, number>; min: number; exemptMentioned?: boolean };
-export function wakeOrder(msg: WakeMsg, members: RoomMember[], selfKey: string, rank?: WakeScores): Wake | null {
-  const uniq = wokenAis(msg, members, selfKey);
-  if (!uniq) return null;
-  if (!rank) {
-    const i = uniq.findIndex((m) => m.key === selfKey);
-    return { rank: i + 1, total: uniq.length, before: uniq.slice(0, i).map(wakeSortKey) };
-  }
+/** 被叫醒的人依分數分成「通過」（高分在前，同分用固定規則）與「略過」（低於門檻、非明確點名） */
+function splitWoken(uniq: RoomMember[], msg: WakeMsg, rank?: WakeScores): { passers: RoomMember[]; held: RoomMember[]; sc: (m: RoomMember) => number | undefined } {
+  if (!rank) return { passers: uniq, held: [], sc: () => undefined };
   const sc = (m: RoomMember) => rank.scores[wakeSortKey(m)];
   const exempt = (m: RoomMember) => !!rank.exemptMentioned && (msg.mentions ?? []).includes(m.key);
-  const passes = (m: RoomMember) => sc(m) === undefined || sc(m) >= rank.min || exempt(m);
+  const passes = (m: RoomMember) => sc(m) === undefined || sc(m)! >= rank.min || exempt(m);
   const passers = uniq.filter(passes);
   // 分數高的在前；同分用固定規則穩定排序
   passers.sort((a, b) => (sc(b) ?? 0) - (sc(a) ?? 0) || labelCmp(a, b));
+  return { passers, held: uniq.filter((m) => !passes(m)), sc };
+}
+export function wakeOrder(msg: WakeMsg, members: RoomMember[], selfKey: string, rank?: WakeScores): Wake | null {
+  const uniq = wokenAis(msg, members, selfKey);
+  if (!uniq) return null;
+  const { passers, held, sc } = splitWoken(uniq, msg, rank);
   const me = uniq.find((m) => m.key === selfKey)!;
   const score = sc(me);
-  if (!passes(me)) return { rank: 0, total: passers.length, before: [], score, hold: true };
+  if (held.includes(me)) return { rank: 0, total: passers.length, before: [], score, hold: true };
   const i = passers.findIndex((m) => m.key === selfKey);
   return { rank: i + 1, total: passers.length, before: passers.slice(0, i).map(wakeSortKey), ...(score === undefined ? {} : { score }) };
+}
+
+/** 存在訊息上的叫醒結果（#231）：key 是讀者視角的成員鍵（後台還原成真實鍵）；rank 從 1 起，被略過的 rank 為 0。只存順序與是否略過，不存內文 */
+export type WakeInfoEntry = { key: string; rank: number; hold: boolean; score?: number };
+export function wakeInfoOf(msg: WakeMsg, members: RoomMember[], selfKey: string, rank?: WakeScores): WakeInfoEntry[] | null {
+  const uniq = wokenAis(msg, members, selfKey);
+  if (!uniq) return null;
+  const { passers, held, sc } = splitWoken(uniq, msg, rank);
+  const ent = (m: RoomMember, r: number, hold: boolean): WakeInfoEntry => ({ key: m.key, rank: r, hold, ...(sc(m) === undefined ? {} : { score: Math.round(sc(m)! * 100) / 100 }) });
+  return [...passers.map((m, i) => ent(m, i + 1, false)), ...held.sort(labelCmp).map((m) => ent(m, 0, true))];
 }
 
 export type RoomDeps = {
@@ -247,6 +261,13 @@ export async function handleNodeRoomAction(deps: RoomDeps, me: { id: string }, a
           }
           const wake = m.for_me ? wakeOrder(m, members, selfKey, scores) : null;
           if (wake?.hold) noteHeld(1);
+          // 第一次算出叫醒結果就存在訊息上（#231）：之後所有成員讀到同一份順序；後台只在尚未有值時寫入，失敗不影響讀取
+          if (woken && (m as { wake_info?: unknown }).wake_info == null) {
+            const info = wakeInfoOf(m, members, selfKey, scores);
+            if (info?.length) {
+              try { await deps.rpc("asn_relay_room_wake_set", { p_node: me.id, p_agent: agent, p_room: room, p_seq: m.seq, p_info: info }); } catch { /* 舊後台沒有這個函式也沒關係 */ }
+            }
+          }
           out.push(wake ? { ...m, wake } : m);
         }
         messages = out;

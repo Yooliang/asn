@@ -78,6 +78,16 @@ const fromLabel = m => {
 // 我的 AI（mine_ai）和別人一樣顯示發言者行與徽章。系統訊息（某某加入了群組、待主持人確認…）是置中的小字。
 // members（選填）是群組成員清單：拿來讓同名的發言者分得開（第二位起加「（2）」）
 // 後台算好的引用（被回覆的那則的作者與摘要）→ 畫面用的 { seq, author, excerpt }；沒有、或原訊息讀者看不到就是 null。作者用同一套標示（同名加「（2）」）
+// 後台存在訊息上的叫醒順序（#231）→ 訊息下方的標籤 [{ label, off }]（依順序，被略過的 off 排最後）。
+// 只有 0～1 位被叫醒且沒人被略過時不顯示（回空陣列）；標示一律過 safeLabel，不會出現節點代號或 x: 代號
+export function wakeTags(info) {
+  if (!Array.isArray(info)) return []
+  const tags = info.filter(e => e && typeof e === 'object').map(e => ({ label: (s => (/^x:/.test(s) ? '' : s) || '成員')(safeLabel(typeof e.label === 'string' ? e.label : '')), off: e.hold === true, rank: Number.isInteger(e.rank) ? e.rank : 0 }))
+  const on = tags.filter(t => !t.off).sort((a, b) => a.rank - b.rank)
+  const off = tags.filter(t => t.off)
+  if (!off.length && on.length < 2) return []
+  return [...on, ...off].map(({ label, off: o }) => ({ label, off: o }))
+}
 const replyOf = (r, labels) => (r && Number.isInteger(r.seq) ? { seq: r.seq, author: safeLabel(labels.get(r.from) || r.from_label || '') || '成員', excerpt: oneLine(r.excerpt, 80) } : null)
 export function roomLog(messages, myKeys, members) {
   const mine = new Set(myKeys ?? [])
@@ -91,7 +101,7 @@ export function roomLog(messages, myKeys, members) {
     if (m.from_kind === 'system' || m.relation === 'system') { out.push({ k: 'sys', text, t, id, seq: m.seq }); continue }
     const isMe = m.relation ? m.relation === 'mine' : mine.has(m.from)
     const kind = kindOf(m)
-    out.push({ k: isMe ? 'me' : 'them', who: isMe ? '' : (labels.get(m.from) || fromLabel(m)), kind, badge: isMe ? '' : KIND_BADGE[kind] ?? '', av: isMe ? '' : speakerAvatarSeed(m.from), reply: replyOf(m.reply_to, labels), text, t, id, seq: m.seq, seed: m.is_seed === true })
+    out.push({ k: isMe ? 'me' : 'them', who: isMe ? '' : (labels.get(m.from) || fromLabel(m)), kind, badge: isMe ? '' : KIND_BADGE[kind] ?? '', av: isMe ? '' : speakerAvatarSeed(m.from), reply: replyOf(m.reply_to, labels), wake: wakeTags(m.wake_info), text, t, id, seq: m.seq, seed: m.is_seed === true })
   }
   return out
 }

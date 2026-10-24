@@ -88,3 +88,11 @@
   .mention{background:#2b4468;color:#cfe3ff}.mention-menu button.on,.mention-menu button:hover{background:#2b4468;color:#e6f0ff}
   .gc-list{background:#3a3418}.gc-card{background:#232a33}.gs-input{background:#1c232b}
 }
+/* 訊息下方的叫醒順序標籤（#231）：灰色小字依序列出；被略過的更淡 */
+.wake-tags{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;margin:2px 0 0 12px;font-size:11px;line-height:1.5;color:#6b7b8c}
+.wake-tag{white-space:nowrap}
+.wake-tag.off{color:#a9b4c0}
+.wake-arrow{color:#98a5b3}
+@media (prefers-color-scheme:dark){
+  .wake-tags{color:#9fb0c3}.wake-tag.off{color:#6d7e91}.wake-arrow{color:#7d8ea1}
+}
