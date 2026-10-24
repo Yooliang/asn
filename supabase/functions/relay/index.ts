@@ -12,6 +12,7 @@ import { parseAsnPresence } from "../_shared/asn_presence.ts";
 import { handlePartnerList, handlePartnerSucceed, handlePartnerSync } from "../_shared/partners.ts";
 import { bellTopicsOf, handleChatHistory, personArgs, sendWithPerson, voiceArgs } from "../_shared/account_me.ts";
 import { normalizeRosterAgents, rosterBellTopics } from "../_shared/roster.ts";
+import { parseWindowRename, renamesFromRoster } from "../_shared/window_rename.ts";
 import { sanitizeClaudeMod } from "../_shared/claude_mod.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
 import * as signal from "../_shared/signal.ts";
@@ -58,6 +59,21 @@ async function ring(topic: string) {
     console.error("bell error", String(e));
   }
   signal.background(signal.putBell(topic));
+}
+
+// 視窗改名後群組成員跟著改名（#229）。回資料庫結果；呼叫失敗（含舊資料庫還沒套 migration）回 null 並只記 log，不影響呼叫它的動作。
+// 新名已是同群組成員而沒改（conflicts>0）也記 log，方便事後查。
+// deno-lint-ignore no-explicit-any
+async function applyWindowRename(node: string, from: string, to: string): Promise<any | null> {
+  try {
+    const { data, error } = await db.rpc("asn_relay_window_rename", { p_node: node, p_from: from, p_to: to });
+    if (error) { console.error("window_rename failed", node, error.message ?? error); return null; }
+    if (data?.conflicts > 0) console.warn("window_rename conflict", node, from, "->", to, "conflicts", data.conflicts);
+    return data ?? {};
+  } catch (e) {
+    console.error("window_rename error", node, String(e));
+    return null;
+  }
 }
 
 // 叫醒順位的排序判斷（#230）：JEV_RANK_ENABLED 沒開或缺 JEV_URL／JEV_KEY 時等於固定順位
@@ -259,9 +275,22 @@ Deno.serve(async (req) => {
         else if (md?.error) console.warn("set_claude_mod", me.id, md.error);
       }
     }
+    // 名單裡視窗帶 renamed_from（改名前的名字）：先把群組成員改名，再做自動入群（否則新名會被當成新視窗、舊名被標離開）
+    for (const rn of renamesFromRoster(b.agents)) await applyWindowRename(me.id, rn.from, rn.to);
     // 視窗名單更新後：符合群組「自動收入」開頭字串的視窗自動入群，消失的標為離開（不是 AI 加人，是比對 roster）
     await syncNodeAuto(roomDeps(), me.id, agents.map((a: { name: unknown }) => a.name).filter((n: unknown): n is string => typeof n === "string"));
     return json(200, { ok: true, count: data.count });
+  }
+  // 視窗改名（#229）：用戶端明說 from→to，同節點在群組裡的成員記錄跟著改名。節點只取自金鑰；舊後台沒有這個動作＝用戶端收 404 靜默略過
+  if (action === "window_rename" && req.method === "POST") {
+    const b = await req.json().catch(() => null);
+    const rn = parseWindowRename(b?.from, b?.to);
+    if (!rn) return json(400, { error: "bad_request" });
+    const d = await applyWindowRename(me.id, rn.from, rn.to);
+    if (d === null) return json(500, { error: "internal" });
+    if (d?.error === "forbidden") return json(403, { error: "forbidden" });
+    if (d?.error) return json(400, { error: d.error });
+    return json(200, { ok: true, moved: d.moved ?? 0, conflicts: d.conflicts ?? 0 });
   }
   // 節點改自己的顯示名（ASN 把視窗名寫進來；只改自己這一列的 name）
   if (action === "set_name" && req.method === "POST") {

@@ -218,6 +218,20 @@ pub fn build_set_name_body(name: &str) -> Value {
     json!({ "name": name })
 }
 
+/// window_rename 的請求內容（#229）：舊名→新名。後台把同節點在群組裡的成員記錄一併改名
+pub fn build_window_rename_body(from: &str, to: &str) -> Value {
+    json!({ "from": from, "to": to })
+}
+
+/// 該送出的改名：目前的名字之前用過、還沒過期的舊名，每個都「舊名→現用名」（冪等：後台舊鍵不在了就什麼都不改）。
+/// A→B→C 連改時 A、B 都會對 C 各送一次，不會漏
+pub fn pending_window_renames(active: &[String]) -> Vec<Value> {
+    match active.split_first() {
+        Some((cur, olds)) => olds.iter().filter(|o| *o != cur).map(|o| build_window_rename_body(o, cur)).collect(),
+        None => vec![],
+    }
+}
+
 /// 節點信箱的讀取動作。帶 exclude＝請後台別回寄給這些視窗名的信（逗號分隔、各自編碼；含逗號的名字略過，最多 20 個）。
 /// 舊版後台不認得這個參數、照舊回最舊的一頁，所以舊後台也不會壞。
 pub fn inbox_action(exclude: &[String]) -> String {
@@ -601,9 +615,20 @@ impl Relay {
                 tokio::time::sleep(Duration::from_secs(wait)).await;
             }
             match self.api("set_name", Some(build_set_name_body(&self.window_name()))).await {
-                Ok(_) => return,
-                Err(e) if set_name_unsupported(&e) => return,
+                Ok(_) => break,
+                Err(e) if set_name_unsupported(&e) => break,
                 Err(e) => eprintln!("set_name failed: {e}"),
+            }
+        }
+        self.sync_window_renames().await;
+    }
+    /// 視窗改名後，請後台把群組成員記錄一併改名（#229）。啟動與改名時各送一次；後台沒有這個動作（404／400）就靜默略過，失敗只記 log
+    pub async fn sync_window_renames(&self) {
+        for body in pending_window_renames(&self.active_names()) {
+            match self.api("window_rename", Some(body)).await {
+                Ok(_) => {}
+                Err(e) if set_name_unsupported(&e) => return,
+                Err(e) => eprintln!("window_rename failed: {e}"),
             }
         }
     }
@@ -1346,6 +1371,42 @@ b", "at": 5 }] }), json!({ "marks": [{ "at": 5 }] })] {
         let s = seen.lock().unwrap();
         assert_eq!(s.len(), 1);
         assert!(s[0].to_lowercase().contains("x-asn-user: bearer usertoken-9") && s[0].contains("action=partner_archive"), "{}", s[0]);
+    }
+
+    #[test]
+    fn 視窗改名_舊名對現用名各送一次_沒有舊名就不送() {
+        let v = |x: &[&str]| x.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(pending_window_renames(&v(&["n33ae0d87"])).is_empty());
+        assert!(pending_window_renames(&[]).is_empty());
+        assert_eq!(pending_window_renames(&v(&["asn-test-1", "n33ae0d87"])), vec![json!({ "from": "n33ae0d87", "to": "asn-test-1" })]);
+        // A→B→C：A、B 都對 C
+        assert_eq!(
+            pending_window_renames(&v(&["C", "B", "A"])),
+            vec![json!({ "from": "B", "to": "C" }), json!({ "from": "A", "to": "C" })]
+        );
+    }
+
+    #[tokio::test]
+    async fn 視窗改名_送到window_rename動作_後台未部署靜默() {
+        let (url, seen) = fake_server(200);
+        let r = Relay::new(url, "k".into(), "H".into(), "n33ae0d87".into());
+        r.sync_window_renames().await;
+        assert!(seen.lock().unwrap().is_empty(), "沒改過名＝完全不打後台（舊行為）");
+        r.set_old_names(vec![crate::names::OldName { name: "n33ae0d87".into(), t: crate::heartbeat::now_ms() }]);
+        *r.window.lock().unwrap() = "asn-test-1".into();
+        r.sync_window_renames().await;
+        {
+            let s = seen.lock().unwrap();
+            assert_eq!(s.len(), 1);
+            assert!(s[0].starts_with("POST /relay?action=window_rename"), "{}", s[0]);
+            assert!(s[0].contains(r#""from":"n33ae0d87""#) && s[0].contains(r#""to":"asn-test-1""#), "{}", s[0]);
+        }
+        let (url404, seen404) = fake_server(404);
+        let r2 = Relay::new(url404, "k".into(), "H".into(), "新".into());
+        let now = crate::heartbeat::now_ms();
+        r2.set_old_names(vec![crate::names::OldName { name: "舊1".into(), t: now }, crate::names::OldName { name: "舊2".into(), t: now - 1 }]);
+        r2.sync_window_renames().await;
+        assert_eq!(seen404.lock().unwrap().len(), 1, "後台不認得就停，不再試下一個");
     }
 
     #[test]
