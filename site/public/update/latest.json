@@ -1,11 +1,11 @@
 {
-  "version": "0.1.60",
-  "notes": "群組：每則訊息下方顯示叫醒順序標籤（被略過的較淡）、群組頁籤固定在最上面、@ 成員選單修正、依 Jev 分數暫不通知低分者；忙碌提示併進頁首黃色小標籤；內建收發室固定開啟；Linux 無視窗主機可自動回信",
-  "pub_date": "2026-10-24T05:20:01.932Z",
+  "version": "0.1.61",
+  "notes": "設定的「設備」與「帳號」合併成一頁；群組：你的發言顯示頭像、AI 標籤移到頭像下方、回覆與叫醒順序標籤收在訊息下方並在滑鼠移上去才出現；順序標籤每個名字有淡底色",
+  "pub_date": "2026-10-24T05:41:14.968Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybndya040TmVUNHhFV2x0MXpkakFQamQ4MmU0Q01KLzNYcCtGWDVBbnFFQUJ4d3ozbm9BNFJFaXd3L1FCNkhPb0ZYSlJjYXI3YmdDRnFBYytwRTVScmdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyODE5MjAxCWZpbGU6QVNOXzAuMS42MF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjYwCjQ5UEZWd21ZQ09sanlrSnl4ODNYL3E0Q2JNV0hHbjZuRTlYYmduanYyeFhJNnpxZ0VZaWhxRWxIa2F6Z0NaOGN0TkswRjFBR2tjUjhKTjk1bzBzSEFRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.60_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnphZE4wWmFzeTl4QW16amdYaWFPL2c3UTBTTnN3djhJc3huYjZHNkJnZEpzcEV3aWdIUEcyWjk2OGp6QVVWNkp4MFJuYU8yM3VQWjJ1ZkR1N1NtcUFzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyODIwNDc0CWZpbGU6QVNOXzAuMS42MV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjYxCkR1eGJXajdMQVJrMU1NNFZtbWpDRUFiUlRwMXBoSGN6MVV0b2JIYUtCUTdJUUx3a00zd0VWWjhodkFESVprVmExREVFMSt0MTlGZzU5TVM1eS9CZEJRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.61_x64-setup.exe"
     }
   }
 }
