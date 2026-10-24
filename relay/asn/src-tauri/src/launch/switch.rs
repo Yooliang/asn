@@ -324,6 +324,10 @@ pub(crate) trait Os {
     fn cmdline(&self, pid: u32) -> Option<String>;
     fn processes(&self) -> Vec<Proc>;
     fn alive(&self, pid: u32) -> bool;
+    /// 程序的建立時間（Unix 毫秒），拿來分辨 pid 是不是被別的程序重用；查不到＝None（當同一個程序）
+    fn started_ms(&self, _pid: u32) -> Option<u64> {
+        None
+    }
     /// 對該 pid 的主控台視窗送關閉訊息；有送出才回 true
     fn close_window(&self, pid: u32) -> bool;
     fn terminate(&self, pid: u32) -> Result<(), String>;
@@ -654,6 +658,9 @@ impl Os for RealOs {
     }
     fn alive(&self, pid: u32) -> bool {
         console::win::pid_alive(pid)
+    }
+    fn started_ms(&self, pid: u32) -> Option<u64> {
+        crate::heartbeat::process_started_ms(pid)
     }
     fn close_window(&self, pid: u32) -> bool {
         winapi::post_close(pid)

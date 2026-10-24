@@ -195,8 +195,27 @@ fn parse_session(v: &Value) -> Option<Window> {
     ))
 }
 
+/// session 檔的 startedAt（毫秒）早於這個值就不是毫秒時間戳（缺欄位、秒、亂值）：不拿來判斷程序身分
+const MIN_EPOCH_MS: u64 = 100_000_000_000;
+/// 程序建立時間可以比 session 檔的 startedAt 晚多少仍算同一個程序（時鐘與寫檔順序的誤差）
+pub const SAME_PROC_TOLERANCE_MS: u64 = 60_000;
+
+/// pid 對到的程序是不是 session 檔當初記錄的那個：程序是在 session 開始之後才建立的，就是 pid 被別的程序重用了。
+/// 只在「確定不是」時回 false；查不到建立時間、startedAt 不可信一律當同一個（寧可多列一個，也不誤砍活著的視窗）。
+pub fn same_process(started_at_ms: u64, created_ms: Option<u64>) -> bool {
+    match created_ms {
+        Some(c) if started_at_ms >= MIN_EPOCH_MS => c <= started_at_ms.saturating_add(SAME_PROC_TOLERANCE_MS),
+        _ => true,
+    }
+}
+
 /// 讀取失敗（資料夾存在卻讀不了）回 None，呼叫端沿用舊名單；資料夾不存在＝沒有任何視窗
 pub fn read_sessions(dir: &Path, alive: impl Fn(u32) -> bool, exclude_pid: u32, exclude_name: &str) -> Option<Vec<Window>> {
+    read_sessions_with(dir, |p, _| alive(p), exclude_pid, exclude_name)
+}
+
+/// 同 read_sessions，但 alive 多收 session 檔的 startedAt（毫秒，沒有就是 0），讓呼叫端能分辨「同一個程序」與「pid 被重用」
+pub fn read_sessions_with(dir: &Path, alive: impl Fn(u32, u64) -> bool, exclude_pid: u32, exclude_name: &str) -> Option<Vec<Window>> {
     let rd = match std::fs::read_dir(dir) {
         Ok(r) => r,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(vec![]),
@@ -210,8 +229,9 @@ pub fn read_sessions(dir: &Path, alive: impl Fn(u32) -> bool, exclude_pid: u32, 
         let Ok(text) = std::fs::read_to_string(e.path()) else { continue };
         let Ok(v) = serde_json::from_str::<Value>(&text) else { continue };
         let Some(w) = parse_session(&v) else { continue };
-        // 檔名的 pid 要和內容一致（identity.mjs 的 readSession 同），而且程序還活著
-        if w.pid != file_pid || !alive(w.pid) || w.pid == exclude_pid || w.name == exclude_name {
+        let started = v.get("startedAt").and_then(Value::as_u64).unwrap_or(0);
+        // 檔名的 pid 要和內容一致（identity.mjs 的 readSession 同），而且程序還活著、還是當初那個程序
+        if w.pid != file_pid || !alive(w.pid, started) || w.pid == exclude_pid || w.name == exclude_name {
             continue;
         }
         out.push(w);
@@ -236,7 +256,12 @@ pub fn push_due(fp: &str, last_fp: Option<&str>, now_ms: u64, last_at: u64, gap_
 
 /// 只讀本機：sessions ＋ 外掛狀態檔組出視窗清單（給即時監看與前端直接讀本機狀態用，不寫檔、不碰後台）
 pub fn read_local(sessions_dir: &Path, status_dir: &Path, alive: impl Fn(u32) -> bool, exclude_pid: u32, exclude_name: &str, now_ms: u64) -> Option<Vec<Window>> {
-    let mut l = read_sessions(sessions_dir, alive, exclude_pid, exclude_name)?;
+    read_local_with(sessions_dir, status_dir, |p, _| alive(p), exclude_pid, exclude_name, now_ms)
+}
+
+/// 同 read_local，alive 多收 startedAt（見 read_sessions_with）
+pub fn read_local_with(sessions_dir: &Path, status_dir: &Path, alive: impl Fn(u32, u64) -> bool, exclude_pid: u32, exclude_name: &str, now_ms: u64) -> Option<Vec<Window>> {
+    let mut l = read_sessions_with(sessions_dir, alive, exclude_pid, exclude_name)?;
     apply_mod_status(&mut l, status_dir, now_ms);
     Some(l)
 }
@@ -665,5 +690,31 @@ mod tests {
         assert_eq!(mod_report_due(Some(a.clone()), Some(&last), 1000 + MOD_REPORT_REFRESH_MS - 1), None);
         assert_eq!(mod_report_due(Some(a.clone()), Some(&last), 1000 + MOD_REPORT_REFRESH_MS), Some(a.clone()), "滿 30 分鐘補報");
         assert_eq!(mod_report_due(Some(b.clone()), Some(&last), 2000), Some(b), "有變化立刻報");
+    }
+
+    #[test]
+    fn 程序身分_建立時間晚於_session_開始就是_pid_被重用_查不到或_startedat_不可信一律當同一個() {
+        let st = 1_800_000_000_000u64;
+        assert!(same_process(st, Some(st - 5_000)), "程序先建立、session 後開始＝同一個");
+        assert!(same_process(st, Some(st + SAME_PROC_TOLERANCE_MS)), "誤差內");
+        assert!(!same_process(st, Some(st + SAME_PROC_TOLERANCE_MS + 1)), "session 開始之後才建立的程序＝別的程序");
+        assert!(same_process(st, None), "查不到建立時間：不誤砍");
+        assert!(same_process(0, Some(st)), "沒有 startedAt：不判斷");
+        assert!(same_process(1234, Some(st)), "startedAt 不是毫秒時間戳：不判斷");
+    }
+
+    #[test]
+    fn 名單_pid_被重用的幽靈_session_檔不列_真的視窗與沒有_startedat_的照列() {
+        let d = tempfile::tempdir().unwrap();
+        let st = 1_800_000_000_000u64;
+        put(d.path(), 301, json!({"pid":301,"name":"T-真的","entrypoint":"cli","startedAt":st}));
+        put(d.path(), 302, json!({"pid":302,"name":"T-幽靈","entrypoint":"cli","startedAt":st}));
+        put(d.path(), 303, json!({"pid":303,"name":"T-舊檔無時間","entrypoint":"cli"}));
+        put(d.path(), 304, json!({"pid":304,"name":"T-查不到","entrypoint":"cli","startedAt":st}));
+        let created = |p: u32| match p { 301 => Some(st - 1_000), 302 => Some(st + 3_600_000), 303 => Some(st + 3_600_000), _ => None };
+        let ws = read_sessions_with(d.path(), |p, s| same_process(s, created(p)), 0, "x").unwrap();
+        assert_eq!(ws.iter().map(|w| w.name.as_str()).collect::<Vec<_>>(), vec!["T-查不到", "T-真的", "T-舊檔無時間"]);
+        // 舊的介面（只給 pid）行為不變
+        assert_eq!(read_sessions(d.path(), |_| true, 0, "x").unwrap().len(), 4);
     }
 }

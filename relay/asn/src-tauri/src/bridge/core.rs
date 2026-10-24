@@ -205,6 +205,8 @@ pub struct Core {
     pub parser: Parser,
     pub log: Arc<BridgeLog>,
     alive: Arc<dyn Fn(u32) -> bool + Send + Sync>,
+    /// pid → 程序建立時間（毫秒）；拿來分辨 session 檔的 pid 是不是被別的程序重用（測試可換）
+    created: Arc<dyn Fn(u32) -> Option<u64> + Send + Sync>,
     now: u64,
     pub roster: Vec<Window>,
     pub roster_ok: bool,
@@ -286,7 +288,7 @@ impl Core {
         let held = HeldStore::load(&cfg.work_dir);
         let corr = CorrLog::new(cfg.handoff_dir.clone());
         let mut c = Core {
-            cfg, relay, sink, parser: Parser::new(nonce), log, alive, now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
+            cfg, relay, sink, parser: Parser::new(nonce), log, alive, created: Arc::new(crate::heartbeat::process_started_ms), now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, respond_sent: String::new(),
@@ -336,6 +338,9 @@ impl Core {
         self.mod_src = f;
     }
 
+    pub fn set_created(&mut self, f: Arc<dyn Fn(u32) -> Option<u64> + Send + Sync>) {
+        self.created = f;
+    }
     pub fn set_launcher(&mut self, l: Arc<Launcher>) {
         self.launcher = Some(l);
     }
@@ -470,8 +475,8 @@ impl Core {
     /// 即時監看（每 watch_ms 一次）：只讀本機 sessions 與外掛狀態檔，名字／狀態／說明和上次回報時不同
     /// （心跳只改 at，不算）且距上次回報已過防抖間隔，就立刻整份回報名單（後台再通知別台設備重拉）。回傳有沒有回報。
     pub async fn watch_local(&mut self, now: u64) -> bool {
-        let alive = self.alive.clone();
-        let Some(l) = roster::read_local(&self.cfg.sessions_dir, &self.cfg.status_dir, |p| alive(p), self.sink.pid(), &self.cfg.mailbox_name, now) else {
+        let (alive, created) = (self.alive.clone(), self.created.clone());
+        let Some(l) = roster::read_local_with(&self.cfg.sessions_dir, &self.cfg.status_dir, |p, st| alive(p) && roster::same_process(st, created(p)), self.sink.pid(), &self.cfg.mailbox_name, now) else {
             return false;
         };
         let fp = roster::local_fingerprint(&l);
@@ -484,8 +489,8 @@ impl Core {
 
     pub async fn refresh_roster(&mut self, now: u64) {
         self.now = now;
-        let alive = self.alive.clone();
-        let claude = roster::read_sessions(&self.cfg.sessions_dir, |p| alive(p), self.sink.pid(), &self.cfg.mailbox_name);
+        let (alive, created) = (self.alive.clone(), self.created.clone());
+        let claude = roster::read_sessions_with(&self.cfg.sessions_dir, |p, st| alive(p) && roster::same_process(st, created(p)), self.sink.pid(), &self.cfg.mailbox_name);
         let engine_ok = self.engines.as_ref().map(|e| e.has_result()).unwrap_or(false);
         // Claude 讀不到、其他引擎也還沒有任何結果：名單不動（和以前一樣）
         if claude.is_none() && !engine_ok && self.cfg.respond.is_none() {

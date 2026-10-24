@@ -19,6 +19,8 @@ struct FakeOs {
     terminated: Mutex<Vec<u32>>,
     closed: Mutex<Vec<u32>>,
     own: u32,
+    /// 程序建立時間（毫秒）；沒列的查不到
+    started: Mutex<HashMap<u32, u64>>,
     /// sleep 時要做的事（模擬外掛在等待期間回報）
     on_sleep: Mutex<Option<Box<dyn Fn() + Send>>>,
 }
@@ -44,6 +46,9 @@ impl Os for FakeOs {
     }
     fn own_pid(&self) -> u32 {
         self.own
+    }
+    fn started_ms(&self, pid: u32) -> Option<u64> {
+        self.started.lock().unwrap().get(&pid).copied()
     }
     fn sleep(&self, _ms: u64) {
         if let Some(f) = self.on_sleep.lock().unwrap().as_ref() {
@@ -224,6 +229,7 @@ fn rig(o: Opt) -> Rig {
         terminated: Mutex::new(vec![]),
         closed: Mutex::new(vec![]),
         own: 300,
+        started: Mutex::new(HashMap::new()),
         on_sleep: Mutex::new(None),
     });
     let env = Arc::new(FakeEnv {
@@ -1446,4 +1452,73 @@ fn 保護名單_ASN視窗名改名後跟著換() {
     assert!(protect("小希"), "改名後新的 ASN 視窗名要受保護");
     assert!(!protect("T-ASN"), "舊名不再是 ASN 視窗");
     assert!(is_protected("x", 77, "m", "a", 77) && !is_protected("x", 0, "m", "a", 0));
+}
+
+// ================================================================================================
+// 關閉／接班換手後不留殘影
+// ================================================================================================
+
+/// 把 220 的 session 檔改成真實的毫秒時間戳 startedAt，並設定「程序建立時間」
+fn stamp_220(r: &Rig, started_at: u64, created: Option<u64>) {
+    let j = json!({ "pid": 220, "sessionId": "sid-220", "name": "目標", "status": "idle", "cwd": r.work.to_str().unwrap(), "kind": "interactive", "startedAt": started_at });
+    std::fs::write(r.sessions.join("220.json"), j.to_string()).unwrap();
+    match created {
+        Some(c) => r.os().started.lock().unwrap().insert(220, c),
+        None => r.os().started.lock().unwrap().remove(&220),
+    };
+}
+
+#[test]
+fn 關閉後_剛結束的視窗留下的_sessions_檔要清掉_別人的檔不碰() {
+    let r = rig(Opt::default());
+    let res = r.run("close", json!({}));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert!(r.terminated().contains(&220));
+    assert!(!r.sessions.join("220.json").exists(), "強制結束的 claude 來不及自己刪 session 檔，日後 pid 被重用就會變成幽靈視窗");
+    assert!(r.sessions.join("231.json").exists(), "別人的檔不碰");
+}
+
+#[test]
+fn 關閉後_session_檔的_sessionid_對不上就不刪() {
+    let r = rig(Opt::default());
+    // 在動手前被別的 claude 蓋成另一個 sessionId、同名：guard 會因為 target 變了而擋下，不會走到清檔；這裡直接驗清檔函式的條件
+    let t = switch::Target { pid: 220, session_id: "sid-other".into(), name: "目標".into(), cwd: String::new(), status: None, args: vec![] };
+    r.os().alive.lock().unwrap().remove(&220);
+    r.ops.forget_session(&t);
+    assert!(r.sessions.join("220.json").exists(), "sessionId 不同＝不是剛結束的那個視窗，不刪");
+    let t = switch::Target { session_id: "sid-220".into(), ..t };
+    r.os().alive.lock().unwrap().insert(220);
+    r.ops.forget_session(&t);
+    assert!(r.sessions.join("220.json").exists(), "程序還活著就不刪");
+}
+
+#[test]
+fn 接班換手後_前任的_sessions_檔也清掉_新視窗的檔還在() {
+    let r = rig(Opt::default());
+    let res = r.run("handover", json!({}));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert!(!r.sessions.join("220.json").exists(), "前任的 session 檔不留，名單上不會同時有新舊兩個「目標」");
+    assert!(r.sessions.join("501.json").exists(), "新視窗的檔在");
+}
+
+#[test]
+fn 規則3_pid_被別的程序重用_不算活視窗_不動手() {
+    let r = rig(Opt::default());
+    // session 在 NOW-1 小時開始，但現在 pid 220 對到的程序是 NOW 才建立的＝別的程序
+    stamp_220(&r, NOW - 3_600_000, Some(NOW));
+    let res = r.run("close", json!({}));
+    assert_eq!(res.status, "failed", "{}", res.detail);
+    assert!(res.detail.contains("找不到"), "{}", res.detail);
+    assert!(r.terminated().is_empty(), "絕不能對被重用的 pid 動手");
+}
+
+#[test]
+fn 規則3_程序比_session_更早建立或查不到時間_照常當活視窗_不誤砍() {
+    for created in [Some(NOW - 7_200_000), Some(NOW - 3_600_000 + 30_000), None] {
+        let r = rig(Opt::default());
+        stamp_220(&r, NOW - 3_600_000, created);
+        let res = r.run("close", json!({}));
+        assert_eq!(res.status, "ok", "{created:?}: {}", res.detail);
+        assert!(r.terminated().contains(&220));
+    }
 }

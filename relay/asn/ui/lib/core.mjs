@@ -39,6 +39,7 @@ export class AsnCore {
       if (typeof transport[k] === 'function') guarded[k] = (...a) => withTimeout(transport[k](...a), k === 'inbox' || k === 'ack' ? stepMs * 2 : stepMs, k)
     }
     Object.assign(this, { aliases: new Set(aliases), transport: guarded, store, selfNode, windowName, isChatVisible, now, log, pollMs, rosterMs, localMs, statusPollMs, stepMs })
+    this.localSeen = new Set()   // 本機現讀曾經看到過的視窗名（之後不見＝剛關掉，見 overlayLocal）
     this.cwdOf = new Map()   // 好友 id → 資料夾標籤（後台名單給的），本機現讀狀態時用來重組個人訊息
     // 門鈴響、回到前景時立刻重拉名單；1 秒內多次合併成一次
     this.refreshRosterSoon = coalesced(() => this.refreshRoster(), soonGapMs)
@@ -140,7 +141,8 @@ export class AsnCore {
     if (typeof this.transport.localWindows !== 'function') return
     let locals
     try { locals = await this.transport.localWindows() } catch { return }
-    const next = overlayLocal(this.friends, this.selfNode, locals, this.cwdOf)
+    const next = overlayLocal(this.friends, this.selfNode, locals, this.cwdOf, this.localSeen)
+    for (const w of Array.isArray(locals) ? locals : []) if (w && typeof w.name === 'string' && w.name) this.localSeen.add(w.name)
     if (!next) return
     this.friends = next
     if (!quiet) this.emit('state')
