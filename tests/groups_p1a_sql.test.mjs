@@ -505,7 +505,7 @@ test('還原驗證：拿掉 trust 重算 → 跨租戶的 trust 測試要變紅'
     assert.ok(s.includes(a), '找不到 trust 重算運算式'); return s.replace(a, 's.trust')
   }
   // group_read 的最新定義在 20261024190000_group_read_receipts.sql（前面還有 device_label、reply_quote、wake_info 各一版），各版都要拿掉才算拿掉
-  const db = await boot({ mutate: { [M_ROOMS]: cut, '20261024140000_reply_quote.sql': cut, '20261024150000_wake_info.sql': cut, '20261024160000_member_device_label.sql': cut, '20261024190000_group_read_receipts.sql': cut } })
+  const db = await boot({ mutate: { [M_ROOMS]: cut, '20261024140000_reply_quote.sql': cut, '20261024150000_wake_info.sql': cut, '20261024160000_member_device_label.sql': cut, '20261024190000_group_read_receipts.sql': cut, '20261024210000_group_read_wakes.sql': cut } })
   const room = await twoTenantRoom(db)
   await post(db, { node: Q2, room, signed: U2, body: '財務員的話' })
   const m = (await readAs(db, { node: W1, agent: '財務', room })).messages.find(x => x.body === '財務員的話')
