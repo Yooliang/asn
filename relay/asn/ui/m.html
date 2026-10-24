@@ -132,9 +132,12 @@
                 </ul>
               </div>
               <div v-for="g in groups" :key="g.key" class="m-group">
-                <button class="m-ghead" type="button" :aria-expanded="!collapsed[g.key]" @click="collapsed[g.key] = !collapsed[g.key]">
-                  <span class="m-caret" :class="{ open: !collapsed[g.key] }">▸</span>{{ groupHeading(g) }}
-                </button>
+                <div class="m-ghead-row">
+                  <button class="m-ghead" type="button" :aria-expanded="!collapsed[g.key]" @click="collapsed[g.key] = !collapsed[g.key]">
+                    <span class="m-caret" :class="{ open: !collapsed[g.key] }">▸</span>{{ groupHeading(g) }}
+                  </button>
+                  <button class="m-ghead-act" type="button" v-if="acctKeys.has(g.key)" :aria-label="ACCT_TEXT.button + '：' + g.label" @click="openAcct(g)">{{ ACCT_TEXT.button }}</button>
+                </div>
                 <ul v-show="!collapsed[g.key]">
                   <li v-for="c in g.items" :key="c.id" :class="{ 'm-archived-row': g.kind === 'archived' }">
                     <button class="m-buddy" :class="{ offline: c.status === 'offline' }" type="button" @click="openChat(c.id)">
@@ -332,6 +335,35 @@
           <p class="m-note" v-if="ops.view && ops.view.rows && !ops.view.rows.length">沒有更多資料。</p>
           <div class="m-bar" v-if="ops.view && !ops.view.done" aria-hidden="true"><i></i></div>
           <button type="button" class="m-btn m-ops-cancel" @click="back">{{ ops.view && ops.view.done ? '關閉' : '先關掉（照常進行）' }}</button>
+        </template>
+      </section>
+    </div>
+
+    <!-- 替電腦切換 Claude 帳號：底部浮層（沿用「⋯」選單樣式）。選帳號 → 確認 → 送出並等對方電腦回報；清單只有 email、方案、是否使用中 -->
+    <div class="m-ops" v-if="nav.sheet === 'acct'" @click.self="back">
+      <section class="m-ops-panel" role="dialog" aria-modal="true" :aria-label="ACCT_TEXT.title(acct.label)">
+        <h2 class="m-ops-h">{{ ACCT_TEXT.title(acct.label) }}</h2>
+        <template v-if="acct.phase === 'pick'">
+          <p class="m-note">{{ acctView.onlineText }}<template v-if="acctView.reportedText">；{{ acctView.reportedText }}</template></p>
+          <p class="m-ops-lead" v-if="acctView.rows.length">{{ acctView.currentText }}</p>
+          <p class="m-note" v-if="acctView.rows.length">{{ ACCT_TEXT.pick }}</p>
+          <button v-for="r in acctView.rows" :key="r.email" type="button" class="m-ops-item" :class="{ off: r.current || !acctView.canPick, picked: r.picked }" :disabled="r.current || !acctView.canPick" :aria-pressed="r.picked" @click="pickAcct(r.email)"><span class="m-opt-t">{{ r.picked ? '✓ ' : '' }}{{ r.email }}</span><small class="m-opt-why">{{ r.current ? '使用中' : r.plan }}</small></button>
+          <p class="m-note" v-if="acctView.empty">{{ acctView.empty }}</p>
+          <p class="m-err" v-if="acctView.status" role="alert">{{ acctView.status }}</p>
+          <p class="m-note" v-if="acctView.rows.length">{{ ACCT_TEXT.quotaNote }}</p>
+          <button type="button" class="m-btn m-btn-big" :disabled="!acctView.pickEmail" @click="acctToConfirm">下一步</button>
+          <button type="button" class="m-btn m-ops-cancel" @click="back">{{ ACCT_TEXT.close }}</button>
+        </template>
+        <template v-else-if="acct.phase === 'confirm'">
+          <p class="m-ops-lead">{{ acctConfirm.lead }}</p>
+          <ul class="m-ops-points"><li v-for="p in acctConfirm.points" :key="p">{{ p }}</li></ul>
+          <button type="button" class="m-btn m-btn-big" @click="submitAcct">{{ ACCT_TEXT.confirmOk }}</button>
+          <button type="button" class="m-btn m-ops-cancel" @click="acct.phase = 'pick'">{{ ACCT_TEXT.back }}</button>
+        </template>
+        <template v-else>
+          <p class="m-prog" :class="acct.view ? 'is-' + acct.view.phase : ''" role="status">{{ acct.view ? acct.view.text : '' }}</p>
+          <div class="m-bar" v-if="acct.view && !acct.view.done" aria-hidden="true"><i></i></div>
+          <button type="button" class="m-btn m-ops-cancel" @click="back">{{ acct.view && acct.view.done ? ACCT_TEXT.close : ACCT_TEXT.later }}</button>
         </template>
       </section>
     </div>

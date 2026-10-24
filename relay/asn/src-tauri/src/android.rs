@@ -90,6 +90,30 @@ pub async fn android_partner_ops(app: State<'_, App>, auth: State<'_, crate::aut
     r.partner_ops_signed(&ids, token.as_deref()).await
 }
 
+// ---------- 遠端切換電腦的 Claude 帳號（#227；後台動作與電腦版相同：acct_list／acct_switch／acct_switch_status，手機靠本人簽章當擁有者） ----------
+
+/// 某台電腦回報的帳號清單（只有 email、方案、使用中，沒有任何權杖）與對方 ASN 是否在線。要本人簽章；沒登入回錯，不打後台。回 { accounts, reported_at, asn_online }
+#[tauri::command]
+pub async fn android_acct_list(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>, node: String) -> Result<serde_json::Value, String> {
+    let r = relay_of(&app)?;
+    let token = crate::account::signing_token(&auth).await;
+    r.acct_list_signed(&node, token.as_deref()).await
+}
+
+/// 送出「切換成這個 email」的指令（對方電腦預設要使用者按同意才會換）。要本人簽章；沒登入回錯，不打後台。回 { id }
+#[tauri::command]
+pub async fn android_acct_switch(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>, node: String, email: String) -> Result<serde_json::Value, String> {
+    let r = relay_of(&app)?;
+    let token = crate::account::signing_token(&auth).await;
+    r.acct_switch_signed(&node, &email, token.as_deref()).await
+}
+
+/// 查切換指令的結果（pending／taken／ok／failed／denied 與失敗原因）。回 { switches: [...] }
+#[tauri::command]
+pub async fn android_acct_status(app: State<'_, App>, ids: Vec<String>) -> Result<serde_json::Value, String> {
+    relay_of(&app)?.acct_switch_status(&ids).await
+}
+
 // ---------- 遠端密碼請求的確認（#26 第二期；別台電腦／雲端代理要密碼，由手機本人確認；設計見 docs/design/SECRET-REMOTE.md） ----------
 
 /// 待確認的密碼請求（哪台電腦、哪個程式、要做什麼、公鑰指紋、剩幾秒；沒有任何機密）。要本人簽章；沒登入回錯，不打後台。回 { requests: [...] }

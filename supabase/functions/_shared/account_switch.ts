@@ -86,7 +86,10 @@ const isReply = (x: { data: Json } | Reply): x is Reply => "status" in x;
 // 節點金鑰的動作（relay 函式）：
 //   acct_report／acct_switch_pending／acct_switch_result：ASN 回報自己的清單、取走自己的待辦、回報結果（只動得到金鑰所屬的節點）
 //   acct_list／acct_switch／acct_switch_status：擁有者節點（SQL 判斷 role = 'owner'）看別台清單、送指令、查結果
-export async function handleAcctAction(deps: AcctDeps, me: { id: string }, action: string, params: Json): Promise<Reply> {
+// signedUser：本人簽章驗過的使用者 id（只有 acct_list／acct_switch 會收；手機節點是 member，靠簽章證明「這個節點與租戶都是這個人的」才准）。
+// 沒簽章就不帶 p_signed_user，行為與以前完全相同（只有 role = owner 的節點准）。
+export async function handleAcctAction(deps: AcctDeps, me: { id: string }, action: string, params: Json, signedUser: string | null = null): Promise<Reply> {
+  const signedArg = signedUser ? { p_signed_user: signedUser } : {};
   if (action === "acct_report") {
     const accounts = parseReport(params);
     if (!accounts) return fail("bad_request");
@@ -95,13 +98,13 @@ export async function handleAcctAction(deps: AcctDeps, me: { id: string }, actio
   }
   if (action === "acct_list") {
     if (typeof params?.node !== "string" || !NODE_ID_RE.test(params.node)) return fail("bad_request");
-    const r = await call(deps, "asn_relay_acct_list", { p_actor: me.id, p_node: params.node });
+    const r = await call(deps, "asn_relay_acct_list", { p_actor: me.id, p_node: params.node, ...signedArg });
     return isReply(r) ? r : { status: 200, body: r.data };
   }
   if (action === "acct_switch") {
     const req = parseSwitch(params);
     if ("error" in req) return fail(req.error);
-    const r = await call(deps, "asn_relay_acct_switch", { p_actor: me.id, p_node: req.node, p_vendor: req.vendor, p_email: req.email });
+    const r = await call(deps, "asn_relay_acct_switch", { p_actor: me.id, p_node: req.node, p_vendor: req.vendor, p_email: req.email, ...signedArg });
     if (isReply(r)) return r;
     await deps.ring(r.data.bell_topic);
     return { status: 200, body: { id: r.data.id } };

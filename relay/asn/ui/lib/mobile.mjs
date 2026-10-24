@@ -23,11 +23,13 @@ export const meNav = () => tabNav('me')
 export const launchNav = () => ({ tab: 'list', sheet: 'launch' })
 export const opsNav = () => ({ tab: 'chats', sheet: 'ops' })
 export const secretNav = () => ({ tab: 'chats', sheet: 'secret' })
+export const acctNav = () => ({ tab: 'list', sheet: 'acct' })   // 名單設備卡的「切換 Claude 帳號」浮層
 // 瀏覽記錄裡讀回來的狀態可能是任何東西（壞資料、別的頁面留下的）：整理成合法的導覽狀態
 export function normalizeNav(raw) {
   if (raw?.sheet === 'launch') return launchNav()
   if (raw?.sheet === 'ops') return opsNav()
   if (raw?.sheet === 'secret') return secretNav()
+  if (raw?.sheet === 'acct') return acctNav()
   if (raw?.sheet === 'guide') return guideNav(raw?.guide)   // 設置分頁的「使用指引」滿版頁
   return tabNav(raw?.tab)
 }

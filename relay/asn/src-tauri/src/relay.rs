@@ -667,6 +667,22 @@ impl Relay {
         let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法同步已讀")?;
         self.api_signed("read_sync", Some(b), Some(t)).await
     }
+    /// 遠端切換 Claude 帳號（手機用，#227；設計見 acct_remote.rs，後台同一組動作）：看某台電腦回報的帳號清單。要本人簽章；沒憑證在打後台之前就回錯
+    pub async fn acct_list_signed(&self, node: &str, token: Option<&str>) -> Result<Value, String> {
+        let b = build_acct_list_body(node)?;
+        let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法查看電腦的帳號")?;
+        self.api_signed("acct_list", Some(b), Some(t)).await
+    }
+    /// 送出「切換帳號」指令（只帶目標 email）。要本人簽章；回 { id }
+    pub async fn acct_switch_signed(&self, node: &str, email: &str, token: Option<&str>) -> Result<Value, String> {
+        let b = build_acct_switch_body(node, email)?;
+        let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法切換電腦的帳號")?;
+        self.api_signed("acct_switch", Some(b), Some(t)).await
+    }
+    /// 查切換指令的結果。後台只看得到「自己送出的」指令，所以用節點金鑰即可（不需要簽章）。回 { switches: [...] }
+    pub async fn acct_switch_status(&self, ids: &[String]) -> Result<Value, String> {
+        self.api("acct_switch_status", Some(build_acct_status_body(ids)?)).await
+    }
     /// 查管理操作的進度（手機用）：同樣要本人簽章。回 { ops: [...] }
     pub async fn partner_ops_signed(&self, ids: &[String], token: Option<&str>) -> Result<Value, String> {
         let b = build_partner_ops_body(ids)?;
@@ -862,6 +878,37 @@ pub fn build_partner_archive_body(raw: &Value) -> Result<Value, String> {
         b["name"] = json!(n);
     }
     Ok(b)
+}
+/// 切換帳號用的設備代號與 email 檢查（與 acct_remote.rs、後台同一條規則；acct_remote 只有電腦版編進去，手機這邊自己留一份）
+fn acct_node_ok(s: &str) -> bool {
+    (1..=32).contains(&s.len()) && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+fn acct_email(s: &str) -> Option<String> {
+    let t = s.trim().to_lowercase();
+    let (user, host) = t.split_once('@')?;
+    let ok = (3..=120).contains(&t.chars().count())
+        && !user.is_empty()
+        && !host.is_empty()
+        && !host.contains('@')
+        && !t.chars().any(|c| c.is_control() || c.is_whitespace() || "/\\:*?\"<>|".contains(c));
+    ok.then_some(t)
+}
+pub fn build_acct_list_body(node: &str) -> Result<Value, String> {
+    if acct_node_ok(node) { Ok(json!({ "node": node })) } else { Err("設備代號不對".into()) }
+}
+pub fn build_acct_switch_body(node: &str, email: &str) -> Result<Value, String> {
+    if !acct_node_ok(node) {
+        return Err("設備代號不對".into());
+    }
+    let email = acct_email(email).ok_or("email 格式不對")?;
+    Ok(json!({ "node": node, "vendor": "claude", "email": email }))
+}
+pub fn build_acct_status_body(ids: &[String]) -> Result<Value, String> {
+    if (1..=20).contains(&ids.len()) && ids.iter().all(|i| is_uuid_str(i)) {
+        Ok(json!({ "ids": ids }))
+    } else {
+        Err("指令編號不對".into())
+    }
 }
 pub fn build_partner_ops_body(ids: &[String]) -> Result<Value, String> {
     if (1..=20).contains(&ids.len()) && ids.iter().all(|i| is_uuid_str(i)) {
@@ -1093,6 +1140,36 @@ b", "op": "close" }),
         let id = "11111111-1111-1111-1111-111111111111".to_string();
         assert_eq!(build_partner_ops_body(&[id.clone()]).unwrap(), json!({ "ids": [id.clone()] }));
         assert!(build_partner_ops_body(&[]).is_err() && build_partner_ops_body(&["x".to_string()]).is_err() && build_partner_ops_body(&vec![id; 21]).is_err());
+    }
+
+    #[test]
+    fn 切換帳號_請求內容只有設備_廠商_email() {
+        assert_eq!(build_acct_list_body("W-2_a").unwrap(), json!({ "node": "W-2_a" }));
+        assert!(build_acct_list_body("").is_err() && build_acct_list_body("a b").is_err() && build_acct_list_body(&"x".repeat(33)).is_err());
+        assert_eq!(build_acct_switch_body("W", " B@X.test ").unwrap(), json!({ "node": "W", "vendor": "claude", "email": "b@x.test" }));
+        for bad in ["", "a", "a@", "@b", "a@b@c", "a b@c", "a/b@c", "../x@y", "a
+@b"] {
+            assert!(build_acct_switch_body("W", bad).is_err(), "{bad}");
+        }
+        assert!(build_acct_switch_body("W W", "a@b.c").is_err());
+        let id = "11111111-1111-1111-1111-111111111111".to_string();
+        assert_eq!(build_acct_status_body(&[id.clone()]).unwrap(), json!({ "ids": [id.clone()] }));
+        assert!(build_acct_status_body(&[]).is_err() && build_acct_status_body(&["x".to_string()]).is_err() && build_acct_status_body(&vec![id; 21]).is_err());
+    }
+
+    #[tokio::test]
+    async fn 切換帳號_沒有本人簽章不送出_有簽章帶標頭() {
+        let (url, seen) = fake_server(200);
+        let r = Relay::new(url, "secret-key".into(), "P".into(), "P-ASN".into());
+        assert!(r.acct_list_signed("W", None).await.unwrap_err().contains("尚未登入"));
+        assert!(r.acct_switch_signed("W", "b@x.test", Some("")).await.is_err(), "空憑證等於沒有");
+        assert!(seen.lock().unwrap().is_empty(), "沒簽章時完全沒有打後台");
+        r.acct_list_signed("W", Some("usertoken-9")).await.unwrap();
+        r.acct_switch_signed("W", "b@x.test", Some("usertoken-9")).await.unwrap();
+        let s = seen.lock().unwrap();
+        assert_eq!(s.len(), 2);
+        assert!(s.iter().all(|x| x.to_lowercase().contains("x-asn-user: bearer usertoken-9")), "{s:?}");
+        assert!(s[0].contains("action=acct_list") && s[1].contains("action=acct_switch"));
     }
 
     #[tokio::test]

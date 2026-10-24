@@ -7,7 +7,7 @@ import { avatarSrc, isAvatarDataUrl, removeAvatarUpload, selfAvatarSrc, uploadAv
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { PROVIDERS, canStart, errorText, phaseText } from './lib/login.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
-import { BANNER_MS, DEFAULT_PREFS, TABS, TAB_LABEL, accountDisplayName, SWIPE_BLOCK_SELECTOR, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, buttonLabel, initialNav, opsNav, secretNav, initialUpdate, installOutcome, launchNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, vendorBadgeHtml, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
+import { BANNER_MS, DEFAULT_PREFS, TABS, TAB_LABEL, accountDisplayName, SWIPE_BLOCK_SELECTOR, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, buttonLabel, initialNav, opsNav, acctNav, secretNav, initialUpdate, installOutcome, launchNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, vendorBadgeHtml, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
 import { LAUNCH_GIVE_UP_MS, LAUNCH_POLL_MS, appearedIn, buildLaunchRequest, initialLaunch, launchChoices, launchDevices, launchEligibility, launchErrorText, launchFormError, machinesByNode, progressView } from './lib/mobile-launch.mjs'
 import { OnboardCard } from './lib/onboard-card.mjs'
 import { MOBILE_PHASE_TEXT, createMobileCall } from './lib/mobile-call.mjs'
@@ -19,6 +19,7 @@ import { friendId } from './lib/roster.mjs'
 import { restoreMobileTab } from './lib/session.mjs'
 import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, showsInSheet } from './lib/mobile-ops.mjs'
 import { OP_LABEL, opFormError, partnerEngine } from './lib/partner-ops.mjs'
+import { ACCT_TEXT, acctButtonDevices, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch } from './lib/mobile-acct.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
 import { opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
 import { defaultPartnerName } from './lib/partner.mjs'
@@ -63,6 +64,12 @@ const opsTransport = {
   partnerOp: body => invoke('android_partner_op', { body }),
   partnerOps: ids => invoke('android_partner_ops', { ids }),
   partnerArchive: body => invoke('android_partner_archive', { body }),
+}
+// 替電腦切換 Claude 帳號（設備卡的按鈕）：手機只下指令；要本人簽章（Rust 端沒憑證就不送）。清單只有 email、方案、是否使用中
+const acctTransport = {
+  acctList: node => invoke('android_acct_list', { node }),
+  acctSwitch: (node, email) => invoke('android_acct_switch', { node, email }),
+  acctStatus: ids => invoke('android_acct_status', { ids }),
 }
 // 照片放大與收到的檔案：另存＝存進 App 私有資料夾，再請外殼複製到「下載/ASN」
 const photoApi = {
@@ -407,6 +414,32 @@ const app = createApp({
       go(launchNav())
       void loadLaunchers().then(() => { if (node) pickLaunchDevice(node) })
     }
+    // ---------- 設備卡「切換 Claude 帳號」：選帳號 → 確認 → 送出並等對方電腦回報 ----------
+    const acctKeys = computed(() => new Set(acctButtonDevices(groups.value, info.node).map(g => g.key)))
+    const acct = reactive({ phase: 'pick', node: '', label: '', picked: '', remote: { loading: false, asnOnline: false, reportedAt: '', msg: '', list: [] }, view: null })
+    const acctView = computed(() => acctSheetView(acct.remote, acct.picked))
+    const acctConfirm = computed(() => acctConfirmText(acct.label, acctView.value.currentEmail, acctView.value.pickEmail))
+    let acctToken = 0
+    async function openAcct(g) {
+      if (nav.sheet) return
+      Object.assign(acct, { phase: 'pick', node: g.node, label: g.label, picked: '', view: null, remote: { loading: true, asnOnline: false, reportedAt: '', msg: '', list: [] } })
+      const token = ++acctToken
+      go(acctNav())
+      try {
+        const v = await acctTransport.acctList(g.node)
+        if (token !== acctToken) return
+        acct.remote = { loading: false, asnOnline: v?.asn_online === true, reportedAt: v?.reported_at ?? '', msg: '', list: (v?.accounts ?? []).filter(a => a.vendor === 'claude') }
+      } catch (e) { if (token === acctToken) acct.remote = { loading: false, asnOnline: false, reportedAt: '', msg: acctErrorText(e), list: [] } }
+    }
+    const pickAcct = email => { if (acct.phase === 'pick') acct.picked = acct.picked === email ? '' : email }
+    const acctToConfirm = () => { if (acctView.value.canPick && acctView.value.pickEmail) acct.phase = 'confirm' }
+    async function submitAcct() {
+      if (acct.phase !== 'confirm' || !acctView.value.pickEmail) return   // 一定要先看過確認畫面才送
+      const token = ++acctToken, email = acctView.value.pickEmail
+      acct.phase = 'run'
+      acct.view = await runAcctSwitch(acctTransport, acct.node, email, { onUpdate: v => { if (token === acctToken) acct.view = v }, cancelled: () => token !== acctToken })
+    }
+    watch(() => nav.sheet, s => { if (s !== 'acct') acctToken++ })
     const sleep = ms => new Promise(r => setTimeout(r, ms))
     async function trackLaunch(t) {
       const stop = Date.now() + LAUNCH_GIVE_UP_MS
@@ -687,6 +720,7 @@ const app = createApp({
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, headTone, CONN_LABEL, info, banner, shake, refreshing,
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, ops, opsText, opsTitle, opsModels, opsModelNote, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
+      acct, acctKeys, acctView, acctConfirm, ACCT_TEXT, openAcct, pickAcct, acctToConfirm, submitAcct,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
