@@ -99,7 +99,12 @@ test('一對一「管理」選單：夥伴管理項目（沿用名單右鍵 mana
   const ctx = { loaded: true, signedIn: true, machines: { H: { online: true, launcher: true } } }
   const inv = opsMenuItems(f)
   const it = managePanelItems(f, ctx, inv)
-  assert.deepEqual(it.map(i => i.key), ['p:info', 'p:rename', 'p:close', 'p:handover', 'p:archive', 'invite'])
+  assert.deepEqual(it.map(i => i.key), ['p:console', 'p:info', 'p:rename', 'p:model', 'p:close', 'p:handover', 'p:resume', 'p:restart', 'p:archive', 'invite'], '項目固定，順序和名單右鍵、手機一致')
+  assert.deepEqual(it.map(i => i.ok), [false, true, true, true, true, true, false, false, true, true], '背景／前台切換要問這個視窗自己（沒給就反灰）；切換模型沒給就照 manageItems；喚醒、重開不適用')
+  for (const i of it) assert.equal(Boolean(i.reason), !i.ok, i.key)
+  assert.equal(it.find(i => i.key === 'p:resume').reason, '這個視窗在線上，不需要喚醒')
+  const local = managePanelItems(f, ctx, inv, { console: { ok: true, reason: '' }, model: { ok: false, reason: '這個視窗在另一台電腦上，要到那台電腦的 ASN 才能切換模型' } })
+  assert.deepEqual(local.slice(0, 4).map(i => [i.key, i.ok, i.reason]), [['p:console', true, ''], ['p:info', true, ''], ['p:rename', true, ''], ['p:model', false, '這個視窗在另一台電腦上，要到那台電腦的 ASN 才能切換模型']])
   assert.equal(it.find(i => i.key === 'invite').sep, true, '邀請前有分隔線')
   assert.ok(!it.some(i => i.sep && i.key !== 'invite'))
   const off = managePanelItems(f, { ...ctx, signedIn: false }, inv).find(i => i.key === 'p:rename')
@@ -110,5 +115,11 @@ test('一對一「管理」選單：夥伴管理項目（沿用名單右鍵 mana
   assert.match(t, /from '\.\/archive\.mjs'/)
   assert.match(t, /<partner-op-dialog v-if="wakeDlg\.open" :friend="friend" :op="wakeDlg\.item\.key"/)
   assert.match(t, /role="separator"/)
+  // 反灰：aria-disabled 加說明小字，點了不送出（OpsMenuButton.pick 與 pickOps 都擋）
+  assert.match(t, /:aria-disabled="it\.ok === false \? 'true' : 'false'"/)
+  assert.match(t, /<small class="menu-why" v-if="it\.ok === false" :id="'ops-why-' \+ it\.key">\{\{ it\.reason \}\}<\/small>/)
+  assert.doesNotMatch(t, /:disabled="it\.ok === false"/, '不用原生 disabled')
+  assert.match(t, /function pick\(it\) \{ if \(it\.ok === false\) return;/)
+  assert.match(t, /const it = opsAll\.value\.find\(i => i\.key === key\)\s*\n\s*if \(!it\?\.ok\) return/)
 })
 

@@ -65,7 +65,7 @@ test('list.html：主選單與二級選單都是最外層的 fixed 元素，不�
   assert.match(css, /\.buddy-subpop\{z-index:63/, '二級選單比主選單高一層')
   // 兩個選單與其他最外層的對話框同一層縮排（兩格）：不在 .tabbar 或任何 overflow 容器裡面
   for (const re of [/^  <ul class="av-menu buddy-menu" v-if="buddyMenu"/m, /^  <ul class="av-menu buddy-menu buddy-subpop"/m, /^  <partner-op-dialog /m]) assert.match(html, re, String(re))
-  assert.match(html, /<li v-if="buddyModel\.show" class="model-sub">\s*<button[^>]*@mouseenter="subEvent\('hover'\)"[^>]*@click="subEvent\('click'\)"[^>]*@keydown\.right\.prevent="subEvent\('right'\)"/, '滑過、點一下、鍵盤右鍵都會開')
+  assert.match(html, /<li v-if="it\.key === 'model'" class="model-sub">\s*<button[^>]*@mouseenter="subEvent\('hover'\)"[^>]*@click="subEvent\('click'\)"[^>]*@keydown\.right\.prevent="subEvent\('right'\)"/, '滑過、點一下、鍵盤右鍵都會開')
   const js = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
   assert.match(js, /closest\('\.buddy-menu'\)/, '點到二級選單（也有 buddy-menu 樣式類別）不算點外面')
   assert.match(js, /submenuNext\(\{ open: buddyModel\.open \}, 'escape'\)/, 'Esc 先收子選單')

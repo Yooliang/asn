@@ -40,7 +40,8 @@ import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArch
 import { backgroundRestoreNoticeText, collectLaunchFailures, findBackgroundTimeouts, launchFailedNoticeText } from './lib/partner-launch-notify.mjs'
 import { ONBOARD_STORE, planOnboarding } from './lib/onboard.mjs'
 import { friendId } from './lib/roster.mjs'
-import { canOfferModelSwitch, confirmText, createModelSwitcher } from './lib/model-switch.mjs'
+import { canOfferModelSwitch, confirmText, createModelSwitcher, modelSwitchBlock } from './lib/model-switch.mjs'
+import { consoleBlock } from './lib/actionbar.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
@@ -449,12 +450,12 @@ async function refreshOpsCtx() {
   Object.assign(opsCtx, ctx)
   if (ctx.signedIn === null || !ctx.loaded) opsCtxAt = 0   // 查詢失敗不要擋住下一次重查
 }
-const buddyOpItems = computed(() => manageItems(buddyMenuFriend.value, { ...opsCtx, friends: friends.value, asn: asnMap.value }).filter(i => i.key !== 'model'))   // 切換模型沿用下面原本那個子選單
+const buddyOpItems = computed(() => manageItems(buddyMenuFriend.value, { ...opsCtx, friends: friends.value, asn: asnMap.value }))   // 項目固定；「切換模型」那一項在畫面上換成下面原本的子選單（順序不變）
 const opDlg = reactive({ open: false, op: '', friend: null, item: null })
 function openPartnerOp(it) {
   const f = buddyMenuFriend.value
+  if (!f || !it?.ok) return   // 反灰的項目：點了不送出任何動作，選單也不收起（可以接著讀說明）
   closeBuddyMenu()
-  if (!f || !it?.ok) return
   if (it.key === 'archive' || it.key === 'unarchive') { void setArchived(f, it.key === 'archive'); return }
   Object.assign(opDlg, { open: true, op: it.key, friend: f, item: it })
 }
@@ -498,7 +499,16 @@ function subEvent(ev, delay = 0) {
   if (delay) buddySubTimer = setTimeout(run, delay)
   else run()
 }
-const buddyModelLabel = computed(() => (buddyModel.state === 'checking' ? '切換模型（檢查中…）' : buddyModel.state === 'none' ? '切換模型（無法切換）' : '切換模型 ▸'))
+const buddyModelLabel = computed(() => '切換模型 ▸')   // 文字固定，不隨狀態改字；不能用的原因寫在下面一行
+// 「切換模型」固定出現；不能用時的原因：這個夥伴根本不適用（modelSwitchBlock）→ 檢查中 → 查到切不了的原因
+const buddyModelWhy = computed(() => {
+  const c = buddyMenuFriend.value
+  if (!c) return ''
+  if (!buddyModel.show) return modelSwitchBlock(c, { selfNode: info.node, engine: c.engine || engineForProfile(c.launchProfile || 'claude') })
+  if (buddyModel.state === 'checking') return '檢查中…'
+  if (buddyModel.state === 'none') return buddyModel.reason || '找不到這個視窗'
+  return buddyModel.items.length ? '' : '查不到可切換的模型'
+})
 const modelDlg = reactive({ open: false, name: '', target: null, current: '', busy: false, error: '', manual: '', done: '', copied: false, st: null })
 const modelDlgText = computed(() => confirmText(modelDlg.name, modelDlg.current, modelDlg.target?.label ?? '', { ownWindow: Boolean(modelDlg.st?.raw?.ownWindow) }))
 function closeModelDlg() { if (!modelDlg.busy) modelDlg.open = false }
@@ -546,7 +556,8 @@ async function openBuddyMenu(c, e) {
   resetBuddyModel()
   buddyModel.show = canOfferModelSwitch(c, { selfNode: info.node, engine: eng })
   if (buddyModel.show) void loadBuddyModel(c)
-  if (c.node !== info.node || c.engine === 'acp' || c.pending) { buddyConsole.state = 'none'; return }
+  const why = consoleBlock(c, info.node)
+  if (why) { buddyConsole.state = 'none'; buddyConsole.reason = why; return }   // 查之前就知道不能用：把原因寫在項目下面
   buddyConsole.state = 'checking'
   buddyConsole.reason = ''
   const q = await withTimeout(transport.partnerConsoleQuery({ engine: eng, name: c.agent || c.nick }), CONSOLE_QUERY_TIMEOUT_MS)
@@ -561,7 +572,7 @@ async function openBuddyMenu(c, e) {
 }
 async function toggleBuddyConsole() {
   const c = buddyMenuFriend.value
-  if (!c || buddyConsole.state !== 'toggle') { closeBuddyMenu(); return }
+  if (!c || buddyConsole.state !== 'toggle') return   // 反灰（檢查中或切不了）：點了什麼都不做，選單不收起，使用者可以讀說明
   const eng = c.engine || engineForProfile(c.launchProfile || 'claude')
   const nextVis = !buddyConsole.visible
   try {
@@ -1190,7 +1201,7 @@ const app = createApp({
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
       opDlg, closeOpDlg, buddyOpItems, openPartnerOp, archiveNote, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddyConsoleItemView, buddyMenuOpenChat, toggleBuddyConsole,
-      buddyModel, buddyModelLabel, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,
+      buddyModel, buddyModelLabel, buddyModelWhy, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,
       launchToolRows, launchPrefs, launchCwdText, saveLaunchPrefs, setLaunchCwdText,
     }
   },

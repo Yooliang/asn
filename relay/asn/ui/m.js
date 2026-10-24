@@ -19,6 +19,7 @@ import { friendId } from './lib/roster.mjs'
 import { restoreMobileTab } from './lib/session.mjs'
 import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, showsInSheet } from './lib/mobile-ops.mjs'
 import { OP_LABEL, opFormError, partnerEngine } from './lib/partner-ops.mjs'
+import { BUDDY_CONSOLE_LABEL } from './lib/partner-launch-ui.mjs'
 import { ACCT_TEXT, ACCT_PAGE_TITLE, acctButtonDevices, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch } from './lib/mobile-acct.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
 import { opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
@@ -512,6 +513,8 @@ const app = createApp({
     // 判斷全部用 lib/partner-ops.mjs 的 menuItems／opFormError／progressView，手機不另寫一套。手機只下指令，視窗在那台電腦上
     const opsCtx = computed(() => ({ machines: lchData.machines, loaded: lchData.loaded, signedIn: acctSigned(), authError: acct.value.error, friends: friends.value, nonWindowNodes: [info.node] }))
     const opsItems = computed(() => (chatFriend.value ? manageItems(chatFriend.value, opsCtx.value) : []))
+    // 選單畫面上的列：最前面固定「背景／前台切換」（手機不能切換，永遠反灰並說明），接著 manageItems 的全部項目，順序和電腦版一致
+    const opsRows = computed(() => (opsItems.value.length ? [{ key: 'console', label: BUDDY_CONSOLE_LABEL, ok: false, reason: '手機不能切換視窗的前景或背景，要到放著這個視窗的電腦上操作' }, ...opsItems.value] : []))
     const ops = reactive({ phase: 'menu', newName: '', note: '', model: '', error: '', view: null })
     const opsText = computed(() => opDialogText(ops.phase, chatFriend.value?.agent || chatFriend.value?.nick || '', chatFriend.value?.device || '', partnerEngine(chatFriend.value)))
     const opsTitle = computed(() => (ops.phase === 'menu' ? (chatFriend.value?.nick ?? '') : OP_LABEL[ops.phase] ?? ''))
@@ -753,7 +756,7 @@ const app = createApp({
       pf, sw, pagerStyle, indicator, swipeStart, swipeMove, swipeEnd, goTab, TABS, TAB_LABEL, tabLabel, myName, meForChat, lastOf, vendorIcon: vendorBadgeHtml,
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, headTone, CONN_LABEL, info, banner, shake, refreshing,
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
-      avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, ops, opsText, opsTitle, opsModels, opsModelNote, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
+      avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, ops, opsText, opsTitle, opsModels, opsModelNote, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       acctSw, acctDevs, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, ACCT_PAGE_TITLE, vendorIconSvg, acctKeys, openAcct, pickAcctDevice, refreshAcct, startAcctSwitch, acctBackToPick, submitAcct,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,

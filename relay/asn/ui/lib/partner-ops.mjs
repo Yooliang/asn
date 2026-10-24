@@ -26,6 +26,17 @@ export const REASON = {
   deviceOffline: '電腦現在不在線，叫不醒（要讓電腦的 ASN 開著）',
   notClaude: '這位夥伴用的引擎還不能喚醒',
   unsupported: '電腦端或收發室還不支援，請先更新',
+  cloud: '這是雲端代理，在雲端執行，沒有電腦上的視窗可以管理',
+  otherEngine: '這位夥伴用的引擎還不能從這裡管理視窗',
+  alreadyOnline: '這個視窗在線上，不需要喚醒',
+  restartOnlyAcp: '「重開」只用在 ASN 在背景執行的工作者；一般視窗請用「接班換手」',
+}
+// 背景工作者（ACP）用不到的項目的說明
+const ACP_WHY = {
+  rename: '這個夥伴是 ASN 在背景執行的工作者，沒有視窗可以改名',
+  model: '這個夥伴是 ASN 在背景執行的工作者，沒有視窗，不能在這裡切換模型',
+  close: '這個夥伴是 ASN 在背景執行的工作者，沒有視窗可關',
+  resume: '這個夥伴是 ASN 在背景執行的工作者，不需要喚醒；要重新啟動請用「重開」',
 }
 export const STALE_TEXT = 'ASN 版本可能太舊，或沒有在跑'
 
@@ -81,44 +92,58 @@ export function isManageable(friend, ctx = {}) {
   return e === 'claude' || e === 'acp'
 }
 
-// 選單項目 { key, label, ok, reason }：Claude 視窗在線五項、離線只有「喚醒」；ACP 工作者只有詳情、重開、接班換手；不是能管理的夥伴回空陣列（不顯示「⋯」）。
+// 選單項目 { key, label, ok, reason }：項目固定。任何 AI 夥伴（Claude 視窗、背景工作者、雲端代理、其他引擎、在線或離線）都給同一套、同一個順序（MENU_KEYS）；
+// 用不到的項目不隱藏，一律 ok:false，reason 寫明這一項為什麼不能用（逐案不同，只寫程式真的判斷得出的條件）。不是 AI 夥伴（人、手機、收發室）回空陣列。
+// 可用時的條件與原本完全相同：Claude 視窗在線＝詳情、改名、切換模型、關閉視窗、接班換手；Claude 視窗離線＝喚醒；背景工作者＝詳情、重開、接班換手。
 // ctx：{ machines（節點→設定）, loaded, signedIn, friends, asn, nonWindowNodes, supported（後台有沒有 partner_op；false＝舊後台） }
+export const MENU_KEYS = ['info', 'rename', 'model', 'close', 'handover', 'resume', 'restart']
 export function menuItems(friend, ctx = {}) {
-  if (!isManageable(friend, ctx)) return []
-  const acp = partnerEngine(friend) === 'acp'
-  if (friend.status === 'offline') return acp ? [] : resumeItems(friend, ctx)
-  const base = baseReason(friend, ctx)
-  const machine = ctx.machines?.[friend.node]
-  return (acp ? ACP_OPS : ONLINE_OPS).map(key => {
-    let reason = base
-    // 詳情是唯讀，不需要那台電腦開放；其餘要開放（launcher 不為空）。沒查到設定時也不能確定開放了沒
-    if (!reason && key !== 'info') {
-      if (!ctx.loaded) reason = loadBlock(ctx)
-      else if (!machine?.launcher) reason = REASON.closed
-    }
+  if (!isAiPartner(friend, ctx)) return []
+  const engine = partnerEngine(friend)
+  const offline = friend.status === 'offline'
+  return MENU_KEYS.map(key => {
+    const reason = itemReason(key, friend, engine, offline, ctx)
     return { key, label: OP_LABEL[key], ok: !reason, reason }
   })
 }
 
-// 離線夥伴的「喚醒」：要有登入、電腦在線且開放遠端管理；這位夥伴用的引擎還不能喚醒（名單上沒寫引擎就當 Claude）
-function resumeItems(friend, ctx) {
-  if (friend.engine && friend.engine !== 'claude') return []
-  let reason = ''
-  const machine = ctx.machines?.[friend.node]
-  if (loginBlock(ctx)) reason = loginBlock(ctx)
-  else if (ctx.supported === false) reason = REASON.unsupported
-  else if (!ctx.loaded) reason = loadBlock(ctx)
-  else if (!machine || machine.online !== true) reason = REASON.deviceOffline
-  else if (!machine.launcher) reason = REASON.closed
-  return [{ key: 'resume', label: OP_LABEL.resume, ok: !reason, reason }]
+// 這一項為什麼不能用（能用回空字串）。先看夥伴的種類，再看登入與電腦，最後才是這一項自己的條件
+function itemReason(key, friend, engine, offline, ctx) {
+  if (engine === 'cloud') return REASON.cloud
+  if (engine === 'other') return REASON.otherEngine
+  const label = OP_LABEL[key]
+  if (engine === 'acp') {
+    if (!ACP_OPS.includes(key)) return ACP_WHY[key]
+    if (offline) return `這個背景工作者已離線，現在不能「${label}」`
+    return gateReason(key, friend, ctx)
+  }
+  if (key === 'resume') return offline ? resumeReason(friend, ctx) : REASON.alreadyOnline
+  if (key === 'restart') return REASON.restartOnlyAcp
+  if (offline) return `這個視窗已離線，要先喚醒才能「${label}」`
+  return gateReason(key, friend, ctx)
 }
 
-function baseReason(friend, ctx) {
+// 在線夥伴的共同條件：要登入、後台支援、電腦在線；詳情是唯讀，不需要那台電腦開放遠端管理，其餘要開放（launcher 不為空）
+function gateReason(key, friend, ctx) {
   if (loginBlock(ctx)) return loginBlock(ctx)
   if (ctx.supported === false) return REASON.unsupported
-  if (friend.status === 'offline') return REASON.offline
   const machine = ctx.machines?.[friend.node]
   if (machine && machine.online === false) return REASON.offline
+  if (key !== 'info') {
+    if (!ctx.loaded) return loadBlock(ctx)   // 沒查到設定時也不能確定開放了沒
+    if (!machine?.launcher) return REASON.closed
+  }
+  return ''
+}
+
+// 離線 Claude 視窗的「喚醒」：要有登入、電腦在線且開放遠端管理
+function resumeReason(friend, ctx) {
+  const machine = ctx.machines?.[friend.node]
+  if (loginBlock(ctx)) return loginBlock(ctx)
+  if (ctx.supported === false) return REASON.unsupported
+  if (!ctx.loaded) return loadBlock(ctx)
+  if (!machine || machine.online !== true) return REASON.deviceOffline
+  if (!machine.launcher) return REASON.closed
   return ''
 }
 

@@ -20,10 +20,17 @@ export function currentModelLabel(raw, models = CLAUDE_MODELS) {
 
 /** 這個名單上的人，能不能出現「切換模型」：只有本機的 Claude 視窗（雲端代理、其他設備、Codex 等不適用）。 */
 export function canOfferModelSwitch(friend, { selfNode, engine }) {
-  if (!friend || friend.pending) return false
-  if (engine !== 'claude') return false
-  if (friend.engine === 'acp') return false
-  return friend.node === selfNode
+  return !modelSwitchBlock(friend, { selfNode, engine })
+}
+
+/** 「切換模型」為什麼不能用（能用回空字串）：選單固定顯示這一項，不能用時把原因寫在項目下面。判斷與 canOfferModelSwitch 完全相同。 */
+export function modelSwitchBlock(friend, { selfNode, engine }) {
+  if (!friend) return '沒有選到夥伴'
+  if (friend.pending) return '這個視窗還在開啟中，開好後才能切換模型'
+  if (friend.engine === 'acp') return '這個夥伴是 ASN 在背景執行的工作者，沒有視窗，不能切換模型'
+  if (engine !== 'claude') return '這位夥伴用的引擎還不能在這裡切換模型'
+  if (friend.node !== selfNode) return '這個視窗在另一台電腦上，要到那台電腦的 ASN 才能切換模型'
+  return ''
 }
 
 /**

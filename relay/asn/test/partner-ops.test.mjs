@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { HANDOVER_GIVE_UP_MS, ONLINE_OPS, OPS, OP_GIVE_UP_MS, QUEUE_GIVE_UP_MS, REASON, STALE_TEXT, buildOpRequest, infoRows, isAiPartner, isManageable, menuItems, opErrorText, opFormError, partnerEngine, progressView } from '../ui/lib/partner-ops.mjs'
+import { ACP_OPS, HANDOVER_GIVE_UP_MS, MENU_KEYS, ONLINE_OPS, OPS, OP_GIVE_UP_MS, QUEUE_GIVE_UP_MS, REASON, STALE_TEXT, buildOpRequest, infoRows, isAiPartner, isManageable, menuItems, opErrorText, opFormError, partnerEngine, progressView } from '../ui/lib/partner-ops.mjs'
 import { machinesByNode } from '../ui/lib/mobile-launch.mjs'
 
 const LAUNCHER = { profiles: [{ id: 'claude' }], cwd_allow: ['D:\\Github\\asn'] }
@@ -10,16 +10,20 @@ const MACH = machinesByNode({ machines: [{ node: 'H', launcher: LAUNCHER, online
 const ctx = { machines: MACH, loaded: true, signedIn: true, asn: { H: [{ window_name: 'H-ASN' }] } }
 const W = (node, agent, extra = {}) => ({ id: `${node}/${agent}`, node, agent, nick: agent, status: 'online', engine: 'claude', kind: 'claude', device: `設備${node}`, ...extra })
 
-test('選單五項：詳情、改名、切換模型、關閉視窗、接班換手；都能用時全部 ok（在線的沒有喚醒）', () => {
+test('選單固定七項（詳情、改名、切換模型、關閉視窗、接班換手、喚醒、重開）；在線的 Claude 視窗前五項能用，喚醒與重開反灰並說明', () => {
   const items = menuItems(W('H', '小文'), ctx)
-  assert.deepEqual(items.map(i => i.key), ONLINE_OPS)
-  assert.deepEqual(OPS, [...ONLINE_OPS, 'resume', 'restart'])
-  assert.deepEqual(items.map(i => i.label), ['詳情', '改名', '切換模型', '關閉視窗', '接班換手'])
-  assert.ok(items.every(i => i.ok && i.reason === ''))
+  assert.deepEqual(items.map(i => i.key), MENU_KEYS)
+  assert.deepEqual(MENU_KEYS, OPS)
+  assert.deepEqual(items.map(i => i.label), ['詳情', '改名', '切換模型', '關閉視窗', '接班換手', '喚醒', '重開'])
+  assert.deepEqual(items.map(i => i.ok), [true, true, true, true, true, false, false])
+  assert.equal(items[5].reason, REASON.alreadyOnline)
+  assert.equal(items[6].reason, REASON.restartOnlyAcp)
+  assert.ok(items.filter(i => i.ok).every(i => i.reason === ''))
+  assert.deepEqual(items.filter(i => i.ok).map(i => i.key), ONLINE_OPS, '可用的項目和原本完全相同')
 })
 
-test('人、手機、雲端代理、群組、ASN／收發室視窗：空陣列（不顯示選單）', () => {
-  for (const f of [W('H', '小良', { kind: 'owner' }), W('P', '手機', { kind: 'phone' }), W('G', '代理', { kind: 'grok' }), W('H', '群', { room: true }), W('H', '某人', { person: true }),
+test('人、手機、群組、ASN／收發室視窗：空陣列（不是 AI 夥伴，沒有夥伴選單）', () => {
+  for (const f of [W('H', '小良', { kind: 'owner' }), W('P', '手機', { kind: 'phone' }), W('H', '群', { room: true }), W('H', '某人', { person: true }),
     W('H', 'H-ASN'), W('H', '另一個', { engine: 'asn' }), W('H', '家用收發室'), W('Q', '雲端', {}), { node: '', agent: '' }, null]) {
     const nonWin = f?.node === 'Q' ? { ...ctx, nonWindowNodes: ['Q'] } : ctx
     assert.deepEqual(menuItems(f, nonWin), [], JSON.stringify(f))
@@ -29,35 +33,40 @@ test('人、手機、雲端代理、群組、ASN／收發室視窗：空陣列�
 
 test('不能用就反灰並給中文原因：沒登入、離線、沒開放（詳情除外）、還沒查到設定、舊後台', () => {
   const rs = items => Object.fromEntries(items.map(i => [i.key, i.reason]))
-  assert.ok(menuItems(W('H', 'a'), { ...ctx, signedIn: false }).every(i => !i.ok && i.reason === REASON.needLogin), '沒登入全反灰（含詳情）')
-  assert.ok(menuItems(W('W', 'a'), ctx).every(i => !i.ok && i.reason === REASON.offline), '電腦離線')
+  const five = items => items.filter(i => ONLINE_OPS.includes(i.key))   // 喚醒與重開對在線的 Claude 視窗另有固定說明
+  assert.ok(five(menuItems(W('H', 'a'), { ...ctx, signedIn: false })).every(i => !i.ok && i.reason === REASON.needLogin), '沒登入全反灰（含詳情）')
+  assert.ok(five(menuItems(W('W', 'a'), ctx)).every(i => !i.ok && i.reason === REASON.offline), '電腦離線')
   const closed = menuItems(W('C', 'a'), ctx)
-  assert.deepEqual(closed.map(i => i.ok), [true, false, false, false, false], '沒開放：只有詳情能用')
+  assert.deepEqual(five(closed).map(i => i.ok), [true, false, false, false, false], '沒開放：只有詳情能用')
   assert.equal(rs(closed).rename, REASON.closed)
   const notLoaded = menuItems(W('H', 'a'), { ...ctx, loaded: false })
-  assert.deepEqual(notLoaded.map(i => i.ok), [true, false, false, false, false])
+  assert.deepEqual(five(notLoaded).map(i => i.ok), [true, false, false, false, false])
   assert.equal(rs(notLoaded).close, REASON.unknown)
-  assert.ok(menuItems(W('H', 'a'), { ...ctx, supported: false }).every(i => !i.ok && i.reason === REASON.unsupported))
+  assert.ok(five(menuItems(W('H', 'a'), { ...ctx, supported: false })).every(i => !i.ok && i.reason === REASON.unsupported))
   for (const r of Object.values(REASON)) assert.ok(!/[A-Za-z]{4,}/.test(r), `純中文：${r}`)
-  for (const i of menuItems(W('H', 'a'), ctx)) assert.ok(!/[A-Za-z]{4,}/.test(i.label))
+  for (const i of menuItems(W('H', 'a'), ctx)) assert.ok(!/[A-Za-z]{4,}/.test(i.label) && !/[A-Za-z]{4,}/.test(i.reason), `純中文：${i.label} ${i.reason}`)
 })
 
-test('離線的 AI 夥伴只有「喚醒」：有登入、電腦在線且開放才能按；其餘反灰並寫中文原因', () => {
+test('離線的 Claude 視窗只有「喚醒」能用（要登入、電腦在線且開放）；其餘六項固定顯示但反灰，說明這個視窗已離線', () => {
   const off = (node, extra = {}) => W(node, '小離', { status: 'offline', ...extra })
-  assert.deepEqual(menuItems(off('H'), ctx), [{ key: 'resume', label: '喚醒', ok: true, reason: '' }])
-  const one = (f, c = ctx) => menuItems(f, c).map(i => [i.key, i.ok, i.reason])
+  const all = menuItems(off('H'), ctx)
+  assert.deepEqual(all.map(i => i.key), MENU_KEYS, '離線也是同一套項目')
+  assert.deepEqual(all.filter(i => i.ok).map(i => [i.key, i.label, i.reason]), [['resume', '喚醒', '']])
+  for (const i of all.filter(x => x.key !== 'resume' && x.key !== 'restart')) assert.match(i.reason, /已離線.*喚醒/, i.key)
+  assert.equal(all.find(i => i.key === 'restart').reason, REASON.restartOnlyAcp, '重開對 Claude 視窗永遠不適用，說明這個比「已離線」準確')
+  const one = (f, c = ctx) => menuItems(f, c).filter(i => i.key === 'resume').map(i => [i.key, i.ok, i.reason])
   assert.deepEqual(one(off('H'), { ...ctx, signedIn: false }), [['resume', false, REASON.needLogin]])
   assert.deepEqual(one(off('W')), [['resume', false, REASON.deviceOffline]], '電腦離線')
   assert.deepEqual(one(off('Z')), [['resume', false, REASON.deviceOffline]], '查不到電腦')
   assert.deepEqual(one(off('C')), [['resume', false, REASON.closed]], '沒開放')
   assert.deepEqual(one(off('H'), { ...ctx, loaded: false }), [['resume', false, REASON.unknown]])
   assert.deepEqual(one(off('H'), { ...ctx, supported: false }), [['resume', false, REASON.unsupported]])
-  assert.deepEqual(menuItems(off('H', { engine: 'codex' }), ctx), [], '只有 Claude 的夥伴能喚醒')
-  assert.equal(menuItems(off('H', { engine: null }), ctx).length, 1, '名單沒寫引擎（離線記得的）就當 Claude')
+  assert.ok(menuItems(off('H', { engine: 'codex' }), ctx).every(i => !i.ok && i.reason === REASON.otherEngine), '只有 Claude 的夥伴能喚醒，其他引擎整組反灰並說明')
+  assert.equal(menuItems(off('H', { engine: null }), ctx).find(i => i.key === 'resume').ok, true, '名單沒寫引擎（離線記得的）就當 Claude')
   for (const f of [off('H', { kind: 'phone' }), off('H', { person: true }), off('H', { room: true }), off('H', { agent: '家用收發室' }), off('H', { engine: 'asn' })]) assert.deepEqual(menuItems(f, ctx), [], JSON.stringify(f))
   assert.deepEqual(buildOpRequest(off('H'), 'resume', { newName: 'x', note: 'y' }), { node: 'H', name: '小離', op: 'resume' }, '喚醒只送節點、名字、動作（session 由後台查）')
   assert.equal(opFormError(off('H'), 'resume', {}), '')
-  assert.equal(opFormError(off('H'), 'resume', {}, one(off('C'))[0] && menuItems(off('C'), ctx)[0]), REASON.closed)
+  assert.equal(opFormError(off('H'), 'resume', {}, menuItems(off('C'), ctx).find(i => i.key === 'resume')), REASON.closed)
 })
 
 test('送出前檢查與請求內容：只放該動作的欄位；節點與視窗名取自名單', () => {
@@ -187,19 +196,26 @@ test('守門：手機指令清單有兩個簽章指令；沒有電腦端指令�
   assert.match(read('..', '..', 'supabase', 'functions', 'relay', 'index.ts'), /action === "partner_op" \|\| action === "partner_ops" \|\| action === "partner_archive"\) \? await signedUserId/)
 })
 
-test('依引擎決定項目：Claude 全部；ACP 工作者只有詳情、重開、接班換手；雲端代理與其他引擎沒有管理項目', () => {
+test('依引擎決定哪幾項能用（項目一律固定七項）：Claude 前五項；ACP 工作者詳情、重開、接班換手；雲端代理與其他引擎全部反灰並說明', () => {
   const keys = f => menuItems(f, ctx).map(i => i.key)
-  assert.deepEqual(keys(W('H', '小文')), ['info', 'rename', 'model', 'close', 'handover'])
-  assert.deepEqual(keys(W('H', '小文', { engine: null })), ['info', 'rename', 'model', 'close', 'handover'], '沒寫引擎當 Claude')
+  const okKeys = f => menuItems(f, ctx).filter(i => i.ok).map(i => i.key)
+  assert.deepEqual(keys(W('H', '小文')), MENU_KEYS)
+  assert.deepEqual(okKeys(W('H', '小文')), ['info', 'rename', 'model', 'close', 'handover'])
+  assert.deepEqual(okKeys(W('H', '小文', { engine: null })), ['info', 'rename', 'model', 'close', 'handover'], '沒寫引擎當 Claude')
   for (const engine of ['gemini', 'agy', 'acp', 'Gemini']) {
     const items = menuItems(W('H', 'Gemini', { engine, kind: 'claude' }), ctx)
-    assert.deepEqual(items.map(i => i.key), ['info', 'restart', 'handover'], engine)
-    assert.deepEqual(items.map(i => i.label), ['詳情', '重開', '接班換手'])
-    assert.ok(items.every(i => i.ok), engine)
+    assert.deepEqual(items.map(i => i.key), MENU_KEYS, engine)
+    assert.deepEqual(items.filter(i => i.ok).map(i => i.key), ['info', 'handover', 'restart'], engine)
+    assert.deepEqual(items.filter(i => i.ok).map(i => i.label), ['詳情', '接班換手', '重開'])
+    const why = Object.fromEntries(items.filter(i => !i.ok).map(i => [i.key, i.reason]))
+    assert.equal(why.close, '這個夥伴是 ASN 在背景執行的工作者，沒有視窗可關', '使用者指定的說明')
+    assert.equal(new Set(Object.values(why)).size, 4, '四項說明逐案不同')
     assert.equal(partnerEngine(W('H', 'g', { engine })), 'acp')
   }
-  for (const f of [W('G', 'Grok', { engine: 'grok', kind: 'grok' }), W('G', 'Grok', { engine: 'cloud' }), W('G', 'Grok', { engine: 'claude', kind: 'cloud-agent' }), W('H', '小碼', { engine: 'codex' }), W('H', '小皮', { engine: 'pi' })]) {
-    assert.deepEqual(menuItems(f, ctx), [], JSON.stringify(f))
+  for (const [f, reason] of [[W('G', 'Grok', { engine: 'grok', kind: 'grok' }), REASON.cloud], [W('G', 'Grok', { engine: 'cloud' }), REASON.cloud], [W('G', 'Grok', { engine: 'claude', kind: 'cloud-agent' }), REASON.cloud], [W('H', '小碼', { engine: 'codex' }), REASON.otherEngine], [W('H', '小皮', { engine: 'pi' }), REASON.otherEngine]]) {
+    const items = menuItems(f, ctx)
+    assert.deepEqual(items.map(i => i.key), MENU_KEYS, JSON.stringify(f))
+    assert.ok(items.every(i => !i.ok && i.reason === reason), JSON.stringify(f))
     assert.equal(isManageable(f, ctx), false)
     assert.equal(isAiPartner(f, ctx), true, '還是 AI 夥伴（封存用）')
   }
@@ -207,14 +223,18 @@ test('依引擎決定項目：Claude 全部；ACP 工作者只有詳情、重開
   assert.equal(partnerEngine(W('H', '小碼', { engine: 'codex' })), 'other')
 })
 
-test('ACP 工作者的項目也受登入、開放、離線的條件管；離線的 ACP 工作者沒有項目（不能喚醒）', () => {
+test('ACP 工作者的項目也受登入、開放、離線的條件管；離線的 ACP 工作者全部反灰（不能喚醒）', () => {
   const g = (node, extra = {}) => W(node, 'Gemini', { engine: 'gemini', ...extra })
-  const closed = menuItems(g('C'), ctx)
-  assert.deepEqual(closed.map(i => i.ok), [true, false, false], '沒開放：只有詳情能用')
+  const sel = items => items.filter(i => ACP_OPS.includes(i.key))
+  const closed = sel(menuItems(g('C'), ctx))
+  assert.deepEqual(closed.map(i => [i.key, i.ok]), [['info', true], ['handover', false], ['restart', false]], '沒開放：只有詳情能用')
   assert.equal(closed[1].reason, REASON.closed)
-  assert.ok(menuItems(g('H'), { ...ctx, signedIn: false }).every(i => !i.ok && i.reason === REASON.needLogin))
-  assert.ok(menuItems(g('W'), ctx).every(i => !i.ok && i.reason === REASON.offline))
-  assert.deepEqual(menuItems(g('H', { status: 'offline' }), ctx), [])
+  assert.ok(sel(menuItems(g('H'), { ...ctx, signedIn: false })).every(i => !i.ok && i.reason === REASON.needLogin))
+  assert.ok(sel(menuItems(g('W'), ctx)).every(i => !i.ok && i.reason === REASON.offline))
+  const off = menuItems(g('H', { status: 'offline' }), ctx)
+  assert.deepEqual(off.map(i => i.key), MENU_KEYS)
+  assert.ok(off.every(i => !i.ok && i.reason), '離線的背景工作者沒有可用項目，每項都有說明')
+  assert.match(off.find(i => i.key === 'restart').reason, /已離線.*重開/)
 })
 
 test('重開：只送節點、名字、動作；送出前不用填任何東西；進度完成文字', () => {

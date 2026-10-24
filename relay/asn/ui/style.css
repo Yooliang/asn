@@ -390,6 +390,12 @@ html.toast-page,html.toast-page body{background:transparent}
 .av-menu button{display:block;width:100%;text-align:left;border:1px solid transparent;background:none;padding:4px 8px;border-radius:3px;cursor:pointer;white-space:nowrap}
 .av-menu button:hover:not(:disabled){background:#e6f1fc;border-color:#b8d6f2}
 .av-menu button:disabled{opacity:.5;cursor:default}
+/* 固定項目的選單（夥伴右鍵、對話上方「管理」）：不能用的項目照樣顯示，反灰（aria-disabled，不用原生 disabled 才讀得到說明）並在下面附一行原因。
+   只把項目名稱變淡，說明文字維持完整對比（選單底色在深色模式下也維持白底，--muted 對白底約 5.6:1，深色模式同樣看得清楚） */
+.av-menu button.off,.ab-menu button.off{cursor:default}
+.av-menu button.off:hover,.ab-menu button.off:hover{background:none;border-color:transparent}
+.av-menu button.off .mi-t,.ab-menu button.off .mi-t{opacity:.55}
+.menu-why{display:block;margin-top:1px;max-width:260px;font-size:11px;line-height:1.35;font-weight:400;color:var(--muted);white-space:normal}
 .av-note{font-size:11px;color:var(--muted)}
 
 /* ---------- 自訂外框：拖邊緣調整大小的把手（原生外框時整組藏起來） ---------- */

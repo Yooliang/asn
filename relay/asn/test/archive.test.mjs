@@ -9,6 +9,7 @@ import { rosterGroups } from '../ui/lib/mobile.mjs'
 
 const read = p => fs.readFileSync(new URL(`../${p}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const PID = 'p_0123456789abcdef0123'
+const FIXED = ['info', 'rename', 'model', 'close', 'handover', 'resume', 'restart', 'archive']   // 選單固定項目與順序
 const F = (node, agent, o = {}) => ({ id: `${node}/${agent}`, node, agent, nick: agent, device: '家用機', status: 'online', engine: 'claude', ...o })
 
 test('名單轉換：後台的 archived 旗標變成 friend.archived；沒帶（舊後台）＝沒封存；離線成員也一樣', () => {
@@ -50,13 +51,15 @@ test('收合：已封存群組預設收合，其他預設展開；使用者展�
 test('選單：能管理的視窗最後一項是「封存」（已封存的是「取消封存」）；離線也有；不需要電腦在線或開放；人、手機、收發室沒有', () => {
   const ctx = { machines: { H: { online: true, launcher: null } }, loaded: true, signedIn: true }
   const on = manageItems(F('H', '小文'), ctx)
-  assert.deepEqual(on.map(i => i.key), ['info', 'rename', 'model', 'close', 'handover', 'archive'])
+  assert.deepEqual(on.map(i => i.key), FIXED)
   assert.equal(on.at(-1).label, '封存')
   const off = manageItems(F('H', '小離', { status: 'offline' }), { ...ctx, machines: {} })
-  assert.deepEqual(off.map(i => i.key), ['resume', 'archive'])
+  assert.deepEqual(off.map(i => i.key), FIXED, '離線也是同一套項目')
+  assert.deepEqual(off.filter(i => i.ok).map(i => i.key), ['archive'], '電腦不在線：喚醒反灰，封存仍可用')
   assert.equal(off.at(-1).ok, true, '電腦不在線也能封存')
   const codex = manageItems(F('H', '小碼', { status: 'offline', engine: 'codex' }), ctx)
-  assert.deepEqual(codex.map(i => i.key), ['archive'], '不能喚醒的離線夥伴也能封存')
+  assert.deepEqual(codex.map(i => i.key), FIXED)
+  assert.deepEqual(codex.filter(i => i.ok).map(i => i.key), ['archive'], '不能喚醒的離線夥伴也能封存')
   const un = manageItems(F('H', '小文', { archived: true }), ctx)
   assert.deepEqual([un.at(-1).key, un.at(-1).label], ['unarchive', '取消封存'])
   assert.deepEqual(manageItems(F('P', '手機'), { ...ctx, nonWindowNodes: ['P'] }), [])
@@ -131,17 +134,24 @@ test('守門：m.js 裡 watch 的來源只能取用「已經定義」的變數�
   assert.ok(lines.some(l => /^\s*watch\(\[\(\) => friends\.value\.length, \(\) => acct\.value\.signed_in\]/.test(l)), '補最後一句話的 watch 還在')
 })
 
-test('選單依引擎：雲端代理只有封存；ACP 工作者是詳情、重開、接班換手加封存；Codex 只有封存；Claude 全部加封存', () => {
+test('選單項目固定：每種 AI 夥伴都是同一套同一個順序，只有「能用的」不同（雲端代理與 Codex 只剩封存可用）', () => {
   const ctx = { machines: { H: { online: true, launcher: { profiles: [] } } }, loaded: true, signedIn: true }
   const keys = f => manageItems(f, ctx).map(i => i.key)
-  assert.deepEqual(keys(F('G', 'Grok', { engine: 'grok', kind: 'grok' })), ['archive'])
-  assert.deepEqual(keys(F('G', 'Grok', { engine: 'cloud', archived: true })), ['unarchive'])
-  assert.deepEqual(keys(F('G', 'Grok', { engine: 'claude', kind: 'cloud-agent' })), ['archive'])
-  assert.deepEqual(keys(F('H', 'Gemini', { engine: 'gemini' })), ['info', 'restart', 'handover', 'archive'])
-  assert.deepEqual(keys(F('H', 'Gemini', { engine: 'agy' })), ['info', 'restart', 'handover', 'archive'])
-  assert.deepEqual(keys(F('H', 'Gemini', { engine: 'gemini', status: 'offline' })), ['archive'], '離線的 ACP 工作者沒有管理項目')
-  assert.deepEqual(keys(F('H', '小碼', { engine: 'codex' })), ['archive'])
-  assert.deepEqual(keys(F('H', '小文')), ['info', 'rename', 'model', 'close', 'handover', 'archive'])
+  const okKeys = f => manageItems(f, ctx).filter(i => i.ok).map(i => i.key)
+  const UNARCH = FIXED.map(k => (k === 'archive' ? 'unarchive' : k))
+  assert.deepEqual(keys(F('G', 'Grok', { engine: 'grok', kind: 'grok' })), FIXED)
+  assert.deepEqual(okKeys(F('G', 'Grok', { engine: 'grok', kind: 'grok' })), ['archive'])
+  assert.deepEqual(keys(F('G', 'Grok', { engine: 'cloud', archived: true })), UNARCH)
+  assert.deepEqual(okKeys(F('G', 'Grok', { engine: 'claude', kind: 'cloud-agent' })), ['archive'])
+  assert.deepEqual(keys(F('H', 'Gemini', { engine: 'gemini' })), FIXED)
+  assert.deepEqual(okKeys(F('H', 'Gemini', { engine: 'gemini' })), ['info', 'handover', 'restart', 'archive'])
+  assert.deepEqual(okKeys(F('H', 'Gemini', { engine: 'agy' })), ['info', 'handover', 'restart', 'archive'])
+  assert.deepEqual(okKeys(F('H', 'Gemini', { engine: 'gemini', status: 'offline' })), ['archive'], '離線的 ACP 工作者只能封存')
+  assert.deepEqual(okKeys(F('H', '小碼', { engine: 'codex' })), ['archive'])
+  assert.deepEqual(keys(F('H', '小文')), FIXED)
+  assert.deepEqual(okKeys(F('H', '小文')), ['info', 'rename', 'model', 'close', 'handover', 'archive'])
+  for (const f of [F('G', 'Grok', { engine: 'grok' }), F('H', 'Gemini', { engine: 'gemini' }), F('H', '小碼', { engine: 'codex' }), F('H', '小文'), F('H', '小離', { status: 'offline' })])
+    for (const i of manageItems(f, ctx)) assert.equal(Boolean(i.reason), !i.ok, `${f.agent} ${i.key}：反灰一定有說明，能用一定沒有`)
   assert.deepEqual(keys(F('P', '手機', { kind: 'phone' })), [], '手機不是 AI 夥伴')
   assert.deepEqual(keys(F('H', '家用收發室', { engine: 'gemini' })), [])
 })

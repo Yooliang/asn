@@ -3,10 +3,10 @@
 // 影響「整個代理」的才放這裡。這裡只放目前已經做好的：顯示／背景（主控台視窗）、切換模型、子代理，以及離線夥伴的「喚醒」。
 // 子代理（#27）已加；權限詢問等功能做好後再加按鈕，沒有功能就不放假按鈕。
 import { AsnDialog } from './dialog.mjs'
-import { canOfferModelSwitch, confirmText, createModelSwitcher } from './model-switch.mjs'
+import { canOfferModelSwitch, confirmText, createModelSwitcher, modelSwitchBlock } from './model-switch.mjs'
 import { SUBAGENT_POLL_MS, canOfferSubagents, subagentView } from './subagents.mjs'
-import { CONSOLE_QUERY_TIMEOUT_MS, consoleToggleLabel, engineForProfile, withTimeout } from './partner-launch-ui.mjs'
-import { initialOpsCtx, menuItems } from './partner-ops.mjs'
+import { BUDDY_CONSOLE_LABEL, CONSOLE_QUERY_TIMEOUT_MS, consoleToggleLabel, engineForProfile, withTimeout } from './partner-launch-ui.mjs'
+import { initialOpsCtx, menuItems, partnerEngine } from './partner-ops.mjs'
 import { manageItems, runArchive } from './archive.mjs'
 import { PartnerOpDialog, loadOpsContext } from './partner-ops-ui.mjs'
 import { canInviteFrom } from './groups.mjs'
@@ -25,9 +25,17 @@ export function sameFriend(a, b) {
 
 /** 能不能切換主控台視窗：只有本機、非雲端代理、已經開起來的視窗。 */
 export function canOfferConsole(friend, selfNode) {
-  if (!friend || friend.pending || friend.room === true) return false
-  if (friend.engine === 'acp') return false
-  return friend.node === selfNode
+  return !consoleBlock(friend, selfNode)
+}
+
+/** 「背景／前台切換」在查詢之前就已經知道不能用的原因（能用回空字串）；判斷與 canOfferConsole 完全相同。 */
+export function consoleBlock(friend, selfNode) {
+  if (!friend) return '沒有選到夥伴'
+  if (friend.room === true) return '群組沒有視窗可以切換'
+  if (friend.pending) return '這個視窗還在開啟中，開好後才能切換前景或背景'
+  if (friend.engine === 'acp') return '這個夥伴是 ASN 在背景執行的工作者，沒有視窗可以切換'
+  if (friend.node !== selfNode) return '這個視窗在另一台電腦上，只能在那台電腦的 ASN 切換前景或背景'
+  return ''
 }
 
 /** 通話按鈕：夥伴要在線（離線的話信只會留在收發室，通話等不到回覆），而且這個環境有語音功能。 */
@@ -41,7 +49,7 @@ export function canOfferCall(friend, { hasVoice = true } = {}) {
  * 有登入、電腦在線且開放遠端管理；不能按就反灰，原因寫在提示裡。回 { show, ok, reason }。
  */
 export function wakeButtonView(friend, ctx = {}) {
-  if (!friend || friend.pending || friend.room === true || friend.status !== 'offline') return { show: false, ok: false, reason: '' }
+  if (!friend || friend.pending || friend.room === true || friend.status !== 'offline' || partnerEngine(friend) !== 'claude') return { show: false, ok: false, reason: '' }
   const it = menuItems(friend, ctx).find(i => i.key === 'resume')
   return it ? { show: true, ok: it.ok, reason: it.reason } : { show: false, ok: false, reason: '' }
 }
@@ -65,9 +73,17 @@ export function opsMenuItems(friend) {
  * ＋分隔線＋邀請等（opsMenuItems）。切換模型、喚醒在大按鈕區已有自己的按鈕，這裡不重複。
  * 夥伴項目的 key 加「p:」前綴，避免和邀請等項目撞名；第一個邀請項目帶 sep:true（前面有夥伴項目時才畫分隔線）。
  */
-export function managePanelItems(friend, ctx = {}, extra = []) {
-  const partner = manageItems(friend, ctx).filter(i => i.key !== 'model' && i.key !== 'resume')
-    .map(i => ({ key: `p:${i.key}`, label: `${i.label}${['close', 'archive', 'unarchive'].includes(i.key) ? '' : '…'}`, ok: i.ok, reason: i.reason }))
+export function managePanelItems(friend, ctx = {}, extra = [], local = {}) {
+  const all = manageItems(friend, ctx)
+  // 項目固定（和名單右鍵、手機同一套同一個順序）：最前面「背景／前台切換」，接著 manageItems 的全部項目；用不到的反灰並附原因。
+  // 切換模型、背景／前台切換要問這個視窗自己（local.model／local.console＝{ ok, reason }），其餘照 manageItems
+  const partner = all.length ? [
+    { key: 'p:console', label: BUDDY_CONSOLE_LABEL, ok: local.console?.ok === true, reason: local.console?.ok === true ? '' : (local.console?.reason || '找不到這個夥伴的主控台視窗') },
+    ...all.map(i => {
+      const o = i.key === 'model' && local.model ? local.model : i
+      return { key: `p:${i.key}`, label: `${i.label}${['close', 'archive', 'unarchive', 'resume', 'model'].includes(i.key) ? '' : '…'}`, ok: o.ok, reason: o.ok ? '' : o.reason }
+    }),
+  ] : []
   const rest = extra.map((i, n) => ({ ...i, ok: true, reason: '', sep: n === 0 && partner.length > 0 }))
   return [...partner, ...rest]
 }
@@ -97,7 +113,8 @@ export const OpsMenuButton = {
       Object.assign(pos, { x: p.x, y: p.y, ready: true })
     }
     function toggle() { open.value = !open.value; pos.ready = false; if (open.value) void place() }
-    function pick(it) { open.value = false; emit('pick', it.key) }
+    // 不能用的項目只是「看起來反灰」還不夠：點了不送出任何動作（選單也不收起，使用者可以接著讀說明）
+    function pick(it) { if (it.ok === false) return; open.value = false; emit('pick', it.key) }
     const onDoc = e => { if (open.value && !btn.value?.contains(e.target) && !pop.value?.contains(e.target)) open.value = false }
     const onKey = e => { if (e.key === 'Escape') open.value = false }
     onMounted(() => { document.addEventListener('mousedown', onDoc, true); window.addEventListener('keydown', onKey); window.addEventListener('resize', place) })
@@ -111,7 +128,7 @@ export const OpsMenuButton = {
   </button>
   <teleport to="body">
     <ul class="ab-menu ab-ops" v-if="open" ref="pop" role="menu" :style="{ left: pos.x + 'px', top: pos.y + 'px', visibility: pos.ready ? 'visible' : 'hidden' }">
-      <template v-for="it in items" :key="it.key"><li class="ab-sep" v-if="it.sep" role="separator"></li><li><button type="button" role="menuitem" :disabled="it.ok === false" :title="it.ok === false ? it.reason : ''" @click="pick(it)">{{ it.label }}</button></li></template>
+      <template v-for="it in items" :key="it.key"><li class="ab-sep" v-if="it.sep" role="separator"></li><li><button type="button" role="menuitem" :class="{ off: it.ok === false }" :aria-disabled="it.ok === false ? 'true' : 'false'" :aria-describedby="it.ok === false ? 'ops-why-' + it.key : null" :title="it.ok === false ? it.reason : ''" @click="pick(it)"><span class="mi-t">{{ it.label }}</span><small class="menu-why" v-if="it.ok === false" :id="'ops-why-' + it.key">{{ it.reason }}</small></button></li></template>
     </ul>
   </teleport>
 </div>`,
@@ -131,7 +148,7 @@ export const ActionBar = {
   emits: ['call', 'ops'],
   setup(props, { emit }) {
     const { ref, computed, reactive, watch, onMounted, onBeforeUnmount } = globalThis.Vue
-    const cons = reactive({ state: 'none', visible: true, busy: false })   // state：none／toggle
+    const cons = reactive({ state: 'none', visible: true, busy: false, reason: '' })   // state：none／checking／toggle
     const model = reactive({ open: false, state: 'none', reason: '', current: '', items: [], st: null })
     const subs = reactive({ open: false, q: null })
     const dlg = reactive({ open: false, target: null, busy: false, error: '', manual: '', done: '', copied: false })
@@ -148,7 +165,16 @@ export const ActionBar = {
     const subView = computed(() => subagentView(subs.q))
     const showCall = computed(() => canOfferCall(props.friend, { hasVoice: props.callable }))
     const wake = computed(() => (props.api && !isRoom.value ? wakeButtonView(props.friend, opsCtx) : { show: false, ok: false, reason: '' }))
-    const opsAll = computed(() => (props.api && !isRoom.value ? managePanelItems(props.friend, opsCtx, props.ops) : props.ops.map(i => ({ ...i, ok: true, reason: '' }))))
+    // 「背景／前台切換」「切換模型」不能用的原因：還沒查到就說檢查中，查到切不了用查到的原因，查之前就知道的用 consoleBlock／modelSwitchBlock
+    const localPanel = computed(() => {
+      const f = props.friend
+      const consoleWhy = consoleBlock(f, props.selfNode) || (cons.state === 'toggle' ? '' : cons.state === 'checking' ? '檢查中…' : cons.reason || '找不到這個夥伴的主控台視窗')
+      return {
+        console: { ok: !consoleWhy && cons.state === 'toggle' && Boolean(props.api), reason: consoleWhy || (props.api ? '' : '這個畫面不能切換視窗') },
+        model: { ok: showModel.value, reason: modelSwitchBlock(f, { selfNode: props.selfNode, engine: engine.value }) || (props.api ? '' : '這個畫面不能切換模型') },
+      }
+    })
+    const opsAll = computed(() => (props.api && !isRoom.value ? managePanelItems(props.friend, opsCtx, props.ops, localPanel.value) : props.ops.map(i => ({ ...i, ok: true, reason: '' }))))
     const show = computed(() => showCall.value || showConsole.value || showModel.value || showSubs.value || wake.value.show || opsAll.value.length > 0)
     const consoleView = computed(() => consoleButtonView(cons.visible))
     const switcher = computed(() => (props.api ? createModelSwitcher({ transport: props.api, log: m => console.info('[ASN]', m) }) : null))
@@ -157,9 +183,10 @@ export const ActionBar = {
     async function loadConsole() {
       const f = props.friend
       if (!props.api || !canOfferConsole(f, props.selfNode)) { cons.state = 'none'; return }
+      cons.state = 'checking'; cons.reason = ''
       const q = await withTimeout(props.api.partnerConsoleQuery({ engine: engine.value, name: name.value }), CONSOLE_QUERY_TIMEOUT_MS)
       if (!sameFriend(props.friend, f)) return
-      if (q?.can_toggle ?? q?.canToggle) { cons.state = 'toggle'; cons.visible = Boolean(q.visible) } else cons.state = 'none'
+      if (q?.can_toggle ?? q?.canToggle) { cons.state = 'toggle'; cons.visible = Boolean(q.visible) } else { cons.state = 'none'; cons.reason = String(q?.reason || '') }
     }
     async function toggleConsole() {
       if (cons.busy || cons.state !== 'toggle') return
@@ -196,9 +223,11 @@ export const ActionBar = {
     let noteTimer = null
     async function pickOps(key) {
       if (!key.startsWith('p:')) { emit('ops', key); return }
-      const it = managePanelItems(props.friend, opsCtx).find(i => i.key === key)
-      if (!it?.ok) return
+      const it = opsAll.value.find(i => i.key === key)
+      if (!it?.ok) return   // 反灰的項目：點了什麼都不做
       const op = key.slice(2)
+      if (op === 'console') { void toggleConsole(); return }
+      if (op === 'model') { void toggleModelMenu(); return }
       if (op === 'archive' || op === 'unarchive') {
         const r = await runArchive(props.api, props.friend, op === 'archive')
         archiveNote.value = r.text
