@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { ROOM_FIRST_LOAD, ROOM_KEEP, ROOM_BODY_MAX, isRoomChat, memberIdentity, mergeRoomLog, needsRead, postError, readSince, roomChatId, roomErrorText, roomIdOf, roomItems, roomLog, roomPseudoFriend, roomUnread, totalUnreadWithRooms } from '../ui/lib/mobile-rooms.mjs'
 
-const R = (id, name, over = {}) => ({ id, name, last_seq: 10, last_at: '2026-10-20T10:00:00Z', last_body: '大家好\n再說一次', last_from_name: '小文', mine: [{ member: 'P', unread: 2 }], members: [{}, {}, {}], ...over })
+const R = (id, name, over = {}) => ({ id, name, last_seq: 10, last_at: '2026-10-20T10:00:00Z', last_body: '大家好\n再說一次', last_from_name: '小文', mine: [{ member: '~u:P', unread: 2 }], members: [{}, {}, {}], ...over })
 
 test('對話代號：room: 前綴來回；一般夥伴 id 不是群組', () => {
   assert.equal(roomChatId('abc'), 'room:abc')
@@ -20,11 +20,12 @@ test('群組列：最近有動靜的在前、人數、最後一句壓成一行�
   assert.deepEqual(roomItems([R('a', '英雄傳說'), R('b', '正見')], { query: ' 正 ' }).map(r => r.id), ['b'])
   assert.equal(roomItems([R('a', '')])[0].name, '未命名的群組')
   assert.deepEqual(roomItems(null), [])
-  assert.equal(roomUnread(R('x', 'x', { mine: [{ unread: 1 }, { unread: 4 }, { unread: -3 }, {}] })), 5)
+  // 只算真人身分（成員鍵 ~ 開頭）的未讀；我名下 AI 視窗各自的未讀不算進徽章（它們要等橋去讀才清，會讓數字卡住）
+  assert.equal(roomUnread(R('x', 'x', { mine: [{ member: '~u:a', unread: 1 }, { member: '~owner', unread: 4 }, { member: '~u:b', unread: -3 }, { member: 'H~asn-2', unread: 9 }, { unread: 7 }, {}] })), 5)
 })
 
 test('總未讀：夥伴的加上群組的', () => {
-  assert.equal(totalUnreadWithRooms(3, [R('a', 'a'), R('b', 'b', { mine: [{ member: 'P', unread: 5 }] })]), 10)
+  assert.equal(totalUnreadWithRooms(3, [R('a', 'a'), R('b', 'b', { mine: [{ member: '~u:P', unread: 5 }] })]), 10)
   assert.equal(totalUnreadWithRooms(0, []), 0)
   assert.equal(totalUnreadWithRooms(undefined, null), 0)
 })

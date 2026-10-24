@@ -22,7 +22,8 @@ import { KIND_BADGE, kindOf, safeLabel, speakerAvatarSeed, speakerLabels } from 
 const oneLine = (s, n) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n)
 const memberList = r => (Array.isArray(r?.mine) ? r.mine : [])
 // 這個群組裡「我」的未讀（我的各個成員身分加總）
-export const roomUnread = r => memberList(r).reduce((n, m) => n + (Number.isInteger(m?.unread) && m.unread > 0 ? m.unread : 0), 0)
+// 只算「我本人」的未讀（成員鍵以 ~ 開頭＝真人身分：~u:<帳號>、~owner）。我名下 AI 視窗各自的未讀要等它們的橋去讀才會清，不能算進我的徽章，否則數字會一直卡住
+export const roomUnread = r => memberList(r).reduce((n, m) => n + (typeof m?.member === 'string' && m.member.startsWith('~') && Number.isInteger(m?.unread) && m.unread > 0 ? m.unread : 0), 0)
 
 // 名單上的群組列：最近有動靜的在前；搜尋字比對群組名
 export function roomItems(rooms, { query = '', plainText = s => s } = {}) {
