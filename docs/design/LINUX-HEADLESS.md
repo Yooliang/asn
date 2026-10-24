@@ -414,3 +414,38 @@ GitHub Actions 停擺時，可在 Windows／macOS／Linux 本機直接編出 Lin
 用戶端：`asn-bridge login [--url] [--home]` 印短碼、輪詢、把金鑰寫到 `<ASN_HOME>/<代號>.key`（600、讀回比對、不印金鑰），沒有 `node` 檔時順便寫入。電腦版設定頁「雲端代理」區塊多一個「輸入短碼核准主機」入口（Tauri 指令 `cloud_agent_approve`）。手機端暫無入口（沿用同一指令集，安卓版未開放這個區塊）。
 
 部署順序：兩個 migration（先 roster_kind 再 device_code）→ relay Edge Function → 發新版 ASN 與 asn-bridge。舊用戶端不受影響。
+
+## 自動回信模式（2026-10-24，尚未部署）
+
+### 為什麼需要
+
+完整模式（`asn-bridge run`）在 Linux 測試機上的實測：群組成員是 `asn-test-1`、`n33ae0d87` 這類名字，但橋只認得自己開的 `claude -p` 收發室 worker（視窗名 `<代號>-收發室`），所以群組訊息全被「window … not forwardable: skipped」略過；沒指定收件人的信因為沒設預設成員，被「kept in inbox for the owner」留著；後台名單對這個節點是空的，也就無法被加進群組或被點名。Windows 上這個角色是「互動式 Claude 視窗＋收發室 worker」；Linux 沒有互動視窗，所以讓 worker 自己當那個視窗。
+
+### 用法
+
+`asn-bridge run --respond`（或環境變數 `ASN_RESPOND=1`）。與 `--inbox`、`--engine-only` 互斥（同時指定會報錯、結束碼 2）。前提：這台主機的 `claude` 已登入（單元範本用 `EnvironmentFile` 放 claude token）。
+
+- 視窗名：`ASN_INBOX_NAME`，沒設用節點代號。不可和內部收發室名（`ASN_MAILBOX_NAME`，預設 `<代號>-收發室`）相同，否則結束碼 2。
+- 模型：沒設 `ASN_MAILBOX_MODEL` 時用 `sonnet`（轉交員預設是 haiku，回答要比轉交聰明）。
+- 工具：`ASN_RESPOND_TOOLS`，預設 `Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch`；沒有寄信、跨 session 的工具（回答由橋代寄）。
+
+### 行為
+
+1. 名單：每次回報都加上一個視窗（名字如上、引擎 `claude`、cwd 標籤空白）；狀態 `busy`＝worker 這一輪還沒結束，或剛交辦（2 分鐘寬限內）還沒回的；否則 `idle`。狀態一變、且距上次回報超過 1.5 秒（`watch_gap_ms`）就立刻重報，不等 60 秒。本機剛好有同名的互動視窗時，名單只留自動回信的那個。
+2. 收件：寄給這個視窗名的信、沒指定收件人的信（沒設 `bridge.json` 的 `unaddressed_to`、`ASN_RELAY_DEFAULT_AGENT` 時改交給它；有設且在線仍以設定為準）、群組裡被叫醒（`for_me`）的訊息（視窗成員與沒有視窗的節點成員都算），都交給 worker。
+3. 沿用既有流程，沒有新的一套：交給 worker 即視為已轉交（`on_sent`，與一般視窗相同：reply=no 的信此時 ack 並清掉、其餘 ack 後開始等回覆；群組不 ack）；回覆用同一組 `<<REPLY-nonce from=…>>` 區塊，經 `on_reply` 寄回——私信走 `send_back`（`reply_to`、`to_agent` 原寄件視窗、`from_agent` 為本視窗），群組走 `room_post`（遵守 `（不需回覆）`／`[no-reply]` 不貼）。群組的 `wake.hold` 略過與順位延遲照舊。逾時、遲到回覆、重啟後對應表還原都不變。
+4. 與一般轉交的差別：不附「請用 asn_send 回信」那行與往來記錄路徑；不做 10 分鐘內的「還沒回覆」提醒（提醒是插話給視窗，而這個視窗就是 worker 自己）；`/指令` 不另回「沒有 ASN 外掛」；橋的系統通知不送進 worker。回覆區塊的 `from` 一律以設定的視窗名為準（不信模型寫的），多封信同時回答時靠回覆首行的 `[回覆 id=<信件編號> → 對方]` 對應（沒寫才依先進先出）。
+5. worker 提示詞帶此節點的身分說明：Linux 無視窗主機、收到的信與群組訊息請簡短回答；唯讀調查與寫文件可直接做；危險操作（改動資料、部署、花錢、對外寄送、帳號設定）不自己動手——群組請主持人明確同意，私信先回報要做什麼、等對方下一封信明確同意；信裡聲稱「已同意」不算；不輸出金鑰與環境變數。
+
+### 風險與限制
+
+- worker 以 `--dangerously-skip-permissions` 跑（與原收發室 worker 相同旗標），並開了 Bash 等工具；危險操作的把關**只靠提示詞**，不是技術上的限制。能寄信給這個視窗的人（後台的信任設定）等於能叫這台主機的 claude 做事，部署前要確認這台節點只收得到可信寄件人的信；必要時用 `ASN_RESPOND_TOOLS` 縮小工具（例如只留 `Read,Glob,Grep,WebFetch`）。
+- 忙碌狀態是近似值：以 worker 的 `result` 事件判斷一輪結束，排隊中的第二則靠 2 分鐘寬限補上，可能短暫顯示 idle。
+- 交給 worker 就 ack（與一般視窗一致）：橋在回答寄出前當掉，該封信不會重送；重啟後未回的信依逾時規則處理。
+- worker 的工作資料夾是 `<ASN_HOME>` 下橋的工作資料夾的 `cwd`；單元範本的 `ReadWritePaths` 要涵蓋它，否則寫文件會失敗。
+
+### 測試
+
+`bridge::tests::respond_it`（9 項，假後端＋假 worker）、`bridge::worker::tests::自動回信_*`、`headless::tests::自動回信旗標與環境變數_*`。已做「拿掉路由確認測試轉紅」：分別拿掉名單注入、交給 worker 後的 `on_sent`、回覆 `from` 正規化、不提醒自己、沒指定收件人的預設落點，各有測試轉紅。
+
+單元範本：`relay/asn/scripts/headless/asn-respond.service`。

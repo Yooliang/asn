@@ -1,0 +1,46 @@
+# ASN 自動回信模式單元範本（沒有互動視窗的 Linux 主機：內建 claude -p 自己當一個可收信的視窗，收到的信與群組訊息由它回答並寄回；
+# 說明見 docs/design/LINUX-HEADLESS.md「自動回信模式」）。
+# 使用方式：複製成 /etc/systemd/system/asn-respond.service，把下面三個 <佔位> 換成實際值，再 daemon-reload、enable --now。
+#   <USER>      跑代理的 Linux 帳號（該帳號已安裝並登入 claude）
+#   <HOME>      該帳號的家目錄（ASN 資料夾放 <HOME>/.asn；claude 的設定放 <HOME>/.claude）
+#   <NODE_ID>   這台主機的節點代號
+# 金鑰與 token 不寫在單元裡：
+#   - ASN 節點金鑰放 <HOME>/.asn/<NODE_ID>.key（權限 600，資料夾 700），或在 EnvironmentFile 內設 ASN_RELAY_KEY。
+#   - claude 的登入 token（例如 CLAUDE_CODE_OAUTH_TOKEN）放 EnvironmentFile=/etc/asn/respond.env（權限 600、只有 root 讀得到；本檔不收任何祕密）。
+# 與 asn-inbox.service 互斥（同一個節點只能有一個收信者）；不要同時啟用。
+# 安全提醒：worker 會用 Bash 等工具替寄件人做事（危險操作只靠提示詞把關）。只讓可信寄件人能寄到這個節點；
+# 想縮小能力就取消下面 ASN_RESPOND_TOOLS 的註解，改成較少的工具。
+[Unit]
+Description=ASN 自動回信模式（節點 <NODE_ID>）
+After=network-online.target
+Wants=network-online.target
+Conflicts=asn-inbox.service
+
+[Service]
+Type=simple
+User=<USER>
+Environment=ASN_HOME=<HOME>/.asn
+Environment=ASN_RELAY_ID=<NODE_ID>
+Environment=HOME=<HOME>
+# 名單上的視窗名（預設用節點代號）；群組成員與來信指的收件視窗就是這個名字。不可和 <NODE_ID>-收發室 相同
+#Environment=ASN_INBOX_NAME=<NODE_ID>
+# 回答用的模型（預設 sonnet）
+#Environment=ASN_MAILBOX_MODEL=sonnet
+# 開放的工具（預設 Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch）
+#Environment=ASN_RESPOND_TOOLS=Read,Glob,Grep,WebFetch
+# 祕密（claude token、必要時 ASN_RELAY_KEY）放這個檔，不放在單元裡
+EnvironmentFile=/etc/asn/respond.env
+ExecStart=/usr/local/bin/asn-bridge run --respond
+Restart=on-failure
+RestartSec=15
+# 撞到另一個收信者（結束碼 3）、設定錯誤（結束碼 2，例如找不到金鑰、視窗名撞名）不要一直重啟
+RestartPreventExitStatus=3 2
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+# claude 要寫 ~/.claude（工作階段、紀錄），橋要寫 ~/.asn（含 worker 的工作資料夾，寫文件也在這裡）
+ReadWritePaths=<HOME>/.asn <HOME>/.claude
+
+[Install]
+WantedBy=multi-user.target

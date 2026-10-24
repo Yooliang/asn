@@ -135,6 +135,11 @@ pub fn start_with(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>, laun
         work_dir: cfg.work_dir.clone(),
         nonce: nonce.clone(),
         extra_env: cfg.extra_env.clone(),
+        respond: cfg.respond.as_ref().map(|name| worker::RespondSpec {
+            name: name.clone(),
+            node: cfg.node.clone(),
+            tools: crate::envc::get("ASN_RESPOND_TOOLS").map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| worker::RESPOND_TOOLS_DEFAULT.to_string()),
+        }),
     };
     let wlog = log.clone();
     // 只有引擎（無視窗橋）：不啟動 claude -p 收發室 worker；核心拿到不會做事的空殼，通道的送端不留，等於永遠沒有 worker 輸出
@@ -147,6 +152,9 @@ pub fn start_with(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>, laun
         (Some(w), sink, lines)
     };
     log.line(&format!("bridge starting node={} mailbox={} (ASN built-in)", cfg.node, cfg.mailbox_name));
+    if let Some(n) = &cfg.respond {
+        log.line(&format!("auto-reply mode: the mailbox worker answers as window {n}"));
+    }
     let alive: Arc<dyn Fn(u32) -> bool + Send + Sync> = Arc::new(crate::heartbeat::pid_alive);
     let wake = Arc::new(Notify::new());
     let shutdown = Arc::new(Notify::new());

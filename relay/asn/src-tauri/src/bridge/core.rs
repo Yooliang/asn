@@ -84,6 +84,9 @@ pub struct Config {
     pub engine_refresh_ms: u64,
     /// 「只有引擎」模式（無視窗橋）：不啟動 `claude -p` 收發室 worker；沒指定收件人的信交給預設成員（default_agent／bridge.json 的 unaddressed_to）
     pub engine_only: bool,
+    /// 自動回信模式（Linux 無視窗主機）：收發室 worker 自己當一個對外可收信的視窗，值＝這個視窗的名字。
+    /// 寄給它的信、沒指定收件人的信、群組裡被叫醒的訊息都交給 worker 回答並寄回；名單上以 claude 引擎、idle／busy 狀態回報
+    pub respond: Option<String>,
 }
 
 impl Config {
@@ -129,6 +132,7 @@ impl Config {
             home: if cfg!(test) { work_dir_home } else { home },
             engine_refresh_ms: env_u64("ASN_ROSTER_MS", 60_000),
             engine_only: false,
+            respond: None,
         }
     }
 }
@@ -243,7 +247,14 @@ pub struct Core {
     /// 上次回報名單時本機 Claude 視窗的指紋與時間（即時監看用）
     roster_fp: Option<String>,
     roster_at: u64,
+    /// 自動回信模式：已交給 worker、這一輪還沒看到它回報結果（名單 busy 的依據之一）
+    respond_open: bool,
+    /// 自動回信模式：上次回報名單時自己視窗的狀態（變了就立刻重報）
+    respond_sent: String,
 }
+
+/// 自動回信模式：交辦後這段時間內，就算 worker 這一輪的結果已回來，仍視為忙碌（它可能正接著處理排隊中的下一則）
+const RESPOND_BUSY_GRACE_MS: u64 = 120_000;
 
 /// JSON 數字（整數、浮點或數字字串）→ u64；不是數字回 0
 fn json_u64(v: Option<&Value>) -> u64 {
@@ -278,7 +289,7 @@ impl Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
-            partners: BTreeMap::new(), partner_off: false, partner_warned: false,
+            partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, respond_sent: String::new(),
         };
         c.restore();
         c
@@ -381,6 +392,16 @@ impl Core {
     fn agent_of(&self, name: &str) -> Option<&Window> {
         self.roster.iter().find(|w| w.name == name)
     }
+    /// 自動回信模式下，這個名字就是 worker 自己扮的視窗
+    fn is_respond(&self, name: &str) -> bool {
+        self.cfg.respond.as_deref() == Some(name)
+    }
+    /// 自動回信視窗現在的狀態：worker 這一輪還沒結束，或剛交辦（寬限期內）還沒回的＝busy，否則 idle
+    fn respond_status(&self) -> &'static str {
+        let Some(me) = self.cfg.respond.as_deref() else { return "idle" };
+        let recent = self.pending.iter().any(|p| p.target == me && !p.replied && matches!(p.state, State::Forwarding | State::Waiting) && self.now.saturating_sub(p.t.max(p.t0)) < RESPOND_BUSY_GRACE_MS);
+        if recent || self.respond_open { "busy" } else { "idle" }
+    }
     fn is_mailbox_sender(from_agent: &str) -> bool {
         from_agent.ends_with("收發室")
     }
@@ -467,7 +488,7 @@ impl Core {
         let claude = roster::read_sessions(&self.cfg.sessions_dir, |p| alive(p), self.sink.pid(), &self.cfg.mailbox_name);
         let engine_ok = self.engines.as_ref().map(|e| e.has_result()).unwrap_or(false);
         // Claude 讀不到、其他引擎也還沒有任何結果：名單不動（和以前一樣）
-        if claude.is_none() && !engine_ok {
+        if claude.is_none() && !engine_ok && self.cfg.respond.is_none() {
             return;
         }
         if let Some(mut l) = claude {
@@ -481,6 +502,14 @@ impl Core {
         let mut list = self.claude_roster.clone();
         if let Some(e) = &self.engines {
             list.extend(e.windows().into_iter().filter(|w| w.name != self.cfg.mailbox_name));
+        }
+        // 自動回信：worker 自己當一個可收信的視窗（同名的別的視窗讓位，一個名字只能對應一個收件者）
+        if let Some(me) = self.cfg.respond.clone() {
+            list.retain(|w| w.name != me);
+            let st = self.respond_status();
+            list.insert(0, Window::claude(&me, Some(st.into()), "", 0, now, None));
+            self.respond_sent = st.to_string();
+            self.roster_at = now;
         }
         self.roster = list;
         self.roster_ok = true;
@@ -636,6 +665,9 @@ impl Core {
         let set = self.cfg.data_dir.as_ref().map(|d| super::read_settings(d).unaddressed_to).unwrap_or_default();
         let mut name = if set.trim().is_empty() { self.cfg.default_agent.trim().to_string() } else { set.trim().to_string() };
         if name.is_empty() {
+            name = self.cfg.respond.clone().unwrap_or_default(); // 自動回信模式：沒設預設成員就是自己
+        }
+        if name.is_empty() {
             name = self.engines.as_ref().and_then(|e| e.default_window()).unwrap_or_default(); // 引擎自己的預設成員（Aegis）
         }
         (!name.is_empty() && self.online_names().contains(name.as_str()) && !self.relay.active_names().contains(&name)).then_some(name)
@@ -662,7 +694,7 @@ impl Core {
 
     /// 信件最後多一行「往來記錄在哪」。ACP 背景工作者只能讀自己的工作資料夾，讀不到那個檔，所以不附
     fn with_path_line(&self, text: String, target: &str) -> String {
-        if matches!(self.engine_of(target).as_str(), "acp" | "aegis") {
+        if self.is_respond(target) || matches!(self.engine_of(target).as_str(), "acp" | "aegis") {
             return text;
         }
         format!("{text}\n{}", self.corr.path_line(target))
@@ -675,6 +707,12 @@ impl Core {
                 Some(e) => e.deliver(&eng, id, to, text),
                 None => Err(format!("沒有載入「{eng}」引擎")),
             };
+        }
+        if self.is_respond(to) {
+            // worker 自己回答，不會回 SENT：不登記追蹤，交出去就算已轉交（各呼叫處接著呼叫 on_sent）
+            let r = self.sink.say(forward_text(&self.parser.nonce, id, to, text));
+            self.respond_open = self.respond_open || r.is_ok();
+            return r;
         }
         self.parser.register(id, to);
         self.sink.say(forward_text(&self.parser.nonce, id, to, text))
@@ -781,15 +819,20 @@ impl Core {
         self.persist();
         // 照片／檔案：內文後面多一行「〔照片〕檔名＋下載指令」，和內文一起在外部資料區塊內
         let body = attach::notes_for(&mail::escape_body(&m.body), &m.attachments, self.cfg.attach_cmd.as_deref());
-        let text = format!("{}\n{}{}{}", mail_head(&m, &self.engine_label_of(&target)), mail::preamble(&m, &self.engine_of(&target)),if note.is_empty() { String::new() } else { format!("{note}\n") }, body);
+        // 自動回信的 worker 由橋代寄回答：不附「請用 asn_send 回信」那行
+        let pre_engine = if self.is_respond(&target) { "respond".to_string() } else { self.engine_of(&target) };
+        let text = format!("{}\n{}{}{}", mail_head(&m, &self.engine_label_of(&target)), mail::preamble(&m, &pre_engine),if note.is_empty() { String::new() } else { format!("{note}\n") }, body);
         let text = self.with_path_line(text, &target);
         match self.deliver(&m.id, &target, &text) {
             Ok(_) => {
                 self.log.line(&format!("handed id={} from={}/{} to={target}", m.id, m.from_node, from_agent));
                 let names: Vec<String> = m.attachments.iter().map(|a| a.name.clone()).collect();
                 self.corr_note(&target, Dir::Received, &Self::node_agent(&m.from_node, &from_agent), &target, &m.id, &m.body, &names);
-                if no_mod_notice {
+                if no_mod_notice && !self.is_respond(&target) {
                     self.send_back(&origin, NO_MOD_NOTICE, None, Some(false)).await;
+                }
+                if self.is_respond(&target) {
+                    self.on_sent(&m.id).await; // 交給自己的 worker＝已轉交：沿用既有的 ack／等回覆／逾時流程
                 }
             }
             Err(e) => {
@@ -822,18 +865,28 @@ impl Core {
     pub async fn on_worker_line(&mut self, l: WorkerLine, now: u64) {
         self.now = now;
         match l {
-            WorkerLine::Started(_) => self.parser.reset_process(),
-            WorkerLine::Exited(_) => {}
+            WorkerLine::Started(_) => {
+                self.parser.reset_process();
+                self.respond_open = false; // worker 重啟：舊的一輪不會再有結果了
+            }
+            WorkerLine::Exited(_) => self.respond_open = false,
             WorkerLine::Line(line) => {
                 let r = self.parser.feed(&line);
                 for l in &r.logs {
                     self.log.line(l);
                 }
+                if r.turn_done {
+                    self.respond_open = false;
+                }
                 for ev in r.events {
                     match ev {
                         WorkerEvent::Sent(id) => self.on_sent(&id).await,
                         WorkerEvent::Fail(id, reason) => self.on_fail(&id, &reason).await,
-                        WorkerEvent::Reply { from, text } => self.on_reply(&from, &text, None).await,
+                        WorkerEvent::Reply { from, text } => {
+                            // 自動回信：worker 只扮一個視窗，名字以設定為準（不信模型寫的 from）
+                            let from = self.cfg.respond.clone().unwrap_or(from);
+                            self.on_reply(&from, &text, None).await
+                        }
                     }
                 }
                 if r.restart {
@@ -951,6 +1004,10 @@ impl Core {
 
     /// 通知信的編號／視窗記一下（TTL 10 分鐘）：視窗若回了這則通知，那則回覆不是給任何人的，丟掉
     fn tell_window(&mut self, name: &str, text: &str) {
+        if self.is_respond(name) {
+            self.log.line(&format!("notice to {name} not delivered: it is the bridge's own auto-reply window"));
+            return;
+        }
         let id = new_uuid();
         let now = self.now;
         self.notice_ids.retain(|_, t| now.saturating_sub(*t) < NOTICE_TTL_MS);
@@ -1270,6 +1327,9 @@ impl Core {
                 let names: Vec<String> = attach::normalize(msg.get("attachments")).iter().map(|a| a.name.clone()).collect();
                 let from = rooms::from_text(msg);
                 self.corr_note(&target, Dir::Received, &format!("群組 {room_name} {from}"), &target, &id, msg.get("body").and_then(Value::as_str).unwrap_or(""), &names);
+                if self.is_respond(&target) {
+                    self.on_sent(&id).await; // 交給自己的 worker＝已轉交，開始等回覆
+                }
                 true
             }
             Err(e) => {
@@ -1395,6 +1455,10 @@ impl Core {
     pub async fn tick(&mut self, now: u64) {
         self.now = now;
         self.release_held(now).await;
+        // 自動回信：自己視窗的忙碌／閒置變了就立刻重報名單（防抖間隔同本機視窗監看）
+        if self.cfg.respond.is_some() && self.respond_status() != self.respond_sent && now.saturating_sub(self.roster_at) >= self.cfg.watch_gap_ms {
+            self.refresh_roster(now).await;
+        }
         let ids: Vec<String> = self.pending.iter().map(|p| p.id.clone()).collect();
         for id in ids {
             let Some(i) = self.idx(&id) else { continue };
@@ -1426,7 +1490,7 @@ impl Core {
                 } else {
                     self.settle_timeout(&id).await;
                 }
-            } else if p.state == State::Waiting && !p.nudged && !p.no_reply && p.room.is_none() && now.saturating_sub(p.t) > self.cfg.nudge_ms && !self.defers_ack(&p.target) {
+            } else if p.state == State::Waiting && !p.nudged && !p.no_reply && p.room.is_none() && now.saturating_sub(p.t) > self.cfg.nudge_ms && !self.defers_ack(&p.target) && !self.is_respond(&p.target) {
                 self.nudge_window(&id).await;
             } else if p.state == State::Notified && now.saturating_sub(p.notified_at.unwrap_or(now)) > self.cfg.late_keep_ms {
                 self.remove(&id);
