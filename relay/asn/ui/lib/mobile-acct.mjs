@@ -7,7 +7,7 @@ import { CLOSE_NOTE } from './device-acct-dialog.mjs'
 import { isFinalStatus, remoteStatusText } from './claude-accounts.mjs'
 
 export const ACCT_TEXT = {
-  button: '切換 Claude 帳號',
+  button: '選項',
   title: label => `切換「${label || '這台設備'}」的 Claude 帳號`,
   empty: '這台電腦還沒有可切換的帳號（請在那台電腦的設定「帳號」頁，按「加入目前登入的帳號」）。',
   needTwo: '這台電腦只有一個帳號，沒有可以換的。',
@@ -20,7 +20,12 @@ export const ACCT_TEXT = {
   later: '先關掉（照常進行）',
 }
 
-// 有「切換 Claude 帳號」按鈕的設備卡：別台電腦（本機與手機不算）。groups 是名單分組，只看 kind 為 device 的
+// 「選項」頁依廠商分區：一區＝廠商小圖＋名稱＋帳號列表＋切換。現在只有 Claude 有遠端切換能力；
+// 以後別家（Gemini、Grok…）有了，在這裡加一筆就多一區。沒有能力的廠商不列，不顯示假區塊。
+export const ACCT_VENDORS = [{ key: 'claude', name: 'Claude' }]
+export const acctVendorSections = (vendors = ACCT_VENDORS) => (Array.isArray(vendors) ? vendors : []).filter(v => v?.key && v?.name)
+
+// 有「選項」按鈕的設備卡：別台電腦（本機與手機不算）。groups 是名單分組，只看 kind 為 device 的
 export function acctButtonDevices(groups, selfNode) {
   return (Array.isArray(groups) ? groups : []).filter(g => g?.kind === 'device' && g.node && g.node !== selfNode
     && !(g.items ?? []).some(f => ['phone', 'mobile', 'android'].includes(String(f?.kind ?? '').toLowerCase())))

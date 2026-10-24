@@ -15,6 +15,8 @@ import { guideNav } from './mobile-guides.mjs'
 // 三個大分頁：夥伴（list）、對話（chats）、設置（me）。
 export const TABS = ['list', 'chats', 'me']
 export const TAB_LABEL = { list: '夥伴', chats: '對話', me: '設置' }
+// 分頁列上的字：進了「選項」頁時，第二個分頁（對話）暫時改叫「選項」，離開就恢復
+export const tabLabel = (t, nav, acctLabel = '選項') => (t === 'chats' && nav?.sheet === 'acct' ? acctLabel : TAB_LABEL[t])
 export const tabIndex = t => Math.max(0, TABS.indexOf(t))
 export const normalizeTab = t => (TABS.includes(t) ? t : 'list')
 export const initialNav = () => ({ tab: 'list', sheet: '' })
@@ -23,7 +25,7 @@ export const meNav = () => tabNav('me')
 export const launchNav = () => ({ tab: 'list', sheet: 'launch' })
 export const opsNav = () => ({ tab: 'chats', sheet: 'ops' })
 export const secretNav = () => ({ tab: 'chats', sheet: 'secret' })
-export const acctNav = () => ({ tab: 'list', sheet: 'acct' })   // 名單設備卡的「切換 Claude 帳號」浮層
+export const acctNav = () => ({ tab: 'chats', sheet: 'acct' })   // 名單設備卡的「選項」進入的滿版頁（切換 Claude 帳號）
 // 瀏覽記錄裡讀回來的狀態可能是任何東西（壞資料、別的頁面留下的）：整理成合法的導覽狀態
 export function normalizeNav(raw) {
   if (raw?.sheet === 'launch') return launchNav()

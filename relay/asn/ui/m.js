@@ -7,7 +7,7 @@ import { avatarSrc, isAvatarDataUrl, removeAvatarUpload, selfAvatarSrc, uploadAv
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { PROVIDERS, canStart, errorText, phaseText } from './lib/login.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
-import { BANNER_MS, DEFAULT_PREFS, TABS, TAB_LABEL, accountDisplayName, SWIPE_BLOCK_SELECTOR, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, buttonLabel, initialNav, opsNav, acctNav, secretNav, initialUpdate, installOutcome, launchNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, vendorBadgeHtml, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
+import { BANNER_MS, DEFAULT_PREFS, TABS, TAB_LABEL, accountDisplayName, SWIPE_BLOCK_SELECTOR, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, buttonLabel, initialNav, opsNav, acctNav, tabLabel as tabLabelOf, secretNav, initialUpdate, installOutcome, launchNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, vendorBadgeHtml, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
 import { LAUNCH_GIVE_UP_MS, LAUNCH_POLL_MS, appearedIn, buildLaunchRequest, initialLaunch, launchChoices, launchDevices, launchEligibility, launchErrorText, launchFormError, machinesByNode, progressView } from './lib/mobile-launch.mjs'
 import { OnboardCard } from './lib/onboard-card.mjs'
 import { MOBILE_PHASE_TEXT, createMobileCall } from './lib/mobile-call.mjs'
@@ -19,7 +19,7 @@ import { friendId } from './lib/roster.mjs'
 import { restoreMobileTab } from './lib/session.mjs'
 import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, showsInSheet } from './lib/mobile-ops.mjs'
 import { OP_LABEL, opFormError, partnerEngine } from './lib/partner-ops.mjs'
-import { ACCT_TEXT, acctButtonDevices, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch } from './lib/mobile-acct.mjs'
+import { ACCT_TEXT, acctButtonDevices, acctVendorSections, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch } from './lib/mobile-acct.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
 import { opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
 import { defaultPartnerName } from './lib/partner.mjs'
@@ -28,6 +28,7 @@ import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
 import { RECENT_GROUP_KEY, RECENT_GROUP_LABEL, recentActivity } from './lib/recent.mjs'
 import { authApi, invoke, listen, store } from './lib/tauri.mjs'
+import { vendorIconSvg } from './lib/vendor-icons.mjs'
 import { ROOM_GROUP_KEY, ROOM_GROUP_LABEL, ROOM_POLL_MS, ROOM_EMPTY_HINT, ROOM_EMPTY_TEXT, ROOM_LOAD_FAIL_TEXT, isRoomChat, roomChatId, roomIdOf, roomPseudoFriend, totalUnreadWithRooms } from './lib/mobile-rooms.mjs'
 import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
@@ -175,7 +176,7 @@ watch([me, prefs, ownerName, lastChat, () => nav.tab], () => { const { nick, ...
 
   core = new AsnCore({
     transport, store: store('chats'), selfNode: info.node, windowName: info.window_name,
-    isChatVisible: async id => document.visibilityState === 'visible' && nav.tab === 'chats' && lastChat.value === id,   // 正在看對話分頁那位才算「看得到」（不算未讀）
+    isChatVisible: async id => document.visibilityState === 'visible' && nav.tab === 'chats' && nav.sheet !== 'acct' && lastChat.value === id,   // 正在看對話分頁那位才算「看得到」（不算未讀）
     aliases: info.old_names, pollMs: info.poll_ms, rosterMs: info.roster_ms,
     log: m => console.info('[ASN]', m),
   })
@@ -185,7 +186,7 @@ watch([me, prefs, ownerName, lastChat, () => nav.tab], () => { const { nick, ...
   core.on('log', id => { pushLog(id); refreshLast(id) })
   core.on('avatars', () => { avatars.value = core.avatarMap() })
   core.on('notify', n => {
-    const plan = notifyPlan(n, { openId: nav.tab === 'chats' ? lastChat.value : '', foreground: document.visibilityState === 'visible', prefs })
+    const plan = notifyPlan(n, { openId: nav.tab === 'chats' && nav.sheet !== 'acct' ? lastChat.value : '', foreground: document.visibilityState === 'visible', prefs })
     if (plan.vibrate) { if (bridge) bridge.vibrate(plan.vibrate); else navigator.vibrate?.(plan.vibrate) }
     if (plan.shake) { shake.value = true; setTimeout(() => { shake.value = false }, 700) }
     if (plan.banner) { banner.value = plan.banner; clearTimeout(bannerTimer); bannerTimer = setTimeout(() => { banner.value = null }, plan.banner.ms ?? BANNER_MS) }
@@ -216,6 +217,11 @@ window.addEventListener('popstate', e => {
 const go = next => { history.pushState(next, ''); Object.assign(nav, next) }
 // 切大分頁：從「夥伴」出去推一筆瀏覽記錄（返回鍵回到夥伴）；其他分頁之間互換不增加記錄
 function goTab(t) {
+  if (nav.sheet === 'acct') {   // 「選項」頁佔著第二個分頁：點夥伴＝返回，點設置＝直接換過去；點自己不動
+    if (t === 'list') history.back()
+    else if (t === 'me') { const n = tabNav('me'); history.replaceState(n, ''); Object.assign(nav, n) }
+    return
+  }
   if (!TABS.includes(t) || t === nav.tab || nav.sheet) return
   if (nav.tab === 'list') go(tabNav(t))
   else if (t === 'list') history.back()
@@ -347,14 +353,16 @@ const app = createApp({
     // 對話分頁正在顯示某位：標已讀、補往來。切到對話分頁、換了最後使用的那位、名單載入完都會跑
     function showLastChat() {
       const id = lastChat.value
+      if (nav.sheet === 'acct') return   // 對話被「選項」頁蓋住，沒有在看，不標已讀
       if (isRoomChat(id)) { if (nav.tab === 'chats') void showRoom(); return }
       if (nav.tab !== 'chats' || !id || !core?.friends.get(id)) return
       core.markRead(id)
       pushLog(id)
       void core.syncHistory(id)   // 向後台補這位夥伴 90 天的往來（以後台為準；失敗就用本機快取）
     }
-    watch([() => nav.tab, lastChat, () => friends.value.length, () => rooms.value.length], showLastChat, { immediate: true })
+    watch([() => nav.tab, () => nav.sheet, lastChat, () => friends.value.length, () => rooms.value.length], showLastChat, { immediate: true })
     const back = () => history.back()
+    const tabLabel = t => tabLabelOf(t, nav, ACCT_TEXT.button)
     const openBanner = () => { const b = banner.value; banner.value = null; if (b) openChat(b.id) }
     // 橫幅上的「接班換手」：開啟那位的對話，直接帶到「接班換手」的確認框（不能換手時停在「⋯」選單，由選單說明原因）
     async function bannerHandover() {
@@ -416,6 +424,7 @@ const app = createApp({
     }
     // ---------- 設備卡「切換 Claude 帳號」：選帳號 → 確認 → 送出並等對方電腦回報 ----------
     const acctKeys = computed(() => new Set(acctButtonDevices(groups.value, info.node).map(g => g.key)))
+    const acctSections = computed(() => acctVendorSections())
     const acctSw = reactive({ phase: 'pick', node: '', label: '', picked: '', remote: { loading: false, asnOnline: false, reportedAt: '', msg: '', list: [] }, view: null })
     const acctView = computed(() => acctSheetView(acctSw.remote, acctSw.picked))
     const acctConfirm = computed(() => acctConfirmText(acctSw.label, acctView.value.currentEmail, acctView.value.pickEmail))
@@ -716,11 +725,11 @@ const app = createApp({
       onboard, onboardApi, finishOnboard, ONBOARD_TEXT, acct, nameDraft, nameErr, commitName, wakeDraft, wakeErr, commitWake, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE,
       screen, fatal, login, loginNote, PROVIDERS, canStart, startLogin, cancelLogin,
       upd, updText: computed(() => bannerText(upd)), updButton: computed(() => buttonLabel(upd)), startUpdate, checkUpdate,
-      pf, sw, pagerStyle, indicator, swipeStart, swipeMove, swipeEnd, goTab, TABS, TAB_LABEL, myName, meForChat, lastOf, vendorIcon: vendorBadgeHtml,
+      pf, sw, pagerStyle, indicator, swipeStart, swipeMove, swipeEnd, goTab, TABS, TAB_LABEL, tabLabel, myName, meForChat, lastOf, vendorIcon: vendorBadgeHtml,
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, headTone, CONN_LABEL, info, banner, shake, refreshing,
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, ops, opsText, opsTitle, opsModels, opsModelNote, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
-      acctSw, acctKeys, acctView, acctConfirm, ACCT_TEXT, openAcct, pickAcct, acctToConfirm, submitAcct,
+      acctSw, acctSections, vendorIconSvg, acctKeys, acctView, acctConfirm, ACCT_TEXT, openAcct, pickAcct, acctToConfirm, submitAcct,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,

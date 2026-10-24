@@ -2,8 +2,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { ACCT_TEXT, acctButtonDevices, acctErrorText, acctSheetView, confirmText, runAcctSwitch } from '../ui/lib/mobile-acct.mjs'
-import { acctNav, normalizeNav } from '../ui/lib/mobile.mjs'
+import { ACCT_VENDORS, acctVendorSections, ACCT_TEXT, acctButtonDevices, acctErrorText, acctSheetView, confirmText, runAcctSwitch } from '../ui/lib/mobile-acct.mjs'
+import { acctNav, normalizeNav, tabLabel, tabNav } from '../ui/lib/mobile.mjs'
 
 const read = (...p) => fs.readFileSync(new URL(`../${p.join('/')}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const ID = '11111111-1111-1111-1111-111111111111'
@@ -17,7 +17,7 @@ test('哪些設備卡有「切換 Claude 帳號」：別台電腦才有；本機
 })
 
 test('導覽：新增 acct 浮層，瀏覽記錄讀回來能還原', () => {
-  assert.deepEqual(acctNav(), { tab: 'list', sheet: 'acct' })
+  assert.deepEqual(acctNav(), { tab: 'chats', sheet: 'acct' })
   assert.deepEqual(normalizeNav({ tab: 'chats', sheet: 'acct' }), acctNav())
 })
 
@@ -100,4 +100,48 @@ test('頁面接線：m.js 走 android_acct_* 指令且不碰電腦端指令；m.
   const lib = read('src-tauri', 'src', 'lib.rs')
   const m = /#\[cfg\(not\(desktop\)\)\]\n\s*let builder = builder\.invoke_handler\(tauri::generate_handler!\[([\s\S]*?)\]\);/.exec(lib)
   for (const c of ['android_acct_list', 'android_acct_switch', 'android_acct_status']) assert.ok(m[1].includes(`android::${c}`), `手機指令清單要有 ${c}`)
+})
+
+test('入口改成低調的「選項」小按鈕，按下切到第二個分頁（對話）整頁顯示，不是浮層', () => {
+  const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
+  assert.equal(ACCT_TEXT.button, '選項')
+  assert.doesNotMatch(ACCT_TEXT.button, /Claude|切換/)
+  // 導覽：選項頁屬於第二個分頁；分頁列上第二個標籤暫時叫「選項」，離開（任何不是 acct 的狀態）就恢復「對話」
+  assert.equal(acctNav().tab, 'chats')
+  assert.equal(tabLabel('chats', acctNav()), '選項')
+  assert.equal(tabLabel('chats', tabNav('chats')), '對話')
+  assert.equal(tabLabel('list', acctNav()), '夥伴')
+  assert.equal(tabLabel('me', acctNav()), '設置')
+  assert.match(html, /\{\{ tabLabel\(t\) \}\}/, '分頁列標籤走 tabLabel')
+  // 畫面：選項頁在對話分頁那一格裡，有返回鍵；原本的對話內容只用 hidden 藏起來（不卸載，草稿才不會丟）
+  const pane = /<section class="m-pg m-chat"[\s\S]*?<!-- 設置 -->/.exec(html)
+  assert.ok(pane, '找得到對話分頁')
+  assert.match(pane[0], /v-if="nav\.sheet === 'acct'"/)
+  assert.match(pane[0], /class="m-keep" :hidden="nav\.sheet === 'acct'"/)
+  assert.match(pane[0], /acctSw\.phase === 'confirm'/)
+  assert.match(pane[0], /aria-label="返回"[^>]*@click="back"/)
+  assert.doesNotMatch(html, /<div class="m-ops"[^>]*nav\.sheet === 'acct'/)
+  assert.doesNotMatch(html, /<section class="m-sheet"[^>]*nav\.sheet === 'acct'/)
+  // 分頁切換：選項頁時點「夥伴」＝返回上一頁；對話被蓋住時不標已讀
+  assert.match(js, /nav\.sheet === 'acct'\) \{[\s\S]*?t === 'list'\) history\.back\(\)/)
+  assert.match(js, /if \(nav\.sheet === 'acct'\) return/)
+  // 按鈕外觀：小字淡色、無外框，但可點區域至少 32px 高
+  const rule = /\.m-ghead-act\{([^}]*)\}/.exec(css)[1]
+  assert.match(rule, /min-height:\s*(3[2-9]|4\d)px/)
+  assert.match(rule, /border:\s*0/)
+  assert.match(rule, /font-size:\s*(1[0-2])px/)
+  assert.doesNotMatch(rule, /border-radius:\s*18px/)
+})
+
+test('選項頁依廠商分區：現在只有 Claude 一區，資料驅動、沒有假區塊', () => {
+  assert.deepEqual(acctVendorSections().map(v => v.key), ['claude'])
+  assert.deepEqual(ACCT_VENDORS.map(v => v.key), ['claude'])
+  // 之後加一家（資料裡多一筆）就多一區；缺名稱或鍵的不列
+  assert.deepEqual(acctVendorSections([...ACCT_VENDORS, { key: 'grok', name: 'Grok' }, { key: '', name: '壞' }]).map(v => v.key), ['claude', 'grok'])
+  const html = read('ui', 'm.html')
+  assert.match(html, /v-for="v in acctSections"/)
+  assert.match(html, /vendorIconSvg\(v\.key\)/)
+  assert.match(html, /\{\{ v\.name \}\}/)
+  assert.doesNotMatch(html, /Gemini|Grok/, '頁面不放寫死的別家區塊')
+  assert.match(html, /ACCT_TEXT\.title\(acctSw\.label\)/, '標題寫設備名')
 })
