@@ -29,13 +29,15 @@ test('我自己的發言：群組裡也畫頭像（用登入者的大頭貼）�
   assert.match(tpl, /v-if="lay\(m\.k\)\.avatar && !m\.badge && !m\.av"/)
 })
 
-test('AI 標籤：在頭像下方（頭像欄裡），名字那行不再塞 AI；沒有頭像時才退回名字旁', () => {
+// 10-25 改動：頭像下方的「AI」小標籤換成頭像右下角的廠商小圖（有廠商圖的就是 AI），所以原本對 av-tag 的斷言改成對 spk-vendor；名字行的規則不變
+test('AI 發言者：廠商小圖在頭像欄裡（頭像之後），名字那行不再塞 AI；沒有頭像時才退回名字旁', () => {
   const av = line('m-av m-av-spk"')
-  assert.match(av, /<span class="av-tag" v-if="m\.kind === 'ai'">AI<\/span>/)
-  assert.ok(av.indexOf('class="dp xs"') < av.indexOf('class="av-tag"'), '標籤在頭像之後')
+  assert.match(av, /<span class="spk-vendor" v-if="m\.kind === 'ai'"/)
+  assert.ok(av.indexOf('class="dp xs"') < av.indexOf('class="spk-vendor"'), '小圖在頭像之後')
+  assert.ok(!av.includes('av-tag'), '不再有 AI 小標籤')
   assert.match(tpl, /<span class="who-badge" :class="'is-' \+ m\.kind" v-if="m\.badge && !\(m\.kind === 'ai' && m\.av\)">/)
   assert.match(css, /\.m-av-spk\{[^}]*flex-direction:column/)
-  assert.match(css, /\.av-tag\{[^}]*font-size:9px/)
+  assert.match(css, /\.spk-vendor\{[^}]*width:14px/)
 })
 
 test('回覆鈕與叫醒順序同一列，在內文下方；名字那行不再有回覆鈕', () => {
@@ -48,12 +50,12 @@ test('回覆鈕與叫醒順序同一列，在內文下方；名字那行不再�
   assert.match(tpl, /class="m-act" v-if="canReply\(m\) \|\| \(m\.wake && m\.wake\.length\)"/)
 })
 
-test('樣式：操作列平常隱藏，滑過／鍵盤聚焦才出現；手機點訊息（act-on）才出現；深色模式的 AI 標籤可讀', () => {
+test('樣式：操作列平常隱藏，滑過／鍵盤聚焦才出現；手機點訊息（act-on）才出現；深色模式的廠商小圖可讀', () => {
   assert.match(css, /\.m-act\{[^}]*opacity:0/)
   assert.match(css, /\.msg:hover \.m-act,\.msg:focus-within \.m-act\{[^}]*opacity:1/)
   assert.match(css, /@media \(hover:none\)\{[^@]*\.msg\.act-on \.m-act\{[^}]*opacity:1/)
   assert.ok(!/\.reply-btn\{[^}]*opacity:0/.test(css), '回覆鈕自己不再各自隱藏，由整列控制')
-  assert.match(css, /\.av-tag\{[^}]*color:#fff/, '白字配紫底，淺色深色都清楚')
+  assert.match(css, /\.spk-vendor\{[^}]*background:#fff/, '白底小方塊，淺色深色都清楚')
 })
 
 test('手機點訊息切換操作列：連結、按鈕、引用不算', () => {
