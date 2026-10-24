@@ -113,7 +113,7 @@ Deno.test("relay/index.ts：帳號動作排在金鑰驗證之後，行動者是 
   const auth = src.indexOf("asn_relay_auth");
   const at = src.indexOf("ACCT_ACTIONS.has(action)");
   assert(auth > 0 && at > auth, "帳號動作要在金鑰驗證之後");
-  const block = src.slice(at, at + 500);
+  const block = src.slice(at, at + 1200);
   assert(block.includes("handleAcctAction(") && block.includes(", me, action"));
   // 資料庫函式：擁有者判定與 launch 同一套，且所有函式只給 service_role
   const sql = Deno.readTextFileSync(new URL("../../migrations/20261021040000_asn_account_switch.sql", import.meta.url));

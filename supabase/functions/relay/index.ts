@@ -489,7 +489,9 @@ Deno.serve(async (req) => {
   if (action && ACCT_ACTIONS.has(action)) {
     const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
-    const r = await handleAcctAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params);
+    // 手機（member 節點）靠本人簽章才准看別台清單、送切換；其他動作不讀簽章
+    const signedAcct = (action === "acct_list" || action === "acct_switch") ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
+    const r = await handleAcctAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedAcct);
     return json(r.status, r.body);
   }
   // 真人的群組動作（建群組、邀請、接受邀請、一對一升級、退出、帶自己的 AI、主持人確認；見 _shared/groups.ts）：
