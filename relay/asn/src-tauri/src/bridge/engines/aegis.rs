@@ -112,7 +112,10 @@ fn build_question(text: &str) -> String {
     let (node, agent, body) = parse_mail_text(text);
     let first = text.lines().next().unwrap_or("");
     let trust = first.split_whitespace().find_map(|t| t.strip_prefix("trust=")).unwrap_or("");
-    format!("這是透過仲介轉來的信：from={node}/{agent} trust={trust}\n{body}")
+    // 第二行「寄件人：…」是後台驗過的身分說明（例如「小良哥（本人，帳號簽章已驗證）」）；帶給成員，免得新格式的信被當成假冒
+    // 只對後台確認過身分的人（owner／本人的 AI）帶這行；成員、外部的信照舊（與 Node 版同格式）
+    let who = text.lines().nth(1).filter(|l| l.starts_with("寄件人：") && matches!(trust, "owner" | "mine" | "mine_ai")).map(|l| format!("{l}\n")).unwrap_or_default();
+    format!("這是透過仲介轉來的信：from={node}/{agent} trust={trust}\n{who}{body}")
 }
 
 struct Inner {
@@ -395,8 +398,10 @@ mod tests {
     }
 
     #[test]
-    fn 問題文字_抬頭取_from_與_trust_內文去掉抬頭與寄件人行() {
+    fn 問題文字_抬頭取_from_與_trust_並保留寄件人身分行() {
         let t = "[RELAY 來信] trust=member from=W/W-政策 to=阿爾法 id=x engine=aegis reply=yes\n寄件人：W-政策（成員身分）\n內文-3";
         assert_eq!(build_question(t), "這是透過仲介轉來的信：from=W/W-政策 trust=member\n內文-3");
+        let o = "[RELAY 來信] trust=owner from=u:3cda66252c34 to=愛吉絲 id=y engine=aegis reply=yes\n寄件人：小良哥（本人，帳號簽章已驗證，從「Oppo 手機」寄出）\n你好";
+        assert!(build_question(o).contains("\n寄件人：小良哥（本人，帳號簽章已驗證，從「Oppo 手機」寄出）\n你好"), "{}", build_question(o));
     }
 }
