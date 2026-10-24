@@ -371,7 +371,12 @@ export async function handleNodeRoomAction(deps: RoomDeps, me: { id: string }, a
       }
     }
     // reads＝讀者這邊最近發的訊息的已讀狀況（#224，舊後台沒有就不附）：原樣帶給用戶端
-    return { status: 200, body: Array.isArray(r.data.reads) ? { messages, last_seq: r.data.last_seq, reads: r.data.reads } : { messages, last_seq: r.data.last_seq } };
+    // wakes＝最近 40 則中已存下叫醒順序的訊息（晚到的順序靠它補上，舊後台沒有就不附）：同樣原樣帶給用戶端，只讀不算
+    return { status: 200, body: {
+      messages, last_seq: r.data.last_seq,
+      ...(Array.isArray(r.data.reads) ? { reads: r.data.reads } : {}),
+      ...(Array.isArray(r.data.wakes) ? { wakes: r.data.wakes } : {}),
+    } };
   }
   if (action === "room_post") {
     const body = params.body;
