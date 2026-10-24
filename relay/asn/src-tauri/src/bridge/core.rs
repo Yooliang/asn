@@ -938,6 +938,14 @@ impl Core {
         self.engines.as_ref().is_some_and(|e| e.ack_after_reply(&eng))
     }
 
+    /// 失敗原因給人看：認得的錯誤（額度用完）換成白話，其他原樣
+    fn short_fail_reason(why: &str) -> String {
+        if why.contains("402") || why.to_lowercase().contains("payment required") || why.to_lowercase().contains("balance exhausted") {
+            return "額度用完了（API 402）".into();
+        }
+        why.to_string()
+    }
+
     pub async fn on_fail(&mut self, id: &str, reason: &str) {
         let Some(i) = self.idx(id) else { return };
         if self.pending[i].state == State::Done {
@@ -954,7 +962,10 @@ impl Core {
             self.log.line(&format!("forward failure notice to mailbox sender {}/{} not sent id={id}", o.from_node, from_agent));
         } else {
             let why = if reason.is_empty() { "原因不明" } else { reason };
-            self.send_back(&o, &format!("[收發室] 轉交給 {target} 失敗：{why}"), None, None).await;
+            // 失敗通知用「對方視窗」的名義寄回、掛在原信底下：寄件人在跟那個視窗的對話框裡直接看到，不是另一個「收發室」視窗
+            let short = Self::short_fail_reason(why);
+            let as_target = if target.trim().is_empty() { None } else { Some(target.as_str()) };
+            self.send_back(&o, &format!("[收發室] 轉交給 {target} 失敗：{short}"), as_target, None).await;
         }
         self.ack_ids(&[id.to_string()]).await;
         self.remove(id);
