@@ -85,6 +85,12 @@ export type Reply = { status: number; body: Json };
 const err = (status: number, error: string, extra: Json = {}): Reply => ({ status, body: { error, ...extra } });
 const num = (v: unknown): number | null => (typeof v === "string" && /^\d{1,15}$/.test(v) ? Number(v) : typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : null);
 
+// 回覆的序號：正整數（或純數字字串）才算，其餘當沒有引用
+export function replySeq(v: unknown): number | null {
+  const n = typeof v === "string" && /^\d{1,15}$/.test(v) ? Number(v) : typeof v === "number" ? v : null;
+  return n !== null && Number.isInteger(n) && n > 0 ? n : null;
+}
+
 // SQL 函式回 {error: …} 時對應的 HTTP 狀態
 export function statusOfError(e: string): number {
   switch (e) {
@@ -106,13 +112,16 @@ const isReply = (r: { data: Json } | Reply): r is Reply => "status" in r;
 
 // 發言（節點與帳號擁有者共用）：先查成員名單解析 @點名，再寫入，最後對每個成員節點敲門鈴
 export async function postMessage(
-  deps: RoomDeps, who: { node: string; agent?: string | null; owner?: boolean }, room: string, body: string,
+  deps: RoomDeps, who: { node: string; agent?: string | null; owner?: boolean }, room: string, body: string, replyTo: number | null = null,
 ): Promise<Reply> {
   const who3 = { p_node: who.node, p_agent: who.agent ?? null, p_room: room, p_owner: Boolean(who.owner) };
   const mem = await call(deps, "asn_relay_room_members", who3);
   if (isReply(mem)) return mem;
   const mentions = parseMentions(body, mem.data.members ?? []);
-  const res = await call(deps, "asn_relay_room_post", { ...who3, p_body: body, p_mentions: mentions });
+  // 回覆某則訊息（#225）：有有效的序號才走回覆版（它會自動 @ 原作者並記下引用）；沒有就照舊，舊用戶端與還沒套 migration 的後台都不受影響
+  const res = replyTo
+    ? await call(deps, "asn_relay_room_post_reply", { ...who3, p_body: body, p_mentions: mentions, p_reply_to_seq: replyTo })
+    : await call(deps, "asn_relay_room_post", { ...who3, p_body: body, p_mentions: mentions });
   if (isReply(res)) return res;
   if (deps.beforeRing) await deps.beforeRing(res.data.seq);
   await Promise.all((res.data.bell_topics ?? []).map((t: string) => deps.ring(t)));
@@ -173,7 +182,7 @@ export async function handleNodeRoomAction(deps: RoomDeps, me: { id: string }, a
     if (typeof body !== "string" || body.length < 1 || body.length > BODY_MAX) return err(400, "bad_body");
     // 視窗代發：視窗名要在該節點的 roster 內（SQL 也會再擋一次）
     if (agent && !(await deps.rosterHas(me.id, agent))) return err(403, "unknown_agent");
-    return await postMessage(deps, { node: me.id, agent }, room, body);
+    return await postMessage(deps, { node: me.id, agent }, room, body, replySeq(params.reply_to));
   }
   return err(404, "not_found");
 }

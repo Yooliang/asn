@@ -192,3 +192,23 @@ Deno.test("去 Irori 化守門（#14 R7）：rooms.ts 不寫死特定人名或�
   assertEquals(parseMentions("@主人 你好", only), []);
   assertEquals(parseMentions("@角色節點 你好", only), ["ROLE1"]);
 });
+
+Deno.test("回覆某則訊息（#225）：帶有效的 reply_to 走 asn_relay_room_post_reply 並傳 p_reply_to_seq；沒帶或不合格的照舊走 asn_relay_room_post（舊用戶端相容）", async () => {
+  const mk = () => fake({ asn_relay_room_members: membersOk, asn_relay_room_post: () => ({ seq: 8, bell_topics: [] }), asn_relay_room_post_reply: () => ({ seq: 9, bell_topics: [] }) });
+  const a = mk();
+  const r = await handleNodeRoomAction(a.deps, ME, "room_post", { room: "r1", body: "好", reply_to: 5 });
+  assertEquals([r.status, r.body.seq], [200, 9]);
+  const call = a.calls.find((c) => c.fn === "asn_relay_room_post_reply")!;
+  assertEquals([call.args.p_reply_to_seq, call.args.p_body, call.args.p_owner], [5, "好", false]);
+  assert(!a.calls.some((c) => c.fn === "asn_relay_room_post"), "有引用就只打回覆版，不寫兩次");
+  // 字串數字（查詢參數）也認；其餘不合格的當沒有引用，走舊函式
+  const s = mk();
+  await handleNodeRoomAction(s.deps, ME, "room_post", { room: "r1", body: "好", reply_to: "12" });
+  assertEquals(s.calls.find((c) => c.fn === "asn_relay_room_post_reply")!.args.p_reply_to_seq, 12);
+  for (const bad of [undefined, null, 0, -3, 1.5, "x", "1e3", {}, [5], true]) {
+    const b = mk();
+    const rb = await handleNodeRoomAction(b.deps, ME, "room_post", { room: "r1", body: "好", reply_to: bad });
+    assertEquals([rb.status, rb.body.seq], [200, 8], String(bad));
+    assert(!b.calls.some((c) => c.fn === "asn_relay_room_post_reply"), `reply_to=${JSON.stringify(bad)} 不該走回覆版`);
+  }
+});

@@ -896,7 +896,7 @@ pub fn build_room_read_action(room: &str, agent: Option<&str>, since: u64, limit
     }
     Ok(a)
 }
-/// 群組發言的內容（手機用）：只放行 room／body／from_agent 三個欄位
+/// 群組發言的內容（手機用）：只放行 room／body／from_agent／reply_to 四個欄位
 pub fn build_room_post_body(raw: &Value) -> Result<Value, String> {
     let o = raw.as_object().ok_or("發言的內容格式不對")?;
     let room = o.get("room").and_then(Value::as_str).unwrap_or("");
@@ -913,6 +913,10 @@ pub fn build_room_post_body(raw: &Value) -> Result<Value, String> {
         Some(Value::String(g)) if g.is_empty() => {}
         Some(Value::String(g)) if valid_room_agent(g) => b["from_agent"] = json!(g),
         Some(_) => return Err("視窗名格式不對".into()),
+    }
+    // 回覆某則訊息（群組內序號，正整數）；不合格的當沒有引用，訊息照送
+    if let Some(n) = o.get("reply_to").and_then(Value::as_u64).filter(|n| (1..1_000_000_000_000_000).contains(n)) {
+        b["reply_to"] = json!(n);
     }
     Ok(b)
 }
@@ -1181,6 +1185,11 @@ b", "at": 5 }] }), json!({ "marks": [{ "at": 5 }] })] {
         let b = build_room_post_body(&json!({ "room": "r1", "body": "嗨", "from_agent": "手機", "as_owner": true, "command": "x" })).unwrap();
         assert_eq!(b, json!({ "room": "r1", "body": "嗨", "from_agent": "手機" }));
         assert_eq!(build_room_post_body(&json!({ "room": "r1", "body": "嗨", "from_agent": "" })).unwrap(), json!({ "room": "r1", "body": "嗨" }));
+        // 回覆：正整數才放行，其餘（0、負數、小數、字串）當沒有引用
+        assert_eq!(build_room_post_body(&json!({ "room": "r1", "body": "嗨", "reply_to": 12 })).unwrap(), json!({ "room": "r1", "body": "嗨", "reply_to": 12 }));
+        for bad in [json!(0), json!(-3), json!(1.5), json!("7"), json!(null)] {
+            assert_eq!(build_room_post_body(&json!({ "room": "r1", "body": "嗨", "reply_to": bad })).unwrap(), json!({ "room": "r1", "body": "嗨" }), "{bad}");
+        }
         for bad in [json!({ "room": "r 1", "body": "嗨" }), json!({ "room": "r1", "body": "  " }), json!({ "room": "r1", "body": "字".repeat(20_001) }), json!({ "room": "r1", "body": "a", "from_agent": "x~y" }), json!({ "room": "r1", "body": "a", "from_agent": 5 }), json!([1])] {
             assert!(build_room_post_body(&bad).is_err(), "{bad}");
         }
