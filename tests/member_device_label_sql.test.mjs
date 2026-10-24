@@ -23,7 +23,7 @@ test('靜態：在交易內、不刪資料、不授權 anon／authenticated、�
   assert.doesNotMatch(code, /drop table|drop column|delete from|truncate|drop function/i)
   assert.doesNotMatch(code, /grant execute[^;]*to (anon|authenticated|public)/i)
   assert.match(code, /revoke all on function relay\.room_display_label/)
-  assert.ok(files.indexOf(MIG) === files.length - 1, '時間戳要是最新')
+  assert.ok(files.indexOf(MIG) > files.indexOf('20261024150000_wake_info.sql'), '時間戳要比 wake_info 新')
 })
 
 let PGlite = null

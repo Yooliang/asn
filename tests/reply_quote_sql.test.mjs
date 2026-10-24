@@ -160,7 +160,8 @@ test('還原驗證：拿掉自動 @ 或加入前不外洩的判斷，對應測�
   const a = await ai(noAuto, room, '原話')
   const r = await human(noAuto, room, '好', { reply: a.seq })
   assert.notDeepEqual(msgOf(await readAs(noAuto, { node: P1, room, signed: U1 }), r.seq).mentions, [A], '沒有自動 @ 的版本不該通過原本的斷言')
-  const leak = await boot({ mutate: { [MIG]: s => s.replace('and q.seq > coalesce(p_vis, 0)', 'and true') } })
+  const cutVis = s => s.replace('and q.seq > coalesce(p_vis, 0)', 'and true')   // room_quote 的最新定義在 20261024160000_member_device_label.sql，兩版都要拿掉
+  const leak = await boot({ mutate: { [MIG]: cutVis, '20261024160000_member_device_label.sql': cutVis } })
   const room2 = await room1(leak)
   const early = await ai(leak, room2, '機密')
   await joinU2(leak, room2)

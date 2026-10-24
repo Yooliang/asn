@@ -504,8 +504,8 @@ test('還原驗證：拿掉 trust 重算 → 跨租戶的 trust 測試要變紅'
     const a = `case when s.trust = 'owner' and relay.member_tenant(s.from_member, v_rt) is not distinct from v_reader then 'owner' else 'member' end`
     assert.ok(s.includes(a), '找不到 trust 重算運算式'); return s.replace(a, 's.trust')
   }
-  // group_read 的最新定義在 20261024150000_wake_info.sql（再多回 wake_info），各版都要拿掉才算拿掉
-  const db = await boot({ mutate: { [M_ROOMS]: cut, '20261024140000_reply_quote.sql': cut, '20261024150000_wake_info.sql': cut } })
+  // group_read 的最新定義在 20261024160000_member_device_label.sql（前面還有 reply_quote、wake_info 各一版），各版都要拿掉才算拿掉
+  const db = await boot({ mutate: { [M_ROOMS]: cut, '20261024140000_reply_quote.sql': cut, '20261024150000_wake_info.sql': cut, '20261024160000_member_device_label.sql': cut } })
   const room = await twoTenantRoom(db)
   await post(db, { node: Q2, room, signed: U2, body: '財務員的話' })
   const m = (await readAs(db, { node: W1, agent: '財務', room })).messages.find(x => x.body === '財務員的話')
@@ -568,7 +568,8 @@ test('實跑：沒有外部成員的群組恢復附件——本人的其他設�
 })
 
 test('還原驗證：拿掉 allow_others 欄位／下載授權補丁 → 上面兩個測試要變紅', { skip }, async () => {
-  const db = await boot({ mutate: { [M_P1C]: s => s.replace(/^\s*'allow_others'.*$/gm, '').replace(/or exists \(select 1 from relay.room_members rm join relay.rooms r[\s\S]*?is not distinct from v_t\);/, ';') } })
+  const cutAo = s => s.replace(/^\s*'allow_others'.*$/gm, '').replace(/or exists \(select 1 from relay.room_members rm join relay.rooms r[\s\S]*?is not distinct from v_t\);/, ';')   // room_members_view 的最新定義在 20261024160000_member_device_label.sql，兩版都要拿掉
+  const db = await boot({ mutate: { [M_P1C]: cutAo, '20261024160000_member_device_label.sql': cutAo } })
   const room = await twoTenantRoom(db)
   const m = await membersAs(db, { node: P1, room, signed: U1 })
   assert.equal(m.members.find(x => x.member_kind === 'ai').allow_others, undefined, '欄位被拿掉了')
