@@ -199,7 +199,7 @@ pub fn roster_body_of(windows: &[Window]) -> Value {
 pub struct InboxCfg {
     /// 收件匣視窗名（`ASN_INBOX_NAME`，預設節點代號）
     pub name: String,
-    /// 名單上的引擎名（`ASN_INBOX_ENGINE`，預設 claude）
+    /// 名單上的引擎名（`ASN_INBOX_ENGINE`，預設 inbox，不代表有登入 Claude）
     pub engine: String,
     pub dir: PathBuf,
     pub sessions_dir: PathBuf,
@@ -215,7 +215,7 @@ pub struct InboxCfg {
 impl InboxCfg {
     pub fn from_env(node: &str, relay_home: &Path, base: &crate::bridge::core::Config) -> InboxCfg {
         let name = crate::envc::get("ASN_INBOX_NAME").map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| node.to_string());
-        let engine = crate::envc::get("ASN_INBOX_ENGINE").map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| "claude".into());
+        let engine = crate::envc::get("ASN_INBOX_ENGINE").map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| "inbox".into());
         InboxCfg {
             name,
             engine,
