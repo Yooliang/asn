@@ -246,6 +246,12 @@ export const ChatPane = {
       replying.value = replyTarget(m, { friend: props.friend, meName: props.me.nick, index: i })
       nextTick(() => composeEl.value && composeEl.value.focus())
     }
+    // 手機沒有滑過：點訊息切換下方的回覆與叫醒順序（點到連結、按鈕、引用不算）
+    const actAt = ref(-1)
+    function tapMsg(i, e) {
+      if (e?.target?.closest?.('a,button,input,textarea,.quote')) return
+      actAt.value = actAt.value === i ? -1 : i
+    }
     const cancelReply = () => { replying.value = null; nextTick(() => composeEl.value && composeEl.value.focus()) }
     const msgQuote = m => m?.reply ?? splitQuote(m?.text).quote
     const jumpNote = ref('')
@@ -319,7 +325,7 @@ export const ChatPane = {
     const docEl = ref(null)
     // 訊息內文裡的連結：不在 WebView 導覽，一律交給系統瀏覽器（Rust 端 open_link 再驗一次協定）
     const onBodyClick = ev => handleLinkClick(ev, url => globalThis.__TAURI__?.core?.invoke?.('open_link', { url }))
-    return { replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, isRoom, attachOk, opsItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, isRoom, attachOk, opsItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -341,11 +347,12 @@ export const ChatPane = {
         <div class="older-note" v-if="noteText">{{ noteText }}</div>
         <template v-for="(m, i) in log" :key="i">
           <div v-if="m.k === 'sys'" class="sys" :class="{ nudge: m.nudge }">{{ m.text }}</div>
-          <div v-else class="msg" :data-i="i" :class="['al-' + lay(m.k).align, { mine: m.k === 'me' }]">
-            <div class="m-av m-av-spk" v-if="m.av"><div class="dp xs" :style="{ '--h': friend.hue }"><span><img :src="speakerAv(m)" alt=""></span></div></div>
+          <div v-else class="msg" :data-i="i" :class="['al-' + lay(m.k).align, { mine: m.k === 'me', 'act-on': actAt === i }]" @click="tapMsg(i, $event)">
+            <div class="m-av m-av-spk" v-if="m.av"><div class="dp xs" :style="{ '--h': friend.hue }"><span><img :src="speakerAv(m)" alt=""></span></div><span class="av-tag" v-if="m.kind === 'ai'">AI</span></div>
+            <div class="m-av m-av-spk m-av-me" v-if="isRoom && m.k === 'me'"><div class="dp xs" :style="{ '--h': 205 }"><span><img :src="meAv" alt=""></span></div></div>
             <div class="m-av" v-if="lay(m.k).avatar && !m.badge && !m.av"><div class="dp xs" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span><img :src="friendAv" alt=""></span></div></div>
             <div class="m-main">
-              <div class="who"><span class="spk-av" :class="'is-' + m.kind" v-if="m.badge && !m.av" aria-hidden="true">{{ initial(plain(m.who || friend.nick)) }}</span>{{ m.k === 'me' ? plain(me.nick) : plain(m.who || friend.nick) }}<span class="who-badge" :class="'is-' + m.kind" v-if="m.badge">{{ m.badge }}</span>：<time>{{ fmt(m.t) }}</time><button v-if="canReply(m)" class="reply-btn" type="button" @click="startReply(m, i)" aria-label="回覆這則訊息" title="回覆這則訊息">回覆</button><span class="from-dev" v-if="m.k === 'me' && m.from">從 {{ plain(m.from) }}</span><span class="voice-tag" v-if="m.k === 'me' && isVoiceMsg(m)" title="這則是通話中說的，辨識成文字後寄出">🎤 語音</span><span v-if="m.k === 'me' && msgTier(m) && msgTier(m) !== 'sent'" class="msg-st" :class="'st-' + msgTier(m)" :title="msgStatusTip(m)" :aria-label="msgStatusTip(m)">{{ msgTier(m) === 'delivered' ? '✓' : '✓✓' }}</span>
+              <div class="who"><span class="spk-av" :class="'is-' + m.kind" v-if="m.badge && !m.av" aria-hidden="true">{{ initial(plain(m.who || friend.nick)) }}</span>{{ m.k === 'me' ? plain(me.nick) : plain(m.who || friend.nick) }}<span class="who-badge" :class="'is-' + m.kind" v-if="m.badge && !(m.kind === 'ai' && m.av)">{{ m.badge }}</span>：<time>{{ fmt(m.t) }}</time><span class="from-dev" v-if="m.k === 'me' && m.from">從 {{ plain(m.from) }}</span><span class="voice-tag" v-if="m.k === 'me' && isVoiceMsg(m)" title="這則是通話中說的，辨識成文字後寄出">🎤 語音</span><span v-if="m.k === 'me' && msgTier(m) && msgTier(m) !== 'sent'" class="msg-st" :class="'st-' + msgTier(m)" :title="msgStatusTip(m)" :aria-label="msgStatusTip(m)">{{ msgTier(m) === 'delivered' ? '✓' : '✓✓' }}</span>
                 <button v-if="voice && m.k === 'them' && m.text" class="spk" :class="{ on: speaking(m, i) }" type="button" @click="speak(m, i)" :aria-label="speakTip(m, i)" :title="speakTip(m, i)">
                   <svg v-if="!speaking(m, i)" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 9.5v5h3.6L12 18.5v-13L7.6 9.5z" fill="currentColor"/><path d="M15 9.2a4 4 0 0 1 0 5.6M17.4 6.8a7.4 7.4 0 0 1 0 10.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
                   <svg v-else viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/></svg>
@@ -353,7 +360,10 @@ export const ChatPane = {
               </div>
               <button v-if="msgQuote(m)" class="quote" type="button" @click="jumpTo(m, i)" :title="'跳到原訊息：' + plain(msgQuote(m).excerpt)"><b>{{ plain(msgQuote(m).author) }}</b><span>{{ plain(msgQuote(m).excerpt) }}</span></button>
               <div class="m-body" :class="['tone-' + lay(m.k).tone, 'md-on']" v-if="shownBody(m).text" v-html="bodyHtml(shownBody(m).text)" @click="onBodyClick"></div>
-              <div class="wake-tags" v-if="m.wake && m.wake.length" aria-label="叫醒順序"><template v-for="(w, wi) in m.wake" :key="wi"><span v-if="wi > 0 && !w.off && !m.wake[wi - 1].off" class="wake-arrow" aria-hidden="true">→</span><span class="wake-tag" :class="{ off: w.off }" :title="w.off ? '不通知' : ''">{{ w.label }}</span></template></div>
+              <div class="m-act" v-if="canReply(m) || (m.wake && m.wake.length)">
+                <div class="wake-tags" v-if="m.wake && m.wake.length" aria-label="叫醒順序"><template v-for="(w, wi) in m.wake" :key="wi"><span v-if="wi > 0 && !w.off && !m.wake[wi - 1].off" class="wake-arrow" aria-hidden="true">→</span><span class="wake-tag" :class="{ off: w.off }" :title="w.off ? '不通知' : ''">{{ w.label }}</span></template></div>
+                <button v-if="canReply(m)" class="reply-btn" type="button" @click="startReply(m, i)" aria-label="回覆這則訊息" title="回覆這則訊息">回覆</button>
+              </div>
               <div class="call-end-note" v-if="shownBody(m).ends">{{ CALL_END_NOTE }}</div>
               <div class="unanswered" v-if="m.k === 'me' && m.unanswered != null && !isAsn">{{ m.unanswered > 0 ? '超過 ' + m.unanswered + ' 分鐘未回' : '對方視窗已關閉，未回' }}</div>
               <div class="photos" v-if="m.photos && m.photos.length">
