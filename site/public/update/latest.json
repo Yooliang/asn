@@ -1,11 +1,11 @@
 {
-  "version": "0.1.65",
-  "notes": "夥伴操作選單項目固定（不適用的反灰並說明）；設備頁籤可手動排序、整台離線且全封存的設備自動隱藏；關閉與接手後殘留的舊視窗修正；背景／前台切換擴到 pi、Grok 等，ASN 開的夥伴各自一個 Windows Terminal 視窗；pi 擴充可收信；Grok 可作為工作者",
-  "pub_date": "2026-10-24T11:34:32.203Z",
+  "version": "0.1.66",
+  "notes": "群組：頭像右下角顯示廠商小圖並拿掉 AI 標籤、離線成員頭像變灰、叫醒順序標籤晚到時會補上；本機程序條目的選單說明不再重複、不再誤稱雲端並清掉舊殘影；開新夥伴可直接開 pi；Linux 登入網址核准頁；帳號旁顯示剩餘額度；沒指定視窗的信通知不再吵",
+  "pub_date": "2026-10-24T16:22:39.782Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjl1M25KS2VEUDV4QWh1d2c5YjY3WmJ0RmVaYkZvV0hqYWlUb2FRWDc2cUM1MW5lUjZQR3JkVnpTVW43KytvNzg5dzRHaEdRdDlScXAzWXcyMDl3VlFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyODQxNjcxCWZpbGU6QVNOXzAuMS42NV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjY1CnJ5M0VjeGFVQnVSUWN4eUJPb1A0U3Zpci9WMW84ZTltWFVxMmJjTlhkNFllcVVaZzRzdXFadGJPTEhxK2R5STZyMGpTSGJHTmhWU1N1WndrRlQ0TUJRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.65_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybitlTDkwNDliTG13cEhXbVpIK0crcVdJMWd6OUxkb25PVWZLVzAwRUNhQUR5RWpkUml5dFUxZStFZUdJNEczb0hCVVB1eHRGMisrNEJWczRGSk54VmdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyODU4OTU5CWZpbGU6QVNOXzAuMS42Nl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjY2Cmh1S1FOUE9WeWNjbTlKYXF5dmZ3eXdJQ0Y3MW1mM04xckZ6NkIrMlgydEliNktST3BDdit5T0pSTTVoUlN1VDN5MEVLNVZUQkR5UnRZenhxeDBTeUFBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.66_x64-setup.exe"
     }
   }
 }
