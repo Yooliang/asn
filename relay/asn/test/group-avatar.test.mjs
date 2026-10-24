@@ -43,7 +43,7 @@ test('群組訊息樣板：每則對方訊息放發言者自己的大頭貼（�
   const errs = []
   compile(tpl, { onError: e => errs.push(e.message) })
   assert.deepEqual(errs, [])
-  assert.match(tpl, /<div class="m-av m-av-spk" v-if="m\.av"><div class="dp xs"[^>]*><span><img :src="speakerAv\(m\)" alt=""><\/span><\/div><\/div>/)
+  assert.match(tpl, /<div class="m-av m-av-spk" v-if="m\.av"><div class="dp xs"[^>]*><span><img :src="speakerAv\(m\)" alt=""><\/span><\/div>(<span class="av-tag"[^>]*>AI<\/span>)?<\/div>/)
   assert.match(tpl, /<span class="spk-av" :class="'is-' \+ m\.kind" v-if="m\.badge && !m\.av"/, '有大頭貼就不再畫首字徽章')
   assert.match(chatpane, /import \{[^}]*autoAvatarDataUrl[^}]*\} from '\.\/avatar\.mjs'/)
   assert.match(chatpane, /const speakerAv = m => autoAvatarDataUrl\(m\.av\)/)
