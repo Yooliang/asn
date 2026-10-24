@@ -31,7 +31,7 @@ import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, normalizeClose, normal
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
 import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
-import { CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, buddyConsoleItem, consoleReq, engineForProfile,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice, withTimeout } from './lib/partner-launch-ui.mjs'
+import { CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, buddyConsoleItem, consoleReq, engineForProfile,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice, foregroundOnlyProfile, withTimeout } from './lib/partner-launch-ui.mjs'
 import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
 import { PartnerOpDialog, loadOpsContext } from './lib/partner-ops-ui.mjs'
 import { initialOpsCtx, sharedWhy } from './lib/partner-ops.mjs'
@@ -346,6 +346,7 @@ const partnerModels = computed(() => launchToolRows.value)
 // 對話框裡的模型列：本機看偵測到的 CLI；別台設備看那台回報的 profile
 const dlgModels = computed(() => (partnerDlg.node && partnerDlg.node !== info.node ? remoteModelRows(remoteLaunchers.value[partnerDlg.node]) : partnerModels.value))
 const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '', display: 'foreground' })
+const partnerFgOnly = computed(() => partnerDlg.node === info.node && foregroundOnlyProfile(partnerDlg.profile))
 const partnerShowDisplay = computed(() => partnerDlg.node === info.node && showDisplayModeChoice(partnerDlg.profile))
 const launchCtx = computed(() => ({ selfNode: info.node, partnerModels: partnerModels.value, remoteLaunchers: remoteLaunchers.value }))
 const launchDeviceRowsList = computed(() => launchDeviceRows(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder }))
@@ -381,6 +382,8 @@ function pickPartnerModel(m) {
   partnerDlg.profile = m.profileId
   partnerDlg.modeLabel = m.modeLabel
   partnerDlg.name = defaultPartnerName(friends.value, m.profileId)
+  // pi 是互動式，只能前台；換回其他模型時還原成使用者上次的選擇
+  partnerDlg.display = foregroundOnlyProfile(m.profileId) ? 'foreground' : (launchPrefs.launchDisplay === 'background' ? 'background' : 'foreground')
 }
 function openPartnerDlg(nodeKey) {
   closeLaunchPicker()
@@ -595,15 +598,17 @@ async function submitPartnerDlg() {
   if (!partnerDlg.name.trim() || !partnerDlg.cwd) { partnerDlg.error = '請填名字與工作資料夾'; return }
   partnerDlg.busy = true
   const mode = MODEL_CATALOG.find(m => m.profileId === partnerDlg.profile)?.mode ?? 'window'
-  const display = partnerShowDisplay.value && partnerDlg.display === 'background' ? 'background' : 'foreground'
+  const foregroundOnly = foregroundOnlyProfile(partnerDlg.profile)
+  const display = !foregroundOnly && partnerShowDisplay.value && partnerDlg.display === 'background' ? 'background' : 'foreground'
   const pend = pendingFriend({ node: partnerDlg.node, device: partnerDlg.deviceLabel, name: partnerDlg.name.trim(), profileId: partnerDlg.profile, mode, launchDisplay: display })
   launchPending.value = [...launchPending.value, pend]
   try {
     if (partnerDlg.node === info.node) {
-      if (display === 'foreground') launchPrefs.launchDisplay = 'foreground'
-      else launchPrefs.launchDisplay = 'background'
-      void saveLaunchPrefs()
-      await transport.partnerLaunchLocal({ profile: partnerDlg.profile, name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, display })
+      if (partnerShowDisplay.value) {
+        launchPrefs.launchDisplay = display === 'background' ? 'background' : 'foreground'
+        void saveLaunchPrefs()
+      }
+      await transport.partnerLaunchLocal({ profile: partnerDlg.profile, name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, display, first_message: foregroundOnly ? partnerDlg.firstMessage.trim() : '' })
     } else {
       const r = await transport.launch({ node: partnerDlg.node, profile: partnerDlg.profile, name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, first_message: partnerDlg.firstMessage.trim() || null })
       if (r?.id) launchTrack.value = [...launchTrack.value, { id: r.id, node: partnerDlg.node, name: partnerDlg.name.trim(), profile: partnerDlg.profile }]
@@ -611,7 +616,7 @@ async function submitPartnerDlg() {
     Object.assign(launchPrefs, bumpRecentCwd(launchPrefs, partnerDlg.cwd))
     void saveLaunchPrefs()
     closePartnerDlg()
-    if (partnerDlg.node === info.node && partnerDlg.firstMessage.trim()) {
+    if (partnerDlg.node === info.node && !foregroundOnly && partnerDlg.firstMessage.trim()) {
       setTimeout(async () => {
         const id = friendId(partnerDlg.node, partnerDlg.name.trim())
         if (core.friends.has(id)) await core.send(id, partnerDlg.firstMessage.trim())
@@ -1235,7 +1240,7 @@ const app = createApp({
       selfNode: info.node, transport, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg,
       searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickLaunchDevice,
       DISPLAY_MODES, partnerShowDisplay,
-      openPartnerDlg, closePartnerDlg, partnerDlg, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
+      openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
       opDlg, closeOpDlg, buddyOpItems, openPartnerOp, archiveNote, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddyConsoleItemView, buddyMenuOpenChat, toggleBuddyConsole,

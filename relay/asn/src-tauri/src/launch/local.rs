@@ -30,6 +30,13 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
 
     let display_bg = req.display == "background";
     let (command, mut args, cwd) = build_spawn_spec(&config, &launch_req)?;
+    // pi：互動式，一律前台；載入收信擴充、名字環境變數、第一句話都在 pi.rs 組好（找不到擴充就報錯，不開一個不會收信的 pi）
+    if prof.engine == "pi" {
+        let files = crate::identity::relay_home().join("pi-first");
+        let plan = super::pi::plan(&req.name, &args, super::pi::resolve_ext_state(), &req.first_message, &files, now_ms())?;
+        let pid = start_window_env(&req.name, &command, &plan.args, &cwd, super::pi::hidden_for("pi", display_bg), &plan.env)?;
+        return Ok(json!({ "ok": true, "mode": "window", "pid": pid, "resumed": false, "display": "foreground", "first_message_sent": !req.first_message.trim().is_empty() }));
+    }
     // 預設接續同名夥伴上一段對話（issue #82）；沒有舊對話才新開
     let resumed = if req.fresh { None } else { super::resume::apply_resume_real(&mut args, &command, prof.engine.as_str(), &req.name, &launch_req.cwd) };
     let pid = start_window(&req.name, &command, &args, &cwd, display_bg)?;
@@ -102,14 +109,19 @@ fn quote_arg(a: &str) -> String {
 }
 
 pub(super) fn start_window(title: &str, command: &str, args: &[String], cwd: &Path, hidden: bool) -> Result<u32, String> {
+    start_window_env(title, command, args, cwd, hidden, &[])
+}
+
+/// 同 [`start_window`]，另外在視窗裡先設好額外的環境變數（pi 的 ASN_PI_NAME）
+pub(super) fn start_window_env(title: &str, command: &str, args: &[String], cwd: &Path, hidden: bool, env: &[(String, String)]) -> Result<u32, String> {
     #[cfg(windows)]
     {
-        start_window_windows(title, command, args, cwd, hidden)
+        start_window_windows(title, command, args, cwd, hidden, env)
     }
     #[cfg(not(windows))]
     {
         let _ = title;
-        start_window_unix(command, args, cwd)
+        start_window_unix(command, args, cwd, env)
     }
 }
 
@@ -132,6 +144,21 @@ pub(crate) fn strip_verbatim_prefix(p: &str) -> String {
 /// 啟動失敗（找不到檔案等）也會把錯誤原文印在視窗裡。
 #[cfg_attr(not(windows), allow(dead_code))]
 fn build_window_script(title: &str, command: &str, args: &[String]) -> String {
+    build_window_script_env(title, command, args, &[])
+}
+
+/// 環境變數名只收大寫英數與底線（不合的丟掉，避免被塞進腳本）
+#[cfg_attr(not(windows), allow(dead_code))]
+fn env_lines(env: &[(String, String)]) -> String {
+    env.iter()
+        .filter(|(k, _)| !k.is_empty() && k.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_'))
+        .map(|(k, v)| format!("$env:{k} = {}\n", ps_quote(v)))
+        .collect()
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn build_window_script_env(title: &str, command: &str, args: &[String], env: &[(String, String)]) -> String {
+    let env_set = env_lines(env);
     let mut call = format!("& {}", ps_quote(command));
     for a in args {
         call.push(' ');
@@ -139,6 +166,7 @@ fn build_window_script(title: &str, command: &str, args: &[String]) -> String {
     }
     format!(
         "try {{ $Host.UI.RawUI.WindowTitle = {title} }} catch {{}}\n\
+         {env_set}\
          $code = 0\n\
          try {{\n\
          {call}\n\
@@ -150,6 +178,7 @@ fn build_window_script(title: &str, command: &str, args: &[String]) -> String {
          Write-Host ''\n\
          Write-Host ('[ASN] 程式已結束（結束碼 ' + $code + '）。上面如果有錯誤訊息請截圖回報；關閉這個視窗即可。') -ForegroundColor Yellow\n",
         title = ps_quote(title),
+        env_set = env_set,
         call = call
     )
 }
@@ -165,7 +194,12 @@ fn encode_ps_command(script: &str) -> String {
 /// 外層 PowerShell（承載視窗）的參數字串：-NoExit 讓視窗留著。
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(super) fn window_launcher_args(title: &str, command: &str, args: &[String]) -> String {
-    let enc = encode_ps_command(&build_window_script(title, command, args));
+    window_launcher_args_env(title, command, args, &[])
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(super) fn window_launcher_args_env(title: &str, command: &str, args: &[String], env: &[(String, String)]) -> String {
+    let enc = encode_ps_command(&build_window_script_env(title, command, args, env));
     format!("-NoLogo -NoProfile -NoExit -ExecutionPolicy Bypass -EncodedCommand {enc}")
 }
 
@@ -195,11 +229,11 @@ fn parse_launcher_output(stdout: &str, stderr: &str, success: bool) -> Result<u3
 /// 回傳的 PID 是「承載視窗的 PowerShell」，不是 claude 本身（claude 是它的子程序、共用同一個主控台）。
 /// 主控台顯示／隱藏另外靠 ~/.claude/sessions 依名字找 claude 的 PID，不依賴這個值。
 #[cfg(windows)]
-fn start_window_windows(title: &str, command: &str, args: &[String], cwd: &Path, hidden: bool) -> Result<u32, String> {
+fn start_window_windows(title: &str, command: &str, args: &[String], cwd: &Path, hidden: bool, env: &[(String, String)]) -> Result<u32, String> {
     // 前景開窗且預設終端機是 Windows Terminal：一個夥伴一個專屬視窗（不開成分頁），主控台切換才能單獨隱藏它。
     // 預設是傳統主控台、沒有 wt.exe、或要背景（Hidden）開的，維持原本的 PowerShell Start-Process
     if !hidden && super::wt_launch::wt_usable(title, &cwd.to_string_lossy()) && super::wt_launch::default_is_wt() {
-        match super::wt_launch::spawn_wt(title, cwd, command, args) {
+        match super::wt_launch::spawn_wt_env(title, cwd, command, args, env) {
             Ok(pid) => return Ok(pid),
             Err(e) => eprintln!("{e}，改開一般主控台"),
         }
@@ -228,10 +262,10 @@ try {
         .env_clear()
         .envs(super::config::child_env())
         .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script])
-        .env("ASN_LAUNCH_ARGS", window_launcher_args(title, command, args))
+        .env("ASN_LAUNCH_ARGS", window_launcher_args_env(title, command, args, env))
         .env("ASN_LAUNCH_DIR", &cwd_s)
         .env("ASN_LAUNCH_STYLE", style)
-        .env("IRORI_LAUNCH_ARGS", window_launcher_args(title, command, args))
+        .env("IRORI_LAUNCH_ARGS", window_launcher_args_env(title, command, args, env))
         .env("IRORI_LAUNCH_DIR", &cwd_s)
         .env("IRORI_LAUNCH_STYLE", style)
         .current_dir(&cwd_s)
@@ -243,7 +277,7 @@ try {
 }
 
 #[cfg(not(windows))]
-fn start_window_unix(command: &str, args: &[String], cwd: &Path) -> Result<u32, String> {
+fn start_window_unix(command: &str, args: &[String], cwd: &Path, env: &[(String, String)]) -> Result<u32, String> {
     let joined = std::iter::once(command)
         .chain(args.iter().map(String::as_str))
         .map(quote_arg)
@@ -251,7 +285,7 @@ fn start_window_unix(command: &str, args: &[String], cwd: &Path) -> Result<u32, 
         .join(" ");
     if let Some(term) = pick_linux_terminal() {
         let mut cmd = Command::new(&term.binary);
-        cmd.env_clear().envs(super::config::child_env());
+        cmd.env_clear().envs(super::config::child_env()).envs(env.iter().map(|(k, v)| (k, v)));
         cmd.args(&term.args_prefix)
             .args(&term.args_suffix)
             .arg(&joined)
@@ -263,7 +297,7 @@ fn start_window_unix(command: &str, args: &[String], cwd: &Path) -> Result<u32, 
         return Ok(child.id());
     }
     let mut cmd = Command::new(command);
-    cmd.env_clear().envs(super::config::child_env());
+    cmd.env_clear().envs(super::config::child_env()).envs(env.iter().map(|(k, v)| (k, v)));
     cmd.args(args).current_dir(cwd).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     let child = cmd.spawn().map_err(|e| format!("開不起來：{e}"))?;
     Ok(child.id())
@@ -335,6 +369,18 @@ mod tests {
     }
 
     #[test]
+    fn 視窗腳本_先設環境變數再跑指令_單引號加倍() {
+        let env = vec![("ASN_PI_NAME".to_string(), "小皮's".to_string()), ("bad name".to_string(), "x".to_string())];
+        let sc = build_window_script_env("T", "pi", &["-e".to_string(), "C:/a b/index.ts".to_string()], &env);
+        let set = sc.find("$env:ASN_PI_NAME = '小皮''s'").expect("有設名字");
+        let call = sc.find("& 'pi' '-e' 'C:/a b/index.ts'").expect("有跑指令");
+        assert!(set < call, "環境變數要在指令之前");
+        assert!(!sc.contains("bad name"), "不合法的變數名丟掉");
+        assert_eq!(build_window_script("T", "pi", &[]), build_window_script_env("T", "pi", &[], &[]), "沒有額外環境時和舊行為一樣");
+        assert!(!build_window_script("T", "claude", &[]).contains("$env:"), "其他引擎的腳本不含任何環境設定");
+    }
+
+    #[test]
     fn 外層參數有_noexit_且編碼可還原() {
         let args = vec!["-n".to_string(), "測 試".to_string()];
         let a = window_launcher_args("測 試", "claude", &args);
@@ -360,7 +406,7 @@ mod tests {
     #[ignore]
     fn 真機_視窗會留著() {
         let dir = std::env::temp_dir();
-        let pid = start_window_windows("ASN 測試", "cmd.exe", &["/c".into(), "echo ASN 測試 & exit 3".into()], &dir, false).unwrap();
+        let pid = start_window_windows("ASN 測試", "cmd.exe", &["/c".into(), "echo ASN 測試 & exit 3".into()], &dir, false, &[]).unwrap();
         println!("ASN_TEST_PID={pid}");
         std::thread::sleep(std::time::Duration::from_secs(3));
         let list = Command::new("tasklist").no_window().args(["/FI", &format!("PID eq {pid}"), "/NH"]).output().unwrap();
@@ -374,7 +420,7 @@ mod tests {
     #[test]
     fn 啟動失敗_錯誤原文會被帶出來() {
         let bad = Path::new(r"C:\ASN-不存在的資料夾-xyz");
-        let e = start_window_windows("t", "cmd.exe", &[], bad, true).unwrap_err();
+        let e = start_window_windows("t", "cmd.exe", &[], bad, true, &[]).unwrap_err();
         assert!(e.starts_with("開不起來"), "{e}");
         assert!(e.len() > "開不起來：".len(), "{e}");
     }

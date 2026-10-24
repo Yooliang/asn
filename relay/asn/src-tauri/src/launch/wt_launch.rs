@@ -37,9 +37,14 @@ pub(crate) fn wt_usable(name: &str, cwd: &str) -> bool {
 
 /// `wt.exe` 的完整參數：開在這個夥伴專屬的新視窗，標題固定（不讓程式自己改標題），裡面跑和原本一樣的 PowerShell 承載腳本
 pub(crate) fn wt_args(name: &str, cwd: &str, command: &str, args: &[String]) -> Vec<String> {
+    wt_args_env(name, cwd, command, args, &[])
+}
+
+/// 同 [`wt_args`]，承載腳本會先設好額外的環境變數
+pub(crate) fn wt_args_env(name: &str, cwd: &str, command: &str, args: &[String], env: &[(String, String)]) -> Vec<String> {
     let title = window_title(name);
     let mut v: Vec<String> = vec!["-w".into(), window_name(name), "new-tab".into(), "-d".into(), super::local::strip_verbatim_prefix(cwd), "--title".into(), title.clone(), "--suppressApplicationTitle".into(), "powershell.exe".into()];
-    v.extend(super::local::window_launcher_args(&title, command, args).split(' ').map(str::to_string));
+    v.extend(super::local::window_launcher_args_env(&title, command, args, env).split(' ').map(str::to_string));
     v
 }
 
@@ -99,6 +104,11 @@ pub(crate) fn default_is_wt() -> bool {
 /// 真的呼叫 wt.exe 開專屬視窗；wt.exe 只是轉交給 Windows Terminal 就結束，回傳它自己的 pid（只用於記錄）
 #[cfg(windows)]
 pub(crate) fn spawn_wt(name: &str, cwd: &Path, command: &str, args: &[String]) -> Result<u32, String> {
+    spawn_wt_env(name, cwd, command, args, &[])
+}
+
+#[cfg(windows)]
+pub(crate) fn spawn_wt_env(name: &str, cwd: &Path, command: &str, args: &[String], env: &[(String, String)]) -> Result<u32, String> {
     use crate::nowin::NoWindow;
     let exe = wt_exe_path().ok_or_else(|| "找不到 wt.exe".to_string())?;
     let cwd_s = cwd.to_string_lossy().to_string();
@@ -106,7 +116,7 @@ pub(crate) fn spawn_wt(name: &str, cwd: &Path, command: &str, args: &[String]) -
         .no_window()
         .env_clear()
         .envs(super::config::child_env())
-        .args(wt_args(name, &cwd_s, command, args))
+        .args(wt_args_env(name, &cwd_s, command, args, env))
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -147,6 +157,21 @@ mod tests {
         assert!(a.iter().all(|x| !x.contains(';')), "編碼後的參數不含分號");
         assert_ne!(a[1], "0", "不再是『最近使用的視窗』（那會變成別人的分頁）");
         assert!(!a.contains(&"-w".to_string()) || a.iter().filter(|x| *x == "-w").count() == 1);
+    }
+
+    #[test]
+    fn wt參數_pi_名字環境變數進承載腳本_其餘結構不變() {
+        use base64::Engine;
+        let env = vec![("ASN_PI_NAME".to_string(), "小皮".to_string())];
+        let a = wt_args_env("小皮", r"D:\proj", "pi", &v(&["-e", r"C:\ASN\pi-extension\index.ts", "--", "嗨"]), &env);
+        assert_eq!(&a[..9], &["-w", "asn-小皮", "new-tab", "-d", r"D:\proj", "--title", "ASN-小皮", "--suppressApplicationTitle", "powershell.exe"]);
+        let enc = a.last().unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD.decode(enc).unwrap();
+        let u: Vec<u16> = bytes.chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let sc = String::from_utf16(&u).unwrap();
+        assert!(sc.contains("$env:ASN_PI_NAME = '小皮'") && sc.contains(r"& 'pi' '-e' 'C:\ASN\pi-extension\index.ts' '--' '嗨'"), "{sc}");
+        assert!(a.iter().all(|x| !x.contains(';')));
+        assert_eq!(wt_args("甲", "D:/x", "claude", &[]), wt_args_env("甲", "D:/x", "claude", &[], &[]));
     }
 
     #[test]

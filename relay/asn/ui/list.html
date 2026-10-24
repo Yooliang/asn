@@ -321,6 +321,7 @@
           <input type="radio" name="partner-display" :value="m.key" v-model="partnerDlg.display" :aria-label="m.label"> {{ m.label }}
         </label>
       </fieldset>
+      <p class="partner-hint partner-fgonly" v-if="partnerFgOnly">pi 是互動式，只能開在前台視窗；視窗開好後約一分鐘內會出現在名單上，可收信、回信。</p>
       <label>第一句話（選填）<textarea class="set-area" rows="2" v-model="partnerDlg.firstMessage" maxlength="4000" aria-label="第一句話"></textarea></label>
       <p class="partner-err" v-if="partnerDlg.error" role="alert">{{ partnerDlg.error }}</p>
       <div class="partner-actions">

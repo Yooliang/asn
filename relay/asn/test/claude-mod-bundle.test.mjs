@@ -34,7 +34,7 @@ test('打包：外掛每個該帶的檔案都列在 bundle.resources，且放在
   for (const [src, dst] of Object.entries(res)) {
     assert.ok(fs.existsSync(path.join(root, 'src-tauri', src)), `resources 來源不存在：${src}`)
     assert.doesNotMatch(src, /\.test\.|\/types\//, '測試檔與 types 不帶')
-    assert.ok(dst.startsWith('claude-mod/'))
+    assert.ok(dst.startsWith('claude-mod/') || dst.startsWith('pi-extension/'), 'claude-mod 或 pi-extension 以外的不帶')
   }
 })
 

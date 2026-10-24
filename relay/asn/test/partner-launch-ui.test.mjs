@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import test from 'node:test'
-import { BUDDY_CONSOLE_LABEL, CONSOLE_QUERY_TIMEOUT_MS, buddyConsoleItem, consoleReq, consoleToggleLabel, withTimeout,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice } from '../ui/lib/partner-launch-ui.mjs'
+import { MODEL_CATALOG } from '../ui/lib/model-catalog.mjs'
+import { buildDefaultProfiles } from '../../shared/launcher-profiles.mjs'
+import { BUDDY_CONSOLE_LABEL, CONSOLE_QUERY_TIMEOUT_MS, buddyConsoleItem, consoleReq, consoleToggleLabel, withTimeout,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice, foregroundOnlyProfile } from '../ui/lib/partner-launch-ui.mjs'
 
 test('設備選單：本機排第一', () => {
   const rows = launchDeviceRows(
@@ -97,4 +99,31 @@ test('主控台查詢請求帶明確欄位（引擎、名字、條目種類、�
   assert.match(js, /partnerConsoleSet\(\{ \.\.\.consoleReq\(c, eng\)/)
   const roster = fs.readFileSync(new URL('../ui/lib/roster.mjs', import.meta.url), 'utf8')
   assert.match(roster, /entryKind: typeof a\.kind === 'string'/, '名單要把條目自己的 kind 帶進好友物件')
+})
+
+test('pi 是互動式：只能前台，不給背景選項；其他模型的顯示方式照舊', () => {
+  assert.equal(showDisplayModeChoice('pi'), false)
+  assert.equal(foregroundOnlyProfile('pi'), true)
+  for (const id of ['claude', 'codex', 'gemini', 'grok']) assert.equal(foregroundOnlyProfile(id), false, id)
+  assert.equal(showDisplayModeChoice('claude'), true)
+  assert.equal(showDisplayModeChoice('codex'), true)
+  const pi = MODEL_CATALOG.find(m => m.profileId === 'pi')
+  assert.equal(pi.mode, 'window', 'pi 的 mode 保持 window')
+  assert.doesNotMatch(pi.modeLabel, /尚在擴充|手動/, '拿掉過時的說明')
+  assert.match(pi.modeLabel, /前台/)
+})
+
+test('pi 的 shared profile 說明不再寫「尚在擴充」', () => {
+  const p = buildDefaultProfiles({ pi: { cmd: '/usr/bin/pi' } }, { platform: 'linux', homeDir: '/h' }).pi
+  assert.doesNotMatch(String(p.disabledReason), /尚在擴充|請先在終端機手動開/)
+})
+
+test('開新夥伴對話框：選 pi 不動使用者的顯示方式偏好、第一句話交給啟動端', () => {
+  const js = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
+  const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
+  assert.match(js, /foregroundOnlyProfile\(partnerDlg\.profile\)/, '送出時依 pi 限制強制前台')
+  assert.match(js, /first_message: foregroundOnly \? partnerDlg\.firstMessage/, 'pi 的第一句話走啟動參數')
+  assert.match(js, /if \(partnerShowDisplay\.value\) \{[^}]*launchPrefs\.launchDisplay/, '只有看得到顯示方式時才記偏好')
+  assert.match(js, /foregroundOnlyProfile\(m\.profileId\) \? 'foreground'/, '選 pi 時預設前台')
+  assert.match(html, /partner-fgonly/, '對話框說明 pi 只能前台')
 })
