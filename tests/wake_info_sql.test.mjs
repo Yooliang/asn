@@ -14,6 +14,7 @@ import crypto from 'node:crypto'
 
 const DIR = new URL('../supabase/migrations/', import.meta.url)
 const MIG = '20261024150000_wake_info.sql'
+const MIG2 = '20261024170000_ai_silent_wake.sql' // 之後重新定義了 wake_set／wake_view，還原驗證要兩份一起改
 const read = f => fs.readFileSync(new URL(f, DIR), 'utf8').replace(/\r\n/g, '\n').replace(/create extension if not exists \w+[^;]*;/g, '')
 const files = fs.readdirSync(DIR).filter(f => f.endsWith('.sql')).sort()
 
@@ -164,14 +165,14 @@ test('實跑：已離開群組的成員不列', { skip }, async () => {
 })
 
 test('還原驗證：拿掉「只在尚未有值時寫入」或「已離開不列」，對應測試要變紅', { skip }, async () => {
-  const over = await boot({ mutate: { [MIG]: s => s.replace('and wake_info is null', '') } })
+  const over = await boot({ mutate: { [MIG]: s => s.replace('and wake_info is null', ''), [MIG2]: s => s.replace('and wake_info is null', '') } })
   const room = await room3(over)
   const h = await human(over, room, '一')
   await setInfo(over, { room, seq: h.seq, info: [{ key: A, rank: 1, hold: false }, { key: B, rank: 2, hold: false }] })
   const again = await setInfo(over, { node: W1, agent: '管理', room, seq: h.seq, info: [{ key: B, rank: 1, hold: false }] })
   assert.equal(again.set, true, '拿掉守門後第二次會覆蓋＝守門測試有效')
   assert.deepEqual((await hostView(over, room, h.seq)).wake_info.map(e => e.label), ['管理'])
-  const left = await boot({ mutate: { [MIG]: s => s.replace('and rm.left_at is null and rm.member = e.v->>', 'and rm.member = e.v->>') } })
+  const left = await boot({ mutate: { [MIG]: s => s.replace('and rm.left_at is null and rm.member = e.v->>', 'and rm.member = e.v->>'), [MIG2]: s => s.replace('and rm.left_at is null and rm.member = e.v->>', 'and rm.member = e.v->>') } })
   const room2 = await room3(left)
   const h2 = await human(left, room2, '一')
   await setInfo(left, { room: room2, seq: h2.seq, info: [{ key: A, rank: 1, hold: false }, { key: B, rank: 2, hold: false }] })
