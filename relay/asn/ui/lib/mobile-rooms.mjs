@@ -16,7 +16,7 @@ export const roomChatId = id => `${ROOM_PREFIX}${id}`
 export const isRoomChat = id => typeof id === 'string' && id.startsWith(ROOM_PREFIX) && id.length > ROOM_PREFIX.length
 export const roomIdOf = chatId => (isRoomChat(chatId) ? chatId.slice(ROOM_PREFIX.length) : '')
 
-import { KIND_BADGE, kindOf, safeLabel, speakerLabels } from './groups.mjs'
+import { KIND_BADGE, kindOf, safeLabel, speakerAvatarSeed, speakerLabels } from './groups.mjs'
 
 const oneLine = (s, n) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n)
 const memberList = r => (Array.isArray(r?.mine) ? r.mine : [])
@@ -88,7 +88,7 @@ export function roomLog(messages, myKeys, members) {
     if (m.from_kind === 'system' || m.relation === 'system') { out.push({ k: 'sys', text, t, id, seq: m.seq }); continue }
     const isMe = m.relation ? m.relation === 'mine' : mine.has(m.from)
     const kind = kindOf(m)
-    out.push({ k: isMe ? 'me' : 'them', who: isMe ? '' : (labels.get(m.from) || fromLabel(m)), kind, badge: isMe ? '' : KIND_BADGE[kind] ?? '', text, t, id, seq: m.seq, seed: m.is_seed === true })
+    out.push({ k: isMe ? 'me' : 'them', who: isMe ? '' : (labels.get(m.from) || fromLabel(m)), kind, badge: isMe ? '' : KIND_BADGE[kind] ?? '', av: isMe ? '' : speakerAvatarSeed(m.from), text, t, id, seq: m.seq, seed: m.is_seed === true })
   }
   return out
 }

@@ -152,7 +152,14 @@ export function speakerLabels(messages, members) {
   for (const m of Array.isArray(messages) ? messages : []) if (m?.from_kind !== 'system' && m?.relation !== 'system') add(m?.from, baseLabel(m))
   return out
 }
-export const KIND_BADGE = { human: '真人', ai: 'AI' }
+// 大頭貼種子：自己名下的 AI（節點~視窗）換成個人名單的 id 寫法（節點/視窗），兩邊同一位夥伴同一張圖；真人與別人的 AI 用原本的對外代號
+export function speakerAvatarSeed(from) {
+  if (typeof from !== 'string' || !from) return ''
+  if (from.startsWith('~') || from.startsWith('x:')) return from
+  const i = from.indexOf('~')
+  return i > 0 ? `${from.slice(0, i)}/${from.slice(i + 1)}` : from
+}
+export const KIND_BADGE ={ human: '真人', ai: 'AI' }
 export const kindOf = m => (m?.from_kind === 'ai' || m?.from_kind === 'human' ? m.from_kind : '')
 // 顯示用的名字只准這些字：避免後台資料夾帶節點代號格式（x: 代號、節點~視窗）
 export const safeLabel = s => String(s ?? '').replace(/\bx:[0-9a-f-]{8,}\b/gi, '').replace(/\S+~\S+/g, t => t.slice(t.indexOf('~') + 1)).trim()

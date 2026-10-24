@@ -36,6 +36,7 @@
 .gs-av,.spk-av{flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;font-size:12px;font-weight:700;color:#fff;vertical-align:middle}
 .gs-av.human,.spk-av.is-human{border-radius:50%;background:#3b82c4}
 .gs-av.ai,.spk-av.is-ai{border-radius:7px;background:#7b6bc9}
+.m-av-spk{flex:none;margin-top:2px}
 .spk-av{width:18px;height:18px;font-size:11px;margin-right:5px}
 .who-badge{display:inline-block;margin-left:5px;padding:0 6px;font-size:10px;line-height:15px;border-radius:8px;vertical-align:1px;color:#fff;font-weight:600}
 .who-badge.is-human{background:#3b82c4}.who-badge.is-ai{background:#7b6bc9}
