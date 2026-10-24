@@ -3,7 +3,7 @@
 // 資料來源都是現有的：名單（有哪些視窗、各用哪家引擎、在線狀態）、啟動器回報（那台裝了哪些 CLI）、
 // Claude 帳號遠端回報（acct_remote_list）、本機的 Claude 帳號庫與 Codex 目前登入。沒有新增任何後台回報。
 import { launchDeviceRows } from './partner-launch-ui.mjs'
-import { isDeviceHidden } from './device-order.mjs'
+import { isDeviceHidden, isDeviceRemoved } from './device-order.mjs'
 import { MODEL_CATALOG } from './model-catalog.mjs'
 import { engineKey, engineRank } from './tabs.mjs'
 import { agoText } from './cloud-invite.mjs'
@@ -36,7 +36,7 @@ function accountView(rows, { loggedOut = false } = {}) {
  * reports：節點 → { error, asnOnline, reportedAt, accounts:[{vendor,email,plan,current}] }（acct_remote_list 的結果）
  * self：{ claude:[{email,plan,current}], codex:{ loggedIn, text } }（本機的帳號庫與 Codex 登入）
  */
-export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], selfNode = '', asn = {}, launchers = {}, reports = {}, self = {}, now = Date.now() } = {}) {
+export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', asn = {}, launchers = {}, reports = {}, self = {}, now = Date.now() } = {}) {
   const rows = launchDeviceRows(friends, { selfNode, nodeOrder, deviceOrder })
   return rows.map(d => {
     const node = d.key
@@ -79,7 +79,7 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
       return { key: k, label: vendorLabel(k), account: v.text, reported: v.reported, extra: v.extra, accounts: list, switchable, switchHint: canPick && !switchable ? '對方電腦的 ASN 沒有在線，無法切換' : '' }
     })
     return {
-      key: node, label, self: isSelf, hidden: isDeviceHidden(node, friends, { selfNode, shown }), kind: phone ? '手機' : '電腦', online: isOn, onlineText: isOn ? '在線' : '離線',
+      key: node, label, self: isSelf, hidden: isDeviceHidden(node, friends, { selfNode, shown }), removed: isDeviceRemoved(node, removed, { selfNode }), kind: phone ? '手機' : '電腦', online: isOn, onlineText: isOn ? '在線' : '離線',
       reportedText: ago ? `帳號最後回報：${ago}` : (!isSelf && rep?.error ? '帳號回報讀取失敗' : ''),
       vendors, empty: vendors.length ? '' : '這台設備還沒有回報任何廠商',
     }

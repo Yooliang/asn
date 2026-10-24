@@ -13,17 +13,18 @@ import { catByKey, normalizeCatKey } from './settings-cats.mjs'
 import { vendorIconSvg } from './vendor-icons.mjs'
 import { USAGE_NOTE } from './usage.mjs'
 import { quotaView } from './account-quota.mjs'
+import { DEVICE_TEXT, canRemoveRow, dropAfter, moveFlags, removedRows, visibleRows } from './device-order.mjs'
 
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
 export const SETTING_OPS = [
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
-  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-trust', 'devices-refresh', 'device-switch', 'device-move', 'device-show',
+  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-trust', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove', 'device-restore',
   'closeTo', 'autostart', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'avatar-remove',
 ]
 
 export const SettingsPanel = {
   components: { LoginPanel, LogoutPanel, CloudInvitePanel },
-  props: { st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' } },
+  props: { st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' }, askRemove: { type: Boolean, default: false }, removedOpen: { type: Boolean, default: false } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
     const { ref, computed, onMounted, onBeforeUnmount } = globalThis.Vue
@@ -32,12 +33,36 @@ export const SettingsPanel = {
     const cat = computed(() => normalizeCatKey(props.catKey))
     const catIcon = catByKey('devices').icon
     // 設備與帳號：選中的設備頁籤（元件自己記；沒選或選的不在了就用這台，再不然第一台）
+    // 進來先看「全部設備的列表」；點一列進該設備的細部頁（picked＝設備鍵），返回回列表。dev 屬性＝直接開某台的細部頁
     const picked = ref(props.dev)
-    const devs = computed(() => (Array.isArray(props.st.devices) ? props.st.devices : []))
-    // 自動隱藏的設備（整台離線、夥伴全封存、沒未讀）：名單左邊不列，這裡仍保留供管理，可手動顯示
-    const hiddenDevs = computed(() => devs.value.filter(d => d.hidden))
-    const curIdx = computed(() => devs.value.findIndex(d => curDev.value && d.key === curDev.value.key))
-    const curDev = computed(() => devs.value.find(d => d.key === picked.value) ?? devs.value.find(d => d.self) ?? devs.value[0] ?? null)
+    const askRemove = ref(props.askRemove)   // 永久移除的二次確認（細部頁內）
+    const removedOpen = ref(props.removedOpen)   // 列表底部「已永久移除」展開
+    const allDevs = computed(() => (Array.isArray(props.st.devices) ? props.st.devices : []))
+    // 列表含自動隱藏的設備（淡色、標「已隱藏」）；永久移除的不在列表，收在底部的「已永久移除」
+    const devs = computed(() => visibleRows(allDevs.value))
+    const removedDevs = computed(() => removedRows(allDevs.value))
+    const flags = computed(() => moveFlags(devs.value, devs.value.find(d => d.self)?.key))
+    const curDev = computed(() => devs.value.find(d => d.key === picked.value) ?? null)
+    const open = key => { picked.value = key; askRemove.value = false }
+    const backToList = () => { picked.value = ''; askRemove.value = false }
+    const onRow = (key, ev) => { if (ev?.target?.closest?.('.dv-row-move')) return; open(key) }
+    const removeNow = () => { const k = curDev.value?.key; if (!k) return; act('device-remove', k); backToList() }
+    // 滑鼠拖放：拖到某列的上半＝插在前面、下半＝插在後面；放開時交給樞紐存順序
+    const dragKey = ref(''), overKey = ref(''), overAfter = ref(false)
+    const clearDrag = () => { dragKey.value = ''; overKey.value = ''; overAfter.value = false }
+    const dragStart = (key, ev) => { if (devs.value.find(d => d.key === key)?.self) { ev.preventDefault(); return } dragKey.value = key; if (ev.dataTransfer) { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', key) } }
+    const dragOver = (key, ev) => {
+      if (!dragKey.value || dragKey.value === key) return
+      ev.preventDefault()
+      if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move'
+      const r = ev.currentTarget.getBoundingClientRect()
+      overKey.value = key; overAfter.value = dropAfter(ev.clientY, r.top, r.height)
+    }
+    const drop = (key, ev) => {
+      ev.preventDefault()
+      if (dragKey.value) act('device-reorder', { drag: dragKey.value, target: key, after: overKey.value === key && overAfter.value })
+      clearDrag()
+    }
     // 這台一定有 Claude 卡片（可加入帳號）；Codex 沒登入時也留著卡片寫登入說明
     const curVendors = computed(() => {
       const d = curDev.value
@@ -51,27 +76,11 @@ export const SettingsPanel = {
       }
       return list
     })
-    // 頁籤太多時可左右捲動
-    const tabsEl = ref(null), canL = ref(false), canR = ref(false)
-    const updScroll = () => {
-      const el = tabsEl.value
-      if (!el) return
-      canL.value = el.scrollLeft > 0
-      canR.value = Math.ceil(el.scrollLeft + el.clientWidth) < el.scrollWidth
-    }
-    const scrollTabs = dir => tabsEl.value?.scrollBy?.({ left: dir * 220, behavior: 'smooth' })
-    const pick = (key, ev) => { picked.value = key; ev?.currentTarget?.scrollIntoView?.({ block: 'nearest', inline: 'center' }) }
-    let ro = null
-    onMounted(() => {
-      updScroll()
-      if (typeof ResizeObserver === 'function' && tabsEl.value) { ro = new ResizeObserver(updScroll); ro.observe(tabsEl.value) }
-    })
-    onBeforeUnmount(() => { ro?.disconnect() })
     const act = (op, value) => emit('act', op, value)
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return {
       fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions,
-      cat, catIcon, devs, hiddenDevs, curIdx, curDev, curVendors, tabsEl, canL, canR, updScroll, scrollTabs, pick, vendorIcon: vendorIconSvg, qv: a => quotaView(a),
+      cat, catIcon, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, onRow, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a),
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL,
       CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS, DIMS,
@@ -131,39 +140,46 @@ export const SettingsPanel = {
       <template v-if="cat === 'devices'">
         <div class="dv-set">
           <header class="dv-head">
-            <div class="dv-head-tx">
-              <h2 class="dv-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path :d="catIcon"></path></svg>設備與帳號</h2>
-              <small>只有 Claude 帳號能從這裡切換；其他廠商目前只顯示，沒回報的會寫「未回報」。這台電腦可以在自己的頁籤加入、切換、刪除 Claude 帳號。</small>
-            </div>
-            <button class="aero-btn" type="button" @click="act('devices-refresh')">重新整理</button>
+            <h2 class="dv-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path :d="catIcon"></path></svg>設備與帳號</h2>
           </header>
-          <small v-if="!devs.length">還沒有設備。</small>
-          <details class="dv-hidden" v-if="hiddenDevs.length">
-            <summary>已隱藏的設備（{{ hiddenDevs.length }}）</summary>
-            <small>這些設備整台離線、底下的對話都已封存，也沒有未讀，所以名單左邊沒有它們的頁籤。</small>
-            <ul>
-              <li v-for="d in hiddenDevs" :key="d.key"><span>{{ d.label }}</span><button class="aero-btn" type="button" @click="act('device-show', d.key)">顯示</button></li>
+          <template v-if="!curDev">
+            <small v-if="!devs.length">{{ DEVICE_TEXT.empty }}</small>
+            <ul class="dv-list" aria-label="設備" v-else>
+              <li v-for="d in devs" :key="d.key" :data-dev="d.key" :class="['dv-row', { hid: d.hidden, off: !d.online, dragging: dragKey === d.key, 'drop-before': overKey === d.key && !overAfter, 'drop-after': overKey === d.key && overAfter }]" :draggable="!d.self" @click="onRow(d.key, $event)" @dragstart="dragStart(d.key, $event)" @dragover="dragOver(d.key, $event)" @drop="drop(d.key, $event)" @dragend="clearDrag">
+                <button class="dv-row-go" type="button" :aria-label="'查看 ' + d.label + ' 的帳號'"><span class="dv-name">{{ d.label }}</span><span class="dv-tag kind">{{ d.kind }}</span><span :class="['dv-tag', d.online ? 'on' : 'off']">{{ d.onlineText }}</span><span class="dv-tag me" v-if="d.self">這台</span><span class="dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span></button>
+                <span class="dv-row-move" v-if="!d.self" role="group" aria-label="設備順序">
+                  <button class="aero-btn" type="button" :disabled="!flags[d.key].up" :aria-label="'上移 ' + d.label" @click.stop="act('device-move', { node: d.key, dir: -1 })">{{ DEVICE_TEXT.moveUp }}</button>
+                  <button class="aero-btn" type="button" :disabled="!flags[d.key].down" :aria-label="'下移 ' + d.label" @click.stop="act('device-move', { node: d.key, dir: 1 })">{{ DEVICE_TEXT.moveDown }}</button>
+                </span>
+                <span class="dv-chev" aria-hidden="true">&rsaquo;</span>
+              </li>
             </ul>
-          </details>
-          <div class="dv-tabs-wrap" v-if="devs.length">
-            <button class="dv-scroll l" type="button" :hidden="!canL" aria-label="向左捲動設備頁籤" @click="scrollTabs(-1)">&lsaquo;</button>
-            <div class="dv-tabs" role="tablist" aria-label="設備" ref="tabsEl" @scroll="updScroll">
-              <button v-for="d in devs" :key="d.key" :class="['dv-tab', { sel: curDev && d.key === curDev.key, off: !d.online }]" type="button" role="tab" :aria-selected="curDev && d.key === curDev.key ? 'true' : 'false'" @click="pick(d.key, $event)">{{ d.label }}<span :class="['dv-dot', d.online ? 'on' : 'off']" :title="d.onlineText"></span></button>
+            <div class="dv-removed" v-if="removedDevs.length">
+              <button class="dv-removed-link" type="button" :aria-expanded="removedOpen ? 'true' : 'false'" @click="removedOpen = !removedOpen">{{ DEVICE_TEXT.removedLink(removedDevs.length) }}</button>
+              <ul v-if="removedOpen">
+                <li v-for="d in removedDevs" :key="d.key"><span>{{ d.label }}</span><button class="aero-btn" type="button" @click="act('device-restore', d.key)">{{ DEVICE_TEXT.restore }}</button></li>
+              </ul>
             </div>
-            <button class="dv-scroll r" type="button" :hidden="!canR" aria-label="向右捲動設備頁籤" @click="scrollTabs(1)">&rsaquo;</button>
-          </div>
-          <section class="dv-dev" v-if="curDev" role="tabpanel" :aria-label="curDev.label">
+          </template>
+          <section class="dv-dev" v-else :aria-label="curDev.label">
             <div class="dv-dev-h">
+              <button class="aero-btn dv-back" type="button" @click="backToList">{{ DEVICE_TEXT.back }}</button>
               <h3 class="dv-name">{{ curDev.label }}</h3>
               <span class="dv-tag kind">{{ curDev.kind }}</span>
               <span :class="['dv-tag', curDev.online ? 'on' : 'off']">{{ curDev.onlineText }}</span>
               <span class="dv-tag me" v-if="curDev.self">這台</span>
-              <span class="dv-tag off" v-if="curDev.hidden">已隱藏</span>
-              <span class="dv-order" v-if="!curDev.self" role="group" aria-label="設備頁籤順序">
-                <button class="aero-btn" type="button" :disabled="curIdx <= 1" aria-label="上移這台設備的頁籤" @click="act('device-move', { node: curDev.key, dir: -1 })">上移</button>
-                <button class="aero-btn" type="button" :disabled="curIdx >= devs.length - 1" aria-label="下移這台設備的頁籤" @click="act('device-move', { node: curDev.key, dir: 1 })">下移</button>
-                <button class="aero-btn" type="button" v-if="curDev.hidden" @click="act('device-show', curDev.key)">在名單顯示</button>
-              </span>
+              <span class="dv-tag off" v-if="curDev.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
+            </div>
+            <div class="dv-hid-act" v-if="canRemoveRow(curDev)">
+              <template v-if="!askRemove">
+                <button class="aero-btn" type="button" @click="act('device-show', curDev.key)">{{ DEVICE_TEXT.showBack }}</button>
+                <button class="aero-btn dv-danger" type="button" @click="askRemove = true">{{ DEVICE_TEXT.remove }}</button>
+              </template>
+              <template v-else>
+                <p class="dv-confirm" role="alert">{{ DEVICE_TEXT.confirmRemove(curDev.label) }}</p>
+                <button class="aero-btn dv-danger" type="button" @click="removeNow">{{ DEVICE_TEXT.removeYes }}</button>
+                <button class="aero-btn" type="button" @click="askRemove = false">{{ DEVICE_TEXT.cancel }}</button>
+              </template>
             </div>
             <small v-if="curDev.reportedText">{{ curDev.reportedText }}</small>
             <div :class="['dv-body', { off: !curDev.online }]">

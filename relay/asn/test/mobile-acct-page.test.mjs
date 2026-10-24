@@ -77,12 +77,10 @@ test('Claude 的確認畫面資料：只取 Claude 帳號交給既有的 acctShe
   assert.equal(acctReportOf({ ...REPORTS[W], msg: '壞了' }).error, '壞了')
 })
 
-test('整頁畫面接線：橫向設備頁籤、廠商卡片、帳號列、虛線未回報、離線偏灰、整台空狀態', () => {
+test('整頁畫面接線（細部頁）：廠商卡片、帳號列、虛線未回報、離線偏灰、整台空狀態；設備列表與排序見 device-list-page.test.mjs', () => {
   const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
   const pane = /<section class="m-pg m-chat"[\s\S]*?<!-- 設置 -->/.exec(html)[0]
-  assert.match(pane, /role="tablist"[^>]*aria-label="設備"/)
-  assert.match(pane, /v-for="d in acctDevs"[\s\S]*?role="tab"/)
-  assert.match(pane, /:aria-selected=/)
+  assert.match(pane, /v-for="d in acctDevs"[\s\S]*?class="m-dv-go"/, '先是設備列表')
   assert.match(pane, /m-dv-dot/)
   assert.match(pane, /v-for="v in acctCur\.vendors"/)
   assert.match(pane, /vendorIconSvg\(v\.key\)/)
@@ -102,24 +100,21 @@ test('整頁畫面接線：橫向設備頁籤、廠商卡片、帳號列、虛�
   assert.match(read('ui', 'lib', 'mobile-acct.mjs'), /from '\.\/device-tree\.mjs'/)
   assert.match(js, /acctDeviceTree\(/)
   assert.doesNotMatch(js, /buildDeviceTree|vendorLabel|VENDOR_LABEL/)
-  // 樣式：頁籤橫向可滑、觸控區至少 40px、離線偏灰、虛線框
-  for (const sel of ['m-dv-tabs', 'm-dv-tab', 'm-dv-vendor', 'm-dv-acct', 'm-dv-none', 'm-dv-body.off', 'm-dv-sw']) assert.ok(css.includes(`.${sel}`), `缺樣式 ${sel}`)
-  assert.match(/\.m-dv-tabs\{([^}]*)\}/.exec(css)[1], /overflow-x:\s*auto/)
-  assert.match(/\.m-dv-tab\{([^}]*)\}/.exec(css)[1], /min-height:\s*4\dpx/)
+  // 樣式：觸控區至少 40px、離線偏灰、虛線框（橫向頁籤已被列表取代）
+  for (const sel of ['m-dv-list', 'm-dv-row', 'm-dv-vendor', 'm-dv-acct', 'm-dv-none', 'm-dv-body.off', 'm-dv-sw']) assert.ok(css.includes(`.${sel}`), `缺樣式 ${sel}`)
   assert.match(/\.m-dv-sw\{([^}]*)\}/.exec(css)[1], /min-height:\s*4\dpx/)
   assert.match(/\.m-dv-none\{([^}]*)\}/.exec(css)[1], /dashed/)
   assert.match(/\.m-dv-body\.off\{([^}]*)\}/.exec(css)[1], /grayscale/)
-  assert.match(read('ui', 'lib', 'mobile.mjs'), /SWIPE_BLOCK_SELECTOR = '[^']*\.m-dv-tabs/, '橫向滑頁籤時不能被分頁手勢搶走')
+  assert.match(read('ui', 'lib', 'mobile.mjs'), /SWIPE_BLOCK_SELECTOR = '[^']*\.m-dv-grip/, '拖排序把手時不能被分頁手勢搶走')
 })
 
-test('流程行為：點「切換」＝選好帳號進確認畫面；從夥伴列表進來預選那台設備；導覽與分頁標籤維持', () => {
+test('流程行為：點「切換」＝選好帳號進確認畫面；從夥伴列表進來直接開那台的細部頁；導覽與分頁標籤維持', () => {
   const js = read('ui', 'm.js')
-  assert.match(js, /async function openAcct\(g\)[\s\S]*?acctSw\.node = /, '預選點進來的那台設備')
+  assert.match(js, /async function openAcct\(g\)[\s\S]*?acctSw\.node = g\.node/, '直接開點進來的那台設備')
   assert.match(js, /function startAcctSwitch\(email\)[\s\S]*?acctSw\.phase = 'confirm'/)
   assert.match(js, /acctView\.value\.canPick/, '進確認前仍檢查能不能切換')
   assert.match(js, /if \(acctSw\.phase !== 'confirm' \|\| !acctView\.value\.pickEmail\) return/, '一定先看過確認畫面才送')
   assert.match(js, /acctSw\.phase = 'run'\n\s*acctSw\.view = await runAcctSwitch\(/, '送出後進進度畫面')
-  assert.match(js, /acctPickDevice\(/)
   assert.match(js, /android_acct_list/)
   assert.match(js, /go\(acctNav\(\)\)/)
   assert.equal(tabLabel('chats', acctNav()), '選項')

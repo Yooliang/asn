@@ -92,8 +92,8 @@ const render = async (catKey, st = fullState()) => {
 test('設定表單：每一類都轉得出來，各類原本的項目都在', async () => {
   const want = {
     me: ['登入狀態', '尚未登入', '用 Google 登入', '用 GitHub 登入', '大頭貼', '選擇圖片', '移除，改回自動產生', '目前用的是自動產生的大頭貼。'],
-    // 帳號與設備併成一頁：預設顯示「這台」的頁籤（帳號管理＋本機 Codex），其他設備的頁籤在 device-accounts-page.test.mjs
-    devices: ['設備與帳號', '重新整理', '家用機', '工作機', '手機一號', 'Claude', '使用中', '切換', '刪除', 'a@b.c', 'OpenAI（Codex）', 'x@openai.test · plus', '信任我自己的設備', '只有 Claude 帳號能從這裡切換'],
+    // 設備與帳號：進來先是設備列表（名稱、類型、在線狀態、›）；帳號管理與廠商在細部頁，見 device-accounts-page／device-list-page
+    devices: ['設備與帳號', '家用機', '工作機', '手機一號', '在線'],
     look: ['視窗外框', '視窗模式', '頭像模式', '工具列位置', '文字底色'],
     tabs: ['分頁依', '分組依'],
     notify: ['右下角通知', '通知聲音', '震動聲音', '收到檔案聲音'],

@@ -83,19 +83,35 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-ghead-row .m-ghead{flex:1;min-width:0}
 /* 「選項」整頁＝電腦版「設備與帳號」：橫向設備頁籤 → 廠商卡片 → 帳號列（單欄；可點區域至少 40px） */
 .m-dv{gap:10px}
-.m-dv-bar{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
 .m-dv-refresh{flex:none;min-height:40px;min-width:64px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel-soft);color:var(--title-fg);font:inherit;font-size:13px;cursor:pointer}
-.m-dv-tabs{display:flex;flex:none;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;border-bottom:1px solid var(--line);background:var(--panel-soft);border-radius:8px 8px 0 0;-webkit-overflow-scrolling:touch}
-.m-dv-tabs::-webkit-scrollbar{display:none}
-.m-dv-tab{flex:none;display:flex;align-items:center;gap:7px;min-height:44px;padding:0 16px;border:0;border-bottom:3px solid transparent;background:none;color:var(--fg);font:inherit;font-size:15px;white-space:nowrap;cursor:pointer}
-.m-dv-tab.off{color:var(--muted)}
-.m-dv-hidden{margin:8px 0;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel-soft);color:var(--fg)}
-.m-dv-hidden summary{min-height:36px;display:flex;align-items:center;cursor:pointer}
-.m-dv-hidden ul{list-style:none;margin:6px 0 0;padding:0}
-.m-dv-hidden li{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:44px}
-.m-dv-tab.sel{border-bottom-color:var(--accent);color:var(--link);background:var(--panel);font-weight:600}
 .m-dv-dot{flex:none;width:9px;height:9px;border-radius:50%;background:var(--offline)}
 .m-dv-dot.on{background:var(--online);box-shadow:0 0 4px var(--online)}
+.m-dv-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:8px;background:var(--panel);overflow:hidden}
+.m-dv-row{display:flex;align-items:stretch;min-height:56px;border-bottom:1px solid var(--line);background:var(--panel);position:relative}
+.m-dv-row:last-child{border-bottom:0}
+.m-dv-row.off .m-dv-rn{color:var(--muted)}
+.m-dv-row.hid{opacity:.6;background:var(--panel-soft)}
+.m-dv-row.dragging{background:var(--panel-head);opacity:.85}
+.m-dv-row.drop-before::before,.m-dv-row.drop-after::after{content:"";position:absolute;left:0;right:0;height:3px;background:var(--accent)}
+.m-dv-row.drop-before::before{top:-1px}
+.m-dv-row.drop-after::after{bottom:-1px}
+.m-dv-grip{flex:none;width:48px;min-height:48px;display:flex;align-items:center;justify-content:center;border:0;background:none;color:var(--muted);cursor:grab;touch-action:none;-webkit-user-select:none;user-select:none}
+.m-dv-grip-gap{flex:none;width:12px}
+.m-dv-go{flex:1;min-width:0;display:flex;align-items:center;gap:10px;min-height:56px;padding:0 12px 0 0;border:0;background:none;color:var(--fg);font:inherit;text-align:left;cursor:pointer}
+.m-dv-rn{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;color:var(--fg)}
+.m-dv-rn b{font-size:16px;font-weight:600;overflow-wrap:anywhere}
+.m-dv-rs{font-size:13px;color:var(--muted)}
+.m-dv-chev{flex:none;font-size:26px;line-height:1;color:var(--muted)}
+.m-dv-tag.hid{border:1px solid var(--line);background:none;color:var(--muted)}
+.m-dv-back{align-self:flex-start;min-height:44px;padding:0 12px;border:0;background:none;color:var(--link);font:inherit;font-size:16px;cursor:pointer}
+.m-dv-hid-act{display:flex;gap:8px;flex-wrap:wrap}
+.m-dv-danger{color:#b3261e;border-color:#b3261e}
+.m-btn.m-dv-danger{background:#b3261e;color:#fff}
+@media (prefers-color-scheme:dark){.m-dv-danger{color:#ff9a90;border-color:#ff9a90}.m-btn.m-dv-danger{background:#8c1d18;color:#fff}}
+.m-dv-removed{margin-top:4px}
+.m-dv-removed-link{min-height:44px;padding:0 4px;border:0;background:none;color:var(--link);font:inherit;font-size:14px;cursor:pointer}
+.m-dv-removed ul{list-style:none;margin:0;padding:0}
+.m-dv-removed li{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:48px;color:var(--fg)}
 .m-dv-dev{display:flex;flex-direction:column;gap:8px;min-width:0}
 .m-dv-dh{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
 .m-dv-name{margin:0;font-size:17px;color:var(--title-fg)}

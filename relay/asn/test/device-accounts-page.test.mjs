@@ -73,30 +73,27 @@ const render = async (props, state = st()) => {
   return renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st: state, meAv: '', ...props }) }))
 }
 
-test('頁首：設定圖示、標題、說明文字與「重新整理」', async () => {
+test('頁首：設定圖示與標題（10-25 起拿掉說明文字與「重新整理」，細節在 device-list-page.test.mjs）', async () => {
   const html = await render({ catKey: 'devices' })
   assert.match(html, /<h2[^>]*class="dv-title"[^>]*>[\s\S]*<svg[\s\S]*設備與帳號/)
-  assert.ok(html.includes('只有 Claude 帳號能從這裡切換'))
-  assert.match(html, /class="dv-head"[\s\S]*<button[^>]*>重新整理<\/button>/)
-  assert.ok(SettingsPanel.template.includes("act('devices-refresh')"))
+  assert.ok(!html.includes('只有 Claude 帳號能從這裡切換') && !html.includes('重新整理'))
 })
 
-test('第 1 層：每台設備一個頁籤，附線上／離線圓點；預設選中這台，其餘不選', async () => {
+test('第 1 層：進入先是設備列表（不再是橫向頁籤）：每台一列，附線上／離線標籤，右邊有「›」', async () => {
   const html = await render({ catKey: 'devices' })
-  const tabs = [...html.matchAll(/<button[^>]*role="tab"[^>]*>[\s\S]*?<\/button>/g)].map(m => m[0])
-  assert.equal(tabs.length, 4)
-  assert.ok(html.includes('role="tablist"'))
-  assert.match(tabs[0], /aria-selected="true"[\s\S]*家用機/)
-  for (const i of [1, 2, 3]) assert.match(tabs[i], /aria-selected="false"/)
-  assert.match(tabs[1], /dv-dot on/); assert.match(tabs[2], /dv-dot off/); assert.match(tabs[3], /dv-dot off/)
-  assert.ok(html.includes('aria-label="向左捲動設備頁籤"') && html.includes('aria-label="向右捲動設備頁籤"'))
+  const rows = [...html.matchAll(/<li[^>]*class="dv-row[^"]*"[\s\S]*?<\/li>/g)].map(m => m[0])
+  assert.equal(rows.length, 4)
+  assert.ok(!html.includes('role="tablist"') && !html.includes('role="tab"'))
+  assert.match(rows[0], /家用機/)
+  assert.match(rows[1], /dv-tag on[^>]*>在線/); assert.match(rows[2], /dv-tag off[^>]*>離線/)
+  for (const r of rows) assert.ok(r.includes('dv-chev'))
 })
 
-test('預設選中的頁籤：沒有「這台」時選第一台；指定 dev 就選指定的；認不得的鍵退回預設', async () => {
+test('進入細部頁：指定 dev 才進；沒指定或認不得的鍵都留在列表（不再自動選「這台」）', async () => {
   const noSelf = st({ devices: devs().map(d => ({ ...d, self: false })) })
-  assert.match(await render({ catKey: 'devices' }, noSelf), /aria-selected="true"[^>]*>[\s\S]{0,200}?家用機/)
+  assert.ok((await render({ catKey: 'devices' }, noSelf)).includes('class="dv-list"'))
   assert.match(await render({ catKey: 'devices', dev: 'W' }), /dv-dev-h[\s\S]*工作機/)
-  assert.match(await render({ catKey: 'devices', dev: 'zzz' }), /dv-dev-h[\s\S]*家用機/)
+  assert.ok((await render({ catKey: 'devices', dev: 'zzz' })).includes('class="dv-list"'))
 })
 
 test('第 2 層：設備標題（名稱、類型標籤、在線標籤）與一列一個的廠商卡片（我們自己的圖示）', async () => {
@@ -144,7 +141,7 @@ test('對方 ASN 沒在線：切換鈕停用並寫原因；離線設備整體偏
 })
 
 test('這台的頁籤：完整的帳號管理（切換、刪除、加入、自動加入、信任自己的設備）都在', async () => {
-  const html = await render({ catKey: 'devices' })
+  const html = await render({ catKey: 'devices', dev: 'H' })
   for (const w of ['a@b.c', 'p@b.c', '使用中', '切換', '刪除', '信任我自己的設備', '邀請雲端代理', 'x@openai.test', '這台']) assert.ok(html.includes(w), `少了「${w}」`)
   const cur = /<li class="dv-acct[^"]*"[^>]*>(?:(?!<\/li>)[\s\S])*a@b\.c[\s\S]*?<\/li>/.exec(html)[0]
   assert.match(cur, /<button[^>]*disabled[^>]*>切換<\/button>/, '使用中的帳號不能再切換')
@@ -154,16 +151,16 @@ test('這台的頁籤：完整的帳號管理（切換、刪除、加入、自�
 
 test('這台的頁籤：刪除要二次確認、忙碌時按鈕停用、警告與狀態列照實顯示；沒登入 Claude 時寫提示', async () => {
   const a = { ...ACCT, confirmDel: 'p@b.c', busy: true, msg: '已切換', mod: '外掛已安裝', autoNote: '已自動加入 q@b.c', current: { email: 'z@b.c', saved: false } }
-  const html = await render({ catKey: 'devices' }, st({ accounts: a }))
+  const html = await render({ catKey: 'devices', dev: 'H' }, st({ accounts: a }))
   assert.ok(html.includes('確認刪除') && html.includes('已切換') && html.includes('外掛已安裝') && html.includes('已自動加入 q@b.c'))
   assert.ok(html.includes('目前登入的 z@b.c 還沒加入帳號庫'))
-  const none = await render({ catKey: 'devices' }, st({ accounts: { ...ACCT, list: [], current: null }, devices: [{ ...devs()[0], vendors: [] }, ...devs().slice(1)] }))
+  const none = await render({ catKey: 'devices', dev: 'H' }, st({ accounts: { ...ACCT, list: [], current: null }, devices: [{ ...devs()[0], vendors: [] }, ...devs().slice(1)] }))
   assert.ok(none.includes('這台電腦目前沒有 Claude 登入。') && none.includes('還沒有加入過帳號。'))
 })
 
 test('這台沒有 Codex 登入：Codex 卡片寫登入說明，不整張消失', async () => {
   const d = devs(); d[0].vendors = d[0].vendors.filter(v => v.key !== 'codex')
-  const html = await render({ catKey: 'devices' }, st({ devices: d, accounts: { ...ACCT, codexLine: '這台電腦目前沒有登入 Codex。' } }))
+  const html = await render({ catKey: 'devices', dev: 'H' }, st({ devices: d, accounts: { ...ACCT, codexLine: '這台電腦目前沒有登入 Codex。' } }))
   assert.ok(html.includes('這台電腦目前沒有登入 Codex。') && html.includes(vendorIconSvg('codex')))
 })
 
@@ -177,7 +174,7 @@ test('遠端設備下拉選單已被頁籤取代：元件與樞紐不再有 acct
   assert.ok(!SETTING_OPS.includes('acct-remote-node') && !SETTING_OPS.includes('acct-remote-switch'))
   assert.ok(!read('ui/lib/settings-panel.mjs').includes('acct-remote'))
   assert.ok(!read('ui/list.js').includes("case 'acct-remote"))
-  for (const op of ['acct-switch', 'acct-remove', 'acct-trust', 'devices-refresh', 'device-switch']) assert.ok(SETTING_OPS.includes(op), op)
+  for (const op of ['acct-switch', 'acct-remove', 'acct-trust', 'device-switch', 'device-reorder', 'device-remove', 'device-restore']) assert.ok(SETTING_OPS.includes(op), op)
 })
 
 test('守門：不引入 Tailwind 或外部網址；樣式只用既有的 CSS 變數；畫面不顯示節點代號', () => {

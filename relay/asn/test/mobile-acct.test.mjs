@@ -119,7 +119,7 @@ test('入口改成低調的「選項」小按鈕，按下切到第二個分頁�
   assert.match(pane[0], /v-if="nav\.sheet === 'acct'"/)
   assert.match(pane[0], /class="m-keep" :hidden="nav\.sheet === 'acct'"/)
   assert.match(pane[0], /acctSw\.phase === 'confirm'/)
-  assert.match(pane[0], /aria-label="返回"[^>]*@click="back"/)
+  assert.match(pane[0], /aria-label="返回"[^>]*@click="acctHeaderBack"/)   // 標題列返回鍵：細部頁先回列表，列表才離開
   assert.doesNotMatch(html, /<div class="m-ops"[^>]*nav\.sheet === 'acct'/)
   assert.doesNotMatch(html, /<section class="m-sheet"[^>]*nav\.sheet === 'acct'/)
   // 分頁切換：選項頁時點「夥伴」＝返回上一頁；對話被蓋住時不標已讀
