@@ -34,7 +34,7 @@ test('右鍵選單的「背景／前台切換」：文字固定不隨狀態改�
   assert.match(buddyConsoleItem('none').tip, /找不到/)
   assert.equal(buddyConsoleItem('toggle', why).tip, '', '能按的時候不放提示')
   const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
-  assert.match(html, /:disabled="buddyConsoleItemView.disabled"[^>]*>{{ buddyConsoleItemView.label }}/, '選單項目沒有 v-if（不隱藏）')
+  assert.match(html, /:aria-disabled="buddyConsoleItemView\.disabled \? 'true' : 'false'"[^>]*>[^]*?\{\{ buddyConsoleItemView\.label \}\}/, '選單項目沒有 v-if（不隱藏），反灰用 aria-disabled 並附說明')
 })
 
 test('名單右鍵選單的固定項目不依賴查詢結果，而且查詢有逾時', () => {
