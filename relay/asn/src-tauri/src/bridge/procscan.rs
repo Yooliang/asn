@@ -49,9 +49,15 @@ impl ProcAgent {
     }
 }
 
-/// 是否開啟（`ASN_ROSTER_PROCS=1`）。預設關：現行後台會丟掉 kind／receivable，條目會被當成可收信的名字；後台支援後再改預設
+/// 是否開啟：預設開（後台已保留 kind／receivable／model，這類條目只顯示、不能收信）；`ASN_ROSTER_PROCS=0`／`false`／`off` 才關
 pub fn enabled() -> bool {
-    matches!(crate::envc::get("ASN_ROSTER_PROCS").as_deref().map(str::trim), Some("1") | Some("true") | Some("on"))
+    let v = crate::envc::get("ASN_ROSTER_PROCS");
+    let v = v.as_deref().map(str::trim);
+    // 測試裡預設關（不掃測試機器上真的程序，名單斷言才穩）；要測掃描就明寫 ASN_ROSTER_PROCS=1
+    if cfg!(test) {
+        return matches!(v, Some("1") | Some("true") | Some("on"));
+    }
+    !matches!(v, Some("0") | Some("false") | Some("off"))
 }
 
 fn exe_stem(exe: &str) -> String {
