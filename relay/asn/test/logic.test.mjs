@@ -105,7 +105,7 @@ test('守門：所有 v-html 都只用 emo(...)', () => {
   for (const f of files) {
     for (const m of fs.readFileSync(path.join(UI, f), 'utf8').matchAll(/v-html\s*=\s*"([^"]*)"/g)) {
       count++
-      assert.match(m[1], /^(emo|vendorIcon|renderMarkdown|bodyHtml)\(.+\)$/, `${f} 的 v-html 只准 emo(...)、vendorIcon(...)、renderMarkdown(...) 或 bodyHtml(...)（它只是 renderMarkdown 加上群組 @ 小標記，見 markdown.test.mjs 的守門）：${m[1]}`)
+      assert.match(m[1], /^(emo|vendorIcon|vendorIconSvg|renderMarkdown|bodyHtml)\(.+\)$/, `${f} 的 v-html 只准 emo(...)、vendorIcon(...)、vendorIconSvg(...)（自家模組的固定 SVG）、renderMarkdown(...) 或 bodyHtml(...)（它只是 renderMarkdown 加上群組 @ 小標記，見 markdown.test.mjs 的守門）：${m[1]}`)
     }
   }
   assert.ok(count >= 4, `v-html 數量異常：${count}`)
