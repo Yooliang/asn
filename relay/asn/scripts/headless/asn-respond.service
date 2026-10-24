@@ -26,7 +26,7 @@ Environment=HOME=<HOME>
 #Environment=ASN_INBOX_NAME=<NODE_ID>
 # 回答用的模型（預設 sonnet）
 #Environment=ASN_MAILBOX_MODEL=sonnet
-# 開放的工具（預設 Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch）
+# 開放的工具（預設 Read,Glob,Grep,WebFetch,WebSearch）
 #Environment=ASN_RESPOND_TOOLS=Read,Glob,Grep,WebFetch
 # 祕密（claude token、必要時 ASN_RELAY_KEY）放這個檔，不放在單元裡
 EnvironmentFile=/etc/asn/respond.env

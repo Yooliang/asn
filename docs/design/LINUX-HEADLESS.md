@@ -427,7 +427,7 @@ GitHub Actions 停擺時，可在 Windows／macOS／Linux 本機直接編出 Lin
 
 - 視窗名：`ASN_INBOX_NAME`，沒設用節點代號。不可和內部收發室名（`ASN_MAILBOX_NAME`，預設 `<代號>-收發室`）相同，否則結束碼 2。
 - 模型：沒設 `ASN_MAILBOX_MODEL` 時用 `sonnet`（轉交員預設是 haiku，回答要比轉交聰明）。
-- 工具：`ASN_RESPOND_TOOLS`，預設 `Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch`；沒有寄信、跨 session 的工具（回答由橋代寄）。
+- 工具：`ASN_RESPOND_TOOLS`，預設 `Read,Glob,Grep,WebFetch,WebSearch`；沒有寄信、跨 session 的工具（回答由橋代寄）。（預設唯讀：要讓它能寫檔或下指令，請明確加上 Write,Edit,Bash；能寄信給這個節點的人等於能指使這台主機）
 
 ### 行為
 

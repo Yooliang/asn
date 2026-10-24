@@ -43,7 +43,7 @@ pub fn system_prompt(mailbox_name: &str, nonce: &str) -> String {
 }
 
 /// 自動回信模式預設開放的工具：唯讀調查與寫文件夠用；沒有寄信、跨 session 的工具（回答由橋代寄）。可用 ASN_RESPOND_TOOLS 改
-pub const RESPOND_TOOLS_DEFAULT: &str = "Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch";
+pub const RESPOND_TOOLS_DEFAULT: &str = "Read,Glob,Grep,WebFetch,WebSearch";
 
 /// 自動回信模式的 worker 設定：worker 自己當一個對外可收信的視窗（Linux 無視窗主機沒有互動式 Claude 視窗）
 #[derive(Clone, Debug, PartialEq)]
