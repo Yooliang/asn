@@ -19,9 +19,9 @@ export async function startFakeRelay({ node = 'T', members = [], mails = [], roo
   }
   const readBody = req => new Promise(r => { let b = ''; req.on('data', d => (b += d)); req.on('end', () => r(b ? JSON.parse(b) : null)) })
   const srv = http.createServer(async (req, res) => {
-    const u = new URL(req.url, 'http://x'), action = u.searchParams.get('action'), agent = u.searchParams.get('agent')
+    const u = new URL(req.url, 'http://x'), action = u.searchParams.get('action'), agent = u.searchParams.get('agent'), exclude = u.searchParams.get('exclude')
     const body = await readBody(req)
-    st.reqs.push({ action, agent, method: req.method, key: req.headers['x-relay-key'], auth: req.headers.authorization, body })
+    st.reqs.push({ action, agent, exclude, method: req.method, key: req.headers['x-relay-key'], auth: req.headers.authorization, body })
     const out = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)) }
     // 帳號動作（登入憑證，不是節點金鑰）：照 supabase/functions/_shared/account.ts 的形狀；憑證真偽在真後端驗，這裡只認 Bearer 標頭有帶
     if (['account_bootstrap', 'node_create', 'node_claim'].includes(action) && req.method === 'POST') {
