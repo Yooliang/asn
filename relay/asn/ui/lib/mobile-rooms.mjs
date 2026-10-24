@@ -89,7 +89,7 @@ export function wakeTags(info) {
   if (!off.length && on.length < 2) return []
   return [...on, ...off].map(({ label, off: o }) => ({ label, off: o }))
 }
-const replyOf = (r, labels) => (r && Number.isInteger(r.seq) ? { seq: r.seq, author: safeLabel(labels.get(r.from) || r.from_label || '') || '成員', excerpt: oneLine(r.excerpt, 80) } : null)
+const replyOf = (r, labels) => (r && Number.isInteger(r.seq) ? { seq: r.seq, author: safeLabel(labels.get(r.from) || r.from_display_label || r.from_label || '') || '成員', excerpt: oneLine(r.excerpt, 80) } : null)
 export function roomLog(messages, myKeys, members) {
   const mine = new Set(myKeys ?? [])
   const list = (Array.isArray(messages) ? messages : []).filter(m => m && Number.isInteger(m.seq))
