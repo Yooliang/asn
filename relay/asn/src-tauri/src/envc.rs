@@ -63,6 +63,9 @@ pub const PAIRS: &[(&str, &str)] = &[
     // 收件匣節點（Linux 無頭）：視窗名、引擎名、命令列無人值守開關
     ("ASN_INBOX_NAME", "IRORI_INBOX_NAME"),
     ("ASN_INBOX_ENGINE", "IRORI_INBOX_ENGINE"),
+    // 自動回信模式（Linux 無頭，內建 claude -p 自己當可收信的視窗）：開關與開放的工具
+    ("ASN_RESPOND", "IRORI_RESPOND"),
+    ("ASN_RESPOND_TOOLS", "IRORI_RESPOND_TOOLS"),
     ("ASN_CLI_UNATTENDED", "IRORI_CLI_UNATTENDED"),
     ("ASN_DATA", "IRORI_ASN_DATA"),
     ("ASN_POLL_MS", "IRORI_ASN_POLL_MS"),

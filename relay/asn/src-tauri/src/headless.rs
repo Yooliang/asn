@@ -32,14 +32,18 @@ pub struct RunOpts {
     pub engine_only: bool,
     /// 收件匣模式：不啟動 worker、不需 Aegis，收到的信存進 `<ASN_HOME>/inbox/inbox.jsonl`，由代理用 `asn-cli inbox` 讀、自己用 `asn-cli send` 回信
     pub inbox: bool,
+    /// 自動回信模式：worker 自己當一個對外可收信的視窗（名字取 ASN_INBOX_NAME，預設節點代號），收到的信與群組訊息由它回答並寄回
+    pub respond: bool,
 }
 
-const USAGE: &str = "用法：asn-bridge run [--engine-only | --inbox]\n       asn-bridge login [--url <後端網址>] [--home <資料夾>]\n\
+const USAGE: &str = "用法：asn-bridge run [--engine-only | --inbox | --respond]\n       asn-bridge login [--url <後端網址>] [--home <資料夾>]\n\
   login          還沒有金鑰時用：印出短碼，請人在已登入的 ASN 輸入核准，金鑰自動存進資料夾的 <代號>.key（權限 600，不會顯示）\n\
   run            讀資料夾（ASN_HOME，預設 ~/.asn，舊的 ~/.irori-relay 也認）裡的節點金鑰，啟動內建收發室核心（收信、門鈴、名單回報）\n\
   --engine-only  只有引擎：不啟動 claude -p 收發室 worker（也可設環境變數 ASN_BRIDGE_ENGINE_ONLY=1）\n\
   --inbox        收件匣模式：不啟動 worker、不需 Aegis；信先存進 <ASN_HOME>/inbox/inbox.jsonl（fsync 後才 ack），代理用 asn-cli inbox 讀、asn-cli send 回信\n\
                  （視窗名取 ASN_INBOX_NAME，預設節點代號；也可設環境變數 ASN_BRIDGE_INBOX=1）\n\
+  --respond      自動回信模式：沒有互動視窗的 Linux 主機，讓內建 claude -p 自己當一個可收信的視窗（名單回報、收信、群組叫醒都由它回答並寄回；需已登入 claude）\n\
+                 （視窗名取 ASN_INBOX_NAME，預設節點代號；也可設環境變數 ASN_RESPOND=1；與 --inbox、--engine-only 互斥）\n\
   --version      顯示版本\n\
   --help         顯示這段說明";
 
@@ -50,6 +54,11 @@ pub fn parse_args(args: &[String], env_engine_only: Option<&str>) -> Result<Cmd,
 
 /// 同上，另外帶環境變數 ASN_BRIDGE_INBOX 的值
 pub fn parse_args_env(args: &[String], env_engine_only: Option<&str>, env_inbox: Option<&str>) -> Result<Cmd, String> {
+    parse_args_envs(args, env_engine_only, env_inbox, None)
+}
+
+/// 同上，另外帶環境變數 ASN_RESPOND 的值
+pub fn parse_args_envs(args: &[String], env_engine_only: Option<&str>, env_inbox: Option<&str>, env_respond: Option<&str>) -> Result<Cmd, String> {
     let mut it = args.iter();
     match it.next().map(String::as_str) {
         None | Some("-h") | Some("--help") | Some("help") => Ok(Cmd::Help),
@@ -66,16 +75,20 @@ pub fn parse_args_env(args: &[String], env_engine_only: Option<&str>, env_inbox:
             Ok(Cmd::Login(o))
         }
         Some("run") => {
-            let mut o = RunOpts { engine_only: truthy(env_engine_only), inbox: truthy(env_inbox) };
+            let mut o = RunOpts { engine_only: truthy(env_engine_only), inbox: truthy(env_inbox), respond: truthy(env_respond) };
             for a in it {
                 match a.as_str() {
                     "--engine-only" => o.engine_only = true,
                     "--inbox" => o.inbox = true,
+                    "--respond" => o.respond = true,
                     other => return Err(format!("不認得的參數：{other}")),
                 }
             }
             if o.inbox && o.engine_only {
                 return Err("--inbox 與 --engine-only 不能同時用".into());
+            }
+            if o.respond && (o.inbox || o.engine_only) {
+                return Err("--respond 不能和 --inbox、--engine-only 同時用".into());
             }
             Ok(Cmd::Run(o))
         }
@@ -101,7 +114,8 @@ fn say(msg: &str) {
 pub fn main_with(args: &[String]) -> i32 {
     let env_only = crate::envc::get("ASN_BRIDGE_ENGINE_ONLY");
     let env_inbox = crate::envc::get("ASN_BRIDGE_INBOX");
-    match parse_args_env(args, env_only.as_deref(), env_inbox.as_deref()) {
+    let env_respond = crate::envc::get("ASN_RESPOND");
+    match parse_args_envs(args, env_only.as_deref(), env_inbox.as_deref(), env_respond.as_deref()) {
         Ok(Cmd::Help) => {
             say(USAGE);
             0
@@ -171,6 +185,19 @@ fn run(o: RunOpts) -> i32 {
     cfg.engine_only = o.engine_only;
     // 無視窗：不回報「ASN 視窗」；沒有主控台切換、UI 自動化、遠端開視窗、系統匣
     cfg.report_asn_window = false;
+    if o.respond {
+        let name = respond_name(&id.node);
+        if name == cfg.mailbox_name {
+            say(&format!("asn-bridge：自動回信的視窗名「{name}」不能和內部收發室同名，請改設 ASN_INBOX_NAME"));
+            return 2;
+        }
+        // 回答要比單純轉交聰明：沒特別指定模型時用 sonnet（ASN_MAILBOX_MODEL 可改）
+        if crate::envc::get("ASN_MAILBOX_MODEL").map(|s| s.trim().is_empty()).unwrap_or(true) {
+            cfg.model = "sonnet".into();
+        }
+        say(&format!("asn-bridge：自動回信模式，視窗名「{name}」，模型 {}", cfg.model));
+        cfg.respond = Some(name);
+    }
 
     say(&format!("asn-bridge {} 啟動：節點 {}，資料夾 {}（引擎專用={}）", env!("CARGO_PKG_VERSION"), id.node, home.primary.display(), o.engine_only));
     say("asn-bridge：無視窗模式，主控台切換、UI 自動化、遠端開視窗、系統匣皆關閉");
@@ -194,6 +221,11 @@ fn run(o: RunOpts) -> i32 {
         running.stop();
         0
     })
+}
+
+/// 自動回信模式的視窗名：ASN_INBOX_NAME（與收件匣模式同一個變數），沒設用節點代號
+pub fn respond_name(node: &str) -> String {
+    crate::envc::get("ASN_INBOX_NAME").map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| node.to_string())
 }
 
 /// 收件匣模式：不啟動 worker 與引擎，只收信存檔、回報名單。結束碼沿用：2 設定錯、3 另一個收信者在跑
@@ -289,25 +321,38 @@ mod tests {
 
     #[test]
     fn run_預設會開收發室_worker() {
-        assert_eq!(parse_args(&a(&["run"]), None).unwrap(), Cmd::Run(RunOpts { engine_only: false, inbox: false }));
+        assert_eq!(parse_args(&a(&["run"]), None).unwrap(), Cmd::Run(RunOpts::default()));
     }
 
     #[test]
     fn 旗標與環境變數都能開只有引擎() {
-        assert_eq!(parse_args(&a(&["run", "--engine-only"]), None).unwrap(), Cmd::Run(RunOpts { engine_only: true, inbox: false }));
-        assert_eq!(parse_args(&a(&["run"]), Some("1")).unwrap(), Cmd::Run(RunOpts { engine_only: true, inbox: false }));
-        assert_eq!(parse_args(&a(&["run"]), Some("true")).unwrap(), Cmd::Run(RunOpts { engine_only: true, inbox: false }));
-        assert_eq!(parse_args(&a(&["run"]), Some("0")).unwrap(), Cmd::Run(RunOpts { engine_only: false, inbox: false }));
-        assert_eq!(parse_args(&a(&["run"]), Some("")).unwrap(), Cmd::Run(RunOpts { engine_only: false, inbox: false }));
+        assert_eq!(parse_args(&a(&["run", "--engine-only"]), None).unwrap(), Cmd::Run(RunOpts { engine_only: true, ..Default::default() }));
+        assert_eq!(parse_args(&a(&["run"]), Some("1")).unwrap(), Cmd::Run(RunOpts { engine_only: true, ..Default::default() }));
+        assert_eq!(parse_args(&a(&["run"]), Some("true")).unwrap(), Cmd::Run(RunOpts { engine_only: true, ..Default::default() }));
+        assert_eq!(parse_args(&a(&["run"]), Some("0")).unwrap(), Cmd::Run(RunOpts::default()));
+        assert_eq!(parse_args(&a(&["run"]), Some("")).unwrap(), Cmd::Run(RunOpts::default()));
     }
 
     #[test]
     fn 收件匣旗標與環境變數() {
-        let inbox = RunOpts { engine_only: false, inbox: true };
+        let inbox = RunOpts { inbox: true, ..Default::default() };
         assert_eq!(parse_args(&a(&["run", "--inbox"]), None).unwrap(), Cmd::Run(inbox.clone()));
         assert_eq!(parse_args_env(&a(&["run"]), None, Some("1")).unwrap(), Cmd::Run(inbox));
         assert_eq!(parse_args_env(&a(&["run"]), None, Some("0")).unwrap(), Cmd::Run(RunOpts::default()));
         assert!(parse_args(&a(&["run", "--inbox", "--engine-only"]), None).is_err());
+    }
+
+    #[test]
+    fn 自動回信旗標與環境變數_與其他模式互斥() {
+        let respond = RunOpts { respond: true, ..Default::default() };
+        assert_eq!(parse_args(&a(&["run", "--respond"]), None).unwrap(), Cmd::Run(respond.clone()));
+        assert_eq!(parse_args_envs(&a(&["run"]), None, None, Some("1")).unwrap(), Cmd::Run(respond));
+        assert_eq!(parse_args_envs(&a(&["run"]), None, None, Some("0")).unwrap(), Cmd::Run(RunOpts::default()));
+        assert!(parse_args(&a(&["run", "--respond", "--inbox"]), None).is_err());
+        assert!(parse_args(&a(&["run", "--respond", "--engine-only"]), None).is_err());
+        assert!(parse_args_envs(&a(&["run", "--inbox"]), None, None, Some("1")).is_err());
+        assert!(parse_args_envs(&a(&["run"]), Some("1"), None, Some("1")).is_err());
+        assert!(USAGE.contains("--respond"));
     }
 
     #[test]
