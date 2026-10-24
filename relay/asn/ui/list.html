@@ -145,7 +145,7 @@
       </div>
     </div>
     <div class="c-foot">
-      <span class="conn"><span class="dot" :class="conn === 'on' ? 'st-online' : conn === 'off' ? 'st-busy' : 'st-away'"></span>{{ CONN_LABEL[conn] }}</span>
+      <span class="conn" v-if="conn !== 'on'"><span class="dot" :class="conn === 'on' ? 'st-online' : conn === 'off' ? 'st-busy' : 'st-away'"></span>{{ CONN_LABEL[conn] }}</span>
     </div>
     <div class="ad-wrap">
       <button v-for="(a, i) in ads" :key="a.key" v-show="i === adI" class="ad" :class="{ link: a.url }" :style="{ '--h': a.hue }" :disabled="!a.url" :aria-label="a.title + '：' + a.sub" @click="openAd(a)">
