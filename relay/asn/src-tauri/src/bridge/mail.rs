@@ -361,7 +361,7 @@ pub fn unaddressed_window_note(actual: &str) -> String {
 
 /// 沒指定收件視窗、交給本人時，回給寄件人的說明
 pub fn unaddressed_receipt(owner: &str) -> String {
-    format!("（這封信沒有指定收件視窗，已交給 {owner} 本人）")
+    format!("（這封信沒有指定收件視窗，已留給 {owner} 本人；本人還沒看到，上線後才會處理。要立刻有人回，請指定收件視窗）")
 }
 
 #[cfg(test)]
