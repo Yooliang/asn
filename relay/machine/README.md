@@ -64,6 +64,7 @@ relay send(reply_to) <──── bridge.mjs <──stdout── 收發室 <─
 | `ASN_RELAY_ALLOW` | 逗號分隔，額外允許轉交的 session 名（測試用；預設只允許名單內的互動式 session） |
 | `ASN_MAILBOX_NAME` / `ASN_MAILBOX_MODEL` | 收發室名稱／模型 |
 | `ASN_REPLY_TIMEOUT_MS` | 等回覆逾時（預設 600000） |
+| `ASN_ROOM_STAGGER_MS` | 群組同時叫醒多位 AI 的順位延遲間隔（毫秒，預設 60000，0＝關閉；內建橋）；見 docs/design/HUMANS-AND-GROUPS.md 2.7.1 |
 | `ASN_NUDGE_MS` | 轉交後多久還沒回就提醒收件視窗一次（預設 300000＝5 分鐘）；`ASN_BRIDGE_TICK_MS` 逾時檢查間隔（預設 5000，測試用） |
 | `ASN_LATE_KEEP_MS` / `ASN_LATE_MAX` | 逾時後，保留信件對應以便寄回遲到回覆的時間（預設 86400000＝24 小時）／最多筆數（預設 200） |
 | `CLAUDE_BIN` | claude 執行檔（預設 `claude`） |

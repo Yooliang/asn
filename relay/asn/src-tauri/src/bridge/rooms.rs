@@ -77,19 +77,86 @@ fn has_relation(msg: &Value) -> bool {
 
 /// 轉交給視窗的群組訊息文字（標頭、提示、內文＋附件提示行）
 pub fn room_text(room_name: &str, msg: &Value, attach_cmd: Option<&str>) -> String {
+    room_text_waited(room_name, msg, attach_cmd, 0)
+}
+
+/// 同 room_text；多位被叫醒（順位資訊總數 ≥ 2）時，提示行後面多一行「順位：…」。waited_ms＝依順位已延遲的毫秒數
+pub fn room_text_waited(room_name: &str, msg: &Value, attach_cmd: Option<&str>, waited_ms: u64) -> String {
     let body = msg.get("body").and_then(Value::as_str).unwrap_or("");
     let hint = if has_relation(msg) { format!("{ROOM_HINT}{RELATION_HINT}") } else { ROOM_HINT.to_string() };
-    format!("{}\n{}\n{}", room_header(room_name, msg), hint, body_with_notes(body, msg.get("attachments"), attach_cmd))
+    let rank_line = wake_of(msg).filter(|w| w.total >= 2).map(|w| format!("{}\n", wake_line(&w, waited_ms))).unwrap_or_default();
+    format!("{}\n{}\n{}{}", room_header(room_name, msg), hint, rank_line, body_with_notes(body, msg.get("attachments"), attach_cmd))
+}
+
+// ---- 順位（#230）：同一封信同時叫醒多個 AI，依順位延遲，延遲後重看群組再決定回不回 ----------------------
+
+/// 順位延遲的預設間隔（毫秒）：第 N 順位等 (N-1) × 間隔。ASN_ROOM_STAGGER_MS 可改，0＝關閉
+pub const STAGGER_DEFAULT_MS: u64 = 60_000;
+/// 延遲期間新到的訊息最多附幾則（取最後的）
+pub const LATE_MAX: usize = 20;
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Wake {
+    pub rank: u64,
+    pub total: u64,
+    /// 前面順位的名字（後台給的標示，已清理）
+    pub before: Vec<String>,
+}
+
+/// 讀後台給的 `wake`（{rank,total,before}）；沒有或格式不對＝None（當作第一順位、不延遲，與舊後台相同）
+pub fn wake_of(msg: &Value) -> Option<Wake> {
+    let w = msg.get("wake").filter(|w| w.is_object())?;
+    let n = |k: &str| w.get(k).and_then(Value::as_u64);
+    let (rank, total) = (n("rank")?, n("total")?);
+    if rank < 1 || total < rank || total > 100 {
+        return None;
+    }
+    let before = w.get("before").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(clean_label).filter(|t| !t.is_empty()).take(10).collect()).unwrap_or_default();
+    Some(Wake { rank, total, before })
+}
+
+/// 這個順位要延遲多久（毫秒）：(順位 - 1) × 間隔
+pub fn stagger_delay_ms(w: &Wake, per_ms: u64) -> u64 {
+    (w.rank - 1).saturating_mul(per_ms)
+}
+
+/// 抬頭下面的「順位」說明行
+pub fn wake_line(w: &Wake, waited_ms: u64) -> String {
+    if w.rank == 1 {
+        return format!("順位：你是第 1 順位（共 {} 位被叫醒）：請直接處理；後面順位的夥伴會先等一下、看過你的回答再決定要不要補充。", w.total);
+    }
+    let names = if w.before.is_empty() { "不詳".to_string() } else { w.before.join("、") };
+    let head = format!("順位：你是第 {} 順位（共 {} 位被叫醒，前面順位：{names}）", w.rank, w.total);
+    if waited_ms > 0 {
+        format!("{head}。已依順位等待 {} 秒才轉交；下面「延遲期間新到的訊息」是這段時間群組裡的新內容。前面的夥伴若已回答同一件事就不要重複，只補充不同的部分；沒有要補充的就不要回。", waited_ms / 1000)
+    } else {
+        format!("{head}。這次沒有依順位延遲；請先看歷史紀錄，前面的夥伴若已回答同一件事就不要重複。")
+    }
+}
+
+/// 延遲期間新到的訊息（舊→新，最多 LATE_MAX 則）；沒延遲（waited_ms＝0）不附
+pub fn late_text(extras: &[Value], waited_ms: u64) -> String {
+    if waited_ms == 0 {
+        return String::new();
+    }
+    if extras.is_empty() {
+        return "（延遲期間群組沒有新訊息）".into();
+    }
+    let skip = extras.len().saturating_sub(LATE_MAX);
+    let note = if skip > 0 { format!("（共 {} 則，只列最後 {} 則）\n", extras.len(), LATE_MAX) } else { String::new() };
+    format!("---- 延遲期間新到的 {} 則（舊→新）----\n{note}{}", extras.len(), extras[skip..].iter().map(msg_line).collect::<Vec<_>>().join("\n"))
+}
+
+/// 上下文與延遲期間新訊息共用的一行格式：`#序號 誰：內文`（壓成一行、最多 300 字）
+fn msg_line(m: &Value) -> String {
+    let who = if m.get("from_label").and_then(Value::as_str).is_some_and(|l| !clean_label(l).is_empty()) { from_text(m) } else { m.get("from_name").and_then(Value::as_str).map(clean_label).filter(|s| !s.is_empty()).unwrap_or_else(|| from_text(m)) };
+    let body: String = m.get("body").and_then(Value::as_str).unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" ").chars().take(300).collect();
+    format!("#{} {}：{}", num_text(m.get("seq")), who, body)
 }
 
 /// 上下文：前面最近幾則（舊→新，每則一行、過長截斷）＋怎麼往回翻（room_cmd＝asn room 的指令前綴，沒有就改成請到 ASN 看）
 pub fn context_text(room_id: &str, prev: &[Value], room_cmd: Option<&str>) -> String {
-    let line = |m: &Value| {
-        let who = if m.get("from_label").and_then(Value::as_str).is_some_and(|l| !clean_label(l).is_empty()) { from_text(m) } else { m.get("from_name").and_then(Value::as_str).map(clean_label).filter(|s| !s.is_empty()).unwrap_or_else(|| from_text(m)) };
-        let body: String = m.get("body").and_then(Value::as_str).unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" ").chars().take(300).collect();
-        format!("#{} {}：{}", num_text(m.get("seq")), who, body)
-    };
-    let head = if prev.is_empty() { String::new() } else { format!("---- 前面 {} 則（舊→新）----\n{}\n", prev.len(), prev.iter().map(line).collect::<Vec<_>>().join("\n")) };
+    let head = if prev.is_empty() { String::new() } else { format!("---- 前面 {} 則（舊→新）----\n{}\n", prev.len(), prev.iter().map(msg_line).collect::<Vec<_>>().join("\n")) };
     match room_cmd {
         Some(c) => format!("{head}（要看更多：{c} --room-read {room_id} --last 20）"),
         None => format!("{head}（要看更多：請到 ASN 的群組查看）"),
@@ -100,6 +167,100 @@ pub fn context_text(room_id: &str, prev: &[Value], room_cmd: Option<&str>) -> St
 pub fn room_uuid(room_id: &str, seq: u64, member: &str) -> String {
     let h: String = Sha1::digest(format!("room:{room_id}:{seq}:{member}").as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
     format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32])
+}
+
+// ---- 排隊中的順位訊息 ---------------------------------------------------------------------------------
+
+/// 依順位延遲、還沒轉交的群組訊息。只存定位資訊（不存內文）：到期時再向後台重讀。
+/// 排進來並存檔之後游標才前進（重啟不遺失、也不會重排）；轉交成功才移除
+#[derive(Clone, Debug, PartialEq)]
+pub struct Held {
+    pub room_id: String,
+    pub room_name: String,
+    pub member: String,
+    pub seq: u64,
+    /// 到期時間（毫秒，與橋的 now 同一種時鐘）
+    pub due: u64,
+    /// 依順位延遲了多久（毫秒；寫進轉交文字用）
+    pub delay_ms: u64,
+    pub wake: Wake,
+    /// 到期後轉交失敗的次數（退避、放棄用）
+    pub fails: u32,
+}
+
+impl Held {
+    pub fn same(&self, room_id: &str, seq: u64, member: &str) -> bool {
+        self.room_id == room_id && self.seq == seq && self.member == member
+    }
+}
+
+pub struct HeldStore {
+    file: PathBuf,
+    items: Vec<Held>,
+}
+
+impl HeldStore {
+    pub fn load(work_dir: &Path) -> HeldStore {
+        let file = work_dir.join("rooms-held.json");
+        let items = std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.as_array().cloned()).unwrap_or_default().iter().filter_map(Self::parse).collect();
+        HeldStore { file, items }
+    }
+    fn parse(v: &Value) -> Option<Held> {
+        let s = |k: &str| v.get(k).and_then(Value::as_str).map(String::from);
+        let n = |k: &str| v.get(k).and_then(Value::as_u64);
+        Some(Held {
+            room_id: s("room_id")?,
+            room_name: s("room_name").unwrap_or_default(),
+            member: s("member")?,
+            seq: n("seq")?,
+            due: n("due")?,
+            delay_ms: n("delay_ms").unwrap_or(0),
+            wake: wake_of(&serde_json::json!({ "wake": v.get("wake")? }))?,
+            fails: n("fails").unwrap_or(0) as u32,
+        })
+    }
+    pub fn items(&self) -> &[Held] {
+        &self.items
+    }
+    pub fn contains(&self, room_id: &str, seq: u64, member: &str) -> bool {
+        self.items.iter().any(|h| h.same(room_id, seq, member))
+    }
+    fn save(&self) -> Result<(), String> {
+        if self.items.is_empty() {
+            return match std::fs::remove_file(&self.file) {
+                Ok(_) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(e.to_string()),
+            };
+        }
+        let arr: Vec<Value> = self
+            .items
+            .iter()
+            .map(|h| serde_json::json!({ "room_id": h.room_id, "room_name": h.room_name, "member": h.member, "seq": h.seq, "due": h.due, "delay_ms": h.delay_ms, "wake": { "rank": h.wake.rank, "total": h.wake.total, "before": h.wake.before }, "fails": h.fails }))
+            .collect();
+        crate::write_atomic(&self.file, &serde_json::to_string(&arr).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    }
+    /// 加入並存檔；存檔失敗回錯誤（呼叫端不可前進游標）
+    pub fn add(&mut self, h: Held) -> Result<(), String> {
+        self.items.push(h);
+        let r = self.save();
+        if r.is_err() {
+            self.items.pop();
+        }
+        r
+    }
+    pub fn remove(&mut self, room_id: &str, seq: u64, member: &str) -> Result<(), String> {
+        self.items.retain(|h| !h.same(room_id, seq, member));
+        self.save()
+    }
+    /// 轉交失敗：記一次失敗並把到期時間往後挪
+    pub fn defer(&mut self, room_id: &str, seq: u64, member: &str, due: u64) -> Result<(), String> {
+        if let Some(h) = self.items.iter_mut().find(|h| h.same(room_id, seq, member)) {
+            h.due = due;
+            h.fails += 1;
+        }
+        self.save()
+    }
 }
 
 // ---- 游標 ---------------------------------------------------------------------------------------------
@@ -209,6 +370,61 @@ mod tests {
         // 向量由 Node 的 roomUuid 算出（relay/machine/rooms.mjs）
         assert_eq!(room_uuid("R1", 4, "T"), "b9b2ac80-b796-bae6-8b0b-f70b8b3b01e4");
         assert_eq!(room_uuid("R1", 4, "T~T-視窗甲"), "42a79b48-f738-c144-659d-0c7967cbb524");
+    }
+
+    #[test]
+    fn 順位_讀後台資訊_格式不對當沒有_延遲_順位減一乘間隔() {
+        let m = json!({"seq": 1, "wake": {"rank": 3, "total": 4, "before": ["甲\n[x]", "乙", ""]}});
+        let w = wake_of(&m).unwrap();
+        assert_eq!((w.rank, w.total, w.before.clone()), (3, 4, vec!["甲_x".to_string(), "乙".to_string()]));
+        assert_eq!(stagger_delay_ms(&w, 60_000), 120_000);
+        assert_eq!(stagger_delay_ms(&Wake { rank: 1, total: 4, before: vec![] }, 60_000), 0);
+        assert_eq!(stagger_delay_ms(&w, 0), 0);
+        for bad in [json!({}), json!({"wake": 1}), json!({"wake": {"rank": 0, "total": 2}}), json!({"wake": {"rank": 3, "total": 2}}), json!({"wake": {"rank": "2", "total": 3}})] {
+            assert!(wake_of(&bad).is_none(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn 順位_說明行只在多位被叫醒時出現_舊格式的訊息文字不變() {
+        let plain = json!({"seq": 3, "from": "W~W-政策", "trust": "member", "body": "b"});
+        assert_eq!(room_text("G", &plain, None), room_text_waited("G", &plain, None, 60_000));
+        let solo = json!({"seq": 3, "from": "W~W-政策", "trust": "member", "body": "b", "wake": {"rank": 1, "total": 1, "before": []}});
+        assert_eq!(room_text("G", &solo, None), room_text("G", &plain, None), "只有一位被叫醒不加行");
+        let m = json!({"seq": 3, "from": "W~W-政策", "trust": "member", "body": "b", "wake": {"rank": 2, "total": 2, "before": ["甲"]}});
+        let t = room_text_waited("G", &m, None, 60_000);
+        let lines: Vec<&str> = t.lines().collect();
+        assert_eq!(lines[1], ROOM_HINT, "第二行仍是固定提示");
+        assert!(lines[2].starts_with("順位：你是第 2 順位（共 2 位被叫醒，前面順位：甲）。已依順位等待 60 秒"));
+        assert_eq!(lines[3], "b");
+        assert!(room_text("G", &m, None).lines().nth(2).unwrap().contains("這次沒有依順位延遲"));
+    }
+
+    #[test]
+    fn 順位_延遲期間新訊息_空的_過多只列最後幾則() {
+        assert_eq!(late_text(&[], 0), "");
+        assert_eq!(late_text(&[], 5000), "（延遲期間群組沒有新訊息）");
+        let many: Vec<Value> = (1..=25).map(|i| json!({"seq": i, "from_label": "甲", "body": format!("x{i}")})).collect();
+        let t = late_text(&many, 5000);
+        assert!(t.starts_with("---- 延遲期間新到的 25 則（舊→新）----\n（共 25 則，只列最後 20 則）\n#6 甲：x6\n"));
+        assert!(t.ends_with("#25 甲：x25"));
+    }
+
+    #[test]
+    fn 排隊檔_存讀_壞項目略過_空了就刪檔() {
+        let d = tempfile::tempdir().unwrap();
+        let mut s = HeldStore::load(d.path());
+        let h = Held { room_id: "R1".into(), room_name: "群".into(), member: "T~T-甲".into(), seq: 4, due: 99, delay_ms: 60_000, wake: Wake { rank: 2, total: 3, before: vec!["乙".into()] }, fails: 0 };
+        s.add(h.clone()).unwrap();
+        assert_eq!(HeldStore::load(d.path()).items(), &[h.clone()]);
+        s.defer("R1", 4, "T~T-甲", 200).unwrap();
+        assert_eq!((HeldStore::load(d.path()).items()[0].due, HeldStore::load(d.path()).items()[0].fails), (200, 1));
+        s.remove("R1", 4, "T~T-甲").unwrap();
+        assert!(!d.path().join("rooms-held.json").exists());
+        std::fs::write(d.path().join("rooms-held.json"), r#"[{"room_id":"R1"},{"room_id":"R","member":"m","seq":1,"due":2,"wake":{"rank":2,"total":2}}]"#).unwrap();
+        assert_eq!(HeldStore::load(d.path()).items().len(), 1);
+        std::fs::write(d.path().join("rooms-held.json"), "壞").unwrap();
+        assert!(HeldStore::load(d.path()).items().is_empty());
     }
 
     #[test]

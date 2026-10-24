@@ -246,6 +246,138 @@ async fn 群組_節點本身的訊息_只交給設定的視窗_不在線就留�
 }
 
 // ================================================================================================
+// 群組順位延遲（#230）：同時被叫醒的 AI 依順位延遲，延遲後重看群組再轉交
+// ================================================================================================
+
+fn wake(rank: u64, total: u64, before: &[&str]) -> Value {
+    json!({"rank": rank, "total": total, "before": before})
+}
+fn held_file(h: &H) -> Value {
+    serde_json::from_str(&std::fs::read_to_string(h.work.path().join("rooms-held.json")).unwrap_or_else(|_| "[]".into())).unwrap()
+}
+fn room_with(h: &H, msgs: Vec<Value>) {
+    set_rooms(h, vec![room(msgs, json!([{"member": "T~T-視窗甲", "read_seq": 1}]))]);
+}
+
+#[tokio::test]
+async fn 群組順位_第二順位先不轉交_到期才轉_期間不擋其他信_附上延遲期間新到的訊息() {
+    let mut h = harness(&[("T-視窗甲", "idle")]).await;
+    room_with(
+        &h,
+        vec![
+            rmsg(2, json!({"forMe": {"T-視窗甲": true}, "wake": wake(2, 3, &["正見（阿明）"])})),
+            rmsg(3, json!({"forMe": {"T-視窗甲": true}})), // 沒有順位資訊（舊後台／單獨叫醒）＝立即
+        ],
+    );
+    h.core.pull("test", T0).await;
+    let f = fwd(&h.said());
+    assert_eq!(f.len(), 1, "只有 #3 立即轉交；#2 排隊等 60 秒，沒有擋住 #3");
+    assert!(f[0].2.starts_with("[群組 專案群] trust=member from=W/W-政策 #3
+"));
+    assert_eq!(cursor_file(&h)["R1|T~T-視窗甲"].as_u64(), Some(3), "排隊的信先記起來，游標照常前進（不因延遲而重複轉交）");
+    assert_eq!(held_file(&h).as_array().unwrap().len(), 1, "排隊的信寫進 rooms-held.json");
+    h.core.tick(T0 + 59_000).await;
+    assert_eq!(fwd(&h.said()).len(), 1, "59 秒還不能轉");
+    // 延遲期間另一位夥伴已回答同一件事
+    let answered = rmsg(4, json!({"from": "W~W-正見", "from_name": "正見", "from_label": "正見（阿明）", "body": "我已經回答了", "forMe": {}}));
+    room_with(&h, vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}, "wake": wake(2, 3, &["正見（阿明）"])})), rmsg(3, json!({})), answered]);
+    h.core.tick(T0 + 60_000).await;
+    let f = fwd(&h.said());
+    assert_eq!(f.len(), 2);
+    let late = &f[1].2;
+    assert!(late.starts_with("[群組 專案群] trust=member from=W/W-政策 #2
+"));
+    assert!(late.contains("順位：你是第 2 順位（共 3 位被叫醒，前面順位：正見（阿明））"), "{late}");
+    assert!(late.contains("---- 延遲期間新到的 2 則（舊→新）----
+#3 政策：群組內文-3
+#4 正見（阿明）：我已經回答了"), "{late}");
+    // 重讀是從那則信之後起算、不帶 mark
+    assert!(reads(&h).iter().any(|r| r["since"] == 1 && r["mark"].is_null() && r["as_agent"] == "T-視窗甲"));
+    assert_eq!(held_file(&h).as_array().unwrap().len(), 0);
+    let before = fwd(&h.said()).len();
+    h.core.tick(T0 + 200_000).await;
+    h.core.pull("test", T0 + 200_000).await;
+    assert_eq!(fwd(&h.said()).len(), before, "不會重複轉交");
+}
+
+#[tokio::test]
+async fn 群組順位_延遲是順位減一乘間隔_第一順位與沒有順位資訊不延遲_間隔設_0_關閉() {
+    let mut h = harness(&[("T-視窗甲", "idle")]).await;
+    room_with(&h, vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}, "wake": wake(3, 3, &["甲", "乙"])})), rmsg(3, json!({"forMe": {"T-視窗甲": true}, "wake": wake(1, 3, &[])}))]);
+    h.core.pull("test", T0).await;
+    assert_eq!(fwd(&h.said()).len(), 1, "第一順位（#3）立即");
+    h.core.tick(T0 + 119_000).await;
+    assert_eq!(fwd(&h.said()).len(), 1, "第三順位 119 秒還不能轉");
+    h.core.tick(T0 + 120_000).await;
+    let f = fwd(&h.said());
+    assert_eq!(f.len(), 2);
+    assert!(f[1].2.contains("順位：你是第 3 順位（共 3 位被叫醒，前面順位：甲、乙）"));
+    assert!(f[0].2.contains("順位：你是第 1 順位（共 3 位被叫醒）"));
+    // 關閉（間隔 0）：第三順位也立即
+    let mut g = harness(&[("T-視窗甲", "idle")]).await;
+    g.core.cfg.room_stagger_ms = 0;
+    room_with(&g, vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}, "wake": wake(3, 3, &["甲", "乙"])}))]);
+    g.core.pull("test", T0).await;
+    assert_eq!(fwd(&g.said()).len(), 1);
+    assert!(!g.work.path().join("rooms-held.json").exists());
+    // 調整間隔（10 秒）：第二順位 10 秒到期
+    let mut k = harness(&[("T-視窗甲", "idle")]).await;
+    k.core.cfg.room_stagger_ms = 10_000;
+    room_with(&k, vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}, "wake": wake(2, 2, &["甲"])}))]);
+    k.core.pull("test", T0).await;
+    k.core.tick(T0 + 9_999).await;
+    assert!(k.said().is_empty());
+    k.core.tick(T0 + 10_000).await;
+    assert_eq!(fwd(&k.said()).len(), 1);
+}
+
+#[tokio::test]
+async fn 群組順位_橋重啟後排隊的信不遺失_到期只轉一次_已轉交的重啟後不再重複() {
+    let mut h = harness(&[("T-視窗甲", "idle")]).await;
+    room_with(&h, vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}, "wake": wake(2, 2, &["甲"])}))]);
+    h.core.pull("test", T0).await;
+    assert!(h.said().is_empty());
+    restart(&mut h, T0 + 10_000).await;
+    h.core.tick(T0 + 30_000).await;
+    assert!(h.said().is_empty(), "重啟後還沒到期");
+    h.core.pull("test", T0 + 31_000).await; // 游標已前進，不會再排一次
+    assert_eq!(held_file(&h).as_array().unwrap().len(), 1);
+    h.core.tick(T0 + 60_000).await;
+    let f = fwd(&h.said());
+    assert_eq!(f.len(), 1);
+    assert_eq!(f[0].0, room_uuid("R1", 2, "T~T-視窗甲"));
+    h.core.on_worker_line(res(&format!("SENT {}", f[0].0)), T0 + 60_001).await;
+    restart(&mut h, T0 + 70_000).await;
+    h.core.tick(T0 + 200_000).await;
+    h.core.pull("test", T0 + 200_000).await;
+    assert_eq!(fwd(&h.said()).len(), 1, "重啟後不重複");
+    // 到期前橋當機、到期時才起來：補轉一次
+    let mut g = harness(&[("T-視窗甲", "idle")]).await;
+    room_with(&g, vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}, "wake": wake(2, 2, &["甲"])}))]);
+    g.core.pull("test", T0).await;
+    restart(&mut g, T0 + 500_000).await;
+    g.core.tick(T0 + 500_000).await;
+    assert_eq!(fwd(&g.said()).len(), 1);
+}
+
+#[tokio::test]
+async fn 群組順位_到期時轉交失敗就留著稍後再試_不遺失() {
+    let mut h = harness(&[("T-視窗甲", "idle")]).await;
+    room_with(&h, vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}, "wake": wake(2, 2, &["甲"])}))]);
+    h.core.pull("test", T0).await;
+    h.sink.down.store(true, Ordering::SeqCst);
+    h.core.tick(T0 + 60_000).await;
+    assert!(h.said().is_empty() && h.core.pending.is_empty());
+    assert_eq!(held_file(&h).as_array().unwrap().len(), 1, "還留著");
+    h.sink.down.store(false, Ordering::SeqCst);
+    h.core.tick(T0 + 61_000).await;
+    assert!(h.said().is_empty(), "失敗後退避一小段時間才再試");
+    h.core.tick(T0 + 100_000).await;
+    assert_eq!(fwd(&h.said()).len(), 1);
+    assert_eq!(held_file(&h).as_array().unwrap().len(), 0);
+}
+
+// ================================================================================================
 // 孤兒清理（真的程序）
 // ================================================================================================
 

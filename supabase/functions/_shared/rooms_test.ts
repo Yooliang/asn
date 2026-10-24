@@ -1,6 +1,6 @@
 // 執行：SUPABASE_URL=http://x SUPABASE_SERVICE_ROLE_KEY=x deno test -A supabase/functions/
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { handleNodeRoomAction, matchAutoJoins, OWNER_ONLY_ACTIONS, parseMentions, type RoomDeps, type RoomMember, shouldRespond, syncNodeAuto, validatePrefixes } from "./rooms.ts";
+import { handleNodeRoomAction, matchAutoJoins, OWNER_ONLY_ACTIONS, parseMentions, type RoomDeps, type RoomMember, shouldRespond, syncNodeAuto, validatePrefixes, wakeOrder } from "./rooms.ts";
 
 const MEMBERS: RoomMember[] = [
   { key: "~owner", name: "啟良", role: "owner", kind: "owner", node_role: "owner" },
@@ -126,6 +126,59 @@ Deno.test("讀紀錄：每則帶 for_me（被點名或 owner 發的才為 true�
   const r = await handleNodeRoomAction(deps, ME, "room_read", { room: "r1", since: "0" });
   assertEquals(r.status, 200);
   assertEquals(r.body.messages.map((m: { for_me: boolean }) => m.for_me), [false, true, true]);
+});
+
+// ── 同時叫醒多個 AI 的順位（#230）：後台給每封 for_me 的信一個穩定的順位，橋依順位延遲 ──
+const AIS: RoomMember[] = [
+  { key: "~owner", name: "啟良", kind: "owner" },
+  { key: "w02", name: "W02", label: "W02（啟良）", kind: "claude" },
+  { key: "aegis", name: "牧陽 Aegis", label: "牧陽 Aegis（啟良）", kind: "claude" },
+  { key: "H~H-主線", name: "H-主線", label: "H-主線（啟良）", kind: "window" },
+  { key: "~u:abc", name: "阿明", label: "阿明", kind: "human" },
+];
+
+Deno.test("順位：主人發問沒點名，所有 AI 都被叫醒；順位依顯示標示排序（與成員清單順序、讀者無關），真人不占順位", () => {
+  const msg = { from: "~owner", trust: "owner", mentions: [] as string[] };
+  const ranks = (members: RoomMember[]) => ["w02", "aegis", "H~H-主線"].map((k) => wakeOrder(msg, members, k));
+  const a = ranks(AIS);
+  const b = ranks([...AIS].reverse());
+  assertEquals(a, b, "成員清單順序不同，結果一樣");
+  const byRank = (a as { rank: number; total: number; before: string[] }[]).map((w) => [w.rank, w.total]);
+  assertEquals(new Set(byRank.map((x) => x[0])).size, 3);
+  assertEquals(byRank.every((x) => x[1] === 3), true);
+  const first = a.find((w) => w!.rank === 1)!;
+  assertEquals(first.before, []);
+  const third = a.find((w) => w!.rank === 3)!;
+  assertEquals(third.before.length, 2);
+  assert(!third.before.includes("阿明") && !third.before.includes("啟良"));
+});
+
+Deno.test("順位：有點名只算被點名的 AI；沒被叫醒（沒點到、自己發的、系統、seed）回 null", () => {
+  const msg = { from: "aegis", trust: "member", mentions: ["w02", "H~H-主線"] };
+  assertEquals(wakeOrder(msg, AIS, "w02")!.total, 2);
+  assertEquals(wakeOrder(msg, AIS, "aegis"), null);
+  assertEquals(wakeOrder({ from: "w02", trust: "member", mentions: ["w02"] }, AIS, "w02"), null);
+  assertEquals(wakeOrder({ from: "~owner", trust: "owner", mentions: [], is_seed: true }, AIS, "w02"), null);
+  assertEquals(wakeOrder({ from: "x", trust: "member", from_kind: "system", mentions: [] }, AIS, "w02"), null);
+  assertEquals(wakeOrder({ from: "~owner", trust: "owner", mentions: ["w02"] }, AIS, "w02"), { rank: 1, total: 1, before: [] });
+});
+
+Deno.test("讀紀錄：for_me 的信多帶 wake（順位、總數、前面順位的名字）；沒被叫醒的信沒有 wake；查不到成員名單時照舊不壞", async () => {
+  const messages = [
+    { seq: 1, from: "aegis~小牧", trust: "member", body: "閒聊", mentions: [] },
+    { seq: 2, from: "~owner", trust: "owner", body: "大家", mentions: [] },
+  ];
+  const { deps, calls } = fake({ asn_relay_room_read: () => ({ key: "w02", last_seq: 2, messages }), asn_relay_room_members: () => ({ key: "w02", members: AIS }) });
+  const r = await handleNodeRoomAction(deps, ME, "room_read", { room: "r1", since: "0", as_agent: "視窗甲" });
+  assertEquals(r.body.messages[0].wake, undefined);
+  const w = r.body.messages[1].wake;
+  assertEquals([w.total, typeof w.rank, Array.isArray(w.before)], [3, "number", true]);
+  const mem = calls.find((c) => c.fn === "asn_relay_room_members")!;
+  assertEquals([mem.args.p_node, mem.args.p_agent, mem.args.p_owner], ["w02", "視窗甲", false]);
+  // 成員名單查失敗：訊息照回、只是沒有 wake
+  const broken: RoomDeps = { ...deps, rpc: (fn, args) => fn === "asn_relay_room_members" ? Promise.resolve({ data: null, error: "boom" }) : deps.rpc(fn, args) };
+  const r2 = await handleNodeRoomAction(broken, ME, "room_read", { room: "r1", since: "0" });
+  assertEquals([r2.status, r2.body.messages[1].for_me, r2.body.messages[1].wake], [200, true, undefined]);
 });
 
 Deno.test("參數檢查：房號格式不對 → 400；未知動作 → 404", async () => {

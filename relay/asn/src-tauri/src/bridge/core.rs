@@ -9,7 +9,7 @@ use super::partner_ops::{CommandJob, PartnerOps};
 use super::slash;
 use super::mail::{self, unaddressed_receipt, unaddressed_window_note, mail_head, parse_send_head, strip_reply_head, wants_reply, Mail, SendHead};
 use super::pending::{self, LastReq, Pending, RoomRef, State};
-use super::rooms::{self, Cursors};
+use super::rooms::{self, Cursors, Held, HeldStore};
 use super::roster::{self, Window};
 use super::worker::{forward_text, Parser, WorkerEvent, WorkerLine, WorkerSink};
 use crate::relay::Relay;
@@ -68,6 +68,8 @@ pub struct Config {
     pub attach_cmd: Option<String>,
     /// 群組「要看更多」的指令前綴（`<asn-cli 完整路徑> room`）
     pub room_cmd: Option<String>,
+    /// 群組順位延遲的間隔（毫秒，預設 60000；ASN_ROOM_STAGGER_MS，0＝關閉）：第 N 順位的信等 (N-1) × 間隔再轉交
+    pub room_stagger_ms: u64,
     /// 依視窗名的往來記錄資料夾（預設 `~/.asn/handoff`；測試一律指到暫存資料夾）
     pub handoff_dir: PathBuf,
     /// 其他引擎（第五段）：ASN_ENGINES（舊名 IRORI_ENGINES）的值（逗號分隔的 acp／codex）；None＝自動（有 agents.json 載 acp、有 ~/.codex 載 codex）
@@ -117,6 +119,7 @@ impl Config {
             report_asn_window: true,
             attach_cmd: attach::attach_cmd_from_env(),
             room_cmd: attach::room_cmd_from_env(),
+            room_stagger_ms: env_u64("ASN_ROOM_STAGGER_MS", rooms::STAGGER_DEFAULT_MS),
             // 測試時絕不碰真實家目錄：往來記錄放進工作資料夾底下
             handoff_dir: if cfg!(test) { test_handoff } else { corrlog::default_dir() },
             // 測試時絕不碰真實的設定與 ~/.codex：只載 Claude，路徑都放進工作資料夾底下
@@ -219,6 +222,7 @@ pub struct Core {
     fail_step: usize,
     pub retry_at: Option<u64>,
     cursors: Cursors,
+    held: HeldStore,
     cursor_warned: bool,
     launcher: Option<Arc<Launcher>>,
     partner_ops: Option<Arc<PartnerOps>>,
@@ -268,11 +272,12 @@ pub fn sent_mark_name(from_window: &str, to_node: &str, to_agent: &str) -> Strin
 impl Core {
     pub fn new(cfg: Config, relay: Arc<Relay>, sink: Arc<dyn WorkerSink>, nonce: &str, log: Arc<BridgeLog>, alive: Arc<dyn Fn(u32) -> bool + Send + Sync>, now: u64) -> Core {
         let cursors = Cursors::load(&cfg.work_dir);
+        let held = HeldStore::load(&cfg.work_dir);
         let corr = CorrLog::new(cfg.handoff_dir.clone());
         let mut c = Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(),
-            last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
+            last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false,
         };
         c.restore();
@@ -1125,6 +1130,90 @@ impl Core {
         if !self.roster_ok {
             return false;
         }
+        // 順位延遲（#230）：同時被叫醒多位時，第 N 順位先排隊 (N-1) × 間隔；排隊（已存檔）就算處理完，游標照常前進
+        if let Some(w) = rooms::wake_of(msg) {
+            let delay = rooms::stagger_delay_ms(&w, self.cfg.room_stagger_ms);
+            if delay > 0 {
+                return self.hold_room_msg(room, member, msg, w, delay);
+            }
+        }
+        self.deliver_room_msg(room, member, msg, 0, &[]).await
+    }
+
+    fn hold_room_msg(&mut self, room: &Value, member: &str, msg: &Value, wake: rooms::Wake, delay_ms: u64) -> bool {
+        let room_id = room.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+        let seq = json_u64(msg.get("seq"));
+        let id = rooms::room_uuid(&room_id, seq, member);
+        if self.idx(&id).is_some() || self.held.contains(&room_id, seq, member) {
+            return true;
+        }
+        let h = Held { room_id: room_id.clone(), room_name: room.get("name").and_then(Value::as_str).unwrap_or("").to_string(), member: member.to_string(), seq, due: self.now + delay_ms, delay_ms, wake: wake.clone(), fails: 0 };
+        match self.held.add(h) {
+            Ok(_) => {
+                self.log.line(&format!("room={room_id} #{seq} member={member} rank {}/{}: held {}s before handing", wake.rank, wake.total, delay_ms / 1000));
+                true
+            }
+            Err(e) => {
+                self.log.line(&format!("rooms held save failed: {e} (cursor not advanced)"));
+                false
+            }
+        }
+    }
+
+    fn drop_held(&mut self, h: &Held, why: &str) {
+        self.log.line(&format!("room={} #{} member={}: held entry dropped ({why})", h.room_id, h.seq, h.member));
+        if let Err(e) = self.held.remove(&h.room_id, h.seq, &h.member) {
+            self.log.line(&format!("rooms held save failed: {e}"));
+        }
+    }
+
+    /// 到期的順位訊息：重讀群組（自該則之後），把延遲期間新到的訊息附上再轉交。轉交成功才移除；失敗退避 30 秒再試，連續 120 次放棄
+    pub async fn release_held(&mut self, now: u64) {
+        self.now = now;
+        let due: Vec<Held> = self.held.items().iter().filter(|h| h.due <= now).cloned().collect();
+        for h in due {
+            if self.idx(&rooms::room_uuid(&h.room_id, h.seq, &h.member)).is_some() {
+                self.drop_held(&h, "already handed");
+                continue;
+            }
+            if !self.roster_ok {
+                continue;
+            }
+            let window = rooms::member_window(&h.member);
+            let as_agent = if window.is_empty() { String::new() } else { format!("&as_agent={}", crate::relay::encode_component(&window)) };
+            let since = h.seq.saturating_sub(1);
+            let res = self.relay.api(&format!("room_read&room={}{as_agent}&since={since}&limit=100", crate::relay::encode_component(&h.room_id)), None).await;
+            let mut delivered = false;
+            match res {
+                Err(e) => self.log.line(&format!("held room_read failed room={} #{}: {e}", h.room_id, h.seq)),
+                Ok(r) => {
+                    let mut msgs: Vec<Value> = r.get("messages").and_then(Value::as_array).cloned().unwrap_or_default();
+                    msgs.sort_by_key(|m| json_u64(m.get("seq")));
+                    let Some(orig) = msgs.iter().find(|m| json_u64(m.get("seq")) == h.seq).cloned() else {
+                        self.drop_held(&h, "message no longer readable");
+                        continue;
+                    };
+                    let extras: Vec<Value> = msgs.into_iter().filter(|m| json_u64(m.get("seq")) > h.seq && m.get("from").and_then(Value::as_str) != Some(h.member.as_str())).collect();
+                    let mut orig = orig;
+                    orig["wake"] = json!({ "rank": h.wake.rank, "total": h.wake.total, "before": h.wake.before });
+                    let room = json!({ "id": h.room_id, "name": h.room_name });
+                    delivered = self.deliver_room_msg(&room, &h.member, &orig, h.delay_ms.max(1), &extras).await;
+                }
+            }
+            if delivered {
+                if let Err(e) = self.held.remove(&h.room_id, h.seq, &h.member) {
+                    self.log.line(&format!("rooms held save failed: {e}"));
+                }
+            } else if h.fails + 1 >= 120 {
+                self.drop_held(&h, "gave up after repeated failures");
+            } else if let Err(e) = self.held.defer(&h.room_id, h.seq, &h.member, now + 30_000) {
+                self.log.line(&format!("rooms held save failed: {e}"));
+            }
+        }
+    }
+
+    /// 實際轉交一則群組訊息給視窗。waited_ms＞0＝這是依順位延遲後的轉交，附上 extras（延遲期間新到的訊息）。true＝處理完
+    async fn deliver_room_msg(&mut self, room: &Value, member: &str, msg: &Value, waited_ms: u64, extras: &[Value]) -> bool {
         let room_id = room.get("id").and_then(Value::as_str).unwrap_or("").to_string();
         let room_name = room.get("name").and_then(Value::as_str).unwrap_or("").to_string();
         let seq = json_u64(msg.get("seq"));
@@ -1161,9 +1250,13 @@ impl Core {
         let prev = self.room_context(&room_id, member, seq).await; // 前面最近 5 則當上下文（只讀；失敗就不附）
         let text = format!(
             "{}{}\n{}",
-            rooms::room_text(&room_name, msg, self.cfg.attach_cmd.as_deref()),
+            rooms::room_text_waited(&room_name, msg, self.cfg.attach_cmd.as_deref(), waited_ms),
             if note.is_empty() { String::new() } else { format!("\n{note}") },
-            rooms::context_text(&room_id, &prev, self.cfg.room_cmd.as_deref())
+            {
+                let late = rooms::late_text(extras, waited_ms);
+                let ctx = rooms::context_text(&room_id, &prev, self.cfg.room_cmd.as_deref());
+                if late.is_empty() { ctx } else { format!("{ctx}\n{late}") }
+            }
         );
         let text = self.with_path_line(text, &target);
         match self.deliver(&id, &target, &text) {
@@ -1296,6 +1389,7 @@ impl Core {
     /// 定時檢查（每 tick_ms 一次）：轉交逾時、等回覆逾時、遲到回覆保留期
     pub async fn tick(&mut self, now: u64) {
         self.now = now;
+        self.release_held(now).await;
         let ids: Vec<String> = self.pending.iter().map(|p| p.id.clone()).collect();
         for id in ids {
             let Some(i) = self.idx(&id) else { continue };

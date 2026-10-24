@@ -73,6 +73,30 @@ export function shouldRespond(
   return msg.trust === "owner";
 }
 
+// 同一封信同時叫醒多個 AI 時的順位（#230）：橋依順位延遲（第一順位不延遲），延遲後重看群組再決定回不回，避免搶答。
+// 被叫醒的集合＝這個讀者看得到的成員裡 shouldRespond 為真的 AI（真人不占順位；wake_ok 只有讀者自己的那份知道，別人的當成可叫醒）。
+// 排序用顯示標示（label，沒有就 name、key），不用成員 key：跨租戶時 key 是讀者視角的相對身分，不同讀者會排出不同順序。
+// 同一封信、同一份成員名單算出的結果固定；沒被叫醒回 null
+export type Wake = { rank: number; total: number; before: string[] };
+const isAiMember = (m: RoomMember) => !m.key.startsWith("~") && m.kind !== "owner" && m.kind !== "human" && m.member_kind !== "human";
+const wakeSortKey = (m: RoomMember) => m.label || m.name || m.key;
+export function wakeOrder(
+  msg: { from: string; trust: string; mentions?: string[]; is_seed?: boolean; from_kind?: string; wake_ok?: boolean },
+  members: RoomMember[],
+  selfKey: string,
+): Wake | null {
+  if (!shouldRespond(msg, selfKey)) return null;
+  const woken = members.filter((m) => m.key === selfKey || (isAiMember(m) && shouldRespond({ ...msg, wake_ok: true }, m.key)));
+  const uniq = [...new Map(woken.map((m) => [m.key, m])).values()];
+  uniq.sort((a, b) => {
+    const x = wakeSortKey(a), y = wakeSortKey(b);
+    return x < y ? -1 : x > y ? 1 : a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
+  });
+  const i = uniq.findIndex((m) => m.key === selfKey);
+  if (i < 0) return null;
+  return { rank: i + 1, total: uniq.length, before: uniq.slice(0, i).map(wakeSortKey) };
+}
+
 export type RoomDeps = {
   rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: Json; error: unknown }>;
   ring: (topic: string) => Promise<void>;
@@ -174,7 +198,16 @@ export async function handleNodeRoomAction(deps: RoomDeps, me: { id: string }, a
     });
     if (isReply(r)) return r;
     const selfKey = r.data.key as string;
-    const messages = (r.data.messages ?? []).map((m: RoomMessage) => ({ ...m, for_me: shouldRespond(m, selfKey) }));
+    let messages = (r.data.messages ?? []).map((m: RoomMessage) => ({ ...m, for_me: shouldRespond(m, selfKey) }));
+    // 順位（#230）：有 for_me 的信才查成員名單；查不到就不附（橋當作第一順位，照舊立即處理）
+    if (messages.some((m: { for_me: boolean }) => m.for_me)) {
+      const mem = await deps.rpc("asn_relay_room_members", { p_node: me.id, p_agent: agent, p_room: room, p_owner: false });
+      const members: RoomMember[] | null = !mem.error && Array.isArray(mem.data?.members) ? mem.data.members : null;
+      if (members) messages = messages.map((m: RoomMessage & { for_me: boolean }) => {
+        const wake = m.for_me ? wakeOrder(m, members, selfKey) : null;
+        return wake ? { ...m, wake } : m;
+      });
+    }
     return { status: 200, body: { messages, last_seq: r.data.last_seq } };
   }
   if (action === "room_post") {
