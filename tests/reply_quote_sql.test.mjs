@@ -1,4 +1,4 @@
-// 針對某則訊息回覆（#225，migration 20261024130000_reply_quote.sql）：群組訊息帶引用（reply_to_seq），讀取時由後台算出原作者與摘要。
+// 針對某則訊息回覆（#225，migration 20261024140000_reply_quote.sql）：群組訊息帶引用（reply_to_seq），讀取時由後台算出原作者與摘要。
 // 1. 靜態：交易內、不動 asn_relay_room_post（新增 asn_relay_room_post_reply 包一層）、新函式只授權 service_role。
 // 2. 實跑（需要 @electric-sql/pglite；沒裝略過，pglite 測試不加 --test-force-exit）：
 //    - 回覆帶出 reply_to＝{ seq, from_kind, from_label, excerpt }，摘要壓成一行、最多 80 字、不含原訊息的引用行
@@ -13,7 +13,7 @@ import fs from 'node:fs'
 import crypto from 'node:crypto'
 
 const DIR = new URL('../supabase/migrations/', import.meta.url)
-const MIG = '20261024130000_reply_quote.sql'
+const MIG = '20261024140000_reply_quote.sql'
 const read = f => fs.readFileSync(new URL(f, DIR), 'utf8').replace(/\r\n/g, '\n').replace(/create extension if not exists \w+[^;]*;/g, '')
 const files = fs.readdirSync(DIR).filter(f => f.endsWith('.sql')).sort()
 
