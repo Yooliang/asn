@@ -706,6 +706,15 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dv-tag.kind{color:var(--link)}
 .dv-tag.on{background:color-mix(in srgb,var(--online) 18%,transparent);color:var(--online)}
 .dv-tag.off{color:var(--muted)}
+.dv-order{display:inline-flex;gap:6px;margin-left:auto}
+.dv-hidden{margin:0 0 8px;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel-soft);color:var(--fg)}
+.dv-hidden summary{cursor:pointer;font-size:13px}
+.dv-hidden ul{list-style:none;margin:6px 0 0;padding:0}
+.dv-hidden li{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 0}
+.rtab.dev-dragging{opacity:.4}
+.rtab.dev-drop-before{box-shadow:0 -3px 0 var(--accent)}
+.rtab.dev-drop-after{box-shadow:0 3px 0 var(--accent)}
+.rtab.dev:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .dv-tag.me{border:1px solid var(--line);background:none}
 .dv-body{min-width:0}
 .dv-body.off{filter:grayscale(.35);opacity:.8}

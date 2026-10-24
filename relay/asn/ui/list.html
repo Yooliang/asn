@@ -50,7 +50,7 @@
     </div>
     <div class="body">
       <nav class="rail" role="tablist" aria-label="名單分頁">
-        <button v-for="d in dev.visible" :key="d.key" class="rtab dev" :class="{ on: tab === d.key, empty: d.empty }" role="tab" :aria-selected="tab === d.key" :title="d.label" :aria-label="d.label" @click="tab = d.key">
+        <button v-for="d in dev.visible" :key="d.key" class="rtab dev" :class="{ on: tab === d.key, empty: d.empty, 'dev-dragging': deviceDrag === d.key, 'dev-drop-before': deviceDrop.over === d.key && !deviceDrop.after, 'dev-drop-after': deviceDrop.over === d.key && deviceDrop.after }" role="tab" :aria-selected="tab === d.key" :title="dimTab === 'device' && d.key !== selfNode ? d.label + '（可拖曳排序，或按 Alt+上／下）' : d.label" :aria-label="d.label" :data-dev="dimTab === 'device' ? d.key : null" :draggable="dimTab === 'device' && d.key !== selfNode" @click="tab = d.key" @dragstart="onDeviceDragStart(d.key, $event)" @dragover="dimTab === 'device' && onDeviceDragOver(d.key, $event)" @drop="dimTab === 'device' && onDeviceDrop(d.key, $event)" @dragend="clearDeviceDrag" @keydown="onDeviceTabKey(d.key, $event)">
           <img v-if="dimTab === 'device' && d.key === selfNode" src="img/logo.svg" alt="">
           <img v-else-if="dimTab === 'engine' && d.vendorKey === 'asn'" src="img/logo.svg" alt="">
           <span v-else-if="dimTab === 'engine' && d.vendorKey" class="rtab-vendor" v-html="vendorIcon(d.vendorKey)"></span>

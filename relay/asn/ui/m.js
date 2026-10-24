@@ -20,6 +20,7 @@ import { restoreMobileTab } from './lib/session.mjs'
 import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, showsInSheet } from './lib/mobile-ops.mjs'
 import { OP_LABEL, opFormError, partnerEngine } from './lib/partner-ops.mjs'
 import { ACCT_TEXT, ACCT_PAGE_TITLE, acctButtonDevices, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch } from './lib/mobile-acct.mjs'
+import { deviceFieldsFromSaved, deviceFieldsToSave, showDevice } from './lib/device-order.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
 import { opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
 import { defaultPartnerName } from './lib/partner.mjs'
@@ -113,6 +114,8 @@ const lastChat = ref('')   // 最後使用的那一位（對話分頁顯示它�
 const me = reactive({ psm: '', status: 'online', nick: info.window_name })
 const prefs = reactive({ ...DEFAULT_PREFS })
 const friends = ref([]), conn = ref('connecting'), nodeOrder = ref([])
+// 設備順序與手動顯示的隱藏設備：目前存在這支手機自己的設定（asn-me.json 的 deviceOrder／deviceShown），尚未與電腦版同步
+const devPrefs = reactive({ deviceOrder: [], deviceShown: [] })
 const logs = reactive({})
 const avatars = ref({})
 const query = ref(''), collapsed = reactive({ [ARCHIVE_GROUP_KEY]: true })   // 「已封存」群組預設收合
@@ -166,12 +169,13 @@ if (screen.value === 'main') {
   const meStore = store('me')
   const saved = (await meStore.load()) ?? {}
   Object.assign(me, { psm: '', status: 'online', ...saved.me, nick: info.window_name })
+  Object.assign(devPrefs, deviceFieldsFromSaved(saved))
   Object.assign(prefs, normalizePrefs(saved.mobilePrefs))
   ownerName.value = typeof saved.ownerName === 'string' ? saved.ownerName : ''
   lastChat.value = normalizeLastChat(saved.lastChat)
   // 重開 App 回到上次的大分頁（名單／對話／設置）；對話那頁的對象就是 lastChat
 savedTab = restoreMobileTab(saved.navTab)
-watch([me, prefs, ownerName, lastChat, () => nav.tab], () => { const { nick, ...rest } = me; void meStore.save({ ...saved, me: rest, mobilePrefs: { ...prefs }, ownerName: ownerName.value, lastChat: lastChat.value, navTab: nav.tab }) }, { deep: true })
+watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab], () => { const { nick, ...rest } = me; void meStore.save({ ...saved, ...deviceFieldsToSave(devPrefs), me: rest, mobilePrefs: { ...prefs }, ownerName: ownerName.value, lastChat: lastChat.value, navTab: nav.tab }) }, { deep: true })
   watch(() => [me.status, me.psm], () => { void invoke('set_presence', { status: me.status, psm: me.psm ?? '' }).catch(() => {}) }, { immediate: true })
 
   core = new AsnCore({
@@ -426,7 +430,11 @@ const app = createApp({
     const acctKeys = computed(() => new Set(acctButtonDevices(groups.value, info.node).map(g => g.key)))
     // 整頁＝電腦版「設備與帳號」：資料用電腦版同一份整理函式；別台電腦的帳號逐台向後台讀（只讀選到的那台）
     const acctSw = reactive({ phase: 'pick', node: '', picked: '', reports: {}, view: null })
-    const acctDevs = computed(() => acctDeviceTree({ friends: friends.value, nodeOrder: nodeOrder.value, selfNode: info.node, reports: acctSw.reports, launchers: lchData.machines }))
+    const acctAllDevs = computed(() => acctDeviceTree({ friends: friends.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, selfNode: info.node, reports: acctSw.reports, launchers: lchData.machines }))
+    // 整台離線、夥伴全封存、沒未讀的設備不列頁籤；收在「已隱藏的設備」，可手動顯示
+    const acctDevs = computed(() => acctAllDevs.value.filter(d => !d.hidden))
+    const acctHidden = computed(() => acctAllDevs.value.filter(d => d.hidden))
+    const showHiddenDevice = key => { devPrefs.deviceShown = showDevice(devPrefs.deviceShown, key) }
     const acctCur = computed(() => acctPickDevice(acctDevs.value, acctSw.node))
     const acctLabel = computed(() => acctCur.value?.label ?? '')
     const acctRep = computed(() => acctSw.reports[acctCur.value?.key] ?? null)
@@ -754,7 +762,7 @@ const app = createApp({
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, headTone, CONN_LABEL, info, banner, shake, refreshing,
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, ops, opsText, opsTitle, opsModels, opsModelNote, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
-      acctSw, acctDevs, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, ACCT_PAGE_TITLE, vendorIconSvg, acctKeys, openAcct, pickAcctDevice, refreshAcct, startAcctSwitch, acctBackToPick, submitAcct,
+      acctSw, acctDevs, acctHidden, showHiddenDevice, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, ACCT_PAGE_TITLE, vendorIconSvg, acctKeys, openAcct, pickAcctDevice, refreshAcct, startAcctSwitch, acctBackToPick, submitAcct,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
