@@ -416,28 +416,28 @@ const app = createApp({
     }
     // ---------- 設備卡「切換 Claude 帳號」：選帳號 → 確認 → 送出並等對方電腦回報 ----------
     const acctKeys = computed(() => new Set(acctButtonDevices(groups.value, info.node).map(g => g.key)))
-    const acct = reactive({ phase: 'pick', node: '', label: '', picked: '', remote: { loading: false, asnOnline: false, reportedAt: '', msg: '', list: [] }, view: null })
-    const acctView = computed(() => acctSheetView(acct.remote, acct.picked))
-    const acctConfirm = computed(() => acctConfirmText(acct.label, acctView.value.currentEmail, acctView.value.pickEmail))
+    const acctSw = reactive({ phase: 'pick', node: '', label: '', picked: '', remote: { loading: false, asnOnline: false, reportedAt: '', msg: '', list: [] }, view: null })
+    const acctView = computed(() => acctSheetView(acctSw.remote, acctSw.picked))
+    const acctConfirm = computed(() => acctConfirmText(acctSw.label, acctView.value.currentEmail, acctView.value.pickEmail))
     let acctToken = 0
     async function openAcct(g) {
       if (nav.sheet) return
-      Object.assign(acct, { phase: 'pick', node: g.node, label: g.label, picked: '', view: null, remote: { loading: true, asnOnline: false, reportedAt: '', msg: '', list: [] } })
+      Object.assign(acctSw, { phase: 'pick', node: g.node, label: g.label, picked: '', view: null, remote: { loading: true, asnOnline: false, reportedAt: '', msg: '', list: [] } })
       const token = ++acctToken
       go(acctNav())
       try {
         const v = await acctTransport.acctList(g.node)
         if (token !== acctToken) return
-        acct.remote = { loading: false, asnOnline: v?.asn_online === true, reportedAt: v?.reported_at ?? '', msg: '', list: (v?.accounts ?? []).filter(a => a.vendor === 'claude') }
-      } catch (e) { if (token === acctToken) acct.remote = { loading: false, asnOnline: false, reportedAt: '', msg: acctErrorText(e), list: [] } }
+        acctSw.remote = { loading: false, asnOnline: v?.asn_online === true, reportedAt: v?.reported_at ?? '', msg: '', list: (v?.accounts ?? []).filter(a => a.vendor === 'claude') }
+      } catch (e) { if (token === acctToken) acctSw.remote = { loading: false, asnOnline: false, reportedAt: '', msg: acctErrorText(e), list: [] } }
     }
-    const pickAcct = email => { if (acct.phase === 'pick') acct.picked = acct.picked === email ? '' : email }
-    const acctToConfirm = () => { if (acctView.value.canPick && acctView.value.pickEmail) acct.phase = 'confirm' }
+    const pickAcct = email => { if (acctSw.phase === 'pick') acctSw.picked = acctSw.picked === email ? '' : email }
+    const acctToConfirm = () => { if (acctView.value.canPick && acctView.value.pickEmail) acctSw.phase = 'confirm' }
     async function submitAcct() {
-      if (acct.phase !== 'confirm' || !acctView.value.pickEmail) return   // 一定要先看過確認畫面才送
+      if (acctSw.phase !== 'confirm' || !acctView.value.pickEmail) return   // 一定要先看過確認畫面才送
       const token = ++acctToken, email = acctView.value.pickEmail
-      acct.phase = 'run'
-      acct.view = await runAcctSwitch(acctTransport, acct.node, email, { onUpdate: v => { if (token === acctToken) acct.view = v }, cancelled: () => token !== acctToken })
+      acctSw.phase = 'run'
+      acctSw.view = await runAcctSwitch(acctTransport, acctSw.node, email, { onUpdate: v => { if (token === acctToken) acctSw.view = v }, cancelled: () => token !== acctToken })
     }
     watch(() => nav.sheet, s => { if (s !== 'acct') acctToken++ })
     const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -720,7 +720,7 @@ const app = createApp({
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, headTone, CONN_LABEL, info, banner, shake, refreshing,
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, ops, opsText, opsTitle, opsModels, opsModelNote, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
-      acct, acctKeys, acctView, acctConfirm, ACCT_TEXT, openAcct, pickAcct, acctToConfirm, submitAcct,
+      acctSw, acctKeys, acctView, acctConfirm, ACCT_TEXT, openAcct, pickAcct, acctToConfirm, submitAcct,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,

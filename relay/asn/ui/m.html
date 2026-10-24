@@ -341,9 +341,9 @@
 
     <!-- 替電腦切換 Claude 帳號：底部浮層（沿用「⋯」選單樣式）。選帳號 → 確認 → 送出並等對方電腦回報；清單只有 email、方案、是否使用中 -->
     <div class="m-ops" v-if="nav.sheet === 'acct'" @click.self="back">
-      <section class="m-ops-panel" role="dialog" aria-modal="true" :aria-label="ACCT_TEXT.title(acct.label)">
-        <h2 class="m-ops-h">{{ ACCT_TEXT.title(acct.label) }}</h2>
-        <template v-if="acct.phase === 'pick'">
+      <section class="m-ops-panel" role="dialog" aria-modal="true" :aria-label="ACCT_TEXT.title(acctSw.label)">
+        <h2 class="m-ops-h">{{ ACCT_TEXT.title(acctSw.label) }}</h2>
+        <template v-if="acctSw.phase === 'pick'">
           <p class="m-note">{{ acctView.onlineText }}<template v-if="acctView.reportedText">；{{ acctView.reportedText }}</template></p>
           <p class="m-ops-lead" v-if="acctView.rows.length">{{ acctView.currentText }}</p>
           <p class="m-note" v-if="acctView.rows.length">{{ ACCT_TEXT.pick }}</p>
@@ -354,16 +354,16 @@
           <button type="button" class="m-btn m-btn-big" :disabled="!acctView.pickEmail" @click="acctToConfirm">下一步</button>
           <button type="button" class="m-btn m-ops-cancel" @click="back">{{ ACCT_TEXT.close }}</button>
         </template>
-        <template v-else-if="acct.phase === 'confirm'">
+        <template v-else-if="acctSw.phase === 'confirm'">
           <p class="m-ops-lead">{{ acctConfirm.lead }}</p>
           <ul class="m-ops-points"><li v-for="p in acctConfirm.points" :key="p">{{ p }}</li></ul>
           <button type="button" class="m-btn m-btn-big" @click="submitAcct">{{ ACCT_TEXT.confirmOk }}</button>
-          <button type="button" class="m-btn m-ops-cancel" @click="acct.phase = 'pick'">{{ ACCT_TEXT.back }}</button>
+          <button type="button" class="m-btn m-ops-cancel" @click="acctSw.phase = 'pick'">{{ ACCT_TEXT.back }}</button>
         </template>
         <template v-else>
-          <p class="m-prog" :class="acct.view ? 'is-' + acct.view.phase : ''" role="status">{{ acct.view ? acct.view.text : '' }}</p>
-          <div class="m-bar" v-if="acct.view && !acct.view.done" aria-hidden="true"><i></i></div>
-          <button type="button" class="m-btn m-ops-cancel" @click="back">{{ acct.view && acct.view.done ? ACCT_TEXT.close : ACCT_TEXT.later }}</button>
+          <p class="m-prog" :class="acctSw.view ? 'is-' + acctSw.view.phase : ''" role="status">{{ acctSw.view ? acctSw.view.text : '' }}</p>
+          <div class="m-bar" v-if="acctSw.view && !acctSw.view.done" aria-hidden="true"><i></i></div>
+          <button type="button" class="m-btn m-ops-cancel" @click="back">{{ acctSw.view && acctSw.view.done ? ACCT_TEXT.close : ACCT_TEXT.later }}</button>
         </template>
       </section>
     </div>

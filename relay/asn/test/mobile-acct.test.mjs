@@ -96,7 +96,7 @@ test('頁面接線：m.js 走 android_acct_* 指令且不碰電腦端指令；m.
   assert.match(html, /nav\.sheet === 'acct'/)
   assert.match(html, /切換 Claude 帳號/)
   assert.match(html, /@click="[^"]*openAcct\(/)
-  assert.match(html, /acct\.phase === 'confirm'/)
+  assert.match(html, /acctSw\.phase === 'confirm'/)
   const lib = read('src-tauri', 'src', 'lib.rs')
   const m = /#\[cfg\(not\(desktop\)\)\]\n\s*let builder = builder\.invoke_handler\(tauri::generate_handler!\[([\s\S]*?)\]\);/.exec(lib)
   for (const c of ['android_acct_list', 'android_acct_switch', 'android_acct_status']) assert.ok(m[1].includes(`android::${c}`), `手機指令清單要有 ${c}`)
