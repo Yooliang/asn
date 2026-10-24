@@ -22,9 +22,9 @@ test('沒有收發室狀態（舊後端）：整塊不顯示', async () => {
   assert.ok(!(await render({ ...base(), bridge: null })).includes('收發室'))
 })
 
-test('預設：開關關著，沒有任何說明或按鈕', async () => {
+test('收發室開關固定開啟且不能改：打勾、停用，沒有任何說明或按鈕', async () => {
   const html = await render({ ...base(), bridge: bridge() })
-  assert.match(html, /<input type="checkbox"(?![^>]*checked)[^>]*aria-label="讓 ASN 負責這台的收發室"/)
+  assert.match(html, /<input type="checkbox" checked disabled[^>]*aria-label="讓 ASN 負責這台的收發室"/)
   assert.ok(!html.includes('舊版收發室橋') && !html.includes('改由 ASN 負責'))
 })
 

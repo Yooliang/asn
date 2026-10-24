@@ -51,10 +51,14 @@ pub fn settings_path(data_dir: &Path) -> PathBuf {
     data_dir.join("bridge.json")
 }
 pub fn read_settings(data_dir: &Path) -> BridgeSettings {
+    // 內建收發室固定開啟（小良哥 10-24：預設且不可關閉）；檔案缺少、損壞、寫 false 都一樣
+    BridgeSettings { enabled: true, ..read_settings_raw(data_dir) }
+}
+fn read_settings_raw(data_dir: &Path) -> BridgeSettings {
     let Ok(text) = std::fs::read_to_string(settings_path(data_dir)) else { return BridgeSettings::default() };
     let Ok(v) = serde_json::from_str::<Value>(&text) else { return BridgeSettings::default() };
     let flag = |k: &str| v.get(k).and_then(Value::as_bool).unwrap_or(false);
-    BridgeSettings { enabled: flag("enabled"), allow_takeover: flag("allow_takeover"), allow_remote_launch: flag("allow_remote_launch"), unaddressed_to: v.get("unaddressed_to").and_then(Value::as_str).unwrap_or("").trim().to_string() }
+    BridgeSettings { enabled: true /* 固定開啟：內建收發室不可關閉（舊設定檔裡的 false 一律忽略） */, allow_takeover: flag("allow_takeover"), allow_remote_launch: flag("allow_remote_launch"), unaddressed_to: v.get("unaddressed_to").and_then(Value::as_str).unwrap_or("").trim().to_string() }
 }
 pub fn write_settings(data_dir: &Path, s: BridgeSettings) -> Result<(), String> {
     crate::write_atomic(&settings_path(data_dir), &json!({ "enabled": s.enabled, "allow_takeover": s.allow_takeover, "allow_remote_launch": s.allow_remote_launch, "unaddressed_to": s.unaddressed_to }).to_string()).map_err(|e| e.to_string())
@@ -405,6 +409,7 @@ impl Manager {
 
     pub fn set_enabled(&self, on: bool) -> Result<Status, String> {
         let mut s = read_settings(&self.data_dir);
+        let on = on || true;   // 不可關閉：關閉的要求一律當成開啟
         s.enabled = on;
         write_settings(&self.data_dir, s)?;
         if on {

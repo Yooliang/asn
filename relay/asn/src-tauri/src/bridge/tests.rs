@@ -1233,26 +1233,25 @@ fn 真的子程序_啟動轉交回覆寄回_關閉時只關自己的_worker_並�
 }
 
 #[test]
-fn 設定_預設關閉_壞檔當關閉() {
+fn 設定_固定開啟_缺檔壞檔寫false都一樣() {
     let d = tempfile::tempdir().unwrap();
-    assert_eq!(super::read_settings(d.path()), super::BridgeSettings::default());
-    super::write_settings(d.path(), super::BridgeSettings { enabled: true, ..Default::default() }).unwrap();
-    assert!(super::read_settings(d.path()).enabled);
+    assert!(super::read_settings(d.path()).enabled, "缺檔也是開");
+    super::write_settings(d.path(), super::BridgeSettings { enabled: false, ..Default::default() }).unwrap();
+    assert!(super::read_settings(d.path()).enabled, "檔案寫 false 也忽略");
     std::fs::write(super::settings_path(d.path()), "壞").unwrap();
-    assert!(!super::read_settings(d.path()).enabled);
+    assert!(super::read_settings(d.path()).enabled, "壞檔也是開");
 }
 
 #[test]
-fn 管理器_舊橋活著時不啟動_狀態顯示由舊版負責_設定關著時什麼都不做() {
+fn 管理器_舊橋活著時不啟動_狀態顯示由舊版負責() {
     let data = tempfile::tempdir().unwrap();
     let work = tempfile::tempdir().unwrap();
     // 用本測試行程的 pid 當「舊橋」：不是我們的 pid 就不能拿鎖——這裡直接寫一個一定活著、但不是 std::process::id() 的 pid 很難，
     // 所以改用父行程（cargo test 的 harness 啟動者）；取不到就跳過這個斷言。
     let relay = Arc::new(Relay::new("http://127.0.0.1:1/relay".into(), "k".into(), "T".into(), "T-ASN".into()));
     let m = super::Manager::new(Some(relay), None, "T".into(), work.path().to_path_buf(), data.path().to_path_buf());
-    // 設定關：start_if_enabled 不啟動
-    m.start_if_enabled();
-    assert_eq!(m.status(), super::Status { enabled: false, running: false, legacy: false, takeover_allowed: false, remote_launch: false, unaddressed_to: String::new(), error: None });
+    // 固定開啟：沒有舊橋時 start_if_enabled 會啟動（這裡 relay 連不上，只看 enabled 旗標）
+    assert!(m.status().enabled);
     // 另一個「活著的」pid 寫進 bridge.pid（找一個真的活著且不是自己的：init 類程序用 pid 4 在 Windows、1 在 Unix）
     let other = if cfg!(windows) { 4 } else { 1 };
     if crate::heartbeat::pid_alive(other) && other != std::process::id() {
