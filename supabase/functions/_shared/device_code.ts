@@ -8,6 +8,20 @@ import { type AuthUser, bearerToken, cleanDisplayName } from "./account.ts";
 
 export const DEVICE_CODE_ACTIONS = new Set(["device_code_start", "device_code_approve", "device_code_poll"]);
 
+/** 官網核准頁（site/public/link）所在的來源。只有它、只有 approve 動作可以跨來源呼叫；start、poll（會回金鑰）都不開給網頁 */
+export const WEB_APPROVE_ORIGIN = "https://asnmessenger.web.app";
+
+export function approveCorsHeaders(origin: string | null, action: string | null): Record<string, string> | null {
+  if (origin !== WEB_APPROVE_ORIGIN || action !== "device_code_approve") return null;
+  return {
+    "access-control-allow-origin": WEB_APPROVE_ORIGIN,
+    "access-control-allow-methods": "POST, OPTIONS",
+    "access-control-allow-headers": "authorization, content-type",
+    "access-control-max-age": "600",
+    "vary": "origin",
+  };
+}
+
 export const USER_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 export const USER_CODE_RE = /^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/;
 export const EXPIRES_IN_SECONDS = 900;

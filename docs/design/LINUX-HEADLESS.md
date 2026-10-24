@@ -415,6 +415,16 @@ GitHub Actions 停擺時，可在 Windows／macOS／Linux 本機直接編出 Lin
 
 部署順序：兩個 migration（先 roster_kind 再 device_code）→ relay Edge Function → 發新版 ASN 與 asn-bridge。舊用戶端不受影響。
 
+### 網頁核准頁（2026-10-24，尚未部署）
+
+`asn-bridge login` 現在先印網址（`https://asnmessenger.web.app/link/?code=ABCD-2345`），再印原本的「電腦版輸入短碼」備案與短碼；用手機或電腦開網址、登入、按一次「核准」即可。
+
+- 頁面：`site/public/link/`（index.html、link.css、config.mjs 公開設定、logic.mjs 純邏輯、link.mjs 畫面）。無外部相依；`site/firebase.json` 對 `/link` 單獨設 CSP（只開自己的腳本與後台一個來源）、不快取、不送來源網址。
+- 登入：瀏覽器端 Supabase OAuth PKCE（Google／GitHub），與桌面版同一套，回呼為 `https://asnmessenger.web.app/link/?state=…`。登入憑證只放頁面記憶體，往返期間 sessionStorage 只暫存驗證碼、state、短碼、名字，回來即清。
+- 核准：`device_code_approve`（Bearer 登入憑證），暴力防護（每帳號輸錯 5 次鎖 15 分鐘）在資料庫，網頁不繞過、不自動重試。
+- 後端：relay Edge Function 對 `device_code_approve` 加了跨來源許可（`approveCorsHeaders`：只有來源為官網、只有 approve；start、poll 絕不開給網頁）。
+- **上線前要手動做**：Supabase 後台 Authentication → URL Configuration → Redirect URLs 加入 `https://asnmessenger.web.app/link/`（不做的話網頁登入會被後台拒絕，其餘流程仍可用電腦版輸入短碼）。部署順序：Edge Function → 官網 → Redirect URLs 白名單 → 發新版 asn-bridge。
+
 ## 自動回信模式（2026-10-24，尚未部署）
 
 ### 為什麼需要
