@@ -13,6 +13,7 @@ pub mod acp_policy;
 pub mod acp_worker;
 pub mod codex;
 pub mod codex_state;
+pub mod pi;
 pub mod rpc;
 
 use super::roster::Window;
@@ -293,6 +294,11 @@ pub fn selected(spec: Option<&str>, agents_file: &Path, codex_home: &Path) -> (b
     }
 }
 
+/// 是否載入 pi 引擎：沒設 ASN_ENGINES 就載入；有設就看有沒有列 pi
+pub fn want_pi(spec: Option<&str>) -> bool {
+    spec.map(|s| s.split(',').any(|x| x.trim().eq_ignore_ascii_case("pi"))).unwrap_or(true)
+}
+
 /// 依設定建引擎集合；沒有任何非 Claude 引擎回 None
 pub fn build(ctx: &EngineCtx, spec: Option<&str>) -> Option<Arc<EngineSet>> {
     let home = codex::codex_home(&ctx.env, &ctx.home);
@@ -307,6 +313,10 @@ pub fn build(ctx: &EngineCtx, spec: Option<&str>) -> Option<Arc<EngineSet>> {
     }
     if want_codex {
         v.push(Arc::new(codex::CodexEngine::new(ctx.clone())));
+    }
+    // pi 視窗（裝了 ASN 擴充的互動 pi）：沒設 ASN_ENGINES 就自動載入（只讀一個資料夾，沒有子程序）；有設就要明寫 pi
+    if want_pi(spec) {
+        v.push(Arc::new(pi::PiEngine::new(ctx.clone())));
     }
     if v.is_empty() {
         return None;
@@ -358,6 +368,14 @@ mod tests {
         assert_eq!(env_get(&kv(&[("ASN_CODEX_BIN", "/n")]), "ASN_CODEX_BIN").as_deref(), Some("/n"));
         assert_eq!(env_get(&kv(&[("ASN_CODEX_BIN", "/n"), ("IRORI_CODEX_BIN", "/o")]), "ASN_CODEX_BIN").as_deref(), Some("/n"));
         assert_eq!(env_get(&kv(&[("OTHER", "x")]), "other").as_deref(), Some("x"), "沒登記的名字照舊大小寫不分比對");
+    }
+
+    #[test]
+    fn pi_引擎_沒設自動載入_有設要明寫() {
+        assert!(want_pi(None));
+        assert!(want_pi(Some("claude, PI")));
+        assert!(!want_pi(Some("claude,acp")));
+        assert!(!want_pi(Some("")));
     }
 
     #[test]
