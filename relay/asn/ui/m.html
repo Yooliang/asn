@@ -237,7 +237,7 @@
                               <span class="m-dv-cur" v-if="a.current">使用中</span>
                               <button type="button" class="m-dv-sw" v-else-if="v.key === 'claude' && (v.switchable || v.switchHint)" :disabled="!v.switchable" @click="startAcctSwitch(a.email)">切換</button>
                             </span>
-                            <span class="m-dv-quota" :class="{ stale: a.quota.stale, out: a.quota.exhausted }" v-if="a.quota">
+                            <span class="m-dv-quota" :class="{ stale: a.quota.stale, 'quota-out': a.quota.exhausted }" v-if="a.quota">
                               <span>{{ a.quota.text }}</span>
                               <span v-if="a.quota.resetText">・{{ a.quota.resetText }}</span>
                               <span v-if="a.quota.meta">（{{ a.quota.meta }}）</span>
