@@ -16,6 +16,7 @@ export const roomChatId = id => `${ROOM_PREFIX}${id}`
 export const isRoomChat = id => typeof id === 'string' && id.startsWith(ROOM_PREFIX) && id.length > ROOM_PREFIX.length
 export const roomIdOf = chatId => (isRoomChat(chatId) ? chatId.slice(ROOM_PREFIX.length) : '')
 
+import { mentionTargets } from './mention.mjs'
 import { KIND_BADGE, kindOf, safeLabel, speakerAvatarSeed, speakerLabels } from './groups.mjs'
 
 const oneLine = (s, n) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n)
@@ -36,7 +37,7 @@ export function roomItems(rooms, { query = '', plainText = s => s } = {}) {
       id: r.id, chatId: roomChatId(r.id), name, count, unread: roomUnread(r), lastSeq: Number.isInteger(r.last_seq) ? r.last_seq : 0,
       last: r.last_body ? `${r.last_from_name ? `${r.last_from_name}：` : ''}${oneLine(r.last_body, 40)}` : '',
       at: Date.parse(r.last_at ?? r.created_at) || 0,
-      external: r.external === true, host: r.is_host === true,
+      external: r.external === true, host: r.is_host === true, mentionable: mentionTargets(r.members),
     })
   }
   return rows.sort((a, b) => b.at - a.at)
@@ -61,7 +62,7 @@ export function memberIdentity(room, selfNode, windowName) {
 // 對話分頁用的假夥伴：沿用 ChatPane，群組標頭顯示群組名與人數
 export function roomPseudoFriend(row) {
   // external＝有別的帳號的成員（不能傳附件）
-  return { id: row.chatId, nick: row.name, psm: `${row.count} 位成員`, status: 'online', room: true, group: true, node: '', device: '', agent: '', hue: 205, dp: row.name.slice(0, 1), unread: 0, external: row.external === true, host: row.host === true }
+  return { id: row.chatId, nick: row.name, psm: `${row.count} 位成員`, status: 'online', room: true, group: true, node: '', device: '', agent: '', hue: 205, dp: row.name.slice(0, 1), unread: 0, external: row.external === true, host: row.host === true, mentionable: row.mentionable ?? [] }
 }
 
 // 後台的訊息 → 對話記錄（ChatPane 的格式）。自己的成員身分發的算 me；who＝每則上的發言者名字

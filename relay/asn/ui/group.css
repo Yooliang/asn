@@ -36,6 +36,12 @@
 .gs-av,.spk-av{flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;font-size:12px;font-weight:700;color:#fff;vertical-align:middle}
 .gs-av.human,.spk-av.is-human{border-radius:50%;background:#3b82c4}
 .gs-av.ai,.spk-av.is-ai{border-radius:7px;background:#7b6bc9}
+.mention{display:inline-block;padding:0 5px;margin:0 1px;border-radius:9px;background:#dbe9fb;color:#1b4f8f;font-size:.92em;line-height:1.5;font-weight:600}
+.composer{position:relative}
+.mention-menu{position:absolute;z-index:20;left:0;bottom:100%;margin:0 0 4px;padding:3px;list-style:none;min-width:200px;max-width:100%;max-height:220px;overflow-y:auto;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 4px 14px rgba(0,30,70,.3)}
+.mention-menu button{display:flex;align-items:center;gap:8px;width:100%;border:0;background:none;text-align:left;padding:7px 9px;border-radius:5px;cursor:pointer;color:var(--fg);font-size:14px}
+.mention-menu button.on,.mention-menu button:hover{background:#dbe9fb;color:#14375f}
+.mention-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .m-av-spk{flex:none;margin-top:2px}
 .spk-av{width:18px;height:18px;font-size:11px;margin-right:5px}
 .who-badge{display:inline-block;margin-left:5px;padding:0 6px;font-size:10px;line-height:15px;border-radius:8px;vertical-align:1px;color:#fff;font-weight:600}
@@ -64,5 +70,6 @@
 .room-btn:hover{background:#e6f1fc}
 .room-btn .unread{align-self:center;height:18px;box-sizing:border-box}
 @media (prefers-color-scheme:dark){
+  .mention{background:#2b4468;color:#cfe3ff}.mention-menu button.on,.mention-menu button:hover{background:#2b4468;color:#e6f0ff}
   .gc-list{background:#3a3418}.gc-card{background:#232a33}.gs-input{background:#1c232b}
 }

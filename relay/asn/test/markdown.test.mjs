@@ -141,8 +141,9 @@ test('守門：對話區只有一般訊息內文走 Markdown；震動、系統�
   // 系統提示（含震動）用文字插值，不用 v-html
   assert.match(pane, /<div v-if="m\.k === 'sys'" class="sys"[^>]*>\{\{ m\.text \}\}<\/div>/)
   // 內文走 renderMarkdown；模板只有這一處
-  assert.equal((pane.match(/v-html="renderMarkdown\(/g) || []).length, 1)
-  assert.match(pane, /v-if="shownBody\(m\)\.text" v-html="renderMarkdown\(shownBody\(m\)\.text\)" @click="onBodyClick"/)   // 對方回信先拿掉結束通話記號（call-end.mjs）再走 Markdown
+  assert.equal((pane.match(/v-html="bodyHtml\(/g) || []).length, 1)
+  assert.match(pane, /const bodyHtml = text => \(isRoom\.value \? markMentions\(renderMarkdown\(text\), .*\) : renderMarkdown\(text\)\)/)   // 群組的 @ 小標記是在 renderMarkdown 輸出之後才加，內文不會繞過跳脫與淨化
+  assert.match(pane, /v-if="shownBody\(m\)\.text" v-html="bodyHtml\(shownBody\(m\)\.text\)" @click="onBodyClick"/)   // 對方回信先拿掉結束通話記號（call-end.mjs）再走 Markdown
   // 照片、檔案區塊沒有 v-html
   const at = pane.indexOf('<div class="photos"')
   assert.ok(at > 0 && !/v-html/.test(pane.slice(at, at + 1500)))
