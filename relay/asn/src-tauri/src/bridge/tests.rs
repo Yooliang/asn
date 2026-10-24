@@ -966,12 +966,19 @@ async fn 沒指定收件人_沒設定或設定的視窗不在線_交給本人_�
     assert!(sink.said.lock().unwrap().is_empty(), "不能轉給任何 session");
     assert!(fr.acked().is_empty(), "交給本人的信不能由橋 ack");
     assert_eq!(core.relay.unaddressed_ids(), vec![uid(2)]);
+    // 不立刻回「已交給本人」：本人若很快就看到並回答，寄件人只會收到真正的回答
+    assert!(fr.sent().is_empty(), "寬限期內不先寄通知");
+    core.tick(T0 + 1000).await;
+    assert!(fr.sent().is_empty());
+    // 寬限期過了本人還沒看（信仍留在信箱）：才寄一次說明
+    core.tick(T0 + 200_000).await;
     let back = fr.sent();
     assert_eq!(back.len(), 1);
     assert_eq!((back[0]["to_node"].as_str(), back[0]["to_agent"].as_str()), (Some("W"), Some("W-政策")));
-    assert_eq!(back[0]["body"], "（這封信沒有指定收件視窗，已交給 T-ASN 本人）");
-    // 再拉一次：不重複通知、仍不 ack
-    core.pull("again", T0 + 1000).await;
+    assert_eq!(back[0]["body"], "（這封信沒有指定收件視窗，已留給 T-ASN 本人；本人還沒看到，上線後才會處理。要立刻有人回，請指定收件視窗）");
+    // 再拉一次、再 tick：不重複通知、仍不 ack
+    core.pull("again", T0 + 201_000).await;
+    core.tick(T0 + 400_000).await;
     assert_eq!(fr.sent().len(), 1);
     assert!(fr.acked().is_empty());
     // ASN 視窗收信：以「未指定收件人」交給畫面；畫面收下（ack）後才從信箱拿掉
@@ -998,11 +1005,37 @@ async fn 沒指定收件人_沒設定或設定的視窗不在線_交給本人_�
 }
 
 #[tokio::test]
+async fn 沒指定收件人_本人在寬限期內收下就不寄說明_同一寄件人十分鐘內只說明一次() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.fr.put(mail(1, json!({"to_agent": null})));
+    h.core.pull("test", T0).await;
+    // 本人在寬限期內收下（畫面收信後 ack）：寄件人不會收到說明
+    h.core.relay.inbox().await.unwrap();
+    h.core.relay.ack(&[uid(1)]).await.unwrap();
+    h.core.tick(T0 + 200_000).await;
+    assert!(h.fr.sent().is_empty(), "已被本人收下，不用說明");
+    // 同一寄件人連寄兩封、本人都沒看：只說明一次
+    h.fr.put(mail(2, json!({"to_agent": null})));
+    h.fr.put(mail(3, json!({"to_agent": null})));
+    h.core.pull("test", T0 + 300_000).await;
+    h.core.tick(T0 + 300_000 + 200_000).await;
+    assert_eq!(h.fr.sent().len(), 1, "{:?}", h.fr.sent());
+    // 十分鐘後同一寄件人又寄：可再說明一次
+    h.fr.put(mail(4, json!({"to_agent": null})));
+    h.core.pull("test", T0 + 1_200_000).await;
+    h.core.tick(T0 + 1_200_000 + 200_000).await;
+    assert_eq!(h.fr.sent().len(), 2);
+    // 信本身全程不 ack（除本人收下的那封）
+    assert_eq!(h.fr.acked(), vec![uid(1)]);
+}
+
+#[tokio::test]
 async fn 沒指定收件人_不要回覆的信與收發室系統信_交給本人但不通知寄件人() {
     let mut h = harness(&[("T-乙", "idle")]).await;
     h.fr.put(mail(1, json!({"to_agent": null, "expects_reply": false, "body": "只是告知"})));
     h.fr.put(mail(2, json!({"to_agent": null, "from_agent": "W-收發室", "body": "系統通知"})));
     h.core.pull("test", T0).await;
+    h.core.tick(T0 + 200_000).await;
     assert!(h.fr.sent().is_empty() && h.fr.acked().is_empty());
     assert_eq!(h.core.relay.unaddressed_ids().len(), 2);
 }

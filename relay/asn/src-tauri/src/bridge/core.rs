@@ -195,6 +195,10 @@ impl Origin {
 
 const NOTICE_TTL_MS: u64 = 600_000;
 /// 本人傳的 /指令，但目標視窗沒有 ASN 外掛：照普通信投遞，另外回這句
+/// 交給本人的信：寬限期內本人收下（ack）就不寄說明（本人會直接回答）；過了還沒人看才說明
+const OWNER_RECEIPT_GRACE_MS: u64 = 180_000;
+/// 同一寄件人對同一節點在這段時間內只說明一次
+const OWNER_RECEIPT_GAP_MS: u64 = 600_000;
 const NO_MOD_NOTICE: &str = "這個視窗沒有 ASN 外掛，/指令 只能當文字送過去";
 const DIRECT_NOTE: &str = "（這個視窗自己用命令列回了信，內文只在對方那邊，收發室看不到）";
 
@@ -222,6 +226,10 @@ pub struct Core {
     /// 其中已經有一封回覆寄失敗的（不再寄後面的、也不 ack）
     reply_fail: HashSet<String>,
     unrouted: HashSet<String>,
+    /// 交給本人、等寬限期過了仍沒被收下才說明的信：(到期時間, 來源)
+    owner_receipts: Vec<(u64, Origin)>,
+    /// 寄件人 → 上次說明「交給本人」的時間（節流用）
+    owner_receipt_at: HashMap<String, u64>,
     last_saved: String,
     persist_failed: bool,
     pruned_at: u64,
@@ -289,7 +297,7 @@ impl Core {
         let corr = CorrLog::new(cfg.handoff_dir.clone());
         let mut c = Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, created: Arc::new(crate::heartbeat::process_started_ms), now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
-            last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(),
+            last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, respond_sent: String::new(),
         };
@@ -864,8 +872,31 @@ impl Core {
         self.log.line(&format!("id={} has no to_agent: kept in inbox for the owner ({owner}), not acked", m.id));
         if wants_reply(m.expects_reply, &m.body) && !Self::is_mailbox_sender(from_agent) {
             let p = Pending::new(&m.id, &m.from_node, from_agent, &owner, self.now, true);
-            self.send_back(&Origin::of(&p), &unaddressed_receipt(&owner), None, Some(false)).await;
+            self.owner_receipts.push((self.now + OWNER_RECEIPT_GRACE_MS, Origin::of(&p)));
         }
+    }
+
+    /// 到期的「交給本人」說明：信已被本人收下就不寄；同一寄件人十分鐘內只寄一次。信本身不動（不 ack、不移除）
+    async fn flush_owner_receipts(&mut self, now: u64) {
+        if self.owner_receipts.is_empty() {
+            return;
+        }
+        let (due, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.owner_receipts).into_iter().partition(|(t, _)| *t <= now);
+        self.owner_receipts = rest;
+        let held = self.relay.unaddressed_ids();
+        let owner = self.relay.window_name();
+        for (_, o) in due {
+            if !held.contains(&o.id) {
+                continue; // 本人已收下
+            }
+            let key = format!("{}/{}", o.from_node, o.from_agent);
+            if self.owner_receipt_at.get(&key).is_some_and(|t| now.saturating_sub(*t) < OWNER_RECEIPT_GAP_MS) {
+                continue;
+            }
+            self.owner_receipt_at.insert(key, now);
+            self.send_back(&o, &unaddressed_receipt(&owner), None, Some(false)).await;
+        }
+        self.owner_receipt_at.retain(|_, t| now.saturating_sub(*t) < OWNER_RECEIPT_GAP_MS);
     }
 
     // ---- worker 回報 ----
@@ -1473,6 +1504,7 @@ impl Core {
     pub async fn tick(&mut self, now: u64) {
         self.now = now;
         self.release_held(now).await;
+        self.flush_owner_receipts(now).await;
         // 自動回信：自己視窗的忙碌／閒置變了就立刻重報名單（防抖間隔同本機視窗監看）
         if self.cfg.respond.is_some() && self.respond_status() != self.respond_sent && now.saturating_sub(self.roster_at) >= self.cfg.watch_gap_ms {
             self.refresh_roster(now).await;
