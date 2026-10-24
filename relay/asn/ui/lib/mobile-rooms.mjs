@@ -121,6 +121,26 @@ export function applyReads(log, reads) {
 }
 // 還有人沒讀的自己的訊息（最近 40 則內）：有的話值得在沒有新訊息時也問一次後台
 export const hasPendingReads = log => (Array.isArray(log) ? log.slice(-40) : []).some(e => e?.k === 'me' && e.rd && e.rd.n < e.rd.total)
+// 叫醒順序是第一位 AI 讀者讀到時才算並存回（要打排序模型，數秒到一分鐘）：發言者的畫面可能比它先讀到，之後要補上。
+// 只對最近 WAKE_WAIT_MS 內發出、還沒有順序的訊息補問；過了這段時間就當作永遠不會有（沒人被叫醒）
+export const WAKE_WAIT_MS = 10 * 60 * 1000
+// 把後台 wakes（最近 40 則中已存下叫醒順序的訊息）套到對話記錄上：只補還沒有順序的（先到先得）；回新陣列（沒有變動回原陣列）
+export function applyWakes(log, wakes) {
+  if (!Array.isArray(log) || !Array.isArray(wakes) || !wakes.length) return log
+  const by = new Map(wakes.filter(e => e && Array.isArray(e.wake_info)).map(e => [e.seq, e.wake_info]))
+  if (!by.size) return log
+  let changed = false
+  const out = log.map(e => {
+    const info = e && (e.k === 'me' || e.k === 'them') && e.wk !== true ? by.get(e.seq) : null
+    if (!info) return e
+    changed = true
+    return { ...e, wake: wakeTags(info), wk: true }
+  })
+  return changed ? out : log
+}
+// 最近 40 則內，WAKE_WAIT_MS 以內發出、還沒有叫醒順序的訊息（系統訊息與開頭紀錄除外）：有的話值得在沒有新訊息時也問一次後台
+export const hasPendingWakes = (log, now = Date.now()) =>
+  (Array.isArray(log) ? log.slice(-40) : []).some(e => e && (e.k === 'me' || e.k === 'them') && e.wk !== true && !e.seed && e.t > 0 && now - e.t < WAKE_WAIT_MS)
 export function roomLog(messages, myKeys, members) {
   const mine = new Set(myKeys ?? [])
   const list = (Array.isArray(messages) ? messages : []).filter(m => m && Number.isInteger(m.seq))
@@ -133,7 +153,7 @@ export function roomLog(messages, myKeys, members) {
     if (m.from_kind === 'system' || m.relation === 'system') { out.push({ k: 'sys', text, t, id, seq: m.seq }); continue }
     const isMe = m.relation ? m.relation === 'mine' : mine.has(m.from)
     const kind = kindOf(m)
-    out.push({ k: isMe ? 'me' : 'them', who: isMe ? '' : (labels.get(m.from) || fromLabel(m)), kind, badge: isMe ? '' : KIND_BADGE[kind] ?? '', av: isMe ? '' : speakerAvatarSeed(m.from), reply: replyOf(m.reply_to, labels), wake: wakeTags(m.wake_info), rd: isMe && !m.is_seed ? readInfo(m) : null, text, t, id, seq: m.seq, seed: m.is_seed === true })
+    out.push({ k: isMe ? 'me' : 'them', who: isMe ? '' : (labels.get(m.from) || fromLabel(m)), kind, badge: isMe ? '' : KIND_BADGE[kind] ?? '', av: isMe ? '' : speakerAvatarSeed(m.from), reply: replyOf(m.reply_to, labels), wake: wakeTags(m.wake_info), wk: Array.isArray(m.wake_info), rd: isMe && !m.is_seed ? readInfo(m) : null, text, t, id, seq: m.seq, seed: m.is_seed === true })
   }
   return out
 }

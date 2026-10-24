@@ -2,10 +2,10 @@
 // 不碰 DOM；後台的呼叫經 invoke（Rust 指令）與 groupApi。發言與主持人確認都要本人簽章，由 Rust 端帶憑證，這裡拿不到。
 // reactive 由頁面帶進來（Vue 的 reactive），測試用預設的原物件。
 import { confirmCards } from './groups.mjs'
-import { ROOM_FIRST_LOAD, ROOM_LOAD_FAIL_TEXT, applyReads, hasPendingReads, mergeRoomLog, memberIdentity, needsRead, postError, readSince, roomErrorText, roomItems, roomLog } from './mobile-rooms.mjs'
+import { ROOM_FIRST_LOAD, ROOM_LOAD_FAIL_TEXT, applyReads, applyWakes, hasPendingReads, hasPendingWakes, mergeRoomLog, memberIdentity, needsRead, postError, readSince, roomErrorText, roomItems, roomLog } from './mobile-rooms.mjs'
 import { groupErrorText } from './groups.mjs'
 
-export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd = 'relay_room_read', postCmd = 'relay_room_post', attachCmd = 'relay_send_attachment', visible = () => true, reactive = x => x }) {
+export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd = 'relay_room_read', postCmd = 'relay_room_post', attachCmd = 'relay_send_attachment', visible = () => true, now = () => Date.now(), reactive = x => x }) {
   const st = reactive({ rooms: [], loaded: false, err: false, logs: {}, cards: {}, note: '', deciding: false })
   const raw = id => st.rooms.find(r => r?.id === id) ?? null
   const rows = (opts = {}) => roomItems(st.rooms, opts)
@@ -22,6 +22,7 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
   }
 
   let reading = new Set()
+  let noWakes = false
   // 讀一個群組的新訊息（第一次讀最近 ROOM_FIRST_LOAD 則）；回 true＝有新資料
   async function read(id, { force = false } = {}) {
     const room = raw(id), row = rowOf(id)
@@ -38,7 +39,7 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
       const since = unread && !first ? Math.max(0, readSince(log, row.lastSeq) - 1) : readSince(log, row.lastSeq)
       const r = await invoke(readCmd, { room: id, agent: ident.agent || null, since, limit: first ? ROOM_FIRST_LOAD : 200, mark: visible() })
       const mine = (room.mine ?? []).map(m => m?.member)
-      st.logs[id] = applyReads(mergeRoomLog(log, roomLog(r?.messages, mine, room.members)), r?.reads)
+      st.logs[id] = applyWakes(applyReads(mergeRoomLog(log, roomLog(r?.messages, mine, room.members)), r?.reads), r?.wakes)
       if (visible()) for (const m of room.mine ?? []) if (m.member === ident.key) m.unread = 0
       st.note = ''
       return true
@@ -46,12 +47,15 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
   }
 
   // 沒有新訊息時：自己發的訊息還有人沒讀，就問一次後台「已讀 N」有沒有變（不標已讀、只讀最後一則之後＝不會有訊息內容）
+  // 同一次呼叫也補晚到的叫醒順序（最近 10 分鐘內發出、還沒有順序的訊息）；後台只回已存的結果，不會重新排序
   async function refreshReceipts(id, ident, log) {
-    if (!hasPendingReads(log)) return false
+    const wakeWait = !noWakes && hasPendingWakes(log, now())
+    if (!hasPendingReads(log) && !wakeWait) return false
     try {
       const r = await invoke(readCmd, { room: id, agent: ident.agent || null, since: log[log.length - 1].seq, limit: 1, mark: false })
+      if (wakeWait && !Array.isArray(r?.wakes)) noWakes = true   // 舊後台沒有這個欄位：不再為順序而問
       const cur = st.logs[id] ?? log
-      const next = applyReads(cur, r?.reads)
+      const next = applyWakes(applyReads(cur, r?.reads), r?.wakes)
       if (next !== cur) { st.logs[id] = next; return true }
     } catch { /* 舊後台或暫時連不上：維持原樣 */ }
     return false
