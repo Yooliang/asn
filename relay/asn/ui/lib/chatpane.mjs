@@ -25,6 +25,7 @@ import { buildNameHints } from './stt-text.mjs'
 import { statusTip, tierOf } from './sent-status.mjs'
 import { isAsnWindow, showsWaiting } from './roster.mjs'
 import { warnKind } from './head-tone.mjs'
+import { DISPLAY_ONLY_TAG, displayOnlyHint, isDisplayOnly } from './display-only.mjs'
 import { keepScroll, olderNote, rearmed, wantsOlder } from './scrollback.mjs'
 
 const { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, reactive } = Vue
@@ -71,12 +72,13 @@ export const ChatPane = {
     const isAsn = computed(() => isAsnWindow(props.friend))
     const showWaiting = computed(() => showsWaiting(props.friend))
     const sideCol = computed(() => hasSideCol(props.dpMode))
-    const composeHint = computed(() => composePlaceholder(props.winMode))
-    const composeTitle = computed(() => composeHintTitle(props.winMode))
+    const composeHint = computed(() => (displayOnly.value ? displayOnlyHint(props.friend) : composePlaceholder(props.winMode)))
+    const composeTitle = computed(() => (displayOnly.value ? displayOnlyHint(props.friend) : composeHintTitle(props.winMode)))
     const collapsed = computed(() => isCollapsed(props.dpMode, props.dpCollapsed))
     const classes = computed(() => paneClasses({ dpMode: props.dpMode, bubble: props.bubble, collapsed: props.dpCollapsed, toolbar: props.toolbar }))
     const side = computed(() => sideOf(props.dpMode))
-    const warn = computed(() => warnKind(props.friend?.status, { hideBusy: props.hideBusyWarn }))
+    const displayOnly = computed(() => !isRoom.value && isDisplayOnly(props.friend))   // 本機程序掃描的條目：只顯示，不能收信
+    const warn = computed(() => (displayOnly.value ? null : warnKind(props.friend?.status, { hideBusy: props.hideBusyWarn })))
     const barArrow = computed(() => foldBarArrow(side.value, collapsed.value))
     const foldTip = computed(() => (collapsed.value ? '展開大頭貼' : '收起大頭貼'))
     const lay = k => msgLayout(k, { dpMode: props.dpMode, bubble: props.bubble })
@@ -116,7 +118,7 @@ export const ChatPane = {
     watch(() => props.friend?.id, () => { armed = true; nextTick(checkTop) })
     watch(() => props.active, a => { if (a) { scrollDown(); nextTick(() => { composeEl.value && composeEl.value.focus(); checkTop() }) } })
     function send() {
-      let text = draft.value.trim(); if (!text) return
+      let text = draft.value.trim(); if (!text || displayOnly.value) return
       const rep = replying.value
       if (rep) text = composeReply(rep, text)   // 引用行＋自動 @ 原作者＋使用者打的字
       if (rep) emit('send', text, { replySeq: rep.seq }); else emit('send', text)
@@ -330,7 +332,7 @@ export const ChatPane = {
     const docEl = ref(null)
     // 訊息內文裡的連結：不在 WebView 導覽，一律交給系統瀏覽器（Rust 端 open_link 再驗一次協定）
     const onBodyClick = ev => handleLinkClick(ev, url => globalThis.__TAURI__?.core?.invoke?.('open_link', { url }))
-    return { actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendor, isRoom, attachOk, opsItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendor, isRoom, attachOk, opsItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -341,6 +343,7 @@ export const ChatPane = {
     <div class="conv-main">
       <div class="to-line" :class="{ 'is-offline': !isRoom && friend.status === 'offline' }"><span v-html="emo(friend.nick)"></span>
         <span class="to-psm" v-if="friend.psm" v-html="emo(friend.psm)"></span>
+        <span class="to-busy to-readonly" v-if="displayOnly">{{ DISPLAY_ONLY_TAG }}</span>
         <span class="to-busy" v-if="warn && warn !== 'offline'">{{ STATUS[friend.status] }}，可能無法馬上回應</span>
       </div>
       <confirm-cards v-if="isRoom" :cards="roomCards" @decide="(id, ok) => $emit('group-decide', id, ok)"></confirm-cards>
@@ -397,7 +400,7 @@ export const ChatPane = {
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="9.5" fill="#ffd84a" stroke="#b58a00"/><circle cx="8.6" cy="9.6" r="1.4" fill="#5a3b00"/><circle cx="15.4" cy="9.6" r="1.4" fill="#5a3b00"/><path d="M7.2 14c1.2 2.6 3 3.6 4.8 3.6s3.6-1 4.8-3.6" fill="none" stroke="#5a3b00" stroke-width="1.6" stroke-linecap="round"/></svg>
           </button>
         </span>
-        <button class="tool icon call" type="button" v-if="showCallBtn" @click="startCall" :disabled="callActive || dictPhase !== 'idle'" aria-label="通話" title="通話：用說的跟這位夥伴對話，回信會念出來">
+        <button class="tool icon call" type="button" v-if="showCallBtn && !displayOnly" @click="startCall" :disabled="callActive || dictPhase !== 'idle'" aria-label="通話" title="通話：用說的跟這位夥伴對話，回信會念出來">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6.6 3.5l2.4-.6 1.7 4.2-1.9 1.6a11.5 11.5 0 0 0 5.5 5.5l1.6-1.9 4.2 1.7-.6 2.4a2.6 2.6 0 0 1-2.6 2C10.1 18.4 5.6 13.9 4.6 6.1a2.6 2.6 0 0 1 2-2.6z" fill="#2f9a45" stroke="#1f6b2f" stroke-width="1.2" stroke-linejoin="round"/></svg>
         </button>
         <button class="tool icon dict" :class="{ rec: dictPhase === 'listening', busy: dictPhase === 'starting' }" type="button" v-if="showDictBtn" @click="dictClick" :disabled="callActive" :aria-pressed="dictPhase === 'listening'" aria-label="語音輸入" :title="dictTip">
@@ -436,8 +439,8 @@ export const ChatPane = {
         <ul class="mention-menu" v-if="mention" role="listbox" aria-label="選擇要點名的成員">
           <li v-for="(o, i) in mention.options" :key="o.label"><button type="button" role="option" :class="{ on: i === mention.idx }" :aria-selected="i === mention.idx" @mousedown.prevent @click="pickMention(o)"><span class="mention-name">{{ o.label }}</span><small class="who-badge" :class="'is-' + o.kind">{{ o.badge }}</small></button></li>
         </ul>
-        <textarea ref="composeEl" v-model="draft" @input="onDraftInput" @click="onDraftInput" @keydown="onComposeKey" @keydown.enter.exact="onEnter" @paste="onPaste" :placeholder="composeHint" :title="composeTitle || undefined" aria-label="輸入訊息"></textarea>
-        <button class="aero-btn" type="submit" :disabled="!draft.trim()">傳送</button>
+        <textarea ref="composeEl" v-model="draft" @input="onDraftInput" @click="onDraftInput" @keydown="onComposeKey" @keydown.enter.exact="onEnter" @paste="onPaste" :placeholder="composeHint" :title="composeTitle || undefined" aria-label="輸入訊息" :disabled="displayOnly"></textarea>
+        <button class="aero-btn" type="submit" :disabled="displayOnly || !draft.trim()">傳送</button>
       </form>
     </div>
   </div>

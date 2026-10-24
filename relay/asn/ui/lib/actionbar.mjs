@@ -2,6 +2,7 @@
 // 分層原則（小良哥 10/21）：只影響「這一則訊息」的（傳檔、截圖、表情、震動、語音）留在輸入框旁的小工具列；
 // 影響「整個代理」的才放這裡。這裡只放目前已經做好的：顯示／背景（主控台視窗）、切換模型、子代理，以及離線夥伴的「喚醒」。
 // 子代理（#27）已加；權限詢問等功能做好後再加按鈕，沒有功能就不放假按鈕。
+import { isDisplayOnly } from './display-only.mjs'
 import { AsnDialog } from './dialog.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher, modelSwitchBlock } from './model-switch.mjs'
 import { SUBAGENT_POLL_MS, canOfferSubagents, subagentView } from './subagents.mjs'
@@ -40,7 +41,7 @@ export function consoleBlock(friend, selfNode) {
 
 /** 通話按鈕：夥伴要在線（離線的話信只會留在收發室，通話等不到回覆），而且這個環境有語音功能。 */
 export function canOfferCall(friend, { hasVoice = true } = {}) {
-  if (!hasVoice || !friend || friend.pending || friend.room === true) return false
+  if (!hasVoice || !friend || friend.pending || friend.room === true || isDisplayOnly(friend)) return false
   return friend.status !== 'offline'
 }
 
