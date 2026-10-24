@@ -59,7 +59,8 @@ test('錯誤訊息照實顯示', async () => {
 test('守門：新增的指令都在清單裡，樞紐接得住，Rust 端有註冊對應指令', () => {
   for (const op of ['bridge-launch', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no']) assert.ok(SETTING_OPS.includes(op), op)
   const list = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
-  for (const cmd of ['bridge_status', 'bridge_set_enabled', 'bridge_set_remote_launch', 'bridge_takeover']) {
+  // bridge_set_enabled 還在 Rust 端註冊，但收發室已固定開啟，前端不再呼叫
+  for (const cmd of ['bridge_status', 'bridge_set_remote_launch', 'bridge_takeover']) {
     assert.ok(list.includes(`invoke('${cmd}'`), `前端呼叫 ${cmd}`)
     assert.ok(fs.readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8').includes(`${cmd},`), `lib.rs 註冊 ${cmd}`)
   }
