@@ -1,6 +1,7 @@
 //! 開新夥伴：本機啟動、遠端 launch API（全 Rust，不呼叫 Node）。
 pub(crate) mod config;
 pub(crate) mod console;
+pub(crate) mod console_resolve;
 pub(crate) mod cwds;
 pub(crate) mod local;
 pub(crate) mod prefs;
@@ -8,6 +9,7 @@ pub(crate) mod profiles;
 mod resume;
 mod subagents;
 pub(crate) mod switch;
+pub(crate) mod wt_launch;
 
 use crate::relay::Relay;
 use prefs::{launch_prefs_get_sync, launch_prefs_set_sync};
@@ -47,6 +49,12 @@ pub struct PartnerConsoleReq {
     pub name: String,
     #[serde(default)]
     pub visible: Option<bool>,
+    /// 名單條目種類（kind）；「process」＝程序掃描列出的本機程式
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// 名單條目明確帶的 pid（選填；一定會再比對本機掃描結果才採用）
+    #[serde(default)]
+    pub pid: Option<u32>,
 }
 
 pub async fn partner_launch_local(node: String, work_dir: PathBuf, data_dir: PathBuf, req: LocalLaunchReq) -> Result<Value, String> {

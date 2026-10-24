@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import test from 'node:test'
-import { BUDDY_CONSOLE_LABEL, CONSOLE_QUERY_TIMEOUT_MS, buddyConsoleItem, consoleToggleLabel, withTimeout,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice } from '../ui/lib/partner-launch-ui.mjs'
+import { BUDDY_CONSOLE_LABEL, CONSOLE_QUERY_TIMEOUT_MS, buddyConsoleItem, consoleReq, consoleToggleLabel, withTimeout,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice } from '../ui/lib/partner-launch-ui.mjs'
 
 test('設備選單：本機排第一', () => {
   const rows = launchDeviceRows(
@@ -85,4 +85,16 @@ test('右鍵選單反灰時把原因接到滑鼠提示（list.js 存 reason、li
   assert.match(js, /buddyConsole\.reason = String\(q\?\.reason/)
   assert.match(js, /buddyConsoleItem\(buddyConsole\.state, buddyConsole\.reason\)/)
   assert.match(html, /:title="buddyConsoleItemView\.tip"/)
+})
+
+test('主控台查詢請求帶明確欄位（引擎、名字、條目種類、選填 pid），不從顯示名解析', () => {
+  assert.deepEqual(consoleReq({ agent: '小良', engine: 'claude' }, 'claude'), { engine: 'claude', name: '小良' })
+  assert.deepEqual(consoleReq({ agent: 'grok #4321（前景）', entryKind: 'process' }, 'grok'), { engine: 'grok', name: 'grok #4321（前景）', kind: 'process' })
+  assert.deepEqual(consoleReq({ nick: '甲', entryKind: 'process', pid: 77 }, 'codex'), { engine: 'codex', name: '甲', kind: 'process', pid: 77 })
+  assert.equal('pid' in consoleReq({ agent: 'x', pid: 'abc' }, 'pi'), false, '壞的 pid 不送')
+  const js = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
+  assert.ok(!/c\.engine === 'acp'/.test(js.slice(js.indexOf('async function openBuddyMenu'), js.indexOf('async function toggleBuddyConsole'))), 'ACP 工作者也要查，才拿得到沒有終端機視窗的原因')
+  assert.match(js, /partnerConsoleSet\(\{ \.\.\.consoleReq\(c, eng\)/)
+  const roster = fs.readFileSync(new URL('../ui/lib/roster.mjs', import.meta.url), 'utf8')
+  assert.match(roster, /entryKind: typeof a\.kind === 'string'/, '名單要把條目自己的 kind 帶進好友物件')
 })

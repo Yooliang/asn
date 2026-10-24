@@ -279,8 +279,10 @@ mod child_env_tests {
     fn 守門_開視窗都用乾淨的環境() {
         let local = include_str!("local.rs");
         let switch = include_str!("switch.rs");
+        let wt = include_str!("wt_launch.rs");
         let marker = ["env_clear()", ".envs(super::config::child_env())"];
         assert!(local.matches(marker[0]).count() >= 3, "local.rs 的三個開視窗路徑都要 env_clear");
-        assert!(switch.contains("wt.exe") && switch.matches(marker[1]).count() >= 1, "換模型重開走 WT 也要乾淨環境");
+        assert!(wt.contains("wt.exe") && wt.matches(marker[0]).count() >= 1 && wt.matches(marker[1]).count() >= 1, "走 WT 專屬視窗開夥伴（含換模型重開）也要乾淨環境");
+        assert!(switch.contains("spawn_wt("), "換模型重開要走 wt_launch::spawn_wt（環境清理在那裡）");
     }
 }

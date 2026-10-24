@@ -31,7 +31,7 @@ import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, normalizeClose, normal
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
 import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
-import { CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, buddyConsoleItem, engineForProfile,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice, withTimeout } from './lib/partner-launch-ui.mjs'
+import { CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, buddyConsoleItem, consoleReq, engineForProfile,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice, withTimeout } from './lib/partner-launch-ui.mjs'
 import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
 import { PartnerOpDialog, loadOpsContext } from './lib/partner-ops-ui.mjs'
 import { initialOpsCtx } from './lib/partner-ops.mjs'
@@ -546,10 +546,10 @@ async function openBuddyMenu(c, e) {
   resetBuddyModel()
   buddyModel.show = canOfferModelSwitch(c, { selfNode: info.node, engine: eng })
   if (buddyModel.show) void loadBuddyModel(c)
-  if (c.node !== info.node || c.engine === 'acp' || c.pending) { buddyConsole.state = 'none'; return }
+  if (c.node !== info.node || c.pending) { buddyConsole.state = 'none'; return }
   buddyConsole.state = 'checking'
   buddyConsole.reason = ''
-  const q = await withTimeout(transport.partnerConsoleQuery({ engine: eng, name: c.agent || c.nick }), CONSOLE_QUERY_TIMEOUT_MS)
+  const q = await withTimeout(transport.partnerConsoleQuery(consoleReq(c, eng)), CONSOLE_QUERY_TIMEOUT_MS)
   if (buddyMenuFriend.value !== c) return   // 使用者已經關掉或換開別人的選單
   if (q?.can_toggle ?? q?.canToggle) {
     buddyConsole.state = 'toggle'
@@ -565,7 +565,7 @@ async function toggleBuddyConsole() {
   const eng = c.engine || engineForProfile(c.launchProfile || 'claude')
   const nextVis = !buddyConsole.visible
   try {
-    const r = await transport.partnerConsoleSet({ engine: eng, name: c.agent || c.nick, visible: nextVis })
+    const r = await transport.partnerConsoleSet({ ...consoleReq(c, eng), visible: nextVis })
     if (r?.ok) buddyConsole.visible = Boolean(r.visible)
   } catch (e) { console.info('[ASN] 主控台切換', e.message) }
   closeBuddyMenu()

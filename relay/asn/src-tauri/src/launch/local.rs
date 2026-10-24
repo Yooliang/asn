@@ -196,6 +196,14 @@ fn parse_launcher_output(stdout: &str, stderr: &str, success: bool) -> Result<u3
 /// 主控台顯示／隱藏另外靠 ~/.claude/sessions 依名字找 claude 的 PID，不依賴這個值。
 #[cfg(windows)]
 fn start_window_windows(title: &str, command: &str, args: &[String], cwd: &Path, hidden: bool) -> Result<u32, String> {
+    // 前景開窗且預設終端機是 Windows Terminal：一個夥伴一個專屬視窗（不開成分頁），主控台切換才能單獨隱藏它。
+    // 預設是傳統主控台、沒有 wt.exe、或要背景（Hidden）開的，維持原本的 PowerShell Start-Process
+    if !hidden && super::wt_launch::wt_usable(title, &cwd.to_string_lossy()) && super::wt_launch::default_is_wt() {
+        match super::wt_launch::spawn_wt(title, cwd, command, args) {
+            Ok(pid) => return Ok(pid),
+            Err(e) => eprintln!("{e}，改開一般主控台"),
+        }
+    }
     // 失敗要大聲：舊版 Start-Process 出錯時 PowerShell 仍以結束碼 0 離開、stdout 空白、stderr 被丟掉，
     // 使用者只看到「沒有回傳 PID」。這裡 Stop + catch，錯誤原文走 stderr 並以結束碼 1 回報。
     let script = r#"

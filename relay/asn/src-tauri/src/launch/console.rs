@@ -8,12 +8,12 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
 pub fn partner_console_query(req: PartnerConsoleReq) -> Result<Value, String> {
-    Ok(json!(query_console(&req.engine, &req.name)?))
+    Ok(json!(query_console(&req)?))
 }
 
 pub fn partner_console_set(req: PartnerConsoleReq) -> Result<Value, String> {
     let vis = req.visible.unwrap_or(true);
-    set_console_visible(&req.engine, &req.name, vis)
+    set_console_visible(&req, vis)
 }
 
 #[derive(serde::Serialize)]
@@ -88,41 +88,86 @@ pub(crate) fn pick_session_pid(sessions: &[Value], name: &str, alive: impl Fn(u3
 /// 夥伴自己沒有視窗可收（隱藏整個終端機會連別的分頁一起消失），所以只說明、不硬切。
 pub(crate) fn no_window_reason(in_windows_terminal: bool) -> &'static str {
     if in_windows_terminal {
-        "這個視窗開在 Windows Terminal 的分頁裡，分頁沒有獨立視窗可收到背景（收起來會連同其他分頁一起消失），所以不能切換"
+        super::console_resolve::WT_SHARED_REASON
     } else {
         "找不到這個夥伴的主控台視窗（可能不是用傳統主控台開的）"
     }
 }
 
-fn query_console(engine: &str, name: &str) -> Result<ConsoleQuery, String> {
-    if name.is_empty() {
+/// 依請求載入需要的本機資料（只載需要的：Claude 讀 sessions、pi 讀登記檔、其他才掃程序、工作者讀設定）
+#[cfg(windows)]
+fn load_sources(req: &PartnerConsoleReq) -> super::console_resolve::Sources {
+    use super::console_resolve::Sources;
+    let engine = req.engine.trim().to_lowercase();
+    let is_process = req.kind.as_deref() == Some("process") || req.pid.is_some();
+    let mut src = Sources::default();
+    let home = crate::identity::home_dir();
+    if (engine.is_empty() || engine == "claude") && (!is_process || req.pid.is_some()) {
+        if let Some(dir) = sessions_dir() {
+            src.sessions = read_sessions(&dir);
+        }
+    }
+    if engine == "pi" || is_process {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+        let wins = crate::bridge::engines::pi::read_windows(&crate::bridge::engines::pi::windows_dir(&home), now, win::pid_alive);
+        src.pi_windows = wins.iter().map(|w| (w.name.clone(), w.pid)).collect();
+    }
+    if is_process {
+        let skip: Vec<u32> = src.pi_windows.iter().map(|(_, p)| *p).collect();
+        src.procs = crate::bridge::procscan::scan_system_excluding(&skip);
+    }
+    if engine != "claude" && !engine.is_empty() && engine != "pi" && !is_process {
+        let agents = crate::identity::relay_home().join("agents.json");
+        src.workers = crate::bridge::engines::acp_config::load_workers_config(&agents, &crate::identity::relay_home()).workers.iter().map(|w| w.name.clone()).collect();
+    }
+    src
+}
+
+#[cfg(windows)]
+struct RealConsoleOs;
+
+#[cfg(windows)]
+impl super::console_resolve::ConsoleOs for RealConsoleOs {
+    fn find_console(&self, pid: u32) -> Option<super::console_resolve::ConsoleWin> {
+        win::find_console(pid).map(|w| super::console_resolve::ConsoleWin { hwnd: w.hwnd, visible: w.visible })
+    }
+    fn find_wt_windows(&self, wt_pid: u32) -> Vec<super::console_resolve::ConsoleWin> {
+        win::find_wt_windows(wt_pid)
+    }
+    fn table(&self) -> Vec<super::switch::Proc> {
+        super::switch::winapi::process_table()
+    }
+    fn own_pid(&self) -> u32 {
+        std::process::id()
+    }
+}
+
+fn query_console(req: &PartnerConsoleReq) -> Result<ConsoleQuery, String> {
+    if req.name.is_empty() {
         return Ok(ConsoleQuery { ok: false, can_toggle: None, visible: None, reason: Some("缺少名字".into()), pid: None, hwnd: None });
     }
     #[cfg(not(windows))]
     {
-        let _ = engine;
         return Ok(ConsoleQuery::no("僅 Windows 可切換主控台視窗", None));
     }
     #[cfg(windows)]
     {
-        const NOT_FOUND: &str = "找不到這個夥伴的主控台視窗";
-        if !(engine == "claude" || engine.is_empty()) {
-            return Ok(ConsoleQuery::no(NOT_FOUND, None));
+        use super::console_resolve::{find_for, resolve_pid, Ask};
+        let src = load_sources(req);
+        let ask = Ask { engine: &req.engine, name: &req.name, kind: req.kind.as_deref().unwrap_or(""), pid: req.pid };
+        let pid = match resolve_pid(&ask, &src, &win::pid_alive) {
+            Ok(p) => p,
+            Err(reason) => return Ok(ConsoleQuery::no(&reason, None)),
+        };
+        match find_for(pid, &RealConsoleOs) {
+            Ok((owner, w)) => Ok(ConsoleQuery { ok: true, can_toggle: Some(true), visible: Some(w.visible), reason: None, pid: Some(owner), hwnd: Some(w.hwnd) }),
+            Err(reason) => Ok(ConsoleQuery::no(&reason, Some(pid))),
         }
-        let Some(dir) = sessions_dir() else { return Ok(ConsoleQuery::no(NOT_FOUND, None)) };
-        let Some(pid) = pick_session_pid(&read_sessions(&dir), name, win::pid_alive) else {
-            return Ok(ConsoleQuery::no(NOT_FOUND, None));
-        };
-        let Some(w) = win::find_console(pid) else {
-            let table = super::switch::winapi::process_table();
-            return Ok(ConsoleQuery::no(no_window_reason(super::switch::in_windows_terminal(&table, pid)), Some(pid)));
-        };
-        Ok(ConsoleQuery { ok: true, can_toggle: Some(true), visible: Some(w.visible), reason: None, pid: Some(pid), hwnd: Some(w.hwnd) })
     }
 }
 
-fn set_console_visible(engine: &str, name: &str, visible: bool) -> Result<Value, String> {
-    let q = query_console(engine, name)?;
+fn set_console_visible(req: &PartnerConsoleReq, visible: bool) -> Result<Value, String> {
+    let q = query_console(req)?;
     if q.can_toggle != Some(true) || q.hwnd.is_none() {
         return Ok(json!({ "ok": false, "reason": q.reason.unwrap_or_else(|| "無法切換".into()) }));
     }
@@ -134,10 +179,8 @@ fn set_console_visible(engine: &str, name: &str, visible: bool) -> Result<Value,
     #[cfg(windows)]
     {
         let hwnd = q.hwnd.unwrap();
-        let pid = q.pid.unwrap();
         win::set_visible(hwnd, visible)?;
-        let after = win::find_console(pid);
-        Ok(json!({ "ok": true, "visible": after.map(|w| w.visible).unwrap_or(visible) }))
+        Ok(json!({ "ok": true, "visible": win::is_visible(hwnd) }))
     }
 }
 
@@ -170,10 +213,42 @@ pub(crate) mod win {
         }
     }
 
-    fn class_is_console(hwnd: HWND) -> bool {
+    fn class_is(hwnd: HWND, want: &str) -> bool {
         let mut buf = [0u16; 64];
         let n = unsafe { GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
-        n > 0 && String::from_utf16_lossy(&buf[..n as usize]) == "ConsoleWindowClass"
+        n > 0 && String::from_utf16_lossy(&buf[..n as usize]) == want
+    }
+
+    fn class_is_console(hwnd: HWND) -> bool {
+        class_is(hwnd, "ConsoleWindowClass")
+    }
+
+    struct WtSearch {
+        pid: u32,
+        found: Vec<i64>,
+    }
+
+    unsafe extern "system" fn each_wt_window(hwnd: HWND, lp: LPARAM) -> i32 {
+        let s = &mut *(lp as *mut WtSearch);
+        let mut p = 0u32;
+        GetWindowThreadProcessId(hwnd, &mut p);
+        if p == s.pid && class_is(hwnd, "CASCADIA_HOSTING_WINDOW_CLASS") {
+            s.found.push(hwnd as isize as i64);
+        }
+        1
+    }
+
+    /// 這個 Windows Terminal 程序擁有的頂層視窗（只列出，不動）
+    pub fn find_wt_windows(wt_pid: u32) -> Vec<crate::launch::console_resolve::ConsoleWin> {
+        let mut s = WtSearch { pid: wt_pid, found: vec![] };
+        unsafe {
+            EnumWindows(Some(each_wt_window), &mut s as *mut WtSearch as LPARAM);
+        }
+        s.found.into_iter().map(|h| crate::launch::console_resolve::ConsoleWin { hwnd: h, visible: is_visible(h) }).collect()
+    }
+
+    pub fn is_visible(hwnd: i64) -> bool {
+        unsafe { IsWindowVisible(hwnd as isize as HWND) != 0 }
     }
 
     struct Search {
@@ -283,7 +358,7 @@ mod tests {
 
     #[test]
     fn 空名字_回說明_不當成找不到() {
-        let q = query_console("claude", "").unwrap();
+        let q = query_console(&PartnerConsoleReq { engine: "claude".into(), name: String::new(), visible: None, kind: None, pid: None }).unwrap();
         assert!(!q.ok);
     }
 

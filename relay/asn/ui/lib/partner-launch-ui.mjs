@@ -82,6 +82,15 @@ export function consoleToggleLabel(visible) {
   return visible ? '切到背景' : '叫回前台'
 }
 
+/** 查詢／切換主控台的請求：引擎、名字、條目種類（名單的 kind，例如 process＝本機掃到的程式）、選填 pid；不從顯示名字串硬解析 */
+export function consoleReq(friend, engine) {
+  const req = { engine, name: friend?.agent || friend?.nick || '' }
+  if (friend?.entryKind) req.kind = String(friend.entryKind)
+  const pid = Number(friend?.pid)
+  if (Number.isInteger(pid) && pid > 0) req.pid = pid
+  return req
+}
+
 /** 名單右鍵選單查主控台狀態最多等多久；超過就當查不到，不擋選單 */
 export const CONSOLE_QUERY_TIMEOUT_MS = 1500
 

@@ -623,41 +623,19 @@ pub fn model_switch_run(req: SwitchRunReq) -> Result<Value, String> {
     Ok(run_with(&RealOs, &dir, &req, &real_launch, &Timing::real()))
 }
 
-/// WT 分頁用的 `wt.exe` 參數：開在最近使用的 Windows Terminal 視窗（沒有就新開一個）
+/// `wt.exe` 參數：開在這個夥伴專屬的新視窗（不是分頁），主控台切換才能單獨顯示／隱藏它（見 wt_launch）
 pub(crate) fn wt_args(plan: &Plan) -> Vec<String> {
-    let mut v: Vec<String> = ["-w", "0", "new-tab", "-d"].iter().map(|s| s.to_string()).collect();
-    v.push(local::strip_verbatim_prefix(&plan.cwd.to_string_lossy()));
-    v.push("--title".into());
-    v.push(plan.name.clone());
-    v.push("powershell.exe".into());
-    v.extend(local::window_launcher_args(&plan.name, &plan.argv[0], &plan.argv[1..]).split(' ').map(str::to_string));
-    v
+    super::wt_launch::wt_args(&plan.name, &plan.cwd.to_string_lossy(), &plan.argv[0], &plan.argv[1..])
 }
 
 pub(crate) fn real_launch(plan: &Plan) -> Result<(), String> {
     #[cfg(windows)]
     {
-        use crate::nowin::NoWindow;
         // WT 的命令分隔符是分號；資料夾或名字含分號就不走 WT，避免被拆成另一條 wt 命令
-        if plan.in_wt && !plan.cwd.to_string_lossy().contains(';') && !plan.name.contains(';') {
-            let r = std::process::Command::new("wt.exe")
-                .no_window()
-                .env_clear()
-                .envs(super::config::child_env())
-                .args(wt_args(plan))
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn();
-            match r {
-                Ok(mut c) => {
-                    // wt.exe 只是轉交給常駐的 Windows Terminal 就結束；不等它，回收子程序避免殭屍
-                    std::thread::spawn(move || {
-                        let _ = c.wait();
-                    });
-                    return Ok(());
-                }
-                Err(e) => eprintln!("wt.exe 開不起來，改開一般主控台：{e}"),
+        if plan.in_wt && super::wt_launch::wt_usable(&plan.name, &plan.cwd.to_string_lossy()) {
+            match super::wt_launch::spawn_wt(&plan.name, &plan.cwd, &plan.argv[0], &plan.argv[1..]) {
+                Ok(_) => return Ok(()),
+                Err(e) => eprintln!("{e}，改開一般主控台"),
             }
         }
     }
@@ -1436,9 +1414,9 @@ mod tests {
     fn wt參數_分號不會被當成分隔符_資料夾與名字原樣() {
         let plan = Plan { name: "小良哥 1".into(), cwd: PathBuf::from(r"\\?\D:\my proj"), argv: v(&[r"C:\Program Files\c\claude.exe", "--model", "opus"]), in_wt: true };
         let a = wt_args(&plan);
-        assert_eq!(&a[..5], &["-w", "0", "new-tab", "-d", r"D:\my proj"]);
-        assert_eq!(&a[5..7], &["--title", "小良哥 1"]);
-        assert_eq!(a[7], "powershell.exe");
+        assert_eq!(&a[..5], &["-w", "asn-小良哥 1", "new-tab", "-d", r"D:\my proj"]);
+        assert_eq!(&a[5..8], &["--title", "ASN-小良哥 1", "--suppressApplicationTitle"]);
+        assert_eq!(a[8], "powershell.exe");
         assert!(a.contains(&"-NoExit".to_string()));
         assert!(a.iter().all(|x| !x.contains(';')), "編碼後的參數不含分號");
     }

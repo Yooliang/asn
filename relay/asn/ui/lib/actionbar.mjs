@@ -5,7 +5,7 @@
 import { AsnDialog } from './dialog.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher } from './model-switch.mjs'
 import { SUBAGENT_POLL_MS, canOfferSubagents, subagentView } from './subagents.mjs'
-import { CONSOLE_QUERY_TIMEOUT_MS, consoleToggleLabel, engineForProfile, withTimeout } from './partner-launch-ui.mjs'
+import { CONSOLE_QUERY_TIMEOUT_MS, consoleReq, consoleToggleLabel, engineForProfile, withTimeout } from './partner-launch-ui.mjs'
 import { initialOpsCtx, menuItems } from './partner-ops.mjs'
 import { manageItems, runArchive } from './archive.mjs'
 import { PartnerOpDialog, loadOpsContext } from './partner-ops-ui.mjs'
@@ -157,7 +157,7 @@ export const ActionBar = {
     async function loadConsole() {
       const f = props.friend
       if (!props.api || !canOfferConsole(f, props.selfNode)) { cons.state = 'none'; return }
-      const q = await withTimeout(props.api.partnerConsoleQuery({ engine: engine.value, name: name.value }), CONSOLE_QUERY_TIMEOUT_MS)
+      const q = await withTimeout(props.api.partnerConsoleQuery(consoleReq(props.friend, engine.value)), CONSOLE_QUERY_TIMEOUT_MS)
       if (!sameFriend(props.friend, f)) return
       if (q?.can_toggle ?? q?.canToggle) { cons.state = 'toggle'; cons.visible = Boolean(q.visible) } else cons.state = 'none'
     }
@@ -165,7 +165,7 @@ export const ActionBar = {
       if (cons.busy || cons.state !== 'toggle') return
       cons.busy = true
       try {
-        const r = await props.api.partnerConsoleSet({ engine: engine.value, name: name.value, visible: !cons.visible })
+        const r = await props.api.partnerConsoleSet({ ...consoleReq(props.friend, engine.value), visible: !cons.visible })
         if (r?.ok) cons.visible = Boolean(r.visible)
       } catch (e) { console.info('[ASN] 主控台切換', e.message) } finally { cons.busy = false }
     }
