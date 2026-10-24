@@ -102,6 +102,15 @@ pub fn find_caller(env: &Env, what: &str) -> R<Caller> {
         }
         return Ok(hit);
     }
+    // 無人值守的收件匣節點（Linux、環境變數與收件匣資料夾皆具備）：寄件視窗＝收件匣名，只准寄信與發言／查群組。
+    // 視窗名只取 ASN_INBOX_NAME（沒設＝節點代號），命令列沒有任何參數能改；收信（recv）不開放，免得和橋搶信。
+    if env.unattended && matches!(what, "寄信" | "查群組") {
+        let name = match env.inbox_name.clone() {
+            Some(n) => n,
+            None => identity(env, false)?.node,
+        };
+        return Ok(Caller { pid: env.self_pid, name });
+    }
     let why = ev.table_error.map(|e| format!("；讀行程表失敗：{e}")).unwrap_or_default();
     Err(Fail::new(2, format!("拒絕：找不到呼叫者所屬的 Claude 視窗（只有在 Claude 視窗裡執行才能{what}）{why}\n除錯：加 --whoami 看父行程鏈與 session 對照")))
 }

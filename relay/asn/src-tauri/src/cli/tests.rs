@@ -15,6 +15,7 @@ mod recv_tests;
 mod room_tests;
 mod secret_tests;
 mod send_tests;
+mod unattended_tests;
 mod unit_tests;
 mod usage_tests;
 
@@ -79,6 +80,8 @@ pub fn fx(url: &str, window: Option<&str>) -> Fx {
         stale_ms: 90_000,
         window_check_ms: 10_000,
         backoff_ms: vec![20, 40],
+        unattended: false,
+        inbox_name: None,
         cmd_prefix: Some("/x/asn-cli".into()),
     };
     Fx { _d: d, home, env, window_alive: flag }

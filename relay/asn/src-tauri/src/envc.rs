@@ -59,6 +59,10 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("ASN_LAUNCH_STYLE", "IRORI_LAUNCH_STYLE"),
     // 電腦版自己的（舊名是 IRORI_ASN_*）
     ("ASN_HOME", "IRORI_HOME"),
+    // 收件匣節點（Linux 無頭）：視窗名、引擎名、命令列無人值守開關
+    ("ASN_INBOX_NAME", "IRORI_INBOX_NAME"),
+    ("ASN_INBOX_ENGINE", "IRORI_INBOX_ENGINE"),
+    ("ASN_CLI_UNATTENDED", "IRORI_CLI_UNATTENDED"),
     ("ASN_DATA", "IRORI_ASN_DATA"),
     ("ASN_POLL_MS", "IRORI_ASN_POLL_MS"),
     ("ASN_APP_ROSTER_MS", "IRORI_ASN_ROSTER_MS"),

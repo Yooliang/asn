@@ -44,6 +44,10 @@ pub struct Env {
     pub window_check_ms: u64,
     /// 收信失敗的退避（毫秒，ASN_PULL_BACKOFF_MS 以逗號分隔）
     pub backoff_ms: Vec<u64>,
+    /// 無人值守寄信已啟用（見 [`unattended_enabled`]）：認不出 Claude 視窗時，寄件視窗改用收件匣名
+    pub unattended: bool,
+    /// ASN_INBOX_NAME（沒設＝節點代號）；只在 unattended 時使用，命令列無法自填
+    pub inbox_name: Option<String>,
     /// 指令前綴（附件下載、群組翻頁提示用）；None＝用 [`crate::cli::cmd_prefix`]
     pub cmd_prefix: Option<String>,
 }
@@ -57,6 +61,15 @@ fn num(k: &str, d: u64) -> u64 {
 
 pub const DEFAULT_BACKOFF_MS: [u64; 5] = [5_000, 10_000, 20_000, 40_000, 60_000];
 
+/// 無人值守寄信（Linux 收件匣節點的 cron／腳本）要同時滿足三件事，缺一不可：
+/// 1. 不是 Windows（Windows 永遠要 Claude 視窗驗證，建資料夾加環境變數也繞不過）；
+/// 2. 環境變數 `ASN_CLI_UNATTENDED` 是 1／true／yes／on；
+/// 3. `$ASN_HOME/inbox` 資料夾存在（`asn-bridge run --inbox` 設定過的收件匣節點才有）。
+pub fn unattended_enabled(raw: Option<&str>, inbox_dir_exists: bool, is_windows: bool) -> bool {
+    let on = raw.map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")).unwrap_or(false);
+    on && inbox_dir_exists && !is_windows
+}
+
 impl Env {
     pub fn from_process() -> Env {
         let home = crate::identity::home_dir();
@@ -64,6 +77,7 @@ impl Env {
         let backoff: Vec<u64> = var("ASN_PULL_BACKOFF_MS")
             .map(|raw| raw.split(',').filter_map(|s| s.trim().parse::<u64>().ok()).filter(|n| *n > 0).collect())
             .unwrap_or_default();
+        let home_info_primary = home_info.primary.clone();
         Env {
             relay_home: home_info.primary,
             relay_home_fallback: home_info.fallback,
@@ -83,6 +97,8 @@ impl Env {
             stale_ms: crate::heartbeat::stale_ms(),
             window_check_ms: 10_000,
             backoff_ms: if backoff.is_empty() { DEFAULT_BACKOFF_MS.to_vec() } else { backoff },
+            unattended: unattended_enabled(var("ASN_CLI_UNATTENDED").as_deref(), crate::inbox_mode::inbox_dir(&home_info_primary).is_dir(), cfg!(windows)),
+            inbox_name: var("ASN_INBOX_NAME").map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
             cmd_prefix: None,
         }
     }

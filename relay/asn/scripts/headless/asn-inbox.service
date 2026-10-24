@@ -6,6 +6,10 @@
 # 金鑰不寫在單元裡：放在 <HOME>/.asn/<NODE_ID>.key（權限 600，資料夾 700），或由平台祕密機制設成環境變數 ASN_RELAY_KEY
 # （例如 EnvironmentFile=/etc/asn/inbox.env，該檔權限 600、只有 root 讀得到，內容 ASN_RELAY_KEY=…；本檔不收任何祕密）。
 # 收到的信存在 <HOME>/.asn/inbox/inbox.jsonl；代理用 asn-cli inbox 讀、asn-cli inbox --done <id> 標處理完、asn-cli send 回信。
+# 無人值守寄信：想讓這台的 cron／腳本自己發言（asn-cli send、send --room），要在「執行 asn-cli 的環境」設
+#   ASN_CLI_UNATTENDED=1（寫在 crontab、腳本或代理的環境；寫在本單元只對橋有效，對 cron 無效），
+# 同時 ASN_HOME/inbox 要存在（本單元跑過就有）。預設關閉。寄件視窗名一律取 ASN_INBOX_NAME（沒設＝節點代號），不能自填；
+# 頻率上限 ASN_SEND_PER_HOUR（預設每小時 30 封）照算。Windows 不適用。細節見 docs/design/LINUX-HEADLESS.md。
 [Unit]
 Description=ASN 收件匣模式（節點 <NODE_ID>）
 After=network-online.target

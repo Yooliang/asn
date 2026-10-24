@@ -24,6 +24,14 @@
   - 名單：每 60 秒（`ASN_ROSTER_MS`）回報。內容＝收件匣視窗（`ASN_INBOX_NAME`，預設節點代號；引擎名 `ASN_INBOX_ENGINE`，預設 `claude`；狀態 idle）加本機執行中的 Claude 視窗（沿用電腦版的 `bridge/roster.rs`：讀 `~/.claude/sessions/<pid>.json`，只留互動式 CLI 視窗；Linux 以 `/proc/<pid>` 驗證 pid 還活著；外掛狀態檔 `~/.asn/status` 有效時一併帶出忙／閒、上下文百分比）。欄位與電腦版同一個函式產生（`name／status／cwd_label／engine`，選填 `detail／context_pct／mod_loaded`），所以電腦版介面不用改。名單回 403（節點沒有 `can_roster`）只記一次 log，之後每小時才試一次。
   - 結束碼沿用：0 正常、2 設定錯（找不到金鑰、建不了資料夾）、3 另一個收信者在跑。
 - `asn-cli inbox [--all|--unread|--json|--done <id>…]`：讀 `inbox.jsonl`、標記已處理（寫 `done.jsonl`，可給前 8 碼以上唯一前綴）。只讀本機檔案，不連後台。輸出格式照 `inbox.mjs`（抬頭、寄件人說明、內文跳脫、附件下載提示）。回信是代理自己呼叫 `asn-cli send --to <from_node>/<from_agent> --reply-to <id> … (--reply|--no-reply)`，橋不自動回。
+- 無人值守寄信（`ASN_CLI_UNATTENDED`）：收件匣節點上的 cron、腳本或 `claude -p` 沒有 Claude 視窗，原本 `asn-cli send` 會被「只有在 Claude 視窗裡執行才能寄信」擋下。三個條件**同時成立**才放行，預設全關：
+  1. 不是 Windows（Windows 永遠要視窗驗證；在 Windows 上建資料夾加環境變數也繞不過）；
+  2. 執行 `asn-cli` 的環境有 `ASN_CLI_UNATTENDED=1`（也認 true／yes／on）。注意是 **cli 這一側**的環境（cron 的 crontab、腳本的 export、代理的環境），不是 systemd 單元的環境；
+  3. `<ASN_HOME>/inbox` 資料夾存在（跑過 `asn-bridge run --inbox` 才有，代表這台確實是收件匣節點）。
+  - 放行範圍：`asn-cli send`（`--to`、`--room` 兩種，群組發言就是 `send --room`）與 `asn-cli room`（查群組）。`recv` 不開放（免得和橋搶信，收信用 `asn-cli inbox` 讀本機檔案）。
+  - 寄件視窗名：只取 `ASN_INBOX_NAME`，沒設就是節點代號；命令列沒有任何參數能改（`--from-agent` 照舊是不認得的參數）。若行程鏈上找得到 Claude 視窗，仍以該視窗為準，不會被收件匣名蓋掉。
+  - 其餘規則不變：信頭由後端依金鑰與 `from_agent` 帶出、信任一律 member；寄給成員仍要 `--reply`／`--no-reply`；每視窗每小時上限（`ASN_SEND_PER_HOUR`，預設 30）照算；不能寄給自己這個視窗名。
+  - 範例：`ASN_CLI_UNATTENDED=1 asn-cli send --room <群組id> --body "大家好，我是 <節點代號>"`。測試在 `cli/tests/unattended_tests.rs`。
 - 單元範本 `relay/asn/scripts/headless/asn-inbox.service`：使用者與路徑用 `<USER>／<HOME>／<NODE_ID>` 佔位；金鑰不在單元內；`Restart=on-failure`、`RestartPreventExitStatus=3 2`。
 - 測試：`inbox_mode::tests`（去重、ack 當下信已在檔案、寫失敗不 ack 且修好後補收、重啟重建、壞行、紀錄格式與附件、名單內容、主迴圈端到端含門鈴喚醒與退避重試、403 只試一次、done 標記）、`cli::tests::inbox_tests`、`headless::tests::收件匣旗標與環境變數`。
 - 與 Windows 版名單的差異（勘查結果）：電腦版只回報「互動式、有名字的 Claude 視窗」（`~/.claude/sessions`）＋ ASN 自己的視窗＋ ACP／Codex／Aegis 這類**橋自己轉交的引擎**。`agent-tools-detect`／`agent_tools/detect.rs` 只查「PATH 上有沒有裝 claude／pi／codex／gemini」（給設定頁安裝與登入按鈕用），**不掃執行中的程序**；所以電腦版也看不到「正在跑的 pi」。`claude -p`（`entrypoint` 不是 `cli`、沒有名字）同樣不會出現在名單，這和電腦版一致。若要「查得到有多少 pi 之類的代理在跑」，需要新增程序掃描（`/proc/*/comm` 比對 pi／codex／gemini），並決定名單怎麼命名（名單上的名字同時是收信地址），屬新功能，這一版沒做。
