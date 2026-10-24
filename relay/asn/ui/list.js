@@ -744,7 +744,7 @@ await listen('asn:cmd', async c => {
   else if (c.op === 'read') core.markRead(c.id)
   else if (c.op === 'dp') ui.collapsed = toggleCollapsed(ui.collapsed)
   else if (c.op === 'send') {
-    if (isRoomChat(c.id)) { await hub.post(roomIdOf(c.id), c.text); pushLog(c.id) }
+    if (isRoomChat(c.id)) { await hub.post(roomIdOf(c.id), c.text, { replySeq: c.replySeq }); pushLog(c.id) }
     else { const r = await core.send(c.id, c.text, { voice: c.voice === true }); if (!r.ok) console.info('[ASN] send failed', r.error) }
   }
   else if (c.op === 'group-menu') await openGroupMenu(c.id, c.what)
@@ -756,7 +756,7 @@ await listen('asn:cmd', async c => {
 const sendTo = async (id, text, opts) => { const r = await core.send(id, text, opts); if (!r.ok) console.info('[ASN] send failed', r.error) }
 // 對話窗的送出：群組走群組發言（本人簽章），其餘照舊寄信給夥伴
 const sendMsg = async (id, text, opts) => {
-  if (isRoomChat(id)) { await hub.post(roomIdOf(id), text); pushLog(id); return }
+  if (isRoomChat(id)) { await hub.post(roomIdOf(id), text, { replySeq: opts?.replySeq }); pushLog(id); return }
   await sendTo(id, text, opts)
 }
 const nudgeTo = id => (isRoomChat(id) ? undefined : core.nudge(id))

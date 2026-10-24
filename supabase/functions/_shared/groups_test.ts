@@ -207,3 +207,10 @@ Deno.test("確認請求（AI 端）：要指定視窗、類別在清單內、摘
   const st = await handleNodeRoomAction(roomDeps(calls, { status: "approved" }), me, "room_confirm_status", { as_agent: "財務", id: ID });
   assertEquals(st.body.status, "approved");
 });
+
+Deno.test("signedRpc：回覆版發言（asn_relay_room_post_reply）同樣帶本人簽章，函式名不變", async () => {
+  const seen: { fn: string; args: Record<string, unknown> }[] = [];
+  const f = signedRpc((fn, args) => { seen.push({ fn, args }); return Promise.resolve({ data: null, error: null }); }, U);
+  await f("asn_relay_room_post_reply", { p_node: "H" });
+  assertEquals([seen[0].fn, seen[0].args.p_signed_user], ["asn_relay_room_post_reply", U]);
+});

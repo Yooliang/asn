@@ -275,7 +275,7 @@ const app = createApp({
     roomsHook.refresh = refreshRooms
     // 讀這個群組新的訊息（接在已有的後面）與待主持人確認的卡片；在看的時候順便標已讀
     async function showRoom() { const id = roomIdOf(lastChat.value); await hub.read(id); await hub.loadCards(id) }
-    const postRoom = (chatId, text) => hub.post(roomIdOf(chatId), text)
+    const postRoom = (chatId, text, opts) => hub.post(roomIdOf(chatId), text, { replySeq: opts?.replySeq })
     const chatCards = computed(() => (isRoomChat(lastChat.value) ? hub.st.cards[roomIdOf(lastChat.value)] : null) ?? [])
     const decideCard = (chatId, cardId, approve) => hub.decide(roomIdOf(chatId), cardId, approve)
     // 群組的對話框（建立、邀請、加入、成員與設定）：蓋在畫面上的一層，系統返回鍵＝關掉它
@@ -379,7 +379,7 @@ const app = createApp({
       newDictation: ({ hints, onText } = {}) => createMobileDictation({ hints, onText, native: bridge.call, reactive, log: m => console.info('[ASN]', m) }),
     } : null
     const onCallState = on => { callOn.value = on; bridge?.keepAwake(on) }
-    const sendTo = async (id, text, opts) => { if (isRoomChat(id)) return postRoom(id, text); const r = await core.send(id, text, opts); if (!r.ok) console.info('[ASN] send failed', r.error) }
+    const sendTo = async (id, text, opts) => { if (isRoomChat(id)) return postRoom(id, text, opts); const r = await core.send(id, text, opts); if (!r.ok) console.info('[ASN] send failed', r.error) }
     const nudgeTo = id => { if (!isRoomChat(id)) core.nudge(id) }   // 群組沒有震動與傳檔（工具列的鈕在群組畫面已藏起來）
     const sendAttachTo = async (id, item, caption) => { if (isRoomChat(id)) { await hub.postAttachment(roomIdOf(id), item, caption); if (nav.tab === 'chats') void showRoom(); return } const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
     // ---------- 使用指引：設置分頁的一個項目，點進去是獨立一頁（先列篇目，再看內文），內容沿用電腦版的篇目 ----------

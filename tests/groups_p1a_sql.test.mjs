@@ -500,10 +500,12 @@ test('實跑：回復腳本可執行——新函式與新表全拿掉，舊群�
 
 // ===== 還原驗證 =====
 test('還原驗證：拿掉 trust 重算 → 跨租戶的 trust 測試要變紅', { skip }, async () => {
-  const db = await boot({ mutate: { [M_ROOMS]: s => {
+  const cut = s => {
     const a = `case when s.trust = 'owner' and relay.member_tenant(s.from_member, v_rt) is not distinct from v_reader then 'owner' else 'member' end`
     assert.ok(s.includes(a), '找不到 trust 重算運算式'); return s.replace(a, 's.trust')
-  } } })
+  }
+  // group_read 的最新定義在 20261024130000_reply_quote.sql（多回 reply_to），兩處都要拿掉才算拿掉
+  const db = await boot({ mutate: { [M_ROOMS]: cut, '20261024130000_reply_quote.sql': cut } })
   const room = await twoTenantRoom(db)
   await post(db, { node: Q2, room, signed: U2, body: '財務員的話' })
   const m = (await readAs(db, { node: W1, agent: '財務', room })).messages.find(x => x.body === '財務員的話')

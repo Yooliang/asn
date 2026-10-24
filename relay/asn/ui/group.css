@@ -36,6 +36,28 @@
 .gs-av,.spk-av{flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;font-size:12px;font-weight:700;color:#fff;vertical-align:middle}
 .gs-av.human,.spk-av.is-human{border-radius:50%;background:#3b82c4}
 .gs-av.ai,.spk-av.is-ai{border-radius:7px;background:#7b6bc9}
+/* 針對某則訊息回覆：回覆鈕平時淡淡的，滑過那則才明顯（觸控裝置一直看得到）；引用列在內文上方 */
+.reply-btn{margin-left:8px;border:0;background:none;padding:0 4px;font-size:11px;color:var(--muted);cursor:pointer;opacity:0;vertical-align:baseline}
+.msg:hover .reply-btn,.reply-btn:focus-visible{opacity:1}
+.reply-btn:hover{color:var(--accent);text-decoration:underline}
+@media (hover:none){.reply-btn{opacity:.75;padding:4px 8px}}
+.quote{display:flex;align-items:baseline;gap:6px;max-width:100%;margin:2px 0 0 12px;padding:2px 8px;border:0;border-left:3px solid #7aa7d6;border-radius:3px;background:rgba(122,167,214,.16);color:var(--muted);font-size:12px;line-height:1.5;text-align:left;cursor:pointer}
+.quote b{flex:none;color:var(--title-fg);font-weight:600}
+.quote span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.quote:hover{background:rgba(122,167,214,.28)}
+.msg.flash{animation:msg-flash 1.4s ease-out}
+@keyframes msg-flash{0%,40%{background:rgba(255,214,90,.5)}100%{background:transparent}}
+.reply-bar{display:flex;align-items:center;gap:8px;margin:0 0 4px;padding:3px 8px;border-left:3px solid #7aa7d6;border-radius:3px;background:rgba(122,167,214,.16);font-size:12px;color:var(--muted)}
+.reply-bar-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.reply-bar-text b{color:var(--title-fg);font-weight:600}
+.reply-bar-x{flex:none;border:0;background:none;cursor:pointer;color:var(--muted);font-size:14px;line-height:1;padding:4px}
+.mention{display:inline-block;padding:0 5px;margin:0 1px;border-radius:9px;background:#dbe9fb;color:#1b4f8f;font-size:.92em;line-height:1.5;font-weight:600}
+.composer{position:relative}
+.mention-menu{position:absolute;z-index:20;left:0;bottom:100%;margin:0 0 4px;padding:3px;list-style:none;min-width:200px;max-width:100%;max-height:220px;overflow-y:auto;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 4px 14px rgba(0,30,70,.3)}
+.mention-menu button{display:flex;align-items:center;gap:8px;width:100%;border:0;background:none;text-align:left;padding:7px 9px;border-radius:5px;cursor:pointer;color:var(--fg);font-size:14px}
+.mention-menu button.on,.mention-menu button:hover{background:#dbe9fb;color:#14375f}
+.mention-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.m-av-spk{flex:none;margin-top:2px}
 .spk-av{width:18px;height:18px;font-size:11px;margin-right:5px}
 .who-badge{display:inline-block;margin-left:5px;padding:0 6px;font-size:10px;line-height:15px;border-radius:8px;vertical-align:1px;color:#fff;font-weight:600}
 .who-badge.is-human{background:#3b82c4}.who-badge.is-ai{background:#7b6bc9}
@@ -63,5 +85,6 @@
 .room-btn:hover{background:#e6f1fc}
 .room-btn .unread{align-self:center;height:18px;box-sizing:border-box}
 @media (prefers-color-scheme:dark){
+  .mention{background:#2b4468;color:#cfe3ff}.mention-menu button.on,.mention-menu button:hover{background:#2b4468;color:#e6f0ff}
   .gc-list{background:#3a3418}.gc-card{background:#232a33}.gs-input{background:#1c232b}
 }

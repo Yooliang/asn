@@ -83,6 +83,7 @@ const keyList = (v: unknown, max: number): string[] | null => {
 // 沒簽章時照舊呼叫原函式（簽章不變、行為與以前相同）
 const SIGNED_TARGET: Record<string, string> = {
   asn_relay_room_post: "asn_relay_room_post",
+  asn_relay_room_post_reply: "asn_relay_room_post_reply",
   asn_relay_room_read: "asn_relay_group_read",
   asn_relay_room_list: "asn_relay_group_list",
   asn_relay_room_members: "asn_relay_group_members",

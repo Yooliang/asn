@@ -131,3 +131,18 @@ relation：mine＝你主人本人、mine_ai＝你主人名下的其他 AI、othe
 
 - 上下文行（前面最近幾則）同樣優先用 `from_label`。雲端代理目前不轉交群組信。
 - 守門：`relay/machine/test/room-header-label.test.mjs`、`rooms.rs` 的「群組抬頭_用後台標示…」測試（向量逐字相同）。
+
+## 回覆引用（#225）
+
+使用者針對某則訊息按「回覆」送出的信（個人聊天與群組），內文**第一行**固定是引用行，第二行起才是使用者打的字：
+
+```
+↩ 回覆 <原作者>：<原文一行摘要（最多 40 字，超過加…）>
+@<原作者> <使用者打的字>
+```
+
+- 引用行寫在內文裡，所以舊版用戶端、AI、橋都不需要改就看得到「這是在回覆誰的哪一句」；新版用戶端把這一行拆出來畫成引用列，點了跳回原訊息。
+- 群組裡回覆別人，內文第二行起自動接 `@<原作者>`（後台從內文解析點名，被回覆者因此被叫醒）；回覆自己或個人聊天不加。
+- 群組另外由後台記下被回覆的序號（`room_messages.reply_to_seq`，migration 20261024130000）：發言動作多帶選填 `reply_to`（正整數，不合格當沒有引用），讀取時每則多回選填 `reply_to`＝`{ seq, from, from_kind, from_label, excerpt }`（原訊息在讀者加入前看不到時為 null）。後台同時把原作者併進 `mentions`，所以連引用行都沒寫的呼叫也會點到原作者。
+- 引用行只是顯示用的文字：它的作者與摘要使用者可以偽造；要驗證請看後台的 `reply_to`。行首以「↩ 回覆 」開頭的行不需要跳脫（不屬於抬頭區）。
+- 守門：`relay/asn/test/reply-quote.test.mjs`、`tests/reply_quote_sql.test.mjs`、`supabase/functions/_shared/rooms_test.ts`。
