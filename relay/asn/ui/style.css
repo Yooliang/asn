@@ -680,7 +680,51 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .logout-set .logout-btn{color:#b3261e;border-color:#d79a95}
 
 .set-adv{margin-top:4px}.set-adv>summary{cursor:pointer;color:var(--muted,inherit);font-size:12px;margin-bottom:8px}
-.dev-card .acct-list li{align-items:center}
+/* 設定「設備與帳號」：設備頁籤 → 廠商卡片 → 帳號列（只用上面的 CSS 變數，深色時跟著變） */
+.dv-set{display:flex;flex-direction:column;gap:12px;min-width:0}
+.dv-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.dv-head-tx{display:flex;flex-direction:column;gap:4px;min-width:0}
+.dv-title{margin:0;display:flex;align-items:center;gap:6px;font-size:15px;color:var(--title-fg)}
+.dv-title svg{flex:none;color:var(--accent)}
+.dv-head small{color:var(--muted)}
+.dv-tabs-wrap{position:relative;display:flex;align-items:stretch;border-bottom:1px solid var(--line);background:var(--panel-soft);border-radius:6px 6px 0 0;overflow:hidden}
+.dv-tabs{display:flex;flex:1;min-width:0;overflow-x:auto;scrollbar-width:none;scroll-behavior:smooth}
+.dv-tabs::-webkit-scrollbar{display:none}
+.dv-tab{flex:none;display:flex;align-items:center;gap:7px;padding:8px 14px;border:0;border-bottom:2px solid transparent;background:none;color:var(--fg);font:inherit;font-size:13px;white-space:nowrap;cursor:pointer}
+.dv-tab:hover{background:var(--panel-head)}
+.dv-tab.off{color:var(--muted)}
+.dv-tab.sel{border-bottom-color:var(--accent);color:var(--link);background:var(--panel);font-weight:600}
+.dv-dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--offline)}
+.dv-dot.on{background:var(--online);box-shadow:0 0 4px var(--online)}
+.dv-scroll{flex:none;width:24px;border:0;background:var(--panel-soft);color:var(--muted);font-size:18px;line-height:1;cursor:pointer}
+.dv-scroll:hover{color:var(--fg);background:var(--panel-head)}
+.dv-scroll[hidden]{display:none}
+.dv-dev{display:flex;flex-direction:column;gap:8px;min-width:0}
+.dv-dev-h{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.dv-name{margin:0;font-size:16px;color:var(--fg)}
+.dv-tag{padding:1px 8px;border-radius:10px;font-size:11px;background:var(--panel-head);color:var(--muted)}
+.dv-tag.kind{color:var(--link)}
+.dv-tag.on{background:color-mix(in srgb,var(--online) 18%,transparent);color:var(--online)}
+.dv-tag.off{color:var(--muted)}
+.dv-tag.me{border:1px solid var(--line);background:none}
+.dv-body{min-width:0}
+.dv-body.off{filter:grayscale(.35);opacity:.8}
+.dv-vendors{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.dv-vendor{border:1px solid var(--line);border-radius:6px;background:var(--panel);overflow:hidden}
+.dv-vh{display:flex;align-items:center;gap:8px;padding:7px 12px;background:var(--panel-soft);border-bottom:1px solid var(--line)}
+.dv-vicon{flex:none;display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;color:var(--fg)}
+.dv-vicon svg{width:20px;height:20px}
+.dv-vb{display:flex;flex-direction:column;gap:8px;padding:10px 12px}
+.dv-accts{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.dv-acct{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:7px 10px;border:1px solid var(--line);border-radius:5px;background:var(--panel)}
+.dv-acct.cur{background:var(--panel-soft)}
+.dv-mail{min-width:0;overflow-wrap:anywhere}
+.dv-side{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.dv-plan{padding:1px 7px;border:1px solid var(--line);border-radius:4px;font-size:11px;color:var(--muted)}
+.dv-cur{padding:1px 8px;border-radius:4px;font-size:11px;font-weight:600;background:var(--accent);color:#fff}
+.dv-none{display:flex;align-items:center;gap:6px;padding:8px 10px;border:1px dashed var(--line);border-radius:5px;color:var(--muted);font-size:12px;font-style:italic}
+.dv-empty{display:flex;flex-direction:column;align-items:center;gap:8px;padding:28px 12px;border:1px dashed var(--line);border-radius:6px;background:var(--panel-soft);color:var(--muted)}
+.dv-vb .aero-btn{white-space:nowrap;font-size:12px;padding:3px 8px}
 
 /* ---------- Frutiger Aero 背景（全 App 共用一張、對話區另一張）：圖貼頂，往下漸變成白色，下半部留白 ---------- */
 .win{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff 55%),url(img/bg-app.webp) top center/max(100%,720px) auto no-repeat,#fff}

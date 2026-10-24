@@ -1,4 +1,4 @@
-// 設定「設備」分類：設備 → 廠商 → 帳號 三層（純邏輯，node 與瀏覽器都能跑）。
+// 設定「設備與帳號」分類：設備 → 廠商 → 帳號 三層（廠商的 accounts 是帳號清單，畫面一個帳號一列）（純邏輯，node 與瀏覽器都能跑）。
 // 設備一律用設備名稱，不顯示節點代號與夥伴 ID；沒回報的顯示「未回報」。
 // 資料來源都是現有的：名單（有哪些視窗、各用哪家引擎、在線狀態）、啟動器回報（那台裝了哪些 CLI）、
 // Claude 帳號遠端回報（acct_remote_list）、本機的 Claude 帳號庫與 Codex 目前登入。沒有新增任何後台回報。
@@ -74,7 +74,7 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], selfNode = '', a
       // 只有 Claude 的帳號能切換，而且對方電腦的 ASN 要在線、至少有兩個帳號
       const canPick = k === 'claude' && !isSelf && list.length >= 2
       const switchable = canPick && rep?.asnOnline === true
-      return { key: k, label: vendorLabel(k), account: v.text, reported: v.reported, extra: v.extra, switchable, switchHint: canPick && !switchable ? '對方電腦的 ASN 沒有在線，無法切換' : '' }
+      return { key: k, label: vendorLabel(k), account: v.text, reported: v.reported, extra: v.extra, accounts: list, switchable, switchHint: canPick && !switchable ? '對方電腦的 ASN 沒有在線，無法切換' : '' }
     })
     return {
       key: node, label, self: isSelf, kind: phone ? '手機' : '電腦', online: isOn, onlineText: isOn ? '在線' : '離線',

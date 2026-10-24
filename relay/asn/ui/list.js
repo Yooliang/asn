@@ -9,7 +9,7 @@ import { buildLogView } from './lib/changelog.mjs'
 import { SettingsPanel } from './lib/settings-panel.mjs'
 import { PANEL_KINDS, isPanelTab, normalizePanelSize, panelItem, panelTabId, panelTabItem, panelTitle, splitTabs } from './lib/panels.mjs'
 import { AsnDialog } from './lib/dialog.mjs'
-import { SETTING_CATS, catSummary } from './lib/settings-cats.mjs'
+import { SETTING_CATS, catSummary, normalizeCatKey } from './lib/settings-cats.mjs'
 import { DIMS, groupOptions, loadDims, pageTabs, withTabDim } from './lib/dims.mjs'
 import { normalizeSearchQuery, rosterShownGroups } from './lib/search.mjs'
 import { deviceAsn } from './lib/presence.mjs'
@@ -722,6 +722,7 @@ async function openChat(id) {
 // 指引、設定的聊天窗（跟 openChat 同一套）：整合模式＝右邊開（或換內容並切到）那個分頁；分離模式＝開（或叫出）那扇視窗並換內容
 async function openPanel(kind, key) {
   if (!panelItem(kind, key)) return
+  if (kind === 'setting') key = normalizeCatKey(key)   // 舊的 accounts 併進 devices
   ui.panel[kind] = key
   if (ui.mode === 'merged') {
     Object.assign(ui, openChatTab(ui, panelTabId(kind), ui.pinnedChat))
@@ -1060,9 +1061,9 @@ const app = createApp({
     }
     const closeDeviceMenu = () => { deviceMenu.value = '' }
     // 打開「切換這台的 Claude 帳號」專屬對話框（名單右鍵與設定的「設備」分類共用）
-    const openDeviceAcct = async node => {
+    const openDeviceAcct = async (node, email = '') => {
       if (!node) return
-      deviceAcct.node = node; deviceAcct.label = deviceTree.value.find(d => d.key === node)?.label ?? accounts.remoteNodes().find(d => d.key === node)?.label ?? ''; deviceAcct.selected = ''
+      deviceAcct.node = node; deviceAcct.label = deviceTree.value.find(d => d.key === node)?.label ?? accounts.remoteNodes().find(d => d.key === node)?.label ?? ''; deviceAcct.selected = email   // 設備頁籤上點某個帳號的「切換」＝預先選好那個帳號，仍要在對話框按送出
       void invoke('show_main').catch(() => {})
       await accounts.remoteSelect(node)
     }
@@ -1137,11 +1138,9 @@ const app = createApp({
         case 'acct-remove': await accounts.remove(value); break
         case 'acct-add': await accounts.addCurrent(); break
         case 'acct-auto': autoAddClaude.value = value === true; if (!autoAddClaude.value) accounts.state.autoNote = ''; break
-        case 'acct-remote-node': await accounts.remoteSelect(String(value ?? '')); break
-        case 'acct-remote-switch': await accounts.remoteSwitch(String(value ?? '')); break
         case 'acct-trust': await accounts.setTrust(value === true); break
         case 'devices-refresh': await refreshDeviceReports(); break
-        case 'device-switch': await openDeviceAcct(String(value ?? '')); break
+        case 'device-switch': await (typeof value === 'object' && value ? openDeviceAcct(String(value.node ?? ''), String(value.email ?? '')) : openDeviceAcct(String(value ?? ''))); break
         case 'closeTo': await setCloseTo(value); break
         case 'autostart': await setAutostart(value === true); break
         case 'bridge-enable': await setBridgeEnabled(value === true); break
@@ -1215,7 +1214,7 @@ sync()
 async function restoreOpenSession() {
   const r = restoreSession(sess.saved, { friends: core.friends, pinned: ui.pinnedChat })
   if (JSON.stringify(r.pinned) !== JSON.stringify(ui.pinnedChat)) ui.pinnedChat = r.pinned
-  for (const k of PANEL_KINDS) if (!ui.panel[k]) ui.panel[k] = r.panel[k]
+  for (const k of PANEL_KINDS) if (!ui.panel[k]) ui.panel[k] = k === 'setting' ? normalizeCatKey(r.panel[k]) : r.panel[k]
   if (ui.mode === 'merged') {
     const tabs = orderTabs([...r.tabs, ...ui.tabs.filter(id => !r.tabs.includes(id))], ui.pinnedChat)
     ui.tabs = tabs

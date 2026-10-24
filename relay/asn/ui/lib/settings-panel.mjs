@@ -8,27 +8,66 @@ import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS } from '.
 import { DIMS, groupOptions } from './dims.mjs'
 import { LoginPanel, LogoutPanel } from './login-panel.mjs'
 import { CloudInvitePanel } from './cloud-invite.mjs'
-import { OTHER_VENDORS, VENDOR_UNSUPPORTED, accountLine } from './claude-accounts.mjs'
+import { accountLine } from './claude-accounts.mjs'
+import { catByKey, normalizeCatKey } from './settings-cats.mjs'
+import { vendorIconSvg } from './vendor-icons.mjs'
 import { USAGE_NOTE } from './usage.mjs'
 
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
 export const SETTING_OPS = [
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
-  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-add', 'acct-auto', 'acct-remote-node', 'acct-remote-switch', 'acct-trust', 'devices-refresh', 'device-switch',
+  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-add', 'acct-auto', 'acct-trust', 'devices-refresh', 'device-switch',
   'closeTo', 'autostart', 'bridge-enable', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'avatar-remove',
 ]
 
 export const SettingsPanel = {
   components: { LoginPanel, LogoutPanel, CloudInvitePanel },
-  props: { st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' } },
+  props: { st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
-    const { ref } = globalThis.Vue
+    const { ref, computed, onMounted, onBeforeUnmount } = globalThis.Vue
     const fileEl = ref(null)
+    // 舊的分類鍵（accounts）併進 devices
+    const cat = computed(() => normalizeCatKey(props.catKey))
+    const catIcon = catByKey('devices').icon
+    // 設備與帳號：選中的設備頁籤（元件自己記；沒選或選的不在了就用這台，再不然第一台）
+    const picked = ref(props.dev)
+    const devs = computed(() => (Array.isArray(props.st.devices) ? props.st.devices : []))
+    const curDev = computed(() => devs.value.find(d => d.key === picked.value) ?? devs.value.find(d => d.self) ?? devs.value[0] ?? null)
+    // 這台一定有 Claude 卡片（可加入帳號）；Codex 沒登入時也留著卡片寫登入說明
+    const curVendors = computed(() => {
+      const d = curDev.value
+      if (!d) return []
+      const list = Array.isArray(d.vendors) ? d.vendors.map(v => ({ ...v, accounts: v.accounts ?? [] })) : []
+      if (!d.self) return list
+      if (!list.some(v => v.key === 'claude')) list.unshift({ key: 'claude', label: 'Claude', accounts: [], switchable: false, switchHint: '' })
+      if (!list.some(v => v.key === 'codex')) {
+        const at = list.findIndex(v => v.key === 'claude') + 1
+        list.splice(at, 0, { key: 'codex', label: 'OpenAI（Codex）', accounts: [], note: props.st.accounts?.codexLine || '', switchable: false, switchHint: '' })
+      }
+      return list
+    })
+    // 頁籤太多時可左右捲動
+    const tabsEl = ref(null), canL = ref(false), canR = ref(false)
+    const updScroll = () => {
+      const el = tabsEl.value
+      if (!el) return
+      canL.value = el.scrollLeft > 0
+      canR.value = Math.ceil(el.scrollLeft + el.clientWidth) < el.scrollWidth
+    }
+    const scrollTabs = dir => tabsEl.value?.scrollBy?.({ left: dir * 220, behavior: 'smooth' })
+    const pick = (key, ev) => { picked.value = key; ev?.currentTarget?.scrollIntoView?.({ block: 'nearest', inline: 'center' }) }
+    let ro = null
+    onMounted(() => {
+      updScroll()
+      if (typeof ResizeObserver === 'function' && tabsEl.value) { ro = new ResizeObserver(updScroll); ro.observe(tabsEl.value) }
+    })
+    onBeforeUnmount(() => { ro?.disconnect() })
     const act = (op, value) => emit('act', op, value)
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return {
-      fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions, OTHER_VENDORS, VENDOR_UNSUPPORTED,
+      fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions,
+      cat, catIcon, devs, curDev, curVendors, tabsEl, canL, canR, updScroll, scrollTabs, pick, vendorIcon: vendorIconSvg,
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL,
       CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS, DIMS,
@@ -85,72 +124,80 @@ export const SettingsPanel = {
           <small role="status">{{ st.voice.note }}</small>
         </div>
       </template>
-      <template v-if="catKey === 'accounts'">
-        <div class="acct-set">
+      <template v-if="cat === 'devices'">
+        <div class="dv-set">
+          <header class="dv-head">
+            <div class="dv-head-tx">
+              <h2 class="dv-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path :d="catIcon"></path></svg>設備與帳號</h2>
+              <small>只有 Claude 帳號能從這裡切換；其他廠商目前只顯示，沒回報的會寫「未回報」。這台電腦可以在自己的頁籤加入、切換、刪除 Claude 帳號。</small>
+            </div>
+            <button class="aero-btn" type="button" @click="act('devices-refresh')">重新整理</button>
+          </header>
+          <small v-if="!devs.length">還沒有設備。</small>
+          <div class="dv-tabs-wrap" v-if="devs.length">
+            <button class="dv-scroll l" type="button" :hidden="!canL" aria-label="向左捲動設備頁籤" @click="scrollTabs(-1)">&lsaquo;</button>
+            <div class="dv-tabs" role="tablist" aria-label="設備" ref="tabsEl" @scroll="updScroll">
+              <button v-for="d in devs" :key="d.key" :class="['dv-tab', { sel: curDev && d.key === curDev.key, off: !d.online }]" type="button" role="tab" :aria-selected="curDev && d.key === curDev.key ? 'true' : 'false'" @click="pick(d.key, $event)">{{ d.label }}<span :class="['dv-dot', d.online ? 'on' : 'off']" :title="d.onlineText"></span></button>
+            </div>
+            <button class="dv-scroll r" type="button" :hidden="!canR" aria-label="向右捲動設備頁籤" @click="scrollTabs(1)">&rsaquo;</button>
+          </div>
+          <section class="dv-dev" v-if="curDev" role="tabpanel" :aria-label="curDev.label">
+            <div class="dv-dev-h">
+              <h3 class="dv-name">{{ curDev.label }}</h3>
+              <span class="dv-tag kind">{{ curDev.kind }}</span>
+              <span :class="['dv-tag', curDev.online ? 'on' : 'off']">{{ curDev.onlineText }}</span>
+              <span class="dv-tag me" v-if="curDev.self">這台</span>
+            </div>
+            <small v-if="curDev.reportedText">{{ curDev.reportedText }}</small>
+            <div :class="['dv-body', { off: !curDev.online }]">
+              <div class="dv-empty" v-if="!curVendors.length"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h13v9H3zM1 18h17M19 8h3v11h-3z"></path></svg><span>{{ curDev.empty || '這台設備還沒有回報任何廠商' }}</span></div>
+              <ul class="dv-vendors" v-else>
+                <li :class="['dv-vendor', 'v-' + v.key]" v-for="v in curVendors" :key="v.key">
+                  <header class="dv-vh"><span class="dv-vicon" aria-hidden="true" v-html="vendorIcon(v.key)"></span><b>{{ v.label }}</b></header>
+                  <div class="dv-vb">
+                    <template v-if="curDev.self && v.key === 'claude'">
+                      <ul class="dv-accts" v-if="st.accounts.list.length">
+                        <li :class="['dv-acct', { cur: a.current }]" v-for="a in st.accounts.list" :key="a.email">
+                          <span class="dv-mail">{{ a.email }}</span>
+                          <span class="dv-side">
+                            <span class="dv-plan" v-if="a.plan">{{ a.plan }}</span>
+                            <span class="dv-cur" v-if="a.current">使用中</span>
+                            <button class="aero-btn" type="button" @click="act('acct-switch', a.email)" :disabled="st.accounts.busy || a.current">切換</button>
+                            <button class="aero-btn" type="button" @click="act('acct-remove', a.email)" :disabled="st.accounts.busy">{{ st.accounts.confirmDel === a.email ? '確認刪除' : '刪除' }}</button>
+                          </span>
+                        </li>
+                      </ul>
+                      <div class="dv-none" v-else>還沒有加入過帳號。</div>
+                      <small v-if="st.accounts.current && !st.accounts.current.saved" class="acct-warn">目前登入的 {{ st.accounts.current.email }} 還沒加入帳號庫，切換到別的帳號前請先加入。</small>
+                      <small v-else-if="!st.accounts.current">這台電腦目前沒有 Claude 登入。</small>
+                      <div class="acct-add"><button class="aero-btn" type="button" @click="act('acct-add')" :disabled="st.accounts.busy || !st.accounts.current">加入目前登入的帳號</button></div>
+                      <label class="chk"><input type="checkbox" :checked="st.accounts.autoAdd" @change="act('acct-auto', $event.target.checked)" /><span>自動加入</span></label>
+                      <small v-if="st.accounts.autoNote" role="status">{{ st.accounts.autoNote }}</small>
+                      <small role="status">{{ st.accounts.msg }}</small>
+                      <small v-if="st.accounts.mod" role="status">{{ st.accounts.mod }}</small>
+                      <label class="chk"><input type="checkbox" :checked="st.accounts.trustOwn" @change="act('acct-trust', $event.target.checked)" /><span>信任我自己的設備，別台要求切換這台時不用確認</span></label>
+                      <small>預設會在這台跳出確認，按了同意才會切換。指令只帶 email，權杖不會經過收發室。</small>
+                    </template>
+                    <template v-else>
+                      <ul class="dv-accts" v-if="v.accounts.length">
+                        <li :class="['dv-acct', { cur: a.current }]" v-for="a in v.accounts" :key="a.email">
+                          <span class="dv-mail">{{ a.email }}</span>
+                          <span class="dv-side">
+                            <span class="dv-plan" v-if="a.plan">{{ a.plan }}</span>
+                            <span class="dv-cur" v-if="a.current">使用中</span>
+                            <button class="aero-btn" type="button" v-else-if="v.key === 'claude' && !curDev.self && (v.switchable || v.switchHint)" :disabled="!v.switchable" @click="act('device-switch', { node: curDev.key, email: a.email })">切換</button>
+                          </span>
+                        </li>
+                      </ul>
+                      <div class="dv-none" v-else><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v4M12 16h.01"></path></svg>{{ v.note || '目前未回報任何帳號' }}</div>
+                      <small v-if="v.switchHint">{{ v.switchHint }}</small>
+                    </template>
+                  </div>
+                </li>
+              </ul>
+            </div>
+          </section>
           <cloud-invite-panel></cloud-invite-panel>
-          <section class="set-card" aria-label="Claude 帳號">
-            <header class="vendor-h"><b>Claude 帳號</b><small>Anthropic</small></header>
-            <ul class="acct-list" v-if="st.accounts.list.length">
-              <li v-for="a in st.accounts.list" :key="a.email">
-                <span class="acct-txt"><span class="acct-name">{{ a.email }}<em v-if="a.current">使用中</em></span><small v-if="a.plan">{{ a.plan }}</small></span>
-                <button class="aero-btn" type="button" @click="act('acct-switch', a.email)" :disabled="st.accounts.busy || a.current">切換</button>
-                <button class="aero-btn" type="button" @click="act('acct-remove', a.email)" :disabled="st.accounts.busy">{{ st.accounts.confirmDel === a.email ? '確認刪除' : '刪除' }}</button>
-              </li>
-            </ul>
-            <small v-else>還沒有加入過帳號。</small>
-            <small v-if="st.accounts.current && !st.accounts.current.saved" class="acct-warn">目前登入的 {{ st.accounts.current.email }} 還沒加入帳號庫，切換到別的帳號前請先加入。</small>
-            <small v-else-if="!st.accounts.current">這台電腦目前沒有 Claude 登入。</small>
-            <div class="acct-add"><button class="aero-btn" type="button" @click="act('acct-add')" :disabled="st.accounts.busy || !st.accounts.current">加入目前登入的帳號</button></div>
-            <label class="chk"><input type="checkbox" :checked="st.accounts.autoAdd" @change="act('acct-auto', $event.target.checked)" /><span>自動加入</span></label>
-            <small v-if="st.accounts.autoNote" role="status">{{ st.accounts.autoNote }}</small>
-            <small role="status">{{ st.accounts.msg }}</small>
-            <small v-if="st.accounts.mod" role="status">{{ st.accounts.mod }}</small>
-          </section>
-          <section class="set-card" aria-label="OpenAI（Codex）帳號">
-            <header class="vendor-h"><b>OpenAI（Codex）帳號</b><small>OpenAI</small></header>
-            <div class="acct-txt"><span class="acct-name">{{ st.accounts.codexLine }}</span></div>
-            <small>切換尚未支援，目前只顯示現在登入的帳號。</small>
-          </section>
-          <section class="set-card" aria-label="遠端設備">
-            <header class="vendor-h"><b>遠端設備</b><small>切換別台電腦的 Claude 帳號</small></header>
-            <label>設備
-              <select class="set-sel" :value="st.accounts.remote.node" @change="act('acct-remote-node', $event.target.value)" aria-label="遠端設備">
-                <option value="">請選擇…</option>
-                <option v-for="d in st.accounts.remote.devices" :key="d.key" :value="d.key">{{ d.label }}</option>
-              </select>
-            </label>
-            <small v-if="!st.accounts.remote.devices.length">目前沒有其他在線的設備（對方要開著 ASN）。</small>
-            <ul class="acct-list" v-if="st.accounts.remote.list.length">
-              <li v-for="a in st.accounts.remote.list" :key="a.email">
-                <span class="acct-txt"><span class="acct-name">{{ a.email }}<em v-if="a.current">使用中</em></span><small v-if="a.plan">{{ a.plan }}</small></span>
-                <button class="aero-btn" type="button" @click="act('acct-remote-switch', a.email)" :disabled="st.accounts.remote.busy || a.current">切換</button>
-              </li>
-            </ul>
-            <small role="status">{{ st.accounts.remote.loading ? '讀取中…' : st.accounts.remote.msg }}</small>
-            <label class="chk"><input type="checkbox" :checked="st.accounts.trustOwn" @change="act('acct-trust', $event.target.checked)" /><span>信任我自己的設備，別台要求切換這台時不用確認</span></label>
-            <small>預設會在這台跳出確認，按了同意才會切換。指令只帶 email，權杖不會經過收發室。</small>
-          </section>
-          <section class="set-card" v-for="v in OTHER_VENDORS" :key="v.key" :aria-label="v.title">
-            <header class="vendor-h"><b>{{ v.title }}</b><small>{{ VENDOR_UNSUPPORTED }}</small></header>
-          </section>
-        </div>
-      </template>
-      <template v-if="catKey === 'devices'">
-        <div class="dev-set">
-          <div class="upd-row"><button class="aero-btn" type="button" @click="act('devices-refresh')">重新整理</button></div>
-          <small v-if="!st.devices.length">還沒有設備。</small>
-          <section class="set-card dev-card" v-for="d in st.devices" :key="d.key" :aria-label="d.label">
-            <header class="vendor-h"><b>{{ d.label }}</b><small>{{ d.kind }}{{ d.self ? '（這台）' : '' }}、{{ d.onlineText }}</small></header>
-            <small v-if="d.reportedText">{{ d.reportedText }}</small>
-            <small v-if="d.empty">{{ d.empty }}</small>
-            <ul class="acct-list dev-vendors" v-if="d.vendors.length">
-              <li v-for="v in d.vendors" :key="v.key">
-                <span class="acct-txt"><span class="acct-name">{{ v.label }}：{{ v.account }}</span><small v-if="v.extra">{{ v.extra }}</small><small v-if="v.switchHint">{{ v.switchHint }}</small></span>
-                <button class="aero-btn" type="button" v-if="v.switchable" @click="act('device-switch', d.key)">切換</button>
-              </li>
-            </ul>
-          </section>
-          <small>只有 Claude 帳號能從這裡切換；其他廠商目前只顯示，沒回報的會寫「未回報」。</small>
         </div>
       </template>
       <template v-if="catKey === 'look'">
