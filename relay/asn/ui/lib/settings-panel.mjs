@@ -16,7 +16,7 @@ import { USAGE_NOTE } from './usage.mjs'
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
 export const SETTING_OPS = [
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
-  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-add', 'acct-auto', 'acct-trust', 'devices-refresh', 'device-switch',
+  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-trust', 'devices-refresh', 'device-switch',
   'closeTo', 'autostart', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'avatar-remove',
 ]
 
@@ -168,10 +168,8 @@ export const SettingsPanel = {
                         </li>
                       </ul>
                       <div class="dv-none" v-else>還沒有加入過帳號。</div>
-                      <small v-if="st.accounts.current && !st.accounts.current.saved" class="acct-warn">目前登入的 {{ st.accounts.current.email }} 還沒加入帳號庫，切換到別的帳號前請先加入。</small>
+                      <small v-if="st.accounts.current && !st.accounts.current.saved" class="acct-warn">目前登入的 {{ st.accounts.current.email }} 還沒加入帳號庫，ASN 會在一分鐘內自動加入，加入後才能切換到別的帳號。</small>
                       <small v-else-if="!st.accounts.current">這台電腦目前沒有 Claude 登入。</small>
-                      <div class="acct-add"><button class="aero-btn" type="button" @click="act('acct-add')" :disabled="st.accounts.busy || !st.accounts.current">加入目前登入的帳號</button></div>
-                      <label class="chk"><input type="checkbox" :checked="st.accounts.autoAdd" @change="act('acct-auto', $event.target.checked)" /><span>自動加入</span></label>
                       <small v-if="st.accounts.autoNote" role="status">{{ st.accounts.autoNote }}</small>
                       <small role="status">{{ st.accounts.msg }}</small>
                       <small v-if="st.accounts.mod" role="status">{{ st.accounts.mod }}</small>
@@ -225,7 +223,6 @@ export const SettingsPanel = {
         <label class="chk" v-if="st.autostart.supported"><input type="checkbox" :checked="st.autostart.on" :disabled="st.autostart.busy || (!!st.autostart.blocked && !st.autostart.on)" @change="act('autostart', $event.target.checked)" aria-label="登入時自動啟動 ASN" /><span>登入時自動啟動 ASN</span></label>
         <small v-if="st.autostart.supported && st.autostart.blocked" class="autostart-blocked">{{ st.autostart.blocked }}</small>
         <section class="set-card" aria-label="收發室" v-if="st.bridge">
-          <label class="chk"><input type="checkbox" checked disabled aria-label="讓 ASN 負責這台的收發室" /><span>讓 ASN 負責這台的收發室（固定開啟）</span></label>
           <label class="chk"><input type="checkbox" :checked="st.bridge.remoteLaunch" :disabled="st.bridge.busy" @change="act('bridge-launch', $event.target.checked)" aria-label="允許我的其他設備替這台開新視窗" /><span>允許我的其他設備替這台開新視窗</span></label>
           <label>沒指定收件人的信交給
             <input class="set-sel" type="text" maxlength="100" :value="st.bridge.unaddressedTo" :disabled="st.bridge.busy" placeholder="留空＝交給我本人" @change="act('bridge-unaddressed', $event.target.value)" aria-label="沒指定收件人的信交給哪個視窗" />

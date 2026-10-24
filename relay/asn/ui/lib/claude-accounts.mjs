@@ -74,7 +74,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
       r.asnOnline = v?.asn_online === true
       r.reportedAt = v?.reported_at ?? ''
       if (!r.asnOnline) r.msg = '對方電腦的 ASN 目前沒有在線，無法切換。'
-      else if (!r.list.length) r.msg = '對方電腦還沒有帳號（請對方先在設定的「帳號」頁按「加入目前登入的帳號」）。'
+      else if (!r.list.length) r.msg = '對方電腦還沒有帳號（請對方電腦開著 ASN，一分鐘內會自動加入目前登入的帳號）。'
     } catch (e) { r.list = []; r.msg = errText(e) }
     r.loading = false
   }

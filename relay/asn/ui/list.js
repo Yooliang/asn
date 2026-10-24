@@ -120,7 +120,7 @@ const closeTo = ref(normalizeClose(savedMe.closeTo))
 const trayOk = ref(true)
 const showNowPlaying = ref(normalizeNowPlaying(savedMe.showNowPlaying))   // 顯示正在聽的歌（預設關；開了 Rust 端才去讀系統媒體、才送出）
 const nowPlaying = ref('')   // 目前正在聽的「歌名 - 歌手」（Rust 端輪詢後推來；沒在聽＝空）
-const autoAddClaude = ref(savedMe.autoAddClaude !== false)   // Claude 帳號自動加入／回存（預設開；Rust 背景工作每分鐘讀同一份存檔看開關）
+const autoAddClaude = ref(true)   // Claude 帳號自動加入／回存：固定開啟（Rust 背景工作每分鐘執行，不再有開關）
 const autostart = reactive({ supported: false, on: false, busy: false, blocked: '' })
 try {
   await invoke('set_close_to_tray', { tray: closeTo.value === 'tray' })
@@ -1135,8 +1135,6 @@ const app = createApp({
         case 'voice-install': await installFromSettings(); break
         case 'acct-switch': await accounts.switchTo(value); break
         case 'acct-remove': await accounts.remove(value); break
-        case 'acct-add': await accounts.addCurrent(); break
-        case 'acct-auto': autoAddClaude.value = value === true; if (!autoAddClaude.value) accounts.state.autoNote = ''; break
         case 'acct-trust': await accounts.setTrust(value === true); break
         case 'devices-refresh': await refreshDeviceReports(); break
         case 'device-switch': await (typeof value === 'object' && value ? openDeviceAcct(String(value.node ?? ''), String(value.email ?? '')) : openDeviceAcct(String(value ?? ''))); break

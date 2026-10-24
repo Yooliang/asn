@@ -156,11 +156,10 @@ test('自動加入：Rust 背景工作通知後顯示一行小字、清單即時
 
 test('自動加入接線守門：開關預設開、存進 asn-me.json、設定頁有開關、Rust 背景工作已啟動', () => {
   const panel = read('ui/lib/settings-panel.mjs'), js = read('ui/list.js'), rs = read('src-tauri/src/lib.rs')
-  assert.match(js, /autoAddClaude = ref\(savedMe\.autoAddClaude !== false\)/, '舊存檔沒這欄位＝開')
+  assert.match(js, /autoAddClaude = ref\(true\)/, '固定開啟，不看舊存檔')
   assert.match(js, /meStore\.save\(\{[^]*?autoAddClaude: autoAddClaude\.value/, '開關要寫進 asn-me.json')
-  assert.match(js, /case 'acct-auto'/)
+  assert.ok(!js.includes("case 'acct-auto'"), '設定頁沒有開關了')
   assert.match(js, /listen\('claude-account-auto'/)
-  assert.match(panel, /act\('acct-auto'/)
-  assert.match(panel, /<span>自動加入<\/span>/)
+  assert.ok(!panel.includes("act('acct-auto'") && !panel.includes('<span>自動加入</span>'), '設定頁沒有自動加入勾選')
   assert.ok(rs.includes('claude_accounts::auto_loop') && rs.includes('"claude-account-auto"'))
 })

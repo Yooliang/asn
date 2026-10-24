@@ -145,11 +145,11 @@ test('對方 ASN 沒在線：切換鈕停用並寫原因；離線設備整體偏
 
 test('這台的頁籤：完整的帳號管理（切換、刪除、加入、自動加入、信任自己的設備）都在', async () => {
   const html = await render({ catKey: 'devices' })
-  for (const w of ['a@b.c', 'p@b.c', '使用中', '切換', '刪除', '加入目前登入的帳號', '自動加入', '信任我自己的設備', '邀請雲端代理', 'x@openai.test', '這台']) assert.ok(html.includes(w), `少了「${w}」`)
+  for (const w of ['a@b.c', 'p@b.c', '使用中', '切換', '刪除', '信任我自己的設備', '邀請雲端代理', 'x@openai.test', '這台']) assert.ok(html.includes(w), `少了「${w}」`)
   const cur = /<li class="dv-acct[^"]*"[^>]*>(?:(?!<\/li>)[\s\S])*a@b\.c[\s\S]*?<\/li>/.exec(html)[0]
   assert.match(cur, /<button[^>]*disabled[^>]*>切換<\/button>/, '使用中的帳號不能再切換')
-  for (const op of ['acct-switch', 'acct-remove', 'acct-add', 'acct-auto', 'acct-trust']) assert.ok(SettingsPanel.template.includes(`act('${op}'`), op)
-  assert.match(html, /<input type="checkbox"[^>]*checked[^>]*\/?>\s*<span>自動加入/)
+  for (const op of ['acct-switch', 'acct-remove', 'acct-trust']) assert.ok(SettingsPanel.template.includes(`act('${op}'`), op)
+  assert.ok(!html.includes('加入目前登入的帳號') && !html.includes('<span>自動加入</span>'), '加入按鈕與自動加入勾選已拿掉（固定自動加入）')
 })
 
 test('這台的頁籤：刪除要二次確認、忙碌時按鈕停用、警告與狀態列照實顯示；沒登入 Claude 時寫提示', async () => {
@@ -157,7 +157,6 @@ test('這台的頁籤：刪除要二次確認、忙碌時按鈕停用、警告�
   const html = await render({ catKey: 'devices' }, st({ accounts: a }))
   assert.ok(html.includes('確認刪除') && html.includes('已切換') && html.includes('外掛已安裝') && html.includes('已自動加入 q@b.c'))
   assert.ok(html.includes('目前登入的 z@b.c 還沒加入帳號庫'))
-  assert.match(html, /<button[^>]*disabled[^>]*>加入目前登入的帳號<\/button>|disabled[^>]*>加入目前登入的帳號/)
   const none = await render({ catKey: 'devices' }, st({ accounts: { ...ACCT, list: [], current: null }, devices: [{ ...devs()[0], vendors: [] }, ...devs().slice(1)] }))
   assert.ok(none.includes('這台電腦目前沒有 Claude 登入。') && none.includes('還沒有加入過帳號。'))
 })
@@ -178,7 +177,7 @@ test('遠端設備下拉選單已被頁籤取代：元件與樞紐不再有 acct
   assert.ok(!SETTING_OPS.includes('acct-remote-node') && !SETTING_OPS.includes('acct-remote-switch'))
   assert.ok(!read('ui/lib/settings-panel.mjs').includes('acct-remote'))
   assert.ok(!read('ui/list.js').includes("case 'acct-remote"))
-  for (const op of ['acct-switch', 'acct-remove', 'acct-add', 'acct-auto', 'acct-trust', 'devices-refresh', 'device-switch']) assert.ok(SETTING_OPS.includes(op), op)
+  for (const op of ['acct-switch', 'acct-remove', 'acct-trust', 'devices-refresh', 'device-switch']) assert.ok(SETTING_OPS.includes(op), op)
 })
 
 test('守門：不引入 Tailwind 或外部網址；樣式只用既有的 CSS 變數；畫面不顯示節點代號', () => {

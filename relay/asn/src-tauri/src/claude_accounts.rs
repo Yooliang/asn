@@ -36,7 +36,7 @@ impl fmt::Display for AccErr {
             AccErr::BadEmail => write!(f, "email 格式不對"),
             AccErr::NotFound => write!(f, "找不到這個帳號"),
             AccErr::NoLogin => write!(f, "這台電腦目前沒有 Claude 登入，請先登入再加入帳號"),
-            AccErr::CurrentUnsaved => write!(f, "目前登入的帳號還沒加入帳號庫，切走會遺失；請先按「加入目前登入的帳號」"),
+            AccErr::CurrentUnsaved => write!(f, "目前登入的帳號還沒加入帳號庫，切走會遺失；請等 ASN 自動加入（約一分鐘）後再切換"),
             AccErr::Corrupt(what) => write!(f, "{what}"),
             AccErr::Io(e) => write!(f, "檔案操作失敗：{e}"),
         }
@@ -547,9 +547,10 @@ pub enum AutoOutcome {
     Updated(String),
 }
 
-/// 設定（asn-me.json 的 `autoAddClaude`）：只有明確寫 false 才關；沒這欄位的舊存檔、壞檔、壞值一律開
+/// 自動加入固定開啟（原本看 asn-me.json 的 `autoAddClaude`，現在不再有開關，寫什麼都當開）
 pub fn auto_enabled_from_saved(text: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(text).ok().and_then(|v| v.get("autoAddClaude")?.as_bool()).unwrap_or(true)
+    let _ = text;   // 固定開啟：舊存檔裡寫 false 也一律忽略（小良哥 10-24）
+    true
 }
 
 /// 做一次：目前登入不在庫就加入；在庫但權杖檔（或帳號資訊）和庫裡不同就回存；沒登入什麼都不動。
@@ -1017,8 +1018,8 @@ mod tests {
     }
 
     #[test]
-    fn 開關讀法_預設開_只有明確寫_false_才關() {
-        assert!(!auto_enabled_from_saved(r#"{"autoAddClaude":false,"closeTo":"tray"}"#));
+    fn 開關讀法_固定開啟_寫_false_也忽略() {
+        assert!(auto_enabled_from_saved(r#"{"autoAddClaude":false,"closeTo":"tray"}"#));
         assert!(auto_enabled_from_saved(r#"{"autoAddClaude":true}"#));
         for t in [r#"{"sound":true}"#, r#"{"autoAddClaude":null}"#, r#"{"autoAddClaude":"false"}"#, "{壞掉", ""] {
             assert!(auto_enabled_from_saved(t), "{t}");
