@@ -63,6 +63,12 @@ export function swipeTarget({ index, dx, dt, width, count = TABS.length }) {
 // 底部指示條的位置（以分頁為單位的小數，跟著手指）
 export const indicatorPos = (index, shift, width, count = TABS.length) => Math.max(0, Math.min(count - 1, index - (width > 0 ? shift / width : 0)))
 // 手指按下的地方能不能開始滑：輸入框、下拉選單、可橫向捲動的工具列、放大看照片的畫面都不接手
+// 訊息裡橫向可捲動的區塊（寬表格、程式碼）：手指在上面橫向滑是要捲動它，不是換頁。只在「真的寬到需要捲」時才擋，沒溢出的表格照常可換頁
+export const SCROLLX_SELECTOR = '.md-tablewrap, .md-code'
+export function inScrollableX(target) {
+  const el = target?.closest?.(SCROLLX_SELECTOR)
+  return !!el && Number(el.scrollWidth) > Number(el.clientWidth) + 1
+}
 export const SWIPE_BLOCK_SELECTOR = 'input, textarea, select, [contenteditable="true"], .toolbar, .photo-viewer, .picker, .m-dv-grip'
 
 // ---------- 名單 ----------
