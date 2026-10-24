@@ -1,6 +1,7 @@
 // 名單視窗的頁籤、群組列與廣告輪播（純邏輯，node 與瀏覽器都能跑）。
 import { UNNAMED_DEVICE } from './text.mjs'
 import { isAsnWindow } from './roster.mjs'
+import { applyDeviceOrder, isDeviceHidden } from './device-order.mjs'
 
 // 固定在設備頁籤之後的頁籤（群組只有在有唯讀 API 時才放，目前有 room_list）
 export const FIXED_TABS = [
@@ -28,9 +29,9 @@ export function groupHeading(g) {
 // ---------- 設備頁籤 ----------
 // 每台設備一個頁籤：本機永遠第一，其餘「有人在線」的在前、整台都離線的排後面，各組內照收發室名單順序，名單裡已消失但有對話紀錄的排在該組最後。
 // 超過 DEVICE_TAB_MAX 個時，第 DEVICE_TAB_MAX 個起收進「更多」；本機不會被收進去。
-// 回傳 { all, visible, more }：每項 { key, label, short, unread, online, total }；more 為空代表不需要「更多」。
+// 回傳 { all, visible, more, hidden }：每項 { key, label, short, unread, online, total }；more 為空代表不需要「更多」。
 export const shortOf = label => Array.from(String(label ?? '').trim())[0]?.toUpperCase() ?? '?'
-export function deviceTabs(friends, { selfNode, selfName = '', nodeOrder = [], max = DEVICE_TAB_MAX } = {}) {
+export function deviceTabs(friends, { selfNode, selfName = '', nodeOrder = [], deviceOrder = [], shown = [], max = DEVICE_TAB_MAX } = {}) {
   const by = new Map()
   const slot = (key, label) => {
     if (!by.has(key)) by.set(key, { key, label: label || UNNAMED_DEVICE, short: '', unread: 0, online: 0, total: 0 })
@@ -52,9 +53,12 @@ export function deviceTabs(friends, { selfNode, selfName = '', nodeOrder = [], m
   const gone = rest.filter(t => !rank.has(t.key)).sort((a, b) => a.label.localeCompare(b.label, 'zh-Hant'))
   // 本機第一；其餘有人在線的設備在前、整台都離線的排後面（各組內維持名單順序）；與設定的設備頁籤、手機同一個規則
   const ordered = [...inRoster, ...gone].map((t, i) => ({ t, i })).sort((a, b) => (a.t.online > 0 ? 0 : 1) - (b.t.online > 0 ? 0 : 1) || a.i - b.i).map(x => x.t)
-  const all = [by.get(selfNode), ...ordered].map(t => ({ ...t, short: shortOf(t.label) }))
-  if (all.length <= max) return { all, visible: all, more: [] }
-  return { all, visible: all.slice(0, max - 1), more: all.slice(max - 1) }
+  // 手動順序（設定檔的 deviceOrder）蓋過上面的自動規則；沒排過的設備照自動規則接在後面。整台離線且夥伴全封存的設備不列（hidden），手動顯示過的除外
+  const placed = applyDeviceOrder([by.get(selfNode), ...ordered], { selfNode, deviceOrder }).map(t => ({ ...t, short: shortOf(t.label) }))
+  const hidden = placed.filter(t => isDeviceHidden(t.key, friends, { selfNode, shown }))
+  const all = placed.filter(t => !hidden.includes(t))
+  if (all.length <= max) return { all, visible: all, more: [], hidden }
+  return { all, visible: all.slice(0, max - 1), more: all.slice(max - 1), hidden }
 }
 // 頁籤上的未讀紅點：該頁籤有未讀；「更多」＝收進去的設備任一有未讀
 export const tabUnread = t => t.unread || 0

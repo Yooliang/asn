@@ -1,6 +1,7 @@
 // 開新夥伴：設備選單、能否在此設備開啟、顯示方式（前台／背景）。
 import { MODEL_CATALOG } from './model-catalog.mjs'
 import { isAsnWindow } from './roster.mjs'
+import { applyDeviceOrder } from './device-order.mjs'
 
 export const DISPLAY_MODES = [
   { key: 'foreground', label: '前台顯示' },
@@ -39,7 +40,7 @@ export function canLaunchOnNode(nodeKey, ctx) {
 }
 
 /** 設備列：本機優先，其餘照名單順序 */
-export function launchDeviceRows(friends, { selfNode, nodeOrder = [] }) {
+export function launchDeviceRows(friends, { selfNode, nodeOrder = [], deviceOrder = [] }) {
   const byNode = new Map()
   for (const f of friends) {
     if (!byNode.has(f.node)) byNode.set(f.node, { key: f.node, label: f.device || f.node })
@@ -57,7 +58,8 @@ export function launchDeviceRows(friends, { selfNode, nodeOrder = [] }) {
   // 排序：本機第一；其餘「有人在線」的設備在前、整台都離線的排後面（各組內維持原順序）。左邊頁籤、設定的設備頁籤、手機的設備順序共用這一份
   const online = new Set(friends.filter(f => f.status !== 'offline' && !isAsnWindow(f)).map(f => f.node))
   const rank = r => (r.key === selfNode ? 0 : online.has(r.key) ? 1 : 2)
-  return out.map((r, i) => ({ r, i })).sort((a, b) => rank(a.r) - rank(b.r) || a.i - b.i).map(x => x.r)
+  const auto = out.map((r, i) => ({ r, i })).sort((a, b) => rank(a.r) - rank(b.r) || a.i - b.i).map(x => x.r)
+  return applyDeviceOrder(auto, { selfNode, deviceOrder })   // 手動順序（設定檔 deviceOrder）蓋過自動規則
 }
 
 export function profileModeFor(profileId) {

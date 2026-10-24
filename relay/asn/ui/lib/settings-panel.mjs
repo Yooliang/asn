@@ -16,7 +16,7 @@ import { USAGE_NOTE } from './usage.mjs'
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
 export const SETTING_OPS = [
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
-  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-trust', 'devices-refresh', 'device-switch',
+  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-trust', 'devices-refresh', 'device-switch', 'device-move', 'device-show',
   'closeTo', 'autostart', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'avatar-remove',
 ]
 
@@ -33,6 +33,9 @@ export const SettingsPanel = {
     // 設備與帳號：選中的設備頁籤（元件自己記；沒選或選的不在了就用這台，再不然第一台）
     const picked = ref(props.dev)
     const devs = computed(() => (Array.isArray(props.st.devices) ? props.st.devices : []))
+    // 自動隱藏的設備（整台離線、夥伴全封存、沒未讀）：名單左邊不列，這裡仍保留供管理，可手動顯示
+    const hiddenDevs = computed(() => devs.value.filter(d => d.hidden))
+    const curIdx = computed(() => devs.value.findIndex(d => curDev.value && d.key === curDev.value.key))
     const curDev = computed(() => devs.value.find(d => d.key === picked.value) ?? devs.value.find(d => d.self) ?? devs.value[0] ?? null)
     // 這台一定有 Claude 卡片（可加入帳號）；Codex 沒登入時也留著卡片寫登入說明
     const curVendors = computed(() => {
@@ -67,7 +70,7 @@ export const SettingsPanel = {
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return {
       fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions,
-      cat, catIcon, devs, curDev, curVendors, tabsEl, canL, canR, updScroll, scrollTabs, pick, vendorIcon: vendorIconSvg,
+      cat, catIcon, devs, hiddenDevs, curIdx, curDev, curVendors, tabsEl, canL, canR, updScroll, scrollTabs, pick, vendorIcon: vendorIconSvg,
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL,
       CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS, DIMS,
@@ -134,6 +137,13 @@ export const SettingsPanel = {
             <button class="aero-btn" type="button" @click="act('devices-refresh')">重新整理</button>
           </header>
           <small v-if="!devs.length">還沒有設備。</small>
+          <details class="dv-hidden" v-if="hiddenDevs.length">
+            <summary>已隱藏的設備（{{ hiddenDevs.length }}）</summary>
+            <small>這些設備整台離線、底下的對話都已封存，也沒有未讀，所以名單左邊沒有它們的頁籤。</small>
+            <ul>
+              <li v-for="d in hiddenDevs" :key="d.key"><span>{{ d.label }}</span><button class="aero-btn" type="button" @click="act('device-show', d.key)">顯示</button></li>
+            </ul>
+          </details>
           <div class="dv-tabs-wrap" v-if="devs.length">
             <button class="dv-scroll l" type="button" :hidden="!canL" aria-label="向左捲動設備頁籤" @click="scrollTabs(-1)">&lsaquo;</button>
             <div class="dv-tabs" role="tablist" aria-label="設備" ref="tabsEl" @scroll="updScroll">
@@ -147,6 +157,12 @@ export const SettingsPanel = {
               <span class="dv-tag kind">{{ curDev.kind }}</span>
               <span :class="['dv-tag', curDev.online ? 'on' : 'off']">{{ curDev.onlineText }}</span>
               <span class="dv-tag me" v-if="curDev.self">這台</span>
+              <span class="dv-tag off" v-if="curDev.hidden">已隱藏</span>
+              <span class="dv-order" v-if="!curDev.self" role="group" aria-label="設備頁籤順序">
+                <button class="aero-btn" type="button" :disabled="curIdx <= 1" aria-label="上移這台設備的頁籤" @click="act('device-move', { node: curDev.key, dir: -1 })">上移</button>
+                <button class="aero-btn" type="button" :disabled="curIdx >= devs.length - 1" aria-label="下移這台設備的頁籤" @click="act('device-move', { node: curDev.key, dir: 1 })">下移</button>
+                <button class="aero-btn" type="button" v-if="curDev.hidden" @click="act('device-show', curDev.key)">在名單顯示</button>
+              </span>
             </div>
             <small v-if="curDev.reportedText">{{ curDev.reportedText }}</small>
             <div :class="['dv-body', { off: !curDev.online }]">

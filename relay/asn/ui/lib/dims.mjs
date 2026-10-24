@@ -32,8 +32,8 @@ const sumTab = (t, friends) => { for (const f of friends) { t.total++; if (onlin
 
 // 頁籤清單 { all, visible, more }；每項 { key, label, short, dot, unread, online, total, empty }
 // 設備：本機第一、照名單順序、消失但有紀錄的排最後；廠商：Claude、Gemini、Grok、Codex、DeepSeek、其他字母、「其他」最後；狀態：固定四個。
-export function pageTabs(friends, dim, { selfNode, selfName = '', nodeOrder = [], max = DEVICE_TAB_MAX } = {}) {
-  let all
+export function pageTabs(friends, dim, { selfNode, selfName = '', nodeOrder = [], deviceOrder = [], shown = [], max = DEVICE_TAB_MAX } = {}) {
+  let all, hidden = []
   const seen = friends   // 設備頁籤要看全部（ASN 視窗讓設備存在，但 deviceTabs 不計它）
   if (dim !== 'device') friends = withoutAsn(friends)
   if (dim === 'status') {
@@ -44,11 +44,13 @@ export function pageTabs(friends, dim, { selfNode, selfName = '', nodeOrder = []
     all = [...by.keys()].sort((a, b) => engineRank(a) - engineRank(b) || a.localeCompare(b))
       .map(k => sumTab({ key: k, label: engineLabel(k), short: '', vendorKey: k, dot: '', unread: 0, online: 0, total: 0 }, by.get(k)))
   } else {
-    all = deviceTabs(seen, { selfNode, selfName, nodeOrder, max }).all.map(t => ({ ...t, dot: '' }))
+    const dt = deviceTabs(seen, { selfNode, selfName, nodeOrder, deviceOrder, shown, max })
+    all = dt.all.map(t => ({ ...t, dot: '' }))
+    hidden = dt.hidden
   }
   all = all.map(t => ({ ...t, empty: t.total === 0 && !(dim === 'device' && t.key === selfNode) }))
-  if (all.length <= max) return { all, visible: all, more: [] }
-  return { all, visible: all.slice(0, max - 1), more: all.slice(max - 1) }
+  if (all.length <= max) return { all, visible: all, more: [], hidden }
+  return { all, visible: all.slice(0, max - 1), more: all.slice(max - 1), hidden }
 }
 
 // 某頁籤裡的好友：線上／忙碌在前、離線在後（同級照名字）；match 為搜尋

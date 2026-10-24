@@ -50,6 +50,7 @@ import { startCallPoll } from './lib/call-poll.mjs'
 import { isCallActive } from './lib/call-session.mjs'
 import { accountLine, codexLine, createAccountsUi } from './lib/claude-accounts.mjs'
 import { buildDeviceTree } from './lib/device-tree.mjs'
+import { deviceFieldsFromSaved, deviceFieldsToSave, moveDevice, reorderDevice, showDevice } from './lib/device-order.mjs'
 import { dialogTitle as deviceAcctTitle, dialogView as deviceAcctViewOf, CONFIRM_NOTE as DEVICE_CONFIRM_NOTE, CLOSE_NOTE as DEVICE_CLOSE_NOTE } from './lib/device-acct-dialog.mjs'
 import { applyRename } from './lib/rename.mjs'
 import { createUsageUi } from './lib/usage.mjs'
@@ -110,6 +111,8 @@ if (info.error) {
 }
 const meStore = store('me')
 const savedMe = (await meStore.load()) ?? {}
+// 設備頁籤的手動順序與手動顯示的隱藏設備（asn-me.json 的 deviceOrder／deviceShown；舊存檔沒有＝維持自動規則）。目前只存本機，手機各自存自己的
+const devPrefs = reactive(deviceFieldsFromSaved(savedMe))
 // 暱稱＝視窗名＝對外名字；以 Rust 端現用名為準，不再從存檔讀
 const me = reactive({ psm: '', status: 'online', ...savedMe.me, nick: info.window_name })
 const notifyPrefs = ref(notifyFromSaved(savedMe))   // 通知四開關（舊存檔的 sound 在這裡轉過來）
@@ -344,7 +347,7 @@ const dlgModels = computed(() => (partnerDlg.node && partnerDlg.node !== info.no
 const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '', display: 'foreground' })
 const partnerShowDisplay = computed(() => partnerDlg.node === info.node && showDisplayModeChoice(partnerDlg.profile))
 const launchCtx = computed(() => ({ selfNode: info.node, partnerModels: partnerModels.value, remoteLaunchers: remoteLaunchers.value }))
-const launchDeviceRowsList = computed(() => launchDeviceRows(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value }))
+const launchDeviceRowsList = computed(() => launchDeviceRows(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder }))
 function launchDisableReasonFor(nodeKey) { return launchDisableReason(nodeKey, launchCtx.value) }
 // 本機的候選由 Rust 端合併（白名單＋開著的 Claude 視窗＋信任過的資料夾＋最近用過，去重、略過不存在的、最多 15 筆）
 const localCwdList = ref([])
@@ -802,8 +805,8 @@ await listen('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoo
 window.addEventListener('focus', () => core.refreshRosterSoon())   // 回到前景立刻更新名單
 await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 
-watch([me, showNowPlaying, notifyPrefs, frame, closeTo, autoAddClaude, autoCheck, dims, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes, () => ui.tabs, () => ui.active, () => ui.panel, () => sess.wins, () => sess.panelWins, () => sess.ready], () => { sync(); saveMe() }, { deep: true })
-const saveMe = trailingThrottle(() => { const { nick, ...rest } = me; void meStore.save({ me: rest, showNowPlaying: showNowPlaying.value, notify: notifyPrefs.value, frame: frame.value, closeTo: closeTo.value, autoAddClaude: autoAddClaude.value, autoUpdate: autoCheck.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting, session: sess.ready ? currentSession() : sess.saved }) }, 600)
+watch([me, showNowPlaying, notifyPrefs, frame, closeTo, autoAddClaude, autoCheck, dims, devPrefs, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes, () => ui.tabs, () => ui.active, () => ui.panel, () => sess.wins, () => sess.panelWins, () => sess.ready], () => { sync(); saveMe() }, { deep: true })
+const saveMe = trailingThrottle(() => { const { nick, ...rest } = me; void meStore.save({ ...deviceFieldsToSave(devPrefs), me: rest, showNowPlaying: showNowPlaying.value, notify: notifyPrefs.value, frame: frame.value, closeTo: closeTo.value, autoAddClaude: autoAddClaude.value, autoUpdate: autoCheck.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting, session: sess.ready ? currentSession() : sess.saved }) }, 600)
 addEventListener('pagehide', () => saveMe.flush())
 // 系統匣圖示的提示文字帶未讀總數
 watch(() => totalUnread(friends.value), n => { void invoke('set_tray_unread', { n }).catch(() => {}) }, { immediate: true })
@@ -817,7 +820,7 @@ watch(showNowPlaying, on => {
 }, { immediate: true })
 // 設定頁改「分頁依」：分組若撞到自動換成剩下兩個裡的第一個
 const setTabDim = v => Object.assign(dims, withTabDim(dims, v))
-const pages = computed(() => pageTabs(friends.value, dims.tabDim, { selfNode: info.node, selfName: info.window_name, nodeOrder: nodeOrder.value }))
+const pages = computed(() => pageTabs(friends.value, dims.tabDim, { selfNode: info.node, selfName: info.window_name, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown }))
 
 // 起始頁籤：平常是設備維度的本機；--shot 可用設定檔的 shotTab 指定固定頁籤（已拿掉的「通知」或任何不認得的值都忽略）
 const startTab = info.shot ? normalizeTab(savedMe.shotTab) : ''
@@ -974,6 +977,32 @@ const app = createApp({
     const menuTogglePin = () => runTabMenu(id => { const r = toggleChatPin(ui, id, ui.pinnedChat); ui.pinnedChat = r.pinned; ui.tabs = r.tabs })
     const chatTabMenuPanel = computed(() => isPanelTab(chatTabMenu.value))   // 指引、設定的分頁不能固定，選單不給「固定分頁」
     const isChatTabPinned = id => isPinned(id, ui.pinnedChat)
+    // 左邊設備頁籤的手動排序：滑鼠拖放，或聚焦頁籤後按 Alt+上／下（設定的「設備與帳號」也有上移／下移鈕）。本機固定第一、不能拖
+    const deviceDrag = ref('')
+    const deviceDrop = reactive({ over: '', after: false })
+    const clearDeviceDrag = () => { deviceDrag.value = ''; deviceDrop.over = ''; deviceDrop.after = false }
+    const applyDeviceMove = (key, dir) => { devPrefs.deviceOrder = moveDevice(deviceTree.value.map(d => d.key), key, dir, { selfNode: info.node, visible: dev.value.all.map(d => d.key) }) }
+    const onDeviceDragStart = (key, e) => { if (key === info.node) { e.preventDefault(); return } deviceDrag.value = key; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', key) }
+    const onDeviceDragOver = (key, e) => {
+      if (!deviceDrag.value || deviceDrag.value === key) return
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'move'
+      const r = e.currentTarget.getBoundingClientRect()
+      deviceDrop.over = key
+      deviceDrop.after = e.clientY > r.top + r.height / 2
+    }
+    const onDeviceDrop = (key, e) => {
+      e.preventDefault()
+      const drag = deviceDrag.value
+      if (drag) devPrefs.deviceOrder = reorderDevice(deviceTree.value.map(d => d.key), drag, key, deviceDrop.over === key && deviceDrop.after, { selfNode: info.node })
+      clearDeviceDrag()
+    }
+    const onDeviceTabKey = (key, e) => {
+      if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || key === info.node || dims.tabDim !== 'device') return
+      e.preventDefault()
+      applyDeviceMove(key, e.key === 'ArrowUp' ? -1 : 1)
+      setTimeout(() => document.querySelector(`[data-dev="${CSS.escape(key)}"]`)?.focus(), 0)
+    }
     const tabDragId = ref('')
     const tabDrop = reactive({ over: '', after: false })   // 拖到哪個分頁上、左半還是右半（右半＝插在它後面，才放得到最後一個）
     const clearTabDrag = () => { tabDragId.value = ''; tabDrop.over = ''; tabDrop.after = false }
@@ -1073,7 +1102,7 @@ const app = createApp({
     }
     // 設定「設備」分類：設備 → 廠商 → 帳號。其他設備的帳號回報在有新設備出現時讀一次，也可按「重新整理」
     const deviceTree = computed(() => buildDeviceTree({
-      friends: friends.value, nodeOrder: nodeOrder.value, selfNode: info.node, asn: asnMap.value, launchers: {
+      friends: friends.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, selfNode: info.node, asn: asnMap.value, launchers: {
         ...remoteLaunchers.value,
         [info.node]: { profiles: partnerModels.value.filter(m => m.installed).map(m => ({ id: m.profileId ?? m.id })) },
       },
@@ -1136,6 +1165,8 @@ const app = createApp({
         case 'acct-switch': await accounts.switchTo(value); break
         case 'acct-remove': await accounts.remove(value); break
         case 'acct-trust': await accounts.setTrust(value === true); break
+        case 'device-move': devPrefs.deviceOrder = moveDevice(deviceTree.value.map(d => d.key), String(value?.node ?? ''), value?.dir === -1 ? -1 : 1, { selfNode: info.node }); break
+        case 'device-show': devPrefs.deviceShown = showDevice(devPrefs.deviceShown, String(value ?? '')); break
         case 'devices-refresh': await refreshDeviceReports(); break
         case 'device-switch': await (typeof value === 'object' && value ? openDeviceAcct(String(value.node ?? ''), String(value.email ?? '')) : openDeviceAcct(String(value ?? ''))); break
         case 'closeTo': await setCloseTo(value); break
@@ -1181,6 +1212,7 @@ const app = createApp({
       chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuCloseIdle, hasIdleTabs, setPaneCall, menuTogglePin, isChatTabPinned,
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
       STATUS, CONN_LABEL, FIXED_TABS, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr, commitNick,
+      deviceDrag, deviceDrop, onDeviceDragStart, onDeviceDragOver, onDeviceDrop, onDeviceTabKey, clearDeviceDrag,
       tab, adI, hub, roomRows, roomHue, roomInitial, groupFlow, openGroupMenu, decideCard, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,
       GUIDES, view, SETTING_CATS, catSub, PANEL_KINDS, panelTabId, panelGuide, panelTitle, openPanel, closePanel, settingsState, applySetting, pickAvatarFile,
       selfNode: info.node, transport, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg,

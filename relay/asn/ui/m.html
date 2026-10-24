@@ -204,6 +204,13 @@
                 <button type="button" class="m-dv-refresh" @click="refreshAcct">重新整理</button>
               </div>
               <p class="m-note" v-if="!acctDevs.length">還沒有設備。</p>
+              <details class="m-dv-hidden" v-if="acctHidden.length">
+                <summary>已隱藏的設備（{{ acctHidden.length }}）</summary>
+                <small class="m-fine">這些設備整台離線、底下的對話都已封存，也沒有未讀，所以不列頁籤。</small>
+                <ul>
+                  <li v-for="d in acctHidden" :key="d.key"><span>{{ d.label }}</span><button type="button" class="m-dv-refresh" @click="showHiddenDevice(d.key)">顯示</button></li>
+                </ul>
+              </details>
               <div class="m-dv-tabs" role="tablist" aria-label="設備" v-if="acctDevs.length">
                 <button v-for="d in acctDevs" :key="d.key" type="button" role="tab" class="m-dv-tab" :class="{ sel: acctCur && d.key === acctCur.key, off: !d.online }" :aria-selected="acctCur && d.key === acctCur.key ? 'true' : 'false'" @click="pickAcctDevice(d.key)">{{ d.label }}<span class="m-dv-dot" :class="d.online ? 'on' : 'off'" :title="d.onlineText"></span></button>
               </div>
