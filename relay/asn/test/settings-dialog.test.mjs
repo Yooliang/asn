@@ -11,9 +11,9 @@ import { closesDialog } from '../ui/lib/dialog.mjs'
 
 const read = f => fs.readFileSync(new URL(`../ui/${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
-test('分類：十二類、順序與鍵固定、標題與圖示都有、鍵不重複', () => {
-  assert.deepEqual(SETTING_KEYS, ['me', 'accounts', 'devices', 'look', 'tabs', 'notify', 'voice', 'window', 'launch', 'usage', 'update', 'about'])
-  assert.deepEqual(SETTING_CATS.map(c => c.title), ['個人', '帳號', '設備', '外觀', '分頁與分組', '通知', '語音', '視窗與系統匣', '啟動設定', '用量', '更新', '關於'])
+test('分類：十一類（帳號併進設備與帳號）、順序與鍵固定、標題與圖示都有、鍵不重複', () => {
+  assert.deepEqual(SETTING_KEYS, ['me', 'devices', 'look', 'tabs', 'notify', 'voice', 'window', 'launch', 'usage', 'update', 'about'])
+  assert.deepEqual(SETTING_CATS.map(c => c.title), ['個人', '設備與帳號', '外觀', '分頁與分組', '通知', '語音', '視窗與系統匣', '啟動設定', '用量', '更新', '關於'])
   assert.equal(new Set(SETTING_KEYS).size, SETTING_CATS.length)
   for (const c of SETTING_CATS) assert.ok(/^M[0-9A-Za-z .,-]+$/.test(c.icon), `${c.key} 圖示`)
   assert.equal(catByKey('voice').title, '語音')
@@ -33,10 +33,8 @@ test('摘要：每一類都有一行文字，缺欄位不丟錯', () => {
 test('摘要：照目前的值顯示', () => {
   assert.equal(catSummary('me', { hasUpload: true }), '已上傳大頭貼')
   assert.equal(catSummary('me', { hasUpload: false }), '自動產生的大頭貼')
-  assert.equal(catSummary('accounts', { accountCount: 0 }), '還沒有加入過帳號')
-  assert.equal(catSummary('accounts', { accountCount: 0, accountCurrent: 'a@x.test' }), '使用中：a@x.test（還沒加入帳號庫）')
-  assert.equal(catSummary('accounts', { accountCount: 2, accountCurrent: 'a@x.test' }), '2 個 Claude 帳號，使用中：a@x.test')
-  assert.equal(catSummary('accounts', { accountCount: 2 }), '2 個 Claude 帳號')
+  assert.equal(catSummary('devices', { accountCount: 0 }), '還沒有設備；還沒有加入過帳號')
+  assert.equal(catSummary('devices', { devices: [{ online: true }], accountCount: 2, accountCurrent: 'a@x.test' }), '1 台設備，1 台在線；2 個 Claude 帳號，使用中：a@x.test')
   const look = catSummary('look', { frame: 'native', mode: 'merged', dpMode: 'side', toolbar: 'top', bubble: 'bubble' })
   assert.ok(look.includes('Windows 原生'), look)
   assert.equal(catSummary('tabs', { tabDim: 'device', groupDim: 'status' }), '分頁依設備、分組依狀態')
@@ -76,9 +74,12 @@ const fullState = () => ({
   version: '9.9.9',
   askpass: { path: 'C:/x/asn-askpass.exe', example: 'setx SSH_ASKPASS "C:/x/asn-askpass.exe"', copied: false },
   devices: [
+    { key: 'H', label: '家用機', self: true, kind: '電腦', online: true, onlineText: '在線', reportedText: '', empty: '', vendors: [
+      { key: 'claude', label: 'Claude', account: 'a@b.c · Max', reported: true, extra: '', accounts: [{ email: 'a@b.c', plan: 'Max', current: true }], switchable: false, switchHint: '' },
+      { key: 'codex', label: 'OpenAI（Codex）', account: 'x@openai.test · plus', reported: true, extra: '', accounts: [{ email: 'x@openai.test · plus', plan: '', current: true }], switchable: false, switchHint: '' }] },
     { key: 'W', label: '工作機', self: false, kind: '電腦', online: true, onlineText: '在線', reportedText: '帳號最後回報：3 分鐘前', empty: '', vendors: [
-      { key: 'claude', label: 'Claude', account: 'w@b.c · pro', reported: true, extra: '另有 1 個帳號：z@b.c', switchable: true, switchHint: '' },
-      { key: 'codex', label: 'OpenAI（Codex）', account: '未回報', reported: false, extra: '', switchable: false, switchHint: '' }] },
+      { key: 'claude', label: 'Claude', account: 'w@b.c · pro', reported: true, extra: '另有 1 個帳號：z@b.c', accounts: [{ email: 'w@b.c', plan: 'pro', current: true }, { email: 'z@b.c', plan: '', current: false }], switchable: true, switchHint: '' },
+      { key: 'codex', label: 'OpenAI（Codex）', account: '未回報', reported: false, extra: '', accounts: [], switchable: false, switchHint: '' }] },
     { key: 'P', label: '手機一號', self: false, kind: '手機', online: false, onlineText: '離線', reportedText: '', empty: '這台設備還沒有回報任何廠商', vendors: [] },
   ],
 })
@@ -91,8 +92,8 @@ const render = async (catKey, st = fullState()) => {
 test('設定表單：每一類都轉得出來，各類原本的項目都在', async () => {
   const want = {
     me: ['登入狀態', '尚未登入', '用 Google 登入', '用 GitHub 登入', '大頭貼', '選擇圖片', '移除，改回自動產生', '目前用的是自動產生的大頭貼。'],
-    accounts: ['Claude 帳號', '使用中', '加入目前登入的帳號', '自動加入', '切換', '刪除', 'a@b.c', 'OpenAI（Codex）帳號', 'x@openai.test · plus', 'Gemini', '尚未支援', '遠端設備', 'w@b.c', '信任我自己的設備'],
-    devices: ['重新整理', '工作機', '手機一號', 'Claude：w@b.c · pro', 'OpenAI（Codex）：未回報', '只有 Claude 帳號能從這裡切換'],
+    // 帳號與設備併成一頁：預設顯示「這台」的頁籤（帳號管理＋本機 Codex），其他設備的頁籤在 device-accounts-page.test.mjs
+    devices: ['設備與帳號', '重新整理', '家用機', '工作機', '手機一號', 'Claude', '使用中', '加入目前登入的帳號', '自動加入', '切換', '刪除', 'a@b.c', 'OpenAI（Codex）', 'x@openai.test · plus', '信任我自己的設備', '只有 Claude 帳號能從這裡切換'],
     look: ['視窗外框', '視窗模式', '頭像模式', '工具列位置', '文字底色'],
     tabs: ['分頁依', '分組依'],
     notify: ['右下角通知', '通知聲音', '震動聲音', '收到檔案聲音'],
@@ -198,14 +199,14 @@ test('開網址不用 explorer.exe（長網址會被當成路徑開成檔案總�
   assert.ok(lib.includes('ShellExecuteW('))
 })
 
-test('守門：電腦設定第一頁——登入帳號資訊與我的名字同處、登出鈕獨立在最下面；帳號分類不再放登入狀態', () => {
+test('守門：電腦設定第一頁——登入帳號資訊與我的名字同處、登出鈕獨立在最下面；設備與帳號分類不再放登入狀態', () => {
   const src = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
   const me = src.slice(src.indexOf("catKey === 'me'"), src.indexOf("catKey === 'notify'"))
-  const accts = src.slice(src.indexOf("catKey === 'accounts'"), src.indexOf("catKey === 'look'"))
+  const accts = src.slice(src.indexOf("cat === 'devices'"), src.indexOf("catKey === 'look'"))
   assert.ok(me.indexOf('<login-panel>') >= 0 && me.indexOf('<login-panel>') < me.indexOf('class="av-set"'), '登入狀態（含我的名字）在第一頁最前面')
   assert.ok(me.indexOf('<logout-panel>') > me.indexOf('class="np-set"'), '登出鈕在第一頁所有項目之後')
-  assert.ok(!accts.includes('<login-panel>') && !accts.includes('<logout-panel>'), '帳號分類不再放登入狀態與登出')
-  assert.ok(accts.includes('<cloud-invite-panel>') && accts.includes('Claude 帳號'), '帳號分類其他項目留在原位')
+  assert.ok(!accts.includes('<login-panel>') && !accts.includes('<logout-panel>'), '設備與帳號分類不再放登入狀態與登出')
+  assert.ok(accts.includes('<cloud-invite-panel>') && accts.includes('加入目前登入的帳號'), '帳號管理留在原位（現在在這台的頁籤裡）')
   const lp = fs.readFileSync(new URL('../ui/lib/login-panel.mjs', import.meta.url), 'utf8')
   assert.ok(lp.includes('LogoutPanel') && /logout-btn/.test(lp))
   assert.match(fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8'), /\.logout-set\{margin-top:3\d+px/)

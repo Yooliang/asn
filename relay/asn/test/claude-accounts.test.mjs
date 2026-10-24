@@ -127,7 +127,7 @@ test('收到別台的切換要求：預設跳確認（按同意才切、拒絕�
 
 test('接線守門：設定頁有這一塊、Rust 指令有註冊、前端不碰權杖', () => {
   const panel = read('ui/lib/settings-panel.mjs'), js = read('ui/list.js'), lib = read('ui/lib/claude-accounts.mjs'), rs = read('src-tauri/src/lib.rs')
-  assert.match(panel, /acct-set/)
+  assert.match(panel, /dv-set/)   // 帳號管理併進「設備與帳號」頁（這台的頁籤）
   assert.match(js, /createAccountsUi/)
   for (const c of ['claude_accounts_list', 'claude_account_current', 'claude_account_save', 'claude_account_switch', 'claude_account_delete']) {
     assert.ok(rs.includes(`claude_accounts::${c}`), c)
@@ -139,7 +139,7 @@ test('接線守門：設定頁有這一塊、Rust 指令有註冊、前端不碰
     assert.ok(lib.includes(c), `前端沒用到 ${c}`)
   }
   assert.doesNotMatch(lib, /accessToken|refreshToken|credentials|\bfetch\(|localStorage/)
-  const acctPart = panel.slice(panel.indexOf('acct-set'), panel.indexOf("catKey === 'look'"))
+  const acctPart = panel.slice(panel.indexOf('dv-set'), panel.indexOf("catKey === 'look'"))
   assert.doesNotMatch(acctPart, /token|credential/i)
   assert.ok(!/acct-save|acctName|存成帳號|取個名字/.test(panel + js + lib), '不再有取名字的流程')
 })

@@ -69,7 +69,7 @@ test('設定「帳號」分類裡有雲端代理區塊；別的分類沒有', as
   globalThis.Vue = Vue
   const st = { accounts: { list: [], current: null, codexLine: '', busy: false, confirmDel: '', msg: '', trustOwn: false, autoAdd: false, autoNote: '', mod: '', remote: { node: '', devices: [], list: [], loading: false, busy: false, msg: '' } }, notify: {}, upd: { status: { tone: 'ok', head: '', lines: [] } } }
   const render = key => renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st, catKey: key, meAv: '' }) }))
-  assert.ok((await render('accounts')).includes('邀請雲端代理'))
+  assert.ok((await render('devices')).includes('邀請雲端代理'))
   assert.ok(!(await render('look')).includes('邀請雲端代理'))
 })
 
