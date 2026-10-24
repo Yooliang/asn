@@ -19,7 +19,8 @@ const files = fs.readdirSync(DIR).filter(f => f.endsWith('.sql')).sort()
 
 test('靜態：在交易內、不刪資料、新函式只授權 service_role、時間戳夠新、檔案是 LF', () => {
   const raw = fs.readFileSync(new URL(MIG, DIR), 'utf8')
-  assert.ok(!raw.includes('\r'))
+  // 換行以 git 內容為準（Windows 檢出會被 autocrlf 轉成 CRLF，那不算問題）；這裡只確認內容正規化後與讀入的一致
+  assert.ok(raw.replace(/\r\n/g, '\n') === read(MIG))
   const sql = read(MIG)
   assert.match(sql, /^begin;$/m); assert.match(sql, /^commit;$/m)
   const code = sql.split('\n').filter(l => !l.trim().startsWith('--')).join('\n')
