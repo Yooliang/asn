@@ -361,8 +361,8 @@ export const ChatPane = {
               <button v-if="msgQuote(m)" class="quote" type="button" @click="jumpTo(m, i)" :title="'跳到原訊息：' + plain(msgQuote(m).excerpt)"><b>{{ plain(msgQuote(m).author) }}</b><span>{{ plain(msgQuote(m).excerpt) }}</span></button>
               <div class="m-body" :class="['tone-' + lay(m.k).tone, 'md-on']" v-if="shownBody(m).text" v-html="bodyHtml(shownBody(m).text)" @click="onBodyClick"></div>
               <div class="m-act" v-if="canReply(m) || (m.wake && m.wake.length)">
-                <div class="wake-tags" v-if="m.wake && m.wake.length" aria-label="叫醒順序"><template v-for="(w, wi) in m.wake" :key="wi"><span v-if="wi > 0 && !w.off && !m.wake[wi - 1].off" class="wake-arrow" aria-hidden="true">→</span><span class="wake-tag" :class="{ off: w.off }" :title="w.off ? '不通知' : ''">{{ w.label }}</span></template></div>
                 <button v-if="canReply(m)" class="reply-btn" type="button" @click="startReply(m, i)" aria-label="回覆這則訊息" title="回覆這則訊息">回覆</button>
+                <div class="wake-tags" v-if="m.wake && m.wake.length" aria-label="叫醒順序"><template v-for="(w, wi) in m.wake" :key="wi"><span v-if="wi > 0 && !w.off && !m.wake[wi - 1].off" class="wake-arrow" aria-hidden="true">→</span><span class="wake-tag" :class="{ off: w.off }" :title="w.off ? '不通知' : ''">{{ w.label }}</span></template></div>
               </div>
               <div class="call-end-note" v-if="shownBody(m).ends">{{ CALL_END_NOTE }}</div>
               <div class="unanswered" v-if="m.k === 'me' && m.unanswered != null && !isAsn">{{ m.unanswered > 0 ? '超過 ' + m.unanswered + ' 分鐘未回' : '對方視窗已關閉，未回' }}</div>

@@ -44,7 +44,7 @@ test('回覆鈕與叫醒順序同一列，在內文下方；名字那行不再�
   const i = tpl.indexOf('class="m-act"')
   assert.ok(i > tpl.indexOf('class="m-body"'), '操作列在內文下方')
   const row = tpl.slice(i, tpl.indexOf('class="call-end-note"'))
-  assert.ok(row.indexOf('class="wake-tags"') > 0 && row.indexOf('class="reply-btn"') > row.indexOf('class="wake-tags"'), '順序標籤與回覆鈕都在這一列')
+  assert.ok(row.indexOf('class="wake-tags"') > 0 && row.indexOf('class="reply-btn"') >= 0 && row.indexOf('class="reply-btn"') < row.indexOf('class="wake-tags"'), '回覆鈕在最前面，順序標籤接在後面，同一列')
   assert.match(tpl, /class="m-act" v-if="canReply\(m\) \|\| \(m\.wake && m\.wake\.length\)"/)
 })
 
