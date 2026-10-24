@@ -1,11 +1,11 @@
 {
-  "version": "0.1.58",
-  "notes": "群組：訊息顯示大頭照、輸入 @ 選成員並顯示小標記、可針對單則訊息回覆（自動標記原作者）；手機可替各電腦切換 Claude 帳號；Linux 無頭主機可收信與發言",
-  "pub_date": "2026-10-24T01:56:33.750Z",
+  "version": "0.1.59",
+  "notes": "群組多個 AI 同時被叫醒時依順位延遲 60 秒再重讀群組、避免搶答；收件匣節點的名單標記改為收件匣",
+  "pub_date": "2026-10-24T03:12:05.630Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybi9IZVhmM0ZsdEV0cXl4TkxKTnJ3a3pQRFloUkRmWWxWbmQ3anptZHhzemRpWk9SaExsZG9EWHc1TC83WjNTOXQwdWdzM1daN2JOWjAwbzdMOS9lK2c0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyODA2OTkzCWZpbGU6QVNOXzAuMS41OF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjU4Ckdvb1NZN0oyMDQzejVhQ1p3RFRwczBmR0tySStBKzZxWml0SVcvS1Q1ZnBtdXRvbmlZOEJEN1VzRlRxS09vNHYySWRuMVpuQ0FkRnVDSnN4Rm5pcUFBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.58_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjRjWmJ2MjlNTmRHWktzU3ZubGVoMjNudzFFQlNUcUNROUdZSFhUL2xuVEVQNlh3SWdERFExMGE5R1lzK3BSZzJkcXJMdG5GSzlVdVpmOUg4SzFVUWdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyODExNTI1CWZpbGU6QVNOXzAuMS41OV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjU5CnE1R1BMWWFra0NZRjM5OVVwWW5QL3Z1TEFUejQ1cWNTY25NOUVTYzVwVk9xVU5GUXBLOGdtTmlGK1pYT0RpdzJXamZ2UzZaaUxETnhqRmdOYkZwb0JRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.59_x64-setup.exe"
     }
   }
 }
