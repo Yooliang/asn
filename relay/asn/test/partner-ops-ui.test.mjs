@@ -98,8 +98,9 @@ test('喚醒按鈕：只有離線的 AI 夥伴才顯示；條件與右鍵選單�
 
 test('接線：名單右鍵用 menuItems（不另寫判斷、不重複切換模型）；喚醒按鈕與圖示；接班舊介面已清掉', () => {
   const js = read('ui/list.js'), html = read('ui/list.html'), bar = read('ui/lib/actionbar.mjs')
-  assert.match(js, /manageItems\(buddyMenuFriend\.value, \{ \.\.\.opsCtx, friends: friends\.value, asn: asnMap\.value \}\)\.filter\(i => i\.key !== 'model'\)/)
-  assert.match(html, /v-for="it in buddyOpItems"[^>]*>[\s\S]*?:disabled="!it\.ok" :title="it\.reason" @click="openPartnerOp\(it\)"/)
+  assert.match(js, /manageItems\(buddyMenuFriend\.value, \{ \.\.\.opsCtx, friends: friends\.value, asn: asnMap\.value \}\)\)/)
+  assert.doesNotMatch(js, /buddyOpItems = computed\([^\n]*\.filter\(/, '項目固定，不再過濾掉任何一項（切換模型換成子選單但位置不變）')
+  assert.match(html, /v-for="it in buddyOpItems"[^>]*>[\s\S]*?:aria-disabled="it\.ok \? 'false' : 'true'"[\s\S]*?:title="it\.reason" @click="openPartnerOp\(it\)"/)
   assert.match(html, /<partner-op-dialog v-if="opDlg\.open"/)
   assert.match(js, /app\.component\('partner-op-dialog', PartnerOpDialog\)/)
   assert.match(bar, /aria-label="喚醒"/); assert.match(bar, /v-if="wake\.show" class="abtn" type="button" :disabled="!wake\.ok" :title="wake\.ok \? '[^']*' : wake\.reason"/, '不能用就反灰、原因寫在提示')
@@ -129,7 +130,7 @@ test('還沒查到登入狀態：喚醒顯示查詢中，不是要先登入', ()
   assert.equal(v.show, true); assert.equal(v.ok, false)
   assert.equal(v.reason, REASON.checking)
   assert.notEqual(v.reason, REASON.needLogin)
-  assert.deepEqual(menuItems(F('H', '小文'), initialOpsCtx()).map(i => i.reason), Array(5).fill(REASON.checking))
+  assert.deepEqual(menuItems(F('H', '小文'), initialOpsCtx()).slice(0, 5).map(i => i.reason), Array(5).fill(REASON.checking))
 })
 
 test('登入狀態查詢失敗：顯示真正原因，不當成沒登入；查到真的沒登入才說要先登入', async () => {

@@ -224,11 +224,13 @@
   <!-- 右鍵選單與它的二級選單都放在最外層（position:fixed）：不會被 .tabbar 或任何 overflow 容器裁掉；位置由 lib/menu-place.mjs 算（右側不夠往左彈、下方不夠往上對齊） -->
   <ul class="av-menu buddy-menu" v-if="buddyMenu" ref="buddyMenuEl" :style="{ left: buddyMenuPos.x + 'px', top: buddyMenuPos.y + 'px' }" role="menu" @click.stop>
     <li><button type="button" role="menuitem" @click="buddyMenuOpenChat">開啟對話</button></li>
-    <li><button type="button" role="menuitem" :disabled="buddyConsoleItemView.disabled" :title="buddyConsoleItemView.tip" @click="toggleBuddyConsole">{{ buddyConsoleItemView.label }}</button></li>
-    <li v-for="it in buddyOpItems" :key="it.key"><button type="button" role="menuitem" :disabled="!it.ok" :title="it.reason" @click="openPartnerOp(it)">{{ it.label }}{{ ['resume', 'close', 'archive', 'unarchive'].includes(it.key) ? '' : '…' }}</button></li>
-    <li v-if="buddyModel.show" class="model-sub">
-      <button type="button" role="menuitem" ref="buddyModelBtn" aria-haspopup="true" :aria-expanded="buddyModel.open" :disabled="buddyModel.state === 'none' || buddyModel.state === 'checking'" :title="buddyModel.state === 'none' ? buddyModel.reason : ''" @mouseenter="subEvent('hover')" @mouseleave="subEvent('leave', 180)" @click="subEvent('click')" @keydown.right.prevent="subEvent('right')" @keydown.left.prevent="subEvent('leave')">{{ buddyModelLabel }}</button>
-    </li>
+    <li><button type="button" role="menuitem" :class="{ off: buddyConsoleItemView.disabled }" :aria-disabled="buddyConsoleItemView.disabled ? 'true' : 'false'" aria-describedby="buddy-why-console" :title="buddyConsoleItemView.tip" @click="toggleBuddyConsole"><span class="mi-t">{{ buddyConsoleItemView.label }}</span><small class="menu-why" id="buddy-why-console" v-if="buddyConsoleItemView.disabled">{{ buddyConsoleItemView.tip }}</small></button></li>
+    <template v-for="it in buddyOpItems" :key="it.key">
+      <li v-if="it.key === 'model'" class="model-sub">
+        <button type="button" role="menuitem" ref="buddyModelBtn" aria-haspopup="true" :aria-expanded="buddyModel.open" :class="{ off: !buddySubEnabled }" :aria-disabled="buddySubEnabled ? 'false' : 'true'" aria-describedby="buddy-why-model" :title="buddyModelWhy" @mouseenter="subEvent('hover')" @mouseleave="subEvent('leave', 180)" @click="subEvent('click')" @keydown.right.prevent="subEvent('right')" @keydown.left.prevent="subEvent('leave')"><span class="mi-t">{{ buddyModelLabel }}</span><small class="menu-why" id="buddy-why-model" v-if="!buddySubEnabled">{{ buddyModelWhy }}</small></button>
+      </li>
+      <li v-else><button type="button" role="menuitem" :class="{ off: !it.ok }" :aria-disabled="it.ok ? 'false' : 'true'" :aria-describedby="it.ok ? null : 'buddy-why-' + it.key" :title="it.reason" @click="openPartnerOp(it)"><span class="mi-t">{{ it.label }}{{ ['resume', 'close', 'archive', 'unarchive'].includes(it.key) ? '' : '…' }}</span><small class="menu-why" :id="'buddy-why-' + it.key" v-if="!it.ok">{{ it.reason }}</small></button></li>
+    </template>
   </ul>
   <ul class="av-menu buddy-menu buddy-subpop" v-if="buddyMenu && buddyModel.open && buddyModel.items.length" ref="buddySubEl" :style="{ left: buddySubPos.x + 'px', top: buddySubPos.y + 'px', visibility: buddySubPos.ready ? 'visible' : 'hidden' }" role="menu" @click.stop @mouseenter="subEvent('hover')" @mouseleave="subEvent('leave', 180)">
     <li class="menu-note">目前：{{ buddyModel.current }}</li>

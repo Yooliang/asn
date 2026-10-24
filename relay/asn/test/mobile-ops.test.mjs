@@ -20,11 +20,11 @@ test('對話分頁：記得最後使用的那一位；從來沒開過、記的�
   assert.equal(normalizeLastChat('H/小文'), 'H/小文')
 })
 
-test('「⋯」選單：項目與可按條件完全來自 partner-ops.menuItems（在線五項、離線只有喚醒、其他不顯示）', () => {
+test('「⋯」選單：項目與可按條件完全來自 partner-ops.menuItems（項目固定，可用的在線五項、離線只有喚醒）', () => {
   const machines = { H: { node: 'H', online: true, launcher: { profiles: [{ id: 'claude' }] } }, C: { node: 'C', online: true, launcher: null } }
   const ctx = { machines, loaded: true, signedIn: true, nonWindowNodes: ['P'] }
-  assert.deepEqual(menuItems(F('H', '小文'), ctx).map(i => i.key), ['info', 'rename', 'model', 'close', 'handover'])
-  assert.deepEqual(menuItems(F('H', '小離', { status: 'offline' }), ctx).map(i => i.key), ['resume'])
+  assert.deepEqual(menuItems(F('H', '小文'), ctx).filter(i => i.ok).map(i => i.key), ['info', 'rename', 'model', 'close', 'handover'])
+  assert.deepEqual(menuItems(F('H', '小離', { status: 'offline' }), ctx).filter(i => i.ok).map(i => i.key), ['resume'])
   assert.deepEqual(menuItems(F('P', '手機'), ctx), [], '手機自己不顯示「⋯」')
   assert.deepEqual(menuItems(F('H', '正見群', { room: true }), ctx), [])
   const closed = menuItems(F('C', '小乙'), ctx)
@@ -84,7 +84,10 @@ test('接線：送出走手機的 Rust 指令、先過 opFormError、輪詢用 r
   const fn = /async function submitOp\(op\) \{([\s\S]*?)\n    \}\n/.exec(js)[1]
   assert.ok(fn.indexOf('opFormError(') >= 0 && fn.indexOf('opFormError(') < fn.indexOf('runPartnerOp('), '先檢查再送出')
   assert.match(fn, /if \(err\)/)
-  assert.match(html, /:disabled="!i\.ok"/, '不能按的項目反灰'); assert.match(html, /\{\{ i\.reason \}\}/, '並顯示中文原因')
+  assert.match(html, /v-for="i in opsRows"[^>]*:aria-disabled="i\.ok \? 'false' : 'true'"[^>]*:aria-describedby="i\.ok \? null : 'ops-why-' \+ i\.key"/, '不能按的項目反灰（aria-disabled）並連到說明')
+  assert.doesNotMatch(html, /v-for="i in opsRows"[^>]*:disabled=/, '不用原生 disabled（讀得到說明、仍可聚焦）')
+  assert.match(html, /<small class="m-opt-why" :id="'ops-why-' \+ i\.key" v-if="!i\.ok">\{\{ i\.reason \}\}<\/small>/, '手機沒有 hover，原因寫在項目下面的小字')
+  assert.match(js, /if \(!item \|\| !item\.ok\) return/, '點反灰的項目不送出任何動作')
   assert.match(html, /v-for="m in opsModels"/); assert.match(html, /\{\{ opsModelNote \}\}/)
   assert.match(html, /v-model="ops\.newName"/); assert.match(html, /v-model="ops\.note"/)
   assert.match(html, /v-if="opsBanner"/, '對話頁頂端顯示進度')

@@ -260,8 +260,9 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-ops-h{margin:0 0 2px;font-size:17px;font-weight:800;color:var(--title-fg);overflow-wrap:anywhere}
 .m-ops-item{display:flex;flex-direction:column;justify-content:center;align-items:flex-start;gap:2px;width:100%;min-height:52px;padding:8px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel-soft);text-align:left;cursor:pointer;font:inherit;color:inherit}
 .m-ops-item:active:not(:disabled){background:#e6f1fc}
-.m-ops-item.off{opacity:.65;background:#f1f3f6}
-.m-ops-item.off .m-opt-why{color:#9a3b14}
+.m-ops-item.off{background:#f1f3f6;cursor:default}
+.m-ops-item.off .m-opt-t{opacity:.6}
+.m-ops-item.off .m-opt-why{color:#9a3b14;white-space:normal}
 .m-ops-cancel{min-height:48px}
 .m-ops-lead{margin:0;font-size:16px;line-height:1.5;overflow-wrap:anywhere}
 .m-ops-input{min-height:48px;width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 12px;background:var(--panel);user-select:text;-webkit-user-select:text;font-size:16px}
