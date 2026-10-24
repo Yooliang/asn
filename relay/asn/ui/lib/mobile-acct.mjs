@@ -31,9 +31,9 @@ export const acctReportOf = r => (r && !r.loading ? { error: r.msg || '', asnOnl
 // 切換流程只認 Claude：把某台的回報濾成 acctSheetView 要的形狀
 export const acctClaudeRemote = r => ({ loading: r?.loading === true, asnOnline: r?.asnOnline === true, reportedAt: r?.reportedAt ?? '', msg: r?.msg ?? '', list: (Array.isArray(r?.list) ? r.list : []).filter(a => a?.vendor === 'claude') })
 
-export function acctDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], selfNode = '', reports = {}, launchers = {}, now = Date.now() } = {}) {
+export function acctDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', reports = {}, launchers = {}, now = Date.now() } = {}) {
   const rep = Object.fromEntries(Object.entries(reports).map(([k, r]) => [k, acctReportOf(r)]).filter(([, r]) => r))
-  return buildDeviceTree({ friends, nodeOrder, deviceOrder, shown, selfNode, launchers, reports: rep, now }).map(d => ({
+  return buildDeviceTree({ friends, nodeOrder, deviceOrder, shown, removed, selfNode, launchers, reports: rep, now }).map(d => ({
     ...d,
     label: d.self && d.label === SELF_LABEL ? PHONE_LABEL : d.label,
     // 手機（本機與別支）只顯示，不提供切換，也不顯示「ASN 沒有在線」的提示

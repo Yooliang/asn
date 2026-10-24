@@ -63,7 +63,7 @@ export function swipeTarget({ index, dx, dt, width, count = TABS.length }) {
 // 底部指示條的位置（以分頁為單位的小數，跟著手指）
 export const indicatorPos = (index, shift, width, count = TABS.length) => Math.max(0, Math.min(count - 1, index - (width > 0 ? shift / width : 0)))
 // 手指按下的地方能不能開始滑：輸入框、下拉選單、可橫向捲動的工具列、放大看照片的畫面都不接手
-export const SWIPE_BLOCK_SELECTOR = 'input, textarea, select, [contenteditable="true"], .toolbar, .photo-viewer, .picker, .m-dv-tabs'
+export const SWIPE_BLOCK_SELECTOR = 'input, textarea, select, [contenteditable="true"], .toolbar, .photo-viewer, .picker, .m-dv-grip'
 
 // ---------- 名單 ----------
 // 單欄名單：所有設備的夥伴放在同一頁，依設備分組（本機那組在最前），有搜尋字就只留符合的。

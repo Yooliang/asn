@@ -21,7 +21,7 @@ import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, rena
 import { OP_LABEL, opFormError, partnerEngine, sharedWhy } from './lib/partner-ops.mjs'
 import { BUDDY_CONSOLE_LABEL } from './lib/partner-launch-ui.mjs'
 import { ACCT_TEXT, ACCT_PAGE_TITLE, acctButtonDevices, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch } from './lib/mobile-acct.mjs'
-import { deviceFieldsFromSaved, deviceFieldsToSave, showDevice } from './lib/device-order.mjs'
+import { deviceFieldsFromSaved, deviceFieldsToSave, dropSlot, moveDevice, moveFlags, pruneRemoved, removeDevice, removedRows, reorderDevice, restoreDevice, showDevice, visibleRows, canRemoveRow, DEVICE_TEXT } from './lib/device-order.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
 import { opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
 import { defaultPartnerName } from './lib/partner.mjs'
@@ -116,7 +116,7 @@ const me = reactive({ psm: '', status: 'online', nick: info.window_name })
 const prefs = reactive({ ...DEFAULT_PREFS })
 const friends = ref([]), conn = ref('connecting'), nodeOrder = ref([])
 // 設備順序與手動顯示的隱藏設備：目前存在這支手機自己的設定（asn-me.json 的 deviceOrder／deviceShown），尚未與電腦版同步
-const devPrefs = reactive({ deviceOrder: [], deviceShown: [] })
+const devPrefs = reactive({ deviceOrder: [], deviceShown: [], deviceRemoved: [] })
 const logs = reactive({})
 const avatars = ref({})
 const query = ref(''), collapsed = reactive({ [ARCHIVE_GROUP_KEY]: true })   // 「已封存」群組預設收合
@@ -428,15 +428,20 @@ const app = createApp({
       void loadLaunchers().then(() => { if (node) pickLaunchDevice(node) })
     }
     // ---------- 設備卡「切換 Claude 帳號」：選帳號 → 確認 → 送出並等對方電腦回報 ----------
-    const acctKeys = computed(() => new Set(acctButtonDevices(groups.value, info.node).map(g => g.key)))
+    const acctKeys = computed(() => new Set(acctButtonDevices(groups.value, info.node).filter(g => !devPrefs.deviceRemoved.includes(g.node)).map(g => g.key)))
     // 整頁＝電腦版「設備與帳號」：資料用電腦版同一份整理函式；別台電腦的帳號逐台向後台讀（只讀選到的那台）
-    const acctSw = reactive({ phase: 'pick', node: '', picked: '', reports: {}, view: null })
-    const acctAllDevs = computed(() => acctDeviceTree({ friends: friends.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, selfNode: info.node, reports: acctSw.reports, launchers: lchData.machines }))
+    const acctSw = reactive({ phase: 'pick', page: 'list', node: '', picked: '', reports: {}, view: null, removedOpen: false })
+    const acctAllDevs = computed(() => acctDeviceTree({ friends: friends.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, reports: acctSw.reports, launchers: lchData.machines }))
     // 整台離線、夥伴全封存、沒未讀的設備不列頁籤；收在「已隱藏的設備」，可手動顯示
-    const acctDevs = computed(() => acctAllDevs.value.filter(d => !d.hidden))
-    const acctHidden = computed(() => acctAllDevs.value.filter(d => d.hidden))
+    const acctDevs = computed(() => visibleRows(acctAllDevs.value))   // 列表＝全部設備（含已隱藏，淡色標「已隱藏」）；永久移除的收在底部
+    const acctRemoved = computed(() => removedRows(acctAllDevs.value))
+    const acctFlags = computed(() => moveFlags(acctDevs.value, info.node))
     const showHiddenDevice = key => { devPrefs.deviceShown = showDevice(devPrefs.deviceShown, key) }
-    const acctCur = computed(() => acctPickDevice(acctDevs.value, acctSw.node))
+    // 細部頁：只有 page 是 detail 且那台還在列表裡才有（被移除或消失就退回列表）
+    const acctCur = computed(() => (acctSw.page === 'detail' ? acctDevs.value.find(d => d.key === acctSw.node) ?? null : null))
+    const acctCanRemove = computed(() => canRemoveRow(acctCur.value))
+    // 設備活過來（又有在線視窗或未讀）就自動從永久移除名單解除
+    watch([() => friends.value, () => devPrefs.deviceRemoved], () => { const next = pruneRemoved(devPrefs.deviceRemoved, friends.value, { selfNode: info.node }); if (next.length !== devPrefs.deviceRemoved.length) devPrefs.deviceRemoved = next }, { deep: true })
     const acctLabel = computed(() => acctCur.value?.label ?? '')
     const acctRep = computed(() => acctSw.reports[acctCur.value?.key] ?? null)
     const acctView = computed(() => acctSheetView(acctClaudeRemote(acctRep.value), acctSw.picked))
@@ -456,18 +461,52 @@ const app = createApp({
     async function openAcct(g) {
       if (nav.sheet) return
       acctEpoch++
-      Object.assign(acctSw, { phase: 'pick', picked: '', view: null, reports: {} })
-      acctSw.node = g.node   // 從夥伴列表某台設備旁的「選項」進來：預選那一台的頁籤
+      Object.assign(acctSw, { phase: 'pick', page: 'list', picked: '', view: null, reports: {}, removedOpen: false })
+      // 從夥伴列表某台設備旁的「選項」進來：直接開那一台的細部頁；從別處進來先看列表
+      if (g?.node && acctDevs.value.some(d => d.key === g.node)) { acctSw.node = g.node; acctSw.page = 'detail' } else acctSw.node = ''
       go(acctNav())
       if (!lchData.loaded) void loadLaunchers()
-      void loadAcct(g.node)
+      if (acctSw.page === 'detail') void loadAcct(g.node)
     }
-    function pickAcctDevice(key) {
+    function openAcctDevice(key) {
       if (acctSw.phase !== 'pick') return
-      acctSw.node = key; acctSw.picked = ''
+      acctSw.node = key; acctSw.picked = ''; acctSw.page = 'detail'
       void loadAcct(key)
     }
-    const refreshAcct = () => { if (acctSw.phase === 'pick' && acctCur.value) void loadAcct(acctCur.value.key, true) }
+    // 返回：細部頁回列表；列表就離開這一頁。標題列的返回鍵與細部頁頂端的「‹ 返回」共用
+    const acctBackToList = () => { acctSw.phase = 'pick'; acctSw.picked = ''; acctSw.page = 'list' }
+    const acctHeaderBack = () => { if (acctSw.page === 'detail' && acctSw.phase !== 'run') acctBackToList(); else back() }
+    // 被隱藏的設備：顯示回名單／永久移除（要先看過二次確認）／恢復
+    const acctShowBack = () => { if (acctCur.value) showHiddenDevice(acctCur.value.key) }
+    const acctAskRemove = () => { if (acctSw.phase === 'pick' && acctCanRemove.value) acctSw.phase = 'rm' }
+    const acctRemoveText = computed(() => DEVICE_TEXT.confirmRemove(acctCur.value?.label))
+    function acctRemoveNow() {
+      if (acctSw.phase !== 'rm' || !acctCanRemove.value) return
+      devPrefs.deviceRemoved = removeDevice(devPrefs.deviceRemoved, acctCur.value.key, { selfNode: info.node })
+      acctBackToList()
+    }
+    const acctRestore = key => { devPrefs.deviceRemoved = restoreDevice(devPrefs.deviceRemoved, key) }
+    // 排序：每列左邊有「排序把手」，只有按住把手才會拖（把手 touch-action:none），其餘地方照常捲動、點一下進細部頁；把手聚焦後也能用上下鍵移動
+    const acctDrag = reactive({ key: '', over: '', after: false })
+    const acctOrderKeys = () => acctAllDevs.value.map(d => d.key)
+    const acctVisibleKeys = () => acctDevs.value.map(d => d.key)
+    function acctMove(key, dir) { devPrefs.deviceOrder = moveDevice(acctOrderKeys(), key, dir, { selfNode: info.node, visible: acctVisibleKeys() }) }
+    function gripDown(key, e) {
+      if (key === info.node || acctSw.phase !== 'pick') return
+      e.currentTarget?.setPointerCapture?.(e.pointerId)
+      acctDrag.key = key; acctDrag.over = ''; acctDrag.after = false
+    }
+    function gripMove(e) {
+      if (!acctDrag.key) return
+      const rows = [...document.querySelectorAll('.m-dv-row')].map(el => { const r = el.getBoundingClientRect(); return { key: el.dataset.dev, top: r.top, height: r.height } })
+      const s = dropSlot(rows, e.clientY)
+      acctDrag.over = s.target; acctDrag.after = s.after
+    }
+    function gripUp() {
+      if (acctDrag.key && acctDrag.over) devPrefs.deviceOrder = reorderDevice(acctOrderKeys(), acctDrag.key, acctDrag.over, acctDrag.after, { selfNode: info.node })
+      Object.assign(acctDrag, { key: '', over: '', after: false })
+    }
+    const gripKey = (key, e) => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); acctMove(key, e.key === 'ArrowUp' ? -1 : 1) } }
     // 點某個帳號的「切換」＝選好它並進確認畫面（要先看過確認才能送出）
     function startAcctSwitch(email) {
       if (acctSw.phase !== 'pick') return
@@ -766,7 +805,7 @@ const app = createApp({
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, headTone, CONN_LABEL, info, banner, shake, refreshing,
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, opsView, ops, opsText, opsTitle, opsModels, opsModelNote, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
-      acctSw, acctDevs, acctHidden, showHiddenDevice, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, ACCT_PAGE_TITLE, vendorIconSvg, acctKeys, openAcct, pickAcctDevice, refreshAcct, startAcctSwitch, acctBackToPick, submitAcct,
+      acctSw, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctHeaderBack, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, ACCT_PAGE_TITLE, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,

@@ -194,32 +194,45 @@
             <!-- 替電腦切換 Claude 帳號：佔用第二個分頁（標籤暫時改成「選項」），原本的對話內容只是藏起來、不卸載；選帳號 → 確認 → 送出並等對方電腦回報 -->
             <template v-if="nav.sheet === 'acct'">
               <header class="m-head m-chathead">
-                <button class="m-icon-btn" type="button" aria-label="返回" @click="back"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M15 4.5L7.5 12 15 19.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                <button class="m-icon-btn" type="button" aria-label="返回" @click="acctHeaderBack"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M15 4.5L7.5 12 15 19.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
                 <div class="m-head-tx"><div class="m-title">{{ ACCT_PAGE_TITLE }}</div></div>
               </header>
           <div class="m-sheet-body m-dv">
-            <template v-if="acctSw.phase === 'pick'">
-              <div class="m-dv-bar">
-                <small class="m-fine">只有 Claude 能從這裡切換帳號；其他廠商只顯示，沒回報的會寫「目前未回報任何帳號」。</small>
-                <button type="button" class="m-dv-refresh" @click="refreshAcct">重新整理</button>
-              </div>
-              <p class="m-note" v-if="!acctDevs.length">還沒有設備。</p>
-              <details class="m-dv-hidden" v-if="acctHidden.length">
-                <summary>已隱藏的設備（{{ acctHidden.length }}）</summary>
-                <small class="m-fine">這些設備整台離線、底下的對話都已封存，也沒有未讀，所以不列頁籤。</small>
-                <ul>
-                  <li v-for="d in acctHidden" :key="d.key"><span>{{ d.label }}</span><button type="button" class="m-dv-refresh" @click="showHiddenDevice(d.key)">顯示</button></li>
+            <template v-if="acctSw.phase === 'pick' && !acctCur">
+              <p class="m-note" v-if="!acctDevs.length">{{ DEVICE_TEXT.empty }}</p>
+              <ul class="m-dv-list" aria-label="設備" v-else>
+                <li v-for="d in acctDevs" :key="d.key" :data-dev="d.key" class="m-dv-row" :class="{ hid: d.hidden, off: !d.online, dragging: acctDrag.key === d.key, 'drop-before': acctDrag.over === d.key && !acctDrag.after, 'drop-after': acctDrag.over === d.key && acctDrag.after }">
+                  <button type="button" class="m-dv-grip" v-if="!d.self" :aria-label="'拖曳調整 ' + d.label + ' 的順序，或按上下鍵'" @pointerdown="gripDown(d.key, $event)" @pointermove="gripMove" @pointerup="gripUp" @pointercancel="gripUp" @keydown="gripKey(d.key, $event)"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M8 6h.01M16 6h.01M8 12h.01M16 12h.01M8 18h.01M16 18h.01" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/></svg></button>
+                  <span class="m-dv-grip-gap" v-else aria-hidden="true"></span>
+                  <button type="button" class="m-dv-go" @click="openAcctDevice(d.key)">
+                    <span class="m-dv-dot" :class="d.online ? 'on' : 'off'" aria-hidden="true"></span>
+                    <span class="m-dv-rn"><b>{{ d.label }}</b><span class="m-dv-rs">{{ d.kind }} · {{ d.onlineText }}<template v-if="d.self"> · 這支手機</template></span></span>
+                    <span class="m-dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
+                    <span class="m-dv-chev" aria-hidden="true">&rsaquo;</span>
+                  </button>
+                </li>
+              </ul>
+              <div class="m-dv-removed" v-if="acctRemoved.length">
+                <button type="button" class="m-dv-removed-link" :aria-expanded="acctSw.removedOpen ? 'true' : 'false'" @click="acctSw.removedOpen = !acctSw.removedOpen">{{ DEVICE_TEXT.removedLink(acctRemoved.length) }}</button>
+                <ul v-if="acctSw.removedOpen">
+                  <li v-for="d in acctRemoved" :key="d.key"><span>{{ d.label }}</span><button type="button" class="m-dv-refresh" @click="acctRestore(d.key)">{{ DEVICE_TEXT.restore }}</button></li>
                 </ul>
-              </details>
-              <div class="m-dv-tabs" role="tablist" aria-label="設備" v-if="acctDevs.length">
-                <button v-for="d in acctDevs" :key="d.key" type="button" role="tab" class="m-dv-tab" :class="{ sel: acctCur && d.key === acctCur.key, off: !d.online }" :aria-selected="acctCur && d.key === acctCur.key ? 'true' : 'false'" @click="pickAcctDevice(d.key)">{{ d.label }}<span class="m-dv-dot" :class="d.online ? 'on' : 'off'" :title="d.onlineText"></span></button>
               </div>
-              <section class="m-dv-dev" v-if="acctCur" role="tabpanel" :aria-label="acctCur.label">
+              <button type="button" class="m-btn m-ops-cancel" @click="back">{{ ACCT_TEXT.close }}</button>
+            </template>
+            <template v-else-if="acctSw.phase === 'pick'">
+              <button type="button" class="m-dv-back" @click="acctBackToList">{{ DEVICE_TEXT.back }}</button>
+              <section class="m-dv-dev" role="region" :aria-label="acctCur.label">
                 <div class="m-dv-dh">
                   <h3 class="m-dv-name">{{ acctCur.label }}</h3>
                   <span class="m-dv-tag">{{ acctCur.kind }}</span>
                   <span class="m-dv-tag" :class="acctCur.online ? 'on' : 'off'">{{ acctCur.onlineText }}</span>
                   <span class="m-dv-tag me" v-if="acctCur.self">這支手機</span>
+                  <span class="m-dv-tag hid" v-if="acctCur.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
+                </div>
+                <div class="m-dv-hid-act" v-if="acctCanRemove">
+                  <button type="button" class="m-dv-refresh" @click="acctShowBack">{{ DEVICE_TEXT.showBack }}</button>
+                  <button type="button" class="m-dv-refresh m-dv-danger" @click="acctAskRemove">{{ DEVICE_TEXT.remove }}</button>
                 </div>
                 <p class="m-fine" v-if="acctCur.reportedText">{{ acctCur.reportedText }}</p>
                 <p class="m-err" v-if="acctRep && acctRep.msg" role="alert">{{ acctRep.msg }}</p>
@@ -253,6 +266,11 @@
                 </div>
               </section>
               <button type="button" class="m-btn m-ops-cancel" @click="back">{{ ACCT_TEXT.close }}</button>
+            </template>
+            <template v-else-if="acctSw.phase === 'rm'">
+              <p class="m-ops-lead" role="alert">{{ acctRemoveText }}</p>
+              <button type="button" class="m-btn m-btn-big m-dv-danger" @click="acctRemoveNow">{{ DEVICE_TEXT.removeYes }}</button>
+              <button type="button" class="m-btn m-ops-cancel" @click="acctBackToPick">{{ DEVICE_TEXT.cancel }}</button>
             </template>
             <template v-else-if="acctSw.phase === 'confirm'">
               <p class="m-ops-lead">{{ acctConfirm.lead }}</p>

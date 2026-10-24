@@ -30,15 +30,15 @@ test('applyDeviceOrder：本機不在列內時不會憑空多出來', () => {
 
 // ---------- 舊存檔相容與儲存還原 ----------
 test('舊存檔沒有 deviceOrder／deviceShown＝空陣列；壞值也當沒有', () => {
-  assert.deepEqual(deviceFieldsFromSaved({}), { deviceOrder: [], deviceShown: [] })
-  assert.deepEqual(deviceFieldsFromSaved(undefined), { deviceOrder: [], deviceShown: [] })
-  assert.deepEqual(deviceFieldsFromSaved({ deviceOrder: 'x', deviceShown: { a: 1 } }), { deviceOrder: [], deviceShown: [] })
+  assert.deepEqual(deviceFieldsFromSaved({}), { deviceOrder: [], deviceShown: [], deviceRemoved: [] })   // 新欄位 deviceRemoved：舊存檔沒有＝空陣列
+  assert.deepEqual(deviceFieldsFromSaved(undefined), { deviceOrder: [], deviceShown: [], deviceRemoved: [] })
+  assert.deepEqual(deviceFieldsFromSaved({ deviceOrder: 'x', deviceShown: { a: 1 }, deviceRemoved: 7 }), { deviceOrder: [], deviceShown: [], deviceRemoved: [] })
   assert.deepEqual(normalizeKeys(['a', '', 'a', 3, null, 'b']), ['a', 'b'])
 })
 test('順序存檔後可原樣還原', () => {
-  const saved = JSON.parse(JSON.stringify(deviceFieldsToSave({ deviceOrder: ['B', 'A'], deviceShown: ['Z'] })))
-  assert.deepEqual(saved, { deviceOrder: ['B', 'A'], deviceShown: ['Z'] })
-  assert.deepEqual(deviceFieldsFromSaved(saved), { deviceOrder: ['B', 'A'], deviceShown: ['Z'] })
+  const saved = JSON.parse(JSON.stringify(deviceFieldsToSave({ deviceOrder: ['B', 'A'], deviceShown: ['Z'], deviceRemoved: ['R'] })))
+  assert.deepEqual(saved, { deviceOrder: ['B', 'A'], deviceShown: ['Z'], deviceRemoved: ['R'] })
+  assert.deepEqual(deviceFieldsFromSaved(saved), { deviceOrder: ['B', 'A'], deviceShown: ['Z'], deviceRemoved: ['R'] })
 })
 test('沒排過時 deviceTabs 結果與原規則完全一樣（本機第一、有人在線在前）', () => {
   const friends = [F('W', '工作機', 'a', 'offline'), F('H', '家用機', 'b'), F('A', '牧陽', 'c')]
@@ -151,7 +151,7 @@ test('接線：設定頁有上移／下移與已隱藏的設備', () => {
   const s = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8')
   assert.match(s, /device-move/)
   assert.match(s, /device-show/)
-  assert.match(s, /已隱藏的設備/)
+  assert.match(s, /DEVICE_TEXT.hiddenTag/)
 })
 test('接線：左邊頁籤可拖曳並支援 Alt+上下', () => {
   const h = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')

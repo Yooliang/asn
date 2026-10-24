@@ -51,7 +51,7 @@ import { startCallPoll } from './lib/call-poll.mjs'
 import { isCallActive } from './lib/call-session.mjs'
 import { accountLine, codexLine, createAccountsUi } from './lib/claude-accounts.mjs'
 import { buildDeviceTree } from './lib/device-tree.mjs'
-import { deviceFieldsFromSaved, deviceFieldsToSave, moveDevice, reorderDevice, showDevice } from './lib/device-order.mjs'
+import { deviceFieldsFromSaved, deviceFieldsToSave, moveDevice, pruneRemoved, removeDevice, reorderDevice, restoreDevice, showDevice, visibleRows } from './lib/device-order.mjs'
 import { dialogTitle as deviceAcctTitle, dialogView as deviceAcctViewOf, CONFIRM_NOTE as DEVICE_CONFIRM_NOTE, CLOSE_NOTE as DEVICE_CLOSE_NOTE } from './lib/device-acct-dialog.mjs'
 import { applyRename } from './lib/rename.mjs'
 import { createUsageUi } from './lib/usage.mjs'
@@ -240,6 +240,8 @@ const roomFriends = computed(() => roomRows.value.map(r => ({ ...roomPseudoFrien
 const openedRooms = new Set()   // 開過的群組對話（整合模式的分頁、分開模式的視窗）：這些要持續讀新訊息
 
 const friends = ref([])
+// 永久移除的設備：之後又有在線視窗或未讀（活過來了）就自動解除，不論設定頁有沒有開著
+watch([() => friends.value, () => devPrefs.deviceRemoved], () => { const next = pruneRemoved(devPrefs.deviceRemoved, friends.value, { selfNode: info.node }); if (next.length !== devPrefs.deviceRemoved.length) devPrefs.deviceRemoved = next }, { deep: true })
 const nodeOrder = ref([])
 const asnBadge = node => deviceAsn(asnMap.value[node], info.version)
 const asnMap = ref({})   // 節點 → 在線的 ASN 視窗（版本與狀態），名單設備分組標題旁的小綠點用
@@ -842,7 +844,7 @@ watch(showNowPlaying, on => {
 }, { immediate: true })
 // 設定頁改「分頁依」：分組若撞到自動換成剩下兩個裡的第一個
 const setTabDim = v => Object.assign(dims, withTabDim(dims, v))
-const pages = computed(() => pageTabs(friends.value, dims.tabDim, { selfNode: info.node, selfName: info.window_name, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown }))
+const pages = computed(() => pageTabs(friends.value, dims.tabDim, { selfNode: info.node, selfName: info.window_name, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved }))
 
 // 起始頁籤：平常是設備維度的本機；--shot 可用設定檔的 shotTab 指定固定頁籤（已拿掉的「通知」或任何不認得的值都忽略）
 const startTab = info.shot ? normalizeTab(savedMe.shotTab) : ''
@@ -939,7 +941,7 @@ const app = createApp({
     // 指引、設定的聊天窗（openPanel／closePanel 在上面）：列表只負責「點一項就開」，內容在右邊分頁或獨立視窗
     const panelGuide = computed(() => panelItem('guide', ui.panel.guide))
     const catSub = key => catSummary(key, {
-      devices: deviceTree.value,
+      devices: visibleRows(deviceTree.value),
       hasUpload: selfHasUpload.value, nowPlayingOn: showNowPlaying.value, accountCount: accounts.state.list.length, accountCurrent: accounts.state.current?.email ?? '',
       frame: frame.value, mode: ui.mode, dpMode: ui.dpMode, toolbar: ui.toolbar, bubble: ui.bubble, tabDim: dims.tabDim, groupDim: dims.groupDim,
       notify: notifyPrefs.value, voiceEnabled: ttsVoices.value.enabled, ttsAuto: voiceCfg.tts_auto, sttLang: voiceCfg.stt_lang,
@@ -1124,7 +1126,7 @@ const app = createApp({
     }
     // 設定「設備」分類：設備 → 廠商 → 帳號。其他設備的帳號回報在有新設備出現時讀一次，也可按「重新整理」
     const deviceTree = computed(() => buildDeviceTree({
-      friends: friends.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, selfNode: info.node, asn: asnMap.value, launchers: {
+      friends: friends.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, asn: asnMap.value, launchers: {
         ...remoteLaunchers.value,
         [info.node]: { profiles: partnerModels.value.filter(m => m.installed).map(m => ({ id: m.profileId ?? m.id })) },
       },
@@ -1132,7 +1134,6 @@ const app = createApp({
       self: { claude: accounts.state.list, codex: { loggedIn: Boolean(accounts.state.codex), text: codexLine(accounts.state.codex, accounts.state.codexErr) } },
     }))
     const otherDeviceNodes = () => launchDeviceRowsList.value.map(d => d.key).filter(k => k && k !== info.node).slice(0, 20)
-    const refreshDeviceReports = () => accounts.loadReports(otherDeviceNodes())
     watch(() => otherDeviceNodes().join(','), () => {
       const missing = otherDeviceNodes().filter(k => !accounts.state.reports[k])
       if (missing.length) void accounts.loadReports(missing)
@@ -1187,9 +1188,11 @@ const app = createApp({
         case 'acct-switch': await accounts.switchTo(value); break
         case 'acct-remove': await accounts.remove(value); break
         case 'acct-trust': await accounts.setTrust(value === true); break
-        case 'device-move': devPrefs.deviceOrder = moveDevice(deviceTree.value.map(d => d.key), String(value?.node ?? ''), value?.dir === -1 ? -1 : 1, { selfNode: info.node }); break
+        case 'device-move': devPrefs.deviceOrder = moveDevice(deviceTree.value.map(d => d.key), String(value?.node ?? ''), value?.dir === -1 ? -1 : 1, { selfNode: info.node, visible: visibleRows(deviceTree.value).map(d => d.key) }); break
+        case 'device-reorder': devPrefs.deviceOrder = reorderDevice(deviceTree.value.map(d => d.key), String(value?.drag ?? ''), String(value?.target ?? ''), value?.after === true, { selfNode: info.node }); break
+        case 'device-remove': devPrefs.deviceRemoved = removeDevice(devPrefs.deviceRemoved, String(value ?? ''), { selfNode: info.node }); break
+        case 'device-restore': devPrefs.deviceRemoved = restoreDevice(devPrefs.deviceRemoved, String(value ?? '')); break
         case 'device-show': devPrefs.deviceShown = showDevice(devPrefs.deviceShown, String(value ?? '')); break
-        case 'devices-refresh': await refreshDeviceReports(); break
         case 'device-switch': await (typeof value === 'object' && value ? openDeviceAcct(String(value.node ?? ''), String(value.email ?? '')) : openDeviceAcct(String(value ?? ''))); break
         case 'closeTo': await setCloseTo(value); break
         case 'autostart': await setAutostart(value === true); break
