@@ -53,12 +53,13 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
   // 打開一個群組：讀訊息與確認卡片
   async function open(id) { await refresh(); await Promise.all([read(id, { force: true }), loadCards(id)]) }
 
-  async function post(id, text) {
+  async function post(id, text, opts = {}) {
     const ident = identityOf(id)
     const err = postError(text, { signedIn: true, identity: ident })
     if (err) { st.note = err; return false }
     try {
-      await invoke(postCmd, { body: { room: id, body: text, ...(ident.agent ? { from_agent: ident.agent } : {}) } })
+      const reply = Number.isInteger(opts?.replySeq) && opts.replySeq > 0 ? { reply_to: opts.replySeq } : {}   // 回覆某則訊息：後台記下引用並自動 @ 原作者
+      await invoke(postCmd, { body: { room: id, body: text, ...(ident.agent ? { from_agent: ident.agent } : {}), ...reply } })
       st.note = ''
       await refresh(); await read(id, { force: true })
       return true

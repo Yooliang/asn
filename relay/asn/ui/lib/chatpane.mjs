@@ -5,6 +5,7 @@ import { EMO, emo, fmt, fmtDate, initial, plain } from './text.mjs'
 import { composeHintTitle, composePlaceholder } from './compose.mjs'
 import { foldBarArrow, hasSideCol, isCollapsed, msgLayout, paneClasses, sideOf } from './merge.mjs'
 import { autoAvatarDataUrl } from './avatar.mjs'
+import { QUOTE_PREFIX, composeReply, findQuoted, replyTarget, splitQuote } from './reply-quote.mjs'
 import { applyMention, markMentions, mentionOptions, mentionQuery } from './mention.mjs'
 import { FILE_ACCEPT, formatBytes, photoExpired, photoTitle } from './photo.mjs'
 import { attachmentFromFile, imageFromBlob } from './photo-canvas.mjs'
@@ -59,6 +60,7 @@ export const ChatPane = {
   emits: ['send', 'nudge', 'toggle-dp', 'attach', 'call-state', 'group-decide', 'group-menu'],
   setup(props, { emit }) {
     const draft = ref(''), pickerOpen = ref(false), nudgeCooling = ref(false)
+    const replying = ref(null)   // 正在回覆的那一則：{ author, excerpt, seq, index, mention }
     const msgsEl = ref(null), composeEl = ref(null)
     const isRoom = computed(() => props.friend?.room === true)
     const attachOk = computed(() => roomAttachAllowed(props.friend))   // 群組有外部成員（別的帳號）時沒有附件鈕
@@ -112,9 +114,11 @@ export const ChatPane = {
     watch(() => props.friend?.id, () => { armed = true; nextTick(checkTop) })
     watch(() => props.active, a => { if (a) { scrollDown(); nextTick(() => { composeEl.value && composeEl.value.focus(); checkTop() }) } })
     function send() {
-      const text = draft.value.trim(); if (!text) return
-      emit('send', text)
-      draft.value = ''; pickerOpen.value = false
+      let text = draft.value.trim(); if (!text) return
+      const rep = replying.value
+      if (rep) text = composeReply(rep, text)   // 引用行＋自動 @ 原作者＋使用者打的字
+      if (rep) emit('send', text, { replySeq: rep.seq }); else emit('send', text)
+      draft.value = ''; pickerOpen.value = false; replying.value = null
     }
     // ---- 群組 @ 點名：打 @ 跳出成員選單（上下鍵、Enter 或點選）；後台從內文的 @名字 解析點名，不另送欄位 ----
     const mention = ref(null)   // { q, options, idx }；沒有就是選單關著
@@ -236,13 +240,34 @@ export const ChatPane = {
         nextTick(() => composeEl.value && composeEl.value.focus())
       })
     }
+    // ---- 針對某則訊息回覆（#225）：引用顯示在訊息上方，點引用跳回原訊息；群組自動 @ 原作者 ----
+    const canReply = m => !!replyTarget(m, { friend: props.friend, meName: props.me.nick, index: 0 })
+    function startReply(m, i) {
+      replying.value = replyTarget(m, { friend: props.friend, meName: props.me.nick, index: i })
+      nextTick(() => composeEl.value && composeEl.value.focus())
+    }
+    const cancelReply = () => { replying.value = null; nextTick(() => composeEl.value && composeEl.value.focus()) }
+    const msgQuote = m => m?.reply ?? splitQuote(m?.text).quote
+    const jumpNote = ref('')
+    function jumpTo(m, i) {
+      const q = msgQuote(m)
+      const at = findQuoted(props.log, i, q, { meName: props.me.nick })
+      const el = at >= 0 ? msgsEl.value?.querySelector(`[data-i="${at}"]`) : null
+      clearTimeout(jumpTimer)
+      if (!el) { jumpNote.value = '找不到原訊息，可能在更早的紀錄。'; jumpTimer = setTimeout(() => { jumpNote.value = '' }, 3500); return }
+      jumpNote.value = ''
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1400)
+    }
+    let jumpTimer = null
+    watch(() => props.friend?.id, () => { replying.value = null; jumpNote.value = '' })
     const speakerAv = m => autoAvatarDataUrl(m.av)   // 群組發言者的大頭貼：與個人名單同一套預設圖
     const msgKey = (m, i) => (m.id ? String(m.id) : `${m.t}:${i}`)
     const msgTier = m => tierOf(m)
     const msgStatusTip = m => statusTip(m)
     const speaking = (m, i) => !!props.voice && props.voice.state.tts.key === msgKey(m, i) && props.voice.state.tts.phase !== 'idle'
     const speakTip = (m, i) => (speaking(m, i) ? '停止念出' : '念出這則訊息')
-    const speak = (m, i) => props.voice && props.voice.speak(msgKey(m, i), m.text)
+    const speak = (m, i) => props.voice && props.voice.speak(msgKey(m, i), shownBody(m).text)
     const MIC_TIP = { starting: '準備麥克風…按一下取消', recording: '聆聽中…說完了，按一下辨識（Esc 取消）', recognizing: '辨識中…按一下取消' }
     const micTip = computed(() => MIC_TIP[props.voice?.state.mic.phase] || '語音輸入（按一下開始說話）')
     // ---- 通話（#99）：每個面板自己一個通話；回信到達（log 變多）時交給通話念出來。換夥伴、切走分頁、關掉面板都自動掛斷 ----
@@ -274,7 +299,10 @@ export const ChatPane = {
       onBeforeUnmount(() => dict.stop())
     }
     // 對方（通話對象）回信最後一行的結束記號不顯示在對話裡，改顯示一行小提示
-    const shownBody = m => (m?.k === 'them' ? splitCallEnd(m.text) : { text: String(m?.text ?? ''), ends: false })
+    const shownBody = m => {
+      const b = m?.k === 'them' ? splitCallEnd(m.text) : { text: String(m?.text ?? ''), ends: false }
+      return { ...b, text: splitQuote(b.text).body }   // 開頭的引用行改畫成引用列，不重複顯示在內文
+    }
     const voiceNote = computed(() => props.voice?.state.note || call?.state.note || dict?.state.note || props.voice?.state.tts.error || '')
     onMounted(() => {
       scrollDown(); if (props.active) composeEl.value && composeEl.value.focus()
@@ -291,7 +319,7 @@ export const ChatPane = {
     const docEl = ref(null)
     // 訊息內文裡的連結：不在 WebView 導覽，一律交給系統瀏覽器（Rust 端 open_link 再驗一次協定）
     const onBodyClick = ev => handleLinkClick(ev, url => globalThis.__TAURI__?.core?.invoke?.('open_link', { url }))
-    return { mention, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, isRoom, attachOk, opsItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, isRoom, attachOk, opsItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -313,16 +341,17 @@ export const ChatPane = {
         <div class="older-note" v-if="noteText">{{ noteText }}</div>
         <template v-for="(m, i) in log" :key="i">
           <div v-if="m.k === 'sys'" class="sys" :class="{ nudge: m.nudge }">{{ m.text }}</div>
-          <div v-else class="msg" :class="['al-' + lay(m.k).align, { mine: m.k === 'me' }]">
+          <div v-else class="msg" :data-i="i" :class="['al-' + lay(m.k).align, { mine: m.k === 'me' }]">
             <div class="m-av m-av-spk" v-if="m.av"><div class="dp xs" :style="{ '--h': friend.hue }"><span><img :src="speakerAv(m)" alt=""></span></div></div>
             <div class="m-av" v-if="lay(m.k).avatar && !m.badge && !m.av"><div class="dp xs" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span><img :src="friendAv" alt=""></span></div></div>
             <div class="m-main">
-              <div class="who"><span class="spk-av" :class="'is-' + m.kind" v-if="m.badge && !m.av" aria-hidden="true">{{ initial(plain(m.who || friend.nick)) }}</span>{{ m.k === 'me' ? plain(me.nick) : plain(m.who || friend.nick) }}<span class="who-badge" :class="'is-' + m.kind" v-if="m.badge">{{ m.badge }}</span>：<time>{{ fmt(m.t) }}</time><span class="from-dev" v-if="m.k === 'me' && m.from">從 {{ plain(m.from) }}</span><span class="voice-tag" v-if="m.k === 'me' && isVoiceMsg(m)" title="這則是通話中說的，辨識成文字後寄出">🎤 語音</span><span v-if="m.k === 'me' && msgTier(m) && msgTier(m) !== 'sent'" class="msg-st" :class="'st-' + msgTier(m)" :title="msgStatusTip(m)" :aria-label="msgStatusTip(m)">{{ msgTier(m) === 'delivered' ? '✓' : '✓✓' }}</span>
+              <div class="who"><span class="spk-av" :class="'is-' + m.kind" v-if="m.badge && !m.av" aria-hidden="true">{{ initial(plain(m.who || friend.nick)) }}</span>{{ m.k === 'me' ? plain(me.nick) : plain(m.who || friend.nick) }}<span class="who-badge" :class="'is-' + m.kind" v-if="m.badge">{{ m.badge }}</span>：<time>{{ fmt(m.t) }}</time><button v-if="canReply(m)" class="reply-btn" type="button" @click="startReply(m, i)" aria-label="回覆這則訊息" title="回覆這則訊息">回覆</button><span class="from-dev" v-if="m.k === 'me' && m.from">從 {{ plain(m.from) }}</span><span class="voice-tag" v-if="m.k === 'me' && isVoiceMsg(m)" title="這則是通話中說的，辨識成文字後寄出">🎤 語音</span><span v-if="m.k === 'me' && msgTier(m) && msgTier(m) !== 'sent'" class="msg-st" :class="'st-' + msgTier(m)" :title="msgStatusTip(m)" :aria-label="msgStatusTip(m)">{{ msgTier(m) === 'delivered' ? '✓' : '✓✓' }}</span>
                 <button v-if="voice && m.k === 'them' && m.text" class="spk" :class="{ on: speaking(m, i) }" type="button" @click="speak(m, i)" :aria-label="speakTip(m, i)" :title="speakTip(m, i)">
                   <svg v-if="!speaking(m, i)" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 9.5v5h3.6L12 18.5v-13L7.6 9.5z" fill="currentColor"/><path d="M15 9.2a4 4 0 0 1 0 5.6M17.4 6.8a7.4 7.4 0 0 1 0 10.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
                   <svg v-else viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/></svg>
                 </button>
               </div>
+              <button v-if="msgQuote(m)" class="quote" type="button" @click="jumpTo(m, i)" :title="'跳到原訊息：' + plain(msgQuote(m).excerpt)"><b>{{ plain(msgQuote(m).author) }}</b><span>{{ plain(msgQuote(m).excerpt) }}</span></button>
               <div class="m-body" :class="['tone-' + lay(m.k).tone, 'md-on']" v-if="shownBody(m).text" v-html="bodyHtml(shownBody(m).text)" @click="onBodyClick"></div>
               <div class="call-end-note" v-if="shownBody(m).ends">{{ CALL_END_NOTE }}</div>
               <div class="unanswered" v-if="m.k === 'me' && m.unanswered != null && !isAsn">{{ m.unanswered > 0 ? '超過 ' + m.unanswered + ' 分鐘未回' : '對方視窗已關閉，未回' }}</div>
@@ -386,6 +415,7 @@ export const ChatPane = {
         <button class="aero-btn" type="button" :disabled="voice.state.install.busy" @click="voice.installStt()">下載</button>
         <button class="aero-btn" type="button" :disabled="voice.state.install.busy" @click="voice.dismissInstall()">取消</button>
       </div>
+      <div class="reply-bar" v-if="replying"><span class="reply-bar-text"><b>回覆 {{ plain(replying.author) }}</b>：{{ plain(replying.excerpt) }}</span><button class="reply-bar-x" type="button" @click="cancelReply" aria-label="取消回覆" title="取消回覆">✕</button></div>
       <form class="composer" @submit.prevent="send">
         <ul class="mention-menu" v-if="mention" role="listbox" aria-label="選擇要點名的成員">
           <li v-for="(o, i) in mention.options" :key="o.label"><button type="button" role="option" :class="{ on: i === mention.idx }" :aria-selected="i === mention.idx" @mousedown.prevent @click="pickMention(o)"><span class="mention-name">{{ o.label }}</span><small class="who-badge" :class="'is-' + o.kind">{{ o.badge }}</small></button></li>
@@ -412,6 +442,7 @@ export const ChatPane = {
   </div>
   <div class="typing" role="status">
     <template v-if="voiceNote">{{ voiceNote }}</template>
+    <template v-else-if="jumpNote">{{ jumpNote }}</template>
     <template v-else-if="photoMsg">{{ photoMsg }}<button v-if="savedHere" class="aero-btn" type="button" @click="revealSaved">開啟資料夾</button></template>
     <template v-else-if="showWaiting">✎ 已送出，等對方回信…</template>
     <template v-else-if="friend.lastAt">上次接收訊息是 {{ fmtDate(friend.lastAt) }}</template>

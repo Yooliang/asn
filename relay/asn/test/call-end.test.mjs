@@ -37,8 +37,8 @@ test('通話提示行告訴 AI 怎麼掛斷，且不是會被收發室跳脫的�
 
 test('顯示：對話區把對方回信的記號拿掉，改顯示小提示（只處理對方的信）', () => {
   const pane = read('ui', 'lib', 'chatpane.mjs')
-  assert.match(pane, /const shownBody = m => \(m\?\.k === 'them' \? splitCallEnd\(m\.text\)/)
-  assert.match(pane, /renderMarkdown\(shownBody\(m\)\.text\)/)
+  assert.match(pane, /const shownBody = m => \{\s*const b = m\?\.k === 'them' \? splitCallEnd\(m\.text\)/)   // 之後再拆引用行（reply-quote.mjs）
+  assert.match(pane, /bodyHtml\(shownBody\(m\)\.text\)/)   // bodyHtml 內部走 renderMarkdown
   assert.match(pane, /v-if="shownBody\(m\)\.ends">\{\{ CALL_END_NOTE \}\}/)
 })
 

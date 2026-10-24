@@ -77,6 +77,8 @@ const fromLabel = m => {
 // 後台的訊息 → 對話記錄。誰是「我」：後台標 relation＝mine（我本人）；舊後台沒有 relation 就看發言者鍵是不是我的成員身分。
 // 我的 AI（mine_ai）和別人一樣顯示發言者行與徽章。系統訊息（某某加入了群組、待主持人確認…）是置中的小字。
 // members（選填）是群組成員清單：拿來讓同名的發言者分得開（第二位起加「（2）」）
+// 後台算好的引用（被回覆的那則的作者與摘要）→ 畫面用的 { seq, author, excerpt }；沒有、或原訊息讀者看不到就是 null。作者用同一套標示（同名加「（2）」）
+const replyOf = (r, labels) => (r && Number.isInteger(r.seq) ? { seq: r.seq, author: safeLabel(labels.get(r.from) || r.from_label || '') || '成員', excerpt: oneLine(r.excerpt, 80) } : null)
 export function roomLog(messages, myKeys, members) {
   const mine = new Set(myKeys ?? [])
   const list = (Array.isArray(messages) ? messages : []).filter(m => m && Number.isInteger(m.seq))
@@ -89,7 +91,7 @@ export function roomLog(messages, myKeys, members) {
     if (m.from_kind === 'system' || m.relation === 'system') { out.push({ k: 'sys', text, t, id, seq: m.seq }); continue }
     const isMe = m.relation ? m.relation === 'mine' : mine.has(m.from)
     const kind = kindOf(m)
-    out.push({ k: isMe ? 'me' : 'them', who: isMe ? '' : (labels.get(m.from) || fromLabel(m)), kind, badge: isMe ? '' : KIND_BADGE[kind] ?? '', av: isMe ? '' : speakerAvatarSeed(m.from), text, t, id, seq: m.seq, seed: m.is_seed === true })
+    out.push({ k: isMe ? 'me' : 'them', who: isMe ? '' : (labels.get(m.from) || fromLabel(m)), kind, badge: isMe ? '' : KIND_BADGE[kind] ?? '', av: isMe ? '' : speakerAvatarSeed(m.from), reply: replyOf(m.reply_to, labels), text, t, id, seq: m.seq, seed: m.is_seed === true })
   }
   return out
 }

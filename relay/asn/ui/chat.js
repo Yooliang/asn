@@ -55,7 +55,7 @@ const app = createApp({
       groupMenu: op => emit('asn:cmd', { op: 'group-menu', id, what: op }),
       groupDecide: (cardId, approve) => emit('asn:cmd', { op: 'group-decide', id, cardId, approve }),
       callState, f, roster, me, transport, selfNode, loadOlder, log, look, friendAv, meAv, voice, photoApi, shotApi, plain, ctl, RESIZE_DIRS, resizeFrom,
-      send: (text, opts) => emit('asn:cmd', { op: 'send', id, text, voice: opts?.voice === true }),
+      send: (text, opts) => emit('asn:cmd', { op: 'send', id, text, voice: opts?.voice === true, replySeq: opts?.replySeq }),
       nudge: () => emit('asn:cmd', { op: 'nudge', id }),
       attach: (photo, caption) => emit('asn:cmd', { op: 'attach', id, photo, caption }),
       toggleDp: () => emit('asn:cmd', { op: 'dp' }),
