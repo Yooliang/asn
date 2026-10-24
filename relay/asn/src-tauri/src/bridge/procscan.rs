@@ -27,6 +27,8 @@ pub struct ProcAgent {
     pub model: Option<String>,
     /// 名單上顯示的供應商／模型簡稱
     pub label: Option<String>,
+    /// 背景執行（無人在前面操作：-p／exec／stdio／headless／rpc 等）；否則是使用者自己在終端機開的前景互動程式
+    pub background: bool,
 }
 
 /// 名單上限，避免失控時灌爆名單
@@ -35,9 +37,10 @@ pub const MAX_AGENTS: usize = 50;
 impl ProcAgent {
     /// 「pi · MiniMax #1234」；沒有供應商資訊就是「pi #1234」
     pub fn name(&self) -> String {
+        let place = if self.background { "背景" } else { "前景" };
         match &self.label {
-            Some(l) => format!("{} · {} #{}", self.engine, l, self.pid),
-            None => format!("{} #{}", self.engine, self.pid),
+            Some(l) => format!("{} · {} #{}（{place}）", self.engine, l, self.pid),
+            None => format!("{} #{}（{place}）", self.engine, self.pid),
         }
     }
     pub fn to_json(&self) -> Value {
@@ -143,6 +146,17 @@ fn is_run(engine: &str, args: &[String]) -> bool {
     true
 }
 
+/// 這組參數是不是背景（無人操作）執行：-p／--print、exec、agent stdio／headless／serve、--mode json／rpc
+fn is_background(args: &[String]) -> bool {
+    let has = |x: &str| args.iter().any(|a| a == x);
+    has("-p")
+        || has("--print")
+        || args.iter().any(|a| a.starts_with("--print="))
+        || matches!(args.first().map(|a| a.to_lowercase()).as_deref(), Some("exec") | Some("run") | Some("serve"))
+        || (has("agent") && (has("stdio") || has("headless") || has("serve") || has("leader")))
+        || args.windows(2).any(|w| w[0] == "--mode" && matches!(w[1].as_str(), "json" | "rpc" | "print"))
+}
+
 fn clean(v: &str) -> Option<String> {
     let v = v.trim();
     if v.is_empty() || v.len() > 40 || v.starts_with('-') || !v.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '/' | '-')) {
@@ -225,7 +239,7 @@ pub fn scan_excluding(table: &[ProcInfo], self_pid: u32, skip: &[u32]) -> Vec<Pr
             continue;
         }
         let (model, label) = model_of(args);
-        out.push(ProcAgent { pid: p.pid, engine: engine.to_string(), model, label });
+        out.push(ProcAgent { pid: p.pid, engine: engine.to_string(), model, label, background: is_background(args) });
     }
     out.sort_by(|a, b| a.engine.cmp(&b.engine).then(a.pid.cmp(&b.pid)));
     out.truncate(MAX_AGENTS);
@@ -421,7 +435,7 @@ mod tests {
         ];
         let r = scan(&t, 999);
         let names: Vec<String> = r.iter().map(|a| a.name()).collect();
-        assert_eq!(names, vec!["claude · MiniMax #11", "codex #14", "gemini #15", "gemini #16", "pi · MiniMax #12", "pi · glm-4.6 #13"]);
+        assert_eq!(names, vec!["claude · MiniMax #11（背景）", "codex #14（背景）", "gemini #15（前景）", "gemini #16（前景）", "pi · MiniMax #12（前景）", "pi · glm-4.6 #13（前景）"]);
         assert_eq!(r[0].model.as_deref(), Some("MiniMax-M2"));
         let j = r[0].to_json();
         assert_eq!(j["receivable"], json!(false));
@@ -467,7 +481,7 @@ mod tests {
         let agents = b["agents"].as_array().unwrap();
         assert_eq!(agents.len(), 2);
         assert_eq!(agents[0], json!({"name":"T-甲","status":"idle","cwd_label":"","engine":"claude"}));
-        assert_eq!(agents[1]["name"], json!("pi · MiniMax #7"));
+        assert_eq!(agents[1]["name"], json!("pi · MiniMax #7（前景）"));
         assert_eq!(agents[1]["receivable"], json!(false));
         // 沒有掃描結果時和以前一模一樣
         assert_eq!(crate::bridge::roster::roster_body(&[w], None, Value::Null)["agents"].as_array().unwrap().len(), 1);
