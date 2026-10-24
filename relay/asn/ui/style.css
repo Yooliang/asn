@@ -244,6 +244,7 @@ html.toast-page,html.toast-page body{background:transparent}
 .body{flex:1;min-height:0;display:flex;background:linear-gradient(90deg,#dcebf9,#eef5fd)}
 .rail{flex:none;width:38px;display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 0;overflow:visible;border-right:1px solid var(--line)}
 .rail-gap{flex:1;min-height:8px}
+.rail .rtab-groups{order:-1}   /* 群組固定在各頁籤的最上面（DOM 仍在底部區，用排序提到最前） */
 /* 頁籤：小巧的正方塊（照 Live Messenger 2009 左側那排）。平常只有圖示，滑過有淡淡的亮框，選中的是白底細框 */
 .rtab{position:relative;width:30px;height:30px;padding:0;display:grid;place-items:center;cursor:pointer;
   border:1px solid transparent;border-radius:4px;background:transparent;color:var(--title-fg)}

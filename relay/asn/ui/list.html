@@ -67,7 +67,7 @@
           </ul>
         </div>
         <span class="rail-gap"></span>
-        <button v-for="t in FIXED_TABS" :key="t.key" class="rtab" :class="{ on: tab === t.key }" role="tab" :aria-selected="tab === t.key" :title="t.label" :aria-label="t.label" @click="tab = t.key">
+        <button v-for="t in FIXED_TABS" :key="t.key" class="rtab" :class="{ on: tab === t.key, 'rtab-groups': t.key === 'groups' }" role="tab" :aria-selected="tab === t.key" :title="t.label" :aria-label="t.label" @click="tab = t.key">
           <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
             <g v-if="t.key === 'groups'"><circle cx="8" cy="9" r="3" fill="#f0b040" stroke="#a06a10"/><circle cx="16" cy="9" r="3" fill="#6fb6f0" stroke="#1f5d9e"/><path d="M2.5 19c0-3.6 2.4-5.4 5.5-5.4s5.5 1.8 5.5 5.4zM10.5 19c0-3.6 2.4-5.4 5.5-5.4s5.5 1.8 5.5 5.4z" fill="#e8eef5" stroke="#6b7f95"/></g>
             <g v-else-if="t.key === 'guide'"><path d="M4.5 4.5c2.6-.9 5.2-.7 7.5 1v14c-2.3-1.7-4.9-1.9-7.5-1z" fill="#6fb6f0" stroke="#1f5d9e"/><path d="M19.5 4.5c-2.6-.9-5.2-.7-7.5 1v14c2.3-1.7 4.9-1.9 7.5-1z" fill="#e8f3fd" stroke="#1f5d9e"/><path d="M6.5 8.2c1.4-.2 2.7 0 3.6.6M6.5 11.2c1.4-.2 2.7 0 3.6.6M14 8.8c.9-.6 2.2-.8 3.6-.6M14 11.8c.9-.6 2.2-.8 3.6-.6" stroke="#1f5d9e" stroke-width="1" stroke-linecap="round" fill="none"/></g>
