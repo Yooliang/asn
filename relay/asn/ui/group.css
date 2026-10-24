@@ -98,6 +98,10 @@
 .wake-tag{white-space:nowrap;padding:0 7px;border-radius:9px;background:rgba(107,123,140,.14)}
 .wake-tag.off{color:#a9b4c0;background:rgba(169,180,192,.12)}
 .wake-arrow{color:#98a5b3}
+/* 自己發的群組訊息的已讀人數（#224）：接在時間後面的同一行小字，不增加行高 */
+.read-n{margin-left:6px;font-size:11px;line-height:1;color:#6b7b8c;white-space:nowrap;cursor:default}
+.read-n.all{color:#1f7ad6}
 @media (prefers-color-scheme:dark){
   .wake-tags{color:#9fb0c3}.wake-tag.off{color:#6d7e91;background:rgba(109,126,145,.14)}.wake-tag{background:rgba(159,176,195,.14)}.wake-arrow{color:#7d8ea1}
+  .read-n{color:#9fb0c3}.read-n.all{color:#6eb5ff}
 }

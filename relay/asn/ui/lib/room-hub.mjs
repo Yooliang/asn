@@ -2,7 +2,7 @@
 // 不碰 DOM；後台的呼叫經 invoke（Rust 指令）與 groupApi。發言與主持人確認都要本人簽章，由 Rust 端帶憑證，這裡拿不到。
 // reactive 由頁面帶進來（Vue 的 reactive），測試用預設的原物件。
 import { confirmCards } from './groups.mjs'
-import { ROOM_FIRST_LOAD, ROOM_LOAD_FAIL_TEXT, mergeRoomLog, memberIdentity, needsRead, postError, readSince, roomErrorText, roomItems, roomLog } from './mobile-rooms.mjs'
+import { ROOM_FIRST_LOAD, ROOM_LOAD_FAIL_TEXT, applyReads, hasPendingReads, mergeRoomLog, memberIdentity, needsRead, postError, readSince, roomErrorText, roomItems, roomLog } from './mobile-rooms.mjs'
 import { groupErrorText } from './groups.mjs'
 
 export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd = 'relay_room_read', postCmd = 'relay_room_post', attachCmd = 'relay_send_attachment', visible = () => true, reactive = x => x }) {
@@ -31,18 +31,30 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
     const log = st.logs[id] ?? []
     const first = !log.length
     const unread = row.unread > 0
-    if (!first && !force && !needsRead(log, row.lastSeq) && !unread) return false
+    if (!first && !force && !needsRead(log, row.lastSeq) && !unread) return await refreshReceipts(id, ident, log)
     reading.add(id)
     try {
       // 後台只在讀到新訊息時才標已讀：未讀還在就多讀最後一則
       const since = unread && !first ? Math.max(0, readSince(log, row.lastSeq) - 1) : readSince(log, row.lastSeq)
       const r = await invoke(readCmd, { room: id, agent: ident.agent || null, since, limit: first ? ROOM_FIRST_LOAD : 200, mark: visible() })
       const mine = (room.mine ?? []).map(m => m?.member)
-      st.logs[id] = mergeRoomLog(log, roomLog(r?.messages, mine, room.members))
+      st.logs[id] = applyReads(mergeRoomLog(log, roomLog(r?.messages, mine, room.members)), r?.reads)
       if (visible()) for (const m of room.mine ?? []) if (m.member === ident.key) m.unread = 0
       st.note = ''
       return true
     } catch (e) { st.note = roomErrorText(e?.message) || ROOM_LOAD_FAIL_TEXT; return false } finally { reading.delete(id) }
+  }
+
+  // 沒有新訊息時：自己發的訊息還有人沒讀，就問一次後台「已讀 N」有沒有變（不標已讀、只讀最後一則之後＝不會有訊息內容）
+  async function refreshReceipts(id, ident, log) {
+    if (!hasPendingReads(log)) return false
+    try {
+      const r = await invoke(readCmd, { room: id, agent: ident.agent || null, since: log[log.length - 1].seq, limit: 1, mark: false })
+      const cur = st.logs[id] ?? log
+      const next = applyReads(cur, r?.reads)
+      if (next !== cur) { st.logs[id] = next; return true }
+    } catch { /* 舊後台或暫時連不上：維持原樣 */ }
+    return false
   }
 
   async function loadCards(id) {

@@ -22,6 +22,8 @@ export type RoomMessage = {
   seq: number; from: string; from_name?: string; trust: string; body: string; mentions: string[]; at: string;
   // 第 1a 期（多租戶群組）新增，舊後台沒有
   from_kind?: string; relation?: string; from_label?: string; from_display_label?: string; from_owner_name?: string | null; is_seed?: boolean; wake_ok?: boolean;
+  // 已讀人數（#224）：除發言者外、這則可見的成員中讀到這則的人數與總數；讀者這邊發的另有名單。舊後台沒有
+  read_count?: number; read_total?: number; read_by?: string[]; unread_by?: string[];
   // #231：第一次算出的叫醒結果（讀者看得到的成員，依順序；略過者 hold）。舊後台沒有
   wake_info?: { key: string; label: string; rank: number; hold: boolean; fb?: boolean; limited?: boolean }[] | null;
 };
@@ -368,7 +370,8 @@ export async function handleNodeRoomAction(deps: RoomDeps, me: { id: string }, a
         messages = out;
       }
     }
-    return { status: 200, body: { messages, last_seq: r.data.last_seq } };
+    // reads＝讀者這邊最近發的訊息的已讀狀況（#224，舊後台沒有就不附）：原樣帶給用戶端
+    return { status: 200, body: Array.isArray(r.data.reads) ? { messages, last_seq: r.data.last_seq, reads: r.data.reads } : { messages, last_seq: r.data.last_seq } };
   }
   if (action === "room_post") {
     const body = params.body;
