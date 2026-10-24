@@ -153,10 +153,12 @@ export function makeJevScorer(o: { url: string; key: string; model?: string; tim
 
 export type RoomRank = { cfg: RankConfig; score: (key: string, input: RankInput) => Promise<Record<string, number> | null> };
 /** 由環境變數組出排序判斷；沒開（JEV_RANK_ENABLED）回 null＝完全走固定順位。開了但缺 JEV_URL／JEV_KEY：每次回 null 並記「unset」 */
+/** Jev 服務的公開網址（與 Irori 的 jev.ts 同一個）；沒設 JEV_URL 就用它，只需要設金鑰 */
+export const DEFAULT_JEV_URL = "https://api.typesafe.ai/v1/systemone";
 export function rankFromEnv(get: Getenv = realEnv, fetchImpl?: typeof fetch): RoomRank | null {
   const cfg = rankConfig(get);
   if (!cfg.enabled) return null;
-  const url = (get("JEV_URL") ?? "").trim();
+  const url = (get("JEV_URL") ?? "").trim() || DEFAULT_JEV_URL;
   const key = (get("JEV_KEY") ?? "").trim();
   const scorer = url && key ? makeJevScorer({ url, key, model: get("JEV_MODEL")?.trim() || DEFAULT_MODEL, timeoutMs: cfg.timeoutMs, fetch: fetchImpl }) : null;
   const cache = cachedBy<Record<string, number>>();
