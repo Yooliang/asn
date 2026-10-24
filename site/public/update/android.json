@@ -1,8 +1,8 @@
 {
-  "version": "0.1.59",
-  "versionCode": 1059,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.59_android.apk",
-  "sha256": "172ece5a2222520e81ad31b825f88f8cc94170af9f79fa5a988ee8bb05824960",
-  "notes": "與電腦版同步的小修正",
+  "version": "0.1.60",
+  "versionCode": 1060,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.60_android.apk",
+  "sha256": "b484bab0a8ff7cfe8b3c9c3bd3fd0e29dbd70b3814e83cd03ad79e7171a0cb95",
+  "notes": "群組叫醒順序標籤、@ 選單修正、忙碌提示",
   "bytes": 9317860
 }
