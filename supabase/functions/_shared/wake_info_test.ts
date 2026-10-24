@@ -1,7 +1,7 @@
 // 群組訊息下方的順序標籤（#231）：叫醒結果第一次算出就存在訊息上。
 // 執行：SUPABASE_URL=http://x SUPABASE_SERVICE_ROLE_KEY=x deno test -A supabase/functions/_shared/wake_info_test.ts
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { handleNodeRoomAction, type RoomDeps, type RoomMember, wakeInfoOf } from "./rooms.ts";
+import { handleNodeRoomAction, type RoomDeps, type RoomMember, wakeInfoOf, wakeOrder } from "./rooms.ts";
 import { rankFromEnv } from "./wake_rank.ts";
 
 const AIS: RoomMember[] = [
@@ -69,4 +69,48 @@ Deno.test("room_read：Jev 的結果一併存下（略過者標 hold）；Jev �
   await handleNodeRoomAction(down.deps, ME, "room_read", { room: "r1", since: "0" });
   const info2 = down.calls.find((c) => c.fn === "asn_relay_room_wake_set")!.args.p_info as { key: string; hold: boolean }[];
   assertEquals(info2.map((e) => [e.key, e.hold]), [["H~H-主線", false], ["w02", false], ["aegis", false]]);
+});
+
+// ── 保底（#230）：真人發的訊息全員低分時，最高分者通過（fb）；AI 發的維持全略過 ──
+Deno.test("保底：真人訊息全員低分→最高分者當第一順位（hold:false、fb:true），其餘仍略過；同分用固定規則", () => {
+  const sc = { scores: { "H-主線（啟良）": 0.21, "W02（啟良）": 0.33, "牧陽 Aegis（啟良）": 0.33 }, min: 0.5, exemptMentioned: true };
+  const msg = { from: "~owner", trust: "owner", mentions: [] as string[] };
+  const info = wakeInfoOf(msg, AIS, "w02", sc)!;
+  // W02 與牧陽同分 0.33：W02 標示較小，勝出
+  assertEquals(info.map((e) => [e.key, e.rank, e.hold, e.fb]), [["w02", 1, false, true], ["H~H-主線", 0, true, undefined], ["aegis", 0, true, undefined]]);
+  const w = wakeOrder(msg, AIS, "w02", sc)!;
+  assertEquals([w.rank, w.total, w.hold, w.fb, w.before], [1, 1, undefined, true, []]);
+  const a = wakeOrder(msg, AIS, "aegis", sc)!;
+  assertEquals([a.rank, a.hold, a.fb], [0, true, undefined]);
+});
+
+Deno.test("保底：AI 發的訊息全員低分維持全部略過；已有人過門檻時行為不變", () => {
+  const low = { scores: { "H-主線（啟良）": 0.2, "W02（啟良）": 0.3, "牧陽 Aegis（啟良）": 0.4 }, min: 0.5, exemptMentioned: true };
+  const aiMsg = { from: "aegis", trust: "owner", mentions: [] as string[] }; // AI 發的、沒點名
+  const info = wakeInfoOf(aiMsg, AIS, "w02", low)!;
+  assert(info.length > 0 && info.every((e) => e.hold && e.fb === undefined));
+  assertEquals(wakeOrder(aiMsg, AIS, "w02", low)!.hold, true);
+  // 已有人過門檻：不啟動保底
+  const ok = { scores: { "H-主線（啟良）": 0.2, "W02（啟良）": 0.3, "牧陽 Aegis（啟良）": 0.6 }, min: 0.5, exemptMentioned: true };
+  const i2 = wakeInfoOf({ from: "~owner", trust: "owner", mentions: [] }, AIS, "w02", ok)!;
+  assertEquals(i2.map((e) => [e.key, e.rank, e.hold, e.fb]), [["aegis", 1, false, undefined], ["H~H-主線", 0, true, undefined], ["w02", 0, true, undefined]]);
+});
+
+Deno.test("保底：room_read 經 Jev 全低分真人訊息→寫回 wake_info 帶 fb；AI 訊息不帶；Jev 失敗仍固定順位", async () => {
+  const mk = (msg: Record<string, unknown>, rank: RoomDeps["rank"]) => {
+    const { deps, calls } = fake({ asn_relay_room_read: () => ({ key: "w02", last_seq: 2, messages: [msg] }), asn_relay_room_members: () => ({ key: "w02", members: AIS }), asn_relay_room_wake_set: () => ({ set: true }) });
+    return { deps: { ...deps, rank }, calls };
+  };
+  const infoOf = async (t: ReturnType<typeof mk>) => {
+    await handleNodeRoomAction(t.deps, ME, "room_read", { room: "r1", since: "0" });
+    return t.calls.find((c) => c.fn === "asn_relay_room_wake_set")!.args.p_info as { key: string; rank: number; hold: boolean; fb?: boolean }[];
+  };
+  // 候選依標示排序：H-主線、W02、牧陽
+  const human = await infoOf(mk(OWNER_MSG, rankFromEnv(envOn(), jevFetch([0.21, 0.33, 0.25]))));
+  assertEquals(human.map((e) => [e.key, e.rank, e.hold, e.fb]), [["w02", 1, false, true], ["H~H-主線", 0, true, undefined], ["aegis", 0, true, undefined]]);
+  const aiM = { seq: 2, from: "aegis", trust: "owner", body: "各位", mentions: [] as string[] };
+  const ai = await infoOf(mk(aiM, rankFromEnv(envOn(), jevFetch([0.21, 0.33]))));
+  assert(ai.every((e) => e.hold && e.fb === undefined));
+  const down = await infoOf(mk(OWNER_MSG, rankFromEnv(envOn(), (() => Promise.reject(new Error("net"))) as unknown as typeof fetch)));
+  assertEquals(down.map((e) => [e.key, e.hold, e.fb]), [["H~H-主線", false, undefined], ["w02", false, undefined], ["aegis", false, undefined]]);
 });

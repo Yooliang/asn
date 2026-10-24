@@ -23,7 +23,7 @@ export type RoomMessage = {
   // 第 1a 期（多租戶群組）新增，舊後台沒有
   from_kind?: string; relation?: string; from_label?: string; from_owner_name?: string | null; is_seed?: boolean; wake_ok?: boolean;
   // #231：第一次算出的叫醒結果（讀者看得到的成員，依順序；略過者 hold）。舊後台沒有
-  wake_info?: { key: string; label: string; rank: number; hold: boolean }[] | null;
+  wake_info?: { key: string; label: string; rank: number; hold: boolean; fb?: boolean }[] | null;
 };
 
 export const keyOf = (node: string, agent?: string | null) => (agent ? `${node}${WINDOW_SEP}${agent}` : node);
@@ -80,7 +80,7 @@ export function shouldRespond(
 // 被叫醒的集合＝這個讀者看得到的成員裡 shouldRespond 為真的 AI（真人不占順位；wake_ok 只有讀者自己的那份知道，別人的當成可叫醒）。
 // 排序用顯示標示（label，沒有就 name、key），不用成員 key：跨租戶時 key 是讀者視角的相對身分，不同讀者會排出不同順序。
 // 同一封信、同一份成員名單算出的結果固定；沒被叫醒回 null
-export type Wake = { rank: number; total: number; before: string[]; score?: number; hold?: true };
+export type Wake = { rank: number; total: number; before: string[]; score?: number; hold?: true; fb?: true };
 const isAiMember = (m: RoomMember) => !m.key.startsWith("~") && m.kind !== "owner" && m.kind !== "human" && m.member_kind !== "human";
 const wakeSortKey = (m: RoomMember) => m.label || m.name || m.key;
 type WakeMsg = { from: string; trust: string; mentions?: string[]; is_seed?: boolean; from_kind?: string; wake_ok?: boolean };
@@ -99,34 +99,50 @@ export function wokenAis(msg: WakeMsg, members: RoomMember[], selfKey: string): 
 /** 排序判斷的分數（以顯示標示為鍵）與門檻；有給就按分數排，沒給＝固定順位 */
 export type WakeScores = { scores: Record<string, number>; min: number; exemptMentioned?: boolean };
 /** 被叫醒的人依分數分成「通過」（高分在前，同分用固定規則）與「略過」（低於門檻、非明確點名） */
-function splitWoken(uniq: RoomMember[], msg: WakeMsg, rank?: WakeScores): { passers: RoomMember[]; held: RoomMember[]; sc: (m: RoomMember) => number | undefined } {
-  if (!rank) return { passers: uniq, held: [], sc: () => undefined };
+function splitWoken(uniq: RoomMember[], msg: WakeMsg, rank?: WakeScores, members: RoomMember[] = []): { passers: RoomMember[]; held: RoomMember[]; sc: (m: RoomMember) => number | undefined; fb: RoomMember | null } {
+  if (!rank) return { passers: uniq, held: [], sc: () => undefined, fb: null };
   const sc = (m: RoomMember) => rank.scores[wakeSortKey(m)];
   const exempt = (m: RoomMember) => !!rank.exemptMentioned && (msg.mentions ?? []).includes(m.key);
   const passes = (m: RoomMember) => sc(m) === undefined || sc(m)! >= rank.min || exempt(m);
   const passers = uniq.filter(passes);
   // 分數高的在前；同分用固定規則穩定排序
   passers.sort((a, b) => (sc(b) ?? 0) - (sc(a) ?? 0) || labelCmp(a, b));
-  return { passers, held: uniq.filter((m) => !passes(m)), sc };
+  let held = uniq.filter((m) => !passes(m));
+  // 保底（#230）：真人（含 owner）發的訊息，被叫醒的人全部低於門檻時，分數最高的一位通過，免得沒人理使用者；
+  // AI 發的訊息全低分維持全部略過（避免 AI 互相叫來叫去）。同分用固定規則穩定決勝
+  let fb: RoomMember | null = null;
+  if (!passers.length && held.length && senderIsHuman(msg, members)) {
+    held = [...held].sort((a, b) => (sc(b) ?? 0) - (sc(a) ?? 0) || labelCmp(a, b));
+    fb = held[0];
+    passers.push(fb);
+    held = held.slice(1);
+  }
+  return { passers, held, sc, fb };
+}
+// 發訊者是不是真人：先看成員名單（不是 AI 就是真人）；名單查不到（跨租戶）時只認 trust=owner；其餘保守當作 AI
+function senderIsHuman(msg: WakeMsg, members: RoomMember[]): boolean {
+  const s = members.find((m) => m.key === msg.from);
+  if (s) return !isAiMember(s);
+  return msg.from.startsWith("~") || (msg.trust === "owner" && msg.from_kind !== "ai");
 }
 export function wakeOrder(msg: WakeMsg, members: RoomMember[], selfKey: string, rank?: WakeScores): Wake | null {
   const uniq = wokenAis(msg, members, selfKey);
   if (!uniq) return null;
-  const { passers, held, sc } = splitWoken(uniq, msg, rank);
+  const { passers, held, sc, fb } = splitWoken(uniq, msg, rank, members);
   const me = uniq.find((m) => m.key === selfKey)!;
   const score = sc(me);
   if (held.includes(me)) return { rank: 0, total: passers.length, before: [], score, hold: true };
   const i = passers.findIndex((m) => m.key === selfKey);
-  return { rank: i + 1, total: passers.length, before: passers.slice(0, i).map(wakeSortKey), ...(score === undefined ? {} : { score }) };
+  return { rank: i + 1, total: passers.length, before: passers.slice(0, i).map(wakeSortKey), ...(score === undefined ? {} : { score }), ...(fb === me ? { fb: true as const } : {}) };
 }
 
 /** 存在訊息上的叫醒結果（#231）：key 是讀者視角的成員鍵（後台還原成真實鍵）；rank 從 1 起，被略過的 rank 為 0。只存順序與是否略過，不存內文 */
-export type WakeInfoEntry = { key: string; rank: number; hold: boolean; score?: number };
+export type WakeInfoEntry = { key: string; rank: number; hold: boolean; score?: number; fb?: true };
 export function wakeInfoOf(msg: WakeMsg, members: RoomMember[], selfKey: string, rank?: WakeScores): WakeInfoEntry[] | null {
   const uniq = wokenAis(msg, members, selfKey);
   if (!uniq) return null;
-  const { passers, held, sc } = splitWoken(uniq, msg, rank);
-  const ent = (m: RoomMember, r: number, hold: boolean): WakeInfoEntry => ({ key: m.key, rank: r, hold, ...(sc(m) === undefined ? {} : { score: Math.round(sc(m)! * 100) / 100 }) });
+  const { passers, held, sc, fb } = splitWoken(uniq, msg, rank, members);
+  const ent = (m: RoomMember, r: number, hold: boolean): WakeInfoEntry => ({ key: m.key, rank: r, hold, ...(sc(m) === undefined ? {} : { score: Math.round(sc(m)! * 100) / 100 }), ...(fb === m ? { fb: true as const } : {}) });
   return [...passers.map((m, i) => ent(m, i + 1, false)), ...held.sort(labelCmp).map((m) => ent(m, 0, true))];
 }
 
