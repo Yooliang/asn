@@ -443,7 +443,7 @@ test('通話（#99）：麥克風執行期才問、語音走系統內建，手�
 
 test('通話鈕只在對話頁工具列、只給 AI 夥伴；手機對話頁把通話接上', () => {
   const pane = read('ui', 'lib', 'chatpane.mjs')
-  assert.match(pane, /v-if="showCallBtn"[^>]*@click="startCall"/, '工具列的通話鈕')
+  assert.match(pane, /v-if="showCallBtn( && !displayOnly)?"[^>]*@click="startCall"/, '工具列的通話鈕（僅顯示條目沒有）')
   assert.match(pane, /const showCallBtn = computed\(\(\) => !!props\.callApi && !!call && canCallPartner\(props\.friend\)\)/, '顯示條件：手機傳了通話、對方是 AI 夥伴')
   assert.match(pane, /:callable="!!call && !callApi"/, '手機沒有上方功能列，不會多出第二顆通話鈕')
   assert.match(read('ui', 'm.html'), /<chat-pane[^>]*:call-api="callApi"[^>]*@call-state="onCallState"/)
