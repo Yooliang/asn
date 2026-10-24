@@ -48,7 +48,8 @@ test('接線守門：手機版傳 hide-busy-warn、標題列掛 is-busy、樣式
   assert.match(read('mobile.css'), /\.m-chathead\.is-busy\{background:rgba\(255,213,74,\.\d+\)/)
   const cp = read('lib/chatpane.mjs')
   assert.match(cp, /hideBusyWarn: \{ type: Boolean, default: false \}/)
-  assert.match(cp, /<div class="warn" v-if="warn">/)
+  assert.match(cp, /<div class="warn" v-if="warn === 'offline'">/)   // 離線仍是整排說明條
+  assert.match(cp, /<span class="to-busy" v-if="warn && warn !== 'offline'">/)   // 忙碌／離開改成頁首後面的黃色小標籤（手機版 warn 為 null 時不出現）
   assert.match(cp, /warnKind\(props\.friend\?\.status, \{ hideBusy: props\.hideBusyWarn \}\)/)
   assert.doesNotMatch(read('chat.html'), /hide-busy-warn/)
 })

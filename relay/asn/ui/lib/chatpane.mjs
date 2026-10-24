@@ -330,12 +330,12 @@ export const ChatPane = {
     <div class="conv-main">
       <div class="to-line" :class="{ 'is-offline': !isRoom && friend.status === 'offline' }"><span v-html="emo(friend.nick)"></span>
         <span class="to-psm" v-if="friend.psm" v-html="emo(friend.psm)"></span>
+        <span class="to-busy" v-if="warn && warn !== 'offline'">{{ STATUS[friend.status] }}，可能無法馬上回應</span>
       </div>
       <confirm-cards v-if="isRoom" :cards="roomCards" @decide="(id, ok) => $emit('group-decide', id, ok)"></confirm-cards>
-      <div class="warn" v-if="warn">
+      <div class="warn" v-if="warn === 'offline'">
         <i>i</i>
-        <span v-if="warn === 'offline'">{{ plain(friend.nick) }} 目前離線，訊息會先留在收發室，對方上線後才收得到。</span>
-        <span v-else>{{ plain(friend.nick) }} 的狀態是{{ STATUS[friend.status] }}，可能無法馬上回應。</span>
+        <span>{{ plain(friend.nick) }} 目前離線，訊息會先留在收發室，對方上線後才收得到。</span>
       </div>
       <div class="msgs" ref="msgsEl" aria-live="polite" @scroll.passive="onScroll">
         <div class="older-note" v-if="noteText">{{ noteText }}</div>

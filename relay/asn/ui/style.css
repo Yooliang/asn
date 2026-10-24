@@ -173,6 +173,7 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .conv-main,.compose-main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:3px;overflow:hidden}
 .to-line{padding:5px 10px;border-bottom:1px solid var(--line);background:linear-gradient(var(--panel-head),var(--panel-soft));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .to-psm{margin-left:8px;font-size:12px;color:var(--muted)}
+.to-busy{margin-left:8px;padding:1px 8px;border-radius:9px;font-size:12px;background:rgba(255,213,74,.75);border:1px solid rgba(217,176,42,.8);color:var(--fg,#333)}
 .warn{display:flex;gap:7px;align-items:center;padding:4px 10px;background:var(--warn-bg);border-bottom:1px solid var(--warn-line);font-size:12px}
 .warn i{flex:none;width:15px;height:15px;border-radius:50%;background:var(--title-fg);color:#fff;font:italic 700 11px/15px Georgia,serif;text-align:center}
 .msgs{flex:1;min-height:0;overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:8px;user-select:text;-webkit-user-select:text}
