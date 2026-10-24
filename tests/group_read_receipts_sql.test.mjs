@@ -1,4 +1,4 @@
-// 群組已讀人數（#224，migration 20261024180000_group_read_receipts.sql）。
+// 群組已讀人數（#224，migration 20261024190000_group_read_receipts.sql）。
 // 1. 靜態：交易內、不刪資料、新函式不授權給前台、整批訊息共用一份成員表（不為每則訊息各查一次）。
 // 2. 實跑（需要 @electric-sql/pglite；沒裝略過，pglite 測試不加 --test-force-exit）：
 //    - 人數＝除發言者外、這則可見的有效成員中 read_seq ≥ 該則 seq；真人與 AI 都算；隨成員讀取增加
@@ -12,7 +12,7 @@ import fs from 'node:fs'
 import crypto from 'node:crypto'
 
 const DIR = new URL('../supabase/migrations/', import.meta.url)
-const MIG = '20261024180000_group_read_receipts.sql'
+const MIG = '20261024190000_group_read_receipts.sql'
 const read = f => fs.readFileSync(new URL(f, DIR), 'utf8').replace(/\r\n/g, '\n').replace(/create extension if not exists \w+[^;]*;/g, '')
 const files = fs.readdirSync(DIR).filter(f => f.endsWith('.sql')).sort()
 
