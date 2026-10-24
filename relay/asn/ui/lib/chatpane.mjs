@@ -5,6 +5,7 @@ import { EMO, emo, fmt, fmtDate, initial, plain } from './text.mjs'
 import { composeHintTitle, composePlaceholder } from './compose.mjs'
 import { foldBarArrow, hasSideCol, isCollapsed, msgLayout, paneClasses, sideOf } from './merge.mjs'
 import { autoAvatarDataUrl } from './avatar.mjs'
+import { vendorIconSvg } from './vendor-icons.mjs'
 import { QUOTE_PREFIX, composeReply, findQuoted, replyTarget, splitQuote } from './reply-quote.mjs'
 import { applyMention, markMentions, mentionOptions, mentionQuery } from './mention.mjs'
 import { FILE_ACCEPT, formatBytes, photoExpired, photoTitle } from './photo.mjs'
@@ -268,6 +269,9 @@ export const ChatPane = {
     }
     let jumpTimer = null
     watch(() => props.friend?.id, () => { replying.value = null; jumpNote.value = '' })
+    const spkOf = m => props.friend?.spk?.[m.fk] ?? null   // 後台給的成員狀態 { vendor, off }；舊後台沒有就是 null（當在線、廠商不明）
+    const spkOff = m => spkOf(m)?.off === true
+    const spkVendor = m => vendorIconSvg(spkOf(m)?.vendor)   // 內建固定字串，沒有外部資料
     const speakerAv = m => autoAvatarDataUrl(m.av)   // 群組發言者的大頭貼：與個人名單同一套預設圖
     const msgKey = (m, i) => (m.id ? String(m.id) : `${m.t}:${i}`)
     const msgTier = m => tierOf(m)
@@ -326,7 +330,7 @@ export const ChatPane = {
     const docEl = ref(null)
     // 訊息內文裡的連結：不在 WebView 導覽，一律交給系統瀏覽器（Rust 端 open_link 再驗一次協定）
     const onBodyClick = ev => handleLinkClick(ev, url => globalThis.__TAURI__?.core?.invoke?.('open_link', { url }))
-    return { actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, isRoom, attachOk, opsItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendor, isRoom, attachOk, opsItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -349,7 +353,7 @@ export const ChatPane = {
         <template v-for="(m, i) in log" :key="i">
           <div v-if="m.k === 'sys'" class="sys" :class="{ nudge: m.nudge }">{{ m.text }}</div>
           <div v-else class="msg" :data-i="i" :class="['al-' + lay(m.k).align, { mine: m.k === 'me', 'act-on': actAt === i }]" @click="tapMsg(i, $event)">
-            <div class="m-av m-av-spk" v-if="m.av"><div class="dp xs" :style="{ '--h': friend.hue }"><span><img :src="speakerAv(m)" alt=""></span></div><span class="av-tag" v-if="m.kind === 'ai'">AI</span></div>
+            <div class="m-av m-av-spk" :class="{ 'is-off': spkOff(m) }" v-if="m.av"><div class="dp xs" :class="{ 'st-offline': spkOff(m) }" :style="{ '--h': friend.hue }"><span><img :src="speakerAv(m)" alt=""></span></div><span class="spk-vendor" v-if="m.kind === 'ai'" aria-hidden="true" v-html="spkVendor(m)"></span></div>
             <div class="m-av m-av-spk m-av-me" v-if="isRoom && m.k === 'me'"><div class="dp xs" :style="{ '--h': 205 }"><span><img :src="meAv" alt=""></span></div></div>
             <div class="m-av" v-if="lay(m.k).avatar && !m.badge && !m.av"><div class="dp xs" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span><img :src="friendAv" alt=""></span></div></div>
             <div class="m-main">

@@ -23,6 +23,18 @@ const oneLine = (s, n) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n
 const memberList = r => (Array.isArray(r?.mine) ? r.mine : [])
 // 這個群組裡「我」的未讀（我的各個成員身分加總）
 // 只算「我本人」的未讀（成員鍵以 ~ 開頭＝真人身分：~u:<帳號>、~owner）。我名下 AI 視窗各自的未讀要等它們的橋去讀才會清，不能算進我的徽章，否則數字會一直卡住
+// 每位 AI 成員的狀態（畫面用）：{ [成員鍵]: { vendor: 引擎名（小寫，沒有＝空字串）, off: 離線 } }。
+// 後台沒給 online 欄位（舊後台）就當在線；真人沒有狀態、不放進來
+export function speakerStates(members) {
+  const out = {}
+  for (const m of Array.isArray(members) ? members : []) {
+    if (!m || typeof m.key !== 'string' || !m.key) continue
+    const ai = m.member_kind === 'ai' || (m.member_kind !== 'human' && (m.kind === 'window' || m.kind === 'ai'))
+    if (!ai) continue
+    out[m.key] = { vendor: String(m.engine ?? '').trim().toLowerCase(), off: m.online === false }
+  }
+  return out
+}
 export const roomUnread = r => memberList(r).reduce((n, m) => n + (typeof m?.member === 'string' && m.member.startsWith('~') && Number.isInteger(m?.unread) && m.unread > 0 ? m.unread : 0), 0)
 
 // 名單上的群組列：最近有動靜的在前；搜尋字比對群組名
@@ -38,7 +50,7 @@ export function roomItems(rooms, { query = '', plainText = s => s } = {}) {
       id: r.id, chatId: roomChatId(r.id), name, count, unread: roomUnread(r), lastSeq: Number.isInteger(r.last_seq) ? r.last_seq : 0,
       last: r.last_body ? `${r.last_from_name ? `${r.last_from_name}：` : ''}${oneLine(r.last_body, 40)}` : '',
       at: Date.parse(r.last_at ?? r.created_at) || 0,
-      external: r.external === true, host: r.is_host === true, mentionable: mentionTargets(r.members),
+      external: r.external === true, host: r.is_host === true, mentionable: mentionTargets(r.members), spk: speakerStates(r.members),
     })
   }
   return rows.sort((a, b) => b.at - a.at)
@@ -63,7 +75,7 @@ export function memberIdentity(room, selfNode, windowName) {
 // 對話分頁用的假夥伴：沿用 ChatPane，群組標頭顯示群組名與人數
 export function roomPseudoFriend(row) {
   // external＝有別的帳號的成員（不能傳附件）
-  return { id: row.chatId, nick: row.name, psm: `${row.count} 位成員`, status: 'online', room: true, group: true, node: '', device: '', agent: '', hue: 205, dp: row.name.slice(0, 1), unread: 0, external: row.external === true, host: row.host === true, mentionable: row.mentionable ?? [] }
+  return { id: row.chatId, nick: row.name, psm: `${row.count} 位成員`, status: 'online', room: true, group: true, node: '', device: '', agent: '', hue: 205, dp: row.name.slice(0, 1), unread: 0, external: row.external === true, host: row.host === true, mentionable: row.mentionable ?? [], spk: row.spk ?? {} }
 }
 
 // 後台的訊息 → 對話記錄（ChatPane 的格式）。自己的成員身分發的算 me；who＝每則上的發言者名字
@@ -153,7 +165,7 @@ export function roomLog(messages, myKeys, members) {
     if (m.from_kind === 'system' || m.relation === 'system') { out.push({ k: 'sys', text, t, id, seq: m.seq }); continue }
     const isMe = m.relation ? m.relation === 'mine' : mine.has(m.from)
     const kind = kindOf(m)
-    out.push({ k: isMe ? 'me' : 'them', who: isMe ? '' : (labels.get(m.from) || fromLabel(m)), kind, badge: isMe ? '' : KIND_BADGE[kind] ?? '', av: isMe ? '' : speakerAvatarSeed(m.from), reply: replyOf(m.reply_to, labels), wake: wakeTags(m.wake_info), wk: Array.isArray(m.wake_info), rd: isMe && !m.is_seed ? readInfo(m) : null, text, t, id, seq: m.seq, seed: m.is_seed === true })
+    out.push({ k: isMe ? 'me' : 'them', who: isMe ? '' : (labels.get(m.from) || fromLabel(m)), kind, badge: isMe ? '' : KIND_BADGE[kind] ?? '', av: isMe ? '' : speakerAvatarSeed(m.from), fk: isMe || typeof m.from !== 'string' ? '' : m.from, reply: replyOf(m.reply_to, labels), wake: wakeTags(m.wake_info), wk: Array.isArray(m.wake_info), rd: isMe && !m.is_seed ? readInfo(m) : null, text, t, id, seq: m.seq, seed: m.is_seed === true })
   }
   return out
 }
