@@ -103,6 +103,11 @@ pub struct Wake {
     pub before: Vec<String>,
 }
 
+/// 後台依 Jev 分數判定「暫不通知」（#230）：`wake.hold == true`。舊後台沒有這個欄位＝false
+pub fn wake_hold(msg: &serde_json::Value) -> bool {
+    msg.get("wake").and_then(|w| w.get("hold")).and_then(serde_json::Value::as_bool).unwrap_or(false)
+}
+
 /// 讀後台給的 `wake`（{rank,total,before}）；沒有或格式不對＝None（當作第一順位、不延遲，與舊後台相同）
 pub fn wake_of(msg: &Value) -> Option<Wake> {
     let w = msg.get("wake").filter(|w| w.is_object())?;
@@ -370,6 +375,15 @@ mod tests {
         // 向量由 Node 的 roomUuid 算出（relay/machine/rooms.mjs）
         assert_eq!(room_uuid("R1", 4, "T"), "b9b2ac80-b796-bae6-8b0b-f70b8b3b01e4");
         assert_eq!(room_uuid("R1", 4, "T~T-視窗甲"), "42a79b48-f738-c144-659d-0c7967cbb524");
+    }
+
+    #[test]
+    fn 暫不通知_只認_wake_hold_true() {
+        use serde_json::json;
+        assert!(wake_hold(&json!({"wake": {"rank": 0, "total": 2, "before": [], "hold": true}})));
+        for m in [json!({}), json!({"wake": {"rank": 1, "total": 2}}), json!({"wake": {"hold": false}}), json!({"wake": {"hold": "true"}}), json!({"wake": 1})] {
+            assert!(!wake_hold(&m), "{m}");
+        }
     }
 
     #[test]

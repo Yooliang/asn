@@ -1130,6 +1130,11 @@ impl Core {
         if !self.roster_ok {
             return false;
         }
+        // Jev 分數低於門檻的人暫不通知（#230）：略過這則，游標照常前進
+        if rooms::wake_hold(msg) {
+            self.log.line(&format!("room={} #{} member={member}: skipped (Jev score below threshold)", room.get("id").and_then(Value::as_str).unwrap_or(""), json_u64(msg.get("seq"))));
+            return true;
+        }
         // 順位延遲（#230）：同時被叫醒多位時，第 N 順位先排隊 (N-1) × 間隔；排隊（已存檔）就算處理完，游標照常前進
         if let Some(w) = rooms::wake_of(msg) {
             let delay = rooms::stagger_delay_ms(&w, self.cfg.room_stagger_ms);
