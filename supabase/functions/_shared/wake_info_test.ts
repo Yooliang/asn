@@ -108,9 +108,11 @@ Deno.test("保底：room_read 經 Jev 全低分真人訊息→寫回 wake_info �
   // 候選依標示排序：H-主線、W02、牧陽
   const human = await infoOf(mk(OWNER_MSG, rankFromEnv(envOn(), jevFetch([0.21, 0.33, 0.25]))));
   assertEquals(human.map((e) => [e.key, e.rank, e.hold, e.fb]), [["w02", 1, false, true], ["H~H-主線", 0, true, undefined], ["aegis", 0, true, undefined]]);
-  const aiM = { seq: 2, from: "aegis", trust: "owner", body: "各位", mentions: [] as string[] };
-  const ai = await infoOf(mk(aiM, rankFromEnv(envOn(), jevFetch([0.21, 0.33]))));
-  assert(ai.every((e) => e.hold && e.fb === undefined));
+  // AI 發的沒 @ 訊息改走專用流程（wake_ai_silent_test.ts）：不套用保底，也不會寫出帶 fb 的結果
+  const aiM = { seq: 2, from: "aegis", from_kind: "ai", trust: "member", body: "各位", mentions: [] as string[] };
+  const aiT = mk(aiM, rankFromEnv(envOn(), jevFetch([0.21, 0.33])));
+  await handleNodeRoomAction(aiT.deps, ME, "room_read", { room: "r1", since: "0" });
+  assert(aiT.calls.filter((c) => c.fn === "asn_relay_room_wake_set").every((c) => (c.args.p_info as { fb?: boolean }[]).every((e) => e.fb === undefined)));
   const down = await infoOf(mk(OWNER_MSG, rankFromEnv(envOn(), (() => Promise.reject(new Error("net"))) as unknown as typeof fetch)));
   assertEquals(down.map((e) => [e.key, e.hold, e.fb]), [["H~H-主線", false, undefined], ["w02", false, undefined], ["aegis", false, undefined]]);
 });

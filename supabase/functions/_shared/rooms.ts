@@ -23,7 +23,7 @@ export type RoomMessage = {
   // 第 1a 期（多租戶群組）新增，舊後台沒有
   from_kind?: string; relation?: string; from_label?: string; from_display_label?: string; from_owner_name?: string | null; is_seed?: boolean; wake_ok?: boolean;
   // #231：第一次算出的叫醒結果（讀者看得到的成員，依順序；略過者 hold）。舊後台沒有
-  wake_info?: { key: string; label: string; rank: number; hold: boolean; fb?: boolean }[] | null;
+  wake_info?: { key: string; label: string; rank: number; hold: boolean; fb?: boolean; limited?: boolean }[] | null;
 };
 
 export const keyOf = (node: string, agent?: string | null) => (agent ? `${node}${WINDOW_SEP}${agent}` : node);
@@ -138,13 +138,46 @@ export function wakeOrder(msg: WakeMsg, members: RoomMember[], selfKey: string, 
 }
 
 /** 存在訊息上的叫醒結果（#231）：key 是讀者視角的成員鍵（後台還原成真實鍵）；rank 從 1 起，被略過的 rank 為 0。只存順序與是否略過，不存內文 */
-export type WakeInfoEntry = { key: string; rank: number; hold: boolean; score?: number; fb?: true };
+export type WakeInfoEntry = { key: string; rank: number; hold: boolean; score?: number; fb?: true; lim?: true };
 export function wakeInfoOf(msg: WakeMsg, members: RoomMember[], selfKey: string, rank?: WakeScores): WakeInfoEntry[] | null {
   const uniq = wokenAis(msg, members, selfKey);
   if (!uniq) return null;
   const { passers, held, sc, fb } = splitWoken(uniq, msg, rank, members);
   const ent = (m: RoomMember, r: number, hold: boolean): WakeInfoEntry => ({ key: m.key, rank: r, hold, ...(sc(m) === undefined ? {} : { score: Math.round(sc(m)! * 100) / 100 }), ...(fb === m ? { fb: true as const } : {}) });
   return [...passers.map((m, i) => ent(m, i + 1, false)), ...held.sort(labelCmp).map((m) => ent(m, 0, true))];
+}
+
+// ── AI 發的、沒有 @ 任何人的訊息（#230）：交給排序判斷（Jev）對「發言者以外的 AI 成員」打分，≥ 門檻的才叫醒 ──
+// 安全規則：判斷失敗／逾時／沒設定、輪數查詢或存入失敗，一律誰都不叫醒（不退回固定順位）；不套用全員低分的保底；
+// 達輪數上限不打 Jev，wake_info 全部略過並標 lim；結果以第一次存下的 wake_info 為準。
+type StoredWake = { key: string; label?: string; rank: number; hold: boolean }[];
+/** 這則是不是「AI 發的、沒點名任何人」的訊息（開頭紀錄、系統訊息、真人訊息都不是） */
+export function isSilentAiMsg(msg: { from: string; mentions?: string[]; is_seed?: boolean; from_kind?: string }, members: RoomMember[]): boolean {
+  if ((msg.mentions ?? []).length || msg.is_seed || msg.from_kind === "system" || msg.from_kind === "human") return false;
+  if (msg.from_kind === "ai") return true;
+  const s = members.find((m) => m.key === msg.from);
+  return !!s && isAiMember(s);
+}
+/** 候選：發言者以外、讀者看得到的 AI 成員（真人不列），依固定規則排序 */
+export function silentCandidates(msg: { from: string }, members: RoomMember[]): RoomMember[] {
+  const c = members.filter((m) => isAiMember(m) && m.key !== msg.from);
+  return [...new Map(c.map((m) => [m.key, m])).values()].sort(labelCmp);
+}
+/** 分數 → 要存的 wake_info：≥ 門檻者依分數高到低（同分固定規則）排順位，其餘略過；沒有保底。scores 為 null＝輪數上限，全部略過並標 lim */
+export function silentWakeInfo(cands: RoomMember[], scores: Record<string, number> | null, min: number): WakeInfoEntry[] {
+  if (!scores) return cands.map((m) => ({ key: m.key, rank: 0, hold: true, lim: true as const }));
+  const sc = (m: RoomMember) => scores[wakeSortKey(m)];
+  const pass = cands.filter((m) => sc(m) >= min).sort((a, b) => sc(b) - sc(a) || labelCmp(a, b));
+  const held = cands.filter((m) => !(sc(m) >= min));
+  const ent = (m: RoomMember, rank: number, hold: boolean): WakeInfoEntry => ({ key: m.key, rank, hold, score: Math.round(sc(m) * 100) / 100 });
+  return [...pass.map((m, i) => ent(m, i + 1, false)), ...held.map((m) => ent(m, 0, true))];
+}
+/** 從存下的 wake_info（讀者視角）算這位讀者的 for_me 與順位；不在名單或被略過＝不叫醒（略過者 for_me 必為 false，舊橋才不會立刻回） */
+export function wakeFromStored(info: StoredWake, selfKey: string): { for_me: boolean; wake?: Wake } {
+  const on = info.filter((e) => e && !e.hold && Number.isInteger(e.rank) && e.rank >= 1).sort((a, b) => a.rank - b.rank);
+  const i = on.findIndex((e) => e.key === selfKey);
+  if (i < 0) return { for_me: false };
+  return { for_me: true, wake: { rank: i + 1, total: on.length, before: on.slice(0, i).map((e) => e.label || e.key) } };
 }
 
 export type RoomDeps = {
@@ -204,6 +237,43 @@ export async function postMessage(
   return { status: 200, body: { seq: res.data.seq, mentions } };
 }
 
+// 無 @ 的 AI 訊息的叫醒結果。任何一步失敗都回「不叫醒」
+async function silentAiWake(
+  deps: RoomDeps, node: string, agent: string | null, room: string, m: RoomMessage, members: RoomMember[], selfKey: string, before: RoomMessage[],
+): Promise<{ for_me: boolean; wake?: Wake }> {
+  const none = { for_me: false };
+  try {
+    const cands = silentCandidates(m, members);
+    if (!cands.some((c) => c.key === selfKey)) return none;
+    if (Array.isArray(m.wake_info)) return wakeFromStored(m.wake_info, selfKey); // 第一次存下的為準
+    // 輪數上限（後台讀信時強制）：從最近一則真人發言起算，AI 叫醒了別的 AI 的訊息算一輪
+    const ch = await deps.rpc("asn_relay_room_ai_chain", { p_node: node, p_agent: agent, p_room: room, p_seq: m.seq, p_owner: false });
+    const count = ch.data?.count, limit = ch.data?.limit;
+    if (ch.error || typeof count !== "number" || typeof limit !== "number") return none;
+    let entries: WakeInfoEntry[];
+    if (count >= limit) {
+      entries = silentWakeInfo(cands, null, 0);
+    } else {
+      const rk = deps.rank;
+      if (!rk) return none; // 沒開／沒設定：誰都不叫醒，也不存（開了之後下一位讀者還能算）
+      const input: RankInput = {
+        body: m.body,
+        recent: before.map((x) => ({ from: x.from_name ?? x.from, body: x.body })),
+        candidates: [...new Map(cands.map((x) => [wakeSortKey(x), { id: wakeSortKey(x), label: wakeSortKey(x) }])).values()],
+      };
+      const sc = await rk.score(`${room}:${m.seq}:silent:${input.candidates.map((c) => c.id).sort().join("|")}`, input);
+      if (!sc) return none; // 逾時／出錯：不退回固定順位
+      entries = silentWakeInfo(cands, sc, rk.cfg.min);
+    }
+    // 先存再決定：存不下來（舊後台、出錯）就不叫醒，免得輪數無法計算；兩人同時算時以資料庫存下的版本為準
+    const res = await deps.rpc("asn_relay_room_wake_set", { p_node: node, p_agent: agent, p_room: room, p_seq: m.seq, p_info: entries });
+    if (res.error || !Array.isArray(res.data?.wake_info)) return none;
+    return wakeFromStored(res.data.wake_info, selfKey);
+  } catch {
+    return none;
+  }
+}
+
 // 節點（AI）呼叫的群組動作。me 是金鑰決定的節點；params 是查詢參數與 JSON body 合併後的物件。
 // 建群組、改置頂、加人、移人一律 403（只有帳號擁有者本人（登入身分）能做，連舊租戶角色節點的金鑰也一樣）
 export async function handleNodeRoomAction(deps: RoomDeps, me: { id: string }, action: string, params: Json): Promise<Reply> {
@@ -250,15 +320,23 @@ export async function handleNodeRoomAction(deps: RoomDeps, me: { id: string }, a
     });
     if (isReply(r)) return r;
     const selfKey = r.data.key as string;
-    let messages = (r.data.messages ?? []).map((m: RoomMessage) => ({ ...m, for_me: shouldRespond(m, selfKey) }));
+    // AI 發的、沒點名任何人的訊息：for_me 先一律 false，要等成員名單與排序判斷（含輪數上限）算完才可能轉真（失敗＝誰都不叫醒）
+    const silentAi = (m: RoomMessage) => m.from_kind === "ai" && !(m.mentions ?? []).length;
+    let messages = (r.data.messages ?? []).map((m: RoomMessage) => ({ ...m, for_me: shouldRespond(m, selfKey) && !silentAi(m) }));
     // 順位（#230）：有 for_me 的信才查成員名單；查不到就不附（橋當作第一順位，照舊立即處理）
-    if (messages.some((m: { for_me: boolean }) => m.for_me)) {
+    if (messages.some((m: RoomMessage & { for_me: boolean }) => m.for_me || (silentAi(m) && m.from !== selfKey && !m.is_seed))) {
       const mem = await deps.rpc("asn_relay_room_members", { p_node: me.id, p_agent: agent, p_room: room, p_owner: false });
       const members: RoomMember[] | null = !mem.error && Array.isArray(mem.data?.members) ? mem.data.members : null;
       if (members) {
         const out: (RoomMessage & { for_me: boolean; wake?: Wake })[] = [];
         for (let i = 0; i < messages.length; i++) {
           const m = messages[i] as RoomMessage & { for_me: boolean };
+          if (isSilentAiMsg(m, members)) {
+            if (m.from === selfKey) { out.push({ ...m, for_me: false }); continue; }
+            const res = await silentAiWake(deps, me.id, agent, room, m, members, selfKey, messages.slice(Math.max(0, i - 6), i));
+            out.push(res.wake ? { ...m, for_me: res.for_me, wake: res.wake } : { ...m, for_me: res.for_me });
+            continue;
+          }
           let scores: WakeScores | undefined;
           const woken = m.for_me ? wokenAis(m, members, selfKey) : null;
           if (woken && deps.rank) {

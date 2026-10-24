@@ -13,6 +13,7 @@ import fs from 'node:fs'
 
 const DIR = new URL('../supabase/migrations/', import.meta.url)
 const MIG = '20261023190000_group_ai_wake_limit.sql'
+const MIG2 = '20261024170000_ai_silent_wake.sql' // 之後把輪數算法移到 relay.room_ai_rounds，「真人重置」的還原驗證要改這份
 const read = f => fs.readFileSync(new URL(f, DIR), 'utf8').replace(/\r\n/g, '\n').replace(/create extension if not exists \w+[^;]*;/g, '')
 const files = fs.readdirSync(DIR).filter(f => f.endsWith('.sql')).sort()
 
@@ -202,7 +203,8 @@ test('還原驗證：拿掉 room_post 的上限檢查，第 6 則就不會被擋
 test('還原驗證：拿掉「真人發言重置」，真人發言後仍被擋', { skip }, async () => {
   const mutate = s => s.replace(/and m\.seq > coalesce\(\(select max\(h\.seq\)[\s\S]*?, 0\)\n/, '\n')
   assert.notEqual(mutate(read(MIG)), read(MIG), '改寫有生效')
-  const db = await boot({ mutate: { [MIG]: mutate } })
+  assert.notEqual(mutate(read(MIG2)), read(MIG2), '新定義的改寫也有生效')
+  const db = await boot({ mutate: { [MIG]: mutate, [MIG2]: mutate } })
   const room = await oneTenantRoom(db)
   await human(db, room, '開始')
   for (let i = 0; i < 5; i++) await aiPost(db, room, A, 'x' + i, [B])
