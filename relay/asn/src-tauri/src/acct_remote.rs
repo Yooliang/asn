@@ -1,7 +1,7 @@
 //! 遠端切換 Claude 帳號（經收發室的「切換帳號」指令）。
 //!
 //! 流程（權杖只在各自那台電腦搬，絕不進收發室）：
-//! 1. 每台 ASN 定期回報自己帳號庫的清單：只有 email、方案、是否使用中（`acct_report`）。
+//! 1. 每台 ASN 定期回報自己帳號庫的清單：email、方案、是否使用中，加上選填的剩餘額度（`acct_report`；額度來源見 claude_quota.rs）。
 //! 2. 發起端（擁有者設備）列出對方清單（`acct_list`）、選一個 email 送出（`acct_switch`）；
 //!    後端只收擁有者節點、同租戶、且 email 在對方最近一次回報的清單裡。
 //! 3. 對方 ASN 取走自己的待辦（`acct_switch_pending`）→ 預設跳出確認、使用者按了才在本機搬檔
@@ -11,6 +11,7 @@
 //! 指令只帶目標帳號的 email；本機只接受「自己剛從收發室取走、尚未處理」的指令編號，
 //! 所以介面端無法憑空要求切換，每個編號只能處理一次。
 use crate::claude_accounts::{self, AccountInfo};
+use crate::claude_quota::Quota;
 use crate::codex_accounts::CodexLogin;
 use crate::relay::Relay;
 use serde::Serialize;
@@ -37,7 +38,32 @@ pub fn valid_node(s: &str) -> bool {
 /// Codex 只放「目前登入」那一個（用 ChatGPT 帳號登入且有 email 才放；API 金鑰模式沒有帳號可顯示就不放）；
 /// 權杖、金鑰、帳號編號一律不碰：`CodexLogin` 本身就只有 email／方案／登入方式三個欄位。
 pub fn build_report(list: &[AccountInfo], codex: Option<&CodexLogin>) -> Value {
-    let mut rows: Vec<Value> = list.iter().take(19).map(|a| json!({ "vendor": "claude", "email": a.email, "plan": a.plan, "current": a.current })).collect();
+    build_report_with_quota(list, codex, &HashMap::new())
+}
+
+/// 同上，另外對「有額度紀錄」的 Claude 帳號帶上額度四欄（five_hour_pct、weekly_pct、reset_at、at，沒有的不帶；全部選填）。
+/// 額度只來自 `claude_quota` 記下的數字；沒有紀錄的帳號不帶任何額度欄位，由介面顯示「額度未知」。Codex 不帶額度。
+pub fn build_report_with_quota(list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>) -> Value {
+    let mut rows: Vec<Value> = list
+        .iter()
+        .take(19)
+        .map(|a| {
+            let mut row = json!({ "vendor": "claude", "email": a.email, "plan": a.plan, "current": a.current });
+            if let (Some(q), Some(o)) = (quotas.get(&a.email), row.as_object_mut()) {
+                if let Some(v) = q.five_hour_pct {
+                    o.insert("five_hour_pct".into(), json!(v));
+                }
+                if let Some(v) = q.weekly_pct {
+                    o.insert("weekly_pct".into(), json!(v));
+                }
+                if let Some(v) = &q.reset_at {
+                    o.insert("reset_at".into(), json!(v));
+                }
+                o.insert("at".into(), json!(q.at));
+            }
+            row
+        })
+        .collect();
     if let Some(c) = codex.filter(|c| c.mode == "chatgpt") {
         if let Some(email) = claude_accounts::normalize_email(&c.email) {
             let plan: String = c.plan.chars().filter(|ch| !ch.is_control()).take(30).collect();
@@ -97,12 +123,12 @@ pub fn decide(taken: &mut HashMap<String, (String, Instant)>, id: &str, allowed:
 }
 
 // ---------- 送給收發室的動作 ----------
-pub async fn report(relay: &Relay, list: &[AccountInfo], codex: Option<&CodexLogin>) -> Result<Value, String> {
-    let full = build_report(list, codex);
+pub async fn report(relay: &Relay, list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>) -> Result<Value, String> {
+    let full = build_report_with_quota(list, codex, quotas);
     let has_codex = full["accounts"].as_array().is_some_and(|a| a.iter().any(|r| r["vendor"] == "codex"));
     match relay.api("acct_report", Some(full)).await {
         // 舊後台只認 claude，看到 codex 會整份退回：退一步只回報 Claude，不讓原本的回報壞掉
-        Err(_) if has_codex => relay.api("acct_report", Some(build_report(list, None))).await,
+        Err(_) if has_codex => relay.api("acct_report", Some(build_report_with_quota(list, None, quotas))).await,
         r => r,
     }
 }

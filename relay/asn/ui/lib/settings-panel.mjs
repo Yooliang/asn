@@ -12,6 +12,7 @@ import { accountLine } from './claude-accounts.mjs'
 import { catByKey, normalizeCatKey } from './settings-cats.mjs'
 import { vendorIconSvg } from './vendor-icons.mjs'
 import { USAGE_NOTE } from './usage.mjs'
+import { quotaView } from './account-quota.mjs'
 
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
 export const SETTING_OPS = [
@@ -70,7 +71,7 @@ export const SettingsPanel = {
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return {
       fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions,
-      cat, catIcon, devs, hiddenDevs, curIdx, curDev, curVendors, tabsEl, canL, canR, updScroll, scrollTabs, pick, vendorIcon: vendorIconSvg,
+      cat, catIcon, devs, hiddenDevs, curIdx, curDev, curVendors, tabsEl, canL, canR, updScroll, scrollTabs, pick, vendorIcon: vendorIconSvg, qv: a => quotaView(a),
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL,
       CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS, DIMS,
@@ -181,6 +182,11 @@ export const SettingsPanel = {
                             <button class="aero-btn" type="button" @click="act('acct-switch', a.email)" :disabled="st.accounts.busy || a.current">切換</button>
                             <button class="aero-btn" type="button" @click="act('acct-remove', a.email)" :disabled="st.accounts.busy">{{ st.accounts.confirmDel === a.email ? '確認刪除' : '刪除' }}</button>
                           </span>
+                          <span class="dv-quota" :class="{ stale: qv(a).stale, out: qv(a).exhausted }">
+                            <span>{{ qv(a).text }}</span>
+                            <span v-if="qv(a).resetText">・{{ qv(a).resetText }}</span>
+                            <span v-if="qv(a).meta">（{{ qv(a).meta }}）</span>
+                          </span>
                         </li>
                       </ul>
                       <div class="dv-none" v-else>還沒有加入過帳號。</div>
@@ -200,6 +206,11 @@ export const SettingsPanel = {
                             <span class="dv-plan" v-if="a.plan">{{ a.plan }}</span>
                             <span class="dv-cur" v-if="a.current">使用中</span>
                             <button class="aero-btn" type="button" v-else-if="v.key === 'claude' && !curDev.self && (v.switchable || v.switchHint)" :disabled="!v.switchable" @click="act('device-switch', { node: curDev.key, email: a.email })">切換</button>
+                          </span>
+                          <span class="dv-quota" :class="{ stale: a.quota.stale, out: a.quota.exhausted }" v-if="a.quota">
+                            <span>{{ a.quota.text }}</span>
+                            <span v-if="a.quota.resetText">・{{ a.quota.resetText }}</span>
+                            <span v-if="a.quota.meta">（{{ a.quota.meta }}）</span>
                           </span>
                         </li>
                       </ul>

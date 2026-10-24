@@ -57,6 +57,8 @@ mod claude_accounts;
 mod claude_json;
 #[cfg(desktop)]
 mod claude_mod;
+#[cfg(desktop)]
+mod claude_quota;
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 mod cloud_invite;
@@ -305,7 +307,9 @@ async fn acct_remote_report(app: State<'_, App>) -> Result<Value, String> {
     let list = tauri::async_runtime::spawn_blocking(claude_accounts::local_list).await.map_err(|e| e.to_string())?;
     // Codex 目前登入（只有 email／方案）；讀不到或沒登入就不放，不影響 Claude 的回報
     let codex = tauri::async_runtime::spawn_blocking(codex_accounts::codex_account_current).await.ok().and_then(|r| r.ok()).flatten();
-    acct_remote::report(relay.as_ref(), &list, codex.as_ref()).await
+    // 各帳號上次記下的額度（沒有紀錄的帳號不帶額度欄位）
+    let quotas = tauri::async_runtime::spawn_blocking(|| claude_quota::load_all(&claude_accounts::claude_home())).await.unwrap_or_default();
+    acct_remote::report(relay.as_ref(), &list, codex.as_ref(), &quotas).await
 }
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
@@ -1032,7 +1036,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
-            claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_mod::claude_mod_status,
+            claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_mod::claude_mod_status, claude_quota::claude_quota_all,
             codex_accounts::codex_account_current, usage::usage_summary,
             acct_remote_report, acct_remote_list, acct_remote_request, acct_remote_status, acct_remote_pending, acct_remote_apply, acct_remote_decline, acct_remote_trust_get, acct_remote_trust_set,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,

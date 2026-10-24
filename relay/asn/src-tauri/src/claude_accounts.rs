@@ -382,6 +382,12 @@ fn saved_accounts(home: &Path) -> Vec<Saved> {
     v
 }
 
+/// 目前登入的 email（只看 .claude.json 裡的 oauthAccount.emailAddress，不碰任何權杖檔）；沒登入回 None
+pub fn current_email(home: &Path) -> Option<String> {
+    let (frag, _) = current_fragment(home).ok().flatten()?;
+    email_of_fragment(&frag)
+}
+
 /// 目前登入的 email 與方案（方案只取權杖檔的 subscriptionType 這一個字串欄位）；沒登入回 None
 pub fn current_login(home: &Path) -> Option<AccountInfo> {
     let (frag, uuid) = current_fragment(home).ok().flatten()?;
