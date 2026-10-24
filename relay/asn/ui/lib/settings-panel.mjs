@@ -17,7 +17,7 @@ import { USAGE_NOTE } from './usage.mjs'
 export const SETTING_OPS = [
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-add', 'acct-auto', 'acct-trust', 'devices-refresh', 'device-switch',
-  'closeTo', 'autostart', 'bridge-enable', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'avatar-remove',
+  'closeTo', 'autostart', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'avatar-remove',
 ]
 
 export const SettingsPanel = {

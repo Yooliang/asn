@@ -908,7 +908,6 @@ const app = createApp({
       bridge.busy = true
       try { applyBridgeStatus(await fn()) } catch (e) { bridge.error = String(e?.message ?? e); say(bridge.error) } finally { bridge.busy = false; bridge.confirm = false }
     }
-    const setBridgeEnabled = on => runBridge(() => invoke('bridge_set_enabled', { on }))
     const setBridgeRemoteLaunch = on => runBridge(() => invoke('bridge_set_remote_launch', { on }))
     const setBridgeUnaddressed = name => runBridge(() => invoke('bridge_set_unaddressed_to', { name: String(name ?? '') }))
     const takeoverBridge = () => runBridge(() => invoke('bridge_takeover', { confirmed: true }))
@@ -1143,7 +1142,6 @@ const app = createApp({
         case 'device-switch': await (typeof value === 'object' && value ? openDeviceAcct(String(value.node ?? ''), String(value.email ?? '')) : openDeviceAcct(String(value ?? ''))); break
         case 'closeTo': await setCloseTo(value); break
         case 'autostart': await setAutostart(value === true); break
-        case 'bridge-enable': await setBridgeEnabled(value === true); break
         case 'bridge-launch': await setBridgeRemoteLaunch(value === true); break
         case 'bridge-unaddressed': await setBridgeUnaddressed(value); break
         case 'bridge-takeover': bridge.confirm = true; break
