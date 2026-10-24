@@ -45,7 +45,11 @@
       "../../claude-mod/hooks/register.ts": "claude-mod/hooks/register.ts",
       "../../claude-mod/hooks/status.ts": "claude-mod/hooks/status.ts",
       "../../claude-mod/skills/asn/SKILL.md": "claude-mod/skills/asn/SKILL.md",
-      "../CHANGELOG.md": "claude-mod/skills/asn/CHANGELOG.md"
+      "../CHANGELOG.md": "claude-mod/skills/asn/CHANGELOG.md",
+      "../../pi-extension/index.ts": "pi-extension/index.ts",
+      "../../pi-extension/lib.mjs": "pi-extension/lib.mjs",
+      "../../pi-extension/inbox.mjs": "pi-extension/inbox.mjs",
+      "../../pi-extension/package.json": "pi-extension/package.json"
     },
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
     "windows": { "nsis": { "installMode": "currentUser", "languages": ["TradChinese"], "installerHooks": "installer-hooks.nsh" } }

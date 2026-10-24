@@ -130,31 +130,24 @@ pub fn build_default_profiles(home: &Path) -> HashMap<String, Profile> {
             },
         );
     }
-    if resolve_binary("pi").is_some() {
-        let comspec = if cfg!(windows) {
-            std::env::var("ComSpec").unwrap_or_else(|_| "cmd.exe".into())
-        } else {
-            "/bin/sh".into()
-        };
-        profiles.insert(
-            "pi".into(),
-            Profile {
-                label: "pi（互動視窗，實驗）".into(),
-                mode: LaunchMode::Window,
-                engine: "pi".into(),
-                command: comspec,
-                args: if cfg!(windows) {
-                    vec!["/c".into(), "start".into(), "pi".into(), "{name}".into()]
-                } else {
-                    vec!["-lc".into(), "pi".into()]
-                },
-                disabled: true,
-                disabled_reason: "pi 互動視窗與收發室整合尚在擴充，請先在終端機手動開 pi".into(),
-            },
-        );
+    if let Some(cmd) = resolve_binary("pi") {
+        profiles.insert("pi".into(), pi_profile(&cmd.to_string_lossy()));
     }
     let _ = home; // cwd templates 由機器橋處理背景工作者
     profiles
+}
+
+/// pi 互動視窗：直接執行 pi；載入收信擴充、名字、第一句話由 launch/pi.rs 在開窗前補上（找不到擴充會報錯）
+pub(crate) fn pi_profile(cmd: &str) -> Profile {
+    Profile {
+        label: "pi（互動視窗）".into(),
+        mode: LaunchMode::Window,
+        engine: "pi".into(),
+        command: cmd.to_string(),
+        args: vec![],
+        disabled: false,
+        disabled_reason: String::new(),
+    }
 }
 
 pub fn bootstrap_config() -> Option<(HashMap<String, Profile>, Vec<PathBuf>, u32)> {
@@ -164,4 +157,18 @@ pub fn bootstrap_config() -> Option<(HashMap<String, Profile>, Vec<PathBuf>, u32
         return None;
     }
     Some((profiles, default_cwd_allow(&home), 6))
+}
+
+#[cfg(test)]
+mod pi_tests {
+    use super::*;
+
+    #[test]
+    fn pi_profile_可啟動_互動視窗_不再是停用() {
+        let p = pi_profile(r"C:\npm\pi.cmd");
+        assert!(!p.disabled && p.disabled_reason.is_empty());
+        assert_eq!(p.mode, LaunchMode::Window);
+        assert_eq!(p.engine, "pi");
+        assert_eq!(p.command, r"C:\npm\pi.cmd");
+    }
 }

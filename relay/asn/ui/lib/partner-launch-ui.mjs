@@ -66,8 +66,13 @@ export function profileModeFor(profileId) {
   return MODEL_CATALOG.find(m => m.profileId === profileId)?.mode ?? 'window'
 }
 
+/** 互動式、無法無人值守的模型（pi）：只能前台，不給背景選項 */
+export function foregroundOnlyProfile(profileId) {
+  return MODEL_CATALOG.find(m => m.profileId === profileId)?.foregroundOnly === true
+}
+
 export function showDisplayModeChoice(profileId) {
-  return profileModeFor(profileId) === 'window'
+  return profileModeFor(profileId) === 'window' && !foregroundOnlyProfile(profileId)
 }
 
 export function engineForProfile(profileId) {

@@ -4,6 +4,7 @@ pub(crate) mod console;
 pub(crate) mod console_resolve;
 pub(crate) mod cwds;
 pub(crate) mod local;
+pub(crate) mod pi;
 pub(crate) mod prefs;
 pub(crate) mod profiles;
 mod resume;
@@ -41,6 +42,9 @@ pub struct LocalLaunchReq {
     /// true＝不接續舊對話、強制新開（預設 false：有同名舊對話就接續）
     #[serde(default)]
     pub fresh: bool,
+    /// 第一句話（目前只有 pi 用：當成開場訊息帶進啟動參數）
+    #[serde(default)]
+    pub first_message: String,
 }
 
 #[derive(Serialize, Deserialize)]

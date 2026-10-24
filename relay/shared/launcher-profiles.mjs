@@ -94,7 +94,7 @@ function profilePi(cmd, platform) {
       ? ['/c', 'start', 'pi', '{name}']
       : ['-lc', `${shellQuote(cmd)}`],
     disabled: true,
-    disabledReason: 'pi 互動視窗與收發室整合尚在擴充，請先在終端機手動開 pi',
+    disabledReason: 'pi 請從 ASN 桌面程式的「開新夥伴」開啟（要一併載入收信擴充）',
   }
 }
 
@@ -125,5 +125,5 @@ export const MODEL_CATALOG = [
   { id: 'codex', toolId: 'codex', profileId: 'codex', label: 'Codex', mode: 'window', modeLabel: '會開一個視窗' },
   { id: 'gemini', toolId: 'agy', profileId: 'gemini', label: 'Gemini', mode: 'background', modeLabel: '在背景執行' },
   { id: 'grok', toolId: 'grok', profileId: 'grok', label: 'Grok', mode: 'background', modeLabel: '在背景執行' },
-  { id: 'pi', toolId: 'pi', profileId: 'pi', label: 'pi', mode: 'window', modeLabel: '會開一個視窗' },
+  { id: 'pi', toolId: 'pi', profileId: 'pi', label: 'pi', mode: 'window', modeLabel: '會開一個互動視窗（只能開在前台）', foregroundOnly: true },
 ]
