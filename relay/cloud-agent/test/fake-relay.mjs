@@ -12,7 +12,7 @@ export async function startFakeRelay({ node = 'grok', rosterStatus = 200, onAck 
     { id: node, name: node, online: true, presence: 'live', agents: [] },
     { id: 'W', name: '工作', online: false, presence: 'idle', agents: [] },
   ]
-  const st = { mails: [], reqs: [], sent: [], rosters: [], acks: [], rosterStatus, roomListStatus, roomReadStatus: 200, rooms: [], roomMsgs: {}, members: members ?? defaultMembers, url: '', port: 0 }
+  const st = { mails: [], reqs: [], sent: [], rosters: [], acks: [], rosterStatus, roomListStatus, roomReadStatus: 200, roomPostStatus: 200, posts: [], rooms: [], roomMsgs: {}, members: members ?? defaultMembers, url: '', port: 0 }
   let inboxFailsLeft = inboxFailRemaining
   const readBody = req => new Promise(r => { let b = ''; req.on('data', d => (b += d)); req.on('end', () => r(b ? JSON.parse(b) : null)) })
   const srv = http.createServer(async (req, res) => {
@@ -46,7 +46,7 @@ export async function startFakeRelay({ node = 'grok', rosterStatus = 200, onAck 
     // 群組：st.rooms＝[{id,name,mine:[{member}]}]、st.roomMsgs[房號]＝訊息（seq 遞增）；room_read 一律帶 since（照後端：不帶會推進已讀）
     if (action === 'room_list') {
       if (st.roomListStatus !== 200) return out(st.roomListStatus, { error: 'forbidden' })
-      return out(200, { rooms: st.rooms.map(r => ({ ...r, last_seq: (st.roomMsgs[r.id] ?? []).at(-1)?.seq ?? 0 })) })
+      return out(200, { rooms: st.rooms.map(r => ({ ...r, last_seq: (st.roomMsgs[r.id] ?? []).at(-1)?.seq ?? 0, last_body: (st.roomMsgs[r.id] ?? []).at(-1)?.body, last_from_name: (st.roomMsgs[r.id] ?? []).at(-1)?.from_name })) })
     }
     if (action === 'room_read') {
       if (st.roomReadStatus !== 200) return out(st.roomReadStatus, { error: 'server_error' })
@@ -54,6 +54,15 @@ export async function startFakeRelay({ node = 'grok', rosterStatus = 200, onAck 
       if (!st.rooms.some(r => r.id === room)) return out(403, { error: 'not_member' })
       const all = st.roomMsgs[room] ?? []
       return out(200, { messages: all.filter(m => m.seq > since).slice(0, limit), last_seq: all.at(-1)?.seq ?? 0 })
+    }
+    if (action === 'room_post') {
+      if (st.roomPostStatus !== 200) return out(st.roomPostStatus, { error: 'rate_limited' })
+      if (!st.rooms.some(r => r.id === body?.room)) return out(403, { error: 'not_member' })
+      if (typeof body?.body !== 'string' || !body.body) return out(400, { error: 'bad_body' })
+      const seq = (st.roomMsgs[body.room].at(-1)?.seq ?? 0) + 1
+      st.posts.push(body)
+      st.roomMsgs[body.room].push({ seq, from: body.from_agent ? `${node}~${body.from_agent}` : node, from_name: body.from_agent ?? node, trust: 'member', at: '2026-10-25T09:00:00Z', body: body.body, for_me: false })
+      return out(200, { seq, mentions: [] })
     }
     if (action === 'roster') {
       st.rosters.push(body)
