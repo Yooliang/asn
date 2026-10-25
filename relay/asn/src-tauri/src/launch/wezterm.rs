@@ -498,4 +498,41 @@ mod tests {
         let e = w2.start(Path::new("C:/work"), &["agy.exe".to_string()]).unwrap_err();
         assert!(e.contains("通訊檔仍未出現"));
     }
+
+    /// 真的 WezTerm 實測（預設不跑，會在桌面開一個視窗）：
+    /// ASN_WEZTERM_DIR=<隔離副本資料夾> cargo test --lib wezterm::tests::live -- --ignored --nocapture
+    /// 開 cmd.exe 視窗 → list → 單行注入加 Enter → get_text 讀回 → 開第二個 pane → 只結束自己記下的視窗程序。
+    #[test]
+    #[ignore]
+    fn live_start_inject_read_and_cleanup() {
+        let fs = RealFs;
+        let dir = locate(&fs).expect("請設定 ASN_WEZTERM_DIR");
+        let tmp = std::env::temp_dir().join(format!("asn-wez-live-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let cfg = tmp.join("wezterm.lua");
+        std::fs::write(&cfg, "return {}").unwrap();
+        let runner = RealRunner;
+        let w = WezTerm::with_default_home(dir, cfg, &runner, &fs);
+        let win = w.start(&tmp, &["cmd.exe".to_string()]).expect("啟動");
+        let result = (|| -> Result<(), String> {
+            std::thread::sleep(Duration::from_millis(1500));
+            let panes = w.list(&win.sock)?;
+            assert!(!panes.is_empty(), "list 應該有 pane");
+            let pid0 = panes[0].pane_id;
+            w.send_line_and_enter(&win.sock, pid0, "echo live-ok
+第二行")?;
+            std::thread::sleep(Duration::from_millis(1200));
+            let t = w.get_text(&win.sock, pid0, None)?;
+            println!("--- get_text ---
+{t}");
+            assert!(t.contains("live-ok"), "讀回應該含 live-ok：{t}");
+            let p2 = w.spawn(&win.sock, &tmp, &["cmd.exe".to_string()])?;
+            assert!(p2 != pid0, "新 pane 編號應不同");
+            Ok(())
+        })();
+        // 只結束自己啟動並記下的視窗程序（含它帶起的子行程樹）
+        let _ = std::process::Command::new("taskkill").args(["/PID", &win.gui_pid.to_string(), "/T", "/F"]).output();
+        let _ = std::fs::remove_dir_all(&tmp);
+        result.expect("實測失敗");
+    }
 }
