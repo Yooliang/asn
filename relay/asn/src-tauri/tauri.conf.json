@@ -49,6 +49,7 @@
       "../../pi-extension/index.ts": "pi-extension/index.ts",
       "../../pi-extension/lib.mjs": "pi-extension/lib.mjs",
       "../../pi-extension/inbox.mjs": "pi-extension/inbox.mjs",
+      "../../pi-extension/control.mjs": "pi-extension/control.mjs",
       "../../pi-extension/package.json": "pi-extension/package.json"
     },
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
