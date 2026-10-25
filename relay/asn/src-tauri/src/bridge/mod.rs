@@ -207,6 +207,7 @@ pub fn start_with(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>, laun
         events: ev_tx,
         notify,
         pids: engines::PidBook::new(&cfg.work_dir),
+        data_dir: cfg.data_dir.clone(),
     };
     let engine_set = engines::build(&ectx, cfg.engines.as_deref());
     if let Some(e) = &engine_set {

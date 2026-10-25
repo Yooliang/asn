@@ -262,7 +262,7 @@ test('依引擎決定哪幾項能用（項目一律固定七項）：Claude 前�
     assert.ok(Object.values(why).every(r => !/[A-Za-z]{4,}/.test(r.replace(/ASN/g, ''))), '原因不夾英文')
     assert.equal(partnerEngine(W('H', 'g', { engine })), 'acp')
   }
-  for (const [f, reason] of [[W('G', 'Grok', { engine: 'grok', kind: 'grok' }), REASON.cloud], [W('G', 'Grok', { engine: 'cloud' }), REASON.cloud], [W('G', 'Grok', { engine: 'claude', kind: 'cloud-agent' }), REASON.cloud], [W('H', '小碼', { engine: 'codex' }), REASON.otherEngine], [W('H', '小皮', { engine: 'pi' }), REASON.otherEngine]]) {
+  for (const [f, reason] of [[W('G', 'Grok', { engine: 'grok', kind: 'grok' }), REASON.cloud], [W('G', 'Grok', { engine: 'cloud' }), REASON.cloud], [W('G', 'Grok', { engine: 'claude', kind: 'cloud-agent' }), REASON.cloud], [W('H', '小碼', { engine: 'codex' }), REASON.otherEngine]]) {
     const items = menuItems(f, ctx)
     assert.deepEqual(items.map(i => i.key), MENU_KEYS, JSON.stringify(f))
     assert.ok(items.every(i => !i.ok && i.reason === reason), JSON.stringify(f))

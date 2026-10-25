@@ -77,6 +77,9 @@ struct FakeEnv {
     /// 模擬前任收到信就把交接寫好
     write_on_tell: AtomicBool,
     tell_fails: AtomicBool,
+    /// pi 視窗的家目錄（登記檔與控制檔）；pi_reply＝假擴充每次被等待時要回的結果（None＝不回，模擬 pi 忙碌）
+    pi_home: PathBuf,
+    pi_reply: Mutex<Option<Value>>,
 }
 
 impl OpsEnv for FakeEnv {
@@ -132,6 +135,28 @@ impl OpsEnv for FakeEnv {
     }
     fn handoff_poll_ms(&self) -> u64 {
         1
+    }
+    fn pi_home(&self) -> PathBuf {
+        self.pi_home.clone()
+    }
+    fn pi_wait_ms(&self) -> u64 {
+        1000
+    }
+    fn pi_sleep(&self, _ms: u64) {
+        let Some(reply) = self.pi_reply.lock().unwrap().clone() else { return };
+        let dir = self.pi_home.join(".asn").join("pi-control").join("psid");
+        let Ok(rd) = std::fs::read_dir(&dir) else { return };
+        for e in rd.flatten() {
+            let n = e.file_name().to_string_lossy().to_string();
+            let Some(id) = n.strip_suffix(".json") else { continue };
+            if id.ends_with(".result") {
+                continue;
+            }
+            let mut r = reply.clone();
+            r["v"] = json!(1);
+            r["id"] = json!(id);
+            std::fs::write(dir.join(format!("{id}.result.json")), r.to_string()).unwrap();
+        }
     }
 }
 
@@ -247,6 +272,8 @@ fn rig(o: Opt) -> Rig {
         progress: Mutex::new(vec![]),
         write_on_tell: AtomicBool::new(true),
         tell_fails: AtomicBool::new(false),
+        pi_home: tmp.path().join("pihome"),
+        pi_reply: Mutex::new(None),
     });
     let status = tmp.path().join("status");
     let control = tmp.path().join("control");
@@ -1648,4 +1675,77 @@ fn 規則3_程序比_session_更早建立或查不到時間_照常當活視窗_�
         assert_eq!(res.status, "ok", "{created:?}: {}", res.detail);
         assert!(r.terminated().contains(&220));
     }
+}
+
+// ================================================================================================
+// pi 視窗：切換模型（走擴充的控制檔管道）
+// ================================================================================================
+
+fn put_pi_window(r: &Rig, name: &str, pid: u32) {
+    let d = r.env.pi_home.join(".asn").join("pi-windows");
+    std::fs::create_dir_all(&d).unwrap();
+    let v = json!({ "v": 1, "engine": "pi", "sessionId": "psid", "name": name, "pid": pid, "cwd": "D:/g/x", "state": "idle", "at": NOW });
+    std::fs::write(d.join("psid.json"), v.to_string()).unwrap();
+    r.os().alive.lock().unwrap().insert(pid);
+}
+
+#[test]
+fn pi_模型代號_後台格式還原() {
+    assert_eq!(pi_model_spec("anthropic[claude-sonnet-5]"), "anthropic/claude-sonnet-5");
+    assert_eq!(pi_model_spec("claude-sonnet-5"), "claude-sonnet-5");
+    assert_eq!(pi_model_spec("xai/grok-4"), "xai/grok-4");
+    assert_eq!(pi_model_spec("a[b[c]]"), "a[b[c]]");
+}
+
+#[test]
+fn pi_切換模型_成功_請求內容對_回中文結果() {
+    let r = rig(Opt::default());
+    put_pi_window(&r, "小丙", 4001);
+    *r.env.pi_reply.lock().unwrap() = Some(json!({ "ok": true, "model": "claude-sonnet-5", "provider": "anthropic", "at": NOW }));
+    let res = r.run("model", json!({ "name": "小丙", "model": "anthropic[claude-sonnet-5]" }));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert_eq!(res.result.unwrap()["provider"], "anthropic");
+    let dir = r.env.pi_home.join(".asn").join("pi-control").join("psid");
+    let reqs: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().filter(|e| !e.file_name().to_string_lossy().ends_with(".result.json")).collect();
+    let req: Value = serde_json::from_str(&std::fs::read_to_string(reqs[0].path()).unwrap()).unwrap();
+    assert_eq!((req["op"].as_str(), req["provider"].as_str(), req["model"].as_str()), (Some("set_model"), Some("anthropic"), Some("claude-sonnet-5")));
+    assert!(r.terminated().is_empty() && r.launched().is_empty(), "不碰任何程序、不開視窗");
+}
+
+#[test]
+fn pi_切換模型_錯誤翻成中文_忙碌逾時_不能用的動作_遠端開關() {
+    let r = rig(Opt::default());
+    put_pi_window(&r, "小丙", 4001);
+    for (reply, want) in [
+        (json!({ "ok": false, "error": "not_found" }), "找不到這個模型"),
+        (json!({ "ok": false, "error": "no_api_key" }), "沒有設定金鑰"),
+        (json!({ "ok": false, "error": "ambiguous", "providers": ["a", "b"] }), "a、b"),
+    ] {
+        *r.env.pi_reply.lock().unwrap() = Some(reply);
+        let res = r.run("model", json!({ "name": "小丙", "model": "m" }));
+        assert_eq!(res.status, "failed");
+        assert!(res.detail.contains(want), "{}", res.detail);
+    }
+    *r.env.pi_reply.lock().unwrap() = None;
+    let res = r.run("model", json!({ "name": "小丙", "model": "m" }));
+    assert_eq!(res.status, "failed");
+    assert!(res.detail.contains("正在忙"), "{}", res.detail);
+    for op in ["close", "rename", "handover", "resume", "restart", "info"] {
+        let res = r.run(op, json!({ "name": "小丙", "new_name": "新名" }));
+        assert_eq!(res.status, "failed", "{op}");
+        assert!(res.detail.contains("只能切換模型"), "{op}: {}", res.detail);
+    }
+    assert!(r.terminated().is_empty() && r.launched().is_empty());
+    let off = rig(Opt { allow_first: 0, ..Opt::default() });
+    put_pi_window(&off, "小丙", 4001);
+    *off.env.pi_reply.lock().unwrap() = Some(json!({ "ok": true, "model": "m", "provider": "p" }));
+    assert_eq!(off.run("model", json!({ "name": "小丙", "model": "m" })).detail, CONSENT_OFF);
+}
+
+#[test]
+fn pi_同名的_claude_視窗存在時不當成_pi() {
+    let r = rig(Opt::default());
+    put_pi_window(&r, "目標", 4001);   // Claude 視窗也叫「目標」
+    assert!(!r.ops.is_pi_window("目標"));
+    assert!(!r.ops.is_pi_window("沒這個"));
 }

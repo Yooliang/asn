@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { MENU_KEYS, REASON, menuItems, partnerEngine } from '../ui/lib/partner-ops.mjs'
+import { MENU_KEYS, MODEL_RE, REASON, buildOpRequest, menuItems, opFormError, partnerEngine } from '../ui/lib/partner-ops.mjs'
 import { machinesByNode } from '../ui/lib/mobile-launch.mjs'
 
 const MACH = machinesByNode({ machines: [{ node: 'H', launcher: { profiles: [{ id: 'claude' }], cwd_allow: ['D:/x'] }, online: true }] })
@@ -19,7 +19,7 @@ const MATRIX = [
   ['codex 視窗', P('小乙', 'codex'), { close: false, model: false, restart: false, handover: false }],
   ['gemini 背景工作者（ACP）', P('Gemini', 'gemini', { kind: undefined }), { close: true, model: false, restart: true, handover: true }],
   ['agy 背景工作者（ACP）', P('Agy', 'agy', { kind: undefined }), { close: true, model: false, restart: true, handover: true }],
-  ['pi 視窗', P('小丙', 'pi'), { close: false, model: false, restart: false, handover: false }],
+  ['pi 視窗（只開放切換模型）', P('小丙', 'pi'), { close: false, model: true, restart: false, handover: false }],
   ['grok 雲端代理（engine=grok, kind=grok）', P('ASN-開發', 'grok'), { close: false, model: false, restart: false, handover: false }],
 ]
 for (const [label, friend, want] of MATRIX) {
@@ -30,9 +30,14 @@ for (const [label, friend, want] of MATRIX) {
   })
 }
 
-test('現況：不能用的項目都有寫明原因（Codex／pi＝這個引擎還不能管理；雲端＝沒有視窗）', () => {
+test('現況：不能用的項目都有寫明原因（Codex＝尚未實機驗證；pi 只開放切換模型，其餘各有說明；雲端＝沒有視窗）', () => {
   assert.equal(ok(P('小乙', 'codex'), 'close').reason, REASON.otherEngine)
-  assert.equal(ok(P('小丙', 'pi'), 'model').reason, REASON.otherEngine)
+  assert.match(REASON.otherEngine, /尚未實機驗證，暫不開放/)
+  const piItems = menuItems(P('小丙', 'pi'), ctx)
+  assert.deepEqual(piItems.filter(i => i.ok).map(i => i.key), ['model'], 'pi 只有切換模型可用')
+  const why = piItems.filter(i => !i.ok).map(i => i.reason)
+  assert.ok(why.every(r => /[一-鿿]/.test(r) && r !== REASON.otherEngine), 'pi 其餘項目各有自己的中文原因')
+  assert.equal(partnerEngine(P('小丙', 'pi')), 'pi')
   assert.equal(ok(P('ASN-開發', 'grok'), 'close').reason, REASON.cloud)
   assert.equal(ok(P('Gemini', 'gemini', { kind: undefined }), 'close').reason, '')
   assert.match(ok(P('Gemini', 'gemini', { kind: undefined }), 'model').reason, /不能在這裡切換模型/)
@@ -60,9 +65,26 @@ test('缺口：Codex 視窗應該能「關閉」', { todo: '電腦端只會找 C
   assert.equal(ok(P('小乙', 'codex'), 'close').ok, true)
 })
 
-test('缺口：pi 視窗應該能「關閉」「切換模型」', { todo: 'pi 有 RPC／擴充可用，但電腦端沒有接到管理動作' }, () => {
+test('缺口：pi 視窗應該能「關閉」', { todo: 'pi 的切換模型已接（pi_control）；關閉還沒做' }, () => {
   assert.equal(ok(P('小丙', 'pi'), 'close').ok, true)
-  assert.equal(ok(P('小丙', 'pi'), 'model').ok, true)
+})
+
+test('pi 視窗的切換模型：離線反灰、送出內容把「提供者/模型」寫成後台收得下的格式、輸入檢查', () => {
+  const pi = P('小丙', 'pi')
+  assert.equal(ok(P('小丙', 'pi', { status: 'offline' }), 'model').ok, false)
+  assert.equal(opFormError(pi, 'model', { model: 'anthropic/claude-sonnet-5' }, ok(pi, 'model')), '')
+  assert.equal(opFormError(pi, 'model', { model: 'claude-sonnet-5' }, ok(pi, 'model')), '')
+  for (const bad of ['', 'a b', 'a/b/c', '/m', 'p/', 'x;calc', '../x']) assert.notEqual(opFormError(pi, 'model', { model: bad }, ok(pi, 'model')), '', bad)
+  assert.deepEqual(buildOpRequest(pi, 'model', { model: ' anthropic/claude-sonnet-5 ' }), { node: 'H', name: '小丙', op: 'model', model: 'anthropic[claude-sonnet-5]' })
+  assert.equal(buildOpRequest(pi, 'model', { model: 'gpt-6' }).model, 'gpt-6')
+  assert.ok(MODEL_RE.test(buildOpRequest(pi, 'model', { model: 'openai-codex/gpt-6.1' }).model), '後台的格式檢查收得下')
+  assert.equal(buildOpRequest(P('小甲', 'claude'), 'model', { model: 'opus' }).model, 'opus', 'Claude 不變')
+})
+
+test('電腦端接線：model 動作遇到 pi 視窗走 pi_control（只在 desktop 編譯的 bridge 底下）', () => {
+  const rs = fs.readFileSync(new URL('../src-tauri/src/bridge/partner_ops.rs', import.meta.url), 'utf8')
+  assert.match(rs, /if self\.is_pi_window\(&op\.name\) \{\s*return self\.execute_pi\(op\);/)
+  assert.match(rs, /pi_control::set_model\(/)
 })
 
 test('ACP 背景工作者能「關閉」（停止本次執行），Gemini／agy／本機 Grok 都是（#235 第一階段）；切換模型沒接，維持反灰並說明', () => {

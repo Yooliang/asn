@@ -120,7 +120,7 @@ test('接線：前端 transport、Rust 指令註冊、名單右鍵選單都有',
   assert.match(lib, /async fn model_switch_run/)
   assert.match(lib, /generate_handler!\[[^\]]*model_switch_query, model_switch_run/s)
   const html = read('ui/list.html')
-  assert.match(html, /<li v-if="it\.key === 'model'" class="model-sub">/, '切換模型固定出現（不再靠 buddyModel.show 決定有沒有這一項）')
+  assert.match(html, /<li v-if="it\.key === 'model' && !buddyIsPi" class="model-sub">/, '切換模型固定出現（不再靠 buddyModel.show 決定有沒有這一項）')
   assert.match(html, /<small class="menu-why" id="buddy-why-model" v-if="!buddySubEnabled && buddyWhyOf\('model'\)">\{\{ buddyWhyOf\('model'\) \}\}<\/small>/, '不能用時原因寫在項目下面')
   assert.match(html, /@click="pickBuddyModel\(m\)"/)
   assert.match(html, /v-if="modelDlg\.open"/)

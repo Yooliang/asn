@@ -27,7 +27,7 @@ export const REASON = {
   notClaude: '這位夥伴用的引擎還不能喚醒',
   unsupported: '電腦端或收發室還不支援，請先更新',
   cloud: '這是雲端代理，在雲端執行，沒有電腦上的視窗可以管理',
-  otherEngine: '這位夥伴用的引擎還不能從這裡管理視窗',
+  otherEngine: '這位夥伴用的引擎尚未實機驗證，暫不開放從這裡管理視窗',
   alreadyOnline: '這個視窗在線上，不需要喚醒',
   restartOnlyAcp: '「重開」只用在 ASN 在背景執行的工作者；一般視窗請用「接班換手」',
 }
@@ -37,6 +37,31 @@ const ACP_WHY = {
   model: '這個夥伴是 ASN 在背景執行的工作者，模型寫在設定檔裡、啟動時就定了，不能在這裡切換模型；要換請改設定檔後重啟 ASN',
   resume: '這個夥伴是 ASN 在背景執行的工作者，不需要喚醒；要重新啟動請用「重開」',
 }
+// pi 視窗：只開放「切換模型」（經 pi 擴充的控制檔，電腦端見 bridge/engines/pi_control.rs）；其餘電腦端還沒接，反灰並各自說明
+export const PI_OPS = ['model']
+const PI_WHY = {
+  info: '這是 pi 視窗，詳情還沒開放',
+  rename: '這是 pi 視窗，改名還沒開放（名字由 pi 的 ASN 擴充登記）',
+  close: '這是 pi 視窗，關閉還沒開放，請直接在 pi 的終端機關掉',
+  handover: '這是 pi 視窗，接班換手還沒開放',
+  resume: '這是 pi 視窗，喚醒還沒開放（pi 沒有可接回的對話紀錄）',
+  restart: REASON.restartOnlyAcp,
+}
+// pi 的模型代號：`模型` 或 `提供者/模型`。後台的模型欄位只收英數與 . _ [ ] -（1～60 字），所以送出時把「提供者/模型」寫成「提供者[模型]」，電腦端再還原
+const PI_PART_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$/
+export function parsePiModel(input) {
+  const parts = String(input ?? '').trim().split('/')
+  if (parts.length === 1 && PI_PART_RE.test(parts[0])) return { provider: '', model: parts[0] }
+  if (parts.length === 2 && PI_PART_RE.test(parts[0]) && PI_PART_RE.test(parts[1])) return { provider: parts[0], model: parts[1] }
+  return null
+}
+export function piModelWire(input) {
+  const m = parsePiModel(input)
+  if (!m) return ''
+  const w = m.provider ? `${m.provider}[${m.model}]` : m.model
+  return w.length <= 60 ? w : ''
+}
+export const PI_MODEL_HINT = '請輸入模型，例如 claude-sonnet-5 或 anthropic/claude-sonnet-5（只能用英數與 . _ -，合起來最多 60 字）'
 // 背景工作者沒有視窗：「關閉」是停止它本次的執行
 export const ACP_CLOSE_LABEL = '關閉'
 export const STALE_TEXT = 'ASN 版本可能太舊，或沒有在跑'
@@ -91,13 +116,14 @@ export function sharedWhy(items) {
   return { notes, rows }
 }
 
-// 這位夥伴屬於哪一類：claude（名單沒寫引擎也算）、acp、cloud，其他（Codex 等）回 other
+// 這位夥伴屬於哪一類：claude（名單沒寫引擎也算）、acp、cloud、pi，其他（Codex 等）回 other
 export function partnerEngine(friend) {
   const engine = String(friend?.engine ?? '').trim().toLowerCase()
   const kind = String(friend?.kind ?? '').trim().toLowerCase()
   if (CLOUD_ENGINES.has(engine) || CLOUD_ENGINES.has(kind) || kind === 'grok') return 'cloud'
   if (!engine || engine === 'claude') return 'claude'
   if (ACP_ENGINES.has(engine) || engine === 'grok') return 'acp'
+  if (engine === 'pi') return 'pi'
   return 'other'
 }
 
@@ -113,11 +139,11 @@ export function isAiPartner(friend, ctx = {}) {
   return true
 }
 
-// 能不能顯示「⋯」與右鍵的管理項目：AI 夥伴，而且是 Claude 視窗或 ACP 工作者。雲端代理與其他引擎不顯示（按了也只會失敗）
+// 能不能顯示「⋯」與右鍵的管理項目：AI 夥伴，而且是 Claude 視窗、ACP 工作者或 pi 視窗。雲端代理與其他引擎不顯示（按了也只會失敗）
 export function isManageable(friend, ctx = {}) {
   if (!isAiPartner(friend, ctx)) return false
   const e = partnerEngine(friend)
-  return e === 'claude' || e === 'acp'
+  return e === 'claude' || e === 'acp' || e === 'pi'
 }
 
 // 選單項目 { key, label, ok, reason }：項目固定。任何 AI 夥伴（Claude 視窗、背景工作者、雲端代理、其他引擎、在線或離線）都給同一套、同一個順序（MENU_KEYS）；
@@ -144,6 +170,11 @@ function itemReason(key, friend, engine, offline, ctx) {
   if (engine === 'cloud') return REASON.cloud
   if (engine === 'other') return REASON.otherEngine
   const label = OP_LABEL[key]
+  if (engine === 'pi') {
+    if (!PI_OPS.includes(key)) return PI_WHY[key]
+    if (offline) return `這個 pi 視窗已離線，現在不能「${label}」`
+    return gateReason(key, friend, ctx)
+  }
   if (engine === 'acp') {
     if (!ACP_OPS.includes(key)) return ACP_WHY[key]
     if (offline) return `這個背景工作者已離線，現在不能「${label}」`
@@ -190,7 +221,8 @@ export function opFormError(friend, op, input = {}, item = null) {
     if (!NAME_RE.test(n)) return '名字只能用英數、連字號、中文，1～40 字，不能以連字號開頭'
     if (n === friend?.agent) return '新名字和現在一樣'
   }
-  if (op === 'model' && !MODEL_RE.test(String(input.model ?? '').trim())) return '請選一個模型（只能用英數與 . _ [ ] -）'
+  if (op === 'model' && partnerEngine(friend) === 'pi') { if (!piModelWire(input.model)) return PI_MODEL_HINT }
+  else if (op === 'model' && !MODEL_RE.test(String(input.model ?? '').trim())) return '請選一個模型（只能用英數與 . _ [ ] -）'
   if (op === 'handover' && isGrokAdoptable(friend) && input.ack !== true) return '請先勾選確認：接手後要先關掉終端機那個 grok'
   if (op === 'handover' && String(input.note ?? '').trim().length > NOTE_MAX) return `補充的話最多 ${NOTE_MAX} 字`
   return ''
@@ -200,7 +232,7 @@ export function opFormError(friend, op, input = {}, item = null) {
 export function buildOpRequest(friend, op, input = {}) {
   const req = { node: friend.node, name: friend.agent, op }
   if (op === 'rename') req.new_name = String(input.newName ?? '').trim()
-  if (op === 'model') req.model = String(input.model ?? '').trim()
+  if (op === 'model') req.model = partnerEngine(friend) === 'pi' ? piModelWire(input.model) : String(input.model ?? '').trim()
   if (op === 'handover') {
     const note = String(input.note ?? '').trim()
     if (note) req.note = note
