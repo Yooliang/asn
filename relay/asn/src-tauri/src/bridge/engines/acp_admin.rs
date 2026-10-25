@@ -43,6 +43,8 @@ pub struct AdoptEnv {
     pub file: PathBuf,
     pub events: EventTx,
     pub wait_ms: u64,
+    /// 沒有現成的 Grok 工作者時，用「開新夥伴」的 grok 啟動設定（授權、白名單、執行檔檢查都照開新夥伴那條路）做接手的底；參數是要接手的資料夾
+    pub base: Arc<dyn Fn(&str) -> Result<WorkerCfg, String> + Send + Sync>,
 }
 
 /// 接手名冊（重啟後把專屬工作者建回來）：[{name, session_id, cwd}]
@@ -111,14 +113,17 @@ impl AcpAdmin for AcpAdminImpl {
     fn adopt(&self, session_id: &str, cwd: &str) -> Result<Value, String> {
         let env = self.adopt.as_ref().ok_or("沒有可以接手的 Grok 工作者設定")?;
         // 以現有的 Grok 工作者（名單引擎 grok、標準 ACP）的設定為底；沒有就不做，不猜指令
-        let base = self
+        let existing = self
             .workers
             .lock()
             .unwrap()
             .iter()
             .map(|(_, w)| w.cfg().clone())
-            .find(|c| c.roster_engine == "grok" && c.protocol == "acp" && !c.adopted)
-            .ok_or("沒有設定 Grok 工作者（agents.json 裡名單引擎是 grok 的標準 ACP 工作者），不知道要用哪個指令接手")?;
+            .find(|c| c.roster_engine == "grok" && c.protocol == "acp" && !c.adopted);
+        let base = match existing {
+            Some(c) => c,
+            None => (env.base)(cwd)?,
+        };
         let mut name = super::grok_adopt::worker_name(cwd, "");
         if let Some(w) = self.find(&name) {
             if env.store.get(w.cfg()) == session_id {
