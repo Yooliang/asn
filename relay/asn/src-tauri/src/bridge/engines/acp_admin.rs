@@ -1,5 +1,6 @@
 //! 遠端管理 ACP 工作者（Gemini、agy 等收發室自己跑的背景工作者）的入口：給 bridge/partner_ops.rs 用。
-//! 只管詳情、重開、接班換手三件事；改名、切換模型、關閉、喚醒不支援（由呼叫端回「這類夥伴不支援」）。
+//! 只管詳情、重開、接班換手、關閉（停止本次執行，不改設定檔）四件事；改名、切換模型、喚醒不支援（由呼叫端回「這類夥伴不支援」）。
+//! 切換模型沒接：標準 ACP 的 session/set_model 還在實驗階段、這個程式也沒實測過，設定檔的 model 欄位只在啟動時讀一次（agy 當 --model 參數），執行中改不了。
 //! 只認收發室記在案的工作者（agents.json 讀進來、已啟動的），而且只結束驅動回報的那個 pid。
 use super::acp_config::WorkerCfg;
 use super::acp_worker::admin::LoadState;
@@ -19,6 +20,8 @@ pub trait AcpAdmin: Send + Sync {
     fn info(&self, name: &str) -> Option<Value>;
     /// 重開（保留對話）
     fn restart(&self, name: &str) -> Result<Value, String>;
+    /// 關閉（停止本次執行）：結束子行程、不再收信、名單上暫時看不到；不改 agents.json。重開或重啟 ASN 恢復
+    fn stop(&self, name: &str) -> Result<Value, String>;
     /// 接班換手（清掉對話後重開，第一則提示是接班說明）
     fn handover(&self, name: &str, note: &str) -> Result<Value, String>;
     /// 接手：另開一個專屬的 Grok 工作者，載入指定的對話（session）。會等到載入成功或失敗才回；只動自己新開的工作者，不碰任何既有程序
@@ -91,6 +94,12 @@ impl AcpAdmin for AcpAdminImpl {
         let w = self.find(name).ok_or("找不到這個工作者")?;
         let pid = w.admin_restart()?;
         Ok(json!({ "kind": "acp", "pid": pid, "kept_session": w.snapshot().has_session }))
+    }
+
+    fn stop(&self, name: &str) -> Result<Value, String> {
+        let w = self.find(name).ok_or("找不到這個工作者")?;
+        let pid = w.admin_stop()?;
+        Ok(json!({ "kind": "acp", "pid": pid, "stopped": true }))
     }
 
     fn handover(&self, name: &str, note: &str) -> Result<Value, String> {

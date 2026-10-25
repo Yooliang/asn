@@ -179,6 +179,8 @@ struct St {
     queue: VecDeque<Job>,
     need_preamble: bool,
     stopping: bool,
+    /// 遠端管理按了「關閉」：驅動已結束、不再收信、名單上看不到；「重開」「接班換手」或 ASN 重啟後恢復。不改任何設定檔
+    admin_stopped: bool,
     owner_notice_at: HashMap<&'static str, u64>,
     turn_grant: HashSet<String>,
     driver: Option<Arc<dyn Driver>>,
@@ -223,6 +225,7 @@ impl Worker {
                 queue: VecDeque::new(),
                 need_preamble: need,
                 stopping: false,
+                admin_stopped: false,
                 owner_notice_at: HashMap::new(),
                 turn_grant: HashSet::new(),
                 driver: None,
@@ -253,7 +256,8 @@ impl Worker {
         }
     }
     pub fn listed(&self) -> bool {
-        self.st.lock().unwrap().health != Health::Unavailable
+        let s = self.st.lock().unwrap();
+        s.health != Health::Unavailable && !s.admin_stopped
     }
 
     fn set_health(&self, next: Health, reason: &str) {
@@ -399,7 +403,11 @@ impl Worker {
     }
 
     pub fn start(self: &Arc<Self>) {
-        self.st.lock().unwrap().stopping = false;
+        {
+            let mut s = self.st.lock().unwrap();
+            s.stopping = false;
+            s.admin_stopped = false;
+        }
         self.warm();
     }
     fn warm(self: &Arc<Self>) {
@@ -608,6 +616,10 @@ impl Worker {
 
     /// 收一封信排隊。排得進去就回報已轉交，並開始處理
     pub fn enqueue(self: &Arc<Self>, job: Job) {
+        if self.st.lock().unwrap().admin_stopped {
+            let _ = self.i.events.send(EngineEvent::Fail(job.id, format!("{} 工作者已被關閉（在夥伴管理按了關閉），這封信沒有處理；重啟 ASN 後才會恢復", self.i.cfg.name)));
+            return;
+        }
         let (unavailable, reason, outstanding) = {
             let s = self.st.lock().unwrap();
             (s.health == Health::Unavailable, s.health_reason.clone(), s.queue.len() + usize::from(s.running))

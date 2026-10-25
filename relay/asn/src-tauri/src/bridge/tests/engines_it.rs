@@ -981,6 +981,37 @@ async fn acp_遠端管理_正在處理信件時不重開_不換手_程序沒被�
 }
 
 #[tokio::test]
+async fn acp_遠端管理_關閉只結束帳本上的程序_名單看不到_不收信_重開恢復() {
+    let mut h = eh(Some(json!([worker("Gemini", "acp", json!({}))])), &[], "acp", &[]).await;
+    let admin = h.set.acp_admin().unwrap();
+    h.put_pull(to_agent(1, "Gemini", "one")).await;
+    h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
+    let pid = wait_pid(&admin, "Gemini", |_| true).await;
+    let r = admin.stop("Gemini").unwrap();
+    assert_eq!((r["pid"].as_u64(), r["stopped"].clone()), (Some(pid), json!(true)));
+    for _ in 0..100 {
+        if !crate::heartbeat::pid_alive(pid as u32) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(!crate::heartbeat::pid_alive(pid as u32), "程序真的結束了");
+    h.set.refresh_all().await;
+    assert!(h.set.windows().iter().all(|w| w.name != "Gemini"), "關閉後名單上看不到");
+    assert!(admin.stop("Gemini").unwrap_err().contains("已經關閉"));
+    h.put_pull(to_agent(2, "Gemini", "two")).await;
+    h.wait("失敗通知", |h| h.fr.sent().len() == 2).await;
+    assert!(h.bodies()[1].contains("已被關閉") && !h.bodies()[1].contains("[第2輪"), "關閉後不處理信，寄件人收到說明：{}", h.bodies()[1]);
+    // 重開恢復
+    admin.restart("Gemini").unwrap();
+    wait_pid(&admin, "Gemini", |_| true).await;
+    h.set.refresh_all().await;
+    assert!(h.set.windows().iter().any(|w| w.name == "Gemini"), "重開後回到名單");
+    h.put_pull(to_agent(3, "Gemini", "three")).await;
+    h.wait("回覆", |h| h.fr.sent().len() == 3).await;
+}
+
+#[tokio::test]
 async fn agy_遠端管理_重開保留對話_接班換手換新對話() {
     let state = tempfile::tempdir().unwrap();
     let st = state.path().display().to_string();

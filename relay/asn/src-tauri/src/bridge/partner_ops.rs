@@ -360,7 +360,7 @@ impl PartnerOps {
         self.acp.lock().unwrap().clone()
     }
 
-    /// 名字對得上收發室管理的 ACP 工作者：只支援詳情、重開、接班換手，其餘回「這類夥伴不支援」。
+    /// 名字對得上收發室管理的 ACP 工作者：只支援詳情、重開、接班換手、關閉（停止本次執行），其餘回「這類夥伴不支援」。
     /// 動的是工作者驅動記錄在案的 pid，不找程序、不比對名稱；同名的 Claude 視窗還活著時不猜
     fn execute_acp(&self, op: &Op, acp: &dyn AcpAdmin) -> OpResult {
         if (self.protect)(&op.name, 0) {
@@ -375,10 +375,17 @@ impl PartnerOps {
                 Some(r) => ok("", Some(r)),
                 None => failed("找不到這個工作者"),
             },
-            "restart" | "handover" => {
+            "restart" | "handover" | "close" => {
                 // 守門 4：動手前再驗一次本機開關
                 if !self.env.allow_remote() {
                     return failed(CONSENT_OFF);
+                }
+                if op.op == "close" {
+                    self.stage(op, "closing");
+                    return match acp.stop(&op.name) {
+                        Ok(r) => ok("已結束工作者的程序，本次不再收信；重啟 ASN 後恢復（沒有改任何設定檔）", Some(r)),
+                        Err(e) => failed(e),
+                    };
                 }
                 if op.op == "restart" {
                     self.stage(op, "closing");
