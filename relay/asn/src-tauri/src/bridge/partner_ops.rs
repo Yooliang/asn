@@ -462,7 +462,7 @@ impl PartnerOps {
         if !os.processes().iter().any(|p| p.pid == pid && switch::exe_stem(&p.name) == "grok") {
             return failed("這個 grok 已經不在執行了（名單可能過期），所以沒有接手");
         }
-        let Some(acp) = self.acp_admin() else { return failed("這台電腦的 ASN 沒有載入背景工作者功能，無法接手") };
+        let Some(acp) = self.acp_admin() else { return failed("這台電腦的 ASN 沒有載入內建通道功能，無法接手") };
         let Some(home) = self.grok_home.lock().unwrap().clone() else { return failed("找不到 grok 的資料夾位置，無法接手") };
         let active = match ga::read_active(&home) {
             Ok(t) => t,

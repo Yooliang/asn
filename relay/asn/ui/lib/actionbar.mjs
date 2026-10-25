@@ -34,7 +34,7 @@ export function consoleBlock(friend, selfNode) {
   if (!friend) return '沒有選到夥伴'
   if (friend.room === true) return '群組沒有視窗可以切換'
   if (friend.pending) return '這個視窗還在開啟中，開好後才能切換前景或背景'
-  if (friend.engine === 'acp') return '這個夥伴是 ASN 在背景執行的工作者，沒有視窗可以切換'
+  if (friend.engine === 'acp') return '這個夥伴由 ASN 內建通道執行，沒有視窗可以切換'
   if (friend.node !== selfNode) return '這個視窗在另一台電腦上，只能在那台電腦的 ASN 切換前景或背景'
   return ''
 }

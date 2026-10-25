@@ -96,7 +96,7 @@ test('本機程序條目：顯示名拿掉（前景）（背景），背景的�
     { name: 'grok #65324（前景）', status: 'running', cwd_label: '', engine: 'grok', kind: 'process', receivable: false },
     { name: 'codex #14（背景）', status: 'running', cwd_label: '', engine: 'codex', kind: 'process', receivable: false },
     { name: 'pi · MiniMax #12（前景）', status: 'running', cwd_label: '', engine: 'pi', kind: 'process', receivable: false },
-    { name: 'Test-Gemini', status: 'idle', cwd_label: 'Gemini（背景工作者）', engine: 'gemini' },
+    { name: 'Test-Gemini', status: 'idle', cwd_label: 'Gemini（背景運行、內建通道）', engine: 'gemini' },
     { name: '小職（背景）', status: 'idle', cwd_label: '', engine: 'claude' },
   ] }]
   const by = n => buildFriends(members, { selfNode: 'self' }).find(f => f.agent === n)
@@ -106,7 +106,7 @@ test('本機程序條目：顯示名拿掉（前景）（背景），背景的�
   assert.deepEqual([c.nick, c.psm], ['codex #14', '背景運行'])
   assert.equal(by('pi · MiniMax #12（前景）').nick, 'pi · MiniMax #12')
   const t = by('Test-Gemini')
-  assert.deepEqual([t.nick, t.psm], ['Test-Gemini', 'Gemini（背景工作者）'], '背景工作者照舊用第二行的標籤')
+  assert.deepEqual([t.nick, t.psm], ['Test-Gemini', 'Gemini（背景運行、內建通道）'], '背景工作者照舊用第二行的標籤')
   const k = by('小職（背景）')
   assert.deepEqual([k.nick, k.psm], ['小職（背景）', ''], '不是程序條目的名字照舊，不動括號')
   assert.equal(procDisplayName('grok #1（前景）'), 'grok #1')

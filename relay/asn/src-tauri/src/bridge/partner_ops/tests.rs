@@ -1456,7 +1456,7 @@ fn 接手_做不到就不接手_回中文原因_工作者入口完全沒被呼�
     none(&r, &a, "grok #7001（前景）", "找不到 grok 的資料夾位置");
     let r = rig(Opt::default());
     grok_rig(&r, grok_active(), true);
-    assert!(adopt_run(&r, "grok #7001（前景）").detail.contains("沒有載入背景工作者功能"));
+    assert!(adopt_run(&r, "grok #7001（前景）").detail.contains("沒有載入內建通道功能"));
     // 遠端開關關著
     let r = rig(Opt { allow_first: 0, ..Opt::default() });
     grok_rig(&r, grok_active(), true);

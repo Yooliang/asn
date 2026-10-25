@@ -108,7 +108,7 @@ pub fn build_cfg(env: &dyn QueueEnv, req: &Req, work_dir: &Path) -> Result<Worke
     check_launch(&config, &mut lr, &[], 0).map_err(|e| format!("{e}（模型 {}、名字 {}）", req.profile, req.name))?;
     let prof = config.profiles.get(&req.profile).ok_or_else(|| format!("沒有這個啟動設定：{}", req.profile))?;
     if prof.mode != LaunchMode::Background {
-        return Err(format!("「{}」不是背景工作者的啟動設定，不能用這條路開", req.profile));
+        return Err(format!("「{}」不是內建通道的啟動設定，不能用這條路開", req.profile));
     }
     let (command, args, cwd) = build_spawn_spec(&config, &lr)?;
     if !env.binary_ok(&command) {
@@ -227,8 +227,8 @@ mod tests {
         fn config(&self) -> Result<LaunchConfig, String> {
             let p = |label: &str, mode: LaunchMode| Profile { label: label.into(), command: "node".into(), args: vec![fake_worker()], engine: "acp".into(), mode, disabled: false, disabled_reason: String::new() };
             let mut profiles = HashMap::new();
-            profiles.insert("grok".to_string(), p("Grok（背景工作者）", LaunchMode::Background));
-            profiles.insert("gemini".to_string(), p("Gemini（背景工作者）", LaunchMode::Background));
+            profiles.insert("grok".to_string(), p("Grok（背景運行、內建通道）", LaunchMode::Background));
+            profiles.insert("gemini".to_string(), p("Gemini（背景運行、內建通道）", LaunchMode::Background));
             profiles.insert("claude".to_string(), p("Claude", LaunchMode::Window));
             Ok(LaunchConfig { profiles, cwd_allow: vec![crate::launch::config::canonical_launch_cwd(&self.allow.to_string_lossy()).unwrap()], max_per_hour: 6 })
         }
@@ -254,7 +254,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let env = env_for(d.path());
         let g = build_cfg(&*env, &req("grok", "小格", d.path()), d.path()).unwrap();
-        assert_eq!((g.protocol.as_str(), g.roster_engine.as_str(), g.label.as_str(), g.adopted), ("acp", "grok", "Grok（背景工作者）", false));
+        assert_eq!((g.protocol.as_str(), g.roster_engine.as_str(), g.label.as_str(), g.adopted), ("acp", "grok", "Grok（背景運行、內建通道）", false));
         let m = build_cfg(&*env, &req("gemini", "小雙", d.path()), d.path()).unwrap();
         assert_eq!((m.protocol.as_str(), m.roster_engine.as_str()), ("agy-stream", "gemini"));
         use crate::bridge::engines::acp_policy::Verdict;
@@ -272,7 +272,7 @@ mod tests {
         assert!(e(req("grok", "A", other.path())).contains("不在允許清單"));
         assert!(e(req("grok", "-壞", d.path())).contains("視窗名格式不對"));
         assert!(e(req("grok", "A", &d.path().join("不存在"))).contains("不在允許清單"));
-        assert!(e(req("claude", "A", d.path())).contains("不是背景工作者"));
+        assert!(e(req("claude", "A", d.path())).contains("不是內建通道"));
         env.bin_ok.store(false, Ordering::SeqCst);
         assert!(e(req("grok", "A", d.path())).contains("找不到"));
         assert!(parse_line("{壞").unwrap_err().contains("讀不懂"));
