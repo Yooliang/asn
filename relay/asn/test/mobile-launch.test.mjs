@@ -82,3 +82,30 @@ test('進度：送出→接手→開視窗→出現在名單；失敗顯示原�
   const fl = [F('H', '夥伴-2'), F('H', '另一個', 'offline'), { ...F('H', '夥伴-3'), pending: true }]
   assert.equal(appearedIn(fl, 'H', '夥伴-2'), true); assert.equal(appearedIn(fl, 'H', '另一個'), false); assert.equal(appearedIn(fl, 'H', '夥伴-3'), false); assert.equal(appearedIn(fl, 'W', '夥伴-2'), false)
 })
+
+test('新版清單：Grok、Gemini 背景與 pi 視窗都列得出來，模型列帶名稱與模式；舊版清單（只有 id 與標籤）照常顯示', () => {
+  const neu = { profiles: [
+    { id: 'claude', label: 'Claude（互動視窗）', engine: 'claude', mode: 'window' },
+    { id: 'gemini', label: 'Gemini（背景工作者）', engine: 'acp', mode: 'background' },
+    { id: 'grok', label: 'Grok（背景工作者）', engine: 'acp', mode: 'background' },
+    { id: 'pi', label: 'pi（互動視窗）', engine: 'pi', mode: 'window' },
+  ], cwd_allow: ['D:\\a'], max_per_hour: 6 }
+  const m = launchChoices({ launcher: neu }).models
+  assert.deepEqual(m.map(r => [r.profileId, r.label, r.mode]), [['claude', 'Claude（互動視窗）', 'window'], ['gemini', 'Gemini（背景工作者）', 'background'], ['grok', 'Grok（背景工作者）', 'background'], ['pi', 'pi（互動視窗）', 'window']])
+  const c = { ...ctx, machines: machinesByNode({ machines: [{ node: 'H', launcher: neu, online: true }] }) }
+  assert.deepEqual(launchEligibility('H', c), { ok: true, reason: '' })
+  const ok = { node: 'H', profile: 'grok', cwd: 'D:\\a', name: '小格', first: '' }
+  assert.equal(launchFormError(ok, launchEligibility('H', c)), '')
+  assert.deepEqual(buildLaunchRequest(ok), { node: 'H', profile: 'grok', name: '小格', cwd: 'D:\\a', first_message: null }, '請求只有四個欄位，不帶指令')
+  // 舊版回報（沒有 engine／mode）：同一份程式照常讀
+  assert.deepEqual(launchChoices(BODY.machines[0]).models.map(r => r.profileId), ['claude', 'gemini'])
+})
+
+test('失敗與進度的文字是純中文、沒有「收發室」，並講下一步', () => {
+  for (const t of [...Object.values(REASON), launchErrorText('launch HTTP 500 internal'), launchErrorText('連線失敗：x'), launchErrorText('launch HTTP 400 bad_profile')]) assert.doesNotMatch(t, /收發室/)
+  assert.match(REASON.closed, /設定/)
+  const p = progressView({ status: 'failed', detail: '開不起來：這台電腦找不到「grok」的執行檔（grok.exe），請先安裝後再試' }, false)
+  assert.equal(p.phase, 'failed'); assert.match(p.text, /請先安裝/)
+  assert.match(progressView({ status: 'unconfirmed', detail: '背景夥伴已排入' }, false).text, /名單/)
+  assert.equal(progressView({ status: 'ok' }, true, '小格').phase, 'done')
+})
