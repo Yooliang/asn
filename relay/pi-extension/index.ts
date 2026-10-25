@@ -1,12 +1,18 @@
 // ASN pi 擴充：第一期 asn_send 寄信工具＋bash 守門（lib.mjs）；第二期視窗登記＋收信（inbox.mjs）。
 import { execFile } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { Type } from 'typebox'
 import { ackEntry, formatInjection, nextEntries, pruneDone, removeWindow, resolveWindowName, validSessionId, windowRecord, writeWindow } from './inbox.mjs'
 import { buildSendArgv, guardAsnSendInput, guardBash, resolveConfig, runSend } from './lib.mjs'
+
+// 第二期的時間常數（見 README「資料流」）：登記心跳 60 秒、掃收件匣 2 秒、done/ 保留 7 天
+const HEARTBEAT_MS = 60_000
+const POLL_MS = 2_000
+const DONE_KEEP_MS = 7 * 24 * 3600 * 1000
 
 function loadFileConfig(): Record<string, string> {
   try {
@@ -18,6 +24,7 @@ function loadFileConfig(): Record<string, string> {
 }
 
 export default function (pi: ExtensionAPI) {
+  registerInbox(pi)
   pi.registerTool({
     name: 'asn_send',
     label: 'ASN 寄信',
