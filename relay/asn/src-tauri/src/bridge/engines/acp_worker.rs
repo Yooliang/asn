@@ -245,6 +245,10 @@ impl Worker {
         (self.i.log)(format!("[{}] {}", self.i.cfg.name, m.as_ref()))
     }
 
+    /// 目前的對話編號（空字串＝還沒有）
+    pub fn session_id(&self) -> String {
+        self.i.store.get(&self.i.cfg)
+    }
     pub fn status(&self) -> &'static str {
         let s = self.st.lock().unwrap();
         if s.running || !s.queue.is_empty() {
