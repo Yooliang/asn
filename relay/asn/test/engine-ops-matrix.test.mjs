@@ -1,0 +1,70 @@
+// 各引擎目前能不能「關閉」「切換模型」（管理夥伴視窗的選單，ui/lib/partner-ops.mjs 的 menuItems）。
+// 這份是「現況盤點」：用測試把表釘住，哪天有人改了行為（不管好壞）就會看到。表與證據見對應的 issue。
+// 電腦端對應：bridge/partner_ops.rs 的 execute——ACP 工作者只做 info／restart／handover，其餘回「這類夥伴不支援」；
+// 非 ACP 的一律走 find_target，只會找 ~/.claude/sessions 裡的 Claude 互動視窗，所以 Codex／pi 即使畫面放行也會回「找不到這個夥伴的 Claude 視窗」。
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import { MENU_KEYS, REASON, menuItems, partnerEngine } from '../ui/lib/partner-ops.mjs'
+import { machinesByNode } from '../ui/lib/mobile-launch.mjs'
+
+const MACH = machinesByNode({ machines: [{ node: 'H', launcher: { profiles: [{ id: 'claude' }], cwd_allow: ['D:/x'] }, online: true }] })
+const ctx = { machines: MACH, loaded: true, signedIn: true, asn: {} }
+const P = (agent, engine, extra = {}) => ({ id: `H/${agent}`, node: 'H', agent, nick: agent, status: 'online', engine, kind: engine, device: '家用機', ...extra })
+const ok = (f, key) => menuItems(f, ctx).find(i => i.key === key)
+
+// 引擎 → { close, model, restart, handover }（現況）
+const MATRIX = [
+  ['claude 視窗', P('小甲', 'claude'), { close: true, model: true, restart: false, handover: true }],
+  ['codex 視窗', P('小乙', 'codex'), { close: false, model: false, restart: false, handover: false }],
+  ['gemini 背景工作者（ACP）', P('Gemini', 'gemini', { kind: undefined }), { close: false, model: false, restart: true, handover: true }],
+  ['agy 背景工作者（ACP）', P('Agy', 'agy', { kind: undefined }), { close: false, model: false, restart: true, handover: true }],
+  ['pi 視窗', P('小丙', 'pi'), { close: false, model: false, restart: false, handover: false }],
+  ['grok 雲端代理（engine=grok, kind=grok）', P('ASN-開發', 'grok'), { close: false, model: false, restart: false, handover: false }],
+]
+for (const [label, friend, want] of MATRIX) {
+  test(`現況：${label} 的 關閉／切換模型／重開／接班換手 ＝ ${JSON.stringify(want)}`, () => {
+    const got = Object.fromEntries(['close', 'model', 'restart', 'handover'].map(k => [k, ok(friend, k).ok]))
+    assert.deepEqual(got, want)
+    assert.deepEqual(menuItems(friend, ctx).map(i => i.key), MENU_KEYS, '項目固定不變')
+  })
+}
+
+test('現況：不能用的項目都有寫明原因（Codex／pi＝這個引擎還不能管理；雲端＝沒有視窗）', () => {
+  assert.equal(ok(P('小乙', 'codex'), 'close').reason, REASON.otherEngine)
+  assert.equal(ok(P('小丙', 'pi'), 'model').reason, REASON.otherEngine)
+  assert.equal(ok(P('ASN-開發', 'grok'), 'close').reason, REASON.cloud)
+  assert.match(ok(P('Gemini', 'gemini', { kind: undefined }), 'close').reason, /背景執行的工作者/)
+  assert.match(ok(P('Gemini', 'gemini', { kind: undefined }), 'model').reason, /不能在這裡切換模型/)
+})
+
+test('現況：電腦端（partner_ops.rs）——非 Claude 的關閉與切換模型根本找不到對象；ACP 工作者只做三件事', () => {
+  const rs = fs.readFileSync(new URL('../src-tauri/src/bridge/partner_ops.rs', import.meta.url), 'utf8')
+  assert.match(rs, /"close" => self\.close\(&target\)/)
+  assert.match(rs, /"model" => self\.model\(op, target\)/)
+  assert.match(rs, /找不到這個夥伴的 Claude 視窗/, 'find_target 只認 Claude 的 sessions 檔')
+  assert.match(rs, /_ => failed\(UNSUPPORTED\)/, 'ACP 工作者其餘動作回「這類夥伴不支援」')
+  const admin = fs.readFileSync(new URL('../src-tauri/src/bridge/engines/acp_admin.rs', import.meta.url), 'utf8')
+  assert.match(admin, /只管詳情、重開、接班換手三件事；改名、切換模型、關閉、喚醒不支援/)
+})
+
+// ---- 缺口（尚未做；node:test 的 todo：跑得過會顯示、跑不過不算失敗，補完行為後把 todo 拿掉）----
+test('缺口：ASN 自己跑的 Grok 背景工作者（名單 engine=grok、不是雲端代理）應該跟 Gemini 一樣有「重開」「接班換手」', { todo: 'UI 把 engine=grok 一律當雲端代理，選單全反灰；要靠 kind 區分（雲端代理的名單是 kind=grok）' }, () => {
+  const worker = P('Grok', 'grok', { kind: undefined })
+  assert.equal(partnerEngine(worker), 'acp')
+  assert.equal(ok(worker, 'restart').ok, true)
+  assert.equal(ok(worker, 'handover').ok, true)
+})
+
+test('缺口：Codex 視窗應該能「關閉」', { todo: '電腦端只會找 Claude 的視窗，Codex 沒有對應的關閉路徑' }, () => {
+  assert.equal(ok(P('小乙', 'codex'), 'close').ok, true)
+})
+
+test('缺口：pi 視窗應該能「關閉」「切換模型」', { todo: 'pi 有 RPC／擴充可用，但電腦端沒有接到管理動作' }, () => {
+  assert.equal(ok(P('小丙', 'pi'), 'close').ok, true)
+  assert.equal(ok(P('小丙', 'pi'), 'model').ok, true)
+})
+
+test('缺口：ACP 背景工作者應該能「關閉」（停止）', { todo: '目前只有「重開」，沒有「停止」這個動作' }, () => {
+  assert.equal(ok(P('Gemini', 'gemini', { kind: undefined }), 'close').ok, true)
+})
