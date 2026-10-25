@@ -160,3 +160,13 @@ test('會議記錄：最新在上、陣列變條列、跳脫 HTML、缺欄位與
   assert.throws(() => injectMeetings('沒有標記', rows))
   assert.equal(parseMeetings([MEET({ time: '2026-10-26' })])[0].time, '2026-10-26', '時間可省略')
 })
+
+test('待辦與優先順序：藍圖頁上有這一區，分成需決定、近期、之後三欄，且不出現「收發室」', () => {
+  const a = page.indexOf('<section id="todo">')
+  const b = page.indexOf('</section>', a)
+  assert.ok(a >= 0 && b > a, '找不到 #todo 區段')
+  const todo = page.slice(a, b)
+  for (const h of ['一、需要負責人決定', '二、近期（依序）', '三、之後']) assert.ok(todo.includes(h), `缺：${h}`)
+  assert.ok(!todo.includes('收發室'))
+  assert.ok(!/\sstyle=/.test(todo))
+})

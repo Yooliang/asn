@@ -279,6 +279,44 @@
     <p class="note">詳細的設計與工作量估算在專案的 docs/ROADMAP.md；個別項目的討論在專案的 issue。</p>
   </section>
 
+  <section id="todo">
+    <h2>待辦與優先順序</h2>
+    <p class="sub">整理日期：2026 年 10 月 26 日。編號是專案議題或 PR 的編號；每次小會議依這裡逐項進行，有變動先改這裡。</p>
+
+    <div class="road">
+      <div class="glass lane">
+        <h3><span class="status plan">一、需要負責人決定</span></h3>
+        <ul>
+          <li><strong>公開原始碼</strong>：歷史掃描沒有真正的金鑰；公開前要先補授權檔、清掉個人資料與本機路徑、確認一個移植來的元件的授權與署名，並決定用乾淨歷史重新發布，還是直接公開現有歷史。</li>
+          <li><strong>GitHub 帳單額度</strong>：自動測試因帳單額度立刻失敗，目前以本機測試為準。</li>
+        </ul>
+      </div>
+
+      <div class="glass lane">
+        <h3><span class="status doing">二、近期（依序）</span></h3>
+        <ul>
+          <li><strong>發版 0.1.71</strong>：切換模型不再關掉使用者自己的終端機、信件內文防冒充補強、AI 永遠可被點名、結束程序守門補強、設備順序同步加鎖。</li>
+          <li><strong>pi 實開測試</strong>：要在桌面開出真的終端機視窗，確認使用者沒在用電腦時進行。<span class="refs">#243</span></li>
+          <li><strong>pi 接手（方案 B）</strong>：第一階段底層已合併，其餘接線與選單進行中。<span class="refs">#240 #246</span></li>
+          <li><strong>非 Claude 引擎的關閉與切換模型</strong>：背景工作者關閉與 pi 切換模型已做；Gemini、Grok 的切換模型要等協定實測；Codex 等有帳號後實機驗證。<span class="refs">#235</span></li>
+          <li><strong>手機端開新夥伴的實機往返</strong>：電腦端 Gemini、Grok 已實測；手機到電腦的完整往返還沒走過。<span class="refs">#239</span></li>
+        </ul>
+      </div>
+
+      <div class="glass lane">
+        <h3><span class="status plan">三、之後</span></h3>
+        <ul>
+          <li><strong>雲端夥伴在手機上改名</strong>與雲端夥伴的訊息直達叫醒（每個夥伴一組叫醒設定）。<span class="refs">#241</span></li>
+          <li><strong>寄回信的預設寄件者</strong>（回信預設用哪個身分）。</li>
+          <li><strong>Codex 真機測試</strong>：需要先有 Codex 帳號。</li>
+          <li><strong>殘留清理</strong>：舊版收發小程式的安裝檔與過時的說明。</li>
+          <li><strong>群組細修</strong>：叫醒順序的呈現、依序回答、手機顯示各帳號剩餘額度。<span class="refs">#228 #230 #231</span></li>
+          <li><strong>議題收尾關閉</strong>：#239、#229、#240 確認後關閉。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
   <section id="meetings">
     <h2>會議記錄</h2>
     <p class="sub">各項進度與決議的小會議記錄，最新在上，時間為台北時間。資料取自 site/meetings.json，那份檔案是唯一來源。</p>
