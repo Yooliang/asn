@@ -25,7 +25,7 @@ function runtimeFiles() {
 
 test('打包：pi 擴充執行需要的檔都列進 bundle.resources，放在安裝資料夾的 pi-extension\\', () => {
   const want = runtimeFiles()
-  assert.deepEqual(want, ['inbox.mjs', 'index.ts', 'lib.mjs', 'package.json'])
+  assert.deepEqual(want, ['control.mjs', 'inbox.mjs', 'index.ts', 'lib.mjs', 'package.json'])   // control.mjs＝遠端控制（切換模型，#235）；漏列＝裝好的 ASN 載入擴充會因找不到檔而失敗
   for (const f of want) assert.equal(res[`../../pi-extension/${f}`], `pi-extension/${f}`, `${f} 沒列進 bundle.resources`)
   const got = Object.entries(res).filter(([, d]) => d.startsWith('pi-extension/'))
   assert.equal(got.length, want.length, '只帶執行需要的檔（不帶測試與 README）')
