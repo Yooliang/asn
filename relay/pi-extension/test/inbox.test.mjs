@@ -48,6 +48,8 @@ test('視窗狀態檔：原子寫入、欄位完整、可移除；壞 sessionId 
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(d, 'sid1.json'), 'utf8')), rec)
   assert.deepEqual(fs.readdirSync(d), ['sid1.json'], '不留暫存檔')
   assert.equal(windowRecord({ sessionId: 'sid1', name: 'n', pid: 1, cwd: '', state: 'weird', at: 1 }).state, 'idle', '不認得的狀態當閒置')
+  assert.equal(windowRecord({ sessionId: 's', name: 'n', pid: 1, cwd: '', state: 'idle', model: 'claude-sonnet-4', provider: 'anthropic', at: 1 }).provider, 'anthropic', '有模型才寫提供者（#258）')
+  assert.equal(windowRecord({ sessionId: 's', name: 'n', pid: 1, cwd: '', state: 'idle', provider: 'anthropic', at: 1 }).provider, undefined, '沒有模型就不寫提供者')
   assert.throws(() => writeWindow(d, { ...rec, sessionId: '../evil' }))
   removeWindow(d, 'sid1')
   removeWindow(d, 'sid1') // 重複移除不丟錯

@@ -29,6 +29,8 @@ pub struct Window {
     pub context_pct: Option<u8>,
     /// 這個視窗有載入 ASN 外掛（外掛狀態檔有效）；名單只在 true 時帶 mod_loaded
     pub mod_loaded: bool,
+    /// 這個視窗背後實際用的模型（pi 視窗：「提供者/模型」，最多 60 字）；沒有就是 None，名單不帶這個欄位
+    pub model: Option<String>,
 }
 
 impl Window {
@@ -38,7 +40,7 @@ impl Window {
     }
     /// Claude 視窗（由 ~/.claude/sessions 讀出）
     pub fn claude(name: &str, status: Option<String>, cwd: &str, pid: u32, updated_at: u64, session_id: Option<String>) -> Window {
-        Window { name: name.into(), status, cwd: cwd.into(), pid, updated_at, session_id, engine: "claude".into(), engine_label: None, no_fallback: false, cwd_label_override: None, detail: None, context_pct: None, mod_loaded: false }
+        Window { name: name.into(), status, cwd: cwd.into(), pid, updated_at, session_id, engine: "claude".into(), engine_label: None, no_fallback: false, cwd_label_override: None, detail: None, context_pct: None, mod_loaded: false, model: None }
     }
     pub fn cwd_label(&self) -> String {
         if let Some(l) = &self.cwd_label_override {
@@ -286,6 +288,9 @@ pub fn roster_body_with_procs(windows: &[Window], asn_window: Option<&str>, laun
             }
             if w.mod_loaded {
                 o["mod_loaded"] = json!(true); // 可選欄位：這個視窗有載入外掛；舊後台會丟掉，舊用戶端略過
+            }
+            if let Some(m) = &w.model {
+                o["model"] = json!(m); // 可選欄位：背後的模型；後台名單本來就收 model，舊用戶端略過
             }
             o
         })

@@ -73,6 +73,17 @@ fn parse_window(path: &Path, stem: &str, now_ms: u64, alive: &impl Fn(u32) -> bo
         detail: None,
         context_pct: None,
         mod_loaded: true,
+        model: model_label(&v),
+    })
+}
+
+/// 登記檔的 provider 與 model 合成「提供者/模型」（名單 model 最長 60 字；太長就只留模型）。沒有 model 就是 None
+fn model_label(v: &Value) -> Option<String> {
+    let clean = |k: &str| v.get(k).and_then(Value::as_str).map(|s| s.trim().chars().filter(|c| !c.is_control()).collect::<String>()).filter(|s| !s.is_empty());
+    let model = clean("model")?;
+    Some(match clean("provider") {
+        Some(p) if p.chars().count() + 1 + model.chars().count() <= 60 => format!("{p}/{model}"),
+        _ => model.chars().take(60).collect(),
     })
 }
 
@@ -233,6 +244,29 @@ mod tests {
         tempfile::tempdir().unwrap()
     }
     const ID: &str = "11111111-1111-4111-8111-111111111111";
+
+    #[test]
+    fn 名單_登記檔的_provider_加_model_合成提供者斜線模型_放進_model() {
+        let h = home();
+        let d = windows_dir(h.path());
+        std::fs::create_dir_all(&d).unwrap();
+        let w = |sid: &str, extra: serde_json::Value| {
+            let mut v = json!({ "v": 1, "engine": "pi", "sessionId": sid, "name": sid, "pid": 7, "cwd": "D:/g/x", "state": "idle", "at": NOW });
+            v.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            std::fs::write(d.join(format!("{sid}.json")), v.to_string()).unwrap();
+        };
+        let s = |n: u8| format!("{n:08}-1111-4111-8111-111111111111");
+        w(&s(1), json!({ "model": "claude-sonnet-4", "provider": "anthropic" }));
+        w(&s(2), json!({ "model": "gpt-5" }));
+        w(&s(3), json!({ "model": "m".repeat(70), "provider": "p" }));
+        w(&s(4), json!({}));
+        let ws = read_windows(&windows_dir(h.path()), NOW, |_| true);
+        let by = |sid: String| ws.iter().find(|x| x.session_id.as_deref() == Some(sid.as_str())).unwrap().model.clone();
+        assert_eq!(by(s(1)).as_deref(), Some("anthropic/claude-sonnet-4"));
+        assert_eq!(by(s(2)).as_deref(), Some("gpt-5"), "沒有提供者就只放模型");
+        assert_eq!(by(s(3)).unwrap().chars().count(), 60, "太長就只留模型並截到 60 字");
+        assert_eq!(by(s(4)), None, "沒有模型就不帶");
+    }
 
     #[test]
     fn 名單_有效的登記檔變成_pi_視窗_忙碌閒置照狀態() {

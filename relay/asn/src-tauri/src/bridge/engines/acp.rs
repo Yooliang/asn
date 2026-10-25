@@ -345,6 +345,7 @@ impl AcpEngine {
             detail: None,
             context_pct: None,
             mod_loaded: false,
+            model: None,
         }
     }
 

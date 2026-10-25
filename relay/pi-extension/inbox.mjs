@@ -37,9 +37,10 @@ export function resolveWindowName({ env = {}, sessionName, cwd = '' }) {
   return c ? cleanWindowName(`pi-${c}`) : 'pi'
 }
 
-export function windowRecord({ sessionId, name, pid, cwd, state, model, at }) {
+export function windowRecord({ sessionId, name, pid, cwd, state, model, provider, at }) {
   const rec = { v: 1, engine: 'pi', sessionId, name, pid, cwd: String(cwd ?? ''), state: state === 'busy' ? 'busy' : 'idle' }
   if (model) rec.model = String(model).slice(0, 80)
+  if (model && provider) rec.provider = String(provider).slice(0, 40)   // 橋合成「提供者/模型」放進名單，讓畫面顯示背後實際的廠商（#258）
   rec.at = at
   return rec
 }

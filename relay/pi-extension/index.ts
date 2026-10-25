@@ -98,7 +98,7 @@ function registerInbox(pi: ExtensionAPI) {
     beat = () => {
       try {
         const name = resolveWindowName({ env: process.env, sessionName: pi.getSessionName(), cwd: ctx.cwd })
-        writeWindow(windowsDir, windowRecord({ sessionId: id, name, pid: process.pid, cwd: ctx.cwd, state, model: ctx.model?.id, at: Date.now() }))
+        writeWindow(windowsDir, windowRecord({ sessionId: id, name, pid: process.pid, cwd: ctx.cwd, state, model: ctx.model?.id, provider: ctx.model?.provider, at: Date.now() }))
       } catch {}
     }
     const poll = () => {
