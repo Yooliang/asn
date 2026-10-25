@@ -34,7 +34,7 @@
     <p class="sub">一眼看清楚每一家 AI 現在能做什麼。依主線程式與議題整理，查不到依據的格子標「待確認」，不憑印象填。</p>
     <ul class="legend" aria-label="狀態說明">
       <li><span class="st st-ok">已完成並驗證</span>已隨正式版發佈，並有實際使用或實機測試的紀錄</li>
-      <li><span class="st st-unv">已完成未驗證</span>程式已寫好，但沒有實機驗證（例如沒有 Codex 帳號）、尚未發版或選單還反灰</li>
+      <li><span class="st st-unv">已完成未驗證</span>程式已寫好，但沒有實機驗證（例如沒有 Codex 帳號）、只用模擬測試，或選單還反灰</li>
       <li><span class="st st-doing">進行中</span>正在做或等審查，附議題或 PR 編號</li>
       <li><span class="st st-todo">尚未做</span>還沒開始</li>
       <li><span class="st st-tbc">待確認</span>程式或議題裡查不到足夠依據，要再查證</li>
@@ -42,7 +42,7 @@
     </ul>
     <div class="table-wrap">
       <table class="matrix">
-        <caption>各家 AI 與各項管理功能的現況（依 2026 年 10 月 25 日的主線程式與議題整理）</caption>
+        <caption>各家 AI 與各項管理功能的現況（依 2026 年 10 月 25 日的主線程式（0.1.68）與議題整理）</caption>
         <thead><tr><th scope="col">AI</th><th scope="col">開啟</th><th scope="col">關閉</th><th scope="col">接手</th><th scope="col">切換模型</th><th scope="col">群組聊天</th><th scope="col">帳號切換</th><th scope="col">備註與限制</th></tr></thead>
         <tbody>
         <tr>
@@ -76,20 +76,20 @@
         <tr>
           <th scope="row" data-label="AI"><strong>Codex</strong><span class="kind">互動視窗</span></th>
           <td data-label="開啟">
-            <span class="st st-unv">已完成未驗證</span>
-            <p>已有啟動設定；查不到實機點開的紀錄，開發機沒有 Codex 帳號。</p>
+            <span class="st st-tbc">待確認</span>
+            <p>本機「開新夥伴」有 Codex 的啟動設定，但內建橋的 Codex 引擎註解寫「不支援遠端開 Codex 視窗」，兩邊矛盾，手機遠端開是否可行待查；開發機沒有 Codex 帳號，也沒有實機點開過。</p>
           </td>
           <td data-label="關閉">
             <span class="st st-unv">已完成未驗證</span>
-            <p>程式已合併，選單尚未接線、仍反灰；未用真的 Codex 驗證。<span class="refs">#238 #235</span></p>
+            <p>程式已隨 0.1.68 發佈，但選單尚未接線、仍反灰；未用真的 Codex 驗證。<span class="refs">#238 #235</span></p>
           </td>
           <td data-label="接手">
-            <span class="st st-todo">尚未做</span>
-            <p>尚未做：目前能收信、名單看得到，但不能接手自己開的 Codex（規劃中）。</p>
+            <span class="st st-na">不適用</span>
+            <p>不需要接手：Codex 的名單、轉交、回覆本來就是對使用者自己開著的視窗做，收信不用接手。</p>
           </td>
           <td data-label="切換模型">
             <span class="st st-unv">已完成未驗證</span>
-            <p>關閉後帶新模型重開同一段對話；程式已合併，選單仍反灰，未實機驗證。<span class="refs">#238 #235</span></p>
+            <p>關閉後帶新模型重開同一段對話；程式已隨 0.1.68 發佈，選單仍反灰，未實機驗證。<span class="refs">#238 #235</span></p>
           </td>
           <td data-label="群組聊天">
             <span class="st st-tbc">待確認</span>
@@ -104,12 +104,12 @@
         <tr>
           <th scope="row" data-label="AI"><strong>Gemini</strong><span class="kind">背景工作者</span></th>
           <td data-label="開啟">
-            <span class="st st-doing">進行中</span>
-            <p>開新夥伴選 Gemini 後，要由內建橋消化請求才會出現工作者；修正已合併到主線（未發版、未實機驗證），議題仍開著。<span class="refs">#239</span></p>
+            <span class="st st-unv">已完成未驗證</span>
+            <p>開新夥伴選 Gemini 後由內建橋消化請求、開出工作者；修正已隨 0.1.68 發佈（0.1.67 以前在只靠內建橋的電腦上開不出來），但還沒有人實機重測，議題仍開著。<span class="refs">#239</span></p>
           </td>
           <td data-label="關閉">
             <span class="st st-unv">已完成未驗證</span>
-            <p>「停止本次執行」已合併（未發版），只用模擬協議測過；重開或重啟 ASN 即恢復。<span class="refs">#235</span></p>
+            <p>「停止本次執行」已隨 0.1.68 發佈，只用模擬協議測過；重開或重啟 ASN 即恢復。<span class="refs">#235</span></p>
           </td>
           <td data-label="接手">
             <span class="st st-todo">尚未做</span>
@@ -132,16 +132,16 @@
         <tr>
           <th scope="row" data-label="AI"><strong>Grok</strong><span class="kind">本機背景工作者</span></th>
           <td data-label="開啟">
-            <span class="st st-doing">進行中</span>
-            <p>與 Gemini 相同：內建橋消化請求的修正已合併到主線（未發版、未實機驗證）。<span class="refs">#239</span></p>
+            <span class="st st-unv">已完成未驗證</span>
+            <p>與 Gemini 相同：修正已隨 0.1.68 發佈，但還沒有人實機重測，議題仍開著。<span class="refs">#239</span></p>
           </td>
           <td data-label="關閉">
             <span class="st st-unv">已完成未驗證</span>
-            <p>「停止本次執行」已合併（未發版），只用模擬協議測過。<span class="refs">#235</span></p>
+            <p>「停止本次執行」已隨 0.1.68 發佈，只用模擬協議測過。<span class="refs">#235</span></p>
           </td>
           <td data-label="接手">
-            <span class="st st-unv">已完成未驗證</span>
-            <p>可接手自己在終端機開的 Grok（載入同一段對話，要先關掉原終端機），已隨 0.1.67 發佈；測試用模擬協議，查不到用真的 Grok 實測。</p>
+            <span class="st st-doing">進行中</span>
+            <p>接手自己在終端機開的 Grok（載入同一段對話，要先關掉原終端機）已隨 0.1.67 發佈，但小良哥實測按「接手」失敗過一次（程式裡對得上「沒有設定 Grok 工作者」的錯誤）；0.1.68 的 #239 補了沒有設定檔時以開新夥伴開出的 Grok 工作者當底，等重測確認。<span class="refs">#239</span></p>
           </td>
           <td data-label="切換模型">
             <span class="st st-todo">尚未做</span>
@@ -155,7 +155,7 @@
             <span class="st st-todo">尚未做</span>
             <p>尚未做。</p>
           </td>
-          <td data-label="備註與限制" class="note-cell">名單曾被誤當成雲端代理而選單全灰，已修（未發版）。 #234</td>
+          <td data-label="備註與限制" class="note-cell">名單曾被誤當成雲端代理而選單全灰，已於 0.1.68 修好。 #234</td>
         </tr>
         <tr>
           <th scope="row" data-label="AI"><strong>Grok</strong><span class="kind">雲端代理</span></th>
@@ -177,7 +177,7 @@
           </td>
           <td data-label="群組聊天">
             <span class="st st-ok">已完成並驗證</span>
-            <p>能收群組訊息、在群組發言與讀歷史，已實際運作；收信是每 2 分鐘輪詢加門鈴。<span class="refs">#232</span></p>
+            <p>能收群組訊息、在群組發言與讀歷史，已實際運作；收信是每 2 分鐘輪詢加門鈴。注意：舊版的雲端收信程式沒有群組輪詢，已經在跑的雲端代理要自己更新到新版才收得到群組訊息。<span class="refs">#232 #233</span></p>
           </td>
           <td data-label="帳號切換">
             <span class="st st-na">不適用</span>
@@ -189,7 +189,7 @@
           <th scope="row" data-label="AI"><strong>pi</strong><span class="kind">互動視窗＋ASN 擴充</span></th>
           <td data-label="開啟">
             <span class="st st-tbc">待確認</span>
-            <p>開新夥伴可直接開 pi（0.1.66）；查不到從 ASN 實際開 pi 的驗證紀錄。</p>
+            <p>開新夥伴可直接開 pi（0.1.66）。但 0.1.65～0.1.67 的 pi 擴充沒有接上收信（入口沒呼叫 registerInbox），開出來的 pi 不會登記、收不到信；0.1.68 起修好，查不到從 ASN 開 pi 並收信的實機驗證紀錄。<span class="refs">#237</span></p>
           </td>
           <td data-label="關閉">
             <span class="st st-todo">尚未做</span>
@@ -197,26 +197,26 @@
           </td>
           <td data-label="接手">
             <span class="st st-doing">進行中</span>
-            <p>自己開的 pi 沒裝擴充時只顯示。方案 A（經同意替你的 pi 裝擴充）PR #243 待審；方案 B（用擴充重開同一段對話）還沒動。<span class="refs">#240 #243</span></p>
+            <p>自己開的 pi 沒裝擴充時只顯示。方案 A（在設定頁經你同意，替你的 pi 安裝 ASN 擴充，之後自己開的 pi 會登記到名單、能收信回信）已合併進主線，預定隨 0.1.69 發佈，尚未發版、未實機驗證；方案 B（接手，用擴充重開同一段對話）進行中，排在 #239 之後。<span class="refs">#240 #243</span></p>
           </td>
           <td data-label="切換模型">
             <span class="st st-unv">已完成未驗證</span>
-            <p>擴充端、橋端與選單接線都已合併（未發版）；只在 pi 的 rpc 模式實測過，互動視窗與 ASN 選單內沒實機點過。<span class="refs">#237 #235</span></p>
+            <p>擴充端、橋端與選單接線都已隨 0.1.68 發佈。只有載入 ASN 擴充的 pi 視窗能切換；擴充只在 pi 閒置時處理，忙碌會等到逾時並回「pi 沒有回應」。只在 pi 的 rpc 模式實測過，互動視窗與 ASN 選單內沒實機點過。<span class="refs">#237 #235</span></p>
           </td>
           <td data-label="群組聊天">
             <span class="st st-tbc">待確認</span>
-            <p>走一般轉交由擴充注入；查不到 pi 在群組實際收發的紀錄。<span class="refs">#135</span></p>
+            <p>群組訊息走一般轉交、由擴充注入。0.1.65～0.1.67 的 pi 收不到任何信（含群組），0.1.68 起修好，但查不到 pi 在群組實際收發的紀錄。<span class="refs">#135 #237</span></p>
           </td>
           <td data-label="帳號切換">
             <span class="st st-todo">尚未做</span>
             <p>尚未做。</p>
           </td>
-          <td data-label="備註與限制" class="note-cell">要載入 ASN 擴充才能收信與切換模型；打包漏列檔案的問題已在主線修好，下一版會帶上（0.1.67 不受影響）。#242</td>
+          <td data-label="備註與限制" class="note-cell">要載入 ASN 擴充才能收信與切換模型。0.1.65～0.1.67 的 pi 收信其實沒生效，0.1.68 起修好；自己開的 pi 要經設定頁同意安裝擴充（方案 A，預定隨 0.1.69 發佈，尚未發版）才會連上 ASN；打包漏列 control.mjs 的問題也已隨 0.1.68 修好（0.1.67 不受影響）。#242</td>
         </tr>
         </tbody>
       </table>
     </div>
-    <p class="note">格子裡的編號是專案議題或 PR 的編號（目前專案尚未公開，所以不附連結）。「接手」指把使用者自己開的視窗或對話收進 ASN 管理；各家目前都有的「接班換手」是換新一任，不算在內。DeepSeek 目前沒有獨立的引擎，名單上只有廠商圖示；能否經 pi 使用，待確認。標「未發版」的項目只在主線，已安裝的 0.1.67 還沒有。</p>
+    <p class="note">格子裡的編號是專案議題或 PR 的編號（目前專案尚未公開，所以不附連結）。「接手」指把使用者自己開的視窗或對話收進 ASN 管理；各家目前都有的「接班換手」是換新一任，不算在內。DeepSeek 目前沒有獨立的引擎，名單上只有廠商圖示；pi 的模型清單裡有 DeepSeek 的模型，所以可經 pi 使用（尚未在 ASN 內實際用過）。標「已隨 0.1.68 發佈」的項目，要更新到 0.1.68 以上才有；標「尚未發版」的項目只在主線，要等下一版。</p>
   </section>
 
   <section id="roadmap">
@@ -232,8 +232,8 @@
           <li><strong>接手</strong>：同名視窗接手、穩定的夥伴身分（改名、換對話、換設備都延續同一位夥伴）；Grok 可接手你自己手動開的對話。</li>
           <li><strong>群組聊天（第一期）</strong>：真人與 AI 同群組、邀請連結、發言者頭像、@ 標記、回覆指定訊息、已讀人數、多個 AI 同時被叫醒時依順位延遲再回答、叫醒順序標籤、AI 互相叫醒的輪數上限可調。</li>
           <li><strong>傳照片與檔案</strong>、多設備共用一份名單、Linux 無視窗主機可收信與發言。</li>
-          <li><strong>雲端代理加入群組</strong>：雲端代理可以收到群組訊息，也可以在群組發言與讀歷史。<span class="tag">已合併，尚未隨版本發佈</span></li>
-          <li><strong>修正</strong>：本機 Grok 背景工作者不再被當成雲端代理，重開與接班換手恢復可用。<span class="tag">已合併，尚未隨版本發佈</span></li>
+          <li><strong>雲端代理加入群組</strong>：雲端代理可以收到群組訊息，也可以在群組發言與讀歷史。<span class="tag">已隨 0.1.68 發佈</span></li>
+          <li><strong>修正</strong>：本機 Grok 背景工作者不再被當成雲端代理，重開與接班換手恢復可用。<span class="tag">已隨 0.1.68 發佈</span></li>
         </ul>
       </div>
 
@@ -242,7 +242,7 @@
         <ul>
           <li><strong>非 Claude 引擎的關閉與切換模型</strong>：目前只有 Claude 兩者都能。
             <ul>
-              <li>pi：切換模型已合併到主線（尚未發版）；自己開的 pi 的接手在進行中（見上方總表）。</li>
+              <li>pi：切換模型已隨 0.1.68 發佈（只在閒置時處理）；自己開的 pi 連上 ASN 的方案 A 已合併、預定隨 0.1.69 發佈，接手（方案 B）進行中（見上方總表）。</li>
               <li>Gemini、Grok 等背景工作者：補上「停止」與切換模型。</li>
               <li>Codex：先完成程式，待有帳號後做實機驗證。</li>
             </ul>
@@ -257,7 +257,7 @@
       <div class="glass lane">
         <h3><span class="status plan">規劃中</span></h3>
         <ul>
-          <li><strong>接手你自己開的 Codex、Gemini</strong>：目前只有 Grok 與 Claude 能接手（pi 的接手已在進行中）。</li>
+          <li><strong>接手你自己開的 Gemini</strong>：目前只有 Claude 確定能接手；Grok 的接手實測失敗過一次，等重測；pi 的接手（方案 B）進行中。Codex 的收信不需要接手。</li>
           <li><strong>雲端代理的叫醒順位</strong>：讓雲端代理也遵守群組的依序回答，避免搶答。</li>
           <li><strong>信件包成外部資料、權限依寄件人</strong>：收到的信一律當資料而不是指令，防止提示注入。</li>
           <li><strong>送達回條與重試強化</strong>：離線、斷線、重送時不重複、不遺漏。</li>

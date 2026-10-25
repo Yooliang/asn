@@ -121,3 +121,19 @@ test('總表：導覽列有連結、窄螢幕有卡片版型（每格帶 data-la
   const css = read('site/public/style.css')
   assert.match(css, /content: attr\(data-label\)/)
 })
+
+test('總表：版本說法與已發版本一致（0.1.68 已發，不再寫「未發版」；pi 收信 0.1.65～0.1.67 沒生效要寫明）', () => {
+  const lastVersion = changelog.match(/^## (\d+\.\d+\.\d+)/m)[1]
+  assert.ok(lastVersion, '讀不到最新版本')
+  assert.doesNotMatch(matrix, /（未發版|已合併（|尚未隨版本發佈/, '已隨 0.1.68 發佈的項目不能再標未發版')
+  assert.doesNotMatch(page, /<span class="tag">已合併，尚未隨版本發佈/, '藍圖頁已發版的項目不能再掛未發版標籤')
+  const rowOf = name => matrixRows.find(r => r.includes(`<strong>${name}`))
+  const pi = rowOf('pi')
+  assert.match(pi, /0\.1\.69/, 'pi 接手欄要寫方案 A 預定隨 0.1.69 發佈（尚未發版）')
+  assert.ok(pi && /0\.1\.65～0\.1\.67/.test(pi) && /0\.1\.68/.test(pi), 'pi 列要寫明 0.1.65～0.1.67 收信沒生效、0.1.68 起修好')
+  assert.match(rowOf('Codex'), /data-label="接手"[^>]*>\s*<span class="st st-na">/, 'Codex 接手是不適用')
+  assert.match(rowOf('Codex'), /data-label="開啟"[^>]*>\s*<span class="st st-tbc">/, 'Codex 開啟是待確認')
+  assert.match(matrixRows.find(r => r.includes('class="kind">本機背景工作者')), /data-label="接手"[^>]*>\s*<span class="st st-doing">/, 'Grok 本機接手是進行中（實測失敗過一次）')
+  assert.match(matrixRows.find(r => r.includes('class="kind">雲端代理')), /舊版的雲端收信程式/, 'Grok 雲端群組要提醒舊收信程式要更新')
+  assert.match(pi, /閒置/, 'pi 切換模型要寫明只在閒置時處理')
+})
