@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { Type } from 'typebox'
 import { ackEntry, formatInjection, nextEntries, pruneDone, removeWindow, resolveWindowName, validSessionId, windowRecord, writeWindow } from './inbox.mjs'
+import { nextRequests, pickModel, pruneControl, writeResult } from './control.mjs'
 import { buildSendArgv, guardAsnSendInput, guardBash, resolveConfig, runSend } from './lib.mjs'
 
 // 第二期的時間常數（見 README「資料流」）：登記心跳 60 秒、掃收件匣 2 秒、done/ 保留 7 天
@@ -71,11 +72,14 @@ function registerInbox(pi: ExtensionAPI) {
   const asnDir = join(homedir(), '.asn')
   const windowsDir = join(asnDir, 'pi-windows')
   const inboxDir = join(asnDir, 'pi-inbox')
+  const controlDir = join(asnDir, 'pi-control')
   let timers: ReturnType<typeof setInterval>[] = []
   let sid = ''
   let state: 'idle' | 'busy' = 'idle'
   let beat: () => void = () => {}
   const seen = new Set<string>()
+  const seenControl = new Set<string>()
+  let controlBusy = false
 
   const stop = () => {
     for (const t of timers) clearInterval(t)
@@ -110,9 +114,34 @@ function registerInbox(pi: ExtensionAPI) {
         }
       } catch {}
     }
+    // 第三期：遠端控制（目前只有 set_model）。橋把請求寫成檔案，這裡呼叫 pi.setModel 再把結果寫回檔案（見 control.mjs）。
+    // 工作進行中不動（換模型換到一半的那一輪行為不明），等閒置再處理；橋端有逾時
+    const pollControl = async () => {
+      if (controlBusy || !ctx.isIdle()) return
+      controlBusy = true
+      try {
+        for (const r of nextRequests(controlDir, id, seenControl, 3)) {
+          let result: { ok: boolean; model?: string; provider?: string; error?: string; providers?: string[] }
+          try {
+            const picked = pickModel({ available: ctx.modelRegistry.getAvailable(), all: ctx.modelRegistry.getAll() }, r.provider, r.model)
+            if ('error' in picked) result = { ok: false, error: picked.error, providers: picked.providers }
+            else if (await pi.setModel(picked.model)) result = { ok: true, model: picked.model.id, provider: picked.model.provider }
+            else result = { ok: false, error: 'no_api_key' }
+          } catch {
+            result = { ok: false, error: 'failed' }
+          }
+          writeResult(controlDir, id, r.id, result)
+          beat() // 登記檔的 model 立刻更新
+          if (ctx.hasUI && result.ok) ctx.ui.notify(`ASN 已切換模型：${result.model}`, 'info')
+        }
+      } catch {} finally {
+        controlBusy = false
+      }
+    }
     beat()
     pruneDone(inboxDir, id, Date.now(), DONE_KEEP_MS)
-    timers.push(setInterval(() => beat(), HEARTBEAT_MS), setInterval(poll, POLL_MS))
+    pruneControl(controlDir, id, Date.now(), DONE_KEEP_MS)
+    timers.push(setInterval(() => beat(), HEARTBEAT_MS), setInterval(poll, POLL_MS), setInterval(() => void pollControl(), POLL_MS))
     for (const t of timers) t.unref?.()
     if (ctx.hasUI) ctx.ui.setStatus('asn', 'ASN 可收信')
   })
