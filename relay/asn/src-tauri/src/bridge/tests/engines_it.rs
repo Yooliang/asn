@@ -1139,3 +1139,14 @@ async fn 開新夥伴的請求由核心的定時檢查消化_失敗有中文原�
     assert!(t.contains("partner-queue: 沒能開出工作者「小格」") && t.contains("不存在的模型"), "{t}");
     assert!(!h.work.path().join("partner-queue.jsonl").exists(), "請求被認領");
 }
+
+#[tokio::test]
+async fn acp_名單帶對話編號_後台靠它認得同一位夥伴() {
+    let mut h = eh(Some(json!([worker("Gemini", "acp", json!({}))])), &[], "acp", &[]).await;
+    h.put_pull(to_agent(1, "Gemini", "one")).await;
+    h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
+    h.set.refresh_all().await;
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(h.work.path().join("acp-workers.json")).unwrap()).unwrap();
+    let sid = saved["workers"]["Gemini"]["session_id"].as_str().unwrap().to_string();
+    assert_eq!(h.set.windows()[0].session_id.as_deref(), Some(sid.as_str()), "名單帶的是工作者目前的對話編號");
+}

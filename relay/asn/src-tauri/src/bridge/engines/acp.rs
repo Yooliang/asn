@@ -42,6 +42,11 @@ pub struct AcpDriver {
     sh: Arc<Shared>,
 }
 
+/// 後台夥伴表的 session 欄只收 ^[A-Za-z0-9_-]{8,80}$，不符的不送（送了會被丟掉，還可能讓整份名單被拒）
+fn roster_session_ok(s: &str) -> bool {
+    (8..=80).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
 impl AcpDriver {
     pub fn new(a: DriverArgs) -> AcpDriver {
         let sid = a.session_id.clone();
@@ -337,7 +342,7 @@ impl AcpEngine {
             cwd: cfg.cwd.to_string_lossy().to_string(),
             pid: 0,
             updated_at: 0,
-            session_id: None,
+            session_id: Some(w.session_id()).filter(|s| roster_session_ok(s)),   // 名單帶對話編號：後台靠它認得「同一位改名／重啟」；格式不符就不帶（維持原狀）
             engine: "acp".into(),
             engine_label: Some(cfg.roster_engine.clone()),
             no_fallback: true,
@@ -496,5 +501,20 @@ impl Engine for AcpEngine {
         let no_reply = !wants_reply(head_reply(text), &body) || agent.ends_with("收發室");
         w.enqueue(Job { id: id.to_string(), text: text.to_string(), sender_node: node, sender_agent: agent, no_reply });
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod roster_session_tests {
+    use super::roster_session_ok;
+
+    #[test]
+    fn 名單的對話編號_只帶後台收得下的格式() {
+        for ok in ["15deff0c-d2a6-4a8f-b6b9-6cb4fb9007df", "01a16c71-c809-7650-898d-fde24188667f", "sess_0001", "abcdefgh", &"a".repeat(80)] {
+            assert!(roster_session_ok(ok), "{ok}");
+        }
+        for bad in ["", "short", "有中文的編號12345", "has space 123", "a/b/c/d/e/f/g", "../../etc/pwd1", &"a".repeat(81)] {
+            assert!(!roster_session_ok(bad), "{bad}");
+        }
     }
 }
