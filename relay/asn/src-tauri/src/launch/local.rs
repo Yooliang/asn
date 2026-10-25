@@ -58,6 +58,12 @@ pub fn start_remote_window(config: &super::config::LaunchConfig, profile: &str, 
     maybe_trust_claude_cwd(if prof.engine.is_empty() { "claude" } else { prof.engine.as_str() }, cwd);
     let req = LaunchReq { profile, name, cwd: cwd.to_string() };
     let (command, mut args, cwd) = build_spawn_spec(config, &req)?;
+    // pi：同本機開窗，載入收信擴充、帶名字環境變數（找不到擴充就報錯，不開一個不會收信的 pi）。第一句話由橋在視窗出現後經收發室送進去
+    if prof.engine == "pi" {
+        let files = crate::identity::relay_home().join("pi-first");
+        let plan = super::pi::plan(name, &args, super::pi::resolve_ext_state(), "", &files, now_ms())?;
+        return start_window_env(name, &command, &plan.args, &cwd, false, &plan.env);
+    }
     // 同本機開窗：預設接續同名夥伴上一段對話；hidden（測試用）不查真實的對話檔
     if !hidden {
         super::resume::apply_resume_real(&mut args, &command, if prof.engine.is_empty() { "claude" } else { prof.engine.as_str() }, name, &cwd.to_string_lossy());
@@ -84,7 +90,7 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-fn enqueue_background(work_dir: &Path, profile: &str, name: &str, cwd: &str) -> Result<(), String> {
+pub(crate) fn enqueue_background(work_dir: &Path, profile: &str, name: &str, cwd: &str) -> Result<(), String> {
     let file = work_dir.join("partner-queue.jsonl");
     if let Some(p) = file.parent() {
         std::fs::create_dir_all(p).map_err(|e| e.to_string())?;
