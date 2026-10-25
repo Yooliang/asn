@@ -13,7 +13,7 @@ const F = (node, agent, o = {}) => ({ id: `${node}/${agent}`, node, agent, nick:
 const ctx = { machines: { H: { online: true, launcher: { profiles: [] } }, C: { online: true, launcher: null } }, loaded: true, signedIn: true }
 const KINDS = {
   'Claude 在線': F('H', 'a'), 'Claude 離線': F('H', 'b', { status: 'offline' }), '背景工作者在線': F('H', 'g', { engine: 'gemini' }), '背景工作者離線': F('H', 'g', { engine: 'gemini', status: 'offline' }),
-  '雲端代理': F('G', 'k', { engine: 'grok' }), '其他引擎': F('H', 'x', { engine: 'codex' }), '沒開放遠端管理': F('C', 'c'),
+  '雲端代理': F('G', 'k', { engine: 'grok', kind: 'grok' }), '其他引擎': F('H', 'x', { engine: 'codex' }), '沒開放遠端管理': F('C', 'c'),
 }
 const FIXED = [...MENU_KEYS, 'archive']
 
@@ -30,13 +30,14 @@ test('每種夥伴的選單都是同一套同一個順序；反灰一定有說�
 
 test('說明逐案不同、寫的是程式真的判斷得出的條件', () => {
   const why = (name, key) => manageItems(KINDS[name], ctx).find(i => i.key === key).reason
-  assert.equal(why('背景工作者在線', 'close'), '這個夥伴是 ASN 在背景執行的工作者，沒有視窗可關')
+  assert.equal(why('背景工作者在線', 'close'), '', '背景工作者可以「關閉」（停止本次執行）')
+  assert.match(why('背景工作者在線', 'model'), /設定檔/, '背景工作者的模型寫在設定檔，原因要講清楚')
   assert.match(why('沒開放遠端管理', 'rename'), /沒有開放遠端管理/)
   assert.match(why('Claude 離線', 'rename'), /已離線/)
   assert.match(why('雲端代理', 'info'), /雲端代理/)
   assert.match(why('其他引擎', 'close'), /引擎/)
   assert.match(why('Claude 在線', 'resume'), /不需要喚醒/)
-  assert.equal(new Set(['Claude 在線', 'Claude 離線', '背景工作者在線', '雲端代理', '其他引擎', '沒開放遠端管理'].map(n => why(n, 'close'))).size, 6, '關閉視窗的六種說明各不相同')
+  assert.equal(new Set(['Claude 在線', 'Claude 離線', '雲端代理', '其他引擎', '沒開放遠端管理'].map(n => why(n, 'close'))).size, 5, '關閉視窗的說明：Claude 在線沒有說明，其餘四種各不相同（共五種）')
 })
 
 test('背景／前台切換與切換模型：固定出現，原因與啟用條件共用同一個判斷', () => {
