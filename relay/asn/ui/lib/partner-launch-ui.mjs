@@ -5,7 +5,7 @@ import { applyDeviceOrder } from './device-order.mjs'
 
 export const DISPLAY_MODES = [
   { key: 'foreground', label: '前台顯示' },
-  { key: 'background', label: '內建通道' },
+  { key: 'background', label: '背景運行' },
 ]
 
 export function launchDisableReason(nodeKey, { selfNode, partnerModels, remoteLaunchers }) {
