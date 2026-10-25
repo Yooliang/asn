@@ -184,16 +184,48 @@ fn set_console_visible(req: &PartnerConsoleReq, visible: bool) -> Result<Value, 
     }
 }
 
-/// 這台電腦上所有「主控台視窗」：[(擁有視窗的程序編號, 是否可見)]。一次 EnumWindows、不接上任何主控台，給名單判斷 CLI 視窗有沒有隱藏。
-/// 非 Windows、測試環境（不碰真的視窗，名單斷言才穩）回空表。
-pub fn console_windows() -> Vec<(u32, bool)> {
+/// 一輪名單用的視窗快照：視窗與程序表各列一次，實作 `ConsoleOs`，所以可以直接餵給 `console_resolve::find_for`
+/// （「背景／前台切換」找視窗用的同一個函式：自己或往上的殼擁有主控台視窗、Windows Terminal 只有單一分頁才算專屬）。
+/// 和切換用的真實作不同的只有一點：不用 AttachConsole（名單迴圈裡不能接上別人的主控台），找不到就是找不到。
+/// 非 Windows、測試環境是空快照（什麼都找不到，名單斷言才穩）。
+#[derive(Default)]
+pub(crate) struct WindowSnapshot {
+    /// ConsoleWindowClass 頂層視窗：(擁有者程序編號, 是否可見)
+    pub console: Vec<(u32, bool)>,
+    /// Windows Terminal 的頂層視窗：(擁有者程序編號, 是否可見)
+    pub wt: Vec<(u32, bool)>,
+    pub procs: Vec<super::switch::Proc>,
+    pub own: u32,
+}
+
+impl super::console_resolve::ConsoleOs for WindowSnapshot {
+    fn find_console(&self, pid: u32) -> Option<super::console_resolve::ConsoleWin> {
+        let mut it = self.console.iter().filter(|(p, _)| *p == pid);
+        let (_, visible) = it.next()?;
+        if it.next().is_some() {
+            return None; // 同一個程序有多個視窗，不猜是哪個
+        }
+        Some(super::console_resolve::ConsoleWin { hwnd: 0, visible: *visible })
+    }
+    fn find_wt_windows(&self, wt_pid: u32) -> Vec<super::console_resolve::ConsoleWin> {
+        self.wt.iter().filter(|(p, _)| *p == wt_pid).map(|(_, v)| super::console_resolve::ConsoleWin { hwnd: 0, visible: *v }).collect()
+    }
+    fn table(&self) -> Vec<super::switch::Proc> {
+        self.procs.clone()
+    }
+    fn own_pid(&self) -> u32 {
+        self.own
+    }
+}
+
+pub(crate) fn window_snapshot() -> WindowSnapshot {
     #[cfg(all(windows, not(test)))]
     {
-        win::console_windows()
+        WindowSnapshot { console: win::console_windows(), wt: win::wt_windows(), procs: super::switch::winapi::process_table(), own: std::process::id() }
     }
     #[cfg(not(all(windows, not(test))))]
     {
-        Vec::new()
+        WindowSnapshot::default()
     }
 }
 
@@ -312,6 +344,27 @@ pub(crate) mod win {
             }
         }
         1
+    }
+
+    unsafe extern "system" fn each_wt_top(hwnd: HWND, lp: LPARAM) -> i32 {
+        let out = &mut *(lp as *mut Vec<(u32, bool)>);
+        if class_is(hwnd, "CASCADIA_HOSTING_WINDOW_CLASS") {
+            let mut p = 0u32;
+            GetWindowThreadProcessId(hwnd, &mut p);
+            if p != 0 {
+                out.push((p, IsWindowVisible(hwnd) != 0));
+            }
+        }
+        1
+    }
+
+    /// 所有 Windows Terminal 頂層視窗的（擁有者程序編號, 可見）；只列出、不動
+    pub fn wt_windows() -> Vec<(u32, bool)> {
+        let mut out: Vec<(u32, bool)> = Vec::new();
+        unsafe {
+            EnumWindows(Some(each_wt_top), &mut out as *mut Vec<(u32, bool)> as LPARAM);
+        }
+        out
     }
 
     /// 所有 ConsoleWindowClass 頂層視窗的（擁有者程序編號, 可見）；只列出、不動，不用 AttachConsole

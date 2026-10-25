@@ -270,24 +270,20 @@ pub fn read_local_with(sessions_dir: &Path, status_dir: &Path, alive: impl Fn(u3
     Some(l)
 }
 
-/// 主控台視窗表：[(擁有視窗的程序編號, 視窗是否可見)]，每一輪名單只列一次（見 launch::console::win::console_windows）。
-/// 只有「表裡剛好有一個那個程序自己的主控台視窗」才算確定；0 個（找不到、視窗屬別人，例如 Windows Terminal 的分頁）或多個（不確定是哪個）都不帶。
-pub fn hidden_of(table: &[(u32, bool)], pid: u32) -> Option<bool> {
+/// 這個視窗的主控台視窗是否隱藏：沿用「背景／前台切換」找視窗的同一個函式 `console_resolve::find_for`
+/// （候選鏈＝自己加往上的包裝殼，例如 ASN 開窗時包著 claude 的 powershell；Windows Terminal 只有單一分頁才算專屬）。
+/// 只有確定找到才有值（`!visible`）；找不到、共用的 Windows Terminal 分頁、沒有程序編號（ACP、Codex）一律 None，不猜。
+pub(crate) fn hidden_of(os: &dyn crate::launch::console_resolve::ConsoleOs, pid: u32) -> Option<bool> {
     if pid == 0 {
         return None;
     }
-    let mut it = table.iter().filter(|(p, _)| *p == pid);
-    let (_, visible) = it.next()?;
-    if it.next().is_some() {
-        return None;
-    }
-    Some(!*visible)
+    crate::launch::console_resolve::find_for(pid, os).ok().map(|(_, w)| !w.visible)
 }
 
 /// 給有程序編號的視窗（Claude、pi）填上 hidden；ACP 工作者與 Codex 沒有程序編號（pid 0）、也沒有視窗，維持 None
-pub fn apply_hidden(windows: &mut [Window], table: &[(u32, bool)]) {
+pub(crate) fn apply_hidden(windows: &mut [Window], os: &dyn crate::launch::console_resolve::ConsoleOs) {
     for w in windows.iter_mut() {
-        w.hidden = if w.engine == "claude" || w.engine == "pi" { hidden_of(table, w.pid) } else { None };
+        w.hidden = if w.engine == "claude" || w.engine == "pi" { hidden_of(os, w.pid) } else { None };
     }
 }
 
@@ -441,29 +437,99 @@ mod tests {
         Window::claude("T-甲", Some(status.into()), "", 1, 0, Some(sid.into()))
     }
 
-    // ---- 主控台視窗是否隱藏（hidden）：假的視窗表 ----
+    // ---- 主控台視窗是否隱藏（hidden）：假的視窗與程序表，沿用 find_for ----
+    use crate::launch::console_resolve::{ConsoleOs, ConsoleWin};
+    use crate::launch::switch::Proc;
+
+    struct FakeOs {
+        console: Vec<(u32, bool)>,
+        wt: Vec<(u32, bool)>,
+        procs: Vec<Proc>,
+    }
+    impl ConsoleOs for FakeOs {
+        fn find_console(&self, pid: u32) -> Option<ConsoleWin> {
+            let v: Vec<_> = self.console.iter().filter(|(p, _)| *p == pid).collect();
+            (v.len() == 1).then(|| ConsoleWin { hwnd: 0, visible: v[0].1 })
+        }
+        fn find_wt_windows(&self, wt_pid: u32) -> Vec<ConsoleWin> {
+            self.wt.iter().filter(|(p, _)| *p == wt_pid).map(|(_, v)| ConsoleWin { hwnd: 0, visible: *v }).collect()
+        }
+        fn table(&self) -> Vec<Proc> {
+            self.procs.clone()
+        }
+        fn own_pid(&self) -> u32 {
+            900
+        }
+    }
+    fn pr(pid: u32, ppid: u32, name: &str) -> Proc {
+        Proc { pid, ppid, name: name.into() }
+    }
+    fn base_procs() -> Vec<Proc> {
+        vec![
+            pr(4, 0, "system"),
+            pr(100, 4, "explorer.exe"),
+            pr(900, 100, "asn.exe"),
+            // 自己擁有視窗：claude.exe(10)；ASN 開窗：powershell.exe(20) 包著 claude.exe(21)，視窗是殼的
+            pr(10, 100, "claude.exe"),
+            pr(20, 100, "powershell.exe"),
+            pr(21, 20, "claude.exe"),
+            // Windows Terminal(30)：一個分頁（OpenConsole 40）裡的 claude.exe(31)；另一個 WT(50) 有兩個分頁（OpenConsole 60、61）
+            pr(30, 100, "windowsterminal.exe"),
+            pr(40, 30, "openconsole.exe"),
+            pr(31, 40, "claude.exe"),
+            pr(50, 100, "windowsterminal.exe"),
+            pr(60, 50, "openconsole.exe"),
+            pr(61, 50, "openconsole.exe"),
+            pr(51, 60, "claude.exe"),
+            pr(52, 61, "claude.exe"),
+            pr(70, 100, "claude.exe"),
+        ]
+    }
+
     #[test]
-    fn hidden_只在確定找到那個程序自己的主控台視窗時才有值() {
-        // 視窗表：(擁有者程序, 是否可見)。10＝隱藏中的視窗；11＝顯示中的視窗；30 有兩個視窗（不確定是哪個）
-        let table = vec![(10u32, false), (11, true), (30, true), (30, false)];
-        assert_eq!(hidden_of(&table, 10), Some(true), "找到且隱藏");
-        assert_eq!(hidden_of(&table, 11), Some(false), "找到且顯示");
-        assert_eq!(hidden_of(&table, 20), None, "找不到（例如 Windows Terminal 的分頁：視窗屬於 WindowsTerminal.exe，不是它）");
-        assert_eq!(hidden_of(&table, 30), None, "同一個程序有多個視窗，不猜");
-        assert_eq!(hidden_of(&table, 0), None, "沒有程序編號（ACP、Codex）");
-        assert_eq!(hidden_of(&[], 10), None, "空表（非 Windows、測試環境）");
+    fn hidden_沿用_find_for_自己或往上的殼擁有視窗_隱藏或顯示() {
+        let os = FakeOs { console: vec![(10, false), (20, true)], wt: vec![], procs: base_procs() };
+        assert_eq!(hidden_of(&os, 10), Some(true), "自己擁有視窗且隱藏");
+        assert_eq!(hidden_of(&os, 21), Some(false), "父殼（powershell）擁有視窗：ASN 開的視窗也找得到，顯示中");
+        let os2 = FakeOs { console: vec![(20, false)], wt: vec![], procs: base_procs() };
+        assert_eq!(hidden_of(&os2, 21), Some(true), "父殼擁有的視窗被隱藏");
+    }
+
+    #[test]
+    fn hidden_找不到或不確定一律不帶() {
+        let os = FakeOs { console: vec![(10, false)], wt: vec![], procs: base_procs() };
+        assert_eq!(hidden_of(&os, 70), None, "找不到視窗");
+        assert_eq!(hidden_of(&os, 0), None, "沒有程序編號（ACP、Codex）");
+        assert_eq!(hidden_of(&os, 900), None, "自己（ASN）與祖先不碰");
+        let dup = FakeOs { console: vec![(10, false), (10, true)], wt: vec![], procs: base_procs() };
+        assert_eq!(hidden_of(&dup, 10), None, "同一個程序有兩個視窗，不猜");
+        // Windows Terminal：整個程序有兩個分頁＝共用，不能單獨隱藏
+        let shared = FakeOs { console: vec![], wt: vec![(50, true)], procs: base_procs() };
+        assert_eq!(hidden_of(&shared, 51), None);
+        assert_eq!(hidden_of(&shared, 52), None);
+        // 空快照（非 Windows、測試環境）
+        let empty = FakeOs { console: vec![], wt: vec![], procs: vec![] };
+        assert_eq!(hidden_of(&empty, 10), None);
+    }
+
+    #[test]
+    fn hidden_windows_terminal_只有單一分頁才算專屬_和切換功能一致() {
+        let one = FakeOs { console: vec![], wt: vec![(30, false)], procs: base_procs() };
+        assert_eq!(hidden_of(&one, 31), Some(true), "單一分頁的 Windows Terminal 視窗被隱藏");
+        let one_shown = FakeOs { console: vec![], wt: vec![(30, true)], procs: base_procs() };
+        assert_eq!(hidden_of(&one_shown, 31), Some(false));
     }
 
     #[test]
     fn hidden_只填_claude_與_pi_視窗_acp_與_codex_維持沒有() {
-        let table = vec![(10u32, false), (11, true)];
+        let os = FakeOs { console: vec![(10, false), (20, true)], wt: vec![], procs: base_procs() };
         let mk = |engine: &str, pid: u32| {
             let mut w = Window::claude("名", None, "", pid, 0, None);
             w.engine = engine.into();
             w
         };
-        let mut ws = vec![mk("claude", 10), mk("claude", 11), mk("claude", 20), mk("pi", 10), mk("acp", 10), mk("codex", 10)];
-        apply_hidden(&mut ws, &table);
+        let mut ws = vec![mk("claude", 10), mk("claude", 21), mk("claude", 70), mk("pi", 10), mk("acp", 10), mk("codex", 10)];
+        apply_hidden(&mut ws, &os);
         assert_eq!(ws.iter().map(|w| w.hidden).collect::<Vec<_>>(), vec![Some(true), Some(false), None, Some(true), None, None]);
         // 名單 JSON：有值才帶 hidden，沒有就不帶這個欄位（舊後台、舊用戶端不受影響）
         let b = roster_body(&ws, None, Value::Null);
@@ -472,7 +538,8 @@ mod tests {
         assert_eq!(a[1]["hidden"], json!(false));
         assert!(a[2].get("hidden").is_none() && a[4].get("hidden").is_none() && a[5].get("hidden").is_none(), "{a:?}");
         // 重新套用會洗掉舊值（視窗後來被顯示出來）
-        apply_hidden(&mut ws, &[(10u32, true)]);
+        let os2 = FakeOs { console: vec![(10, true), (20, true)], wt: vec![], procs: base_procs() };
+        apply_hidden(&mut ws, &os2);
         assert_eq!(ws[0].hidden, Some(false));
     }
 
