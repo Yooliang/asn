@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { MODEL_CATALOG as sharedCatalog } from '../../shared/launcher-profiles.mjs'
-import { MODEL_CATALOG as uiCatalog } from '../ui/lib/model-catalog.mjs'
+import { MODEL_CATALOG as uiCatalog, RUN_LABEL, runChoices } from '../ui/lib/model-catalog.mjs'
+import { remoteModelRows } from '../ui/lib/partner-launch-ui.mjs'
 import { defaultPartnerName, injectPendingGroups, pendingFriend, resolvePending } from '../ui/lib/partner.mjs'
 import { bumpRecentCwd, cwdChoices, normalizeLaunchPrefs } from '../ui/lib/launch-prefs.mjs'
 
@@ -38,4 +39,33 @@ test('最近用過的工作資料夾', () => {
 test('啟動設定記住顯示方式', () => {
   assert.equal(normalizeLaunchPrefs({ launchDisplay: 'background' }).launchDisplay, 'background')
   assert.equal(normalizeLaunchPrefs({ launchDisplay: 'weird' }).launchDisplay, 'foreground')
+})
+
+test('運行二選一：模型決定哪種可用，不支援的反灰並寫原因（Claude／Codex／pi 只有 CLI，Gemini／Grok 只有內建通道）', () => {
+  const by = id => uiCatalog.find(m => m.id === id)
+  for (const id of ['claude', 'codex', 'pi']) {
+    const r = runChoices(by(id))
+    assert.equal(r.selected, 'cli', id)
+    assert.deepEqual(r.choices.map(c => [c.key, c.ok]), [['cli', true], ['acp', false]], id)
+    assert.ok(r.choices[1].why.includes('內建通道') && r.choices[1].why.length > 6, `${id} 要寫原因：${r.choices[1].why}`)
+    assert.equal(r.choices[0].why, '')
+  }
+  for (const id of ['gemini', 'grok']) {
+    const r = runChoices(by(id))
+    assert.equal(r.selected, 'acp', id)
+    assert.deepEqual(r.choices.map(c => [c.key, c.ok]), [['cli', false], ['acp', true]], id)
+    assert.match(r.choices[0].why, /外部入口/, id)
+  }
+  assert.deepEqual(runChoices(by('claude')).choices.map(c => c.label), [RUN_LABEL.cli, RUN_LABEL.acp])
+  assert.match(RUN_LABEL.acp, /背景運行/); assert.match(RUN_LABEL.cli, /終端機視窗/)
+})
+
+test('運行二選一：目錄上沒有的自訂設定只看那台回報的 mode，不支援的用通用原因；沒有資料不丟錯', () => {
+  const rows = remoteModelRows({ profiles: [{ id: 'mine', label: '自訂視窗', mode: 'window' }, { id: 'bg', label: '自訂背景', mode: 'background' }, { id: 'claude', label: 'Claude' }] })
+  const [w, b, c] = rows.map(runChoices)
+  assert.equal(w.selected, 'cli'); assert.equal(w.choices[1].ok, false); assert.match(w.choices[1].why, /不支援/)
+  assert.equal(b.selected, 'acp'); assert.equal(b.choices[0].ok, false)
+  assert.match(c.choices[1].why, /Claude/, '回報的 profile 在目錄上有：用目錄的原因')
+  assert.equal(runChoices(undefined).selected, 'cli')
+  assert.equal(runChoices(null).choices.length, 2)
 })

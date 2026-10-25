@@ -408,6 +408,10 @@
               <legend>模型</legend>
               <button v-for="m in lchChoices.models" :key="m.profileId" type="button" class="m-opt" :class="{ on: lch.profile === m.profileId }" :aria-pressed="lch.profile === m.profileId" @click="lch.profile = m.profileId"><span class="m-opt-t">{{ m.label }}</span><small class="m-opt-why">{{ m.modeLabel }}</small></button>
             </fieldset>
+            <fieldset class="m-fs">
+              <legend>運行</legend>
+              <button v-for="c in lchRun.choices" :key="c.key" type="button" class="m-opt" :class="{ on: lchRun.selected === c.key, off: !c.ok }" :disabled="!c.ok" :aria-pressed="lchRun.selected === c.key"><span class="m-opt-t">{{ c.label }}</span><small class="m-opt-why" v-if="!c.ok">{{ c.why }}</small></button>
+            </fieldset>
             <label class="m-field">工作資料夾<select class="set-sel" v-model="lch.cwd"><option v-for="c in lchChoices.cwds" :key="c" :value="c">{{ c }}</option></select></label>
             <label class="m-field">名字<input class="set-input" v-model="lch.name" maxlength="40" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
             <label class="m-field">第一句話（選填）<textarea class="set-area" v-model="lch.first" rows="3" maxlength="4000"></textarea></label>
