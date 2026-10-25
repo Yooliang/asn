@@ -2,9 +2,9 @@
 // 手機三個大分頁：夥伴、對話（最後使用的那一位）、設置。沒有多視窗、系統匣、設定分頁。
 import { groupItems } from './dims.mjs'
 import { friendMatchesQuery, normalizeSearchQuery, sortFriends } from './search.mjs'
-import { engineKey } from './tabs.mjs'
+import { displayVendorKey } from './tabs.mjs'
 import { withoutAsn } from './roster.mjs'
-import { modelVendorKey, vendorIconSvg } from './vendor-icons.mjs'
+import { vendorIconSvg } from './vendor-icons.mjs'
 import { noticeOf } from './photo.mjs'
 import { guideNav } from './mobile-guides.mjs'
 
@@ -85,8 +85,7 @@ export const totalUnread = friends => withoutAsn(friends).reduce((n, f) => n + (
 // 廠商圖：電腦版已有的官方圖（vendor-icons.mjs）；ASN 自己的視窗用機器人 logo。回要放進徽章的 HTML（都是內建的固定字串，沒有外部資料）
 export const ASN_BADGE = '<img src="img/logo.svg" alt="" draggable="false">'
 export function vendorBadgeHtml(friend) {
-  const k = engineKey(friend)
-  if (k === 'pi') return vendorIconSvg(modelVendorKey(friend?.model) ?? 'pi')   // pi 只是執行殼：顯示背後實際的模型廠商，對不到才用 pi 的圖
+  const k = displayVendorKey(friend)   // pi 只是執行殼：顯示背後實際的模型廠商，對不到才用 pi 的圖
   return k === 'asn' ? ASN_BADGE : vendorIconSvg(k)
 }
 export const LAST_WORDS_MAX = 80
