@@ -78,7 +78,7 @@ export function buildFriends(members, { selfNode, selfName } = {}) {
         psm: psmOf(a), contextPct: isOff || a.online === false ? null : pctOf(a.context_pct),   // 上下文已用％（選填；離線或舊後台沒有＝null）
         modLoaded: isOff || a.online === false || typeof a.mod_loaded !== 'boolean' ? null : a.mod_loaded,   // 這個視窗有沒有載入外掛（選填；離線或舊後台沒有＝null）
         deviceMod: modOf(m.claude_mod),   // 這台電腦的外掛狀態（選填；舊後台沒有＝null）
-        onRoster: true, engine: a.engine ?? null, ...(a.receivable === false ? { receivable: false } : {}), entryKind: typeof a.kind === 'string' && a.kind ? a.kind : null, kind: typeof m.kind === 'string' && m.kind ? m.kind : null, status: off || a.online === false ? 'offline' : statusOf(a.status),
+        onRoster: true, engine: a.engine ?? null, ...(typeof a.model === 'string' && a.model.trim() ? { model: a.model.trim() } : {}), ...(a.receivable === false ? { receivable: false } : {}), entryKind: typeof a.kind === 'string' && a.kind ? a.kind : null, kind: typeof m.kind === 'string' && m.kind ? m.kind : null, status: off || a.online === false ? 'offline' : statusOf(a.status),
         archived: a.archived === true,   // 封存（記在帳號層；舊後台沒有這個鍵＝沒封存）。每次名單都明寫，才不會被記住的舊值蓋掉
         ...(PARTNER_ID.test(String(a.partner_id ?? '')) ? { partnerId: a.partner_id } : {}),   // 夥伴 ID（#153）：只在內部用來查往來記錄與交接檔資料夾，不顯示
       })

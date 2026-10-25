@@ -4,7 +4,7 @@ import { groupItems } from './dims.mjs'
 import { friendMatchesQuery, normalizeSearchQuery, sortFriends } from './search.mjs'
 import { engineKey } from './tabs.mjs'
 import { withoutAsn } from './roster.mjs'
-import { vendorIconSvg } from './vendor-icons.mjs'
+import { modelVendorKey, vendorIconSvg } from './vendor-icons.mjs'
 import { noticeOf } from './photo.mjs'
 import { guideNav } from './mobile-guides.mjs'
 
@@ -86,6 +86,7 @@ export const totalUnread = friends => withoutAsn(friends).reduce((n, f) => n + (
 export const ASN_BADGE = '<img src="img/logo.svg" alt="" draggable="false">'
 export function vendorBadgeHtml(friend) {
   const k = engineKey(friend)
+  if (k === 'pi') return vendorIconSvg(modelVendorKey(friend?.model) ?? 'pi')   // pi 只是執行殼：顯示背後實際的模型廠商，對不到才用 pi 的圖
   return k === 'asn' ? ASN_BADGE : vendorIconSvg(k)
 }
 export const LAST_WORDS_MAX = 80
