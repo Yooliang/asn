@@ -27,7 +27,7 @@ export function canOfferModelSwitch(friend, { selfNode, engine }) {
 export function modelSwitchBlock(friend, { selfNode, engine }) {
   if (!friend) return '沒有選到夥伴'
   if (friend.pending) return '這個視窗還在開啟中，開好後才能切換模型'
-  if (friend.engine === 'acp') return '這個夥伴是 ASN 在背景執行的工作者，沒有視窗，不能切換模型'
+  if (friend.engine === 'acp') return '這個夥伴由 ASN 內建通道執行，沒有視窗，不能切換模型'
   if (engine !== 'claude') return '這位夥伴用的引擎還不能在這裡切換模型'
   if (friend.node !== selfNode) return '這個視窗在另一台電腦上，要到那台電腦的 ASN 才能切換模型'
   return ''

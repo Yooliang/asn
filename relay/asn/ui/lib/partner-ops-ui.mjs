@@ -54,15 +54,15 @@ export function opDialogText(op, name, device = '', engine = 'claude') {
       points: ['只換這個視窗目前用的模型，視窗不會關，對話保留', 'pi 正在工作時不會馬上換，最多等十幾秒，沒換成會告訴你原因'],
     }
     case 'rename': return { title, lead: `要把「${name}」改成什麼名字？名字只能用英數、連字號、中文，1～40 字，不能以連字號開頭。`, points: [], ok: '改名', auto: false }
-    case 'close': if (engine === 'acp') return { title: '關閉', lead: `要關閉「${name}」${where}背景工作者嗎？會結束它的程序，這次不再收信，名單上暫時看不到；不會改設定檔，重啟 ASN 後會恢復。`, points: [], ok: '關閉', auto: false }
+    case 'close': if (engine === 'acp') return { title: '關閉', lead: `要關閉「${name}」${where}內建通道的工作者嗎？會結束它的程序，這次不再收信，名單上暫時看不到；不會改設定檔，重啟 ASN 後會恢復。`, points: [], ok: '關閉', auto: false }
       return { title, lead: `關掉「${name}」${where}視窗？對話記錄會留著。`, points: [], ok: '關閉視窗', auto: false }
-    case 'restart': return { title, lead: `要重開「${name}」${where}背景工作者嗎？會先結束它的程序，再由 ASN 重新啟動，對話會保留。`, points: [], ok: '重開', auto: false }
+    case 'restart': return { title, lead: `要重開「${name}」${where}內建通道的工作者嗎？會先結束它的程序，再由 ASN 重新啟動，對話會保留。`, points: [], ok: '重開', auto: false }
     case 'handover': if (engine === 'adopt') return {
       title: '接手', lead: `要讓 ASN 的 Grok 工作者接手${where}「${name}」的對話嗎？`, ok: '接手', auto: false, ack: ADOPT_ACK,
       points: ['ASN 會找出這個 grok 正在用的那一段對話，找不到或不只一段就不會接手，並告訴你原因', '另外開一個專屬的 Grok 工作者載入同一段對話，之後寄給它的信會接在這段對話後面，回覆照一般工作者寄回', '接手後請先關掉終端機那個 grok，兩邊同時用同一段對話可能互相覆蓋', 'ASN 不會替你關掉終端機裡的 grok'],
     }
     return engine === 'acp' ? {
-      title, lead: `要讓「${name}」${where}背景工作者接班換手嗎？`, ok: '開始換手', auto: false,
+      title, lead: `要讓「${name}」${where}內建通道的工作者接班換手嗎？`, ok: '開始換手', auto: false,
       points: ['這類夥伴不會請前任寫交接，也沒有前任的對話紀錄可讀', '清掉目前的對話，結束它的程序，由 ASN 重新啟動', '新的對話第一句會是接班說明，請它先向寄件人確認進度'],
     } : {
       title, lead: `要讓「${name}」${where}視窗接班換手嗎？`, ok: '開始換手', auto: false,

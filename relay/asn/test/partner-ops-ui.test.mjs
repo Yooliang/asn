@@ -192,7 +192,7 @@ test('三個畫面都用「未知」當初始值，不再寫死 signedIn:false',
 
 test('對話框文字：重開要確認、接班換手依引擎說不同的事（ACP 不請前任寫交接）', () => {
   const r = opDialogText('restart', 'Gemini', '家用機', 'acp')
-  assert.equal(r.auto, false); assert.equal(r.title, '重開'); assert.match(r.lead, /背景工作者/); assert.match(r.lead, /對話會保留/)
+  assert.equal(r.auto, false); assert.equal(r.title, '重開'); assert.match(r.lead, /內建通道/); assert.match(r.lead, /對話會保留/)
   const acp = opDialogText('handover', 'Gemini', '', 'acp')
   assert.ok(acp.points.some(p => /不會請前任寫交接/.test(p)))
   const claude = opDialogText('handover', '小文', '')

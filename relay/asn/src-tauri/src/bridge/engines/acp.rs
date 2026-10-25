@@ -482,7 +482,7 @@ impl Engine for AcpEngine {
                     let (env, work_dir) = (self.queue_env.lock().unwrap().clone(), self.ctx.work_dir.clone());
                     Arc::new(move |cwd: &str| {
                         let req = super::partner_queue::Req { profile: "grok".into(), name: super::grok_adopt::worker_name(cwd, ""), cwd: cwd.to_string() };
-                        super::partner_queue::build_cfg(&*env, &req, &work_dir).map_err(|e| format!("這台電腦沒有現成的 Grok 背景工作者，改用「開新夥伴」的 grok 設定也開不起來：{e}"))
+                        super::partner_queue::build_cfg(&*env, &req, &work_dir).map_err(|e| format!("這台電腦沒有現成的 Grok 內建通道工作者，改用「開新夥伴」的 grok 設定也開不起來：{e}"))
                     })
                 },
             }

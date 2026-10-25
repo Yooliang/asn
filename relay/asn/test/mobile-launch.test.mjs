@@ -86,12 +86,12 @@ test('進度：送出→接手→開視窗→出現在名單；失敗顯示原�
 test('新版清單：Grok、Gemini 背景與 pi 視窗都列得出來，模型列帶名稱與模式；舊版清單（只有 id 與標籤）照常顯示', () => {
   const neu = { profiles: [
     { id: 'claude', label: 'Claude（互動視窗）', engine: 'claude', mode: 'window' },
-    { id: 'gemini', label: 'Gemini（背景工作者）', engine: 'acp', mode: 'background' },
-    { id: 'grok', label: 'Grok（背景工作者）', engine: 'acp', mode: 'background' },
+    { id: 'gemini', label: 'Gemini（背景運行、內建通道）', engine: 'acp', mode: 'background' },
+    { id: 'grok', label: 'Grok（背景運行、內建通道）', engine: 'acp', mode: 'background' },
     { id: 'pi', label: 'pi（互動視窗）', engine: 'pi', mode: 'window' },
   ], cwd_allow: ['D:\\a'], max_per_hour: 6 }
   const m = launchChoices({ launcher: neu }).models
-  assert.deepEqual(m.map(r => [r.profileId, r.label, r.mode]), [['claude', 'Claude（互動視窗）', 'window'], ['gemini', 'Gemini（背景工作者）', 'background'], ['grok', 'Grok（背景工作者）', 'background'], ['pi', 'pi（互動視窗）', 'window']])
+  assert.deepEqual(m.map(r => [r.profileId, r.label, r.mode]), [['claude', 'Claude（互動視窗）', 'window'], ['gemini', 'Gemini（背景運行、內建通道）', 'background'], ['grok', 'Grok（背景運行、內建通道）', 'background'], ['pi', 'pi（互動視窗）', 'window']])
   const c = { ...ctx, machines: machinesByNode({ machines: [{ node: 'H', launcher: neu, online: true }] }) }
   assert.deepEqual(launchEligibility('H', c), { ok: true, reason: '' })
   const ok = { node: 'H', profile: 'grok', cwd: 'D:\\a', name: '小格', first: '' }

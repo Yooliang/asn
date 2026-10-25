@@ -526,7 +526,7 @@ impl LaunchEnv for FakeEnv {
             Profile { label: "Claude（互動視窗）".into(), command: "C:\\fake\\claude.exe".into(), args: vec!["-n".into(), "{name}".into(), "--remote-control".into(), "{name}".into()], engine: "claude".into(), mode: LaunchMode::Window, disabled: false, disabled_reason: String::new() },
         );
         if self.extra_profiles {
-            profiles.insert("grok".to_string(), Profile { label: "Grok（背景工作者）".into(), command: "C:\\fake\\grok.exe".into(), args: vec!["agent".into(), "stdio".into()], engine: "acp".into(), mode: LaunchMode::Background, disabled: false, disabled_reason: String::new() });
+            profiles.insert("grok".to_string(), Profile { label: "Grok（背景運行、內建通道）".into(), command: "C:\\fake\\grok.exe".into(), args: vec!["agent".into(), "stdio".into()], engine: "acp".into(), mode: LaunchMode::Background, disabled: false, disabled_reason: String::new() });
             profiles.insert("pi".to_string(), Profile { label: "pi（互動視窗）".into(), command: "C:\\fake\\pi.cmd".into(), args: vec![], engine: "pi".into(), mode: LaunchMode::Window, disabled: false, disabled_reason: String::new() });
         }
         Ok(LaunchConfig { profiles, cwd_allow: self.allow.clone(), max_per_hour: self.max_per_hour })

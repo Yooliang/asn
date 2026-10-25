@@ -420,8 +420,8 @@ mod tests {
         let mut m = HashMap::new();
         m.insert("claude".to_string(), prof("Claude（互動視窗）", "claude", LaunchMode::Window));
         m.insert("codex".to_string(), prof("Codex（互動視窗）", "codex", LaunchMode::Window));
-        m.insert("gemini".to_string(), prof("Gemini（背景工作者）", "acp", LaunchMode::Background));
-        m.insert("grok".to_string(), prof("Grok（背景工作者）", "acp", LaunchMode::Background));
+        m.insert("gemini".to_string(), prof("Gemini（背景運行、內建通道）", "acp", LaunchMode::Background));
+        m.insert("grok".to_string(), prof("Grok（背景運行、內建通道）", "acp", LaunchMode::Background));
         m.insert("pi".to_string(), prof("pi（互動視窗）", "pi", LaunchMode::Window));
         (m, allow, 6)
     }
@@ -527,7 +527,7 @@ mod tests {
             rows,
             vec![("claude".into(), "claude".into(), "window".into()), ("gemini".into(), "acp".into(), "background".into()), ("grok".into(), "acp".into(), "background".into()), ("pi".into(), "pi".into(), "window".into())]
         );
-        assert_eq!(s["profiles"][2]["label"], "Grok（背景工作者）");
+        assert_eq!(s["profiles"][2]["label"], "Grok（背景運行、內建通道）");
         assert!(!s.to_string().contains("tool.exe"), "摘要不含指令");
     }
 
@@ -538,7 +538,7 @@ mod tests {
     impl pq::QueueEnv for FakeQ {
         fn config(&self) -> Result<LaunchConfig, String> {
             let mut profiles = HashMap::new();
-            profiles.insert("grok".to_string(), prof("Grok（背景工作者）", "acp", LaunchMode::Background));
+            profiles.insert("grok".to_string(), prof("Grok（背景運行、內建通道）", "acp", LaunchMode::Background));
             profiles.insert("claude".to_string(), prof("Claude", "claude", LaunchMode::Window));
             Ok(LaunchConfig { profiles, cwd_allow: vec![crate::launch::config::canonical_launch_cwd(&self.allow.to_string_lossy()).unwrap()], max_per_hour: 6 })
         }
@@ -560,7 +560,7 @@ mod tests {
         let e = queue_background(&ok, "grok", "小格", &other.path().to_string_lossy(), work.path()).unwrap_err();
         assert!(e.contains("不在允許清單"), "{e}");
         assert!(queue_background(&ok, "grok", "-壞", &cwd_s, work.path()).unwrap_err().contains("視窗名格式不對"));
-        assert!(queue_background(&ok, "claude", "小格", &cwd_s, work.path()).unwrap_err().contains("不是背景工作者"));
+        assert!(queue_background(&ok, "claude", "小格", &cwd_s, work.path()).unwrap_err().contains("不是內建通道"));
         assert!(queue_background(&ok, "nope", "小格", &cwd_s, work.path()).unwrap_err().contains("沒有這個啟動設定"));
         assert!(!queue.exists(), "驗不過一行都不能寫進佇列");
         queue_background(&ok, "grok", "小格", &cwd_s, work.path()).unwrap();

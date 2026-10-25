@@ -105,7 +105,7 @@ pub fn build_default_profiles(home: &Path) -> HashMap<String, Profile> {
         profiles.insert(
             "gemini".into(),
             Profile {
-                label: "Gemini（背景工作者）".into(),
+                label: "Gemini（背景運行、內建通道）".into(),
                 mode: LaunchMode::Background,
                 engine: "acp".into(),
                 command: c,
@@ -120,7 +120,7 @@ pub fn build_default_profiles(home: &Path) -> HashMap<String, Profile> {
         profiles.insert(
             "grok".into(),
             Profile {
-                label: "Grok（背景工作者）".into(),
+                label: "Grok（背景運行、內建通道）".into(),
                 mode: LaunchMode::Background,
                 engine: "acp".into(),
                 command: c,

@@ -47,12 +47,12 @@ test('背景／前台切換與切換模型：固定出現，原因與啟用條�
     if (consoleBlock(f, 'H')) assert.ok(consoleBlock(f, "H").length > 4)
   }
   assert.equal(consoleBlock(F('X', 'a'), 'H'), '這個視窗在另一台電腦上，只能在那台電腦的 ASN 切換前景或背景')
-  assert.equal(consoleBlock(F('H', 'a', { engine: 'acp' }), 'H'), '這個夥伴是 ASN 在背景執行的工作者，沒有視窗可以切換')
+  assert.equal(consoleBlock(F('H', 'a', { engine: 'acp' }), 'H'), '這個夥伴由 ASN 內建通道執行，沒有視窗可以切換')
   for (const [f, engine] of [[F('H', 'a'), 'claude'], [F('X', 'a'), 'claude'], [F('H', 'a'), 'codex'], [F('H', 'a', { engine: 'acp' }), 'acp'], [F('H', 'a', { pending: true }), 'claude']]) {
     assert.equal(canOfferModelSwitch(f, { selfNode: 'H', engine }), modelSwitchBlock(f, { selfNode: 'H', engine }) === '')
   }
   assert.match(modelSwitchBlock(F('X', 'a'), { selfNode: 'H', engine: 'claude' }), /另一台電腦/)
-  assert.match(modelSwitchBlock(F('H', 'a', { engine: 'acp' }), { selfNode: 'H', engine: 'acp' }), /背景執行的工作者/)
+  assert.match(modelSwitchBlock(F('H', 'a', { engine: 'acp' }), { selfNode: 'H', engine: 'acp' }), /內建通道/)
 })
 
 test('對話上方「管理」：背景／前台切換排最前面，其後和右鍵、手機同順序；問不到就反灰', () => {

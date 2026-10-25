@@ -44,7 +44,7 @@ pub(crate) trait ConsoleOs {
     fn own_pid(&self) -> u32;
 }
 
-const WORKER_REASON: &str = "這是 ASN 在背景執行的工作者，沒有終端機視窗";
+const WORKER_REASON: &str = "這是 ASN 內建通道的工作者，沒有終端機視窗";
 const BACKGROUND_REASON: &str = "這是在背景執行的程式（沒有人在前面操作），沒有自己的終端機視窗";
 const GONE_REASON: &str = "這個程式已經結束";
 const PROC_MISSING_REASON: &str = "找不到這個程式，可能剛好結束，或不是這台電腦上的程式";
@@ -217,7 +217,7 @@ mod tests {
         let src = Sources { workers: vec!["Grok工作者".into(), "Gemini".into()], ..Default::default() };
         for (eng, name) in [("grok", "Grok工作者"), ("gemini", "Gemini"), ("acp", "Gemini")] {
             let e = resolve_pid(&ask(eng, name, "", None), &src, &all_alive).unwrap_err();
-            assert_eq!(e, "這是 ASN 在背景執行的工作者，沒有終端機視窗", "{eng}/{name}");
+            assert_eq!(e, "這是 ASN 內建通道的工作者，沒有終端機視窗", "{eng}/{name}");
         }
         let e = resolve_pid(&ask("acp", "不在設定裡", "", None), &src, &all_alive).unwrap_err();
         assert!(e.contains("工作者"), "引擎是 acp 本身就足以判定：{e}");
