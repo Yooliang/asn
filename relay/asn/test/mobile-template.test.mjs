@@ -76,3 +76,13 @@ test('mobile.css：「⋯」選單每一列不能被壓縮（直向 flex 加 ove
   const css = fs.readFileSync(new URL('../ui/mobile.css', import.meta.url), 'utf8')
   assert.match(css, /\.m-ops-item\{[^}]*flex:none/)
 })
+
+test('開新夥伴畫面：模型與「運行」分開呈現（電腦版對話框與手機第 2 頁都有運行二選一）', () => {
+  const list = fs.readFileSync(path.join(root, 'ui', 'list.html'), 'utf8').replace(/\r\n/g, '\n')
+  const d = list.slice(list.indexOf('id="partner-dlg-title"'))
+  assert.ok(d.includes('aria-label="模型"') && d.includes('<legend>運行</legend>') && d.includes('v-for="c in partnerRun.choices"') && d.includes(':disabled="!c.ok"') && d.includes('c.why'))
+  assert.ok(d.indexOf('aria-label="模型"') < d.indexOf('<legend>運行</legend>'), '先選模型、下面才是運行')
+  const p2 = html.slice(html.indexOf(`<template v-else-if="lch.phase === 'form'">`))
+  assert.ok(p2.includes('<legend>模型</legend>') && p2.includes('<legend>運行</legend>') && p2.includes('v-for="c in lchRun.choices"') && p2.includes(':disabled="!c.ok"'))
+  assert.ok(p2.indexOf('<legend>模型</legend>') < p2.indexOf('<legend>運行</legend>'), '手機：先模型、再運行')
+})

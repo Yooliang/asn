@@ -303,7 +303,13 @@
           <span class="pmodel-lb">{{ m.label }}</span>
         </button>
       </div>
-      <p class="partner-mode" v-if="partnerDlg.modeLabel">{{ partnerDlg.modeLabel }}</p>
+      <fieldset class="partner-run" aria-label="運行">
+        <legend>運行</legend>
+        <label v-for="c in partnerRun.choices" :key="c.key" class="partner-run-opt" :class="{ off: !c.ok }">
+          <input type="radio" name="partner-run" :value="c.key" :checked="partnerRun.selected === c.key" :disabled="!c.ok" :aria-label="c.label"> {{ c.label }}
+          <small class="partner-run-why" v-if="!c.ok">{{ c.why }}</small>
+        </label>
+      </fieldset>
       <label>名字<input class="set-input" v-model="partnerDlg.name" maxlength="40" aria-label="夥伴名字"></label>
       <label>工作資料夾
         <span class="partner-cwd-row">

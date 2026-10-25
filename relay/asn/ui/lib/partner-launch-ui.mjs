@@ -29,7 +29,7 @@ export function remoteModelRows(launcher) {
     // 目錄上沒有的項目（自訂設定）：看那台回報的 mode（舊版回報沒有這欄＝視窗）
     const bg = !cat && p.mode === 'background'
     return {
-      id: cat?.id ?? p.id, toolId: cat?.toolId ?? p.id, profileId: p.id,
+      id: cat?.id ?? p.id, toolId: cat?.toolId ?? p.id, profileId: p.id, cliWhy: cat?.cliWhy, acpWhy: cat?.acpWhy,
       label: (typeof p.label === 'string' && p.label.trim()) || cat?.label || p.id,
       mode: cat?.mode ?? (bg ? 'background' : 'window'), modeLabel: cat?.modeLabel ?? (bg ? '由 ASN 內建通道執行' : '會開一個視窗'),
       installed: true, installHint: '', version: '',
