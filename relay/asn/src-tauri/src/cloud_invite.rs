@@ -42,7 +42,7 @@ pub fn clean_name(raw: &str) -> Option<String> {
 /// 要貼給代理的說明。**不含金鑰**：金鑰由人另外設成代理平台的秘密環境變數 ASN_RELAY_KEY。
 pub fn invite_text(skill_url: &str, id: &str, relay_url: &str, name: &str) -> String {
     format!(
-        "請閱讀並照著做：{skill_url}\n你的節點代號：{id}\n收發室後端網址：{relay_url}\n你在好友名單上的名字：{name}\n金鑰是環境變數 ASN_RELAY_KEY，你看不到也不要嘗試印出或寫進任何檔案。\n照說明建立收信、寄信、看門與開機自動啟動，完成後回報我。"
+        "請閱讀並照著做：{skill_url}\n你的節點代號：{id}\nASN 後端網址：{relay_url}\n你在好友名單上的名字：{name}\n金鑰是環境變數 ASN_RELAY_KEY，你看不到也不要嘗試印出或寫進任何檔案。\n照說明建立收信、寄信、看門與開機自動啟動，完成後回報我。"
     )
 }
 
