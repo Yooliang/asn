@@ -2,7 +2,7 @@
 // engine＝這個視窗背後是哪家 AI（claude／codex／gemini／grok…）。格式不對或沒帶（舊版機器橋）就是 null，
 // 不因此拒絕整份名單；detail（選填，最多 80 字）同理；資料庫那邊也有同樣的格式檢查（supabase/sql/19_roster_engine.sql）。
 
-export type RosterAgent = { name: unknown; status: unknown; cwd_label: unknown; engine: string | null; detail: string | null; context_pct: number | null; mod_loaded: boolean | null; kind: string; receivable: boolean; model: string | null };
+export type RosterAgent = { name: unknown; status: unknown; cwd_label: unknown; engine: string | null; detail: string | null; context_pct: number | null; mod_loaded: boolean | null; kind: string; receivable: boolean; model: string | null; hidden: boolean | null };
 
 export const DETAIL_MAX = 80;
 export const MODEL_MAX = 60;
@@ -35,6 +35,8 @@ export function normalizeRosterAgents(agents: Array<Record<string, unknown>>): R
     // 條目種類（window＝AI 視窗；service 等）／能不能收信／背後的模型：舊版沒帶或壞值＝window／true／null
     kind: typeof a?.kind === "string" && ENGINE_RE.test(a.kind) ? a.kind : "window",
     receivable: typeof a?.receivable === "boolean" ? a.receivable : true,
-    model: typeof a?.model === "string" && a.model.trim() ? [...a.model.trim()].slice(0, MODEL_MAX).join("") : null,
+    model: typeof a?.model === "string" && a.model.trim() ? [...a.model.trim()].slice(0, MODEL_MAX).join("") : null,
+    // 這個視窗目前是不是隱藏的（選填，只收布林；沒有視窗或舊版橋沒帶＝null）。前景／背景只代表視窗隱藏與否，與 ACP 通道無關
+    hidden: typeof a?.hidden === "boolean" ? a.hidden : null,
   }));
 }
