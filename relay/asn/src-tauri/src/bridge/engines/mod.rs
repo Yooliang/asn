@@ -22,6 +22,9 @@ pub mod pi;
 // 切換 pi 視窗模型的檔案管道（#235）；選單接線由 partner_ops 接上前先允許未使用
 #[allow(dead_code)]
 pub mod pi_control;
+// 接手使用者自己開的 pi：找出那個 pi 正在用的對話（#240 方案 B）；選單接線由 partner_ops 接上前先允許未使用
+#[allow(dead_code)]
+pub mod pi_adopt;
 pub mod rpc;
 
 use super::roster::Window;
