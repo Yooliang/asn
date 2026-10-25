@@ -2,9 +2,11 @@
 // 雲端代理的收信常駐程式：Realtime 門鈴＋每 2 分鐘補拉；pull 失敗時短退避重試（見 relay/machine/pull-retry.mjs）。
 // 每封信「先 append 到 inbox.jsonl 並 fsync，寫成功才 ack」。
 // 環境被重置時信還留在收發室信箱（沒 ack），不會掉；以信件 id 去重（含重啟後，從 inbox.jsonl 重建）。
+// 群組：同一個 pull 裡 room_list → room_read(since) 只存後端標 for_me 的訊息（被點名，或擁有者發的），游標存 rooms.json；首次看到群組不灌歷史。
 // 每 60 秒 roster 回報 resolveCloudAgents 名單（Grok 掃描＋agents.json 合併；見 grok-agents.mjs）。roster 403 只記一次、之後每小時才試一次。
 //   node recv.mjs          長駐（boot.sh 用 nohup setsid 啟動）
 // 不需要公開 IP：全程只往外連（HTTPS 輪詢＋WebSocket 門鈴）。exit code：2 沒金鑰、3 已有另一個在跑。
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createCore } from '../machine/relay-core.mjs'   // 沿用 API 呼叫與門鈴，不複製協定
@@ -14,7 +16,7 @@ import { NO_KEY_MSG, readAnonKey, readKey, resolveCloudAgents, resolveConfig, ro
 import { applyEnvCompat } from './env-compat.mjs'
 import { backendHostCode } from './env.mjs'
 import { createPullWithRetry, parsePullBackoffMs } from '../machine/pull-retry.mjs'
-import { acquirePidLock, appendLineDurable, ensureDir, readJsonl } from './lib.mjs'
+import { acquirePidLock, appendLineDurable, ensureDir, readJsonl, writeFileAtomic } from './lib.mjs'
 
 const recordOf = m => ({
   id: m.id, trust: m.trust ?? null, from_node: m.from_node, from_agent: m.from_agent ?? null, to_agent: m.to_agent ?? null,
@@ -29,6 +31,20 @@ const recordOf = m => ({
   ...(normalizeAttachments(m.attachments).length ? { attachments: normalizeAttachments(m.attachments) } : {}),
 })
 
+// 群組訊息的 inbox 記錄（格式沿用信件，多 room／seq 等欄位；inbox.mjs 看到 room 就顯示成群組訊息）
+const ROOM_PAGE = 100, ROOM_MAX_PAGES = 5
+const relationOf = m => (typeof m.relation === 'string' && m.relation.length <= 16 && /^[a-z_]+$/.test(m.relation) ? m.relation : null)
+const wakeOf = w => (w && Number.isInteger(w.rank) && Number.isInteger(w.total) ? { rank: w.rank, total: w.total, before: Array.isArray(w.before) ? w.before.filter(x => typeof x === 'string').slice(0, 20) : [] } : null)
+export const roomRecordOf = (room, member, agent, m) => ({
+  id: `room:${room.id}:${m.seq}:${member}`, room: room.id, room_name: typeof room.name === 'string' ? room.name : null, seq: m.seq,
+  trust: m.trust ?? null, relation: relationOf(m),
+  from_node: m.from ?? null, from_agent: m.from_name ?? null, from_label: typeof m.from_label === 'string' ? m.from_label : null,
+  to_agent: agent || null, reply_to: null, created_at: m.at ?? null, expects_reply: null,
+  body: m.body ?? '', received_at: new Date().toISOString(),
+  ...(wakeOf(m.wake) ? { wake: wakeOf(m.wake) } : {}),
+  ...(normalizeAttachments(m.attachments).length ? { attachments: normalizeAttachments(m.attachments) } : {}),
+})
+
 // 收信核心（可單獨測試）：api(action, {method, body}) 是 relay-core 的 api
 export function createReceiver({
   api, cfg, log, now = () => Date.now(), listAllFn, env = rosterScanEnvFrom(cfg),
@@ -37,7 +53,7 @@ export function createReceiver({
   ensureDir(cfg.mailDir, 0o700)
   const seen = new Set(readJsonl(cfg.inboxFile).map(m => m?.id).filter(Boolean))   // 重啟後靠檔案去重
 
-  async function pullOnce() {
+  async function pullInboxOnce() {
     const { messages = [] } = await api('inbox')
     const ackIds = []
     for (const m of messages) {
@@ -53,8 +69,53 @@ export function createReceiver({
     for (let i = 0; i < ackIds.length; i += 100) await api('ack', { method: 'POST', body: { ids: ackIds.slice(i, i + 100) } })
     return ackIds.length
   }
+  // 群組：游標存 cfg.roomsFile。成員身分＝room_list 的 mine[].member（節點本身或「節點~視窗名」）；視窗名當 as_agent
+  const readCursors = () => { try { const c = JSON.parse(fs.readFileSync(cfg.roomsFile, 'utf8')); return c && typeof c === 'object' && !Array.isArray(c) ? c : {} } catch { return {} } }
+  async function pullRooms() {
+    let list
+    try { list = (await api('room_list'))?.rooms ?? [] }
+    catch (e) { if (e.status === 403 || e.status === 404) return 0; throw e }   // 舊後台／沒有群組權限：略過，不影響信箱
+    const cur = readCursors()
+    let stored = 0, dirty = false
+    const save = () => { if (dirty) { writeFileAtomic(cfg.roomsFile, JSON.stringify(cur)); dirty = false } }
+    try {
+      for (const room of list) {
+        for (const mine of room.mine ?? []) {
+          const member = mine?.member
+          if (typeof member !== 'string' || !room?.id) continue
+          const key = `${room.id}|${member}`
+          if (cur[key] === undefined) { cur[key] = Number(room.last_seq) || 0; dirty = true; continue }   // 第一次看到：從現在開始，不灌歷史
+          const agent = member.includes('~') ? member.split('~').slice(1).join('~') : ''
+          for (let page = 0; page < ROOM_MAX_PAGES; page++) {
+            const res = await api(`room_read&room=${encodeURIComponent(room.id)}${agent ? `&as_agent=${encodeURIComponent(agent)}` : ''}&since=${cur[key]}&limit=${ROOM_PAGE}`)
+            const msgs = (res?.messages ?? []).filter(m => Number.isInteger(m?.seq) && m.seq > cur[key]).sort((a, b) => a.seq - b.seq)
+            for (const m of msgs) {
+              const rec = roomRecordOf(room, member, agent, m)
+              if (m.for_me === true && !seen.has(rec.id)) {
+                try { appendLineDurable(cfg.inboxFile, JSON.stringify(rec)) }   // 先寫、fsync；失敗就停在這則前面，游標不動，下次補拉
+                catch (e) { log(`room write failed id=${rec.id}: ${e.message} (cursor not advanced; will retry)`); return stored }
+                seen.add(rec.id); stored++
+                log(`room mail stored id=${rec.id} from=${rec.from_label ?? rec.from_node ?? ''}`)
+              }
+              cur[key] = m.seq; dirty = true
+            }
+            if (msgs.length < ROOM_PAGE) break
+          }
+        }
+      }
+    } finally { save() }
+    return stored
+  }
+
+  // 群組拉取失敗不拖累信箱（信箱已先寫、先 ack）：只記一次 log，下一次門鈴或輪詢再拉
+  let roomWarned = false
+  async function pullRoomsQuiet() {
+    try { await pullRooms(); if (roomWarned) log('room pull ok again'); roomWarned = false }
+    catch (e) { if (!roomWarned) log(`room pull failed: ${e.message} (will retry on next pull)`); roomWarned = true }
+  }
+
   const { pull, destroy } = createPullWithRetry({
-    pullOnce, log, sleep, backoffMs: backoffMs ?? parsePullBackoffMs(env),
+    pullOnce: async () => { const n = await pullInboxOnce(); await pullRoomsQuiet(); return n }, log, sleep, backoffMs: backoffMs ?? parsePullBackoffMs(env),
   })
 
   // roster：每位代理一列（本機掃描或 config.mjs 的 loadAgents）。403＝沒有 can_roster，只記一次、之後每小時才試
@@ -76,7 +137,7 @@ export function createReceiver({
       return false
     }
   }
-  return { pull, pullOnce, rosterOnce, seen, destroy }
+  return { pull, pullOnce: pullInboxOnce, pullRooms, rosterOnce, seen, destroy }
 }
 
 export async function main(rawEnv = process.env) {

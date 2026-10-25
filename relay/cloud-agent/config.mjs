@@ -47,6 +47,7 @@ export function resolveConfig(rawEnv = process.env) {
     logFile: path.join(mailDir, 'recv.log'),
     pidFile: path.join(mailDir, 'recv.pid'),
     agentsFile: path.join(mailDir, 'agents.json'),
+    roomsFile: path.join(mailDir, 'rooms.json'),   // 群組游標（鍵「房號|成員key」→ 已讀到的 seq）
     agentsEnv: env.ASN_CLOUD_AGENTS || '',
     cwdLabel: (env.ASN_CLOUD_ROSTER_LABEL || 'grok-cloud').trim(),
     engine: (env.ASN_CLOUD_ENGINE || 'grok').trim(),
