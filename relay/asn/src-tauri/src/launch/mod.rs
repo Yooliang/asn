@@ -12,6 +12,9 @@ mod resume;
 mod subagents;
 pub(crate) mod switch;
 pub(crate) mod wt_launch;
+#[cfg(desktop)]
+#[allow(dead_code)]
+pub(crate) mod wezterm;
 
 use crate::relay::Relay;
 use prefs::{launch_prefs_get_sync, launch_prefs_set_sync};
