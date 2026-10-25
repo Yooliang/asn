@@ -1,8 +1,8 @@
 {
-  "version": "0.1.70",
-  "versionCode": 1070,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.70_android.apk",
-  "sha256": "4f58c3c432e02f0ed87e22af47c2fffb846544ce21dc740f33c6381904a5c495",
-  "notes": "開新夥伴：這台電腦的 Grok 不在系統路徑時也能找到、Gemini 夥伴實測可收發",
+  "version": "0.1.71",
+  "versionCode": 1071,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.71_android.apk",
+  "sha256": "7432f5d5e4c59f85d2a386f284859bcac8b6fa07cc9441ee47d8d8d70c8e6e3e",
+  "notes": "切換模型不再關掉使用者自己開的終端機、信件內文防冒充補強、AI 永遠可被點名並拿掉「接受別人點名」勾選、結束程序的守門補強、設備順序同步加鎖、官網新增共用選單與待辦",
   "bytes": 9375204
 }
