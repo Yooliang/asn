@@ -104,8 +104,8 @@
         <tr>
           <th scope="row" data-label="AI"><strong>Gemini</strong><span class="kind">背景工作者</span></th>
           <td data-label="開啟">
-            <span class="st st-unv">已完成未驗證</span>
-            <p>開新夥伴選 Gemini 後由內建橋消化請求、開出工作者；修正已隨 0.1.68 發佈（0.1.67 以前在只靠內建橋的電腦上開不出來），但還沒有人實機重測，議題仍開著。<span class="refs">#239</span></p>
+            <span class="st st-ok">已完成並驗證</span>
+            <p>開新夥伴選 Gemini 後由內建橋消化請求、開出工作者。2026-10-25 在家用機實測：開出後約 7 秒內能回覆，ASN 重啟後會自動重建。<span class="refs">#239</span></p>
           </td>
           <td data-label="關閉">
             <span class="st st-unv">已完成未驗證</span>
@@ -120,8 +120,8 @@
             <p>尚未做：模型寫在設定檔、啟動時就定了；ACP 的切換模型還沒實測。<span class="refs">#235</span></p>
           </td>
           <td data-label="群組聊天">
-            <span class="st st-tbc">待確認</span>
-            <p>背景工作者收信走一般轉交（預設不代收別人的信）；查不到 Gemini 在群組實際收發的紀錄。</p>
+            <span class="st st-ok">已完成並驗證</span>
+            <p>Gemini 夥伴已在群組中實際發言與收到點名。</p>
           </td>
           <td data-label="帳號切換">
             <span class="st st-todo">尚未做</span>
@@ -132,8 +132,8 @@
         <tr>
           <th scope="row" data-label="AI"><strong>Grok</strong><span class="kind">本機背景工作者</span></th>
           <td data-label="開啟">
-            <span class="st st-unv">已完成未驗證</span>
-            <p>與 Gemini 相同：修正已隨 0.1.68 發佈，但還沒有人實機重測，議題仍開著。<span class="refs">#239</span></p>
+            <span class="st st-ok">已完成並驗證</span>
+            <p>開新夥伴選 Grok 後由內建橋消化請求、開出工作者。2026-10-25 在家用機實測：約 17 秒內能回覆。0.1.70 起，Grok 執行檔不在系統路徑時也能在安裝位置找到（之前這種電腦永遠開不出來）。<span class="refs">#239</span></p>
           </td>
           <td data-label="關閉">
             <span class="st st-unv">已完成未驗證</span>
@@ -197,7 +197,7 @@
           </td>
           <td data-label="接手">
             <span class="st st-doing">進行中</span>
-            <p>自己開的 pi 沒裝擴充時只顯示。方案 A（在設定頁經你同意，替你的 pi 安裝 ASN 擴充，之後自己開的 pi 會登記到名單、能收信回信）已合併進主線，預定隨 0.1.69 發佈，尚未發版、未實機驗證；方案 B（接手，用擴充重開同一段對話）進行中：第一階段（找出那個 pi 的對話檔的底層程式，沒有接線、使用者看不到變化）已合併，其餘還沒做。<span class="refs">#240 #243 #246</span></p>
+            <p>自己開的 pi 沒裝擴充時只顯示。方案 A（在設定頁經你同意，替你的 pi 安裝 ASN 擴充，之後自己開的 pi 會登記到名單、能收信回信）已隨 0.1.69 發佈，尚未在真的視窗裡點過；方案 B（接手，用擴充重開同一段對話）進行中：第一階段（找出那個 pi 的對話檔的底層程式，沒有接線、使用者看不到變化）已合併，其餘還沒做。<span class="refs">#240 #243 #246</span></p>
           </td>
           <td data-label="切換模型">
             <span class="st st-unv">已完成未驗證</span>
@@ -211,12 +211,12 @@
             <span class="st st-todo">尚未做</span>
             <p>尚未做。</p>
           </td>
-          <td data-label="備註與限制" class="note-cell">要載入 ASN 擴充才能收信與切換模型。0.1.65～0.1.67 的 pi 收信其實沒生效，0.1.68 起修好；自己開的 pi 要經設定頁同意安裝擴充（方案 A，預定隨 0.1.69 發佈，尚未發版）才會連上 ASN；打包漏列 control.mjs 的問題也已隨 0.1.68 修好（0.1.67 不受影響）。#242</td>
+          <td data-label="備註與限制" class="note-cell">要載入 ASN 擴充才能收信與切換模型。0.1.65～0.1.67 的 pi 收信其實沒生效，0.1.68 起修好；自己開的 pi 要經設定頁同意安裝擴充（方案 A，已隨 0.1.69 發佈）才會連上 ASN；打包漏列 control.mjs 的問題也已隨 0.1.68 修好（0.1.67 不受影響）。#242</td>
         </tr>
         </tbody>
       </table>
     </div>
-    <p class="note">格子裡的編號是專案議題或 PR 的編號（目前專案尚未公開，所以不附連結）。「接手」指把使用者自己開的視窗或對話收進 ASN 管理；各家目前都有的「接班換手」是換新一任，不算在內。DeepSeek 目前沒有獨立的引擎，名單上只有廠商圖示；pi 的模型清單裡有 DeepSeek 的模型，所以可經 pi 使用（尚未在 ASN 內實際用過）。標「已隨 0.1.68 發佈」的項目，要更新到 0.1.68 以上才有；標「尚未發版」的項目只在主線，要等下一版。</p>
+    <p class="note">格子裡的編號是專案議題或 PR 的編號（目前專案尚未公開，所以不附連結）。「接手」指把使用者自己開的視窗或對話收進 ASN 管理；各家目前都有的「接班換手」是換新一任，不算在內。DeepSeek 目前沒有獨立的引擎，名單上只有廠商圖示；pi 的模型清單裡有 DeepSeek 的模型，所以可經 pi 使用（尚未在 ASN 內實際用過）。標「已隨 某版 發佈」的項目，要更新到該版以上才有；標「尚未發版」的項目只在主線，要等下一版。</p>
   </section>
 
   <section id="roadmap">
@@ -242,7 +242,7 @@
         <ul>
           <li><strong>非 Claude 引擎的關閉與切換模型</strong>：目前只有 Claude 兩者都能。
             <ul>
-              <li>pi：切換模型已隨 0.1.68 發佈（只在閒置時處理）；自己開的 pi 連上 ASN 的方案 A 已合併、預定隨 0.1.69 發佈，接手（方案 B）進行中（見上方總表）。</li>
+              <li>pi：切換模型已隨 0.1.68 發佈（只在閒置時處理）；自己開的 pi 連上 ASN 的方案 A 已隨 0.1.69 發佈，接手（方案 B）進行中（見上方總表）。</li>
               <li>Gemini、Grok 等背景工作者：補上「停止」與切換模型。</li>
               <li>Codex：先完成程式，待有帳號後做實機驗證。</li>
             </ul>

@@ -129,7 +129,7 @@ test('總表：版本說法與已發版本一致（0.1.68 已發，不再寫「�
   assert.doesNotMatch(page, /<span class="tag">已合併，尚未隨版本發佈/, '藍圖頁已發版的項目不能再掛未發版標籤')
   const rowOf = name => matrixRows.find(r => r.includes(`<strong>${name}`))
   const pi = rowOf('pi')
-  assert.match(pi, /0\.1\.69/, 'pi 接手欄要寫方案 A 預定隨 0.1.69 發佈（尚未發版）')
+  assert.match(pi, /0\.1\.69/, 'pi 接手欄要寫方案 A 隨 0.1.69 發佈')
   assert.ok(pi && /0\.1\.65～0\.1\.67/.test(pi) && /0\.1\.68/.test(pi), 'pi 列要寫明 0.1.65～0.1.67 收信沒生效、0.1.68 起修好')
   assert.match(rowOf('Codex'), /data-label="接手"[^>]*>\s*<span class="st st-na">/, 'Codex 接手是不適用')
   assert.match(rowOf('Codex'), /data-label="開啟"[^>]*>\s*<span class="st st-tbc">/, 'Codex 開啟是待確認')
