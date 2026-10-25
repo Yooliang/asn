@@ -425,12 +425,12 @@ fn 上傳失敗或後端拒收_不寄信_錯誤是白話() {
     let f3 = fx(&h.url(), Some("T-視窗甲"));
     let (c, _, err) = go(&f3.env, &["send", "--to", "PC1", "--body", "x", "--file", &p, "--no-reply"], "");
     assert_eq!(c, 4);
-    assert!(err.contains("上傳網址不在收發室的主機上"), "{err}");
+    assert!(err.contains("上傳網址不在 ASN 的主機上"), "{err}");
     assert_eq!(h.count(), 1);
     // 後端不認得 attach_init（舊收發室）
     let o = Fake::start(|_: &Req, _| Resp::json(404, json!({"error": "not_found"})));
     let f4 = fx(&o.url(), Some("T-視窗甲"));
     let (c, _, err) = go(&f4.env, &["send", "--to", "PC1", "--body", "x", "--file", &p, "--no-reply"], "");
     assert_eq!(c, 4);
-    assert!(err.contains("這個收發室還不支援傳附件"), "{err}");
+    assert!(err.contains("這個 ASN 服務還不支援傳附件"), "{err}");
 }

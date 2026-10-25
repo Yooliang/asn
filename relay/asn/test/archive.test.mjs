@@ -81,7 +81,7 @@ test('送出：內容只含節點、名字、旗標與（有的話）夥伴 ID�
   const bad = async msg => await runArchive({ partnerArchive: async () => { throw new Error(msg) } }, F('H', 'a'), true)
   assert.match((await bad('尚未登入，無法封存夥伴')).text, /登入/)
   assert.match((await bad('partner_archive HTTP 404 not_found')).text, /找不到|更新/)
-  assert.match((await bad('partner_archive HTTP 403 protected')).text, /收發室/)
+  assert.match((await bad('partner_archive HTTP 403 protected')).text, /ASN 通知/)
   assert.match((await bad('partner_archive 連線失敗：timeout')).text, /網路/)
   const none = await runArchive({}, F('H', 'a'), true)
   assert.deepEqual([none.ok, /更新/.test(none.text)], [false, true], '沒有這個介面（舊版）')

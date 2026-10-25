@@ -126,7 +126,7 @@ export const SettingsPanel = {
             <select class="set-sel" :value="st.voice.cfg.tts_auto ? 'on' : 'off'" @change="act('voice-save', { tts_auto: $event.target.value === 'on' })" aria-label="收到新訊息自動念" :disabled="!st.voice.enabled"><option v-for="c in AUTO_CHOICES" :key="c" :value="c">{{ AUTO_LABEL[c] }}</option></select>
           </label>
           <small v-if="!st.voice.enabled">念出訊息要由維護者在後台啟用；對話裡每則對方的訊息旁有喇叭鈕，啟用後才念得出聲。</small>
-          <small v-else>念出訊息時，那則訊息的文字會經收發室送到語音代理合成（微軟 Edge 的非公開介面，僅個人用）。語音輸入則完全在這台電腦上辨識。</small>
+          <small v-else>念出訊息時，那則訊息的文字會經 ASN 送到語音代理合成（微軟 Edge 的非公開介面，僅個人用）。語音輸入則完全在這台電腦上辨識。</small>
           <label>語音輸入的語言
             <select class="set-sel" :value="st.voice.cfg.stt_lang" @change="act('voice-save', { stt_lang: $event.target.value })" aria-label="語音輸入的語言"><option v-for="l in STT_LANGS" :key="l" :value="l">{{ STT_LANG_LABEL[l] }}</option></select>
           </label>
@@ -212,7 +212,7 @@ export const SettingsPanel = {
                       <small role="status">{{ st.accounts.msg }}</small>
                       <small v-if="st.accounts.mod" role="status">{{ st.accounts.mod }}</small>
                       <label class="chk"><input type="checkbox" :checked="st.accounts.trustOwn" @change="act('acct-trust', $event.target.checked)" /><span>信任我自己的設備，別台要求切換這台時不用確認</span></label>
-                      <small>預設會在這台跳出確認，按了同意才會切換。指令只帶 email，權杖不會經過收發室。</small>
+                      <small>預設會在這台跳出確認，按了同意才會切換。指令只帶 email，權杖不會經過 ASN 的伺服器。</small>
                     </template>
                     <template v-else>
                       <ul class="dv-accts" v-if="v.accounts.length">
@@ -265,18 +265,18 @@ export const SettingsPanel = {
         <small v-if="!st.trayOk">這台電腦建不起系統匣圖示，關閉視窗一律結束程式。</small>
         <label class="chk" v-if="st.autostart.supported"><input type="checkbox" :checked="st.autostart.on" :disabled="st.autostart.busy || (!!st.autostart.blocked && !st.autostart.on)" @change="act('autostart', $event.target.checked)" aria-label="登入時自動啟動 ASN" /><span>登入時自動啟動 ASN</span></label>
         <small v-if="st.autostart.supported && st.autostart.blocked" class="autostart-blocked">{{ st.autostart.blocked }}</small>
-        <section class="set-card" aria-label="收發室" v-if="st.bridge">
+        <section class="set-card" aria-label="收發信功能" v-if="st.bridge">
           <label class="chk"><input type="checkbox" :checked="st.bridge.remoteLaunch" :disabled="st.bridge.busy" @change="act('bridge-launch', $event.target.checked)" aria-label="允許我的其他設備替這台開新視窗" /><span>允許我的其他設備替這台開新視窗</span></label>
           <label>沒指定收件人的信交給
             <input class="set-sel" type="text" maxlength="100" :value="st.bridge.unaddressedTo" :disabled="st.bridge.busy" placeholder="留空＝交給我本人" @change="act('bridge-unaddressed', $event.target.value)" aria-label="沒指定收件人的信交給哪個視窗" />
           </label>
           <small>寄來的信沒有指定收件視窗時，預設交給你本人，在對話裡標示「沒有指定收件人」。指定的視窗不在線時也會交給你本人。</small>
-          <small v-if="st.bridge.running">這台的收發室目前由 ASN 負責。</small>
-          <small v-else-if="st.bridge.legacy">這台的收發室目前由舊版收發室橋負責。</small>
+          <small v-if="st.bridge.running">這台的收發信功能目前由 ASN 負責。</small>
+          <small v-else-if="st.bridge.legacy">這台的收發信功能目前由舊版收發信小程式負責。</small>
           <template v-if="st.bridge.legacy && st.bridge.takeoverAllowed">
             <button v-if="!st.bridge.confirm" class="aero-btn" type="button" :disabled="st.bridge.busy" @click="act('bridge-takeover')">改由 ASN 負責</button>
             <div v-else class="upd-row">
-              <small>要停掉舊版收發室橋，改由 ASN 負責嗎？</small>
+              <small>要停掉舊版收發信小程式，改由 ASN 負責嗎？</small>
               <button class="aero-btn" type="button" :disabled="st.bridge.busy" @click="act('bridge-takeover-yes')">確定</button>
               <button class="aero-btn" type="button" :disabled="st.bridge.busy" @click="act('bridge-takeover-no')">取消</button>
             </div>

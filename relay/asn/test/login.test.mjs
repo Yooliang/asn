@@ -73,7 +73,7 @@ test('「暫時不登入」連結：只有已有節點金鑰、而且不在登�
   assert.equal(showSkip(true, 'setting'), false)
   assert.equal(showSkip(false, 'idle'), false, '新電腦沒有金鑰可用，不給這個選項')
   assert.equal(showSkip(undefined, 'idle'), false)
-  assert.equal(SKIP_LABEL, '暫時不登入（只用這台的收發室金鑰）')
+  assert.equal(SKIP_LABEL, '暫時不登入（只用這台電腦的金鑰）')
 })
 
 test('設定頁登入區塊元件：未登入時有兩個登入鈕、沒有登出與認領', async () => {

@@ -55,7 +55,7 @@ export function secretError(s) {
 // 畫面上的標題與提示（全中文）
 export const TEXT = {
   title: '有程式在向你要密碼',
-  lead: '請確認是你要的，再輸入密碼。密碼會在這支手機上加密後才送出，收發室看不到。',
+  lead: '請確認是你要的，再輸入密碼。密碼會在這支手機上加密後才送出，中間經過的伺服器看不到。',
   deviceLabel: '哪台電腦',
   programLabel: '哪個程式（對方自報）',
   purposeLabel: '要做什麼（對方自報）',

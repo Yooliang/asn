@@ -200,7 +200,7 @@ const OWNER_RECEIPT_GRACE_MS: u64 = 180_000;
 /// 同一寄件人對同一節點在這段時間內只說明一次
 const OWNER_RECEIPT_GAP_MS: u64 = 600_000;
 const NO_MOD_NOTICE: &str = "這個視窗沒有 ASN 外掛，/指令 只能當文字送過去";
-const DIRECT_NOTE: &str = "（這個視窗自己用命令列回了信，內文只在對方那邊，收發室看不到）";
+const DIRECT_NOTE: &str = "（這個視窗自己用命令列回了信，內文只在對方那邊，中間經過的伺服器看不到）";
 
 pub struct Core {
     pub cfg: Config,

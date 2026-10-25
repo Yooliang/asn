@@ -87,7 +87,7 @@ test('顯示用文字與錯誤白話', () => {
   assert.match(friendlyPhotoError('attach_init HTTP 413 file_too_large'), /5 MB/)
   assert.match(friendlyPhotoError('x unsupported_type'), /不收這種檔案/)
   assert.match(friendlyPhotoError('rate_limited'), /頻繁/)
-  assert.equal(friendlyPhotoError('這個收發室還不支援傳照片'), '這個收發室還不支援傳照片')
+  assert.equal(friendlyPhotoError('這個 ASN 服務還不支援傳照片'), '這個 ASN 服務還不支援傳照片')
   assert.equal(friendlyPhotoError(''), '照片沒有傳出去。')
 })
 

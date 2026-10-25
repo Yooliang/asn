@@ -25,7 +25,7 @@ export const REASON = {
   closed: '這台電腦沒有開放遠端管理視窗（要到電腦的設定打開「允許遠端開視窗與管理視窗」）',
   deviceOffline: '電腦現在不在線，叫不醒（要讓電腦的 ASN 開著）',
   notClaude: '這位夥伴用的引擎還不能喚醒',
-  unsupported: '電腦端或收發室還不支援，請先更新',
+  unsupported: '電腦端或 ASN 服務還不支援，請先更新',
   cloud: '這是雲端代理，在雲端執行，沒有電腦上的視窗可以管理',
   otherEngine: '這位夥伴用的引擎尚未實機驗證，暫不開放從這裡管理視窗',
   alreadyOnline: '這個視窗在線上，不需要喚醒',
@@ -253,19 +253,19 @@ const CODE_TEXT = {
   name_taken: '電腦上已經有同名的視窗，換個名字',
   busy: '這個視窗還有一個操作在進行中，等它完成再試',
   rate_limited: '這台電腦這個小時管理太多次了，稍後再試',
-  protected: '收發室與 ASN 自己的視窗不能這樣操作',
+  protected: 'ASN 通知與 ASN 自己的視窗不能這樣操作',
   already_online: '這位夥伴已經在線上，不需要喚醒',
   no_session: '這位夥伴沒有可接回的對話紀錄，只能開新的夥伴',
   not_claude: REASON.notClaude,
   device_offline: REASON.deviceOffline,
   bad_request: '送出的內容不合格',
-  internal: '收發室暫時有問題，稍後再試',
+  internal: 'ASN 暫時有問題，稍後再試',
 }
 // Rust／後台的錯誤字串（例如「partner_op HTTP 409 busy」）→ 給人看的中文
 export function opErrorText(msg) {
   const m = String(msg ?? '')
   if (/尚未登入/.test(m)) return REASON.needLogin
-  if (/連線失敗|逾時|timed? ?out/i.test(m)) return '連不上收發室，請檢查網路'
+  if (/連線失敗|逾時|timed? ?out/i.test(m)) return '連不上 ASN，請檢查網路'
   const code = /HTTP (\d+) ?(\w*)/.exec(m)
   if (code && CODE_TEXT[code[2]]) return CODE_TEXT[code[2]]
   if (code && code[1] === '404') return REASON.unsupported   // 舊後台沒有這個動作

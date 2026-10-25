@@ -1374,7 +1374,7 @@ async fn 往來記錄_視窗自己用命令列回信_橋只看得到記號_照�
     std::fs::write(h.work.path().join("replied").join(uid(1)), "").unwrap();
     h.core.tick(T0 + 700_000).await;
     let t = corr_text(&h, "T-乙");
-    assert!(t.contains("自行回信｜T-乙 → W/W-政策") && t.contains("收發室看不到"), "{t}");
+    assert!(t.contains("自行回信｜T-乙 → W/W-政策") && t.contains("中間經過的伺服器看不到"), "{t}");
 }
 
 #[tokio::test]

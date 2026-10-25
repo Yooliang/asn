@@ -349,7 +349,7 @@ export const ChatPane = {
       <confirm-cards v-if="isRoom" :cards="roomCards" @decide="(id, ok) => $emit('group-decide', id, ok)"></confirm-cards>
       <div class="warn" v-if="warn === 'offline'">
         <i>i</i>
-        <span>{{ plain(friend.nick) }} 目前離線，訊息會先留在收發室，對方上線後才收得到。</span>
+        <span>{{ plain(friend.nick) }} 目前離線，訊息會先留在 ASN，對方上線後才收得到。</span>
       </div>
       <div class="msgs" ref="msgsEl" aria-live="polite" @scroll.passive="onScroll">
         <div class="older-note" v-if="noteText">{{ noteText }}</div>

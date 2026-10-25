@@ -76,12 +76,12 @@ const CODE_TEXT = {
   name_taken: '這台電腦已經有同名的夥伴，換個名字',
   rate_limited: '這台電腦這個小時開太多視窗了，稍後再試',
   bad_request: '送出的內容不合格',
-  internal: '服務暫時有問題，稍後再試',
+  internal: 'ASN 暫時有問題，稍後再試',
 }
 export function launchErrorText(msg) {
   const m = String(msg ?? '')
   if (/尚未登入/.test(m)) return REASON.needLogin
-  if (/連線失敗|逾時|timed? ?out/i.test(m)) return '連不上服務，請檢查網路'
+  if (/連線失敗|逾時|timed? ?out/i.test(m)) return '連不上 ASN，請檢查網路'
   const code = /HTTP \d+ (\w+)/.exec(m)?.[1]
   if (code && CODE_TEXT[code]) return CODE_TEXT[code]
   if (/格式不對|不對|最多|只能用/.test(m) && !/HTTP/.test(m)) return m   // Rust 端自己擋下的（已經是中文）
