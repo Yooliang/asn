@@ -38,6 +38,7 @@ import { createGroupFlow } from './lib/group-flow.mjs'
 import { canInviteFrom, copyText, createGroupApi } from './lib/groups.mjs'
 import { createRoomHub } from './lib/room-hub.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, guideNav, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
+import { mobileSettingRows, mobileSettingTitle, settingNav } from './lib/mobile-settings.mjs'
 import { applyRename } from './lib/rename.mjs'
 import { checkAiWakeLimit, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE } from './lib/ai-wake-limit.mjs'
 import { GuideDoc } from './lib/guide-doc.mjs'
@@ -402,6 +403,11 @@ const app = createApp({
     // ---------- 使用指引：設置分頁的一個項目，點進去是獨立一頁（先列篇目，再看內文），內容沿用電腦版的篇目 ----------
     const guides = phoneGuideList()
     const guideOpen = computed(() => (nav.sheet === 'guide' ? phoneGuide(nav.guide) : null))
+    // 設置分頁＝分類列表（每列一行目前值），點一列進該項的滿版頁（左上返回回列表）
+    const settingRows = computed(() => mobileSettingRows({ name: myName.value, hasUpload: selfHasUpload.value, vibrateNudge: prefs.vibrateNudge, vibrateMsg: prefs.vibrateMsg, updateEnabled: upd.enabled, autoUpdate: prefs.autoUpdate, version: info.version }))
+    const settingCat = computed(() => (nav.sheet === 'setting' ? nav.cat : ''))
+    const settingTitle = computed(() => mobileSettingTitle(settingCat.value))
+    const openSetting = key => { if (!nav.sheet) go(settingNav(key)) }
     const openGuides = () => { if (!nav.sheet) go(guideNav()) }
     const openGuide = key => go(guideNav(key))
     // ---------- 開新夥伴（遠端開視窗）：手機只下指令，視窗開在那台電腦上。要本人簽章（Rust 端沒憑證就不送） ----------
@@ -821,7 +827,7 @@ const app = createApp({
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchStep2, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
-      nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
+      settingRows, settingCat, settingTitle, openSetting, nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }
   },
 })

@@ -294,8 +294,36 @@
               <div class="m-head-tx"><div class="m-title">設置</div></div>
             </header>
             <div class="m-scroll m-meview">
+              <div class="m-card m-form m-set-list">
+                <ul class="m-guide-list">
+                  <li v-for="r in settingRows" :key="r.key">
+                    <button class="m-row-btn" type="button" @click="openSetting(r.key)"><svg class="m-row-ic" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path :d="r.icon" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="m-row-tx"><b>{{ r.title }}</b><small>{{ r.summary }}</small></span><span class="m-caret" aria-hidden="true">▸</span></button>
+                  </li>
+                </ul>
+              </div>
+              <div class="m-card m-form m-guide-entry">
+                <button class="m-row-btn" type="button" @click="openGuides"><span class="m-row-tx"><b>{{ GUIDE_ENTRY_LABEL }}</b><small>{{ GUIDE_ENTRY_SUB }}</small></span><span class="m-caret" aria-hidden="true">▸</span></button>
+              </div>
+              <div class="m-logout">
+                <button class="m-btn m-danger" type="button" :disabled="loggingOut" @click="doLogout">登出</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- 設置的某一項：滿版的獨立一頁（左上返回回分類列表） -->
+    <section class="m-sheet m-set" v-if="nav.sheet === 'setting'" role="dialog" aria-modal="true" :aria-label="settingTitle">
+      <header class="m-head m-chathead">
+        <button class="m-icon-btn" type="button" aria-label="返回" @click="back"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M15 4.5L7.5 12 15 19.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="m-head-tx"><div class="m-title">{{ settingTitle }}</div></div>
+      </header>
+      <div class="m-sheet-body m-set-detail">
+        <template v-if="settingCat === 'me'">
               <input ref="avFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden @change="pickAvatar">
-              <div class="m-card">
+              <div class="m-card m-card-av">
                 <button class="m-av-big" type="button" :disabled="avBusy" aria-label="換大頭貼" @click="avFile.click()"><img class="m-pic m-pic-lg" :class="'st-' + me.status" :src="meAv" alt="" width="112" height="112"></button>
                 <p class="m-who">{{ myName }}</p>
                 <p class="m-hint">點一下換大頭貼</p>
@@ -313,29 +341,29 @@
                 <label>狀態<select class="set-sel" v-model="me.status"><option v-for="(label, key) in STATUS" :key="key" :value="key">{{ label }}</option></select></label>
                 <label>個人訊息<input class="set-input" v-model="me.psm" maxlength="60" placeholder="輸入個人訊息" enterkeyhint="done" @keydown.enter="$event.target.blur()"></label>
               </div>
+        </template>
+        <template v-else-if="settingCat === 'notify'">
               <div class="m-card m-form">
                 <label class="m-check"><input type="checkbox" v-model="prefs.vibrateNudge"> 對方傳來「震動」時，手機跟著震動</label>
                 <label class="m-check"><input type="checkbox" v-model="prefs.vibrateMsg"> 收到新訊息時輕輕震一下</label>
               </div>
-              <div class="m-card m-form">
+        </template>
+        <template v-else-if="settingCat === 'update'">
+          <div class="m-card m-form">
                 <template v-if="upd.enabled">
                   <label class="m-check"><input type="checkbox" v-model="prefs.autoUpdate"> 自動檢查新版本</label>
                   <button class="m-btn" type="button" :disabled="upd.checking || upd.phase === 'downloading'" @click="checkUpdate(true)">{{ upd.checking ? '檢查中…' : '檢查更新' }}</button>
                   <p class="m-note" v-if="upd.manual" role="status">{{ upd.manual }}</p>
                 </template>
+            <p class="m-note" v-else>這個版本不提供自動檢查新版本。</p>
+          </div>
+        </template>
+        <template v-else-if="settingCat === 'about'">
+          <div class="m-card m-form">
                 <p class="m-ver">ASN {{ info.version }}</p>
-              </div>
-              <div class="m-card m-form m-guide-entry">
-                <button class="m-row-btn" type="button" @click="openGuides"><span class="m-row-tx"><b>{{ GUIDE_ENTRY_LABEL }}</b><small>{{ GUIDE_ENTRY_SUB }}</small></span><span class="m-caret" aria-hidden="true">▸</span></button>
-              </div>
-              <div class="m-logout">
-                <button class="m-btn m-danger" type="button" :disabled="loggingOut" @click="doLogout">登出</button>
-              </div>
-            </div>
-          </section>
-        </div>
+          </div>
+        </template>
       </div>
-
     </section>
 
     <!-- 使用指引：滿版的獨立一頁（左上返回）；先列篇目，點一篇看內文。內文一律當純文字（guide-doc 不用 v-html） -->

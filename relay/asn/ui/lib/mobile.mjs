@@ -7,6 +7,7 @@ import { withoutAsn } from './roster.mjs'
 import { modelVendorKey, vendorIconSvg } from './vendor-icons.mjs'
 import { noticeOf } from './photo.mjs'
 import { guideNav } from './mobile-guides.mjs'
+import { MOBILE_SETTING_KEYS, settingNav } from './mobile-settings.mjs'
 
 // ---------- 單欄導覽 ----------
 // 狀態：{ tab: 'list' | 'chats' | 'me', sheet: '' | 'launch' | 'ops' }。sheet＝蓋在分頁上的一層：「開新夥伴」（滿版）、「⋯」選單（底部浮層）。
@@ -33,6 +34,7 @@ export function normalizeNav(raw) {
   if (raw?.sheet === 'ops') return opsNav()
   if (raw?.sheet === 'secret') return secretNav()
   if (raw?.sheet === 'acct') return acctNav()
+  if (raw?.sheet === 'setting') return MOBILE_SETTING_KEYS.includes(raw?.cat) ? settingNav(raw.cat) : tabNav('me')   // 設置分頁的某一項滿版頁；沒這個分類退回設置分頁
   if (raw?.sheet === 'guide') return guideNav(raw?.guide)   // 設置分頁的「使用指引」滿版頁
   return tabNav(raw?.tab)
 }
