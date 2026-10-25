@@ -19,7 +19,7 @@ import { DEVICE_TEXT, canRemoveRow, dropAfter, moveFlags, removedRows, visibleRo
 export const SETTING_OPS = [
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-trust', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove', 'device-restore',
-  'closeTo', 'autostart', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'avatar-remove',
+  'closeTo', 'autostart', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'avatar-remove',
 ]
 
 export const SettingsPanel = {
@@ -323,6 +323,19 @@ export const SettingsPanel = {
               <span class="launch-hint" v-else>{{ t.installHint }}</span>
             </li>
           </ul>
+          <section class="set-card" aria-label="pi 與 ASN 互通" v-if="st.piSetup">
+            <b>{{ st.piSetup.title }}</b>
+            <small v-for="(l, i) in st.piSetup.lines" :key="i">{{ l }}</small>
+            <small v-if="st.piSetup.consent">{{ st.piSetup.consent }}</small>
+            <div class="upd-row">
+              <button class="aero-btn" type="button" v-if="st.piSetup.showAsk" :disabled="st.piSetup.busy" @click="act('pi-setup-ask')">{{ st.piSetup.askLabel }}</button>
+              <button class="aero-btn" type="button" v-if="st.piSetup.showAgree" :disabled="st.piSetup.busy" @click="act('pi-setup-install')">{{ st.piSetup.agreeLabel }}</button>
+              <button class="aero-btn" type="button" v-if="st.piSetup.showCancel" :disabled="st.piSetup.busy" @click="act('pi-setup-cancel')">{{ st.piSetup.cancelLabel }}</button>
+              <button class="aero-btn" type="button" v-if="st.piSetup.showReinstall" :disabled="st.piSetup.busy" @click="act('pi-setup-install')">{{ st.piSetup.reinstallLabel }}</button>
+              <button class="aero-btn" type="button" v-if="st.piSetup.showRemove" :disabled="st.piSetup.busy" @click="act('pi-setup-remove')">{{ st.piSetup.removeLabel }}</button>
+            </div>
+            <small v-if="st.piSetup.msg" role="status">{{ st.piSetup.msg }}</small>
+          </section>
           <label>每小時開新夥伴上限
             <input class="set-input" type="number" min="1" max="20" :value="st.launch.maxPerHour" @change="act('launch-max', Number($event.target.value))">
           </label>
