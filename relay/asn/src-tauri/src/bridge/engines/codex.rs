@@ -446,6 +446,7 @@ impl Inner {
                     context_pct: None,
                     mod_loaded: false,
                     model: None,
+                    hidden: None,
                 },
                 CW { thread_id: id.clone(), path: th.get("path").and_then(Value::as_str).map(String::from) },
             ));

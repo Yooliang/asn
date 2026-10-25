@@ -29,6 +29,8 @@ pub struct ProcAgent {
     pub label: Option<String>,
     /// 背景執行（無人在前面操作：-p／exec／stdio／headless／rpc 等）；否則是使用者自己在終端機開的前景互動程式
     pub background: bool,
+    /// 主控台視窗是否隱藏（只在確定時有值，見 roster::hidden_of）；名單只在有值時帶 hidden
+    pub hidden: Option<bool>,
 }
 
 /// 名單上限，避免失控時灌爆名單
@@ -47,6 +49,9 @@ impl ProcAgent {
         let mut o = json!({ "name": self.name(), "status": "running", "cwd_label": "", "engine": self.engine, "kind": "process", "receivable": false });
         if let Some(m) = &self.model {
             o["model"] = json!(m);
+        }
+        if let Some(h) = self.hidden {
+            o["hidden"] = json!(h);
         }
         o
     }
@@ -239,7 +244,7 @@ pub fn scan_excluding(table: &[ProcInfo], self_pid: u32, skip: &[u32]) -> Vec<Pr
             continue;
         }
         let (model, label) = model_of(args);
-        out.push(ProcAgent { pid: p.pid, engine: engine.to_string(), model, label, background: is_background(args) });
+        out.push(ProcAgent { pid: p.pid, engine: engine.to_string(), model, label, background: is_background(args), hidden: None });
     }
     out.sort_by(|a, b| a.engine.cmp(&b.engine).then(a.pid.cmp(&b.pid)));
     out.truncate(MAX_AGENTS);
@@ -512,5 +517,20 @@ mod tests {
     fn 真實掃描至少讀得到自己() {
         let t = system_table();
         assert!(t.iter().any(|x| x.pid == std::process::id()));
+    }
+}
+
+#[cfg(test)]
+mod hidden_tests {
+    use super::*;
+
+    #[test]
+    fn 程序條目_hidden_有值才帶() {
+        let mut a = ProcAgent { pid: 7, engine: "grok".into(), model: None, label: None, background: false, hidden: None };
+        assert!(a.to_json().get("hidden").is_none());
+        a.hidden = Some(true);
+        assert_eq!(a.to_json()["hidden"], json!(true));
+        a.hidden = Some(false);
+        assert_eq!(a.to_json()["hidden"], json!(false));
     }
 }

@@ -54,6 +54,14 @@ export const PROC_PLACE_RE = /（(前景|背景)）\s*$/
 export const isProcEntry = a => String(a?.kind ?? '').trim().toLowerCase() === 'process'
 export const procDisplayName = name => String(name ?? '').replace(PROC_PLACE_RE, '').trim()
 
+// CLI 視窗的主控台視窗被隱藏（名單帶 hidden:true，橋只在確定時才帶）＝「背景運行」，接在資料夾後面；顯示中或沒有這個欄位不寫字。ACP 內建通道的字樣在啟動設定的 label 裡
+export const HIDDEN_NOTE = '背景運行'
+export function hiddenPsm(a) {
+  const base = psmOf(a)
+  if (a?.hidden !== true) return base
+  return base ? `${base}・${HIDDEN_NOTE}` : HIDDEN_NOTE
+}
+
 // 一個視窗一列；名字＝視窗名，個人訊息＝資料夾（cwd_label，沒有就空）
 export function buildFriends(members, { selfNode, selfName } = {}) {
   const out = []
@@ -82,7 +90,7 @@ export function buildFriends(members, { selfNode, selfName } = {}) {
       seen.add(a.name)
       out.push({
         id: friendId(m.id, a.name), node: m.id, device: typeof m.name === 'string' && m.name.trim() ? m.name.trim() : '', agent: a.name, nick: isProcEntry(a) ? procDisplayName(a.name) || a.name : a.name,
-        psm: psmOf(a), contextPct: isOff || a.online === false ? null : pctOf(a.context_pct),   // 上下文已用％（選填；離線或舊後台沒有＝null）
+        psm: hiddenPsm(a), contextPct: isOff || a.online === false ? null : pctOf(a.context_pct),   // 上下文已用％（選填；離線或舊後台沒有＝null）
         modLoaded: isOff || a.online === false || typeof a.mod_loaded !== 'boolean' ? null : a.mod_loaded,   // 這個視窗有沒有載入外掛（選填；離線或舊後台沒有＝null）
         deviceMod: modOf(m.claude_mod),   // 這台電腦的外掛狀態（選填；舊後台沒有＝null）
         onRoster: true, engine: a.engine ?? null, ...(typeof a.model === 'string' && a.model.trim() ? { model: a.model.trim() } : {}), ...(a.receivable === false ? { receivable: false } : {}), entryKind: typeof a.kind === 'string' && a.kind ? a.kind : null, kind: typeof m.kind === 'string' && m.kind ? m.kind : null, status: off || a.online === false ? 'offline' : statusOf(a.status),

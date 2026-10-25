@@ -74,6 +74,7 @@ fn parse_window(path: &Path, stem: &str, now_ms: u64, alive: &impl Fn(u32) -> bo
         context_pct: None,
         mod_loaded: true,
         model: model_label(&v),
+        hidden: None,
     })
 }
 
