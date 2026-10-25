@@ -15,6 +15,9 @@ pub mod codex;
 pub mod codex_state;
 pub mod grok_adopt;
 pub mod pi;
+// 切換 pi 視窗模型的檔案管道（#235）；選單接線由 partner_ops 接上前先允許未使用
+#[allow(dead_code)]
+pub mod pi_control;
 pub mod rpc;
 
 use super::roster::Window;
