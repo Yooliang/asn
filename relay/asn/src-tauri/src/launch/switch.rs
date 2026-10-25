@@ -299,6 +299,13 @@ pub(crate) fn in_windows_terminal(table: &[Proc], pid: u32) -> bool {
 /// 守門：算出「這次允許結束的 pid」。只含已確認的 root、它的後代（子先孫後）、以及（若有）它的直接父殼 `host`。
 /// 永遠不含自己（ASN）、自己的祖先、pid 0／4，也不含其他同輩程序。
 pub(crate) fn kill_set(table: &[Proc], root: u32, host: Option<u32>, own: u32) -> Vec<u32> {
+    kill_set_with(table, root, host, own, &|_| None)
+}
+
+/// 同 `kill_set`，多一份建立時間：Windows 的程序表在父程序結束後不會清掉子程序的 ppid，舊 pid 被重用時，
+/// 舊父親的孤兒會被誤當成新程序的後代。所以兩邊建立時間都查得到、而子程序比父程序早建立時，就不算後代（連同它底下的）。
+/// 任何一邊查不到就維持原樣（只在能確認時才排除，不會因此多殺）。
+pub(crate) fn kill_set_with(table: &[Proc], root: u32, host: Option<u32>, own: u32, started: &dyn Fn(u32) -> Option<u64>) -> Vec<u32> {
     let mut forbidden: HashSet<u32> = ancestors(table, own).into_iter().collect();
     forbidden.insert(own);
     forbidden.insert(0);
@@ -312,6 +319,9 @@ pub(crate) fn kill_set(table: &[Proc], root: u32, host: Option<u32>, own: u32) -
     while idx < order.len() {
         let cur = order[idx];
         for p in table.iter().filter(|p| p.ppid == cur && p.pid != cur) {
+            if matches!((started(p.pid), started(cur)), (Some(c), Some(par)) if c < par) {
+                continue; // 比父程序還早建立：是舊 pid 的孤兒，不是後代
+            }
             if !order.contains(&p.pid) {
                 order.push(p.pid);
             }
@@ -584,7 +594,7 @@ pub(crate) fn run_with(os: &dyn Os, dir: &Path, req: &SwitchRunReq, launch: &dyn
     let table = os.processes();
     let in_wt = in_windows_terminal(&table, target.pid);
     let host = asn_host_of(os, &table, target.pid);
-    let allowed = kill_set(&table, target.pid, host, os.own_pid());
+    let allowed = kill_set_with(&table, target.pid, host, os.own_pid(), &|p| os.started_ms(p));
     if !allowed.contains(&target.pid) {
         return fail("check", "守門：這個程序不允許結束", &manual, false);
     }
@@ -1060,6 +1070,33 @@ mod tests {
             p(300, 100, "asn.exe"),        // ASN 自己
             p(310, 300, "powershell.exe"), // ASN 的子程序
         ]
+    }
+
+    #[test]
+    fn 守門_pid_被重用_比父程序早建立的孤兒不算後代() {
+        let t = table();
+        // 222（cmd）其實是舊 221 留下的孤兒：建立時間比現在的 221 早
+        let st = |pid: u32| match pid {
+            220 => Some(1000),
+            221 => Some(2000),
+            222 => Some(1500),
+            _ => None,
+        };
+        assert_eq!(kill_set_with(&t, 220, None, 300, &st), vec![221, 220]);
+        // 查不到建立時間：維持原樣（不多殺也不少殺）
+        assert_eq!(kill_set_with(&t, 220, None, 300, &|_| None), vec![222, 221, 220]);
+        // 只有一邊查得到：維持原樣
+        assert_eq!(kill_set_with(&t, 220, None, 300, &|p| if p == 222 { Some(1) } else { None }), vec![222, 221, 220]);
+        // 正常順序（子比父晚）：全部算後代
+        assert_eq!(kill_set_with(&t, 220, None, 300, &|p| Some(p as u64)), vec![222, 221, 220]);
+        // 被排除的節點底下的孫子也不算
+        let st2 = |pid: u32| match pid {
+            220 => Some(1000),
+            221 => Some(500),
+            222 => Some(3000),
+            _ => None,
+        };
+        assert_eq!(kill_set_with(&t, 220, None, 300, &st2), vec![220]);
     }
 
     #[test]
