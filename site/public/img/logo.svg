@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="120 112 260 260" width="260" height="260">
+  <!-- ASN 的標誌：小機器人本體（頭＋身體），小良哥 10/20 給的圖拿掉天線、耳機、翅膀、底下的推進光 -->
+  <defs>
+    <linearGradient id="primaryBlue" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#1e3a8a"/>
+    </linearGradient>
+    <linearGradient id="whiteMetal" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/><stop offset="100%" stop-color="#cbd5e1"/>
+    </linearGradient>
+    <linearGradient id="screenBlack" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/><stop offset="100%" stop-color="#020617"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="15" stdDeviation="15" flood-color="#0f172a" flood-opacity="0.15"/>
+    </filter>
+    <filter id="neonGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <!-- 身體 -->
+  <path d="M 180 270 C 180 270, 160 360, 250 360 C 340 360, 320 270, 320 270 Z" fill="url(#primaryBlue)" filter="url(#shadow)"/>
+  <path d="M 190 270 C 190 270, 175 350, 250 350 C 325 350, 310 270, 310 270 Z" fill="url(#whiteMetal)"/>
+  <rect x="225" y="300" width="50" height="15" rx="7.5" fill="#f59e0b" filter="url(#neonGlow)"/>
+  <!-- 頭 -->
+  <rect x="150" y="130" width="200" height="150" rx="75" fill="url(#primaryBlue)" filter="url(#shadow)"/>
+  <rect x="160" y="140" width="180" height="130" rx="65" fill="url(#whiteMetal)"/>
+  <rect x="175" y="155" width="150" height="95" rx="45" fill="url(#screenBlack)"/>
+  <path d="M 185 175 Q 250 160 315 175" fill="none" stroke="#ffffff" stroke-width="4" stroke-opacity="0.2" stroke-linecap="round"/>
+  <g stroke="#22d3ee" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none" filter="url(#neonGlow)">
+    <path d="M 205 200 L 215 190 L 225 200"/>
+    <path d="M 275 200 L 285 190 L 295 200"/>
+    <path d="M 235 215 Q 250 225 265 215"/>
+  </g>
+</svg>
