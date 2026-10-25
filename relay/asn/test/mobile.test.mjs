@@ -7,6 +7,14 @@ import { groupHeading } from '../ui/lib/tabs.mjs'
 
 const F = (id, node, nick, status = 'online', extra = {}) => ({ id, node, agent: nick, nick, status, device: `設備${node}`, unread: 0, ...extra })
 
+test('開新夥伴兩頁：第 2 頁多一個 step: 2，其他值都當第 1 頁；瀏覽記錄的壞 step 退回第 1 頁', () => {
+  assert.deepEqual(launchNav(2), { tab: 'list', sheet: 'launch', step: 2 })
+  for (const bad of [undefined, 0, 1, 3, '2', null, {}]) assert.deepEqual(launchNav(bad), { tab: 'list', sheet: 'launch' }, String(bad))
+  assert.deepEqual(normalizeNav({ sheet: 'launch', tab: 'me', step: 2 }), launchNav(2))
+  assert.deepEqual(normalizeNav({ sheet: 'launch', step: 9 }), launchNav())
+  assert.deepEqual(normalizeNav({ sheet: 'ops', step: 2 }), opsNav(), '別的浮層不帶 step')
+})
+
 test('導覽：夥伴／對話／設置三個分頁、開新夥伴與「⋯」選單兩種浮層；瀏覽記錄裡的壞資料一律退回名單', () => {
   assert.deepEqual(initialNav(), { tab: 'list', sheet: '' })
   assert.deepEqual(meNav(), { tab: 'me', sheet: '' })

@@ -43,3 +43,15 @@ test('m.html：樣板用到的 setup 變數都有放進 return（漏回傳＝真
   const missing = [...used].filter(n => declared.has(n) && !returned.has(n) && !local.has(n))
   assert.deepEqual(missing, [], `樣板用到卻沒回傳：${missing.join('、')}`)
 })
+
+test('m.html：開新夥伴第 1 頁只有電腦與「下一步」，第 2 頁才有模型、工作資料夾、名字、第一句話與開啟（模型清單依電腦而定）', () => {
+  const a = html.indexOf(`v-if="lch.phase === 'form' && !lchStep2"`)
+  const b = html.indexOf(`v-else-if="lch.phase === 'form'"`, a)
+  const c = html.indexOf('<template v-else>', b)
+  assert.ok(a > 0 && b > a && c > b, '找不到兩頁的樣板')
+  const p1 = html.slice(a, b), p2 = html.slice(b, c)
+  assert.match(p1, /<legend>電腦<\/legend>/); assert.match(p1, /nextLaunch/)
+  for (const t of ['<legend>模型</legend>', '工作資料夾', '名字', 'submitLaunch']) assert.ok(!p1.includes(t), `第 1 頁不該有 ${t}`)
+  for (const t of ['<legend>模型</legend>', '工作資料夾', '名字', '第一句話', 'submitLaunch']) assert.ok(p2.includes(t), `第 2 頁要有 ${t}`)
+  assert.ok(!p2.includes('<legend>電腦</legend>'), '第 2 頁不再選電腦')
+})
