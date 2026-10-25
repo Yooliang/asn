@@ -146,6 +146,7 @@ async fn aboot(members: Value, env: &[(&str, &str)]) -> AH {
         events: tx,
         notify: Arc::new(|_| {}),
         pids: PidBook::new(work.path()),
+        data_dir: None,
     };
     let set = engines::build(&ctx, Some("aegis")).expect("有載入 aegis 引擎");
     let mut core = new_core(&fr, work.path(), sessions.path(), Arc::new(FakeSink::default()), now());

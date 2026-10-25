@@ -241,11 +241,89 @@ pub struct AcpEngine {
     workers: Arc<Mutex<Vec<(String, WorkerHandle)>>>,
     /// 帳本（start 時才開）；接手要用同一份存對話編號
     store: Mutex<Option<Arc<Store>>>,
+    /// 消化「開新夥伴」請求用的本機環境（啟動設定、指令是否存在）；測試換成假的
+    queue_env: Mutex<Arc<dyn super::partner_queue::QueueEnv>>,
+    /// 同一時間只有一輪在消化請求
+    queue_busy: Mutex<()>,
 }
 
 impl AcpEngine {
     pub fn new(ctx: EngineCtx, make_driver: Option<MakeDriver>) -> AcpEngine {
-        AcpEngine { ctx, approvals: Approvals::new(), make_driver: make_driver.unwrap_or_else(default_make_driver), workers: Arc::new(Mutex::new(vec![])), store: Mutex::new(None) }
+        let env: Arc<dyn super::partner_queue::QueueEnv> = Arc::new(super::partner_queue::SystemQueueEnv { data_dir: ctx.data_dir.clone() });
+        AcpEngine { ctx, approvals: Approvals::new(), make_driver: make_driver.unwrap_or_else(default_make_driver), workers: Arc::new(Mutex::new(vec![])), store: Mutex::new(None), queue_env: Mutex::new(env), queue_busy: Mutex::new(()) }
+    }
+
+    /// 測試用：換掉消化請求時的本機環境
+    #[cfg(test)]
+    pub fn set_queue_env(&self, env: Arc<dyn super::partner_queue::QueueEnv>) {
+        *self.queue_env.lock().unwrap() = env;
+    }
+
+    /// 動態加一個背景工作者（開新夥伴）。同名且還在名單上＝失敗；同名但已被關閉／起不來＝換成新的
+    fn add_partner(&self, cfg: WorkerCfg) -> Result<(), String> {
+        let store = self.store.lock().unwrap().clone().ok_or("工作者管理還沒啟動")?;
+        {
+            let mut ws = self.workers.lock().unwrap();
+            if let Some(i) = ws.iter().position(|(n, _)| n.eq_ignore_ascii_case(&cfg.name)) {
+                if ws[i].1.listed() {
+                    return Err(format!("已經有叫「{}」的工作者", cfg.name));
+                }
+                let (_, old) = ws.remove(i);
+                old.stop();
+            }
+        }
+        std::fs::create_dir_all(&cfg.cwd).map_err(|e| format!("工作資料夾建不起來（{}）：{e}", cfg.cwd.display()))?;
+        let name = cfg.name.clone();
+        let (protocol, cwd) = (cfg.protocol.clone(), cfg.cwd.display().to_string());
+        let w = self.make_worker(Arc::new(cfg), store);
+        self.workers.lock().unwrap().push((name.clone(), w.clone()));
+        w.start();
+        self.ctx.log(format!("acp: 動態啟動工作者 {name}（protocol={protocol} cwd={cwd}）"));
+        Ok(())
+    }
+
+    /// 消化佇列檔裡的「開新夥伴」請求（橋的定時檢查呼叫）。每一行的結果都記 log，失敗寫明中文原因
+    fn consume_queue(&self) {
+        use super::partner_queue as pq;
+        let Ok(_busy) = self.queue_busy.try_lock() else { return };
+        if self.store.lock().unwrap().is_none() {
+            return;
+        }
+        let lines = match pq::claim(&self.ctx.work_dir) {
+            Ok(l) => l,
+            Err(e) => {
+                self.ctx.log(format!("partner-queue: {e}"));
+                return;
+            }
+        };
+        if lines.is_empty() {
+            return;
+        }
+        let env = self.queue_env.lock().unwrap().clone();
+        let mut changed = false;
+        for line in lines {
+            let req = match pq::parse_line(&line) {
+                Ok(r) => r,
+                Err(e) => {
+                    self.ctx.log(format!("partner-queue: 沒能開出工作者：{e}"));
+                    continue;
+                }
+            };
+            let r = pq::build_cfg(&*env, &req, &self.ctx.work_dir).and_then(|cfg| {
+                let cwd = cfg.cwd.display().to_string();
+                self.add_partner(cfg).map(|_| cwd)
+            });
+            match r {
+                Ok(cwd) => {
+                    pq::remember(&self.ctx.work_dir.join(pq::PARTNERS_FILE), &req.name, &req.profile, &cwd);
+                    changed = true;
+                }
+                Err(e) => self.ctx.log(format!("partner-queue: 沒能開出工作者「{}」（模型 {}）：{e}", req.name, req.profile)),
+            }
+        }
+        if changed {
+            let _ = self.ctx.events.send(EngineEvent::RosterChanged);
+        }
     }
 
     fn window_of(w: &Worker) -> Window {
@@ -307,7 +385,7 @@ impl Engine for AcpEngine {
         if conf.workers.is_empty() {
             self.ctx.log(format!("acp: 沒有任何工作者（{}）。範本：relay/machine/agents.example.json", self.ctx.agents_file.display()));
         }
-        let base_grok = conf.workers.iter().find(|c| c.roster_engine == "grok" && c.protocol == "acp").cloned();
+        let mut base_grok = conf.workers.iter().find(|c| c.roster_engine == "grok" && c.protocol == "acp").cloned();
         for cfg in conf.workers {
             if let Err(e) = std::fs::create_dir_all(&cfg.cwd) {
                 self.ctx.log(format!("acp: {} 的工作資料夾建不起來（{}）：{e}", cfg.name, cfg.cwd.display()));
@@ -330,6 +408,19 @@ impl Engine for AcpEngine {
             w.start();
             self.ctx.log(line);
         }
+        // 開新夥伴開出過的背景工作者：重啟後依 profile 重建（重驗授權與指令；現在不成立的留在名冊裡、記 log、不啟動）
+        for (name, profile, cwd) in super::partner_queue::read_partners(&self.ctx.work_dir.join(super::partner_queue::PARTNERS_FILE)) {
+            let req = super::partner_queue::Req { profile, name: name.clone(), cwd };
+            let env = self.queue_env.lock().unwrap().clone();
+            match super::partner_queue::build_cfg(&*env, &req, &self.ctx.work_dir).and_then(|cfg| self.add_partner(cfg)) {
+                Ok(()) => {}
+                Err(e) => self.ctx.log(format!("acp: 重啟後沒能建回背景工作者「{name}」：{e}")),
+            }
+        }
+        // 沒有 agents.json 的 Grok 設定時，開新夥伴開出的 grok 工作者就是接手的底
+        if base_grok.is_none() {
+            base_grok = self.workers.lock().unwrap().iter().map(|(_, w)| w.cfg().clone()).find(|c| c.roster_engine == "grok" && c.protocol == "acp" && !c.adopted);
+        }
         // 接手過的專屬工作者（使用者在終端機開的 grok 的對話）：重啟後建回來，對話編號已在帳本裡
         if let Some(base) = base_grok {
             for (name, sid, cwd) in super::acp_admin::read_adopted(&self.ctx.work_dir.join(ADOPTED_FILE)) {
@@ -344,6 +435,10 @@ impl Engine for AcpEngine {
                 self.ctx.log(format!("acp: 接手的專屬工作者 {name} 啟動（載入原本的對話）"));
             }
         }
+    }
+
+    fn poll(&self) {
+        self.consume_queue();
     }
 
     fn acp_admin(&self) -> Option<Arc<dyn super::acp_admin::AcpAdmin>> {
