@@ -4,7 +4,7 @@
 // 所有資料庫存取經 SECURITY DEFINER 函式（只授權 service_role）。見 docs/AUTH.md。
 import { parseSelfName } from "./node_name.ts";
 
-export const ACCOUNT_ACTIONS = new Set(["account_bootstrap", "node_create", "node_claim", "node_update_request", "node_update_status", "cloud_node_create", "cloud_node_list", "cloud_node_revoke", "account_name", "account_settings"]);
+export const ACCOUNT_ACTIONS = new Set(["account_bootstrap", "node_create", "node_claim", "node_update_request", "node_update_status", "cloud_node_create", "cloud_node_list", "cloud_node_revoke", "account_name", "account_settings", "account_device_prefs"]);
 
 export interface AuthUser {
   id: string;
@@ -71,6 +71,26 @@ const ERR_STATUS: Record<string, number> = {
   asn_offline: 409,
   rate_limited: 429,
 };
+
+const NODE_KEY = /^[A-Za-z0-9_-]{1,32}$/;
+function cleanKeyList(v: unknown): string[] | null {
+  if (!Array.isArray(v) || v.length > 200) return null;
+  const out: string[] = [];
+  for (const k of v) {
+    if (typeof k !== "string" || !NODE_KEY.test(k) || out.includes(k)) return null;
+    out.push(k);
+  }
+  return out;
+}
+/** 設備偏好：三個節點鍵陣列＋rev（0～2^53 的整數毫秒）；多餘欄位丟掉，任何一項不合格就整份拒絕（回 null） */
+export function cleanDevicePrefs(v: unknown): { order: string[]; shown: string[]; removed: string[]; rev: number } | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  const order = cleanKeyList(o.order), shown = cleanKeyList(o.shown), removed = cleanKeyList(o.removed);
+  if (!order || !shown || !removed) return null;
+  if (typeof o.rev !== "number" || !Number.isSafeInteger(o.rev) || o.rev < 0) return null;
+  return { order, shown, removed, rev: o.rev };
+}
 
 function mapError(code: string): Reply {
   return { status: ERR_STATUS[code] ?? 400, body: { error: code } };
@@ -163,6 +183,22 @@ export async function handleAccountAction(
     const d = data as Record<string, unknown>;
     if (typeof d?.error === "string") return mapError(d.error);
     return { status: 200, body: { ai_wake_limit: d.ai_wake_limit } };
+  }
+
+  // 設備順序同步（migration 20261025010000_account_device_prefs.sql）：order／shown／removed 三個節點鍵陣列＋rev（毫秒時間戳）。
+  // body 帶 prefs ＝寫（整份以 rev 較新的為準，對方較新時回現有的並帶 stale）；沒帶＝讀（沒設過 prefs 為 null）。一律要本人的登入憑證。
+  if (action === "account_device_prefs") {
+    const o = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+    let prefs: Record<string, unknown> | null = null;
+    if (o.prefs !== undefined && o.prefs !== null) {
+      prefs = cleanDevicePrefs(o.prefs);
+      if (!prefs) return { status: 400, body: { error: "bad_request" } };
+    }
+    const { data, error } = await deps.rpc("asn_account_device_prefs", { p_user: user.id, p_prefs: prefs });
+    if (error) { console.error("account_device_prefs", error); return { status: 500, body: { error: "internal" } }; }
+    const d = data as Record<string, unknown>;
+    if (typeof d?.error === "string") return mapError(d.error);
+    return { status: 200, body: d?.stale === true ? { prefs: d.prefs ?? null, stale: true } : { prefs: d?.prefs ?? null } };
   }
 
   // 遠端更新（見 supabase/migrations/20261021070000_asn_remote_update.sql）：只有自己帳號名下的節點；對別人的節點一律 not_found

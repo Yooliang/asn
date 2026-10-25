@@ -386,6 +386,48 @@ pub async fn auth_ai_wake_limit_set(auth: State<'_, AuthState>, limit: i64) -> R
     Ok(v.get("ai_wake_limit").and_then(Value::as_i64).unwrap_or(limit))
 }
 
+/// 設備順序同步（帳號層）：order／shown／removed 是節點鍵陣列，rev 是毫秒時間戳；規則與後台 asn_account_device_prefs 一致
+/// （每個陣列最多 200 個、元素 1～32 字的英數與 _-、不重複）。不合格整份拒絕
+pub fn clean_device_prefs(v: &Value) -> Result<Value, String> {
+    fn keys(v: Option<&Value>) -> Result<Vec<String>, String> {
+        let arr = v.and_then(Value::as_array).ok_or("設備設定格式不對")?;
+        if arr.len() > 200 {
+            return Err("設備設定太多".into());
+        }
+        let mut out: Vec<String> = vec![];
+        for k in arr {
+            let k = k.as_str().ok_or("設備設定格式不對")?;
+            let ok = !k.is_empty() && k.len() <= 32 && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+            if !ok || out.iter().any(|x| x == k) {
+                return Err("設備設定格式不對".into());
+            }
+            out.push(k.to_string());
+        }
+        Ok(out)
+    }
+    let rev = v.get("rev").and_then(Value::as_i64).filter(|r| (0..=9_007_199_254_740_991).contains(r)).ok_or("設備設定缺少版本")?;
+    Ok(json!({ "order": keys(v.get("order"))?, "shown": keys(v.get("shown"))?, "removed": keys(v.get("removed"))?, "rev": rev }))
+}
+
+/// 讀帳號層的設備順序設定（後台 account_device_prefs 動作，要本人登入憑證）；後台沒設過回 null
+#[tauri::command]
+pub async fn auth_device_prefs_get(auth: State<'_, AuthState>) -> Result<Value, String> {
+    let c = ctx()?;
+    let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
+    let v = call(&c.client, &c.relay_url, &token, "account_device_prefs", None, json!({})).await?;
+    Ok(json!({ "prefs": v.get("prefs").cloned().unwrap_or(Value::Null) }))
+}
+
+/// 寫帳號層的設備順序設定：回 { prefs, stale? }；stale＝後台那份比較新、沒有覆蓋，前端要改採用回來的 prefs
+#[tauri::command]
+pub async fn auth_device_prefs_set(auth: State<'_, AuthState>, prefs: Value) -> Result<Value, String> {
+    let prefs = clean_device_prefs(&prefs)?;
+    let c = ctx()?;
+    let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
+    let v = call(&c.client, &c.relay_url, &token, "account_device_prefs", None, json!({ "prefs": prefs })).await?;
+    Ok(json!({ "prefs": v.get("prefs").cloned().unwrap_or(Value::Null), "stale": v.get("stale").and_then(Value::as_bool).unwrap_or(false) }))
+}
+
 /// 登入後自動處理金鑰（使用者不用按任何鈕）：
 /// - 這台已有節點金鑰 → node_claim 綁到帳號；失敗（含舊租戶還沒被認領）都不擋使用，回 pending，下次啟動再試
 /// - 沒有節點金鑰 → node_create 建新節點、存好金鑰（呼叫端稍後重新啟動）
@@ -457,6 +499,22 @@ mod tests {
         assert!(clean_account_name(&"字".repeat(40)).is_ok());
         assert!(clean_account_name(&"字".repeat(41)).is_err());
         assert!(clean_account_name("a\nb").is_err());
+    }
+
+    #[test]
+    fn 設備設定驗證() {
+        let ok = json!({ "order": ["a1", "b-2"], "shown": ["c_3"], "removed": [], "rev": 1761350000000i64, "extra": 1 });
+        assert_eq!(clean_device_prefs(&ok).unwrap(), json!({ "order": ["a1", "b-2"], "shown": ["c_3"], "removed": [], "rev": 1761350000000i64 }));
+        let base = |f: &dyn Fn(&mut Value)| { let mut v = ok.clone(); f(&mut v); v };
+        assert!(clean_device_prefs(&base(&|v| v["order"] = json!("a"))).is_err());
+        assert!(clean_device_prefs(&base(&|v| v["shown"] = json!([1]))).is_err());
+        assert!(clean_device_prefs(&base(&|v| v["removed"] = json!(["a b"]))).is_err());
+        assert!(clean_device_prefs(&base(&|v| v["order"] = json!(["a", "a"]))).is_err());
+        assert!(clean_device_prefs(&base(&|v| v["order"] = json!(["x".repeat(33)]))).is_err());
+        assert!(clean_device_prefs(&base(&|v| v["order"] = json!((0..201).map(|i| format!("n{i}")).collect::<Vec<_>>()))).is_err());
+        assert!(clean_device_prefs(&base(&|v| v["rev"] = json!(-1))).is_err());
+        assert!(clean_device_prefs(&base(&|v| v["rev"] = json!("1"))).is_err());
+        assert!(clean_device_prefs(&base(&|v| { v.as_object_mut().unwrap().remove("rev"); })).is_err());
     }
 
     #[test]

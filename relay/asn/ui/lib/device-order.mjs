@@ -11,8 +11,10 @@ export const normalizeKeys = v => {
   return out.slice(0, MAX_KEYS)
 }
 // deviceRemoved＝永久移除的設備（不再出現在任何設備列表；不刪後台資料與對話）。舊存檔沒有＝空陣列
-export const deviceFieldsFromSaved = saved => ({ deviceOrder: normalizeKeys(saved?.deviceOrder), deviceShown: normalizeKeys(saved?.deviceShown), deviceRemoved: normalizeKeys(saved?.deviceRemoved) })
-export const deviceFieldsToSave = ({ deviceOrder, deviceShown, deviceRemoved } = {}) => ({ deviceOrder: normalizeKeys(deviceOrder), deviceShown: normalizeKeys(deviceShown), deviceRemoved: normalizeKeys(deviceRemoved) })
+// deviceRev／deviceSynced＝帳號層同步用（lib/device-sync.mjs）：deviceRev＝這份設定最後一次改動的毫秒時間戳，deviceSynced＝這台跟後台同步過。舊存檔沒有＝0／false
+const revOf = v => (Number.isSafeInteger(v) && v > 0 ? v : 0)
+export const deviceFieldsFromSaved = saved => ({ deviceOrder: normalizeKeys(saved?.deviceOrder), deviceShown: normalizeKeys(saved?.deviceShown), deviceRemoved: normalizeKeys(saved?.deviceRemoved), deviceRev: revOf(saved?.deviceRev), deviceSynced: saved?.deviceSynced === true })
+export const deviceFieldsToSave = ({ deviceOrder, deviceShown, deviceRemoved, deviceRev, deviceSynced } = {}) => ({ deviceOrder: normalizeKeys(deviceOrder), deviceShown: normalizeKeys(deviceShown), deviceRemoved: normalizeKeys(deviceRemoved), deviceRev: revOf(deviceRev), deviceSynced: deviceSynced === true })
 
 // rows：已按自動規則排好的列（每列有 key）。本機固定第一；手動排過的接著、照手動順序；其餘（新設備、沒排過）照原自動順序接在後面
 export function applyDeviceOrder(rows, { selfNode, deviceOrder = [] } = {}) {

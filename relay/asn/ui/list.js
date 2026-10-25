@@ -51,6 +51,7 @@ import { startCallPoll } from './lib/call-poll.mjs'
 import { isCallActive } from './lib/call-session.mjs'
 import { accountLine, codexLine, createAccountsUi } from './lib/claude-accounts.mjs'
 import { buildDeviceTree } from './lib/device-tree.mjs'
+import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, moveDevice, pruneRemoved, removeDevice, reorderDevice, restoreDevice, showDevice, visibleRows } from './lib/device-order.mjs'
 import { dialogTitle as deviceAcctTitle, dialogView as deviceAcctViewOf, CONFIRM_NOTE as DEVICE_CONFIRM_NOTE, CLOSE_NOTE as DEVICE_CLOSE_NOTE } from './lib/device-acct-dialog.mjs'
 import { applyRename } from './lib/rename.mjs'
@@ -114,6 +115,10 @@ const meStore = store('me')
 const savedMe = (await meStore.load()) ?? {}
 // 設備頁籤的手動順序與手動顯示的隱藏設備（asn-me.json 的 deviceOrder／deviceShown；舊存檔沒有＝維持自動規則）。目前只存本機，手機各自存自己的
 const devPrefs = reactive(deviceFieldsFromSaved(savedMe))
+// 設備順序同步到帳號層（lib/device-sync.mjs）：有登入才同步，整份以 rev 較新的為準；沒登入或後台還沒部署就只用本機檔。--shot 截圖模式不動
+const devSync = createDeviceSync({ prefs: devPrefs, api: { get: authApi.getDevicePrefs, set: authApi.setDevicePrefs }, canSync: async () => (await authApi.status().catch(() => null))?.signed_in === true })
+watch(devPrefs, () => devSync.noteLocal(), { deep: true })
+if (!info.shot) devSync.start()
 // 暱稱＝視窗名＝對外名字；以 Rust 端現用名為準，不再從存檔讀
 const me = reactive({ psm: '', status: 'online', ...savedMe.me, nick: info.window_name })
 const notifyPrefs = ref(notifyFromSaved(savedMe))   // 通知四開關（舊存檔的 sound 在這裡轉過來）

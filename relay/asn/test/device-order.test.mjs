@@ -30,15 +30,20 @@ test('applyDeviceOrder：本機不在列內時不會憑空多出來', () => {
 
 // ---------- 舊存檔相容與儲存還原 ----------
 test('舊存檔沒有 deviceOrder／deviceShown＝空陣列；壞值也當沒有', () => {
-  assert.deepEqual(deviceFieldsFromSaved({}), { deviceOrder: [], deviceShown: [], deviceRemoved: [] })   // 新欄位 deviceRemoved：舊存檔沒有＝空陣列
-  assert.deepEqual(deviceFieldsFromSaved(undefined), { deviceOrder: [], deviceShown: [], deviceRemoved: [] })
-  assert.deepEqual(deviceFieldsFromSaved({ deviceOrder: 'x', deviceShown: { a: 1 }, deviceRemoved: 7 }), { deviceOrder: [], deviceShown: [], deviceRemoved: [] })
+  assert.deepEqual(deviceFieldsFromSaved({}), { deviceOrder: [], deviceShown: [], deviceRemoved: [], deviceRev: 0, deviceSynced: false })   // 新欄位 deviceRemoved：舊存檔沒有＝空陣列
+  assert.deepEqual(deviceFieldsFromSaved(undefined), { deviceOrder: [], deviceShown: [], deviceRemoved: [], deviceRev: 0, deviceSynced: false })
+  assert.deepEqual(deviceFieldsFromSaved({ deviceOrder: 'x', deviceShown: { a: 1 }, deviceRemoved: 7 }), { deviceOrder: [], deviceShown: [], deviceRemoved: [], deviceRev: 0, deviceSynced: false })
   assert.deepEqual(normalizeKeys(['a', '', 'a', 3, null, 'b']), ['a', 'b'])
 })
 test('順序存檔後可原樣還原', () => {
   const saved = JSON.parse(JSON.stringify(deviceFieldsToSave({ deviceOrder: ['B', 'A'], deviceShown: ['Z'], deviceRemoved: ['R'] })))
-  assert.deepEqual(saved, { deviceOrder: ['B', 'A'], deviceShown: ['Z'], deviceRemoved: ['R'] })
-  assert.deepEqual(deviceFieldsFromSaved(saved), { deviceOrder: ['B', 'A'], deviceShown: ['Z'], deviceRemoved: ['R'] })
+  assert.deepEqual(saved, { deviceOrder: ['B', 'A'], deviceShown: ['Z'], deviceRemoved: ['R'], deviceRev: 0, deviceSynced: false })
+  assert.deepEqual(deviceFieldsFromSaved(saved), { deviceOrder: ['B', 'A'], deviceShown: ['Z'], deviceRemoved: ['R'], deviceRev: 0, deviceSynced: false })
+  // 帳號層同步用的兩個欄位（lib/device-sync.mjs）：版本是正整數毫秒、已同步是 true 才算；壞值當 0／false
+  const synced = JSON.parse(JSON.stringify(deviceFieldsToSave({ deviceOrder: ['A'], deviceRev: 1761350000000, deviceSynced: true })))
+  assert.deepEqual(deviceFieldsFromSaved(synced), { deviceOrder: ['A'], deviceShown: [], deviceRemoved: [], deviceRev: 1761350000000, deviceSynced: true })
+  assert.deepEqual(deviceFieldsFromSaved({ deviceRev: -5, deviceSynced: 'yes' }), { deviceOrder: [], deviceShown: [], deviceRemoved: [], deviceRev: 0, deviceSynced: false })
+  assert.equal(deviceFieldsFromSaved({ deviceRev: 1.5 }).deviceRev, 0)
 })
 test('沒排過時 deviceTabs 結果與原規則完全一樣（本機第一、有人在線在前）', () => {
   const friends = [F('W', '工作機', 'a', 'offline'), F('H', '家用機', 'b'), F('A', '牧陽', 'c')]

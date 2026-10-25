@@ -275,7 +275,7 @@ test('手機被隱藏設備：細部頁兩個動作；永久移除走獨立的�
 test('手機自動解除與存檔：活過來就解除、舊存檔相容、被移除的設備不再有「選項」入口', () => {
   const js = read('ui/m.js')
   assert.match(js, /pruneRemoved\(devPrefs\.deviceRemoved, friends\.value, \{ selfNode: info\.node \}\)/)
-  assert.match(js, /reactive\(\{ deviceOrder: \[\], deviceShown: \[\], deviceRemoved: \[\] \}\)/)
+  assert.match(js, /reactive\(\{ deviceOrder: \[\], deviceShown: \[\], deviceRemoved: \[\], deviceRev: 0, deviceSynced: false \}\)/)
   assert.match(js, /Object\.assign\(devPrefs, deviceFieldsFromSaved\(saved\)\)/)
   assert.match(js, /removed: devPrefs\.deviceRemoved, selfNode: info\.node, reports: acctSw\.reports/)
   assert.match(js, /filter\(g => !devPrefs\.deviceRemoved\.includes\(g\.node\)\)/)

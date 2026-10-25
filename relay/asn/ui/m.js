@@ -21,6 +21,7 @@ import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, rena
 import { OP_LABEL, opFormError, partnerEngine, sharedWhy } from './lib/partner-ops.mjs'
 import { BUDDY_CONSOLE_LABEL } from './lib/partner-launch-ui.mjs'
 import { ACCT_TEXT, ACCT_PAGE_TITLE, acctButtonDevices, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch } from './lib/mobile-acct.mjs'
+import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, dropSlot, moveDevice, moveFlags, pruneRemoved, removeDevice, removedRows, reorderDevice, restoreDevice, showDevice, visibleRows, canRemoveRow, DEVICE_TEXT } from './lib/device-order.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
 import { opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
@@ -115,8 +116,8 @@ const lastChat = ref('')   // 最後使用的那一位（對話分頁顯示它�
 const me = reactive({ psm: '', status: 'online', nick: info.window_name })
 const prefs = reactive({ ...DEFAULT_PREFS })
 const friends = ref([]), conn = ref('connecting'), nodeOrder = ref([])
-// 設備順序與手動顯示的隱藏設備：目前存在這支手機自己的設定（asn-me.json 的 deviceOrder／deviceShown），尚未與電腦版同步
-const devPrefs = reactive({ deviceOrder: [], deviceShown: [], deviceRemoved: [] })
+// 設備順序與手動顯示的隱藏設備：存在這支手機自己的設定（asn-me.json 的 deviceOrder／deviceShown／deviceRemoved）當離線快取，有登入就與帳號層同步（lib/device-sync.mjs）
+const devPrefs = reactive({ deviceOrder: [], deviceShown: [], deviceRemoved: [], deviceRev: 0, deviceSynced: false })
 const logs = reactive({})
 const avatars = ref({})
 const query = ref(''), collapsed = reactive({ [ARCHIVE_GROUP_KEY]: true })   // 「已封存」群組預設收合
@@ -171,6 +172,9 @@ if (screen.value === 'main') {
   const saved = (await meStore.load()) ?? {}
   Object.assign(me, { psm: '', status: 'online', ...saved.me, nick: info.window_name })
   Object.assign(devPrefs, deviceFieldsFromSaved(saved))
+  const devSync = createDeviceSync({ prefs: devPrefs, api: { get: authApi.getDevicePrefs, set: authApi.setDevicePrefs }, canSync: async () => (await authApi.status().catch(() => null))?.signed_in === true })
+  watch(devPrefs, () => devSync.noteLocal(), { deep: true })
+  devSync.start()
   Object.assign(prefs, normalizePrefs(saved.mobilePrefs))
   ownerName.value = typeof saved.ownerName === 'string' ? saved.ownerName : ''
   lastChat.value = normalizeLastChat(saved.lastChat)
