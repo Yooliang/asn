@@ -1,8 +1,8 @@
 {
-  "version": "0.1.67",
-  "versionCode": 1067,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.67_android.apk",
-  "sha256": "2f1e4dccc4522e2bae75dfd196b64f8e587d1d25ccfd8f0215cebc392f71f500",
-  "notes": "設備清單改為列表加細部頁、僅顯示的條目不能誤操作、手機表格可左右捲動、設備排序跨裝置同步、Grok 接手手動開的對話",
+  "version": "0.1.68",
+  "versionCode": 1068,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.68_android.apk",
+  "sha256": "30dba383662b0859cdd9d1021f2eb6a1a8db742f3306c2249cdd56b70ae2de97",
+  "notes": "開新夥伴選 Grok 或 Gemini 現在真的會開出工作者、背景工作者可以關閉、pi 視窗可以切換模型、本機 Grok 工作者不再被當成雲端代理、pi 擴充的收信修正、雲端代理可收發群組訊息",
   "bytes": 9371108
 }

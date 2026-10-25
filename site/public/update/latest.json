@@ -1,11 +1,11 @@
 {
-  "version": "0.1.67",
-  "notes": "設備清單改為列表加細部頁、僅顯示的條目不能誤操作、手機表格可左右捲動、設備排序跨裝置同步、Grok 接手手動開的對話",
-  "pub_date": "2026-10-25T02:19:31.236Z",
+  "version": "0.1.68",
+  "notes": "開新夥伴選 Grok 或 Gemini 現在真的會開出工作者、背景工作者可以關閉、pi 視窗可以切換模型、本機 Grok 工作者不再被當成雲端代理、pi 擴充的收信修正、雲端代理可收發群組訊息",
+  "pub_date": "2026-10-25T07:02:23.151Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjh6ZERuSFdHeGw1eEU4YStDbDdYaFRZV29acDhpOUVZNHlHZzNES3FhZnVteXYvcW0yNFhkYmdRZ1FOd3k4VU9IYmc1emNMNmEraHZWcU5ZckJMemc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyODk0NzcxCWZpbGU6QVNOXzAuMS42N194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjY3CmhWSkRMU1FiTVNZYVhHTXdqeEh2VnNmSVdrTzRRTGlqeTJ1VmxTQ2prUlpKdzN0N0xxaWJaL1ZjL1RXakVrWnZZYkpkbGd4cjdlNXhUaVJYUmRyTUJRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.67_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybncrVisrWkJvdXFrQkRrbzJ3OWlCWWV3Y3lCZWRkc1J0MEpQbmRpcTlPcE9Rb1FIVFNuMWNnSzd1ZWV5UHZudjBsdVg0QXpqd3ZLK1FoOHdlbFBqMXdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyOTExNzQyCWZpbGU6QVNOXzAuMS42OF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjY4Cng4RGE2bCs4TVJzRXVhaWEreVg1MWpmODJQMFNUU3dldkpVcU00d1NRaDh3bHZlZGVzdVZBNE5CSkU3eFcxTm1JMVI2c1poV3d2cEZnanBwc3hYREJ3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.68_x64-setup.exe"
     }
   }
 }
