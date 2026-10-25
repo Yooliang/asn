@@ -1110,7 +1110,8 @@ async fn acp_接手_載不進來就失敗_不偷偷開新對話_不留工作者_
     let h = eh(Some(json!([worker("Gemini", "acp", json!({}))])), &[("FAKE_ACP_STATE", &st), ("FAKE_ACP_LOAD", "1")], "acp", &[]).await;
     let admin = h.set.acp_admin().unwrap();
     let e = adopt_blocking(&admin, "sess-grok1", &cwd.display().to_string()).await.unwrap_err();
-    assert!(e.contains("沒有設定 Grok 工作者"), "{e}");
+    // 沒有現成的 Grok 工作者：改用開新夥伴的 grok 啟動設定做底（照開新夥伴那條路驗授權與白名單）；這裡的測試環境沒有授權，所以是被擋下，而且說明是哪條路擋的
+    assert!(e.contains("改用「開新夥伴」的 grok 設定也開不起來") && e.contains("不在允許清單"), "{e}");
 }
 
 #[tokio::test]

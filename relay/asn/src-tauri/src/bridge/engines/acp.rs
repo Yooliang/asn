@@ -426,11 +426,26 @@ impl Engine for AcpEngine {
             base_grok = self.workers.lock().unwrap().iter().map(|(_, w)| w.cfg().clone()).find(|c| c.roster_engine == "grok" && c.protocol == "acp" && !c.adopted);
         }
         // 接手過的專屬工作者（使用者在終端機開的 grok 的對話）：重啟後建回來，對話編號已在帳本裡
-        if let Some(base) = base_grok {
+        {
             for (name, sid, cwd) in super::acp_admin::read_adopted(&self.ctx.work_dir.join(ADOPTED_FILE)) {
                 if self.workers.lock().unwrap().iter().any(|(n, _)| *n == name) {
                     continue;
                 }
+                // 沒有現成的 Grok 工作者就用「開新夥伴」的 grok 啟動設定做底（和接手時同一條路）；建不起來就記 log 跳過，名冊留著
+                let base = match &base_grok {
+                    Some(b) => b.clone(),
+                    None => {
+                        let req = super::partner_queue::Req { profile: "grok".into(), name: name.clone(), cwd: cwd.clone() };
+                        let env = self.queue_env.lock().unwrap().clone();
+                        match super::partner_queue::build_cfg(&*env, &req, &self.ctx.work_dir) {
+                            Ok(c) => c,
+                            Err(e) => {
+                                self.ctx.log(format!("acp: 重啟後沒能建回接手的專屬工作者「{name}」：{e}"));
+                                continue;
+                            }
+                        }
+                    }
+                };
                 let cfg = Arc::new(super::grok_adopt::adopted_cfg(&base, &name, &cwd));
                 store.set(&cfg, &sid);
                 let w = self.make_worker(cfg, store.clone());
@@ -458,6 +473,13 @@ impl Engine for AcpEngine {
                 file: self.ctx.work_dir.join(ADOPTED_FILE),
                 events: self.ctx.events.clone(),
                 wait_ms: super::acp_admin::ADOPT_WAIT_MS,
+                base: {
+                    let (env, work_dir) = (self.queue_env.lock().unwrap().clone(), self.ctx.work_dir.clone());
+                    Arc::new(move |cwd: &str| {
+                        let req = super::partner_queue::Req { profile: "grok".into(), name: super::grok_adopt::worker_name(cwd, ""), cwd: cwd.to_string() };
+                        super::partner_queue::build_cfg(&*env, &req, &work_dir).map_err(|e| format!("這台電腦沒有現成的 Grok 背景工作者，改用「開新夥伴」的 grok 設定也開不起來：{e}"))
+                    })
+                },
             }
         });
         Some(Arc::new(super::acp_admin::AcpAdminImpl { workers: self.workers.clone(), adopt }))

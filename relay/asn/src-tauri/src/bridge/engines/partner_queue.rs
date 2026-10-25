@@ -387,6 +387,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn 接手_沒有現成的_grok_工作者_改用開新夥伴的_grok_設定做底() {
+        // 名冊裡沒有任何 grok 工作者（只有 gemini）：以前直接回「沒有可以接手的 Grok 工作者設定」；現在用 grok 啟動設定建底，
+        // 假工作者沒宣告能載入既有對話，所以會失敗在「載入」這一步，而不是失敗在找不到底
+        let mut h = H::new();
+        h.enqueue(&[queue_line("gemini", "小雙", h.cwd.path())]);
+        h.eng.poll();
+        let admin = h.eng.acp_admin().unwrap();
+        assert!(!admin.has_worker("小格"));
+        let cwd = h.cwd.path().display().to_string();
+        let a = admin.clone();
+        let e = tokio::task::spawn_blocking(move || a.adopt("sess-grok1", &cwd)).await.unwrap().unwrap_err();
+        assert!(!e.contains("沒有設定 Grok 工作者") && !e.contains("沒有可以接手的 Grok 工作者設定"), "{e}");
+        assert!(e.contains("載入"), "要走到載入對話那一步：{e}");
+        // 失敗不留痕：沒有專屬工作者、沒有接手名冊
+        assert!(!h.work.path().join("acp-adopted.json").exists());
+        h.eng.stop();
+        let _ = h.rx.try_recv();
+    }
+
+    #[tokio::test]
     async fn 去重_同名不重複建立_失敗都記_log_有中文原因() {
         let h = H::new();
         h.enqueue(&[queue_line("grok", "小格", h.cwd.path())]);
