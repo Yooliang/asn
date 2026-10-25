@@ -1,11 +1,11 @@
 {
-  "version": "0.1.71",
-  "notes": "切換模型不再關掉使用者自己開的終端機、信件內文防冒充補強、AI 永遠可被點名並拿掉「接受別人點名」勾選、結束程序的守門補強、設備順序同步加鎖、官網新增共用選單與待辦",
-  "pub_date": "2026-10-25T12:46:09.918Z",
+  "version": "0.1.72",
+  "notes": "pi 夥伴顯示背後實際的模型廠商（電腦版分頁與手機徽章）、手機「開新夥伴」改成兩頁（先選電腦，再選模型與資料夾）、手機「設定」改成兩頁（先列分類，點進去才是該項）",
+  "pub_date": "2026-10-25T16:38:29.512Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjUzckNzR0h6M3BSOXhHM3dTaVl6QXFWMkpRNFhWNGVyU3YrSWt3Si81ZDNycG9NQS8yRWV2SnVwUkx6ZXBuS012K0h2anBycUdwbTJkWHB2dkxpOHdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyOTMyMzY5CWZpbGU6QVNOXzAuMS43MV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjcxCnFvNmc3eVF4SldBMFFMMVBNN3hldHhpNUtJQWVPZ3VYbDBIeWcvM0lrZlhFQU9scWdlM0VJaEZ5RlFNdTJuWnlHb0pLTmRTRjhkdW5SN0hQbDMzNERRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.71_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjc0amJHb1MrSE00N0N2YW5PT2gzaTRiK3dBajZKVGRnNm9Tbi9PUUxPaTFCZkdZU2VzQi9WS3h1eitMdjVBNEp5b1dmWldjQmJEMnFBcEhmd0Y1SXc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyOTQ2MzA4CWZpbGU6QVNOXzAuMS43Ml94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjcyCnpKVitNa0JZdlRoUk1XSXNoQ0orSXZNSzlTL1NqUFZacEV3UGZCSExUTGlxSEx3bVRFMWl6UnFsejhqS0N5UXlEMU51Tm0yUVJHaHlsU3hIZ3VYbkF3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.72_x64-setup.exe"
     }
   }
 }
