@@ -97,8 +97,8 @@ impl TakeoverError {
     pub fn text(&self) -> String {
         match self {
             TakeoverError::NotAllowed => "這個功能目前還沒開放（設定檔 bridge.json 的 allow_takeover 是關的）".into(),
-            TakeoverError::NotConfirmed => "需要使用者確認才能停掉舊版收發室橋".into(),
-            TakeoverError::NothingToDo => "目前沒有舊版收發室橋在跑".into(),
+            TakeoverError::NotConfirmed => "需要使用者確認才能停掉舊版收發信小程式".into(),
+            TakeoverError::NothingToDo => "目前沒有舊版收發信小程式在跑".into(),
             TakeoverError::Failed(m) => m.clone(),
         }
     }

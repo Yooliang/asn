@@ -95,10 +95,10 @@ pub fn explain_upload_error(msg: &str) -> String {
     let pick = |code: &str, text: &str| msg.contains(code).then(|| text.to_string());
     pick("quota_exceeded", "這台設備的附件空間滿了（保存 30 天後自動清掉），晚點再寄")
         .or_else(|| pick("file_too_large", "檔案太大了（照片上限 5 MB、檔案上限 25 MB）"))
-        .or_else(|| pick("unsupported_type", "收發室不收這種檔案"))
+        .or_else(|| pick("unsupported_type", "ASN 不收這種檔案"))
         .or_else(|| pick("rate_limited", "傳得太頻繁了，請稍後再試"))
         .or_else(|| pick("not_uploaded", "檔案還沒傳完，請再試一次"))
-        .or_else(|| (msg.starts_with("attach_") && msg.contains("HTTP 404")).then(|| "這個收發室還不支援傳附件".to_string()))
+        .or_else(|| (msg.starts_with("attach_") && msg.contains("HTTP 404")).then(|| "這個 ASN 服務還不支援傳附件".to_string()))
         .unwrap_or_else(|| msg.to_string())
 }
 
@@ -111,10 +111,10 @@ pub async fn upload_items(relay: &Relay, items: &[Item]) -> R<Vec<String>> {
             .api("attach_init", Some(json!({ "kind": it.kind, "mime": it.mime, "name": it.name, "bytes": it.bytes.len() })))
             .await
             .map_err(|e| Fail::new(4, format!("{}：{}", it.name, explain_upload_error(&e))))?;
-        let id = init.get("id").and_then(|v| v.as_str()).filter(|s| is_uuid(s)).ok_or_else(|| Fail::new(4, format!("{}：收發室沒有給附件編號", it.name)))?.to_string();
-        let url = init.get("upload_url").and_then(|v| v.as_str()).filter(|u| reqwest::Url::parse(u).is_ok()).ok_or_else(|| Fail::new(4, format!("{}：收發室沒有給上傳網址", it.name)))?;
+        let id = init.get("id").and_then(|v| v.as_str()).filter(|s| is_uuid(s)).ok_or_else(|| Fail::new(4, format!("{}：ASN 沒有給附件編號", it.name)))?.to_string();
+        let url = init.get("upload_url").and_then(|v| v.as_str()).filter(|u| reqwest::Url::parse(u).is_ok()).ok_or_else(|| Fail::new(4, format!("{}：ASN 沒有給上傳網址", it.name)))?;
         if !same_host(url, relay.base()) {
-            return Err(Fail::new(4, format!("{}：上傳網址不在收發室的主機上，已取消", it.name)));
+            return Err(Fail::new(4, format!("{}：上傳網址不在 ASN 的主機上，已取消", it.name)));
         }
         // 網址是一次性簽名，不放進訊息
         let res = http

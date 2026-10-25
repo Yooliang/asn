@@ -74,9 +74,9 @@ pub async fn download(rl: &Relay, id: &str, out_dir: &Path, out: Option<&str>) -
         };
         Fail::new(4, format!("取不到下載網址：{why}"))
     })?;
-    let url = info.get("url").and_then(|v| v.as_str()).filter(|u| reqwest::Url::parse(u).is_ok()).ok_or_else(|| Fail::new(4, "收發室回的下載網址格式不對"))?;
+    let url = info.get("url").and_then(|v| v.as_str()).filter(|u| reqwest::Url::parse(u).is_ok()).ok_or_else(|| Fail::new(4, "ASN 回的下載網址格式不對"))?;
     if !same_host(url, rl.base()) {
-        return Err(Fail::new(4, "下載網址不在收發室的主機上，拒絕下載"));
+        return Err(Fail::new(4, "下載網址不在 ASN 的主機上，拒絕下載"));
     }
     let mime = info.get("mime").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let name = info.get("name").and_then(|v| v.as_str()).unwrap_or("");

@@ -318,7 +318,10 @@ impl AcpEngine {
                     pq::remember(&self.ctx.work_dir.join(pq::PARTNERS_FILE), &req.name, &req.profile, &cwd);
                     changed = true;
                 }
-                Err(e) => self.ctx.log(format!("partner-queue: 沒能開出工作者「{}」（模型 {}）：{e}", req.name, req.profile)),
+                Err(e) => {
+                    self.ctx.log(format!("partner-queue: 沒能開出工作者「{}」（模型 {}）：{e}", req.name, req.profile));
+                    pq::record_failure(&self.ctx.work_dir, &req.name, &req.profile, &e);
+                }
             }
         }
         if changed {

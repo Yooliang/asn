@@ -219,7 +219,7 @@ pub fn migrate(base: &Path, ops: &dyn Ops) -> Outcome {
         Some(Kind::Dir) => {}
     }
     if let Some((f, pid)) = live_pid_in(&legacy, ops) {
-        return Outcome::Skipped(format!("舊的橋或收發室還在跑（{f} 記錄的程序 {pid}），這次不遷移"));
+        return Outcome::Skipped(format!("舊的橋或舊版 ASN 還在跑（{f} 記錄的程序 {pid}），這次不遷移"));
     }
     let kn = kind_of(&new);
     if matches!(kn, Some(Kind::Link) | Some(Kind::Other)) {

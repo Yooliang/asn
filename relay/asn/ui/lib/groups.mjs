@@ -54,7 +54,7 @@ export function groupErrorText(raw) {
   const s = String(raw ?? '')
   for (const code of Object.keys(ERR)) if (new RegExp(`\\b${code}\\b`).test(s)) return ERR[code]
   if (/尚未登入/.test(s)) return ERR.unauthorized
-  if (/連線失敗|timeout|逾時/.test(s)) return '連不上收發室，請檢查網路。'
+  if (/連線失敗|timeout|逾時/.test(s)) return '連不上 ASN，請檢查網路。'
   const h = /HTTP (\d{3})/.exec(s)
   if (h && HTTP_STATUS[h[1]]) return ERR[HTTP_STATUS[h[1]]]
   // Rust 端自己整理的中文格式錯誤（沒有代碼、沒有 HTTP）可以直接給人看

@@ -39,7 +39,7 @@ export function archiveMenuItem(friend, ctx = {}) {
   let reason = ''
   if (ctx.signedIn === false) reason = '要先登入，才能封存夥伴'
   else if (loginBlock(ctx)) reason = loginBlock(ctx)
-  else if (ctx.supported === false) reason = '電腦端或收發室還不支援，請先更新'
+  else if (ctx.supported === false) reason = '電腦端或 ASN 服務還不支援，請先更新'
   return { key, label: ARCHIVE_LABEL[key], ok: !reason, reason }
 }
 

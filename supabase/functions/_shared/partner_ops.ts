@@ -27,7 +27,7 @@ const ERROR_TEXT: Record<string, string> = {
   name_taken: "這台電腦已經有同名的視窗（或剛用過），換個名字",
   busy: "這個視窗還有一個操作在進行中，等它完成再試",
   rate_limited: "這台電腦這個小時管理太多次了，稍後再試",
-  protected: "收發室與 ASN 自己的視窗不能這樣操作",
+  protected: "ASN 通知與 ASN 自己的視窗不能這樣操作",
   already_online: "這位夥伴已經在線上，不需要喚醒",
   no_session: "這位夥伴沒有可接回的對話紀錄，只能開新的夥伴",
   not_claude: "這位夥伴用的引擎還不能喚醒",

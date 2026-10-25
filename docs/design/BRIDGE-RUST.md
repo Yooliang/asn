@@ -152,7 +152,7 @@ Rust 測試在各模組的 `#[cfg(test)]`，整合測試在 `bridge/tests.rs`（
 | 有 `launcher.json`（本機自己寫的＝明確同意） | 檔案裡的 profile | 檔案裡的 `cwd_allow` |
 | 打開「允許我的其他設備替這台開新視窗」（`bridge.json` 的 `allow_remote_launch`） | 再加上 ASN 偵測到的 Claude CLI（自動 profile） | 再加上啟動偏好的 `cwdAllow` 與「工作資料夾候選」（`launch/cwds.rs`：最近用過、開著的視窗、信任過的資料夾，最多 15 筆） |
 
-其他限制：只收 **Claude 引擎的視窗型 profile**（Codex、Gemini 等背景夥伴留到第五段）；白名單最多 50 筆（仲介的上限）；不存在的資料夾不列；所有路徑正規化成同一種寫法再比對。切換同意不用重啟橋（每次回報和處理請求都重讀 `bridge.json`）。
+其他限制：遠端可開的項目是 **Claude 視窗、pi 視窗、Grok 與 Gemini 背景工作者**（`launcher.rs` 的 `remote_allowed`；Codex 尚未實機驗證，暫不開放）。pi 沿用本機開窗的擴充載入（找不到擴充或 pi 就回中文原因）；背景工作者先用消化端同一套規則驗（授權資料夾、名字、執行檔）再排進 `partner-queue.jsonl`，引擎記進名冊才回報成功，失敗留在 `partner-queue-failed.jsonl` 並原文回報手機。回報的 profile 多帶 `engine`、`mode` 兩欄（舊版手機只讀 id 與標籤，不受影響）；白名單最多 50 筆（仲介的上限）；不存在的資料夾不列；所有路徑正規化成同一種寫法再比對。切換同意不用重啟橋（每次回報和處理請求都重讀 `bridge.json`）。
 
 **安全取捨（請小良哥確認）**：打開同意後，白名單包含「工作資料夾候選」（開著的視窗、信任過的資料夾），不只是使用者在「瀏覽…」明確加過的。這是照任務要求（資料來源改用 `launch/prefs.rs`、`launch/cwds.rs`）；如果要更嚴，改成只用 `launcher.json` 與 `cwdAllow`，只要在 `SystemEnv::build` 拿掉 `cwds::candidates` 那一行。
 

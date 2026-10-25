@@ -97,9 +97,9 @@ export function friendlyAvatarError(message) {
   const m = String(message ?? '')
   if (/avatar_too_large|太大|超過/.test(m)) return '圖片太大了，請換一張（處理後要在 32 KB 以內）。'
   if (/bad_avatar|avatar_bad|不是有效|對不上|只接受/.test(m)) return '這個圖片格式不能用，請選 png、jpg 或 webp。'
-  if (/HTTP 404|not_found/.test(m)) return '收發室還不支援大頭貼，請稍後再試。'
-  if (/HTTP 401|unauthorized/.test(m)) return '收發室不認得這台設備的金鑰。'
-  if (/連線失敗/.test(m)) return '連不上收發室，請稍後再試。'
+  if (/HTTP 404|not_found/.test(m)) return 'ASN 服務還不支援大頭貼，請稍後再試。'
+  if (/HTTP 401|unauthorized/.test(m)) return 'ASN 不認得這台設備的金鑰。'
+  if (/連線失敗/.test(m)) return '連不上 ASN，請稍後再試。'
   return `上傳沒有成功：${m}`
 }
 

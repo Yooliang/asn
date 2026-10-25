@@ -115,7 +115,7 @@ pub fn build_default_profiles(home: &Path) -> HashMap<String, Profile> {
             },
         );
     }
-    if let Some(cmd) = resolve_binary("grok") {
+    if let Some(cmd) = resolve_binary("grok").or_else(|| grok_home_binary(home)) {
         let c = cmd.to_string_lossy().into_owned();
         profiles.insert(
             "grok".into(),
@@ -133,8 +133,12 @@ pub fn build_default_profiles(home: &Path) -> HashMap<String, Profile> {
     if let Some(cmd) = resolve_binary("pi") {
         profiles.insert("pi".into(), pi_profile(&cmd.to_string_lossy()));
     }
-    let _ = home; // cwd templates 由機器橋處理背景工作者
     profiles
+}
+
+/// Grok 官方安裝程式把執行檔放在 ~/.grok/bin，而且不一定加進 PATH：PATH 找不到時看這個固定位置（否則「開新夥伴」永遠沒有 Grok）
+fn grok_home_binary(home: &Path) -> Option<std::path::PathBuf> {
+    ["grok.exe", "grok"].iter().map(|n| home.join(".grok").join("bin").join(n)).find(|p| p.is_file())
 }
 
 /// pi 互動視窗：直接執行 pi；載入收信擴充、名字、第一句話由 launch/pi.rs 在開窗前補上（找不到擴充會報錯）
@@ -170,5 +174,23 @@ mod pi_tests {
         assert_eq!(p.mode, LaunchMode::Window);
         assert_eq!(p.engine, "pi");
         assert_eq!(p.command, r"C:\npm\pi.cmd");
+    }
+}
+
+#[cfg(test)]
+mod grok_home_tests {
+    use super::*;
+
+    #[test]
+    fn grok_不在_path_時看_家目錄的_grok_bin() {
+        let home = std::env::temp_dir().join(format!("asn-grok-home-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        assert_eq!(grok_home_binary(&home), None, "沒有安裝＝找不到，不能憑空造出路徑");
+        let bin = home.join(".grok").join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let exe = bin.join("grok.exe");
+        std::fs::write(&exe, b"x").unwrap();
+        assert_eq!(grok_home_binary(&home), Some(exe));
+        let _ = std::fs::remove_dir_all(&home);
     }
 }

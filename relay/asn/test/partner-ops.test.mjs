@@ -171,7 +171,7 @@ test('接班換手的進度分段：請前任寫交接 → 關閉前任視窗 �
 
 test('錯誤翻成中文：後台代碼、沒登入、斷線、舊後台；看不懂的給通用句，不洩漏英文', () => {
   assert.match(opErrorText('partner_op HTTP 409 busy'), /進行中/)
-  assert.match(opErrorText('partner_op HTTP 403 protected'), /收發室/)
+  assert.match(opErrorText('partner_op HTTP 403 protected'), /ASN 通知/)
   assert.match(opErrorText('partner_op HTTP 409 name_taken'), /同名/)
   assert.match(opErrorText('partner_op HTTP 401 unauthorized'), /登入/)
   assert.match(opErrorText('partner_op HTTP 409 no_launcher'), /沒有開放/)
