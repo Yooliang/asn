@@ -31,7 +31,8 @@ test('接手：背景 grok、其他引擎的程序條目、沒登入、電腦沒
   assert.equal(h(GROK({ agent: 'grok #9（背景）', nick: 'grok #9（背景）' })).ok, false)
   assert.equal(isGrokAdoptable(GROK({ engine: 'pi', agent: 'pi #5（前景）' })), false)
   assert.equal(h(GROK({ engine: 'pi', agent: 'pi #5（前景）' })).label, '接班換手', '其他引擎維持原本的名稱')
-  assert.equal(h(GROK({ entryKind: '', agent: 'grok' })).ok, false, '不是程序條目（例如 ASN 的 Grok 工作者）不算')
+  assert.equal(isGrokAdoptable(GROK({ entryKind: '', agent: 'grok' })), false, '不是程序條目（例如 ASN 的 Grok 工作者）不算接手')
+  assert.equal(h(GROK({ entryKind: '', agent: 'grok' })).label, '接班換手', 'ASN 的 Grok 工作者走一般接班換手（#234 之後可用）')
   assert.equal(h(GROK(), { ...ctx, signedIn: false }).reason, REASON.needLogin)
   assert.equal(h(GROK({ node: 'C', id: 'C/x' })).reason, REASON.closed)
   assert.equal(h(GROK({ node: 'W', id: 'W/x' })).reason, REASON.offline)
@@ -267,7 +268,8 @@ test('依引擎決定哪幾項能用（項目一律固定七項）：Claude 前�
     assert.equal(isManageable(f, ctx), false)
     assert.equal(isAiPartner(f, ctx), true, '還是 AI 夥伴（封存用）')
   }
-  assert.equal(partnerEngine(W('G', 'Grok', { engine: 'grok' })), 'cloud')
+  assert.equal(partnerEngine(W('G', 'Grok', { engine: 'grok', kind: 'grok' })), 'cloud')
+  assert.equal(partnerEngine(W('H', 'Grok', { engine: 'grok' })), 'acp', '本機 Grok 背景工作者（沒有 kind）走 ACP，重開與接班換手可用（#234）')
   assert.equal(partnerEngine(W('H', '小碼', { engine: 'codex' })), 'other')
 })
 

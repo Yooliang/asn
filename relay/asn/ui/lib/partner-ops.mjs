@@ -43,7 +43,7 @@ export const STALE_TEXT = 'ASN 版本可能太舊，或沒有在跑'
 // 不是 AI 夥伴的對象：人、手機，群組、ASN 與收發室視窗
 const NON_AI_KINDS = new Set(['owner', 'person', 'human', 'phone', 'mobile', 'android', 'room', 'group'])
 // 雲端代理（Grok 等）：名單 engine 或節點種類是這些。不在電腦上跑，沒有視窗可管，只能封存
-const CLOUD_ENGINES = new Set(['cloud', 'cloud-agent', 'grok'])
+const CLOUD_ENGINES = new Set(['cloud', 'cloud-agent'])   // 引擎是 grok 時要看 kind：雲端代理的名單帶 kind=grok，本機的 Grok 背景工作者沒有 kind（#234）
 // 由內建收發室自己跑的背景工作者（ACP）：名單 engine 是它們的引擎名
 const ACP_ENGINES = new Set(['gemini', 'agy', 'antigravity', 'acp'])
 
@@ -94,9 +94,9 @@ export function sharedWhy(items) {
 export function partnerEngine(friend) {
   const engine = String(friend?.engine ?? '').trim().toLowerCase()
   const kind = String(friend?.kind ?? '').trim().toLowerCase()
-  if (CLOUD_ENGINES.has(engine) || CLOUD_ENGINES.has(kind)) return 'cloud'
+  if (CLOUD_ENGINES.has(engine) || CLOUD_ENGINES.has(kind) || kind === 'grok') return 'cloud'
   if (!engine || engine === 'claude') return 'claude'
-  if (ACP_ENGINES.has(engine)) return 'acp'
+  if (ACP_ENGINES.has(engine) || engine === 'grok') return 'acp'
   return 'other'
 }
 
