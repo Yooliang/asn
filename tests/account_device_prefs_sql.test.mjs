@@ -22,6 +22,18 @@ test('靜態：在交易內、不刪資料、只授權 service_role；是最新�
   assert.equal(files.at(-1) >= MIG, true)
 })
 
+test('靜態：鎖定版 migration 讀帳號那一列時有 for update，且簽名與授權不變（#253）', () => {
+  const sql = read('20261025040000_account_device_prefs_lock.sql')
+  assert.match(sql, /select \* into v_t from relay\.tenants where owner_user = p_user for update;/)
+  assert.match(sql, /^begin;$/m); assert.match(sql, /^commit;$/m)
+  const code = sql.split('\n').filter(l => !l.trim().startsWith('--')).join('\n')
+  assert.doesNotMatch(code, /drop table|drop column|delete from|truncate|drop function/i)
+  assert.doesNotMatch(code, /grant execute[^;]*to (anon|authenticated|public)/i)
+  assert.match(sql, /grant execute on function public\.asn_account_device_prefs\(uuid, jsonb\) to service_role;/)
+  // 原本的 migration 已部署，不改
+  assert.doesNotMatch(read(MIG), /for update/)
+})
+
 let PGlite = null
 try { ({ PGlite } = await import('@electric-sql/pglite')) } catch { /* 沒裝就略過實跑 */ }
 const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
