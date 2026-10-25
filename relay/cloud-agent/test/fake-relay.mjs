@@ -7,12 +7,12 @@ export const FAKE_KEY = 'fake-grok-node-key'
 export const INVITE = 'good-invite-code'
 export const ISSUED_KEY = 'issued-secret-key-for-test'
 
-export async function startFakeRelay({ node = 'grok', rosterStatus = 200, onAck = null, inboxFailRemaining = 0, members = null } = {}) {
+export async function startFakeRelay({ node = 'grok', rosterStatus = 200, onAck = null, inboxFailRemaining = 0, members = null, roomListStatus = 200 } = {}) {
   const defaultMembers = [
     { id: node, name: node, online: true, presence: 'live', agents: [] },
     { id: 'W', name: '工作', online: false, presence: 'idle', agents: [] },
   ]
-  const st = { mails: [], reqs: [], sent: [], rosters: [], acks: [], rosterStatus, members: members ?? defaultMembers, url: '', port: 0 }
+  const st = { mails: [], reqs: [], sent: [], rosters: [], acks: [], rosterStatus, roomListStatus, roomReadStatus: 200, rooms: [], roomMsgs: {}, members: members ?? defaultMembers, url: '', port: 0 }
   let inboxFailsLeft = inboxFailRemaining
   const readBody = req => new Promise(r => { let b = ''; req.on('data', d => (b += d)); req.on('end', () => r(b ? JSON.parse(b) : null)) })
   const srv = http.createServer(async (req, res) => {
@@ -43,6 +43,18 @@ export async function startFakeRelay({ node = 'grok', rosterStatus = 200, onAck 
       for (const m of st.mails) if (body.ids.includes(m.id)) m.acked = true
       return out(200, { acked: body.ids.length })
     }
+    // 群組：st.rooms＝[{id,name,mine:[{member}]}]、st.roomMsgs[房號]＝訊息（seq 遞增）；room_read 一律帶 since（照後端：不帶會推進已讀）
+    if (action === 'room_list') {
+      if (st.roomListStatus !== 200) return out(st.roomListStatus, { error: 'forbidden' })
+      return out(200, { rooms: st.rooms.map(r => ({ ...r, last_seq: (st.roomMsgs[r.id] ?? []).at(-1)?.seq ?? 0 })) })
+    }
+    if (action === 'room_read') {
+      if (st.roomReadStatus !== 200) return out(st.roomReadStatus, { error: 'server_error' })
+      const room = u.searchParams.get('room'), since = Number(u.searchParams.get('since')), limit = Number(u.searchParams.get('limit') || 50)
+      if (!st.rooms.some(r => r.id === room)) return out(403, { error: 'not_member' })
+      const all = st.roomMsgs[room] ?? []
+      return out(200, { messages: all.filter(m => m.seq > since).slice(0, limit), last_seq: all.at(-1)?.seq ?? 0 })
+    }
     if (action === 'roster') {
       st.rosters.push(body)
       if (st.rosterStatus !== 200) return out(st.rosterStatus, { error: 'forbidden' })
@@ -62,6 +74,13 @@ export async function startFakeRelay({ node = 'grok', rosterStatus = 200, onAck 
   st.mail = (n, extra = {}) => {
     const m = { id: U(n), from_node: 'W', from_agent: 'W-政策', to_node: node, to_agent: 'Grok', body: `信${n}`, reply_to: null, created_at: '2026-10-20T08:00:00Z', trust: 'member', expects_reply: true, acked: false, ...extra }
     st.mails.push(m)
+    return m
+  }
+  st.room = (id, members = [node], name = `群組${id}`) => { st.rooms.push({ id, name, mine: members.map(member => ({ member })) }); st.roomMsgs[id] ??= []; return id }
+  st.roomMsg = (id, extra = {}) => {
+    const list = st.roomMsgs[id], seq = (list.at(-1)?.seq ?? 0) + 1
+    const m = { seq, from: 'W~W-政策', from_name: 'W-政策', trust: 'member', at: '2026-10-25T08:00:00Z', body: `群組訊息${seq}`, for_me: false, ...extra }
+    list.push(m)
     return m
   }
   return st
