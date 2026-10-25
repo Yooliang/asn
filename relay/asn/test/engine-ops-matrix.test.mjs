@@ -49,7 +49,7 @@ test('現況：電腦端（partner_ops.rs）——非 Claude 的關閉與切換�
 })
 
 // ---- 缺口（尚未做；node:test 的 todo：跑得過會顯示、跑不過不算失敗，補完行為後把 todo 拿掉）----
-test('缺口：ASN 自己跑的 Grok 背景工作者（名單 engine=grok、不是雲端代理）應該跟 Gemini 一樣有「重開」「接班換手」', { todo: 'UI 把 engine=grok 一律當雲端代理，選單全反灰；要靠 kind 區分（雲端代理的名單是 kind=grok）' }, () => {
+test('ASN 自己跑的 Grok 背景工作者（名單 engine=grok、沒有 kind）跟 Gemini 一樣有「重開」「接班換手」（#234）', () => {
   const worker = P('Grok', 'grok', { kind: undefined })
   assert.equal(partnerEngine(worker), 'acp')
   assert.equal(ok(worker, 'restart').ok, true)
