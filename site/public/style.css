@@ -29,18 +29,16 @@ a { color: #0b5fb0; }
 }
 .top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; flex-wrap: wrap; }
 .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); font-weight: 700; font-style: italic; letter-spacing: .02em; }
-.brand-mark {
-  width: 34px; height: 34px; border-radius: 10px; flex: none;
-  background: radial-gradient(circle at 35% 30%, #fff 0, #bfe0fa 35%, #3f93d6 100%);
-  border: 1px solid #5a9fd8; box-shadow: 0 1px 3px rgba(20, 80, 140, .35), inset 0 1px 0 #fff;
-  position: relative;
+.brand-logo { width: 36px; height: 36px; flex: none; display: block; }
+.nav { display: flex; gap: 2px 6px; font-size: 15px; flex-wrap: wrap; justify-content: flex-end; }
+.nav a { text-decoration: none; color: var(--ink-soft); padding: 5px 9px; border-radius: 8px; line-height: 1.5; white-space: nowrap; }
+.nav a:hover { color: #0b5fb0; background: rgba(255, 255, 255, .55); }
+.nav a[aria-current="page"] { color: var(--ink); background: rgba(255, 255, 255, .85); box-shadow: 0 0 0 1px var(--line); }
+/* 高亮不改粗細（避免每頁寬度不同）。窄螢幕：Logo 一行、選單在下面整列排開（每頁項目一樣，所以每頁換行位置也一樣） */
+@media (max-width: 1000px) {
+  .top .wrap { flex-direction: column; align-items: flex-start; gap: 6px; }
+  .nav { justify-content: flex-start; margin: 0 -9px; font-size: 14px; }
 }
-.brand-mark::before, .brand-mark::after { content: ""; position: absolute; top: 13px; width: 5px; height: 7px; border-radius: 3px; background: #15324f; }
-.brand-mark::before { left: 9px; }
-.brand-mark::after { right: 9px; }
-.nav { display: flex; gap: 18px; font-size: 15px; flex-wrap: wrap; }
-.nav a { text-decoration: none; color: var(--ink-soft); }
-.nav a:hover { color: #0b5fb0; text-decoration: underline; }
 
 /* 玻璃面板 */
 .glass {

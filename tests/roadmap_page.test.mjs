@@ -116,8 +116,8 @@ test('總表：不出現「收發室」，也不用行內樣式', () => {
   assert.ok(!/\sstyle=/.test(matrix))
 })
 
-test('總表：導覽列有連結、窄螢幕有卡片版型（每格帶 data-label）', () => {
-  assert.ok(page.includes('<a href="#matrix">支援總表</a>'))
+test('總表：藍圖頁上有這一區、窄螢幕有卡片版型（每格帶 data-label）', () => {
+  assert.ok(page.includes('<section id="matrix">'), '總表區段在藍圖頁上（選單改成各頁共用，不再有頁內錨點）')
   const css = read('site/public/style.css')
   assert.match(css, /content: attr\(data-label\)/)
 })
