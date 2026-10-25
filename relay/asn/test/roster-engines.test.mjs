@@ -7,7 +7,7 @@ import { pageItems, pageTabs, groupItems } from '../ui/lib/dims.mjs'
 import { groupHeading, engineLabel } from '../ui/lib/tabs.mjs'
 import { VENDOR_ICON_KEYS, vendorIconSvg } from '../ui/lib/vendor-icons.mjs'
 import { memStore } from './helpers.mjs'
-import { buildFriends, procDisplayName } from '../ui/lib/roster.mjs'
+import { buildFriends, hiddenPsm, procDisplayName } from '../ui/lib/roster.mjs'
 
 const claude = n => ({ name: n, status: 'idle', cwd_label: 'proj', engine: 'claude', detail: null })
 const MEMBERS = [
@@ -111,4 +111,23 @@ test('本機程序條目：顯示名拿掉（前景）（背景），第二行�
   assert.deepEqual([k.nick, k.psm], ['小職（背景）', ''], '不是程序條目的名字照舊，不動括號')
   assert.equal(procDisplayName('grok #1（前景）'), 'grok #1')
   assert.equal(procDisplayName('（前景）'), '')
+})
+
+test('CLI 視窗隱藏（hidden:true）第二行寫「背景運行」接在資料夾後面；顯示中、沒帶欄位、ACP 都不多寫', () => {
+  const members = [{ id: 'w02', name: '工作機', kind: 'claude', agents: [
+    { name: '甲', status: 'idle', cwd_label: 'proj', engine: 'claude', hidden: true },
+    { name: '乙', status: 'idle', cwd_label: '', engine: 'claude', hidden: true },
+    { name: '丙', status: 'idle', cwd_label: 'proj', engine: 'claude', hidden: false },
+    { name: '丁', status: 'idle', cwd_label: 'proj', engine: 'claude' },
+    { name: 'Test-Gemini', status: 'idle', cwd_label: 'Gemini（背景運行、內建通道）', engine: 'gemini' },
+    { name: 'codex #14（背景）', status: 'running', cwd_label: '', engine: 'codex', kind: 'process', receivable: false, hidden: true },
+  ] }]
+  const by = n => buildFriends(members, { selfNode: 'self' }).find(f => f.agent === n)
+  assert.equal(by('甲').psm, 'proj・背景運行')
+  assert.equal(by('乙').psm, '背景運行')
+  assert.equal(by('丙').psm, 'proj', '顯示中不寫字')
+  assert.equal(by('丁').psm, 'proj', '沒有 hidden（舊橋、Windows Terminal 分頁、非 Windows）不寫字')
+  assert.equal(by('Test-Gemini').psm, 'Gemini（背景運行、內建通道）', 'ACP 只有 label 的字，不重複')
+  assert.equal(by('codex #14（背景）').psm, '背景運行', '程序條目隱藏時也一樣')
+  assert.equal(hiddenPsm({ hidden: 'true', cwd_label: 'x' }), 'x', '只認布林 true')
 })

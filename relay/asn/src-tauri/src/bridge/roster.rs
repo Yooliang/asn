@@ -31,6 +31,8 @@ pub struct Window {
     pub mod_loaded: bool,
     /// 這個視窗背後實際用的模型（pi 視窗：「提供者/模型」，最多 60 字）；沒有就是 None，名單不帶這個欄位
     pub model: Option<String>,
+    /// 這個 CLI 視窗的主控台視窗是否隱藏（Windows 才有）：只在確定找到那個程序自己的視窗時才有值；找不到、屬別人（Windows Terminal 分頁）、非 Windows、沒有視窗的引擎都是 None，名單不帶
+    pub hidden: Option<bool>,
 }
 
 impl Window {
@@ -40,7 +42,7 @@ impl Window {
     }
     /// Claude 視窗（由 ~/.claude/sessions 讀出）
     pub fn claude(name: &str, status: Option<String>, cwd: &str, pid: u32, updated_at: u64, session_id: Option<String>) -> Window {
-        Window { name: name.into(), status, cwd: cwd.into(), pid, updated_at, session_id, engine: "claude".into(), engine_label: None, no_fallback: false, cwd_label_override: None, detail: None, context_pct: None, mod_loaded: false, model: None }
+        Window { name: name.into(), status, cwd: cwd.into(), pid, updated_at, session_id, engine: "claude".into(), engine_label: None, no_fallback: false, cwd_label_override: None, detail: None, context_pct: None, mod_loaded: false, model: None, hidden: None }
     }
     pub fn cwd_label(&self) -> String {
         if let Some(l) = &self.cwd_label_override {
@@ -268,6 +270,27 @@ pub fn read_local_with(sessions_dir: &Path, status_dir: &Path, alive: impl Fn(u3
     Some(l)
 }
 
+/// 主控台視窗表：[(擁有視窗的程序編號, 視窗是否可見)]，每一輪名單只列一次（見 launch::console::win::console_windows）。
+/// 只有「表裡剛好有一個那個程序自己的主控台視窗」才算確定；0 個（找不到、視窗屬別人，例如 Windows Terminal 的分頁）或多個（不確定是哪個）都不帶。
+pub fn hidden_of(table: &[(u32, bool)], pid: u32) -> Option<bool> {
+    if pid == 0 {
+        return None;
+    }
+    let mut it = table.iter().filter(|(p, _)| *p == pid);
+    let (_, visible) = it.next()?;
+    if it.next().is_some() {
+        return None;
+    }
+    Some(!*visible)
+}
+
+/// 給有程序編號的視窗（Claude、pi）填上 hidden；ACP 工作者與 Codex 沒有程序編號（pid 0）、也沒有視窗，維持 None
+pub fn apply_hidden(windows: &mut [Window], table: &[(u32, bool)]) {
+    for w in windows.iter_mut() {
+        w.hidden = if w.engine == "claude" || w.engine == "pi" { hidden_of(table, w.pid) } else { None };
+    }
+}
+
 /// roster 動作的請求內容。asn_window＝ASN 自己的視窗名（也列進名單，別台看得到這台的 ASN；engine 標 asn）。
 /// launcher＝遠端開視窗的摘要（profile 名與標籤、cwd 白名單、上限；不含指令），沒有可用設定送 null，仲介就清掉。
 pub fn roster_body(windows: &[Window], asn_window: Option<&str>, launcher: Value) -> Value {
@@ -291,6 +314,9 @@ pub fn roster_body_with_procs(windows: &[Window], asn_window: Option<&str>, laun
             }
             if let Some(m) = &w.model {
                 o["model"] = json!(m); // 可選欄位：背後的模型；後台名單本來就收 model，舊用戶端略過
+            }
+            if let Some(h) = w.hidden {
+                o["hidden"] = json!(h); // 可選欄位：主控台視窗是否隱藏；舊後台會丟掉，舊用戶端略過
             }
             o
         })
@@ -413,6 +439,41 @@ mod tests {
 
     fn win(sid: &str, status: &str) -> Window {
         Window::claude("T-甲", Some(status.into()), "", 1, 0, Some(sid.into()))
+    }
+
+    // ---- 主控台視窗是否隱藏（hidden）：假的視窗表 ----
+    #[test]
+    fn hidden_只在確定找到那個程序自己的主控台視窗時才有值() {
+        // 視窗表：(擁有者程序, 是否可見)。10＝隱藏中的視窗；11＝顯示中的視窗；30 有兩個視窗（不確定是哪個）
+        let table = vec![(10u32, false), (11, true), (30, true), (30, false)];
+        assert_eq!(hidden_of(&table, 10), Some(true), "找到且隱藏");
+        assert_eq!(hidden_of(&table, 11), Some(false), "找到且顯示");
+        assert_eq!(hidden_of(&table, 20), None, "找不到（例如 Windows Terminal 的分頁：視窗屬於 WindowsTerminal.exe，不是它）");
+        assert_eq!(hidden_of(&table, 30), None, "同一個程序有多個視窗，不猜");
+        assert_eq!(hidden_of(&table, 0), None, "沒有程序編號（ACP、Codex）");
+        assert_eq!(hidden_of(&[], 10), None, "空表（非 Windows、測試環境）");
+    }
+
+    #[test]
+    fn hidden_只填_claude_與_pi_視窗_acp_與_codex_維持沒有() {
+        let table = vec![(10u32, false), (11, true)];
+        let mk = |engine: &str, pid: u32| {
+            let mut w = Window::claude("名", None, "", pid, 0, None);
+            w.engine = engine.into();
+            w
+        };
+        let mut ws = vec![mk("claude", 10), mk("claude", 11), mk("claude", 20), mk("pi", 10), mk("acp", 10), mk("codex", 10)];
+        apply_hidden(&mut ws, &table);
+        assert_eq!(ws.iter().map(|w| w.hidden).collect::<Vec<_>>(), vec![Some(true), Some(false), None, Some(true), None, None]);
+        // 名單 JSON：有值才帶 hidden，沒有就不帶這個欄位（舊後台、舊用戶端不受影響）
+        let b = roster_body(&ws, None, Value::Null);
+        let a = b["agents"].as_array().unwrap();
+        assert_eq!(a[0]["hidden"], json!(true));
+        assert_eq!(a[1]["hidden"], json!(false));
+        assert!(a[2].get("hidden").is_none() && a[4].get("hidden").is_none() && a[5].get("hidden").is_none(), "{a:?}");
+        // 重新套用會洗掉舊值（視窗後來被顯示出來）
+        apply_hidden(&mut ws, &[(10u32, true)]);
+        assert_eq!(ws[0].hidden, Some(false));
     }
 
     const NOW: u64 = 10_000_000_000;

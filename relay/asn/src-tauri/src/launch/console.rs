@@ -184,6 +184,19 @@ fn set_console_visible(req: &PartnerConsoleReq, visible: bool) -> Result<Value, 
     }
 }
 
+/// 這台電腦上所有「主控台視窗」：[(擁有視窗的程序編號, 是否可見)]。一次 EnumWindows、不接上任何主控台，給名單判斷 CLI 視窗有沒有隱藏。
+/// 非 Windows、測試環境（不碰真的視窗，名單斷言才穩）回空表。
+pub fn console_windows() -> Vec<(u32, bool)> {
+    #[cfg(all(windows, not(test)))]
+    {
+        win::console_windows()
+    }
+    #[cfg(not(all(windows, not(test))))]
+    {
+        Vec::new()
+    }
+}
+
 #[cfg(windows)]
 pub(crate) mod win {
     use std::sync::Mutex;
@@ -287,6 +300,27 @@ pub(crate) mod win {
                 Some(h)
             }
         }
+    }
+
+    unsafe extern "system" fn each_console_window(hwnd: HWND, lp: LPARAM) -> i32 {
+        let out = &mut *(lp as *mut Vec<(u32, bool)>);
+        if class_is_console(hwnd) {
+            let mut p = 0u32;
+            GetWindowThreadProcessId(hwnd, &mut p);
+            if p != 0 {
+                out.push((p, IsWindowVisible(hwnd) != 0));
+            }
+        }
+        1
+    }
+
+    /// 所有 ConsoleWindowClass 頂層視窗的（擁有者程序編號, 可見）；只列出、不動，不用 AttachConsole
+    pub fn console_windows() -> Vec<(u32, bool)> {
+        let mut out: Vec<(u32, bool)> = Vec::new();
+        unsafe {
+            EnumWindows(Some(each_console_window), &mut out as *mut Vec<(u32, bool)> as LPARAM);
+        }
+        out
     }
 
     pub fn find_console(pid: u32) -> Option<WinConsole> {
