@@ -12,6 +12,9 @@ pub mod acp_config;
 pub mod acp_policy;
 pub mod acp_worker;
 pub mod codex;
+// Codex 視窗的關閉與切換模型（#235，未實機驗證）；選單接線由 partner_ops 接上前先允許未使用
+#[allow(dead_code)]
+pub mod codex_ops;
 pub mod codex_state;
 pub mod grok_adopt;
 pub mod pi;
