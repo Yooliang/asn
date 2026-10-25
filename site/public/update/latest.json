@@ -1,11 +1,11 @@
 {
-  "version": "0.1.73",
-  "notes": "修正手機「⋯」選單：反灰項目的說明文字不再長出框、疊到下一列標題上",
-  "pub_date": "2026-10-25T21:21:23.280Z",
+  "version": "0.1.74",
+  "notes": "名單帶視窗是否隱藏（隱藏的 CLI 視窗第二行寫「背景運行」）、內建通道字樣改「背景運行、內建通道」、背景工作者的名單帶對話編號、接手 Grok 時沒有現成底也能用開新夥伴的設定、設備分組照設備順序、名單不再顯示（前景）（背景）字樣",
+  "pub_date": "2026-10-25T22:21:38.602Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjFhSWRPdSsvc3RzZUR3VXVHTTdIYjhtMlRzOFVySVhXSzJVTnpBOERjaGxDdmhjZGFFMDZGRDVLcHlOeWxKbHpDU0tLOGFBT0R0OCtpa1BFTGxTOXcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyOTYzMjgyCWZpbGU6QVNOXzAuMS43M194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjczCnVtWEdTWTQyWmprNVpLSTlMbmQ2V1JIWHpmL1VZM0xINCtnMmVvSmU4ZWwzQXZ6TTFHa0hmOVJLNG9jNUdaN0FJS1VMbngxQTZlNnFvRTRoLzhQVEJBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.73_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjFUK1gzdm1KcmtFSlA2eDBLSWFiOGZmQ2FaWWI5bG8rZXRkNGIyUmZ3WTdFZ1ZrbmJDQURoVGdUS1BMMzZqbzBnM0JDWUpqaGpQcmZBWEpiK0c0WHdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyOTY2ODk4CWZpbGU6QVNOXzAuMS43NF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjc0Cmc0RzJLZ1dhTGdYL3phdGxRMnU1bldRcE8rdkZLVEhaV2NudUNsSWE4NGhKTVFKeTdWZ3FaKzNTTTdJTVNoVmNZZVVIaE5sbGE3a21vU2hEcEhsVERRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.74_x64-setup.exe"
     }
   }
 }

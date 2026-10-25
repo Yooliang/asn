@@ -1,8 +1,8 @@
 {
-  "version": "0.1.73",
-  "versionCode": 1073,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.73_android.apk",
-  "sha256": "35f7958e626b04d5d60584730180b0424b4597d283318eb7e0da0d00ec221ce5",
-  "notes": "修正手機「⋯」選單：反灰項目的說明文字不再長出框、疊到下一列標題上",
+  "version": "0.1.74",
+  "versionCode": 1074,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.74_android.apk",
+  "sha256": "a24818c1c4b5cce010ee4e0eef2ccccd5a7811fd9a5086e866637abe005b9cd4",
+  "notes": "名單帶視窗是否隱藏（隱藏的 CLI 視窗第二行寫「背景運行」）、內建通道字樣改「背景運行、內建通道」、背景工作者的名單帶對話編號、接手 Grok 時沒有現成底也能用開新夥伴的設定、設備分組照設備順序、名單不再顯示（前景）（背景）字樣",
   "bytes": 9379300
 }
