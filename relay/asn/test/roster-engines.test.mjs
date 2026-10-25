@@ -75,3 +75,17 @@ test('廠商標誌：gemini／codex／acp 有各自的圖，不認得的用通�
   assert.equal(engineLabel('acp'), 'ACP')
   assert.equal(engineLabel('asn'), 'ASN')
 })
+
+test('名單：後台帶的 model 會留在好友上（pi 夥伴靠它顯示背後模型的廠商）；沒帶或空白就沒有這個鍵', async () => {
+  const members = [{ id: 'w02', name: '工作機', kind: 'claude', agents: [
+    { name: '派', status: 'idle', cwd_label: null, engine: 'pi', detail: null, model: ' anthropic/claude-sonnet-4 ' },
+    { name: '派二', status: 'idle', cwd_label: null, engine: 'pi', detail: null, model: '   ' },
+    { name: '派三', status: 'idle', cwd_label: null, engine: 'pi', detail: null },
+  ] }]
+  const core = new AsnCore({ transport: { list: async () => ({ members }) }, store: memStore(), selfNode: 'self', windowName: '自己-ASN' })
+  await core.refreshRoster()
+  const by = n => [...core.friends.values()].find(f => f.agent === n)
+  assert.equal(by('派').model, 'anthropic/claude-sonnet-4')
+  assert.equal('model' in by('派二'), false)
+  assert.equal('model' in by('派三'), false)
+})

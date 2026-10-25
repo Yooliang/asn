@@ -184,6 +184,17 @@ test('廠商徽章：各廠商用電腦版的官方圖，ASN 自己的視窗用�
   assert.match(vendorBadgeHtml({}), /^<svg/, '都沒有＝通用圖，不會是空的')
 })
 
+test('廠商徽章：pi 只是執行殼，顯示背後模型的廠商；對不到或沒回報才用 pi 的圖；別的引擎不受 model 影響', () => {
+  const pi = m => vendorBadgeHtml({ engine: 'pi', ...(m === undefined ? {} : { model: m }) })
+  assert.equal(pi('anthropic/claude-sonnet-4'), vendorBadgeHtml({ engine: 'claude' }))
+  assert.equal(pi('openai/gpt-5'), vendorBadgeHtml({ engine: 'gpt' }))
+  assert.equal(pi('google/gemini-2.5-pro'), vendorBadgeHtml({ engine: 'gemini' }))
+  assert.equal(pi('local/llama-3'), vendorBadgeHtml({ engine: 'pi' }), '對不到＝pi 的圖')
+  assert.equal(pi(undefined), vendorBadgeHtml({ engine: 'pi' }), '沒回報模型＝pi 的圖')
+  assert.notEqual(vendorBadgeHtml({ engine: 'pi' }), vendorBadgeHtml({ engine: 'claude' }))
+  assert.equal(vendorBadgeHtml({ engine: 'grok', model: 'anthropic/claude-sonnet-4' }), vendorBadgeHtml({ engine: 'grok' }), '只有 pi 看模型')
+})
+
 test('大分頁：夥伴／對話／設置三個，順序固定，名稱純中文', () => {
   assert.deepEqual(TABS, ['list', 'chats', 'me']); assert.deepEqual(TABS.map(t => TAB_LABEL[t]), ['夥伴', '對話', '設置'])
   assert.deepEqual(TABS.map(tabIndex), [0, 1, 2]); assert.equal(tabIndex('亂寫'), 0)

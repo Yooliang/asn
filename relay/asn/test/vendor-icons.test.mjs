@@ -3,7 +3,7 @@ import test from 'node:test'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { vendorIconSvg } from '../ui/lib/vendor-icons.mjs'
+import { modelVendorKey, vendorIconSvg } from '../ui/lib/vendor-icons.mjs'
 
 const DOC = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../docs/ASN-VENDOR-ICONS.md')
 
@@ -27,4 +27,14 @@ test('授權文件存在且提到 CC0', () => {
   const t = fs.readFileSync(DOC, 'utf8')
   assert.match(t, /CC0/)
   assert.match(t, /vendor-icons/)
+})
+
+test('模型對廠商：提供者／模型編號都認得，經轉接（openrouter）看模型名，對不到回 null', () => {
+  const cases = {
+    'anthropic/claude-sonnet-4': 'claude', 'openai/gpt-5': 'gpt', 'openai-codex/gpt-5-codex': 'gpt', 'google/gemini-2.5-pro': 'gemini',
+    'google-vertex/gemini-2.5-flash': 'gemini', 'xai/grok-4': 'grok', 'deepseek/deepseek-chat': 'deepseek', 'minimax/MiniMax-M2': 'minimax',
+    'openrouter/deepseek/deepseek-chat': 'deepseek', 'claude-opus-4': 'claude', 'gpt-4.1': 'gpt', 'o3-mini': 'gpt', 'gemini-2.5-pro': 'gemini', 'abab6.5': 'minimax',
+  }
+  for (const [m, k] of Object.entries(cases)) assert.equal(modelVendorKey(m), k, m)
+  for (const m of ['', null, undefined, 'local/llama-3', 'ollama/qwen3', 'someone/other-model', 'o', 'orange']) assert.equal(modelVendorKey(m), null, String(m))
 })

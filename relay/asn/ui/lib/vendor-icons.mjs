@@ -21,3 +21,18 @@ export function vendorIconSvg(engineKey) {
   const k = String(engineKey ?? '').trim().toLowerCase()
   return SVG[k] ?? SVG.other
 }
+
+// 執行殼（pi）背後實際用的模型：名單的 model 長這樣「提供者/模型」（例如 anthropic/claude-sonnet-4、openrouter/deepseek/deepseek-chat），
+// 也可能只有模型編號。對得到廠商就回廠商圖的鍵（只會是上面 SVG 裡有的鍵）；對不到回 null，呼叫端退回原本的圖。
+const PROVIDER_KEY = [['anthropic', 'claude'], ['claude', 'claude'], ['openai', 'gpt'], ['google', 'gemini'], ['gemini', 'gemini'], ['xai', 'grok'], ['x-ai', 'grok'], ['deepseek', 'deepseek'], ['minimax', 'minimax']]
+const MODEL_KEY = [[/^claude/, 'claude'], [/^(gpt|chatgpt|codex|o\d)/, 'gpt'], [/^gemini/, 'gemini'], [/^grok/, 'grok'], [/^deepseek/, 'deepseek'], [/^(minimax|abab)/, 'minimax']]
+export function modelVendorKey(model) {
+  const s = String(model ?? '').trim().toLowerCase()
+  if (!s) return null
+  const slash = s.indexOf('/')
+  const provider = slash > 0 ? s.slice(0, slash) : ''
+  for (const [p, k] of PROVIDER_KEY) if (provider === p || provider.startsWith(p + '-')) return k
+  const id = s.slice(s.lastIndexOf('/') + 1)
+  for (const [re, k] of MODEL_KEY) if (re.test(id)) return k
+  return null
+}
