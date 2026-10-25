@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseChangelog, injectReleases, KEEP } from '../site/make-roadmap-page.mjs'
+import { parseChangelog, injectReleases, KEEP, parseMeetings, injectMeetings } from '../site/make-roadmap-page.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const read = p => fs.readFileSync(path.join(root, p), 'utf8').replace(/\r\n/g, '\n')   // Windows 工作樹是 CRLF，統一成 LF 再比對
@@ -136,4 +136,27 @@ test('總表：版本說法與已發版本一致（0.1.68 已發，不再寫「�
   assert.match(matrixRows.find(r => r.includes('class="kind">本機背景工作者')), /data-label="接手"[^>]*>\s*<span class="st st-doing">/, 'Grok 本機接手是進行中（實測失敗過一次）')
   assert.match(matrixRows.find(r => r.includes('class="kind">雲端代理')), /舊版的雲端收信程式/, 'Grok 雲端群組要提醒舊收信程式要更新')
   assert.match(pi, /閒置/, 'pi 切換模型要寫明只在閒置時處理')
+})
+
+// ---- 會議記錄（#meetings，資料在 site/meetings.json）----
+const MEET = (over = {}) => ({ time: '2026-10-26 08:00', attendees: '甲、乙', progress: ['進度一', '進度二'], decisions: '決議', assignments: '分派', improvements: '無', ...over })
+
+test('會議記錄：頁面與 site/meetings.json 一致（改了資料檔要重跑 node site/make-roadmap-page.mjs）', () => {
+  const rows = parseMeetings(JSON.parse(read('site/meetings.json')))
+  assert.equal(injectMeetings(page, rows), page)
+  for (const h of ['時間', '出席／回覆', '各項進度', '決議', '分派', '改善意見']) assert.ok(page.includes(`<th scope="col">${h}</th>`), h)
+})
+
+test('會議記錄：最新在上、陣列變條列、跳脫 HTML、缺欄位與壞時間會報錯', () => {
+  const rows = parseMeetings([MEET({ time: '2026-10-25 20:00' }), MEET({ time: '2026-10-26 08:00', decisions: '<b>&' }), MEET({ time: '2026-10-26 08:00', attendees: '同時間後來的' })])
+  assert.deepEqual(rows.map(r => r.time), ['2026-10-26 08:00', '2026-10-26 08:00', '2026-10-25 20:00'])
+  assert.equal(rows[1].attendees[0], '同時間後來的', '同時間維持檔案先後')
+  const html = injectMeetings('x<!-- meetings:start（由 site/make-roadmap-page.mjs 產生，不要手改；資料在 site/meetings.json） -->\nold\n<!-- meetings:end -->y', rows)
+  assert.ok(html.includes('&lt;b&gt;&amp;') && !html.includes('old'))
+  assert.ok(html.includes('<ul><li>進度一</li><li>進度二</li></ul>'))
+  assert.throws(() => parseMeetings([MEET({ decisions: '' })]), /缺少「決議」/)
+  assert.throws(() => parseMeetings([MEET({ time: '昨天' })]), /time 格式/)
+  assert.throws(() => parseMeetings({}), /陣列/)
+  assert.throws(() => injectMeetings('沒有標記', rows))
+  assert.equal(parseMeetings([MEET({ time: '2026-10-26' })])[0].time, '2026-10-26', '時間可省略')
 })

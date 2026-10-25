@@ -152,6 +152,9 @@ footer a { margin-right: 16px; }
 .matrix td p { margin: 6px 0 0; color: var(--ink-soft); }
 .matrix .refs { margin-left: 6px; font-size: 12px; color: #0b5fb0; white-space: nowrap; }
 .matrix .note-cell { color: var(--ink-soft); font-size: 13px; min-width: 190px; }
+.matrix.meetings { min-width: 980px; }
+.matrix.meetings td ul { margin: 0; padding-left: 1.1em; }
+.matrix.meetings tbody th { font-weight: 600; }
 @media (min-width: 1200px) {
   .table-wrap { width: 1120px; margin-left: -40px; }   /* 總表欄位多，比內文寬一點 */
 }
@@ -168,4 +171,5 @@ footer a { margin-right: 16px; }
   .matrix td::before { content: attr(data-label); display: block; font-size: 12px; font-weight: 700; color: var(--ink); margin-bottom: 2px; }
   .matrix td .st { margin-right: 4px; }
   .matrix .note-cell { min-width: 0; }
+  .matrix.meetings { min-width: 0; }
 }
