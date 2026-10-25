@@ -1,11 +1,11 @@
 {
-  "version": "0.1.66",
-  "notes": "群組：頭像右下角顯示廠商小圖並拿掉 AI 標籤、離線成員頭像變灰、叫醒順序標籤晚到時會補上；本機程序條目的選單說明不再重複、不再誤稱雲端並清掉舊殘影；開新夥伴可直接開 pi；Linux 登入網址核准頁；帳號旁顯示剩餘額度；沒指定視窗的信通知不再吵",
-  "pub_date": "2026-10-24T16:22:39.782Z",
+  "version": "0.1.67",
+  "notes": "設備清單改為列表加細部頁、僅顯示的條目不能誤操作、手機表格可左右捲動、設備排序跨裝置同步、Grok 接手手動開的對話",
+  "pub_date": "2026-10-25T02:19:31.236Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybitlTDkwNDliTG13cEhXbVpIK0crcVdJMWd6OUxkb25PVWZLVzAwRUNhQUR5RWpkUml5dFUxZStFZUdJNEczb0hCVVB1eHRGMisrNEJWczRGSk54VmdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyODU4OTU5CWZpbGU6QVNOXzAuMS42Nl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjY2Cmh1S1FOUE9WeWNjbTlKYXF5dmZ3eXdJQ0Y3MW1mM04xckZ6NkIrMlgydEliNktST3BDdit5T0pSTTVoUlN1VDN5MEVLNVZUQkR5UnRZenhxeDBTeUFBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.66_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjh6ZERuSFdHeGw1eEU4YStDbDdYaFRZV29acDhpOUVZNHlHZzNES3FhZnVteXYvcW0yNFhkYmdRZ1FOd3k4VU9IYmc1emNMNmEraHZWcU5ZckJMemc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyODk0NzcxCWZpbGU6QVNOXzAuMS42N194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjY3CmhWSkRMU1FiTVNZYVhHTXdqeEh2VnNmSVdrTzRRTGlqeTJ1VmxTQ2prUlpKdzN0N0xxaWJaL1ZjL1RXakVrWnZZYkpkbGd4cjdlNXhUaVJYUmRyTUJRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.67_x64-setup.exe"
     }
   }
 }

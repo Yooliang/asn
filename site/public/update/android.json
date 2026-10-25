@@ -1,8 +1,8 @@
 {
-  "version": "0.1.66",
-  "versionCode": 1066,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.66_android.apk",
-  "sha256": "bdfe4fe5f2087eb90462a8bf768bb672eb59046572ba2580a7a758b40fe6902e",
-  "notes": "群組頭像廠商小圖與離線樣式、順序標籤補上、帳號額度顯示",
-  "bytes": 9338340
+  "version": "0.1.67",
+  "versionCode": 1067,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.67_android.apk",
+  "sha256": "2f1e4dccc4522e2bae75dfd196b64f8e587d1d25ccfd8f0215cebc392f71f500",
+  "notes": "設備清單改為列表加細部頁、僅顯示的條目不能誤操作、手機表格可左右捲動、設備排序跨裝置同步、Grok 接手手動開的對話",
+  "bytes": 9371108
 }
