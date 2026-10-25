@@ -65,3 +65,59 @@ test('頁內錨點都有對應 id，站內連結都指到存在的頁面', () =>
     assert.ok(ok, `站內連結 /${p} 不存在`)
   }
 })
+
+// ---- 各家 AI 支援總表（#matrix）----
+const matrix = (() => {
+  const a = page.indexOf('<section id="matrix">')
+  const b = page.indexOf('</section>', a)
+  assert.ok(a >= 0 && b > a, '找不到 #matrix 區段')
+  return page.slice(a, b)
+})()
+const STATUSES = ['已完成並驗證', '已完成未驗證', '進行中', '尚未做', '待確認', '不適用']
+const matrixRows = [...matrix.matchAll(/<tr>\n([\s\S]*?)<\/tr>/g)].map(m => m[1])
+
+test('總表：欄位必須有開啟、關閉、接手、切換模型、群組聊天，且每家都列齊', () => {
+  const heads = [...matrix.matchAll(/<th scope="col">([^<]+)<\/th>/g)].map(m => m[1])
+  for (const h of ['開啟', '關閉', '接手', '切換模型', '群組聊天', '帳號切換', '備註與限制']) assert.ok(heads.includes(h), `缺欄位：${h}`)
+  assert.equal(heads[0], 'AI')
+  const names = matrixRows.map(r => /<strong>([^<]+)<\/strong>/.exec(r)?.[1])
+  for (const n of ['Claude', 'Codex', 'Gemini', 'Grok', 'pi']) assert.ok(names.includes(n), `缺 ${n}`)
+  assert.ok(matrixRows.length >= 6)
+})
+
+test('總表：每一列每個功能欄都有狀態（只能是六種之一）與說明，備註欄不為空', () => {
+  for (const row of matrixRows) {
+    const tds = [...row.matchAll(/<td data-label="([^"]+)"([^>]*)>([\s\S]*?)<\/td>/g)]
+    assert.equal(tds.length, 7, '每列 7 格')
+    for (const [, label, attrs, inner] of tds) {
+      if (label === '備註與限制') { assert.ok(inner.trim().length > 0); continue }
+      const st = /<span class="st (st-[a-z]+)">([^<]+)<\/span>/.exec(inner)
+      assert.ok(st, `${label} 缺狀態`)
+      assert.ok(STATUSES.includes(st[2]), `未知狀態：${st[2]}`)
+      assert.ok(/<p>[^<]{4,}/.test(inner), `${label} 缺說明`)
+    }
+  }
+})
+
+test('總表：圖例的六種狀態都在，且表格裡出現的樣式都有圖例；樣式有對應 CSS', () => {
+  const css = read('site/public/style.css')
+  for (const s of STATUSES) assert.ok(matrix.includes(`>${s}</span>`), `圖例缺 ${s}`)
+  for (const cls of new Set([...matrix.matchAll(/class="st (st-[a-z]+)"/g)].map(m => m[1]))) assert.ok(css.includes(`.${cls} `), `style.css 缺 .${cls}`)
+})
+
+test('總表：「待確認」與「已完成未驗證」一定寫明原因（說明至少一句完整的話）', () => {
+  for (const row of matrixRows) {
+    for (const m of row.matchAll(/class="st st-(tbc|unv)">[^<]+<\/span>\s*<p>([^<]*)/g)) assert.ok(m[2].length >= 12, `說明太短：${m[2]}`)
+  }
+})
+
+test('總表：不出現「收發室」，也不用行內樣式', () => {
+  assert.ok(!matrix.includes('收發室'))
+  assert.ok(!/\sstyle=/.test(matrix))
+})
+
+test('總表：導覽列有連結、窄螢幕有卡片版型（每格帶 data-label）', () => {
+  assert.ok(page.includes('<a href="#matrix">支援總表</a>'))
+  const css = read('site/public/style.css')
+  assert.match(css, /content: attr\(data-label\)/)
+})
