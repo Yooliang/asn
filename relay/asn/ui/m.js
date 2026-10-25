@@ -264,7 +264,7 @@ const app = createApp({
   setup() {
     // 已封存的不放進名單，另成最底下一個預設收合的「已封存（N）」群組（搜尋字同樣適用）
     const groups = computed(() => {
-      const o = { query: query.value, selfNode: info.node, selfName: info.window_name, plainText: plain }
+      const o = { query: query.value, selfNode: info.node, selfName: info.window_name, deviceOrder: devPrefs.deviceOrder, plainText: plain }
       return withArchivedGroup(rosterGroups(activeFriends(friends.value), o), rosterGroups(archivedFriends(friends.value), o).flatMap(g => g.items))
     })
     // ---------- 群組對話：名單裡的一個分組（永遠顯示，沒有群組時有「建立群組」「加入群組」）；點進去在對話分頁看訊息、發言（lastChat 記成 room:<代號>） ----------

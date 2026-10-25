@@ -113,3 +113,15 @@ test('設備順序規則共用：設定的設備頁籤與手機也是本機第�
   ]
   assert.deepEqual(launchDeviceRows(friends, { selfNode: 'H', nodeOrder: ['W', 'H', 'G', 'A'] }).map(r => r.key), ['H', 'G', 'A', 'W'])
 })
+
+// 設備分組要照帳號層的設備順序（和「分頁依設備」同一份 deviceOrder），不能只有本機第一＋設備名排序
+test('分組依設備：照 deviceOrder 排，本機仍第一，沒列的接在後面照設備名；分頁依廠商底下也一樣', () => {
+  const items = [F('H', '家用機', 'a', 'online', 'claude'), F('W', '工作機', 'b', 'online', 'claude'), F('G', 'grok機', 'c', 'online', 'claude'), F('A', '牧陽', 'd', 'online', 'claude')]
+  const nodes = g => g.map(x => x.node)
+  assert.deepEqual(nodes(groupItems(items, 'device', { selfNode: 'H' })), ['H', 'G', 'W', 'A'].sort((x, y) => (y === 'H') - (x === 'H') || ({ H: '家用機', W: '工作機', G: 'grok機', A: '牧陽' })[x].localeCompare(({ H: '家用機', W: '工作機', G: 'grok機', A: '牧陽' })[y], 'zh-Hant')), '沒有 deviceOrder：維持原本規則')
+  assert.deepEqual(nodes(groupItems(items, 'device', { selfNode: 'H', deviceOrder: ['A', 'W'] })), ['H', 'A', 'W', 'G'], '手動順序在前、沒列的在後')
+  assert.deepEqual(nodes(groupItems(items, 'device', { selfNode: 'H', deviceOrder: ['W', 'H', 'A', 'G'] })), ['H', 'W', 'A', 'G'], '本機永遠第一，就算順序裡有它')
+  assert.deepEqual(nodes(groupItems(items, 'device', { selfNode: 'H', deviceOrder: 'bad' })), nodes(groupItems(items, 'device', { selfNode: 'H' })), '壞資料當沒有')
+  const withLabel = groupItems(items, 'device', { selfNode: 'H', deviceOrder: ['A'] })
+  assert.ok(withLabel.every(g => g.key === `device:${g.node}` && g.kind === 'device' && g.items.length === 1), '組的欄位不變')
+})

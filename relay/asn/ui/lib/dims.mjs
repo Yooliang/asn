@@ -1,6 +1,7 @@
 // 名單的「分頁依」與「分組依」：三個維度（狀態／廠商／設備）的純邏輯，node 與瀏覽器都能跑。
 import { UNNAMED_DEVICE } from './text.mjs'
 import { isAsnWindow, withoutAsn } from './roster.mjs'
+import { applyDeviceOrder } from './device-order.mjs'
 import { DEVICE_TAB_MAX, deviceTabs, engineKey, engineLabel, engineRank, groupInDevice, shortOf } from './tabs.mjs'
 
 export const DIMS = [{ key: 'status', label: '狀態' }, { key: 'engine', label: '廠商' }, { key: 'device', label: '設備' }]
@@ -61,7 +62,8 @@ export function pageItems(friends, dim, key, match = () => true) {
 }
 
 // 頁籤裡的分組；設備組用設備名、本機那組排第一，其餘照設備名
-export function groupItems(items, groupDim, { selfNode, selfName = '' } = {}) {
+// deviceOrder＝帳號層的設備順序（和「分頁依設備」同一份）：設備分組也照它排，沒列在裡面的接在後面（照設備名）
+export function groupItems(items, groupDim, { selfNode, selfName = '', deviceOrder = [] } = {}) {
   if (groupDim === 'device') {
     const by = new Map()
     for (const f of items) {
@@ -71,7 +73,9 @@ export function groupItems(items, groupDim, { selfNode, selfName = '' } = {}) {
       if (f.device && g.label === UNNAMED_DEVICE) g.label = f.device
       g.items.push(f)
     }
-    return [...by.values()].sort((a, b) => (b.node === selfNode) - (a.node === selfNode) || a.label.localeCompare(b.label, 'zh-Hant'))
+    const byLabel = [...by.values()].sort((a, b) => (b.node === selfNode) - (a.node === selfNode) || a.label.localeCompare(b.label, 'zh-Hant'))
+    // applyDeviceOrder 認的是 key＝設備鍵，組的 key 是 device:設備鍵，所以包一層再拆開
+    return applyDeviceOrder(byLabel.map(g => ({ key: g.node, g })), { selfNode, deviceOrder }).map(x => x.g)
       // node 留在組上：設備分組標題旁要用它查那台的 ASN 在線狀態
   }
   return groupInDevice(items, groupDim)
