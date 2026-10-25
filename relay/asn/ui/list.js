@@ -903,7 +903,7 @@ const app = createApp({
     watch(dev, d => { if (!normalizeTab(tab.value, d.all.map(x => x.key))) tab.value = d.all[0]?.key ?? '' }, { immediate: true })
     const shown = computed(() => {
       if (!isDevice.value) return []
-      const o = { tabDim: dims.tabDim, tabKey: tab.value, groupDim: dims.groupDim, selfNode: info.node, selfName: info.window_name, query: query.value, plainText: plain }
+      const o = { tabDim: dims.tabDim, tabKey: tab.value, groupDim: dims.groupDim, selfNode: info.node, selfName: info.window_name, deviceOrder: devPrefs.deviceOrder, query: query.value, plainText: plain }
       const base = rosterShownGroups(activeFriends(friends.value), o)
       // 已封存的不放進名單，另成最底下一個預設收合的「已封存（N）」群組（同一個分頁與搜尋字）
       const archived = rosterShownGroups(archivedFriends(friends.value), o).flatMap(g => g.items)

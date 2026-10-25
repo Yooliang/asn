@@ -82,3 +82,10 @@ test('夥伴管理仍排除 ASN 視窗', () => {
   assert.equal(isManageable(F('H', '小良的家用機', 'asn')), false)
   assert.equal(isManageable(F('H', '甲', 'claude')), true)
 })
+
+test('電腦版 rosterShownGroups：分組依設備時把 deviceOrder 傳下去', () => {
+  const f = (node, device, nick) => ({ id: `${node}/${nick}`, node, device, nick, status: 'online', engine: 'claude', unread: 0 })
+  const fl = [f('H', '家用機', 'a'), f('W', '工作機', 'b'), f('A', '牧陽', 'd')]
+  const o = { tabDim: 'engine', tabKey: 'claude', groupDim: 'device', selfNode: 'H', selfName: '', query: '', plainText: s => s }
+  assert.deepEqual(rosterShownGroups(fl, { ...o, deviceOrder: ['A', 'W'] }).map(g => g.node), ['H', 'A', 'W'])
+})

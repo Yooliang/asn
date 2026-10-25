@@ -234,3 +234,9 @@ test('滑動吸附：拖過一定比例或夠快才換頁；到頭不能再換�
   assert.equal(indicatorPos(0, 500, W), 0, '不會跑出左邊'); assert.equal(indicatorPos(2, -500, W), 2)
 })
 
+test('手機名單依設備分組：照帳號層的設備順序（deviceOrder），本機仍第一', () => {
+  const f = (node, device, nick) => ({ id: `${node}/${nick}`, node, device, nick, status: 'online', engine: 'claude', unread: 0 })
+  const fl = [f('H', '家用機', 'a'), f('W', '工作機', 'b'), f('G', 'grok機', 'c'), f('A', '牧陽', 'd')]
+  assert.deepEqual(rosterGroups(fl, { selfNode: 'H', deviceOrder: ['A', 'W'] }).map(g => g.node), ['H', 'A', 'W', 'G'])
+  assert.deepEqual(rosterGroups(fl, { selfNode: 'H', deviceOrder: [] }).map(g => g.node), rosterGroups(fl, { selfNode: 'H' }).map(g => g.node), '沒有順序＝原本規則')
+})

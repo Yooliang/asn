@@ -77,10 +77,10 @@ export const SWIPE_BLOCK_SELECTOR = 'input, textarea, select, [contenteditable="
 // ---------- 名單 ----------
 // 單欄名單：所有設備的夥伴放在同一頁，依設備分組（本機那組在最前），有搜尋字就只留符合的。
 // 組內線上在前、離線在後。回傳 [{ key, label, node, items }]
-export function rosterGroups(friends, { query = '', selfNode = '', selfName = '', plainText = s => s } = {}) {
+export function rosterGroups(friends, { query = '', selfNode = '', selfName = '', deviceOrder = [], plainText = s => s } = {}) {
   const q = normalizeSearchQuery(query)
   const items = sortFriends(withoutAsn(friends).filter(f => friendMatchesQuery(f, q, plainText)))
-  return groupItems(items, 'device', { selfNode, selfName })
+  return groupItems(items, 'device', { selfNode, selfName, deviceOrder })
 }
 export const totalUnread = friends => withoutAsn(friends).reduce((n, f) => n + (Number.isInteger(f?.unread) && f.unread > 0 ? f.unread : 0), 0)
 
