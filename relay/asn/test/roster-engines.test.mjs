@@ -7,6 +7,7 @@ import { pageItems, pageTabs, groupItems } from '../ui/lib/dims.mjs'
 import { groupHeading, engineLabel } from '../ui/lib/tabs.mjs'
 import { VENDOR_ICON_KEYS, vendorIconSvg } from '../ui/lib/vendor-icons.mjs'
 import { memStore } from './helpers.mjs'
+import { buildFriends, procDisplayName } from '../ui/lib/roster.mjs'
 
 const claude = n => ({ name: n, status: 'idle', cwd_label: 'proj', engine: 'claude', detail: null })
 const MEMBERS = [
@@ -88,4 +89,26 @@ test('名單：後台帶的 model 會留在好友上（pi 夥伴靠它顯示背�
   assert.equal(by('派').model, 'anthropic/claude-sonnet-4')
   assert.equal('model' in by('派二'), false)
   assert.equal('model' in by('派三'), false)
+})
+
+test('本機程序條目：顯示名拿掉（前景）（背景），背景的才在第二行寫「背景運行」；名字本身（鍵）不變', () => {
+  const members = [{ id: 'w02', name: '工作機', kind: 'claude', agents: [
+    { name: 'grok #65324（前景）', status: 'running', cwd_label: '', engine: 'grok', kind: 'process', receivable: false },
+    { name: 'codex #14（背景）', status: 'running', cwd_label: '', engine: 'codex', kind: 'process', receivable: false },
+    { name: 'pi · MiniMax #12（前景）', status: 'running', cwd_label: '', engine: 'pi', kind: 'process', receivable: false },
+    { name: 'Test-Gemini', status: 'idle', cwd_label: 'Gemini（背景工作者）', engine: 'gemini' },
+    { name: '小職（背景）', status: 'idle', cwd_label: '', engine: 'claude' },
+  ] }]
+  const by = n => buildFriends(members, { selfNode: 'self' }).find(f => f.agent === n)
+  const g = by('grok #65324（前景）')
+  assert.deepEqual([g.nick, g.psm, g.agent], ['grok #65324', '', 'grok #65324（前景）'], '前景：不寫，鍵不變（接手、操作都用 agent）')
+  const c = by('codex #14（背景）')
+  assert.deepEqual([c.nick, c.psm], ['codex #14', '背景運行'])
+  assert.equal(by('pi · MiniMax #12（前景）').nick, 'pi · MiniMax #12')
+  const t = by('Test-Gemini')
+  assert.deepEqual([t.nick, t.psm], ['Test-Gemini', 'Gemini（背景工作者）'], '背景工作者照舊用第二行的標籤')
+  const k = by('小職（背景）')
+  assert.deepEqual([k.nick, k.psm], ['小職（背景）', ''], '不是程序條目的名字照舊，不動括號')
+  assert.equal(procDisplayName('grok #1（前景）'), 'grok #1')
+  assert.equal(procDisplayName('（前景）'), '')
 })
