@@ -71,3 +71,8 @@ test('m.html：設置分頁只列分類（每列一行摘要）加使用指引�
     for (const n of needles) assert.ok(detail.includes(n), `${cat} 分類頁缺 ${n}`)
   }
 })
+
+test('mobile.css：「⋯」選單每一列不能被壓縮（直向 flex 加 overflow 時，列會縮到比內容矮，說明文字就疊在別列上）', () => {
+  const css = fs.readFileSync(new URL('../ui/mobile.css', import.meta.url), 'utf8')
+  assert.match(css, /\.m-ops-item\{[^}]*flex:none/)
+})
