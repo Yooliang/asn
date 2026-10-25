@@ -72,6 +72,14 @@ export function processReason(f) {
   return `這是這台電腦上自己開的 ${eng}${place ? `（${place}）` : ''}：ASN 只能顯示，不能從這裡管理`
 }
 
+// 接手：使用者自己在終端機開的 grok（前景程序條目），可以讓 ASN 的 Grok 工作者載入同一段對話。
+// 沿用「接班換手」這個動作代號（後台與簽章流程不用改），選單上改叫「接手」；真正找得到哪一段對話由電腦端決定，找不到會回原因。
+export const ADOPT_LABEL = '接手'
+export const ADOPT_ACK = '我已了解：接手後我會先關掉終端機那個 grok，兩邊同時用同一段對話可能互相覆蓋'
+export const isGrokAdoptable = f => isProcessEntry(f) && /^grok\b/i.test(String(f?.engine ?? '').trim() || String(f?.agent ?? f?.nick ?? '')) && /（前景）\s*$/.test(String(f?.agent ?? f?.nick ?? ''))
+// 對話框文字用的種類：可接手的 grok 程序條目是 'adopt'，其餘照原本的種類
+export const dialogEngine = f => (isGrokAdoptable(f) ? 'adopt' : partnerEngine(f))
+
 // 同一個原因影響多個項目時只寫一次：回 { notes（共用說明，每個原因一行）, rows（項目加 why：只剩各自獨有的原因）}
 export function sharedWhy(items) {
   const list = Array.isArray(items) ? items : []
@@ -122,13 +130,15 @@ export function menuItems(friend, ctx = {}) {
   const offline = friend.status === 'offline'
   return MENU_KEYS.map(key => {
     const reason = itemReason(key, friend, engine, offline, ctx)
-    return { key, label: OP_LABEL[key], ok: !reason, reason }
+    const adopt = key === 'handover' && isGrokAdoptable(friend)
+    return { key, label: adopt ? ADOPT_LABEL : OP_LABEL[key], ok: !reason, reason }
   })
 }
 
 // 這一項為什麼不能用（能用回空字串）。先看夥伴的種類，再看登入與電腦，最後才是這一項自己的條件
 function itemReason(key, friend, engine, offline, ctx) {
-  if (isProcessEntry(friend)) return processReason(friend)   // 本機程序條目：一律是「自己開的，只能顯示」，不看引擎種類（絕不說雲端）
+  if (key === 'handover' && isGrokAdoptable(friend)) return gateReason(key, friend, ctx)   // 接手：和其他管理項目同一套登入／電腦條件
+  if (isProcessEntry(friend)) return processReason(friend)   //本機程序條目：一律是「自己開的，只能顯示」，不看引擎種類（絕不說雲端）
   if (engine === 'cloud') return REASON.cloud
   if (engine === 'other') return REASON.otherEngine
   const label = OP_LABEL[key]
@@ -179,6 +189,7 @@ export function opFormError(friend, op, input = {}, item = null) {
     if (n === friend?.agent) return '新名字和現在一樣'
   }
   if (op === 'model' && !MODEL_RE.test(String(input.model ?? '').trim())) return '請選一個模型（只能用英數與 . _ [ ] -）'
+  if (op === 'handover' && isGrokAdoptable(friend) && input.ack !== true) return '請先勾選確認：接手後要先關掉終端機那個 grok'
   if (op === 'handover' && String(input.note ?? '').trim().length > NOTE_MAX) return `補充的話最多 ${NOTE_MAX} 字`
   return ''
 }
@@ -275,6 +286,13 @@ export function progressView(row, { op = row?.op, sentAt = 0, now = Date.now() }
   switch (row?.status) {
     case 'ok': {
       const v = { phase: 'done', done: true, text: DONE_TEXT[op] ?? '完成。' }
+      if (op === 'handover' && row.result?.kind === 'adopt') {
+        // 接手 grok：沒有前任、沒有交接檔；提醒先關掉終端機那個 grok
+        const who = typeof row.result.name === 'string' ? short(row.result.name, 60) : ''
+        v.text = row.result.already === true ? `已經接手過了${who ? `（專屬工作者「${who}」）` : ''}。` : `已接手${who ? `，專屬工作者「${who}」` : ''}載入了同一段對話。`
+        v.extra = ['請先關掉終端機那個 grok（ASN 不會替你關）：兩邊同時用同一段對話可能互相覆蓋。']
+        return v
+      }
       if (op === 'handover') { v.steps = stepsAt('', true); v.extra = handoverExtra(row.result) }
       return v
     }

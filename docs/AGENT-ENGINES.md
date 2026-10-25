@@ -122,6 +122,7 @@
   - **名稱衝突**：官方版和社群版都叫 `grok`。裝官方版前要先處理（解除社群版，或用完整路徑／`npx` 呼叫）。
 - 另一條：pi 的 `/login xai` 可用 Grok／X 訂閱，走 pi 的 RPC（見第 2 節）。
 - 來源：[Grok Build 概覽](https://docs.x.ai/build/overview)、[無頭模式](https://docs.x.ai/build/cli/headless-scripting)、[Sessions](https://docs.x.ai/build/features/sessions)、[ACP 登錄表](https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json)。
+- **接手使用者自己開的 grok（2026-10-25，已實作，尚未用真的 grok 實測 `session/load`）**：名單上的「grok #pid（前景）」沒有外部入口，但 grok 自己把使用中的對話登記在 `~/.grok/active_sessions.json`（陣列：session_id、pid、cwd、opened_at），對話資料夾在 `~/.grok/sessions/<編碼後的工作資料夾>/<session_id>/`。選單「接手」（沿用 `handover` 動作代號，後台不用改）用名單上的 pid 查登記檔，唯一才採用（沒登記、同 pid 對到多段、對話資料夾不在、登記比程序還早＝pid 被重用，一律不接手並回中文原因）；然後用現有 Grok 工作者的指令另開專屬工作者「grok-接手-<資料夾名>」（`bridge/engines/grok_adopt.rs`），以 ACP `session/load` 載入同一段對話，載不進來就失敗、不退回開新對話（`WorkerCfg.adopted`）。專屬工作者寫檔最多「詢問」、工作資料夾白名單換成那段對話的資料夾；接手名冊存 `acp-adopted.json`，橋重啟後建回來。只讀登記檔與資料夾名稱，不讀對話內容、不碰 auth；絕不結束或操作使用者的 grok 程序。風險：終端機的 grok 與專屬工作者同時寫同一段對話可能互相覆蓋，所以對話框要二次確認「接手後請先關掉終端機那個 grok」。
 - **未實測**：官方 Grok Build 的安裝與 ACP（需要訂閱登入，且 Windows 為 best-effort）。要實測時再做，約一個工作階段內可完成（裝 → 登入 → `tools-acp-probe.mjs prompt custom "…" --cmd <grok 路徑> agent stdio`）。
 
 ---

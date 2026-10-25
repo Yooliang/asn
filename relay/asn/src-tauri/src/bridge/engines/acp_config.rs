@@ -39,6 +39,8 @@ pub struct WorkerCfg {
     pub turn_timeout_ms: u64,
     pub turn_max_ms: u64,
     pub queue_max: usize,
+    /// 接手別人（例如使用者在終端機開的 grok）的對話：載入指定的對話失敗時不准偷偷開新對話，直接回報失敗
+    pub adopted: bool,
 }
 
 fn num(v: Option<&Value>, d: u64, min: u64) -> u64 {
@@ -150,6 +152,7 @@ pub fn normalize_worker(raw: &Value, work_dir: &Path, index: usize) -> Result<(W
         turn_timeout_ms: num(raw.get("turn_timeout_ms"), 300_000, 100),
         turn_max_ms: num(raw.get("turn_max_ms"), 1_800_000, 100),
         queue_max: num(raw.get("queue_max"), 10, 1) as usize,
+        adopted: false,
     };
     Ok((cfg, warnings))
 }

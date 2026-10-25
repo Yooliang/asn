@@ -1336,12 +1336,114 @@ impl AcpAdmin for FakeAcp {
         self.calls.lock().unwrap().push(format!("handover {name} [{note}]"));
         Ok(json!({ "kind": "acp", "pid": 4321, "handoff_done": false }))
     }
+    fn adopt(&self, session_id: &str, cwd: &str) -> Result<Value, String> {
+        self.calls.lock().unwrap().push(format!("adopt {session_id} {cwd}"));
+        match self.fail_with.lock().unwrap().clone() {
+            Some(e) => Err(e),
+            None => Ok(json!({ "kind": "adopt", "name": "grok-接手-專案", "already": false })),
+        }
+    }
+}
+
+const GROK_SID: &str = "01a16c6d-6842-71c0-a78d-911586798d88";
+
+/// 假的 ~/.grok：使用中對話登記（pid 7001 對 GROK_SID）與 sessions 底下的對話資料夾；假程序表加上 grok.exe(7001)
+fn grok_rig(r: &Rig, active: Value, with_dir: bool) {
+    let home = r.tmp.path().join("grokhome");
+    std::fs::create_dir_all(home.join("sessions").join("D%3A%5C專案")).unwrap();
+    if with_dir {
+        std::fs::create_dir_all(home.join("sessions").join("D%3A%5C專案").join(GROK_SID)).unwrap();
+    }
+    std::fs::write(home.join("active_sessions.json"), active.to_string()).unwrap();
+    r.ops.set_grok_home(home);
+    r.os().table.lock().unwrap().push(p(7001, 100, "grok.exe"));
+    r.os().alive.lock().unwrap().insert(7001);
+}
+fn grok_active() -> Value {
+    json!([{ "session_id": GROK_SID, "pid": 7001, "cwd": "D:\\專案", "opened_at": "2026-10-24T05:41:12.4Z" }])
+}
+fn adopt_run(r: &Rig, name: &str) -> OpResult {
+    r.run("handover", json!({ "name": name }))
 }
 
 fn with_acp(r: &Rig, names: &[&str]) -> Arc<FakeAcp> {
     let a = Arc::new(FakeAcp { names: names.iter().map(|s| s.to_string()).collect(), calls: Mutex::new(vec![]), fail_with: Mutex::new(None) });
     r.ops.set_acp(a.clone());
     a
+}
+
+#[test]
+fn 接手_用_pid_查到唯一的對話_交給工作者入口_絕不碰那個_grok_程序() {
+    let r = rig(Opt::default());
+    grok_rig(&r, grok_active(), true);
+    let a = with_acp(&r, &["Grok"]);
+    let res = adopt_run(&r, "grok #7001（前景）");
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert_eq!(*a.calls.lock().unwrap(), vec![format!("adopt {GROK_SID} D:\\專案")]);
+    assert!(res.detail.contains("專屬工作者「grok-接手-專案」") && res.detail.contains("先關掉終端機那個 grok") && res.detail.contains("互相覆蓋"), "{}", res.detail);
+    assert_eq!(res.result.unwrap(), json!({ "kind": "adopt", "name": "grok-接手-專案", "already": false }));
+    assert!(r.terminated().is_empty() && r.os().closed.lock().unwrap().is_empty() && r.launched().is_empty(), "不結束、不關閉、不開任何視窗");
+    assert!(!res.detail.contains(GROK_SID), "結果不顯示對話編號");
+}
+
+#[test]
+fn 接手_做不到就不接手_回中文原因_工作者入口完全沒被呼叫() {
+    let none = |r: &Rig, a: &Arc<FakeAcp>, name: &str, want: &str| {
+        let res = adopt_run(r, name);
+        assert_eq!(res.status, "failed", "{name}");
+        assert!(res.detail.contains(want), "{name}：{}", res.detail);
+        assert!(a.calls.lock().unwrap().is_empty() && r.terminated().is_empty(), "{name}");
+    };
+    // 沒有登記這個 pid
+    let r = rig(Opt::default());
+    grok_rig(&r, json!([{ "session_id": GROK_SID, "pid": 1, "cwd": "D:\\x", "opened_at": "" }]), true);
+    let a = with_acp(&r, &["Grok"]);
+    none(&r, &a, "grok #7001（前景）", "找不到這個 grok 正在用的對話");
+    // 同一個 pid 對到兩段不同對話
+    let r = rig(Opt::default());
+    grok_rig(&r, json!([{ "session_id": GROK_SID, "pid": 7001, "cwd": "D:\\x", "opened_at": "" }, { "session_id": "01a16c71-c809-7650-898d-fde24188667f", "pid": 7001, "cwd": "D:\\x", "opened_at": "" }]), true);
+    let a = with_acp(&r, &["Grok"]);
+    none(&r, &a, "grok #7001（前景）", "同時對得上 2 段");
+    // 對話資料夾不在
+    let r = rig(Opt::default());
+    grok_rig(&r, grok_active(), false);
+    let a = with_acp(&r, &["Grok"]);
+    none(&r, &a, "grok #7001（前景）", "找不到這段對話的紀錄資料夾");
+    // 那個 pid 不是 grok（名單過期、pid 被重用）
+    let r = rig(Opt::default());
+    grok_rig(&r, grok_active(), true);
+    let a = with_acp(&r, &["Grok"]);
+    none(&r, &a, "grok #231（前景）", "已經不在執行");
+    // 沒有 grok 的資料夾設定、沒有 ACP 引擎
+    let r = rig(Opt::default());
+    grok_rig(&r, grok_active(), true);
+    *r.ops.grok_home.lock().unwrap() = None;
+    let a = with_acp(&r, &["Grok"]);
+    none(&r, &a, "grok #7001（前景）", "找不到 grok 的資料夾位置");
+    let r = rig(Opt::default());
+    grok_rig(&r, grok_active(), true);
+    assert!(adopt_run(&r, "grok #7001（前景）").detail.contains("沒有載入背景工作者功能"));
+    // 遠端開關關著
+    let r = rig(Opt { allow_first: 0, ..Opt::default() });
+    grok_rig(&r, grok_active(), true);
+    let a = with_acp(&r, &["Grok"]);
+    none(&r, &a, "grok #7001（前景）", CONSENT_OFF);
+}
+
+#[test]
+fn 接手_工作者載入失敗的原因原樣回報_一般名字的接班換手不受影響() {
+    let r = rig(Opt::default());
+    grok_rig(&r, grok_active(), true);
+    let a = with_acp(&r, &["Grok"]);
+    *a.fail_with.lock().unwrap() = Some("專屬工作者沒能載入那段對話，已撤掉：載入那段對話失敗：session not found".into());
+    let res = adopt_run(&r, "grok #7001（前景）");
+    assert_eq!(res.status, "failed");
+    assert!(res.detail.contains("沒能載入那段對話"));
+    // 名字不是 grok 程序條目：維持原本（找不到視窗）
+    let res = adopt_run(&r, "pi #7001（前景）");
+    assert_eq!(res.status, "failed");
+    assert!(!res.detail.contains("grok"), "{}", res.detail);
+    assert_eq!(a.calls.lock().unwrap().len(), 1);
 }
 
 fn acp_run(r: &Rig, op: &str, extra: Value) -> OpResult {

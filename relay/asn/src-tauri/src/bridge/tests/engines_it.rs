@@ -999,3 +999,101 @@ async fn agy_遠端管理_重開保留對話_接班換手換新對話() {
     h.wait("回覆3", |h| h.fr.sent().len() == 3).await;
     assert!(h.bodies()[2].contains("[第1輪 full 含說明"), "{}", h.bodies()[2]);
 }
+
+// ================================================================================================
+// 接手使用者自己在終端機開的 grok：專屬工作者用 session/load 載入同一段對話（假的 ACP 程式，不啟動真的 grok）
+// ================================================================================================
+
+fn grok_base() -> Value {
+    worker("Grok", "acp", json!({ "roster_engine": "grok", "permissions": { "write": "allow", "execute": "deny" } }))
+}
+
+async fn adopt_blocking(admin: &Arc<dyn engines::acp_admin::AcpAdmin>, sid: &str, cwd: &str) -> Result<Value, String> {
+    let (a, sid, cwd) = (admin.clone(), sid.to_string(), cwd.to_string());
+    tokio::task::spawn_blocking(move || a.adopt(&sid, &cwd)).await.unwrap()
+}
+
+#[tokio::test]
+async fn acp_接手_專屬工作者載入既有對話_信接在同一段後面_名單有名字_重啟後建回來() {
+    let state = tempfile::tempdir().unwrap();
+    std::fs::write(state.path().join("sess-grok1.json"), r#"{"turns":2}"#).unwrap();
+    let st = state.path().display().to_string();
+    let mut h = eh(Some(json!([grok_base()])), &[("FAKE_ACP_STATE", &st), ("FAKE_ACP_LOAD", "1")], "acp", &[]).await;
+    let admin = h.set.acp_admin().expect("有載入 ACP 引擎");
+    let cwd = h.work.path().join("專案");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let r = adopt_blocking(&admin, "sess-grok1", &cwd.display().to_string()).await.unwrap();
+    assert_eq!((r["kind"].as_str(), r["name"].as_str(), r["already"].clone()), (Some("adopt"), Some("grok-接手-專案"), json!(false)));
+    // 名單：新工作者以名字出現，引擎標 grok；既有的 Grok 工作者不動
+    h.set.refresh_all().await;
+    h.core.refresh_roster(now()).await;
+    let agents = h.last_roster()["agents"].as_array().unwrap().clone();
+    assert!(agents.iter().any(|a| a["name"] == "grok-接手-專案" && a["engine"] == "grok"), "{agents:?}");
+    assert!(agents.iter().any(|a| a["name"] == "Grok"), "{agents:?}");
+    // 信接在同一段對話後面：假 agent 的輪數從 2 繼續，是第 3 輪（沒有開新對話）；第一輪附開場說明與接手說明
+    h.put_pull(to_agent(1, "grok-接手-專案", "你好")).await;
+    h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
+    assert!(h.bodies()[0].contains("[第3輪 含說明]"), "{}", h.bodies()[0]);
+    assert_eq!(h.fr.sent()[0]["from_agent"].as_str(), Some("grok-接手-專案"), "回覆照一般工作者寄回");
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(h.work.path().join("acp-workers.json")).unwrap()).unwrap();
+    assert_eq!(saved["workers"]["grok-接手-專案"]["session_id"], "sess-grok1", "帳本記著那一段對話");
+    assert!(std::fs::read_to_string(h.work.path().join("acp-adopted.json")).unwrap().contains("grok-接手-專案"));
+    // 再接手同一段：不重複開
+    let again = adopt_blocking(&admin, "sess-grok1", &cwd.display().to_string()).await.unwrap();
+    assert_eq!(again["already"], json!(true));
+    // 橋重啟：專屬工作者自己建回來，繼續同一段（第 4 輪、不再附說明）
+    h.restart().await;
+    h.put_pull(to_agent(2, "grok-接手-專案", "再來")).await;
+    h.wait("回覆2", |h| h.fr.sent().len() == 2).await;
+    assert!(h.bodies()[1].contains("[第4輪]"), "{}", h.bodies()[1]);
+}
+
+#[tokio::test]
+async fn acp_接手_載不進來就失敗_不偷偷開新對話_不留工作者_也不留紀錄() {
+    let state = tempfile::tempdir().unwrap();
+    let st = state.path().display().to_string();
+    // 1. 對話不存在（session/load 失敗）
+    let mut h = eh(Some(json!([grok_base()])), &[("FAKE_ACP_STATE", &st), ("FAKE_ACP_LOAD", "1")], "acp", &[]).await;
+    let admin = h.set.acp_admin().unwrap();
+    let cwd = h.work.path().join("專案");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let e = adopt_blocking(&admin, "sess-none", &cwd.display().to_string()).await.unwrap_err();
+    assert!(e.contains("沒能載入那段對話") && e.contains("session not found"), "{e}");
+    assert!(!admin.has_worker("grok-接手-專案"));
+    h.core.refresh_roster(now()).await;
+    assert!(!h.last_roster()["agents"].to_string().contains("grok-接手"));
+    let saved = std::fs::read_to_string(h.work.path().join("acp-workers.json")).unwrap_or_default();
+    assert!(!saved.contains("sess-none"), "帳本沒留下：{saved}");
+    assert!(!h.work.path().join("acp-adopted.json").exists(), "接手名冊沒寫");
+    assert!(h.fr.sent().is_empty());
+    h.set.stop();
+    // 2. agent 沒宣告 loadSession
+    std::fs::write(state.path().join("sess-grok1.json"), r#"{"turns":2}"#).unwrap();
+    let h = eh(Some(json!([grok_base()])), &[("FAKE_ACP_STATE", &st)], "acp", &[]).await;
+    let admin = h.set.acp_admin().unwrap();
+    let e = adopt_blocking(&admin, "sess-grok1", &cwd.display().to_string()).await.unwrap_err();
+    assert!(e.contains("沒有宣告能載入既有的對話"), "{e}");
+    assert!(!admin.has_worker("grok-接手-專案"));
+    // 3. 沒有設定 Grok 工作者：不猜指令
+    let h = eh(Some(json!([worker("Gemini", "acp", json!({}))])), &[("FAKE_ACP_STATE", &st), ("FAKE_ACP_LOAD", "1")], "acp", &[]).await;
+    let admin = h.set.acp_admin().unwrap();
+    let e = adopt_blocking(&admin, "sess-grok1", &cwd.display().to_string()).await.unwrap_err();
+    assert!(e.contains("沒有設定 Grok 工作者"), "{e}");
+}
+
+#[tokio::test]
+async fn acp_接手_寫檔最多詢問_工作資料夾白名單換成那段對話的資料夾() {
+    let state = tempfile::tempdir().unwrap();
+    std::fs::write(state.path().join("sess-grok1.json"), r#"{"turns":0}"#).unwrap();
+    let st = state.path().display().to_string();
+    let h = eh(Some(json!([grok_base()])), &[("FAKE_ACP_STATE", &st), ("FAKE_ACP_LOAD", "1")], "acp", &[]).await;
+    let admin = h.set.acp_admin().unwrap();
+    let cwd = h.work.path().join("專案");
+    std::fs::create_dir_all(&cwd).unwrap();
+    adopt_blocking(&admin, "sess-grok1", &cwd.display().to_string()).await.unwrap();
+    let info = admin.info("grok-接手-專案").unwrap();
+    assert_eq!(info["permissions"]["write"], "ask", "底下的 Grok 設定是 write=allow，接手的專屬工作者降成詢問");
+    assert_eq!(info["permissions"]["execute"], "deny");
+    assert_eq!(info["cwd"].as_str(), Some(cwd.display().to_string().as_str()));
+    assert_eq!(admin.info("Grok").unwrap()["permissions"]["write"], "allow", "既有的 Grok 工作者設定沒被動到");
+}

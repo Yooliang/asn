@@ -10,6 +10,54 @@ const MACH = machinesByNode({ machines: [{ node: 'H', launcher: LAUNCHER, online
 const ctx = { machines: MACH, loaded: true, signedIn: true, asn: { H: [{ window_name: 'H-ASN' }] } }
 const W = (node, agent, extra = {}) => ({ id: `${node}/${agent}`, node, agent, nick: agent, status: 'online', engine: 'claude', kind: 'claude', device: `設備${node}`, ...extra })
 
+// ---- 接手使用者自己在終端機開的 grok（前景程序條目）----
+const GROK = (extra = {}) => ({ id: 'H/grok #65324（前景）', node: 'H', agent: 'grok #65324（前景）', nick: 'grok #65324（前景）', status: 'busy', engine: 'grok', entryKind: 'process', receivable: false, device: '設備H', ...extra })
+
+test('接手：前景 grok 程序條目的「接班換手」位置變成可用的「接手」，其餘項目仍反灰（自己開的，只能顯示）', async () => {
+  const { isGrokAdoptable, ADOPT_LABEL } = await import('../ui/lib/partner-ops.mjs')
+  assert.equal(ADOPT_LABEL, '接手')
+  assert.equal(isGrokAdoptable(GROK()), true)
+  const items = menuItems(GROK(), ctx)
+  assert.deepEqual(items.map(i => i.key), MENU_KEYS, '項目固定不變')
+  const h = items.find(i => i.key === 'handover')
+  assert.deepEqual([h.label, h.ok, h.reason], ['接手', true, ''])
+  assert.ok(items.filter(i => i.key !== 'handover').every(i => !i.ok && /自己開的 grok/.test(i.reason)), '其餘仍是僅顯示的說明')
+})
+
+test('接手：背景 grok、其他引擎的程序條目、沒登入、電腦沒開放遠端管理時都不能用，並說明原因', async () => {
+  const { isGrokAdoptable } = await import('../ui/lib/partner-ops.mjs')
+  const h = (f, c = ctx) => menuItems(f, c).find(i => i.key === 'handover')
+  assert.equal(isGrokAdoptable(GROK({ agent: 'grok #9（背景）', nick: 'grok #9（背景）' })), false)
+  assert.equal(h(GROK({ agent: 'grok #9（背景）', nick: 'grok #9（背景）' })).ok, false)
+  assert.equal(isGrokAdoptable(GROK({ engine: 'pi', agent: 'pi #5（前景）' })), false)
+  assert.equal(h(GROK({ engine: 'pi', agent: 'pi #5（前景）' })).label, '接班換手', '其他引擎維持原本的名稱')
+  assert.equal(h(GROK({ entryKind: '', agent: 'grok' })).ok, false, '不是程序條目（例如 ASN 的 Grok 工作者）不算')
+  assert.equal(h(GROK(), { ...ctx, signedIn: false }).reason, REASON.needLogin)
+  assert.equal(h(GROK({ node: 'C', id: 'C/x' })).reason, REASON.closed)
+  assert.equal(h(GROK({ node: 'W', id: 'W/x' })).reason, REASON.offline)
+})
+
+test('接手：送出前一定要勾「我已了解」（二次確認），沒勾回中文原因；請求內容仍是 handover', async () => {
+  const { ADOPT_ACK } = await import('../ui/lib/partner-ops.mjs')
+  const f = GROK()
+  const item = menuItems(f, ctx).find(i => i.key === 'handover')
+  assert.match(ADOPT_ACK, /關掉終端機/)
+  assert.match(opFormError(f, 'handover', { note: '' }, item), /勾選/)
+  assert.equal(opFormError(f, 'handover', { ack: true }, item), '')
+  assert.equal(opFormError(W('H', '小文'), 'handover', {}, menuItems(W('H', '小文'), ctx).find(i => i.key === 'handover')), '', '一般夥伴不受影響')
+  assert.deepEqual(buildOpRequest(f, 'handover', { ack: true }), { node: 'H', name: 'grok #65324（前景）', op: 'handover' })
+})
+
+test('接手完成：說明專屬工作者載入了同一段對話並提醒先關掉終端機的 grok；不出現交接檔與「新視窗」的說法', () => {
+  const v = progressView({ status: 'ok', result: { kind: 'adopt', name: 'grok-接手-專案', already: false } }, { op: 'handover' })
+  assert.equal(v.phase, 'done')
+  assert.equal(v.text, '已接手，專屬工作者「grok-接手-專案」載入了同一段對話。')
+  assert.match(v.extra.join(''), /先關掉終端機那個 grok.*互相覆蓋/)
+  assert.equal(v.steps, undefined)
+  assert.match(progressView({ status: 'ok', result: { kind: 'adopt', name: 'x', already: true } }, { op: 'handover' }).text, /已經接手過了/)
+  assert.match(progressView({ status: 'failed', detail: '找不到這個 grok 正在用的對話，所以不接手' }, { op: 'handover' }).text, /沒有成功：找不到這個 grok/)
+})
+
 test('選單固定七項（詳情、改名、切換模型、關閉視窗、接班換手、喚醒、重開）；在線的 Claude 視窗前五項能用，喚醒與重開反灰並說明', () => {
   const items = menuItems(W('H', '小文'), ctx)
   assert.deepEqual(items.map(i => i.key), MENU_KEYS)

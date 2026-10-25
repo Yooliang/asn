@@ -421,7 +421,8 @@
         <template v-else-if="ops.phase === 'close' || ops.phase === 'handover' || ops.phase === 'restart'">
           <p class="m-ops-lead">{{ opsText.lead }}</p>
           <ul class="m-ops-points" v-if="opsText.points.length"><li v-for="p in opsText.points" :key="p">{{ p }}</li></ul>
-          <label class="m-field" v-if="ops.phase === 'handover'">補充的話（選填，會附在新夥伴的第一句話後面）<textarea class="set-area" rows="3" v-model="ops.note" maxlength="1000"></textarea></label>
+          <label class="m-field" v-if="opsText.ack"><input type="checkbox" v-model="ops.ack" aria-label="確認接手前要先關掉終端機"> {{ opsText.ack }}</label>
+          <label class="m-field" v-if="ops.phase === 'handover' && !opsText.ack">補充的話（選填，會附在新夥伴的第一句話後面）<textarea class="set-area" rows="3" v-model="ops.note" maxlength="1000"></textarea></label>
           <p class="m-err" v-if="ops.error" role="alert">{{ ops.error }}</p>
           <button type="button" class="m-btn m-btn-big" :class="{ 'm-danger': ops.phase === 'close' }" @click="submitOp(ops.phase)">{{ opsText.ok }}</button>
           <button type="button" class="m-btn m-ops-cancel" @click="ops.phase = 'menu'; ops.error = ''">返回</button>
