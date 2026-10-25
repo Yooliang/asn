@@ -39,6 +39,9 @@ export const transport = {
   launchCwdBrowse: () => invoke('launch_cwd_browse'),   // Rust 端開「選擇資料夾」；→ 路徑（已寫進本機白名單）或 null
   launchPrefsGet: () => invoke('launch_prefs_get'),
   launchPrefsSet: prefs => invoke('launch_prefs_set', { prefs }),
+  piSetupStatus: () => invoke('pi_setup_status'),     // 讓自己開的 pi 連上 ASN（#240 方案 A）：→ { pi, ext, installed, stale }
+  piSetupInstall: () => invoke('pi_setup_install'),   // 使用者同意後才呼叫：pi install 擴充 → 新狀態
+  piSetupRemove: () => invoke('pi_setup_remove'),     // 移除我們裝的那一筆 → 新狀態
 }
 // 照片放大與另存（對話視窗各自呼叫，不經樞紐）：Rust 端換短效下載網址、下載、檢查
 export const photoApi = {
