@@ -26,10 +26,12 @@ export function remoteModelRows(launcher) {
   const list = Array.isArray(launcher?.profiles) ? launcher.profiles : []
   return list.filter(p => p && typeof p.id === 'string' && p.id).map(p => {
     const cat = MODEL_CATALOG.find(m => m.profileId === p.id)
+    // 目錄上沒有的項目（自訂設定）：看那台回報的 mode（舊版回報沒有這欄＝視窗）
+    const bg = !cat && p.mode === 'background'
     return {
       id: cat?.id ?? p.id, toolId: cat?.toolId ?? p.id, profileId: p.id,
       label: (typeof p.label === 'string' && p.label.trim()) || cat?.label || p.id,
-      mode: cat?.mode ?? 'window', modeLabel: cat?.modeLabel ?? '會開一個視窗',
+      mode: cat?.mode ?? (bg ? 'background' : 'window'), modeLabel: cat?.modeLabel ?? (bg ? '在背景執行' : '會開一個視窗'),
       installed: true, installHint: '', version: '',
     }
   })

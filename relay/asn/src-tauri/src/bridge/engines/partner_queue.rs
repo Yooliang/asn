@@ -53,11 +53,16 @@ impl QueueEnv for SystemQueueEnv {
     }
 
     fn binary_ok(&self, command: &str) -> bool {
-        if command.contains('/') || command.contains('\\') {
-            Path::new(command).is_file()
-        } else {
-            crate::agent_tools::resolve_binary(command).is_some()
-        }
+        binary_exists(command)
+    }
+}
+
+/// 指令（已展開變數）找得到嗎：帶路徑的看檔案在不在，否則到 PATH 找
+pub fn binary_exists(command: &str) -> bool {
+    if command.contains('/') || command.contains('\\') {
+        Path::new(command).is_file()
+    } else {
+        crate::agent_tools::resolve_binary(command).is_some()
     }
 }
 
@@ -107,7 +112,7 @@ pub fn build_cfg(env: &dyn QueueEnv, req: &Req, work_dir: &Path) -> Result<Worke
     }
     let (command, args, cwd) = build_spawn_spec(&config, &lr)?;
     if !env.binary_ok(&command) {
-        return Err(format!("找不到「{}」的執行檔（{command}），請確認已安裝", req.profile));
+        return Err(format!("這台電腦找不到「{}」的執行檔（{command}），請先安裝後再試", req.profile));
     }
     let (protocol, roster) = protocol_and_roster(&req.profile);
     let cwd = crate::launch::local::strip_verbatim_prefix(&cwd.to_string_lossy());
@@ -140,8 +145,63 @@ pub fn remember(file: &Path, name: &str, profile: &str, cwd: &str) {
     let mut list = read_partners(file);
     list.retain(|(n, _, _)| !n.eq_ignore_ascii_case(name));
     list.push((name.to_string(), profile.to_string(), cwd.to_string()));
-    let arr: Vec<Value> = list.iter().map(|(n, p, c)| json!({ "name": n, "profile": p, "cwd": c })).collect();
+    let at = crate::heartbeat::now_ms();
+    let old_at = read_at_map(file);
+    let arr: Vec<Value> = list
+        .iter()
+        .map(|(n, p, c)| {
+            let t = if n.eq_ignore_ascii_case(name) { at } else { old_at.get(&n.to_lowercase()).copied().unwrap_or(0) };
+            json!({ "name": n, "profile": p, "cwd": c, "at": t })
+        })
+        .collect();
     let _ = crate::write_atomic(file, &json!({ "version": 1, "partners": arr }).to_string());
+}
+
+/// 名冊每筆的建立時間（毫秒；舊檔沒有就是 0），鍵是小寫名字
+fn read_at_map(file: &Path) -> std::collections::HashMap<String, u64> {
+    let Ok(t) = std::fs::read_to_string(file) else { return Default::default() };
+    let Ok(v) = serde_json::from_str::<Value>(&t) else { return Default::default() };
+    v.get("partners")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| Some((e.get("name")?.as_str()?.to_lowercase(), e.get("at").and_then(Value::as_u64).unwrap_or(0))))
+        .collect()
+}
+
+pub const FAIL_FILE: &str = "partner-queue-failed.jsonl";
+const FAIL_KEEP: usize = 50;
+
+/// 消化請求失敗時留一筆（給遠端開新夥伴的等待端讀，回報中文原因給手機）；只留最近 50 筆
+pub fn record_failure(work_dir: &Path, name: &str, profile: &str, error: &str) {
+    let file = work_dir.join(FAIL_FILE);
+    let mut lines: Vec<String> = std::fs::read_to_string(&file).unwrap_or_default().lines().filter(|l| !l.trim().is_empty()).map(String::from).collect();
+    lines.push(json!({ "at": crate::heartbeat::now_ms(), "name": name, "profile": profile, "error": error }).to_string());
+    let skip = lines.len().saturating_sub(FAIL_KEEP);
+    let _ = crate::write_atomic(&file, &(lines[skip..].join("\n") + "\n"));
+}
+
+/// `since_ms` 之後這個名字的請求處理得如何：Some(Ok)＝已開出並記進名冊、Some(Err)＝失敗（中文原因）、None＝還沒處理。名字不分大小寫
+pub fn find_outcome(work_dir: &Path, name: &str, since_ms: u64) -> Option<Result<(), String>> {
+    let mut best: Option<(u64, Result<(), String>)> = None;
+    if let Ok(t) = std::fs::read_to_string(work_dir.join(PARTNERS_FILE)) {
+        if let Ok(v) = serde_json::from_str::<Value>(&t) {
+            for e in v.get("partners").and_then(Value::as_array).into_iter().flatten() {
+                let at = e.get("at").and_then(Value::as_u64).unwrap_or(0);
+                if at >= since_ms && e.get("name").and_then(Value::as_str).is_some_and(|n| n.eq_ignore_ascii_case(name)) {
+                    best = Some((at, Ok(())));
+                }
+            }
+        }
+    }
+    for l in std::fs::read_to_string(work_dir.join(FAIL_FILE)).unwrap_or_default().lines() {
+        let Ok(v) = serde_json::from_str::<Value>(l) else { continue };
+        let at = v.get("at").and_then(Value::as_u64).unwrap_or(0);
+        if at >= since_ms && v.get("name").and_then(Value::as_str).is_some_and(|n| n.eq_ignore_ascii_case(name)) && best.as_ref().map_or(true, |(b, _)| at >= *b) {
+            best = Some((at, Err(v.get("error").and_then(Value::as_str).unwrap_or("原因不明").to_string())));
+        }
+    }
+    best.map(|(_, r)| r)
 }
 
 #[cfg(test)]
@@ -231,6 +291,28 @@ mod tests {
         assert!(std::fs::read_dir(d.path()).unwrap().flatten().all(|e| !e.file_name().to_string_lossy().ends_with(".work")), "認領檔已刪");
         std::fs::write(&f, "{\"c\":3}\n").unwrap();
         assert_eq!(claim(d.path()).unwrap(), vec![r#"{"c":3}"#.to_string()]);
+    }
+
+    #[test]
+    fn 處理結果_記進名冊算成功_失敗留中文原因_只看請求之後的_名字不分大小寫() {
+        let d = tempfile::tempdir().unwrap();
+        let w = d.path();
+        assert_eq!(find_outcome(w, "小格", 0), None, "什麼都沒有＝還沒處理");
+        let before = crate::heartbeat::now_ms();
+        remember(&w.join(PARTNERS_FILE), "Little", "grok", "C:/x");
+        assert_eq!(find_outcome(w, "little", before), Some(Ok(())));
+        assert_eq!(find_outcome(w, "little", crate::heartbeat::now_ms() + 60_000), None, "舊的紀錄不算這次請求的結果");
+        // 沒有時間欄位的舊名冊（升級前留下的）不會被當成這次成功
+        std::fs::write(w.join(PARTNERS_FILE), r#"{"version":1,"partners":[{"name":"舊的","profile":"grok","cwd":"C:/x"}]}"#).unwrap();
+        assert_eq!(find_outcome(w, "舊的", before), None);
+        assert_eq!(read_partners(&w.join(PARTNERS_FILE)).len(), 1, "舊格式照樣讀得到");
+        record_failure(w, "小格", "grok", "已經有叫「小格」的工作者");
+        assert_eq!(find_outcome(w, "小格", before), Some(Err("已經有叫「小格」的工作者".into())));
+        assert_eq!(find_outcome(w, "別人", before), None);
+        for i in 0..60 {
+            record_failure(w, &format!("n{i}"), "grok", "x");
+        }
+        assert_eq!(std::fs::read_to_string(w.join(FAIL_FILE)).unwrap().lines().count(), FAIL_KEEP, "失敗紀錄只留最近的");
     }
 
     struct H {
@@ -326,6 +408,9 @@ mod tests {
             assert!(t.contains(want), "缺 {want}：{t}");
         }
         assert_eq!(h.roster().await.len(), 1);
+        let dup = find_outcome(h.work.path(), "小格", 0);
+        assert!(matches!(&dup, Some(Err(e)) if e.contains("已經有叫「小格」")), "失敗要留給遠端開新夥伴的等待端讀：{dup:?}");
+        assert!(matches!(find_outcome(h.work.path(), "丙", 0), Some(Err(e)) if e.contains("這台電腦找不到")));
         h.eng.stop();
     }
 

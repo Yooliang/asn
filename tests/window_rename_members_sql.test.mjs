@@ -14,6 +14,7 @@ import crypto from 'node:crypto'
 
 const DIR = new URL('../supabase/migrations/', import.meta.url)
 const MIG = '20261024180000_window_rename_members.sql'
+const MIG2 = '20261025020000_wake_info_follow_rename.sql'   // 重新定義 relay.window_rename_members（多改寫 wake_info），以它為準
 const read = f => fs.readFileSync(new URL(f, DIR), 'utf8').replace(/\r\n/g, '\n').replace(/create extension if not exists \w+[^;]*;/g, '')
 const files = fs.readdirSync(DIR).filter(f => f.endsWith('.sql')).sort()
 
@@ -203,6 +204,14 @@ test('還原驗證：拿掉各項保護，對應測試要變紅', { skip }, asyn
       const r = await rename(db, W1, '財務', '會計')
       assert.deepEqual(r, { ok: true, moved: 0, conflicts: 1 })
     }],
+    ['不改叫醒順序的成員鍵', s => s.replace(/    update relay[.]room_messages set wake_info = [^\n]*\n/, ''), async db => {
+      const room = await setup(db)
+      await post(db, { node: W1, agent: '財務', room, body: 'x' })
+      await db.exec(`update relay.room_messages set wake_info = '[{"m":"${A}","rank":1,"hold":false}]'::jsonb where room_id = '${room}'`)
+      await rename(db, W1, '財務', '會計')
+      const w = (await db.query(`select wake_info from relay.room_messages where room_id = '${room}' and wake_info is not null`)).rows[0].wake_info
+      assert.equal(w[0].m, A2)
+    }],
     ['不看 session 條件', s => s.replace(/\n     and old\.node = new\.node and old\.current_session is not distinct from new\.current_session then/, '\n     and old.node = new.node then'), async db => {
       const room = await setup(db)
       await db.exec(`insert into relay.partners(partner_id, tenant_id, node, current_name, current_session)
@@ -214,8 +223,8 @@ test('還原驗證：拿掉各項保護，對應測試要變紅', { skip }, asyn
   for (const [name, mut, body] of runs) {
     const good = await boot()
     await body(good) // 原版要綠
-    const bad = await boot({ mutate: { [MIG]: mut } })
-    if (mut(read(MIG)) === read(MIG)) assert.fail(name + '：還原的取代沒有生效（樣式沒對到）')
+    const bad = await boot({ mutate: { [MIG]: mut, [MIG2]: mut } })
+    if (mut(read(MIG)) === read(MIG) && mut(read(MIG2)) === read(MIG2)) assert.fail(name + '：還原的取代沒有生效（樣式沒對到）')
     await assert.rejects(() => body(bad), undefined, name + '：拿掉後測試應該變紅')
   }
 })

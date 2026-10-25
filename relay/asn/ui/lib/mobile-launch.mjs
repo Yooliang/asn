@@ -6,7 +6,7 @@ export const REASON = {
   needLogin: '要先登入，才能替電腦開新夥伴',
   unknown: '還沒查到這台電腦的啟動設定，請稍後再試',
   offline: '這台電腦不在線',
-  closed: '這台電腦沒有開放遠端開視窗',
+  closed: '這台電腦沒有開放遠端開新夥伴，請到電腦的設定打開「允許我的其他設備替這台開新視窗」',
   noModel: '這台電腦還沒有可用的模型',
   noCwd: '這台電腦沒有開放的工作資料夾',
 }
@@ -70,7 +70,7 @@ const CODE_TEXT = {
   not_found: '找不到這台電腦',
   no_launcher: REASON.closed,
   bad_name: '名字只能用英數、連字號、中文，1～40 字，不能以連字號開頭',
-  bad_profile: '這台電腦沒有這個模型',
+  bad_profile: '這台電腦沒有這個模型（可能剛換過設定），請重新整理後再選',
   bad_cwd: '工作資料夾不在這台電腦允許的清單裡',
   bad_first_message: `第一句話最多 ${FIRST_MAX} 字`,
   name_taken: '這台電腦已經有同名的夥伴，換個名字',

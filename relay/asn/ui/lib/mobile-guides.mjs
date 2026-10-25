@@ -9,7 +9,7 @@ export const GUIDE_ENTRY_SUB = '名字、群組、常見問題，和電腦版的
 // 每一篇在手機上的標示：desktop＝整篇講電腦上的操作；part＝一部分是電腦才有的；phone＝手機也適用
 export const GUIDE_FIT = {
   start: { fit: 'part', badge: '部分是電腦版功能', note: '這篇是電腦版的操作說明。名字、大頭貼、狀態在手機的「設置」分頁就能改；截圖與標註、視窗外框、分頁與分組設定是電腦版功能，手機沒有。' },
-  bridge: { fit: 'desktop', badge: '電腦版功能', note: '安裝收發室橋要在電腦上做，手機不能裝。這篇只供對照；裝好之後，那台電腦的視窗會自己出現在手機的夥伴名單上。' },
+  bridge: { fit: 'desktop', badge: '電腦版功能', note: '電腦只要裝好 ASN 電腦版並登入，開著的 Claude 視窗就會自動出現在名單上，手機不用設定。這篇是電腦上的說明，只供對照。' },
   cloud: { fit: 'desktop', badge: '電腦版功能', note: '讓雲端 AI 代理加入要在電腦或雲端環境操作，手機不能做。這篇只供對照。' },
   groups: { fit: 'phone', badge: '手機也能用', note: '手機版比下面的說明多一點：夥伴分頁的「群組對話」分組可以直接看群組訊息，也能用你的登入身分發言。建立群組、加人、改置頂仍然只能在後台做。' },
   faq: { fit: 'phone', badge: '', note: '' },

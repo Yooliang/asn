@@ -480,6 +480,13 @@ struct FakeEnv {
     appear_after_ms: u64,
     fail_start: bool,
     config_err: Mutex<Option<String>>,
+    /// 設定裡多放 grok（背景）與 pi（視窗）
+    extra_profiles: bool,
+    /// 背景夥伴排進佇列後引擎的處理結果（Some(Ok)＝記進名冊、Some(Err)＝記失敗、None＝沒人處理）
+    bg_outcome: Option<Result<(), String>>,
+    /// 排佇列時就失敗（缺執行檔、未授權資料夾…）
+    enq_err: Option<String>,
+    enqueued: Mutex<Vec<(String, String, String)>>,
     started: Mutex<Vec<(String, String, String)>>,
     /// start 時實際會執行的命令（取自本機設定，展開 {name} 後）
     commands: Mutex<Vec<(String, Vec<String>)>>,
@@ -494,6 +501,10 @@ impl FakeEnv {
             appear_after_ms: 0,
             fail_start: false,
             config_err: Mutex::new(None),
+            extra_profiles: false,
+            bg_outcome: None,
+            enq_err: None,
+            enqueued: Mutex::new(vec![]),
             started: Mutex::new(vec![]),
             commands: Mutex::new(vec![]),
         })
@@ -514,7 +525,28 @@ impl LaunchEnv for FakeEnv {
             "claude".to_string(),
             Profile { label: "Claude（互動視窗）".into(), command: "C:\\fake\\claude.exe".into(), args: vec!["-n".into(), "{name}".into(), "--remote-control".into(), "{name}".into()], engine: "claude".into(), mode: LaunchMode::Window, disabled: false, disabled_reason: String::new() },
         );
+        if self.extra_profiles {
+            profiles.insert("grok".to_string(), Profile { label: "Grok（背景工作者）".into(), command: "C:\\fake\\grok.exe".into(), args: vec!["agent".into(), "stdio".into()], engine: "acp".into(), mode: LaunchMode::Background, disabled: false, disabled_reason: String::new() });
+            profiles.insert("pi".to_string(), Profile { label: "pi（互動視窗）".into(), command: "C:\\fake\\pi.cmd".into(), args: vec![], engine: "pi".into(), mode: LaunchMode::Window, disabled: false, disabled_reason: String::new() });
+        }
         Ok(LaunchConfig { profiles, cwd_allow: self.allow.clone(), max_per_hour: self.max_per_hour })
+    }
+    fn enqueue_background(&self, _config: &LaunchConfig, profile: &str, name: &str, cwd: &str, work_dir: &Path) -> Result<(), String> {
+        if let Some(e) = &self.enq_err {
+            return Err(e.clone());
+        }
+        self.enqueued.lock().unwrap().push((profile.into(), name.into(), cwd.into()));
+        if let Some(o) = self.bg_outcome.clone() {
+            let (wd, name, profile, cwd) = (work_dir.to_path_buf(), name.to_string(), profile.to_string(), cwd.to_string());
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(80));
+                match o {
+                    Ok(()) => crate::bridge::engines::partner_queue::remember(&wd.join(crate::bridge::engines::partner_queue::PARTNERS_FILE), &name, &profile, &cwd),
+                    Err(e) => crate::bridge::engines::partner_queue::record_failure(&wd, &name, &profile, &e),
+                }
+            });
+        }
+        Ok(())
     }
     fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str) -> Result<u32, String> {
         let (cmd, args, _) = build_spawn_spec(config, &LaunchReq { profile, name, cwd: cwd.to_string() })?;
@@ -598,7 +630,7 @@ async fn 遠端開視窗_取走_開視窗_出現在名單_回報_ok_名單附摘
     let last = rosters.last().unwrap();
     assert!(last["agents"].as_array().unwrap().iter().any(|a| a["name"] == "T-英雄-2"), "新視窗要出現在名單上");
     let cwd_norm = crate::launch::cwds::norm_path(&canonical_launch_cwd(&cwd.to_string_lossy()).unwrap().to_string_lossy()).unwrap();
-    assert_eq!(last["launcher"], json!({"profiles": [{"id": "claude", "label": "Claude（互動視窗）"}], "cwd_allow": [cwd_norm], "max_per_hour": 6}));
+    assert_eq!(last["launcher"], json!({"profiles": [{"id": "claude", "label": "Claude（互動視窗）", "engine": "claude", "mode": "window"}], "cwd_allow": [cwd_norm], "max_per_hour": 6}));
     assert!(!rosters.iter().any(|r| r.to_string().contains("fake\\\\claude") || r.to_string().contains("remote-control")), "名單不含指令");
     // 紀錄
     let log = std::fs::read_to_string(l.h.work.path().join("launch.log")).unwrap();
@@ -709,6 +741,93 @@ async fn 遠端開視窗_兩個同名請求同時在等時第二個算重名() {
     assert_eq!(r.len(), 1);
     assert!(r[0]["detail"].as_str().unwrap().contains("已經有叫"));
     assert_eq!(l.env.started.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn 遠端開背景夥伴_grok_排佇列_等引擎記進名冊才回_ok_不走開視窗_第一句話照送() {
+    let mut l = lharness(|s, p| FakeEnv::with(s, p, |e| { e.extra_profiles = true; e.bg_outcome = Some(Ok(())); }), (30_000, 60_000, 20)).await;
+    let cwd = l.proj.path().to_path_buf();
+    l.h.fr.st.lock().unwrap().launches.push(lreq(1, "小格", &cwd, json!({"profile": "grok", "first_message": "你好", "command": "calc.exe"})));
+    l.h.core.pull("bell", T0).await;
+    assert!(results(&l.h).is_empty(), "排進佇列只是開始，引擎還沒處理完不能回報成功");
+    wait_until(|| !results(&l.h).is_empty()).await;
+    assert_eq!(results(&l.h), vec![json!({"id": uid(1), "status": "ok", "detail": "小格 已開啟"})]);
+    assert_eq!(l.env.enqueued.lock().unwrap().len(), 1);
+    let q = l.env.enqueued.lock().unwrap().clone();
+    assert_eq!((q[0].0.as_str(), q[0].1.as_str()), ("grok", "小格"));
+    assert!(l.env.started.lock().unwrap().is_empty(), "背景夥伴不開視窗");
+    let ev = tokio::time::timeout(std::time::Duration::from_secs(5), l.rx.recv()).await.unwrap().unwrap();
+    assert_eq!((ev.name.as_str(), ev.first_message.as_deref()), ("小格", Some("你好")));
+}
+
+#[tokio::test]
+async fn 遠端開背景夥伴_失敗回中文原因_排佇列就失敗_引擎消化失敗_都不算成功() {
+    // 排佇列前就驗不過（缺執行檔）
+    let mut l = lharness(|s, p| FakeEnv::with(s, p, |e| { e.extra_profiles = true; e.enq_err = Some("這台電腦找不到「grok」的執行檔（grok.exe），請先安裝後再試".into()); }), (30_000, 60_000, 20)).await;
+    let cwd = l.proj.path().to_path_buf();
+    l.h.fr.st.lock().unwrap().launches.push(lreq(1, "小格", &cwd, json!({"profile": "grok"})));
+    l.h.core.pull("bell", T0).await;
+    assert_eq!(results(&l.h), vec![json!({"id": uid(1), "status": "failed", "detail": "開不起來：這台電腦找不到「grok」的執行檔（grok.exe），請先安裝後再試"})]);
+    assert!(l.rx.try_recv().is_err());
+    // 引擎消化時失敗（名字重複）
+    let mut g = lharness(|s, p| FakeEnv::with(s, p, |e| { e.extra_profiles = true; e.bg_outcome = Some(Err("已經有叫「小格」的工作者".into())); }), (30_000, 60_000, 20)).await;
+    let cwd = g.proj.path().to_path_buf();
+    g.h.fr.st.lock().unwrap().launches.push(lreq(1, "小格", &cwd, json!({"profile": "grok"})));
+    g.h.core.pull("bell", T0).await;
+    wait_until(|| !results(&g.h).is_empty()).await;
+    assert_eq!(results(&g.h), vec![json!({"id": uid(1), "status": "failed", "detail": "開不起來：已經有叫「小格」的工作者"})]);
+    assert!(g.rx.try_recv().is_err(), "失敗不通知核心送第一句話");
+}
+
+#[tokio::test]
+async fn 遠端開背景夥伴_引擎一直沒處理先回_unconfirmed_並講原因() {
+    let mut l = lharness(|s, p| FakeEnv::with(s, p, |e| e.extra_profiles = true), (100, 400, 20)).await;
+    let cwd = l.proj.path().to_path_buf();
+    l.h.fr.st.lock().unwrap().launches.push(lreq(1, "小格", &cwd, json!({"profile": "grok"})));
+    l.h.core.pull("bell", T0).await;
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+    let r = results(&l.h);
+    assert_eq!(r.iter().map(|x| x["status"].as_str().unwrap()).collect::<Vec<_>>(), vec!["unconfirmed"]);
+    assert_eq!(r[0]["detail"], launcher::BG_HINT);
+}
+
+#[tokio::test]
+async fn 遠端開_pi_走視窗啟動_不排佇列_沒出現時提示講_pi_的狀況() {
+    let mut l = lharness(|s, p| FakeEnv::with(s, p, |e| e.extra_profiles = true), (30_000, 60_000, 20)).await;
+    let cwd = l.proj.path().to_path_buf();
+    l.h.fr.st.lock().unwrap().launches.push(lreq(1, "小皮", &cwd, json!({"profile": "pi"})));
+    l.h.core.pull("bell", T0).await;
+    wait_until(|| !results(&l.h).is_empty()).await;
+    assert_eq!(results(&l.h)[0]["status"], "ok");
+    assert_eq!(l.env.started.lock().unwrap()[0].0, "pi");
+    assert!(l.env.enqueued.lock().unwrap().is_empty());
+    let _ = l.rx.recv().await;
+    let mut g = lharness(|s, p| FakeEnv::with(s, p, |e| { e.extra_profiles = true; e.appear = false; }), (50, 300, 20)).await;
+    let cwd = g.proj.path().to_path_buf();
+    g.h.fr.st.lock().unwrap().launches.push(lreq(1, "小皮", &cwd, json!({"profile": "pi"})));
+    g.h.core.pull("bell", T0).await;
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    assert_eq!(results(&g.h)[0]["detail"], launcher::PI_HINT);
+}
+
+#[tokio::test]
+async fn 遠端開_codex_與沒列在清單的設定_一律驗不過() {
+    let mut l = lharness(|s, p| FakeEnv::with(s, p, |e| e.extra_profiles = true), (30_000, 60_000, 20)).await;
+    let cwd = l.proj.path().to_path_buf();
+    l.h.fr.st.lock().unwrap().launches.push(lreq(1, "小碼", &cwd, json!({"profile": "codex"})));
+    l.h.core.pull("bell", T0).await;
+    assert!(results(&l.h)[0]["detail"].as_str().unwrap().contains("沒有這個啟動設定"));
+    assert!(l.env.started.lock().unwrap().is_empty() && l.env.enqueued.lock().unwrap().is_empty());
+}
+
+/// 守門：遠端 start 的 pi 要走擴充載入（launch/pi.rs），不能當一般視窗直接開（會開出不收信的 pi）
+#[test]
+fn 守門_遠端啟動的_pi_走_plan() {
+    let src = include_str!("../../launch/local.rs");
+    let f = src.split("pub fn start_remote_window").nth(1).unwrap().split("fn maybe_trust_claude_cwd").next().unwrap();
+    assert!(f.contains("prof.engine == \"pi\"") && f.contains("super::pi::plan("), "start_remote_window 要有 pi 分支");
+    let l = include_str!("../launcher.rs").split("#[cfg(test)]").next().unwrap().to_string();
+    assert!(l.contains("queue_background") && l.contains("pq::build_cfg(env, &req, work_dir)"), "背景夥伴要先用消化端同一套規則驗");
 }
 
 /// 守門：遠端請求裡只有 profile／name／cwd（與 first_message 當內容、id 當編號）會被讀；指令、參數、環境一律不從請求拿

@@ -9,10 +9,13 @@
 //! - 本機 `launcher.json`（若有）：它的 profile 與 `cwd_allow` 一律採用，等同使用者明確同意（與 Node 橋相同）；
 //! - bridge.json 的 `allow_remote_launch`（設定頁「允許我的其他設備替這台開新視窗」，預設關）打開後，再加上
 //!   ASN 偵測到的 Claude CLI（自動 profile）、啟動偏好的 `cwdAllow` 與「工作資料夾候選」（`launch/cwds.rs`：開著的視窗、信任過的資料夾、最近用過）；
-//! - 只收 Claude 引擎的「視窗」型 profile（背景夥伴與 Codex 等其他引擎留到第五段）。
+//! - 遠端可開的項目（`remote_allowed`）：Claude 視窗、pi 視窗（沿用 launch/pi.rs 的擴充載入）、Grok／Gemini 背景工作者
+//!   （排進 `partner-queue.jsonl`，由 engines/partner_queue.rs 重驗後建工作者；等它記進名冊才回報 ok，失敗讀 partner-queue-failed.jsonl 回中文原因）。
+//!   Codex 暫不開放：尚未實機驗證。
 use super::core::BridgeLog;
 use crate::launch::config::{check_launch, load_launch_config_from, Bootstrap, LaunchConfig, LaunchReq};
-use crate::launch::profiles::LaunchMode;
+use crate::launch::profiles::{LaunchMode, Profile};
+use super::engines::partner_queue as pq;
 use crate::relay::Relay;
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -24,6 +27,9 @@ const HOUR_MS: u64 = 3_600_000;
 const MAX_CWD: usize = 50;
 pub const TRUST_HINT: &str = "視窗已開，但 30 秒內沒出現在名單上：可能卡在「是否信任此資料夾」，請到電腦前按一次 Enter";
 pub const NO_CONFIG: &str = "這台電腦還沒有可用的啟動設定";
+pub const PI_HINT: &str = "pi 視窗已開，但 30 秒內沒出現在名單上：請到電腦前看看視窗有沒有卡住（例如要登入、選模型，或擴充沒載入）";
+pub const BG_HINT: &str = "背景夥伴已排入，但 30 秒內還沒開出來：請確認這台電腦的 ASN 還在執行；稍後會自動補上結果";
+pub const NO_REMOTE_PROFILE: &str = "沒有可以從遠端開啟的設定（目前支援 Claude、pi、Grok、Gemini）";
 
 fn now_ms() -> u64 {
     crate::heartbeat::now_ms()
@@ -44,6 +50,22 @@ pub trait LaunchEnv: Send + Sync {
     fn config(&self, fresh: bool) -> Result<LaunchConfig, String>;
     /// 開視窗：回外層視窗的 PID。config／profile／name／cwd 都已驗過
     fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str) -> Result<u32, String>;
+    /// 背景工作者：再驗一次（授權資料夾、名字、執行檔）後排進佇列，由引擎消化。work_dir＝橋的工作資料夾
+    fn enqueue_background(&self, _config: &LaunchConfig, _profile: &str, _name: &str, _cwd: &str, _work_dir: &Path) -> Result<(), String> {
+        Err("這台電腦不能開背景夥伴".into())
+    }
+}
+
+/// 遠端可以開哪些項目：Claude 視窗（沒寫引擎的自訂 profile 視為 Claude）、pi 視窗、Grok／Gemini 背景工作者。
+/// Codex 尚未實機驗證，不開放；其他背景設定（自訂 id）不開放，因為工作者的協定與名單引擎名是依 id 對應的。
+pub fn remote_allowed(id: &str, p: &Profile) -> bool {
+    if p.disabled {
+        return false;
+    }
+    match p.mode {
+        LaunchMode::Window => p.engine.is_empty() || p.engine == "claude" || p.engine == "pi",
+        LaunchMode::Background => (id == "grok" || id == "gemini") && p.engine == "acp",
+    }
 }
 
 // ---- 設定組合（純函式，可測）---------------------------------------------------------------------------
@@ -55,10 +77,9 @@ pub fn build_remote_config(launcher_file: &Path, bootstrap: Option<Bootstrap>, e
         return Err(NO_CONFIG.into());
     }
     let mut cfg = load_launch_config_from(launcher_file, if consent { bootstrap } else { None })?;
-    // 只收 Claude 引擎的視窗型 profile（沒寫 engine 的自訂 profile 視為 Claude，與 Node 橋相同）
-    cfg.profiles.retain(|_, p| p.mode == LaunchMode::Window && !p.disabled && (p.engine.is_empty() || p.engine == "claude"));
+    cfg.profiles.retain(|id, p| remote_allowed(id, p));
     if cfg.profiles.is_empty() {
-        return Err("沒有可以從遠端開啟的 Claude 視窗設定".into());
+        return Err(NO_REMOTE_PROFILE.into());
     }
     let mut all: Vec<PathBuf> = cfg.cwd_allow.clone();
     if consent {
@@ -90,7 +111,14 @@ pub fn build_remote_config(launcher_file: &Path, bootstrap: Option<Bootstrap>, e
 pub fn summary(cfg: &LaunchConfig) -> Value {
     let mut ids: Vec<&String> = cfg.profiles.keys().collect();
     ids.sort_by(|a, b| (a.as_str() != "claude").cmp(&(b.as_str() != "claude")).then(a.cmp(b)));
-    let profiles: Vec<Value> = ids.into_iter().map(|id| json!({ "id": id, "label": cfg.profiles[id].label })).collect();
+    // engine／mode 是附加資訊：舊版手機只讀 id 與 label，多出的欄位會被忽略
+    let profiles: Vec<Value> = ids
+        .into_iter()
+        .map(|id| {
+            let p = &cfg.profiles[id];
+            json!({ "id": id, "label": p.label, "engine": if p.engine.is_empty() { "claude" } else { p.engine.as_str() }, "mode": if p.mode == LaunchMode::Background { "background" } else { "window" } })
+        })
+        .collect();
     let cwd: Vec<String> = cfg.cwd_allow.iter().map(|p| crate::launch::cwds::norm_path(&p.to_string_lossy()).unwrap_or_default()).filter(|s| !s.is_empty()).collect();
     json!({ "profiles": profiles, "cwd_allow": cwd, "max_per_hour": cfg.max_per_hour })
 }
@@ -142,6 +170,21 @@ impl LaunchEnv for SystemEnv {
     fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str) -> Result<u32, String> {
         crate::launch::local::start_remote_window(config, profile, name, cwd, false)
     }
+    fn enqueue_background(&self, _config: &LaunchConfig, profile: &str, name: &str, cwd: &str, work_dir: &Path) -> Result<(), String> {
+        // 遠端同意過的資料夾（開著的視窗、最近用過…）要讓消化端也認得：和本機開新夥伴一樣記進啟動偏好的白名單（消化端會再驗一次）
+        let known = crate::launch::config::canonical_launch_cwd(cwd).ok().is_some_and(|c| crate::launch::config::load_launch_config().is_ok_and(|l| l.cwd_allow.contains(&c)));
+        if !known {
+            let _ = crate::launch::cwds::add_to_prefs_allow(&self.data_dir, cwd);
+        }
+        queue_background(&pq::SystemQueueEnv { data_dir: Some(self.data_dir.clone()) }, profile, name, cwd, work_dir)
+    }
+}
+
+/// 排進佇列前用消化端同一套規則先驗一次（授權資料夾、名字、執行檔），不通過就當場回中文原因；通過才附加一行
+pub fn queue_background(env: &dyn pq::QueueEnv, profile: &str, name: &str, cwd: &str, work_dir: &Path) -> Result<(), String> {
+    let req = pq::Req { profile: profile.into(), name: name.into(), cwd: cwd.into() };
+    pq::build_cfg(env, &req, work_dir)?;
+    crate::launch::local::enqueue_background(work_dir, profile, name, cwd)
 }
 
 // ---- 流程 ------------------------------------------------------------------------------------------------
@@ -283,6 +326,23 @@ impl Launcher {
         self.inflight.lock().unwrap().insert(lower.clone());
         let env = self.env.clone();
         let (cfg2, p2, n2, c2) = (cfg.clone(), profile.clone(), name.clone(), cwd.clone());
+        let (is_bg, is_pi) = cfg.profiles.get(&profile).map(|p| (p.mode == LaunchMode::Background, p.engine == "pi")).unwrap_or((false, false));
+        if is_bg {
+            let since = now_ms();
+            let wd = self.work_dir.clone();
+            let queued = tokio::task::spawn_blocking(move || env.enqueue_background(&cfg2, &p2, &n2, &c2, &wd)).await.map_err(|e| format!("背景工作失敗：{e}")).and_then(|r| r);
+            if let Err(e) = queued {
+                self.inflight.lock().unwrap().remove(&lower);
+                return self.report(&l, "failed", &format!("開不起來：{e}")).await;
+            }
+            self.record(&l, "queued", "");
+            let me = self.clone();
+            tokio::spawn(async move {
+                me.wait_for_background(l, since).await;
+                me.inflight.lock().unwrap().remove(&lower);
+            });
+            return;
+        }
         let started = tokio::task::spawn_blocking(move || env.start(&cfg2, &p2, &n2, &c2)).await.map_err(|e| format!("背景工作失敗：{e}")).and_then(|r| r);
         let pid = match started {
             Ok(p) => p,
@@ -294,12 +354,12 @@ impl Launcher {
         self.record(&l, "spawned", &format!("pid={pid}"));
         let me = self.clone();
         tokio::spawn(async move {
-            me.wait_for_window(l).await;
+            me.wait_for_window(l, if is_pi { PI_HINT } else { TRUST_HINT }).await;
             me.inflight.lock().unwrap().remove(&lower);
         });
     }
 
-    async fn wait_for_window(&self, l: Value) {
+    async fn wait_for_window(&self, l: Value, hint: &str) {
         let s = |k: &str| l.get(k).and_then(Value::as_str).unwrap_or("").to_string();
         let name = s("name");
         let t0 = std::time::Instant::now();
@@ -314,10 +374,36 @@ impl Launcher {
             }
             if !unconfirmed && t0.elapsed().as_millis() >= self.confirm_ms as u128 {
                 unconfirmed = true;
-                self.report(&l, "unconfirmed", TRUST_HINT).await;
+                self.report(&l, "unconfirmed", hint).await;
             }
         }
         self.record(&l, "gave-up", &format!("{} 分鐘內都沒出現在名單上", self.late_ms / 60_000));
+    }
+
+    /// 背景夥伴：等引擎消化佇列。記進名冊＝開出來了（回 ok、通知核心刷新名單與送第一句話）；引擎記了失敗＝回中文原因
+    async fn wait_for_background(&self, l: Value, since: u64) {
+        let s = |k: &str| l.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+        let name = s("name");
+        let t0 = std::time::Instant::now();
+        let mut unconfirmed = false;
+        while t0.elapsed().as_millis() < self.late_ms as u128 {
+            tokio::time::sleep(std::time::Duration::from_millis(self.poll_ms)).await;
+            match pq::find_outcome(&self.work_dir, &name, since) {
+                Some(Ok(())) => {
+                    self.report(&l, "ok", &format!("{name} 已開啟")).await;
+                    let first = l.get("first_message").and_then(Value::as_str).map(str::trim).filter(|m| !m.is_empty()).map(String::from);
+                    let _ = self.tx.send(Launched { id: s("id"), requested_by: s("requested_by"), name, first_message: first });
+                    return;
+                }
+                Some(Err(e)) => return self.report(&l, "failed", &format!("開不起來：{e}")).await,
+                None => {}
+            }
+            if !unconfirmed && t0.elapsed().as_millis() >= self.confirm_ms as u128 {
+                unconfirmed = true;
+                self.report(&l, "unconfirmed", BG_HINT).await;
+            }
+        }
+        self.record(&l, "gave-up", &format!("{} 分鐘內背景夥伴都沒開出來", self.late_ms / 60_000));
     }
 }
 
@@ -334,7 +420,9 @@ mod tests {
         let mut m = HashMap::new();
         m.insert("claude".to_string(), prof("Claude（互動視窗）", "claude", LaunchMode::Window));
         m.insert("codex".to_string(), prof("Codex（互動視窗）", "codex", LaunchMode::Window));
-        m.insert("gemini".to_string(), prof("Gemini", "acp", LaunchMode::Background));
+        m.insert("gemini".to_string(), prof("Gemini（背景工作者）", "acp", LaunchMode::Background));
+        m.insert("grok".to_string(), prof("Grok（背景工作者）", "acp", LaunchMode::Background));
+        m.insert("pi".to_string(), prof("pi（互動視窗）", "pi", LaunchMode::Window));
         (m, allow, 6)
     }
     fn write_launcher(dir: &Path, allow: &[&Path], max: u32) -> PathBuf {
@@ -374,7 +462,7 @@ mod tests {
         assert!(c.cwd_allow[0].ends_with("a"));
         assert_eq!(c.max_per_hour, 3);
         let s = summary(&c);
-        assert_eq!(s["profiles"], json!([{ "id": "default", "label": "一般（含 Chrome）" }]));
+        assert_eq!(s["profiles"], json!([{ "id": "default", "label": "一般（含 Chrome）", "engine": "claude", "mode": "window" }]));
         assert_eq!(s["max_per_hour"], 3);
         let text = s.to_string();
         assert!(!text.contains("secret") && !text.contains("skip-permissions") && !text.contains("claude.exe"), "摘要不含指令：{text}");
@@ -389,14 +477,16 @@ mod tests {
         let f = d.path().join("none.json");
         let extra = vec![b.display().to_string(), a.display().to_string(), b.display().to_string(), d.path().join("沒這個").display().to_string()];
         let c = build_remote_config(&f, Some(bootstrap(vec![a.clone()])), extra, true).unwrap();
-        assert_eq!(c.profiles.keys().collect::<Vec<_>>(), vec!["claude"], "只收 Claude 引擎的視窗型 profile");
+        let mut keys: Vec<&String> = c.profiles.keys().collect();
+        keys.sort();
+        assert_eq!(keys, vec!["claude", "gemini", "grok", "pi"], "Claude、pi 視窗與 Grok、Gemini 背景；Codex 尚未實機驗證不收");
         assert_eq!(c.cwd_allow.len(), 2, "去重＋略過不存在的");
         let s = summary(&c);
         assert_eq!(s["profiles"][0]["id"], "claude");
         // 有 launcher.json 時同意只是「再加上」，檔案裡的 profile 仍在，排在 claude 後面
         let f2 = write_launcher(d.path(), &[&a], 4);
         let c2 = build_remote_config(&f2, Some(bootstrap(vec![b.clone()])), vec![], true).unwrap();
-        assert_eq!(summary(&c2)["profiles"].as_array().unwrap().iter().map(|p| p["id"].as_str().unwrap()).collect::<Vec<_>>(), vec!["claude", "default"]);
+        assert_eq!(summary(&c2)["profiles"].as_array().unwrap().iter().map(|p| p["id"].as_str().unwrap()).collect::<Vec<_>>(), vec!["claude", "default", "gemini", "grok", "pi"]);
         assert_eq!(c2.max_per_hour, 4);
     }
 
@@ -407,7 +497,76 @@ mod tests {
         let f = write_launcher(d.path(), &[&gone], 3);
         assert_eq!(build_remote_config(&f, None, vec![], false).err().as_deref(), Some("工作資料夾白名單是空的"));
         let mut b = bootstrap(vec![d.path().to_path_buf()]);
-        b.0.retain(|k, _| k == "gemini");
-        assert!(build_remote_config(&d.path().join("x.json"), Some(b), vec![], true).err().unwrap().contains("沒有可以從遠端開啟"));
+        b.0.retain(|k, _| k == "codex");
+        assert_eq!(build_remote_config(&d.path().join("x.json"), Some(b), vec![], true).err().as_deref(), Some(NO_REMOTE_PROFILE), "只剩 Codex 就是沒有可開的");
+    }
+
+    #[test]
+    fn 可開項目矩陣_claude_pi_視窗_grok_gemini_背景_codex_與自訂背景_停用_都不開() {
+        let p = |engine: &str, mode: LaunchMode, disabled: bool| Profile { disabled, ..prof("x", engine, mode) };
+        assert!(remote_allowed("claude", &p("claude", LaunchMode::Window, false)));
+        assert!(remote_allowed("default", &p("", LaunchMode::Window, false)), "沒寫引擎視為 Claude");
+        assert!(remote_allowed("pi", &p("pi", LaunchMode::Window, false)));
+        assert!(remote_allowed("grok", &p("acp", LaunchMode::Background, false)));
+        assert!(remote_allowed("gemini", &p("acp", LaunchMode::Background, false)));
+        assert!(!remote_allowed("codex", &p("codex", LaunchMode::Window, false)), "Codex 尚未實機驗證");
+        assert!(!remote_allowed("bg", &p("acp", LaunchMode::Background, false)), "自訂 id 的背景設定不開放");
+        assert!(!remote_allowed("grok", &p("acp", LaunchMode::Background, true)));
+        assert!(!remote_allowed("grok", &p("claude", LaunchMode::Background, false)), "引擎不對");
+    }
+
+    #[test]
+    fn 摘要帶引擎與模式_排序_claude_第一_不含指令() {
+        let d = tempfile::tempdir().unwrap();
+        let a = d.path().join("a");
+        std::fs::create_dir_all(&a).unwrap();
+        let c = build_remote_config(&d.path().join("none.json"), Some(bootstrap(vec![a])), vec![], true).unwrap();
+        let s = summary(&c);
+        let rows: Vec<(String, String, String)> = s["profiles"].as_array().unwrap().iter().map(|p| (p["id"].as_str().unwrap().into(), p["engine"].as_str().unwrap().into(), p["mode"].as_str().unwrap().into())).collect();
+        assert_eq!(
+            rows,
+            vec![("claude".into(), "claude".into(), "window".into()), ("gemini".into(), "acp".into(), "background".into()), ("grok".into(), "acp".into(), "background".into()), ("pi".into(), "pi".into(), "window".into())]
+        );
+        assert_eq!(s["profiles"][2]["label"], "Grok（背景工作者）");
+        assert!(!s.to_string().contains("tool.exe"), "摘要不含指令");
+    }
+
+    struct FakeQ {
+        allow: PathBuf,
+        bin: bool,
+    }
+    impl pq::QueueEnv for FakeQ {
+        fn config(&self) -> Result<LaunchConfig, String> {
+            let mut profiles = HashMap::new();
+            profiles.insert("grok".to_string(), prof("Grok（背景工作者）", "acp", LaunchMode::Background));
+            profiles.insert("claude".to_string(), prof("Claude", "claude", LaunchMode::Window));
+            Ok(LaunchConfig { profiles, cwd_allow: vec![crate::launch::config::canonical_launch_cwd(&self.allow.to_string_lossy()).unwrap()], max_per_hour: 6 })
+        }
+        fn binary_ok(&self, _command: &str) -> bool {
+            self.bin
+        }
+    }
+
+    #[test]
+    fn 排進佇列前先驗_缺執行檔_未授權資料夾_壞名字_不是背景設定_都回中文原因且不寫佇列() {
+        let d = tempfile::tempdir().unwrap();
+        let (work, cwd, other) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let ok = FakeQ { allow: cwd.path().to_path_buf(), bin: true };
+        let cwd_s = cwd.path().to_string_lossy().to_string();
+        let queue = work.path().join(pq::QUEUE_FILE);
+        let no_bin = FakeQ { allow: cwd.path().to_path_buf(), bin: false };
+        let e = queue_background(&no_bin, "grok", "小格", &cwd_s, work.path()).unwrap_err();
+        assert!(e.contains("這台電腦找不到「grok」") && e.contains("請先安裝"), "{e}");
+        let e = queue_background(&ok, "grok", "小格", &other.path().to_string_lossy(), work.path()).unwrap_err();
+        assert!(e.contains("不在允許清單"), "{e}");
+        assert!(queue_background(&ok, "grok", "-壞", &cwd_s, work.path()).unwrap_err().contains("視窗名格式不對"));
+        assert!(queue_background(&ok, "claude", "小格", &cwd_s, work.path()).unwrap_err().contains("不是背景工作者"));
+        assert!(queue_background(&ok, "nope", "小格", &cwd_s, work.path()).unwrap_err().contains("沒有這個啟動設定"));
+        assert!(!queue.exists(), "驗不過一行都不能寫進佇列");
+        queue_background(&ok, "grok", "小格", &cwd_s, work.path()).unwrap();
+        let text = std::fs::read_to_string(&queue).unwrap();
+        let v: Value = serde_json::from_str(text.trim()).unwrap();
+        assert_eq!((v["profile"].as_str(), v["name"].as_str()), (Some("grok"), Some("小格")));
+        let _ = d;
     }
 }
