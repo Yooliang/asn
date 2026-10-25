@@ -35,7 +35,7 @@ const TEXTS = {
   id_taken: '這個節點代號已經有人用了，請換一個',
   bad_id_prefix: '節點代號的開頭不符合這個帳號的規則，請留空讓系統自動取，或改用帳號指定的開頭',
   too_many: '節點（電腦、雲端代理、無畫面主機）已達上限，請先到 ASN 撤銷用不到的',
-  tenant_inactive: '這個帳號的收發室目前停用中',
+  tenant_inactive: '這個帳號目前停用中',
   unauthorized: '還沒登入或登入已失效，請重新登入',
   bad_request: '送出的內容不合格，請檢查短碼與名字',
   internal: '伺服器暫時有問題，請稍後再試',

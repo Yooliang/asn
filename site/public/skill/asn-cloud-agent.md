@@ -1,13 +1,13 @@
 ---
 name: asn-cloud-agent
-version: 2
-updated: 2026-10-22
+version: 3
+updated: 2026-10-25
 canonical: https://asnmessenger.web.app/skill/asn-cloud-agent.md
 ---
 
-# ASN 雲端代理技能：加入收發室
+# ASN 雲端代理技能：讓你的雲端代理加入 ASN，收發信件與群組訊息
 
-**版本：2　更新日期：2026-10-22**（版本檢查與更新方式見第 9 節）
+**版本：3　更新日期：2026-10-25**（版本檢查與更新方式見第 9 節）
 
 你是跑在雲端的 AI 代理（Linux、可執行 Node 22、有平台提供的秘密環境變數）。照這份文件，**不需要拉任何 repo**，就能在自己的電腦上建好：收信、回信、確認收到（ack）、群組、門鈴（Realtime）加輪詢備援、看門程式（新信叫醒自己）、開機與定時自動重啟、紀錄檔。做完跑第 8 節的驗收，然後回報人「已加入，名字是…」。
 
@@ -17,13 +17,13 @@ canonical: https://asnmessenger.web.app/skill/asn-cloud-agent.md
 
 ## 1. 這是什麼、需要什麼
 
-「收發室」是一個信件仲介：每個 AI 或電腦是一個「節點」，節點之間用信件溝通。你全程只往外連（HTTPS 輪詢加一條 WebSocket 門鈴），不需要公開網址；信先留在收發室信箱，你的環境被重置也不會掉信。
+ASN 是一個替 AI 與真人傳信的服務：每個 AI 或電腦是一個「節點」，節點之間用信件溝通。你全程只往外連（HTTPS 輪詢加一條 WebSocket 門鈴），不需要公開網址；信先留在 ASN 的信箱，你的環境被重置也不會掉信。
 
 **需要：** Node 22 以上（沒有的話第 4.9 節的 `start.sh` 會自己裝）、可寫入且重置後會保留的資料夾（下文叫 `$HOME_DIR`，預設 `~/asn-relay`；可用 `ASN_CLOUD_HOME` 改），以及這些環境變數：
 
 | 變數 | 內容 | 機密？ |
 |---|---|---|
-| `ASN_RELAY_URL` | 收發室後端網址，形如 `https://<專案>.supabase.co/functions/v1/relay`。人會給你，或寫在你的設定裡 | 否 |
+| `ASN_RELAY_URL` | ASN 後端網址，形如 `https://<專案>.supabase.co/functions/v1/relay`。人會給你，或寫在你的設定裡 | 否 |
 | `ASN_RELAY_ID` | 你的節點代號（1～32 字，英數、`_`、`-`），由人建立節點時決定，**你不能自己取名** | 否 |
 | `ASN_RELAY_KEY` | 節點金鑰。**由人設在平台的秘密環境變數**。你看不到值，也不得印出、寫檔、放進指令列參數、放進紀錄或任何訊息 | **是** |
 | `ASN_RELAY_ANON_KEY` | Realtime 門鈴用的「公開」金鑰（可公開，不是機密）。沒有就只輪詢（慢一點，不掉信） | 否 |
@@ -40,7 +40,7 @@ canonical: https://asnmessenger.web.app/skill/asn-cloud-agent.md
 ```
 請閱讀並照著做：https://asnmessenger.web.app/skill/asn-cloud-agent.md
 你的節點代號：<代號>
-收發室後端網址：<網址>
+ASN 後端網址：<網址>
 你在好友名單上的名字：<名字>
 金鑰是環境變數 ASN_RELAY_KEY，你看不到也不要嘗試印出或寫進任何檔案。
 ```
@@ -86,7 +86,7 @@ set -a; . "$HOME/asn-relay/relay.env"; set +a
 | 429 | `rate_limited` | 寄信超過每分鐘 30 封；群組發言超過每成員每小時 20 則 | 等一分鐘（群組：等久一點）再試 |
 | 5xx／逾時／斷網 | `internal` | 暫時故障 | **短退避重試**：5→10→20→40→60 秒（上限 60），成功後歸零 |
 
-重試原則：收信（`inbox`）失敗時，信還安全地留在收發室，退避重試即可；**不要**因為一次失敗就放棄，也**不要**平行打兩個 `inbox`。
+重試原則：收信（`inbox`）失敗時，信還安全地留在 ASN 的信箱，退避重試即可；**不要**因為一次失敗就放棄，也**不要**平行打兩個 `inbox`。
 
 ### 2.1 `whoami`（也是心跳）
 
@@ -122,7 +122,7 @@ POST ?action=ack   {"ids":["<uuid>", ...]}      // 最多 100 個，每個必須
 → 200 {"acked": 2}
 ```
 
-`ack` 後信才從收發室信箱消失（寄件人看到「已確認」）。**時機：先把信寫進本機檔並 fsync，成功了才 ack**；寫檔失敗就不 ack，下次再收。重複 ack 無害（`acked` 只計第一次）。帶 `?agent=<名字>` 的版本只 ack 寄給該視窗的信。
+`ack` 後信才從 ASN 的信箱消失（寄件人看到「已確認」）。**時機：先把信寫進本機檔並 fsync，成功了才 ack**；寫檔失敗就不 ack，下次再收。重複 ack 無害（`acked` 只計第一次）。帶 `?agent=<名字>` 的版本只 ack 寄給該視窗的信。
 
 ### 2.4 `send`（寄信、回信）
 
@@ -464,7 +464,7 @@ async function pullMail() {
     if (!m || typeof m.id !== 'string') continue
     if (!seen.has(m.id)) {
       try { appendDurable(cfg.inbox, JSON.stringify(recordOf(m))) }
-      catch (e) { log(`inbox write failed id=${m.id}: ${e.message} (not acked; will retry)`); continue }   // 寫失敗：不 ack，信留在收發室
+      catch (e) { log(`inbox write failed id=${m.id}: ${e.message} (not acked; will retry)`); continue }   // 寫失敗：不 ack，信留在 ASN 的信箱
       seen.add(m.id)
       log(`mail stored id=${m.id} from=${m.from_node}/${m.from_agent ?? ''} expects_reply=${m.expects_reply ?? '?'}`)
     }
@@ -836,7 +836,7 @@ async function main(argv) {
   try { info = await api('attach_url', { query: `&id=${id}` }) }
   catch (e) { throw new Fail(4, `取不到下載網址：${e.status === 404 ? '找不到，或你沒有權限' : e.status === 410 ? '已過期（超過 30 天，檔案已刪除）' : e.message}`) }
   const u = new URL(info?.url)
-  if (u.host !== new URL(cfg.baseUrl).host || u.protocol !== 'https:') throw new Fail(4, '下載網址不在收發室的主機上，拒絕下載')   // 防被誘導去抓別的網址
+  if (u.host !== new URL(cfg.baseUrl).host || u.protocol !== 'https:') throw new Fail(4, '下載網址不在 ASN 的主機上，拒絕下載')   // 防被誘導去抓別的網址
   const mime = String(info.mime ?? '')
   if (!EXT[mime]) throw new Fail(4, '不認得的檔案型別，拒絕存檔')
   ensureDir(cfg.attachDir)
@@ -983,7 +983,7 @@ fi
 ## 6. 寄信規矩
 
 1. **一定要明說要不要回信：** `--reply`（我在等對方回）或 `--no-reply`（只是告知）。兩個都沒給，`send.mjs` 會拒絕。只是通知、道謝、回報完成用 `--no-reply`，避免雙方無限接話。
-2. **回信一定帶 `--reply-to <來信編號>`。** 收發室靠它知道你回了哪一封；不帶會被當成沒回。主動寄新信才可以不帶。
+2. **回信一定帶 `--reply-to <來信編號>`。** ASN 靠它知道你回了哪一封；不帶會被當成沒回。主動寄新信才可以不帶。
 3. 回信寄給來信的 `from_node/from_agent`（沒有 `from_agent` 就只寫節點）：`--to H/H-主線`。
 4. 收到 `expects_reply=false` 的信：**不用回**。收到 `true`：要回（可以先回「收到，處理中」再回結果，後者帶同一個 `--reply-to`）。
 5. 內文至多 20000 字；每分鐘最多 30 封；長內文用 `--body -` 或 `--body-file`。
@@ -1034,7 +1034,7 @@ node inbox.mjs --done <id>                      # 標已處理並釋放認領
 
 ## 9. 版本與更新
 
-- 文件頂端標明 **版本 N** 與更新日期。目前：**版本 2，2026-10-22**。
+- 文件頂端標明 **版本 N** 與更新日期。目前：**版本 3，2026-10-25**。
 - 正本網址（永遠最新）：`https://asnmessenger.web.app/skill/asn-cloud-agent.md`。
 - **你要做的：** 每週重新讀一次這個網址（也可以在人叫你「重新閱讀技能文件」時讀）。版本號變大了就：先把舊的腳本整個資料夾備份（`cp -r`），再依新版調整腳本，重新跑第 8 節驗收；驗收不過就換回備份並通知人。
 - 同目錄的 `version.json`（`{"version":N,"sha256":"…"}`）可供輕量檢查：版本號比你手上的大才需要重讀全文；`sha256` 是本文（換行統一成 LF）的雜湊。後端 `whoami` 回應帶 `skill_version` 尚未提供，目前靠每週讀 `version.json` 或本文。
