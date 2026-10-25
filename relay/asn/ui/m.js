@@ -221,9 +221,9 @@ if (savedTab !== 'list') { const next = tabNav(savedTab); history.pushState(next
 window.addEventListener('popstate', e => {
   // 通話中按返回鍵＝掛斷，畫面留在原處（不跳到上一頁）
   if (callOn.value) { void liveCall?.end(); history.pushState({ tab: nav.tab, sheet: nav.sheet }, ''); return }
-  Object.assign(nav, normalizeNav(e.state))
+  Object.assign(nav, { step: 0 }, normalizeNav(e.state))
 })
-const go = next => { history.pushState(next, ''); Object.assign(nav, next) }
+const go = next => { history.pushState(next, ''); Object.assign(nav, { step: 0 }, next) }
 // 切大分頁：從「夥伴」出去推一筆瀏覽記錄（返回鍵回到夥伴）；其他分頁之間互換不增加記錄
 function goTab(t) {
   if (nav.sheet === 'acct') {   // 「選項」頁佔著第二個分頁：點夥伴＝返回，點設置＝直接換過去；點自己不動
@@ -429,8 +429,14 @@ const app = createApp({
       if (lch.phase === 'progress' && lch.vphase !== 'done' && lch.vphase !== 'failed') { go(launchNav()); return }   // 還在開：回到進度畫面
       Object.assign(lch, initialLaunch(), { vphase: 'sending' })
       go(launchNav())
-      void loadLaunchers().then(() => { if (node) pickLaunchDevice(node) })
+      void loadLaunchers().then(() => { if (node) { pickLaunchDevice(node); nextLaunch() } })   // 從某台電腦進來＝第 1 頁已選好，直接到第 2 頁
     }
+    // 第 2 頁才顯示該電腦可用的模型與資料夾；沒選電腦或那台不能開就留在第 1 頁
+    const lchStep2 = computed(() => nav.sheet === 'launch' && nav.step === 2 && !!lch.node && lch.phase === 'form')
+    const lchCanNext = computed(() => !!lch.node && lchElig.value.ok)
+    function nextLaunch() { if (!lchCanNext.value || nav.step === 2) return; lch.error = ''; go(launchNav(2)) }
+    // 開好後或失敗後關閉整個面板：在第 2 頁要退兩筆記錄
+    const closeLaunch = () => history.go(nav.step === 2 ? -2 : -1)
     // ---------- 設備卡「切換 Claude 帳號」：選帳號 → 確認 → 送出並等對方電腦回報 ----------
     const acctKeys = computed(() => new Set(acctButtonDevices(groups.value, info.node).filter(g => !devPrefs.deviceRemoved.includes(g.node)).map(g => g.key)))
     // 整頁＝電腦版「設備與帳號」：資料用電腦版同一份整理函式；別台電腦的帳號逐台向後台讀（只讀選到的那台）
@@ -559,7 +565,7 @@ const app = createApp({
         void trackLaunch({ id: r.id, node: lch.node, name })
       } catch (e) { lch.error = launchErrorText(e.message) } finally { lch.busy = false }
     }
-    function openLaunched() { const id = lch.friendId; if (!id) return; history.back(); setTimeout(() => openChat(id), 50) }
+    function openLaunched() { const id = lch.friendId; if (!id) return; closeLaunch(); setTimeout(() => openChat(id), 50) }
     // ---------- 「⋯」選單：管理這位夥伴的視窗（詳情、改名、切換模型、關閉視窗、接班換手；離線的只有喚醒） ----------
     // 判斷全部用 lib/partner-ops.mjs 的 menuItems／opFormError／progressView，手機不另寫一套。手機只下指令，視窗在那台電腦上
     const opsCtx = computed(() => ({ machines: lchData.machines, loaded: lchData.loaded, signedIn: acctSigned(), authError: acct.value.error, friends: friends.value, nonWindowNodes: [info.node] }))
@@ -812,7 +818,7 @@ const app = createApp({
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, opsView, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       acctSw, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctHeaderBack, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, ACCT_PAGE_TITLE, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct,
-      lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
+      lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchStep2, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,

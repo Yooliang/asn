@@ -22,13 +22,14 @@ export const normalizeTab = t => (TABS.includes(t) ? t : 'list')
 export const initialNav = () => ({ tab: 'list', sheet: '' })
 export const tabNav = t => ({ tab: normalizeTab(t), sheet: '' })
 export const meNav = () => tabNav('me')
-export const launchNav = () => ({ tab: 'list', sheet: 'launch' })
+// 開新夥伴分兩頁：第 1 頁只選電腦（沒有 step），第 2 頁（step: 2）選該電腦的模型與資料夾、名字、第一句話。第 2 頁多推一筆瀏覽記錄，返回鍵回第 1 頁
+export const launchNav = step => (step === 2 ? { tab: 'list', sheet: 'launch', step: 2 } : { tab: 'list', sheet: 'launch' })
 export const opsNav = () => ({ tab: 'chats', sheet: 'ops' })
 export const secretNav = () => ({ tab: 'chats', sheet: 'secret' })
 export const acctNav = () => ({ tab: 'chats', sheet: 'acct' })   // 名單設備卡的「選項」進入的滿版頁（切換 Claude 帳號）
 // 瀏覽記錄裡讀回來的狀態可能是任何東西（壞資料、別的頁面留下的）：整理成合法的導覽狀態
 export function normalizeNav(raw) {
-  if (raw?.sheet === 'launch') return launchNav()
+  if (raw?.sheet === 'launch') return launchNav(raw?.step)
   if (raw?.sheet === 'ops') return opsNav()
   if (raw?.sheet === 'secret') return secretNav()
   if (raw?.sheet === 'acct') return acctNav()

@@ -360,10 +360,10 @@
     <section class="m-sheet" v-if="nav.sheet === 'launch'" role="dialog" aria-modal="true" aria-label="開新夥伴">
       <header class="m-head m-chathead">
         <button class="m-icon-btn" type="button" aria-label="返回" @click="back"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M15 4.5L7.5 12 15 19.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-        <div class="m-head-tx"><div class="m-title">開新夥伴</div><div class="m-conn">視窗會開在你選的電腦上</div></div>
+        <div class="m-head-tx"><div class="m-title">{{ lchStep2 ? '設定這位夥伴' : '開新夥伴' }}</div><div class="m-conn">{{ lchStep2 ? '開在 ' + lch.deviceLabel : '先選一台電腦，視窗會開在那台上' }}</div></div>
       </header>
       <div class="m-sheet-body">
-        <template v-if="lch.phase === 'form'">
+        <template v-if="lch.phase === 'form' && !lchStep2">
           <fieldset class="m-fs">
             <legend>電腦</legend>
             <button v-for="d in lchDevices" :key="d.key" type="button" class="m-opt" :class="{ on: lch.node === d.key, off: !d.ok }" :disabled="!d.ok" :aria-pressed="lch.node === d.key" @click="pickLaunchDevice(d.key)"><span class="m-opt-t">{{ d.label }}</span><small class="m-opt-why" v-if="!d.ok">{{ d.reason }}</small></button>
@@ -371,6 +371,10 @@
             <p class="m-note" v-else-if="!lchData.loaded && !lchData.error">查詢各台電腦的設定中…</p>
             <p class="m-err" v-if="lchData.error">{{ lchData.error }}</p>
           </fieldset>
+          <button class="m-btn m-btn-big" type="button" :disabled="!lchCanNext" @click="nextLaunch">下一步</button>
+        </template>
+        <template v-else-if="lch.phase === 'form'">
+          <p class="m-note">電腦：{{ lch.deviceLabel }}</p>
           <template v-if="lch.node && lchElig.ok">
             <fieldset class="m-fs">
               <legend>模型</legend>
@@ -390,7 +394,7 @@
           <div class="m-bar" v-if="lch.vphase === 'sending' || lch.vphase === 'opening' || lch.vphase === 'waiting'" aria-hidden="true"><i></i></div>
           <button class="m-btn m-btn-big" type="button" v-if="lch.vphase === 'done'" @click="openLaunched">開始對話</button>
           <button class="m-btn" type="button" v-if="lch.vphase === 'failed'" @click="lch.phase = 'form'">再試一次</button>
-          <button class="m-btn" type="button" @click="back">{{ lch.vphase === 'done' || lch.vphase === 'failed' ? '關閉' : '先關閉（會在背景繼續）' }}</button>
+          <button class="m-btn" type="button" @click="closeLaunch">{{ lch.vphase === 'done' || lch.vphase === 'failed' ? '關閉' : '先關閉（會在背景繼續）' }}</button>
         </template>
       </div>
     </section>
