@@ -246,10 +246,10 @@ pub async fn send_attachment_signed(relay: &Relay, http: &reqwest::Client, paylo
     };
 
     let init = relay.api("attach_init", Some(init_body(&photo))).await.map_err(|e| explain(&e))?;
-    let id = init.get("id").and_then(Value::as_str).filter(|s| is_uuid(s)).ok_or("收發室沒有給附件編號")?.to_string();
-    let url = init.get("upload_url").and_then(Value::as_str).ok_or("收發室沒有給上傳網址")?;
+    let id = init.get("id").and_then(Value::as_str).filter(|s| is_uuid(s)).ok_or("ASN 沒有給附件編號")?.to_string();
+    let url = init.get("upload_url").and_then(Value::as_str).ok_or("ASN 沒有給上傳網址")?;
     if !same_host(url, relay.base()) {
-        return Err("上傳網址不在收發室的主機上，已取消".into());
+        return Err("上傳網址不在 ASN 的主機上，已取消".into());
     }
     let put = http
         .put(url)
@@ -280,9 +280,9 @@ pub fn explain(e: &str) -> String {
     let pick = |code: &str, msg: &str| if e.contains(code) { Some(msg.to_string()) } else { None };
     pick("quota_exceeded", "這台設備的照片空間滿了（保存 30 天後自動清掉），晚點再傳")
         .or_else(|| pick("file_too_large", "檔案太大了（照片上限 5 MB、檔案上限 25 MB）"))
-        .or_else(|| pick("unsupported_type", "收發室不收這種檔案"))
+        .or_else(|| pick("unsupported_type", "ASN 不收這種檔案"))
         .or_else(|| pick("rate_limited", "傳得太頻繁了，請稍後再試"))
-        .or_else(|| if e.contains("HTTP 404") && (e.starts_with("attach_") ) { Some("這個收發室還不支援傳照片".to_string()) } else { None })
+        .or_else(|| if e.contains("HTTP 404") && (e.starts_with("attach_") ) { Some("這個 ASN 服務還不支援傳照片".to_string()) } else { None })
         .or_else(|| pick("not_uploaded", "照片還沒傳完，請再試一次"))
         .unwrap_or_else(|| e.to_string())
 }
@@ -303,9 +303,9 @@ pub async fn download(relay: &Relay, http: &reqwest::Client, id: &str) -> Result
         else if e.contains("HTTP 410") { "這個附件已超過保存期限，檔案已刪除".to_string() }
         else { explain(&e) }
     })?;
-    let url = info.get("url").and_then(Value::as_str).ok_or("收發室沒有給下載網址")?;
+    let url = info.get("url").and_then(Value::as_str).ok_or("ASN 沒有給下載網址")?;
     if !same_host(url, relay.base()) {
-        return Err("下載網址不在收發室的主機上，已取消".into());
+        return Err("下載網址不在 ASN 的主機上，已取消".into());
     }
     let mime = info.get("mime").and_then(Value::as_str).unwrap_or("").to_string();
     if ext_of(&mime).is_none() {
@@ -827,7 +827,7 @@ mod tests {
     async fn 寄照片_上傳網址指到別的主機_取消() {
         let (port, log) = serve(|_, _| (200, br#"{"id":"00000000-0000-0000-0000-000000000042","upload_url":"https://evil.example.com/steal"}"#.to_vec(), "application/json"));
         let e = send_attachment(&relay_at(port), &reqwest::Client::new(), &payload(json!({}))).await.unwrap_err();
-        assert!(e.contains("不在收發室的主機"), "{e}");
+        assert!(e.contains("不在 ASN 的主機"), "{e}");
         assert_eq!(log.lock().unwrap().len(), 1, "只有 attach_init，沒有上傳也沒有寄信");
     }
 
@@ -874,7 +874,7 @@ mod tests {
     #[tokio::test]
     async fn 下載_沒權限_過期_內容不對_大小不符_都拒絕() {
         let port_cell = Arc::new(Mutex::new(0u16));
-        for (case, expect) in [("404", "沒有權限"), ("410", "保存期限"), ("html", "對不上"), ("size", "大小不符"), ("host", "不在收發室的主機")] {
+        for (case, expect) in [("404", "沒有權限"), ("410", "保存期限"), ("html", "對不上"), ("size", "大小不符"), ("host", "不在 ASN 的主機")] {
             let pc = port_cell.clone();
             let (port, _) = serve(move |r, _| {
                 let port = *pc.lock().unwrap();

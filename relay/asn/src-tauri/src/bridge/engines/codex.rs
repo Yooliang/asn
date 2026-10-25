@@ -509,10 +509,10 @@ impl Inner {
         let policy = w.path.as_deref().and_then(|p| read_policy(std::path::Path::new(p), 1 << 20, 64 << 20));
         // 讀不到權限設定＝不知道是不是完全存取：寧可不轉（fail-closed）
         let Some(policy) = policy.or_else(|| self.allow_full_access.then(|| super::codex_state::Policy { approval: String::new(), sandbox: String::new() })) else {
-            return self.fail(&id, format!("讀不到 Codex 視窗「{to}」的權限設定，收發室不把外部來信轉進去（要放行請設 ASN_CODEX_ALLOW_FULL_ACCESS=1）"));
+            return self.fail(&id, format!("讀不到 Codex 視窗「{to}」的權限設定，ASN 不把外部來信轉進去（要放行請設 ASN_CODEX_ALLOW_FULL_ACCESS=1）"));
         };
         if is_full_access(&policy) && !self.allow_full_access {
-            return self.fail(&id, format!("Codex 視窗「{to}」是「完全存取（沒有沙盒）」模式，收發室不把外部來信轉進去（要放行請設 ASN_CODEX_ALLOW_FULL_ACCESS=1）"));
+            return self.fail(&id, format!("Codex 視窗「{to}」是「完全存取（沒有沙盒）」模式，ASN 不把外部來信轉進去（要放行請設 ASN_CODEX_ALLOW_FULL_ACCESS=1）"));
         }
         // --message=<內文>（連在一起）：內文若以 -- 開頭，分開寫會被 codex 的參數解析器當成旗標而失敗
         let args = vec!["queue".to_string(), "--thread".to_string(), w.thread_id.clone(), format!("--message={}", self.wrap(&id, &text))];

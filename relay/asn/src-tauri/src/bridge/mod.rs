@@ -146,7 +146,7 @@ pub fn start_with(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>, laun
         }),
     };
     let wlog = log.clone();
-    // 只有引擎（無視窗橋）：不啟動 claude -p 收發室 worker；核心拿到不會做事的空殼，通道的送端不留，等於永遠沒有 worker 輸出
+    // 只有引擎（無視窗橋）：不啟動 claude -p 的自動回信 worker；核心拿到不會做事的空殼，通道的送端不留，等於永遠沒有 worker 輸出
     let (w, sink, lines): (Option<ProcWorker>, Arc<dyn WorkerSink>, mpsc::UnboundedReceiver<WorkerLine>) = if cfg.engine_only {
         log.line("engine-only mode: no claude mailbox worker");
         (None, Arc::new(NoWorker), mpsc::unbounded_channel().1)
@@ -298,7 +298,7 @@ pub struct Status {
     pub enabled: bool,
     /// 內建橋正在跑
     pub running: bool,
-    /// 這台的收發室目前由舊版收發室橋負責
+    /// 這台的收發信功能目前由舊版收發信小程式負責
     pub legacy: bool,
     /// 「改由 ASN 負責」按鈕是否開放
     pub takeover_allowed: bool,

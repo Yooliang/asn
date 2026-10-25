@@ -909,7 +909,7 @@ const app = createApp({
       const archived = rosterShownGroups(archivedFriends(friends.value), o).flatMap(g => g.items)
       return withArchivedGroup(injectPendingGroups(base, launchPending.value.filter(p => !tab.value || p.node === tab.value)), archived)
     })
-    const emptyText = computed(() => (normalizeSearchQuery(query.value) ? '沒有符合的聯絡人。' : conn.value !== 'on' ? '還沒連上收發室。' : '這一頁目前沒有視窗。'))
+    const emptyText = computed(() => (normalizeSearchQuery(query.value) ? '沒有符合的聯絡人。' : conn.value !== 'on' ? '還沒連上 ASN。' : '這一頁目前沒有視窗。'))
     const openAd = a => openAdWith(a, url => void invoke('open_url', { url }))
     // 改最上面的暱稱＝改對外名字；Rust 端驗證，不合法就還原並提示
     const commitNick = async () => {

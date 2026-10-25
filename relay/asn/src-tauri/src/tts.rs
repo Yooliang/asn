@@ -52,14 +52,14 @@ pub fn friendly_error(e: &str) -> String {
     } else if e.contains("tts_failed") || e.contains("HTTP 502") {
         "語音合成暫時失敗，請稍後再試。".into()
     } else if e.contains("連線失敗") {
-        "連不上收發室。".into()
+        "連不上 ASN。".into()
     } else {
         "念出訊息失敗。".into()
     }
 }
 
 fn relay_of(app: &App) -> Result<std::sync::Arc<Relay>, String> {
-    app.relay.clone().ok_or_else(|| app.init_error.clone().unwrap_or_else(|| "尚未連上收發室".into()))
+    app.relay.clone().ok_or_else(|| app.init_error.clone().unwrap_or_else(|| "尚未連上 ASN".into()))
 }
 
 /// 後台列出的可選聲音與是否啟用（不耗合成額度）

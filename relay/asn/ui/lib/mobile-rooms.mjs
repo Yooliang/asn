@@ -198,7 +198,7 @@ export function roomErrorText(msg) {
   if (/rate_limited|HTTP 429/.test(s)) return '發言太頻繁了（每小時有上限），晚點再試。'
   if (/not_member|HTTP 403|forbidden|unknown_agent/.test(s)) return '你已經不在這個群組裡，沒辦法發言。'
   if (/HTTP 404|not_found/.test(s)) return '找不到這個群組。'
-  if (/連線失敗|timeout|逾時/.test(s)) return '連不上收發室，請檢查網路。'
+  if (/連線失敗|timeout|逾時/.test(s)) return '連不上 ASN，請檢查網路。'
   return '群組暫時無法使用，晚點再試。'
 }
 export const ROOM_EMPTY_TEXT = '目前不在任何群組。'

@@ -24,7 +24,7 @@
       </template>
     </dl>
     <input v-if="vm.kind === 'secret'" ref="box" class="ap-input" type="password" v-model="secret" autocomplete="off" spellcheck="false" aria-label="密碼" />
-    <p class="ap-note" v-if="vm.remote">輸入的密碼會在這台電腦上加密後才送出，收發室只轉密文；請求端的畫面若顯示同一組核對碼，才表示是同一個請求。</p>
+    <p class="ap-note" v-if="vm.remote">輸入的密碼會在這台電腦上加密後才送出，ASN 的伺服器只轉密文；請求端的畫面若顯示同一組核對碼，才表示是同一個請求。</p>
     <p class="ap-note" v-else>輸入的內容只會交給上面這個程式，不會經過 AI、不會存成檔案。</p>
     <p class="ap-left" role="status">{{ left }}</p>
     <div class="ap-btns">

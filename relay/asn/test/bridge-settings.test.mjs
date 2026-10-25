@@ -31,17 +31,17 @@ test('收發室開關固定開啟且不能改：打勾、停用，沒有任何�
 test('開著且正在跑：說明由 ASN 負責', async () => {
   const html = await render({ ...base(), bridge: bridge({ enabled: true, running: true }) })
   assert.ok(!html.includes('讓 ASN 負責這台的收發室'), '固定開啟的選項已從畫面拿掉')
-  assert.ok(html.includes('這台的收發室目前由 ASN 負責。'))
+  assert.ok(html.includes('這台的收發信功能目前由 ASN 負責。'))
 })
 
 test('舊版收發室橋在跑：顯示由舊版負責；開關放行才出現「改由 ASN 負責」，按下去先問再做', async () => {
   const off = await render({ ...base(), bridge: bridge({ legacy: true }) })
-  assert.ok(off.includes('這台的收發室目前由舊版收發室橋負責。'))
+  assert.ok(off.includes('這台的收發信功能目前由舊版收發信小程式負責。'))
   assert.ok(!off.includes('改由 ASN 負責'), '設定檔沒放行時不顯示按鈕')
   const on = await render({ ...base(), bridge: bridge({ legacy: true, takeoverAllowed: true }) })
   assert.ok(on.includes('改由 ASN 負責') && !on.includes('確定'))
   const ask = await render({ ...base(), bridge: bridge({ legacy: true, takeoverAllowed: true, confirm: true }) })
-  assert.ok(ask.includes('要停掉舊版收發室橋，改由 ASN 負責嗎？') && ask.includes('確定') && ask.includes('取消'))
+  assert.ok(ask.includes('要停掉舊版收發信小程式，改由 ASN 負責嗎？') && ask.includes('確定') && ask.includes('取消'))
 })
 
 test('允許其他設備替這台開新視窗：預設關，打開後勾選；按下去送出 bridge-launch', async () => {
@@ -66,6 +66,6 @@ test('守門：新增的指令都在清單裡，樞紐接得住，Rust 端有註
   }
   // 畫面任何地方都不顯示節點代號：新區塊不引用 node
   const panel = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8')
-  const block = panel.slice(panel.indexOf('aria-label="收發室"'), panel.indexOf('</section>', panel.indexOf('aria-label="收發室"')))
+  const block = panel.slice(panel.indexOf('aria-label="收發信功能"'), panel.indexOf('</section>', panel.indexOf('aria-label="收發信功能"')))
   assert.ok(!/node/i.test(block))
 })

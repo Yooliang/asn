@@ -209,7 +209,7 @@ fn startup_info(app: State<'_, App>, auth: State<'_, auth::AuthState>) -> Startu
 }
 
 pub(crate) fn relay_of(app: &App) -> Result<Arc<Relay>, String> {
-    app.relay.clone().ok_or_else(|| app.init_error.clone().unwrap_or_else(|| "尚未連上收發室".into()))
+    app.relay.clone().ok_or_else(|| app.init_error.clone().unwrap_or_else(|| "尚未連上 ASN".into()))
 }
 
 #[cfg(feature = "gui")]
