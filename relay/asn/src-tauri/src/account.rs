@@ -11,11 +11,11 @@ use tauri::{AppHandle, State};
 pub fn error_text(code: &str) -> String {
     match code {
         "unauthorized" => "登入已失效，請重新登入",
-        "tenant_not_yours" => "這個節點還在舊的收發室租戶底下，要等舊租戶認領到你的帳號",
+        "tenant_not_yours" => "這個節點還在舊的 ASN 帳號空間底下，要等舊租戶認領到你的帳號",
         "already_claimed" => "這個節點已經被別的帳號認領了",
         "invalid_key" => "這台電腦的節點金鑰後台不認得（可能已被換掉）",
         "too_many" => "這個帳號的電腦數量已達上限",
-        "tenant_inactive" => "這個帳號的收發室目前停用中",
+        "tenant_inactive" => "這個帳號目前停用中",
         "bad_request" => "送出的內容不合格",
         "internal" => "後台暫時有問題，請稍後再試",
         "not_found" => "找不到這台設備（它不在你的帳號底下）",
@@ -312,7 +312,7 @@ fn restart_soon(app: &App, handle: AppHandle) {
 #[tauri::command]
 pub fn auth_skip_login(app: State<'_, App>) -> Result<(), String> {
     if app.relay.is_none() {
-        return Err("這台電腦還沒有收發室金鑰，需要先登入".into());
+        return Err("這台電腦還沒有 ASN 金鑰，需要先登入".into());
     }
     set_login_skipped(&app.data_dir, true)
 }

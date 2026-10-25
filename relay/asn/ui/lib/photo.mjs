@@ -117,7 +117,7 @@ export function friendlyPhotoError(msg) {
   const e = String(msg ?? '')
   if (/quota_exceeded/.test(e)) return '這台設備的照片空間滿了（照片保存 30 天後自動清掉），晚點再傳。'
   if (/file_too_large/.test(e)) return '檔案太大了（照片上限 5 MB、檔案上限 25 MB）。'
-  if (/unsupported_type/.test(e)) return '收發室不收這種檔案。'
+  if (/unsupported_type/.test(e)) return 'ASN 不收這種檔案。'
   if (/rate_limited/.test(e)) return '傳得太頻繁了，請稍後再試。'
   return e || '照片沒有傳出去。'
 }

@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 
 /// `pi install` 要下載或複製東西，給比較長的時間
 const TIMEOUT_SECS: u64 = 90;
+/// 子程序輸出最多留多少位元組（超過的照樣讀掉丟棄，不然子程序會卡在寫管線）
+pub(crate) const OUT_CAP: usize = 64 * 1024;
 /// 記錄「我們裝了哪一筆」的檔名（放在 ASN 的資料夾）
 pub(crate) const MARKER: &str = "pi-ext-installed.json";
 
@@ -172,36 +174,64 @@ impl Files for RealFiles {
     }
 }
 
-struct RealRunner;
+struct RealRunner {
+    timeout: std::time::Duration,
+}
+
+impl Default for RealRunner {
+    fn default() -> Self {
+        RealRunner { timeout: std::time::Duration::from_secs(TIMEOUT_SECS) }
+    }
+}
+
+/// 在另一條執行緒持續讀走一條管線：最多留 OUT_CAP 位元組，超過的照樣讀掉丟棄。
+/// 一定要一直讀：子程序寫滿管線緩衝區（Windows 預設只有 4KB）就會卡在寫入，父程序又在等它結束＝死鎖到逾時（#審查 Gemini 指出）
+fn drain(mut r: impl std::io::Read + Send + 'static) -> std::sync::mpsc::Receiver<String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut out: Vec<u8> = Vec::new();
+        let mut buf = [0u8; 8192];
+        loop {
+            match r.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    let room = OUT_CAP.saturating_sub(out.len());
+                    out.extend_from_slice(&buf[..n.min(room)]);
+                }
+            }
+        }
+        let _ = tx.send(String::from_utf8_lossy(&out).into_owned());
+    });
+    rx
+}
 
 impl Runner for RealRunner {
     fn run(&self, program: &Path, args: &[String]) -> Result<(i32, String), String> {
         use crate::nowin::NoWindow;
-        use std::io::Read;
         use std::process::Stdio;
         let mut cmd = std::process::Command::new(program);
         cmd.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).no_window();
         let mut child = cmd.spawn().map_err(|e| e.to_string())?;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(TIMEOUT_SECS);
+        // 兩條管線一開始就各自有人讀，不等程序結束
+        let out_rx = child.stdout.take().map(drain);
+        let err_rx = child.stderr.take().map(drain);
+        let deadline = std::time::Instant::now() + self.timeout;
+        // 程序結束後，讀的執行緒通常馬上收尾；若有孫程序還握著管線，最多再等這麼久，拿到多少算多少
+        let grace = std::time::Duration::from_secs(2);
         loop {
             match child.try_wait().map_err(|e| e.to_string())? {
                 Some(status) => {
-                    let (mut out, mut err) = (String::new(), String::new());
-                    if let Some(mut o) = child.stdout.take() {
-                        let _ = o.read_to_string(&mut out);
-                    }
-                    if let Some(mut e) = child.stderr.take() {
-                        let _ = e.read_to_string(&mut err);
-                    }
+                    let mut out = out_rx.and_then(|r| r.recv_timeout(grace).ok()).unwrap_or_default();
+                    let err = err_rx.and_then(|r| r.recv_timeout(grace).ok()).unwrap_or_default();
                     out.push_str(&err);
                     return Ok((status.code().unwrap_or(-1), out));
                 }
                 None if std::time::Instant::now() >= deadline => {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Err(format!("超過 {TIMEOUT_SECS} 秒沒有結束，已停止"));
+                    return Err(format!("超過 {} 秒沒有結束，已停止", self.timeout.as_secs()));
                 }
-                None => std::thread::sleep(std::time::Duration::from_millis(200)),
+                None => std::thread::sleep(std::time::Duration::from_millis(50)),
             }
         }
     }
@@ -243,7 +273,7 @@ pub fn install_real() -> Result<Value, String> {
     let pi = real_pi().ok_or("這台電腦找不到 pi，請先安裝 pi")?;
     let (_, ext, auto) = real_state(&files);
     let ext = ext.ok_or("找不到 ASN 附的 pi 擴充（安裝可能不完整），請重新安裝 ASN")?;
-    install(&pi, &ext, auto, &RealRunner, &files)?;
+    install(&pi, &ext, auto, &RealRunner::default(), &files)?;
     Ok(real_state(&files).0.to_json())
 }
 
@@ -252,7 +282,7 @@ pub fn remove_real() -> Result<Value, String> {
     let files = RealFiles { agent, marker };
     let pi = real_pi().ok_or("這台電腦找不到 pi，沒辦法執行移除")?;
     let (_, ext, _) = real_state(&files);
-    remove(&pi, ext.as_deref(), &RealRunner, &files)?;
+    remove(&pi, ext.as_deref(), &RealRunner::default(), &files)?;
     Ok(real_state(&files).0.to_json())
 }
 
@@ -456,6 +486,50 @@ mod tests {
         pi.fail_remove = true;
         assert!(remove(Path::new("pi"), Some(ext()), &pi, &f).unwrap_err().contains("移除擴充失敗"));
         assert!(f.read_marker().is_some(), "失敗不清記錄，使用者可以再試");
+    }
+
+    // ---- 真的執行器：輸出量與逾時（Gemini 審查指出：只輪詢 try_wait 不讀管線，輸出超過管線緩衝區子程序就卡死）----
+    #[cfg(windows)]
+    fn ps(script: &str) -> Vec<String> {
+        vec!["-NoProfile".into(), "-Command".into(), script.into()]
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn 真執行器_輸出遠超管線緩衝區也能正常結束_輸出只留上限() {
+        // 30000 行 × 50 字 ≈ 1.5MB，遠大於管線緩衝區（Windows 預設只有 4KB）
+        let r = RealRunner { timeout: std::time::Duration::from_secs(30) };
+        let started = std::time::Instant::now();
+        let (code, out) = r.run(Path::new("powershell"), &ps("1..30000 | ForEach-Object { 'x' * 50 }")).expect("大量輸出也要能跑完，不能卡到逾時");
+        assert_eq!(code, 0);
+        assert!(started.elapsed() < std::time::Duration::from_secs(25), "不該等到逾時：{:?}", started.elapsed());
+        assert!(!out.is_empty() && out.len() <= OUT_CAP, "輸出要有內容、而且最多留上限：{}", out.len());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn 真執行器_stderr_也一起收_結束碼照實回() {
+        let r = RealRunner { timeout: std::time::Duration::from_secs(30) };
+        let (code, out) = r.run(Path::new("powershell"), &ps("[Console]::Error.WriteLine('boom-err'); Write-Output 'ok-out'; exit 3")).unwrap();
+        assert_eq!(code, 3);
+        assert!(out.contains("ok-out") && out.contains("boom-err"), "{out}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn 真執行器_逾時會收掉程序並回原因() {
+        let r = RealRunner { timeout: std::time::Duration::from_secs(2) };
+        let started = std::time::Instant::now();
+        let e = r.run(Path::new("powershell"), &ps("Start-Sleep -Seconds 60")).unwrap_err();
+        assert!(e.contains("超過 2 秒"), "{e}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(20), "逾時後要馬上回來：{:?}", started.elapsed());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn 真執行器_起不來回原因() {
+        let r = RealRunner::default();
+        assert!(r.run(Path::new("Z:/不存在/pi.exe"), &[]).is_err());
     }
 
     /// 用真的 pi 與真的執行器端到端跑一次（`cargo test --lib -- --ignored pi_setup_real`）。

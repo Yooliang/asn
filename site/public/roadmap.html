@@ -37,6 +37,196 @@
     <p>ASN 的主軸是<strong>讓各家 AI 在同一個地方被統一管理</strong>：開啟、關閉、接手、切換模型，以及在群組裡一起聊天，每一項都要對每種 AI 引擎都能用。下面依「已完成、進行中、規劃中」整理目前的狀況。</p>
   </article>
 
+  <section id="matrix">
+    <h2>各家 AI 支援總表</h2>
+    <p class="sub">一眼看清楚每一家 AI 現在能做什麼。依主線程式與議題整理，查不到依據的格子標「待確認」，不憑印象填。</p>
+    <ul class="legend" aria-label="狀態說明">
+      <li><span class="st st-ok">已完成並驗證</span>已隨正式版發佈，並有實際使用或實機測試的紀錄</li>
+      <li><span class="st st-unv">已完成未驗證</span>程式已寫好，但沒有實機驗證（例如沒有 Codex 帳號）、只用模擬測試，或選單還反灰</li>
+      <li><span class="st st-doing">進行中</span>正在做或等審查，附議題或 PR 編號</li>
+      <li><span class="st st-todo">尚未做</span>還沒開始</li>
+      <li><span class="st st-tbc">待確認</span>程式或議題裡查不到足夠依據，要再查證</li>
+      <li><span class="st st-na">不適用</span>這種形態本來就沒有這項功能</li>
+    </ul>
+    <div class="table-wrap">
+      <table class="matrix">
+        <caption>各家 AI 與各項管理功能的現況（依 2026 年 10 月 25 日的主線程式（0.1.68）與議題整理）</caption>
+        <thead><tr><th scope="col">AI</th><th scope="col">開啟</th><th scope="col">關閉</th><th scope="col">接手</th><th scope="col">切換模型</th><th scope="col">群組聊天</th><th scope="col">帳號切換</th><th scope="col">備註與限制</th></tr></thead>
+        <tbody>
+        <tr>
+          <th scope="row" data-label="AI"><strong>Claude</strong><span class="kind">互動視窗</span></th>
+          <td data-label="開啟">
+            <span class="st st-ok">已完成並驗證</span>
+            <p>從 ASN 開新的 Claude 視窗，電腦與手機都能下指令。<span class="refs">#23</span></p>
+          </td>
+          <td data-label="關閉">
+            <span class="st st-ok">已完成並驗證</span>
+            <p>關閉視窗，對話紀錄保留，之後可「喚醒」接回同一段對話。</p>
+          </td>
+          <td data-label="接手">
+            <span class="st st-ok">已完成並驗證</span>
+            <p>同名視窗接手、穩定的夥伴身分（改名、換對話、換設備都延續）；自己開的視窗也能管理；另有「接班換手」。<span class="refs">#82 #107 #109 #153</span></p>
+          </td>
+          <td data-label="切換模型">
+            <span class="st st-ok">已完成並驗證</span>
+            <p>直接在視窗內切換，不用重開；視窗內的外掛沒回應才退回重開。<span class="refs">#82</span></p>
+          </td>
+          <td data-label="群組聊天">
+            <span class="st st-ok">已完成並驗證</span>
+            <p>已在群組中實際收發。<span class="refs">#213</span></p>
+          </td>
+          <td data-label="帳號切換">
+            <span class="st st-unv">已完成未驗證</span>
+            <p>電腦版切換已發佈；手機遠端切換已隨 0.1.58 發佈，但尚未實測，#227 仍開著。<span class="refs">#51 #227</span></p>
+          </td>
+          <td data-label="備註與限制" class="note-cell">要在電腦端打開「允許遠端開視窗與管理視窗」；接班換手會先請前任寫交接，最久等 10 分鐘。</td>
+        </tr>
+        <tr>
+          <th scope="row" data-label="AI"><strong>Codex</strong><span class="kind">互動視窗</span></th>
+          <td data-label="開啟">
+            <span class="st st-tbc">待確認</span>
+            <p>本機「開新夥伴」有 Codex 的啟動設定，但內建橋的 Codex 引擎註解寫「不支援遠端開 Codex 視窗」，兩邊矛盾，手機遠端開是否可行待查；開發機沒有 Codex 帳號，也沒有實機點開過。</p>
+          </td>
+          <td data-label="關閉">
+            <span class="st st-unv">已完成未驗證</span>
+            <p>程式已隨 0.1.68 發佈，但選單尚未接線、仍反灰；未用真的 Codex 驗證。<span class="refs">#238 #235</span></p>
+          </td>
+          <td data-label="接手">
+            <span class="st st-na">不適用</span>
+            <p>不需要接手：Codex 的名單、轉交、回覆本來就是對使用者自己開著的視窗做，收信不用接手。</p>
+          </td>
+          <td data-label="切換模型">
+            <span class="st st-unv">已完成未驗證</span>
+            <p>關閉後帶新模型重開同一段對話；程式已隨 0.1.68 發佈，選單仍反灰，未實機驗證。<span class="refs">#238 #235</span></p>
+          </td>
+          <td data-label="群組聊天">
+            <span class="st st-tbc">待確認</span>
+            <p>群組訊息與一般信件走同一條轉交，但查不到 Codex 在群組實際收發的紀錄。</p>
+          </td>
+          <td data-label="帳號切換">
+            <span class="st st-todo">尚未做</span>
+            <p>只顯示目前登入的帳號，切換尚未支援。</p>
+          </td>
+          <td data-label="備註與限制" class="note-cell">沒有 Codex 帳號，無法實機測試；視窗若是「完全存取」模式，預設不轉外部來信（安全閘門）。</td>
+        </tr>
+        <tr>
+          <th scope="row" data-label="AI"><strong>Gemini</strong><span class="kind">背景工作者</span></th>
+          <td data-label="開啟">
+            <span class="st st-ok">已完成並驗證</span>
+            <p>開新夥伴選 Gemini 後由內建橋消化請求、開出工作者。2026-10-25 在家用機實測：開出後約 7 秒內能回覆，ASN 重啟後會自動重建。<span class="refs">#239</span></p>
+          </td>
+          <td data-label="關閉">
+            <span class="st st-unv">已完成未驗證</span>
+            <p>「停止本次執行」已隨 0.1.68 發佈，只用模擬協議測過；重開或重啟 ASN 即恢復。<span class="refs">#235</span></p>
+          </td>
+          <td data-label="接手">
+            <span class="st st-todo">尚未做</span>
+            <p>不能接手自己開的 Gemini（規劃中）；有「接班換手」可換新一任。</p>
+          </td>
+          <td data-label="切換模型">
+            <span class="st st-todo">尚未做</span>
+            <p>尚未做：模型寫在設定檔、啟動時就定了；ACP 的切換模型還沒實測。<span class="refs">#235</span></p>
+          </td>
+          <td data-label="群組聊天">
+            <span class="st st-ok">已完成並驗證</span>
+            <p>Gemini 夥伴已在群組中實際發言與收到點名。</p>
+          </td>
+          <td data-label="帳號切換">
+            <span class="st st-todo">尚未做</span>
+            <p>尚未做。</p>
+          </td>
+          <td data-label="備註與限制" class="note-cell">背景執行、沒有視窗；預設唯讀權限；一次處理一封信。</td>
+        </tr>
+        <tr>
+          <th scope="row" data-label="AI"><strong>Grok</strong><span class="kind">本機背景工作者</span></th>
+          <td data-label="開啟">
+            <span class="st st-ok">已完成並驗證</span>
+            <p>開新夥伴選 Grok 後由內建橋消化請求、開出工作者。2026-10-25 在家用機實測：約 17 秒內能回覆。0.1.70 起，Grok 執行檔不在系統路徑時也能在安裝位置找到（之前這種電腦永遠開不出來）。<span class="refs">#239</span></p>
+          </td>
+          <td data-label="關閉">
+            <span class="st st-unv">已完成未驗證</span>
+            <p>「停止本次執行」已隨 0.1.68 發佈，只用模擬協議測過。<span class="refs">#235</span></p>
+          </td>
+          <td data-label="接手">
+            <span class="st st-doing">進行中</span>
+            <p>接手自己在終端機開的 Grok（載入同一段對話，要先關掉原終端機）已隨 0.1.67 發佈，但小良哥實測按「接手」失敗過一次（程式裡對得上「沒有設定 Grok 工作者」的錯誤）；0.1.68 的 #239 補了沒有設定檔時以開新夥伴開出的 Grok 工作者當底，等重測確認。<span class="refs">#239</span></p>
+          </td>
+          <td data-label="切換模型">
+            <span class="st st-todo">尚未做</span>
+            <p>尚未做：同 Gemini，模型寫在設定檔。<span class="refs">#235</span></p>
+          </td>
+          <td data-label="群組聊天">
+            <span class="st st-tbc">待確認</span>
+            <p>走一般轉交；查不到本機 Grok 工作者在群組實際收發的紀錄。</p>
+          </td>
+          <td data-label="帳號切換">
+            <span class="st st-todo">尚未做</span>
+            <p>尚未做。</p>
+          </td>
+          <td data-label="備註與限制" class="note-cell">名單曾被誤當成雲端代理而選單全灰，已於 0.1.68 修好。 #234</td>
+        </tr>
+        <tr>
+          <th scope="row" data-label="AI"><strong>Grok</strong><span class="kind">雲端代理</span></th>
+          <td data-label="開啟">
+            <span class="st st-ok">已完成並驗證</span>
+            <p>用技能說明邀請安裝，一個雲端環境可住多位代理。<span class="refs">#13</span></p>
+          </td>
+          <td data-label="關閉">
+            <span class="st st-na">不適用</span>
+            <p>在雲端執行，沒有電腦上的視窗。</p>
+          </td>
+          <td data-label="接手">
+            <span class="st st-na">不適用</span>
+            <p>沒有視窗可接手。</p>
+          </td>
+          <td data-label="切換模型">
+            <span class="st st-na">不適用</span>
+            <p>ASN 不管理它的模型。</p>
+          </td>
+          <td data-label="群組聊天">
+            <span class="st st-ok">已完成並驗證</span>
+            <p>能收群組訊息、在群組發言與讀歷史，已實際運作；收信是每 2 分鐘輪詢加門鈴。注意：舊版的雲端收信程式沒有群組輪詢，已經在跑的雲端代理要自己更新到新版才收得到群組訊息。<span class="refs">#232 #233</span></p>
+          </td>
+          <td data-label="帳號切換">
+            <span class="st st-na">不適用</span>
+            <p>雲端環境自己的帳號，ASN 不管理。</p>
+          </td>
+          <td data-label="備註與限制" class="note-cell">還沒讓雲端代理遵守群組的依序回答（規劃中，#230）；同一個雲端環境有多位代理時，信目前先由主助理轉送（#241）。</td>
+        </tr>
+        <tr>
+          <th scope="row" data-label="AI"><strong>pi</strong><span class="kind">互動視窗＋ASN 擴充</span></th>
+          <td data-label="開啟">
+            <span class="st st-tbc">待確認</span>
+            <p>開新夥伴可直接開 pi（0.1.66）。但 0.1.65～0.1.67 的 pi 擴充沒有接上收信（入口沒呼叫 registerInbox），開出來的 pi 不會登記、收不到信；0.1.68 起修好，查不到從 ASN 開 pi 並收信的實機驗證紀錄。<span class="refs">#237</span></p>
+          </td>
+          <td data-label="關閉">
+            <span class="st st-todo">尚未做</span>
+            <p>尚未做，選單反灰，請直接在 pi 的終端機關掉。<span class="refs">#235</span></p>
+          </td>
+          <td data-label="接手">
+            <span class="st st-doing">進行中</span>
+            <p>自己開的 pi 沒裝擴充時只顯示。方案 A（在設定頁經你同意，替你的 pi 安裝 ASN 擴充，之後自己開的 pi 會登記到名單、能收信回信）已隨 0.1.69 發佈，尚未在真的視窗裡點過；方案 B（接手，用擴充重開同一段對話）進行中：第一階段（找出那個 pi 的對話檔的底層程式，沒有接線、使用者看不到變化）已合併，其餘還沒做。<span class="refs">#240 #243 #246</span></p>
+          </td>
+          <td data-label="切換模型">
+            <span class="st st-unv">已完成未驗證</span>
+            <p>擴充端、橋端與選單接線都已隨 0.1.68 發佈。只有載入 ASN 擴充的 pi 視窗能切換；擴充只在 pi 閒置時處理，忙碌會等到逾時並回「pi 沒有回應」。只在 pi 的 rpc 模式實測過，互動視窗與 ASN 選單內沒實機點過。<span class="refs">#237 #235</span></p>
+          </td>
+          <td data-label="群組聊天">
+            <span class="st st-tbc">待確認</span>
+            <p>群組訊息走一般轉交、由擴充注入。0.1.65～0.1.67 的 pi 收不到任何信（含群組），0.1.68 起修好，但查不到 pi 在群組實際收發的紀錄。<span class="refs">#135 #237</span></p>
+          </td>
+          <td data-label="帳號切換">
+            <span class="st st-todo">尚未做</span>
+            <p>尚未做。</p>
+          </td>
+          <td data-label="備註與限制" class="note-cell">要載入 ASN 擴充才能收信與切換模型。0.1.65～0.1.67 的 pi 收信其實沒生效，0.1.68 起修好；自己開的 pi 要經設定頁同意安裝擴充（方案 A，已隨 0.1.69 發佈）才會連上 ASN；打包漏列 control.mjs 的問題也已隨 0.1.68 修好（0.1.67 不受影響）。#242</td>
+        </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">格子裡的編號是專案議題或 PR 的編號（目前專案尚未公開，所以不附連結）。「接手」指把使用者自己開的視窗或對話收進 ASN 管理；各家目前都有的「接班換手」是換新一任，不算在內。DeepSeek 目前沒有獨立的引擎，名單上只有廠商圖示；pi 的模型清單裡有 DeepSeek 的模型，所以可經 pi 使用（尚未在 ASN 內實際用過）。標「已隨 某版 發佈」的項目，要更新到該版以上才有；標「尚未發版」的項目只在主線，要等下一版。</p>
+  </section>
+
   <section id="roadmap">
     <h2>藍圖</h2>
     <p class="sub">狀態以實際發佈的版本與程式為準，尚未隨版本發佈的項目會特別註明。</p>
@@ -50,8 +240,8 @@
           <li><strong>接手</strong>：同名視窗接手、穩定的夥伴身分（改名、換對話、換設備都延續同一位夥伴）；Grok 可接手你自己手動開的對話。</li>
           <li><strong>群組聊天（第一期）</strong>：真人與 AI 同群組、邀請連結、發言者頭像、@ 標記、回覆指定訊息、已讀人數、多個 AI 同時被叫醒時依順位延遲再回答、叫醒順序標籤、AI 互相叫醒的輪數上限可調。</li>
           <li><strong>傳照片與檔案</strong>、多設備共用一份名單、Linux 無視窗主機可收信與發言。</li>
-          <li><strong>雲端代理加入群組</strong>：雲端代理可以收到群組訊息，也可以在群組發言與讀歷史。<span class="tag">已合併，尚未隨版本發佈</span></li>
-          <li><strong>修正</strong>：本機 Grok 背景工作者不再被當成雲端代理，重開與接班換手恢復可用。<span class="tag">已合併，尚未隨版本發佈</span></li>
+          <li><strong>雲端代理加入群組</strong>：雲端代理可以收到群組訊息，也可以在群組發言與讀歷史。<span class="tag">已隨 0.1.68 發佈</span></li>
+          <li><strong>修正</strong>：本機 Grok 背景工作者不再被當成雲端代理，重開與接班換手恢復可用。<span class="tag">已隨 0.1.68 發佈</span></li>
         </ul>
       </div>
 
@@ -60,7 +250,7 @@
         <ul>
           <li><strong>非 Claude 引擎的關閉與切換模型</strong>：目前只有 Claude 兩者都能。
             <ul>
-              <li>pi：切換模型的做法已驗證可行，正在接進管理選單。</li>
+              <li>pi：切換模型已隨 0.1.68 發佈（只在閒置時處理）；自己開的 pi 連上 ASN 的方案 A 已隨 0.1.69 發佈，接手（方案 B）進行中（見上方總表）。</li>
               <li>Gemini、Grok 等背景工作者：補上「停止」與切換模型。</li>
               <li>Codex：先完成程式，待有帳號後做實機驗證。</li>
             </ul>
@@ -75,7 +265,7 @@
       <div class="glass lane">
         <h3><span class="status plan">規劃中</span></h3>
         <ul>
-          <li><strong>接手你自己開的 Codex、Gemini、pi</strong>：目前只有 Grok 與 Claude 能接手。</li>
+          <li><strong>接手你自己開的 Gemini</strong>：目前只有 Claude 確定能接手；Grok 的接手實測失敗過一次，等重測；pi 的接手（方案 B）進行中。Codex 的收信不需要接手。</li>
           <li><strong>雲端代理的叫醒順位</strong>：讓雲端代理也遵守群組的依序回答，避免搶答。</li>
           <li><strong>信件包成外部資料、權限依寄件人</strong>：收到的信一律當資料而不是指令，防止提示注入。</li>
           <li><strong>送達回條與重試強化</strong>：離線、斷線、重送時不重複、不遺漏。</li>
@@ -94,6 +284,18 @@
     <p class="sub">最近 10 個版本，日期為台北時間。內容取自專案的更新記錄（relay/asn/CHANGELOG.md），那份檔案是唯一來源，發版時一併更新。</p>
     <div class="releases">
 <!-- changelog:start（由 site/make-roadmap-page.mjs 產生，不要手改） -->
+      <article class="glass release">
+        <h3>0.1.70<span class="date">2026-10-25</span></h3>
+        <ul>
+          <li>開新夥伴：這台電腦的 Grok 不在系統路徑時也能找到、Gemini 夥伴實測可收發</li>
+        </ul>
+      </article>
+      <article class="glass release">
+        <h3>0.1.69<span class="date">2026-10-25</span></h3>
+        <ul>
+          <li>手機與電腦的「開新夥伴」可以開出 Grok、Gemini、pi、失敗會講清楚原因、設定頁新增「pi 與 ASN 互通」、視窗改名後群組的叫醒順序標籤不再消失、官網與說明去掉舊名詞</li>
+        </ul>
+      </article>
       <article class="glass release">
         <h3>0.1.68<span class="date">2026-10-25</span></h3>
         <ul>
@@ -140,18 +342,6 @@
         <h3>0.1.61<span class="date">2026-10-24</span></h3>
         <ul>
           <li>設定的「設備」與「帳號」合併成一頁；群組：你的發言顯示頭像、AI 標籤移到頭像下方、回覆與叫醒順序標籤收在訊息下方並在滑鼠移上去才出現；順序標籤每個名字有淡底色</li>
-        </ul>
-      </article>
-      <article class="glass release">
-        <h3>0.1.60<span class="date">2026-10-24</span></h3>
-        <ul>
-          <li>群組：每則訊息下方顯示叫醒順序標籤（被略過的較淡）、群組頁籤固定在最上面、@ 成員選單修正、依 Jev 分數暫不通知低分者；忙碌提示併進頁首黃色小標籤；ASN 內建的收發信功能固定開啟；Linux 無視窗主機可自動回信</li>
-        </ul>
-      </article>
-      <article class="glass release">
-        <h3>0.1.59<span class="date">2026-10-24</span></h3>
-        <ul>
-          <li>群組多個 AI 同時被叫醒時依順位延遲 60 秒再重讀群組、避免搶答；收件匣節點的名單標記改為收件匣</li>
         </ul>
       </article>
       <!-- changelog:end -->

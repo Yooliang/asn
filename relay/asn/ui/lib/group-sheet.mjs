@@ -80,7 +80,6 @@ export const GroupSheet = {
           <li v-for="m in s.members.filter(x => x.kind === 'ai')" :key="m.ref">
             <span class="gs-av ai" aria-hidden="true">{{ m.label.slice(0, 1) }}</span><span class="gs-name">{{ m.label }}</span>
             <template v-if="m.mine">
-              <label class="gs-allow"><input type="checkbox" :checked="m.allowOthers" :disabled="s.busy" @change="flow.setAllow(m.ref, $event.target.checked)">接受別人點名</label>
               <button class="gs-btn small" type="button" :disabled="s.busy" @click="flow.removeAi(m.ref)">移出</button>
             </template>
           </li>

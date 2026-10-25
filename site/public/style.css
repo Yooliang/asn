@@ -130,3 +130,42 @@ footer a { margin-right: 16px; }
 .release .date { margin-left: 10px; font-size: 14px; font-weight: 400; color: var(--ink-soft); }
 .release ul { margin: 0; padding-left: 1.2em; }
 .release li { margin: 3px 0; font-size: 15px; }
+
+/* 各家 AI 支援總表（藍圖頁） */
+.legend { list-style: none; margin: 0 0 14px; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 6px 18px; font-size: 14px; color: var(--ink-soft); }
+.legend .st { margin-right: 8px; }
+.st { display: inline-block; padding: 0 10px; border-radius: 99px; font-size: 13px; font-weight: 700; line-height: 1.7; border: 1px solid; white-space: nowrap; }
+.st-ok { background: #def5e3; color: #1d6b34; border-color: #9bd3a8; }
+.st-unv { background: #fff4d6; color: var(--warn); border-color: #ecd28f; }
+.st-doing { background: #dcecfb; color: #0b5fb0; border-color: #8fb8dc; }
+.st-todo { background: #eceff3; color: #4a5a6c; border-color: #c3ccd6; }
+.st-tbc { background: #fff; color: #7a3b9c; border: 1px dashed #b68bd0; }
+.st-na { background: transparent; color: #7b8b9b; border-color: #d2dae2; font-weight: 400; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--glass-edge); border-radius: 14px; background: var(--glass); box-shadow: 0 2px 10px rgba(30, 90, 150, .1); }
+.matrix { border-collapse: collapse; width: 100%; min-width: 1040px; font-size: 14px; line-height: 1.55; }
+.matrix caption { text-align: left; padding: 10px 14px; font-size: 14px; color: var(--ink-soft); }
+.matrix th, .matrix td { padding: 10px 12px; border-top: 1px solid var(--line); vertical-align: top; text-align: left; }
+.matrix thead th { background: rgba(190, 222, 248, .7); font-size: 14px; white-space: nowrap; }
+.matrix tbody th { white-space: nowrap; background: rgba(255, 255, 255, .55); position: sticky; left: 0; }
+.matrix tbody tr:nth-child(even) td { background: rgba(255, 255, 255, .35); }
+.matrix .kind { display: block; font-size: 12px; font-weight: 400; color: var(--ink-soft); }
+.matrix td p { margin: 6px 0 0; color: var(--ink-soft); }
+.matrix .refs { margin-left: 6px; font-size: 12px; color: #0b5fb0; white-space: nowrap; }
+.matrix .note-cell { color: var(--ink-soft); font-size: 13px; min-width: 190px; }
+@media (min-width: 1200px) {
+  .table-wrap { width: 1120px; margin-left: -40px; }   /* 總表欄位多，比內文寬一點 */
+}
+@media (max-width: 760px) {
+  .table-wrap { overflow: visible; border: 0; background: none; box-shadow: none; }
+  .matrix, .matrix caption, .matrix tbody, .matrix tr, .matrix th, .matrix td { display: block; min-width: 0; width: 100%; }
+  .matrix thead { position: absolute; left: -9999px; }
+  .matrix caption { padding: 0 0 8px; }
+  .matrix tbody tr { margin: 0 0 14px; border: 1px solid var(--glass-edge); border-radius: 14px; background: var(--glass); overflow: hidden; box-shadow: 0 2px 10px rgba(30, 90, 150, .1); }
+  .matrix tbody th { position: static; font-size: 17px; border-top: 0; background: rgba(190, 222, 248, .7); }
+  .matrix .kind { display: inline; margin-left: 8px; font-size: 13px; }
+  .matrix tbody tr:nth-child(even) td { background: none; }
+  .matrix td { border-top: 1px solid var(--line); padding: 8px 14px; }
+  .matrix td::before { content: attr(data-label); display: block; font-size: 12px; font-weight: 700; color: var(--ink); margin-bottom: 2px; }
+  .matrix td .st { margin-right: 4px; }
+  .matrix .note-cell { min-width: 0; }
+}

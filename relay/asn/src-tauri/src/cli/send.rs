@@ -23,7 +23,7 @@ fn usage() -> String {
   asn send --to <成員代號 | 節點/視窗名> --body \"<內文>\" (--reply | --no-reply) [--reply-to <信件id>]
   asn send --room <群組id> --body \"<內文>\"
   --reply | --no-reply  寄給成員／視窗（含回信 --reply-to）時二選一、一定要給，兩個不能同時給：
-                     --reply＝我在等對方回信（收發室 10 分鐘沒收到回覆會提醒）；--no-reply＝只是告知，不用回、不會提醒。
+                     --reply＝我在等對方回信（ASN 10 分鐘沒收到回覆會提醒）；--no-reply＝只是告知，不用回、不會提醒。
                      結果以欄位送給後端，不會在內文加標記。--room 群組本來就不計時，給了會忽略（印一行說明）。
   --body-file <檔>   內文從檔案讀；--body -  內文從 stdin 讀
   --file <路徑>      附件，可重複，一封至多 {MAX_FILES} 個（--to、--room 都能用；內文可省略，只有附件時內文就是附件清單）。

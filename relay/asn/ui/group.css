@@ -32,7 +32,6 @@
 .gs-members .gs-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gs-empty{color:var(--muted);font-size:13px}
 .gs-badge{flex:none;font-size:10px;padding:1px 6px;border-radius:9px;background:var(--panel-head);color:var(--title-fg)}
-.gs-allow{flex:none;display:flex;align-items:center;gap:4px;font-size:12px;color:var(--muted)}
 .gs-av,.spk-av{flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;font-size:12px;font-weight:700;color:#fff;vertical-align:middle}
 .gs-av.human,.spk-av.is-human{border-radius:50%;background:#3b82c4}
 .gs-av.ai,.spk-av.is-ai{border-radius:7px;background:#7b6bc9}

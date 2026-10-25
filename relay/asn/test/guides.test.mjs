@@ -20,8 +20,11 @@ test('指引清單：五篇、順序與鍵固定、每篇有標題與副標、�
 
 test('指引內容的出處：各篇提到的關鍵步驟都在（對照 repo 文件）', () => {
   const text = k => guideByKey(k).blocks.map(b => b.t).join('\n')
-  assert.ok(/1 到 40 個字/.test(text('start')) && /收發室/.test(text('start')) && /不會回報給收發室/.test(text('start')))
-  assert.ok(/安裝\.cmd/.test(text('bridge')) && /邀請碼/.test(text('bridge')) && /Node\.js 22/.test(text('bridge')) && /bridge\.log/.test(text('bridge')) && /解除安裝\.cmd/.test(text('bridge')))
+  assert.ok(/1 到 40 個字/.test(text('start')) && /不會回報給別人/.test(text('start')))
+  // 「讓這台電腦的 Claude 視窗出現在名單上」：現在是「裝好 ASN 電腦版並登入就自動出現」，不再教人裝舊版 Node 橋
+  // （照舊版步驟裝會讓內建的收發信功能讓步）；只剩紀錄檔位置與「舊版已不需要」的提醒
+  assert.ok(/登入/.test(text('bridge')) && /固定開啟/.test(text('bridge')) && /bridge\.log/.test(text('bridge')) && /改由 ASN 負責/.test(text('bridge')))
+  assert.ok(!/邀請碼|Node\.js 22|解除安裝\.cmd|zip/.test(text('bridge')), '不再有舊版 Node 橋的安裝步驟')
   assert.ok(/ASN_RELAY_KEY/.test(text('cloud')) && /boot\.sh/.test(text('cloud')) && /inbox\.mjs/.test(text('cloud')) && /send\.mjs/.test(text('cloud')) && /--reply-to/.test(text('cloud')))
   assert.ok(/asn-cli room --rooms/.test(text('groups')) && /--room-read/.test(text('groups')) && /唯讀|只讀|只能「看」/.test(text('groups')))
   for (const w of ['沒回覆', '名字改了', '狀態燈', '震動']) assert.ok(guideByKey('faq').blocks.some(b => b.k === 'h' && b.t.includes(w)), w)
@@ -34,6 +37,7 @@ test('守門：說明裡沒有金鑰、內部網址與後台網址、使用者�
   assert.ok(!/sk-[A-Za-z0-9]{10,}|eyJ[A-Za-z0-9_-]{20,}|[A-Za-z0-9+/]{40,}={0,2}/.test(all), '不像金鑰的長字串')
   assert.ok(!/[A-Za-z]:\Users\|cwen0708|D:\Github|C:\Users/.test(all), '不放個人路徑')
   assert.ok(all.includes('%USERPROFILE%'), '用 %USERPROFILE% 的通用寫法')
+  assert.ok(!all.includes('收發室'), '對使用者不說「收發室」（小良哥 #38、#104）：說「ASN」或實際做什麼')
   for (const g of GUIDES) for (const b of g.blocks) assert.ok(!/<[a-z/][^>]*>/i.test(b.t), `${g.key} 不放 HTML`)
 })
 

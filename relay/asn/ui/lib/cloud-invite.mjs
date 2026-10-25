@@ -115,7 +115,7 @@ export const CloudInvitePanel = {
     return { signedIn, rows, busy, msg, form, name, created, reveal, copiedKey, copiedInvite, confirmId, justJoined, COPY_NOTE, INVITE_NOTE, create, copyKey, copyInvite, done, revoke, approveForm, code, hostName, hostId, approved, approve }
   },
   template: `<section class="set-card cloud-set" aria-label="雲端代理">
-      <header class="vendor-h"><b>雲端代理</b><small>讓跑在雲端的 AI 代理加入收發室</small></header>
+      <header class="vendor-h"><b>雲端代理</b><small>讓跑在雲端的 AI 代理加入 ASN</small></header>
       <small v-if="signedIn === false">請先在上面的「登入狀態」登入，才能邀請雲端代理。</small>
       <template v-else>
         <div v-if="created" class="cloud-created">

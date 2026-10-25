@@ -38,7 +38,7 @@ pub(crate) const CONSENT_OFF: &str = "這台電腦沒有開啟「允許遠端開
 pub(crate) const HANDOFF_SUBDIR: &str = "交接";
 /// ACP 工作者（收發室自己跑的背景工作者）只支援詳情、重開、接班換手；其他操作與 Claude 以外的夥伴一律回這句
 pub(crate) const UNSUPPORTED: &str = "這類夥伴不支援這個操作";
-const PROTECTED: &str = "收發室與 ASN 自己的視窗不能操作";
+const PROTECTED: &str = "ASN 通知與 ASN 自己的視窗不能操作";
 const CHAIN_MAX: usize = 12;
 
 /// 請前任寫交接的信
@@ -414,7 +414,7 @@ impl PartnerOps {
                 if op.op == "restart" {
                     self.stage(op, "closing");
                     return match acp.restart(&op.name) {
-                        Ok(r) => ok("已結束工作者的程序，收發室會重新啟動它，對話保留", Some(r)),
+                        Ok(r) => ok("已結束工作者的程序，ASN 會重新啟動它，對話保留", Some(r)),
                         Err(e) => failed(e),
                     };
                 }
@@ -477,7 +477,7 @@ impl PartnerOps {
             Ok(r) => {
                 let name = r.get("name").and_then(Value::as_str).unwrap_or("").to_string();
                 let already = r.get("already").and_then(Value::as_bool) == Some(true);
-                let detail = format!("{}專屬工作者「{name}」，之後寄給它的信會接在同一段對話後面。請先關掉終端機那個 grok（收發室不會替你關），兩邊同時用同一段對話可能互相覆蓋", if already { "已經接手過了：" } else { "已開好" });
+                let detail = format!("{}專屬工作者「{name}」，之後寄給它的信會接在同一段對話後面。請先關掉終端機那個 grok（ASN 不會替你關），兩邊同時用同一段對話可能互相覆蓋", if already { "已經接手過了：" } else { "已開好" });
                 ok(detail, Some(json!({ "kind": "adopt", "name": name, "already": already })))
             }
             Err(e) => failed(e),

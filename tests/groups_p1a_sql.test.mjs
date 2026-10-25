@@ -426,10 +426,10 @@ test('實跑：額度——每人每群組每小時 20 則、每則 @ 最多 8 �
   assert.equal(read.messages.filter(m => m.body.startsWith('醒醒')).filter(m => m.wake_ok === false).length, 1)
   // 同租戶不限：小良自己點名自己的 AI 不計
   for (let i = 0; i < 12; i++) assert.deepEqual((await post(db2, { node: P1, room: g2.id, signed: U1, body: '自己人' + i, mentions: [`${W1}~財務`] })).suppressed, [])
-  // 主人關掉「接受別人點名」
+  // 主人關掉「接受別人點名」（舊版 App 還能設；20261025030000 起不再生效）
   assert.deepEqual(await rpc(db2, 'asn_relay_group_allow_others', { p_user: U1, p_node: P1, p_room: g2.id, p_key: `${W1}~財務`, p_allow: false }), { ok: true, allow: false })
   await db2.exec(`delete from relay.room_wakes`)
-  assert.equal((await post(db2, { node: Q2, room: g2.id, signed: U2, body: '再醒', mentions: [refs] })).suppressed.length, 1)
+  assert.equal((await post(db2, { node: Q2, room: g2.id, signed: U2, body: '再醒', mentions: [refs] })).suppressed.length, 0, '20261025030000 起 AI 永遠可被點名：關掉也不再擋（#119）')
   // 只有那個 AI 的主人能改
   assert.equal((await rpc(db2, 'asn_relay_group_allow_others', { p_user: U2, p_node: Q2, p_room: g2.id, p_key: `${W1}~財務`, p_allow: true })).error, 'not_found')
 })

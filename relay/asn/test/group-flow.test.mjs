@@ -215,3 +215,9 @@ test('加我的另一個 AI：⋯ 選單（電腦版與手機版）有入口，�
   assert.deepEqual(t.flow.state.addable.map(a => a.label).sort(), ['報表', '財務'])
   t.flow.openManage('g1'); assert.equal(t.flow.state.focusAdd, false)
 })
+
+test('畫面上沒有「接受別人點名」勾選：AI 永遠可被點名（#119）', async () => {
+  const fs = await import('node:fs')
+  const sheet = fs.readFileSync(new URL('../ui/lib/group-sheet.mjs', import.meta.url), 'utf8')
+  assert.doesNotMatch(sheet, /接受別人點名|gs-allow|setAllow/)
+})
