@@ -1,11 +1,11 @@
 {
-  "version": "0.1.69",
-  "notes": "手機與電腦的「開新夥伴」可以開出 Grok、Gemini、pi、失敗會講清楚原因、設定頁新增「pi 與 ASN 互通」、視窗改名後群組的叫醒順序標籤不再消失、官網與說明去掉舊名詞",
-  "pub_date": "2026-10-25T08:29:00.454Z",
+  "version": "0.1.70",
+  "notes": "開新夥伴：這台電腦的 Grok 不在系統路徑時也能找到、Gemini 夥伴實測可收發",
+  "pub_date": "2026-10-25T08:52:08.468Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjJmM2xIVE1RalR0TVRTVTlCM0NJMjdOQjN2ZEYySWhjVmhFbnFydVpGSkxaenVCM0VvcXhmWkZSQWZNeXVXclZvSGx5bUoyU3RiZThKYk5paTNwK1FrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyOTE2OTQwCWZpbGU6QVNOXzAuMS42OV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjY5Ck5Wak1vRGVVb1o1aCtOU3l6NGZRTkwrQjdWTnMvU0ROWDBXd0JnbzhyNU1CbEJmOEZ5WnNVUmpOa2Vuc3E4M0MwRUFHb1lxU2FMZEovWkQ1L3NpK0JRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.69_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjc4aFAwZmRFVEFiell6MG5ycjY5dGZhTW0ya3BIVEhINWNLRGZwMWhXY0dEaGI4YWpzTVhSN2d3YWl1VDdXeDJkVnp0LzJBaGZaZWFFemNpem9pa0FrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyOTE4MzI4CWZpbGU6QVNOXzAuMS43MF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjcwClRsTHV2cXJFUktFWkJXaTFhWGRPRjdjcU9jNFIxNTRxdll3dzRISFg2SmJ6VVlhLy93Y2tudkYyMisyWEJhZkdyRjVsdzBGS2dyR2pscEhqKzZlMEFRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.70_x64-setup.exe"
     }
   }
 }
