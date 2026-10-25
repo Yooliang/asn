@@ -350,3 +350,8 @@ html,body.m-body{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff
 .m-chat .chatpane-main{background:none}
 .m-chat .conv,.m-chat .compose-row{background:transparent}
 .m-chat .conv-main,.m-chat .compose-main{background:rgba(255,255,255,.62)}
+.m-row-ic{flex:none;width:24px;height:24px;color:var(--muted)}
+.m-set-list{padding:6px 12px;align-items:stretch}
+.m-set-detail{padding:0;gap:0;background:var(--panel-soft)}
+.m-set-detail > .m-card:first-child{align-items:stretch}
+.m-set-detail > .m-card-av{align-items:center}
