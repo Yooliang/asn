@@ -71,6 +71,7 @@ async fn boot(fr: &FakeRelay, work: &Path, home: &Path, sessions: &Path, sink: A
         events: tx,
         notify: Arc::new(move |n| n2.lock().unwrap().push(n)),
         pids: PidBook::new(work),
+        data_dir: None,
     };
     let set = engines::build(&ctx, Some(spec)).expect("有載入的引擎");
     let mut core = new_core(fr, work, sessions, sink, now());
@@ -787,7 +788,7 @@ async fn codex_不可用_版本太舊_名單不列_deliver_同步失敗() {
     assert!(h.log_text().contains("比已驗證的最低版本"), "{}", h.log_text());
     // 引擎本身：deliver 同步 throw（橋把信留在 inbox）
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let ctx = EngineCtx { log: Arc::new(|_| {}), work_dir: d.path().to_path_buf(), home: d.path().to_path_buf(), agents_file: d.path().join("a.json"), env: Arc::new(cx.env.clone()), events: tx, notify: Arc::new(|_| {}), pids: PidBook::new(d.path()) };
+    let ctx = EngineCtx { log: Arc::new(|_| {}), work_dir: d.path().to_path_buf(), home: d.path().to_path_buf(), agents_file: d.path().join("a.json"), env: Arc::new(cx.env.clone()), events: tx, notify: Arc::new(|_| {}), pids: PidBook::new(d.path()), data_dir: None };
     let e = engines::codex::CodexEngine::new(ctx);
     e.probe().await;
     assert!(!e.usable());
@@ -1127,4 +1128,14 @@ async fn acp_接手_寫檔最多詢問_工作資料夾白名單換成那段對�
     assert_eq!(info["permissions"]["execute"], "deny");
     assert_eq!(info["cwd"].as_str(), Some(cwd.display().to_string().as_str()));
     assert_eq!(admin.info("Grok").unwrap()["permissions"]["write"], "allow", "既有的 Grok 工作者設定沒被動到");
+}
+
+#[tokio::test]
+async fn 開新夥伴的請求由核心的定時檢查消化_失敗有中文原因記進引擎_log() {
+    let mut h = eh(None, &[], "acp", &[]).await;
+    std::fs::write(h.work.path().join("partner-queue.jsonl"), "{\"profile\":\"不存在的模型\",\"name\":\"小格\",\"cwd\":\"C:/\"}\n").unwrap();
+    h.core.tick(now()).await;
+    let t = h.log_text();
+    assert!(t.contains("partner-queue: 沒能開出工作者「小格」") && t.contains("不存在的模型"), "{t}");
+    assert!(!h.work.path().join("partner-queue.jsonl").exists(), "請求被認領");
 }

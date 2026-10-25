@@ -17,6 +17,7 @@ pub mod codex;
 pub mod codex_ops;
 pub mod codex_state;
 pub mod grok_adopt;
+pub mod partner_queue;
 pub mod pi;
 // 切換 pi 視窗模型的檔案管道（#235）；選單接線由 partner_ops 接上前先允許未使用
 #[allow(dead_code)]
@@ -67,6 +68,8 @@ pub trait Engine: Send + Sync {
     /// 在 tokio 執行環境裡呼叫：啟動長駐的工作者／偵測
     fn start(&self);
     fn stop(&self);
+    /// 橋的定時檢查（每幾秒一次）呼叫：引擎順手處理自己的待辦（ACP：消化「開新夥伴」寫下的背景工作者請求）。預設什麼都不做
+    fn poll(&self) {}
     /// 遠端管理這個引擎的工作者（只有 ACP 有）
     fn acp_admin(&self) -> Option<Arc<dyn acp_admin::AcpAdmin>> {
         None
@@ -197,6 +200,8 @@ pub struct EngineCtx {
     pub events: EventTx,
     pub notify: Notifier,
     pub pids: Arc<PidBook>,
+    /// ASN 資料夾（launch-prefs.json 在這裡；開新夥伴佇列驗證工作資料夾授權用）；測試與沒有資料夾的情況是 None
+    pub data_dir: Option<PathBuf>,
 }
 
 impl EngineCtx {
@@ -242,6 +247,12 @@ impl EngineSet {
             }
         }
         changed
+    }
+    /// 定時檢查：各引擎處理自己的待辦
+    pub fn poll(&self) {
+        for e in &self.engines {
+            e.poll();
+        }
     }
     /// 這個引擎代號的信是不是「寄回成功才 ack」
     pub fn ack_after_reply(&self, engine: &str) -> bool {
@@ -315,7 +326,8 @@ pub fn build(ctx: &EngineCtx, spec: Option<&str>) -> Option<Arc<EngineSet>> {
     if spec.is_some_and(|s| s.split(',').any(|x| x.trim().eq_ignore_ascii_case("aegis"))) {
         v.push(Arc::new(aegis::AegisEngine::new(ctx.clone())));
     }
-    if want_acp {
+    // 內建橋自己要能消化「開新夥伴」寫下的背景工作者請求（partner-queue.jsonl），所以沒設 ASN_ENGINES 時 acp 一律載入（沒有 agents.json 也一樣）
+    if want_acp || spec.is_none() {
         v.push(Arc::new(acp::AcpEngine::new(ctx.clone(), None)));
     }
     if want_codex {

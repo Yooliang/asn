@@ -1503,6 +1503,9 @@ impl Core {
     /// 定時檢查（每 tick_ms 一次）：轉交逾時、等回覆逾時、遲到回覆保留期
     pub async fn tick(&mut self, now: u64) {
         self.now = now;
+        if let Some(e) = &self.engines {
+            e.poll();
+        }
         self.release_held(now).await;
         self.flush_owner_receipts(now).await;
         // 自動回信：自己視窗的忙碌／閒置變了就立刻重報名單（防抖間隔同本機視窗監看）
