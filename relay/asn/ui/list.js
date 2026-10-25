@@ -34,7 +34,7 @@ import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaun
 import { CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, buddyConsoleItem, consoleReq, engineForProfile,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice, foregroundOnlyProfile, withTimeout } from './lib/partner-launch-ui.mjs'
 import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
 import { PartnerOpDialog, loadOpsContext } from './lib/partner-ops-ui.mjs'
-import { initialOpsCtx, sharedWhy } from './lib/partner-ops.mjs'
+import { initialOpsCtx, partnerEngine, sharedWhy } from './lib/partner-ops.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
 import { backgroundRestoreNoticeText, collectLaunchFailures, findBackgroundTimeouts, launchFailedNoticeText } from './lib/partner-launch-notify.mjs'
@@ -515,8 +515,9 @@ function subEvent(ev, delay = 0) {
 // 右鍵選單的說明小字：同一個原因影響多個項目只在最上方寫一次（notes），各項目只留自己獨有的原因（why）
 const buddyMenuView = computed(() => sharedWhy([
   { key: 'console', ok: !buddyConsoleItemView.value.disabled, reason: buddyConsoleItemView.value.tip },
-  ...buddyOpItems.value.map(i => (i.key === 'model' ? { key: 'model', ok: buddySubEnabled.value, reason: buddyModelWhy.value } : i)),
+  ...buddyOpItems.value.map(i => (i.key === 'model' && !buddyIsPi.value ? { key: 'model', ok: buddySubEnabled.value, reason: buddyModelWhy.value } : i)),
 ]))
+const buddyIsPi = computed(() => partnerEngine(buddyMenuFriend.value) === 'pi')   // pi 的「切換模型」沒有固定清單：不用子選單，開對話框輸入
 const buddyWhyOf = key => buddyMenuView.value.rows.find(r => r.key === key)?.why ?? ''
 const buddyModelLabel = computed(() => '切換模型 ▸')   // 文字固定，不隨狀態改字；不能用的原因寫在下面一行
 // 「切換模型」固定出現；不能用時的原因：這個夥伴根本不適用（modelSwitchBlock）→ 檢查中 → 查到切不了的原因
@@ -1252,7 +1253,7 @@ const app = createApp({
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
       opDlg, closeOpDlg, buddyOpItems, openPartnerOp, archiveNote, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddyConsoleItemView, buddyMenuOpenChat, toggleBuddyConsole,
-      buddyModel, buddyModelLabel, buddyModelWhy, buddyMenuView, buddyWhyOf, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,
+      buddyModel, buddyIsPi, buddyModelLabel, buddyModelWhy, buddyMenuView, buddyWhyOf, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,
       launchToolRows, launchPrefs, launchCwdText, saveLaunchPrefs, setLaunchCwdText,
     }
   },

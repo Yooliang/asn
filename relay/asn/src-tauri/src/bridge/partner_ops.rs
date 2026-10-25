@@ -104,6 +104,17 @@ pub(crate) trait OpsEnv: Send + Sync {
     /// 等前任寫完交接檔的最長時間與輪詢間隔
     fn handoff_wait_ms(&self) -> u64;
     fn handoff_poll_ms(&self) -> u64;
+    /// pi 視窗的登記檔與控制檔所在的使用者家目錄（測試換成暫存資料夾）
+    fn pi_home(&self) -> PathBuf {
+        crate::identity::home_dir()
+    }
+    /// 等 pi 擴充回報「切換模型」結果的最長時間（pi 忙碌時擴充不處理，不要硬等太久）與等待一次
+    fn pi_wait_ms(&self) -> u64 {
+        15_000
+    }
+    fn pi_sleep(&self, ms: u64) {
+        std::thread::sleep(std::time::Duration::from_millis(ms));
+    }
 }
 
 pub(crate) struct SystemOpsEnv {
@@ -223,6 +234,19 @@ fn unconfirmed(detail: impl Into<String>) -> OpResult {
 /// 外掛回報的文字：保留換行（其他控制字元變空白）、去頭尾空白、截短
 fn keep_text(s: &str, max: usize) -> String {
     s.replace("\r\n", "\n").chars().map(|c| if c == '\n' { c } else if c == '\r' { '\n' } else if c.is_control() { ' ' } else { c }).collect::<String>().replace("\n\n\n", "\n\n").trim().chars().take(max).collect()
+}
+
+/// 後台的模型欄位不收 `/`，所以畫面把「提供者/模型」寫成「提供者[模型]」送來；這裡還原。也接受直接帶斜線與只有模型
+fn pi_model_spec(wire: &str) -> String {
+    let w = wire.trim();
+    if let Some((p, rest)) = w.split_once('[') {
+        if let Some(m) = rest.strip_suffix(']') {
+            if !p.is_empty() && !m.is_empty() && !m.contains(['[', ']']) {
+                return format!("{p}/{m}");
+            }
+        }
+    }
+    w.to_string()
 }
 
 /// 等待時間的中文寫法（滿一分鐘用分鐘，否則秒）
@@ -407,6 +431,25 @@ impl PartnerOps {
         }
     }
 
+    /// 名單上有這個 pi 視窗（pi 擴充的登記檔，程序還活著），而且同名的 Claude 視窗不存在（同名時不猜，照 Claude 處理）
+    fn is_pi_window(&self, name: &str) -> bool {
+        let os = self.env.os();
+        super::engines::pi_control::window_session_id(&self.env.pi_home(), name, self.env.now_ms(), |p| os.alive(p)).is_some() && self.find_target(name).is_err()
+    }
+
+    /// pi 視窗：目前只開放「切換模型」，走擴充的控制檔管道（見 engines/pi_control.rs）。pi 忙碌時擴充不處理，逾時回中文原因
+    fn execute_pi(&self, op: &Op) -> OpResult {
+        if op.op != "model" {
+            return failed("pi 視窗目前只能切換模型，其他操作尚未開放");
+        }
+        let os = self.env.os();
+        let env = super::engines::pi_control::SetModelEnv { now: &|| self.env.now_ms(), alive: &|p| os.alive(p), sleep: &|ms| self.env.pi_sleep(ms), wait_ms: self.env.pi_wait_ms(), poll_ms: 500 };
+        match super::engines::pi_control::set_model(&self.env.pi_home(), &op.name, &pi_model_spec(&op.model), &env) {
+            Ok(v) => ok("已切換模型", Some(json!({ "engine": "pi", "model": v.get("model"), "provider": v.get("provider") }))),
+            Err(e) => failed(e),
+        }
+    }
+
     /// 接手使用者自己開的 grok：用名單上的 pid 查 grok 自己的使用中對話登記，唯一才採用，再讓專屬的 Grok 工作者載入同一段對話。
     /// 絕不結束、不操作那個 grok 程序（接手後請使用者自己先關掉）；只讀登記檔與 sessions 的資料夾名稱，不讀對話內容。
     fn execute_adopt(&self, op: &Op, pid: u32) -> OpResult {
@@ -562,6 +605,9 @@ impl PartnerOps {
         }
         if let Some(acp) = self.acp_admin().filter(|a| a.has_worker(&op.name)) {
             return self.execute_acp(op, &*acp);
+        }
+        if self.is_pi_window(&op.name) {
+            return self.execute_pi(op);
         }
         if op.op == "restart" {
             return failed(UNSUPPORTED);

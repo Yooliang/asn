@@ -49,6 +49,10 @@ export function opDialogText(op, name, device = '', engine = 'claude') {
   const where = device ? `在「${device}」上的` : ''
   const title = { info: `${name} 的詳情`, rename: '改名', close: '關閉視窗', handover: '接班換手', resume: '喚醒', restart: '重開' }[op] ?? OP_LABEL[op] ?? ''
   switch (op) {
+    case 'model': return {
+      title, lead: `要把「${name}」${where}視窗的模型換成哪一個？可以只寫模型，或寫「提供者/模型」，例如 anthropic/claude-sonnet-5。`, ok: '切換', auto: false,
+      points: ['只換這個視窗目前用的模型，視窗不會關，對話保留', 'pi 正在工作時不會馬上換，最多等十幾秒，沒換成會告訴你原因'],
+    }
     case 'rename': return { title, lead: `要把「${name}」改成什麼名字？名字只能用英數、連字號、中文，1～40 字，不能以連字號開頭。`, points: [], ok: '改名', auto: false }
     case 'close': if (engine === 'acp') return { title: '關閉', lead: `要關閉「${name}」${where}背景工作者嗎？會結束它的程序，這次不再收信，名單上暫時看不到；不會改設定檔，重啟 ASN 後會恢復。`, points: [], ok: '關閉', auto: false }
       return { title, lead: `關掉「${name}」${where}視窗？對話記錄會留著。`, points: [], ok: '關閉視窗', auto: false }
@@ -83,7 +87,7 @@ export const PartnerOpDialog = {
     const { ref, reactive, computed, onMounted, onBeforeUnmount } = globalThis.Vue
     const name = props.friend.agent || props.friend.nick
     const text = computed(() => opDialogText(props.op, name, props.friend.device, dialogEngine(props.friend)))
-    const form = reactive({ newName: name, note: '', ack: false })
+    const form = reactive({ newName: name, note: '', ack: false, model: '' })
     const st = reactive({ phase: 'form', error: '', busy: false, view: null })
     let closed = false
     async function submit() {
@@ -107,6 +111,9 @@ export const PartnerOpDialog = {
     <p class="launch-notice-body">{{ text.lead }}</p>
     <label class="op-field" v-if="op === 'rename'">新名字
       <input class="set-input" type="text" v-model="form.newName" maxlength="40" aria-label="新名字" @keydown.enter.prevent="submit">
+    </label>
+    <label class="op-field" v-if="op === 'model'">模型
+      <input class="set-input" type="text" v-model="form.model" maxlength="101" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="例如 anthropic/claude-sonnet-5" aria-label="模型" @keydown.enter.prevent="submit">
     </label>
     <ul class="model-points" v-if="text.points.length"><li v-for="p in text.points" :key="p">{{ p }}</li></ul>
     <label class="op-field" v-if="text.ack"><input type="checkbox" v-model="form.ack" aria-label="確認接手前要先關掉終端機"> {{ text.ack }}</label>

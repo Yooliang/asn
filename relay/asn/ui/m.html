@@ -412,6 +412,14 @@
           <button type="button" class="m-btn m-btn-big" @click="submitOp('rename')">{{ opsText.ok }}</button>
           <button type="button" class="m-btn m-ops-cancel" @click="ops.phase = 'menu'; ops.error = ''">返回</button>
         </template>
+        <template v-else-if="ops.phase === 'model' && opsIsPi">
+          <p class="m-ops-lead">{{ opsText.lead }}</p>
+          <ul class="m-ops-points" v-if="opsText.points.length"><li v-for="p in opsText.points" :key="p">{{ p }}</li></ul>
+          <input class="set-input m-ops-input" v-model="ops.model" maxlength="101" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="例如 anthropic/claude-sonnet-5" aria-label="模型" @keydown.enter.prevent="submitOp('model')">
+          <p class="m-err" v-if="ops.error" role="alert">{{ ops.error }}</p>
+          <button type="button" class="m-btn m-btn-big" @click="submitOp('model')">{{ opsText.ok }}</button>
+          <button type="button" class="m-btn m-ops-cancel" @click="ops.phase = 'menu'; ops.error = ''">返回</button>
+        </template>
         <template v-else-if="ops.phase === 'model'">
           <button v-for="m in opsModels" :key="m.id" type="button" class="m-ops-item" @click="ops.model = m.id; submitOp('model')"><span class="m-opt-t">{{ m.label }}</span></button>
           <p class="m-note">{{ opsModelNote }}</p>
