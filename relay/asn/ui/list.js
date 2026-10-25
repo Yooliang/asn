@@ -30,6 +30,7 @@ import { nowPlayingLine, normalizeNowPlaying } from './lib/now-playing.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, normalizeClose, normalizeFrame, totalUnread, notifyFromSaved, notifyPlan, notifyWith } from './lib/prefs.mjs'
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
+import { PI_SETUP_TEXT, piSetupError, piSetupView } from './lib/pi-setup.mjs'
 import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
 import { CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, buddyConsoleItem, consoleReq, engineForProfile,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice, foregroundOnlyProfile, withTimeout } from './lib/partner-launch-ui.mjs'
 import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
@@ -327,6 +328,16 @@ async function refreshLaunchers() {
     for (const m of body?.machines ?? []) if (m?.node) map[m.node] = m.launcher
     remoteLaunchers.value = map
   } catch { /* 非 owner 或後台未就緒 */ }
+}
+// pi 與 ASN 互通（#240 方案 A）：狀態在後端查；安裝與移除一定要使用者在設定頁按同意才會呼叫，沒有任何自動安裝
+const piSetup = reactive({ raw: null, busy: false, confirm: false, msg: '' })
+async function loadPiSetup() {
+  try { piSetup.raw = await transport.piSetupStatus() } catch { piSetup.raw = null }
+}
+async function runPiSetup(call, doneText) {
+  if (piSetup.busy) return
+  piSetup.busy = true; piSetup.confirm = false; piSetup.msg = ''
+  try { piSetup.raw = await call(); piSetup.msg = doneText } catch (e) { piSetup.msg = piSetupError(e) } finally { piSetup.busy = false }
 }
 async function loadLaunchPrefs() {
   try {
@@ -669,6 +680,7 @@ async function pollLaunchResults() {
 void refreshCliTools()
 void refreshLaunchers()
 void loadLaunchPrefs()
+void loadPiSetup()
 setInterval(() => { void refreshLaunchers(); void pollLaunchResults() }, 15_000)
 // 語音：整合模式的對話分頁用這一份；設定存在 Rust 端的 voice.json（對話視窗也讀同一份）
 const voice = createVoiceUi({ invoke, listen, createMic, createAudio: browserAudio, reactive })
@@ -1175,6 +1187,7 @@ const app = createApp({
       autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual, status: updateStatus({ checking: upd.checking, phase: upd.phase, info: upd.info, lastCheck: upd.lastCheck, error: upd.checkErr, current: info.version }) },
       usage: { loading: usage.state.loading, error: usage.state.error, data: usage.state.data, updated: usage.state.updated },
       launch: { tools: launchToolRows.value, maxPerHour: launchPrefs.maxPerHour, cwdText: launchCwdText.value },
+      piSetup: piSetupView(piSetup.raw, piSetup),
       version: info.version,
       log: buildLogView({ entries: changelogEntries.value, current: info.version, available: upd.phase === 'idle' ? null : upd.info }),
     }))
@@ -1213,6 +1226,10 @@ const app = createApp({
         case 'usage-refresh': await usage.refresh(); break
         case 'launch-max': launchPrefs.maxPerHour = Number.isFinite(value) ? value : 6; await saveLaunchPrefs(); break
         case 'launch-cwd': setLaunchCwdText(String(value ?? '')); break
+        case 'pi-setup-ask': piSetup.confirm = true; piSetup.msg = ''; break
+        case 'pi-setup-cancel': piSetup.confirm = false; break
+        case 'pi-setup-install': await runPiSetup(() => transport.piSetupInstall(), PI_SETUP_TEXT.installed); break
+        case 'pi-setup-remove': await runPiSetup(() => transport.piSetupRemove(), PI_SETUP_TEXT.removed); break
         case 'avatar-remove': await removeAvatar(); break
         case 'avatar-upload': avBusy.value = true; try { say((await uploadAvatarFile(value, { toDataUrl: async u => u, setAvatar: v => core.setSelfAvatar(v) })).message) } finally { avBusy.value = false } break   // 分離視窗已在自己那邊裁好圖，送來的是 data URL
         default: break

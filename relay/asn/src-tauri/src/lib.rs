@@ -455,6 +455,28 @@ async fn launch_prefs_get(app: State<'_, App>) -> Result<Value, String> {
     launch::launch_prefs_get(app.data_dir.clone()).await
 }
 
+/// 讓使用者自己開的 pi 也能跟 ASN 互通（#240 方案 A）：查狀態、安裝、移除。安裝與移除要使用者在畫面上同意才會被呼叫
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+async fn pi_setup_status() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(launch::pi_setup::status_real).await.map_err(|e| e.to_string())
+}
+
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+async fn pi_setup_install() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(launch::pi_setup::install_real).await.map_err(|e| e.to_string())?
+}
+
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+async fn pi_setup_remove() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(launch::pi_setup::remove_real).await.map_err(|e| e.to_string())?
+}
+
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
@@ -1034,7 +1056,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_mod::claude_mod_status, claude_quota::claude_quota_all,
             codex_accounts::codex_account_current, usage::usage_summary,
