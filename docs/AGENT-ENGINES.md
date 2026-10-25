@@ -12,7 +12,7 @@
    - **接不到你已經開著的視窗。** 兩者的做法都是「由它們自己啟動 agent」：ACP 是「編輯器／程式把 agent 當子行程叫起來，用 stdio 講話」，AgentAPI 是「自己開一個模擬終端把 agent 包在裡面」。你自己在 Windows Terminal 開的 `claude`，兩者都碰不到。
    - 現在 Irori 能送進你開著的 Claude 視窗，靠的是 Claude Code 自己的「跨 session 訊息」（`ListAgents`／`SendMessage`，收發室用 `claude -p` 去呼叫它）。**這條路目前是唯一不改 Claude、又能進已開視窗的官方路**，不要拆。
    - **用「＋開新視窗」開的 Claude 視窗，本來就是一個真的互動式 Claude 視窗**（`Start-Process claude …`），所以 SendMessage 本來就接得到，**不需要為它改走 ACP**。改走 ACP 反而變成「看不見的背景工作」，還會碰到下一點的帳務規定。
-   - **對 Claude 用 ACP 有帳務風險**：ACP 的 Claude 轉接器是用 Anthropic 的 Agent SDK 寫的，而 Anthropic 官方文件寫明 Agent SDK 要用 API 金鑰，不准把 Pro／Max 訂閱登入轉給第三方程式用。現行收發室用的是「沒改過的 `claude -p`＋你自己的訂閱登入」，文件允許。結論：**Claude 不走 ACP。**
+   - **對 Claude 用 ACP 有帳務風險（來源與限定範圍，2026-10-26 查證）**：ACP 的 Claude 轉接器是用 Anthropic 的 Agent SDK 寫的。Anthropic 官方〈[Legal and compliance](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use)〉寫明：「開發產品或服務、包含用 Agent SDK 的，應使用 Claude Console 或支援的雲端廠商的 API 金鑰；Anthropic 不允許第三方開發者在自己的應用程式提供 Claude.ai 登入，或代使用者以 Free／Pro／Max 方案憑證發送請求」，也不得收集、儲存或轉手 Claude.ai 憑證。**但這不是「完全不能做」**：同一份文件說，使用者自己在未修改的 Claude Code 登入自己的訂閱沒有問題；另外〈[Use the Claude Agent SDK with your Claude plan](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan)〉（Claude 說明中心）2026-10-07 更新寫「你仍可用 Claude Agent SDK、`claude -p` 與第三方 app 吃你的訂閱額度」，Max／Team 並含每月 API 額度，且 2026-06-15 曾暫停原先宣布的收緊。所以結論是**灰色地帶**：ASN 是對外發佈的產品，若由 ASN 的轉接器帶著使用者的訂閱登入去跑 Agent SDK，可能落入「第三方產品代為使用方案憑證」；使用者自己本機跑自己的登入則較沒問題，但規則仍在變。現行收發室用的是「沒改過的 `claude -p`＋你自己的訂閱登入」，文件允許。目前決定：**Claude 不走 ACP**（保守作法，要改需小良哥決定，必要時向 Anthropic 業務確認）。
    - AgentAPI 更不用考慮：它的 GitHub 專案 **2026-09-13 已封存、不再維護**。
 
 2. **「pi shell 會自動找到電腦上有的 AI 嗎？」**
@@ -133,7 +133,7 @@
 
 | 登錄名 | 版本 | 啟動 | 底層 | 備註 |
 |---|---|---|---|---|
-| `claude-acp`（Claude Agent） | 0.85.1 | `npx @agentclientprotocol/claude-agent-acp` | Claude Agent SDK | **帳務限制，見第 1 節** |
+| `claude-acp`（Claude Agent） | 0.85.1 | `npx @agentclientprotocol/claude-agent-acp` | Claude Agent SDK | **帳務限制（灰色地帶），見第 1 節** |
 | `codex-acp` | 2.1.1 | `npx @agentclientprotocol/codex-acp` | 新版建在 Codex App Server | 舊倉庫 `zed-industries/codex-acp` 2026-07-22 封存；支援 ChatGPT 訂閱登入，但「遠端專案不能用」 |
 | `gemini`（Gemini CLI） | 0.62.0 | `npx @google/gemini-cli --acp` | 原生 | 這台的帳號層級已被拒 |
 | `antigravity-acp`（Google） | 1.3.0 | 下載 `agy_acp_server`（有 windows-x86_64） | Google 官方 | 要另外登入，體積大 |
