@@ -14,7 +14,7 @@
 //! - 切換模型：關閉後照原命令列重開，去掉舊的 `-m`／`--model`，在 `resume` 前面插入 `-m <新模型>`；
 //!   重開後確認出現新的 codex 程序（不是舊 pid、命令列帶著新模型與同一個接續目標）。
 //! - 對話進行中（名單狀態忙碌）不動，回「等它閒置」。
-use crate::launch::switch::{asn_host_of, close_session, in_windows_terminal, is_idle, kill_set, manual_command, parse_cmdline, wait_until, Os, Plan, Proc, Timing};
+use crate::launch::switch::{asn_host_of, close_session, in_windows_terminal, is_idle, kill_set_with, manual_command, parse_cmdline, wait_until, Os, Plan, Proc, Timing};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
@@ -136,7 +136,7 @@ pub(crate) fn resolve(os: &dyn Os, table: &[Proc], name: &str, thread_id: &str) 
 /// 守門：算出這次允許結束的 pid（含它的後代與直接父殼）。目標不在允許清單裡（例如是 ASN 自己或它的祖先）就拒絕
 fn guard(os: &dyn Os, table: &[Proc], t: &CodexTarget) -> Result<(Option<u32>, Vec<u32>, bool), String> {
     let host = asn_host_of(os, table, t.pid);
-    let allowed = kill_set(table, t.pid, host, os.own_pid());
+    let allowed = kill_set_with(table, t.pid, host, os.own_pid(), &|p| os.started_ms(p));
     if !allowed.contains(&t.pid) {
         return Err("守門：這個程序不允許結束".into());
     }

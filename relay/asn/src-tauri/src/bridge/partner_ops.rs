@@ -662,7 +662,7 @@ impl PartnerOps {
         }
         let table = os.processes();
         let host = switch::asn_host_of(os, &table, t.pid);
-        let allowed = switch::kill_set(&table, t.pid, host, os.own_pid());
+        let allowed = switch::kill_set_with(&table, t.pid, host, os.own_pid(), &|p| os.started_ms(p));
         if !allowed.contains(&t.pid) {
             return Err("守門：這個程序不允許結束".into());
         }
