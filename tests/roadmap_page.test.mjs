@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { parseChangelog, injectReleases, KEEP } from '../site/make-roadmap-page.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
-const read = p => fs.readFileSync(path.join(root, p), 'utf8')
+const read = p => fs.readFileSync(path.join(root, p), 'utf8').replace(/\r\n/g, '\n')   // Windows 工作樹是 CRLF，統一成 LF 再比對
 const page = read('site/public/roadmap.html')
 const changelog = read('relay/asn/CHANGELOG.md')
 
