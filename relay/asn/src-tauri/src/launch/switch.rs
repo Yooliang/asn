@@ -235,6 +235,17 @@ pub(crate) fn is_idle(status: Option<&str>) -> bool {
     status.map(|s| s.trim().eq_ignore_ascii_case("idle")).unwrap_or(false)
 }
 
+/// 工作資料夾正規化：去掉 Windows 的 \\?\ 前綴與尾端斜線（磁碟根目錄 C:\ 保留）。比對用，不改大小寫
+pub(crate) fn normalize_cwd(p: &str) -> String {
+    let t = p.trim().trim_start_matches(r"\\?\");
+    let trimmed = t.trim_end_matches(['\\', '/']);
+    // 只剩磁碟機代號（C:）＝根目錄，補回一條斜線
+    if trimmed.len() == 2 && trimmed.ends_with(':') {
+        return format!("{trimmed}\\");
+    }
+    trimmed.to_string()
+}
+
 /// 可複製的手動重開指令（PowerShell）：不依賴我們自己，使用者貼進終端機就能接續對話。
 pub(crate) fn manual_command(cwd: &str, argv: &[String]) -> String {
     let call = argv.iter().enumerate().map(|(i, a)| if i == 0 { format!("& {}", local::ps_quote(a)) } else { local::ps_quote(a) }).collect::<Vec<_>>().join(" ");
@@ -322,6 +333,10 @@ pub(crate) fn kill_set(table: &[Proc], root: u32, host: Option<u32>, own: u32) -
 
 pub(crate) trait Os {
     fn cmdline(&self, pid: u32) -> Option<String>;
+    /// 程序目前的工作資料夾（只讀；讀不到＝None）。預設讀不到，現有的假 Os 不用改
+    fn cwd(&self, _pid: u32) -> Option<String> {
+        None
+    }
     fn processes(&self) -> Vec<Proc>;
     fn alive(&self, pid: u32) -> bool;
     /// 程序的建立時間（Unix 毫秒），拿來分辨 pid 是不是被別的程序重用；查不到＝None（當同一個程序）
@@ -653,6 +668,9 @@ impl Os for RealOs {
     fn cmdline(&self, pid: u32) -> Option<String> {
         winapi::cmdline_of(pid)
     }
+    fn cwd(&self, pid: u32) -> Option<String> {
+        winapi::cwd_of(pid)
+    }
     fn processes(&self) -> Vec<Proc> {
         winapi::process_table()
     }
@@ -767,6 +785,51 @@ pub(crate) mod winapi {
 
     #[cfg(not(target_pointer_width = "64"))]
     pub fn cmdline_of(_pid: u32) -> Option<String> {
+        None
+    }
+
+    /// 讀別的程序目前的工作資料夾：同 cmdline_of 的路徑，讀 ProcessParameters.CurrentDirectory.DosPath（UNICODE_STRING，偏移 0x38）。
+    /// 只讀、同一個使用者的程序不需要提權；讀不到、長度不合理都回 None。結果已正規化（見 normalize_cwd）
+    #[cfg(target_pointer_width = "64")]
+    pub fn cwd_of(pid: u32) -> Option<String> {
+        const PEB_PROCESS_PARAMETERS: usize = 0x20;
+        const PARAMS_CURRENT_DIRECTORY: usize = 0x38;
+        unsafe {
+            let h = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid);
+            if h.is_null() {
+                return None;
+            }
+            let r = (|| {
+                let mut pbi: ProcessBasicInformation = std::mem::zeroed();
+                let mut ret = 0u32;
+                let st = NtQueryInformationProcess(h, 0, &mut pbi as *mut _ as *mut c_void, std::mem::size_of::<ProcessBasicInformation>() as u32, &mut ret);
+                if st < 0 || pbi.peb_base.is_null() {
+                    return None;
+                }
+                let params: usize = read::<usize>(h, pbi.peb_base as usize + PEB_PROCESS_PARAMETERS)?;
+                if params == 0 {
+                    return None;
+                }
+                let len: u16 = read::<u16>(h, params + PARAMS_CURRENT_DIRECTORY)?;
+                let buf_ptr: usize = read::<usize>(h, params + PARAMS_CURRENT_DIRECTORY + 8)?;
+                if len == 0 || len % 2 != 0 || len > 4096 || buf_ptr == 0 {
+                    return None;
+                }
+                let mut buf = vec![0u16; (len / 2) as usize];
+                let mut got = 0usize;
+                let ok = ReadProcessMemory(h, buf_ptr as *const c_void, buf.as_mut_ptr() as *mut c_void, len as usize, &mut got);
+                if ok == 0 || got != len as usize {
+                    return None;
+                }
+                String::from_utf16(&buf).ok().map(|p| super::normalize_cwd(&p)).filter(|p| !p.is_empty())
+            })();
+            CloseHandle(h);
+            r
+        }
+    }
+
+    #[cfg(not(target_pointer_width = "64"))]
+    pub fn cwd_of(_pid: u32) -> Option<String> {
         None
     }
 
@@ -1517,5 +1580,62 @@ mod tests {
         }
         std::thread::sleep(Duration::from_millis(400));
         assert!(!console::win::pid_alive(host));
+    }
+
+    // ---- 讀程序的工作資料夾（方案 B：接手使用者自己開的 pi 要靠它找對話）----
+    #[test]
+    fn 工作資料夾正規化() {
+        assert_eq!(normalize_cwd(r"C:\Users\cwen0708"), r"C:\Users\cwen0708");
+        assert_eq!(normalize_cwd(r"C:\Users\cwen0708\"), r"C:\Users\cwen0708", "去尾端斜線");
+        assert_eq!(normalize_cwd("D:/x/y/"), "D:/x/y", "正斜線也去");
+        assert_eq!(normalize_cwd(r"\\?\C:\work"), r"C:\work", "去 verbatim 前綴");
+        assert_eq!(normalize_cwd(r"C:\"), r"C:\", "磁碟根目錄保留一條斜線");
+        assert_eq!(normalize_cwd("  C:/  "), r"C:\");
+        assert_eq!(normalize_cwd(""), "");
+        assert_eq!(normalize_cwd("/"), "", "只有斜線＝空（呼叫端當讀不到）");
+    }
+
+    #[test]
+    fn os_的_cwd_預設讀不到_現有的假_os_不用改() {
+        // 只實作必要的方法、沒寫 cwd 的 Os：照樣編得過，cwd 回 None
+        struct Bare;
+        impl Os for Bare {
+            fn cmdline(&self, _pid: u32) -> Option<String> {
+                None
+            }
+            fn processes(&self) -> Vec<Proc> {
+                vec![]
+            }
+            fn alive(&self, _pid: u32) -> bool {
+                false
+            }
+            fn close_window(&self, _pid: u32) -> bool {
+                false
+            }
+            fn terminate(&self, _pid: u32) -> Result<(), String> {
+                Ok(())
+            }
+        }
+        assert_eq!(Bare.cwd(1), None);
+    }
+
+    /// 真的讀：自己、以及自己開的子程序（指定了工作資料夾）。只動自己啟動的程序
+    #[cfg(windows)]
+    #[test]
+    fn 讀自己與子程序的工作資料夾() {
+        use crate::nowin::NoWindow;
+        let mine = std::env::current_dir().unwrap();
+        let got = winapi::cwd_of(std::process::id()).expect("讀得到自己的");
+        assert_eq!(normalize_cwd(&mine.to_string_lossy()).to_lowercase(), got.to_lowercase());
+        let d = tempfile::tempdir().unwrap();
+        let mut child = std::process::Command::new("cmd").args(["/c", "ping", "-n", "30", "127.0.0.1"]).current_dir(d.path()).stdout(std::process::Stdio::null()).no_window().spawn().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        let want = normalize_cwd(&d.path().to_string_lossy()).to_lowercase();
+        let child_cwd = winapi::cwd_of(child.id());
+        let _ = child.kill();
+        let _ = child.wait();
+        assert_eq!(child_cwd.map(|c| c.to_lowercase()), Some(want), "子程序的工作資料夾");
+        assert_eq!(winapi::cwd_of(child.id()), None, "程序結束後讀不到");
+        assert_eq!(winapi::cwd_of(0), None);
     }
 }
