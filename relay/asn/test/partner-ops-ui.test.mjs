@@ -82,6 +82,26 @@ test('對話框文字：接班換手說明流程、全部純中文、不出現�
   }
 })
 
+test('接手的對話框：講明先關掉終端機那個 grok、兩邊同時用可能互相覆蓋，並要求勾選確認；一般接班換手沒有這些', () => {
+  const t = opDialogText('handover', 'grok #65324（前景）', '家用機', 'adopt')
+  assert.equal(t.title, '接手')
+  assert.equal(t.ok, '接手')
+  const all = [t.lead, ...t.points, t.ack].join('\n')
+  assert.match(all, /接手後請先關掉終端機那個 grok/)
+  assert.match(all, /兩邊同時用同一段對話可能互相覆蓋/)
+  assert.ok(t.ack && t.ack.length > 5)
+  assert.ok(!/[A-Za-z]{4,}/.test(all.replace(/grok|ASN|#\d+/gi, '')), `文字純中文：${all}`)
+  assert.equal(opDialogText('handover', '小文', '家用機', 'claude').ack, undefined)
+  assert.equal(opDialogText('handover', '小文', '家用機', 'acp').ack, undefined)
+})
+
+test('接手：桌面與手機對話框都用 dialogEngine 選文字、都有勾選確認的欄位', () => {
+  for (const f of ['ui/lib/partner-ops-ui.mjs', 'ui/m.js']) assert.match(read(f), /dialogEngine\(/, f)
+  assert.match(read('ui/lib/partner-ops-ui.mjs'), /v-model="form\.ack"/)
+  assert.match(read('ui/m.html'), /v-model="ops\.ack"/)
+  assert.match(read('ui/m.js'), /ack: ops\.ack/)
+})
+
 test('喚醒按鈕：只有離線的 AI 夥伴才顯示；條件與右鍵選單同一套，不能按就反灰並寫原因', () => {
   assert.deepEqual(wakeButtonView(F('H', 'a'), ctx), { show: false, ok: false, reason: '' }, '在線的不顯示')
   assert.deepEqual(wakeButtonView(F('H', 'a', { status: 'busy' }), ctx).show, false)

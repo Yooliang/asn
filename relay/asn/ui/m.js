@@ -18,7 +18,7 @@ import { POLL_MS as SECRET_POLL_MS, TEXT as SECRET_TEXT, countdownText as secret
 import { friendId } from './lib/roster.mjs'
 import { restoreMobileTab } from './lib/session.mjs'
 import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, showsInSheet } from './lib/mobile-ops.mjs'
-import { OP_LABEL, opFormError, partnerEngine, sharedWhy } from './lib/partner-ops.mjs'
+import { OP_LABEL, opFormError, dialogEngine, sharedWhy } from './lib/partner-ops.mjs'
 import { BUDDY_CONSOLE_LABEL } from './lib/partner-launch-ui.mjs'
 import { ACCT_TEXT, ACCT_PAGE_TITLE, acctButtonDevices, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch } from './lib/mobile-acct.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
@@ -567,16 +567,16 @@ const app = createApp({
     // 選單畫面上的列：最前面固定「背景／前台切換」（手機不能切換，永遠反灰並說明），接著 manageItems 的全部項目，順序和電腦版一致
     const opsRows = computed(() => (opsItems.value.length ? [{ key: 'console', label: BUDDY_CONSOLE_LABEL, ok: false, reason: '手機不能切換視窗的前景或背景，要到放著這個視窗的電腦上操作' }, ...opsItems.value] : []))
     const opsView = computed(() => sharedWhy(opsRows.value))   // 同一個原因只在選單最上方寫一次
-    const ops = reactive({ phase: 'menu', newName: '', note: '', model: '', error: '', view: null })
-    const opsText = computed(() => opDialogText(ops.phase, chatFriend.value?.agent || chatFriend.value?.nick || '', chatFriend.value?.device || '', partnerEngine(chatFriend.value)))
-    const opsTitle = computed(() => (ops.phase === 'menu' ? (chatFriend.value?.nick ?? '') : OP_LABEL[ops.phase] ?? ''))
+    const ops = reactive({ phase: 'menu', newName: '', note: '', ack: false, model: '', error: '', view: null })
+    const opsText = computed(() => opDialogText(ops.phase, chatFriend.value?.agent || chatFriend.value?.nick || '', chatFriend.value?.device || '', dialogEngine(chatFriend.value)))
+    const opsTitle = computed(() => (ops.phase === 'menu' ? (chatFriend.value?.nick ?? '') : opsText.value.title || OP_LABEL[ops.phase] || ''))
     const opsModels = phoneModels(), opsModelNote = MODEL_NOTE
     const opsRun = ref(null)   // 對話頁頂端的進度：{ op, view }
     const opsBanner = computed(() => runBanner(opsRun.value))
     let opsToken = 0
     function openOps() {
       if ((!opsItems.value.length && !groupItems.value.length) || nav.sheet) return
-      Object.assign(ops, { phase: 'menu', newName: chatFriend.value?.agent ?? '', note: '', model: '', error: '', view: null })
+      Object.assign(ops, { phase: 'menu', newName: chatFriend.value?.agent ?? '', note: '', ack: false, model: '', error: '', view: null })
       opsToken++
       go(opsNav())
       void loadLaunchers()   // 各台電腦的在線與開放狀態（選單的可按條件）
@@ -593,7 +593,7 @@ const app = createApp({
       const f = chatFriend.value
       if (!f) return
       const item = opsItems.value.find(i => i.key === op)
-      const input = { newName: ops.newName, model: ops.model, note: ops.note }
+      const input = { newName: ops.newName, model: ops.model, note: ops.note, ack: ops.ack }
       const err = opFormError(f, op, input, item)
       if (err) { ops.error = err; return }
       const token = ++opsToken

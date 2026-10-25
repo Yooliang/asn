@@ -185,6 +185,8 @@ struct St {
     driver_gen: u64,
     /// 接班換手後的第一則提示（新對話成功處理第一輪才清掉）
     handover: Option<String>,
+    /// 最近一次啟動驅動失敗的原因（成功啟動就清空）。接手要靠它知道載入有沒有成功
+    start_error: String,
 }
 
 pub struct WorkerInit {
@@ -226,6 +228,7 @@ impl Worker {
                 driver: None,
                 driver_gen: 0,
                 handover: None,
+                start_error: String::new(),
             }),
             i,
             start_lock: tokio::sync::Mutex::new(()),
@@ -404,11 +407,13 @@ impl Worker {
         crate::rt::spawn(async move {
             match me.ensure_driver(me.base_full()).await {
                 Ok(_) => {
+                    me.st.lock().unwrap().start_error.clear();
                     if me.st.lock().unwrap().health == Health::Unavailable {
                         me.set_health(Health::Ok, "");
                     }
                 }
                 Err(e) => {
+                    me.st.lock().unwrap().start_error = e.message.clone();
                     me.apply_failure(e, None);
                 }
             }
@@ -678,4 +683,4 @@ impl Guard for WorkerGuard {
 }
 
 // 遠端管理夥伴（詳情、重開、接班換手）用的方法放在子模組，才能讀這裡的私有欄位
-mod admin;
+pub mod admin;

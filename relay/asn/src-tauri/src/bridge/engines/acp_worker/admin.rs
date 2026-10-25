@@ -19,6 +19,13 @@ pub fn handover_prompt(name: &str, note: &str) -> String {
     s
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum LoadState {
+    Loading,
+    Ready,
+    Failed(String),
+}
+
 /// 詳情用的快照
 #[derive(Debug, Clone)]
 pub struct WorkerSnapshot {
@@ -67,6 +74,26 @@ impl Worker {
             has_session: !self.i.store.get(cfg).is_empty(),
             load_session: d.as_ref().and_then(|d| d.load_session()),
         }
+    }
+
+    /// 接手：這個工作者要載入的是別人（使用者在終端機開的 grok）的對話。第一則提示附接手說明；對話編號已由呼叫端存好
+    pub fn mark_adopted(&self) {
+        let mut s = self.st.lock().unwrap();
+        s.need_preamble = true;
+        s.handover = Some(crate::bridge::engines::grok_adopt::adopt_prompt(&self.i.cfg.name));
+    }
+
+    /// 接手載入的進度：Ready＝驅動在跑且已載入指定的對話；Failed＝啟動失敗（附原因）；否則還在載入
+    pub fn load_state(&self, session_id: &str) -> LoadState {
+        let s = self.st.lock().unwrap();
+        if let Some(d) = s.driver.as_ref().filter(|d| d.alive() && d.session_id() == session_id) {
+            let _ = d;
+            return LoadState::Ready;
+        }
+        if !s.start_error.is_empty() && !s.starting {
+            return LoadState::Failed(s.start_error.clone());
+        }
+        LoadState::Loading
     }
 
     /// 動手前的共同檢查：正在處理信件、正在啟動或正在關閉時不動（回原因）。通過就把目前的驅動拿走（回它的 pid 與本體）

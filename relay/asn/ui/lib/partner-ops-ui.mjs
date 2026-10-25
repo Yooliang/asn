@@ -3,7 +3,7 @@
 // 純繁體中文；不顯示節點代號與夥伴 ID。node 也要能載入（測試），所以 Vue 只在元件 setup 裡才取用。
 import { AsnDialog } from './dialog.mjs'
 import { machinesByNode } from './mobile-launch.mjs'
-import { OP_LABEL, OP_POLL_MS, buildOpRequest, infoRows, opErrorText, opFormError, partnerEngine, progressView } from './partner-ops.mjs'
+import { ADOPT_ACK, OP_LABEL, OP_POLL_MS, buildOpRequest, dialogEngine, infoRows, opErrorText, opFormError, progressView } from './partner-ops.mjs'
 
 const errText = e => String(e?.message ?? e ?? '').replace(/\s+/g, ' ').trim().slice(0, 80) || '原因不明'
 
@@ -52,7 +52,11 @@ export function opDialogText(op, name, device = '', engine = 'claude') {
     case 'rename': return { title, lead: `要把「${name}」改成什麼名字？名字只能用英數、連字號、中文，1～40 字，不能以連字號開頭。`, points: [], ok: '改名', auto: false }
     case 'close': return { title, lead: `關掉「${name}」${where}視窗？對話記錄會留著。`, points: [], ok: '關閉視窗', auto: false }
     case 'restart': return { title, lead: `要重開「${name}」${where}背景工作者嗎？會先結束它的程序，再由收發室重新啟動，對話會保留。`, points: [], ok: '重開', auto: false }
-    case 'handover': return engine === 'acp' ? {
+    case 'handover': if (engine === 'adopt') return {
+      title: '接手', lead: `要讓 ASN 的 Grok 工作者接手${where}「${name}」的對話嗎？`, ok: '接手', auto: false, ack: ADOPT_ACK,
+      points: ['收發室會找出這個 grok 正在用的那一段對話，找不到或不只一段就不會接手，並告訴你原因', '另外開一個專屬的 Grok 工作者載入同一段對話，之後寄給它的信會接在這段對話後面，回覆照一般工作者寄回', '接手後請先關掉終端機那個 grok，兩邊同時用同一段對話可能互相覆蓋', '收發室不會替你關掉終端機裡的 grok'],
+    }
+    return engine === 'acp' ? {
       title, lead: `要讓「${name}」${where}背景工作者接班換手嗎？`, ok: '開始換手', auto: false,
       points: ['這類夥伴不會請前任寫交接，也沒有前任的對話紀錄可讀', '清掉目前的對話，結束它的程序，由收發室重新啟動', '新的對話第一句會是接班說明，請它先向寄件人確認進度'],
     } : {
@@ -77,8 +81,8 @@ export const PartnerOpDialog = {
   setup(props, { emit }) {
     const { ref, reactive, computed, onMounted, onBeforeUnmount } = globalThis.Vue
     const name = props.friend.agent || props.friend.nick
-    const text = computed(() => opDialogText(props.op, name, props.friend.device, partnerEngine(props.friend)))
-    const form = reactive({ newName: name, note: '' })
+    const text = computed(() => opDialogText(props.op, name, props.friend.device, dialogEngine(props.friend)))
+    const form = reactive({ newName: name, note: '', ack: false })
     const st = reactive({ phase: 'form', error: '', busy: false, view: null })
     let closed = false
     async function submit() {
@@ -104,7 +108,8 @@ export const PartnerOpDialog = {
       <input class="set-input" type="text" v-model="form.newName" maxlength="40" aria-label="新名字" @keydown.enter.prevent="submit">
     </label>
     <ul class="model-points" v-if="text.points.length"><li v-for="p in text.points" :key="p">{{ p }}</li></ul>
-    <label class="op-field" v-if="op === 'handover'">補充的話（選填，會附在新夥伴的第一句話後面）
+    <label class="op-field" v-if="text.ack"><input type="checkbox" v-model="form.ack" aria-label="確認接手前要先關掉終端機"> {{ text.ack }}</label>
+    <label class="op-field" v-if="op === 'handover' && !text.ack">補充的話（選填，會附在新夥伴的第一句話後面）
       <textarea class="set-area" rows="3" v-model="form.note" maxlength="1000" aria-label="補充的話"></textarea>
     </label>
     <p class="partner-err" v-if="st.error" role="alert">{{ st.error }}</p>

@@ -301,6 +301,8 @@ pub(crate) struct PartnerOps {
     cmds: Mutex<std::collections::HashMap<String, bool>>,
     /// 收發室管理的 ACP 工作者（沒載入 ACP 引擎＝None）
     acp: Mutex<Option<Arc<dyn AcpAdmin>>>,
+    /// grok 的資料夾（~/.grok）：接手時只讀裡面的使用中對話登記與 sessions 的資料夾名稱。沒設＝不能接手
+    grok_home: Mutex<Option<PathBuf>>,
 }
 
 impl PartnerOps {
@@ -319,6 +321,7 @@ impl PartnerOps {
             inflight: Mutex::new(HashSet::new()),
             cmds: Mutex::new(std::collections::HashMap::new()),
             acp: Mutex::new(None),
+            grok_home: Mutex::new(None),
         })
     }
 
@@ -330,7 +333,17 @@ impl PartnerOps {
         let relay3 = relay.clone();
         // ASN 視窗名每次判斷時現讀（改名後立刻跟著換，不能啟動時抓一次就固定）
         let protect: Arc<dyn Fn(&str, u32) -> bool + Send + Sync> = Arc::new(move |name, pid| is_protected(name, pid, &mailbox_name, &relay.window_name(), worker_pid()));
-        PartnerOps::new(relay3, log, handoff_dir, Arc::new(SystemOpsEnv { data_dir, relay: relay2 }), OpsDirs { sessions: sessions_dir, status: status_dir, control, projects }, protect)
+        // sessions_dir＝<家>/.claude/sessions，grok 的資料夾在 <家>/.grok
+        let grok_home = sessions_dir.parent().and_then(Path::parent).map(super::engines::grok_adopt::grok_home_of);
+        let ops = PartnerOps::new(relay3, log, handoff_dir, Arc::new(SystemOpsEnv { data_dir, relay: relay2 }), OpsDirs { sessions: sessions_dir, status: status_dir, control, projects }, protect);
+        if let Some(g) = grok_home {
+            ops.set_grok_home(g);
+        }
+        ops
+    }
+
+    pub(crate) fn set_grok_home(&self, p: PathBuf) {
+        *self.grok_home.lock().unwrap() = Some(p);
     }
 
     /// 後台回報的「視窗名 → 夥伴 ID」（往來記錄與交接檔資料夾都用它）
@@ -384,6 +397,40 @@ impl PartnerOps {
                 }
             }
             _ => failed(UNSUPPORTED),
+        }
+    }
+
+    /// 接手使用者自己開的 grok：用名單上的 pid 查 grok 自己的使用中對話登記，唯一才採用，再讓專屬的 Grok 工作者載入同一段對話。
+    /// 絕不結束、不操作那個 grok 程序（接手後請使用者自己先關掉）；只讀登記檔與 sessions 的資料夾名稱，不讀對話內容。
+    fn execute_adopt(&self, op: &Op, pid: u32) -> OpResult {
+        use super::engines::grok_adopt as ga;
+        if !self.env.allow_remote() {
+            return failed(CONSENT_OFF);
+        }
+        let os = self.env.os();
+        // 那個 pid 現在還是一個 grok 程序（名單過期、pid 被別的程式重用都擋掉）
+        if !os.processes().iter().any(|p| p.pid == pid && switch::exe_stem(&p.name) == "grok") {
+            return failed("這個 grok 已經不在執行了（名單可能過期），所以沒有接手");
+        }
+        let Some(acp) = self.acp_admin() else { return failed("這台電腦的 ASN 沒有載入背景工作者功能，無法接手") };
+        let Some(home) = self.grok_home.lock().unwrap().clone() else { return failed("找不到 grok 的資料夾位置，無法接手") };
+        let active = match ga::read_active(&home) {
+            Ok(t) => t,
+            Err(e) => return failed(e),
+        };
+        let found = match ga::resolve(&active, pid, &|sid| ga::session_dir_exists(&home, sid), os.started_ms(pid)) {
+            Ok(f) => f,
+            Err(e) => return failed(e),
+        };
+        self.stage(op, "opening");
+        match acp.adopt(&found.session_id, &found.cwd) {
+            Ok(r) => {
+                let name = r.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+                let already = r.get("already").and_then(Value::as_bool) == Some(true);
+                let detail = format!("{}專屬工作者「{name}」，之後寄給它的信會接在同一段對話後面。請先關掉終端機那個 grok（收發室不會替你關），兩邊同時用同一段對話可能互相覆蓋", if already { "已經接手過了：" } else { "已開好" });
+                ok(detail, Some(json!({ "kind": "adopt", "name": name, "already": already })))
+            }
+            Err(e) => failed(e),
         }
     }
 
@@ -499,6 +546,12 @@ impl PartnerOps {
         }
         if op.op != "info" && !self.env.allow_remote() {
             return failed(CONSENT_OFF);
+        }
+        // 使用者自己在終端機開的 grok（名單上的「grok #pid（前景）」）：「接班換手」在這裡的意思是「接手」
+        if op.op == "handover" {
+            if let Some(pid) = super::engines::grok_adopt::proc_pid(&op.name) {
+                return self.execute_adopt(op, pid);
+            }
         }
         if let Some(acp) = self.acp_admin().filter(|a| a.has_worker(&op.name)) {
             return self.execute_acp(op, &*acp);

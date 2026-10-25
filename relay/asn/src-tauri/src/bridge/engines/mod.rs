@@ -13,6 +13,7 @@ pub mod acp_policy;
 pub mod acp_worker;
 pub mod codex;
 pub mod codex_state;
+pub mod grok_adopt;
 pub mod pi;
 pub mod rpc;
 

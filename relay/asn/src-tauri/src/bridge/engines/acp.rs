@@ -138,7 +138,15 @@ impl Driver for AcpDriver {
                 self.sh.can_load.store(if can_load { 1 } else { 2 }, Ordering::SeqCst);
                 let cwd = cfg.cwd.to_string_lossy().to_string();
                 let mut sid = self.sh.sid.lock().unwrap().clone();
-                if !sid.is_empty() && can_load {
+                if cfg.adopted {
+                    // 接手別人的對話：一定要載入指定的那一段，載不進來就失敗，不偷偷開新對話
+                    if sid.is_empty() || !can_load {
+                        return Err(RpcError { message: "這個 agent 沒有宣告能載入既有的對話，沒辦法接手".into(), code: None });
+                    }
+                    if let Err(e) = client.load_session(&sid, &cwd).await {
+                        return Err(RpcError { message: format!("載入那段對話失敗：{}", e.message), code: e.code });
+                    }
+                } else if !sid.is_empty() && can_load {
                     if let Err(e) = client.load_session(&sid, &cwd).await {
                         (self.a.log)(format!("session/load 失敗，改開新的：{}", e.message));
                         self.sh.resume_lost.store(true, Ordering::SeqCst);
@@ -231,11 +239,13 @@ pub struct AcpEngine {
     approvals: Arc<Approvals>,
     make_driver: MakeDriver,
     workers: Arc<Mutex<Vec<(String, WorkerHandle)>>>,
+    /// 帳本（start 時才開）；接手要用同一份存對話編號
+    store: Mutex<Option<Arc<Store>>>,
 }
 
 impl AcpEngine {
     pub fn new(ctx: EngineCtx, make_driver: Option<MakeDriver>) -> AcpEngine {
-        AcpEngine { ctx, approvals: Approvals::new(), make_driver: make_driver.unwrap_or_else(default_make_driver), workers: Arc::new(Mutex::new(vec![])) }
+        AcpEngine { ctx, approvals: Approvals::new(), make_driver: make_driver.unwrap_or_else(default_make_driver), workers: Arc::new(Mutex::new(vec![])), store: Mutex::new(None) }
     }
 
     fn window_of(w: &Worker) -> Window {
@@ -258,19 +268,25 @@ impl AcpEngine {
     }
 
     fn make_worker(&self, cfg: Arc<WorkerCfg>, store: Arc<Store>) -> WorkerHandle {
-        let notify = self.ctx.notify.clone();
-        Worker::new(WorkerInit {
-            cfg,
-            env: self.ctx.env.clone(),
-            log: self.ctx.log.clone(),
-            approvals: self.approvals.clone(),
-            notify,
-            store,
-            make_driver: self.make_driver.clone(),
-            events: self.ctx.events.clone(),
-            pids: self.ctx.pids.clone(),
-        })
+        make_worker_with(&self.ctx, &self.approvals, &self.make_driver, cfg, store)
     }
+}
+
+/// 接手名冊檔（工作資料夾底下）：記著接手過的專屬工作者，重啟後建回來
+pub const ADOPTED_FILE: &str = "acp-adopted.json";
+
+fn make_worker_with(ctx: &EngineCtx, approvals: &Arc<Approvals>, make_driver: &MakeDriver, cfg: Arc<WorkerCfg>, store: Arc<Store>) -> WorkerHandle {
+    Worker::new(WorkerInit {
+        cfg,
+        env: ctx.env.clone(),
+        log: ctx.log.clone(),
+        approvals: approvals.clone(),
+        notify: ctx.notify.clone(),
+        store,
+        make_driver: make_driver.clone(),
+        events: ctx.events.clone(),
+        pids: ctx.pids.clone(),
+    })
 }
 
 impl Engine for AcpEngine {
@@ -280,6 +296,7 @@ impl Engine for AcpEngine {
 
     fn start(&self) {
         let store = Store::open(self.ctx.work_dir.join("acp-workers.json"), self.ctx.log.clone());
+        *self.store.lock().unwrap() = Some(store.clone());
         let conf = load_workers_config(&self.ctx.agents_file, &self.ctx.work_dir);
         for e in &conf.errors {
             self.ctx.log(format!("acp: 設定有問題，已跳過：{e}"));
@@ -290,6 +307,7 @@ impl Engine for AcpEngine {
         if conf.workers.is_empty() {
             self.ctx.log(format!("acp: 沒有任何工作者（{}）。範本：relay/machine/agents.example.json", self.ctx.agents_file.display()));
         }
+        let base_grok = conf.workers.iter().find(|c| c.roster_engine == "grok" && c.protocol == "acp").cloned();
         for cfg in conf.workers {
             if let Err(e) = std::fs::create_dir_all(&cfg.cwd) {
                 self.ctx.log(format!("acp: {} 的工作資料夾建不起來（{}）：{e}", cfg.name, cfg.cwd.display()));
@@ -312,10 +330,38 @@ impl Engine for AcpEngine {
             w.start();
             self.ctx.log(line);
         }
+        // 接手過的專屬工作者（使用者在終端機開的 grok 的對話）：重啟後建回來，對話編號已在帳本裡
+        if let Some(base) = base_grok {
+            for (name, sid, cwd) in super::acp_admin::read_adopted(&self.ctx.work_dir.join(ADOPTED_FILE)) {
+                if self.workers.lock().unwrap().iter().any(|(n, _)| *n == name) {
+                    continue;
+                }
+                let cfg = Arc::new(super::grok_adopt::adopted_cfg(&base, &name, &cwd));
+                store.set(&cfg, &sid);
+                let w = self.make_worker(cfg, store.clone());
+                self.workers.lock().unwrap().push((name.clone(), w.clone()));
+                w.start();
+                self.ctx.log(format!("acp: 接手的專屬工作者 {name} 啟動（載入原本的對話）"));
+            }
+        }
     }
 
     fn acp_admin(&self) -> Option<Arc<dyn super::acp_admin::AcpAdmin>> {
-        Some(Arc::new(super::acp_admin::AcpAdminImpl { workers: self.workers.clone() }))
+        let store = self.store.lock().unwrap().clone();
+        let adopt = store.map(|store| {
+            let (ctx, approvals, make_driver) = (self.ctx.clone(), self.approvals.clone(), self.make_driver.clone());
+            super::acp_admin::AdoptEnv {
+                make: Arc::new({
+                    let store = store.clone();
+                    move |cfg| make_worker_with(&ctx, &approvals, &make_driver, cfg, store.clone())
+                }),
+                store,
+                file: self.ctx.work_dir.join(ADOPTED_FILE),
+                events: self.ctx.events.clone(),
+                wait_ms: super::acp_admin::ADOPT_WAIT_MS,
+            }
+        });
+        Some(Arc::new(super::acp_admin::AcpAdminImpl { workers: self.workers.clone(), adopt }))
     }
 
     fn stop(&self) {
