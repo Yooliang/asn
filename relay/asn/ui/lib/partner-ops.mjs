@@ -29,13 +29,13 @@ export const REASON = {
   cloud: '這是雲端代理，在雲端執行，沒有電腦上的視窗可以管理',
   otherEngine: '這位夥伴用的引擎尚未實機驗證，暫不開放從這裡管理視窗',
   alreadyOnline: '這個視窗在線上，不需要喚醒',
-  restartOnlyAcp: '「重開」只用在 ASN 在背景執行的工作者；一般視窗請用「接班換手」',
+  restartOnlyAcp: '「重開」只用在 ASN 內建通道的工作者；一般視窗請用「接班換手」',
 }
 // 背景工作者（ACP）用不到的項目的說明
 const ACP_WHY = {
-  rename: '這個夥伴是 ASN 在背景執行的工作者，沒有視窗可以改名',
-  model: '這個夥伴是 ASN 在背景執行的工作者，模型寫在設定檔裡、啟動時就定了，不能在這裡切換模型；要換請改設定檔後重啟 ASN',
-  resume: '這個夥伴是 ASN 在背景執行的工作者，不需要喚醒；要重新啟動請用「重開」',
+  rename: '這個夥伴由 ASN 內建通道執行，沒有視窗可以改名',
+  model: '這個夥伴由 ASN 內建通道執行，模型寫在設定檔裡、啟動時就定了，不能在這裡切換模型；要換請改設定檔後重啟 ASN',
+  resume: '這個夥伴由 ASN 內建通道執行，不需要喚醒；要重新啟動請用「重開」',
 }
 // pi 視窗：只開放「切換模型」（經 pi 擴充的控制檔，電腦端見 bridge/engines/pi_control.rs）；其餘電腦端還沒接，反灰並各自說明
 export const PI_OPS = ['model']
@@ -177,7 +177,7 @@ function itemReason(key, friend, engine, offline, ctx) {
   }
   if (engine === 'acp') {
     if (!ACP_OPS.includes(key)) return ACP_WHY[key]
-    if (offline) return `這個背景工作者已離線，現在不能「${label}」`
+    if (offline) return `這個內建通道的工作者已離線，現在不能「${label}」`
     return gateReason(key, friend, ctx)
   }
   if (key === 'resume') return offline ? resumeReason(friend, ctx) : REASON.alreadyOnline

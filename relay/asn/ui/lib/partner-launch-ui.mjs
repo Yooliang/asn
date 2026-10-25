@@ -5,7 +5,7 @@ import { applyDeviceOrder } from './device-order.mjs'
 
 export const DISPLAY_MODES = [
   { key: 'foreground', label: '前台顯示' },
-  { key: 'background', label: '背景執行' },
+  { key: 'background', label: '背景運行' },
 ]
 
 export function launchDisableReason(nodeKey, { selfNode, partnerModels, remoteLaunchers }) {
@@ -31,7 +31,7 @@ export function remoteModelRows(launcher) {
     return {
       id: cat?.id ?? p.id, toolId: cat?.toolId ?? p.id, profileId: p.id,
       label: (typeof p.label === 'string' && p.label.trim()) || cat?.label || p.id,
-      mode: cat?.mode ?? (bg ? 'background' : 'window'), modeLabel: cat?.modeLabel ?? (bg ? '在背景執行' : '會開一個視窗'),
+      mode: cat?.mode ?? (bg ? 'background' : 'window'), modeLabel: cat?.modeLabel ?? (bg ? '由 ASN 內建通道執行' : '會開一個視窗'),
       installed: true, installHint: '', version: '',
     }
   })

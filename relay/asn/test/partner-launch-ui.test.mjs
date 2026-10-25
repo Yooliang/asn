@@ -129,9 +129,9 @@ test('開新夥伴對話框：選 pi 不動使用者的顯示方式偏好、第�
 })
 
 test('別台回報的清單：目錄外的背景設定用回報的模式；Grok、pi 沿用目錄', () => {
-  const rows = remoteModelRows({ profiles: [{ id: 'grok', label: 'Grok（背景工作者）', engine: 'acp', mode: 'background' }, { id: 'pi', label: 'pi（互動視窗）', engine: 'pi', mode: 'window' }, { id: 'mybg', label: '自訂', mode: 'background' }, { id: 'mywin', label: '舊版' }], cwd_allow: ['x'] })
+  const rows = remoteModelRows({ profiles: [{ id: 'grok', label: 'Grok（背景運行、內建通道）', engine: 'acp', mode: 'background' }, { id: 'pi', label: 'pi（互動視窗）', engine: 'pi', mode: 'window' }, { id: 'mybg', label: '自訂', mode: 'background' }, { id: 'mywin', label: '舊版' }], cwd_allow: ['x'] })
   assert.deepEqual(rows.map(r => [r.profileId, r.mode]), [['grok', 'background'], ['pi', 'window'], ['mybg', 'background'], ['mywin', 'window']])
-  assert.equal(rows[2].modeLabel, '在背景執行')
+  assert.equal(rows[2].modeLabel, '由 ASN 內建通道執行')
   assert.equal(showDisplayModeChoice('grok'), false, '背景夥伴沒有前台／背景可選')
   assert.equal(foregroundOnlyProfile('pi'), true)
 })
