@@ -591,7 +591,8 @@ pub(crate) fn run_with(os: &dyn Os, dir: &Path, req: &SwitchRunReq, launch: &dyn
     let old_pids: HashSet<u32> = console::read_sessions(dir).iter().filter(|s| s.get("name").and_then(Value::as_str) == Some(target.name.as_str())).filter_map(|s| s.get("pid").and_then(Value::as_u64).map(|p| p as u32)).collect();
 
     // 2. 優雅關閉：先送關閉訊息給主控台視窗，等幾秒；沒走就只強制結束允許清單內的 pid
-    if let Err(reason) = close_session(os, t, target.pid, &allowed, host, true) {
+    // 使用者自己開的視窗（沒有 ASN 承載殼）不送關閉訊息，只結束 claude 與子孫，留下他的終端機；ASN 開的才先送（與 partner_ops、codex_ops 一致）
+    if let Err(reason) = close_session(os, t, target.pid, &allowed, host, host.is_some()) {
         return fail("close", reason, &manual, false);
     }
 
@@ -1236,6 +1237,39 @@ mod tests {
         assert_eq!(r["ok"], true, "{r}");
         let killed = f.terminated.borrow().clone();
         assert!(killed.contains(&220) && !killed.contains(&210) && !killed.contains(&200), "{killed:?}");
+    }
+
+    /// 「Gemini審查」審查指出（我核對過成立）：run_with 把 close_session 的 polite 寫死 true，使用者自己開的視窗（沒有 ASN 承載殼）
+    /// 也會被送 WM_CLOSE，而 close_session 的說明與 partner_ops／codex_ops 都是 host.is_some()——那種視窗不送關閉訊息，免得把使用者的終端機一起關掉
+    #[test]
+    fn 切換_使用者自己開的視窗_不送關閉訊息_只結束_claude_那棵() {
+        let (e, f) = env("idle");
+        let dir = e.dir.clone();
+        let work = e.work.clone();
+        let r = run_with(&f, &e.dir, &run_req(), &|plan| {
+            write_session(&dir, 503, "sid-220", &plan.name, "idle", work.to_str().unwrap());
+            f.alive.borrow_mut().insert(503);
+            Ok(())
+        }, &quick());
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(f.closed.borrow().is_empty(), "使用者自己開的視窗不能送關閉訊息（會把他的終端機一起關掉）：{:?}", f.closed.borrow());
+        assert!(f.terminated.borrow().contains(&220), "要改成直接結束 claude 那棵");
+    }
+
+    #[test]
+    fn 切換_asn_開的視窗_才先送關閉訊息() {
+        let (e, mut f) = env("idle");
+        f.cmd.borrow_mut().insert(210, format!("powershell.exe {}", local::window_launcher_args("小良哥", "claude.exe", &v(&["--model", "opus"]))));
+        f.table = vec![p(4, 0, "system"), p(100, 4, "explorer.exe"), p(210, 100, "powershell.exe"), p(220, 210, "claude.exe"), p(300, 100, "asn.exe")];
+        let dir = e.dir.clone();
+        let work = e.work.clone();
+        let r = run_with(&f, &e.dir, &run_req(), &|plan| {
+            write_session(&dir, 503, "sid-220", &plan.name, "idle", work.to_str().unwrap());
+            f.alive.borrow_mut().insert(503);
+            Ok(())
+        }, &quick());
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(f.closed.borrow().contains(&220), "ASN 開的視窗（有承載殼）照舊先送關閉訊息：{:?}", f.closed.borrow());
     }
 
     #[test]
