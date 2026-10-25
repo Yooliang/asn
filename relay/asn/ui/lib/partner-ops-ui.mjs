@@ -50,7 +50,8 @@ export function opDialogText(op, name, device = '', engine = 'claude') {
   const title = { info: `${name} 的詳情`, rename: '改名', close: '關閉視窗', handover: '接班換手', resume: '喚醒', restart: '重開' }[op] ?? OP_LABEL[op] ?? ''
   switch (op) {
     case 'rename': return { title, lead: `要把「${name}」改成什麼名字？名字只能用英數、連字號、中文，1～40 字，不能以連字號開頭。`, points: [], ok: '改名', auto: false }
-    case 'close': return { title, lead: `關掉「${name}」${where}視窗？對話記錄會留著。`, points: [], ok: '關閉視窗', auto: false }
+    case 'close': if (engine === 'acp') return { title: '關閉', lead: `要關閉「${name}」${where}背景工作者嗎？會結束它的程序，這次不再收信，名單上暫時看不到；不會改設定檔，重啟 ASN 後會恢復。`, points: [], ok: '關閉', auto: false }
+      return { title, lead: `關掉「${name}」${where}視窗？對話記錄會留著。`, points: [], ok: '關閉視窗', auto: false }
     case 'restart': return { title, lead: `要重開「${name}」${where}背景工作者嗎？會先結束它的程序，再由收發室重新啟動，對話會保留。`, points: [], ok: '重開', auto: false }
     case 'handover': if (engine === 'adopt') return {
       title: '接手', lead: `要讓 ASN 的 Grok 工作者接手${where}「${name}」的對話嗎？`, ok: '接手', auto: false, ack: ADOPT_ACK,

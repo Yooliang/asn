@@ -1332,6 +1332,13 @@ impl AcpAdmin for FakeAcp {
             None => Ok(json!({ "kind": "acp", "pid": 4321, "kept_session": true })),
         }
     }
+    fn stop(&self, name: &str) -> Result<Value, String> {
+        self.calls.lock().unwrap().push(format!("stop {name}"));
+        match self.fail_with.lock().unwrap().clone() {
+            Some(e) => Err(e),
+            None => Ok(json!({ "kind": "acp", "pid": 4321, "stopped": true })),
+        }
+    }
     fn handover(&self, name: &str, note: &str) -> Result<Value, String> {
         self.calls.lock().unwrap().push(format!("handover {name} [{note}]"));
         Ok(json!({ "kind": "acp", "pid": 4321, "handoff_done": false }))
@@ -1472,15 +1479,33 @@ fn acp_詳情_重開_接班換手_交給工作者管理入口_不碰任何程序
 }
 
 #[test]
-fn acp_改名_切換模型_關閉_喚醒_一律這類夥伴不支援() {
+fn acp_改名_切換模型_喚醒_一律這類夥伴不支援() {
     let r = rig(Opt::default());
     let a = with_acp(&r, &["Gemini"]);
-    for (op, extra) in [("rename", json!({ "new_name": "新名字" })), ("model", json!({ "model": "gemini-2.5" })), ("close", json!({})), ("resume", json!({ "session_id": "sid-zzzzzzzz" }))] {
+    for (op, extra) in [("rename", json!({ "new_name": "新名字" })), ("model", json!({ "model": "gemini-2.5" })), ("resume", json!({ "session_id": "sid-zzzzzzzz" }))] {
         let res = acp_run(&r, op, extra);
         assert_eq!((res.status, res.detail.as_str()), ("failed", UNSUPPORTED), "{op}");
     }
     assert!(a.calls.lock().unwrap().is_empty());
     assert!(r.terminated().is_empty() && r.launched().is_empty());
+}
+
+#[test]
+fn acp_關閉_交給工作者管理入口停止_不碰任何其他程序_本機沒開放就不做() {
+    let r = rig(Opt::default());
+    let a = with_acp(&r, &["Gemini"]);
+    let res = acp_run(&r, "close", json!({}));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert_eq!(res.result.unwrap()["stopped"], true);
+    assert_eq!(*a.calls.lock().unwrap(), vec!["stop Gemini".to_string()]);
+    assert!(r.terminated().is_empty() && r.launched().is_empty() && r.os().closed.lock().unwrap().is_empty(), "不用名稱找程序、不結束任何程序");
+    *a.fail_with.lock().unwrap() = Some("工作者正在處理信件，等它做完再試".into());
+    let res = acp_run(&r, "close", json!({}));
+    assert_eq!((res.status, res.detail.as_str()), ("failed", "工作者正在處理信件，等它做完再試"));
+    let r = rig(Opt { allow_first: 0, ..Opt::default() });
+    let a = with_acp(&r, &["Gemini"]);
+    assert_eq!(acp_run(&r, "close", json!({})).detail, CONSENT_OFF);
+    assert!(a.calls.lock().unwrap().is_empty());
 }
 
 #[test]

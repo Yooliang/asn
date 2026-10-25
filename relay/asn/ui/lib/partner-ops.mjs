@@ -7,8 +7,8 @@ import { isRelayRoom } from './roster.mjs'
 export const OPS = ['info', 'rename', 'model', 'close', 'handover', 'resume', 'restart']
 // Claude 視窗：在線的五項；離線的只有「喚醒」
 export const ONLINE_OPS = ['info', 'rename', 'model', 'close', 'handover']
-// ACP 工作者（Gemini 等收發室自己跑的背景工作者）：只有詳情、重開、接班換手；其餘電腦端會回「這類夥伴不支援」，所以畫面不顯示
-export const ACP_OPS = ['info', 'restart', 'handover']
+// ACP 工作者（Gemini 等收發室自己跑的背景工作者）：詳情、關閉（只停止本次執行，不改設定檔）、重開、接班換手；改名、切換模型、喚醒電腦端會回「這類夥伴不支援」，所以反灰
+export const ACP_OPS = ['info', 'close', 'restart', 'handover']
 export const OP_LABEL = { info: '詳情', rename: '改名', model: '切換模型', close: '關閉視窗', handover: '接班換手', resume: '喚醒', restart: '重開' }
 export const NOTE_MAX = 1000
 export const MODEL_RE = /^[A-Za-z0-9._[\]-]{1,60}$/
@@ -34,10 +34,11 @@ export const REASON = {
 // 背景工作者（ACP）用不到的項目的說明
 const ACP_WHY = {
   rename: '這個夥伴是 ASN 在背景執行的工作者，沒有視窗可以改名',
-  model: '這個夥伴是 ASN 在背景執行的工作者，沒有視窗，不能在這裡切換模型',
-  close: '這個夥伴是 ASN 在背景執行的工作者，沒有視窗可關',
+  model: '這個夥伴是 ASN 在背景執行的工作者，模型寫在設定檔裡、啟動時就定了，不能在這裡切換模型；要換請改設定檔後重啟 ASN',
   resume: '這個夥伴是 ASN 在背景執行的工作者，不需要喚醒；要重新啟動請用「重開」',
 }
+// 背景工作者沒有視窗：「關閉」是停止它本次的執行
+export const ACP_CLOSE_LABEL = '關閉'
 export const STALE_TEXT = 'ASN 版本可能太舊，或沒有在跑'
 
 // 不是 AI 夥伴的對象：人、手機，群組、ASN 與收發室視窗
@@ -131,7 +132,8 @@ export function menuItems(friend, ctx = {}) {
   return MENU_KEYS.map(key => {
     const reason = itemReason(key, friend, engine, offline, ctx)
     const adopt = key === 'handover' && isGrokAdoptable(friend)
-    return { key, label: adopt ? ADOPT_LABEL : OP_LABEL[key], ok: !reason, reason }
+    const label = adopt ? ADOPT_LABEL : key === 'close' && engine === 'acp' ? ACP_CLOSE_LABEL : OP_LABEL[key]
+    return { key, label, ok: !reason, reason }
   })
 }
 
@@ -293,6 +295,7 @@ export function progressView(row, { op = row?.op, sentAt = 0, now = Date.now() }
         v.extra = ['請先關掉終端機那個 grok（ASN 不會替你關）：兩邊同時用同一段對話可能互相覆蓋。']
         return v
       }
+      if (op === 'close' && row.result?.kind === 'acp') v.text = '工作者已關閉（本次執行；設定檔沒改）。重啟 ASN 後會恢復。'
       if (op === 'handover') { v.steps = stepsAt('', true); v.extra = handoverExtra(row.result) }
       return v
     }

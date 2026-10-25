@@ -113,6 +113,31 @@ impl Worker {
         Ok((pid, d))
     }
 
+    /// 關閉（停止本次執行）：結束驅動程序，不再收信，名單上暫時看不到；只改記憶體狀態，不動 agents.json 等設定檔。
+    /// 「重開」「接班換手」或 ASN 重啟可恢復。回被結束的 pid（本來就沒在跑 0）
+    pub fn admin_stop(self: &Arc<Self>) -> Result<u32, String> {
+        if self.st.lock().unwrap().admin_stopped {
+            return Err("這個工作者已經關閉了".into());
+        }
+        let (pid, d) = self.take_driver_for_admin()?;
+        self.st.lock().unwrap().admin_stopped = true;
+        if let Some(d) = d {
+            d.stop();
+        }
+        self.i.approvals.cancel_all(&self.i.cfg.name);
+        self.log(format!("遠端管理：關閉（結束程序 pid={pid}，本次執行不再收信）"));
+        let _ = self.i.events.send(crate::bridge::engines::EngineEvent::RosterChanged);
+        Ok(pid)
+    }
+
+    /// 之前被「關閉」過：恢復收信並通知名單有變（沒被關過就什麼都不做）
+    fn revive_after_admin_stop(&self) {
+        let was = std::mem::replace(&mut self.st.lock().unwrap().admin_stopped, false);
+        if was {
+            let _ = self.i.events.send(crate::bridge::engines::EngineEvent::RosterChanged);
+        }
+    }
+
     /// 重開：結束驅動程序，讓收發室重新啟動它；對話編號留著，能接續就接續。回被結束的 pid（本來就沒在跑 0）
     pub fn admin_restart(self: &Arc<Self>) -> Result<u32, String> {
         let (pid, d) = self.take_driver_for_admin()?;
@@ -120,6 +145,7 @@ impl Worker {
             d.stop();
         }
         self.log(format!("遠端管理：重開（結束程序 pid={pid}）"));
+        self.revive_after_admin_stop();
         self.warm();
         Ok(pid)
     }
@@ -137,6 +163,7 @@ impl Worker {
             s.handover = Some(handover_prompt(&self.i.cfg.name, note));
         }
         self.log(format!("遠端管理：接班換手（結束程序 pid={pid}，對話編號已清掉）"));
+        self.revive_after_admin_stop();
         self.warm();
         Ok(pid)
     }
