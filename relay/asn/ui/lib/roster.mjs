@@ -48,12 +48,11 @@ export function psmOf(a) {
 }
 
 // 本機程序掃描出來的條目（kind＝process）名字長這樣「grok #1234（前景）」「codex #14（背景）」：括號裡的前景／背景是掃描程式加的，
-// 名字本身（含括號）仍是這個條目的鍵（接手、操作都用它）。畫面上前景的不用特地寫，背景的才在第二行寫「背景運行」，所以顯示名拿掉括號。
+// 名字本身（含括號）仍是這個條目的鍵（接手、操作都用它），所以只有顯示名拿掉括號。
+// 括號裡的（背景）是掃描程式依命令列（-p／exec／headless／rpc＝無人在前面操作）猜的，不是「視窗有沒有隱藏」，所以不拿它當畫面上的前景／背景（#270）。
 export const PROC_PLACE_RE = /（(前景|背景)）\s*$/
 export const isProcEntry = a => String(a?.kind ?? '').trim().toLowerCase() === 'process'
 export const procDisplayName = name => String(name ?? '').replace(PROC_PLACE_RE, '').trim()
-export const isBackgroundProc = a => isProcEntry(a) && /（背景）\s*$/.test(String(a?.name ?? ''))
-export const BACKGROUND_NOTE = '背景運行'
 
 // 一個視窗一列；名字＝視窗名，個人訊息＝資料夾（cwd_label，沒有就空）
 export function buildFriends(members, { selfNode, selfName } = {}) {
@@ -83,7 +82,7 @@ export function buildFriends(members, { selfNode, selfName } = {}) {
       seen.add(a.name)
       out.push({
         id: friendId(m.id, a.name), node: m.id, device: typeof m.name === 'string' && m.name.trim() ? m.name.trim() : '', agent: a.name, nick: isProcEntry(a) ? procDisplayName(a.name) || a.name : a.name,
-        psm: psmOf(a) || (isBackgroundProc(a) ? BACKGROUND_NOTE : ''), contextPct: isOff || a.online === false ? null : pctOf(a.context_pct),   // 上下文已用％（選填；離線或舊後台沒有＝null）
+        psm: psmOf(a), contextPct: isOff || a.online === false ? null : pctOf(a.context_pct),   // 上下文已用％（選填；離線或舊後台沒有＝null）
         modLoaded: isOff || a.online === false || typeof a.mod_loaded !== 'boolean' ? null : a.mod_loaded,   // 這個視窗有沒有載入外掛（選填；離線或舊後台沒有＝null）
         deviceMod: modOf(m.claude_mod),   // 這台電腦的外掛狀態（選填；舊後台沒有＝null）
         onRoster: true, engine: a.engine ?? null, ...(typeof a.model === 'string' && a.model.trim() ? { model: a.model.trim() } : {}), ...(a.receivable === false ? { receivable: false } : {}), entryKind: typeof a.kind === 'string' && a.kind ? a.kind : null, kind: typeof m.kind === 'string' && m.kind ? m.kind : null, status: off || a.online === false ? 'offline' : statusOf(a.status),

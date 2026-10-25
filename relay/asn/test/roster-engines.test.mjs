@@ -91,7 +91,7 @@ test('名單：後台帶的 model 會留在好友上（pi 夥伴靠它顯示背�
   assert.equal('model' in by('派三'), false)
 })
 
-test('本機程序條目：顯示名拿掉（前景）（背景），背景的才在第二行寫「背景運行」；名字本身（鍵）不變', () => {
+test('本機程序條目：顯示名拿掉（前景）（背景），第二行不借用它寫前景／背景；名字本身（鍵）不變', () => {
   const members = [{ id: 'w02', name: '工作機', kind: 'claude', agents: [
     { name: 'grok #65324（前景）', status: 'running', cwd_label: '', engine: 'grok', kind: 'process', receivable: false },
     { name: 'codex #14（背景）', status: 'running', cwd_label: '', engine: 'codex', kind: 'process', receivable: false },
@@ -101,9 +101,9 @@ test('本機程序條目：顯示名拿掉（前景）（背景），背景的�
   ] }]
   const by = n => buildFriends(members, { selfNode: 'self' }).find(f => f.agent === n)
   const g = by('grok #65324（前景）')
-  assert.deepEqual([g.nick, g.psm, g.agent], ['grok #65324', '', 'grok #65324（前景）'], '前景：不寫，鍵不變（接手、操作都用 agent）')
+  assert.deepEqual([g.nick, g.psm, g.agent], ['grok #65324', '', 'grok #65324（前景）'], '鍵不變（接手、操作都用 agent）')
   const c = by('codex #14（背景）')
-  assert.deepEqual([c.nick, c.psm], ['codex #14', '背景運行'])
+  assert.deepEqual([c.nick, c.psm], ['codex #14', ''], '（背景）是命令列猜的，不是視窗隱藏，第二行不寫')
   assert.equal(by('pi · MiniMax #12（前景）').nick, 'pi · MiniMax #12')
   const t = by('Test-Gemini')
   assert.deepEqual([t.nick, t.psm], ['Test-Gemini', 'Gemini（背景工作者）'], '背景工作者照舊用第二行的標籤')
