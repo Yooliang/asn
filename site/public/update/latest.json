@@ -1,11 +1,11 @@
 {
-  "version": "0.1.74",
-  "notes": "名單帶視窗是否隱藏（隱藏的 CLI 視窗第二行寫「背景運行」）、內建通道字樣改「背景運行、內建通道」、背景工作者的名單帶對話編號、接手 Grok 時沒有現成底也能用開新夥伴的設定、設備分組照設備順序、名單不再顯示（前景）（背景）字樣",
-  "pub_date": "2026-10-25T22:21:38.602Z",
+  "version": "0.1.75",
+  "notes": "下載版的檔案補帶共用資料夾、內建終端機的命令層（開、送字、讀畫面、結束、忙閒、改名、重啟後認回自己開的視窗；目前還沒有畫面入口）",
+  "pub_date": "2026-10-26T05:36:36.884Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjFUK1gzdm1KcmtFSlA2eDBLSWFiOGZmQ2FaWWI5bG8rZXRkNGIyUmZ3WTdFZ1ZrbmJDQURoVGdUS1BMMzZqbzBnM0JDWUpqaGpQcmZBWEpiK0c0WHdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyOTY2ODk4CWZpbGU6QVNOXzAuMS43NF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjc0Cmc0RzJLZ1dhTGdYL3phdGxRMnU1bldRcE8rdkZLVEhaV2NudUNsSWE4NGhKTVFKeTdWZ3FaKzNTTTdJTVNoVmNZZVVIaE5sbGE3a21vU2hEcEhsVERRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.74_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjlobXEzS0hIVTRUT053bGREZk01NzI3dnM3R25SL0hlcE9kSzRaMDF4eXJqODBtSDBYQUNDTGhvREI0OG5Sc2hoWkxCZTdwV3E2Vk5kd1JrZ05MendvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyOTkyOTk2CWZpbGU6QVNOXzAuMS43NV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjc1CndlVEhscUFzczdjV3FPbWt5YjN1TURkdllMaHBiemFJTGJVNG1naFFGUDJPVk1wWkhNM056Uk1tTXBlZm9GdjM2MlREME1PY21uUCt2dTk4WXJaS0NRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.75_x64-setup.exe"
     }
   }
 }
