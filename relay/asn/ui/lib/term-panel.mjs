@@ -61,6 +61,77 @@ export function willSendText(pv, n) {
 }
 export const sentText = desc => (desc ? `已送出：${String(desc).slice(0, 80)}` : '已送出')
 
+// ---- ASN 替使用者往終端送字（#296）----
+// 使用者在清單裡寫好文字、按「送出」→ 先跳確認框，寫清楚「送到哪個終端／哪個資料夾／送什麼字」→ 按「確認送出」才呼叫 term_send。
+// 沒有任何自動送出；終端正在等你回答（信任資料夾、選單）時不能送字，請先處理提示。
+export const SEND_MAX = 2000
+
+/** 送字草稿的檢查。回 { ok, reason, lines, flattened }：reason 是給人看的中文原因（ok 時是空字串） */
+export function sendDraftView(row, text) {
+  const t = String(text ?? '')
+  const lines = t.split(/\r?\n/).filter(l => l.trim()).length
+  if (!row) return { ok: false, reason: '找不到這個終端', lines, flattened: false }
+  if (row.state === 'waiting_user') return { ok: false, reason: '終端正在等你回答，請先處理提示再送字', lines, flattened: false }
+  if (!t.trim()) return { ok: false, reason: '請先寫要送的文字', lines, flattened: false }
+  if (t.length > SEND_MAX) return { ok: false, reason: `文字太長（最多 ${SEND_MAX} 字）`, lines, flattened: false }
+  if (!row.cwd) return { ok: false, reason: '這個終端沒有工作資料夾紀錄，不能代送', lines, flattened: false }
+  return { ok: true, reason: '', lines, flattened: lines > 1 }
+}
+
+/** 確認框的說明：送到哪、什麼字、會不會按 Enter、多行會壓成一行 */
+export function sendConfirmView(row, text, enter) {
+  const d = sendDraftView(row, text)
+  if (!d.ok) return null
+  return {
+    title: '要替你把這段文字送進終端嗎？',
+    target: `${row.title}${row.folder ? `・${row.folder}` : ''}`,
+    text: String(text).slice(0, SEND_MAX),
+    note: [d.flattened ? '多行文字會合成一行送出。' : '', enter ? '送完後會再按一次 Enter。' : '只會把字打進去，不按 Enter。'].filter(Boolean).join(''),
+  }
+}
+
+/** 使用者按了「確認送出」：回給 term_send 的請求（只有編號、文字、是否換行）；草稿不合格回 null，不送 */
+export function sendRequest(row, text, enter) {
+  const d = sendDraftView(row, text)
+  return d.ok ? { id: row.id, text: String(text), enter: enter === true } : null
+}
+
+// ---- 接手使用者自己開的 WezTerm 窗格（#285 定案版；後端 #313）----
+// 接手只存記憶體、預設全唯讀；「代答提問」「代送文字」兩個寫入開關各自獨立、預設關，只能在這裡由本機使用者逐窗格點開（手機、來信、網路都不行）。
+// 「解除接手」不會結束那個程式，只是 ASN 不再管它。標題只用來在清單裡認人，接手後不存。
+const posInt = (v, min = 0) => Number.isInteger(v) && v >= min
+
+/** 後端候選列（term_adopt_candidates）→ 畫面一列；欄位壞掉的丟掉。tab_title 只是顯示用；cwd_raw 可能是 file:// 網址，取最後一段當資料夾名 */
+export function candidateRows(list) {
+  return (Array.isArray(list) ? list : []).filter(c => c && posInt(c.pid, 1) && posInt(c.pane_id) && posInt(c.started_ms, 1) && typeof c.profile === 'string').map(c => {
+    let raw = String(c.cwd_raw ?? '')
+    try { raw = decodeURIComponent(raw) } catch { /* 用原文 */ }
+    const verified = c.version_verified === true
+    const adopted = c.already_adopted === true
+    return {
+      key: `${c.pid}:${c.pane_id}`, pid: c.pid, pane_id: c.pane_id, started_ms: c.started_ms,
+      profile: c.profile, title: clip(c.tab_title, 60).replace(/[\u0000-\u001f\u007f]/g, ' ').trim(), folder: folderName(raw),
+      authorized: c.cwd_authorized === true, verified, adopted,
+      note: verified ? '' : clip(c.version_note, 120) || 'WezTerm 版本未驗證，只能讀取，不能代答或代送',
+      canAdopt: !adopted,
+    }
+  })
+}
+
+/** 使用者按了「接手」：回給 term_adopt 的請求（pid、窗格、建立時間原樣帶回，後端會核對）；列不合格回 null */
+export const adoptRequest = row => (row && posInt(row.pid, 1) && posInt(row.pane_id) && posInt(row.started_ms, 1) && row.canAdopt ? { pid: row.pid, pane_id: row.pane_id, started_ms: row.started_ms } : null)
+
+// 兩個寫入開關：kind＝answer（代答提問）／send（代送文字）
+export const UNLOCK_TEXT = {
+  answer: { label: '允許 ASN 代答提問', ask: '要讓 ASN 能在這個窗格代按提問選項嗎？每次還是要你在 ASN 按「送出」，送前會重讀畫面、確認不是你正在操作的窗格。' },
+  send: { label: '允許 ASN 代送文字', ask: '要讓 ASN 能往這個窗格代送文字嗎？每次還是要你在確認框按「確認送出」，送前會重新確認資料夾已授權、不是你正在操作的窗格。' },
+}
+/** 使用者在確認後按了「允許」：回給 term_adopt_unlock 的請求；只開被選的那一個，另一個不動（維持 false）。沒接手的窗格、不認得的種類回 null */
+export function unlockRequest(row, kind) {
+  if (!row || row.adopted !== true || !Object.hasOwn(UNLOCK_TEXT, kind)) return null
+  return { id: row.id, allow_answer: kind === 'answer', allow_send: kind === 'send' }
+}
+
 // 資料夾顯示名：路徑最後一段（Windows 與 POSIX 分隔都認），結尾的分隔符號略過；不是字串或空的回空字串
 export function folderName(cwd) {
   const parts = String(typeof cwd === 'string' ? cwd : '').split(/[\\/]+/).filter(Boolean)
@@ -73,7 +144,7 @@ export function rowsOf(listed, statuses = {}) {
     const st = statuses[t.id]
     const sv = stateView(st?.state)
     const prompt = sv.key === 'waiting_user' ? promptView(st?.prompt) : null
-    return { id: t.id, profile: String(t.profile ?? ''), title: `${t.profile ?? '終端'} #${t.id}`, cwd: typeof t.cwd === 'string' ? t.cwd : '', folder: folderName(t.cwd), state: sv.key, stateLabel: sv.label, tone: sv.tone, reason: String(st?.reason ?? ''), prompt }
+    return { id: t.id, adopted: t.adopted === true, profile: String(t.profile ?? ''), title: `${t.profile ?? '終端'} #${t.id}`, cwd: typeof t.cwd === 'string' ? t.cwd : '', folder: folderName(t.cwd), state: sv.key, stateLabel: sv.label, tone: sv.tone, reason: String(st?.reason ?? ''), prompt }
   })
 }
 
