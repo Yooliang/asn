@@ -34,6 +34,8 @@ pub trait Runner {
     fn spawn(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String>;
     /// 結束一個自己剛啟動的行程與它的子行程樹（等 socket 逾時要清掉剛開的視窗，不留桌面孤兒）
     fn kill_tree(&self, pid: u32);
+    /// 行程的建立時間（毫秒，查不到＝None）：結束行程前用來確認還是當初啟動的那一個，防程式編號被回收後誤殺別人
+    fn started_ms(&self, pid: u32) -> Option<u64>;
     fn sleep(&self, d: Duration);
 }
 
@@ -101,6 +103,10 @@ impl Runner for RealRunner {
         Ok(child.id())
     }
 
+    fn started_ms(&self, pid: u32) -> Option<u64> {
+        crate::heartbeat::process_started_ms(pid)
+    }
+
     fn kill_tree(&self, pid: u32) {
         let _ = Command::new("taskkill").no_window().args(["/PID", &pid.to_string(), "/T", "/F"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
     }
@@ -139,6 +145,8 @@ pub fn locate_from(dir: Option<PathBuf>, fs: &dyn Fs) -> Result<WezTermDir, Stri
 pub struct Window {
     pub gui_pid: u32,
     pub sock: PathBuf,
+    /// 視窗程序啟動當下量到的建立時間；stop 靠它確認還是同一個程序（量不到＝None，stop 會拒絕動手）
+    pub started_ms: Option<u64>,
 }
 
 pub fn sock_path(home: &Path, gui_pid: u32) -> PathBuf {
@@ -229,12 +237,13 @@ impl<'a> WezTerm<'a> {
         ];
         args.extend(command.iter().cloned());
         let gui_pid = self.runner.spawn(&self.dir.gui, &args, &self.config_env())?;
+        let started_ms = self.runner.started_ms(gui_pid);
         let sock = sock_path(&self.home, gui_pid);
         let start = Instant::now();
         let step = Duration::from_millis(100);
         loop {
             if self.fs.exists(&sock) {
-                return Ok(Window { gui_pid, sock });
+                return Ok(Window { gui_pid, sock, started_ms });
             }
             if start.elapsed() >= self.sock_wait {
                 self.runner.kill_tree(gui_pid);   // 剛開的視窗連同子行程一起清掉，不留桌面孤兒視窗
@@ -313,6 +322,25 @@ impl<'a> WezTerm<'a> {
         self.send_enter(sock, pane_id)
     }
 
+    /// 結束自己啟動的視窗（含子行程樹）。程式編號可能在視窗自己關掉後被系統回收給別的程式，所以：
+    /// - 啟動當下沒量到建立時間 → 拒絕（不能確認是同一個）；
+    /// - 現在查不到這個編號 → 視窗早就沒了，視為完成；
+    /// - 現在的建立時間和當初不同 → 編號已被別的程式用了，拒絕且不動它；
+    /// - 相同才結束。
+    pub fn stop(&self, win: &Window) -> Result<(), String> {
+        let Some(was) = win.started_ms else {
+            return Err("沒有記下視窗程序的建立時間，無法確認是同一個程序，不結束它".to_string());
+        };
+        match self.runner.started_ms(win.gui_pid) {
+            None => Ok(()),
+            Some(now) if now == was => {
+                self.runner.kill_tree(win.gui_pid);
+                Ok(())
+            }
+            Some(_) => Err("這個程式編號現在是別的程序（建立時間不同），不結束它".to_string()),
+        }
+    }
+
     /// 送「請讀 <路徑> 的內容並照辦」一行提示；路徑不得有換行與控制字元。**不帶 Enter**（Enter 要另外送，見 send_file_pointer_and_enter）
     pub fn send_file_pointer(&self, sock: &Path, pane_id: u64, file: &Path) -> Result<(), String> {
         let p = file.to_string_lossy();
@@ -355,6 +383,7 @@ mod tests {
         killed: RefCell<bool>,
         spawn_pid: u32,
         tree_killed: RefCell<Vec<u32>>,
+        started: RefCell<Vec<Option<u64>>>,   // 每次 started_ms 依序回傳（用完回 None）
     }
     impl Runner for FakeRunner {
         fn run(&self, _p: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<RunOutput, String> {
@@ -371,6 +400,10 @@ mod tests {
         }
         fn kill_tree(&self, pid: u32) {
             self.tree_killed.borrow_mut().push(pid);
+        }
+        fn started_ms(&self, _pid: u32) -> Option<u64> {
+            let mut v = self.started.borrow_mut();
+            if v.is_empty() { None } else { v.remove(0) }
         }
         fn sleep(&self, d: Duration) {
             self.sleeps.borrow_mut().push(d);
@@ -502,6 +535,38 @@ mod tests {
     }
 
     #[test]
+    fn stop_kills_only_when_creation_time_matches() {
+        let fs = FakeFs::default();
+        fs.files.borrow_mut().insert(sock_path(Path::new("H"), 1));
+        // 啟動時量到 1000，結束時還是 1000 → 結束
+        let r = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(1000), Some(1000)]), ..Default::default() };
+        let w = wez(&r, &fs);
+        let win = w.start(Path::new("C:/work"), &["agy.exe".to_string()]).unwrap();
+        assert_eq!(win.started_ms, Some(1000));
+        w.stop(&win).unwrap();
+        assert_eq!(*r.tree_killed.borrow(), vec![1]);
+        // 編號被別的程式回收（建立時間不同）→ 拒絕，且不動它
+        let r2 = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(1000), Some(2000)]), ..Default::default() };
+        let w2 = wez(&r2, &fs);
+        let win2 = w2.start(Path::new("C:/work"), &["agy.exe".to_string()]).unwrap();
+        assert!(w2.stop(&win2).unwrap_err().contains("別的程序"));
+        assert!(r2.tree_killed.borrow().is_empty(), "建立時間不同絕不能結束");
+        // 視窗早就沒了（查不到）→ 視為完成，不用動手
+        let r3 = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(1000), None]), ..Default::default() };
+        let w3 = wez(&r3, &fs);
+        let win3 = w3.start(Path::new("C:/work"), &["agy.exe".to_string()]).unwrap();
+        w3.stop(&win3).unwrap();
+        assert!(r3.tree_killed.borrow().is_empty());
+        // 啟動時沒量到建立時間 → 拒絕
+        let r4 = FakeRunner { spawn_pid: 1, ..Default::default() };
+        let w4 = wez(&r4, &fs);
+        let win4 = w4.start(Path::new("C:/work"), &["agy.exe".to_string()]).unwrap();
+        assert_eq!(win4.started_ms, None);
+        assert!(w4.stop(&win4).is_err());
+        assert!(r4.tree_killed.borrow().is_empty());
+    }
+
+    #[test]
     fn flatten_tab_becomes_space_not_glued() {
         assert_eq!(flatten_line("ls	-la"), "ls -la");
         assert_eq!(flatten_line("a		b
@@ -573,7 +638,9 @@ mod tests {
             Ok(())
         })();
         // 只結束自己啟動並記下的視窗程序（含它帶起的子行程樹）
-        let _ = std::process::Command::new("taskkill").args(["/PID", &win.gui_pid.to_string(), "/T", "/F"]).output();
+        let stopped = w.stop(&win);   // 真的走 stop：核對建立時間後才結束
+        println!("stop 結果：{stopped:?}");
+        let _ = stopped;
         let _ = std::fs::remove_dir_all(&tmp);
         result.expect("實測失敗");
     }
