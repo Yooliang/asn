@@ -1,8 +1,8 @@
 {
-  "version": "0.1.77",
-  "versionCode": 1077,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.77_android.apk",
-  "sha256": "0c747ef0caea2227e166fb52651b4c2c289c9df6eaafdf239eec38a789b37390",
-  "notes": "設備與帳號：設定視窗不再重複一個標題；電腦版拿掉底部「已永久移除」區；設備類型標籤只標手機、電腦不標；離線的別台設備不必等自動隱藏就能永久移除；帳號切換的結果回報失敗會重試並存檔補報",
+  "version": "0.1.78",
+  "versionCode": 1078,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.78_android.apk",
+  "sha256": "81635afdb04ff5e8b5bf4a8397f09ab7ef1e025651d3271a7f300775e4a05807",
+  "notes": "內建終端機的 WezTerm 隨安裝檔附帶（不必另外設定）；手機上本人簽章的切換帳號指令不必再到電腦按確認（設定可關、每小時最多自動切 3 次、切換後電腦跳通知可還原）；終端代送文字前要確認工作資料夾已授權",
   "bytes": 9387492
 }

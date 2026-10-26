@@ -1,11 +1,11 @@
 {
-  "version": "0.1.77",
-  "notes": "設備與帳號：設定視窗不再重複一個標題；電腦版拿掉底部「已永久移除」區；設備類型標籤只標手機、電腦不標；離線的別台設備不必等自動隱藏就能永久移除；帳號切換的結果回報失敗會重試並存檔補報",
-  "pub_date": "2026-10-26T11:57:16.850Z",
+  "version": "0.1.78",
+  "notes": "內建終端機的 WezTerm 隨安裝檔附帶（不必另外設定）；手機上本人簽章的切換帳號指令不必再到電腦按確認（設定可關、每小時最多自動切 3 次、切換後電腦跳通知可還原）；終端代送文字前要確認工作資料夾已授權",
+  "pub_date": "2026-10-26T13:11:33.632Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjRvQlFQVHJUd3ZrWCtGekQ2QStmU1lVQXBGSE9LdjhmUXRMYzlhYW1DK05Hd0I0OGlSMFM5dTFRWTRxYndvOGgwd1J5SE9DZHhPd3phM0svbC9hOWcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDE1ODM2CWZpbGU6QVNOXzAuMS43N194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjc3ClYvb09rMHlQOE5nSHZuRDFtVEZZNUkzdGpwQzdscWFzclBOTEMrdFk3VnA2TmFwTU9qY3dsSit3ZUdXZGx2S0h3UFY3TCtaQ0ZSeHE4c1RMTkprQkF3PT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.77_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjFZQ1g1NHd5Sy9JYytIYkl3c2ZJeDJNSkpyQ2pQcEpRMk5LcjNXZm14T0h6dUxhZE5DdHJtTWNIK0paTHlQaXlCZGRURGlxWWZZWnVlWVdLcSt1RFE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDIwMjkzCWZpbGU6QVNOXzAuMS43OF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjc4CkI4cTdTZEtpbDhlNVQ0MkQwODNZYnZJVExHb2dGYXZuaTh0ay9Hc0JHNlUrdmJQWVY2VytacUg0M3ludTBaQ1NENTF4UWpRdTNoWmp6RGhnMWJ5dkNRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.78_x64-setup.exe"
     }
   }
 }
