@@ -57,9 +57,18 @@ export const procDisplayName = name => String(name ?? '').replace(PROC_PLACE_RE,
 // CLI 視窗的主控台視窗被隱藏（名單帶 hidden:true，橋只在確定時才帶）＝「背景運行」，接在資料夾後面；顯示中或沒有這個欄位不寫字。ACP 內建通道的字樣在啟動設定的 label 裡
 export const HIDDEN_NOTE = '背景運行'
 export function hiddenPsm(a) {
-  const base = psmOf(a)
+  const base = [psmOf(a), piModelNote(a)].filter(Boolean).join('・')
   if (a?.hidden !== true) return base
   return base ? `${base}・${HIDDEN_NOTE}` : HIDDEN_NOTE
+}
+
+// pi 只是執行殼，名單上看不出背後用哪一家的模型：名單的 model 欄（後端合成「提供者/模型」，例如 anthropic/claude-sonnet-4）接在個人訊息後面，
+// 寫成「Pi 提供者/模型」。只收安全的字元與長度（它會顯示在畫面上），別的引擎、沒有 model 的不加。
+const PI_MODEL_RE = /^[\w.\-/\[\]:@+]{1,100}$/
+export function piModelNote(a) {
+  if (String(a?.engine ?? '').trim().toLowerCase() !== 'pi') return ''
+  const m = typeof a?.model === 'string' ? a.model.trim() : ''
+  return PI_MODEL_RE.test(m) ? `Pi ${m}` : ''
 }
 
 // 一個視窗一列；名字＝視窗名，個人訊息＝資料夾（cwd_label，沒有就空）
