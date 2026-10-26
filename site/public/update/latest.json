@@ -1,11 +1,11 @@
 {
-  "version": "0.1.76",
-  "notes": "電腦版新增「終端」按鈕與清單：列出由 ASN 開的終端機；終端等你回答時（信任資料夾、上下選單）跳出提示框，由你先選一項再按「送出」才代按，絕不自動代答；判斷 Grok 是閒置、處理中或在等你回答（需另外備好內建終端機的程式，尚未隨安裝檔附帶）",
-  "pub_date": "2026-10-26T07:48:08.090Z",
+  "version": "0.1.77",
+  "notes": "設備與帳號：設定視窗不再重複一個標題；電腦版拿掉底部「已永久移除」區；設備類型標籤只標手機、電腦不標；離線的別台設備不必等自動隱藏就能永久移除；帳號切換的結果回報失敗會重試並存檔補報",
+  "pub_date": "2026-10-26T11:57:16.850Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjNTSEM5S0xra09zY0JUUm1tak5rN0NVSFlKRmxvN1c4WUNXR1NGYmVNZm1RbGpEcm9zMEwrMUhFZ0hOT0NkTHh5NnlSdXpEa3RHRUxRdHdPWjVDdnc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDAwODg3CWZpbGU6QVNOXzAuMS43Nl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjc2CmM1RE9PQ0w1bHRYaXlJQmJuUmNmRldwWVg5c1dSRzJNSDdWd1FsUG1SeHhmNTJjMlBJZUhXbnJyVEZIZlBLeUVwWm1MK2gvSDk1WGhqbW40a2p0ZERnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.76_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjRvQlFQVHJUd3ZrWCtGekQ2QStmU1lVQXBGSE9LdjhmUXRMYzlhYW1DK05Hd0I0OGlSMFM5dTFRWTRxYndvOGgwd1J5SE9DZHhPd3phM0svbC9hOWcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDE1ODM2CWZpbGU6QVNOXzAuMS43N194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjc3ClYvb09rMHlQOE5nSHZuRDFtVEZZNUkzdGpwQzdscWFzclBOTEMrdFk3VnA2TmFwTU9qY3dsSit3ZUdXZGx2S0h3UFY3TCtaQ0ZSeHE4c1RMTkprQkF3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.77_x64-setup.exe"
     }
   }
 }
