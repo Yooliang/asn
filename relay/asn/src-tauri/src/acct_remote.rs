@@ -152,15 +152,95 @@ pub async fn remote_status(relay: &Relay, ids: Vec<String>) -> Result<Value, Str
     relay.api("acct_switch_status", Some(json!({ "ids": ids }))).await
 }
 
-async fn send_result(relay: &Relay, id: &str, status: &str, detail: &str) {
-    let d: String = detail.chars().filter(|c| !c.is_control()).take(300).collect();
-    if let Err(e) = relay.api("acct_switch_result", Some(json!({ "id": id, "status": status, "detail": d }))).await {
-        eprintln!("acct_switch_result failed: {e}");
+// ---------- 回報結果：失敗要重試，重試仍失敗就存檔、之後補報 ----------
+// 以前回報失敗只 eprintln：本機明明已經切好了，後端狀態卻停在 taken，手機一直顯示「等使用者按確認」（#300）。
+const RESULT_RETRY_DELAYS_MS: [u64; 2] = [1000, 3000];
+const OUTBOX_MAX: usize = 20;
+
+fn outbox_path(data_dir: &Path) -> std::path::PathBuf {
+    data_dir.join("acct-switch-outbox.json")
+}
+/// 還沒送達的結果：[{ id, status, detail }]
+fn outbox_read(data_dir: &Path) -> Vec<Value> {
+    std::fs::read_to_string(outbox_path(data_dir)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.as_array().cloned()).unwrap_or_default()
+}
+fn outbox_write(data_dir: &Path, rows: &[Value]) {
+    if rows.is_empty() {
+        let _ = std::fs::remove_file(outbox_path(data_dir));
+    } else {
+        let _ = crate::write_atomic(&outbox_path(data_dir), &Value::Array(rows.to_vec()).to_string());
     }
+}
+/// 放進待補報：同編號只留最新一筆，最多 OUTBOX_MAX 筆（超過丟最舊的）
+fn outbox_push(data_dir: &Path, id: &str, status: &str, detail: &str) {
+    let mut rows = outbox_read(data_dir);
+    rows.retain(|r| r.get("id").and_then(Value::as_str) != Some(id));
+    rows.push(json!({ "id": id, "status": status, "detail": detail }));
+    while rows.len() > OUTBOX_MAX {
+        rows.remove(0);
+    }
+    outbox_write(data_dir, &rows);
+}
+
+/// 試著送出，失敗就依序等 delays 再試；回傳最後有沒有成功。`sleep` 與送出都由呼叫端注入（測試用）。
+async fn send_with_retry<F, Fut, S, SFut>(mut try_send: F, delays: &[Duration], mut sleep: S) -> bool
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+    S: FnMut(Duration) -> SFut,
+    SFut: std::future::Future<Output = ()>,
+{
+    if try_send().await {
+        return true;
+    }
+    for d in delays {
+        sleep(*d).await;
+        if try_send().await {
+            return true;
+        }
+    }
+    false
+}
+
+async fn post_result(relay: &Relay, id: &str, status: &str, detail: &str) -> bool {
+    match relay.api("acct_switch_result", Some(json!({ "id": id, "status": status, "detail": detail }))).await {
+        Ok(_) => true,
+        Err(e) => {
+            eprintln!("acct_switch_result failed: {e}");
+            false
+        }
+    }
+}
+
+async fn send_result(relay: &Relay, data_dir: &Path, id: &str, status: &str, detail: &str) {
+    let d: String = detail.chars().filter(|c| !c.is_control()).take(300).collect();
+    let delays: Vec<Duration> = RESULT_RETRY_DELAYS_MS.iter().map(|ms| Duration::from_millis(*ms)).collect();
+    let ok = send_with_retry(|| post_result(relay, id, status, &d), &delays, |d| tokio::time::sleep(d)).await;
+    if !ok {
+        outbox_push(data_dir, id, status, &d);
+    }
+}
+
+/// 把之前沒送達的結果再送一次（每次取走指令前呼叫）；送達的從檔案拿掉，沒送達的留著
+pub async fn flush_outbox(relay: &Relay, data_dir: &Path) {
+    let rows = outbox_read(data_dir);
+    if rows.is_empty() {
+        return;
+    }
+    let mut left = vec![];
+    for r in rows {
+        let (Some(id), Some(status)) = (r.get("id").and_then(Value::as_str), r.get("status").and_then(Value::as_str)) else { continue };
+        let detail = r.get("detail").and_then(Value::as_str).unwrap_or("");
+        if !post_result(relay, id, status, detail).await {
+            left.push(r.clone());
+        }
+    }
+    outbox_write(data_dir, &left);
 }
 
 /// 取走自己的待辦。格式不對的當場回報失敗；合格的記進 TAKEN（之後只能憑編號處理）。
 pub async fn pending(relay: &Relay, data_dir: &Path) -> Result<Vec<Pending>, String> {
+    flush_outbox(relay, data_dir).await;   // 之前沒送達的結果先補報
     let v = relay.api("acct_switch_pending", Some(json!({}))).await?;
     let needs_confirm = !trust_own(data_dir);
     let mut out = vec![];
@@ -172,7 +252,7 @@ pub async fn pending(relay: &Relay, data_dir: &Path) -> Result<Vec<Pending>, Str
             }
             Err(why) => {
                 if let Some(id) = row.get("id").and_then(Value::as_str).filter(|s| is_uuid(s)) {
-                    send_result(relay, id, "failed", &why).await;
+                    send_result(relay, data_dir, id, "failed", &why).await;
                 }
             }
         }
@@ -193,7 +273,7 @@ pub async fn apply_with(relay: &Relay, data_dir: &Path, id: String, confirmed: b
         tokio::task::spawn_blocking(move || with_taken(|m| decide(m, &id2, allowed, switch))).await.map_err(|e| format!("背景工作失敗：{e}"))?
     };
     let Some((status, detail)) = res else { return Err("找不到這個指令（已處理過或已過期）".into()) };
-    send_result(relay, &id, status, &detail).await;
+    send_result(relay, data_dir, &id, status, &detail).await;
     if status == "ok" {
         Ok(json!({ "status": status, "detail": detail }))
     } else {
@@ -202,10 +282,10 @@ pub async fn apply_with(relay: &Relay, data_dir: &Path, id: String, confirmed: b
 }
 
 /// 使用者按了拒絕
-pub async fn decline(relay: &Relay, id: String) -> Result<(), String> {
+pub async fn decline(relay: &Relay, data_dir: &Path, id: String) -> Result<(), String> {
     let removed = with_taken(|m| m.remove(&id).is_some());
     if removed {
-        send_result(relay, &id, "denied", "對方電腦上的使用者沒有同意").await;
+        send_result(relay, data_dir, &id, "denied", "對方電腦上的使用者沒有同意").await;
     }
     Ok(())
 }
@@ -442,5 +522,43 @@ mod tests {
     fn 設備代號與編號格式() {
         assert!(valid_node("H") && valid_node("machine-2_a") && !valid_node("") && !valid_node("a b") && !valid_node(&"x".repeat(33)));
         assert!(is_uuid(U) && !is_uuid("11111111-2222-3333-4444-55555555555") && !is_uuid("zzzzzzzz-2222-3333-4444-555555555555"));
+    }
+
+    // ---- 回報結果：重試與補報（#300）----
+    #[tokio::test]
+    async fn 回報失敗會依序重試_成功就停_全失敗回_false() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let delays = [Duration::from_millis(1), Duration::from_millis(1)];
+        let n = AtomicUsize::new(0);
+        let ok = send_with_retry(|| { let k = n.fetch_add(1, Ordering::SeqCst); async move { k >= 1 } }, &delays, |_| async {}).await;
+        assert!(ok && n.load(Ordering::SeqCst) == 2, "第二次成功就停");
+        let n2 = AtomicUsize::new(0);
+        let first = send_with_retry(|| { n2.fetch_add(1, Ordering::SeqCst); async { true } }, &delays, |_| async {}).await;
+        assert!(first && n2.load(Ordering::SeqCst) == 1, "第一次就成功不重試");
+        let n3 = AtomicUsize::new(0);
+        let none = send_with_retry(|| { n3.fetch_add(1, Ordering::SeqCst); async { false } }, &delays, |_| async {}).await;
+        assert!(!none && n3.load(Ordering::SeqCst) == 3, "一次加兩次重試後放棄");
+    }
+
+    #[test]
+    fn 待補報檔_同編號留最新_最多二十筆_讀不到當空_清空會刪檔() {
+        let d = tempfile::tempdir().unwrap();
+        assert!(outbox_read(d.path()).is_empty());
+        outbox_push(d.path(), U, "failed", "舊的");
+        outbox_push(d.path(), U, "ok", "新的");
+        let rows = outbox_read(d.path());
+        assert_eq!(rows.len(), 1);
+        assert_eq!((rows[0]["status"].as_str(), rows[0]["detail"].as_str()), (Some("ok"), Some("新的")));
+        for i in 0..30 {
+            outbox_push(d.path(), &format!("id-{i}"), "ok", "x");
+        }
+        let rows = outbox_read(d.path());
+        assert_eq!(rows.len(), OUTBOX_MAX);
+        assert_eq!(rows.last().unwrap()["id"], "id-29");
+        assert!(rows.iter().all(|r| r["id"] != U), "最舊的被丟掉");
+        std::fs::write(outbox_path(d.path()), "不是 JSON").unwrap();
+        assert!(outbox_read(d.path()).is_empty(), "壞檔當空");
+        outbox_write(d.path(), &[]);
+        assert!(!outbox_path(d.path()).exists());
     }
 }
