@@ -9,7 +9,9 @@
 //!
 //! 忙閒只實作 grok：連續兩次取樣（中間用 Runner::sleep，間隔可注入；假執行器不真的等）畫面與游標都沒變，
 //! 且最後一個非空白行全文等於暫定提示符，才是 idle。對不上、agy、或讀取失敗都是 unknown，不把「畫面停住」猜成閒置。
-//! 畫面含「Do you trust the contents of this directory」則是 waiting_user，絕不代答。
+//! 畫面含信任提問、或解析得出選單、或選單模樣但解析不出時是 waiting_user，並附上 prompt。絕不代答。
+//! 代答只有 term_answer。這個命令本身證明不了使用者有按確認，UI 的提示框必須是唯一入口，後端其他路徑不得呼叫它。
+//! 按鍵只從固定對照表產生，走專用的送出（ESC [ A、ESC [ B、\r、ESC）。一般送字仍先壓行，那個會丟掉 ESC 的保護不放寬。
 //!
 //! 認領不掃整個系統。只讀 data_dir 裡自己寫的對照表，用記下的程序編號重算通訊路徑（檔案裡的路徑一律不理），
 //! 建立時間相符且通訊檔存在才 list。workspace 是 `asn-{編號}`，或分頁標題是 `ASN:{編號}`（或後面空一格）才放回對照表。
@@ -41,6 +43,14 @@ const TRUNC_MARK: &str = "…（已截斷）";
 const GROK_IDLE_MARK: &str = "grok>";
 /// grok 第一次打開資料夾時的信任提問。畫面裡出現這句就回 waiting_user，絕不代送 y 或其他字。
 const GROK_TRUST_MARK: &str = "Do you trust the contents of this directory";
+/// 回給前端的提問原文上限（字，不是位元組）。
+const PROMPT_TEXT_CHARS: usize = 500;
+/// 解析不出選單時，原文取畫面底部這幾行（與忙閒取樣同一扇窗）。
+const PROMPT_TEXT_LINES: usize = 40;
+/// 選單從目前游標往下，最多幾步。超過就拒絕，不送鍵。
+const MAX_MENU_DOWN: u32 = 20;
+/// 一次代答的按鍵數上限（含 Enter）。與往下步數分開算。
+const MAX_ANSWER_KEYS: usize = 32;
 
 /// `term_list` 的一列。
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -49,9 +59,12 @@ pub struct TermListed {
     pub profile: String,
     pub pid: u32,
     pub started_ms: Option<u64>,
+    /// 開啟時已通過授權的工作資料夾。記下來的那次，不是事後重查。
+    pub cwd: String,
 }
 
 /// `term_status` 的結果。state 只會是 busy、idle、unknown、waiting_user。判斷不了就是 unknown，不會猜。
+/// waiting_user 才有 prompt；其他狀態 prompt 是空的。
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct TermStatus {
     pub state: String,
@@ -59,6 +72,28 @@ pub struct TermStatus {
     pub cursor_x: Option<i64>,
     pub cursor_y: Option<i64>,
     pub reason: String,
+    pub prompt: Option<TermPrompt>,
+}
+
+/// 畫面上等使用者回答的提問。kind 只會是 trust_dialog、menu、unknown_prompt。
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct TermPrompt {
+    pub kind: String,
+    pub text: String,
+    pub options: Vec<TermOption>,
+}
+
+/// 選項編號從 1 起算。label 是畫面上的文字；信任提問的兩項是固定的。
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct TermOption {
+    pub n: u32,
+    pub label: String,
+}
+
+/// `term_answer` 實際送出的按鍵描述，給前端顯示。不是原始控制碼。
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct TermAnswered {
+    pub keys: String,
 }
 
 struct Session {
@@ -69,6 +104,8 @@ struct Session {
     workspace: String,
     /// 設到分頁上的完整標題（含 ASN 前綴）。
     title: String,
+    /// 開啟時已通過授權的工作資料夾。
+    cwd: String,
 }
 
 struct SessionSnap {
@@ -103,6 +140,9 @@ struct StoreTerm {
     pane_id: u64,
     workspace: String,
     title: String,
+    /// 舊對照表沒有這欄就當空字串，不猜一個資料夾。
+    #[serde(default)]
+    cwd: String,
 }
 
 enum Loaded {
@@ -250,6 +290,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 pane_id,
                 workspace,
                 title,
+                cwd: cwd.to_string_lossy().into_owned(),
             });
         }
         if let Err(e) = self.persist() {
@@ -296,6 +337,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 profile: s.profile.clone(),
                 pid: s.window.gui_pid,
                 started_ms: s.window.started_ms,
+                cwd: s.cwd.clone(),
             })
             .collect()
     }
@@ -317,7 +359,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
 
     /// 忙或閒。只認自己的編號。agy 沒有規則，直接 unknown，連畫面都不讀。
     /// grok：取樣、睡一段、再取樣。兩次的畫面與游標都相同，且停在暫定提示符，才是 idle；有變化是 busy；其餘 unknown。
-    /// 任一次畫面含信任資料夾的提問就是 waiting_user。這裡不送字。
+    /// 任一次畫面是信任提問、選單、或解析不出的選單模樣，就是 waiting_user。這裡不送字。
     pub fn status(&self, id: &str) -> Result<TermStatus, String> {
         let snap = self.snapshot(id)?;
         if snap.profile != "grok" {
@@ -327,6 +369,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 cursor_x: None,
                 cursor_y: None,
                 reason: "只有 grok 有閒置規則".into(),
+                prompt: None,
             });
         }
         let dir = self.dir()?;
@@ -335,16 +378,16 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             Ok(s) => s,
             Err(e) => return Ok(unknown_status(&snap.profile, &format!("讀不到畫面或游標，無法判斷：{e}"))),
         };
-        if first.text.contains(GROK_TRUST_MARK) {
-            return Ok(trust_status(&snap.profile, first.cursor_x, first.cursor_y));
+        if let Some(p) = classify_prompt(&first.text) {
+            return Ok(waiting_status(&snap.profile, first.cursor_x, first.cursor_y, p));
         }
         self.runner.sleep(self.status_gap);
         let second = match self.sample(&w, &snap) {
             Ok(s) => s,
             Err(e) => return Ok(unknown_status(&snap.profile, &format!("讀不到畫面或游標，無法判斷：{e}"))),
         };
-        if second.text.contains(GROK_TRUST_MARK) {
-            return Ok(trust_status(&snap.profile, second.cursor_x, second.cursor_y));
+        if let Some(p) = classify_prompt(&second.text) {
+            return Ok(waiting_status(&snap.profile, second.cursor_x, second.cursor_y, p));
         }
         let cursor_x = Some(second.cursor_x);
         let cursor_y = Some(second.cursor_y);
@@ -355,6 +398,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 cursor_x,
                 cursor_y,
                 reason: "畫面或游標有變化".into(),
+                prompt: None,
             });
         }
         if last_nonempty(&second.text) == GROK_IDLE_MARK {
@@ -364,6 +408,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 cursor_x,
                 cursor_y,
                 reason: "連續兩次畫面相同且停在提示符".into(),
+                prompt: None,
             });
         }
         Ok(TermStatus {
@@ -372,7 +417,38 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             cursor_x,
             cursor_y,
             reason: "畫面沒有變化，但不是已確認的 grok 提示符".into(),
+            prompt: None,
         })
+    }
+
+    /// 使用者在 UI 提示框按了第 n 個選項才代送。不收原始按鍵。送出前再讀一次畫面：提示還在、種類相符、n 合法才送。
+    /// 按鍵只從固定對照表產生，走 send_bytes，不經過會丟掉 ESC 的壓行。
+    /// 這個方法證明不了使用者有按確認。UI 的提示框必須是唯一入口；後端其他路徑不得呼叫。
+    pub fn answer(&self, id: &str, prompt_kind: &str, n: u32) -> Result<TermAnswered, String> {
+        let snap = self.snapshot(id)?;
+        if prompt_kind != "trust_dialog" && prompt_kind != "menu" {
+            return Err("不認得這個提示，不能代答".into());
+        }
+        let dir = self.dir()?;
+        let w = self.wez(&dir);
+        let text = w.get_text(&snap.window.sock, snap.pane_id, Some(-STATUS_LINES))?;
+        let Some(seen) = classify_prompt(&text) else {
+            return Err("這個提示已經不在畫面上，沒有送出".into());
+        };
+        if seen.kind != prompt_kind {
+            return Err("這個提示已經不在畫面上，沒有送出".into());
+        }
+        if n == 0 || n as usize > seen.options.len() {
+            return Err("沒有這個選項，沒有送出".into());
+        }
+        let keys = match prompt_kind {
+            "trust_dialog" => trust_keys(n)?,
+            "menu" => menu_keys(seen.cursor, n)?,
+            _ => return Err("不認得這個提示，不能代答".into()),
+        };
+        let bytes = encode_keys(&keys)?;
+        w.send_bytes(&snap.window.sock, snap.pane_id, &bytes)?;
+        Ok(TermAnswered { keys: describe_keys(&keys) })
     }
 
     /// 改自己這個終端的分頁標題。使用者給的字會接在 `ASN:{編號} ` 後面，前綴不拿掉（認領靠它）。
@@ -451,6 +527,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 pane_id: pane.pane_id,
                 workspace: format!("asn-{}", term.id),
                 title,
+                cwd: term.cwd.clone(),
             });
         }
         let mut next = file.next;
@@ -615,6 +692,7 @@ fn session_to_store(s: &Session) -> StoreTerm {
         pane_id: s.pane_id,
         workspace: s.workspace.clone(),
         title: s.title.clone(),
+        cwd: s.cwd.clone(),
     }
 }
 
@@ -668,17 +746,309 @@ fn unknown_status(profile: &str, reason: &str) -> TermStatus {
         cursor_x: None,
         cursor_y: None,
         reason: reason.to_string(),
+        prompt: None,
     }
 }
 
-fn trust_status(profile: &str, cursor_x: i64, cursor_y: i64) -> TermStatus {
+fn waiting_status(profile: &str, cursor_x: i64, cursor_y: i64, p: ScreenPrompt) -> TermStatus {
     TermStatus {
         state: "waiting_user".into(),
         profile: profile.to_string(),
         cursor_x: Some(cursor_x),
         cursor_y: Some(cursor_y),
-        reason: "trust_dialog".into(),
+        reason: p.kind.to_string(),
+        prompt: Some(p.into_public()),
     }
+}
+
+/// 畫面上看到的提問。cursor 是選單目前停在第幾項（從 1 起算）；信任提問用不到，是 0。
+struct ScreenPrompt {
+    kind: &'static str,
+    text: String,
+    options: Vec<TermOption>,
+    cursor: u32,
+}
+
+impl ScreenPrompt {
+    fn into_public(self) -> TermPrompt {
+        TermPrompt { kind: self.kind.to_string(), text: self.text, options: self.options }
+    }
+}
+
+/// 固定對照表裡的一顆鍵。控制碼只在 encode_key 產生，不接受外面傳進來的字串。
+#[derive(Clone, Copy)]
+enum AnswerKey {
+    Up,
+    Down,
+    Enter,
+    Esc,
+    Char(char),
+}
+
+fn trust_keys(n: u32) -> Result<Vec<AnswerKey>, String> {
+    let c = match n {
+        1 => 'y',
+        2 => 'n',
+        _ => return Err("沒有這個選項，沒有送出".into()),
+    };
+    Ok(vec![AnswerKey::Char(c)])
+}
+
+/// 從畫面上的游標走到第 n 項。往下超過 MAX_MENU_DOWN 就拒絕。總長度另由 encode_keys 把關。
+fn menu_keys(cursor: u32, n: u32) -> Result<Vec<AnswerKey>, String> {
+    if cursor == 0 || n == 0 {
+        return Err("沒有這個選項，沒有送出".into());
+    }
+    let downs = if n > cursor { n - cursor } else { 0 };
+    let ups = if cursor > n { cursor - n } else { 0 };
+    if downs > MAX_MENU_DOWN {
+        return Err("往下的步數超過上限，沒有送出".into());
+    }
+    let mut keys = Vec::new();
+    for _ in 0..ups {
+        keys.push(AnswerKey::Up);
+    }
+    for _ in 0..downs {
+        keys.push(AnswerKey::Down);
+    }
+    keys.push(AnswerKey::Enter);
+    Ok(keys)
+}
+
+/// 唯一會產生終端機控制碼的地方。字元鍵只准單一英數字元，其他控制碼字串一律拒絕。
+fn encode_key(key: AnswerKey) -> Result<String, String> {
+    Ok(match key {
+        AnswerKey::Up => "\u{1b}[A".to_string(),
+        AnswerKey::Down => "\u{1b}[B".to_string(),
+        AnswerKey::Enter => "\r".to_string(),
+        AnswerKey::Esc => "\u{1b}".to_string(),
+        AnswerKey::Char(c) => {
+            if !c.is_ascii_alphanumeric() {
+                return Err("按鍵只能是單一英數字元，不能送控制碼".into());
+            }
+            c.to_string()
+        }
+    })
+}
+
+fn encode_keys(keys: &[AnswerKey]) -> Result<String, String> {
+    if keys.is_empty() || keys.len() > MAX_ANSWER_KEYS {
+        return Err("按鍵序列太長，沒有送出".into());
+    }
+    let mut out = String::new();
+    for k in keys {
+        out.push_str(&encode_key(*k)?);
+    }
+    Ok(out)
+}
+
+fn describe_keys(keys: &[AnswerKey]) -> String {
+    match keys {
+        [AnswerKey::Char(c)] => c.to_string(),
+        [AnswerKey::Enter] => "Enter".to_string(),
+        _ => {
+            let ups = keys.iter().filter(|k| matches!(k, AnswerKey::Up)).count();
+            let downs = keys.iter().filter(|k| matches!(k, AnswerKey::Down)).count();
+            let mut parts = Vec::new();
+            if ups > 0 {
+                parts.push(format!("Up×{ups}"));
+            }
+            if downs > 0 {
+                parts.push(format!("Down×{downs}"));
+            }
+            if keys.iter().any(|k| matches!(k, AnswerKey::Enter)) {
+                parts.push("Enter".into());
+            }
+            if keys.iter().any(|k| matches!(k, AnswerKey::Esc)) {
+                parts.push("Esc".into());
+            }
+            parts.join(" + ")
+        }
+    }
+}
+
+fn clean_text(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).collect::<String>().trim().to_string()
+}
+
+fn cap_head(s: &str, max: usize) -> String {
+    s.chars().take(max).collect()
+}
+
+fn cap_tail(s: &str, max: usize) -> String {
+    let v: Vec<char> = s.chars().collect();
+    if v.len() <= max {
+        return v.into_iter().collect();
+    }
+    v[v.len() - max..].iter().collect()
+}
+
+fn is_selected_marker(c: char) -> bool {
+    matches!(c, '>' | '●' | '▶' | '❯')
+}
+
+fn is_unselected_marker(c: char) -> bool {
+    matches!(c, '○' | '◦' | '·')
+}
+
+/// 行首（只認普通空格）的游標或項目符號。回傳縮排字數、符號、標籤起始欄、標籤。
+fn split_marker(line: &str) -> Option<(usize, char, usize, String)> {
+    let indent = line.chars().take_while(|c| *c == ' ').count();
+    let after: String = line.chars().skip(indent).collect();
+    let mut it = after.chars();
+    let marker = it.next()?;
+    if !is_selected_marker(marker) && !is_unselected_marker(marker) {
+        return None;
+    }
+    let rest: String = it.collect();
+    let gap = rest.chars().take_while(|c| *c == ' ').count();
+    if gap == 0 {
+        return None;
+    }
+    let label = clean_text(&rest.chars().skip(gap).collect::<String>());
+    if label.is_empty() {
+        return None;
+    }
+    Some((indent, marker, indent + 1 + gap, label))
+}
+
+fn plain_sibling(line: &str, label_col: usize) -> Option<String> {
+    if split_marker(line).is_some() {
+        return None;
+    }
+    let indent = line.chars().take_while(|c| *c == ' ').count();
+    if indent != label_col {
+        return None;
+    }
+    let label = clean_text(&line.chars().skip(indent).collect::<String>());
+    if label.is_empty() {
+        None
+    } else {
+        Some(label)
+    }
+}
+
+fn sibling_label(line: &str, indent: usize, label_col: usize, gt_style: bool) -> Option<String> {
+    if let Some((ind, marker, _, label)) = split_marker(line) {
+        if ind != indent || is_selected_marker(marker) {
+            return None;
+        }
+        if !gt_style && is_unselected_marker(marker) {
+            return Some(label);
+        }
+        return None;
+    }
+    if gt_style {
+        plain_sibling(line, label_col)
+    } else {
+        None
+    }
+}
+
+/// 信任提問優先。選單要恰好一個游標、連續至少兩項、縮排一致才算；對不上就不猜。
+/// 兩個以上游標，或項目符號清單拼不齊，是 unknown_prompt（options 空的）。
+fn classify_prompt(text: &str) -> Option<ScreenPrompt> {
+    if text.contains(GROK_TRUST_MARK) {
+        let raw = text.lines().filter(|l| l.contains(GROK_TRUST_MARK)).map(clean_text).filter(|l| !l.is_empty()).collect::<Vec<_>>().join("\n");
+        return Some(ScreenPrompt {
+            kind: "trust_dialog",
+            text: cap_head(&raw, PROMPT_TEXT_CHARS),
+            options: vec![
+                TermOption { n: 1, label: "Yes, proceed".into() },
+                TermOption { n: 2, label: "No, quit".into() },
+            ],
+            cursor: 0,
+        });
+    }
+    let lines: Vec<&str> = text.lines().collect();
+    let selected: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(i, l)| match split_marker(l) {
+            Some((_, m, _, _)) if is_selected_marker(m) => Some(i),
+            _ => None,
+        })
+        .collect();
+    if selected.len() == 1 {
+        if let Some(menu) = parse_menu_block(&lines, selected[0]) {
+            return Some(menu);
+        }
+    }
+    let bullet_rows = lines.iter().filter(|l| split_marker(l).is_some_and(|(_, m, _, _)| m != '>')).count();
+    if selected.len() >= 2 || (bullet_rows >= 2 && selected.len() != 1) {
+        let start = lines.len().saturating_sub(PROMPT_TEXT_LINES);
+        let body = lines[start..].iter().map(|l| clean_text(l)).filter(|l| !l.is_empty()).collect::<Vec<_>>().join("\n");
+        return Some(ScreenPrompt {
+            kind: "unknown_prompt",
+            text: cap_tail(&body, PROMPT_TEXT_CHARS),
+            options: Vec::new(),
+            cursor: 0,
+        });
+    }
+    None
+}
+
+fn parse_menu_block(lines: &[&str], cursor_idx: usize) -> Option<ScreenPrompt> {
+    let (indent, marker, label_col, _) = split_marker(lines[cursor_idx])?;
+    if !is_selected_marker(marker) {
+        return None;
+    }
+    let gt_style = marker == '>';
+    let mut start = cursor_idx;
+    let mut end = cursor_idx;
+    while start > 0 {
+        let prev = lines[start - 1];
+        if prev.trim().is_empty() || sibling_label(prev, indent, label_col, gt_style).is_none() {
+            break;
+        }
+        start -= 1;
+    }
+    while end + 1 < lines.len() {
+        let next = lines[end + 1];
+        if next.trim().is_empty() || sibling_label(next, indent, label_col, gt_style).is_none() {
+            break;
+        }
+        end += 1;
+    }
+    if end - start + 1 < 2 {
+        return None;
+    }
+    let mut options = Vec::new();
+    let mut cursor = 0u32;
+    for (i, line) in lines.iter().enumerate().take(end + 1).skip(start) {
+        let label = if i == cursor_idx {
+            split_marker(line)?.3
+        } else {
+            sibling_label(line, indent, label_col, gt_style)?
+        };
+        let n = options.len() as u32 + 1;
+        if i == cursor_idx {
+            cursor = n;
+        }
+        options.push(TermOption { n, label });
+    }
+    if cursor == 0 || options.len() < 2 {
+        return None;
+    }
+    let mut q = Vec::new();
+    let mut i = start;
+    while i > 0 {
+        i -= 1;
+        if lines[i].trim().is_empty() {
+            break;
+        }
+        let line = clean_text(lines[i]);
+        if !line.is_empty() {
+            q.push(line);
+        }
+    }
+    q.reverse();
+    Some(ScreenPrompt {
+        kind: "menu",
+        text: cap_head(&q.join("\n"), PROMPT_TEXT_CHARS),
+        options,
+        cursor,
+    })
 }
 
 /// 使用者給的標題：去掉首尾空白後 1 到 MAX_TITLE_CHARS 個字，不能有控制字元，空白只准普通空格。
@@ -774,6 +1144,14 @@ pub struct TermStatusReq {
 pub struct TermRenameReq {
     pub id: String,
     pub title: String,
+}
+
+#[cfg(feature = "gui")]
+#[derive(Debug, serde::Deserialize)]
+pub struct TermAnswerReq {
+    pub id: String,
+    pub prompt_kind: String,
+    pub n: u32,
 }
 
 /// 正式路徑：讀啟動設定、沿用本機資料夾授權，再交給 TermService。
@@ -1057,6 +1435,7 @@ mod tests {
         assert_eq!(v["version"], 1);
         assert_eq!(v["terms"][0]["workspace"], "asn-1");
         assert_eq!(v["terms"][0]["title"], "ASN:1");
+        assert_eq!(v["terms"][0]["cwd"], rig.cwd, "對照表記下開啟時已授權的資料夾");
         assert_eq!(v["terms"][1]["workspace"], "asn-2");
         assert!(!starts.iter().any(|a| a.iter().any(|x| x == "agent" || x == "stdio" || x.contains("cmd.exe"))), "不帶內建通道參數，也不走陷阱編號 agy 的 cmd");
         let calls = rig.runner.inner.calls.borrow();
@@ -1069,13 +1448,15 @@ mod tests {
                     id: id.clone(),
                     profile: "agy".into(),
                     pid: 42,
-                    started_ms: Some(1_000)
+                    started_ms: Some(1_000),
+                    cwd: rig.cwd.clone(),
                 },
                 TermListed {
                     id: id2,
                     profile: "grok".into(),
                     pid: 42,
-                    started_ms: Some(1_000)
+                    started_ms: Some(1_000),
+                    cwd: rig.cwd.clone(),
                 },
             ]
         );
@@ -1084,6 +1465,7 @@ mod tests {
         assert_eq!(json["profile"], "agy");
         assert_eq!(json["pid"], 42);
         assert_eq!(json["started_ms"], 1_000);
+        assert_eq!(json["cwd"], rig.cwd);
         assert_cli_uses_socket(&rig.runner);
     }
 
@@ -1109,7 +1491,7 @@ mod tests {
     fn 指令只收自己的編號_不能傳程序編號或通訊路徑() {
         let src = include_str!("term.rs");
         let lib = include_str!("../lib.rs");
-        for name in ["TermStartReq", "TermSendReq", "TermReadReq", "TermStopReq", "TermStatusReq", "TermRenameReq"] {
+        for name in ["TermStartReq", "TermSendReq", "TermReadReq", "TermStopReq", "TermStatusReq", "TermRenameReq", "TermAnswerReq"] {
             let marker = format!("struct {name}");
             let rest = src.split(&marker).nth(1).unwrap_or_else(|| panic!("找不到 {name}"));
             let body = rest.split('}').next().unwrap();
@@ -1118,6 +1500,21 @@ mod tests {
         assert!(lib.contains("terms.stop(&req.id)"), "關閉只把編號交給 stop");
         assert!(lib.contains("terms.status(&req.id)"), "忙閒只把編號交給 status");
         assert!(lib.contains("terms.rename(&req.id, &req.title)"), "改名只把編號與標題交給 rename");
+        assert!(lib.contains("terms.answer(&req.id, &req.prompt_kind, req.n)"), "代答只把編號、提示種類與選項編號交給 answer");
+        let head = src.split("mod tests").next().unwrap();
+        assert!(!head.contains(".answer("), "後端其他路徑不得呼叫 answer；UI 提示框是唯一入口");
+        let ans = head.split("pub fn answer(").nth(1).expect("找得到 answer");
+        let ans_body = ans.split("pub fn rename").next().unwrap();
+        assert!(ans_body.contains("encode_keys(&keys)"), "送出前只能走固定對照表");
+        assert!(ans_body.contains("send_bytes"), "代答走 send-text 位元組，不壓行");
+        assert!(!ans_body.contains("send(") && !ans_body.contains("send_line"), "代答不把文字交給會丟掉控制碼的壓行送字");
+        let req = src.split("struct TermAnswerReq").nth(1).unwrap().split('}').next().unwrap();
+        assert!(!req.contains("choice") && !req.contains("keys") && !req.contains("ansi"), "不收原始按鍵或選擇字串：{req}");
+        let wz = include_str!("wezterm.rs");
+        let bytes_fn = wz.split("pub fn send_bytes(").nth(1).expect("有專用按鍵路徑").split("fn send_raw").next().unwrap();
+        assert!(!bytes_fn.contains("flatten_line"), "方向鍵路徑不得壓行");
+        let line_fn = wz.split("pub fn send_line(").nth(1).unwrap().split("pub fn send_enter").next().unwrap();
+        assert!(line_fn.contains("flatten_line"), "一般送字仍要壓行，不能放寬");
         assert!(!lib.contains("kill_tree"), "命令層不自己結束行程");
     }
 
@@ -1132,6 +1529,7 @@ mod tests {
             rig.svc.stop("999").unwrap_err(),
             rig.svc.rename("999", "名稱").unwrap_err(),
             rig.svc.status("999").unwrap_err(),
+            rig.svc.answer("999", "trust_dialog", 1).unwrap_err(),
         ] {
             assert!(op.contains("沒有這個終端"), "{op}");
         }
@@ -1340,6 +1738,11 @@ mod tests {
         let st = rig.svc.status(&id).unwrap();
         assert_eq!(st.state, "waiting_user");
         assert_eq!(st.reason, "trust_dialog");
+        let p = st.prompt.expect("waiting_user 要附上提問");
+        assert_eq!(p.kind, "trust_dialog");
+        assert!(p.text.contains("Do you trust the contents of this directory"), "{}", p.text);
+        assert!(!p.text.chars().any(|c| c.is_control()), "原文去掉控制字元");
+        assert_eq!(p.options.iter().map(|o| (o.n, o.label.as_str())).collect::<Vec<_>>(), vec![(1, "Yes, proceed"), (2, "No, quit")]);
         assert_eq!(count_cmd(&rig.runner, "send-text"), 0, "信任提問不可代答，也不能送任何字");
         assert!(!rig.runner.args().iter().any(|a| a.iter().any(|x| x == "y" || x == "n")));
         assert!(rig.runner.inner.sleeps.borrow().is_empty(), "第一次就看到提問，不必再睡");
@@ -1347,6 +1750,7 @@ mod tests {
         *rig.runner.inner.screen.borrow_mut() = "Grok Build  1.0.70\n".into();
         let st = rig.svc.status(&id).unwrap();
         assert_eq!(st.state, "unknown", "沒有信任提問時，最後一行不是 grok> 仍是 unknown");
+        assert!(st.prompt.is_none());
         assert_eq!(count_cmd(&rig.runner, "send-text"), 0);
 
         let rig = make(default_profiles(), vec![]);
@@ -1367,6 +1771,154 @@ mod tests {
         assert_eq!(st.state, "unknown", "agy 沒有這條規則");
         assert_eq!(count_cmd(&rig.runner, "send-text"), 0);
         assert!(!rig.runner.args().iter().any(|a| a.iter().any(|x| x == "get-text")));
+    }
+
+    #[test]
+    fn 使用者確認後才代送信任提問的按鍵() {
+        let trust = "Do you trust the contents of this directory? (Yes, proceed y / No, quit n)\nGrok Build  1.0.70\n";
+        let rig = make(default_profiles(), vec![]);
+        let id = rig.svc.start("grok", &rig.cwd, &rig.config).unwrap();
+        *rig.runner.inner.screen.borrow_mut() = trust.into();
+        let got = rig.svc.answer(&id, "trust_dialog", 1).unwrap();
+        assert_eq!(got.keys, "y");
+        let sent: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "send-text")).collect();
+        assert_eq!(sent, vec![vec!["cli".to_string(), "send-text".into(), "--pane-id".into(), "7".into(), "--no-paste".into(), "y".into()]]);
+        let trace = rig.runner.inner.trace.borrow().clone();
+        assert_eq!(trace[trace.len() - 2], "run:get-text", "送出前要先讀畫面：{trace:?}");
+        assert_eq!(trace[trace.len() - 1], "run:send-text");
+        assert_cli_uses_socket(&rig.runner);
+        let got = rig.svc.answer(&id, "trust_dialog", 2).unwrap();
+        assert_eq!(got.keys, "n");
+        let sent: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "send-text")).collect();
+        assert_eq!(sent.last().unwrap().last().map(String::as_str), Some("n"));
+        assert!(!sent.iter().any(|a| a.iter().any(|x| x == "\r")), "信任提問只送單一字，不另外送 Enter");
+
+        *rig.runner.inner.screen.borrow_mut() = "Grok Build  1.0.70\n".into();
+        let before = count_cmd(&rig.runner, "send-text");
+        let err = rig.svc.answer(&id, "trust_dialog", 1).unwrap_err();
+        assert!(err.contains("不在畫面"), "{err}");
+        assert_eq!(count_cmd(&rig.runner, "send-text"), before, "提示不在就不可送字");
+
+        let before = rig.runner.args().len();
+        let err = rig.svc.answer(&id, "\u{1b}[A", 1).unwrap_err();
+        assert!(err.contains("不認得"), "{err}");
+        assert_eq!(rig.runner.args().len(), before, "控制碼字串不能當成提示種類");
+        let err = rig.svc.answer(&id, "something_else", 1).unwrap_err();
+        assert!(err.contains("不認得"), "{err}");
+        assert_eq!(rig.runner.args().len(), before, "未知提示種類不可呼叫 WezTerm");
+        let err = rig.svc.answer(&id, "unknown_prompt", 1).unwrap_err();
+        assert!(err.contains("不認得"), "{err}");
+        assert_eq!(rig.runner.args().len(), before, "解析不出的提問不能代答");
+
+        *rig.runner.inner.screen.borrow_mut() = trust.into();
+        let before = count_cmd(&rig.runner, "send-text");
+        let err = rig.svc.answer(&id, "trust_dialog", 3).unwrap_err();
+        assert!(err.contains("沒有這個選項"), "{err}");
+        assert_eq!(count_cmd(&rig.runner, "send-text"), before, "編號超出選項不可送字");
+        let err = rig.svc.answer(&id, "trust_dialog", 0).unwrap_err();
+        assert!(err.contains("沒有這個選項"), "{err}");
+        assert_eq!(count_cmd(&rig.runner, "send-text"), before);
+
+        let before = rig.runner.args().len();
+        let err = rig.svc.answer("999", "trust_dialog", 1).unwrap_err();
+        assert!(err.contains("沒有這個終端"), "{err}");
+        assert_eq!(rig.runner.args().len(), before, "未知編號不可送字");
+    }
+
+    #[test]
+    fn 按鍵只由固定對照表產生且拒絕控制碼() {
+        assert_eq!(encode_keys(&[AnswerKey::Up]).unwrap(), "\u{1b}[A");
+        assert_eq!(encode_keys(&[AnswerKey::Down]).unwrap(), "\u{1b}[B");
+        assert_eq!(encode_keys(&[AnswerKey::Enter]).unwrap(), "\r");
+        assert_eq!(encode_keys(&[AnswerKey::Esc]).unwrap(), "\u{1b}");
+        assert_eq!(encode_keys(&[AnswerKey::Char('y')]).unwrap(), "y");
+        assert_eq!(encode_keys(&[AnswerKey::Char('n')]).unwrap(), "n");
+        for bad in ['\u{1b}', '[', ' ', '中', '\r'] {
+            let err = encode_keys(&[AnswerKey::Char(bad)]).unwrap_err();
+            assert!(err.contains("英數字元"), "{bad:?} {err}");
+        }
+        let long = vec![AnswerKey::Down; MAX_ANSWER_KEYS + 1];
+        assert!(encode_keys(&long).unwrap_err().contains("太長"));
+    }
+
+    #[test]
+    fn 選單從游標起算且步數與長度有上限() {
+        let menu = "Pick one\n  Alpha\n> Beta\n  Gamma\n";
+        let parsed = classify_prompt(menu).expect("兩項以上且恰好一個游標");
+        assert_eq!(parsed.kind, "menu");
+        assert_eq!(parsed.text, "Pick one");
+        assert_eq!(parsed.cursor, 2);
+        assert_eq!(parsed.options.iter().map(|o| (o.n, o.label.as_str())).collect::<Vec<_>>(), vec![(1, "Alpha"), (2, "Beta"), (3, "Gamma")]);
+
+        let rig = make(default_profiles(), vec![]);
+        let id = rig.svc.start("grok", &rig.cwd, &rig.config).unwrap();
+        *rig.runner.inner.screen.borrow_mut() = menu.into();
+        let st = rig.svc.status(&id).unwrap();
+        assert_eq!(st.state, "waiting_user");
+        assert_eq!(st.reason, "menu");
+        assert_eq!(count_cmd(&rig.runner, "send-text"), 0, "看出選單也不代答");
+        assert!(rig.runner.inner.sleeps.borrow().is_empty(), "第一次就看到選單，不必再睡");
+
+        let got = rig.svc.answer(&id, "menu", 3).unwrap();
+        assert_eq!(got.keys, "Down×1 + Enter", "游標在第 2 項，選第 3 項只往下一格");
+        let sent: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "send-text")).collect();
+        assert_eq!(sent.last().unwrap().last().map(String::as_str), Some("\u{1b}[B\r"));
+        assert_ne!(wezterm::flatten_line("\u{1b}[B\r"), "\u{1b}[B\r", "壓行會丟掉方向鍵，代答不能走那條");
+        let got = rig.svc.answer(&id, "menu", 1).unwrap();
+        assert_eq!(got.keys, "Up×1 + Enter");
+        let sent: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "send-text")).collect();
+        assert_eq!(sent.last().unwrap().last().map(String::as_str), Some("\u{1b}[A\r"));
+        let got = rig.svc.answer(&id, "menu", 2).unwrap();
+        assert_eq!(got.keys, "Enter");
+        let sent: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "send-text")).collect();
+        assert_eq!(sent.last().unwrap().last().map(String::as_str), Some("\r"));
+
+        let before = count_cmd(&rig.runner, "send-text");
+        let err = rig.svc.answer(&id, "menu", 4).unwrap_err();
+        assert!(err.contains("沒有這個選項"), "{err}");
+        assert_eq!(count_cmd(&rig.runner, "send-text"), before, "n 越界不送字");
+
+        *rig.runner.inner.screen.borrow_mut() = "grok>\n".into();
+        let err = rig.svc.answer(&id, "menu", 2).unwrap_err();
+        assert!(err.contains("不在畫面"), "{err}");
+        assert_eq!(count_cmd(&rig.runner, "send-text"), before, "提示消失不送字");
+
+        let mut far = String::from("> One\n");
+        for i in 2..=22 {
+            far.push_str(&format!("  Item{i}\n"));
+        }
+        *rig.runner.inner.screen.borrow_mut() = far;
+        let err = rig.svc.answer(&id, "menu", 22).unwrap_err();
+        assert!(err.contains("往下"), "{err}");
+        assert_eq!(count_cmd(&rig.runner, "send-text"), before, "往下超過 20 步不送字");
+        let got = rig.svc.answer(&id, "menu", 21).unwrap();
+        assert_eq!(got.keys, "Down×20 + Enter");
+
+        let mut tall = String::new();
+        for i in 1..33 {
+            tall.push_str(&format!("  Item{i}\n"));
+        }
+        tall.push_str("> Last\n");
+        *rig.runner.inner.screen.borrow_mut() = tall;
+        let before = count_cmd(&rig.runner, "send-text");
+        let err = rig.svc.answer(&id, "menu", 1).unwrap_err();
+        assert!(err.contains("太長"), "{err}");
+        assert_eq!(count_cmd(&rig.runner, "send-text"), before, "序列超過長度上限不送字");
+
+        let messy = "> Alpha\n> Beta\n";
+        assert_eq!(classify_prompt(messy).unwrap().kind, "unknown_prompt");
+        assert!(classify_prompt(messy).unwrap().options.is_empty());
+        *rig.runner.inner.screen.borrow_mut() = messy.into();
+        let st = rig.svc.status(&id).unwrap();
+        assert_eq!(st.state, "waiting_user");
+        assert_eq!(st.prompt.unwrap().kind, "unknown_prompt");
+        assert_eq!(count_cmd(&rig.runner, "send-text"), before, "解析不出也不代答");
+
+        let bullets = "● Yes, proceed\n○ No, quit\n";
+        let parsed = classify_prompt(bullets).unwrap();
+        assert_eq!(parsed.kind, "menu");
+        assert_eq!(parsed.cursor, 1);
+        assert_eq!(parsed.options[1].label, "No, quit");
     }
 
     #[test]
@@ -1471,7 +2023,7 @@ mod tests {
         let body7 = pane7.trim_start_matches('[').trim_end_matches(']');
         let body99 = pane99.trim_start_matches('[').trim_end_matches(']');
         *rig.runner.inner.list_json.borrow_mut() = format!("[{body7},{body99}]");
-        write_store(&rig.store, 7, &row("4", "grok", "1000", ""));
+        write_store(&rig.store, 7, &row("4", "grok", "1000", r#","cwd":"D:/proj""#));
         rig.svc.reclaim().unwrap();
         let listed = rig.svc.list();
         assert_eq!(listed.len(), 1, "檔案沒有的窗格不可認領");
@@ -1479,6 +2031,7 @@ mod tests {
         assert_eq!(listed[0].profile, "grok");
         assert_eq!(listed[0].pid, 42);
         assert_eq!(listed[0].started_ms, Some(1_000));
+        assert_eq!(listed[0].cwd, "D:/proj", "認領沿用開啟時記下的資料夾");
         assert!(rig.runner.killed().is_empty(), "認領不結束視窗");
         assert_cli_uses_socket(&rig.runner);
         assert_eq!(rig.svc.read("4", 1).unwrap(), "畫面一行");

@@ -522,7 +522,7 @@ async fn term_stop(terms: State<'_, Arc<launch::term::LiveTerms>>, req: launch::
     launch::blocking_timeout(move || terms.stop(&req.id)).await
 }
 
-/// 自己開的終端現在忙還是閒。只有 grok 有規則；判斷不了回 unknown，不猜。信任資料夾的提問是 waiting_user，不代答。
+/// 自己開的終端現在忙還是閒。只有 grok 有規則；判斷不了回 unknown，不猜。等人回答時是 waiting_user，並附上 prompt，不代答。
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
@@ -538,6 +538,16 @@ async fn term_status(terms: State<'_, Arc<launch::term::LiveTerms>>, req: launch
 async fn term_rename(terms: State<'_, Arc<launch::term::LiveTerms>>, req: launch::term::TermRenameReq) -> Result<(), String> {
     let terms = terms.inner().clone();
     launch::blocking_timeout(move || terms.rename(&req.id, &req.title)).await
+}
+
+/// 使用者在 UI 提示框按了第 n 個選項後，前端才呼叫。這個命令本身證明不了有按確認。
+/// UI 的提示框必須是唯一入口；後端其他路徑不得呼叫。只收編號、提示種類與選項編號。
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+async fn term_answer(terms: State<'_, Arc<launch::term::LiveTerms>>, req: launch::term::TermAnswerReq) -> Result<launch::term::TermAnswered, String> {
+    let terms = terms.inner().clone();
+    launch::blocking_timeout(move || terms.answer(&req.id, &req.prompt_kind, req.n)).await
 }
 
 #[cfg(feature = "gui")]
@@ -1122,7 +1132,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, term_start, term_send, term_read, term_list, term_stop, term_status, term_rename, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, term_start, term_send, term_read, term_list, term_stop, term_status, term_rename, term_answer, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_mod::claude_mod_status, claude_quota::claude_quota_all,
             codex_accounts::codex_account_current, usage::usage_summary,
