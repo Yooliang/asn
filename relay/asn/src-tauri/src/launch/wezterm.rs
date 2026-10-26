@@ -184,7 +184,8 @@ fn workspace_name_ok(name: &str) -> bool {
     !name.is_empty() && !name.chars().any(|c| c.is_whitespace() || c.is_control())
 }
 
-/// 把訊息壓成單行：換行（含 \r\n）與製表字元換成一個空格（連續的合併成一個），去掉其他控制字元（含 ESC），超過 4000 字截斷
+/// 把訊息壓成單行：換行（含 \r\n）與製表字元換成一個空格（連續的合併成一個），去掉其他控制字元（含 ESC），超過 4000 字截斷。
+/// 方向鍵不得改這裡來放行 ESC。那條走專用的按鍵送出。
 pub fn flatten_line(text: &str) -> String {
     let mut out = String::new();
     let mut prev_nl = false;
@@ -360,6 +361,16 @@ impl<'a> WezTerm<'a> {
         self.send_raw(sock, pane_id, "\r")
     }
 
+    /// 方向鍵專用送出。只接受固定對照表組好的位元組（ESC [ A、ESC [ B、\r、ESC、單一英數字元），不壓行。
+    /// 一般送字會把 ESC 當控制字元丟掉，那個保護留在那裡，這裡不放寬。
+    /// 20240203-110809-5046fc22 的 `send-text --no-paste` 把參數位元組原樣寫進窗格，自己不解釋跳脫字元。
+    pub fn send_bytes(&self, sock: &Path, pane_id: u64, text: &str) -> Result<(), String> {
+        if text.is_empty() {
+            return Err("沒有要送的按鍵".to_string());
+        }
+        self.send_raw(sock, pane_id, text)
+    }
+
     fn send_raw(&self, sock: &Path, pane_id: u64, text: &str) -> Result<(), String> {
         let args = vec!["send-text".to_string(), "--pane-id".into(), pane_id.to_string(), "--no-paste".into(), text.to_string()];
         self.cli(sock, &args).map(|_| ())
@@ -496,6 +507,10 @@ mod tests {
     #[test]
     fn flatten_strips_esc_and_controls() {
         assert_eq!(flatten_line("a\x1b[31mb\x07c\td"), "a[31mbc d");
+        assert_eq!(flatten_line("\u{1b}[A"), "[A", "往上的控制碼仍要丟掉");
+        assert_eq!(flatten_line("\u{1b}[B"), "[B", "往下的控制碼仍要丟掉");
+        assert_eq!(flatten_line("\r"), " ", "換行鍵仍要換成空格");
+        assert_eq!(flatten_line("\u{1b}"), "", "ESC 本身仍要丟掉");
     }
 
     #[test]
