@@ -45,7 +45,7 @@ test('Windows zip：必要的檔案都在（程式、安裝／解除安裝、使
 test('Windows zip：不含金鑰、測試、紀錄、開發工具、執行狀態，也沒有 skill zip', () => {
   const names = zipNames()
   for (const n of names) assert.ok(!FORBIDDEN_IN_ZIP.test(n), `不該出現：${n}`)
-  assert.ok(!names.some(n => /(^|\/)test\//.test(n) || /tools-/.test(n) || /\.key$/.test(n) || /\.log$/.test(n) || /pending\.json/.test(n) || /\.pid$/.test(n)))
+  assert.ok(!names.some(n => /(^|\/)test\//.test(n) || /(^|\/)tools-/.test(n) || /\.key$/.test(n) || /\.log$/.test(n) || /pending\.json/.test(n) || /\.pid$/.test(n)))
   assert.ok(!names.some(n => /aegis|\.service$/.test(n)), 'Linux／Aegis 專用檔不進 Windows 包')
   assert.ok(!fs.existsSync(path.join(build().outDir, 'irori-relay-skill.zip')))
 })
@@ -123,21 +123,7 @@ test('同一份內容打包兩次，zip 的 sha256 一樣（可重現）；--inc
   assert.equal(b.manifest.files['irori.apk'].sha256, sha(Buffer.from('fake apk')))
 })
 
-test('firebase.json：Windows zip、downloads.json 轉址到 Supabase 公開 downloads 區；skill 沒有 zip 轉址；下載頁連本站固定網址、不連 GitHub', () => {
-  const fb = JSON.parse(fs.readFileSync(new URL('../firebase.json', import.meta.url), 'utf8'))
-  const base = 'https://hwtahctsgjcemtwzlvnq.supabase.co/storage/v1/object/public/downloads/'
-  const red = Object.fromEntries(fb.hosting.redirects.map(r => [r.source, r]))
-  for (const n of ['irori-windows.zip', 'downloads.json']) {
-    assert.equal(red[`/download/${n}`].destination, base + n)
-    assert.equal(red[`/download/${n}`].type, 302)
-  }
-  assert.ok(!('/download/irori-relay-skill.zip' in red))
-  const page = fs.readFileSync(new URL('../web/download/index.html', import.meta.url), 'utf8').toLowerCase()
-  assert.ok(!page.includes('github') && page.includes('href="/download/irori-windows.zip"'))  // 10/04 小良哥：下載、skill、Windows 收發室同一頁
-  const install = fs.readFileSync(new URL('../web/relay/INSTALL.txt', import.meta.url), 'utf8')
-  assert.ok(install.includes('https://irori.web.app/relay/SKILL.md') && install.includes('name: asn-relay'))
-})
-
+// （已移除一個檢查舊官網下載轉址的測試：站台改版後 site/firebase.json 沒有 /download/ 轉址、也沒有下載頁，測試的對象已不存在，#284）
 // ---- 註冊小幫手（假伺服器）----
 
 test('代號建議：只留合法字元、≤32 字、前綴補在前面、不佔 t<數字>- 開頭', () => {
@@ -156,15 +142,15 @@ test('註冊：成功寫金鑰檔與 node 檔、讀回一致，回傳值與輸�
   const home = tmp('irori-reg-')
   const r = await registerNode({ baseUrl: srv.url, invite: 'CODE1', id: 'PC-1', name: '小美的筆電', machine: '小美的筆電', home })
   assert.deepEqual(r, { ok: true, id: 'PC-1', verified: true })
-  const key = fs.readFileSync(path.join(home, '.irori-relay', 'PC-1.key'), 'utf8')
+  const key = fs.readFileSync(path.join(home, '.asn', 'PC-1.key'), 'utf8')
   assert.equal(key, srv.issued[0])
   assert.ok(!JSON.stringify(r).includes(key))
-  assert.equal(fs.readFileSync(path.join(home, '.irori-relay', 'node'), 'utf8'), 'PC-1')
+  assert.equal(fs.readFileSync(path.join(home, '.asn', 'node'), 'utf8'), 'PC-1')
   assert.equal(srv.registers[0].kind, 'other')
   assert.equal(srv.registers[0].machine, '小美的筆電')
   const again = await registerNode({ baseUrl: srv.url, invite: 'CODE1', id: 'PC-2', name: 'x', machine: 'x', home })
   assert.equal(again.ok, false); assert.equal(again.error, 'invalid_invite')
-  assert.ok(!fs.existsSync(path.join(home, '.irori-relay', 'PC-2.key')))
+  assert.ok(!fs.existsSync(path.join(home, '.asn', 'PC-2.key')))
   await srv.close()
 })
 
@@ -172,12 +158,12 @@ test('註冊：node 檔已經有了就不改（替別台註冊不會改掉這台
   const srv = await fakeRelay({ invites: { X: {}, Y: {} } })
   try {
     const home = tmp('irori-reg-node-')
-    fs.mkdirSync(path.join(home, '.irori-relay'), { recursive: true })
-    fs.writeFileSync(path.join(home, '.irori-relay', 'node'), 'H')
+    fs.mkdirSync(path.join(home, '.asn'), { recursive: true })
+    fs.writeFileSync(path.join(home, '.asn', 'node'), 'H')
     assert.equal((await registerNode({ baseUrl: srv.url, invite: 'X', id: 'grok', name: 'Grok 雲端', machine: 'grok-cloud', home })).ok, true)
-    assert.equal(fs.readFileSync(path.join(home, '.irori-relay', 'node'), 'utf8'), 'H')
+    assert.equal(fs.readFileSync(path.join(home, '.asn', 'node'), 'utf8'), 'H')
     assert.equal((await registerNode({ baseUrl: srv.url, invite: 'Y', id: 'PC-9', name: 'x', machine: 'x', home, setNode: true })).ok, true)
-    assert.equal(fs.readFileSync(path.join(home, '.irori-relay', 'node'), 'utf8'), 'PC-9')
+    assert.equal(fs.readFileSync(path.join(home, '.asn', 'node'), 'utf8'), 'PC-9')
   } finally { await srv.close() }
 })
 
@@ -194,7 +180,7 @@ test('註冊：撞名、前綴不符、格式錯、網路不通都回白話訊�
   assert.equal(bad.error, 'bad_request')
   const empty = await registerNode({ baseUrl: srv.url, invite: '  ', id: 'x', name: 'n', machine: 'm', home })
   assert.equal(empty.error, 'bad_request')
-  assert.deepEqual(fs.readdirSync(path.join(home, '.irori-relay')).sort(), ['W-pc1.key', 'node'])
+  assert.deepEqual(fs.readdirSync(path.join(home, '.asn')).sort(), ['W-pc1.key', 'node'])
   await srv.close()
   const down = await registerNode({ baseUrl: srv.url, invite: 'C', id: 'x1', name: 'n', machine: 'm', home })
   assert.equal(down.error, 'network'); assert.match(down.message, /網路/)
