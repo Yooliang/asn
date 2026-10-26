@@ -356,14 +356,14 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         if let Some(ad) = &snap.adopted {
             let config = self.launch_config_for_adopt()?;
             let live = term_adopt::fetch_live_pane(&w, &snap.window, snap.pane_id, &self.runner)?;
-            let idle = term_adopt::user_idle_secs_for_write(&w, &snap.window.sock)?;
+            term_adopt::ensure_user_idle_for_adopt_write(&w, &snap.window.sock, snap.pane_id)?;
             if !ad.version_verified {
                 return Err("WezTerm 版本未驗證，不能代送".into());
             }
             if !ad.send_unlocked {
                 return Err("這個接手窗格還沒在本機開啟「允許代送文字」".into());
             }
-            term_adopt::verify_adopted_for_write(&live, ad, &config, idle)?;
+            term_adopt::verify_adopted_for_write(&live, ad, &config)?;
         } else if !snap.send_granted || snap.cwd.trim().is_empty() {
             return Err("這個工作資料夾還沒有使用者的授權，不能代送".into());
         }
@@ -530,7 +530,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         if let Some(ad) = &snap.adopted {
             let config = self.launch_config_for_adopt()?;
             let live = term_adopt::fetch_live_pane(&w, &snap.window, snap.pane_id, &self.runner)?;
-            let idle = term_adopt::user_idle_secs_for_write(&w, &snap.window.sock)?;
+            term_adopt::ensure_user_idle_for_adopt_write(&w, &snap.window.sock, snap.pane_id)?;
             if !term_adopt::foreground_still_known(&live.pane.title) {
                 return Err("前景不是已知的 CLI，不能代答".into());
             }
@@ -540,7 +540,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             if !ad.answer_unlocked {
                 return Err("這個接手窗格還沒在本機開啟「允許代答提問」".into());
             }
-            term_adopt::verify_adopted_for_write(&live, ad, &config, idle)?;
+            term_adopt::verify_adopted_for_write(&live, ad, &config)?;
         }
         let text = w.get_text(&snap.window.sock, snap.pane_id, Some(-STATUS_LINES))?;
         let Some(seen) = classify_prompt(&text) else {
@@ -1507,8 +1507,8 @@ mod tests {
         }
     }
 
-    fn list_clients_json_with_idle_secs(secs: u64) -> String {
-        format!(r#"[{{"pid":1,"idle_time":{{"secs":{secs},"nanos":0}},"focused_pane_id":9}}]"#)
+    fn list_clients_json_with_idle(secs: u64, focused_pane_id: u64) -> String {
+        format!(r#"[{{"pid":1,"idle_time":{{"secs":{secs},"nanos":0}},"focused_pane_id":{focused_pane_id}}}]"#)
     }
 
     #[derive(Clone)]
@@ -2708,12 +2708,14 @@ mod tests {
         let id = rig.svc.adopt(100, 9, 1_000, &rig.config).unwrap();
         assert!(rig.svc.list()[0].adopted);
         rig.svc.unlock_adopted(&id, false, true).unwrap();
-        *rig.runner.inner.list_clients_json.borrow_mut() = list_clients_json_with_idle_secs(4);
+        *rig.runner.inner.list_clients_json.borrow_mut() = list_clients_json_with_idle(4, 9);
         let busy = rig.svc.confirm_send(&id, "x", false).unwrap_err();
-        assert!(busy.contains("正在操作"), "{busy}");
-        *rig.runner.inner.list_clients_json.borrow_mut() = list_clients_json_with_idle_secs(5);
+        assert!(busy.contains("焦點與輸入都在這個窗格"), "{busy}");
+        *rig.runner.inner.list_clients_json.borrow_mut() = list_clients_json_with_idle(4, 99);
+        assert!(rig.svc.confirm_send(&id, "x", false).unwrap_err().contains("剛操作過 WezTerm"));
+        *rig.runner.inner.list_clients_json.borrow_mut() = list_clients_json_with_idle(6, 99);
         assert!(rig.svc.confirm_send(&id, "x", false).is_ok());
-        *rig.runner.inner.list_clients_json.borrow_mut() = list_clients_json_with_idle_secs(6);
+        *rig.runner.inner.list_clients_json.borrow_mut() = list_clients_json_with_idle(5, 9);
         assert!(rig.svc.confirm_send(&id, "y", false).is_ok());
         *rig.runner.inner.list_json.borrow_mut() = adopt_pane_json(99, "grok.exe", &cwd_url, false);
         assert!(rig.svc.read(&id, 5).unwrap_err().contains("窗格"));
