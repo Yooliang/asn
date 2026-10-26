@@ -127,15 +127,26 @@ pub struct WezTermDir {
     pub cli: PathBuf,
 }
 
-const NOT_FOUND: &str = "找不到 WezTerm，請設定 ASN_WEZTERM_DIR（原型階段只用開發機上的隔離副本）";
+const NOT_FOUND: &str = "找不到 WezTerm（安裝資料夾裡的 wezterm 不見了，請重新安裝 ASN；開發時可用 ASN_WEZTERM_DIR 指到別的副本）";
 
-/// 依環境變數 ASN_WEZTERM_DIR 找 WezTerm；不自動下載
+/// 隨安裝檔附帶的 WezTerm：安裝資料夾（ASN 本體旁）的 wezterm 資料夾
+pub fn bundled_dir() -> Option<PathBuf> {
+    Some(std::env::current_exe().ok()?.parent()?.join("wezterm"))
+}
+
+/// 先看環境變數 ASN_WEZTERM_DIR（開發或測試指到別的副本；設了就只認它），沒設就用安裝檔附帶的；不自動下載
 pub fn locate(fs: &dyn Fs) -> Result<WezTermDir, String> {
-    locate_from(std::env::var_os(DIR_ENV).map(PathBuf::from), fs)
+    locate_with(std::env::var_os(DIR_ENV).map(PathBuf::from), bundled_dir(), fs)
 }
 
 pub fn locate_from(dir: Option<PathBuf>, fs: &dyn Fs) -> Result<WezTermDir, String> {
-    let dir = dir.filter(|d| !d.as_os_str().is_empty()).ok_or_else(|| NOT_FOUND.to_string())?;
+    locate_with(dir, None, fs)
+}
+
+/// env＝環境變數指的資料夾（空字串當沒設），bundled＝安裝檔附帶的資料夾。env 有設就只看它，不悄悄換成附帶的。
+pub fn locate_with(env: Option<PathBuf>, bundled: Option<PathBuf>, fs: &dyn Fs) -> Result<WezTermDir, String> {
+    let env = env.filter(|d| !d.as_os_str().is_empty());
+    let dir = env.or(bundled).ok_or_else(|| NOT_FOUND.to_string())?;
     let gui = dir.join("wezterm-gui.exe");
     let cli = dir.join("wezterm.exe");
     if !fs.exists(&gui) || !fs.exists(&cli) {
@@ -679,6 +690,21 @@ mod tests {
         assert!(locate_from(Some("W".into()), &fs).is_err());
         fs.files.borrow_mut().insert("W/wezterm-gui.exe".into());
         assert!(locate_from(Some("W".into()), &fs).is_ok());
+    }
+
+    #[test]
+    fn locate_用安裝檔附帶的_環境變數有設就只認它() {
+        let fs = FakeFs::default();
+        fs.files.borrow_mut().insert("B/wezterm.exe".into());
+        fs.files.borrow_mut().insert("B/wezterm-gui.exe".into());
+        assert!(locate_with(None, Some("B".into()), &fs).is_ok(), "沒設環境變數就用附帶的");
+        assert!(locate_with(Some("".into()), Some("B".into()), &fs).is_ok(), "空字串當沒設");
+        assert!(locate_with(Some("E".into()), Some("B".into()), &fs).is_err(), "環境變數指到沒有的地方不能悄悄換成附帶的");
+        fs.files.borrow_mut().insert("E/wezterm.exe".into());
+        fs.files.borrow_mut().insert("E/wezterm-gui.exe".into());
+        assert_eq!(locate_with(Some("E".into()), Some("B".into()), &fs).unwrap().cli, PathBuf::from("E/wezterm.exe"));
+        assert!(locate_with(None, None, &fs).is_err());
+        assert!(bundled_dir().is_some_and(|d| d.ends_with("wezterm")), "附帶的在安裝資料夾的 wezterm 底下");
     }
 
     #[test]
