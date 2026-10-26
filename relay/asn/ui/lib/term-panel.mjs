@@ -169,7 +169,11 @@ export function rowsOf(listed, statuses = {}) {
     const st = statuses[t.id]
     const sv = stateView(st?.state)
     const prompt = sv.key === 'waiting_user' ? promptView(st?.prompt) : null
-    return { id: t.id, adopted: t.adopted === true, profile: String(t.profile ?? ''), title: `${t.profile ?? '終端'} #${t.id}`, cwd: typeof t.cwd === 'string' ? t.cwd : '', folder: folderName(t.cwd), state: sv.key, stateLabel: sv.label, tone: sv.tone, reason: String(st?.reason ?? ''), prompt }
+    const adopted = t.adopted === true
+    // 接手窗格的「已允許」以電腦端 term_list 回報為準（#317 起有這兩欄）：要明確是 true 才算；缺欄或壞值一律當沒允許。自己開的終端不用解鎖
+    const answerUnlocked = adopted ? t.answer_unlocked === true : true
+    const sendUnlocked = adopted ? t.send_unlocked === true : true
+    return { id: t.id, adopted, answerUnlocked, sendUnlocked, profile: String(t.profile ?? ''), title: `${t.profile ?? '終端'} #${t.id}`, cwd: typeof t.cwd === 'string' ? t.cwd : '', folder: folderName(t.cwd), state: sv.key, stateLabel: sv.label, tone: sv.tone, reason: String(st?.reason ?? ''), prompt }
   })
 }
 

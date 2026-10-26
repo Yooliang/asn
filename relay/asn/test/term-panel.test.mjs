@@ -273,6 +273,16 @@ test('清單：term_list 的 adopted 帶進列，沒有就是 false', () => {
   assert.deepEqual(rows.map(r => r.adopted), [true, false])
 })
 
+test('清單：接手窗格的「已允許」照 term_list 的 answer_unlocked／send_unlocked；要明確 true 才算，自己開的終端一律已允許', () => {
+  const rows = rowsOf([
+    { id: '1', adopted: true, answer_unlocked: true, send_unlocked: false },
+    { id: '2', adopted: true },                                          // 缺欄（舊後端）：當沒允許
+    { id: '3', adopted: true, answer_unlocked: 'true', send_unlocked: 1 }, // 壞值：當沒允許
+    { id: '4', answer_unlocked: false, send_unlocked: false },             // 自己開的：不用解鎖
+  ])
+  assert.deepEqual(rows.map(r => [r.answerUnlocked, r.sendUnlocked]), [[true, false], [false, false], [false, false], [true, true]])
+})
+
 test('接線：term_adopt_unlock 只在 adoptUnlockConfirm 裡呼叫一次、只有「允許」按鈕觸發（先跳確認）；term_adopt 只在 adoptDo；寫入開關預設關', () => {
   const js = readUi('list.js'), html = readUi('list.html'), tauri = readUi('lib/tauri.mjs')
   assert.equal(count(js, 'transport.termAdoptUnlock('), 1)
@@ -286,6 +296,9 @@ test('接線：term_adopt_unlock 只在 adoptUnlockConfirm 裡呼叫一次、只
   assert.ok(!ask.includes('termAdoptUnlock'), 'adoptUnlockAsk 不解鎖')
   assert.equal(count(js, 'transport.termAdopt('), 1)
   assert.ok(js.slice(js.lastIndexOf('async function adoptDo', js.indexOf('transport.termAdopt(')), js.indexOf('transport.termAdopt(')).includes('adoptRequest('))
-  assert.ok(/unlocked: \{\}/.test(js), '本機記下的解鎖狀態一開始是空的（全關）')
+  assert.ok(!/adopt\.unlocked|unlocked: \{\}/.test(js + html), '「已允許」不在畫面自己記（#317 起讀 term_list）')
+  assert.equal((html.match(/v-if="!r\.answerUnlocked"/g) ?? []).length, 1); assert.equal((html.match(/v-if="!r\.sendUnlocked"/g) ?? []).length, 1)
+  const confirmFn = js.slice(js.indexOf('async function adoptUnlockConfirm')).split('\n}\n')[0]
+  assert.ok(confirmFn.includes('termPoller?.tickNow()'), '允許後立刻重讀清單')
   assert.ok(tauri.includes("termAdoptUnlock: req => invoke('term_adopt_unlock', { req })") && tauri.includes("termStop: req => invoke('term_stop', { req })"))
 })
