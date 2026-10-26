@@ -4,3 +4,5 @@ ui/vendor/
 src-tauri/target/
 # Tauri 產生的權限結構檔不進 git；安卓專案（src-tauri/gen/android，含我們改過的外殼）要進 git，它自己的 .gitignore 會擋掉建置輸出
 src-tauri/gen/schemas/
+src-tauri/resources/
+.cache/

@@ -1,0 +1,14 @@
+{
+  "bundle": {
+    "resources": {
+      "resources/wezterm/wezterm-gui.exe": "wezterm/wezterm-gui.exe",
+      "resources/wezterm/wezterm.exe": "wezterm/wezterm.exe",
+      "resources/wezterm/conpty.dll": "wezterm/conpty.dll",
+      "resources/wezterm/OpenConsole.exe": "wezterm/OpenConsole.exe",
+      "resources/wezterm/libEGL.dll": "wezterm/libEGL.dll",
+      "resources/wezterm/libGLESv2.dll": "wezterm/libGLESv2.dll",
+      "resources/wezterm/LICENSE.md": "wezterm/LICENSE.md",
+      "resources/wezterm/SOURCE.txt": "wezterm/SOURCE.txt"
+    }
+  }
+}
