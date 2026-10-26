@@ -19,8 +19,20 @@ fn pick_windows_candidate(where_output: &str) -> Option<String> {
     lines.iter().find(runnable).or_else(|| lines.first()).map(|l| l.to_string())
 }
 
-/// PATH 上第一個可執行檔路徑（與 agent-tools-detect.mjs 的 lookup 對齊）。
+/// PATH 上第一個可執行檔路徑（與 agent-tools-detect.mjs 的 lookup 對齊）；找不到再看官方安裝程式固定放的位置。
 pub fn resolve_binary(name: &str) -> Option<PathBuf> {
+    resolve_on_path(name).or_else(|| known_home_binary(&crate::identity::home_dir(), name))
+}
+
+/// 官方安裝程式把執行檔放在家目錄底下、而且不一定加進 PATH 的工具：Grok 在 ~/.grok/bin（否則偵測與「開新夥伴」永遠說它沒安裝）
+fn known_home_binary(home: &std::path::Path, name: &str) -> Option<PathBuf> {
+    if name != "grok" {
+        return None;
+    }
+    ["grok.exe", "grok"].iter().map(|n| home.join(".grok").join("bin").join(n)).find(|p| p.is_file())
+}
+
+fn resolve_on_path(name: &str) -> Option<PathBuf> {
     if let Some(p) = crate::envc::get("ASN_MOCK_BIN_DIR") {
         let base = PathBuf::from(p);
         let win = base.join(format!("{name}.exe"));
@@ -67,6 +79,19 @@ pub fn resolve_binary(name: &str) -> Option<PathBuf> {
 mod tests {
     use super::*;
     use crate::agent_tools::catalog::tool;
+
+    #[test]
+    fn grok_不在_path_時看家目錄的_grok_bin_其他工具不看() {
+        let home = std::env::temp_dir().join(format!("asn-detect-home-{}", std::process::id()));
+        let bin = home.join(".grok").join("bin");
+        assert_eq!(known_home_binary(&home, "grok"), None, "沒裝＝找不到，不能憑空造出路徑");
+        std::fs::create_dir_all(&bin).unwrap();
+        let exe = bin.join(if cfg!(windows) { "grok.exe" } else { "grok" });
+        std::fs::write(&exe, b"x").unwrap();
+        assert_eq!(known_home_binary(&home, "grok"), Some(exe));
+        assert_eq!(known_home_binary(&home, "claude"), None, "只有 grok 有這個固定位置");
+        std::fs::remove_dir_all(&home).unwrap();
+    }
 
     #[test]
     fn agy_用_binary_名() {
