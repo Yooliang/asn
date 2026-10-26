@@ -72,3 +72,25 @@ fn 身分解析_主要位置缺金鑰與門鈴時回頭找後備位置_遷移搬
     assert_eq!(id.anon.as_deref(), Some("fake-anon"));
     assert_eq!(id.work_dir, primary.join("machine-T"), "工作資料夾仍放主要位置");
 }
+
+// pi 從別的 Claude 視窗底下開出來時，寄件人要是 pi 自己的視窗，不能算成上面那個 Claude 視窗
+#[test]
+fn 呼叫者_pi_視窗登記的_pid_在父行程鏈上_優先於更上層的_claude_視窗() {
+    use super::super::caller::find_caller;
+    let f = fx("http://127.0.0.1:1", Some("上層Claude"));
+    let pi_pid = 9500u32;
+    let table: ProcTable = [(SELF_PID, (BASH_PID, "asn-cli.exe".to_string())), (BASH_PID, (pi_pid, "bash.exe".to_string())), (pi_pid, (CLAUDE_PID, "node.exe".to_string())), (CLAUDE_PID, (1, "claude.exe".to_string()))].into_iter().collect();
+    let mut env = f.env.clone();
+    env.procs = Arc::new(move || Ok(table.clone()));
+    // 沒有 pi 登記：往上找到 Claude 視窗
+    assert_eq!(find_caller(&env, "寄信").unwrap().name, "上層Claude");
+    // 有登記：pi 自己
+    let d = f.rh().join("pi-windows");
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(d.join("s1.json"), json!({"v": 1, "engine": "pi", "sessionId": "s1", "name": "pi-cwen0708", "pid": pi_pid, "cwd": "", "state": "idle", "at": 1}).to_string()).unwrap();
+    let c = find_caller(&env, "寄信").unwrap();
+    assert_eq!((c.name.as_str(), c.pid), ("pi-cwen0708", pi_pid));
+    // 別人的 pid 登記不算（pid 不在鏈上）
+    std::fs::write(d.join("s1.json"), json!({"v": 1, "engine": "pi", "sessionId": "s1", "name": "別的pi", "pid": 7777, "cwd": "", "state": "idle", "at": 1}).to_string()).unwrap();
+    assert_eq!(find_caller(&env, "寄信").unwrap().name, "上層Claude");
+}
