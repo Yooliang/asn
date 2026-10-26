@@ -71,6 +71,12 @@ export function windowsEntries(repo = REPO, version = versionInfo(repo)) {
   for (const rel of walk(machineDir)) {
     entries.push({ name: `app/${rel}`, data: normalizeText(rel, fs.readFileSync(path.join(machineDir, rel))) })
   }
+  // relay/machine 的檔案用相對路徑引用 ../shared/（agent-tools-detect.mjs 等），zip 根目錄的 shared/ 一起帶；測試資料夾與測試向量不帶
+  const sharedDir = path.join(repo, 'relay', 'shared')
+  for (const rel of fs.existsSync(sharedDir) ? walk(sharedDir) : []) {
+    if (rel.startsWith('test-vectors/')) continue
+    entries.push({ name: `shared/${rel}`, data: normalizeText(rel, fs.readFileSync(path.join(sharedDir, rel))) })
+  }
   const instDir = path.join(repo, INSTALLER)
   for (const name of fs.readdirSync(instDir).filter(n => fs.statSync(path.join(instDir, n)).isFile())) {
     entries.push({ name, data: normalizeText(name, fs.readFileSync(path.join(instDir, name))) })
