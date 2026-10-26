@@ -18,7 +18,7 @@ import { DEVICE_TEXT, canRemoveRow, dropAfter, moveFlags, removedRows, visibleRo
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
 export const SETTING_OPS = [
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
-  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-trust', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove', 'device-restore',
+  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-trust', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
   'closeTo', 'autostart', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'avatar-remove',
 ]
 
@@ -139,14 +139,11 @@ export const SettingsPanel = {
       </template>
       <template v-if="cat === 'devices'">
         <div class="dv-set">
-          <header class="dv-head">
-            <h2 class="dv-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path :d="catIcon"></path></svg>設備與帳號</h2>
-          </header>
           <template v-if="!curDev">
             <small v-if="!devs.length">{{ DEVICE_TEXT.empty }}</small>
             <ul class="dv-list" aria-label="設備" v-else>
               <li v-for="d in devs" :key="d.key" :data-dev="d.key" :class="['dv-row', { hid: d.hidden, off: !d.online, dragging: dragKey === d.key, 'drop-before': overKey === d.key && !overAfter, 'drop-after': overKey === d.key && overAfter }]" :draggable="!d.self" @click="onRow(d.key, $event)" @dragstart="dragStart(d.key, $event)" @dragover="dragOver(d.key, $event)" @drop="drop(d.key, $event)" @dragend="clearDrag">
-                <button class="dv-row-go" type="button" :aria-label="'查看 ' + d.label + ' 的帳號'"><span class="dv-name">{{ d.label }}</span><span class="dv-tag kind">{{ d.kind }}</span><span :class="['dv-tag', d.online ? 'on' : 'off']">{{ d.onlineText }}</span><span class="dv-tag me" v-if="d.self">這台</span><span class="dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span></button>
+                <button class="dv-row-go" type="button" :aria-label="'查看 ' + d.label + ' 的帳號'"><span class="dv-name">{{ d.label }}</span><span class="dv-tag kind" v-if="d.kind !== '電腦'">{{ d.kind }}</span><span :class="['dv-tag', d.online ? 'on' : 'off']">{{ d.onlineText }}</span><span class="dv-tag me" v-if="d.self">這台</span><span class="dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span></button>
                 <span class="dv-row-move" v-if="!d.self" role="group" aria-label="設備順序">
                   <button class="aero-btn" type="button" :disabled="!flags[d.key].up" :aria-label="'上移 ' + d.label" @click.stop="act('device-move', { node: d.key, dir: -1 })">{{ DEVICE_TEXT.moveUp }}</button>
                   <button class="aero-btn" type="button" :disabled="!flags[d.key].down" :aria-label="'下移 ' + d.label" @click.stop="act('device-move', { node: d.key, dir: 1 })">{{ DEVICE_TEXT.moveDown }}</button>
@@ -154,25 +151,19 @@ export const SettingsPanel = {
                 <span class="dv-chev" aria-hidden="true">&rsaquo;</span>
               </li>
             </ul>
-            <div class="dv-removed" v-if="removedDevs.length">
-              <button class="dv-removed-link" type="button" :aria-expanded="removedOpen ? 'true' : 'false'" @click="removedOpen = !removedOpen">{{ DEVICE_TEXT.removedLink(removedDevs.length) }}</button>
-              <ul v-if="removedOpen">
-                <li v-for="d in removedDevs" :key="d.key"><span>{{ d.label }}</span><button class="aero-btn" type="button" @click="act('device-restore', d.key)">{{ DEVICE_TEXT.restore }}</button></li>
-              </ul>
-            </div>
           </template>
           <section class="dv-dev" v-else :aria-label="curDev.label">
             <div class="dv-dev-h">
               <button class="aero-btn dv-back" type="button" @click="backToList">{{ DEVICE_TEXT.back }}</button>
               <h3 class="dv-name">{{ curDev.label }}</h3>
-              <span class="dv-tag kind">{{ curDev.kind }}</span>
+              <span class="dv-tag kind" v-if="curDev.kind !== '電腦'">{{ curDev.kind }}</span>
               <span :class="['dv-tag', curDev.online ? 'on' : 'off']">{{ curDev.onlineText }}</span>
               <span class="dv-tag me" v-if="curDev.self">這台</span>
               <span class="dv-tag off" v-if="curDev.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
             </div>
             <div class="dv-hid-act" v-if="canRemoveRow(curDev)">
               <template v-if="!askRemove">
-                <button class="aero-btn" type="button" @click="act('device-show', curDev.key)">{{ DEVICE_TEXT.showBack }}</button>
+                <button class="aero-btn" type="button" v-if="curDev.hidden" @click="act('device-show', curDev.key)">{{ DEVICE_TEXT.showBack }}</button>
                 <button class="aero-btn dv-danger" type="button" @click="askRemove = true">{{ DEVICE_TEXT.remove }}</button>
               </template>
               <template v-else>

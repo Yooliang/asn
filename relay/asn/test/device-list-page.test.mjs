@@ -36,22 +36,23 @@ test('removeDevice／restoreDevice：本機不能移除；重複不重複加；�
   assert.equal(isDeviceRemoved('A', ['A'], { selfNode: 'H' }), true)
 })
 
-test('自動解除：移除後又有在線視窗（ASN 視窗也算）或未讀就從名單拿掉；仍離線沒未讀就維持', () => {
+test('自動解除：移除後又有在線視窗（ASN 視窗也算）才從名單拿掉；仍離線（有沒有未讀都一樣）就維持', () => {
   const off = [F('A', 'A機', 'a', 'offline', { archived: true })]
   assert.deepEqual(pruneRemoved(['A'], off, { selfNode: 'H' }), ['A'], '還是離線＝維持移除')
   assert.deepEqual(pruneRemoved(['A'], [F('A', 'A機', 'a', 'online')], { selfNode: 'H' }), [], '有在線視窗＝活過來')
   assert.deepEqual(pruneRemoved(['A'], [F('A', 'A機', 'asn', 'online', { engine: 'asn' })], { selfNode: 'H' }), [], 'ASN 視窗上線也算')
-  assert.deepEqual(pruneRemoved(['A'], [F('A', 'A機', 'a', 'offline', { unread: 2 })], { selfNode: 'H' }), [], '新未讀＝活過來')
+  assert.deepEqual(pruneRemoved(['A'], [F('A', 'A機', 'a', 'offline', { unread: 2 })], { selfNode: 'H' }), ['A'], '離線但有舊未讀＝仍維持移除')
   assert.deepEqual(pruneRemoved(['A', 'B'], [F('B', 'B機', 'b', 'busy')], { selfNode: 'H' }), ['A'], '只解除活過來的那台')
   assert.deepEqual(pruneRemoved(['H', 'A'], [], { selfNode: 'H' }), ['A'], '本機不會留在名單裡')
   assert.deepEqual(pruneRemoved(['A'], [], { selfNode: 'H' }), ['A'], '名單還沒載入＝不解除')
 })
 
-test('只有「已隱藏」的別台設備能永久移除；本機、沒隱藏的、已移除的都不能', () => {
-  assert.equal(canRemoveRow({ self: false, hidden: true }), true)
-  assert.equal(canRemoveRow({ self: true, hidden: true }), false)
-  assert.equal(canRemoveRow({ self: false, hidden: false }), false)
-  assert.equal(canRemoveRow({ self: false, hidden: true, removed: true }), false)
+test('別台、離線的設備都能永久移除（不必先被自動隱藏）；本機、在線的、已移除的不能', () => {
+  assert.equal(canRemoveRow({ self: false, online: false, hidden: true }), true)
+  assert.equal(canRemoveRow({ self: false, online: false, hidden: false }), true, '還有夥伴或未讀、沒被自動隱藏的離線設備也能移除')
+  assert.equal(canRemoveRow({ self: true, online: false, hidden: true }), false)
+  assert.equal(canRemoveRow({ self: false, online: true, hidden: false }), false)
+  assert.equal(canRemoveRow({ self: false, online: false, hidden: true, removed: true }), false)
   assert.equal(canRemoveRow(null), false)
 })
 
@@ -117,9 +118,9 @@ const render = async (props, state = { devices: devs(), accounts: ACCT }) => {
   return renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st: state, meAv: '', catKey: 'devices', ...props }) }))
 }
 
-test('頁首：只剩標題；說明文字、「重新整理」、「已隱藏的設備」展開區、橫向頁籤都拿掉了', async () => {
+test('頁首：設定視窗標題已是「設備與帳號」，面板裡不再重複一個標題；說明文字、「重新整理」、「已隱藏的設備」展開區、橫向頁籤都拿掉了', async () => {
   const html = await render({})
-  assert.match(html, /<h2[^>]*class="dv-title"[^>]*>[\s\S]*<svg[\s\S]*設備與帳號/)
+  assert.ok(!html.includes('dv-title') && !html.includes('dv-head'), '面板裡沒有重複的標題')
   for (const gone of ['重新整理', '只有 Claude 帳號能從這裡切換', '已隱藏的設備（', 'role="tablist"', 'dv-tabs', 'dv-hidden', '顯示</button>']) assert.ok(!html.includes(gone), `不該還有「${gone}」`)
   assert.ok(!SETTING_OPS.includes('devices-refresh') && !SettingsPanel.template.includes('devices-refresh'))
 })
@@ -129,7 +130,7 @@ test('進入先看全部設備的列表：由上到下一台一列，名稱／�
   const rows = [...html.matchAll(/<li[^>]*class="dv-row[^"]*"[\s\S]*?<\/li>/g)].map(m => m[0])
   assert.equal(rows.length, 3, '列表三台（被永久移除的不在列表）')
   assert.match(rows[0], /家用機[\s\S]*dv-tag me[^>]*>這台/)
-  assert.match(rows[1], /工作機[\s\S]*>電腦<[\s\S]*dv-tag on[^>]*>在線/)
+  assert.match(rows[1], /工作機[\s\S]*dv-tag on[^>]*>在線/); assert.ok(!rows[1].includes('>電腦<'), '電腦標籤多餘不顯示')
   for (const r of rows) assert.match(r, /class="dv-chev"[^>]*>›</)
   assert.ok(!html.includes('dv-vendor') && !html.includes('w@b.c'), '列表不含廠商與帳號內容')
   assert.ok(!html.includes('永久移除的機器'), '被永久移除的不出現在列表')
@@ -197,22 +198,22 @@ test('永久移除要二次確認：確認區寫明對話與帳號資料不會�
   assert.ok(SETTING_OPS.includes('device-remove') && read('ui/list.js').includes("case 'device-remove'"))
 })
 
-test('底部「已永久移除（N）」只在 N>0 出現，展開後每列有「恢復」', async () => {
+test('電腦版設備列表不再顯示「已永久移除」區；永久移除的整個不出現', async () => {
   const html = await render({})
-  assert.match(html, /dv-removed-link[^>]*>已永久移除（1）</)
-  assert.ok(!html.includes('>恢復<'), '收合時不列')
-  const open = await render({ removedOpen: true })
-  assert.match(open, /永久移除的機器[\s\S]*>恢復</)
-  const none = await render({}, { devices: devs().filter(d => !d.removed), accounts: ACCT })
-  assert.ok(!none.includes('已永久移除（') && !none.includes('dv-removed'))
-  assert.ok(SETTING_OPS.includes('device-restore') && read('ui/list.js').includes("case 'device-restore'"))
-  assert.match(SettingsPanel.template, /act\('device-restore', d\.key\)/)
+  assert.ok(!html.includes('已永久移除（') && !html.includes('dv-removed') && !html.includes('>恢復<'))
+  assert.ok(!SETTING_OPS.includes('device-restore') && !read('ui/list.js').includes("case 'device-restore'"), '電腦版沒有還原入口，也不留沒人用的指令（手機版另有自己的恢復入口）')
+})
+
+test('設備類型標籤：電腦不顯示（多餘），只有手機等非電腦才標', async () => {
+  const html = await render({})
+  assert.ok(!html.includes('class="dv-tag kind">電腦<'))
+  const ph = await render({}, { devices: [dev('P', '我的手機', { kind: '手機' })], accounts: ACCT })
+  assert.match(ph, /class="dv-tag kind">手機</)
 })
 
 test('樞紐：永久移除／恢復寫入 deviceRemoved（本機不可）、活過來自動解除、三處列表都帶 removed', () => {
   const hub = read('ui/list.js')
   assert.match(hub, /devPrefs\.deviceRemoved = removeDevice\(devPrefs\.deviceRemoved, String\(value \?\? ''\), \{ selfNode: info\.node \}\)/)
-  assert.match(hub, /devPrefs\.deviceRemoved = restoreDevice\(/)
   assert.match(hub, /pruneRemoved\(devPrefs\.deviceRemoved, friends\.value/)
   assert.match(hub, /pageTabs\([^\n]*removed: devPrefs\.deviceRemoved/)
   assert.match(hub, /removed: devPrefs\.deviceRemoved, selfNode: info\.node, asn:/)
@@ -287,4 +288,11 @@ test('安卓編譯：只動 ui 與 JS，沒有新增 Rust 呼叫給手機', () =
   const js = read('ui/m.js')
   assert.ok(!/invoke\('(device|dev)_/.test(js))
   assert.deepEqual([...js.matchAll(/invoke\('([a-z_]+)'/g)].map(m => m[1]).filter(n => /remov|restor|device_order/.test(n)), [])
+})
+
+test('細部頁：離線但沒被自動隱藏的設備（還有夥伴或未讀）也有「永久移除」，沒有「顯示回名單」；在線的設備沒有', async () => {
+  const off = await render({ dev: 'X' }, { devices: [dev('X', '未命名設備', { online: false, onlineText: '離線', hidden: false })], accounts: ACCT })
+  assert.ok(off.includes('>永久移除<') && !off.includes('>顯示回名單<'))
+  const on = await render({ dev: 'X' }, { devices: [dev('X', '在線機', { online: true, hidden: false })], accounts: ACCT })
+  assert.ok(!on.includes('>永久移除<'))
 })

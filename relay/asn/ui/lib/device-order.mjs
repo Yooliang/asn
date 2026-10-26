@@ -73,15 +73,15 @@ export const removeDevice = (removed, key, { selfNode } = {}) => {
 }
 export const restoreDevice = (removed, key) => normalizeKeys(removed).filter(k => k !== key)
 export const isDeviceRemoved = (key, removed, { selfNode } = {}) => Boolean(key) && key !== selfNode && normalizeKeys(removed).includes(key)
-// 自動解除：被移除的設備之後又有在線的視窗（ASN 視窗也算）或未讀＝它活過來了，從名單拿掉。
-// 移除時它一定是離線且沒未讀（只有「已隱藏」的設備能移除），所以之後只要看到在線或未讀，就一定是新的。
+// 自動解除：被移除的設備之後又有在線的視窗（ASN 視窗也算）＝它活過來了，從名單拿掉。
+// 移除時它一定是離線；有未讀不算活過來（使用者明確移除了它，舊的未讀不能讓它又冒出來）。
 export function pruneRemoved(removed, friends, { selfNode } = {}) {
   const alive = new Set()
-  for (const f of Array.isArray(friends) ? friends : []) if (f && ((f.status && f.status !== 'offline') || (f.unread || 0) > 0)) alive.add(f.node ?? '')
+  for (const f of Array.isArray(friends) ? friends : []) if (f && f.status && f.status !== 'offline') alive.add(f.node ?? '')
   return normalizeKeys(removed).filter(k => k !== selfNode && !alive.has(k))
 }
-// 設備列（buildDeviceTree 的結果）：只有「已隱藏」的別台設備能永久移除
-export const canRemoveRow = d => Boolean(d && !d.self && d.hidden && !d.removed)
+// 設備列（buildDeviceTree 的結果）：別台、離線的設備都能永久移除（不必等它被自動隱藏；還有未讀或夥伴的也一樣）
+export const canRemoveRow = d => Boolean(d && !d.self && !d.online && !d.removed)
 export const visibleRows = rows => (Array.isArray(rows) ? rows : []).filter(d => !d.removed)
 export const removedRows = rows => (Array.isArray(rows) ? rows : []).filter(d => d.removed)
 

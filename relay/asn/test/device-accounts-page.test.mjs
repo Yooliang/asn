@@ -75,7 +75,7 @@ const render = async (props, state = st()) => {
 
 test('頁首：設定圖示與標題（10-25 起拿掉說明文字與「重新整理」，細節在 device-list-page.test.mjs）', async () => {
   const html = await render({ catKey: 'devices' })
-  assert.match(html, /<h2[^>]*class="dv-title"[^>]*>[\s\S]*<svg[\s\S]*設備與帳號/)
+  assert.ok(!html.includes('dv-title'), '設定視窗標題已是「設備與帳號」，面板內不重複')
   assert.ok(!html.includes('只有 Claude 帳號能從這裡切換') && !html.includes('重新整理'))
 })
 
@@ -99,7 +99,7 @@ test('進入細部頁：指定 dev 才進；沒指定或認不得的鍵都留在
 test('第 2 層：設備標題（名稱、類型標籤、在線標籤）與一列一個的廠商卡片（我們自己的圖示）', async () => {
   const html = await render({ catKey: 'devices', dev: 'W' })
   assert.match(html, /<h3 class="dv-name">工作機<\/h3>/)
-  assert.match(html, /class="dv-tag kind">電腦</); assert.match(html, /class="dv-tag on">在線</)
+  assert.ok(!html.includes('class="dv-tag kind">電腦<'), '電腦類型標籤多餘，不顯示'); assert.match(html, /class="dv-tag on">在線</)
   assert.ok(html.includes('帳號最後回報：3 分鐘前'))
   const cards = [...html.matchAll(/<li class="dv-vendor[^"]*"/g)]
   assert.equal(cards.length, 3)
@@ -174,7 +174,7 @@ test('遠端設備下拉選單已被頁籤取代：元件與樞紐不再有 acct
   assert.ok(!SETTING_OPS.includes('acct-remote-node') && !SETTING_OPS.includes('acct-remote-switch'))
   assert.ok(!read('ui/lib/settings-panel.mjs').includes('acct-remote'))
   assert.ok(!read('ui/list.js').includes("case 'acct-remote"))
-  for (const op of ['acct-switch', 'acct-remove', 'acct-trust', 'device-switch', 'device-reorder', 'device-remove', 'device-restore']) assert.ok(SETTING_OPS.includes(op), op)
+  for (const op of ['acct-switch', 'acct-remove', 'acct-trust', 'device-switch', 'device-reorder', 'device-remove']) assert.ok(SETTING_OPS.includes(op), op)
 })
 
 test('守門：不引入 Tailwind 或外部網址；樣式只用既有的 CSS 變數；畫面不顯示節點代號', () => {

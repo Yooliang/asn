@@ -55,7 +55,7 @@ import { isCallActive } from './lib/call-session.mjs'
 import { accountLine, codexLine, createAccountsUi } from './lib/claude-accounts.mjs'
 import { buildDeviceTree } from './lib/device-tree.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
-import { deviceFieldsFromSaved, deviceFieldsToSave, moveDevice, pruneRemoved, removeDevice, reorderDevice, restoreDevice, showDevice, visibleRows } from './lib/device-order.mjs'
+import { deviceFieldsFromSaved, deviceFieldsToSave, moveDevice, pruneRemoved, removeDevice, reorderDevice, showDevice, visibleRows } from './lib/device-order.mjs'
 import { dialogTitle as deviceAcctTitle, dialogView as deviceAcctViewOf, CONFIRM_NOTE as DEVICE_CONFIRM_NOTE, CLOSE_NOTE as DEVICE_CLOSE_NOTE } from './lib/device-acct-dialog.mjs'
 import { applyRename } from './lib/rename.mjs'
 import { createUsageUi } from './lib/usage.mjs'
@@ -1252,7 +1252,6 @@ const app = createApp({
         case 'device-move': devPrefs.deviceOrder = moveDevice(deviceTree.value.map(d => d.key), String(value?.node ?? ''), value?.dir === -1 ? -1 : 1, { selfNode: info.node, visible: visibleRows(deviceTree.value).map(d => d.key) }); break
         case 'device-reorder': devPrefs.deviceOrder = reorderDevice(deviceTree.value.map(d => d.key), String(value?.drag ?? ''), String(value?.target ?? ''), value?.after === true, { selfNode: info.node }); break
         case 'device-remove': devPrefs.deviceRemoved = removeDevice(devPrefs.deviceRemoved, String(value ?? ''), { selfNode: info.node }); break
-        case 'device-restore': devPrefs.deviceRemoved = restoreDevice(devPrefs.deviceRemoved, String(value ?? '')); break
         case 'device-show': devPrefs.deviceShown = showDevice(devPrefs.deviceShown, String(value ?? '')); break
         case 'device-switch': await (typeof value === 'object' && value ? openDeviceAcct(String(value.node ?? ''), String(value.email ?? '')) : openDeviceAcct(String(value ?? ''))); break
         case 'closeTo': await setCloseTo(value); break
