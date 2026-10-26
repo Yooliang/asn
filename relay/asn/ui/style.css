@@ -769,3 +769,15 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .partner-run-opt{display:flex;flex-wrap:wrap;align-items:center;gap:4px;font-size:12px;cursor:pointer}
 .partner-run-opt.off{opacity:.65;cursor:default}
 .partner-run-why{flex-basis:100%;margin-left:20px;font-size:11px;color:#9a3b14}
+.term-ic{position:relative}
+.term-badge{position:absolute;top:-4px;right:-4px;min-width:12px;height:12px;border-radius:6px;background:#d33;color:#fff;font-size:9px;line-height:12px;text-align:center;font-weight:700}
+.term-prompt-text{margin:6px 0;padding:6px 8px;max-height:140px;overflow:auto;white-space:pre-wrap;word-break:break-word;font:12px/1.4 Consolas,monospace;border:1px solid var(--line);border-radius:4px;background:rgba(255,255,255,.55)}
+.term-options{flex-direction:column;align-items:stretch}
+.term-opt{text-align:left;justify-content:flex-start}
+.term-rows{list-style:none;margin:6px 0;padding:0}
+.term-row{display:flex;gap:10px;align-items:center;padding:4px 2px;border-bottom:1px solid var(--line);font-size:13px}
+.term-folder{color:var(--muted,#666);font-size:12px}
+.term-state{margin-left:auto;font-size:12px}
+.term-state.tone-warn{color:#b45f06;font-weight:700}
+.term-state.tone-busy{color:#1b6ac9}
+.term-state.tone-ok{color:#2e7d32}

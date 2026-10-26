@@ -1,6 +1,9 @@
 // 電腦版「終端」面板的純邏輯：狀態字樣、提示內容整理、使用者按選項才產生送出請求、輪詢（不重疊、單列失敗不拖累整輪）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { PROMPT_TEXT_MAX, answerRequest, createTermPoller, folderName, kindTitle, promptKey, promptView, rowsOf, sentText, stateView, willSendText } from '../ui/lib/term-panel.mjs'
 
 const MENU = { kind: 'menu', text: '要信任這個資料夾嗎？', options: [{ n: 2, label: 'No, quit' }, { n: 1, label: 'Yes, proceed' }] }
@@ -107,4 +110,39 @@ test('資料夾：清單帶 cwd 與最後一段資料夾名（Windows 與 POSIX 
   for (const bad of ['', null, undefined, 42, '///']) assert.equal(folderName(bad), '', String(bad))
   const rows = rowsOf([{ id: '1', profile: 'grok', cwd: 'D:\\Github\\x' }, { id: '2', profile: 'agy' }])
   assert.deepEqual([rows[0].cwd, rows[0].folder, rows[1].cwd, rows[1].folder], ['D:\\Github\\x', 'x', '', ''])
+})
+
+// ---- 畫面接線的守門：term_answer 的唯一入口是提示框的「送出」，不自動代答 ----
+const UI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ui')
+const readUi = f => fs.readFileSync(path.join(UI, f), 'utf8').replace(/\r\n/g, '\n')
+const count = (text, needle) => text.split(needle).length - 1
+
+test('接線：term_answer 只在 termConfirm 裡呼叫一次；termConfirm 只有「送出」按鈕觸發，且要先選了選項', () => {
+  const js = readUi('list.js'), html = readUi('list.html')
+  assert.equal(count(js, 'transport.termAnswer('), 1, '整支 list.js 只能有一處呼叫 termAnswer')
+  const at = js.indexOf('transport.termAnswer(')
+  const fnStart = js.lastIndexOf('async function termConfirm', at)
+  assert.ok(fnStart > 0 && js.indexOf('\n}\n', fnStart) > at, '那一處在 termConfirm 裡')
+  assert.ok(js.slice(fnStart, at).includes('answerRequest('), '送出前先過 answerRequest（選項必須真的在提示裡）')
+  assert.equal(count(html, 'termConfirm'), 1, '模板裡只有一個按鈕呼叫 termConfirm')
+  assert.ok(html.includes(':disabled="!terms.selected || terms.busy" @click="termConfirm"'), '沒選選項、或送出中，按鈕是停用的')
+  assert.ok(!js.includes('terms.selected = terms.rows') && !js.includes('selected = 1'), '沒有預設選項')
+})
+
+test('接線：提示框有選項清單（逐項按鈕）、說明「將選擇…」、「我自己在視窗裡處理」只關框；用語不出現「收發室」', () => {
+  const html = readUi('list.html'), js = readUi('list.js')
+  const a = html.indexOf('id="term-prompt-title"'), b = html.indexOf('id="term-list-title"')
+  assert.ok(a > 0 && b > a)
+  const dlg = html.slice(a, b)
+  assert.ok(dlg.includes('v-for="o in termPrompt.pv.options"') && dlg.includes('@click="termPick(o.n)"'))
+  assert.ok(dlg.includes('{{ termWill }}') && dlg.includes('@click="termDismiss"') && dlg.includes('我自己在視窗裡處理'))
+  assert.ok(!dlg.includes('收發室') && !html.slice(b, b + 900).includes('收發室'))
+  const dismiss = js.slice(js.indexOf('function termDismiss'), js.indexOf('async function termConfirm'))
+  assert.ok(!dismiss.includes('termAnswer') && !dismiss.includes('transport.'), '「我自己處理」不送任何東西')
+})
+
+test('接線：終端清單按鈕只在有終端時出現；有等你回答的終端時顯示提醒點', () => {
+  const html = readUi('list.html')
+  assert.ok(html.includes('v-if="terms.rows.length" title="終端"'))
+  assert.ok(html.includes('v-if="terms.rows.some(r => r.prompt)"'))
 })
