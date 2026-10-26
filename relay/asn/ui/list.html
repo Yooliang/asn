@@ -386,7 +386,12 @@
       <p class="partner-hint" v-if="!terms.rows.length">目前沒有由 ASN 開啟的終端。</p>
       <ul class="term-rows" v-else>
         <li v-for="r in terms.rows" :key="r.id" class="term-row-wrap">
-          <div class="term-row"><b>{{ r.title }}</b><span class="term-folder" v-if="r.folder">{{ r.folder }}</span><span class="term-state" :class="'tone-' + r.tone">{{ r.stateLabel }}</span><button class="aero-btn term-send-btn" type="button" :aria-expanded="termSend.id === r.id" @click="termSendOpen(r)">{{ termSend.id === r.id ? '收起' : '送字…' }}</button></div>
+          <div class="term-row"><b>{{ r.title }}</b><span class="term-adopted" v-if="r.adopted">已接手・預設只能看</span><span class="term-folder" v-if="r.folder">{{ r.folder }}</span><span class="term-state" :class="'tone-' + r.tone">{{ r.stateLabel }}</span><button class="aero-btn term-send-btn" type="button" :aria-expanded="termSend.id === r.id" @click="termSendOpen(r)">{{ termSend.id === r.id ? '收起' : '送字…' }}</button></div>
+          <div class="term-adopt-row" v-if="r.adopted">
+            <button class="aero-btn" type="button" v-if="!adopt.unlocked[r.id + ':answer']" :disabled="!!adopt.busy" @click="adoptUnlockAsk(r, 'answer')">{{ UNLOCK_TEXT.answer.label }}…</button><span class="partner-hint" v-else>已允許代答提問</span>
+            <button class="aero-btn" type="button" v-if="!adopt.unlocked[r.id + ':send']" :disabled="!!adopt.busy" @click="adoptUnlockAsk(r, 'send')">{{ UNLOCK_TEXT.send.label }}…</button><span class="partner-hint" v-else>已允許代送文字</span>
+            <button class="aero-btn" type="button" :disabled="!!adopt.busy" @click="adoptRelease(r)">解除接手</button>
+          </div>
           <div class="term-send" v-if="termSend.id === r.id">
             <textarea class="set-input" v-model="termSend.text" rows="3" :maxlength="SEND_MAX" placeholder="要送進這個終端的文字" aria-label="要送進終端的文字"></textarea>
             <label class="chk"><input type="checkbox" v-model="termSend.enter" /><span>送完後按 Enter</span></label>
@@ -397,7 +402,41 @@
           </div>
         </li>
       </ul>
-      <div class="partner-actions"><button class="aero-btn" type="button" @click="terms.open = false">關閉</button></div>
+      <p class="partner-hint" v-if="adopt.note" role="status">{{ adopt.note }}</p>
+      <p class="partner-err" v-if="adopt.error && !adopt.open" role="alert">{{ adopt.error }}</p>
+      <div class="partner-actions"><button class="aero-btn" type="button" @click="adoptLoad">接手既有視窗…</button><button class="aero-btn" type="button" @click="terms.open = false">關閉</button></div>
+    </div>
+  </div>
+
+  <!-- 接手既有視窗：候選清單（只列前景是 claude／grok／agy／pi／codex 的 WezTerm 窗格；接手後預設只能看） -->
+  <div class="partner-dlg-back" v-if="adopt.open" @click.self="adoptClose">
+    <div class="partner-dlg term-list-dlg" role="dialog" aria-labelledby="term-adopt-title" @click.stop>
+      <h3 id="term-adopt-title">接手既有視窗</h3>
+      <p class="partner-hint">把你自己已經開著的 WezTerm 窗格交給 ASN 看。接手後預設只能看狀態與畫面；要讓 ASN 代答或代送，得之後逐窗格自己點開。解除接手不會關掉那個視窗。</p>
+      <p class="partner-hint" v-if="adopt.loading">掃描中…</p>
+      <p class="partner-hint" v-else-if="!adopt.rows.length && !adopt.error">沒有找到可以接手的窗格（只認前景是已知 AI 程式的 WezTerm 窗格）。</p>
+      <ul class="term-rows" v-else>
+        <li v-for="c in adopt.rows" :key="c.key" class="term-row-wrap">
+          <div class="term-row"><b>{{ c.profile }}</b><span class="term-folder" v-if="c.folder">{{ c.folder }}</span><span class="term-folder" v-if="c.title">{{ c.title }}</span><span class="term-state" :class="c.authorized ? 'tone-ok' : 'tone-warn'">{{ c.authorized ? '資料夾已授權' : '資料夾未授權' }}</span><button class="aero-btn term-send-btn" type="button" :disabled="!c.canAdopt || !!adopt.busy" @click="adoptDo(c)">{{ c.adopted ? '已接手' : adopt.busy === c.key ? '接手中…' : '接手' }}</button></div>
+          <p class="partner-hint" v-if="c.note">{{ c.note }}</p>
+        </li>
+      </ul>
+      <p class="partner-hint" v-if="adopt.note" role="status">{{ adopt.note }}</p>
+      <p class="partner-err" v-if="adopt.error" role="alert">{{ adopt.error }}</p>
+      <div class="partner-actions"><button class="aero-btn" type="button" @click="adoptLoad" :disabled="adopt.loading">重新掃描</button><button class="aero-btn" type="button" @click="adoptClose">關閉</button></div>
+    </div>
+  </div>
+
+  <!-- 接手窗格：打開代答／代送前的確認（逐窗格、逐項） -->
+  <div class="partner-dlg-back" v-if="adopt.unlockAsk">
+    <div class="partner-dlg term-prompt" role="dialog" aria-labelledby="term-unlock-title" @click.stop>
+      <h3 id="term-unlock-title">{{ UNLOCK_TEXT[adopt.unlockAsk.kind].label }}？</h3>
+      <p class="partner-node">{{ adopt.unlockAsk.title }}</p>
+      <p class="partner-hint">{{ adopt.unlockAsk.text }}</p>
+      <div class="partner-actions">
+        <button class="aero-btn" type="button" @click="adoptUnlockCancel">取消</button>
+        <button class="aero-btn primary" type="button" :disabled="!!adopt.busy" @click="adoptUnlockConfirm">允許</button>
+      </div>
     </div>
   </div>
 
