@@ -105,7 +105,7 @@ pub struct TermPrompt {
 }
 
 /// 選項編號從 1 起算。label 是畫面上的文字；信任提問的兩項是固定的。
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
 pub struct TermOption {
     pub n: u32,
     pub label: String,
