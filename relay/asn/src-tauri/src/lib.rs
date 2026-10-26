@@ -345,7 +345,7 @@ async fn acct_remote_apply(app: State<'_, App>, id: String, confirmed: bool) -> 
 #[cfg(desktop)]
 #[tauri::command]
 async fn acct_remote_decline(app: State<'_, App>, id: String) -> Result<(), String> {
-    acct_remote::decline(relay_of(&app)?.as_ref(), id).await
+    acct_remote::decline(relay_of(&app)?.as_ref(), &app.data_dir, id).await
 }
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
