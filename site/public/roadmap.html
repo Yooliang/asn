@@ -33,7 +33,7 @@
 <main class="wrap">
   <article class="glass doc">
     <h1>藍圖與更新日誌</h1>
-    <p class="meta">藍圖最後整理：2026 年 10 月 25 日（台北時間）。ASN 目前為測試階段，順序與內容會隨進度調整。</p>
+    <p class="meta">藍圖最後整理：2026 年 10 月 26 日（台北時間）。ASN 目前為測試階段，順序與內容會隨進度調整。</p>
     <p>ASN 的主軸是<strong>讓各家 AI 在同一個地方被統一管理</strong>：開啟、關閉、接手、切換模型，以及在群組裡一起聊天，每一項都要對每種 AI 引擎都能用。下面依「已完成、進行中、規劃中」整理目前的狀況。</p>
   </article>
 
@@ -50,7 +50,7 @@
     </ul>
     <div class="table-wrap">
       <table class="matrix">
-        <caption>各家 AI 與各項管理功能的現況（依 2026 年 10 月 25 日的主線程式（0.1.68）與議題整理）</caption>
+        <caption>各家 AI 與各項管理功能的現況（依 2026 年 10 月 26 日的主線程式（0.1.74）與議題整理；各格的版本與驗證狀態以格內文字為準）</caption>
         <thead><tr><th scope="col">AI</th><th scope="col">開啟</th><th scope="col">關閉</th><th scope="col">接手</th><th scope="col">切換模型</th><th scope="col">群組聊天</th><th scope="col">帳號切換</th><th scope="col">備註與限制</th></tr></thead>
         <tbody>
         <tr>
@@ -149,7 +149,7 @@
           </td>
           <td data-label="接手">
             <span class="st st-doing">進行中</span>
-            <p>接手自己在終端機開的 Grok（載入同一段對話，要先關掉原終端機）已隨 0.1.67 發佈，但小良哥實測按「接手」失敗過一次（程式裡對得上「沒有設定 Grok 工作者」的錯誤）；0.1.68 的 #239 補了沒有設定檔時以開新夥伴開出的 Grok 工作者當底，等重測確認。<span class="refs">#239</span></p>
+            <p>接手自己在終端機開的 Grok（載入同一段對話，要先關掉原終端機）已隨 0.1.67 發佈，但小良哥實測按「接手」失敗過一次（程式裡對得上「沒有設定 Grok 工作者」的錯誤）；0.1.68 的 #239 補了沒有設定檔時以開新夥伴開出的 Grok 工作者當底，但當時名冊裡沒有 Grok 工作者時仍會失敗；0.1.74 起（#269）沒有現成的 Grok 工作者也會用開新夥伴的 grok 設定建底，只用模擬工作者測過，等小良哥在手機重測確認。<span class="refs">#239 #269</span></p>
           </td>
           <td data-label="切換模型">
             <span class="st st-todo">尚未做</span>
@@ -295,12 +295,11 @@
       <div class="glass lane">
         <h3><span class="status doing">二、近期（依序）</span></h3>
         <ul>
-          <li><strong>發版 0.1.71</strong>：切換模型不再關掉使用者自己的終端機、信件內文防冒充補強、AI 永遠可被點名、結束程序守門補強、設備順序同步加鎖。</li>
+          <li><strong>內建終端機（WezTerm 原型）</strong>：ASN 與終端機是兩隻獨立程式，ASN 不渲染終端內容；WezTerm 是第一候選。隔離實驗已證明在 Windows 上能啟動視窗、列出、送字、讀字，Rust 控制模組已合併（沒接畫面、沒進安裝包）。接下來：真機實測，以及 agy、Grok 登入後互動畫面的實測（A1～A8，需要負責人排 20～30 分鐘、先登入）；是否隨安裝包另議。<span class="refs">#280</span></li>
+          <li><strong>0.1.74 驗收</strong>：開新夥伴「模型與運行分開」（#281）下一版裝好後，請在電腦版與手機第 2 頁目視確認；Grok 接手（#269）重測後可關閉 #239。<span class="refs">#239 #269 #281</span></li>
           <li><strong>pi 實開測試</strong>：要在桌面開出真的終端機視窗，確認使用者沒在用電腦時進行。<span class="refs">#243</span></li>
           <li><strong>pi 接手（方案 B）</strong>：第一階段底層已合併，其餘接線與選單進行中。<span class="refs">#240 #246</span></li>
           <li><strong>非 Claude 引擎的關閉與切換模型</strong>：背景工作者關閉與 pi 切換模型已做；Gemini、Grok 的切換模型要等協定實測；Codex 等有帳號後實機驗證。<span class="refs">#235</span></li>
-          <li><strong>發版 0.1.72</strong>：pi 夥伴顯示背後實際的模型廠商（來源端與顯示端已合併）、手機「開新夥伴」改兩頁（第 1 頁選電腦，第 2 頁選該電腦的模型與資料夾）。<span class="refs">#258 #260</span></li>
-          <li><strong>手機「設定」改成兩頁</strong>：先列各分類（每列一行目前值），點進去才是該項頁面，另加手冊導引入口，與電腦版一致。<span class="refs">#262</span></li>
           <li><strong>手機端開新夥伴的實機往返</strong>：電腦端 Gemini、Grok 已實測；手機到電腦的完整往返還沒走過。<span class="refs">#239</span></li>
         </ul>
       </div>
@@ -313,7 +312,7 @@
           <li><strong>Codex 真機測試</strong>：需要先有 Codex 帳號。</li>
           <li><strong>殘留清理</strong>：舊版收發小程式的安裝檔與過時的說明。</li>
           <li><strong>群組細修</strong>：叫醒順序的呈現、依序回答、手機顯示各帳號剩餘額度。<span class="refs">#228 #230 #231</span></li>
-          <li><strong>議題收尾關閉</strong>：#239、#229、#240 確認後關閉。</li>
+          <li><strong>議題收尾關閉</strong>：#239、#240 確認後關閉。</li>
         </ul>
       </div>
     </div>
@@ -328,7 +327,14 @@
         <thead><tr><th scope="col">時間</th><th scope="col">出席／回覆</th><th scope="col">各項進度</th><th scope="col">決議</th><th scope="col">分派</th><th scope="col">改善意見</th></tr></thead>
         <tbody>
 <!-- meetings:start（由 site/make-roadmap-page.mjs 產生，不要手改；資料在 site/meetings.json） -->
-        <tr><td colspan="6">還沒有記錄，第一筆從小會議開始後寫入。</td></tr>
+        <tr>
+          <th scope="row">2026-10-26 08:00</th>
+          <td data-label="出席／回覆">ASN-開發 主持；asn西川、asn小東、Gemini審查 待回</td>
+          <td data-label="各項進度">0.1.74 已發（官網、Play、家用機）；#281 開新夥伴模型與運行分開已合併；#280 方向更正為 ASN 與終端機獨立、WezTerm 為第一候選，隔離實驗可行，Rust 控制模組原型已合併（不接畫面、不進安裝包）</td>
+          <td data-label="決議">先更新藍圖使其與 0.1.74 一致並列入 #280；WezTerm 原型階段用開發機隔離副本，是否隨安裝包另議</td>
+          <td data-label="分派">asn小東 修藍圖並寫入本記錄（#282）；asn西川 WezTerm 真機實測；Gemini審查 審控制模組；小良哥 排登入後實測時段、#281 目視</td>
+          <td data-label="改善意見">藍圖待辦落後主線三個版本，發版時應一併更新藍圖；群組每小時 20 則限流，回報請合併成一則；Gemini審查 本輪起請每次小會議回覆一則</td>
+        </tr>
         <!-- meetings:end -->
         </tbody>
       </table>
