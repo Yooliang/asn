@@ -32,6 +32,8 @@ pub trait Runner {
     fn run(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<RunOutput, String>;
     /// 啟動後不等待，回傳行程編號
     fn spawn(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String>;
+    /// 結束一個自己剛啟動的行程與它的子行程樹（等 socket 逾時要清掉剛開的視窗，不留桌面孤兒）
+    fn kill_tree(&self, pid: u32);
     fn sleep(&self, d: Duration);
 }
 
@@ -99,6 +101,10 @@ impl Runner for RealRunner {
         Ok(child.id())
     }
 
+    fn kill_tree(&self, pid: u32) {
+        let _ = Command::new("taskkill").no_window().args(["/PID", &pid.to_string(), "/T", "/F"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    }
+
     fn sleep(&self, d: Duration) {
         std::thread::sleep(d);
     }
@@ -155,12 +161,12 @@ pub struct PaneInfo {
     pub is_active: bool,
 }
 
-/// 把訊息壓成單行：換行（含 \r\n）換成一個空格，去掉其他控制字元（含 ESC），超過 4000 字截斷
+/// 把訊息壓成單行：換行（含 \r\n）與製表字元換成一個空格（連續的合併成一個），去掉其他控制字元（含 ESC），超過 4000 字截斷
 pub fn flatten_line(text: &str) -> String {
     let mut out = String::new();
     let mut prev_nl = false;
     for c in text.chars() {
-        if c == '\n' || c == '\r' {
+        if c == '\n' || c == '\r' || c == '\t' {   // 製表字元和換行一樣換成空格，免得 ls\t-la 變 ls-la
             if !prev_nl {
                 out.push(' ');
             }
@@ -231,7 +237,8 @@ impl<'a> WezTerm<'a> {
                 return Ok(Window { gui_pid, sock });
             }
             if start.elapsed() >= self.sock_wait {
-                return Err(format!("等了 {} 秒，WezTerm 的通訊檔仍未出現：{}", self.sock_wait.as_secs(), sock.display()));
+                self.runner.kill_tree(gui_pid);   // 剛開的視窗連同子行程一起清掉，不留桌面孤兒視窗
+                return Err(format!("等了 {} 秒，WezTerm 的通訊檔仍未出現：{}（已結束剛啟動的視窗）", self.sock_wait.as_secs(), sock.display()));
             }
             self.runner.sleep(step);
         }
@@ -306,13 +313,20 @@ impl<'a> WezTerm<'a> {
         self.send_enter(sock, pane_id)
     }
 
-    /// 送「請讀 <路徑> 的內容並照辦」一行提示；路徑不得有換行與控制字元
+    /// 送「請讀 <路徑> 的內容並照辦」一行提示；路徑不得有換行與控制字元。**不帶 Enter**（Enter 要另外送，見 send_file_pointer_and_enter）
     pub fn send_file_pointer(&self, sock: &Path, pane_id: u64, file: &Path) -> Result<(), String> {
         let p = file.to_string_lossy();
         if p.is_empty() || p.chars().any(|c| c.is_control()) {
             return Err("檔案路徑含有換行或控制字元，已拒絕".to_string());
         }
         self.send_line(sock, pane_id, &format!("請讀 {p} 的內容並照辦"))
+    }
+
+    /// 同 send_file_pointer，之後等一小段再另外送 Enter（送出整個提示）
+    pub fn send_file_pointer_and_enter(&self, sock: &Path, pane_id: u64, file: &Path) -> Result<(), String> {
+        self.send_file_pointer(sock, pane_id, file)?;
+        self.runner.sleep(self.enter_delay);
+        self.send_enter(sock, pane_id)
     }
 }
 
@@ -340,6 +354,7 @@ mod tests {
         timeout_err: bool,
         killed: RefCell<bool>,
         spawn_pid: u32,
+        tree_killed: RefCell<Vec<u32>>,
     }
     impl Runner for FakeRunner {
         fn run(&self, _p: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<RunOutput, String> {
@@ -353,6 +368,9 @@ mod tests {
         fn spawn(&self, _p: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
             self.calls.borrow_mut().push((args.to_vec(), env.clone()));
             Ok(self.spawn_pid)
+        }
+        fn kill_tree(&self, pid: u32) {
+            self.tree_killed.borrow_mut().push(pid);
         }
         fn sleep(&self, d: Duration) {
             self.sleeps.borrow_mut().push(d);
@@ -383,7 +401,7 @@ mod tests {
 
     #[test]
     fn flatten_strips_esc_and_controls() {
-        assert_eq!(flatten_line("a\x1b[31mb\x07c\td"), "a[31mbcd");
+        assert_eq!(flatten_line("a\x1b[31mb\x07c\td"), "a[31mbc d");
     }
 
     #[test]
@@ -467,6 +485,27 @@ mod tests {
         assert!(r.calls.borrow().is_empty());
         w.send_file_pointer(&sock(), 0, Path::new("C:/a/task.md")).unwrap();
         assert_eq!(r.calls.borrow()[0].0.last().unwrap(), "請讀 C:/a/task.md 的內容並照辦");
+        assert_eq!(r.calls.borrow().len(), 1, "send_file_pointer 不帶 Enter");
+    }
+
+    #[test]
+    fn file_pointer_and_enter_sends_enter_separately_after_delay() {
+        let r = FakeRunner::default();
+        let fs = fs_with_sock();
+        let w = wez(&r, &fs);
+        w.send_file_pointer_and_enter(&sock(), 0, Path::new("C:/a/task.md")).unwrap();
+        let c = r.calls.borrow();
+        assert_eq!(c.len(), 2);
+        assert_eq!(c[0].0.last().unwrap(), "請讀 C:/a/task.md 的內容並照辦");
+        assert_eq!(c[1].0.last().unwrap(), "\r", "Enter 另外單獨送");
+        assert_eq!(r.sleeps.borrow().len(), 1, "兩次之間有延遲");
+    }
+
+    #[test]
+    fn flatten_tab_becomes_space_not_glued() {
+        assert_eq!(flatten_line("ls	-la"), "ls -la");
+        assert_eq!(flatten_line("a		b
+	c"), "a b c");
     }
 
     #[test]
@@ -499,6 +538,7 @@ mod tests {
         let w2 = wez(&r, &fs2);
         let e = w2.start(Path::new("C:/work"), &["agy.exe".to_string()]).unwrap_err();
         assert!(e.contains("通訊檔仍未出現"));
+        assert_eq!(*r.tree_killed.borrow(), vec![1], "逾時要把剛啟動的視窗連子行程一起結束，不留孤兒視窗");
     }
 
     /// 真的 WezTerm 實測（預設不跑，會在桌面開一個視窗）：
