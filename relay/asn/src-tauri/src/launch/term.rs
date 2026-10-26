@@ -2810,6 +2810,7 @@ mod tests {
     #[test]
     #[ignore]
     fn live_adopt_existing_window() {
+        use crate::nowin::NoWindow;
         let grok = std::env::var("ASN_LIVE_GROK").expect("請設定 ASN_LIVE_GROK");
         let dir = wezterm::locate(&wezterm::RealFs).expect("請設定 ASN_WEZTERM_DIR");
         let tmp = std::env::temp_dir().join(format!("asn-adopt-live-{}", std::process::id()));
@@ -2819,7 +2820,7 @@ mod tests {
         std::fs::write(&cfg_file, "return {}").unwrap();
         let home = crate::identity::home_dir();
         // 1) 用 WezTerm 自己的命令列開一個「使用者自己開的」視窗（不經過 ASN 的啟動流程）
-        let mut gui = std::process::Command::new(&dir.gui)
+        let mut gui = std::process::Command::new(&dir.gui).no_window()
             .args(["--config-file", &cfg_file.to_string_lossy(), "start", "--always-new-process", "--cwd", &tmp.to_string_lossy(), "--", &grok])
             .spawn()
             .expect("開使用者視窗");
@@ -2856,7 +2857,7 @@ mod tests {
             println!("作用中被擋：{e}");
             assert_eq!(svc.read(&id, 30)?, screen, "被擋時畫面完全沒變");
             // 5) 探針：另開第二個 WezTerm 視窗搶走焦點（使用者去用別的視窗），再「不經過 ASN 的核驗」直接往 grok 那格送 y，看 grok 處理不處理
-            let mut other = std::process::Command::new(&dir.gui)
+            let mut other = std::process::Command::new(&dir.gui).no_window()
                 .args(["--config-file", &cfg_file.to_string_lossy(), "start", "--always-new-process", "--cwd", &tmp.to_string_lossy(), "--", "cmd.exe"])
                 .spawn()
                 .map_err(|e| e.to_string())?;
@@ -2867,14 +2868,14 @@ mod tests {
             let panes = wz.list(&sock)?;
             println!("探針：grok 那格 is_active={}（它所在的視窗現在沒有焦點）", panes.iter().find(|p| p.pane_id == c.pane_id).map(|p| p.is_active).unwrap_or(false));
             for (name, s) in [("第一個視窗", sock.clone()), ("第二個視窗", wezterm::sock_path(&home, other_pid))] {
-                let o = std::process::Command::new(&dir.cli).env("WEZTERM_UNIX_SOCKET", &s).args(["--config-file", &cfg_file.to_string_lossy(), "cli", "list-clients", "--format", "json"]).output().map_err(|e| e.to_string())?;
+                let o = std::process::Command::new(&dir.cli).no_window().env("WEZTERM_UNIX_SOCKET", &s).args(["--config-file", &cfg_file.to_string_lossy(), "cli", "list-clients", "--format", "json"]).output().map_err(|e| e.to_string())?;
                 println!("探針：{name} list-clients：{}", String::from_utf8_lossy(&o.stdout).split_whitespace().collect::<Vec<_>>().join(" "));
             }
             wz.send_bytes(&sock, c.pane_id, "y")?;
             std::thread::sleep(Duration::from_millis(3000));
             let still = svc.read(&id, 30)?.contains("Do you trust the contents");
             println!("探針：視窗沒有焦點時送 y 之後，提問還在嗎＝{still}");
-            let _ = std::process::Command::new("taskkill").args(["/T", "/F", "/PID", &other_pid.to_string()]).output();
+            let _ = std::process::Command::new("taskkill").no_window().args(["/T", "/F", "/PID", &other_pid.to_string()]).output();
             let _ = other.wait();
             if still {
                 return Err("視窗沒有焦點時送鍵 grok 也沒處理".to_string());
@@ -2889,7 +2890,7 @@ mod tests {
             Ok(())
         })();
         // 只結束自己開的那個視窗（記下的程序編號）
-        let _ = std::process::Command::new("taskkill").args(["/T", "/F", "/PID", &gui_pid.to_string()]).output();
+        let _ = std::process::Command::new("taskkill").no_window().args(["/T", "/F", "/PID", &gui_pid.to_string()]).output();
         let _ = gui.wait();
         let _ = std::fs::remove_dir_all(&tmp);
         result.expect("真機驗收失敗");
