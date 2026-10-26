@@ -77,7 +77,7 @@ test('狀態正規化：壞值用保守預設（不啟用、沒有舊的）', ()
 test('錯誤訊息：加前綴並限長', () => {
   assert.equal(piSetupError(new Error('x')), `${PI_SETUP_TEXT.failed}x`)
   assert.equal(piSetupError('boom'), `${PI_SETUP_TEXT.failed}boom`)
-  assert.ok(piSetupError(new Error('a'.repeat(500))).length <= PI_SETUP_TEXT.failed.length + 200)
+  assert.ok(piSetupError(new Error('a'.repeat(500))).length <= PI_SETUP_TEXT.failed.length + 500)
 })
 
 test('文案：對使用者不說「收發室」（小良哥 #38），每一句都有講清楚', () => {

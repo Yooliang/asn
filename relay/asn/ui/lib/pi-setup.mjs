@@ -65,4 +65,4 @@ export function piSetupView(raw, ui = {}) {
 }
 
 /** 後端錯誤 → 給人看的一句話 */
-export const piSetupError = e => `${PI_SETUP_TEXT.failed}${String(e?.message ?? e ?? '').slice(0, 200)}`
+export const piSetupError = e => `${PI_SETUP_TEXT.failed}${String(e?.message ?? e ?? '').slice(0, 500)}`
