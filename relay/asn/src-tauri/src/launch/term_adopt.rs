@@ -297,6 +297,18 @@ pub fn foreground_still_known(title: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// 真機核對過的寫法：WezTerm 20240203 在 Windows 回報 `file:///C:/Users/…/資料夾/`（主機名稱是空的、結尾有斜線）
+    #[test]
+    fn 工作資料夾_真機寫法轉成本機路徑_且和授權清單用同一個正規化() {
+        let d = tempfile::tempdir().unwrap();
+        let canon = canonical_launch_cwd(&d.path().to_string_lossy()).unwrap();
+        let plain = canon.to_string_lossy().trim_start_matches(r"\\?\").replace('\\', "/");
+        let url = if plain.starts_with('/') { format!("file://{plain}/") } else { format!("file:///{plain}/") };
+        let got = pane_cwd_to_local(&url).unwrap();
+        assert_eq!(got, canon, "{url}");
+        assert!(cwd_in_allow(&got, &[canon]));
+    }
+
     #[test]
     fn 只認識已知_cli() {
         assert_eq!(known_profile_from_pane_title("grok.exe"), Some("grok"));

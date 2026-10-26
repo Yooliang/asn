@@ -2624,7 +2624,9 @@ mod tests {
     }
 
     fn wezterm_file_url(canon: &Path) -> String {
-        let p = canon.to_string_lossy().replace('\\', "/");
+        // Windows 的 canonicalize 會帶 \\?\ 前綴；WezTerm 實際回報的是 file:///C:/…/（真機核對過），所以先拿掉
+        let s = canon.to_string_lossy();
+        let p = s.trim_start_matches(r"\\?\").replace('\\', "/");
         if p.starts_with('/') {
             format!("file://{p}")
         } else {
@@ -2801,5 +2803,95 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&tmp);
         result.expect("實測失敗");
+    }
+
+    /// 真機驗收（#313）：隔離 WezTerm ＋ 真的 grok 當「使用者自己開的窗格」。不呼叫模型、不登入。
+    /// ASN_WEZTERM_DIR=<WezTerm 資料夾> ASN_LIVE_GROK=<grok.exe> cargo test --lib launch::term::tests::live_adopt -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_adopt_existing_window() {
+        let grok = std::env::var("ASN_LIVE_GROK").expect("請設定 ASN_LIVE_GROK");
+        let dir = wezterm::locate(&wezterm::RealFs).expect("請設定 ASN_WEZTERM_DIR");
+        let tmp = std::env::temp_dir().join(format!("asn-adopt-live-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let canon = canonical_launch_cwd(&tmp.to_string_lossy()).unwrap();
+        let cfg_file = tmp.join("w.lua");
+        std::fs::write(&cfg_file, "return {}").unwrap();
+        let home = crate::identity::home_dir();
+        // 1) 用 WezTerm 自己的命令列開一個「使用者自己開的」視窗（不經過 ASN 的啟動流程）
+        let mut gui = std::process::Command::new(&dir.gui)
+            .args(["--config-file", &cfg_file.to_string_lossy(), "start", "--always-new-process", "--cwd", &tmp.to_string_lossy(), "--", &grok])
+            .spawn()
+            .expect("開使用者視窗");
+        let gui_pid = gui.id();
+        std::thread::sleep(Duration::from_millis(4000));
+        let mut profiles = HashMap::new();
+        profiles.insert("grok".to_string(), profile(&grok, vec!["agent".into(), "stdio".into()]));
+        let config = LaunchConfig { profiles, cwd_allow: vec![canon.clone()], max_per_hour: 6 };
+        let svc = TermService::fixed(dir.clone(), cfg_file.clone(), tmp.join("wezterm-terms.json"), home.clone(), wezterm::RealRunner, wezterm::RealFs);
+        *svc.test_launch_config.lock().unwrap() = Some(config.clone());   // 寫入前核驗讀的是服務自己的啟動設定，測試要把允許清單塞進去
+        let result = (|| -> Result<(), String> {
+            let cands = svc.adopt_candidates(&config)?;
+            println!("候選：{cands:#?}");
+            let c = cands.iter().find(|c| c.pid == gui_pid).ok_or("清單裡沒有我開的那個視窗")?.clone();
+            assert_eq!(c.profile, "grok");
+            assert!(c.cwd_authorized, "資料夾在授權清單內應為 true：{}", c.cwd_raw);
+            assert!(c.version_verified, "隨安裝檔的 20240203 應判為已驗證：{}", c.version_note);
+            assert!(!cands.iter().any(|x| x.profile == "cmd"), "一般命令列不列出");
+            // 2) 接手：只存記憶體
+            let id = svc.adopt(c.pid, c.pane_id, c.started_ms, &config)?;
+            assert!(svc.list().iter().any(|t| t.id == id && t.adopted));
+            assert!(!tmp.join("wezterm-terms.json").exists(), "接手不寫對照表檔");
+            // 3) 唯讀：能讀、能看狀態；不解鎖就不能代答／代送
+            let st = svc.status(&id)?;
+            println!("狀態：{} {} prompt={:?}", st.state, st.reason, st.prompt);
+            assert_eq!(st.state, "waiting_user", "新資料夾第一次開 grok 應是信任提問");
+            let screen = svc.read(&id, 30)?;
+            assert!(screen.contains("Do you trust"), "能讀到畫面");
+            assert!(svc.answer(&id, "trust_dialog", 1).is_err(), "沒解鎖不能代答");
+            assert!(svc.confirm_send(&id, "x", false).is_err(), "沒解鎖不能代送");
+            // 4) 本機解鎖代答；但這個窗格現在是作用中窗格（使用者正在用它）→ 必須被擋
+            svc.unlock_adopted(&id, true, false)?;
+            let e = svc.answer(&id, "trust_dialog", 1).unwrap_err();
+            println!("作用中被擋：{e}");
+            assert_eq!(svc.read(&id, 30)?, screen, "被擋時畫面完全沒變");
+            // 5) 探針：另開第二個 WezTerm 視窗搶走焦點（使用者去用別的視窗），再「不經過 ASN 的核驗」直接往 grok 那格送 y，看 grok 處理不處理
+            let mut other = std::process::Command::new(&dir.gui)
+                .args(["--config-file", &cfg_file.to_string_lossy(), "start", "--always-new-process", "--cwd", &tmp.to_string_lossy(), "--", "cmd.exe"])
+                .spawn()
+                .map_err(|e| e.to_string())?;
+            let other_pid = other.id();
+            std::thread::sleep(Duration::from_millis(3500));
+            let sock = wezterm::sock_path(&home, gui_pid);
+            let wz = wezterm::WezTerm::with_default_home(dir.clone(), cfg_file.clone(), &wezterm::RealRunner, &wezterm::RealFs);
+            let panes = wz.list(&sock)?;
+            println!("探針：grok 那格 is_active={}（它所在的視窗現在沒有焦點）", panes.iter().find(|p| p.pane_id == c.pane_id).map(|p| p.is_active).unwrap_or(false));
+            for (name, s) in [("第一個視窗", sock.clone()), ("第二個視窗", wezterm::sock_path(&home, other_pid))] {
+                let o = std::process::Command::new(&dir.cli).env("WEZTERM_UNIX_SOCKET", &s).args(["--config-file", &cfg_file.to_string_lossy(), "cli", "list-clients", "--format", "json"]).output().map_err(|e| e.to_string())?;
+                println!("探針：{name} list-clients：{}", String::from_utf8_lossy(&o.stdout).split_whitespace().collect::<Vec<_>>().join(" "));
+            }
+            wz.send_bytes(&sock, c.pane_id, "y")?;
+            std::thread::sleep(Duration::from_millis(3000));
+            let still = svc.read(&id, 30)?.contains("Do you trust the contents");
+            println!("探針：視窗沒有焦點時送 y 之後，提問還在嗎＝{still}");
+            let _ = std::process::Command::new("taskkill").args(["/T", "/F", "/PID", &other_pid.to_string()]).output();
+            let _ = other.wait();
+            if still {
+                return Err("視窗沒有焦點時送鍵 grok 也沒處理".to_string());
+            }
+            // 6) 結束＝解除接手：視窗與程序都還活著
+            svc.stop(&id)?;
+            assert!(svc.list().iter().all(|t| t.id != id), "已解除接手");
+            assert!(gui.try_wait().map_err(|e| e.to_string())?.is_none(), "解除接手不能關掉使用者的視窗");
+            // 7) 重啟（新服務）：接手清空
+            let svc2 = TermService::fixed(dir.clone(), cfg_file.clone(), tmp.join("wezterm-terms.json"), home.clone(), wezterm::RealRunner, wezterm::RealFs);
+            assert!(svc2.list().is_empty(), "重啟後不認回接手");
+            Ok(())
+        })();
+        // 只結束自己開的那個視窗（記下的程序編號）
+        let _ = std::process::Command::new("taskkill").args(["/T", "/F", "/PID", &gui_pid.to_string()]).output();
+        let _ = gui.wait();
+        let _ = std::fs::remove_dir_all(&tmp);
+        result.expect("真機驗收失敗");
     }
 }
