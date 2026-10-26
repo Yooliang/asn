@@ -16,6 +16,8 @@ pub(crate) mod wt_launch;
 #[allow(dead_code)]
 pub(crate) mod wezterm;
 #[cfg(desktop)]
+mod term_adopt;
+#[cfg(desktop)]
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub(crate) mod term;
 

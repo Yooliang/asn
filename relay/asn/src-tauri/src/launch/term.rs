@@ -24,6 +24,8 @@
 #![cfg(desktop)]
 
 use super::config::{canonical_launch_cwd, LaunchConfig};
+pub use super::term_adopt::TermAdoptCandidate;
+use super::term_adopt::{self, AdoptedSession, AdoptedSnap};
 use super::wezterm::{self, Fs, Runner, WezTerm, WezTermDir, Window};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -67,6 +69,9 @@ pub struct TermListed {
     pub started_ms: Option<u64>,
     /// 開啟時已通過授權的工作資料夾。記下來的那次，不是事後重查。
     pub cwd: String,
+    /// 使用者自己開的窗格、由 ASN 接手（只存記憶體）。
+    #[serde(default)]
+    pub adopted: bool,
 }
 
 /// `term_status` 的結果。state 只會是 busy、idle、unknown、waiting_user。判斷不了就是 unknown，不會猜。
@@ -123,11 +128,13 @@ struct SessionSnap {
     pane_id: u64,
     cwd: String,
     send_granted: bool,
+    adopted: Option<AdoptedSnap>,
 }
 
 struct Inner {
     next: u64,
     sessions: Vec<Session>,
+    adopted: Vec<AdoptedSession>,
     /// 建立時間曾相符、但這次通訊檔不在（或 list 失敗），留在檔案裡下次再試。不放進可操作的對照表，也不對它們下 cli。
     parked: Vec<StoreTerm>,
 }
@@ -186,6 +193,9 @@ pub struct TermService<R, F> {
     fs: F,
     status_gap: Duration,
     inner: Mutex<Inner>,
+    /// 單元測試注入啟動設定，避免依賴本機 launcher.json。
+    #[cfg(test)]
+    test_launch_config: Mutex<Option<LaunchConfig>>,
 }
 
 impl<R: Runner, F: Fs> TermService<R, F> {
@@ -201,8 +211,11 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             inner: Mutex::new(Inner {
                 next: 0,
                 sessions: Vec::new(),
+                adopted: Vec::new(),
                 parked: Vec::new(),
             }),
+            #[cfg(test)]
+            test_launch_config: Mutex::new(None),
         }
     }
 
@@ -218,8 +231,11 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             inner: Mutex::new(Inner {
                 next: 0,
                 sessions: Vec::new(),
+                adopted: Vec::new(),
                 parked: Vec::new(),
             }),
+            #[cfg(test)]
+            test_launch_config: Mutex::new(None),
         }
     }
 
@@ -236,9 +252,20 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             inner: Mutex::new(Inner {
                 next: 0,
                 sessions: Vec::new(),
+                adopted: Vec::new(),
                 parked: Vec::new(),
             }),
+            #[cfg(test)]
+            test_launch_config: Mutex::new(None),
         }
+    }
+
+    fn launch_config_for_adopt(&self) -> Result<LaunchConfig, String> {
+        #[cfg(test)]
+        if let Some(c) = self.test_launch_config.lock().unwrap().clone() {
+            return Ok(c);
+        }
+        super::config::load_launch_config()
     }
 
     /// 測試注入兩次取樣的間隔。正式路徑用 STATUS_GAP，不呼叫這個。
@@ -324,11 +351,24 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// 這個方法證明不了使用者有按確認。UI 的確認必須是唯一入口；後端其他路徑不得呼叫。
     pub fn confirm_send(&self, id: &str, text: &str, enter: bool) -> Result<(), String> {
         let snap = self.snapshot(id)?;
-        if !snap.send_granted || snap.cwd.trim().is_empty() {
-            return Err("這個工作資料夾還沒有使用者的授權，不能代送".into());
-        }
         let dir = self.dir()?;
         let w = self.wez(&dir);
+        if let Some(ad) = &snap.adopted {
+            let config = self.launch_config_for_adopt()?;
+            let live = term_adopt::fetch_live_pane(&w, &snap.window, snap.pane_id, &self.runner)?;
+            if live.pane.is_active {
+                return Err("你正在操作這個窗格，ASN 不會代送（請先切到別處再試）".into());
+            }
+            if !ad.version_verified {
+                return Err("WezTerm 版本未驗證，不能代送".into());
+            }
+            if !ad.send_unlocked {
+                return Err("這個接手窗格還沒在本機開啟「允許代送文字」".into());
+            }
+            term_adopt::verify_adopted_for_write(&live, ad, &config)?;
+        } else if !snap.send_granted || snap.cwd.trim().is_empty() {
+            return Err("這個工作資料夾還沒有使用者的授權，不能代送".into());
+        }
         if enter {
             w.send_line_and_enter(&snap.window.sock, snap.pane_id, text)
         } else {
@@ -344,13 +384,17 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         }
         let dir = self.dir()?;
         let w = self.wez(&dir);
+        if snap.adopted.is_some() {
+            let _ = term_adopt::fetch_live_pane(&w, &snap.window, snap.pane_id, &self.runner)?;
+        }
         let text = w.get_text(&snap.window.sock, snap.pane_id, Some(-lines))?;
         Ok(cap_output(&text))
     }
 
     pub fn list(&self) -> Vec<TermListed> {
         let g = self.inner.lock().unwrap();
-        g.sessions
+        let mut out: Vec<TermListed> = g
+            .sessions
             .iter()
             .map(|s| TermListed {
                 id: s.id.clone(),
@@ -358,14 +402,29 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 pid: s.window.gui_pid,
                 started_ms: s.window.started_ms,
                 cwd: s.cwd.clone(),
+                adopted: false,
             })
-            .collect()
+            .collect();
+        out.extend(g.adopted.iter().map(|s| TermListed {
+            id: s.id.clone(),
+            profile: s.profile.clone(),
+            pid: s.window.gui_pid,
+            started_ms: s.window.started_ms,
+            cwd: s.cwd.clone(),
+            adopted: true,
+        }));
+        out
     }
 
     /// 結束自己開的視窗。只拿對照表裡的 Window 交給 wezterm::stop（裡面核對 started_ms），不接受呼叫端傳入的程序編號。
     /// 成功（含視窗早已不在）才從表上移除；建立時間對不上就保留編號，方便呼叫端知道沒關掉。
     pub fn stop(&self, id: &str) -> Result<(), String> {
-        let snap = self.snapshot(id)?;
+        if self.is_adopted_id(id)? {
+            let mut g = self.inner.lock().unwrap();
+            g.adopted.retain(|s| s.id != id);
+            return Ok(());
+        }
+        let snap = self.snapshot_owned(id)?;
         let dir = self.dir()?;
         let w = self.wez(&dir);
         w.stop(&snap.window)?;
@@ -383,18 +442,30 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// 第一次畫面含「[stop]」或「Ctrl+c:cancel」就是處理中，直接 busy，不等第二次。
     pub fn status(&self, id: &str) -> Result<TermStatus, String> {
         let snap = self.snapshot(id)?;
+        let dir = self.dir()?;
+        let w = self.wez(&dir);
+        if snap.adopted.is_some() {
+            let live = term_adopt::fetch_live_pane(&w, &snap.window, snap.pane_id, &self.runner);
+            if let Ok(l) = &live {
+                if !term_adopt::foreground_still_known(&l.pane.title) {
+                    return Ok(unknown_status(&snap.profile, "前景不是已知的 CLI"));
+                }
+            }
+        }
         if snap.profile != "grok" {
             return Ok(TermStatus {
                 state: "unknown".into(),
                 profile: snap.profile,
                 cursor_x: None,
                 cursor_y: None,
-                reason: "只有 grok 有閒置規則".into(),
+                reason: if snap.adopted.is_some() {
+                    "這個 CLI 還沒有閒置規則".into()
+                } else {
+                    "只有 grok 有閒置規則".into()
+                },
                 prompt: None,
             });
         }
-        let dir = self.dir()?;
-        let w = self.wez(&dir);
         let first = match self.sample(&w, &snap) {
             Ok(s) => s,
             Err(e) => return Ok(unknown_status(&snap.profile, &format!("讀不到畫面或游標，無法判斷：{e}"))),
@@ -458,6 +529,23 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         }
         let dir = self.dir()?;
         let w = self.wez(&dir);
+        if let Some(ad) = &snap.adopted {
+            let config = self.launch_config_for_adopt()?;
+            let live = term_adopt::fetch_live_pane(&w, &snap.window, snap.pane_id, &self.runner)?;
+            if live.pane.is_active {
+                return Err("你正在操作這個窗格，ASN 不會代送（請先切到別處再試）".into());
+            }
+            if !term_adopt::foreground_still_known(&live.pane.title) {
+                return Err("前景不是已知的 CLI，不能代答".into());
+            }
+            if !ad.version_verified {
+                return Err("WezTerm 版本未驗證，不能代答".into());
+            }
+            if !ad.answer_unlocked {
+                return Err("這個接手窗格還沒在本機開啟「允許代答提問」".into());
+            }
+            term_adopt::verify_adopted_for_write(&live, ad, &config)?;
+        }
         let text = w.get_text(&snap.window.sock, snap.pane_id, Some(-STATUS_LINES))?;
         let Some(seen) = classify_prompt(&text) else {
             return Err("這個提示已經不在畫面上，沒有送出".into());
@@ -475,7 +563,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         };
         let bytes = encode_keys(&keys)?;
         w.send_bytes(&snap.window.sock, snap.pane_id, &bytes)?;
-        if prompt_kind == "trust_dialog" && n == 1 {
+        if snap.adopted.is_none() && prompt_kind == "trust_dialog" && n == 1 {
             self.note_send_grant(&snap.id)?;
         }
         Ok(TermAnswered { keys: describe_keys(&keys) })
@@ -504,7 +592,10 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// 改自己這個終端的分頁標題。使用者給的字會接在 `ASN:{編號} ` 後面，前綴不拿掉（認領靠它）。
     /// 長度與字元先檢查，不合法就不呼叫 cli。
     pub fn rename(&self, id: &str, title: &str) -> Result<(), String> {
-        let snap = self.snapshot(id)?;
+        if self.is_adopted_id(id)? {
+            return Err("接手的窗格不能改名".into());
+        }
+        let snap = self.snapshot_owned(id)?;
         let user = normalize_title(title)?;
         let full = format!("ASN:{} {}", snap.id, user);
         let dir = self.dir()?;
@@ -597,20 +688,98 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         Ok(())
     }
 
+    fn is_adopted_id(&self, id: &str) -> Result<bool, String> {
+        let g = self.inner.lock().unwrap();
+        if g.sessions.iter().any(|s| s.id == id) {
+            return Ok(false);
+        }
+        if g.adopted.iter().any(|s| s.id == id) {
+            return Ok(true);
+        }
+        Err("沒有這個終端".into())
+    }
+
     fn snapshot(&self, id: &str) -> Result<SessionSnap, String> {
         let g = self.inner.lock().unwrap();
-        g.sessions
-            .iter()
-            .find(|s| s.id == id)
-            .map(|s| SessionSnap {
+        if let Some(s) = g.sessions.iter().find(|s| s.id == id) {
+            return Ok(SessionSnap {
                 id: s.id.clone(),
                 profile: s.profile.clone(),
                 window: s.window.clone(),
                 pane_id: s.pane_id,
                 cwd: s.cwd.clone(),
                 send_granted: s.send_granted,
-            })
-            .ok_or_else(|| "沒有這個終端（只能操作這次由 ASN 開啟的）".to_string())
+                adopted: None,
+            });
+        }
+        if let Some(s) = g.adopted.iter().find(|s| s.id == id) {
+            return Ok(SessionSnap {
+                id: s.id.clone(),
+                profile: s.profile.clone(),
+                window: s.window.clone(),
+                pane_id: s.pane_id,
+                cwd: s.cwd.clone(),
+                send_granted: false,
+                adopted: Some(AdoptedSnap {
+                    foreground: s.foreground.clone(),
+                    answer_unlocked: s.answer_unlocked,
+                    send_unlocked: s.send_unlocked,
+                    version_verified: s.version_verified,
+                }),
+            });
+        }
+        Err("沒有這個終端".into())
+    }
+
+    fn snapshot_owned(&self, id: &str) -> Result<SessionSnap, String> {
+        let snap = self.snapshot(id)?;
+        if snap.adopted.is_some() {
+            return Err("沒有這個終端（只能操作這次由 ASN 開啟的）".into());
+        }
+        Ok(snap)
+    }
+
+    /// 列出可接手的 WezTerm 窗格（只列已知 CLI；ASN 絕不自動接手）。
+    pub fn adopt_candidates(&self, config: &LaunchConfig) -> Result<Vec<TermAdoptCandidate>, String> {
+        let dir = self.dir()?;
+        let w = self.wez(&dir);
+        let keys = {
+            let g = self.inner.lock().unwrap();
+            g.adopted.iter().map(|s| (s.window.gui_pid, s.pane_id)).collect::<Vec<_>>()
+        };
+        Ok(term_adopt::scan_candidates(&self.home, &w, &self.fs, &self.runner, config, &keys))
+    }
+
+    /// 使用者在桌面清單按「接手」後呼叫。只存記憶體，不寫對照表檔。
+    pub fn adopt(&self, pid: u32, pane_id: u64, started_ms: u64, config: &LaunchConfig) -> Result<String, String> {
+        let dir = self.dir()?;
+        let w = self.wez(&dir);
+        let mut row = term_adopt::adopt_pane(pid, pane_id, started_ms, &w, &self.home, &self.fs, &self.runner, config)?;
+        let id = self.alloc_adopt_id();
+        row.id = id.clone();
+        {
+            let mut g = self.inner.lock().unwrap();
+            if g.adopted.iter().any(|s| s.window.gui_pid == pid && s.pane_id == pane_id) {
+                return Err("這個窗格已經接手過了".into());
+            }
+            g.adopted.push(row);
+        }
+        Ok(id)
+    }
+
+    /// 解鎖接手窗格的寫入能力。只能由本機桌面命令呼叫，遠端與收信不得觸及。
+    pub fn unlock_adopted(&self, id: &str, allow_answer: bool, allow_send: bool) -> Result<(), String> {
+        let mut g = self.inner.lock().unwrap();
+        let Some(s) = g.adopted.iter_mut().find(|s| s.id == id) else {
+            return Err("沒有這個接手終端".into());
+        };
+        if allow_answer {
+            s.answer_unlocked = true;
+        }
+        if allow_send {
+            s.send_unlocked = true;
+        }
+        Ok(())
     }
 
     fn sample(&self, w: &WezTerm<'_>, snap: &SessionSnap) -> Result<Sample, String> {
@@ -636,6 +805,13 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             return Err(e);
         }
         Ok(id)
+    }
+
+    /// 接手編號只存記憶體，不寫對照表檔。
+    fn alloc_adopt_id(&self) -> String {
+        let mut g = self.inner.lock().unwrap();
+        g.next += 1;
+        g.next.to_string()
     }
 
     fn load_store(&self) -> Result<Loaded, String> {
@@ -1235,6 +1411,37 @@ pub struct TermAnswerReq {
     pub n: u32,
 }
 
+#[cfg(feature = "gui")]
+#[derive(Debug, serde::Deserialize)]
+pub struct TermAdoptReq {
+    pub pid: u32,
+    pub pane_id: u64,
+    pub started_ms: u64,
+}
+
+#[cfg(feature = "gui")]
+#[derive(Debug, serde::Deserialize)]
+pub struct TermAdoptUnlockReq {
+    pub id: String,
+    #[serde(default)]
+    pub allow_answer: bool,
+    #[serde(default)]
+    pub allow_send: bool,
+}
+
+#[cfg(feature = "gui")]
+pub fn adopt_candidates_live(terms: &LiveTerms, _data_dir: &Path) -> Result<Vec<TermAdoptCandidate>, String> {
+    let config = super::config::load_launch_config()?;
+    terms.adopt_candidates(&config)
+}
+
+#[cfg(feature = "gui")]
+pub fn adopt_live(terms: &LiveTerms, req: TermAdoptReq, _data_dir: &Path) -> Result<TermStarted, String> {
+    let config = super::config::load_launch_config()?;
+    let id = terms.adopt(req.pid, req.pane_id, req.started_ms, &config)?;
+    Ok(TermStarted { id })
+}
+
 /// 正式路徑：讀啟動設定、沿用本機資料夾授權，再交給 TermService。
 #[cfg(feature = "gui")]
 pub fn start_live(terms: &LiveTerms, profile: &str, cwd: &str, data_dir: &Path) -> Result<TermStarted, String> {
@@ -1276,6 +1483,8 @@ mod tests {
         list_jsons: RefCell<Vec<String>>,
         /// 參數裡出現這個子字串時，cli 回失敗。
         fail_substr: RefCell<Option<String>>,
+        /// `wezterm.exe --version` 的假輸出。
+        version_out: RefCell<String>,
         trace: RefCell<Vec<String>>,
     }
 
@@ -1290,6 +1499,7 @@ mod tests {
             screens: RefCell::new(Vec::new()),
             list_jsons: RefCell::new(Vec::new()),
             fail_substr: RefCell::new(None),
+            version_out: RefCell::new("wezterm 20240203-110809-5046fc22".into()),
             trace: RefCell::new(Vec::new()),
         }
     }
@@ -1316,7 +1526,9 @@ mod tests {
                     return Err(format!("WezTerm cli 失敗：假的失敗 {sub}"));
                 }
             }
-            let stdout = if args.iter().any(|a| a == "list") {
+            let stdout = if args.first().map(|a| a.as_str()) == Some("--version") {
+                self.inner.version_out.borrow().clone()
+            } else if args.iter().any(|a| a == "list") {
                 let mut q = self.inner.list_jsons.borrow_mut();
                 if q.is_empty() {
                     self.inner.list_json.borrow().clone()
@@ -1384,6 +1596,7 @@ mod tests {
 
     struct Rig {
         _dir: tempfile::TempDir,
+        home: PathBuf,
         cwd: String,
         config: LaunchConfig,
         svc: TermService<FakeRunner, FakeFs>,
@@ -1412,6 +1625,7 @@ mod tests {
             inner: Rc::new(fake_inner(started, r#"[{"pane_id":7,"tab_id":1,"is_active":true,"cursor_x":1,"cursor_y":2}]"#.into(), "畫面一行".into())),
         };
         let view = runner.clone();
+        let home = PathBuf::from("H");
         let svc = TermService::fixed(
             WezTermDir {
                 gui: "W/wezterm-gui.exe".into(),
@@ -1419,12 +1633,13 @@ mod tests {
             },
             "cfg.lua".into(),
             store.clone(),
-            "H".into(),
+            home.clone(),
             runner,
             fs,
         );
         Rig {
             _dir: dir,
+            home,
             cwd,
             config,
             svc,
@@ -1532,6 +1747,7 @@ mod tests {
                     pid: 42,
                     started_ms: Some(1_000),
                     cwd: rig.cwd.clone(),
+                    adopted: false,
                 },
                 TermListed {
                     id: id2,
@@ -1539,6 +1755,7 @@ mod tests {
                     pid: 42,
                     started_ms: Some(1_000),
                     cwd: rig.cwd.clone(),
+                    adopted: false,
                 },
             ]
         );
@@ -2404,6 +2621,124 @@ mod tests {
         assert!(view.killed().is_empty());
         assert!(view.args().is_empty(), "找不到 WezTerm 不可執行 cli");
         assert_eq!(std::fs::read_to_string(&store).unwrap(), body);
+    }
+
+    fn wezterm_file_url(canon: &Path) -> String {
+        let p = canon.to_string_lossy().replace('\\', "/");
+        if p.starts_with('/') {
+            format!("file://{p}")
+        } else {
+            format!("file:///{p}")
+        }
+    }
+
+    fn adopt_pane_json(pane_id: u64, title: &str, cwd: &str, active: bool) -> String {
+        format!(
+            r#"[{{"pane_id":{pane_id},"tab_id":1,"is_active":{active},"title":"{title}","cwd":"{cwd}","cursor_x":1,"cursor_y":2}}]"#,
+            active = if active { "true" } else { "false" }
+        )
+    }
+
+    fn install_gui_sock(home: &Path, pid: u32, files: &Rc<RefCell<HashSet<PathBuf>>>) {
+        let guidir = home.join(".local").join("share").join("wezterm");
+        std::fs::create_dir_all(&guidir).unwrap();
+        std::fs::write(guidir.join(format!("gui-sock-{pid}")), b"").unwrap();
+        files.borrow_mut().insert(wezterm::sock_path(home, pid));
+    }
+
+    fn make_adopt(pid: u32, pane_id: u64, title: &str, active: bool) -> Rig {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let store = dir.path().join("wezterm-terms.json");
+        let canon = canonical_launch_cwd(&dir.path().to_string_lossy()).unwrap();
+        let cwd = canon.to_string_lossy().into_owned();
+        let cwd_url = wezterm_file_url(&canon);
+        let list_json = adopt_pane_json(pane_id, title, &cwd_url, active);
+        let config = LaunchConfig {
+            profiles: default_profiles(),
+            cwd_allow: vec![canon],
+            max_per_hour: 6,
+        };
+        let files = Rc::new(RefCell::new(HashSet::new()));
+        install_gui_sock(&home, pid, &files);
+        let fs = FakeFs { files: files.clone() };
+        let runner = FakeRunner {
+            inner: Rc::new(fake_inner(vec![Some(1_000)], list_json, String::new())),
+        };
+        let wdir = WezTermDir {
+            gui: PathBuf::from("W/wezterm-gui.exe"),
+            cli: PathBuf::from("W/wezterm.exe"),
+        };
+        files.borrow_mut().insert(wdir.gui.clone());
+        files.borrow_mut().insert(wdir.cli.clone());
+        let svc = TermService::fixed(wdir, dir.path().join("wezterm-term.lua"), store.clone(), home.clone(), runner.clone(), fs);
+        *svc.test_launch_config.lock().unwrap() = Some(config.clone());
+        Rig {
+            _dir: dir,
+            home,
+            cwd,
+            config,
+            svc,
+            runner,
+            files,
+            store,
+        }
+    }
+
+    #[test]
+    fn 接手_只列已知_cli_建立時間不符_窗格重用_is_active_拒絕() {
+        let rig = make_adopt(100, 9, "grok.exe", false);
+        let cwd_url = wezterm_file_url(Path::new(&rig.cwd));
+        assert!(rig.svc.adopt(100, 9, 2_000, &rig.config).unwrap_err().contains("建立時間"));
+        let cands = rig.svc.adopt_candidates(&rig.config).unwrap();
+        assert!(cands.iter().any(|c| c.profile == "grok" && c.cwd_authorized));
+        assert!(!cands.iter().any(|c| c.profile == "cmd"));
+        let id = rig.svc.adopt(100, 9, 1_000, &rig.config).unwrap();
+        assert!(rig.svc.list()[0].adopted);
+        *rig.runner.inner.list_json.borrow_mut() = adopt_pane_json(9, "grok.exe", &cwd_url, true);
+        let busy = rig.svc.confirm_send(&id, "x", false).unwrap_err();
+        assert!(busy.contains("正在操作"), "{busy}");
+        *rig.runner.inner.list_json.borrow_mut() = adopt_pane_json(99, "grok.exe", &cwd_url, false);
+        assert!(rig.svc.read(&id, 5).unwrap_err().contains("窗格"));
+    }
+
+    #[test]
+    fn 接手_解除不殺程序_改名拒絕_重啟清空_解鎖只有本機入口() {
+        let rig = make_adopt(100, 9, "grok.exe", false);
+        let id = rig.svc.adopt(100, 9, 1_000, &rig.config).unwrap();
+        assert!(rig.svc.rename(&id, "x").unwrap_err().contains("改名"));
+        rig.svc.stop(&id).unwrap();
+        assert!(rig.svc.list().is_empty());
+        assert!(rig.runner.killed().is_empty(), "解除接手不得 kill");
+        let src = include_str!("term.rs");
+        let lib = include_str!("../lib.rs");
+        assert!(lib.contains("term_adopt_unlock"));
+        assert!(!src.split("mod tests").next().unwrap().contains(".unlock_adopted("));
+        assert!(!rig.store.exists(), "接手前不應有對照表檔");
+        let id2 = rig.svc.adopt(100, 9, 1_000, &rig.config).unwrap();
+        assert!(!rig.store.exists(), "接手不得寫對照表檔");
+        rig.svc.unlock_adopted(&id2, true, false).unwrap();
+        assert!(rig.svc.confirm_send(&id2, "hi", false).unwrap_err().contains("代送"));
+        let svc2 = TermService::without_wezterm(rig.store.clone(), rig.home.clone(), rig.runner.clone(), FakeFs { files: rig.files.clone() });
+        assert!(svc2.list().is_empty(), "新服務記憶體清空");
+    }
+
+    #[test]
+    fn 接手_版本不同與_unknown_行程() {
+        let rig = make_adopt(100, 9, "grok.exe", false);
+        let cwd_url = wezterm_file_url(Path::new(&rig.cwd));
+        *rig.runner.inner.version_out.borrow_mut() = "wezterm 20990101-xxxx".into();
+        let c = rig.svc.adopt_candidates(&rig.config).unwrap();
+        assert!(!c.is_empty());
+        assert!(!c[0].version_verified);
+        assert!(!c[0].version_note.is_empty());
+        let id = rig.svc.adopt(100, 9, 1_000, &rig.config).unwrap();
+        rig.svc.unlock_adopted(&id, true, true).unwrap();
+        assert!(rig.svc.answer(&id, "trust_dialog", 1).unwrap_err().contains("版本"));
+        *rig.runner.inner.list_json.borrow_mut() = adopt_pane_json(9, "vim.exe", &cwd_url, false);
+        assert_eq!(rig.svc.status(&id).unwrap().state, "unknown");
+        assert!(rig.svc.answer(&id, "menu", 1).unwrap_err().contains("CLI"));
     }
 
     /// 真機實測（預設不跑，會在桌面開一個 grok 視窗；不登入、不送字、不呼叫模型）：

@@ -568,6 +568,35 @@ async fn term_answer(terms: State<'_, Arc<launch::term::LiveTerms>>, req: launch
     launch::blocking_timeout(move || terms.answer(&req.id, &req.prompt_kind, req.n)).await
 }
 
+/// 可接手的 WezTerm 窗格（只列前景為已知 CLI 者；不在白名單的標示為未授權）。
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+async fn term_adopt_candidates(app: State<'_, App>, terms: State<'_, Arc<launch::term::LiveTerms>>) -> Result<Vec<launch::term::TermAdoptCandidate>, String> {
+    let terms = terms.inner().clone();
+    let data_dir = app.data_dir.clone();
+    launch::blocking_timeout(move || launch::term::adopt_candidates_live(&terms, &data_dir)).await
+}
+
+/// 使用者在桌面按「接手」後呼叫。接手紀錄只存記憶體，ASN 重啟後清空。
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+async fn term_adopt(app: State<'_, App>, terms: State<'_, Arc<launch::term::LiveTerms>>, req: launch::term::TermAdoptReq) -> Result<launch::term::TermStarted, String> {
+    let terms = terms.inner().clone();
+    let data_dir = app.data_dir.clone();
+    launch::blocking_timeout(move || launch::term::adopt_live(&terms, req, &data_dir)).await
+}
+
+/// 在本機桌面解鎖接手窗格的代答／代送（預設關；遠端指令不能呼叫這條）。
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+async fn term_adopt_unlock(terms: State<'_, Arc<launch::term::LiveTerms>>, req: launch::term::TermAdoptUnlockReq) -> Result<(), String> {
+    let terms = terms.inner().clone();
+    launch::blocking_timeout(move || terms.unlock_adopted(&req.id, req.allow_answer, req.allow_send)).await
+}
+
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
@@ -1150,7 +1179,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, term_start, term_send, term_read, term_list, term_stop, term_status, term_rename, term_answer, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, term_start, term_send, term_read, term_list, term_stop, term_status, term_rename, term_answer, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_quota::claude_quota_all,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,

@@ -342,6 +342,15 @@ impl<'a> WezTerm<'a> {
         serde_json::from_str(&s).map_err(|e| format!("無法解析 WezTerm 清單：{e}"))
     }
 
+    /// 執行 `wezterm.exe --version`（不走 socket）。
+    pub fn version_string(&self) -> Result<String, String> {
+        let out = self.runner.run(&self.dir.cli, &["--version".to_string()], &self.config_env(), self.cli_timeout)?;
+        if !out.success {
+            return Err(format!("WezTerm 版本查詢失敗：{}", out.stderr.trim()));
+        }
+        Ok(out.stdout)
+    }
+
     /// 在視窗內開新分頁，回傳新 pane 編號
     pub fn spawn(&self, sock: &Path, cwd: &Path, command: &[String]) -> Result<u64, String> {
         let mut args: Vec<String> = vec!["spawn".into(), "--cwd".into(), cwd.to_string_lossy().into_owned()];
