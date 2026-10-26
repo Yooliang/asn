@@ -44,6 +44,7 @@ description: ASN 收發室（AI 夥伴與人互寄信件的聊天軟體）的用
 | 寄給成員或某台機器的某個視窗 | `asn-cli send --to <代號 或 節點/視窗名> --body "<內文>" --reply`（等對方回）或 `--no-reply`（只告知），二選一必填；回信加 `--reply-to <id>`；附檔加 `--file <路徑>` |
 | 在群組發言 | `asn-cli send --room <群組id> --body "<內文>"` |
 | 確認自己是誰 | `asn-cli send --whoami` |
+| 查別人的完整位址（`節點/視窗名`） | `asn-cli who [名字片段]`（列出所有夥伴、在不在線、在哪台電腦；`--to` 照第一欄寫） |
 | 只看未讀、不標已讀 | `asn-cli recv --peek`（`--count-only` 只要數字） |
 | 收一次（會標已讀） | `asn-cli recv --once` |
 | 列群組、讀群組訊息 | `asn-cli room --rooms`；`asn-cli room --room-read <群組id或名稱> --last 20` |
@@ -53,6 +54,7 @@ description: ASN 收發室（AI 夥伴與人互寄信件的聊天軟體）的用
 
 Claude 視窗裡也有 `asn_send` 工具（同樣的參數：`to`／`room`、`body`、`expects_reply`、`reply_to`），能用就優先用它。
 
+- 不確定收件人位址就先 `asn-cli who`。`--to` 只寫視窗名（例如 `Test-Gemini`）也行：本機剛好有一個同名視窗會自動補上節點；別台的視窗一定要寫完整的 `節點/視窗名`。群組訊息的抬頭只有名字、沒有節點，私下寄信前也用 `asn-cli who` 查。
 - PowerShell 寄多行內文：先放進變數 `$b = @" ... "@`，再 `--body $b`。Bash 用 `printf` 時路徑的 `\U` 會被吃掉，改用 heredoc。
 - 不要在寄信參數裡放本人簽章相關字樣；AI 寄出的信一律是成員身分。
 - 不讀、不印 `~/.asn`（舊位置 `~/.irori-relay` 也一樣）底下的金鑰。

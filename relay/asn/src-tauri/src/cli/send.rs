@@ -32,6 +32,7 @@ fn usage() -> String {
                      檢查全在本機先做，任何一個不合格或上傳失敗都不寄信。收的人用 asn attach --id <編號> 下載。
   --whoami           不寄信，印出父行程鏈、session 對照、節點判定（除錯用）
 同一台機器上的其他視窗（含 ASN）也可以寄（--to <本機節點>/<視窗名>）；不能寄給自己這個視窗。
+只寫視窗名、而它不是成員代號時：本機剛好有一個同名視窗就改寄它（stderr 說明）；否則列出各電腦的同名視窗請你寫完整位址。所有夥伴的完整位址用 asn who 查。
 內文至多 {MAX_BODY} 字。寄件人（視窗名）由本程式自動判定，不能自填；信任一律是 member。"
     )
 }
@@ -192,13 +193,19 @@ pub async fn main(argv: &[String], env: &Env, io: &mut Io<'_>) -> R<i32> {
         }
     }
     let (mut to_node, mut to_agent) = (String::new(), String::new());
+    // 只寫視窗名、又不可能是成員代號（例如含中文）：不先問後端，直接查名單找本機同名視窗（#320）
+    let mut lookup_first = false;
     if let Some(to) = &a.to {
         match to.split_once('/') {
             Some((n, w)) => (to_node, to_agent) = (n.to_string(), w.to_string()),
             None => to_node = to.clone(),
         }
         if !valid_id(&to_node) && !crate::bridge::mail::is_person_alias(&to_node) {
-            return Err(Fail::new(1, format!("--to {to} 的成員代號格式不對")));
+            let wordish = to_node.chars().all(|c| c.is_alphanumeric() || "-_ .".contains(c)); // 明顯打錯的（如 bad!id）照舊不打後端
+            if !to_agent.is_empty() || !crate::valid_window_name(&to_node) || !wordish {
+                return Err(Fail::new(1, format!("--to {to} 的成員代號格式不對")));
+            }
+            lookup_first = true;
         }
     }
     let id = identity(env, true)?;
@@ -231,15 +238,78 @@ pub async fn main(argv: &[String], env: &Env, io: &mut Io<'_>) -> R<i32> {
         if let Some(ids) = &attachment_ids {
             b["attachment_ids"] = json!(ids);
         }
-        let r = rl.api("send", Some(b)).await.map_err(backend)?;
+        let mut shown = a.to.clone().unwrap_or_default();
+        let first = if lookup_first { Err(String::new()) } else { rl.api("send", Some(b.clone())).await };
+        let r = match first {
+            Ok(r) => r,
+            // 只寫視窗名（#320）：後端只認節點，視窗名當節點會 unknown_to_node。後端不核對視窗存不存在，所以不能盲目改寄，先查名單
+            Err(e) if lookup_first || (to_agent.is_empty() && e.contains("unknown_to_node") && !crate::bridge::mail::is_person_alias(&to_node)) => {
+                let members = rl.list().await.map_err(|le| backend(if e.is_empty() { le } else { e.clone() }))?;
+                let w = window_fallback(members.get("members").unwrap_or(&Value::Null), &to_node, &id.node).map_err(|c| {
+                    if lookup_first && c.is_empty() {
+                        Fail::new(1, format!("--to {to_node} 的成員代號格式不對，這台（{}）也沒有叫這個名字的視窗", id.node))
+                    } else {
+                        Fail::new(4, window_fallback_error(&e, &to_node, &id.node, &c))
+                    }
+                })?;
+                if w == me.name {
+                    return Err(Fail::new(1, format!("收件人就是你自己（{}/{}）；不能寄給自己", id.node, me.name)));
+                }
+                (to_node, to_agent) = (id.node.clone(), w);
+                shown = format!("{to_node}/{to_agent}");
+                io.errln(&format!("「{}」不是成員代號，已改寄本機同名視窗 {shown}（下次可直接寫 {shown}）", a.to.as_deref().unwrap_or("")));
+                b["to_node"] = json!(to_node);
+                b["to_agent"] = json!(to_agent);
+                rl.api("send", Some(b)).await.map_err(backend)?
+            }
+            Err(e) => return Err(backend(e)),
+        };
         if let Some(r) = &a.reply_to {
             mark_replied(&id.work_dir, r, now);
         }
         mark_sent(&id.work_dir, &me.name, &to_node, &to_agent, now);
-        io.outln(&format!("sent id={} to={} from={}/{}", r.get("id").and_then(Value::as_str).unwrap_or("?"), a.to.as_deref().unwrap_or(""), id.node, me.name));
+        io.outln(&format!("sent id={} to={shown} from={}/{}", r.get("id").and_then(Value::as_str).unwrap_or("?"), id.node, me.name));
     }
     if !note.is_empty() {
         io.errln(&note);
     }
     Ok(0)
+}
+
+/// 名單（後端 list 的 members）裡找叫 name 的視窗（不分大小寫，含離線的）。
+/// 寄件節點上剛好一個 → Ok(名單上的寫法)；否則 Err(候選「節點/視窗名」，可能是空的)：本機有多個或只有別台有，都不替人猜。
+pub fn window_fallback(members: &Value, name: &str, my_node: &str) -> Result<String, Vec<String>> {
+    let want = name.to_lowercase();
+    let (mut mine, mut all) = (vec![], vec![]);
+    for m in members.as_array().into_iter().flatten() {
+        let Some(node) = m.get("id").and_then(Value::as_str) else { continue };
+        for key in ["agents", "offline_agents"] {
+            for ag in m.get(key).and_then(Value::as_array).into_iter().flatten() {
+                let Some(n) = ag.get("name").and_then(Value::as_str) else { continue };
+                if n.to_lowercase() != want {
+                    continue;
+                }
+                let full = format!("{node}/{n}");
+                if !all.contains(&full) {
+                    if node == my_node {
+                        mine.push(n.to_string());
+                    }
+                    all.push(full);
+                }
+            }
+        }
+    }
+    match mine.as_slice() {
+        [one] => Ok(one.clone()),
+        _ => Err(all),
+    }
+}
+
+fn window_fallback_error(e: &str, name: &str, my_node: &str, cands: &[String]) -> String {
+    let head = if e.is_empty() { String::new() } else { format!("{e}\n") };
+    if cands.is_empty() {
+        format!("{head}「{name}」不是成員代號，這台（{my_node}）也沒有叫這個名字的視窗；寄給別台的視窗請寫「節點/視窗名」（asn who 可以查）")
+    } else {
+        format!("{head}「{name}」不是成員代號；以下電腦有同名視窗，請寫完整位址：{}", cands.join("、"))
+    }
 }

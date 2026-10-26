@@ -1,6 +1,6 @@
 //! 由 send.test.mjs／send-attach.test.mjs 改寫
 use super::*;
-use crate::cli::send::{parse_args, resolve_reply_flag};
+use crate::cli::send::{parse_args, resolve_reply_flag, window_fallback};
 
 const NEED_FLAG: &str = "請說明要不要回信：等對方回就加 --reply，只是告知就加 --no-reply";
 // 與 Node 的 sentMarkName 對照（node -e 算出來的值）：橋讀的記號檔名兩邊必須一致
@@ -433,4 +433,89 @@ fn 上傳失敗或後端拒收_不寄信_錯誤是白話() {
     let (c, _, err) = go(&f4.env, &["send", "--to", "PC1", "--body", "x", "--file", &p, "--no-reply"], "");
     assert_eq!(c, 4);
     assert!(err.contains("這個 ASN 服務還不支援傳附件"), "{err}");
+}
+
+// ---- 只寫視窗名（#320）----
+fn roster() -> Value {
+    json!([
+        {"id": "T", "agents": [{"name": "Test-Gemini"}, {"name": "T-視窗甲"}], "offline_agents": [{"name": "舊視窗"}]},
+        {"id": "W", "agents": [{"name": "W-政策"}, {"name": "test-gemini"}], "offline_agents": []},
+        {"id": "X", "agents": [{"name": "W-政策"}]}
+    ])
+}
+
+#[test]
+fn 名單找視窗_本機剛好一個才改寄_其他都只列候選() {
+    assert_eq!(window_fallback(&roster(), "test-gemini", "T"), Ok("Test-Gemini".to_string()), "不分大小寫，回名單上的寫法");
+    assert_eq!(window_fallback(&roster(), "舊視窗", "T"), Ok("舊視窗".to_string()), "離線的也算");
+    assert_eq!(window_fallback(&roster(), "W-政策", "T"), Err(vec!["W/W-政策".to_string(), "X/W-政策".to_string()]), "只有別台有：不猜");
+    assert_eq!(window_fallback(&roster(), "沒有這個", "T"), Err(vec![]));
+    let two = json!([{"id": "T", "agents": [{"name": "Dup"}, {"name": "dup"}]}]);
+    assert_eq!(window_fallback(&two, "DUP", "T"), Err(vec!["T/Dup".to_string(), "T/dup".to_string()]), "本機兩個大小寫不同：不猜");
+    assert_eq!(window_fallback(&json!(null), "x", "T"), Err(vec![]), "壞資料不丟錯");
+}
+
+/// 假後端：只寫節點的 send，節點不是 T／W 就回 unknown_to_node；list 回 roster()
+fn roster_backend() -> Fake {
+    Fake::start(|req: &Req, _| match req.action().as_str() {
+        "list" => Resp::ok(json!({"members": roster()})),
+        "send" => {
+            let j = req.json();
+            let node = j["to_node"].as_str().unwrap_or("");
+            if node == "T" || node == "W" { Resp::ok(json!({"id": NEW_ID})) } else { Resp::json(400, json!({"error": "unknown_to_node"})) }
+        }
+        _ => Resp::ok(json!({})),
+    })
+}
+
+#[test]
+fn 只寫視窗名_本機有同名視窗就改寄並說明_沒有或在別台就不寄並列候選() {
+    let b = roster_backend();
+    let f = fx(&b.url(), Some("T-視窗甲"));
+    let (c, out, err) = go(&f.env, &["send", "--to", "test-gemini", "--body", "狀態？", "--reply"], "");
+    assert_eq!(c, 0, "{err}");
+    assert!(out.starts_with(&format!("sent id={NEW_ID} to=T/Test-Gemini from=T/T-視窗甲")), "{out}");
+    assert!(err.contains("已改寄本機同名視窗 T/Test-Gemini"), "{err}");
+    let sends = b.of("send");
+    assert_eq!(sends.len(), 2);
+    assert_eq!(sends[1].json(), json!({"to_node": "T", "to_agent": "Test-Gemini", "body": "狀態？", "from_agent": "T-視窗甲", "expects_reply": true}));
+    // 只在別台：不寄，列出完整位址（含中文的名字不可能是成員代號，直接查名單、不先寄）
+    let (c, _, err) = go(&f.env, &["send", "--to", "W-政策", "--body", "x", "--no-reply"], "");
+    assert_eq!(c, 4);
+    assert!(err.starts_with("「W-政策」不是成員代號") && err.contains("W/W-政策、X/W-政策"), "{err}");
+    // 哪裡都沒有
+    let (c, _, err) = go(&f.env, &["send", "--to", "NOBODY", "--body", "x", "--no-reply"], "");
+    assert_eq!(c, 4);
+    assert!(err.contains("unknown_to_node") && err.contains("這台（T）也沒有叫這個名字的視窗") && err.contains("asn who"), "{err}");
+    // 改寄的對象是自己：不寄
+    let (c, _, err) = go(&f.env, &["send", "--to", "t-視窗甲", "--body", "x", "--no-reply"], "");
+    assert_eq!(c, 1);
+    assert!(err.contains("不能寄給自己"), "{err}");
+    assert_eq!(b.of("send").len(), 3, "第一封試兩次（改寄成功）；NOBODY 試一次；含中文的兩個不先寄");
+    // 成員代號本來就認得的不查名單
+    assert_eq!(go(&f.env, &["send", "--to", "W", "--body", "x", "--no-reply"], "").0, 0);
+    assert_eq!(b.of("list").len(), 4);
+}
+
+#[test]
+fn 只寫視窗名_查名單失敗_回原本的錯() {
+    let b = Fake::start(|req: &Req, _| match req.action().as_str() {
+        "list" => Resp::json(500, json!({"error": "internal"})),
+        _ => Resp::json(400, json!({"error": "unknown_to_node"})),
+    });
+    let f = fx(&b.url(), Some("T-視窗甲"));
+    let (c, _, err) = go(&f.env, &["send", "--to", "Test-Gemini", "--body", "x", "--no-reply"], "");
+    assert_eq!(c, 4);
+    assert!(err.contains("send HTTP 400 unknown_to_node"), "{err}");
+    assert_eq!(b.of("send").len(), 1);
+}
+
+#[test]
+fn 含中文的名字_本機沒有_照舊報格式不對_結束碼_1() {
+    let b = roster_backend();
+    let f = fx(&b.url(), Some("T-視窗甲"));
+    let (c, _, err) = go(&f.env, &["send", "--to", "西川", "--body", "x", "--no-reply"], "");
+    assert_eq!(c, 1);
+    assert!(err.contains("成員代號格式不對") && err.contains("這台（T）也沒有"), "{err}");
+    assert!(b.of("send").is_empty());
 }
