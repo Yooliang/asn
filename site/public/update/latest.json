@@ -1,11 +1,11 @@
 {
-  "version": "0.1.79",
-  "notes": "含這些已合併的修正：開新夥伴裡的 Grok 不再反灰（Grok 程式不在系統路徑、放在官方安裝位置也找得到）；pi 與 ASN 互通預設開啟，設定裡存相對路徑的 pi 擴充不再被誤判成沒裝（安裝不再假失敗）；pi 夥伴在名單顯示「Pi 提供者/模型」；Grok 帳號：設備與帳號頁顯示、自動加入帳號庫、可切換（本機與手機遠端）",
-  "pub_date": "2026-10-26T14:50:10.833Z",
+  "version": "0.1.80",
+  "notes": "新增：手機遠端確認終端送字與代答（電腦要往終端送字時，手機會跳出待確認，本人按確認或拒絕）；接手已開著的終端視窗（預設只讀，需在電腦本機另外開啟代答或代送）；終端忙太久或等你太久時顯示提示；終端送字表單與確認框。修正：pi 從別的視窗底下開啟時，寄件人被誤判成上層視窗。",
+  "pub_date": "2026-10-26T21:45:37.735Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnlxNUZpcHlZWjlXMmpHQnFoanhmZjFKWUF1MStKNldMcDR0OXg1dGdDVlV6b0RIMmVwRUh6dzU4UGdJcUdkQXg0VWFnMHhva3A4UFo0d1JWVzUrNXd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDI2MjEwCWZpbGU6QVNOXzAuMS43OV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjc5CnI1dzhxQlhpWmYwYUlBRW56OUREanJvWFhtQ1E0dkhXTWNvSDB3NWIrMkJmK243MWswdUdwVU1PV1NoTnRYaUpZNktXSVdPWkZkMWxZSFdmMWpDaENRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.79_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybitFV1hOUDZmOWFpR3ZoYTd6UHVvWU80STZyQzFxaXZvZlNjSDQvdTFxYmZULzZLRlQ5R1dDSWVUQVl4RXRJUGx3WHBOVXJoaldyeVArT3BQMFQ5NXd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDUxMTM3CWZpbGU6QVNOXzAuMS44MF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjgwCjE4NHFZQXN0NlZFQ0FDOCt0NVNMa2I1ZjRvRVZxTUdRZHhsT2tIUEFQcmR4UzJqOWtZR1Y5TVpLTFB0R3FYWGgweTlIRDFMaFdZSlkzV2tha2VOeUNRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.80_x64-setup.exe"
     }
   }
 }

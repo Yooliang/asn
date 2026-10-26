@@ -1,8 +1,8 @@
 {
-  "version": "0.1.79",
-  "versionCode": 1079,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.79_android.apk",
-  "sha256": "4604cb4a7f3dd4998d3445ad18434774945797195c7cc1fa3e9fb21cf6fe5eba",
-  "notes": "含這些已合併的修正：開新夥伴裡的 Grok 不再反灰（Grok 程式不在系統路徑、放在官方安裝位置也找得到）；pi 與 ASN 互通預設開啟，設定裡存相對路徑的 pi 擴充不再被誤判成沒裝（安裝不再假失敗）；pi 夥伴在名單顯示「Pi 提供者/模型」；Grok 帳號：設備與帳號頁顯示、自動加入帳號庫、可切換（本機與手機遠端）",
-  "bytes": 9387492
+  "version": "0.1.80",
+  "versionCode": 1080,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.80_android.apk",
+  "sha256": "31afb2c0a5045b9d01ae9c7613164df7bf24b011ba1a6f37901d44330bf920a2",
+  "notes": "新增：手機端新增「待確認」頁，電腦要往終端送字或代答時，在手機上本人按確認或拒絕；終端忙太久或等你太久時顯示提示。修正：寄件人判斷。",
+  "bytes": 9416164
 }
