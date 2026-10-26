@@ -779,6 +779,7 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .term-row-wrap{list-style:none;border-bottom:1px solid var(--line)}
 .term-row-wrap .term-row{border-bottom:0}
 .term-send-btn{flex:none;padding:2px 10px}
+.term-held{font-size:12px;color:#b45f06}
 .term-send{display:flex;flex-direction:column;gap:6px;padding:4px 2px 8px}
 .term-send textarea{width:100%;box-sizing:border-box;resize:vertical}
 .term-folder{color:var(--muted,#666);font-size:12px}

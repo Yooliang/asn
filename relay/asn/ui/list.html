@@ -386,7 +386,7 @@
       <p class="partner-hint" v-if="!terms.rows.length">目前沒有由 ASN 開啟的終端。</p>
       <ul class="term-rows" v-else>
         <li v-for="r in terms.rows" :key="r.id" class="term-row-wrap">
-          <div class="term-row"><b>{{ r.title }}</b><span class="term-folder" v-if="r.folder">{{ r.folder }}</span><span class="term-state" :class="'tone-' + r.tone">{{ r.stateLabel }}</span><button class="aero-btn term-send-btn" type="button" :aria-expanded="termSend.id === r.id" @click="termSendOpen(r)">{{ termSend.id === r.id ? '收起' : '送字…' }}</button></div>
+          <div class="term-row"><b>{{ r.title }}</b><span class="term-folder" v-if="r.folder">{{ r.folder }}</span><span class="term-held" v-if="r.held">{{ r.held }}</span><span class="term-state" :class="'tone-' + r.tone">{{ r.stateLabel }}</span><button class="aero-btn term-send-btn" type="button" :aria-expanded="termSend.id === r.id" @click="termSendOpen(r)">{{ termSend.id === r.id ? '收起' : '送字…' }}</button></div>
           <div class="term-send" v-if="termSend.id === r.id">
             <textarea class="set-input" v-model="termSend.text" rows="3" :maxlength="SEND_MAX" placeholder="要送進這個終端的文字" aria-label="要送進終端的文字"></textarea>
             <label class="chk"><input type="checkbox" v-model="termSend.enter" /><span>送完後按 Enter</span></label>
