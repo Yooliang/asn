@@ -229,7 +229,7 @@ window.addEventListener('popstate', e => {
 const go = next => { history.pushState(next, ''); Object.assign(nav, { step: 0 }, next) }
 // 切大分頁：從「夥伴」出去推一筆瀏覽記錄（返回鍵回到夥伴）；其他分頁之間互換不增加記錄
 function goTab(t) {
-  if (nav.sheet === 'acct') {   // 「選項」頁佔著第二個分頁：點夥伴＝返回，點設置＝直接換過去；點自己不動
+  if (nav.sheet === 'acct') {   // 「設備與帳號」頁佔著第二個分頁：點夥伴＝返回，點設置＝直接換過去；點自己不動
     if (t === 'list') history.back()
     else if (t === 'me') { const n = tabNav('me'); history.replaceState(n, ''); Object.assign(nav, n) }
     return
@@ -374,7 +374,7 @@ const app = createApp({
     }
     watch([() => nav.tab, () => nav.sheet, lastChat, () => friends.value.length, () => rooms.value.length], showLastChat, { immediate: true })
     const back = () => history.back()
-    const tabLabel = t => tabLabelOf(t, nav, ACCT_TEXT.button)
+    const tabLabel = t => tabLabelOf(t, nav, ACCT_PAGE_TITLE)   // 設備與帳號頁開著時，第二個分頁的標籤跟頁標題一致（#268）
     const openBanner = () => { const b = banner.value; banner.value = null; if (b) openChat(b.id) }
     // 橫幅上的「接班換手」：開啟那位的對話，直接帶到「接班換手」的確認框（不能換手時停在「⋯」選單，由選單說明原因）
     async function bannerHandover() {
@@ -406,10 +406,11 @@ const app = createApp({
     const guides = phoneGuideList()
     const guideOpen = computed(() => (nav.sheet === 'guide' ? phoneGuide(nav.guide) : null))
     // 設置分頁＝分類列表（每列一行目前值），點一列進該項的滿版頁（左上返回回列表）
-    const settingRows = computed(() => mobileSettingRows({ name: myName.value, hasUpload: selfHasUpload.value, vibrateNudge: prefs.vibrateNudge, vibrateMsg: prefs.vibrateMsg, updateEnabled: upd.enabled, autoUpdate: prefs.autoUpdate, version: info.version }))
+    const settingRows = computed(() => mobileSettingRows({ name: myName.value, hasUpload: selfHasUpload.value, vibrateNudge: prefs.vibrateNudge, vibrateMsg: prefs.vibrateMsg, updateEnabled: upd.enabled, autoUpdate: prefs.autoUpdate, version: info.version, devices: acctDevs.value }))
     const settingCat = computed(() => (nav.sheet === 'setting' ? nav.cat : ''))
     const settingTitle = computed(() => mobileSettingTitle(settingCat.value))
-    const openSetting = key => { if (!nav.sheet) go(settingNav(key)) }
+    // 設備與帳號（#268）開的是名單設備卡「選項」的同一頁（先看設備列表），其他分類開設置的滿版頁
+    const openSetting = key => { if (nav.sheet) return; if (key === 'devices') void openAcct(); else go(settingNav(key)) }
     const openGuides = () => { if (!nav.sheet) go(guideNav()) }
     const openGuide = key => go(guideNav(key))
     // ---------- 開新夥伴（遠端開視窗）：手機只下指令，視窗開在那台電腦上。要本人簽章（Rust 端沒憑證就不送） ----------

@@ -117,5 +117,5 @@ test('流程行為：點「切換」＝選好帳號進確認畫面；從夥伴�
   assert.match(js, /acctSw\.phase = 'run'\n\s*acctSw\.view = await runAcctSwitch\(/, '送出後進進度畫面')
   assert.match(js, /android_acct_list/)
   assert.match(js, /go\(acctNav\(\)\)/)
-  assert.equal(tabLabel('chats', acctNav()), '選項')
+  assert.equal(tabLabel('chats', acctNav()), '設備與帳號')
 })
