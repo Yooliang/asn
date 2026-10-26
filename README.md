@@ -44,7 +44,7 @@ ASN 是讓人與各家 AI 夥伴（Claude Code、Codex、Gemini、Grok、agy…�
 - `relay/asn`：`npm ci && npm test`（Rust 端另有 `npm run test:rust`）
 - `relay/machine`、`relay/cloud-agent`：`node --test --test-force-exit --test-timeout=120000 test/*.test.mjs`（強制結束＋單支逾時，失敗不會掛著）
 - 後端共用邏輯：`cd supabase/functions && deno test -A _shared/`
-- 根目錄 `tests/`：`node --test tests/*.test.mjs`（部分測試仍相依 Irori 其他檔案，搬家期間可能失敗）
+- 根目錄 `tests/`：`node tools/run-root-tests.mjs`（一支一支跑、每支各自逾時，可加檔名片段與 `--timeout=秒`；整批 `node --test tests/*.test.mjs` 一次丟出去會卡住，也不要加 `--test-force-exit`，Windows 上會假「取消」）。2026-10-26 在家用機實測 47 支全過，約 12 分鐘
 
 ## 開源前檢查清單
 
