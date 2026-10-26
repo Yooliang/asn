@@ -356,16 +356,14 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         if let Some(ad) = &snap.adopted {
             let config = self.launch_config_for_adopt()?;
             let live = term_adopt::fetch_live_pane(&w, &snap.window, snap.pane_id, &self.runner)?;
-            if live.pane.is_active {
-                return Err("你正在操作這個窗格，ASN 不會代送（請先切到別處再試）".into());
-            }
+            let idle = term_adopt::user_idle_secs_for_write(&w, &snap.window.sock)?;
             if !ad.version_verified {
                 return Err("WezTerm 版本未驗證，不能代送".into());
             }
             if !ad.send_unlocked {
                 return Err("這個接手窗格還沒在本機開啟「允許代送文字」".into());
             }
-            term_adopt::verify_adopted_for_write(&live, ad, &config)?;
+            term_adopt::verify_adopted_for_write(&live, ad, &config, idle)?;
         } else if !snap.send_granted || snap.cwd.trim().is_empty() {
             return Err("這個工作資料夾還沒有使用者的授權，不能代送".into());
         }
@@ -532,9 +530,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         if let Some(ad) = &snap.adopted {
             let config = self.launch_config_for_adopt()?;
             let live = term_adopt::fetch_live_pane(&w, &snap.window, snap.pane_id, &self.runner)?;
-            if live.pane.is_active {
-                return Err("你正在操作這個窗格，ASN 不會代送（請先切到別處再試）".into());
-            }
+            let idle = term_adopt::user_idle_secs_for_write(&w, &snap.window.sock)?;
             if !term_adopt::foreground_still_known(&live.pane.title) {
                 return Err("前景不是已知的 CLI，不能代答".into());
             }
@@ -544,7 +540,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             if !ad.answer_unlocked {
                 return Err("這個接手窗格還沒在本機開啟「允許代答提問」".into());
             }
-            term_adopt::verify_adopted_for_write(&live, ad, &config)?;
+            term_adopt::verify_adopted_for_write(&live, ad, &config, idle)?;
         }
         let text = w.get_text(&snap.window.sock, snap.pane_id, Some(-STATUS_LINES))?;
         let Some(seen) = classify_prompt(&text) else {
@@ -1485,7 +1481,13 @@ mod tests {
         fail_substr: RefCell<Option<String>>,
         /// `wezterm.exe --version` 的假輸出。
         version_out: RefCell<String>,
+        /// `wezterm cli list-clients --format json` 的假輸出。
+        list_clients_json: RefCell<String>,
         trace: RefCell<Vec<String>>,
+    }
+
+    fn default_list_clients_json() -> String {
+        r#"[{"pid":1,"idle_time":{"secs":60,"nanos":0},"focused_pane_id":0}]"#.into()
     }
 
     fn fake_inner(started: Vec<Option<u64>>, list_json: String, screen: String) -> FakeInner {
@@ -1500,8 +1502,13 @@ mod tests {
             list_jsons: RefCell::new(Vec::new()),
             fail_substr: RefCell::new(None),
             version_out: RefCell::new("wezterm 20240203-110809-5046fc22".into()),
+            list_clients_json: RefCell::new(default_list_clients_json()),
             trace: RefCell::new(Vec::new()),
         }
+    }
+
+    fn list_clients_json_with_idle_secs(secs: u64) -> String {
+        format!(r#"[{{"pid":1,"idle_time":{{"secs":{secs},"nanos":0}},"focused_pane_id":9}}]"#)
     }
 
     #[derive(Clone)]
@@ -1528,7 +1535,9 @@ mod tests {
             }
             let stdout = if args.first().map(|a| a.as_str()) == Some("--version") {
                 self.inner.version_out.borrow().clone()
-            } else if args.iter().any(|a| a == "list") {
+            } else if args.iter().any(|a| a == "list-clients") {
+                self.inner.list_clients_json.borrow().clone()
+            } else if args.get(1).map(|a| a.as_str()) == Some("list") {
                 let mut q = self.inner.list_jsons.borrow_mut();
                 if q.is_empty() {
                     self.inner.list_json.borrow().clone()
@@ -2689,7 +2698,7 @@ mod tests {
     }
 
     #[test]
-    fn 接手_只列已知_cli_建立時間不符_窗格重用_is_active_拒絕() {
+    fn 接手_只列已知_cli_建立時間不符_窗格重用_使用者閒置不足_拒絕() {
         let rig = make_adopt(100, 9, "grok.exe", false);
         let cwd_url = wezterm_file_url(Path::new(&rig.cwd));
         assert!(rig.svc.adopt(100, 9, 2_000, &rig.config).unwrap_err().contains("建立時間"));
@@ -2698,11 +2707,32 @@ mod tests {
         assert!(!cands.iter().any(|c| c.profile == "cmd"));
         let id = rig.svc.adopt(100, 9, 1_000, &rig.config).unwrap();
         assert!(rig.svc.list()[0].adopted);
-        *rig.runner.inner.list_json.borrow_mut() = adopt_pane_json(9, "grok.exe", &cwd_url, true);
+        rig.svc.unlock_adopted(&id, false, true).unwrap();
+        *rig.runner.inner.list_clients_json.borrow_mut() = list_clients_json_with_idle_secs(4);
         let busy = rig.svc.confirm_send(&id, "x", false).unwrap_err();
         assert!(busy.contains("正在操作"), "{busy}");
+        *rig.runner.inner.list_clients_json.borrow_mut() = list_clients_json_with_idle_secs(5);
+        assert!(rig.svc.confirm_send(&id, "x", false).is_ok());
+        *rig.runner.inner.list_clients_json.borrow_mut() = list_clients_json_with_idle_secs(6);
+        assert!(rig.svc.confirm_send(&id, "y", false).is_ok());
         *rig.runner.inner.list_json.borrow_mut() = adopt_pane_json(99, "grok.exe", &cwd_url, false);
         assert!(rig.svc.read(&id, 5).unwrap_err().contains("窗格"));
+    }
+
+    #[test]
+    fn 接手_list_clients_失敗或缺欄位_寫入一律拒絕() {
+        let rig = make_adopt(100, 9, "grok.exe", false);
+        let id = rig.svc.adopt(100, 9, 1_000, &rig.config).unwrap();
+        rig.svc.unlock_adopted(&id, true, true).unwrap();
+        *rig.runner.inner.fail_substr.borrow_mut() = Some("list-clients".into());
+        assert!(rig.svc.confirm_send(&id, "x", false).unwrap_err().contains("list-clients"));
+        *rig.runner.inner.fail_substr.borrow_mut() = None;
+        *rig.runner.inner.list_clients_json.borrow_mut() = "[]".into();
+        assert!(rig.svc.answer(&id, "trust_dialog", 1).unwrap_err().contains("client"));
+        *rig.runner.inner.list_clients_json.borrow_mut() = r#"[{"pid":1}]"#.into();
+        assert!(rig.svc.confirm_send(&id, "x", false).unwrap_err().contains("idle_time"));
+        *rig.runner.inner.list_clients_json.borrow_mut() = "not json".into();
+        assert!(rig.svc.confirm_send(&id, "x", false).unwrap_err().contains("解析"));
     }
 
     #[test]
@@ -2851,10 +2881,10 @@ mod tests {
             assert!(screen.contains("Do you trust"), "能讀到畫面");
             assert!(svc.answer(&id, "trust_dialog", 1).is_err(), "沒解鎖不能代答");
             assert!(svc.confirm_send(&id, "x", false).is_err(), "沒解鎖不能代送");
-            // 4) 本機解鎖代答；但這個窗格現在是作用中窗格（使用者正在用它）→ 必須被擋
+            // 4) 本機解鎖代答；剛開 grok 時 list-clients 的 idle_time 通常 < 5 秒 → 必須被擋
             svc.unlock_adopted(&id, true, false)?;
             let e = svc.answer(&id, "trust_dialog", 1).unwrap_err();
-            println!("作用中被擋：{e}");
+            println!("使用者閒置不足被擋：{e}");
             assert_eq!(svc.read(&id, 30)?, screen, "被擋時畫面完全沒變");
             // 5) 探針：另開第二個 WezTerm 視窗搶走焦點（使用者去用別的視窗），再「不經過 ASN 的核驗」直接往 grok 那格送 y，看 grok 處理不處理
             let mut other = std::process::Command::new(&dir.gui).no_window()

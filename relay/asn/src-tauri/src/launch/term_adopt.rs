@@ -4,12 +4,17 @@
 use super::config::{canonical_launch_cwd, LaunchConfig};
 use super::cwds;
 use super::switch;
-use super::wezterm::{self, Fs, PaneInfo, Runner, WezTerm, Window};
+use super::wezterm::{self, Fs, PaneInfo, Runner, WezClientInfo, WezDuration, WezTerm, Window};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 /// 隨安裝檔附帶、真機實測過的 WezTerm 標籤。
 pub const VERIFIED_WEZTERM_TAG: &str = "20240203";
+
+/// 代答／代送前：WezTerm 實例距上次使用者輸入須至少這麼久（秒）。
+pub const ADOPT_WRITE_MIN_USER_IDLE_SECS: f64 = 5.0;
+
+const USER_BUSY_MSG: &str = "你正在操作這個窗格，ASN 不會代送（請先切到別處再試）";
 
 /// 接手候選／已接手窗格的前景 CLI（WezTerm list 的 title 欄位是行程名）。
 const KNOWN_CLI: &[(&str, &str)] = &[
@@ -270,17 +275,71 @@ pub fn fetch_live_pane(w: &WezTerm<'_>, win: &Window, pane_id: u64, runner: &dyn
     Ok(LivePane { pane, started_ms: now })
 }
 
+pub fn idle_secs_from_duration(d: &WezDuration) -> f64 {
+    d.as_secs_f64()
+}
+
+/// 解析 `idle_time` 物件；缺欄位或型別不對就拒絕。
+pub fn idle_secs_from_json(idle: &serde_json::Value) -> Result<f64, String> {
+    let obj = idle.as_object().ok_or_else(|| "WezTerm client 的 idle_time 格式不對".to_string())?;
+    let secs = obj.get("secs").and_then(|v| v.as_u64()).ok_or_else(|| "WezTerm client 缺 idle_time.secs".to_string())?;
+    let nanos = obj.get("nanos").and_then(|v| v.as_u64()).unwrap_or(0);
+    Ok(secs as f64 + nanos as f64 / 1_000_000_000.0)
+}
+
+pub fn min_user_idle_secs(clients: &[WezClientInfo]) -> Result<f64, String> {
+    if clients.is_empty() {
+        return Err("讀不到 WezTerm 的使用者閒置時間（沒有連線的 client）".into());
+    }
+    clients
+        .iter()
+        .map(|c| idle_secs_from_duration(&c.idle_time))
+        .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .ok_or_else(|| "讀不到 WezTerm 的使用者閒置時間".into())
+}
+
+pub fn parse_list_clients_json(text: &str) -> Result<Vec<WezClientInfo>, String> {
+    let v: serde_json::Value =
+        serde_json::from_str(text.trim()).map_err(|e| format!("無法解析 WezTerm client 清單：{e}"))?;
+    let arr = v.as_array().ok_or_else(|| "WezTerm client 清單格式不對（不是陣列）".to_string())?;
+    if arr.is_empty() {
+        return Err("讀不到 WezTerm 的使用者閒置時間（沒有連線的 client）".into());
+    }
+    for (i, item) in arr.iter().enumerate() {
+        if !item.is_object() {
+            return Err(format!("WezTerm client 清單第 {} 列格式不對", i + 1));
+        }
+        let idle = item
+            .get("idle_time")
+            .ok_or_else(|| format!("WezTerm client 清單第 {} 列缺 idle_time", i + 1))?;
+        idle_secs_from_json(idle)?;
+    }
+    serde_json::from_value(v).map_err(|e| format!("WezTerm client 清單欄位不符：{e}"))
+}
+
+pub fn user_idle_secs_for_write(w: &WezTerm<'_>, sock: &std::path::Path) -> Result<f64, String> {
+    let text = w.list_clients_text(sock)?;
+    let clients = parse_list_clients_json(&text)?;
+    min_user_idle_secs(&clients)
+}
+
+pub fn check_user_idle_for_write(idle_secs: f64) -> Result<(), String> {
+    if idle_secs < ADOPT_WRITE_MIN_USER_IDLE_SECS {
+        return Err(USER_BUSY_MSG.into());
+    }
+    Ok(())
+}
+
 pub fn verify_adopted_for_write(
     live: &LivePane,
     adopted: &AdoptedSnap,
     config: &LaunchConfig,
+    user_idle_secs: f64,
 ) -> Result<(), String> {
+    check_user_idle_for_write(user_idle_secs)?;
     let fg = known_profile_from_pane_title(&live.pane.title).unwrap_or("");
     if fg != adopted.foreground {
         return Err(format!("前景行程已變成「{}」，不是接手時的 {}", live.pane.title.trim(), adopted.foreground));
-    }
-    if live.pane.is_active {
-        return Err("你正在操作這個窗格，ASN 不會代送（請先切到別處再試）".into());
     }
     let canon = pane_cwd_to_local(&live.pane.cwd)?;
     if !cwd_in_allow(&canon, &config.cwd_allow) {
@@ -321,5 +380,22 @@ mod tests {
         assert!(pane_cwd_to_local("").is_err());
         assert!(pane_cwd_to_local("//wsl.localhost/Ubuntu/home").is_err());
         assert!(pane_cwd_to_local("user@host:/tmp").is_err());
+    }
+
+    #[test]
+    fn 使用者閒置_4_秒拒絕_5_6_秒放行() {
+        assert!(check_user_idle_for_write(4.0).unwrap_err().contains("正在操作"));
+        check_user_idle_for_write(5.0).unwrap();
+        check_user_idle_for_write(6.0).unwrap();
+    }
+
+    #[test]
+    fn list_clients_json_空陣列_缺_idle_格式錯誤() {
+        assert!(parse_list_clients_json("[]").unwrap_err().contains("client"));
+        assert!(parse_list_clients_json(r#"[{"pid":1}]"#).unwrap_err().contains("idle_time"));
+        assert!(parse_list_clients_json("not-json").unwrap_err().contains("解析"));
+        assert!(parse_list_clients_json("{}").unwrap_err().contains("陣列"));
+        let ok = parse_list_clients_json(r#"[{"idle_time":{"secs":5,"nanos":0}}]"#).unwrap();
+        assert_eq!(min_user_idle_secs(&ok).unwrap(), 5.0);
     }
 }
