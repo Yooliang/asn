@@ -53,7 +53,7 @@ async function boot({ withRename }) {
   // 改名前就有的外來排程（呼叫舊名），驗證排程指令會被改
   await db.exec(`select cron.schedule('t-old-name', '0 0 * * *', 'select public.irori_relay_acct_expire()')`)
   const before = (await db.query(`select proname, pg_get_function_identity_arguments(oid) ident from pg_proc where pronamespace = 'public'::regnamespace and proname like 'irori\\_relay\\_%' order by 1, 2`)).rows
-  if (withRename) for (const f of files.slice(files.indexOf(RENAME))) await db.exec(read(f))
+  if (withRename) for (const f of files.slice(files.indexOf(RENAME), files.indexOf(RENAME) + 1)) await db.exec(read(f))   // 只套改名這一份：之後的 migration 會改簽章（例如 acct_list 加 p_signed_user），不屬於這支測試要驗的
   return { db, before }
 }
 const rows = async (db, q, a = []) => (await db.query(q, a)).rows
