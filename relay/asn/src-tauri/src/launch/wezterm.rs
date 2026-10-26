@@ -61,12 +61,16 @@ impl Runner for RealRunner {
         let mut err = child.stderr.take();
         let t_out = std::thread::spawn(move || {
             let mut s = Vec::new();
-            if let Some(o) = out.as_mut() { let _ = o.read_to_end(&mut s); }
+            if let Some(o) = out.as_mut() {
+                let _ = o.read_to_end(&mut s);
+            }
             s
         });
         let t_err = std::thread::spawn(move || {
             let mut s = Vec::new();
-            if let Some(o) = err.as_mut() { let _ = o.read_to_end(&mut s); }
+            if let Some(o) = err.as_mut() {
+                let _ = o.read_to_end(&mut s);
+            }
             s
         });
         let start = Instant::now();
@@ -159,6 +163,12 @@ pub struct PaneInfo {
     pub tab_id: u64,
     #[serde(default)]
     pub title: String,
+    /// `wezterm cli list` 的分頁標題。set-tab-title 寫的是這個欄位（與行程標題 `title` 分開）。
+    #[serde(default)]
+    pub tab_title: String,
+    /// `wezterm start --workspace` 設下的工作區名稱。認領時只用它與分頁標題，不看行程標題。
+    #[serde(default)]
+    pub workspace: String,
     #[serde(default)]
     pub cwd: String,
     #[serde(default)]
@@ -169,12 +179,18 @@ pub struct PaneInfo {
     pub is_active: bool,
 }
 
+/// workspace 名稱：非空，且沒有空白與控制字元（要能安全放進一個參數）。
+fn workspace_name_ok(name: &str) -> bool {
+    !name.is_empty() && !name.chars().any(|c| c.is_whitespace() || c.is_control())
+}
+
 /// 把訊息壓成單行：換行（含 \r\n）與製表字元換成一個空格（連續的合併成一個），去掉其他控制字元（含 ESC），超過 4000 字截斷
 pub fn flatten_line(text: &str) -> String {
     let mut out = String::new();
     let mut prev_nl = false;
     for c in text.chars() {
-        if c == '\n' || c == '\r' || c == '\t' {   // 製表字元和換行一樣換成空格，免得 ls\t-la 變 ls-la
+        if c == '\n' || c == '\r' || c == '\t' {
+            // 製表字元和換行一樣換成空格，免得 ls\t-la 變 ls-la
             if !prev_nl {
                 out.push(' ');
             }
@@ -209,7 +225,16 @@ pub struct WezTerm<'a> {
 
 impl<'a> WezTerm<'a> {
     pub fn new(dir: WezTermDir, config_file: PathBuf, home: PathBuf, runner: &'a dyn Runner, fs: &'a dyn Fs) -> Self {
-        Self { dir, config_file, home, runner, fs, cli_timeout: CLI_TIMEOUT, sock_wait: SOCK_WAIT, enter_delay: ENTER_DELAY }
+        Self {
+            dir,
+            config_file,
+            home,
+            runner,
+            fs,
+            cli_timeout: CLI_TIMEOUT,
+            sock_wait: SOCK_WAIT,
+            enter_delay: ENTER_DELAY,
+        }
     }
 
     /// 家目錄用 identity::home_dir
@@ -223,19 +248,39 @@ impl<'a> WezTerm<'a> {
         m
     }
 
-    /// 啟動新視窗並等 socket 檔出現
+    /// 啟動新視窗並等 socket 檔出現。不帶 workspace；命令層要做認領標記時用 start_in_workspace。
     pub fn start(&self, cwd: &Path, command: &[String]) -> Result<Window, String> {
         if command.is_empty() {
             return Err("沒有指定要執行的指令".to_string());
+        }
+        let mut args: Vec<String> = vec!["start".into(), "--always-new-process".into(), "--cwd".into(), cwd.to_string_lossy().into_owned(), "--".into()];
+        args.extend(command.iter().cloned());
+        self.spawn_gui(args)
+    }
+
+    /// 啟動並指定 workspace（`wezterm start --workspace`，20240203 的 gui 就有）。
+    /// 名稱在視窗出現前就設好，重啟後認領不必先靠 cli。名稱不得為空、不得含空白或控制字元。
+    pub fn start_in_workspace(&self, cwd: &Path, workspace: &str, command: &[String]) -> Result<Window, String> {
+        if command.is_empty() {
+            return Err("沒有指定要執行的指令".to_string());
+        }
+        if !workspace_name_ok(workspace) {
+            return Err("workspace 名稱不合法".to_string());
         }
         let mut args: Vec<String> = vec![
             "start".into(),
             "--always-new-process".into(),
             "--cwd".into(),
             cwd.to_string_lossy().into_owned(),
+            "--workspace".into(),
+            workspace.to_string(),
             "--".into(),
         ];
         args.extend(command.iter().cloned());
+        self.spawn_gui(args)
+    }
+
+    fn spawn_gui(&self, args: Vec<String>) -> Result<Window, String> {
         let gui_pid = self.runner.spawn(&self.dir.gui, &args, &self.config_env())?;
         let started_ms = self.runner.started_ms(gui_pid);
         let sock = sock_path(&self.home, gui_pid);
@@ -246,11 +291,22 @@ impl<'a> WezTerm<'a> {
                 return Ok(Window { gui_pid, sock, started_ms });
             }
             if start.elapsed() >= self.sock_wait {
-                self.runner.kill_tree(gui_pid);   // 剛開的視窗連同子行程一起清掉，不留桌面孤兒視窗
+                self.runner.kill_tree(gui_pid); // 剛開的視窗連同子行程一起清掉，不留桌面孤兒視窗
                 return Err(format!("等了 {} 秒，WezTerm 的通訊檔仍未出現：{}（已結束剛啟動的視窗）", self.sock_wait.as_secs(), sock.display()));
             }
             self.runner.sleep(step);
         }
+    }
+
+    /// `wezterm cli set-tab-title --pane-id <id> <標題>`。
+    /// 20240203-110809-5046fc22 有這個子命令（20230408-112425-69ae8472 起）。標題是一個參數，不經 shell。
+    /// 空字串與控制字元在這裡就拒絕，不會執行 cli。長度由命令層再限制。
+    pub fn set_tab_title(&self, sock: &Path, pane_id: u64, title: &str) -> Result<(), String> {
+        if title.is_empty() || title.chars().any(|c| c.is_control()) {
+            return Err("分頁標題是空的或含有控制字元，已拒絕".to_string());
+        }
+        let args = vec!["set-tab-title".to_string(), "--pane-id".into(), pane_id.to_string(), title.to_string()];
+        self.cli(sock, &args).map(|_| ())
     }
 
     /// 執行 `wezterm.exe cli ...`。socket 不存在時絕不執行（否則 cli 會卡住並悄悄啟動 mux-server）
@@ -305,13 +361,7 @@ impl<'a> WezTerm<'a> {
     }
 
     fn send_raw(&self, sock: &Path, pane_id: u64, text: &str) -> Result<(), String> {
-        let args = vec![
-            "send-text".to_string(),
-            "--pane-id".into(),
-            pane_id.to_string(),
-            "--no-paste".into(),
-            text.to_string(),
-        ];
+        let args = vec!["send-text".to_string(), "--pane-id".into(), pane_id.to_string(), "--no-paste".into(), text.to_string()];
         self.cli(sock, &args).map(|_| ())
     }
 
@@ -383,7 +433,7 @@ mod tests {
         killed: RefCell<bool>,
         spawn_pid: u32,
         tree_killed: RefCell<Vec<u32>>,
-        started: RefCell<Vec<Option<u64>>>,   // 每次 started_ms 依序回傳（用完回 None）
+        started: RefCell<Vec<Option<u64>>>, // 每次 started_ms 依序回傳（用完回 None）
     }
     impl Runner for FakeRunner {
         fn run(&self, _p: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<RunOutput, String> {
@@ -392,7 +442,11 @@ mod tests {
                 *self.killed.borrow_mut() = true;
                 return Err(format!("WezTerm 指令逾時（{} 秒），已結束該子行程", timeout.as_secs()));
             }
-            Ok(RunOutput { success: true, stdout: self.stdout.borrow().clone(), stderr: String::new() })
+            Ok(RunOutput {
+                success: true,
+                stdout: self.stdout.borrow().clone(),
+                stderr: String::new(),
+            })
         }
         fn spawn(&self, _p: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
             self.calls.borrow_mut().push((args.to_vec(), env.clone()));
@@ -403,7 +457,11 @@ mod tests {
         }
         fn started_ms(&self, _pid: u32) -> Option<u64> {
             let mut v = self.started.borrow_mut();
-            if v.is_empty() { None } else { v.remove(0) }
+            if v.is_empty() {
+                None
+            } else {
+                v.remove(0)
+            }
         }
         fn sleep(&self, d: Duration) {
             self.sleeps.borrow_mut().push(d);
@@ -411,7 +469,10 @@ mod tests {
     }
 
     fn dirs() -> WezTermDir {
-        WezTermDir { gui: "W/wezterm-gui.exe".into(), cli: "W/wezterm.exe".into() }
+        WezTermDir {
+            gui: "W/wezterm-gui.exe".into(),
+            cli: "W/wezterm.exe".into(),
+        }
     }
     fn sock() -> PathBuf {
         PathBuf::from("H/gui-sock-1")
@@ -461,6 +522,7 @@ mod tests {
         assert!(w.send_line(&sock(), 0, "x").is_err());
         assert!(w.send_enter(&sock(), 0).is_err());
         assert!(w.get_text(&sock(), 0, None).is_err());
+        assert!(w.set_tab_title(&sock(), 0, "ASN:1").is_err());
         assert!(r.calls.borrow().is_empty(), "sock 不存在時不可執行 cli");
     }
 
@@ -485,6 +547,8 @@ mod tests {
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].pane_id, 0);
         assert_eq!(v[0].title, "cmd.exe");
+        assert_eq!(v[0].tab_title, "");
+        assert_eq!(v[0].workspace, "default");
         assert_eq!(v[0].cwd, "file:///C:/work");
         assert_eq!((v[0].cursor_x, v[0].cursor_y), (5, 3));
         assert!(v[0].is_active);
@@ -539,20 +603,32 @@ mod tests {
         let fs = FakeFs::default();
         fs.files.borrow_mut().insert(sock_path(Path::new("H"), 1));
         // 啟動時量到 1000，結束時還是 1000 → 結束
-        let r = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(1000), Some(1000)]), ..Default::default() };
+        let r = FakeRunner {
+            spawn_pid: 1,
+            started: RefCell::new(vec![Some(1000), Some(1000)]),
+            ..Default::default()
+        };
         let w = wez(&r, &fs);
         let win = w.start(Path::new("C:/work"), &["agy.exe".to_string()]).unwrap();
         assert_eq!(win.started_ms, Some(1000));
         w.stop(&win).unwrap();
         assert_eq!(*r.tree_killed.borrow(), vec![1]);
         // 編號被別的程式回收（建立時間不同）→ 拒絕，且不動它
-        let r2 = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(1000), Some(2000)]), ..Default::default() };
+        let r2 = FakeRunner {
+            spawn_pid: 1,
+            started: RefCell::new(vec![Some(1000), Some(2000)]),
+            ..Default::default()
+        };
         let w2 = wez(&r2, &fs);
         let win2 = w2.start(Path::new("C:/work"), &["agy.exe".to_string()]).unwrap();
         assert!(w2.stop(&win2).unwrap_err().contains("別的程序"));
         assert!(r2.tree_killed.borrow().is_empty(), "建立時間不同絕不能結束");
         // 視窗早就沒了（查不到）→ 視為完成，不用動手
-        let r3 = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(1000), None]), ..Default::default() };
+        let r3 = FakeRunner {
+            spawn_pid: 1,
+            started: RefCell::new(vec![Some(1000), None]),
+            ..Default::default()
+        };
         let w3 = wez(&r3, &fs);
         let win3 = w3.start(Path::new("C:/work"), &["agy.exe".to_string()]).unwrap();
         w3.stop(&win3).unwrap();
@@ -569,8 +645,13 @@ mod tests {
     #[test]
     fn flatten_tab_becomes_space_not_glued() {
         assert_eq!(flatten_line("ls	-la"), "ls -la");
-        assert_eq!(flatten_line("a		b
-	c"), "a b c");
+        assert_eq!(
+            flatten_line(
+                "a		b
+	c"
+            ),
+            "a b c"
+        );
     }
 
     #[test]
@@ -583,6 +664,38 @@ mod tests {
         assert!(locate_from(Some("W".into()), &fs).is_err());
         fs.files.borrow_mut().insert("W/wezterm-gui.exe".into());
         assert!(locate_from(Some("W".into()), &fs).is_ok());
+    }
+
+    #[test]
+    fn start_in_workspace_puts_name_before_command_and_rejects_bad_names() {
+        let r = FakeRunner { spawn_pid: 1, ..Default::default() };
+        let fs = FakeFs::default();
+        fs.files.borrow_mut().insert(sock_path(Path::new("H"), 1));
+        let w = wez(&r, &fs);
+        w.start_in_workspace(Path::new("C:/work"), "asn-1", &["agy.exe".to_string()]).unwrap();
+        assert_eq!(r.calls.borrow()[0].0, vec!["start", "--always-new-process", "--cwd", "C:/work", "--workspace", "asn-1", "--", "agy.exe"]);
+        for bad in ["", "asn 1", "asn\n1", "a\tb"] {
+            let err = w.start_in_workspace(Path::new("C:/work"), bad, &["agy.exe".to_string()]).unwrap_err();
+            assert!(err.contains("不合法"), "{bad:?}: {err}");
+        }
+        assert_eq!(r.calls.borrow().len(), 1, "不合法的 workspace 不可啟動");
+    }
+
+    #[test]
+    fn set_tab_title_uses_pane_and_refuses_without_sock_or_controls() {
+        let r = FakeRunner::default();
+        let fs = FakeFs::default();
+        let w = wez(&r, &fs);
+        assert!(w.set_tab_title(&sock(), 7, "ASN:1").is_err());
+        assert!(r.calls.borrow().is_empty(), "通訊檔不在就不可執行 cli");
+        let fs = fs_with_sock();
+        let w = wez(&r, &fs);
+        assert!(w.set_tab_title(&sock(), 7, "").is_err());
+        assert!(w.set_tab_title(&sock(), 7, "A\nB").is_err());
+        assert!(r.calls.borrow().is_empty(), "空標題或控制字元不可執行 cli");
+        w.set_tab_title(&sock(), 7, "ASN:1 名稱").unwrap();
+        assert_eq!(r.calls.borrow()[0].0, vec!["cli", "set-tab-title", "--pane-id", "7", "ASN:1 名稱"]);
+        assert_eq!(r.calls.borrow()[0].1.get("WEZTERM_UNIX_SOCKET").unwrap(), "H/gui-sock-1");
     }
 
     #[test]
@@ -626,19 +739,25 @@ mod tests {
             let panes = w.list(&win.sock)?;
             assert!(!panes.is_empty(), "list 應該有 pane");
             let pid0 = panes[0].pane_id;
-            w.send_line_and_enter(&win.sock, pid0, "echo live-ok
-第二行")?;
+            w.send_line_and_enter(
+                &win.sock,
+                pid0,
+                "echo live-ok
+第二行",
+            )?;
             std::thread::sleep(Duration::from_millis(1200));
             let t = w.get_text(&win.sock, pid0, None)?;
-            println!("--- get_text ---
-{t}");
+            println!(
+                "--- get_text ---
+{t}"
+            );
             assert!(t.contains("live-ok"), "讀回應該含 live-ok：{t}");
             let p2 = w.spawn(&win.sock, &tmp, &["cmd.exe".to_string()])?;
             assert!(p2 != pid0, "新 pane 編號應不同");
             Ok(())
         })();
         // 只結束自己啟動並記下的視窗程序（含它帶起的子行程樹）
-        let stopped = w.stop(&win);   // 真的走 stop：核對建立時間後才結束
+        let stopped = w.stop(&win); // 真的走 stop：核對建立時間後才結束
         println!("stop 結果：{stopped:?}");
         let _ = stopped;
         let _ = std::fs::remove_dir_all(&tmp);
