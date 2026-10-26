@@ -359,6 +359,18 @@ fn acct_remote_trust_get(app: State<'_, App>) -> bool {
 fn acct_remote_trust_set(app: State<'_, App>, on: bool) -> Result<(), String> {
     acct_remote::set_trust_own(&app.data_dir, on)
 }
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+fn acct_remote_trust_signed_get(app: State<'_, App>) -> bool {
+    acct_remote::trust_signed(&app.data_dir)
+}
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+fn acct_remote_trust_signed_set(app: State<'_, App>, on: bool) -> Result<(), String> {
+    acct_remote::set_trust_signed(&app.data_dir, on)
+}
 
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
@@ -1136,7 +1148,7 @@ pub fn run() {
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_mod::claude_mod_status, claude_quota::claude_quota_all,
             codex_accounts::codex_account_current, usage::usage_summary,
-            acct_remote_report, acct_remote_list, acct_remote_request, acct_remote_status, acct_remote_pending, acct_remote_apply, acct_remote_decline, acct_remote_trust_get, acct_remote_trust_set,
+            acct_remote_report, acct_remote_list, acct_remote_request, acct_remote_status, acct_remote_pending, acct_remote_apply, acct_remote_decline, acct_remote_trust_get, acct_remote_trust_set, acct_remote_trust_signed_get, acct_remote_trust_signed_set,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
             wins::open_chat, wins::open_panel, wins::close_panels, wins::chat_visible, wins::close_chats, wins::open_windows, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,

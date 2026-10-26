@@ -40,6 +40,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
   const s = reactive({
     list: [], current: null, codex: null, codexErr: '', msg: '', busy: false, confirmDel: '',
     trustOwn: false,
+    trustSigned: true,
     remote: { node: '', list: [], reportedAt: '', asnOnline: false, loading: false, busy: false, msg: '' },
     incoming: [],   // 等本機使用者按確認的遠端切換指令：{ id, email, from, fromLabel }
     reports: {},    // 節點 → 那台電腦的帳號回報（設備分類用）：{ error, asnOnline, reportedAt, accounts }
@@ -149,13 +150,20 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     await refresh()
     void report()
   }
-  const loadTrust = async () => { try { s.trustOwn = (await invoke('acct_remote_trust_get')) === true } catch { s.trustOwn = false } }
+  const loadTrust = async () => {
+    try { s.trustOwn = (await invoke('acct_remote_trust_get')) === true } catch { s.trustOwn = false }
+    // 讀不到就當預設（開）：不會因為讀取失敗而悄悄變成關
+    try { s.trustSigned = (await invoke('acct_remote_trust_signed_get')) !== false } catch { s.trustSigned = true }
+  }
   const setTrust = async on => {
     try { await invoke('acct_remote_trust_set', { on }); s.trustOwn = on === true } catch (e) { s.msg = errText(e) }
   }
+  const setTrustSigned = async on => {
+    try { await invoke('acct_remote_trust_signed_set', { on }); s.trustSigned = on === true } catch (e) { s.msg = errText(e) }
+  }
   return {
     state: s,
-    refresh, report, onAuto, loadReports, remoteNodes, remoteSelect, remoteLoad, remoteSwitch, pollIncoming, approve, decline, loadTrust, setTrust,
+    refresh, report, onAuto, loadReports, remoteNodes, remoteSelect, remoteLoad, remoteSwitch, pollIncoming, approve, decline, loadTrust, setTrust, setTrustSigned,
     addCurrent: () => run(async () => { const a = await invoke('claude_account_save'); s.savedSeq++; return `已加入 ${a.email}。` }),
     switchTo: email => run(async () => { const r = await invoke('claude_account_switch', { email }); return `已切換到 ${r.email}。${SWITCH_NOTICE}` }),
     // 刪除要按兩次（第一次變成「確認刪除」），避免誤觸

@@ -1220,7 +1220,7 @@ const app = createApp({
       devices: deviceTree.value,
       accounts: {
         list: accounts.state.list, current: accounts.state.current, codexLine: codexLine(accounts.state.codex, accounts.state.codexErr),
-        busy: accounts.state.busy, confirmDel: accounts.state.confirmDel, msg: accounts.state.msg, trustOwn: accounts.state.trustOwn, autoAdd: autoAddClaude.value, autoNote: accounts.state.autoNote,
+        busy: accounts.state.busy, confirmDel: accounts.state.confirmDel, msg: accounts.state.msg, trustOwn: accounts.state.trustOwn, trustSigned: accounts.state.trustSigned, autoAdd: autoAddClaude.value, autoNote: accounts.state.autoNote,
         remote: { node: accounts.state.remote.node, devices: accounts.remoteNodes(), list: accounts.state.remote.list, loading: accounts.state.remote.loading, busy: accounts.state.remote.busy, msg: accounts.state.remote.msg },
       },
       closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy, blocked: autostart.blocked },
@@ -1249,6 +1249,7 @@ const app = createApp({
         case 'acct-switch': await accounts.switchTo(value); break
         case 'acct-remove': await accounts.remove(value); break
         case 'acct-trust': await accounts.setTrust(value === true); break
+        case 'acct-trust-signed': await accounts.setTrustSigned(value === true); break
         case 'device-move': devPrefs.deviceOrder = moveDevice(deviceTree.value.map(d => d.key), String(value?.node ?? ''), value?.dir === -1 ? -1 : 1, { selfNode: info.node, visible: visibleRows(deviceTree.value).map(d => d.key) }); break
         case 'device-reorder': devPrefs.deviceOrder = reorderDevice(deviceTree.value.map(d => d.key), String(value?.drag ?? ''), String(value?.target ?? ''), value?.after === true, { selfNode: info.node }); break
         case 'device-remove': devPrefs.deviceRemoved = removeDevice(devPrefs.deviceRemoved, String(value ?? ''), { selfNode: info.node }); break
