@@ -42,6 +42,27 @@ fn session_name(s: &Value) -> String {
     s.get("name").and_then(Value::as_str).map(|n| n.trim().to_string()).unwrap_or_default()
 }
 
+/// pi 視窗：pi 擴充每分鐘在 ~/.asn/pi-windows 寫一份登記（含自己的 pid 與視窗名）。
+/// 父行程鏈上某個程序的 pid 正好是登記裡的 pid，它就是呼叫者所在的 pi 視窗。
+/// 這樣 pi 是從別的 Claude 視窗底下開的，寄件人也不會被算成那個 Claude 視窗。
+fn pi_window_name(dir: &Path, pid: u32) -> Option<String> {
+    for e in std::fs::read_dir(dir).ok()?.flatten() {
+        let p = e.path();
+        if p.extension().and_then(|x| x.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(raw) = std::fs::read_to_string(&p) else { continue };
+        let Ok(v) = serde_json::from_str::<Value>(&raw) else { continue };
+        if v.get("engine").and_then(Value::as_str) == Some("pi") && v.get("pid").and_then(Value::as_u64) == Some(pid as u64) {
+            let n = v.get("name").and_then(Value::as_str).map(str::trim).unwrap_or_default();
+            if !n.is_empty() {
+                return Some(n.to_string());
+            }
+        }
+    }
+    None
+}
+
 pub fn inspect(env: &Env) -> Evidence {
     let mut ev = Evidence { env_socket: env.socket.clone().unwrap_or_default(), ..Default::default() };
     let table: Option<ProcTable> = match (env.procs)() {
@@ -55,6 +76,11 @@ pub fn inspect(env: &Env) -> Evidence {
         let mut pid = table.get(&env.self_pid).map(|x| x.0).unwrap_or(0);
         let mut hops = 0;
         while pid != 0 && hops < 40 {
+            if let Some(name) = pi_window_name(&env.relay_home.join("pi-windows"), pid) {
+                ev.chain.push(ChainItem { pid, name: table.get(&pid).map(|x| x.1.clone()).unwrap_or_else(|| "(已結束)".into()), session: Some(name.clone()) });
+                ev.via_chain = Some(Caller { pid, name });
+                break;
+            }
             let s = read_session(&env.sessions_dir, pid);
             ev.chain.push(ChainItem {
                 pid,
