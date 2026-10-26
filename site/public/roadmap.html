@@ -295,12 +295,13 @@
       <div class="glass lane">
         <h3><span class="status doing">二、近期（依序）</span></h3>
         <ul>
-          <li><strong>內建終端機（WezTerm 原型）</strong>：ASN 與終端機是兩隻獨立程式，ASN 不渲染終端內容；WezTerm 是第一候選。隔離實驗已證明在 Windows 上能啟動視窗、列出、送字、讀字，Rust 控制模組已合併（沒接畫面、沒進安裝包）。接下來：真機實測，以及 agy、Grok 登入後互動畫面的實測（A1～A8，需要負責人排 20～30 分鐘、先登入）；是否隨安裝包另議。<span class="refs">#280</span></li>
-          <li><strong>0.1.74 驗收</strong>：開新夥伴「模型與運行分開」（#281）下一版裝好後，請在電腦版與手機第 2 頁目視確認；Grok 接手（#269）重測後可關閉 #239。<span class="refs">#239 #269 #281</span></li>
+          <li><strong>內建終端機（WezTerm）</strong>：ASN 與終端機是兩隻獨立程式，ASN 不渲染終端內容；經 WezTerm 命令列管啟停、送字、讀輸出。真機實測已通過（啟動、列出、送字含中文與換行壓成單行、讀回都成功，#267）；Rust 控制模組與 stop（核對建立時間）已合併。整體實作計畫 #285：第 1 步命令層 #286（term_start／send／read／list／stop）PR 等 asn西川 本機測試與 Gemini審查 審查，兩者都過才合併；接著第 2 步收信注入、改名、接手、閒置判斷。登入後 agy、Grok 互動畫面實測（A1～A8）仍等負責人排 20～30 分鐘並先登入；是否隨安裝包另議。<span class="refs">#280 #285 #286</span></li>
+          <li><strong>整修後端 SQL 測試套件</strong>：舊測試還在建已改名的 irori.kv、資料庫實跑被取消、過期的「最新 migration」斷言、build_downloads 找不到 firebase.json；GitHub 自動測試停擺所以沒人發現。排在 #280 原型之後，asn小東 先從 build_downloads 與過期斷言這兩個小的做起。<span class="refs">#284</span></li>
+          <li><strong>0.1.74 驗收</strong>：開新夥伴「模型與運行分開」（#281）下一版裝好後，請在電腦版與手機第 2 頁目視確認；Grok 接手（#269）仍待負責人在手機重測（#239 已關閉）。<span class="refs">#269 #281</span></li>
           <li><strong>pi 實開測試</strong>：要在桌面開出真的終端機視窗，確認使用者沒在用電腦時進行。<span class="refs">#243</span></li>
           <li><strong>pi 接手（方案 B）</strong>：第一階段底層已合併，其餘接線與選單進行中。<span class="refs">#240 #246</span></li>
           <li><strong>非 Claude 引擎的關閉與切換模型</strong>：背景工作者關閉與 pi 切換模型已做；Gemini、Grok 的切換模型要等協定實測；Codex 等有帳號後實機驗證。<span class="refs">#235</span></li>
-          <li><strong>手機端開新夥伴的實機往返</strong>：電腦端 Gemini、Grok 已實測；手機到電腦的完整往返還沒走過。<span class="refs">#239</span></li>
+          <li><strong>手機端開新夥伴的實機往返</strong>：電腦端 Gemini、Grok 已實測；手機到電腦的完整往返還沒走過（#239 已關閉，往返仍待實機）。</li>
         </ul>
       </div>
 
@@ -312,7 +313,7 @@
           <li><strong>Codex 真機測試</strong>：需要先有 Codex 帳號。</li>
           <li><strong>殘留清理</strong>：舊版收發小程式的安裝檔與過時的說明。</li>
           <li><strong>群組細修</strong>：叫醒順序的呈現、依序回答、手機顯示各帳號剩餘額度。<span class="refs">#228 #230 #231</span></li>
-          <li><strong>議題收尾關閉</strong>：#239、#240 確認後關閉。</li>
+          <li><strong>議題收尾關閉</strong>：#240 確認後關閉。</li>
         </ul>
       </div>
     </div>
@@ -327,6 +328,14 @@
         <thead><tr><th scope="col">時間</th><th scope="col">出席／回覆</th><th scope="col">各項進度</th><th scope="col">決議</th><th scope="col">分派</th><th scope="col">改善意見</th></tr></thead>
         <tbody>
 <!-- meetings:start（由 site/make-roadmap-page.mjs 產生，不要手改；資料在 site/meetings.json） -->
+        <tr>
+          <th scope="row">2026-10-26 12:00</th>
+          <td data-label="出席／回覆">ASN-開發 主持；asn西川、asn小東、Gemini審查 待回</td>
+          <td data-label="各項進度">08:00 決議已完成——藍圖對齊 0.1.74 並寫入首筆記錄（#283 已合併、#282 已關）；WezTerm 真機實測通過；Gemini審查 審控制模組通過並提三項細節，已修（81d3f06）；新增 stop(window) 建立時間核對（9e712d3）；#285 WezTerm 整體實作計畫開立，#286 第一步命令層 PR 待測試與審查；#284 SQL 測試套件整修開立；#239 已關</td>
+          <td data-label="決議">#286 需 asn西川 本機測試與 Gemini審查 審查都通過才合併；之後進行 #285 第二步收信注入；藍圖待辦同步本次進度</td>
+          <td data-label="分派">asn西川 #286 本機測試；Gemini審查 審 stop(window) 與 #286；asn小東 寫入本記錄並更新藍圖待辦、排定 #284；小良哥 排登入後 A1～A8 實測時段</td>
+          <td data-label="改善意見">藍圖待辦應隨合併同步更新；審查交付時附預計回覆時間，逾時由主持人改派</td>
+        </tr>
         <tr>
           <th scope="row">2026-10-26 08:00</th>
           <td data-label="出席／回覆">ASN-開發 主持；asn西川、asn小東、Gemini審查 待回</td>
