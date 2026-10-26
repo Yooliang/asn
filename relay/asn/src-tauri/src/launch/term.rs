@@ -10,6 +10,7 @@
 //! 忙閒只實作 grok：連續兩次取樣（中間用 Runner::sleep，間隔可注入；假執行器不真的等）畫面與游標都沒變，
 //! 且最後一個非空白行全文等於暫定提示符，才是 idle。對不上、agy、或讀取失敗都是 unknown，不把「畫面停住」猜成閒置。
 //! 畫面含「Do you trust the contents of this directory」則是 waiting_user，絕不代答。
+//! 代答只有 term_answer：前端使用者確認後才送按鍵，後端其他路徑不呼叫它。
 //!
 //! 認領不掃整個系統。只讀 data_dir 裡自己寫的對照表，用記下的程序編號重算通訊路徑（檔案裡的路徑一律不理），
 //! 建立時間相符且通訊檔存在才 list。workspace 是 `asn-{編號}`，或分頁標題是 `ASN:{編號}`（或後面空一格）才放回對照表。
@@ -375,6 +376,20 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         })
     }
 
+    /// 使用者確認後才代送按鍵。只認白名單裡的提示；送出前再讀一次畫面，提示不在就拒絕、不送字。
+    /// 走既有的 send（單行、不貼上、帶通訊檔）。後端其他方法不得呼叫這裡。
+    pub fn answer(&self, id: &str, prompt_kind: &str, choice: &str) -> Result<(), String> {
+        let snap = self.snapshot(id)?;
+        let key = answer_key(prompt_kind, choice)?;
+        let dir = self.dir()?;
+        let w = self.wez(&dir);
+        let text = w.get_text(&snap.window.sock, snap.pane_id, Some(-STATUS_LINES))?;
+        if !prompt_still_shown(prompt_kind, &text) {
+            return Err("這個提示已經不在畫面上，沒有送出".into());
+        }
+        self.send(id, key, false)
+    }
+
     /// 改自己這個終端的分頁標題。使用者給的字會接在 `ASN:{編號} ` 後面，前綴不拿掉（認領靠它）。
     /// 長度與字元先檢查，不合法就不呼叫 cli。
     pub fn rename(&self, id: &str, title: &str) -> Result<(), String> {
@@ -671,6 +686,24 @@ fn unknown_status(profile: &str, reason: &str) -> TermStatus {
     }
 }
 
+/// 白名單：新的提示種類只加在這裡。trust_dialog 的 yes 送 y、no 送 n，不另外送 Enter。
+fn answer_key(prompt_kind: &str, choice: &str) -> Result<&'static str, String> {
+    match (prompt_kind, choice) {
+        ("trust_dialog", "yes") => Ok("y"),
+        ("trust_dialog", "no") => Ok("n"),
+        ("trust_dialog", _) => Err("這個提示沒有這個選項".into()),
+        _ => Err("不認得這個提示，不能代答".into()),
+    }
+}
+
+/// 送出前再看一次：這個提示還在畫面上才算。沒列進來的種類一律當不在，避免漏查就送字。
+fn prompt_still_shown(prompt_kind: &str, text: &str) -> bool {
+    match prompt_kind {
+        "trust_dialog" => text.contains(GROK_TRUST_MARK),
+        _ => false,
+    }
+}
+
 fn trust_status(profile: &str, cursor_x: i64, cursor_y: i64) -> TermStatus {
     TermStatus {
         state: "waiting_user".into(),
@@ -774,6 +807,14 @@ pub struct TermStatusReq {
 pub struct TermRenameReq {
     pub id: String,
     pub title: String,
+}
+
+#[cfg(feature = "gui")]
+#[derive(Debug, serde::Deserialize)]
+pub struct TermAnswerReq {
+    pub id: String,
+    pub prompt_kind: String,
+    pub choice: String,
 }
 
 /// 正式路徑：讀啟動設定、沿用本機資料夾授權，再交給 TermService。
@@ -1109,7 +1150,7 @@ mod tests {
     fn 指令只收自己的編號_不能傳程序編號或通訊路徑() {
         let src = include_str!("term.rs");
         let lib = include_str!("../lib.rs");
-        for name in ["TermStartReq", "TermSendReq", "TermReadReq", "TermStopReq", "TermStatusReq", "TermRenameReq"] {
+        for name in ["TermStartReq", "TermSendReq", "TermReadReq", "TermStopReq", "TermStatusReq", "TermRenameReq", "TermAnswerReq"] {
             let marker = format!("struct {name}");
             let rest = src.split(&marker).nth(1).unwrap_or_else(|| panic!("找不到 {name}"));
             let body = rest.split('}').next().unwrap();
@@ -1118,6 +1159,9 @@ mod tests {
         assert!(lib.contains("terms.stop(&req.id)"), "關閉只把編號交給 stop");
         assert!(lib.contains("terms.status(&req.id)"), "忙閒只把編號交給 status");
         assert!(lib.contains("terms.rename(&req.id, &req.title)"), "改名只把編號與標題交給 rename");
+        assert!(lib.contains("terms.answer(&req.id, &req.prompt_kind, &req.choice)"), "代答只把編號、提示種類與選項交給 answer");
+        let head = src.split("mod tests").next().unwrap();
+        assert!(!head.contains("self.answer("), "後端其他路徑不得自己呼叫 answer");
         assert!(!lib.contains("kill_tree"), "命令層不自己結束行程");
     }
 
@@ -1132,6 +1176,7 @@ mod tests {
             rig.svc.stop("999").unwrap_err(),
             rig.svc.rename("999", "名稱").unwrap_err(),
             rig.svc.status("999").unwrap_err(),
+            rig.svc.answer("999", "trust_dialog", "yes").unwrap_err(),
         ] {
             assert!(op.contains("沒有這個終端"), "{op}");
         }
@@ -1367,6 +1412,44 @@ mod tests {
         assert_eq!(st.state, "unknown", "agy 沒有這條規則");
         assert_eq!(count_cmd(&rig.runner, "send-text"), 0);
         assert!(!rig.runner.args().iter().any(|a| a.iter().any(|x| x == "get-text")));
+    }
+
+    #[test]
+    fn 使用者確認後才代送信任提問的按鍵() {
+        let trust = "Do you trust the contents of this directory? (Yes, proceed y / No, quit n)\nGrok Build  1.0.70\n";
+        let rig = make(default_profiles(), vec![]);
+        let id = rig.svc.start("grok", &rig.cwd, &rig.config).unwrap();
+        *rig.runner.inner.screen.borrow_mut() = trust.into();
+        rig.svc.answer(&id, "trust_dialog", "yes").unwrap();
+        let sent: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "send-text")).collect();
+        assert_eq!(sent, vec![vec!["cli".to_string(), "send-text".into(), "--pane-id".into(), "7".into(), "--no-paste".into(), "y".into()]]);
+        let trace = rig.runner.inner.trace.borrow().clone();
+        assert_eq!(trace[trace.len() - 2], "run:get-text", "送出前要先讀畫面：{trace:?}");
+        assert_eq!(trace[trace.len() - 1], "run:send-text");
+        assert_cli_uses_socket(&rig.runner);
+        rig.svc.answer(&id, "trust_dialog", "no").unwrap();
+        let sent: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "send-text")).collect();
+        assert_eq!(sent.last().unwrap().last().map(String::as_str), Some("n"));
+        assert!(!sent.iter().any(|a| a.iter().any(|x| x == "\r")), "只送單一字，不另外送 Enter");
+
+        *rig.runner.inner.screen.borrow_mut() = "Grok Build  1.0.70\n".into();
+        let before = count_cmd(&rig.runner, "send-text");
+        let err = rig.svc.answer(&id, "trust_dialog", "yes").unwrap_err();
+        assert!(err.contains("不在畫面"), "{err}");
+        assert_eq!(count_cmd(&rig.runner, "send-text"), before, "提示不在就不可送字");
+
+        let before = rig.runner.args().len();
+        let err = rig.svc.answer(&id, "something_else", "yes").unwrap_err();
+        assert!(err.contains("不認得"), "{err}");
+        assert_eq!(rig.runner.args().len(), before, "未知提示種類不可呼叫 WezTerm");
+        let err = rig.svc.answer(&id, "trust_dialog", "maybe").unwrap_err();
+        assert!(err.contains("沒有這個選項"), "{err}");
+        assert_eq!(rig.runner.args().len(), before, "不認得的選項不可送字");
+
+        let before = rig.runner.args().len();
+        let err = rig.svc.answer("999", "trust_dialog", "yes").unwrap_err();
+        assert!(err.contains("沒有這個終端"), "{err}");
+        assert_eq!(rig.runner.args().len(), before, "未知編號不可送字");
     }
 
     #[test]
