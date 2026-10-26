@@ -500,6 +500,28 @@
         <button type="button" class="m-btn m-ops-cancel" :disabled="sec.busy" @click="laterSecret">{{ SECRET_TEXT.later }}</button>
       </section>
     </div>
+    <!-- 電腦要往終端送字／代答提問（#285、#296）：底部浮層，樣式沿用「⋯」選單。哪台電腦由設備名稱對來；預覽只放前 200 字且已去掉控制字元。確認或拒絕都在手機上，不必去遠端桌面 -->
+    <div class="m-ops" v-if="nav.sheet === 'termreq' && tq.cur" @click.self="laterTermReq">
+      <section class="m-ops-panel" role="dialog" aria-modal="true" :aria-label="tq.cur.kind === 'answer' ? TERMREQ_TEXT.titleAnswer : TERMREQ_TEXT.titleSend">
+        <h2 class="m-ops-h">{{ tq.cur.kind === 'answer' ? TERMREQ_TEXT.titleAnswer : TERMREQ_TEXT.titleSend }}</h2>
+        <p class="m-ops-lead">{{ tq.cur.kind === 'answer' ? TERMREQ_TEXT.leadAnswer : TERMREQ_TEXT.leadSend }}</p>
+        <dl class="m-ops-rows">
+          <dt>{{ TERMREQ_TEXT.deviceLabel }}</dt><dd>{{ tq.cur.deviceName }}</dd>
+          <dt>{{ TERMREQ_TEXT.termLabel }}</dt><dd>{{ tq.cur.term }}</dd>
+          <template v-if="tq.cur.folder"><dt>{{ TERMREQ_TEXT.folderLabel }}</dt><dd>{{ tq.cur.folder }}</dd></template>
+          <dt>{{ TERMREQ_TEXT.previewLabel }}</dt><dd class="m-term-preview">{{ tq.cur.preview }}</dd>
+        </dl>
+        <div class="m-term-opts" role="group" :aria-label="TERMREQ_TEXT.optionLabel" v-if="tq.cur.kind === 'answer'">
+          <button type="button" class="m-btn m-term-opt" v-for="o in tq.cur.options" :key="o.n" :class="{ on: tq.choice === o.n }" :aria-pressed="tq.choice === o.n" :disabled="tq.busy" @click="tq.choice = o.n">{{ o.label }}</button>
+        </div>
+        <p class="m-note" v-if="tq.cur.kind === 'send'">{{ tq.cur.enter ? TERMREQ_TEXT.enterYes : TERMREQ_TEXT.enterNo }}</p>
+        <p class="m-note">{{ TERMREQ_TEXT.note }}　{{ tqCountdown }}</p>
+        <p class="m-err" v-if="tq.error" role="alert">{{ tq.error }}</p>
+        <button type="button" class="m-btn m-btn-big" :disabled="tq.busy || (tq.cur.kind === 'answer' && tq.choice === null)" @click="decideTermReq('approve')">{{ TERMREQ_TEXT.ok }}</button>
+        <button type="button" class="m-btn m-ops-cancel m-danger" :disabled="tq.busy" @click="decideTermReq('deny')">{{ TERMREQ_TEXT.deny }}</button>
+        <button type="button" class="m-btn m-ops-cancel" :disabled="tq.busy" @click="laterTermReq">{{ TERMREQ_TEXT.later }}</button>
+      </section>
+    </div>
     <group-sheet :flow="groupFlow"></group-sheet>
   </template>
 </div>
