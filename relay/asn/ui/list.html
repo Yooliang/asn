@@ -283,7 +283,7 @@
   </asn-dialog>
   <asn-dialog v-if="accounts.state.done.length" title="已依手機的要求切換 Claude 帳號" @close="accounts.dismissDone(accounts.state.done[0].id)">
     <p class="launch-notice-body">「{{ accounts.state.done[0].fromLabel }}」要求把這台電腦的 Claude 帳號切換成 {{ accounts.state.done[0].email }}，已經切好了。</p>
-    <p class="launch-notice-body">開著的 Claude 視窗要關掉重開，才會用新帳號。不是你本人操作，請按「還原」，並到設定關掉「手機簽章免確認」。</p>
+    <p class="launch-notice-body">開著的 Claude 視窗要關掉重開，才會用新帳號。不是你本人操作，請按「還原」（會回到這次切換之前的帳號），並到設定關掉「我在手機上用本人帳號發出的切換，不用再到這台確認」。</p>
     <div class="partner-actions">
       <button class="aero-btn" type="button" @click="accounts.undo(accounts.state.done[0].id)">還原</button>
       <button class="aero-btn primary" type="button" @click="accounts.dismissDone(accounts.state.done[0].id)">知道了</button>
