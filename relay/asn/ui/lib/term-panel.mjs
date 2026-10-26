@@ -61,6 +61,31 @@ export function willSendText(pv, n) {
 }
 export const sentText = desc => (desc ? `已送出：${String(desc).slice(0, 80)}` : '已送出')
 
+// ---- 卡太久的提示（借鏡 agent-board 的巡檢；#310、#426 第 5 項）----
+// 前端只知道「這個終端一直是什麼狀態」，不知道畫面有沒有變，所以不說「卡住」，只說「忙碌已 N 分鐘」「已等你回答 N 分鐘」。
+// 只顯示狀態與時間，不碰也不轉寄終端畫面文字（避免反射型 prompt injection）。計時從 ASN 第一次看到這個狀態起算，ASN 重開會重新計。
+export const BUSY_LONG_MIN = 15
+export const WAIT_LONG_MIN = 10
+
+/**
+ * prev：上一輪的 { 編號: { state, since } }；rows：這一輪的清單列；nowMs：現在（毫秒）。
+ * 回 { since, rows }：since 是這一輪的對照（狀態變了或新出現就重新起算，消失的丟掉）；rows 每列多 held（超過門檻才有字，否則空字串）。
+ */
+export function trackHeld(prev, rows, nowMs) {
+  const since = {}
+  const out = (Array.isArray(rows) ? rows : []).map(r => {
+    const old = prev?.[r.id]
+    const s = old && old.state === r.state && Number.isFinite(old.since) ? old.since : nowMs
+    since[r.id] = { state: r.state, since: s }
+    const min = Math.floor(Math.max(0, nowMs - s) / 60000)
+    let held = ''
+    if (r.state === 'busy' && min >= BUSY_LONG_MIN) held = `忙碌已 ${min} 分鐘`
+    else if (r.state === 'waiting_user' && min >= WAIT_LONG_MIN) held = `已等你回答 ${min} 分鐘`
+    return { ...r, held }
+  })
+  return { since, rows: out }
+}
+
 // ---- ASN 替使用者往終端送字（#296）----
 // 使用者在清單裡寫好文字、按「送出」→ 先跳確認框，寫清楚「送到哪個終端／哪個資料夾／送什麼字」→ 按「確認送出」才呼叫 term_send。
 // 沒有任何自動送出；終端正在等你回答（信任資料夾、選單）時不能送字，請先處理提示。

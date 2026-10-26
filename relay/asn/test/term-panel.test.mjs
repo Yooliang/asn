@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { PROMPT_TEXT_MAX, SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, folderName, kindTitle, promptKey, promptView, rowsOf, sendConfirmView, sendDraftView, sendRequest, sentText, stateView, unlockRequest, willSendText } from '../ui/lib/term-panel.mjs'
+import { BUSY_LONG_MIN, PROMPT_TEXT_MAX, SEND_MAX, UNLOCK_TEXT, WAIT_LONG_MIN, adoptRequest, answerRequest, candidateRows, createTermPoller, folderName, kindTitle, promptKey, promptView, rowsOf, sendConfirmView, sendDraftView, sendRequest, sentText, stateView, trackHeld, unlockRequest, willSendText } from '../ui/lib/term-panel.mjs'
 
 const MENU = { kind: 'menu', text: '要信任這個資料夾嗎？', options: [{ n: 2, label: 'No, quit' }, { n: 1, label: 'Yes, proceed' }] }
 
@@ -202,6 +202,35 @@ test('接線：term_send 只在 termSendConfirm 裡呼叫一次；只有「確�
   assert.ok(!ask.includes('termSend('), 'termSendAsk 不送字')
   assert.ok(tauri.includes("termSend: req => invoke('term_send', { req })"))
   assert.ok(html.includes('aria-label="要送進終端的文字"'))
+})
+
+// ---- 卡太久的提示 ----
+test('忙碌／等你回答太久：從第一次看到這個狀態起算，超過門檻才出字；狀態一變就重新起算；消失的列不留', () => {
+  const M = 60000, T0 = 1_000_000
+  const r = (id, state) => ({ id, state })
+  let t = trackHeld({}, [r('1', 'busy'), r('2', 'waiting_user'), r('3', 'idle')], T0)
+  assert.deepEqual(t.rows.map(x => x.held), ['', '', ''], '剛看到：沒有提示')
+  t = trackHeld(t.since, [r('1', 'busy'), r('2', 'waiting_user'), r('3', 'idle')], T0 + (WAIT_LONG_MIN - 1) * M)
+  assert.deepEqual(t.rows.map(x => x.held), ['', '', ''], '還沒到門檻')
+  t = trackHeld(t.since, [r('1', 'busy'), r('2', 'waiting_user'), r('3', 'idle')], T0 + WAIT_LONG_MIN * M + 5000)
+  assert.deepEqual(t.rows.map(x => x.held), ['', `已等你回答 ${WAIT_LONG_MIN} 分鐘`, ''], '等你回答先到門檻；閒置永遠不提示')
+  t = trackHeld(t.since, [r('1', 'busy'), r('2', 'waiting_user')], T0 + BUSY_LONG_MIN * M)
+  assert.equal(t.rows[0].held, `忙碌已 ${BUSY_LONG_MIN} 分鐘`)
+  assert.equal(t.since['3'], undefined, '消失的列從對照拿掉')
+  t = trackHeld(t.since, [r('1', 'idle'), r('2', 'waiting_user')], T0 + (BUSY_LONG_MIN + 1) * M)
+  assert.equal(t.rows[0].held, '', '狀態變了就不再提示')
+  t = trackHeld(t.since, [r('1', 'busy')], T0 + (BUSY_LONG_MIN + 2) * M)
+  assert.equal(t.rows[0].held, '', '又變回忙碌是重新起算')
+  assert.deepEqual(trackHeld(undefined, 'x', T0), { since: {}, rows: [] }, '壞資料不丟錯')
+  assert.equal(trackHeld({ 1: { state: 'busy', since: 'x' } }, [r('1', 'busy')], T0).rows[0].held, '', '對照壞掉就重新起算')
+})
+
+test('卡太久的提示：只有狀態與時間，不帶終端畫面文字；接線在輪詢更新裡', () => {
+  const t = trackHeld({}, [{ id: '1', state: 'waiting_user', prompt: { text: '機密畫面文字' } }], 0).rows[0]
+  assert.ok(!t.held.includes('機密'), '提示文字不含畫面內容')
+  const js = readUi('list.js'), html = readUi('list.html')
+  assert.ok(js.includes('trackHeld(termSince, raw, Date.now())'))
+  assert.ok(html.includes('class="term-held" v-if="r.held"'))
 })
 
 // ---- 接手使用者自己開的 WezTerm 窗格（#285，後端 #313）----

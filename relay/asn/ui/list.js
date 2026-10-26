@@ -28,7 +28,7 @@ import { normalizeSession, restoreSession, sameSession, snapshotSession, trailin
 import { chatTabSameZone, closeAllChatTabs, closeIdleChatTabs, idleTabIds, withCallState, dropInsertBefore, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
 import { nowPlayingLine, normalizeNowPlaying } from './lib/now-playing.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, normalizeClose, normalizeFrame, totalUnread, notifyFromSaved, notifyPlan, notifyWith } from './lib/prefs.mjs'
-import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, unlockRequest, willSendText } from './lib/term-panel.mjs'
+import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
 import { PI_SETUP_TEXT, piSetupError, piSetupView } from './lib/pi-setup.mjs'
@@ -968,9 +968,13 @@ async function adoptUnlockConfirm() {
   try { await transport.termAdoptUnlock(req); adopt.unlocked[`${a.id}:${a.kind}`] = true; adopt.unlockAsk = null } catch (e) { adopt.error = String(e?.message ?? e); adopt.unlockAsk = null } finally { adopt.busy = '' }
 }
 // 沒有終端或舊版後端（沒有這幾個命令）時 term_list 會失敗，靜默略過；截圖模式不輪詢
+let termSince = {}
 const termPoller = info.shot ? null : createTermPoller({
   transport,
-  onUpdate: rows => {
+  onUpdate: raw => {
+    const t = trackHeld(termSince, raw, Date.now())   // 忙碌／等你回答太久的提示（只有狀態與時間）
+    termSince = t.since
+    const rows = t.rows
     terms.rows = rows
     const live = new Set(rows.filter(r => r.prompt).map(r => promptKey(r.id, r.prompt)))
     for (const k of Object.keys(terms.dismissed)) if (!live.has(k)) delete terms.dismissed[k]   // 提示消失了就忘掉「我自己處理」，下次同樣的提示再跳
