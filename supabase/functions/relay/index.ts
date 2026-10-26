@@ -19,6 +19,7 @@ import * as signal from "../_shared/signal.ts";
 import { handleNodeLaunchAction, LAUNCH_ACTIONS, sanitizeLauncher } from "../_shared/launch.ts";
 import { handleNodePartnerOpAction, PARTNER_OP_ACTIONS } from "../_shared/partner_ops.ts";
 import { ACCT_ACTIONS, handleAcctAction } from "../_shared/account_switch.ts";
+import { handleTermReqAction, TERM_REQ_ACTIONS, TERM_REQ_SIGNED_ACTIONS } from "../_shared/term_request.ts";
 import { handleSecretAction, SECRET_ACTIONS } from "../_shared/secret_remote.ts";
 import { handleUsageAction, USAGE_ACTIONS } from "../_shared/usage.ts";
 import {
@@ -530,6 +531,14 @@ Deno.serve(async (req) => {
     // 手機（member 節點）靠本人簽章才准看別台清單、送切換；其他動作不讀簽章
     const signedAcct = (action === "acct_list" || action === "acct_switch") ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
     const r = await handleAcctAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedAcct);
+    return json(r.status, r.body);
+  }
+  // 手機確認終端送字／代答（見 _shared/term_request.ts）：桌面用節點金鑰建立、領取、回報；手機用本人簽章列出與決定（沒簽章一律 403）
+  if (action && TERM_REQ_ACTIONS.has(action)) {
+    const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
+    const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
+    const signedTerm = TERM_REQ_SIGNED_ACTIONS.has(action) ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
+    const r = await handleTermReqAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedTerm);
     return json(r.status, r.body);
   }
   // 真人的群組動作（建群組、邀請、接受邀請、一對一升級、退出、帶自己的 AI、主持人確認；見 _shared/groups.ts）：
