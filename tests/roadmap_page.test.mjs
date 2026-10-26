@@ -170,3 +170,11 @@ test('待辦與優先順序：藍圖頁上有這一區，分成需決定、近�
   assert.ok(!todo.includes('收發室'))
   assert.ok(!/\sstyle=/.test(todo))
 })
+
+// 同步機制（#297）：總表標題的版本要和 CHANGELOG 最新版一致；發版後忘了更新藍圖，這裡會變紅，提醒一併更新總表、待辦與會議記錄
+test('總表標題的主線版本與 CHANGELOG 最新版一致（發版要一併更新藍圖）', () => {
+  const latest = parseChangelog(changelog)[0].version
+  const m = /各家 AI 與各項管理功能的現況（依[^（]*主線程式（(\d+\.\d+\.\d+)）/.exec(page)
+  assert.ok(m, '找不到總表標題的主線版本')
+  assert.equal(m[1], latest, `總表標題寫 ${m[1]}，CHANGELOG 最新版是 ${latest}：發版後請同步藍圖（總表、待辦與優先順序、會議記錄）`)
+})
