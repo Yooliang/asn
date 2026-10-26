@@ -1,11 +1,11 @@
 {
-  "version": "0.1.75",
-  "notes": "下載版的檔案補帶共用資料夾、內建終端機的命令層（開、送字、讀畫面、結束、忙閒、改名、重啟後認回自己開的視窗；目前還沒有畫面入口）",
-  "pub_date": "2026-10-26T05:36:36.884Z",
+  "version": "0.1.76",
+  "notes": "電腦版新增「終端」按鈕與清單：列出由 ASN 開的終端機；終端等你回答時（信任資料夾、上下選單）跳出提示框，由你先選一項再按「送出」才代按，絕不自動代答；判斷 Grok 是閒置、處理中或在等你回答（需另外備好內建終端機的程式，尚未隨安裝檔附帶）",
+  "pub_date": "2026-10-26T07:48:08.090Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjlobXEzS0hIVTRUT053bGREZk01NzI3dnM3R25SL0hlcE9kSzRaMDF4eXJqODBtSDBYQUNDTGhvREI0OG5Sc2hoWkxCZTdwV3E2Vk5kd1JrZ05MendvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyOTkyOTk2CWZpbGU6QVNOXzAuMS43NV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjc1CndlVEhscUFzczdjV3FPbWt5YjN1TURkdllMaHBiemFJTGJVNG1naFFGUDJPVk1wWkhNM056Uk1tTXBlZm9GdjM2MlREME1PY21uUCt2dTk4WXJaS0NRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.75_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjNTSEM5S0xra09zY0JUUm1tak5rN0NVSFlKRmxvN1c4WUNXR1NGYmVNZm1RbGpEcm9zMEwrMUhFZ0hOT0NkTHh5NnlSdXpEa3RHRUxRdHdPWjVDdnc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDAwODg3CWZpbGU6QVNOXzAuMS43Nl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjc2CmM1RE9PQ0w1bHRYaXlJQmJuUmNmRldwWVg5c1dSRzJNSDdWd1FsUG1SeHhmNTJjMlBJZUhXbnJyVEZIZlBLeUVwWm1MK2gvSDk1WGhqbW40a2p0ZERnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.76_x64-setup.exe"
     }
   }
 }

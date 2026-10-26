@@ -1,8 +1,8 @@
 {
-  "version": "0.1.75",
-  "versionCode": 1075,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.75_android.apk",
-  "sha256": "8ee12fa78b7808d3fbc5ca48134b76c9282192b3c5a5e293ab8030c61ad9e42f",
-  "notes": "下載版的檔案補帶共用資料夾、內建終端機的命令層（開、送字、讀畫面、結束、忙閒、改名、重啟後認回自己開的視窗；目前還沒有畫面入口）",
-  "bytes": 9379300
+  "version": "0.1.76",
+  "versionCode": 1076,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.76_android.apk",
+  "sha256": "c29e23b2c5197fd47ad4eb074c25cf8e8a5db7f5e5ca32f9adcdd6bf5b8bf9ce",
+  "notes": "電腦版新增「終端」按鈕與清單：列出由 ASN 開的終端機；終端等你回答時（信任資料夾、上下選單）跳出提示框，由你先選一項再按「送出」才代按，絕不自動代答；判斷 Grok 是閒置、處理中或在等你回答（需另外備好內建終端機的程式，尚未隨安裝檔附帶）",
+  "bytes": 9387492
 }

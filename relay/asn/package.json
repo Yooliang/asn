@@ -1,6 +1,6 @@
 {
   "name": "asn",
-  "version": "0.1.75",
+  "version": "0.1.76",
   "private": true,
   "type": "module",
   "description": "ASN 即時通：收發室的懷舊桌面介面（Tauri 2 + Vue 3）",
