@@ -146,6 +146,10 @@ pub(crate) trait Files {
     fn raw_settings(&self) -> Option<String> {
         self.settings()
     }
+    /// 設定檔裡「實際記錄的那串原樣字串」，解開後等於 `target` 的那一筆（pi 存的是相對路徑時，`pi remove` 可能只認原樣字串）。預設沒有
+    fn raw_entry_for(&self, _target: &str) -> Option<String> {
+        None
+    }
     fn exists(&self, p: &str) -> bool;
     fn read_marker(&self) -> Option<String>;
     fn write_marker(&self, path: &str) -> Result<(), String>;
@@ -177,8 +181,15 @@ pub(crate) fn install(pi: &Path, ext_dir: &Path, auto_dir_has_index: bool, runne
 /// 移除：只移除「我們裝的那一筆」（記錄檔裡的路徑；沒有記錄就用現在的擴充資料夾）。pi 說找不到（本來就沒裝）也算成功
 pub(crate) fn remove(pi: &Path, ext_dir: Option<&Path>, runner: &dyn Runner, files: &dyn Files) -> Result<(), String> {
     let target = files.read_marker().or_else(|| ext_dir.map(|d| d.to_string_lossy().to_string())).ok_or("不知道要移除哪一筆")?;
-    let (code, out) = runner.run(pi, &["remove".to_string(), target.clone()]).map_err(|e| format!("pi 沒有跑起來：{e}"))?;
-    let still = package_entries(files.settings().as_deref()).iter().any(|e| norm(e) == norm(&target));
+    let (mut code, mut out) = runner.run(pi, &["remove".to_string(), target.clone()]).map_err(|e| format!("pi 沒有跑起來：{e}"))?;
+    let mut still = package_entries(files.settings().as_deref()).iter().any(|e| norm(e) == norm(&target));
+    if still {
+        // pi 沒有移除掉：設定檔存的若是另一種寫法（例如相對路徑），改用原樣字串再試一次（只移除同一筆）
+        if let Some(raw) = files.raw_entry_for(&target).filter(|r| r.as_str() != target) {
+            (code, out) = runner.run(pi, &["remove".to_string(), raw]).map_err(|e| format!("pi 沒有跑起來：{e}"))?;
+            still = package_entries(files.settings().as_deref()).iter().any(|e| norm(e) == norm(&target));
+        }
+    }
     if code != 0 && still {
         return Err(format!("pi 移除擴充失敗（結束碼 {code}）：{}", tail(&out)));
     }
@@ -251,6 +262,9 @@ impl Files for RealFiles {
     }
     fn raw_settings(&self) -> Option<String> {
         std::fs::read_to_string(self.agent.join("settings.json")).ok()
+    }
+    fn raw_entry_for(&self, target: &str) -> Option<String> {
+        package_entries(self.raw_settings().as_deref()).into_iter().find(|e| norm(&resolve_entry(&self.agent, e)) == norm(target))
     }
     fn exists(&self, p: &str) -> bool {
         Path::new(p).exists()
@@ -623,6 +637,65 @@ mod tests {
         assert!(compute_state(true, Some(ext), Some(&obj), false, &exists_none).installed);
         assert_eq!(resolve_settings(base, "{壞掉".into()).unwrap(), "{壞掉");
         assert_eq!(resolve_settings(base, r#"{"a":1}"#.into()).unwrap(), r#"{"a":1}"#);
+    }
+
+    /// 設定檔存相對路徑、而且 pi 只認原樣字串的情形（模擬）
+    struct RelFiles {
+        raw: String,
+        abs: String,
+        present: RefCell<bool>,
+    }
+    impl Files for RelFiles {
+        fn settings(&self) -> Option<String> {
+            Some(json!({ "packages": if *self.present.borrow() { vec![self.abs.clone()] } else { vec![] } }).to_string())
+        }
+        fn exists(&self, _: &str) -> bool {
+            true
+        }
+        fn read_marker(&self) -> Option<String> {
+            Some(self.abs.clone())
+        }
+        fn write_marker(&self, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn clear_marker(&self) {}
+        fn raw_entry_for(&self, target: &str) -> Option<String> {
+            (norm(target) == norm(&self.abs)).then(|| self.raw.clone())
+        }
+    }
+    struct RelPi<'a> {
+        files: &'a RelFiles,
+        calls: RefCell<Vec<String>>,
+    }
+    impl Runner for RelPi<'_> {
+        fn run(&self, _p: &Path, args: &[String]) -> Result<(i32, String), String> {
+            self.calls.borrow_mut().push(args[1].clone());
+            if args[1] == self.files.raw {
+                *self.files.present.borrow_mut() = false;
+                Ok((0, "Removed".into()))
+            } else {
+                Ok((1, "No matching package found".into()))
+            }
+        }
+    }
+
+    #[test]
+    fn 移除_pi_只認設定檔裡的原樣字串時_改用原樣字串再試一次_只移除同一筆() {
+        let f = RelFiles { raw: r"..\..\AppData\Local\ASN\pi-extension".into(), abs: r"C:\Users\u\AppData\Local\ASN\pi-extension".into(), present: RefCell::new(true) };
+        let pi = RelPi { files: &f, calls: RefCell::new(vec![]) };
+        remove(Path::new("pi"), None, &pi, &f).unwrap();
+        assert_eq!(*pi.calls.borrow(), vec![f.abs.clone(), f.raw.clone()], "先用絕對路徑，沒移掉再用原樣字串");
+        assert!(!*f.present.borrow());
+        // 原樣字串也移不掉：照實回 pi 的錯誤，不謊稱成功
+        let f2 = RelFiles { raw: "never".into(), abs: f.abs.clone(), present: RefCell::new(true) };
+        struct Stuck;
+        impl Runner for Stuck {
+            fn run(&self, _: &Path, _: &[String]) -> Result<(i32, String), String> {
+                Ok((1, "locked".into()))
+            }
+        }
+        let e = remove(Path::new("pi"), None, &Stuck, &f2).unwrap_err();
+        assert!(e.contains("locked"), "{e}");
     }
 
     fn st(pi: bool, ext: bool, installed: bool) -> SetupState {
