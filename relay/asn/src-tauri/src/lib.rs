@@ -522,7 +522,7 @@ async fn term_stop(terms: State<'_, Arc<launch::term::LiveTerms>>, req: launch::
     launch::blocking_timeout(move || terms.stop(&req.id)).await
 }
 
-/// 自己開的終端現在忙還是閒。只有 grok 有規則；判斷不了回 unknown，不猜。信任資料夾的提問是 waiting_user，不代答。
+/// 自己開的終端現在忙還是閒。只有 grok 有規則；判斷不了回 unknown，不猜。等人回答時是 waiting_user，並附上 prompt，不代答。
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
@@ -540,13 +540,14 @@ async fn term_rename(terms: State<'_, Arc<launch::term::LiveTerms>>, req: launch
     launch::blocking_timeout(move || terms.rename(&req.id, &req.title)).await
 }
 
-/// 使用者確認某個提示後，才代送對應按鍵。只收編號、提示種類與選項；後端不會自己呼叫。
+/// 使用者在 UI 提示框按了第 n 個選項後，前端才呼叫。這個命令本身證明不了有按確認。
+/// UI 的提示框必須是唯一入口；後端其他路徑不得呼叫。只收編號、提示種類與選項編號。
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
-async fn term_answer(terms: State<'_, Arc<launch::term::LiveTerms>>, req: launch::term::TermAnswerReq) -> Result<(), String> {
+async fn term_answer(terms: State<'_, Arc<launch::term::LiveTerms>>, req: launch::term::TermAnswerReq) -> Result<launch::term::TermAnswered, String> {
     let terms = terms.inner().clone();
-    launch::blocking_timeout(move || terms.answer(&req.id, &req.prompt_kind, &req.choice)).await
+    launch::blocking_timeout(move || terms.answer(&req.id, &req.prompt_kind, req.n)).await
 }
 
 #[cfg(feature = "gui")]
