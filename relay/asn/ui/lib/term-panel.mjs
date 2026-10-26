@@ -55,13 +55,19 @@ export function willSendText(pv, n) {
 }
 export const sentText = desc => (desc ? `已送出：${String(desc).slice(0, 80)}` : '已送出')
 
-/** 清單的一列：id、profile、狀態；沒有狀態（還沒查到或查失敗）當 unknown */
+// 資料夾顯示名：路徑最後一段（Windows 與 POSIX 分隔都認），結尾的分隔符號略過；不是字串或空的回空字串
+export function folderName(cwd) {
+  const parts = String(typeof cwd === 'string' ? cwd : '').split(/[\\/]+/).filter(Boolean)
+  return parts.length ? parts[parts.length - 1] : ''
+}
+
+/** 清單的一列：id、profile、資料夾（後端 term_list 的 cwd，開啟時已授權的資料夾；舊後端沒有就空）、狀態；沒有狀態（還沒查到或查失敗）當 unknown */
 export function rowsOf(listed, statuses = {}) {
   return (Array.isArray(listed) ? listed : []).filter(t => t && typeof t.id === 'string').map(t => {
     const st = statuses[t.id]
     const sv = stateView(st?.state)
     const prompt = sv.key === 'waiting_user' ? promptView(st?.prompt) : null
-    return { id: t.id, profile: String(t.profile ?? ''), title: `${t.profile ?? '終端'} #${t.id}`, state: sv.key, stateLabel: sv.label, tone: sv.tone, reason: String(st?.reason ?? ''), prompt }
+    return { id: t.id, profile: String(t.profile ?? ''), title: `${t.profile ?? '終端'} #${t.id}`, cwd: typeof t.cwd === 'string' ? t.cwd : '', folder: folderName(t.cwd), state: sv.key, stateLabel: sv.label, tone: sv.tone, reason: String(st?.reason ?? ''), prompt }
   })
 }
 

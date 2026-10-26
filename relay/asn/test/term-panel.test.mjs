@@ -1,7 +1,7 @@
 // 電腦版「終端」面板的純邏輯：狀態字樣、提示內容整理、使用者按選項才產生送出請求、輪詢（不重疊、單列失敗不拖累整輪）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { PROMPT_TEXT_MAX, answerRequest, createTermPoller, kindTitle, promptKey, promptView, rowsOf, sentText, stateView, willSendText } from '../ui/lib/term-panel.mjs'
+import { PROMPT_TEXT_MAX, answerRequest, createTermPoller, folderName, kindTitle, promptKey, promptView, rowsOf, sentText, stateView, willSendText } from '../ui/lib/term-panel.mjs'
 
 const MENU = { kind: 'menu', text: '要信任這個資料夾嗎？', options: [{ n: 2, label: 'No, quit' }, { n: 1, label: 'Yes, proceed' }] }
 
@@ -98,4 +98,13 @@ test('輪詢：一輪還沒跑完不會開下一輪；term_list 失敗回報錯�
   const before = updates.length
   await q.tickNow()
   assert.equal(updates.length, before, 'stop 之後不再更新')
+})
+
+test('資料夾：清單帶 cwd 與最後一段資料夾名（Windows 與 POSIX 路徑都行）；舊後端沒有 cwd 就空', () => {
+  assert.equal(folderName('D:\\Github\\Yooliang\\asn'), 'asn')
+  assert.equal(folderName('/home/u/proj/'), 'proj')
+  assert.equal(folderName('C:\\'), 'C:')
+  for (const bad of ['', null, undefined, 42, '///']) assert.equal(folderName(bad), '', String(bad))
+  const rows = rowsOf([{ id: '1', profile: 'grok', cwd: 'D:\\Github\\x' }, { id: '2', profile: 'agy' }])
+  assert.deepEqual([rows[0].cwd, rows[0].folder, rows[1].cwd, rows[1].folder], ['D:\\Github\\x', 'x', '', ''])
 })
