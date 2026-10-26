@@ -72,6 +72,16 @@ pub struct TermListed {
     /// 使用者自己開的窗格、由 ASN 接手（只存記憶體）。
     #[serde(default)]
     pub adopted: bool,
+    /// 接手窗格：本機是否已解鎖代答（自己開的終端一律 true）。
+    #[serde(default = "default_unlocked")]
+    pub answer_unlocked: bool,
+    /// 接手窗格：本機是否已解鎖代送（自己開的終端一律 true）。
+    #[serde(default = "default_unlocked")]
+    pub send_unlocked: bool,
+}
+
+fn default_unlocked() -> bool {
+    true
 }
 
 /// `term_status` 的結果。state 只會是 busy、idle、unknown、waiting_user。判斷不了就是 unknown，不會猜。
@@ -401,6 +411,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 started_ms: s.window.started_ms,
                 cwd: s.cwd.clone(),
                 adopted: false,
+                answer_unlocked: true,
+                send_unlocked: true,
             })
             .collect();
         out.extend(g.adopted.iter().map(|s| TermListed {
@@ -410,6 +422,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             started_ms: s.window.started_ms,
             cwd: s.cwd.clone(),
             adopted: true,
+            answer_unlocked: s.answer_unlocked,
+            send_unlocked: s.send_unlocked,
         }));
         out
     }
@@ -1405,6 +1419,11 @@ pub struct TermAnswerReq {
     pub id: String,
     pub prompt_kind: String,
     pub n: u32,
+    /// 代答雜湊用；前端從 term_status 的 prompt 帶入（遠端確認與本機作廢時要比對）。
+    #[serde(default)]
+    pub prompt_text: String,
+    #[serde(default)]
+    pub options: Vec<TermOption>,
 }
 
 #[cfg(feature = "gui")]
@@ -1757,6 +1776,8 @@ mod tests {
                     started_ms: Some(1_000),
                     cwd: rig.cwd.clone(),
                     adopted: false,
+                    answer_unlocked: true,
+                    send_unlocked: true,
                 },
                 TermListed {
                     id: id2,
@@ -1765,6 +1786,8 @@ mod tests {
                     started_ms: Some(1_000),
                     cwd: rig.cwd.clone(),
                     adopted: false,
+                    answer_unlocked: true,
+                    send_unlocked: true,
                 },
             ]
         );
@@ -1808,8 +1831,8 @@ mod tests {
         assert!(lib.contains("terms.stop(&req.id)"), "關閉只把編號交給 stop");
         assert!(lib.contains("terms.status(&req.id)"), "忙閒只把編號交給 status");
         assert!(lib.contains("terms.rename(&req.id, &req.title)"), "改名只把編號與標題交給 rename");
-        assert!(lib.contains("terms.answer(&req.id, &req.prompt_kind, req.n)"), "代答只把編號、提示種類與選項編號交給 answer");
-        assert!(lib.contains("terms.confirm_send(&req.id, &req.text, req.enter)"), "代送文字只把編號、文字與是否換行交給 confirm_send");
+        assert!(lib.contains("term_remote::local_confirm_answer"), "代答經遠端確認模組的唯一入口");
+        assert!(lib.contains("term_remote::local_confirm_send"), "代送文字經遠端確認模組的唯一入口");
         let head = src.split("mod tests").next().unwrap();
         assert!(!head.contains(".answer("), "後端其他路徑不得呼叫 answer；UI 提示框是唯一入口");
         assert!(!head.contains(".confirm_send("), "後端其他路徑不得呼叫 confirm_send；UI 確認是唯一入口");
