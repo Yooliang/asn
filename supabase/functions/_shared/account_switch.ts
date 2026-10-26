@@ -23,7 +23,7 @@ const ERROR_TEXT: Record<string, string> = {
   forbidden: "只有使用者本人（擁有者設備）能遠端切換帳號",
   not_found: "找不到這台電腦（或這筆指令）",
   bad_request: "資料格式不對",
-  bad_vendor: "目前只支援切換 Claude 帳號",
+  bad_vendor: "目前只支援切換 Claude、Grok 帳號",
   bad_email: "email 格式不對",
   asn_offline: "對方電腦的 ASN 沒有在線，無法切換",
   unknown_account: "對方電腦的帳號庫裡沒有這個 email（請對方開著 ASN 讓清單更新）",
@@ -42,7 +42,7 @@ export function cleanEmail(v: unknown): string | null {
   return e.length >= 3 && e.length <= 120 && EMAIL_RE.test(e) ? e : null;
 }
 
-export type ReportedAccount = { vendor: "claude" | "codex"; email: string; plan: string; current: boolean; five_hour_pct?: number; weekly_pct?: number; reset_at?: string; at?: string };
+export type ReportedAccount = { vendor: "claude" | "codex" | "grok"; email: string; plan: string; current: boolean; five_hour_pct?: number; weekly_pct?: number; reset_at?: string; at?: string };
 
 // 剩餘額度（#228，全部選填）：five_hour_pct／weekly_pct 是 0～100 的剩餘百分比，reset_at 是重置時間，at 是那台電腦記下數字的時間。
 // 只收 Claude。不合格的欄位單獨丟掉（不退回整份，免得額度壞掉拖累帳號清單）；沒有合格的百分比或沒有合格的 at 就整組不收。
@@ -67,7 +67,7 @@ export function parseReport(b: Json): ReportedAccount[] | null {
   if (!b || typeof b !== "object" || !Array.isArray(b.accounts) || b.accounts.length > MAX_ACCOUNTS) return null;
   const out: ReportedAccount[] = [];
   for (const a of b.accounts) {
-    if (!a || typeof a !== "object" || (a.vendor !== "claude" && a.vendor !== "codex")) return null;
+    if (!a || typeof a !== "object" || (a.vendor !== "claude" && a.vendor !== "codex" && a.vendor !== "grok")) return null;
     const email = cleanEmail(a.email);
     if (!email) return null;
     let plan = "";
@@ -81,14 +81,14 @@ export function parseReport(b: Json): ReportedAccount[] | null {
   return out;
 }
 
-export type SwitchRequest = { node: string; vendor: "claude"; email: string };
+export type SwitchRequest = { node: string; vendor: "claude" | "grok"; email: string };
 export function parseSwitch(b: Json): SwitchRequest | { error: string } {
   if (!b || typeof b !== "object" || Array.isArray(b)) return { error: "bad_request" };
   if (typeof b.node !== "string" || !NODE_ID_RE.test(b.node)) return { error: "bad_request" };
-  if (b.vendor !== "claude") return { error: "bad_vendor" };
+  if (b.vendor !== "claude" && b.vendor !== "grok") return { error: "bad_vendor" };
   const email = cleanEmail(b.email);
   if (!email) return { error: "bad_email" };
-  return { node: b.node, vendor: "claude", email }; // 多餘欄位（command、token…）一律丟掉
+  return { node: b.node, vendor: b.vendor, email }; // 多餘欄位（command、token…）一律丟掉
 }
 
 async function call(deps: AcctDeps, fn: string, args: Record<string, unknown>): Promise<{ data: Json } | Reply> {

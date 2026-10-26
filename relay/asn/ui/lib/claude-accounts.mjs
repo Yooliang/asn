@@ -38,10 +38,10 @@ const errText = e => (typeof e === 'string' ? e : e?.message || String(e))
 
 export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLabel = n => n, sleep = ms => new Promise(r => setTimeout(r, ms)), pollMs = 3000, pollMax = 80 }) {
   const s = reactive({
-    list: [], current: null, codex: null, codexErr: '', msg: '', busy: false, confirmDel: '',
+    list: [], grok: [], current: null, codex: null, codexErr: '', msg: '', busy: false, confirmDel: '',
     trustOwn: false,
     trustSigned: true,
-    remote: { node: '', list: [], reportedAt: '', asnOnline: false, loading: false, busy: false, msg: '' },
+    remote: { node: '', vendor: 'claude', list: [], reportedAt: '', asnOnline: false, loading: false, busy: false, msg: '' },
     incoming: [],   // 等本機使用者按確認的遠端切換指令：{ id, email, from, fromLabel }
     done: [],       // 免確認（本人簽章／信任自己的設備）已經切好、讓使用者看一眼的：{ id, email, from, fromLabel }；可按「還原」
     reports: {},    // 節點 → 那台電腦的帳號回報（設備分類用）：{ error, asnOnline, reportedAt, accounts }
@@ -52,6 +52,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
   const refresh = async () => {
     try { s.list = await invoke('claude_accounts_list') } catch (e) { s.msg = errText(e) }
     try { s.current = (await invoke('claude_account_current')) ?? null } catch { s.current = null }
+    try { s.grok = (await invoke('grok_accounts_list')) ?? [] } catch { s.grok = [] }   // 舊版 Rust 沒有這個指令就當沒有
     try { s.codex = (await invoke('codex_account_current')) ?? null; s.codexErr = '' } catch (e) { s.codex = null; s.codexErr = errText(e) }
     try { s.mod = (await invoke('claude_mod_status')) ?? '' } catch { /* 舊版 Rust 沒有這個指令就不顯示 */ }
     // 各帳號上次記下的額度（沒有紀錄或舊版 Rust 沒有這個指令就維持「額度未知」）
@@ -78,7 +79,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     r.loading = true; r.msg = ''
     try {
       const v = await invoke('acct_remote_list', { node: r.node })
-      r.list = (v?.accounts ?? []).filter(a => a.vendor === 'claude')
+      r.list = (v?.accounts ?? []).filter(a => a.vendor === r.vendor)
       s.reports[r.node] = { error: '', asnOnline: v?.asn_online === true, reportedAt: v?.reported_at ?? '', accounts: v?.accounts ?? [] }
       r.asnOnline = v?.asn_online === true
       r.reportedAt = v?.reported_at ?? ''
@@ -96,13 +97,13 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
       } catch (e) { s.reports[node] = { error: errText(e), asnOnline: false, reportedAt: '', accounts: [] } }
     }))
   }
-  const remoteSelect = async node => { s.remote.node = node || ''; await remoteLoad() }
+  const remoteSelect = async (node, vendor = 'claude') => { s.remote.node = node || ''; s.remote.vendor = vendor === 'grok' ? 'grok' : 'claude'; await remoteLoad() }
   const remoteSwitch = async email => {
     const r = s.remote
     if (r.busy || !r.node) return
     r.busy = true; r.msg = '送出中…'
     try {
-      const sent = await invoke('acct_remote_request', { node: r.node, email })
+      const sent = await invoke('acct_remote_request', { node: r.node, email, vendor: r.vendor })
       r.msg = remoteStatusText({ status: 'pending' })
       for (let i = 0; i < pollMax; i++) {
         await sleep(pollMs)
@@ -125,12 +126,12 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
       try {
         await invoke('acct_remote_apply', { id: row.id, confirmed: false })
         s.msg = `${nodeLabel(row.requested_by)} 要求切換，已切到 ${row.email}。${SWITCH_NOTICE}`
-        s.done.push({ id: row.id, email: row.email, from: row.requested_by, fromLabel: nodeLabel(row.requested_by) })
+        s.done.push({ id: row.id, email: row.email, from: row.requested_by, fromLabel: nodeLabel(row.requested_by), vendor: row.vendor === 'grok' ? 'grok' : 'claude' })
       } catch (e) { s.msg = errText(e) }
       await refresh(); void report()
       return
     }
-    s.incoming.push({ id: row.id, email: row.email, from: row.requested_by, fromLabel: nodeLabel(row.requested_by) })
+    s.incoming.push({ id: row.id, email: row.email, from: row.requested_by, fromLabel: nodeLabel(row.requested_by), vendor: row.vendor === 'grok' ? 'grok' : 'claude' })
   }
   const pollIncoming = async () => {
     let rows = []
@@ -143,6 +144,14 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     s.incoming = s.incoming.filter(x => x.id !== id)
     if (!it) return
     try { await invoke('acct_remote_apply', { id, confirmed: true }); s.msg = `已依 ${it.fromLabel} 的要求切換到 ${it.email}。${SWITCH_NOTICE}` } catch (e) { s.msg = errText(e) }
+    await refresh(); void report()
+  }
+  // 本機 Grok：切到帳號庫裡的另一個帳號（整份登入檔換掉；開著的 Grok 要重開才生效）
+  const grokSwitch = async email => {
+    if (s.busy) return
+    s.busy = true
+    try { const o = await invoke('grok_account_switch', { email }); s.msg = String(o?.notice ?? '已切換') } catch (e) { s.msg = errText(e) }
+    s.busy = false
     await refresh(); void report()
   }
   const dismissDone = id => { s.done = s.done.filter(x => x.id !== id) }
@@ -175,7 +184,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
   }
   return {
     state: s,
-    refresh, report, onAuto, loadReports, remoteNodes, remoteSelect, remoteLoad, remoteSwitch, pollIncoming, approve, decline, dismissDone, undo, loadTrust, setTrust, setTrustSigned,
+    refresh, report, onAuto, loadReports, remoteNodes, remoteSelect, remoteLoad, remoteSwitch, grokSwitch, pollIncoming, approve, decline, dismissDone, undo, loadTrust, setTrust, setTrustSigned,
     addCurrent: () => run(async () => { const a = await invoke('claude_account_save'); s.savedSeq++; return `已加入 ${a.email}。` }),
     switchTo: email => run(async () => { const r = await invoke('claude_account_switch', { email }); return `已切換到 ${r.email}。${SWITCH_NOTICE}` }),
     // 刪除要按兩次（第一次變成「確認刪除」），避免誤觸

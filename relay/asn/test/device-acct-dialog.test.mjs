@@ -46,7 +46,7 @@ test('接線：右鍵項目打開專屬對話框，不再打開設定頁；切�
   const js = read('ui/list.js'), html = read('ui/list.html')
   const fn = js.slice(js.indexOf('const openDeviceAcct'), js.indexOf('const installFromSettings'))
   assert.ok(fn.includes('deviceAcct.node = node'), '右鍵要設定對話框對象')
-  assert.ok(fn.includes('accounts.remoteSelect(node)'), '要沿用 remoteSelect 載入清單')
+  assert.ok(fn.includes('accounts.remoteSelect(node, vendor)'), '要沿用 remoteSelect 載入清單')
   assert.ok(!fn.includes("openPanel('setting'"), '不可再打開整個設定頁')
   assert.ok(fn.includes('accounts.remoteSwitch(v.switchEmail)'), '送出要沿用 remoteSwitch')
   assert.ok(html.includes('<asn-dialog v-if="deviceAcct.node" :title="deviceAcctTitleText"'))

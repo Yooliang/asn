@@ -50,7 +50,7 @@
     </ul>
     <div class="table-wrap">
       <table class="matrix">
-        <caption>各家 AI 與各項管理功能的現況（依 2026 年 10 月 26 日的主線程式（0.1.78）與議題整理；各格的版本與驗證狀態以格內文字為準）</caption>
+        <caption>各家 AI 與各項管理功能的現況（依 2026 年 10 月 26 日的主線程式（0.1.79）與議題整理；各格的版本與驗證狀態以格內文字為準）</caption>
         <thead><tr><th scope="col">AI</th><th scope="col">開啟</th><th scope="col">關閉</th><th scope="col">接手</th><th scope="col">切換模型</th><th scope="col">群組聊天</th><th scope="col">帳號切換</th><th scope="col">備註與限制</th></tr></thead>
         <tbody>
         <tr>
@@ -373,6 +373,12 @@
     <div class="releases">
 <!-- changelog:start（由 site/make-roadmap-page.mjs 產生，不要手改） -->
       <article class="glass release">
+        <h3>0.1.79<span class="date">2026-10-26</span></h3>
+        <ul>
+          <li>含這些已合併的修正：開新夥伴裡的 Grok 不再反灰（Grok 程式不在系統路徑、放在官方安裝位置也找得到）；pi 與 ASN 互通預設開啟，設定裡存相對路徑的 pi 擴充不再被誤判成沒裝（安裝不再假失敗）；pi 夥伴在名單顯示「Pi 提供者/模型」；Grok 帳號：設備與帳號頁顯示、自動加入帳號庫、可切換（本機與手機遠端）</li>
+        </ul>
+      </article>
+      <article class="glass release">
         <h3>0.1.78<span class="date">2026-10-26</span></h3>
         <ul>
           <li>內建終端機的 WezTerm 隨安裝檔附帶（不必另外設定）；手機上本人簽章的切換帳號指令不必再到電腦按確認（設定可關、每小時最多自動切 3 次、切換後電腦跳通知可還原）；終端代送文字前要確認工作資料夾已授權</li>
@@ -424,12 +430,6 @@
         <h3>0.1.70<span class="date">2026-10-25</span></h3>
         <ul>
           <li>開新夥伴：這台電腦的 Grok 不在系統路徑時也能找到、Gemini 夥伴實測可收發</li>
-        </ul>
-      </article>
-      <article class="glass release">
-        <h3>0.1.69<span class="date">2026-10-25</span></h3>
-        <ul>
-          <li>手機與電腦的「開新夥伴」可以開出 Grok、Gemini、pi、失敗會講清楚原因、設定頁新增「pi 與 ASN 互通」、視窗改名後群組的叫醒順序標籤不再消失、官網與說明去掉舊名詞</li>
         </ul>
       </article>
       <!-- changelog:end -->

@@ -29,6 +29,8 @@ static TAKEN: Mutex<Option<HashMap<String, (String, Instant)>>> = Mutex::new(Non
 /// TAKEN 每筆指令的附註：編號 → (發起端, 後端是否標了本人簽章)。只有 `pending` 依後端回的 signed=true 標成簽章；
 /// 編號處理掉（切換、拒絕）就一起拿掉，過期的在 `with_taken` 清（只留還在 TAKEN 裡的）。
 static META: Mutex<Option<HashMap<String, (String, bool)>>> = Mutex::new(None);
+/// TAKEN 每筆指令是哪個廠商的：編號 → "claude" 或 "grok"（沒記就是 claude）。跟 META 一起在處理掉、過期時清掉。
+static VENDORS: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 /// 這次執行是否已經把上次沒處理完的指令（存在 acct-taken.json）讀回來
 static RESTORED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -50,9 +52,14 @@ pub fn build_report(list: &[AccountInfo], codex: Option<&CodexLogin>) -> Value {
 /// 同上，另外對「有額度紀錄」的 Claude 帳號帶上額度四欄（five_hour_pct、weekly_pct、reset_at、at，沒有的不帶；全部選填）。
 /// 額度只來自 `claude_quota` 記下的數字；沒有紀錄的帳號不帶任何額度欄位，由介面顯示「額度未知」。Codex 不帶額度。
 pub fn build_report_with_quota(list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>) -> Value {
+    build_report_full(list, codex, quotas, &[])
+}
+
+/// 同上，再加 Grok 帳號庫（只有 email、是否使用中；沒有方案與額度）。總共最多 20 筆：Claude 14、Grok 5、Codex 1。
+pub fn build_report_full(list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount]) -> Value {
     let mut rows: Vec<Value> = list
         .iter()
-        .take(19)
+        .take(if grok.is_empty() { 19 } else { 14 })
         .map(|a| {
             let mut row = json!({ "vendor": "claude", "email": a.email, "plan": a.plan, "current": a.current });
             if let (Some(q), Some(o)) = (quotas.get(&a.email), row.as_object_mut()) {
@@ -75,6 +82,9 @@ pub fn build_report_with_quota(list: &[AccountInfo], codex: Option<&CodexLogin>,
             let plan: String = c.plan.chars().filter(|ch| !ch.is_control()).take(30).collect();
             rows.push(json!({ "vendor": "codex", "email": email, "plan": plan, "current": true }));
         }
+    }
+    for g in grok.iter().take(5) {
+        rows.push(json!({ "vendor": "grok", "email": g.email, "plan": "", "current": g.current }));
     }
     json!({ "accounts": rows })
 }
@@ -119,12 +129,14 @@ pub struct Pending {
     pub email: String,
     pub requested_by: String,
     pub needs_confirm: bool,
+    /// 要切換哪個廠商的帳號："claude" 或 "grok"
+    pub vendor: String,
 }
 pub fn parse_pending(row: &Value) -> Result<(String, String, String), String> {
     let id = row.get("id").and_then(Value::as_str).filter(|s| is_uuid(s)).ok_or("指令編號不對")?;
     let by = row.get("requested_by").and_then(Value::as_str).filter(|s| valid_node(s)).ok_or("發起端不對")?;
-    if row.get("vendor").and_then(Value::as_str) != Some("claude") {
-        return Err("目前只支援切換 Claude 帳號".into());
+    if !matches!(row.get("vendor").and_then(Value::as_str), Some("claude" | "grok")) {
+        return Err("目前只支援切換 Claude、Grok 帳號".into());
     }
     let email = row.get("email").and_then(Value::as_str).and_then(claude_accounts::normalize_email).ok_or("email 格式不對")?;
     Ok((id.to_string(), email, by.to_string()))
@@ -139,7 +151,21 @@ fn with_taken<T>(f: impl FnOnce(&mut HashMap<String, (String, Instant)>) -> T) -
     if let Some(meta) = mg.as_mut() {
         meta.retain(|id, _| m.contains_key(id));
     }
+    if let Some(v) = VENDORS.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        v.retain(|id, _| m.contains_key(id));
+    }
     r
+}
+
+fn set_vendor(id: &str, vendor: &str) {
+    VENDORS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(id.to_string(), vendor.to_string());
+}
+fn vendor_of(id: &str) -> String {
+    VENDORS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(id)).cloned().unwrap_or_else(|| "claude".into())
+}
+/// 後端回的 vendor 只認 claude 或 grok，其餘（包含缺欄位）一律當 claude 之前就被 parse_pending 擋掉了
+fn row_vendor(row: &Value) -> &'static str {
+    if row.get("vendor").and_then(Value::as_str) == Some("grok") { "grok" } else { "claude" }
 }
 
 fn set_meta(id: &str, by: &str, signed: bool) {
@@ -203,7 +229,7 @@ fn taken_persist(data_dir: &Path) {
         m.iter()
             .map(|(id, (email, t))| {
                 let (by, signed) = meta.as_ref().and_then(|x| x.get(id)).cloned().unwrap_or_default();
-                json!({ "id": id, "email": email, "by": by, "signed": signed, "at": now.saturating_sub(t.elapsed().as_millis() as u64) })
+                json!({ "id": id, "email": email, "by": by, "signed": signed, "vendor": vendor_of(id), "at": now.saturating_sub(t.elapsed().as_millis() as u64) })
             })
             .collect()
     });
@@ -235,6 +261,7 @@ fn taken_restore(data_dir: &Path) -> Vec<(String, String, String, bool)> {
         });
         if fresh {
             set_meta(id, by, signed);
+            set_vendor(id, if r.get("vendor").and_then(Value::as_str) == Some("grok") { "grok" } else { "claude" });
             out.push((id.to_string(), email, by.to_string(), signed));
         }
     }
@@ -255,12 +282,12 @@ pub fn decide(taken: &mut HashMap<String, (String, Instant)>, id: &str, allowed:
 }
 
 // ---------- 送給收發室的動作 ----------
-pub async fn report(relay: &Relay, list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>) -> Result<Value, String> {
-    let full = build_report_with_quota(list, codex, quotas);
-    let has_codex = full["accounts"].as_array().is_some_and(|a| a.iter().any(|r| r["vendor"] == "codex"));
+pub async fn report(relay: &Relay, list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount]) -> Result<Value, String> {
+    let full = build_report_full(list, codex, quotas, grok);
+    let has_codex = full["accounts"].as_array().is_some_and(|a| a.iter().any(|r| r["vendor"] == "codex" || r["vendor"] == "grok"));
     match relay.api("acct_report", Some(full)).await {
         // 舊後台只認 claude，看到 codex 會整份退回：退一步只回報 Claude，不讓原本的回報壞掉
-        Err(_) if has_codex => relay.api("acct_report", Some(build_report_with_quota(list, None, quotas))).await,
+        Err(_) if has_codex => relay.api("acct_report", Some(build_report_with_quota(list, None, quotas))).await, // 舊後台不認 codex／grok 時退回只報 Claude
         r => r,
     }
 }
@@ -270,12 +297,15 @@ pub async fn remote_list(relay: &Relay, node: &str) -> Result<Value, String> {
     }
     relay.api("acct_list", Some(json!({ "node": node }))).await
 }
-pub async fn remote_request(relay: &Relay, node: &str, email: &str) -> Result<Value, String> {
+pub async fn remote_request(relay: &Relay, node: &str, email: &str, vendor: &str) -> Result<Value, String> {
     if !valid_node(node) {
         return Err("設備代號不對".into());
     }
+    if vendor != "claude" && vendor != "grok" {
+        return Err("目前只支援切換 Claude、Grok 帳號".into());
+    }
     let email = claude_accounts::normalize_email(email).ok_or("email 格式不對")?;
-    relay.api("acct_switch", Some(json!({ "node": node, "vendor": "claude", "email": email }))).await
+    relay.api("acct_switch", Some(json!({ "node": node, "vendor": vendor, "email": email }))).await
 }
 pub async fn remote_status(relay: &Relay, ids: Vec<String>) -> Result<Value, String> {
     if ids.is_empty() || ids.len() > 20 || !ids.iter().all(|i| is_uuid(i)) {
@@ -413,7 +443,8 @@ pub async fn pending(relay: &Relay, data_dir: &Path) -> Result<Vec<Pending>, Str
     if !RESTORED.swap(true, std::sync::atomic::Ordering::SeqCst) {
         for (id, email, by, signed) in taken_restore(data_dir) {
             log_event(data_dir, "restored", &id, &format!("{by} {email}"));
-            out.push(Pending { id, email, requested_by: by, needs_confirm: needs_confirm(own, signed_ok, signed) });
+            let vendor = vendor_of(&id);
+            out.push(Pending { id, email, requested_by: by, needs_confirm: needs_confirm(own, signed_ok, signed), vendor });
         }
     }
     for row in v.get("requests").and_then(Value::as_array).cloned().unwrap_or_default() {
@@ -423,8 +454,10 @@ pub async fn pending(relay: &Relay, data_dir: &Path) -> Result<Vec<Pending>, Str
                 let signed = row.get("signed").and_then(Value::as_bool) == Some(true);
                 with_taken(|m| m.insert(id.clone(), (email.clone(), Instant::now())));
                 set_meta(&id, &by, signed);
-                log_event(data_dir, "taken", &id, &format!("{by} {email} signed={signed}"));
-                out.push(Pending { id, email, requested_by: by, needs_confirm: needs_confirm(own, signed_ok, signed) });
+                let vendor = row_vendor(&row).to_string();
+                set_vendor(&id, &vendor);
+                log_event(data_dir, "taken", &id, &format!("{by} {vendor} {email} signed={signed}"));
+                out.push(Pending { id, email, requested_by: by, needs_confirm: needs_confirm(own, signed_ok, signed), vendor });
             }
             Err(why) => {
                 if let Some(id) = row.get("id").and_then(Value::as_str).filter(|s| is_uuid(s)) {
@@ -440,7 +473,12 @@ pub async fn pending(relay: &Relay, data_dir: &Path) -> Result<Vec<Pending>, Str
 
 /// 使用者按了確認（或設定為信任自己的設備）：在本機切換並回報結果
 pub async fn apply(relay: &Relay, data_dir: &Path, id: String, confirmed: bool) -> Result<Value, String> {
-    apply_with(relay, data_dir, id, confirmed, |e| claude_accounts::local_switch(e).map(|o| o.notice)).await
+    // 依這筆指令的廠商換不同的帳號庫（Claude 與 Grok 各一套，都只在這台電腦上整檔搬）
+    if vendor_of(&id) == "grok" {
+        apply_with(relay, data_dir, id, confirmed, |e| crate::grok_accounts::local_switch(e).map(|o| o.notice)).await
+    } else {
+        apply_with(relay, data_dir, id, confirmed, |e| claude_accounts::local_switch(e).map(|o| o.notice)).await
+    }
 }
 
 /// `switch` 由呼叫端注入：正式是本機切換，測試指到暫存家目錄
@@ -497,6 +535,32 @@ mod tests {
             { "vendor": "claude", "email": "b@x.test", "plan": "max", "current": false },
         ] }));
         assert!(!v.to_string().contains("ORG-SECRET"), "組織名稱不外送");
+    }
+
+    #[test]
+    fn 回報帶_grok_帳號庫_只有_email_與是否使用中_且總數不超過二十筆() {
+        use crate::grok_accounts::GrokAccount;
+        let g = |e: &str, cur: bool| GrokAccount { email: e.into(), current: cur, saved: true };
+        let v = build_report_full(&[acct("a@x.test", true)], None, &HashMap::new(), &[g("g1@x.test", true), g("g2@x.test", false)]);
+        assert_eq!(v["accounts"][1], json!({ "vendor": "grok", "email": "g1@x.test", "plan": "", "current": true }));
+        assert_eq!(v["accounts"][2]["vendor"], "grok");
+        assert_eq!(build_report_with_quota(&[acct("a@x.test", true)], None, &HashMap::new()), build_report_full(&[acct("a@x.test", true)], None, &HashMap::new(), &[]), "沒有 Grok 就和以前一樣");
+        let many: Vec<_> = (0..30).map(|i| acct(&format!("c{i}@x.test"), false)).collect();
+        let gs: Vec<_> = (0..30).map(|i| g(&format!("g{i}@x.test"), false)).collect();
+        let n = build_report_full(&many, Some(&codex("c@x.test", "plus", "chatgpt")), &HashMap::new(), &gs)["accounts"].as_array().unwrap().len();
+        assert!(n <= 20, "後端上限 20 筆，實際 {n}");
+        assert!(!v.to_string().contains("token") && !v.to_string().contains("key"));
+    }
+
+    #[test]
+    fn 指令的廠商只認_claude_與_grok_其他一律拒絕() {
+        let row = |v: &str| json!({ "id": U, "requested_by": "H", "vendor": v, "email": "b@x.test" });
+        assert!(parse_pending(&row("claude")).is_ok() && parse_pending(&row("grok")).is_ok());
+        for bad in ["codex", "gemini", "", "GROK", "claude "] {
+            assert!(parse_pending(&row(bad)).is_err(), "{bad}");
+        }
+        assert_eq!(row_vendor(&row("grok")), "grok");
+        assert_eq!(row_vendor(&row("claude")), "claude");
     }
 
     fn codex(email: &str, plan: &str, mode: &str) -> CodexLogin {
@@ -659,7 +723,7 @@ mod tests {
 
         // 1. 取走：合格的進待辦、要確認
         let p = pending(&relay, data.path()).await.unwrap();
-        assert_eq!(p, vec![Pending { id: U.into(), email: "b@x.test".into(), requested_by: "H".into(), needs_confirm: true }]);
+        assert_eq!(p, vec![Pending { id: U.into(), email: "b@x.test".into(), requested_by: "H".into(), needs_confirm: true, vendor: "claude".into() }]);
         // 2. 沒同意：不碰檔案，回報 denied
         assert!(apply_with(&relay, data.path(), U.into(), false, sw(h.clone())).await.is_err());
         assert_eq!(cred(&h), before, "沒同意就不切");

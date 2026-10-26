@@ -122,10 +122,10 @@ test('第 3 層（其他設備）：Claude 每個帳號一列——信箱、方�
 })
 
 test('其他設備的「切換」送既有的 device-switch（帶設備與信箱），樞紐沿用右鍵切換的確認對話框', () => {
-  assert.match(SettingsPanel.template, /act\('device-switch', \{ node: curDev.key, email: a\.email \}\)/)
+  assert.match(SettingsPanel.template, /act\('device-switch', \{ node: curDev.key, email: a\.email, vendor: v\.key \}\)/)
   const hub = read('ui/list.js')
   assert.ok(hub.includes("case 'device-switch'") && hub.includes('openDeviceAcct('))
-  assert.match(hub, /openDeviceAcct = async \(node, email = ''\)/, '可帶預選的信箱')
+  assert.match(hub, /openDeviceAcct = async \(node, email = '', vendor = 'claude'\)/, '可帶預選的信箱')
   assert.match(hub, /deviceAcct\.selected = email/)
 })
 
