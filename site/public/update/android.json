@@ -1,8 +1,8 @@
 {
-  "version": "0.1.76",
-  "versionCode": 1076,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.76_android.apk",
-  "sha256": "c29e23b2c5197fd47ad4eb074c25cf8e8a5db7f5e5ca32f9adcdd6bf5b8bf9ce",
-  "notes": "電腦版新增「終端」按鈕與清單：列出由 ASN 開的終端機；終端等你回答時（信任資料夾、上下選單）跳出提示框，由你先選一項再按「送出」才代按，絕不自動代答；判斷 Grok 是閒置、處理中或在等你回答（需另外備好內建終端機的程式，尚未隨安裝檔附帶）",
+  "version": "0.1.77",
+  "versionCode": 1077,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.77_android.apk",
+  "sha256": "0c747ef0caea2227e166fb52651b4c2c289c9df6eaafdf239eec38a789b37390",
+  "notes": "設備與帳號：設定視窗不再重複一個標題；電腦版拿掉底部「已永久移除」區；設備類型標籤只標手機、電腦不標；離線的別台設備不必等自動隱藏就能永久移除；帳號切換的結果回報失敗會重試並存檔補報",
   "bytes": 9387492
 }
