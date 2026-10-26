@@ -24,6 +24,19 @@ const MEMBERS = [
   },
 ]
 
+test('pi 夥伴：個人訊息帶「Pi 提供者/模型」，看得出背後用哪一家；別的引擎、沒有 model、不安全的字不加', () => {
+  const pi = (extra = {}) => ({ name: 'pi-1', status: 'idle', cwd_label: 'proj', engine: 'pi', detail: null, ...extra })
+  assert.equal(hiddenPsm(pi({ model: 'anthropic/claude-sonnet-4' })), 'proj・Pi anthropic/claude-sonnet-4')
+  assert.equal(hiddenPsm(pi({ model: 'openrouter/deepseek/deepseek-chat', cwd_label: '' })), 'Pi openrouter/deepseek/deepseek-chat')
+  assert.equal(hiddenPsm(pi({ model: 'deepseek/deepseek-v4-flash', hidden: true })), 'proj・Pi deepseek/deepseek-v4-flash・背景運行')
+  assert.equal(hiddenPsm(pi()), 'proj', '沒有 model 不加')
+  assert.equal(hiddenPsm(pi({ model: '<img src=x onerror=1>' })), 'proj', '不安全的字不顯示')
+  assert.equal(hiddenPsm(pi({ model: 'a'.repeat(101) })), 'proj')
+  assert.equal(hiddenPsm({ name: 'g', engine: 'claude', cwd_label: 'proj', model: 'claude-sonnet-5' }), 'proj', '只有 pi 才加')
+  const f = buildFriends([{ id: 'w', name: '工作機', kind: 'claude', agents: [pi({ model: 'anthropic/claude-sonnet-4' })] }], { selfNode: 'self' })
+  assert.equal(f[0].psm, 'proj・Pi anthropic/claude-sonnet-4')
+})
+
 async function makeCore() {
   const transport = { list: async () => ({ members: MEMBERS }) }
   const core = new AsnCore({ transport, store: memStore(), selfNode: 'self', windowName: '自己-ASN' })
