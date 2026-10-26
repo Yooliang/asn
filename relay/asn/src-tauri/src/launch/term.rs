@@ -9,6 +9,7 @@
 //!
 //! 忙閒只實作 grok：連續兩次取樣（中間用 Runner::sleep，間隔可注入；假執行器不真的等）畫面與游標都沒變，
 //! 且最後一個非空白行全文等於暫定提示符，才是 idle。對不上、agy、或讀取失敗都是 unknown，不把「畫面停住」猜成閒置。
+//! 畫面含「Do you trust the contents of this directory」則是 waiting_user，絕不代答。
 //!
 //! 認領不掃整個系統。只讀 data_dir 裡自己寫的對照表，用記下的程序編號重算通訊路徑（檔案裡的路徑一律不理），
 //! 建立時間相符且通訊檔存在才 list。workspace 是 `asn-{編號}`，或分頁標題是 `ASN:{編號}`（或後面空一格）才放回對照表。
@@ -38,6 +39,8 @@ const STORE_VERSION: u32 = 1;
 const TRUNC_MARK: &str = "…（已截斷）";
 /// 暫定的 grok 閒置標記。真機提示符還沒在 A5 確認過；最後一個非空白行去掉首尾空白後必須全文等於它，否則回 unknown。
 const GROK_IDLE_MARK: &str = "grok>";
+/// grok 第一次打開資料夾時的信任提問。畫面裡出現這句就回 waiting_user，絕不代送 y 或其他字。
+const GROK_TRUST_MARK: &str = "Do you trust the contents of this directory";
 
 /// `term_list` 的一列。
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -48,7 +51,7 @@ pub struct TermListed {
     pub started_ms: Option<u64>,
 }
 
-/// `term_status` 的結果。state 只會是 busy、idle、unknown。判斷不了就是 unknown，不會猜。
+/// `term_status` 的結果。state 只會是 busy、idle、unknown、waiting_user。判斷不了就是 unknown，不會猜。
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct TermStatus {
     pub state: String,
@@ -314,6 +317,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
 
     /// 忙或閒。只認自己的編號。agy 沒有規則，直接 unknown，連畫面都不讀。
     /// grok：取樣、睡一段、再取樣。兩次的畫面與游標都相同，且停在暫定提示符，才是 idle；有變化是 busy；其餘 unknown。
+    /// 任一次畫面含信任資料夾的提問就是 waiting_user。這裡不送字。
     pub fn status(&self, id: &str) -> Result<TermStatus, String> {
         let snap = self.snapshot(id)?;
         if snap.profile != "grok" {
@@ -331,11 +335,17 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             Ok(s) => s,
             Err(e) => return Ok(unknown_status(&snap.profile, &format!("讀不到畫面或游標，無法判斷：{e}"))),
         };
+        if first.text.contains(GROK_TRUST_MARK) {
+            return Ok(trust_status(&snap.profile, first.cursor_x, first.cursor_y));
+        }
         self.runner.sleep(self.status_gap);
         let second = match self.sample(&w, &snap) {
             Ok(s) => s,
             Err(e) => return Ok(unknown_status(&snap.profile, &format!("讀不到畫面或游標，無法判斷：{e}"))),
         };
+        if second.text.contains(GROK_TRUST_MARK) {
+            return Ok(trust_status(&snap.profile, second.cursor_x, second.cursor_y));
+        }
         let cursor_x = Some(second.cursor_x);
         let cursor_y = Some(second.cursor_y);
         if first.text != second.text || first.cursor_x != second.cursor_x || first.cursor_y != second.cursor_y {
@@ -658,6 +668,16 @@ fn unknown_status(profile: &str, reason: &str) -> TermStatus {
         cursor_x: None,
         cursor_y: None,
         reason: reason.to_string(),
+    }
+}
+
+fn trust_status(profile: &str, cursor_x: i64, cursor_y: i64) -> TermStatus {
+    TermStatus {
+        state: "waiting_user".into(),
+        profile: profile.to_string(),
+        cursor_x: Some(cursor_x),
+        cursor_y: Some(cursor_y),
+        reason: "trust_dialog".into(),
     }
 }
 
@@ -1308,6 +1328,45 @@ mod tests {
         let st = rig.svc.status(&id).unwrap();
         assert_eq!(st.state, "busy", "游標動了、畫面沒變，不能當成閒置：{}", st.reason);
         assert_eq!((st.cursor_x, st.cursor_y), (Some(9), Some(2)));
+    }
+
+    #[test]
+    fn 信任提問是_waiting_user且不代答() {
+        let mut rig = make(default_profiles(), vec![]);
+        let id = rig.svc.start("grok", &rig.cwd, &rig.config).unwrap();
+        rig.svc.set_status_gap(Duration::from_millis(5));
+        // 真機：最後一行是版本標題，提問在上面。拿掉判斷會因不是 grok> 而掉回 unknown。
+        *rig.runner.inner.screen.borrow_mut() = "Do you trust the contents of this directory? (Yes, proceed y / No, quit n)\nGrok Build  1.0.70\n".into();
+        let st = rig.svc.status(&id).unwrap();
+        assert_eq!(st.state, "waiting_user");
+        assert_eq!(st.reason, "trust_dialog");
+        assert_eq!(count_cmd(&rig.runner, "send-text"), 0, "信任提問不可代答，也不能送任何字");
+        assert!(!rig.runner.args().iter().any(|a| a.iter().any(|x| x == "y" || x == "n")));
+        assert!(rig.runner.inner.sleeps.borrow().is_empty(), "第一次就看到提問，不必再睡");
+
+        *rig.runner.inner.screen.borrow_mut() = "Grok Build  1.0.70\n".into();
+        let st = rig.svc.status(&id).unwrap();
+        assert_eq!(st.state, "unknown", "沒有信任提問時，最後一行不是 grok> 仍是 unknown");
+        assert_eq!(count_cmd(&rig.runner, "send-text"), 0);
+
+        let rig = make(default_profiles(), vec![]);
+        let id = rig.svc.start("grok", &rig.cwd, &rig.config).unwrap();
+        *rig.runner.inner.screens.borrow_mut() = vec![
+            "Grok Build  1.0.70\n".into(),
+            "Do you trust the contents of this directory?\nGrok Build  1.0.70\n".into(),
+        ];
+        let st = rig.svc.status(&id).unwrap();
+        assert_eq!(st.state, "waiting_user", "第二次才出現提問也不能當成 busy");
+        assert_eq!(st.reason, "trust_dialog");
+        assert_eq!(count_cmd(&rig.runner, "send-text"), 0);
+
+        let rig = make(default_profiles(), vec![]);
+        let id = rig.svc.start("agy", &rig.cwd, &rig.config).unwrap();
+        *rig.runner.inner.screen.borrow_mut() = "Do you trust the contents of this directory?\n".into();
+        let st = rig.svc.status(&id).unwrap();
+        assert_eq!(st.state, "unknown", "agy 沒有這條規則");
+        assert_eq!(count_cmd(&rig.runner, "send-text"), 0);
+        assert!(!rig.runner.args().iter().any(|a| a.iter().any(|x| x == "get-text")));
     }
 
     #[test]

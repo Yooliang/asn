@@ -522,7 +522,7 @@ async fn term_stop(terms: State<'_, Arc<launch::term::LiveTerms>>, req: launch::
     launch::blocking_timeout(move || terms.stop(&req.id)).await
 }
 
-/// 自己開的終端現在忙還是閒。只有 grok 有規則；判斷不了回 unknown，不猜。
+/// 自己開的終端現在忙還是閒。只有 grok 有規則；判斷不了回 unknown，不猜。信任資料夾的提問是 waiting_user，不代答。
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
