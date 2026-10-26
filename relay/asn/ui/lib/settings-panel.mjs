@@ -18,7 +18,7 @@ import { DEVICE_TEXT, canRemoveRow, dropAfter, moveFlags, removedRows, visibleRo
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
 export const SETTING_OPS = [
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
-  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-trust', 'acct-trust-signed', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
+  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-trust', 'acct-trust-signed', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
   'closeTo', 'autostart', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'avatar-remove',
 ]
 
@@ -213,7 +213,8 @@ export const SettingsPanel = {
                           <span class="dv-side">
                             <span class="dv-plan" v-if="a.plan">{{ a.plan }}</span>
                             <span class="dv-cur" v-if="a.current">使用中</span>
-                            <button class="aero-btn" type="button" v-else-if="v.key === 'claude' && !curDev.self && (v.switchable || v.switchHint)" :disabled="!v.switchable" @click="act('device-switch', { node: curDev.key, email: a.email })">切換</button>
+                            <button class="aero-btn" type="button" v-else-if="(v.key === 'claude' || v.key === 'grok') && !curDev.self && (v.switchable || v.switchHint)" :disabled="!v.switchable" @click="act('device-switch', { node: curDev.key, email: a.email, vendor: v.key })">切換</button>
+                            <button class="aero-btn" type="button" v-else-if="v.key === 'grok' && curDev.self && v.accounts.length > 1" :disabled="st.accounts.busy" @click="act('grok-switch', a.email)">切換</button>
                           </span>
                           <span class="dv-quota" :class="{ stale: a.quota.stale, out: a.quota.exhausted }" v-if="a.quota">
                             <span>{{ a.quota.text }}</span>

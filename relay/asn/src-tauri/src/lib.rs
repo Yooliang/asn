@@ -311,7 +311,9 @@ async fn acct_remote_report(app: State<'_, App>) -> Result<Value, String> {
     let codex = tauri::async_runtime::spawn_blocking(codex_accounts::codex_account_current).await.ok().and_then(|r| r.ok()).flatten();
     // 各帳號上次記下的額度（沒有紀錄的帳號不帶額度欄位）
     let quotas = tauri::async_runtime::spawn_blocking(|| claude_quota::load_all(&claude_accounts::claude_home())).await.unwrap_or_default();
-    acct_remote::report(relay.as_ref(), &list, codex.as_ref(), &quotas).await
+    // Grok 帳號庫（email 與是否使用中）；沒有就是空的
+    let grok = tauri::async_runtime::spawn_blocking(grok_accounts::local_list).await.unwrap_or_default();
+    acct_remote::report(relay.as_ref(), &list, codex.as_ref(), &quotas, &grok).await
 }
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
@@ -322,8 +324,8 @@ async fn acct_remote_list(app: State<'_, App>, node: String) -> Result<Value, St
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
-async fn acct_remote_request(app: State<'_, App>, node: String, email: String) -> Result<Value, String> {
-    acct_remote::remote_request(relay_of(&app)?.as_ref(), &node, &email).await
+async fn acct_remote_request(app: State<'_, App>, node: String, email: String, vendor: Option<String>) -> Result<Value, String> {
+    acct_remote::remote_request(relay_of(&app)?.as_ref(), &node, &email, vendor.as_deref().unwrap_or("claude")).await
 }
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
