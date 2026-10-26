@@ -1242,6 +1242,17 @@ pub fn run() {
                     let _ = h.emit("claude-account-auto", o);
                 }));
             }
+            // pi 與 ASN 互通（#240 方案 A）預設開啟：啟動後 20 秒，第一次偵測到 pi 且還沒裝就自動安裝；使用者在設定關掉後不再裝回；--shot 截圖模式不動
+            if handle.state::<App>().shot.is_none() {
+                tauri::async_runtime::spawn(async {
+                    tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+                    match tauri::async_runtime::spawn_blocking(launch::pi_setup::auto_install_real).await {
+                        Ok(Some(Ok(_))) => eprintln!("pi 與 ASN 互通：已自動安裝擴充"),
+                        Ok(Some(Err(e))) => eprintln!("pi 與 ASN 互通：自動安裝沒成功：{e}"),
+                        _ => {}
+                    }
+                });
+            }
             // Claude Code 外掛：啟動後 5 秒在背景安裝一次（找不到 claude 就略過；有標記檔就不再碰；--shot 截圖模式不動）
             if handle.state::<App>().shot.is_none() {
                 let h = handle.clone();
