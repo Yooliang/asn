@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { BUSY_LONG_MIN, PROMPT_TEXT_MAX, SEND_MAX, WAIT_LONG_MIN, trackHeld, answerRequest, createTermPoller, folderName, kindTitle, promptKey, promptView, rowsOf, sendConfirmView, sendDraftView, sendRequest, sentText, stateView, willSendText } from '../ui/lib/term-panel.mjs'
+import { BUSY_LONG_MIN, PROMPT_TEXT_MAX, SEND_MAX, UNLOCK_TEXT, WAIT_LONG_MIN, adoptRequest, answerRequest, candidateRows, createTermPoller, folderName, kindTitle, promptKey, promptView, rowsOf, sendConfirmView, sendDraftView, sendRequest, sentText, stateView, trackHeld, unlockRequest, willSendText } from '../ui/lib/term-panel.mjs'
 
 const MENU = { kind: 'menu', text: '要信任這個資料夾嗎？', options: [{ n: 2, label: 'No, quit' }, { n: 1, label: 'Yes, proceed' }] }
 
@@ -225,4 +225,61 @@ test('卡太久的提示：只有狀態與時間，不帶終端畫面文字；�
   const js = readUi('list.js'), html = readUi('list.html')
   assert.ok(js.includes('trackHeld(termSince, raw, Date.now())'))
   assert.ok(html.includes('class="term-held" v-if="r.held"'))
+})
+
+// ---- 接手使用者自己開的 WezTerm 窗格（#285，後端 #313）----
+const CAND = { pid: 4242, pane_id: 3, started_ms: 1700000000000, profile: 'grok', tab_title: 'my grok', cwd_raw: 'file://HOST/D:/work/proj%20x', cwd_authorized: true, version_verified: true, version_note: '', already_adopted: false }
+
+test('接手候選：欄位壞掉的丟掉；資料夾取最後一段（網址編碼會還原）；版本未驗證說明原因；已接手的不能再按', () => {
+  const rows = candidateRows([CAND, { ...CAND, pid: 0 }, { ...CAND, pane_id: -1 }, { ...CAND, started_ms: 'x' }, null, { ...CAND, profile: 3 }])
+  assert.equal(rows.length, 1)
+  assert.deepEqual([rows[0].key, rows[0].profile, rows[0].folder, rows[0].authorized, rows[0].canAdopt, rows[0].note], ['4242:3', 'grok', 'proj x', true, true, ''])
+  const un = candidateRows([{ ...CAND, version_verified: false, version_note: '版本不是 20240203', cwd_authorized: false }])[0]
+  assert.deepEqual([un.verified, un.note, un.authorized], [false, '版本不是 20240203', false])
+  assert.match(candidateRows([{ ...CAND, version_verified: false, version_note: '' }])[0].note, /只能讀取/, '沒有原因也要說只能讀')
+  assert.equal(candidateRows([{ ...CAND, already_adopted: true }])[0].canAdopt, false)
+  assert.equal(candidateRows([{ ...CAND, tab_title: 'a\u0000b\u001bc' }])[0].title, 'a b c', '控制字元不進畫面')
+  assert.deepEqual(candidateRows('壞的'), [])
+})
+
+test('接手請求：pid、窗格、建立時間原樣帶回；已接手或欄位壞的回 null', () => {
+  const row = candidateRows([CAND])[0]
+  assert.deepEqual(adoptRequest(row), { pid: 4242, pane_id: 3, started_ms: 1700000000000 })
+  assert.equal(adoptRequest({ ...row, canAdopt: false }), null)
+  assert.equal(adoptRequest(null), null)
+  assert.equal(adoptRequest({ ...row, started_ms: 0 }), null)
+  assert.deepEqual(Object.keys(adoptRequest(row)).sort(), ['pane_id', 'pid', 'started_ms'])
+})
+
+test('解鎖請求：只對已接手的窗格；一次只開被選的那一個，另一個維持關；不認得的種類回 null', () => {
+  const adopted = { id: '7', adopted: true }
+  assert.deepEqual(unlockRequest(adopted, 'answer'), { id: '7', allow_answer: true, allow_send: false })
+  assert.deepEqual(unlockRequest(adopted, 'send'), { id: '7', allow_answer: false, allow_send: true })
+  assert.equal(unlockRequest({ id: '7', adopted: false }, 'send'), null, '自己開的終端不需要也不能解鎖')
+  assert.equal(unlockRequest(adopted, 'both'), null)
+  assert.equal(unlockRequest(null, 'send'), null)
+  assert.match(UNLOCK_TEXT.send.ask, /確認送出/)
+  assert.match(UNLOCK_TEXT.answer.ask, /送出/)
+})
+
+test('清單：term_list 的 adopted 帶進列，沒有就是 false', () => {
+  const rows = rowsOf([{ id: '1', profile: 'grok', adopted: true, cwd: 'D:\a' }, { id: '2', profile: 'grok', cwd: 'D:\b' }])
+  assert.deepEqual(rows.map(r => r.adopted), [true, false])
+})
+
+test('接線：term_adopt_unlock 只在 adoptUnlockConfirm 裡呼叫一次、只有「允許」按鈕觸發（先跳確認）；term_adopt 只在 adoptDo；寫入開關預設關', () => {
+  const js = readUi('list.js'), html = readUi('list.html'), tauri = readUi('lib/tauri.mjs')
+  assert.equal(count(js, 'transport.termAdoptUnlock('), 1)
+  const at = js.indexOf('transport.termAdoptUnlock(')
+  const fnStart = js.lastIndexOf('async function adoptUnlockConfirm', at)
+  assert.ok(fnStart > 0 && js.indexOf('\n}\n', fnStart) > at, '那一處在 adoptUnlockConfirm 裡')
+  assert.ok(js.slice(fnStart, at).includes('unlockRequest('), '送出前先過 unlockRequest')
+  assert.equal((html.match(/adoptUnlockConfirm(?![A-Za-z])/g) ?? []).length, 1, '模板只有一個按鈕呼叫 adoptUnlockConfirm')
+  assert.equal((html.match(/adoptUnlockAsk\(r, /g) ?? []).length, 2, '兩個「允許…」按鈕都只是開確認框')
+  const ask = js.slice(js.indexOf('function adoptUnlockAsk'), js.indexOf('function adoptUnlockCancel'))
+  assert.ok(!ask.includes('termAdoptUnlock'), 'adoptUnlockAsk 不解鎖')
+  assert.equal(count(js, 'transport.termAdopt('), 1)
+  assert.ok(js.slice(js.lastIndexOf('async function adoptDo', js.indexOf('transport.termAdopt(')), js.indexOf('transport.termAdopt(')).includes('adoptRequest('))
+  assert.ok(/unlocked: \{\}/.test(js), '本機記下的解鎖狀態一開始是空的（全關）')
+  assert.ok(tauri.includes("termAdoptUnlock: req => invoke('term_adopt_unlock', { req })") && tauri.includes("termStop: req => invoke('term_stop', { req })"))
 })

@@ -168,6 +168,32 @@ pub fn sock_path(home: &Path, gui_pid: u32) -> PathBuf {
     home.join(".local").join("share").join("wezterm").join(format!("gui-sock-{gui_pid}"))
 }
 
+/// `list-clients --format json` 裡的時間長度。
+#[derive(Debug, Clone, Deserialize, PartialEq, Default)]
+pub struct WezDuration {
+    #[serde(default)]
+    pub secs: u64,
+    #[serde(default)]
+    pub nanos: u64,
+}
+
+impl WezDuration {
+    pub fn as_secs_f64(&self) -> f64 {
+        self.secs as f64 + self.nanos as f64 / 1_000_000_000.0
+    }
+}
+
+/// `wezterm cli list-clients --format json` 的一列。
+#[derive(Debug, Clone, Deserialize, PartialEq, Default)]
+pub struct WezClientInfo {
+    #[serde(default)]
+    pub pid: u64,
+    #[serde(default)]
+    pub idle_time: WezDuration,
+    #[serde(default)]
+    pub focused_pane_id: u64,
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct PaneInfo {
     pub pane_id: u64,
@@ -340,6 +366,19 @@ impl<'a> WezTerm<'a> {
     pub fn list(&self, sock: &Path) -> Result<Vec<PaneInfo>, String> {
         let s = self.cli(sock, &["list".into(), "--format".into(), "json".into()])?;
         serde_json::from_str(&s).map_err(|e| format!("無法解析 WezTerm 清單：{e}"))
+    }
+
+    pub fn list_clients_text(&self, sock: &Path) -> Result<String, String> {
+        self.cli(sock, &["list-clients".into(), "--format".into(), "json".into()])
+    }
+
+    /// 執行 `wezterm.exe --version`（不走 socket）。
+    pub fn version_string(&self) -> Result<String, String> {
+        let out = self.runner.run(&self.dir.cli, &["--version".to_string()], &self.config_env(), self.cli_timeout)?;
+        if !out.success {
+            return Err(format!("WezTerm 版本查詢失敗：{}", out.stderr.trim()));
+        }
+        Ok(out.stdout)
     }
 
     /// 在視窗內開新分頁，回傳新 pane 編號
