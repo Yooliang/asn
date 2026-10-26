@@ -79,6 +79,8 @@ impl Runner for RealRunner {
                 }
                 Ok(None) => {
                     if start.elapsed() >= timeout {
+                        // cli 若在 socket 突然消失時自己拉起了 mux-server，那是它的子行程：連整棵樹一起結束（此刻 child 還活著，編號不會被回收）
+                        let _ = Command::new("taskkill").no_window().args(["/PID", &child.id().to_string(), "/T", "/F"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
                         let _ = child.kill();
                         let _ = child.wait();
                         return Err(format!("WezTerm 指令逾時（{} 秒），已結束該子行程", timeout.as_secs()));
