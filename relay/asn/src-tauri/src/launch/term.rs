@@ -8,7 +8,7 @@
 //! - profile 只准 agy 與 grok。認領時檔案裡其他 profile 一律不接手、不結束。
 //!
 //! 忙閒只實作 grok：連續兩次取樣（中間用 Runner::sleep，間隔可注入；假執行器不真的等）畫面與游標都沒變，
-//! 且最後一個非空白行全文等於暫定提示符，才是 idle。對不上、agy、或讀取失敗都是 unknown，不把「畫面停住」猜成閒置。
+//! 且最近 40 行裡有空的輸入框（行首是「│ ❯」，後面只有空白或佔位「…」），才是 idle。框裡有別的字、agy、或讀取失敗都是 unknown。
 //! 畫面含信任提問、或解析得出選單、或選單模樣但解析不出時是 waiting_user，並附上 prompt。絕不代答。
 //! 代答只有 term_answer。這個命令本身證明不了使用者有按確認，UI 的提示框必須是唯一入口，後端其他路徑不得呼叫它。
 //! 按鍵只從固定對照表產生，走專用的送出（ESC [ A、ESC [ B、\r、ESC）。一般送字仍先壓行，那個會丟掉 ESC 的保護不放寬。
@@ -39,8 +39,8 @@ pub const STATUS_GAP: Duration = Duration::from_secs(1);
 pub const MAX_TITLE_CHARS: usize = 40;
 const STORE_VERSION: u32 = 1;
 const TRUNC_MARK: &str = "…（已截斷）";
-/// 暫定的 grok 閒置標記。真機提示符還沒在 A5 確認過；最後一個非空白行去掉首尾空白後必須全文等於它，否則回 unknown。
-const GROK_IDLE_MARK: &str = "grok>";
+/// grok 1.0.70 登入後閒置時，輸入框那一行的行首。空框後面可以是佔位「…」，那不算使用者正在打字。
+const GROK_INPUT_MARK: &str = "│ ❯";
 /// grok 第一次打開資料夾時的信任提問。畫面裡出現這句就回 waiting_user，絕不代送 y 或其他字。
 const GROK_TRUST_MARK: &str = "Do you trust the contents of this directory";
 /// 回給前端的提問原文上限（字，不是位元組）。
@@ -358,8 +358,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     }
 
     /// 忙或閒。只認自己的編號。agy 沒有規則，直接 unknown，連畫面都不讀。
-    /// grok：取樣、睡一段、再取樣。兩次的畫面與游標都相同，且停在暫定提示符，才是 idle；有變化是 busy；其餘 unknown。
-    /// 任一次畫面是信任提問、選單、或解析不出的選單模樣，就是 waiting_user。這裡不送字。
+    /// grok：取樣、睡一段、再取樣。兩次的畫面與游標都相同，且有空的輸入框，才是 idle；有變化是 busy；其餘 unknown。
+    /// 任一次畫面是信任提問、選單、或解析不出的選單模樣，就是 waiting_user，優先於閒置。這裡不送字。
     pub fn status(&self, id: &str) -> Result<TermStatus, String> {
         let snap = self.snapshot(id)?;
         if snap.profile != "grok" {
@@ -401,22 +401,17 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 prompt: None,
             });
         }
-        if last_nonempty(&second.text) == GROK_IDLE_MARK {
-            return Ok(TermStatus {
-                state: "idle".into(),
-                profile: snap.profile,
-                cursor_x,
-                cursor_y,
-                reason: "連續兩次畫面相同且停在提示符".into(),
-                prompt: None,
-            });
-        }
+        let (state, reason) = match grok_input_box(&second.text) {
+            InputBox::Empty => ("idle", "連續兩次畫面相同且停在輸入框"),
+            InputBox::Typing => ("unknown", "輸入框裡有文字，不當成閒置"),
+            InputBox::None => ("unknown", "畫面沒有變化，但不是已確認的 grok 輸入框"),
+        };
         Ok(TermStatus {
-            state: "unknown".into(),
+            state: state.into(),
             profile: snap.profile,
             cursor_x,
             cursor_y,
-            reason: "畫面沒有變化，但不是已確認的 grok 提示符".into(),
+            reason: reason.into(),
             prompt: None,
         })
     }
@@ -735,8 +730,28 @@ fn pick_pane<'a>(panes: &'a [wezterm::PaneInfo], id: &str, saved_pane: u64) -> O
     Some(ours[0])
 }
 
-fn last_nonempty(text: &str) -> &str {
-    text.lines().rev().find(|l| !l.trim().is_empty()).map(str::trim).unwrap_or("")
+enum InputBox {
+    /// 最近這段畫面裡沒有輸入框那一行。
+    None,
+    /// 有輸入框，而且除了行首記號、空白、佔位「…」以外沒有字。
+    Empty,
+    /// 輸入框裡有使用者打的字。保守不當成閒置。
+    Typing,
+}
+
+/// 只認行首正好是「│ ❯」。佔位「…」算空框；再多任何字就當正在輸入。
+fn grok_input_box(text: &str) -> InputBox {
+    let mut saw_empty = false;
+    for line in text.lines() {
+        let Some(rest) = line.trim_end().strip_prefix(GROK_INPUT_MARK) else { continue };
+        let rest = rest.trim();
+        if rest.is_empty() || rest == "…" {
+            saw_empty = true;
+        } else {
+            return InputBox::Typing;
+        }
+    }
+    if saw_empty { InputBox::Empty } else { InputBox::None }
 }
 
 fn unknown_status(profile: &str, reason: &str) -> TermStatus {
@@ -1668,10 +1683,10 @@ mod tests {
     }
 
     #[test]
-    fn agy_穩定停在提示符仍是_unknown() {
+    fn agy_穩定停在輸入框仍是_unknown() {
         let mut rig = make(default_profiles(), vec![]);
         let id = rig.svc.start("agy", &rig.cwd, &rig.config).unwrap();
-        *rig.runner.inner.screen.borrow_mut() = "grok>\n".into();
+        *rig.runner.inner.screen.borrow_mut() = "│ ❯ …\nGrok Build  1.0.70\n".into();
         rig.svc.set_status_gap(Duration::from_millis(5));
         let st = rig.svc.status(&id).unwrap();
         assert_eq!(st.state, "unknown");
@@ -1684,17 +1699,18 @@ mod tests {
     }
 
     #[test]
-    fn 兩次取樣之間只睡注入的間隔且停在提示符才是_idle() {
+    fn 兩次取樣之間只睡注入的間隔且停在輸入框才是_idle() {
         let mut rig = make(default_profiles(), vec![]);
         assert_eq!(rig.svc.status_gap, STATUS_GAP);
         let id = rig.svc.start("grok", &rig.cwd, &rig.config).unwrap();
-        *rig.runner.inner.screen.borrow_mut() = "前面一行\ngrok> \n".into();
+        // 真機：最後一行是版本標題，輸入框在上面，空框帶佔位「…」。
+        *rig.runner.inner.screen.borrow_mut() = "│ ❯ …\nGrok Build  1.0.70\n".into();
         rig.svc.set_status_gap(Duration::from_millis(5));
         let st = rig.svc.status(&id).unwrap();
         assert_eq!(st.state, "idle");
         assert_eq!(st.profile, "grok");
         assert_eq!((st.cursor_x, st.cursor_y), (Some(1), Some(2)));
-        assert!(st.reason.contains("提示符"), "{}", st.reason);
+        assert!(st.reason.contains("輸入框"), "{}", st.reason);
         let gets: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "get-text")).collect();
         assert_eq!(gets.len(), 2);
         assert!(gets.iter().all(|a| a.iter().any(|x| x == &format!("--start-line=-{STATUS_LINES}"))));
@@ -1714,7 +1730,7 @@ mod tests {
         let mut rig = make(default_profiles(), vec![]);
         let id = rig.svc.start("grok", &rig.cwd, &rig.config).unwrap();
         rig.svc.set_status_gap(Duration::from_millis(5));
-        *rig.runner.inner.screens.borrow_mut() = vec!["grok>\n".into(), "grok>\n工作中\n".into()];
+        *rig.runner.inner.screens.borrow_mut() = vec!["│ ❯ …\nGrok Build  1.0.70\n".into(), "│ ❯ …\n正在想\nGrok Build  1.0.70\n".into()];
         let st = rig.svc.status(&id).unwrap();
         assert_eq!(st.state, "busy", "文字變了仍應是 busy：{}", st.reason);
         assert!(st.reason.contains("變化"), "{}", st.reason);
@@ -1733,8 +1749,8 @@ mod tests {
         let mut rig = make(default_profiles(), vec![]);
         let id = rig.svc.start("grok", &rig.cwd, &rig.config).unwrap();
         rig.svc.set_status_gap(Duration::from_millis(5));
-        // 真機：最後一行是版本標題，提問在上面。拿掉判斷會因不是 grok> 而掉回 unknown。
-        *rig.runner.inner.screen.borrow_mut() = "Do you trust the contents of this directory? (Yes, proceed y / No, quit n)\nGrok Build  1.0.70\n".into();
+        // 真機：最後一行是版本標題，提問在上面。信任提問優先於輸入框。
+        *rig.runner.inner.screen.borrow_mut() = "Do you trust the contents of this directory? (Yes, proceed y / No, quit n)\n│ ❯ …\nGrok Build  1.0.70\n".into();
         let st = rig.svc.status(&id).unwrap();
         assert_eq!(st.state, "waiting_user");
         assert_eq!(st.reason, "trust_dialog");
@@ -1749,7 +1765,7 @@ mod tests {
 
         *rig.runner.inner.screen.borrow_mut() = "Grok Build  1.0.70\n".into();
         let st = rig.svc.status(&id).unwrap();
-        assert_eq!(st.state, "unknown", "沒有信任提問時，最後一行不是 grok> 仍是 unknown");
+        assert_eq!(st.state, "unknown", "沒有信任提問、也沒有輸入框時仍是 unknown");
         assert!(st.prompt.is_none());
         assert_eq!(count_cmd(&rig.runner, "send-text"), 0);
 
@@ -1922,15 +1938,21 @@ mod tests {
     }
 
     #[test]
-    fn 畫面沒變但不是提示符就是_unknown() {
+    fn 畫面沒變但不是輸入框就是_unknown() {
         let mut rig = make(default_profiles(), vec![]);
         let id = rig.svc.start("grok", &rig.cwd, &rig.config).unwrap();
         rig.svc.set_status_gap(Duration::from_millis(5));
         *rig.runner.inner.screen.borrow_mut() = "仍在想\n".into();
         let st = rig.svc.status(&id).unwrap();
-        assert_eq!(st.state, "unknown", "畫面停住但不是已確認的提示符，不能猜成閒置");
-        assert!(st.reason.contains("提示符"), "{}", st.reason);
+        assert_eq!(st.state, "unknown", "畫面停住但沒有輸入框，不能猜成閒置");
+        assert!(st.reason.contains("輸入框"), "{}", st.reason);
         assert_ne!(st.state, "idle");
+
+        *rig.runner.inner.screen.borrow_mut() = "│ ❯ 你好\nGrok Build  1.0.70\n".into();
+        let st = rig.svc.status(&id).unwrap();
+        assert_eq!(st.state, "unknown", "輸入框裡有字，保守不當成閒置");
+        assert!(st.reason.contains("有文字"), "{}", st.reason);
+        assert_eq!(count_cmd(&rig.runner, "send-text"), 0);
     }
 
     #[test]
