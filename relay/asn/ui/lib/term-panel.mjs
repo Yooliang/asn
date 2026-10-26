@@ -55,6 +55,41 @@ export function willSendText(pv, n) {
 }
 export const sentText = desc => (desc ? `已送出：${String(desc).slice(0, 80)}` : '已送出')
 
+// ---- ASN 替使用者往終端送字（#296）----
+// 使用者在清單裡寫好文字、按「送出」→ 先跳確認框，寫清楚「送到哪個終端／哪個資料夾／送什麼字」→ 按「確認送出」才呼叫 term_send。
+// 沒有任何自動送出；終端正在等你回答（信任資料夾、選單）時不能送字，請先處理提示。
+export const SEND_MAX = 2000
+
+/** 送字草稿的檢查。回 { ok, reason, lines, flattened }：reason 是給人看的中文原因（ok 時是空字串） */
+export function sendDraftView(row, text) {
+  const t = String(text ?? '')
+  const lines = t.split(/\r?\n/).filter(l => l.trim()).length
+  if (!row) return { ok: false, reason: '找不到這個終端', lines, flattened: false }
+  if (row.state === 'waiting_user') return { ok: false, reason: '終端正在等你回答，請先處理提示再送字', lines, flattened: false }
+  if (!t.trim()) return { ok: false, reason: '請先寫要送的文字', lines, flattened: false }
+  if (t.length > SEND_MAX) return { ok: false, reason: `文字太長（最多 ${SEND_MAX} 字）`, lines, flattened: false }
+  if (!row.cwd) return { ok: false, reason: '這個終端沒有工作資料夾紀錄，不能代送', lines, flattened: false }
+  return { ok: true, reason: '', lines, flattened: lines > 1 }
+}
+
+/** 確認框的說明：送到哪、什麼字、會不會按 Enter、多行會壓成一行 */
+export function sendConfirmView(row, text, enter) {
+  const d = sendDraftView(row, text)
+  if (!d.ok) return null
+  return {
+    title: '要替你把這段文字送進終端嗎？',
+    target: `${row.title}${row.folder ? `・${row.folder}` : ''}`,
+    text: String(text).slice(0, SEND_MAX),
+    note: [d.flattened ? '多行文字會合成一行送出。' : '', enter ? '送完後會再按一次 Enter。' : '只會把字打進去，不按 Enter。'].filter(Boolean).join(''),
+  }
+}
+
+/** 使用者按了「確認送出」：回給 term_send 的請求（只有編號、文字、是否換行）；草稿不合格回 null，不送 */
+export function sendRequest(row, text, enter) {
+  const d = sendDraftView(row, text)
+  return d.ok ? { id: row.id, text: String(text), enter: enter === true } : null
+}
+
 // 資料夾顯示名：路徑最後一段（Windows 與 POSIX 分隔都認），結尾的分隔符號略過；不是字串或空的回空字串
 export function folderName(cwd) {
   const parts = String(typeof cwd === 'string' ? cwd : '').split(/[\\/]+/).filter(Boolean)

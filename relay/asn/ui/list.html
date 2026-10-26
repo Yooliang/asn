@@ -365,13 +365,37 @@
     </div>
   </div>
 
+  <!-- 終端：替你送字的確認框（按「確認送出」才送；關掉或取消都不送） -->
+  <div class="partner-dlg-back" v-if="termSendConfirmView">
+    <div class="partner-dlg term-prompt" role="dialog" aria-labelledby="term-send-title" @click.stop>
+      <h3 id="term-send-title">{{ termSendConfirmView.title }}</h3>
+      <p class="partner-node">送到：{{ termSendConfirmView.target }}</p>
+      <pre class="term-prompt-text">{{ termSendConfirmView.text }}</pre>
+      <p class="partner-hint">{{ termSendConfirmView.note }}</p>
+      <div class="partner-actions">
+        <button class="aero-btn" type="button" @click="termSendBack">取消</button>
+        <button class="aero-btn primary" type="button" :disabled="termSend.busy" @click="termSendConfirm">{{ termSend.busy ? '送出中…' : '確認送出' }}</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 終端：清單（編號、profile、資料夾、狀態；不渲染終端內容） -->
   <div class="partner-dlg-back" v-if="terms.open" @click.self="terms.open = false">
     <div class="partner-dlg term-list-dlg" role="dialog" aria-labelledby="term-list-title" @click.stop>
       <h3 id="term-list-title">終端</h3>
       <p class="partner-hint" v-if="!terms.rows.length">目前沒有由 ASN 開啟的終端。</p>
       <ul class="term-rows" v-else>
-        <li v-for="r in terms.rows" :key="r.id" class="term-row"><b>{{ r.title }}</b><span class="term-folder" v-if="r.folder">{{ r.folder }}</span><span class="term-state" :class="'tone-' + r.tone">{{ r.stateLabel }}</span></li>
+        <li v-for="r in terms.rows" :key="r.id" class="term-row-wrap">
+          <div class="term-row"><b>{{ r.title }}</b><span class="term-folder" v-if="r.folder">{{ r.folder }}</span><span class="term-state" :class="'tone-' + r.tone">{{ r.stateLabel }}</span><button class="aero-btn term-send-btn" type="button" :aria-expanded="termSend.id === r.id" @click="termSendOpen(r)">{{ termSend.id === r.id ? '收起' : '送字…' }}</button></div>
+          <div class="term-send" v-if="termSend.id === r.id">
+            <textarea class="set-input" v-model="termSend.text" rows="3" :maxlength="SEND_MAX" placeholder="要送進這個終端的文字" aria-label="要送進終端的文字"></textarea>
+            <label class="chk"><input type="checkbox" v-model="termSend.enter" /><span>送完後按 Enter</span></label>
+            <p class="partner-hint" v-if="termSend.text && !termSendDraft.ok">{{ termSendDraft.reason }}</p>
+            <p class="partner-hint" v-if="termSend.note" role="status">{{ termSend.note }}</p>
+            <p class="partner-err" v-if="termSend.error" role="alert">{{ termSend.error }}</p>
+            <div class="partner-actions"><button class="aero-btn primary" type="button" :disabled="!termSendDraft.ok || termSend.busy" @click="termSendAsk">送出</button></div>
+          </div>
+        </li>
       </ul>
       <div class="partner-actions"><button class="aero-btn" type="button" @click="terms.open = false">關閉</button></div>
     </div>
