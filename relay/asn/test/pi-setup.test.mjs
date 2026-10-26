@@ -28,11 +28,22 @@ test('還沒啟用：先只有「啟用…」；按了才出現同意說明與�
   assert.match(b.consent, /隨時可以在這裡移除/, '要講明可以還原')
 })
 
+test('預設開啟：已啟用的說明講明「已替你的 pi 安裝，可在此關閉」；使用者關掉後改說已關閉自動安裝', () => {
+  assert.match(PI_SETUP_TEXT.on, /已替你的 pi 安裝 ASN 擴充，可在此關閉/)
+  assert.equal(piSetupView(S({ installed: true })).lines[0], PI_SETUP_TEXT.on)
+  assert.equal(piSetupView(S({ installed: true })).removeLabel, '關閉並移除')
+  assert.match(PI_SETUP_TEXT.removed, /不會再自動裝回/)
+  assert.equal(piSetupView(S({ auto: true })).lines[0], PI_SETUP_TEXT.off)
+  assert.equal(piSetupView(S({ auto: false })).lines[0], PI_SETUP_TEXT.offAuto)
+  assert.match(PI_SETUP_TEXT.offAuto, /已關閉自動安裝/)
+  assert.doesNotMatch(Object.values(PI_SETUP_TEXT).join(''), /收發室/)
+})
+
 test('已啟用：只有「移除」；有舊的失效擴充時多一個「清理並重新安裝」並說明', () => {
   const a = piSetupView(S({ installed: true }))
   assert.deepEqual([a.showRemove, a.showAsk, a.showAgree, a.showReinstall], [true, false, false, false])
   assert.deepEqual(a.lines, [PI_SETUP_TEXT.on])
-  const b = piSetupView(S({ installed: true, stale: 2 }))
+  const b = piSetupView(S({ installed: true, stale: 2, auto: true }))
   assert.equal(b.showReinstall, true)
   assert.ok(b.lines.includes(PI_SETUP_TEXT.stale))
   assert.equal(piSetupView(S({ installed: true, stale: 2, ext: false })).showReinstall, false, '找不到擴充就不能重新安裝')
@@ -57,15 +68,16 @@ test('已經啟用就不會再顯示同意說明（即使 confirm 還是 true）
 })
 
 test('狀態正規化：壞值用保守預設（不啟用、沒有舊的）', () => {
-  assert.deepEqual(normalizePiSetup(null), { pi: false, ext: false, installed: false, stale: 0 })
-  assert.deepEqual(normalizePiSetup({ pi: 'yes', ext: 1, installed: 'true', stale: -3 }), { pi: false, ext: false, installed: false, stale: 0 })
-  assert.deepEqual(normalizePiSetup({ pi: true, ext: true, installed: true, stale: 2 }), { pi: true, ext: true, installed: true, stale: 2 })
+  assert.deepEqual(normalizePiSetup(null), { pi: false, ext: false, installed: false, stale: 0, auto: true })
+  assert.deepEqual(normalizePiSetup({ pi: 'yes', ext: 1, installed: 'true', stale: -3 }), { pi: false, ext: false, installed: false, stale: 0, auto: true })
+  assert.equal(normalizePiSetup({ pi: true, auto: false }).auto, false, '只有明確 false 才算關閉自動安裝')
+  assert.deepEqual(normalizePiSetup({ pi: true, ext: true, installed: true, stale: 2, auto: true }), { pi: true, ext: true, installed: true, stale: 2, auto: true })
 })
 
 test('錯誤訊息：加前綴並限長', () => {
   assert.equal(piSetupError(new Error('x')), `${PI_SETUP_TEXT.failed}x`)
   assert.equal(piSetupError('boom'), `${PI_SETUP_TEXT.failed}boom`)
-  assert.ok(piSetupError(new Error('a'.repeat(500))).length <= PI_SETUP_TEXT.failed.length + 200)
+  assert.ok(piSetupError(new Error('a'.repeat(500))).length <= PI_SETUP_TEXT.failed.length + 500)
 })
 
 test('文案：對使用者不說「收發室」（小良哥 #38），每一句都有講清楚', () => {
@@ -119,5 +131,5 @@ test('畫面：已啟用＝只有「移除」；處理中按鈕全部 disabled�
   assert.ok(on.includes(PI_SETUP_TEXT.on) && on.includes(PI_SETUP_TEXT.installed))
   assert.deepEqual(buttons(on).filter(b => [PI_SETUP_TEXT.ask, PI_SETUP_TEXT.agree, PI_SETUP_TEXT.remove].includes(b)), [PI_SETUP_TEXT.remove])
   const busy = await render(piSetupView(S({ installed: true }), { busy: true }))
-  assert.ok(/<button[^>]*disabled[^>]*>移除<\/button>/.test(busy), '處理中移除鈕要鎖住')
+  assert.ok(/<button[^>]*disabled[^>]*>關閉並移除<\/button>/.test(busy), '處理中移除鈕要鎖住')
 })

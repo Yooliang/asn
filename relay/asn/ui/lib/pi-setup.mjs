@@ -5,7 +5,8 @@
 export const PI_SETUP_TEXT = {
   title: 'pi 與 ASN 互通',
   off: '你自己開的 pi 目前不會出現在 ASN 的名單上，也不能在 ASN 收信、回信。',
-  on: '已啟用：你之後自己開的 pi 會自動連上 ASN（出現在名單上、能收信回信、能切換模型）。已經開著的 pi 要重開才會生效。',
+  offAuto: '已關閉自動安裝：ASN 不會再替你的 pi 裝擴充。要用的話，按下面的「啟用」。',
+  on: '已替你的 pi 安裝 ASN 擴充，可在此關閉。你之後自己開的 pi 會自動連上 ASN（出現在名單上、能收信回信、能切換模型）；已經開著的 pi 要重開才會生效。',
   stale: '設定裡有一筆已經不存在的舊擴充（ASN 搬過家或重裝過），重新安裝時會順便清掉。',
   consent:
     '同意之後，ASN 會用 pi 官方的安裝指令，替你的 pi 加裝一個小擴充（程式就在這台電腦上，不會上傳）。裝好後，你之後開的 pi 會自動出現在 ASN 的名單上，能收信、回信，也能從 ASN 切換模型；已經開著的 pi 要重開才會生效。' +
@@ -14,18 +15,18 @@ export const PI_SETUP_TEXT = {
   ask: '啟用…',
   agree: '同意並安裝',
   cancel: '取消',
-  remove: '移除',
+  remove: '關閉並移除',
   reinstall: '清理並重新安裝',
   busy: '處理中，請稍候…',
   installed: '已啟用。之後你開的 pi 就會連上 ASN。',
-  removed: '已移除，pi 的設定已還原。',
+  removed: '已關閉並移除，pi 的設定已還原；ASN 不會再自動裝回。',
   failed: '沒有成功：',
 }
 
 /** 後端回來的狀態 → 乾淨的物件（壞值當保守預設） */
 export function normalizePiSetup(raw) {
   const r = raw && typeof raw === 'object' ? raw : {}
-  return { pi: r.pi === true, ext: r.ext === true, installed: r.installed === true, stale: Number.isInteger(r.stale) && r.stale > 0 ? r.stale : 0 }
+  return { pi: r.pi === true, ext: r.ext === true, installed: r.installed === true, stale: Number.isInteger(r.stale) && r.stale > 0 ? r.stale : 0, auto: r.auto !== false }
 }
 
 /**
@@ -38,7 +39,7 @@ export function piSetupView(raw, ui = {}) {
   if (!s.pi && !s.installed) return null
   const busy = ui.busy === true
   const confirm = ui.confirm === true && !s.installed && !busy
-  const lines = [s.installed ? PI_SETUP_TEXT.on : PI_SETUP_TEXT.off]
+  const lines = [s.installed ? PI_SETUP_TEXT.on : s.auto ? PI_SETUP_TEXT.off : PI_SETUP_TEXT.offAuto]
   if (s.stale > 0) lines.push(PI_SETUP_TEXT.stale)
   if (!s.ext && !s.installed) lines.push(PI_SETUP_TEXT.noExt)
   if (busy) lines.push(PI_SETUP_TEXT.busy)
@@ -64,4 +65,4 @@ export function piSetupView(raw, ui = {}) {
 }
 
 /** 後端錯誤 → 給人看的一句話 */
-export const piSetupError = e => `${PI_SETUP_TEXT.failed}${String(e?.message ?? e ?? '').slice(0, 200)}`
+export const piSetupError = e => `${PI_SETUP_TEXT.failed}${String(e?.message ?? e ?? '').slice(0, 500)}`
