@@ -1572,4 +1572,66 @@ mod tests {
         assert!(view.args().is_empty(), "找不到 WezTerm 不可執行 cli");
         assert_eq!(std::fs::read_to_string(&store).unwrap(), body);
     }
+
+    /// 真機實測（預設不跑，會在桌面開一個 grok 視窗；不登入、不送字、不呼叫模型）：
+    /// ASN_WEZTERM_DIR=<隔離副本> ASN_LIVE_GROK=<grok.exe 路徑> cargo test --lib launch::term::tests::live -- --ignored --nocapture
+    /// 啟動 → list → 改名（再用 wezterm list 看分頁標題與 workspace）→ 讀畫面首行 → status → 模擬 ASN 重啟（新服務用同一份對照表檔 reclaim）→ 用新服務結束視窗。
+    #[test]
+    #[ignore]
+    fn live_start_rename_status_restart_reclaim_stop() {
+        let grok = std::env::var("ASN_LIVE_GROK").expect("請設定 ASN_LIVE_GROK");
+        let dir = wezterm::locate(&wezterm::RealFs).expect("請設定 ASN_WEZTERM_DIR");
+        let tmp = std::env::temp_dir().join(format!("asn-term-live-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let canon = canonical_launch_cwd(&tmp.to_string_lossy()).unwrap();
+        let cwd = canon.to_string_lossy().into_owned();
+        let mut profiles = HashMap::new();
+        profiles.insert("grok".to_string(), profile(&grok, vec!["agent".into(), "stdio".into()]));
+        let config = LaunchConfig { profiles, cwd_allow: vec![canon], max_per_hour: 6 };
+        let cfg_file = tmp.join("wezterm-term.lua");
+        let store = tmp.join("wezterm-terms.json");
+        let home = crate::identity::home_dir();
+        let mk = || TermService::fixed(dir.clone(), cfg_file.clone(), store.clone(), home.clone(), wezterm::RealRunner, wezterm::RealFs);
+        let svc = mk();
+        svc.ensure_config().expect("隔離設定");
+        let mut stop_with: Option<&TermService<wezterm::RealRunner, wezterm::RealFs>> = Some(&svc);
+        let svc2 = mk();
+        let result = (|| -> Result<(), String> {
+            let id = svc.start("grok", &cwd, &config)?;
+            println!("started id={id}");
+            std::thread::sleep(Duration::from_millis(2500));
+            let listed = svc.list();
+            assert_eq!(listed.len(), 1, "list 應該有一個");
+            svc.rename(&id, "live 測試")?;
+            let w = wezterm::WezTerm::new(dir.clone(), cfg_file.clone(), home.clone(), &wezterm::RealRunner, &wezterm::RealFs);
+            let sock = wezterm::sock_path(&home, listed[0].pid);
+            let panes = w.list(&sock)?;
+            println!("panes: {:?}", panes.iter().map(|p| (p.pane_id, p.tab_title.clone(), p.workspace.clone(), p.title.clone())).collect::<Vec<_>>());
+            assert!(panes.iter().any(|p| p.tab_title.starts_with(&format!("ASN:{id} "))), "分頁標題應以 ASN:{id} 開頭");
+            let screen = svc.read(&id, 20)?;
+            println!("--- grok 畫面（最後 20 行）---
+{screen}");
+            let st = svc.status(&id)?;
+            println!("status: state={} reason={}", st.state, st.reason);
+            // 模擬 ASN 重啟：記憶體對照表是空的，靠檔案認領
+            assert!(svc2.list().is_empty());
+            svc2.reclaim()?;
+            let re = svc2.list();
+            println!("reclaim 後 list: {:?}", re.iter().map(|t| (t.id.clone(), t.pid)).collect::<Vec<_>>());
+            assert_eq!(re.len(), 1, "重啟後應只認回自己的那一個");
+            assert_eq!(re[0].id, id);
+            assert_eq!(re[0].pid, listed[0].pid);
+            stop_with = Some(&svc2);
+            svc2.stop(&id)?;
+            stop_with = None;
+            Ok(())
+        })();
+        if let Some(s) = stop_with {
+            for t in s.list() {
+                let _ = s.stop(&t.id);
+            }
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+        result.expect("實測失敗");
+    }
 }
