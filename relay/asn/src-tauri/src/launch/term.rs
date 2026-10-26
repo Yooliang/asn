@@ -2885,9 +2885,18 @@ mod tests {
             assert!(svc.confirm_send(&id, "x", false).is_err(), "沒解鎖不能代送");
             // 4) 本機解鎖代答；剛開 grok 時 list-clients 的 idle_time 通常 < 5 秒 → 必須被擋
             svc.unlock_adopted(&id, true, false)?;
-            let e = svc.answer(&id, "trust_dialog", 1).unwrap_err();
-            println!("使用者閒置不足被擋：{e}");
-            assert_eq!(svc.read(&id, 30)?, screen, "被擋時畫面完全沒變");
+            // 閒置時間從視窗開起來算：剛開不到 5 秒會被擋（畫面完全不變），超過就放行（這時 y 已經送進去、提問會消失）——兩種都是對的，看時間
+            let mut answered = false;
+            match svc.answer(&id, "trust_dialog", 1) {
+                Err(e) => {
+                    println!("使用者閒置不足被擋：{e}");
+                    assert_eq!(svc.read(&id, 30)?, screen, "被擋時畫面完全沒變");
+                }
+                Ok(a) => {
+                    println!("閒置已超過 5 秒，放行代答：{}", a.keys);
+                    answered = true;
+                }
+            }
             // 5) 探針：另開第二個 WezTerm 視窗搶走焦點（使用者去用別的視窗），再「不經過 ASN 的核驗」直接往 grok 那格送 y，看 grok 處理不處理
             let mut other = std::process::Command::new(&dir.gui).no_window()
                 .args(["--config-file", &cfg_file.to_string_lossy(), "start", "--always-new-process", "--cwd", &tmp.to_string_lossy(), "--", "cmd.exe"])
@@ -2903,10 +2912,14 @@ mod tests {
                 let o = std::process::Command::new(&dir.cli).no_window().env("WEZTERM_UNIX_SOCKET", &s).args(["--config-file", &cfg_file.to_string_lossy(), "cli", "list-clients", "--format", "json"]).output().map_err(|e| e.to_string())?;
                 println!("探針：{name} list-clients：{}", String::from_utf8_lossy(&o.stdout).split_whitespace().collect::<Vec<_>>().join(" "));
             }
-            wz.send_bytes(&sock, c.pane_id, "y")?;
-            std::thread::sleep(Duration::from_millis(3000));
+            if answered {
+                std::thread::sleep(Duration::from_millis(3000));
+            } else {
+                wz.send_bytes(&sock, c.pane_id, "y")?;
+                std::thread::sleep(Duration::from_millis(3000));
+            }
             let still = svc.read(&id, 30)?.contains("Do you trust the contents");
-            println!("探針：視窗沒有焦點時送 y 之後，提問還在嗎＝{still}");
+            println!("探針：視窗沒有焦點時送 y（或已代答）之後，提問還在嗎＝{still}");
             let _ = std::process::Command::new("taskkill").no_window().args(["/T", "/F", "/PID", &other_pid.to_string()]).output();
             let _ = other.wait();
             if still {
