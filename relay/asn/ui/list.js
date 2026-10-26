@@ -1161,6 +1161,8 @@ const app = createApp({
     }
     // 有人要求切換這台的帳號：把視窗叫到前面，讓使用者看得到確認框
     watch(() => accounts.state.incoming.length, n => { if (n) void invoke('show_main').catch(() => {}) })
+    // 免確認切好之後也叫到前面，讓使用者看得到「已切換／還原」
+    watch(() => accounts.state.done.length, n => { if (n) void invoke('show_main').catch(() => {}) })
     // 名單設備標題右鍵：切換那台設備的 Claude 帳號
     const deviceMenu = ref('')
     const deviceMenuPos = reactive({ x: 0, y: 0 })
