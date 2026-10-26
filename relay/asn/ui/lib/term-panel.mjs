@@ -45,7 +45,13 @@ export const promptKey = (id, pv) => `${id}|${pv?.kind ?? ''}|${pv?.text ?? ''}|
 /** 使用者按了第 n 個選項：回給 term_answer 的請求；選項不存在（或不是這個提示）回 null，不送 */
 export function answerRequest(id, pv, n) {
   if (!id || !pv || !pv.options.some(o => o.n === n)) return null
-  return { id, prompt_kind: pv.kind, n }
+  return {
+    id,
+    prompt_kind: pv.kind,
+    n,
+    prompt_text: pv.text ?? '',
+    options: pv.options.map(o => ({ n: o.n, label: o.label })),
+  }
 }
 
 /** 送出前顯示給使用者看的說明：按鍵序列由後端依畫面上的游標位置算，所以這裡只說「第 n 項」；送出後以後端回的按鍵描述為準 */

@@ -26,14 +26,20 @@ test('提示內容：選項依 n 排序、壞的丟掉、不重複；文字截�
   assert.deepEqual(promptView({ kind: 'unknown_prompt', text: '最後幾行' }).options, [], '解析不出選項＝空清單，只顯示文字')
 })
 
-test('送出：只有提示裡真的有的選項才產生請求，沒有預設選項；請求只含編號、提示種類、選項 n', () => {
+test('送出：只有提示裡真的有的選項才產生請求，沒有預設選項；請求含編號、提示種類、選項 n、原文與選項清單（給遠端確認雜湊）', () => {
   const pv = promptView(MENU)
-  assert.deepEqual(answerRequest('3', pv, 1), { id: '3', prompt_kind: 'menu', n: 1 })
-  assert.deepEqual(answerRequest('3', pv, 2), { id: '3', prompt_kind: 'menu', n: 2 })
+  assert.deepEqual(answerRequest('3', pv, 1), {
+    id: '3',
+    prompt_kind: 'menu',
+    n: 1,
+    prompt_text: pv.text,
+    options: pv.options.map(o => ({ n: o.n, label: o.label })),
+  })
+  assert.deepEqual(answerRequest('3', pv, 2)?.n, 2)
   for (const bad of [0, 3, -1, 1.5, '1', undefined, null, NaN]) assert.equal(answerRequest('3', pv, bad), null, String(bad))
   assert.equal(answerRequest('', pv, 1), null); assert.equal(answerRequest('3', null, 1), null)
   assert.equal(answerRequest('3', promptView({ kind: 'unknown_prompt', text: 'x' }), 1), null, '沒有選項的提示不能代答')
-  assert.deepEqual(Object.keys(answerRequest('3', pv, 1)).sort(), ['id', 'n', 'prompt_kind'])
+  assert.deepEqual(Object.keys(answerRequest('3', pv, 1)).sort(), ['id', 'n', 'options', 'prompt_kind', 'prompt_text'])
 })
 
 test('送出前後的說明：送前寫「第 n 項」與游標由 ASN 算，送後用後端回的按鍵描述', () => {

@@ -898,6 +898,12 @@ const termPrompt = computed(() => {
 })
 const termWill = computed(() => willSendText(termPrompt.value?.pv, terms.selected))
 watch(() => termPrompt.value?.key, () => { terms.selected = 0; terms.error = ''; terms.note = '' })
+watch(() => termPrompt.value, p => {
+  if (!p?.row?.id || !p.pv) return
+  const req = answerRequest(p.row.id, p.pv, p.pv.options[0]?.n ?? 1)
+  if (!req) return
+  void invoke('term_remote_offer_answer', { req }).catch(() => {})
+}, { immediate: true })
 function termPick(n) { terms.selected = n; terms.error = '' }
 function termDismiss() { const p = termPrompt.value; if (p) terms.dismissed[p.key] = true }   // 「我自己在視窗裡處理」：只關框，不送任何鍵
 async function termConfirm() {
