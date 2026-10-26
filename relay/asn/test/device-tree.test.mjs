@@ -94,7 +94,7 @@ test('沒有名稱的設備寫「未命名設備」，不退回節點代號', ()
 test('守門：設備分頁的畫面接線——設定表單用 st.devices，樞紐接得住兩個新指令，並沿用專屬對話框', () => {
   const panel = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8')
   const hub = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
-  assert.ok(panel.includes("cat === 'devices'") && panel.includes("act('device-switch', { node: curDev.key, email: a.email })"))
+  assert.ok(panel.includes("cat === 'devices'") && panel.includes("act('device-switch', { node: curDev.key, email: a.email, vendor: v.key })"))
   assert.ok(hub.includes("case 'device-switch'") && hub.includes('openDeviceAcct('))
   assert.ok(hub.includes('deviceAcct.node = node'), '沿用右鍵切換的專屬對話框')
   const block = panel.slice(panel.indexOf("cat === 'devices'"), panel.indexOf("catKey === 'look'"))

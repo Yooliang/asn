@@ -1154,7 +1154,8 @@ const app = createApp({
     setTimeout(() => void accounts.report(), 5_000)
     setInterval(() => void accounts.report(), 5 * 60_000)
     void listen('claude-mod-status', e => { accounts.state.mod = String(e.payload ?? '') })   // Rust 背景安裝 Claude 外掛完成
-    void listen('claude-account-auto', e => void accounts.onAuto(e.payload))   // Rust 背景工作自動加入／回存之後
+    void listen('claude-account-auto', e => void accounts.onAuto(e.payload))
+    void listen('grok-account-auto', e => void accounts.onAuto(e.payload))   // Grok 自動加入也走同一支：重抓清單並回報   // Rust 背景工作自動加入／回存之後
     if (!info.shot) {
       setInterval(() => void accounts.pollIncoming(), 15_000)
       void listen('relay-bell', () => void accounts.pollIncoming())
@@ -1175,11 +1176,11 @@ const app = createApp({
     }
     const closeDeviceMenu = () => { deviceMenu.value = '' }
     // 打開「切換這台的 Claude 帳號」專屬對話框（名單右鍵與設定的「設備」分類共用）
-    const openDeviceAcct = async (node, email = '') => {
+    const openDeviceAcct = async (node, email = '', vendor = 'claude') => {
       if (!node) return
       deviceAcct.node = node; deviceAcct.label = deviceTree.value.find(d => d.key === node)?.label ?? accounts.remoteNodes().find(d => d.key === node)?.label ?? ''; deviceAcct.selected = email   // 設備頁籤上點某個帳號的「切換」＝預先選好那個帳號，仍要在對話框按送出
       void invoke('show_main').catch(() => {})
-      await accounts.remoteSelect(node)
+      await accounts.remoteSelect(node, vendor)
     }
     const deviceMenuSwitch = async () => {
       const node = deviceMenu.value
@@ -1193,7 +1194,7 @@ const app = createApp({
         [info.node]: { profiles: partnerModels.value.filter(m => m.installed).map(m => ({ id: m.profileId ?? m.id })) },
       },
       reports: accounts.state.reports,
-      self: { claude: accounts.state.list, codex: { loggedIn: Boolean(accounts.state.codex), text: codexLine(accounts.state.codex, accounts.state.codexErr) } },
+      self: { claude: accounts.state.list, grok: accounts.state.grok, codex: { loggedIn: Boolean(accounts.state.codex), text: codexLine(accounts.state.codex, accounts.state.codexErr) } },
     }))
     const otherDeviceNodes = () => launchDeviceRowsList.value.map(d => d.key).filter(k => k && k !== info.node).slice(0, 20)
     watch(() => otherDeviceNodes().join(','), () => {
@@ -1251,12 +1252,13 @@ const app = createApp({
         case 'acct-switch': await accounts.switchTo(value); break
         case 'acct-remove': await accounts.remove(value); break
         case 'acct-trust': await accounts.setTrust(value === true); break
+        case 'grok-switch': await accounts.grokSwitch(String(value ?? '')); break
         case 'acct-trust-signed': await accounts.setTrustSigned(value === true); break
         case 'device-move': devPrefs.deviceOrder = moveDevice(deviceTree.value.map(d => d.key), String(value?.node ?? ''), value?.dir === -1 ? -1 : 1, { selfNode: info.node, visible: visibleRows(deviceTree.value).map(d => d.key) }); break
         case 'device-reorder': devPrefs.deviceOrder = reorderDevice(deviceTree.value.map(d => d.key), String(value?.drag ?? ''), String(value?.target ?? ''), value?.after === true, { selfNode: info.node }); break
         case 'device-remove': devPrefs.deviceRemoved = removeDevice(devPrefs.deviceRemoved, String(value ?? ''), { selfNode: info.node }); break
         case 'device-show': devPrefs.deviceShown = showDevice(devPrefs.deviceShown, String(value ?? '')); break
-        case 'device-switch': await (typeof value === 'object' && value ? openDeviceAcct(String(value.node ?? ''), String(value.email ?? '')) : openDeviceAcct(String(value ?? ''))); break
+        case 'device-switch': await (typeof value === 'object' && value ? openDeviceAcct(String(value.node ?? ''), String(value.email ?? ''), String(value.vendor ?? 'claude')) : openDeviceAcct(String(value ?? ''))); break
         case 'closeTo': await setCloseTo(value); break
         case 'autostart': await setAutostart(value === true); break
         case 'bridge-launch': await setBridgeRemoteLaunch(value === true); break

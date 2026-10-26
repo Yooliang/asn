@@ -60,6 +60,8 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
     if (isSelf) {
       accts.claude = (self.claude ?? []).map(a => ({ email: a.email, plan: a.plan, current: a.current === true, quota: quotaView(a, now) }))
       if (accts.claude.length) keys.add('claude')
+      accts.grok = (self.grok ?? []).map(a => ({ email: a.email, plan: '', current: a.current === true }))
+      if (accts.grok.length) keys.add('grok')
       if (self.codex?.loggedIn) { keys.add('codex'); accts.codex = [{ email: self.codex.text, plan: '', current: true }] }
     } else if (rep && !rep.error) {
       for (const a of rep.accounts ?? []) {
@@ -73,8 +75,8 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
     const vendors = [...keys].sort((a, b) => engineRank(a) - engineRank(b) || a.localeCompare(b)).map(k => {
       const list = accts[k] ?? []
       const v = accountView(list, { loggedOut: isSelf && (k === 'claude' || k === 'codex') })
-      // 只有 Claude 的帳號能切換，而且對方電腦的 ASN 要在線、至少有兩個帳號
-      const canPick = k === 'claude' && !isSelf && list.length >= 2
+      // Claude 與 Grok 的帳號能切換，而且對方電腦的 ASN 要在線、至少有兩個帳號
+      const canPick = (k === 'claude' || k === 'grok') && !isSelf && list.length >= 2
       const switchable = canPick && rep?.asnOnline === true
       return { key: k, label: vendorLabel(k), account: v.text, reported: v.reported, extra: v.extra, accounts: list, switchable, switchHint: canPick && !switchable ? '對方電腦的 ASN 沒有在線，無法切換' : '' }
     })

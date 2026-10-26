@@ -65,6 +65,8 @@ mod cloud_invite;
 #[cfg(desktop)]
 mod codex_accounts;
 #[cfg(desktop)]
+mod grok_accounts;
+#[cfg(desktop)]
 mod launch;
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
@@ -309,7 +311,9 @@ async fn acct_remote_report(app: State<'_, App>) -> Result<Value, String> {
     let codex = tauri::async_runtime::spawn_blocking(codex_accounts::codex_account_current).await.ok().and_then(|r| r.ok()).flatten();
     // 各帳號上次記下的額度（沒有紀錄的帳號不帶額度欄位）
     let quotas = tauri::async_runtime::spawn_blocking(|| claude_quota::load_all(&claude_accounts::claude_home())).await.unwrap_or_default();
-    acct_remote::report(relay.as_ref(), &list, codex.as_ref(), &quotas).await
+    // Grok 帳號庫（email 與是否使用中）；沒有就是空的
+    let grok = tauri::async_runtime::spawn_blocking(grok_accounts::local_list).await.unwrap_or_default();
+    acct_remote::report(relay.as_ref(), &list, codex.as_ref(), &quotas, &grok).await
 }
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
@@ -320,8 +324,8 @@ async fn acct_remote_list(app: State<'_, App>, node: String) -> Result<Value, St
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
-async fn acct_remote_request(app: State<'_, App>, node: String, email: String) -> Result<Value, String> {
-    acct_remote::remote_request(relay_of(&app)?.as_ref(), &node, &email).await
+async fn acct_remote_request(app: State<'_, App>, node: String, email: String, vendor: Option<String>) -> Result<Value, String> {
+    acct_remote::remote_request(relay_of(&app)?.as_ref(), &node, &email, vendor.as_deref().unwrap_or("claude")).await
 }
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
@@ -1149,7 +1153,7 @@ pub fn run() {
             startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, term_start, term_send, term_read, term_list, term_stop, term_status, term_rename, term_answer, relay_log_paths, open_machine_log_dir, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_quota::claude_quota_all,
-            codex_accounts::codex_account_current, usage::usage_summary,
+            codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,
             acct_remote_report, acct_remote_list, acct_remote_request, acct_remote_status, acct_remote_pending, acct_remote_apply, acct_remote_decline, acct_remote_trust_get, acct_remote_trust_set, acct_remote_trust_signed_get, acct_remote_trust_signed_set,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
@@ -1240,6 +1244,14 @@ pub fn run() {
                 let every = std::time::Duration::from_millis(env_ms("ASN_CLAUDE_AUTO_MS", 60_000));
                 tauri::async_runtime::spawn(claude_accounts::auto_loop(auto_acct_dir.clone(), std::time::Duration::from_secs(15), every, move |o| {
                     let _ = h.emit("claude-account-auto", o);
+                }));
+            }
+            // Grok 帳號自動加入／回存：啟動後 20 秒起每 60 秒一次（沒登入 Grok 就什麼都不動）；--shot 截圖模式不動
+            if handle.state::<App>().shot.is_none() {
+                let h = handle.clone();
+                let every = std::time::Duration::from_millis(env_ms("ASN_GROK_AUTO_MS", 60_000));
+                tauri::async_runtime::spawn(grok_accounts::auto_loop(std::time::Duration::from_secs(20), every, move |o| {
+                    let _ = h.emit("grok-account-auto", o);
                 }));
             }
             // pi 與 ASN 互通（#240 方案 A）預設開啟：啟動後 20 秒，第一次偵測到 pi 且還沒裝就自動安裝；使用者在設定關掉後不再裝回；--shot 截圖模式不動

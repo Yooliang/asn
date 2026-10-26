@@ -34,6 +34,7 @@ Deno.test("parseReport：每筆只留四個欄位，權杖類的多餘欄位丟�
     { vendor: "claude", email: "b@x.test", plan: "", current: false },
   ]);
   assert(!JSON.stringify(r).includes("SECRET"));
+  assertEquals(parseReport({ accounts: [{ vendor: "grok", email: "G@x.test", plan: "", current: true, refresh_token: "SECRET" }] }), [{ vendor: "grok", email: "g@x.test", plan: "", current: true }]);
   assertEquals(parseReport({ accounts: [{ vendor: "codex", email: "C@x.test", plan: "plus", current: true, id_token: "SECRET" }] }), [{ vendor: "codex", email: "c@x.test", plan: "plus", current: true }]);
   assertEquals(parseReport({ accounts: [] }), []);
   for (const bad of [null, {}, { accounts: "x" }, { accounts: [{ vendor: "gemini", email: "a@x.test" }] }, { accounts: [{ vendor: "claude", email: "bad" }] },
@@ -47,6 +48,8 @@ Deno.test("parseSwitch：指令只帶節點與 email；多餘欄位（憑證、�
   assertEquals(parseSwitch({ node: "W", vendor: "claude", email: "B@X.test", token: "SECRET", command: "calc.exe" }), { node: "W", vendor: "claude", email: "b@x.test" });
   assertEquals(parseSwitch({ node: "W;x", vendor: "claude", email: "b@x.test" }), { error: "bad_request" });
   assertEquals(parseSwitch({ node: "W", vendor: "codex", email: "b@x.test" }), { error: "bad_vendor" });
+  assertEquals(parseSwitch({ node: "W", vendor: "gemini", email: "b@x.test" }), { error: "bad_vendor" });
+  assertEquals(parseSwitch({ node: "W", vendor: "grok", email: "B@X.test", token: "SECRET" }), { node: "W", vendor: "grok", email: "b@x.test" });
   assertEquals(parseSwitch({ node: "W", vendor: "claude", email: "../x" }), { error: "bad_email" });
   assertEquals(parseSwitch([1]), { error: "bad_request" });
 });
