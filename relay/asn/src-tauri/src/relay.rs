@@ -935,6 +935,28 @@ pub fn build_acct_status_body(ids: &[String]) -> Result<Value, String> {
         Err("指令編號不對".into())
     }
 }
+/// 手機決定終端請求（term_req_decide）的請求體：編號是 UUID、決定只有 approve／deny、雜湊是 64 位小寫十六進位（原樣帶回，後台比對）、選項 0..=99（拒絕時不帶）
+pub fn build_term_decide_body(id: &str, decision: &str, choice_n: Option<i64>, hash: &str) -> Result<Value, String> {
+    if !is_uuid_str(id) {
+        return Err("請求編號不對".into());
+    }
+    if decision != "approve" && decision != "deny" {
+        return Err("決定只能是確認或拒絕".into());
+    }
+    if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return Err("內容雜湊格式不對".into());
+    }
+    if let Some(n) = choice_n {
+        if !(0..=99).contains(&n) {
+            return Err("選項編號不對".into());
+        }
+    }
+    let mut v = json!({ "id": id, "decision": decision, "hash": hash });
+    if let Some(n) = choice_n.filter(|_| decision == "approve") {
+        v["choice_n"] = json!(n);
+    }
+    Ok(v)
+}
 pub fn build_partner_ops_body(ids: &[String]) -> Result<Value, String> {
     if (1..=20).contains(&ids.len()) && ids.iter().all(|i| is_uuid_str(i)) {
         Ok(json!({ "ids": ids }))
@@ -1184,6 +1206,20 @@ b", "op": "close" }),
         let id = "11111111-1111-1111-1111-111111111111".to_string();
         assert_eq!(build_acct_status_body(&[id.clone()]).unwrap(), json!({ "ids": [id.clone()] }));
         assert!(build_acct_status_body(&[]).is_err() && build_acct_status_body(&["x".to_string()]).is_err() && build_acct_status_body(&vec![id; 21]).is_err());
+    }
+
+    #[test]
+    fn 終端請求決定_欄位檢查_拒絕不帶選項_雜湊要六十四位小寫十六進位() {
+        let id = "11111111-2222-3333-4444-555555555555";
+        let h = "a".repeat(64);
+        assert_eq!(build_term_decide_body(id, "approve", Some(2), &h).unwrap(), json!({ "id": id, "decision": "approve", "hash": h, "choice_n": 2 }));
+        assert_eq!(build_term_decide_body(id, "approve", None, &h).unwrap(), json!({ "id": id, "decision": "approve", "hash": h }));
+        assert_eq!(build_term_decide_body(id, "deny", Some(2), &h).unwrap(), json!({ "id": id, "decision": "deny", "hash": h }), "拒絕不帶選項");
+        assert!(build_term_decide_body("x", "approve", None, &h).is_err());
+        assert!(build_term_decide_body(id, "yes", None, &h).is_err());
+        assert!(build_term_decide_body(id, "approve", None, &"A".repeat(64)).is_err(), "大寫不收");
+        assert!(build_term_decide_body(id, "approve", None, &"a".repeat(63)).is_err());
+        assert!(build_term_decide_body(id, "approve", Some(100), &h).is_err() && build_term_decide_body(id, "approve", Some(-1), &h).is_err());
     }
 
     #[tokio::test]
