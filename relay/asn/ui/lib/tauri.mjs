@@ -34,6 +34,7 @@ export const transport = {
   partnerConsoleSet: req => invoke('partner_console_set', { req }),
   termList: () => invoke('term_list'),                       // 這次由 ASN 開啟的終端：[{ id, profile, pid, started_ms, cwd }]（只在電腦版）
   termStatus: req => invoke('term_status', { req }),         // { id } → { state, prompt? }；等你回答時帶 prompt
+  termSend: req => invoke('term_send', { req }),             // { id, text, enter }；只在使用者按下「確認送出」後呼叫（後端另外檢查資料夾授權）
   termAnswer: req => invoke('term_answer', { req }),         // { id, prompt_kind, n } → { keys }；只在使用者按下送出後呼叫
   modelSwitchQuery: req => invoke('model_switch_query', { req }),   // 讀這個 Claude 視窗的目前模型與是否閒置
   modelSwitchRun: req => invoke('model_switch_run', { req }),       // 關掉那一個視窗、照原參數重開（--resume＋新 --model）

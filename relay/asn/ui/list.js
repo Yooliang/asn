@@ -28,7 +28,7 @@ import { normalizeSession, restoreSession, sameSession, snapshotSession, trailin
 import { chatTabSameZone, closeAllChatTabs, closeIdleChatTabs, idleTabIds, withCallState, dropInsertBefore, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
 import { nowPlayingLine, normalizeNowPlaying } from './lib/now-playing.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, normalizeClose, normalizeFrame, totalUnread, notifyFromSaved, notifyPlan, notifyWith } from './lib/prefs.mjs'
-import { answerRequest, createTermPoller, promptKey, sentText, willSendText } from './lib/term-panel.mjs'
+import { SEND_MAX, answerRequest, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, willSendText } from './lib/term-panel.mjs'
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
 import { PI_SETUP_TEXT, piSetupError, piSetupView } from './lib/pi-setup.mjs'
@@ -911,6 +911,24 @@ async function termConfirm() {
     void termPoller?.tickNow()
   } catch (e) { terms.error = String(e?.message ?? e) } finally { terms.busy = false }
 }
+// ASN 替使用者往終端送字（#296）：寫文字 → 按「送出」→ 確認框 → 按「確認送出」才呼叫 term_send（termSendConfirm 是唯一呼叫處）。
+const termSend = reactive({ id: '', text: '', enter: true, confirming: false, busy: false, error: '', note: '' })
+const termSendRow = computed(() => terms.rows.find(r => r.id === termSend.id) ?? null)
+const termSendDraft = computed(() => sendDraftView(termSendRow.value, termSend.text))
+const termSendConfirmView = computed(() => (termSend.confirming ? sendConfirmView(termSendRow.value, termSend.text, termSend.enter) : null))
+function termSendOpen(row) { termSend.id = termSend.id === row.id ? '' : row.id; termSend.text = ''; termSend.confirming = false; termSend.error = ''; termSend.note = '' }
+function termSendAsk() { if (termSendDraft.value.ok) { termSend.confirming = true; termSend.error = '' } }   // 只是跳出確認框，不送
+function termSendBack() { termSend.confirming = false }
+async function termSendConfirm() {
+  const req = sendRequest(termSendRow.value, termSend.text, termSend.enter)
+  if (!req || termSend.busy) return
+  termSend.busy = true; termSend.error = ''
+  try {
+    await transport.termSend(req)
+    termSend.note = '已送出'; termSend.text = ''; termSend.confirming = false
+    void termPoller?.tickNow()
+  } catch (e) { termSend.error = String(e?.message ?? e); termSend.confirming = false } finally { termSend.busy = false }
+}
 // 沒有終端或舊版後端（沒有這幾個命令）時 term_list 會失敗，靜默略過；截圖模式不輪詢
 const termPoller = info.shot ? null : createTermPoller({
   transport,
@@ -1313,6 +1331,7 @@ const app = createApp({
       searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickLaunchDevice,
       DISPLAY_MODES, partnerShowDisplay, partnerRun,
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
+      termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termSendAsk, termSendBack, termSendConfirm, SEND_MAX,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
       opDlg, closeOpDlg, buddyOpItems, openPartnerOp, archiveNote, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
