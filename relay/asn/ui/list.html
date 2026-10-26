@@ -81,6 +81,7 @@
             <input ref="searchInput" v-model="query" placeholder="搜尋聯絡人..." aria-label="搜尋聯絡人">
             <button class="search-ic" type="button" title="搜尋" aria-label="搜尋" @click="focusSearch"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
             <button class="search-ic" type="button" title="開新夥伴" aria-label="開新夥伴" @click.stop="openLaunchPicker"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>
+            <button class="search-ic term-ic" type="button" v-if="terms.rows.length" title="終端" aria-label="終端" @click.stop="terms.open = !terms.open"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 10l3 2-3 2M12 15h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="term-badge" v-if="terms.rows.some(r => r.prompt)" aria-hidden="true">!</span></button>
           </div>
           <p class="archive-note" v-if="archiveNote" role="status">{{ archiveNote }}</p>
           <div class="list">
@@ -336,6 +337,38 @@
       </div>
     </div>
   </div>
+  <!-- 終端：等你回答的提示框（使用者先選一個選項、再按「送出」才會送出按鍵；「我自己在視窗裡處理」只關框） -->
+  <div class="partner-dlg-back" v-if="termPrompt">
+    <div class="partner-dlg term-prompt" role="dialog" aria-labelledby="term-prompt-title" @click.stop>
+      <h3 id="term-prompt-title">{{ termPrompt.pv.title }}</h3>
+      <p class="partner-node">{{ termPrompt.row.title }}<template v-if="termPrompt.row.folder">・{{ termPrompt.row.folder }}</template></p>
+      <pre class="term-prompt-text" v-if="termPrompt.pv.text">{{ termPrompt.pv.text }}</pre>
+      <div class="partner-models term-options" role="group" aria-label="選項" v-if="termPrompt.pv.options.length">
+        <button v-for="o in termPrompt.pv.options" :key="o.n" type="button" class="pmodel term-opt" :class="{ on: terms.selected === o.n }" :aria-pressed="terms.selected === o.n" @click="termPick(o.n)"><span class="pmodel-lb">{{ o.n }}. {{ o.label }}</span></button>
+      </div>
+      <p class="partner-hint" v-else>這個提示看不出選項，請直接在終端視窗裡處理。</p>
+      <p class="partner-hint" v-if="terms.selected">{{ termWill }}</p>
+      <p class="partner-hint" v-if="terms.note" role="status">{{ terms.note }}</p>
+      <p class="partner-err" v-if="terms.error" role="alert">{{ terms.error }}</p>
+      <div class="partner-actions">
+        <button class="aero-btn" type="button" @click="termDismiss">我自己在視窗裡處理</button>
+        <button class="aero-btn primary" type="button" :disabled="!terms.selected || terms.busy" @click="termConfirm">{{ terms.busy ? '送出中…' : '送出' }}</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 終端：清單（編號、profile、資料夾、狀態；不渲染終端內容） -->
+  <div class="partner-dlg-back" v-if="terms.open" @click.self="terms.open = false">
+    <div class="partner-dlg term-list-dlg" role="dialog" aria-labelledby="term-list-title" @click.stop>
+      <h3 id="term-list-title">終端</h3>
+      <p class="partner-hint" v-if="!terms.rows.length">目前沒有由 ASN 開啟的終端。</p>
+      <ul class="term-rows" v-else>
+        <li v-for="r in terms.rows" :key="r.id" class="term-row"><b>{{ r.title }}</b><span class="term-folder" v-if="r.folder">{{ r.folder }}</span><span class="term-state" :class="'tone-' + r.tone">{{ r.stateLabel }}</span></li>
+      </ul>
+      <div class="partner-actions"><button class="aero-btn" type="button" @click="terms.open = false">關閉</button></div>
+    </div>
+  </div>
+
 <group-sheet :flow="groupFlow"></group-sheet>
 </div>
 <script src="vendor/vue.global.prod.js"></script>

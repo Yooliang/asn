@@ -28,6 +28,7 @@ import { normalizeSession, restoreSession, sameSession, snapshotSession, trailin
 import { chatTabSameZone, closeAllChatTabs, closeIdleChatTabs, idleTabIds, withCallState, dropInsertBefore, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
 import { nowPlayingLine, normalizeNowPlaying } from './lib/now-playing.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, normalizeClose, normalizeFrame, totalUnread, notifyFromSaved, notifyPlan, notifyWith } from './lib/prefs.mjs'
+import { answerRequest, createTermPoller, promptKey, sentText, willSendText } from './lib/term-panel.mjs'
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
 import { PI_SETUP_TEXT, piSetupError, piSetupView } from './lib/pi-setup.mjs'
@@ -883,6 +884,44 @@ const refreshAds = async () => {
 }
 void refreshAds()
 setInterval(() => void refreshAds(), 6 * 3600_000)
+// ---------- 終端（電腦版）：清單與「等你回答」的提示框 ----------
+// 只列清單與提示框，不渲染終端內容（畫面由 WezTerm 視窗自己顯示）。遇到要使用者授權或選擇的提示：只跳出提示，
+// 使用者先選一個選項、再按「送出」才呼叫 term_answer（termConfirm 是唯一呼叫處）；絕不自動代答、沒有預設選項。
+const terms = reactive({ rows: [], open: false, dismissed: {}, selected: 0, busy: false, error: '', note: '' })
+const termPrompt = computed(() => {
+  for (const r of terms.rows) {
+    if (!r.prompt) continue
+    const key = promptKey(r.id, r.prompt)
+    if (!terms.dismissed[key]) return { row: r, key, pv: r.prompt }
+  }
+  return null
+})
+const termWill = computed(() => willSendText(termPrompt.value?.pv, terms.selected))
+watch(() => termPrompt.value?.key, () => { terms.selected = 0; terms.error = ''; terms.note = '' })
+function termPick(n) { terms.selected = n; terms.error = '' }
+function termDismiss() { const p = termPrompt.value; if (p) terms.dismissed[p.key] = true }   // 「我自己在視窗裡處理」：只關框，不送任何鍵
+async function termConfirm() {
+  const p = termPrompt.value
+  const req = p ? answerRequest(p.row.id, p.pv, terms.selected) : null
+  if (!req || terms.busy) return
+  terms.busy = true; terms.error = ''
+  try {
+    const r = await transport.termAnswer(req)
+    terms.note = sentText(r?.keys); terms.selected = 0
+    void termPoller?.tickNow()
+  } catch (e) { terms.error = String(e?.message ?? e) } finally { terms.busy = false }
+}
+// 沒有終端或舊版後端（沒有這幾個命令）時 term_list 會失敗，靜默略過；截圖模式不輪詢
+const termPoller = info.shot ? null : createTermPoller({
+  transport,
+  onUpdate: rows => {
+    terms.rows = rows
+    const live = new Set(rows.filter(r => r.prompt).map(r => promptKey(r.id, r.prompt)))
+    for (const k of Object.keys(terms.dismissed)) if (!live.has(k)) delete terms.dismissed[k]   // 提示消失了就忘掉「我自己處理」，下次同樣的提示再跳
+  },
+  onError: () => {},
+})
+
 const app = createApp({
   setup() {
     const tab = shotTab, moreOpen = ref(false)
@@ -1269,6 +1308,7 @@ const app = createApp({
       selfNode: info.node, transport, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg,
       searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickLaunchDevice,
       DISPLAY_MODES, partnerShowDisplay, partnerRun,
+      terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
       opDlg, closeOpDlg, buddyOpItems, openPartnerOp, archiveNote, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
