@@ -22,7 +22,7 @@ test('靜態：在交易內、不刪資料、不授權 anon／authenticated、�
   assert.doesNotMatch(code, /drop table|drop column|delete from|truncate|drop function/i)
   assert.doesNotMatch(code, /grant execute[^;]*to (anon|authenticated|public)/i)
   assert.match(code, /revoke all on function relay\.room_member_presence/)
-  assert.equal(files.at(-1), MIG, '時間戳要是最新的')
+  assert.ok(files.includes(MIG), 'migration 檔要在')   // 不再斷言「是最新一份」：之後每加一份新 migration 就會過期；先後順序由下一行檢查
   assert.ok(files.indexOf(MIG) > files.indexOf('20261024200000_acct_report_quota.sql'))
 })
 
