@@ -18,7 +18,7 @@ import { DEVICE_TEXT, canRemoveRow, dropAfter, moveFlags, removedRows, visibleRo
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
 export const SETTING_OPS = [
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
-  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-trust', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
+  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-trust', 'acct-trust-signed', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
   'closeTo', 'autostart', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'avatar-remove',
 ]
 
@@ -203,7 +203,8 @@ export const SettingsPanel = {
                       <small role="status">{{ st.accounts.msg }}</small>
                       <small v-if="st.accounts.mod" role="status">{{ st.accounts.mod }}</small>
                       <label class="chk"><input type="checkbox" :checked="st.accounts.trustOwn" @change="act('acct-trust', $event.target.checked)" /><span>信任我自己的設備，別台要求切換這台時不用確認</span></label>
-                      <small>預設會在這台跳出確認，按了同意才會切換。指令只帶 email，權杖不會經過 ASN 的伺服器。</small>
+                      <label class="chk"><input type="checkbox" :checked="st.accounts.trustSigned" @change="act('acct-trust-signed', $event.target.checked)" /><span>我在手機上用本人帳號發出的切換，不用再到這台確認（切換後這裡會顯示一行訊息）</span></label>
+                      <small>沒有本人簽章的要求，預設仍會在這台跳出確認，按了同意才會切換。指令只帶 email，權杖不會經過 ASN 的伺服器。</small>
                     </template>
                     <template v-else>
                       <ul class="dv-accts" v-if="v.accounts.length">

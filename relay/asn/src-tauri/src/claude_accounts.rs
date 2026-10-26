@@ -538,6 +538,18 @@ pub fn switch_impl(home: &Path, email: &str, fault: Fault) -> R<SwitchOutcome> {
     Ok(SwitchOutcome { email, notice: "切換好了。開著的 Claude 視窗要關掉重開，才會用新帳號。".into() })
 }
 
+/// 還原到最近一次切換之前：把切換前的備份（`.asn\\claude-backup`，只留最近一次）寫回去。
+/// 沒有備份就什麼都不動。只給本機畫面的「還原」按鈕用，遠端指令碰不到這個入口。
+pub fn undo_last_switch(home: &Path) -> R<String> {
+    let bk = backup_dir(home);
+    let cred = std::fs::read(bk.join("credentials.json")).map_err(|_| AccErr::Corrupt("沒有可以還原的備份（只有切換過才有）"))?;
+    write_atomic(&cred_path(home), &cred)?;
+    if let Ok(t) = std::fs::read(bk.join("claude.json")) {
+        write_atomic(&cj_path(home), &t)?;
+    }
+    Ok("已還原到切換前的帳號。開著的 Claude 視窗要關掉重開，才會用還原後的帳號。".into())
+}
+
 static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 // ---------- 自動加入／回存（背景每分鐘一次） ----------
@@ -665,6 +677,11 @@ pub fn claude_account_delete(email: String) -> Result<(), String> {
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     delete(&claude_home(), &email).map_err(|e| e.to_string())
 }
+#[cfg_attr(feature = "gui", tauri::command)]
+pub fn claude_account_undo() -> Result<String, String> {
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    undo_last_switch(&claude_home()).map_err(|e| e.to_string())
+}
 /// 本機切換（Tauri 指令與遠端切換共用同一個入口，同一把鎖）
 pub fn local_switch(email: &str) -> Result<SwitchOutcome, String> {
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -706,6 +723,24 @@ mod tests {
     }
     fn emails(h: &Path) -> Vec<String> {
         list(h).into_iter().map(|a| a.email).collect()
+    }
+
+    #[test]
+    fn 還原到切換前_權杖與帳號資訊都回到切換前_沒備份就不動() {
+        let d = setup();
+        let h = d.path();
+        assert!(undo_last_switch(h).is_err(), "從沒切換過：沒有備份，不動任何東西");
+        assert!(!cred_path(h).exists());
+        login(h, "u-a", "a@x.test", "A1");
+        save_current(h).unwrap();
+        login(h, "u-b", "b@x.test", "B1");
+        save_current(h).unwrap();
+        login(h, "u-a", "a@x.test", "A1");
+        let (c0, j0) = (read(cred_path(h)), read(cj_path(h)));
+        switch_to(h, "b@x.test").unwrap();
+        assert_ne!(read(cred_path(h)), c0);
+        undo_last_switch(h).unwrap();
+        assert_eq!((read(cred_path(h)), read(cj_path(h))), (c0, j0), "回到切換前");
     }
 
     #[test]
