@@ -177,7 +177,7 @@ export const SettingsPanel = {
               <div class="dv-empty" v-if="!curVendors.length"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h13v9H3zM1 18h17M19 8h3v11h-3z"></path></svg><span>{{ curDev.empty || '這台設備還沒有回報任何廠商' }}</span></div>
               <ul class="dv-vendors" v-else>
                 <li :class="['dv-vendor', 'v-' + v.key]" v-for="v in curVendors" :key="v.key">
-                  <header class="dv-vh"><span class="dv-vicon" aria-hidden="true" v-html="vendorIcon(v.key)"></span><b>{{ v.label }}</b></header>
+                  <header class="dv-vh"><span class="dv-vicon" aria-hidden="true" v-html="vendorIcon(v.iconKey || v.key)"></span><b>{{ v.label }}</b><small class="dv-via" v-if="v.via">經 {{ v.via }}</small></header>
                   <div class="dv-vb">
                     <template v-if="curDev.self && v.key === 'claude'">
                       <ul class="dv-accts" v-if="st.accounts.list.length">

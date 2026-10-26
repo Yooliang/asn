@@ -10,6 +10,7 @@ import { agoText } from './cloud-invite.mjs'
 import { accountLine } from './claude-accounts.mjs'
 import { UNNAMED_DEVICE } from './text.mjs'
 import { quotaView } from './account-quota.mjs'
+import { modelVendorKey } from './vendor-icons.mjs'
 
 export const NOT_REPORTED = '未回報'
 export const SELF_LABEL = '這台電腦'
@@ -19,6 +20,17 @@ const VENDOR_OF = { gpt: 'codex' }
 const SKIP = new Set(['asn', 'other', ''])
 export const VENDOR_LABEL = { claude: 'Claude', codex: 'OpenAI（Codex）', gemini: 'Gemini', grok: 'Grok', pi: 'Pi', acp: 'ACP 工作者', deepseek: 'DeepSeek', minimax: 'MiniMax', aegis: 'Aegis' }
 const vendorLabel = k => VENDOR_LABEL[k] ?? k.charAt(0).toUpperCase() + k.slice(1)
+// pi 只是執行殼：它背後實際用的模型廠商（名單 model 欄「提供者/模型」對得到的）。modelVendorKey 回的鍵 → 給人看的名字
+const PI_VIA_LABEL = { claude: 'Claude', gpt: 'OpenAI', gemini: 'Gemini', grok: 'Grok', deepseek: 'DeepSeek', minimax: 'MiniMax' }
+export function piBackends(friends) {
+  const keys = []
+  for (const f of friends ?? []) {
+    if (String(f?.engine ?? '').trim().toLowerCase() !== 'pi') continue
+    const k = modelVendorKey(f?.model)
+    if (k && PI_VIA_LABEL[k] && !keys.includes(k)) keys.push(k)
+  }
+  return keys
+}
 const vendorKey = e => { const k = String(e ?? '').trim().toLowerCase(); return VENDOR_OF[k] ?? k }
 
 // 一個廠商底下的帳號 → 顯示用的字
@@ -76,7 +88,9 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
       // 只有 Claude 的帳號能切換，而且對方電腦的 ASN 要在線、至少有兩個帳號
       const canPick = k === 'claude' && !isSelf && list.length >= 2
       const switchable = canPick && rep?.asnOnline === true
-      return { key: k, label: vendorLabel(k), account: v.text, reported: v.reported, extra: v.extra, accounts: list, switchable, switchHint: canPick && !switchable ? '對方電腦的 ASN 沒有在線，無法切換' : '' }
+      // pi：列出它背後用的廠商（Claude、DeepSeek…）；只有一家時圖示也換成那一家，對不到就維持 Pi 的圖與名字
+      const via = k === 'pi' ? piBackends(mine) : []
+      return { key: k, label: vendorLabel(k), ...(via.length ? { via: via.map(x => PI_VIA_LABEL[x]).join('、'), iconKey: via.length === 1 ? via[0] : 'pi' } : {}), account: v.text, reported: v.reported, extra: v.extra, accounts: list, switchable, switchHint: canPick && !switchable ? '對方電腦的 ASN 沒有在線，無法切換' : '' }
     })
     return {
       key: node, label, self: isSelf, hidden: isDeviceHidden(node, friends, { selfNode, shown }), removed: isDeviceRemoved(node, removed, { selfNode }), kind: phone ? '手機' : '電腦', online: isOn, onlineText: isOn ? '在線' : '離線',
