@@ -12,6 +12,7 @@ import crypto from 'node:crypto'
 
 const DIR = new URL('../supabase/migrations/', import.meta.url)
 const MIG = '20261025000000_room_member_presence.sql'
+const MIG2 = '20261026300000_room_member_pi_provider.sql'   // 之後又重定義同一支函式（多帶 provider）：還原驗證要兩份都改，否則後面那份會蓋掉改動
 const read = f => fs.readFileSync(new URL(f, DIR), 'utf8').replace(/\r\n/g, '\n').replace(/create extension if not exists \w+[^;]*;/g, '')
 const files = fs.readdirSync(DIR).filter(f => f.endsWith('.sql')).sort()
 
@@ -128,12 +129,30 @@ test('實跑：外部帳號的讀者拿得到 AI 的 online／engine，但看不
 })
 
 test('還原驗證：3 分鐘改 3 小時、或讓真人也帶欄位，對應測試要變紅', { skip }, async () => {
-  const slow = await boot({ mutate: { [MIG]: s => s.replace("r.seen_at > now() - interval '3 minutes'", "r.seen_at > now() - interval '3 hours'") } })
+  const slowTime = s => s.replace("r.seen_at > now() - interval '3 minutes'", "r.seen_at > now() - interval '3 hours'")
+  const slow = await boot({ mutate: { [MIG]: slowTime, [MIG2]: slowTime } })
   const r1 = await room2(slow)
   await slow.exec(`update relay.roster set seen_at = now() - interval '10 minutes' where node = '${W1}' and name = '管理'`)
   assert.equal(byName((await membersAs(slow, { node: P1, room: r1, signed: U1 })).members, '管理').online, true, '門檻放寬後離線的變在線＝測試有效')
-  const hum = await boot({ mutate: { [MIG]: s => s.replace("when p_member like '~%' then '{}'::jsonb", "when p_member like '~%' then jsonb_build_object('online', true)") } })
+  const humFields = s => s.replace("when p_member like '~%' then '{}'::jsonb", "when p_member like '~%' then jsonb_build_object('online', true)")
+  const hum = await boot({ mutate: { [MIG]: humFields, [MIG2]: humFields } })
   const r2 = await room2(hum)
   const human = (await membersAs(hum, { node: P1, room: r2, signed: U1 })).members.find(m => m.member_kind === 'human')
   assert.ok('online' in human, '真人也帶欄位＝守門測試有效')
+})
+
+test('實跑：pi 視窗帶 provider（提供者小寫）；沒有斜線、字元不合、非 pi 都不帶；不帶完整模型名', { skip }, async () => {
+  const db = await boot()
+  const r = await room2(db)
+  await db.exec(`update relay.roster set engine = 'pi', model = 'Anthropic/claude-sonnet-4' where node = '${W1}' and name = '財務';
+    update relay.roster set engine = 'pi', model = 'deepseek-chat' where node = '${W1}' and name = '管理'`)
+  const seen = (await membersAs(db, { node: P1, room: r, signed: U1 })).members
+  assert.equal(byName(seen, '財務').provider, 'anthropic')
+  assert.equal(byName(seen, '財務').engine, 'pi')
+  assert.ok(!('provider' in byName(seen, '管理')), '沒有「提供者/」寫法就不帶')
+  assert.doesNotMatch(JSON.stringify(seen), /claude-sonnet-4|deepseek-chat/, '完整模型名不外送')
+  await db.exec(`update relay.roster set model = 'bad provider!/x' where node = '${W1}' and name = '財務'`)
+  assert.ok(!('provider' in byName((await membersAs(db, { node: P1, room: r, signed: U1 })).members, '財務')), '字元不合不帶')
+  await db.exec(`update relay.roster set engine = 'claude', model = 'anthropic/claude-x' where node = '${W1}' and name = '財務'`)
+  assert.ok(!('provider' in byName((await membersAs(db, { node: P1, room: r, signed: U1 })).members, '財務')), '只有 pi 才帶')
 })
