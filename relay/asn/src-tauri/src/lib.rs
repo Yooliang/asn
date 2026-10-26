@@ -487,13 +487,15 @@ async fn term_start(app: State<'_, App>, terms: State<'_, Arc<launch::term::Live
     launch::blocking_timeout(move || launch::term::start_live(&terms, &req.profile, &req.cwd, &data_dir)).await
 }
 
-/// 對自己開的終端送字。enter 為真時，文字送出後再另外送一次 Enter。
+/// 使用者在 UI 確認後才把文字送進自己開的終端。這個命令本身證明不了有按確認。
+/// UI 的確認必須是唯一入口；後端其他路徑不得呼叫。只收編號、文字、是否換行。
+/// 工作資料夾沒有授權記錄就拒絕，不送字。enter 為真時，文字送出後再另外送一次 Enter。
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn term_send(terms: State<'_, Arc<launch::term::LiveTerms>>, req: launch::term::TermSendReq) -> Result<(), String> {
     let terms = terms.inner().clone();
-    launch::blocking_timeout(move || terms.send(&req.id, &req.text, req.enter)).await
+    launch::blocking_timeout(move || terms.confirm_send(&req.id, &req.text, req.enter)).await
 }
 
 /// 讀自己開的終端。lines 是從畫面底部往回的行數，超過上限會被拒絕。

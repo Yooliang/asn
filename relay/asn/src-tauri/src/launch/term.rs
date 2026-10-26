@@ -12,6 +12,8 @@
 //! 畫面含信任提問、或解析得出選單、或選單模樣但解析不出時是 waiting_user，並附上 prompt。絕不代答。
 //! 處理中輸入框仍是空的，但畫面含「[stop]」或「Ctrl+c:cancel」。這在 waiting_user 之後、閒置之前直接 busy，不等第二次取樣。
 //! 代答只有 term_answer。這個命令本身證明不了使用者有按確認，UI 的提示框必須是唯一入口，後端其他路徑不得呼叫它。
+//! 代送文字只有 confirm_send（命令 term_send）。同樣證明不了使用者有按確認，UI 的確認必須是唯一入口，後端其他路徑不得呼叫它。
+//! 送出前該終端的工作資料夾要有授權記錄：在 ASN 選定並通過允許清單而開啟，或使用者在信任提問按了信任。沒有記錄就不送。
 //! 按鍵只從固定對照表產生，走專用的送出（ESC [ A、ESC [ B、\r、ESC）。一般送字仍先壓行，那個會丟掉 ESC 的保護不放寬。
 //!
 //! 認領不掃整個系統。只讀 data_dir 裡自己寫的對照表，用記下的程序編號重算通訊路徑（檔案裡的路徑一律不理），
@@ -110,6 +112,8 @@ struct Session {
     title: String,
     /// 開啟時已通過授權的工作資料夾。
     cwd: String,
+    /// 使用者授權 ASN 把文字送進這個終端。開啟時資料夾通過允許清單，或信任提問按了信任，才是真。
+    send_granted: bool,
 }
 
 struct SessionSnap {
@@ -117,6 +121,8 @@ struct SessionSnap {
     profile: String,
     window: Window,
     pane_id: u64,
+    cwd: String,
+    send_granted: bool,
 }
 
 struct Inner {
@@ -147,6 +153,9 @@ struct StoreTerm {
     /// 舊對照表沒有這欄就當空字串，不猜一個資料夾。
     #[serde(default)]
     cwd: String,
+    /// 舊對照表沒有這欄就當沒授權，不能代送文字。
+    #[serde(default)]
+    send_granted: bool,
 }
 
 enum Loaded {
@@ -295,6 +304,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 workspace,
                 title,
                 cwd: cwd.to_string_lossy().into_owned(),
+                send_granted: true,
             });
         }
         if let Err(e) = self.persist() {
@@ -309,8 +319,14 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         Ok(id)
     }
 
-    pub fn send(&self, id: &str, text: &str, enter: bool) -> Result<(), String> {
+    /// 使用者在 UI 確認後才把文字送進自己開的終端。不收程序編號或通訊路徑。
+    /// 工作資料夾沒有授權記錄就不送。文字走會壓行的送字，不走方向鍵那條。
+    /// 這個方法證明不了使用者有按確認。UI 的確認必須是唯一入口；後端其他路徑不得呼叫。
+    pub fn confirm_send(&self, id: &str, text: &str, enter: bool) -> Result<(), String> {
         let snap = self.snapshot(id)?;
+        if !snap.send_granted || snap.cwd.trim().is_empty() {
+            return Err("這個工作資料夾還沒有使用者的授權，不能代送".into());
+        }
         let dir = self.dir()?;
         let w = self.wez(&dir);
         if enter {
@@ -459,7 +475,30 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         };
         let bytes = encode_keys(&keys)?;
         w.send_bytes(&snap.window.sock, snap.pane_id, &bytes)?;
+        if prompt_kind == "trust_dialog" && n == 1 {
+            self.note_send_grant(&snap.id)?;
+        }
         Ok(TermAnswered { keys: describe_keys(&keys) })
+    }
+
+    /// 信任提問按了信任之後，把這個終端已記下的工作資料夾記成可代送。空的資料夾不記。
+    fn note_send_grant(&self, id: &str) -> Result<(), String> {
+        let should = {
+            let mut g = self.inner.lock().unwrap();
+            let Some(s) = g.sessions.iter_mut().find(|s| s.id == id) else {
+                return Err("沒有這個終端（只能操作這次由 ASN 開啟的）".into());
+            };
+            if s.cwd.trim().is_empty() {
+                false
+            } else {
+                s.send_granted = true;
+                true
+            }
+        };
+        if should {
+            self.persist()?;
+        }
+        Ok(())
     }
 
     /// 改自己這個終端的分頁標題。使用者給的字會接在 `ASN:{編號} ` 後面，前綴不拿掉（認領靠它）。
@@ -539,6 +578,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 workspace: format!("asn-{}", term.id),
                 title,
                 cwd: term.cwd.clone(),
+                send_granted: term.send_granted,
             });
         }
         let mut next = file.next;
@@ -567,6 +607,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 profile: s.profile.clone(),
                 window: s.window.clone(),
                 pane_id: s.pane_id,
+                cwd: s.cwd.clone(),
+                send_granted: s.send_granted,
             })
             .ok_or_else(|| "沒有這個終端（只能操作這次由 ASN 開啟的）".to_string())
     }
@@ -704,6 +746,7 @@ fn session_to_store(s: &Session) -> StoreTerm {
         workspace: s.workspace.clone(),
         title: s.title.clone(),
         cwd: s.cwd.clone(),
+        send_granted: s.send_granted,
     }
 }
 
@@ -1474,6 +1517,7 @@ mod tests {
         assert_eq!(v["terms"][0]["workspace"], "asn-1");
         assert_eq!(v["terms"][0]["title"], "ASN:1");
         assert_eq!(v["terms"][0]["cwd"], rig.cwd, "對照表記下開啟時已授權的資料夾");
+        assert_eq!(v["terms"][0]["send_granted"], true, "在 ASN 選定並通過允許清單，記成可代送");
         assert_eq!(v["terms"][1]["workspace"], "asn-2");
         assert!(!starts.iter().any(|a| a.iter().any(|x| x == "agent" || x == "stdio" || x.contains("cmd.exe"))), "不帶內建通道參數，也不走陷阱編號 agy 的 cmd");
         let calls = rig.runner.inner.calls.borrow();
@@ -1514,7 +1558,7 @@ mod tests {
         assert_cli_uses_socket(&rig.runner);
         let before = rig.runner.args().len();
         assert!(rig.files.borrow_mut().remove(&sock()));
-        let send = rig.svc.send(&id, "不該送出", true).unwrap_err();
+        let send = rig.svc.confirm_send(&id, "不該送出", true).unwrap_err();
         let read = rig.svc.read(&id, 10).unwrap_err();
         assert!(send.contains("通訊檔不存在"), "{send}");
         assert!(read.contains("通訊檔不存在"), "{read}");
@@ -1539,13 +1583,21 @@ mod tests {
         assert!(lib.contains("terms.status(&req.id)"), "忙閒只把編號交給 status");
         assert!(lib.contains("terms.rename(&req.id, &req.title)"), "改名只把編號與標題交給 rename");
         assert!(lib.contains("terms.answer(&req.id, &req.prompt_kind, req.n)"), "代答只把編號、提示種類與選項編號交給 answer");
+        assert!(lib.contains("terms.confirm_send(&req.id, &req.text, req.enter)"), "代送文字只把編號、文字與是否換行交給 confirm_send");
         let head = src.split("mod tests").next().unwrap();
         assert!(!head.contains(".answer("), "後端其他路徑不得呼叫 answer；UI 提示框是唯一入口");
+        assert!(!head.contains(".confirm_send("), "後端其他路徑不得呼叫 confirm_send；UI 確認是唯一入口");
         let ans = head.split("pub fn answer(").nth(1).expect("找得到 answer");
         let ans_body = ans.split("pub fn rename").next().unwrap();
         assert!(ans_body.contains("encode_keys(&keys)"), "送出前只能走固定對照表");
         assert!(ans_body.contains("send_bytes"), "代答走 send-text 位元組，不壓行");
         assert!(!ans_body.contains("send(") && !ans_body.contains("send_line"), "代答不把文字交給會丟掉控制碼的壓行送字");
+        assert!(ans_body.contains("trust_dialog") && ans_body.contains("note_send_grant"), "信任提問按了信任才記下授權");
+        let send_fn = head.split("pub fn confirm_send(").nth(1).expect("有確認後送字").split("pub fn read").next().unwrap();
+        assert!(send_fn.contains("send_granted"), "沒有授權記錄不能送");
+        assert!(send_fn.contains("send_line"), "確認後的文字仍走會壓行的送字");
+        assert!(!send_fn.contains("send_bytes"), "確認後送字不走方向鍵路徑");
+        assert!(!send_fn.contains("flatten_line"), "不在這裡放寬或複製壓行");
         let req = src.split("struct TermAnswerReq").nth(1).unwrap().split('}').next().unwrap();
         assert!(!req.contains("choice") && !req.contains("keys") && !req.contains("ansi"), "不收原始按鍵或選擇字串：{req}");
         let wz = include_str!("wezterm.rs");
@@ -1562,7 +1614,7 @@ mod tests {
         let id = rig.svc.start("agy", &rig.cwd, &rig.config).unwrap();
         let before = rig.runner.args().len();
         for op in [
-            rig.svc.send("999", "你好", true).unwrap_err(),
+            rig.svc.confirm_send("999", "你好", true).unwrap_err(),
             rig.svc.read("999", 10).unwrap_err(),
             rig.svc.stop("999").unwrap_err(),
             rig.svc.rename("999", "名稱").unwrap_err(),
@@ -1573,21 +1625,76 @@ mod tests {
         }
         assert_eq!(rig.runner.args().len(), before, "未知編號不可呼叫 WezTerm");
         assert!(rig.runner.killed().is_empty());
-        rig.svc.send(&id, "仍可送自己的", false).unwrap();
+        rig.svc.confirm_send(&id, "仍可送自己的", false).unwrap();
     }
 
     #[test]
     fn 送字可選擇是否另送換行鍵且換行先壓成單行() {
         let rig = make(default_profiles(), vec![]);
         let id = rig.svc.start("agy", &rig.cwd, &rig.config).unwrap();
-        rig.svc.send(&id, "第一行\n第二行", false).unwrap();
-        rig.svc.send(&id, "請只回覆 OK", true).unwrap();
+        rig.svc.confirm_send(&id, "第一行\n第二行", false).unwrap();
+        rig.svc.confirm_send(&id, "請只回覆 OK", true).unwrap();
         let sent: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "send-text")).collect();
         assert_eq!(sent.len(), 3);
         assert_eq!(sent[0].last().map(String::as_str), Some("第一行 第二行"));
         assert_eq!(sent[1].last().map(String::as_str), Some("請只回覆 OK"));
         assert_eq!(sent[2].last().map(String::as_str), Some("\r"));
         assert_eq!(rig.runner.inner.sleeps.borrow().len(), 1, "有 Enter 才在兩次之間等待");
+    }
+
+    #[test]
+    fn 沒有授權記錄就不能代送_信任後才可以() {
+        let trust = "Do you trust the contents of this directory? (Yes, proceed y / No, quit n)\nGrok Build  1.0.70\n";
+        let menu = "Pick one\n  Alpha\n> Beta\n  Gamma\n";
+        let rig = make(default_profiles(), vec![Some(1_000)]);
+        *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-4", "ASN:4", 7, 1);
+        write_store(&rig.store, 7, &row("4", "grok", "1000", r#","cwd":"D:/proj""#));
+        rig.svc.reclaim().unwrap();
+        assert_eq!(rig.svc.list()[0].cwd, "D:/proj");
+        let before = count_cmd(&rig.runner, "send-text");
+        let err = rig.svc.confirm_send("4", "回答 1\n下一行", true).unwrap_err();
+        assert!(err.contains("授權"), "{err}");
+        assert_eq!(count_cmd(&rig.runner, "send-text"), before, "沒有授權記錄不可送字");
+
+        *rig.runner.inner.screen.borrow_mut() = menu.into();
+        rig.svc.answer("4", "menu", 2).unwrap();
+        let err = rig.svc.confirm_send("4", "回答 1\n下一行", true).unwrap_err();
+        assert!(err.contains("授權"), "選單代答不構成資料夾授權：{err}");
+        assert!(!rig.runner.args().iter().any(|a| a.iter().any(|x| x.contains("回答 1"))), "還沒授權就不能把那句話送出去");
+
+        *rig.runner.inner.screen.borrow_mut() = trust.into();
+        rig.svc.answer("4", "trust_dialog", 2).unwrap();
+        let err = rig.svc.confirm_send("4", "回答 1\n下一行", true).unwrap_err();
+        assert!(err.contains("授權"), "按了不信任不能代送：{err}");
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
+        assert_eq!(v["terms"][0]["send_granted"], false, "按了不信任不要記成可代送");
+
+        rig.svc.answer("4", "trust_dialog", 1).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
+        assert_eq!(v["terms"][0]["send_granted"], true, "按了信任才記下授權");
+        assert_eq!(v["terms"][0]["cwd"], "D:/proj", "授權的是終端自己的資料夾，不是呼叫端傳進來的");
+        rig.svc.confirm_send("4", "回答 1\n下一行", true).unwrap();
+        let sent: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "send-text")).collect();
+        assert_eq!(sent.last().unwrap().last().map(String::as_str), Some("\r"));
+        assert!(sent.iter().any(|a| a.last().map(String::as_str) == Some("回答 1 下一行")), "換行仍先壓成單行：{sent:?}");
+        assert!(!sent.iter().any(|a| a.iter().any(|x| x.contains('\u{1b}')) && a.iter().any(|x| x.contains("回答"))), "這句話不走方向鍵路徑");
+
+        let rig = make(default_profiles(), vec![Some(1_000)]);
+        *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-4", "ASN:4", 7, 1);
+        write_store(&rig.store, 7, &row("4", "grok", "1000", r#","cwd":"","send_granted":true"#));
+        rig.svc.reclaim().unwrap();
+        let before = count_cmd(&rig.runner, "send-text");
+        let err = rig.svc.confirm_send("4", "回答 1", false).unwrap_err();
+        assert!(err.contains("授權"), "空的資料夾不能代送：{err}");
+        assert_eq!(count_cmd(&rig.runner, "send-text"), before);
+
+        let rig = make(default_profiles(), vec![Some(1_000)]);
+        *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-4", "ASN:4", 7, 1);
+        write_store(&rig.store, 7, &row("4", "grok", "1000", r#","cwd":"D:/proj","send_granted":true"#));
+        rig.svc.reclaim().unwrap();
+        rig.svc.confirm_send("4", "已授權", false).unwrap();
+        let sent: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "send-text")).collect();
+        assert_eq!(sent.last().unwrap().last().map(String::as_str), Some("已授權"));
     }
 
     #[test]
@@ -1628,7 +1735,7 @@ mod tests {
         let id = rig.svc.start("agy", &rig.cwd, &rig.config).unwrap();
         rig.svc.stop(&id).unwrap();
         assert!(rig.svc.list().is_empty(), "停止成功後編號要移除");
-        assert!(rig.svc.send(&id, "x", false).unwrap_err().contains("沒有這個終端"));
+        assert!(rig.svc.confirm_send(&id, "x", false).unwrap_err().contains("沒有這個終端"));
         assert!(rig.svc.stop(&id).unwrap_err().contains("沒有這個終端"));
         assert_eq!(rig.runner.killed(), vec![42]);
         let gone: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
