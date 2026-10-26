@@ -32,6 +32,45 @@ pub(crate) fn norm(p: &str) -> String {
     t.trim_end_matches('/').to_lowercase()
 }
 
+/// pi 在 settings.json 裡可能存「相對於 pi 設定資料夾」的路徑（例如 `..\\..\\AppData\\Local\\ASN\\pi-extension`）。
+/// 以前拿它直接跟絕對路徑比、或直接問檔案存不存在（相對的是 ASN 的工作目錄），會誤判成「沒裝」或「已失效」，
+/// 安裝後驗證失敗（「pi 說裝好了，但設定裡找不到這個擴充」）。這裡依 `base`（pi 設定資料夾）解成絕對路徑，只做字串運算、不碰檔案。
+/// 只處理以 `.` 開頭的路徑；`npm:`、`git:`、已是絕對路徑的原樣不動。
+pub(crate) fn resolve_entry(base: &Path, entry: &str) -> String {
+    let t = entry.trim();
+    if !(t.starts_with("./") || t.starts_with(".\\") || t.starts_with("../") || t.starts_with("..\\") || t == "." || t == "..") {
+        return entry.to_string();
+    }
+    let mut out = base.to_path_buf();
+    for c in Path::new(&t.replace('\\', "/")).components() {
+        use std::path::Component::*;
+        match c {
+            CurDir => {}
+            ParentDir => {
+                out.pop();
+            }
+            Normal(x) => out.push(x),
+            _ => {}
+        }
+    }
+    out.to_string_lossy().to_string()
+}
+
+/// 讀用的副本：把 packages 裡的相對路徑項目解成絕對路徑（字串與 `{ "source": … }` 兩種都處理）。壞檔、沒有 packages 原樣回傳。
+/// 這份只拿來判斷狀態，**絕不寫回** pi 的設定檔。
+pub(crate) fn resolve_settings(base: &Path, text: String) -> Option<String> {
+    let Ok(mut v) = serde_json::from_str::<Value>(&text) else { return Some(text) };
+    let Some(arr) = v.get_mut("packages").and_then(Value::as_array_mut) else { return Some(text) };
+    for e in arr.iter_mut() {
+        if let Some(s) = e.as_str() {
+            *e = Value::String(resolve_entry(base, s));
+        } else if let Some(src) = e.get("source").and_then(Value::as_str).map(|s| resolve_entry(base, s)) {
+            e["source"] = Value::String(src);
+        }
+    }
+    Some(v.to_string())
+}
+
 /// settings.json 的 `packages`：每一項是字串，或 `{ "source": "…" }`
 pub(crate) fn package_entries(settings_text: Option<&str>) -> Vec<String> {
     let Some(v) = settings_text.and_then(|t| serde_json::from_str::<Value>(t).ok()) else { return vec![] };
@@ -103,6 +142,14 @@ fn tail(s: &str) -> String {
 /// 讀目前的設定文字（沒有就是 None）
 pub(crate) trait Files {
     fn settings(&self) -> Option<String>;
+    /// 設定檔原文（remove 失敗時用 pi 存的原樣字串再試一次）；預設同 settings()
+    fn raw_settings(&self) -> Option<String> {
+        self.settings()
+    }
+    /// 設定檔裡「實際記錄的那串原樣字串」，解開後等於 `target` 的那一筆（pi 存的是相對路徑時，`pi remove` 可能只認原樣字串）。預設沒有
+    fn raw_entry_for(&self, _target: &str) -> Option<String> {
+        None
+    }
     fn exists(&self, p: &str) -> bool;
     fn read_marker(&self) -> Option<String>;
     fn write_marker(&self, path: &str) -> Result<(), String>;
@@ -124,7 +171,9 @@ pub(crate) fn install(pi: &Path, ext_dir: &Path, auto_dir_has_index: bool, runne
     }
     let after = compute_state(true, Some(ext_dir), files.settings().as_deref(), auto_dir_has_index, &|p| files.exists(p));
     if !after.installed {
-        return Err("pi 說裝好了，但設定裡找不到這個擴充，請再試一次或手動執行 pi install".into());
+        let seen = package_entries(files.settings().as_deref());
+        let seen = if seen.is_empty() { "（packages 是空的或讀不到）".to_string() } else { seen.join("、") };
+        return Err(format!("pi 說裝好了，但設定裡找不到這個擴充（要找 {ext}；pi 設定裡目前有：{seen}），請再試一次或手動執行 pi install"));
     }
     files.write_marker(&ext)
 }
@@ -132,8 +181,15 @@ pub(crate) fn install(pi: &Path, ext_dir: &Path, auto_dir_has_index: bool, runne
 /// 移除：只移除「我們裝的那一筆」（記錄檔裡的路徑；沒有記錄就用現在的擴充資料夾）。pi 說找不到（本來就沒裝）也算成功
 pub(crate) fn remove(pi: &Path, ext_dir: Option<&Path>, runner: &dyn Runner, files: &dyn Files) -> Result<(), String> {
     let target = files.read_marker().or_else(|| ext_dir.map(|d| d.to_string_lossy().to_string())).ok_or("不知道要移除哪一筆")?;
-    let (code, out) = runner.run(pi, &["remove".to_string(), target.clone()]).map_err(|e| format!("pi 沒有跑起來：{e}"))?;
-    let still = package_entries(files.settings().as_deref()).iter().any(|e| norm(e) == norm(&target));
+    let (mut code, mut out) = runner.run(pi, &["remove".to_string(), target.clone()]).map_err(|e| format!("pi 沒有跑起來：{e}"))?;
+    let mut still = package_entries(files.settings().as_deref()).iter().any(|e| norm(e) == norm(&target));
+    if still {
+        // pi 沒有移除掉：設定檔存的若是另一種寫法（例如相對路徑），改用原樣字串再試一次（只移除同一筆）
+        if let Some(raw) = files.raw_entry_for(&target).filter(|r| r.as_str() != target) {
+            (code, out) = runner.run(pi, &["remove".to_string(), raw]).map_err(|e| format!("pi 沒有跑起來：{e}"))?;
+            still = package_entries(files.settings().as_deref()).iter().any(|e| norm(e) == norm(&target));
+        }
+    }
     if code != 0 && still {
         return Err(format!("pi 移除擴充失敗（結束碼 {code}）：{}", tail(&out)));
     }
@@ -142,6 +198,55 @@ pub(crate) fn remove(pi: &Path, ext_dir: Option<&Path>, runner: &dyn Runner, fil
     }
     files.clear_marker();
     Ok(())
+}
+
+// ---------------------------------------------------------------- 預設開啟：第一次偵測到 pi 就自動安裝（#305）
+
+pub(crate) const AUTO_PREF: &str = "pi-auto.json";
+
+/// 讀偏好：(auto＝允許自動安裝（預設 true）, done＝自動安裝已經處理過（裝過，或本來就裝了）)。檔案壞掉當預設。
+pub(crate) fn auto_read(p: &Path) -> (bool, bool) {
+    let v = std::fs::read_to_string(p).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
+    let get = |k: &str, d: bool| v.as_ref().and_then(|v| v.get(k)).and_then(Value::as_bool).unwrap_or(d);
+    (get("auto", true), get("done", false))
+}
+pub(crate) fn auto_write(p: &Path, auto: bool, done: bool) {
+    let _ = crate::write_atomic(p, &json!({ "auto": auto, "done": done }).to_string());
+}
+
+/// 要不要自動安裝：允許、還沒處理過、找得到 pi 與 ASN 附的擴充、而且還沒裝
+pub(crate) fn should_auto(auto: bool, done: bool, st: &SetupState) -> bool {
+    auto && !done && st.pi_found && st.ext_found && !st.installed
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum AutoOutcome {
+    Skipped,
+    Installed,
+    Failed(String),
+}
+
+/// 啟動時跑一次。裝好就記 done；本來就裝了也記 done（之後有人手動拿掉，不會又被裝回來）；使用者關掉（auto=false）一律不動。
+/// 安裝失敗不記 done（下次啟動再試一次）。`do_install` 由呼叫端注入。
+pub(crate) fn auto_step(pref: &Path, st: &SetupState, do_install: impl FnOnce() -> Result<(), String>) -> AutoOutcome {
+    let (auto, done) = auto_read(pref);
+    if !auto || done {
+        return AutoOutcome::Skipped;
+    }
+    if st.installed {
+        auto_write(pref, true, true);
+        return AutoOutcome::Skipped;
+    }
+    if !should_auto(auto, done, st) {
+        return AutoOutcome::Skipped;
+    }
+    match do_install() {
+        Ok(()) => {
+            auto_write(pref, true, true);
+            AutoOutcome::Installed
+        }
+        Err(e) => AutoOutcome::Failed(e),
+    }
 }
 
 // ---------------------------------------------------------------- 真實環境
@@ -153,7 +258,13 @@ struct RealFiles {
 
 impl Files for RealFiles {
     fn settings(&self) -> Option<String> {
+        resolve_settings(&self.agent, self.raw_settings()?)
+    }
+    fn raw_settings(&self) -> Option<String> {
         std::fs::read_to_string(self.agent.join("settings.json")).ok()
+    }
+    fn raw_entry_for(&self, target: &str) -> Option<String> {
+        package_entries(self.raw_settings().as_deref()).into_iter().find(|e| norm(&resolve_entry(&self.agent, e)) == norm(target))
     }
     fn exists(&self, p: &str) -> bool {
         Path::new(p).exists()
@@ -262,9 +373,37 @@ fn real_state(files: &RealFiles) -> (SetupState, Option<PathBuf>, bool) {
     (st, ext, auto)
 }
 
+fn auto_pref_path() -> PathBuf {
+    crate::identity::relay_home().join(AUTO_PREF)
+}
+
+/// 狀態的 JSON 多帶一個 auto：目前是否允許自動安裝（畫面用來說明「已關閉自動安裝」）
+fn with_auto(mut v: Value) -> Value {
+    v["auto"] = json!(auto_read(&auto_pref_path()).0);
+    v
+}
+
 pub fn status_real() -> Value {
     let (agent, marker) = real_env();
-    real_state(&RealFiles { agent, marker }).0.to_json()
+    with_auto(real_state(&RealFiles { agent, marker }).0.to_json())
+}
+
+/// 啟動後在背景呼叫一次：預設開啟，第一次偵測到 pi 且還沒裝就自動安裝。回 None＝沒做事
+pub fn auto_install_real() -> Option<Result<Value, String>> {
+    let (agent, marker) = real_env();
+    let files = RealFiles { agent, marker };
+    let (st, ext, auto_dir) = real_state(&files);
+    let pref = auto_pref_path();
+    let pi = real_pi();
+    let out = auto_step(&pref, &st, || {
+        let (pi, ext) = (pi.ok_or("這台電腦找不到 pi")?, ext.ok_or("找不到 ASN 附的 pi 擴充")?);
+        install(&pi, &ext, auto_dir, &RealRunner::default(), &files)
+    });
+    match out {
+        AutoOutcome::Skipped => None,
+        AutoOutcome::Installed => Some(Ok(with_auto(real_state(&files).0.to_json()))),
+        AutoOutcome::Failed(e) => Some(Err(e)),
+    }
 }
 
 pub fn install_real() -> Result<Value, String> {
@@ -274,7 +413,8 @@ pub fn install_real() -> Result<Value, String> {
     let (_, ext, auto) = real_state(&files);
     let ext = ext.ok_or("找不到 ASN 附的 pi 擴充（安裝可能不完整），請重新安裝 ASN")?;
     install(&pi, &ext, auto, &RealRunner::default(), &files)?;
-    Ok(real_state(&files).0.to_json())
+    auto_write(&auto_pref_path(), true, true);   // 使用者自己按了啟用：之後視為允許自動安裝
+    Ok(with_auto(real_state(&files).0.to_json()))
 }
 
 pub fn remove_real() -> Result<Value, String> {
@@ -283,7 +423,8 @@ pub fn remove_real() -> Result<Value, String> {
     let pi = real_pi().ok_or("這台電腦找不到 pi，沒辦法執行移除")?;
     let (_, ext, _) = real_state(&files);
     remove(&pi, ext.as_deref(), &RealRunner::default(), &files)?;
-    Ok(real_state(&files).0.to_json())
+    auto_write(&auto_pref_path(), false, true);   // 使用者關掉：不再自動裝回
+    Ok(with_auto(real_state(&files).0.to_json()))
 }
 
 #[cfg(test)]
@@ -466,6 +607,151 @@ mod tests {
         // 沒有記錄時用現在的擴充資料夾；本來就沒裝，pi 回成功也算成功
         remove(Path::new("pi"), Some(ext()), &pi, &f).unwrap();
         assert!(remove(Path::new("pi"), None, &pi, &f).unwrap_err().contains("不知道要移除哪一筆"));
+    }
+
+    #[test]
+    fn 相對路徑_依_pi_設定資料夾解成絕對_其餘原樣() {
+        let base = Path::new(r"C:\Users\u\.pi\agent");
+        assert_eq!(norm(&resolve_entry(base, r"..\..\AppData\Local\ASN\pi-extension")), norm(r"C:\Users\u\AppData\Local\ASN\pi-extension"));
+        assert_eq!(norm(&resolve_entry(base, "../x/pi-extension")), norm(r"C:\Users\u\.pi\x\pi-extension"));
+        assert_eq!(norm(&resolve_entry(base, r".\local\pi-extension")), norm(r"C:\Users\u\.pi\agent\local\pi-extension"));
+        for same in [r"C:\ASN\pi-extension", "npm:some-pkg", "git:github.com/a/b", "/opt/pi-extension"] {
+            assert_eq!(resolve_entry(base, same), same, "{same}");
+        }
+    }
+
+    #[test]
+    fn 設定裡存相對路徑_也認得是現在這個擴充_不會誤判沒裝或失效() {
+        // 真機上 pi 存的就是這種相對於 pi 設定資料夾的寫法（#305）
+        let base = Path::new(r"C:\Users\u\.pi\agent");
+        let ext = Path::new(r"C:\Users\u\AppData\Local\ASN\pi-extension");
+        let text = r#"{"packages":["..\\..\\AppData\\Local\\ASN\\pi-extension"]}"#.to_string();
+        let resolved = resolve_settings(base, text.clone()).unwrap();
+        let st = compute_state(true, Some(ext), Some(&resolved), false, &exists_none);
+        assert!(st.installed && st.stale.is_empty(), "{st:?}");
+        // 沒解的話（舊行為）會被當成失效的舊擴充、而且不算裝了
+        let old = compute_state(true, Some(ext), Some(&text), false, &exists_none);
+        assert!(!old.installed && old.stale.len() == 1);
+        // 物件寫法一樣處理；沒有 packages、壞檔原樣不動
+        let obj = resolve_settings(base, r#"{"packages":[{"source":"../../AppData/Local/ASN/pi-extension"}]}"#.into()).unwrap();
+        assert!(compute_state(true, Some(ext), Some(&obj), false, &exists_none).installed);
+        assert_eq!(resolve_settings(base, "{壞掉".into()).unwrap(), "{壞掉");
+        assert_eq!(resolve_settings(base, r#"{"a":1}"#.into()).unwrap(), r#"{"a":1}"#);
+    }
+
+    /// 設定檔存相對路徑、而且 pi 只認原樣字串的情形（模擬）
+    struct RelFiles {
+        raw: String,
+        abs: String,
+        present: RefCell<bool>,
+    }
+    impl Files for RelFiles {
+        fn settings(&self) -> Option<String> {
+            Some(json!({ "packages": if *self.present.borrow() { vec![self.abs.clone()] } else { vec![] } }).to_string())
+        }
+        fn exists(&self, _: &str) -> bool {
+            true
+        }
+        fn read_marker(&self) -> Option<String> {
+            Some(self.abs.clone())
+        }
+        fn write_marker(&self, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn clear_marker(&self) {}
+        fn raw_entry_for(&self, target: &str) -> Option<String> {
+            (norm(target) == norm(&self.abs)).then(|| self.raw.clone())
+        }
+    }
+    struct RelPi<'a> {
+        files: &'a RelFiles,
+        calls: RefCell<Vec<String>>,
+    }
+    impl Runner for RelPi<'_> {
+        fn run(&self, _p: &Path, args: &[String]) -> Result<(i32, String), String> {
+            self.calls.borrow_mut().push(args[1].clone());
+            if args[1] == self.files.raw {
+                *self.files.present.borrow_mut() = false;
+                Ok((0, "Removed".into()))
+            } else {
+                Ok((1, "No matching package found".into()))
+            }
+        }
+    }
+
+    #[test]
+    fn 移除_pi_只認設定檔裡的原樣字串時_改用原樣字串再試一次_只移除同一筆() {
+        let f = RelFiles { raw: r"..\..\AppData\Local\ASN\pi-extension".into(), abs: r"C:\Users\u\AppData\Local\ASN\pi-extension".into(), present: RefCell::new(true) };
+        let pi = RelPi { files: &f, calls: RefCell::new(vec![]) };
+        remove(Path::new("pi"), None, &pi, &f).unwrap();
+        assert_eq!(*pi.calls.borrow(), vec![f.abs.clone(), f.raw.clone()], "先用絕對路徑，沒移掉再用原樣字串");
+        assert!(!*f.present.borrow());
+        // 原樣字串也移不掉：照實回 pi 的錯誤，不謊稱成功
+        let f2 = RelFiles { raw: "never".into(), abs: f.abs.clone(), present: RefCell::new(true) };
+        struct Stuck;
+        impl Runner for Stuck {
+            fn run(&self, _: &Path, _: &[String]) -> Result<(i32, String), String> {
+                Ok((1, "locked".into()))
+            }
+        }
+        let e = remove(Path::new("pi"), None, &Stuck, &f2).unwrap_err();
+        assert!(e.contains("locked"), "{e}");
+    }
+
+    fn st(pi: bool, ext: bool, installed: bool) -> SetupState {
+        SetupState { pi_found: pi, ext_found: ext, installed, stale: vec![] }
+    }
+
+    #[test]
+    fn 自動安裝偏好_預設允許且未處理_壞檔用預設() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join(AUTO_PREF);
+        assert_eq!(auto_read(&p), (true, false));
+        auto_write(&p, false, true);
+        assert_eq!(auto_read(&p), (false, true));
+        std::fs::write(&p, "{壞掉").unwrap();
+        assert_eq!(auto_read(&p), (true, false));
+    }
+
+    #[test]
+    fn 自動安裝_該裝才裝_找不到_pi_或擴充_已經裝了_都不動() {
+        assert!(should_auto(true, false, &st(true, true, false)));
+        assert!(!should_auto(true, false, &st(false, true, false)), "沒有 pi");
+        assert!(!should_auto(true, false, &st(true, false, false)), "沒有 ASN 的擴充");
+        assert!(!should_auto(true, false, &st(true, true, true)), "已經裝了");
+        assert!(!should_auto(false, false, &st(true, true, false)), "使用者關掉");
+        assert!(!should_auto(true, true, &st(true, true, false)), "處理過了");
+    }
+
+    #[test]
+    fn 自動安裝_第一次裝並記下_之後使用者關掉就不再裝回() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join(AUTO_PREF);
+        let mut calls = 0;
+        assert_eq!(auto_step(&p, &st(true, true, false), || { calls += 1; Ok(()) }), AutoOutcome::Installed);
+        assert_eq!((calls, auto_read(&p)), (1, (true, true)));
+        // 再啟動一次（即使現在沒裝）也不會又裝
+        assert_eq!(auto_step(&p, &st(true, true, false), || { calls += 1; Ok(()) }), AutoOutcome::Skipped);
+        assert_eq!(calls, 1);
+        // 使用者關掉
+        auto_write(&p, false, true);
+        assert_eq!(auto_step(&p, &st(true, true, false), || panic!("不該裝")), AutoOutcome::Skipped);
+        // 沒有紀錄檔、使用者一開始就關掉：不裝
+        let p2 = d.path().join("other.json");
+        auto_write(&p2, false, false);
+        assert_eq!(auto_step(&p2, &st(true, true, false), || panic!("不該裝")), AutoOutcome::Skipped);
+    }
+
+    #[test]
+    fn 自動安裝_本來就裝了記下已處理_失敗不記下次再試_沒有_pi_不動() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join(AUTO_PREF);
+        assert_eq!(auto_step(&p, &st(false, true, false), || panic!("不該裝")), AutoOutcome::Skipped);
+        assert_eq!(auto_read(&p), (true, false), "沒有 pi：不留紀錄，之後裝了 pi 還能自動裝");
+        assert_eq!(auto_step(&p, &st(true, true, false), || Err("壞了".into())), AutoOutcome::Failed("壞了".into()));
+        assert_eq!(auto_read(&p), (true, false), "失敗不記，下次啟動再試");
+        assert_eq!(auto_step(&p, &st(true, true, true), || panic!("不該裝")), AutoOutcome::Skipped);
+        assert_eq!(auto_read(&p), (true, true), "本來就裝了：記下，之後被手動拿掉也不裝回");
     }
 
     #[test]

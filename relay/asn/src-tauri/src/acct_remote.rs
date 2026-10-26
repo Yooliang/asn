@@ -26,6 +26,12 @@ const ENTRY_TTL: Duration = Duration::from_secs(15 * 60);
 /// 待處理的遠端指令：編號 → (email, 取走時間)。只有 `acct_remote_pending` 會放進來。
 static TAKEN: Mutex<Option<HashMap<String, (String, Instant)>>> = Mutex::new(None);
 
+/// TAKEN 每筆指令的附註：編號 → (發起端, 後端是否標了本人簽章)。只有 `pending` 依後端回的 signed=true 標成簽章；
+/// 編號處理掉（切換、拒絕）就一起拿掉，過期的在 `with_taken` 清（只留還在 TAKEN 裡的）。
+static META: Mutex<Option<HashMap<String, (String, bool)>>> = Mutex::new(None);
+/// 這次執行是否已經把上次沒處理完的指令（存在 acct-taken.json）讀回來
+static RESTORED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn is_uuid(s: &str) -> bool {
     let p: Vec<&str> = s.split('-').collect();
     p.len() == 5 && p.iter().zip([8, 4, 4, 4, 12]).all(|(x, n)| x.len() == n && x.chars().all(|c| c.is_ascii_hexdigit()))
@@ -77,11 +83,33 @@ pub fn build_report_with_quota(list: &[AccountInfo], codex: Option<&CodexLogin>,
 pub fn prefs_path(data_dir: &Path) -> std::path::PathBuf {
     data_dir.join("acct-prefs.json")
 }
+fn pref_bool(data_dir: &Path, key: &str, default: bool) -> bool {
+    std::fs::read_to_string(prefs_path(data_dir)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.get(key).and_then(Value::as_bool)).unwrap_or(default)
+}
+/// 寫一個設定：保留檔裡其他設定（檔壞掉就從空的開始）
+fn set_pref(data_dir: &Path, key: &str, on: bool) -> Result<(), String> {
+    let mut v = std::fs::read_to_string(prefs_path(data_dir)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).filter(Value::is_object).unwrap_or_else(|| json!({}));
+    v[key] = json!(on);
+    crate::write_atomic(&prefs_path(data_dir), &v.to_string()).map_err(|e| e.to_string())
+}
 pub fn trust_own(data_dir: &Path) -> bool {
-    std::fs::read_to_string(prefs_path(data_dir)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.get("remote_trust_own").and_then(Value::as_bool)).unwrap_or(false)
+    pref_bool(data_dir, "remote_trust_own", false)
 }
 pub fn set_trust_own(data_dir: &Path, on: bool) -> Result<(), String> {
-    crate::write_atomic(&prefs_path(data_dir), &json!({ "remote_trust_own": on }).to_string()).map_err(|e| e.to_string())
+    set_pref(data_dir, "remote_trust_own", on)
+}
+/// 設定：remote_trust_signed＝後端標了「本人簽章」的指令（手機上用本人帳號發出）不用在本機確認（預設 true，可關）。
+/// 沒簽章、簽章不成立的指令不受這項影響，一律照舊要本機確認。
+pub fn trust_signed(data_dir: &Path) -> bool {
+    pref_bool(data_dir, "remote_trust_signed", true)
+}
+pub fn set_trust_signed(data_dir: &Path, on: bool) -> Result<(), String> {
+    set_pref(data_dir, "remote_trust_signed", on)
+}
+
+/// 這個指令要不要在本機按確認：信任自己的設備，或（信任簽章且這筆指令後端標了簽章）就不用
+pub fn needs_confirm(trust_own: bool, trust_signed: bool, signed: bool) -> bool {
+    !(trust_own || (trust_signed && signed))
 }
 
 /// 對方送來的待辦一列：編號、email、發起端節點。格式不對回錯誤原因。
@@ -106,7 +134,111 @@ fn with_taken<T>(f: impl FnOnce(&mut HashMap<String, (String, Instant)>) -> T) -
     let mut g = TAKEN.lock().unwrap_or_else(|e| e.into_inner());
     let m = g.get_or_insert_with(HashMap::new);
     m.retain(|_, (_, t)| t.elapsed() < ENTRY_TTL);
-    f(m)
+    let r = f(m);
+    let mut mg = META.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(meta) = mg.as_mut() {
+        meta.retain(|id, _| m.contains_key(id));
+    }
+    r
+}
+
+fn set_meta(id: &str, by: &str, signed: bool) {
+    META.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(id.to_string(), (by.to_string(), signed));
+}
+fn is_signed(id: &str) -> bool {
+    META.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(id)).is_some_and(|(_, signed)| *signed)
+}
+
+// ---------- 本機日誌、自動切換頻率上限、待辦存檔 ----------
+/// 同一小時內，靠「本人簽章」免確認的切換最多這麼多次；超過的照舊要在本機按確認（設定「信任自己的設備」不受這個限制）
+const AUTO_MAX_PER_HOUR: usize = 3;
+const AUTO_WINDOW_MS: u64 = 60 * 60 * 1000;
+const LOG_MAX_BYTES: u64 = 200 * 1024;
+
+fn log_path(data_dir: &Path) -> std::path::PathBuf {
+    data_dir.join("acct-remote.log")
+}
+/// 本機日誌：一行一件事（時間毫秒、事件、編號、發起端、email…）。只放編號與 email，沒有任何權杖。
+/// 超過 200 KB 就只留後半，寫不進去也不影響切換。
+fn log_event(data_dir: &Path, event: &str, id: &str, detail: &str) {
+    use std::io::Write;
+    let line = format!("{}\t{}\t{}\t{}\n", crate::heartbeat::now_ms(), event, id, detail.replace(['\n', '\r', '\t'], " "));
+    let p = log_path(data_dir);
+    if std::fs::metadata(&p).map(|m| m.len() > LOG_MAX_BYTES).unwrap_or(false) {
+        if let Ok(t) = std::fs::read_to_string(&p) {
+            let keep = t.get(t.len() / 2..).unwrap_or("");
+            let keep = keep.find('\n').map(|i| &keep[i + 1..]).unwrap_or("");
+            let _ = std::fs::write(&p, keep);
+        }
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
+        let _ = f.write_all(line.as_bytes());
+    }
+}
+
+fn auto_path(data_dir: &Path) -> std::path::PathBuf {
+    data_dir.join("acct-auto.json")
+}
+fn auto_times(data_dir: &Path, now_ms: u64) -> Vec<u64> {
+    std::fs::read_to_string(auto_path(data_dir)).ok().and_then(|t| serde_json::from_str::<Vec<u64>>(&t).ok()).unwrap_or_default().into_iter().filter(|t| now_ms.saturating_sub(*t) < AUTO_WINDOW_MS).collect()
+}
+/// 現在還能不能再靠簽章免確認切換
+pub fn auto_allowed(data_dir: &Path, now_ms: u64) -> bool {
+    auto_times(data_dir, now_ms).len() < AUTO_MAX_PER_HOUR
+}
+fn auto_record(data_dir: &Path, now_ms: u64) {
+    let mut t = auto_times(data_dir, now_ms);
+    t.push(now_ms);
+    let _ = crate::write_atomic(&auto_path(data_dir), &serde_json::to_string(&t).unwrap_or_default());
+}
+
+fn taken_path(data_dir: &Path) -> std::path::PathBuf {
+    data_dir.join("acct-taken.json")
+}
+/// 把還沒處理的指令存檔：[{ id, email, by, signed, at（取走的時間，毫秒）}]。重啟後讀回來，才不會在「取走」與「按確定」之間重啟就找不到。
+fn taken_persist(data_dir: &Path) {
+    let now = crate::heartbeat::now_ms();
+    let rows: Vec<Value> = with_taken(|m| {
+        let meta = META.lock().unwrap_or_else(|e| e.into_inner());
+        m.iter()
+            .map(|(id, (email, t))| {
+                let (by, signed) = meta.as_ref().and_then(|x| x.get(id)).cloned().unwrap_or_default();
+                json!({ "id": id, "email": email, "by": by, "signed": signed, "at": now.saturating_sub(t.elapsed().as_millis() as u64) })
+            })
+            .collect()
+    });
+    if rows.is_empty() {
+        let _ = std::fs::remove_file(taken_path(data_dir));
+    } else {
+        let _ = crate::write_atomic(&taken_path(data_dir), &Value::Array(rows).to_string());
+    }
+}
+/// 把存檔讀回記憶體（只收格式對、沒過期的），回傳讀回來的（編號, email, 發起端, 是否簽章）。已經在記憶體裡的編號不動。
+fn taken_restore(data_dir: &Path) -> Vec<(String, String, String, bool)> {
+    let now = crate::heartbeat::now_ms();
+    let rows = std::fs::read_to_string(taken_path(data_dir)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.as_array().cloned()).unwrap_or_default();
+    let mut out = vec![];
+    for r in rows {
+        let (Some(id), Some(email), Some(by), at) = (r.get("id").and_then(Value::as_str), r.get("email").and_then(Value::as_str), r.get("by").and_then(Value::as_str), r.get("at").and_then(Value::as_u64)) else { continue };
+        let age = Duration::from_millis(now.saturating_sub(at.unwrap_or(0)));
+        let Some(email) = claude_accounts::normalize_email(email) else { continue };
+        if !is_uuid(id) || !valid_node(by) || age >= ENTRY_TTL {
+            continue;
+        }
+        let signed = r.get("signed").and_then(Value::as_bool) == Some(true);
+        let fresh = with_taken(|m| {
+            if m.contains_key(id) {
+                return false;
+            }
+            m.insert(id.to_string(), (email.clone(), Instant::now().checked_sub(age).unwrap_or_else(Instant::now)));
+            true
+        });
+        if fresh {
+            set_meta(id, by, signed);
+            out.push((id.to_string(), email, by.to_string(), signed));
+        }
+    }
+    out
 }
 
 /// 決定一筆指令：取出（每個編號只處理一次）→ 沒確認就拒絕 → 在本機切換。回傳（結果狀態, 說明）；沒有這個編號回 None。
@@ -274,21 +406,35 @@ pub async fn flush_outbox(relay: &Relay, data_dir: &Path) {
 pub async fn pending(relay: &Relay, data_dir: &Path) -> Result<Vec<Pending>, String> {
     flush_outbox(relay, data_dir).await;   // 之前沒送達的結果先補報
     let v = relay.api("acct_switch_pending", Some(json!({}))).await?;
-    let needs_confirm = !trust_own(data_dir);
+    // 簽章免確認要再看頻率：同一小時內已經自動切太多次，後面的改成要確認
+    let (own, signed_ok) = (trust_own(data_dir), trust_signed(data_dir) && auto_allowed(data_dir, crate::heartbeat::now_ms()));
     let mut out = vec![];
+    // 上次重啟前取走、還沒處理的指令：第一次輪詢時讀回來，重新交給畫面（後端那邊已是 taken，不會再發第二次）
+    if !RESTORED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        for (id, email, by, signed) in taken_restore(data_dir) {
+            log_event(data_dir, "restored", &id, &format!("{by} {email}"));
+            out.push(Pending { id, email, requested_by: by, needs_confirm: needs_confirm(own, signed_ok, signed) });
+        }
+    }
     for row in v.get("requests").and_then(Value::as_array).cloned().unwrap_or_default() {
         match parse_pending(&row) {
             Ok((id, email, by)) => {
+                // 只認後端明確回 signed=true（布林）；沒有欄位、別的型別一律當沒簽章
+                let signed = row.get("signed").and_then(Value::as_bool) == Some(true);
                 with_taken(|m| m.insert(id.clone(), (email.clone(), Instant::now())));
-                out.push(Pending { id, email, requested_by: by, needs_confirm });
+                set_meta(&id, &by, signed);
+                log_event(data_dir, "taken", &id, &format!("{by} {email} signed={signed}"));
+                out.push(Pending { id, email, requested_by: by, needs_confirm: needs_confirm(own, signed_ok, signed) });
             }
             Err(why) => {
                 if let Some(id) = row.get("id").and_then(Value::as_str).filter(|s| is_uuid(s)) {
+                    log_event(data_dir, "invalid", id, &why);
                     send_result(relay, data_dir, id, "failed", &why).await;
                 }
             }
         }
     }
+    taken_persist(data_dir);
     Ok(out)
 }
 
@@ -299,12 +445,21 @@ pub async fn apply(relay: &Relay, data_dir: &Path, id: String, confirmed: bool) 
 
 /// `switch` 由呼叫端注入：正式是本機切換，測試指到暫存家目錄
 pub async fn apply_with(relay: &Relay, data_dir: &Path, id: String, confirmed: bool, switch: impl FnOnce(&str) -> Result<String, String> + Send + 'static) -> Result<Value, String> {
-    let allowed = confirmed || trust_own(data_dir);
+    let now = crate::heartbeat::now_ms();
+    // 只靠簽章放行的（沒按確認、也沒開「信任自己的設備」）才算進頻率上限
+    let by_signed = !confirmed && !trust_own(data_dir) && trust_signed(data_dir) && is_signed(&id) && auto_allowed(data_dir, now);
+    let allowed = confirmed || trust_own(data_dir) || by_signed;
+    if by_signed && with_taken(|m| m.contains_key(&id)) {
+        auto_record(data_dir, now);
+    }
     let res = {
         let id2 = id.clone();
         tokio::task::spawn_blocking(move || with_taken(|m| decide(m, &id2, allowed, switch))).await.map_err(|e| format!("背景工作失敗：{e}"))?
     };
     let Some((status, detail)) = res else { return Err("找不到這個指令（已處理過或已過期）".into()) };
+    let how = if confirmed { "confirmed" } else if by_signed { "signed" } else if allowed { "trust_own" } else { "none" };
+    log_event(data_dir, status, &id, &format!("{how} {detail}"));
+    taken_persist(data_dir);
     send_result(relay, data_dir, &id, status, &detail).await;
     if status == "ok" {
         Ok(json!({ "status": status, "detail": detail }))
@@ -317,6 +472,8 @@ pub async fn apply_with(relay: &Relay, data_dir: &Path, id: String, confirmed: b
 pub async fn decline(relay: &Relay, data_dir: &Path, id: String) -> Result<(), String> {
     let removed = with_taken(|m| m.remove(&id).is_some());
     if removed {
+        log_event(data_dir, "declined", &id, "");
+        taken_persist(data_dir);
         send_result(relay, data_dir, &id, "denied", "對方電腦上的使用者沒有同意").await;
     }
     Ok(())
@@ -548,6 +705,250 @@ mod tests {
         let h2 = h.clone();
         apply_with(&relay, data.path(), U4.into(), false, move |e| claude_accounts::switch_to(&h2, e).map(|o| o.notice).map_err(|e| e.to_string())).await.unwrap();
         assert!(std::fs::read_to_string(h.join(".claude").join(".credentials.json")).unwrap().contains("FAKE-B"));
+    }
+
+    // ---- 同帳號簽章的指令不用在本機按確認（#300 第 1、2 項）----
+    #[test]
+    fn 要不要確認_只有信任自己或_信任簽章且指令有簽章_才免() {
+        assert!(needs_confirm(false, false, false));
+        assert!(needs_confirm(false, false, true), "信任簽章關掉：有簽章也要確認");
+        assert!(needs_confirm(false, true, false), "沒簽章：照舊要確認");
+        assert!(!needs_confirm(false, true, true));
+        assert!(!needs_confirm(true, false, false), "信任自己的設備照舊");
+    }
+
+    #[test]
+    fn 設定_信任簽章預設開_寫一項不會洗掉另一項_壞檔用預設() {
+        let d = tempfile::tempdir().unwrap();
+        assert!(trust_signed(d.path()) && !trust_own(d.path()));
+        set_trust_own(d.path(), true).unwrap();
+        assert!(trust_own(d.path()) && trust_signed(d.path()));
+        set_trust_signed(d.path(), false).unwrap();
+        assert!(trust_own(d.path()) && !trust_signed(d.path()), "兩項各自保留");
+        set_trust_own(d.path(), false).unwrap();
+        assert!(!trust_own(d.path()) && !trust_signed(d.path()));
+        std::fs::write(prefs_path(d.path()), "{壞掉").unwrap();
+        assert!(!trust_own(d.path()) && trust_signed(d.path()), "壞檔用預設：自己的設備要確認、簽章的免");
+        set_trust_signed(d.path(), false).unwrap();
+        assert!(!trust_signed(d.path()), "壞檔也能重新寫入");
+    }
+
+    fn switch_to_home(h: &std::path::Path) -> impl FnOnce(&str) -> Result<String, String> + Send + 'static {
+        let h = h.to_path_buf();
+        move |e: &str| claude_accounts::switch_to(&h, e).map(|o| o.notice).map_err(|e| e.to_string())
+    }
+    fn two_accounts() -> tempfile::TempDir {
+        let home = tempfile::tempdir().unwrap();
+        let h = home.path();
+        login(h, "u-a", "a@x.test", "A");
+        claude_accounts::save_current(h).unwrap();
+        login(h, "u-b", "b@x.test", "B");
+        claude_accounts::save_current(h).unwrap();
+        login(h, "u-a", "a@x.test", "A");
+        home
+    }
+    fn creds(h: &Path) -> String {
+        std::fs::read_to_string(h.join(".claude").join(".credentials.json")).unwrap()
+    }
+
+    #[tokio::test]
+    async fn 後端標了簽章的指令_預設不用確認就切_重播和沒取走過的編號被拒() {
+        const S1: &str = "55555555-2222-3333-4444-555555555555";
+        let home = two_accounts();
+        let data = tempfile::tempdir().unwrap();
+        let (url, seen) = fake_server(vec![json!({ "id": S1, "requested_by": "P", "vendor": "claude", "email": "b@x.test", "signed": true })]);
+        let relay = Relay::new(url, "k".into(), "W".into(), "W-ASN".into());
+        let p = pending(&relay, data.path()).await.unwrap();
+        assert!(!p[0].needs_confirm, "簽章指令預設免確認");
+        // 偽造：另一個沒取走過的編號，即使呼叫端說已確認也不能切
+        let forged = "66666666-2222-3333-4444-555555555555";
+        assert!(apply_with(&relay, data.path(), forged.into(), true, switch_to_home(home.path())).await.is_err());
+        assert!(creds(home.path()).contains("FAKE-A"), "偽造編號沒動到檔案");
+        // 本人簽章：沒按確認（confirmed=false）也切
+        apply_with(&relay, data.path(), S1.into(), false, switch_to_home(home.path())).await.unwrap();
+        assert!(creds(home.path()).contains("FAKE-B"));
+        // 重放：同一個編號第二次被拒，檔案不再被碰
+        login(home.path(), "u-a", "a@x.test", "A");
+        assert!(apply_with(&relay, data.path(), S1.into(), false, switch_to_home(home.path())).await.is_err());
+        assert!(creds(home.path()).contains("FAKE-A"), "重放不會再切");
+        assert!(!is_signed(S1), "處理過的編號從簽章表拿掉");
+        let reqs = seen.lock().unwrap().clone();
+        assert_eq!(reqs.iter().filter(|r| r.starts_with("POST /relay?action=acct_switch_result")).count(), 1, "只回報一次");
+    }
+
+    #[tokio::test]
+    async fn 沒簽章_簽章為假_簽章不是布林_一律照舊要確認() {
+        let ids = ["77777777-2222-3333-4444-555555555555", "88888888-2222-3333-4444-555555555555", "99999999-2222-3333-4444-555555555555", "aaaaaaaa-2222-3333-4444-555555555555"];
+        let home = two_accounts();
+        let data = tempfile::tempdir().unwrap();
+        let base = |id: &str| json!({ "id": id, "requested_by": "P", "vendor": "claude", "email": "b@x.test" });
+        let mut rows = vec![base(ids[0])];
+        let mut f = base(ids[1]);
+        f["signed"] = json!(false);
+        rows.push(f);
+        let mut t = base(ids[2]);
+        t["signed"] = json!("true");
+        rows.push(t);
+        let mut n = base(ids[3]);
+        n["signed"] = json!(1);
+        rows.push(n);
+        let (url, _seen) = fake_server(rows);
+        let relay = Relay::new(url, "k".into(), "W".into(), "W-ASN".into());
+        let mut p = vec![];
+        for _ in 0..4 { p.extend(pending(&relay, data.path()).await.unwrap()); }   // 假後端一次回一筆
+        assert_eq!(p.len(), 4);
+        assert!(p.iter().all(|x| x.needs_confirm), "沒簽章、簽章為 false、字串或數字都要確認");
+        for id in ids {
+            assert!(apply_with(&relay, data.path(), id.into(), false, switch_to_home(home.path())).await.is_err(), "{id}");
+        }
+        assert!(creds(home.path()).contains("FAKE-A"), "沒有任何一筆切換");
+    }
+
+    #[tokio::test]
+    async fn 信任簽章關掉_簽章的指令也要確認() {
+        const S2: &str = "bbbbbbbb-2222-3333-4444-555555555555";
+        let home = two_accounts();
+        let data = tempfile::tempdir().unwrap();
+        set_trust_signed(data.path(), false).unwrap();
+        let (url, _seen) = fake_server(vec![json!({ "id": S2, "requested_by": "P", "vendor": "claude", "email": "b@x.test", "signed": true })]);
+        let relay = Relay::new(url, "k".into(), "W".into(), "W-ASN".into());
+        let p = pending(&relay, data.path()).await.unwrap();
+        assert!(p[0].needs_confirm);
+        assert!(apply_with(&relay, data.path(), S2.into(), false, switch_to_home(home.path())).await.is_err(), "沒按確認就不切");
+        assert!(creds(home.path()).contains("FAKE-A"));
+    }
+
+    #[tokio::test]
+    async fn 簽章只認那個編號_同一批的沒簽章指令仍要確認() {
+        const S3: &str = "cccccccc-2222-3333-4444-555555555555";
+        const N3: &str = "dddddddd-2222-3333-4444-555555555555";
+        let home = two_accounts();
+        let data = tempfile::tempdir().unwrap();
+        let (url, _seen) = fake_server(vec![
+            json!({ "id": S3, "requested_by": "P", "vendor": "claude", "email": "b@x.test", "signed": true }),
+            json!({ "id": N3, "requested_by": "Q", "vendor": "claude", "email": "b@x.test" }),
+        ]);
+        let relay = Relay::new(url, "k".into(), "W".into(), "W-ASN".into());
+        let mut p = pending(&relay, data.path()).await.unwrap();
+        p.extend(pending(&relay, data.path()).await.unwrap());
+        assert!(!p.iter().find(|x| x.id == S3).unwrap().needs_confirm);
+        assert!(p.iter().find(|x| x.id == N3).unwrap().needs_confirm);
+        assert!(apply_with(&relay, data.path(), N3.into(), false, switch_to_home(home.path())).await.is_err());
+        assert!(creds(home.path()).contains("FAKE-A"));
+    }
+
+    // ---- 頻率上限、本機日誌、待辦存檔（#302 補齊）----
+    #[test]
+    fn 簽章自動切換_同一小時最多三次_過了一小時才恢復() {
+        let d = tempfile::tempdir().unwrap();
+        let t0 = 1_000_000_000_000u64;
+        assert!(auto_allowed(d.path(), t0));
+        for i in 0..AUTO_MAX_PER_HOUR as u64 {
+            assert!(auto_allowed(d.path(), t0 + i), "第 {i} 次還可以");
+            auto_record(d.path(), t0 + i);
+        }
+        assert!(!auto_allowed(d.path(), t0 + 10), "滿了");
+        assert!(!auto_allowed(d.path(), t0 + AUTO_WINDOW_MS - 1));
+        assert!(auto_allowed(d.path(), t0 + AUTO_WINDOW_MS + 3), "一小時後前面的算過期");
+        std::fs::write(auto_path(d.path()), "{壞掉").unwrap();
+        assert!(auto_allowed(d.path(), t0), "壞檔當沒有紀錄");
+    }
+
+    #[tokio::test]
+    async fn 自動切換滿三次後_簽章的指令改成要確認_且不切() {
+        let home = two_accounts();
+        let data = tempfile::tempdir().unwrap();
+        let now = crate::heartbeat::now_ms();
+        for _ in 0..AUTO_MAX_PER_HOUR {
+            auto_record(data.path(), now);
+        }
+        const R1: &str = "eeeeeeee-2222-3333-4444-555555555555";
+        let (url, _seen) = fake_server(vec![json!({ "id": R1, "requested_by": "P", "vendor": "claude", "email": "b@x.test", "signed": true })]);
+        let relay = Relay::new(url, "k".into(), "W".into(), "W-ASN".into());
+        let p = pending(&relay, data.path()).await.unwrap();
+        assert!(p[0].needs_confirm, "超過頻率上限要確認");
+        assert!(apply_with(&relay, data.path(), R1.into(), false, switch_to_home(home.path())).await.is_err());
+        assert!(creds(home.path()).contains("FAKE-A"), "沒切");
+    }
+
+    #[tokio::test]
+    async fn 本機日誌_記取走_切換_拒絕_且沒有權杖() {
+        const L1: &str = "f1111111-2222-3333-4444-555555555555";
+        const L2: &str = "f2222222-2222-3333-4444-555555555555";
+        let home = two_accounts();
+        let data = tempfile::tempdir().unwrap();
+        let (url, _seen) = fake_server(vec![
+            json!({ "id": L1, "requested_by": "P", "vendor": "claude", "email": "b@x.test", "signed": true }),
+            json!({ "id": L2, "requested_by": "Q", "vendor": "claude", "email": "b@x.test" }),
+        ]);
+        let relay = Relay::new(url, "k".into(), "W".into(), "W-ASN".into());
+        pending(&relay, data.path()).await.unwrap();
+        pending(&relay, data.path()).await.unwrap();
+        apply_with(&relay, data.path(), L1.into(), false, switch_to_home(home.path())).await.unwrap();
+        decline(&relay, data.path(), L2.into()).await.unwrap();
+        let log = std::fs::read_to_string(log_path(data.path())).unwrap();
+        for want in [format!("taken\t{L1}"), format!("ok\t{L1}\tsigned"), format!("taken\t{L2}"), format!("declined\t{L2}")] {
+            assert!(log.contains(&want), "日誌少了 {want}：\n{log}");
+        }
+        assert!(!log.contains("FAKE-"), "日誌裡沒有權杖");
+    }
+
+    #[test]
+    fn 日誌太大只留後半() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(log_path(d.path()), "x".repeat(LOG_MAX_BYTES as usize + 10)).unwrap();
+        log_event(d.path(), "taken", U, "H");
+        let n = std::fs::metadata(log_path(d.path())).unwrap().len();
+        assert!(n < LOG_MAX_BYTES, "縮小了：{n}");
+        assert!(std::fs::read_to_string(log_path(d.path())).unwrap().contains("taken"));
+    }
+
+    #[tokio::test]
+    async fn 取走後重啟_待辦從存檔讀回來_簽章也保留_處理後存檔清掉() {
+        const K1: &str = "f3333333-2222-3333-4444-555555555555";
+        let home = two_accounts();
+        let data = tempfile::tempdir().unwrap();
+        let (url, _seen) = fake_server(vec![json!({ "id": K1, "requested_by": "P", "vendor": "claude", "email": "b@x.test", "signed": true })]);
+        let relay = Relay::new(url, "k".into(), "W".into(), "W-ASN".into());
+        pending(&relay, data.path()).await.unwrap();
+        let saved = std::fs::read_to_string(taken_path(data.path())).unwrap();
+        assert!(saved.contains(K1) && saved.contains(r#""signed":true"#) && !saved.contains("FAKE-"), "{saved}");
+        // 模擬重啟：記憶體裡的待辦與附註清空，只剩存檔
+        with_taken(|m| m.remove(K1));   // 待辦表是全域的，只動自己這一筆，不影響平行的測試
+        META.lock().unwrap().as_mut().map(|m| m.remove(K1));
+        assert!(apply_with(&relay, data.path(), K1.into(), true, switch_to_home(home.path())).await.is_err(), "重啟後沒讀回來就找不到");
+        // 另一份存檔：讀回來之後才能處理
+        std::fs::write(taken_path(data.path()), json!([{ "id": K1, "email": "b@x.test", "by": "P", "signed": true, "at": crate::heartbeat::now_ms() }]).to_string()).unwrap();
+        let back = taken_restore(data.path());
+        assert_eq!(back, vec![(K1.to_string(), "b@x.test".to_string(), "P".to_string(), true)]);
+        assert!(is_signed(K1));
+        assert!(taken_restore(data.path()).is_empty(), "已在記憶體裡的不重複讀回來");
+        apply_with(&relay, data.path(), K1.into(), false, switch_to_home(home.path())).await.unwrap();
+        assert!(creds(home.path()).contains("FAKE-B"));
+        // 待辦表是全域的，平行的測試可能還有別的編號；只看這一筆有沒有清掉
+        assert!(!std::fs::read_to_string(taken_path(data.path())).unwrap_or_default().contains(K1), "處理完存檔清掉");
+    }
+
+    #[test]
+    fn 存檔讀回來_過期_格式不對的丟掉() {
+        let d = tempfile::tempdir().unwrap();
+        let now = crate::heartbeat::now_ms();
+        let old = now - ENTRY_TTL.as_millis() as u64 - 1000;
+        const G1: &str = "f4444444-2222-3333-4444-555555555555";
+        std::fs::write(
+            taken_path(d.path()),
+            json!([
+                { "id": G1, "email": "b@x.test", "by": "P", "signed": true, "at": old },
+                { "id": "不是編號", "email": "b@x.test", "by": "P", "signed": true, "at": now },
+                { "id": "f5555555-2222-3333-4444-555555555555", "email": "../x", "by": "P", "signed": true, "at": now },
+                { "id": "f6666666-2222-3333-4444-555555555555", "email": "b@x.test", "by": "P P", "signed": true, "at": now },
+            ])
+            .to_string(),
+        )
+        .unwrap();
+        assert!(taken_restore(d.path()).is_empty());
+        std::fs::write(taken_path(d.path()), "{壞掉").unwrap();
+        assert!(taken_restore(d.path()).is_empty());
     }
 
     #[test]

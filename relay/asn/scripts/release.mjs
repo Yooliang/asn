@@ -61,6 +61,7 @@ if (newChangelog !== null) {
 }
 
 run(node, ['scripts/prep.mjs'])
+run(node, ['scripts/fetch-wezterm.mjs'])   // 內建終端機用的 WezTerm（固定版本、核對雜湊；ASN_SKIP_WEZTERM=1 可略過）
 run(node, [path.join('node_modules', '@tauri-apps', 'cli', 'tauri.js'), 'build', '--bundles', 'nsis'])
 
 const bundle = path.join(root, 'src-tauri', 'target', 'release', 'bundle', 'nsis')

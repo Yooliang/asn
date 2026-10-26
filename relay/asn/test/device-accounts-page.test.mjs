@@ -145,7 +145,7 @@ test('這台的頁籤：完整的帳號管理（切換、刪除、加入、自�
   for (const w of ['a@b.c', 'p@b.c', '使用中', '切換', '刪除', '信任我自己的設備', '邀請雲端代理', 'x@openai.test', '這台']) assert.ok(html.includes(w), `少了「${w}」`)
   const cur = /<li class="dv-acct[^"]*"[^>]*>(?:(?!<\/li>)[\s\S])*a@b\.c[\s\S]*?<\/li>/.exec(html)[0]
   assert.match(cur, /<button[^>]*disabled[^>]*>切換<\/button>/, '使用中的帳號不能再切換')
-  for (const op of ['acct-switch', 'acct-remove', 'acct-trust']) assert.ok(SettingsPanel.template.includes(`act('${op}'`), op)
+  for (const op of ['acct-switch', 'acct-remove', 'acct-trust', 'acct-trust-signed']) assert.ok(SettingsPanel.template.includes(`act('${op}'`), op)
   assert.ok(!html.includes('加入目前登入的帳號') && !html.includes('<span>自動加入</span>'), '加入按鈕與自動加入勾選已拿掉（固定自動加入）')
 })
 
@@ -174,7 +174,7 @@ test('遠端設備下拉選單已被頁籤取代：元件與樞紐不再有 acct
   assert.ok(!SETTING_OPS.includes('acct-remote-node') && !SETTING_OPS.includes('acct-remote-switch'))
   assert.ok(!read('ui/lib/settings-panel.mjs').includes('acct-remote'))
   assert.ok(!read('ui/list.js').includes("case 'acct-remote"))
-  for (const op of ['acct-switch', 'acct-remove', 'acct-trust', 'device-switch', 'device-reorder', 'device-remove']) assert.ok(SETTING_OPS.includes(op), op)
+  for (const op of ['acct-switch', 'acct-remove', 'acct-trust', 'acct-trust-signed', 'device-switch', 'device-reorder', 'device-remove']) assert.ok(SETTING_OPS.includes(op), op)
 })
 
 test('守門：不引入 Tailwind 或外部網址；樣式只用既有的 CSS 變數；畫面不顯示節點代號', () => {

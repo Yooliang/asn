@@ -40,8 +40,10 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
   const s = reactive({
     list: [], current: null, codex: null, codexErr: '', msg: '', busy: false, confirmDel: '',
     trustOwn: false,
+    trustSigned: true,
     remote: { node: '', list: [], reportedAt: '', asnOnline: false, loading: false, busy: false, msg: '' },
     incoming: [],   // 等本機使用者按確認的遠端切換指令：{ id, email, from, fromLabel }
+    done: [],       // 免確認（本人簽章／信任自己的設備）已經切好、讓使用者看一眼的：{ id, email, from, fromLabel }；可按「還原」
     reports: {},    // 節點 → 那台電腦的帳號回報（設備分類用）：{ error, asnOnline, reportedAt, accounts }
     savedSeq: 0,
     autoNote: '',   // 背景自動加入成功時的一行小字
@@ -120,7 +122,11 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
   // 本機這邊：定期取走別台送來的切換指令。預設要使用者按確認；設定「信任我自己的設備」就直接切
   const handleIncoming = async row => {
     if (!row.needs_confirm) {
-      try { await invoke('acct_remote_apply', { id: row.id, confirmed: false }); s.msg = `${nodeLabel(row.requested_by)} 要求切換，已切到 ${row.email}。${SWITCH_NOTICE}` } catch (e) { s.msg = errText(e) }
+      try {
+        await invoke('acct_remote_apply', { id: row.id, confirmed: false })
+        s.msg = `${nodeLabel(row.requested_by)} 要求切換，已切到 ${row.email}。${SWITCH_NOTICE}`
+        s.done.push({ id: row.id, email: row.email, from: row.requested_by, fromLabel: nodeLabel(row.requested_by) })
+      } catch (e) { s.msg = errText(e) }
       await refresh(); void report()
       return
     }
@@ -139,6 +145,13 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     try { await invoke('acct_remote_apply', { id, confirmed: true }); s.msg = `已依 ${it.fromLabel} 的要求切換到 ${it.email}。${SWITCH_NOTICE}` } catch (e) { s.msg = errText(e) }
     await refresh(); void report()
   }
+  const dismissDone = id => { s.done = s.done.filter(x => x.id !== id) }
+  // 還原到切換前（本機備份；只有這個按鈕能用，遠端指令碰不到）
+  const undo = async id => {
+    dismissDone(id)
+    try { s.msg = String((await invoke('claude_account_undo')) ?? '') } catch (e) { s.msg = errText(e) }
+    await refresh(); void report()
+  }
   const decline = async id => {
     s.incoming = s.incoming.filter(x => x.id !== id)
     try { await invoke('acct_remote_decline', { id }) } catch { /* 略過 */ }
@@ -149,13 +162,20 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     await refresh()
     void report()
   }
-  const loadTrust = async () => { try { s.trustOwn = (await invoke('acct_remote_trust_get')) === true } catch { s.trustOwn = false } }
+  const loadTrust = async () => {
+    try { s.trustOwn = (await invoke('acct_remote_trust_get')) === true } catch { s.trustOwn = false }
+    // 讀不到就當預設（開）：不會因為讀取失敗而悄悄變成關
+    try { s.trustSigned = (await invoke('acct_remote_trust_signed_get')) !== false } catch { s.trustSigned = true }
+  }
   const setTrust = async on => {
     try { await invoke('acct_remote_trust_set', { on }); s.trustOwn = on === true } catch (e) { s.msg = errText(e) }
   }
+  const setTrustSigned = async on => {
+    try { await invoke('acct_remote_trust_signed_set', { on }); s.trustSigned = on === true } catch (e) { s.msg = errText(e) }
+  }
   return {
     state: s,
-    refresh, report, onAuto, loadReports, remoteNodes, remoteSelect, remoteLoad, remoteSwitch, pollIncoming, approve, decline, loadTrust, setTrust,
+    refresh, report, onAuto, loadReports, remoteNodes, remoteSelect, remoteLoad, remoteSwitch, pollIncoming, approve, decline, dismissDone, undo, loadTrust, setTrust, setTrustSigned,
     addCurrent: () => run(async () => { const a = await invoke('claude_account_save'); s.savedSeq++; return `已加入 ${a.email}。` }),
     switchTo: email => run(async () => { const r = await invoke('claude_account_switch', { email }); return `已切換到 ${r.email}。${SWITCH_NOTICE}` }),
     // 刪除要按兩次（第一次變成「確認刪除」），避免誤觸

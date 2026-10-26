@@ -125,6 +125,30 @@ test('收到別台的切換要求：預設跳確認（按同意才切、拒絕�
   assert.equal(await ui.pollIncoming(), 0, '取不到待辦就當沒有，不吵使用者')
 })
 
+test('免確認切好之後：留一筆讓使用者看一眼，可按還原（呼叫本機還原）；切換失敗不留', async () => {
+  const base = { claude_accounts_list: [], claude_account_current: null, codex_account_current: null, acct_remote_report: {} }
+  const row = { id: 'ID3', email: 'b@x.test', requested_by: 'P', needs_confirm: false }
+  let { f, ui } = mk({ ...base, acct_remote_pending: [row], acct_remote_apply: {}, claude_account_undo: '已還原到切換前的帳號。' }, { nodeLabel: n => (n === 'P' ? '手機' : n) })
+  await ui.pollIncoming()
+  assert.deepEqual(ui.state.done, [{ id: 'ID3', email: 'b@x.test', from: 'P', fromLabel: '手機' }])
+  assert.deepEqual(ui.state.incoming, [])
+  await ui.undo('ID3')
+  assert.ok(f.calls.some(c => c[0] === 'claude_account_undo'), '按還原才呼叫本機還原')
+  assert.deepEqual(ui.state.done, [])
+  assert.equal(ui.state.msg, '已還原到切換前的帳號。')
+
+  ;({ f, ui } = mk({ ...base, acct_remote_pending: [row], acct_remote_apply: {} }))
+  await ui.pollIncoming()
+  ui.dismissDone('ID3')
+  assert.deepEqual(ui.state.done, [])
+  assert.ok(!f.calls.some(c => c[0] === 'claude_account_undo'), '按「知道了」不還原')
+
+  ;({ f, ui } = mk({ ...base, acct_remote_pending: [row], acct_remote_apply: new Error('找不到這個指令') }))
+  await ui.pollIncoming()
+  assert.deepEqual(ui.state.done, [], '沒切成功就不顯示「已切換」')
+  assert.match(ui.state.msg, /找不到/)
+})
+
 test('接線守門：設定頁有這一塊、Rust 指令有註冊、前端不碰權杖', () => {
   const panel = read('ui/lib/settings-panel.mjs'), js = read('ui/list.js'), lib = read('ui/lib/claude-accounts.mjs'), rs = read('src-tauri/src/lib.rs')
   assert.match(panel, /dv-set/)   // 帳號管理併進「設備與帳號」頁（這台的頁籤）
@@ -134,7 +158,7 @@ test('接線守門：設定頁有這一塊、Rust 指令有註冊、前端不碰
     assert.ok(lib.includes(c), c)
   }
   assert.ok(rs.includes('codex_accounts::codex_account_current') && lib.includes('codex_account_current'))
-  for (const c of ['acct_remote_report', 'acct_remote_list', 'acct_remote_request', 'acct_remote_status', 'acct_remote_pending', 'acct_remote_apply', 'acct_remote_decline', 'acct_remote_trust_get', 'acct_remote_trust_set']) {
+  for (const c of ['acct_remote_report', 'acct_remote_list', 'acct_remote_request', 'acct_remote_status', 'acct_remote_pending', 'acct_remote_apply', 'acct_remote_decline', 'acct_remote_trust_get', 'acct_remote_trust_set', 'acct_remote_trust_signed_get', 'acct_remote_trust_signed_set', 'claude_account_undo']) {
     assert.ok(rs.includes(c), `lib.rs 沒註冊 ${c}`)
     assert.ok(lib.includes(c), `前端沒用到 ${c}`)
   }
