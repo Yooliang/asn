@@ -1,5 +1,5 @@
 -- Grok 帳號可以回報與遠端切換（做法與 Claude 相同，登入檔整份在對方電腦上換）。
--- 兩支函式各改一處（以 20261023160000 的回報函式、20261026100000 的切換函式為基礎，其餘逐字不變）：
+-- 兩支函式各改一處（以線上現行的回報函式（含 20261024200000 的額度欄位）、20261026100000 的切換函式為基礎，其餘逐字不變）：
 --   1. asn_relay_acct_report：vendor 可以是 claude、codex 或 grok；仍只留 vendor／email／plan／current 四欄，最多 20 筆。
 --   2. asn_relay_acct_switch：vendor 可以是 claude 或 grok；「email 在對方回報的清單裡」改成比對同一個廠商那幾筆（不能拿別家的帳號當目標）。
 -- 切換指令表（relay.account_switches.vendor）沒有限制清單，不用改。舊版桌面只送 claude 也照舊通過；
@@ -7,37 +7,38 @@
 -- 部署順序：migration → Edge 函式 → 發新版 ASN。回復：換回上述兩份 migration 的函式定義。
 begin;
 
-create or replace function public.asn_relay_acct_report(p_node text, p_accounts jsonb)
- returns jsonb
- language plpgsql
- security definer
- set search_path to ''
-as $function$
-declare
-  v_row jsonb;
-  v_out jsonb := '[]'::jsonb;
-begin
-  if p_accounts is null or jsonb_typeof(p_accounts) <> 'array' or jsonb_array_length(p_accounts) > 20 then
-    return jsonb_build_object('error', 'bad_request');
-  end if;
-  if not exists (select 1 from relay.nodes where id = p_node and status = 'active') then
-    return jsonb_build_object('error', 'not_found');
-  end if;
-  for v_row in select * from jsonb_array_elements(p_accounts) loop
-    if jsonb_typeof(v_row) <> 'object'
-       or v_row->>'vendor' is null or v_row->>'vendor' not in ('claude', 'codex', 'grok')
-       or not public.asn_relay_acct_email_ok(v_row->>'email')
-       or (v_row ? 'plan' and (jsonb_typeof(v_row->'plan') <> 'string' or char_length(v_row->>'plan') > 30 or (v_row->>'plan') ~ '[[:cntrl:]]'))
-       or (v_row ? 'current' and jsonb_typeof(v_row->'current') <> 'boolean') then
-      return jsonb_build_object('error', 'bad_request');
-    end if;
-    v_out := v_out || jsonb_build_array(jsonb_build_object(
-      'vendor', v_row->>'vendor', 'email', v_row->>'email', 'plan', coalesce(v_row->>'plan', ''), 'current', coalesce((v_row->>'current')::boolean, false)));
-  end loop;
-  insert into relay.asn_accounts (node, accounts, updated_at) values (p_node, v_out, now())
-    on conflict (node) do update set accounts = excluded.accounts, updated_at = excluded.updated_at;
-  return jsonb_build_object('ok', true, 'count', jsonb_array_length(v_out));
-end;
+create or replace FUNCTION public.asn_relay_acct_report(p_node text, p_accounts jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+declare
+  v_row jsonb;
+  v_out jsonb := '[]'::jsonb;
+begin
+  if p_accounts is null or jsonb_typeof(p_accounts) <> 'array' or jsonb_array_length(p_accounts) > 20 then
+    return jsonb_build_object('error', 'bad_request');
+  end if;
+  if not exists (select 1 from relay.nodes where id = p_node and status = 'active') then
+    return jsonb_build_object('error', 'not_found');
+  end if;
+  for v_row in select * from jsonb_array_elements(p_accounts) loop
+    if jsonb_typeof(v_row) <> 'object'
+       or v_row->>'vendor' is null or v_row->>'vendor' not in ('claude', 'codex', 'grok')
+       or not public.asn_relay_acct_email_ok(v_row->>'email')
+       or (v_row ? 'plan' and (jsonb_typeof(v_row->'plan') <> 'string' or char_length(v_row->>'plan') > 30 or (v_row->>'plan') ~ '[[:cntrl:]]'))
+       or (v_row ? 'current' and jsonb_typeof(v_row->'current') <> 'boolean') then
+      return jsonb_build_object('error', 'bad_request');
+    end if;
+    v_out := v_out || jsonb_build_array(jsonb_build_object(
+      'vendor', v_row->>'vendor', 'email', v_row->>'email', 'plan', coalesce(v_row->>'plan', ''), 'current', coalesce((v_row->>'current')::boolean, false))
+      || case when v_row->>'vendor' = 'claude' then public.asn_relay_acct_quota(v_row) else '{}'::jsonb end);
+  end loop;
+  insert into relay.asn_accounts (node, accounts, updated_at) values (p_node, v_out, now())
+    on conflict (node) do update set accounts = excluded.accounts, updated_at = excluded.updated_at;
+  return jsonb_build_object('ok', true, 'count', jsonb_array_length(v_out));
+end;
 $function$;
 
 create or replace function public.asn_relay_acct_switch(p_actor text, p_node text, p_vendor text, p_email text, p_signed_user uuid default null::uuid)
