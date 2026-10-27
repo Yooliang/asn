@@ -67,7 +67,7 @@ export function runOptions(row, { local = false, piInstalled = false, piReady = 
   const opt = (key, ok, reason, note = '') => ({ key, label: RUN_OPTION_LABEL[key], ok, why: ok ? '' : reason, note })
   const acpOk = st('acp') === 'ok'
   const piOk = st('pi') !== undefined && st('pi') !== 'no' && piInstalled && (isPiItself || piReady)
-  const piWhy = st('pi') === 'no' || st('pi') === undefined ? (why('pi') || '這個模型不能經 pi 開') : !piInstalled ? '這台電腦沒偵測到 pi' : '0.1.90 起才能帶提供者和模型開 pi'
+  const piWhy = st('pi') === 'no' || st('pi') === undefined ? (why('pi') || '這個模型不能經 pi 開') : !piInstalled ? '這台電腦沒偵測到 pi（PATH 和 npm、pnpm、scoop 的安裝資料夾都找過）；剛裝好的話，把 ASN 關掉重開再試' : '0.1.90 起才能帶提供者和模型開 pi'
   // 終端：Claude、Codex、pi 是 ASN 開成它自己的終端機視窗（原本的開法，別台設備也能遠端開）；Grok、Gemini 是 ASN 內建的 WezTerm，只能在這台開
   const termWindow = st('term') === 'window'
   const termWez = ['ok', 'noinbox'].includes(st('term')) && TERM_PROFILES.includes(row?.toolId)

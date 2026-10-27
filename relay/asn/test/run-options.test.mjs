@@ -51,3 +51,10 @@ test('pi 是通道不是廠家：廠家清單不列 pi，目錄裡仍留著（�
   assert.deepEqual(vendorRows(MODEL_CATALOG).map(m => m.id), ['claude', 'codex', 'gemini', 'grok'])
   assert.deepEqual(vendorRows(null), [])
 })
+
+test('沒偵測到 pi 的說明（#394）：講清楚是「沒有 pi」、找過哪些地方、剛裝好要重開 ASN；跟「沒有擴充」分開', () => {
+  const why = runOptions(row('grok'), { local: true, piInstalled: false }).options[1].why
+  assert.match(why, /沒偵測到 pi（PATH 和 npm、pnpm、scoop 的安裝資料夾都找過）/)
+  assert.match(why, /把 ASN 關掉重開/)
+  assert.doesNotMatch(why, /擴充/)
+})
