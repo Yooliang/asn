@@ -1,11 +1,11 @@
 {
-  "version": "0.1.82",
-  "notes": "修正：電腦端往終端送字時，確認框打開就會同時傳到手機「待確認」頁，本人在手機按確認或拒絕（之前只有代答會傳到手機）。",
-  "pub_date": "2026-10-27T01:34:24.598Z",
+  "version": "0.1.83",
+  "notes": "新增：電腦版「終端」圖示常駐，沒有終端時也能進「接手既有視窗…」。修正：電腦端往終端送字時，按返回、關閉或換終端會撤回手機上的待確認；改字再送會先撤回舊的；只動送字，不影響手機上等你回答的代答請求。",
+  "pub_date": "2026-10-27T01:59:19.853Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjJIcWZtSkNzTEJXc0lHdmF4ci9WS0NVTkZvUFZzWCtvbE5xUHFPKzU3Wmk1Q3ZKbnBMbkFoNjBWSFp0dGhBVjZJdTYwWDgrNUE2NWxRbEl1S3lyUVFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDY0ODY0CWZpbGU6QVNOXzAuMS44Ml94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjgyCnAvQmVQbTFkQXJDVDZ6SnZ5Ri85dk55Rm5Mb1h0c3BORTNINFNWVm1WWDlPVEdYS2NXUHNlSDhCRThzRXZGQ0pUdzB5eU1PeVg5c0JYS093eEtCZkJ3PT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.82_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjJnMW1NZU92Um40YkpCRTJuaGV0T3R3YmJsSG1xeGRwMkJtNjVpbVhuOWJSSjdEZEtzQ2FqNjdmVUtRaHNlOVgzUFFRM09EOUhvZUF3UFRGWkRDREFBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDY2MzU5CWZpbGU6QVNOXzAuMS44M194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjgzCmdOWGZqK1J3RVI0OGpUTzVLYkhxS2dNcS9CY1FBbzZiM2RKc3ZIdlRYWEhOUjBMV1IrakVMRVhlYkdZSDZoV1FNTkpZUzZacG5jTVFRakg3Q29TWkRRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.83_x64-setup.exe"
     }
   }
 }

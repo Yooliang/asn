@@ -50,7 +50,7 @@
     </ul>
     <div class="table-wrap">
       <table class="matrix">
-        <caption>各家 AI 與各項管理功能的現況（依 2026 年 10 月 27 日的主線程式（0.1.82）與議題整理；各格的版本與驗證狀態以格內文字為準）</caption>
+        <caption>各家 AI 與各項管理功能的現況（依 2026 年 10 月 27 日的主線程式（0.1.83）與議題整理；各格的版本與驗證狀態以格內文字為準）</caption>
         <thead><tr><th scope="col">AI</th><th scope="col">開啟</th><th scope="col">關閉</th><th scope="col">接手</th><th scope="col">切換模型</th><th scope="col">群組聊天</th><th scope="col">帳號切換</th><th scope="col">備註與限制</th></tr></thead>
         <tbody>
         <tr>
@@ -383,6 +383,12 @@
     <div class="releases">
 <!-- changelog:start（由 site/make-roadmap-page.mjs 產生，不要手改） -->
       <article class="glass release">
+        <h3>0.1.83<span class="date">2026-10-27</span></h3>
+        <ul>
+          <li>新增：電腦版「終端」圖示常駐，沒有終端時也能進「接手既有視窗…」。修正：電腦端往終端送字時，按返回、關閉或換終端會撤回手機上的待確認；改字再送會先撤回舊的；只動送字，不影響手機上等你回答的代答請求。</li>
+        </ul>
+      </article>
+      <article class="glass release">
         <h3>0.1.82<span class="date">2026-10-27</span></h3>
         <ul>
           <li>修正：電腦端往終端送字時，確認框打開就會同時傳到手機「待確認」頁，本人在手機按確認或拒絕（之前只有代答會傳到手機）。</li>
@@ -434,12 +440,6 @@
         <h3>0.1.74<span class="date">2026-10-26</span></h3>
         <ul>
           <li>名單帶視窗是否隱藏（隱藏的 CLI 視窗第二行寫「背景運行」）、內建通道字樣改「背景運行、內建通道」、背景工作者的名單帶對話編號、接手 Grok 時沒有現成底也能用開新夥伴的設定、設備分組照設備順序、名單不再顯示（前景）（背景）字樣</li>
-        </ul>
-      </article>
-      <article class="glass release">
-        <h3>0.1.73<span class="date">2026-10-26</span></h3>
-        <ul>
-          <li>修正手機「⋯」選單：反灰項目的說明文字不再長出框、疊到下一列標題上</li>
         </ul>
       </article>
       <!-- changelog:end -->
