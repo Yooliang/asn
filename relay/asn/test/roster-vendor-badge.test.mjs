@@ -18,14 +18,15 @@ test('共用：pi 照 model 換成背後廠商的圖，對不到用 pi 的圖；
   assert.equal(mobile.vendorBadgeHtml, vendorBadgeHtml, '手機沿用同一支')
 })
 
-test('電腦版名單與對話視窗：廠商小圖疊在頭像右下角（#336，裝飾用、不念），用 vendorBadge', () => {
+test('電腦版名單與對話視窗：廠商小圖放在頭像右邊（#336，裝飾用、不念），用 vendorBadge', () => {
   const html = read('list.html'), js = read('list.js'), pane = read('lib/chatpane.mjs'), css = read('style.css')
   assert.match(html, /<span class="avb xs"[^>]*><span class="dp xs"[^>]*><span><img :src="avOf\(c\)" alt=""><\/span><\/span><span class="avb-v" aria-hidden="true" v-html="vendorBadge\(c\)"><\/span><\/span>/, '名單每列')
   assert.ok(!html.includes('class="b-vendor"'), '名字前不再放一顆')
   assert.ok(html.includes('v-html="vendorBadge(r)"') && html.includes('v-html="vendorBadge(t)"'), '終端列、釘選分頁也有')
   assert.match(js, /vendorBadge: vendorBadgeHtml,/)
   for (const s of ['class="avb xs to-av"', 'class="avb xl"', 'vendorBadge: vendorBadgeHtml,']) assert.ok(pane.includes(s), `對話視窗缺 ${s}`)   // 上方、側欄大頭、訊息旁
-  assert.match(css, /\.avb-v\{position:absolute;right:-4px;bottom:-4px/, '固定右下角')
+  assert.match(css, /\.avb\{display:inline-flex;flex:none;align-items:center;gap:3px/, '小圖在頭像右邊、左右並排（小良哥 #725）')
+  assert.ok(!/\.avb-v\{[^}]*position:absolute/.test(css), '不疊在頭像上')
   assert.match(css, /\.avb\.off \.avb-v\{opacity:\.6;filter:grayscale\(1\)\}/, '離線整顆灰階')
 })
 
