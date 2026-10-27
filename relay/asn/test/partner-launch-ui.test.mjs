@@ -154,3 +154,16 @@ test('開新夥伴是三頁精靈（#351）：「＋」只留「新增夥伴…�
   assert.ok(step1.includes('@keydown="partnerDevKey"') && /function partnerDevKey\(e\)[\s\S]*?filter\(k => !launchDisableReasonFor\(k\)\)/.test(js), '設備清單能用方向鍵選，跳過不能開的')
   assert.ok(!js.includes('function pickLaunchDevice('), '舊的「選單先選設備」入口已拿掉')
 })
+
+test('開新夥伴精靈的小修（#378 截圖）：「進階」不重複、沒選到設備時不顯示空的設備段、截圖不硬切頁', () => {
+  const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
+  const js = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
+  const run = html.slice(html.indexOf('class="partner-run"'), html.indexOf('</fieldset>', html.indexOf('class="partner-run"')))
+  assert.ok(!run.includes('ch-adv'), '「進階」已寫在運行選項的文字裡，不再另加標籤')
+  const node = html.split('\n').find(l => l.includes('class="partner-node"') && l.includes('partnerDlg.deviceLabel'))
+  assert.ok(node && node.includes('partnerDlg.node &amp;&amp;') && node.includes('&amp;&amp; partnerDlg.deviceLabel"'), '「設備：」要有選到設備且有名稱才顯示')
+  const sum = html.split('\n').find(l => l.includes('class="partner-sum"'))
+  assert.ok(sum && sum.includes('<template v-if="partnerDlg.node &amp;&amp; partnerDlg.node !== selfNode &amp;&amp; partnerDlg.deviceLabel">'), '摘要的設備段沒有名稱就不顯示（不留尾巴的「・」）')
+  assert.match(js, /partnerDlg\.deviceLabel = friends\.value\.find\(f => f\.node === nodeKey\)\?\.device \|\| nodeKey/, '裝置名稱是空字串也退回節點代號')
+  assert.match(js, /if \(partnerDlg\.node\) for \(const n of \[2, 3\]\)/, '截圖沒選到設備就不切到第 2、3 頁')
+})
