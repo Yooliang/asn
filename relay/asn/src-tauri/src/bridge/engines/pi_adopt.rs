@@ -324,16 +324,22 @@ mod tests {
 
     #[test]
     fn 命令列指定路徑_要是對話資料夾裡的檔() {
-        let files = [sf("D:/pi/sessions/--C--p--", ID1, T0 - 5000), sf("D:/pi/sessions/--C--q--", ID2, T0 - 9000)];
+        // 絕對路徑用 temp_dir 組：D:/ 在 Linux 不算絕對路徑，會被當成相對路徑接到工作資料夾後面
+        let root = std::env::temp_dir().join("pi").join("sessions");
+        let dir = |d: &str| root.join(d).to_string_lossy().replace('\\', "/");
+        let files = [sf(&dir("--C--p--"), ID1, T0 - 5000), sf(&dir("--C--q--"), ID2, T0 - 9000)];
         let h = hdr(&[(ID1, "C:/p"), (ID2, "C:/q")]);
-        let abs = format!("D:/pi/sessions/--C--p--/2026-10-25T06-33-07-927Z_{ID1}.jsonl");
+        let abs = format!("{}/2026-10-25T06-33-07-927Z_{ID1}.jsonl", dir("--C--p--"));
         let got = resolve(&facts(&v(&["pi", "--session", &abs]), Some("C:/other"), Some(T0), 3), &files, &h).unwrap();
         assert_eq!((got.session_id.as_str(), got.cwd.as_str(), got.via), (ID1, "C:/p", Via::Arg), "指定的就用，不管 cwd、不管別的 pi、不管修改時間");
-        // 大小寫與斜線不同也認
-        let upper = abs.replace('/', "\\").to_uppercase();
-        assert!(resolve(&facts(&v(&["pi", &format!("--session={upper}")]), None, None, 0), &files, &h).is_ok());
+        // 大小寫與斜線不同也認（只有 Windows 的路徑不分大小寫）
+        if cfg!(windows) {
+            let upper = abs.replace('/', "\\").to_uppercase();
+            assert!(resolve(&facts(&v(&["pi", &format!("--session={upper}")]), None, None, 0), &files, &h).is_ok());
+        }
         // 不在對話資料夾裡的檔（例如 /etc/passwd 或別處的檔案）一律不接手，也不去讀它
-        let e = resolve(&facts(&v(&["pi", "--session", "D:/secret/auth.json"]), None, None, 0), &files, &|_: &Path| panic!("不該讀")).unwrap_err();
+        let secret = std::env::temp_dir().join("secret").join("auth.json").to_string_lossy().to_string();
+        let e = resolve(&facts(&v(&["pi", "--session", &secret]), None, None, 0), &files, &|_: &Path| panic!("不該讀")).unwrap_err();
         assert!(e.contains("不在 pi 的對話資料夾"), "{e}");
     }
 

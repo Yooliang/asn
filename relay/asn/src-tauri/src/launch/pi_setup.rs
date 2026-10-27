@@ -621,10 +621,14 @@ mod tests {
 
     #[test]
     fn 相對路徑_依_pi_設定資料夾解成絕對_其餘原樣() {
-        let base = Path::new(r"C:\Users\u\.pi\agent");
-        assert_eq!(norm(&resolve_entry(base, r"..\..\AppData\Local\ASN\pi-extension")), norm(r"C:\Users\u\AppData\Local\ASN\pi-extension"));
-        assert_eq!(norm(&resolve_entry(base, "../x/pi-extension")), norm(r"C:\Users\u\.pi\x\pi-extension"));
-        assert_eq!(norm(&resolve_entry(base, r".\local\pi-extension")), norm(r"C:\Users\u\.pi\agent\local\pi-extension"));
+        // 家目錄用 temp_dir 組（Linux 不認 C:\ 是絕對路徑）；相對路徑照真機寫法留反斜線，兩個平台都要解得開
+        let home = std::env::temp_dir().join("u");
+        let base = home.join(".pi").join("agent");
+        let base = base.as_path();
+        let at = |p: PathBuf| norm(&p.to_string_lossy());
+        assert_eq!(norm(&resolve_entry(base, r"..\..\AppData\Local\ASN\pi-extension")), at(home.join("AppData").join("Local").join("ASN").join("pi-extension")));
+        assert_eq!(norm(&resolve_entry(base, "../x/pi-extension")), at(home.join(".pi").join("x").join("pi-extension")));
+        assert_eq!(norm(&resolve_entry(base, r".\local\pi-extension")), at(home.join(".pi").join("agent").join("local").join("pi-extension")));
         for same in [r"C:\ASN\pi-extension", "npm:some-pkg", "git:github.com/a/b", "/opt/pi-extension"] {
             assert_eq!(resolve_entry(base, same), same, "{same}");
         }
@@ -633,8 +637,11 @@ mod tests {
     #[test]
     fn 設定裡存相對路徑_也認得是現在這個擴充_不會誤判沒裝或失效() {
         // 真機上 pi 存的就是這種相對於 pi 設定資料夾的寫法（#305）
-        let base = Path::new(r"C:\Users\u\.pi\agent");
-        let ext = Path::new(r"C:\Users\u\AppData\Local\ASN\pi-extension");
+        let home = std::env::temp_dir().join("u");
+        let base = home.join(".pi").join("agent");
+        let base = base.as_path();
+        let ext = home.join("AppData").join("Local").join("ASN").join("pi-extension");
+        let ext = ext.as_path();
         let text = r#"{"packages":["..\\..\\AppData\\Local\\ASN\\pi-extension"]}"#.to_string();
         let resolved = resolve_settings(base, text.clone()).unwrap();
         let st = compute_state(true, Some(ext), Some(&resolved), false, &exists_none);
