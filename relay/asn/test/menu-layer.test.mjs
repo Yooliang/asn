@@ -30,5 +30,5 @@ test('活躍度頁籤：活躍綠、閒置黃、離線一定是紅（用 lv-，�
 test('名單「已封存」群組裡的夥伴燈號一律灰，不管實際在不在線', () => {
   const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
   assert.ok(html.includes(`<asn-avatar :src="avOf(c)" :friend="c" :status="g.kind === 'archived' ? 'offline' : c.status" :off="c.status === 'offline'">`))
-  assert.match(css, /\.dp\.st-offline,\.dot\.st-offline\{--frame:var\(--offline\)\}/, '灰＝--offline')
+  assert.match(css, /\.dp\.st-offline,\.dot\.st-offline,\.dp\.st-stopped,\.dot\.st-stopped\{--frame:var\(--offline\)\}/, '灰＝--offline；已停止的工作者同樣是灰（0.2 B3）')
 })

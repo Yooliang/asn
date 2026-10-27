@@ -1366,6 +1366,13 @@ impl AcpAdmin for FakeAcp {
             None => Ok(json!({ "kind": "acp", "pid": 4321, "stopped": true })),
         }
     }
+    fn remove(&self, name: &str) -> Result<Value, String> {
+        self.calls.lock().unwrap().push(format!("remove {name}"));
+        if name == "Gemini" {
+            return Err("這位寫在這台電腦的 agents.json，不能從這裡移除；請在電腦上改設定檔".into());
+        }
+        Ok(json!({ "kind": "acp", "pid": 4321, "removed": true }))
+    }
     fn set_model(&self, name: &str, model: &str) -> Result<Value, String> {
         self.calls.lock().unwrap().push(format!("model {name} {model}"));
         if model == "grok-9" {
@@ -1525,6 +1532,26 @@ fn acp_切換模型_交給工作者比對清單_結果寫明有沒有重開_被�
     assert!(res.detail.contains("不在這個工作者可選的模型裡"), "{}", res.detail);
     assert_eq!(a.calls.lock().unwrap().len(), 3);
     assert!(r.terminated().is_empty() && r.launched().is_empty(), "不用名稱找程序、不開視窗");
+}
+
+#[test]
+fn acp_移除_交給工作者_被拒照實回_遠端開關關著不做_不是內建通道的回不支援() {
+    let r = rig(Opt::default());
+    let a = with_acp(&r, &["Gemini", "小葛"]);
+    let res = acp_run(&r, "remove", json!({}));
+    assert_eq!(res.status, "failed");
+    assert!(res.detail.contains("agents.json"), "{}", res.detail);
+    let res = r.run("remove", json!({ "name": "小葛" }));
+    assert_eq!((res.status, res.detail.as_str()), ("ok", "已移除：結束了工作者的程序，從名冊刪掉；工作資料夾的檔案留著"));
+    assert_eq!(*a.calls.lock().unwrap(), vec!["remove Gemini".to_string(), "remove 小葛".to_string()]);
+    let res = r.run("remove", json!({}));
+    assert_eq!((res.status, res.detail.as_str()), ("failed", UNSUPPORTED), "不是內建通道的工作者不能移除");
+    assert!(r.terminated().is_empty() && r.launched().is_empty());
+    // 遠端開關：動手前再驗一次（同 close）
+    let r2 = rig(Opt { allow_first: 1, ..Opt::default() });
+    let a2 = with_acp(&r2, &["小葛"]);
+    assert_eq!(r2.run("remove", json!({ "name": "小葛" })).detail, CONSENT_OFF);
+    assert!(a2.calls.lock().unwrap().is_empty(), "開關關了就不叫工作者");
 }
 
 #[test]

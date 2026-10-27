@@ -29,7 +29,7 @@ import { DISPLAY_ONLY_TAG, displayOnlyHint, isDisplayOnly } from './display-only
 import { keepScroll, olderNote, rearmed, wantsOlder } from './scrollback.mjs'
 
 const { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, reactive } = Vue
-const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯示為離線' }
+const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯示為離線', stopped: '已停止' }
 
 export const ChatPane = {
   name: 'ChatPane',
@@ -344,12 +344,16 @@ export const ChatPane = {
       <div class="to-line" :class="{ 'is-offline': !isRoom && friend.status === 'offline' }"><asn-avatar class="to-av" v-if="!isRoom" :src="friendAv" :friend="friend" :status="friend.status" :hue="friend.hue"></asn-avatar><span v-html="emo(friend.nick)"></span>
         <span class="to-psm" v-if="friend.psm" v-html="emo(friend.psm)"></span>
         <span class="to-busy to-readonly" v-if="displayOnly">{{ DISPLAY_ONLY_TAG }}</span>
-        <span class="to-busy" v-if="warn && warn !== 'offline'">{{ STATUS[friend.status] }}，可能無法馬上回應</span>
+        <span class="to-busy" v-if="warn && warn !== 'offline' && warn !== 'stopped'">{{ STATUS[friend.status] }}，可能無法馬上回應</span>
       </div>
       <confirm-cards v-if="isRoom" :cards="roomCards" @decide="(id, ok) => $emit('group-decide', id, ok)"></confirm-cards>
       <div class="warn" v-if="warn === 'offline'">
         <i>i</i>
         <span>{{ plain(friend.nick) }} 目前離線，訊息會先留在 ASN，對方上線後才收得到。</span>
+      </div>
+      <div class="warn" v-if="warn === 'stopped'">
+        <i>i</i>
+        <span>{{ plain(friend.nick) }} 已停止，寄來的信不會處理（會收到一則說明）。要恢復請在夥伴管理按「重開」。</span>
       </div>
       <div class="msgs" ref="msgsEl" aria-live="polite" @scroll.passive="onScroll">
         <div class="older-note" v-if="noteText">{{ noteText }}</div>

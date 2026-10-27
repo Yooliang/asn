@@ -29,12 +29,13 @@ export const withoutAsn = friends => (Array.isArray(friends) ? friends : []).fil
 export const expectsReplyTo = f => !isAsnWindow(f)
 export const showsWaiting = f => Boolean(f?.waiting) && !isAsnWindow(f)
 
-// 後端回報的視窗狀態 → 介面狀態：busy/working/running 之類＝忙碌，waiting 之類（等人回應）＝暫離，其餘（idle…）＝線上；不在名單＝離線（由 mergeFriends 決定）
+// 後端回報的視窗狀態 → 介面狀態：busy/working/running 之類＝忙碌，waiting 之類（等人回應）＝暫離，stopped＝已停止（內建通道的工作者被「關閉」，0.2 B3），
+// 其餘（idle…）＝線上；不在名單＝離線（由 mergeFriends 決定）
 const BUSY = new Set(['busy', 'working', 'running', 'thinking'])
 const AWAY = new Set(['waiting', 'away', 'blocked', 'paused'])
 export function statusOf(raw) {
   const s = String(raw ?? '').trim().toLowerCase()
-  return BUSY.has(s) ? 'busy' : AWAY.has(s) ? 'away' : 'online'
+  return BUSY.has(s) ? 'busy' : AWAY.has(s) ? 'away' : s === 'stopped' ? 'stopped' : 'online'
 }
 
 // 舊存檔的個人訊息是「節點／資料夾」或單獨節點名；設備已由頁籤表示，只留資料夾

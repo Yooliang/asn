@@ -982,7 +982,7 @@ async fn acp_遠端管理_正在處理信件時不重開_不換手_程序沒被�
 }
 
 #[tokio::test]
-async fn acp_遠端管理_關閉只結束帳本上的程序_名單看不到_不收信_重開恢復() {
+async fn acp_遠端管理_關閉只結束帳本上的程序_名單標已停止_不收信_重開恢復() {
     let mut h = eh(Some(json!([worker("Gemini", "acp", json!({}))])), &[], "acp", &[]).await;
     let admin = h.set.acp_admin().unwrap();
     h.put_pull(to_agent(1, "Gemini", "one")).await;
@@ -998,16 +998,18 @@ async fn acp_遠端管理_關閉只結束帳本上的程序_名單看不到_不�
     }
     assert!(!crate::heartbeat::pid_alive(pid as u32), "程序真的結束了");
     h.set.refresh_all().await;
-    assert!(h.set.windows().iter().all(|w| w.name != "Gemini"), "關閉後名單上看不到");
+    let st = |h: &EH| h.set.windows().iter().find(|w| w.name == "Gemini").and_then(|w| w.status.clone());
+    assert_eq!(st(&h).as_deref(), Some("stopped"), "關閉後留在名單、狀態是已停止（0.2 B3），才點得到重開");
+    assert_eq!(admin.info("Gemini").unwrap()["status"], json!("stopped"));
     assert!(admin.stop("Gemini").unwrap_err().contains("已經關閉"));
     h.put_pull(to_agent(2, "Gemini", "two")).await;
     h.wait("失敗通知", |h| h.fr.sent().len() == 2).await;
-    assert!(h.bodies()[1].contains("已被關閉") && !h.bodies()[1].contains("[第2輪"), "關閉後不處理信，寄件人收到說明：{}", h.bodies()[1]);
+    assert!(h.bodies()[1].contains("已被關閉") && h.bodies()[1].contains("重開") && !h.bodies()[1].contains("[第2輪"), "關閉後不處理信，寄件人收到說明：{}", h.bodies()[1]);
     // 重開恢復
     admin.restart("Gemini").unwrap();
     wait_pid(&admin, "Gemini", |_| true).await;
     h.set.refresh_all().await;
-    assert!(h.set.windows().iter().any(|w| w.name == "Gemini"), "重開後回到名單");
+    assert_eq!(st(&h).as_deref(), Some("idle"), "重開後狀態回到正常");
     h.put_pull(to_agent(3, "Gemini", "three")).await;
     h.wait("回覆", |h| h.fr.sent().len() == 3).await;
 }
@@ -1152,6 +1154,96 @@ async fn acp_切換模型_處理信件中直接拒絕不排隊_不記下來() {
     assert_eq!(admin.info("Grok").unwrap()["status"], json!("busy"));
     assert!(set_model_blocking(&admin, "Grok", "grok-4.6").await.unwrap_err().contains("正在處理信件，等它做完再試"));
     assert!(!h.work.path().join("acp-models.json").exists());
+}
+
+// ================================================================================================
+// 移除這個夥伴（B3）：只移除「開新夥伴」與接手開出來的；寫在 agents.json 的回說明、不改檔。工作資料夾的檔案留著
+// ================================================================================================
+
+async fn remove_blocking(admin: &Arc<dyn engines::acp_admin::AcpAdmin>, name: &str) -> Result<Value, String> {
+    let (a, n) = (admin.clone(), name.to_string());
+    tokio::task::spawn_blocking(move || a.remove(&n)).await.unwrap()
+}
+
+#[tokio::test]
+async fn acp_移除_寫在agents_json的拒絕並說明_不改檔_工作者照常() {
+    let mut h = eh(Some(json!([worker("Gemini", "acp", json!({}))])), &[], "acp", &[]).await;
+    let admin = h.set.acp_admin().unwrap();
+    let pid = wait_pid(&admin, "Gemini", |_| true).await;
+    let before = std::fs::read_to_string(h.work.path().join("agents.json")).unwrap();
+    let e = remove_blocking(&admin, "Gemini").await.unwrap_err();
+    assert!(e.contains("agents.json") && e.contains("請在電腦上改設定檔"), "{e}");
+    assert_eq!(std::fs::read_to_string(h.work.path().join("agents.json")).unwrap(), before, "設定檔一個字都沒改");
+    assert_eq!(wait_pid(&admin, "Gemini", |_| true).await, pid, "程序沒被結束");
+    h.put_pull(to_agent(1, "Gemini", "一")).await;
+    h.wait("回覆", |h| h.fr.sent().len() == 1).await;
+}
+
+#[tokio::test]
+async fn acp_移除_名冊裡的工作者_結束程序_刪名冊與記下的模型_名單看不到_同名新夥伴不繼承模型_工作資料夾留著() {
+    let state = tempfile::tempdir().unwrap();
+    std::fs::write(state.path().join("sess-grok1.json"), r#"{"turns":2}"#).unwrap();
+    let st = state.path().display().to_string();
+    let mut h = eh(Some(json!([grok_base()])), &[("FAKE_ACP_STATE", &st), ("FAKE_ACP_LOAD", "1"), ("FAKE_ACP_MODELS", "grok-4.7,grok-4.6")], "acp", &[]).await;
+    let admin = h.set.acp_admin().unwrap();
+    let cwd = h.work.path().join("專案");
+    std::fs::create_dir_all(&cwd).unwrap();
+    std::fs::write(cwd.join("筆記.md"), "留著").unwrap();
+    let name = adopt_blocking(&admin, "sess-grok1", &cwd.display().to_string()).await.unwrap()["name"].as_str().unwrap().to_string();
+    let pid = wait_pid(&admin, &name, |_| true).await;
+    set_model_blocking(&admin, &name, "grok-4.6").await.unwrap();
+    assert_eq!(recorded_models(&h)["models"][&name], json!("grok-4.6"));
+    let r = remove_blocking(&admin, &name).await.unwrap();
+    assert_eq!((r["pid"].as_u64(), r["removed"].clone()), (Some(pid), json!(true)));
+    for _ in 0..100 {
+        if !crate::heartbeat::pid_alive(pid as u32) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(!crate::heartbeat::pid_alive(pid as u32), "程序真的結束了");
+    assert!(!admin.has_worker(&name), "工作者清單拿掉了");
+    h.set.refresh_all().await;
+    assert!(h.set.windows().iter().all(|w| w.name != name), "名單上看不到");
+    assert!(engines::acp_admin::read_adopted(&h.work.path().join("acp-adopted.json")).is_empty(), "接手名冊刪掉了");
+    assert!(recorded_models(&h)["models"].get(&name).is_none(), "記下的模型刪掉了");
+    assert_eq!(std::fs::read_to_string(cwd.join("筆記.md")).unwrap(), "留著", "工作資料夾的檔案留著");
+    assert!(h.set.windows().iter().any(|w| w.name == "Grok"), "其他工作者不動");
+    // 同名的新夥伴（再接手一次同一個資料夾）用預設模型，不繼承舊的
+    let again = adopt_blocking(&admin, "sess-grok1", &cwd.display().to_string()).await.unwrap();
+    assert_eq!(again["name"].as_str(), Some(name.as_str()));
+    wait_pid(&admin, &name, |_| true).await;
+    assert_eq!(admin.info(&name).unwrap()["model"], json!("grok-4.7"), "沒有繼承移除前記下的模型");
+    // 重開 ASN 後，被移除的不會回來（只回來重新接手的那一個）
+    remove_blocking(&admin, &name).await.unwrap();
+    h.restart().await;
+    let admin = h.set.acp_admin().unwrap();
+    assert!(!admin.has_worker(&name), "移除後重開 ASN 也不會回來");
+}
+
+#[tokio::test]
+async fn acp_移除_處理信件中拒絕_什麼都不動() {
+    let state = tempfile::tempdir().unwrap();
+    std::fs::write(state.path().join("sess-grok1.json"), r#"{"turns":2}"#).unwrap();
+    let st = state.path().display().to_string();
+    let mut h = eh(Some(json!([grok_base()])), &[("FAKE_ACP_STATE", &st), ("FAKE_ACP_LOAD", "1")], "acp", &[]).await;
+    let admin = h.set.acp_admin().unwrap();
+    let cwd = h.work.path().join("專案");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let name = adopt_blocking(&admin, "sess-grok1", &cwd.display().to_string()).await.unwrap()["name"].as_str().unwrap().to_string();
+    wait_pid(&admin, &name, |_| true).await;
+    h.set.refresh_all().await;
+    h.core.refresh_roster(now()).await;
+    h.put_pull(to_agent(1, &name, "@@SLEEP")).await;
+    for _ in 0..600 {
+        if admin.info(&name).unwrap()["status"] == json!("busy") {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    }
+    assert!(remove_blocking(&admin, &name).await.unwrap_err().contains("正在處理信件"));
+    assert!(admin.has_worker(&name));
+    assert_eq!(engines::acp_admin::read_adopted(&h.work.path().join("acp-adopted.json")).len(), 1, "名冊沒動");
 }
 
 // ================================================================================================

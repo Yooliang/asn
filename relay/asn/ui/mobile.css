@@ -63,7 +63,7 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 /* （不能叫 .m-av：那是 ChatPane 訊息旁頭像的類別名） */
 .m-pic{--frame:var(--online);flex:none;display:block;width:44px;height:44px;max-width:44px;max-height:44px;object-fit:cover;border-radius:8px;border:3px solid var(--frame);background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3)}
 .m-pic-lg{width:112px;height:112px;max-width:112px;max-height:112px;border-width:4px;border-radius:16px}
-.m-pic.st-busy{--frame:var(--busy)} .m-pic.st-away{--frame:var(--away)} .m-pic.st-offline{--frame:var(--offline);filter:grayscale(.65)}
+.m-pic.st-busy{--frame:var(--busy)} .m-pic.st-away{--frame:var(--away)} .m-pic.st-offline,.m-pic.st-stopped{--frame:var(--offline);filter:grayscale(.65)}
 .m-conn-tx{min-width:0;overflow:hidden;text-overflow:ellipsis}
 /* 滿版：左右不留外框與外距，內容直接貼齊螢幕寬 */
 .m-scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;margin:0;background:var(--panel);border:0;border-top:1px solid var(--line);border-radius:0}

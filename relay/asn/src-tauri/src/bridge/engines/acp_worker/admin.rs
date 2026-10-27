@@ -84,7 +84,11 @@ impl Worker {
             cwd: cfg.cwd.to_string_lossy().to_string(),
             process_running: d.as_ref().map(|d| d.alive()).unwrap_or(false),
             pid: d.as_ref().filter(|d| d.alive()).map(|d| d.pid()).unwrap_or(0),
-            status: if self.status() == "busy" { "busy" } else { status },
+            status: match self.status() {
+                "busy" => "busy",
+                "stopped" => "stopped",
+                _ => status,
+            },
             has_session: !self.i.store.get(cfg).is_empty(),
             load_session: d.as_ref().and_then(|d| d.load_session()),
         }
@@ -147,6 +151,24 @@ impl Worker {
         self.i.approvals.cancel_all(&self.i.cfg.name);
         self.log(format!("遠端管理：關閉（結束程序 pid={pid}，本次執行不再收信）"));
         let _ = self.i.events.send(crate::bridge::engines::EngineEvent::RosterChanged);
+        Ok(pid)
+    }
+
+    /// 移除（給 acp_admin 用；名冊與記下的模型由呼叫端刪）：正在處理信件就拒絕；結束驅動程序、不再收信、取消等著的授權、清掉對話編號。
+    /// 之後這個工作者就從工作者清單拿掉，不會再啟動。回被結束的 pid（本來就沒在跑 0）
+    pub fn admin_remove(self: &Arc<Self>) -> Result<u32, String> {
+        let (pid, d) = self.take_driver_for_admin()?;
+        {
+            let mut s = self.st.lock().unwrap();
+            s.admin_stopped = true;
+            s.stopping = true;
+        }
+        if let Some(d) = d {
+            d.stop();
+        }
+        self.i.approvals.cancel_all(&self.i.cfg.name);
+        self.i.store.clear(&self.i.cfg);
+        self.log(format!("遠端管理：移除（結束程序 pid={pid}，對話編號已清掉；工作資料夾的檔案留著）"));
         Ok(pid)
     }
 

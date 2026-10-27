@@ -157,6 +157,19 @@ pub fn remember(file: &Path, name: &str, profile: &str, cwd: &str) {
     let _ = crate::write_atomic(file, &json!({ "version": 1, "partners": arr }).to_string());
 }
 
+/// 從名冊刪掉一筆（遠端管理「移除」；名字不分大小寫）。其餘各筆原樣保留（含建立時間）；名冊裡本來就沒有＝成功
+pub fn forget(file: &Path, name: &str) -> Result<(), String> {
+    let Ok(t) = std::fs::read_to_string(file) else { return Ok(()) };
+    let mut v: Value = serde_json::from_str(&t).map_err(|e| format!("名冊讀不懂：{e}"))?;
+    let Some(arr) = v.get_mut("partners").and_then(Value::as_array_mut) else { return Ok(()) };
+    let before = arr.len();
+    arr.retain(|e| !e.get("name").and_then(Value::as_str).is_some_and(|n| n.eq_ignore_ascii_case(name)));
+    if arr.len() == before {
+        return Ok(());
+    }
+    crate::write_atomic(file, &v.to_string()).map_err(|e| format!("名冊寫不進去：{e}"))
+}
+
 /// 名冊每筆的建立時間（毫秒；舊檔沒有就是 0），鍵是小寫名字
 fn read_at_map(file: &Path) -> std::collections::HashMap<String, u64> {
     let Ok(t) = std::fs::read_to_string(file) else { return Default::default() };

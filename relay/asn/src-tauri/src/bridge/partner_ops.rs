@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-const KNOWN_OPS: [&str; 7] = ["info", "rename", "model", "close", "handover", "resume", "restart"];
+const KNOWN_OPS: [&str; 8] = ["info", "rename", "model", "close", "handover", "resume", "restart", "remove"];
 pub(crate) const DETAIL_MAX: usize = 500;
 pub(crate) const RESULT_MAX_BYTES: usize = 4096;
 pub(crate) const CONSENT_OFF: &str = "這台電腦沒有開啟「允許遠端開視窗與管理視窗」";
@@ -386,7 +386,7 @@ impl PartnerOps {
         self.acp.lock().unwrap().clone()
     }
 
-    /// 名字對得上收發室管理的 ACP 工作者：只支援詳情、重開、接班換手、關閉（停止本次執行）、切換模型，其餘回「這類夥伴不支援」。
+    /// 名字對得上收發室管理的 ACP 工作者：只支援詳情、重開、接班換手、關閉（停止本次執行）、切換模型、移除，其餘回「這類夥伴不支援」。
     /// 動的是工作者驅動記錄在案的 pid，不找程序、不比對名稱；同名的 Claude 視窗還活著時不猜
     fn execute_acp(&self, op: &Op, acp: &dyn AcpAdmin) -> OpResult {
         if (self.protect)(&op.name, 0) {
@@ -401,7 +401,7 @@ impl PartnerOps {
                 Some(r) => ok("", Some(r)),
                 None => failed("找不到這個工作者"),
             },
-            "restart" | "handover" | "close" | "model" => {
+            "restart" | "handover" | "close" | "model" | "remove" => {
                 // 守門 4：動手前再驗一次本機開關
                 if !self.env.allow_remote() {
                     return failed(CONSENT_OFF);
@@ -417,10 +417,17 @@ impl PartnerOps {
                         Err(e) => failed(e),
                     };
                 }
+                if op.op == "remove" {
+                    self.stage(op, "closing");
+                    return match acp.remove(&op.name) {
+                        Ok(r) => ok("已移除：結束了工作者的程序，從名冊刪掉；工作資料夾的檔案留著", Some(r)),
+                        Err(e) => failed(e),
+                    };
+                }
                 if op.op == "close" {
                     self.stage(op, "closing");
                     return match acp.stop(&op.name) {
-                        Ok(r) => ok("已結束工作者的程序，本次不再收信；重啟 ASN 後恢復（沒有改任何設定檔）", Some(r)),
+                        Ok(r) => ok("已結束工作者的程序，本次不再收信；名單上顯示「已停止」，按「重開」或重啟 ASN 後恢復（沒有改任何設定檔）", Some(r)),
                         Err(e) => failed(e),
                     };
                 }
@@ -666,7 +673,7 @@ impl PartnerOps {
         if self.is_pi_window(&op.name) {
             return self.execute_pi(op);
         }
-        if op.op == "restart" {
+        if op.op == "restart" || op.op == "remove" {
             return failed(UNSUPPORTED);
         }
         if op.op == "resume" {

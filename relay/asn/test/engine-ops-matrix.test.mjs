@@ -43,14 +43,14 @@ test('現況：不能用的項目都有寫明原因（Codex＝尚未實機驗證
   assert.equal(ok(P('Gemini', 'gemini', { kind: undefined }), 'model').reason, '', '內建通道的工作者可以切換模型（0.2 B4）')
 })
 
-test('現況：電腦端（partner_ops.rs）——非 Claude 的關閉與切換模型根本找不到對象；ACP 工作者做五件事（含停止、切換模型）', () => {
+test('現況：電腦端（partner_ops.rs）——非 Claude 的關閉與切換模型根本找不到對象；ACP 工作者做六件事（含停止、切換模型、移除）', () => {
   const rs = fs.readFileSync(new URL('../src-tauri/src/bridge/partner_ops.rs', import.meta.url), 'utf8')
   assert.match(rs, /"close" => self\.close\(&target\)/)
   assert.match(rs, /"model" => self\.model\(op, target\)/)
   assert.match(rs, /找不到這個夥伴的 Claude 視窗/, 'find_target 只認 Claude 的 sessions 檔')
   assert.match(rs, /_ => failed\(UNSUPPORTED\)/, 'ACP 工作者其餘動作回「這類夥伴不支援」')
   const admin = fs.readFileSync(new URL('../src-tauri/src/bridge/engines/acp_admin.rs', import.meta.url), 'utf8')
-  assert.match(admin, /管詳情、重開、接班換手、關閉（停止本次執行，不改設定檔）、切換模型五件事；改名、喚醒不支援/)
+  assert.match(admin, /管詳情、重開、接班換手、關閉（停止本次執行，不改設定檔）、切換模型、移除六件事；改名、喚醒不支援/)
   assert.match(rs, /acp\.set_model\(&op\.name, op\.model\.trim\(\)\)/, 'ACP 工作者的切換模型交給工作者比對可選清單')
 })
 

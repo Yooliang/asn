@@ -59,14 +59,15 @@ test('接手完成：說明專屬工作者載入了同一段對話並提醒先�
   assert.match(progressView({ status: 'failed', detail: '找不到這個 grok 正在用的對話，所以不接手' }, { op: 'handover' }).text, /沒有成功：找不到這個 grok/)
 })
 
-test('選單固定七項（詳情、改名、切換模型、關閉視窗、接班換手、喚醒、重開）；在線的 Claude 視窗前五項能用，喚醒與重開反灰並說明', () => {
+test('選單固定八項（詳情、改名、切換模型、關閉視窗、接班換手、喚醒、重開、移除）；在線的 Claude 視窗前五項能用，喚醒、重開、移除反灰並說明', () => {
   const items = menuItems(W('H', '小文'), ctx)
   assert.deepEqual(items.map(i => i.key), MENU_KEYS)
   assert.deepEqual(MENU_KEYS, OPS)
-  assert.deepEqual(items.map(i => i.label), ['詳情', '改名', '切換模型', '關閉視窗', '接班換手', '喚醒', '重開'])
-  assert.deepEqual(items.map(i => i.ok), [true, true, true, true, true, false, false])
+  assert.deepEqual(items.map(i => i.label), ['詳情', '改名', '切換模型', '關閉視窗', '接班換手', '喚醒', '重開', '移除'])
+  assert.deepEqual(items.map(i => i.ok), [true, true, true, true, true, false, false, false])
   assert.equal(items[5].reason, REASON.alreadyOnline)
   assert.equal(items[6].reason, REASON.restartOnlyAcp)
+  assert.equal(items[7].reason, REASON.removeOnlyAcp)
   assert.ok(items.filter(i => i.ok).every(i => i.reason === ''))
   assert.deepEqual(items.filter(i => i.ok).map(i => i.key), ONLINE_OPS, '可用的項目和原本完全相同')
 })
@@ -96,13 +97,14 @@ test('不能用就反灰並給中文原因：沒登入、離線、沒開放（�
   for (const i of menuItems(W('H', 'a'), ctx)) assert.ok(!/[A-Za-z]{4,}/.test(i.label) && !/[A-Za-z]{4,}/.test(i.reason), `純中文：${i.label} ${i.reason}`)
 })
 
-test('離線的 Claude 視窗只有「喚醒」能用（要登入、電腦在線且開放）；其餘六項固定顯示但反灰，說明這個視窗已離線', () => {
+test('離線的 Claude 視窗只有「喚醒」能用（要登入、電腦在線且開放）；其餘七項固定顯示但反灰，說明這個視窗已離線', () => {
   const off = (node, extra = {}) => W(node, '小離', { status: 'offline', ...extra })
   const all = menuItems(off('H'), ctx)
   assert.deepEqual(all.map(i => i.key), MENU_KEYS, '離線也是同一套項目')
   assert.deepEqual(all.filter(i => i.ok).map(i => [i.key, i.label, i.reason]), [['resume', '喚醒', '']])
-  for (const i of all.filter(x => x.key !== 'resume' && x.key !== 'restart')) assert.match(i.reason, /已離線.*喚醒/, i.key)
+  for (const i of all.filter(x => !['resume', 'restart', 'remove'].includes(x.key))) assert.match(i.reason, /已離線.*喚醒/, i.key)
   assert.equal(all.find(i => i.key === 'restart').reason, REASON.restartOnlyAcp, '重開對 Claude 視窗永遠不適用，說明這個比「已離線」準確')
+  assert.equal(all.find(i => i.key === 'remove').reason, REASON.removeOnlyAcp, '移除同理')
   const one = (f, c = ctx) => menuItems(f, c).filter(i => i.key === 'resume').map(i => [i.key, i.ok, i.reason])
   assert.deepEqual(one(off('H'), { ...ctx, signedIn: false }), [['resume', false, REASON.needLogin]])
   assert.deepEqual(one(off('W')), [['resume', false, REASON.deviceOffline]], '電腦離線')
@@ -245,7 +247,7 @@ test('守門：手機指令清單有兩個簽章指令；沒有電腦端指令�
   assert.match(read('..', '..', 'supabase', 'functions', 'relay', 'index.ts'), /action === "partner_op" \|\| action === "partner_ops" \|\| action === "partner_archive"\) \? await signedUserId/)
 })
 
-test('依引擎決定哪幾項能用（項目一律固定七項）：Claude 前五項；ACP 工作者詳情、切換模型、關閉、重開、接班換手；雲端代理與其他引擎全部反灰並說明', () => {
+test('依引擎決定哪幾項能用（項目一律固定八項）：Claude 前五項；ACP 工作者詳情、切換模型、關閉、重開、接班換手、移除；雲端代理與其他引擎全部反灰並說明', () => {
   const keys = f => menuItems(f, ctx).map(i => i.key)
   const okKeys = f => menuItems(f, ctx).filter(i => i.ok).map(i => i.key)
   assert.deepEqual(keys(W('H', '小文')), MENU_KEYS)
@@ -254,8 +256,8 @@ test('依引擎決定哪幾項能用（項目一律固定七項）：Claude 前�
   for (const engine of ['gemini', 'agy', 'acp', 'Gemini']) {
     const items = menuItems(W('H', 'Gemini', { engine, kind: 'claude' }), ctx)
     assert.deepEqual(items.map(i => i.key), MENU_KEYS, engine)
-    assert.deepEqual(items.filter(i => i.ok).map(i => i.key), ['info', 'model', 'close', 'handover', 'restart'], engine)
-    assert.deepEqual(items.filter(i => i.ok).map(i => i.label), ['詳情', '切換模型', '關閉', '接班換手', '重開'])
+    assert.deepEqual(items.filter(i => i.ok).map(i => i.key), ['info', 'model', 'close', 'handover', 'restart', 'remove'], engine)
+    assert.deepEqual(items.filter(i => i.ok).map(i => i.label), ['詳情', '切換模型', '關閉', '接班換手', '重開', '移除'])
     const why = Object.fromEntries(items.filter(i => !i.ok).map(i => [i.key, i.reason]))
     assert.equal(new Set(Object.values(why)).size, 2, '兩項說明逐案不同')
     assert.ok(Object.values(why).every(r => !/[A-Za-z]{4,}/.test(r.replace(/ASN/g, ''))), '原因不夾英文')
@@ -277,7 +279,7 @@ test('ACP 工作者的項目也受登入、開放、離線的條件管；離線�
   const g = (node, extra = {}) => W(node, 'Gemini', { engine: 'gemini', ...extra })
   const sel = items => items.filter(i => ACP_OPS.includes(i.key))
   const closed = sel(menuItems(g('C'), ctx))
-  assert.deepEqual(closed.map(i => [i.key, i.ok]), [['info', true], ['model', false], ['close', false], ['handover', false], ['restart', false]], '沒開放：只有詳情能用')
+  assert.deepEqual(closed.map(i => [i.key, i.ok]), [['info', true], ['model', false], ['close', false], ['handover', false], ['restart', false], ['remove', false]], '沒開放：只有詳情能用')
   assert.equal(closed[1].reason, REASON.closed)
   assert.equal(closed[2].reason, REASON.closed)
   assert.equal(closed[3].reason, REASON.closed)

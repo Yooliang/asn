@@ -4,13 +4,15 @@
 import { NAME_RE } from './mobile-launch.mjs'
 import { isRelayRoom } from './roster.mjs'
 
-export const OPS = ['info', 'rename', 'model', 'close', 'handover', 'resume', 'restart']
+export const OPS = ['info', 'rename', 'model', 'close', 'handover', 'resume', 'restart', 'remove']
 // Claude 視窗：在線的五項；離線的只有「喚醒」
 export const ONLINE_OPS = ['info', 'rename', 'model', 'close', 'handover']
 // ACP 工作者（Gemini 等收發室自己跑的背景工作者）：詳情、切換模型、關閉（只停止本次執行，不改設定檔）、重開、接班換手；改名、喚醒電腦端會回「這類夥伴不支援」，所以反灰。
-// 切換模型（0.2 B4）：Grok 用原生切換不重開；Gemini（agy）帶同一段對話重開。舊版電腦端會回「這類夥伴不支援」
-export const ACP_OPS = ['info', 'model', 'close', 'restart', 'handover']
-export const OP_LABEL = { info: '詳情', rename: '改名', model: '切換模型', close: '關閉視窗', handover: '接班換手', resume: '喚醒', restart: '重開' }
+// 切換模型（0.2 B4）：Grok 用原生切換不重開；Gemini（agy）帶同一段對話重開。移除（0.2 B3）：只移除「開新夥伴」與接手開出來的。舊版電腦端會回「這類夥伴不支援」
+export const ACP_OPS = ['info', 'model', 'close', 'restart', 'handover', 'remove']
+// 已停止（被「關閉」、名單上留著）的工作者：只能看詳情、重開、移除
+export const ACP_STOPPED_OPS = ['info', 'restart', 'remove']
+export const OP_LABEL = { info: '詳情', rename: '改名', model: '切換模型', close: '關閉視窗', handover: '接班換手', resume: '喚醒', restart: '重開', remove: '移除' }
 export const NOTE_MAX = 1000
 export const MODEL_RE = /^[A-Za-z0-9._[\]-]{1,60}$/
 export const OP_POLL_MS = 3000
@@ -31,6 +33,7 @@ export const REASON = {
   otherEngine: '這位夥伴用的引擎尚未實機驗證，暫不開放從這裡管理視窗',
   alreadyOnline: '這個視窗在線上，不需要喚醒',
   restartOnlyAcp: '「重開」只用在 ASN 內建通道的工作者；一般視窗請用「接班換手」',
+  removeOnlyAcp: '「移除」只用在 ASN 內建通道的工作者；一般視窗請用「關閉視窗」，不用的夥伴可以封存',
 }
 // 背景工作者（ACP）用不到的項目的說明
 const ACP_WHY = {
@@ -46,6 +49,7 @@ const PI_WHY = {
   handover: '這是 pi 視窗，接班換手還沒開放',
   resume: '這是 pi 視窗，喚醒還沒開放（pi 沒有可接回的對話紀錄）',
   restart: REASON.restartOnlyAcp,
+  remove: REASON.removeOnlyAcp,
 }
 // pi 的模型代號：`模型` 或 `提供者/模型`。後台的模型欄位只收英數與 . _ [ ] -（1～60 字），所以送出時把「提供者/模型」寫成「提供者[模型]」，電腦端再還原
 const PI_PART_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$/
@@ -153,7 +157,7 @@ export function isManageable(friend, ctx = {}) {
 // 用不到的項目不隱藏，一律 ok:false，reason 寫明這一項為什麼不能用（逐案不同，只寫程式真的判斷得出的條件）。不是 AI 夥伴（人、手機、收發室）回空陣列。
 // 可用時的條件與原本完全相同：Claude 視窗在線＝詳情、改名、切換模型、關閉視窗、接班換手；Claude 視窗離線＝喚醒；背景工作者＝詳情、重開、接班換手。
 // ctx：{ machines（節點→設定）, loaded, signedIn, friends, asn, nonWindowNodes, supported（後台有沒有 partner_op；false＝舊後台） }
-export const MENU_KEYS = ['info', 'rename', 'model', 'close', 'handover', 'resume', 'restart']
+export const MENU_KEYS = ['info', 'rename', 'model', 'close', 'handover', 'resume', 'restart', 'remove']
 export function menuItems(friend, ctx = {}) {
   if (!isAiPartner(friend, ctx)) return []
   const engine = partnerEngine(friend)
@@ -181,10 +185,12 @@ function itemReason(key, friend, engine, offline, ctx) {
   if (engine === 'acp') {
     if (!ACP_OPS.includes(key)) return ACP_WHY[key]
     if (offline) return `這個內建通道的工作者已離線，現在不能「${label}」`
+    if (friend.status === 'stopped' && !ACP_STOPPED_OPS.includes(key)) return `這個工作者已停止，先按「重開」才能「${label}」`
     return gateReason(key, friend, ctx)
   }
   if (key === 'resume') return offline ? resumeReason(friend, ctx) : REASON.alreadyOnline
   if (key === 'restart') return REASON.restartOnlyAcp
+  if (key === 'remove') return REASON.removeOnlyAcp
   if (offline) return `這個視窗已離線，要先喚醒才能「${label}」`
   return gateReason(key, friend, ctx)
 }
@@ -331,7 +337,8 @@ export function progressView(row, { op = row?.op, sentAt = 0, now = Date.now() }
         v.extra = ['請先關掉終端機那個 grok（ASN 不會替你關）：兩邊同時用同一段對話可能互相覆蓋。']
         return v
       }
-      if (op === 'close' && row.result?.kind === 'acp') v.text = '工作者已關閉（本次執行；設定檔沒改）。重啟 ASN 後會恢復。'
+      if (op === 'close' && row.result?.kind === 'acp') v.text = '工作者已關閉（本次執行；設定檔沒改）。名單上顯示「已停止」，按「重開」或重啟 ASN 後會恢復。'
+      if (op === 'remove') v.text = '已移除：工作者的程序結束了，也從名冊刪掉；工作資料夾的檔案留著。'
       if (op === 'handover') { v.steps = stepsAt('', true); v.extra = handoverExtra(row.result) }
       return v
     }
@@ -359,7 +366,7 @@ export function progressView(row, { op = row?.op, sentAt = 0, now = Date.now() }
 // ---------- 詳情 ----------
 
 const ENGINE_TEXT = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', pi: 'Pi' }
-const STATUS_TEXT = { idle: '閒置', online: '閒置', busy: '忙碌', working: '忙碌', running: '忙碌', thinking: '忙碌', waiting: '等你回應', away: '等你回應', blocked: '等你回應', paused: '暫停' }
+const STATUS_TEXT = { idle: '閒置', online: '閒置', busy: '忙碌', working: '忙碌', running: '忙碌', thinking: '忙碌', waiting: '等你回應', away: '等你回應', blocked: '等你回應', paused: '暫停', stopped: '已停止' }
 const pad = n => String(n).padStart(2, '0')
 function timeText(v) {
   const d = new Date(typeof v === 'number' && v < 1e12 ? v * 1000 : v)

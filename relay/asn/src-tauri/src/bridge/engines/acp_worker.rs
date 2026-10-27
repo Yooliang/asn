@@ -191,7 +191,7 @@ struct St {
     queue: VecDeque<Job>,
     need_preamble: bool,
     stopping: bool,
-    /// 遠端管理按了「關閉」：驅動已結束、不再收信、名單上看不到；「重開」「接班換手」或 ASN 重啟後恢復。不改任何設定檔
+    /// 遠端管理按了「關閉」：驅動已結束、不再收信；名單上留著、狀態是「已停止」（stopped）。「重開」「接班換手」或 ASN 重啟後恢復。不改任何設定檔
     admin_stopped: bool,
     owner_notice_at: HashMap<&'static str, u64>,
     turn_grant: HashSet<String>,
@@ -282,7 +282,9 @@ impl Worker {
     }
     pub fn status(&self) -> &'static str {
         let s = self.st.lock().unwrap();
-        if s.running || !s.queue.is_empty() {
+        if s.admin_stopped {
+            "stopped"
+        } else if s.running || !s.queue.is_empty() {
             "busy"
         } else if s.health == Health::LoginRequired || s.health == Health::Quota {
             s.health.name()
@@ -290,9 +292,14 @@ impl Worker {
             "idle"
         }
     }
+    /// 名單上看得到嗎：起不來的不列；被「關閉」的照樣列（狀態「已停止」），才點得到「重開」「移除」
     pub fn listed(&self) -> bool {
         let s = self.st.lock().unwrap();
-        s.health != Health::Unavailable && !s.admin_stopped
+        s.health != Health::Unavailable || s.admin_stopped
+    }
+    /// 被遠端管理「關閉」了（本次執行不再收信）
+    pub fn admin_stopped(&self) -> bool {
+        self.st.lock().unwrap().admin_stopped
     }
 
     fn set_health(&self, next: Health, reason: &str) {
@@ -652,7 +659,7 @@ impl Worker {
     /// 收一封信排隊。排得進去就回報已轉交，並開始處理
     pub fn enqueue(self: &Arc<Self>, job: Job) {
         if self.st.lock().unwrap().admin_stopped {
-            let _ = self.i.events.send(EngineEvent::Fail(job.id, format!("{} 工作者已被關閉（在夥伴管理按了關閉），這封信沒有處理；重啟 ASN 後才會恢復", self.i.cfg.name)));
+            let _ = self.i.events.send(EngineEvent::Fail(job.id, format!("{} 工作者已被關閉（在夥伴管理按了關閉），這封信沒有處理；在夥伴管理按「重開」或重啟 ASN 後恢復", self.i.cfg.name)));
             return;
         }
         let (unavailable, reason, outstanding) = {
