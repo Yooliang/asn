@@ -50,7 +50,7 @@
     </ul>
     <div class="table-wrap">
       <table class="matrix">
-        <caption>各家 AI 與各項管理功能的現況（依 2026 年 10 月 27 日的主線程式（0.1.90）與議題整理；各格的版本與驗證狀態以格內文字為準）</caption>
+        <caption>各家 AI 與各項管理功能的現況（依 2026 年 10 月 27 日的主線程式（0.1.91）與議題整理；各格的版本與驗證狀態以格內文字為準）</caption>
         <thead><tr><th scope="col">AI</th><th scope="col">開啟</th><th scope="col">關閉</th><th scope="col">接手</th><th scope="col">切換模型</th><th scope="col">群組聊天</th><th scope="col">帳號切換</th><th scope="col">備註與限制</th></tr></thead>
         <tbody>
         <tr>
@@ -398,6 +398,12 @@
     <div class="releases">
 <!-- changelog:start（由 site/make-roadmap-page.mjs 產生，不要手改） -->
       <article class="glass release">
+        <h3>0.1.91<span class="date">2026-10-27</span></h3>
+        <ul>
+          <li>新增：開新夥伴可以「經 pi」開，選提供者和模型（只列 pi 查得到、已登入的）；pi 提供者的登入狀態同時查、約 1 秒內出來。對話窗「管理」選單多了「把這台電腦上開著的終端納入管理…」（從「＋」選單搬過來）。修正：Gemini 審查等工作者的寫入權限可以只開放指定資料夾；pi 的提供者與模型名稱不允許以減號開頭。</li>
+        </ul>
+      </article>
+      <article class="glass release">
         <h3>0.1.90<span class="date">2026-10-27</span></h3>
         <ul>
           <li>新增：開新夥伴改成兩頁：先選廠牌與運行方式（內建通道、經 pi、ASN 開的終端、自己開的 CLI，第一個可用的標建議），再填名稱與路徑；「在這台開終端」併進這裡；頭像旁的廠商小圖改成並排、更小。修正：Gemini 審查等工作者的寫入權限可以只開放指定資料夾。</li>
@@ -449,12 +455,6 @@
         <h3>0.1.82<span class="date">2026-10-27</span></h3>
         <ul>
           <li>修正：電腦端往終端送字時，確認框打開就會同時傳到手機「待確認」頁，本人在手機按確認或拒絕（之前只有代答會傳到手機）。</li>
-        </ul>
-      </article>
-      <article class="glass release">
-        <h3>0.1.81<span class="date">2026-10-27</span></h3>
-        <ul>
-          <li>新增：asn-cli 寄信只寫視窗名會自動補節點，並新增 asn who 列出完整位址；手機設置新增「設備與帳號」，分頁標籤改名；電腦版名單每列顯示廠商小圖，pi 依背後模型標示；設備頁標示 pi 背後的模型廠商。修正：接手窗格的「已允許」改讀電腦端真實狀態。</li>
         </ul>
       </article>
       <!-- changelog:end -->
