@@ -1,11 +1,11 @@
 {
-  "version": "0.1.85",
-  "notes": "修正：手機和電腦幾乎同時確認同一段終端送字時，只會送一次；電腦端若在手機剛處理後再按確認，會提示『手機剛處理過這一段字』而不重送。",
-  "pub_date": "2026-10-27T04:18:54.750Z",
+  "version": "0.1.86",
+  "notes": "新增：名單「＋」選單多了「在這台開終端…」，可以選 Grok 或 Gemini（agy）和工作資料夾，開好直接打開那個終端的分頁。",
+  "pub_date": "2026-10-27T04:52:52.679Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjdLeGYyQWgrRlZCa2tiamwwRjBpSW9WMnVidVZLbDdBVGxCZHovSEpzQ1ZLV29kOVlLUUFNVjBxZ29VMFZEdjc0Myt0M204OEhwNlpYTmM4ZmJEZndZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDc0NzM0CWZpbGU6QVNOXzAuMS44NV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjg1CnVJSVdFSGRNem4wcU9hQzN1SW01SHpoTUVEaTVzZ1ViWWx0SmtJS25zTjVwckVPM2ExVCtneGhweHhaN1pBN3JISVpKcnVFeWNTQmVHNS94d0QwQ0F3PT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.85_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjVaZGRJa0o1Ny9weU5iRVhROW5FakhwbFVIN0ZxMDRvRWMvYkt2N3NPTmo2aFRnMkQ0RjZ3VDBHRkMvOWdLbFVvWkpvQjk3SThpUGFJdkV6Vlc1dXdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDc2NzcyCWZpbGU6QVNOXzAuMS44Nl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjg2ClY1amp2aTEvbUlBNUE0bW0xaXBGaUJHbmQ1Uzh2TW1LNjR2M0JUNER0Mi94ZkQxWU5NNVlWM3pFY1l6eFFlZVRTOThrdW1JcG5LMjY1aGhJaXB6QkJ3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.86_x64-setup.exe"
     }
   }
 }
