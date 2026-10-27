@@ -9,13 +9,13 @@ pi 擴充是 TypeScript，pi 直接載入，不用編譯。
 開發／試用（只這次執行）：
 
 ```
-pi -e D:/Github/Yooliang/asn/relay/pi-extension/index.ts
+pi -e <ASN 原始碼>/relay/pi-extension/index.ts
 ```
 
 長期安裝（pi 套件，寫進 `~/.pi/agent/settings.json`；`-l` 則寫專案設定）：
 
 ```
-pi install D:/Github/Yooliang/asn/relay/pi-extension
+pi install <ASN 原始碼>/relay/pi-extension
 ```
 
 套件清單在本資料夾的 `package.json`（`pi.extensions` 指向 `index.ts`）。也可以手動在 `settings.json` 的 `extensions` 加路徑，或把資料夾放到 `~/.pi/agent/extensions/asn/`（需有 `index.ts`）。擴充以完整系統權限執行，只裝自己信任的來源。
@@ -67,7 +67,7 @@ pi（模型）處理完 ──asn_send(to=回信位址, reply_to=信件編號)�
 ### 使用者怎麼讓自己的 pi 載入
 
 1. 先用新版 ASN（含 pi 引擎的橋）；`asn_send` 要設好 `ASN_CLI_PATH`（Windows 預設已有）。
-2. 長期：`pi install D:/Github/Yooliang/asn/relay/pi-extension`（或把資料夾放到 `~/.pi/agent/extensions/asn/`）；先試用：`pi -e D:/Github/Yooliang/asn/relay/pi-extension/index.ts`。
+2. 長期：`pi install <ASN 原始碼>/relay/pi-extension`（或把資料夾放到 `~/.pi/agent/extensions/asn/`）；先試用：`pi -e <ASN 原始碼>/relay/pi-extension/index.ts`。
 3. 重開 pi（互動模式）。約 1 分鐘內 ASN 名單會出現「pi-<資料夾名>」（引擎 pi），原本的「pi · MiniMax #pid」僅顯示條目消失。
 4. 想指定名字：開 pi 前設 `ASN_PI_NAME`。
 
