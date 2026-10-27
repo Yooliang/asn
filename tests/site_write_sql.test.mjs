@@ -45,7 +45,8 @@ const U1 = '11111111-1111-1111-1111-111111111111'
 const U2 = '22222222-2222-2222-2222-222222222222'
 const T1 = 'aaaaaaaa-0000-0000-0000-000000000001'
 const T2 = 'bbbbbbbb-0000-0000-0000-000000000002'
-const W1 = 'wrk9b2', Q2 = 'qqq3c4', OFF = 'off5d6'
+const W1 = 'wrk9b2', Q2 = 'qqq3c4', OFF = 'off5d6', INV = 'inv7e8', ALIEN = 'aln8f9'
+const OWNER_MIG = '20261027210000_site_writer_owner.sql'
 
 async function boot({ mutate, writers = [T1] } = {}) {
   const db = new PGlite()
@@ -69,7 +70,9 @@ async function boot({ mutate, writers = [T1] } = {}) {
     insert into relay.nodes(id, name, key_hash, bell_topic, role, tenant_id, owner_user, status, machine) values
       ('${W1}', '工作機', 'k2', 'bell-w1', 'member', '${T1}', '${U1}', 'active', '工作機'),
       ('${OFF}', '舊電腦', 'k4', 'bell-off', 'member', '${T1}', '${U1}', 'disabled', '舊電腦'),
-      ('${Q2}', '別人的電腦', 'k3', 'bell-q2', 'member', '${T2}', '${U2}', 'active', '電腦');`)
+      ('${Q2}', '別人的電腦', 'k3', 'bell-q2', 'member', '${T2}', '${U2}', 'active', '電腦'),
+      ('${INV}', '邀請碼加入、沒認領', 'k5', 'bell-inv', 'member', '${T1}', null, 'active', '測試'),
+      ('${ALIEN}', '別人認領、但在負責人的租戶', 'k6', 'bell-aln', 'member', '${T1}', '${U2}', 'active', '電腦');`)
   for (const t of writers) await db.query(`insert into relay.site_writers(tenant_id, note) values ($1, '測試')`, [t])
   return db
 }
@@ -111,6 +114,19 @@ test('實跑：名單外的租戶、停用的節點、停用的租戶、不存�
   assert.deepEqual(await release(db, REL), { error: 'not_allowed' })
   assert.equal((await db.query(`select count(*)::int n from public.asn_site_releases where version = '9.0.1'`)).rows[0].n, 0)
   assert.equal((await db.query('select count(*)::int n from relay.site_write_log')).rows[0].n, 0)
+})
+
+test('實跑：名單上的租戶裡，沒認領或別人認領的節點也不能寫（只有擁有者本人認領的節點可寫）', { skip }, async () => {
+  const db = await boot()
+  assert.deepEqual(await release(db, REL, INV), { error: 'not_allowed' })
+  assert.deepEqual(await meeting(db, MEET, ALIEN), { error: 'not_allowed' })
+  assert.deepEqual(await item(db, ITEM, INV), { error: 'not_allowed' })
+  assert.equal((await release(db, REL, W1)).ok, true)
+})
+
+test('還原驗證：拿掉擁有者認領的檢查，邀請碼加入的節點就寫得進去（上面的測試會抓到）', { skip }, async () => {
+  const db = await boot({ mutate: { [OWNER_MIG]: s => s.replace('\n    and n.owner_user is not null and n.owner_user = t.owner_user', '') } })
+  assert.equal((await release(db, REL, INV)).ok, true)
 })
 
 test('實跑：名單空白（migration 剛套上）時誰都不能寫', { skip }, async () => {
@@ -252,6 +268,7 @@ test('實跑：同一租戶每小時最多 120 次寫入', { skip }, async () =>
 })
 
 test('還原驗證：拿掉名單檢查，名單外的租戶就寫得進去（上面的測試會抓到）', { skip }, async () => {
-  const db = await boot({ mutate: { [MIG]: s => s.replace("join relay.site_writers w on w.tenant_id = n.tenant_id\n", '') } })
+  const drop = s => s.replace("join relay.site_writers w on w.tenant_id = n.tenant_id\n", '')
+  const db = await boot({ mutate: { [MIG]: drop, [OWNER_MIG]: drop } })
   assert.equal((await release(db, REL, Q2)).ok, true)
 })
