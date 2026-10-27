@@ -206,8 +206,9 @@ fn log_event(data_dir: &Path, event: &str, id: &str, detail: &str) {
     let p = log_path(data_dir);
     if std::fs::metadata(&p).map(|m| m.len() > LOG_MAX_BYTES).unwrap_or(false) {
         if let Ok(t) = std::fs::read_to_string(&p) {
-            let keep = t.get(t.len() / 2..).unwrap_or("");
-            let keep = keep.find('\n').map(|i| &keep[i + 1..]).unwrap_or("");
+            // 從中間往後找第一個換行再切：用位元組找（換行一定在字元邊界上；以前切在中文字中間會把整個日誌清空）
+            let mid = t.len() / 2;
+            let keep = t.as_bytes()[mid..].iter().position(|&b| b == b'\n').map(|i| &t[mid + i + 1..]).unwrap_or("");
             let _ = std::fs::write(&p, keep);
         }
     }

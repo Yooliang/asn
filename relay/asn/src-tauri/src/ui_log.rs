@@ -31,8 +31,10 @@ pub fn append(dir: &Path, lines: &[String]) -> Result<usize, String> {
     let p = path(dir);
     if std::fs::metadata(&p).map(|m| m.len() > MAX_BYTES).unwrap_or(false) {
         if let Ok(t) = std::fs::read_to_string(&p) {
-            let keep = t.get(t.len() / 2..).unwrap_or("");
-            let keep = keep.find('\n').map(|i| &keep[i + 1..]).unwrap_or("");
+            // 從中間往後找第一個換行再切：用位元組找（換行一定在字元邊界上）。
+            // 以前用 t.get(t.len() / 2..)，中文一個字 3 個位元組，切在字中間會回 None，整個記錄就被清空
+            let mid = t.len() / 2;
+            let keep = t.as_bytes()[mid..].iter().position(|&b| b == b'\n').map(|i| &t[mid + i + 1..]).unwrap_or("");
             let _ = std::fs::write(&p, keep);
         }
     }
@@ -52,6 +54,29 @@ mod tests {
         assert_eq!(clean_line("  [ASN] pull failed\nx\t y  ").as_deref(), Some("[ASN] pull failed x  y"));
         assert_eq!(clean_line(" \n\t ").as_deref(), None);
         assert_eq!(clean_line(&"字".repeat(LINE_MAX + 50)).unwrap().chars().count(), LINE_MAX);
+    }
+
+    #[test]
+    fn 超過上限修剪時_中文不會把整個記錄清空_開頭是一整行() {
+        // asn真 審 #432：用位元組位置切，切在中文字中間 get 會回 None，整個檔案就被清空
+        let d = tempfile::tempdir().unwrap();
+        let line = "中".repeat(100);
+        let mut text = String::new();
+        while (text.len() as u64) <= MAX_BYTES {
+            text.push_str(&line);
+            text.push('\n');
+        }
+        // 確定中點落在字的中間（舊寫法會清空的情形）
+        while text.is_char_boundary(text.len() / 2) {
+            text.insert(0, 'a');
+        }
+        std::fs::write(path(d.path()), &text).unwrap();
+        append(d.path(), &["最後一行".into()]).unwrap();
+        let after = std::fs::read_to_string(path(d.path())).unwrap();
+        assert!(after.len() > 1000, "修剪後不能是空的：{} bytes", after.len());
+        assert!((after.len() as u64) < MAX_BYTES);
+        assert_eq!(after.lines().next().unwrap(), line, "開頭是一整行，不留半個字");
+        assert!(after.ends_with("最後一行\n"));
     }
 
     #[test]
