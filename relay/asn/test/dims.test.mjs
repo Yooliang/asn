@@ -71,12 +71,11 @@ test('分頁依廠商：超過 6 個收進「更多」，「其他」排最後',
   assert.deepEqual(t.more.map(x => x.key), ['alpha', 'zeta', 'other'])
 })
 
-test('分頁依狀態：四個固定、沒人的標 empty、未讀彙總', () => {
+test('分頁依活躍度：三個固定（#347）、沒人的標 empty', () => {
   const t = pageTabs(SAMPLE, 'status', { selfNode: 'H' })
-  assert.deepEqual(t.all.map(x => [x.label, x.total, x.empty]), [['線上', 3, false], ['忙碌', 1, false], ['暫離', 1, false], ['離線', 1, false]])
-  assert.equal(t.all[1].unread, 2)
+  assert.deepEqual(t.all.map(x => [x.label, x.total, x.empty]), [['活躍', 0, true], ['閒置', 5, false], ['離線', 1, false]], '沒算過活躍度的：離線歸離線，其餘先當閒置')
   const none = pageTabs([], 'status', { selfNode: 'H' })
-  assert.equal(none.all.length, 4)
+  assert.equal(none.all.length, 3)
   assert.ok(none.all.every(x => x.empty))
 })
 
@@ -88,7 +87,7 @@ test('分頁依設備：本機第一、有人在線的設備在前、整台都�
 
 test('pageItems：依維度取該頁籤的好友，線上在前', () => {
   assert.deepEqual(pageItems(SAMPLE, 'engine', 'claude').map(f => f.nick), ['a', 'b', 'c'])
-  assert.deepEqual(pageItems(SAMPLE, 'status', 'online').map(f => f.nick), ['a', 'e', 'f'])
+  assert.deepEqual(pageItems(SAMPLE, 'status', 'idle').map(f => f.nick), SAMPLE.filter(f => f.status !== 'offline').map(f => f.nick).sort((a, b) => a.localeCompare(b, 'zh-Hant')))
   assert.deepEqual(pageItems(SAMPLE, 'device', 'H', f => f.nick === 'b').map(f => f.nick), ['b'])
 })
 
@@ -100,9 +99,9 @@ test('分組：設備組用設備名、本機排第一；標題規則照 groupHe
   const gw = groupItems(pageItems(SAMPLE, 'engine', 'claude'), 'device', { selfNode: 'W' })
   assert.deepEqual(gw.map(x => x.label), ['工作機', '家用機'])
   const st = groupItems(pageItems(SAMPLE, 'device', 'A'), 'status')
-  assert.deepEqual(st.map(x => groupHeading(x)), ['線上 (2)'])
-  const en = groupItems(pageItems(SAMPLE, 'status', 'online'), 'engine')
-  assert.deepEqual(en.map(x => groupHeading(x)), ['Claude (1/1)', 'DeepSeek (1/1)', '其他 (1/1)'])
+  assert.deepEqual(st.map(x => groupHeading(x)), ['閒置 (2)'])
+  const en = groupItems(pageItems(SAMPLE, 'status', 'idle'), 'engine')
+  assert.deepEqual(en.map(x => groupHeading(x)), ['Claude (2/2)', 'Grok (1/1)', 'DeepSeek (1/1)', '其他 (1/1)'], '閒置裡含原本的忙碌、暫離')
 })
 
 test('設備順序規則共用：設定的設備頁籤與手機也是本機第一、有人在線的在前、整台離線的在後', async () => {

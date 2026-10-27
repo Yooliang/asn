@@ -35,7 +35,7 @@ test('最多 8 個；沒有近期活動就是空的；同一夥伴不重複', ()
   const r = recentActivity({ friends: [...fs8, fs8[0]], logOf, rooms: [], now: NOW })
   assert.equal(r.length, RECENT_MAX); assert.equal(r[0].id, 'H/f0'); assert.equal(new Set(r.map(x => x.id)).size, RECENT_MAX)
   assert.deepEqual(recentActivity({ friends: [F('H/zzz')], logOf, rooms: [], now: NOW }), [])
-  assert.equal(RECENT_WINDOW_MS, 24 * 3600_000)
+  assert.equal(RECENT_WINDOW_MS, 8 * 3600_000, '跟電腦版「活躍」同一個門檻（#347）')
 })
 
 test('接線守門：手機名單最上面、群組對話之前；沒有近期活動不顯示；不從設備分組拿掉', () => {

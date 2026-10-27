@@ -37,7 +37,7 @@ test('摘要：照目前的值顯示', () => {
   assert.equal(catSummary('devices', { devices: [{ online: true }], accountCount: 2, accountCurrent: 'a@x.test' }), '1 台設備，1 台在線；2 個 Claude 帳號，使用中：a@x.test')
   const look = catSummary('look', { frame: 'native', mode: 'merged', dpMode: 'side', toolbar: 'top', bubble: 'bubble' })
   assert.ok(look.includes('Windows 原生'), look)
-  assert.equal(catSummary('tabs', { tabDim: 'device', groupDim: 'status' }), '分頁依設備、分組依狀態')
+  assert.equal(catSummary('tabs', { tabDim: 'device', groupDim: 'status' }), '分頁依設備、分組依活躍度')
   assert.equal(catSummary('notify', { notify: { toast: true, msg: true, nudge: false, file: false } }), '右下角通知、通知聲音')
   assert.equal(catSummary('notify', { notify: { toast: false, msg: false, nudge: false, file: false } }), '全部關閉')
   assert.equal(catSummary('voice', { voiceEnabled: false }), '念出訊息尚未啟用')
