@@ -371,7 +371,7 @@
       <ol class="partner-steps" aria-label="步驟"><li :class="{ on: partnerDlg.step === 1 }">1. 廠牌與運行</li><li :class="{ on: partnerDlg.step === 2 }">2. 名稱與路徑</li></ol>
       <div v-show="partnerDlg.step === 1">
       <div class="partner-models" role="radiogroup" aria-label="模型">
-        <button v-for="m in dlgVendors" :key="m.id" type="button" class="pmodel" :class="{ on: partnerDlg.profile === m.profileId, off: !m.installed }" :disabled="!m.installed" :title="m.installed ? m.modeLabel : m.installHint" @click="pickPartnerModel(m)">
+        <button v-for="m in dlgVendors" :key="m.id" type="button" class="pmodel" :class="{ on: partnerDlg.vendor ? partnerDlg.vendor === m.id : partnerDlg.profile === m.profileId, off: !m.installed }" :disabled="!m.installed" :title="m.installed ? m.modeLabel : m.installHint" @click="pickPartnerModel(m)">
           <span class="pmodel-ic" :data-m="m.id"></span>
           <span class="pmodel-lb">{{ m.label }}</span>
         </button>
