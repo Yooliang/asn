@@ -369,6 +369,9 @@ fn real_env() -> (PathBuf, PathBuf) {
     (agent, crate::identity::relay_home().join(MARKER))
 }
 
+/// 找不到 pi 時給人看的說明（#394）：講清楚是沒有 pi（不是沒有擴充）、找過哪些地方、剛裝好要重開 ASN
+pub(crate) const NO_PI_MSG: &str = "這台電腦找不到 pi（PATH 和 npm、pnpm、scoop 的安裝資料夾都找過），請先安裝 pi；剛裝好的話，把 ASN 關掉重開再試";
+
 fn real_pi() -> Option<PathBuf> {
     crate::agent_tools::resolve_binary("pi")
 }
@@ -403,7 +406,7 @@ pub fn auto_install_real() -> Option<Result<Value, String>> {
     let pref = auto_pref_path();
     let pi = real_pi();
     let out = auto_step(&pref, &st, || {
-        let (pi, ext) = (pi.ok_or("這台電腦找不到 pi")?, ext.ok_or("找不到 ASN 附的 pi 擴充")?);
+        let (pi, ext) = (pi.ok_or(NO_PI_MSG)?, ext.ok_or("找不到 ASN 附的 pi 擴充")?);
         install(&pi, &ext, auto_dir, &RealRunner::default(), &files)
     });
     match out {
@@ -416,7 +419,7 @@ pub fn auto_install_real() -> Option<Result<Value, String>> {
 pub fn install_real() -> Result<Value, String> {
     let (agent, marker) = real_env();
     let files = RealFiles { agent, marker };
-    let pi = real_pi().ok_or("這台電腦找不到 pi，請先安裝 pi")?;
+    let pi = real_pi().ok_or(NO_PI_MSG)?;
     let (_, ext, auto) = real_state(&files);
     let ext = ext.ok_or("找不到 ASN 附的 pi 擴充（安裝可能不完整），請重新安裝 ASN")?;
     install(&pi, &ext, auto, &RealRunner::default(), &files)?;
