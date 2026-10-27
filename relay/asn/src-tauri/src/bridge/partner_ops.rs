@@ -457,13 +457,16 @@ impl PartnerOps {
         super::engines::pi_control::window_session_id(&self.env.pi_home(), name, self.env.now_ms(), |p| os.alive(p)).is_some() && self.find_target(name).is_err()
     }
 
-    /// pi 視窗：開放「切換模型」（走擴充的控制檔管道，見 engines/pi_control.rs；pi 忙碌時擴充不處理，逾時回中文原因）與「關閉」
+    /// pi 視窗：開放「切換模型」「改名」（走擴充的控制檔管道，見 engines/pi_control.rs；pi 忙碌時排隊）與「關閉」
     fn execute_pi(&self, op: &Op) -> OpResult {
         if op.op == "close" {
             return self.close_pi(op);
         }
+        if op.op == "rename" {
+            return self.rename_pi(op);
+        }
         if op.op != "model" {
-            return failed("pi 視窗目前只能切換模型和關閉，其他操作尚未開放");
+            return failed("pi 視窗目前只能切換模型、改名和關閉，其他操作尚未開放");
         }
         let os = self.env.os();
         let env = super::engines::pi_control::SetModelEnv { now: &|| self.env.now_ms(), alive: &|p| os.alive(p), sleep: &|ms| self.env.pi_sleep(ms), wait_ms: self.env.pi_wait_ms(), poll_ms: 500 };
@@ -473,6 +476,34 @@ impl PartnerOps {
                 Some(json!({ "engine": "pi", "queued": true, "model": v.get("model"), "provider": v.get("provider") })),
             ),
             Ok(v) => ok("已切換模型", Some(json!({ "engine": "pi", "model": v.get("model"), "provider": v.get("provider") }))),
+            Err(e) => failed(e),
+        }
+    }
+
+    /// pi 視窗「改名」（0.2 A4）：名字格式與 Claude 視窗同一套；這台電腦上已經有同名的（Claude 視窗、pi 視窗、內建通道的工作者）就拒絕。
+    /// 實際改名由 pi 的 ASN 擴充做（pi.setSessionName＋記一筆「ASN 改過名」，重開後還在）；擴充太舊回「請更新擴充」
+    fn rename_pi(&self, op: &Op) -> OpResult {
+        let new = op.new_name.trim();
+        if !valid_partner_name(new) {
+            return failed("新名字只能用英數、連字號、中文，1～40 字，不能以連字號開頭");
+        }
+        if new == op.name {
+            return failed("新名字和現在的一樣");
+        }
+        if !self.env.allow_remote() {
+            return failed(CONSENT_OFF);
+        }
+        let os = self.env.os();
+        let claude_taken = console::read_sessions(&self.dirs.sessions).iter().any(|s| s.get("name").and_then(Value::as_str) == Some(new) && s.get("pid").and_then(Value::as_u64).map(|p| os.alive(p as u32)).unwrap_or(false));
+        let pi_taken = super::engines::pi_control::window_session_id(&self.env.pi_home(), new, self.env.now_ms(), |p| os.alive(p)).is_some();
+        let acp_taken = self.acp_admin().is_some_and(|a| a.has_worker(new));
+        if claude_taken || pi_taken || acp_taken {
+            return failed("這台電腦已經有同名的視窗，換個名字");
+        }
+        let env = super::engines::pi_control::SetModelEnv { now: &|| self.env.now_ms(), alive: &|p| os.alive(p), sleep: &|ms| self.env.pi_sleep(ms), wait_ms: self.env.pi_wait_ms(), poll_ms: 500 };
+        match super::engines::pi_control::set_name(&self.env.pi_home(), &op.name, new, &env) {
+            Ok(v) if v.get("queued").and_then(Value::as_bool) == Some(true) => ok("pi 正在忙，已排隊：做完這一輪就會改名", Some(json!({ "engine": "pi", "queued": true, "new_name": new }))),
+            Ok(_) => ok("已改名", Some(json!({ "engine": "pi", "new_name": new }))),
             Err(e) => failed(e),
         }
     }

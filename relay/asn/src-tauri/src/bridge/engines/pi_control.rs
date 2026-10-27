@@ -1,7 +1,8 @@
-//! pi 視窗的遠端控制：切換模型（#235）。
+//! pi 視窗的遠端控制：切換模型（#235）、改名（0.2 A4）。
 //! 擴充那一半見 relay/pi-extension/control.mjs（檔案約定與這裡一致）：
-//!   ~/.asn/pi-control/<sessionId>/<請求編號>.json         請求（橋寫）{ v:1, id, op:"set_model", provider?, model, at }
-//!   ~/.asn/pi-control/<sessionId>/<請求編號>.result.json  結果（擴充寫）{ v:1, id, ok, model?, provider?, error?, providers?, at }
+//!   ~/.asn/pi-control/<sessionId>/<請求編號>.json         請求（橋寫）{ v:1, id, op:"set_model", provider?, model, at } 或 { v:1, id, op:"set_name", name, at }
+//!   ~/.asn/pi-control/<sessionId>/<請求編號>.result.json  結果（擴充寫）{ v:1, id, ok, model?, provider?, name?, error?, providers?, at }
+//! 改名要擴充的功能版本 ≥ 2（登記檔的 ext）；舊擴充不認得 set_name，直接回「請更新擴充」，不寫請求。
 //! ASN 開的 pi 是互動視窗加擴充，沒有 RPC 通道；擴充用 pi.setModel() 切換，而且只在 pi 閒置時處理，
 //! 所以 pi 忙碌時橋端會等到逾時。這裡只有檔案與純邏輯，不啟動任何程式。
 use super::pi::{read_windows, windows_dir};
@@ -40,18 +41,27 @@ pub fn parse_model_spec(spec: &str) -> Option<(Option<String>, String)> {
 
 /// 把「切換模型」請求原子寫進該視窗的控制資料夾。請求編號相同＝覆蓋
 pub fn write_control_request(home: &Path, sid: &str, id: &str, provider: Option<&str>, model: &str, now_ms: u64) -> Result<(), String> {
-    if !valid_sid(sid) || !valid_request_id(id) {
-        return Err("視窗或請求編號不合法".into());
-    }
     if !valid_model(model) || provider.map(|p| !valid_provider(p)).unwrap_or(false) {
         return Err("模型名稱不合法（只能用英數與 . _ : @ -）".into());
     }
-    let dir = control_dir(home).join(sid);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("建立控制資料夾失敗：{e}"))?;
     let mut v = json!({ "v": 1, "id": id, "op": "set_model", "model": model, "at": now_ms });
     if let Some(p) = provider {
         v["provider"] = json!(p);
     }
+    write_request(home, sid, id, &v)
+}
+
+/// 改名請求（名字格式由呼叫端先驗過；擴充會再驗一次）
+pub fn write_rename_request(home: &Path, sid: &str, id: &str, name: &str, now_ms: u64) -> Result<(), String> {
+    write_request(home, sid, id, &json!({ "v": 1, "id": id, "op": "set_name", "name": name, "at": now_ms }))
+}
+
+fn write_request(home: &Path, sid: &str, id: &str, v: &Value) -> Result<(), String> {
+    if !valid_sid(sid) || !valid_request_id(id) {
+        return Err("視窗或請求編號不合法".into());
+    }
+    let dir = control_dir(home).join(sid);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("建立控制資料夾失敗：{e}"))?;
     let target = dir.join(format!("{id}.json"));
     let tmp = dir.join(format!("{id}.json.{}.tmp", std::process::id()));
     std::fs::write(&tmp, v.to_string()).map_err(|e| format!("寫入控制請求失敗：{e}"))?;
@@ -118,27 +128,69 @@ fn queued(provider: Option<&str>, model: &str) -> Value {
     json!({ "queued": true, "model": model, "provider": provider })
 }
 
-pub fn set_model(home: &Path, name: &str, spec: &str, env: &SetModelEnv) -> Result<Value, String> {
+fn next_request_id(prefix: char, now: u64) -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQ: AtomicU64 = AtomicU64::new(0);
+    format!("{prefix}{now}-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed))
+}
+
+pub fn set_model(home: &Path, name: &str, spec: &str, env: &SetModelEnv) -> Result<Value, String> {
     let (provider, model) = parse_model_spec(spec).ok_or("模型名稱不合法（只能用英數與 . _ : @ -，可寫成 提供者/模型）")?;
     let start = (env.now)();
     let sid = window_session_id(home, name, start, env.alive).ok_or("找不到這個 pi 視窗（可能已經關了，或沒有裝 ASN 的 pi 擴充）")?;
-    let id = format!("m{start}-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed));
+    let id = next_request_id('m', start);
     write_control_request(home, &sid, &id, provider.as_deref(), &model, start)?;
-    if window_busy(home, &sid, start, env.alive) == Some(true) {
-        return Ok(queued(provider.as_deref(), &model));
+    let q = queued(provider.as_deref(), &model);
+    await_request(home, &sid, &id, env, q, control_outcome)
+}
+
+/// 擴充的功能版本（登記檔的 ext；舊擴充沒有＝0）
+pub fn window_ext(home: &Path, sid: &str) -> u64 {
+    if !valid_sid(sid) {
+        return 0;
+    }
+    let f = windows_dir(home).join(format!("{sid}.json"));
+    std::fs::read_to_string(f).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.get("ext").and_then(Value::as_u64)).unwrap_or(0)
+}
+
+/// 收得下「改名」的擴充功能版本
+pub const RENAME_EXT: u64 = 2;
+pub const OLD_EXT_RENAME: &str = "這個 pi 的 ASN 擴充太舊，不能改名；請更新 pi 的 ASN 擴充後再試";
+
+/// 改 pi 視窗的名字（0.2 A4）：pi 正在忙就排隊（回 { queued: true }），閒著就等擴充寫回結果。成功回 { name }
+pub fn set_name(home: &Path, name: &str, new_name: &str, env: &SetModelEnv) -> Result<Value, String> {
+    let start = (env.now)();
+    let sid = window_session_id(home, name, start, env.alive).ok_or("找不到這個 pi 視窗（可能已經關了，或沒有裝 ASN 的 pi 擴充）")?;
+    if window_ext(home, &sid) < RENAME_EXT {
+        return Err(OLD_EXT_RENAME.into());
+    }
+    let id = next_request_id('n', start);
+    write_rename_request(home, &sid, &id, new_name, start)?;
+    let q = json!({ "queued": true, "name": new_name });
+    await_request(home, &sid, &id, env, q, |v| {
+        if v.get("ok").and_then(Value::as_bool) == Some(true) {
+            Ok(json!({ "name": v.get("name").cloned().unwrap_or(Value::Null) }))
+        } else {
+            Err("pi 改名失敗".to_string())
+        }
+    })
+}
+
+/// 寫好請求之後的共同流程：pi 忙就回排隊；閒著就等結果；逾時時剛好變忙也算排隊，還是閒著就刪掉請求回「沒有回應」
+fn await_request(home: &Path, sid: &str, id: &str, env: &SetModelEnv, queued_v: Value, outcome: impl Fn(&Value) -> Result<Value, String>) -> Result<Value, String> {
+    if window_busy(home, sid, (env.now)(), env.alive) == Some(true) {
+        return Ok(queued_v);
     }
     let mut waited = 0;
     loop {
-        if let Some(r) = read_control_result(home, &sid, &id) {
-            return control_outcome(&r);
+        if let Some(r) = read_control_result(home, sid, id) {
+            return outcome(&r);
         }
         if waited >= env.wait_ms {
-            if window_busy(home, &sid, (env.now)(), env.alive) == Some(true) {
-                return Ok(queued(provider.as_deref(), &model));
+            if window_busy(home, sid, (env.now)(), env.alive) == Some(true) {
+                return Ok(queued_v);
             }
-            let _ = std::fs::remove_file(control_dir(home).join(&sid).join(format!("{id}.json")));
+            let _ = std::fs::remove_file(control_dir(home).join(sid).join(format!("{id}.json")));
             return Err("pi 沒有回應（可能是 pi 的 ASN 擴充太舊，請更新擴充後再試）".into());
         }
         (env.sleep)(env.poll_ms);
@@ -258,6 +310,42 @@ mod tests {
         let r = set_model(h.path(), "pi-a", "anthropic/claude-sonnet-5", &env(&sleep, 10_000)).unwrap();
         assert_eq!(r, json!({"model":"claude-sonnet-5","provider":"anthropic"}));
         assert_eq!(calls.get(), 2);
+    }
+
+    fn put_window_ext(home: &Path, sid: &str, name: &str, ext: u64, state: &str) {
+        let d = windows_dir(home);
+        std::fs::create_dir_all(&d).unwrap();
+        let v = json!({ "v": 1, "engine": "pi", "ext": ext, "sessionId": sid, "name": name, "pid": 100, "cwd": "D:/g/x", "state": state, "at": NOW });
+        std::fs::write(d.join(format!("{sid}.json")), v.to_string()).unwrap();
+    }
+
+    #[test]
+    fn 改名_新擴充_寫set_name請求_等到結果_忙時排隊_舊擴充直接請更新不寫請求() {
+        let h = home();
+        put_window_ext(h.path(), "s1", "pi-a", 2, "idle");
+        let sleep = |_ms: u64| {
+            let dir = control_dir(h.path()).join("s1");
+            let req: Value = std::fs::read_dir(&dir).unwrap().flatten().find(|e| !e.file_name().to_string_lossy().contains("result")).map(|e| serde_json::from_str(&std::fs::read_to_string(e.path()).unwrap()).unwrap()).unwrap();
+            assert_eq!((req["op"].as_str(), req["name"].as_str()), (Some("set_name"), Some("小葛")));
+            fake_extension(h.path(), "s1", json!({"ok":true,"name":"小葛","at":NOW}));
+        };
+        assert_eq!(set_name(h.path(), "pi-a", "小葛", &env(&sleep, 10_000)).unwrap(), json!({"name":"小葛"}));
+        // 忙：寫好請求就回排隊
+        let h2 = home();
+        put_window_ext(h2.path(), "s2", "pi-b", 2, "busy");
+        let r = set_name(h2.path(), "pi-b", "小葛", &env(&|_| panic!("忙的時候不等"), 10_000)).unwrap();
+        assert_eq!(r["queued"], json!(true));
+        assert_eq!(std::fs::read_dir(control_dir(h2.path()).join("s2")).unwrap().count(), 1, "請求留著，做完這一輪擴充就會處理");
+        // 舊擴充（沒有 ext）：不寫請求、直接請更新
+        let h3 = home();
+        put_window(h3.path(), "s3", "pi-c", 100);
+        assert_eq!(set_name(h3.path(), "pi-c", "小葛", &env(&|_| panic!("不等"), 10_000)).unwrap_err(), OLD_EXT_RENAME);
+        assert!(!control_dir(h3.path()).join("s3").exists(), "舊擴充不寫請求");
+        // 擴充回失敗
+        let h4 = home();
+        put_window_ext(h4.path(), "s4", "pi-d", 2, "idle");
+        let sleep4 = |_ms: u64| fake_extension(h4.path(), "s4", json!({"ok":false,"error":"failed","at":NOW}));
+        assert_eq!(set_name(h4.path(), "pi-d", "小葛", &env(&sleep4, 10_000)).unwrap_err(), "pi 改名失敗");
     }
 
     #[test]

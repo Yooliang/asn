@@ -30,11 +30,12 @@ for (const [label, friend, want] of MATRIX) {
   })
 }
 
-test('現況：不能用的項目都有寫明原因（Codex＝尚未實機驗證；pi 開放切換模型與關閉，其餘各有說明；雲端＝沒有視窗）', () => {
+test('現況：不能用的項目都有寫明原因（Codex＝尚未實機驗證；pi 開放改名、切換模型與關閉，其餘各有說明；雲端＝沒有視窗）', () => {
   assert.equal(ok(P('小乙', 'codex'), 'close').reason, REASON.otherEngine)
   assert.match(REASON.otherEngine, /尚未實機驗證，暫不開放/)
   const piItems = menuItems(P('小丙', 'pi'), ctx)
-  assert.deepEqual(piItems.filter(i => i.ok).map(i => i.key).sort(), ['close', 'model'], 'pi 可以切換模型與關閉')
+  assert.deepEqual(piItems.filter(i => i.ok).map(i => i.key).sort(), ['close', 'model', 'rename'], 'pi 可以改名（0.2 A4）、切換模型與關閉')
+  assert.equal(buildOpRequest(P('小丙', 'pi'), 'rename', { newName: ' 小丁 ' }).new_name, '小丁')
   const why = piItems.filter(i => !i.ok).map(i => i.reason)
   assert.ok(why.every(r => /[一-鿿]/.test(r) && r !== REASON.otherEngine), 'pi 其餘項目各有自己的中文原因')
   assert.equal(partnerEngine(P('小丙', 'pi')), 'pi')

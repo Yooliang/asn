@@ -11,6 +11,13 @@ const SID_RE = /^[A-Za-z0-9_-]{1,128}$/
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/
 export const MAX_NAME = 40
 export const MAX_INJECT_CHARS = 60000
+// 擴充的功能版本（寫進視窗登記檔的 ext）：2＝收得下「改名」（0.2 A4）。橋看到沒有 ext 或比 2 小，就知道要請使用者更新擴充
+export const EXT_VERSION = 2
+// ASN 遠端改名時，在 pi 的對話檔追加的自訂紀錄（不送給模型）：{ name }。重開 pi、接回同一段對話後靠它找回 ASN 給的名字
+export const ASN_NAME_ENTRY = 'asn-name'
+// 改名的新名字：與電腦端 valid_partner_name 同一套（英數或中文開頭，之後可再有連字號，最多 40 字）
+const RENAME_RE = /^[A-Za-z0-9一-鿿][A-Za-z0-9一-鿿-]{0,39}$/
+export const validRename = s => typeof s === 'string' && RENAME_RE.test(s)
 
 export function validSessionId(s) {
   return typeof s === 'string' && SID_RE.test(s)
@@ -27,7 +34,30 @@ export function cleanWindowName(s) {
 }
 
 /** 視窗名優先序：ASN_PI_NAME > pi 工作階段名 > pi-資料夾名 > pi */
-export function resolveWindowName({ env = {}, sessionName, cwd = '' }) {
+/**
+ * 從對話檔的紀錄找出 ASN 改過的名字，規則是「最後一次改的為準」：
+ * - 有 ASN 改名的紀錄，而且之後沒有更新的 session_info（使用者在 pi 裡 /name）→ { name: ASN 給的, sessionWins: false }
+ * - ASN 改名之後，使用者又 /name 了 → { name: ASN 給的, sessionWins: true }（登記名用 session 名）
+ * - 沒有 ASN 改名的紀錄 → null（照舊：環境變數 → session 名 → 資料夾名）
+ */
+export function asnNameFrom(entries) {
+  let asn = null
+  let asnAt = -1
+  let infoAt = -1
+  ;(Array.isArray(entries) ? entries : []).forEach((e, i) => {
+    if (e?.type === 'custom' && e.customType === ASN_NAME_ENTRY && validRename(e.data?.name)) {
+      asn = e.data.name
+      asnAt = i
+    } else if (e?.type === 'session_info') infoAt = i
+  })
+  return asn ? { name: asn, sessionWins: infoAt > asnAt } : null
+}
+
+export function resolveWindowName({ env = {}, sessionName, cwd = '', asn = null }) {
+  if (asn?.name) {
+    const s = cleanWindowName(sessionName)
+    return asn.sessionWins && s ? s : cleanWindowName(asn.name)
+  }
   const a = cleanWindowName(env.ASN_PI_NAME)
   if (a) return a
   const b = cleanWindowName(sessionName)
@@ -38,7 +68,7 @@ export function resolveWindowName({ env = {}, sessionName, cwd = '' }) {
 }
 
 export function windowRecord({ sessionId, name, pid, cwd, state, model, provider, at }) {
-  const rec = { v: 1, engine: 'pi', sessionId, name, pid, cwd: String(cwd ?? ''), state: state === 'busy' ? 'busy' : 'idle' }
+  const rec = { v: 1, engine: 'pi', ext: EXT_VERSION, sessionId, name, pid, cwd: String(cwd ?? ''), state: state === 'busy' ? 'busy' : 'idle' }
   if (model) rec.model = String(model).slice(0, 80)
   if (model && provider) rec.provider = String(provider).slice(0, 40)   // 橋合成「提供者/模型」放進名單，讓畫面顯示背後實際的廠商（#258）
   rec.at = at
