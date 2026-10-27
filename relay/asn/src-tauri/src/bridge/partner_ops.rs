@@ -386,7 +386,7 @@ impl PartnerOps {
         self.acp.lock().unwrap().clone()
     }
 
-    /// 名字對得上收發室管理的 ACP 工作者：只支援詳情、重開、接班換手、關閉（停止本次執行），其餘回「這類夥伴不支援」。
+    /// 名字對得上收發室管理的 ACP 工作者：只支援詳情、重開、接班換手、關閉（停止本次執行）、切換模型，其餘回「這類夥伴不支援」。
     /// 動的是工作者驅動記錄在案的 pid，不找程序、不比對名稱；同名的 Claude 視窗還活著時不猜
     fn execute_acp(&self, op: &Op, acp: &dyn AcpAdmin) -> OpResult {
         if (self.protect)(&op.name, 0) {
@@ -401,10 +401,21 @@ impl PartnerOps {
                 Some(r) => ok("", Some(r)),
                 None => failed("找不到這個工作者"),
             },
-            "restart" | "handover" | "close" => {
+            "restart" | "handover" | "close" | "model" => {
                 // 守門 4：動手前再驗一次本機開關
                 if !self.env.allow_remote() {
                     return failed(CONSENT_OFF);
+                }
+                if op.op == "model" {
+                    // 模型代號由工作者再比對可選清單（Grok：agent 列出的；agy：agy models），不在清單裡就拒絕
+                    return match acp.set_model(&op.name, op.model.trim()) {
+                        Ok(r) => {
+                            let how = if r["restarted"] == json!(true) { "工作者帶同一段對話重開了，對話保留" } else { "沒有重開，對話保留" };
+                            let keep = if r["saved"] == json!(false) { "；但沒能記下來，重開 ASN 後會回到原本的模型" } else { "" };
+                            ok(&format!("已切換模型：{how}{keep}"), Some(r))
+                        }
+                        Err(e) => failed(e),
+                    };
                 }
                 if op.op == "close" {
                     self.stage(op, "closing");

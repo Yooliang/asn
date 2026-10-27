@@ -26,7 +26,7 @@ fn worker(name: &str, protocol: &str, extra: Value) -> Value {
     let script = if protocol == "agy-stream" { fake("fake-agy.mjs") } else { fake("fake-acp-worker.mjs") };
     let mut w = json!({
         "name": name, "engine": "acp", "roster_engine": "gemini", "protocol": protocol, "command": "node", "args": [script], "label": "工作者",
-        "env_pass": ["FAKE_ACP_STATE", "FAKE_ACP_LOAD", "FAKE_ACP_AUTH", "FAKE_AGY_STATE", "FAKE_X"],
+        "env_pass": ["FAKE_ACP_STATE", "FAKE_ACP_LOAD", "FAKE_ACP_AUTH", "FAKE_AGY_STATE", "FAKE_X", "FAKE_ACP_MODELS", "FAKE_AGY_MODELS"],
     });
     for (k, v) in extra.as_object().unwrap() {
         w[k] = v.clone();
@@ -1030,6 +1030,128 @@ async fn agy_遠端管理_重開保留對話_接班換手換新對話() {
     h.put_pull(to_agent(3, "Gemini", "三")).await;
     h.wait("回覆3", |h| h.fr.sent().len() == 3).await;
     assert!(h.bodies()[2].contains("[第1輪 full 含說明"), "{}", h.bodies()[2]);
+}
+
+// ================================================================================================
+// 切換模型（B4 #420）：Grok（標準 ACP）用原生 session/set_model；agy 換模型後帶同一段對話重開。選好的記進 acp-models.json
+// ================================================================================================
+
+async fn set_model_blocking(admin: &Arc<dyn engines::acp_admin::AcpAdmin>, name: &str, model: &str) -> Result<Value, String> {
+    let (a, n, m) = (admin.clone(), name.to_string(), model.to_string());
+    tokio::task::spawn_blocking(move || a.set_model(&n, &m)).await.unwrap()
+}
+
+fn recorded_models(h: &EH) -> Value {
+    serde_json::from_str(&std::fs::read_to_string(h.work.path().join("acp-models.json")).unwrap_or_default()).unwrap_or(Value::Null)
+}
+
+#[tokio::test]
+async fn acp_切換模型_原生切換不重開_下一輪用新模型_對話接續_記下來_重開asn照新模型() {
+    let grok = worker("Grok", "acp", json!({ "roster_engine": "grok" }));
+    let state = tempfile::tempdir().unwrap();
+    let st = state.path().display().to_string();
+    let mut h = eh(Some(json!([grok])), &[("FAKE_ACP_MODELS", "grok-4.7,grok-4.6"), ("FAKE_ACP_STATE", &st)], "acp", &[]).await;
+    let admin = h.set.acp_admin().unwrap();
+    h.put_pull(to_agent(1, "Grok", "一")).await;
+    h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
+    assert!(h.bodies()[0].contains("模型=grok-4.7"), "{}", h.bodies()[0]);
+    assert_eq!(admin.info("Grok").unwrap()["model"], json!("grok-4.7"), "沒指定時顯示 agent 說的目前模型");
+    let pid = wait_pid(&admin, "Grok", |_| true).await;
+    let r = set_model_blocking(&admin, "Grok", "grok-4.6").await.unwrap();
+    assert_eq!((r["pid"].as_u64(), r["restarted"].clone(), r["saved"].clone()), (Some(pid), json!(false), json!(true)));
+    assert_eq!(recorded_models(&h)["models"]["Grok"], json!("grok-4.6"));
+    assert_eq!(admin.info("Grok").unwrap()["model"], json!("grok-4.6"));
+    h.put_pull(to_agent(2, "Grok", "二")).await;
+    h.wait("回覆2", |h| h.fr.sent().len() == 2).await;
+    assert!(h.bodies()[1].contains("第2輪") && h.bodies()[1].contains("模型=grok-4.6"), "同一段對話、用新模型：{}", h.bodies()[1]);
+    assert_eq!(wait_pid(&admin, "Grok", |_| true).await, pid, "沒有重開");
+    // 名單顯示實際生效的模型
+    h.set.refresh_all().await;
+    assert_eq!(h.set.windows().iter().find(|w| w.name == "Grok").and_then(|w| w.model.clone()).as_deref(), Some("grok-4.6"));
+    // 重開 ASN：記下的模型在 session/new 之後補一次 set_model
+    h.restart().await;
+    h.put_pull(to_agent(3, "Grok", "三")).await;
+    h.wait("回覆3", |h| h.fr.sent().len() == 3).await;
+    assert!(h.bodies()[2].contains("模型=grok-4.6"), "重開後照新模型：{}", h.bodies()[2]);
+    assert!(h.log_text().contains("已套用記下的模型 grok-4.6"), "{}", h.log_text());
+}
+
+#[tokio::test]
+async fn acp_切換模型_清單外的被拒絕並列出可選的_不合法的代號被拒_沒列模型的不能切() {
+    let grok = worker("Grok", "acp", json!({ "roster_engine": "grok" }));
+    let mut h = eh(Some(json!([grok])), &[("FAKE_ACP_MODELS", "grok-4.7,grok-4.6")], "acp", &[]).await;
+    let admin = h.set.acp_admin().unwrap();
+    wait_pid(&admin, "Grok", |_| true).await;
+    let e = set_model_blocking(&admin, "Grok", "grok-9").await.unwrap_err();
+    assert!(e.contains("不在這個工作者可選的模型裡") && e.contains("grok-4.7、grok-4.6"), "{e}");
+    for bad in ["-x", "a b", "a/b", ""] {
+        assert!(set_model_blocking(&admin, "Grok", bad).await.unwrap_err().contains("只能用英數"), "{bad}");
+    }
+    assert!(!h.work.path().join("acp-models.json").exists(), "被拒絕時不記");
+    h.put_pull(to_agent(1, "Grok", "一")).await;
+    h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
+    assert!(h.bodies()[0].contains("模型=grok-4.7"), "模型沒變：{}", h.bodies()[0]);
+    // agent 沒列出模型：不能從這裡切
+    let h2 = eh(Some(json!([worker("Gemini", "acp", json!({}))])), &[], "acp", &[]).await;
+    let admin2 = h2.set.acp_admin().unwrap();
+    wait_pid(&admin2, "Gemini", |_| true).await;
+    assert!(set_model_blocking(&admin2, "Gemini", "x1").await.unwrap_err().contains("沒有列出可選的模型"));
+}
+
+#[tokio::test]
+async fn acp_記下的模型檔壞了_照原設定啟動並記log_記下的模型不在清單裡_跳過照預設跑() {
+    let grok = worker("Grok", "acp", json!({ "roster_engine": "grok" }));
+    let mut h = eh(Some(json!([grok])), &[("FAKE_ACP_MODELS", "grok-4.7,grok-4.6")], "acp", &[]).await;
+    std::fs::write(h.work.path().join("acp-models.json"), "{壞掉").unwrap();
+    h.restart().await;
+    h.put_pull(to_agent(1, "Grok", "一")).await;
+    h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
+    assert!(h.bodies()[0].contains("模型=grok-4.7"), "照原設定啟動：{}", h.bodies()[0]);
+    assert!(h.log_text().contains("記下的模型讀不懂，照原設定啟動"), "{}", h.log_text());
+    std::fs::write(h.work.path().join("acp-models.json"), r#"{"version":1,"models":{"Grok":"grok-0"}}"#).unwrap();
+    h.restart().await;
+    h.put_pull(to_agent(2, "Grok", "二")).await;
+    h.wait("回覆2", |h| h.fr.sent().len() == 2).await;
+    assert!(h.bodies()[1].contains("模型=grok-4.7"), "{}", h.bodies()[1]);
+    assert!(h.log_text().contains("記下的模型 grok-0 不在這個 agent 列出的可選模型裡，照預設跑"), "{}", h.log_text());
+}
+
+#[tokio::test]
+async fn agy_切換模型_比對agy_models_帶同一段對話重開_下一輪帶新的_model_清單外拒絕() {
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[("FAKE_AGY_MODELS", "gemini-4-argon-medium,gemini-3.8-flash-high")], "acp", &[]).await;
+    let admin = h.set.acp_admin().unwrap();
+    h.put_pull(to_agent(1, "Gemini", "一")).await;
+    h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
+    assert!(!h.bodies()[0].contains("/gemini"), "一開始沒帶 --model：{}", h.bodies()[0]);
+    let e = set_model_blocking(&admin, "Gemini", "gemini-9").await.unwrap_err();
+    assert!(e.contains("不在這個工作者可選的模型裡") && e.contains("gemini-4-argon-medium"), "{e}");
+    let pid = wait_pid(&admin, "Gemini", |_| true).await;
+    let r = set_model_blocking(&admin, "Gemini", "gemini-3.8-flash-high").await.unwrap();
+    assert_eq!((r["pid"].as_u64(), r["restarted"].clone(), r["saved"].clone()), (Some(pid), json!(true), json!(true)));
+    assert_eq!(recorded_models(&h)["models"]["Gemini"], json!("gemini-3.8-flash-high"));
+    h.put_pull(to_agent(2, "Gemini", "二")).await;
+    h.wait("回覆2", |h| h.fr.sent().len() == 2).await;
+    assert!(h.bodies()[1].contains("[第2輪 full/gemini-3.8-flash-high"), "同一段對話、帶新的 --model：{}", h.bodies()[1]);
+    assert_ne!(wait_pid(&admin, "Gemini", |_| true).await, pid, "重開過");
+    assert_eq!(admin.info("Gemini").unwrap()["model"], json!("gemini-3.8-flash-high"));
+}
+
+#[tokio::test]
+async fn acp_切換模型_處理信件中直接拒絕不排隊_不記下來() {
+    let grok = worker("Grok", "acp", json!({ "roster_engine": "grok" }));
+    let mut h = eh(Some(json!([grok])), &[("FAKE_ACP_MODELS", "grok-4.7,grok-4.6")], "acp", &[]).await;
+    let admin = h.set.acp_admin().unwrap();
+    wait_pid(&admin, "Grok", |_| true).await;
+    h.put_pull(to_agent(1, "Grok", "@@SLEEP")).await;
+    for _ in 0..600 {
+        if admin.info("Grok").unwrap()["status"] == json!("busy") {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    }
+    assert_eq!(admin.info("Grok").unwrap()["status"], json!("busy"));
+    assert!(set_model_blocking(&admin, "Grok", "grok-4.6").await.unwrap_err().contains("正在處理信件，等它做完再試"));
+    assert!(!h.work.path().join("acp-models.json").exists());
 }
 
 // ================================================================================================

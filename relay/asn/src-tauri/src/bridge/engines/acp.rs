@@ -35,6 +35,15 @@ struct Shared {
     stopped: AtomicBool,
     /// agent 宣告的 loadSession：0＝還不知道、1＝支援、2＝不支援
     can_load: AtomicU8,
+    /// agent 列出的可選模型與目前的模型（session/new、session/load 回的 models）
+    models: Mutex<(Vec<String>, Option<String>)>,
+}
+
+/// 從 session/new、session/load 的回應讀出 (可選的模型, 目前的模型)；沒有 models 回 None
+pub fn session_models(r: &Value) -> Option<(Vec<String>, Option<String>)> {
+    let m = r.get("models")?;
+    let list = m.get("availableModels").and_then(Value::as_array).into_iter().flatten().filter_map(|x| x.get("modelId").and_then(Value::as_str)).filter(|x| super::acp_models::valid_model(x)).map(String::from).collect();
+    Some((list, m.get("currentModelId").and_then(Value::as_str).map(String::from)))
 }
 
 pub struct AcpDriver {
@@ -50,7 +59,31 @@ fn roster_session_ok(s: &str) -> bool {
 impl AcpDriver {
     pub fn new(a: DriverArgs) -> AcpDriver {
         let sid = a.session_id.clone();
-        AcpDriver { a, sh: Arc::new(Shared { sid: Mutex::new(sid), resume_lost: AtomicBool::new(false), client: Mutex::new(None), denied: Mutex::new(None), last_activity: AtomicU64::new(0), stopped: AtomicBool::new(false), can_load: AtomicU8::new(0) }) }
+        AcpDriver { a, sh: Arc::new(Shared { sid: Mutex::new(sid), resume_lost: AtomicBool::new(false), client: Mutex::new(None), denied: Mutex::new(None), last_activity: AtomicU64::new(0), stopped: AtomicBool::new(false), can_load: AtomicU8::new(0), models: Mutex::new((vec![], None)) }) }
+    }
+
+    /// 設定裡有模型（含切換模型記下的）：在 session/new 或 session/load 之後補一次 session/set_model。
+    /// 不在對方列出的可選模型裡、或切換失敗，就記 log 照預設跑，不讓工作者起不來
+    async fn apply_recorded_model(&self, client: &AcpClient, sid: &str) {
+        let want = self.a.cfg.model.trim();
+        if want.is_empty() {
+            return;
+        }
+        let (list, cur) = self.sh.models.lock().unwrap().clone();
+        if cur.as_deref() == Some(want) {
+            return;
+        }
+        if !list.iter().any(|m| m == want) {
+            (self.a.log)(format!("記下的模型 {want} 不在這個 agent 列出的可選模型裡，照預設跑"));
+            return;
+        }
+        match client.set_model(sid, want).await {
+            Ok(()) => {
+                self.sh.models.lock().unwrap().1 = Some(want.to_string());
+                (self.a.log)(format!("已套用記下的模型 {want}"));
+            }
+            Err(e) => (self.a.log)(format!("套用記下的模型 {want} 失敗，照預設跑：{}", e.message)),
+        }
     }
 
     fn classify(&self, e: &RpcError, ctx: &str) -> WorkerError {
@@ -82,6 +115,24 @@ impl Driver for AcpDriver {
             2 => Some(false),
             _ => None,
         }
+    }
+    fn models(&self) -> Vec<String> {
+        self.sh.models.lock().unwrap().0.clone()
+    }
+    fn current_model(&self) -> Option<String> {
+        self.sh.models.lock().unwrap().1.clone()
+    }
+    fn set_model(&self, model: String) -> BoxFut<'_, Result<(), String>> {
+        Box::pin(async move {
+            let Some(client) = self.sh.client.lock().unwrap().clone().filter(|c| c.alive()) else { return Err("工作者沒有在跑".to_string()) };
+            let sid = self.session_id();
+            if sid.is_empty() {
+                return Err("工作者還沒有對話，稍後再試".into());
+            }
+            client.set_model(&sid, &model).await.map_err(|e| format!("工作者拒絕切換模型：{}", clip(&e.message, 200)))?;
+            self.sh.models.lock().unwrap().1 = Some(model);
+            Ok(())
+        })
     }
     fn touch(&self) {
         self.sh.last_activity.store(now_ms(), Ordering::SeqCst);
@@ -143,28 +194,39 @@ impl Driver for AcpDriver {
                 self.sh.can_load.store(if can_load { 1 } else { 2 }, Ordering::SeqCst);
                 let cwd = cfg.cwd.to_string_lossy().to_string();
                 let mut sid = self.sh.sid.lock().unwrap().clone();
+                let mut resp: Option<Value> = None;
                 if cfg.adopted {
                     // 接手別人的對話：一定要載入指定的那一段，載不進來就失敗，不偷偷開新對話
                     if sid.is_empty() || !can_load {
                         return Err(RpcError { message: "這個 agent 沒有宣告能載入既有的對話，沒辦法接手".into(), code: None });
                     }
-                    if let Err(e) = client.load_session(&sid, &cwd).await {
-                        return Err(RpcError { message: format!("載入那段對話失敗：{}", e.message), code: e.code });
+                    match client.load_session(&sid, &cwd).await {
+                        Ok(r) => resp = Some(r),
+                        Err(e) => return Err(RpcError { message: format!("載入那段對話失敗：{}", e.message), code: e.code }),
                     }
                 } else if !sid.is_empty() && can_load {
-                    if let Err(e) = client.load_session(&sid, &cwd).await {
-                        (self.a.log)(format!("session/load 失敗，改開新的：{}", e.message));
-                        self.sh.resume_lost.store(true, Ordering::SeqCst);
-                        sid.clear();
+                    match client.load_session(&sid, &cwd).await {
+                        Ok(r) => resp = Some(r),
+                        Err(e) => {
+                            (self.a.log)(format!("session/load 失敗，改開新的：{}", e.message));
+                            self.sh.resume_lost.store(true, Ordering::SeqCst);
+                            sid.clear();
+                        }
                     }
                 } else if !sid.is_empty() {
                     self.sh.resume_lost.store(true, Ordering::SeqCst);
                     sid.clear();
                 }
                 if sid.is_empty() {
-                    sid = client.new_session(&cwd).await?;
+                    let (s, r) = client.new_session_full(&cwd).await?;
+                    sid = s;
+                    resp = Some(r);
                 }
-                *self.sh.sid.lock().unwrap() = sid;
+                *self.sh.sid.lock().unwrap() = sid.clone();
+                if let Some(m) = resp.as_ref().and_then(session_models) {
+                    *self.sh.models.lock().unwrap() = m;
+                }
+                self.apply_recorded_model(&client, &sid).await;
                 Ok(())
             }
             .await;
@@ -350,7 +412,7 @@ impl AcpEngine {
             detail: None,
             context_pct: None,
             mod_loaded: false,
-            model: None,
+            model: Some(w.effective_model()).filter(|m| !m.is_empty()),
             hidden: None,
         }
     }
@@ -363,7 +425,18 @@ impl AcpEngine {
 /// 接手名冊檔（工作資料夾底下）：記著接手過的專屬工作者，重啟後建回來
 pub const ADOPTED_FILE: &str = "acp-adopted.json";
 
+/// 工作者的設定套上切換模型時記下的模型（acp-models.json；壞了就當沒有、記 log）
+fn with_recorded_model(ctx: &EngineCtx, cfg: Arc<WorkerCfg>) -> Arc<WorkerCfg> {
+    let log = ctx.log.clone();
+    let models = super::acp_models::load(&ctx.work_dir.join(super::acp_models::MODELS_FILE), &move |m| log(m));
+    match models.get(&cfg.name) {
+        Some(m) if *m != cfg.model => Arc::new(WorkerCfg { model: m.clone(), ..(*cfg).clone() }),
+        _ => cfg,
+    }
+}
+
 fn make_worker_with(ctx: &EngineCtx, approvals: &Arc<Approvals>, make_driver: &MakeDriver, cfg: Arc<WorkerCfg>, store: Arc<Store>) -> WorkerHandle {
+    let cfg = with_recorded_model(ctx, cfg);
     Worker::new(WorkerInit {
         cfg,
         env: ctx.env.clone(),
@@ -488,7 +561,7 @@ impl Engine for AcpEngine {
                 },
             }
         });
-        Some(Arc::new(super::acp_admin::AcpAdminImpl { workers: self.workers.clone(), adopt }))
+        Some(Arc::new(super::acp_admin::AcpAdminImpl { workers: self.workers.clone(), adopt, models_file: self.ctx.work_dir.join(super::acp_models::MODELS_FILE) }))
     }
 
     fn stop(&self) {

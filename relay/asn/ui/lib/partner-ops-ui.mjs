@@ -51,7 +51,11 @@ export function opDialogText(op, name, device = '', engine = 'claude') {
   const where = device ? `在「${device}」上的` : ''
   const title = { info: `${name} 的詳情`, rename: '改名', close: '關閉視窗', handover: '接班換手', resume: '喚醒', restart: '重開' }[op] ?? OP_LABEL[op] ?? ''
   switch (op) {
-    case 'model': return {
+    case 'model': if (engine === 'acp') return {
+      title, lead: `要把「${name}」${where}內建通道的工作者換成哪個模型？請輸入模型代號，例如 grok-4.6 或 gemini-3.8-flash-high。`, ok: '切換', auto: false, placeholder: '例如 grok-4.6',
+      points: ['只能選這個工作者列得出來的模型；不在清單裡會被拒絕，並列出可以選的', 'Grok 直接換，不會重開；Gemini 會帶同一段對話短暫重開（幾秒）', '工作者正在處理信件時不能換，等它做完再試', '選好的會記下來，重開 ASN 也照新的模型'],
+    }
+    return {
       title, lead: `要把「${name}」${where}視窗的模型換成哪一個？可以只寫模型，或寫「提供者/模型」，例如 anthropic/claude-sonnet-5。`, ok: '切換', auto: false,
       points: ['只換這個視窗目前用的模型，視窗不會關，對話保留', 'pi 正在工作時會先排隊，做完這一輪就換'],
     }
@@ -115,7 +119,7 @@ export const PartnerOpDialog = {
       <input class="set-input" type="text" v-model="form.newName" maxlength="40" aria-label="新名字" @keydown.enter.prevent="submit">
     </label>
     <label class="op-field" v-if="op === 'model'">模型
-      <input class="set-input" type="text" v-model="form.model" maxlength="101" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="例如 anthropic/claude-sonnet-5" aria-label="模型" @keydown.enter.prevent="submit">
+      <input class="set-input" type="text" v-model="form.model" maxlength="101" autocomplete="off" autocapitalize="off" spellcheck="false" :placeholder="text.placeholder || '例如 anthropic/claude-sonnet-5'" aria-label="模型" @keydown.enter.prevent="submit">
     </label>
     <ul class="model-points" v-if="text.points.length"><li v-for="p in text.points" :key="p">{{ p }}</li></ul>
     <label class="op-field" v-if="text.ack"><input type="checkbox" v-model="form.ack" aria-label="確認接手前要先關掉終端機"> {{ text.ack }}</label>
