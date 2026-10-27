@@ -32,6 +32,20 @@ function withTimeout(p, ms, what) {
   })
 }
 
+// 連線中斷的簡短原因（給畫面顯示；原始錯誤只進 log）：分不出來就回空字串，畫面維持原本的說法
+export function connReason(e) {
+  const m = String(e?.message ?? e ?? '')
+  if (/逾時|timeout|timed out/i.test(m)) return '請求逾時'
+  if (/HTTP 401|HTTP 403|unauthorized|forbidden/i.test(m)) return '憑證被拒（請重新登入或重新設定）'
+  if (/HTTP 5\d\d/.test(m)) return '後台暫時出錯'
+  if (/HTTP 400/.test(m)) return '後台拒絕了這次請求'
+  if (/連線失敗|network|dns|connect/i.test(m)) return '連不上後台（請檢查網路或代理）'
+  if (/save|儲存|寫入/i.test(m)) return '本機存檔失敗（磁碟滿了或檔案被占用？）'
+  return ''
+}
+const ACK_CHUNK = 100   // 後台一次最多收 100 個編號，超過整批 400
+const ITEM_RETRY_MAX = 3   // 同一封信處理失敗幾次後就先 ack 掉，不讓一封壞信擋住後面所有信
+
 export class AsnCore {
   constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, localMs = 2_000, soonGapMs = 1_000, statusPollMs = STATUS_POLL_MS, aliases = [], stepMs = STEP_MS }) {
     // 讀取類的呼叫一律加逾時（寄信、寄檔另有自己的流程，不在這裡限時）。收信（inbox、ack）可能一次要走好幾個名字，給兩倍時間
@@ -51,6 +65,8 @@ export class AsnCore {
     this.asn = {}              // 節點 → 在線的 ASN 視窗（名單帶的 asn：版本與狀態）
     this.avatars = new Map()   // 節點 → { at, data }：各設備上傳的大頭貼（名單只帶更新時間，圖按需取、依更新時間快取）
     this.conn = 'connecting'   // connecting | on | off
+    this.connWhy = ''          // conn 為 off 時的簡短原因（connReason）
+    this.itemFails = new Map() // 信件 id → 處理失敗次數
     this.rosterLoaded = false
     this.contextWatch = createContextWatch()   // 上下文升破 90％的提醒記錄（只在記憶體）
     this.handlers = {}
@@ -106,7 +122,7 @@ export class AsnCore {
   async refreshRoster() {
     let members
     try { members = (await this.transport.list())?.members; this.#setConn('on') }
-    catch (e) { this.log(`list failed: ${e.message}`); this.#setConn('off'); return }
+    catch (e) { this.log(`list failed: ${e.message}`); this.#setConn('off', connReason(e)); return }
     this.nodeOrder = (Array.isArray(members) ? members : []).map(m => m?.id).filter(x => typeof x === 'string')
     this.asn = asnByNode(members)
     const live = buildFriends(members, { selfNode: this.selfNode, selfName: this.windowName })
@@ -212,7 +228,7 @@ export class AsnCore {
     } catch (e) { return { ok: false, error: e.message } }
   }
 
-  #setConn(c) { if (this.conn !== c) { this.conn = c; this.emit('state') } }
+  #setConn(c, why = '') { if (this.conn !== c || this.connWhy !== why) { this.conn = c; this.connWhy = c === 'off' ? why : ''; this.emit('state') } }
   #decorate(f) { return { ...f, hue: hueOf(f.id), dp: initial(f.nick) } }
 
   // ---------- 收信 ----------
@@ -225,14 +241,31 @@ export class AsnCore {
         const { messages = [] } = (await this.transport.inbox()) ?? {}
         this.#setConn('on')
         const ids = []
+        let itemErr = null
         for (const m of messages) {
           if (m.to_agent !== this.windowName && !this.aliases.has(m.to_agent)) continue   // 不是寄給本視窗（或還沒過期的舊名）的絕不處理、不 ack
-          if (!this.seen.has(m.id)) { this.seen.add(m.id); if (!this.#noReplyNotice(m)) await this.#incoming(m) }
-          ids.push(m.id)
+          try {
+            if (!this.seen.has(m.id)) { this.seen.add(m.id); if (!this.#noReplyNotice(m)) await this.#incoming(m) }
+            this.itemFails.delete(m.id)
+            ids.push(m.id)
+          } catch (e) {
+            // 一封信處理失敗不能擋住後面的信：記下、跳過；同一封連續失敗 ITEM_RETRY_MAX 次就放棄它（照常 ack，免得每輪都卡在同一封）
+            itemErr = e
+            const n = (this.itemFails.get(m.id) ?? 0) + 1
+            this.itemFails.set(m.id, n)
+            this.seen.delete(m.id)
+            this.log(`pull item failed (${String(m.id).slice(0, 8)} #${n}): ${e.message}`)
+            if (n >= ITEM_RETRY_MAX) { this.itemFails.delete(m.id); this.seen.add(m.id); ids.push(m.id); this.log(`pull item dropped (${String(m.id).slice(0, 8)})`) }
+          }
         }
-        if (ids.length) { await this.flush(); await this.transport.ack(ids); ids.forEach(i => this.seen.delete(i)) }
+        if (ids.length) {
+          await this.flush()
+          for (let i = 0; i < ids.length; i += ACK_CHUNK) await this.transport.ack(ids.slice(i, i + ACK_CHUNK))   // 分批 ack，一批最多 100 個
+          ids.forEach(i => this.seen.delete(i))
+        }
+        if (itemErr) this.#setConn('off', '有信件處理失敗（已跳過，詳見記錄）')
       } while (this.again)
-    } catch (e) { this.log(`pull failed (${why}): ${e.message}`); this.#setConn('off') }
+    } catch (e) { this.log(`pull failed (${why}): ${e.message}`); this.#setConn('off', connReason(e)) }
     finally { this.pulling = false }
     void this.refreshSentStatus(why)
   }
@@ -541,7 +574,7 @@ export class AsnCore {
   logOf(id) { return this.logs.get(id) ?? [] }
   // 畫面要顯示的範圍：最近 VIEW_BASE 列，加上往上載入而多出來的
   viewOf(id) { return this.logOf(id).slice(-(VIEW_BASE + (this.olderExtra.get(id) ?? 0))) }
-  snapshot() { return { conn: this.conn, windowName: this.windowName, selfNode: this.selfNode, nodeOrder: [...this.nodeOrder], asn: this.asn, friends: [...this.friends.values()].map(f => ({ ...f })) } }
+  snapshot() { return { conn: this.conn, connWhy: this.connWhy, windowName: this.windowName, selfNode: this.selfNode, nodeOrder: [...this.nodeOrder], asn: this.asn, friends: [...this.friends.values()].map(f => ({ ...f })) } }
 
   // ---------- 存檔 ----------
   #scheduleSave() { if (!this.saveTimer) this.saveTimer = setTimeout(() => { this.saveTimer = null; void this.flush() }, 300) }

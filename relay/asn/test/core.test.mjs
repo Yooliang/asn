@@ -214,3 +214,38 @@ test('未指定收件人的信（橋交給本人）：對話先顯示「XX 寄�
   await core.stop()
   await relay.close()
 })
+
+// ---- #339：一封壞信、ack 超過 100 個、連線原因 ----
+import { connReason } from '../ui/lib/core.mjs'
+
+test('連線中斷的簡短原因：逾時、憑證、後台出錯、連不上、存檔失敗各自說清楚；認不得的留空', () => {
+  assert.equal(connReason(new Error('inbox 逾時')), '請求逾時')
+  assert.match(connReason(new Error('inbox HTTP 401 unauthorized')), /憑證/)
+  assert.match(connReason(new Error('inbox HTTP 503')), /後台/)
+  assert.match(connReason(new Error('inbox 連線失敗：error sending request')), /連不上/)
+  assert.match(connReason(new Error('save 逾時')), /逾時/)
+  assert.equal(connReason(new Error('怪怪的')), '')
+})
+
+test('收信：一次 250 封，ack 分批、每批最多 100 個（後台一次超過 100 個整批 400）', async () => {
+  const acks = []
+  const msgs = Array.from({ length: 250 }, (_, i) => ({ id: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`, from_node: 'W', from_agent: 'W-政策', to_node: 'T', to_agent: NAME, body: `m${i}`, created_at: '2026-10-27T08:00:00Z' }))
+  const transport = { list: async () => ({ members: roster() }), inbox: async () => ({ messages: msgs }), ack: async ids => { acks.push(ids.length); return { acked: ids.length } }, send: async () => ({}) }
+  const core = new AsnCore({ transport, store: memStore(), selfNode: 'T', windowName: NAME, isChatVisible: async () => false, pollMs: 60_000, rosterMs: 60_000 })
+  await core.pull('test')
+  assert.deepEqual(acks, [100, 100, 50])
+  assert.equal(core.conn, 'on')
+})
+
+test('收信：ack 失敗時連線標 off 並寫出原因；下一輪成功就恢復', async () => {
+  let fail = true
+  const msgs = [{ id: '00000000-0000-4000-8000-000000000001', from_node: 'W', from_agent: 'W-政策', to_node: 'T', to_agent: NAME, body: 'x', created_at: '2026-10-27T08:00:00Z' }]
+  const transport = { list: async () => ({ members: roster() }), inbox: async () => ({ messages: msgs }), ack: async () => { if (fail) throw new Error('ack HTTP 503'); return {} }, send: async () => ({}) }
+  const core = new AsnCore({ transport, store: memStore(), selfNode: 'T', windowName: NAME, isChatVisible: async () => false, pollMs: 60_000, rosterMs: 60_000 })
+  await core.pull('test')
+  assert.equal(core.conn, 'off'); assert.match(core.connWhy, /後台/)
+  assert.equal(core.snapshot().connWhy, core.connWhy)
+  fail = false
+  await core.pull('test')
+  assert.equal(core.conn, 'on'); assert.equal(core.connWhy, '')
+})

@@ -258,12 +258,14 @@ const nodeOrder = ref([])
 const asnBadge = node => deviceAsn(asnMap.value[node], info.version)
 const asnMap = ref({})   // 節點 → 在線的 ASN 視窗（版本與狀態），名單設備分組標題旁的小綠點用
 const conn = ref('connecting')
+const connWhy = ref('')   // conn 為 off 時的簡短原因（core.connReason）
 const sync = () => {
   const s = core.snapshot()
   friends.value = s.friends
   nodeOrder.value = s.nodeOrder
   asnMap.value = s.asn ?? {}
   conn.value = s.conn
+  connWhy.value = s.connWhy ?? ''
   emit('asn:state', { ...s, friends: [...s.friends, ...roomFriends.value], me: { ...me }, ui: { dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, collapsed: ui.collapsed } })
 }
 // 名單的活躍度（#347）：名單每次更新、再加每 30 秒（讓 8 小時門檻與離線去抖會自己到期）算一輪；狀態放在普通 Map，畫面靠 activityTick 重算
@@ -1553,7 +1555,7 @@ const app = createApp({
       ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo: sendMsg, nudgeTo, sendAttachTo, loadOlder, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
       chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuCloseIdle, hasIdleTabs, setPaneCall, menuTogglePin, isChatTabPinned,
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
-      STATUS, CONN_LABEL, FIXED_TABS, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr, commitNick,
+      STATUS, CONN_LABEL, connWhy, FIXED_TABS, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr, commitNick,
       deviceDrag, deviceDrop, onDeviceDragStart, onDeviceDragOver, onDeviceDrop, onDeviceTabKey, clearDeviceDrag,
       tab, adI, hub, roomRows, roomHue, roomInitial, groupFlow, openGroupMenu, decideCard, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,
       GUIDES, view, SETTING_CATS, catSub, PANEL_KINDS, panelTabId, panelGuide, panelTitle, openPanel, closePanel, settingsState, applySetting, pickAvatarFile,
