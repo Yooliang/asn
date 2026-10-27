@@ -450,6 +450,10 @@ impl PartnerOps {
         let os = self.env.os();
         let env = super::engines::pi_control::SetModelEnv { now: &|| self.env.now_ms(), alive: &|p| os.alive(p), sleep: &|ms| self.env.pi_sleep(ms), wait_ms: self.env.pi_wait_ms(), poll_ms: 500 };
         match super::engines::pi_control::set_model(&self.env.pi_home(), &op.name, &pi_model_spec(&op.model), &env) {
+            Ok(v) if v.get("queued").and_then(Value::as_bool) == Some(true) => ok(
+                "pi 正在忙，已排隊：做完這一輪就會切換模型",
+                Some(json!({ "engine": "pi", "queued": true, "model": v.get("model"), "provider": v.get("provider") })),
+            ),
             Ok(v) => ok("已切換模型", Some(json!({ "engine": "pi", "model": v.get("model"), "provider": v.get("provider") }))),
             Err(e) => failed(e),
         }
