@@ -28,7 +28,7 @@ import { normalizeSession, restoreSession, sameSession, snapshotSession, trailin
 import { chatTabSameZone, closeAllChatTabs, closeIdleChatTabs, idleTabIds, withCallState, dropInsertBefore, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
 import { nowPlayingLine, normalizeNowPlaying } from './lib/now-playing.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, normalizeClose, normalizeFrame, totalUnread, notifyFromSaved, notifyPlan, notifyWith } from './lib/prefs.mjs'
-import { composerView, entryLabel, screenText, termFriendId, termFriends, termIdOf, timelineAdd, timelineSet } from './lib/term-chat.mjs'
+import { composerView, entryLabel, screenText, termFriendId, termFriends, termIdOf, termStartChoices, termStartRequest, timelineAdd, timelineSet } from './lib/term-chat.mjs'
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
@@ -1027,7 +1027,38 @@ async function openTermTab(id) {
   await invoke('show_main')
   sync()
 }
-const termRoster = computed(() => termFriends(terms.rows, { selfNode: info.node, device: '' }))
+// 「＋」選單的「在這台開終端…」：選 grok／agy 與工作資料夾，按「開啟」才呼叫 term_start（唯一呼叫處）；開好就打開它的分頁
+const termStartDlg = reactive({ open: false, profile: '', cwd: '', busy: false, error: '' })
+const termStartOpts = computed(() => termStartChoices(partnerModels.value))
+const termStartCwds = computed(() => mergeCwdLists([localCwdList.value, cwdChoices({ allow: launchPrefs.cwdAllow.length ? launchPrefs.cwdAllow : defaultCwdAllowFromCli(), recent: launchPrefs.recentCwd })]))
+function openTermStart() {
+  closeLaunchPicker()
+  Object.assign(termStartDlg, { open: true, busy: false, error: '', profile: termStartOpts.value.find(c => c.ok)?.profile ?? '', cwd: termStartCwds.value[0] ?? '' })
+  void refreshCwdCandidates().then(() => { if (termStartDlg.open && !termStartDlg.cwd) termStartDlg.cwd = termStartCwds.value[0] ?? '' })
+}
+function closeTermStart() { if (!termStartDlg.busy) termStartDlg.open = false }
+async function browseTermStartCwd() {
+  termStartDlg.error = ''
+  try {
+    const p = await transport.launchCwdBrowse()
+    if (!p) return
+    localCwdList.value = withPickedCwd(localCwdList.value, p)
+    termStartDlg.cwd = p
+    await loadLaunchPrefs()
+  } catch (e) { termStartDlg.error = String(e?.message ?? e) }
+}
+async function submitTermStart() {
+  const req = termStartRequest(termStartDlg.profile, termStartDlg.cwd, termStartOpts.value)
+  if (!req || termStartDlg.busy) return
+  termStartDlg.busy = true; termStartDlg.error = ''
+  try {
+    const r = await transport.termStart(req)
+    await termPoller?.tickNow()
+    termStartDlg.open = false
+    if (r?.id) await openTermTab(String(r.id))
+  } catch (e) { termStartDlg.error = String(e?.message ?? e) } finally { termStartDlg.busy = false }
+}
+const termRoster =computed(() => termFriends(terms.rows, { selfNode: info.node, device: '' }))
 const termComposer = computed(() => composerView(termPaneRow.value))   // 比終端面板嚴：忙碌或等你回答時輸入區不開放
 const termTabItem = row => (row ? { id: termFriendId(row.id), panel: 'term', term: true, nick: row.title, status: row.tone === 'busy' ? 'busy' : row.tone === 'warn' ? 'away' : 'online', unread: row.state === 'waiting_user' ? 1 : 0 } : null)
 async function termPaneAnswer(n) {   // 分頁裡的選項按鈕：按下就是明確選了第 n 項（沒有預設選項）；仍走 termConfirm
@@ -1481,6 +1512,7 @@ const app = createApp({
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
       termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termsClose, termSendAsk, termSendPhone, termSendBack, termSendConfirm, SEND_MAX,
       termPane, termPaneRow, termPaneActive, termRoster, termComposer, openTermTab, termPaneAnswer, termTimeline, entryLabel,
+      termStartDlg, termStartOpts, termStartCwds, openTermStart, closeTermStart, browseTermStartCwd, submitTermStart,
       adopt, adoptLoad, adoptClose, adoptDo, adoptRelease, adoptUnlockAsk, adoptUnlockCancel, adoptUnlockConfirm, UNLOCK_TEXT,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,

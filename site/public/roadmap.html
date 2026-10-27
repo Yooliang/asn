@@ -50,7 +50,7 @@
     </ul>
     <div class="table-wrap">
       <table class="matrix">
-        <caption>各家 AI 與各項管理功能的現況（依 2026 年 10 月 27 日的主線程式（0.1.85）與議題整理；各格的版本與驗證狀態以格內文字為準）</caption>
+        <caption>各家 AI 與各項管理功能的現況（依 2026 年 10 月 27 日的主線程式（0.1.86）與議題整理；各格的版本與驗證狀態以格內文字為準）</caption>
         <thead><tr><th scope="col">AI</th><th scope="col">開啟</th><th scope="col">關閉</th><th scope="col">接手</th><th scope="col">切換模型</th><th scope="col">群組聊天</th><th scope="col">帳號切換</th><th scope="col">備註與限制</th></tr></thead>
         <tbody>
         <tr>
@@ -394,6 +394,12 @@
     <div class="releases">
 <!-- changelog:start（由 site/make-roadmap-page.mjs 產生，不要手改） -->
       <article class="glass release">
+        <h3>0.1.86<span class="date">2026-10-27</span></h3>
+        <ul>
+          <li>新增：名單「＋」選單多了「在這台開終端…」，可以選 Grok 或 Gemini（agy）和工作資料夾，開好直接打開那個終端的分頁。</li>
+        </ul>
+      </article>
+      <article class="glass release">
         <h3>0.1.85<span class="date">2026-10-27</span></h3>
         <ul>
           <li>修正：手機和電腦幾乎同時確認同一段終端送字時，只會送一次；電腦端若在手機剛處理後再按確認，會提示『手機剛處理過這一段字』而不重送。</li>
@@ -445,12 +451,6 @@
         <h3>0.1.77<span class="date">2026-10-26</span></h3>
         <ul>
           <li>設備與帳號：設定視窗不再重複一個標題；電腦版拿掉底部「已永久移除」區；設備類型標籤只標手機、電腦不標；離線的別台設備不必等自動隱藏就能永久移除；帳號切換的結果回報失敗會重試並存檔補報</li>
-        </ul>
-      </article>
-      <article class="glass release">
-        <h3>0.1.76<span class="date">2026-10-26</span></h3>
-        <ul>
-          <li>電腦版新增「終端」按鈕與清單：列出由 ASN 開的終端機；終端等你回答時（信任資料夾、上下選單）跳出提示框，由你先選一項再按「送出」才代按，絕不自動代答；判斷 Grok 是閒置、處理中或在等你回答（需另外備好內建終端機的程式，尚未隨安裝檔附帶）</li>
         </ul>
       </article>
       <!-- changelog:end -->

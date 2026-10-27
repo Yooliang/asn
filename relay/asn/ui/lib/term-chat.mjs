@@ -125,6 +125,31 @@ export function timelineSet(list, key, status, detail = '') {
 const REMOTE_TO_ENTRY = { pending: 'phone', approved: 'sending', taken: 'sending', done: 'sent', denied: 'rejected', cancelled: 'withdrawn', expired: 'expired', failed: 'failed' }
 export const remoteStatusToEntry = s => (Object.hasOwn(REMOTE_TO_ENTRY, s) ? REMOTE_TO_ENTRY[s] : 'failed')
 
+// ---- 在這台電腦開終端（「＋」選單的「開終端…」）----
+// 後端 term_start 只允許 agy 與 grok（launch/term.rs resolve_command）；工作資料夾要在白名單或是候選（grant_local_cwd）。
+export const TERM_START_PROFILES = Object.freeze([
+  { profile: 'grok', toolId: 'grok', label: 'Grok' },
+  { profile: 'agy', toolId: 'agy', label: 'Gemini（agy）' },
+])
+
+/** 開終端對話框的選項：rows 是開新夥伴用的模型列（modelUiRow 輸出，有 toolId 與 installed）。沒偵測到的反灰並說明 */
+export function termStartChoices(rows) {
+  const list = Array.isArray(rows) ? rows : []
+  return TERM_START_PROFILES.map(p => {
+    const r = list.find(x => (x?.toolId ?? x?.id) === p.toolId)
+    const ok = r?.installed === true
+    return { profile: p.profile, label: p.label, ok, why: ok ? '' : `這台電腦沒偵測到 ${p.label}` }
+  })
+}
+
+/** 按「開啟」：回給 term_start 的請求；種類不在清單、沒裝、沒選資料夾都回 null，不送 */
+export function termStartRequest(profile, cwd, choices) {
+  const c = (Array.isArray(choices) ? choices : []).find(x => x.profile === profile)
+  const dir = typeof cwd === 'string' ? cwd.trim() : ''
+  if (!c || !c.ok || !dir) return null
+  return { profile: c.profile, cwd: dir }
+}
+
 // ---- 終端畫面文字（#331 決定 B：只在本機顯示、唯讀；不轉寄、不上傳、不進信件）----
 export const SCREEN_LINES = 40
 export const SCREEN_MAX = 4000
