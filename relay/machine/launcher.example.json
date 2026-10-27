@@ -12,6 +12,6 @@
       "args": ["/c", "codex", "-c", "check_for_update_on_startup=false", "-s", "workspace-write", "-a", "on-request", "resume", "{name}"]
     }
   },
-  "cwd_allow": ["D:\\Github", "D:\\Github\\irori", "D:\\Github\\eiyuu-md"],
+  "cwd_allow": ["D:\\work", "D:\\work\\project-a", "D:\\work\\project-b"],
   "max_per_hour": 6
 }
