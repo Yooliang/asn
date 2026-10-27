@@ -15,6 +15,7 @@ mod recv_tests;
 mod room_tests;
 mod secret_tests;
 mod send_tests;
+mod site_tests;
 mod who_tests;
 mod unattended_tests;
 mod unit_tests;

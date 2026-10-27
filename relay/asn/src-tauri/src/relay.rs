@@ -376,6 +376,16 @@ impl Relay {
     pub async fn api_signed(&self, action: &str, body: Option<Value>, token: Option<&str>) -> Result<Value, String> {
         self.api_inner(action, body, Duration::from_secs(20), token).await
     }
+    /// 不把非 2xx 當錯誤：回（HTTP 狀態碼, 回應 JSON）。給需要後台中文說明（detail、field）的指令用（asn-cli site）。
+    /// 只有連線失敗才回 Err；錯誤訊息只含動作名，不含金鑰。
+    pub async fn api_status(&self, action: &str, body: Value) -> Result<(u16, Value), String> {
+        let url = format!("{}?action={}", self.base, action);
+        let name = action.split('&').next().unwrap_or(action);
+        let res = self.client.post(&url).json(&body).header("x-relay-key", &self.key).timeout(Duration::from_secs(20)).send().await.map_err(|e| format!("{name} 連線失敗：{}", e.without_url()))?;
+        let status = res.status().as_u16();
+        let text = res.text().await.unwrap_or_default();
+        Ok((status, serde_json::from_str(&text).unwrap_or(Value::Null)))
+    }
     async fn api_inner(&self, action: &str, body: Option<Value>, timeout: Duration, user_token: Option<&str>) -> Result<Value, String> {
         let url = format!("{}?action={}", self.base, action);
         let name = action.split('&').next().unwrap_or(action);
