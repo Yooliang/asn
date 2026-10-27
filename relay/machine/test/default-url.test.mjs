@@ -17,7 +17,7 @@ test('register.mjs 的 DEFAULT_URL 是新後台', () => { assert.equal(DEFAULT_U
 
 function baseUrlIn(env) {
   const id = pathToFileURL(path.join(ROOT, 'relay', 'machine', 'identity.mjs')).href
-  const e = { ...process.env }; delete e.IRORI_RELAY_URL; Object.assign(e, env)
+  const e = { ...process.env }; delete e.IRORI_RELAY_URL; delete e.ASN_RELAY_URL; Object.assign(e, env)
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', `import('${id}').then(m => console.log(m.BASE_URL))`], { env: e, encoding: 'utf8' })
   return r.stdout.trim()
 }
