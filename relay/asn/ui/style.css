@@ -792,6 +792,7 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .partner-run legend{padding:0 4px;font-size:12px;font-weight:600}
 .partner-run-opt{display:flex;flex-wrap:wrap;align-items:center;gap:4px;font-size:12px;cursor:pointer}
 .partner-run-opt.off{opacity:.65;cursor:default}
+.partner-dlg .partner-run-opt{flex-direction:row}
 .partner-run-why{flex-basis:100%;margin-left:20px;font-size:11px;color:#9a3b14}
 .term-ic{position:relative}
 .term-badge{position:absolute;top:-4px;right:-4px;min-width:12px;height:12px;border-radius:6px;background:#d33;color:#fff;font-size:9px;line-height:12px;text-align:center;font-weight:700}

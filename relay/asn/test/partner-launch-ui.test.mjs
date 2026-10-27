@@ -167,3 +167,9 @@ test('開新夥伴精靈的小修（#378 截圖）：「進階」不重複、沒
   assert.match(js, /partnerDlg\.deviceLabel = friends\.value\.find\(f => f\.node === nodeKey\)\?\.device \|\| nodeKey/, '裝置名稱是空字串也退回節點代號')
   assert.match(js, /if \(partnerDlg\.node\) for \(const n of \[2, 3\]\)/, '截圖沒選到設備就不切到第 2、3 頁')
 })
+
+test('「運行」選項圓點和文字排在同一行（#384）：壓過對話框 label 的直排規則', () => {
+  const css = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8')
+  assert.match(css, /\.partner-dlg \.partner-run-opt\{flex-direction:row\}/)
+  assert.ok(css.indexOf('.partner-dlg .partner-run-opt{') > css.indexOf('.partner-dlg label{'), '要寫在直排規則後面')
+})
