@@ -33,7 +33,7 @@ import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, normalizeClose, normal
 import { composerView, entryLabel, screenText, termFriendId, termFriends, termIdOf, termStartChoices, termStartRequest, timelineAdd, timelineSet } from './lib/term-chat.mjs'
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
-import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
+import { MODEL_CATALOG, cliInstalled, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
 import { PI_SETUP_TEXT, piSetupError, piSetupView } from './lib/pi-setup.mjs'
 import { QUOTA_HOOK_TEXT, quotaHookError, quotaHookView } from './lib/quota-hook.mjs'
 import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
@@ -422,13 +422,13 @@ const PI_VIA_READY = true
 // 只能經 pi 的廠牌（#351）：這台的 pi 列得到它的模型才出現，運行只有「經 pi」能選；遠端開 pi 帶模型還沒做，所以只在選這台時加
 const PI_ONLY_CHANNELS = { acp: { status: 'no', why: '沒有內建通道' }, pi: { status: 'ok', why: '只能經 pi 開' }, term: { status: 'no', why: '不走終端' } }
 const piOnlyRows = computed(() => (PI_VIA_READY && partnerDlg.node === info.node
-  ? piOnlyVendorRows(piInfo.models, piInfo.providers).map(v => ({ ...v, profileId: 'pi', toolId: 'pi', installed: cliTools.value.pi?.installed === true, modeLabel: '經 pi 開', installHint: '這台電腦沒偵測到 pi', channels: PI_ONLY_CHANNELS }))
+  ? piOnlyVendorRows(piInfo.models, piInfo.providers).map(v => ({ ...v, profileId: 'pi', toolId: 'pi', installed: cliInstalled(cliTools.value, 'pi'), modeLabel: '經 pi 開', installHint: '這台電腦沒偵測到 pi', channels: PI_ONLY_CHANNELS }))
   : []))
 const dlgVendors = computed(() => (PI_VIA_READY ? [...vendorRows(dlgModels.value), ...piOnlyRows.value] : dlgModels.value))
 const partnerRun = computed(() => {
   const row = dlgRow.value
   const r = row?.channels
-    ? runOptions(row, { local: partnerDlg.node === info.node, piInstalled: cliTools.value.pi?.installed === true, piReady: PI_VIA_READY && piChoice.value.ok })
+    ? runOptions(row, { local: partnerDlg.node === info.node, piInstalled: cliInstalled(cliTools.value, 'pi'), piReady: PI_VIA_READY && piChoice.value.ok })
     : null
   if (!r) {   // 目錄上沒有的（自訂設定）：只看 mode，開成視窗或內建通道
     const bg = row?.mode === 'background'
