@@ -109,6 +109,8 @@ pub fn category_of_agy_tool(name: &str) -> &'static str {
 pub struct Permissions {
     pub rules: BTreeMap<&'static str, Verdict>,
     pub allow_dirs: Vec<PathBuf>,
+    /// 寫入再多一層限制（可選）：有設時，寫檔的路徑還要在這些資料夾裡（同時也必須在 allow_dirs 裡）；沒設就只看 allow_dirs（#708）
+    pub write_dirs: Option<Vec<PathBuf>>,
 }
 impl Permissions {
     pub fn rule(&self, c: &str) -> Verdict {
@@ -151,7 +153,7 @@ pub fn normalize_permissions(raw: Option<&Value>, cwd: &Path) -> (Permissions, V
         rules.insert(c, v);
     }
     for k in src.keys() {
-        if !CATEGORIES.contains(&k.as_str()) && k != "allow_dirs" {
+        if !CATEGORIES.contains(&k.as_str()) && k != "allow_dirs" && k != "write_dirs" {
             warnings.push(format!("permissions.{k} 不認得，已忽略"));
         }
     }
@@ -160,7 +162,23 @@ pub fn normalize_permissions(raw: Option<&Value>, cwd: &Path) -> (Permissions, V
     if dirs.is_empty() {
         dirs.push(cwd.to_path_buf());
     }
-    (Permissions { rules, allow_dirs: dirs }, warnings)
+    let write_dirs = match src.get("write_dirs") {
+        None => None,
+        Some(v) => match v.as_array() {
+            Some(a) => {
+                let w: Vec<PathBuf> = a.iter().filter_map(|d| d.as_str()).filter(|s| !s.trim().is_empty()).map(|s| resolve(cwd, s)).collect();
+                if w.is_empty() {
+                    warnings.push("permissions.write_dirs 是空的，寫入一律拒絕".into());
+                }
+                Some(w)
+            }
+            None => {
+                warnings.push("permissions.write_dirs 必須是資料夾陣列，已忽略".into());
+                None
+            }
+        },
+    };
+    (Permissions { rules, allow_dirs: dirs, write_dirs }, warnings)
 }
 
 fn norm(p: &Path) -> String {
@@ -193,6 +211,13 @@ pub fn decide(policy: &Permissions, req: &Req, base: &Path) -> (Verdict, String)
     if req.category == "read" || req.category == "write" {
         if let Some(out) = req.paths.iter().find(|p| !inside_dirs(p, &policy.allow_dirs, base)) {
             return (Verdict::Deny, format!("路徑在白名單資料夾之外：{out}"));
+        }
+        if req.category == "write" {
+            if let Some(wd) = &policy.write_dirs {
+                if let Some(out) = req.paths.iter().find(|p| !inside_dirs(p, wd, base)) {
+                    return (Verdict::Deny, format!("路徑不在可寫入的資料夾裡：{out}"));
+                }
+            }
         }
     }
     (rule, format!("{}的政策是 {}", category_label(&req.category), rule.name()))
@@ -432,6 +457,32 @@ mod tests {
         assert_eq!(decide(&p, &req("network", &[]), cwd).0, Verdict::Allow);
         assert_eq!(decide(&p, &req("internal", &[]), cwd).0, Verdict::Allow);
         assert_eq!(decide(&p, &req("other", &[]), cwd).0, Verdict::Deny);
+    }
+
+    #[test]
+    fn write_dirs_只收窄寫入_讀仍看_allow_dirs() {
+        let cwd = Path::new("/w/Review");
+        let raw = json!({"write": "allow", "allow_dirs": ["/w/Review"], "write_dirs": ["/w/Review/_preview"]});
+        let (p, warn) = normalize_permissions(Some(&raw), cwd);
+        assert!(warn.is_empty());
+        let req = |c: &str, paths: &[&str]| Req { category: c.into(), paths: paths.iter().map(|s| s.to_string()).collect(), summary: String::new() };
+        assert_eq!(decide(&p, &req("write", &["/w/Review/_preview/a.html"]), cwd).0, Verdict::Allow);
+        assert_eq!(decide(&p, &req("write", &["/w/Review/_patches/x.diff"]), cwd).0, Verdict::Deny, "_patches 不在可寫資料夾");
+        assert_eq!(decide(&p, &req("write", &["/w/Review/_preview/../_patches/x"]), cwd).0, Verdict::Deny, ".. 逃出可寫資料夾");
+        assert_eq!(decide(&p, &req("write", &["/w/Review/_preview/a", "/w/Review/b"]), cwd).0, Verdict::Deny, "多個路徑只要一個在外面就拒絕");
+        assert_eq!(decide(&p, &req("read", &["/w/Review/_patches/x.diff"]), cwd).0, Verdict::Allow, "讀不受 write_dirs 影響");
+        assert_eq!(decide(&p, &req("read", &["/etc/passwd"]), cwd).0, Verdict::Deny);
+        // write_dirs 設在 allow_dirs 外面也寫不進去（兩層都要過）
+        let raw2 = json!({"write": "allow", "allow_dirs": ["/w/Review"], "write_dirs": ["/elsewhere"]});
+        let (p2, _) = normalize_permissions(Some(&raw2), cwd);
+        assert_eq!(decide(&p2, &req("write", &["/elsewhere/x"]), cwd).0, Verdict::Deny);
+        // 空陣列＝全部拒絕並提醒；壞型別＝忽略並提醒；沒設＝行為不變
+        let (p3, w3) = normalize_permissions(Some(&json!({"write": "allow", "write_dirs": []})), cwd);
+        assert_eq!(w3.len(), 1);
+        assert_eq!(decide(&p3, &req("write", &["/w/Review/a"]), cwd).0, Verdict::Deny);
+        let (p4, w4) = normalize_permissions(Some(&json!({"write": "allow", "write_dirs": "oops"})), cwd);
+        assert_eq!(w4.len(), 1);
+        assert_eq!(decide(&p4, &req("write", &["/w/Review/a"]), cwd).0, Verdict::Allow);
     }
 
     #[test]
