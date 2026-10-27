@@ -35,7 +35,8 @@ pub struct PiModel {
 
 /// 名稱只收安全的字元與長度（它會顯示在畫面上，也會當 --provider／--model 的參數）
 pub(crate) fn safe_name(s: &str) -> bool {
-    !s.is_empty() && s.len() <= 100 && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '/' | ':' | '+' | '@' | '[' | ']'))
+    // 第一個字元必須是英數字：「-」開頭的會被 pi 當成旗標（例如 --resume），不能當 --provider／--model 的值
+    s.chars().next().is_some_and(|c| c.is_ascii_alphanumeric()) && s.len() <= 100 && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '/' | ':' | '+' | '@' | '[' | ']'))
 }
 
 /// 開 pi 時帶的 `--provider X --model Y`。兩個都空＝不帶（用 pi 自己的預設）；只給一個、或名稱不合法＝回錯，不悄悄忽略。
@@ -198,6 +199,14 @@ deepseek      deepseek-v4-pro             1M       384K     yes       no    \n";
         assert!(model_args("", "m").is_err());
         assert!(model_args("a;b", "m").is_err());
         assert!(model_args("a", "m --api-key x").is_err(), "不能夾帶別的旗標");
+        assert!(model_args("--resume", "m").is_err(), "以 - 開頭會被當成旗標");
+        assert!(model_args("a", "--api-key").is_err());
+        assert!(model_args("a", "-x").is_err());
+        assert!(model_args("a", "_x").is_err(), "第一個字元一定要英數字");
+        assert!(parse_models("--resume  m  1M 1K yes yes
+ok  -m  1M 1K yes yes
+ok  good  1M 1K yes yes
+").iter().all(|m| m.model == "good"), "清單裡以 - 開頭的名稱也丟掉");
         assert!(model_args("a", &"x".repeat(101)).is_err());
     }
 

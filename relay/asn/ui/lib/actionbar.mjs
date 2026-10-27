@@ -74,16 +74,30 @@ export function opsMenuItems(friend) {
  * ＋分隔線＋邀請等（opsMenuItems）。切換模型、喚醒在大按鈕區已有自己的按鈕，這裡不重複。
  * 夥伴項目的 key 加「p:」前綴，避免和邀請等項目撞名；第一個邀請項目帶 sep:true（前面有夥伴項目時才畫分隔線）。
  */
+// 「把這台電腦上開著的終端納入管理…」（小良哥 #753、#757 用詞）：放在夥伴管理那段、封存之前。
+// 點了打開接手清單（adopt 對話框，候選窗格、接手、允許代答／代送都沿用）；對方已經是 ASN 開的終端、或不在這台電腦時反灰並寫原因。
+export const ADOPT_LABEL = '把這台電腦上開著的終端納入管理…'
+export const ADOPT_TIP = '你自己在終端開的 grok、claude、agy、pi 或 codex，可以交給 ASN 看狀態、提醒你回答；預設只能看，要代送文字得另外允許。'
+export function adoptItem(friend, selfNode = '') {
+  const why = friend?.entryKind === 'term' ? '這個夥伴已經由 ASN 管理' : (!selfNode || friend?.node !== selfNode) ? '只能在那台電腦上納入管理' : ''
+  return { key: 'p:adopt', label: ADOPT_LABEL, tip: ADOPT_TIP, ok: why === '', reason: why }
+}
+// 插在封存／取消封存之前；沒有封存項目就放最後
+function withAdoptItem(items, adopt) {
+  const i = items.findIndex(x => x.key === 'p:archive' || x.key === 'p:unarchive')
+  return i < 0 ? [...items, adopt] : [...items.slice(0, i), adopt, ...items.slice(i)]
+}
+
 export function managePanelItems(friend, ctx = {}, extra = [], local = {}) {
   const all = manageItems(friend, ctx)
   // 項目固定（和名單右鍵、手機同一套同一個順序）：最前面「背景／前台切換」，接著 manageItems 的全部項目；用不到的反灰並附原因。
   // 切換模型、背景／前台切換要問這個視窗自己（local.model／local.console＝{ ok, reason }），其餘照 manageItems
   const partner = all.length ? [
     { key: 'p:console', label: BUDDY_CONSOLE_LABEL, ok: local.console?.ok === true, reason: local.console?.ok === true ? '' : (local.console?.reason || '找不到這個夥伴的主控台視窗') },
-    ...all.map(i => {
+    ...withAdoptItem(all.map(i => {
       const o = i.key === 'model' && local.model ? local.model : i
       return { key: `p:${i.key}`, label: `${i.label}${['close', 'archive', 'unarchive', 'resume', 'model'].includes(i.key) ? '' : '…'}`, ok: o.ok, reason: o.ok ? '' : o.reason }
-    }),
+    }), adoptItem(friend, local.selfNode)),
   ] : []
   const rest = extra.map((i, n) => ({ ...i, ok: true, reason: '', sep: n === 0 && partner.length > 0 }))
   return [...partner, ...rest]
@@ -173,6 +187,7 @@ export const ActionBar = {
       const f = props.friend
       const consoleWhy = consoleBlock(f, props.selfNode) || (cons.state === 'toggle' ? '' : cons.state === 'checking' ? '檢查中…' : cons.reason || '找不到這個夥伴的主控台視窗')
       return {
+        selfNode: props.selfNode,
         console: { ok: !consoleWhy && cons.state === 'toggle' && Boolean(props.api), reason: consoleWhy || (props.api ? '' : '這個畫面不能切換視窗') },
         model: { ok: showModel.value, reason: modelSwitchBlock(f, { selfNode: props.selfNode, engine: engine.value }) || (props.api ? '' : '這個畫面不能切換模型') },
       }
@@ -231,6 +246,7 @@ export const ActionBar = {
       const op = key.slice(2)
       if (op === 'console') { void toggleConsole(); return }
       if (op === 'model') { void toggleModelMenu(); return }
+      if (op === 'adopt') { emit('ops', 'adopt'); return }   // 接手清單在名單視窗裡，經 group-menu 通道請它打開
       if (op === 'archive' || op === 'unarchive') {
         const r = await runArchive(props.api, props.friend, op === 'archive')
         archiveNote.value = r.text

@@ -349,7 +349,6 @@
     <li class="menu-sep" role="separator"></li>
     <li class="menu-head" role="presentation">終端</li>
     <li v-if="termWaitCount"><button type="button" role="menuitem" class="menu-warn" @click="openWaitingTerm">{{ termWaitCount }} 個終端等你回答</button></li>
-    <li><button type="button" role="menuitem" @click="closeLaunchPicker(); adoptLoad()">接手已開著的終端視窗…</button></li>
     <li class="menu-sep" role="separator"></li>
     <li class="menu-head" role="presentation">群組</li>
     <li><button type="button" role="menuitem" @click="closeLaunchPicker(); groupFlow.openCreate()">建立群組…</button></li>
