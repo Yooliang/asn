@@ -60,6 +60,9 @@ mod gui_tests {
     use std::sync::{Arc, Mutex};
     use tempfile::TempDir;
 
+    // 這幾個測試共用同一份全域暫存，要排隊跑，否則互相 reset
+    static SERIAL: Mutex<()> = Mutex::new(());
+
     fn fake_term_server(take_queue: Vec<Vec<Value>>) -> (String, Arc<Mutex<Vec<String>>>) {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://127.0.0.1:{}/relay", l.local_addr().unwrap().port());
@@ -89,6 +92,7 @@ mod gui_tests {
 
     #[tokio::test]
     async fn 本機先確認則遠端作廢() {
+        let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         reset_for_test();
         let d = TempDir::new().unwrap();
         let (url, seen) = fake_term_server(vec![]);
@@ -103,7 +107,38 @@ mod gui_tests {
     }
 
     #[tokio::test]
+    async fn 本機取消則撤回遠端請求_之後不再有東西可確認() {
+        let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        reset_for_test();
+        let d = TempDir::new().unwrap();
+        let (url, seen) = fake_term_server(vec![]);
+        let relay = Relay::new(url, "k".into(), "W".into(), "W".into());
+        register_fake_outgoing("1", "11111111-1111-1111-1111-111111111111", "要撤回", false);
+        withdraw(&relay, d.path(), "1").await;
+        let reqs = seen.lock().unwrap();
+        assert!(reqs.iter().any(|r| r.contains("term_req_result") && r.contains("cancelled")));
+        drop(reqs);
+        assert!(local_by_term("1").is_none(), "本機不再記著這筆");
+        withdraw(&relay, d.path(), "1").await;   // 沒有進行中的請求：不報錯、不再打後台
+        assert_eq!(seen.lock().unwrap().iter().filter(|r| r.contains("term_req_result")).count(), 1);
+    }
+
+    #[tokio::test]
+    async fn 有代答進行中時_撤回送字不會動到它() {
+        let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        reset_for_test();
+        let d = TempDir::new().unwrap();
+        let (url, seen) = fake_term_server(vec![]);
+        let relay = Relay::new(url, "k".into(), "W".into(), "W".into());
+        register_fake_answer("1", "11111111-1111-1111-1111-111111111111");
+        withdraw(&relay, d.path(), "1").await;
+        assert!(local_by_term("1").is_some(), "代答那筆還在");
+        assert!(seen.lock().unwrap().iter().all(|r| !r.contains("term_req_result")), "沒有通知後台取消");
+    }
+
+    #[tokio::test]
     async fn 雜湊不符執行失敗並回報() {
+        let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         reset_for_test();
         let d = TempDir::new().unwrap();
         let row = vec![json!({ "id": "11111111-1111-1111-1111-111111111111", "kind": "send", "term_id": "1", "body_hash": "b".repeat(64), "enter": false })];

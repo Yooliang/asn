@@ -149,7 +149,7 @@ test('接線：提示框有選項清單（逐項按鈕）、說明「將選擇�
 
 test('接線：終端清單按鈕只在有終端時出現；有等你回答的終端時顯示提醒點', () => {
   const html = readUi('list.html')
-  assert.ok(html.includes('v-if="terms.rows.length" title="終端"'))
+  assert.ok(html.includes('class="search-ic term-ic" type="button" title="終端"'))
   assert.ok(html.includes('v-if="terms.rows.some(r => r.prompt)"'))
 })
 
@@ -202,6 +202,12 @@ test('接線：term_send 只在 termSendConfirm 裡呼叫一次；只有「確�
   assert.ok(!ask.includes('termSend('), 'termSendAsk 不送字')
   assert.ok(ask.includes("invoke('term_remote_offer_send'") && ask.includes('sendRequest('), '開確認框時同時傳到手機待確認（#328）')
   assert.ok(tauri.includes("termSend: req => invoke('term_send', { req })"))
+  const back = js.slice(js.indexOf('function termSendBack'), js.indexOf('async function termSendConfirm'))
+  assert.ok(back.includes('termSendWithdraw()'), '按「返回」要撤回手機上的請求（#329）')
+  assert.ok(js.slice(js.indexOf('function termSendOpen'), js.indexOf('function termSendAsk')).includes('termSendWithdraw()'), '關掉或換終端也撤回')
+  assert.ok(js.includes("invoke('term_remote_withdraw'"))
+  assert.ok(js.slice(js.indexOf('function termsClose'), js.indexOf('function termSendOpen')).includes('termSendWithdraw()'), '關整個面板也撤回')
+  assert.ok(!html.includes('terms.open = false'), '模板裡不再直接把面板關掉（一律走 termsClose）')
   assert.ok(html.includes('aria-label="要送進終端的文字"'))
 })
 
