@@ -3,7 +3,7 @@
 給接手「開發、合併、發版」這個位置的人。沒有任何金鑰在這份文件裡。
 
 ## 一、位置與規矩
-- **誰做什麼**：asn真 領隊排優先序；開發（合併、發版）= 你；Gemini審查 = 外部唯讀審查員（審查副本 `D:\Github\Yooliang\asn-gemini-review`，家用機上，我把 diff 放它的 `_patches\`）；ASN-開發（Grok 雲端）= 會議召集人。
+- **誰做什麼**：asn真 領隊排優先序；開發（合併、發版）= 你；Gemini審查 = 外部唯讀審查員（審查副本 `<審查副本>`，家用機上，我把 diff 放它的 `_patches\`）；ASN-開發（Grok 雲端）= 會議召集人。
 - **合併規則**（`docs/TEAM-FLOW.md`）：夥伴互審過就自己合併、發版，小良哥只定產品方向。**合併前一定核對 PR head 的完整 SHA 等於審查核可的 SHA**（我曾經沒核對就合，被糾正過）；別人在 PR 上留的意見要先處理完。疊在別的 PR 上的 PR，合併前先改目標分支成 main，不然內容不會進主線。
 - 終端送字／代答這類 PR，審查要逐條走過「電腦確認、手機確認、手機拒絕、過期、取消、換分頁」六種結束方式。
 - 對小良哥說話：中文、短、不要貼長串；結論與編號就好，細節寫 issue／PR。不確定的事就說不確定，**沒實測就講沒實測**。
@@ -20,7 +20,7 @@
 
 踩過的坑：
 - `release` 會依 `package.json` 升版；如果合併後又要補東西，先 `git checkout -- relay site/public` 還原版本檔再重跑，不然會跳版。
-- 測試用 `CARGO_TARGET_DIR=D:/Github/Yooliang/asn-pr172/relay/asn/src-tauri/target`（共用編譯快取，快很多）。
+- 測試用 `CARGO_TARGET_DIR=<共用的 target 資料夾>`（共用編譯快取，快很多）。
 - 新增 `Command::new` 一定要 `.no_window()`（有守門測試），電腦版專用模組要掛 `#[cfg(desktop)]`（安卓建置會壞，我犯過）。
 - 樣板用到的名字要從 `setup()` return（`test/template-ctx.test.mjs` 會檢查）。
 
