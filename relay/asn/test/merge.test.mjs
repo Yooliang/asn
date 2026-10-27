@@ -197,7 +197,11 @@ test('守門：元件依 paneClasses／msgLayout／foldArrow 排版；樞紐用 
   assert.ok(/\.ctab-menu\{position:fixed/.test(fs.readFileSync(path.join(UI, 'style.css'), 'utf8')), '分頁選單要 position:fixed')
   assert.ok(/\.buddy-menu[\s\S]*position:fixed/.test(fs.readFileSync(path.join(UI, 'style.css'), 'utf8')), '名單右鍵選單要 position:fixed')
   assert.ok(!htmlTab.includes('g-launch') && !htmlTab.includes('開新夥伴…'), '組標題旁與右鍵不保留舊入口')
-  assert.ok(htmlTab.includes('openLaunchPicker') && htmlTab.includes('search-ic'), '搜尋列旁要有開新夥伴')
+  // 「＋」在個人訊息右邊（#349），搜尋列只留搜尋
+  const psmRow = htmlTab.slice(htmlTab.indexOf('class="me-psm-row"'), htmlTab.indexOf('class="me-np"'))
+  assert.ok(psmRow.includes('psm-input') && psmRow.includes('@click.stop="openLaunchPicker"'), '個人訊息右邊要有「＋」')
+  const searchBar = htmlTab.slice(htmlTab.indexOf('<div class="search">'), htmlTab.indexOf('class="archive-note"'))
+  assert.ok(!searchBar.includes('openLaunchPicker') && !searchBar.includes('term-ic'), '搜尋列不再放「＋」和終端按鈕')
   for (const label of ['關閉', '關閉其他', '關閉右側', '全部關閉']) assert.ok(htmlTab.includes(label), `list.html 缺 ${label}`)
   assert.ok(htmlTab.includes('menuTogglePin') && htmlTab.includes('tabPinLabel'))
   const html = fs.readFileSync(path.join(UI, 'list.html'), 'utf8')

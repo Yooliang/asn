@@ -1027,6 +1027,13 @@ async function openTermTab(id) {
   await invoke('show_main')
   sync()
 }
+// 「＋」上的紅點與選單裡的「N 個終端等你回答」（#349）：點了直接打開第一個在等的終端分頁
+const termWaitCount = computed(() => terms.rows.filter(r => r.state === 'waiting_user').length)
+function openWaitingTerm() {
+  closeLaunchPicker()
+  const r = terms.rows.find(x => x.state === 'waiting_user')
+  if (r) void openTermTab(r.id)
+}
 // 「＋」選單的「在這台開終端…」：選 grok／agy 與工作資料夾，按「開啟」才呼叫 term_start（唯一呼叫處）；開好就打開它的分頁
 const termStartDlg = reactive({ open: false, profile: '', cwd: '', busy: false, error: '' })
 const termStartOpts = computed(() => termStartChoices(partnerModels.value))
@@ -1512,7 +1519,7 @@ const app = createApp({
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
       termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termsClose, termSendAsk, termSendPhone, termSendBack, termSendConfirm, SEND_MAX,
       termPane, termPaneRow, termPaneActive, termRoster, termComposer, openTermTab, termPaneAnswer, termTimeline, entryLabel,
-      termStartDlg, termStartOpts, termStartCwds, openTermStart, closeTermStart, browseTermStartCwd, submitTermStart,
+      termStartDlg, termStartOpts, termStartCwds, openTermStart, closeTermStart, browseTermStartCwd, submitTermStart, termWaitCount, openWaitingTerm,
       adopt, adoptLoad, adoptClose, adoptDo, adoptRelease, adoptUnlockAsk, adoptUnlockCancel, adoptUnlockConfirm, UNLOCK_TEXT,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
