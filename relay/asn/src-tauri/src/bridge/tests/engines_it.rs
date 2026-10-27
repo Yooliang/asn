@@ -1111,7 +1111,10 @@ async fn acp_接手_載不進來就失敗_不偷偷開新對話_不留工作者_
     let admin = h.set.acp_admin().unwrap();
     let e = adopt_blocking(&admin, "sess-grok1", &cwd.display().to_string()).await.unwrap_err();
     // 沒有現成的 Grok 工作者：改用開新夥伴的 grok 啟動設定做底（照開新夥伴那條路驗授權與白名單）；這裡的測試環境沒有授權，所以是被擋下，而且說明是哪條路擋的
-    assert!(e.contains("改用「開新夥伴」的 grok 設定也開不起來") && e.contains("不在允許清單"), "{e}");
+    // 擋下的原因看這台機器：有啟動設定＝白名單擋（沒有授權）；完全沒裝 CLI（例如 GitHub 的 Linux 建置）＝沒有可用的啟動設定。兩種都不能自己猜指令
+    assert!(e.contains("改用「開新夥伴」的 grok 設定也開不起來"), "{e}");
+    assert!(e.contains("不在允許清單") || e.contains("還沒有可用的啟動設定"), "{e}");
+    assert!(!admin.has_worker("grok-接手-專案"));
 }
 
 #[tokio::test]
