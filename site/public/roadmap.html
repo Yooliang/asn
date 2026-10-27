@@ -50,7 +50,7 @@
     </ul>
     <div class="table-wrap">
       <table class="matrix">
-        <caption>各家 AI 與各項管理功能的現況（依 2026 年 10 月 27 日的主線程式（0.1.93）與議題整理；各格的版本與驗證狀態以格內文字為準）</caption>
+        <caption>各家 AI 與各項管理功能的現況（依 2026 年 10 月 27 日的主線程式（0.1.94）與議題整理；各格的版本與驗證狀態以格內文字為準）</caption>
         <thead><tr><th scope="col">AI</th><th scope="col">開啟</th><th scope="col">關閉</th><th scope="col">接手</th><th scope="col">切換模型</th><th scope="col">群組聊天</th><th scope="col">帳號切換</th><th scope="col">備註與限制</th></tr></thead>
         <tbody>
         <tr>
@@ -418,6 +418,12 @@
     <div class="releases">
 <!-- changelog:start（由 site/make-roadmap-page.mjs 產生，不要手改） -->
       <article class="glass release">
+        <h3>0.1.94<span class="date">2026-10-27</span></h3>
+        <ul>
+          <li>電腦版查啟動設定與帳號清單時帶上本人簽章，被擋就退避，不再顯示 HTTP 403（含接班換手）；開新夥伴精靈第 2 頁「運行」選項改成橫排；開源後文件與授權整理</li>
+        </ul>
+      </article>
+      <article class="glass release">
         <h3>0.1.93<span class="date">2026-10-27</span></h3>
         <ul>
           <li>新增：開新夥伴改成三頁精靈：「＋」→「新增夥伴…」先選設備，再選廠牌與運行方式，最後填名稱與路徑；新增 DeepSeek、MiniMax（經 pi）；頭像旁的廠商小圖改成疊在右下角。修正：精靈裡設備名、重複的「進階」標示等小問題。</li>
@@ -469,12 +475,6 @@
         <h3>0.1.85<span class="date">2026-10-27</span></h3>
         <ul>
           <li>修正：手機和電腦幾乎同時確認同一段終端送字時，只會送一次；電腦端若在手機剛處理後再按確認，會提示『手機剛處理過這一段字』而不重送。</li>
-        </ul>
-      </article>
-      <article class="glass release">
-        <h3>0.1.84<span class="date">2026-10-27</span></h3>
-        <ul>
-          <li>新增：電腦版名單裡每個終端各一列，點開是跟聊天一樣的分頁：上方狀態、中間送字記錄與終端最近畫面（唯讀）、等你回答時選項直接是按鈕、下方輸入框；送字前出現確認列，可改用手機確認（按了才傳到手機）。修正：手機確認後電腦上的確認列會自動收起，不會再送出第二次；終端忙碌時不開放送字。</li>
         </ul>
       </article>
       <!-- changelog:end -->
