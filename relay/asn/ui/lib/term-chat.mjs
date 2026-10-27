@@ -105,7 +105,7 @@ export function confirmBarView(state, row) {
 
 // ---- 送字時間軸（只記在本機記憶體，ASN 重開就清掉）----
 export const TIMELINE_MAX = 50
-const ENTRY_LABEL = { confirm: '等你確認', phone: '等手機確認', sending: '送出中', sent: '已送出', rejected: '手機已拒絕', withdrawn: '已撤回', expired: '已過期', failed: '沒有送出' }
+const ENTRY_LABEL = { confirm: '等你確認', phone: '等手機確認', sending: '送出中', sent: '已送出', rejected: '手機已拒絕', withdrawn: '已撤回', expired: '已過期', handled: '手機已處理', failed: '沒有送出' }
 export const entryLabel = st => ENTRY_LABEL[st] ?? ENTRY_LABEL.failed
 
 /** 加一筆（最新的在最後，超過上限丟最舊的）。key 由呼叫端給（例如時間戳＋序號），同 key 不重複加 */

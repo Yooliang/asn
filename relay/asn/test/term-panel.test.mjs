@@ -214,6 +214,13 @@ test('接線：term_send 只在 termSendConfirm 裡呼叫一次；只有「確�
   assert.ok(js.includes("invoke('term_remote_withdraw'"))
   assert.ok(js.slice(js.indexOf('function termsClose'), js.indexOf('function termSendOpen')).includes('termSendWithdraw()'), '關整個面板也撤回')
   assert.ok(!html.includes('terms.open = false'), '模板裡不再直接把面板關掉（一律走 termsClose）')
+  // 手機已處理後不能再送一次（#334 審查）：phone 狀態下 termSend 前要先查 term_remote_pending；忙碌也擋
+  const conf = js.slice(js.indexOf('async function termSendConfirm'), js.indexOf('// ---------- 終端放進名單'))
+  assert.ok(conf.indexOf('termPhonePending(') > 0 && conf.indexOf('termPhonePending(') < conf.indexOf('transport.termSend('), '送字前先查手機那筆還在不在')
+  assert.ok(conf.includes("composerView(termSendRow.value).mode !== 'ready'") && conf.indexOf("composerView(termSendRow.value).mode") < conf.indexOf('transport.termSend('), '送字前再擋一次忙碌')
+  assert.ok(js.includes('p?.termId === id'), 'PendingView 欄位是 camelCase（termId）')
+  const ph = js.slice(js.indexOf('function termSendPhone'), js.indexOf('async function termPhonePending'))
+  assert.ok(ph.includes("invoke('term_remote_withdraw'"), '傳手機途中取消：回來後再撤一次')
   assert.ok(html.includes('aria-label="要送進終端的文字"'))
 })
 

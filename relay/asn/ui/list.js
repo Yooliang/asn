@@ -941,14 +941,45 @@ function termSendPhone() {
   const req = sendRequest(termSendRow.value, termSend.text, termSend.enter)
   if (!req || termSend.phone || termSend.busy) return
   termSend.phone = true; termSend.error = ''
-  invoke('term_remote_offer_send', { req }).then(() => { termSend.entryKey = termEntryAdd(req.id, req.text, 'phone') }).catch(e => { termSend.phone = false; termSend.error = String(e?.message ?? e) })
+  invoke('term_remote_offer_send', { req }).then(() => {
+    if (!termSend.phone || termSend.id !== req.id) { void invoke('term_remote_withdraw', { id: req.id }).catch(() => {}); return }   // 傳的途中已取消或換了終端：後台剛登記的那筆馬上撤掉，不留孤兒
+    termSend.entryKey = termEntryAdd(req.id, req.text, 'phone')
+    termPhoneWatch()
+  }).catch(e => { termSend.phone = false; termSend.error = String(e?.message ?? e) })
+}
+// 手機上那筆還在不在：term_remote_pending 是電腦端記著的進行中請求（手機執行完、拒絕、過期都會移除）
+async function termPhonePending(id) {
+  const list = await invoke('term_remote_pending')
+  return Array.isArray(list) && list.some(p => p?.kind === 'send' && p?.termId === id)
+}
+// 手機已處理（確認、拒絕或過期）：收掉確認列，時間軸那筆改成「手機已處理」；字有沒有進去看終端畫面
+function termPhoneSettled() {
+  termEntrySet(termSend.id, termSend.entryKey, 'handled')
+  termSend.phone = false; termSend.entryKey = ''; termSend.confirming = false; termSend.text = ''
+  termSend.note = '手機已處理這一筆，請看終端畫面確認字有沒有送進去'
+}
+let termPhoneTimer = 0
+function termPhoneWatch() {
+  clearInterval(termPhoneTimer)
+  termPhoneTimer = setInterval(async () => {
+    if (!termSend.phone || !termSend.id) { clearInterval(termPhoneTimer); termPhoneTimer = 0; return }
+    try { if (!(await termPhonePending(termSend.id))) { clearInterval(termPhoneTimer); termPhoneTimer = 0; if (termSend.phone) termPhoneSettled() } } catch { /* 查不到就下一輪再查 */ }
+  }, 2000)
 }
 function termSendBack() { termSend.confirming = false; termSendWithdraw() }
 async function termSendConfirm() {
   const req = sendRequest(termSendRow.value, termSend.text, termSend.enter)
   if (!req || termSend.busy) return
+  if (composerView(termSendRow.value).mode !== 'ready') {   // 確認列出現後終端才忙碌或等你回答：不送，收掉確認列並撤回手機那筆
+    termSend.error = composerView(termSendRow.value).reason; termSend.confirming = false; termSendWithdraw(); return
+  }
   termSend.busy = true; termSend.error = ''
   try {
+    if (termSend.phone) {   // 已傳過手機：先確認手機那筆還在。不在了＝手機已處理，再送會送兩次
+      let still = false
+      try { still = await termPhonePending(req.id) } catch (e) { termSend.error = '查不到手機那筆的狀態，先不送，請稍後再試'; return }
+      if (!still) { termPhoneSettled(); return }
+    }
     await transport.termSend(req)
     if (termSend.phone && termSend.entryKey) { termEntrySet(req.id, termSend.entryKey, 'sent') } else termEntryAdd(req.id, req.text, 'sent')   // 本機先確認：手機那筆跟著作廢，同一筆記成已送出
     termSend.phone = false; termSend.entryKey = ''
