@@ -1,11 +1,11 @@
 {
-  "version": "0.1.87",
-  "notes": "新增：設定 → 啟動設定多了「額度回報」，按「接上…」同意後，ASN 會把額度記錄接在 Claude Code 的狀態列上，手機的「設備與帳號」就看得到這台 Claude 帳號還剩多少額度；預設不接，隨時可以取消接上，你原本的狀態列指令照常顯示。",
-  "pub_date": "2026-10-27T05:09:15.046Z",
+  "version": "0.1.88",
+  "notes": "修正：電腦版名單的分頁依廠商、群組依廠商，現在 pi 也會依背後實際用的模型廠商歸類（Claude、GPT、Gemini…），對不到才留在 Pi。",
+  "pub_date": "2026-10-27T05:19:04.987Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjVEZGNwVk9lcFdwekticm5ReFlIZlZVcVBqL01SQ3ppajdpNVdQRXZXS2NrdUd0ZERpMWlKMi9PQnZYY3ZUbG01WE9IWXVSM3hyR0JYR3RmNmZ1NVFzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDc3NzU0CWZpbGU6QVNOXzAuMS44N194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjg3CjFmV0l2aEtHT1ZGdUV0WTNVR0MzT1hkMVQwcVdvdHgrYytVbFMwV0hZU0dxMWQ3Y0JIYnhiMm5xdEE4eW5CRXFaMzJmdXRlVTVrTGo1MG1Gbk9TUkJRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.87_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnhNNnJDL3lQendEb1AvTzQ3TUFsNUFXRUluNFJhTDZtWi9FWjRXNFZqRUIyaFlkTlhaYlI4MmdrOVMvQkxRaGZ5ckxuekoyUTBsbWszbTZ3NDkvK1EwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDc4MzQ0CWZpbGU6QVNOXzAuMS44OF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjg4ClVtdHhOekNZWTBvb3NXcXI0Mk9rb1ptTkdOL1E4ak9Pckh4by90R3ZFSTVPZ3JiTTBaakhYeTB2TktzUndEazhLVEVmUzJBdjBCNnRiZ214K2VvZENnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.88_x64-setup.exe"
     }
   }
 }
