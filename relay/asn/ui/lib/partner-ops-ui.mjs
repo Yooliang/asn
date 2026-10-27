@@ -49,7 +49,7 @@ export async function runPartnerOp(api, friend, op, input, { onUpdate = () => {}
 // 各動作的對話框文字（給人看；device＝設備名）。confirm＝要先確認；auto＝不用確認直接送出
 export function opDialogText(op, name, device = '', engine = 'claude') {
   const where = device ? `在「${device}」上的` : ''
-  const title = { info: `${name} 的詳情`, rename: '改名', close: '關閉視窗', handover: '接班換手', resume: '喚醒', restart: '重開' }[op] ?? OP_LABEL[op] ?? ''
+  const title = { info: `${name} 的詳情`, rename: '改名', close: '關閉視窗', handover: '接班換手', resume: '喚醒', restart: '重開', remove: '移除' }[op] ?? OP_LABEL[op] ?? ''
   switch (op) {
     case 'model': if (engine === 'acp') return {
       title, lead: `要把「${name}」${where}內建通道的工作者換成哪個模型？請輸入模型代號，例如 grok-4.6 或 gemini-3.8-flash-high。`, ok: '切換', auto: false, placeholder: '例如 grok-4.6',
@@ -62,6 +62,10 @@ export function opDialogText(op, name, device = '', engine = 'claude') {
     case 'rename': return { title, lead: `要把「${name}」改成什麼名字？名字只能用英數、連字號、中文，1～40 字，不能以連字號開頭。`, points: [], ok: '改名', auto: false }
     case 'close': if (engine === 'acp') return { title: '關閉', lead: `要關閉「${name}」${where}內建通道的工作者嗎？會結束它的程序，這次不再收信，名單上暫時看不到；不會改設定檔，重啟 ASN 後會恢復。`, points: [], ok: '關閉', auto: false }
       return { title, lead: `關掉「${name}」${where}視窗？對話記錄會留著。`, points: [], ok: '關閉視窗', auto: false }
+    case 'remove': return {
+      title, lead: `要移除「${name}」${where}內建通道的工作者嗎？`, ok: '移除', auto: false, danger: true,
+      points: ['會結束它的程序，從名單和 ASN 的名冊刪掉，重開 ASN 也不會回來', '它的對話會清掉，記下的模型也一起刪掉', '工作資料夾裡的檔案留著，不會刪', '寫在這台電腦 agents.json 裡的工作者不能從這裡移除，要到電腦上改設定檔'],
+    }
     case 'restart': return { title, lead: `要重開「${name}」${where}內建通道的工作者嗎？會先結束它的程序，再由 ASN 重新啟動，對話會保留。`, points: [], ok: '重開', auto: false }
     case 'handover': if (engine === 'adopt') return {
       title: '接手', lead: `要讓 ASN 的 Grok 工作者接手${where}「${name}」的對話嗎？`, ok: '接手', auto: false, ack: ADOPT_ACK,
@@ -129,7 +133,7 @@ export const PartnerOpDialog = {
     <p class="partner-err" v-if="st.error" role="alert">{{ st.error }}</p>
     <div class="partner-actions">
       <button class="aero-btn" type="button" @click="close">取消</button>
-      <button class="aero-btn primary" type="button" @click="submit">{{ text.ok }}</button>
+      <button class="aero-btn" :class="text.danger ? 'danger' : 'primary'" type="button" @click="submit">{{ text.ok }}</button>
     </div>
   </template>
   <template v-else>

@@ -9,7 +9,7 @@ import { rosterGroups } from '../ui/lib/mobile.mjs'
 
 const read = p => fs.readFileSync(new URL(`../${p}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const PID = 'p_0123456789abcdef0123'
-const FIXED = ['info', 'rename', 'model', 'close', 'handover', 'resume', 'restart', 'archive']   // 選單固定項目與順序
+const FIXED = ['info', 'rename', 'model', 'close', 'handover', 'resume', 'restart', 'remove', 'archive']   // 選單固定項目與順序
 const F = (node, agent, o = {}) => ({ id: `${node}/${agent}`, node, agent, nick: agent, device: '家用機', status: 'online', engine: 'claude', ...o })
 
 test('名單轉換：後台的 archived 旗標變成 friend.archived；沒帶（舊後台）＝沒封存；離線成員也一樣', () => {
@@ -144,8 +144,9 @@ test('選單項目固定：每種 AI 夥伴都是同一套同一個順序，只�
   assert.deepEqual(keys(F('G', 'Grok', { engine: 'cloud', archived: true })), UNARCH)
   assert.deepEqual(okKeys(F('G', 'Grok', { engine: 'claude', kind: 'cloud-agent' })), ['archive'])
   assert.deepEqual(keys(F('H', 'Gemini', { engine: 'gemini' })), FIXED)
-  assert.deepEqual(okKeys(F('H', 'Gemini', { engine: 'gemini' })), ['info', 'model', 'close', 'handover', 'restart', 'archive'])
-  assert.deepEqual(okKeys(F('H', 'Gemini', { engine: 'agy' })), ['info', 'model', 'close', 'handover', 'restart', 'archive'])
+  assert.deepEqual(okKeys(F('H', 'Gemini', { engine: 'gemini' })), ['info', 'model', 'close', 'handover', 'restart', 'remove', 'archive'])
+  assert.deepEqual(okKeys(F('H', 'Gemini', { engine: 'agy' })), ['info', 'model', 'close', 'handover', 'restart', 'remove', 'archive'])
+  assert.deepEqual(okKeys(F('H', 'Gemini', { engine: 'gemini', status: 'stopped' })), ['info', 'restart', 'remove', 'archive'], '已停止的工作者：詳情、重開、移除（0.2 B3）')
   assert.deepEqual(okKeys(F('H', 'Gemini', { engine: 'gemini', status: 'offline' })), ['archive'], '離線的 ACP 工作者只能封存')
   assert.deepEqual(okKeys(F('H', '小碼', { engine: 'codex' })), ['archive'])
   assert.deepEqual(keys(F('H', '小文')), FIXED)

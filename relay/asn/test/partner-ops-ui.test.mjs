@@ -211,3 +211,26 @@ test('內建通道工作者的「切換模型」對話框：說清楚只能選�
   assert.doesNotMatch(all, /pi/, '不混進 pi 的說明')
   assert.equal(opDialogText('model', '小甲', '', 'claude').placeholder, undefined, 'Claude 與 pi 的文字不變')
 })
+
+test('移除（0.2 B3）的對話框：寫明會結束程序、對話清掉、工作資料夾的檔案留著、agents.json 那類不能移除；確認鍵是紅色', () => {
+  const t = opDialogText('remove', 'Grok', '工作機', 'acp')
+  assert.equal(t.title, '移除')
+  assert.equal(t.ok, '移除')
+  assert.equal(t.danger, true, '確認鍵用紅色')
+  const all = t.points.join('\n')
+  for (const re of [/結束它的程序/, /對話會清掉/, /工作資料夾裡的檔案留著/, /agents\.json/]) assert.match(all, re)
+  const ui = fs.readFileSync(new URL('../ui/lib/partner-ops-ui.mjs', import.meta.url), 'utf8')
+  assert.match(ui, /:class="text\.danger \? 'danger' : 'primary'"/)
+  assert.match(fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8'), /\.aero-btn\.danger\{/)
+  assert.match(fs.readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8'), /'m-danger': ops\.phase === 'close' \|\| opsText\.danger/)
+})
+
+test('已停止（0.2 B3）：名單狀態 stopped 不當成線上；內建通道的工作者只能詳情、重開、移除，其餘寫明先重開', async () => {
+  const { statusOf } = await import('../ui/lib/roster.mjs')
+  assert.equal(statusOf('stopped'), 'stopped')
+  assert.equal(statusOf('idle'), 'online')
+  const ctx = { machines: { H: { online: true, launcher: { profiles: [] } } }, loaded: true, signedIn: true }
+  const items = menuItems({ node: 'H', agent: 'Grok', engine: 'grok', status: 'stopped' }, ctx)
+  assert.deepEqual(items.filter(i => i.ok).map(i => i.key), ['info', 'restart', 'remove'])
+  assert.match(items.find(i => i.key === 'model').reason, /已停止，先按「重開」/)
+})

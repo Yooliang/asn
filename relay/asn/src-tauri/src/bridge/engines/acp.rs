@@ -326,13 +326,13 @@ impl AcpEngine {
         *self.queue_env.lock().unwrap() = env;
     }
 
-    /// 動態加一個背景工作者（開新夥伴）。同名且還在名單上＝失敗；同名但已被關閉／起不來＝換成新的
+    /// 動態加一個背景工作者（開新夥伴）。同名且還在名單上（沒被關閉）＝失敗；同名但已被關閉／起不來＝換成新的
     fn add_partner(&self, cfg: WorkerCfg) -> Result<(), String> {
         let store = self.store.lock().unwrap().clone().ok_or("工作者管理還沒啟動")?;
         {
             let mut ws = self.workers.lock().unwrap();
             if let Some(i) = ws.iter().position(|(n, _)| n.eq_ignore_ascii_case(&cfg.name)) {
-                if ws[i].1.listed() {
+                if ws[i].1.listed() && !ws[i].1.admin_stopped() {
                     return Err(format!("已經有叫「{}」的工作者", cfg.name));
                 }
                 let (_, old) = ws.remove(i);
@@ -561,7 +561,15 @@ impl Engine for AcpEngine {
                 },
             }
         });
-        Some(Arc::new(super::acp_admin::AcpAdminImpl { workers: self.workers.clone(), adopt, models_file: self.ctx.work_dir.join(super::acp_models::MODELS_FILE) }))
+        let wd = &self.ctx.work_dir;
+        Some(Arc::new(super::acp_admin::AcpAdminImpl {
+            workers: self.workers.clone(),
+            adopt,
+            models_file: wd.join(super::acp_models::MODELS_FILE),
+            partners_file: wd.join(super::partner_queue::PARTNERS_FILE),
+            adopted_file: wd.join(ADOPTED_FILE),
+            events: self.ctx.events.clone(),
+        }))
     }
 
     fn stop(&self) {

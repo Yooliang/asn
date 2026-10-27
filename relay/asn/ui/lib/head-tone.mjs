@@ -13,6 +13,7 @@ export function headTone(status, friend = null) {
 export function warnKind(status, { hideBusy = false } = {}) {
   if (status === 'online' || !status) return null
   if (status === 'offline') return 'offline'
+  if (status === 'stopped') return 'stopped'
   if (status === 'busy' && hideBusy) return null
   return 'status'
 }

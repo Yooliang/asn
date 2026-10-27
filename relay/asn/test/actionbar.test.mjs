@@ -99,8 +99,8 @@ test('一對一「管理」選單：夥伴管理項目（沿用名單右鍵 mana
   const ctx = { loaded: true, signedIn: true, machines: { H: { online: true, launcher: true } } }
   const inv = opsMenuItems(f)
   const it = managePanelItems(f, ctx, inv)
-  assert.deepEqual(it.map(i => i.key), ['p:console', 'p:info', 'p:rename', 'p:model', 'p:close', 'p:handover', 'p:resume', 'p:restart', 'p:adopt', 'p:archive', 'invite'], '項目固定，順序和名單右鍵、手機一致')
-  assert.deepEqual(it.map(i => i.ok), [false, true, true, true, true, true, false, false, false, true, true], '背景／前台切換要問這個視窗自己（沒給就反灰）；切換模型沒給就照 manageItems；喚醒、重開不適用')
+  assert.deepEqual(it.map(i => i.key), ['p:console', 'p:info', 'p:rename', 'p:model', 'p:close', 'p:handover', 'p:resume', 'p:restart', 'p:remove', 'p:adopt', 'p:archive', 'invite'], '項目固定，順序和名單右鍵、手機一致')
+  assert.deepEqual(it.map(i => i.ok), [false, true, true, true, true, true, false, false, false, false, true, true], '背景／前台切換要問這個視窗自己（沒給就反灰）；切換模型沒給就照 manageItems；喚醒、重開不適用')
   for (const i of it) assert.equal(Boolean(i.reason), !i.ok, i.key)
   assert.equal(it.find(i => i.key === 'p:resume').reason, '這個視窗在線上，不需要喚醒')
   const local = managePanelItems(f, ctx, inv, { console: { ok: true, reason: '' }, model: { ok: false, reason: '這個視窗在另一台電腦上，要到那台電腦的 ASN 才能切換模型' } })

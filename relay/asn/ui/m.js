@@ -589,7 +589,7 @@ const app = createApp({
     const opsText = computed(() => opDialogText(ops.phase, chatFriend.value?.agent || chatFriend.value?.nick || '', chatFriend.value?.device || '', dialogEngine(chatFriend.value)))
     const opsTitle = computed(() => (ops.phase === 'menu' ? (chatFriend.value?.nick ?? '') : opsText.value.title || OP_LABEL[ops.phase] || ''))
     const opsModels = phoneModels(), opsModelNote = MODEL_NOTE
-    const opsIsPi = computed(() => partnerEngine(chatFriend.value) === 'pi')   // pi 沒有固定的模型清單：改成輸入框
+    const opsIsPi = computed(() => ['pi', 'acp'].includes(partnerEngine(chatFriend.value)))   // pi 與內建通道的工作者沒有固定的模型清單：改成輸入框（Claude 的常用清單對它們不適用）
     const opsRun = ref(null)   // 對話頁頂端的進度：{ op, view }
     const opsBanner = computed(() => runBanner(opsRun.value))
     let opsToken = 0

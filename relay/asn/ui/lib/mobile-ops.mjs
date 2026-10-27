@@ -21,7 +21,7 @@ export function chatPageState(friends, lastId) {
 
 // ---------- 「⋯」選單 ----------
 // 每個項目點下去的下一步：form＝要先填（改名）、pick＝要先選（切換模型）、confirm＝要先確認（關閉、接班換手）、run＝直接送出（詳情、喚醒）
-export const OP_STEP = { rename: 'form', model: 'pick', close: 'confirm', handover: 'confirm', restart: 'confirm', info: 'run', resume: 'run' }
+export const OP_STEP = { rename: 'form', model: 'pick', close: 'confirm', handover: 'confirm', restart: 'confirm', remove: 'confirm', info: 'run', resume: 'run' }
 export const opStep = op => OP_STEP[op] ?? ''
 // 詳情的結果留在選單裡看；其他動作送出後選單收起，進度顯示在對話頁頂端
 export const showsInSheet = op => op === 'info'
