@@ -4,6 +4,8 @@
 //
 //   node tools-acp-probe.mjs init   <agent> [--cmd <exe> [args...]]    只做 initialize，印出能力（不花額度）
 //   node tools-acp-probe.mjs prompt <agent> "<一句話>" [--cmd ...]      initialize＋session/new＋session/prompt
+//   node tools-acp-probe.mjs models <agent> [--cmd ...]                initialize＋session/new，看有沒有原生切模型（0.2 B2）：
+//        印 session/new 回的 models／modes；有 models 就用「目前的模型」呼叫一次 session/set_model（等於沒換）確認方法存在。不送任何一句話、不花額度
 //
 // <agent>：gemini（node + 全域 @google/gemini-cli bundle + --acp）、或 custom（搭配 --cmd 指定任何 ACP agent 指令）
 import fs from 'node:fs'
@@ -28,8 +30,8 @@ function resolveAgent(name, rest) {
 }
 
 const [mode, agentName, ...rest] = process.argv.slice(2)
-if (!['init', 'prompt'].includes(mode) || !agentName) {
-  console.error('用法：tools-acp-probe.mjs init|prompt <agent> ["<一句話>"] [--cmd <exe> [args...]]')
+if (!['init', 'prompt', 'models'].includes(mode) || !agentName) {
+  console.error('用法：tools-acp-probe.mjs init|prompt|models <agent> ["<一句話>"] [--cmd <exe> [args...]]')
   process.exit(2)
 }
 const authAt = rest.indexOf('--auth')
@@ -51,6 +53,17 @@ try {
     agentCapabilities: init.agentCapabilities ?? null,
     authMethods: (init.authMethods ?? []).map(a => ({ id: a.id, name: a.name })),
   }, null, 1))
+  if (mode === 'models') {
+    if (authId) { await client.authenticate(authId); log(`authenticate ${authId} ok`) }
+    const s = await client.newSession(cwd)
+    log(`session/new ok（sessionId=${s.sessionId}）`)
+    const models = s.models ?? null
+    const out = { sessionNewKeys: Object.keys(s ?? {}).sort(), models: models ? { currentModelId: models.currentModelId ?? null, available: (models.availableModels ?? []).map(m => m.modelId ?? m.id ?? m.name) } : null, modes: s.modes ? { currentModeId: s.modes.currentModeId ?? null, available: (s.modes.availableModes ?? []).map(m => m.id) } : null, setModel: null }
+    if (models?.currentModelId) {
+      try { await client.request('session/set_model', { sessionId: s.sessionId, modelId: models.currentModelId }, 15_000); out.setModel = 'ok' } catch (e) { out.setModel = `error: ${String(e?.message ?? e).slice(0, 160)}` }
+    }
+    console.log(JSON.stringify(out, null, 1))
+  }
   if (mode === 'prompt') {
     if (authId) { await client.authenticate(authId); log(`authenticate ${authId} ok`) }
     const s = await client.newSession(cwd)
