@@ -159,6 +159,14 @@ test('接線：終端入口併進「＋」選單（#349）；有終端等你回�
   assert.ok(js.includes("const termWaitCount = computed(() => terms.rows.filter(r => r.state === 'waiting_user').length)"))
 })
 
+test('「＋」選單沒有終端等你回答時，不留空的「終端」標題（#392）', () => {
+  const html = readUi('list.html')
+  const menu = html.slice(html.indexOf('class="av-menu launch-picker"'), html.indexOf('</ul>', html.indexOf('class="av-menu launch-picker"')))
+  const block = menu.slice(menu.indexOf('<template v-if="termWaitCount">'), menu.indexOf('</template>'))
+  assert.ok(block.includes('>終端</li>') && block.includes('@click="openWaitingTerm"'), '「終端」標題和項目包在同一個 v-if 裡')
+  assert.equal(menu.split('>終端</li>').length, 2, '選單裡只有一個「終端」標題')
+})
+
 // ---- ASN 替使用者往終端送字（#296）----
 const ROW = { id: '4', title: 'grok #4', folder: 'proj', cwd: 'D:\\work\\proj', state: 'idle' }
 
