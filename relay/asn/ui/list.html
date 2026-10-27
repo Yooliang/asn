@@ -58,7 +58,7 @@
           <img v-if="dimTab === 'device' && d.key === selfNode" src="img/logo.svg" alt="">
           <img v-else-if="dimTab === 'engine' && d.vendorKey === 'asn'" src="img/logo.svg" alt="">
           <span v-else-if="dimTab === 'engine' && d.vendorKey" class="rtab-vendor" v-html="vendorIcon(d.vendorKey)"></span>
-          <span v-else-if="d.dot" class="dot big" :class="'st-' + d.dot"></span>
+          <span v-else-if="d.dot" class="dot big" :class="'lv-' + d.dot"></span>
           <span v-else class="mono">{{ d.short }}</span>
           <span class="red" v-if="d.unread"></span>
         </button>
@@ -95,7 +95,7 @@
               <ul v-show="!collapsed[g.key]">
                 <li v-for="c in g.items" :key="c.id" @contextmenu.prevent="openBuddyMenu(c, $event)">
                   <button class="buddy" :class="{ offline: c.status === 'offline', pending: c.pending }" @click="openChat(c.id)">
-                    <span class="avb xs" :class="{ off: c.status === 'offline' }"><span class="dp xs" :class="'st-' + c.status"><span><img :src="avOf(c)" alt=""></span></span><span class="avb-v" aria-hidden="true" v-html="vendorBadge(c)"></span></span>
+                    <span class="avb xs" :class="{ off: c.status === 'offline' }"><span class="dp xs" :class="'st-' + (g.kind === 'archived' ? 'offline' : c.status)"><span><img :src="avOf(c)" alt=""></span></span><span class="avb-v" aria-hidden="true" v-html="vendorBadge(c)"></span></span>
                     <span class="b-text">
                       <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-ctx" :class="{ danger: contextLabel(c).danger }" v-if="contextLabel(c)">{{ contextLabel(c).text }}</span><span class="b-st" v-if="statusNote(c.status)">{{ statusNote(c.status) }}</span></span>
                       <span class="b-psm" v-if="c.psm" v-html="emo(c.psm)"></span>

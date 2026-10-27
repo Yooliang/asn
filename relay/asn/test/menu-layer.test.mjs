@@ -16,11 +16,19 @@ test('「＋」、名單右鍵、設備、分頁右鍵選單：同時帶 av-menu
   assert.ok(zOf('.av-menu.buddy-subpop') > zOf('.av-menu.buddy-menu'), '二級選單要比主選單高一層')
 })
 
-// 活躍度頁籤的三種燈號（#372）：活躍、閒置以前都退回 .dot 預設的綠，看起來是「綠、綠、灰」
-test('活躍度三個級別都有自己的燈號樣式：活躍綠實心、閒置綠空心、離線灰', async () => {
+// 活躍度頁籤的燈（#372、小良哥 #950）：活躍綠、閒置黃、離線紅；名單「已封存」群組裡的頭像一律灰
+test('活躍度頁籤：活躍綠、閒置黃、離線一定是紅（用 lv-，不跟上線狀態的 st-offline 灰共用）', async () => {
   const { ACTIVITY_LEVELS } = await import('../ui/lib/activity.mjs')
-  for (const [key] of ACTIVITY_LEVELS) assert.match(css, new RegExp(`\.dot\.st-${key}\{`), key)
-  assert.match(css, /\.dot\.st-active\{--frame:var\(--online\)\}/)
-  assert.match(css, /\.dot\.st-idle\{background:transparent;box-shadow:inset 0 0 0 2px var\(--online\)\}/)
-  assert.match(css, /\.dot\.st-offline\{--frame:var\(--offline\)\}/)
+  for (const [key] of ACTIVITY_LEVELS) assert.match(css, new RegExp(`\\.dot\\.lv-${key}\\{`), key)
+  assert.match(css, /\.dot\.lv-active\{--frame:var\(--online\)\}/)
+  assert.match(css, /\.dot\.lv-idle\{--frame:var\(--away\)\}/)
+  assert.match(css, /\.dot\.lv-offline\{--frame:var\(--busy\)\}/)
+  const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
+  assert.ok(html.includes(`class="dot big" :class="'lv-' + d.dot"`), '頁籤的燈用 lv-')
+})
+
+test('名單「已封存」群組裡的夥伴燈號一律灰，不管實際在不在線', () => {
+  const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
+  assert.ok(html.includes(`<span class="dp xs" :class="'st-' + (g.kind === 'archived' ? 'offline' : c.status)">`))
+  assert.match(css, /\.dp\.st-offline,\.dot\.st-offline\{--frame:var\(--offline\)\}/, '灰＝--offline')
 })
