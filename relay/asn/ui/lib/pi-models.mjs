@@ -7,7 +7,7 @@ export const VENDOR_PI_PROVIDER = Object.freeze({ claude: 'anthropic', codex: 'o
 /** 只能經 pi 開的廠牌（目錄上沒有自己的 CLI 列）；只有 pi 真的列得到它的模型時才出現在廠牌清單 */
 export const PI_ONLY_VENDORS = Object.freeze([{ id: 'deepseek', label: 'DeepSeek' }, { id: 'minimax', label: 'MiniMax' }])
 
-const SAFE = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,99}$/   // 提供者與模型名稱只收這些字元，避免把奇怪字串帶進啟動參數
+const SAFE = /^[A-Za-z0-9][A-Za-z0-9._:/@+\[\]-]{0,99}$/   // 提供者與模型名稱只收這些字元（跟後端 pi_models.rs 的 safe_name 一致），避免把奇怪字串帶進啟動參數
 
 /** 後端 pi_models 的回應 → 乾淨的 [{ provider, model, thinking, images }]；壞資料丟掉 */
 export function cleanPiModels(list) {
@@ -34,6 +34,20 @@ export function piChoiceFor(vendorId, models, providers = {}) {
   if (status === 'not_ready' || (!mine.length && status !== 'ready')) return { provider, ok: false, why: `pi 還沒登入 ${provider}：先在終端開 pi 打 /login`, models: [], defaultModel: '' }
   if (!mine.length) return { provider, ok: false, why: `pi 沒有列出 ${provider} 的模型`, models: [], defaultModel: '' }
   return { provider, ok: true, why: '', models: mine, defaultModel: mine[0].model }
+}
+
+/**
+ * 後端 pi_providers 的回應 [{ provider, state }]（state：ready／not_ready／missing／unknown，#363）→ piChoiceFor 用的對照表
+ * { provider: 'ready'|'not_ready'|'provider_not_found' }；unknown 和壞資料不放（＝沒查到）
+ */
+export function providerStates(list) {
+  const map = { ready: 'ready', not_ready: 'not_ready', missing: 'provider_not_found' }
+  const out = {}
+  for (const r of Array.isArray(list) ? list : []) {
+    const p = String(r?.provider ?? ''), s = map[r?.state]
+    if (SAFE.test(p) && s) out[p] = s
+  }
+  return out
 }
 
 /** 廠牌清單要多出來的「只能經 pi」廠牌：pi 列得到模型的才出現 */

@@ -53,3 +53,11 @@ test('開 pi 參數：模型一定要在這次查到的清單裡，否則不送'
   assert.equal(piLaunchArgs('grok', 'claude-x', MODELS, READY), null, '別家的模型')
   assert.equal(piLaunchArgs('gemini', 'x', MODELS, READY), null)
 })
+
+test('後端 pi_providers 格式轉換（#363）：missing＝這版 pi 沒有；unknown 與壞資料不放', async () => {
+  const { providerStates } = await import('../ui/lib/pi-models.mjs')
+  const m = providerStates([{ provider: 'anthropic', state: 'ready' }, { provider: 'google', state: 'not_ready' }, { provider: 'qwen', state: 'missing' }, { provider: 'xai', state: 'unknown' }, { provider: 'x;y', state: 'ready' }, null])
+  assert.deepEqual(m, { anthropic: 'ready', google: 'not_ready', qwen: 'provider_not_found' })
+  assert.deepEqual(providerStates('oops'), {})
+  assert.equal(cleanPiModels([{ provider: 'anthropic', model: 'opus[1m]' }]).length, 1, '模型名可以有方括號（跟後端 safe_name 一致）')
+})
