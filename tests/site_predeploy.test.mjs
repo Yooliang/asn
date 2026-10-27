@@ -39,6 +39,17 @@ function fakeFetch(online, calls = []) {
     return { ok: true, status: 200, headers: { get: k => (k === 'content-length' ? String(buf.length) : null) }, arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.length) }
   }
 }
+// 假的線上，可指定表頭與回應長度（模擬 Firebase 對 exe 回 content-encoding: br、content-length 是壓縮後的長度）
+function fakeFetchWith({ headers, bodies = {} }, seen = []) {
+  return async (url, opts) => {
+    seen.push(opts)
+    const rel = decodeURIComponent(new URL(url).pathname.slice(1))
+    const data = bodies[rel]
+    if (data === undefined) return { ok: false, status: 404, headers: { get: () => null }, arrayBuffer: async () => new ArrayBuffer(0) }
+    const buf = Buffer.from(data)
+    return { ok: true, status: 200, headers: { get: k => headers(k, buf) }, arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.length) }
+  }
+}
 const onlineAll = { 'update/ASN_0.1.98_x64-setup.exe': EXE, 'update/ASN_0.1.96_android.apk': APK, 'download/asn-windows.zip': ZIP }
 
 test('清單裡只列指到本站的檔案（別站的不管），安裝檔旁邊的 .sig 是選用', () => {
@@ -80,7 +91,7 @@ test('線上也沒有：擋下並說明是哪個檔', async () => {
 
 test('伺服器說的大小與實際下載的不同（下載被截斷）：擋下', async () => {
   const dir = makeSite({ apk: true, zip: true })
-  const fetchFn = async () => ({ ok: true, status: 200, headers: { get: () => '9999' }, arrayBuffer: async () => EXE.buffer.slice(EXE.byteOffset, EXE.byteOffset + EXE.length) })
+  const fetchFn = async () => ({ ok: true, status: 200, headers: { get: k => (k === 'content-length' ? '9999' : null) }, arrayBuffer: async () => EXE.buffer.slice(EXE.byteOffset, EXE.byteOffset + EXE.length) })
   await assert.rejects(predeploy({ siteDir: dir, base: BASE, fetchFn }), /ASN_0\.1\.98_x64-setup\.exe.*9999/)
 })
 
@@ -101,4 +112,35 @@ test('firebase.json 有掛部署前檢查', () => {
   const cfg = JSON.parse(fs.readFileSync(new URL('../site/firebase.json', import.meta.url), 'utf8'))
   assert.ok([].concat(cfg.hosting.predeploy ?? []).some(c => /tools[\\/]release[\\/]site_predeploy\.mjs/.test(c)))
   assert.ok(fs.existsSync(new URL('../tools/release/site_predeploy.mjs', import.meta.url)))
+})
+
+test('下載時要求不壓縮（accept-encoding: identity）', async () => {
+  const dir = makeSite({ apk: true, zip: true })
+  const seen = []
+  await predeploy({ siteDir: dir, base: BASE, fetchFn: fakeFetchWith({ headers: (k, b) => (k === 'content-length' ? String(b.length) : null), bodies: onlineAll }, seen) })
+  assert.ok(seen.length >= 1)
+  for (const o of seen) assert.equal(o?.headers?.['accept-encoding'], 'identity')
+})
+
+test('伺服器還是回壓縮（content-encoding: br，content-length 是壓縮後的長度）：略過長度比對、能通過', async () => {
+  const dir = makeSite({ apk: true, zip: true })
+  const headers = (k, b) => ({ 'content-encoding': 'br', 'content-length': String(b.length - 5) })[k] ?? null   // 壓縮後比較短
+  const r = await predeploy({ siteDir: dir, base: BASE, fetchFn: fakeFetchWith({ headers, bodies: onlineAll }) })
+  assert.ok(r.fetched.includes('update/ASN_0.1.98_x64-setup.exe'))
+  assert.ok(fs.readFileSync(path.join(dir, 'public', 'update', 'ASN_0.1.98_x64-setup.exe')).equals(EXE))
+})
+
+test('回壓縮時，有 sha256 的檔案照樣比：內容被改過會被擋', async () => {
+  const dir = makeSite({ exe: true, zip: true })
+  const headers = (k, b) => ({ 'content-encoding': 'br', 'content-length': String(b.length - 1) })[k] ?? null
+  await assert.rejects(
+    predeploy({ siteDir: dir, base: BASE, fetchFn: fakeFetchWith({ headers, bodies: { ...onlineAll, 'update/ASN_0.1.96_android.apk': 'tampered!!' } }) }),
+    /ASN_0\.1\.96_android\.apk/,
+  )
+})
+
+test('明說 identity 但被截斷（content-length 比實際長）：擋下', async () => {
+  const dir = makeSite({ apk: true, zip: true })
+  const headers = (k, b) => ({ 'content-encoding': 'identity', 'content-length': String(b.length + 100) })[k] ?? null
+  await assert.rejects(predeploy({ siteDir: dir, base: BASE, fetchFn: fakeFetchWith({ headers, bodies: onlineAll }) }), /ASN_0\.1\.98_x64-setup\.exe.*伺服器說/)
 })

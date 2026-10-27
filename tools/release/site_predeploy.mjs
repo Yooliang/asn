@@ -60,13 +60,16 @@ export async function predeploy({ siteDir = DEFAULT_SITE, base = DEFAULT_BASE, f
     }
     const url = `${base}/${want.rel.split('/').map(encodeURIComponent).join('/')}`
     let res
-    try { res = await fetchFn(url) } catch (e) { throw new Error(`部署前檢查失敗：本機沒有 ${want.rel}，從線上下載也失敗（${e.message}）`) }
+    try { res = await fetchFn(url, { headers: { 'accept-encoding': 'identity' } }) } catch (e) { throw new Error(`部署前檢查失敗：本機沒有 ${want.rel}，從線上下載也失敗（${e.message}）`) }
     if (!res.ok) {
       if (want.optional && res.status === 404) { result.skipped.push(want.rel); continue }
       throw new Error(`部署前檢查失敗：本機沒有 ${want.rel}，線上也拿不到（HTTP ${res.status}）`)
     }
     const buf = Buffer.from(await res.arrayBuffer())
-    const len = Number(res.headers?.get?.('content-length'))
+    // 要求不壓縮；伺服器還是回了壓縮（content-encoding 不是 identity）時，content-length 是壓縮後的大小，跟解壓後的 body 比對一定不符，所以略過這個比對
+    // （有 sha256 或清單大小的照樣比，見 check）
+    const enc = String(res.headers?.get?.('content-encoding') ?? 'identity').trim().toLowerCase()
+    const len = enc === 'identity' ? Number(res.headers?.get?.('content-length')) : NaN
     try {
       check(buf, want, want.rel)
       if (Number.isInteger(len) && len > 0 && buf.length !== len) throw new Error(`${want.rel}：下載到 ${buf.length} 位元組，伺服器說 ${len}`)
