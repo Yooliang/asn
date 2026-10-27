@@ -923,7 +923,12 @@ const termSendRow = computed(() => terms.rows.find(r => r.id === termSend.id) ??
 const termSendDraft = computed(() => sendDraftView(termSendRow.value, termSend.text))
 const termSendConfirmView = computed(() => (termSend.confirming ? sendConfirmView(termSendRow.value, termSend.text, termSend.enter) : null))
 function termSendOpen(row) { termSend.id = termSend.id === row.id ? '' : row.id; termSend.text = ''; termSend.confirming = false; termSend.error = ''; termSend.note = '' }
-function termSendAsk() { if (termSendDraft.value.ok) { termSend.confirming = true; termSend.error = '' } }   // 只是跳出確認框，不送
+function termSendAsk() {   // 跳出確認框；同時把同一份內容傳到手機待確認（#312 接點，與本機確認互斥）。這裡不送字
+  if (!termSendDraft.value.ok) return
+  termSend.confirming = true; termSend.error = ''
+  const req = sendRequest(termSendRow.value, termSend.text, termSend.enter)
+  if (req) void invoke('term_remote_offer_send', { req }).catch(() => {})
+}
 function termSendBack() { termSend.confirming = false }
 async function termSendConfirm() {
   const req = sendRequest(termSendRow.value, termSend.text, termSend.enter)

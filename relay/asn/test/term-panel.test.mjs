@@ -200,6 +200,7 @@ test('接線：term_send 只在 termSendConfirm 裡呼叫一次；只有「確�
   assert.ok(html.includes('@click="termSendAsk"') && html.includes('v-if="termSendConfirmView"'), '「送出」先開確認框')
   const ask = js.slice(js.indexOf('function termSendAsk'), js.indexOf('function termSendBack'))
   assert.ok(!ask.includes('termSend('), 'termSendAsk 不送字')
+  assert.ok(ask.includes("invoke('term_remote_offer_send'") && ask.includes('sendRequest('), '開確認框時同時傳到手機待確認（#328）')
   assert.ok(tauri.includes("termSend: req => invoke('term_send', { req })"))
   assert.ok(html.includes('aria-label="要送進終端的文字"'))
 })
