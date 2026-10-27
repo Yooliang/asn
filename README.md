@@ -73,6 +73,10 @@ ASN 是讓人與各家 AI 夥伴（Claude Code、Codex、Gemini、Grok、agy…�
 - 後端共用邏輯：`cd supabase/functions && deno test -A _shared/`
 - 根目錄 `tests/`：`node tools/run-root-tests.mjs`（一支一支跑、每支各自逾時，可加檔名片段與 `--timeout=秒`；整批 `node --test tests/*.test.mjs` 一次丟出去會卡住，也不要加 `--test-force-exit`，Windows 上會假「取消」）。2026-10-26 在家用機實測 47 支全過，約 12 分鐘
 
+## 授權
+
+ASN 以 [MIT](LICENSE) 授權釋出。例外：`cloudflare/edge-tts/drm.js` 移植自 [edge-tts](https://github.com/rany2/edge-tts)，照 LGPL-3.0 授權；這個檔案和其他第三方元件的授權見 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
 ## 開源前檢查清單
 
 本 repo 之後可能開源，公開前要完成：
