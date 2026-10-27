@@ -2,7 +2,7 @@
 import { UNNAMED_DEVICE } from './text.mjs'
 import { isAsnWindow, withoutAsn } from './roster.mjs'
 import { applyDeviceOrder } from './device-order.mjs'
-import { DEVICE_TAB_MAX, deviceTabs, engineKey, engineLabel, engineRank, groupInDevice, shortOf } from './tabs.mjs'
+import { DEVICE_TAB_MAX, deviceTabs, displayVendorKey, engineKey, engineLabel, engineRank, groupInDevice, shortOf } from './tabs.mjs'
 
 export const DIMS = [{ key: 'status', label: '狀態' }, { key: 'engine', label: '廠商' }, { key: 'device', label: '設備' }]
 export const DEFAULT_DIMS = { tabDim: 'device', groupDim: 'status' }
@@ -41,7 +41,7 @@ export function pageTabs(friends, dim, { selfNode, selfName = '', nodeOrder = []
     all = STATUS_LIST.map(([key, label]) => sumTab({ key, label, short: '', dot: key, unread: 0, online: 0, total: 0 }, friends.filter(f => f.status === key)))
   } else if (dim === 'engine') {
     const by = new Map()
-    for (const f of friends) { const k = engineKey(f); if (!by.has(k)) by.set(k, []); by.get(k).push(f) }
+    for (const f of friends) { const k = displayVendorKey(f); if (!by.has(k)) by.set(k, []); by.get(k).push(f) }
     all = [...by.keys()].sort((a, b) => engineRank(a) - engineRank(b) || a.localeCompare(b))
       .map(k => sumTab({ key: k, label: engineLabel(k), short: '', vendorKey: k, dot: '', unread: 0, online: 0, total: 0 }, by.get(k)))
   } else {
@@ -56,7 +56,7 @@ export function pageTabs(friends, dim, { selfNode, selfName = '', nodeOrder = []
 
 // 某頁籤裡的好友：線上／忙碌在前、離線在後（同級照名字）；match 為搜尋
 export function pageItems(friends, dim, key, match = () => true) {
-  const of = f => (dim === 'status' ? f.status : dim === 'engine' ? engineKey(f) : (f.node ?? ''))
+  const of = f => (dim === 'status' ? f.status : dim === 'engine' ? displayVendorKey(f) : (f.node ?? ''))
   const rank = s => (s === 'offline' ? 1 : 0)
   return friends.filter(f => !isAsnWindow(f) && of(f) === key && match(f)).sort((a, b) => rank(a.status) - rank(b.status) || a.nick.localeCompare(b.nick, 'zh-Hant'))
 }

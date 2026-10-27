@@ -2,6 +2,7 @@
 import { UNNAMED_DEVICE } from './text.mjs'
 import { isAsnWindow } from './roster.mjs'
 import { applyDeviceOrder, isDeviceHidden, isDeviceRemoved } from './device-order.mjs'
+import { modelVendorKey } from './vendor-icons.mjs'
 
 // 固定在設備頁籤之後的頁籤（群組只有在有唯讀 API 時才放，目前有 room_list）
 export const FIXED_TABS = [
@@ -133,12 +134,18 @@ export const engineKey = f => {
   const k = String(f?.kind ?? '').trim().toLowerCase()
   return KIND_VENDORS.includes(k) ? k : 'other'
 }
+// 顯示廠商（分頁依廠商、名單的廠商圖用）：pi 只是執行殼，取名單 model 的提供者，對不到退回 pi；其他引擎＝engineKey。
+// 管理判斷（開關、切換模型、接手、能不能通話）一律用 engineKey／partnerEngine，不要用這個。
+export const displayVendorKey = f => {
+  const k = engineKey(f)
+  return k === 'pi' ? (modelVendorKey(f?.model) ?? 'pi') : k
+}
 export const engineRank = k => (k === 'other' ? 1e3 : ENGINE_ORDER.includes(k) ? ENGINE_ORDER.indexOf(k) : 100)
 export const engineLabel = k => ENGINE_LABEL[k] ?? (k === 'other' ? '其他' : k.charAt(0).toUpperCase() + k.slice(1))
 export function groupInDevice(items, mode = 'status') {
   if (mode === 'engine') {
     const by = new Map()
-    for (const f of items) { const k = engineKey(f); if (!by.has(k)) by.set(k, []); by.get(k).push(f) }
+    for (const f of items) { const k = displayVendorKey(f); if (!by.has(k)) by.set(k, []); by.get(k).push(f) }
     const keys = [...by.keys()].sort((a, b) => engineRank(a) - engineRank(b) || a.localeCompare(b))
     const st = s => STATUS_GROUPS.findIndex(([k]) => k === s)
     return keys.map(k => ({ key: `engine:${k}`, kind: 'engine', label: engineLabel(k),

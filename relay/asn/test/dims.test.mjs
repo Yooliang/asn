@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { DEFAULT_DIMS, groupItems, groupOptions, loadDims, normalizeDims, pageItems, pageTabs, withTabDim } from '../ui/lib/dims.mjs'
-import { engineKey, groupHeading } from '../ui/lib/tabs.mjs'
+import { displayVendorKey, engineKey, groupHeading, groupInDevice } from '../ui/lib/tabs.mjs'
 import { buildFriends } from '../ui/lib/roster.mjs'
 
 const F = (node, device, nick, status = 'online', engine = null, kind = null, unread = 0) => ({ id: `${node}/${nick}`, node, device, nick, status, engine, kind, unread })
@@ -124,4 +124,29 @@ test('分組依設備：照 deviceOrder 排，本機仍第一，沒列的接在�
   assert.deepEqual(nodes(groupItems(items, 'device', { selfNode: 'H', deviceOrder: 'bad' })), nodes(groupItems(items, 'device', { selfNode: 'H' })), '壞資料當沒有')
   const withLabel = groupItems(items, 'device', { selfNode: 'H', deviceOrder: ['A'] })
   assert.ok(withLabel.every(g => g.key === `device:${g.node}` && g.kind === 'device' && g.items.length === 1), '組的欄位不變')
+})
+
+// pi 只是執行殼：分頁依廠商、群組依廠商用「顯示廠商」（名單 model 的提供者，對不到退回 pi）；管理判斷仍只看 engine
+const PI = (nick, model, status = 'online') => ({ ...F('H', '家用機', nick, status, 'pi'), ...(model === undefined ? {} : { model }) })
+const PI_SAMPLE = [F('H', '家用機', 'c1', 'online', 'claude'), PI('p1', 'anthropic/claude-sonnet-4'), PI('p2', 'openai/gpt-5', 'busy'), PI('p3', 'local/llama-3'), PI('p4'), PI('p5', 'google/gemini-2.5-pro', 'offline')]
+
+test('顯示廠商：pi 看 model 的提供者，對不到退回 pi；別的引擎不看 model；engineKey 不變', () => {
+  assert.deepEqual(PI_SAMPLE.map(displayVendorKey), ['claude', 'claude', 'gpt', 'pi', 'pi', 'gemini'])
+  assert.deepEqual(PI_SAMPLE.map(engineKey), ['claude', 'pi', 'pi', 'pi', 'pi', 'pi'], '管理用的 engineKey 仍是 pi')
+  assert.equal(displayVendorKey({ engine: 'grok', model: 'anthropic/claude-sonnet-4' }), 'grok')
+})
+
+test('分頁依廠商：pi 夥伴依背後模型歸到各廠商的分頁，對不到留在 pi；人數對得上', () => {
+  const tabs = pageTabs(PI_SAMPLE, 'engine', { selfNode: 'H' }).all
+  const by = Object.fromEntries(tabs.map(t => [t.key, t.total]))
+  assert.deepEqual(by, { claude: 2, gpt: 1, gemini: 1, pi: 2 })
+  assert.equal(Object.values(by).reduce((a, b) => a + b, 0), PI_SAMPLE.length)
+  assert.deepEqual(pageItems(PI_SAMPLE, 'engine', 'claude').map(f => f.nick).sort(), ['c1', 'p1'])
+  assert.deepEqual(pageItems(PI_SAMPLE, 'engine', 'pi').map(f => f.nick).sort(), ['p3', 'p4'])
+  assert.equal(tabs.find(t => t.key === 'gpt').vendorKey, 'gpt')
+})
+
+test('群組依廠商（設備頁籤內，groupInDevice）：同樣用顯示廠商', () => {
+  const g = groupInDevice(PI_SAMPLE, 'engine')
+  assert.deepEqual(g.map(x => [x.key, x.items.length]), [['engine:claude', 2], ['engine:gemini', 1], ['engine:gpt', 1], ['engine:pi', 2]])
 })
