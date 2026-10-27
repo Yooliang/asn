@@ -249,3 +249,17 @@ test('收信：ack 失敗時連線標 off 並寫出原因；下一輪成功就�
   await core.pull('test')
   assert.equal(core.conn, 'on'); assert.equal(core.connWhy, '')
 })
+
+test('收信：編號不是 UUID 的信不會讓整批 ack 失敗，其他信照常確認；連線原因認得「格式不對」', async () => {
+  const acked = []
+  const good = '00000000-0000-4000-8000-000000000001'
+  const msgs = [good, 'not-a-uuid'].map((id, i) => ({ id, from_node: 'W', from_agent: 'W-政策', to_node: 'T', to_agent: NAME, body: `x${i}`, created_at: '2026-10-27T08:00:00Z' }))
+  const logs = []
+  const transport = { list: async () => ({ members: roster() }), inbox: async () => ({ messages: msgs }), ack: async ids => { acked.push(...ids); return {} }, send: async () => ({}) }
+  const core = new AsnCore({ transport, store: memStore(), selfNode: 'T', windowName: NAME, isChatVisible: async () => false, pollMs: 60_000, rosterMs: 60_000, log: l => logs.push(l) })
+  await core.pull('test')
+  assert.deepEqual(acked, [good])
+  assert.equal(core.conn, 'on')
+  assert.ok(logs.some(l => l.includes('ack skipped 1 bad id')))
+  assert.match(connReason(new Error('信件 id 格式不對')), /格式不對/)
+})

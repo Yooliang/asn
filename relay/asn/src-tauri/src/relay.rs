@@ -207,7 +207,10 @@ pub fn build_ack_body(ids: &[String]) -> Result<Value, String> {
         let p: Vec<&str> = s.split('-').collect();
         p.len() == 5 && [8, 4, 4, 4, 12].iter().zip(&p).all(|(n, x)| x.len() == *n && x.chars().all(|c| c.is_ascii_hexdigit()))
     };
-    if ids.len() > 100 || !ids.iter().all(|i| uuid(i)) {
+    if ids.len() > 100 {
+        return Err("一次最多確認 100 封信".into());
+    }
+    if !ids.iter().all(|i| uuid(i)) {
         return Err("信件 id 格式不對".into());
     }
     Ok(json!({ "ids": ids }))
