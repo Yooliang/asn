@@ -1,11 +1,11 @@
 {
-  "version": "0.1.96",
-  "notes": "帳號切換的兩個免確認合成一個勾「允許切換帳號」（預設勾選，不勾則別台送來的切換一律拒絕）；開新夥伴的設備清單不再列出已永久移除的設備；頭像統一寫法，廠商小圖都在頭像右下角，agy 補上圖示，同頁多個 Gemini／MiniMax 頭像顏色不再畫不出來；新增 asn-cli site release／meeting／item 寫入官網資料庫；安裝說明補回少掉的反斜線",
-  "pub_date": "2026-10-27T15:42:11.368Z",
+  "version": "0.1.97",
+  "notes": "修正：開新夥伴的「經 pi」在本機一直反灰、說沒偵測到 pi，連帶 DeepSeek、MiniMax 也選不到；現在裝了 pi 就能選（#414）。改進：asn-cli who 會列出背景運行的夥伴，並標「背景運行」（#413）。",
+  "pub_date": "2026-10-27T16:50:18.568Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjNRb0h3NVJJSDUvWG5Jd0lGdXNSSjJjWTRiR3VKOHBvWWFYaUxVaFhXZEVVMWp6TVhCYVNaRVJOY2FzcXQ3WlpncTZ2SFp6bFlWZTdQZk0zZWM4TFFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMTE1NzMxCWZpbGU6QVNOXzAuMS45Nl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjk2Ck9UelpoT0NXNzFpQ0ZINEU0RnpBYnpkTFhjOWRSY2xjZkg4VnhOc3JTOFg1anRoK0hRenljUDZCTVF6ZFV5eFI0U3RJa3RjYVRRZDRUKzVBS3hsR0FBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.96_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjh4QTFOTUxkVUhGWDd5dWNreVVMbU9ob2VjY3E5VFNLcVZUMVhEMy81Ly9JL0xYZU4wcjFIRU5OMlZnYUNzMkFUd0V5c2dROWtuanoxY2xRU2lqNkFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMTE5ODE4CWZpbGU6QVNOXzAuMS45N194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjk3CjNrS2FMUi9MMGRyU2R5aEFQeHFPVEVjbXJEcHFxQVVMZzBPUythZHZZZnBIYk5Xa0dZUGFQa1hRd2lpREI4T2IrUjU5ZytQU0luaDk1RjY4NG9udUJnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.97_x64-setup.exe"
     }
   }
 }
