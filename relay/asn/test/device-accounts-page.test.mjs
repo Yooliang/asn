@@ -142,10 +142,10 @@ test('對方 ASN 沒在線：切換鈕停用並寫原因；離線設備整體偏
 
 test('這台的頁籤：完整的帳號管理（切換、刪除、加入、自動加入、信任自己的設備）都在', async () => {
   const html = await render({ catKey: 'devices', dev: 'H' })
-  for (const w of ['a@b.c', 'p@b.c', '使用中', '切換', '刪除', '信任我自己的設備', '邀請雲端代理', 'x@openai.test', '這台']) assert.ok(html.includes(w), `少了「${w}」`)
+  for (const w of ['a@b.c', 'p@b.c', '使用中', '切換', '刪除', '允許切換帳號', '邀請雲端代理', 'x@openai.test', '這台']) assert.ok(html.includes(w), `少了「${w}」`)
   const cur = /<li class="dv-acct[^"]*"[^>]*>(?:(?!<\/li>)[\s\S])*a@b\.c[\s\S]*?<\/li>/.exec(html)[0]
   assert.match(cur, /<button[^>]*disabled[^>]*>切換<\/button>/, '使用中的帳號不能再切換')
-  for (const op of ['acct-switch', 'acct-remove', 'acct-trust', 'acct-trust-signed']) assert.ok(SettingsPanel.template.includes(`act('${op}'`), op)
+  for (const op of ['acct-switch', 'acct-remove', 'acct-allow-switch']) assert.ok(SettingsPanel.template.includes(`act('${op}'`), op)
   assert.ok(!html.includes('加入目前登入的帳號') && !html.includes('<span>自動加入</span>'), '加入按鈕與自動加入勾選已拿掉（固定自動加入）')
 })
 
@@ -174,7 +174,7 @@ test('遠端設備下拉選單已被頁籤取代：元件與樞紐不再有 acct
   assert.ok(!SETTING_OPS.includes('acct-remote-node') && !SETTING_OPS.includes('acct-remote-switch'))
   assert.ok(!read('ui/lib/settings-panel.mjs').includes('acct-remote'))
   assert.ok(!read('ui/list.js').includes("case 'acct-remote"))
-  for (const op of ['acct-switch', 'acct-remove', 'acct-trust', 'acct-trust-signed', 'device-switch', 'device-reorder', 'device-remove']) assert.ok(SETTING_OPS.includes(op), op)
+  for (const op of ['acct-switch', 'acct-remove', 'acct-allow-switch', 'device-switch', 'device-reorder', 'device-remove']) assert.ok(SETTING_OPS.includes(op), op)
 })
 
 test('守門：不引入 Tailwind 或外部網址；樣式只用既有的 CSS 變數；畫面不顯示節點代號', () => {
@@ -194,4 +194,10 @@ test('守門：廠商圖示鍵齊全（claude、codex、gemini、grok、deepseek
 test('手機版沒有設定的帳號／設備分類：只做電腦版（手機設置頁維持原狀）', () => {
   const js = read('ui/m.js') + read('ui/m.html')
   assert.ok(!js.includes('settings-panel') && !js.includes('SETTING_CATS'))
+})
+
+test('帳號切換只剩一個勾「允許切換帳號」，底下只有一行說明，舊的兩個勾與長說明都拿掉（#371）', () => {
+  const t = SettingsPanel.template
+  assert.ok(t.includes(`<span>允許切換帳號</span></label>\n                      <small>讓手機或別台設備替這台切換帳號。</small>`) || t.includes(`<span>允許切換帳號</span></label>\r\n                      <small>讓手機或別台設備替這台切換帳號。</small>`))
+  for (const old of ['信任我自己的設備', '不用再到這台確認', '沒有本人簽章的要求', "act('acct-trust'"]) assert.ok(!t.includes(old), old)
 })

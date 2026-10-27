@@ -159,7 +159,7 @@ test('守門：元件送出的每個指令，樞紐的 applySetting 都接得住
 
 test('守門：每個舊設定項目的行為綁定都還在（改走樞紐指令，存檔欄位不變）', () => {
   const hub = read('list.js')
-  for (const k of ['setFrame(value)', 'setMode(value)', 'setTabDim(value)', 'saveVoice(value)', 'installFromSettings()', 'accounts.switchTo(value)', 'accounts.remove(value)', 'accounts.remoteSwitch(', 'accounts.setTrust(',
+  for (const k of ['setFrame(value)', 'setMode(value)', 'setTabDim(value)', 'saveVoice(value)', 'installFromSettings()', 'accounts.switchTo(value)', 'accounts.remove(value)', 'accounts.remoteSwitch(', 'accounts.setAllowSwitch(',
     'setCloseTo(value)', 'setAutostart(', 'checkUpdate(true)', 'saveLaunchPrefs()', 'setLaunchCwdText(', 'removeAvatar()', 'notifyWith(notifyPrefs.value', 'normalizeDpMode(value)', 'normalizeBubble(value)']) {
     assert.ok(hub.includes(k), `樞紐缺 ${k}`)
   }
@@ -206,7 +206,7 @@ test('守門：電腦設定第一頁——登入帳號資訊與我的名字同�
   assert.ok(me.indexOf('<login-panel>') >= 0 && me.indexOf('<login-panel>') < me.indexOf('class="av-set"'), '登入狀態（含我的名字）在第一頁最前面')
   assert.ok(me.indexOf('<logout-panel>') > me.indexOf('class="np-set"'), '登出鈕在第一頁所有項目之後')
   assert.ok(!accts.includes('<login-panel>') && !accts.includes('<logout-panel>'), '設備與帳號分類不再放登入狀態與登出')
-  assert.ok(accts.includes('<cloud-invite-panel>') && accts.includes('信任我自己的設備'), '帳號管理留在原位（現在在這台的頁籤裡）')
+  assert.ok(accts.includes('<cloud-invite-panel>') && accts.includes('允許切換帳號'), '帳號管理留在原位（現在在這台的頁籤裡）')
   const lp = fs.readFileSync(new URL('../ui/lib/login-panel.mjs', import.meta.url), 'utf8')
   assert.ok(lp.includes('LogoutPanel') && /logout-btn/.test(lp))
   assert.match(fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8'), /\.logout-set\{margin-top:3\d+px/)
