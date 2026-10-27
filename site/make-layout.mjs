@@ -1,6 +1,7 @@
 // 官網各頁共用的「頁首（Logo＋選單）、頁尾連結、網站圖示」只在這支腳本裡寫一份，再寫進各頁的標記區段之間。
 // 改選單或 Logo：編輯下面的 NAV／BRAND，執行 `node site/make-layout.mjs`；守門測試 tests/site_layout.test.mjs 會檢查各頁與這份一致，忘了跑會變紅。
 // 不用前端框架也不用執行階段腳本（網站的內容安全政策不允許行內腳本），所以是「建置時產生靜態 HTML」。
+// 例外：藍圖與開發日誌兩頁的內容從資料庫讀，載入 timeline/ 底下的外部腳本（這兩頁的內容安全政策在 firebase.json 另外放寬）。
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -11,20 +12,22 @@ export const NAV = [
   { key: 'features', label: '功能', href: '/#features' },
   { key: 'screens', label: '畫面', href: '/#screens' },
   { key: 'download', label: '下載', href: '/#download' },
-  { key: 'roadmap', label: '藍圖與更新日誌', href: '/roadmap' },
+  { key: 'roadmap', label: '藍圖', href: '/roadmap' },
+  { key: 'log', label: '開發日誌', href: '/log' },
   { key: 'privacy', label: '隱私權政策', href: '/privacy' },
   { key: 'terms', label: '服務條款', href: '/terms' },
 ]
 export const BRAND = { name: 'Agent Sync Network Messenger', logo: '/img/logo.svg', alt: 'ASN 小機器人' }
 // 頁尾左邊的連結（右邊的聯絡資訊各頁自己手寫，不在這裡）
-export const FOOTER_NAV = ['home', 'roadmap', 'privacy', 'terms']
+export const FOOTER_NAV = ['home', 'roadmap', 'log', 'privacy', 'terms']
 
 // 要套用的頁面（相對 site/public）：current 是選單要高亮的項目（null＝沒有對應項目）；parts 是要產生的區段
 export const PAGES = {
   'index.html': { current: 'home', parts: ['head', 'header', 'footer'] },
   'privacy.html': { current: 'privacy', parts: ['head', 'header', 'footer'] },
   'terms.html': { current: 'terms', parts: ['head', 'header', 'footer'] },
-  'roadmap.html': { current: 'roadmap', parts: ['head', 'header', 'footer'] },
+  'roadmap.html': { current: 'roadmap', parts: ['head', 'header', 'footer'] },   // 內容從資料庫讀（timeline/roadmap.mjs）
+  'log.html': { current: 'log', parts: ['head', 'header', 'footer'] },           // 內容從資料庫讀（timeline/log.mjs）
   'skill/index.html': { current: null, parts: ['head', 'header'] },
   'i/index.html': { current: null, parts: ['head', 'header'] },
   'link/index.html': { current: null, parts: ['head'] },   // 核准頁有自己的版面（link.css），只套網站圖示

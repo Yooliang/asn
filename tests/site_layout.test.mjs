@@ -27,7 +27,7 @@ test('各頁的共用區段與 make-layout.mjs 產生的一致（改了選單要
 })
 
 test('選單固定順序、每頁一樣：只差目前頁的 aria-current', () => {
-  assert.deepEqual(NAV.map(n => n.label), ['首頁', '功能', '畫面', '下載', '藍圖與更新日誌', '隱私權政策', '服務條款'])
+  assert.deepEqual(NAV.map(n => n.label), ['首頁', '功能', '畫面', '下載', '藍圖', '開發日誌', '隱私權政策', '服務條款'])
   const strip = h => h.replace(/ aria-current="page"/g, '')
   const headers = files.filter(f => PAGES[f].parts.includes('header')).map(f => strip(section(pageHtml(f), 'header')))
   assert.ok(headers.length >= 6)
@@ -46,7 +46,7 @@ test('站內錨點用完整連結（/#features），任何頁都不用只有 # �
 })
 
 test('目前頁高亮：恰好一個 aria-current="page"，且指到自己（沒有對應項目的頁面不高亮）', () => {
-  const expectHref = { home: '/', roadmap: '/roadmap', privacy: '/privacy', terms: '/terms' }
+  const expectHref = { home: '/', roadmap: '/roadmap', log: '/log', privacy: '/privacy', terms: '/terms' }
   for (const f of files.filter(f => PAGES[f].parts.includes('header'))) {
     const nav = /<nav[\s\S]*?<\/nav>/.exec(section(pageHtml(f), 'header'))[0]
     const cur = [...nav.matchAll(/<a href="([^"]*)" aria-current="page">/g)].map(m => m[1])
@@ -54,7 +54,7 @@ test('目前頁高亮：恰好一個 aria-current="page"，且指到自己（沒
     if (c) assert.deepEqual(cur, [expectHref[c]], f)
     else assert.deepEqual(cur, [], f)
   }
-  assert.ok(files.includes('index.html') && files.includes('privacy.html') && files.includes('terms.html') && files.includes('roadmap.html'))
+  assert.ok(files.includes('index.html') && files.includes('privacy.html') && files.includes('terms.html') && files.includes('roadmap.html') && files.includes('log.html'))
 })
 
 test('Logo 是圖檔（有 alt），來源是 App 的 ui/img/logo.svg，圖檔都在', () => {
@@ -78,7 +78,7 @@ test('每頁都有 favicon 與 apple-touch-icon 連結，連結指到存在的�
   }
 })
 
-test('符合網站的內容安全政策：套用共用版面的頁面沒有行內樣式、行內腳本、外部資源（/i/ 與 /link/ 本來就有自己的外部腳本檔）', () => {
+test('符合網站的內容安全政策：套用共用版面的頁面沒有行內樣式、行內腳本、外部資源（/i/、/link/、藍圖與開發日誌有自己的外部腳本檔）', () => {
   for (const f of files) {
     const html = pageHtml(f)
     assert.ok(!/<style/i.test(html), `${f} 有行內 <style>`)
@@ -87,12 +87,12 @@ test('符合網站的內容安全政策：套用共用版面的頁面沒有行�
     assert.ok(!/<script(?![^>]*\ssrc=)/i.test(html), `${f} 有行內腳本`)
     assert.ok(!/(src|href)="https?:\/\//i.test(html), `${f} 有外部資源`)
   }
-  for (const f of ['index.html', 'privacy.html', 'terms.html', 'roadmap.html', 'skill/index.html']) assert.ok(!/<script/i.test(pageHtml(f)), `${f} 不該有腳本`)
+  for (const f of ['index.html', 'privacy.html', 'terms.html', 'skill/index.html']) assert.ok(!/<script/i.test(pageHtml(f)), `${f} 不該有腳本`)
 })
 
 test('頁尾連結各頁一致，用語不出現舊名詞', () => {
   const foot = files.filter(f => PAGES[f].parts.includes('footer')).map(f => section(pageHtml(f), 'footer'))
-  assert.equal(foot.length, 4)
+  assert.equal(foot.length, 5)
   for (const h of foot) assert.equal(h, foot[0])
   for (const f of files) assert.ok(!pageHtml(f).includes('收發室'), f)
   assert.ok(!read('site/make-layout.mjs').split('\n').some(l => l.includes('收發室') && !l.startsWith('//')))

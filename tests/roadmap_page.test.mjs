@@ -1,180 +1,247 @@
-// 官網「藍圖與更新日誌」頁（site/public/roadmap.html）的守門測試：node --test --test-force-exit --test-timeout=120000 tests/roadmap_page.test.mjs
+// 官網「藍圖」（/roadmap）與「開發日誌」（/log）兩頁的守門測試：node --test --test-force-exit --test-timeout=120000 tests/roadmap_page.test.mjs
+// 內容從 2026-10-27 起放在資料庫（public.asn_site_* 表），頁面只剩骨架＋外部腳本 site/public/timeline/。
+// 這裡檢查：種子 SQL 與產生腳本一致、頁面沒有行內腳本、畫面程式不用 innerHTML、內容安全政策只對這兩頁放寬、公開內容沒有個資與金鑰、純邏輯正確。
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseChangelog, injectReleases, KEEP, parseMeetings, injectMeetings } from '../site/make-roadmap-page.mjs'
+import { generate, extract, toMarkup, releaseFacts, SOURCE_HTML, SOURCE_MEETINGS } from '../site/tools/extract-roadmap-seed.mjs'
+import * as M from '../site/public/timeline/model.mjs'
+import { QUERIES } from '../site/public/timeline/data.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const read = p => fs.readFileSync(path.join(root, p), 'utf8').replace(/\r\n/g, '\n')   // Windows 工作樹是 CRLF，統一成 LF 再比對
-const page = read('site/public/roadmap.html')
-const changelog = read('relay/asn/CHANGELOG.md')
+const SEED = 'supabase/migrations/20261027100100_site_content_seed.sql'
+const SCHEMA = 'supabase/migrations/20261027100000_site_content.sql'
+const PAGES = ['site/public/roadmap.html', 'site/public/log.html']
+const TIMELINE_DIR = 'site/public/timeline'
+const timelineFiles = fs.readdirSync(path.join(root, TIMELINE_DIR)).filter(f => f.endsWith('.mjs')).map(f => `${TIMELINE_DIR}/${f}`)
+const data = extract(fs.readFileSync(SOURCE_HTML, 'utf8'), fs.readFileSync(SOURCE_MEETINGS, 'utf8'))
 
-test('更新日誌區段與 relay/asn/CHANGELOG.md 一致（改了更新記錄要重跑 node site/make-roadmap-page.mjs）', () => {
-  const releases = parseChangelog(changelog)
-  assert.equal(releases.length, KEEP)
-  assert.equal(injectReleases(page, releases), page)
-  for (const r of releases) {
-    assert.match(r.date, /^\d{4}-\d{2}-\d{2}$/)
-    assert.ok(r.items.length >= 1, `${r.version} 沒有內容`)
-    assert.ok(page.includes(`<h3>${r.version}<span class="date">${r.date}</span></h3>`), `${r.version} 不在頁面`)
+// 公開內容守門：電子郵件、本機路徑、金鑰樣式
+function assertPublicSafe(text, where) {
+  assert.ok(!/[\w.+-]+@[\w-]+\.[\w.]+/.test(text), `${where}：不放電子郵件`)
+  assert.ok(!/[A-Za-z]:\\|\/home\/|\/Users\/|~\/\./.test(text), `${where}：不放本機路徑`)
+  assert.ok(!/eyJ[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|service_role/.test(text), `${where}：不放金鑰`)
+}
+
+// ---- 種子資料 ----
+test('種子 SQL 與產生腳本一致（改了快照或腳本要重跑 node site/tools/extract-roadmap-seed.mjs）', () => {
+  assert.equal(read(SEED), generate().replace(/\r\n/g, '\n'))
+})
+
+test('種子筆數：發版 10、會議 8、欄位 6、項目 47、總表 6 欄 6 列 36 格', () => {
+  assert.equal(data.releases.length, 10)
+  assert.equal(data.meetings.length, 8)
+  assert.equal(data.lanes.length, 6)
+  assert.equal(data.items.length, 47)
+  assert.equal(data.matrix.columns.length, 6)
+  assert.equal(data.matrix.rows.length, 6)
+  assert.equal(data.matrix.cells.length, 36)
+  assert.match(read(SEED), /-- 筆數：發版 10、會議 8、藍圖與待辦欄位 6、項目 47、總表欄 6、總表列 6、總表格 36/)
+})
+
+test('快照裡的每一版、每一場會議、每一列總表都進了種子 SQL', () => {
+  const sql = read(SEED)
+  const html = read('site/tools/seed-source/roadmap.html')
+  for (const m of html.matchAll(/<h3>(\d+\.\d+\.\d+)<span class="date">/g)) assert.ok(sql.includes(`('${m[1]}', `), `缺 ${m[1]}`)
+  for (const m of JSON.parse(read('site/tools/seed-source/meetings.json'))) assert.ok(sql.includes(`'${m.time}+08'`), `缺 ${m.time} 會議`)
+  for (const n of ['Claude', 'Codex', 'Gemini', 'Grok', 'pi']) assert.ok(data.matrix.rows.some(r => r.name === n), `缺 ${n}`)
+  assert.deepEqual(data.matrix.columns.map(c => c.label), ['開啟', '關閉', '接手', '切換模型', '群組聊天', '帳號切換'])
+})
+
+test('種子內容不帶 HTML：只剩 **粗體**、`程式碼`、#編號 這種標記', () => {
+  const texts = [
+    ...data.releases.flatMap(r => r.items),
+    ...data.items.flatMap(i => [i.title ?? '', i.body]),
+    ...data.matrix.rows.map(r => r.note),
+    ...data.matrix.cells.map(c => c.body),
+    ...data.meetings.flatMap(m => [...m.attendees, ...m.progress, ...m.decisions, ...m.assignments, ...m.improvements]),
+  ]
+  for (const t of texts) assert.ok(!/<\/?[a-z][^>]*>|&(amp|lt|gt|quot);/i.test(t), `還有 HTML：${t.slice(0, 40)}`)
+  assert.ok(data.items.some(i => i.body.includes('`tenants_sql`')), '<code> 要轉成 `…`')
+  assert.ok(data.items.some(i => /\n- /.test(i.body)), '巢狀清單要轉成「- 」行')
+})
+
+test('總表：狀態只能是六種之一，「待確認」與「已完成未驗證」寫明原因', () => {
+  for (const c of data.matrix.cells) {
+    assert.ok(Object.keys(M.STATUS_LABEL).includes(c.status), c.status)
+    if (c.status === 'tbc' || c.status === 'unv') assert.ok(c.body.length >= 12, `說明太短：${c.body}`)
+  }
+  const cell = (row, col) => data.matrix.cells.find(c => c.row === row && c.column === col)
+  assert.equal(cell('codex', 'adopt').status, 'na')
+  assert.equal(cell('codex', 'open').status, 'tbc')
+  assert.equal(cell('grok-local', 'adopt').status, 'doing')
+  assert.match(cell('grok-cloud', 'group').body, /舊版的雲端收信程式/)
+  assert.deepEqual(cell('claude', 'adopt').refs, [82, 107, 109, 153])
+})
+
+test('發版：commit 與發佈位置從待辦與會議文字找，找不到就留空不猜', () => {
+  const r = Object.fromEntries(data.releases.map(x => [x.version, x]))
+  assert.equal(r['0.1.94'].commit, '76d7284')
+  assert.deepEqual(r['0.1.92'].platforms, ['官網', '家用機', '工作機'])
+  assert.equal(r['0.1.89'].commit, '6bb7400')
+  assert.deepEqual(releaseFacts('9.9.9', '沒有這版'), { commit: null, platforms: [] })
+})
+
+test('轉換：不認得的標籤直接報錯，不默默吞掉', () => {
+  assert.throws(() => toMarkup('<em>斜體</em>'), /不認得的標籤/)
+  assert.deepEqual(toMarkup('<strong>A</strong>：b &amp; c<span class="refs">#1 #22</span>'), { text: '**A**：b & c', refs: [1, 22], tag: null })
+})
+
+test('公開內容守門：種子 SQL、快照、兩頁、畫面程式都沒有電子郵件、本機路徑、金鑰', () => {
+  for (const f of [SEED, SCHEMA, 'site/tools/seed-source/roadmap.html', 'site/tools/seed-source/meetings.json', ...PAGES]) assertPublicSafe(read(f), f)
+  for (const f of timelineFiles) assertPublicSafe(read(f), f)
+})
+
+// ---- 資料表與權限 ----
+test('資料表：開 RLS、anon 只能讀，不給新增／修改／刪除', () => {
+  const sql = read(SCHEMA)
+  const tables = [...sql.matchAll(/create table if not exists public\.(asn_site_\w+)/g)].map(m => m[1])
+  assert.deepEqual(tables.sort(), ['asn_site_lanes', 'asn_site_matrix_cells', 'asn_site_matrix_columns', 'asn_site_matrix_rows', 'asn_site_meetings', 'asn_site_releases', 'asn_site_roadmap_items'])
+  const loop = /array\[([^\]]+)\]\s*loop/.exec(sql)[1]
+  for (const t of tables) assert.ok(loop.includes(`'${t}'`), `${t} 沒套權限`)
+  assert.match(sql, /enable row level security/)
+  assert.match(sql, /revoke all on table public\.%I from public, anon, authenticated/)
+  assert.match(sql, /grant select on table public\.%I to anon, authenticated/)
+  assert.match(sql, /for select to anon, authenticated using \(true\)/)
+  assert.doesNotMatch(sql, /grant (insert|update|delete|all)/i)
+  assert.doesNotMatch(sql, /for (insert|update|delete|all)/i)
+  // 前端讀的每張表都在 migration 裡
+  for (const q of Object.values(QUERIES)) assert.ok(tables.includes(q.split('?')[0]), q)
+})
+
+// ---- 頁面與畫面程式 ----
+test('兩頁：沒有行內腳本、行內樣式、行內事件；只載入站內的 timeline 腳本', () => {
+  const want = { 'site/public/roadmap.html': '/timeline/roadmap.mjs', 'site/public/log.html': '/timeline/log.mjs' }
+  for (const f of PAGES) {
+    const html = read(f)
+    const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)]
+    assert.equal(scripts.length, 1, `${f} 只能有一個腳本`)
+    assert.match(scripts[0][1], new RegExp(`type="module" src="${want[f]}"`))
+    assert.equal(scripts[0][2].trim(), '', `${f} 不能有行內腳本`)
+    assert.ok(!/<style/i.test(html) && !/\sstyle=/i.test(html), `${f} 有行內樣式`)
+    assert.ok(!/\son[a-z]+=/i.test(html), `${f} 有行內事件`)
+    assert.ok(!/(src|href)="https?:\/\//i.test(html), `${f} 有外部資源`)
   }
 })
 
-test('解析：略過格式不符的段落、跳脫 HTML、只取前 N 版', () => {
-  const src = '# 標題\n\n## 0.2.0（2026-11-01）\n- a <b> & "c"\n- 第二行\n\n## 說明\n- 不算\n\n## 0.1.9（2026-10-31）\n- 舊版\n'
-  const r = parseChangelog(src, 5)
-  assert.deepEqual(r.map(x => x.version), ['0.2.0', '0.1.9'])
-  assert.equal(r[0].items.length, 2)
-  assert.equal(parseChangelog(src, 1).length, 1)
-  const html = injectReleases('x<!-- changelog:start（由 site/make-roadmap-page.mjs 產生，不要手改） -->\nold\n<!-- changelog:end -->y', r)
-  assert.ok(html.includes('a &lt;b&gt; &amp; &quot;c&quot;'))
-  assert.ok(!html.includes('old'))
-  assert.throws(() => injectReleases('沒有標記', r))
-})
-
-test('符合網站的內容安全政策：不能有行內樣式、行內腳本、外部資源', () => {
-  assert.ok(!/<script/i.test(page))
-  assert.ok(!/\sstyle=/i.test(page))
-  assert.ok(!/\son[a-z]+=/i.test(page))
-  assert.ok(!/(src|href)="https?:\/\//i.test(page))
-  assert.ok(page.includes('<link rel="stylesheet" href="/style.css">'))
-})
-
-test('只放可以公開的內容：沒有電子郵件、本機路徑、金鑰樣式', () => {
-  assert.ok(!/[\w.+-]+@[\w-]+\.[\w.]+/.test(page), '不放電子郵件')
-  assert.ok(!/[A-Za-z]:\\|\/home\/|\/Users\/|~\/\./.test(page), '不放本機路徑')
-  assert.ok(!/eyJ[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|service_role/.test(page), '不放金鑰')
-})
-
-test('三欄藍圖都在，且每個頁面都連得到藍圖頁', () => {
-  for (const s of ['status done">已完成', 'status doing">進行中', 'status plan">規劃中']) assert.ok(page.includes(s), s)
-  for (const f of ['index', 'privacy', 'terms', 'roadmap']) {
-    const html = read(`site/public/${f}.html`)
-    assert.ok(html.includes('href="/roadmap"'), `${f}.html 缺藍圖連結`)
+test('兩頁：讀取中與讀取失敗的提示是給人看的一句話，技術細節只進 console', () => {
+  for (const f of ['site/public/timeline/roadmap.mjs', 'site/public/timeline/log.mjs']) {
+    const js = read(f)
+    assert.match(js, /暫時讀不到資料，請稍後重新整理/)
+    assert.match(js, /console\.info\(/)
+    assert.doesNotMatch(js, /showStatus\([^)]*\b(e|err|error)\b[.)]/, '錯誤物件不能顯示在畫面上')
   }
+  assert.match(read('site/public/roadmap.html'), /id="timeline-status"[^>]*>讀取中…</)
+  assert.match(read('site/public/log.html'), /id="log-status"[^>]*>讀取中…</)
 })
 
-test('頁內錨點都有對應 id，站內連結都指到存在的頁面', () => {
-  const ids = new Set([...page.matchAll(/\sid="([^"]+)"/g)].map(m => m[1]))
-  for (const m of page.matchAll(/href="#([^"]+)"/g)) assert.ok(ids.has(m[1]), `找不到 #${m[1]}`)
-  for (const m of page.matchAll(/href="\/([^"#]*)"/g)) {
-    const p = m[1]
-    const ok = p === '' || p === 'style.css' || fs.existsSync(path.join(root, 'site/public', p + '.html')) || fs.existsSync(path.join(root, 'site/public', p))
-    assert.ok(ok, `站內連結 /${p} 不存在`)
+test('畫面程式不用 innerHTML 這類把字串當 HTML 的寫法（靜態檢查 timeline/ 全部檔案）', () => {
+  assert.ok(timelineFiles.length >= 5)
+  for (const f of timelineFiles) {
+    const js = read(f).split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
+    assert.doesNotMatch(js, /\.innerHTML|\.outerHTML|insertAdjacentHTML|document\.write|DOMParser|createContextualFragment|setHTMLUnsafe|\.srcdoc|\beval\(|new Function\(/, f)
   }
+  const view = read('site/public/timeline/view.mjs')
+  assert.match(view, /createTextNode|textContent/)
+  assert.doesNotMatch(view, /setAttribute\(\s*['"]href/, 'href 只能經驗證後設定')
+  assert.doesNotMatch(view, /'href'/, '屬性白名單不能有 href')
 })
 
-// ---- 各家 AI 支援總表（#matrix）----
-const matrix = (() => {
-  const a = page.indexOf('<section id="matrix">')
-  const b = page.indexOf('</section>', a)
-  assert.ok(a >= 0 && b > a, '找不到 #matrix 區段')
-  return page.slice(a, b)
-})()
-const STATUSES = ['已完成並驗證', '已完成未驗證', '進行中', '尚未做', '待確認', '不適用']
-const matrixRows = [...matrix.matchAll(/<tr>\n([\s\S]*?)<\/tr>/g)].map(m => m[1])
-
-test('總表：欄位必須有開啟、關閉、接手、切換模型、群組聊天，且每家都列齊', () => {
-  const heads = [...matrix.matchAll(/<th scope="col">([^<]+)<\/th>/g)].map(m => m[1])
-  for (const h of ['開啟', '關閉', '接手', '切換模型', '群組聊天', '帳號切換', '備註與限制']) assert.ok(heads.includes(h), `缺欄位：${h}`)
-  assert.equal(heads[0], 'AI')
-  const names = matrixRows.map(r => /<strong>([^<]+)<\/strong>/.exec(r)?.[1])
-  for (const n of ['Claude', 'Codex', 'Gemini', 'Grok', 'pi']) assert.ok(names.includes(n), `缺 ${n}`)
-  assert.ok(matrixRows.length >= 6)
+test('畫面程式：網址只連 GitHub 的議題頁，其他協定一律擋', () => {
+  assert.equal(M.issueUrl(281), 'https://github.com/Yooliang/asn/issues/281')
+  assert.equal(M.issueUrl(0), null)
+  assert.equal(M.issueUrl('1'), null)
+  assert.equal(M.safeHttpUrl('javascript:alert(1)'), null)
+  assert.equal(M.safeHttpUrl('data:text/html,x'), null)
+  assert.equal(M.safeHttpUrl('https://example.org/a'), 'https://example.org/a')
 })
 
-test('總表：每一列每個功能欄都有狀態（只能是六種之一）與說明，備註欄不為空', () => {
-  for (const row of matrixRows) {
-    const tds = [...row.matchAll(/<td data-label="([^"]+)"([^>]*)>([\s\S]*?)<\/td>/g)]
-    assert.equal(tds.length, 7, '每列 7 格')
-    for (const [, label, attrs, inner] of tds) {
-      if (label === '備註與限制') { assert.ok(inner.trim().length > 0); continue }
-      const st = /<span class="st (st-[a-z]+)">([^<]+)<\/span>/.exec(inner)
-      assert.ok(st, `${label} 缺狀態`)
-      assert.ok(STATUSES.includes(st[2]), `未知狀態：${st[2]}`)
-      assert.ok(/<p>[^<]{4,}/.test(inner), `${label} 缺說明`)
-    }
-  }
+// ---- 內容安全政策（site/firebase.json）----
+test('內容安全政策：只有 /roadmap、/log 放寬腳本與連線，其他頁維持全站的嚴格設定', () => {
+  const fb = JSON.parse(read('site/firebase.json')).hosting
+  const cspOf = h => h.headers.find(x => x.key === 'Content-Security-Policy')?.value
+  const global = fb.headers.find(h => h.source === '**')
+  assert.match(cspOf(global), /script-src 'none'/)
+  const idxGlobal = fb.headers.indexOf(global)
+  const ours = fb.headers.filter(h => /roadmap|log/.test(h.source))
+  assert.equal(ours.length, 1, '只加一條')
+  const o = ours[0]
+  assert.equal(o.source, '/{roadmap,log}{,.html}')
+  assert.ok(fb.headers.indexOf(o) > idxGlobal, '要排在全站設定之後才會蓋過')
+  const csp = cspOf(o)
+  assert.match(csp, /script-src 'self'(;|$)/)
+  assert.match(csp, /connect-src https:\/\/etccgmkrosbzpltudlgt\.supabase\.co(;|$)/)
+  for (const d of ["default-src 'self'", "style-src 'self'", "frame-ancestors 'none'", "base-uri 'self'", "form-action 'none'", "img-src 'self' data:"]) assert.ok(csp.includes(d), d)
+  assert.doesNotMatch(csp, /unsafe-inline|unsafe-eval|\*/)
+  // 其他放寬 script-src 的只有原本就有的 /i/ 與 /link/
+  const relaxed = fb.headers.filter(h => /script-src 'self'/.test(cspOf(h) ?? '')).map(h => h.source).sort()
+  assert.deepEqual(relaxed, ['/i/**', '/link{,/**}', '/{roadmap,log}{,.html}'].sort())
 })
 
-test('總表：圖例的六種狀態都在，且表格裡出現的樣式都有圖例；樣式有對應 CSS', () => {
-  const css = read('site/public/style.css')
-  for (const s of STATUSES) assert.ok(matrix.includes(`>${s}</span>`), `圖例缺 ${s}`)
-  for (const cls of new Set([...matrix.matchAll(/class="st (st-[a-z]+)"/g)].map(m => m[1]))) assert.ok(css.includes(`.${cls} `), `style.css 缺 .${cls}`)
+test('資料來源：只連 Supabase 的 REST，金鑰沿用核准頁的公開設定，不另外抄一份', () => {
+  const js = read('site/public/timeline/data.mjs')
+  assert.match(js, /from '\.\.\/link\/config\.mjs'/)
+  assert.doesNotMatch(js, /eyJ/)
+  assert.match(js, /\/rest\/v1\//)
 })
 
-test('總表：「待確認」與「已完成未驗證」一定寫明原因（說明至少一句完整的話）', () => {
-  for (const row of matrixRows) {
-    for (const m of row.matchAll(/class="st st-(tbc|unv)">[^<]+<\/span>\s*<p>([^<]*)/g)) assert.ok(m[2].length >= 12, `說明太短：${m[2]}`)
-  }
+// ---- 純邏輯 ----
+test('內文標記：粗體、程式碼、編號、子清單；其餘當純文字（含尖括號）', () => {
+  assert.deepEqual(M.parseInline('**A**：用 `x<y>` 修 #12'), [
+    { t: 'strong', v: 'A' }, { t: 'text', v: '：用 ' }, { t: 'code', v: 'x<y>' }, { t: 'text', v: ' 修 ' }, { t: 'ref', v: '#12' },
+  ])
+  assert.deepEqual(M.parseInline('<b>不是標籤</b>'), [{ t: 'text', v: '<b>不是標籤</b>' }])
+  const b = M.parseBlocks('第一段\n- 甲\n- 乙\n第二段')
+  assert.deepEqual(b.map(x => x.kind), ['p', 'ul', 'p'])
+  assert.equal(b[1].items.length, 2)
 })
 
-test('總表：不出現「收發室」，也不用行內樣式', () => {
-  assert.ok(!matrix.includes('收發室'))
-  assert.ok(!/\sstyle=/.test(matrix))
+test('版本排序用語意版本（0.1.9 < 0.1.10）', () => {
+  assert.deepEqual(['0.1.10', '0.1.9', '0.2.0', '0.1.94'].sort(M.cmpVersion), ['0.1.9', '0.1.10', '0.1.94', '0.2.0'])
 })
 
-test('總表：藍圖頁上有這一區、窄螢幕有卡片版型（每格帶 data-label）', () => {
-  assert.ok(page.includes('<section id="matrix">'), '總表區段在藍圖頁上（選單改成各頁共用，不再有頁內錨點）')
-  const css = read('site/public/style.css')
-  assert.match(css, /content: attr\(data-label\)/)
+// 把種子資料轉成資料庫回傳的樣子
+const rowsFromSeed = () => ({
+  releases: data.releases.map(r => ({ version: r.version, released_on: r.date, items: r.items, platforms: r.platforms, commit_sha: r.commit, notes: null })),
+  items: data.items.map(i => ({ item_key: i.key, section: i.section, lane: i.lane, title: i.title, body: i.body, refs: i.refs, status: i.status, version: i.version, sort_order: i.sort })),
+  lanes: data.lanes.map(l => ({ section: l.section, lane: l.key, label: l.label, tone: l.tone, sort_order: l.sort })),
+  meetings: data.meetings.map((m, i) => ({ id: i + 1, held_at: new Date(`${m.time.replace(' ', 'T')}:00+08:00`).toISOString(), ...m })),
 })
 
-test('總表：版本說法與已發版本一致（0.1.68 已發，不再寫「未發版」；pi 收信 0.1.65～0.1.67 沒生效要寫明）', () => {
-  const lastVersion = changelog.match(/^## (\d+\.\d+\.\d+)/m)[1]
-  assert.ok(lastVersion, '讀不到最新版本')
-  assert.doesNotMatch(matrix, /（未發版|已合併（|尚未隨版本發佈/, '已隨 0.1.68 發佈的項目不能再標未發版')
-  assert.doesNotMatch(page, /<span class="tag">已合併，尚未隨版本發佈/, '藍圖頁已發版的項目不能再掛未發版標籤')
-  const rowOf = name => matrixRows.find(r => r.includes(`<strong>${name}`))
-  const pi = rowOf('pi')
-  assert.match(pi, /0\.1\.69/, 'pi 接手欄要寫方案 A 隨 0.1.69 發佈')
-  assert.ok(pi && /0\.1\.65～0\.1\.67/.test(pi) && /0\.1\.68/.test(pi), 'pi 列要寫明 0.1.65～0.1.67 收信沒生效、0.1.68 起修好')
-  assert.match(rowOf('Codex'), /data-label="接手"[^>]*>\s*<span class="st st-na">/, 'Codex 接手是不適用')
-  assert.match(rowOf('Codex'), /data-label="開啟"[^>]*>\s*<span class="st st-tbc">/, 'Codex 開啟是待確認')
-  assert.match(matrixRows.find(r => r.includes('class="kind">本機背景工作者')), /data-label="接手"[^>]*>\s*<span class="st st-doing">/, 'Grok 本機接手是進行中（實測失敗過一次）')
-  assert.match(matrixRows.find(r => r.includes('class="kind">雲端代理')), /舊版的雲端收信程式/, 'Grok 雲端群組要提醒舊收信程式要更新')
-  assert.match(pi, /閒置/, 'pi 切換模型要寫明只在閒置時處理')
+test('藍圖時間軸：過去（舊到新）→ 現在 → 未來（預定版本、再來是未定版本）', () => {
+  const d = rowsFromSeed()
+  const tl = M.buildRoadmapTimeline(d.releases, d.items)
+  assert.equal(tl.past[0].version, '0.1.68', '藍圖裡「已隨 0.1.68 發佈」的項目自成一個節點')
+  assert.equal(tl.past[tl.past.length - 1].version, '0.1.94')
+  assert.equal(tl.latest, '0.1.94')
+  assert.equal(tl.earlier.length, 5)
+  assert.equal(tl.now.length, 5)
+  assert.deepEqual(tl.future.map(n => n.version), ['0.1.95'])
+  assert.equal(tl.later.length, 8)
+  // 已經發過的版本不能出現在未來
+  const t2 = M.buildRoadmapTimeline(d.releases, [...d.items, { section: 'todo', lane: 'next', status: 'planned', version: '0.1.90', body: 'x', refs: [], sort_order: 1 }])
+  assert.deepEqual(t2.future.map(n => n.version), ['0.1.95'])
 })
 
-// ---- 會議記錄（#meetings，資料在 site/meetings.json）----
-const MEET = (over = {}) => ({ time: '2026-10-26 08:00', attendees: '甲、乙', progress: ['進度一', '進度二'], decisions: '決議', assignments: '分派', improvements: '無', ...over })
-
-test('會議記錄：頁面與 site/meetings.json 一致（改了資料檔要重跑 node site/make-roadmap-page.mjs）', () => {
-  const rows = parseMeetings(JSON.parse(read('site/meetings.json')))
-  assert.equal(injectMeetings(page, rows), page)
-  for (const h of ['時間', '出席／回覆', '各項進度', '決議', '分派', '改善意見']) assert.ok(page.includes(`<th scope="col">${h}</th>`), h)
+test('開發日誌：會議與發版合成一條、最新在上；同一天的發版排在當天會議之上、多版依版本新到舊', () => {
+  const d = rowsFromSeed()
+  const log = M.buildLog(d.meetings, d.releases)
+  assert.equal(log.length, 18)
+  assert.deepEqual(log.slice(0, 11).map(e => e.kind), Array(10).fill('release').concat('meeting'))
+  assert.equal(log[0].release.version, '0.1.94')
+  assert.equal(log[9].release.version, '0.1.85')
+  assert.equal(`${log[10].date} ${log[10].time}`, '2026-10-27 20:00', '會議時間以台北時間顯示')
+  assert.equal(`${log[17].date} ${log[17].time}`, '2026-10-26 08:00')
 })
 
-test('會議記錄：最新在上、陣列變條列、跳脫 HTML、缺欄位與壞時間會報錯', () => {
-  const rows = parseMeetings([MEET({ time: '2026-10-25 20:00' }), MEET({ time: '2026-10-26 08:00', decisions: '<b>&' }), MEET({ time: '2026-10-26 08:00', attendees: '同時間後來的' })])
-  assert.deepEqual(rows.map(r => r.time), ['2026-10-26 08:00', '2026-10-26 08:00', '2026-10-25 20:00'])
-  assert.equal(rows[1].attendees[0], '同時間後來的', '同時間維持檔案先後')
-  const html = injectMeetings('x<!-- meetings:start（由 site/make-roadmap-page.mjs 產生，不要手改；資料在 site/meetings.json） -->\nold\n<!-- meetings:end -->y', rows)
-  assert.ok(html.includes('&lt;b&gt;&amp;') && !html.includes('old'))
-  assert.ok(html.includes('<ul><li>進度一</li><li>進度二</li></ul>'))
-  assert.throws(() => parseMeetings([MEET({ decisions: '' })]), /缺少「決議」/)
-  assert.throws(() => parseMeetings([MEET({ time: '昨天' })]), /time 格式/)
-  assert.throws(() => parseMeetings({}), /陣列/)
-  assert.throws(() => injectMeetings('沒有標記', rows))
-  assert.equal(parseMeetings([MEET({ time: '2026-10-26' })])[0].time, '2026-10-26', '時間可省略')
-})
-
-test('待辦與優先順序：藍圖頁上有這一區，分成需決定、近期、之後三欄，且不出現「收發室」', () => {
-  const a = page.indexOf('<section id="todo">')
-  const b = page.indexOf('</section>', a)
-  assert.ok(a >= 0 && b > a, '找不到 #todo 區段')
-  const todo = page.slice(a, b)
-  for (const h of ['一、需要負責人決定', '二、近期（依序）', '三、之後']) assert.ok(todo.includes(h), `缺：${h}`)
-  assert.ok(!todo.includes('收發室'))
-  assert.ok(!/\sstyle=/.test(todo))
-})
-
-// 同步機制（#297）：總表標題的版本要和 CHANGELOG 最新版一致；發版後忘了更新藍圖，這裡會變紅，提醒一併更新總表、待辦與會議記錄
-test('總表標題的主線版本與 CHANGELOG 最新版一致（發版要一併更新藍圖）', () => {
-  const latest = parseChangelog(changelog)[0].version
-  const m = /各家 AI 與各項管理功能的現況（依[^（]*主線程式（(\d+\.\d+\.\d+)）/.exec(page)
-  assert.ok(m, '找不到總表標題的主線版本')
-  assert.equal(m[1], latest, `總表標題寫 ${m[1]}，CHANGELOG 最新版是 ${latest}：發版後請同步藍圖（總表、待辦與優先順序、會議記錄）`)
+test('待辦欄位與總表：依排序組好，缺的格子當「待確認」', () => {
+  const d = rowsFromSeed()
+  const lanes = M.buildLanes(d.lanes, d.items, 'todo')
+  assert.deepEqual(lanes.map(l => l.label), ['一、需要負責人決定', '二、近期（依序）', '三、之後'])
+  assert.deepEqual(lanes.map(l => l.items.length), [1, 20, 6])
+  const m = M.buildMatrix([{ column_key: 'a', label: 'A', sort_order: 1 }], [{ row_key: 'x', name: 'X', kind: 'k', note: 'n', sort_order: 1 }], [])
+  assert.equal(m.rows[0].cells[0].status, 'tbc')
 })
