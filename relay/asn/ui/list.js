@@ -33,6 +33,7 @@ import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, crea
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
 import { PI_SETUP_TEXT, piSetupError, piSetupView } from './lib/pi-setup.mjs'
+import { QUOTA_HOOK_TEXT, quotaHookError, quotaHookView } from './lib/quota-hook.mjs'
 import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
 import { CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, buddyConsoleItem, consoleReq, engineForProfile,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice, foregroundOnlyProfile, withTimeout } from './lib/partner-launch-ui.mjs'
 import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
@@ -341,6 +342,15 @@ async function runPiSetup(call, doneText) {
   if (piSetup.busy) return
   piSetup.busy = true; piSetup.confirm = false; piSetup.msg = ''
   try { piSetup.raw = await call(); piSetup.msg = doneText } catch (e) { piSetup.msg = piSetupError(e) } finally { piSetup.busy = false }
+}
+const quotaHook = reactive({ raw: null, busy: false, confirm: false, msg: '' })
+async function loadQuotaHook() {
+  try { quotaHook.raw = await transport.quotaHookStatus() } catch { quotaHook.raw = null }
+}
+async function runQuotaHook(call, doneText) {
+  if (quotaHook.busy) return
+  quotaHook.busy = true; quotaHook.confirm = false; quotaHook.msg = ''
+  try { quotaHook.raw = await call(); quotaHook.msg = doneText } catch (e) { quotaHook.msg = quotaHookError(e); await loadQuotaHook() } finally { quotaHook.busy = false }
 }
 async function loadLaunchPrefs() {
   try {
@@ -685,7 +695,7 @@ async function pollLaunchResults() {
 void refreshCliTools()
 void refreshLaunchers()
 void loadLaunchPrefs()
-void loadPiSetup()
+void loadPiSetup(); void loadQuotaHook()
 setInterval(() => { void refreshLaunchers(); void pollLaunchResults() }, 15_000)
 // 語音：整合模式的對話分頁用這一份；設定存在 Rust 端的 voice.json（對話視窗也讀同一份）
 const voice = createVoiceUi({ invoke, listen, createMic, createAudio: browserAudio, reactive })
@@ -1384,6 +1394,7 @@ const app = createApp({
       usage: { loading: usage.state.loading, error: usage.state.error, data: usage.state.data, updated: usage.state.updated },
       launch: { tools: launchToolRows.value, maxPerHour: launchPrefs.maxPerHour, cwdText: launchCwdText.value },
       piSetup: piSetupView(piSetup.raw, piSetup),
+      quotaHook: quotaHookView(quotaHook.raw, quotaHook),
       version: info.version,
       log: buildLogView({ entries: changelogEntries.value, current: info.version, available: upd.phase === 'idle' ? null : upd.info }),
     }))
@@ -1423,6 +1434,10 @@ const app = createApp({
         case 'usage-refresh': await usage.refresh(); break
         case 'launch-max': launchPrefs.maxPerHour = Number.isFinite(value) ? value : 6; await saveLaunchPrefs(); break
         case 'launch-cwd': setLaunchCwdText(String(value ?? '')); break
+        case 'quota-hook-ask': quotaHook.confirm = true; quotaHook.msg = ''; break
+        case 'quota-hook-cancel': quotaHook.confirm = false; break
+        case 'quota-hook-connect': await runQuotaHook(() => transport.quotaHookConnect(), QUOTA_HOOK_TEXT.connected); break
+        case 'quota-hook-disconnect': await runQuotaHook(() => transport.quotaHookDisconnect(), QUOTA_HOOK_TEXT.disconnected); break
         case 'pi-setup-ask': piSetup.confirm = true; piSetup.msg = ''; break
         case 'pi-setup-cancel': piSetup.confirm = false; break
         case 'pi-setup-install': await runPiSetup(() => transport.piSetupInstall(), PI_SETUP_TEXT.installed); break

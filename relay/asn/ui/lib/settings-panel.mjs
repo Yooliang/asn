@@ -19,7 +19,7 @@ import { DEVICE_TEXT, canRemoveRow, dropAfter, moveFlags, removedRows, visibleRo
 export const SETTING_OPS = [
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-trust', 'acct-trust-signed', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
-  'closeTo', 'autostart', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'avatar-remove',
+  'closeTo', 'autostart', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove',
 ]
 
 export const SettingsPanel = {
@@ -328,6 +328,19 @@ export const SettingsPanel = {
               <button class="aero-btn" type="button" v-if="st.piSetup.showRemove" :disabled="st.piSetup.busy" @click="act('pi-setup-remove')">{{ st.piSetup.removeLabel }}</button>
             </div>
             <small v-if="st.piSetup.msg" role="status">{{ st.piSetup.msg }}</small>
+          </section>
+          <section class="set-card" aria-label="額度回報" v-if="st.quotaHook">
+            <b>{{ st.quotaHook.title }}</b>
+            <small v-for="(l, i) in st.quotaHook.lines" :key="i">{{ l }}</small>
+            <small v-if="st.quotaHook.current">目前的狀態列指令：<code>{{ st.quotaHook.current }}</code></small>
+            <small v-if="st.quotaHook.consent">{{ st.quotaHook.consent }}</small>
+            <div class="upd-row">
+              <button class="aero-btn" type="button" v-if="st.quotaHook.showAsk" :disabled="st.quotaHook.busy" @click="act('quota-hook-ask')">{{ st.quotaHook.askLabel }}</button>
+              <button class="aero-btn" type="button" v-if="st.quotaHook.showAgree" :disabled="st.quotaHook.busy" @click="act('quota-hook-connect')">{{ st.quotaHook.agreeLabel }}</button>
+              <button class="aero-btn" type="button" v-if="st.quotaHook.showCancel" :disabled="st.quotaHook.busy" @click="act('quota-hook-cancel')">{{ st.quotaHook.cancelLabel }}</button>
+              <button class="aero-btn" type="button" v-if="st.quotaHook.showDisconnect" :disabled="st.quotaHook.busy" @click="act('quota-hook-disconnect')">{{ st.quotaHook.disconnectLabel }}</button>
+            </div>
+            <small v-if="st.quotaHook.msg" role="status">{{ st.quotaHook.msg }}</small>
           </section>
           <label>每小時開新夥伴上限
             <input class="set-input" type="number" min="1" max="20" :value="st.launch.maxPerHour" @change="act('launch-max', Number($event.target.value))">
