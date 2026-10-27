@@ -1,6 +1,7 @@
 {
   "hosting": {
     "public": "public",
+    "predeploy": ["node ../tools/release/site_predeploy.mjs"],
     "cleanUrls": true,
     "trailingSlash": false,
     "rewrites": [

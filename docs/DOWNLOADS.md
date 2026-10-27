@@ -78,6 +78,8 @@ cd site && npx firebase-tools deploy --only hosting  # 部署（很慢，丟背�
 產出的 zip 與 `downloads.json` 不進 git（`.gitignore`），所以**換一台電腦發版要重新產生再部署**；`--out <資料夾>` 可改輸出位置，
 `--include <檔案>` 可把其他檔案（可重複）也列進 `downloads.json`。
 
+**部署前檢查**：`site/firebase.json` 的 `hosting.predeploy` 會先跑 `tools/release/site_predeploy.mjs`。Firebase 每次部署都把整個網站換成這台電腦上的內容，而安裝檔、APK、zip 都不進 git，所以換一台電腦部署會把別人發的檔案弄不見。檢查讀 `update/latest.json`、`update/android.json`、`download/downloads.json`，指到本站的檔案本機沒有就從線上目前的版本補回並核對 sha256 或大小；補不回來或對不起來就讓部署失敗，並說明是哪個檔。也可以單獨跑：`node tools/release/site_predeploy.mjs`。
+
 上傳後驗證：`curl -sI https://asnmessenger.web.app/download/asn-windows.zip` 應該是 200、`content-type: application/zip`，
 大小與 `downloads.json` 一致；`downloads.json` 的標頭是 `no-cache`。
 
