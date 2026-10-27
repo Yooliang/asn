@@ -83,7 +83,7 @@ test('「⋯」搬到大按鈕區：收件人列不再有選單，大按鈕區�
 test('群組列表：未讀徽章垂直置中、不被拉長；大頭像與個人名單同一個 dp xs 尺寸', () => {
   const html = read('ui/list.html'), css = read('ui/group.css')
   assert.match(html, /<span class="dp xs room-av/)
-  assert.match(html, /<span class="dp xs" :class="'st-' \+ \(g\.kind === 'archived' \? 'offline' : c\.status\)">/, '個人名單也是 dp xs（已封存群組一律灰）')
+  assert.match(html, /<asn-avatar :src="avOf\(c\)" :friend="c" :status="g\.kind === 'archived' \? 'offline' : c\.status"/, '個人名單用統一頭像（預設 xs，同 dp xs 尺寸；已封存群組一律灰）')
   assert.ok(!/room-ic/.test(html))
   assert.match(css, /\.room-btn\{display:flex;align-items:center;/)
   assert.match(css, /\.room-btn \.unread\{align-self:center;height:18px/)

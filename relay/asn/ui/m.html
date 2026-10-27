@@ -92,8 +92,7 @@
                     <button class="m-buddy" :class="{ offline: x.kind === 'friend' && x.friend.status === 'offline' }" type="button" @click="x.kind === 'room' ? openRoom(x.room.chatId) : openChat(x.id)">
                       <template v-if="x.kind === 'friend'">
                         <span class="m-av-wrap">
-                          <span class="dp sm" :class="'st-' + x.friend.status"><span><img :src="avOf(x.friend)" alt=""></span></span>
-                          <span class="m-vendor" aria-hidden="true" v-html="vendorIcon(x.friend)"></span>
+                          <asn-avatar size="sm" :src="avOf(x.friend)" :friend="x.friend" :status="x.friend.status" :off="false"></asn-avatar>
                         </span>
                         <span class="b-text">
                           <span class="b-line"><span class="b-nick" v-html="emo(x.friend.nick)"></span><span class="b-st" v-if="statusNote(x.friend.status)">{{ statusNote(x.friend.status) }}</span></span>
@@ -142,8 +141,7 @@
                   <li v-for="c in g.items" :key="c.id" :class="{ 'm-archived-row': g.kind === 'archived' }">
                     <button class="m-buddy" :class="{ offline: c.status === 'offline' }" type="button" @click="openChat(c.id)">
                       <span class="m-av-wrap">
-                        <span class="dp sm" :class="'st-' + c.status"><span><img :src="avOf(c)" alt=""></span></span>
-                        <span class="m-vendor" aria-hidden="true" v-html="vendorIcon(c)"></span>
+                        <asn-avatar size="sm" :src="avOf(c)" :friend="c" :status="c.status" :off="false"></asn-avatar>
                       </span>
                       <span class="b-text">
                         <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-ctx" :class="{ danger: contextLabel(c).danger }" v-if="contextLabel(c)">{{ contextLabel(c).text }}</span><span class="b-st" v-if="statusNote(c.status)">{{ statusNote(c.status) }}</span></span>

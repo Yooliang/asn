@@ -18,13 +18,14 @@ test('共用：pi 照 model 換成背後廠商的圖，對不到用 pi 的圖；
   assert.equal(mobile.vendorBadgeHtml, vendorBadgeHtml, '手機沿用同一支')
 })
 
-test('電腦版名單與對話視窗：廠商小圖疊在頭像右下角，跟手機一樣（#336，裝飾用、不念），用 vendorBadge', () => {
-  const html = read('list.html'), js = read('list.js'), pane = read('lib/chatpane.mjs'), css = read('style.css')
-  assert.match(html, /<span class="avb xs"[^>]*><span class="dp xs"[^>]*><span><img :src="avOf\(c\)" alt=""><\/span><\/span><span class="avb-v" aria-hidden="true" v-html="vendorBadge\(c\)"><\/span><\/span>/, '名單每列')
+test('電腦版名單與對話視窗：廠商小圖疊在頭像右下角，跟手機一樣（#336，裝飾用、不念），統一用 <asn-avatar>', () => {
+  const html = read('list.html'), pane = read('lib/chatpane.mjs'), css = read('style.css'), comp = read('lib/avatar-badge.mjs')
+  assert.match(html, /<asn-avatar :src="avOf\(c\)" :friend="c"/, '名單每列')
   assert.ok(!html.includes('class="b-vendor"'), '名字前不再放一顆')
-  assert.ok(html.includes('v-html="vendorBadge(r)"') && html.includes('v-html="vendorBadge(t)"'), '終端列、釘選分頁也有')
-  assert.match(js, /vendorBadge: vendorBadgeHtml,/)
-  for (const s of ['class="avb xs to-av"', 'class="avb xl"', 'vendorBadge: vendorBadgeHtml,']) assert.ok(pane.includes(s), `對話視窗缺 ${s}`)   // 上方、側欄大頭、訊息旁
+  assert.match(html, /<asn-avatar glyph=">_" :friend="r"/, '終端列')
+  assert.match(html, /<asn-avatar class="pin-av" :src="avOf\(t\)" :friend="!t\.panel &amp;&amp; !t\.room \? t : null"/, '釘選分頁（面板、群組不放小圖）')
+  for (const s of ['<asn-avatar class="to-av"', '<asn-avatar size="xl" :src="friendAv"', '<asn-avatar :src="friendAv"']) assert.ok(pane.includes(s), `對話視窗缺 ${s}`)   // 上方、側欄大頭、訊息旁
+  assert.match(comp, /<span class="avb-v" aria-hidden="true" v-if="badge" v-html="badge">/, '小圖裝飾用、不念')
   assert.match(css, /\.avb-v\{position:absolute;right:-5px;bottom:-5px/, '跟手機一樣疊在頭像右下角（小良哥 10/27 傍晚）')
 
   assert.match(css, /\.avb\.off \.avb-v\{opacity:\.6;filter:grayscale\(1\)\}/, '離線整顆灰階')
@@ -36,4 +37,11 @@ test('vendorBadge 只回內建固定字串（v-html 白名單的前提）：不�
     assert.ok(allowed.has(vendorBadgeHtml({ engine: 'pi', model })), String(model))
   }
   assert.ok(allowed.has(vendorBadgeHtml({ engine: '<svg onload=1>' })), '奇怪的 engine 退回 other')
+})
+
+test('v-html 白名單的前提（#336）：頭像小圖只會是內建常數，或內建常數把 id 加上只含英數的尾碼', async () => {
+  const { withUniqueIds } = await import('../ui/lib/vendor-icons.mjs')
+  const g = vendorIconSvg('gemini')
+  assert.equal(withUniqueIds(g, '"><script>x'), withUniqueIds(g, 'scriptx'), '尾碼裡的非英數字元一律丟掉')
+  assert.equal(withUniqueIds(g, ''), g, '沒有尾碼就原樣')
 })

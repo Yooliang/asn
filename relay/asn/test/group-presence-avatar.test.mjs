@@ -43,9 +43,9 @@ async function render(mem) {
 test('AI 發言有廠商小圖、沒有「AI」小標籤；真人沒有小圖', async () => {
   const rows = await render(members)
   assert.equal(rows.length, 4)
-  assert.ok(rows[0].includes('class="spk-vendor"') && rows[0].includes(sig('claude')), 'claude 的圖')
+  assert.ok(rows[0].includes('class="avb-v"') && rows[0].includes(sig('claude')), 'claude 的圖')
   assert.ok(rows[1].includes(sig('gemini')), 'gemini 的圖')
-  assert.ok(!rows[2].includes('spk-vendor'), '真人沒有小圖')
+  assert.ok(!rows[2].includes('avb-v'), '真人沒有小圖')
   assert.ok(rows[3].includes(sig('other')), '不認得的引擎用通用圖')
   for (const r of rows) assert.ok(!r.includes('av-tag') && !r.includes('>AI<'), '拿掉 AI 小標籤')
 })
@@ -62,8 +62,8 @@ test('舊後台沒有 online／engine 欄位：不離線；AI 仍有通用圖', 
   const old = members.map(({ online, engine, ...m }) => m)
   const rows = await render(old)
   for (const r of rows) assert.ok(!r.includes('is-off') && !r.includes('st-offline'), '沒欄位＝在線')
-  assert.ok(rows[0].includes('class="spk-vendor"') && rows[0].includes(sig('other')))
-  assert.ok(!rows[2].includes('spk-vendor'))
+  assert.ok(rows[0].includes('class="avb-v"') && rows[0].includes(sig('other')))
+  assert.ok(!rows[2].includes('avb-v'))
   assert.deepEqual(speakerStates(undefined), {})
   assert.deepEqual(speakerStates(old)['H~財務'], { vendor: '', off: false })
 })
@@ -76,11 +76,14 @@ test('不壞既有功能：@ 標記資料、操作列、真人標籤仍在', asy
 })
 
 test('樣式：小圖定位在頭像欄右下角、離線灰階、深色模式有處理', () => {
-  const css = read('group.css')
+  // 小圖改用統一頭像（#336）：位置、灰階、深色模式都是 style.css 的 .avb 那一套
+  const css = read('group.css'), base = read('style.css')
   assert.match(css, /\.m-av-spk\{[^}]*position:relative/)
-  assert.match(css, /\.spk-vendor\{[^}]*position:absolute[^}]*right:-4px[^}]*bottom:-4px/)
+  assert.match(base, /\.avb-v\{[^}]*position:absolute/)
+  assert.match(base, /\.avb\.xs \.avb-v\{[^}]*right:-4px;bottom:-4px/)
+  assert.match(base, /\.avb\.off \.avb-v\{[^}]*grayscale/)
   assert.match(css, /\.m-av-spk\.is-off \.dp img\{[^}]*grayscale/)
-  assert.match(css, /prefers-color-scheme:dark\)\{[^@]*\.spk-vendor/)
+  assert.match(base, /prefers-color-scheme:dark\)\{\.avb-v\{/)
 })
 
 test('pi 夥伴的群組頭像小圖：後台帶 provider 就依提供者對到廠商；對不到、沒帶、非 pi 一律維持原本的圖', () => {

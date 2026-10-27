@@ -3,11 +3,12 @@
 // 打開 App 才收信：前景時照電腦版的節奏輪詢，加上門鈴一響就拉；回到前景時立刻拉一次（推播留給第二期）。
 import { AsnCore } from './lib/core.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
+import { AsnAvatar } from './lib/avatar-badge.mjs'
 import { avatarSrc, isAvatarDataUrl, removeAvatarUpload, selfAvatarSrc, uploadAvatarFile } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { PROVIDERS, canStart, errorText, phaseText } from './lib/login.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
-import { BANNER_MS, DEFAULT_PREFS, TABS, TAB_LABEL, accountDisplayName, SWIPE_BLOCK_SELECTOR, inScrollableX, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, buttonLabel, initialNav, opsNav, acctNav, tabLabel as tabLabelOf, secretNav, termReqNav, initialUpdate, installOutcome, launchNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, vendorBadgeHtml, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
+import { BANNER_MS, DEFAULT_PREFS, TABS, TAB_LABEL, accountDisplayName, SWIPE_BLOCK_SELECTOR, inScrollableX, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, buttonLabel, initialNav, opsNav, acctNav, tabLabel as tabLabelOf, secretNav, termReqNav, initialUpdate, installOutcome, launchNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
 import { LAUNCH_GIVE_UP_MS, LAUNCH_POLL_MS, appearedIn, buildLaunchRequest, initialLaunch, launchChoices, launchDevices, launchEligibility, launchErrorText, launchFormError, machinesByNode, progressView } from './lib/mobile-launch.mjs'
 import { OnboardCard } from './lib/onboard-card.mjs'
 import { MOBILE_PHASE_TEXT, createMobileCall } from './lib/mobile-call.mjs'
@@ -857,7 +858,7 @@ const app = createApp({
       onboard, onboardApi, finishOnboard, ONBOARD_TEXT, acct, nameDraft, nameErr, commitName, wakeDraft, wakeErr, commitWake, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE,
       screen, fatal, login, loginNote, PROVIDERS, canStart, startLogin, cancelLogin,
       upd, updText: computed(() => bannerText(upd)), updButton: computed(() => buttonLabel(upd)), startUpdate, checkUpdate,
-      pf, sw, pagerStyle, indicator, swipeStart, swipeMove, swipeEnd, goTab, TABS, TAB_LABEL, tabLabel, myName, meForChat, lastOf, vendorIcon: vendorBadgeHtml,
+      pf, sw, pagerStyle, indicator, swipeStart, swipeMove, swipeEnd, goTab, TABS, TAB_LABEL, tabLabel, myName, meForChat, lastOf,
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, headTone, CONN_LABEL, info, banner, shake, refreshing,
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
@@ -871,6 +872,7 @@ const app = createApp({
   },
 })
 app.component('chat-pane', ChatPane)
+app.component('asn-avatar', AsnAvatar)
 app.component('group-sheet', GroupSheet)
 app.component('onboard-card', OnboardCard)
 app.component('guide-doc', GuideDoc)
