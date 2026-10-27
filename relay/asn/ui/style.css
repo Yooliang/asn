@@ -123,6 +123,11 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .pmodel{border:1px solid var(--line);border-radius:4px;padding:6px 8px;background:var(--panel-soft);cursor:pointer;display:flex;align-items:center;gap:6px;font-size:12px}
 .pmodel.on{border-color:var(--accent);background:#e6f1fc;font-weight:600}
 .pmodel.off{opacity:.45;cursor:default}
+.partner-devices{display:flex;flex-direction:column;gap:6px}
+.pdevice{border:1px solid var(--line);border-radius:4px;padding:8px 10px;background:var(--panel-soft);cursor:pointer;text-align:left;font-size:13px}
+.pdevice.on{border-color:var(--accent);background:#e6f1fc;font-weight:600}
+.pdevice.off{opacity:.55;cursor:default}
+.pdevice .launch-why{display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:2px}
 .partner-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
 .gmode{flex:none;display:flex;border:1px solid #9ab7d6;border-radius:3px;overflow:hidden}
 .gmode button{border:0;padding:3px 7px;font-size:12px;background:linear-gradient(#fdfeff,#e3eef9);color:var(--muted);cursor:pointer}
