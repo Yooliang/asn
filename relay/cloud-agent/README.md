@@ -93,7 +93,9 @@ node relay/cloud-agent/preflight.mjs
 
 ### 新信即時分派（dispatch-watch，選用）
 
-`dispatch-watch.mjs` 目前在 draft [PR #4](https://github.com/Yooliang/asn/pull/4)（分支 `relay/dispatch-watch`），**尚未在 main**。合併後 `boot.example.sh`／`start.sh` 會在偵測到檔案時一併啟動；合併前需自行從該分支取得程式。
+`dispatch-watch.mjs` **不在 main**：[PR #4](https://github.com/Yooliang/asn/pull/4)（分支 `relay/dispatch-watch`）已於 2026-10-21 關閉、沒有合併，**不會再合**。雲端節點目前實際跑的是那個分支的版本；之後的改法（每位夥伴一組叫醒、叫醒不帶內文）以 #241 為準，在技能文件的 watch.mjs 上做，不整支合回 PR #4。`boot.example.sh`／`start.sh` 偵測到檔案時才會一併啟動。
+
+> 安全提醒：PR #4 版的 webhook 會帶信件內文前 60 字，內文是外部資料，會直接進自動執行的例行任務（提示注入通道）。改版前請先拿掉內文，只帶信件 id、收件人、信任等級。
 
 ### Grok Bot 例行任務 webhook
 

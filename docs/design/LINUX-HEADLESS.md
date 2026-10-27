@@ -103,7 +103,7 @@
 
 - `recv.mjs` 只做：門鈴＋每 2 分鐘補拉 → 每封信先寫進 `inbox.jsonl` 並 fsync → 成功才 ack（以信件 id 去重，重啟靠檔案重建）→ 每 60 秒回報 roster（掃 `/home/box/agent-data/agents/<uuid>/profile.json` 的 `name`，與 `agents.json` 合併）。
 - **沒有任何東西替 Grok 回信**：Grok（AI 本體）自己在例行任務裡用 `inbox.mjs` 讀信、用 `send.mjs --reply-to … --reply|--no-reply` 回信。橋只是郵差。
-- `dispatch-watch.mjs`（即時喚醒 Grok 的觀察者）仍在 draft PR #4，沒進 main。
+- `dispatch-watch.mjs`（即時喚醒 Grok 的觀察者）不在 main：PR #4 已於 2026-10-21 關閉、未合併；後續改法見 #241。
 - 所以 Rust 要做的是：同一種「收件匣模式」常駐程式（寫 `inbox.jsonl` 相容格式）＋ 命令列（讀信／標記處理／寄信）。**寄信、讀信的命令列 `asn-cli send/recv/room/attach` 已經有 Rust 版**，缺的是常駐收信存檔與 Grok 夥伴掃描。
 
 沒辦法確認的事（要試了才知道，列為階段 0 的驗證）：Grok 沙盒能不能執行下載來的 Linux 二進位檔、能不能連到下載來源、CPU 架構（`uname -m`）、有沒有外部網路白名單。這些在 Grok 沙盒裡才查得到，我不能從外面看。
@@ -145,7 +145,7 @@
 | 19 | `preflight`（只讀自檢、不碰 inbox） | `preflight.mjs` | 沒有 | 新增 `asn bridge --check` |
 | 20 | 附件／照片（`attach-*`） | 有（收件匣會記附件欄位） | `bridge/attach.rs`、`cli/attach_cmd.rs` | 已有；確認收件匣模式保存 `attachments` 欄位 |
 | 21 | Grok 作為「可被送信的引擎」（`grok agent stdio` ACP） | **沒有**（雲端代理只是郵差；AGENT-ENGINES §4 只調研、未實測） | 有 ACP 引擎 | 非必要。若日後要讓 Grok CLI 直接自動回信，重用 `engines/acp`。**第一期不做** |
-| 22 | 即時喚醒（`dispatch-watch`） | 在 draft PR #4，未合併 | 沒有 | 不處理，隨收件匣模式一起重新評估 |
+| 22 | 即時喚醒（`dispatch-watch`） | PR #4 已關閉、未合併（後續見 #241） | 沒有 | 不處理，隨收件匣模式一起重新評估 |
 
 ### 無視窗模式要關掉的 Windows／Tauri 相依
 
