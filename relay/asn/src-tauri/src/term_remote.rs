@@ -219,17 +219,32 @@ pub async fn api_result(relay: &Relay, id: &str, status: &str, detail: &str) -> 
         .map(|_| ())
 }
 
+/// 本機取消（按「返回」、關掉送字框、換終端）：撤回這個終端還在等手機確認的請求，後台標成已取消，之後手機按確認也不會送。
+pub async fn withdraw(relay: &Relay, data_dir: &Path, term_id: &str) {
+    if let Some((_, o)) = cancel_local_for_term(term_id) {
+        if let Some(rid) = o.remote_id.as_deref() {
+            let _ = api_result(relay, rid, "cancelled", "本機已取消").await;
+            log_event(data_dir, "cancelled", rid, &o.payload.hash, o.payload.text.len(), "local_withdraw");
+        }
+    }
+}
+
 pub async fn offer_send(relay: &Relay, terms: &LiveTerms, data_dir: &Path, term_id: &str, text: &str, enter: bool) -> Result<String, String> {
     adopt_write_allowed(terms, term_id, Kind::Send)?;
-    if local_by_term(term_id).is_some() {
-        return Ok(term_id.to_string());
+    let hash = hash_send(text, enter);
+    if let Some(key) = local_by_term(term_id) {
+        let same = with_out(|m| m.get(&key).map(|o| o.payload.hash == hash)).unwrap_or(false);
+        if same {
+            return Ok(term_id.to_string());
+        }
+        // 內容變了：手機上那筆是舊字，先撤回再建新的
+        withdraw(relay, data_dir, term_id).await;
     }
     let listed = terms.list().into_iter().find(|t| t.id == term_id).ok_or_else(|| "沒有這個終端".to_string())?;
     let preview = preview_text(text);
     if preview.trim().is_empty() {
         return Err("沒有可送出的內容".into());
     }
-    let hash = hash_send(text, enter);
     let key = term_id.to_string();
     let outgoing = Outgoing {
         payload: Payload {

@@ -103,6 +103,22 @@ mod gui_tests {
     }
 
     #[tokio::test]
+    async fn 本機取消則撤回遠端請求_之後不再有東西可確認() {
+        reset_for_test();
+        let d = TempDir::new().unwrap();
+        let (url, seen) = fake_term_server(vec![]);
+        let relay = Relay::new(url, "k".into(), "W".into(), "W".into());
+        register_fake_outgoing("1", "11111111-1111-1111-1111-111111111111", "要撤回", false);
+        withdraw(&relay, d.path(), "1").await;
+        let reqs = seen.lock().unwrap();
+        assert!(reqs.iter().any(|r| r.contains("term_req_result") && r.contains("cancelled")));
+        drop(reqs);
+        assert!(local_by_term("1").is_none(), "本機不再記著這筆");
+        withdraw(&relay, d.path(), "1").await;   // 沒有進行中的請求：不報錯、不再打後台
+        assert_eq!(seen.lock().unwrap().iter().filter(|r| r.contains("term_req_result")).count(), 1);
+    }
+
+    #[tokio::test]
     async fn 雜湊不符執行失敗並回報() {
         reset_for_test();
         let d = TempDir::new().unwrap();
