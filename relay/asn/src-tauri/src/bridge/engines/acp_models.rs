@@ -60,11 +60,13 @@ pub fn remove(file: &Path, name: &str) -> Result<(), String> {
     write(file, &m)
 }
 
-/// `agy models` 的輸出（stdout；開頭的「Fetching available models...」在 stderr）：一行一個「模型代號<Tab>顯示名稱」，取第一欄
+/// `agy models` 的輸出（stdout；開頭的「Fetching available models...」在 stderr）：一行一個「模型代號<Tab>顯示名稱」，取第一欄。
+/// 空行與沒有 Tab 的行（說明文字等）一律略過
 pub fn parse_agy_models(stdout: &str) -> Vec<String> {
     let mut out: Vec<String> = vec![];
     for line in stdout.lines() {
-        let id = line.split('\t').next().unwrap_or("").trim();
+        let Some((id, _)) = line.split_once('\t') else { continue };
+        let id = id.trim();
         if valid_model(id) && !out.iter().any(|x| x == id) {
             out.push(id.to_string());
         }
@@ -155,5 +157,7 @@ mod tests {
         let out = "gemini-4-argon-medium\tGemini 4 Argon (Medium)\ngemini-3.8-flash-high\tGemini 3.8 Flash (High)\r\n\nclaude-opus-5-5-low\tClaude Opus 5.5 (Low)\ngemini-4-argon-medium\tdup\n";
         assert_eq!(parse_agy_models(out), vec!["gemini-4-argon-medium", "gemini-3.8-flash-high", "claude-opus-5-5-low"]);
         assert!(parse_agy_models("Fetching available models...\n").is_empty(), "說明文字不是模型");
+        assert!(parse_agy_models("gemini-4-argon-high\n  \nNote: sign in first\n").is_empty(), "沒有 Tab 的行一律略過，就算長得像代號");
+        assert_eq!(parse_agy_models("bad id\tX\n-x\tY\nok-1\tZ\n"), vec!["ok-1"], "第一欄不合法的略過");
     }
 }
