@@ -1,11 +1,11 @@
 {
-  "version": "0.1.92",
-  "notes": "修正：收信更耐壞：一次確認最多 100 封、編號格式不對的信不再擋住整批確認、一封處理失敗的信不擋後面的信；「連線中斷」後面會寫出簡短原因（逾時、憑證被拒、後台出錯、連不上、本機存檔失敗…）。",
-  "pub_date": "2026-10-27T08:45:08.109Z",
+  "version": "0.1.93",
+  "notes": "新增：開新夥伴改成三頁精靈：「＋」→「新增夥伴…」先選設備，再選廠牌與運行方式，最後填名稱與路徑；新增 DeepSeek、MiniMax（經 pi）；頭像旁的廠商小圖改成疊在右下角。修正：精靈裡設備名、重複的「進階」標示等小問題。",
+  "pub_date": "2026-10-27T09:44:56.910Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjRqZE5xVVhnVlNxUmY3cnNqenRYaCtaZTNZZ25VTlhLUXFBK2RJdFAzQ1pzNDlmNEt5SEt1a3hFRGNDQVZvTHdpTytmMTZrbGVGM3VXRGRxSVRJTGc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDkwNzA4CWZpbGU6QVNOXzAuMS45Ml94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjkyCmpoZnJLS0g0dlpvZWFVUFMxekhtVFJnOFRjRnFCVzBQQ3B3MUE0ZlZkcUZET2tvdnE1YlllRTNIR2hTc2h2dU1wMU0zaGQ0bmZhaEFuTVFIbVo2RERBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.92_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjNHUm9lbGVLT1ZsRi91RGI5OXF0WkI0dDdXaHpwVlRUYTJTMWxYZFNHaHN6TjhBVnpteVNoMzRIbmlSTTBBd2JnSHFjZGR6QmVpcGJuaTFKeXowYndZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDk0Mjk2CWZpbGU6QVNOXzAuMS45M194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjkzCmlIdThKWUJ0blNhYzBuQzdoRS9TNmUvcWd3cmM0OFZJSXN3R20yMmhUMHlLM1hiTU5vRUxsbXVsNS9tZzh5SmozS2RVcmFnOC92ZXlDckhwT2lETUJ3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.93_x64-setup.exe"
     }
   }
 }
