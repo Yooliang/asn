@@ -949,7 +949,7 @@ mod tests {
     #[tokio::test]
     async fn 允許切換帳號_沒簽章的照舊要確認_簽章的直接切() {
         // 方案 A（#371）：允許只放行本人簽章的；沒簽章的要不要免確認是 #300，還沒定
-        const U2: &str = "cccccccc-2222-3333-4444-555555555555";
+        const U2: &str = "fa371000-2222-3333-4444-555555555555";   // 自己一個編號：META 是全域的，跟別的測試共用編號會讀到人家的簽章（並行時偶發失敗）
         let home = two_accounts();
         let data = tempfile::tempdir().unwrap();
         set_allow_switch(data.path(), true).unwrap();

@@ -1097,6 +1097,10 @@ async fn 畫面沒在收信時_rust_代收寄給_asn_視窗的信並_ack_畫面�
     let ms = relay.inbox().await.unwrap();
     let ids: Vec<&str> = ms["messages"].as_array().unwrap().iter().filter_map(|m| m["id"].as_str()).collect();
     assert_eq!(ids, vec![uid(1).as_str()]);
+    // 代收的信標 spooled，畫面一次收到很多封時據此合成一則提示（#339）；存檔裡不帶這個標記
+    assert_eq!(ms["messages"][0]["spooled"], json!(true));
+    let saved = std::fs::read_to_string(d.path().join("window-spool.json")).unwrap();
+    assert!(!saved.contains("spooled"), "{saved}");
     assert!(relay.ui_inbox_at() > 0);
     assert_eq!(relay.fallback_tick(crate::heartbeat::now_ms() + 100_000, 300_000).await.unwrap(), 0);
     // 畫面確認收下：只清代收區，不再向後台重複 ack

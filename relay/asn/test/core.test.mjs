@@ -263,3 +263,33 @@ test('收信：編號不是 UUID 的信不會讓整批 ack 失敗，其他信照
   assert.ok(logs.some(l => l.includes('ack skipped 1 bad id')))
   assert.match(connReason(new Error('信件 id 格式不對')), /格式不對/)
 })
+
+// #339 收尾：Rust 代收的舊信（spooled）一次很多封時，照常進對話、算未讀、ack，但只跳一則摘要
+const spoolMsgs = (n, extra = {}) => Array.from({ length: n }, (_, i) => ({ id: `00000000-0000-4000-8000-${String(900 + i).padStart(12, '0')}`, from_node: 'W', from_agent: 'W-政策', to_node: 'T', to_agent: NAME, body: `舊信${i}`, created_at: `2026-10-27T08:0${i % 10}:00Z`, spooled: true, ...extra }))
+async function pullWith(msgs) {
+  const acks = []
+  const transport = { list: async () => ({ members: roster() }), inbox: async () => ({ messages: msgs }), ack: async ids => { acks.push(...ids); return {} }, send: async () => ({}) }
+  const core = new AsnCore({ transport, store: memStore(), selfNode: 'T', windowName: NAME, isChatVisible: async () => false, pollMs: 60_000, rosterMs: 60_000 })
+  const notes = []
+  core.on('notify', n => notes.push(n))
+  await core.pull('test')
+  return { core, notes, acks }
+}
+
+test('代收舊信超過 3 封：不逐封跳提示，只跳一則「收到 N 封你不在時代收的信」；信照樣進對話、算未讀、ack', async () => {
+  const { core, notes, acks } = await pullWith(spoolMsgs(5))
+  assert.deepEqual(notes.map(n => n.line), ['收到 5 封你不在時代收的信'])
+  assert.equal(notes[0].friend.id, 'W/W-政策')
+  const f = core.snapshot().friends.find(x => x.id === 'W/W-政策')
+  assert.equal(f.unread, 5)
+  assert.equal(core.viewOf('W/W-政策').filter(e => e.k === 'them').length, 5)
+  assert.equal(acks.length, 5)
+})
+
+test('代收舊信 3 封以內、或不是代收的信：照舊逐封提示', async () => {
+  assert.equal((await pullWith(spoolMsgs(3))).notes.length, 3)
+  const live = spoolMsgs(6).map(({ spooled, ...m }) => m)
+  const { notes } = await pullWith(live)
+  assert.equal(notes.length, 6, '一般新信不受影響')
+  assert.ok(notes.every(n => !/代收/.test(n.line)))
+})
