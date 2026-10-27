@@ -389,7 +389,10 @@ const partnerFgOnly = computed(() => partnerDlg.node === info.node && foreground
 // 「運行」四選一（#351、小良哥 10/27 定案）：內建通道 ＞ 經 pi ＞ ASN 開的終端（進階）＞ 自己開的 CLI（只作說明，永遠不能選）。
 // 目錄決定哪個能選；不能選的灰掉並寫原因；第一個能選的標「建議」。
 const dlgRow = computed(() => dlgModels.value.find(m => m.profileId === partnerDlg.profile))
-const dlgVendors = computed(() => vendorRows(dlgModels.value))   // pi 是通道不是廠商，不列在廠牌裡
+// pi 是通道不是廠牌，最後不列在廠牌裡；但「經 pi」要等後端能帶提供者與模型開 pi（0.1.90 後續）才能選，
+// 在那之前先留著 pi 這一列，不然使用者完全開不了 pi 夥伴（小東 #737）
+const PI_VIA_READY = false
+const dlgVendors = computed(() => (PI_VIA_READY ? vendorRows(dlgModels.value) : dlgModels.value))
 const partnerRun = computed(() => {
   const row = dlgRow.value
   const r = row?.channels
@@ -410,6 +413,7 @@ const partnerRunChoice = computed(() => {
   const cur = opts.find(o => o.key === partnerDlg.run && o.ok && o.key !== 'self')
   return cur ? cur.key : partnerRun.value.selected
 })
+const partnerRunModel = computed({ get: () => partnerRunChoice.value, set: v => { partnerDlg.run = v } })   // 預設選項要真的勾起來
 const partnerCanRun = computed(() => { const o = partnerRun.value.options.find(x => x.key === partnerRunChoice.value); return Boolean(o && o.ok && o.key !== 'self') })
 const TERM_WEZ_TOOLS = ['grok', 'agy']   // 後端 term_start 只收這兩個
 const partnerChannels = computed(() => channelRows(dlgModels.value.find(m => m.profileId === partnerDlg.profile)))   // #351：這個模型三條通道的狀態，只顯示說明
@@ -1539,7 +1543,7 @@ const app = createApp({
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
       termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termsClose, termSendAsk, termSendPhone, termSendBack, termSendConfirm, SEND_MAX,
       termPane, termPaneRow, termPaneActive, termRoster, termComposer, openTermTab, termPaneAnswer, termTimeline, entryLabel,
-      dlgVendors, partnerRunChoice, partnerCanRun, termWaitCount, openWaitingTerm,
+      dlgRow, dlgVendors, partnerRunChoice, partnerRunModel, partnerCanRun, termWaitCount, openWaitingTerm,
       adopt, adoptLoad, adoptClose, adoptDo, adoptRelease, adoptUnlockAsk, adoptUnlockCancel, adoptUnlockConfirm, UNLOCK_TEXT,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
