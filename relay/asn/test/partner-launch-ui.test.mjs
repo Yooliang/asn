@@ -75,7 +75,7 @@ test('別台設備的模型列：用它回報的 profile 與標籤，不看本�
 
 test('開新夥伴對話框：模型列依設備切換（本機偵測／別台回報），並在開啟時重抓別台的設定', () => {
   const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
-  assert.match(html, /v-for="m in dlgModels"/)
+  assert.match(html, /v-for="m in dlgVendors"/)
   const js = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
   assert.match(js, /remoteModelRows\(remoteLaunchers\.value\[partnerDlg\.node\]\)/)
   assert.match(js, /void refreshLaunchers\(\)\.then\(/)

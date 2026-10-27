@@ -349,7 +349,6 @@
     <li class="menu-sep" role="separator"></li>
     <li class="menu-head" role="presentation">終端</li>
     <li v-if="termWaitCount"><button type="button" role="menuitem" class="menu-warn" @click="openWaitingTerm">{{ termWaitCount }} 個終端等你回答</button></li>
-    <li><button type="button" role="menuitem" @click="openTermStart">在這台開終端…</button></li>
     <li><button type="button" role="menuitem" @click="closeLaunchPicker(); adoptLoad()">接手已開著的終端視窗…</button></li>
     <li class="menu-sep" role="separator"></li>
     <li class="menu-head" role="presentation">群組</li>
@@ -357,31 +356,7 @@
     <li><button type="button" role="menuitem" @click="closeLaunchPicker(); groupFlow.openJoin()">加入群組…</button></li>
   </ul>
   <!-- 在這台開終端（#331）：只開 grok／agy；按「開啟」才呼叫 term_start，開好直接打開它的分頁 -->
-  <asn-dialog v-if="termStartDlg.open" title="在這台開終端" @close="closeTermStart">
-    <fieldset class="partner-run" aria-label="要開的程式">
-      <legend>程式</legend>
-      <label v-for="c in termStartOpts" :key="c.profile" class="partner-run-opt" :class="{ off: !c.ok }">
-        <input type="radio" name="term-start-profile" :value="c.profile" v-model="termStartDlg.profile" :disabled="!c.ok || termStartDlg.busy" :aria-label="c.label"> {{ c.label }}
-        <small class="partner-run-why" v-if="!c.ok">{{ c.why }}</small>
-      </label>
-    </fieldset>
-    <label>工作資料夾
-      <span class="partner-cwd-row">
-        <select class="set-sel" v-model="termStartDlg.cwd" :disabled="termStartDlg.busy" aria-label="終端的工作資料夾">
-          <option v-if="!termStartCwds.length" value="" disabled>（還沒有資料夾）</option>
-          <option v-for="c in termStartCwds" :key="c" :value="c">{{ c }}</option>
-        </select>
-        <button class="aero-btn" type="button" :disabled="termStartDlg.busy" @click.prevent="browseTermStartCwd" aria-label="瀏覽資料夾">瀏覽…</button>
-      </span>
-    </label>
-    <p class="partner-hint" v-if="!termStartCwds.length">{{ CWD_EMPTY_HINT }}</p>
-    <p class="partner-hint">終端會開在 ASN 自帶的 WezTerm 視窗裡，名單上會多一列；要送字一樣得在確認列按「確認送出」。</p>
-    <p class="partner-err" v-if="termStartDlg.error" role="alert">{{ termStartDlg.error }}</p>
-    <div class="partner-actions">
-      <button class="aero-btn" type="button" :disabled="termStartDlg.busy" @click="closeTermStart">取消</button>
-      <button class="aero-btn primary" type="button" :disabled="termStartDlg.busy || !termStartDlg.profile || !termStartDlg.cwd" @click="submitTermStart">{{ termStartDlg.busy ? '開啟中…' : '開啟' }}</button>
-    </div>
-  </asn-dialog>
+
   <asn-dialog v-if="launchNotice.open" :title="launchNotice.title" @close="closeLaunchNotice">
     <p class="launch-notice-body">{{ launchNotice.body }}</p>
     <p class="launch-notice-log" v-if="launchNotice.logPath"><span>記錄檔：</span><code>{{ launchNotice.logPath }}</code></p>
@@ -394,23 +369,27 @@
     <div class="partner-dlg" role="dialog" aria-labelledby="partner-dlg-title" @click.stop>
       <h3 id="partner-dlg-title">開新夥伴</h3>
       <p class="partner-node" v-if="partnerDlg.node !== selfNode">設備：{{ partnerDlg.deviceLabel }}</p>
+      <ol class="partner-steps" aria-label="步驟"><li :class="{ on: partnerDlg.step === 1 }">1. 廠牌與運行</li><li :class="{ on: partnerDlg.step === 2 }">2. 名稱與路徑</li></ol>
+      <div v-show="partnerDlg.step === 1">
       <div class="partner-models" role="radiogroup" aria-label="模型">
-        <button v-for="m in dlgModels" :key="m.id" type="button" class="pmodel" :class="{ on: partnerDlg.profile === m.profileId, off: !m.installed }" :disabled="!m.installed" :title="m.installed ? m.modeLabel : m.installHint" @click="pickPartnerModel(m)">
+        <button v-for="m in dlgVendors" :key="m.id" type="button" class="pmodel" :class="{ on: partnerDlg.profile === m.profileId, off: !m.installed }" :disabled="!m.installed" :title="m.installed ? m.modeLabel : m.installHint" @click="pickPartnerModel(m)">
           <span class="pmodel-ic" :data-m="m.id"></span>
           <span class="pmodel-lb">{{ m.label }}</span>
         </button>
       </div>
       <fieldset class="partner-run" aria-label="運行">
         <legend>運行</legend>
-        <label v-for="c in partnerRun.choices" :key="c.key" class="partner-run-opt" :class="{ off: !c.ok }">
-          <input type="radio" name="partner-run" :value="c.key" :checked="partnerRun.selected === c.key" :disabled="!c.ok" :aria-label="c.label"> {{ c.label }}
-          <small class="partner-run-why" v-if="!c.ok">{{ c.why }}</small>
+        <label v-for="c in partnerRun.options" :key="c.key" class="partner-run-opt" :class="{ off: !c.ok || c.self }">
+          <input type="radio" name="partner-run" :value="c.key" v-model="partnerRunModel" :disabled="!c.ok || c.self" :aria-label="c.label"> {{ c.label }}
+          <em class="ch-rec" v-if="c.key === partnerRun.recommended">（建議）</em><span class="ch-adv" v-if="c.adv">進階</span>
+          <small class="partner-run-why" v-if="c.self">{{ c.note }}（這個只是說明，不能在這裡選）</small>
+          <small class="partner-run-why" v-else-if="!c.ok">{{ c.why }}</small>
+          <small class="partner-run-why" v-else-if="c.note">{{ c.note }}</small>
         </label>
       </fieldset>
-      <!-- 這個模型三條通道的現況（#351 第 1 步，只是說明，不能選） -->
-      <ul class="partner-channels" v-if="partnerChannels.length" aria-label="這個模型的啟動方式">
-        <li v-for="c in partnerChannels" :key="c.key" :class="'ch-' + c.status"><b>{{ c.label }}</b>：{{ c.statusText }}<em class="ch-rec" v-if="c.recommended">（建議）</em><small>{{ c.why }}</small></li>
-      </ul>
+      </div>
+      <div v-show="partnerDlg.step === 2">
+      <p class="partner-sum">{{ dlgRow ? dlgRow.label : '' }}・{{ (partnerRun.options.find(o => o.key === partnerRunChoice) || {}).label }}<template v-if="partnerDlg.node !== selfNode">・{{ partnerDlg.deviceLabel }}</template></p>
       <label>名字<input class="set-input" v-model="partnerDlg.name" maxlength="40" aria-label="夥伴名字"></label>
       <label>工作資料夾
         <span class="partner-cwd-row">
@@ -430,10 +409,13 @@
       </fieldset>
       <p class="partner-hint partner-fgonly" v-if="partnerFgOnly">pi 是互動式，只能開在前台視窗；視窗開好後約一分鐘內會出現在名單上，可收信、回信。</p>
       <label>第一句話（選填）<textarea class="set-area" rows="2" v-model="partnerDlg.firstMessage" maxlength="4000" aria-label="第一句話"></textarea></label>
+      </div>
       <p class="partner-err" v-if="partnerDlg.error" role="alert">{{ partnerDlg.error }}</p>
       <div class="partner-actions">
-        <button class="aero-btn" type="button" @click="closePartnerDlg">取消</button>
-        <button class="aero-btn primary" type="button" :disabled="partnerDlg.busy" @click="submitPartnerDlg">{{ partnerDlg.busy ? '啟動中…' : '開啟' }}</button>
+        <button class="aero-btn" type="button" v-if="partnerDlg.step === 1" @click="closePartnerDlg">取消</button>
+        <button class="aero-btn" type="button" v-else @click="partnerDlg.step = 1">〈 上一步</button>
+        <button class="aero-btn primary" type="button" v-if="partnerDlg.step === 1" :disabled="!partnerCanRun" @click="partnerDlg.step = 2">下一步 〉</button>
+        <button class="aero-btn primary" type="button" v-else :disabled="partnerDlg.busy || !partnerCanRun" @click="submitPartnerDlg">{{ partnerDlg.busy ? '啟動中…' : '開啟' }}</button>
       </div>
     </div>
   </div>

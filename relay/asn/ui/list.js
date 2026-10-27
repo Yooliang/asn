@@ -48,7 +48,7 @@ import { friendId } from './lib/roster.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher, modelSwitchBlock } from './lib/model-switch.mjs'
 import { consoleBlock } from './lib/actionbar.mjs'
 import { vendorBadgeHtml, vendorIconSvg } from './lib/vendor-icons.mjs'
-import { channelRows, runChoices } from './lib/model-catalog.mjs'
+import { channelRows, runChoices, runOptions, vendorRows } from './lib/model-catalog.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
@@ -384,10 +384,38 @@ const launchToolRows = computed(() => MODEL_CATALOG.map(m => modelUiRow(m, cliTo
 const partnerModels = computed(() => launchToolRows.value)
 // 對話框裡的模型列：本機看偵測到的 CLI；別台設備看那台回報的 profile
 const dlgModels = computed(() => (partnerDlg.node && partnerDlg.node !== info.node ? remoteModelRows(remoteLaunchers.value[partnerDlg.node]) : partnerModels.value))
-const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '', display: 'foreground' })
+const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '', display: 'foreground', run: '', step: 1 })
 const partnerFgOnly = computed(() => partnerDlg.node === info.node && foregroundOnlyProfile(partnerDlg.profile))
-// 「運行」二選一：依目前選的模型（目錄決定哪種可用，不支援的反灰並寫原因）
-const partnerRun = computed(() => runChoices(dlgModels.value.find(m => m.profileId === partnerDlg.profile)))
+// 「運行」四選一（#351、小良哥 10/27 定案）：內建通道 ＞ 經 pi ＞ ASN 開的終端（進階）＞ 自己開的 CLI（只作說明，永遠不能選）。
+// 目錄決定哪個能選；不能選的灰掉並寫原因；第一個能選的標「建議」。
+const dlgRow = computed(() => dlgModels.value.find(m => m.profileId === partnerDlg.profile))
+// pi 是通道不是廠牌，最後不列在廠牌裡；但「經 pi」要等後端能帶提供者與模型開 pi（0.1.90 後續）才能選，
+// 在那之前先留著 pi 這一列，不然使用者完全開不了 pi 夥伴（小東 #737）
+const PI_VIA_READY = false
+const dlgVendors = computed(() => (PI_VIA_READY ? vendorRows(dlgModels.value) : dlgModels.value))
+const partnerRun = computed(() => {
+  const row = dlgRow.value
+  const r = row?.channels
+    ? runOptions(row, { local: partnerDlg.node === info.node, piInstalled: cliTools.value.pi?.installed === true, piReady: false })
+    : null
+  if (!r) {   // 目錄上沒有的（自訂設定）：只看 mode，開成視窗或內建通道
+    const bg = row?.mode === 'background'
+    return { options: [
+      { key: 'acp', label: '內建通道（背景運行）', ok: bg, why: bg ? '' : '這個設定不是背景運行', note: '' },
+      { key: 'term', label: '開成視窗', ok: !bg, why: bg ? '這個設定是背景運行' : '', note: '' },
+    ], selected: bg ? 'acp' : 'term', recommended: bg ? 'acp' : 'term' }
+  }
+  const rec = r.options.find(o => o.ok && o.key !== 'self')?.key ?? ''
+  return { ...r, options: r.options.map(o => ({ ...o, self: o.key === 'self', adv: o.key === 'term' || o.key === 'self' })), recommended: rec }
+})
+const partnerRunChoice = computed(() => {
+  const opts = partnerRun.value.options
+  const cur = opts.find(o => o.key === partnerDlg.run && o.ok && o.key !== 'self')
+  return cur ? cur.key : partnerRun.value.selected
+})
+const partnerRunModel = computed({ get: () => partnerRunChoice.value, set: v => { partnerDlg.run = v } })   // 預設選項要真的勾起來
+const partnerCanRun = computed(() => { const o = partnerRun.value.options.find(x => x.key === partnerRunChoice.value); return Boolean(o && o.ok && o.key !== 'self') })
+const TERM_WEZ_TOOLS = ['grok', 'agy']   // 後端 term_start 只收這兩個
 const partnerChannels = computed(() => channelRows(dlgModels.value.find(m => m.profileId === partnerDlg.profile)))   // #351：這個模型三條通道的狀態，只顯示說明
 const partnerShowDisplay = computed(() => partnerDlg.node === info.node && showDisplayModeChoice(partnerDlg.profile))
 const launchCtx = computed(() => ({ selfNode: info.node, partnerModels: partnerModels.value, remoteLaunchers: remoteLaunchers.value }))
@@ -422,6 +450,7 @@ async function browsePartnerCwd() {
 function pickPartnerModel(m) {
   if (!m.installed) return
   partnerDlg.profile = m.profileId
+  partnerDlg.run = ''
   partnerDlg.modeLabel = m.modeLabel
   partnerDlg.name = defaultPartnerName(friends.value, m.profileId)
   // pi 是互動式，只能前台；換回其他模型時還原成使用者上次的選擇
@@ -435,6 +464,7 @@ function openPartnerDlg(nodeKey) {
   partnerDlg.deviceLabel = devLabel
   partnerDlg.error = ''
   partnerDlg.busy = false
+  partnerDlg.step = 1
   partnerDlg.firstMessage = ''
   partnerDlg.display = launchPrefs.launchDisplay === 'background' ? 'background' : 'foreground'
   const first = dlgModels.value.find(m => m.installed) ?? dlgModels.value[0]
@@ -639,6 +669,8 @@ async function toggleBuddyConsole() {
 async function submitPartnerDlg() {
   partnerDlg.error = ''
   if (!partnerDlg.name.trim() || !partnerDlg.cwd) { partnerDlg.error = '請填名字與工作資料夾'; return }
+  if (!partnerCanRun.value) { partnerDlg.error = '這個運行方式現在不能選'; return }
+  if (partnerRunChoice.value === 'term' && partnerDlg.node === info.node && TERM_WEZ_TOOLS.includes(dlgRow.value?.toolId)) return submitTermViaDialog()   // Grok／Gemini 的終端：ASN 自帶 WezTerm
   partnerDlg.busy = true
   const mode = MODEL_CATALOG.find(m => m.profileId === partnerDlg.profile)?.mode ?? 'window'
   const foregroundOnly = foregroundOnlyProfile(partnerDlg.profile)
@@ -1043,36 +1075,19 @@ function openWaitingTerm() {
   const r = terms.rows.find(x => x.state === 'waiting_user')
   if (r) void openTermTab(r.id)
 }
-// 「＋」選單的「在這台開終端…」：選 grok／agy 與工作資料夾，按「開啟」才呼叫 term_start（唯一呼叫處）；開好就打開它的分頁
-const termStartDlg = reactive({ open: false, profile: '', cwd: '', busy: false, error: '' })
-const termStartOpts = computed(() => termStartChoices(partnerModels.value))
-const termStartCwds = computed(() => mergeCwdLists([localCwdList.value, cwdChoices({ allow: launchPrefs.cwdAllow.length ? launchPrefs.cwdAllow : defaultCwdAllowFromCli(), recent: launchPrefs.recentCwd })]))
-function openTermStart() {
-  closeLaunchPicker()
-  Object.assign(termStartDlg, { open: true, busy: false, error: '', profile: termStartOpts.value.find(c => c.ok)?.profile ?? '', cwd: termStartCwds.value[0] ?? '' })
-  void refreshCwdCandidates().then(() => { if (termStartDlg.open && !termStartDlg.cwd) termStartDlg.cwd = termStartCwds.value[0] ?? '' })
-}
-function closeTermStart() { if (!termStartDlg.busy) termStartDlg.open = false }
-async function browseTermStartCwd() {
-  termStartDlg.error = ''
-  try {
-    const p = await transport.launchCwdBrowse()
-    if (!p) return
-    localCwdList.value = withPickedCwd(localCwdList.value, p)
-    termStartDlg.cwd = p
-    await loadLaunchPrefs()
-  } catch (e) { termStartDlg.error = String(e?.message ?? e) }
-}
-async function submitTermStart() {
-  const req = termStartRequest(termStartDlg.profile, termStartDlg.cwd, termStartOpts.value)
-  if (!req || termStartDlg.busy) return
-  termStartDlg.busy = true; termStartDlg.error = ''
+// 開新夥伴對話框選「ASN 開的終端」且是 Grok／Gemini 時：呼叫 term_start（唯一呼叫處），開好直接打開那個終端的分頁
+async function submitTermViaDialog() {
+  const req = termStartRequest(dlgRow.value.toolId === 'agy' ? 'agy' : 'grok', partnerDlg.cwd, termStartChoices(dlgModels.value))
+  if (!req) { partnerDlg.error = '這台電腦沒偵測到這個程式，或沒有選工作資料夾'; return }
+  partnerDlg.busy = true
   try {
     const r = await transport.termStart(req)
+    Object.assign(launchPrefs, bumpRecentCwd(launchPrefs, partnerDlg.cwd))
+    void saveLaunchPrefs()
+    closePartnerDlg()
     await termPoller?.tickNow()
-    termStartDlg.open = false
     if (r?.id) await openTermTab(String(r.id))
-  } catch (e) { termStartDlg.error = String(e?.message ?? e) } finally { termStartDlg.busy = false }
+  } catch (e) { partnerDlg.error = String(e?.message ?? e) } finally { partnerDlg.busy = false }
 }
 const termRoster =computed(() => termFriends(terms.rows, { selfNode: info.node, device: '' }))
 const termComposer = computed(() => composerView(termPaneRow.value))   // 比終端面板嚴：忙碌或等你回答時輸入區不開放
@@ -1528,7 +1543,7 @@ const app = createApp({
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
       termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termsClose, termSendAsk, termSendPhone, termSendBack, termSendConfirm, SEND_MAX,
       termPane, termPaneRow, termPaneActive, termRoster, termComposer, openTermTab, termPaneAnswer, termTimeline, entryLabel,
-      termStartDlg, termStartOpts, termStartCwds, openTermStart, closeTermStart, browseTermStartCwd, submitTermStart, termWaitCount, openWaitingTerm,
+      dlgRow, dlgVendors, partnerRunChoice, partnerRunModel, partnerCanRun, termWaitCount, openWaitingTerm,
       adopt, adoptLoad, adoptClose, adoptDo, adoptRelease, adoptUnlockAsk, adoptUnlockCancel, adoptUnlockConfirm, UNLOCK_TEXT,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
