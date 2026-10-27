@@ -47,8 +47,8 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .dp.xl{width:104px;height:104px;padding:4px;border-radius:10px}
 .dp.xl>span{font-size:42px;border-radius:6px}
 .dp.st-online,.dot.st-online{--frame:var(--online)} .dp.st-busy,.dot.st-busy{--frame:var(--busy)} .dp.st-away,.dot.st-away{--frame:var(--away)} .dp.st-offline,.dot.st-offline{--frame:var(--offline)}
-/* 活躍度頁籤（#372）：活躍＝綠實心、閒置＝同一個綠只畫外框、離線沿用 st-offline 的灰 */
-.dot.st-active{--frame:var(--online)} .dot.st-idle{background:transparent;box-shadow:inset 0 0 0 2px var(--online)}
+/* 活躍度頁籤的燈（#372、小良哥 #950）：活躍綠、閒置黃、離線紅；用 lv- 跟上線狀態的 st-（離線＝灰）分開。封存的夥伴不分級，名單裡一律灰（list.html 已封存群組） */
+.dot.lv-active{--frame:var(--online)} .dot.lv-idle{--frame:var(--away)} .dot.lv-offline{--frame:var(--busy)}
 
 /* 大頭貼圖片（自動產生的色塊或設備上傳的圖）填滿相框 */
 .dp img{display:block;width:100%;height:100%;border-radius:inherit;object-fit:cover}
