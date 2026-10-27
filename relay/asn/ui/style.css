@@ -50,6 +50,16 @@ textarea,input{user-select:text;-webkit-user-select:text}
 
 /* 大頭貼圖片（自動產生的色塊或設備上傳的圖）填滿相框 */
 .dp img{display:block;width:100%;height:100%;border-radius:inherit;object-fit:cover}
+/* 頭像＋廠商小圖（#336，小良哥 #725 定案：小圖放在頭像右邊、左右並排，小一點）；離線整顆灰階 */
+.avb{display:inline-flex;flex:none;align-items:center;gap:3px;vertical-align:middle}
+.avb-v{flex:none;display:grid;place-items:center;color:#1d2733;pointer-events:none}
+.avb-v:empty{display:none}
+.avb-v svg,.avb-v img{display:block;width:100%;height:100%}
+.avb.xs .avb-v{width:11px;height:11px}
+.avb.sm .avb-v{width:12px;height:12px}
+.avb.xl .avb-v{width:20px;height:20px;align-self:flex-end}
+.avb.off .avb-v{opacity:.6;filter:grayscale(1)}
+.to-line .to-av{margin-right:8px}   /* 對話視窗上方：名字前的頭像＋廠商小圖 */
 .dp.st-offline img{filter:grayscale(.65) opacity(.85)}
 
 /* ---------- 好友名單 ---------- */
@@ -277,7 +287,6 @@ html.toast-page,html.toast-page body{background:transparent}
 .buddy{padding-left:22px}
 .b-line{display:flex;align-items:baseline;gap:5px;min-width:0}
 .b-line .b-nick{min-width:0}
-.b-vendor{flex:none;display:inline-flex;align-self:center;width:13px;height:13px}.b-vendor svg,.b-vendor img{width:13px;height:13px}   /* 名單每列的廠商小圖；pi 照背後模型（#308） */
 .b-st{flex:none;color:#9aa5b1;font-size:12px}
 .b-ctx{flex:none;color:#b7791f;font-size:12px}
 .b-ctx.danger{color:#d93025;font-weight:600}
