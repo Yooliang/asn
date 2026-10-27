@@ -108,7 +108,7 @@ test('入口改成低調的「選項」小按鈕，按下切到第二個分頁�
   assert.doesNotMatch(ACCT_TEXT.button, /Claude|切換/)
   // 導覽：選項頁屬於第二個分頁；分頁列上第二個標籤暫時叫「選項」，離開（任何不是 acct 的狀態）就恢復「對話」
   assert.equal(acctNav().tab, 'chats')
-  assert.equal(tabLabel('chats', acctNav()), '選項')
+  assert.equal(tabLabel('chats', acctNav()), '設備與帳號')   // #268：分頁標籤跟頁標題一致；設備卡上的按鈕仍叫「選項」
   assert.equal(tabLabel('chats', tabNav('chats')), '對話')
   assert.equal(tabLabel('list', acctNav()), '夥伴')
   assert.equal(tabLabel('me', acctNav()), '設置')

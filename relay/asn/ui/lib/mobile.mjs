@@ -7,7 +7,7 @@ import { withoutAsn } from './roster.mjs'
 import { modelVendorKey, vendorIconSvg } from './vendor-icons.mjs'
 import { noticeOf } from './photo.mjs'
 import { guideNav } from './mobile-guides.mjs'
-import { MOBILE_SETTING_KEYS, settingNav } from './mobile-settings.mjs'
+import { SETTING_SHEET_KEYS, settingNav } from './mobile-settings.mjs'
 
 // ---------- 單欄導覽 ----------
 // 狀態：{ tab: 'list' | 'chats' | 'me', sheet: '' | 'launch' | 'ops' }。sheet＝蓋在分頁上的一層：「開新夥伴」（滿版）、「⋯」選單（底部浮層）。
@@ -17,7 +17,7 @@ import { MOBILE_SETTING_KEYS, settingNav } from './mobile-settings.mjs'
 export const TABS = ['list', 'chats', 'me']
 export const TAB_LABEL = { list: '夥伴', chats: '對話', me: '設置' }
 // 分頁列上的字：進了「選項」頁時，第二個分頁（對話）暫時改叫「選項」，離開就恢復
-export const tabLabel = (t, nav, acctLabel = '選項') => (t === 'chats' && nav?.sheet === 'acct' ? acctLabel : TAB_LABEL[t])
+export const tabLabel = (t, nav, acctLabel = '設備與帳號') => (t === 'chats' && nav?.sheet === 'acct' ? acctLabel : TAB_LABEL[t])
 export const tabIndex = t => Math.max(0, TABS.indexOf(t))
 export const normalizeTab = t => (TABS.includes(t) ? t : 'list')
 export const initialNav = () => ({ tab: 'list', sheet: '' })
@@ -28,7 +28,7 @@ export const launchNav = step => (step === 2 ? { tab: 'list', sheet: 'launch', s
 export const opsNav = () => ({ tab: 'chats', sheet: 'ops' })
 export const secretNav = () => ({ tab: 'chats', sheet: 'secret' })
 export const termReqNav = () => ({ tab: 'chats', sheet: 'termreq' })
-export const acctNav = () => ({ tab: 'chats', sheet: 'acct' })   // 名單設備卡的「選項」進入的滿版頁（切換 Claude 帳號）
+export const acctNav = () => ({ tab: 'chats', sheet: 'acct' })   // 「設備與帳號」滿版頁：名單設備卡的「選項」或設置列表的「設備與帳號」進入（切換 Claude 帳號）
 // 瀏覽記錄裡讀回來的狀態可能是任何東西（壞資料、別的頁面留下的）：整理成合法的導覽狀態
 export function normalizeNav(raw) {
   if (raw?.sheet === 'launch') return launchNav(raw?.step)
@@ -36,7 +36,7 @@ export function normalizeNav(raw) {
   if (raw?.sheet === 'secret') return secretNav()
   if (raw?.sheet === 'termreq') return termReqNav()
   if (raw?.sheet === 'acct') return acctNav()
-  if (raw?.sheet === 'setting') return MOBILE_SETTING_KEYS.includes(raw?.cat) ? settingNav(raw.cat) : tabNav('me')   // 設置分頁的某一項滿版頁；沒這個分類退回設置分頁
+  if (raw?.sheet === 'setting') return SETTING_SHEET_KEYS.includes(raw?.cat) ? settingNav(raw.cat) : tabNav('me')   // 設置分頁的某一項滿版頁；沒這個分類退回設置分頁
   if (raw?.sheet === 'guide') return guideNav(raw?.guide)   // 設置分頁的「使用指引」滿版頁
   return tabNav(raw?.tab)
 }
