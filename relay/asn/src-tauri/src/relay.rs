@@ -565,10 +565,13 @@ impl Relay {
             map.insert(id.to_string(), String::new());
             all.push(m);
         }
-        // Rust 代收的信（已 ack 過後台）：交給畫面；畫面確認收下才從代收區移除
+        // Rust 代收的信（已 ack 過後台）：交給畫面；畫面確認收下才從代收區移除。
+        // 標 spooled：畫面一次收到很多封時不逐封跳提示（#339：0.1.92 裝上時代收了 437 封）
         for m in self.spool.lock().unwrap().iter() {
             if !m.get("id").and_then(Value::as_str).map(|i| all.iter().any(|a| a.get("id").and_then(Value::as_str) == Some(i))).unwrap_or(true) {
-                all.push(m.clone());
+                let mut m = m.clone();
+                m["spooled"] = json!(true);
+                all.push(m);
             }
         }
         *self.ack_agent.lock().unwrap() = map;

@@ -47,6 +47,8 @@ export function connReason(e) {
 const ACK_CHUNK = 100   // 一次 ack 最多 100 個編號（本機 relay.rs 的 build_ack_body 檢查：超過或有任何一個格式不對就整批不送）
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const ITEM_RETRY_MAX = 3   // 同一封信處理失敗幾次後就先 ack 掉，不讓一封壞信擋住後面所有信
+// 一次收到超過這麼多封「Rust 代收的信」（畫面沒開時存下來的，m.spooled）就不逐封跳提示、只跳一則摘要（#339：曾一次湧進 437 封）
+export const SPOOL_QUIET_OVER = 3
 
 export class AsnCore {
   constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, localMs = 2_000, soonGapMs = 1_000, statusPollMs = STATUS_POLL_MS, aliases = [], stepMs = STEP_MS }) {
@@ -244,10 +246,21 @@ export class AsnCore {
         this.#setConn('on')
         const ids = []
         let itemErr = null
+        const forMe = m => m.to_agent === this.windowName || this.aliases.has(m.to_agent)
+        // 代收的舊信很多時照常進對話、算未讀，但不逐封跳提示與音效，最後合成一則
+        const quiet = messages.filter(m => m?.spooled === true && forMe(m) && !this.seen.has(m.id)).length > SPOOL_QUIET_OVER
+        let quietN = 0, quietLast = null
         for (const m of messages) {
-          if (m.to_agent !== this.windowName && !this.aliases.has(m.to_agent)) continue   // 不是寄給本視窗（或還沒過期的舊名）的絕不處理、不 ack
+          if (!forMe(m)) continue   // 不是寄給本視窗（或還沒過期的舊名）的絕不處理、不 ack
           try {
-            if (!this.seen.has(m.id)) { this.seen.add(m.id); if (!this.#noReplyNotice(m)) await this.#incoming(m) }
+            if (!this.seen.has(m.id)) {
+              this.seen.add(m.id)
+              if (!this.#noReplyNotice(m)) {
+                const q = quiet && m.spooled === true
+                const f = await this.#incoming(m, { quiet: q })
+                if (q && f) { quietN++; quietLast = f }
+              }
+            }
             this.itemFails.delete(m.id)
             ids.push(m.id)
           } catch (e) {
@@ -270,6 +283,10 @@ export class AsnCore {
           if (bad.length) { this.log(`ack skipped ${bad.length} bad id(s): ${bad.slice(0, 3).map(i => String(i).slice(0, 12)).join(',')}`); ids.splice(0, ids.length, ...ids.filter(i => UUID_RE.test(String(i)))) }
           for (let i = 0; i < ids.length; i += ACK_CHUNK) await this.transport.ack(ids.slice(i, i + ACK_CHUNK))   // 分批 ack，一批最多 100 個
           ids.forEach(i => this.seen.delete(i))
+        }
+        if (quietN) {
+          this.log(`spool delivered ${quietN} message(s) quietly`)
+          this.emit('notify', { kind: 'msg', friend: quietLast, line: `收到 ${quietN} 封你不在時代收的信`, sound: 'msg', toast: true })
         }
         if (itemErr) this.#setConn('off', '有信件處理失敗（已跳過，詳見記錄）')
       } while (this.again)
@@ -296,7 +313,8 @@ export class AsnCore {
     return true
   }
 
-  async #incoming(m) {
+  // quiet：照常記進對話、算未讀，只是不跳提示（代收舊信一次很多時由 pull 合成一則）。回這封信落在哪位夥伴
+  async #incoming(m, { quiet = false } = {}) {
     const r = routeMail(this.friends, m)
     let f = this.friends.get(r.id)
     if (!f) { f = this.#decorate({ ...stubFriend(r), unread: 0, waiting: false, replyTo: null }); this.friends.set(r.id, f) }
@@ -330,10 +348,11 @@ export class AsnCore {
     this.#scheduleSave()
     this.emit('state')
     this.emit('log', r.id)
-    if (shown) this.emit('notify', { kind: 'msg', friend: f, line: text ? plain(text) : noticeOf(photos), sound: 'msg', toast: !visible, hasFile: photos.some(a => a.kind === 'file') })
-    if (nudge) this.emit('notify', { kind: 'nudge', friend: f, line: '傳送了一個震動', sound: 'nudge', toast: !visible, shake: visible })
+    if (shown && !quiet) this.emit('notify', { kind: 'msg', friend: f, line: text ? plain(text) : noticeOf(photos), sound: 'msg', toast: !visible, hasFile: photos.some(a => a.kind === 'file') })
+    if (nudge && !quiet) this.emit('notify', { kind: 'nudge', friend: f, line: '傳送了一個震動', sound: 'nudge', toast: !visible, shake: visible })
     // 回信是扇出給我所有設備的：我在別台設備上說的話這台還沒有，順手補一次（人在別台說、這台只看到 AI 的回覆就會斷掉）
     if (typeof m.fanout_id === 'string') void this.syncHistory(r.id, { force: true })
+    return f
   }
 
   // ---------- 寄信 ----------
