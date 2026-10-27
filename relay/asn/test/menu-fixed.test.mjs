@@ -58,7 +58,11 @@ test('背景／前台切換與切換模型：固定出現，原因與啟用條�
 test('對話上方「管理」：背景／前台切換排最前面，其後和右鍵、手機同順序；問不到就反灰', () => {
   for (const [name, f] of Object.entries(KINDS)) {
     const keys = managePanelItems(f, ctx).map(i => i.key)
-    assert.deepEqual(keys, ['p:console', ...FIXED.map(k => `p:${k}`)], name)
+    // 「把這台電腦上開著的終端納入管理…」固定放在封存／取消封存之前（#753）
+    const fixed = FIXED.map(k => `p:${k}`)
+    const at = fixed.findIndex(k => /archive/.test(k))
+    const want = ['p:console', ...(at < 0 ? [...fixed, 'p:adopt'] : [...fixed.slice(0, at), 'p:adopt', ...fixed.slice(at)])]
+    assert.deepEqual(keys, want, name)
   }
   const on = managePanelItems(F('H', 'a'), ctx, [], { console: { ok: true, reason: '' }, model: { ok: true, reason: '' } })
   assert.equal(on.find(i => i.key === 'p:console').ok, true)

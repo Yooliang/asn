@@ -401,7 +401,7 @@ async function loadPiInfo() {
 const piChoice = computed(() => piChoiceFor(dlgRow.value?.id, piInfo.models, piInfo.providers))
 // pi 是通道不是廠牌，最後不列在廠牌裡；但「經 pi」要等後端能帶提供者與模型開 pi（0.1.90 後續）才能選，
 // 在那之前先留著 pi 這一列，不然使用者完全開不了 pi 夥伴（小東 #737）
-const PI_VIA_READY = false
+const PI_VIA_READY = true
 const dlgVendors = computed(() => (PI_VIA_READY ? vendorRows(dlgModels.value) : dlgModels.value))
 const partnerRun = computed(() => {
   const row = dlgRow.value
@@ -795,6 +795,7 @@ async function openRoomChat(id) {
 // 對話上方「⋯」：邀請別人加入、成員與設定（開在名單視窗；分開模式的對話視窗也是請名單視窗代開）
 async function openGroupMenu(chatId, what) {
   await invoke('show_main').catch(() => {})
+  if (what === 'adopt') { await adoptLoad(); return }   // 對話窗「管理」→「把這台電腦上開著的終端納入管理…」
   if (isRoomChat(chatId)) {
     const rid = roomIdOf(chatId), r = hub.raw(rid)
     if (what === 'manage') groupFlow.openManage(rid)
