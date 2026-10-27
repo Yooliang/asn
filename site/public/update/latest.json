@@ -1,11 +1,11 @@
 {
-  "version": "0.1.81",
-  "notes": "新增：asn-cli 寄信只寫視窗名會自動補節點，並新增 asn who 列出完整位址；手機設置新增「設備與帳號」，分頁標籤改名；電腦版名單每列顯示廠商小圖，pi 依背後模型標示；設備頁標示 pi 背後的模型廠商。修正：接手窗格的「已允許」改讀電腦端真實狀態。",
-  "pub_date": "2026-10-27T00:46:12.610Z",
+  "version": "0.1.82",
+  "notes": "修正：電腦端往終端送字時，確認框打開就會同時傳到手機「待確認」頁，本人在手機按確認或拒絕（之前只有代答會傳到手機）。",
+  "pub_date": "2026-10-27T01:34:24.598Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjdrWFVmSWVqTC95M2orSDNuVEg5bDIxTzFCdUREQVZXYUd1Z0VKdXExWTlhTjgrQmNDN2MyYkpTNkEzRzI1RlNYVWsxcFFJa29WdGZCTmZVa1loVFFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDYxOTcyCWZpbGU6QVNOXzAuMS44MV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjgxCm9nckV1enM3NGJ5NGd4bkMvT0xQUDQyeFZjaCtFL3BoLzNiT0NPSW44N3BNaFdhVTRKRWQvaWc5cGptNkIxek4wMTJBdmU1MEhDdW1VV04xMjVYMERnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.81_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjJIcWZtSkNzTEJXc0lHdmF4ci9WS0NVTkZvUFZzWCtvbE5xUHFPKzU3Wmk1Q3ZKbnBMbkFoNjBWSFp0dGhBVjZJdTYwWDgrNUE2NWxRbEl1S3lyUVFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDY0ODY0CWZpbGU6QVNOXzAuMS44Ml94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjgyCnAvQmVQbTFkQXJDVDZ6SnZ5Ri85dk55Rm5Mb1h0c3BORTNINFNWVm1WWDlPVEdYS2NXUHNlSDhCRThzRXZGQ0pUdzB5eU1PeVg5c0JYS093eEtCZkJ3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.82_x64-setup.exe"
     }
   }
 }
