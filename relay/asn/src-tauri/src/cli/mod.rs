@@ -18,6 +18,7 @@ mod secret;
 mod send;
 mod upload;
 mod usage_cmd;
+mod who;
 #[cfg(test)]
 pub(crate) mod testsupport;
 #[cfg(test)]
@@ -59,7 +60,7 @@ impl Io<'_> {
     }
 }
 
-pub const SUBCOMMANDS: [&str; 8] = ["send", "recv", "room", "attach", "secret", "usage", "inbox", "claude-quota"];
+pub const SUBCOMMANDS: [&str; 9] = ["send", "recv", "room", "attach", "secret", "usage", "inbox", "claude-quota", "who"];
 
 /// 第一個參數是子命令才算命令列呼叫（asn.exe 據此決定要不要跑命令列）
 pub fn is_subcommand(args: &[String]) -> bool {
@@ -70,6 +71,7 @@ const TOP_USAGE: &str = "用法：
   asn send   --to <成員代號 | 節點/視窗名> --body \"<內文>\" (--reply | --no-reply) [--reply-to <信件id>] [--file <路徑> ...]
   asn send   --room <群組id> --body \"<內文>\"
   asn send   --whoami
+  asn who    [名字片段] [--json]   （列出所有夥伴的完整收件位址「節點/視窗名」；不確定 --to 怎麼寫先查這個）
   asn recv   --once | --watch | --peek [--count-only]
   asn room   --rooms | --room-read <群組id|群組名> [--last N | --since SEQ] [--json]
   asn room   confirm-request --room <群組id|群組名> --kind <類別> --summary \"<一句話>\"   （危險操作前請主持人確認）
@@ -105,6 +107,7 @@ pub fn run(args: &[String], env: &Env, io: &mut Io) -> i32 {
             "usage" => usage_cmd::main(rest, env, io).await,
             "inbox" => inbox_cmd::main(rest, env, io).await,
             "claude-quota" => quota_cmd::main(rest, env, io).await,
+            "who" => who::main(rest, env, io).await,
             "--help" | "-h" | "help" => {
                 io.outln(TOP_USAGE);
                 Ok(0)
