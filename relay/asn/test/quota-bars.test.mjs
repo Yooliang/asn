@@ -10,10 +10,18 @@ const at = new Date(NOW - 10 * 60_000).toISOString()
 test('有數字：兩條剩餘百分比，剩 20% 以下標警示；重置寫「約 N 小時後」', () => {
   const v = quotaBars({ five_hour_pct: 64, weekly_pct: 12, reset_at: new Date(NOW + 3 * 3600_000 + 10 * 60_000).toISOString(), at }, { hookOn: true, now: NOW })
   assert.deepEqual(v.bars, [{ key: 'five', label: '5 小時', pct: 64, low: false }, { key: 'week', label: '每週', pct: 12, low: true }])
-  assert.equal(v.reset, '約 3 小時後重置')
+  assert.equal(v.reset, '5 小時額度約 3 小時後重置', '都沒用完：重置時間是 5 小時那條的')
   assert.equal(v.note, '')
   assert.equal(v.stale, false)
   assert.equal(LOW_PCT, 20)
+})
+
+test('重置時間標明是哪一條的（規則同 claude_quota.rs）', () => {
+  const r = (five, week) => quotaBars({ five_hour_pct: five, weekly_pct: week, reset_at: new Date(NOW + 2 * 3600_000).toISOString(), at }, { now: NOW }).reset
+  assert.equal(r(40, 0), '每週額度約 2 小時後重置', '每週用完')
+  assert.equal(r(0, 30), '5 小時額度約 2 小時後重置', '5 小時用完')
+  assert.equal(r(0, 0), '兩條額度都約 2 小時後重置', '兩條都用完：較晚的那個')
+  assert.equal(r(null, 50), '每週額度約 2 小時後重置', '只有每週的資料')
 })
 
 test('重置時間：不到 1 小時、已過、沒有', () => {
