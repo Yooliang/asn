@@ -1,11 +1,11 @@
 {
-  "version": "0.1.80",
-  "notes": "新增：手機遠端確認終端送字與代答（電腦要往終端送字時，手機會跳出待確認，本人按確認或拒絕）；接手已開著的終端視窗（預設只讀，需在電腦本機另外開啟代答或代送）；終端忙太久或等你太久時顯示提示；終端送字表單與確認框。修正：pi 從別的視窗底下開啟時，寄件人被誤判成上層視窗。",
-  "pub_date": "2026-10-26T21:45:37.735Z",
+  "version": "0.1.81",
+  "notes": "新增：asn-cli 寄信只寫視窗名會自動補節點，並新增 asn who 列出完整位址；手機設置新增「設備與帳號」，分頁標籤改名；電腦版名單每列顯示廠商小圖，pi 依背後模型標示；設備頁標示 pi 背後的模型廠商。修正：接手窗格的「已允許」改讀電腦端真實狀態。",
+  "pub_date": "2026-10-27T00:46:12.610Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybitFV1hOUDZmOWFpR3ZoYTd6UHVvWU80STZyQzFxaXZvZlNjSDQvdTFxYmZULzZLRlQ5R1dDSWVUQVl4RXRJUGx3WHBOVXJoaldyeVArT3BQMFQ5NXd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDUxMTM3CWZpbGU6QVNOXzAuMS44MF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjgwCjE4NHFZQXN0NlZFQ0FDOCt0NVNMa2I1ZjRvRVZxTUdRZHhsT2tIUEFQcmR4UzJqOWtZR1Y5TVpLTFB0R3FYWGgweTlIRDFMaFdZSlkzV2tha2VOeUNRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.80_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjdrWFVmSWVqTC95M2orSDNuVEg5bDIxTzFCdUREQVZXYUd1Z0VKdXExWTlhTjgrQmNDN2MyYkpTNkEzRzI1RlNYVWsxcFFJa29WdGZCTmZVa1loVFFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDYxOTcyCWZpbGU6QVNOXzAuMS44MV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjgxCm9nckV1enM3NGJ5NGd4bkMvT0xQUDQyeFZjaCtFL3BoLzNiT0NPSW44N3BNaFdhVTRKRWQvaWc5cGptNkIxek4wMTJBdmU1MEhDdW1VV04xMjVYMERnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.81_x64-setup.exe"
     }
   }
 }

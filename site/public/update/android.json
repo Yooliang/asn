@@ -1,8 +1,8 @@
 {
-  "version": "0.1.80",
-  "versionCode": 1080,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.80_android.apk",
-  "sha256": "31afb2c0a5045b9d01ae9c7613164df7bf24b011ba1a6f37901d44330bf920a2",
-  "notes": "新增：手機端新增「待確認」頁，電腦要往終端送字或代答時，在手機上本人按確認或拒絕；終端忙太久或等你太久時顯示提示。修正：寄件人判斷。",
-  "bytes": 9416164
+  "version": "0.1.81",
+  "versionCode": 1081,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.81_android.apk",
+  "sha256": "8a97aec4fc973a5ca9df4d790344b7e3f1835e4817a4158f9e8c617134afca34",
+  "notes": "新增：手機設置新增「設備與帳號」，分頁標籤改名；設備頁標示 pi 背後的模型廠商。",
+  "bytes": 9420260
 }
