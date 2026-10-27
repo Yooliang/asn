@@ -173,8 +173,9 @@ pub fn normalize_permissions(raw: Option<&Value>, cwd: &Path) -> (Permissions, V
                 Some(w)
             }
             None => {
-                warnings.push("permissions.write_dirs 必須是資料夾陣列，已忽略".into());
-                None
+                // 設錯了不能放大權限：型別不對就當空清單，寫入一律拒絕
+                warnings.push("permissions.write_dirs 必須是資料夾陣列，寫入一律拒絕".into());
+                Some(Vec::new())
             }
         },
     };
@@ -214,6 +215,9 @@ pub fn decide(policy: &Permissions, req: &Req, base: &Path) -> (Verdict, String)
         }
         if req.category == "write" {
             if let Some(wd) = &policy.write_dirs {
+                if req.paths.is_empty() {
+                    return (Verdict::Deny, "有設可寫入的資料夾，但這次寫入沒有帶路徑，拒絕".into());
+                }
                 if let Some(out) = req.paths.iter().find(|p| !inside_dirs(p, wd, base)) {
                     return (Verdict::Deny, format!("路徑不在可寫入的資料夾裡：{out}"));
                 }
@@ -482,7 +486,12 @@ mod tests {
         assert_eq!(decide(&p3, &req("write", &["/w/Review/a"]), cwd).0, Verdict::Deny);
         let (p4, w4) = normalize_permissions(Some(&json!({"write": "allow", "write_dirs": "oops"})), cwd);
         assert_eq!(w4.len(), 1);
-        assert_eq!(decide(&p4, &req("write", &["/w/Review/a"]), cwd).0, Verdict::Allow);
+        assert_eq!(decide(&p4, &req("write", &["/w/Review/a"]), cwd).0, Verdict::Deny, "壞型別不能放大權限：寫入一律拒絕");
+        // 有設 write_dirs 時，沒帶路徑的寫入不能跳過檢查
+        assert_eq!(decide(&p, &req("write", &[]), cwd).0, Verdict::Deny);
+        // 沒設 write_dirs：行為不變（沒帶路徑照規則）
+        let (p5, _) = normalize_permissions(Some(&json!({"write": "allow"})), cwd);
+        assert_eq!(decide(&p5, &req("write", &[]), cwd).0, Verdict::Allow);
     }
 
     #[test]
