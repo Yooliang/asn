@@ -2,9 +2,7 @@
 // 手機三個大分頁：夥伴、對話（最後使用的那一位）、設置。沒有多視窗、系統匣、設定分頁。
 import { groupItems } from './dims.mjs'
 import { friendMatchesQuery, normalizeSearchQuery, sortFriends } from './search.mjs'
-import { engineKey } from './tabs.mjs'
 import { withoutAsn } from './roster.mjs'
-import { modelVendorKey, vendorIconSvg } from './vendor-icons.mjs'
 import { noticeOf } from './photo.mjs'
 import { guideNav } from './mobile-guides.mjs'
 import { SETTING_SHEET_KEYS, settingNav } from './mobile-settings.mjs'
@@ -87,13 +85,8 @@ export function rosterGroups(friends, { query = '', selfNode = '', selfName = ''
 export const totalUnread = friends => withoutAsn(friends).reduce((n, f) => n + (Number.isInteger(f?.unread) && f.unread > 0 ? f.unread : 0), 0)
 
 // ---------- 名單每列：廠商小徽章與「最後一句話」 ----------
-// 廠商圖：電腦版已有的官方圖（vendor-icons.mjs）；ASN 自己的視窗用機器人 logo。回要放進徽章的 HTML（都是內建的固定字串，沒有外部資料）
-export const ASN_BADGE = '<img src="img/logo.svg" alt="" draggable="false">'
-export function vendorBadgeHtml(friend) {
-  const k = engineKey(friend)
-  if (k === 'pi') return vendorIconSvg(modelVendorKey(friend?.model) ?? 'pi')   // pi 只是執行殼：顯示背後實際的模型廠商，對不到才用 pi 的圖
-  return k === 'asn' ? ASN_BADGE : vendorIconSvg(k)
-}
+// 廠商圖：與電腦版名單共用（vendor-icons.mjs，#308）
+export { ASN_BADGE, vendorBadgeHtml } from './vendor-icons.mjs'
 export const LAST_WORDS_MAX = 80
 // 這位夥伴最後說的一句話：只取對方寄來的（k:'them'）；自己寄的、震動、系統提示（k:'sys'）一律跳過找前一則；
 // 只有照片或檔案的信顯示「傳來了一張照片」「傳來了一個檔案」。換行與連續空白壓成一個空格，最多 LAST_WORDS_MAX 字

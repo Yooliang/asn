@@ -44,7 +44,7 @@ import { ONBOARD_STORE, planOnboarding } from './lib/onboard.mjs'
 import { friendId } from './lib/roster.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher, modelSwitchBlock } from './lib/model-switch.mjs'
 import { consoleBlock } from './lib/actionbar.mjs'
-import { vendorIconSvg } from './lib/vendor-icons.mjs'
+import { vendorBadgeHtml, vendorIconSvg } from './lib/vendor-icons.mjs'
 import { runChoices } from './lib/model-catalog.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
@@ -1369,7 +1369,7 @@ const app = createApp({
       deviceDrag, deviceDrop, onDeviceDragStart, onDeviceDragOver, onDeviceDrop, onDeviceTabKey, clearDeviceDrag,
       tab, adI, hub, roomRows, roomHue, roomInitial, groupFlow, openGroupMenu, decideCard, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,
       GUIDES, view, SETTING_CATS, catSub, PANEL_KINDS, panelTabId, panelGuide, panelTitle, openPanel, closePanel, settingsState, applySetting, pickAvatarFile,
-      selfNode: info.node, transport, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg,
+      selfNode: info.node, transport, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg, vendorBadge: vendorBadgeHtml,
       searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickLaunchDevice,
       DISPLAY_MODES, partnerShowDisplay, partnerRun,
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
