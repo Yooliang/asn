@@ -258,12 +258,12 @@ test('守門：可重用入口都有匯出（imageFromBlob／fileFromBlob／atta
   assert.match(read('ui/lib/core.mjs'), /async sendAttachment\(id, photo, caption/)
   const pane = read('ui/lib/chatpane.mjs')
   assert.ok(pane.includes('aria-label="傳送檔案"') && pane.includes('class="filecard"'))
-  assert.ok(!/v-html/.test(pane.slice(pane.indexOf('class="photos"'), pane.indexOf('class="dp-fold-bar"'))))
+  assert.ok(!/v-html/.test(pane.slice(pane.indexOf('class="photos"'), pane.indexOf('<aside class="dp-side"')   /* 側欄頭像有廠商徽章 v-html（#336），範圍只到照片區結束 */)))
 })
 
 test('守門：對話區的縮圖用 <img :src>（資料網址）與按鈕，沒有新增任何 v-html；縮圖與放大檢視都有無障礙名稱', () => {
   const pane = read('ui/lib/chatpane.mjs')
-  const photos = pane.slice(pane.indexOf('class="photos"'), pane.indexOf('class="dp-fold-bar"'))
+  const photos = pane.slice(pane.indexOf('class="photos"'), pane.indexOf('<aside class="dp-side"')   /* 側欄頭像有廠商徽章 v-html（#336），範圍只到照片區結束 */)
   assert.ok(photos.length > 100 && !/v-html/.test(photos))
   const viewer = pane.slice(pane.indexOf('class="photo-viewer"'))
   assert.ok(!/v-html/.test(viewer) && viewer.includes('role="dialog"') && viewer.includes('aria-label'))
