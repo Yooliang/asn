@@ -1,11 +1,11 @@
 {
-  "version": "0.1.88",
-  "notes": "修正：電腦版名單的分頁依廠商、群組依廠商，現在 pi 也會依背後實際用的模型廠商歸類（Claude、GPT、Gemini…），對不到才留在 Pi。",
-  "pub_date": "2026-10-27T05:19:04.987Z",
+  "version": "0.1.89",
+  "notes": "新增：名單的分頁／分組「狀態」改成「活躍度」（活躍、閒置、離線），近 8 小時有收發的算活躍，AI 一忙一閒不再換組、跳分頁；手機的『最近有活動』也同樣改成 8 小時。「＋」按鈕移到個人訊息列右邊，選單分成新增夥伴、終端、群組三段，終端在等你回答時「＋」上會有紅點。",
+  "pub_date": "2026-10-27T05:48:07.573Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnhNNnJDL3lQendEb1AvTzQ3TUFsNUFXRUluNFJhTDZtWi9FWjRXNFZqRUIyaFlkTlhaYlI4MmdrOVMvQkxRaGZ5ckxuekoyUTBsbWszbTZ3NDkvK1EwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDc4MzQ0CWZpbGU6QVNOXzAuMS44OF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjg4ClVtdHhOekNZWTBvb3NXcXI0Mk9rb1ptTkdOL1E4ak9Pckh4by90R3ZFSTVPZ3JiTTBaakhYeTB2TktzUndEazhLVEVmUzJBdjBCNnRiZ214K2VvZENnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.88_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjVhOEtvRnJrei9tYnN5ZmZCMlZkNWx4K3JoekFRamwyRGFNNGhzZHloK3dpVlB3a3VmcERUdnlRMHRsQThQbXZHRXcySUJMWnZWdTZoMzhScTJQTHc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDgwMDg3CWZpbGU6QVNOXzAuMS44OV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjg5CnloTUdwQmVOdEhCT24rNHNVREM3V0lJUVJIMHAyZEhIRFVEZ2xGSy9vdkY1SjcxeGRjczU5aXBEUWphM3JsMVJ0NzJ6KzhSTWJ0MTFZRFRnUS9vR0FnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.89_x64-setup.exe"
     }
   }
 }

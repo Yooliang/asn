@@ -1,8 +1,8 @@
 {
-  "version": "0.1.81",
-  "versionCode": 1081,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.81_android.apk",
-  "sha256": "8a97aec4fc973a5ca9df4d790344b7e3f1835e4817a4158f9e8c617134afca34",
-  "notes": "新增：手機設置新增「設備與帳號」，分頁標籤改名；設備頁標示 pi 背後的模型廠商。",
-  "bytes": 9420260
+  "version": "0.1.89",
+  "versionCode": 1089,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.89_android.apk",
+  "sha256": "e907b49fb56708353994298e074208f085ccfc6aef40eac0547ffdb4cfef5a28",
+  "notes": "新增：『最近有活動』改成 8 小時，跟電腦版一致；開新夥伴的對話框會列出各模型的啟動方式現況。",
+  "bytes": 9436644
 }
