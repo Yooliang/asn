@@ -33,12 +33,16 @@ export function runChoices(row) {
  * status：ok 可用／window 開成自己的視窗／noinbox 開得起來但收不到信／untested 理論可行但沒實測／no 不支援或刻意不做。
  * 回 [{ key, label, status, statusText, why }]；目錄上沒有 channels 的（自訂設定）回空陣列。
  */
-export const CHANNEL_LABEL = { term: '終端機', acp: '內建通道', pi: '經 pi' }
+// 排列順序＝優先序（小良哥 10/27 決定）：內建通道（ACP）＞經 pi＞終端機（ASN 開的）；使用者自己開的 CLI 加外掛排最後、不在這裡
+export const CHANNEL_LABEL = { acp: '內建通道', pi: '經 pi', term: '終端機' }
 export const CHANNEL_STATUS_TEXT = { ok: '可用', window: '開成視窗', noinbox: '收不到信', untested: '沒實測', no: '不支援' }
 export function channelRows(row) {
   const ch = row?.channels
   if (!ch || typeof ch !== 'object') return []
-  return Object.keys(CHANNEL_LABEL).filter(k => ch[k]).map(k => ({ key: k, label: CHANNEL_LABEL[k], status: ch[k].status, statusText: CHANNEL_STATUS_TEXT[ch[k].status] ?? '', why: String(ch[k].why ?? '') }))
+  const rows = Object.keys(CHANNEL_LABEL).filter(k => ch[k]).map(k => ({ key: k, label: CHANNEL_LABEL[k], status: ch[k].status, statusText: CHANNEL_STATUS_TEXT[ch[k].status] ?? '', why: String(ch[k].why ?? ''), recommended: false }))
+  const best = rows.find(r => r.status === 'ok')   // 依優先序第一個「可用」的就是推薦；都沒有就不標
+  if (best) best.recommended = true
+  return rows
 }
 
 /**
