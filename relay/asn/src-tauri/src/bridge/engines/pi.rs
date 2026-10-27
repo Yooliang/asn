@@ -31,6 +31,9 @@ pub fn inbox_dir(home: &Path) -> PathBuf {
     home.join(".asn").join("pi-inbox")
 }
 
+/// 擴充太舊時名單上的提醒
+pub const OLD_EXT_DETAIL: &str = "ASN 的 pi 擴充較舊，請更新";
+
 fn clean_name(s: &str) -> String {
     let t: String = s.chars().map(|c| if c.is_control() { ' ' } else if c == '/' || c == '\\' { '-' } else { c }).collect();
     t.trim().chars().take(NAME_MAX_CHARS).collect::<String>().trim().to_string()
@@ -70,7 +73,8 @@ fn parse_window(path: &Path, stem: &str, now_ms: u64, alive: &impl Fn(u32) -> bo
         engine_label: None,
         no_fallback: false,
         cwd_label_override: None,
-        detail: None,
+        // 擴充太舊（沒有 ext 或比改名需要的版本小）：名單上的個人訊息提醒更新（新功能用不了，不是壞了）
+        detail: (v.get("ext").and_then(Value::as_u64).unwrap_or(0) < super::pi_control::RENAME_EXT).then(|| OLD_EXT_DETAIL.to_string()),
         context_pct: None,
         mod_loaded: true,
         model: model_label(&v),

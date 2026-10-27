@@ -234,3 +234,10 @@ test('已停止（0.2 B3）：名單狀態 stopped 不當成線上；內建通�
   assert.deepEqual(items.filter(i => i.ok).map(i => i.key), ['info', 'restart', 'remove'])
   assert.match(items.find(i => i.key === 'model').reason, /已停止，先按「重開」/)
 })
+
+test('pi 改名（0.2 A4）的對話框：寫明不關視窗、重開後名字還在、忙時排隊、要新版擴充；Claude 的改名文字不變', () => {
+  const t = opDialogText('rename', '小丙', '工作機', 'pi')
+  const all = t.points.join('\n')
+  for (const re of [/視窗不會關/, /重開、接回同一段對話後名字還在/, /排隊/, /新版的 pi ASN 擴充/]) assert.match(all, re)
+  assert.deepEqual(opDialogText('rename', '小甲', '', 'claude').points, [])
+})

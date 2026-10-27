@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { Type } from 'typebox'
-import { ackEntry, formatInjection, nextEntries, pruneDone, removeWindow, resolveWindowName, validSessionId, windowRecord, writeWindow } from './inbox.mjs'
+import { ASN_NAME_ENTRY, ackEntry, asnNameFrom, formatInjection, nextEntries, pruneDone, removeWindow, resolveWindowName, validSessionId, windowRecord, writeWindow } from './inbox.mjs'
 import { nextRequests, pickModel, pruneControl, writeResult } from './control.mjs'
 import { buildSendArgv, guardAsnSendInput, guardBash, resolveConfig, runSend } from './lib.mjs'
 
@@ -80,6 +80,8 @@ function registerInbox(pi: ExtensionAPI) {
   const seen = new Set<string>()
   const seenControl = new Set<string>()
   let controlBusy = false
+  // ASN 改過的名字（0.2 A4）：開場時從對話檔找回；之後 ASN 改名、使用者在 pi 裡 /name 都即時更新（「最後一次改的為準」）
+  let asnName: { name: string; sessionWins: boolean } | null = null
 
   const stop = () => {
     for (const t of timers) clearInterval(t)
@@ -95,9 +97,14 @@ function registerInbox(pi: ExtensionAPI) {
     const id = String(ctx.sessionManager.getSessionId())
     if (!validSessionId(id)) return
     sid = id
+    try {
+      asnName = asnNameFrom(ctx.sessionManager.getEntries())
+    } catch {
+      asnName = null
+    }
     beat = () => {
       try {
-        const name = resolveWindowName({ env: process.env, sessionName: pi.getSessionName(), cwd: ctx.cwd })
+        const name = resolveWindowName({ env: process.env, sessionName: pi.getSessionName(), cwd: ctx.cwd, asn: asnName })
         writeWindow(windowsDir, windowRecord({ sessionId: id, name, pid: process.pid, cwd: ctx.cwd, state, model: ctx.model?.id, provider: ctx.model?.provider, at: Date.now() }))
       } catch {}
     }
@@ -121,7 +128,22 @@ function registerInbox(pi: ExtensionAPI) {
       controlBusy = true
       try {
         for (const r of nextRequests(controlDir, id, seenControl, 3)) {
-          let result: { ok: boolean; model?: string; provider?: string; error?: string; providers?: string[] }
+          let result: { ok: boolean; model?: string; provider?: string; name?: string; error?: string; providers?: string[] }
+          if (r.op === 'set_name') {
+            // 改名：先改 pi 的 session 名，再記一筆「ASN 改過名」（比 session_info 新，重開後照 ASN 給的）
+            try {
+              pi.setSessionName(r.name)
+              pi.appendEntry(ASN_NAME_ENTRY, { name: r.name })
+              asnName = { name: r.name, sessionWins: false }
+              result = { ok: true, name: r.name }
+            } catch {
+              result = { ok: false, error: 'failed' }
+            }
+            writeResult(controlDir, id, r.id, result)
+            beat() // 登記檔的名字立刻更新
+            if (ctx.hasUI && result.ok) ctx.ui.notify(`ASN 已改名：${r.name}`, 'info')
+            continue
+          }
           try {
             const picked = pickModel({ available: ctx.modelRegistry.getAvailable(), all: ctx.modelRegistry.getAll() }, r.provider, r.model)
             if ('error' in picked) result = { ok: false, error: picked.error, providers: picked.providers }
@@ -144,6 +166,12 @@ function registerInbox(pi: ExtensionAPI) {
     timers.push(setInterval(() => beat(), HEARTBEAT_MS), setInterval(poll, POLL_MS), setInterval(() => void pollControl(), POLL_MS))
     for (const t of timers) t.unref?.()
     if (ctx.hasUI) ctx.ui.setStatus('asn', 'ASN 可收信')
+  })
+
+  // 使用者在 pi 裡 /name：如果 ASN 改過名，之後這個比較新，登記名改用 session 名（ASN 自己改名時也會觸發，那時 session 名就是 ASN 給的）
+  pi.on('session_info_changed', async () => {
+    if (asnName) asnName = { ...asnName, sessionWins: pi.getSessionName() !== asnName.name }
+    beat()
   })
 
   pi.on('agent_start', async () => {

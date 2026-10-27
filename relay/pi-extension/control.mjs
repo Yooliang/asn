@@ -1,21 +1,21 @@
-// pi 擴充第三期：遠端控制（目前只有 set_model＝切換模型）的純邏輯（檔案層，不 import pi，方便 node --test）。
+// pi 擴充第三期：遠端控制（set_model＝切換模型、set_name＝改名（0.2 A4））的純邏輯（檔案層，不 import pi，方便 node --test）。
 //
 // 為什麼不用 pi 的 RPC：ASN 開的 pi 是互動視窗加這個擴充，不是 `pi --mode rpc` 程序，沒有 RPC 通道可以送指令。
 // 擴充 API 有 pi.setModel(model)（回傳 Promise<boolean>），所以仿照收信，用檔案當管道：
 //
 // 檔案約定（與 Rust 橋 relay/asn/src-tauri/src/bridge/engines/pi.rs 一致）：
-//   ~/.asn/pi-control/<sessionId>/<請求編號>.json          請求（橋寫、擴充讀）{ v:1, id, op:'set_model', provider?, model, at }
-//   ~/.asn/pi-control/<sessionId>/<請求編號>.result.json   結果（擴充寫、橋讀）{ v:1, id, ok, model?, provider?, error?, at }
+//   ~/.asn/pi-control/<sessionId>/<請求編號>.json          請求（橋寫、擴充讀）{ v:1, id, op:'set_model', provider?, model, at } 或 { v:1, id, op:'set_name', name, at }
+//   ~/.asn/pi-control/<sessionId>/<請求編號>.result.json   結果（擴充寫、橋讀）{ v:1, id, ok, model?, provider?, name?, error?, at }
 // 一個請求只處理一次：結果檔存在就不再處理（重開 pi 也有效）。
 import fs from 'node:fs'
 import path from 'node:path'
-import { validSessionId } from './inbox.mjs'
+import { validRename, validSessionId } from './inbox.mjs'
 
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/
 // 模型代號與提供者：pi 的模型 id 只會有英數與 . _ : @ -（例如 claude-opus-4-8、gpt-5.6-sol、MiniMax-M3.1-Flash）
 export const MODEL_RE = /^[A-Za-z0-9._:@-]{1,100}$/
 export const PROVIDER_RE = /^[A-Za-z0-9._-]{1,50}$/
-export const OPS = ['set_model']
+export const OPS = ['set_model', 'set_name']
 const RESULT_SUFFIX = '.result.json'
 
 /** 讀一個請求檔；不合格（壞 JSON、檔名與 id 不符、不認得的動作、模型代號不合法）回 null */
@@ -23,9 +23,11 @@ export function parseRequest(file, id) {
   try {
     const e = JSON.parse(fs.readFileSync(file, 'utf8'))
     if (!e || e.id !== id || e.v !== 1 || !OPS.includes(e.op)) return null
+    const at = Number.isFinite(e.at) ? e.at : 0
+    if (e.op === 'set_name') return validRename(e.name) ? { id, op: e.op, name: e.name, at } : null
     if (typeof e.model !== 'string' || !MODEL_RE.test(e.model)) return null
     if (e.provider != null && (typeof e.provider !== 'string' || !PROVIDER_RE.test(e.provider))) return null
-    return { id, op: e.op, model: e.model, provider: e.provider ?? null, at: Number.isFinite(e.at) ? e.at : 0 }
+    return { id, op: e.op, model: e.model, provider: e.provider ?? null, at }
   } catch {
     return null
   }
@@ -63,6 +65,7 @@ export function writeResult(controlDir, sessionId, id, result, now = Date.now())
   const rec = { v: 1, id, ok: result?.ok === true, at: now }
   if (result?.model) rec.model = String(result.model).slice(0, 100)
   if (result?.provider) rec.provider = String(result.provider).slice(0, 50)
+  if (result?.name) rec.name = String(result.name).slice(0, 40)
   if (result?.error) rec.error = String(result.error).slice(0, 40)
   if (Array.isArray(result?.providers)) rec.providers = result.providers.slice(0, 20).map(p => String(p).slice(0, 50))
   try {

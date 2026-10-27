@@ -1730,6 +1730,43 @@ fn 規則3_程序比_session_更早建立或查不到時間_照常當活視窗_�
 // pi 視窗：切換模型（走擴充的控制檔管道）
 // ================================================================================================
 
+#[test]
+fn pi_改名_新擴充_成功_同名拒絕_名字不合規則_忙時排隊_遠端開關() {
+    let r = rig(Opt::default());
+    put_pi_window_ext(&r, "小丙", 4001, "idle");
+    *r.env.pi_reply.lock().unwrap() = Some(json!({ "ok": true, "name": "小丁", "at": NOW }));
+    let res = r.run("rename", json!({ "name": "小丙", "new_name": "小丁" }));
+    assert_eq!((res.status, res.detail.as_str()), ("ok", "已改名"), "{}", res.detail);
+    assert_eq!(res.result.unwrap()["new_name"], json!("小丁"));
+    for (new, why) in [("-x", "英數"), ("小丙", "一樣"), ("", "英數")] {
+        let res = r.run("rename", json!({ "name": "小丙", "new_name": new }));
+        assert!(res.status == "failed" && res.detail.contains(why), "{new}: {}", res.detail);
+    }
+    // 這台電腦已經有同名的 Claude 視窗
+    write_session(&r.sessions, 5001, "sid-5001", "小甲", "idle", "D:/g/x");
+    r.os().alive.lock().unwrap().insert(5001);
+    let res = r.run("rename", json!({ "name": "小丙", "new_name": "小甲" }));
+    assert!(res.detail.contains("同名"), "{}", res.detail);
+    // pi 忙：排隊
+    let b = rig(Opt::default());
+    put_pi_window_ext(&b, "小丙", 4001, "busy");
+    let res = b.run("rename", json!({ "name": "小丙", "new_name": "小丁" }));
+    assert_eq!((res.status, res.detail.as_str()), ("ok", "pi 正在忙，已排隊：做完這一輪就會改名"));
+    // 遠端開關關著
+    let off = rig(Opt { allow_first: 0, ..Opt::default() });
+    put_pi_window_ext(&off, "小丙", 4001, "idle");
+    assert_eq!(off.run("rename", json!({ "name": "小丙", "new_name": "小丁" })).detail, CONSENT_OFF);
+    assert!(r.terminated().is_empty() && r.launched().is_empty(), "改名不關、不開任何程序");
+}
+
+fn put_pi_window_ext(r: &Rig, name: &str, pid: u32, state: &str) {
+    let d = r.env.pi_home.join(".asn").join("pi-windows");
+    std::fs::create_dir_all(&d).unwrap();
+    let v = json!({ "v": 1, "engine": "pi", "ext": 2, "sessionId": "psid", "name": name, "pid": pid, "cwd": "D:/g/x", "state": state, "at": NOW });
+    std::fs::write(d.join("psid.json"), v.to_string()).unwrap();
+    r.os().alive.lock().unwrap().insert(pid);
+}
+
 fn put_pi_window(r: &Rig, name: &str, pid: u32) {
     let d = r.env.pi_home.join(".asn").join("pi-windows");
     std::fs::create_dir_all(&d).unwrap();
@@ -1784,11 +1821,14 @@ fn pi_切換模型_錯誤翻成中文_忙碌逾時_不能用的動作_遠端開�
     let orphans: Vec<String> = std::fs::read_dir(&ctl).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string())
         .filter(|n| n.ends_with(".json") && !n.ends_with(".result.json") && !ctl.join(n.replace(".json", ".result.json")).exists()).collect();
     assert!(orphans.is_empty(), "沒回的請求要刪掉：{orphans:?}");
-    for op in ["rename", "handover", "resume", "restart", "info"] {
+    for op in ["handover", "resume", "restart", "info"] {
         let res = r.run(op, json!({ "name": "小丙", "new_name": "新名" }));
         assert_eq!(res.status, "failed", "{op}");
-        assert!(res.detail.contains("只能切換模型和關閉"), "{op}: {}", res.detail);
+        assert!(res.detail.contains("只能切換模型、改名和關閉"), "{op}: {}", res.detail);
     }
+    // 改名：舊擴充（登記檔沒有 ext）直接請更新
+    let res = r.run("rename", json!({ "name": "小丙", "new_name": "新名" }));
+    assert!(res.detail.contains("擴充太舊，不能改名"), "{}", res.detail);
     assert!(r.terminated().is_empty() && r.launched().is_empty());
     let off = rig(Opt { allow_first: 0, ..Opt::default() });
     put_pi_window(&off, "小丙", 4001);

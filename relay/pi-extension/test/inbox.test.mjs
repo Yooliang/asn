@@ -43,7 +43,7 @@ test('sessionId 只收一般字元，不能當路徑跳出去', () => {
 test('視窗狀態檔：原子寫入、欄位完整、可移除；壞 sessionId 拒絕', () => {
   const d = tmp()
   const rec = windowRecord({ sessionId: 'sid1', name: 'pi-x', pid: 123, cwd: 'D:/g/x', state: 'idle', model: 'MiniMax-M2', at: 1000 })
-  assert.deepEqual(rec, { v: 1, engine: 'pi', sessionId: 'sid1', name: 'pi-x', pid: 123, cwd: 'D:/g/x', state: 'idle', model: 'MiniMax-M2', at: 1000 })
+  assert.deepEqual(rec, { v: 1, engine: 'pi', ext: 2, sessionId: 'sid1', name: 'pi-x', pid: 123, cwd: 'D:/g/x', state: 'idle', model: 'MiniMax-M2', at: 1000 })
   writeWindow(d, rec)
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(d, 'sid1.json'), 'utf8')), rec)
   assert.deepEqual(fs.readdirSync(d), ['sid1.json'], '不留暫存檔')
