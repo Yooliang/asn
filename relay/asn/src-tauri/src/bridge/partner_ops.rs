@@ -39,6 +39,8 @@ pub(crate) const HANDOFF_SUBDIR: &str = "交接";
 /// ACP 工作者（收發室自己跑的背景工作者）只支援詳情、重開、接班換手；其他操作與 Claude 以外的夥伴一律回這句
 pub(crate) const UNSUPPORTED: &str = "這類夥伴不支援這個操作";
 const PROTECTED: &str = "ASN 通知與 ASN 自己的視窗不能操作";
+/// pi 視窗的程序可能是哪個執行檔（npm 裝的 pi 由 node 跑；單檔版是 pi，也有人用 bun 跑）。關閉前登記的 pid 必須是其中之一
+const PI_PROC_STEMS: [&str; 3] = ["node", "pi", "bun"];
 const CHAIN_MAX: usize = 12;
 
 /// 請前任寫交接的信
@@ -437,10 +439,13 @@ impl PartnerOps {
         super::engines::pi_control::window_session_id(&self.env.pi_home(), name, self.env.now_ms(), |p| os.alive(p)).is_some() && self.find_target(name).is_err()
     }
 
-    /// pi 視窗：目前只開放「切換模型」，走擴充的控制檔管道（見 engines/pi_control.rs）。pi 忙碌時擴充不處理，逾時回中文原因
+    /// pi 視窗：開放「切換模型」（走擴充的控制檔管道，見 engines/pi_control.rs；pi 忙碌時擴充不處理，逾時回中文原因）與「關閉」
     fn execute_pi(&self, op: &Op) -> OpResult {
+        if op.op == "close" {
+            return self.close_pi(op);
+        }
         if op.op != "model" {
-            return failed("pi 視窗目前只能切換模型，其他操作尚未開放");
+            return failed("pi 視窗目前只能切換模型和關閉，其他操作尚未開放");
         }
         let os = self.env.os();
         let env = super::engines::pi_control::SetModelEnv { now: &|| self.env.now_ms(), alive: &|p| os.alive(p), sleep: &|ms| self.env.pi_sleep(ms), wait_ms: self.env.pi_wait_ms(), poll_ms: 500 };
@@ -448,6 +453,38 @@ impl PartnerOps {
             Ok(v) => ok("已切換模型", Some(json!({ "engine": "pi", "model": v.get("model"), "provider": v.get("provider") }))),
             Err(e) => failed(e),
         }
+    }
+
+    /// pi 視窗「關閉」（0.2 A2）：守門同 Claude 視窗——只結束 pi 擴充登記的那個 pi 程序與它的子孫，
+    /// 永遠不碰 ASN 自己與它的祖先、不碰同輩程序；登記的 pid 現在跑的不是 pi（名單過期、pid 被重用）就不動。
+    /// ASN 開的（有承載殼）先送關閉訊息、連殼一起收；使用者自己開的不送（會把整個終端機關掉），只結束 pi，留下終端機
+    fn close_pi(&self, op: &Op) -> OpResult {
+        if !self.env.allow_remote() {
+            return failed(CONSENT_OFF);
+        }
+        let os = self.env.os();
+        let dir = super::engines::pi::windows_dir(&self.env.pi_home());
+        let Some(w) = super::engines::pi::read_windows(&dir, self.env.now_ms(), |p| os.alive(p)).into_iter().find(|w| w.name == op.name) else {
+            return failed("找不到這個 pi 視窗（可能已經關了）");
+        };
+        if (self.protect)(&w.name, w.pid) {
+            return failed(PROTECTED);
+        }
+        let table = os.processes();
+        if !table.iter().any(|p| p.pid == w.pid && PI_PROC_STEMS.contains(&switch::exe_stem(&p.name).as_str())) {
+            return failed("這個 pi 已經不在執行了（名單可能過期），所以沒有關閉");
+        }
+        let host = switch::asn_host_of(os, &table, w.pid);
+        let allowed = switch::kill_set_with(&table, w.pid, host, os.own_pid(), &|p| os.started_ms(p));
+        if !allowed.contains(&w.pid) {
+            return failed("守門：這個程序不允許結束");
+        }
+        self.stage(op, "closing");
+        if let Err(e) = switch::close_session(os, &self.env.timing(), w.pid, &allowed, host, host.is_some()) {
+            return failed(e);
+        }
+        let kept = host.is_none();
+        ok(if kept { "已結束 pi；原本的終端機分頁會留下" } else { "已關閉視窗" }, Some(json!({ "engine": "pi", "pid": w.pid, "kept_terminal": kept })))
     }
 
     /// 接手使用者自己開的 grok：用名單上的 pid 查 grok 自己的使用中對話登記，唯一才採用，再讓專屬的 Grok 工作者載入同一段對話。
