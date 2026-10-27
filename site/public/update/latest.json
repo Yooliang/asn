@@ -1,11 +1,11 @@
 {
-  "version": "0.1.94",
-  "notes": "電腦版查啟動設定與帳號清單時帶上本人簽章，被擋就退避，不再顯示 HTTP 403（含接班換手）；開新夥伴精靈第 2 頁「運行」選項改成橫排；開源後文件與授權整理",
-  "pub_date": "2026-10-27T12:22:12.279Z",
+  "version": "0.1.95",
+  "notes": "修正選單被上方個人資訊區壓住（＋選單、名單右鍵、設備選單、分頁右鍵）；電腦版群組對話直接顯示圖片附件，可點開放大、另存；截圖標註說明文字看得到了；＋選單沒有終端等你回答時不再留空的「終端」標題；家用機有 pi 卻說找不到：除了 PATH 也會找 npm、pnpm、scoop 資料夾，找不到時寫明找過哪些地方；活躍度燈號分活躍綠、閒置黃、離線紅，已封存群組的夥伴一律灰色",
+  "pub_date": "2026-10-27T14:01:40.899Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjZpSFNZTmp6dU1maldFWGlXNDRiVXFTbUNKaEdIQkIyWWY5WSsrRjRYc1I2ZG92QUhKV0MweWpac3Y1WVd2d1pGZGVDOVVwNFNFTTNsSnVHYk1PVndFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMTAzNzMyCWZpbGU6QVNOXzAuMS45NF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjk0Cm5qWXcvcm5wME9KWEdVRGxzL3Q5eHZZSXNINTJuWFFMVEJleWdaLzhVNEpaVVhFY1c5WlBadGFJTXZHTk5RTFFVVEtPVkNOZEdTaUp1WVdxMzA3WEF3PT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.94_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjR1cWlabVpkZU9FWFlCNjNQZy9TWHlzYXIwWk9DQ1dNRExXWHhaZ3l3QitxalRyQ1lvd3NsZkdTZkpmenBLSHRrTHY2OHZUS01LL1F5dHRpb2ZwZGdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMTA5NzAwCWZpbGU6QVNOXzAuMS45NV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjk1CkJBQ1dKbzlYbTJtclRBZXB2NSs1L1hoZkxPN1FCN0NtOE1KeDVzb2VPMkhmbXQ3MmMyaXJYRDNTc0ptZ1ZIcy80WDRON0pFT2VyT3AxZ2kvcGlBUEFBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.95_x64-setup.exe"
     }
   }
 }
