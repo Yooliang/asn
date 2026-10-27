@@ -936,7 +936,7 @@ async function termSendConfirm() {
   } catch (e) { termSend.error = String(e?.message ?? e); termSend.confirming = false } finally { termSend.busy = false }
 }
 // 接手使用者自己開的 WezTerm 窗格（#285）：列候選 → 按「接手」→ 預設唯讀；兩個寫入開關各自要使用者逐窗格確認後才開（termAdoptUnlockConfirm 是 term_adopt_unlock 唯一呼叫處）
-const adopt = reactive({ open: false, loading: false, rows: [], error: '', note: '', busy: '', unlockAsk: null, unlocked: {} })
+const adopt = reactive({ open: false, loading: false, rows: [], error: '', note: '', busy: '', unlockAsk: null })   // 「已允許」不記在這裡，讀 term_list 的 answer_unlocked／send_unlocked
 async function adoptLoad() {
   adopt.open = true; adopt.loading = true; adopt.error = ''; adopt.note = ''
   try { adopt.rows = candidateRows(await transport.termAdoptCandidates()) } catch (e) { adopt.rows = []; adopt.error = String(e?.message ?? e) } finally { adopt.loading = false }
@@ -956,7 +956,7 @@ async function adoptDo(row) {
 async function adoptRelease(row) {   // 解除接手：後端只是忘掉它，不結束那個程式
   if (!row?.adopted || adopt.busy) return
   adopt.busy = row.id; adopt.error = ''
-  try { await transport.termStop({ id: row.id }); delete adopt.unlocked[row.id + ':answer']; delete adopt.unlocked[row.id + ':send']; adopt.note = '已解除接手（那個視窗沒有被關掉）'; void termPoller?.tickNow() } catch (e) { adopt.error = String(e?.message ?? e) } finally { adopt.busy = '' }
+  try { await transport.termStop({ id: row.id }); adopt.note = '已解除接手（那個視窗沒有被關掉）'; void termPoller?.tickNow() } catch (e) { adopt.error = String(e?.message ?? e) } finally { adopt.busy = '' }
 }
 function adoptUnlockAsk(row, kind) { adopt.unlockAsk = unlockRequest(row, kind) ? { id: row.id, kind, text: UNLOCK_TEXT[kind].ask, title: row.title } : null; adopt.error = '' }
 function adoptUnlockCancel() { adopt.unlockAsk = null }
@@ -965,7 +965,7 @@ async function adoptUnlockConfirm() {
   const req = a ? unlockRequest(terms.rows.find(r => r.id === a.id), a.kind) : null
   if (!req || adopt.busy) return
   adopt.busy = a.id; adopt.error = ''
-  try { await transport.termAdoptUnlock(req); adopt.unlocked[`${a.id}:${a.kind}`] = true; adopt.unlockAsk = null } catch (e) { adopt.error = String(e?.message ?? e); adopt.unlockAsk = null } finally { adopt.busy = '' }
+  try { await transport.termAdoptUnlock(req); adopt.unlockAsk = null; void termPoller?.tickNow() } catch (e) { adopt.error = String(e?.message ?? e); adopt.unlockAsk = null } finally { adopt.busy = '' }
 }
 // 沒有終端或舊版後端（沒有這幾個命令）時 term_list 會失敗，靜默略過；截圖模式不輪詢
 let termSince = {}
