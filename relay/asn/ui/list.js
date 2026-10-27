@@ -39,6 +39,7 @@ import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaun
 import { CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, buddyConsoleItem, consoleReq, engineForProfile,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice, foregroundOnlyProfile, withTimeout } from './lib/partner-launch-ui.mjs'
 import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
 import { PartnerOpDialog, loadOpsContext } from './lib/partner-ops-ui.mjs'
+import { LAUNCHERS_POLL_MS, isAuthDenied, nextLaunchersDelay } from './lib/launcher-poll.mjs'
 import { initialOpsCtx, partnerEngine, sharedWhy } from './lib/partner-ops.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
@@ -336,13 +337,25 @@ async function refreshCliTools() {
     cliTools.value = map
   } catch (e) { console.info('[ASN] cli detect failed', e.message) }
 }
+// #380：被後台擋（401／403）就拉長下次查詢的間隔（最長 5 分鐘），查到恢復 15 秒；記錄只在狀態改變時寫一次
+let launchersDelay = LAUNCHERS_POLL_MS
+let launchersDenied = false
 async function refreshLaunchers() {
+  let err = null
   try {
     const body = await transport.launchers()
     const map = {}
     for (const m of body?.machines ?? []) if (m?.node) map[m.node] = m.launcher
     remoteLaunchers.value = map
-  } catch { /* 非 owner 或後台未就緒 */ }
+  } catch (e) { err = e }
+  const denied = !!err && isAuthDenied(err)
+  if (denied !== launchersDenied) console.info('[ASN] 查各電腦啟動設定', denied ? `被後台擋下，改成較長間隔重查：${err.message}` : '恢復正常')
+  launchersDenied = denied
+  launchersDelay = nextLaunchersDelay(launchersDelay, err)
+}
+async function launchersLoop() {
+  await refreshLaunchers()
+  setTimeout(() => void launchersLoop(), launchersDelay)
 }
 // pi 與 ASN 互通（#240 方案 A）：狀態在後端查；安裝與移除一定要使用者在設定頁按同意才會呼叫，沒有任何自動安裝
 const piSetup = reactive({ raw: null, busy: false, confirm: false, msg: '' })
@@ -519,6 +532,10 @@ function pickPartnerDevice(nodeKey) {
   }
 }
 function closePartnerDlg() { partnerDlg.open = false; partnerDlg.error = '' }
+// 對話框打開時本機的 CLI 可能還沒查完（本機暫時不能開、沒被預先選起來）：查完後還停在第 1 頁、還沒選設備，就補選本機
+watch(launchCtx, () => {
+  if (partnerDlg.open && partnerDlg.step === 1 && !partnerDlg.node && !launchDisableReasonFor(info.node)) pickPartnerDevice(info.node)
+})
 // 第 1 頁設備清單的方向鍵：上下（左右）移到前／後一台能開的設備，焦點跟著走
 function partnerDevKey(e) {
   const dir = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key]
@@ -781,10 +798,10 @@ async function pollLaunchResults() {
   launchPending.value = still
 }
 void refreshCliTools()
-void refreshLaunchers()
+void launchersLoop()
 void loadLaunchPrefs()
 void loadPiSetup(); void loadQuotaHook()
-setInterval(() => { void refreshLaunchers(); void pollLaunchResults() }, 15_000)
+setInterval(() => void pollLaunchResults(), LAUNCHERS_POLL_MS)   // 只在有剛開的夥伴要追進度時才查
 // 語音：整合模式的對話分頁用這一份；設定存在 Rust 端的 voice.json（對話視窗也讀同一份）
 const voice = createVoiceUi({ invoke, listen, createMic, createAudio: browserAudio, reactive })
 const callTick = ref(0)                 // 通話狀態變動時加一，讓「關閉閒置」的可用判斷重算

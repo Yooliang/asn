@@ -299,8 +299,10 @@ async fn relay_launch(app: State<'_, App>, body: Value) -> Result<Value, String>
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
-async fn relay_launchers(app: State<'_, App>, ids: Option<Vec<String>>) -> Result<Value, String> {
-    launch::relay_launchers(relay_of(&app)?.as_ref(), ids).await
+async fn relay_launchers(app: State<'_, App>, auth: State<'_, auth::AuthState>, ids: Option<Vec<String>>) -> Result<Value, String> {
+    let r = relay_of(&app)?;
+    let token = account::signing_token(&auth).await;
+    launch::relay_launchers(r.as_ref(), ids, token.as_deref()).await
 }
 
 // ---------- 遠端切換 Claude 帳號（設計見 acct_remote.rs；權杖只在各自那台搬，不進收發室） ----------
@@ -322,8 +324,10 @@ async fn acct_remote_report(app: State<'_, App>) -> Result<Value, String> {
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
-async fn acct_remote_list(app: State<'_, App>, node: String) -> Result<Value, String> {
-    acct_remote::remote_list(relay_of(&app)?.as_ref(), &node).await
+async fn acct_remote_list(app: State<'_, App>, auth: State<'_, auth::AuthState>, node: String) -> Result<Value, String> {
+    let r = relay_of(&app)?;
+    let token = account::signing_token(&auth).await;
+    acct_remote::remote_list(r.as_ref(), &node, token.as_deref()).await
 }
 #[cfg(feature = "gui")]
 #[cfg(desktop)]

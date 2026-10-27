@@ -64,7 +64,7 @@ test('詳情：完成時附中文詳情列', async () => {
 
 test('設定載入：沒登入、查不到的都當沒查到（反灰說明），不丟錯', async () => {
   assert.deepEqual(await loadOpsContext({ authStatus: async () => ({ signed_in: true }), launchers: async () => ({ machines: [{ node: 'H', launcher: LAUNCHER, online: true }] }) }), { machines: { H: { node: 'H', launcher: LAUNCHER, online: true } }, loaded: true, signedIn: true, checking: false, authError: '', loadError: '' })
-  assert.deepEqual(await loadOpsContext({ authStatus: async () => { throw new Error('x') }, launchers: async () => { throw new Error('y') } }), { machines: {}, loaded: false, signedIn: null, checking: false, authError: 'x', loadError: 'y' })
+  assert.deepEqual(await loadOpsContext({ authStatus: async () => { throw new Error('x') }, launchers: async () => { throw new Error('y') } }), { machines: {}, loaded: false, signedIn: null, checking: false, authError: 'x', loadError: '暫時連不上，請稍後再試' }, '查不到的原文只進 console，畫面說使用者能做什麼（#380）')
 })
 
 test('對話框文字：接班換手說明流程、全部純中文、不出現節點代號與夥伴 ID', () => {
@@ -170,7 +170,9 @@ test('已登入、電腦設定查到、那台在線且開放：喚醒可按；�
   const ok = await loadOpsContext({ authStatus: async () => ({ signed_in: true }), launchers: async () => ({ machines: [{ node: 'H', launcher: LAUNCHER, online: true }] }) })
   assert.equal(wakeButtonView(OFFLINE, ok).ok, true)
   const bad = await loadOpsContext({ authStatus: async () => ({ signed_in: true }), launchers: async () => { throw new Error('連不上收發室') } })
-  assert.equal(wakeButtonView(OFFLINE, bad).reason, '查不到這台電腦的設定：連不上收發室')
+  assert.equal(wakeButtonView(OFFLINE, bad).reason, '查不到這台電腦的設定：暫時連不上，請稍後再試')
+  const denied = await loadOpsContext({ authStatus: async () => ({ signed_in: true }), launchers: async () => { throw new Error('launchers HTTP 403 forbidden') } })
+  assert.equal(wakeButtonView(OFFLINE, denied).reason, '查不到這台電腦的設定：這台電腦還沒有權限查看，請到「設定」確認已登入本人帳號', '不秀 HTTP 403（#380）')
 })
 
 test('查詢回來時名單物件已換新：以夥伴 ID 判斷是同一位，結果不丟掉', () => {

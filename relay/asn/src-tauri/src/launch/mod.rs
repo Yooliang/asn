@@ -143,9 +143,10 @@ pub async fn relay_launch(relay: &Relay, body: Value) -> Result<Value, String> {
     relay.api("launch", Some(body)).await
 }
 
-pub async fn relay_launchers(relay: &Relay, ids: Option<Vec<String>>) -> Result<Value, String> {
+/// 各電腦的啟動設定。有登入就帶本人簽章（#380：成員角色的電腦不帶會被後台擋 403）；沒登入照舊不帶，擁有者角色的電腦一樣查得到
+pub async fn relay_launchers(relay: &Relay, ids: Option<Vec<String>>, token: Option<&str>) -> Result<Value, String> {
     let body = ids.map(|v| json!({ "ids": v }));
-    relay.api("launchers", body).await
+    relay.api_signed("launchers", body, token).await
 }
 
 #[cfg(test)]
