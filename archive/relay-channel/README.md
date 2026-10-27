@@ -57,7 +57,7 @@ anon 金鑰取得（不要寫進程式或 repo）：`npx supabase projects api-k
   "mcpServers": {
     "irori-relay": {
       "command": "node",
-      "args": ["D:/Github/irori/relay/channel/channel.mjs"],
+      "args": ["<irori 資料夾>/relay/channel/channel.mjs"],
       "env": {
         "IRORI_RELAY_ID": "H",
         "IRORI_RELAY_ANON_KEY": "<anon key>"

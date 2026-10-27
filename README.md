@@ -73,14 +73,16 @@ ASN 是讓人與各家 AI 夥伴（Claude Code、Codex、Gemini、Grok、agy…�
 - 後端共用邏輯：`cd supabase/functions && deno test -A _shared/`
 - 根目錄 `tests/`：`node tools/run-root-tests.mjs`（一支一支跑、每支各自逾時，可加檔名片段與 `--timeout=秒`；整批 `node --test tests/*.test.mjs` 一次丟出去會卡住，也不要加 `--test-force-exit`，Windows 上會假「取消」）。2026-10-26 在家用機實測 47 支全過，約 12 分鐘
 
-## 開源前檢查清單
+## 開源狀態
 
-本 repo 之後可能開源，公開前要完成：
+本 repo 已於 2026-10-27 公開。公開前後的檢查與決定記在 [#326](https://github.com/Yooliang/asn/issues/326)。
 
-- [ ] **選定授權條款**（尚未選定；選定後加入 `LICENSE`、各 package 的 license 欄位、官網頁尾）。第三方依賴的授權要逐一確認；加密相關選型要避開 AGPL／GPL 實作（見 [docs/research/03-encryption-protocols.md](docs/research/03-encryption-protocols.md)）。
-- [ ] **清理既有檔案中的私人資訊**：個人姓名與暱稱、內部工作階段名稱、本機絕對路徑、個人電子郵件、特定設備與使用者的對應等（掃描清單見對應 PR 的說明）。新寫的文件已照開源寫法，既有檔案另開 PR 處理。
-- [ ] **清理 git 歷史中的私人資訊**：歷史（含從 Irori 抽出的部分）可能含上述私人資訊與已刪除的設定檔；公開前用歷史改寫工具（例如 git filter-repo）處理，或以乾淨歷史重新發布。
-- [ ] **金鑰掃描**：用 gitleaks 或 trufflehog 掃整個歷史（含所有分支與標籤），確認後台的 service role、節點金鑰、邀請碼、Firebase 服務帳戶金鑰沒有進過歷史；若有，視為外洩並輪換。
-- [ ] **移除舊後台殘留**：`supabase/functions/irori-relay/`、`supabase/sql/` 與寫死舊後台網址的位置（見 [docs/MIGRATION.md](docs/MIGRATION.md)）在切換完成後清掉。
-- [ ] 補 `CONTRIBUTING`、`SECURITY`（漏洞回報管道）、行為準則；確認官網隱私權政策與條款與開源後的實際行為一致。
-- [ ] 確認 `.gitignore` 涵蓋 `.env`、`*.key`、`.asn/`、`.irori-relay/`、`supabase/.temp/`、`site/.firebase/`。
+- [x] **授權條款**：MIT（[LICENSE](LICENSE)）。第三方元件與例外檔案（`cloudflare/edge-tts/drm.js` 照 LGPL-3.0）見 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。之後加密相關選型仍要避開 AGPL／GPL 實作（見 [docs/research/03-encryption-protocols.md](docs/research/03-encryption-protocols.md)）。
+- [x] **金鑰掃描**：2026-10-27 用 gitleaks 掃過全部分支的歷史（`--log-opts=--all`），12 筆命中逐筆看過，都不是真的機密（Supabase anon 公開金鑰、測試用假字串、edge-tts 的公開常數），沒有 service role 金鑰。結果記在 [#326](https://github.com/Yooliang/asn/issues/326)。
+- [x] **歷史紀錄**：決定**不改寫歷史**，直接公開現有歷史（含從 Irori 抽出的部分）。依據是上面的金鑰掃描沒有找到要靠改寫歷史才能清掉的機密；整理歷史另案處理，不擋公開。
+- [x] **漏洞回報管道**：見 [SECURITY.md](SECURITY.md)。
+- [x] **main 分支保護**：已禁止強制推送與刪除分支。
+- [x] **`.gitignore`**：已涵蓋 `.env`、`*.key`、`.asn/`、`.irori-relay/`、`supabase/.temp/`、`site/.firebase/`。
+- [ ] **清理既有檔案中的私人資訊**：文件裡的本機絕對路徑已陸續換成泛用寫法；個人暱稱、內部工作階段名稱、設備與使用者的對應等仍散見於交接與設計文件，繼續分批清理。
+- [ ] **移除舊後台殘留**：後台已在 2026-10-21 切換到新專案（見 [docs/MIGRATION.md](docs/MIGRATION.md)），但 `supabase/functions/irori-relay/`、`supabase/sql/` 還在，要等舊後台停用後清掉。
+- [ ] 補 `CONTRIBUTING`、行為準則；確認官網隱私權政策與條款與開源後的實際行為一致。

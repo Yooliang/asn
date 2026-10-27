@@ -24,7 +24,7 @@
       "args": ["-NoExit", "-Command", "claude --dangerously-skip-permissions --chrome -n {name}"]
     }
   },
-  "cwd_allow": ["D:\\Github", "D:\\Github\\irori", "D:\\Github\\eiyuu-md"],
+  "cwd_allow": ["<專案上層資料夾>", "<專案資料夾 A>", "<專案資料夾 B>"],
   "max_per_hour": 6
 }
 ```
