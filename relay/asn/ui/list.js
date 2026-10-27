@@ -28,6 +28,7 @@ import { normalizeSession, restoreSession, sameSession, snapshotSession, trailin
 import { chatTabSameZone, closeAllChatTabs, closeIdleChatTabs, idleTabIds, withCallState, dropInsertBefore, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
 import { nowPlayingLine, normalizeNowPlaying } from './lib/now-playing.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, normalizeClose, normalizeFrame, totalUnread, notifyFromSaved, notifyPlan, notifyWith } from './lib/prefs.mjs'
+import { composerView, entryLabel, screenText, termFriendId, termFriends, termIdOf, timelineAdd, timelineSet } from './lib/term-chat.mjs'
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
@@ -906,8 +907,8 @@ watch(() => termPrompt.value, p => {
 }, { immediate: true })
 function termPick(n) { terms.selected = n; terms.error = '' }
 function termDismiss() { const p = termPrompt.value; if (p) terms.dismissed[p.key] = true }   // 「我自己在視窗裡處理」：只關框，不送任何鍵
-async function termConfirm() {
-  const p = termPrompt.value
+async function termConfirm(given) {
+  const p = given?.row && given?.pv ? given : termPrompt.value
   const req = p ? answerRequest(p.row.id, p.pv, terms.selected) : null
   if (!req || terms.busy) return
   terms.busy = true; terms.error = ''
@@ -918,29 +919,112 @@ async function termConfirm() {
   } catch (e) { terms.error = String(e?.message ?? e) } finally { terms.busy = false }
 }
 // ASN 替使用者往終端送字（#296）：寫文字 → 按「送出」→ 確認框 → 按「確認送出」才呼叫 term_send（termSendConfirm 是唯一呼叫處）。
-const termSend = reactive({ id: '', text: '', enter: true, confirming: false, busy: false, error: '', note: '' })
+const termSend = reactive({ id: '', text: '', enter: true, confirming: false, busy: false, phone: false, entryKey: '', error: '', note: '' })
+const termTimeline = reactive({})   // 終端編號 → 這次開著期間送過什麼（只在記憶體，不存檔、不上傳）
+let termSeq = 0
+const termEntryAdd = (id, text, status) => { const key = `${Date.now()}-${++termSeq}`; termTimeline[id] = timelineAdd(termTimeline[id], { key, at: Date.now(), text, status }); return key }
+const termEntrySet = (id, key, status) => { if (key) termTimeline[id] = timelineSet(termTimeline[id], key, status) }
+const isTermTab = id => Boolean(termIdOf(id))
 const termSendRow = computed(() => terms.rows.find(r => r.id === termSend.id) ?? null)
 const termSendDraft = computed(() => sendDraftView(termSendRow.value, termSend.text))
 const termSendConfirmView = computed(() => (termSend.confirming ? sendConfirmView(termSendRow.value, termSend.text, termSend.enter) : null))
-function termSendWithdraw() { if (termSend.id) void invoke('term_remote_withdraw', { id: termSend.id }).catch(() => {}) }   // 本機取消：手機上那筆一起撤回
+function termSendWithdraw() {   // 本機取消：手機上那筆一起撤回
+  if (!termSend.id) return
+  void invoke('term_remote_withdraw', { id: termSend.id }).catch(() => {})
+  if (termSend.phone) { termEntrySet(termSend.id, termSend.entryKey, 'withdrawn'); termSend.phone = false; termSend.entryKey = '' }
+}
 function termsClose() { termSendWithdraw(); terms.open = false }   // 關整個終端面板（點外面或按「關閉」）：手機上等確認的送字一起撤回
 function termSendOpen(row) { termSendWithdraw(); termSend.id = termSend.id === row.id ? '' : row.id; termSend.text = ''; termSend.confirming = false; termSend.error = ''; termSend.note = '' }
-function termSendAsk() {   // 跳出確認框；同時把同一份內容傳到手機待確認（#312 接點，與本機確認互斥）。這裡不送字
-  if (!termSendDraft.value.ok) return
-  termSend.confirming = true; termSend.error = ''
+function termSendAsk() { if (termSendDraft.value.ok) { termSend.confirming = true; termSend.error = '' } }   // 只是跳出確認框，不送、也不傳手機
+// 按了「改用手機確認」才把同一份內容傳到手機待確認（#312 接點，與本機確認互斥，誰先按誰算）。這裡不送字
+function termSendPhone() {
   const req = sendRequest(termSendRow.value, termSend.text, termSend.enter)
-  if (req) void invoke('term_remote_offer_send', { req }).catch(() => {})
+  if (!req || termSend.phone || termSend.busy) return
+  termSend.phone = true; termSend.error = ''
+  invoke('term_remote_offer_send', { req }).then(() => {
+    if (!termSend.phone || termSend.id !== req.id) { void invoke('term_remote_withdraw', { id: req.id }).catch(() => {}); return }   // 傳的途中已取消或換了終端：後台剛登記的那筆馬上撤掉，不留孤兒
+    termSend.entryKey = termEntryAdd(req.id, req.text, 'phone')
+    termPhoneWatch()
+  }).catch(e => { termSend.phone = false; termSend.error = String(e?.message ?? e) })
+}
+// 手機上那筆還在不在：term_remote_pending 是電腦端記著的進行中請求（手機執行完、拒絕、過期都會移除）
+async function termPhonePending(id) {
+  const list = await invoke('term_remote_pending')
+  return Array.isArray(list) && list.some(p => p?.kind === 'send' && p?.termId === id)
+}
+// 手機已處理（確認、拒絕或過期）：收掉確認列，時間軸那筆改成「手機已處理」；字有沒有進去看終端畫面
+function termPhoneSettled() {
+  termEntrySet(termSend.id, termSend.entryKey, 'handled')
+  termSend.phone = false; termSend.entryKey = ''; termSend.confirming = false; termSend.text = ''
+  termSend.note = '手機已處理這一筆，請看終端畫面確認字有沒有送進去'
+}
+let termPhoneTimer = 0
+function termPhoneWatch() {
+  clearInterval(termPhoneTimer)
+  termPhoneTimer = setInterval(async () => {
+    if (!termSend.phone || !termSend.id) { clearInterval(termPhoneTimer); termPhoneTimer = 0; return }
+    try { if (!(await termPhonePending(termSend.id))) { clearInterval(termPhoneTimer); termPhoneTimer = 0; if (termSend.phone) termPhoneSettled() } } catch { /* 查不到就下一輪再查 */ }
+  }, 2000)
 }
 function termSendBack() { termSend.confirming = false; termSendWithdraw() }
 async function termSendConfirm() {
   const req = sendRequest(termSendRow.value, termSend.text, termSend.enter)
   if (!req || termSend.busy) return
+  if (composerView(termSendRow.value).mode !== 'ready') {   // 確認列出現後終端才忙碌或等你回答：不送，收掉確認列並撤回手機那筆
+    termSend.error = composerView(termSendRow.value).reason; termSend.confirming = false; termSendWithdraw(); return
+  }
   termSend.busy = true; termSend.error = ''
   try {
+    if (termSend.phone) {   // 已傳過手機：先確認手機那筆還在。不在了＝手機已處理，再送會送兩次
+      let still = false
+      try { still = await termPhonePending(req.id) } catch (e) { termSend.error = '查不到手機那筆的狀態，先不送，請稍後再試'; return }
+      if (!still) { termPhoneSettled(); return }
+    }
     await transport.termSend(req)
+    if (termSend.phone && termSend.entryKey) { termEntrySet(req.id, termSend.entryKey, 'sent') } else termEntryAdd(req.id, req.text, 'sent')   // 本機先確認：手機那筆跟著作廢，同一筆記成已送出
+    termSend.phone = false; termSend.entryKey = ''
     termSend.note = '已送出'; termSend.text = ''; termSend.confirming = false
     void termPoller?.tickNow()
-  } catch (e) { termSend.error = String(e?.message ?? e); termSend.confirming = false } finally { termSend.busy = false }
+  } catch (e) { termEntryAdd(req.id, req.text, 'failed'); termSend.error = String(e?.message ?? e); termSend.confirming = false } finally { termSend.busy = false }
+}
+// ---------- 終端放進名單與分頁（#331）：名單上每個終端一列，點開是右邊的分頁，下方輸入框送字 ----------
+// 送字、代答仍然只走 termSendConfirm／termConfirm（唯一呼叫處）；分頁只是換了擺放位置。畫面文字用 term_read 只讀，純文字顯示。
+const termPane = reactive({ screen: '' })
+const activeTermId = computed(() => termIdOf(ui.active))
+const termPaneRow = computed(() => terms.rows.find(r => r.id === activeTermId.value) ?? null)
+const termPaneActive = computed(() => Boolean(activeTermId.value && termPaneRow.value && ui.tabs.length))
+let termScreenTimer = 0
+async function termScreenTick(id) {
+  try { const r = await transport.termRead({ id, lines: 40 }); if (activeTermId.value === id) termPane.screen = screenText(r) } catch { if (activeTermId.value === id) termPane.screen = '' }
+}
+watch(activeTermId, id => {
+  clearInterval(termScreenTimer); termScreenTimer = 0; termPane.screen = ''
+  if (termSend.id && termSend.id !== id) { termSendWithdraw(); termSend.id = ''; termSend.text = ''; termSend.confirming = false; termSend.error = ''; termSend.note = '' }
+  if (!id) return
+  termSend.id = id
+  void termScreenTick(id)
+  termScreenTimer = setInterval(() => void termScreenTick(id), 3000)
+}, { immediate: true })
+// 終端消失（關掉、解除接手）：它的分頁一起關
+watch(() => terms.rows.map(r => r.id).join(','), () => {
+  const live = new Set(terms.rows.map(r => r.id))
+  for (const t of [...ui.tabs]) if (isTermTab(t) && !live.has(termIdOf(t))) { Object.assign(ui, closeChatTab(ui, t)); delete termTimeline[termIdOf(t)] }
+})
+async function openTermTab(id) {
+  if (!terms.rows.some(r => r.id === id)) return
+  if (ui.mode !== 'merged') { terms.open = true; return }   // 分離模式沒有分頁區：先用舊的終端面板
+  Object.assign(ui, openChatTab(ui, termFriendId(id), ui.pinnedChat))
+  await invoke('show_main')
+  sync()
+}
+const termRoster = computed(() => termFriends(terms.rows, { selfNode: info.node, device: '' }))
+const termComposer = computed(() => composerView(termPaneRow.value))   // 比終端面板嚴：忙碌或等你回答時輸入區不開放
+const termTabItem = row => (row ? { id: termFriendId(row.id), panel: 'term', term: true, nick: row.title, status: row.tone === 'busy' ? 'busy' : row.tone === 'warn' ? 'away' : 'online', unread: row.state === 'waiting_user' ? 1 : 0 } : null)
+async function termPaneAnswer(n) {   // 分頁裡的選項按鈕：按下就是明確選了第 n 項（沒有預設選項）；仍走 termConfirm
+  const row = termPaneRow.value
+  if (!row?.prompt) return
+  terms.selected = n
+  await termConfirm({ row, pv: row.prompt, key: promptKey(row.id, row.prompt) })
 }
 // 接手使用者自己開的 WezTerm 窗格（#285）：列候選 → 按「接手」→ 預設唯讀；兩個寫入開關各自要使用者逐窗格確認後才開（termAdoptUnlockConfirm 是 term_adopt_unlock 唯一呼叫處）
 const adopt = reactive({ open: false, loading: false, rows: [], error: '', note: '', busy: '', unlockAsk: null })   // 「已允許」不記在這裡，讀 term_list 的 answer_unlocked／send_unlocked
@@ -1090,7 +1174,7 @@ const app = createApp({
     const pageDone = a => { pageLoaded[a.key] = true }
     const pageBroken = a => { pageFail[a.key] = true }
     // 分頁列：好友的對話分頁，加上「指引：…」「設定：…」兩種面板分頁（各最多一個）
-    const tabItems = computed(() => ui.tabs.map(id => (isPanelTab(id) ? panelTabItem(id.slice(1), ui.panel[id.slice(1)]) : tabFriend(id))).filter(Boolean))
+    const tabItems = computed(() => ui.tabs.map(id => (isPanelTab(id) ? panelTabItem(id.slice(1), ui.panel[id.slice(1)]) : isTermTab(id) ? termTabItem(terms.rows.find(r => r.id === termIdOf(id))) : tabFriend(id))).filter(Boolean))
     const mergedTabs = computed(() => tabItems.value.filter(t => !t.panel))   // 只有好友的對話才有對話窗
     const chatTabMenu = ref('')
     const chatTabMenuPin = computed(() => (chatTabMenu.value ? isPinned(chatTabMenu.value, ui.pinnedChat) : false))
@@ -1380,7 +1464,8 @@ const app = createApp({
       searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickLaunchDevice,
       DISPLAY_MODES, partnerShowDisplay, partnerRun,
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
-      termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termsClose, termSendAsk, termSendBack, termSendConfirm, SEND_MAX,
+      termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termsClose, termSendAsk, termSendPhone, termSendBack, termSendConfirm, SEND_MAX,
+      termPane, termPaneRow, termPaneActive, termRoster, termComposer, openTermTab, termPaneAnswer, termTimeline, entryLabel,
       adopt, adoptLoad, adoptClose, adoptDo, adoptRelease, adoptUnlockAsk, adoptUnlockCancel, adoptUnlockConfirm, UNLOCK_TEXT,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,

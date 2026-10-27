@@ -101,6 +101,17 @@
                     <span class="unread" v-if="c.unread">{{ c.unread }}</span>
                   </button>
                 </li>
+                <template v-if="g.kind === 'device' && g.node === selfNode">
+                  <li v-for="r in termRoster" :key="r.id">
+                    <button class="buddy term-buddy" type="button" @click="openTermTab(r.termId)">
+                      <span class="dp xs" :class="'st-' + r.status"><span class="term-glyph" aria-hidden="true">&gt;_</span></span>
+                      <span class="b-text">
+                        <span class="b-line"><span class="b-vendor" aria-hidden="true" v-html="vendorBadge(r)"></span><span class="b-nick">{{ r.nick }}</span><span class="term-tag">{{ r.termBadge }}</span></span>
+                        <span class="b-psm" v-if="r.psm">{{ r.psm }}</span>
+                      </span>
+                    </button>
+                  </li>
+                </template>
               </ul>
             </div>
             <div class="empty-list" v-if="!shown.length">{{ emptyText }}</div>
@@ -168,7 +179,7 @@
           <span class="dp xs pin-av" :class="'st-' + t.status"><span><img :src="avOf(t)" alt=""></span></span>
         </template>
         <template v-else>
-          <svg v-if="t.panel" class="panel-ic" viewBox="0 0 24 24" aria-hidden="true"><path :d="t.panel === 'guide' ? 'M4.5 5c2.6-.9 5.2-.7 7.5 1v13c-2.3-1.7-4.9-1.9-7.5-1zM19.5 5c-2.6-.9-5.2-.7-7.5 1v13c2.3-1.7 4.9-1.9 7.5-1z' : 'M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1'"/></svg>
+          <svg v-if="t.panel" class="panel-ic" viewBox="0 0 24 24" aria-hidden="true"><path :d="t.panel === 'term' ? 'M3 5h18v14H3zM7 10l3 2-3 2M12 15h4' : t.panel === 'guide' ? 'M4.5 5c2.6-.9 5.2-.7 7.5 1v13c-2.3-1.7-4.9-1.9-7.5-1zM19.5 5c-2.6-.9-5.2-.7-7.5 1v13c2.3-1.7 4.9-1.9 7.5-1z' : 'M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1'"/></svg>
           <span v-else class="dot" :class="'st-' + t.status"></span>
           <span class="ctab-name">{{ plain(t.nick) }}</span>
         </template>
@@ -188,6 +199,45 @@
       <chat-pane v-for="t in mergedTabs" :key="t.id" v-show="view === 'chat' && t.id === ui.active" :friend="t" :me="me" :log="logs[t.id] || []" :friend-av="avOf(t)" :me-av="meAv" :win-mode="ui.mode" :dp-mode="ui.dpMode" :bubble="ui.bubble" :toolbar="ui.toolbar" :dp-collapsed="ui.collapsed" :active="view === 'chat' && t.id === ui.active" :voice="voice" :hint-names="friends" :agent-api="transport" :self-node="selfNode"
         :room-cards="hub.st.cards[t.id.slice(5)] || []" :group-menu="true" @group-menu="op => openGroupMenu(t.id, op)" @group-decide="(cid, ok) => decideCard(t.id, cid, ok)"
         :photo-api="photoApi" :shot-api="shotApi" :load-older="loadOlder" @call-state="on => setPaneCall(t.id, on)" @send="(text, opts) => sendTo(t.id, text, opts)" @nudge="nudgeTo(t.id)" @attach="(p, cap) => sendAttachTo(t.id, p, cap)" @toggle-dp="toggleDp"></chat-pane>
+      <!-- 終端的對話分頁（#331）：上方狀態、中間時間軸與畫面文字（純文字）、等你回答時的選項按鈕、下方輸入框與確認列 -->
+      <div class="pane term-pane" v-if="view === 'chat' && termPaneActive">
+        <div class="tp-head"><b>{{ termPaneRow.title }}</b><span class="term-state" :class="'tone-' + termPaneRow.tone">{{ termPaneRow.stateLabel }}</span><span class="term-folder" v-if="termPaneRow.folder">{{ termPaneRow.folder }}</span><span class="term-adopted" v-if="termPaneRow.adopted">已接手・預設只能看</span></div>
+        <div class="tp-body">
+          <ul class="tp-log" v-if="(termTimeline[termPaneRow.id] || []).length" aria-label="送字記錄">
+            <li v-for="e in termTimeline[termPaneRow.id]" :key="e.key"><span class="tp-text">{{ e.text }}</span><em class="tp-st" :class="'s-' + e.status">{{ entryLabel(e.status) }}</em></li>
+          </ul>
+          <div class="tp-ask" v-if="termPaneRow.prompt">
+            <p class="tp-ask-title">{{ termPaneRow.prompt.title }}</p>
+            <pre class="term-prompt-text">{{ termPaneRow.prompt.text }}</pre>
+            <p class="partner-hint" v-if="termPaneRow.adopted && !termPaneRow.answerUnlocked">這個視窗還沒允許代答，請直接在終端視窗裡處理，或先 <button class="aero-btn" type="button" @click="adoptUnlockAsk(termPaneRow, 'answer')">允許…</button></p>
+            <div class="partner-actions" v-else-if="termPaneRow.prompt.options.length"><button v-for="o in termPaneRow.prompt.options" :key="o.n" class="aero-btn" type="button" :disabled="terms.busy" @click="termPaneAnswer(o.n)">{{ o.n }}. {{ o.label }}</button></div>
+            <p class="partner-hint" v-else>這個提示看不出選項，請直接在終端視窗裡處理。</p>
+            <p class="partner-err" v-if="terms.error" role="alert">{{ terms.error }}</p>
+          </div>
+          <details class="tp-screen" open><summary>終端最近畫面（只讀）</summary><pre class="term-prompt-text">{{ termPane.screen || '（目前讀不到畫面）' }}</pre></details>
+        </div>
+        <div class="tp-compose">
+          <div class="tp-confirm" v-if="termSendConfirmView" role="group" aria-label="確認送字">
+            <p class="tp-confirm-text">要送進終端：<b>{{ termSendConfirmView.text.slice(0, 60) }}{{ termSendConfirmView.text.length > 60 ? '…' : '' }}</b></p>
+            <p class="partner-hint">{{ termSendConfirmView.target }}。{{ termSendConfirmView.note }}</p>
+            <div class="partner-actions">
+              <button class="aero-btn" type="button" @click="termSendBack">取消</button>
+              <button class="aero-btn" type="button" :disabled="termSend.busy || termSend.phone" @click="termSendPhone">{{ termSend.phone ? '已傳到手機，等你確認' : '改用手機確認' }}</button>
+              <button class="aero-btn primary" type="button" :disabled="termSend.busy" @click="termSendConfirm">{{ termSend.busy ? '送出中…' : '確認送出' }}</button>
+            </div>
+          </div>
+          <p class="partner-hint" v-if="termComposer.mode === 'locked'">{{ termComposer.reason }}。<button class="aero-btn" type="button" @click="adoptUnlockAsk(termPaneRow, termComposer.unlock)">允許…</button></p>
+          <p class="partner-hint" v-else-if="termComposer.mode === 'blocked'">{{ termComposer.reason }}</p>
+          <template v-else>
+            <textarea class="set-input" v-model="termSend.text" rows="2" :maxlength="SEND_MAX" :disabled="Boolean(termSendConfirmView)" placeholder="要送進這個終端的文字" aria-label="要送進終端的文字"></textarea>
+            <label class="chk"><input type="checkbox" v-model="termSend.enter" /><span>送完後按 Enter</span></label>
+            <p class="partner-hint" v-if="termSend.text && !termSendDraft.ok">{{ termSendDraft.reason }}</p>
+            <p class="partner-hint" v-if="termSend.note" role="status">{{ termSend.note }}</p>
+            <p class="partner-err" v-if="termSend.error" role="alert">{{ termSend.error }}</p>
+            <div class="partner-actions"><button class="aero-btn primary" type="button" :disabled="!termSendDraft.ok || termSend.busy || Boolean(termSendConfirmView)" @click="termSendAsk">送出</button></div>
+          </template>
+        </div>
+      </div>
       <!-- 指引、設定的聊天窗（整合模式）：跟好友的對話分頁同一套，各最多一個，內容換成被點的那一篇／那一類 -->
       <template v-for="k in PANEL_KINDS" :key="k">
         <div class="pane panel-pane" v-if="view === 'chat' && ui.active === panelTabId(k) && ui.panel[k]">
@@ -346,7 +396,7 @@
     </div>
   </div>
   <!-- 終端：等你回答的提示框（使用者先選一個選項、再按「送出」才會送出按鍵；「我自己在視窗裡處理」只關框） -->
-  <div class="partner-dlg-back" v-if="termPrompt">
+  <div class="partner-dlg-back" v-if="termPrompt && !(view === 'chat' && termPaneActive && termPaneRow.id === termPrompt.row.id)">
     <div class="partner-dlg term-prompt" role="dialog" aria-labelledby="term-prompt-title" @click.stop>
       <h3 id="term-prompt-title">{{ termPrompt.pv.title }}</h3>
       <p class="partner-node">{{ termPrompt.row.title }}<template v-if="termPrompt.row.folder">・{{ termPrompt.row.folder }}</template></p>
@@ -366,7 +416,7 @@
   </div>
 
   <!-- 終端：替你送字的確認框（按「確認送出」才送；關掉或取消都不送） -->
-  <div class="partner-dlg-back" v-if="termSendConfirmView">
+  <div class="partner-dlg-back" v-if="termSendConfirmView && !(view === 'chat' && termPaneActive)">
     <div class="partner-dlg term-prompt" role="dialog" aria-labelledby="term-send-title" @click.stop>
       <h3 id="term-send-title">{{ termSendConfirmView.title }}</h3>
       <p class="partner-node">送到：{{ termSendConfirmView.target }}</p>
@@ -374,6 +424,7 @@
       <p class="partner-hint">{{ termSendConfirmView.note }}</p>
       <div class="partner-actions">
         <button class="aero-btn" type="button" @click="termSendBack">取消</button>
+        <button class="aero-btn" type="button" :disabled="termSend.busy || termSend.phone" @click="termSendPhone">{{ termSend.phone ? '已傳到手機，等你確認' : '改用手機確認' }}</button>
         <button class="aero-btn primary" type="button" :disabled="termSend.busy" @click="termSendConfirm">{{ termSend.busy ? '送出中…' : '確認送出' }}</button>
       </div>
     </div>

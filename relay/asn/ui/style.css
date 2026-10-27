@@ -791,3 +791,22 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .term-state.tone-warn{color:#b45f06;font-weight:700}
 .term-state.tone-busy{color:#1b6ac9}
 .term-state.tone-ok{color:#2e7d32}
+
+/* 終端分頁（#331） */
+.term-buddy .term-glyph{display:flex;align-items:center;justify-content:center;width:100%;height:100%;font:700 11px/1 Consolas,monospace;color:#fff;background:#2d3748}
+.term-tag{margin-left:6px;padding:0 5px;border:1px solid var(--line);border-radius:3px;font-size:10px;color:var(--muted,#667)}
+.pane.term-pane{display:flex;flex-direction:column;min-height:0}
+.tp-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line)}
+.tp-body{flex:1;min-height:0;overflow-y:auto;padding:10px 12px}
+.tp-log{list-style:none;margin:0 0 10px;padding:0}
+.tp-log li{display:flex;gap:8px;justify-content:space-between;padding:4px 0;border-bottom:1px dashed var(--line)}
+.tp-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tp-st{font-style:normal;font-size:11px;white-space:nowrap}
+.tp-st.s-failed,.tp-st.s-rejected{color:#b42318}
+.tp-ask{margin:0 0 10px;padding:8px;border:1px solid var(--line);border-radius:4px;background:rgba(255,255,255,.4)}
+.tp-ask-title{margin:0 0 4px;font-weight:700}
+.tp-screen summary{cursor:pointer;font-size:12px;color:var(--muted,#667)}
+.tp-compose{border-top:1px solid var(--line);padding:8px 12px}
+.tp-confirm{margin:0 0 8px;padding:8px;border:1px solid var(--line);border-radius:4px;background:rgba(255,248,220,.6)}
+.tp-confirm-text{margin:0 0 4px;word-break:break-word}
+.tp-compose .set-input{width:100%;box-sizing:border-box}

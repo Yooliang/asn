@@ -195,12 +195,18 @@ test('接線：term_send 只在 termSendConfirm 裡呼叫一次；只有「確�
   const fnStart = js.lastIndexOf('async function termSendConfirm', at)
   assert.ok(fnStart > 0 && js.indexOf('\n}\n', fnStart) > at, '那一處在 termSendConfirm 裡')
   assert.ok(js.slice(fnStart, at).includes('sendRequest('), '送出前先過 sendRequest（草稿要合格）')
-  assert.equal((html.match(/termSendConfirm(?![A-Za-z])/g) ?? []).length, 1, '模板裡只有一個按鈕呼叫 termSendConfirm')
-  assert.equal(count(html, '@click="termSendConfirm"'), 1)
+  // #331：確認有兩處擺放（對話分頁裡的確認列、舊面板的確認框），都只在 termSendConfirmView 存在時才看得到
+  assert.equal((html.match(/termSendConfirm(?![A-Za-z])/g) ?? []).length, 2, '模板裡只有兩個按鈕呼叫 termSendConfirm（確認列、確認框）')
+  assert.equal(count(html, '@click="termSendConfirm"'), 2)
+  for (const m of html.matchAll(/@click="termSendConfirm"/g)) {
+    assert.ok(html.lastIndexOf('termSendConfirmView', m.index) > 0, '按鈕在確認畫面裡（前面要有 termSendConfirmView 的條件）')
+  }
   assert.ok(html.includes('@click="termSendAsk"') && html.includes('v-if="termSendConfirmView"'), '「送出」先開確認框')
-  const ask = js.slice(js.indexOf('function termSendAsk'), js.indexOf('function termSendBack'))
-  assert.ok(!ask.includes('termSend('), 'termSendAsk 不送字')
-  assert.ok(ask.includes("invoke('term_remote_offer_send'") && ask.includes('sendRequest('), '開確認框時同時傳到手機待確認（#328）')
+  const ask = js.slice(js.indexOf('function termSendAsk'), js.indexOf('function termSendPhone'))
+  assert.ok(!ask.includes('termSend(') && !ask.includes('term_remote_offer_send'), 'termSendAsk 不送字、也不自動傳手機（#331）')
+  assert.equal(count(js, "invoke('term_remote_offer_send'"), 1, '傳手機只有 termSendPhone 一處')
+  assert.ok(js.slice(js.indexOf('function termSendPhone'), js.indexOf('function termSendBack')).includes("invoke('term_remote_offer_send'"))
+  assert.equal(count(html, '@click="termSendPhone"'), 2, '「改用手機確認」按鈕兩處（確認列、確認框）')
   assert.ok(tauri.includes("termSend: req => invoke('term_send', { req })"))
   const back = js.slice(js.indexOf('function termSendBack'), js.indexOf('async function termSendConfirm'))
   assert.ok(back.includes('termSendWithdraw()'), '按「返回」要撤回手機上的請求（#329）')
@@ -208,6 +214,13 @@ test('接線：term_send 只在 termSendConfirm 裡呼叫一次；只有「確�
   assert.ok(js.includes("invoke('term_remote_withdraw'"))
   assert.ok(js.slice(js.indexOf('function termsClose'), js.indexOf('function termSendOpen')).includes('termSendWithdraw()'), '關整個面板也撤回')
   assert.ok(!html.includes('terms.open = false'), '模板裡不再直接把面板關掉（一律走 termsClose）')
+  // 手機已處理後不能再送一次（#334 審查）：phone 狀態下 termSend 前要先查 term_remote_pending；忙碌也擋
+  const conf = js.slice(js.indexOf('async function termSendConfirm'), js.indexOf('// ---------- 終端放進名單'))
+  assert.ok(conf.indexOf('termPhonePending(') > 0 && conf.indexOf('termPhonePending(') < conf.indexOf('transport.termSend('), '送字前先查手機那筆還在不在')
+  assert.ok(conf.includes("composerView(termSendRow.value).mode !== 'ready'") && conf.indexOf("composerView(termSendRow.value).mode") < conf.indexOf('transport.termSend('), '送字前再擋一次忙碌')
+  assert.ok(js.includes('p?.termId === id'), 'PendingView 欄位是 camelCase（termId）')
+  const ph = js.slice(js.indexOf('function termSendPhone'), js.indexOf('async function termPhonePending'))
+  assert.ok(ph.includes("invoke('term_remote_withdraw'"), '傳手機途中取消：回來後再撤一次')
   assert.ok(html.includes('aria-label="要送進終端的文字"'))
 })
 
