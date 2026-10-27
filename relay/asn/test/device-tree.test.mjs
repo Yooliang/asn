@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { buildDeviceTree, deviceSummary, NOT_REPORTED } from '../ui/lib/device-tree.mjs'
+import { buildDeviceTree, deviceSummary, piBackends, NOT_REPORTED } from '../ui/lib/device-tree.mjs'
 
 const SELF = 'aaaaaaaa-0000-4000-8000-000000000001'
 const W = 'bbbbbbbb-0000-4000-8000-000000000002'
@@ -19,6 +19,25 @@ const base = () => ({
   self: { claude: [{ email: 'me@x.test', plan: 'max', current: true }], codex: { loggedIn: true, text: 'me@openai.test · plus' } },
 })
 const byLabel = (t, l) => t.find(d => d.label === l)
+
+const piFr = (node, agent, model) => ({ ...fr(node, '工作機', agent, 'pi'), model })
+
+test('pi 夥伴：廠商列出它背後用的模型廠商（經 Claude、DeepSeek…）；只有一家時圖示換成那一家；對不到維持 Pi', () => {
+  assert.deepEqual(piBackends([piFr(W, 'p1', 'anthropic/claude-sonnet-4'), piFr(W, 'p2', 'deepseek/deepseek-v4-flash'), piFr(W, 'p3', 'anthropic/claude-opus-5')]), ['claude', 'deepseek'], '去重、依出現順序')
+  assert.deepEqual(piBackends([piFr(W, 'p1', 'local/llama-3'), piFr(W, 'p2', ''), piFr(W, 'p3', undefined), { ...fr(W, '工作機', 'c', 'claude'), model: 'anthropic/claude-x' }]), [], '對不到、沒有 model、不是 pi 的都不算')
+  const tree = fs => buildDeviceTree({ ...base(), friends: fs }).find(d => d.label === '工作機').vendors.find(v => v.key === 'pi')
+  const one = tree([piFr(W, 'p1', 'anthropic/claude-sonnet-4')])
+  assert.deepEqual([one.label, one.via, one.iconKey], ['Pi', 'Claude', 'claude'])
+  const two = tree([piFr(W, 'p1', 'anthropic/claude-sonnet-4'), piFr(W, 'p2', 'openai/gpt-5')])
+  assert.deepEqual([two.via, two.iconKey], ['Claude、OpenAI', 'pi'], '多家時維持 Pi 的圖')
+  const none = tree([piFr(W, 'p1', 'local/llama-3')])
+  assert.equal(none.via, undefined)
+  assert.equal(none.iconKey, undefined, '對不到：維持 Pi')
+  // 不影響 Claude 自己的廠商與帳號（pi 經 Claude 不等於有 Claude 帳號）
+  const t = buildDeviceTree({ ...base(), friends: [fr(W, '工作機', 'w1', 'claude'), piFr(W, 'p1', 'anthropic/claude-sonnet-4')] }).find(d => d.label === '工作機')
+  assert.deepEqual(t.vendors.map(v => v.key).sort(), ['claude', 'codex', 'pi'])
+  assert.equal(t.vendors.filter(v => v.key === 'claude').length, 1)
+})
 
 test('三層：設備用名稱，底下是廠商，每個廠商一個帳號', () => {
   const t = buildDeviceTree(base())

@@ -736,6 +736,7 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dv-vh{display:flex;align-items:center;gap:8px;padding:7px 12px;background:var(--panel-soft);border-bottom:1px solid var(--line)}
 .dv-vicon{flex:none;display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;color:var(--fg)}
 .dv-vicon svg{width:20px;height:20px}
+.dv-via{color:var(--muted, inherit);opacity:.75;font-weight:400}
 .dv-vb{display:flex;flex-direction:column;gap:8px;padding:10px 12px}
 .dv-accts{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
 .dv-acct{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:7px 10px;border:1px solid var(--line);border-radius:5px;background:var(--panel)}
