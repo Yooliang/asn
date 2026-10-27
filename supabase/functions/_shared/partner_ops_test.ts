@@ -50,6 +50,7 @@ Deno.test("parsePartnerOp：只留該動作用得到的欄位；格式不對在�
   assertEquals((parsePartnerOp({ node: "H", name: "小文", op: "handover", note: "x".repeat(1000) }) as { note: string }).note.length, 1000);
   assertEquals(parsePartnerOp({ node: "H", name: "小文", op: "handover", note: 5 }), { error: "bad_note" });
   assertEquals(parsePartnerOp({ node: "H", name: "Gemini", op: "restart", model: "x", note: "y", new_name: "z" }), { node: "H", name: "Gemini", op: "restart", new_name: null, model: null, note: null }, "重開：只收 node／name／op");
+  assertEquals(parsePartnerOp({ node: "H", name: "Grok", op: "remove", model: "x", note: "y", new_name: "z" }), { node: "H", name: "Grok", op: "remove", new_name: null, model: null, note: null }, "移除（0.2 B3）：只收 node／name／op");
   assertEquals(parsePartnerOp({ node: "H", name: "小文", op: "resume", session_id: "../x", note: "z", new_name: "y" }), { node: "H", name: "小文", op: "resume", new_name: null, model: null, note: null }, "喚醒：只收 node／name／op，session 由後台從夥伴記錄查，不收用戶端的");
   assertEquals(parsePartnerOp({ ...OK, op: "kill" }), { error: "bad_request" });
   assertEquals(parsePartnerOp({ ...OK, node: "H;drop" }), { error: "bad_request" });
