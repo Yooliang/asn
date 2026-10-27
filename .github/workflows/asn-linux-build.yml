@@ -14,19 +14,15 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    # 自架 runner（aegis-tokyo-yooliang-asn）：系統套件、Rust、xvfb 已由主機管理者預先裝好，所以不再 sudo apt-get。
+    # 公開後 fork 來的 PR 不得跑在自架 runner（會執行外人的程式），下面的 if 只放行本倉庫的 PR／push／手動觸發。
+    runs-on: [self-hosted, yooliang]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     defaults:
       run:
         working-directory: relay/asn
     steps:
       - uses: actions/checkout@v4
-
-      - name: 安裝系統依賴
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libssl-dev \
-            libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
-            libjavascriptcoregtk-4.1-dev libsoup-3.0-dev patchelf xvfb scrot
 
       - uses: actions/setup-node@v4
         with:
