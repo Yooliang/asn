@@ -55,6 +55,11 @@ pub struct LocalLaunchReq {
     /// 第一句話（目前只有 pi 用：當成開場訊息帶進啟動參數）
     #[serde(default)]
     pub first_message: String,
+    /// 經 pi 開時指定提供者與模型（兩個要一起給；只有 profile 是 pi 才收，其他 profile 給了就報錯，不悄悄忽略）
+    #[serde(default)]
+    pub pi_provider: String,
+    #[serde(default)]
+    pub pi_model: String,
 }
 
 #[derive(Serialize, Deserialize)]

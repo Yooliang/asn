@@ -487,15 +487,17 @@ async fn pi_setup_status() -> Result<Value, String> {
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
-async fn pi_models() -> Result<Vec<launch::pi_models::PiModel>, String> {
-    tauri::async_runtime::spawn_blocking(launch::pi_models::models_real).await.map_err(|e| e.to_string())
+async fn pi_models(force: Option<bool>) -> Result<Vec<launch::pi_models::PiModel>, String> {
+    let force = force == Some(true);
+    tauri::async_runtime::spawn_blocking(move || launch::pi_models::models_real(force)).await.map_err(|e| e.to_string())
 }
 
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
-async fn pi_providers() -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(launch::pi_models::providers_real).await.map_err(|e| e.to_string())
+async fn pi_providers(force: Option<bool>) -> Result<Value, String> {
+    let force = force == Some(true);
+    tauri::async_runtime::spawn_blocking(move || launch::pi_models::providers_real(force)).await.map_err(|e| e.to_string())
 }
 
 #[cfg(feature = "gui")]

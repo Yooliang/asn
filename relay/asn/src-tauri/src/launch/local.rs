@@ -21,6 +21,11 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
     };
     check_launch(&config, &mut launch_req, &[], now_ms())?;
     let prof = config.profiles.get(&req.profile).ok_or_else(|| "沒有這個啟動設定".to_string())?;
+    // 經 pi 指定提供者與模型：只有 pi 的 profile 收；名稱不合法或只給一個就直接報錯
+    let pi_model_args = super::pi_models::model_args(&req.pi_provider, &req.pi_model)?;
+    if !pi_model_args.is_empty() && prof.engine != "pi" {
+        return Err("只有經 pi 開的夥伴能指定提供者與模型".into());
+    }
     maybe_trust_claude_cwd(prof.engine.as_str(), &launch_req.cwd);
 
     if prof.mode == LaunchMode::Background {
@@ -32,6 +37,7 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
     let (command, mut args, cwd) = build_spawn_spec(&config, &launch_req)?;
     // pi：互動式，一律前台；載入收信擴充、名字環境變數、第一句話都在 pi.rs 組好（找不到擴充就報錯，不開一個不會收信的 pi）
     if prof.engine == "pi" {
+        args.extend(pi_model_args);
         let files = crate::identity::relay_home().join("pi-first");
         let plan = super::pi::plan(&req.name, &args, super::pi::resolve_ext_state(), &req.first_message, &files, now_ms())?;
         let pid = start_window_env(&req.name, &command, &plan.args, &cwd, super::pi::hidden_for("pi", display_bg), &plan.env)?;
