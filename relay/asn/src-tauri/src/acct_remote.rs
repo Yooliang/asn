@@ -117,6 +117,20 @@ pub fn set_trust_signed(data_dir: &Path, on: bool) -> Result<(), String> {
     set_pref(data_dir, "remote_trust_signed", on)
 }
 
+/// 設定：remote_allow_switch＝「允許切換帳號」（#371，取代上面兩個勾）。不允許＝別台送來的切換一律拒絕；
+/// 允許＝本人簽章的直接套用（每小時上限照舊），沒簽章的照舊要在這台按確認（自己的設備要不要互信是 #300，還沒定）。
+/// 還沒存過新設定時從舊的兩個換算：只要有一個是開的就算允許（remote_trust_signed 預設開，所以預設允許）。
+/// 舊的 remote_trust_own 不再顯示，原本勾了的人照舊連沒簽章的也免確認，不改變他已經選好的信任範圍。
+pub fn allow_switch(data_dir: &Path) -> bool {
+    let stored = std::fs::read_to_string(prefs_path(data_dir)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.get("remote_allow_switch").and_then(Value::as_bool));
+    stored.unwrap_or_else(|| trust_own(data_dir) || trust_signed(data_dir))
+}
+pub fn set_allow_switch(data_dir: &Path, on: bool) -> Result<(), String> {
+    set_pref(data_dir, "remote_allow_switch", on)
+}
+/// 不允許切換帳號時回給發起端的原因
+pub const NOT_ALLOWED: &str = "這台沒有允許切換帳號";
+
 /// 這個指令要不要在本機按確認：信任自己的設備，或（信任簽章且這筆指令後端標了簽章）就不用
 pub fn needs_confirm(trust_own: bool, trust_signed: bool, signed: bool) -> bool {
     !(trust_own || (trust_signed && signed))
@@ -437,13 +451,19 @@ pub async fn flush_outbox(relay: &Relay, data_dir: &Path) {
 pub async fn pending(relay: &Relay, data_dir: &Path) -> Result<Vec<Pending>, String> {
     flush_outbox(relay, data_dir).await;   // 之前沒送達的結果先補報
     let v = relay.api("acct_switch_pending", Some(json!({}))).await?;
+    // 沒允許切換帳號（#371）：別台送來的一律拒絕、不交給畫面
+    let allow = allow_switch(data_dir);
     // 簽章免確認要再看頻率：同一小時內已經自動切太多次，後面的改成要確認
-    let (own, signed_ok) = (trust_own(data_dir), trust_signed(data_dir) && auto_allowed(data_dir, crate::heartbeat::now_ms()));
+    let (own, signed_ok) = (allow && trust_own(data_dir), allow && auto_allowed(data_dir, crate::heartbeat::now_ms()));
     let mut out = vec![];
     // 上次重啟前取走、還沒處理的指令：第一次輪詢時讀回來，重新交給畫面（後端那邊已是 taken，不會再發第二次）
     if !RESTORED.swap(true, std::sync::atomic::Ordering::SeqCst) {
         for (id, email, by, signed) in taken_restore(data_dir) {
             log_event(data_dir, "restored", &id, &format!("{by} {email}"));
+            if !allow {
+                refuse(relay, data_dir, &id).await;
+                continue;
+            }
             let vendor = vendor_of(&id);
             out.push(Pending { id, email, requested_by: by, needs_confirm: needs_confirm(own, signed_ok, signed), vendor });
         }
@@ -458,6 +478,10 @@ pub async fn pending(relay: &Relay, data_dir: &Path) -> Result<Vec<Pending>, Str
                 let vendor = row_vendor(&row).to_string();
                 set_vendor(&id, &vendor);
                 log_event(data_dir, "taken", &id, &format!("{by} {vendor} {email} signed={signed}"));
+                if !allow {
+                    refuse(relay, data_dir, &id).await;
+                    continue;
+                }
                 out.push(Pending { id, email, requested_by: by, needs_confirm: needs_confirm(own, signed_ok, signed), vendor });
             }
             Err(why) => {
@@ -485,9 +509,19 @@ pub async fn apply(relay: &Relay, data_dir: &Path, id: String, confirmed: bool) 
 /// `switch` 由呼叫端注入：正式是本機切換，測試指到暫存家目錄
 pub async fn apply_with(relay: &Relay, data_dir: &Path, id: String, confirmed: bool, switch: impl FnOnce(&str) -> Result<String, String> + Send + 'static) -> Result<Value, String> {
     let now = crate::heartbeat::now_ms();
-    // 只靠簽章放行的（沒按確認、也沒開「信任自己的設備」）才算進頻率上限
-    let by_signed = !confirmed && !trust_own(data_dir) && trust_signed(data_dir) && is_signed(&id) && auto_allowed(data_dir, now);
-    let allowed = confirmed || trust_own(data_dir) || by_signed;
+    // 沒允許切換帳號（#371）：連本機按確認也不套用（畫面本來就收不到這種指令，這裡是最後一道關）
+    let allow = allow_switch(data_dir);
+    if !allow {
+        if !with_taken(|m| m.contains_key(&id)) {
+            return Err("找不到這個指令（已處理過或已過期）".into());
+        }
+        refuse(relay, data_dir, &id).await;
+        return Err(NOT_ALLOWED.into());
+    }
+    let own = trust_own(data_dir);
+    // 只靠簽章放行的（沒按確認、也不是舊設定的「信任自己的設備」）才算進頻率上限
+    let by_signed = !confirmed && !own && is_signed(&id) && auto_allowed(data_dir, now);
+    let allowed = confirmed || own || by_signed;
     if by_signed && with_taken(|m| m.contains_key(&id)) {
         auto_record(data_dir, now);
     }
@@ -505,6 +539,14 @@ pub async fn apply_with(relay: &Relay, data_dir: &Path, id: String, confirmed: b
     } else {
         Err(detail)
     }
+}
+
+/// 這台沒有允許切換帳號（#371）：取走的指令直接拒絕，告訴發起端原因
+async fn refuse(relay: &Relay, data_dir: &Path, id: &str) {
+    with_taken(|m| m.remove(id));
+    log_event(data_dir, "refused", id, NOT_ALLOWED);
+    taken_persist(data_dir);
+    send_result(relay, data_dir, id, "denied", NOT_ALLOWED).await;
 }
 
 /// 使用者按了拒絕
@@ -870,16 +912,52 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn 信任簽章關掉_簽章的指令也要確認() {
+    async fn 沒允許切換帳號_別台送來的一律拒絕_回報原因_不交給畫面() {
+        // 舊設定兩個都關＝不允許（#371）；簽章的也一樣擋
         const S2: &str = "bbbbbbbb-2222-3333-4444-555555555555";
         let home = two_accounts();
         let data = tempfile::tempdir().unwrap();
         set_trust_signed(data.path(), false).unwrap();
-        let (url, _seen) = fake_server(vec![json!({ "id": S2, "requested_by": "P", "vendor": "claude", "email": "b@x.test", "signed": true })]);
+        assert!(!allow_switch(data.path()));
+        let (url, seen) = fake_server(vec![json!({ "id": S2, "requested_by": "P", "vendor": "claude", "email": "b@x.test", "signed": true })]);
         let relay = Relay::new(url, "k".into(), "W".into(), "W-ASN".into());
         let p = pending(&relay, data.path()).await.unwrap();
-        assert!(p[0].needs_confirm);
-        assert!(apply_with(&relay, data.path(), S2.into(), false, switch_to_home(home.path())).await.is_err(), "沒按確認就不切");
+        assert!(p.is_empty(), "不交給畫面確認");
+        let reqs = seen.lock().unwrap().clone();
+        assert!(reqs.iter().any(|r| r.contains("acct_switch_result") && r.contains(S2) && r.contains("denied") && r.contains(NOT_ALLOWED)), "{reqs:?}");
+        assert!(apply_with(&relay, data.path(), S2.into(), true, switch_to_home(home.path())).await.is_err(), "已經拒絕過，按確認也不切");
+        assert!(creds(home.path()).contains("FAKE-A"));
+    }
+
+    #[test]
+    fn 允許切換帳號_預設開_舊的兩個有一個開就算允許_新設定優先() {
+        let d = tempfile::tempdir().unwrap();
+        assert!(allow_switch(d.path()), "沒存過＝舊的簽章免確認預設開＝允許");
+        set_trust_signed(d.path(), false).unwrap();
+        assert!(!allow_switch(d.path()), "舊的兩個都關＝不允許");
+        set_trust_own(d.path(), true).unwrap();
+        assert!(allow_switch(d.path()), "舊的信任自己的設備開＝允許");
+        set_allow_switch(d.path(), false).unwrap();
+        assert!(!allow_switch(d.path()), "存過新設定就照新設定");
+        set_allow_switch(d.path(), true).unwrap();
+        set_trust_own(d.path(), false).unwrap();
+        assert!(allow_switch(d.path()));
+        std::fs::write(prefs_path(d.path()), "{壞掉").unwrap();
+        assert!(allow_switch(d.path()), "壞檔用預設（允許）");
+    }
+
+    #[tokio::test]
+    async fn 允許切換帳號_沒簽章的照舊要確認_簽章的直接切() {
+        // 方案 A（#371）：允許只放行本人簽章的；沒簽章的要不要免確認是 #300，還沒定
+        const U2: &str = "cccccccc-2222-3333-4444-555555555555";
+        let home = two_accounts();
+        let data = tempfile::tempdir().unwrap();
+        set_allow_switch(data.path(), true).unwrap();
+        let (url, _seen) = fake_server(vec![json!({ "id": U2, "requested_by": "P", "vendor": "claude", "email": "b@x.test" })]);
+        let relay = Relay::new(url, "k".into(), "W".into(), "W-ASN".into());
+        let p = pending(&relay, data.path()).await.unwrap();
+        assert!(p[0].needs_confirm, "沒簽章：要在這台按確認");
+        assert!(apply_with(&relay, data.path(), U2.into(), false, switch_to_home(home.path())).await.is_err());
         assert!(creds(home.path()).contains("FAKE-A"));
     }
 

@@ -158,7 +158,7 @@ test('接線守門：設定頁有這一塊、Rust 指令有註冊、前端不碰
     assert.ok(lib.includes(c), c)
   }
   assert.ok(rs.includes('codex_accounts::codex_account_current') && lib.includes('codex_account_current'))
-  for (const c of ['acct_remote_report', 'acct_remote_list', 'acct_remote_request', 'acct_remote_status', 'acct_remote_pending', 'acct_remote_apply', 'acct_remote_decline', 'acct_remote_trust_get', 'acct_remote_trust_set', 'acct_remote_trust_signed_get', 'acct_remote_trust_signed_set', 'claude_account_undo']) {
+  for (const c of ['acct_remote_report', 'acct_remote_list', 'acct_remote_request', 'acct_remote_status', 'acct_remote_pending', 'acct_remote_apply', 'acct_remote_decline', 'acct_remote_allow_get', 'acct_remote_allow_set', 'claude_account_undo']) {
     assert.ok(rs.includes(c), `lib.rs 沒註冊 ${c}`)
     assert.ok(lib.includes(c), `前端沒用到 ${c}`)
   }

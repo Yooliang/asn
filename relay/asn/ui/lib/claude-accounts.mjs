@@ -39,8 +39,7 @@ const errText = e => (typeof e === 'string' ? e : e?.message || String(e))
 export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLabel = n => n, sleep = ms => new Promise(r => setTimeout(r, ms)), pollMs = 3000, pollMax = 80 }) {
   const s = reactive({
     list: [], grok: [], current: null, codex: null, codexErr: '', msg: '', busy: false, confirmDel: '',
-    trustOwn: false,
-    trustSigned: true,
+    allowSwitch: true,   // 「允許切換帳號」（#371）：讓手機或別台設備替這台切換
     remote: { node: '', vendor: 'claude', list: [], reportedAt: '', asnOnline: false, loading: false, busy: false, msg: '' },
     incoming: [],   // 等本機使用者按確認的遠端切換指令：{ id, email, from, fromLabel }
     done: [],       // 免確認（本人簽章／信任自己的設備）已經切好、讓使用者看一眼的：{ id, email, from, fromLabel }；可按「還原」
@@ -171,20 +170,16 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     await refresh()
     void report()
   }
+  // 讀不到就當預設（開）：不會因為讀取失敗而悄悄變成關（真正擋不擋由 Rust 端照存檔判斷）
   const loadTrust = async () => {
-    try { s.trustOwn = (await invoke('acct_remote_trust_get')) === true } catch { s.trustOwn = false }
-    // 讀不到就當預設（開）：不會因為讀取失敗而悄悄變成關
-    try { s.trustSigned = (await invoke('acct_remote_trust_signed_get')) !== false } catch { s.trustSigned = true }
+    try { s.allowSwitch = (await invoke('acct_remote_allow_get')) !== false } catch { s.allowSwitch = true }
   }
-  const setTrust = async on => {
-    try { await invoke('acct_remote_trust_set', { on }); s.trustOwn = on === true } catch (e) { s.msg = errText(e) }
-  }
-  const setTrustSigned = async on => {
-    try { await invoke('acct_remote_trust_signed_set', { on }); s.trustSigned = on === true } catch (e) { s.msg = errText(e) }
+  const setAllowSwitch = async on => {
+    try { await invoke('acct_remote_allow_set', { on }); s.allowSwitch = on === true } catch (e) { s.msg = errText(e) }
   }
   return {
     state: s,
-    refresh, report, onAuto, loadReports, remoteNodes, remoteSelect, remoteLoad, remoteSwitch, grokSwitch, pollIncoming, approve, decline, dismissDone, undo, loadTrust, setTrust, setTrustSigned,
+    refresh, report, onAuto, loadReports, remoteNodes, remoteSelect, remoteLoad, remoteSwitch, grokSwitch, pollIncoming, approve, decline, dismissDone, undo, loadTrust, setAllowSwitch,
     addCurrent: () => run(async () => { const a = await invoke('claude_account_save'); s.savedSeq++; return `已加入 ${a.email}。` }),
     switchTo: email => run(async () => { const r = await invoke('claude_account_switch', { email }); return `已切換到 ${r.email}。${SWITCH_NOTICE}` }),
     // 刪除要按兩次（第一次變成「確認刪除」），避免誤觸
