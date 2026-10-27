@@ -12,13 +12,15 @@ fn members() -> Value {
 }
 
 #[test]
-fn 名單轉位址_本機排最前_隱藏的不列_離線與只顯示有標_片段過濾() {
+fn 名單轉位址_本機排最前_背景運行照列並標出_離線與只顯示有標_片段過濾() {
+    // 背景運行（hidden）以前整列跳過，收得到信的夥伴反而查不到位址；現在照列、標「背景運行」，跟電腦版名單一致
     let rows = who_rows(&members(), "T", "");
     let lines: Vec<String> = rows.iter().map(who_line).collect();
     assert_eq!(lines, vec![
         "T/Test-Gemini\t在線\t家用機（本機）",
         "T/看板\t在線、只顯示\t家用機（本機）",
         "T/舊視窗\t離線\t家用機（本機）",
+        "T/藏起來\t在線、背景運行\t家用機（本機）",
         "G/grok\t在線\tG",
         "W/W-政策\t在線\t公司機",
     ]);
@@ -40,12 +42,14 @@ fn who_指令_印位址_json_與參數錯誤() {
     let (c, out, _) = go(&f.env, &["who", "政策", "--json"], "");
     assert_eq!(c, 0);
     let v: Value = serde_json::from_str(out.trim()).unwrap();
-    assert_eq!(v, json!([{"address": "W/W-政策", "node": "W", "name": "W-政策", "online": true, "device": "公司機", "receivable": true, "here": false}]));
+    assert_eq!(v, json!([{"address": "W/W-政策", "node": "W", "name": "W-政策", "online": true, "device": "公司機", "receivable": true, "background": false, "here": false}]));
+    let (c, out, _) = go(&f.env, &["who", "藏起來"], "");
+    assert_eq!((c, out.trim()), (0, "T/藏起來\t在線、背景運行\t家用機（本機）"), "背景運行的也查得到位址");
     let (c, out, _) = go(&f.env, &["who", "沒有這個"], "");
     assert_eq!((c, out.trim()), (0, "沒有符合的夥伴"));
     assert_eq!(go(&f.env, &["who", "--x"], "").0, 1);
     assert_eq!(go(&f.env, &["who", "a", "b"], "").0, 1);
-    assert_eq!(b.of("list").len(), 3);
+    assert_eq!(b.of("list").len(), 4);
     // 後端錯誤：結束碼 4
     let e = Fake::start(|_: &Req, _| Resp::json(500, json!({"error": "internal"})));
     let f2 = fx(&e.url(), Some("T-視窗甲"));
