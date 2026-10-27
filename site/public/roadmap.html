@@ -50,7 +50,7 @@
     </ul>
     <div class="table-wrap">
       <table class="matrix">
-        <caption>各家 AI 與各項管理功能的現況（依 2026 年 10 月 27 日的主線程式（0.1.89）與議題整理；各格的版本與驗證狀態以格內文字為準）</caption>
+        <caption>各家 AI 與各項管理功能的現況（依 2026 年 10 月 27 日的主線程式（0.1.90）與議題整理；各格的版本與驗證狀態以格內文字為準）</caption>
         <thead><tr><th scope="col">AI</th><th scope="col">開啟</th><th scope="col">關閉</th><th scope="col">接手</th><th scope="col">切換模型</th><th scope="col">群組聊天</th><th scope="col">帳號切換</th><th scope="col">備註與限制</th></tr></thead>
         <tbody>
         <tr>
@@ -394,6 +394,12 @@
     <div class="releases">
 <!-- changelog:start（由 site/make-roadmap-page.mjs 產生，不要手改） -->
       <article class="glass release">
+        <h3>0.1.90<span class="date">2026-10-27</span></h3>
+        <ul>
+          <li>新增：開新夥伴改成兩頁：先選廠牌與運行方式（內建通道、經 pi、ASN 開的終端、自己開的 CLI，第一個可用的標建議），再填名稱與路徑；「在這台開終端」併進這裡；頭像旁的廠商小圖改成並排、更小。修正：Gemini 審查等工作者的寫入權限可以只開放指定資料夾。</li>
+        </ul>
+      </article>
+      <article class="glass release">
         <h3>0.1.89<span class="date">2026-10-27</span></h3>
         <ul>
           <li>新增：名單的分頁／分組「狀態」改成「活躍度」（活躍、閒置、離線），近 8 小時有收發的算活躍，AI 一忙一閒不再換組、跳分頁；手機的『最近有活動』也同樣改成 8 小時。「＋」按鈕移到個人訊息列右邊，選單分成新增夥伴、終端、群組三段，終端在等你回答時「＋」上會有紅點。</li>
@@ -445,12 +451,6 @@
         <h3>0.1.81<span class="date">2026-10-27</span></h3>
         <ul>
           <li>新增：asn-cli 寄信只寫視窗名會自動補節點，並新增 asn who 列出完整位址；手機設置新增「設備與帳號」，分頁標籤改名；電腦版名單每列顯示廠商小圖，pi 依背後模型標示；設備頁標示 pi 背後的模型廠商。修正：接手窗格的「已允許」改讀電腦端真實狀態。</li>
-        </ul>
-      </article>
-      <article class="glass release">
-        <h3>0.1.80<span class="date">2026-10-27</span></h3>
-        <ul>
-          <li>新增：手機遠端確認終端送字與代答（電腦要往終端送字時，手機會跳出待確認，本人按確認或拒絕）；接手已開著的終端視窗（預設只讀，需在電腦本機另外開啟代答或代送）；終端忙太久或等你太久時顯示提示；終端送字表單與確認框。修正：pi 從別的視窗底下開啟時，寄件人被誤判成上層視窗。</li>
         </ul>
       </article>
       <!-- changelog:end -->

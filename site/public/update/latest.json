@@ -1,11 +1,11 @@
 {
-  "version": "0.1.89",
-  "notes": "新增：名單的分頁／分組「狀態」改成「活躍度」（活躍、閒置、離線），近 8 小時有收發的算活躍，AI 一忙一閒不再換組、跳分頁；手機的『最近有活動』也同樣改成 8 小時。「＋」按鈕移到個人訊息列右邊，選單分成新增夥伴、終端、群組三段，終端在等你回答時「＋」上會有紅點。",
-  "pub_date": "2026-10-27T05:48:07.573Z",
+  "version": "0.1.90",
+  "notes": "新增：開新夥伴改成兩頁：先選廠牌與運行方式（內建通道、經 pi、ASN 開的終端、自己開的 CLI，第一個可用的標建議），再填名稱與路徑；「在這台開終端」併進這裡；頭像旁的廠商小圖改成並排、更小。修正：Gemini 審查等工作者的寫入權限可以只開放指定資料夾。",
+  "pub_date": "2026-10-27T06:33:43.974Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjVhOEtvRnJrei9tYnN5ZmZCMlZkNWx4K3JoekFRamwyRGFNNGhzZHloK3dpVlB3a3VmcERUdnlRMHRsQThQbXZHRXcySUJMWnZWdTZoMzhScTJQTHc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDgwMDg3CWZpbGU6QVNOXzAuMS44OV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjg5CnloTUdwQmVOdEhCT24rNHNVREM3V0lJUVJIMHAyZEhIRFVEZ2xGSy9vdkY1SjcxeGRjczU5aXBEUWphM3JsMVJ0NzJ6KzhSTWJ0MTFZRFRnUS9vR0FnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.89_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybitZYXpzRDVKWjBPR25CeTNnOXEyRmcweDJZVG9xWkp3ZnRLalhDdFNJeWphR003aFkyak1XVnJDMXVoN21qamVjYzZTQlRzSFBPR2JaMDA2eGU3VHdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDgyODIzCWZpbGU6QVNOXzAuMS45MF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjkwCjk2dTNpMnVHN1p5YmpnM0ZZZjdiK2hlR1BGT1hIREthVzB5a1E3b2FCUEU1eVpPTy9jRkNiejVHK2VxcVJzSWVoSzlHazAyZFc2RHFBWUNLVy9rMURnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.90_x64-setup.exe"
     }
   }
 }
