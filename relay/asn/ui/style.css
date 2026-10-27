@@ -89,6 +89,8 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .model-manual{width:100%;box-sizing:border-box;font-family:Consolas,"Liberation Mono",monospace;font-size:11px;resize:none}
 .launch-picker button.off{color:var(--muted);cursor:default}
 .launch-picker .menu-sep{height:0;margin:3px 4px;border-top:1px solid var(--line, #c9d8e8)}   /* 設備清單和「在這台開終端…」之間的分隔線 */
+.partner-channels{margin:2px 0 6px;padding:0;list-style:none;font-size:11px;color:var(--muted)}.partner-channels li{margin:1px 0}.partner-channels small{display:block;margin-left:1em}   /* 開新夥伴：三條通道說明（#351） */
+.partner-channels .ch-ok b{color:#2e7d32}.partner-channels .ch-no b{color:var(--muted)}
 .launch-picker .launch-why{display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:2px;white-space:normal}
 .partner-dlg-back{position:fixed;inset:0;z-index:70;background:rgba(10,24,40,.45);display:flex;align-items:center;justify-content:center;padding:12px}
 .partner-dlg{min-width:min(420px,96vw);max-width:480px;padding:14px 16px;border:1px solid #7a9ec4;border-radius:6px;background:var(--panel);box-shadow:0 8px 28px rgba(0,30,70,.35);display:flex;flex-direction:column;gap:8px}

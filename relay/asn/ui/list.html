@@ -397,6 +397,10 @@
           <small class="partner-run-why" v-if="!c.ok">{{ c.why }}</small>
         </label>
       </fieldset>
+      <!-- 這個模型三條通道的現況（#351 第 1 步，只是說明，不能選） -->
+      <ul class="partner-channels" v-if="partnerChannels.length" aria-label="這個模型的啟動方式">
+        <li v-for="c in partnerChannels" :key="c.key" :class="'ch-' + c.status"><b>{{ c.label }}</b>：{{ c.statusText }}<small>{{ c.why }}</small></li>
+      </ul>
       <label>名字<input class="set-input" v-model="partnerDlg.name" maxlength="40" aria-label="夥伴名字"></label>
       <label>工作資料夾
         <span class="partner-cwd-row">

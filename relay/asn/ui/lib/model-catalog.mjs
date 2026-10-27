@@ -4,11 +4,11 @@
 /** @typedef {'window'|'background'} LaunchMode */
 
 export const MODEL_CATALOG = [
-  { id: 'claude', toolId: 'claude', profileId: 'claude', label: 'Claude', mode: 'window', modeLabel: '會開一個視窗', acpWhy: 'Claude 沒有內建通道，只能開成終端機視窗' },
-  { id: 'codex', toolId: 'codex', profileId: 'codex', label: 'Codex', mode: 'window', modeLabel: '會開一個視窗', acpWhy: 'Codex 還沒有內建通道，只能開成終端機視窗' },
-  { id: 'gemini', toolId: 'agy', profileId: 'gemini', label: 'Gemini', mode: 'background', modeLabel: '由 ASN 內建通道執行', cliWhy: '終端機版沒有外部入口，ASN 收不到信；要收發信請用內建通道' },
-  { id: 'grok', toolId: 'grok', profileId: 'grok', label: 'Grok', mode: 'background', modeLabel: '由 ASN 內建通道執行', cliWhy: '終端機版沒有外部入口，ASN 收不到信；要收發信請用內建通道' },
-  { id: 'pi', toolId: 'pi', profileId: 'pi', label: 'pi', mode: 'window', modeLabel: '會開一個互動視窗（只能開在前台）', foregroundOnly: true, acpWhy: 'pi 沒有內建通道，只能開成終端機視窗' },
+  { id: 'claude', toolId: 'claude', profileId: 'claude', label: 'Claude', mode: 'window', modeLabel: '會開一個視窗', acpWhy: 'Claude 沒有內建通道，只能開成終端機視窗', channels: { term: { status: 'window', why: '開成自己的終端機視窗（不是 ASN 自帶終端），靠 asn 外掛收發信' }, acp: { status: 'no', why: '刻意不做（帳務風險，#273）' }, pi: { status: 'untested', why: 'pi 可以用 Claude 訂閱登入，ASN 裡還沒有實際用過' } } },
+  { id: 'codex', toolId: 'codex', profileId: 'codex', label: 'Codex', mode: 'window', modeLabel: '會開一個視窗', acpWhy: 'Codex 還沒有內建通道，只能開成終端機視窗', channels: { term: { status: 'window', why: '開成自己的終端機視窗，還沒有真機實測' }, acp: { status: 'no', why: '還沒有內建通道' }, pi: { status: 'untested', why: 'pi 有 openai-codex 提供者，ASN 裡還沒有實際用過' } } },
+  { id: 'gemini', toolId: 'agy', profileId: 'gemini', label: 'Gemini', mode: 'background', modeLabel: '由 ASN 內建通道執行', cliWhy: '終端機版可以從「＋」→「在這台開終端…」開在 ASN 自帶的終端裡，但那樣 ASN 收不到它的信；要收發信請用內建通道', channels: { term: { status: 'noinbox', why: '可以開在 ASN 自帶終端（0.1.86 起），但收不到信' }, acp: { status: 'ok', why: '背景運行，可以收發信（0.1.70 起，有真機）' }, pi: { status: 'no', why: 'pi 已拿掉 Gemini 訂閱登入，不建議' } } },
+  { id: 'grok', toolId: 'grok', profileId: 'grok', label: 'Grok', mode: 'background', modeLabel: '由 ASN 內建通道執行', cliWhy: '終端機版可以從「＋」→「在這台開終端…」開在 ASN 自帶的終端裡，但那樣 ASN 收不到它的信；要收發信請用內建通道', channels: { term: { status: 'noinbox', why: '可以開在 ASN 自帶終端（0.1.84 起），但收不到信' }, acp: { status: 'ok', why: '背景運行，可以收發信（0.1.70 起，有真機）' }, pi: { status: 'untested', why: 'pi 有 xai 提供者，ASN 裡還沒有實際用過' } } },
+  { id: 'pi', toolId: 'pi', profileId: 'pi', label: 'pi', mode: 'window', modeLabel: '會開一個互動視窗（只能開在前台）', foregroundOnly: true, acpWhy: 'pi 沒有內建通道，只能開成終端機視窗', channels: { term: { status: 'window', why: 'pi 自己就是互動視窗，靠 pi 擴充收發信' }, acp: { status: 'no', why: 'pi 沒有內建通道' }, pi: { status: 'ok', why: '可以切換提供者和模型' } } },
 ]
 
 /**
@@ -26,6 +26,19 @@ export function runChoices(row) {
     { key: 'acp', label: RUN_LABEL.acp, ok: acp, why: acp ? '' : (row?.acpWhy || RUN_GENERIC_WHY) },
   ]
   return { choices, selected: acp ? 'acp' : 'cli' }
+}
+
+/**
+ * 每個模型的三條通道（#351 第 1 步，只是資料與文字）：term＝終端機（ASN 自帶終端或自己的視窗）、acp＝內建通道、pi＝經 pi 跑。
+ * status：ok 可用／window 開成自己的視窗／noinbox 開得起來但收不到信／untested 理論可行但沒實測／no 不支援或刻意不做。
+ * 回 [{ key, label, status, statusText, why }]；目錄上沒有 channels 的（自訂設定）回空陣列。
+ */
+export const CHANNEL_LABEL = { term: '終端機', acp: '內建通道', pi: '經 pi' }
+export const CHANNEL_STATUS_TEXT = { ok: '可用', window: '開成視窗', noinbox: '收不到信', untested: '沒實測', no: '不支援' }
+export function channelRows(row) {
+  const ch = row?.channels
+  if (!ch || typeof ch !== 'object') return []
+  return Object.keys(CHANNEL_LABEL).filter(k => ch[k]).map(k => ({ key: k, label: CHANNEL_LABEL[k], status: ch[k].status, statusText: CHANNEL_STATUS_TEXT[ch[k].status] ?? '', why: String(ch[k].why ?? '') }))
 }
 
 /**
