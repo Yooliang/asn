@@ -614,7 +614,7 @@ R1 的環境變數對照表（新名 ← 舊名）：一律把 `IRORI_` 換成 `
 | `relay/cloud-agent/*.mjs`、`test/*`、`boot.example.sh` | `IRORI_CLOUD_*`、`IRORI_RELAY_*`、`[irori]` 日誌前綴 |
 | `supabase/functions/_shared/*.ts`（約 11 檔）、`relay/index.ts` | `irori_relay_*` 函式名（D9）、註解中的 `irori-relay`／`irori-api` 說明 |
 | `web/relay/SKILL.md`、`INSTALL.txt` | 技能名 `irori-relay`、網址 `irori.web.app`、舊後台網址（改名同時併入新技能文件） |
-| `relay/machine/launcher.example.json` | 範例路徑 `D:\Github\irori` |
+| `relay/machine/launcher.example.json` | 範例路徑（`<irori 資料夾>`） |
 | `README.md`、`CLAUDE.md`、`.gitignore`、`docs/*.md`（現行文件） | 環境變數與路徑的說明 |
 | `tests/`、`tools/release/` | 測試與打包工具中的名稱 |
 

@@ -316,9 +316,9 @@ ACP 路線（標準 ACP agent）的權限是**真的預防**：agent 要做事�
 > 以下是**使用者**在那台電腦做的事；這次實作沒有重啟任何橋、沒有部署。
 
 1. **先確認 agy 本身能用**：終端機執行 `agy --version`，再 `agy -p "只回 PONG"` 要回 PONG（沒登入就先照 9.4 登入）。
-2. **放設定檔**：複製 `relay/machine/agents.example.json` 到 `%USERPROFILE%.asn\agents.json`，至少改 `cwd` 與 `allow_dirs`（把 `你` 換成使用者名稱）。`cwd` 請用**專用的空資料夾**（不存在會自動建），不要指到專案。
+2. **放設定檔**：複製 `relay/machine/agents.example.json` 到 `%USERPROFILE%\.asn\agents.json`，至少改 `cwd` 與 `allow_dirs`（把 `你` 換成使用者名稱）。`cwd` 請用**專用的空資料夾**（不存在會自動建），不要指到專案。
 3. **載入轉接器**：橋要用 `ASN_ENGINES=claude,acp` 啟動。用排程／手動啟動的話：`run-bridge.ps1 -NodeId <ID> -Engines claude,acp`（新增的 `-Engines` 參數）；或在使用者環境變數設 `ASN_ENGINES`。**重啟橋才會生效**（橋有單一執行個體鎖，先正常關掉舊的再開）。
-4. **看 log**：`%USERPROFILE%.asn\machine-<ID>\bridge.log`，搜尋 `acp:`。啟動時會有 `acp: 工作者 Gemini 啟動（protocol=agy-stream cwd=… 權限 read=allow write=deny …）`；設定有問題會有 `acp: 設定有問題，已跳過：…`／`設定提醒：…`。之後每封信有 `handed id=… to=Gemini`、`[Gemini] …` 行（權限請求、等授權、狀態變化、失敗原因都在這裡）。對話的 session id 存在 `machine-<ID>\acp-workers.json`（刪掉＝下次從新對話開始）。
+4. **看 log**：`%USERPROFILE%\.asn\machine-<ID>\bridge.log`，搜尋 `acp:`。啟動時會有 `acp: 工作者 Gemini 啟動（protocol=agy-stream cwd=… 權限 read=allow write=deny …）`；設定有問題會有 `acp: 設定有問題，已跳過：…`／`設定提醒：…`。之後每封信有 `handed id=… to=Gemini`、`[Gemini] …` 行（權限請求、等授權、狀態變化、失敗原因都在這裡）。對話的 session id 存在 `machine-<ID>\acp-workers.json`（刪掉＝下次從新對話開始）。
 5. **確認名單**：幾十秒內，手機 Irori Chat「聯絡人」那台電腦底下出現 `Gemini`（頭像右下有 ✦ 角標；要先部署 9.6 的前後端，沒部署時它會被當成 Claude 視窗顯示，功能照常）。
 6. **試一封**：從手機對 Gemini 傳一句話，或在那台電腦用 `node relay/machine/send.mjs`（見 README）寄一封，等幾秒收到回信。
 7. **關掉**：把 `agents.json` 裡該工作者加 `"enabled": false`，或移除 `ASN_ENGINES` 裡的 `acp`，然後重啟橋；Claude 的收發室完全不受影響（兩者是獨立的轉接器）。緊急時直接結束橋，工作者子行程會跟著結束。

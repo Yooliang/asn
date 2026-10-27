@@ -8,17 +8,17 @@ ASN（Agent Sync Network）是讓人與各家 AI 夥伴（Claude Code、Codex、
 每台設備、每個雲端代理是一個**節點**，節點有自己的金鑰與信箱；中間一個仲介後端負責收寄信、群組廣播、已讀回條、在線名單。
 人用「ASN 電腦版」（類似舊式即時通）看好友名單與聊天；AI 視窗透過各設備上的「收發室橋」收信、回信。
 
-ASN 從 Irori 專案（github.com/cwen0708/irori）拆出，保留 git 歷史。拆出後後端已在新的 Supabase 專案複製一份，**但尚未切換**：
+ASN 從 Irori 專案（github.com/cwen0708/irori）拆出，保留 git 歷史。拆出後後端搬到新的 Supabase 專案，2026-10-21 已切換：
 
 | 項目 | 現況 |
 |---|---|
 | 程式碼 | 已搬進本 repo（`relay/`、`supabase/`、`site/`、`tools/`、`web/`） |
 | 新後台 | Supabase 專案 `asn`（東京，專案代號 `etccgmkrosbzpltudlgt`）；Edge Function `relay`，網址 `https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay`；資料已從舊後台複製（筆數見 [MIGRATION.md](MIGRATION.md)）；舊節點金鑰在新後台可直接使用（後端只存雜湊） |
-| 切換 | **尚未切換**：各設備收發室橋、ASN 電腦版、雲端代理、Irori 仍連舊後台；切換前要再做一次增量同步 |
+| 切換 | 2026-10-21 完成（#7）：程式預設網址已指向新後台，各設備收發室橋與雲端代理已在新後台，切換後補同步 0 筆遺漏。Irori 自己的節點交給 Irori repo 處理；舊後台保留中，停用前要先確認 |
 | 登入 | 新後台已開 Google（已發布）與 GitHub 登入；`relay.nodes.owner_user` 只有欄位，登入與認領流程還沒做（見 [AUTH.md](AUTH.md)） |
 | 官網 | https://asnmessenger.web.app（首頁、隱私權政策、服務條款），Firebase Hosting；下載區尚未開放 |
 | 訊息保存 | 90 天自動刪除排程（每天 03:17 UTC）新舊後台都已建立 |
-| 授權 | 尚未選定（見 [README](../README.md) 的「開源前檢查清單」） |
+| 授權 | MIT（見 [LICENSE](../LICENSE)）；第三方元件與例外檔案見 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。開源現況見 [README](../README.md) 的「開源狀態」 |
 
 ## 元件與位置
 
@@ -44,14 +44,14 @@ ASN 從 Irori 專案（github.com/cwen0708/irori）拆出，保留 git 歷史。
 搬家共四步：
 1. 程式從 Irori 拆出（完成，PR #1 官網、其餘歷史保留）。
 2. 新後台建好（完成，PR #2）。
-3. 資料複製（完成一次；切換時還要再同步一次）。
-4. **切換各用戶端（尚未）**。步驟與回退見 [MIGRATION.md](MIGRATION.md)。
+3. 資料複製（完成；切換時已補同步）。
+4. 切換各用戶端（2026-10-21 完成，見 #7）。步驟與回退見 [MIGRATION.md](MIGRATION.md)。
 
 ## 下一步（建議順序）
 
-1. 切換：做增量同步、切換各設備收發室橋、ASN、雲端代理、Irori（[MIGRATION.md](MIGRATION.md)）。
+1. 搬家收尾：舊後台停用前先確認 Irori 也已切換，再移除 `supabase/functions/irori-relay/`、`supabase/sql/`（[MIGRATION.md](MIGRATION.md)）。
 2. 登入與認領：帳號對應設備（[AUTH.md](AUTH.md)）。
-3. 開源前整理（[README](../README.md) 的檢查清單）。
+3. 開源後續（[README](../README.md) 的「開源狀態」）。
 4. 其餘設計方向見 [ROADMAP.md](ROADMAP.md)。
 
 ## 常用指令

@@ -31,15 +31,15 @@ Storage 的基底：`https://hwtahctsgjcemtwzlvnq.supabase.co/storage/v1/object/
 
 安裝程式做的事：檢查 Node 版本（沒有或太舊就說明去 nodejs.org 裝 LTS 並結束）→ 檢查 `claude` 是否在 PATH
 （沒有只提示，照樣安裝；橋會先連上、信留在信箱，裝好 Claude Code 後再雙擊一次「安裝.cmd」重啟）→ 用邀請碼向仲介
-`?action=register` 註冊（kind＝`other`、machine＝電腦名稱，≤40 字）→ 金鑰存 `%USERPROFILE%.asn\<代號>.key`
-（**不印出**）、代號寫進 `node` 檔 → 程式複製到 `%USERPROFILE%.asn\app\` → 呼叫 `app\install-task.ps1 -Apply`
+`?action=register` 註冊（kind＝`other`、machine＝電腦名稱，≤40 字）→ 金鑰存 `%USERPROFILE%\.asn\<代號>.key`
+（**不印出**）、代號寫進 `node` 檔 → 程式複製到 `%USERPROFILE%\.asn\app\` → 呼叫 `app\install-task.ps1 -Apply`
 建立登入排程 `AsnBridge-<代號>`（舊名 `IroriRelayMachine-<代號>` 若存在會一併移除；設定同手冊：登入時、隱藏視窗、失敗 1 分鐘後重啟 5 次）並立刻啟動 → 檢查連線。
 
 - **代號規則**（同後端 register）：英數、`-`、`_`，1～32 字，全名單唯一。預設由電腦名稱產生。邀請碼若限定前綴
   （工頭開的邀請碼，例如 `W-`），安裝程式自動補上前綴再試；撞名（409）會請使用者換一個；`t<數字>-` 開頭留給其他租戶。
 - **已安裝過**：再雙擊「安裝.cmd」＝更新程式（只換 `app\`、重啟橋，不重註冊、不動金鑰）。
 - **金鑰不見了**（但名單上還有這個代號）：帳號擁有者產生「重設碼」，使用者在命令列跑 `安裝.cmd -Reissue`，貼重設碼並輸入原代號。
-- **解除安裝**：「解除安裝.cmd」（安裝後 `%USERPROFILE%.asn\uninstall\` 也有一份）：移除排程、**只結束
+- **解除安裝**：「解除安裝.cmd」（安裝後 `%USERPROFILE%\.asn\uninstall\` 也有一份）：移除排程、**只結束
   `bridge.pid`、`mailbox.pid` 記的程序**（且確認 pid 沒被別的程式重用）、詢問是否刪除金鑰與資料夾，並可同時 `leave` 離開名單
   （之後同一代號才能重新註冊）。
 - 所有 ps1 支援 `-WhatIf`（預覽，不改任何東西、不連網）。

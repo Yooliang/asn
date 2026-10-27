@@ -74,7 +74,7 @@ issue #12 內建橋第五期。`BRIDGE-RUST.md` 的第一至四段讓 ASN 內建
 ## 6. 切換工作機前要注意
 
 1. 工作機要先把舊 Node 橋與它的工作排程停掉（設定頁「改由 ASN 負責」，需 `allow_takeover` 放行並按確認）；內建橋拿不到 `bridge.pid` 鎖時不會啟動。
-2. 確認 `%USERPROFILE%.asn\agents.json` 還在；Gemini 工作者的 `command` 要在 ASN 行程的 `PATH` 找得到（從工作排程或開機啟動的 ASN，PATH 可能比互動終端機少，必要時在 `agents.json` 寫完整路徑）。
+2. 確認 `%USERPROFILE%\.asn\agents.json` 還在；Gemini 工作者的 `command` 要在 ASN 行程的 `PATH` 找得到（從工作排程或開機啟動的 ASN，PATH 可能比互動終端機少，必要時在 `agents.json` 寫完整路徑）。
 3. Gemini 要保持登入：ASN 是背景程式，不會替它開瀏覽器登入；失效時寄信會收到「需要登入…請到這台電腦前登入」並在名單標 `login-required`。
 4. Codex 要在 `~/.codex`（或 `CODEX_HOME`）有資料、版本 ≥ 0.154（已驗證 0.154.0）；視窗要先 `/rename` 取名才會列入名單，且必須是**普通沙盒**（完全存取的視窗不收外部來信）。Codex 預設沙盒沒有網路，視窗裡的程式連不上仲介，所以回信一律走橋自動寄回。
 5. 換手後先看 `machine-<ID>\bridge.log` 的 `acp:`、`codex` 開頭的行：設定錯誤、跳過的條目、版本不符、起不來的原因都記在這裡。
