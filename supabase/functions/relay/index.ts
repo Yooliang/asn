@@ -14,6 +14,7 @@ import { bellTopicsOf, handleChatHistory, personArgs, sendWithPerson, voiceArgs 
 import { normalizeRosterAgents, rosterBellTopics } from "../_shared/roster.ts";
 import { parseWindowRename, renamesFromRoster } from "../_shared/window_rename.ts";
 import { sanitizeClaudeMod } from "../_shared/claude_mod.ts";
+import { sanitizeNodePlatform } from "../_shared/node_platform.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
 import * as signal from "../_shared/signal.ts";
 import { handleNodeLaunchAction, LAUNCH_ACTIONS, sanitizeLauncher } from "../_shared/launch.ts";
@@ -272,6 +273,13 @@ Deno.serve(async (req) => {
       const { data: ld, error: le } = await db.rpc("asn_relay_set_launcher", { p_node: me.id, p_launcher: l });
       if (le) console.error(le);
       else if (ld?.error) console.warn("set_launcher", me.id, ld.error);
+    }
+    // 這台設備的平台與「不開放開新夥伴」的原因（選填 platform／launch_closed_reason，0.2 H2；機器橋帶）。舊資料庫沒有這支函式只記 log，不影響名單
+    if ("platform" in b || "launch_closed_reason" in b) {
+      const np = sanitizeNodePlatform(b);
+      const { data: pd, error: pe } = await db.rpc("asn_relay_set_platform", { p_node: me.id, p_platform: np.platform, p_closed_reason: np.reason });
+      if (pe) console.warn("set_platform", me.id, pe.message ?? pe);
+      else if (pd?.error) console.warn("set_platform", me.id, pd.error);
     }
     // 這台電腦的 Claude 外掛狀態（選填 mod；啟動檢查完與狀態變化時才帶）。格式不對或舊資料庫沒有這支函式都只記 log，不影響名單
     if ("mod" in b) {
