@@ -5,7 +5,7 @@ import { EMO, emo, fmt, fmtDate, initial, plain } from './text.mjs'
 import { composeHintTitle, composePlaceholder } from './compose.mjs'
 import { foldBarArrow, hasSideCol, isCollapsed, msgLayout, paneClasses, sideOf } from './merge.mjs'
 import { autoAvatarDataUrl } from './avatar.mjs'
-import { vendorBadgeHtml, vendorIconSvg } from './vendor-icons.mjs'
+import { AsnAvatar } from './avatar-badge.mjs'
 import { QUOTE_PREFIX, composeReply, findQuoted, replyTarget, splitQuote } from './reply-quote.mjs'
 import { applyMention, markMentions, mentionOptions, mentionQuery } from './mention.mjs'
 import { FILE_ACCEPT, formatBytes, photoExpired, photoTitle } from './photo.mjs'
@@ -33,7 +33,7 @@ const STATUS = { online: '線上', busy: '忙碌', away: '暫離', offline: '顯
 
 export const ChatPane = {
   name: 'ChatPane',
-  components: { Annotator, ActionBar, CallView, ConfirmCards },
+  components: { Annotator, ActionBar, CallView, ConfirmCards, AsnAvatar },
   props: {
     friend: { type: Object, default: null },
     me: { type: Object, default: () => ({ nick: '我', status: 'online' }) },
@@ -273,7 +273,7 @@ export const ChatPane = {
     watch(() => props.friend?.id, () => { replying.value = null; jumpNote.value = '' })
     const spkOf = m => props.friend?.spk?.[m.fk] ?? null   // 後台給的成員狀態 { vendor, off }；舊後台沒有就是 null（當在線、廠商不明）
     const spkOff = m => spkOf(m)?.off === true
-    const spkVendor = m => vendorIconSvg(spkOf(m)?.vendor)   // 內建固定字串，沒有外部資料
+    const spkVendorKey = m => String(spkOf(m)?.vendor ?? '') || 'other'   // 發言者的廠商鍵（舊後台沒帶就用通用圖）；圖示由 <asn-avatar> 換成內建固定字串
     const speakerAv = m => autoAvatarDataUrl(m.av)   // 群組發言者的大頭貼：與個人名單同一套預設圖
     const msgKey = (m, i) => (m.id ? String(m.id) : `${m.t}:${i}`)
     const msgTier = m => tierOf(m)
@@ -332,7 +332,7 @@ export const ChatPane = {
     const docEl = ref(null)
     // 訊息內文裡的連結：不在 WebView 導覽，一律交給系統瀏覽器（Rust 端 open_link 再驗一次協定）
     const onBodyClick = ev => handleLinkClick(ev, url => globalThis.__TAURI__?.core?.invoke?.('open_link', { url }))
-    return { vendorBadge: vendorBadgeHtml, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendor, isRoom, attachOk, opsItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, attachOk, opsItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -341,7 +341,7 @@ export const ChatPane = {
   <div class="chatpane-main">
   <div class="conv">
     <div class="conv-main">
-      <div class="to-line" :class="{ 'is-offline': !isRoom && friend.status === 'offline' }"><span class="avb xs to-av" v-if="!isRoom" :class="{ off: friend.status === 'offline' }"><span class="dp xs" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span><img :src="friendAv" alt=""></span></span><span class="avb-v" aria-hidden="true" v-html="vendorBadge(friend)"></span></span><span v-html="emo(friend.nick)"></span>
+      <div class="to-line" :class="{ 'is-offline': !isRoom && friend.status === 'offline' }"><asn-avatar class="to-av" v-if="!isRoom" :src="friendAv" :friend="friend" :status="friend.status" :hue="friend.hue"></asn-avatar><span v-html="emo(friend.nick)"></span>
         <span class="to-psm" v-if="friend.psm" v-html="emo(friend.psm)"></span>
         <span class="to-busy to-readonly" v-if="displayOnly">{{ DISPLAY_ONLY_TAG }}</span>
         <span class="to-busy" v-if="warn && warn !== 'offline'">{{ STATUS[friend.status] }}，可能無法馬上回應</span>
@@ -356,9 +356,9 @@ export const ChatPane = {
         <template v-for="(m, i) in log" :key="i">
           <div v-if="m.k === 'sys'" class="sys" :class="{ nudge: m.nudge }">{{ m.text }}</div>
           <div v-else class="msg" :data-i="i" :class="['al-' + lay(m.k).align, { mine: m.k === 'me', 'act-on': actAt === i }]" @click="tapMsg(i, $event)">
-            <div class="m-av m-av-spk" :class="{ 'is-off': spkOff(m) }" v-if="m.av"><div class="dp xs" :class="{ 'st-offline': spkOff(m) }" :style="{ '--h': friend.hue }"><span><img :src="speakerAv(m)" alt=""></span></div><span class="spk-vendor" v-if="m.kind === 'ai'" aria-hidden="true" v-html="spkVendor(m)"></span></div>
+            <div class="m-av m-av-spk" :class="{ 'is-off': spkOff(m) }" v-if="m.av"><asn-avatar :src="speakerAv(m)" :vendor="m.kind === 'ai' ? spkVendorKey(m) : ''" :status="spkOff(m) ? 'offline' : 'online'" :hue="friend.hue"></asn-avatar></div>
             <div class="m-av m-av-spk m-av-me" v-if="isRoom && m.k === 'me'"><div class="dp xs" :style="{ '--h': 205 }"><span><img :src="meAv" alt=""></span></div></div>
-            <div class="m-av" v-if="lay(m.k).avatar && !m.badge && !m.av"><span class="avb xs" :class="{ off: friend.status === 'offline' }"><span class="dp xs" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span><img :src="friendAv" alt=""></span></span><span class="avb-v" aria-hidden="true" v-if="!isRoom" v-html="vendorBadge(friend)"></span></span></div>
+            <div class="m-av" v-if="lay(m.k).avatar && !m.badge && !m.av"><asn-avatar :src="friendAv" :friend="isRoom ? null : friend" :status="friend.status" :hue="friend.hue"></asn-avatar></div>
             <div class="m-main">
               <div class="who"><span class="spk-av" :class="'is-' + m.kind" v-if="m.badge && !m.av" aria-hidden="true">{{ initial(plain(m.who || friend.nick)) }}</span>{{ m.k === 'me' ? plain(me.nick) : plain(m.who || friend.nick) }}<span class="who-badge" :class="'is-' + m.kind" v-if="m.badge && !(m.kind === 'ai' && m.av)">{{ m.badge }}</span>：<time>{{ fmt(m.t) }}</time><span class="from-dev" v-if="m.k === 'me' && m.from">從 {{ plain(m.from) }}</span><span class="voice-tag" v-if="m.k === 'me' && isVoiceMsg(m)" title="這則是通話中說的，辨識成文字後寄出">🎤 語音</span><span v-if="m.k === 'me' && msgTier(m) && msgTier(m) !== 'sent'" class="msg-st" :class="'st-' + msgTier(m)" :title="msgStatusTip(m)" :aria-label="msgStatusTip(m)">{{ msgTier(m) === 'delivered' ? '✓' : '✓✓' }}</span><span v-if="isRoom && m.k === 'me' && readLabel(m.rd)" class="read-n" :class="{ all: m.rd.n >= m.rd.total }" :title="readTitle(m.rd)">{{ readLabel(m.rd) }}</span>
                 <button v-if="voice && m.k === 'them' && m.text" class="spk" :class="{ on: speaking(m, i) }" type="button" @click="speak(m, i)" :aria-label="speakTip(m, i)" :title="speakTip(m, i)">
@@ -448,7 +448,7 @@ export const ChatPane = {
   <aside class="dp-side" v-if="sideCol" :class="'dp-side-' + side">
     <div class="dp-side-stack" v-show="!collapsed">
       <div class="dp-grp">
-        <span class="avb xl" :class="{ off: friend.status === 'offline' }"><span class="dp xl" :class="'st-' + friend.status" :style="{ '--h': friend.hue }"><span><img :src="friendAv" alt=""></span></span><span class="avb-v" aria-hidden="true" v-if="!isRoom" v-html="vendorBadge(friend)"></span></span>
+        <asn-avatar size="xl" :src="friendAv" :friend="isRoom ? null : friend" :status="friend.status" :hue="friend.hue"></asn-avatar>
         <button class="dp-fold-bar" type="button" @click="$emit('toggle-dp')" :aria-label="foldTip" :aria-expanded="!collapsed" :title="foldTip">{{ barArrow }}</button>
       </div>
       <div class="dp-grp">

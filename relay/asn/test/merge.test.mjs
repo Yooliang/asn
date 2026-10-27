@@ -231,7 +231,7 @@ test('守門：側欄寬度不小於大頭貼 xl 尺寸；對方在上、自己�
   assert.ok(/\.dp-fold-strip\{flex:1/.test(css), '收起時留一條整欄高的可點條')
   const pane = fs.readFileSync(path.join(UI, 'lib', 'chatpane.mjs'), 'utf8')
   const i = pane.indexOf('<aside class="dp-side"')
-  const f = pane.indexOf("'st-' + friend.status", i), bar1 = pane.indexOf('class="dp-fold-bar"', f), m = pane.indexOf("'st-' + me.status", i), bar2 = pane.indexOf('class="dp-fold-bar"', m)
+  const f = pane.indexOf('<asn-avatar size="xl" :src="friendAv"', i), bar1 = pane.indexOf('class="dp-fold-bar"', f), m = pane.indexOf("'st-' + me.status", i), bar2 = pane.indexOf('class="dp-fold-bar"', m)
   assert.ok(i > 0 && f > i && bar1 > f && m > bar1 && bar2 > m, '順序：對方大頭貼、其下橫條、自己大頭貼、其下橫條')
   assert.ok(pane.includes('class="dp-fold-strip"'), '收起狀態要有可展開的條')
   assert.ok(/\.dp-grp\{[^}]*width:var\(--dp-xl\)/.test(css), '橫條與大頭貼同寬')

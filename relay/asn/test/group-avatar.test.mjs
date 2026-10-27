@@ -44,7 +44,8 @@ test('群組訊息樣板：每則對方訊息放發言者自己的大頭貼（�
   compile(tpl, { onError: e => errs.push(e.message) })
   assert.deepEqual(errs, [])
   // 10-25：頭像下方的「AI」小標籤改成右下角的廠商小圖（spk-vendor）、離線時整欄帶 is-off；頭像本身（speakerAv）不變
-  assert.match(tpl, /<div class="m-av m-av-spk"[^>]* v-if="m\.av"><div class="dp xs"[^>]*><span><img :src="speakerAv\(m\)" alt=""><\/span><\/div>(<span class="spk-vendor"[^>]*><\/span>)?<\/div>/)
+  // #336：頭像與右下角廠商小圖都交給統一頭像 <asn-avatar>
+  assert.match(tpl, /<div class="m-av m-av-spk"[^>]* v-if="m\.av"><asn-avatar :src="speakerAv\(m\)"[^>]*><\/asn-avatar><\/div>/)
   assert.doesNotMatch(tpl, /av-tag/)
   assert.match(tpl, /<span class="spk-av" :class="'is-' \+ m\.kind" v-if="m\.badge && !m\.av"/, '有大頭貼就不再畫首字徽章')
   assert.match(chatpane, /import \{[^}]*autoAvatarDataUrl[^}]*\} from '\.\/avatar\.mjs'/)

@@ -95,7 +95,7 @@
               <ul v-show="!collapsed[g.key]">
                 <li v-for="c in g.items" :key="c.id" @contextmenu.prevent="openBuddyMenu(c, $event)">
                   <button class="buddy" :class="{ offline: c.status === 'offline', pending: c.pending }" @click="openChat(c.id)">
-                    <span class="avb xs" :class="{ off: c.status === 'offline' }"><span class="dp xs" :class="'st-' + (g.kind === 'archived' ? 'offline' : c.status)"><span><img :src="avOf(c)" alt=""></span></span><span class="avb-v" aria-hidden="true" v-html="vendorBadge(c)"></span></span>
+                    <asn-avatar :src="avOf(c)" :friend="c" :status="g.kind === 'archived' ? 'offline' : c.status" :off="c.status === 'offline'"></asn-avatar>
                     <span class="b-text">
                       <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-ctx" :class="{ danger: contextLabel(c).danger }" v-if="contextLabel(c)">{{ contextLabel(c).text }}</span><span class="b-st" v-if="statusNote(c.status)">{{ statusNote(c.status) }}</span></span>
                       <span class="b-psm" v-if="c.psm" v-html="emo(c.psm)"></span>
@@ -106,7 +106,7 @@
                 <template v-if="g.kind === 'device' && g.node === selfNode">
                   <li v-for="r in termRoster" :key="r.id">
                     <button class="buddy term-buddy" type="button" @click="openTermTab(r.termId)">
-                      <span class="avb xs"><span class="dp xs" :class="'st-' + r.status"><span class="term-glyph" aria-hidden="true">&gt;_</span></span><span class="avb-v" aria-hidden="true" v-html="vendorBadge(r)"></span></span>
+                      <asn-avatar glyph=">_" :friend="r" :status="r.status" :off="false"></asn-avatar>
                       <span class="b-text">
                         <span class="b-line"><span class="b-nick">{{ r.nick }}</span><span class="term-tag">{{ r.termBadge }}</span></span>
                         <span class="b-psm" v-if="r.psm">{{ r.psm }}</span>
@@ -178,7 +178,7 @@
       <div class="ctab home" v-if="!tabItems.length" :class="{ on: view === 'home' }" role="tab" :aria-selected="view === 'home'"><img src="img/logo.svg" alt="" width="14" height="14"><span class="ctab-name">開始</span></div>
       <div v-for="t in tabItems" :key="t.id" class="ctab" draggable="true" :class="[{ on: view === 'chat' && t.id === ui.active, pinned: isChatTabPinned(t.id), 'panel-tab': t.panel }, tabDragClass(t.id)]" role="tab" :aria-selected="view === 'chat' && t.id === ui.active" :title="plain(t.nick)" :aria-label="plain(t.nick)" @click="activateTab(t.id)" @contextmenu.prevent="openChatTabMenu(t.id, $event)" @auxclick.middle.prevent="!isChatTabPinned(t.id) && closeChatTab(t.id)" @dragstart="onTabDragStart(t.id, $event)" @dragend="onTabDragEnd" @dragover="onTabDragOver(t.id, $event)" @drop="onTabDrop(t.id, $event)">
         <template v-if="isChatTabPinned(t.id)">
-          <span class="avb xs pin-av" :class="{ off: t.status === 'offline' }"><span class="dp xs" :class="'st-' + t.status"><span><img :src="avOf(t)" alt=""></span></span><span class="avb-v" aria-hidden="true" v-html="vendorBadge(t)" v-if="!t.panel &amp;&amp; !t.room"></span></span>
+          <asn-avatar class="pin-av" :src="avOf(t)" :friend="!t.panel &amp;&amp; !t.room ? t : null" :status="t.status"></asn-avatar>
         </template>
         <template v-else>
           <svg v-if="t.panel" class="panel-ic" viewBox="0 0 24 24" aria-hidden="true"><path :d="t.panel === 'term' ? 'M3 5h18v14H3zM7 10l3 2-3 2M12 15h4' : t.panel === 'guide' ? 'M4.5 5c2.6-.9 5.2-.7 7.5 1v13c-2.3-1.7-4.9-1.9-7.5-1zM19.5 5c-2.6-.9-5.2-.7-7.5 1v13c2.3-1.7 4.9-1.9 7.5-1z' : 'M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1'"/></svg>

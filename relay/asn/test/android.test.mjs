@@ -257,10 +257,12 @@ test('手機開新夥伴：只走要本人簽章的指令；不用電腦版不�
 test('名單每列：廠商小徽章疊在頭像右下角（約 40%、白底圓角）；第三行最後一句話單行省略、色淡；補往來有節制', () => {
   const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
   assert.match(css, /\.m-av-wrap \.dp\{display:block;width:38px;height:38px\}/, '包在 wrapper 裡的 .dp 要明確 display:block（inline 會忽略寬高）')
-  assert.match(html, /<span class="m-av-wrap">[\s\S]*?<span class="m-vendor" aria-hidden="true" v-html="vendorIcon\(c\)"><\/span>/)
-  const v = /\.m-vendor\{([^}]*)\}/.exec(css)[1]
+  // 小徽章改用統一頭像 <asn-avatar size="sm">（#336），樣式是 style.css 的 .avb 那一套
+  const base = read('ui', 'style.css')
+  assert.match(html, /<span class="m-av-wrap">\s*<asn-avatar size="sm" :src="avOf\(c\)" :friend="c"/)
+  const v = /\.avb-v\{([^}]*)\}/.exec(base)[1]
   assert.match(v, /position:absolute/); assert.match(v, /right:-?\d+px/); assert.match(v, /bottom:-?\d+px/); assert.match(v, /background:#fff/); assert.match(v, /border-radius:\d+px/)
-  const w = Number(/width:(\d+)px/.exec(v)[1]), a = Number(/\.m-av-wrap\{[^}]*width:(\d+)px/.exec(css)[1])
+  const w = Number(/\.avb\.sm \.avb-v\{width:(\d+)px/.exec(base)[1]), a = Number(/\.m-av-wrap\{[^}]*width:(\d+)px/.exec(css)[1])
   assert.ok(w / a >= 0.35 && w / a <= 0.45, `徽章約頭像寬的 40%（${w}/${a}）`)
   assert.match(html, /<span class="b-last" v-if="lastOf\(c\.id\)">\{\{ lastOf\(c\.id\) \}\}<\/span>/)
   const last = /\.m-buddy \.b-last\{([^}]*)\}/.exec(css)[1]

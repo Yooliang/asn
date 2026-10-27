@@ -17,6 +17,7 @@ import { deviceAsn } from './lib/presence.mjs'
 import { POLL_MS as REMOTE_UPD_POLL_MS, mineFromStatus, remoteUpdateView } from './lib/remote-update.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
+import { AsnAvatar } from './lib/avatar-badge.mjs'
 import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
 import { copyText, createGroupApi, roomHue, roomInitial } from './lib/groups.mjs'
@@ -48,7 +49,7 @@ import { ONBOARD_STORE, planOnboarding } from './lib/onboard.mjs'
 import { friendId } from './lib/roster.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher, modelSwitchBlock } from './lib/model-switch.mjs'
 import { consoleBlock } from './lib/actionbar.mjs'
-import { vendorBadgeHtml, vendorIconSvg } from './lib/vendor-icons.mjs'
+import { vendorIconSvg } from './lib/vendor-icons.mjs'
 import { channelRows, runChoices, runOptions, vendorRows } from './lib/model-catalog.mjs'
 import { cleanPiModels, piChoiceFor, piLaunchArgs, piOnlyVendorRows, providerStates } from './lib/pi-models.mjs'
 import { createMic } from './lib/mic.mjs'
@@ -1601,7 +1602,7 @@ const app = createApp({
       deviceDrag, deviceDrop, onDeviceDragStart, onDeviceDragOver, onDeviceDrop, onDeviceTabKey, clearDeviceDrag,
       tab, adI, hub, roomRows, roomHue, roomInitial, groupFlow, openGroupMenu, decideCard, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,
       GUIDES, view, SETTING_CATS, catSub, PANEL_KINDS, panelTabId, panelGuide, panelTitle, openPanel, closePanel, settingsState, applySetting, pickAvatarFile,
-      selfNode: info.node, transport, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg, vendorBadge: vendorBadgeHtml,
+      selfNode: info.node, transport, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg,
       searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickPartnerDevice, partnerDevKey, partnerCanNext, partnerNext,
       DISPLAY_MODES, partnerShowDisplay, partnerRun, partnerChannels,
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
@@ -1621,6 +1622,7 @@ const app = createApp({
 app.component('chat-pane', ChatPane)
 app.component('group-sheet', GroupSheet)
 app.component('asn-dialog', AsnDialog)
+app.component('asn-avatar', AsnAvatar)
 app.component('partner-op-dialog', PartnerOpDialog)
 app.component('guide-doc', GuideDoc)
 app.component('settings-panel', SettingsPanel)

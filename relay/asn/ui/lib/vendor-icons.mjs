@@ -16,7 +16,19 @@ const SVG = {
   other: '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="6" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="18" cy="12" r="2" fill="currentColor"/></svg>',
 }
 
+// agy（Antigravity）跑的是 Gemini：用 Gemini 的圖（#336 盤點第 6 點，原本落到「其他」的三點圖）
+SVG.agy = SVG.gemini
+
 export const VENDOR_ICON_KEYS = Object.keys(SVG)
+
+// 圖裡的漸層 id（gemini、minimax）在同一頁重複出現時，url(#…) 都指到第一份；第一份在收合的群組裡（display:none）時，
+// 後面的漸層就畫不出來。每個頭像用自己的尾碼改名，彼此不撞（#336）。沒有 id 的圖原樣回傳。
+export function withUniqueIds(svg, suffix) {
+  const s = String(svg ?? '')
+  const tag = String(suffix ?? '').replace(/[^A-Za-z0-9_-]/g, '')
+  if (!tag || !s.includes(' id="')) return s
+  return s.replace(/ id="([^"]+)"/g, ` id="$1-${tag}"`).replace(/url\(#([^)]+)\)/g, `url(#$1-${tag})`)
+}
 
 export function vendorIconSvg(engineKey) {
   const k = String(engineKey ?? '').trim().toLowerCase()
