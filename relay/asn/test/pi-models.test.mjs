@@ -61,3 +61,16 @@ test('後端 pi_providers 格式轉換（#363）：missing＝這版 pi 沒有；
   assert.deepEqual(providerStates('oops'), {})
   assert.equal(cleanPiModels([{ provider: 'anthropic', model: 'opus[1m]' }]).length, 1, '模型名可以有方括號（跟後端 safe_name 一致）')
 })
+
+test('接線（#351）：經 pi 開新夥伴一律用 pi 的啟動設定，帶 piLaunchArgs 驗過的提供者與模型；清單外不送；打開對話框才查、60 秒內不重查', async () => {
+  const fs = await import('node:fs')
+  const js = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
+  const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
+  const submit = js.slice(js.indexOf('async function submitPartnerDlg'), js.indexOf('async function submitTermViaDialog'))
+  assert.ok(submit.includes("partnerRunChoice.value === 'pi' ? piLaunchArgs("), '送出前先過 piLaunchArgs')
+  assert.ok(submit.includes("profile: 'pi'") && submit.includes('pi_provider: viaPi.provider') && submit.includes('pi_model: viaPi.model'), '帶 pi_provider／pi_model')
+  assert.ok(submit.includes("throw new Error('pi 的模型清單裡沒有這個模型"), '清單外不送')
+  assert.ok(js.includes('if (Date.now() - piInfo.at < 60_000) return'), '60 秒內不重查')
+  assert.ok(js.includes('piReady: PI_VIA_READY && piChoice.value.ok'), 'runOptions 的 piReady 看 pi 自己回答的狀態')
+  assert.ok(html.includes('v-model="partnerDlg.piModel"') && html.includes('v-for="m in piChoice.models"'), '第 2 頁列 pi 的模型')
+})
