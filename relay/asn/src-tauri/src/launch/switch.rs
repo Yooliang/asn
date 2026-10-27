@@ -1656,8 +1656,8 @@ mod tests {
     // ---- 讀程序的工作資料夾（方案 B：接手使用者自己開的 pi 要靠它找對話）----
     #[test]
     fn 工作資料夾正規化() {
-        assert_eq!(normalize_cwd(r"C:\Users\cwen0708"), r"C:\Users\cwen0708");
-        assert_eq!(normalize_cwd(r"C:\Users\cwen0708\"), r"C:\Users\cwen0708", "去尾端斜線");
+        assert_eq!(normalize_cwd(r"C:\Users\alice"), r"C:\Users\alice");
+        assert_eq!(normalize_cwd(r"C:\Users\alice\"), r"C:\Users\alice", "去尾端斜線");
         assert_eq!(normalize_cwd("D:/x/y/"), "D:/x/y", "正斜線也去");
         assert_eq!(normalize_cwd(r"\\?\C:\work"), r"C:\work", "去 verbatim 前綴");
         assert_eq!(normalize_cwd(r"C:\"), r"C:\", "磁碟根目錄保留一條斜線");

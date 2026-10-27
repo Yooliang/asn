@@ -7,7 +7,7 @@
 開發／試用（只這個 session）：
 
 ```
-claude --plugin-dir D:/Github/Yooliang/asn/relay/claude-mod
+claude --plugin-dir <ASN 原始碼>/relay/claude-mod
 ```
 
 正式安裝（本機資料夾 marketplace，只做一次）：

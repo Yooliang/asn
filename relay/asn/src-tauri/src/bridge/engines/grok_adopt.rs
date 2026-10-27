@@ -210,7 +210,7 @@ mod tests {
 
     #[test]
     fn 專屬工作者名字_合法_最長四十字_同名時加尾碼() {
-        assert_eq!(worker_name("C:\\Users\\cwen0708", ""), "grok-接手-cwen0708");
+        assert_eq!(worker_name("C:\\Users\\alice", ""), "grok-接手-alice");
         assert_eq!(worker_name("D:\\Github\\我的 專案\\", ""), "grok-接手-我的-專案");
         assert_eq!(worker_name("D:\\x\\proj", "01a1-6c"), "grok-接手-proj-01a1");
         assert_eq!(worker_name("C:\\", ""), "grok-接手-C");

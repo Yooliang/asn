@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LGPL-3.0-only
+// 本檔逐行移植自 edge-tts（https://github.com/rany2/edge-tts）的 drm.py，原作照 LGPLv3 授權；本檔與它的修改同樣照 LGPL-3.0，不受 ASN 主授權影響（見 THIRD_PARTY_NOTICES.md）。
 // Sec-MS-GEC v2 token：逐行移植自 Python edge-tts 7.3.1 的 drm.py（generate_sec_ms_gec_v2）。
 // 格式 "<16 hex>-<64 hex>"＝CS64 摘要 + 改過初始狀態的 SHA-256 摘要。
 // 全程用 BigInt，語意跟 Python 的無限精度整數一致（Python 有些中間值故意不遮罩，晚一點才 & 0xFFFFFFFF）。

@@ -127,7 +127,7 @@ test('同一份內容打包兩次，zip 的 sha256 一樣（可重現）；--inc
 // ---- 註冊小幫手（假伺服器）----
 
 test('代號建議：只留合法字元、≤32 字、前綴補在前面、不佔 t<數字>- 開頭', () => {
-  assert.equal(suggestNodeId('O019-PC'), 'O019-PC')
+  assert.equal(suggestNodeId('AB12-PC'), 'AB12-PC')
   assert.equal(suggestNodeId('小美 的 筆電'), 'PC')
   assert.equal(suggestNodeId('my laptop!'), 'my-laptop')
   assert.equal(suggestNodeId('x'.repeat(50)).length, 32)
