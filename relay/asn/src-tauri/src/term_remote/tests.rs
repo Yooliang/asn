@@ -60,6 +60,9 @@ mod gui_tests {
     use std::sync::{Arc, Mutex};
     use tempfile::TempDir;
 
+    // 這幾個測試共用同一份全域暫存，要排隊跑，否則互相 reset
+    static SERIAL: Mutex<()> = Mutex::new(());
+
     fn fake_term_server(take_queue: Vec<Vec<Value>>) -> (String, Arc<Mutex<Vec<String>>>) {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://127.0.0.1:{}/relay", l.local_addr().unwrap().port());
@@ -89,6 +92,7 @@ mod gui_tests {
 
     #[tokio::test]
     async fn 本機先確認則遠端作廢() {
+        let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         reset_for_test();
         let d = TempDir::new().unwrap();
         let (url, seen) = fake_term_server(vec![]);
@@ -104,6 +108,7 @@ mod gui_tests {
 
     #[tokio::test]
     async fn 本機取消則撤回遠端請求_之後不再有東西可確認() {
+        let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         reset_for_test();
         let d = TempDir::new().unwrap();
         let (url, seen) = fake_term_server(vec![]);
@@ -120,6 +125,7 @@ mod gui_tests {
 
     #[tokio::test]
     async fn 雜湊不符執行失敗並回報() {
+        let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         reset_for_test();
         let d = TempDir::new().unwrap();
         let row = vec![json!({ "id": "11111111-1111-1111-1111-111111111111", "kind": "send", "term_id": "1", "body_hash": "b".repeat(64), "enter": false })];
