@@ -3,6 +3,21 @@
 //! 絕不加 `--credentials`、不碰 `pi auth print-*`：不讀、不印任何憑證。
 use serde::Serialize;
 use serde_json::{json, Value};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+/// 結果快取多久（登入、改憑證後使用者可以傳 force 立刻重查）
+pub const CACHE_TTL: Duration = Duration::from_secs(60);
+static MODELS_CACHE: Mutex<Option<(Instant, Vec<PiModel>)>> = Mutex::new(None);
+static PROVIDERS_CACHE: Mutex<Option<(Instant, Value)>> = Mutex::new(None);
+
+fn fresh<T: Clone>(slot: &Mutex<Option<(Instant, T)>>, now: Instant) -> Option<T> {
+    let g = slot.lock().unwrap_or_else(|e| e.into_inner());
+    g.as_ref().filter(|(at, _)| now.saturating_duration_since(*at) < CACHE_TTL).map(|(_, v)| v.clone())
+}
+fn store<T>(slot: &Mutex<Option<(Instant, T)>>, v: T) {
+    *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some((Instant::now(), v));
+}
 
 const LIST_TIMEOUT_SECS: u64 = 10;
 const MAX_MODELS: usize = 300;
@@ -19,8 +34,19 @@ pub struct PiModel {
 }
 
 /// 名稱只收安全的字元與長度（它會顯示在畫面上，也會當 --provider／--model 的參數）
-fn safe_name(s: &str) -> bool {
+pub(crate) fn safe_name(s: &str) -> bool {
     !s.is_empty() && s.len() <= 100 && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '/' | ':' | '+' | '@' | '[' | ']'))
+}
+
+/// 開 pi 時帶的 `--provider X --model Y`。兩個都空＝不帶（用 pi 自己的預設）；只給一個、或名稱不合法＝回錯，不悄悄忽略。
+pub fn model_args(provider: &str, model: &str) -> Result<Vec<String>, String> {
+    let (p, m) = (provider.trim(), model.trim());
+    match (p.is_empty(), m.is_empty()) {
+        (true, true) => Ok(Vec::new()),
+        (false, false) if safe_name(p) && safe_name(m) => Ok(vec!["--provider".into(), p.into(), "--model".into(), m.into()]),
+        (false, false) => Err("pi 的提供者或模型名稱含不允許的字元".into()),
+        _ => Err("提供者和模型要一起給（只給了一個）".into()),
+    }
 }
 
 /// `pi --list-models` 的表格 → 模型列。第一行是標題；「No models matching」或空輸出＝空陣列；欄位不夠或名稱不安全的列丟掉。
@@ -55,23 +81,47 @@ pub fn parse_auth(text: &str) -> &'static str {
     }
 }
 
-pub fn models_real() -> Vec<PiModel> {
+/// force＝true 略過快取（使用者剛登入或剛設好憑證）。查失敗（沒有 pi、逾時）的空結果不進快取，下次再試
+pub fn models_real(force: bool) -> Vec<PiModel> {
+    if !force {
+        if let Some(v) = fresh(&MODELS_CACHE, Instant::now()) {
+            return v;
+        }
+    }
     match super::pi_setup::run_pi(&["--list-models"], LIST_TIMEOUT_SECS) {
-        Ok((0, out)) => parse_models(&out),
+        Ok((0, out)) => {
+            let v = parse_models(&out);
+            store(&MODELS_CACHE, v.clone());
+            v
+        }
         _ => Vec::new(),
     }
 }
 
-pub fn providers_real() -> Value {
-    let mut rows = Vec::new();
-    for p in KNOWN_PROVIDERS {
-        let state = match super::pi_setup::run_pi(&["auth", "check", "--provider", p, "--json", "--no-refresh"], LIST_TIMEOUT_SECS) {
-            Ok((_, out)) => parse_auth(&out),
-            Err(_) => "unknown",
-        };
-        rows.push(json!({ "provider": p, "state": state }));
+fn check_one(p: &'static str) -> Value {
+    let state = match super::pi_setup::run_pi(&["auth", "check", "--provider", p, "--json", "--no-refresh"], LIST_TIMEOUT_SECS) {
+        Ok((_, out)) => parse_auth(&out),
+        Err(_) => "unknown",
+    };
+    json!({ "provider": p, "state": state })
+}
+
+/// 8 個提供者同時查（各自一條執行緒，單一逾時 10 秒，整體最多約 10 秒），順序照 KNOWN_PROVIDERS
+pub fn providers_real(force: bool) -> Value {
+    if !force {
+        if let Some(v) = fresh(&PROVIDERS_CACHE, Instant::now()) {
+            return v;
+        }
     }
-    json!(rows)
+    let rows: Vec<Value> = std::thread::scope(|sc| {
+        let hs: Vec<_> = KNOWN_PROVIDERS.iter().map(|p| sc.spawn(move || check_one(p))).collect();
+        hs.into_iter().zip(KNOWN_PROVIDERS).map(|(h, p)| h.join().unwrap_or_else(|_| json!({ "provider": p, "state": "unknown" }))).collect()
+    });
+    let v = json!(rows);
+    if rows.iter().any(|r| r["state"] != "unknown") {
+        store(&PROVIDERS_CACHE, v.clone());   // 全部 unknown（多半是沒有 pi）不進快取
+    }
+    v
 }
 
 #[cfg(test)]
@@ -127,13 +177,49 @@ deepseek      deepseek-v4-pro             1M       384K     yes       no    \n";
     #[test]
     #[ignore]
     fn 真機_models_real_列得出來_providers_real_分得出狀態() {
-        let m = models_real();
+        let m = models_real(true);
         assert!(!m.is_empty(), "這台應該列得出模型");
-        let p = providers_real();
+        let t = Instant::now();
+        let p = providers_real(true);
+        eprintln!("providers 並行耗時 {:?}", t.elapsed());
         let arr = p.as_array().unwrap();
         assert_eq!(arr.len(), KNOWN_PROVIDERS.len());
         assert!(arr.iter().any(|r| r["provider"] == "qwen" && r["state"] == "missing"), "pi 1.4.0 沒有 qwen：{p}");
         eprintln!("models={} providers={p}", m.len());
+    }
+
+    #[test]
+    fn 開_pi_的模型參數_兩個都空不帶_只給一個或不合法就報錯() {
+        assert_eq!(model_args("", "").unwrap(), Vec::<String>::new());
+        assert_eq!(model_args(" ", " ").unwrap(), Vec::<String>::new());
+        assert_eq!(model_args("anthropic", "claude-sonnet-5-5").unwrap(), ["--provider", "anthropic", "--model", "claude-sonnet-5-5"]);
+        assert_eq!(model_args("minimax", "MiniMax-M3").unwrap().len(), 4);
+        assert!(model_args("anthropic", "").is_err());
+        assert!(model_args("", "m").is_err());
+        assert!(model_args("a;b", "m").is_err());
+        assert!(model_args("a", "m --api-key x").is_err(), "不能夾帶別的旗標");
+        assert!(model_args("a", &"x".repeat(101)).is_err());
+    }
+
+    #[test]
+    fn 快取_六十秒內回同一份_過期或_force_才重查() {
+        let slot: Mutex<Option<(Instant, u32)>> = Mutex::new(None);
+        let t0 = Instant::now();
+        assert_eq!(fresh(&slot, t0), None);
+        store(&slot, 7);
+        assert_eq!(fresh(&slot, Instant::now()), Some(7));
+        assert_eq!(fresh(&slot, t0 + CACHE_TTL + Duration::from_secs(1)), None, "超過 60 秒就不算新鮮");
+    }
+
+    #[test]
+    fn 提供者並行查_順序照固定清單() {
+        // 不真的跑 pi：check_one 在沒有 pi 時回 unknown，順序與數量仍要對得上
+        let rows: Vec<Value> = std::thread::scope(|sc| {
+            let hs: Vec<_> = KNOWN_PROVIDERS.iter().map(|p| sc.spawn(move || json!({ "provider": p }))).collect();
+            hs.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        let names: Vec<&str> = rows.iter().map(|r| r["provider"].as_str().unwrap()).collect();
+        assert_eq!(names, KNOWN_PROVIDERS);
     }
 
     #[test]
