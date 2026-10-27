@@ -3,6 +3,7 @@
 // 純繁體中文；不顯示節點代號與夥伴 ID。node 也要能載入（測試），所以 Vue 只在元件 setup 裡才取用。
 import { AsnDialog } from './dialog.mjs'
 import { machinesByNode } from './mobile-launch.mjs'
+import { launchersErrorText } from './launcher-poll.mjs'
 import { ADOPT_ACK, OP_LABEL, OP_POLL_MS, buildOpRequest, dialogEngine, infoRows, opErrorText, opFormError, progressView } from './partner-ops.mjs'
 
 const errText = e => String(e?.message ?? e ?? '').replace(/\s+/g, ' ').trim().slice(0, 80) || '原因不明'
@@ -16,7 +17,8 @@ export async function loadOpsContext(api) {
     if (st && typeof st.signed_in === 'boolean') out.signedIn = st.signed_in
     else out.authError = '沒有收到回應'
   } catch (e) { out.authError = errText(e) }
-  try { out.machines = machinesByNode(await api.launchers()); out.loaded = true } catch (e) { out.loadError = errText(e) }
+  // 查不到的原因只寫使用者能做什麼（#380：不在畫面秀「HTTP 403」）；原文進 console
+  try { out.machines = machinesByNode(await api.launchers()); out.loaded = true } catch (e) { console.info('[ASN] 查電腦設定失敗', errText(e)); out.loadError = launchersErrorText(e) }
   return out
 }
 

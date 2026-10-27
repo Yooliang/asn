@@ -1240,6 +1240,23 @@ b", "op": "close" }),
         assert!(s[0].contains("action=acct_list") && s[1].contains("action=acct_switch"));
     }
 
+    #[cfg(desktop)]
+    #[tokio::test]
+    async fn 電腦版查啟動設定與帳號清單_有登入帶簽章_沒登入照舊不帶() {
+        // #380：成員角色的電腦不帶簽章，後台回 403；有登入就要帶，沒登入（擁有者角色的電腦）照舊
+        let (url, seen) = fake_server(200);
+        let r = Relay::new(url, "secret-key".into(), "P".into(), "P-ASN".into());
+        crate::launch::relay_launchers(&r, None, Some("usertoken-9")).await.unwrap();
+        crate::acct_remote::remote_list(&r, "W", Some("usertoken-9")).await.unwrap();
+        crate::launch::relay_launchers(&r, None, None).await.unwrap();
+        crate::acct_remote::remote_list(&r, "W", Some("")).await.unwrap();
+        let s = seen.lock().unwrap();
+        assert_eq!(s.len(), 4);
+        assert!(s[0].contains("action=launchers") && s[1].contains("action=acct_list"));
+        assert!(s[..2].iter().all(|x| x.to_lowercase().contains("x-asn-user: bearer usertoken-9")), "{s:?}");
+        assert!(s[2..].iter().all(|x| !x.to_lowercase().contains("x-asn-user")), "沒登入或空憑證不帶簽章標頭：{s:?}");
+    }
+
     #[tokio::test]
     async fn 遠端開視窗_沒有本人簽章不送出_有簽章帶標頭() {
         let (url, seen) = fake_server(200);

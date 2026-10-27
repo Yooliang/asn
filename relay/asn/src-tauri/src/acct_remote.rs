@@ -291,11 +291,12 @@ pub async fn report(relay: &Relay, list: &[AccountInfo], codex: Option<&CodexLog
         r => r,
     }
 }
-pub async fn remote_list(relay: &Relay, node: &str) -> Result<Value, String> {
+/// 有登入就帶本人簽章（#380：成員角色的電腦不帶會被後台擋 403）；沒登入照舊不帶
+pub async fn remote_list(relay: &Relay, node: &str, token: Option<&str>) -> Result<Value, String> {
     if !valid_node(node) {
         return Err("設備代號不對".into());
     }
-    relay.api("acct_list", Some(json!({ "node": node }))).await
+    relay.api_signed("acct_list", Some(json!({ "node": node })), token).await
 }
 pub async fn remote_request(relay: &Relay, node: &str, email: &str, vendor: &str) -> Result<Value, String> {
     if !valid_node(node) {
