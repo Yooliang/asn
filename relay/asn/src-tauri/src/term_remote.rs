@@ -44,6 +44,40 @@ struct Outgoing {
 
 static OUT: Mutex<Option<HashMap<String, Outgoing>>> = Mutex::new(None);
 static BY_TERM: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+/// 手機剛領走執行的送字（終端編號 → 內容雜湊、時間）。本機幾乎同時按「確認送出」時，靠這份擋掉第二次（#337）。
+static HANDLED: Mutex<Option<HashMap<String, (String, Instant)>>> = Mutex::new(None);
+/// 只擋這段時間內的同一段字；之後使用者自己再送同一段字照常可以送。
+pub const HANDLED_WINDOW: Duration = Duration::from_secs(15);
+
+fn mark_handled(term_id: &str, hash: &str) {
+    let mut g = HANDLED.lock().unwrap_or_else(|e| e.into_inner());
+    let m = g.get_or_insert_with(HashMap::new);
+    m.retain(|_, (_, t)| t.elapsed() < HANDLED_WINDOW);
+    m.insert(term_id.to_string(), (hash.to_string(), Instant::now()));
+}
+
+fn clear_handled(term_id: &str) {
+    if let Some(m) = HANDLED.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        m.remove(term_id);
+    }
+}
+
+#[cfg(test)]
+pub fn mark_handled_for_test(term_id: &str, text: &str, enter: bool) {
+    mark_handled(term_id, &hash_send(text, enter));
+}
+
+#[cfg(test)]
+pub fn handled_for_test(term_id: &str, text: &str, enter: bool) -> bool {
+    recently_handled(term_id, &hash_send(text, enter))
+}
+
+fn recently_handled(term_id: &str, hash: &str) -> bool {
+    let mut g = HANDLED.lock().unwrap_or_else(|e| e.into_inner());
+    let m = g.get_or_insert_with(HashMap::new);
+    m.retain(|_, (_, t)| t.elapsed() < HANDLED_WINDOW);
+    m.get(term_id).is_some_and(|(h, _)| h == hash)
+}
 
 fn with_out<T>(f: impl FnOnce(&mut HashMap<String, Outgoing>) -> T) -> T {
     let mut g = OUT.lock().unwrap_or_else(|e| e.into_inner());
@@ -382,6 +416,10 @@ pub async fn local_confirm_send(relay: &Relay, terms: &LiveTerms, data_dir: &Pat
             log_event(data_dir, "cancelled", rid, &hash_send(&req.text, req.enter), req.text.len(), "local_send");
         }
         revalidate_hash(&o.payload, &hash_send(&req.text, req.enter))?;
+    } else if recently_handled(&req.id, &hash_send(&req.text, req.enter)) {
+        // 手機剛把同一段字領走執行：本機這次不送，免得送兩次（#337）
+        log_event(data_dir, "blocked", "-", &hash_send(&req.text, req.enter), req.text.len(), "local_send_after_remote");
+        return Err("手機剛處理過這一段字，這次沒有再送".into());
     }
     execute_send(
         terms,
@@ -445,6 +483,15 @@ async fn execute_taken(relay: &Relay, terms: &LiveTerms, data_dir: &Path, row: &
         let _ = take_local(&local_key);
         return;
     }
+    // 執行前先把本機那筆拿走（同一把鎖）：本機若已先拿走＝本機已確認，這邊就不執行；
+    // 這邊先拿到，就記下「手機已處理」，本機隨後按確認會被擋（#337）
+    let Some(o) = take_local(&local_key) else {
+        fail_and_result(relay, data_dir, id, "本機已確認").await;
+        return;
+    };
+    if o.payload.kind == Kind::Send {
+        mark_handled(&o.payload.term_id, &o.payload.hash);
+    }
 
     let exec = match kind {
         "send" => execute_send(terms, &o.payload),
@@ -455,7 +502,6 @@ async fn execute_taken(relay: &Relay, terms: &LiveTerms, data_dir: &Path, row: &
         _ => Err("不認得的請求種類".into()),
     };
 
-    let _ = take_local(&local_key);
     match exec {
         Ok(()) => {
             let _ = api_result(relay, id, "done", "").await;
@@ -468,7 +514,13 @@ async fn execute_taken(relay: &Relay, terms: &LiveTerms, data_dir: &Path, row: &
                 term_id,
             );
         }
-        Err(e) => fail_and_result(relay, data_dir, id, &e).await,
+        Err(e) => {
+            // 手機這筆沒送成：不擋本機自己再送
+            if o.payload.kind == Kind::Send {
+                clear_handled(&o.payload.term_id);
+            }
+            fail_and_result(relay, data_dir, id, &e).await
+        }
     }
 }
 
@@ -533,6 +585,7 @@ pub const POLL_INTERVAL_SECS: u64 = 2;
 pub fn reset_for_test() {
     *OUT.lock().unwrap() = None;
     *BY_TERM.lock().unwrap() = None;
+    *HANDLED.lock().unwrap() = None;
 }
 
 #[cfg(test)]
