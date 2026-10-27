@@ -54,7 +54,8 @@ test('運行二選一：模型決定哪種可用，不支援的反灰並寫原�
     const r = runChoices(by(id))
     assert.equal(r.selected, 'acp', id)
     assert.deepEqual(r.choices.map(c => [c.key, c.ok]), [['cli', false], ['acp', true]], id)
-    assert.match(r.choices[0].why, /外部入口/, id)
+    assert.match(r.choices[0].why, /在這台開終端…/, id)   // 0.1.86 起終端開得起來，只是收不到信（#351 第 1 步改正舊說法）
+    assert.match(r.choices[0].why, /收不到/, id)
   }
   assert.deepEqual(runChoices(by('claude')).choices.map(c => c.label), [RUN_LABEL.cli, RUN_LABEL.acp])
   assert.match(RUN_LABEL.acp, /背景運行/); assert.match(RUN_LABEL.cli, /終端機視窗/)
@@ -68,4 +69,22 @@ test('運行二選一：目錄上沒有的自訂設定只看那台回報的 mode
   assert.match(c.choices[1].why, /Claude/, '回報的 profile 在目錄上有：用目錄的原因')
   assert.equal(runChoices(undefined).selected, 'cli')
   assert.equal(runChoices(null).choices.length, 2)
+})
+
+test('三條通道（#351 第 1 步）：每個模型都有 term／acp／pi 的狀態與原因；兩份目錄一致；只是說明不改運行選項', async () => {
+  const { channelRows, CHANNEL_STATUS_TEXT } = await import('../ui/lib/model-catalog.mjs')
+  for (const m of uiCatalog) {
+    const rows = channelRows(m)
+    assert.deepEqual(rows.map(r => r.key), ['acp', 'pi', 'term'], `${m.id}：照優先序排（內建通道＞經 pi＞終端機）`)
+    assert.ok(rows.filter(r => r.recommended).length <= 1, `${m.id} 最多一個建議`)
+    for (const r of rows) { assert.ok(Object.hasOwn(CHANNEL_STATUS_TEXT, r.status), `${m.id}.${r.key} 的狀態 ${r.status}`); assert.ok(r.why, `${m.id}.${r.key} 要寫原因`) }
+  }
+  const by = id => channelRows(uiCatalog.find(m => m.id === id))
+  assert.equal(by('gemini').find(r => r.key === 'acp').status, 'ok')
+  assert.equal(by('grok').find(r => r.key === 'term').status, 'noinbox', '終端開得起來但收不到信')
+  assert.equal(by('claude').find(r => r.key === 'acp').status, 'no', 'Claude 刻意不做內建通道')
+  assert.deepEqual(channelRows({ id: 'custom' }), [], '自訂設定沒有 channels')
+  assert.equal(by('grok').find(r => r.recommended).key, 'acp', 'Grok 建議內建通道')
+  assert.equal(by('pi').find(r => r.recommended).key, 'pi', 'pi 本身建議經 pi')
+  assert.equal(by('claude').find(r => r.recommended), undefined, 'Claude 三條都不是「可用」：不標建議（它走自己的視窗加外掛）')
 })

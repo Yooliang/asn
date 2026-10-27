@@ -48,7 +48,7 @@ import { friendId } from './lib/roster.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher, modelSwitchBlock } from './lib/model-switch.mjs'
 import { consoleBlock } from './lib/actionbar.mjs'
 import { vendorBadgeHtml, vendorIconSvg } from './lib/vendor-icons.mjs'
-import { runChoices } from './lib/model-catalog.mjs'
+import { channelRows, runChoices } from './lib/model-catalog.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
@@ -388,6 +388,7 @@ const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: '
 const partnerFgOnly = computed(() => partnerDlg.node === info.node && foregroundOnlyProfile(partnerDlg.profile))
 // 「運行」二選一：依目前選的模型（目錄決定哪種可用，不支援的反灰並寫原因）
 const partnerRun = computed(() => runChoices(dlgModels.value.find(m => m.profileId === partnerDlg.profile)))
+const partnerChannels = computed(() => channelRows(dlgModels.value.find(m => m.profileId === partnerDlg.profile)))   // #351：這個模型三條通道的狀態，只顯示說明
 const partnerShowDisplay = computed(() => partnerDlg.node === info.node && showDisplayModeChoice(partnerDlg.profile))
 const launchCtx = computed(() => ({ selfNode: info.node, partnerModels: partnerModels.value, remoteLaunchers: remoteLaunchers.value }))
 const launchDeviceRowsList = computed(() => launchDeviceRows(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder }))
@@ -1523,7 +1524,7 @@ const app = createApp({
       GUIDES, view, SETTING_CATS, catSub, PANEL_KINDS, panelTabId, panelGuide, panelTitle, openPanel, closePanel, settingsState, applySetting, pickAvatarFile,
       selfNode: info.node, transport, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg, vendorBadge: vendorBadgeHtml,
       searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickLaunchDevice,
-      DISPLAY_MODES, partnerShowDisplay, partnerRun,
+      DISPLAY_MODES, partnerShowDisplay, partnerRun, partnerChannels,
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
       termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termsClose, termSendAsk, termSendPhone, termSendBack, termSendConfirm, SEND_MAX,
       termPane, termPaneRow, termPaneActive, termRoster, termComposer, openTermTab, termPaneAnswer, termTimeline, entryLabel,
