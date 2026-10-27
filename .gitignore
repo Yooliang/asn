@@ -15,3 +15,7 @@ site/.firebase/
 site/public/update/*.exe
 site/public/update/*.apk
 site/public/update/*.sig
+
+# 下載區：由 tools/release/build_downloads.mjs 在發版時產生，不進 git
+site/public/download/*.zip
+site/public/download/downloads.json

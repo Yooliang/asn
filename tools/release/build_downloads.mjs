@@ -1,11 +1,10 @@
-// 產生「下載區」的檔案到 %TEMP%\asn-downloads\（不上傳、不部署；上傳步驟見 docs/DOWNLOADS.md）：
+// 產生「下載區」的檔案到 site/public/download/（二進位檔不進 git；產生後由發版的人 firebase deploy，見 docs/DOWNLOADS.md）：
 //   asn-windows.zip     Windows 小程式（收發室橋 + 安裝／解除安裝程式）
 //   irori-windows.zip   舊檔名：內容與 asn-windows.zip 完全相同，只為了舊網址與舊連結仍可下載（D10）
 //   downloads.json      各檔版本（git 短 sha + 日期）、大小、sha256
 // 用法：node tools/release/build_downloads.mjs [--out <資料夾>] [--include <其他要列進 downloads.json 的檔案，例如 apk>]...
 // 同一個 commit 產出的 zip 內容固定（時間戳取 commit 日期），sha256 也會一樣。
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
@@ -14,7 +13,8 @@ import { buildZip } from './zip_lite.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 export const REPO = path.resolve(here, '..', '..')
-export const PUBLIC_BASE = 'https://irori.web.app/download'
+export const PUBLIC_BASE = 'https://asnmessenger.web.app/download'
+export const DEFAULT_OUT = path.join(REPO, 'site', 'public', 'download')
 export const WINDOWS_ZIP = 'asn-windows.zip'
 export const LEGACY_WINDOWS_ZIP = 'irori-windows.zip'
 
@@ -88,7 +88,7 @@ export function windowsEntries(repo = REPO, version = versionInfo(repo)) {
   return entries
 }
 
-export function buildDownloads({ outDir = path.join(os.tmpdir(), 'asn-downloads'), repo = REPO, include = [], now = new Date() } = {}) {
+export function buildDownloads({ outDir = DEFAULT_OUT, repo = REPO, include = [], now = new Date() } = {}) {
   fs.mkdirSync(outDir, { recursive: true })
   const version = versionInfo(repo)
   const zip = buildZip(windowsEntries(repo, version), `${version.date}T00:00:00Z`)

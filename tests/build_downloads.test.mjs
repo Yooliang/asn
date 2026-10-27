@@ -102,10 +102,10 @@ test('downloads.json：版本（git 短 sha＋日期）、大小、sha256 與實
   assert.equal(w.size, buf.length)
   assert.equal(w.sha256, sha(buf))
   assert.match(w.version, /^[0-9a-f]{7,}(-dirty)? \(\d{4}-\d{2}-\d{2}\)$/)
-  assert.equal(w.url, 'https://irori.web.app/download/asn-windows.zip')
+  assert.equal(w.url, 'https://asnmessenger.web.app/download/asn-windows.zip')
   // 舊檔名仍產出、內容與新檔名一模一樣（舊網址與舊連結不會壞）
   const old = manifest.files[LEGACY_WINDOWS_ZIP]
-  assert.equal(old.url, 'https://irori.web.app/download/irori-windows.zip')
+  assert.equal(old.url, 'https://asnmessenger.web.app/download/irori-windows.zip')
   assert.equal(old.sha256, w.sha256)
   assert.ok(fs.readFileSync(path.join(outDir, LEGACY_WINDOWS_ZIP)).equals(buf))
   const v = JSON.parse(listZip(buf).find(e => e.name === 'app/VERSION.json').data.toString())
@@ -123,7 +123,26 @@ test('同一份內容打包兩次，zip 的 sha256 一樣（可重現）；--inc
   assert.equal(b.manifest.files['irori.apk'].sha256, sha(Buffer.from('fake apk')))
 })
 
-// （已移除一個檢查舊官網下載轉址的測試：站台改版後 site/firebase.json 沒有 /download/ 轉址、也沒有下載頁，測試的對象已不存在，#284）
+// 下載檔在 ASN 自己的網站（F2 #424）：預設輸出到 site/public/download/、二進位檔不進 git、zip 與 json 有正確的標頭
+test('下載區：預設輸出資料夾是 site/public/download，網址基底是 asnmessenger.web.app', async () => {
+  const m = await import('../tools/release/build_downloads.mjs')
+  assert.equal(path.relative(m.REPO, m.DEFAULT_OUT).split(path.sep).join('/'), 'site/public/download')
+  assert.equal(m.PUBLIC_BASE, 'https://asnmessenger.web.app/download')
+})
+
+test('下載區：firebase.json 給 zip 與 downloads.json 標頭；.gitignore 擋掉產出的檔案', () => {
+  const cfg = JSON.parse(fs.readFileSync(new URL('../site/firebase.json', import.meta.url), 'utf8'))
+  const rule = src => cfg.hosting.headers.find(h => h.source === src)?.headers ?? []
+  const val = (src, key) => rule(src).find(h => h.key === key)?.value
+  assert.equal(val('download/*.zip', 'Content-Type'), 'application/zip')
+  assert.equal(val('download/downloads.json', 'Content-Type'), 'application/json')
+  assert.equal(val('download/downloads.json', 'Cache-Control'), 'no-cache')
+  const ignore = fs.readFileSync(new URL('../.gitignore', import.meta.url), 'utf8')
+  assert.match(ignore, /^site\/public\/download\/\*\.zip$/m)
+  assert.match(ignore, /^site\/public\/download\/downloads\.json$/m)
+  // 舊的轉址規則不在這個站（irori.web.app 是另一個專案，轉址移到 F6 前置）
+  assert.ok(!(cfg.hosting.redirects ?? []).some(r => String(r.source).startsWith('/download')))
+})
 // ---- 註冊小幫手（假伺服器）----
 
 test('代號建議：只留合法字元、≤32 字、前綴補在前面、不佔 t<數字>- 開頭', () => {

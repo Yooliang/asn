@@ -1,6 +1,7 @@
 {
   "hosting": {
     "public": "public",
+    "predeploy": ["node ../tools/release/site_predeploy.mjs"],
     "cleanUrls": true,
     "trailingSlash": false,
     "rewrites": [
@@ -56,6 +57,17 @@
       {
         "source": "update/*.apk",
         "headers": [{ "key": "Content-Type", "value": "application/vnd.android.package-archive" }]
+      },
+      {
+        "source": "download/*.zip",
+        "headers": [{ "key": "Content-Type", "value": "application/zip" }]
+      },
+      {
+        "source": "download/downloads.json",
+        "headers": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Cache-Control", "value": "no-cache" }
+        ]
       },
       {
         "source": "update/latest.json",
