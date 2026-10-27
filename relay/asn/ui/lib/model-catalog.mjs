@@ -8,7 +8,7 @@ export const MODEL_CATALOG = [
   { id: 'codex', toolId: 'codex', profileId: 'codex', label: 'Codex', mode: 'window', modeLabel: '會開一個視窗', acpWhy: 'Codex 還沒有內建通道，只能開成終端機視窗', channels: { term: { status: 'window', why: '開成自己的終端機視窗，還沒有真機實測' }, acp: { status: 'no', why: '還沒有內建通道' }, pi: { status: 'untested', why: 'pi 有 openai-codex 提供者，ASN 裡還沒有實際用過' } } },
   { id: 'gemini', toolId: 'agy', profileId: 'gemini', label: 'Gemini', mode: 'background', modeLabel: '由 ASN 內建通道執行', cliWhy: '終端機版可以從「＋」→「在這台開終端…」開在 ASN 自帶的終端裡，但那樣 ASN 收不到它的信；要收發信請用內建通道', channels: { term: { status: 'noinbox', why: '可以開在 ASN 自帶終端（0.1.86 起），但收不到信' }, acp: { status: 'ok', why: '背景運行，可以收發信（0.1.70 起，有真機）' }, pi: { status: 'no', why: 'pi 已拿掉 Gemini 訂閱登入，不建議' } } },
   { id: 'grok', toolId: 'grok', profileId: 'grok', label: 'Grok', mode: 'background', modeLabel: '由 ASN 內建通道執行', cliWhy: '終端機版可以從「＋」→「在這台開終端…」開在 ASN 自帶的終端裡，但那樣 ASN 收不到它的信；要收發信請用內建通道', channels: { term: { status: 'noinbox', why: '可以開在 ASN 自帶終端（0.1.84 起），但收不到信' }, acp: { status: 'ok', why: '背景運行，可以收發信（0.1.70 起，有真機）' }, pi: { status: 'untested', why: 'pi 有 xai 提供者，ASN 裡還沒有實際用過' } } },
-  { id: 'pi', toolId: 'pi', profileId: 'pi', label: 'pi', mode: 'window', modeLabel: '會開一個互動視窗（只能開在前台）', foregroundOnly: true, acpWhy: 'pi 沒有內建通道，只能開成終端機視窗', channels: { term: { status: 'window', why: 'pi 自己就是互動視窗，靠 pi 擴充收發信' }, acp: { status: 'no', why: 'pi 沒有內建通道' }, pi: { status: 'ok', why: '可以切換提供者和模型' } } },
+  { id: 'pi', toolId: 'pi', profileId: 'pi', label: 'pi', mode: 'window', modeLabel: '會開一個互動視窗（只能開在前台）', foregroundOnly: true, channelOnly: true, acpWhy: 'pi 沒有內建通道，只能開成終端機視窗', channels: { term: { status: 'window', why: 'pi 自己就是互動視窗，靠 pi 擴充收發信' }, acp: { status: 'no', why: 'pi 沒有內建通道' }, pi: { status: 'ok', why: '可以切換提供者和模型' } } },
 ]
 
 /**
@@ -43,6 +43,47 @@ export function channelRows(row) {
   const best = rows.find(r => r.status === 'ok')   // 依優先序第一個「可用」的就是推薦；都沒有就不標
   if (best) best.recommended = true
   return rows
+}
+
+/**
+ * 開新夥伴的「運行」四選一（#351，小良哥 10/27：開終端不是獨立功能，是開新夥伴的一個選項）。順序＝優先序：
+ *   acp 內建通道 ＞ pi 經 pi ＞ term ASN 開的終端（進階）＞ self 自己開的 CLI（ASN 不開，只給說明或接手）。
+ * row：目錄列（有 channels 與 toolId）；local：選的是這台電腦；piInstalled：這台偵測到 pi；piReady：ASN 已能帶提供者／模型開 pi（0.1.90 起）。
+ * 回 { options: [{ key, label, ok, why, note }], selected }；selected＝依序第一個 ok 的（沒有就 'self'）。
+ */
+/**
+ * 開新夥伴的「模型」清單只列廠家（小良哥 10/27：pi 是通道，不是廠家）。目錄上 channelOnly 的（pi）不列進廠家清單，只在「運行」的「經 pi」出現。
+ * 目錄裡仍留著 pi 這一列，因為後端啟動設定的 profile 叫 pi，經 pi 開的時候要用它。
+ */
+export const vendorRows = rows => (Array.isArray(rows) ? rows : []).filter(r => r && !r.channelOnly)
+
+export const RUN_OPTION_LABEL ={ acp: '內建通道（背景運行）', pi: '經 pi', term: 'ASN 開的終端（進階）', self: '自己開的 CLI' }
+const TERM_PROFILES = ['grok', 'agy']   // 後端 term_start 只收這兩個（launch/term.rs resolve_command）
+export function runOptions(row, { local = false, piInstalled = false, piReady = false } = {}) {
+  const ch = row?.channels ?? {}
+  const st = k => ch[k]?.status
+  const why = k => String(ch[k]?.why ?? '')
+  const isPiItself = row?.id === 'pi'
+  const opt = (key, ok, reason, note = '') => ({ key, label: RUN_OPTION_LABEL[key], ok, why: ok ? '' : reason, note })
+  const acpOk = st('acp') === 'ok'
+  const piOk = st('pi') !== undefined && st('pi') !== 'no' && piInstalled && (isPiItself || piReady)
+  const piWhy = st('pi') === 'no' || st('pi') === undefined ? (why('pi') || '這個模型不能經 pi 開') : !piInstalled ? '這台電腦沒偵測到 pi' : '0.1.90 起才能帶提供者和模型開 pi'
+  // 終端：Claude、Codex、pi 是 ASN 開成它自己的終端機視窗（原本的開法，別台設備也能遠端開）；Grok、Gemini 是 ASN 內建的 WezTerm，只能在這台開
+  const termWindow = st('term') === 'window'
+  const termWez = ['ok', 'noinbox'].includes(st('term')) && TERM_PROFILES.includes(row?.toolId)
+  const termOk = termWindow || (termWez && local)
+  const termWhy = termWez ? '只能在那台電腦上開' : (why('term') || '不支援')
+  const termNote = termWindow ? '開成它自己的終端機視窗' : termWez && st('term') === 'noinbox' ? '收不到信，只能看畫面、送字' : ''
+  const selfNote = row?.id === 'claude' ? '在你自己的終端打開 claude，裝了 ASN 外掛就會出現在名單上' : isPiItself ? '在你自己的終端打開 pi，裝了 pi 擴充就會出現在名單上' : '已經在你自己的終端開著的話，可以用「接手已開著的終端視窗…」接進來'
+  const options = [
+    opt('acp', acpOk, why('acp') || '這個模型沒有內建通道'),
+    opt('pi', piOk, piWhy),
+    opt('term', termOk, termWhy, termOk ? termNote : ''),
+    opt('self', true, '', selfNote),
+  ]
+  // 預設：優先序第一個能選的（自己開的 CLI 只在前三個都不行時才當預設）
+  const first = options.find(o => o.ok && o.key !== 'self')
+  return { options, selected: first ? first.key : 'self' }
 }
 
 /**
