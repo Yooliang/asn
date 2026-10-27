@@ -47,9 +47,9 @@ export function channelRows(row) {
 
 /**
  * 開新夥伴的「運行」四選一（#351，小良哥 10/27：開終端不是獨立功能，是開新夥伴的一個選項）。順序＝優先序：
- *   acp 內建通道 ＞ pi 經 pi ＞ term ASN 開的終端（進階）＞ self 自己開的 CLI（ASN 不開，只給說明或接手）。
+ *   acp 內建通道 ＞ pi 經 pi ＞ term ASN 開的終端（進階）＞ self 自己開的 CLI（始終不能選，只顯示說明與接手入口）。
  * row：目錄列（有 channels 與 toolId）；local：選的是這台電腦；piInstalled：這台偵測到 pi；piReady：ASN 已能帶提供者／模型開 pi（0.1.90 起）。
- * 回 { options: [{ key, label, ok, why, note }], selected }；selected＝依序第一個 ok 的（沒有就 'self'）。
+ * 回 { options: [{ key, label, ok, why, note }], selected }；selected＝依序第一個 ok 的（沒有就 null）。
  */
 /**
  * 開新夥伴的「模型」清單只列廠家（小良哥 10/27：pi 是通道，不是廠家）。目錄上 channelOnly 的（pi）不列進廠家清單，只在「運行」的「經 pi」出現。
@@ -79,11 +79,11 @@ export function runOptions(row, { local = false, piInstalled = false, piReady = 
     opt('acp', acpOk, why('acp') || '這個模型沒有內建通道'),
     opt('pi', piOk, piWhy),
     opt('term', termOk, termWhy, termOk ? termNote : ''),
-    opt('self', true, '', selfNote),
+    opt('self', false, '你自己在終端開，ASN 只負責接手（不能從這裡開）', selfNote),   // 小良哥 10/27 #723：這一項始終不能選，只顯示說明
   ]
-  // 預設：優先序第一個能選的（自己開的 CLI 只在前三個都不行時才當預設）
-  const first = options.find(o => o.ok && o.key !== 'self')
-  return { options, selected: first ? first.key : 'self' }
+  // 預設：優先序第一個能選的；三條都不行就沒有預設（null），開啟按鈕要反灰
+  const first = options.find(o => o.ok)
+  return { options, selected: first ? first.key : null }
 }
 
 /**
