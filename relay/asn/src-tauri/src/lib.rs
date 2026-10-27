@@ -37,6 +37,7 @@ mod android;
 mod acct_remote;
 #[cfg(desktop)]
 mod statusline_hook;
+#[cfg(desktop)]
 mod term_remote;
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
