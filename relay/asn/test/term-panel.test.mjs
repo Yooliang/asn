@@ -153,7 +153,8 @@ test('接線：終端入口併進「＋」選單（#349）；有終端等你回�
   assert.ok(!html.includes('term-ic'), '搜尋列不再有終端按鈕')
   assert.ok(html.includes('class="search-ic plus-btn"') && html.includes('<span class="term-badge" v-if="termWaitCount"'), '「＋」上的紅點')
   const menu = html.slice(html.indexOf('class="av-menu launch-picker"'), html.indexOf('</ul>', html.indexOf('class="av-menu launch-picker"')))
-  for (const s of ['@click="openWaitingTerm"', '@click="openTermStart"', 'adoptLoad()', 'groupFlow.openCreate()', 'groupFlow.openJoin()']) assert.ok(menu.includes(s), `「＋」選單缺 ${s}`)
+  for (const s of ['@click="openWaitingTerm"', 'adoptLoad()', 'groupFlow.openCreate()', 'groupFlow.openJoin()']) assert.ok(menu.includes(s), `「＋」選單缺 ${s}`)
+  assert.ok(!menu.includes('openTermStart'), '「在這台開終端…」併進開新夥伴對話框的『運行』，選單不再有獨立入口（小良哥 #697）')
   assert.ok(js.includes("const termWaitCount = computed(() => terms.rows.filter(r => r.state === 'waiting_user').length)"))
 })
 

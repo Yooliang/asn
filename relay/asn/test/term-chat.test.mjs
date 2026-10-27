@@ -154,16 +154,18 @@ test('開終端：只有 grok 與 agy；沒偵測到的反灰；請求要種類�
   assert.deepEqual(termStartChoices(null).map(x => x.ok), [false, false])
 })
 
-test('接線：term_start 只在「開終端」按「開啟」時呼叫一次，並列在「＋」選單裡', () => {
+test('接線：term_start 只在開新夥伴對話框選「ASN 開的終端」（Grok／Gemini）時呼叫一次', () => {
   const ui = new URL('../ui/', import.meta.url)
   const js = fs.readFileSync(new URL('list.js', ui), 'utf8')
   const html = fs.readFileSync(new URL('list.html', ui), 'utf8')
   const tauri = fs.readFileSync(new URL('lib/tauri.mjs', ui), 'utf8')
   assert.equal((js.match(/transport\.termStart\(/g) ?? []).length, 1, 'list.js 只有一處呼叫 termStart')
-  const submit = js.slice(js.indexOf('async function submitTermStart'), js.indexOf('const termRoster'))
+  const submit = js.slice(js.indexOf('async function submitTermViaDialog'), js.indexOf('const termRoster'))
   assert.ok(submit.includes('termStartRequest(') && submit.includes('transport.termStart(req)'), '先過 termStartRequest 才呼叫')
   assert.ok(!js.includes("invoke('term_start'"), 'list.js 不直接 invoke term_start')
   assert.ok(tauri.includes("termStart: req => invoke('term_start', { req })"))
-  assert.ok(html.includes('@click="openTermStart">在這台開終端…</button>'))
-  assert.ok(html.includes('@click="submitTermStart"'))
+  assert.ok(!html.includes('openTermStart') && !html.includes('termStartDlg'), '沒有獨立的「在這台開終端」入口和對話框')
+  const sub = js.slice(js.indexOf('async function submitPartnerDlg'), js.indexOf('async function pollLaunchResults'))
+  assert.ok(sub.includes("partnerRunChoice.value === 'term'") && sub.includes('partnerDlg.node === info.node') && sub.includes('TERM_WEZ_TOOLS.includes('), '只有本機、選終端、且是 Grok／Gemini 才走 term_start')
+  assert.ok(sub.indexOf('partnerCanRun.value') < sub.indexOf('submitTermViaDialog()'), '先檢查這個運行方式能不能選')
 })
