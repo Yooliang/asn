@@ -50,7 +50,7 @@
     </ul>
     <div class="table-wrap">
       <table class="matrix">
-        <caption>各家 AI 與各項管理功能的現況（依 2026 年 10 月 27 日的主線程式（0.1.86）與議題整理；各格的版本與驗證狀態以格內文字為準）</caption>
+        <caption>各家 AI 與各項管理功能的現況（依 2026 年 10 月 27 日的主線程式（0.1.87）與議題整理；各格的版本與驗證狀態以格內文字為準）</caption>
         <thead><tr><th scope="col">AI</th><th scope="col">開啟</th><th scope="col">關閉</th><th scope="col">接手</th><th scope="col">切換模型</th><th scope="col">群組聊天</th><th scope="col">帳號切換</th><th scope="col">備註與限制</th></tr></thead>
         <tbody>
         <tr>
@@ -394,6 +394,12 @@
     <div class="releases">
 <!-- changelog:start（由 site/make-roadmap-page.mjs 產生，不要手改） -->
       <article class="glass release">
+        <h3>0.1.87<span class="date">2026-10-27</span></h3>
+        <ul>
+          <li>新增：設定 → 啟動設定多了「額度回報」，按「接上…」同意後，ASN 會把額度記錄接在 Claude Code 的狀態列上，手機的「設備與帳號」就看得到這台 Claude 帳號還剩多少額度；預設不接，隨時可以取消接上，你原本的狀態列指令照常顯示。</li>
+        </ul>
+      </article>
+      <article class="glass release">
         <h3>0.1.86<span class="date">2026-10-27</span></h3>
         <ul>
           <li>新增：名單「＋」選單多了「在這台開終端…」，可以選 Grok 或 Gemini（agy）和工作資料夾，開好直接打開那個終端的分頁。</li>
@@ -445,12 +451,6 @@
         <h3>0.1.78<span class="date">2026-10-26</span></h3>
         <ul>
           <li>內建終端機的 WezTerm 隨安裝檔附帶（不必另外設定）；手機上本人簽章的切換帳號指令不必再到電腦按確認（設定可關、每小時最多自動切 3 次、切換後電腦跳通知可還原）；終端代送文字前要確認工作資料夾已授權</li>
-        </ul>
-      </article>
-      <article class="glass release">
-        <h3>0.1.77<span class="date">2026-10-26</span></h3>
-        <ul>
-          <li>設備與帳號：設定視窗不再重複一個標題；電腦版拿掉底部「已永久移除」區；設備類型標籤只標手機、電腦不標；離線的別台設備不必等自動隱藏就能永久移除；帳號切換的結果回報失敗會重試並存檔補報</li>
         </ul>
       </article>
       <!-- changelog:end -->
