@@ -173,3 +173,19 @@ test('「運行」選項圓點和文字排在同一行（#384）：壓過對話�
   assert.match(css, /\.partner-dlg \.partner-run-opt\{flex-direction:row\}/)
   assert.ok(css.indexOf('.partner-dlg .partner-run-opt{') > css.indexOf('.partner-dlg label{'), '要寫在直排規則後面')
 })
+
+test('開新夥伴的設備清單不列「永久移除」的設備（跟設定頁、設備頁籤一致）；本機不會被濾掉', () => {
+  const friends = [
+    { node: 'H', device: '家用機', status: 'online' },
+    { node: 'VM', device: 'VM測試機', status: 'offline' },
+    { node: 'OP', device: 'Oppo 手機', status: 'offline' },
+    { node: 'W', device: '工作機', status: 'online' },
+  ]
+  const keys = opt => launchDeviceRows(friends, { selfNode: 'W', ...opt }).map(r => r.key)
+  assert.deepEqual(keys({}), ['W', 'H', 'VM', 'OP'])
+  assert.deepEqual(keys({ removed: ['VM', 'OP'] }), ['W', 'H'])
+  assert.deepEqual(keys({ removed: ['W', 'VM'] }), ['W', 'H', 'OP'], '本機寫進移除清單也照樣列出')
+  assert.deepEqual(keys({ removed: [] }), ['W', 'H', 'VM', 'OP'], '還原後（清單拿掉）就回來')
+  const js = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
+  assert.match(js, /launchDeviceRows\(friends\.value, \{[^}]*removed: devPrefs\.deviceRemoved/, '電腦版帶上設定裡的移除清單')
+})

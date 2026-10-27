@@ -1,6 +1,7 @@
 // 手機版「幫電腦開新夥伴」的純邏輯：能不能開、為什麼不能、送出前的檢查、請求內容、錯誤與進度的中文。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import { LAUNCH_GIVE_UP_MS, REASON, appearedIn, buildLaunchRequest, initialLaunch, launchChoices, launchDevices, launchEligibility, launchErrorText, launchFormError, machinesByNode, progressView } from '../ui/lib/mobile-launch.mjs'
 
 const LAUNCHER = { profiles: [{ id: 'claude', label: 'Claude' }, { id: 'gemini', label: 'Gemini' }], cwd_allow: ['D:\\Github\\asn', 'D:\\Github\\irori'], max_per_hour: 6 }
@@ -108,4 +109,12 @@ test('失敗與進度的文字是純中文、沒有「收發室」，並講下�
   assert.equal(p.phase, 'failed'); assert.match(p.text, /請先安裝/)
   assert.match(progressView({ status: 'unconfirmed', detail: '背景夥伴已排入' }, false).text, /名單/)
   assert.equal(progressView({ status: 'ok' }, true, '小格').phase, 'done')
+})
+
+test('手機開新夥伴的電腦清單不列「永久移除」的設備', () => {
+  const friends = [{ node: 'H', device: '家用機' }, { node: 'VM', device: 'VM測試機' }, { node: 'P', device: '手機' }]
+  assert.deepEqual(launchDevices(friends, { selfNode: 'P' }).map(d => d.key), ['H', 'VM'])
+  assert.deepEqual(launchDevices(friends, { selfNode: 'P', removed: ['VM'] }).map(d => d.key), ['H'])
+  const js = fs.readFileSync(new URL('../ui/m.js', import.meta.url), 'utf8')
+  assert.match(js, /launchDevices\(friends\.value, \{[^}]*removed: devPrefs\.deviceRemoved/, '手機版帶上移除清單')
 })

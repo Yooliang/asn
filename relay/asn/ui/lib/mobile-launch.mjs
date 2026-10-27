@@ -1,6 +1,7 @@
 // 手機版「幫電腦開新夥伴」（遠端開視窗）的純邏輯：哪些電腦能開、為什麼不能、表單檢查、請求內容、進度文字、錯誤翻成中文。
 // 視窗開在那台電腦上，手機只是下指令（後台 relay 的 launch／launchers，要本人簽章）。node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。
 import { remoteModelRows } from './partner-launch-ui.mjs'
+import { isDeviceRemoved } from './device-order.mjs'
 
 export const REASON = {
   needLogin: '要先登入，才能替電腦開新夥伴',
@@ -34,10 +35,10 @@ export function launchEligibility(node, { machines = {}, loaded = false, signedI
 
 export const cwdList = launcher => (Array.isArray(launcher?.cwd_allow) ? launcher.cwd_allow.filter(c => typeof c === 'string' && c) : [])
 
-// 能選的電腦：名單上的各台設備，不含這支手機；本機以外照名單順序。每列 { key, label, ok, reason }
-export function launchDevices(friends, { selfNode = '', nodeOrder = [], ...ctx } = {}) {
+// 能選的電腦：名單上的各台設備，不含這支手機與「永久移除」的設備；本機以外照名單順序。每列 { key, label, ok, reason }
+export function launchDevices(friends, { selfNode = '', nodeOrder = [], removed = [], ...ctx } = {}) {
   const label = new Map()
-  for (const f of friends ?? []) if (f.node && f.node !== selfNode && !label.has(f.node)) label.set(f.node, f.device || '未命名設備')
+  for (const f of friends ?? []) if (f.node && f.node !== selfNode && !isDeviceRemoved(f.node, removed, { selfNode }) && !label.has(f.node)) label.set(f.node, f.device || '未命名設備')
   const order = [...nodeOrder.filter(n => label.has(n)), ...[...label.keys()].filter(n => !nodeOrder.includes(n))]
   return order.map(key => ({ key, label: label.get(key), ...launchEligibility(key, { ...ctx, friends }) }))
 }
