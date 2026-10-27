@@ -1730,10 +1730,10 @@ fn pi_切換模型_錯誤翻成中文_忙碌逾時_不能用的動作_遠端開�
     let res = r.run("model", json!({ "name": "小丙", "model": "m" }));
     assert_eq!(res.status, "failed");
     assert!(res.detail.contains("正在忙"), "{}", res.detail);
-    for op in ["close", "rename", "handover", "resume", "restart", "info"] {
+    for op in ["rename", "handover", "resume", "restart", "info"] {
         let res = r.run(op, json!({ "name": "小丙", "new_name": "新名" }));
         assert_eq!(res.status, "failed", "{op}");
-        assert!(res.detail.contains("只能切換模型"), "{op}: {}", res.detail);
+        assert!(res.detail.contains("只能切換模型和關閉"), "{op}: {}", res.detail);
     }
     assert!(r.terminated().is_empty() && r.launched().is_empty());
     let off = rig(Opt { allow_first: 0, ..Opt::default() });
@@ -1748,4 +1748,90 @@ fn pi_同名的_claude_視窗存在時不當成_pi() {
     put_pi_window(&r, "目標", 4001);   // Claude 視窗也叫「目標」
     assert!(!r.ops.is_pi_window("目標"));
     assert!(!r.ops.is_pi_window("沒這個"));
+}
+
+// ================================================================================================
+// pi 視窗：關閉（0.2 A2）——守門同 Claude 視窗：只結束登記的 pi 與子孫，不碰 ASN、不碰同輩、名單過期不動
+// ================================================================================================
+
+/// 在程序表放一個 pi：parent→pi(4001, node.exe)→子程序(4002)；asn_host＝父殼是 ASN 開視窗用的承載殼
+fn put_pi_proc(r: &Rig, asn_host: bool) -> u32 {
+    let os = r.os();
+    let parent = if asn_host { 4100 } else { 4200 };
+    let mut t = os.table.lock().unwrap();
+    t.push(p(parent, 100, "powershell.exe"));
+    t.push(p(4001, parent, "node.exe"));
+    t.push(p(4002, 4001, "node.exe"));
+    t.push(p(4003, parent, "notepad.exe")); // 同一個殼底下的別的程式：同輩，不准碰
+    drop(t);
+    os.cmd.lock().unwrap().insert(parent, if asn_host { asn_host_cmdline() } else { "powershell.exe".into() });
+    os.alive.lock().unwrap().extend([parent, 4001, 4002, 4003]);
+    // 啟動時間：殼最早、pi 其次、子程序再晚，都早於登記檔的心跳（NOW）
+    os.started.lock().unwrap().extend([(parent, NOW - 120_000), (4001, NOW - 60_000), (4002, NOW - 30_000), (4003, NOW - 50_000)]);
+    parent
+}
+
+#[test]
+fn pi_關閉_使用者自己開的_只結束_pi_與子孫_留下終端機與同輩() {
+    let r = rig(Opt::default());
+    put_pi_window(&r, "小丙", 4001);
+    let shell = put_pi_proc(&r, false);
+    let res = r.run("close", json!({ "name": "小丙" }));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert!(res.detail.contains("終端機分頁會留下"), "{}", res.detail);
+    assert_eq!(res.result.unwrap()["kept_terminal"], true);
+    let killed = r.terminated();
+    assert_eq!(killed, vec![4002, 4001], "子先孫後，只有 pi 與子孫");
+    assert!(!killed.contains(&shell) && !killed.contains(&4003) && !killed.contains(&300), "終端機、同輩、ASN 都不碰");
+    assert!(r.os().closed.lock().unwrap().is_empty(), "使用者自己開的不送關閉訊息（會把整個終端機關掉）");
+}
+
+#[test]
+fn pi_關閉_asn_開的_連承載殼一起收() {
+    let r = rig(Opt::default());
+    put_pi_window(&r, "小丙", 4001);
+    let host = put_pi_proc(&r, true);
+    let res = r.run("close", json!({ "name": "小丙" }));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert_eq!(res.detail, "已關閉視窗");
+    let killed = r.terminated();
+    assert!(killed.contains(&4001) && killed.contains(&4002) && killed.contains(&host), "{killed:?}");
+    assert!(!killed.contains(&4003) && !killed.contains(&300));
+}
+
+#[test]
+fn pi_關閉_登記的_pid_跑的不是_pi_就不動_遠端開關關著也不動() {
+    let r = rig(Opt::default());
+    put_pi_window(&r, "小丙", 4001);
+    r.os().table.lock().unwrap().push(p(4001, 100, "notepad.exe")); // pid 被別的程式重用
+    let res = r.run("close", json!({ "name": "小丙" }));
+    assert_eq!(res.status, "failed");
+    assert!(res.detail.contains("不在執行了"), "{}", res.detail);
+    assert!(r.terminated().is_empty());
+    let res = r.run("close", json!({ "name": "沒這個" }));
+    assert_eq!(res.status, "failed");
+    let off = rig(Opt { allow_first: 0, ..Opt::default() });
+    put_pi_window(&off, "小丙", 4001);
+    put_pi_proc(&off, false);
+    assert_eq!(off.run("close", json!({ "name": "小丙" })).detail, CONSENT_OFF);
+    assert!(off.terminated().is_empty());
+}
+
+#[test]
+fn pi_關閉_程序啟動時間晚於最後心跳_或查不到_就不結束() {
+    // asn真 審 #433：pi 在心跳後當掉、pid 被別的 node 拿去用時，只看程序名分不出來
+    let r = rig(Opt::default());
+    put_pi_window(&r, "小丙", 4001);
+    put_pi_proc(&r, false);
+    r.os().started.lock().unwrap().insert(4001, NOW + 5_000);   // 比心跳晚啟動：不是登記的那個 pi
+    let res = r.run("close", json!({ "name": "小丙" }));
+    assert_eq!(res.status, "failed");
+    assert!(res.detail.contains("對不上"), "{}", res.detail);
+    assert!(r.terminated().is_empty(), "一個都不結束");
+    r.os().started.lock().unwrap().remove(&4001);   // 查不到啟動時間：寧可關不掉
+    let res = r.run("close", json!({ "name": "小丙" }));
+    assert_eq!(res.status, "failed");
+    assert!(r.terminated().is_empty());
+    r.os().started.lock().unwrap().insert(4001, NOW);   // 剛好等於心跳：算數
+    assert_eq!(r.run("close", json!({ "name": "小丙" })).status, "ok");
 }

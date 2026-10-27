@@ -19,7 +19,7 @@ const MATRIX = [
   ['codex 視窗', P('小乙', 'codex'), { close: false, model: false, restart: false, handover: false }],
   ['gemini 背景工作者（ACP）', P('Gemini', 'gemini', { kind: undefined }), { close: true, model: false, restart: true, handover: true }],
   ['agy 背景工作者（ACP）', P('Agy', 'agy', { kind: undefined }), { close: true, model: false, restart: true, handover: true }],
-  ['pi 視窗（只開放切換模型）', P('小丙', 'pi'), { close: false, model: true, restart: false, handover: false }],
+  ['pi 視窗（開放切換模型與關閉）', P('小丙', 'pi'), { close: true, model: true, restart: false, handover: false }],
   ['grok 雲端代理（engine=grok, kind=grok）', P('ASN-開發', 'grok'), { close: false, model: false, restart: false, handover: false }],
 ]
 for (const [label, friend, want] of MATRIX) {
@@ -30,11 +30,11 @@ for (const [label, friend, want] of MATRIX) {
   })
 }
 
-test('現況：不能用的項目都有寫明原因（Codex＝尚未實機驗證；pi 只開放切換模型，其餘各有說明；雲端＝沒有視窗）', () => {
+test('現況：不能用的項目都有寫明原因（Codex＝尚未實機驗證；pi 開放切換模型與關閉，其餘各有說明；雲端＝沒有視窗）', () => {
   assert.equal(ok(P('小乙', 'codex'), 'close').reason, REASON.otherEngine)
   assert.match(REASON.otherEngine, /尚未實機驗證，暫不開放/)
   const piItems = menuItems(P('小丙', 'pi'), ctx)
-  assert.deepEqual(piItems.filter(i => i.ok).map(i => i.key), ['model'], 'pi 只有切換模型可用')
+  assert.deepEqual(piItems.filter(i => i.ok).map(i => i.key).sort(), ['close', 'model'], 'pi 可以切換模型與關閉')
   const why = piItems.filter(i => !i.ok).map(i => i.reason)
   assert.ok(why.every(r => /[一-鿿]/.test(r) && r !== REASON.otherEngine), 'pi 其餘項目各有自己的中文原因')
   assert.equal(partnerEngine(P('小丙', 'pi')), 'pi')
@@ -65,8 +65,9 @@ test('缺口：Codex 視窗應該能「關閉」', { todo: '電腦端只會找 C
   assert.equal(ok(P('小乙', 'codex'), 'close').ok, true)
 })
 
-test('缺口：pi 視窗應該能「關閉」', { todo: 'pi 的切換模型已接（pi_control）；關閉還沒做' }, () => {
+test('pi 視窗能「關閉」（0.2 A2）；離線的反灰', () => {
   assert.equal(ok(P('小丙', 'pi'), 'close').ok, true)
+  assert.equal(ok(P('小丙', 'pi', { status: 'offline' }), 'close').ok, false)
 })
 
 test('pi 視窗的切換模型：離線反灰、送出內容把「提供者/模型」寫成後台收得下的格式、輸入檢查', () => {

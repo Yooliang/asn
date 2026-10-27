@@ -37,12 +37,12 @@ const ACP_WHY = {
   model: '這個夥伴由 ASN 內建通道執行，模型寫在設定檔裡、啟動時就定了，不能在這裡切換模型；要換請改設定檔後重啟 ASN',
   resume: '這個夥伴由 ASN 內建通道執行，不需要喚醒；要重新啟動請用「重開」',
 }
-// pi 視窗：只開放「切換模型」（經 pi 擴充的控制檔，電腦端見 bridge/engines/pi_control.rs）；其餘電腦端還沒接，反灰並各自說明
-export const PI_OPS = ['model']
+// pi 視窗：開放「切換模型」（經 pi 擴充的控制檔，電腦端見 bridge/engines/pi_control.rs）與「關閉」（只結束那個 pi 與子孫，見 partner_ops.rs close_pi）；
+// 其餘電腦端還沒接，反灰並各自說明
+export const PI_OPS = ['model', 'close']
 const PI_WHY = {
   info: '這是 pi 視窗，詳情還沒開放',
   rename: '這是 pi 視窗，改名還沒開放（名字由 pi 的 ASN 擴充登記）',
-  close: '這是 pi 視窗，關閉還沒開放，請直接在 pi 的終端機關掉',
   handover: '這是 pi 視窗，接班換手還沒開放',
   resume: '這是 pi 視窗，喚醒還沒開放（pi 沒有可接回的對話紀錄）',
   restart: REASON.restartOnlyAcp,
