@@ -49,7 +49,7 @@ import { canOfferModelSwitch, confirmText, createModelSwitcher, modelSwitchBlock
 import { consoleBlock } from './lib/actionbar.mjs'
 import { vendorBadgeHtml, vendorIconSvg } from './lib/vendor-icons.mjs'
 import { channelRows, runChoices, runOptions, vendorRows } from './lib/model-catalog.mjs'
-import { cleanPiModels, piChoiceFor, piLaunchArgs, providerStates } from './lib/pi-models.mjs'
+import { cleanPiModels, piChoiceFor, piLaunchArgs, piOnlyVendorRows, providerStates } from './lib/pi-models.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
@@ -387,11 +387,12 @@ const launchToolRows = computed(() => MODEL_CATALOG.map(m => modelUiRow(m, cliTo
 const partnerModels = computed(() => launchToolRows.value)
 // 對話框裡的模型列：本機看偵測到的 CLI；別台設備看那台回報的 profile
 const dlgModels = computed(() => (partnerDlg.node && partnerDlg.node !== info.node ? remoteModelRows(remoteLaunchers.value[partnerDlg.node]) : partnerModels.value))
-const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '', display: 'foreground', run: '', step: 1, piModel: '' })
+const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '', display: 'foreground', run: '', step: 1, piModel: '', vendor: '' })
 const partnerFgOnly = computed(() => partnerDlg.node === info.node && foregroundOnlyProfile(partnerDlg.profile))
 // 「運行」四選一（#351、小良哥 10/27 定案）：內建通道 ＞ 經 pi ＞ ASN 開的終端（進階）＞ 自己開的 CLI（只作說明，永遠不能選）。
 // 目錄決定哪個能選；不能選的灰掉並寫原因；第一個能選的標「建議」。
-const dlgRow = computed(() => dlgModels.value.find(m => m.profileId === partnerDlg.profile))
+// 選到的廠牌列：一般廠牌照 profile 找；只能經 pi 的廠牌（DeepSeek、MiniMax）profile 都是 pi，所以照 vendor（廠牌 id）找
+const dlgRow = computed(() => (partnerDlg.vendor && dlgVendors.value.find(m => m.id === partnerDlg.vendor)) || dlgModels.value.find(m => m.profileId === partnerDlg.profile))
 // 經 pi（#351）：這台 pi 列得到哪些模型、各提供者有沒有登入。打開對話框時才向後端查，60 秒內不重查；先拿模型清單，登入狀態晚一點回來再補原因
 const piInfo = reactive({ models: [], providers: {}, at: 0 })
 async function loadPiInfo() {
@@ -404,7 +405,12 @@ const piChoice = computed(() => piChoiceFor(dlgRow.value?.id, piInfo.models, piI
 // pi 是通道不是廠牌，最後不列在廠牌裡；但「經 pi」要等後端能帶提供者與模型開 pi（0.1.90 後續）才能選，
 // 在那之前先留著 pi 這一列，不然使用者完全開不了 pi 夥伴（小東 #737）
 const PI_VIA_READY = true
-const dlgVendors = computed(() => (PI_VIA_READY ? vendorRows(dlgModels.value) : dlgModels.value))
+// 只能經 pi 的廠牌（#351）：這台的 pi 列得到它的模型才出現，運行只有「經 pi」能選；遠端開 pi 帶模型還沒做，所以只在選這台時加
+const PI_ONLY_CHANNELS = { acp: { status: 'no', why: '沒有內建通道' }, pi: { status: 'ok', why: '只能經 pi 開' }, term: { status: 'no', why: '不走終端' } }
+const piOnlyRows = computed(() => (PI_VIA_READY && partnerDlg.node === info.node
+  ? piOnlyVendorRows(piInfo.models, piInfo.providers).map(v => ({ ...v, profileId: 'pi', toolId: 'pi', installed: cliTools.value.pi?.installed === true, modeLabel: '經 pi 開', installHint: '這台電腦沒偵測到 pi', channels: PI_ONLY_CHANNELS }))
+  : []))
+const dlgVendors = computed(() => (PI_VIA_READY ? [...vendorRows(dlgModels.value), ...piOnlyRows.value] : dlgModels.value))
 const partnerRun = computed(() => {
   const row = dlgRow.value
   const r = row?.channels
@@ -463,10 +469,11 @@ async function browsePartnerCwd() {
 }
 function pickPartnerModel(m) {
   if (!m.installed) return
+  partnerDlg.vendor = m.id
   partnerDlg.profile = m.profileId
   partnerDlg.run = ''
   partnerDlg.modeLabel = m.modeLabel
-  partnerDlg.name = defaultPartnerName(friends.value, m.profileId)
+  partnerDlg.name = defaultPartnerName(friends.value, m.viaPiOnly ? m.id : m.profileId)
   // pi 是互動式，只能前台；換回其他模型時還原成使用者上次的選擇
   partnerDlg.display = foregroundOnlyProfile(m.profileId) ? 'foreground' : (launchPrefs.launchDisplay === 'background' ? 'background' : 'foreground')
 }
