@@ -124,6 +124,19 @@ mod gui_tests {
     }
 
     #[tokio::test]
+    async fn 有代答進行中時_撤回送字不會動到它() {
+        let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        reset_for_test();
+        let d = TempDir::new().unwrap();
+        let (url, seen) = fake_term_server(vec![]);
+        let relay = Relay::new(url, "k".into(), "W".into(), "W".into());
+        register_fake_answer("1", "11111111-1111-1111-1111-111111111111");
+        withdraw(&relay, d.path(), "1").await;
+        assert!(local_by_term("1").is_some(), "代答那筆還在");
+        assert!(seen.lock().unwrap().iter().all(|r| !r.contains("term_req_result")), "沒有通知後台取消");
+    }
+
+    #[tokio::test]
     async fn 雜湊不符執行失敗並回報() {
         let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         reset_for_test();

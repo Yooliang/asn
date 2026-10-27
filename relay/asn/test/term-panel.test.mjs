@@ -206,6 +206,8 @@ test('接線：term_send 只在 termSendConfirm 裡呼叫一次；只有「確�
   assert.ok(back.includes('termSendWithdraw()'), '按「返回」要撤回手機上的請求（#329）')
   assert.ok(js.slice(js.indexOf('function termSendOpen'), js.indexOf('function termSendAsk')).includes('termSendWithdraw()'), '關掉或換終端也撤回')
   assert.ok(js.includes("invoke('term_remote_withdraw'"))
+  assert.ok(js.slice(js.indexOf('function termsClose'), js.indexOf('function termSendOpen')).includes('termSendWithdraw()'), '關整個面板也撤回')
+  assert.ok(!html.includes('terms.open = false'), '模板裡不再直接把面板關掉（一律走 termsClose）')
   assert.ok(html.includes('aria-label="要送進終端的文字"'))
 })
 

@@ -923,6 +923,7 @@ const termSendRow = computed(() => terms.rows.find(r => r.id === termSend.id) ??
 const termSendDraft = computed(() => sendDraftView(termSendRow.value, termSend.text))
 const termSendConfirmView = computed(() => (termSend.confirming ? sendConfirmView(termSendRow.value, termSend.text, termSend.enter) : null))
 function termSendWithdraw() { if (termSend.id) void invoke('term_remote_withdraw', { id: termSend.id }).catch(() => {}) }   // 本機取消：手機上那筆一起撤回
+function termsClose() { termSendWithdraw(); terms.open = false }   // 關整個終端面板（點外面或按「關閉」）：手機上等確認的送字一起撤回
 function termSendOpen(row) { termSendWithdraw(); termSend.id = termSend.id === row.id ? '' : row.id; termSend.text = ''; termSend.confirming = false; termSend.error = ''; termSend.note = '' }
 function termSendAsk() {   // 跳出確認框；同時把同一份內容傳到手機待確認（#312 接點，與本機確認互斥）。這裡不送字
   if (!termSendDraft.value.ok) return
@@ -1379,7 +1380,7 @@ const app = createApp({
       searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickLaunchDevice,
       DISPLAY_MODES, partnerShowDisplay, partnerRun,
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
-      termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termSendAsk, termSendBack, termSendConfirm, SEND_MAX,
+      termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termsClose, termSendAsk, termSendBack, termSendConfirm, SEND_MAX,
       adopt, adoptLoad, adoptClose, adoptDo, adoptRelease, adoptUnlockAsk, adoptUnlockCancel, adoptUnlockConfirm, UNLOCK_TEXT,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
