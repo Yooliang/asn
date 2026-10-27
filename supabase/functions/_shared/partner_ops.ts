@@ -7,7 +7,7 @@ type Json = any;
 
 import { LAUNCH_NAME_RE, NODE_ID_RE, type LaunchDeps, type Reply } from "./launch.ts";
 
-export const PARTNER_OPS = ["info", "rename", "model", "close", "handover", "resume", "restart"] as const;
+export const PARTNER_OPS = ["info", "rename", "model", "close", "handover", "resume", "restart", "remove"] as const;
 export const NOTE_MAX = 1000;
 export const RESULT_MAX_BYTES = 4096;
 // 模型字串：1～60 字，只允許英數與 . _ [ ] -（命令列旗標的值，不能夾空白、引號、分號）
