@@ -1,11 +1,11 @@
 {
-  "version": "0.1.95",
-  "notes": "修正選單被上方個人資訊區壓住（＋選單、名單右鍵、設備選單、分頁右鍵）；電腦版群組對話直接顯示圖片附件，可點開放大、另存；截圖標註說明文字看得到了；＋選單沒有終端等你回答時不再留空的「終端」標題；家用機有 pi 卻說找不到：除了 PATH 也會找 npm、pnpm、scoop 資料夾，找不到時寫明找過哪些地方；活躍度燈號分活躍綠、閒置黃、離線紅，已封存群組的夥伴一律灰色",
-  "pub_date": "2026-10-27T14:01:40.899Z",
+  "version": "0.1.96",
+  "notes": "帳號切換的兩個免確認合成一個勾「允許切換帳號」（預設勾選，不勾則別台送來的切換一律拒絕）；開新夥伴的設備清單不再列出已永久移除的設備；頭像統一寫法，廠商小圖都在頭像右下角，agy 補上圖示，同頁多個 Gemini／MiniMax 頭像顏色不再畫不出來；新增 asn-cli site release／meeting／item 寫入官網資料庫；安裝說明補回少掉的反斜線",
+  "pub_date": "2026-10-27T15:42:11.368Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjR1cWlabVpkZU9FWFlCNjNQZy9TWHlzYXIwWk9DQ1dNRExXWHhaZ3l3QitxalRyQ1lvd3NsZkdTZkpmenBLSHRrTHY2OHZUS01LL1F5dHRpb2ZwZGdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMTA5NzAwCWZpbGU6QVNOXzAuMS45NV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjk1CkJBQ1dKbzlYbTJtclRBZXB2NSs1L1hoZkxPN1FCN0NtOE1KeDVzb2VPMkhmbXQ3MmMyaXJYRDNTc0ptZ1ZIcy80WDRON0pFT2VyT3AxZ2kvcGlBUEFBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.95_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjNRb0h3NVJJSDUvWG5Jd0lGdXNSSjJjWTRiR3VKOHBvWWFYaUxVaFhXZEVVMWp6TVhCYVNaRVJOY2FzcXQ3WlpncTZ2SFp6bFlWZTdQZk0zZWM4TFFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMTE1NzMxCWZpbGU6QVNOXzAuMS45Nl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjk2Ck9UelpoT0NXNzFpQ0ZINEU0RnpBYnpkTFhjOWRSY2xjZkg4VnhOc3JTOFg1anRoK0hRenljUDZCTVF6ZFV5eFI0U3RJa3RjYVRRZDRUKzVBS3hsR0FBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.96_x64-setup.exe"
     }
   }
 }
