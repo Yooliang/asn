@@ -1726,10 +1726,15 @@ fn pi_切換模型_錯誤翻成中文_忙碌逾時_不能用的動作_遠端開�
         assert_eq!(res.status, "failed");
         assert!(res.detail.contains(want), "{}", res.detail);
     }
+    // 閒著卻沒回（擴充太舊、沒載入控制功能）：失敗，而且把請求刪掉，免得之後悄悄生效（0.2 A3）
     *r.env.pi_reply.lock().unwrap() = None;
     let res = r.run("model", json!({ "name": "小丙", "model": "m" }));
     assert_eq!(res.status, "failed");
-    assert!(res.detail.contains("正在忙"), "{}", res.detail);
+    assert!(res.detail.contains("擴充太舊"), "{}", res.detail);
+    let ctl = r.env.pi_home.join(".asn").join("pi-control").join("psid");
+    let orphans: Vec<String> = std::fs::read_dir(&ctl).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| n.ends_with(".json") && !n.ends_with(".result.json") && !ctl.join(n.replace(".json", ".result.json")).exists()).collect();
+    assert!(orphans.is_empty(), "沒回的請求要刪掉：{orphans:?}");
     for op in ["rename", "handover", "resume", "restart", "info"] {
         let res = r.run(op, json!({ "name": "小丙", "new_name": "新名" }));
         assert_eq!(res.status, "failed", "{op}");
@@ -1834,4 +1839,24 @@ fn pi_關閉_程序啟動時間晚於最後心跳_或查不到_就不結束() {
     assert!(r.terminated().is_empty());
     r.os().started.lock().unwrap().insert(4001, NOW);   // 剛好等於心跳：算數
     assert_eq!(r.run("close", json!({ "name": "小丙" })).status, "ok");
+}
+
+#[test]
+fn pi_切換模型_pi_正在忙_馬上回已排隊_請求留著等它做完() {
+    // 0.2 A3：以前等到逾時回「沒有回應」（畫面說失敗），請求卻留著、之後悄悄生效
+    let r = rig(Opt::default());
+    put_pi_window(&r, "小丙", 4001);
+    let d = r.env.pi_home.join(".asn").join("pi-windows");
+    let v = json!({ "v": 1, "engine": "pi", "sessionId": "psid", "name": "小丙", "pid": 4001, "cwd": "D:/g/x", "state": "busy", "at": NOW });
+    std::fs::write(d.join("psid.json"), v.to_string()).unwrap();
+    *r.env.pi_reply.lock().unwrap() = None;
+    let res = r.run("model", json!({ "name": "小丙", "model": "anthropic[claude-sonnet-5]" }));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert!(res.detail.contains("已排隊"), "{}", res.detail);
+    let out = res.result.unwrap();
+    assert_eq!((out["queued"].as_bool(), out["model"].as_str(), out["provider"].as_str()), (Some(true), Some("claude-sonnet-5"), Some("anthropic")));
+    let ctl = r.env.pi_home.join(".asn").join("pi-control").join("psid");
+    let reqs: Vec<_> = std::fs::read_dir(&ctl).unwrap().flatten().filter(|e| !e.file_name().to_string_lossy().ends_with(".result.json")).collect();
+    assert_eq!(reqs.len(), 1, "請求留著，pi 閒下來擴充就會處理");
+    assert!(r.terminated().is_empty() && r.launched().is_empty());
 }

@@ -53,7 +53,7 @@ export function opDialogText(op, name, device = '', engine = 'claude') {
   switch (op) {
     case 'model': return {
       title, lead: `要把「${name}」${where}視窗的模型換成哪一個？可以只寫模型，或寫「提供者/模型」，例如 anthropic/claude-sonnet-5。`, ok: '切換', auto: false,
-      points: ['只換這個視窗目前用的模型，視窗不會關，對話保留', 'pi 正在工作時不會馬上換，最多等十幾秒，沒換成會告訴你原因'],
+      points: ['只換這個視窗目前用的模型，視窗不會關，對話保留', 'pi 正在工作時會先排隊，做完這一輪就換'],
     }
     case 'rename': return { title, lead: `要把「${name}」改成什麼名字？名字只能用英數、連字號、中文，1～40 字，不能以連字號開頭。`, points: [], ok: '改名', auto: false }
     case 'close': if (engine === 'acp') return { title: '關閉', lead: `要關閉「${name}」${where}內建通道的工作者嗎？會結束它的程序，這次不再收信，名單上暫時看不到；不會改設定檔，重啟 ASN 後會恢復。`, points: [], ok: '關閉', auto: false }

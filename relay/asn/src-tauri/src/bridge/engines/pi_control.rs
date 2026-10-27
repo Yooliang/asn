@@ -95,14 +95,27 @@ pub fn window_session_id(home: &Path, name: &str, now_ms: u64, alive: impl Fn(u3
     read_windows(&windows_dir(home), now_ms, alive).into_iter().find(|w| w.name == name).and_then(|w| w.session_id)
 }
 
-/// 切換 pi 視窗的模型：寫請求、等擴充寫回結果（pi 忙碌時擴充不處理，等到逾時）。
-/// now／sleep 可注入（測試用）；wait_ms 內每 poll_ms 看一次結果。成功回 { model, provider }
+/// 切換 pi 視窗的模型（0.2 A3：pi 忙時改排隊）。
+/// - pi 正在忙（登記檔 state=busy）：寫好請求就回 `{ queued: true }`。擴充只在 pi 閒下來時處理請求，所以這一輪做完就會切換；
+///   以前會等到逾時回「沒有回應」，畫面說失敗，但請求還留著、之後悄悄生效。
+/// - pi 閒著：等擴充寫回結果（wait_ms 內每 poll_ms 看一次）。等到逾時時 pi 若剛好變忙，照樣算排隊；
+///   還是閒著卻沒回（擴充太舊、沒載入控制功能），就把請求刪掉再回失敗，免得之後悄悄生效。
+/// now／sleep 可注入（測試用）。成功回 { model, provider }
 pub struct SetModelEnv<'a> {
     pub now: &'a dyn Fn() -> u64,
     pub alive: &'a dyn Fn(u32) -> bool,
     pub sleep: &'a dyn Fn(u64),
     pub wait_ms: u64,
     pub poll_ms: u64,
+}
+
+/// 這個 pi 視窗現在是不是忙碌中（找不到回 None）
+fn window_busy(home: &Path, sid: &str, now_ms: u64, alive: &dyn Fn(u32) -> bool) -> Option<bool> {
+    read_windows(&windows_dir(home), now_ms, alive).into_iter().find(|w| w.session_id.as_deref() == Some(sid)).map(|w| w.status.as_deref() == Some("busy"))
+}
+
+fn queued(provider: Option<&str>, model: &str) -> Value {
+    json!({ "queued": true, "model": model, "provider": provider })
 }
 
 pub fn set_model(home: &Path, name: &str, spec: &str, env: &SetModelEnv) -> Result<Value, String> {
@@ -113,13 +126,20 @@ pub fn set_model(home: &Path, name: &str, spec: &str, env: &SetModelEnv) -> Resu
     let sid = window_session_id(home, name, start, env.alive).ok_or("找不到這個 pi 視窗（可能已經關了，或沒有裝 ASN 的 pi 擴充）")?;
     let id = format!("m{start}-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed));
     write_control_request(home, &sid, &id, provider.as_deref(), &model, start)?;
+    if window_busy(home, &sid, start, env.alive) == Some(true) {
+        return Ok(queued(provider.as_deref(), &model));
+    }
     let mut waited = 0;
     loop {
         if let Some(r) = read_control_result(home, &sid, &id) {
             return control_outcome(&r);
         }
         if waited >= env.wait_ms {
-            return Err("pi 沒有回應（可能正在忙，等它做完再試）".into());
+            if window_busy(home, &sid, (env.now)(), env.alive) == Some(true) {
+                return Ok(queued(provider.as_deref(), &model));
+            }
+            let _ = std::fs::remove_file(control_dir(home).join(&sid).join(format!("{id}.json")));
+            return Err("pi 沒有回應（可能是 pi 的 ASN 擴充太舊，請更新擴充後再試）".into());
         }
         (env.sleep)(env.poll_ms);
         waited += env.poll_ms;
