@@ -1,11 +1,11 @@
 {
-  "version": "0.1.84",
-  "notes": "新增：電腦版名單裡每個終端各一列，點開是跟聊天一樣的分頁：上方狀態、中間送字記錄與終端最近畫面（唯讀）、等你回答時選項直接是按鈕、下方輸入框；送字前出現確認列，可改用手機確認（按了才傳到手機）。修正：手機確認後電腦上的確認列會自動收起，不會再送出第二次；終端忙碌時不開放送字。",
-  "pub_date": "2026-10-27T03:50:28.889Z",
+  "version": "0.1.85",
+  "notes": "修正：手機和電腦幾乎同時確認同一段終端送字時，只會送一次；電腦端若在手機剛處理後再按確認，會提示『手機剛處理過這一段字』而不重送。",
+  "pub_date": "2026-10-27T04:18:54.750Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjR6TDNGcDhzT05SK3ZEYkVhMlEyM2VuMWVpM2NOcG9NaWgxV0J4RmdmR1NrV2VJR3NrZ1YwK21jNFdvWVdrVXZuVForMUE0YXdZRnVVc0MzZXkyaFFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDczMDI4CWZpbGU6QVNOXzAuMS44NF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjg0CnVSZ1BXZExPN2dLUkxyTlZTS0RkTy96eTlFVnZ6amNlL2luajB1NFZGWFhDV2F4RmZDRkVOdldyN0FQdm43ZEtUQkt5ZmsvVms4TjBkMml5Z08xb0J3PT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.84_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjdLeGYyQWgrRlZCa2tiamwwRjBpSW9WMnVidVZLbDdBVGxCZHovSEpzQ1ZLV29kOVlLUUFNVjBxZ29VMFZEdjc0Myt0M204OEhwNlpYTmM4ZmJEZndZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDc0NzM0CWZpbGU6QVNOXzAuMS44NV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjg1CnVJSVdFSGRNem4wcU9hQzN1SW01SHpoTUVEaTVzZ1ViWWx0SmtJS25zTjVwckVPM2ExVCtneGhweHhaN1pBN3JISVpKcnVFeWNTQmVHNS94d0QwQ0F3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.85_x64-setup.exe"
     }
   }
 }
