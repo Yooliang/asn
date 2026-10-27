@@ -247,7 +247,7 @@ const core = new AsnCore({
 // ---------- 群組（真人好友與群組）：群組在名單的「群組」分頁，點進去在對話分頁（整合）或對話視窗（分開）聊 ----------
 // 群組對話用「假夥伴」接上既有的對話窗：id 是 room:<群組代號>。發言、讀取、同意／拒絕都走 Rust 指令並帶本人簽章
 const groupApi = createGroupApi(invoke)
-const hub = createRoomHub({ invoke, groupApi, selfNode: info.node, windowName: info.window_name, reactive, visible: () => document.visibilityState === 'visible' })
+const hub = createRoomHub({ invoke, groupApi, selfNode: info.node, windowName: info.window_name, photos: true, reactive, visible: () => document.visibilityState === 'visible' })
 const roomRows = computed(() => hub.rows())
 const roomFriends = computed(() => roomRows.value.map(r => ({ ...roomPseudoFriend(r), unread: r.unread })))
 const openedRooms = new Set()   // 開過的群組對話（整合模式的分頁、分開模式的視窗）：這些要持續讀新訊息

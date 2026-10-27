@@ -5,7 +5,7 @@ import { confirmCards } from './groups.mjs'
 import { ROOM_FIRST_LOAD, ROOM_LOAD_FAIL_TEXT, applyReads, applyWakes, hasPendingReads, hasPendingWakes, mergeRoomLog, memberIdentity, needsRead, postError, readSince, roomErrorText, roomItems, roomLog } from './mobile-rooms.mjs'
 import { groupErrorText } from './groups.mjs'
 
-export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd = 'relay_room_read', postCmd = 'relay_room_post', attachCmd = 'relay_send_attachment', visible = () => true, now = () => Date.now(), reactive = x => x }) {
+export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd = 'relay_room_read', postCmd = 'relay_room_post', attachCmd = 'relay_send_attachment', photos = false, visible = () => true, now = () => Date.now(), reactive = x => x }) {
   const st = reactive({ rooms: [], loaded: false, err: false, logs: {}, cards: {}, note: '', deciding: false })
   const raw = id => st.rooms.find(r => r?.id === id) ?? null
   const rows = (opts = {}) => roomItems(st.rooms, opts)
@@ -39,7 +39,7 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
       const since = unread && !first ? Math.max(0, readSince(log, row.lastSeq) - 1) : readSince(log, row.lastSeq)
       const r = await invoke(readCmd, { room: id, agent: ident.agent || null, since, limit: first ? ROOM_FIRST_LOAD : 200, mark: visible() })
       const mine = (room.mine ?? []).map(m => m?.member)
-      st.logs[id] = applyWakes(applyReads(mergeRoomLog(log, roomLog(r?.messages, mine, room.members)), r?.reads), r?.wakes)
+      st.logs[id] = applyWakes(applyReads(mergeRoomLog(log, roomLog(r?.messages, mine, room.members, { photos })), r?.reads), r?.wakes)
       if (visible()) for (const m of room.mine ?? []) if (m.member === ident.key) m.unread = 0
       st.note = ''
       return true

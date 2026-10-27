@@ -47,6 +47,8 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .dp.xl{width:104px;height:104px;padding:4px;border-radius:10px}
 .dp.xl>span{font-size:42px;border-radius:6px}
 .dp.st-online,.dot.st-online{--frame:var(--online)} .dp.st-busy,.dot.st-busy{--frame:var(--busy)} .dp.st-away,.dot.st-away{--frame:var(--away)} .dp.st-offline,.dot.st-offline{--frame:var(--offline)}
+/* 活躍度頁籤（#372）：活躍＝綠實心、閒置＝同一個綠只畫外框、離線沿用 st-offline 的灰 */
+.dot.st-active{--frame:var(--online)} .dot.st-idle{background:transparent;box-shadow:inset 0 0 0 2px var(--online)}
 
 /* 大頭貼圖片（自動產生的色塊或設備上傳的圖）填滿相框 */
 .dp img{display:block;width:100%;height:100%;border-radius:inherit;object-fit:cover}
@@ -84,9 +86,9 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .search input{flex:1;min-width:0;width:100%;border:1px solid var(--line);border-radius:3px;padding:4px 8px;background:var(--panel)}
 .search-ic{flex:none;width:26px;height:26px;padding:0;border:1px solid var(--line);border-radius:3px;background:linear-gradient(#fdfeff,#e3eef9);color:var(--title-fg);cursor:pointer;display:grid;place-items:center}
 .search-ic:hover{border-color:var(--accent);background:linear-gradient(#f2f9ff,#bfe0fb)}
-.buddy-menu,.launch-picker,.device-menu{position:fixed;z-index:62;margin:0;max-width:min(320px,calc(100vw - 16px))}
+.buddy-menu,.launch-picker,.device-menu,.av-menu.buddy-menu,.av-menu.launch-picker,.av-menu.device-menu{position:fixed;z-index:62;margin:0;max-width:min(320px,calc(100vw - 16px))}
 /* 二級選單：放在主選單外面（fixed），比主選單高一層；位置由 lib/menu-place.mjs 算 */
-.buddy-subpop{z-index:63;list-style:none;padding:2px 0;width:max-content}
+.buddy-subpop,.av-menu.buddy-subpop{z-index:63;list-style:none;padding:2px 0;width:max-content}
 .menu-shared{display:block;max-width:260px;padding:3px 12px 5px;font-size:11px;line-height:1.35;color:var(--muted);white-space:normal;list-style:none;border-bottom:1px solid rgba(0,0,0,.08)}
 .buddy-subpop .menu-note{padding:2px 8px;font-size:11px;color:var(--muted);white-space:normal}
 /* 夥伴管理對話框：接班換手的分段進度、詳情列 */
@@ -383,7 +385,7 @@ html.toast-page,html.toast-page body{background:transparent}
 .ctab.tab-dragging{opacity:.55}
 .ctab.tab-drop-before{box-shadow:inset 3px 0 0 #1a6fb5}
 .ctab.tab-drop-after{box-shadow:inset -3px 0 0 #1a6fb5}
-.ctab-menu{position:fixed;z-index:60;margin:0}
+.ctab-menu,.av-menu.ctab-menu{position:fixed;z-index:60;margin:0}
 .chat-stack{flex:1;min-height:0;display:flex;flex-direction:column}
 .chat-stack > .pane{flex:1;min-height:0;border-top-left-radius:0}
 
@@ -578,7 +580,7 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .an-text{position:absolute;z-index:2;box-sizing:border-box;min-width:0;max-width:100%;font-weight:600;font-family:"Microsoft JhengHei","PingFang TC","Noto Sans CJK TC",sans-serif;line-height:1.25;white-space:pre;overflow:hidden;border:0;outline:1px dashed var(--accent);outline-offset:0;resize:none;padding:0;margin:0;caret-color:#1e88e5}
 .an-msg{position:absolute;left:50%;bottom:8px;transform:translateX(-50%);padding:4px 10px;border-radius:4px;background:rgba(160,30,25,.9);font-size:13px}
 .an-foot{display:flex;align-items:center;gap:8px;padding:6px 10px;flex:none}
-.an-cap{flex:1;min-width:0;padding:4px 8px;border:1px solid var(--line);border-radius:3px;font:inherit}
+.an-cap{flex:1;min-width:0;padding:4px 8px;border:1px solid var(--line);border-radius:3px;font:inherit;background:var(--panel);color:var(--fg)}
 /* 設定頁：Claude 帳號 */
 .acct-set{display:flex;flex-direction:column;gap:10px}
 .acct-set .set-card{gap:8px}

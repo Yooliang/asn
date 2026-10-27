@@ -58,6 +58,21 @@ test('訊息轉對話記錄：自己的成員身分算我（不顯示名字）�
   assert.deepEqual(roomLog(null, []), [])
 })
 
+test('電腦版（photos:true）：群組附件放進 photos 直接顯示，不再寫「請用電腦版查看」；沒附件的訊息不帶 photos（#392）', () => {
+  const id = '0f8fad5b-d9cb-469f-a165-70867728950e'
+  const msgs = [
+    { seq: 1, from: '~owner', body: '看圖', at: '2026-10-20T10:02:00Z', attachments: [{ id, kind: 'image', name: 'a.webp', mime: 'image/webp', bytes: 1200, width: 10, height: 10 }, { name: '沒有編號' }] },
+    { seq: 2, from: '~owner', body: '只有字', at: '2026-10-20T10:03:00Z' },
+  ]
+  const desk = roomLog(msgs, [], [], { photos: true })
+  assert.equal(desk[0].text, '看圖')
+  assert.deepEqual(desk[0].photos.map(p => [p.id, p.kind, p.name]), [[id, 'image', 'a.webp']])
+  assert.equal('photos' in desk[1], false)
+  const phone = roomLog(msgs, [], [])
+  assert.equal(phone[0].text, '看圖\n（附件：a.webp，請用電腦版查看）\n（附件：沒有編號，請用電腦版查看）')
+  assert.equal('photos' in phone[0], false)
+})
+
 test('合併記錄：依序號去重排序，最多留 ROOM_KEEP 則', () => {
   const e = s => ({ seq: s, k: 'them', text: String(s) })
   assert.deepEqual(mergeRoomLog([e(1), e(3)], [e(2), e(3)]).map(x => x.seq), [1, 2, 3])
