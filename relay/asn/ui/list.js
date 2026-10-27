@@ -11,6 +11,7 @@ import { PANEL_KINDS, isPanelTab, normalizePanelSize, panelItem, panelTabId, pan
 import { AsnDialog } from './lib/dialog.mjs'
 import { SETTING_CATS, catSummary, normalizeCatKey } from './lib/settings-cats.mjs'
 import { DIMS, groupOptions, loadDims, pageTabs, withTabDim } from './lib/dims.mjs'
+import { activityRound, withActivity } from './lib/activity.mjs'
 import { normalizeSearchQuery, rosterShownGroups } from './lib/search.mjs'
 import { deviceAsn } from './lib/presence.mjs'
 import { POLL_MS as REMOTE_UPD_POLL_MS, mineFromStatus, remoteUpdateView } from './lib/remote-update.mjs'
@@ -264,6 +265,13 @@ const sync = () => {
   conn.value = s.conn
   emit('asn:state', { ...s, friends: [...s.friends, ...roomFriends.value], me: { ...me }, ui: { dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, collapsed: ui.collapsed } })
 }
+// 名單的活躍度（#347）：名單每次更新、再加每 30 秒（讓 8 小時門檻與離線去抖會自己到期）算一輪；狀態放在普通 Map，畫面靠 activityTick 重算
+let activityPrev = new Map()
+const activityTick = ref(0)
+function refreshActivity() { activityPrev = activityRound(friends.value, { logOf: id => core.viewOf(id) ?? [], prev: activityPrev }); activityTick.value++ }
+const friendsAct = computed(() => { void activityTick.value; return withActivity(friends.value, activityPrev) })
+watch(friends, refreshActivity)
+setInterval(refreshActivity, 30_000)
 const logs = reactive({})   // 整合模式的分頁直接讀這份；分開模式的對話視窗走 asn:log 事件
 const pushLog = id => {
   const room = isRoomChat(id)
@@ -877,7 +885,7 @@ watch(showNowPlaying, on => {
 }, { immediate: true })
 // 設定頁改「分頁依」：分組若撞到自動換成剩下兩個裡的第一個
 const setTabDim = v => Object.assign(dims, withTabDim(dims, v))
-const pages = computed(() => pageTabs(friends.value, dims.tabDim, { selfNode: info.node, selfName: info.window_name, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved }))
+const pages = computed(() => pageTabs(friendsAct.value, dims.tabDim, { selfNode: info.node, selfName: info.window_name, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved }))
 
 // 起始頁籤：平常是設備維度的本機；--shot 可用設定檔的 shotTab 指定固定頁籤（已拿掉的「通知」或任何不認得的值都忽略）
 const startTab = info.shot ? normalizeTab(savedMe.shotTab) : ''
@@ -1145,9 +1153,9 @@ const app = createApp({
     const shown = computed(() => {
       if (!isDevice.value) return []
       const o = { tabDim: dims.tabDim, tabKey: tab.value, groupDim: dims.groupDim, selfNode: info.node, selfName: info.window_name, deviceOrder: devPrefs.deviceOrder, query: query.value, plainText: plain }
-      const base = rosterShownGroups(activeFriends(friends.value), o)
+      const base = rosterShownGroups(activeFriends(friendsAct.value), o)
       // 已封存的不放進名單，另成最底下一個預設收合的「已封存（N）」群組（同一個分頁與搜尋字）
-      const archived = rosterShownGroups(archivedFriends(friends.value), o).flatMap(g => g.items)
+      const archived = rosterShownGroups(archivedFriends(friendsAct.value), o).flatMap(g => g.items)
       return withArchivedGroup(injectPendingGroups(base, launchPending.value.filter(p => !tab.value || p.node === tab.value)), archived)
     })
     const emptyText = computed(() => (normalizeSearchQuery(query.value) ? '沒有符合的聯絡人。' : conn.value !== 'on' ? '還沒連上 ASN。' : '這一頁目前沒有視窗。'))

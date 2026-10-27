@@ -89,7 +89,7 @@ test('送出：內容只含節點、名字、旗標與（有的話）夥伴 ID�
 
 test('接線：電腦版右鍵與手機「⋯」只用 manageItems；已封存另成群組；取消封存有入口；介面名單與 Rust 指令', () => {
   const list = read('ui/list.js'), lhtml = read('ui/list.html'), m = read('ui/m.js'), mhtml = read('ui/m.html')
-  assert.match(list, /rosterShownGroups\(activeFriends\(friends\.value\), o\)/, '電腦版名單只放沒封存的')
+  assert.match(list, /rosterShownGroups\(activeFriends\(friendsAct\.value\), o\)/, '電腦版名單只放沒封存的')
   assert.match(list, /withArchivedGroup\(injectPendingGroups\(/)
   assert.match(list, /collapsed = reactive\(\{ \[ARCHIVE_GROUP_KEY\]: true \}\)/, '已封存預設收合')
   assert.match(list, /it\.key === 'archive' \|\| it\.key === 'unarchive'\) \{ void setArchived\(f, it\.key === 'archive'\)/)

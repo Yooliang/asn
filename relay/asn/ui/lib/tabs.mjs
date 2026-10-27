@@ -1,6 +1,7 @@
 // 名單視窗的頁籤、群組列與廣告輪播（純邏輯，node 與瀏覽器都能跑）。
 import { UNNAMED_DEVICE } from './text.mjs'
 import { isAsnWindow } from './roster.mjs'
+import { ACTIVITY_LEVELS, activityRank, levelOf } from './activity.mjs'
 import { applyDeviceOrder, isDeviceHidden, isDeviceRemoved } from './device-order.mjs'
 import { modelVendorKey } from './vendor-icons.mjs'
 
@@ -121,8 +122,8 @@ export function openAdWith(ad, open) {
 }
 
 // ---------- 設備頁裡的分組 ----------
-// mode＝'status'：線上／忙碌／暫離／離線；mode＝'engine'：Claude／Gemini／Grok…（沒回報類型的歸「其他」，排最後）。空的組不列。
-const STATUS_GROUPS = [['online', '線上'], ['busy', '忙碌'], ['away', '暫離'], ['offline', '離線']]
+// mode＝'status'：活躍／閒置／離線（#347，看 f.activity，不再看忙閒）；mode＝'engine'：Claude／Gemini／Grok…（沒回報類型的歸「其他」，排最後）。空的組不列。
+const STATUS_GROUPS = ACTIVITY_LEVELS
 const ENGINE_ORDER = ['claude', 'gemini', 'grok', 'codex', 'deepseek', 'minimax']
 const ENGINE_LABEL = { claude: 'Claude', gemini: 'Gemini', grok: 'Grok', codex: 'Codex', deepseek: 'DeepSeek', minimax: 'MiniMax', aegis: 'Aegis', gpt: 'GPT', acp: 'ACP', asn: 'ASN', pi: 'Pi' }
 // 節點回報的 kind 只有這幾個值可以拿來推斷廠商；'other' 不採用
@@ -147,10 +148,10 @@ export function groupInDevice(items, mode = 'status') {
     const by = new Map()
     for (const f of items) { const k = displayVendorKey(f); if (!by.has(k)) by.set(k, []); by.get(k).push(f) }
     const keys = [...by.keys()].sort((a, b) => engineRank(a) - engineRank(b) || a.localeCompare(b))
-    const st = s => STATUS_GROUPS.findIndex(([k]) => k === s)
+    const st = activityRank
     return keys.map(k => ({ key: `engine:${k}`, kind: 'engine', label: engineLabel(k),
-      items: by.get(k).slice().sort((a, b) => st(a.status) - st(b.status)) }))
+      items: by.get(k).slice().sort((a, b) => st(levelOf(a)) - st(levelOf(b))) }))
   }
-  return STATUS_GROUPS.map(([k, label]) => ({ key: `status:${k}`, kind: 'status', label, items: items.filter(f => f.status === k) }))
+  return STATUS_GROUPS.map(([k, label]) => ({ key: `status:${k}`, kind: 'status', label, items: items.filter(f => levelOf(f) === k).sort((a, b) => String(a.nick ?? '').localeCompare(String(b.nick ?? ''), 'zh-Hant')) }))
     .filter(g => g.items.length)
 }

@@ -2,12 +2,14 @@
 import { UNNAMED_DEVICE } from './text.mjs'
 import { isAsnWindow, withoutAsn } from './roster.mjs'
 import { applyDeviceOrder } from './device-order.mjs'
+import { ACTIVITY_LEVELS, activityRank, levelOf } from './activity.mjs'
 import { DEVICE_TAB_MAX, deviceTabs, displayVendorKey, engineKey, engineLabel, engineRank, groupInDevice, shortOf } from './tabs.mjs'
 
-export const DIMS = [{ key: 'status', label: '狀態' }, { key: 'engine', label: '廠商' }, { key: 'device', label: '設備' }]
+export const DIMS = [{ key: 'status', label: '活躍度' }, { key: 'engine', label: '廠商' }, { key: 'device', label: '設備' }]
 export const DEFAULT_DIMS = { tabDim: 'device', groupDim: 'status' }
 const KEYS = DIMS.map(d => d.key)
-const STATUS_LIST = [['online', '線上'], ['busy', '忙碌'], ['away', '暫離'], ['offline', '離線']]
+// 「活躍度」維度（#347）：鍵名沿用 status，舊設定照樣能讀；分組改看 f.activity（activity.mjs 算的），不再看忙閒
+const STATUS_LIST = ACTIVITY_LEVELS
 
 // 分組可選的維度：除了分頁用掉的那個，剩下兩個
 export const groupOptions = tabDim => DIMS.filter(d => d.key !== tabDim)
@@ -38,7 +40,7 @@ export function pageTabs(friends, dim, { selfNode, selfName = '', nodeOrder = []
   const seen = friends   // 設備頁籤要看全部（ASN 視窗讓設備存在，但 deviceTabs 不計它）
   if (dim !== 'device') friends = withoutAsn(friends)
   if (dim === 'status') {
-    all = STATUS_LIST.map(([key, label]) => sumTab({ key, label, short: '', dot: key, unread: 0, online: 0, total: 0 }, friends.filter(f => f.status === key)))
+    all = STATUS_LIST.map(([key, label]) => sumTab({ key, label, short: '', dot: key, unread: 0, online: 0, total: 0 }, friends.filter(f => levelOf(f) === key)))
   } else if (dim === 'engine') {
     const by = new Map()
     for (const f of friends) { const k = displayVendorKey(f); if (!by.has(k)) by.set(k, []); by.get(k).push(f) }
@@ -56,9 +58,9 @@ export function pageTabs(friends, dim, { selfNode, selfName = '', nodeOrder = []
 
 // 某頁籤裡的好友：線上／忙碌在前、離線在後（同級照名字）；match 為搜尋
 export function pageItems(friends, dim, key, match = () => true) {
-  const of = f => (dim === 'status' ? f.status : dim === 'engine' ? displayVendorKey(f) : (f.node ?? ''))
-  const rank = s => (s === 'offline' ? 1 : 0)
-  return friends.filter(f => !isAsnWindow(f) && of(f) === key && match(f)).sort((a, b) => rank(a.status) - rank(b.status) || a.nick.localeCompare(b.nick, 'zh-Hant'))
+  const of = f => (dim === 'status' ? levelOf(f) : dim === 'engine' ? displayVendorKey(f) : (f.node ?? ''))
+  // 組內排序固定：活躍、閒置、離線，同級照名字；不看忙閒，免得一忙一閒就換位置
+  return friends.filter(f => !isAsnWindow(f) && of(f) === key && match(f)).sort((a, b) => activityRank(levelOf(a)) - activityRank(levelOf(b)) || a.nick.localeCompare(b.nick, 'zh-Hant'))
 }
 
 // 頁籤裡的分組；設備組用設備名、本機那組排第一，其餘照設備名

@@ -126,14 +126,14 @@ test('廣告輪播：循環一圈回到起點；連結只有官網與正見的�
   assert.equal(nextAd(0, 0), 0)
 })
 
-test('groupInDevice：依狀態分線上／忙碌／暫離／離線，空組不列；依類型 Claude、Gemini、Grok 在前，沒回報的歸其他排最後', async () => {
+test('groupInDevice：依活躍度分活躍／閒置／離線（#347，不看忙閒），空組不列；依類型 Claude、Gemini、Grok 在前，沒回報的歸其他排最後', async () => {
   const { groupInDevice, groupHeading } = await import('../ui/lib/tabs.mjs')
   const f = (nick, status, engine) => ({ id: nick, nick, status, engine })
   const items = [f('a', 'online', 'claude'), f('b', 'busy', 'gemini'), f('c', 'away', null), f('d', 'offline', 'claude'), f('e', 'online', 'grok')]
   const st = groupInDevice(items, 'status')
-  assert.deepEqual(st.map(g => [g.label, g.items.map(x => x.nick)]), [['線上', ['a', 'e']], ['忙碌', ['b']], ['暫離', ['c']], ['離線', ['d']]])
-  assert.equal(groupHeading(st[0]), '線上 (2)')
-  assert.deepEqual(groupInDevice([f('x', 'busy', 'claude')], 'status').map(g => g.label), ['忙碌'])
+  assert.deepEqual(st.map(g => [g.label, g.items.map(x => x.nick)]), [['閒置', ['a', 'b', 'c', 'e']], ['離線', ['d']]], '沒算過活躍度的：離線歸離線，其餘先當閒置')
+  assert.equal(groupHeading(st[0]), '閒置 (4)')
+  assert.deepEqual(groupInDevice([{ ...f('x', 'busy', 'claude'), activity: 'active' }], 'status').map(g => g.label), ['活躍'], '忙碌也照活躍度分')
   const en = groupInDevice(items, 'engine')
   assert.deepEqual(en.map(g => [g.label, g.items.map(x => x.nick)]), [['Claude', ['a', 'd']], ['Gemini', ['b']], ['Grok', ['e']], ['其他', ['c']]])
   assert.equal(groupHeading(en[0]), 'Claude (1/2)')

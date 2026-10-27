@@ -1,10 +1,10 @@
 // 手機「夥伴」名單最上面的「最近有活動」分組（純邏輯，node 與瀏覽器共用）。
-// 列出最近 24 小時內有往來（收或發）的夥伴與群組，最多 8 個，依最後活動時間新到舊；沒有任何近期活動就回空陣列（畫面不顯示這組）。
+// 列出最近 8 小時內有往來（收或發）的夥伴與群組，最多 8 個，依最後活動時間新到舊；沒有任何近期活動就回空陣列（畫面不顯示這組）。
 // 同一夥伴在下方設備分組照常出現（這裡只是多一份捷徑，不從原分組拿掉）。
 
 export const RECENT_GROUP_KEY = 'recent'
 export const RECENT_GROUP_LABEL = '最近有活動'
-export const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000
+export const RECENT_WINDOW_MS = 8 * 60 * 60 * 1000   // 跟電腦版「活躍」同一個門檻（#347，activity.mjs 的 ACTIVE_WINDOW_MS）
 export const RECENT_MAX = 8
 
 // 一段對話記錄的最後往來時間：只算「收（them）」與「發（me）」，系統提示行不算
