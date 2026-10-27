@@ -1,6 +1,6 @@
 //! 遠端管理 ACP 工作者（Gemini、agy 等收發室自己跑的背景工作者）的入口：給 bridge/partner_ops.rs 用。
-//! 只管詳情、重開、接班換手、關閉（停止本次執行，不改設定檔）四件事；改名、切換模型、喚醒不支援（由呼叫端回「這類夥伴不支援」）。
-//! 切換模型沒接：標準 ACP 的 session/set_model 還在實驗階段、這個程式也沒實測過，設定檔的 model 欄位只在啟動時讀一次（agy 當 --model 參數），執行中改不了。
+//! 管詳情、重開、接班換手、關閉（停止本次執行，不改設定檔）、切換模型五件事；改名、喚醒不支援（由呼叫端回「這類夥伴不支援」）。
+//! 切換模型：Grok（標準 ACP）用原生 session/set_model；agy 換模型後帶同一個對話重開。選好的記進 acp-models.json（見 acp_models.rs）。
 //! 只認收發室記在案的工作者（agents.json 讀進來、已啟動的），而且只結束驅動回報的那個 pid。
 use super::acp_config::WorkerCfg;
 use super::acp_worker::admin::LoadState;
@@ -22,6 +22,10 @@ pub trait AcpAdmin: Send + Sync {
     fn restart(&self, name: &str) -> Result<Value, String>;
     /// 關閉（停止本次執行）：結束子行程、不再收信、名單上暫時看不到；不改 agents.json。重開或重啟 ASN 恢復
     fn stop(&self, name: &str) -> Result<Value, String>;
+    /// 切換模型（模型先比對可選清單；正在處理信件就拒絕，不排隊）
+    fn set_model(&self, _name: &str, _model: &str) -> Result<Value, String> {
+        Err("這台電腦的 ASN 還不能切換這類工作者的模型".into())
+    }
     /// 接班換手（清掉對話後重開，第一則提示是接班說明）
     fn handover(&self, name: &str, note: &str) -> Result<Value, String>;
     /// 接手：另開一個專屬的 Grok 工作者，載入指定的對話（session）。會等到載入成功或失敗才回；只動自己新開的工作者，不碰任何既有程序
@@ -34,6 +38,8 @@ pub struct AcpAdminImpl {
     pub workers: Arc<Mutex<Vec<(String, WorkerHandle)>>>,
     /// 接手用：做工作者的函式、存對話編號的帳本、接手名冊檔、通知名單有變的通道、等載入的上限
     pub adopt: Option<AdoptEnv>,
+    /// 切換模型後記下來的檔案（acp-models.json）
+    pub models_file: PathBuf,
 }
 
 #[derive(Clone)]
@@ -102,6 +108,12 @@ impl AcpAdmin for AcpAdminImpl {
         let w = self.find(name).ok_or("找不到這個工作者")?;
         let pid = w.admin_stop()?;
         Ok(json!({ "kind": "acp", "pid": pid, "stopped": true }))
+    }
+
+    fn set_model(&self, name: &str, model: &str) -> Result<Value, String> {
+        let w = self.find(name).ok_or("找不到這個工作者")?;
+        let (pid, restarted, saved) = w.admin_set_model(model, &self.models_file)?;
+        Ok(json!({ "kind": "acp", "pid": pid, "model": model, "restarted": restarted, "saved": saved }))
     }
 
     fn handover(&self, name: &str, note: &str) -> Result<Value, String> {

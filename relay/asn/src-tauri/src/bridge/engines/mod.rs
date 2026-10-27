@@ -9,6 +9,7 @@ pub mod acp_agy;
 pub mod acp_approvals;
 pub mod acp_client;
 pub mod acp_config;
+pub mod acp_models;
 pub mod acp_policy;
 pub mod acp_worker;
 pub mod codex;

@@ -7,11 +7,17 @@
 //   @@CRASH          往 stderr 寫字然後結束碼 3
 //   @@ENV <名稱>     回覆該環境變數有沒有被帶進來
 // 環境變數 FAKE_AGY_STATE：資料夾，存各 conversation 已經跑過幾輪（模擬 --conversation 可恢復）。
+// `fake-agy.mjs models`：照 agy 1.x 實測的格式列模型（說明行在 stderr；stdout 一行「代號<Tab>名稱」），清單取 FAKE_AGY_MODELS（逗號分隔）
 import fs from 'node:fs'
 import path from 'node:path'
 import readline from 'node:readline'
 
 const argv = process.argv.slice(2)
+if (argv[0] === 'models') {
+  process.stderr.write('Fetching available models...\n')
+  for (const id of (process.env.FAKE_AGY_MODELS || 'gemini-4-argon-medium,gemini-3.8-flash-high').split(',').filter(Boolean)) process.stdout.write(`${id}\t${id.toUpperCase()}\n`)
+  process.exit(0)
+}
 const flag = n => argv.includes(n)
 const opt = n => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : '' }
 const stateDir = process.env.FAKE_AGY_STATE || ''

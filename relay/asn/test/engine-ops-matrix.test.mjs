@@ -17,8 +17,8 @@ const ok = (f, key) => menuItems(f, ctx).find(i => i.key === key)
 const MATRIX = [
   ['claude 視窗', P('小甲', 'claude'), { close: true, model: true, restart: false, handover: true }],
   ['codex 視窗', P('小乙', 'codex'), { close: false, model: false, restart: false, handover: false }],
-  ['gemini 背景工作者（ACP）', P('Gemini', 'gemini', { kind: undefined }), { close: true, model: false, restart: true, handover: true }],
-  ['agy 背景工作者（ACP）', P('Agy', 'agy', { kind: undefined }), { close: true, model: false, restart: true, handover: true }],
+  ['gemini 背景工作者（ACP）', P('Gemini', 'gemini', { kind: undefined }), { close: true, model: true, restart: true, handover: true }],
+  ['agy 背景工作者（ACP）', P('Agy', 'agy', { kind: undefined }), { close: true, model: true, restart: true, handover: true }],
   ['pi 視窗（開放切換模型與關閉）', P('小丙', 'pi'), { close: true, model: true, restart: false, handover: false }],
   ['grok 雲端代理（engine=grok, kind=grok）', P('ASN-開發', 'grok'), { close: false, model: false, restart: false, handover: false }],
 ]
@@ -40,17 +40,18 @@ test('現況：不能用的項目都有寫明原因（Codex＝尚未實機驗證
   assert.equal(partnerEngine(P('小丙', 'pi')), 'pi')
   assert.equal(ok(P('ASN-開發', 'grok'), 'close').reason, REASON.cloud)
   assert.equal(ok(P('Gemini', 'gemini', { kind: undefined }), 'close').reason, '')
-  assert.match(ok(P('Gemini', 'gemini', { kind: undefined }), 'model').reason, /不能在這裡切換模型/)
+  assert.equal(ok(P('Gemini', 'gemini', { kind: undefined }), 'model').reason, '', '內建通道的工作者可以切換模型（0.2 B4）')
 })
 
-test('現況：電腦端（partner_ops.rs）——非 Claude 的關閉與切換模型根本找不到對象；ACP 工作者只做四件事（含停止）', () => {
+test('現況：電腦端（partner_ops.rs）——非 Claude 的關閉與切換模型根本找不到對象；ACP 工作者做五件事（含停止、切換模型）', () => {
   const rs = fs.readFileSync(new URL('../src-tauri/src/bridge/partner_ops.rs', import.meta.url), 'utf8')
   assert.match(rs, /"close" => self\.close\(&target\)/)
   assert.match(rs, /"model" => self\.model\(op, target\)/)
   assert.match(rs, /找不到這個夥伴的 Claude 視窗/, 'find_target 只認 Claude 的 sessions 檔')
   assert.match(rs, /_ => failed\(UNSUPPORTED\)/, 'ACP 工作者其餘動作回「這類夥伴不支援」')
   const admin = fs.readFileSync(new URL('../src-tauri/src/bridge/engines/acp_admin.rs', import.meta.url), 'utf8')
-  assert.match(admin, /只管詳情、重開、接班換手、關閉（停止本次執行，不改設定檔）四件事；改名、切換模型、喚醒不支援/)
+  assert.match(admin, /管詳情、重開、接班換手、關閉（停止本次執行，不改設定檔）、切換模型五件事；改名、喚醒不支援/)
+  assert.match(rs, /acp\.set_model\(&op\.name, op\.model\.trim\(\)\)/, 'ACP 工作者的切換模型交給工作者比對可選清單')
 })
 
 // ---- 缺口（尚未做；node:test 的 todo：跑得過會顯示、跑不過不算失敗，補完行為後把 todo 拿掉）----
@@ -88,12 +89,14 @@ test('電腦端接線：model 動作遇到 pi 視窗走 pi_control（只在 desk
   assert.match(rs, /pi_control::set_model\(/)
 })
 
-test('ACP 背景工作者能「關閉」（停止本次執行），Gemini／agy／本機 Grok 都是（#235 第一階段）；切換模型沒接，維持反灰並說明', () => {
+test('ACP 背景工作者能「關閉」（停止本次執行）與「切換模型」（0.2 B4），Gemini／agy／本機 Grok 都是；模型代號先在畫面上檢查格式', () => {
   for (const [a, e] of [['Gemini', 'gemini'], ['Agy', 'agy'], ['Grok', 'grok']]) {
     const w = P(a, e, { kind: undefined })
     assert.equal(ok(w, 'close').ok, true, e)
     assert.equal(ok(w, 'close').label, '關閉')
-    assert.equal(ok(w, 'model').ok, false)
-    assert.match(ok(w, 'model').reason, /設定檔/)
+    assert.equal(ok(w, 'model').ok, true, e)
+    assert.equal(opFormError(w, 'model', { model: 'grok-4.6' }, ok(w, 'model')), '')
+    for (const bad of ['', '-x', 'a/b', 'a[b]', 'a b']) assert.notEqual(opFormError(w, 'model', { model: bad }, ok(w, 'model')), '', bad)
+    assert.equal(buildOpRequest(w, 'model', { model: ' grok-4.6 ' }).model, 'grok-4.6')
   }
 })

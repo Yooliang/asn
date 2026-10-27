@@ -31,7 +31,8 @@ test('每種夥伴的選單都是同一套同一個順序；反灰一定有說�
 test('說明逐案不同、寫的是程式真的判斷得出的條件', () => {
   const why = (name, key) => manageItems(KINDS[name], ctx).find(i => i.key === key).reason
   assert.equal(why('背景工作者在線', 'close'), '', '背景工作者可以「關閉」（停止本次執行）')
-  assert.match(why('背景工作者在線', 'model'), /設定檔/, '背景工作者的模型寫在設定檔，原因要講清楚')
+  assert.equal(why('背景工作者在線', 'model'), '', '背景工作者可以切換模型（0.2 B4）')
+  assert.match(why('背景工作者在線', 'rename'), /沒有視窗可以改名/)
   assert.match(why('沒開放遠端管理', 'rename'), /沒有開放遠端管理/)
   assert.match(why('Claude 離線', 'rename'), /已離線/)
   assert.match(why('雲端代理', 'info'), /雲端代理/)

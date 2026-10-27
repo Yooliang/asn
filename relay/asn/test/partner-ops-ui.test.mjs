@@ -201,3 +201,13 @@ test('對話框文字：重開要確認、接班換手依引擎說不同的事�
   assert.ok(claude.points.some(p => /先請它把交接寫到一個檔案/.test(p)))
   for (const t of [r, acp, claude]) for (const s of [t.title, t.lead, t.ok, ...t.points]) assert.ok(!/[A-Za-z]{4,}/.test(s.replace('Gemini', '')), `純中文：${s}`)
 })
+
+test('內建通道工作者的「切換模型」對話框：說清楚只能選列得出來的、Grok 不重開、Gemini 會短暫重開、忙時不能換、會記下來', () => {
+  const t = opDialogText('model', 'Grok', '工作機', 'acp')
+  assert.match(t.lead, /內建通道的工作者換成哪個模型/)
+  assert.equal(t.placeholder, '例如 grok-4.6')
+  const all = t.points.join('\n')
+  for (const re of [/不在清單裡會被拒絕/, /Grok 直接換，不會重開/, /Gemini 會帶同一段對話短暫重開/, /正在處理信件時不能換/, /重開 ASN 也照新的模型/]) assert.match(all, re)
+  assert.doesNotMatch(all, /pi/, '不混進 pi 的說明')
+  assert.equal(opDialogText('model', '小甲', '', 'claude').placeholder, undefined, 'Claude 與 pi 的文字不變')
+})

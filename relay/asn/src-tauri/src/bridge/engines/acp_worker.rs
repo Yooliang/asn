@@ -55,6 +55,18 @@ pub trait Driver: Send + Sync {
     fn load_session(&self) -> Option<bool> {
         None
     }
+    /// 對方列出的可選模型（標準 ACP 的 session/new、session/load 回的 models.availableModels）；沒列出回空
+    fn models(&self) -> Vec<String> {
+        vec![]
+    }
+    /// 對方說目前用的模型（沒說回 None）
+    fn current_model(&self) -> Option<String> {
+        None
+    }
+    /// 原生切換模型（不重啟、對話不斷）；不支援的驅動回錯誤
+    fn set_model(&self, _model: String) -> BoxFut<'_, Result<(), String>> {
+        Box::pin(async { Err("這類工作者沒有原生的切換模型".to_string()) })
+    }
     /// 有人在等授權：重設「沒動靜」的計時
     fn touch(&self);
     fn start(&self) -> BoxFut<'_, Result<(), WorkerError>>;
@@ -189,6 +201,8 @@ struct St {
     handover: Option<String>,
     /// 最近一次啟動驅動失敗的原因（成功啟動就清空）。接手要靠它知道載入有沒有成功
     start_error: String,
+    /// 實際要用的模型：啟動時＝設定（已套用 acp-models.json 記下的），遠端「切換模型」後換成新的。下次啟動驅動就用它
+    model: String,
 }
 
 pub struct WorkerInit {
@@ -232,6 +246,7 @@ impl Worker {
                 driver_gen: 0,
                 handover: None,
                 start_error: String::new(),
+                model: i.cfg.model.clone(),
             }),
             i,
             start_lock: tokio::sync::Mutex::new(()),
@@ -240,6 +255,22 @@ impl Worker {
 
     pub fn cfg(&self) -> &WorkerCfg {
         &self.i.cfg
+    }
+    /// 啟動驅動用的設定：模型換成目前實際要用的（切換過模型就是新的）
+    fn cfg_now(&self) -> Arc<WorkerCfg> {
+        let model = self.st.lock().unwrap().model.clone();
+        if model == self.i.cfg.model {
+            return self.i.cfg.clone();
+        }
+        Arc::new(WorkerCfg { model, ..(*self.i.cfg).clone() })
+    }
+    /// 實際生效的模型：有指定就是它；沒指定時用 agent 自己說的目前模型（還不知道回空字串）
+    pub fn effective_model(&self) -> String {
+        let s = self.st.lock().unwrap();
+        if !s.model.is_empty() {
+            return s.model.clone();
+        }
+        s.driver.as_ref().and_then(|d| d.current_model()).unwrap_or_default()
     }
     fn log(&self, m: impl AsRef<str>) {
         (self.i.log)(format!("[{}] {}", self.i.cfg.name, m.as_ref()))
@@ -378,7 +409,7 @@ impl Worker {
             }
         });
         let d = (self.i.make_driver)(DriverArgs {
-            cfg: self.i.cfg.clone(),
+            cfg: self.cfg_now(),
             env: self.i.env.clone(),
             log: {
                 let (log, name) = (self.i.log.clone(), self.i.cfg.name.clone());

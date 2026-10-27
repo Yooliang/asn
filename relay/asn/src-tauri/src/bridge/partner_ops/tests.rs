@@ -1366,6 +1366,13 @@ impl AcpAdmin for FakeAcp {
             None => Ok(json!({ "kind": "acp", "pid": 4321, "stopped": true })),
         }
     }
+    fn set_model(&self, name: &str, model: &str) -> Result<Value, String> {
+        self.calls.lock().unwrap().push(format!("model {name} {model}"));
+        if model == "grok-9" {
+            return Err("「grok-9」不在這個工作者可選的模型裡。可選：grok-4.7".into());
+        }
+        Ok(json!({ "kind": "acp", "pid": 4321, "model": model, "restarted": model.starts_with("gemini"), "saved": true }))
+    }
     fn handover(&self, name: &str, note: &str) -> Result<Value, String> {
         self.calls.lock().unwrap().push(format!("handover {name} [{note}]"));
         Ok(json!({ "kind": "acp", "pid": 4321, "handoff_done": false }))
@@ -1506,10 +1513,25 @@ fn acp_詳情_重開_接班換手_交給工作者管理入口_不碰任何程序
 }
 
 #[test]
-fn acp_改名_切換模型_喚醒_一律這類夥伴不支援() {
+fn acp_切換模型_交給工作者比對清單_結果寫明有沒有重開_被拒照實回() {
     let r = rig(Opt::default());
     let a = with_acp(&r, &["Gemini"]);
-    for (op, extra) in [("rename", json!({ "new_name": "新名字" })), ("model", json!({ "model": "gemini-2.5" })), ("resume", json!({ "session_id": "sid-zzzzzzzz" }))] {
+    let res = acp_run(&r, "model", json!({ "model": "gemini-3.8-flash-high" }));
+    assert_eq!((res.status, res.detail.as_str()), ("ok", "已切換模型：工作者帶同一段對話重開了，對話保留"));
+    let res = acp_run(&r, "model", json!({ "model": "grok-4.6" }));
+    assert_eq!((res.status, res.detail.as_str()), ("ok", "已切換模型：沒有重開，對話保留"));
+    let res = acp_run(&r, "model", json!({ "model": "grok-9" }));
+    assert_eq!(res.status, "failed");
+    assert!(res.detail.contains("不在這個工作者可選的模型裡"), "{}", res.detail);
+    assert_eq!(a.calls.lock().unwrap().len(), 3);
+    assert!(r.terminated().is_empty() && r.launched().is_empty(), "不用名稱找程序、不開視窗");
+}
+
+#[test]
+fn acp_改名_喚醒_一律這類夥伴不支援() {
+    let r = rig(Opt::default());
+    let a = with_acp(&r, &["Gemini"]);
+    for (op, extra) in [("rename", json!({ "new_name": "新名字" })), ("resume", json!({ "session_id": "sid-zzzzzzzz" }))] {
         let res = acp_run(&r, op, extra);
         assert_eq!((res.status, res.detail.as_str()), ("failed", UNSUPPORTED), "{op}");
     }

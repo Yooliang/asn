@@ -7,6 +7,7 @@
 //   @@SLEEP        → 沒有任何動靜（看門狗）
 // 回覆文字列出每個請求的結果：edit:allowed / execute:denied …
 // 環境變數：FAKE_ACP_LOAD=1 宣告 loadSession；FAKE_ACP_AUTH=1 → session/new 回 Authentication required；FAKE_ACP_STATE=資料夾（存 session 與輪數）
+//   FAKE_ACP_MODELS=a,b,c → session/new、session/load 回 models（可選 a,b,c，目前是第一個），收 session/set_model，回覆附「模型=目前的」
 import fs from 'node:fs'
 import path from 'node:path'
 import readline from 'node:readline'
@@ -17,6 +18,9 @@ const sFile = id => path.join(stateDir, `${id}.json`)
 const turnsOf = id => { try { return JSON.parse(fs.readFileSync(sFile(id), 'utf8')).turns } catch { return 0 } }
 const waiters = new Map()
 let nextReq = 500
+const models = (process.env.FAKE_ACP_MODELS || '').split(',').filter(Boolean)
+let curModel = models[0] || ''
+const modelsField = () => models.length ? { models: { availableModels: models.map(id => ({ modelId: id, name: id.toUpperCase() })), currentModelId: curModel } } : {}
 
 const rl = readline.createInterface({ input: process.stdin })
 rl.on('line', line => {
@@ -30,10 +34,15 @@ rl.on('line', line => {
     if (process.env.FAKE_ACP_AUTH === '1') return out({ id: m.id, error: { code: -32000, message: 'Authentication required' } })
     const id = `sess-${Math.random().toString(16).slice(2, 8)}`
     if (stateDir) fs.writeFileSync(sFile(id), JSON.stringify({ turns: 0 }))
-    return out({ id: m.id, result: { sessionId: id } })
+    return out({ id: m.id, result: { sessionId: id, ...modelsField() } })
   }
   if (m.method === 'session/load') {
     if (!stateDir || !fs.existsSync(sFile(m.params.sessionId))) return out({ id: m.id, error: { code: -32602, message: 'session not found' } })
+    return out({ id: m.id, result: { ...modelsField() } })
+  }
+  if (m.method === 'session/set_model') {
+    if (!models.includes(m.params.modelId)) return out({ id: m.id, error: { code: -32602, message: `unknown model ${m.params.modelId}` } })
+    curModel = m.params.modelId
     return out({ id: m.id, result: {} })
   }
   if (m.method === 'session/prompt') { void prompt(m); return }
@@ -66,7 +75,7 @@ async function prompt(m) {
   if (/@@MULTI/.test(body)) for (const c of ['a', 'b', 'c']) await req('execute', { rawInput: { command: `cmd-${c}` } })
   const n = turnsOf(sid) + 1
   if (stateDir) fs.writeFileSync(sFile(sid), JSON.stringify({ turns: n }))
-  const reply = `收到：${body.replace(/^\[RELAY 來信\][^\n]*\n?/, '').replace(/^寄件人：[^\n]*\n?/, '').replace(/^【要回信】[^\n]*\n?/, '').trim().slice(0, 60)} [${[`第${n}輪`, results.join(','), text.includes('背景工作者') ? '含說明' : '', text.includes('下一任') ? '接班' : ''].filter(Boolean).join(' ')}]`
+  const reply = `收到：${body.replace(/^\[RELAY 來信\][^\n]*\n?/, '').replace(/^寄件人：[^\n]*\n?/, '').replace(/^【要回信】[^\n]*\n?/, '').trim().slice(0, 60)} [${[`第${n}輪`, results.join(','), text.includes('背景工作者') ? '含說明' : '', text.includes('下一任') ? '接班' : '', curModel ? `模型=${curModel}` : ''].filter(Boolean).join(' ')}]`
   out({ method: 'session/update', params: { sessionId: sid, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: reply } } } })
   out({ id: m.id, result: { stopReason: 'end_turn' } })
 }

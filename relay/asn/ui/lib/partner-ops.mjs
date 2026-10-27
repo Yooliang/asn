@@ -7,8 +7,9 @@ import { isRelayRoom } from './roster.mjs'
 export const OPS = ['info', 'rename', 'model', 'close', 'handover', 'resume', 'restart']
 // Claude 視窗：在線的五項；離線的只有「喚醒」
 export const ONLINE_OPS = ['info', 'rename', 'model', 'close', 'handover']
-// ACP 工作者（Gemini 等收發室自己跑的背景工作者）：詳情、關閉（只停止本次執行，不改設定檔）、重開、接班換手；改名、切換模型、喚醒電腦端會回「這類夥伴不支援」，所以反灰
-export const ACP_OPS = ['info', 'close', 'restart', 'handover']
+// ACP 工作者（Gemini 等收發室自己跑的背景工作者）：詳情、切換模型、關閉（只停止本次執行，不改設定檔）、重開、接班換手；改名、喚醒電腦端會回「這類夥伴不支援」，所以反灰。
+// 切換模型（0.2 B4）：Grok 用原生切換不重開；Gemini（agy）帶同一段對話重開。舊版電腦端會回「這類夥伴不支援」
+export const ACP_OPS = ['info', 'model', 'close', 'restart', 'handover']
 export const OP_LABEL = { info: '詳情', rename: '改名', model: '切換模型', close: '關閉視窗', handover: '接班換手', resume: '喚醒', restart: '重開' }
 export const NOTE_MAX = 1000
 export const MODEL_RE = /^[A-Za-z0-9._[\]-]{1,60}$/
@@ -34,7 +35,6 @@ export const REASON = {
 // 背景工作者（ACP）用不到的項目的說明
 const ACP_WHY = {
   rename: '這個夥伴由 ASN 內建通道執行，沒有視窗可以改名',
-  model: '這個夥伴由 ASN 內建通道執行，模型寫在設定檔裡、啟動時就定了，不能在這裡切換模型；要換請改設定檔後重啟 ASN',
   resume: '這個夥伴由 ASN 內建通道執行，不需要喚醒；要重新啟動請用「重開」',
 }
 // pi 視窗：開放「切換模型」（經 pi 擴充的控制檔，電腦端見 bridge/engines/pi_control.rs）與「關閉」（只結束那個 pi 與子孫，見 partner_ops.rs close_pi）；
@@ -61,6 +61,9 @@ export function piModelWire(input) {
   const w = m.provider ? `${m.provider}[${m.model}]` : m.model
   return w.length <= 60 ? w : ''
 }
+// 內建通道工作者的模型代號：英數開頭，只能用英數與 . _ -（電腦端還會比對這個工作者可選的模型）
+export const ACP_MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$/
+export const ACP_MODEL_HINT = '請輸入模型代號，例如 grok-4.6 或 gemini-3.8-flash-high（只能用英數與 . _ -，最多 60 字）'
 export const PI_MODEL_HINT = '請輸入模型，例如 claude-sonnet-5 或 anthropic/claude-sonnet-5（只能用英數與 . _ -，合起來最多 60 字）'
 // 背景工作者沒有視窗：「關閉」是停止它本次的執行
 export const ACP_CLOSE_LABEL = '關閉'
@@ -222,6 +225,7 @@ export function opFormError(friend, op, input = {}, item = null) {
     if (n === friend?.agent) return '新名字和現在一樣'
   }
   if (op === 'model' && partnerEngine(friend) === 'pi') { if (!piModelWire(input.model)) return PI_MODEL_HINT }
+  else if (op === 'model' && partnerEngine(friend) === 'acp') { if (!ACP_MODEL_RE.test(String(input.model ?? '').trim())) return ACP_MODEL_HINT }
   else if (op === 'model' && !MODEL_RE.test(String(input.model ?? '').trim())) return '請選一個模型（只能用英數與 . _ [ ] -）'
   if (op === 'handover' && isGrokAdoptable(friend) && input.ack !== true) return '請先勾選確認：接手後要先關掉終端機那個 grok'
   if (op === 'handover' && String(input.note ?? '').trim().length > NOTE_MAX) return `補充的話最多 ${NOTE_MAX} 字`
