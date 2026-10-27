@@ -835,5 +835,4 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .partner-steps li{padding:2px 8px;border-bottom:2px solid transparent}
 .partner-steps li.on{color:var(--accent);border-color:var(--accent);font-weight:600}
 .partner-sum{margin:0 0 8px;font-size:12px;color:var(--muted,#667)}
-.partner-run .ch-adv{margin-left:6px;padding:0 5px;border:1px solid var(--line);border-radius:8px;font-size:10px;color:var(--muted,#667)}
 

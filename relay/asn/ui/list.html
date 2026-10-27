@@ -364,7 +364,7 @@
   <div class="partner-dlg-back" v-if="partnerDlg.open" @click.self="closePartnerDlg">
     <div class="partner-dlg" role="dialog" aria-labelledby="partner-dlg-title" @click.stop>
       <h3 id="partner-dlg-title">開新夥伴</h3>
-      <p class="partner-node" v-if="partnerDlg.step > 1 &amp;&amp; partnerDlg.node !== selfNode">設備：{{ partnerDlg.deviceLabel }}</p>
+      <p class="partner-node" v-if="partnerDlg.step > 1 &amp;&amp; partnerDlg.node &amp;&amp; partnerDlg.node !== selfNode &amp;&amp; partnerDlg.deviceLabel">設備：{{ partnerDlg.deviceLabel }}</p>
       <ol class="partner-steps" aria-label="步驟"><li :class="{ on: partnerDlg.step === 1 }">1. 設備</li><li :class="{ on: partnerDlg.step === 2 }">2. 廠牌與運行</li><li :class="{ on: partnerDlg.step === 3 }">3. 名稱與路徑</li></ol>
       <!-- #351：第 1 頁選設備；不能開的反灰並寫原因。換設備時第 2、3 頁的選項跟著重算 -->
       <div v-show="partnerDlg.step === 1">
@@ -385,7 +385,7 @@
         <legend>運行</legend>
         <label v-for="c in partnerRun.options" :key="c.key" class="partner-run-opt" :class="{ off: !c.ok || c.self }">
           <input type="radio" name="partner-run" :value="c.key" v-model="partnerRunModel" :disabled="!c.ok || c.self" :aria-label="c.label"> {{ c.label }}
-          <em class="ch-rec" v-if="c.key === partnerRun.recommended">（建議）</em><span class="ch-adv" v-if="c.adv">進階</span>
+          <em class="ch-rec" v-if="c.key === partnerRun.recommended">（建議）</em>
           <small class="partner-run-why" v-if="c.self">{{ c.note }}（這個只是說明，不能在這裡選）</small>
           <small class="partner-run-why" v-else-if="!c.ok">{{ c.why }}</small>
           <small class="partner-run-why" v-else-if="c.note">{{ c.note }}</small>
@@ -393,7 +393,7 @@
       </fieldset>
       </div>
       <div v-show="partnerDlg.step === 3">
-      <p class="partner-sum">{{ dlgRow ? dlgRow.label : '' }}・{{ (partnerRun.options.find(o => o.key === partnerRunChoice) || {}).label }}<template v-if="partnerDlg.node !== selfNode">・{{ partnerDlg.deviceLabel }}</template></p>
+      <p class="partner-sum">{{ dlgRow ? dlgRow.label : '' }}・{{ (partnerRun.options.find(o => o.key === partnerRunChoice) || {}).label }}<template v-if="partnerDlg.node &amp;&amp; partnerDlg.node !== selfNode &amp;&amp; partnerDlg.deviceLabel">・{{ partnerDlg.deviceLabel }}</template></p>
       <!-- 經 pi（#351）：列出這家在 pi 的模型（打開對話框時向 pi 查的，不寫死）；預設第一個 -->
       <label v-if="partnerRunChoice === 'pi' &amp;&amp; piChoice.ok">pi 的模型
         <select class="set-sel" v-model="partnerDlg.piModel" aria-label="經 pi 開的模型">

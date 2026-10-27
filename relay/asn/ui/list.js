@@ -420,7 +420,7 @@ const partnerRun = computed(() => {
   const rec = r.options.find(o => o.ok && o.key !== 'self')?.key ?? ''
   // 經 pi 不能選時，原因用 pi 自己回答的（沒登入、這版 pi 沒有、沒列出模型），比目錄的通用說明準確
   const piWhy = PI_VIA_READY && !piChoice.value.ok && partnerDlg.node === info.node ? piChoice.value.why : ''
-  return { ...r, options: r.options.map(o => ({ ...o, why: o.key === 'pi' && !o.ok && piWhy ? piWhy : o.why, self: o.key === 'self', adv: o.key === 'term' || o.key === 'self' })), recommended: rec }
+  return { ...r, options: r.options.map(o => ({ ...o, why: o.key === 'pi' && !o.ok && piWhy ? piWhy : o.why, self: o.key === 'self' })), recommended: rec }
 })
 const partnerRunChoice = computed(() => {
   const opts = partnerRun.value.options
@@ -488,7 +488,7 @@ function openPartnerDlg(nodeKey = '') {
 function pickPartnerDevice(nodeKey) {
   if (launchDisableReasonFor(nodeKey) || nodeKey === partnerDlg.node) return   // 再點同一台：保留第 2、3 頁已選的
   partnerDlg.node = nodeKey
-  partnerDlg.deviceLabel = friends.value.find(f => f.node === nodeKey)?.device ?? nodeKey
+  partnerDlg.deviceLabel = friends.value.find(f => f.node === nodeKey)?.device || nodeKey   // 裝置名稱是空字串也退回節點代號
   partnerDlg.error = ''
   partnerDlg.piModel = ''
   if (nodeKey === info.node && PI_VIA_READY) void loadPiInfo()   // 經 pi 只能在這台開（遠端開 pi 帶模型還沒做）
@@ -1641,8 +1641,9 @@ if (info.shot) {
     await sleep(350)
   }
   if (savedMe.shotPartnerDlg) {
-    // 開新夥伴對話框：三頁各拍一張，設備選本機（候選來自 Rust 端的真實合併；截圖用暫存家目錄）
-    openPartnerDlg(info.node)
+    // 開新夥伴對話框：三頁各拍一張，設備先選本機、不能開就選第一台能開的（候選來自 Rust 端的真實合併；截圖用暫存家目錄）
+    const shotNode = [info.node, ...launchDeviceRowsList.value.map(d => d.key)].find(k => k && !launchDisableReasonFor(k)) ?? ''
+    openPartnerDlg(shotNode)
     await refreshCwdCandidates()
     if (!partnerDlg.cwd) partnerDlg.cwd = partnerCwdChoices.value[0] ?? ''
     await waitPaint()
@@ -1651,7 +1652,9 @@ if (info.shot) {
     await sleep(900)
     await invoke('capture_ui_ready', { tag: 'partner-dlg-ready' })
     await invoke('take_shot', { tab: 'partner-dlg' })   // 第 1 頁：設備
-    for (const n of [2, 3]) { partnerDlg.step = n; await waitPaint(); await invoke('take_shot', { tab: `partner-dlg-${n}` }) }
+    // 沒有能開的設備就不硬切到第 2、3 頁（會拍出空白的設備與灰掉的按鈕），只在記錄寫原因
+    if (partnerDlg.node) for (const n of [2, 3]) { partnerDlg.step = n; await waitPaint(); await invoke('take_shot', { tab: `partner-dlg-${n}` }) }
+    else console.info('[ASN] 截圖：沒有能開新夥伴的設備，只拍第 1 頁', launchDeviceRowsList.value.map(d => [d.key, launchDisableReasonFor(d.key)]))
     closePartnerDlg()
   } else if (savedMe.shotLaunchNotice) {
     showLaunchNotice(backgroundRestoreNoticeText('夥伴-7'))
