@@ -474,6 +474,11 @@ impl PartnerOps {
         if !table.iter().any(|p| p.pid == w.pid && PI_PROC_STEMS.contains(&switch::exe_stem(&p.name).as_str())) {
             return failed("這個 pi 已經不在執行了（名單可能過期），所以沒有關閉");
         }
+        // 身分核對（asn真 審 #433）：登記檔 5 分鐘內有心跳就算有效，pi 若在這段時間當掉、pid 又被別的 node 拿去用，
+        // 只看程序名分不出來。程序的啟動時間一定要早於（或等於）最後一次心跳；查不到啟動時間也拒絕——寧可關不掉，也不要關錯
+        if !os.started_ms(w.pid).is_some_and(|st| st <= w.updated_at) {
+            return failed("這個 pi 已經不在執行了（程序跟登記的對不上），所以沒有關閉");
+        }
         let host = switch::asn_host_of(os, &table, w.pid);
         let allowed = switch::kill_set_with(&table, w.pid, host, os.own_pid(), &|p| os.started_ms(p));
         if !allowed.contains(&w.pid) {

@@ -1766,6 +1766,8 @@ fn put_pi_proc(r: &Rig, asn_host: bool) -> u32 {
     drop(t);
     os.cmd.lock().unwrap().insert(parent, if asn_host { asn_host_cmdline() } else { "powershell.exe".into() });
     os.alive.lock().unwrap().extend([parent, 4001, 4002, 4003]);
+    // 啟動時間：殼最早、pi 其次、子程序再晚，都早於登記檔的心跳（NOW）
+    os.started.lock().unwrap().extend([(parent, NOW - 120_000), (4001, NOW - 60_000), (4002, NOW - 30_000), (4003, NOW - 50_000)]);
     parent
 }
 
@@ -1813,4 +1815,23 @@ fn pi_關閉_登記的_pid_跑的不是_pi_就不動_遠端開關關著也不動
     put_pi_proc(&off, false);
     assert_eq!(off.run("close", json!({ "name": "小丙" })).detail, CONSENT_OFF);
     assert!(off.terminated().is_empty());
+}
+
+#[test]
+fn pi_關閉_程序啟動時間晚於最後心跳_或查不到_就不結束() {
+    // asn真 審 #433：pi 在心跳後當掉、pid 被別的 node 拿去用時，只看程序名分不出來
+    let r = rig(Opt::default());
+    put_pi_window(&r, "小丙", 4001);
+    put_pi_proc(&r, false);
+    r.os().started.lock().unwrap().insert(4001, NOW + 5_000);   // 比心跳晚啟動：不是登記的那個 pi
+    let res = r.run("close", json!({ "name": "小丙" }));
+    assert_eq!(res.status, "failed");
+    assert!(res.detail.contains("對不上"), "{}", res.detail);
+    assert!(r.terminated().is_empty(), "一個都不結束");
+    r.os().started.lock().unwrap().remove(&4001);   // 查不到啟動時間：寧可關不掉
+    let res = r.run("close", json!({ "name": "小丙" }));
+    assert_eq!(res.status, "failed");
+    assert!(r.terminated().is_empty());
+    r.os().started.lock().unwrap().insert(4001, NOW);   // 剛好等於心跳：算數
+    assert_eq!(r.run("close", json!({ "name": "小丙" })).status, "ok");
 }
