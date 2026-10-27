@@ -74,7 +74,7 @@ Log：`~/.asn/machine-<ID>/bridge.log`（每個轉交、每一輪收發室的耗
 ## 執行與開機自動啟動
 
 ```
-node D:\Github\irori\relay\machine\bridge.mjs          # 前景跑（ASN_RELAY_ID 預設 H）
+node <ASN 原始碼>\relay\machine\bridge.mjs          # 前景跑（ASN_RELAY_ID 預設 H）
 powershell -File install-task.ps1                      # 預覽，不改任何東西
 powershell -File install-task.ps1 -DefaultAgent <名稱> -Apply   # 指定預設收件 session（不帶＝不指定，信留給 ASN 視窗的本人）；run-bridge.ps1 同名參數
 powershell -File install-task.ps1 -Apply               # 建立工作排程 AsnBridge-H（舊安裝的 IroriRelayMachine-H 重建時會被移除）（登入時、隱藏視窗、失敗重啟）
@@ -157,7 +157,7 @@ powershell -File install-task.ps1 -Uninstall           # 移除
 
 ### 在 Aegis 上安裝
 
-1. 取得程式：把本 repo 的 `relay/machine/` 放到主機（例如 `/home/cwen0708/irori/relay/machine/`，`git clone` 或 `scp`），Node 用 `/opt/node22/bin/node`（>= 22）。
+1. 取得程式：把本 repo 的 `relay/machine/` 放到主機（例如 `/home/<使用者>/asn/relay/machine/`，`git clone` 或 `scp`），Node 用 `/opt/node22/bin/node`（>= 22）。
 2. 放金鑰（家目錄是 `~/.asn/`；金鑰是 **Aegis 節點專用**的仲介節點金鑰，不要共用別台的）：
    ```
    mkdir -p ~/.asn && chmod 700 ~/.asn
@@ -207,9 +207,9 @@ node room.mjs --room-read <群組id|群組名> [--last 20 | --since <seq>] [--js
 另外每次寄給節點／視窗（不論有沒有 `--reply-to`）也會在 `machine-<節點>/sent/<雜湊>` 留「誰寄給誰」的記號，橋據此判斷「對方已直接寄信給原寄件人」（檔名由 `sent-mark.mjs` 產生，send 與橋共用）：
 
 ```
-node D:/Github/Yooliang/asn/relay/machine/send.mjs --to PC1 --body "內文" --reply|--no-reply [--reply-to <信件id>]
-node D:/Github/Yooliang/asn/relay/machine/send.mjs --to W/W-政策 --body-file msg.txt --no-reply   # 節點/視窗名
-node D:/Github/Yooliang/asn/relay/machine/send.mjs --room <群組id> --body "內文"            # 貼到群組（room_post）
+node <ASN 原始碼>/relay/machine/send.mjs --to PC1 --body "內文" --reply|--no-reply [--reply-to <信件id>]
+node <ASN 原始碼>/relay/machine/send.mjs --to W/W-政策 --body-file msg.txt --no-reply   # 節點/視窗名
+node <ASN 原始碼>/relay/machine/send.mjs --room <群組id> --body "內文"            # 貼到群組（room_post）
 echo 內文 | node send.mjs --to PC1 --body - --reply                                 # 內文從 stdin 讀
 node send.mjs --to PC1 --file 報告.pdf --file 圖.webp --body "說明" --no-reply        # 寄檔案／照片
 ```
@@ -237,8 +237,8 @@ node send.mjs --to PC1 --file 報告.pdf --file 圖.webp --body "說明" --no-re
 仲介信箱是「一台機器一個節點」，橋收信後經收發室（`claude -p`，每封約 1 美分、多一層）轉給視窗。視窗也可以**自己收**寄給自己的信，不經收發室、不經模型：
 
 ```
-node D:/Github/Yooliang/asn/relay/machine/recv.mjs --watch    # 長駐；掛在 Claude Code 的 Monitor 上，每封信一行 JSON 就是一則通知
-node D:/Github/Yooliang/asn/relay/machine/recv.mjs --once     # 拉一次、印出、ack、結束
+node <ASN 原始碼>/relay/machine/recv.mjs --watch    # 長駐；掛在 Claude Code 的 Monitor 上，每封信一行 JSON 就是一則通知
+node <ASN 原始碼>/relay/machine/recv.mjs --once     # 拉一次、印出、ack、結束
 ```
 
 每行 JSON：`{id, trust, from_node, from_agent, to_agent, reply_to, created_at, expects_reply, body}`（`expects_reply`：true 要回、false 只是告知、null 舊信沒說）；回信用 `send.mjs --to <from_node>/<from_agent> --reply-to <id> --body "…" --reply|--no-reply`。診斷只印 stderr。exit code：1 用法、2 認不出視窗、3 這個視窗已有另一個 `--watch` 在跑、4 後端錯誤。

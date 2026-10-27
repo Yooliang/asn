@@ -87,9 +87,9 @@ fn 呼叫者_pi_視窗登記的_pid_在父行程鏈上_優先於更上層的_cla
     // 有登記：pi 自己
     let d = f.rh().join("pi-windows");
     std::fs::create_dir_all(&d).unwrap();
-    std::fs::write(d.join("s1.json"), json!({"v": 1, "engine": "pi", "sessionId": "s1", "name": "pi-cwen0708", "pid": pi_pid, "cwd": "", "state": "idle", "at": 1}).to_string()).unwrap();
+    std::fs::write(d.join("s1.json"), json!({"v": 1, "engine": "pi", "sessionId": "s1", "name": "pi-alice", "pid": pi_pid, "cwd": "", "state": "idle", "at": 1}).to_string()).unwrap();
     let c = find_caller(&env, "寄信").unwrap();
-    assert_eq!((c.name.as_str(), c.pid), ("pi-cwen0708", pi_pid));
+    assert_eq!((c.name.as_str(), c.pid), ("pi-alice", pi_pid));
     // 別人的 pid 登記不算（pid 不在鏈上）
     std::fs::write(d.join("s1.json"), json!({"v": 1, "engine": "pi", "sessionId": "s1", "name": "別的pi", "pid": 7777, "cwd": "", "state": "idle", "at": 1}).to_string()).unwrap();
     assert_eq!(find_caller(&env, "寄信").unwrap().name, "上層Claude");
