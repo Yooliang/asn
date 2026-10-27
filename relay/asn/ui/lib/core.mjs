@@ -38,12 +38,14 @@ export function connReason(e) {
   if (/逾時|timeout|timed out/i.test(m)) return '請求逾時'
   if (/HTTP 401|HTTP 403|unauthorized|forbidden/i.test(m)) return '憑證被拒（請重新登入或重新設定）'
   if (/HTTP 5\d\d/.test(m)) return '後台暫時出錯'
+  if (/格式不對/.test(m)) return '本機送出的資料格式不對（詳見記錄）'
   if (/HTTP 400/.test(m)) return '後台拒絕了這次請求'
   if (/連線失敗|network|dns|connect/i.test(m)) return '連不上後台（請檢查網路或代理）'
   if (/save|儲存|寫入/i.test(m)) return '本機存檔失敗（磁碟滿了或檔案被占用？）'
   return ''
 }
-const ACK_CHUNK = 100   // 後台一次最多收 100 個編號，超過整批 400
+const ACK_CHUNK = 100   // 一次 ack 最多 100 個編號（本機 relay.rs 的 build_ack_body 檢查：超過或有任何一個格式不對就整批不送）
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const ITEM_RETRY_MAX = 3   // 同一封信處理失敗幾次後就先 ack 掉，不讓一封壞信擋住後面所有信
 
 export class AsnCore {
@@ -255,11 +257,17 @@ export class AsnCore {
             this.itemFails.set(m.id, n)
             this.seen.delete(m.id)
             this.log(`pull item failed (${String(m.id).slice(0, 8)} #${n}): ${e.message}`)
-            if (n >= ITEM_RETRY_MAX) { this.itemFails.delete(m.id); this.seen.add(m.id); ids.push(m.id); this.log(`pull item dropped (${String(m.id).slice(0, 8)})`) }
+            if (n >= ITEM_RETRY_MAX) {
+              this.itemFails.delete(m.id); this.seen.add(m.id); ids.push(m.id); this.log(`pull item dropped (${String(m.id).slice(0, 8)})`)
+              try { const r = routeMail(this.friends, m); if (this.friends.has(r.id)) this.#log(r.id).push({ k: 'sys', text: '有一封信無法顯示，已跳過（詳見記錄）', t: this.now() }) } catch { /* 連留一行都做不到就算了 */ }
+            }
           }
         }
         if (ids.length) {
           await this.flush()
+          // 不是 UUID 的編號會讓整批 ack 永遠失敗：先濾掉、寫 log（那封信在後台不會被確認收到，但不再擋住其他信）
+          const bad = ids.filter(i => !UUID_RE.test(String(i)))
+          if (bad.length) { this.log(`ack skipped ${bad.length} bad id(s): ${bad.slice(0, 3).map(i => String(i).slice(0, 12)).join(',')}`); ids.splice(0, ids.length, ...ids.filter(i => UUID_RE.test(String(i)))) }
           for (let i = 0; i < ids.length; i += ACK_CHUNK) await this.transport.ack(ids.slice(i, i + ACK_CHUNK))   // 分批 ack，一批最多 100 個
           ids.forEach(i => this.seen.delete(i))
         }
