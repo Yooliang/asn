@@ -14,7 +14,7 @@ import { createLog } from './safe-log.mjs'
 import { contextText, createRooms, parseMember, roomText, roomUuid, NO_REPLY_RE as ROOM_NO_REPLY_RE } from './rooms.mjs'
 import { escapeBody, mailHead, parseSendHead, mailPreamble, senderLine, stripReplyHead, wantsReply } from './mail-format.mjs'
 import { bodyWithNotes } from './attach-format.mjs'
-import { createLauncher } from './launcher.mjs'
+import { createLauncher, platformOf, readClosed } from './launcher.mjs'
 import { detectAgentTools } from '../shared/agent-tools-detect.mjs'
 import { buildDefaultProfiles, defaultCwdAllow } from '../shared/launcher-profiles.mjs'
 import { createPartnerQueue, workerSpecFromProfile } from './partner-background.mjs'
@@ -105,7 +105,9 @@ async function refreshRoster() {
   if (firstRoster) void pullRoomsGuarded()
   try {
     // engine 欄位：仲介的 roster 端點只取 name／status／cwd_label（多餘欄位直接忽略，不會 400），舊仲介安全
-    await api('roster', { method: 'POST', body: { agents: roster.map(a => ({ name: a.name, status: a.status, cwd_label: a.cwd_label, engine: engineLabelOf(a) })), launcher: launcher.summary() } })
+    // platform／launch_closed_reason（0.2 H2）：開新夥伴精靈用來寫 Linux 的設定方法與這台自己寫的不開放原因；舊仲介忽略
+    const closed = readClosed(LAUNCHER_FILE)
+    await api('roster', { method: 'POST', body: { agents: roster.map(a => ({ name: a.name, status: a.status, cwd_label: a.cwd_label, engine: engineLabelOf(a) })), launcher: launcher.summary(), platform: platformOf(), launch_closed_reason: closed.closed ? closed.reason : null } })
     rosterWarned = false
   } catch (e) {
     if (!rosterWarned) { log(`roster post failed: ${e.message} (will keep trying quietly)`); rosterWarned = true }
@@ -357,6 +359,7 @@ async function startBackgroundPartner({ req, profile }) {
   await refreshRoster()
   return { pid: 0 }
 }
+const LAUNCHER_FILE = envGet(process.env, 'LAUNCHER_FILE') || locateHome('launcher.json')
 let launcher = { summary: () => null, pull: async () => {}, current: () => null }
 const partnerQueue = createPartnerQueue({
   file: path.join(WORK_DIR, 'partner-queue.jsonl'),
@@ -371,7 +374,7 @@ const partnerQueue = createPartnerQueue({
 })
 const canRemoteLaunch = openEngines.length || acpEngine
 launcher = !canRemoteLaunch ? launcher : createLauncher({
-  api, log, workDir: WORK_DIR, configPath: envGet(process.env, 'LAUNCHER_FILE') || locateHome('launcher.json'),
+  api, log, workDir: WORK_DIR, configPath: LAUNCHER_FILE,
   bootstrap: () => launchBootstrap,
   listNames: async () => {
     const sets = await Promise.all(engines.map(e => e.listNames()))

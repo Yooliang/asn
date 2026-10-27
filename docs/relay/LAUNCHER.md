@@ -33,6 +33,12 @@
 - `{name}` 是唯一允許的替換欄位，且必須符合 `^[A-Za-z0-9\-\u4e00-\u9fff]{1,40}$`；**工作資料夾只能從 cwd_allow 選**；第一句話不拼進指令列，改在視窗啟動後由收發室用 SendMessage 送進去。
 - 建議沿用 partner-relay 的 `spawn-partner.ps1` 的做法（清掉繼承的 `CLAUDE_*`、`NO_COLOR`，開 Remote Control），launcher 可以直接呼叫它。
 
+### 明寫「這台不開放」（0.2 H2）
+
+在 launcher.json 寫 `{"remote_launch": false, "reason": "這台是公司的伺服器，不開放"}`：機器橋不載入任何 profile（連自動偵測的也不用），名單回報時帶上原因，同帳號其他設備的開新夥伴精靈會反灰並顯示「這台設備不開放開新夥伴：<原因>」。原因只留純文字（控制字元換空白、最多 120 字），機器橋、relay、資料庫各過濾一次，畫面只用文字插值顯示。
+
+機器橋也會回報這台的平台（`platform`：linux／windows／macos）。Linux 設備沒開放、又沒寫原因時，精靈會說明要在那台的 `~/.asn/launcher.json` 寫 profiles 與 cwd_allow，或設 `ASN_LAUNCH_AUTO=1` 自動偵測，再重啟機器橋。舊版機器橋不帶平台，精靈照原本的說法。
+
 ## 安全（這是能在你電腦上開程式的入口，必須嚴格）
 
 1. **只有 owner 能下令**：仲介新增動作 `launch {machine, profile, name, cwd, first_message?}`，只接受 role=owner（小良哥經希緒或 Irori Chat）；其他成員、工頭、外部 AI 一律 403。
