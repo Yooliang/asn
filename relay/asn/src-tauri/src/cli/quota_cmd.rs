@@ -5,7 +5,7 @@
 //! 結束碼一律 0：它掛在狀態列上，絕不能因為記不下來而讓狀態列壞掉。
 use super::env::Env;
 use super::{Io, R};
-use std::io::Read;
+use std::io::{Read, Write};
 
 fn usage() -> &'static str {
     "用法：asn claude-quota < 狀態列資料
@@ -13,7 +13,7 @@ fn usage() -> &'static str {
 在你的狀態列指令裡把同一份標準輸入也餵給它即可；它不輸出任何東西，結束碼一律 0。"
 }
 
-pub async fn main(args: &[String], _env: &Env, io: &mut Io<'_>) -> R<i32> {
+pub async fn main(args: &[String], env: &Env, io: &mut Io<'_>) -> R<i32> {
     if args.iter().any(|a| a == "--help" || a == "-h") {
         io.outln(usage());
         return Ok(0);
@@ -23,6 +23,13 @@ pub async fn main(args: &[String], _env: &Env, io: &mut Io<'_>) -> R<i32> {
     let _ = io.stdin.take(1_000_001).read_to_end(&mut buf);
     let text = String::from_utf8_lossy(&buf);
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
-    let _ = crate::claude_quota::hook(&crate::claude_accounts::claude_home(), &text, now);
+    let _ = crate::claude_quota::hook(&crate::claude_accounts::claude_home(), &text, now);   // 記額度一定先做完、不連網
+    if args.iter().any(|a| a == "--chain") {
+        // 接在狀態列上時：把同一份輸入餵給原本的狀態列指令（最多等 2 秒、輸出最多 4 KB），原樣印出（#228）
+        let (out, code) = crate::statusline_hook::run_original(&env.relay_home, &buf);
+        let _ = io.out.write_all(&out);
+        let _ = io.out.flush();
+        return Ok(code);
+    }
     Ok(0)
 }
