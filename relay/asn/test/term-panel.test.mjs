@@ -195,12 +195,18 @@ test('接線：term_send 只在 termSendConfirm 裡呼叫一次；只有「確�
   const fnStart = js.lastIndexOf('async function termSendConfirm', at)
   assert.ok(fnStart > 0 && js.indexOf('\n}\n', fnStart) > at, '那一處在 termSendConfirm 裡')
   assert.ok(js.slice(fnStart, at).includes('sendRequest('), '送出前先過 sendRequest（草稿要合格）')
-  assert.equal((html.match(/termSendConfirm(?![A-Za-z])/g) ?? []).length, 1, '模板裡只有一個按鈕呼叫 termSendConfirm')
-  assert.equal(count(html, '@click="termSendConfirm"'), 1)
+  // #331：確認有兩處擺放（對話分頁裡的確認列、舊面板的確認框），都只在 termSendConfirmView 存在時才看得到
+  assert.equal((html.match(/termSendConfirm(?![A-Za-z])/g) ?? []).length, 2, '模板裡只有兩個按鈕呼叫 termSendConfirm（確認列、確認框）')
+  assert.equal(count(html, '@click="termSendConfirm"'), 2)
+  for (const m of html.matchAll(/@click="termSendConfirm"/g)) {
+    assert.ok(html.lastIndexOf('termSendConfirmView', m.index) > 0, '按鈕在確認畫面裡（前面要有 termSendConfirmView 的條件）')
+  }
   assert.ok(html.includes('@click="termSendAsk"') && html.includes('v-if="termSendConfirmView"'), '「送出」先開確認框')
-  const ask = js.slice(js.indexOf('function termSendAsk'), js.indexOf('function termSendBack'))
-  assert.ok(!ask.includes('termSend('), 'termSendAsk 不送字')
-  assert.ok(ask.includes("invoke('term_remote_offer_send'") && ask.includes('sendRequest('), '開確認框時同時傳到手機待確認（#328）')
+  const ask = js.slice(js.indexOf('function termSendAsk'), js.indexOf('function termSendPhone'))
+  assert.ok(!ask.includes('termSend(') && !ask.includes('term_remote_offer_send'), 'termSendAsk 不送字、也不自動傳手機（#331）')
+  assert.equal(count(js, "invoke('term_remote_offer_send'"), 1, '傳手機只有 termSendPhone 一處')
+  assert.ok(js.slice(js.indexOf('function termSendPhone'), js.indexOf('function termSendBack')).includes("invoke('term_remote_offer_send'"))
+  assert.equal(count(html, '@click="termSendPhone"'), 2, '「改用手機確認」按鈕兩處（確認列、確認框）')
   assert.ok(tauri.includes("termSend: req => invoke('term_send', { req })"))
   const back = js.slice(js.indexOf('function termSendBack'), js.indexOf('async function termSendConfirm'))
   assert.ok(back.includes('termSendWithdraw()'), '按「返回」要撤回手機上的請求（#329）')
