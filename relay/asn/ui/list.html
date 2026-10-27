@@ -368,8 +368,8 @@
       <ol class="partner-steps" aria-label="步驟"><li :class="{ on: partnerDlg.step === 1 }">1. 設備</li><li :class="{ on: partnerDlg.step === 2 }">2. 廠牌與運行</li><li :class="{ on: partnerDlg.step === 3 }">3. 名稱與路徑</li></ol>
       <!-- #351：第 1 頁選設備；不能開的反灰並寫原因。換設備時第 2、3 頁的選項跟著重算 -->
       <div v-show="partnerDlg.step === 1">
-      <div class="partner-devices" role="radiogroup" aria-label="設備">
-        <button v-for="d in launchDeviceRows" :key="d.key" type="button" class="pdevice" role="radio" :aria-checked="partnerDlg.node === d.key" :class="{ on: partnerDlg.node === d.key, off: launchDisableReason(d.key) }" :disabled="!!launchDisableReason(d.key)" :title="launchDisableReason(d.key) || d.label" @click="pickPartnerDevice(d.key)">
+      <div class="partner-devices" role="radiogroup" aria-label="設備" @keydown="partnerDevKey">
+        <button v-for="d in launchDeviceRows" :key="d.key" type="button" class="pdevice" role="radio" :data-node="d.key" :aria-checked="partnerDlg.node === d.key" :tabindex="partnerDlg.node === d.key || !partnerDlg.node ? 0 : -1" :class="{ on: partnerDlg.node === d.key, off: launchDisableReason(d.key) }" :disabled="!!launchDisableReason(d.key)" :title="launchDisableReason(d.key) || d.label" @click="pickPartnerDevice(d.key)">
           <span class="pdevice-lb">{{ d.label }}</span><small class="launch-why" v-if="launchDisableReason(d.key)">{{ launchDisableReason(d.key) }}</small>
         </button>
       </div>

@@ -486,7 +486,7 @@ function openPartnerDlg(nodeKey = '') {
 }
 // 第 1 頁選設備：第 2 頁的廠牌、運行與第 3 頁的資料夾都跟著這台重算
 function pickPartnerDevice(nodeKey) {
-  if (launchDisableReasonFor(nodeKey)) return
+  if (launchDisableReasonFor(nodeKey) || nodeKey === partnerDlg.node) return   // 再點同一台：保留第 2、3 頁已選的
   partnerDlg.node = nodeKey
   partnerDlg.deviceLabel = friends.value.find(f => f.node === nodeKey)?.device ?? nodeKey
   partnerDlg.error = ''
@@ -512,6 +512,18 @@ function pickPartnerDevice(nodeKey) {
   }
 }
 function closePartnerDlg() { partnerDlg.open = false; partnerDlg.error = '' }
+// 第 1 頁設備清單的方向鍵：上下（左右）移到前／後一台能開的設備，焦點跟著走
+function partnerDevKey(e) {
+  const dir = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key]
+  if (!dir) return
+  e.preventDefault()
+  const keys = launchDeviceRowsList.value.map(d => d.key).filter(k => !launchDisableReasonFor(k))
+  if (!keys.length) return
+  const i = keys.indexOf(partnerDlg.node)
+  const next = keys[i < 0 ? 0 : (i + dir + keys.length) % keys.length]
+  pickPartnerDevice(next)
+  e.currentTarget?.querySelector?.(`[data-node="${CSS.escape(next)}"]`)?.focus?.()
+}
 const partnerCanNext = computed(() => (partnerDlg.step === 1 ? !!partnerDlg.node && !launchDisableReasonFor(partnerDlg.node) : partnerCanRun.value))
 function partnerNext() { if (partnerCanNext.value && partnerDlg.step < 3) partnerDlg.step += 1 }
 const searchInput = ref(null)
@@ -1567,7 +1579,7 @@ const app = createApp({
       tab, adI, hub, roomRows, roomHue, roomInitial, groupFlow, openGroupMenu, decideCard, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,
       GUIDES, view, SETTING_CATS, catSub, PANEL_KINDS, panelTabId, panelGuide, panelTitle, openPanel, closePanel, settingsState, applySetting, pickAvatarFile,
       selfNode: info.node, transport, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg, vendorBadge: vendorBadgeHtml,
-      searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickPartnerDevice, partnerCanNext, partnerNext,
+      searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickPartnerDevice, partnerDevKey, partnerCanNext, partnerNext,
       DISPLAY_MODES, partnerShowDisplay, partnerRun, partnerChannels,
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
       termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termsClose, termSendAsk, termSendPhone, termSendBack, termSendConfirm, SEND_MAX,

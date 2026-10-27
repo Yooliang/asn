@@ -150,6 +150,7 @@ test('開新夥伴是三頁精靈（#351）：「＋」只留「新增夥伴…�
   assert.ok(dlg.slice(dlg.indexOf('v-show="partnerDlg.step === 2"')).includes('dlgVendors'), '第 2 頁是廠牌與運行')
   assert.ok(dlg.slice(dlg.indexOf('v-show="partnerDlg.step === 3"')).includes('partnerDlg.cwd'), '第 3 頁是名稱與路徑')
   assert.match(js, /function openPartnerDlg\(nodeKey = ''\) \{[\s\S]*?partnerDlg\.step = 1[\s\S]*?pickPartnerDevice\(pre\)/, '帶設備進來也從第 1 頁開始、預先選好')
-  assert.match(js, /function pickPartnerDevice\(nodeKey\) \{\s*if \(launchDisableReasonFor\(nodeKey\)\) return/, '不能開的設備選不起來')
+  assert.match(js, /function pickPartnerDevice\(nodeKey\) \{\s*if \(launchDisableReasonFor\(nodeKey\) \|\| nodeKey === partnerDlg\.node\) return/, '不能開的設備選不起來；再點同一台不洗掉後面已選的')
+  assert.ok(step1.includes('@keydown="partnerDevKey"') && /function partnerDevKey\(e\)[\s\S]*?filter\(k => !launchDisableReasonFor\(k\)\)/.test(js), '設備清單能用方向鍵選，跳過不能開的')
   assert.ok(!js.includes('function pickLaunchDevice('), '舊的「選單先選設備」入口已拿掉')
 })
