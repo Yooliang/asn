@@ -124,12 +124,6 @@ footer a { margin-right: 16px; }
 .status.doing { background: #dcecfb; color: #0b5fb0; border-color: #8fb8dc; }
 .status.plan { background: #fff4d6; color: var(--warn); border-color: #ecd28f; }
 .note { color: var(--ink-soft); font-size: 14px; margin: 14px 0 0; }
-.releases { display: grid; gap: 14px; }
-.release { padding: 16px 20px 12px; }
-.release h3 { margin: 0 0 4px; font-size: 18px; }
-.release .date { margin-left: 10px; font-size: 14px; font-weight: 400; color: var(--ink-soft); }
-.release ul { margin: 0; padding-left: 1.2em; }
-.release li { margin: 3px 0; font-size: 15px; }
 
 /* 各家 AI 支援總表（藍圖頁） */
 .legend { list-style: none; margin: 0 0 14px; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 6px 18px; font-size: 14px; color: var(--ink-soft); }
@@ -149,12 +143,10 @@ footer a { margin-right: 16px; }
 .matrix tbody th { white-space: nowrap; background: rgba(255, 255, 255, .55); position: sticky; left: 0; }
 .matrix tbody tr:nth-child(even) td { background: rgba(255, 255, 255, .35); }
 .matrix .kind { display: block; font-size: 12px; font-weight: 400; color: var(--ink-soft); }
-.matrix td p { margin: 6px 0 0; color: var(--ink-soft); }
+.matrix td .cell-body { margin: 6px 0 0; color: var(--ink-soft); }
+.matrix td .cell-body p { margin: 4px 0 0; }
 .matrix .refs { margin-left: 6px; font-size: 12px; color: #0b5fb0; white-space: nowrap; }
 .matrix .note-cell { color: var(--ink-soft); font-size: 13px; min-width: 190px; }
-.matrix.meetings { min-width: 980px; }
-.matrix.meetings td ul { margin: 0; padding-left: 1.1em; }
-.matrix.meetings tbody th { font-weight: 600; }
 @media (min-width: 1200px) {
   .table-wrap { width: 1120px; margin-left: -40px; }   /* 總表欄位多，比內文寬一點 */
 }
@@ -171,5 +163,53 @@ footer a { margin-right: 16px; }
   .matrix td::before { content: attr(data-label); display: block; font-size: 12px; font-weight: 700; color: var(--ink); margin-bottom: 2px; }
   .matrix td .st { margin-right: 4px; }
   .matrix .note-cell { min-width: 0; }
-  .matrix.meetings { min-width: 0; }
+}
+
+/* 時間軸（藍圖頁與開發日誌頁共用同一套：左邊一條線、每個節點一個圓點、日期在卡片上方） */
+.tl-status { color: var(--ink-soft); font-size: 15px; margin: 0 0 12px; }
+.tl-status[hidden] { display: none; }
+.tl { list-style: none; margin: 0; padding: 0 0 0 26px; position: relative; }
+.tl::before { content: ""; position: absolute; left: 8px; top: 6px; bottom: 6px; width: 2px; border-radius: 2px; background: linear-gradient(180deg, var(--line), #4aa3e6 60%, var(--line)); }
+.tl-item { position: relative; margin: 0 0 18px; min-width: 0; }
+.tl-dot { position: absolute; left: -24px; top: 6px; width: 16px; height: 16px; border-radius: 50%; background: #fff; border: 3px solid #4aa3e6; box-shadow: 0 0 0 3px rgba(255, 255, 255, .7); }
+.tl-date { font-size: 14px; font-weight: 700; color: var(--ink-soft); margin: 0 0 6px; line-height: 1.6; font-variant-numeric: tabular-nums; }
+.tl-card { padding: 14px 18px 10px; min-width: 0; overflow-wrap: anywhere; }
+.tl-card h3 { margin: 0 0 6px; font-size: 18px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tl-card ul { margin: 0 0 6px; padding-left: 1.2em; }
+.tl-card li { margin: 4px 0; font-size: 15px; }
+.tl-card li p, .tl-card dd p { margin: 4px 0 0; }
+.tl-card li ul { margin-top: 4px; }
+.tl-meta, .tl-sub { margin: 0 0 6px; font-size: 13px; color: var(--ink-soft); }
+.tl-sub { margin-top: 8px; font-weight: 700; }
+.tl-notes { font-size: 14px; color: var(--ink-soft); margin: 4px 0 6px; }
+.tl-fields { margin: 0; display: grid; grid-template-columns: 7.5em minmax(0, 1fr); gap: 4px 12px; font-size: 15px; }
+.tl-fields dt { font-weight: 700; color: var(--ink); }
+.tl-fields dd { margin: 0; color: var(--ink-soft); min-width: 0; }
+.tl-fields dd ul { margin: 0; }
+.tl-kind { display: inline-block; padding: 0 10px; border-radius: 99px; font-size: 13px; font-weight: 700; line-height: 1.7; border: 1px solid; white-space: nowrap; }
+.tl-kind.release, .tl-kind.done { background: #def5e3; color: #1d6b34; border-color: #9bd3a8; }
+.tl-kind.meeting { background: #efe6f8; color: #6a3596; border-color: #c7a8e2; }
+.tl-kind.now { background: #dcecfb; color: #0b5fb0; border-color: #8fb8dc; }
+.tl-kind.future { background: #fff4d6; color: var(--warn); border-color: #ecd28f; }
+.tl-item.is-release .tl-dot, .tl-item.is-past .tl-dot { border-color: #3aa35a; }
+.tl-item.is-meeting .tl-dot { border-color: #8a55bf; }
+.tl-item.is-now .tl-dot { width: 20px; height: 20px; left: -26px; top: 4px; background: #4aa3e6; border-color: #fff; box-shadow: 0 0 0 3px #4aa3e6, 0 0 12px rgba(74, 163, 230, .8); }
+.tl-item.is-now .tl-date { color: #0b5fb0; font-size: 16px; }
+.tl-item.is-now .tl-card { border: 2px solid #8fb8dc; }
+.tl-item.is-future .tl-dot { border-style: dashed; border-color: #d7a646; }
+.tl-item.is-future .tl-card { background: rgba(255, 255, 255, .45); border-style: dashed; }
+.tl-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 14px; color: var(--ink-soft); }
+.tl-legend .tl-kind { margin-right: 8px; }
+.refs { margin-left: 6px; font-size: 12px; }
+.refs a { color: #0b5fb0; white-space: nowrap; }
+.ref { color: #0b5fb0; }
+.lane li p { margin: 4px 0 0; }
+@media (max-width: 760px) {
+  .tl { padding-left: 22px; }
+  .tl::before { left: 6px; }
+  .tl-dot { left: -22px; width: 14px; height: 14px; }
+  .tl-item.is-now .tl-dot { left: -24px; width: 18px; height: 18px; }
+  .tl-card { padding: 12px 14px 8px; }
+  .tl-fields { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .tl-fields dd { margin-bottom: 6px; }
 }

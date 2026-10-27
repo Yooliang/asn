@@ -81,3 +81,5 @@ fs.writeFileSync(path.join(out, 'latest.json'), `${JSON.stringify(latest, null, 
 console.log(`已產生：${out}`)
 console.log(`  ${name}、${name}.sig、latest.json`)
 console.log(opts.dryRun ? '演練完成：沒有改版本號，也沒有動官網目錄。' : '下一步：提交版本號與 site/public/update/latest.json，再由人部署官網（firebase deploy --only hosting，在 site/ 底下）。')
+// 官網的藍圖與開發日誌從 2026-10-27 起讀資料庫（public.asn_site_releases 等），這支腳本不寫官網頁面；第二期會改成 asn-cli 指令自動寫入
+if (!opts.dryRun) console.log(`提醒：在資料庫 public.asn_site_releases 加 ${version} 這一版（寫法見 site/README.md），官網的藍圖與開發日誌才會出現。`)

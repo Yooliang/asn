@@ -1,6 +1,6 @@
 # ASN 官方網站（site）
 
-純靜態網站（HTML／CSS，不用前端框架、頁面沒有執行階段腳本；只有「共用版面」要在改完後跑一支產生腳本），放在 Firebase Hosting（Google Cloud 專案 `asnmessenger`，預設網址 https://asnmessenger.web.app）。
+純靜態網站（HTML／CSS，不用前端框架；只有「共用版面」要在改完後跑一支產生腳本。例外：藍圖與開發日誌兩頁用外部腳本從資料庫讀內容），放在 Firebase Hosting（Google Cloud 專案 `asnmessenger`，預設網址 https://asnmessenger.web.app）。
 同時是 Google 登入同意畫面要求的「應用程式首頁、隱私權政策、服務條款」。
 
 | 頁面 | 檔案 |
@@ -9,7 +9,8 @@
 | 隱私權政策 | `public/privacy.html`（網址 `/privacy`） |
 | 服務條款 | `public/terms.html`（網址 `/terms`） |
 | 主機核准頁 | `public/link/`（`/link/?code=ABCD-2345`；測試 `tests/approve_page.test.mjs`；Supabase Redirect URLs 要加 `https://asnmessenger.web.app/link/`） |
-| 藍圖與更新日誌 | `public/roadmap.html`（`/roadmap`；測試 `tests/roadmap_page.test.mjs`） |
+| 藍圖 | `public/roadmap.html`（`/roadmap`；內容在資料庫，見下方；測試 `tests/roadmap_page.test.mjs`） |
+| 開發日誌 | `public/log.html`（`/log`；會議與發版合成一條時間軸，內容在資料庫） |
 | 邀請加入頁 | `public/i/`（`/i/…`，有自己的腳本與較嚴的 CSP） |
 | 雲端代理技能說明 | `public/skill/`（`/skill/`；說明本體 `asn-cloud-agent.md`，輕量檢查 `version.json`） |
 
@@ -17,20 +18,31 @@
 
 每一頁的頁首（Logo＋選單）、頁尾連結、網站圖示 `<link>` 都只在 `make-layout.mjs` 寫一份（`NAV`、`BRAND`、`FOOTER_NAV`、`PAGES`），再寫進各頁標記區段 `<!-- layout:header:start … -->` 到 `<!-- layout:header:end -->`（另有 `head`、`footer` 兩種）之間。**區段內不要手改。**
 
-- **改選單**：編輯 `make-layout.mjs` 的 `NAV`，執行 `node site/make-layout.mjs`。順序固定：首頁、功能、畫面、下載、藍圖與更新日誌、隱私權政策、服務條款；首頁的錨點在別的頁要寫完整連結（`/#features`）。目前頁自動加 `aria-current="page"` 並高亮。
+- **改選單**：編輯 `make-layout.mjs` 的 `NAV`，執行 `node site/make-layout.mjs`。順序固定：首頁、功能、畫面、下載、藍圖、開發日誌、隱私權政策、服務條款；首頁的錨點在別的頁要寫完整連結（`/#features`）。目前頁自動加 `aria-current="page"` 並高亮。
 - **新增一頁**：在 `PAGES` 加一筆（`current` 是要高亮的項目，沒有對應項目就填 `null`），頁面裡放好標記區段（可抄 `privacy.html`），再執行腳本。
 - **Logo**：`public/img/logo.svg`，與 App 的 `relay/asn/ui/img/logo.svg`（小機器人，電腦版與安卓圖示都由它而來）相同；`img/favicon-32.png`、`img/apple-touch-icon.png`（180，淺藍底）與 `favicon.ico` 由 App 的 `src-tauri/icons/icon.png` 縮出。
 - 窄螢幕的排版在 `style.css`（`.top`、`.nav`）；高亮不改字重，避免各頁寬度不同而換行位置不一樣。
 - 守門測試：`node --test --test-force-exit tests/site_layout.test.mjs`（各頁共用區段與腳本一致、選單順序、高亮、Logo 與圖示檔、沒有行內樣式／腳本）。忘了跑腳本會變紅。
 - 不在共用版面內：`link/`（核准頁，自己的版面與較嚴的 CSP，只套網站圖示）、`ads/policy.html`（App 內嵌的廣告大頁，自帶樣式）。
 
-## 藍圖與更新日誌頁怎麼更新
+## 藍圖與開發日誌：內容在資料庫
 
-- **更新日誌**：來源是 `relay/asn/CHANGELOG.md`（唯一來源）。發版後執行 `node site/make-roadmap-page.mjs`，會把最近 10 版寫進頁面的標記區段；守門測試會檢查頁面與來源一致，忘了跑會變紅。
-- **各家 AI 支援總表**（`#matrix`）：手寫的 HTML 表格，列＝各家 AI、欄＝開啟／關閉／接手／切換模型／群組聊天／帳號切換。狀態只有六種（已完成並驗證、已完成未驗證、進行中、尚未做、待確認、不適用），一律對照主線程式與 issue／PR 填，查不到依據標「待確認」；格子內的 issue／PR 編號只寫純文字（專案未公開、網站的內容安全政策也不允許外部連結）。每次發版或相關 PR 合併後，連同下面的藍圖一起更新；守門測試只檢查結構（欄位、狀態、原因），內容對不對靠人核對。
-- **會議記錄**：來源是 `site/meetings.json`（唯一來源，陣列，每筆 `time`（台北時間 `YYYY-MM-DD HH:MM`）、`attendees`、`progress`、`decisions`、`assignments`、`improvements`；後五個可以是字串或字串陣列，沒內容寫「無」）。新增一筆就在陣列裡加一個物件，再執行 `node site/make-roadmap-page.mjs`；頁面依時間排成最新在上，守門測試會檢查頁面與資料檔一致。頁面是公開的，不要寫電子郵件、本機路徑或金鑰。
-- **藍圖**：手寫在 `roadmap.html` 的三欄（已完成、進行中、規劃中），依 `docs/ROADMAP.md` 與 issue 的進度調整，並更新頁首的「最後整理」日期。
-- 頁面只放可公開的內容（不放電子郵件、本機路徑、金鑰），也不能用行內樣式或腳本（網站的內容安全政策不允許）。
+2026-10-27 起，藍圖頁（`/roadmap`）與開發日誌頁（`/log`）的內容**不再寫在 HTML 裡**，改放 Supabase 的公開唯讀表；頁面只剩骨架，由 `public/timeline/` 的外部腳本讀資料、用時間軸畫出來。之前的 `make-roadmap-page.mjs`、`site/meetings.json` 已拿掉，`relay/asn/CHANGELOG.md` 仍是 App 內「更新」記錄的來源，但官網不再讀它。
+
+| 表（`public` schema） | 內容 | 顯示在 |
+|---|---|---|
+| `asn_site_releases` | 一版一列：版本、日期、更新說明條列、發佈到哪裡、發版 commit、補充說明 | 藍圖時間軸的過去節點、開發日誌的「發版」 |
+| `asn_site_meetings` | 一場小會議一列：時間、出席、進度、決議、分派、改善意見（都是字串陣列） | 開發日誌的「會議」 |
+| `asn_site_lanes`、`asn_site_roadmap_items` | 藍圖三欄與待辦三欄的欄位與項目（狀態 released／doing／planned／decide，可綁版本） | 藍圖時間軸（現在、未來）與「待辦與優先順序」 |
+| `asn_site_matrix_columns`、`_rows`、`_cells` | 各家 AI 支援總表（欄＝功能、列＝AI、格＝狀態＋說明） | 「各家 AI 支援總表」 |
+
+- 表定義：`supabase/migrations/20261027100000_site_content.sql`（欄位說明寫在 SQL 註解）；搬家時的全部內容：`20261027100100_site_content_seed.sql`，由 `site/tools/extract-roadmap-seed.mjs` 從凍結快照 `site/tools/seed-source/` 產生（只在搬家時用，之後以資料庫為準，不要再改快照）。
+- **內文格式**：不存 HTML。只有 `**粗體**`、`` `程式碼` ``、`#123`（議題編號的文字樣式），以換行開頭的「- 」行是子項目；項目的 `refs` 欄會在頁面上連到 GitHub 的議題頁。頁面一律用 textContent 建節點，資料庫內容不會被當 HTML。
+- **現在怎麼更新（第一期）**：維護者直接下 SQL 寫入（anon 只能讀，不能寫）。例：發版後 `insert into public.asn_site_releases (version, released_on, items, platforms, commit_sha) values ('0.1.95', '2026-10-28', array['新增：…'], array['官網','家用機'], 'abc1234');`；開完小會議 `insert into public.asn_site_meetings (held_at, attendees, progress, decisions, assignments, improvements) values ('2026-10-28 08:00+08', array['…'], array['…'], array['…'], array['…'], array['無']);`。總表與待辦用 `update … where row_key/column_key` 或 `item_key`。頁面是公開的，不要寫電子郵件、本機路徑或金鑰。
+- **第二期**：會加 asn-cli 寫入指令，經 relay Edge Function、帶節點簽章寫入，不用再手下 SQL。
+- **內容安全政策**：只有這兩頁（`firebase.json` 的 `/{roadmap,log}{,.html}`）放寬成 `script-src 'self'` 與 `connect-src` 到 Supabase；其他頁維持全站的 `script-src 'none'`。Supabase 的 anon 公開金鑰沿用 `public/link/config.mjs`。
+- 讀不到資料時畫面只寫「暫時讀不到資料，請稍後重新整理。」，細節進 console。
+- 守門測試：`node --test --test-force-exit --test-timeout=120000 tests/roadmap_page.test.mjs`（種子 SQL 與產生腳本一致、兩頁沒有行內腳本、畫面程式不用 innerHTML、內容安全政策只對兩頁放寬、公開內容沒有個資與金鑰、時間軸排序）。
 
 ## 本機預覽
 
