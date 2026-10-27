@@ -452,7 +452,7 @@ const TERM_WEZ_TOOLS = ['grok', 'agy']   // 後端 term_start 只收這兩個
 const partnerChannels = computed(() => channelRows(dlgModels.value.find(m => m.profileId === partnerDlg.profile)))   // #351：這個模型三條通道的狀態，只顯示說明
 const partnerShowDisplay = computed(() => partnerDlg.node === info.node && showDisplayModeChoice(partnerDlg.profile))
 const launchCtx = computed(() => ({ selfNode: info.node, partnerModels: partnerModels.value, remoteLaunchers: remoteLaunchers.value }))
-const launchDeviceRowsList = computed(() => launchDeviceRows(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder }))
+const launchDeviceRowsList = computed(() => launchDeviceRows(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, removed: devPrefs.deviceRemoved }))
 function launchDisableReasonFor(nodeKey) { return launchDisableReason(nodeKey, launchCtx.value) }
 // 本機的候選由 Rust 端合併（白名單＋開著的 Claude 視窗＋信任過的資料夾＋最近用過，去重、略過不存在的、最多 15 筆）
 const localCwdList = ref([])

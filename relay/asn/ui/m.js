@@ -418,7 +418,7 @@ const app = createApp({
     const lchData = reactive({ machines: {}, loaded: false, error: '' })
     const acctSigned = () => (acct.value.known ? acct.value.signed_in : null)   // 還沒查到登入狀態＝null，不是「沒登入」
     const lchCtx = computed(() => ({ machines: lchData.machines, loaded: lchData.loaded, signedIn: acctSigned(), authError: acct.value.error, friends: friends.value }))
-    const lchDevices = computed(() => launchDevices(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value, ...lchCtx.value }))
+    const lchDevices = computed(() => launchDevices(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value, removed: devPrefs.deviceRemoved, ...lchCtx.value }))
     const lchElig = computed(() => (lch.node ? launchEligibility(lch.node, lchCtx.value) : { ok: false, reason: '' }))
     const lchFormErr = computed(() => (lch.node ? launchFormError(lch, lchElig.value) : ''))
     const lchChoices = computed(() => launchChoices(lchData.machines[lch.node]))

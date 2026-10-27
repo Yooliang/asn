@@ -1,7 +1,7 @@
 // 開新夥伴：設備選單、能否在此設備開啟、顯示方式（前台／背景）。
 import { MODEL_CATALOG } from './model-catalog.mjs'
 import { isAsnWindow } from './roster.mjs'
-import { applyDeviceOrder } from './device-order.mjs'
+import { applyDeviceOrder, isDeviceRemoved } from './device-order.mjs'
 
 export const DISPLAY_MODES = [
   { key: 'foreground', label: '前台顯示' },
@@ -42,9 +42,11 @@ export function canLaunchOnNode(nodeKey, ctx) {
 }
 
 /** 設備列：本機優先，其餘照名單順序 */
-export function launchDeviceRows(friends, { selfNode, nodeOrder = [], deviceOrder = [] }) {
+// removed＝使用者「永久移除」的設備（設定 → 設備與帳號）：跟設備頁籤一樣不列出來（本機不會被移除）
+export function launchDeviceRows(friends, { selfNode, nodeOrder = [], deviceOrder = [], removed = [] }) {
   const byNode = new Map()
   for (const f of friends) {
+    if (isDeviceRemoved(f.node, removed, { selfNode })) continue
     if (!byNode.has(f.node)) byNode.set(f.node, { key: f.node, label: f.device || f.node })
   }
   if (!byNode.has(selfNode)) byNode.set(selfNode, { key: selfNode, label: selfNode })
