@@ -50,16 +50,17 @@ textarea,input{user-select:text;-webkit-user-select:text}
 
 /* 大頭貼圖片（自動產生的色塊或設備上傳的圖）填滿相框 */
 .dp img{display:block;width:100%;height:100%;border-radius:inherit;object-fit:cover}
-/* 頭像＋廠商小圖（#336，小良哥 #725 定案：小圖放在頭像右邊、左右並排，小一點）；離線整顆灰階 */
-.avb{display:inline-flex;flex:none;align-items:center;gap:3px;vertical-align:middle}
-.avb-v{flex:none;display:grid;place-items:center;color:#1d2733;pointer-events:none}
+/* 頭像＋廠商小圖（#336）：跟手機名單一樣，白底小方塊疊在頭像右下角（小良哥 10/27 傍晚：電腦版要跟手機一樣）；離線整顆灰階 */
+.avb{position:relative;display:inline-flex;flex:none;vertical-align:middle}
+.avb-v{position:absolute;right:-5px;bottom:-5px;display:grid;place-items:center;box-sizing:border-box;padding:2px;border-radius:5px;background:#fff;box-shadow:0 0 0 1px rgba(40,80,130,.28),0 1px 2px rgba(0,0,0,.2);color:#1d2733;pointer-events:none}
 .avb-v:empty{display:none}
 .avb-v svg,.avb-v img{display:block;width:100%;height:100%}
-.avb.xs .avb-v{width:11px;height:11px}
-.avb.sm .avb-v{width:12px;height:12px}
-.avb.xl .avb-v{width:20px;height:20px;align-self:flex-end}
+.avb.xs .avb-v{width:14px;height:14px;right:-4px;bottom:-4px;border-radius:4px}
+.avb.sm .avb-v{width:16px;height:16px}
+.avb.xl .avb-v{width:30px;height:30px;padding:4px;border-radius:7px;right:-6px;bottom:-6px}
+@media (prefers-color-scheme:dark){.avb-v{box-shadow:0 0 0 1px rgba(255,255,255,.35),0 1px 2px rgba(0,0,0,.5)}}
 .avb.off .avb-v{opacity:.6;filter:grayscale(1)}
-.to-line .to-av{margin-right:8px}   /* 對話視窗上方：名字前的頭像＋廠商小圖 */
+.to-line .to-av{margin:0 10px 4px 0}   /* 對話視窗上方：名字前的頭像＋右下角廠商小圖（徽章往下凸，留空間免得被 overflow 切掉） */
 .dp.st-offline img{filter:grayscale(.65) opacity(.85)}
 
 /* ---------- 好友名單 ---------- */
