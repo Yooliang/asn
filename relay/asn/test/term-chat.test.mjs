@@ -1,7 +1,8 @@
 // #331 終端整合進對話視窗：純邏輯（名單列、輸入區、確認列狀態機、時間軸、畫面文字）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { termFriendId, isTermFriend, termIdOf, termFriends, composerView, confirmReduce, confirmBarView, IDLE, timelineAdd, timelineSet, TIMELINE_MAX, entryLabel, remoteStatusToEntry, screenText, SCREEN_LINES, SCREEN_MAX } from '../ui/lib/term-chat.mjs'
+import { termFriendId, isTermFriend, termIdOf, termFriends, composerView, confirmReduce, confirmBarView, IDLE, timelineAdd, timelineSet, TIMELINE_MAX, entryLabel, remoteStatusToEntry, screenText, SCREEN_LINES, SCREEN_MAX, TERM_START_PROFILES, termStartChoices, termStartRequest } from '../ui/lib/term-chat.mjs'
+import fs from 'node:fs'
 import { rowsOf } from '../ui/lib/term-panel.mjs'
 import { vendorBadgeHtml } from '../ui/lib/vendor-icons.mjs'
 
@@ -138,4 +139,31 @@ test('畫面文字：去掉 ANSI 與控制字元、只留最後幾行、限字�
   assert.equal(screenText('x'.repeat(SCREEN_MAX + 50)).length, SCREEN_MAX)
   assert.equal(screenText('<img src=x onerror=alert(1)>'), '<img src=x onerror=alert(1)>', '原樣交給 {{ }} 跳脫，這裡不轉 HTML')
   assert.equal(screenText(null), '')
+})
+
+test('開終端：只有 grok 與 agy；沒偵測到的反灰；請求要種類有裝、資料夾不空', () => {
+  assert.deepEqual(TERM_START_PROFILES.map(p => p.profile), ['grok', 'agy'], '跟後端 resolve_command 允許的一致')
+  const rows = [{ id: 'grok', toolId: 'grok', installed: true }, { id: 'gemini', toolId: 'agy', installed: false }, { id: 'claude', toolId: 'claude', installed: true }]
+  const c = termStartChoices(rows)
+  assert.deepEqual(c.map(x => [x.profile, x.ok]), [['grok', true], ['agy', false]])
+  assert.match(c[1].why, /沒偵測到/)
+  assert.deepEqual(termStartRequest('grok', ' D:\\w ', c), { profile: 'grok', cwd: 'D:\\w' })
+  assert.equal(termStartRequest('agy', 'D:\\w', c), null, '沒裝的不送')
+  assert.equal(termStartRequest('claude', 'D:\\w', c), null, '不在清單的不送')
+  assert.equal(termStartRequest('grok', '  ', c), null, '沒資料夾不送')
+  assert.deepEqual(termStartChoices(null).map(x => x.ok), [false, false])
+})
+
+test('接線：term_start 只在「開終端」按「開啟」時呼叫一次，並列在「＋」選單裡', () => {
+  const ui = new URL('../ui/', import.meta.url)
+  const js = fs.readFileSync(new URL('list.js', ui), 'utf8')
+  const html = fs.readFileSync(new URL('list.html', ui), 'utf8')
+  const tauri = fs.readFileSync(new URL('lib/tauri.mjs', ui), 'utf8')
+  assert.equal((js.match(/transport\.termStart\(/g) ?? []).length, 1, 'list.js 只有一處呼叫 termStart')
+  const submit = js.slice(js.indexOf('async function submitTermStart'), js.indexOf('const termRoster'))
+  assert.ok(submit.includes('termStartRequest(') && submit.includes('transport.termStart(req)'), '先過 termStartRequest 才呼叫')
+  assert.ok(!js.includes("invoke('term_start'"), 'list.js 不直接 invoke term_start')
+  assert.ok(tauri.includes("termStart: req => invoke('term_start', { req })"))
+  assert.ok(html.includes('@click="openTermStart">在這台開終端…</button>'))
+  assert.ok(html.includes('@click="submitTermStart"'))
 })

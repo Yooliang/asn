@@ -343,7 +343,35 @@
     <li v-for="d in launchDeviceRows" :key="d.key">
       <button type="button" role="menuitem" :class="{ off: launchDisableReason(d.key) }" :disabled="!!launchDisableReason(d.key)" :title="launchDisableReason(d.key) || d.label" @click="pickLaunchDevice(d.key)">{{ d.label }}<span class="launch-why" v-if="launchDisableReason(d.key)">{{ launchDisableReason(d.key) }}</span></button>
     </li>
+    <li class="menu-sep" role="separator"></li>
+    <li><button type="button" role="menuitem" @click="openTermStart">在這台開終端…</button></li>
   </ul>
+  <!-- 在這台開終端（#331）：只開 grok／agy；按「開啟」才呼叫 term_start，開好直接打開它的分頁 -->
+  <asn-dialog v-if="termStartDlg.open" title="在這台開終端" @close="closeTermStart">
+    <fieldset class="partner-run" aria-label="要開的程式">
+      <legend>程式</legend>
+      <label v-for="c in termStartOpts" :key="c.profile" class="partner-run-opt" :class="{ off: !c.ok }">
+        <input type="radio" name="term-start-profile" :value="c.profile" v-model="termStartDlg.profile" :disabled="!c.ok || termStartDlg.busy" :aria-label="c.label"> {{ c.label }}
+        <small class="partner-run-why" v-if="!c.ok">{{ c.why }}</small>
+      </label>
+    </fieldset>
+    <label>工作資料夾
+      <span class="partner-cwd-row">
+        <select class="set-sel" v-model="termStartDlg.cwd" :disabled="termStartDlg.busy" aria-label="終端的工作資料夾">
+          <option v-if="!termStartCwds.length" value="" disabled>（還沒有資料夾）</option>
+          <option v-for="c in termStartCwds" :key="c" :value="c">{{ c }}</option>
+        </select>
+        <button class="aero-btn" type="button" :disabled="termStartDlg.busy" @click.prevent="browseTermStartCwd" aria-label="瀏覽資料夾">瀏覽…</button>
+      </span>
+    </label>
+    <p class="partner-hint" v-if="!termStartCwds.length">{{ CWD_EMPTY_HINT }}</p>
+    <p class="partner-hint">終端會開在 ASN 自帶的 WezTerm 視窗裡，名單上會多一列；要送字一樣得在確認列按「確認送出」。</p>
+    <p class="partner-err" v-if="termStartDlg.error" role="alert">{{ termStartDlg.error }}</p>
+    <div class="partner-actions">
+      <button class="aero-btn" type="button" :disabled="termStartDlg.busy" @click="closeTermStart">取消</button>
+      <button class="aero-btn primary" type="button" :disabled="termStartDlg.busy || !termStartDlg.profile || !termStartDlg.cwd" @click="submitTermStart">{{ termStartDlg.busy ? '開啟中…' : '開啟' }}</button>
+    </div>
+  </asn-dialog>
   <asn-dialog v-if="launchNotice.open" :title="launchNotice.title" @close="closeLaunchNotice">
     <p class="launch-notice-body">{{ launchNotice.body }}</p>
     <p class="launch-notice-log" v-if="launchNotice.logPath"><span>記錄檔：</span><code>{{ launchNotice.logPath }}</code></p>
