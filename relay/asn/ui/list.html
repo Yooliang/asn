@@ -390,6 +390,13 @@
       </div>
       <div v-show="partnerDlg.step === 2">
       <p class="partner-sum">{{ dlgRow ? dlgRow.label : '' }}・{{ (partnerRun.options.find(o => o.key === partnerRunChoice) || {}).label }}<template v-if="partnerDlg.node !== selfNode">・{{ partnerDlg.deviceLabel }}</template></p>
+      <!-- 經 pi（#351）：列出這家在 pi 的模型（打開對話框時向 pi 查的，不寫死）；預設第一個 -->
+      <label v-if="partnerRunChoice === 'pi' &amp;&amp; piChoice.ok">pi 的模型
+        <select class="set-sel" v-model="partnerDlg.piModel" aria-label="經 pi 開的模型">
+          <option value="">預設（{{ piChoice.defaultModel }}）</option>
+          <option v-for="m in piChoice.models" :key="m.model" :value="m.model">{{ m.model }}<template v-if="m.thinking">・會思考</template></option>
+        </select>
+      </label>
       <label>名字<input class="set-input" v-model="partnerDlg.name" maxlength="40" aria-label="夥伴名字"></label>
       <label>工作資料夾
         <span class="partner-cwd-row">

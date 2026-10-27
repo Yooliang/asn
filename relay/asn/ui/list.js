@@ -49,6 +49,7 @@ import { canOfferModelSwitch, confirmText, createModelSwitcher, modelSwitchBlock
 import { consoleBlock } from './lib/actionbar.mjs'
 import { vendorBadgeHtml, vendorIconSvg } from './lib/vendor-icons.mjs'
 import { channelRows, runChoices, runOptions, vendorRows } from './lib/model-catalog.mjs'
+import { cleanPiModels, piChoiceFor, piLaunchArgs, providerStates } from './lib/pi-models.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
@@ -384,11 +385,20 @@ const launchToolRows = computed(() => MODEL_CATALOG.map(m => modelUiRow(m, cliTo
 const partnerModels = computed(() => launchToolRows.value)
 // 對話框裡的模型列：本機看偵測到的 CLI；別台設備看那台回報的 profile
 const dlgModels = computed(() => (partnerDlg.node && partnerDlg.node !== info.node ? remoteModelRows(remoteLaunchers.value[partnerDlg.node]) : partnerModels.value))
-const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '', display: 'foreground', run: '', step: 1 })
+const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '', display: 'foreground', run: '', step: 1, piModel: '' })
 const partnerFgOnly = computed(() => partnerDlg.node === info.node && foregroundOnlyProfile(partnerDlg.profile))
 // 「運行」四選一（#351、小良哥 10/27 定案）：內建通道 ＞ 經 pi ＞ ASN 開的終端（進階）＞ 自己開的 CLI（只作說明，永遠不能選）。
 // 目錄決定哪個能選；不能選的灰掉並寫原因；第一個能選的標「建議」。
 const dlgRow = computed(() => dlgModels.value.find(m => m.profileId === partnerDlg.profile))
+// 經 pi（#351）：這台 pi 列得到哪些模型、各提供者有沒有登入。打開對話框時才向後端查，60 秒內不重查；先拿模型清單，登入狀態晚一點回來再補原因
+const piInfo = reactive({ models: [], providers: {}, at: 0 })
+async function loadPiInfo() {
+  if (Date.now() - piInfo.at < 60_000) return
+  piInfo.at = Date.now()
+  try { piInfo.models = cleanPiModels(await transport.piModels()) } catch { piInfo.models = [] }
+  try { piInfo.providers = providerStates(await transport.piProviders()) } catch { piInfo.providers = {} }
+}
+const piChoice = computed(() => piChoiceFor(dlgRow.value?.id, piInfo.models, piInfo.providers))
 // pi 是通道不是廠牌，最後不列在廠牌裡；但「經 pi」要等後端能帶提供者與模型開 pi（0.1.90 後續）才能選，
 // 在那之前先留著 pi 這一列，不然使用者完全開不了 pi 夥伴（小東 #737）
 const PI_VIA_READY = false
@@ -396,7 +406,7 @@ const dlgVendors = computed(() => (PI_VIA_READY ? vendorRows(dlgModels.value) : 
 const partnerRun = computed(() => {
   const row = dlgRow.value
   const r = row?.channels
-    ? runOptions(row, { local: partnerDlg.node === info.node, piInstalled: cliTools.value.pi?.installed === true, piReady: false })
+    ? runOptions(row, { local: partnerDlg.node === info.node, piInstalled: cliTools.value.pi?.installed === true, piReady: PI_VIA_READY && piChoice.value.ok })
     : null
   if (!r) {   // 目錄上沒有的（自訂設定）：只看 mode，開成視窗或內建通道
     const bg = row?.mode === 'background'
@@ -406,7 +416,9 @@ const partnerRun = computed(() => {
     ], selected: bg ? 'acp' : 'term', recommended: bg ? 'acp' : 'term' }
   }
   const rec = r.options.find(o => o.ok && o.key !== 'self')?.key ?? ''
-  return { ...r, options: r.options.map(o => ({ ...o, self: o.key === 'self', adv: o.key === 'term' || o.key === 'self' })), recommended: rec }
+  // 經 pi 不能選時，原因用 pi 自己回答的（沒登入、這版 pi 沒有、沒列出模型），比目錄的通用說明準確
+  const piWhy = PI_VIA_READY && !piChoice.value.ok && partnerDlg.node === info.node ? piChoice.value.why : ''
+  return { ...r, options: r.options.map(o => ({ ...o, why: o.key === 'pi' && !o.ok && piWhy ? piWhy : o.why, self: o.key === 'self', adv: o.key === 'term' || o.key === 'self' })), recommended: rec }
 })
 const partnerRunChoice = computed(() => {
   const opts = partnerRun.value.options
@@ -465,7 +477,9 @@ function openPartnerDlg(nodeKey) {
   partnerDlg.error = ''
   partnerDlg.busy = false
   partnerDlg.step = 1
+  partnerDlg.piModel = ''
   partnerDlg.firstMessage = ''
+  if (nodeKey === info.node && PI_VIA_READY) void loadPiInfo()   // 經 pi 只能在這台開（遠端開 pi 帶模型還沒做）
   partnerDlg.display = launchPrefs.launchDisplay === 'background' ? 'background' : 'foreground'
   const first = dlgModels.value.find(m => m.installed) ?? dlgModels.value[0]
   if (first) pickPartnerModel(first)
@@ -683,7 +697,12 @@ async function submitPartnerDlg() {
         launchPrefs.launchDisplay = display === 'background' ? 'background' : 'foreground'
         void saveLaunchPrefs()
       }
-      await transport.partnerLaunchLocal({ profile: partnerDlg.profile, name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, display, first_message: foregroundOnly ? partnerDlg.firstMessage.trim() : '' })
+      // 經 pi：一律用 pi 的啟動設定，帶這次查到清單裡的提供者與模型（piLaunchArgs 驗過才送，清單外的不送）
+      const viaPi = partnerRunChoice.value === 'pi' ? piLaunchArgs(dlgRow.value?.id, partnerDlg.piModel || piChoice.value.defaultModel, piInfo.models, piInfo.providers) : null
+      if (partnerRunChoice.value === 'pi' && !viaPi) throw new Error('pi 的模型清單裡沒有這個模型，請重新選一次')
+      await transport.partnerLaunchLocal(viaPi
+        ? { profile: 'pi', name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, display: 'foreground', first_message: partnerDlg.firstMessage.trim(), pi_provider: viaPi.provider, pi_model: viaPi.model }
+        : { profile: partnerDlg.profile, name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, display, first_message: foregroundOnly ? partnerDlg.firstMessage.trim() : '' })
     } else {
       const r = await transport.launch({ node: partnerDlg.node, profile: partnerDlg.profile, name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, first_message: partnerDlg.firstMessage.trim() || null })
       if (r?.id) launchTrack.value = [...launchTrack.value, { id: r.id, node: partnerDlg.node, name: partnerDlg.name.trim(), profile: partnerDlg.profile }]
@@ -1543,7 +1562,7 @@ const app = createApp({
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
       termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termsClose, termSendAsk, termSendPhone, termSendBack, termSendConfirm, SEND_MAX,
       termPane, termPaneRow, termPaneActive, termRoster, termComposer, openTermTab, termPaneAnswer, termTimeline, entryLabel,
-      dlgRow, dlgVendors, partnerRunChoice, partnerRunModel, partnerCanRun, termWaitCount, openWaitingTerm,
+      dlgRow, dlgVendors, piChoice, partnerRunChoice, partnerRunModel, partnerCanRun, termWaitCount, openWaitingTerm,
       adopt, adoptLoad, adoptClose, adoptDo, adoptRelease, adoptUnlockAsk, adoptUnlockCancel, adoptUnlockConfirm, UNLOCK_TEXT,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
