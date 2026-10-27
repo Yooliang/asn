@@ -56,8 +56,13 @@ export function resolvePending(pending, friends) {
   })
 }
 
+// 這台電腦有沒有偵測到某個 CLI：讀 ai_cli_detect 的原始列（Rust ToolDetectRow，欄位是 binary_found；舊格式是 cmd）。
+// tools 是「id → 原始列」的對照（list.js 的 cliTools）。不要讀 .installed——那是 modelUiRow 整理後才有的欄位（#394 之後查出 0.1.91 起讀錯）
+export const toolFound = tool => Boolean(tool?.binary_found ?? tool?.cmd)
+export const cliInstalled = (tools, id) => toolFound(tools?.[id])
+
 export function modelUiRow(catalogItem, tool) {
-  const installed = Boolean(tool?.binary_found ?? tool?.cmd)
+  const installed = toolFound(tool)
   return {
     ...catalogItem,
     installed,
