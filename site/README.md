@@ -38,8 +38,13 @@
 
 - 表定義：`supabase/migrations/20261027100000_site_content.sql`（欄位說明寫在 SQL 註解）；搬家時的全部內容：`20261027100100_site_content_seed.sql`，由 `site/tools/extract-roadmap-seed.mjs` 從凍結快照 `site/tools/seed-source/` 產生（只在搬家時用，之後以資料庫為準，不要再改快照）。
 - **內文格式**：不存 HTML。只有 `**粗體**`、`` `程式碼` ``、`#123`（議題編號的文字樣式），以換行開頭的「- 」行是子項目；項目的 `refs` 欄會在頁面上連到 GitHub 的議題頁。頁面一律用 textContent 建節點，資料庫內容不會被當 HTML。
-- **現在怎麼更新（第一期）**：維護者直接下 SQL 寫入（anon 只能讀，不能寫）。例：發版後 `insert into public.asn_site_releases (version, released_on, items, platforms, commit_sha) values ('0.1.95', '2026-10-28', array['新增：…'], array['官網','家用機'], 'abc1234');`；開完小會議 `insert into public.asn_site_meetings (held_at, attendees, progress, decisions, assignments, improvements) values ('2026-10-28 08:00+08', array['…'], array['…'], array['…'], array['…'], array['無']);`。總表與待辦用 `update … where row_key/column_key` 或 `item_key`。頁面是公開的，不要寫電子郵件、本機路徑或金鑰。
-- **第二期**：會加 asn-cli 寫入指令，經 relay Edge Function、帶節點簽章寫入，不用再手下 SQL。
+- **現在怎麼更新（第二期，#400）**：用 `asn-cli site` 指令，經 relay Edge Function（節點金鑰認證）寫入，不用再手下 SQL（anon 仍然只能讀）：
+  - 發版：`asn-cli site release --version 0.1.96 --date 2026-10-28 --commit abc1234 --item "新增：…" --item "修正：…" --platform 官網 --platform 家用機`。依版本新增或更新；已有的版本只改有給的欄位（`--commit ""`、`--notes ""` 清掉）。
+  - 小會議：`asn-cli site meeting --file meeting.json`。檔案格式同以前的 `site/meetings.json`：`time`（台北時間 `2026-10-28 08:00`）、`attendees`、`progress`、`decisions`、`assignments`、`improvements`（字串或字串陣列，一行一項，沒內容寫「無」）；同一時間再送一次＝整筆覆寫。
+  - 藍圖與待辦：`asn-cli site item --key todo-next-15b --section todo --lane next --title "…" --body "…" --ref 400 --status doing`（新項目要 section、lane、body、status）；之後改狀態只要 `asn-cli site item --key todo-next-15b --status released --version 0.1.96`。這一期不能刪除，要下架就改狀態。
+  - 誰能寫：只有官網寫入名單 `relay.site_writers`（以帳號／租戶為單位）上的帳號；名單外回「不在官網寫入名單」。migration 不放任何一列，**要由負責人把專案擁有者的租戶加進去**：`insert into relay.site_writers (tenant_id, note) values ('<租戶 id>', '專案負責人');`。每次寫入記在 `relay.site_write_log`（不公開）；每個帳號每小時最多 120 次。
+  - 後台會擋：HTML 標籤、電子郵件、本機路徑、金鑰樣式（頁面是公開的），以及不合表格限制的長度與格式。後端：`supabase/migrations/20261027200000_site_write.sql`、`supabase/functions/_shared/site_write.ts`。
+- 支援總表（`asn_site_matrix_*`）這一期還沒有指令，仍由維護者下 SQL（`update … where row_key/column_key`）。
 - **內容安全政策**：只有這兩頁（`firebase.json` 的 `/{roadmap,log}{,.html}`）放寬成 `script-src 'self'` 與 `connect-src` 到 Supabase；其他頁維持全站的 `script-src 'none'`。Supabase 的 anon 公開金鑰沿用 `public/link/config.mjs`。
 - 讀不到資料時畫面只寫「暫時讀不到資料，請稍後重新整理。」，細節進 console。
 - 守門測試：`node --test --test-force-exit --test-timeout=120000 tests/roadmap_page.test.mjs`（種子 SQL 與產生腳本一致、兩頁沒有行內腳本、畫面程式不用 innerHTML、內容安全政策只對兩頁放寬、公開內容沒有個資與金鑰、時間軸排序）。

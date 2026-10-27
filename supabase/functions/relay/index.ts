@@ -22,6 +22,7 @@ import { ACCT_ACTIONS, handleAcctAction } from "../_shared/account_switch.ts";
 import { handleTermReqAction, TERM_REQ_ACTIONS, TERM_REQ_SIGNED_ACTIONS } from "../_shared/term_request.ts";
 import { handleSecretAction, SECRET_ACTIONS } from "../_shared/secret_remote.ts";
 import { handleUsageAction, USAGE_ACTIONS } from "../_shared/usage.ts";
+import { handleSiteAction, SITE_ACTIONS } from "../_shared/site_write.ts";
 import {
   ACTIONS as ATTACH_ACTIONS, bindAttachments, handleAttachAction, prepareAttachments, type StorageDeps, withAttachments,
   withRoomAttachments,
@@ -512,6 +513,13 @@ Deno.serve(async (req) => {
     const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
     const params = action === "usage_report" ? raw : { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
     const r = await handleUsageAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params);
+    return json(r.status, r.body);
+  }
+  // 官網內容第二期（#400，見 _shared/site_write.ts）：寫入發版記錄、小會議記錄、藍圖與待辦項目。節點一律是金鑰所屬的 me.id；
+  // 能不能寫由資料庫的名單（relay.site_writers，以租戶為單位）決定，名單外回 403 not_allowed
+  if (action && SITE_ACTIONS.has(action)) {
+    if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
+    const r = await handleSiteAction({ rpc }, me, action, await req.json().catch(() => null));
     return json(r.status, r.body);
   }
   // 遠端一次性密碼傳遞（#26 第二期，見 _shared/secret_remote.ts）：secret_request／secret_fetch 是請求端；secret_pending／secret_reply 是本人設備，一定要本人簽章（沒簽章 401 不打資料庫）。

@@ -16,6 +16,7 @@ mod confirm;
 mod room;
 mod secret;
 mod send;
+mod site_cmd;
 mod upload;
 mod usage_cmd;
 mod who;
@@ -60,7 +61,7 @@ impl Io<'_> {
     }
 }
 
-pub const SUBCOMMANDS: [&str; 9] = ["send", "recv", "room", "attach", "secret", "usage", "inbox", "claude-quota", "who"];
+pub const SUBCOMMANDS: [&str; 10] = ["send", "recv", "room", "attach", "secret", "usage", "inbox", "claude-quota", "who", "site"];
 
 /// 第一個參數是子命令才算命令列呼叫（asn.exe 據此決定要不要跑命令列）
 pub fn is_subcommand(args: &[String]) -> bool {
@@ -80,6 +81,7 @@ const TOP_USAGE: &str = "用法：
   asn inbox   [--all | --json | --done <信件id> ...]   （收件匣模式：讀 asn-bridge run --inbox 存下的信、標記已處理）
   asn secret request --purpose <用途說明> [--program <程式名稱>] [--ttl <秒>]
   asn usage  report (--file <hourly.json> | --input-tokens N ... --rounds N) / list [--since <ISO>]   （無頭節點自己回報每小時用量）
+  asn site   release --version <x.y.z> --date <YYYY-MM-DD> --item \"…\" / meeting --file <meeting.json> / item --key <項目代號> ...   （寫官網的發版、會議、藍圖；限官網寫入名單上的帳號）
   asn claude-quota  < 狀態列資料   （接在 Claude Code 狀態列指令後，記下目前帳號的 5 小時與每週剩餘額度）
 各子命令加 --help 看詳細說明。身分（節點、寄件視窗名）自動判定，不能自填。";
 
@@ -108,6 +110,7 @@ pub fn run(args: &[String], env: &Env, io: &mut Io) -> i32 {
             "inbox" => inbox_cmd::main(rest, env, io).await,
             "claude-quota" => quota_cmd::main(rest, env, io).await,
             "who" => who::main(rest, env, io).await,
+            "site" => site_cmd::main(rest, env, io).await,
             "--help" | "-h" | "help" => {
                 io.outln(TOP_USAGE);
                 Ok(0)
