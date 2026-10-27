@@ -50,7 +50,7 @@
     </ul>
     <div class="table-wrap">
       <table class="matrix">
-        <caption>各家 AI 與各項管理功能的現況（依 2026 年 10 月 27 日的主線程式（0.1.91）與議題整理；各格的版本與驗證狀態以格內文字為準）</caption>
+        <caption>各家 AI 與各項管理功能的現況（依 2026 年 10 月 27 日的主線程式（0.1.92）與議題整理；各格的版本與驗證狀態以格內文字為準）</caption>
         <thead><tr><th scope="col">AI</th><th scope="col">開啟</th><th scope="col">關閉</th><th scope="col">接手</th><th scope="col">切換模型</th><th scope="col">群組聊天</th><th scope="col">帳號切換</th><th scope="col">備註與限制</th></tr></thead>
         <tbody>
         <tr>
@@ -398,6 +398,12 @@
     <div class="releases">
 <!-- changelog:start（由 site/make-roadmap-page.mjs 產生，不要手改） -->
       <article class="glass release">
+        <h3>0.1.92<span class="date">2026-10-27</span></h3>
+        <ul>
+          <li>修正：收信更耐壞：一次確認最多 100 封、編號格式不對的信不再擋住整批確認、一封處理失敗的信不擋後面的信；「連線中斷」後面會寫出簡短原因（逾時、憑證被拒、後台出錯、連不上、本機存檔失敗…）。</li>
+        </ul>
+      </article>
+      <article class="glass release">
         <h3>0.1.91<span class="date">2026-10-27</span></h3>
         <ul>
           <li>新增：開新夥伴可以「經 pi」開，選提供者和模型（只列 pi 查得到、已登入的）；pi 提供者的登入狀態同時查、約 1 秒內出來。對話窗「管理」選單多了「把這台電腦上開著的終端納入管理…」（從「＋」選單搬過來）。修正：Gemini 審查等工作者的寫入權限可以只開放指定資料夾；pi 的提供者與模型名稱不允許以減號開頭。</li>
@@ -449,12 +455,6 @@
         <h3>0.1.83<span class="date">2026-10-27</span></h3>
         <ul>
           <li>新增：電腦版「終端」圖示常駐，沒有終端時也能進「接手既有視窗…」。修正：電腦端往終端送字時，按返回、關閉或換終端會撤回手機上的待確認；改字再送會先撤回舊的；只動送字，不影響手機上等你回答的代答請求。</li>
-        </ul>
-      </article>
-      <article class="glass release">
-        <h3>0.1.82<span class="date">2026-10-27</span></h3>
-        <ul>
-          <li>修正：電腦端往終端送字時，確認框打開就會同時傳到手機「待確認」頁，本人在手機按確認或拒絕（之前只有代答會傳到手機）。</li>
         </ul>
       </article>
       <!-- changelog:end -->

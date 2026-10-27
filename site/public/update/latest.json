@@ -1,11 +1,11 @@
 {
-  "version": "0.1.91",
-  "notes": "新增：開新夥伴可以「經 pi」開，選提供者和模型（只列 pi 查得到、已登入的）；pi 提供者的登入狀態同時查、約 1 秒內出來。對話窗「管理」選單多了「把這台電腦上開著的終端納入管理…」（從「＋」選單搬過來）。修正：Gemini 審查等工作者的寫入權限可以只開放指定資料夾；pi 的提供者與模型名稱不允許以減號開頭。",
-  "pub_date": "2026-10-27T07:48:57.459Z",
+  "version": "0.1.92",
+  "notes": "修正：收信更耐壞：一次確認最多 100 封、編號格式不對的信不再擋住整批確認、一封處理失敗的信不擋後面的信；「連線中斷」後面會寫出簡短原因（逾時、憑證被拒、後台出錯、連不上、本機存檔失敗…）。",
+  "pub_date": "2026-10-27T08:45:08.109Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybitIMjI2NUE1aEZCdnBoSTBUQ3NZVEhmb25OaEFWSmw4TC8reUhpdjF4V3M0K01YYnlCVUhKRnp6Zyt2VSszTnpPbmtFN091ZzRKLy9qVjl2NFhPL1FZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDg3MzM3CWZpbGU6QVNOXzAuMS45MV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjkxCnJVeUp2eGRxaS9BdFIvRzR0MjhYNXpiTWFnT05WZTl1TDIwWUM0aTJBcFdZbDN3ZTQ3MSs0elVUaVh5d3FTSGUyOHhyalBlVE56c1ZZbjFqTmZvUEJRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.91_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjRqZE5xVVhnVlNxUmY3cnNqenRYaCtaZTNZZ25VTlhLUXFBK2RJdFAzQ1pzNDlmNEt5SEt1a3hFRGNDQVZvTHdpTytmMTZrbGVGM3VXRGRxSVRJTGc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDkwNzA4CWZpbGU6QVNOXzAuMS45Ml94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjkyCmpoZnJLS0g0dlpvZWFVUFMxekhtVFJnOFRjRnFCVzBQQ3B3MUE0ZlZkcUZET2tvdnE1YlllRTNIR2hTc2h2dU1wMU0zaGQ0bmZhaEFuTVFIbVo2RERBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.92_x64-setup.exe"
     }
   }
 }
