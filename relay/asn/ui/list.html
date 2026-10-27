@@ -342,10 +342,7 @@
     </div>
   </asn-dialog>
   <ul class="av-menu launch-picker" v-if="launchPicker" :style="{ left: launchPickerPos.x + 'px', top: launchPickerPos.y + 'px' }" role="menu" @click.stop>
-    <li class="menu-head" role="presentation">新增夥伴</li>
-    <li v-for="d in launchDeviceRows" :key="d.key">
-      <button type="button" role="menuitem" :class="{ off: launchDisableReason(d.key) }" :disabled="!!launchDisableReason(d.key)" :title="launchDisableReason(d.key) || d.label" @click="pickLaunchDevice(d.key)">{{ d.label }}<span class="launch-why" v-if="launchDisableReason(d.key)">{{ launchDisableReason(d.key) }}</span></button>
-    </li>
+    <li><button type="button" role="menuitem" @click="openPartnerDlg()">新增夥伴…</button></li>
     <li class="menu-sep" role="separator"></li>
     <li class="menu-head" role="presentation">終端</li>
     <li v-if="termWaitCount"><button type="button" role="menuitem" class="menu-warn" @click="openWaitingTerm">{{ termWaitCount }} 個終端等你回答</button></li>
@@ -367,9 +364,17 @@
   <div class="partner-dlg-back" v-if="partnerDlg.open" @click.self="closePartnerDlg">
     <div class="partner-dlg" role="dialog" aria-labelledby="partner-dlg-title" @click.stop>
       <h3 id="partner-dlg-title">開新夥伴</h3>
-      <p class="partner-node" v-if="partnerDlg.node !== selfNode">設備：{{ partnerDlg.deviceLabel }}</p>
-      <ol class="partner-steps" aria-label="步驟"><li :class="{ on: partnerDlg.step === 1 }">1. 廠牌與運行</li><li :class="{ on: partnerDlg.step === 2 }">2. 名稱與路徑</li></ol>
+      <p class="partner-node" v-if="partnerDlg.step > 1 &amp;&amp; partnerDlg.node !== selfNode">設備：{{ partnerDlg.deviceLabel }}</p>
+      <ol class="partner-steps" aria-label="步驟"><li :class="{ on: partnerDlg.step === 1 }">1. 設備</li><li :class="{ on: partnerDlg.step === 2 }">2. 廠牌與運行</li><li :class="{ on: partnerDlg.step === 3 }">3. 名稱與路徑</li></ol>
+      <!-- #351：第 1 頁選設備；不能開的反灰並寫原因。換設備時第 2、3 頁的選項跟著重算 -->
       <div v-show="partnerDlg.step === 1">
+      <div class="partner-devices" role="radiogroup" aria-label="設備" @keydown="partnerDevKey">
+        <button v-for="d in launchDeviceRows" :key="d.key" type="button" class="pdevice" role="radio" :data-node="d.key" :aria-checked="partnerDlg.node === d.key" :tabindex="partnerDlg.node === d.key || !partnerDlg.node ? 0 : -1" :class="{ on: partnerDlg.node === d.key, off: launchDisableReason(d.key) }" :disabled="!!launchDisableReason(d.key)" :title="launchDisableReason(d.key) || d.label" @click="pickPartnerDevice(d.key)">
+          <span class="pdevice-lb">{{ d.label }}</span><small class="launch-why" v-if="launchDisableReason(d.key)">{{ launchDisableReason(d.key) }}</small>
+        </button>
+      </div>
+      </div>
+      <div v-show="partnerDlg.step === 2">
       <div class="partner-models" role="radiogroup" aria-label="模型">
         <button v-for="m in dlgVendors" :key="m.id" type="button" class="pmodel" :class="{ on: partnerDlg.profile === m.profileId, off: !m.installed }" :disabled="!m.installed" :title="m.installed ? m.modeLabel : m.installHint" @click="pickPartnerModel(m)">
           <span class="pmodel-ic" :data-m="m.id"></span>
@@ -387,7 +392,7 @@
         </label>
       </fieldset>
       </div>
-      <div v-show="partnerDlg.step === 2">
+      <div v-show="partnerDlg.step === 3">
       <p class="partner-sum">{{ dlgRow ? dlgRow.label : '' }}・{{ (partnerRun.options.find(o => o.key === partnerRunChoice) || {}).label }}<template v-if="partnerDlg.node !== selfNode">・{{ partnerDlg.deviceLabel }}</template></p>
       <!-- 經 pi（#351）：列出這家在 pi 的模型（打開對話框時向 pi 查的，不寫死）；預設第一個 -->
       <label v-if="partnerRunChoice === 'pi' &amp;&amp; piChoice.ok">pi 的模型
@@ -419,8 +424,8 @@
       <p class="partner-err" v-if="partnerDlg.error" role="alert">{{ partnerDlg.error }}</p>
       <div class="partner-actions">
         <button class="aero-btn" type="button" v-if="partnerDlg.step === 1" @click="closePartnerDlg">取消</button>
-        <button class="aero-btn" type="button" v-else @click="partnerDlg.step = 1">〈 上一步</button>
-        <button class="aero-btn primary" type="button" v-if="partnerDlg.step === 1" :disabled="!partnerCanRun" @click="partnerDlg.step = 2">下一步 〉</button>
+        <button class="aero-btn" type="button" v-else @click="partnerDlg.step -= 1">〈 上一步</button>
+        <button class="aero-btn primary" type="button" v-if="partnerDlg.step < 3" :disabled="!partnerCanNext" @click="partnerNext">下一步 〉</button>
         <button class="aero-btn primary" type="button" v-else :disabled="partnerDlg.busy || !partnerCanRun" @click="submitPartnerDlg">{{ partnerDlg.busy ? '啟動中…' : '開啟' }}</button>
       </div>
     </div>

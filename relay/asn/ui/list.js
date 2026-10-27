@@ -470,17 +470,27 @@ function pickPartnerModel(m) {
   // pi 是互動式，只能前台；換回其他模型時還原成使用者上次的選擇
   partnerDlg.display = foregroundOnlyProfile(m.profileId) ? 'foreground' : (launchPrefs.launchDisplay === 'background' ? 'background' : 'foreground')
 }
-function openPartnerDlg(nodeKey) {
+// #351 三頁精靈：1. 設備 2. 廠牌與運行 3. 名稱與路徑。「＋」進來預先選這台（不能開就不選）；
+// 帶 nodeKey 進來（某台設備的入口）預先選那台，但一樣從第 1 頁開始
+function openPartnerDlg(nodeKey = '') {
   closeLaunchPicker()
-  const devLabel = friends.value.find(f => f.node === nodeKey)?.device ?? nodeKey
   partnerDlg.open = true
-  partnerDlg.node = nodeKey
-  partnerDlg.deviceLabel = devLabel
+  partnerDlg.node = ''
+  partnerDlg.deviceLabel = ''
   partnerDlg.error = ''
   partnerDlg.busy = false
   partnerDlg.step = 1
-  partnerDlg.piModel = ''
   partnerDlg.firstMessage = ''
+  const pre = [nodeKey, info.node].find(k => k && !launchDisableReasonFor(k))
+  if (pre) pickPartnerDevice(pre)
+}
+// 第 1 頁選設備：第 2 頁的廠牌、運行與第 3 頁的資料夾都跟著這台重算
+function pickPartnerDevice(nodeKey) {
+  if (launchDisableReasonFor(nodeKey) || nodeKey === partnerDlg.node) return   // 再點同一台：保留第 2、3 頁已選的
+  partnerDlg.node = nodeKey
+  partnerDlg.deviceLabel = friends.value.find(f => f.node === nodeKey)?.device ?? nodeKey
+  partnerDlg.error = ''
+  partnerDlg.piModel = ''
   if (nodeKey === info.node && PI_VIA_READY) void loadPiInfo()   // 經 pi 只能在這台開（遠端開 pi 帶模型還沒做）
   partnerDlg.display = launchPrefs.launchDisplay === 'background' ? 'background' : 'foreground'
   const first = dlgModels.value.find(m => m.installed) ?? dlgModels.value[0]
@@ -502,6 +512,20 @@ function openPartnerDlg(nodeKey) {
   }
 }
 function closePartnerDlg() { partnerDlg.open = false; partnerDlg.error = '' }
+// 第 1 頁設備清單的方向鍵：上下（左右）移到前／後一台能開的設備，焦點跟著走
+function partnerDevKey(e) {
+  const dir = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key]
+  if (!dir) return
+  e.preventDefault()
+  const keys = launchDeviceRowsList.value.map(d => d.key).filter(k => !launchDisableReasonFor(k))
+  if (!keys.length) return
+  const i = keys.indexOf(partnerDlg.node)
+  const next = keys[i < 0 ? 0 : (i + dir + keys.length) % keys.length]
+  pickPartnerDevice(next)
+  e.currentTarget?.querySelector?.(`[data-node="${CSS.escape(next)}"]`)?.focus?.()
+}
+const partnerCanNext = computed(() => (partnerDlg.step === 1 ? !!partnerDlg.node && !launchDisableReasonFor(partnerDlg.node) : partnerCanRun.value))
+function partnerNext() { if (partnerCanNext.value && partnerDlg.step < 3) partnerDlg.step += 1 }
 const searchInput = ref(null)
 function focusSearch() { searchInput.value?.focus?.() }
 const launchPicker = ref(false)
@@ -514,11 +538,6 @@ function openLaunchPicker(e) {
   launchPicker.value = true
 }
 function closeLaunchPicker() { launchPicker.value = false }
-function pickLaunchDevice(nodeKey) {
-  if (launchDisableReasonFor(nodeKey)) return
-  closeLaunchPicker()
-  openPartnerDlg(nodeKey)
-}
 const buddyMenu = ref('')
 const buddyMenuPos = reactive({ x: 0, y: 0 })
 const buddyMenuFriend = ref(null)
@@ -1560,7 +1579,7 @@ const app = createApp({
       tab, adI, hub, roomRows, roomHue, roomInitial, groupFlow, openGroupMenu, decideCard, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,
       GUIDES, view, SETTING_CATS, catSub, PANEL_KINDS, panelTabId, panelGuide, panelTitle, openPanel, closePanel, settingsState, applySetting, pickAvatarFile,
       selfNode: info.node, transport, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg, vendorBadge: vendorBadgeHtml,
-      searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickLaunchDevice,
+      searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickPartnerDevice, partnerDevKey, partnerCanNext, partnerNext,
       DISPLAY_MODES, partnerShowDisplay, partnerRun, partnerChannels,
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
       termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termsClose, termSendAsk, termSendPhone, termSendBack, termSendConfirm, SEND_MAX,
@@ -1622,7 +1641,7 @@ if (info.shot) {
     await sleep(350)
   }
   if (savedMe.shotPartnerDlg) {
-    // 開新夥伴對話框：停在本機（候選來自 Rust 端的真實合併；截圖用暫存家目錄）
+    // 開新夥伴對話框：三頁各拍一張，設備選本機（候選來自 Rust 端的真實合併；截圖用暫存家目錄）
     openPartnerDlg(info.node)
     await refreshCwdCandidates()
     if (!partnerDlg.cwd) partnerDlg.cwd = partnerCwdChoices.value[0] ?? ''
@@ -1631,7 +1650,8 @@ if (info.shot) {
     await waitPaint()
     await sleep(900)
     await invoke('capture_ui_ready', { tag: 'partner-dlg-ready' })
-    await invoke('take_shot', { tab: 'partner-dlg' })
+    await invoke('take_shot', { tab: 'partner-dlg' })   // 第 1 頁：設備
+    for (const n of [2, 3]) { partnerDlg.step = n; await waitPaint(); await invoke('take_shot', { tab: `partner-dlg-${n}` }) }
     closePartnerDlg()
   } else if (savedMe.shotLaunchNotice) {
     showLaunchNotice(backgroundRestoreNoticeText('夥伴-7'))
