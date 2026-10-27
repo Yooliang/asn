@@ -17,6 +17,7 @@ export const isRoomChat = id => typeof id === 'string' && id.startsWith(ROOM_PRE
 export const roomIdOf = chatId => (isRoomChat(chatId) ? chatId.slice(ROOM_PREFIX.length) : '')
 
 import { mentionTargets } from './mention.mjs'
+import { normalizePhotos } from './photo.mjs'
 import { modelVendorKey } from './vendor-icons.mjs'
 import { KIND_BADGE, kindOf, safeLabel, speakerAvatarSeed, speakerLabels } from './groups.mjs'
 
@@ -157,19 +158,21 @@ export function applyWakes(log, wakes) {
 // 最近 40 則內，WAKE_WAIT_MS 以內發出、還沒有叫醒順序的訊息（系統訊息與開頭紀錄除外）：有的話值得在沒有新訊息時也問一次後台
 export const hasPendingWakes = (log, now = Date.now()) =>
   (Array.isArray(log) ? log.slice(-40) : []).some(e => e && (e.k === 'me' || e.k === 'them') && e.wk !== true && !e.seed && e.t > 0 && now - e.t < WAKE_WAIT_MS)
-export function roomLog(messages, myKeys, members) {
+// photos：電腦版傳 true，附件放進 photos 由對話框直接顯示（點開放大、另存）；手機版還不能看附件，留一行「請用電腦版查看」
+export function roomLog(messages, myKeys, members, { photos = false } = {}) {
   const mine = new Set(myKeys ?? [])
   const list = (Array.isArray(messages) ? messages : []).filter(m => m && Number.isInteger(m.seq))
   const labels = speakerLabels(list, members)
   const out = []
   for (const m of list) {
-    const att = Array.isArray(m.attachments) ? m.attachments.map(a => String(a?.name ?? '').trim()).filter(Boolean) : []
+    const pics = photos ? normalizePhotos(m.attachments) : []
+    const att = photos || !Array.isArray(m.attachments) ? [] : m.attachments.map(a => String(a?.name ?? '').trim()).filter(Boolean)
     const text = [String(m.body ?? ''), ...att.map(n => `（附件：${n}，請用電腦版查看）`)].filter(Boolean).join('\n')
     const t = Date.parse(m.at) || 0, id = `room-${m.seq}`
     if (m.from_kind === 'system' || m.relation === 'system') { out.push({ k: 'sys', text, t, id, seq: m.seq }); continue }
     const isMe = m.relation ? m.relation === 'mine' : mine.has(m.from)
     const kind = kindOf(m)
-    out.push({ k: isMe ? 'me' : 'them', who: isMe ? '' : (labels.get(m.from) || fromLabel(m)), kind, badge: isMe ? '' : KIND_BADGE[kind] ?? '', av: isMe ? '' : speakerAvatarSeed(m.from), fk: isMe || typeof m.from !== 'string' ? '' : m.from, reply: replyOf(m.reply_to, labels), wake: wakeTags(m.wake_info), wk: Array.isArray(m.wake_info), rd: isMe && !m.is_seed ? readInfo(m) : null, text, t, id, seq: m.seq, seed: m.is_seed === true })
+    out.push({ k: isMe ? 'me' : 'them', who: isMe ? '' : (labels.get(m.from) || fromLabel(m)), kind, badge: isMe ? '' : KIND_BADGE[kind] ?? '', av: isMe ? '' : speakerAvatarSeed(m.from), fk: isMe || typeof m.from !== 'string' ? '' : m.from, reply: replyOf(m.reply_to, labels), wake: wakeTags(m.wake_info), wk: Array.isArray(m.wake_info), rd: isMe && !m.is_seed ? readInfo(m) : null, text, t, id, seq: m.seq, seed: m.is_seed === true, ...(pics.length ? { photos: pics } : {}) })
   }
   return out
 }
