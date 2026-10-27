@@ -348,6 +348,13 @@ impl Runner for RealRunner {
     }
 }
 
+/// 用同一個執行器跑一次 pi（模型清單、提供者檢查用）。找不到 pi 回 Err("沒有 pi")；逾時由執行器砍掉
+pub(crate) fn run_pi(args: &[&str], timeout_secs: u64) -> Result<(i32, String), String> {
+    let pi = real_pi().ok_or_else(|| "沒有 pi".to_string())?;
+    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    RealRunner { timeout: std::time::Duration::from_secs(timeout_secs) }.run(&pi, &args)
+}
+
 /// ASN 自己帶的擴充資料夾（有 index.ts 的那層）
 fn real_ext_dir() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
