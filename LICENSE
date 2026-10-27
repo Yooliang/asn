@@ -19,9 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-Exception: cloudflare/edge-tts/drm.js is ported from edge-tts
-(https://github.com/rany2/edge-tts) and is licensed under LGPL-3.0, not MIT.
-See THIRD_PARTY_NOTICES.md for this and other third-party components.
