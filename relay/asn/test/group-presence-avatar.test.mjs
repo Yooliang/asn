@@ -82,3 +82,15 @@ test('樣式：小圖定位在頭像欄右下角、離線灰階、深色模式�
   assert.match(css, /\.m-av-spk\.is-off \.dp img\{[^}]*grayscale/)
   assert.match(css, /prefers-color-scheme:dark\)\{[^@]*\.spk-vendor/)
 })
+
+test('pi 夥伴的群組頭像小圖：後台帶 provider 就依提供者對到廠商；對不到、沒帶、非 pi 一律維持原本的圖', () => {
+  const m = (engine, provider) => [{ key: 'H~p', member_kind: 'ai', kind: 'window', engine, ...(provider === undefined ? {} : { provider }) }]
+  assert.equal(speakerStates(m('pi', 'anthropic'))['H~p'].vendor, 'claude')
+  assert.equal(speakerStates(m('pi', 'openai'))['H~p'].vendor, 'gpt')
+  assert.equal(speakerStates(m('pi', 'deepseek'))['H~p'].vendor, 'deepseek')
+  assert.equal(speakerStates(m('pi', 'google'))['H~p'].vendor, 'gemini')
+  assert.equal(speakerStates(m('pi', 'some-unknown'))['H~p'].vendor, 'pi', '對不到維持 pi 的圖')
+  assert.equal(speakerStates(m('pi'))['H~p'].vendor, 'pi', '舊後台沒有 provider')
+  assert.equal(speakerStates(m('pi', 5))['H~p'].vendor, 'pi', '型別不對不信')
+  assert.equal(speakerStates(m('claude', 'openai'))['H~p'].vendor, 'claude', '只有 pi 才看提供者')
+})

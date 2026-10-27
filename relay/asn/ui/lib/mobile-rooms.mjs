@@ -17,6 +17,7 @@ export const isRoomChat = id => typeof id === 'string' && id.startsWith(ROOM_PRE
 export const roomIdOf = chatId => (isRoomChat(chatId) ? chatId.slice(ROOM_PREFIX.length) : '')
 
 import { mentionTargets } from './mention.mjs'
+import { modelVendorKey } from './vendor-icons.mjs'
 import { KIND_BADGE, kindOf, safeLabel, speakerAvatarSeed, speakerLabels } from './groups.mjs'
 
 const oneLine = (s, n) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n)
@@ -31,7 +32,10 @@ export function speakerStates(members) {
     if (!m || typeof m.key !== 'string' || !m.key) continue
     const ai = m.member_kind === 'ai' || (m.member_kind !== 'human' && (m.kind === 'window' || m.kind === 'ai'))
     if (!ai) continue
-    out[m.key] = { vendor: String(m.engine ?? '').trim().toLowerCase(), off: m.online === false }
+    // pi 只是執行殼：後台帶了提供者（provider）就用它對到廠商，對不到才維持 pi 的圖
+    const engine = String(m.engine ?? '').trim().toLowerCase()
+    const piVendor = engine === 'pi' && typeof m.provider === 'string' ? modelVendorKey(`${m.provider.trim()}/x`) : null
+    out[m.key] = { vendor: piVendor ?? engine, off: m.online === false }
   }
   return out
 }

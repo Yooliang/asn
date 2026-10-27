@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { PROMPT_TEXT_MAX, answerRequest, createTermPoller, folderName, kindTitle, promptKey, promptView, rowsOf, sentText, stateView, willSendText } from '../ui/lib/term-panel.mjs'
+import { BUSY_LONG_MIN, PROMPT_TEXT_MAX, SEND_MAX, UNLOCK_TEXT, WAIT_LONG_MIN, adoptRequest, answerRequest, candidateRows, createTermPoller, folderName, kindTitle, promptKey, promptView, rowsOf, sendConfirmView, sendDraftView, sendRequest, sentText, stateView, trackHeld, unlockRequest, willSendText } from '../ui/lib/term-panel.mjs'
 
 const MENU = { kind: 'menu', text: '要信任這個資料夾嗎？', options: [{ n: 2, label: 'No, quit' }, { n: 1, label: 'Yes, proceed' }] }
 
@@ -26,14 +26,20 @@ test('提示內容：選項依 n 排序、壞的丟掉、不重複；文字截�
   assert.deepEqual(promptView({ kind: 'unknown_prompt', text: '最後幾行' }).options, [], '解析不出選項＝空清單，只顯示文字')
 })
 
-test('送出：只有提示裡真的有的選項才產生請求，沒有預設選項；請求只含編號、提示種類、選項 n', () => {
+test('送出：只有提示裡真的有的選項才產生請求，沒有預設選項；請求含編號、提示種類、選項 n、原文與選項清單（給遠端確認雜湊）', () => {
   const pv = promptView(MENU)
-  assert.deepEqual(answerRequest('3', pv, 1), { id: '3', prompt_kind: 'menu', n: 1 })
-  assert.deepEqual(answerRequest('3', pv, 2), { id: '3', prompt_kind: 'menu', n: 2 })
+  assert.deepEqual(answerRequest('3', pv, 1), {
+    id: '3',
+    prompt_kind: 'menu',
+    n: 1,
+    prompt_text: pv.text,
+    options: pv.options.map(o => ({ n: o.n, label: o.label })),
+  })
+  assert.deepEqual(answerRequest('3', pv, 2)?.n, 2)
   for (const bad of [0, 3, -1, 1.5, '1', undefined, null, NaN]) assert.equal(answerRequest('3', pv, bad), null, String(bad))
   assert.equal(answerRequest('', pv, 1), null); assert.equal(answerRequest('3', null, 1), null)
   assert.equal(answerRequest('3', promptView({ kind: 'unknown_prompt', text: 'x' }), 1), null, '沒有選項的提示不能代答')
-  assert.deepEqual(Object.keys(answerRequest('3', pv, 1)).sort(), ['id', 'n', 'prompt_kind'])
+  assert.deepEqual(Object.keys(answerRequest('3', pv, 1)).sort(), ['id', 'n', 'options', 'prompt_kind', 'prompt_text'])
 })
 
 test('送出前後的說明：送前寫「第 n 項」與游標由 ASN 算，送後用後端回的按鍵描述', () => {
@@ -145,4 +151,141 @@ test('接線：終端清單按鈕只在有終端時出現；有等你回答的�
   const html = readUi('list.html')
   assert.ok(html.includes('v-if="terms.rows.length" title="終端"'))
   assert.ok(html.includes('v-if="terms.rows.some(r => r.prompt)"'))
+})
+
+// ---- ASN 替使用者往終端送字（#296）----
+const ROW = { id: '4', title: 'grok #4', folder: 'proj', cwd: 'D:\\work\\proj', state: 'idle' }
+
+test('送字草稿：空白、太長、終端在等你回答、沒有資料夾紀錄都不能送，並說明原因', () => {
+  assert.equal(sendDraftView(ROW, '請只回覆 OK').ok, true)
+  assert.equal(sendDraftView(ROW, '   \n ').ok, false)
+  assert.match(sendDraftView(ROW, '').reason, /請先寫/)
+  assert.match(sendDraftView(ROW, 'a'.repeat(SEND_MAX + 1)).reason, /太長/)
+  assert.equal(sendDraftView(ROW, 'a'.repeat(SEND_MAX)).ok, true)
+  assert.match(sendDraftView({ ...ROW, state: 'waiting_user' }, 'hi').reason, /等你回答/)
+  assert.match(sendDraftView({ ...ROW, cwd: '' }, 'hi').reason, /沒有工作資料夾/)
+  assert.equal(sendDraftView(null, 'hi').ok, false)
+  assert.equal(sendDraftView(ROW, 'a\nb').flattened, true, '多行會合成一行')
+  assert.equal(sendDraftView(ROW, 'a\n\n').flattened, false, '空行不算多行')
+})
+
+test('送字確認框：寫明送到哪個終端與資料夾、送什麼字、按不按 Enter；草稿不合格就沒有確認框', () => {
+  const v = sendConfirmView(ROW, '請只回覆 OK', true)
+  assert.equal(v.target, 'grok #4・proj')
+  assert.equal(v.text, '請只回覆 OK')
+  assert.match(v.note, /再按一次 Enter/)
+  assert.match(sendConfirmView(ROW, 'a\nb', false).note, /合成一行.*不按 Enter/)
+  assert.equal(sendConfirmView({ ...ROW, state: 'waiting_user' }, 'hi', true), null)
+  assert.equal(sendConfirmView(ROW, '', true), null)
+})
+
+test('送字請求：只有編號、文字、是否換行三個欄位；草稿不合格回 null；enter 只認 true', () => {
+  assert.deepEqual(sendRequest(ROW, 'hi', true), { id: '4', text: 'hi', enter: true })
+  assert.deepEqual(sendRequest(ROW, 'hi', false), { id: '4', text: 'hi', enter: false })
+  assert.equal(sendRequest(ROW, 'hi', 'yes').enter, false)
+  assert.deepEqual(Object.keys(sendRequest(ROW, 'hi', true)).sort(), ['enter', 'id', 'text'])
+  assert.equal(sendRequest(ROW, '  ', true), null)
+  assert.equal(sendRequest({ ...ROW, state: 'waiting_user' }, 'hi', true), null)
+})
+
+test('接線：term_send 只在 termSendConfirm 裡呼叫一次；只有「確認送出」按鈕觸發；「送出」只跳確認框，不送', () => {
+  const js = readUi('list.js'), html = readUi('list.html'), tauri = readUi('lib/tauri.mjs')
+  assert.equal(count(js, 'transport.termSend('), 1, '整支 list.js 只能有一處呼叫 termSend')
+  const at = js.indexOf('transport.termSend(')
+  const fnStart = js.lastIndexOf('async function termSendConfirm', at)
+  assert.ok(fnStart > 0 && js.indexOf('\n}\n', fnStart) > at, '那一處在 termSendConfirm 裡')
+  assert.ok(js.slice(fnStart, at).includes('sendRequest('), '送出前先過 sendRequest（草稿要合格）')
+  assert.equal((html.match(/termSendConfirm(?![A-Za-z])/g) ?? []).length, 1, '模板裡只有一個按鈕呼叫 termSendConfirm')
+  assert.equal(count(html, '@click="termSendConfirm"'), 1)
+  assert.ok(html.includes('@click="termSendAsk"') && html.includes('v-if="termSendConfirmView"'), '「送出」先開確認框')
+  const ask = js.slice(js.indexOf('function termSendAsk'), js.indexOf('function termSendBack'))
+  assert.ok(!ask.includes('termSend('), 'termSendAsk 不送字')
+  assert.ok(tauri.includes("termSend: req => invoke('term_send', { req })"))
+  assert.ok(html.includes('aria-label="要送進終端的文字"'))
+})
+
+// ---- 卡太久的提示 ----
+test('忙碌／等你回答太久：從第一次看到這個狀態起算，超過門檻才出字；狀態一變就重新起算；消失的列不留', () => {
+  const M = 60000, T0 = 1_000_000
+  const r = (id, state) => ({ id, state })
+  let t = trackHeld({}, [r('1', 'busy'), r('2', 'waiting_user'), r('3', 'idle')], T0)
+  assert.deepEqual(t.rows.map(x => x.held), ['', '', ''], '剛看到：沒有提示')
+  t = trackHeld(t.since, [r('1', 'busy'), r('2', 'waiting_user'), r('3', 'idle')], T0 + (WAIT_LONG_MIN - 1) * M)
+  assert.deepEqual(t.rows.map(x => x.held), ['', '', ''], '還沒到門檻')
+  t = trackHeld(t.since, [r('1', 'busy'), r('2', 'waiting_user'), r('3', 'idle')], T0 + WAIT_LONG_MIN * M + 5000)
+  assert.deepEqual(t.rows.map(x => x.held), ['', `已等你回答 ${WAIT_LONG_MIN} 分鐘`, ''], '等你回答先到門檻；閒置永遠不提示')
+  t = trackHeld(t.since, [r('1', 'busy'), r('2', 'waiting_user')], T0 + BUSY_LONG_MIN * M)
+  assert.equal(t.rows[0].held, `忙碌已 ${BUSY_LONG_MIN} 分鐘`)
+  assert.equal(t.since['3'], undefined, '消失的列從對照拿掉')
+  t = trackHeld(t.since, [r('1', 'idle'), r('2', 'waiting_user')], T0 + (BUSY_LONG_MIN + 1) * M)
+  assert.equal(t.rows[0].held, '', '狀態變了就不再提示')
+  t = trackHeld(t.since, [r('1', 'busy')], T0 + (BUSY_LONG_MIN + 2) * M)
+  assert.equal(t.rows[0].held, '', '又變回忙碌是重新起算')
+  assert.deepEqual(trackHeld(undefined, 'x', T0), { since: {}, rows: [] }, '壞資料不丟錯')
+  assert.equal(trackHeld({ 1: { state: 'busy', since: 'x' } }, [r('1', 'busy')], T0).rows[0].held, '', '對照壞掉就重新起算')
+})
+
+test('卡太久的提示：只有狀態與時間，不帶終端畫面文字；接線在輪詢更新裡', () => {
+  const t = trackHeld({}, [{ id: '1', state: 'waiting_user', prompt: { text: '機密畫面文字' } }], 0).rows[0]
+  assert.ok(!t.held.includes('機密'), '提示文字不含畫面內容')
+  const js = readUi('list.js'), html = readUi('list.html')
+  assert.ok(js.includes('trackHeld(termSince, raw, Date.now())'))
+  assert.ok(html.includes('class="term-held" v-if="r.held"'))
+})
+
+// ---- 接手使用者自己開的 WezTerm 窗格（#285，後端 #313）----
+const CAND = { pid: 4242, pane_id: 3, started_ms: 1700000000000, profile: 'grok', tab_title: 'my grok', cwd_raw: 'file://HOST/D:/work/proj%20x', cwd_authorized: true, version_verified: true, version_note: '', already_adopted: false }
+
+test('接手候選：欄位壞掉的丟掉；資料夾取最後一段（網址編碼會還原）；版本未驗證說明原因；已接手的不能再按', () => {
+  const rows = candidateRows([CAND, { ...CAND, pid: 0 }, { ...CAND, pane_id: -1 }, { ...CAND, started_ms: 'x' }, null, { ...CAND, profile: 3 }])
+  assert.equal(rows.length, 1)
+  assert.deepEqual([rows[0].key, rows[0].profile, rows[0].folder, rows[0].authorized, rows[0].canAdopt, rows[0].note], ['4242:3', 'grok', 'proj x', true, true, ''])
+  const un = candidateRows([{ ...CAND, version_verified: false, version_note: '版本不是 20240203', cwd_authorized: false }])[0]
+  assert.deepEqual([un.verified, un.note, un.authorized], [false, '版本不是 20240203', false])
+  assert.match(candidateRows([{ ...CAND, version_verified: false, version_note: '' }])[0].note, /只能讀取/, '沒有原因也要說只能讀')
+  assert.equal(candidateRows([{ ...CAND, already_adopted: true }])[0].canAdopt, false)
+  assert.equal(candidateRows([{ ...CAND, tab_title: 'a\u0000b\u001bc' }])[0].title, 'a b c', '控制字元不進畫面')
+  assert.deepEqual(candidateRows('壞的'), [])
+})
+
+test('接手請求：pid、窗格、建立時間原樣帶回；已接手或欄位壞的回 null', () => {
+  const row = candidateRows([CAND])[0]
+  assert.deepEqual(adoptRequest(row), { pid: 4242, pane_id: 3, started_ms: 1700000000000 })
+  assert.equal(adoptRequest({ ...row, canAdopt: false }), null)
+  assert.equal(adoptRequest(null), null)
+  assert.equal(adoptRequest({ ...row, started_ms: 0 }), null)
+  assert.deepEqual(Object.keys(adoptRequest(row)).sort(), ['pane_id', 'pid', 'started_ms'])
+})
+
+test('解鎖請求：只對已接手的窗格；一次只開被選的那一個，另一個維持關；不認得的種類回 null', () => {
+  const adopted = { id: '7', adopted: true }
+  assert.deepEqual(unlockRequest(adopted, 'answer'), { id: '7', allow_answer: true, allow_send: false })
+  assert.deepEqual(unlockRequest(adopted, 'send'), { id: '7', allow_answer: false, allow_send: true })
+  assert.equal(unlockRequest({ id: '7', adopted: false }, 'send'), null, '自己開的終端不需要也不能解鎖')
+  assert.equal(unlockRequest(adopted, 'both'), null)
+  assert.equal(unlockRequest(null, 'send'), null)
+  assert.match(UNLOCK_TEXT.send.ask, /確認送出/)
+  assert.match(UNLOCK_TEXT.answer.ask, /送出/)
+})
+
+test('清單：term_list 的 adopted 帶進列，沒有就是 false', () => {
+  const rows = rowsOf([{ id: '1', profile: 'grok', adopted: true, cwd: 'D:\a' }, { id: '2', profile: 'grok', cwd: 'D:\b' }])
+  assert.deepEqual(rows.map(r => r.adopted), [true, false])
+})
+
+test('接線：term_adopt_unlock 只在 adoptUnlockConfirm 裡呼叫一次、只有「允許」按鈕觸發（先跳確認）；term_adopt 只在 adoptDo；寫入開關預設關', () => {
+  const js = readUi('list.js'), html = readUi('list.html'), tauri = readUi('lib/tauri.mjs')
+  assert.equal(count(js, 'transport.termAdoptUnlock('), 1)
+  const at = js.indexOf('transport.termAdoptUnlock(')
+  const fnStart = js.lastIndexOf('async function adoptUnlockConfirm', at)
+  assert.ok(fnStart > 0 && js.indexOf('\n}\n', fnStart) > at, '那一處在 adoptUnlockConfirm 裡')
+  assert.ok(js.slice(fnStart, at).includes('unlockRequest('), '送出前先過 unlockRequest')
+  assert.equal((html.match(/adoptUnlockConfirm(?![A-Za-z])/g) ?? []).length, 1, '模板只有一個按鈕呼叫 adoptUnlockConfirm')
+  assert.equal((html.match(/adoptUnlockAsk\(r, /g) ?? []).length, 2, '兩個「允許…」按鈕都只是開確認框')
+  const ask = js.slice(js.indexOf('function adoptUnlockAsk'), js.indexOf('function adoptUnlockCancel'))
+  assert.ok(!ask.includes('termAdoptUnlock'), 'adoptUnlockAsk 不解鎖')
+  assert.equal(count(js, 'transport.termAdopt('), 1)
+  assert.ok(js.slice(js.lastIndexOf('async function adoptDo', js.indexOf('transport.termAdopt(')), js.indexOf('transport.termAdopt(')).includes('adoptRequest('))
+  assert.ok(/unlocked: \{\}/.test(js), '本機記下的解鎖狀態一開始是空的（全關）')
+  assert.ok(tauri.includes("termAdoptUnlock: req => invoke('term_adopt_unlock', { req })") && tauri.includes("termStop: req => invoke('term_stop', { req })"))
 })

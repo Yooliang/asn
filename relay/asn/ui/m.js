@@ -7,7 +7,7 @@ import { avatarSrc, isAvatarDataUrl, removeAvatarUpload, selfAvatarSrc, uploadAv
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { PROVIDERS, canStart, errorText, phaseText } from './lib/login.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
-import { BANNER_MS, DEFAULT_PREFS, TABS, TAB_LABEL, accountDisplayName, SWIPE_BLOCK_SELECTOR, inScrollableX, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, buttonLabel, initialNav, opsNav, acctNav, tabLabel as tabLabelOf, secretNav, initialUpdate, installOutcome, launchNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, vendorBadgeHtml, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
+import { BANNER_MS, DEFAULT_PREFS, TABS, TAB_LABEL, accountDisplayName, SWIPE_BLOCK_SELECTOR, inScrollableX, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, buttonLabel, initialNav, opsNav, acctNav, tabLabel as tabLabelOf, secretNav, termReqNav, initialUpdate, installOutcome, launchNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, vendorBadgeHtml, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
 import { LAUNCH_GIVE_UP_MS, LAUNCH_POLL_MS, appearedIn, buildLaunchRequest, initialLaunch, launchChoices, launchDevices, launchEligibility, launchErrorText, launchFormError, machinesByNode, progressView } from './lib/mobile-launch.mjs'
 import { OnboardCard } from './lib/onboard-card.mjs'
 import { MOBILE_PHASE_TEXT, createMobileCall } from './lib/mobile-call.mjs'
@@ -15,6 +15,7 @@ import { canDictate, createMobileDictation } from './lib/mobile-dictation.mjs'
 import { startCallPoll } from './lib/call-poll.mjs'
 import { ONBOARD_STORE, TEXT as ONBOARD_TEXT, checkName, markOnboarded, planOnboarding } from './lib/onboard.mjs'
 import { POLL_MS as SECRET_POLL_MS, TEXT as SECRET_TEXT, countdownText as secretCountdown, errorText as secretError, normalizeList as secretList, nextToAsk as secretNext, secretError as secretValidate } from './lib/secret-ask.mjs'
+import { POLL_MS as TQ_POLL_MS, TEXT as TERMREQ_TEXT, countdownText as tqCountdownText, decideArgs as tqDecideArgs, errorText as tqError, normalizeList as tqList, nextToAsk as tqNext } from './lib/term-ask.mjs'
 import { friendId } from './lib/roster.mjs'
 import { restoreMobileTab } from './lib/session.mjs'
 import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, showsInSheet } from './lib/mobile-ops.mjs'
@@ -670,6 +671,39 @@ const app = createApp({
     document.addEventListener('visibilitychange', () => { void checkSecrets() })
     setInterval(() => { void checkSecrets() }, SECRET_POLL_MS)
     void listen('relay-bell', () => { void checkSecrets() })
+    // ---------- 電腦要往終端送字／代答提問（#285、#296）：跳出確認面板，本人按確認或拒絕；桌面才能建立請求，手機只能決定 ----------
+    // 預覽文字只給本人看（不寫儲存、不進 console）；沒登入或後台還沒部署就靜默略過；通知只敲門鈴，不帶內容
+    const tq = reactive({ cur: null, choice: null, error: '', busy: false, left: 0 })
+    const tqDismissed = new Set()
+    let tqTimer = 0
+    const tqCountdown = computed(() => tqCountdownText(tq.left))
+    const tqClose = () => { clearInterval(tqTimer); tq.cur = null; tq.choice = null; tq.busy = false }
+    const tqDeviceName = node => friends.value.find(f => f.node === node && f.device)?.device ?? ''
+    async function checkTermReqs() {
+      if (tq.busy || tq.cur || sec.cur || nav.sheet || !acct.value.signed_in || document.visibilityState !== 'visible') return
+      let list
+      try { list = tqList(await invoke('android_term_req_list'), tqDeviceName) } catch { return }
+      const next = tqNext(list, tqDismissed)
+      if (!next || nav.sheet) return
+      Object.assign(tq, { cur: next, choice: null, error: '', busy: false, left: next.secondsLeft })
+      clearInterval(tqTimer)
+      tqTimer = setInterval(() => { if (tq.left > 0) tq.left -= 1; else { tqDismissed.add(tq.cur?.id); history.back() } }, 1000)
+      go(termReqNav())
+    }
+    async function decideTermReq(decision) {
+      const cur = tq.cur
+      if (!cur || tq.busy) return
+      const args = tqDecideArgs(cur, decision, tq.choice)
+      if (!args) { tq.error = TERMREQ_TEXT.pickFirst; return }
+      tq.busy = true; tq.error = ''
+      try { await invoke('android_term_req_decide', { id: args.id, decision: args.decision, choiceN: args.choiceN, hash: args.hash }); history.back() }
+      catch (e) { tq.error = tqError(e); tq.busy = false }
+    }
+    const laterTermReq = () => { if (tq.cur) tqDismissed.add(tq.cur.id); history.back() }
+    watch(() => nav.sheet, s => { if (s !== 'termreq' && tq.cur) tqClose() })
+    document.addEventListener('visibilitychange', () => { void checkTermReqs() })
+    setInterval(() => { void checkTermReqs() }, TQ_POLL_MS)
+    void listen('relay-bell', () => { void checkTermReqs() })
     // 名單第三行「最後一句話」：本機有記錄就用；沒有的（例如剛裝）向後台補一次往來（每位最多一次、依畫面順序、慢慢來、整個執行期有上限），補到的記錄存在本機當快取
     const lastOf = id => lastMap[id] ?? ''
     const backfillTried = new Set()
@@ -825,6 +859,7 @@ const app = createApp({
       pf, sw, pagerStyle, indicator, swipeStart, swipeMove, swipeEnd, goTab, TABS, TAB_LABEL, tabLabel, myName, meForChat, lastOf, vendorIcon: vendorBadgeHtml,
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, headTone, CONN_LABEL, info, banner, shake, refreshing,
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
+      tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, opsView, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       acctSw, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctHeaderBack, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, ACCT_PAGE_TITLE, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchStep2, lchRun, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,

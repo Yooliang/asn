@@ -776,6 +776,14 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .term-opt{text-align:left;justify-content:flex-start}
 .term-rows{list-style:none;margin:6px 0;padding:0}
 .term-row{display:flex;gap:10px;align-items:center;padding:4px 2px;border-bottom:1px solid var(--line);font-size:13px}
+.term-row-wrap{list-style:none;border-bottom:1px solid var(--line)}
+.term-row-wrap .term-row{border-bottom:0}
+.term-send-btn{flex:none;padding:2px 10px}
+.term-held{font-size:12px;color:#b45f06}
+.term-adopted{font-size:12px;color:#1b6ac9}
+.term-adopt-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:2px 2px 8px}
+.term-send{display:flex;flex-direction:column;gap:6px;padding:4px 2px 8px}
+.term-send textarea{width:100%;box-sizing:border-box;resize:vertical}
 .term-folder{color:var(--muted,#666);font-size:12px}
 .term-state{margin-left:auto;font-size:12px}
 .term-state.tone-warn{color:#b45f06;font-weight:700}

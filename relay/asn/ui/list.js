@@ -28,7 +28,7 @@ import { normalizeSession, restoreSession, sameSession, snapshotSession, trailin
 import { chatTabSameZone, closeAllChatTabs, closeIdleChatTabs, idleTabIds, withCallState, dropInsertBefore, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
 import { nowPlayingLine, normalizeNowPlaying } from './lib/now-playing.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, normalizeClose, normalizeFrame, totalUnread, notifyFromSaved, notifyPlan, notifyWith } from './lib/prefs.mjs'
-import { answerRequest, createTermPoller, promptKey, sentText, willSendText } from './lib/term-panel.mjs'
+import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { MODEL_CATALOG, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
 import { PI_SETUP_TEXT, piSetupError, piSetupView } from './lib/pi-setup.mjs'
@@ -898,6 +898,12 @@ const termPrompt = computed(() => {
 })
 const termWill = computed(() => willSendText(termPrompt.value?.pv, terms.selected))
 watch(() => termPrompt.value?.key, () => { terms.selected = 0; terms.error = ''; terms.note = '' })
+watch(() => termPrompt.value, p => {
+  if (!p?.row?.id || !p.pv) return
+  const req = answerRequest(p.row.id, p.pv, p.pv.options[0]?.n ?? 1)
+  if (!req) return
+  void invoke('term_remote_offer_answer', { req }).catch(() => {})
+}, { immediate: true })
 function termPick(n) { terms.selected = n; terms.error = '' }
 function termDismiss() { const p = termPrompt.value; if (p) terms.dismissed[p.key] = true }   // 「我自己在視窗裡處理」：只關框，不送任何鍵
 async function termConfirm() {
@@ -911,10 +917,64 @@ async function termConfirm() {
     void termPoller?.tickNow()
   } catch (e) { terms.error = String(e?.message ?? e) } finally { terms.busy = false }
 }
+// ASN 替使用者往終端送字（#296）：寫文字 → 按「送出」→ 確認框 → 按「確認送出」才呼叫 term_send（termSendConfirm 是唯一呼叫處）。
+const termSend = reactive({ id: '', text: '', enter: true, confirming: false, busy: false, error: '', note: '' })
+const termSendRow = computed(() => terms.rows.find(r => r.id === termSend.id) ?? null)
+const termSendDraft = computed(() => sendDraftView(termSendRow.value, termSend.text))
+const termSendConfirmView = computed(() => (termSend.confirming ? sendConfirmView(termSendRow.value, termSend.text, termSend.enter) : null))
+function termSendOpen(row) { termSend.id = termSend.id === row.id ? '' : row.id; termSend.text = ''; termSend.confirming = false; termSend.error = ''; termSend.note = '' }
+function termSendAsk() { if (termSendDraft.value.ok) { termSend.confirming = true; termSend.error = '' } }   // 只是跳出確認框，不送
+function termSendBack() { termSend.confirming = false }
+async function termSendConfirm() {
+  const req = sendRequest(termSendRow.value, termSend.text, termSend.enter)
+  if (!req || termSend.busy) return
+  termSend.busy = true; termSend.error = ''
+  try {
+    await transport.termSend(req)
+    termSend.note = '已送出'; termSend.text = ''; termSend.confirming = false
+    void termPoller?.tickNow()
+  } catch (e) { termSend.error = String(e?.message ?? e); termSend.confirming = false } finally { termSend.busy = false }
+}
+// 接手使用者自己開的 WezTerm 窗格（#285）：列候選 → 按「接手」→ 預設唯讀；兩個寫入開關各自要使用者逐窗格確認後才開（termAdoptUnlockConfirm 是 term_adopt_unlock 唯一呼叫處）
+const adopt = reactive({ open: false, loading: false, rows: [], error: '', note: '', busy: '', unlockAsk: null, unlocked: {} })
+async function adoptLoad() {
+  adopt.open = true; adopt.loading = true; adopt.error = ''; adopt.note = ''
+  try { adopt.rows = candidateRows(await transport.termAdoptCandidates()) } catch (e) { adopt.rows = []; adopt.error = String(e?.message ?? e) } finally { adopt.loading = false }
+}
+function adoptClose() { adopt.open = false; adopt.unlockAsk = null }
+async function adoptDo(row) {
+  const req = adoptRequest(row)
+  if (!req || adopt.busy) return
+  adopt.busy = row.key; adopt.error = ''; adopt.note = ''
+  try {
+    await transport.termAdopt(req)
+    adopt.note = `已接手 ${row.profile}${row.folder ? `・${row.folder}` : ''}（預設只能看，不能代答或代送）`
+    void termPoller?.tickNow()
+    adopt.rows = candidateRows(await transport.termAdoptCandidates())
+  } catch (e) { adopt.error = String(e?.message ?? e) } finally { adopt.busy = '' }
+}
+async function adoptRelease(row) {   // 解除接手：後端只是忘掉它，不結束那個程式
+  if (!row?.adopted || adopt.busy) return
+  adopt.busy = row.id; adopt.error = ''
+  try { await transport.termStop({ id: row.id }); delete adopt.unlocked[row.id + ':answer']; delete adopt.unlocked[row.id + ':send']; adopt.note = '已解除接手（那個視窗沒有被關掉）'; void termPoller?.tickNow() } catch (e) { adopt.error = String(e?.message ?? e) } finally { adopt.busy = '' }
+}
+function adoptUnlockAsk(row, kind) { adopt.unlockAsk = unlockRequest(row, kind) ? { id: row.id, kind, text: UNLOCK_TEXT[kind].ask, title: row.title } : null; adopt.error = '' }
+function adoptUnlockCancel() { adopt.unlockAsk = null }
+async function adoptUnlockConfirm() {
+  const a = adopt.unlockAsk
+  const req = a ? unlockRequest(terms.rows.find(r => r.id === a.id), a.kind) : null
+  if (!req || adopt.busy) return
+  adopt.busy = a.id; adopt.error = ''
+  try { await transport.termAdoptUnlock(req); adopt.unlocked[`${a.id}:${a.kind}`] = true; adopt.unlockAsk = null } catch (e) { adopt.error = String(e?.message ?? e); adopt.unlockAsk = null } finally { adopt.busy = '' }
+}
 // 沒有終端或舊版後端（沒有這幾個命令）時 term_list 會失敗，靜默略過；截圖模式不輪詢
+let termSince = {}
 const termPoller = info.shot ? null : createTermPoller({
   transport,
-  onUpdate: rows => {
+  onUpdate: raw => {
+    const t = trackHeld(termSince, raw, Date.now())   // 忙碌／等你回答太久的提示（只有狀態與時間）
+    termSince = t.since
+    const rows = t.rows
     terms.rows = rows
     const live = new Set(rows.filter(r => r.prompt).map(r => promptKey(r.id, r.prompt)))
     for (const k of Object.keys(terms.dismissed)) if (!live.has(k)) delete terms.dismissed[k]   // 提示消失了就忘掉「我自己處理」，下次同樣的提示再跳
@@ -1313,6 +1373,8 @@ const app = createApp({
       searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickLaunchDevice,
       DISPLAY_MODES, partnerShowDisplay, partnerRun,
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
+      termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termSendAsk, termSendBack, termSendConfirm, SEND_MAX,
+      adopt, adoptLoad, adoptClose, adoptDo, adoptRelease, adoptUnlockAsk, adoptUnlockCancel, adoptUnlockConfirm, UNLOCK_TEXT,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
       opDlg, closeOpDlg, buddyOpItems, openPartnerOp, archiveNote, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,

@@ -114,6 +114,27 @@ pub async fn android_acct_status(app: State<'_, App>, ids: Vec<String>) -> Resul
     relay_of(&app)?.acct_switch_status(&ids).await
 }
 
+// ---------- 電腦要往終端送字／代答提問的確認（#285、#296；後台 term_req_list／term_req_decide，要本人簽章；桌面才能建立請求，手機只能決定） ----------
+
+/// 待確認的終端請求（哪台電腦、哪個終端與資料夾、預覽前 200 字、有沒有 Enter、選項、雜湊、到期時間）。要本人簽章；沒登入回錯，不打後台。回 { requests: [...] }
+#[tauri::command]
+pub async fn android_term_req_list(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>) -> Result<serde_json::Value, String> {
+    let r = relay_of(&app)?;
+    let token = crate::account::signing_token(&auth).await;
+    let Some(t) = token.as_deref().filter(|t| !t.is_empty()) else { return Err("尚未登入，不能確認終端請求".into()) };
+    r.api_signed("term_req_list", None, Some(t)).await
+}
+
+/// 本人按了確認或拒絕：欄位先在這裡檢查（編號、決定、雜湊、選項）才送；雜湊由桌面算、原樣帶回，後台比對。要本人簽章；沒登入回錯，不打後台
+#[tauri::command]
+pub async fn android_term_req_decide(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>, id: String, decision: String, choice_n: Option<i64>, hash: String) -> Result<serde_json::Value, String> {
+    let body = crate::relay::build_term_decide_body(&id, &decision, choice_n, &hash)?;
+    let r = relay_of(&app)?;
+    let token = crate::account::signing_token(&auth).await;
+    let Some(t) = token.as_deref().filter(|t| !t.is_empty()) else { return Err("尚未登入，不能確認終端請求".into()) };
+    r.api_signed("term_req_decide", Some(body), Some(t)).await
+}
+
 // ---------- 遠端密碼請求的確認（#26 第二期；別台電腦／雲端代理要密碼，由手機本人確認；設計見 docs/design/SECRET-REMOTE.md） ----------
 
 /// 待確認的密碼請求（哪台電腦、哪個程式、要做什麼、公鑰指紋、剩幾秒；沒有任何機密）。要本人簽章；沒登入回錯，不打後台。回 { requests: [...] }

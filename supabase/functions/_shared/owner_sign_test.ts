@@ -45,8 +45,8 @@ Deno.test("relay 的 send 與 room_post 接上本人簽章，且在節點金鑰�
   assertEquals(/asn_relay_room_post: "asn_relay_room_post"/.test(groups) && groups.includes("p_signed_user: signed"), true);
 });
 
-Deno.test("簽章標頭只在 send／room_post／launch／launchers／partner_op／partner_ops／secret_pending／secret_reply／acct_list／acct_switch／read_sync／群組動作（group_*）讀取；room_read／room_list 也帶（其他動作不碰）", async () => {
+Deno.test("簽章標頭只在 send／room_post／launch／launchers／partner_op／partner_ops／secret_pending／secret_reply／acct_list／acct_switch／term_req_list／term_req_decide／read_sync／群組動作（group_*）讀取；room_read／room_list 也帶（其他動作不碰）", async () => {
   const src = await Deno.readTextFile(new URL("../relay/index.ts", import.meta.url));
-  assertEquals(src.split("signedUserId(").length - 1, 8); // send、room_post／room_read／room_list、遠端開視窗（launch／launchers）、管理夥伴視窗（partner_op／partner_ops）、遠端密碼確認（secret_pending／secret_reply）、手機切帳號（acct_list／acct_switch）、已讀同步（read_sync）、真人群組動作（group_*）
-  assertEquals(src.split("SIGN_HEADER").length - 1, 12); // 匯入一次、十一處讀取（send、room_post／read／list、chat_history、partner_succeed、partner_list、launch／launchers、partner_op／partner_ops、secret_pending／secret_reply、acct_list／acct_switch、read_sync、group_*）
+  assertEquals(src.split("signedUserId(").length - 1, 9); // send、room_post／room_read／room_list、遠端開視窗（launch／launchers）、管理夥伴視窗（partner_op／partner_ops）、遠端密碼確認（secret_pending／secret_reply）、手機切帳號（acct_list／acct_switch）、手機確認終端請求（term_req_list／term_req_decide）、已讀同步（read_sync）、真人群組動作（group_*）
+  assertEquals(src.split("SIGN_HEADER").length - 1, 13); // 匯入一次、十一處讀取（send、room_post／read／list、chat_history、partner_succeed、partner_list、launch／launchers、partner_op／partner_ops、secret_pending／secret_reply、acct_list／acct_switch、read_sync、group_*）
 });
