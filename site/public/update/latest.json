@@ -1,11 +1,11 @@
 {
-  "version": "0.1.97",
-  "notes": "修正：開新夥伴的「經 pi」在本機一直反灰、說沒偵測到 pi，連帶 DeepSeek、MiniMax 也選不到；現在裝了 pi 就能選（#414）。改進：asn-cli who 會列出背景運行的夥伴，並標「背景運行」（#413）。",
-  "pub_date": "2026-10-27T16:50:18.568Z",
+  "version": "0.1.98",
+  "notes": "新增：pi 視窗可以從名單「關閉」，只結束那個 pi 和它的子程序，使用者自己開的會留下終端機（#416）。改進：pi 正在忙時切換模型改成排隊，做完這一輪就換；pi 的 ASN 擴充太舊沒回應時不再之後悄悄生效（#235）。改進：主視窗的記錄另外寫進機器資料夾的 ui.log，事後查得到；離線時代收的舊信一次很多封時只跳一則提示（#339）。",
+  "pub_date": "2026-10-27T21:27:12.509Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjh4QTFOTUxkVUhGWDd5dWNreVVMbU9ob2VjY3E5VFNLcVZUMVhEMy81Ly9JL0xYZU4wcjFIRU5OMlZnYUNzMkFUd0V5c2dROWtuanoxY2xRU2lqNkFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMTE5ODE4CWZpbGU6QVNOXzAuMS45N194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjk3CjNrS2FMUi9MMGRyU2R5aEFQeHFPVEVjbXJEcHFxQVVMZzBPUythZHZZZnBIYk5Xa0dZUGFQa1hRd2lpREI4T2IrUjU5ZytQU0luaDk1RjY4NG9udUJnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.97_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnlkU0NVczZwTFNMZGhOTEpQd0Y0Vk9wSlU1QUV6QkVQYW5VWXp1cW9ZUjQwN2o1R05WYnI3dUlpbm1leDdWbnovaUN3RnVuRTBCSlA1cXdiQ0QybHdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMTM2NDMyCWZpbGU6QVNOXzAuMS45OF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjk4CnJYSmZ6TStMQWtUamx3ajRJbEMvNzZWc3gxVVc1RHFwSE1EMStIdkNkS2M3MCtLWXd6NEVTend1RGl0cmdvdnJYeXM0OWppMXc3dkZLbnNHQU56VkN3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.98_x64-setup.exe"
     }
   }
 }
