@@ -1,20 +1,19 @@
 # 下載區：固定網址、用途、安裝步驟、發版
 
-下載頁 `web/download/index.html` **不放任何下載連結**（`tests/test_landing.py` 的規則：開放下載前不放 github／.apk）。
-要給人的時候，把下面的固定網址直接傳給對方。檔案放在 Supabase Storage 公開 bucket `downloads`，
-`firebase.json` 用 302 轉址，所以**更新檔案不用重新部署網頁**。
+下載檔放在 ASN 自己的網站（Firebase Hosting，`site/public/download/`），固定網址在 `https://asnmessenger.web.app/download/`。
+二進位檔**不進 git**（`.gitignore` 擋掉），發版時由 `tools/release/build_downloads.mjs` 產生到那個資料夾，再 `firebase deploy`；
+不再用 Supabase Storage，也不需要 service_role。要給人的時候，把下面的固定網址直接傳給對方。
 
-| 網址 | 內容 | 轉到 |
-|---|---|---|
-| `https://irori.web.app/download/irori.apk` | 手機 App | `…/storage/v1/object/public/downloads/irori.apk` |
-| `https://irori.web.app/download/irori-tv.apk` | 電視 App | `…/downloads/irori-tv.apk` |
-| `https://irori.web.app/download/asn-windows.zip` | Windows 小程式（收發室橋＋安裝程式，新檔名） | `…/downloads/asn-windows.zip` |
-| `https://irori.web.app/download/irori-windows.zip` | 同上，**舊檔名保留**：內容與 asn-windows.zip 完全相同，舊連結仍可下載（D10） | `…/downloads/irori-windows.zip` |
-| `https://irori.web.app/download/downloads.json` | 各檔版本（git 短 sha＋日期）、大小、sha256 | `…/downloads/downloads.json` |
-| `https://irori.web.app/relay/SKILL.md` | Claude Code skill「asn-relay」本體（舊名 irori-relay，已安裝的人不受影響） | 網頁本身（不經轉址） |
-| `https://irori.web.app/relay/INSTALL.txt` | 「安裝 skill」用的話，貼給 Claude Code | 網頁本身 |
+| 網址 | 內容 |
+|---|---|
+| `https://asnmessenger.web.app/download/asn-windows.zip` | Windows 小程式（收發室橋＋安裝程式） |
+| `https://asnmessenger.web.app/download/irori-windows.zip` | 同上，**舊檔名保留**：內容與 asn-windows.zip 完全相同，舊連結仍可下載（D10） |
+| `https://asnmessenger.web.app/download/downloads.json` | 各檔版本（git 短 sha＋日期）、大小、sha256（不快取） |
+| `https://irori.web.app/download/asn-windows.zip`、`…/irori-windows.zip`、`…/downloads.json` | 舊連結：目前仍指到舊後台的 Storage；移除舊後台（F6）之前會改成轉到上面的新網址 |
+| `https://irori.web.app/relay/SKILL.md`、`…/INSTALL.txt` | Claude Code skill「asn-relay」本體與安裝話術，在 Irori 網站，本文件不管 |
 
-Storage 的基底：`https://hwtahctsgjcemtwzlvnq.supabase.co/storage/v1/object/public/downloads/`。
+手機 APK 不放這裡：在 `/update/`（`https://asnmessenger.web.app/update/android.json` 會給出目前的檔名）。
+Irori 的手機／電視 App（`irori.apk`、`irori-tv.apk`）是 Irori 自己的，不在 ASN 的下載區。
 
 ## 1. Windows 小程式（asn-windows.zip；舊檔名 irori-windows.zip 仍同步產出）
 
@@ -71,32 +70,16 @@ skill 本體 `web/relay/SKILL.md` 已公開在 `https://irori.web.app/relay/SKIL
 Windows 小程式（`relay/machine/` 或 `relay/machine/installer/` 有改動時）：
 
 ```
-node tools/release/build_downloads.mjs              # 輸出到 %TEMP%\asn-downloads\：asn-windows.zip、irori-windows.zip（同內容舊檔名）、downloads.json
+node tools/release/build_downloads.mjs              # 輸出到 site/public/download/：asn-windows.zip、irori-windows.zip（同內容舊檔名）、downloads.json
+cd site && npx firebase-tools deploy --only hosting  # 部署（很慢，丟背景跑）
 ```
 
-（要把 APK 也列進 `downloads.json`：加 `--include <路徑>\irori.apk`，可重複。）打包前先 commit——工作樹有未提交的
-`relay/machine` 變動時版本會標 `-dirty`。同一個 commit 打兩次，zip 的 sha256 相同。
+打包前先 commit——工作樹有未提交的 `relay/machine` 變動時版本會標 `-dirty`。同一個 commit 打兩次，zip 的 sha256 相同。
+產出的 zip 與 `downloads.json` 不進 git（`.gitignore`），所以**換一台電腦發版要重新產生再部署**；`--out <資料夾>` 可改輸出位置，
+`--include <檔案>` 可把其他檔案（可重複）也列進 `downloads.json`。
 
-上傳（service_role 用 `npx supabase projects api-keys --project-ref hwtahctsgjcemtwzlvnq -o json` 取，**不要印出、不要進 repo**；
-`x-upsert: true` 覆蓋舊檔）：
-
-```
-curl -sS -X POST "https://hwtahctsgjcemtwzlvnq.supabase.co/storage/v1/object/downloads/asn-windows.zip" \
-  -H "Authorization: Bearer $SERVICE_KEY" -H "x-upsert: true" -H "Content-Type: application/zip" \
-  --data-binary @"$TEMP/asn-downloads/asn-windows.zip"
-curl -sS -X POST "https://hwtahctsgjcemtwzlvnq.supabase.co/storage/v1/object/downloads/irori-windows.zip" \
-  -H "Authorization: Bearer $SERVICE_KEY" -H "x-upsert: true" -H "Content-Type: application/zip" \
-  --data-binary @"$TEMP/asn-downloads/irori-windows.zip"
-curl -sS -X POST "https://hwtahctsgjcemtwzlvnq.supabase.co/storage/v1/object/downloads/downloads.json" \
-  -H "Authorization: Bearer $SERVICE_KEY" -H "x-upsert: true" -H "Content-Type: application/json" \
-  --data-binary @"$TEMP/asn-downloads/downloads.json"
-```
-
-**不用重新部署網頁**（轉址規則在 `firebase.json`；新增檔名 `asn-windows.zip` 時要先在轉址表加一條 `/download/asn-windows.zip` 並部署一次，舊的 `irori-windows.zip` 那條不要刪）。bucket 的 `allowed_mime_types`
-要含 `application/zip`（原本只有 apk 與 json）。上傳後驗證：`curl -sIL https://irori.web.app/download/asn-windows.zip`
-應該 302 → 200，大小與 `downloads.json` 一致；Storage 公開物件有 CDN 快取，剛覆蓋後可能要等一下才看到新版。
-
-手機／電視 APK：在 `android/` 跑 `./gradlew assemblePhoneDebug assembleTvDebug`，發版後上傳到同一個 bucket 的 `downloads/irori.apk`、`irori-tv.apk`（`x-upsert: true`）。
+上傳後驗證：`curl -sI https://asnmessenger.web.app/download/asn-windows.zip` 應該是 200、`content-type: application/zip`，
+大小與 `downloads.json` 一致；`downloads.json` 的標頭是 `no-cache`。
 
 ## 4. 測試
 
