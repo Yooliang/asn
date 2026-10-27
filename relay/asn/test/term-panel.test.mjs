@@ -147,10 +147,14 @@ test('接線：提示框有選項清單（逐項按鈕）、說明「將選擇�
   assert.ok(!dismiss.includes('termAnswer') && !dismiss.includes('transport.'), '「我自己處理」不送任何東西')
 })
 
-test('接線：終端清單按鈕只在有終端時出現；有等你回答的終端時顯示提醒點', () => {
+test('接線：終端入口併進「＋」選單（#349）；有終端等你回答時「＋」上有紅點、選單可直接跳過去', () => {
   const html = readUi('list.html')
-  assert.ok(html.includes('class="search-ic term-ic" type="button" title="終端"'))
-  assert.ok(html.includes('v-if="terms.rows.some(r => r.prompt)"'))
+  const js = readUi('list.js')
+  assert.ok(!html.includes('term-ic'), '搜尋列不再有終端按鈕')
+  assert.ok(html.includes('class="search-ic plus-btn"') && html.includes('<span class="term-badge" v-if="termWaitCount"'), '「＋」上的紅點')
+  const menu = html.slice(html.indexOf('class="av-menu launch-picker"'), html.indexOf('</ul>', html.indexOf('class="av-menu launch-picker"')))
+  for (const s of ['@click="openWaitingTerm"', '@click="openTermStart"', 'adoptLoad()', 'groupFlow.openCreate()', 'groupFlow.openJoin()']) assert.ok(menu.includes(s), `「＋」選單缺 ${s}`)
+  assert.ok(js.includes("const termWaitCount = computed(() => terms.rows.filter(r => r.state === 'waiting_user').length)"))
 })
 
 // ---- ASN 替使用者往終端送字（#296）----

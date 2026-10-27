@@ -64,6 +64,10 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .nick-err{font-size:11px;color:var(--busy)}
 .me-np{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .psm-input{font-size:12px;color:var(--muted);font-style:italic}
+.me-psm-row{display:flex;align-items:center;gap:4px}.me-psm-row .psm-input{flex:1;min-width:0}   /* 個人訊息右邊放「＋」（#349） */
+.plus-btn{position:relative;width:22px;height:22px}
+.launch-picker .menu-head{padding:3px 8px 1px;font-size:11px;color:var(--muted);cursor:default}
+.launch-picker .menu-warn{color:#c0392b;font-weight:600}
 .search{padding:6px 8px;border-bottom:1px solid var(--line);background:var(--panel-soft)}
 .search{display:flex;gap:4px;align-items:center}
 .search input{flex:1;min-width:0;width:100%;border:1px solid var(--line);border-radius:3px;padding:4px 8px;background:var(--panel)}

@@ -36,7 +36,11 @@
             <option v-for="(label, key) in STATUS" :key="key" :value="key">({{ label }})</option>
           </select>
         </div>
-        <input class="ghost psm-input" v-model="me.psm" maxlength="60" placeholder="&lt;輸入個人訊息&gt;" aria-label="個人訊息">
+        <div class="me-psm-row">
+          <input class="ghost psm-input" v-model="me.psm" maxlength="60" placeholder="&lt;輸入個人訊息&gt;" aria-label="個人訊息">
+          <!-- 「＋」（#349）：新增夥伴、開終端／接手、等你回答的終端、建立／加入群組；有終端在等你回答時右上角紅點 -->
+          <button class="search-ic plus-btn" type="button" :title="termWaitCount ? `新增（${termWaitCount} 個終端等你回答）` : '新增'" :aria-label="termWaitCount ? `新增，${termWaitCount} 個終端等你回答` : '新增'" @click.stop="openLaunchPicker"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg><span class="term-badge" v-if="termWaitCount" aria-hidden="true">{{ termWaitCount }}</span></button>
+        </div>
         <div class="me-np" v-if="nowPlayingText" role="status">{{ nowPlayingText }}</div>
         <div class="nick-err" v-if="nickErr" role="alert">{{ nickErr }}</div>
         <div class="av-note" v-if="avMsg" role="status">{{ avMsg }}</div>
@@ -80,8 +84,6 @@
           <div class="search">
             <input ref="searchInput" v-model="query" placeholder="搜尋聯絡人..." aria-label="搜尋聯絡人">
             <button class="search-ic" type="button" title="搜尋" aria-label="搜尋" @click="focusSearch"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
-            <button class="search-ic" type="button" title="開新夥伴" aria-label="開新夥伴" @click.stop="openLaunchPicker"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>
-            <button class="search-ic term-ic" type="button" title="終端" aria-label="終端" @click.stop="terms.open ? termsClose() : (terms.open = true)"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 10l3 2-3 2M12 15h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="term-badge" v-if="terms.rows.some(r => r.prompt)" aria-hidden="true">!</span></button>
           </div>
           <p class="archive-note" v-if="archiveNote" role="status">{{ archiveNote }}</p>
           <div class="list">
@@ -340,11 +342,19 @@
     </div>
   </asn-dialog>
   <ul class="av-menu launch-picker" v-if="launchPicker" :style="{ left: launchPickerPos.x + 'px', top: launchPickerPos.y + 'px' }" role="menu" @click.stop>
+    <li class="menu-head" role="presentation">新增夥伴</li>
     <li v-for="d in launchDeviceRows" :key="d.key">
       <button type="button" role="menuitem" :class="{ off: launchDisableReason(d.key) }" :disabled="!!launchDisableReason(d.key)" :title="launchDisableReason(d.key) || d.label" @click="pickLaunchDevice(d.key)">{{ d.label }}<span class="launch-why" v-if="launchDisableReason(d.key)">{{ launchDisableReason(d.key) }}</span></button>
     </li>
     <li class="menu-sep" role="separator"></li>
+    <li class="menu-head" role="presentation">終端</li>
+    <li v-if="termWaitCount"><button type="button" role="menuitem" class="menu-warn" @click="openWaitingTerm">{{ termWaitCount }} 個終端等你回答</button></li>
     <li><button type="button" role="menuitem" @click="openTermStart">在這台開終端…</button></li>
+    <li><button type="button" role="menuitem" @click="closeLaunchPicker(); adoptLoad()">接手已開著的終端視窗…</button></li>
+    <li class="menu-sep" role="separator"></li>
+    <li class="menu-head" role="presentation">群組</li>
+    <li><button type="button" role="menuitem" @click="closeLaunchPicker(); groupFlow.openCreate()">建立群組…</button></li>
+    <li><button type="button" role="menuitem" @click="closeLaunchPicker(); groupFlow.openJoin()">加入群組…</button></li>
   </ul>
   <!-- 在這台開終端（#331）：只開 grok／agy；按「開啟」才呼叫 term_start，開好直接打開它的分頁 -->
   <asn-dialog v-if="termStartDlg.open" title="在這台開終端" @close="closeTermStart">
