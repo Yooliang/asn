@@ -211,6 +211,9 @@ pub fn start_with(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>, laun
     };
     if cfg.engines_pi_added {
         log.line("engines: 舊名 IRORI_ENGINES 的清單沒列 pi（那時還沒有 pi），自動載入 pi；要關掉 pi 請改設 ASN_ENGINES");
+    } else if !engines::want_pi(cfg.engines.as_deref()) {
+        // 名單上只說「這台的設定把 pi 關掉了」，是哪個設定記在這裡
+        log.line("engines: ASN_ENGINES 沒列 pi，不載入 pi 視窗（名單上的前景 pi 會標「這台的設定把 pi 關掉了」）");
     }
     let engine_set = engines::build(&ectx, cfg.engines.as_deref());
     if let Some(e) = &engine_set {

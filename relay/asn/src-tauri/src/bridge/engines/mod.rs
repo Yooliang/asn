@@ -354,7 +354,8 @@ pub fn pi_unregistered_detail(pi_loaded: bool) -> &'static str {
         PI_DISABLED
     }
 }
-pub const PI_DISABLED: &str = "pi 被設定關掉了（ASN_ENGINES），收不到信、不能改名";
+// 畫面上的字不寫變數名（留在 log）：pi 那段沒載入＝ASN_ENGINES 沒列 pi
+pub const PI_DISABLED: &str = "這台的設定把 pi 關掉了，收不到信、不能改名";
 pub const PI_NOT_REGISTERED: &str = "這個 pi 沒有登記到 ASN：沒裝 ASN 的 pi 擴充，或 pi 版本和擴充不相容";
 
 /// 依設定建引擎集合；沒有任何非 Claude 引擎回 None
