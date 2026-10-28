@@ -89,6 +89,11 @@ pub(crate) fn message_args(msg: &str, files_dir: &Path, name: &str, now_ms: u64)
     Ok(vec!["--".into(), format!("@{}", super::local::strip_verbatim_prefix(&file.to_string_lossy()))])
 }
 
+/// pi 的「這次執行信任專案資料夾」參數（pi 1.4 起；只作用在這一次，不改 pi 的信任紀錄）
+pub(crate) const PI_APPROVE_ARG: &str = "--approve";
+/// 使用者自己指定信任與否的參數：有其中一個就不另外加 --approve
+const PI_TRUST_FLAGS: [&str; 4] = ["--approve", "-a", "--no-approve", "-na"];
+
 /// 組出 pi 的完整參數與環境。profile_args＝profile 本身帶的參數（預設空）
 pub(crate) fn plan(name: &str, profile_args: &[String], ext: ExtState, first_message: &str, files_dir: &Path, now_ms: u64) -> Result<PiPlan, String> {
     let mut args: Vec<String> = Vec::new();
@@ -101,6 +106,12 @@ pub(crate) fn plan(name: &str, profile_args: &[String], ext: ExtState, first_mes
         ExtState::Missing => return Err(NO_EXTENSION_MSG.into()),
     }
     args.extend(profile_args.iter().map(|a| a.replace("{name}", name)));
+    // 這次執行信任專案資料夾（#487）：pi 對有專案設定（.pi、.agents/skills）的資料夾會先問要不要信任，擴充要選完才載入，遠端開就一直等不到。
+    // pi 官方參數 --approve 只作用在這一次、不寫進 pi 的信任紀錄；ASN 開 pi 的每條路都先驗過資料夾在使用者自己列的 cwd_allow 裡才會走到這裡。
+    // 使用者在 profile 自己寫了 --approve／-a／--no-approve／-na 就照他的，不另外加
+    if !profile_args.iter().any(|a| PI_TRUST_FLAGS.contains(&a.as_str())) {
+        args.push(PI_APPROVE_ARG.into());
+    }
     args.extend(message_args(first_message, files_dir, name, now_ms)?);
     Ok(PiPlan { args, env: vec![("ASN_PI_NAME".into(), name.to_string())] })
 }
@@ -122,7 +133,7 @@ mod tests {
     fn 有擴充路徑_帶_e_與名字環境變數() {
         let d = tempfile::tempdir().unwrap();
         let p = plan("小皮", &[], ExtState::Path(PathBuf::from(r"C:\ASN\pi-extension\index.ts")), "", d.path(), 1).unwrap();
-        assert_eq!(p.args, v(&["-e", r"C:\ASN\pi-extension\index.ts"]));
+        assert_eq!(p.args, v(&["-e", r"C:\ASN\pi-extension\index.ts", "--approve"]));
         assert_eq!(p.env, vec![("ASN_PI_NAME".to_string(), "小皮".to_string())]);
     }
 
@@ -130,7 +141,7 @@ mod tests {
     fn 已安裝擴充_不重複載入() {
         let d = tempfile::tempdir().unwrap();
         let p = plan("小皮", &[], ExtState::Installed, "", d.path(), 1).unwrap();
-        assert!(p.args.is_empty());
+        assert_eq!(p.args, v(&["--approve"]), "不帶 -e，只有這次信任資料夾");
         assert_eq!(p.env[0].1, "小皮", "名字照樣設");
     }
 
@@ -146,7 +157,7 @@ mod tests {
     fn 第一句話_安全就直接帶在最後() {
         let d = tempfile::tempdir().unwrap();
         let p = plan("小皮", &[], ExtState::Path("/x/index.ts".into()), "  請先讀 README，然後 -h 看看  ", d.path(), 1).unwrap();
-        assert_eq!(p.args, v(&["-e", "/x/index.ts", "--", "請先讀 README，然後 -h 看看"]));
+        assert_eq!(p.args, v(&["-e", "/x/index.ts", "--approve", "--", "請先讀 README，然後 -h 看看"]));
         assert_eq!(std::fs::read_dir(d.path()).unwrap().count(), 0, "不寫暫存檔");
     }
 
@@ -156,8 +167,8 @@ mod tests {
             assert!(!message_arg_safe(m), "{m}");
             let d = tempfile::tempdir().unwrap();
             let p = plan("小皮", &[], ExtState::Installed, m, d.path(), 77).unwrap();
-            assert_eq!(p.args[0], "--");
-            let f = p.args[1].strip_prefix('@').expect("@檔案");
+            assert_eq!(&p.args[..2], &v(&["--approve", "--"])[..]);
+            let f = p.args[2].strip_prefix('@').expect("@檔案");
             assert!(f.ends_with("小皮-77.md"), "{f}");
             assert_eq!(std::fs::read_to_string(f).unwrap(), m.trim(), "檔案內容原文保留");
         }
@@ -166,14 +177,27 @@ mod tests {
     #[test]
     fn 第一句話_空白不帶() {
         let d = tempfile::tempdir().unwrap();
-        assert!(plan("小皮", &[], ExtState::Installed, "  \n ", d.path(), 1).unwrap().args.is_empty());
+        assert_eq!(plan("小皮", &[], ExtState::Installed, "  \n ", d.path(), 1).unwrap().args, v(&["--approve"]));
     }
 
     #[test]
     fn profile參數的名字佔位被換掉_順序在擴充之後_訊息之前() {
         let d = tempfile::tempdir().unwrap();
         let p = plan("小皮", &v(&["--name", "{name}"]), ExtState::Path("/x/index.ts".into()), "嗨", d.path(), 1).unwrap();
-        assert_eq!(p.args, v(&["-e", "/x/index.ts", "--name", "小皮", "--", "嗨"]));
+        assert_eq!(p.args, v(&["-e", "/x/index.ts", "--name", "小皮", "--approve", "--", "嗨"]));
+    }
+
+    #[test]
+    fn 這次執行信任資料夾_使用者在_profile_自己指定就照他的_只加一次_在第一句話之前() {
+        let d = tempfile::tempdir().unwrap();
+        for own in ["--approve", "-a", "--no-approve", "-na"] {
+            let p = plan("小皮", &v(&[own]), ExtState::Installed, "嗨", d.path(), 1).unwrap();
+            assert_eq!(p.args, v(&[own, "--", "嗨"]), "使用者寫了 {own}：不另外加");
+        }
+        let p = plan("小皮", &v(&["--model", "m"]), ExtState::Installed, "嗨", d.path(), 1).unwrap();
+        assert_eq!(p.args.iter().filter(|a| *a == "--approve").count(), 1);
+        let dd = p.args.iter().position(|a| a == "--").unwrap();
+        assert!(p.args.iter().position(|a| a == "--approve").unwrap() < dd, "要在 -- 之前，不然會被當成第一句話");
     }
 
     #[test]

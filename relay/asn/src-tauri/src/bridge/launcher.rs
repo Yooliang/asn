@@ -27,7 +27,7 @@ const HOUR_MS: u64 = 3_600_000;
 const MAX_CWD: usize = 50;
 pub const TRUST_HINT: &str = "視窗已開，但 30 秒內沒出現在名單上：可能卡在「是否信任此資料夾」，請到電腦前按一次 Enter";
 pub const NO_CONFIG: &str = "這台電腦還沒有可用的啟動設定";
-pub const PI_HINT: &str = "pi 視窗已開，但 30 秒內沒出現在名單上：請到電腦前看看視窗有沒有卡住（例如要登入、選模型，或擴充沒載入）";
+pub const PI_HINT: &str = "pi 視窗已開，但 30 秒內沒出現在名單上：pi 可能在問要不要信任這個資料夾，或要登入、選模型，請到那台電腦選一次；也可能是 pi 的 ASN 擴充沒載入";
 pub const BG_HINT: &str = "背景夥伴已排入，但 30 秒內還沒開出來：請確認這台電腦的 ASN 還在執行；稍後會自動補上結果";
 pub const NO_REMOTE_PROFILE: &str = "沒有可以從遠端開啟的設定（目前支援 Claude、pi、Grok、Gemini）";
 
