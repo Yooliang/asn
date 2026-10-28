@@ -43,6 +43,13 @@ test('開：session 名 asn-<中文名字>、has-session 用 = 精確比對；�
   assert.equal(attachHint('小葛'), '在那台執行 tmux attach -t asn-小葛 可以看到這個視窗')
 })
 
+test('沒有參數時不讓 tmux 交給 sh -c：經 /usr/bin/env 直接 exec（一定是兩個以上的參數）', async () => {
+  const f = fakeTmux()
+  await startTmuxWindow({ ...spec, command: '/usr/bin/codex', args: [] }, { tmux: '/usr/bin/tmux', run: f.run })
+  const made = f.calls.find(c => c[1] === 'new-session')
+  assert.deepEqual(made.slice(-2), ['/usr/bin/env', '/usr/bin/codex'])
+})
+
 test('同名的 session 已經存在就拒絕（精確比對，不會被 asn-小葛2 之類的前綴騙）', async () => {
   const f = fakeTmux({ existing: ['=asn-小葛'] })
   await assert.rejects(startTmuxWindow(spec, { tmux: '/usr/bin/tmux', run: f.run }), /已經有叫「asn-小葛」/)

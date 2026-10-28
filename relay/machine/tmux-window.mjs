@@ -51,7 +51,9 @@ export async function startTmuxWindow({ command, args, cwd, env, name }, { tmux,
   if ((await run(tmux, ['has-session', '-t', `=${s}`], env)).code === 0) throw new Error(`已經有叫「${s}」的 tmux session，換個名字或先關掉它`)
   // 環境變數一個一個用 -e 帶（tmux server 已經在跑時，新 session 不會繼承這個 client 的環境）；env 已經是 childEnv 濾過、沒有金鑰的
   const envFlags = Object.entries(env ?? {}).filter(([k, v]) => k && !k.includes('=') && v != null).flatMap(([k, v]) => ['-e', `${k}=${v}`])
-  const made = await run(tmux, ['new-session', '-d', '-s', s, '-c', cwd, ...envFlags, command, ...args], env)
+  // tmux 只收到一個參數時會交給 sh -c 解讀（asn真 審 #458）；沒有參數就經 env 直接 exec，維持「多個參數、不經 shell」
+  const argv = args.length ? [command, ...args] : ['/usr/bin/env', command]
+  const made = await run(tmux, ['new-session', '-d', '-s', s, '-c', cwd, ...envFlags, ...argv], env)
   if (made.code !== 0) throw new Error(`tmux 開不起來（結束碼 ${made.code}）`)
   const shown = await run(tmux, ['display-message', '-p', '-t', `=${s}`, '#{pane_pid}'], env)
   return { pid: Number(String(shown.stdout).trim()) || 0, tmux: s }
