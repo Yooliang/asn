@@ -5,6 +5,7 @@
 // 指令完全由本機 launcher.json 決定；仲介來的只有 profile 名、視窗名、cwd（必須在白名單裡）。{name} 是唯一的替換欄位。
 import { envGet, isSecretEnvName, withBothNames } from './env-compat.mjs'
 import { execFile, spawn } from 'node:child_process'
+import { attachHint, findBin, hasDesktop, startTmuxWindow } from './tmux-window.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -188,14 +189,16 @@ const START_PS = [
   "$p = if ($a) { Start-Process -FilePath $f -ArgumentList $a -WorkingDirectory $d -WindowStyle $w -PassThru } else { Start-Process -FilePath $f -WorkingDirectory $d -WindowStyle $w -PassThru }",
   "[Console]::Out.Write($p.Id)",
 ].join('\n')
-export function startWindowLinux({ command, args, cwd, env }) {
-  const term = pickLinuxTerminal(env)
-  const joined = [command, ...args].map(quoteArg).join(' ')
+// Linux：有桌面、找得到圖形終端就開終端；否則用 tmux 開（0.2 H4，見 tmux-window.mjs）；都沒有就失敗並說明，
+// 不再把互動式 CLI 丟到背景跑（沒有 TTY 會馬上結束或卡住）。deps 給測試換假的
+export function startWindowLinux({ command, args, cwd, env, name }, { findTmux = e => findBin('tmux', e?.PATH ?? ''), run } = {}) {
+  const term = hasDesktop(env) ? pickLinuxTerminal(env) : null
   if (term) {
+    const joined = [command, ...args].map(quoteArg).join(' ')
     const argv = [...term.argsPrefix, term.binary, ...term.argsSuffix, joined]
     return spawnDetached(argv[0], argv.slice(1), cwd, env)
   }
-  return spawnDetached(command, args, cwd, env)
+  return startTmuxWindow({ command, args, cwd, env, name }, { tmux: findTmux(env), ...(run ? { run } : {}) })
 }
 
 function pickLinuxTerminal(env) {
@@ -224,8 +227,8 @@ function spawnDetached(command, args, cwd, env) {
   })
 }
 
-export function startWindow({ command, args, cwd, env }) {
-  if (process.platform !== 'win32') return startWindowLinux({ command, args, cwd, env })
+export function startWindow({ command, args, cwd, env, name }) {
+  if (process.platform !== 'win32') return startWindowLinux({ command, args, cwd, env, name })
   const psExe = path.join(env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
   const encoded = Buffer.from(START_PS, 'utf16le').toString('base64')
   const henvVals = { LAUNCH_FILE: command, LAUNCH_ARGS: args.map(quoteArg).join(' '), LAUNCH_DIR: cwd, LAUNCH_STYLE: envGet(process.env, 'LAUNCH_WINDOW_STYLE') || 'Normal' }
@@ -304,11 +307,11 @@ export function createLauncher({ api, log, workDir, configPath, listNames, onLau
       await sleep(pollMs)
       const now = await listNames()
       if (now && [...now].some(n => n === l.name)) {
-        await report(l, 'ok', `${l.name} 已開啟`)
+        await report(l, 'ok', started?.tmux ? `${l.name} 已開啟；${attachHint(l.name)}` : `${l.name} 已開啟`)
         try { await onLaunched(l) } catch (e) { log(`launch onLaunched failed id=${l.id}: ${e.message}`) }
         return
       }
-      if (!unconfirmed && Date.now() - t0 >= confirmMs) { unconfirmed = true; await report(l, 'unconfirmed', TRUST_HINT) }
+      if (!unconfirmed && Date.now() - t0 >= confirmMs) { unconfirmed = true; await report(l, 'unconfirmed', started?.tmux ? `視窗已開，但 30 秒內沒出現在名單上：${attachHint(l.name)}，看看是不是卡在確認畫面` : TRUST_HINT) }
     }
     record(l, 'gave-up', `${Math.round(lateMs / 60000)} 分鐘內都沒出現在名單上`)
   }
