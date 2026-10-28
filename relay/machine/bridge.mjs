@@ -15,6 +15,7 @@ import { contextText, createRooms, parseMember, roomText, roomUuid, NO_REPLY_RE 
 import { escapeBody, mailHead, parseSendHead, mailPreamble, senderLine, stripReplyHead, wantsReply } from './mail-format.mjs'
 import { bodyWithNotes } from './attach-format.mjs'
 import { createLauncher, platformOf, readClosed } from './launcher.mjs'
+import { createTmuxPartners, recordOpened } from './tmux-partners.mjs'
 import { detectAgentTools } from '../shared/agent-tools-detect.mjs'
 import { buildDefaultProfiles, defaultCwdAllow } from '../shared/launcher-profiles.mjs'
 import { createPartnerQueue, workerSpecFromProfile } from './partner-background.mjs'
@@ -381,6 +382,7 @@ async function startBackgroundPartner({ req, profile }) {
   return { pid: 0 }
 }
 const LAUNCHER_FILE = envGet(process.env, 'LAUNCHER_FILE') || locateHome('launcher.json')
+const TMUX_OPENED_FILE = path.join(WORK_DIR, 'tmux-opened.json')
 let launcher = { summary: () => null, pull: async () => {}, current: () => null }
 const partnerQueue = createPartnerQueue({
   file: path.join(WORK_DIR, 'partner-queue.jsonl'),
@@ -397,6 +399,7 @@ const canRemoteLaunch = openEngines.length || acpEngine
 launcher = !canRemoteLaunch ? launcher : createLauncher({
   api, log, workDir: WORK_DIR, configPath: LAUNCHER_FILE,
   bootstrap: () => launchBootstrap,
+  onTmuxOpened: (name, session) => { recordOpened(TMUX_OPENED_FILE, name); log(`tmux window opened name=${name} session=${session}`) },
   listNames: async () => {
     const sets = await Promise.all(engines.map(e => e.listNames()))
     return sets.some(x => x) ? new Set(sets.flatMap(x => (x ? [...x] : []))) : null
@@ -414,6 +417,11 @@ launcher = !canRemoteLaunch ? launcher : createLauncher({
   },
   ...(envGet(process.env, 'LAUNCH_CONFIRM_MS') ? { confirmMs: Number(envGet(process.env, 'LAUNCH_CONFIRM_MS')), pollMs: 200 } : {}),
 })
+
+// 遠端關閉這台橋用 tmux 開的夥伴（#457）。只在 Linux 啟用：Windows 的遠端管理由 ASN 電腦版（Rust 橋）處理，這裡不能搶走它的待辦
+const tmuxPartners = process.platform === 'linux' && canRemoteLaunch
+  ? createTmuxPartners({ api, log, file: TMUX_OPENED_FILE, mailboxName: MAILBOX_NAME, allowed: () => Boolean(launcher.current()) })
+  : { pull: async () => {} }
 
 let pulling = false, again = false
 async function handleMail(m) {
@@ -496,6 +504,7 @@ async function pull(why) {
   void pullRoomsGuarded()
   void partnerQueue.drain().catch(e => log(`partner-queue: ${e.message}`))
   void launcher.pull()
+  void tmuxPartners.pull().catch(e => log(`tmux-partners: ${e.message}`))
   if (pulling) { again = true; return }
   pulling = true
   try {

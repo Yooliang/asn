@@ -248,7 +248,7 @@ export function startWindow({ command, args, cwd, env, name }) {
 
 // deps：api(action, opts)、log(msg)、workDir、configPath、listNames() → Promise<Set|null>（本機目前的 session 名）、
 //       onLaunched(launch) 視窗出現後呼叫（橋拿來刷新名單、送第一句話）、start（開視窗，測試可換掉）
-export function createLauncher({ api, log, workDir, configPath, listNames, onLaunched = async () => {}, start = startWindow, startBackground = null, envFilter = childEnv,
+export function createLauncher({ api, log, workDir, configPath, listNames, onLaunched = async () => {}, onTmuxOpened = () => {}, start = startWindow, startBackground = null, envFilter = childEnv,
   bootstrap = null, confirmMs = 30_000, lateMs = 180_000, pollMs = 2_000 }) {
   const historyFile = path.join(workDir, 'launch-history.json')
   const logFile = path.join(workDir, 'launch.log')
@@ -303,6 +303,7 @@ export function createLauncher({ api, log, workDir, configPath, listNames, onLau
       const s = buildSpawn(config, l, process.env, envFilter)
       try { started = await start(s) } catch (e) { return report(l, 'failed', `開不起來：${e.message}`) }
     }
+    if (started?.tmux) { try { onTmuxOpened(l.name, started.tmux) } catch (e) { log(`tmux-opened record failed name=${l.name}: ${e.message}`) } }   // 之後從手機關閉要靠這份記錄（#457）
     record(l, 'spawned', `pid=${started?.pid ?? 0}`)
     const t0 = Date.now()
     let unconfirmed = false
