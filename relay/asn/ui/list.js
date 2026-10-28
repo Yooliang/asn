@@ -319,6 +319,11 @@ async function refreshRooms() {
 // ---------- 開新夥伴 ----------
 const cliTools = ref({})
 const remoteLaunchers = ref({})   // node → launcher 摘要
+// 別台電腦回報的 pi 模型清單（#443／#444）：有就給「切換模型」的下拉選單，沒有回 null（對話框退回輸入框）
+function remotePiModelsFor(node) {
+  const pm = remoteLaunchers.value[node]?.pi_models
+  return Array.isArray(pm) && pm.length ? async () => pm : null
+}
 const remoteMachines = ref({})   // node → { platform, launch_closed_reason }（0.2 H2：沒開放時說明怎麼開，或那台自己寫的原因）
 const launchPending = ref([])     // 啟動中列
 const launchTrack = ref([])       // { id, node, name, profile } 遠端 launch uuid
@@ -1612,7 +1617,7 @@ const app = createApp({
       deviceDrag, deviceDrop, onDeviceDragStart, onDeviceDragOver, onDeviceDrop, onDeviceTabKey, clearDeviceDrag,
       tab, adI, hub, roomRows, roomHue, roomInitial, groupFlow, openGroupMenu, decideCard, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,
       GUIDES, view, SETTING_CATS, catSub, PANEL_KINDS, panelTabId, panelGuide, panelTitle, openPanel, closePanel, settingsState, applySetting, pickAvatarFile,
-      selfNode: info.node, transport, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg,
+      selfNode: info.node, transport, remotePiModelsFor, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg,
       searchInput, focusSearch, launchPicker, launchPickerPos, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickPartnerDevice, partnerDevKey, partnerCanNext, partnerNext,
       DISPLAY_MODES, partnerShowDisplay, partnerRun, partnerChannels,
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
