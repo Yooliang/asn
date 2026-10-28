@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { ARCHIVE_GROUP_KEY, activeFriends, archiveHeading, archiveMenuItem, archivedFriends, archivedGroup, buildArchiveRequest, isGroupCollapsed, manageItems, runArchive, withArchivedGroup } from '../ui/lib/archive.mjs'
+import { ARCHIVE_GROUP_KEY, activeFriends, archiveHeading, archiveMenuItem, archivedFriends, archivedGroup, buildArchiveRequest, GONE_TEXT, isGroupCollapsed, manageItems, runArchive, withArchivedGroup } from '../ui/lib/archive.mjs'
 import { buildFriends } from '../ui/lib/roster.mjs'
 import { groupHeading } from '../ui/lib/tabs.mjs'
 import { rosterGroups } from '../ui/lib/mobile.mjs'
@@ -80,7 +80,9 @@ test('送出：內容只含節點、名字、旗標與（有的話）夥伴 ID�
   assert.match((await runArchive({ partnerArchive: async () => ({ ok: true }) }, F('H', 'a'), false)).text, /取消封存/)
   const bad = async msg => await runArchive({ partnerArchive: async () => { throw new Error(msg) } }, F('H', 'a'), true)
   assert.match((await bad('尚未登入，無法封存夥伴')).text, /登入/)
-  assert.match((await bad('partner_archive HTTP 404 not_found')).text, /找不到|更新/)
+  assert.equal((await bad('partner_archive HTTP 404 not_found')).text, GONE_TEXT, '不在名單上：專用說法，不說找不到視窗')
+  assert.doesNotMatch(GONE_TEXT, /找不到這個視窗/)
+  assert.match((await bad('partner_archive HTTP 404')).text, /更新/, '舊後台沒有這個動作仍是請更新')
   assert.match((await bad('partner_archive HTTP 403 protected')).text, /ASN 通知/)
   assert.match((await bad('partner_archive 連線失敗：timeout')).text, /網路/)
   const none = await runArchive({}, F('H', 'a'), true)

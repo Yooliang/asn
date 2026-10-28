@@ -60,6 +60,7 @@ export function buildArchiveRequest(friend, archived) {
 
 const DONE_TEXT = { true: '已封存，這位夥伴不會再出現在名單上；它再寄信來或重新上線就會自動回來。', false: '已取消封存。' }
 // 送出一次封存／取消封存。回 { ok, text }；api 要有 partnerArchive（lib/tauri.mjs 的 transport）。後台舊版（404）會說要先更新
+export const GONE_TEXT = '這位夥伴已經不在名單上，不用封存'
 export async function runArchive(api, friend, archived) {
   if (typeof api?.partnerArchive !== 'function') return { ok: false, text: '這個版本還不能封存，請先更新' }
   try {
@@ -67,6 +68,8 @@ export async function runArchive(api, friend, archived) {
     if (r && r.ok === false) return { ok: false, text: '封存失敗，請稍後再試' }
     return { ok: true, text: DONE_TEXT[archived === true] }
   } catch (e) {
+    // 後台名單裡沒有這個名字（程序關掉、夥伴被移除）：不是壞掉，用專用的說法，不要講「找不到這個視窗」（#447）
+    if (/HTTP 404 ?not_found/.test(String(e?.message ?? ''))) return { ok: false, text: GONE_TEXT }
     return { ok: false, text: opErrorText(e?.message) }
   }
 }

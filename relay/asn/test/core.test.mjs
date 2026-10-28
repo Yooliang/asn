@@ -157,6 +157,17 @@ test('上線提示：第一次名單不提示；之後有人新上線才提示�
   await core.stop(); await relay.close()
 })
 
+test('程序條目（「pi #pid」）關掉後不留在名單上，就算本機有對話記錄也一樣；對話記錄本身不刪（#447）', async () => {
+  const { relay, core } = await setup()
+  relay.mail(1, { from_node: 'W', from_agent: 'pi #30784', to_node: 'T', to_agent: NAME, body: '我是程序掃描出來的' })
+  await core.start()
+  await core.refreshRoster(); await sleep(5)
+  assert.ok(!core.snapshot().friends.some(f => f.id === 'W/pi #30784'), '帶對話記錄的程序條目也不當離線好友列著')
+  assert.ok(core.logOf('W/pi #30784').some(m => /程序掃描/.test(m.text ?? m.body ?? '')), '對話記錄還在')
+  assert.ok(core.snapshot().friends.some(f => f.id === 'W/W-政策'), '一般夥伴照舊')
+  await core.stop(); await relay.close()
+})
+
 test('存檔：重開後好友與對話還在（離線）', async () => {
   const store = memStore()
   const a = await setup({ store })

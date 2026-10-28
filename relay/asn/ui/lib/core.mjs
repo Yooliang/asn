@@ -132,7 +132,7 @@ export class AsnCore {
     const live = buildFriends(members, { selfNode: this.selfNode, selfName: this.windowName })
     this.#mergeRenamed(live)
     const prev = new Map([...this.friends].map(([id, f]) => [id, f.status]))
-    const known = [...this.friends.values()].filter(f => (this.logs.has(f.id) || f.known) && !(f.entryKind === 'process' || (isProcessName(f.agent) && !this.logs.get(f.id)?.length)))   // 程序條目不當離線好友記住；舊殘影（名字符合格式、沒有對話）也不留
+    const known = [...this.friends.values()].filter(f => (this.logs.has(f.id) || f.known) && !(f.entryKind === 'process' || isProcessName(f.agent)))   // 程序條目（「pi #pid」這類）不當離線好友記住，有沒有對話記錄都一樣（#447）；對話記錄本身不刪
     const merged = mergeFriends(known, live, archivedKeysOf(members))
     const next = new Map()
     for (const m of merged) {
