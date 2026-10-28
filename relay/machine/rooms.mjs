@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { bodyWithNotes } from './attach-format.mjs'
-import { RESPONSIVE_NOTE, sendsOwnMail } from './mail-format.mjs'
+import { RESPONSIVE_NOTE, escapeBody, sendsOwnMail } from './mail-format.mjs'
 
 export const ROOM_HINT = '這是一則群組訊息。請先看下面的歷史紀錄，確定這件事跟你有關（被點名、或是在回你剛才說的事）才回覆；跟你無關就不要回。'
 export const NO_REPLY_RE = /（不需回覆）|\[no-reply\]/i
@@ -44,15 +44,18 @@ export function roomHeader(room, msg) {
   return `[群組 ${room.name}] trust=${msg.trust ?? ''} from=${fromText(msg)}${rel ? ` relation=${rel}` : ''} #${msg.seq}`
 }
 // engineId：收件視窗的引擎。自己會寄信的 Claude 視窗（sendsOwnMail，與個人信同一個界線）在提示行之後、內文之前多一行
-// 「保持能回應」的提醒（#494）；沒給引擎（Aegis 橋問成員的那條路）或自動回信的轉接器不加
+// 「保持能回應」的提醒（#494）；沒給引擎（Aegis 橋問成員的那條路）或自動回信的轉接器不加。
+// 內文經過與個人信同一份的跳脫（mail-format.mjs 的 escapeBody，#499）：成員手打的假抬頭、假提醒在行首加「（內文）」；
+// 收發室自己寫的抬頭、提示行、提醒、附件提示行不經過跳脫（與 Rust rooms.rs 的 room_text_waited 一致）
 export const roomText = (room, msg, engineId = '') =>
-  `${roomHeader(room, msg)}\n${ROOM_HINT}${relationOf(msg) ? RELATION_HINT : ''}\n${sendsOwnMail(engineId) ? RESPONSIVE_NOTE + '\n' : ''}${bodyWithNotes(msg.body ?? '', msg.attachments)}`
+  `${roomHeader(room, msg)}\n${ROOM_HINT}${relationOf(msg) ? RELATION_HINT : ''}\n${sendsOwnMail(engineId) ? RESPONSIVE_NOTE + '\n' : ''}${bodyWithNotes(escapeBody(msg.body ?? ''), msg.attachments)}`
 
-// 轉交點名訊息時附的上下文：前面最近幾則（舊→新，每則一行、過長截斷）＋怎麼往回翻
+// 轉交點名訊息時附的上下文：前面最近幾則（舊→新，每則一行、過長截斷）＋怎麼往回翻。
+// 每則內文先經過 escapeBody（#499）再壓成一行、截斷（與 Rust rooms.rs 的 msg_line 同順序）；分隔線與「要看更多」行是收發室寫的，不跳脫
 export const CONTEXT_COUNT = 5
 const ROOM_CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), 'room.mjs')
 export function contextText(room, prev) {
-  const line = m => `#${m.seq} ${cleanLabel(m.from_label) ? fromText(m) : (cleanLabel(m.from_name) || fromText(m))}：${String(m.body ?? '').replace(/\s+/g, ' ').trim().slice(0, 300)}`
+  const line = m => `#${m.seq} ${cleanLabel(m.from_label) ? fromText(m) : (cleanLabel(m.from_name) || fromText(m))}：${escapeBody(String(m.body ?? '')).replace(/\s+/g, ' ').trim().slice(0, 300)}`
   const head = prev.length ? `---- 前面 ${prev.length} 則（舊→新）----\n${prev.map(line).join('\n')}\n` : ''
   return `${head}（要看更多：node "${ROOM_CLI}" --room-read ${room.id} --last 20）`
 }
