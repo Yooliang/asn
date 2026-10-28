@@ -16,6 +16,7 @@ import { parseWindowRename, renamesFromRoster } from "../_shared/window_rename.t
 import { sanitizeClaudeMod } from "../_shared/claude_mod.ts";
 import { sanitizeNodePlatform } from "../_shared/node_platform.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
+import { PARTNER_ID_RE, parseSetPartnerAvatar, setReply } from "../_shared/partner_avatar.ts";
 import * as signal from "../_shared/signal.ts";
 import { roomPostAgent, touchActive } from "../_shared/last_active.ts";
 import { handleNodeLaunchAction, LAUNCH_ACTIONS, sanitizeLauncher } from "../_shared/launch.ts";
@@ -247,6 +248,24 @@ Deno.serve(async (req) => {
     const node = url.searchParams.get("node") ?? "";
     if (!ID_RE.test(node)) return json(400, { error: "bad_request" });
     const { data, error } = await db.rpc("asn_relay_get_avatar", { p_tenant: me.tenant_id, p_node: node });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    if (data?.error === "not_found") return json(404, { error: "not_found" });
+    return json(200, data);
+  }
+  // 夥伴自己換頭像（#446）：規則同設備頭像。node 一律取自金鑰（body 裡不接受指定節點），只能改這台上名字對得上的夥伴；
+  // 後台只認節點金鑰，同一台電腦上的視窗在伺服器看起來是同一個人（和寄信的 from_agent 一樣）。list 只帶 avatar_updated_at，圖用 partner_avatar 按需取（限同租戶）。
+  if (action === "set_partner_avatar" && req.method === "POST") {
+    const p = parseSetPartnerAvatar(await req.json().catch(() => null));
+    if (!p.ok) return json(400, { error: p.error });
+    const { data, error } = await db.rpc("asn_relay_set_partner_avatar", { p_node: me.id, p_agent: p.agent, p_avatar: p.avatar });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    const r = setReply(data);
+    return json(r.status, r.body);
+  }
+  if (action === "partner_avatar" && req.method === "GET") {
+    const partner = url.searchParams.get("partner") ?? "";
+    if (!PARTNER_ID_RE.test(partner)) return json(400, { error: "bad_request" });
+    const { data, error } = await db.rpc("asn_relay_get_partner_avatar", { p_tenant: me.tenant_id, p_partner: partner });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     if (data?.error === "not_found") return json(404, { error: "not_found" });
     return json(200, data);
