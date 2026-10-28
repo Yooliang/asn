@@ -19,6 +19,7 @@ function fakeDeps(answer: (c: Call) => unknown = () => ({ id: "11111111-1111-111
   return { deps, calls, rings };
 }
 const OK = { node: "H", profile: "default", name: "H-英雄-2", cwd: "D:\\Github\\eiyuu-md" };
+const OUT = { ...OK, pi_provider: null, pi_model: null };   // 沒帶經 pi 的提供者與模型（D2）＝兩個都是 null
 
 Deno.test("視窗名：英數、連字號、中文；不能以連字號開頭、不能有空白引號分號、最多 40 字", () => {
   for (const ok of ["H-英雄-2", "a", "工頭", "X".repeat(40), "9-a"]) assert(LAUNCH_NAME_RE.test(ok), ok);
@@ -28,8 +29,8 @@ Deno.test("視窗名：英數、連字號、中文；不能以連字號開頭、
 });
 
 Deno.test("parseLaunch：格式不對在進資料庫前就擋下，第一句話空白當沒有", () => {
-  assertEquals(parseLaunch({ ...OK, first_message: "  " }), { ...OK, first_message: null });
-  assertEquals(parseLaunch({ ...OK, first_message: " 開始做吧 " }), { ...OK, first_message: "開始做吧" });
+  assertEquals(parseLaunch({ ...OK, first_message: "  " }), { ...OUT, first_message: null });
+  assertEquals(parseLaunch({ ...OK, first_message: " 開始做吧 " }), { ...OUT, first_message: "開始做吧" });
   assertEquals(parseLaunch({ ...OK, name: "-x" }), { error: "bad_name" });
   assertEquals(parseLaunch({ ...OK, node: "H;drop" }), { error: "bad_request" });
   assertEquals(parseLaunch({ ...OK, profile: "" }), { error: "bad_profile" });
@@ -37,7 +38,7 @@ Deno.test("parseLaunch：格式不對在進資料庫前就擋下，第一句話�
   assertEquals(parseLaunch({ ...OK, first_message: "x".repeat(4001) }), { error: "bad_first_message" });
   assertEquals(parseLaunch([OK]), { error: "bad_request" });
   // 指令內容不會被帶進請求：多餘的欄位一律丟掉
-  assertEquals(parseLaunch({ ...OK, command: "calc.exe", args: ["x"] }), { ...OK, first_message: null });
+  assertEquals(parseLaunch({ ...OK, command: "calc.exe", args: ["x"] }), { ...OUT, first_message: null });
 });
 
 Deno.test("requestLaunch：通過就呼叫 irori_relay_launch（actor 由呼叫端決定）並敲機器門鈴", async () => {
@@ -157,4 +158,25 @@ Deno.test("啟動設定摘要的 pi_models（#443／#444）：只留 provider／
   assertEquals("pi_models" in (sanitizeLauncher(base) as Record<string, unknown>), false, "舊的電腦端不帶：不加這個欄位");
   assertEquals("pi_models" in (sanitizeLauncher({ ...base, pi_models: "x" }) as Record<string, unknown>), false);
   assertEquals("pi_models" in (sanitizeLauncher({ ...base, pi_models: [{ provider: "-", model: "-" }] }) as Record<string, unknown>), false, "全部不合格：不加");
+});
+
+Deno.test("parseLaunch：經 pi 的提供者與模型（D2）選填、要一起給、格式照 piModelWire；舊版不帶就是 null", () => {
+  assertEquals(parseLaunch({ ...OK, profile: "pi", pi_provider: "minimax", pi_model: "MiniMax-M3.1-Flash" }), { ...OK, profile: "pi", first_message: null, pi_provider: "minimax", pi_model: "MiniMax-M3.1-Flash" });
+  assertEquals(parseLaunch({ ...OK }), { ...OUT, first_message: null }, "舊版手機不帶：兩個都是 null");
+  for (const bad of [{ pi_provider: "minimax" }, { pi_model: "x" }, { pi_provider: "-x", pi_model: "y" }, { pi_provider: "a b", pi_model: "y" }, { pi_provider: "a", pi_model: "y:z" }, { pi_provider: "a", pi_model: "x".repeat(51) }, { pi_provider: 3, pi_model: "y" }]) {
+    assertEquals(parseLaunch({ ...OK, ...bad }), { error: "bad_pi_model" }, JSON.stringify(bad));
+  }
+});
+
+Deno.test("requestLaunch：帶了經 pi 才呼叫 9 參數的新版本；沒帶照舊呼叫原本的（參數一個都不多）", async () => {
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const deps = { rpc: (fn: string, a: Record<string, unknown>) => { calls.push([fn, a]); return Promise.resolve({ data: { id: "i", bell_topic: "t" }, error: null }); }, ring: () => Promise.resolve() } as unknown as LaunchDeps;
+  await requestLaunch(deps, "P", { ...OK });
+  assertEquals(Object.keys(calls[0][1]).sort(), ["p_actor", "p_cwd", "p_first", "p_name", "p_node", "p_profile"]);
+  await requestLaunch(deps, "P", { ...OK, profile: "pi", pi_provider: "minimax", pi_model: "M3" }, "u1");
+  assertEquals(calls[1][1].p_pi_provider, "minimax");
+  assertEquals(calls[1][1].p_pi_model, "M3");
+  assertEquals(calls[1][1].p_signed_user, "u1");
+  await requestLaunch(deps, "P", { ...OK, profile: "pi", pi_provider: "minimax", pi_model: "M3" });
+  assertEquals(calls[2][1].p_signed_user, null, "9 參數版本沒有預設值：沒簽章也要明確帶 null");
 });
