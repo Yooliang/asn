@@ -271,6 +271,8 @@ pub struct Core {
     respond_open: bool,
     /// 自動回信模式：上次回報名單時自己視窗的狀態（變了就立刻重報）
     respond_sent: String,
+    /// 0.2 E2／E4（#397）：各視窗最後一次收到信或被看到在忙的時間（毫秒），名單回報時帶給後台；只存記憶體
+    active: BTreeMap<String, u64>,
 }
 
 /// 自動回信模式：交辦後這段時間內，就算 worker 這一輪的結果已回來，仍視為忙碌（它可能正接著處理排隊中的下一則）
@@ -309,7 +311,7 @@ impl Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, created: Arc::new(crate::heartbeat::process_started_ms), now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
-            partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, respond_sent: String::new(),
+            partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, respond_sent: String::new(), active: BTreeMap::new(),
         };
         c.restore();
         c
@@ -556,7 +558,9 @@ impl Core {
                 p.detail = Some(super::engines::pi_unregistered_detail(pi_loaded).to_string());
             }
         }
-        let mut body = roster::roster_body_with_procs(&self.roster, asn.as_deref(), launcher, &procs);
+        // 在忙也算活躍（E4）：這一輪忙碌的視窗記成現在；名單上沒有的名字不保留
+        self.active = roster::active_marks(&self.active, &self.roster, now);
+        let mut body = roster::with_active(roster::roster_body_with_procs(&self.roster, asn.as_deref(), launcher, &procs), &self.active);
         // 這台電腦的 Claude 外掛狀態：啟動檢查完與狀態變化時才附（舊後台會丟掉這個欄位，不壞）
         let due = roster::mod_report_due((self.mod_src)(), self.mod_sent.as_ref(), now);
         if let Some(m) = &due {
@@ -736,6 +740,14 @@ impl Core {
     }
 
     fn deliver(&mut self, id: &str, to: &str, text: &str) -> Result<(), String> {
+        let r = self.deliver_raw(id, to, text);
+        if r.is_ok() {
+            self.active.insert(to.to_string(), self.now);
+        }
+        r
+    }
+
+    fn deliver_raw(&mut self, id: &str, to: &str, text: &str) -> Result<(), String> {
         let eng = self.engine_of(to);
         if eng != "claude" {
             return match &self.engines {

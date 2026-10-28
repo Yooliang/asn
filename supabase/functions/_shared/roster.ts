@@ -2,7 +2,7 @@
 // engine＝這個視窗背後是哪家 AI（claude／codex／gemini／grok…）。格式不對或沒帶（舊版機器橋）就是 null，
 // 不因此拒絕整份名單；detail（選填，最多 80 字）同理；資料庫那邊也有同樣的格式檢查（supabase/sql/19_roster_engine.sql）。
 
-export type RosterAgent = { name: unknown; status: unknown; cwd_label: unknown; engine: string | null; detail: string | null; context_pct: number | null; mod_loaded: boolean | null; kind: string; receivable: boolean; model: string | null; hidden: boolean | null };
+export type RosterAgent = { name: unknown; status: unknown; cwd_label: unknown; engine: string | null; detail: string | null; context_pct: number | null; mod_loaded: boolean | null; kind: string; receivable: boolean; model: string | null; hidden: boolean | null; active_at: number | null };
 
 export const DETAIL_MAX = 80;
 export const MODEL_MAX = 60;
@@ -38,5 +38,7 @@ export function normalizeRosterAgents(agents: Array<Record<string, unknown>>): R
     model: typeof a?.model === "string" && a.model.trim() ? [...a.model.trim()].slice(0, MODEL_MAX).join("") : null,
     // 這個視窗目前是不是隱藏的（選填，只收布林；沒有視窗或舊版橋沒帶＝null）。前景／背景只代表視窗隱藏與否，與 ACP 通道無關
     hidden: typeof a?.hidden === "boolean" ? a.hidden : null,
+    // 0.2 E2（#397）：橋回報的最後收信／忙碌時間（毫秒）：只收正整數；舊版橋沒帶或壞值＝null（資料庫只寫進夥伴的最後活動時間，未來的時間當現在）
+    active_at: Number.isSafeInteger(a?.active_at) && (a.active_at as number) > 0 ? a.active_at as number : null,
   }));
 }

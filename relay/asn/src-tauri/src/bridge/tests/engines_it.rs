@@ -634,7 +634,10 @@ async fn codex_名單_有名字且正被開著的視窗_忙碌是最後一個_tu
     let names: std::collections::BTreeSet<String> = agents.iter().filter(|a| a["engine"] == "codex").map(|a| a["name"].as_str().unwrap().to_string()).collect();
     assert_eq!(names, ["視窗乙".to_string(), "視窗甲".to_string()].into_iter().collect());
     assert!(agents.contains(&json!({"name":"視窗甲","status":"idle","cwd_label":"proj-a","engine":"codex"})), "{agents:?}");
-    assert!(agents.contains(&json!({"name":"視窗乙","status":"busy","cwd_label":"proj-b","engine":"codex"})), "{agents:?}");
+    // 在忙的 codex 視窗帶最後活動時間（E4 #397）
+    let mut b = agents.iter().find(|a| a["name"] == "視窗乙").cloned().unwrap();
+    assert!(b.as_object_mut().unwrap().remove("active_at").is_some_and(|t| t.is_u64()), "{agents:?}");
+    assert_eq!(b, json!({"name":"視窗乙","status":"busy","cwd_label":"proj-b","engine":"codex"}));
     // 全程不 resume thread（resume 會讓收發室變成持有者，搶走使用者視窗的佇列）
     assert!(cx.calls().iter().all(|c| c["method"] != "thread/resume"));
     // 夥伴同步帶 thread id 當 session 編號

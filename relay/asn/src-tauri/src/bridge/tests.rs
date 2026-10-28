@@ -346,12 +346,32 @@ async fn 名單回報_格式與_node_橋相同_含_asn_視窗_排除死掉的視
     assert_eq!(
         posts[0],
         json!({"agents": [
-            {"name":"T-乙","status":"busy","cwd_label":"x","engine":"claude"},
+            {"name":"T-乙","status":"busy","cwd_label":"x","engine":"claude","active_at":T0},
             {"name":"T-甲","status":"idle","cwd_label":"x","engine":"claude"},
             {"name":"T-ASN","status":"idle","cwd_label":"","engine":"asn"},
         ], "launcher": null})
     );
     assert!(core.roster_ok);
+}
+
+#[tokio::test]
+async fn 名單回報_帶最後活動時間_收到信的時間與在忙都算_閒著又沒收信的不帶() {
+    let mut h = harness(&[("T-甲", "idle"), ("T-乙", "idle")]).await;
+    let first = h.fr.st.lock().unwrap().rosters[0].clone();
+    assert!(first["agents"].as_array().unwrap().iter().all(|a| a.get("active_at").is_none()), "都閒著、沒收過信：不帶 {first}");
+    h.forward(mail(1, json!({})), T0 + 10).await;
+    h.core.refresh_roster(T0 + 5_000).await;
+    let posts = h.fr.st.lock().unwrap().rosters.clone();
+    let agents = posts.last().unwrap()["agents"].as_array().unwrap().clone();
+    let of = |n: &str| agents.iter().find(|a| a["name"] == json!(n)).cloned().unwrap();
+    assert_eq!(of("T-乙")["active_at"], json!(T0 + 10), "收信時間");
+    assert!(of("T-甲").get("active_at").is_none());
+    // 乙接著在忙：記成這一輪的時間
+    put_session(h.sessions.path(), 5001, "T-乙", "busy", 102);
+    h.core.refresh_roster(T0 + 60_000).await;
+    let posts = h.fr.st.lock().unwrap().rosters.clone();
+    let b = posts.last().unwrap()["agents"].as_array().unwrap().iter().find(|a| a["name"] == json!("T-乙")).cloned().unwrap();
+    assert_eq!(b["active_at"], json!(T0 + 60_000), "在忙也算活躍（E4）");
 }
 
 #[tokio::test]

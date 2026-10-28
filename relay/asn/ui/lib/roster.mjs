@@ -73,6 +73,9 @@ export function piModelNote(a) {
 }
 
 // 一個視窗一列；名字＝視窗名，個人訊息＝資料夾（cwd_label，沒有就空）
+// 後台記的最後活動時間（E1～E3 #397：寄信、群組發言、橋回報的收信與忙碌）ISO 字串 → 毫秒；沒有或壞值＝null
+export const activeAtOf = v => { const t = typeof v === 'string' ? Date.parse(v) : NaN; return Number.isFinite(t) && t > 0 ? t : null }
+
 export function buildFriends(members, { selfNode, selfName } = {}) {
   const out = []
   // 同一個夥伴 ID 只留一筆（改名後後台的離線成員還掛著舊名）：先掃一遍記下「有在線的夥伴 ID」，離線的同夥伴不列
@@ -102,6 +105,7 @@ export function buildFriends(members, { selfNode, selfName } = {}) {
         id: friendId(m.id, a.name), node: m.id, device: typeof m.name === 'string' && m.name.trim() ? m.name.trim() : '', agent: a.name, nick: isProcEntry(a) ? procDisplayName(a.name) || a.name : a.name,
         psm: hiddenPsm(a), contextPct: isOff || a.online === false ? null : pctOf(a.context_pct),   // 上下文已用％（選填；離線或舊後台沒有＝null）
         modLoaded: isOff || a.online === false || typeof a.mod_loaded !== 'boolean' ? null : a.mod_loaded,   // 這個視窗有沒有載入外掛（選填；離線或舊後台沒有＝null）
+        activeAt: activeAtOf(a.last_active_at),   // 後台的最後活動時間（選填；舊後台沒有＝null，活躍度退回只看本機往來）
         deviceMod: modOf(m.claude_mod),   // 這台電腦的外掛狀態（選填；舊後台沒有＝null）
         onRoster: true, engine: a.engine ?? null, ...(typeof a.model === 'string' && a.model.trim() ? { model: a.model.trim() } : {}), ...(a.receivable === false ? { receivable: false } : {}), entryKind: typeof a.kind === 'string' && a.kind ? a.kind : null, kind: typeof m.kind === 'string' && m.kind ? m.kind : null, status: off || a.online === false ? 'offline' : statusOf(a.status),
         archived: a.archived === true,   // 封存（記在帳號層；舊後台沒有這個鍵＝沒封存）。每次名單都明寫，才不會被記住的舊值蓋掉
