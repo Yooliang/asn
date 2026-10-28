@@ -59,6 +59,31 @@ function parseOneProfile(id, p) {
 }
 
 // 讀 launcher.json，並與 bootstrap（CLI 自動 profile）合併；手寫覆蓋同 id 的自動項。
+// 0.2 H2：名單回報帶這台的平台（只回固定幾個值，其餘 null），開新夥伴精靈才寫得出對的設定說明
+export function platformOf(p = process.platform) {
+  return p === 'linux' ? 'linux' : p === 'win32' ? 'windows' : p === 'darwin' ? 'macos' : null
+}
+
+export const CLOSED_REASON_MAX = 120
+/**
+ * launcher.json 寫了 {"remote_launch": false, "reason": "…"}：這台不開放開新夥伴，原因會顯示在同帳號其他設備的精靈上。
+ * 回 { closed: true, reason }（reason 只留純文字：控制字元換空白、去頭尾空白、最多 120 字，沒寫就是 null）；沒寫 remote_launch:false 回 { closed: false }
+ */
+export function closedFromJson(j) {
+  if (!j || j.remote_launch !== false) return { closed: false }
+  const r = typeof j.reason === 'string' ? j.reason.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim() : ''
+  return { closed: true, reason: r ? [...r].slice(0, CLOSED_REASON_MAX).join('').trim() : null }
+}
+
+/** 讀 launcher.json 看這台是不是明寫不開放（讀不到、壞掉都當沒寫） */
+export function readClosed(file) {
+  try {
+    return closedFromJson(JSON.parse(fs.readFileSync(file, 'utf8').replace(/^﻿/, '')))
+  } catch {
+    return { closed: false }
+  }
+}
+
 export function loadConfig(file, bootstrap = null) {
   let j = null
   let fileErr = null
@@ -68,6 +93,8 @@ export function loadConfig(file, bootstrap = null) {
   } catch (e) {
     if (e.code !== 'ENOENT') fileErr = `讀不到 ${file}：${e.message}`
   }
+  // 明寫不開放：不載入任何 profile（連自動偵測的也不用），手機看到的是「不開放」與那台寫的原因
+  if (closedFromJson(j).closed) return { config: null, error: 'launcher.json 寫了 remote_launch:false，這台不開放開新夥伴' }
   if (j && (j.profiles == null || typeof j.profiles !== 'object' || Array.isArray(j.profiles))) {
     return { config: null, error: 'launcher.json 缺 profiles' }
   }

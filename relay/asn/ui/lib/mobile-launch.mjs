@@ -1,6 +1,6 @@
 // 手機版「幫電腦開新夥伴」（遠端開視窗）的純邏輯：哪些電腦能開、為什麼不能、表單檢查、請求內容、進度文字、錯誤翻成中文。
 // 視窗開在那台電腦上，手機只是下指令（後台 relay 的 launch／launchers，要本人簽章）。node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。
-import { remoteModelRows } from './partner-launch-ui.mjs'
+import { closedReasonOf, remoteModelRows } from './partner-launch-ui.mjs'
 import { isDeviceRemoved } from './device-order.mjs'
 
 export const REASON = {
@@ -27,7 +27,7 @@ export function launchEligibility(node, { machines = {}, loaded = false, signedI
   const online = m ? m.online === true : friends.some(f => f.node === node && f.status !== 'offline')
   if (!online) return { ok: false, reason: REASON.offline }
   const l = m?.launcher
-  if (!l) return { ok: false, reason: REASON.closed }
+  if (!l) return { ok: false, reason: closedReasonOf(m, REASON.closed) }
   if (!remoteModelRows(l).length) return { ok: false, reason: REASON.noModel }
   if (!cwdList(l).length) return { ok: false, reason: REASON.noCwd }
   return { ok: true, reason: '' }

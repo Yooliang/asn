@@ -319,6 +319,7 @@ async function refreshRooms() {
 // ---------- 開新夥伴 ----------
 const cliTools = ref({})
 const remoteLaunchers = ref({})   // node → launcher 摘要
+const remoteMachines = ref({})   // node → { platform, launch_closed_reason }（0.2 H2：沒開放時說明怎麼開，或那台自己寫的原因）
 const launchPending = ref([])     // 啟動中列
 const launchTrack = ref([])       // { id, node, name, profile } 遠端 launch uuid
 const launchNotice = reactive({ open: false, title: '', body: '', logPath: '' })
@@ -349,8 +350,14 @@ async function refreshLaunchers() {
   try {
     const body = await transport.launchers()
     const map = {}
-    for (const m of body?.machines ?? []) if (m?.node) map[m.node] = m.launcher
+    const mach = {}
+    for (const m of body?.machines ?? []) {
+      if (!m?.node) continue
+      if (m.launcher) map[m.node] = m.launcher   // 沒開放（launcher 是 null）的不放進來，照舊算沒開放
+      mach[m.node] = { platform: m.platform ?? null, launch_closed_reason: m.launch_closed_reason ?? null }
+    }
     remoteLaunchers.value = map
+    remoteMachines.value = mach
   } catch (e) { err = e }
   const denied = !!err && isAuthDenied(err)
   if (denied !== launchersDenied) console.info('[ASN] 查各電腦啟動設定', denied ? `被後台擋下，改成較長間隔重查：${err.message}` : '恢復正常')
@@ -455,7 +462,7 @@ const partnerCanRun = computed(() => { const o = partnerRun.value.options.find(x
 const TERM_WEZ_TOOLS = ['grok', 'agy']   // 後端 term_start 只收這兩個
 const partnerChannels = computed(() => channelRows(dlgModels.value.find(m => m.profileId === partnerDlg.profile)))   // #351：這個模型三條通道的狀態，只顯示說明
 const partnerShowDisplay = computed(() => partnerDlg.node === info.node && showDisplayModeChoice(partnerDlg.profile))
-const launchCtx = computed(() => ({ selfNode: info.node, partnerModels: partnerModels.value, remoteLaunchers: remoteLaunchers.value }))
+const launchCtx = computed(() => ({ selfNode: info.node, partnerModels: partnerModels.value, remoteLaunchers: remoteLaunchers.value, remoteMachines: remoteMachines.value }))
 const launchDeviceRowsList = computed(() => launchDeviceRows(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, removed: devPrefs.deviceRemoved }))
 function launchDisableReasonFor(nodeKey) { return launchDisableReason(nodeKey, launchCtx.value) }
 // 本機的候選由 Rust 端合併（白名單＋開著的 Claude 視窗＋信任過的資料夾＋最近用過，去重、略過不存在的、最多 15 筆）
