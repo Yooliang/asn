@@ -8,6 +8,7 @@ import { GuideDoc } from './lib/guide-doc.mjs'
 import { buildLogView } from './lib/changelog.mjs'
 import { initialReleases, loadReleases, releasesNote } from './lib/releases.mjs'
 import { SettingsPanel } from './lib/settings-panel.mjs'
+import { openUiLog } from './lib/view-log.mjs'
 import { PANEL_KINDS, isPanelTab, normalizePanelSize, panelItem, panelTabId, panelTabItem, panelTitle, splitTabs } from './lib/panels.mjs'
 import { AsnDialog } from './lib/dialog.mjs'
 import { SETTING_CATS, catSummary, normalizeCatKey } from './lib/settings-cats.mjs'
@@ -343,6 +344,8 @@ function closeLaunchNotice() { launchNotice.open = false }
 async function openLaunchLogFolder() {
   try { await invoke('open_machine_log_dir') } catch (e) { console.info('[ASN] 開啟記錄資料夾', e.message) }
 }
+// 設定頁「檢視記錄」：開 ui.log，開不了就退回開記錄資料夾；說明顯示在設定頁（#339）
+const uiLogMsg = ref('')
 const launchPrefs = reactive(normalizeLaunchPrefs(null))
 const launchCwdText = ref('')
 async function refreshCliTools() {
@@ -1565,7 +1568,7 @@ const app = createApp({
       piSetup: piSetupView(piSetup.raw, piSetup),
       quotaHook: quotaHookView(quotaHook.raw, quotaHook),
       claudeModAuto: claudeModAuto.value,
-      version: info.version,
+      version: info.version, uiLogMsg: uiLogMsg.value,
       log: buildLogView({ entries: releases.entries, current: info.version, available: upd.phase === 'idle' ? null : upd.info }),
       logNote: releasesNote(releases), logRetry: releases.phase === 'error',
     }))
@@ -1614,6 +1617,7 @@ const app = createApp({
         case 'pi-setup-install': await runPiSetup(() => transport.piSetupInstall(), PI_SETUP_TEXT.installed); break
         case 'pi-setup-remove': await runPiSetup(() => transport.piSetupRemove(), PI_SETUP_TEXT.removed); break
         case 'pi-login': try { await invoke('ai_cli_login', { toolId: 'pi' }); piSetup.msg = CONNECT_TEXT.piLoginNote } catch (e) { piSetup.msg = piSetupError(e) } break
+        case 'open-ui-log': uiLogMsg.value = ''; uiLogMsg.value = await openUiLog(invoke); break
         case 'avatar-remove': await removeAvatar(); break
         case 'avatar-upload': avBusy.value = true; try { say((await uploadAvatarFile(value, { toDataUrl: async u => u, setAvatar: v => core.setSelfAvatar(v) })).message) } finally { avBusy.value = false } break   // 分離視窗已在自己那邊裁好圖，送來的是 data URL
         default: break
