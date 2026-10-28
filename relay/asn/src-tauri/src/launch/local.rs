@@ -77,6 +77,17 @@ pub fn start_remote_window(config: &super::config::LaunchConfig, profile: &str, 
     start_window(name, &command, &args, &cwd, hidden)
 }
 
+/// 接手使用者自己開的 pi（0.2 A5）：用本機 pi 的啟動設定、載入收信擴充、帶名字，在原本的資料夾用 --session 接回同一段對話。
+/// 驗證（名字、白名單、上限）由呼叫端做完；指令只來自本機的 pi profile。回外層視窗的 PID
+pub fn start_pi_session(config: &super::config::LaunchConfig, name: &str, cwd: &str, session_file: &str) -> Result<u32, String> {
+    let req = LaunchReq { profile: "pi", name, cwd: cwd.to_string() };
+    let (command, mut args, cwd) = build_spawn_spec(config, &req)?;
+    args.extend(["--session".to_string(), session_file.to_string()]);
+    let files = crate::identity::relay_home().join("pi-first");
+    let plan = super::pi::plan(name, &args, super::pi::resolve_ext_state(), "", &files, now_ms())?;
+    start_window_env(name, &command, &plan.args, &cwd, false, &plan.env)
+}
+
 /// Claude 引擎：在啟動前把 cwd_allow 內、本次使用的資料夾標成已信任（失敗只記 log，不擋啟動）。
 fn maybe_trust_claude_cwd(engine: &str, cwd: &str) {
     if engine != "claude" {

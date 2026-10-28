@@ -23,11 +23,18 @@ struct FakeOs {
     started: Mutex<HashMap<u32, u64>>,
     /// sleep 時要做的事（模擬外掛在等待期間回報）
     on_sleep: Mutex<Option<Box<dyn Fn() + Send>>>,
+    /// 程序的工作資料夾（接手 pi 用）；沒列的查不到
+    cwds: Mutex<HashMap<u32, String>>,
+    /// 結束時不理（模擬程序關不掉）
+    immortal: Mutex<HashSet<u32>>,
 }
 
 impl Os for FakeOs {
     fn cmdline(&self, pid: u32) -> Option<String> {
         self.cmd.lock().unwrap().get(&pid).cloned()
+    }
+    fn cwd(&self, pid: u32) -> Option<String> {
+        self.cwds.lock().unwrap().get(&pid).cloned()
     }
     fn processes(&self) -> Vec<Proc> {
         self.table.lock().unwrap().clone()
@@ -41,7 +48,9 @@ impl Os for FakeOs {
     }
     fn terminate(&self, pid: u32) -> Result<(), String> {
         self.terminated.lock().unwrap().push(pid);
-        self.alive.lock().unwrap().remove(&pid);
+        if !self.immortal.lock().unwrap().contains(&pid) {
+            self.alive.lock().unwrap().remove(&pid);
+        }
         Ok(())
     }
     fn own_pid(&self) -> u32 {
@@ -80,6 +89,10 @@ struct FakeEnv {
     /// pi 視窗的家目錄（登記檔與控制檔）；pi_reply＝假擴充每次被等待時要回的結果（None＝不回，模擬 pi 忙碌）
     pi_home: PathBuf,
     pi_reply: Mutex<Option<Value>>,
+    /// 接手開的 pi：(名字, 資料夾, 對話檔)；pi_launch_fail＝開不起來；pi_launch_registers＝開了之後擴充有沒有登記上名單
+    pi_launched: Mutex<Vec<(String, String, String)>>,
+    pi_launch_fail: AtomicBool,
+    pi_launch_registers: AtomicBool,
 }
 
 impl OpsEnv for FakeEnv {
@@ -141,6 +154,23 @@ impl OpsEnv for FakeEnv {
     }
     fn pi_wait_ms(&self) -> u64 {
         1000
+    }
+    fn pi_agent_dir(&self) -> PathBuf {
+        self.pi_home.join(".pi").join("agent")
+    }
+    fn launch_pi_session(&self, _config: &LaunchConfig, name: &str, cwd: &str, session_file: &str) -> Result<u32, String> {
+        if self.pi_launch_fail.load(Ordering::SeqCst) {
+            return Err("開不起來".into());
+        }
+        self.pi_launched.lock().unwrap().push((name.into(), cwd.into(), session_file.into()));
+        if self.pi_launch_registers.load(Ordering::SeqCst) {
+            let d = self.pi_home.join(".asn").join("pi-windows");
+            std::fs::create_dir_all(&d).unwrap();
+            let v = json!({ "v": 1, "engine": "pi", "ext": 2, "sessionId": "newsid", "name": name, "pid": 4900, "cwd": cwd, "state": "idle", "at": NOW });
+            std::fs::write(d.join("newsid.json"), v.to_string()).unwrap();
+            self.os.alive.lock().unwrap().insert(4900);
+        }
+        Ok(4900)
     }
     fn pi_sleep(&self, _ms: u64) {
         let Some(reply) = self.pi_reply.lock().unwrap().clone() else { return };
@@ -256,6 +286,8 @@ fn rig(o: Opt) -> Rig {
         own: 300,
         started: Mutex::new(HashMap::new()),
         on_sleep: Mutex::new(None),
+        cwds: Mutex::new(HashMap::new()),
+        immortal: Mutex::new(HashSet::new()),
     });
     let env = Arc::new(FakeEnv {
         os,
@@ -274,6 +306,9 @@ fn rig(o: Opt) -> Rig {
         tell_fails: AtomicBool::new(false),
         pi_home: tmp.path().join("pihome"),
         pi_reply: Mutex::new(None),
+        pi_launched: Mutex::new(vec![]),
+        pi_launch_fail: AtomicBool::new(false),
+        pi_launch_registers: AtomicBool::new(true),
     });
     let status = tmp.path().join("status");
     let control = tmp.path().join("control");
@@ -1849,6 +1884,113 @@ fn pi_同名的_claude_視窗存在時不當成_pi() {
 // ================================================================================================
 
 /// 在程序表放一個 pi：parent→pi(4001, node.exe)→子程序(4002)；asn_host＝父殼是 ASN 開視窗用的承載殼
+/// 使用者自己開的 pi（沒有 ASN 擴充、沒登記）：pi 程序 4001（node 跑 pi 的腳本），在 r.work 底下的「專案」資料夾；對話檔放在假的 ~/.pi/agent/sessions
+fn put_user_pi(r: &Rig, sessions: &[(&str, u64)]) -> u32 {
+    put_pi_proc(r, false);
+    let cwd = r.work.join("專案");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let cwd_s = canonical_launch_cwd(&cwd.to_string_lossy()).unwrap().to_string_lossy().to_string();
+    let os = r.os();
+    os.cmd.lock().unwrap().insert(4001, "\"C:\\Program Files\\nodejs\\node.exe\" \"C:\\npm\\node_modules\\@mariozechner\\pi-coding-agent\\dist\\cli.js\"".into());
+    os.cwds.lock().unwrap().insert(4001, cwd_s.clone());
+    let dir = r.env.pi_home.join(".pi").join("agent").join("sessions").join("--proj--");
+    std::fs::create_dir_all(&dir).unwrap();
+    for (id, mtime) in sessions {
+        let f = dir.join(format!("2026-10-28T00-00-00-000Z_{id}.jsonl"));
+        std::fs::write(&f, format!("{}\n{{\"type\":\"message\"}}\n", json!({ "type": "session", "id": id, "cwd": cwd_s }))).unwrap();
+        let t = std::time::UNIX_EPOCH + std::time::Duration::from_millis(*mtime);
+        std::fs::File::options().write(true).open(&f).unwrap().set_modified(t).unwrap();
+    }
+    4001
+}
+
+fn pi_adopt_cfg(r: &Rig) -> LaunchConfig {
+    use crate::launch::profiles::Profile;
+    let mut c = launch_cfg(&[&r.work.join("專案")]);
+    c.profiles.insert("pi".into(), Profile { label: "pi".into(), command: "pi".into(), args: vec![], engine: "pi".into(), mode: LaunchMode::Window, disabled: false, disabled_reason: String::new() });
+    c
+}
+
+const SID_A: &str = "aaaaaaaa-1111-2222-3333-444444444444";
+
+#[test]
+fn pi_接手_先關舊的_確認結束_才帶session開新的_登記上名單才算成功() {
+    let r = rig(Opt::default());
+    let pid = put_user_pi(&r, &[(SID_A, NOW)]);
+    *r.env.cfg.lock().unwrap() = Ok(pi_adopt_cfg(&r));
+    let res = r.run("handover", json!({ "name": format!("pi · MiniMax #{pid}（前景）"), "new_name": "Pi妹妹" }));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert!(res.detail.contains("原本的 pi 已關閉（終端機留著）"), "{}", res.detail);
+    assert_eq!(r.terminated(), vec![4002, 4001], "舊的 pi 與子孫先結束，終端機留著");
+    let launched = r.env.pi_launched.lock().unwrap().clone();
+    assert_eq!(launched.len(), 1);
+    assert_eq!(launched[0].0, "Pi妹妹");
+    assert!(launched[0].2.ends_with(&format!("{SID_A}.jsonl")), "帶 --session 接回同一段對話：{}", launched[0].2);
+    let v = res.result.unwrap();
+    assert_eq!((v["kind"].as_str(), v["session_id"].as_str()), (Some("pi_adopt"), Some(SID_A)));
+}
+
+#[test]
+fn pi_接手_對話不唯一或還沒講話就拒絕_什麼都不關() {
+    let r = rig(Opt::default());
+    let pid = put_user_pi(&r, &[(SID_A, NOW), ("bbbbbbbb-1111-2222-3333-444444444444", NOW)]);
+    *r.env.cfg.lock().unwrap() = Ok(pi_adopt_cfg(&r));
+    let res = r.run("handover", json!({ "name": format!("pi #{pid}（前景）") }));
+    assert_eq!(res.status, "failed");
+    assert!(res.detail.contains("不只一段對話"), "{}", res.detail);
+    assert!(r.terminated().is_empty() && r.env.pi_launched.lock().unwrap().is_empty(), "不唯一：不關也不開");
+    let r2 = rig(Opt::default());
+    let pid2 = put_user_pi(&r2, &[("cccccccc-1111-2222-3333-444444444444", NOW - 600_000)]);
+    *r2.env.cfg.lock().unwrap() = Ok(pi_adopt_cfg(&r2));
+    let res = r2.run("handover", json!({ "name": format!("pi #{pid2}（前景）") }));
+    assert!(res.detail.contains("先在 pi 裡講一句話"), "還沒講話（對話檔早於啟動）：{}", res.detail);
+    assert!(r2.terminated().is_empty());
+}
+
+#[test]
+fn pi_接手_舊程序沒結束就不開新的() {
+    let r = rig(Opt::default());
+    let pid = put_user_pi(&r, &[(SID_A, NOW)]);
+    *r.env.cfg.lock().unwrap() = Ok(pi_adopt_cfg(&r));
+    r.os().immortal.lock().unwrap().insert(4001);
+    let res = r.run("handover", json!({ "name": format!("pi #{pid}（前景）") }));
+    assert_eq!(res.status, "failed");
+    assert!(res.detail.contains("沒有開新的") || res.detail.contains("沒能關掉"), "{}", res.detail);
+    assert!(r.env.pi_launched.lock().unwrap().is_empty(), "舊的還活著：不開新的");
+}
+
+#[test]
+fn pi_接手_新的沒開起來或沒登記上_照實回報並附手動接回的指令() {
+    for launch_fails in [true, false] {
+        let r = rig(Opt::default());
+        let pid = put_user_pi(&r, &[(SID_A, NOW)]);
+        *r.env.cfg.lock().unwrap() = Ok(pi_adopt_cfg(&r));
+        if launch_fails {
+            r.env.pi_launch_fail.store(true, Ordering::SeqCst);
+        } else {
+            r.env.pi_launch_registers.store(false, Ordering::SeqCst);
+        }
+        let res = r.run("handover", json!({ "name": format!("pi #{pid}（前景）") }));
+        assert_eq!(res.status, "failed");
+        assert!(res.detail.contains("原本的 pi 已關閉") && res.detail.contains("pi --session") && res.detail.contains(&format!("{SID_A}.jsonl")), "{}", res.detail);
+    }
+}
+
+#[test]
+fn pi_接手_名字不合規則_資料夾不在白名單_遠端開關關著_都不關() {
+    let r = rig(Opt::default());
+    let pid = put_user_pi(&r, &[(SID_A, NOW)]);
+    *r.env.cfg.lock().unwrap() = Ok(pi_adopt_cfg(&r));
+    assert!(r.run("handover", json!({ "name": format!("pi #{pid}（前景）"), "new_name": "-壞" })).detail.contains("新名字"));
+    let mut c = pi_adopt_cfg(&r);
+    c.cwd_allow = vec![canonical_launch_cwd(&r.handoff.to_string_lossy()).unwrap()];
+    *r.env.cfg.lock().unwrap() = Ok(c);
+    assert_eq!(r.run("handover", json!({ "name": format!("pi #{pid}（前景）") })).status, "failed", "資料夾不在白名單");
+    assert!(r.terminated().is_empty());
+    let off = rig(Opt { allow_first: 0, ..Opt::default() });
+    assert_eq!(off.run("handover", json!({ "name": "pi #4001（前景）" })).detail, CONSENT_OFF);
+}
+
 fn put_pi_proc(r: &Rig, asn_host: bool) -> u32 {
     let os = r.os();
     let parent = if asn_host { 4100 } else { 4200 };
