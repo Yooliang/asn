@@ -114,9 +114,18 @@ pub(crate) fn summary_with(cache: &'static Slot, busy: &'static std::sync::atomi
     };
     if !fresh_enough && busy.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
         spawn(Box::new(move || {
+            // 重查中途 panic 也要放開旗標，不然之後永遠不再重查（asn真 審 #460）
+            struct Release(&'static std::sync::atomic::AtomicBool);
+            impl Drop for Release {
+                fn drop(&mut self) {
+                    self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+            let _release = Release(busy);
             let v = fetch();
-            *cache.lock().unwrap() = Some((Instant::now(), v));
-            busy.store(false, Ordering::SeqCst);
+            if let Ok(mut g) = cache.lock() {
+                *g = Some((Instant::now(), v));
+            }
         }));
     }
     list.iter().take(SUMMARY_MAX).map(|m| serde_json::json!({ "provider": m.provider, "model": m.model })).collect()
@@ -195,6 +204,22 @@ mod tests {
         let later = Instant::now() + SUMMARY_TTL + Duration::from_secs(1);
         assert_eq!(summary_with(&CACHE, &BUSY, later, fetch, &spawn).len(), 1, "過期時先用舊的");
         assert_eq!(jobs.borrow().len(), 1);
+    }
+
+    #[test]
+    fn 摘要的模型清單_重查中途panic_旗標照樣放開_下一輪還會重查() {
+        use std::sync::atomic::AtomicBool;
+        static CACHE: Slot = Mutex::new(None);
+        static BUSY: AtomicBool = AtomicBool::new(false);
+        let jobs: std::cell::RefCell<Vec<Job>> = std::cell::RefCell::new(vec![]);
+        let spawn = |j: Job| jobs.borrow_mut().push(j);
+        let t0 = Instant::now();
+        assert!(summary_with(&CACHE, &BUSY, t0, || -> Vec<PiModel> { panic!("pi 壞了") }, &spawn).is_empty());
+        let j = jobs.borrow_mut().pop().unwrap();
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(j)).is_err());
+        assert!(!BUSY.load(std::sync::atomic::Ordering::SeqCst), "panic 後旗標放開了");
+        summary_with(&CACHE, &BUSY, t0, Vec::new, &spawn);
+        assert_eq!(jobs.borrow().len(), 1, "下一輪還會排重查");
     }
 
     use super::*;
