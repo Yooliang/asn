@@ -742,15 +742,23 @@ fn open_in_file_manager(path: &Path) -> Result<(), String> {
 /// 不經 shell，路徑當成單一參數傳；呼叫的地方負責確認路徑是自己決定的
 #[cfg(desktop)]
 fn open_with_system(path: &Path) -> Result<(), String> {
+    // 兩段分開、程式名寫成字面：nowin.rs 的守門白名單比對的是 explorer／xdg-open 這兩行的確切寫法
     #[cfg(windows)]
-    let opener = "explorer";
+    {
+        std::process::Command::new("explorer")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
     #[cfg(not(windows))]
-    let opener = "xdg-open";
-    std::process::Command::new(opener)
-        .arg(path)
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
 }
 
 /// 唯一允許用檔案管理員開啟的 machine 記錄目錄；路徑只來自 Rust 端 work_dir，不接受前端傳入。
