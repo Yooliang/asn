@@ -34,7 +34,7 @@ test('內頁描述：設置分類、指引、設備與帳號；壞資料一律 n
   assert.equal(settingPage('nope'), null)
   assert.deepEqual(guidePage(), { kind: 'guide', guide: '' }); assert.deepEqual(guidePage('faq'), { kind: 'guide', guide: 'faq' }); assert.deepEqual(guidePage('../x'), { kind: 'guide', guide: '' })
   assert.deepEqual(acctPage(), { kind: 'acct', node: '' }); assert.deepEqual(acctPage(5), { kind: 'acct', node: '' }); assert.deepEqual(acctPage('W'), { kind: 'acct', node: 'W' })
-  for (const bad of [null, undefined, 5, 'x', {}, { kind: 'launch' }, { kind: 'setting', cat: 'devices' }]) assert.equal(normalizePage(bad), null, JSON.stringify(bad))
+  for (const bad of [null, undefined, 5, 'x', {}, { kind: 'ops' }, { kind: 'setting', cat: 'devices' }]) assert.equal(normalizePage(bad), null, JSON.stringify(bad))
   assert.deepEqual(pageLayers(guidePage('faq')), [guidePage(), guidePage('faq')], '指引單篇下面是篇目列表')
   assert.deepEqual(pageLayers(acctPage('W')), [acctPage(), acctPage('W')], '設備細部下面是設備列表')
   assert.deepEqual(pageLayers(settingPage('about')), [settingPage('about')])

@@ -1,26 +1,26 @@
 // 手機版（安卓）的純邏輯：單欄導覽、名單分組、提示規則、外殼橋、登入後的下一步。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { EDGE_PX, TABS, TAB_LABEL, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, SWIPE_BLOCK_SELECTOR, COMMIT_FRAC, ASN_BADGE, BACKFILL_MAX, LAST_WORDS_MAX, accountDisplayName, backfillQueue, lastWords, vendorBadgeHtml, PTR_LOADING_H, PTR_MAX, PTR_THRESHOLD, PULL_TEXT, UPDATE_LATEST, UPDATE_UNAVAILABLE, launchNav, opsNav, pullHeight, pullPhase, pullRatio, shouldRefreshOnRelease, updateCheckErrorText } from '../ui/lib/mobile.mjs'
+import { EDGE_PX, TABS, TAB_LABEL, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, SWIPE_BLOCK_SELECTOR, COMMIT_FRAC, ASN_BADGE, BACKFILL_MAX, LAST_WORDS_MAX, accountDisplayName, backfillQueue, lastWords, vendorBadgeHtml, PTR_LOADING_H, PTR_MAX, PTR_THRESHOLD, PULL_TEXT, UPDATE_LATEST, UPDATE_UNAVAILABLE, pageNav, opsNav, pullHeight, pullPhase, pullRatio, shouldRefreshOnRelease, updateCheckErrorText } from '../ui/lib/mobile.mjs'
 import { BANNER_MS, DEFAULT_PREFS, MSG_VIBRATE_MS, NUDGE_VIBRATE_MS, UPDATE_CHECK_MS, afterBind, bannerText, buttonLabel, initialUpdate, installOutcome, progressText, shouldAutoCheck, withAvailable, withFailure, withProgress, androidBridge, initialNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, totalUnread } from '../ui/lib/mobile.mjs'
 import { groupHeading } from '../ui/lib/tabs.mjs'
+import { launchPage } from '../ui/lib/mobile-fourth.mjs'
 
 const F = (id, node, nick, status = 'online', extra = {}) => ({ id, node, agent: nick, nick, status, device: `設備${node}`, unread: 0, ...extra })
 
-test('開新夥伴兩頁：第 2 頁多一個 step: 2，其他值都當第 1 頁；瀏覽記錄的壞 step 退回第 1 頁', () => {
-  assert.deepEqual(launchNav(2), { tab: 'list', sheet: 'launch', step: 2 })
-  for (const bad of [undefined, 0, 1, 3, '2', null, {}]) assert.deepEqual(launchNav(bad), { tab: 'list', sheet: 'launch' }, String(bad))
-  assert.deepEqual(normalizeNav({ sheet: 'launch', tab: 'me', step: 2 }), launchNav(2))
-  assert.deepEqual(normalizeNav({ sheet: 'launch', step: 9 }), launchNav())
+test('開新夥伴兩頁（#461：第四頁籤上的兩層）：第 2 頁 step: 2，其他值都當第 1 頁；舊的 sheet=launch 記錄轉成第四頁籤，壞 step 退回第 1 頁', () => {
+  assert.deepEqual(launchPage(2), { kind: 'launch', step: 2 })
+  for (const bad of [undefined, 0, 1, 3, '2', null, {}]) assert.deepEqual(launchPage(bad), { kind: 'launch', step: 1 }, String(bad))
+  assert.deepEqual(normalizeNav({ sheet: 'launch', tab: 'me', step: 2 }), pageNav(launchPage(2)))
+  assert.deepEqual(normalizeNav({ sheet: 'launch', step: 9 }), pageNav(launchPage()))
   assert.deepEqual(normalizeNav({ sheet: 'ops', step: 2 }), opsNav(), '別的浮層不帶 step')
 })
 
-test('導覽：夥伴／對話／設置三個分頁、開新夥伴與「⋯」選單兩種浮層；瀏覽記錄裡的壞資料一律退回名單', () => {
+test('導覽：夥伴／對話／設置三個分頁、「⋯」選單等浮層（開新夥伴在第四頁籤）；瀏覽記錄裡的壞資料一律退回名單', () => {
   assert.deepEqual(initialNav(), { tab: 'list', sheet: '' })
   assert.deepEqual(meNav(), { tab: 'me', sheet: '' })
-  assert.deepEqual(launchNav(), { tab: 'list', sheet: 'launch' })
   assert.deepEqual(opsNav(), { tab: 'chats', sheet: 'ops' })
-  assert.deepEqual(normalizeNav({ sheet: 'launch', tab: 'me' }), launchNav())
+  assert.deepEqual(normalizeNav({ sheet: 'launch', tab: 'me' }), pageNav(launchPage()))
   assert.deepEqual(normalizeNav({ sheet: 'ops', tab: 'list' }), opsNav())
   assert.deepEqual(normalizeNav({ sheet: 'other' }), initialNav())
   assert.deepEqual(normalizeNav({ tab: 'me' }), meNav())

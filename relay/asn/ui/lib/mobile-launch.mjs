@@ -49,6 +49,8 @@ export const launchChoices = machine => ({ models: remoteModelRows(machine?.laun
 export const NAME_RE = /^[A-Za-z0-9一-鿿][A-Za-z0-9一-鿿-]{0,39}$/
 export const FIRST_MAX = 4000
 
+// 還在開（送出後、還沒開好也還沒失敗）：關掉畫面也照常在背景追蹤，再進「開新夥伴」接著顯示進度
+export const launchInProgress = l => l?.phase === 'progress' && l.vphase !== 'done' && l.vphase !== 'failed'
 export const initialLaunch = () => ({ open: false, phase: 'form', node: '', deviceLabel: '', profile: '', cwd: '', name: '', first: '', error: '', busy: false, id: '', text: '', detail: '', friendId: '', since: 0 })
 
 // 送出前的檢查：不能開的電腦、缺欄位、名字格式都擋在這裡（不送出）。回中文錯誤，通過回空字串
