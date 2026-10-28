@@ -291,7 +291,7 @@
     <li v-for="m in buddyModel.items" :key="m.id"><button type="button" role="menuitemradio" :aria-checked="m.checked" :disabled="m.disabled" @click="pickBuddyModel(m)">{{ m.checked ? '✓ ' : '　' }}{{ m.label }}</button></li>
     <li class="menu-note" v-if="buddyModel.reason">{{ buddyModel.reason }}</li>
   </ul>
-  <partner-op-dialog v-if="opDlg.open" :friend="opDlg.friend" :op="opDlg.op" :item="opDlg.item" :api="transport" @close="closeOpDlg"></partner-op-dialog>
+  <partner-op-dialog v-if="opDlg.open" :friend="opDlg.friend" :op="opDlg.op" :item="opDlg.item" :api="transport" :pi-models="opDlg.friend.node === selfNode ? transport.piModels : null" @close="closeOpDlg"></partner-op-dialog>
   <asn-dialog v-if="modelDlg.open" :title="modelDlgText.title" @close="closeModelDlg">
     <p class="launch-notice-body" v-if="!modelDlg.done">{{ modelDlgText.lead }}</p>
     <ul class="model-points" v-if="!modelDlg.done && !modelDlg.error"><li v-for="p in modelDlgText.points" :key="p">{{ p }}</li></ul>
