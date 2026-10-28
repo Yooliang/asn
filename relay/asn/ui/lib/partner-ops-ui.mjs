@@ -4,7 +4,8 @@
 import { AsnDialog } from './dialog.mjs'
 import { machinesByNode } from './mobile-launch.mjs'
 import { launchersErrorText } from './launcher-poll.mjs'
-import { ADOPT_ACK, OP_LABEL, OP_POLL_MS, buildOpRequest, dialogEngine, infoRows, opErrorText, opFormError, progressView } from './partner-ops.mjs'
+import { ADOPT_ACK, OP_LABEL, OP_POLL_MS, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, buildOpRequest, dialogEngine, infoRows, opErrorText, opFormError, piModelChoices, progressView } from './partner-ops.mjs'
+import { cleanPiModels } from './pi-models.mjs'
 
 const errText = e => String(e?.message ?? e ?? '').replace(/\s+/g, ' ').trim().slice(0, 80) || '原因不明'
 
@@ -94,6 +95,8 @@ export const PartnerOpDialog = {
     op: { type: String, required: true },
     api: { type: Object, required: true },
     item: { type: Object, default: null },   // menuItems 的那一項（反灰就不送出）
+    // 這台電腦自己的 pi 模型清單（async () => pi_models 的回應）。只有這個 pi 視窗在本機時才給；沒給＝退回輸入框（#443）
+    piModels: { type: Function, default: null },
   },
   emits: ['close', 'done'],
   setup(props, { emit }) {
@@ -102,9 +105,21 @@ export const PartnerOpDialog = {
     const text = computed(() => opDialogText(props.op, name, props.friend.device, dialogEngine(props.friend)))
     const form = reactive({ newName: name, note: '', ack: false, model: '' })
     const st = reactive({ phase: 'form', error: '', busy: false, view: null })
+    // pi 切換模型的下拉選單：查得到清單才用（null＝還在查或查不到，畫輸入框）
+    const isPiModel = props.op === 'model' && dialogEngine(props.friend) === 'pi'
+    const pi = reactive({ groups: null, loading: isPiModel && Boolean(props.piModels) })
+    const piNote = computed(() => (isPiModel && !pi.loading && !pi.groups ? PI_MODEL_REMOTE_NOTE : ''))
+    async function loadPiModels() {
+      try {
+        const c = piModelChoices(cleanPiModels(await props.piModels()), props.friend.model)
+        if (c.groups.length) { pi.groups = c.groups; form.model = c.selected }
+      } catch (e) { console.info('[ASN] 查 pi 模型清單失敗，改用輸入框', e?.message ?? e) }
+      pi.loading = false
+    }
     let closed = false
     async function submit() {
       if (st.busy) return
+      if (pi.groups && !pi.groups.some(g => g.options.some(o => o.value === form.model))) { st.error = PI_MODEL_PICK_ERR; return }
       const err = opFormError(props.friend, props.op, form, props.item)
       if (err) { st.error = err; return }
       st.error = ''; st.busy = true; st.phase = 'progress'
@@ -114,9 +129,12 @@ export const PartnerOpDialog = {
       if (v?.phase === 'done') emit('done', { op: props.op, view: v })
     }
     function close() { closed = true; emit('close') }
-    onMounted(() => { if (text.value.auto) void submit() })
+    onMounted(() => {
+      if (text.value.auto) void submit()
+      if (pi.loading) void loadPiModels()
+    })
     onBeforeUnmount(() => { closed = true })
-    return { text, form, st, submit, close, name }
+    return { text, form, st, submit, close, name, pi, piNote }
   },
   template: `
 <asn-dialog :title="text.title" @close="close">
@@ -125,9 +143,16 @@ export const PartnerOpDialog = {
     <label class="op-field" v-if="op === 'rename'">新名字
       <input class="set-input" type="text" v-model="form.newName" maxlength="40" aria-label="新名字" @keydown.enter.prevent="submit">
     </label>
-    <label class="op-field" v-if="op === 'model'">模型
+    <label class="op-field" v-if="op === 'model' && pi.groups">模型
+      <select class="set-sel" v-model="form.model" aria-label="模型">
+        <optgroup v-for="g in pi.groups" :key="g.provider" :label="g.provider"><option v-for="o in g.options" :key="o.value" :value="o.value">{{ o.label }}</option></optgroup>
+      </select>
+    </label>
+    <p class="launch-notice-body" v-else-if="op === 'model' && pi.loading">正在查這台 pi 能用的模型…</p>
+    <label class="op-field" v-else-if="op === 'model'">模型
       <input class="set-input" type="text" v-model="form.model" maxlength="101" autocomplete="off" autocapitalize="off" spellcheck="false" :placeholder="text.placeholder || '例如 anthropic/claude-sonnet-5'" aria-label="模型" @keydown.enter.prevent="submit">
     </label>
+    <small class="partner-hint" v-if="piNote">{{ piNote }}</small>
     <ul class="model-points" v-if="text.points.length"><li v-for="p in text.points" :key="p">{{ p }}</li></ul>
     <label class="op-field" v-if="text.ack"><input type="checkbox" v-model="form.ack" aria-label="確認接手前要先關掉終端機"> {{ text.ack }}</label>
     <label class="op-field" v-if="op === 'handover' && !text.ack">補充的話（選填，會附在新夥伴的第一句話後面）

@@ -67,6 +67,27 @@ export function piModelWire(input) {
 // 內建通道工作者的模型代號：英數開頭，只能用英數與 . _ -（電腦端還會比對這個工作者可選的模型）
 export const ACP_MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$/
 export const ACP_MODEL_HINT = '請輸入模型代號，例如 grok-4.6 或 gemini-3.8-flash-high（只能用英數與 . _ -，最多 60 字）'
+/**
+ * pi「切換模型」的下拉選單（#443／#444）：這台 pi 列得出來的模型（pi-models.mjs 的 cleanPiModels），依提供者分組。
+ * pi 可以跨廠商切換（小良哥 #1062），所以列出所有已登入的提供者，不只開夥伴時選的那家。
+ * 只收送得出去的（piModelWire 收得下：英數與 . _ -、合起來 60 字內）；value 是「提供者/模型」，跟輸入框同一個格式。
+ * current＝名單上這個 pi 現在的模型（「提供者/模型」），放在選單裡就預選它。回 { groups: [{ provider, options: [{ value, label }] }], selected }
+ */
+export function piModelChoices(models, current = '') {
+  const groups = []
+  for (const m of Array.isArray(models) ? models : []) {
+    const value = `${m?.provider ?? ''}/${m?.model ?? ''}`
+    if (!piModelWire(value)) continue
+    let g = groups.find(x => x.provider === m.provider)
+    if (!g) groups.push((g = { provider: m.provider, options: [] }))
+    if (!g.options.some(o => o.value === value)) g.options.push({ value, label: m.model })
+  }
+  const all = groups.flatMap(g => g.options.map(o => o.value))
+  const cur = String(current ?? '').trim()
+  return { groups, selected: all.includes(cur) ? cur : all[0] ?? '' }
+}
+export const PI_MODEL_PICK_ERR = '請從清單選一個模型'
+export const PI_MODEL_REMOTE_NOTE = '這台的模型清單只能在那台電腦上看到，請照 pi 裡的名稱輸入'
 export const PI_MODEL_HINT = '請輸入模型，例如 claude-sonnet-5 或 anthropic/claude-sonnet-5（只能用英數與 . _ -，合起來最多 60 字）'
 // 背景工作者沒有視窗：「關閉」是停止它本次的執行
 export const ACP_CLOSE_LABEL = '關閉'
