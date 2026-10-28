@@ -10,10 +10,14 @@ import { PI_SETUP_TEXT, normalizePiSetup, piSetupError, piSetupView } from '../u
 const read = (...p) => fs.readFileSync(new URL(`../${p.join('/')}`, import.meta.url), 'utf8')
 const S = (o = {}) => ({ pi: true, ext: true, installed: false, stale: 0, ...o })
 
-test('沒查到狀態、或這台電腦沒有 pi 又沒裝過擴充：不顯示這一區', () => {
+test('沒查到狀態不顯示這一區；沒有 pi 又沒裝過擴充：顯示說明與官方說明連結（#343）', () => {
   assert.equal(piSetupView(null), null)
   assert.equal(piSetupView(undefined), null)
-  assert.equal(piSetupView(S({ pi: false })), null)
+  const miss = piSetupView(S({ pi: false }))
+  assert.equal(miss.missing, true)
+  assert.deepEqual(miss.lines, ['沒偵測到 pi，裝好後可以到設定開啟互通'])
+  assert.match(miss.docUrl, /^https:\/\/github\.com\//, '官方說明的網址寫死在程式裡')
+  assert.ok(!miss.showAsk && !miss.showRemove && !miss.showLogin, '沒有 pi：不給安裝或登入按鈕')
   assert.notEqual(piSetupView(S({ pi: false, installed: true })), null, '裝過就算 pi 暫時找不到也要能移除')
 })
 

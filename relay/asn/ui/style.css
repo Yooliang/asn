@@ -700,6 +700,10 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 
 /* 首次登入引導、設定頁的帳號名稱 */
 .onboard-form{display:flex;flex-direction:column;gap:10px;text-align:left}
+.connect-card{display:flex;gap:8px;align-items:flex-start;padding:8px;border:1px solid var(--line);border-radius:4px;background:var(--panel-soft)}
+.connect-card>span{display:flex;flex-direction:column;gap:3px}
+.connect-card.off{opacity:.7}
+.connect-card .aero-btn{align-self:flex-start;margin-top:2px}
 .onboard-field{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--title-fg)}
 .onboard-field .set-input{min-height:32px;padding:4px 8px;font-size:14px}
 .onboard-progress{text-align:center;color:var(--muted)}

@@ -38,6 +38,19 @@ pub enum Outcome {
     NoClaude,
     Failed(String),
     UpdateFailed(String),
+    /// 使用者關掉了「自動安裝或更新 Claude 外掛」（#343）：不裝也不更新，已經裝的不動
+    AutoOff,
+}
+
+/// 「自動安裝或更新 Claude 外掛」開關（#343）存的檔（資料夾底下）：{"auto": true|false}。預設開；沒有檔案或讀不懂都當開，舊用戶照舊自動裝
+pub const AUTO_FILE: &str = "claude-mod-auto.json";
+
+pub fn auto_on(data_dir: &Path) -> bool {
+    std::fs::read_to_string(data_dir.join(AUTO_FILE)).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()).and_then(|v| v.get("auto").and_then(serde_json::Value::as_bool)).unwrap_or(true)
+}
+
+pub fn set_auto(data_dir: &Path, on: bool) -> Result<(), String> {
+    crate::write_atomic(&data_dir.join(AUTO_FILE), &serde_json::json!({ "auto": on }).to_string()).map_err(|e| format!("設定存不進去：{e}"))
 }
 
 impl Outcome {
@@ -50,6 +63,7 @@ impl Outcome {
             Outcome::NoClaude => "Claude 外掛：未安裝（找不到 Claude Code）".into(),
             Outcome::Failed(why) => format!("Claude 外掛：安裝失敗：{why}"),
             Outcome::UpdateFailed(why) => format!("Claude 外掛：更新失敗：{why}"),
+            Outcome::AutoOff => "Claude 外掛：已關閉自動安裝（已經裝的會留著）".into(),
         }
     }
 }
@@ -65,7 +79,13 @@ impl Outcome {
             Outcome::NoClaude => json!({ "state": "no_claude" }),
             Outcome::Failed(why) => json!({ "state": "failed", "reason": report_reason(why) }),
             Outcome::UpdateFailed(why) => json!({ "state": "update_failed", "reason": report_reason(why) }),
+            // 後台的狀態清單沒有「關閉自動安裝」：不回報（呼叫端看 reportable）
+            Outcome::AutoOff => json!({ "state": "checking" }),
         }
+    }
+    /// 要不要回報給後台：關閉自動安裝時不知道裝了沒，不回報（舊狀態留著）
+    pub fn reportable(&self) -> bool {
+        !matches!(self, Outcome::AutoOff)
     }
 }
 
@@ -308,6 +328,9 @@ fn first_install(runner: &dyn Runner, claude: &Path, mod_dir: &Path, data_dir: &
 
 /// 入口：標記的版本和資料夾一致就不碰 Claude Code；沒標記＝第一次安裝；標記版本不同＝更新（或尊重解除安裝）。
 pub fn run(runner: &dyn Runner, path_var: &OsStr, extra: &[PathBuf], mod_dir: &Path, data_dir: &Path, now_secs: u64) -> Outcome {
+    if !auto_on(data_dir) {
+        return Outcome::AutoOff;
+    }
     let want = plugin_version(mod_dir);
     let marker = read_marker(data_dir);
     if let (Some((mv, md)), Some(w)) = (&marker, &want) {
@@ -431,6 +454,30 @@ pub fn claude_mod_status(s: tauri::State<'_, ModState>) -> String {
     s.0.lock().map(|g| g.clone()).unwrap_or_default()
 }
 
+/// 「自動安裝或更新 Claude 外掛」開關（#343）
+#[cfg(feature = "gui")]
+#[tauri::command]
+pub fn claude_mod_auto_get(app: tauri::State<'_, crate::App>) -> bool {
+    auto_on(&app.data_dir)
+}
+
+/// 設開關；打開時馬上在背景跑一次安裝檢查（跟啟動時同一條路），結果用 claude-mod-status 事件送回畫面。回開關的新值
+#[cfg(feature = "gui")]
+#[tauri::command]
+pub async fn claude_mod_auto_set(app: tauri::State<'_, crate::App>, handle: tauri::AppHandle, on: bool) -> Result<bool, String> {
+    use tauri::{Emitter, Manager};
+    set_auto(&app.data_dir, on)?;
+    let dir = app.data_dir.clone();
+    let out = tauri::async_runtime::spawn_blocking(move || run_real(&dir)).await.unwrap_or_else(|_| Outcome::Failed("背景工作中斷".into()));
+    if out.reportable() {
+        set_report(Some(out.report()));
+    }
+    let line = out.line();
+    *handle.state::<ModState>().0.lock().unwrap() = line.clone();
+    let _ = handle.emit("claude-mod-status", line);
+    Ok(on)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -488,6 +535,24 @@ mod tests {
         let mk = marker(&d).expect("要留標記");
         assert_eq!(mk["installedVersion"], "1.2.3");
         assert_eq!(mk["installedAt"], 77);
+    }
+
+    #[test]
+    fn 自動安裝開關_預設開_關著時不裝也不更新也不回報_檔案壞了當開() {
+        let (_t, m, d) = dirs();
+        assert!(auto_on(&d), "沒有檔案＝開（舊用戶照舊自動裝）");
+        std::fs::write(d.join(AUTO_FILE), "{壞").unwrap();
+        assert!(auto_on(&d), "讀不懂也當開");
+        set_auto(&d, false).unwrap();
+        assert!(!auto_on(&d));
+        let f = Fake::new(vec![ok("[]")]);
+        let r = run(&f, std::ffi::OsStr::new(""), &[], &m, &d, 77);
+        assert_eq!(r, Outcome::AutoOff);
+        assert!(f.log().is_empty(), "關著：一個 claude 指令都不跑：{:?}", f.log());
+        assert!(!r.reportable(), "不知道裝了沒，不回報給後台");
+        assert_eq!(r.line(), "Claude 外掛：已關閉自動安裝（已經裝的會留著）");
+        set_auto(&d, true).unwrap();
+        assert!(auto_on(&d));
     }
 
     /// 一個舊標記（版本 1.0.0）：模擬「ASN 更新了，外掛資料夾是 1.2.3」
