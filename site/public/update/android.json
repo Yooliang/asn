@@ -1,8 +1,8 @@
 {
-  "version": "0.1.100",
-  "versionCode": 1100,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.100_android.apk",
-  "sha256": "dbd3e7b047f5ab401045f5f5d5346ae1ea331a2472f71f2cede589b7f7786da3",
-  "notes": "與電腦版 0.1.100 同步：接手自己在終端機開的 pi、pi 切換模型改下拉選單（手機也有）、引導頁加「連接你的 AI 工具」、已關掉的 pi 不再留在名單",
-  "bytes": 9461220
+  "version": "0.1.101",
+  "versionCode": 1101,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.101_android.apk",
+  "sha256": "3388e24f61b1c875565d6d7bc56599d6a0649d23cecf65314deaf998eab35981",
+  "notes": "0.1.101：手機開新夥伴可選運行並經 pi 帶模型；設定改第四頁籤；版本紀錄從資料庫讀；活躍度跨設備",
+  "bytes": 9489892
 }
