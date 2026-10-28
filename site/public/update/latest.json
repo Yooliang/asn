@@ -1,11 +1,11 @@
 {
-  "version": "0.1.101",
-  "notes": "改進：ASN 開的夥伴一律改用 Windows 原生主控台開（外觀會從 Windows Terminal 分頁變成原生視窗），開著別的 Windows Terminal 視窗時也能切前景／背景；開在 Windows Terminal 分頁裡的舊夥伴切不了時會說明原因（#476）。新增：關掉的 pi 可以從名單「喚醒」，用同一段對話在原本的資料夾重開（#468）。新增：手機開新夥伴可以選運行方式，經 pi 時能指定提供者和模型，開好時寫出實際用的模型；那台電腦要 0.1.101 以上才會照選的模型開（#421、#422）。改進：活躍度看得到別台設備的夥伴，在忙沒寄信也算活躍（#397）。修正：舊設定 IRORI_ENGINES 沒列 pi 時，pi 不再被當成自己開的、收不到信（#467）。改進：手機的設定類內頁改在第四頁籤，開新夥伴也搬進去（#461）；版本紀錄改從資料庫讀（#462）。提醒：「接手 pi」與「pi 改名」都要新版的 pi ASN 擴充：重新執行 pi install <ASN 原始碼>/relay/pi-extension，再重開 pi。",
-  "pub_date": "2026-10-28T07:55:08.329Z",
+  "version": "0.1.102",
+  "notes": "新增：經 pi 開的夥伴改開在 ASN 自帶的終端，在名單上可以切前景／背景；這台沒有自帶的終端時改用一般視窗開（#475）。新增：終端面板列出開在自帶終端的 pi，可以看畫面、代送一行字；pi 問要不要信任資料夾這類提問會列出選項，你按了才代答（#483）。改進：ASN 開的 pi 會自動信任這一次的資料夾設定（不寫進 pi 的紀錄）；不想要的話在啟動設定加 --no-approve。遠端開 pi 沒出現在名單上時，說明會提醒可能在問要不要信任資料夾（#487）。新增：Linux 機器橋支援 pi（要在機器橋的引擎設定加上 pi），也能從手機關閉用 tmux 開的夥伴（#456、#457）。修正：Claude 外掛回報到一半時，偶爾被誤判成沒有回應（#472）。",
+  "pub_date": "2026-10-28T10:02:29.692Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjNkZGVNN0JVU0d2U1pqaTVyaHNad21YdkxtbUFSRW9YU2xZa05CalJvM0lJYkg2Y0srOURmMHdlc1JhQTA3NFdKS2x1RjEyd2hGN3YwU211RklYRUFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMTc0MTA4CWZpbGU6QVNOXzAuMS4xMDFfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS4xMDEKcjEyTTFPcWdoUy91Ylc3K3Bjb3JOVENqbk5nY2YzcUdjbXFBaEI5RTlkWUlsQ1hXeThvUEk4UVNLT1BRWHoxUnMyMlZReGtIdVJJRUJJTUt3VlcrQmc9PQo=",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.101_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnkrR3lkWlBCTlZ4QmZOamMzZVVLQVFYZ2hoU084SndYemErNTRZU01VcW0xNnhja0RzMDg3YWdyZVhHVUZkN0ZEUERTZU5jaE81UGdUdGYzejMzeVFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMTgxNzQ5CWZpbGU6QVNOXzAuMS4xMDJfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS4xMDIKQjhuSm03TXllK3R1U1FqYy8rcE5FRERGU2dBbmFMTCt3dVJycm9FalJ4OWJWU2J2TnI1QVIvUTgwRE5wZ3dzMkNadURONHllSklYeE01bHRObFN6RHc9PQo=",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.102_x64-setup.exe"
     }
   }
 }
