@@ -25,6 +25,7 @@ const ERROR_TEXT: Record<string, string> = {
   bad_profile: "這台電腦沒有這個啟動設定",
   bad_cwd: "工作資料夾不在這台電腦允許的清單裡",
   bad_first_message: `第一句話最多 ${FIRST_MESSAGE_MAX} 字`,
+  bad_pi_model: "經 pi 的提供者和模型要一起選，只能用英數與 . _ -",
   name_taken: "這台電腦已經有同名的視窗（或剛開過），換個名字",
   rate_limited: "這台電腦這個小時開太多視窗了，稍後再試",
   bad_request: "資料格式不對",
@@ -34,7 +35,7 @@ export const launchErrorText = (code: string) => ERROR_TEXT[code] ?? "操作失�
 const STATUS: Record<string, number> = { forbidden: 403, not_found: 404, no_launcher: 409, name_taken: 409, rate_limited: 429, internal: 500 };
 export const fail = (code: string): Reply => ({ status: STATUS[code] ?? 400, body: { error: code, detail: launchErrorText(code) } });
 
-export type LaunchRequest = { node: string; profile: string; name: string; cwd: string; first_message: string | null };
+export type LaunchRequest = { node: string; profile: string; name: string; cwd: string; first_message: string | null; pi_provider: string | null; pi_model: string | null };
 
 // 第一層格式檢查（不查資料庫）；通過回整理好的請求，不通過回錯誤碼
 export function parseLaunch(b: Json): LaunchRequest | { error: string } {
@@ -50,8 +51,13 @@ export function parseLaunch(b: Json): LaunchRequest | { error: string } {
     first = b.first_message.trim() || null;
     if (first && first.length > FIRST_MESSAGE_MAX) return { error: "bad_first_message" };
   }
-  return { node, profile, name, cwd, first_message: first };
+  // 經 pi 的提供者與模型（0.2 D2）：選填；兩個都給或都不給，格式照 piModelWire（英數開頭，之後英數與 . _ -，最多 50 字）
+  const pp = b.pi_provider ?? null, pm = b.pi_model ?? null;
+  if ((pp === null) !== (pm === null)) return { error: "bad_pi_model" };
+  if (pp !== null && (typeof pp !== "string" || typeof pm !== "string" || !PI_PART_RE.test(pp) || !PI_PART_RE.test(pm))) return { error: "bad_pi_model" };
+  return { node, profile, name, cwd, first_message: first, pi_provider: pp, pi_model: pm };
 }
+export const PI_PART_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$/;
 
 async function call(deps: LaunchDeps, fn: string, args: Record<string, unknown>): Promise<{ data: Json } | Reply> {
   const { data, error } = await deps.rpc(fn, args);
@@ -70,9 +76,11 @@ const isReply = (x: { data: Json } | Reply): x is Reply => "status" in x;
 export async function requestLaunch(deps: LaunchDeps, actor: string, raw: Json, signedUser: string | null = null): Promise<Reply> {
   const req = parseLaunch(raw);
   if ("error" in req) return fail(req.error);
+  // 帶了 pi 的提供者與模型才呼叫 9 參數的新版本（D2）；沒帶照舊呼叫原本的，行為完全不變
+  const withPi = req.pi_provider !== null;
   const r = await call(deps, "asn_relay_launch", {
     p_actor: actor, p_node: req.node, p_profile: req.profile, p_name: req.name, p_cwd: req.cwd, p_first: req.first_message,
-    ...(signedUser ? { p_signed_user: signedUser } : {}),
+    ...(withPi ? { p_signed_user: signedUser, p_pi_provider: req.pi_provider, p_pi_model: req.pi_model } : signedUser ? { p_signed_user: signedUser } : {}),
   });
   if (isReply(r)) return r;
   await deps.ring(r.data.bell_topic);
