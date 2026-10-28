@@ -55,6 +55,15 @@ test('現況：電腦端（partner_ops.rs）——非 Claude 的關閉與切換�
   assert.match(rs, /acp\.set_model\(&op\.name, op\.model\.trim\(\)\)/, 'ACP 工作者的切換模型交給工作者比對可選清單')
 })
 
+test('pi 喚醒（#468）：離線的 pi 可以喚醒（條件同 Claude：登入、電腦在線、開放遠端管理）；在線的說不需要喚醒', () => {
+  const off = P('小丙', 'pi', { status: 'offline' })
+  assert.equal(ok(off, 'resume').ok, true, ok(off, 'resume').reason)
+  assert.equal(ok(P('小丙', 'pi'), 'resume').reason, REASON.alreadyOnline)
+  const closed = menuItems(off, { ...ctx, machines: machinesByNode({ machines: [{ node: 'H', launcher: null, online: true }] }) }).find(i => i.key === 'resume')
+  assert.equal(closed.ok, false, '那台電腦沒開放遠端管理')
+  assert.equal(buildOpRequest(off, 'resume', {}).op, 'resume')
+})
+
 // ---- 缺口（尚未做；node:test 的 todo：跑得過會顯示、跑不過不算失敗，補完行為後把 todo 拿掉）----
 test('ASN 自己跑的 Grok 背景工作者（名單 engine=grok、沒有 kind）跟 Gemini 一樣有「重開」「接班換手」（#234）', () => {
   const worker = P('Grok', 'grok', { kind: undefined })

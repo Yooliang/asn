@@ -41,12 +41,11 @@ const ACP_WHY = {
   resume: '這個夥伴由 ASN 內建通道執行，不需要喚醒；要重新啟動請用「重開」',
 }
 // pi 視窗：開放「切換模型」「改名」（0.2 A4；經 pi 擴充的控制檔，電腦端見 bridge/engines/pi_control.rs）與「關閉」（只結束那個 pi 與子孫，見 partner_ops.rs close_pi）；
-// 其餘電腦端還沒接，反灰並各自說明。改名要新版的 pi 擴充，舊擴充電腦端會回「請更新擴充」
+// 離線時可「喚醒」（#468，電腦端見 partner_ops.rs resume_pi）；其餘電腦端還沒接，反灰並各自說明。改名要新版的 pi 擴充，舊擴充電腦端會回「請更新擴充」
 export const PI_OPS = ['rename', 'model', 'close']
 const PI_WHY = {
   info: '這是 pi 視窗，詳情還沒開放',
   handover: '這是 pi 視窗，接班換手還沒開放',
-  resume: '這是 pi 視窗，喚醒還沒開放（pi 沒有可接回的對話紀錄）',
   restart: REASON.restartOnlyAcp,
   remove: REASON.removeOnlyAcp,
 }
@@ -202,6 +201,7 @@ function itemReason(key, friend, engine, offline, ctx) {
   if (engine === 'other') return REASON.otherEngine
   const label = OP_LABEL[key]
   if (engine === 'pi') {
+    if (key === 'resume') return offline ? resumeReason(friend, ctx) : REASON.alreadyOnline   // 喚醒（#468）：關掉的 pi 用同一段對話重開
     if (!PI_OPS.includes(key)) return PI_WHY[key]
     if (offline) return `這個 pi 視窗已離線，現在不能「${label}」`
     return gateReason(key, friend, ctx)

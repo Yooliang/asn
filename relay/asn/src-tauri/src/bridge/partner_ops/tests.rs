@@ -2091,3 +2091,102 @@ fn pi_切換模型_pi_正在忙_馬上回已排隊_請求留著等它做完() {
     assert_eq!(reqs.len(), 1, "請求留著，pi 閒下來擴充就會處理");
     assert!(r.terminated().is_empty() && r.launched().is_empty());
 }
+
+// ================================================================================================
+// pi 喚醒（#468）：關掉的 pi 用同一段對話（--session）在原資料夾重開；檢查照開新夥伴
+// ================================================================================================
+
+/// 只放對話檔（pi 已經關了，程序表裡沒有它）；header_id 給別的值＝檔名與檔頭對不上
+fn put_pi_file(r: &Rig, file_id: &str, header_id: &str) -> PathBuf {
+    let cwd = r.work.join("專案");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let cwd_s = canonical_launch_cwd(&cwd.to_string_lossy()).unwrap().to_string_lossy().to_string();
+    let dir = r.env.pi_home.join(".pi").join("agent").join("sessions").join("--proj--");
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join(format!("2026-10-28T00-00-00-000Z_{file_id}.jsonl"));
+    std::fs::write(&f, format!("{}\n{{\"type\":\"message\"}}\n", json!({ "type": "session", "id": header_id, "cwd": cwd_s }))).unwrap();
+    f
+}
+
+#[test]
+fn pi_喚醒_用同一段對話與原本的名字在原資料夾開_登記上名單才算成功_不結束任何程序() {
+    let r = rig(Opt::default());
+    put_pi_file(&r, SID_A, SID_A);
+    *r.env.cfg.lock().unwrap() = Ok(pi_adopt_cfg(&r));
+    let res = resume(&r, "Pi妹妹", SID_A);
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    let launched = r.env.pi_launched.lock().unwrap().clone();
+    assert_eq!(launched.len(), 1);
+    assert_eq!(launched[0].0, "Pi妹妹", "原本的名字");
+    assert!(launched[0].1.contains("專案"), "對話檔記的資料夾：{}", launched[0].1);
+    assert!(launched[0].2.ends_with(&format!("{SID_A}.jsonl")), "帶 --session 接回同一段對話：{}", launched[0].2);
+    assert!(r.launched().is_empty(), "不走 Claude 的開法");
+    assert!(r.terminated().is_empty(), "不動任何程序");
+    let v = res.result.unwrap();
+    assert_eq!((v["kind"].as_str(), v["session_id"].as_str()), (Some("pi_resume"), Some(SID_A)));
+}
+
+#[test]
+fn pi_喚醒_開不起來回失敗_沒登記上回未確認_都附手動接回的指令() {
+    for launch_fails in [true, false] {
+        let r = rig(Opt::default());
+        put_pi_file(&r, SID_A, SID_A);
+        *r.env.cfg.lock().unwrap() = Ok(pi_adopt_cfg(&r));
+        if launch_fails {
+            r.env.pi_launch_fail.store(true, Ordering::SeqCst);
+        } else {
+            r.env.pi_launch_registers.store(false, Ordering::SeqCst);
+        }
+        let res = resume(&r, "Pi妹妹", SID_A);
+        assert_eq!(res.status, if launch_fails { "failed" } else { "unconfirmed" }, "{}", res.detail);
+        assert!(res.detail.contains("pi --session") && res.detail.contains(&format!("{SID_A}.jsonl")), "{}", res.detail);
+    }
+}
+
+#[test]
+fn pi_喚醒守門_資料夾不在白名單_沒有_pi_設定_遠端開關關著_同名在線_都不開() {
+    let r = rig(Opt::default());
+    put_pi_file(&r, SID_A, SID_A);
+    let mut c = pi_adopt_cfg(&r);
+    c.cwd_allow = vec![canonical_launch_cwd(&r.handoff.to_string_lossy()).unwrap_or_else(|_| { std::fs::create_dir_all(&r.handoff).unwrap(); canonical_launch_cwd(&r.handoff.to_string_lossy()).unwrap() })];
+    *r.env.cfg.lock().unwrap() = Ok(c);
+    let res = resume(&r, "Pi妹妹", SID_A);
+    assert!(res.status == "failed" && res.detail.contains("允許清單"), "{}", res.detail);
+    *r.env.cfg.lock().unwrap() = Ok(launch_cfg(&[&r.work.join("專案")]));
+    assert!(resume(&r, "Pi妹妹", SID_A).detail.contains("沒有 pi"), "啟動設定沒有 pi");
+    assert!(r.env.pi_launched.lock().unwrap().is_empty());
+
+    let off = rig(Opt { allow_first: 0, ..Opt::default() });
+    put_pi_file(&off, SID_A, SID_A);
+    *off.env.cfg.lock().unwrap() = Ok(pi_adopt_cfg(&off));
+    assert_eq!(resume(&off, "Pi妹妹", SID_A).detail, CONSENT_OFF);
+    assert_eq!(off.env.asked.load(Ordering::SeqCst), 1, "開關關著：execute 一開頭就擋下，沒走到讀對話檔那一步（asn真 審 #474）");
+    assert!(off.env.pi_launched.lock().unwrap().is_empty());
+
+    // 同名的 pi 已經登記在名單上（活著）
+    let on = rig(Opt::default());
+    put_pi_file(&on, SID_A, SID_A);
+    *on.env.cfg.lock().unwrap() = Ok(pi_adopt_cfg(&on));
+    let d = on.env.pi_home.join(".asn").join("pi-windows");
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(d.join("othersid.json"), json!({ "v": 1, "engine": "pi", "ext": 2, "sessionId": "othersid", "name": "Pi妹妹", "pid": 4900, "cwd": "x", "state": "idle", "at": NOW }).to_string()).unwrap();
+    on.os().alive.lock().unwrap().insert(4900);
+    assert_eq!(resume(&on, "Pi妹妹", SID_A).status, "failed", "在線的 pi 不喚醒（後台也先擋 already_online）");
+    assert!(on.env.pi_launched.lock().unwrap().is_empty());
+}
+
+#[test]
+fn pi_喚醒_對話檔檔名與檔頭對不上_或同一個編號有兩個檔_當作找不到() {
+    let r = rig(Opt::default());
+    put_pi_file(&r, SID_A, "bbbbbbbb-1111-2222-3333-444444444444");
+    *r.env.cfg.lock().unwrap() = Ok(pi_adopt_cfg(&r));
+    assert!(resume(&r, "Pi妹妹", SID_A).detail.contains("找不到原本的對話紀錄"));
+    let r2 = rig(Opt::default());
+    put_pi_file(&r2, SID_A, SID_A);
+    let other = r2.env.pi_home.join(".pi").join("agent").join("sessions").join("--other--");
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::copy(put_pi_file(&r2, SID_A, SID_A), other.join(format!("2026-10-27T00-00-00-000Z_{SID_A}.jsonl"))).unwrap();
+    *r2.env.cfg.lock().unwrap() = Ok(pi_adopt_cfg(&r2));
+    assert!(resume(&r2, "Pi妹妹", SID_A).detail.contains("找不到原本的對話紀錄"), "不唯一不猜");
+    assert!(r.env.pi_launched.lock().unwrap().is_empty() && r2.env.pi_launched.lock().unwrap().is_empty());
+}
