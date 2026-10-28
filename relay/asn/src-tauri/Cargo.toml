@@ -1,6 +1,6 @@
 [package]
 name = "asn"
-version = "0.1.100"
+version = "0.1.101"
 description = "ASN 即時通：懷舊風格的桌面介面"
 edition = "2021"
 publish = false
