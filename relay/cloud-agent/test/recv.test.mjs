@@ -84,7 +84,7 @@ test('roster 回報內容：一個視窗 Grok／idle／engine grok／cwd_label g
   try {
     await createReceiver({ api: apiFor(a.cfg), cfg: a.cfg, log: () => {} }).rosterOnce()
     await createReceiver({ api: apiFor(b.cfg), cfg: b.cfg, log: () => {} }).rosterOnce()
-    assert.deepEqual(st.rosters[0], { agents: [{ name: 'Grok', status: 'idle', engine: 'grok', cwd_label: 'grok-cloud' }] })
+    assert.deepEqual(st.rosters[0], { agents: [{ name: 'Grok', status: 'idle', engine: 'grok', cwd_label: 'grok-cloud' }], used_legacy_env: [] }, '沒傳就送空陣列（一律帶）')
     assert.equal(st.rosters[1].agents[0].name, 'Grok-2')
   } finally { await st.close(); rm(a.root); rm(b.root) }
 })
@@ -112,7 +112,9 @@ test('roster 403：只記一次 log、期間不再重試；過了重試期才再
 test('常駐程式煙霧測試：收到信寫進 inbox.jsonl 並 ack、回報 roster、第二個執行個體 exit 3；只關自己的 PID', async () => {
   const st = await startFakeRelay()
   const { root, env, cfg } = tmpEnv(st.url, { IRORI_RELAY_KEY: 'fake-grok-node-key', IRORI_RECV_POLL_MS: '200', IRORI_ROSTER_MS: '200' })
-  const spawnRecv = () => spawn(process.execPath, [script('recv.mjs')], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: childEnv(env) })
+  // tmpEnv 已把舊名複製到新名；拿掉 ASN_ROSTER_MS 讓這一個只剩舊名，名單的 used_legacy_env 應該列出它
+  const { ASN_ROSTER_MS: _dropped, ...legacyOnly } = env
+  const spawnRecv = () => spawn(process.execPath, [script('recv.mjs')], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: childEnv(legacyOnly) })
   const c = spawnRecv()
   let out = ''; c.stdout.on('data', d => (out += d)); c.stderr.on('data', d => (out += d))
   try {
@@ -121,6 +123,10 @@ test('常駐程式煙霧測試：收到信寫進 inbox.jsonl 並 ack、回報 ro
     assert.equal(st.mails[0].acked, true, out)
     assert.deepEqual(readJsonl(cfg.inboxFile).map(m => m.id), [U(1)])
     assert.ok(st.rosters.length >= 1)
+    // used_legacy_env（F4 PR-2）：只有舊名的 IRORI_ROSTER_MS 列出；新舊名都有的（IRORI_RECV_POLL_MS）不列；只有名字，不含值
+    const used = st.rosters[0].used_legacy_env
+    assert.deepEqual(used, ['IRORI_ROSTER_MS'], JSON.stringify(used))
+    assert.ok(!JSON.stringify(st.rosters[0]).includes('fake-grok-node-key'), '名單不含金鑰值')
     assert.equal(Number(fs.readFileSync(cfg.pidFile, 'utf8')), c.pid)
     const second = spawnRecv()
     const code = await new Promise(r => second.on('close', r))
@@ -167,4 +173,17 @@ test('pid 檔過期（同一個 pid 現在是無關程序）：視為沒人在�
     const f = path.join(root, 'recv.pid'); fs.writeFileSync(f, String(process.ppid))
     assert.equal(acquirePidLock(f, 'definitely-not-this-process.mjs'), true)
   } finally { rm(root) }
+})
+
+test('roster：usedLegacyEnv 排序去重後放頂層，不放每位代理；改傳入的陣列不影響已送內容', async () => {
+  const st = await startFakeRelay()
+  const { root, cfg } = tmpEnv(st.url)
+  try {
+    const names = ['IRORI_RELAY_URL', 'IRORI_RELAY_ID', 'IRORI_RELAY_URL']
+    const rx = createReceiver({ api: apiFor(cfg), cfg, log: () => {}, usedLegacyEnv: names })
+    names.push('IRORI_X')
+    await rx.rosterOnce()
+    assert.deepEqual(st.rosters[0].used_legacy_env, ['IRORI_RELAY_ID', 'IRORI_RELAY_URL'])
+    assert.ok(st.rosters[0].agents.every(a => !('used_legacy_env' in a)))
+  } finally { await st.close(); rm(root) }
 })

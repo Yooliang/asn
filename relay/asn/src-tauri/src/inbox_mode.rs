@@ -210,6 +210,8 @@ pub struct InboxCfg {
     pub backoff_ms: Vec<u64>,
     /// roster 403（沒有 can_roster）後多久才再試
     pub roster_403_retry_ms: u64,
+    /// 名單頂層 used_legacy_env 的來源（正式＝envc 的全域記錄；測試給自己的，不受別的測試影響）
+    pub legacy_env: fn() -> Vec<String>,
 }
 
 impl InboxCfg {
@@ -226,6 +228,7 @@ impl InboxCfg {
             roster_ms: base.roster_ms,
             backoff_ms: base.pull_backoff_ms.clone(),
             roster_403_retry_ms: 3_600_000,
+            legacy_env: crate::envc::used_legacy,
         }
     }
 }
@@ -244,6 +247,8 @@ async fn roster_once<A: MailApi>(api: &A, cfg: &InboxCfg, blocked_until: &mut u6
     // 本機執行中的代理（僅顯示、不可收信；開關見 procscan::enabled）
     let procs = tokio::task::spawn_blocking(crate::bridge::procscan::scan_system).await.unwrap_or_default();
     let body = crate::bridge::roster::roster_body_with_procs(&windows, None, Value::Null, &procs);
+    // 靠舊環境變數名才拿到設定的舊名（只送名字；新版一律帶，沒用到是空陣列）
+    let body = crate::bridge::roster::with_legacy_env(body, (cfg.legacy_env)());
     match api.call("roster", Some(body)).await {
         Ok(_) => {
             if *warned {

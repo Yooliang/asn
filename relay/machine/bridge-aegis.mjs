@@ -2,7 +2,7 @@
 // Irori relay Aegis 轉接橋（Linux / Aegis 主機）。
 // 用一把仲介節點金鑰收信；每封信 = 一次 POST <aegis>/api/v1/agent-chat/ask（to_agent 當成員 slug），把 answer 用 reply_to 寄回。
 // 只有白名單（ASN_AEGIS_ALLOW，舊名 IRORI_AEGIS_ALLOW 照認）內的成員能被問；不開 claude -p、不需要 claude CLI。
-import { envGet } from './env-compat.mjs'
+import { envGet, usedLegacyEnv } from './env-compat.mjs'
 import { pickAnon } from './anon.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -84,7 +84,8 @@ async function refreshRoster() {
   // name＝中文名（沒有才用 slug）；cwd_label 留空：畫面會把它當標題副標露出，slug 是內部代號不給人看
   const agents = ALLOW.filter(slug => slug !== SELF_MEMBER).map(slug => ({ name: displayName(slug), status: 'idle', cwd_label: '' }))
   try {
-    await api('roster', { method: 'POST', body: { agents } })
+    // used_legacy_env（F4 PR-2）：靠舊環境變數名才拿到設定的舊名（只有名字、排序去重，沒用到是空陣列）；舊仲介忽略
+    await api('roster', { method: 'POST', body: { agents, used_legacy_env: usedLegacyEnv() } })
     rosterWarned = false
   } catch (e) {
     if (!rosterWarned) { log(`roster post failed: ${e.message} (will keep trying quietly)`); rosterWarned = true }

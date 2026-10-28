@@ -1,0 +1,47 @@
+{
+  "_說明": "名單回報頂層 used_legacy_env 的判定（F4 PR-2，規格見 issue #423）：只列「新名沒有值（沒設或只有空白）、退回舊名而且舊名有值（不是空白）」的舊名；排序去重；沒用到是空陣列。三邊（Rust envc.rs、relay/machine/env-compat.mjs、relay/cloud-agent/env-compat.mjs）讀同一份。read 是程式依序讀的名字（不含 ASN_／IRORI_ 前綴）；雲端代理在入口一次讀完整張對照表，不看 read。",
+  "cases": [
+    {
+      "name": "只有舊名＝列入",
+      "env": { "IRORI_RELAY_ID": "N" },
+      "read": ["RELAY_ID"],
+      "used": ["IRORI_RELAY_ID"]
+    },
+    {
+      "name": "只有新名＝不列",
+      "env": { "ASN_RELAY_ID": "N" },
+      "read": ["RELAY_ID"],
+      "used": []
+    },
+    {
+      "name": "兩個都有＝不列",
+      "env": { "ASN_RELAY_ID": "N", "IRORI_RELAY_ID": "O" },
+      "read": ["RELAY_ID"],
+      "used": []
+    },
+    {
+      "name": "新名空白＋舊名有值＝列入",
+      "env": { "ASN_RELAY_ID": "  ", "IRORI_RELAY_ID": "O" },
+      "read": ["RELAY_ID"],
+      "used": ["IRORI_RELAY_ID"]
+    },
+    {
+      "name": "新名空白＋舊名也空白＝不列",
+      "env": { "ASN_RELAY_ID": "", "IRORI_RELAY_ID": " " },
+      "read": ["RELAY_ID"],
+      "used": []
+    },
+    {
+      "name": "兩個都沒設＝不列",
+      "env": {},
+      "read": ["RELAY_ID"],
+      "used": []
+    },
+    {
+      "name": "多個舊名、重複讀：排序去重",
+      "env": { "IRORI_RELAY_URL": "http://127.0.0.1:1", "IRORI_RELAY_ID": "N" },
+      "read": ["RELAY_URL", "RELAY_ID", "RELAY_URL"],
+      "used": ["IRORI_RELAY_ID", "IRORI_RELAY_URL"]
+    }
+  ]
+}

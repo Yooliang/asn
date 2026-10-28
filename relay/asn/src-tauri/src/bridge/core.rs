@@ -264,6 +264,9 @@ pub struct Core {
     mod_src: Arc<dyn Fn() -> Option<Value> + Send + Sync>,
     /// 上次成功回報的外掛狀態（內容, 時間）；沒變化就不重報
     mod_sent: Option<(String, u64)>,
+    /// 名單頂層 used_legacy_env 從哪裡來（正式＝envc 的全域記錄；測試預設給空的，
+    /// 不讓別的測試讀環境時記下的舊名影響名單內容；要驗內容用 set_legacy_env_source 換）
+    legacy_src: Arc<dyn Fn() -> Vec<String> + Send + Sync>,
     /// 上次回報名單時本機 Claude 視窗的指紋與時間（即時監看用）
     roster_fp: Option<String>,
     roster_at: u64,
@@ -302,6 +305,15 @@ pub fn sent_mark_name(from_window: &str, to_node: &str, to_agent: &str) -> Strin
     Sha1::digest(j.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// 正式讀 envc 的全域記錄；測試預設空的（全域記錄會被同一個測試程序裡別的測試寫到）
+fn default_legacy_src() -> Arc<dyn Fn() -> Vec<String> + Send + Sync> {
+    if cfg!(test) {
+        Arc::new(Vec::new)
+    } else {
+        Arc::new(crate::envc::used_legacy)
+    }
+}
+
 impl Core {
     pub fn new(cfg: Config, relay: Arc<Relay>, sink: Arc<dyn WorkerSink>, nonce: &str, log: Arc<BridgeLog>, alive: Arc<dyn Fn(u32) -> bool + Send + Sync>, now: u64) -> Core {
         let cursors = Cursors::load(&cfg.work_dir);
@@ -310,7 +322,7 @@ impl Core {
         let mut c = Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, created: Arc::new(crate::heartbeat::process_started_ms), now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
-            last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
+            last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, respond_sent: String::new(), active: BTreeMap::new(),
         };
         c.restore();
@@ -356,6 +368,12 @@ impl Core {
     /// 接上遠端開視窗（第三段）。沒接＝名單回報 launcher 送 null、不處理 launch_pending
     pub fn set_mod_source(&mut self, f: Arc<dyn Fn() -> Option<Value> + Send + Sync>) {
         self.mod_src = f;
+    }
+
+    /// 換掉名單頂層 used_legacy_env 的來源（測試用；正式一律是 envc 的全域記錄）
+    #[cfg(test)]
+    pub fn set_legacy_env_source(&mut self, f: Arc<dyn Fn() -> Vec<String> + Send + Sync>) {
+        self.legacy_src = f;
     }
 
     pub fn set_created(&mut self, f: Arc<dyn Fn(u32) -> Option<u64> + Send + Sync>) {
@@ -560,7 +578,9 @@ impl Core {
         }
         // 在忙也算活躍（E4）：這一輪忙碌的視窗記成現在；名單上沒有的名字不保留
         self.active = roster::active_marks(&self.active, &self.roster, now);
-        let mut body = roster::with_active(roster::roster_body_with_procs(&self.roster, asn.as_deref(), launcher, &procs), &self.active);
+        let body = roster::with_active(roster::roster_body_with_procs(&self.roster, asn.as_deref(), launcher, &procs), &self.active);
+        // 靠舊環境變數名才拿到設定的舊名（只送名字；新版一律帶，沒用到是空陣列）
+        let mut body = roster::with_legacy_env(body, (self.legacy_src)());
         // 這台電腦的 Claude 外掛狀態：啟動檢查完與狀態變化時才附（舊後台會丟掉這個欄位，不壞）
         let due = roster::mod_report_due((self.mod_src)(), self.mod_sent.as_ref(), now);
         if let Some(m) = &due {

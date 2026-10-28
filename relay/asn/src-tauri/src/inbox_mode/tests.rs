@@ -221,6 +221,7 @@ fn cfg_for(dir: &Path, name: &str) -> InboxCfg {
         roster_ms: 10_000,
         backoff_ms: vec![30, 60],
         roster_403_retry_ms: 3_600_000,
+        legacy_env: || vec!["IRORI_RELAY_ID".into()],
     }
 }
 
@@ -248,6 +249,7 @@ async fn 主迴圈_啟動就回報名單並收信_補拉收到後來的信_門�
     let roster = b.fake.of("roster");
     assert!(!roster.is_empty());
     assert_eq!(roster[0].json()["agents"][0]["name"], "家用-收件匣");
+    assert_eq!(roster[0].json()["used_legacy_env"], json!(["IRORI_RELAY_ID"]), "名單頂層帶 used_legacy_env（來源可換，不受別的測試影響）");
     b.mails.lock().unwrap().push(mail(B, "之後來的"));
     assert!(wait_until(|| lines(d.path()).len() == 2).await, "補拉沒收到後來的信");
     shutdown.notify_one();

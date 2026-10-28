@@ -50,6 +50,7 @@ async fn 名單回報_自動回信視窗以_claude_引擎_idle_出現_同名的�
     let h = respond_harness().await;
     let me = me_in(&h.fr.rosters()[0]);
     assert_eq!((me["engine"].as_str(), me["status"].as_str()), (Some("claude"), Some("idle")));
+    assert!(h.fr.rosters()[0]["used_legacy_env"].is_array(), "名單頂層帶 used_legacy_env（陣列）");
     assert_eq!(h.core.roster.iter().filter(|w| w.name == ME).count(), 1);
     // 本機剛好有同名的互動式視窗：名字只能對應一個收件者，留自動回信的那個
     put_session(h.sessions.path(), 5000, ME, "busy", 7);

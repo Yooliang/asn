@@ -62,7 +62,9 @@ export function applyEnvCompat(source = process.env, options = {}) {
       }
     }
   }
-  return { env, legacyNames, conflictNames }
+  // legacyNames：新名沒有值（沒設或只有空白）、舊名有值才算（與 Rust envc.rs、machine env-compat.mjs 同一規則，
+  // 共用向量 relay/shared/test-vectors/legacy-env.json）；排序後就是名單回報頂層的 used_legacy_env
+  return { env, legacyNames: [...legacyNames].sort(), conflictNames }
 }
 
 /** 平台或 shell 是否已提供節點金鑰（新名或舊名皆可；不讀檔、不印值） */

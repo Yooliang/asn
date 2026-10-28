@@ -344,6 +344,14 @@ pub fn active_marks(prev: &BTreeMap<String, u64>, windows: &[Window], now_ms: u6
 }
 
 /// 名單請求內容裡有記錄的條目加上 active_at（毫秒）。可選欄位：舊後台會丟掉，舊用戶端略過；後台照 10 秒節流寫進夥伴的最後活動時間
+/// 名單回報頂層的 `used_legacy_env`（F4 PR-2，issue #423）：這個程序靠舊環境變數名才拿到設定的舊名清單
+/// （只有名字、排序去重，見 `envc::used_legacy`）；沒用到送空陣列，新版一律帶。
+/// 放頂層不放每位代理：每位代理的欄位會被後台白名單丟掉。
+pub fn with_legacy_env(mut body: Value, names: Vec<String>) -> Value {
+    body["used_legacy_env"] = json!(names);
+    body
+}
+
 pub fn with_active(mut body: Value, marks: &BTreeMap<String, u64>) -> Value {
     if let Some(agents) = body.get_mut("agents").and_then(Value::as_array_mut) {
         for a in agents.iter_mut() {
@@ -412,6 +420,15 @@ pub fn parse_partners(resp: &Value) -> BTreeMap<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 名單頂層帶_used_legacy_env_而且是陣列() {
+        let body = with_legacy_env(roster_body(&[], None, Value::Null), vec![]);
+        assert_eq!(body["used_legacy_env"], json!([]), "沒用到舊名也要送空陣列");
+        let body = with_legacy_env(roster_body(&[], None, Value::Null), vec!["IRORI_RELAY_ID".into(), "IRORI_RELAY_URL".into()]);
+        assert_eq!(body["used_legacy_env"], json!(["IRORI_RELAY_ID", "IRORI_RELAY_URL"]));
+        assert!(body["agents"].as_array().unwrap().iter().all(|a| a.get("used_legacy_env").is_none()), "不放在每位代理");
+    }
 
     fn put(d: &Path, pid: u32, v: Value) {
         std::fs::write(d.join(format!("{pid}.json")), v.to_string()).unwrap();
