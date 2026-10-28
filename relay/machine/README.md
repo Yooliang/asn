@@ -316,6 +316,15 @@ node <ASN 原始碼>/relay/machine/recv.mjs --once     # 拉一次、印出、ac
 - 順手清理：登記檔 pid 已死超過一天的、沒有登記檔又超過 7 天的收件匣。
 - 名單上報：所有引擎的視窗都會帶可選欄位 `active_at`（信投遞成功、或這一輪看到視窗在忙），pi 另帶 `model`、`detail`（擴充太舊）、`mod_loaded`；舊後台會丟掉這些欄位。
 
+### 從手機關閉 tmux 開的夥伴（`tmux-partners.mjs`，#457，只在 Linux 啟用）
+
+機器橋用 tmux 開夥伴時，把 session 名記進 `machine-<ID>/tmux-opened.json`（原子寫入）。手機下令關閉時（`partner_op_pending`／`partner_op_result`）：
+
+- 只認 `close`，其他操作一律回報「這類夥伴不支援這個操作」。成功、失敗、不支援都會回報，手機不會等到逾時。
+- 只關記錄裡有、而且 `tmux has-session -t =asn-<名字>` 精確比對存在的；使用者自己開的 `asn-` 開頭 session 不在記錄裡，不關。只用 `tmux kill-session -t =asn-<名字>`，不用 pid 或名稱去找程序。
+- 這台沒有開放遠端開視窗與管理（啟動設定不可用，例如 `remote_launch:false`）不動，動手前再驗一次；收發室視窗不動。
+- 記錄檔壞了一律不關並照實說；每輪順手把已經不存在的 session 從記錄拿掉。
+
 ### acp 轉接器：背景工作者（Gemini 等，`engines/acp.mjs`，#134 第一期）
 
 `ASN_ENGINES=claude,acp` 載入（`run-bridge.ps1 -Engines claude,acp`）。不接「使用者已開的視窗」，而是依 `~/.asn/agents.json`（範本 `agents.example.json`，`ASN_AGENTS_FILE` 可改路徑）長駐啟動一批**工作者**（背景 AI），名單上以工作者名出現（roster 的 `engine` 欄位＝`roster_engine`，例如 `gemini`）。
