@@ -36,6 +36,7 @@ import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, r
 import { installUiLog } from './lib/ui-log.mjs'
 import { MODEL_CATALOG, cliInstalled, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
 import { PI_SETUP_TEXT, piSetupError, piSetupView } from './lib/pi-setup.mjs'
+import { CONNECT_TEXT } from './lib/connect-tools.mjs'
 import { QUOTA_HOOK_TEXT, quotaHookError, quotaHookView } from './lib/quota-hook.mjs'
 import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
 import { CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, buddyConsoleItem, consoleReq, engineForProfile,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice, foregroundOnlyProfile, withTimeout } from './lib/partner-launch-ui.mjs'
@@ -384,6 +385,11 @@ async function runPiSetup(call, doneText) {
   try { piSetup.raw = await call(); piSetup.msg = doneText } catch (e) { piSetup.msg = piSetupError(e) } finally { piSetup.busy = false }
 }
 const quotaHook = reactive({ raw: null, busy: false, confirm: false, msg: '' })
+// Claude 外掛「自動安裝或更新」開關（#343）：null＝還沒查到（舊版 Rust 沒有這個指令就不顯示）
+const claudeModAuto = ref(null)
+async function loadClaudeModAuto() {
+  try { claudeModAuto.value = await invoke('claude_mod_auto_get') } catch { claudeModAuto.value = null }
+}
 async function loadQuotaHook() {
   try { quotaHook.raw = await transport.quotaHookStatus() } catch { quotaHook.raw = null }
 }
@@ -816,7 +822,7 @@ async function pollLaunchResults() {
 void refreshCliTools()
 void launchersLoop()
 void loadLaunchPrefs()
-void loadPiSetup(); void loadQuotaHook()
+void loadPiSetup(); void loadQuotaHook(); void loadClaudeModAuto()
 setInterval(() => void pollLaunchResults(), LAUNCHERS_POLL_MS)   // 只在有剛開的夥伴要追進度時才查
 // 語音：整合模式的對話分頁用這一份；設定存在 Rust 端的 voice.json（對話視窗也讀同一份）
 const voice = createVoiceUi({ invoke, listen, createMic, createAudio: browserAudio, reactive })
@@ -1538,6 +1544,7 @@ const app = createApp({
       launch: { tools: launchToolRows.value, maxPerHour: launchPrefs.maxPerHour, cwdText: launchCwdText.value },
       piSetup: piSetupView(piSetup.raw, piSetup),
       quotaHook: quotaHookView(quotaHook.raw, quotaHook),
+      claudeModAuto: claudeModAuto.value,
       version: info.version,
       log: buildLogView({ entries: changelogEntries.value, current: info.version, available: upd.phase === 'idle' ? null : upd.info }),
     }))
@@ -1584,6 +1591,8 @@ const app = createApp({
         case 'pi-setup-cancel': piSetup.confirm = false; break
         case 'pi-setup-install': await runPiSetup(() => transport.piSetupInstall(), PI_SETUP_TEXT.installed); break
         case 'pi-setup-remove': await runPiSetup(() => transport.piSetupRemove(), PI_SETUP_TEXT.removed); break
+        case 'pi-login': try { await invoke('ai_cli_login', { toolId: 'pi' }); piSetup.msg = CONNECT_TEXT.piLoginNote } catch (e) { piSetup.msg = piSetupError(e) } break
+        case 'claude-mod-auto': try { claudeModAuto.value = await invoke('claude_mod_auto_set', { on: value === true }) } catch (e) { accounts.state.mod = `沒有成功：${String(e?.message ?? e)}`; await loadClaudeModAuto() } break
         case 'avatar-remove': await removeAvatar(); break
         case 'avatar-upload': avBusy.value = true; try { say((await uploadAvatarFile(value, { toDataUrl: async u => u, setAvatar: v => core.setSelfAvatar(v) })).message) } finally { avBusy.value = false } break   // 分離視窗已在自己那邊裁好圖，送來的是 data URL
         default: break

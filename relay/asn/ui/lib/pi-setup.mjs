@@ -2,6 +2,7 @@
 // 經使用者同意，ASN 用 pi 官方的 `pi install` 替他的 pi 加裝 ASN 擴充，之後他自己開的 pi 會自動連上 ASN；可隨時移除，設定還原。
 // 給人看的文字：純繁體中文，不出現「收發室」（對使用者說「我們這套軟體」「ASN」）。
 
+import { CONNECT_TEXT, PI_DOC_URL } from './connect-tools.mjs'
 export const PI_SETUP_TEXT = {
   title: 'pi 與 ASN 互通',
   off: '你自己開的 pi 目前不會出現在 ASN 的名單上，也不能在 ASN 收信、回信。',
@@ -36,7 +37,8 @@ export function normalizePiSetup(raw) {
 export function piSetupView(raw, ui = {}) {
   if (!raw) return null
   const s = normalizePiSetup(raw)
-  if (!s.pi && !s.installed) return null
+  // 沒偵測到 pi（#343）：卡片照樣出現，說明裝好後可以回來開啟互通，附官方說明（網址寫死在程式裡）
+  if (!s.pi && !s.installed) return { title: PI_SETUP_TEXT.title, missing: true, lines: [CONNECT_TEXT.piMissing], docUrl: PI_DOC_URL, docLabel: CONNECT_TEXT.piDoc, consent: '', msg: '', busy: false, showAsk: false, showAgree: false, showCancel: false, showRemove: false, showReinstall: false, showLogin: false }
   const busy = ui.busy === true
   const confirm = ui.confirm === true && !s.installed && !busy
   const lines = [s.installed ? PI_SETUP_TEXT.on : s.auto ? PI_SETUP_TEXT.off : PI_SETUP_TEXT.offAuto]
@@ -56,6 +58,8 @@ export function piSetupView(raw, ui = {}) {
     showCancel: confirm,
     showRemove: s.installed,
     showReinstall: s.installed && s.stale > 0 && s.ext,
+    showLogin: s.pi,   // 「登入 pi」：幫使用者開一個終端機跑 pi，讓他自己打 /login（#343）
+    loginLabel: CONNECT_TEXT.piLogin,
     askLabel: PI_SETUP_TEXT.ask,
     agreeLabel: PI_SETUP_TEXT.agree,
     cancelLabel: PI_SETUP_TEXT.cancel,

@@ -19,7 +19,7 @@ import { DEVICE_TEXT, canRemoveRow, dropAfter, moveFlags, removedRows, visibleRo
 export const SETTING_OPS = [
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
-  'closeTo', 'autostart', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove',
+  'closeTo', 'autostart', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'claude-mod-auto',
 ]
 
 export const SettingsPanel = {
@@ -326,6 +326,7 @@ export const SettingsPanel = {
           <section class="set-card" aria-label="pi 與 ASN 互通" v-if="st.piSetup">
             <b>{{ st.piSetup.title }}</b>
             <small v-for="(l, i) in st.piSetup.lines" :key="i">{{ l }}</small>
+            <small v-if="st.piSetup.docUrl"><a :href="st.piSetup.docUrl" target="_blank" rel="noopener">{{ st.piSetup.docLabel }}</a></small>
             <small v-if="st.piSetup.consent">{{ st.piSetup.consent }}</small>
             <div class="upd-row">
               <button class="aero-btn" type="button" v-if="st.piSetup.showAsk" :disabled="st.piSetup.busy" @click="act('pi-setup-ask')">{{ st.piSetup.askLabel }}</button>
@@ -333,8 +334,15 @@ export const SettingsPanel = {
               <button class="aero-btn" type="button" v-if="st.piSetup.showCancel" :disabled="st.piSetup.busy" @click="act('pi-setup-cancel')">{{ st.piSetup.cancelLabel }}</button>
               <button class="aero-btn" type="button" v-if="st.piSetup.showReinstall" :disabled="st.piSetup.busy" @click="act('pi-setup-install')">{{ st.piSetup.reinstallLabel }}</button>
               <button class="aero-btn" type="button" v-if="st.piSetup.showRemove" :disabled="st.piSetup.busy" @click="act('pi-setup-remove')">{{ st.piSetup.removeLabel }}</button>
+              <button class="aero-btn" type="button" v-if="st.piSetup.showLogin" @click="act('pi-login')">{{ st.piSetup.loginLabel }}</button>
             </div>
             <small v-if="st.piSetup.msg" role="status">{{ st.piSetup.msg }}</small>
+          </section>
+          <section class="set-card" aria-label="Claude 外掛" v-if="st.claudeModAuto !== null && st.claudeModAuto !== undefined">
+            <b>Claude 外掛</b>
+            <label class="chk"><input type="checkbox" :checked="st.claudeModAuto" @change="act('claude-mod-auto', $event.target.checked)" /><span>自動安裝或更新 Claude 外掛</span></label>
+            <small>關掉後 ASN 不再自動安裝或更新 Claude 外掛；已經裝的會留著，要移除請在 Claude Code 裡用 /plugin 移除 asn。</small>
+            <small v-if="st.accounts && st.accounts.mod" role="status">{{ st.accounts.mod }}</small>
           </section>
           <section class="set-card" aria-label="額度回報" v-if="st.quotaHook">
             <b>{{ st.quotaHook.title }}</b>

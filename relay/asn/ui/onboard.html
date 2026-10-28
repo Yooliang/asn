@@ -20,7 +20,8 @@
     <div class="login-card" v-if="steps.length">
       <div class="login-avatar is-logo"><img src="img/logo.svg" alt="" draggable="false"></div>
       <h1 class="login-h">{{ TEXT.title }}</h1>
-      <onboard-card :steps="steps" :device-default="deviceDefault" :api="api" @done="finish"></onboard-card>
+      <connect-step v-if="connect" :api="connectApi" @done="finish"></connect-step>
+      <onboard-card v-else :steps="steps" :device-default="deviceDefault" :api="api" @done="connect = true"></onboard-card>
     </div>
     <div class="login-card" v-else-if="failed">
       <h1 class="login-h">{{ TEXT.title }}</h1>
