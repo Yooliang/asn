@@ -1748,6 +1748,35 @@ mod slash_it {
         assert!(h.core.log.has("slash_command"), "寫了 log");
     }
 
+    /// #472：外掛寫狀態檔時橋剛好讀到寫到一半（空檔），不能當成外掛沒了；一直是壞檔才算
+    #[tokio::test]
+    async fn 狀態檔讀到寫到一半_先等下一輪_外掛回報照常成功() {
+        let mut h = rig(10_000).await;
+        with_mod(&h, "sid-b");
+        h.fr.put(owner(1, "/compact", "T-乙"));
+        h.core.pull("test", T0).await;
+        assert!(until(|| control_file(&h, "sid-b").is_some()).await, "寫了控制檔");
+        std::fs::write(status_path(&h, "sid-b"), "").unwrap(); // 外掛正在寫：檔案被截成空的
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(h.fr.acked().is_empty(), "半份不算外掛沒了，也還沒做完：不 ack");
+        plugin_reply(&h, "sid-b", &uid(1), true, "已壓縮");
+        assert!(until(|| h.fr.acked().contains(&uid(1))).await, "外掛寫完：照常成功並 ack");
+        assert_eq!(replies(&h, &uid(1))[0]["body"].as_str(), Some("已壓縮"));
+    }
+
+    #[tokio::test]
+    async fn 狀態檔一直是壞的_超過寬限才當外掛沒了() {
+        let mut h = rig(10_000).await;
+        with_mod(&h, "sid-b");
+        h.fr.put(owner(1, "/compact", "T-乙"));
+        h.core.pull("test", T0).await;
+        assert!(until(|| control_file(&h, "sid-b").is_some()).await, "寫了控制檔");
+        std::fs::write(status_path(&h, "sid-b"), "{半份").unwrap();
+        assert!(until(|| h.fr.acked().contains(&uid(1))).await, "寬限過了：回報失敗並 ack");
+        let r = replies(&h, &uid(1));
+        assert!(r[0]["body"].as_str().unwrap_or("").contains("沒有回應"), "{r:?}");
+    }
+
     #[tokio::test]
     async fn 不阻塞其他信_等外掛的期間別的信照常轉交_同一封信再拉不會重複執行() {
         let mut h = rig(10_000).await;

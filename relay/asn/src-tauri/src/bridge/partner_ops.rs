@@ -42,6 +42,8 @@ const PROTECTED: &str = "ASN 通知與 ASN 自己的視窗不能操作";
 /// pi 視窗的程序可能是哪個執行檔（npm 裝的 pi 由 node 跑；單檔版是 pi，也有人用 bun 跑）。關閉前登記的 pid 必須是其中之一
 const PI_PROC_STEMS: [&str; 3] = ["node", "pi", "bun"];
 const CHAIN_MAX: usize = 12;
+/// 等外掛回報時，狀態檔一直讀到「寫到一半」多久以內不算外掛沒了（#472）
+const TORN_READ_GRACE_MS: u64 = 2_000;
 
 /// 請前任寫交接的信
 pub(crate) fn ask_handoff_text(path: &Path) -> String {
@@ -938,11 +940,18 @@ impl PartnerOps {
         let mut probing = probe_at;
         let t0 = std::time::Instant::now();
         let probe_ms = self.env.mod_probe_ms();
+        // 外掛寫狀態檔不一定是原子的：剛好讀到寫到一半（空檔、JSON 不完整）時先當作「正在寫」，下一輪再讀；
+        // 一直是半份超過 TORN_READ_GRACE_MS 才算外掛沒了（#472：全套平行跑時這個時間差被放大，誤判成 Lost）
+        let mut torn_since: Option<std::time::Instant> = None;
         switch::wait_until(self.env.os(), self.env.mod_wait_ms(), 500, || {
             let Some(live) = self.mod_live(sid, pid) else {
+                if self.status_torn(sid) && torn_since.get_or_insert_with(std::time::Instant::now).elapsed() < std::time::Duration::from_millis(TORN_READ_GRACE_MS) {
+                    return false;
+                }
                 res = Some(Awaited::Lost);
                 return true;
             };
+            torn_since = None;
             let st = live.status;
             if let Some(c) = st.get("control").filter(|c| c.get("id").and_then(Value::as_str) == Some(id)) {
                 let detail = keep_text(c.get("detail").and_then(Value::as_str).unwrap_or(""), COMMAND_DETAIL_MAX);
@@ -966,6 +975,18 @@ impl PartnerOps {
         // 不論結果都收掉控制檔：之後新視窗的外掛不能再執行一次舊指令
         let _ = std::fs::remove_file(&file);
         res.unwrap_or(Awaited::Timeout)
+    }
+
+    /// 狀態檔看起來是「寫到一半」：檔案在，但內容是空的或不是完整的 JSON（讀檔失敗也算，Windows 上外掛正在寫時可能被鎖住）
+    fn status_torn(&self, sid: &str) -> bool {
+        if !roster::valid_sid(sid) {
+            return false;
+        }
+        let path = self.dirs.status.join(format!("{sid}.json"));
+        match std::fs::read_to_string(&path) {
+            Ok(s) => serde_json::from_str::<Value>(&s).is_err(),
+            Err(_) => path.exists(),
+        }
     }
 
     fn write_control(&self, sid: &str, body: &Value) -> bool {
