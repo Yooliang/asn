@@ -144,3 +144,31 @@ test('明說 identity 但被截斷（content-length 比實際長）：擋下', a
   const headers = (k, b) => ({ 'content-encoding': 'identity', 'content-length': String(b.length + 100) })[k] ?? null
   await assert.rejects(predeploy({ siteDir: dir, base: BASE, fetchFn: fakeFetchWith({ headers, bodies: onlineAll }) }), /ASN_0\.1\.98_x64-setup\.exe.*伺服器說/)
 })
+
+// ---- 歷史 APK：以前的 android.json 指過、現在清單已不指到的檔案，也要保住 ----
+const OLD = Buffer.from('fake old apk bytes')
+const oldEntry = { url: `${BASE}/update/ASN_0.1.95_android.apk`, sha256: sha(OLD), bytes: OLD.length }
+
+test('歷史 APK：本機沒有、線上有 → 補回並核對，不會被這次部署蓋掉', async () => {
+  const dir = makeSite({ exe: true, apk: true, zip: true })
+  const r = await predeploy({ siteDir: dir, fetchFn: fakeFetch({ 'update/ASN_0.1.95_android.apk': OLD }), history: [oldEntry] })
+  assert.ok(r.fetched.includes('update/ASN_0.1.95_android.apk'))
+  assert.deepEqual(fs.readFileSync(path.join(dir, 'public', 'update', 'ASN_0.1.95_android.apk')), OLD)
+})
+
+test('歷史 APK：本機和線上都沒有（早就掉了）→ 不擋部署，記在略過', async () => {
+  const dir = makeSite({ exe: true, apk: true, zip: true })
+  const r = await predeploy({ siteDir: dir, fetchFn: fakeFetch({}), history: [oldEntry] })
+  assert.ok(r.skipped.includes('update/ASN_0.1.95_android.apk'))
+})
+
+test('歷史 APK：線上的內容和當時記的 sha256 對不起來 → 擋下', async () => {
+  const dir = makeSite({ exe: true, apk: true, zip: true })
+  await assert.rejects(predeploy({ siteDir: dir, fetchFn: fakeFetch({ 'update/ASN_0.1.95_android.apk': 'tampered' }), history: [oldEntry] }), /sha256|大小/)
+})
+
+test('歷史 APK：不是 git 倉庫（或沒有歷史）時不出事', async () => {
+  const dir = makeSite({ exe: true, apk: true, zip: true })
+  const r = await predeploy({ siteDir: dir, fetchFn: fakeFetch({}) })
+  assert.ok(!r.skipped.some(f => f.includes('0.1.95')))
+})

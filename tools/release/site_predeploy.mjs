@@ -4,10 +4,14 @@
 //   update/latest.json       電腦版更新：platforms.*.url（沒有 sha256；下載時比對伺服器回的大小）
 //   update/android.json      手機更新：url，帶 sha256 與 bytes
 //   download/downloads.json  下載區：files.*.url，帶 sha256 與 size
+// 另外還會讀 update/android.json 的 git 歷史：以前指過的每個手機 APK（帶 sha256、bytes）也算「要保留」的檔案。
+// 它們是別台電腦發的、不進 git，目前清單已不指到，卻還有人在下載；本機沒有就先從線上補，不然這次部署會把它們蓋掉（0.1.103 就這樣掉過）。
+// 線上也已經沒有的（早就掉了）不擋部署，只記在 skipped；本機或線上有的一律補齊並核對。
 // 用法：node tools/release/site_predeploy.mjs [--site <site 資料夾>] [--base <網站網址>]
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -20,7 +24,20 @@ const readJson = file => {
 }
 
 // 清單裡指到本站的檔案：[{ rel（相對 public/）、sha256?、size?、optional? }]
-export function wantedFiles(siteDir, base = DEFAULT_BASE) {
+// 以前的 android.json 指過的 APK：[{ url, sha256, bytes }]。不是 git 倉庫或沒有歷史就回空陣列。
+export function androidHistory(siteDir) {
+  try {
+    const git = args => execFileSync('git', ['-C', siteDir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 })
+    const rel = 'public/update/android.json'
+    const out = []
+    for (const h of git(['log', '--format=%H', '--', rel]).split(/\s+/).filter(Boolean)) {
+      try { const j = JSON.parse(git(['show', `${h}:./${rel}`])); if (j?.url) out.push({ url: j.url, sha256: j.sha256, bytes: j.bytes }) } catch { /* 那一版讀不出來就略過 */ }
+    }
+    return out
+  } catch { return [] }
+}
+
+export function wantedFiles(siteDir, base = DEFAULT_BASE, history = androidHistory(siteDir)) {
   const pub = path.join(siteDir, 'public')
   const out = new Map()
   const add = (url, extra = {}) => {
@@ -34,6 +51,7 @@ export function wantedFiles(siteDir, base = DEFAULT_BASE) {
     add(p?.url)
     if (p?.url) add(`${p.url}.sig`, { optional: true })   // 簽章也放在旁邊；線上沒有就算了（更新用 latest.json 裡的簽章字串）
   }
+  for (const h of history) add(h.url, { sha256: h.sha256, size: h.bytes, history: true })   // 歷史 APK：本機和線上都沒有的不擋
   const android = readJson(path.join(pub, 'update', 'android.json'))
   if (android?.url) add(android.url, { sha256: android.sha256, size: android.bytes })
   const dl = readJson(path.join(pub, 'download', 'downloads.json'))
@@ -47,10 +65,10 @@ function check(buf, want, label) {
 }
 
 // 回傳 { present, fetched, skipped }；任何一個檔案補不起來就丟錯（訊息寫明是哪個檔）
-export async function predeploy({ siteDir = DEFAULT_SITE, base = DEFAULT_BASE, fetchFn = fetch, log = () => {} } = {}) {
+export async function predeploy({ siteDir = DEFAULT_SITE, base = DEFAULT_BASE, fetchFn = fetch, log = () => {}, history } = {}) {
   const pub = path.join(siteDir, 'public')
   const result = { present: [], fetched: [], skipped: [] }
-  for (const want of wantedFiles(siteDir, base)) {
+  for (const want of wantedFiles(siteDir, base, history)) {
     const file = path.join(pub, ...want.rel.split('/'))
     if (fs.existsSync(file)) {
       // 本機有：有 sha／大小的就核對，不符就擋（不覆蓋，免得把別人的檔案換掉）
@@ -62,7 +80,7 @@ export async function predeploy({ siteDir = DEFAULT_SITE, base = DEFAULT_BASE, f
     let res
     try { res = await fetchFn(url, { headers: { 'accept-encoding': 'identity' } }) } catch (e) { throw new Error(`部署前檢查失敗：本機沒有 ${want.rel}，從線上下載也失敗（${e.message}）`) }
     if (!res.ok) {
-      if (want.optional && res.status === 404) { result.skipped.push(want.rel); continue }
+      if ((want.optional || want.history) && res.status === 404) { result.skipped.push(want.rel); continue }
       throw new Error(`部署前檢查失敗：本機沒有 ${want.rel}，線上也拿不到（HTTP ${res.status}）`)
     }
     const buf = Buffer.from(await res.arrayBuffer())
