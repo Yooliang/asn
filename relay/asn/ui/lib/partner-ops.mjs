@@ -130,8 +130,12 @@ export function processReason(f) {
 export const ADOPT_LABEL = '接手'
 export const ADOPT_ACK = '我已了解：接手後我會先關掉終端機那個 grok，兩邊同時用同一段對話可能互相覆蓋'
 export const isGrokAdoptable = f => isProcessEntry(f) && /^grok\b/i.test(String(f?.engine ?? '').trim() || String(f?.agent ?? f?.nick ?? '')) && /（前景）\s*$/.test(String(f?.agent ?? f?.nick ?? ''))
-// 對話框文字用的種類：可接手的 grok 程序條目是 'adopt'，其餘照原本的種類
-export const dialogEngine = f => (isGrokAdoptable(f) ? 'adopt' : partnerEngine(f))
+// 接手使用者自己開的 pi（0.2 A5）：前景的 pi 程序條目。ASN 會先關掉原本的 pi（終端機留著），再用同一段對話開一個由 ASN 管理的 pi
+export const isPiAdoptable = f => isProcessEntry(f) && /^pi\b/i.test(String(f?.engine ?? '').trim() || String(f?.agent ?? f?.nick ?? '')) && /（前景）\s*$/.test(String(f?.agent ?? f?.nick ?? ''))
+export const isAdoptable = f => isGrokAdoptable(f) || isPiAdoptable(f)
+export const PI_ADOPT_ACK = '我已了解：會先關掉原本的 pi（終端機留著）；它如果正在回覆，這一輪會中斷'
+// 對話框文字用的種類：可接手的 grok 程序條目是 'adopt'、pi 是 'pi_adopt'，其餘照原本的種類
+export const dialogEngine = f => (isGrokAdoptable(f) ? 'adopt' : isPiAdoptable(f) ? 'pi_adopt' : partnerEngine(f))
 
 // 同一個原因影響多個項目時只寫一次：回 { notes（共用說明，每個原因一行）, rows（項目加 why：只剩各自獨有的原因）}
 export function sharedWhy(items) {
@@ -184,7 +188,7 @@ export function menuItems(friend, ctx = {}) {
   const offline = friend.status === 'offline'
   return MENU_KEYS.map(key => {
     const reason = itemReason(key, friend, engine, offline, ctx)
-    const adopt = key === 'handover' && isGrokAdoptable(friend)
+    const adopt = key === 'handover' && isAdoptable(friend)
     const label = adopt ? ADOPT_LABEL : key === 'close' && engine === 'acp' ? ACP_CLOSE_LABEL : OP_LABEL[key]
     return { key, label, ok: !reason, reason }
   })
@@ -192,7 +196,7 @@ export function menuItems(friend, ctx = {}) {
 
 // 這一項為什麼不能用（能用回空字串）。先看夥伴的種類，再看登入與電腦，最後才是這一項自己的條件
 function itemReason(key, friend, engine, offline, ctx) {
-  if (key === 'handover' && isGrokAdoptable(friend)) return gateReason(key, friend, ctx)   // 接手：和其他管理項目同一套登入／電腦條件
+  if (key === 'handover' && isAdoptable(friend)) return gateReason(key, friend, ctx)   // 接手：和其他管理項目同一套登入／電腦條件
   if (isProcessEntry(friend)) return processReason(friend)   //本機程序條目：一律是「自己開的，只能顯示」，不看引擎種類（絕不說雲端）
   if (engine === 'cloud') return REASON.cloud
   if (engine === 'other') return REASON.otherEngine
@@ -254,6 +258,7 @@ export function opFormError(friend, op, input = {}, item = null) {
   else if (op === 'model' && partnerEngine(friend) === 'acp') { if (!ACP_MODEL_RE.test(String(input.model ?? '').trim())) return ACP_MODEL_HINT }
   else if (op === 'model' && !MODEL_RE.test(String(input.model ?? '').trim())) return '請選一個模型（只能用英數與 . _ [ ] -）'
   if (op === 'handover' && isGrokAdoptable(friend) && input.ack !== true) return '請先勾選確認：接手後要先關掉終端機那個 grok'
+  if (op === 'handover' && isPiAdoptable(friend) && input.ack !== true) return '請先勾選確認：會先關掉原本的 pi'
   if (op === 'handover' && String(input.note ?? '').trim().length > NOTE_MAX) return `補充的話最多 ${NOTE_MAX} 字`
   return ''
 }
@@ -350,6 +355,12 @@ export function progressView(row, { op = row?.op, sentAt = 0, now = Date.now() }
   switch (row?.status) {
     case 'ok': {
       const v = { phase: 'done', done: true, text: DONE_TEXT[op] ?? '完成。' }
+      if (op === 'handover' && row.result?.kind === 'pi_adopt') {
+        const who = typeof row.result.name === 'string' ? short(row.result.name, 60) : ''
+        v.text = `已接手：原本的 pi 已關閉${row.result.kept_terminal === false ? '' : '（終端機留著）'}，用同一段對話開了由 ASN 管理的 pi${who ? `「${who}」` : ''}。`
+        v.extra = ['之後可以從名單寄信給它，也可以改名、切換模型；要改名字請用「改名」。']
+        return v
+      }
       if (op === 'handover' && row.result?.kind === 'adopt') {
         // 接手 grok：沒有前任、沒有交接檔；提醒先關掉終端機那個 grok
         const who = typeof row.result.name === 'string' ? short(row.result.name, 60) : ''

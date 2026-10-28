@@ -214,6 +214,51 @@ pub fn resolve(f: &Facts, files: &[SessionFile], header: &dyn Fn(&Path) -> Optio
     }
 }
 
+/// 命令列切字（`Os::cmdline` 回的是整串）：雙引號包住的算同一項，其餘以空白分隔（與 procscan 的 Windows 版同規則，這裡不分平台）
+pub fn split_cmdline(s: &str) -> Vec<String> {
+    let (mut out, mut cur, mut q, mut any) = (vec![], String::new(), false, false);
+    for c in s.chars() {
+        match c {
+            '"' => {
+                q = !q;
+                any = true;
+            }
+            c if c.is_whitespace() && !q => {
+                if any {
+                    out.push(std::mem::take(&mut cur));
+                    any = false;
+                }
+            }
+            c => {
+                cur.push(c);
+                any = true;
+            }
+        }
+    }
+    if any {
+        out.push(cur);
+    }
+    out
+}
+
+/// 接手後新 pi 的預設名字：pi-<資料夾名>；資料夾名裡不合名字規則的字（空白、符號）拿掉，都拿光了用「pi-接手」
+pub fn default_name(cwd: &str) -> String {
+    let folder = cwd.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next().unwrap_or("");
+    let ok = |c: char| c.is_ascii_alphanumeric() || c == '-' || ('\u{4e00}'..='\u{9fff}').contains(&c);
+    let clean: String = folder.chars().filter(|c| ok(*c)).take(37).collect();
+    let clean = clean.trim_start_matches('-');
+    if clean.is_empty() {
+        "pi-接手".to_string()
+    } else {
+        format!("pi-{clean}")
+    }
+}
+
+/// 接手的手動接回指令（第 4、5 步失敗時附在結果裡）：在那個資料夾下執行
+pub fn manual_command(found: &Found) -> String {
+    format!("cd \"{}\"，再執行 pi --session \"{}\"", found.cwd, crate::launch::local::strip_verbatim_prefix(&found.path.to_string_lossy()))
+}
+
 /// 重開用的 pi 參數（接在擴充的 `-e`／已安裝之後）：指定同一個對話檔
 pub fn reopen_args(found: &Found) -> Vec<String> {
     vec!["--session".to_string(), crate::launch::local::strip_verbatim_prefix(&found.path.to_string_lossy())]

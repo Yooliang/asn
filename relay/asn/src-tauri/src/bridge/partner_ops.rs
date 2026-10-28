@@ -19,7 +19,7 @@ use super::core::BridgeLog;
 use super::corrlog::{CorrLog, Dir, Entry};
 use super::engines::acp_admin::AcpAdmin;
 use super::roster;
-use crate::launch::config::{canonical_launch_cwd, child_env, expand_vars, valid_partner_name, LaunchConfig};
+use crate::launch::config::{canonical_launch_cwd, check_launch, child_env, expand_vars, valid_partner_name, LaunchConfig, LaunchReq};
 use crate::launch::profiles::LaunchMode;
 use crate::launch::console;
 use crate::launch::switch::{self, Os, Plan, Proc, SwitchRunReq, Timing};
@@ -116,6 +116,14 @@ pub(crate) trait OpsEnv: Send + Sync {
     }
     fn pi_sleep(&self, ms: u64) {
         std::thread::sleep(std::time::Duration::from_millis(ms));
+    }
+    /// pi 的設定資料夾（對話檔在它底下的 sessions）：`PI_CODING_AGENT_DIR` 優先，否則 `~/.pi/agent`（測試換成暫存資料夾）
+    fn pi_agent_dir(&self) -> PathBuf {
+        crate::launch::pi_setup::agent_dir(std::env::var("PI_CODING_AGENT_DIR").ok().as_deref(), &crate::identity::home_dir())
+    }
+    /// 接手（0.2 A5）：用本機 pi 的啟動設定，在 cwd 用 --session 開一個由 ASN 管理的 pi。回外層視窗 PID（測試換成假的）
+    fn launch_pi_session(&self, config: &LaunchConfig, name: &str, cwd: &str, session_file: &str) -> Result<u32, String> {
+        crate::launch::local::start_pi_session(config, name, cwd, session_file)
     }
 }
 
@@ -545,6 +553,99 @@ impl PartnerOps {
         ok(if kept { "已結束 pi；原本的終端機分頁會留下" } else { "已關閉視窗" }, Some(json!({ "engine": "pi", "pid": w.pid, "kept_terminal": kept })))
     }
 
+    /// 接手使用者自己開的 pi（0.2 A5）。順序照 asn真 定的：先關舊的、確認真的結束，才帶 --session 開新的（原本的 pi 沒有 ASN 擴充，
+    /// 不知道它是不是正在回覆；先開新的會有一段時間兩邊同時寫同一段對話）。
+    /// 1. 找出它在用的對話（pi_adopt::resolve；不唯一、剛開還沒講話都拒絕）  2. 名字、資料夾白名單、上限照開新夥伴的檢查
+    /// 3. 用 A2「關閉 pi」那套結束舊的（只結束那個 pi 與子孫，終端機留著）  4. 確認舊程序結束  5. 帶 --session 開新的  6. 等新的登記上名單。
+    /// 第 5、6 步失敗：對話檔還在，照實回報「原本的 pi 已關閉，新的沒開起來」並附手動接回的指令
+    fn execute_pi_adopt(&self, op: &Op, pid: u32) -> OpResult {
+        use super::engines::pi_adopt as pa;
+        if !self.env.allow_remote() {
+            return failed(CONSENT_OFF);
+        }
+        let os = self.env.os();
+        let table = os.processes();
+        let Some(me) = table.iter().find(|p| p.pid == pid) else { return failed("這個 pi 已經不在執行了（名單可能過期），所以沒有接手") };
+        let args = pa::split_cmdline(&os.cmdline(pid).unwrap_or_default());
+        if !super::procscan::is_pi_process(&me.name, &args) {
+            return failed("這個程序不是 pi（名單可能過期，或 pid 被別的程式用了），所以沒有接手");
+        }
+        let cwd = os.cwd(pid);
+        // 同一個資料夾裡別的 pi（不含它自己）：有就無法確定是哪一段對話
+        let others = table.iter().filter(|p| p.pid != pid && os.cwd(p.pid).is_some_and(|c| Some(&c) == cwd.as_ref()) && super::procscan::is_pi_process(&p.name, &pa::split_cmdline(&os.cmdline(p.pid).unwrap_or_default()))).count();
+        let facts = pa::Facts { args: &args, cwd: cwd.as_deref(), started_ms: os.started_ms(pid), others_same_cwd: others };
+        let files = pa::list_session_files(&pa::sessions_dir(&self.env.pi_agent_dir()));
+        let found = match pa::resolve(&facts, &files, &pa::read_header) {
+            Ok(f) => f,
+            Err(e) => return failed(e),
+        };
+        // 名字與資料夾：照開新夥伴的檢查（白名單、名字規則、每小時上限）；同台已有同名的就拒絕
+        let name = if op.new_name.trim().is_empty() { pa::default_name(&found.cwd) } else { op.new_name.trim().to_string() };
+        if !valid_partner_name(&name) {
+            return failed("新名字只能用英數、連字號、中文，1～40 字，不能以連字號開頭");
+        }
+        let config = match self.env.launch_config() {
+            Ok(c) => c,
+            Err(e) => return failed(format!("啟動設定不可用：{e}")),
+        };
+        if !config.profiles.contains_key("pi") {
+            return failed("這台電腦的啟動設定裡沒有 pi，無法接手");
+        }
+        let mut req = LaunchReq { profile: "pi", name: &name, cwd: found.cwd.clone() };
+        if let Err(e) = check_launch(&config, &mut req, &[], self.env.now_ms()) {
+            return failed(e);
+        }
+        if self.name_taken_here(&name) {
+            return failed("這台電腦已經有同名的視窗，換個名字");
+        }
+        // 3. 結束舊的（守門同 A2：程序要對得上、查不到啟動時間就不動）
+        if (self.protect)(&op.name, pid) || os.started_ms(pid).is_none() {
+            return failed("守門：這個程序不允許結束，所以沒有接手");
+        }
+        let host = switch::asn_host_of(os, &table, pid);
+        let allowed = switch::kill_set_with(&table, pid, host, os.own_pid(), &|p| os.started_ms(p));
+        if !allowed.contains(&pid) {
+            return failed("守門：這個程序不允許結束，所以沒有接手");
+        }
+        self.stage(op, "closing");
+        if let Err(e) = switch::close_session(os, &self.env.timing(), pid, &allowed, host, host.is_some()) {
+            return failed(format!("原本的 pi 沒能關掉，沒有接手：{e}"));
+        }
+        // 4. 確認舊程序真的結束了，才開新的
+        if os.alive(pid) {
+            return failed("原本的 pi 還沒結束，為了不讓兩邊同時寫同一段對話，沒有開新的");
+        }
+        let manual = pa::manual_command(&found);
+        let kept = host.is_none();
+        // 5. 帶 --session 開新的
+        self.stage(op, "opening");
+        let session = crate::launch::local::strip_verbatim_prefix(&found.path.to_string_lossy());
+        let new_pid = match self.env.launch_pi_session(&config, &name, &req.cwd, &session) {
+            Ok(p) => p,
+            Err(e) => return failed(format!("原本的 pi 已關閉，新的沒開起來（{e}）。對話檔還在，可以手動接回：{manual}")),
+        };
+        // 6. 等新的 pi 由 ASN 擴充登記上名單
+        let home = self.env.pi_home();
+        let appeared = switch::wait_until(os, self.env.timing().appear_wait_ms, self.env.timing().poll_ms, || {
+            super::engines::pi_control::window_session_id(&home, &name, self.env.now_ms(), |p| os.alive(p)).is_some()
+        });
+        if !appeared {
+            return failed(format!("原本的 pi 已關閉，新的 pi 開了但還沒出現在名單上（可能卡在啟動，或 ASN 的 pi 擴充沒載入）。對話檔還在，可以手動接回：{manual}"));
+        }
+        ok(
+            if kept { "已接手：原本的 pi 已關閉（終端機留著），用同一段對話開了由 ASN 管理的 pi" } else { "已接手：用同一段對話開了由 ASN 管理的 pi" },
+            Some(json!({ "kind": "pi_adopt", "name": name, "pid": new_pid, "old_pid": pid, "session_id": found.session_id, "kept_terminal": kept })),
+        )
+    }
+
+    /// 這台電腦上有沒有這個名字的視窗（Claude 視窗、pi 視窗、內建通道工作者）
+    fn name_taken_here(&self, name: &str) -> bool {
+        let os = self.env.os();
+        let claude = console::read_sessions(&self.dirs.sessions).iter().any(|s| s.get("name").and_then(Value::as_str) == Some(name) && s.get("pid").and_then(Value::as_u64).map(|p| os.alive(p as u32)).unwrap_or(false));
+        let pi = super::engines::pi_control::window_session_id(&self.env.pi_home(), name, self.env.now_ms(), |p| os.alive(p)).is_some();
+        claude || pi || self.acp_admin().is_some_and(|a| a.has_worker(name))
+    }
+
     /// 接手使用者自己開的 grok：用名單上的 pid 查 grok 自己的使用中對話登記，唯一才採用，再讓專屬的 Grok 工作者載入同一段對話。
     /// 絕不結束、不操作那個 grok 程序（接手後請使用者自己先關掉）；只讀登記檔與 sessions 的資料夾名稱，不讀對話內容。
     fn execute_adopt(&self, op: &Op, pid: u32) -> OpResult {
@@ -694,6 +795,9 @@ impl PartnerOps {
         }
         // 使用者自己在終端機開的 grok（名單上的「grok #pid（前景）」）：「接班換手」在這裡的意思是「接手」
         if op.op == "handover" {
+            if let Some(pid) = super::engines::pi_adopt::proc_pid(&op.name) {
+                return self.execute_pi_adopt(op, pid);
+            }
             if let Some(pid) = super::engines::grok_adopt::proc_pid(&op.name) {
                 return self.execute_adopt(op, pid);
             }

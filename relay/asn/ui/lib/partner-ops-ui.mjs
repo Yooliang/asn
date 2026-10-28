@@ -4,7 +4,7 @@
 import { AsnDialog } from './dialog.mjs'
 import { machinesByNode } from './mobile-launch.mjs'
 import { launchersErrorText } from './launcher-poll.mjs'
-import { ADOPT_ACK, OP_LABEL, OP_POLL_MS, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, buildOpRequest, dialogEngine, infoRows, opErrorText, opFormError, piModelChoices, progressView } from './partner-ops.mjs'
+import { ADOPT_ACK, PI_ADOPT_ACK, OP_LABEL, OP_POLL_MS, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, buildOpRequest, dialogEngine, infoRows, opErrorText, opFormError, piModelChoices, progressView } from './partner-ops.mjs'
 import { cleanPiModels } from './pi-models.mjs'
 
 const errText = e => String(e?.message ?? e ?? '').replace(/\s+/g, ' ').trim().slice(0, 80) || '原因不明'
@@ -71,7 +71,11 @@ export function opDialogText(op, name, device = '', engine = 'claude') {
       points: ['會結束它的程序，從名單和 ASN 的名冊刪掉，重開 ASN 也不會回來', '它的對話會清掉，記下的模型也一起刪掉', '工作資料夾裡的檔案留著，不會刪', '寫在這台電腦 agents.json 裡的工作者不能從這裡移除，要到電腦上改設定檔'],
     }
     case 'restart': return { title, lead: `要重開「${name}」${where}內建通道的工作者嗎？會先結束它的程序，再由 ASN 重新啟動，對話會保留。`, points: [], ok: '重開', auto: false }
-    case 'handover': if (engine === 'adopt') return {
+    case 'handover': if (engine === 'pi_adopt') return {
+      title: '接手', lead: `要讓 ASN 接手${where}「${name}」這個 pi 的對話嗎？之後可以從名單收信、改名、切換模型。`, ok: '接手', auto: false, ack: PI_ADOPT_ACK, danger: true,
+      points: ['會先關掉原本的 pi（終端機留著），再用同一段對話開一個由 ASN 管理的 pi。原本的 pi 如果正在回覆，這一輪會中斷', 'ASN 會找出這個 pi 正在用的那一段對話；找不到或不只一段就不會接手，什麼都不關', '剛開還沒講過話的 pi 找不到對話，請先在 pi 裡講一句再試', '新的 pi 名字是「pi-資料夾名」，接手後可以再改名', '如果新的沒開起來，對話檔還在，結果會附上手動接回的指令'],
+    }
+    if (engine === 'adopt') return {
       title: '接手', lead: `要讓 ASN 的 Grok 工作者接手${where}「${name}」的對話嗎？`, ok: '接手', auto: false, ack: ADOPT_ACK,
       points: ['ASN 會找出這個 grok 正在用的那一段對話，找不到或不只一段就不會接手，並告訴你原因', '另外開一個專屬的 Grok 工作者載入同一段對話，之後寄給它的信會接在這段對話後面，回覆照一般工作者寄回', '接手後請先關掉終端機那個 grok，兩邊同時用同一段對話可能互相覆蓋', 'ASN 不會替你關掉終端機裡的 grok'],
     }

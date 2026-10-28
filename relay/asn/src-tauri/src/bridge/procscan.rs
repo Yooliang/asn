@@ -118,6 +118,11 @@ fn engine_of_script(script: &str) -> Option<&'static str> {
     engine_of_name(stem)
 }
 
+/// 這個程序是不是 pi（直接跑 pi，或 node／bun 跑 pi 的腳本）。exe＝執行檔名；cmdline＝含第 0 項的命令列（0.2 A5 接手用）
+pub fn is_pi_process(exe: &str, cmdline: &[String]) -> bool {
+    identify(&ProcInfo { pid: 0, ppid: 0, exe: exe.to_string(), cmdline: cmdline.to_vec() }).is_some_and(|(e, _)| e == "pi")
+}
+
 /// 這個程序是哪個引擎、後面的參數是什麼（不含執行檔／腳本）
 fn identify(p: &ProcInfo) -> Option<(&'static str, Vec<String>)> {
     let stem = exe_stem(&p.exe);
