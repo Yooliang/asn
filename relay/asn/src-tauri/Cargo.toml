@@ -56,6 +56,8 @@ sha2 = "0.10"
 sha1 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 png = "0.17"
+# 夥伴自己換頭像（asn avatar set）：把 png／jpeg／webp 原圖在本機裁成正方形、縮小、重新編成 png。只開這三種解碼，不要其他格式與功能
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 tar = "0.4"
 zeroize = "1"

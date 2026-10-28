@@ -68,6 +68,7 @@ const transport = {
   sentStatus: ids => invoke('relay_sent_status', { ids }).then(r => r?.status ?? []),
   readSync: body => invoke('relay_read_sync', { body }),   // 已讀多端同步（要本人簽章；沒登入或舊後台就回錯，前端靜默）
   avatar: node => invoke('relay_avatar', { node }),
+  partnerAvatar: partner => invoke('relay_partner_avatar', { partner }),
   setAvatar: avatar => invoke('relay_set_avatar', { avatar }),
   sendAttachment: payload => invoke('relay_send_attachment', { payload }),
 }
