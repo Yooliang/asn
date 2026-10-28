@@ -38,12 +38,12 @@ test('帳號清單的畫面資料：顯示 email 與方案、使用中的不能�
   assert.match(ACCT_TEXT.quotaNote, /額度/, '要老實說明手機看不到剩餘額度')
 })
 
-test('切換前確認：寫清楚哪台電腦、從哪個換到哪個、對方要按同意、開著的 Claude 視窗要重開', () => {
+test('切換前確認：寫清楚哪台電腦、從哪個換到哪個、對方要按同意、開著的 Claude 視窗不用重開', () => {
   const c = confirmText('工作機', 'a@x.test', 'b@x.test')
   assert.match(c.lead, /工作機/)
   assert.ok(c.lead.includes('a@x.test') && c.lead.includes('b@x.test'))
   assert.ok(c.points.some(p => p.includes('同意')))
-  assert.ok(c.points.some(p => p.includes('重開')))
+  assert.ok(c.points.some(p => p.includes('不用重開')))
   assert.equal(confirmText('工作機', '', 'b@x.test').lead.includes('undefined'), false)
 })
 

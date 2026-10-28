@@ -39,7 +39,7 @@ test('離線與沒回報時的文字；狀態文字沿用 remote.msg', () => {
 test('說明文字講清楚對方會跳出確認', () => {
   assert.match(CONFIRM_NOTE, /跳出確認/)
   assert.match(CONFIRM_NOTE, /信任/)
-  assert.match(CLOSE_NOTE, /重開/)
+  assert.match(CLOSE_NOTE, /不用重開/)
 })
 
 test('接線：右鍵項目打開專屬對話框，不再打開設定頁；切換走原本的 remoteSwitch', () => {

@@ -35,11 +35,11 @@ test('加入目前登入的帳號：不用取名字，呼叫沒有參數；成�
   assert.ok(f.calls.some(c => c[0] === 'acct_remote_report'))
 })
 
-test('切換成功要提示重開 Claude 視窗，指令只帶 email；失敗顯示 Rust 回的中文原因', async () => {
+test('切換成功要說不用重開 Claude 視窗，指令只帶 email；失敗顯示 Rust 回的中文原因', async () => {
   const { f, ui } = mk({ claude_accounts_list: [], claude_account_current: null, codex_account_current: null, claude_account_switch: a => ({ email: a.email }), acct_remote_report: {} })
   await ui.switchTo('b@x.test')
   assert.deepEqual(f.calls[0], ['claude_account_switch', { email: 'b@x.test' }])
-  assert.ok(ui.state.msg.includes(SWITCH_NOTICE) && SWITCH_NOTICE.includes('重開'))
+  assert.ok(ui.state.msg.includes(SWITCH_NOTICE) && SWITCH_NOTICE.includes('不用重開'))
   const ui2 = mk({ claude_account_switch: new Error('目前登入的帳號還沒加入帳號庫'), claude_accounts_list: [], claude_account_current: null, codex_account_current: null }).ui
   await ui2.switchTo('b@x.test')
   assert.match(ui2.state.msg, /還沒加入帳號庫/)
@@ -205,4 +205,14 @@ test('Grok：帳號庫清單進狀態；切換呼叫本機指令並重抓；遠�
   assert.deepEqual(r.ui.state.remote.list.map(a => a.email), ['g@x.test'])
   await r.ui.remoteSwitch('g@x.test')
   assert.deepEqual(r.f.calls.find(c => c[0] === 'acct_remote_request'), ['acct_remote_request', { node: 'W', email: 'g@x.test', vendor: 'grok' }])
+})
+
+test('手機要求切換後的彈窗：Claude 不說要重開、不提已併掉的舊選項，指到現在的「允許切換帳號」（Grok 照舊要重開）', async () => {
+  const fs = await import('node:fs')
+  const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
+  const block = html.slice(html.indexOf('accounts.state.incoming.length'), html.indexOf('av-menu launch-picker'))
+  assert.ok(block.includes('不用再到這台確認') === false, '舊選項已整合進「允許切換帳號」')
+  assert.ok(block.includes('「允許切換帳號」'))
+  assert.ok(!/Claude 視窗要關掉重開/.test(block), 'Claude 切換不用重開')
+  assert.ok(/Grok 視窗要關掉重開/.test(block), 'Grok 還是要重開')
 })

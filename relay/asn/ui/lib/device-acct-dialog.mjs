@@ -3,7 +3,7 @@
 import { agoText } from './cloud-invite.mjs'
 
 export const CONFIRM_NOTE = '送出後，那台電腦會跳出確認視窗，對方按「同意」後才會切換；如果對方設定了信任自己的設備，就會直接切換、不再詢問。'
-export const CLOSE_NOTE = '切換後，那台電腦開著的 Claude 視窗要關掉重開，才會用新帳號。'
+export const CLOSE_NOTE = '切換後馬上生效，那台電腦開著的 Claude 視窗不用重開。'
 
 export const dialogTitle = label => `切換「${label || '這台設備'}」的 Claude 帳號`
 
