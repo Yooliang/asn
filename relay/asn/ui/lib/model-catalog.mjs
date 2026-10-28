@@ -57,7 +57,7 @@ export function channelRows(row) {
  */
 export const vendorRows = rows => (Array.isArray(rows) ? rows : []).filter(r => r && !r.channelOnly)
 
-export const RUN_OPTION_LABEL ={ acp: '內建通道（背景運行）', pi: '經 pi', term: 'ASN 開的終端（進階）', self: '自己開的 CLI' }
+export const RUN_OPTION_LABEL ={ acp: '內建通道（背景運行）', pi: '經 pi', term: 'ASN 開的終端（進階）', self: '原生 CLI（手動開啟）' }
 const TERM_PROFILES = ['grok', 'agy']   // 後端 term_start 只收這兩個（launch/term.rs resolve_command）
 export function runOptions(row, { local = false, piInstalled = false, piReady = false } = {}) {
   const ch = row?.channels ?? {}
@@ -74,12 +74,12 @@ export function runOptions(row, { local = false, piInstalled = false, piReady = 
   const termOk = termWindow || (termWez && local)
   const termWhy = termWez ? '只能在那台電腦上開' : (why('term') || '不支援')
   const termNote = termWindow ? '開成它自己的終端機視窗' : termWez && st('term') === 'noinbox' ? '收不到信，只能看畫面、送字' : ''
-  const selfNote = row?.id === 'claude' ? '在你自己的終端打開 claude，裝了 ASN 外掛就會出現在名單上' : isPiItself ? '在你自己的終端打開 pi，裝了 pi 擴充就會出現在名單上' : '已經在你自己的終端開著的話，可以用「接手已開著的終端視窗…」接進來'
+  const selfNote = row?.id === 'claude' ? '自己開 claude，裝了 ASN 外掛會出現在名單上' : isPiItself ? '自己開 pi，裝了 ASN 擴充會出現在名單上' : '已開著的可以用「接手已開著的終端視窗」接進來'
   const options = [
     opt('acp', acpOk, why('acp') || '這個模型沒有內建通道'),
     opt('pi', piOk, piWhy),
     opt('term', termOk, termWhy, termOk ? termNote : ''),
-    opt('self', false, '你自己在終端開，ASN 只負責接手（不能從這裡開）', selfNote),   // 小良哥 10/27 #723：這一項始終不能選，只顯示說明
+    opt('self', false, 'ASN 只負責接手，不能從這裡開', selfNote),   // 小良哥 10/27 #723：這一項始終不能選，只顯示說明
   ]
   // 預設：優先序第一個能選的；三條都不行就沒有預設（null），開啟按鈕要反灰
   const first = options.find(o => o.ok)
