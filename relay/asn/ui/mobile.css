@@ -47,9 +47,11 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-page{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding-bottom:env(safe-area-inset-bottom,0px)}
 /* 三個大分頁並排（夥伴／對話／設置），整排用 transform 平移：手指拖動時跟手、放開吸附。只動 transform，捲動與動畫都不觸發排版 */
 .m-pager-wrap{flex:1;min-height:0;overflow:hidden;position:relative;touch-action:pan-y}
-.m-pager{display:flex;width:300%;height:100%;will-change:transform;transition:transform .28s cubic-bezier(.2,.8,.3,1)}
+.m-pager{display:flex;width:calc(var(--pages,3) * 100%);height:100%;will-change:transform;transition:transform .28s cubic-bezier(.2,.8,.3,1)}
 .m-pager.dragging{transition:none}
-.m-pg{flex:0 0 33.3333%;width:33.3333%;min-width:0;min-height:0;display:flex;flex-direction:column}
+.m-pg{flex:0 0 calc(100% / var(--pages,3));width:calc(100% / var(--pages,3));min-width:0;min-height:0;display:flex;flex-direction:column}
+/* 第四頁籤（#461）上的內頁：設置的某一項、使用指引各一塊，撐滿這一頁 */
+.m-pgin{flex:1;min-height:0;display:flex;flex-direction:column}
 @media (prefers-reduced-motion:reduce){.m-pager{transition:none}}
 /* 對話：第二個大分頁本身（最後使用的那一位），和其他兩頁一起左右翻 */
 .m-chat{overflow:hidden}
@@ -69,12 +71,14 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;margin:0;background:var(--panel);border:0;border-top:1px solid var(--line);border-radius:0}
 /* 分頁列在頁面最上方：視覺高 32px（舊 52px 的 0.6 倍），按鈕用 ::after 上下各多 2px，可點範圍 36px */
 .m-tabs{position:relative;flex:none;display:flex;height:32px;margin:0;border:0;border-bottom:1px solid var(--line);border-radius:0;background:var(--panel-soft)}
-.m-ind{position:absolute;z-index:2;bottom:0;left:0;width:33.3333%;height:3px;background:var(--accent);transition:transform .28s cubic-bezier(.2,.8,.3,1);will-change:transform;pointer-events:none}
+.m-ind{position:absolute;z-index:2;bottom:0;left:0;width:calc(100% / var(--pages,3));height:3px;background:var(--accent);transition:transform .28s cubic-bezier(.2,.8,.3,1);will-change:transform;pointer-events:none}
 .m-tabs.dragging .m-ind{transition:none}
 .m-tabs button{position:relative;flex:1;height:32px;padding:0;border:0;background:none;color:var(--muted);font-size:15px;font-weight:600;cursor:pointer}
 .m-tabs button::after{content:"";position:absolute;left:0;right:0;top:-2px;bottom:-2px}
 .m-tabs button.on{color:var(--accent);background:var(--panel)}
 .m-tabs .red{top:6px;right:calc(50% - 30px)}
+/* 第四頁籤的標題是內頁的標題，可能比較長：一行放不下就省略 */
+.m-tabs button.is-page span{display:block;padding:0 4px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 /* 名單 */
 .m-search{position:sticky;top:0;z-index:2;padding:8px;background:var(--panel-soft);border-bottom:1px solid var(--line)}
 .m-search input{width:100%;min-height:44px;border:1px solid var(--line);border-radius:22px;padding:0 16px;background:var(--panel);user-select:text;-webkit-user-select:text}
@@ -143,8 +147,6 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-sw:disabled{opacity:.5}
 .m-dv-none{display:flex;align-items:center;min-height:40px;padding:6px 10px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);font-size:13px;font-style:italic}
 .m-dv-empty{display:flex;align-items:center;justify-content:center;padding:28px 12px;border:1px dashed var(--line);border-radius:8px;background:var(--panel-soft);color:var(--muted);text-align:center}
-.m-keep{display:contents}
-.m-keep[hidden]{display:none}
 .m-ghead-act{flex:none;min-height:36px;min-width:44px;padding:0 10px;border:0;background:none;color:var(--muted);font:inherit;font-size:12px;opacity:.8;cursor:pointer}
 .m-ghead-act:active{opacity:1;background:rgba(0,0,0,.06);border-radius:8px}
 .m-ops-item.picked{border-color:var(--accent);background:#e6f1fc}

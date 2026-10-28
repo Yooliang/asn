@@ -5,8 +5,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { GUIDES, GUIDE_KEYS } from '../ui/lib/guides.mjs'
-import { GUIDE_FIT, guideNav, phoneGuide, phoneGuideList } from '../ui/lib/mobile-guides.mjs'
-import { normalizeNav } from '../ui/lib/mobile.mjs'
+import { GUIDE_FIT, phoneGuide, phoneGuideList } from '../ui/lib/mobile-guides.mjs'
+import { normalizeNav, pageNav } from '../ui/lib/mobile.mjs'
+import { guidePage } from '../ui/lib/mobile-fourth.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const read = (...p) => fs.readFileSync(path.join(root, ...p), 'utf8').replace(/\r\n/g, '\n')
@@ -31,18 +32,18 @@ test('單篇：內容就是電腦版那一份（同一個物件），不存在�
   assert.equal(phoneGuide(undefined), null)
 })
 
-test('導覽：蓋在設置分頁上；壞的篇目鍵退回篇目列表；舊記錄照常', () => {
-  assert.deepEqual(guideNav(), { tab: 'me', sheet: 'guide', guide: '' })
-  assert.deepEqual(guideNav('faq'), { tab: 'me', sheet: 'guide', guide: 'faq' })
-  assert.deepEqual(guideNav('../x'), { tab: 'me', sheet: 'guide', guide: '' })
-  assert.deepEqual(normalizeNav({ sheet: 'guide', guide: 'start' }), guideNav('start'))
-  assert.deepEqual(normalizeNav({ sheet: 'guide', guide: 5 }), guideNav())
+test('導覽：第四頁籤上的一頁（#461）；壞的篇目鍵退回篇目列表；舊記錄轉成第四頁籤', () => {
+  assert.deepEqual(guidePage(), { kind: 'guide', guide: '' })
+  assert.deepEqual(guidePage('faq'), { kind: 'guide', guide: 'faq' })
+  assert.deepEqual(guidePage('../x'), { kind: 'guide', guide: '' })
+  assert.deepEqual(normalizeNav({ sheet: 'guide', guide: 'start' }), pageNav(guidePage('start')))
+  assert.deepEqual(normalizeNav({ sheet: 'guide', guide: 5 }), pageNav(guidePage()))
 })
 
-test('頁面：指引是設置分頁的一個項目、滿版獨立一頁有返回；內文只用文字插值，手機頁面不用 v-html 顯示指引', () => {
+test('頁面：指引是設置分頁的一個項目、在第四頁籤上獨立一頁有返回；內文只用文字插值，手機頁面不用 v-html 顯示指引', () => {
   const html = read('ui', 'm.html')
-  assert.match(html, /<section class="m-sheet m-guide" v-if="nav\.sheet === 'guide'"/)
-  const sheet = /<section class="m-sheet m-guide"[\s\S]*?<\/section>/.exec(html)[0]
+  assert.match(html, /<div class="m-pgin m-guide" v-else-if="fourthPage\.kind === 'guide'">/)
+  const sheet = /<div class="m-pgin m-guide"[\s\S]*?<\/section>/.exec(html)[0]
   assert.match(sheet, /aria-label="返回"[^>]*@click="back"/, '左上返回')
   assert.doesNotMatch(sheet, /v-html/, '指引頁不用 v-html')
   assert.match(sheet, /<guide-doc :guide="guideOpen\.guide">/)

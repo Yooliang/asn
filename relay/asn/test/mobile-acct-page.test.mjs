@@ -5,7 +5,9 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { ACCT_PAGE_TITLE, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctReportOf, acctSheetView } from '../ui/lib/mobile-acct.mjs'
 import { buildDeviceTree } from '../ui/lib/device-tree.mjs'
-import { acctNav, tabLabel } from '../ui/lib/mobile.mjs'
+import { tabLabel } from '../ui/lib/mobile.mjs'
+import { PAGE_TAB, acctPage } from '../ui/lib/mobile-fourth.mjs'
+import { pageTitle } from '../ui/lib/mobile-nav.mjs'
 
 const read = (...p) => fs.readFileSync(new URL(`../${p.join('/')}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const S = 'aaaaaaaa-0000-4000-8000-000000000001', W = 'bbbbbbbb-0000-4000-8000-000000000002', P = 'cccccccc-0000-4000-8000-000000000003', E = 'dddddddd-0000-4000-8000-000000000004'
@@ -79,7 +81,7 @@ test('Claude 的確認畫面資料：只取 Claude 帳號交給既有的 acctShe
 
 test('整頁畫面接線（細部頁）：廠商卡片、帳號列、虛線未回報、離線偏灰、整台空狀態；設備列表與排序見 device-list-page.test.mjs', () => {
   const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
-  const pane = /<section class="m-pg m-chat"[\s\S]*?<!-- 設置 -->/.exec(html)[0]
+  const pane = /<section class="m-pg m-fourth"[\s\S]*?<!-- \/第四頁籤 -->/.exec(html)[0]
   assert.match(pane, /v-for="d in acctDevs"[\s\S]*?class="m-dv-go"/, '先是設備列表')
   assert.match(pane, /m-dv-dot/)
   assert.match(pane, /v-for="v in acctCur\.vendors"/)
@@ -116,6 +118,7 @@ test('流程行為：點「切換」＝選好帳號進確認畫面；從夥伴�
   assert.match(js, /if \(acctSw\.phase !== 'confirm' \|\| !acctView\.value\.pickEmail\) return/, '一定先看過確認畫面才送')
   assert.match(js, /acctSw\.phase = 'run'\n\s*acctSw\.view = await runAcctSwitch\(/, '送出後進進度畫面')
   assert.match(js, /android_acct_list/)
-  assert.match(js, /go\(acctNav\(\)\)/)
-  assert.equal(tabLabel('chats', acctNav()), '設備與帳號')
+  assert.match(js, /fourthNav\.openPage\(acctPage\(acctSw\.node\)\)/, '在第四頁籤打開（#461）')
+  assert.equal(tabLabel(PAGE_TAB, pageTitle(acctPage())), '設備與帳號')
+  assert.equal(tabLabel('chats'), '對話')
 })

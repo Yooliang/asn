@@ -56,17 +56,17 @@ test('m.html：開新夥伴第 1 頁只有電腦與「下一步」，第 2 頁�
   assert.ok(!p2.includes('<legend>電腦</legend>'), '第 2 頁不再選電腦')
 })
 
-test('m.html：設置分頁只列分類（每列一行摘要）加使用指引與登出；各項設定都在分類頁裡', () => {
+test('m.html：設置分頁只列分類（每列一行摘要）加使用指引；各項設定（含登出）都在分類頁裡', () => {
   const a = html.indexOf('<section class="m-pg" aria-label="設置">')
-  const b = html.indexOf('<section class="m-sheet m-set"', a)
+  const b = html.indexOf('<div class="m-pgin m-set"', a)   // #461：分類頁在第四頁籤裡
   assert.ok(a > 0 && b > a, '找不到設置分頁或分類頁')
   const list = html.slice(a, b)
   assert.match(list, /v-for="r in settingRows"/); assert.match(list, /openSetting\(r\.key\)/); assert.match(list, /r\.summary/)
-  assert.match(list, /openGuides/); assert.match(list, /doLogout/)
-  for (const t of ['nameDraft', 'prefs.vibrateNudge', 'checkUpdate', 'avFile', 'commitNick']) assert.ok(!list.includes(t), `列表頁不該直接放 ${t}`)
+  assert.match(list, /openGuides/)
+  for (const t of ['nameDraft', 'prefs.vibrateNudge', 'checkUpdate', 'avFile', 'commitNick', 'doLogout', 'm-logout']) assert.ok(!list.includes(t), `列表頁不該直接放 ${t}`)
   const c = html.indexOf('</section>', b)
   const detail = html.slice(b, c)
-  for (const [cat, needles] of [['me', ['nameDraft', 'avFile', 'commitNick']], ['notify', ['prefs.vibrateNudge', 'prefs.vibrateMsg']], ['update', ['prefs.autoUpdate', 'checkUpdate']], ['about', ['info.version']]]) {
+  for (const [cat, needles] of [['me', ['nameDraft', 'avFile', 'commitNick', 'doLogout']], ['notify', ['prefs.vibrateNudge', 'prefs.vibrateMsg']], ['update', ['prefs.autoUpdate', 'checkUpdate']], ['about', ['info.version']]]) {
     assert.ok(detail.includes(`settingCat === '${cat}'`), `缺 ${cat} 分類頁`)
     for (const n of needles) assert.ok(detail.includes(n), `${cat} 分類頁缺 ${n}`)
   }
