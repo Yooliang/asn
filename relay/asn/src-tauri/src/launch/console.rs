@@ -405,6 +405,37 @@ pub(crate) mod win {
 mod tests {
     use super::*;
 
+    /// 真機手動驗收（#476）：走 ASN 開夥伴的同一條路（明確用 conhost.exe），在 Windows Terminal 開著別的視窗時，
+    /// 開出來的是一個程序一扇的原生主控台視窗，現有的切換找得到它、能隱藏、能叫回來。只結束自己開的那一個（記下的 PID）。
+    /// 執行：cargo test --lib -- --ignored 真機_原生主控台 --nocapture
+    #[cfg(windows)]
+    #[test]
+    #[ignore]
+    fn 真機_原生主控台開的夥伴_能隱藏能叫回來() {
+        let dir = std::env::temp_dir();
+        let pid = super::super::local::start_window("ASN-雯驗收", "ping.exe", &["-n".into(), "120".into(), "127.0.0.1".into()], &dir, false).expect("開得起來");
+        println!("ASN_TEST_PID={pid}");
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let found = super::super::console_resolve::find_for(pid, &RealConsoleOs);
+        let result = (|| -> Result<(), String> {
+            let (owner, w) = found.clone()?;
+            println!("視窗擁有者={owner} hwnd={} visible={}", w.hwnd, w.visible);
+            win::set_visible(w.hwnd, false)?;
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            if win::is_visible(w.hwnd) {
+                return Err("隱藏後還看得到".into());
+            }
+            win::set_visible(w.hwnd, true)?;
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            if !win::is_visible(w.hwnd) {
+                return Err("叫回後還是看不到".into());
+            }
+            Ok(())
+        })();
+        let _ = std::process::Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).output();
+        result.unwrap();
+    }
+
     fn sess(pid: u64, name: &str, started: u64, kind: &str) -> Value {
         json!({ "pid": pid, "name": name, "sessionId": "s", "status": "idle", "startedAt": started, "kind": kind })
     }
