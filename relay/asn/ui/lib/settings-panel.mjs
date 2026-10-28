@@ -19,7 +19,7 @@ import { DEVICE_TEXT, canRemoveRow, dropAfter, moveFlags, removedRows, visibleRo
 export const SETTING_OPS = [
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
-  'closeTo', 'autostart', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'claude-mod-auto',
+  'closeTo', 'autostart', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'claude-mod-auto', 'open-ui-log',
 ]
 
 export const SettingsPanel = {
@@ -399,6 +399,14 @@ export const SettingsPanel = {
       </template>
       <template v-if="catKey === 'about'">
         <small class="ver-line">版本 {{ st.version }}</small>
+        <section class="set-card" aria-label="記錄">
+          <b>記錄</b>
+          <small>出問題時可以看這份記錄</small>
+          <div class="upd-row">
+            <button class="aero-btn" type="button" @click="act('open-ui-log')">檢視記錄</button>
+          </div>
+          <small v-if="st.uiLogMsg" role="status">{{ st.uiLogMsg }}</small>
+        </section>
       </template>
     </div>`,
 }

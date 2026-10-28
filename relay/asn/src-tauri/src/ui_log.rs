@@ -14,6 +14,17 @@ pub fn path(dir: &Path) -> PathBuf {
     dir.join(UI_LOG_FILE)
 }
 
+/// 設定頁「檢視記錄」要開的檔：只會是機器資料夾裡的 ui.log（路徑由這裡決定，不接受前端傳入）。
+/// 還沒寫過記錄（檔案不存在）或同名的不是檔案，回錯誤，讓畫面退回開記錄資料夾
+pub fn existing(dir: &Path) -> Result<PathBuf, String> {
+    let p = path(dir);
+    if p.is_file() {
+        Ok(p)
+    } else {
+        Err("記錄檔還沒有產生".into())
+    }
+}
+
 /// 一行記錄：拿掉控制字元（含換行），去頭尾空白，限長；整行空白回 None
 pub fn clean_line(s: &str) -> Option<String> {
     let t: String = s.chars().map(|c| if c.is_control() { ' ' } else { c }).take(LINE_MAX).collect();
@@ -77,6 +88,17 @@ mod tests {
         assert!((after.len() as u64) < MAX_BYTES);
         assert_eq!(after.lines().next().unwrap(), line, "開頭是一整行，不留半個字");
         assert!(after.ends_with("最後一行\n"));
+    }
+
+    #[test]
+    fn 檢視記錄_只開機器資料夾裡的_ui_log_沒有檔案就回錯誤() {
+        let d = tempfile::tempdir().unwrap();
+        assert!(existing(d.path()).is_err(), "還沒寫過記錄");
+        std::fs::create_dir(path(d.path())).unwrap();
+        assert!(existing(d.path()).is_err(), "同名的是資料夾也不開");
+        std::fs::remove_dir(path(d.path())).unwrap();
+        append(d.path(), &["[ASN] pull failed".into()]).unwrap();
+        assert_eq!(existing(d.path()).unwrap(), d.path().join("ui.log"));
     }
 
     #[test]
