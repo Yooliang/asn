@@ -432,7 +432,8 @@ mod tests {
             }
             Ok(())
         })();
-        let _ = std::process::Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).output();
+        use crate::nowin::NoWindow;
+        let _ = std::process::Command::new("taskkill").no_window().args(["/PID", &pid.to_string(), "/T", "/F"]).output();
         result.unwrap();
     }
 

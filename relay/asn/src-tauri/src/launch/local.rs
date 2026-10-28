@@ -287,6 +287,7 @@ try {
     if ($k) { $id = $k.ProcessId; break }
     Start-Sleep -Milliseconds 100
   }
+  if ($id -eq $p.Id) { [Console]::Error.WriteLine('等不到 conhost 底下的 powershell，回傳 conhost 的 PID') }
   [Console]::Out.Write($id)
 } catch {
   [Console]::Error.WriteLine($_.Exception.Message)
@@ -313,7 +314,13 @@ try {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let out = cmd.output().map_err(|e| format!("開不起來：{e}"))?;
-    parse_launcher_output(&String::from_utf8_lossy(&out.stdout), &String::from_utf8_lossy(&out.stderr), out.status.success())
+    let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    let r = parse_launcher_output(&stdout, &stderr, out.status.success());
+    // 開起來了但有話要說（例如等不到 powershell、回傳的是 conhost 的 PID）：記一行，不當成失敗
+    if r.is_ok() && !stderr.trim().is_empty() {
+        eprintln!("開夥伴視窗：{}", stderr.trim());
+    }
+    r
 }
 
 #[cfg(not(windows))]
