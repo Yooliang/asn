@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { EDGE_PX, TABS, TAB_LABEL, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, SWIPE_BLOCK_SELECTOR, COMMIT_FRAC, ASN_BADGE, BACKFILL_MAX, LAST_WORDS_MAX, accountDisplayName, backfillQueue, lastWords, vendorBadgeHtml, PTR_LOADING_H, PTR_MAX, PTR_THRESHOLD, PULL_TEXT, UPDATE_LATEST, UPDATE_UNAVAILABLE, pageNav, opsNav, pullHeight, pullPhase, pullRatio, shouldRefreshOnRelease, updateCheckErrorText } from '../ui/lib/mobile.mjs'
-import { BANNER_MS, DEFAULT_PREFS, MSG_VIBRATE_MS, NUDGE_VIBRATE_MS, UPDATE_CHECK_MS, afterBind, bannerText, buttonLabel, initialUpdate, installOutcome, progressText, shouldAutoCheck, withAvailable, withFailure, withProgress, androidBridge, initialNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, totalUnread } from '../ui/lib/mobile.mjs'
+import { BANNER_MS, DEFAULT_PREFS, MSG_VIBRATE_MS, NUDGE_VIBRATE_MS, UPDATE_CHECK_MS, afterBind, bannerText, sideloadLastText, SIDELOAD_LAST_TEXT, buttonLabel, initialUpdate, installOutcome, progressText, shouldAutoCheck, withAvailable, withFailure, withProgress, androidBridge, initialNav, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, totalUnread } from '../ui/lib/mobile.mjs'
 import { groupHeading } from '../ui/lib/tabs.mjs'
 import { launchPage } from '../ui/lib/mobile-fourth.mjs'
 
@@ -134,6 +134,15 @@ test('自動更新：交給系統安裝程式的各種結果；沒有許可要�
   assert.equal(b.selfUpdateEnabled(), true); assert.equal(b.installApk('/x/a.apk'), 'ok')
   assert.equal(androidBridge({ AsnAndroid: { vibrate() {} } }).selfUpdateEnabled(), false, '外殼沒有這個方法＝沒有更新功能')
   assert.equal(androidBridge({ AsnAndroid: { vibrate() {} } }).installApk('/x'), 'error')
+})
+
+test('最後一個自行安裝版：自行安裝版常駐提示改用 Google Play；Play 版、一般瀏覽器都不出現', () => {
+  const side = androidBridge({ AsnAndroid: { vibrate() {}, selfUpdateEnabled: () => true } })
+  assert.equal(sideloadLastText(side), SIDELOAD_LAST_TEXT)
+  assert.match(SIDELOAD_LAST_TEXT, /最後一個自行安裝版/); assert.match(SIDELOAD_LAST_TEXT, /先移除這個版本/); assert.match(SIDELOAD_LAST_TEXT, /Play 搜尋 ASN/)
+  assert.equal(sideloadLastText(androidBridge({ AsnAndroid: { vibrate() {}, selfUpdateEnabled: () => false } })), '', 'Play 版不出現')
+  assert.equal(sideloadLastText(androidBridge({ AsnAndroid: { vibrate() {} } })), '', '外殼沒有這個方法（舊外殼／Play 版）不出現')
+  assert.equal(sideloadLastText(null), '', '一般瀏覽器、電腦版不出現')
 })
 
 test('下拉重整：拉動有阻尼與上限；到門檻才算「放開重新整理」；沒到門檻或更新中放開不更新', () => {

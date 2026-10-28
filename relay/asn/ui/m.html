@@ -59,6 +59,8 @@
         <button class="m-btn m-upd-btn" type="button" v-if="upd.phase !== 'downloading'" @click="startUpdate">{{ updButton }}</button>
         <span class="m-upd-hint" v-if="upd.hint">{{ upd.hint }}</span>
       </div>
+      <!-- 自行安裝版常駐：這是最後一個自行安裝版，請改用 Google Play 版（Play 版不出現） -->
+      <div class="m-upd m-upd-last" v-if="sideloadLast" role="note"><span class="m-upd-tx">{{ sideloadLast }}</span></div>
       <div class="m-pager-wrap" @touchstart.passive="swipeStart($event, 'pager')" @touchmove="swipeMove" @touchend="swipeEnd" @touchcancel="swipeEnd">
         <div class="m-pager" :class="{ dragging: sw.dragging }" :style="pagerStyle">
 
