@@ -500,7 +500,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         // 有就是 waiting_user 並附上選項（代答照既有的確認流程）；讀一次就好，不做兩次取樣的閒置判斷
         if snap.profile == "pi" {
             return Ok(match self.sample(&w, &snap) {
-                Ok(s) => match classify_prompt(&s.text) {
+                Ok(s) => match classify_prompt_for(&snap.profile, &s.text) {
                     Some(p) => waiting_status(&snap.profile, s.cursor_x, s.cursor_y, p),
                     None => unknown_status(&snap.profile, PI_STATE_ELSEWHERE),
                 },
@@ -600,7 +600,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             term_adopt::verify_adopted_for_write(&live, ad, &config)?;
         }
         let text = w.get_text(&snap.window.sock, snap.pane_id, Some(-STATUS_LINES))?;
-        let Some(seen) = classify_prompt(&text) else {
+        let Some(seen) = classify_prompt_for(&snap.profile, &text) else {
             return Err("這個提示已經不在畫面上，沒有送出".into());
         };
         if seen.kind != prompt_kind {
@@ -1194,12 +1194,28 @@ fn cap_tail(s: &str, max: usize) -> String {
 }
 
 fn is_selected_marker(c: char) -> bool {
-    matches!(c, '>' | '●' | '▶' | '❯' | '→')
+    matches!(c, '>' | '●' | '▶' | '❯')
 }
 
-/// 「>」式選單：選中那行有記號，其他選項沒有記號、跟選中那行的文字對齊（grok 的 `>`、pi 的 `→`，#483）
-fn arrow_style(marker: char) -> bool {
-    marker == '>' || marker == '→'
+/// 依終端種類找提問。pi 1.4 的選單用「→ 」當選中記號、其他選項只縮排，跟 grok 的「>」同一種樣式（#483）：
+/// 只在 pi 的終端把行首的「→」當成「>」解析；grok、agy 畫面裡的「→」（例如輸出裡的箭頭）一律當一般文字，不會被誤認成選單
+fn classify_prompt_for(profile: &str, text: &str) -> Option<ScreenPrompt> {
+    if profile != "pi" {
+        return classify_prompt(text);
+    }
+    let t = text
+        .lines()
+        .map(|l| {
+            let ind = l.chars().take_while(|c| *c == ' ').count();
+            let rest: String = l.chars().skip(ind).collect();
+            match rest.strip_prefix('→') {
+                Some(r) => format!("{}>{r}", " ".repeat(ind)),
+                None => l.to_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    classify_prompt(&t)
 }
 
 fn is_unselected_marker(c: char) -> bool {
@@ -1308,7 +1324,7 @@ fn parse_menu_block(lines: &[&str], cursor_idx: usize) -> Option<ScreenPrompt> {
     if !is_selected_marker(marker) {
         return None;
     }
-    let gt_style = arrow_style(marker);
+    let gt_style = marker == '>';
     let mut start = cursor_idx;
     let mut end = cursor_idx;
     while start > 0 {
@@ -2314,6 +2330,19 @@ mod tests {
         assert_eq!(a.keys, describe_keys(&[AnswerKey::Down, AnswerKey::Down, AnswerKey::Enter]), "選「只信任這一次」");
         *rig.runner.inner.screen.borrow_mut() = "pi  anthropic/claude-sonnet-5-5\n> \n".into();
         assert!(rig.svc.answer(&id, "menu", 3).unwrap_err().contains("不在畫面上"), "提問已經不在：不送");
+    }
+
+    #[test]
+    fn 行首的箭頭只在_pi_當成選單記號_grok_畫面裡的箭頭當一般文字() {
+        // asn真 審 #490：grok／agy 的輸出剛好有「→ 」開頭的行，不能被誤認成選單
+        let arrows = " 變更：\n → a.rs 改了\n   b.rs 沒改\n";
+        assert!(classify_prompt_for("grok", arrows).is_none(), "grok 的箭頭是一般文字");
+        assert!(classify_prompt_for("agy", arrows).is_none());
+        assert_eq!(classify_prompt_for("pi", PI_TRUST_SCREEN).map(|p| p.kind), Some("menu"));
+        assert!(classify_prompt_for("grok", PI_TRUST_SCREEN).is_none(), "同一個畫面在 grok 的終端也不當選單");
+        // 其他記號照舊：grok 的「>」選單兩邊都認得
+        let gt = " Pick one\n > Yes\n   No\n";
+        assert_eq!(classify_prompt_for("grok", gt).map(|p| p.kind), Some("menu"));
     }
 
     #[test]
