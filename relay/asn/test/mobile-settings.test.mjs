@@ -47,7 +47,7 @@ test('導覽：分類頁是第四頁籤上的一頁（#461）；沒有的分類�
 test('設備與帳號（#268）：設置列表點了開名單設備卡「選項」的同一頁，不是設置的滿版頁；兩個入口並存', () => {
   assert.equal(settingPage('devices'), null, '沒有設置的一般分類頁')
   const js = readFileSync(new URL('../ui/m.js', import.meta.url), 'utf8')
-  assert.match(js, /const openSetting = key => \{ if \(key === 'devices'\) void openAcct\(\); else fourthNav\.openPage\(settingPage\(key\)\) \}/)
+  assert.match(js, /const openSetting = key => \{ if \(key === 'devices'\) void openAcct\(\); else askBeforeLeave\(settingPage\(key\), \(\) => fourthNav\.openPage\(settingPage\(key\)\)\) \}/)
   assert.match(js, /devices: acctDevs\.value \}\)\)/, '摘要用同一份設備列表')
   assert.match(js, /tabLabelOf\(t, fourthTitle\.value\)/, '第四頁籤的標籤跟頁標題一致')
   const html = readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8')

@@ -208,6 +208,8 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-banner-act{flex:none;margin-left:auto;padding:6px 12px;border:1px solid rgba(40,80,130,.7);border-radius:8px;background:var(--link);color:#fff;font:inherit;font-size:14px}
 @keyframes m-drop{from{transform:translateY(-120%);opacity:0}to{transform:none;opacity:1}}
 @media (prefers-reduced-motion:reduce){.m-banner{animation:none}}
+/* 一句話的提示：底部置中、讓出手勢列，深底白字；點一下就關 */
+.m-toast{position:fixed;z-index:85;left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom,0px) + 72px);padding:12px 14px;border-radius:10px;background:rgba(28,36,48,.92);color:#fff;font-size:15px;line-height:1.4;text-align:center;box-shadow:0 4px 14px rgba(0,0,0,.25)}
 
 /* 開新夥伴：蓋滿整個畫面的表單 */
 .m-sheet{position:fixed;z-index:70;inset:0;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px);background:linear-gradient(180deg,var(--glass-top),var(--glass-bottom) 55%,#a9cdee)}

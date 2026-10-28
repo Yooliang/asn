@@ -7,8 +7,8 @@ import { noticeOf } from './photo.mjs'
 import { PAGE_TAB, normalizePage } from './mobile-fourth.mjs'
 
 // ---------- 單欄導覽 ----------
-// 狀態：{ tab: 'list' | 'chats' | 'me' | 'page', sheet: '' | 'launch' | 'ops' | … }。sheet＝蓋在分頁上的一層：「開新夥伴」（滿版）、「⋯」選單（底部浮層）、要密碼、終端請求、群組對話框。
-// 'page'＝第四頁籤（設備與帳號、設置的某一項、使用指引；見 lib/mobile-fourth.mjs），平時不顯示，進這些內頁時才出現在最右邊。
+// 狀態：{ tab: 'list' | 'chats' | 'me' | 'page', sheet: '' | 'ops' | … }。sheet＝蓋在分頁上的一層：「⋯」選單（底部浮層）、要密碼、終端請求、群組對話框、換內頁前的確認（leave）。
+// 'page'＝第四頁籤（設備與帳號、設置的某一項、使用指引、開新夥伴；見 lib/mobile-fourth.mjs），平時不顯示，進這些內頁時才出現在最右邊。
 // 對話不再是蓋在名單上的一層：第二個分頁「對話」就是最後使用的那一位的對話內容（見 lib/mobile-ops.mjs 的 chatPageState）。
 // 每往下一層（夥伴→其他分頁、名單→開新夥伴、對話→選單）就在瀏覽記錄推一筆；系統的返回鍵＝瀏覽器上一頁，外殼（WryActivity）已接好，名單層再按才退到背景。
 // 三個大分頁：夥伴（list）、對話（chats）、設置（me）。
@@ -23,8 +23,6 @@ export const normalizeTab = t => (TABS.includes(t) ? t : 'list')
 export const initialNav = () => ({ tab: 'list', sheet: '' })
 export const tabNav = t => ({ tab: normalizeTab(t), sheet: '' })
 export const meNav = () => tabNav('me')
-// 開新夥伴分兩頁：第 1 頁只選電腦（沒有 step），第 2 頁（step: 2）選該電腦的模型與資料夾、名字、第一句話。第 2 頁多推一筆瀏覽記錄，返回鍵回第 1 頁
-export const launchNav = step => (step === 2 ? { tab: 'list', sheet: 'launch', step: 2 } : { tab: 'list', sheet: 'launch' })
 export const opsNav = () => ({ tab: 'chats', sheet: 'ops' })
 export const secretNav = () => ({ tab: 'chats', sheet: 'secret' })
 export const termReqNav = () => ({ tab: 'chats', sheet: 'termreq' })
@@ -32,15 +30,15 @@ export const termReqNav = () => ({ tab: 'chats', sheet: 'termreq' })
 export const pageNav = page => ({ tab: PAGE_TAB, sheet: '', page: normalizePage(page) })
 // 瀏覽記錄裡讀回來的狀態可能是任何東西（壞資料、別的頁面留下的）：整理成合法的導覽狀態
 export function normalizeNav(raw) {
-  if (raw?.sheet === 'launch') return launchNav(raw?.step)
   if (raw?.sheet === 'ops') return opsNav()
   if (raw?.sheet === 'secret') return secretNav()
   if (raw?.sheet === 'termreq') return termReqNav()
   if (raw?.tab === PAGE_TAB) { const p = normalizePage(raw?.page); return p ? pageNav(p) : initialNav() }
-  // 舊版的滿版層（設備與帳號、設置的某一項、使用指引）改成第四頁籤上的同一頁
+  // 舊版的滿版層（設備與帳號、設置的某一項、使用指引、開新夥伴）改成第四頁籤上的同一頁
   if (raw?.sheet === 'acct') return pageNav({ kind: 'acct' })
   if (raw?.sheet === 'setting') { const p = normalizePage({ kind: 'setting', cat: raw?.cat }); return p ? pageNav(p) : tabNav('me') }   // 沒這個分類退回設置分頁
   if (raw?.sheet === 'guide') return pageNav({ kind: 'guide', guide: raw?.guide })
+  if (raw?.sheet === 'launch') return pageNav({ kind: 'launch', step: raw?.step })   // 開新夥伴：第 2 步（step: 2）是第四頁籤上的第二層
   return tabNav(raw?.tab)
 }
 
