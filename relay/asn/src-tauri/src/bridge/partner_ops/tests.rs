@@ -2160,6 +2160,7 @@ fn pi_喚醒守門_資料夾不在白名單_沒有_pi_設定_遠端開關關著_
     put_pi_file(&off, SID_A, SID_A);
     *off.env.cfg.lock().unwrap() = Ok(pi_adopt_cfg(&off));
     assert_eq!(resume(&off, "Pi妹妹", SID_A).detail, CONSENT_OFF);
+    assert_eq!(off.env.asked.load(Ordering::SeqCst), 1, "開關關著：execute 一開頭就擋下，沒走到讀對話檔那一步（asn真 審 #474）");
     assert!(off.env.pi_launched.lock().unwrap().is_empty());
 
     // 同名的 pi 已經登記在名單上（活著）
