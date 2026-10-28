@@ -4,6 +4,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { AsnCore } from '../ui/lib/core.mjs'
 import { startFakeRelay, U } from './fake-relay.mjs'
+import { modelVendorKey, vendorBadgeHtml, vendorIconSvg } from '../ui/lib/vendor-icons.mjs'
+import { groupByDevice } from '../ui/lib/roster.mjs'
 import { httpTransport, memStore, sleep } from './helpers.mjs'
 
 const NAME = 'T-ASN'
@@ -180,6 +182,56 @@ test('存檔：重開後好友與對話還在（離線）', async () => {
   assert.equal(w.status, 'offline')
   assert.equal(b.core.logOf('W/W-政策')[0].text, '存起來')
   await b.core.stop(); await b.relay.close()
+})
+
+test('存檔：舊好友重開後模型與設備名還在，pi 夥伴的廠商圖示照模型換、設備不顯示未命名', async () => {
+  const store = memStore()
+  const members = [
+    { id: 'T', agents: [{ name: NAME, status: 'idle' }] },
+    { id: 'W', name: '工作機', kind: 'phone', agents: [{ name: 'W-pi', status: 'idle', engine: 'pi', model: 'anthropic/claude-sonnet-4' }] },
+  ]
+  const a = await setup({ store, members })
+  a.relay.mail(1, { from_agent: 'W-pi', body: '存起來' })
+  await a.core.start(); await a.core.stop(); await a.relay.close()
+  const saved = store.data.friends.find(f => f.id === 'W/W-pi')
+  assert.equal(saved.model, 'anthropic/claude-sonnet-4')
+  assert.equal(saved.device, '工作機')
+  assert.equal(saved.kind, 'phone')
+  const b = await setup({ store, members: [{ id: 'T', agents: [] }] })   // 重開後 W 已不在名單
+  await b.core.start()
+  const w = b.core.snapshot().friends.find(f => f.id === 'W/W-pi')
+  assert.equal(w.status, 'offline')
+  assert.equal(w.model, 'anthropic/claude-sonnet-4')
+  assert.equal(w.device, '工作機')
+  assert.equal(w.kind, 'phone')
+  assert.equal(modelVendorKey(w.model), 'claude')
+  assert.equal(vendorBadgeHtml(w), vendorIconSvg('claude'), '離線的 pi 夥伴仍顯示模型廠商的圖示，不退回 pi')
+  assert.equal(groupByDevice(b.core.snapshot().friends, { selfNode: 'T' }).find(g => g.key === 'W').label, '工作機')
+  await b.core.stop(); await b.relay.close()
+})
+
+test('存檔：舊格式（沒有模型與設備名）照常讀，顯示照舊退回 pi 圖示與未命名設備；壞值不帶進畫面', async () => {
+  const store = memStore({
+    friends: [
+      { id: 'W/W-pi', node: 'W', agent: 'W-pi', nick: 'W-pi', psm: '', engine: 'pi', lastAt: 1, known: true, onRoster: true },
+      { id: 'X/X-壞', node: 'X', agent: 'X-壞', nick: 'X-壞', psm: '', engine: 'pi', model: { bad: 1 }, device: 42, kind: '', lastAt: 1, known: true },
+    ],
+    logs: { 'W/W-pi': [{ k: 'them', text: '舊信', t: 1 }] },
+  })
+  const { relay, core } = await setup({ store, members: [{ id: 'T', agents: [] }] })
+  await core.start()
+  const friends = core.snapshot().friends
+  const w = friends.find(f => f.id === 'W/W-pi')
+  assert.ok(w, '舊格式的好友要讀得回來')
+  assert.equal(w.status, 'offline')
+  assert.equal(w.model, undefined)
+  assert.equal(w.device, undefined)
+  assert.equal(core.logOf('W/W-pi')[0].text, '舊信')
+  assert.equal(vendorBadgeHtml(w), vendorIconSvg('pi'))
+  const x = friends.find(f => f.id === 'X/X-壞')
+  assert.equal(x.model, undefined); assert.equal(x.device, undefined); assert.equal(x.kind, undefined)
+  assert.equal(groupByDevice(friends, { selfNode: 'T' }).find(g => g.key === 'W').label, '未命名設備')
+  await core.stop(); await relay.close()
 })
 
 test('寄信狀態：sent_status 更新已送達／已讀；收到 reply_to 標已回覆', async () => {
