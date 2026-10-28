@@ -1,8 +1,8 @@
 {
-  "version": "0.1.103",
-  "versionCode": 1103,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.103_android.apk",
-  "sha256": "5d32594a36e17863177e68467f8be9d1accde6cb34462e863994a73dfca40749",
-  "notes": "0.1.103：與電腦版同步（夥伴可以自己換頭像，名單和群組顯示夥伴自訂的頭像）",
+  "version": "0.1.104",
+  "versionCode": 1104,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.104_android.apk",
+  "sha256": "a4f1cc1bcc71d529bd941dedd1725507535b7d85edc6d094137651b1ccd321c7",
+  "notes": "請改從 Google Play 安裝（先移除這個版本，再到 Play 搜尋 ASN）\nhttps://play.google.com/store/apps/details?id=tw.yooliang.asn",
   "bytes": 9493988
 }
