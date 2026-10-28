@@ -39,6 +39,10 @@
 
 機器橋也會回報這台的平台（`platform`：linux／windows／macos）。Linux 設備沒開放、又沒寫原因時，精靈會說明要在那台的 `~/.asn/launcher.json` 寫 profiles 與 cwd_allow，或設 `ASN_LAUNCH_AUTO=1` 自動偵測，再重啟機器橋。舊版機器橋不帶平台，精靈照原本的說法。
 
+### 沒有桌面的 Linux（0.2 H4）
+
+有桌面（`DISPLAY`／`WAYLAND_DISPLAY`）而且找得到圖形終端（gnome-terminal、konsole、xfce4-terminal、xterm）就照舊開終端；否則用 tmux 開一個 session（`asn-<名字>`），在那台執行 `tmux attach -t asn-<名字>` 就看得到。需要 tmux 3.2 以上：3.2 起 `new-session` 才有 `-e`，而且多個參數會直接 exec、不經 shell；版本太舊就拒絕，不退回字串拼接。同名的 session 已存在（`has-session -t =asn-<名字>` 精確比對）就拒絕。都沒有就失敗並說明，不再把互動式 CLI 丟到背景跑。這版只管 claude 與 codex 的開窗；Linux 機器橋的 pi 引擎與關閉 tmux session 另開。
+
 ## 安全（這是能在你電腦上開程式的入口，必須嚴格）
 
 1. **只有 owner 能下令**：仲介新增動作 `launch {machine, profile, name, cwd, first_message?}`，只接受 role=owner（小良哥經希緒或 Irori Chat）；其他成員、工頭、外部 AI 一律 403。

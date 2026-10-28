@@ -9,7 +9,7 @@ export const DISPLAY_MODES = [
 ]
 
 // 0.2 H2：沒開放時依那台回報的內容說明。Linux 的機器橋沒有設定畫面，要改設定檔；那台自己寫了不開放的原因就照它寫的（純文字，畫面只用文字插值顯示）
-export const LINUX_CLOSED = '這台是 Linux 設備，沒有設定畫面。要開放的話，請在那台的 ~/.asn/launcher.json 寫好 profiles 和 cwd_allow（工作資料夾白名單），或設環境變數 ASN_LAUNCH_AUTO=1 讓它自動偵測，再重啟 ASN 機器橋'
+export const LINUX_CLOSED = '這台是 Linux 設備，沒有設定畫面。要開放的話，請在那台的 ~/.asn/launcher.json 寫好 profiles 和 cwd_allow（工作資料夾白名單），或設環境變數 ASN_LAUNCH_AUTO=1 讓它自動偵測，再重啟 ASN 機器橋。沒有桌面時會用 tmux 開（需要 tmux 3.2 以上）'
 export const closedByDevice = reason => `這台設備不開放開新夥伴：${reason}`
 /** 沒開放的原因：那台寫的原因 → Linux 的設定方法 → 呼叫端給的一般說法（舊的機器橋沒回報平台就是這個） */
 export function closedReasonOf(machine, fallback) {
