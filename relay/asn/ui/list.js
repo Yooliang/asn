@@ -6,6 +6,7 @@ import { ADS, AD_MS, FIXED_TABS, goAd, groupHeading, groupRows, moreUnread, next
 import { GUIDES } from './lib/guides.mjs'
 import { GuideDoc } from './lib/guide-doc.mjs'
 import { buildLogView } from './lib/changelog.mjs'
+import { initialReleases, loadReleases, releasesNote } from './lib/releases.mjs'
 import { SettingsPanel } from './lib/settings-panel.mjs'
 import { PANEL_KINDS, isPanelTab, normalizePanelSize, panelItem, panelTabId, panelTabItem, panelTitle, splitTabs } from './lib/panels.mjs'
 import { AsnDialog } from './lib/dialog.mjs'
@@ -168,10 +169,13 @@ async function copyAskpassPath() {
 // 自動更新：啟動與每 6 小時檢查；有新版只在名單上方顯示一條通知，使用者按「更新」才下載安裝（--shot 模式不檢查）。程式在 updater.rs
 const autoCheck = ref(autoCheckFromSaved(savedMe.autoUpdate))
 const upd = reactive({ ...initialUpdateState(), checking: false, manual: '', lastCheck: 0, checkErr: '' })
-// 版本更新記錄：打包時 CHANGELOG.md 轉成 vendor/changelog.json（與同內容的 changelog.mjs），離線也能看（讀不到就當沒有）
-const changelogEntries = ref([])
-// （CSP 的 connect-src 不放行 fetch；跟 dicebear.mjs 一樣用 import 載入同內容的 .mjs 版）
-try { changelogEntries.value = (await import('./vendor/changelog.mjs')).default } catch { /* 沒有記錄檔就不顯示 */ }
+// 版本更新記錄：從後台公開的 asn_site_releases 讀（Rust 的 site_releases 指令；讀成功的在記憶體留 10 分鐘），讀不到照實說（#462）
+const releases = reactive(initialReleases())
+const reloadReleases = async (force = false) => {
+  if (info.shot || releases.phase === 'loading') return
+  releases.phase = 'loading'
+  Object.assign(releases, await loadReleases(f => transport.siteReleases(f), { force }))
+}
 const setUpd = next => Object.assign(upd, next)
 const checkUpdate = async (manual = false) => {
   if (info.shot || upd.checking || upd.phase === 'installing') return
@@ -384,6 +388,7 @@ async function runPiSetup(call, doneText) {
   piSetup.busy = true; piSetup.confirm = false; piSetup.msg = ''
   try { piSetup.raw = await call(); piSetup.msg = doneText } catch (e) { piSetup.msg = piSetupError(e) } finally { piSetup.busy = false }
 }
+if (!info.shot) void reloadReleases()   // 啟動時先讀一次（讀成功的 Rust 端留 10 分鐘，之後開設定頁不重抓）
 const quotaHook = reactive({ raw: null, busy: false, confirm: false, msg: '' })
 // Claude 外掛「自動安裝或更新」開關（#343）：null＝還沒查到（舊版 Rust 沒有這個指令就不顯示）
 const claudeModAuto = ref(null)
@@ -1546,7 +1551,8 @@ const app = createApp({
       quotaHook: quotaHookView(quotaHook.raw, quotaHook),
       claudeModAuto: claudeModAuto.value,
       version: info.version,
-      log: buildLogView({ entries: changelogEntries.value, current: info.version, available: upd.phase === 'idle' ? null : upd.info }),
+      log: buildLogView({ entries: releases.entries, current: info.version, available: upd.phase === 'idle' ? null : upd.info }),
+      logNote: releasesNote(releases), logRetry: releases.phase === 'error',
     }))
     const applySetting = async (op, value) => {
       switch (op) {
@@ -1580,6 +1586,7 @@ const app = createApp({
         case 'askpass-copy': await copyAskpassPath(); break
         case 'autoCheck': autoCheck.value = value === true; break
         case 'check-update': await checkUpdate(true); break
+        case 'releases-retry': await reloadReleases(true); break
         case 'usage-refresh': await usage.refresh(); break
         case 'launch-max': launchPrefs.maxPerHour = Number.isFinite(value) ? value : 6; await saveLaunchPrefs(); break
         case 'launch-cwd': setLaunchCwdText(String(value ?? '')); break

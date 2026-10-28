@@ -34,6 +34,8 @@ import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
 import { RECENT_GROUP_KEY, RECENT_GROUP_LABEL, recentActivity } from './lib/recent.mjs'
 import { authApi, invoke, listen, store } from './lib/tauri.mjs'
+import { buildLogView } from './lib/changelog.mjs'
+import { RETRY_LABEL, initialReleases, loadReleases, releasesNote } from './lib/releases.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
 import { runChoices } from './lib/model-catalog.mjs'
 import { ROOM_GROUP_KEY, ROOM_GROUP_LABEL, ROOM_POLL_MS, ROOM_EMPTY_HINT, ROOM_EMPTY_TEXT, ROOM_LOAD_FAIL_TEXT, isRoomChat, roomChatId, roomIdOf, roomPseudoFriend, totalUnreadWithRooms } from './lib/mobile-rooms.mjs'
@@ -411,6 +413,16 @@ const app = createApp({
     const settingRows = computed(() => mobileSettingRows({ name: myName.value, hasUpload: selfHasUpload.value, vibrateNudge: prefs.vibrateNudge, vibrateMsg: prefs.vibrateMsg, updateEnabled: upd.enabled, autoUpdate: prefs.autoUpdate, version: info.version, devices: acctDevs.value }))
     const settingCat = computed(() => (nav.sheet === 'setting' ? nav.cat : ''))
     const settingTitle = computed(() => mobileSettingTitle(settingCat.value))
+    // 設置 → 更新：版本紀錄從後台公開的 asn_site_releases 讀（Rust 端讀成功的留 10 分鐘），讀不到照實說（#462）
+    const rel = reactive(initialReleases())
+    const loadRel = async (force = false) => {
+      if (rel.phase === 'loading') return
+      rel.phase = 'loading'
+      Object.assign(rel, await loadReleases(f => invoke('site_releases', { force: f === true }), { force }))
+    }
+    const relLog = computed(() => buildLogView({ entries: rel.entries, current: info.version, available: null }))
+    const relNote = computed(() => releasesNote(rel))
+    watch(settingCat, c => { if (c === 'update' && (rel.phase === 'idle' || rel.phase === 'error')) void loadRel() })
     // 設備與帳號（#268）開的是名單設備卡「選項」的同一頁（先看設備列表），其他分類開設置的滿版頁
     const openSetting = key => { if (nav.sheet) return; if (key === 'devices') void openAcct(); else go(settingNav(key)) }
     const openGuides = () => { if (!nav.sheet) go(guideNav()) }
@@ -880,7 +892,7 @@ const app = createApp({
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchStep2, lchRun, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
-      settingRows, settingCat, settingTitle, openSetting, nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
+      settingRows, settingCat, settingTitle, openSetting, rel, relLog, relNote, loadRel, RETRY_LABEL, nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }
   },
 })
