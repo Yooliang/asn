@@ -527,7 +527,8 @@ pub(crate) struct Plan {
     pub cwd: PathBuf,
     /// 含程式本身
     pub argv: Vec<String>,
-    /// 原本在 Windows Terminal 分頁裡
+    /// 原本在 Windows Terminal 分頁裡（只做記錄：#476 起重開一律用 Windows 原生主控台，見 local::start_window）
+    #[allow(dead_code)]
     pub in_wt: bool,
 }
 
@@ -653,22 +654,8 @@ pub fn model_switch_run(req: SwitchRunReq) -> Result<Value, String> {
     Ok(run_with(&RealOs, &dir, &req, &real_launch, &Timing::real()))
 }
 
-/// `wt.exe` 參數：開在這個夥伴專屬的新視窗（不是分頁），主控台切換才能單獨顯示／隱藏它（見 wt_launch）
-pub(crate) fn wt_args(plan: &Plan) -> Vec<String> {
-    super::wt_launch::wt_args(&plan.name, &plan.cwd.to_string_lossy(), &plan.argv[0], &plan.argv[1..])
-}
-
+/// 照計畫重開：一律用 Windows 原生主控台（#476；原本在 Windows Terminal 分頁裡的也一樣，重開後就能單獨切前景／背景）
 pub(crate) fn real_launch(plan: &Plan) -> Result<(), String> {
-    #[cfg(windows)]
-    {
-        // WT 的命令分隔符是分號；資料夾或名字含分號就不走 WT，避免被拆成另一條 wt 命令
-        if plan.in_wt && super::wt_launch::wt_usable(&plan.name, &plan.cwd.to_string_lossy()) {
-            match super::wt_launch::spawn_wt(&plan.name, &plan.cwd, &plan.argv[0], &plan.argv[1..]) {
-                Ok(_) => return Ok(()),
-                Err(e) => eprintln!("{e}，改開一般主控台"),
-            }
-        }
-    }
     local::start_window(&plan.name, &plan.argv[0], &plan.argv[1..], &plan.cwd, false).map(|_| ())
 }
 
@@ -1549,17 +1536,6 @@ mod tests {
         let r = run_with(&f, &e.dir, &run_req(), &|_| panic!(), &quick());
         assert_eq!(r["stage"], "check");
         assert!(f.terminated.borrow().is_empty());
-    }
-
-    #[test]
-    fn wt參數_分號不會被當成分隔符_資料夾與名字原樣() {
-        let plan = Plan { name: "小良哥 1".into(), cwd: PathBuf::from(r"\\?\D:\my proj"), argv: v(&[r"C:\Program Files\c\claude.exe", "--model", "opus"]), in_wt: true };
-        let a = wt_args(&plan);
-        assert_eq!(&a[..5], &["-w", "asn-小良哥 1", "new-tab", "-d", r"D:\my proj"]);
-        assert_eq!(&a[5..8], &["--title", "ASN-小良哥 1", "--suppressApplicationTitle"]);
-        assert_eq!(a[8], "powershell.exe");
-        assert!(a.contains(&"-NoExit".to_string()));
-        assert!(a.iter().all(|x| !x.contains(';')), "編碼後的參數不含分號");
     }
 
     // ---- 真機手動測試（假主控台程式）

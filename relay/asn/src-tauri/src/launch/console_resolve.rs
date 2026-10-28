@@ -48,7 +48,7 @@ const WORKER_REASON: &str = "這是 ASN 內建通道的工作者，沒有終端�
 const BACKGROUND_REASON: &str = "這是在背景執行的程式（沒有人在前面操作），沒有自己的終端機視窗";
 const GONE_REASON: &str = "這個程式已經結束";
 const PROC_MISSING_REASON: &str = "找不到這個程式，可能剛好結束，或不是這台電腦上的程式";
-pub(crate) const WT_SHARED_REASON: &str = "這個夥伴開在共用的 Windows Terminal 分頁裡，無法單獨隱藏；之後由 ASN 開的夥伴會各自一個視窗";
+pub(crate) const WT_SHARED_REASON: &str = "這個夥伴開在 Windows Terminal 裡，跟別的分頁共用同一個視窗，不能單獨切換";
 
 /// 名單條目 → 要查視窗的 pid；不行就回原因。
 /// 安全：任何 pid（包括請求明確帶的）都必須在本機掃描／登記的結果裡、引擎對得上、程序還活著才採用，
@@ -293,7 +293,7 @@ mod tests {
         assert_eq!(*o.asked.borrow(), vec![60]);
     }
 
-    const WT_SHARED: &str = "這個夥伴開在共用的 Windows Terminal 分頁裡，無法單獨隱藏；之後由 ASN 開的夥伴會各自一個視窗";
+    const WT_SHARED: &str = "這個夥伴開在 Windows Terminal 裡，跟別的分頁共用同一個視窗，不能單獨切換";
 
     #[test]
     fn windows_terminal_獨佔一個視窗_只動那一個視窗() {
@@ -319,6 +319,12 @@ mod tests {
         assert_eq!(find_for(70, &two), Err(WT_SHARED.into()), "分不出是哪一扇，不動");
         let none = os_wt(vec![p(1, 0, "asn.exe"), p(70, 68, "node.exe"), p(68, 5, "openconsole.exe"), p(5, 4, "windowsterminal.exe")], vec![]);
         assert!(find_for(70, &none).is_err());
+    }
+
+    #[test]
+    fn 共用視窗的說明照實說_不再承諾之後會各自一個視窗() {
+        assert!(!WT_SHARED_REASON.contains("之後"), "ASN 開的夥伴改用原生主控台後，WT 裡的只剩舊夥伴與使用者自己開的（#476）");
+        assert!(WT_SHARED_REASON.contains("不能單獨切換"));
     }
 
     #[test]

@@ -266,14 +266,9 @@ fn parse_launcher_output(stdout: &str, stderr: &str, success: bool) -> Result<u3
 /// 主控台顯示／隱藏另外靠 ~/.claude/sessions 依名字找 claude 的 PID，不依賴這個值。
 #[cfg(windows)]
 fn start_window_windows(title: &str, command: &str, args: &[String], cwd: &Path, hidden: bool, env: &[(String, String)]) -> Result<u32, String> {
-    // 前景開窗且預設終端機是 Windows Terminal：一個夥伴一個專屬視窗（不開成分頁），主控台切換才能單獨隱藏它。
-    // 預設是傳統主控台、沒有 wt.exe、或要背景（Hidden）開的，維持原本的 PowerShell Start-Process
-    if !hidden && super::wt_launch::wt_usable(title, &cwd.to_string_lossy()) && super::wt_launch::default_is_wt() {
-        match super::wt_launch::spawn_wt_env(title, cwd, command, args, env) {
-            Ok(pid) => return Ok(pid),
-            Err(e) => eprintln!("{e}，改開一般主控台"),
-        }
-    }
+    // 一律用 Windows 原生主控台開（#476）：明確交給 conhost.exe，不管這台的預設終端機是什麼。
+    // Windows Terminal 的所有視窗共用同一個程序，只要使用者開著別的 WT 視窗，ASN 開的夥伴就無法單獨切前景／背景；
+    // 原生主控台一個程序一扇視窗，現有的切換本來就支援。
     // 失敗要大聲：舊版 Start-Process 出錯時 PowerShell 仍以結束碼 0 離開、stdout 空白、stderr 被丟掉，
     // 使用者只看到「沒有回傳 PID」。這裡 Stop + catch，錯誤原文走 stderr 並以結束碼 1 回報。
     let script = r#"
@@ -282,8 +277,18 @@ $a = $env:ASN_LAUNCH_ARGS; $d = $env:ASN_LAUNCH_DIR; $w = $env:ASN_LAUNCH_STYLE
 Remove-Item env:ASN_LAUNCH_ARGS, env:ASN_LAUNCH_DIR, env:ASN_LAUNCH_STYLE, env:IRORI_LAUNCH_ARGS, env:IRORI_LAUNCH_DIR, env:IRORI_LAUNCH_STYLE -ErrorAction SilentlyContinue
 if (-not $w) { $w = 'Normal' }
 try {
-  $p = Start-Process -FilePath ($env:SystemRoot + '\System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $a -WorkingDirectory $d -WindowStyle $w -PassThru
-  [Console]::Out.Write($p.Id)
+  $c = $env:SystemRoot + '\System32\conhost.exe'
+  $ps = $env:SystemRoot + '\System32\WindowsPowerShell\v1.0\powershell.exe'
+  $p = Start-Process -FilePath $c -ArgumentList ('"' + $ps + '" ' + $a) -WorkingDirectory $d -WindowStyle $w -PassThru
+  # 回傳承載視窗的 PowerShell（conhost 的子程序），跟以前一樣；等不到就回 conhost 自己
+  $id = $p.Id
+  for ($i = 0; $i -lt 30; $i++) {
+    $k = Get-CimInstance Win32_Process -Filter "ParentProcessId=$($p.Id) and Name='powershell.exe'" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($k) { $id = $k.ProcessId; break }
+    Start-Sleep -Milliseconds 100
+  }
+  if ($id -eq $p.Id) { [Console]::Error.WriteLine('等不到 conhost 底下的 powershell，回傳 conhost 的 PID') }
+  [Console]::Out.Write($id)
 } catch {
   [Console]::Error.WriteLine($_.Exception.Message)
   exit 1
@@ -309,7 +314,13 @@ try {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let out = cmd.output().map_err(|e| format!("開不起來：{e}"))?;
-    parse_launcher_output(&String::from_utf8_lossy(&out.stdout), &String::from_utf8_lossy(&out.stderr), out.status.success())
+    let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    let r = parse_launcher_output(&stdout, &stderr, out.status.success());
+    // 開起來了但有話要說（例如等不到 powershell、回傳的是 conhost 的 PID）：記一行，不當成失敗
+    if r.is_ok() && !stderr.trim().is_empty() {
+        eprintln!("開夥伴視窗：{}", stderr.trim());
+    }
+    r
 }
 
 #[cfg(not(windows))]

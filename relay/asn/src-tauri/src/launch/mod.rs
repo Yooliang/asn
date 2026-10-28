@@ -12,7 +12,6 @@ pub(crate) mod profiles;
 mod resume;
 mod subagents;
 pub(crate) mod switch;
-pub(crate) mod wt_launch;
 #[cfg(desktop)]
 #[allow(dead_code)]
 pub(crate) mod wezterm;
