@@ -54,7 +54,7 @@ relay send(reply_to) <──── bridge.mjs <──stdout── 收發室 <─
 
 使用者資料夾一律經 `home.mjs` 的單一解析函式（#14 第二期）：環境變數 `ASN_HOME`（舊名 `IRORI_HOME`）→ `~/.asn` → 舊的 `~/.irori-relay`。兩邊都在時，舊資料夾若是連結（遷移完成後的相容連結）或空的就用 `~/.asn`；若是有內容的真資料夾（還沒遷移），就先用舊的、新的當後備。獨立橋不主動遷移，遷移由 ASN 電腦版啟動時做（見 `docs/design/ONBOARDING.md` 第 9.4 節 R2）。
 
-環境變數已改為 **`ASN_` 前綴**（`docs/design/ONBOARDING.md` 第 5 節，#14 第一期）。舊名 `IRORI_<名>` 照樣能用：新名優先，沒設（或只有空白）才讀舊名，兩個都設以新名為準（`env-compat.mjs` 的 `envGet`）。橋交給子程序的環境，已改名的變數兩個名字都帶，金鑰（`ASN_RELAY_KEY`／`ASN_RELAY_ANON_KEY` 與舊名）新舊名都擋。資料夾 `~/.asn/` 本期不搬。Aegis 轉接橋專用的 `IRORI_AEGIS_*` 不改名。
+環境變數已改為 **`ASN_` 前綴**（`docs/design/ONBOARDING.md` 第 5 節，#14 第一期）。舊名 `IRORI_<名>` 照樣能用：新名優先，沒設（或只有空白）才讀舊名，兩個都設以新名為準（`env-compat.mjs` 的 `envGet`）。橋交給子程序的環境，已改名的變數兩個名字都帶，金鑰（`ASN_RELAY_KEY`／`ASN_RELAY_ANON_KEY` 與舊名）新舊名都擋。資料夾 `~/.asn/` 本期不搬。Aegis 轉接橋專用的變數也已改名（F4）：新名 `ASN_AEGIS_*` 優先，舊名 `IRORI_AEGIS_*` 照認，Aegis 主機現有的設定不用改。
 
 | 檔／環境變數 | 說明 |
 |---|---|
@@ -143,17 +143,18 @@ powershell -File install-task.ps1 -Uninstall           # 移除
 | 情況 | 行為 |
 |---|---|
 | `to_agent` 不在白名單 | 寄回「這位成員沒有開放聯絡」再 ack（不打 Aegis） |
-| 沒有 `to_agent` | 交給預設成員 `IRORI_AEGIS_DEFAULT`（預設 `aegis`＝愛吉絲，Aegis 總管），回信 `from_agent` 填實際回答的成員；預設成員不在白名單才寄回「請指定要問的成員」並列出白名單 |
+| 沒有 `to_agent` | 交給預設成員 `ASN_AEGIS_DEFAULT`（預設 `aegis`＝愛吉絲，Aegis 總管），回信 `from_agent` 填實際回答的成員；預設成員不在白名單才寄回「請指定要問的成員」並列出白名單 |
 | `status=success` | 把 `answer` 寄回 |
 | `status=error`／連線失敗／逾時 | 60 秒後重試一次；仍失敗寄「對方忙線中，請稍後再問」 |
 | HTTP 404 | 寄「查無此成員」（不重試） |
 | 其他 status | 照實回報 |
 | 寄回失敗 | 不 ack，留在 inbox 等下次補拉 |
 
-名單回報（roster）只列白名單成員（`name`=中文名，沒有中文名才用 slug；`cwd_label`=slug），聯絡人因此顯示中文名；白名單仍以 slug 判斷。Aegis 主機轉接橋自己的成員（`IRORI_AEGIS_SELF`，預設 `xi-xu`，Irori 生態專用）不列進名單，寄給它的信會被擋回。節點需要 `can_roster`（`supabase/sql/04_roster.sql`）才能回報，否則 403 只記一次 log。
+名單回報（roster）只列白名單成員（`name`=中文名，沒有中文名才用 slug；`cwd_label`=slug），聯絡人因此顯示中文名；白名單仍以 slug 判斷。Aegis 主機轉接橋自己的成員（`ASN_AEGIS_SELF`，預設 `xi-xu`，Irori 生態專用）不列進名單，寄給它的信會被擋回。節點需要 `can_roster`（`supabase/sql/04_roster.sql`）才能回報，否則 403 只記一次 log。
 
-環境變數：`ASN_RELAY_ID`（預設 `AEGIS`）、`IRORI_AEGIS_ALLOW`（逗號分隔 slug，**預設空＝全部擋下**）、`IRORI_AEGIS_URL`、
-`IRORI_AEGIS_DEFAULT`、`IRORI_AEGIS_FROM_MEMBER`、`IRORI_AEGIS_TIMEOUT_MS`、`IRORI_AEGIS_RETRY_MS`、`ASN_RELAY_KEY`／`ASN_RELAY_ANON_KEY`（也可用檔案）。
+環境變數：`ASN_RELAY_ID`（預設 `AEGIS`）、`ASN_AEGIS_ALLOW`（逗號分隔 slug，**預設空＝全部擋下**）、`ASN_AEGIS_URL`、
+`ASN_AEGIS_DEFAULT`、`ASN_AEGIS_FROM_MEMBER`、`ASN_AEGIS_TIMEOUT_MS`、`ASN_AEGIS_RETRY_MS`、`ASN_RELAY_KEY`／`ASN_RELAY_ANON_KEY`（也可用檔案）。
+`ASN_AEGIS_*` 的舊名 `IRORI_AEGIS_*` 照認（新名優先，新名沒設或只有空白才讀舊名；設定讀取在 `aegis-config.mjs`）。
 
 ### 在 Aegis 上安裝
 
@@ -165,7 +166,7 @@ powershell -File install-task.ps1 -Uninstall           # 移除
    (read -rs A; printf '%s' "$A" > ~/.asn/anon.key); chmod 600 ~/.asn/anon.key   # 可省：沒有 anon.key 就只剩 2 分鐘輪詢
    ```
    檔名要跟 `ASN_RELAY_ID` 一致（預設 `AEGIS` → `AEGIS.key`）。
-3. 編輯 `irori-relay-aegis.service`：`ASN_RELAY_ID`、`IRORI_AEGIS_ALLOW=<slug1>,<slug2>`、`ExecStart` 路徑，然後：
+3. 編輯 `irori-relay-aegis.service`：`ASN_RELAY_ID`、`IRORI_AEGIS_ALLOW=<slug1>,<slug2>`（範本沿用舊名，照認；新裝的也可改寫成 `ASN_AEGIS_ALLOW`）、`ExecStart` 路徑，然後：
    ```
    sudo cp irori-relay-aegis.service /etc/systemd/system/
    sudo systemctl daemon-reload
@@ -173,7 +174,7 @@ powershell -File install-task.ps1 -Uninstall           # 移除
    ```
 4. 看狀態與 log：`systemctl status irori-relay-aegis`、`journalctl -u irori-relay-aegis -f`，
    或 `tail -f ~/.asn/aegis-AEGIS/bridge.log`。看到 `aegis bridge starting … allow=[…]`、`whoami node=…`、`doorbell joined` 即上線。
-5. 改白名單：改 unit 的 `IRORI_AEGIS_ALLOW` → `sudo systemctl daemon-reload && sudo systemctl restart irori-relay-aegis`。
+5. 改白名單：改 unit 的 `IRORI_AEGIS_ALLOW`（或新名 `ASN_AEGIS_ALLOW`，兩個都設以新名為準） → `sudo systemctl daemon-reload && sudo systemctl restart irori-relay-aegis`。
 6. 這把節點金鑰只能有**一個**收信者；`can_invite` 才能回報名單（否則 log 一行 403 後安靜）。
 
 ## 群組訊息轉交（rooms）
@@ -183,7 +184,7 @@ powershell -File install-task.ps1 -Uninstall           # 移除
 - `bridge.mjs`：成員 key 是節點本身 → 只轉給 `ASN_RELAY_DEFAULT_AGENT`（沒設或不在線就留著、游標不前進，不丟給別的視窗）；是視窗 key → 轉給該視窗（不在可轉交清單就略過、記 log、推進游標）。走同一個收發室 worker（id 為 `sha1(room:房號:seq:成員key)` 組的確定性 UUID）。
   轉交文字：第一行 `[群組 名稱] trust=… from=… #seq`（`~` 顯示成 `/`，`~owner` 顯示主人的名字（沒帶名字就顯示「主人」）），第二行固定的「不需要回就不要回」提示，之後是內文。
   視窗回覆經收發室後，用 `room_post`（`from_agent`＝該視窗名）貼回群組；回覆含 `（不需回覆）`／`[no-reply]` 不貼；`room_post` 429（每成員每群組每小時 20 則）只記 log、不重試；群組訊息不寄逾時通知、轉交失敗也只記 log，不會貼到群組。
-- `bridge-aegis.mjs`：成員 key `aegis~名字` → `resolveSlug(名字)`、節點本身 → `IRORI_AEGIS_DEFAULT`；要在 `IRORI_AEGIS_ALLOW` 內才問（不在就略過、記 log、推進游標）；用同樣的標頭格式呼叫 `/ask`，answer 以 `room_post`（`from_agent`＝roster 上的名字）貼回；ask 失敗不貼。
+- `bridge-aegis.mjs`：成員 key `aegis~名字` → `resolveSlug(名字)`、節點本身 → `ASN_AEGIS_DEFAULT`；要在 `ASN_AEGIS_ALLOW` 內才問（不在就略過、記 log、推進游標）；用同樣的標頭格式呼叫 `/ask`，answer 以 `room_post`（`from_agent`＝roster 上的名字）貼回；ask 失敗不貼。
 - 共用邏輯在 `rooms.mjs`（游標、標頭格式、UUID、room_post）。
 - 轉交時（只有 `bridge.mjs`）在內文最後附「前面 5 則」當上下文（`rooms.context()`：`room_read` 帶 `since=seq-6&limit=5`，只讀；讀失敗就不附、照常轉交）與往回翻的指令。
 

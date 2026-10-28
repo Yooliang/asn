@@ -10,6 +10,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnTracked } from './spawn-tracked.mjs'
 import { splitNudgeAnswer } from '../nudge.mjs'
+import { aegisConfig } from '../aegis-config.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const V = JSON.parse(fs.readFileSync(path.join(here, '..', '..', 'shared', 'test-vectors', 'aegis-bridge.json'), 'utf8'))
@@ -22,6 +23,15 @@ test('向量：震動拆分', () => {
   for (const c of V.nudge_split) {
     const sp = splitNudgeAnswer(c.answer, c.name)
     assert.deepEqual(sp, c.split, JSON.stringify(c.answer))
+  }
+})
+
+test('向量：設定讀取（只舊名、只新名、兩個都設新名贏、新名空白退回舊名、預設值）', () => {
+  assert.ok(V.env_config.length >= 5)
+  for (const c of V.env_config) {
+    const g = aegisConfig(c.env)
+    const got = { url: g.url, from_member: g.fromMember, allow: g.allow, self_member: g.selfMember, default_member: g.defaultMember, ask_timeout_ms: g.askTimeoutMs, retry_ms: g.retryMs }
+    assert.deepEqual(got, c.expect, c.case)
   }
 })
 

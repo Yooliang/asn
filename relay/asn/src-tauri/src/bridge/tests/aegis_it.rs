@@ -225,6 +225,29 @@ fn 向量_震動拆分與_node_版逐字相同() {
     }
 }
 
+#[test]
+fn 向量_設定讀取_新名優先_舊名照認_與_node_版相同() {
+    use super::super::engines::aegis::AegisCfg;
+    let v = vectors();
+    let cases = v["env_config"].as_array().unwrap();
+    assert!(cases.len() >= 5);
+    for c in cases {
+        let env: Vec<(String, String)> = c["env"].as_object().unwrap().iter().map(|(k, x)| (k.clone(), x.as_str().unwrap().to_string())).collect();
+        let e = &c["expect"];
+        let s = |k: &str| e[k].as_str().unwrap().to_string();
+        let want = AegisCfg {
+            url: s("url"),
+            from_member: s("from_member"),
+            allow: e["allow"].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect(),
+            self_member: s("self_member"),
+            default_member: s("default_member"),
+            ask_timeout_ms: e["ask_timeout_ms"].as_u64().unwrap(),
+            retry_ms: e["retry_ms"].as_u64().unwrap(),
+        };
+        assert_eq!(AegisCfg::from_env(&env), want, "{}", c["case"]);
+    }
+}
+
 #[tokio::test]
 async fn 向量_每封信的問答_回信_ack_名單_與_node_版相同() {
     let v = vectors();

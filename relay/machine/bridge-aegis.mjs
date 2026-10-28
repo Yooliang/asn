@@ -1,7 +1,7 @@
 // 之後移出本 repo（#14 R8，D11）：本橋服務 Aegis 主機，那台部署還在用，移出步驟見 docs/design/ONBOARDING.md 第 7.5 節。移出前不要刪、不要改名。
 // Irori relay Aegis 轉接橋（Linux / Aegis 主機）。
 // 用一把仲介節點金鑰收信；每封信 = 一次 POST <aegis>/api/v1/agent-chat/ask（to_agent 當成員 slug），把 answer 用 reply_to 寄回。
-// 只有白名單（IRORI_AEGIS_ALLOW）內的成員能被問；不開 claude -p、不需要 claude CLI。
+// 只有白名單（ASN_AEGIS_ALLOW，舊名 IRORI_AEGIS_ALLOW 照認）內的成員能被問；不開 claude -p、不需要 claude CLI。
 import { envGet } from './env-compat.mjs'
 import { pickAnon } from './anon.mjs'
 import fs from 'node:fs'
@@ -11,18 +11,14 @@ import { createCore } from './relay-core.mjs'
 import { createLog } from './safe-log.mjs'
 import { createRooms, parseMember, roomText } from './rooms.mjs'
 import { splitNudgeAnswer } from './nudge.mjs'
+import { aegisConfig } from './aegis-config.mjs'
 
 const NODE_ID = (envGet(process.env, 'RELAY_ID') || 'AEGIS').trim()
 const BASE_URL = envGet(process.env, 'RELAY_URL') || 'https://etccgmkrosbzpltudlgt.supabase.co/functions/v1/relay'
 import { HOME_DIR, locateHome } from './home.mjs'
 const WORK_DIR = path.join(HOME_DIR, `aegis-${NODE_ID}`)
-const AEGIS_URL = (process.env.IRORI_AEGIS_URL || 'http://127.0.0.1:8899').replace(/\/+$/, '')
-const FROM_MEMBER = process.env.IRORI_AEGIS_FROM_MEMBER || 'xi-xu'
-const ALLOW = (process.env.IRORI_AEGIS_ALLOW || '').split(',').map(s => s.trim()).filter(Boolean)
-const SELF_MEMBER = (process.env.IRORI_AEGIS_SELF || 'xi-xu').trim()   // 希緒自己：不列進名單、也不能被問
-const DEFAULT_MEMBER = (process.env.IRORI_AEGIS_DEFAULT || 'aegis').trim()   // 沒有 to_agent 的信交給它（要在白名單內）
-const ASK_TIMEOUT_MS = Number(process.env.IRORI_AEGIS_TIMEOUT_MS || 300_000)
-const RETRY_MS = Number(process.env.IRORI_AEGIS_RETRY_MS || 60_000)
+// Aegis 專屬設定：新名 ASN_AEGIS_* 優先，舊名 IRORI_AEGIS_* 照認（aegis-config.mjs）
+const { url: AEGIS_URL, fromMember: FROM_MEMBER, allow: ALLOW, selfMember: SELF_MEMBER, defaultMember: DEFAULT_MEMBER, askTimeoutMs: ASK_TIMEOUT_MS, retryMs: RETRY_MS } = aegisConfig(process.env)
 const POLL_MS = Number(envGet(process.env, 'RELAY_POLL_MS') || 120_000)
 const ROSTER_MS = Number(envGet(process.env, 'ROSTER_MS') || 60_000)
 const LOG_FILE = envGet(process.env, 'RELAY_LOG') || path.join(WORK_DIR, 'bridge.log')

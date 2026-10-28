@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-/// 後台節點信箱一次最多回幾封（與 irori_relay_inbox 的 limit 一致）
+/// 後台節點信箱一次最多回幾封（與 asn_relay_inbox 的 limit 一致）
 const INBOX_PAGE: usize = 50;
 /// 一輪收信最多往後多拿幾批
 const INBOX_ROUNDS: usize = 5;

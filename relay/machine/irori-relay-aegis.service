@@ -1,7 +1,7 @@
 # 之後移出本 repo（#14 R8，D11）：Aegis 主機仍以本檔部署（ExecStart 指向該機的 clone），移出步驟見 docs/design/ONBOARDING.md 第 7.5 節。
 # Aegis 轉接橋（仲介信 -> Aegis /agent-chat/ask）。安裝方式見 README「Aegis 轉接橋」一節。
 # 金鑰不寫在這裡：放在 ~/.asn/<節點代號>.key（舊位置 ~/.irori-relay/ 也認；chmod 600）。
-# 注意：AEGIS 專屬變數（IRORI_AEGIS_*）程式目前只認舊名，改名屬 F4，這裡先維持舊名。
+# AEGIS 專屬變數：程式新名 ASN_AEGIS_* 優先、舊名 IRORI_AEGIS_* 照認（F4）。這台主機的部署還在用舊名，這裡維持舊名，不用改。
 [Unit]
 Description=ASN relay Aegis bridge
 After=network-online.target
@@ -13,7 +13,7 @@ User=cwen0708
 Environment=ASN_RELAY_ID=AEGIS
 # 逗號分隔的成員 slug；空白＝全部擋下
 Environment=IRORI_AEGIS_ALLOW=
-# 其餘可選：IRORI_AEGIS_URL（預設 http://127.0.0.1:8899）、IRORI_AEGIS_FROM_MEMBER（預設 xi-xu）、IRORI_AEGIS_TIMEOUT_MS（預設 300000）
+# 其餘可選（新名 ASN_AEGIS_* 優先，舊名照認）：ASN_AEGIS_URL（預設 http://127.0.0.1:8899）、ASN_AEGIS_FROM_MEMBER（預設 xi-xu）、ASN_AEGIS_TIMEOUT_MS（預設 300000）
 ExecStart=/opt/node22/bin/node /home/cwen0708/irori/relay/machine/bridge-aegis.mjs
 Restart=on-failure
 RestartSec=15

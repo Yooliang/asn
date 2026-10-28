@@ -120,7 +120,7 @@ function sources(dir, out = []) {
   }
   return out
 }
-// env-compat 本身要寫舊名。Aegis 轉接橋專用的 IRORI_AEGIS_* 依 D11 將移出本 repo，第一期不改名（共用的 RELAY_* 已走 envGet）
+// env-compat 本身要寫舊名。Aegis 轉接橋專用的 AEGIS_* 也已走 envGet（F4），守門一樣要管
 const EXEMPT = new Set(['env-compat.mjs'])
 
 test('守門：relay/machine 的程式不再直接讀 IRORI_*，一律走 envGet；envGet 的名字都在 RENAMED 清單', () => {
@@ -129,7 +129,7 @@ test('守門：relay/machine 的程式不再直接讀 IRORI_*，一律走 envGet
     if (EXEMPT.has(path.basename(f))) continue
     const src = fs.readFileSync(f, 'utf8')
     const code = src.split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
-    if (/\benv(?:\.|\[\s*['"`])IRORI_(?!AEGIS_)/.test(code) || /\$env:IRORI_(?!FILE|ARGS|DIR|STYLE)/.test(code)) bad.push(path.relative(MACHINE, f))
+    if (/\benv(?:\.|\[\s*['"`])IRORI_/.test(code) || /\$env:IRORI_(?!FILE|ARGS|DIR|STYLE)/.test(code)) bad.push(path.relative(MACHINE, f))
     for (const m of code.matchAll(/envGet\(\s*[\w.]+\s*,\s*'([A-Z0-9_]+)'\s*\)/g)) if (!RENAMED.includes(m[1])) unknown.push(`${path.relative(MACHINE, f)}:${m[1]}`)
   }
   assert.deepEqual(bad, [], '這些檔案還在直接讀 IRORI_*（改用 envGet）')

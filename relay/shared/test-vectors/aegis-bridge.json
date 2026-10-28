@@ -1,5 +1,5 @@
 {
- "說明": "Aegis 橋的共用測試向量：Node（relay/machine/test/aegis-vectors.test.mjs）與 Rust（bridge/tests/aegis_it.rs、engines/aegis.rs）都讀這一份。每封信都會被 ack（寄回成功才 ack）。replies 的 body 逐字比對（Node 與 Rust 同文）；沒寫 from_agent 就不比。mail 的 expects_reply 可覆蓋 config.mail（寄件人明說不需回覆也照問照回）。no_default＝白名單沒有預設成員時，沒指定收件人的信要得到「請指定成員」清單。rooms＝群組訊息：視窗寫成員代號或中文名都要問到同一位成員，並以中文名貼回群組。",
+ "說明": "Aegis 橋的共用測試向量：Node（relay/machine/test/aegis-vectors.test.mjs）與 Rust（bridge/tests/aegis_it.rs、engines/aegis.rs）都讀這一份。每封信都會被 ack（寄回成功才 ack）。replies 的 body 逐字比對（Node 與 Rust 同文）；沒寫 from_agent 就不比。mail 的 expects_reply 可覆蓋 config.mail（寄件人明說不需回覆也照問照回）。no_default＝白名單沒有預設成員時，沒指定收件人的信要得到「請指定成員」清單。rooms＝群組訊息：視窗寫成員代號或中文名都要問到同一位成員，並以中文名貼回群組。 env_config＝設定讀取：新名 ASN_AEGIS_* 優先、舊名 IRORI_AEGIS_* 照認、新名空白就退回舊名、兩個都沒有（或都是空字串）用預設值；ALLOW 逗號分隔去空白，SELF／DEFAULT 去頭尾空白，URL 去尾端斜線。",
  "config": {
   "allow": "alpha,flaky,busy,ghost,weird,xiao-liang,aegis,xi-xu",
   "retry_ms": 100,
@@ -721,6 +721,163 @@
    "target": "alpha",
    "answer": "群組答案-中文名",
    "post_from_agent": "阿爾法"
+  }
+ ],
+ "env_config": [
+  {
+   "case": "都沒設：預設值",
+   "env": {},
+   "expect": {
+    "url": "http://127.0.0.1:8899",
+    "from_member": "xi-xu",
+    "allow": [],
+    "self_member": "xi-xu",
+    "default_member": "aegis",
+    "ask_timeout_ms": 300000,
+    "retry_ms": 60000
+   }
+  },
+  {
+   "case": "只設舊名",
+   "env": {
+    "IRORI_AEGIS_URL": "http://127.0.0.1:1/",
+    "IRORI_AEGIS_FROM_MEMBER": "from-x",
+    "IRORI_AEGIS_ALLOW": " a, b ,,c ",
+    "IRORI_AEGIS_SELF": " self-x ",
+    "IRORI_AEGIS_DEFAULT": " def-x ",
+    "IRORI_AEGIS_TIMEOUT_MS": "2000",
+    "IRORI_AEGIS_RETRY_MS": "100"
+   },
+   "expect": {
+    "url": "http://127.0.0.1:1",
+    "from_member": "from-x",
+    "allow": [
+     "a",
+     "b",
+     "c"
+    ],
+    "self_member": "self-x",
+    "default_member": "def-x",
+    "ask_timeout_ms": 2000,
+    "retry_ms": 100
+   }
+  },
+  {
+   "case": "只設新名",
+   "env": {
+    "ASN_AEGIS_URL": "http://127.0.0.1:1/",
+    "ASN_AEGIS_FROM_MEMBER": "from-x",
+    "ASN_AEGIS_ALLOW": " a, b ,,c ",
+    "ASN_AEGIS_SELF": " self-x ",
+    "ASN_AEGIS_DEFAULT": " def-x ",
+    "ASN_AEGIS_TIMEOUT_MS": "2000",
+    "ASN_AEGIS_RETRY_MS": "100"
+   },
+   "expect": {
+    "url": "http://127.0.0.1:1",
+    "from_member": "from-x",
+    "allow": [
+     "a",
+     "b",
+     "c"
+    ],
+    "self_member": "self-x",
+    "default_member": "def-x",
+    "ask_timeout_ms": 2000,
+    "retry_ms": 100
+   }
+  },
+  {
+   "case": "兩個都設：新名贏",
+   "env": {
+    "IRORI_AEGIS_URL": "http://old",
+    "IRORI_AEGIS_FROM_MEMBER": "from-old",
+    "IRORI_AEGIS_ALLOW": "old1,old2",
+    "IRORI_AEGIS_SELF": "self-old",
+    "IRORI_AEGIS_DEFAULT": "def-old",
+    "IRORI_AEGIS_TIMEOUT_MS": "1111",
+    "IRORI_AEGIS_RETRY_MS": "11",
+    "ASN_AEGIS_URL": "http://127.0.0.1:1/",
+    "ASN_AEGIS_FROM_MEMBER": "from-x",
+    "ASN_AEGIS_ALLOW": " a, b ,,c ",
+    "ASN_AEGIS_SELF": " self-x ",
+    "ASN_AEGIS_DEFAULT": " def-x ",
+    "ASN_AEGIS_TIMEOUT_MS": "2000",
+    "ASN_AEGIS_RETRY_MS": "100"
+   },
+   "expect": {
+    "url": "http://127.0.0.1:1",
+    "from_member": "from-x",
+    "allow": [
+     "a",
+     "b",
+     "c"
+    ],
+    "self_member": "self-x",
+    "default_member": "def-x",
+    "ask_timeout_ms": 2000,
+    "retry_ms": 100
+   }
+  },
+  {
+   "case": "新名空白、舊名有值：用舊名",
+   "env": {
+    "IRORI_AEGIS_URL": "http://127.0.0.1:1/",
+    "IRORI_AEGIS_FROM_MEMBER": "from-x",
+    "IRORI_AEGIS_ALLOW": " a, b ,,c ",
+    "IRORI_AEGIS_SELF": " self-x ",
+    "IRORI_AEGIS_DEFAULT": " def-x ",
+    "IRORI_AEGIS_TIMEOUT_MS": "2000",
+    "IRORI_AEGIS_RETRY_MS": "100",
+    "ASN_AEGIS_URL": "  ",
+    "ASN_AEGIS_FROM_MEMBER": "",
+    "ASN_AEGIS_ALLOW": " ",
+    "ASN_AEGIS_SELF": " ",
+    "ASN_AEGIS_DEFAULT": "",
+    "ASN_AEGIS_TIMEOUT_MS": "",
+    "ASN_AEGIS_RETRY_MS": " "
+   },
+   "expect": {
+    "url": "http://127.0.0.1:1",
+    "from_member": "from-x",
+    "allow": [
+     "a",
+     "b",
+     "c"
+    ],
+    "self_member": "self-x",
+    "default_member": "def-x",
+    "ask_timeout_ms": 2000,
+    "retry_ms": 100
+   }
+  },
+  {
+   "case": "新舊名都是空字串：預設值",
+   "env": {
+    "ASN_AEGIS_URL": "",
+    "IRORI_AEGIS_URL": "",
+    "ASN_AEGIS_FROM_MEMBER": "",
+    "IRORI_AEGIS_FROM_MEMBER": "",
+    "ASN_AEGIS_ALLOW": "",
+    "IRORI_AEGIS_ALLOW": "",
+    "ASN_AEGIS_SELF": "",
+    "IRORI_AEGIS_SELF": "",
+    "ASN_AEGIS_DEFAULT": "",
+    "IRORI_AEGIS_DEFAULT": "",
+    "ASN_AEGIS_TIMEOUT_MS": "",
+    "IRORI_AEGIS_TIMEOUT_MS": "",
+    "ASN_AEGIS_RETRY_MS": "",
+    "IRORI_AEGIS_RETRY_MS": ""
+   },
+   "expect": {
+    "url": "http://127.0.0.1:8899",
+    "from_member": "xi-xu",
+    "allow": [],
+    "self_member": "xi-xu",
+    "default_member": "aegis",
+    "ask_timeout_ms": 300000,
+    "retry_ms": 60000
+   }
   }
  ]
 }
