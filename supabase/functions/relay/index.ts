@@ -17,6 +17,7 @@ import { sanitizeClaudeMod } from "../_shared/claude_mod.ts";
 import { sanitizeNodePlatform } from "../_shared/node_platform.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
 import * as signal from "../_shared/signal.ts";
+import { roomPostAgent, touchActive } from "../_shared/last_active.ts";
 import { handleNodeLaunchAction, LAUNCH_ACTIONS, sanitizeLauncher } from "../_shared/launch.ts";
 import { handleNodePartnerOpAction, PARTNER_OP_ACTIONS } from "../_shared/partner_ops.ts";
 import { ACCT_ACTIONS, handleAcctAction } from "../_shared/account_switch.ts";
@@ -488,6 +489,7 @@ Deno.serve(async (req) => {
     await bindAttachments({ rpc }, me.id, att.ids, { messageId: sent.id });
     // 回信寄給人代號時會扇出給這個帳號所有在線的 ASN，每台的門鈴都敲
     for (const t of bellTopicsOf(sent)) await ring(t);
+    await touchActive(rpc, me.id, str(b.from_agent));   // 最後活動時間（#397）：背景寫入，失敗不影響寄信
     return json(200, { id: sent.id });
   }
   // 遠端開視窗：launch／launchers 只有 owner 節點（SQL 判斷）；launch_pending／launch_result 是機器橋取待辦、回報結果
@@ -596,6 +598,7 @@ Deno.serve(async (req) => {
       if (attIds.length) deps.beforeRing = async (seq) => { await bindAttachments({ rpc }, me.id, attIds, { room: roomId, seq }); };
     }
     const r = await handleNodeRoomAction(deps, me, action, params);
+    if (action === "room_post" && r.status === 200) await touchActive(rpc, me.id, roomPostAgent(params));   // 最後活動時間（#397）：背景寫入，失敗不影響發言
     if (action === "room_read" && r.status === 200 && typeof params.room === "string") {
       r.body.messages = await withRoomAttachments({ rpc }, params.room, r.body.messages);
     }
