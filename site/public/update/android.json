@@ -1,8 +1,8 @@
 {
-  "version": "0.1.101",
-  "versionCode": 1101,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.101_android.apk",
-  "sha256": "3388e24f61b1c875565d6d7bc56599d6a0649d23cecf65314deaf998eab35981",
-  "notes": "0.1.101：手機開新夥伴可選運行並經 pi 帶模型；設定改第四頁籤；版本紀錄從資料庫讀；活躍度跨設備",
+  "version": "0.1.102",
+  "versionCode": 1102,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.102_android.apk",
+  "sha256": "11f1a6294f604b55e0348b47219b2dec7f7e63a5b69063c065ec7dd756d09b09",
+  "notes": "0.1.102：與電腦版同步（經 pi 開在 ASN 自帶終端、終端面板列出 pi、Linux 機器橋支援 pi 與遠端關閉 tmux 夥伴）",
   "bytes": 9489892
 }
