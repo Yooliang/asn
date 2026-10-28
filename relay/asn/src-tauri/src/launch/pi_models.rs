@@ -89,18 +89,36 @@ static SUMMARY_CACHE: Mutex<Option<(Instant, Vec<PiModel>)>> = Mutex::new(None);
 /// 名單回報最多帶這麼多筆（後台也只收 200 筆）
 pub const SUMMARY_MAX: usize = 200;
 
-/// 給啟動設定摘要的 [{ provider, model }]：只有這兩欄、最多 200 筆（不帶憑證、路徑或其他設定）
+/// 給啟動設定摘要的 [{ provider, model }]：只有這兩欄、最多 200 筆（不帶憑證、路徑或其他設定）。
+/// 只讀快取、不等（#454）：快取過期或還沒有時，在背景執行緒重查一次（同時只跑一個），這一輪先用舊的，第一次就先不帶。
+/// summary() 是同步函式，名單每輪都會叫它；pi --list-models 要開外部程序，不能卡住呼叫它的執行緒
 pub fn summary_models() -> Vec<serde_json::Value> {
-    let now = Instant::now();
-    let list = {
-        let g = SUMMARY_CACHE.lock().unwrap();
-        g.as_ref().filter(|(at, _)| now.saturating_duration_since(*at) < SUMMARY_TTL).map(|(_, v)| v.clone())
+    summary_with(&SUMMARY_CACHE, &SUMMARY_REFRESHING, Instant::now(), || models_real(false), &|job| {
+        std::thread::spawn(job);
+    })
+}
+static SUMMARY_REFRESHING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+type Job = Box<dyn FnOnce() + Send>;
+type Slot = Mutex<Option<(Instant, Vec<PiModel>)>>;
+
+/// summary_models 的本體（快取、旗標、重查與開背景工作都可以換掉，測試用）
+pub(crate) fn summary_with(cache: &'static Slot, busy: &'static std::sync::atomic::AtomicBool, now: Instant, fetch: impl FnOnce() -> Vec<PiModel> + Send + 'static, spawn: &dyn Fn(Job)) -> Vec<serde_json::Value> {
+    use std::sync::atomic::Ordering;
+    let (list, fresh_enough) = {
+        let g = cache.lock().unwrap();
+        match g.as_ref() {
+            Some((at, v)) => (v.clone(), now.saturating_duration_since(*at) < SUMMARY_TTL),
+            None => (vec![], false),
+        }
     };
-    let list = list.unwrap_or_else(|| {
-        let v = models_real(false);
-        *SUMMARY_CACHE.lock().unwrap() = Some((now, v.clone()));
-        v
-    });
+    if !fresh_enough && busy.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+        spawn(Box::new(move || {
+            let v = fetch();
+            *cache.lock().unwrap() = Some((Instant::now(), v));
+            busy.store(false, Ordering::SeqCst);
+        }));
+    }
     list.iter().take(SUMMARY_MAX).map(|m| serde_json::json!({ "provider": m.provider, "model": m.model })).collect()
 }
 
@@ -148,6 +166,37 @@ pub fn providers_real(force: bool) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 摘要的模型清單_只讀快取不等_過期才在背景重查一次_同時只跑一個_第一次先不帶() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        static CACHE: Slot = Mutex::new(None);
+        static BUSY: AtomicBool = AtomicBool::new(false);
+        static RUNS: AtomicUsize = AtomicUsize::new(0);
+        let jobs: std::cell::RefCell<Vec<Job>> = std::cell::RefCell::new(vec![]);
+        let spawn = |j: Job| jobs.borrow_mut().push(j);
+        let m = |p: &str, id: &str| PiModel { provider: p.into(), model: id.into(), context: String::new(), thinking: false, images: false };
+        let fetch = move || {
+            RUNS.fetch_add(1, Ordering::SeqCst);
+            vec![m("minimax", "MiniMax-M3.1-Flash")]
+        };
+        let t0 = Instant::now();
+        // 第一次：快取還沒有 → 先不帶（空），排一個背景重查；同一輪再叫也不會多排
+        assert!(summary_with(&CACHE, &BUSY, t0, fetch, &spawn).is_empty());
+        assert!(summary_with(&CACHE, &BUSY, t0, fetch, &spawn).is_empty());
+        assert_eq!(jobs.borrow().len(), 1, "同時只跑一個");
+        assert_eq!(RUNS.load(Ordering::SeqCst), 0, "呼叫的人不等，也不在自己的執行緒上跑 pi");
+        let j = jobs.borrow_mut().pop().unwrap();
+        j();
+        // 算好之後：直接讀快取，不再排
+        let v = summary_with(&CACHE, &BUSY, Instant::now(), fetch, &spawn);
+        assert_eq!(v, vec![serde_json::json!({ "provider": "minimax", "model": "MiniMax-M3.1-Flash" })]);
+        assert!(jobs.borrow().is_empty());
+        // 過期：先回舊的，背景再重查一次
+        let later = Instant::now() + SUMMARY_TTL + Duration::from_secs(1);
+        assert_eq!(summary_with(&CACHE, &BUSY, later, fetch, &spawn).len(), 1, "過期時先用舊的");
+        assert_eq!(jobs.borrow().len(), 1);
+    }
+
     use super::*;
 
     const SAMPLE: &str = "provider      model                       context  max-out  thinking  images\n\
