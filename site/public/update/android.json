@@ -1,8 +1,8 @@
 {
-  "version": "0.1.99",
-  "versionCode": 1099,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.99_android.apk",
-  "sha256": "6a074794b2f36a4ce5fd923ed2a431f7ecb2f0bd4d43b2960cbbe02c0157fa90",
-  "notes": "與電腦版 0.1.99 同步：內建通道切換模型、「關」分成停止與移除、pi 改名、Claude 額度條",
-  "bytes": 9453028
+  "version": "0.1.100",
+  "versionCode": 1100,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.100_android.apk",
+  "sha256": "dbd3e7b047f5ab401045f5f5d5346ae1ea331a2472f71f2cede589b7f7786da3",
+  "notes": "與電腦版 0.1.100 同步：接手自己在終端機開的 pi、pi 切換模型改下拉選單（手機也有）、引導頁加「連接你的 AI 工具」、已關掉的 pi 不再留在名單",
+  "bytes": 9461220
 }
