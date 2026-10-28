@@ -143,3 +143,18 @@ Deno.test("migration：launch／launchers 的擁有者判定＝role=owner 或 �
   assert(/grant execute on function public\.irori_relay_launch\(text, text, text, text, text, text, uuid\) to service_role/i.test(sql));
   assert(!/to (anon|authenticated|public)/i.test(sql), "只授權 service_role");
 });
+
+Deno.test("啟動設定摘要的 pi_models（#443／#444）：只留 provider／model、格式不合的丟掉不整份拒收、最多 200 筆；沒帶就不加", () => {
+  const base = { profiles: [{ id: "pi", label: "Pi" }], cwd_allow: ["C:/x"] };
+  const l = sanitizeLauncher({ ...base, pi_models: [
+    { provider: "minimax", model: "MiniMax-M3.1-Flash", secret: "不該留" },
+    { provider: "-bad", model: "x" }, { provider: "a b", model: "x" }, { provider: "openai-codex", model: 5 }, "壞", null,
+    { provider: "openai-codex", model: "gpt-6" },
+  ] }) as Record<string, unknown>;
+  assertEquals(l.pi_models, [{ provider: "minimax", model: "MiniMax-M3.1-Flash" }, { provider: "openai-codex", model: "gpt-6" }]);
+  const many = sanitizeLauncher({ ...base, pi_models: Array.from({ length: 300 }, (_, i) => ({ provider: "p", model: `m${i}` })) }) as Record<string, unknown>;
+  assertEquals((many.pi_models as unknown[]).length, 200);
+  assertEquals("pi_models" in (sanitizeLauncher(base) as Record<string, unknown>), false, "舊的電腦端不帶：不加這個欄位");
+  assertEquals("pi_models" in (sanitizeLauncher({ ...base, pi_models: "x" }) as Record<string, unknown>), false);
+  assertEquals("pi_models" in (sanitizeLauncher({ ...base, pi_models: [{ provider: "-", model: "-" }] }) as Record<string, unknown>), false, "全部不合格：不加");
+});

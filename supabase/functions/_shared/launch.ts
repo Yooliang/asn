@@ -93,12 +93,28 @@ export async function listLaunchers(deps: LaunchDeps, actor: string, ids?: unkno
 }
 
 // 機器橋回報的啟動設定摘要：只留 profile 的 id／label、cwd 白名單、每小時上限（指令內容一律不上傳）
+// 啟動設定摘要裡「這台 pi 能用的模型」（#443／#444）：只留 { provider, model }，格式照 pi-models.mjs 的 SAFE，最多 200 筆；不合格的筆數丟掉，不整份拒收
+export const PI_MODELS_MAX = 200;
+const PI_SAFE_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@+\[\]-]{0,99}$/;
+export function sanitizePiModels(v: unknown): { provider: string; model: string }[] | null {
+  if (!Array.isArray(v)) return null;
+  const out: { provider: string; model: string }[] = [];
+  for (const e of v) {
+    if (out.length >= PI_MODELS_MAX) break;
+    const provider = (e as Json)?.provider, model = (e as Json)?.model;
+    if (typeof provider === "string" && typeof model === "string" && PI_SAFE_RE.test(provider) && PI_SAFE_RE.test(model)) out.push({ provider, model });
+  }
+  return out;
+}
+
 export function sanitizeLauncher(l: Json): Json | null | { error: string } {
   if (l === null) return null;
   if (!l || typeof l !== "object" || Array.isArray(l) || !Array.isArray(l.profiles) || !Array.isArray(l.cwd_allow)) return { error: "bad_request" };
   const profiles = l.profiles.map((p: Json) => ({ id: p?.id, label: typeof p?.label === "string" ? p.label.slice(0, 60) : null }));
   const out: Json = { profiles, cwd_allow: l.cwd_allow };
   if (Number.isInteger(l.max_per_hour)) out.max_per_hour = l.max_per_hour;
+  const pi = sanitizePiModels(l.pi_models);
+  if (pi && pi.length) out.pi_models = pi;
   return out;
 }
 
