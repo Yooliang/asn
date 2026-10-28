@@ -36,6 +36,13 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # Rust 編譯快取（target 與 ~/.cargo）：CI 一次要 9～10 分鐘，大多花在重編相依套件。
+      # 以 Cargo.lock 與工具鏈為鍵，相依沒變就直接沿用；只有 main 的推送會更新快取，PR 只讀。
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: relay/asn/src-tauri -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
       - name: 安裝前端依賴
         run: npm ci
 
