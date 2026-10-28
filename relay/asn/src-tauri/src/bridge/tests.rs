@@ -349,9 +349,14 @@ async fn 名單回報_格式與_node_橋相同_含_asn_視窗_排除死掉的視
             {"name":"T-乙","status":"busy","cwd_label":"x","engine":"claude","active_at":T0},
             {"name":"T-甲","status":"idle","cwd_label":"x","engine":"claude"},
             {"name":"T-ASN","status":"idle","cwd_label":"","engine":"asn"},
-        ], "launcher": null})
+        ], "launcher": null, "used_legacy_env": []})
     );
     assert!(core.roster_ok);
+    // used_legacy_env 的來源可換：換成固定的一份，名單頂層照送（只有名字）
+    core.set_legacy_env_source(Arc::new(|| vec!["IRORI_RELAY_ID".into(), "IRORI_RELAY_URL".into()]));
+    core.refresh_roster(T0 + 1).await;
+    let posts = fr.st.lock().unwrap().rosters.clone();
+    assert_eq!(posts.last().unwrap()["used_legacy_env"], json!(["IRORI_RELAY_ID", "IRORI_RELAY_URL"]));
 }
 
 #[tokio::test]
