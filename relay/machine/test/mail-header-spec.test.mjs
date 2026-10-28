@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { mailHead, mailPreamble, replyLine, senderLine } from '../mail-format.mjs'
+import { RESPONSIVE_NOTE, mailHead, mailPreamble, replyLine, senderLine } from '../mail-format.mjs'
 
 const doc = fs.readFileSync(fileURLToPath(new URL('../../../docs/design/MAIL-HEADER.md', import.meta.url)), 'utf8').replace(/\r\n/g, '\n')
 const blocks = [...doc.matchAll(/```\n([\s\S]*?)\n```/g)].map(m => m[1])
@@ -45,11 +45,17 @@ test('規格第二行：範例表裡每一句都能由 senderLine 產生', () =>
   for (const s of inDoc) assert.ok(expected.has(s), `文件範例「${s}」不是 senderLine 的輸出`)
 })
 
-test('實際組出來的前三行：本人信 reply=yes 有三行、reply=no 只有兩行；不含 XISU', () => {
+test('實際組出來的抬頭：本人信 reply=yes 前三行固定、第四行是保持能回應的提醒；reply=no 沒有要回信那行；不含 XISU', () => {
   const lines = (mailHead(m) + '\n' + mailPreamble(m)).split('\n')
-  assert.equal(lines.length, 4)   // 三行＋結尾空字串
+  assert.equal(lines.length, 5)   // 四行＋結尾空字串
   assert.ok(lines[0].startsWith('[RELAY 來信]') && lines[1].startsWith('寄件人：') && lines[2].startsWith('【要回信】回信位址='))
+  assert.equal(lines[3], RESPONSIVE_NOTE)
   assert.ok(!lines.join('\n').includes('XISU'))
   const no = (mailHead({ ...m, expects_reply: false }) + '\n' + mailPreamble({ ...m, expects_reply: false })).split('\n')
-  assert.equal(no.length, 3)
+  assert.equal(no.length, 4)
+  assert.equal(no[2], RESPONSIVE_NOTE)
+})
+
+test('規格的保持能回應提醒（#494）：文件的範本與 RESPONSIVE_NOTE 字面一致', () => {
+  assert.ok(blocks.includes(RESPONSIVE_NOTE), '文件裡找不到保持能回應提醒的範本')
 })

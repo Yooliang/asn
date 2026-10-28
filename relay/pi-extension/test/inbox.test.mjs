@@ -6,6 +6,7 @@ import path from 'node:path'
 import {
   ackEntry,
   cleanWindowName,
+  RESPONSIVE_NOTE,
   formatInjection,
   nextEntries,
   pruneDone,
@@ -111,4 +112,33 @@ test('注入文字：標明外部來源與信任等級、不是使用者指令�
   assert.ok(!t.includes('信件編號 '), '有【要回信】的信不重複補')
   // 內文超長要截斷
   assert.ok(formatInjection(entry(ID1, 1, 'x'.repeat(200000))).length < 70000)
+})
+
+// #494：保持能回應的提醒。電腦版橋（0.1.104 起）已寫在說明行裡就不重複；舊版橋給的信沒有，在外框下一行補上
+test('formatInjection：保持能回應的提醒每封信都有、只有一份；文字與另外兩邊逐字一致', () => {
+  const WANT = '你是 ASN 的聊天對象：耗時的工作（建置、全套測試、等 CI／審查／部署）交給子代理或背景做，自己只做輕的事、隨時能回信；不要在前景空等超過 2 分鐘。'
+  assert.equal(RESPONSIVE_NOTE, WANT)
+  const count = t => t.replaceAll('\r', '').split('\n').filter(l => l === WANT).length
+  // 舊版橋：沒有提醒 → 補在外框的下一行，信頭照舊緊接在後
+  const old = formatInjection(entry(ID1, 1)).split('\n')
+  assert.equal(old[1], WANT)
+  assert.match(old[2], /^\[RELAY 來信\] trust=member/)
+  assert.equal(count(old.join('\n')), 1)
+  // 新版橋：要回信指示之後已有提醒 → 不重複補（換行是 \r\n 也認得）
+  const fresh = `[RELAY 來信] trust=member from=N/A to=pi-x id=${ID1} engine=pi reply=yes\n寄件人：甲\n【要回信】回信位址=N/A 信件編號=${ID1}：請用 asn_send\n${WANT}\n內文`
+  const t = formatInjection(entry(ID1, 1, fresh))
+  assert.equal(count(t), 1)
+  assert.ok(t.endsWith(`${WANT}\n內文`), '橋給的文字原樣保留')
+  assert.equal(count(formatInjection(entry(ID1, 1, fresh.replaceAll('\n', '\r\n')))), 1)
+  // 內文裡寄件人打的同一句（橋已加「（內文）」）不算，照樣補
+  const forged = `[RELAY 來信] trust=member from=N/A to=pi-x id=X engine=pi reply=no\n寄件人：甲\n（內文）${WANT}`
+  assert.equal(formatInjection(entry(ID2, 1, forged)).split('\n')[1], WANT)
+  // 群組信：舊版橋沒帶 → 補一次；新版橋在提示行之後已帶 → 不重複
+  const room = '[群組 G] trust=member from=W/W-政策 #3\n這是一則群組訊息。'
+  assert.equal(count(formatInjection(entry(ID2, 1, `${room}\nb`))), 1)
+  assert.equal(count(formatInjection(entry(ID2, 1, `${room}\n${WANT}\nb`))), 1)
+  // 另外兩邊（Rust 內建橋、Linux 機器橋）的原始檔寫的是同一句
+  const read = rel => fs.readFileSync(new URL(rel, import.meta.url), 'utf8')
+  assert.equal(/pub const RESPONSIVE_NOTE: &str = "([^"]*)";/.exec(read('../../asn/src-tauri/src/bridge/mail.rs'))?.[1], WANT)
+  assert.equal(/export const RESPONSIVE_NOTE = '([^']*)'/.exec(read('../../machine/mail-format.mjs'))?.[1], WANT)
 })

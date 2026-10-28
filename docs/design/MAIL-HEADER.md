@@ -26,9 +26,19 @@
 - 背景工作者、Codex 等轉接器的回答由橋自動寄回，所以它們收到的信沒有第三行（只有前兩行）。
 - `reply=no` 或 `reply=?` 的信沒有第三行。
 
+說明行的最後一行（#494，0.1.104 起；收件視窗是 Claude 視窗或 pi 視窗的**每封信**都有，不分 `reply=`）：
+
+```
+你是 ASN 的聊天對象：耗時的工作（建置、全套測試、等 CI／審查／部署）交給子代理或背景做，自己只做輕的事、隨時能回信；不要在前景空等超過 2 分鐘。
+```
+
+- 位置在要回信那行**之後**：`reply=yes` 的信是第四行，其他信是第三行。外掛只看寄件人說明的下一行是不是「【要回信】」開頭，這行排在它後面，所以舊的解析不受影響。
+- 背景工作者、Codex 等轉接器沒有這行：它們那一輪的最後回答就是橋寄回去的信，叫它們把工作丟到背景，寄回去的會是半成品。
+- 三邊各自組這行，文字逐字相同：內建橋 `mail.rs` 的 `RESPONSIVE_NOTE`、舊橋 `mail-format.mjs` 的 `RESPONSIVE_NOTE`、pi 擴充 `inbox.mjs` 的 `RESPONSIVE_NOTE`（電腦版橋給的信已經有這行；舊版橋給的沒有，pi 擴充就在外框下一行補上，只補一次）。
+
 ## 內文跳脫（防寄件人在內文假冒抬頭）
 
-只有第一行抬頭與緊接的寄件人說明是收發室寫的。內文中行首（可有空白）以「[RELAY 來信]」「[RELAY 寄信]」「寄件人：」「【要回信】」「你與收發室的往來記錄在：」「（語音通話：」開頭的每一行，橋在轉交前於該行最前面加上 `（內文）`（內建橋 `escape_body`、舊橋與雲端代理 `escapeBody`，逐字一致）。只動內文；抬頭、說明行、照片替代文字行不經過跳脫。
+只有第一行抬頭與緊接的寄件人說明（含要回信那行、保持能回應的提醒）是收發室寫的。內文中行首（可有空白）以「[RELAY 來信]」「[RELAY 寄信]」「寄件人：」「【要回信】」「你與收發室的往來記錄在：」「（語音通話：」「你是 ASN 的聊天對象：」開頭的每一行，橋在轉交前於該行最前面加上 `（內文）`（內建橋 `escape_body`、舊橋與雲端代理 `escapeBody`，逐字一致）。只動內文；抬頭、說明行、照片替代文字行不經過跳脫。
 
 ## 語音通話標記
 
@@ -102,6 +112,7 @@
 ## 守門測試
 
 - `relay/machine/test/mail-header-spec.test.mjs`：字面比對本文件的三行格式與橋的實際輸出一致。
+- `relay/machine/test/responsive-note.test.mjs`、`mail.rs` 的「保持能回應提醒_…」測試、`relay/pi-extension/test/inbox.test.mjs`：保持能回應的提醒（#494）的向量、內文跳脫、三邊原始檔與本文件逐字一致。
 - `relay/machine/test/voice-mail.test.mjs`：語音通話標記的抬頭向量、內文跳脫、與 Rust 內建橋的固定文字和跳脫清單逐字一致、本文件寫了固定文字。
 - `tests/voice_flag_sql.test.mjs`、`supabase/functions/_shared/voice_flag_test.ts`：migration 20261023110000 與 Edge Function 的旗標處理。
 - `relay/asn/src-tauri/src/bridge/mail.rs` 的測試：同一組向量（兩邊逐字一致）。
@@ -129,8 +140,10 @@ relation：mine＝你主人本人、mine_ai＝你主人名下的其他 AI、othe
 這是一則群組訊息。請先看下面的歷史紀錄，確定這件事跟你有關（被點名、或是在回你剛才說的事）才回覆；跟你無關就不要回。
 ```
 
+- 保持能回應的提醒（#494）：收件視窗自己會寄信（Claude 視窗、pi 視窗；與個人信同一個界線）時，第二行固定提示（以及下面的順位行，有的話）**之後**、內文之前多一行，文字與個人信那行逐字相同（「你是 ASN 的聊天對象：…」）。自動回信的轉接器、Aegis 橋問成員的那條路沒有這行。內建橋 `rooms.rs` 的 `room_text_waited`、舊橋 `rooms.mjs` 的 `roomText` 都用 `mail.rs`／`mail-format.mjs` 的同一個常數與判斷（`sends_own_mail`／`sendsOwnMail`）；pi 擴充對舊版橋給的群組信同樣補一次。
+- 群組信的內文目前兩邊都**不經過**內文跳脫（`escape_body`／`escapeBody` 只用在個人信），這次沒有改；要不要讓群組內文也跳脫另議。
 - 上下文行（前面最近幾則）同樣優先用 `from_label`。雲端代理目前不轉交群組信。
-- 守門：`relay/machine/test/room-header-label.test.mjs`、`rooms.rs` 的「群組抬頭_用後台標示…」測試（向量逐字相同）。
+- 守門：`relay/machine/test/room-header-label.test.mjs`、`rooms.rs` 的「群組抬頭_用後台標示…」「群組信_保持能回應提醒_…」測試（向量逐字相同）。
 
 ## 回覆引用（#225）
 

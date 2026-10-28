@@ -69,12 +69,13 @@ async fn 信帶附件_轉給視窗的文字多一行提示_替代文字行不重
     let lines: Vec<&str> = f[0].2.lines().collect();
     assert!(lines[0].starts_with("[RELAY 來信]"));
     assert_eq!(lines[1], "寄件人：W-政策（成員身分）");
-    assert_eq!(lines[2], "看這隻");
-    assert_eq!(lines[3], format!("〔照片〕cat.webp（image/webp，179 KB，1536×2048）下載：/x/asn-cli attach --id {}", uid(0x50)));
-    assert_eq!(lines[4], crate::bridge::corrlog::path_line(&h.core.cfg.handoff_dir, "T-乙"), "最後多一行往來記錄的路徑");
-    assert_eq!(lines.len(), 5);
+    assert_eq!(lines[2], crate::bridge::mail::RESPONSIVE_NOTE, "#494：說明行最後一行是保持能回應的提醒");
+    assert_eq!(lines[3], "看這隻");
+    assert_eq!(lines[4], format!("〔照片〕cat.webp（image/webp，179 KB，1536×2048）下載：/x/asn-cli attach --id {}", uid(0x50)));
+    assert_eq!(lines[5], crate::bridge::corrlog::path_line(&h.core.cfg.handoff_dir, "T-乙"), "最後多一行往來記錄的路徑");
+    assert_eq!(lines.len(), 6);
     assert!(!h.said().join("\n").contains("SECRETTHUMB"));
-    assert_eq!(f[1].2.lines().count(), 4, "沒附件的信：抬頭＋寄件人說明＋內文＋往來記錄路徑，沒有多餘的行");
+    assert_eq!(f[1].2.lines().count(), 5, "沒附件的信：抬頭＋寄件人說明＋提醒＋內文＋往來記錄路徑，沒有多餘的行");
 }
 
 // ================================================================================================
@@ -108,8 +109,8 @@ async fn 群組_只轉_for_me_點名轉給對的視窗_標頭提示與上下文_
     assert_eq!(f.iter().find(|x| key(x) == "T-視窗甲#4").unwrap().0, room_uuid("R1", 4, "T~T-視窗甲"));
     // 標頭、提示、內文、上下文（前面最近的幾則，舊→新）、往回翻的指令
     let j3 = &f.iter().find(|x| key(x) == "T-視窗甲#3").unwrap().2;
-    assert_eq!(j3, &format!("[群組 專案群] trust=member from=W/W-政策 #3\n{ROOM_HINT}\n群組內文-3\n---- 前面 1 則（舊→新）----\n#2 政策：群組內文-2\n（要看更多：/x/asn-cli room --room-read R1 --last 20）
-{}", crate::bridge::corrlog::path_line(&h.core.cfg.handoff_dir, "T-視窗甲")));
+    assert_eq!(j3, &format!("[群組 專案群] trust=member from=W/W-政策 #3\n{ROOM_HINT}\n{}\n群組內文-3\n---- 前面 1 則（舊→新）----\n#2 政策：群組內文-2\n（要看更多：/x/asn-cli room --room-read R1 --last 20）
+{}", crate::bridge::mail::RESPONSIVE_NOTE, crate::bridge::corrlog::path_line(&h.core.cfg.handoff_dir, "T-視窗甲")));
     assert!(d4.2.contains("---- 前面 2 則（舊→新）----\n#2 政策：群組內文-2\n#3 政策：群組內文-3\n（要看更多"));
     assert!(d4.2.starts_with("[群組 專案群] trust=owner from=主人 #4\n"));
     // 所有 room_read 都帶 since、不帶 mark（不動後端已讀）；視窗帶 as_agent、節點本身不帶；起算點是 read_seq

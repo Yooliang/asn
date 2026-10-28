@@ -31,12 +31,13 @@ test('向量：voice=true 的信，說明行後面接固定提醒；沒有旗標
 test('向量：成員信、reply=no 的信也加；行數不變（提醒在第二行，第一行抬頭與第三行要回信指示不動）', () => {
   const member = { id: ID, trust: 'member', from_node: 'H', from_agent: 'asn', to_agent: 'T-甲', expects_reply: false, voice: true }
   const lines = (mailHead(member) + '\n' + mailPreamble(member)).split('\n')
-  assert.equal(lines.length, 3)
+  assert.equal(lines.length, 4)   // 抬頭、說明行（接語音提醒）、保持能回應的提醒（#494）＋結尾空字串
+  assert.equal(lines.length, (mailHead(member) + '\n' + mailPreamble({ ...member, voice: undefined })).split('\n').length, '語音旗標不增加行數')
   assert.equal(lines[1], `寄件人：asn（成員身分）${WANT}`)
   assert.equal(mailHead(member), mailHead({ ...member, voice: undefined }), '抬頭第一行不受旗標影響')
   const yes = { ...owner, voice: true }
   const l3 = (mailHead(yes) + '\n' + mailPreamble(yes)).split('\n')
-  assert.equal(l3.length, 4)
+  assert.equal(l3.length, 5)
   assert.ok(l3[1].endsWith(WANT) && l3[2].startsWith('【要回信】回信位址='))
 })
 
@@ -59,7 +60,7 @@ test('與 Rust 內建橋逐字一致：固定文字與跳脫開頭清單', () =>
   const heads = /const BODY_ESCAPE_HEADS: \[&str; \d+\] = \[(.*)\];/.exec(rs)
   assert.ok(heads)
   const list = [...heads[1].matchAll(/"([^"]*)"/g)].map(x => x[1])
-  assert.deepEqual(list, ['[RELAY 來信]', '[RELAY 寄信]', '[RELAY 回信]', '寄件人：', '【要回信】', '你與收發室的往來記錄在：', '（語音通話：'])
+  assert.deepEqual(list, ['[RELAY 來信]', '[RELAY 寄信]', '[RELAY 回信]', '寄件人：', '【要回信】', '你與收發室的往來記錄在：', '（語音通話：', '你是 ASN 的聊天對象：'])
   // Node 的跳脫正則也包含同一串開頭
   const src = read('../mail-format.mjs')
   for (const h of list) assert.ok(src.includes(h.replace(/[\[\]]/g, '\\$&')), h)
