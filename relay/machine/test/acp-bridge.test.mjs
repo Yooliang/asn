@@ -76,7 +76,8 @@ test('橋＋acp：名單帶 engine=gemini；信送進工作者，回覆帶 reply
   assert.equal(reply.to_node, 'W'); assert.equal(reply.to_agent, 'W-政策'); assert.equal(reply.from_agent, 'Gemini')
   assert.match(reply.body, /收到：你好/)
   const roster = r.st.rosterPosts.at(-1).agents
-  assert.deepEqual(roster, [{ name: 'Gemini', status: 'idle', cwd_label: '工作者', engine: 'gemini' }])
+  assert.ok(Number.isFinite(roster[0].active_at), '收過信：名單帶最後活動時間')   // E2～E4
+  assert.deepEqual(roster.map(({ active_at, ...rest }) => rest), [{ name: 'Gemini', status: 'idle', cwd_label: '工作者', engine: 'gemini' }])
   assert.match(r.log, /handed id=00000000-0000-0000-0000-000000000001 from=W\/W-政策 to=Gemini/)
 })
 

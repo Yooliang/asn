@@ -107,11 +107,31 @@ async function refreshRoster() {
     // engine 欄位：仲介的 roster 端點只取 name／status／cwd_label（多餘欄位直接忽略，不會 400），舊仲介安全
     // platform／launch_closed_reason（0.2 H2）：開新夥伴精靈用來寫 Linux 的設定方法與這台自己寫的不開放原因；舊仲介忽略
     const closed = readClosed(LAUNCHER_FILE)
-    await api('roster', { method: 'POST', body: { agents: roster.map(a => ({ name: a.name, status: a.status, cwd_label: a.cwd_label, engine: engineLabelOf(a) })), launcher: launcher.summary(), platform: platformOf(), launch_closed_reason: closed.closed ? closed.reason : null } })
+    markBusyActive()
+    await api('roster', { method: 'POST', body: { agents: roster.map(rosterEntry), launcher: launcher.summary(), platform: platformOf(), launch_closed_reason: closed.closed ? closed.reason : null } })
     rosterWarned = false
   } catch (e) {
     if (!rosterWarned) { log(`roster post failed: ${e.message} (will keep trying quietly)`); rosterWarned = true }
   }
+}
+// 各視窗的最後活動時間（毫秒，E2～E4 #397；pi 在 Linux 上也要帶 #456）：信投遞成功、或這一輪看到視窗在忙，都記成現在。
+// 名單上已經沒有的名字不保留。可選欄位：舊後台會丟掉，後台自己照 10 秒節流寫進夥伴的最後活動時間
+const activeMarks = new Map()
+const isBusyStatus = s => s === 'busy' || s === 'working' || s === 'running'
+function markActive(name) { if (name) activeMarks.set(name, Date.now()) }
+function markBusyActive() {
+  const names = new Set(roster.map(a => a.name))
+  for (const n of [...activeMarks.keys()]) if (!names.has(n)) activeMarks.delete(n)
+  for (const a of roster) if (isBusyStatus(a.status)) markActive(a.name)
+}
+// 名單上一個視窗的上報內容。detail／mod_loaded／model／active_at 都是可選欄位（有才帶；舊後台會丟掉，舊用戶端略過）
+function rosterEntry(a) {
+  const o = { name: a.name, status: a.status, cwd_label: a.cwd_label, engine: engineLabelOf(a) }
+  if (a.detail) o.detail = a.detail
+  if (a.mod_loaded) o.mod_loaded = true
+  if (a.model) o.model = a.model
+  if (activeMarks.has(a.name)) o.active_at = activeMarks.get(a.name)
+  return o
 }
 const onlineNames = () => new Set(agents.filter(a => a.name && a.name !== MAILBOX_NAME).map(a => a.name))
 const forwardable = name => roster.some(a => a.name === name) || (EXTRA_ALLOW.includes(name) && onlineNames().has(name))
@@ -171,6 +191,7 @@ async function onSent(id) {
   const p = pending.get(id)
   if (!p || p.state !== 'forwarding') return
   p.state = 'waiting'
+  markActive(p.target)
   persist()
   if (p.room) { log(`forwarded room=${p.room.id} #${p.room.seq} -> ${p.target}`); p.t = Date.now(); return }
   if (p.noReply) { pending.delete(id); log(`forwarded id=${id} -> ${p.target} (no-reply mail, no timer)`); await ackIds([id]); return }
