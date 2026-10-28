@@ -275,11 +275,11 @@ test('名單每列：廠商小徽章疊在頭像右下角（約 40%、白底圓�
 
 test('三個大分頁：夥伴／對話／設置，橫向翻頁、頂部分頁列＋底線指示條；邊緣留給系統、輸入與工具列不接手', () => {
   const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
-  assert.deepEqual([...html.matchAll(/<section class="m-pg" aria-label="([^"]+)">/g)].map(m => m[1]).concat([...html.matchAll(/<section class="m-pg m-chat" [^>]*aria-label="([^"]+)">/g)].map(m => m[1])).sort(), ['夥伴', '設置', "tabLabel('chats')"].sort())   // 第二分頁的標籤是動態的：平常「對話」，設備與帳號頁開著時是「設備與帳號」
-  assert.match(html, /<button v-for="t in TABS"[^>]*@click="goTab\(t\)"><span>\{\{ tabLabel\(t\) \}\}<\/span>/, '上方分頁三個，可點')
+  assert.deepEqual([...html.matchAll(/<section class="m-pg" aria-label="([^"]+)">/g)].map(m => m[1]).concat([...html.matchAll(/<section class="m-pg m-chat" [^>]*aria-label="([^"]+)">/g)].map(m => m[1])).sort(), ['夥伴', '設置', '對話'].sort())   // 對話分頁的標籤固定（#461：設備與帳號改在第四頁籤）
+  assert.match(html, /<button v-for="t in tabs"[^>]*@click="goTab\(t\)"><span>\{\{ tabLabel\(t\) \}\}<\/span>/, '上方分頁三個（有第四頁籤時四個），可點')
   assert.match(html, /class="m-ind" :style="\{ transform: 'translateX\(' \+ indicator \* 100 \+ '%\)' \}"/, '指示條跟著滑動')
   // 分頁列在最上方（pager 之前），不留底部列；視覺高 32px、可點範圍 36px；輸入區貼底並讓出安全區
-  assert.ok(html.indexOf('<nav class="m-tabs"') > html.indexOf('<section class="m-page">') && html.indexOf('<nav class="m-tabs"') < html.indexOf('class="m-pager-wrap"'), '分頁列在 pager 之上')
+  assert.ok(html.indexOf('<nav class="m-tabs"') > html.indexOf('<section class="m-page"') && html.indexOf('<nav class="m-tabs"') < html.indexOf('class="m-pager-wrap"'), '分頁列在 pager 之上')
   assert.equal((html.match(/<nav class="m-tabs"/g) || []).length, 1, '只有一個分頁列')
   assert.match(css, /\.m-tabs\{[^}]*height:32px[^}]*border-bottom:1px solid/, '分頁列矮（32px），底邊分隔')
   assert.doesNotMatch(css, /\.m-tabs\{[^}]*border-top/, '不再是底部列')
@@ -290,18 +290,19 @@ test('三個大分頁：夥伴／對話／設置，橫向翻頁、頂部分頁�
   // 手勢：頁面並排區接觸控（對話分頁在裡面，所以對話上也能左右滑；輸入框與工具列不接手）
   assert.match(html, /class="m-pager-wrap" @touchstart\.passive="swipeStart\(\$event, 'pager'\)" @touchmove="swipeMove" @touchend="swipeEnd" @touchcancel="swipeEnd"/)
   assert.match(css, /\.m-pager-wrap\{[^}]*touch-action:pan-y/)
-  assert.match(css, /\.m-pager\{[^}]*width:300%[^}]*transition:transform/); assert.match(css, /\.m-pager\.dragging\{transition:none\}/, '拖動時沒有動畫（跟手）')
+  assert.match(css, /\.m-pager\{[^}]*width:calc\(var\(--pages,3\) \* 100%\)[^}]*transition:transform/); assert.match(css, /\.m-pager\.dragging\{transition:none\}/, '拖動時沒有動畫（跟手）')
   assert.doesNotMatch(css, /\.m-chat\{[^}]*position:fixed/, '對話是第二個分頁本身，不再是蓋在分頁上的一層')
   // 邏輯接線：邊緣、輸入、選取、水平鎖定、吸附
   const start = /function swipeStart\(e, mode\) \{([\s\S]*?)\n    \}\n/.exec(js)[1]
   assert.match(start, /swipeStartOk\(t\.clientX, window\.innerWidth\)/, '邊緣不接手'); assert.match(start, /closest\?\.\(SWIPE_BLOCK_SELECTOR\)/); assert.match(start, /getSelection/, '正在選文字不接手')
   const move = /function swipeMove\(e\) \{([\s\S]*?)\n    \}\n/.exec(js)[1]
   assert.match(move, /swipeLock\(dx, dy\)/); assert.match(move, /if \(l === 'v'\) \{ sw\.mode = ''; return \}/, '垂直就放手給系統捲動')
-  assert.match(js, /swipeTarget\(\{ index: idx\.value, dx, dt: Date\.now\(\) - t0, width \}\)/)
+  assert.match(js, /swipeTarget\(\{ index: idx\.value, dx, dt: Date\.now\(\) - t0, width, count: pages\.value \}\)/)
   assert.match(css, /\.m-ind\{[^}]*z-index:2/, '指示條要在分頁按鈕上面（不然被選中的底色蓋住）')
   assert.match(js, /if \(sw\.locked === 'h'\) \{ y0 = null/, '左右滑動時不觸發下拉重整')
   // 返回：對話 → 回到分頁；非夥伴的分頁 → 回夥伴
-  assert.match(js, /function goTab\(t\) \{[\s\S]*?if \(nav\.tab === 'list'\) go\(tabNav\(t\)\)[\s\S]*?else if \(t === 'list'\) history\.back\(\)/)
+  assert.match(js, /const goTab = t => fourthNav\.goTab\(t\)/)
+  assert.match(read('ui', 'lib', 'mobile-nav.mjs'), /function switchTab\(t\) \{[\s\S]*?if \(nav\.tab === 'list'\) go\(tabNav\(t\)\)[\s\S]*?else if \(t === 'list'\) history\.back\(\)/)
   // 設置頁沒有下拉重整；舊的 goMe／goList 都不見了
   assert.doesNotMatch(js, /goMe|goList/)
 })

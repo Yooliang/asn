@@ -4,19 +4,21 @@ import { groupItems } from './dims.mjs'
 import { friendMatchesQuery, normalizeSearchQuery, sortFriends } from './search.mjs'
 import { withoutAsn } from './roster.mjs'
 import { noticeOf } from './photo.mjs'
-import { guideNav } from './mobile-guides.mjs'
-import { SETTING_SHEET_KEYS, settingNav } from './mobile-settings.mjs'
+import { PAGE_TAB, normalizePage } from './mobile-fourth.mjs'
 
 // ---------- 單欄導覽 ----------
-// 狀態：{ tab: 'list' | 'chats' | 'me', sheet: '' | 'launch' | 'ops' }。sheet＝蓋在分頁上的一層：「開新夥伴」（滿版）、「⋯」選單（底部浮層）。
+// 狀態：{ tab: 'list' | 'chats' | 'me' | 'page', sheet: '' | 'launch' | 'ops' | … }。sheet＝蓋在分頁上的一層：「開新夥伴」（滿版）、「⋯」選單（底部浮層）、要密碼、終端請求、群組對話框。
+// 'page'＝第四頁籤（設備與帳號、設置的某一項、使用指引；見 lib/mobile-fourth.mjs），平時不顯示，進這些內頁時才出現在最右邊。
 // 對話不再是蓋在名單上的一層：第二個分頁「對話」就是最後使用的那一位的對話內容（見 lib/mobile-ops.mjs 的 chatPageState）。
 // 每往下一層（夥伴→其他分頁、名單→開新夥伴、對話→選單）就在瀏覽記錄推一筆；系統的返回鍵＝瀏覽器上一頁，外殼（WryActivity）已接好，名單層再按才退到背景。
 // 三個大分頁：夥伴（list）、對話（chats）、設置（me）。
 export const TABS = ['list', 'chats', 'me']
 export const TAB_LABEL = { list: '夥伴', chats: '對話', me: '設置' }
-// 分頁列上的字：進了「選項」頁時，第二個分頁（對話）暫時改叫「選項」，離開就恢復
-export const tabLabel = (t, nav, acctLabel = '設備與帳號') => (t === 'chats' && nav?.sheet === 'acct' ? acctLabel : TAB_LABEL[t])
-export const tabIndex = t => Math.max(0, TABS.indexOf(t))
+// 分頁列上的字：前三個固定；第四頁籤用它目前內頁的標題（pageTitle）
+export const tabLabel = (t, pageTitle = '') => (t === PAGE_TAB ? String(pageTitle ?? '') : TAB_LABEL[t] ?? '')
+// 目前有哪些分頁：有第四頁籤時四個，沒有時三個（pager 的頁數、指示條、左右滑的範圍都跟著它）
+export const tabList = fourth => (fourth?.page ? [...TABS, PAGE_TAB] : TABS)
+export const tabIndex = (t, tabs = TABS) => Math.max(0, (Array.isArray(tabs) ? tabs : TABS).indexOf(t))   // 當 map 的回呼用時第二個參數是索引，不是清單
 export const normalizeTab = t => (TABS.includes(t) ? t : 'list')
 export const initialNav = () => ({ tab: 'list', sheet: '' })
 export const tabNav = t => ({ tab: normalizeTab(t), sheet: '' })
@@ -26,16 +28,19 @@ export const launchNav = step => (step === 2 ? { tab: 'list', sheet: 'launch', s
 export const opsNav = () => ({ tab: 'chats', sheet: 'ops' })
 export const secretNav = () => ({ tab: 'chats', sheet: 'secret' })
 export const termReqNav = () => ({ tab: 'chats', sheet: 'termreq' })
-export const acctNav = () => ({ tab: 'chats', sheet: 'acct' })   // 「設備與帳號」滿版頁：名單設備卡的「選項」或設置列表的「設備與帳號」進入（切換 Claude 帳號）
+// 第四頁籤上的一層：page＝內頁描述（lib/mobile-fourth.mjs）。每一層一筆瀏覽記錄，返回鍵一層一層退
+export const pageNav = page => ({ tab: PAGE_TAB, sheet: '', page: normalizePage(page) })
 // 瀏覽記錄裡讀回來的狀態可能是任何東西（壞資料、別的頁面留下的）：整理成合法的導覽狀態
 export function normalizeNav(raw) {
   if (raw?.sheet === 'launch') return launchNav(raw?.step)
   if (raw?.sheet === 'ops') return opsNav()
   if (raw?.sheet === 'secret') return secretNav()
   if (raw?.sheet === 'termreq') return termReqNav()
-  if (raw?.sheet === 'acct') return acctNav()
-  if (raw?.sheet === 'setting') return SETTING_SHEET_KEYS.includes(raw?.cat) ? settingNav(raw.cat) : tabNav('me')   // 設置分頁的某一項滿版頁；沒這個分類退回設置分頁
-  if (raw?.sheet === 'guide') return guideNav(raw?.guide)   // 設置分頁的「使用指引」滿版頁
+  if (raw?.tab === PAGE_TAB) { const p = normalizePage(raw?.page); return p ? pageNav(p) : initialNav() }
+  // 舊版的滿版層（設備與帳號、設置的某一項、使用指引）改成第四頁籤上的同一頁
+  if (raw?.sheet === 'acct') return pageNav({ kind: 'acct' })
+  if (raw?.sheet === 'setting') { const p = normalizePage({ kind: 'setting', cat: raw?.cat }); return p ? pageNav(p) : tabNav('me') }   // 沒這個分類退回設置分頁
+  if (raw?.sheet === 'guide') return pageNav({ kind: 'guide', guide: raw?.guide })
   return tabNav(raw?.tab)
 }
 

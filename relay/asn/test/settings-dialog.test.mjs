@@ -212,14 +212,20 @@ test('守門：電腦設定第一頁——登入帳號資訊與我的名字同�
   assert.match(fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8'), /\.logout-set\{margin-top:3\d+px/)
 })
 
-test('守門：手機設置頁——分類列表在上、使用指引在列表後、登出獨立在最下面；帳號在名字下（個人頁）、版本在關於頁', () => {
+test('守門：手機設置頁——分類列表在上、使用指引在列表後；登出在「個人」內頁最下面（#1093）；帳號在名字下（個人頁）、版本在關於頁', () => {
   const html = fs.readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
   const a = html.indexOf('<section class="m-pg" aria-label="設置">')
-  const b = html.indexOf('<section class="m-sheet m-set"', a)
+  const b = html.indexOf('<div class="m-pgin m-set"', a)   // #461：分類頁在第四頁籤裡
   const list = html.slice(a, b)
-  const listAt = list.indexOf('v-for="r in settingRows"'), guideAt = list.indexOf('openGuides'), outAt = list.indexOf('doLogout')
-  assert.ok(listAt > 0 && guideAt > listAt && outAt > guideAt && list.slice(guideAt, outAt).includes('class="m-logout"'), '列表 → 使用指引 → 登出（自成一塊）')
+  const listAt = list.indexOf('v-for="r in settingRows"'), guideAt = list.indexOf('openGuides')
+  assert.ok(listAt > 0 && guideAt > listAt, '列表 → 使用指引')
+  assert.ok(!list.includes('doLogout') && !list.includes('m-logout') && !list.includes('登出'), '#1093：設置列表不再有登出鈕')
   const detail = html.slice(b, html.indexOf('</section>', b))
+  // 登出鈕在「個人」內頁（settingCat === 'me' 那一塊）最下面、自成一塊；其他分類頁沒有
+  const me = detail.slice(detail.indexOf("settingCat === 'me'"), detail.indexOf("settingCat === 'notify'"))
+  const outAt = me.indexOf('@click="doLogout">登出</button>')
+  assert.ok(outAt > me.indexOf('個人訊息<input') && me.slice(me.lastIndexOf('</div>', outAt) , outAt).includes('class="m-logout"'), '登出在個人內頁的最後、自成一塊')
+  assert.equal((html.match(/@click="doLogout"/g) || []).length, 1, '整頁只有一顆登出鈕')
   const nameAt = detail.indexOf('我的名字<input'), acctAt = detail.indexOf('{{ accountText }}')
   assert.ok(nameAt > 0 && acctAt > nameAt && detail.slice(nameAt, acctAt).indexOf('m-card') < 0, '帳號文字緊接在我的名字之後、同一張卡')
   const updAt = detail.indexOf('檢查更新'), verAt = detail.indexOf('{{ info.version }}')

@@ -46,11 +46,11 @@
       <button class="m-banner-act" type="button" v-if="banner.handover" @click.stop="bannerHandover">接班換手</button>
     </div>
 
-    <!-- 三個大分頁：夥伴／對話／設置。左右滑動切換（跟手，放開吸附到最近的分頁），也可以點上方分頁；下拉重整只在夥伴與對話兩頁 -->
-    <section class="m-page">
+    <!-- 三個大分頁：夥伴／對話／設置，進內頁時多一個第四頁籤（最右邊）。左右滑動切換（跟手，放開吸附到最近的分頁），也可以點上方分頁；下拉重整只在夥伴與對話兩頁 -->
+    <section class="m-page" :style="{ '--pages': pages }">
       <nav class="m-tabs" :class="{ dragging: sw.dragging }" role="tablist" aria-label="大分頁">
         <i class="m-ind" :style="{ transform: 'translateX(' + indicator * 100 + '%)' }" aria-hidden="true"></i>
-        <button v-for="t in TABS" :key="t" type="button" role="tab" :class="{ on: nav.tab === t }" :aria-selected="nav.tab === t" @click="goTab(t)"><span>{{ tabLabel(t) }}</span><i class="red" v-if="t === 'chats' && unreadTotal"></i></button>
+        <button v-for="t in tabs" :key="t" type="button" role="tab" :class="{ on: nav.tab === t, 'is-page': t === 'page' }" :aria-selected="nav.tab === t" @click="goTab(t)"><span>{{ tabLabel(t) }}</span><i class="red" v-if="t === 'chats' && unreadTotal"></i></button>
       </nav>
       <div class="m-upd" v-if="upd.enabled && upd.phase !== 'idle'" role="status" :class="{ failed: upd.phase === 'failed' }">
         <span class="m-upd-tx">{{ updText }}</span>
@@ -159,8 +159,7 @@
           </section>
 
           <!-- 對話：最後使用的那一位的對話內容（從夥伴分頁點一位就成為最後使用）；右上角「⋯」管理這位的視窗 -->
-          <section class="m-pg m-chat" :class="{ shake, 'is-room': chatFriend && chatFriend.room }" :aria-label="tabLabel('chats')">
-            <div class="m-keep" :hidden="nav.sheet === 'acct'">
+          <section class="m-pg m-chat" :class="{ shake, 'is-room': chatFriend && chatFriend.room }" aria-label="對話">
             <header class="m-head m-chathead" :class="{ 'is-busy': chatFriend && headTone(chatFriend.status, chatFriend) === 'busy', 'is-offline': chatFriend && !chatFriend.room && headTone(chatFriend.status, chatFriend) === 'offline' }">
               <template v-if="chatFriend">
                 <img class="m-pic" :class="'st-' + chatFriend.status" :src="avOf(chatFriend)" alt="" width="44" height="44">
@@ -188,11 +187,34 @@
               @send="(text, opts) => sendTo(chatFriend.id, text, opts)" @nudge="nudgeTo(chatFriend.id)" @attach="(p, cap) => sendAttachTo(chatFriend.id, p, cap)"
               :room-cards="chatCards" @group-decide="(cid, ok) => decideCard(chatFriend.id, cid, ok)"></chat-pane>
             <div class="m-scroll" v-else><div class="empty-list">{{ chatEmptyText }}</div></div>
+          </section>
+
+          <!-- 設置 -->
+          <section class="m-pg" aria-label="設置">
+            <header class="m-head">
+              <button class="m-me" type="button" aria-label="設置" @click="goTab('me')"><img class="m-pic" :class="'st-' + me.status" :src="meAv" alt="" width="44" height="44"></button>
+              <div class="m-head-tx"><div class="m-title">設置</div></div>
+            </header>
+            <div class="m-scroll m-meview">
+              <div class="m-card m-form m-set-list">
+                <ul class="m-guide-list">
+                  <li v-for="r in settingRows" :key="r.key">
+                    <button class="m-row-btn" type="button" @click="openSetting(r.key)"><svg class="m-row-ic" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path :d="r.icon" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="m-row-tx"><b>{{ r.title }}</b><small>{{ r.summary }}</small></span><span class="m-caret" aria-hidden="true">▸</span></button>
+                  </li>
+                </ul>
+              </div>
+              <div class="m-card m-form m-guide-entry">
+                <button class="m-row-btn" type="button" @click="openGuides"><span class="m-row-tx"><b>{{ GUIDE_ENTRY_LABEL }}</b><small>{{ GUIDE_ENTRY_SUB }}</small></span><span class="m-caret" aria-hidden="true">▸</span></button>
+              </div>
             </div>
-            <!-- 替電腦切換 Claude 帳號：佔用第二個分頁（標籤暫時改成「選項」），原本的對話內容只是藏起來、不卸載；選帳號 → 確認 → 送出並等對方電腦回報 -->
-            <template v-if="nav.sheet === 'acct'">
+          </section>
+
+          <!-- 第四頁籤（#461）：設備與帳號、設置的某一項、使用指引。平時沒有，進這些內頁才出現在最右邊並切過來；切走後留著（內容不卸載），3 分鐘沒回來才收起 -->
+          <section class="m-pg m-fourth" v-if="fourthPage" :aria-label="fourthTitle">
+            <template v-if="fourthPage.kind === 'acct'">
+              <!-- 設備與帳號（替電腦切換 Claude 帳號）：先看設備列表，點一台進細部（多一層，返回鍵回列表）；選帳號 → 確認 → 送出並等對方電腦回報 -->
               <header class="m-head m-chathead">
-                <button class="m-icon-btn" type="button" aria-label="返回" @click="acctHeaderBack"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M15 4.5L7.5 12 15 19.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                <button class="m-icon-btn" type="button" aria-label="返回" @click="back"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M15 4.5L7.5 12 15 19.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
                 <div class="m-head-tx"><div class="m-title">{{ ACCT_PAGE_TITLE }}</div></div>
               </header>
           <div class="m-sheet-body m-dv">
@@ -216,7 +238,7 @@
                   <li v-for="d in acctRemoved" :key="d.key"><span>{{ d.label }}</span><button type="button" class="m-dv-refresh" @click="acctRestore(d.key)">{{ DEVICE_TEXT.restore }}</button></li>
                 </ul>
               </div>
-              <button type="button" class="m-btn m-ops-cancel" @click="back">{{ ACCT_TEXT.close }}</button>
+              <button type="button" class="m-btn m-ops-cancel" @click="closePage">{{ ACCT_TEXT.close }}</button>
             </template>
             <template v-else-if="acctSw.phase === 'pick'">
               <button type="button" class="m-dv-back" @click="acctBackToList">{{ DEVICE_TEXT.back }}</button>
@@ -263,7 +285,7 @@
                   </ul>
                 </div>
               </section>
-              <button type="button" class="m-btn m-ops-cancel" @click="back">{{ ACCT_TEXT.close }}</button>
+              <button type="button" class="m-btn m-ops-cancel" @click="closePage">{{ ACCT_TEXT.close }}</button>
             </template>
             <template v-else-if="acctSw.phase === 'rm'">
               <p class="m-ops-lead" role="alert">{{ acctRemoveText }}</p>
@@ -279,116 +301,96 @@
             <template v-else>
               <p class="m-prog" :class="acctSw.view ? 'is-' + acctSw.view.phase : ''" role="status">{{ acctSw.view ? acctSw.view.text : '' }}</p>
               <div class="m-bar" v-if="acctSw.view && !acctSw.view.done" aria-hidden="true"><i></i></div>
-              <button type="button" class="m-btn m-ops-cancel" @click="back">{{ acctSw.view && acctSw.view.done ? ACCT_TEXT.close : ACCT_TEXT.later }}</button>
+              <button type="button" class="m-btn m-ops-cancel" @click="closePage">{{ acctSw.view && acctSw.view.done ? ACCT_TEXT.close : ACCT_TEXT.later }}</button>
             </template>
           </div>
             </template>
-          </section>
-
-          <!-- 設置 -->
-          <section class="m-pg" aria-label="設置">
-            <header class="m-head">
-              <button class="m-me" type="button" aria-label="設置" @click="goTab('me')"><img class="m-pic" :class="'st-' + me.status" :src="meAv" alt="" width="44" height="44"></button>
-              <div class="m-head-tx"><div class="m-title">設置</div></div>
-            </header>
-            <div class="m-scroll m-meview">
-              <div class="m-card m-form m-set-list">
-                <ul class="m-guide-list">
-                  <li v-for="r in settingRows" :key="r.key">
-                    <button class="m-row-btn" type="button" @click="openSetting(r.key)"><svg class="m-row-ic" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path :d="r.icon" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="m-row-tx"><b>{{ r.title }}</b><small>{{ r.summary }}</small></span><span class="m-caret" aria-hidden="true">▸</span></button>
+            <div class="m-pgin m-set" v-else-if="fourthPage.kind === 'setting'">
+              <!-- 設置的某一項（個人、通知、更新、關於）：左上返回回設置分頁 -->
+              <header class="m-head m-chathead">
+                <button class="m-icon-btn" type="button" aria-label="返回" @click="back"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M15 4.5L7.5 12 15 19.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                <div class="m-head-tx"><div class="m-title">{{ settingTitle }}</div></div>
+              </header>
+              <div class="m-sheet-body m-set-detail">
+                <template v-if="settingCat === 'me'">
+                      <input ref="avFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden @change="pickAvatar">
+                      <div class="m-card m-card-av">
+                        <button class="m-av-big" type="button" :disabled="avBusy" aria-label="換大頭貼" @click="avFile.click()"><img class="m-pic m-pic-lg" :class="'st-' + me.status" :src="meAv" alt="" width="112" height="112"></button>
+                        <p class="m-who">{{ myName }}</p>
+                        <p class="m-hint">點一下換大頭貼</p>
+                        <button class="m-link" type="button" v-if="selfHasUpload" :disabled="avBusy" @click="removeAvatar">改回自動產生</button>
+                        <p class="m-note" v-if="avMsg" role="status">{{ avMsg }}</p>
+                      </div>
+                      <div class="m-card m-form">
+                        <label>我的名字<input class="set-input" v-model="nameDraft" maxlength="40" enterkeyhint="done" @change="commitName" @keydown.enter="$event.target.blur()"><small class="m-fine">帳號的名字，所有設備共用，改了每台設備都會跟著變。</small></label>
+                        <p class="m-err" v-if="nameErr" role="alert">{{ nameErr }}</p>
+                        <label v-if="acct.signed_in">{{ AI_WAKE_LIMIT_LABEL }}<input class="set-input" type="number" inputmode="numeric" min="0" max="20" step="1" v-model="wakeDraft" enterkeyhint="done" @change="commitWake" @keydown.enter="$event.target.blur()"><small class="m-fine">{{ AI_WAKE_LIMIT_NOTE }}</small></label>
+                        <p class="m-err" v-if="wakeErr" role="alert">{{ wakeErr }}</p>
+                        <p class="m-acct">{{ accountText }}</p>
+                        <label>這台設備的名稱<input class="set-input" v-model="me.nick" maxlength="40" enterkeyhint="done" @change="commitNick" @keydown.enter="$event.target.blur()"><small class="m-fine">只有這支手機用：別台設備看到你從這裡寄信時，會標「從 {{ me.nick }}」。</small></label>
+                        <p class="m-err" v-if="nickErr" role="alert">{{ nickErr }}</p>
+                        <label>狀態<select class="set-sel" v-model="me.status"><option v-for="(label, key) in STATUS" :key="key" :value="key">{{ label }}</option></select></label>
+                        <label>個人訊息<input class="set-input" v-model="me.psm" maxlength="60" placeholder="輸入個人訊息" enterkeyhint="done" @keydown.enter="$event.target.blur()"></label>
+                      </div>
+                      <!-- 登出在「個人」內頁最下面（#1093：不放在設置列表） -->
+                      <div class="m-logout">
+                        <button class="m-btn m-danger" type="button" :disabled="loggingOut" @click="doLogout">登出</button>
+                      </div>
+                </template>
+                <template v-else-if="settingCat === 'notify'">
+                      <div class="m-card m-form">
+                        <label class="m-check"><input type="checkbox" v-model="prefs.vibrateNudge"> 對方傳來「震動」時，手機跟著震動</label>
+                        <label class="m-check"><input type="checkbox" v-model="prefs.vibrateMsg"> 收到新訊息時輕輕震一下</label>
+                      </div>
+                </template>
+                <template v-else-if="settingCat === 'update'">
+                  <div class="m-card m-form">
+                        <template v-if="upd.enabled">
+                          <label class="m-check"><input type="checkbox" v-model="prefs.autoUpdate"> 自動檢查新版本</label>
+                          <button class="m-btn" type="button" :disabled="upd.checking || upd.phase === 'downloading'" @click="checkUpdate(true)">{{ upd.checking ? '檢查中…' : '檢查更新' }}</button>
+                          <p class="m-note" v-if="upd.manual" role="status">{{ upd.manual }}</p>
+                        </template>
+                    <p class="m-note" v-else>這個版本不提供自動檢查新版本。</p>
+                  </div>
+                  <div class="m-card m-form m-rel" aria-label="版本紀錄">
+                    <b>版本紀錄</b>
+                    <p class="m-note" v-if="relNote" role="status">{{ relNote }}</p>
+                    <button class="m-btn" type="button" v-if="rel.phase === 'error'" @click="loadRel(true)">{{ RETRY_LABEL }}</button>
+                    <article class="m-rel-item" v-for="e in relLog" :key="e.version">
+                      <header><span class="m-rel-ver">{{ e.version }}</span><span class="m-rel-tag" v-if="e.tag === 'current'">目前版本</span><span class="m-rel-date" v-if="e.date">{{ e.date }}</span></header>
+                      <ul><li v-for="(l, i) in e.lines" :key="i">{{ l }}</li></ul>
+                    </article>
+                  </div>
+                </template>
+                <template v-else-if="settingCat === 'about'">
+                  <div class="m-card m-form">
+                        <p class="m-ver">ASN {{ info.version }}</p>
+                  </div>
+                </template>
+              </div>
+            </div>
+            <div class="m-pgin m-guide" v-else-if="fourthPage.kind === 'guide'">
+              <!-- 使用指引：先列篇目，點一篇看內文（多一層，返回鍵回篇目）。內文一律當純文字顯示（guide-doc） -->
+              <header class="m-head m-chathead">
+                <button class="m-icon-btn" type="button" aria-label="返回" @click="back"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M15 4.5L7.5 12 15 19.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                <div class="m-head-tx"><div class="m-title">{{ guideOpen ? guideOpen.guide.title : GUIDE_ENTRY_LABEL }}</div><div class="m-conn" v-if="!guideOpen">{{ GUIDE_ENTRY_SUB }}</div></div>
+              </header>
+              <div class="m-sheet-body">
+                <template v-if="guideOpen">
+                  <p class="m-guide-note" v-if="guideOpen.note" role="note">{{ guideOpen.note }}</p>
+                  <guide-doc :guide="guideOpen.guide"></guide-doc>        </template>
+                <ul class="m-guide-list" v-else>
+                  <li v-for="g in guides" :key="g.key">
+                    <button class="m-row-btn" type="button" @click="openGuide(g.key)"><span class="m-row-tx"><b>{{ g.title }}</b><small>{{ g.sub }}</small><em class="m-guide-badge" :class="'is-' + g.fit" v-if="g.badge">{{ g.badge }}</em></span><span class="m-caret" aria-hidden="true">▸</span></button>
                   </li>
                 </ul>
               </div>
-              <div class="m-card m-form m-guide-entry">
-                <button class="m-row-btn" type="button" @click="openGuides"><span class="m-row-tx"><b>{{ GUIDE_ENTRY_LABEL }}</b><small>{{ GUIDE_ENTRY_SUB }}</small></span><span class="m-caret" aria-hidden="true">▸</span></button>
-              </div>
-              <div class="m-logout">
-                <button class="m-btn m-danger" type="button" :disabled="loggingOut" @click="doLogout">登出</button>
-              </div>
             </div>
           </section>
+          <!-- /第四頁籤 -->
         </div>
       </div>
 
-    </section>
-
-    <!-- 設置的某一項：滿版的獨立一頁（左上返回回分類列表） -->
-    <section class="m-sheet m-set" v-if="nav.sheet === 'setting'" role="dialog" aria-modal="true" :aria-label="settingTitle">
-      <header class="m-head m-chathead">
-        <button class="m-icon-btn" type="button" aria-label="返回" @click="back"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M15 4.5L7.5 12 15 19.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-        <div class="m-head-tx"><div class="m-title">{{ settingTitle }}</div></div>
-      </header>
-      <div class="m-sheet-body m-set-detail">
-        <template v-if="settingCat === 'me'">
-              <input ref="avFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden @change="pickAvatar">
-              <div class="m-card m-card-av">
-                <button class="m-av-big" type="button" :disabled="avBusy" aria-label="換大頭貼" @click="avFile.click()"><img class="m-pic m-pic-lg" :class="'st-' + me.status" :src="meAv" alt="" width="112" height="112"></button>
-                <p class="m-who">{{ myName }}</p>
-                <p class="m-hint">點一下換大頭貼</p>
-                <button class="m-link" type="button" v-if="selfHasUpload" :disabled="avBusy" @click="removeAvatar">改回自動產生</button>
-                <p class="m-note" v-if="avMsg" role="status">{{ avMsg }}</p>
-              </div>
-              <div class="m-card m-form">
-                <label>我的名字<input class="set-input" v-model="nameDraft" maxlength="40" enterkeyhint="done" @change="commitName" @keydown.enter="$event.target.blur()"><small class="m-fine">帳號的名字，所有設備共用，改了每台設備都會跟著變。</small></label>
-                <p class="m-err" v-if="nameErr" role="alert">{{ nameErr }}</p>
-                <label v-if="acct.signed_in">{{ AI_WAKE_LIMIT_LABEL }}<input class="set-input" type="number" inputmode="numeric" min="0" max="20" step="1" v-model="wakeDraft" enterkeyhint="done" @change="commitWake" @keydown.enter="$event.target.blur()"><small class="m-fine">{{ AI_WAKE_LIMIT_NOTE }}</small></label>
-                <p class="m-err" v-if="wakeErr" role="alert">{{ wakeErr }}</p>
-                <p class="m-acct">{{ accountText }}</p>
-                <label>這台設備的名稱<input class="set-input" v-model="me.nick" maxlength="40" enterkeyhint="done" @change="commitNick" @keydown.enter="$event.target.blur()"><small class="m-fine">只有這支手機用：別台設備看到你從這裡寄信時，會標「從 {{ me.nick }}」。</small></label>
-                <p class="m-err" v-if="nickErr" role="alert">{{ nickErr }}</p>
-                <label>狀態<select class="set-sel" v-model="me.status"><option v-for="(label, key) in STATUS" :key="key" :value="key">{{ label }}</option></select></label>
-                <label>個人訊息<input class="set-input" v-model="me.psm" maxlength="60" placeholder="輸入個人訊息" enterkeyhint="done" @keydown.enter="$event.target.blur()"></label>
-              </div>
-        </template>
-        <template v-else-if="settingCat === 'notify'">
-              <div class="m-card m-form">
-                <label class="m-check"><input type="checkbox" v-model="prefs.vibrateNudge"> 對方傳來「震動」時，手機跟著震動</label>
-                <label class="m-check"><input type="checkbox" v-model="prefs.vibrateMsg"> 收到新訊息時輕輕震一下</label>
-              </div>
-        </template>
-        <template v-else-if="settingCat === 'update'">
-          <div class="m-card m-form">
-                <template v-if="upd.enabled">
-                  <label class="m-check"><input type="checkbox" v-model="prefs.autoUpdate"> 自動檢查新版本</label>
-                  <button class="m-btn" type="button" :disabled="upd.checking || upd.phase === 'downloading'" @click="checkUpdate(true)">{{ upd.checking ? '檢查中…' : '檢查更新' }}</button>
-                  <p class="m-note" v-if="upd.manual" role="status">{{ upd.manual }}</p>
-                </template>
-            <p class="m-note" v-else>這個版本不提供自動檢查新版本。</p>
-          </div>
-          <div class="m-card m-form m-rel" aria-label="版本紀錄">
-            <b>版本紀錄</b>
-            <p class="m-note" v-if="relNote" role="status">{{ relNote }}</p>
-            <button class="m-btn" type="button" v-if="rel.phase === 'error'" @click="loadRel(true)">{{ RETRY_LABEL }}</button>
-            <article class="m-rel-item" v-for="e in relLog" :key="e.version">
-              <header><span class="m-rel-ver">{{ e.version }}</span><span class="m-rel-tag" v-if="e.tag === 'current'">目前版本</span><span class="m-rel-date" v-if="e.date">{{ e.date }}</span></header>
-              <ul><li v-for="(l, i) in e.lines" :key="i">{{ l }}</li></ul>
-            </article>
-          </div>
-        </template>
-        <template v-else-if="settingCat === 'about'">
-          <div class="m-card m-form">
-                <p class="m-ver">ASN {{ info.version }}</p>
-          </div>
-        </template>
-      </div>
-    </section>
-
-    <!-- 使用指引：滿版的獨立一頁（左上返回）；先列篇目，點一篇看內文。內文一律當純文字（guide-doc 不用 v-html） -->
-    <section class="m-sheet m-guide" v-if="nav.sheet === 'guide'" role="dialog" aria-modal="true" :aria-label="GUIDE_ENTRY_LABEL">
-      <header class="m-head m-chathead">
-        <button class="m-icon-btn" type="button" aria-label="返回" @click="back"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M15 4.5L7.5 12 15 19.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-        <div class="m-head-tx"><div class="m-title">{{ guideOpen ? guideOpen.guide.title : GUIDE_ENTRY_LABEL }}</div><div class="m-conn" v-if="!guideOpen">{{ GUIDE_ENTRY_SUB }}</div></div>
-      </header>
-      <div class="m-sheet-body">
-        <template v-if="guideOpen">
-          <p class="m-guide-note" v-if="guideOpen.note" role="note">{{ guideOpen.note }}</p>
-          <guide-doc :guide="guideOpen.guide"></guide-doc>        </template>
-        <ul class="m-guide-list" v-else>
-          <li v-for="g in guides" :key="g.key">
-            <button class="m-row-btn" type="button" @click="openGuide(g.key)"><span class="m-row-tx"><b>{{ g.title }}</b><small>{{ g.sub }}</small><em class="m-guide-badge" :class="'is-' + g.fit" v-if="g.badge">{{ g.badge }}</em></span><span class="m-caret" aria-hidden="true">▸</span></button>
-          </li>
-        </ul>
-      </div>
     </section>
 
     <!-- 開新夥伴（遠端開視窗）：視窗開在選的那台電腦上，手機只下指令 -->

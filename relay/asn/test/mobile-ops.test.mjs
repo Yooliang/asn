@@ -63,7 +63,7 @@ test('頂端進度條：主句、接班換手分段（✓／…／○）、交�
 // ---------- 頁面接線 ----------
 test('接線：對話分頁是單一對話（不是列表）；「⋯」只在有選單項目時出現；選單在分頁外層、觸控目標 ≥ 44px', () => {
   const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
-  assert.match(html, /<section class="m-pg m-chat" [^>]*:aria-label="tabLabel\('chats'\)"/, '第二頁就是對話本身（標籤走 tabLabel：平常叫「對話」，進「選項」頁暫時叫「選項」）')
+  assert.match(html, /<section class="m-pg m-chat" [^>]*aria-label="對話"/, '第二頁就是對話本身；#461 起設備與帳號改在第四頁籤，對話分頁不再被借用，標籤固定叫「對話」')
   assert.doesNotMatch(html, /m-threads|m-thread|threads|threadTimeText/, '對話列表拿掉')
   assert.match(html, /<chat-pane v-if="chatFriend"/); assert.match(html, /\{\{ chatEmptyText \}\}/)
   assert.match(html, /<button class="m-icon-btn" type="button" aria-label="更多操作" v-if="opsItems\.length \|\| groupItems\.length" @click="openOps">/, '只有選單有項目（夥伴管理或邀請別人）才顯示「⋯」')
@@ -102,5 +102,5 @@ test('接線：最後使用的那位存在手機本機設定、點夥伴就成�
   assert.doesNotMatch(js, /chatNav|nav\.chat|swipeStart\(\$event, 'chat'\)|backAsync|threadMap|threadRows|\bpc\b/)
   assert.doesNotMatch(mob, /threadRows|threadTime|lastMessage|chatNav/)
   assert.doesNotMatch(css, /m-thread|m-threads|b-last2/)
-  assert.match(js, /isChatVisible: async id => document\.visibilityState === 'visible' && nav\.tab === 'chats' && nav\.sheet !== 'acct' && lastChat\.value === id/, '正在看對話分頁那位才算看得到（不算未讀）；被「選項」頁蓋住時不算在看')
+  assert.match(js, /isChatVisible: async id => document\.visibilityState === 'visible' && nav\.tab === 'chats' && lastChat\.value === id/, '正在看對話分頁那位才算看得到（不算未讀）；設備與帳號改在第四頁籤，對話分頁看得到就算看得到')
 })

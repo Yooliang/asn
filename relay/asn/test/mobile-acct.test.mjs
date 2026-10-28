@@ -3,7 +3,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { ACCT_TEXT, acctButtonDevices, acctErrorText, acctSheetView, confirmText, runAcctSwitch } from '../ui/lib/mobile-acct.mjs'
-import { acctNav, normalizeNav, tabLabel, tabNav } from '../ui/lib/mobile.mjs'
+import { normalizeNav, pageNav, tabLabel, tabNav } from '../ui/lib/mobile.mjs'
+import { PAGE_TAB, acctPage } from '../ui/lib/mobile-fourth.mjs'
+import { pageTitle } from '../ui/lib/mobile-nav.mjs'
 
 const read = (...p) => fs.readFileSync(new URL(`../${p.join('/')}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const ID = '11111111-1111-1111-1111-111111111111'
@@ -16,9 +18,10 @@ test('哪些設備卡有「切換 Claude 帳號」：別台電腦才有；本機
   assert.deepEqual(acctButtonDevices(null, 'S'), [])
 })
 
-test('導覽：新增 acct 浮層，瀏覽記錄讀回來能還原', () => {
-  assert.deepEqual(acctNav(), { tab: 'chats', sheet: 'acct' })
-  assert.deepEqual(normalizeNav({ tab: 'chats', sheet: 'acct' }), acctNav())
+test('導覽：設備與帳號是第四頁籤上的一頁（#461）；舊的 acct 浮層記錄讀回來轉成它', () => {
+  assert.deepEqual(pageNav(acctPage()), { tab: PAGE_TAB, sheet: '', page: { kind: 'acct', node: '' } })
+  assert.deepEqual(normalizeNav({ tab: 'chats', sheet: 'acct' }), pageNav(acctPage()))
+  assert.deepEqual(normalizeNav(pageNav(acctPage('W'))), pageNav(acctPage('W')))
 })
 
 test('帳號清單的畫面資料：顯示 email 與方案、使用中的不能選、離線時不能送', () => {
@@ -93,7 +96,7 @@ test('頁面接線：m.js 走 android_acct_* 指令且不碰電腦端指令；m.
   const js = read('ui', 'm.js'), html = read('ui', 'm.html')
   for (const c of ['android_acct_list', 'android_acct_switch', 'android_acct_status']) assert.match(js, new RegExp(c))
   assert.doesNotMatch(js, /acct_remote_/, '手機不叫電腦端的 acct_remote_* 指令')
-  assert.match(html, /nav\.sheet === 'acct'/)
+  assert.match(html, /fourthPage\.kind === 'acct'/)
   assert.match(html, /切換 Claude 帳號/)
   assert.match(html, /@click="[^"]*openAcct\(/)
   assert.match(html, /acctSw\.phase === 'confirm'/)
@@ -102,29 +105,27 @@ test('頁面接線：m.js 走 android_acct_* 指令且不碰電腦端指令；m.
   for (const c of ['android_acct_list', 'android_acct_switch', 'android_acct_status']) assert.ok(m[1].includes(`android::${c}`), `手機指令清單要有 ${c}`)
 })
 
-test('入口改成低調的「選項」小按鈕，按下切到第二個分頁（對話）整頁顯示，不是浮層', () => {
+test('入口改成低調的「選項」小按鈕，按下在第四頁籤整頁顯示（#461：不再借用對話分頁），不是浮層', () => {
   const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
   assert.equal(ACCT_TEXT.button, '選項')
   assert.doesNotMatch(ACCT_TEXT.button, /Claude|切換/)
-  // 導覽：選項頁屬於第二個分頁；分頁列上第二個標籤暫時叫「選項」，離開（任何不是 acct 的狀態）就恢復「對話」
-  assert.equal(acctNav().tab, 'chats')
-  assert.equal(tabLabel('chats', acctNav()), '設備與帳號')   // #268：分頁標籤跟頁標題一致；設備卡上的按鈕仍叫「選項」
-  assert.equal(tabLabel('chats', tabNav('chats')), '對話')
-  assert.equal(tabLabel('list', acctNav()), '夥伴')
-  assert.equal(tabLabel('me', acctNav()), '設置')
+  // 導覽：第四頁籤的標題＝頁標題「設備與帳號」（#268）；對話分頁的標籤永遠是「對話」（設備卡上的按鈕仍叫「選項」）
+  assert.equal(pageTitle(acctPage()), '設備與帳號')
+  assert.equal(tabLabel(PAGE_TAB, pageTitle(acctPage())), '設備與帳號')
+  assert.equal(tabLabel('chats'), '對話')
+  assert.equal(tabLabel('list'), '夥伴')
+  assert.equal(tabLabel('me'), '設置')
   assert.match(html, /\{\{ tabLabel\(t\) \}\}/, '分頁列標籤走 tabLabel')
-  // 畫面：選項頁在對話分頁那一格裡，有返回鍵；原本的對話內容只用 hidden 藏起來（不卸載，草稿才不會丟）
-  const pane = /<section class="m-pg m-chat"[\s\S]*?<!-- 設置 -->/.exec(html)
-  assert.ok(pane, '找得到對話分頁')
-  assert.match(pane[0], /v-if="nav\.sheet === 'acct'"/)
-  assert.match(pane[0], /class="m-keep" :hidden="nav\.sheet === 'acct'"/)
-  assert.match(pane[0], /acctSw\.phase === 'confirm'/)
-  assert.match(pane[0], /aria-label="返回"[^>]*@click="acctHeaderBack"/)   // 標題列返回鍵：細部頁先回列表，列表才離開
-  assert.doesNotMatch(html, /<div class="m-ops"[^>]*nav\.sheet === 'acct'/)
-  assert.doesNotMatch(html, /<section class="m-sheet"[^>]*nav\.sheet === 'acct'/)
-  // 分頁切換：選項頁時點「夥伴」＝返回上一頁；對話被蓋住時不標已讀
-  assert.match(js, /nav\.sheet === 'acct'\) \{[\s\S]*?t === 'list'\) history\.back\(\)/)
-  assert.match(js, /if \(nav\.sheet === 'acct'\) return/)
+  // 畫面：在第四頁籤裡，有返回鍵；對話分頁不再被借用
+  const fourth = html.slice(html.indexOf('<section class="m-pg m-fourth"'), html.indexOf('<!-- /第四頁籤 -->'))
+  assert.match(fourth, /v-if="fourthPage\.kind === 'acct'"/)
+  assert.match(fourth, /acctSw\.phase === 'confirm'/)
+  assert.match(fourth, /aria-label="返回"[^>]*@click="back"/)   // 標題列返回鍵＝系統返回鍵：細部頁先回列表，列表才收起
+  const chat = /<section class="m-pg m-chat"[\s\S]*?<!-- 設置 -->/.exec(html)[0]
+  assert.doesNotMatch(chat, /acctSw|m-keep/)
+  assert.doesNotMatch(html, /<div class="m-ops"[^>]*acct/)
+  assert.doesNotMatch(html, /<section class="m-sheet"[^>]*acct/)
+  assert.doesNotMatch(js, /nav\.sheet === 'acct'|nav\.sheet !== 'acct'/, '分頁切換與已讀判斷不再有設備與帳號的特例')
   // 按鈕外觀：小字淡色、無外框，但可點區域至少 32px 高
   const rule = /\.m-ghead-act\{([^}]*)\}/.exec(css)[1]
   assert.match(rule, /min-height:\s*(3[2-9]|4\d)px/)

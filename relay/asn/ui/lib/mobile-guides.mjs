@@ -1,5 +1,5 @@
 // 手機版「使用指引」：沿用電腦版的篇目（lib/guides.mjs，內容一個字不複製），只多一層「手機上適不適用」的標示。
-// 設置分頁的「使用指引」點進去是獨立一頁（全螢幕層）：先列篇目，點一篇看內文；內文用 guide-doc 元件，一律當純文字顯示（不用 v-html）。
+// 設置分頁的「使用指引」點進去是第四頁籤上的一頁：先列篇目，點一篇看內文；內文用 guide-doc 元件，一律當純文字顯示（不用 v-html）。
 // node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。
 import { GUIDES, guideByKey } from './guides.mjs'
 
@@ -23,5 +23,4 @@ export function phoneGuide(key) {
   const g = guideByKey(key)
   return g ? { guide: g, ...(GUIDE_FIT[g.key] ?? FALLBACK) } : null
 }
-// 導覽：蓋在「設置」分頁上的一層；guide＝正在看哪一篇（空字串＝篇目列表）
-export const guideNav = (key = '') => ({ tab: 'me', sheet: 'guide', guide: guideByKey(key) ? key : '' })
+// 導覽：第四頁籤上的一頁（內頁描述見 lib/mobile-fourth.mjs 的 guidePage）
