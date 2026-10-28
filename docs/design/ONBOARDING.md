@@ -348,7 +348,8 @@ AUTH.md 已建議：人類動作不要塞進現有 `relay` 函式的金鑰驗證
 
 - 與切換同時發佈新名與相容層（因為切換本來就要每台重新部署，這是改名成本最低的時間點）。
 - 保留相容至少兩個正式版本、且切換後至少 90 天。
-- 移除前條件：日誌（以及用戶端回報的 `legacy_names` 旗標，隨 `roster` 附帶，後端只計數）顯示沒有節點還在使用舊名。
+- 移除前條件：日誌（以及用戶端回報的 `used_legacy_env`，隨 `roster` 附帶，見下一段）顯示沒有節點還在使用舊名。
+- **名單回報的 `used_legacy_env`**（F4，#423）：用戶端（電腦版含 Linux 無頭版、Linux 機器橋含 Aegis 橋、雲端代理）在名單回報頂層送字串陣列，只放「這次啟動靠舊名才拿到設定」的環境變數名字（不送值）；沒用到送 `[]`；0.1.104 以前的舊版不送。後台（`relay` 函式名單分支，`_shared/legacy_env.ts`）只在有帶、而且是陣列時才寫：每個名字要符合 `^IRORI_[A-Z0-9_]{1,64}$` 且在舊名白名單（三邊對照表 `envc.rs` 的 `PAIRS`、`relay/machine/env-compat.mjs` 的 `RENAMED`、`relay/cloud-agent/env-compat.mjs` 的 `ENV_RENAME_PAIRS` 舊名的聯集，守門測試 `_shared/legacy_env_test.ts` 讀三個原始檔比對；新增改名要一起補白名單），其他丟掉；排序去重、最多 64 個。存在 `relay.nodes.used_legacy_env text[]`（null＝從沒回報過，`{}`＝回報了、沒用舊名）與 `used_legacy_env_at`（最後寫入時間），寫入函式 `asn_relay_set_legacy_env(p_node, p_names)`（只給 service_role，會再檢查格式與上限；migration `20261028230000_legacy_env.sql`）。資料庫還沒有這支函式時只記日誌、名單照常回應。報表讀法：`select id, used_legacy_env, used_legacy_env_at from relay.nodes where used_legacy_env is null or cardinality(used_legacy_env) > 0`（還沒升級、或還在用舊名的節點）。
 - 移除時：刪除對照表與相容連結的建立、刪除守門測試中的容許清單；之後守門測試要求 repo 內（除歷史文件外）不得出現 `IRORI_`、`.irori-relay`。
 
 ### 5.5 要改的地方（總表）

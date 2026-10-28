@@ -15,6 +15,7 @@ import { normalizeRosterAgents, rosterBellTopics } from "../_shared/roster.ts";
 import { parseWindowRename, renamesFromRoster } from "../_shared/window_rename.ts";
 import { sanitizeClaudeMod } from "../_shared/claude_mod.ts";
 import { sanitizeNodePlatform } from "../_shared/node_platform.ts";
+import { applyLegacyEnv } from "../_shared/legacy_env.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
 import { PARTNER_ID_RE, parseSetPartnerAvatar, setReply } from "../_shared/partner_avatar.ts";
 import * as signal from "../_shared/signal.ts";
@@ -301,6 +302,8 @@ Deno.serve(async (req) => {
       if (pe) console.warn("set_platform", me.id, pe.message ?? pe);
       else if (pd?.error) console.warn("set_platform", me.id, pd.error);
     }
+    // 靠舊名（IRORI_*）才拿到設定的環境變數名字（選填 used_legacy_env，F4 #423；給舊名使用報表）。有帶而且是陣列才寫；舊資料庫沒有這支函式只記 log，不影響名單
+    await applyLegacyEnv((fn, args) => db.rpc(fn, args), me.id, b);
     // 這台電腦的 Claude 外掛狀態（選填 mod；啟動檢查完與狀態變化時才帶）。格式不對或舊資料庫沒有這支函式都只記 log，不影響名單
     if ("mod" in b) {
       const cm = sanitizeClaudeMod(b.mod);
