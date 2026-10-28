@@ -1,5 +1,5 @@
 {
-  "_說明": "複製成 ~/.irori-relay/agents.json（不進 repo）。ASN_ENGINES=claude,acp 才會載入；每個工作者是橋長駐啟動的背景 AI，名單上以 name 出現。步驟與風險見 docs/AGENT-ENGINES.md「第一期上線步驟」。",
+  "_說明": "複製成 ~/.asn/agents.json（不進 repo）。ASN_ENGINES=claude,acp 才會載入；每個工作者是橋長駐啟動的背景 AI，名單上以 name 出現。步驟與風險見 docs/AGENT-ENGINES.md「第一期上線步驟」。",
   "workers": [
     {
       "name": "Gemini",
@@ -8,7 +8,7 @@
       "protocol": "agy-stream",
       "command": "agy",
       "args": [],
-      "cwd": "C:\\Users\\你\\.irori-relay\\workers\\Gemini",
+      "cwd": "C:\\Users\\你\\.asn\\workers\\Gemini",
       "label": "工作者",
       "model": "",
       "permissions": {
@@ -17,7 +17,7 @@
         "execute": "allow",
         "network": "allow",
         "other": "deny",
-        "allow_dirs": ["C:\\Users\\你\\.irori-relay\\workers\\Gemini"]
+        "allow_dirs": ["C:\\Users\\你\\.asn\\workers\\Gemini"]
       },
       "ask": { "notify": ["sender"], "timeout_ms": 300000 },
       "turn_timeout_ms": 300000,
@@ -34,7 +34,7 @@
       "protocol": "acp",
       "command": "node",
       "args": ["C:\\path\\to\\node_modules\\google-antigravity-acp\\dist\\cli.js", "--binary-path", "C:\\Users\\你\\AppData\\Local\\agy\\bin\\agy.exe", "--no-skip-permissions"],
-      "cwd": "C:\\Users\\你\\.irori-relay\\workers\\Gemini-ACP",
+      "cwd": "C:\\Users\\你\\.asn\\workers\\Gemini-ACP",
       "label": "工作者",
       "permissions": { "write": "deny", "execute": "deny" }
     },
@@ -47,7 +47,7 @@
       "protocol": "acp",
       "command": "grok",
       "args": ["agent", "stdio"],
-      "cwd": "C:\\Users\\你\\.irori-relay\\workers\\Grok",
+      "cwd": "C:\\Users\\你\\.asn\\workers\\Grok",
       "permissions": { "write": "ask", "execute": "ask", "network": "allow" },
       "ask": { "notify": [{ "node": "PC1" }], "timeout_ms": 300000 }
     }

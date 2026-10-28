@@ -1,15 +1,16 @@
 # 之後移出本 repo（#14 R8，D11）：Aegis 主機仍以本檔部署（ExecStart 指向該機的 clone），移出步驟見 docs/design/ONBOARDING.md 第 7.5 節。
 # Aegis 轉接橋（仲介信 -> Aegis /agent-chat/ask）。安裝方式見 README「Aegis 轉接橋」一節。
-# 金鑰不寫在這裡：放在 ~/.irori-relay/<IRORI_RELAY_ID>.key（chmod 600）。
+# 金鑰不寫在這裡：放在 ~/.asn/<節點代號>.key（舊位置 ~/.irori-relay/ 也認；chmod 600）。
+# 注意：AEGIS 專屬變數（IRORI_AEGIS_*）程式目前只認舊名，改名屬 F4，這裡先維持舊名。
 [Unit]
-Description=Irori relay Aegis bridge
+Description=ASN relay Aegis bridge
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=cwen0708
-Environment=IRORI_RELAY_ID=AEGIS
+Environment=ASN_RELAY_ID=AEGIS
 # 逗號分隔的成員 slug；空白＝全部擋下
 Environment=IRORI_AEGIS_ALLOW=
 # 其餘可選：IRORI_AEGIS_URL（預設 http://127.0.0.1:8899）、IRORI_AEGIS_FROM_MEMBER（預設 xi-xu）、IRORI_AEGIS_TIMEOUT_MS（預設 300000）
