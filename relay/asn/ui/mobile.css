@@ -239,6 +239,7 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-upd-tx{flex:1;min-width:0;font-size:14px;overflow-wrap:anywhere}
 .m-upd-btn{min-height:40px}
 .m-upd-hint{flex-basis:100%;font-size:13px}
+.m-upd-last{background:#fff0d6;border-color:#e3b872;color:#4a2e00}
 
 /* 對話：ChatPane 的版面在小螢幕上收緊，觸控目標放大 */
 .m-chathead{height:60px}

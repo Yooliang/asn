@@ -87,3 +87,11 @@ test('開新夥伴畫面：模型與「運行」分開呈現（電腦版對話�
   assert.ok(p2.includes('v-for="m in lchVendors"') && p2.includes('v-model="lch.piModel"'), '手機：廠牌清單、經 pi 的模型下拉')
   assert.ok(p2.indexOf('<legend>模型</legend>') < p2.indexOf('<legend>運行</legend>'), '手機：先模型、再運行')
 })
+
+test('m.html：「最後一個自行安裝版」提示只掛在 sideloadLast（自行安裝版才有字），沒有關閉鈕', () => {
+  const i = html.indexOf('class="m-upd m-upd-last"')
+  assert.ok(i > 0, '找不到提示')
+  const tag = html.slice(html.lastIndexOf('<div', i), html.indexOf('</div>', i))
+  assert.match(tag, /v-if="sideloadLast"/)
+  assert.ok(!tag.includes('<button'), '常駐，不給關')
+})

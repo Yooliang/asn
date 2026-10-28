@@ -219,6 +219,10 @@ export function afterBind(out, bridge) {
 
 // ---------- 自動更新（自行安裝版；Google Play 版不啟用，畫面上根本不出現） ----------
 export const UPDATE_CHECK_MS = 6 * 3600 * 1000
+// 0.1.104 是最後一個自行安裝版（之後只發 Google Play）：自行安裝版每次開 App 都常駐這句，不給關（換版要先移除舊版，忘了就再也收不到更新）。
+// 兩種版本簽章不同，Play 版不能直接蓋過自行安裝版，所以要先移除。Play 目前只開內部測試，沒有公開網址，不附連結。
+export const SIDELOAD_LAST_TEXT = '這是最後一個自行安裝版，之後請改用 Google Play 版（先移除這個版本，再到 Play 搜尋 ASN）'
+export const sideloadLastText = bridge => (bridge?.selfUpdateEnabled() === true ? SIDELOAD_LAST_TEXT : '')
 // 檢查更新時官網連不上或回錯誤：不顯示原始錯誤，一律這句（官網還沒有 android.json＝404 時 Rust 端回「沒有新版」，畫面顯示「目前已是最新版」）
 export const UPDATE_UNAVAILABLE = '暫時無法檢查更新'
 export const UPDATE_LATEST = '目前已是最新版'
