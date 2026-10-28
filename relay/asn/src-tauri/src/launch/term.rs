@@ -85,6 +85,9 @@ fn default_unlocked() -> bool {
     true
 }
 
+/// pi 的狀態說明：忙碌與閒置在名單上（pi 的 ASN 擴充回報），終端面板不另外判斷
+const PI_STATE_ELSEWHERE: &str = "pi 的忙碌與閒置請看名單";
+
 /// `term_status` 的結果。state 只會是 busy、idle、unknown、waiting_user。判斷不了就是 unknown，不會猜。
 /// waiting_user 才有 prompt；其他狀態 prompt 是空的。
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -492,6 +495,17 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                     return Ok(unknown_status(&snap.profile, "前景不是已知的 CLI"));
                 }
             }
+        }
+        // pi（#483）：忙碌與閒置看名單（pi 的 ASN 擴充會回報），這裡只看畫面上有沒有要使用者選的提問（例如要不要信任資料夾），
+        // 有就是 waiting_user 並附上選項（代答照既有的確認流程）；讀一次就好，不做兩次取樣的閒置判斷
+        if snap.profile == "pi" {
+            return Ok(match self.sample(&w, &snap) {
+                Ok(s) => match classify_prompt(&s.text) {
+                    Some(p) => waiting_status(&snap.profile, s.cursor_x, s.cursor_y, p),
+                    None => unknown_status(&snap.profile, PI_STATE_ELSEWHERE),
+                },
+                Err(e) => unknown_status(&snap.profile, &format!("讀不到畫面或游標，無法判斷：{e}")),
+            });
         }
         if snap.profile != "grok" {
             return Ok(TermStatus {
@@ -1180,7 +1194,12 @@ fn cap_tail(s: &str, max: usize) -> String {
 }
 
 fn is_selected_marker(c: char) -> bool {
-    matches!(c, '>' | '●' | '▶' | '❯')
+    matches!(c, '>' | '●' | '▶' | '❯' | '→')
+}
+
+/// 「>」式選單：選中那行有記號，其他選項沒有記號、跟選中那行的文字對齊（grok 的 `>`、pi 的 `→`，#483）
+fn arrow_style(marker: char) -> bool {
+    marker == '>' || marker == '→'
 }
 
 fn is_unselected_marker(c: char) -> bool {
@@ -1289,7 +1308,7 @@ fn parse_menu_block(lines: &[&str], cursor_idx: usize) -> Option<ScreenPrompt> {
     if !is_selected_marker(marker) {
         return None;
     }
-    let gt_style = marker == '>';
+    let gt_style = arrow_style(marker);
     let mut start = cursor_idx;
     let mut end = cursor_idx;
     while start > 0 {
@@ -2259,6 +2278,51 @@ mod tests {
         assert_eq!(st.reason, "trust_dialog");
         assert!(rig.runner.inner.sleeps.borrow().is_empty(), "第一次就看到提問，不必再睡");
         assert_eq!(count_cmd(&rig.runner, "send-text"), 0);
+    }
+
+    /// pi 1.4 的信任提問（#483，照 #475 驗收時小良哥截圖的畫面）：選中那行是「→ 」，其他選項只縮排
+    const PI_TRUST_SCREEN: &str = "────────────────\n\n Trust project folder?\n C:\\Users\\u\\proj\n\n This allows pi to load .pi settings and resources, install missing project\n packages, and execute project extensions.\n\n → Trust\n   Trust parent folder (C:\\Users\\u)\n   Trust (this session only)\n   Do not trust\n   Do not trust (this session only)\n\n ↑↓ navigate  enter select  escape/ctrl+c cancel\n";
+
+    fn pi_rig() -> (Rig, String) {
+        let rig = make(default_profiles(), vec![]);
+        let argv: Vec<String> = vec!["pi".into()];
+        let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &argv, &BTreeMap::new()).unwrap();
+        (rig, id)
+    }
+
+    #[test]
+    fn pi_的信任提問_認得是選單_列出五個選項_游標在第一個_不自動代答() {
+        let (rig, id) = pi_rig();
+        *rig.runner.inner.screen.borrow_mut() = PI_TRUST_SCREEN.into();
+        let st = rig.svc.status(&id).unwrap();
+        assert_eq!(st.state, "waiting_user", "{}", st.reason);
+        let p = st.prompt.expect("附上提問");
+        assert_eq!(p.kind, "menu");
+        assert_eq!(
+            p.options.iter().map(|o| o.label.as_str()).collect::<Vec<_>>(),
+            vec!["Trust", "Trust parent folder (C:\\Users\\u)", "Trust (this session only)", "Do not trust", "Do not trust (this session only)"]
+        );
+        assert_eq!(count_cmd(&rig.runner, "send-text"), 0, "只看不送");
+        assert!(rig.runner.inner.sleeps.borrow().is_empty(), "pi 讀一次畫面就好");
+    }
+
+    #[test]
+    fn pi_的提問經確認代答_送往下與_enter_選到第三個_畫面換了就不送() {
+        let (rig, id) = pi_rig();
+        *rig.runner.inner.screen.borrow_mut() = PI_TRUST_SCREEN.into();
+        let a = rig.svc.answer(&id, "menu", 3).unwrap();
+        assert_eq!(a.keys, describe_keys(&[AnswerKey::Down, AnswerKey::Down, AnswerKey::Enter]), "選「只信任這一次」");
+        *rig.runner.inner.screen.borrow_mut() = "pi  anthropic/claude-sonnet-5-5\n> \n".into();
+        assert!(rig.svc.answer(&id, "menu", 3).unwrap_err().contains("不在畫面上"), "提問已經不在：不送");
+    }
+
+    #[test]
+    fn pi_沒有提問時說忙閒看名單_不猜() {
+        let (rig, id) = pi_rig();
+        *rig.runner.inner.screen.borrow_mut() = "pi  anthropic/claude-sonnet-5-5\n> \n".into();
+        let st = rig.svc.status(&id).unwrap();
+        assert_eq!((st.state.as_str(), st.reason.as_str()), ("unknown", PI_STATE_ELSEWHERE));
+        assert!(st.prompt.is_none());
     }
 
     #[test]

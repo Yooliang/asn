@@ -163,8 +163,9 @@ export function folderName(cwd) {
   return parts.length ? parts[parts.length - 1] : ''
 }
 
-// 經 pi 開在自帶終端的（#475）先不列在面板：讀畫面、代答還沒支援 pi，列出來只會一直是「狀態未知」（另開一張做）
-export const PANEL_HIDDEN_PROFILES = Object.freeze(['pi'])
+// 面板不列的終端種類。經 pi 開在自帶終端的（#475）從 #483 起列出：讀畫面、代送照常；提問（例如要不要信任資料夾）會跳出選項、經確認才代答，
+// 忙碌與閒置看名單（終端面板對 pi 顯示「狀態未知」並註明）
+export const PANEL_HIDDEN_PROFILES = Object.freeze([])
 export const panelTerms = list => (Array.isArray(list) ? list : []).filter(t => !PANEL_HIDDEN_PROFILES.includes(t?.profile))
 
 /** 清單的一列：id、profile、資料夾（後端 term_list 的 cwd，開啟時已授權的資料夾；舊後端沒有就空）、狀態；沒有狀態（還沒查到或查失敗）當 unknown */
