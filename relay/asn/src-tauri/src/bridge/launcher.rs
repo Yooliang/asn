@@ -225,7 +225,15 @@ impl Launcher {
         match self.env.config(false) {
             Ok(c) => {
                 *self.warned.lock().unwrap() = String::new();
-                summary(&c)
+                let mut s = summary(&c);
+                // 有 pi 的啟動設定：多帶這台 pi 能用的模型，手機與別台電腦的「切換模型」才有下拉選單（#443／#444；舊後台會丟掉這個欄位）
+                if c.profiles.values().any(|p| p.engine == "pi") {
+                    let models = crate::launch::pi_models::summary_models();
+                    if !models.is_empty() {
+                        s["pi_models"] = Value::Array(models);
+                    }
+                }
+                s
             }
             Err(e) => {
                 let mut w = self.warned.lock().unwrap();

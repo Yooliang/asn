@@ -83,6 +83,27 @@ pub fn parse_auth(text: &str) -> &'static str {
 }
 
 /// force＝true 略過快取（使用者剛登入或剛設好憑證）。查失敗（沒有 pi、逾時）的空結果不進快取，下次再試
+/// 名單回報附的模型清單（#443／#444）用的快取：名單每輪都會組摘要，pi --list-models 要開外部程序，所以另外留 10 分鐘
+pub const SUMMARY_TTL: Duration = Duration::from_secs(600);
+static SUMMARY_CACHE: Mutex<Option<(Instant, Vec<PiModel>)>> = Mutex::new(None);
+/// 名單回報最多帶這麼多筆（後台也只收 200 筆）
+pub const SUMMARY_MAX: usize = 200;
+
+/// 給啟動設定摘要的 [{ provider, model }]：只有這兩欄、最多 200 筆（不帶憑證、路徑或其他設定）
+pub fn summary_models() -> Vec<serde_json::Value> {
+    let now = Instant::now();
+    let list = {
+        let g = SUMMARY_CACHE.lock().unwrap();
+        g.as_ref().filter(|(at, _)| now.saturating_duration_since(*at) < SUMMARY_TTL).map(|(_, v)| v.clone())
+    };
+    let list = list.unwrap_or_else(|| {
+        let v = models_real(false);
+        *SUMMARY_CACHE.lock().unwrap() = Some((now, v.clone()));
+        v
+    });
+    list.iter().take(SUMMARY_MAX).map(|m| serde_json::json!({ "provider": m.provider, "model": m.model })).collect()
+}
+
 pub fn models_real(force: bool) -> Vec<PiModel> {
     if !force {
         if let Some(v) = fresh(&MODELS_CACHE, Instant::now()) {

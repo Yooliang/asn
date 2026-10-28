@@ -20,7 +20,8 @@ import { POLL_MS as TQ_POLL_MS, TEXT as TERMREQ_TEXT, countdownText as tqCountdo
 import { friendId } from './lib/roster.mjs'
 import { restoreMobileTab } from './lib/session.mjs'
 import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, showsInSheet } from './lib/mobile-ops.mjs'
-import { OP_LABEL, PI_MODEL_REMOTE_NOTE, opFormError, dialogEngine, partnerEngine, sharedWhy } from './lib/partner-ops.mjs'
+import { OP_LABEL, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, opFormError, dialogEngine, partnerEngine, piModelChoices, sharedWhy } from './lib/partner-ops.mjs'
+import { cleanPiModels } from './lib/pi-models.mjs'
 import { BUDDY_CONSOLE_LABEL } from './lib/partner-launch-ui.mjs'
 import { ACCT_TEXT, ACCT_PAGE_TITLE, acctButtonDevices, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch } from './lib/mobile-acct.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
@@ -589,8 +590,14 @@ const app = createApp({
     const opsText = computed(() => opDialogText(ops.phase, chatFriend.value?.agent || chatFriend.value?.nick || '', chatFriend.value?.device || '', dialogEngine(chatFriend.value)))
     const opsTitle = computed(() => (ops.phase === 'menu' ? (chatFriend.value?.nick ?? '') : opsText.value.title || OP_LABEL[ops.phase] || ''))
     const opsModels = phoneModels(), opsModelNote = MODEL_NOTE
-    const opsIsPi = computed(() => ['pi', 'acp'].includes(partnerEngine(chatFriend.value)))
-    const opsPiNote = computed(() => (partnerEngine(chatFriend.value) === 'pi' ? PI_MODEL_REMOTE_NOTE : ''))   // 手機拿不到那台 pi 的模型清單（#443）   // pi 與內建通道的工作者沒有固定的模型清單：改成輸入框（Claude 的常用清單對它們不適用）
+    const opsIsPi = computed(() => ['pi', 'acp'].includes(partnerEngine(chatFriend.value)))   // pi 與內建通道的工作者沒有固定的模型清單：改成輸入框（Claude 的常用清單對它們不適用）
+    // pi 的模型下拉選單（#443／#444）：那台開放遠端管理時，啟動設定摘要會帶它的 pi 能用的模型；沒有就退回輸入框並說明
+    const opsPiChoices = computed(() => {
+      const f = chatFriend.value
+      if (partnerEngine(f) !== 'pi') return { groups: [], selected: '' }
+      return piModelChoices(cleanPiModels(lchData.machines?.[f.node]?.launcher?.pi_models), f.model)
+    })
+    const opsPiNote = computed(() => (partnerEngine(chatFriend.value) === 'pi' && !opsPiChoices.value.groups.length ? PI_MODEL_REMOTE_NOTE : ''))
     const opsRun = ref(null)   // 對話頁頂端的進度：{ op, view }
     const opsBanner = computed(() => runBanner(opsRun.value))
     let opsToken = 0
@@ -607,13 +614,18 @@ const app = createApp({
       ops.error = ''
       if (op === 'archive' || op === 'unarchive') { history.back(); void setArchived(chatFriend.value, op === 'archive'); return }
       if (opStep(op) === 'run') void submitOp(op)
-      else ops.phase = op
+      else {
+        if (op === 'model' && opsPiChoices.value.groups.length) ops.model = opsPiChoices.value.selected
+        ops.phase = op
+      }
     }
     async function submitOp(op) {
       const f = chatFriend.value
       if (!f) return
       const item = opsItems.value.find(i => i.key === op)
       const input = { newName: ops.newName, model: ops.model, note: ops.note, ack: ops.ack }
+      const piGroups = op === 'model' ? opsPiChoices.value.groups : []
+      if (piGroups.length && !piGroups.some(g => g.options.some(o => o.value === input.model))) { ops.error = PI_MODEL_PICK_ERR; return }
       const err = opFormError(f, op, input, item)
       if (err) { ops.error = err; return }
       const token = ++opsToken
@@ -863,7 +875,7 @@ const app = createApp({
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, headTone, CONN_LABEL, info, banner, shake, refreshing,
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
-      avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, opsView, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
+      avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, opsView, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       acctSw, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctHeaderBack, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, ACCT_PAGE_TITLE, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchStep2, lchRun, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,

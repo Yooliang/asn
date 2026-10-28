@@ -87,7 +87,7 @@ export function piModelChoices(models, current = '') {
   return { groups, selected: all.includes(cur) ? cur : all[0] ?? '' }
 }
 export const PI_MODEL_PICK_ERR = '請從清單選一個模型'
-export const PI_MODEL_REMOTE_NOTE = '這台的模型清單只能在那台電腦上看到，請照 pi 裡的名稱輸入'
+export const PI_MODEL_REMOTE_NOTE = '查不到這台的模型清單（那台要開放遠端管理才會回報），請照 pi 裡的名稱輸入'
 export const PI_MODEL_HINT = '請輸入模型，例如 claude-sonnet-5 或 anthropic/claude-sonnet-5（只能用英數與 . _ -，合起來最多 60 字）'
 // 背景工作者沒有視窗：「關閉」是停止它本次的執行
 export const ACP_CLOSE_LABEL = '關閉'

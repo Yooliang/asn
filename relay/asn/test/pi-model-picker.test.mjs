@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { PI_MODEL_REMOTE_NOTE, piModelChoices, piModelWire } from '../ui/lib/partner-ops.mjs'
+import { cleanPiModels } from '../ui/lib/pi-models.mjs'
 
 const MODELS = [
   { provider: 'minimax', model: 'MiniMax-M2.7' }, { provider: 'minimax', model: 'MiniMax-M3.1-Flash' },
@@ -26,7 +27,20 @@ test('接線：電腦版只有本機的 pi 視窗才查清單；選單外的不�
   assert.match(ui, /<optgroup v-for="g in pi\.groups"/)
   assert.match(ui, /PI_MODEL_PICK_ERR/)
   assert.match(ui, /v-else-if="op === 'model'">模型/, '查不到清單：輸入框')
-  assert.match(fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8'), /:pi-models="opDlg\.friend\.node === selfNode \? transport\.piModels : null"/)
+  assert.match(fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8'), /:pi-models="opDlg\.friend\.node === selfNode \? transport\.piModels : remotePiModelsFor\(opDlg\.friend\.node\)"/)
   assert.match(fs.readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8'), /<p class="m-note" v-if="opsPiNote">\{\{ opsPiNote \}\}<\/p>/)
-  assert.equal(PI_MODEL_REMOTE_NOTE, '這台的模型清單只能在那台電腦上看到，請照 pi 裡的名稱輸入')
+  assert.match(PI_MODEL_REMOTE_NOTE, /開放遠端管理/, '說明寫明：那台要開放遠端管理才會回報')
+})
+
+test('第 2 步：手機與別台電腦用那台啟動設定摘要的 pi_models 給下拉選單；沒有就退回輸入框', () => {
+  const m = fs.readFileSync(new URL('../ui/m.js', import.meta.url), 'utf8')
+  assert.match(m, /piModelChoices\(cleanPiModels\(lchData\.machines\?\.\[f\.node\]\?\.launcher\?\.pi_models\), f\.model\)/)
+  assert.match(m, /PI_MODEL_PICK_ERR/, '選單外的不送')
+  const html = fs.readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8')
+  assert.match(html, /<select class="set-sel m-ops-input" v-if="opsPiChoices\.groups\.length"/)
+  assert.match(html, /<input class="set-input m-ops-input" v-else v-model="ops\.model"/)
+  const l = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
+  assert.match(l, /const pm = remoteLaunchers\.value\[node\]\?\.pi_models/)
+  // 送不出去的（資料庫收 : @ + [ ]，但後台的模型欄位不收）不列
+  assert.deepEqual(piModelChoices(cleanPiModels([{ provider: 'p', model: 'a@b' }, { provider: 'p', model: 'ok-1' }])).groups[0].options.map(o => o.value), ['p/ok-1'])
 })
