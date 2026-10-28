@@ -410,12 +410,15 @@
                   <template v-if="lch.node && lchElig.ok">
                     <fieldset class="m-fs">
                       <legend>模型</legend>
-                      <button v-for="m in lchChoices.models" :key="m.profileId" type="button" class="m-opt" :class="{ on: lch.profile === m.profileId }" :aria-pressed="lch.profile === m.profileId" @click="lch.profile = m.profileId"><span class="m-opt-t">{{ m.label }}</span><small class="m-opt-why">{{ m.modeLabel }}</small></button>
+                      <button v-for="m in lchVendors" :key="m.id" type="button" class="m-opt" :class="{ on: lch.vendor === m.id }" :aria-pressed="lch.vendor === m.id" @click="pickLaunchVendor(m)"><span class="m-opt-t">{{ m.label }}</span><small class="m-opt-why">{{ m.modeLabel }}</small></button>
                     </fieldset>
                     <fieldset class="m-fs">
                       <legend>運行</legend>
-                      <button v-for="c in lchRun.choices" :key="c.key" type="button" class="m-opt" :class="{ on: lchRun.selected === c.key, off: !c.ok }" :disabled="!c.ok" :aria-pressed="lchRun.selected === c.key"><span class="m-opt-t">{{ c.label }}</span><small class="m-opt-why" v-if="!c.ok">{{ c.why }}</small></button>
+                      <button v-for="c in lchRun.options" :key="c.key" type="button" class="m-opt" :class="{ on: lchRunKey === c.key, off: !c.ok || c.key === 'self' }" :disabled="!c.ok || c.key === 'self'" :aria-pressed="lchRunKey === c.key" @click="lch.run = c.key"><span class="m-opt-t">{{ c.label }}</span><small class="m-opt-why" v-if="!c.ok || c.key === 'self'">{{ c.why || c.note }}</small><small class="m-opt-why" v-else-if="c.note">{{ c.note }}</small></button>
                     </fieldset>
+                    <!-- 經 pi（D2 #422）：那台回報的 pi 模型清單；預設第一個 -->
+                    <label class="m-field" v-if="lchRunKey === 'pi' && lchPi.ok">經 pi 的模型<select class="set-sel" v-model="lch.piModel"><option value="">{{ lchPi.defaultModel }}（預設）</option><option v-for="pm in lchPi.models" :key="pm.model" :value="pm.model">{{ pm.model }}</option></select></label>
+                    <p class="m-note" v-if="lchRunKey === 'pi' && lchPi.ok">{{ PI_REMOTE_VERSION_NOTE }}</p>
                     <label class="m-field">工作資料夾<select class="set-sel" v-model="lch.cwd"><option v-for="c in lchChoices.cwds" :key="c" :value="c">{{ c }}</option></select></label>
                     <label class="m-field">名字<input class="set-input" v-model="lch.name" maxlength="40" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
                     <label class="m-field">第一句話（選填）<textarea class="set-area" v-model="lch.first" rows="3" maxlength="4000"></textarea></label>

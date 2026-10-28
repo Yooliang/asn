@@ -13,7 +13,8 @@ import path from 'node:path'
 export const NAME_RE = /^[A-Za-z0-9一-鿿][A-Za-z0-9一-鿿-]{0,39}$/
 const DEFAULT_MAX_PER_HOUR = 6
 const HOUR_MS = 3_600_000
-export const TRUST_HINT = '視窗已開，但 30 秒內沒出現在名單上：可能卡在「是否信任此資料夾」，請到電腦前按一次 Enter'
+export const PI_MODEL_UNSUPPORTED = '這台電腦還不能經 pi 開夥伴（要指定提供者與模型），請改用其他模型'
+export const TRUST_HINT ='視窗已開，但 30 秒內沒出現在名單上：可能卡在「是否信任此資料夾」，請到電腦前按一次 Enter'
 
 /** 工作資料夾：先 path.resolve，再 realpath（符號連結、.. 都會落到實際路徑） */
 export function normalizePath(p) {
@@ -290,6 +291,8 @@ export function createLauncher({ api, log, workDir, configPath, listNames, onLau
     const recent = readHistory()
     const why = check(config, l, { names, recent })
     if (why) return report(l, 'failed', why)
+    // 遠端開 pi 帶提供者與模型（D2 #422）：這個機器橋沒有經 pi 的啟動設定，帶了就拒絕，不悄悄用預設模型開
+    if (l.pi_provider != null || l.pi_model != null) return report(l, 'failed', PI_MODEL_UNSUPPORTED)
     writeHistory([...recent, Date.now()])
     const prof = config.profiles[l.profile]
     let started

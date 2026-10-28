@@ -9,7 +9,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnTracked } from './spawn-tracked.mjs'
 import { fileURLToPath } from 'node:url'
-import { buildSpawn, canonicalLaunchCwd, check, childEnv, createLauncher, loadConfig, NAME_RE, quoteArg, summary, TRUST_HINT } from '../launcher.mjs'
+import { buildSpawn, canonicalLaunchCwd, check, childEnv, createLauncher, loadConfig, NAME_RE, PI_MODEL_UNSUPPORTED, quoteArg, summary, TRUST_HINT } from '../launcher.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const MACHINE = path.join(here, '..')
@@ -181,6 +181,19 @@ test('流程：開不起來回 failed', async () => {
     await h.L.pull()
     await waitFor(() => h.results.length === 1)
     assert.deepEqual([h.results[0].status, h.results[0].detail], ['failed', '開不起來：找不到執行檔'])
+  } finally { h.done() }
+})
+
+test('流程：帶了經 pi 的提供者與模型（D2 #422）就拒絕，不用預設模型開；舊版沒帶（或 null）照常', async () => {
+  const h = harness()
+  try {
+    h.push(req(1, { cwd: h.d, pi_provider: 'minimax', pi_model: 'MiniMax-M3.1-Flash' }), req(2, { cwd: h.d, pi_provider: null, pi_model: null }))
+    await h.L.pull()
+    await waitFor(() => h.results.length === 2)
+    const by = Object.fromEntries(h.results.map(r => [r.id, r]))
+    assert.deepEqual([by[uid(1)].status, by[uid(1)].detail], ['failed', PI_MODEL_UNSUPPORTED])
+    assert.equal(by[uid(2)].status, 'ok')
+    assert.equal(h.starts.length, 1)
   } finally { h.done() }
 })
 

@@ -404,6 +404,7 @@
           <option v-for="m in piChoice.models" :key="m.model" :value="m.model">{{ m.model }}<template v-if="m.thinking">・會思考</template></option>
         </select>
       </label>
+      <p class="partner-hint" v-if="partnerRunChoice === 'pi' &amp;&amp; piChoice.ok &amp;&amp; dlgRemote">{{ PI_REMOTE_VERSION_NOTE }}</p>
       <label>名字<input class="set-input" v-model="partnerDlg.name" maxlength="40" aria-label="夥伴名字"></label>
       <label>工作資料夾
         <span class="partner-cwd-row">

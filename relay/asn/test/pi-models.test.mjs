@@ -80,7 +80,7 @@ test('接線（#351）：DeepSeek、MiniMax 以「只能經 pi」列進開新夥
   const js = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
   const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
   assert.ok(js.includes('piOnlyVendorRows(piInfo.models, piInfo.providers)'), '只列 pi 列得到的')
-  assert.ok(js.includes("const dlgVendors = computed(() => (PI_VIA_READY ? [...vendorRows(dlgModels.value), ...piOnlyRows.value] : dlgModels.value))"))
+  assert.ok(js.includes("const dlgVendors = computed(() => (dlgRemote.value ? launchVendors(dlgRemoteLauncher.value) : PI_VIA_READY ? [...vendorRows(dlgModels.value), ...piOnlyRows.value] : dlgModels.value))"), '別台用那台回報的清單（D2 #422），這台用本機 pi')
   assert.ok(js.includes('partnerDlg.vendor && dlgVendors.value.find(m => m.id === partnerDlg.vendor)'), 'profile 都是 pi，靠 vendor 分辨')
   assert.ok(js.includes("partnerDlg.node === info.node"), '只在選這台時加')
   assert.ok(html.includes('on: partnerDlg.vendor ? partnerDlg.vendor === m.id : partnerDlg.profile === m.profileId'))

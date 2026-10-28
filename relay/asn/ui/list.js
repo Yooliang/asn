@@ -55,6 +55,7 @@ import { consoleBlock } from './lib/actionbar.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
 import { channelRows, runChoices, runOptions, vendorRows } from './lib/model-catalog.mjs'
 import { cleanPiModels, piChoiceFor, piLaunchArgs, piOnlyVendorRows, providerStates } from './lib/pi-models.mjs'
+import { PI_REMOTE_VERSION_NOTE, buildLaunchRequest as remoteLaunchRequest, launchPiChoice, launchRun, launchVendors } from './lib/mobile-launch.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
@@ -441,7 +442,10 @@ async function loadPiInfo() {
   try { piInfo.models = cleanPiModels(await transport.piModels()) } catch { piInfo.models = [] }
   try { piInfo.providers = providerStates(await transport.piProviders()) } catch { piInfo.providers = {} }
 }
-const piChoice = computed(() => piChoiceFor(dlgRow.value?.id, piInfo.models, piInfo.providers))
+// 別台設備（D2 #422）：用那台回報的 pi 模型清單（要開放遠端管理），跟手機同一套
+const dlgRemote = computed(() => !!partnerDlg.node && partnerDlg.node !== info.node)
+const dlgRemoteLauncher = computed(() => (dlgRemote.value ? remoteLaunchers.value[partnerDlg.node] ?? null : null))
+const piChoice = computed(() => (dlgRemote.value ? launchPiChoice(dlgRow.value, dlgRemoteLauncher.value) : piChoiceFor(dlgRow.value?.id, piInfo.models, piInfo.providers)))
 // pi 是通道不是廠牌，最後不列在廠牌裡；但「經 pi」要等後端能帶提供者與模型開 pi（0.1.90 後續）才能選，
 // 在那之前先留著 pi 這一列，不然使用者完全開不了 pi 夥伴（小東 #737）
 const PI_VIA_READY = true
@@ -450,9 +454,13 @@ const PI_ONLY_CHANNELS = { acp: { status: 'no', why: '沒有內建通道' }, pi:
 const piOnlyRows = computed(() => (PI_VIA_READY && partnerDlg.node === info.node
   ? piOnlyVendorRows(piInfo.models, piInfo.providers).map(v => ({ ...v, profileId: 'pi', toolId: 'pi', installed: cliInstalled(cliTools.value, 'pi'), modeLabel: '經 pi 開', installHint: '這台電腦沒偵測到 pi', channels: PI_ONLY_CHANNELS }))
   : []))
-const dlgVendors = computed(() => (PI_VIA_READY ? [...vendorRows(dlgModels.value), ...piOnlyRows.value] : dlgModels.value))
+const dlgVendors = computed(() => (dlgRemote.value ? launchVendors(dlgRemoteLauncher.value) : PI_VIA_READY ? [...vendorRows(dlgModels.value), ...piOnlyRows.value] : dlgModels.value))
 const partnerRun = computed(() => {
   const row = dlgRow.value
+  if (dlgRemote.value) {   // 別台：手機同一套（遠端開，自帶終端只能在那台開、經 pi 看那台的清單）
+    const r = launchRun(row, dlgRemoteLauncher.value)
+    return { ...r, options: r.options.map(o => ({ ...o, self: o.key === 'self' })), recommended: r.options.find(o => o.ok && o.key !== 'self')?.key ?? '' }
+  }
   const r = row?.channels
     ? runOptions(row, { local: partnerDlg.node === info.node, piInstalled: cliInstalled(cliTools.value, 'pi'), piReady: PI_VIA_READY && piChoice.value.ok })
     : null
@@ -776,7 +784,10 @@ async function submitPartnerDlg() {
         ? { profile: 'pi', name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, display: 'foreground', first_message: partnerDlg.firstMessage.trim(), pi_provider: viaPi.provider, pi_model: viaPi.model }
         : { profile: partnerDlg.profile, name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, display, first_message: foregroundOnly ? partnerDlg.firstMessage.trim() : '' })
     } else {
-      const r = await transport.launch({ node: partnerDlg.node, profile: partnerDlg.profile, name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, first_message: partnerDlg.firstMessage.trim() || null })
+      // 經 pi：profile 一律 pi，帶那台清單裡的提供者與模型（不在清單裡就不送）；其他開法照舊
+      const body = remoteLaunchRequest({ node: partnerDlg.node, profile: partnerDlg.profile, name: partnerDlg.name, cwd: partnerDlg.cwd, first: partnerDlg.firstMessage, piModel: partnerDlg.piModel }, { run: partnerRunChoice.value, row: dlgRow.value, launcher: dlgRemoteLauncher.value })
+      if (!body) throw new Error('那台的 pi 模型清單裡沒有這個模型，請重新選一次')
+      const r = await transport.launch(body)
       if (r?.id) launchTrack.value = [...launchTrack.value, { id: r.id, node: partnerDlg.node, name: partnerDlg.name.trim(), profile: partnerDlg.profile }]
     }
     Object.assign(launchPrefs, bumpRecentCwd(launchPrefs, partnerDlg.cwd))
@@ -1639,7 +1650,7 @@ const app = createApp({
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
       termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termsClose, termSendAsk, termSendPhone, termSendBack, termSendConfirm, SEND_MAX,
       termPane, termPaneRow, termPaneActive, termRoster, termComposer, openTermTab, termPaneAnswer, termTimeline, entryLabel,
-      dlgRow, dlgVendors, piChoice, partnerRunChoice, partnerRunModel, partnerCanRun, termWaitCount, openWaitingTerm,
+      dlgRow, dlgVendors, dlgRemote, PI_REMOTE_VERSION_NOTE, piChoice, partnerRunChoice, partnerRunModel, partnerCanRun, termWaitCount, openWaitingTerm,
       adopt, adoptLoad, adoptClose, adoptDo, adoptRelease, adoptUnlockAsk, adoptUnlockCancel, adoptUnlockConfirm, UNLOCK_TEXT,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
