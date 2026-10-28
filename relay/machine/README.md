@@ -155,6 +155,7 @@ powershell -File install-task.ps1 -Uninstall           # 移除
 環境變數：`ASN_RELAY_ID`（預設 `AEGIS`）、`ASN_AEGIS_ALLOW`（逗號分隔 slug，**預設空＝全部擋下**）、`ASN_AEGIS_URL`、
 `ASN_AEGIS_DEFAULT`、`ASN_AEGIS_FROM_MEMBER`、`ASN_AEGIS_TIMEOUT_MS`、`ASN_AEGIS_RETRY_MS`、`ASN_RELAY_KEY`／`ASN_RELAY_ANON_KEY`（也可用檔案）。
 `ASN_AEGIS_*` 的舊名 `IRORI_AEGIS_*` 照認（新名優先，新名沒設或只有空白才讀舊名；設定讀取在 `aegis-config.mjs`）。
+注意：要全部擋下，不能只把 `ASN_AEGIS_ALLOW` 設成空白——新名空白會當成沒設，舊名 `IRORI_AEGIS_ALLOW` 還有值就照舊名放行；請把兩個名字都清掉（或都設成空白）。
 
 ### 在 Aegis 上安裝
 

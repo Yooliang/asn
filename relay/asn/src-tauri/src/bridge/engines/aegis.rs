@@ -54,7 +54,7 @@ pub struct AegisCfg {
     pub url: String,
     pub from_member: String,
     pub allow: Vec<String>,
-    /// 希緒自己：不列進名單、也不能被問
+    /// 轉接橋自己的成員：不列進名單、也不能被問
     pub self_member: String,
     /// 沒指定收件人的信交給它（要在白名單內）
     pub default_member: String,
@@ -282,7 +282,7 @@ impl Engine for AegisEngine {
         self.i.stopped.store(true, Ordering::SeqCst);
     }
 
-    /// 只列白名單成員（不含希緒自己）。成員表讀不到就沿用上次的名字（沒有就用 slug），名單照樣回報
+    /// 只列白名單成員（不含轉接橋自己的成員）。成員表讀不到就沿用上次的名字（沒有就用 slug），名單照樣回報
     fn list(&self) -> BoxFut<'_, Option<Vec<Window>>> {
         Box::pin(async move {
             self.i.refresh_members().await;
@@ -324,12 +324,12 @@ impl Engine for AegisEngine {
         (name != c.self_member && c.allow.iter().any(|s| s == name)).then(|| self.i.display_name(name))
     }
 
-    /// 白名單外與希緒自己：和 Node 版同文（只在僅引擎模式由核心採用）
+    /// 白名單外與轉接橋自己的成員：和 Node 版同文（只在僅引擎模式由核心採用）
     fn unreachable_reply(&self, name: &str) -> Option<String> {
         let c = &self.i.cfg;
         let slug = self.i.resolve_slug(name);
         if slug == c.self_member {
-            Some("[Aegis] 這是希緒自己，不能自己問自己".into())
+            Some("[Aegis] 這是轉接橋自己的成員，不能問自己".into())
         } else if !c.allow.contains(&slug) {
             Some(format!("[Aegis] 這位成員沒有開放聯絡（{slug}）"))
         } else {
@@ -341,7 +341,7 @@ impl Engine for AegisEngine {
     fn unaddressed_reply(&self) -> Option<String> {
         let c = &self.i.cfg;
         if c.allow.contains(&c.default_member) {
-            return (c.default_member == c.self_member).then(|| "[Aegis] 這是希緒自己，不能自己問自己".into());
+            return (c.default_member == c.self_member).then(|| "[Aegis] 這是轉接橋自己的成員，不能問自己".into());
         }
         let list = c
             .allow

@@ -259,7 +259,7 @@ async fn 向量_每封信的問答_回信_ack_名單_與_node_版相同() {
             h.ag.script(m["body"].as_str().unwrap(), target, list.as_array().unwrap().iter().map(|r| (r["http"].as_u64().unwrap() as u16, r["json"].clone())).collect());
         }
     }
-    // 名單：白名單成員（不含希緒）、中文名、副標空
+    // 名單：白名單成員（不含轉接橋自己的成員）、中文名、副標空
     let names: Vec<String> = h.aegis_roster().iter().map(|a| a["name"].as_str().unwrap().to_string()).collect();
     let want: Vec<String> = v["config"]["roster_names"].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect();
     assert_eq!(names, want);
@@ -348,7 +348,7 @@ async fn 其他引擎的_ack_時機沒變_aegis_以外的引擎不延後() {
 async fn 名單_成員表讀不到就用代號_讀到了改用中文名() {
     let h = aboot(json!({"oops": 1}), &[("ASN_AEGIS_ALLOW", "alpha,xi-xu,flaky")]).await;
     let names: Vec<String> = h.aegis_roster().iter().map(|a| a["name"].as_str().unwrap().to_string()).collect();
-    assert_eq!(names, vec!["alpha", "flaky"], "成員表格式不認得：用代號，不含希緒自己");
+    assert_eq!(names, vec!["alpha", "flaky"], "成員表格式不認得：用代號，不含轉接橋自己的成員");
     let h = aboot(json!({"members": [{"slug": "alpha", "display_name": "阿爾法"}, {"slug": "flaky", "member_name": "不穩"}]}), &[("IRORI_AEGIS_ALLOW", "alpha,flaky")]).await;
     let names: Vec<String> = h.aegis_roster().iter().map(|a| a["name"].as_str().unwrap().to_string()).collect();
     assert_eq!(names, vec!["阿爾法", "不穩"], "舊名 IRORI_AEGIS_ALLOW 也認；成員表可包在 members 裡、名字可叫 display_name／member_name");
