@@ -1,6 +1,6 @@
 // 名單的「活躍度」（#347，取代原本依忙閒分組）：純邏輯，桌面與手機共用。
 // 三級：active＝在線且近 8 小時有收發；idle＝在線但 8 小時沒往來；offline＝離線。忙碌、暫離不再分組，只在名字後面用小字表示。
-// 防跳：進活躍立刻生效；離開活躍要再多等 5 分鐘；判成離線要連續 3 分鐘不在名單上。第一期只用本機對話記錄的收發時間（第二期加後台 last_active_at）。
+// 防跳：進活躍立刻生效；離開活躍要再多等 5 分鐘；判成離線要連續 3 分鐘不在名單上。收發時間取本機對話記錄、名單列的 lastAt 與後台的最後活動時間（activeAt，E3 #397：別台設備、在終端裡忙的也看得到）三者最新的；舊後台沒有 activeAt 就跟以前一樣。
 import { lastTrafficAt } from './recent.mjs'
 
 export const ACTIVE_WINDOW_MS = 8 * 60 * 60 * 1000
@@ -32,14 +32,14 @@ export function nextActivity(prev, { status, lastAt }, now) {
 }
 
 /**
- * 整份名單算一輪。friends：名單列（有 id、status、lastAt 可選）；logOf(id)：該夥伴的對話記錄；prev：上一輪回傳的 Map。
+ * 整份名單算一輪。friends：名單列（有 id、status，lastAt／activeAt 可選）；logOf(id)：該夥伴的對話記錄；prev：上一輪回傳的 Map。
  * 回新的 Map（id → { level, offSince }）；名單上沒有的不保留。
  */
 export function activityRound(friends, { logOf = () => [], prev = new Map(), now = Date.now() } = {}) {
   const out = new Map()
   for (const f of Array.isArray(friends) ? friends : []) {
     if (!f || typeof f.id !== 'string') continue
-    const lastAt = Math.max(Number.isFinite(f.lastAt) ? f.lastAt : 0, lastTrafficAt(logOf(f.id)))
+    const lastAt = Math.max(Number.isFinite(f.lastAt) ? f.lastAt : 0, Number.isFinite(f.activeAt) ? f.activeAt : 0, lastTrafficAt(logOf(f.id)))
     out.set(f.id, nextActivity(prev.get(f.id), { status: f.status, lastAt }, now))
   }
   return out

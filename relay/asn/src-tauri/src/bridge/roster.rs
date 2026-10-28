@@ -331,6 +331,30 @@ pub fn roster_body_with_procs(windows: &[Window], asn_window: Option<&str>, laun
     json!({ "agents": agents, "launcher": launcher })
 }
 
+/// 0.2 E2／E4（#397）：各視窗的最後活動時間（毫秒）。prev＝上一輪（含收到信的時間）；這一輪忙碌的視窗記成 now_ms；
+/// 名單上已經沒有的名字不保留。回新的表，不改 prev
+pub fn active_marks(prev: &BTreeMap<String, u64>, windows: &[Window], now_ms: u64) -> BTreeMap<String, u64> {
+    windows
+        .iter()
+        .filter_map(|w| {
+            let busy = w.is_busy().then_some(now_ms);
+            prev.get(&w.name).copied().max(busy).map(|t| (w.name.clone(), t))
+        })
+        .collect()
+}
+
+/// 名單請求內容裡有記錄的條目加上 active_at（毫秒）。可選欄位：舊後台會丟掉，舊用戶端略過；後台照 10 秒節流寫進夥伴的最後活動時間
+pub fn with_active(mut body: Value, marks: &BTreeMap<String, u64>) -> Value {
+    if let Some(agents) = body.get_mut("agents").and_then(Value::as_array_mut) {
+        for a in agents.iter_mut() {
+            if let Some(t) = a.get("name").and_then(Value::as_str).and_then(|n| marks.get(n)) {
+                a["active_at"] = json!(t);
+            }
+        }
+    }
+    body
+}
+
 /// 外掛狀態回報的間隔：沒變化時最久每 30 分鐘補報一次（後台有存，補報只是保險，不高頻）
 pub const MOD_REPORT_REFRESH_MS: u64 = 30 * 60 * 1000;
 
@@ -391,6 +415,18 @@ mod tests {
 
     fn put(d: &Path, pid: u32, v: Value) {
         std::fs::write(d.join(format!("{pid}.json")), v.to_string()).unwrap();
+    }
+
+    #[test]
+    fn 最後活動時間_在忙記成現在_收信時間保留_離開名單的不留_不改原表() {
+        let ws = [Window::claude("甲", Some("busy".into()), "", 1, 0, None), Window::claude("乙", Some("idle".into()), "", 2, 0, None), Window::claude("丙", Some("waiting".into()), "", 3, 0, None)];
+        let prev: BTreeMap<String, u64> = [("甲".to_string(), 50), ("乙".to_string(), 70), ("走了".to_string(), 90)].into();
+        let m = active_marks(&prev, &ws, 100);
+        assert_eq!(m, [("甲".to_string(), 100), ("乙".to_string(), 70)].into(), "等人回答（waiting）不算忙");
+        assert_eq!(prev.len(), 3, "原表不動");
+        let body = with_active(json!({"agents":[{"name":"甲"},{"name":"丙"},{"name":"pi · MiniMax #9"}],"launcher":null}), &m);
+        assert_eq!(body, json!({"agents":[{"name":"甲","active_at":100},{"name":"丙"},{"name":"pi · MiniMax #9"}],"launcher":null}));
+        assert_eq!(with_active(json!({"x":1}), &m), json!({"x":1}), "沒有 agents 不動");
     }
 
     #[test]
