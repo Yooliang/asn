@@ -7,6 +7,7 @@
 //!
 //! 金鑰只在記憶體（讀 ~/.asn/<節點>.key 或 ASN_RELAY_KEY），絕不印出。
 mod attach_cmd;
+mod avatar_cmd;
 mod inbox_cmd;
 mod caller;
 mod quota_cmd;
@@ -61,7 +62,7 @@ impl Io<'_> {
     }
 }
 
-pub const SUBCOMMANDS: [&str; 10] = ["send", "recv", "room", "attach", "secret", "usage", "inbox", "claude-quota", "who", "site"];
+pub const SUBCOMMANDS: [&str; 11] = ["send", "recv", "room", "attach", "avatar", "secret", "usage", "inbox", "claude-quota", "who", "site"];
 
 /// 第一個參數是子命令才算命令列呼叫（asn.exe 據此決定要不要跑命令列）
 pub fn is_subcommand(args: &[String]) -> bool {
@@ -78,6 +79,7 @@ const TOP_USAGE: &str = "用法：
   asn room   confirm-request --room <群組id|群組名> --kind <類別> --summary \"<一句話>\"   （危險操作前請主持人確認）
   asn room   confirm-status <id> [--peek]
   asn attach --id <附件編號> [--out <路徑>]
+  asn avatar set --file <圖> / clear   （夥伴換自己的頭像：png／jpg／webp 會在本機裁成正方形、縮成 96×96；只能改呼叫者自己，每小時 5 次）
   asn inbox   [--all | --json | --done <信件id> ...]   （收件匣模式：讀 asn-bridge run --inbox 存下的信、標記已處理）
   asn secret request --purpose <用途說明> [--program <程式名稱>] [--ttl <秒>]
   asn usage  report (--file <hourly.json> | --input-tokens N ... --rounds N) / list [--since <ISO>]   （無頭節點自己回報每小時用量）
@@ -105,6 +107,7 @@ pub fn run(args: &[String], env: &Env, io: &mut Io) -> i32 {
             "recv" => recv::main(rest, env, io).await,
             "room" => room::main(rest, env, io).await,
             "attach" => attach_cmd::main(rest, env, io).await,
+            "avatar" => avatar_cmd::main(rest, env, io).await,
             "secret" => secret::main(rest, env, io).await,
             "usage" => usage_cmd::main(rest, env, io).await,
             "inbox" => inbox_cmd::main(rest, env, io).await,

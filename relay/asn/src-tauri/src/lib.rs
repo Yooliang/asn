@@ -883,6 +883,17 @@ async fn relay_avatar(app: State<'_, App>, node: String) -> Result<Value, String
     relay_of(&app)?.api(&format!("avatar&node={}", relay::encode_component(&node)), None).await
 }
 
+/// 某位夥伴自己換的頭像（#446；名單的夥伴條目帶 avatar_updated_at 才會來取）。夥伴編號先驗格式（p_ 加 20 個十六進位字元）才組網址
+#[cfg(feature = "gui")]
+#[tauri::command]
+async fn relay_partner_avatar(app: State<'_, App>, partner: String) -> Result<Value, String> {
+    let ok = partner.len() == 22 && partner.starts_with("p_") && partner[2..].bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    if !ok {
+        return Err(format!("夥伴編號格式不對：{partner}"));
+    }
+    relay_of(&app)?.api(&format!("partner_avatar&partner={partner}"), None).await
+}
+
 /// 上傳（或 null＝移除）自己這台設備的大頭貼：格式與大小在這裡檢查，通過才送出；只能改自己的節點（後端由金鑰決定是誰）
 #[cfg(feature = "gui")]
 #[tauri::command]
@@ -1290,7 +1301,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_window_name, set_presence, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_unaddressed_to, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_mod::claude_mod_auto_get, claude_mod::claude_mod_auto_set, claude_quota::claude_quota_all, statusline_hook::claude_quota_hook_status, statusline_hook::claude_quota_hook_connect, statusline_hook::claude_quota_hook_disconnect,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,
@@ -1305,7 +1316,7 @@ pub fn run() {
     // 手機只開放單欄名單與對話需要的指令；電腦端的指令（開視窗、橋、用量……）手機上根本不存在
     #[cfg(not(desktop))]
     let builder = builder.invoke_handler(tauri::generate_handler![
-        startup_info, relay_list, relay_inbox, relay_ack, relay_rooms, relay_group, invite_pending, relay_send, relay_chat_history, relay_read_sync, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_avatar, relay_set_avatar,
+        startup_info, relay_list, relay_inbox, relay_ack, relay_rooms, relay_group, invite_pending, relay_send, relay_chat_history, relay_read_sync, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_avatar, relay_partner_avatar, relay_set_avatar,
         set_presence, set_window_name, store_load, store_save, quit_app, capture_ui_ready, shot_frontend_log, open_link,
         account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_device_prefs_get, account::auth_device_prefs_set, account::auth_bind,
         site_releases::site_releases, android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, android::android_acct_list, android::android_acct_switch, android::android_acct_status, android::android_term_req_list, android::android_term_req_decide, android::android_secret_pending, android::android_secret_reply, android::android_room_read, android::android_room_post, relay_partner_list, relay_partner_succeed,

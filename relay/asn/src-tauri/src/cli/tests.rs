@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 mod attach_tests;
+mod avatar_tests;
 mod confirm_tests;
 mod inbox_tests;
 mod recv_tests;

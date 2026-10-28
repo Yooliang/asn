@@ -2,7 +2,7 @@
 //   1. 自動產生：DiceBear 的 shapes 風格（離線，由 scripts/prep.mjs 打包成 ui/vendor/dicebear.mjs），
 //      種子＝好友 id（`節點/視窗名`），每人固定、不同人不同。
 //   2. 設備上傳的大頭貼：96×96、png 或 webp、≤ 32 KB 的 data URL；上傳前與收到時都要檢查格式與大小。
-//   3. 顯示規則：AI 視窗（在名單上）→ 一律自動產生；不在名單上的寄件人 → 用他那台設備上傳的圖，沒有就自動產生；
+//   3. 顯示規則：AI 視窗（在名單上）→ 夥伴自己換的頭像（asn avatar set），沒有就自動產生；不在名單上的寄件人 → 用他那台設備上傳的圖，沒有就自動產生；
 //      自己 → 本機節點有上傳就用上傳的，沒有就自動產生。
 
 import { createAvatar, shapes } from '../vendor/dicebear.mjs'
@@ -71,7 +71,11 @@ export function checkAvatarDataUrl(v) {
 export const isAvatarDataUrl = v => checkAvatarDataUrl(v).ok
 
 // ---------- 顯示規則 ----------
-// friend：{ id, node, onRoster }；avatars：Map 或物件，節點 → { data, at }（或直接是 data URL 字串）
+// 夥伴自己換的頭像（#446）放在同一張表，鍵是 'p:<夥伴編號>'（改名不會斷）。
+export const PARTNER_ID_RE = /^p_[0-9a-f]{20}$/
+export const partnerAvatarKey = pid => `p:${pid}`
+
+// friend：{ id, node, onRoster, partnerId }；avatars：Map 或物件，節點（或 p:夥伴編號）→ { data, at }（或直接是 data URL 字串）
 const pick = (avatars, node) => {
   const e = avatars instanceof Map ? avatars.get(node) : avatars?.[node]
   const d = typeof e === 'string' ? e : e?.data
@@ -79,7 +83,10 @@ const pick = (avatars, node) => {
 }
 // 回傳 { kind: 'upload', src } 或 { kind: 'auto', seed }
 export function avatarFor(friend, { avatars } = {}) {
-  if (friend?.onRoster === true) return { kind: 'auto', seed: friend.id }          // AI 視窗：一律自動產生
+  if (friend?.onRoster === true) {                                                 // AI 視窗：夥伴自己換過頭像就用它，沒有就自動產生（設備頭像不套在 AI 視窗上）
+    const own = typeof friend.partnerId === 'string' && PARTNER_ID_RE.test(friend.partnerId) ? pick(avatars, partnerAvatarKey(friend.partnerId)) : null
+    return own ? { kind: 'upload', src: own } : { kind: 'auto', seed: friend.id }
+  }
   const up = friend?.node ? pick(avatars, friend.node) : null                      // 名單外的寄件人：他那台設備上傳的圖
   return up ? { kind: 'upload', src: up } : { kind: 'auto', seed: friend?.id ?? '' }
 }

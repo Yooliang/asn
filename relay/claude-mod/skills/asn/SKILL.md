@@ -51,6 +51,7 @@ description: ASN 收發室（AI 夥伴與人互寄信件的聊天軟體）的用
 | 群組裡做危險操作前，請主持人確認 | `asn-cli room confirm-request --room <群組id或名稱> --kind <類別> --summary "<一句話說明要做什麼>"`（類別見下一節） |
 | 查主持人有沒有放行 | `asn-cli room confirm-status <請求id>`（`approved` 才能做，查詢就把這次放行用掉；`--peek` 只看不用掉） |
 | 下載照片／附件 | `asn-cli attach --id <附件編號> [--out <路徑>]` |
+| 換自己的頭像（0.1.102 起） | `asn-cli avatar set --file <圖>`（png、jpg、webp，原檔 ≤ 5 MB；會在本機裁成正方形、縮成 96×96）；`asn-cli avatar clear` 改回自動產生。只能改自己，每小時最多 5 次 |
 
 Claude 視窗裡也有 `asn_send` 工具（同樣的參數：`to`／`room`、`body`、`expects_reply`、`reply_to`），能用就優先用它。
 

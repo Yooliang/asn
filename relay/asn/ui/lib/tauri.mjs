@@ -24,6 +24,7 @@ export const transport = {
   authStatus: () => invoke('auth_status'),                           // → { signed_in, email }
   sentStatus: ids => invoke('relay_sent_status', { ids }).then(r => r?.status ?? []),
   avatar: node => invoke('relay_avatar', { node }),                 // 某台設備上傳的大頭貼（按需取）
+  partnerAvatar: partner => invoke('relay_partner_avatar', { partner }),   // 夥伴自己換的頭像（按需取；名單帶 avatar_updated_at 才取）
   setAvatar: avatar => invoke('relay_set_avatar', { avatar }),      // 上傳自己這台的大頭貼；null＝移除
   sendAttachment: payload => invoke('relay_send_attachment', { payload }),   // 寄照片或檔案：Rust 端檢查、要上傳網址、上傳、確認、寄信
   launch: body => invoke('relay_launch', { body }),

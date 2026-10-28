@@ -1,9 +1,9 @@
 // ASN 狀態核心（瀏覽器與 node 都能跑）：好友、對話、未讀、收信、寄信、震動。
 // 不碰網路細節：transport 由外面注入（桌面版＝Rust 命令，金鑰留在 Rust；測試＝連本機假 relay）。
-//   transport: { list(), inbox(), ack(ids), send(payload), avatar?(node), setAvatar?(dataUrl|null), sendAttachment?(payload), history?(node, agent, partnerId) }
+//   transport: { list(), inbox(), ack(ids), send(payload), avatar?(node), partnerAvatar?(partnerId), setAvatar?(dataUrl|null), sendAttachment?(payload), history?(node, agent, partnerId) }
 //   store:     { load() → 物件|null, save(物件) }
 //   isChatVisible(id) → Promise<boolean>：該好友的對話視窗是否開著且沒最小化
-import { isAvatarDataUrl } from './avatar.mjs'
+import { PARTNER_ID_RE, isAvatarDataUrl, partnerAvatarKey } from './avatar.mjs'
 import { renamedInfo } from './rename.mjs'
 import { asnByNode } from './presence.mjs'
 import { coalesced, overlayLocal } from './local-status.mjs'
@@ -54,7 +54,7 @@ export class AsnCore {
   constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, localMs = 2_000, soonGapMs = 1_000, statusPollMs = STATUS_POLL_MS, aliases = [], stepMs = STEP_MS }) {
     // 讀取類的呼叫一律加逾時（寄信、寄檔另有自己的流程，不在這裡限時）。收信（inbox、ack）可能一次要走好幾個名字，給兩倍時間
     const guarded = { ...transport }
-    for (const k of ['list', 'inbox', 'ack', 'sentStatus', 'avatar', 'history', 'readSync']) {
+    for (const k of ['list', 'inbox', 'ack', 'sentStatus', 'avatar', 'partnerAvatar', 'history', 'readSync']) {
       if (typeof transport[k] === 'function') guarded[k] = (...a) => withTimeout(transport[k](...a), k === 'inbox' || k === 'ack' ? stepMs * 2 : stepMs, k)
     }
     Object.assign(this, { aliases: new Set(aliases), transport: guarded, store, selfNode, windowName, isChatVisible, now, log, pollMs, rosterMs, localMs, statusPollMs, stepMs })
@@ -67,7 +67,7 @@ export class AsnCore {
     this.seen = new Set()      // 已處理過的信件 id（ack 失敗重拉時不重複顯示）
     this.nodeOrder = []        // 收發室名單裡的節點順序（設備頁籤照這個排）
     this.asn = {}              // 節點 → 在線的 ASN 視窗（名單帶的 asn：版本與狀態）
-    this.avatars = new Map()   // 節點 → { at, data }：各設備上傳的大頭貼（名單只帶更新時間，圖按需取、依更新時間快取）
+    this.avatars = new Map()   // 節點（或 p:夥伴編號）→ { at, data }：各設備、各夥伴上傳的大頭貼（名單只帶更新時間，圖按需取、依更新時間快取）
     this.conn = 'connecting'   // connecting | on | off
     this.connWhy = ''          // conn 為 off 時的簡短原因（connReason）
     this.itemFails = new Map() // 信件 id → 處理失敗次數
@@ -201,19 +201,29 @@ export class AsnCore {
 
   // ---------- 設備大頭貼 ----------
   // 名單每個節點帶 avatar_updated_at（沒上傳＝空）；時間跟快取不同才去取圖，不再上傳了就清掉。收到的圖一律驗格式（外部資料）。
+  // 夥伴自己換的頭像（#446）：名單的每位夥伴（在線與離線）也帶 avatar_updated_at 與 partner_id，圖放在同一張表，鍵是 'p:<夥伴編號>'（改名不會斷）。
+  // 舊後台沒有這個欄位＝沒有夥伴頭像；沒有 partnerAvatar 通道的舊傳輸層略過夥伴這一層。
   async #syncAvatars(members) {
     if (!this.transport.avatar) return
-    const want = new Map()
-    for (const m of Array.isArray(members) ? members : []) if (typeof m?.id === 'string' && typeof m.avatar_updated_at === 'string' && m.avatar_updated_at) want.set(m.id, m.avatar_updated_at)
+    const want = new Map()   // 鍵 → [更新時間, 取圖的函式]
+    for (const m of Array.isArray(members) ? members : []) {
+      if (typeof m?.id === 'string' && typeof m.avatar_updated_at === 'string' && m.avatar_updated_at) want.set(m.id, [m.avatar_updated_at, () => this.transport.avatar(m.id)])
+      if (!this.transport.partnerAvatar) continue
+      for (const a of [...(Array.isArray(m?.agents) ? m.agents : []), ...(Array.isArray(m?.offline_agents) ? m.offline_agents : [])]) {
+        if (typeof a?.partner_id === 'string' && PARTNER_ID_RE.test(a.partner_id) && typeof a.avatar_updated_at === 'string' && a.avatar_updated_at) {
+          want.set(partnerAvatarKey(a.partner_id), [a.avatar_updated_at, () => this.transport.partnerAvatar(a.partner_id)])
+        }
+      }
+    }
     let changed = false
-    for (const node of [...this.avatars.keys()]) if (!want.has(node)) { this.avatars.delete(node); changed = true }
-    for (const [node, at] of want) {
-      if (this.avatars.get(node)?.at === at) continue
+    for (const key of [...this.avatars.keys()]) if (!want.has(key)) { this.avatars.delete(key); changed = true }
+    for (const [key, [at, fetchOne]] of want) {
+      if (this.avatars.get(key)?.at === at) continue
       try {
-        const r = await this.transport.avatar(node)
-        if (isAvatarDataUrl(r?.avatar)) { this.avatars.set(node, { at, data: r.avatar }); changed = true }
-        else this.log(`avatar ${node}: 格式不合，略過`)
-      } catch (e) { this.log(`avatar ${node} failed: ${e.message}`) }
+        const r = await fetchOne()
+        if (isAvatarDataUrl(r?.avatar)) { this.avatars.set(key, { at, data: r.avatar }); changed = true }
+        else this.log(`avatar ${key}: 格式不合，略過`)
+      } catch (e) { this.log(`avatar ${key} failed: ${e.message}`) }
     }
     if (changed) this.emit('avatars')
   }
