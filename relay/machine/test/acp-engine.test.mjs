@@ -280,10 +280,14 @@ test('agy：指令不存在——名單上不出現，寄信得到明確說明',
 test('agy：佇列——一次一輪、依序回覆、忙碌時名單是 busy、超過上限先不收', async () => {
   const r = rig([agy({ queue_max: 3 })])
   try {
-    r.mail(ID(1), 'a'); r.mail(ID(2), 'b'); r.mail(ID(3), 'c'); r.mail(ID(4), 'd')
+    // 第一封卡在閘門：等假 agy 看到閘門檔才回，斷言 busy 時第一輪一定還在進行（#498，不靠時間）
+    const gate = path.join(r.dir, 'gate-a')
+    r.mail(ID(1), `a\n@@GATE ${gate}`); r.mail(ID(2), 'b'); r.mail(ID(3), 'c'); r.mail(ID(4), 'd')
     await r.waitFor(() => r.fails().length === 1, '第 4 封被擋')
     assert.match(r.fails()[0].reason, /前面還排著 3 封/)
     assert.equal(await r.status(), 'busy')
+    assert.equal(r.replies().length, 0, '放行前不該有回覆')
+    fs.writeFileSync(gate, 'go')
     await r.waitFor(() => r.replies().length === 3, '三封都回覆')
     assert.deepEqual(r.replies().map(t => /收到：(\w)/.exec(t)[1]), ['a', 'b', 'c'])
     await r.waitForAsync(async () => (await r.status()) === 'idle', '回到 idle')

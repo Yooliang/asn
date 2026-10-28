@@ -4,6 +4,7 @@
 //   @@RUN <指令>     送出執行指令步驟；沒帶 --dangerously-skip-permissions 就被「權限拒絕」（空回覆＋denied_actions）
 //   @@AUTH / @@QUOTA 回 status=ERROR 的 result 並結束（結束碼 1）
 //   @@SLEEP          送出一個步驟之後就不再有動靜（看門狗測試）
+//   @@GATE <路徑>    送出一個進行中的步驟，等到那個檔案出現才繼續（測試建檔＝放行）；放行後照一般信處理，回覆不含這個暗號
 //   @@CRASH          往 stderr 寫字然後結束碼 3
 //   @@ENV <名稱>     回覆該環境變數有沒有被帶進來
 // 環境變數 FAKE_AGY_STATE：資料夾，存各 conversation 已經跑過幾輪（模擬 --conversation 可恢復）。
@@ -46,7 +47,13 @@ async function handle(line) {
   saveTurns(conv, turns)
   out({ event: 'step_update', step_update: { conversation_id: conv, step_index: step++, state: 'DONE', step_type: 'user_input' } })
   const mail = content.includes('\n---\n') ? content.slice(content.indexOf('\n---\n') + 5) : content
-  const body = mail.replace(/^\[RELAY 來信\][^\n]*\n?/, '').replace(/^寄件人：[^\n]*\n?/, '').replace(/^【要回信】[^\n]*\n?/, '')
+  let body = mail.replace(/^\[RELAY 來信\][^\n]*\n?/, '').replace(/^寄件人：[^\n]*\n?/, '').replace(/^【要回信】[^\n]*\n?/, '')
+  const gate = /@@GATE\s+(\S+)/.exec(body)
+  if (gate) {
+    out({ event: 'step_update', step_update: { conversation_id: conv, step_index: step++, state: 'ACTIVE', step_type: 'agent_response', text_delta: '...' } })
+    while (!fs.existsSync(gate[1])) await sleep(20)
+    body = body.replace(gate[0], '')
+  }
   const resultOf = (response, extra = {}) => out({ event: 'result', result: { conversation_id: conv, status: 'SUCCESS', response, duration_seconds: 0.01, num_turns: 1, usage: { input_tokens: 1 }, ...extra } })
   const fail = (err, code) => { out({ event: 'result', result: { conversation_id: '', status: 'ERROR', response: '', error: err } }); setTimeout(() => process.exit(code), 20) }
   const flags = `${flag('--dangerously-skip-permissions') ? 'full' : 'normal'}${opt('--model') ? `/${opt('--model')}` : ''}`
