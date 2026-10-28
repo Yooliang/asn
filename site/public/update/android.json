@@ -1,8 +1,8 @@
 {
-  "version": "0.1.102",
-  "versionCode": 1102,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.102_android.apk",
-  "sha256": "11f1a6294f604b55e0348b47219b2dec7f7e63a5b69063c065ec7dd756d09b09",
-  "notes": "0.1.102：與電腦版同步（經 pi 開在 ASN 自帶終端、終端面板列出 pi、Linux 機器橋支援 pi 與遠端關閉 tmux 夥伴）",
-  "bytes": 9489892
+  "version": "0.1.103",
+  "versionCode": 1103,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.103_android.apk",
+  "sha256": "5d32594a36e17863177e68467f8be9d1accde6cb34462e863994a73dfca40749",
+  "notes": "0.1.103：與電腦版同步（夥伴可以自己換頭像，名單和群組顯示夥伴自訂的頭像）",
+  "bytes": 9493988
 }
