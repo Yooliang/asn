@@ -221,6 +221,19 @@ test('aegis: 白名單預設空＝全部擋下', async () => {
   } finally { await st.close() }
 })
 
+test('aegis: 只設新名 ASN_AEGIS_* 也能跑；新舊名都設以新名為準（F4）', async () => {
+  const st = await fakeServer({ inbox: [mail(1, { to_agent: 'alpha' })], members: [{ slug: 'alpha', name: '阿爾法' }], aegis: { alpha: () => ({ json: { answer: '新名答', status: 'success', member: 'alpha' } }) } })
+  try {
+    await runBridge({
+      script: 'bridge-aegis.mjs', st,
+      env: { ASN_AEGIS_URL: `http://127.0.0.1:${st.port}`, ASN_AEGIS_ALLOW: 'alpha', IRORI_AEGIS_ALLOW: 'someone-else' },
+      until: () => st.acked.has(uid(1)),
+    })
+    assert.deepEqual(st.asks.map(a => a.target), ['alpha'])
+    assert.equal(st.sent[0].body, '新名答')
+  } finally { await st.close() }
+})
+
 // ------------------------------------------------------------------------ bridge.mjs（任務 A）
 const SESSIONS = [
   { pid: 91001, name: 'T-舊的', updatedAt: 1000 },
