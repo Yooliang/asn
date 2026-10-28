@@ -163,6 +163,10 @@ export function folderName(cwd) {
   return parts.length ? parts[parts.length - 1] : ''
 }
 
+// 經 pi 開在自帶終端的（#475）先不列在面板：讀畫面、代答還沒支援 pi，列出來只會一直是「狀態未知」（另開一張做）
+export const PANEL_HIDDEN_PROFILES = Object.freeze(['pi'])
+export const panelTerms = list => (Array.isArray(list) ? list : []).filter(t => !PANEL_HIDDEN_PROFILES.includes(t?.profile))
+
 /** 清單的一列：id、profile、資料夾（後端 term_list 的 cwd，開啟時已授權的資料夾；舊後端沒有就空）、狀態；沒有狀態（還沒查到或查失敗）當 unknown */
 export function rowsOf(listed, statuses = {}) {
   return (Array.isArray(listed) ? listed : []).filter(t => t && typeof t.id === 'string').map(t => {
@@ -188,7 +192,7 @@ export function createTermPoller({ transport, onUpdate, onError = () => {}, inte
     running = true
     try {
       let listed = []
-      try { listed = await transport.termList() } catch (e) { onError(String(e?.message ?? e)); listed = null }
+      try { listed = panelTerms(await transport.termList()) } catch (e) { onError(String(e?.message ?? e)); listed = null }
       if (listed) {
         const statuses = {}
         await Promise.all((Array.isArray(listed) ? listed : []).map(async t => {

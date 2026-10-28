@@ -336,3 +336,10 @@ test('接線：term_adopt_unlock 只在 adoptUnlockConfirm 裡呼叫一次、只
   assert.ok(confirmFn.includes('termPoller?.tickNow()'), '允許後立刻重讀清單')
   assert.ok(tauri.includes("termAdoptUnlock: req => invoke('term_adopt_unlock', { req })") && tauri.includes("termStop: req => invoke('term_stop', { req })"))
 })
+
+test('經 pi 開在自帶終端的先不列在面板（#475；讀畫面、代答支援 pi 另開一張），agy／grok 照列', async () => {
+  const { panelTerms } = await import('../ui/lib/term-panel.mjs')
+  const list = [{ id: '1', profile: 'grok' }, { id: '2', profile: 'pi' }, { id: '3', profile: 'agy' }]
+  assert.deepEqual(panelTerms(list).map(t => t.id), ['1', '3'])
+  assert.deepEqual(panelTerms(null), [])
+})

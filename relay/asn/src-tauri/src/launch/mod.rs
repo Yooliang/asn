@@ -6,6 +6,7 @@ pub(crate) mod cwds;
 pub(crate) mod local;
 pub(crate) mod pi;
 pub(crate) mod pi_models;
+pub(crate) mod pi_term;
 pub(crate) mod pi_setup;
 pub(crate) mod prefs;
 pub(crate) mod profiles;

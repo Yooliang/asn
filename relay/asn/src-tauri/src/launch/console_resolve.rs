@@ -40,6 +40,14 @@ pub(crate) trait ConsoleOs {
     fn find_console(&self, pid: u32) -> Option<ConsoleWin>;
     /// 這個程序擁有的 Windows Terminal 頂層視窗（CASCADIA_HOSTING_WINDOW_CLASS）
     fn find_wt_windows(&self, wt_pid: u32) -> Vec<ConsoleWin>;
+    /// ASN 自己開的 WezTerm（自帶終端，#475）的 GUI 程序編號；接手的窗格、使用者自己開的都不在裡面。預設沒有
+    fn own_wezterm(&self) -> Vec<u32> {
+        vec![]
+    }
+    /// 這個 WezTerm GUI 程序擁有的頂層視窗（org.wezfurlong.wezterm）。預設沒有
+    fn find_wez_windows(&self, _gui_pid: u32) -> Vec<ConsoleWin> {
+        vec![]
+    }
     fn table(&self) -> Vec<Proc>;
     fn own_pid(&self) -> u32;
 }
@@ -48,6 +56,10 @@ const WORKER_REASON: &str = "這是 ASN 內建通道的工作者，沒有終端�
 const BACKGROUND_REASON: &str = "這是在背景執行的程式（沒有人在前面操作），沒有自己的終端機視窗";
 const GONE_REASON: &str = "這個程式已經結束";
 const PROC_MISSING_REASON: &str = "找不到這個程式，可能剛好結束，或不是這台電腦上的程式";
+/// 開在 WezTerm 裡、但那個 WezTerm 不是 ASN 開的（使用者自己開的、或 ASN 重開後認不回來的）：不碰
+pub(crate) const WEZ_NOT_OURS_REASON: &str = "這個夥伴開在不是 ASN 開的 WezTerm 裡，不能單獨切換";
+/// ASN 開的 WezTerm，但那個程序不只一扇視窗（分不出是哪一扇）
+pub(crate) const WEZ_SHARED_REASON: &str = "這個 WezTerm 有不只一扇視窗，不能單獨切換";
 pub(crate) const WT_SHARED_REASON: &str = "這個夥伴開在 Windows Terminal 裡，跟別的分頁共用同一個視窗，不能單獨切換";
 
 /// 名單條目 → 要查視窗的 pid；不行就回原因。
@@ -105,6 +117,7 @@ fn check_proc(a: &ProcAgent, alive: &dyn Fn(u32) -> bool) -> Result<u32, String>
 const WRAPPERS: &[&str] = &["cmd.exe", "powershell.exe", "pwsh.exe", "node.exe", "bun.exe", "python.exe", "pythonw.exe", "py.exe", "npm.exe", "npx.exe"];
 const MAX_WRAP_LEVELS: usize = 4;
 const WT_NAME: &str = "windowsterminal.exe";
+const WEZ_NAME: &str = "wezterm-gui.exe";
 const TAB_HOSTS: &[&str] = &["openconsole.exe", "conhost.exe"];
 
 /// pid → 它的主控台視窗（含往上找殼）；找不到回原因。
@@ -117,6 +130,15 @@ pub(crate) fn find_for(pid: u32, os: &dyn ConsoleOs) -> Result<(u32, ConsoleWin)
     forbidden.push(own);
     if forbidden.contains(&pid) {
         return Err(NOT_FOUND.into());
+    }
+    // ASN 自帶的終端（WezTerm，#475）：裡面的程式跑在虛擬主控台上，不能用下面的主控台找法（會找到看不見的虛擬主控台視窗），先看這條。
+    // 三個條件都對才切：往上找得到 wezterm-gui、那個 GUI 是 ASN 自己開的（對照表裡有）、它只擁有一扇視窗
+    if let Some(gui) = super::switch::ancestors(&table, pid).into_iter().take(8).find(|a| table.iter().any(|p| p.pid == *a && p.name == WEZ_NAME)) {
+        if !os.own_wezterm().contains(&gui) {
+            return Err(WEZ_NOT_OURS_REASON.into());
+        }
+        let wins = os.find_wez_windows(gui);
+        return if wins.len() == 1 { Ok((gui, wins[0])) } else { Err(WEZ_SHARED_REASON.into()) };
     }
     let mut cands = vec![pid];
     let mut cur = pid;
@@ -237,8 +259,18 @@ mod tests {
         wt: Vec<(u32, ConsoleWin)>,
         asked: RefCell<Vec<u32>>,
         asked_wt: RefCell<Vec<u32>>,
+        /// ASN 自己開的 WezTerm GUI（對照表裡的）
+        own_wez: Vec<u32>,
+        /// (WezTerm GUI 程序, 它的視窗)
+        wez: Vec<(u32, ConsoleWin)>,
     }
     impl ConsoleOs for FakeOs {
+        fn own_wezterm(&self) -> Vec<u32> {
+            self.own_wez.clone()
+        }
+        fn find_wez_windows(&self, gui: u32) -> Vec<ConsoleWin> {
+            self.wez.iter().filter(|(p, _)| *p == gui).map(|(_, w)| *w).collect()
+        }
         fn find_console(&self, pid: u32) -> Option<ConsoleWin> {
             self.asked.borrow_mut().push(pid);
             self.consoles.iter().find(|(p, _)| *p == pid).map(|(_, w)| *w)
@@ -258,7 +290,7 @@ mod tests {
         Proc { pid, ppid, name: name.into() }
     }
     fn os(table: Vec<Proc>, consoles: Vec<(u32, ConsoleWin)>) -> FakeOs {
-        FakeOs { table, consoles, wt: vec![], asked: RefCell::new(vec![]), asked_wt: RefCell::new(vec![]) }
+        FakeOs { table, consoles, wt: vec![], asked: RefCell::new(vec![]), asked_wt: RefCell::new(vec![]), own_wez: vec![], wez: vec![] }
     }
     fn os_wt(table: Vec<Proc>, wt: Vec<(u32, ConsoleWin)>) -> FakeOs {
         FakeOs { wt, ..os(table, vec![]) }
@@ -325,6 +357,39 @@ mod tests {
     fn 共用視窗的說明照實說_不再承諾之後會各自一個視窗() {
         assert!(!WT_SHARED_REASON.contains("之後"), "ASN 開的夥伴改用原生主控台後，WT 裡的只剩舊夥伴與使用者自己開的（#476）");
         assert!(WT_SHARED_REASON.contains("不能單獨切換"));
+    }
+
+    /// ASN 自帶的終端（#475）：pi（node 4100）的父程序直接是 wezterm-gui（4000）；虛擬主控台也查得到一扇看不見的視窗（不能碰它）
+    fn wez_os(own: Vec<u32>, wins: Vec<(u32, ConsoleWin)>) -> FakeOs {
+        let t = vec![p(1, 0, "asn.exe"), p(4000, 1, "wezterm-gui.exe"), p(4100, 4000, "node.exe"), p(4200, 4100, "rg.exe")];
+        FakeOs { own_wez: own, wez: wins, ..os(t, vec![(4100, ConsoleWin { hwnd: 999, visible: false })]) }
+    }
+    const WEZ_W: ConsoleWin = ConsoleWin { hwnd: 4444, visible: true };
+
+    #[test]
+    fn asn_自帶終端裡的_pi_切那扇_wezterm_視窗_不碰虛擬主控台() {
+        let o = wez_os(vec![4000], vec![(4000, WEZ_W)]);
+        assert_eq!(find_for(4100, &o), Ok((4000, WEZ_W)));
+        assert_eq!(find_for(4200, &o), Ok((4000, WEZ_W)), "pi 底下的子程序也是同一扇");
+        assert!(o.asked.borrow().is_empty(), "不去查主控台：裡面的虛擬主控台視窗看不見，碰了也沒用");
+    }
+
+    #[test]
+    fn 不是_asn_開的_wezterm_一律不切_包含_asn_重開後認不回來的() {
+        // 使用者自己開的 WezTerm，或 ASN 重開後對照表沒認回來：對照表裡沒有這個 GUI
+        let o = wez_os(vec![], vec![(4000, WEZ_W)]);
+        assert_eq!(find_for(4100, &o), Err(WEZ_NOT_OURS_REASON.into()));
+        let other = wez_os(vec![5000], vec![(4000, WEZ_W)]);
+        assert_eq!(find_for(4100, &other), Err(WEZ_NOT_OURS_REASON.into()), "ASN 開的是別的 GUI");
+        assert!(o.asked.borrow().is_empty() && other.asked.borrow().is_empty(), "也不退回去找虛擬主控台");
+    }
+
+    #[test]
+    fn asn_開的_wezterm_有不只一扇或找不到視窗_不猜() {
+        let two = wez_os(vec![4000], vec![(4000, WEZ_W), (4000, ConsoleWin { hwnd: 4445, visible: true })]);
+        assert_eq!(find_for(4100, &two), Err(WEZ_SHARED_REASON.into()));
+        let none = wez_os(vec![4000], vec![]);
+        assert_eq!(find_for(4100, &none), Err(WEZ_SHARED_REASON.into()));
     }
 
     #[test]

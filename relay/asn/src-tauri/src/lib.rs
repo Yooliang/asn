@@ -1236,6 +1236,11 @@ pub fn run() {
 
     #[cfg(desktop)]
     let term_data_dir = data_dir.clone();
+    // 自帶終端的服務：畫面命令（State）與開新夥伴（經 pi）、名單切前後景（全域）用同一份對照表（#475）
+    #[cfg(desktop)]
+    let terms = Arc::new(launch::term::live(&term_data_dir));
+    #[cfg(desktop)]
+    launch::term::set_global(terms.clone());
     let frame_data_dir = data_dir.clone();
     let bridge_data_dir = data_dir.clone();
     let auto_acct_dir = data_dir.clone();
@@ -1276,7 +1281,7 @@ pub fn run() {
         .manage(SaveDir::default())
         .manage(claude_mod::ModState::default())
         .manage(bridge_mgr)
-        .manage(Arc::new(launch::term::live(&term_data_dir)))
+        .manage(terms)
         .manage(Arc::new(askpass::dialog::DialogState::default()))
         .plugin(tauri_plugin_updater::Builder::new().build());
     // 安卓版專屬：開系統瀏覽器（登入、點連結）
