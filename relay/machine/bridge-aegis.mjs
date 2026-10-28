@@ -123,7 +123,7 @@ async function handleMail(m) {
   }
   if (slug === SELF_MEMBER) {
     log(`id=${m.id} ${who} to=${slug} blocked (self)`)
-    return replyAndAck(m, '[Aegis] 這是希緒自己，不能自己問自己')
+    return replyAndAck(m, '[Aegis] 這是轉接橋自己的成員，不能問自己')
   }
   if (!ALLOW.includes(slug)) {
     log(`id=${m.id} ${who} to=${slug} blocked (not in allowlist)`)

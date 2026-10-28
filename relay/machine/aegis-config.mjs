@@ -9,7 +9,7 @@ export function aegisConfig(env) {
     url: (envGet(env, 'AEGIS_URL') || 'http://127.0.0.1:8899').replace(/\/+$/, ''),
     fromMember: envGet(env, 'AEGIS_FROM_MEMBER') || 'xi-xu',
     allow: (envGet(env, 'AEGIS_ALLOW') || '').split(',').map(s => s.trim()).filter(Boolean),
-    selfMember: (envGet(env, 'AEGIS_SELF') || 'xi-xu').trim(),   // 希緒自己：不列進名單、也不能被問
+    selfMember: (envGet(env, 'AEGIS_SELF') || 'xi-xu').trim(),   // 轉接橋自己的成員：不列進名單、也不能被問
     defaultMember: (envGet(env, 'AEGIS_DEFAULT') || 'aegis').trim(),   // 沒有 to_agent 的信交給它（要在白名單內）
     askTimeoutMs: Number(envGet(env, 'AEGIS_TIMEOUT_MS') || 300_000),
     retryMs: Number(envGet(env, 'AEGIS_RETRY_MS') || 60_000),
