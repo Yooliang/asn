@@ -48,8 +48,12 @@ pub struct Launched {
 pub trait LaunchEnv: Send + Sync {
     /// fresh＝要最新的（執行前的再驗一次）；false 可用快取（名單回報每分鐘一次）
     fn config(&self, fresh: bool) -> Result<LaunchConfig, String>;
-    /// 開視窗：回外層視窗的 PID。config／profile／name／cwd 都已驗過
-    fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str) -> Result<u32, String>;
+    /// 開視窗：回外層視窗的 PID。config／profile／name／cwd 都已驗過；pi_args＝經 pi 的 --provider／--model（已驗過，沒帶就是空）
+    fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str, pi_args: &[String]) -> Result<u32, String>;
+    /// 這台 pi 列得出這個提供者／模型嗎（遠端開 pi 帶模型，D2 #422）。預設列不出來＝拒絕
+    fn pi_listed(&self, _provider: &str, _model: &str) -> bool {
+        false
+    }
     /// 背景工作者：再驗一次（授權資料夾、名字、執行檔）後排進佇列，由引擎消化。work_dir＝橋的工作資料夾
     fn enqueue_background(&self, _config: &LaunchConfig, _profile: &str, _name: &str, _cwd: &str, _work_dir: &Path) -> Result<(), String> {
         Err("這台電腦不能開背景夥伴".into())
@@ -105,6 +109,23 @@ pub fn build_remote_config(launcher_file: &Path, bootstrap: Option<Bootstrap>, e
     }
     cfg.cwd_allow = out;
     Ok(cfg)
+}
+
+/// 見 [`Launcher::remote_pi_args`]；listed＝這台 pi 列不列得出這組
+pub fn remote_pi_args(l: &Value, is_pi: bool, listed: &dyn Fn(&str, &str) -> bool) -> Result<Vec<String>, String> {
+    let s = |k: &str| l.get(k).and_then(Value::as_str).unwrap_or("").trim().to_string();
+    let (p, m) = (s("pi_provider"), s("pi_model"));
+    if p.is_empty() && m.is_empty() {
+        return Ok(vec![]);
+    }
+    if !is_pi {
+        return Err("只有經 pi 開的夥伴能指定提供者與模型".into());
+    }
+    let args = crate::launch::pi_models::model_args(&p, &m)?;
+    if !listed(&p, &m) {
+        return Err(format!("這台電腦的 pi 沒有「{p}/{m}」這個模型（可能沒登入那一家，或清單剛換過），請重新選一次"));
+    }
+    Ok(args)
 }
 
 /// 給仲介的摘要：不含指令內容。profile 排序固定（claude 在最前）
@@ -167,8 +188,11 @@ impl LaunchEnv for SystemEnv {
         *self.cache.lock().unwrap() = Some((std::time::Instant::now(), consent, r.clone()));
         r
     }
-    fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str) -> Result<u32, String> {
-        crate::launch::local::start_remote_window(config, profile, name, cwd, false)
+    fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str, pi_args: &[String]) -> Result<u32, String> {
+        crate::launch::local::start_remote_window(config, profile, name, cwd, false, pi_args)
+    }
+    fn pi_listed(&self, provider: &str, model: &str) -> bool {
+        crate::launch::pi_models::models_real(false).iter().any(|m| m.provider == provider && m.model == model)
     }
     fn enqueue_background(&self, _config: &LaunchConfig, profile: &str, name: &str, cwd: &str, work_dir: &Path) -> Result<(), String> {
         // 遠端同意過的資料夾（開著的視窗、最近用過…）要讓消化端也認得：和本機開新夥伴一樣記進啟動偏好的白名單（消化端會再驗一次）
@@ -292,6 +316,12 @@ impl Launcher {
         Ok(req.cwd)
     }
 
+    /// 遠端開 pi 帶的提供者與模型（D2 #422）→ pi 的參數。沒帶（舊版手機）＝空，用 pi 自己的預設。
+    /// 帶了就要：是 pi 的啟動設定、格式對、而且在這台 pi 列得出來的模型裡；不合就拒絕並說明，不退回預設模型
+    fn remote_pi_args(&self, l: &Value, is_pi: bool) -> Result<Vec<String>, String> {
+        remote_pi_args(l, is_pi, &|p, m| self.env.pi_listed(p, m))
+    }
+
     /// 取走待辦並逐筆處理。驗證與開視窗在這裡做完；等視窗出現的部分丟到背景工作，不擋住收信
     pub async fn pull(self: &Arc<Self>) {
         let v = match self.relay.api("launch_pending", None).await {
@@ -327,6 +357,14 @@ impl Launcher {
         };
         let s = |k: &str| l.get(k).and_then(Value::as_str).unwrap_or("").to_string();
         let (profile, name) = (s("profile"), s("name"));
+        let (is_bg, is_pi) = cfg.profiles.get(&profile).map(|p| (p.mode == LaunchMode::Background, p.engine == "pi")).unwrap_or((false, false));
+        // 查這台 pi 的模型清單會開外部程序（有快取），放背景執行緒
+        let me0 = self.clone();
+        let l0 = l.clone();
+        let pi_args = match tokio::task::spawn_blocking(move || me0.remote_pi_args(&l0, is_pi)).await.map_err(|e| format!("背景工作失敗：{e}")).and_then(|r| r) {
+            Ok(a) => a,
+            Err(why) => return self.report(&l, "failed", &why).await,
+        };
         let mut h = self.read_history();
         h.push(now_ms());
         self.write_history(&h);
@@ -334,7 +372,6 @@ impl Launcher {
         self.inflight.lock().unwrap().insert(lower.clone());
         let env = self.env.clone();
         let (cfg2, p2, n2, c2) = (cfg.clone(), profile.clone(), name.clone(), cwd.clone());
-        let (is_bg, is_pi) = cfg.profiles.get(&profile).map(|p| (p.mode == LaunchMode::Background, p.engine == "pi")).unwrap_or((false, false));
         if is_bg {
             let since = now_ms();
             let wd = self.work_dir.clone();
@@ -351,7 +388,7 @@ impl Launcher {
             });
             return;
         }
-        let started = tokio::task::spawn_blocking(move || env.start(&cfg2, &p2, &n2, &c2)).await.map_err(|e| format!("背景工作失敗：{e}")).and_then(|r| r);
+        let started = tokio::task::spawn_blocking(move || env.start(&cfg2, &p2, &n2, &c2, &pi_args)).await.map_err(|e| format!("背景工作失敗：{e}")).and_then(|r| r);
         let pid = match started {
             Ok(p) => p,
             Err(e) => {

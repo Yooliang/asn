@@ -9,7 +9,7 @@ import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { PROVIDERS, canStart, errorText, phaseText } from './lib/login.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
 import { BANNER_MS, DEFAULT_PREFS, TAB_LABEL, tabList, accountDisplayName, SWIPE_BLOCK_SELECTOR, inScrollableX, indicatorPos, pagerShift, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, buttonLabel, initialNav, opsNav, tabLabel as tabLabelOf, secretNav, termReqNav, initialUpdate, installOutcome, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
-import { LAUNCH_GIVE_UP_MS, LAUNCH_POLL_MS, appearedIn, buildLaunchRequest, initialLaunch, launchChoices, launchDevices, launchEligibility, launchErrorText, launchFormError, machinesByNode, progressView, launchInProgress } from './lib/mobile-launch.mjs'
+import { LAUNCH_GIVE_UP_MS, LAUNCH_POLL_MS, appearedIn, buildLaunchRequest, initialLaunch, launchChoices, launchDevices, launchEligibility, launchErrorText, launchFormError, launchPiChoice, launchRun, launchVendors, machinesByNode, pickedRun, progressView, launchInProgress } from './lib/mobile-launch.mjs'
 import { OnboardCard } from './lib/onboard-card.mjs'
 import { MOBILE_PHASE_TEXT, createMobileCall } from './lib/mobile-call.mjs'
 import { canDictate, createMobileDictation } from './lib/mobile-dictation.mjs'
@@ -37,7 +37,6 @@ import { authApi, invoke, listen, store } from './lib/tauri.mjs'
 import { buildLogView } from './lib/changelog.mjs'
 import { RETRY_LABEL, initialReleases, loadReleases, releasesNote } from './lib/releases.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
-import { runChoices } from './lib/model-catalog.mjs'
 import { ROOM_GROUP_KEY, ROOM_GROUP_LABEL, ROOM_POLL_MS, ROOM_EMPTY_HINT, ROOM_EMPTY_TEXT, ROOM_LOAD_FAIL_TEXT, isRoomChat, roomChatId, roomIdOf, roomPseudoFriend, totalUnreadWithRooms } from './lib/mobile-rooms.mjs'
 import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
@@ -451,10 +450,18 @@ const app = createApp({
     const lchCtx = computed(() => ({ machines: lchData.machines, loaded: lchData.loaded, signedIn: acctSigned(), authError: acct.value.error, friends: friends.value }))
     const lchDevices = computed(() => launchDevices(friends.value, { selfNode: info.node, nodeOrder: nodeOrder.value, removed: devPrefs.deviceRemoved, ...lchCtx.value }))
     const lchElig = computed(() => (lch.node ? launchEligibility(lch.node, lchCtx.value) : { ok: false, reason: '' }))
-    const lchFormErr = computed(() => (lch.node ? launchFormError(lch, lchElig.value) : ''))
     const lchChoices = computed(() => launchChoices(lchData.machines[lch.node]))
-    // 「運行」二選一：依目前選的模型（目錄決定哪種可用，不支援的反灰並寫原因）
-    const lchRun = computed(() => runChoices(lchChoices.value.models.find(m => m.profileId === lch.profile)))
+    // 「模型」只列廠牌，「運行」四選一（D1 #421，跟電腦版同一套）：內建通道 ＞ 經 pi ＞ ASN 開的終端 ＞ 原生 CLI（只作說明）。不能選的反灰並寫原因
+    const lchLauncher = computed(() => lchData.machines[lch.node]?.launcher ?? null)
+    const lchVendors = computed(() => launchVendors(lchLauncher.value))
+    const lchRow = computed(() => lchVendors.value.find(v => v.id === lch.vendor) ?? null)
+    const lchRun = computed(() => launchRun(lchRow.value, lchLauncher.value))
+    const lchRunKey = computed(() => pickedRun(lchRun.value, lch.run))
+    // 經 pi（D2 #422）：那台回報的 pi 模型清單（要開放遠端管理）；預設第一個
+    const lchPi = computed(() => launchPiChoice(lchRow.value, lchLauncher.value))
+    const lchReq = computed(() => buildLaunchRequest(lch, { run: lchRunKey.value, row: lchRow.value, launcher: lchLauncher.value }))
+    const lchFormErr = computed(() => (lch.node ? launchFormError(lch, lchElig.value, { run: lchRunKey.value, piOk: !!lchReq.value }) : ''))
+    function pickLaunchVendor(v) { Object.assign(lch, { vendor: v.id, profile: v.profileId, run: '', piModel: '' }) }
     async function loadLaunchers() {
       lchData.error = ''
       try { lchData.machines = machinesByNode(await invoke('android_launchers', {})); lchData.loaded = true } catch (e) { lchData.loaded = false; lchData.error = launchErrorText(e.message) }
@@ -463,7 +470,8 @@ const app = createApp({
       if (!launchEligibility(node, lchCtx.value).ok) return
       const c = launchChoices(lchData.machines[node])
       Object.assign(lch, { node, deviceLabel: lchDevices.value.find(d => d.key === node)?.label ?? '', error: '' })
-      if (!c.models.some(m => m.profileId === lch.profile)) lch.profile = c.models[0]?.profileId ?? ''
+      const vs = launchVendors(lchData.machines[node]?.launcher)
+      if (!vs.some(v => v.id === lch.vendor)) { const v = vs[0]; Object.assign(lch, { vendor: v?.id ?? '', profile: v?.profileId ?? '', run: '', piModel: '' }) }
       if (!c.cwds.includes(lch.cwd)) lch.cwd = c.cwds[0] ?? ''
       if (!lch.name.trim()) lch.name = defaultPartnerName(friends.value, lch.profile)
     }
@@ -619,7 +627,9 @@ const app = createApp({
       lch.busy = true
       try {
         const name = lch.name.trim()
-        const r = await invoke('android_launch', { body: buildLaunchRequest(lch) })
+        const body = lchReq.value
+        if (!body) throw new Error('請選一個經 pi 的模型')
+        const r = await invoke('android_launch', { body })
         if (!r?.id) throw new Error('送出失敗')
         Object.assign(lch, { phase: 'progress', id: r.id, since: Date.now(), friendId: '', detail: '', ...(({ phase, text }) => ({ vphase: phase, text }))(progressView(null, false)) })
         void trackLaunch({ id: r.id, node: lch.node, name })
@@ -934,7 +944,7 @@ const app = createApp({
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, opsView, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       acctSw, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, ACCT_PAGE_TITLE, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct,
-      lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchStep2, lchTitle, lchRun, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
+      lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRun, lchRunKey, lchPi, pickLaunchVendor, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,

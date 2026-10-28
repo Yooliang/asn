@@ -58,14 +58,19 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
 /// 遠端開視窗（內建收發室橋）用：驗證（profile、名字、白名單、上限）都已在呼叫端做完，
 /// 這裡只做「自動信任資料夾 → 依本機設定組命令 → 開視窗」。指令只來自本機的 profile，遠端只決定 profile 名、名字與資料夾。
 /// hidden＝視窗樣式 Hidden（測試用，正式一律 false）。回傳外層視窗（PowerShell）的 PID。
-pub fn start_remote_window(config: &super::config::LaunchConfig, profile: &str, name: &str, cwd: &str, hidden: bool) -> Result<u32, String> {
+/// pi_args＝經 pi 的 --provider／--model（呼叫端已驗過格式與這台 pi 列得出來；只有 pi 的 profile 收）
+pub fn start_remote_window(config: &super::config::LaunchConfig, profile: &str, name: &str, cwd: &str, hidden: bool, pi_args: &[String]) -> Result<u32, String> {
     let prof = config.profiles.get(profile).ok_or_else(|| "沒有這個啟動設定".to_string())?;
+    if !pi_args.is_empty() && prof.engine != "pi" {
+        return Err("只有經 pi 開的夥伴能指定提供者與模型".into());
+    }
     // 沒寫 engine 的自訂 profile 與 Node 橋相同，視為 Claude
     maybe_trust_claude_cwd(if prof.engine.is_empty() { "claude" } else { prof.engine.as_str() }, cwd);
     let req = LaunchReq { profile, name, cwd: cwd.to_string() };
     let (command, mut args, cwd) = build_spawn_spec(config, &req)?;
     // pi：同本機開窗，載入收信擴充、帶名字環境變數（找不到擴充就報錯，不開一個不會收信的 pi）。第一句話由橋在視窗出現後經收發室送進去
     if prof.engine == "pi" {
+        args.extend(pi_args.iter().cloned());
         let files = crate::identity::relay_home().join("pi-first");
         let plan = super::pi::plan(name, &args, super::pi::resolve_ext_state(), "", &files, now_ms())?;
         return start_window_env(name, &command, &plan.args, &cwd, false, &plan.env);

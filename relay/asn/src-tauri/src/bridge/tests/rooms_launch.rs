@@ -490,6 +490,10 @@ struct FakeEnv {
     started: Mutex<Vec<(String, String, String)>>,
     /// start 時實際會執行的命令（取自本機設定，展開 {name} 後）
     commands: Mutex<Vec<(String, Vec<String>)>>,
+    /// 這台 pi 列得出來的（提供者, 模型）（D2 #422）
+    pi_list: Vec<(String, String)>,
+    /// start 收到的 pi 參數
+    pi_args: Mutex<Vec<Vec<String>>>,
 }
 impl FakeEnv {
     fn new(sessions: &Path, allow: &Path) -> Arc<FakeEnv> {
@@ -507,6 +511,8 @@ impl FakeEnv {
             enqueued: Mutex::new(vec![]),
             started: Mutex::new(vec![]),
             commands: Mutex::new(vec![]),
+            pi_list: vec![],
+            pi_args: Mutex::new(vec![]),
         })
     }
     fn with(sessions: &Path, allow: &Path, f: impl FnOnce(&mut FakeEnv)) -> Arc<FakeEnv> {
@@ -548,7 +554,11 @@ impl LaunchEnv for FakeEnv {
         }
         Ok(())
     }
-    fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str) -> Result<u32, String> {
+    fn pi_listed(&self, provider: &str, model: &str) -> bool {
+        self.pi_list.iter().any(|(p, m)| p == provider && m == model)
+    }
+    fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str, pi_args: &[String]) -> Result<u32, String> {
+        self.pi_args.lock().unwrap().push(pi_args.to_vec());
         let (cmd, args, _) = build_spawn_spec(config, &LaunchReq { profile, name, cwd: cwd.to_string() })?;
         self.commands.lock().unwrap().push((cmd, args));
         self.started.lock().unwrap().push((profile.into(), name.into(), cwd.into()));
@@ -811,6 +821,61 @@ async fn 遠端開_pi_走視窗啟動_不排佇列_沒出現時提示講_pi_的�
 }
 
 #[tokio::test]
+async fn 遠端開_pi_帶提供者與模型_只收這台列得出來的_舊版沒帶照舊() {
+    let listed = |e: &mut FakeEnv| {
+        e.extra_profiles = true;
+        e.pi_list = vec![("minimax".into(), "MiniMax-M3.1-Flash".into())];
+    };
+    let mut l = lharness(|s, p| FakeEnv::with(s, p, listed), (30_000, 60_000, 20)).await;
+    let cwd = l.proj.path().to_path_buf();
+    l.h.fr.st.lock().unwrap().launches.push(lreq(1, "小皮", &cwd, json!({"profile": "pi", "pi_provider": "minimax", "pi_model": "MiniMax-M3.1-Flash"})));
+    l.h.core.pull("bell", T0).await;
+    wait_until(|| !results(&l.h).is_empty()).await;
+    assert_eq!(results(&l.h)[0]["status"], "ok");
+    assert_eq!(l.env.pi_args.lock().unwrap()[0], vec!["--provider", "minimax", "--model", "MiniMax-M3.1-Flash"]);
+    let _ = l.rx.recv().await;
+
+    // 舊版手機沒帶（或帶 null）：不加參數，用 pi 自己的預設
+    let mut o = lharness(|s, p| FakeEnv::with(s, p, listed), (30_000, 60_000, 20)).await;
+    let cwd = o.proj.path().to_path_buf();
+    o.h.fr.st.lock().unwrap().launches.push(lreq(1, "小皮", &cwd, json!({"profile": "pi", "pi_provider": null, "pi_model": null})));
+    o.h.core.pull("bell", T0).await;
+    wait_until(|| !results(&o.h).is_empty()).await;
+    assert_eq!(results(&o.h)[0]["status"], "ok");
+    assert!(o.env.pi_args.lock().unwrap()[0].is_empty());
+    let _ = o.rx.recv().await;
+
+    // 清單外的、不是 pi 的啟動設定、只給一個：拒絕並說明，不退回預設模型、不開視窗
+    for (extra, want) in [
+        (json!({"profile": "pi", "pi_provider": "minimax", "pi_model": "Other-Model"}), "這台電腦的 pi 沒有"),
+        (json!({"profile": "pi", "pi_provider": "openai", "pi_model": "MiniMax-M3.1-Flash"}), "這台電腦的 pi 沒有"),
+        (json!({"profile": "claude", "pi_provider": "minimax", "pi_model": "MiniMax-M3.1-Flash"}), "只有經 pi 開的夥伴"),
+        (json!({"profile": "pi", "pi_provider": "minimax"}), "要一起給"),
+    ] {
+        let mut b = lharness(|s, p| FakeEnv::with(s, p, listed), (30_000, 60_000, 20)).await;
+        let cwd = b.proj.path().to_path_buf();
+        b.h.fr.st.lock().unwrap().launches.push(lreq(1, "小皮", &cwd, extra.clone()));
+        b.h.core.pull("bell", T0).await;
+        wait_until(|| !results(&b.h).is_empty()).await;
+        let r = &results(&b.h)[0];
+        assert_eq!(r["status"], "failed", "{extra}");
+        assert!(r["detail"].as_str().unwrap().contains(want), "{extra} → {}", r["detail"]);
+        assert!(b.env.started.lock().unwrap().is_empty(), "{extra}");
+    }
+}
+
+#[test]
+fn 遠端_pi_參數_純函式() {
+    let yes = |_: &str, _: &str| true;
+    let no = |_: &str, _: &str| false;
+    assert_eq!(launcher::remote_pi_args(&json!({}), true, &no), Ok(vec![]), "沒帶＝空，不查清單");
+    assert_eq!(launcher::remote_pi_args(&json!({"pi_provider": " ", "pi_model": ""}), false, &no), Ok(vec![]));
+    assert_eq!(launcher::remote_pi_args(&json!({"pi_provider": "a", "pi_model": "b"}), true, &yes).unwrap(), vec!["--provider", "a", "--model", "b"]);
+    assert!(launcher::remote_pi_args(&json!({"pi_provider": "-x", "pi_model": "b"}), true, &yes).is_err(), "旗標開頭的不收");
+    assert!(launcher::remote_pi_args(&json!({"pi_provider": "a", "pi_model": "b"}), true, &no).is_err());
+}
+
+#[tokio::test]
 async fn 遠端開_codex_與沒列在清單的設定_一律驗不過() {
     let mut l = lharness(|s, p| FakeEnv::with(s, p, |e| e.extra_profiles = true), (30_000, 60_000, 20)).await;
     let cwd = l.proj.path().to_path_buf();
@@ -840,8 +905,9 @@ fn 守門_啟動請求的處理程式不讀任何指令類欄位() {
             assert!(!line.contains(field), "launcher.rs 不應該從請求讀 {field}：{line}");
         }
     }
-    // 開視窗只收這四個值
-    assert!(body.contains("env.start(&cfg2, &p2, &n2, &c2)"));
+    // 開視窗只收這四個值，加上經 pi 的 --provider／--model（只由 remote_pi_args 組：格式驗過、而且這台 pi 列得出來）
+    assert!(body.contains("env.start(&cfg2, &p2, &n2, &c2, &pi_args)"));
+    assert!(body.contains("me0.remote_pi_args(&l0, is_pi)") && body.contains("crate::launch::pi_models::model_args(&p, &m)?"));
 }
 
 // ---- 真的開一個（隱藏的）視窗：假視窗程式是測試執行檔自己 ----------------------------------------------------
@@ -871,8 +937,8 @@ async fn 遠端開視窗_真的開一個隱藏視窗_假視窗程式登記成_se
         fn config(&self, _f: bool) -> Result<LaunchConfig, String> {
             Ok(self.cfg.clone())
         }
-        fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str) -> Result<u32, String> {
-            let pid = crate::launch::local::start_remote_window(config, profile, name, cwd, true)?;
+        fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str, pi_args: &[String]) -> Result<u32, String> {
+            let pid = crate::launch::local::start_remote_window(config, profile, name, cwd, true, pi_args)?;
             self.pids.lock().unwrap().push(pid);
             Ok(pid)
         }
