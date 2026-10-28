@@ -28,6 +28,7 @@ pub use super::term_adopt::TermAdoptCandidate;
 use super::term_adopt::{self, AdoptedSession, AdoptedSnap};
 use super::wezterm::{self, Fs, Runner, WezTerm, WezTermDir, Window};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -316,12 +317,40 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     pub fn start(&self, profile: &str, cwd: &str, config: &LaunchConfig) -> Result<String, String> {
         let command = resolve_command(profile, config)?;
         let cwd = authorize_cwd(config, cwd)?;
+        self.open(profile, cwd, &[command], None).map(|(id, _)| id)
+    }
+
+    /// 經 pi 開在 ASN 自帶的終端（#475）。指令與參數由呼叫端照本機 pi 的啟動設定組好（build_spawn_spec＋pi::plan，跟原生主控台同一份），
+    /// 資料夾也由呼叫端照開新夥伴的規則驗過；這裡只再確認「執行的真的是 pi」、資料夾存在。
+    /// env＝已照 child_env 濾掉金鑰類變數的環境，GUI 與 pi 只拿到這些（不繼承 ASN 自己的環境）。回（終端編號, GUI 的程序編號）
+    pub fn start_pi(&self, cwd: &Path, argv: &[String], env: &BTreeMap<String, String>) -> Result<(String, u32), String> {
+        let Some(exe) = argv.first() else { return Err("沒有指定要執行的指令".into()) };
+        if !crate::bridge::procscan::is_pi_process(exe, argv) {
+            return Err("要開的程式不是 pi，已拒絕".into());
+        }
+        if !cwd.is_dir() {
+            return Err(format!("工作資料夾不存在：{}", cwd.display()));
+        }
+        self.open("pi", cwd.to_path_buf(), argv, Some(env))
+    }
+
+    /// ASN 自己開的終端（不含接手的窗格）各自的 GUI 程序編號：切前景／背景只認這些（#475）
+    pub fn own_gui_pids(&self) -> Vec<u32> {
+        self.inner.lock().unwrap().sessions.iter().map(|s| s.window.gui_pid).collect()
+    }
+
+    /// 開一個終端並記進對照表：視窗帶 workspace `asn-{編號}`、分頁標題 `ASN:{編號}`；標題設不下去就結束剛開的視窗，不留沒有標記的孤兒。
+    /// env 有給＝GUI 只拿到這些環境變數（經 pi）；沒給＝照舊繼承（agy／grok）
+    fn open(&self, profile: &str, cwd: PathBuf, command: &[String], env: Option<&BTreeMap<String, String>>) -> Result<(String, u32), String> {
         let dir = self.dir()?;
         let id = self.alloc_id()?;
         let workspace = format!("asn-{id}");
         let title = format!("ASN:{id}");
         let w = self.wez(&dir);
-        let win = w.start_in_workspace(&cwd, &workspace, &[command])?;
+        let win = match env {
+            Some(e) => w.start_in_workspace_clean(&cwd, &workspace, command, e)?,
+            None => w.start_in_workspace(&cwd, &workspace, command)?,
+        };
         let panes = match w.list(&win.sock) {
             Ok(p) if !p.is_empty() => p,
             Ok(_) => return fail_close(&w, &win, "WezTerm 視窗裡沒有可操作的窗格".into()),
@@ -353,7 +382,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             let _ = self.persist();
             return Err(format!("終端已啟動但對照表寫入失敗，已嘗試結束視窗：{e}"));
         }
-        Ok(id)
+        Ok((id, win.gui_pid))
     }
 
     /// 使用者在 UI 確認後才把文字送進自己開的終端。不收程序編號或通訊路徑。
@@ -915,7 +944,7 @@ fn cap_output(text: &str) -> String {
     out
 }
 
-fn fail_close(w: &WezTerm<'_>, win: &Window, why: String) -> Result<String, String> {
+fn fail_close<T>(w: &WezTerm<'_>, win: &Window, why: String) -> Result<T, String> {
     match w.stop(win) {
         Ok(()) => Err(why),
         Err(e) => Err(format!("{why}（結束剛啟動的視窗也失敗：{e}）")),
@@ -942,7 +971,7 @@ fn reclaim_candidate(t: &StoreTerm) -> bool {
 }
 
 fn profile_reclaimable(profile: &str) -> bool {
-    profile == "agy" || profile == "grok"
+    profile == "agy" || profile == "grok" || profile == "pi"
 }
 
 fn id_ok(id: &str) -> bool {
@@ -1455,6 +1484,52 @@ pub fn adopt_live(terms: &LiveTerms, req: TermAdoptReq, _data_dir: &Path) -> Res
     let config = super::config::load_launch_config()?;
     let id = terms.adopt(req.pid, req.pane_id, req.started_ms, &config)?;
     Ok(TermStarted { id })
+}
+
+/// 啟動時由畫面那一層交進來的終端服務（#475）：開新夥伴（經 pi）、名單切前景／背景要用同一份對照表。
+/// 只設一次；測試不設、也不讀（pi_host／own_gui_pids 在測試一律回空），平行的測試不共用狀態
+#[cfg(feature = "gui")]
+static GLOBAL: std::sync::OnceLock<std::sync::Arc<LiveTerms>> = std::sync::OnceLock::new();
+
+#[cfg(feature = "gui")]
+pub fn set_global(t: std::sync::Arc<LiveTerms>) {
+    let _ = GLOBAL.set(t);
+}
+
+/// 經 pi 開夥伴用的自帶終端（見 pi_term）；沒有畫面的建置、測試＝None
+#[cfg(feature = "gui")]
+pub(crate) fn pi_host() -> Option<std::sync::Arc<dyn super::pi_term::PiTermHost>> {
+    #[cfg(test)]
+    {
+        None
+    }
+    #[cfg(not(test))]
+    {
+        GLOBAL.get().map(|t| t.clone() as std::sync::Arc<dyn super::pi_term::PiTermHost>)
+    }
+}
+
+/// ASN 自己開的終端的 GUI 程序編號（切前景／背景只認這些）；沒有畫面的建置、測試＝空
+pub(crate) fn own_gui_pids() -> Vec<u32> {
+    #[cfg(all(feature = "gui", not(test)))]
+    {
+        GLOBAL.get().map(|t| t.own_gui_pids()).unwrap_or_default()
+    }
+    #[cfg(not(all(feature = "gui", not(test))))]
+    {
+        Vec::new()
+    }
+}
+
+#[cfg(feature = "gui")]
+impl super::pi_term::PiTermHost for LiveTerms {
+    fn available(&self) -> bool {
+        self.dir().is_ok()
+    }
+    fn start_pi(&self, cwd: &Path, argv: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
+        self.ensure_config()?;
+        TermService::start_pi(self, cwd, argv, env).map(|(_, pid)| pid)
+    }
 }
 
 /// 正式路徑：讀啟動設定、沿用本機資料夾授權，再交給 TermService。
@@ -2519,6 +2594,58 @@ mod tests {
         rig.svc.reclaim().unwrap();
         let id = rig.svc.start("grok", &rig.cwd, &rig.config).unwrap();
         assert_eq!(id, "8", "編號要從對照表的 next 接著編，不可重複");
+    }
+
+    #[test]
+    fn 經_pi_開在自帶終端_只帶給的環境_記成_pi_也列進自己開的_gui() {
+        let rig = make(default_profiles(), vec![]);
+        let env: BTreeMap<String, String> = [("ASN_PI_NAME".to_string(), "小皮".to_string()), ("PATH".to_string(), "C:/bin".to_string())].into();
+        let argv: Vec<String> = ["pi", "-e", "ext.ts", "--model", "MiniMax-M3"].iter().map(|s| s.to_string()).collect();
+        let (id, gui) = rig.svc.start_pi(Path::new(&rig.cwd), &argv, &env).unwrap();
+        assert_eq!(gui, 42);
+        let listed = rig.svc.list();
+        assert_eq!((listed[0].id.as_str(), listed[0].profile.as_str()), (id.as_str(), "pi"));
+        assert_eq!(rig.svc.own_gui_pids(), vec![42], "ASN 自己開的：切前後景認得它");
+        let calls = rig.runner.inner.calls.borrow();
+        let (args, got_env) = calls.iter().find(|(a, _)| a.first().map(String::as_str) == Some("start")).expect("有開視窗");
+        assert!(args.ends_with(&argv), "指令與參數原樣交給 WezTerm：{args:?}");
+        assert!(args.windows(2).any(|w| w[0] == "--workspace" && w[1] == format!("asn-{id}")));
+        assert_eq!(got_env.get("ASN_PI_NAME").map(String::as_str), Some("小皮"));
+        assert_eq!(got_env.get("WEZTERM_CONFIG_FILE").map(String::as_str), Some("cfg.lua"), "照樣用隔離的設定檔");
+        assert_eq!(got_env.len(), 3, "只帶給的環境（另加隔離設定檔），不繼承 ASN 自己的：{got_env:?}");
+    }
+
+    #[test]
+    fn 經_pi_只開得了_pi_資料夾要存在() {
+        let rig = make(default_profiles(), vec![]);
+        let env = BTreeMap::new();
+        let not_pi: Vec<String> = ["cmd.exe", "/c", "echo"].iter().map(|s| s.to_string()).collect();
+        assert!(rig.svc.start_pi(Path::new(&rig.cwd), &not_pi, &env).unwrap_err().contains("不是 pi"));
+        assert!(rig.svc.start_pi(Path::new(&rig.cwd), &[], &env).is_err());
+        let pi: Vec<String> = vec!["pi".into()];
+        assert!(rig.svc.start_pi(Path::new("Z:/ASN-不存在-xyz"), &pi, &env).unwrap_err().contains("不存在"));
+        assert!(rig.svc.list().is_empty());
+        assert!(rig.runner.args().iter().all(|a| a.first().map(String::as_str) != Some("start")), "沒通過就不開視窗");
+    }
+
+    #[test]
+    fn asn_重開後_pi_的自帶終端_對得上就認回來_對不上就不認也不關() {
+        // 認回來：標記與建立時間都對
+        let rig = make(default_profiles(), vec![Some(1_000)]);
+        *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-5", "ASN:5", 7, 1);
+        write_store(&rig.store, 5, &row("5", "pi", "1000", r#","cwd":"D:/proj""#));
+        rig.svc.reclaim().unwrap();
+        let listed = rig.svc.list();
+        assert_eq!((listed.len(), listed[0].profile.as_str()), (1, "pi"));
+        assert_eq!(rig.svc.own_gui_pids(), vec![42], "認回來的照樣能切前後景");
+        // 認不回來：建立時間對不上（程序編號可能已經是別人的）
+        let rig = make(default_profiles(), vec![Some(2_000)]);
+        *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-5", "ASN:5", 7, 1);
+        write_store(&rig.store, 5, &row("5", "pi", "1000", ""));
+        rig.svc.reclaim().unwrap();
+        assert!(rig.svc.list().is_empty());
+        assert!(rig.svc.own_gui_pids().is_empty(), "認不回來就不算 ASN 開的：不能切（照實說），也不當成使用者的去動它");
+        assert!(rig.runner.killed().is_empty(), "也不能因此關掉它");
     }
 
     #[test]

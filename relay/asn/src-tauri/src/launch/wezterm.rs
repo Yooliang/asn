@@ -32,6 +32,11 @@ pub trait Runner {
     fn run(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<RunOutput, String>;
     /// 啟動後不等待，回傳行程編號
     fn spawn(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String>;
+    /// 同 spawn，但子行程只拿到 env 裡的變數（不繼承 ASN 自己的環境；#475 經 pi 開在自帶終端用）。
+    /// 預設＝spawn（測試的假 runner 照樣記下 env）
+    fn spawn_clean(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
+        self.spawn(program, args, env)
+    }
     /// 結束一個自己剛啟動的行程與它的子行程樹（等 socket 逾時要清掉剛開的視窗，不留桌面孤兒）
     fn kill_tree(&self, pid: u32);
     /// 行程的建立時間（毫秒，查不到＝None）：結束行程前用來確認還是當初啟動的那一個，防程式編號被回收後誤殺別人
@@ -103,6 +108,13 @@ impl Runner for RealRunner {
     fn spawn(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
         let mut cmd = Command::new(program);
         cmd.no_window().args(args).envs(env).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        let child = cmd.spawn().map_err(|e| format!("無法啟動 {}：{e}", program.display()))?;
+        Ok(child.id())
+    }
+
+    fn spawn_clean(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
+        let mut cmd = Command::new(program);
+        cmd.no_window().env_clear().args(args).envs(env).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
         let child = cmd.spawn().map_err(|e| format!("無法啟動 {}：{e}", program.display()))?;
         Ok(child.id())
     }
@@ -318,8 +330,38 @@ impl<'a> WezTerm<'a> {
         self.spawn_gui(args)
     }
 
+    /// 同 start_in_workspace，但 GUI（與裡面的程式）只拿到 env 加上隔離設定檔的路徑，不繼承 ASN 自己的環境（#475 經 pi）。
+    /// env 由呼叫端先照 child_env 濾掉金鑰類變數
+    pub fn start_in_workspace_clean(&self, cwd: &Path, workspace: &str, command: &[String], env: &BTreeMap<String, String>) -> Result<Window, String> {
+        if command.is_empty() {
+            return Err("沒有指定要執行的指令".to_string());
+        }
+        if !workspace_name_ok(workspace) {
+            return Err("workspace 名稱不合法".to_string());
+        }
+        let mut args: Vec<String> = vec![
+            "start".into(),
+            "--always-new-process".into(),
+            "--cwd".into(),
+            cwd.to_string_lossy().into_owned(),
+            "--workspace".into(),
+            workspace.to_string(),
+            "--".into(),
+        ];
+        args.extend(command.iter().cloned());
+        let mut merged = env.clone();
+        merged.extend(self.config_env());
+        let gui_pid = self.runner.spawn_clean(&self.dir.gui, &args, &merged)?;
+        self.wait_sock(gui_pid)
+    }
+
     fn spawn_gui(&self, args: Vec<String>) -> Result<Window, String> {
         let gui_pid = self.runner.spawn(&self.dir.gui, &args, &self.config_env())?;
+        self.wait_sock(gui_pid)
+    }
+
+    /// 等新開的 GUI 的通訊檔出現；逾時就結束剛開的視窗
+    fn wait_sock(&self, gui_pid: u32) -> Result<Window, String> {
         let started_ms = self.runner.started_ms(gui_pid);
         let sock = sock_path(&self.home, gui_pid);
         let start = Instant::now();

@@ -40,8 +40,13 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
         args.extend(pi_model_args);
         let files = crate::identity::relay_home().join("pi-first");
         let plan = super::pi::plan(&req.name, &args, super::pi::resolve_ext_state(), &req.first_message, &files, now_ms())?;
-        let pid = start_window_env(&req.name, &command, &plan.args, &cwd, super::pi::hidden_for("pi", display_bg), &plan.env)?;
-        return Ok(json!({ "ok": true, "mode": "window", "pid": pid, "resumed": false, "display": "foreground", "first_message_sent": !req.first_message.trim().is_empty() }));
+        // 優先開在 ASN 自帶的終端（#475，能切前景／背景）；沒有或開不起來就用原生主控台，note 是給使用者看的說明
+        let opened = super::pi_term::open_pi_real(&req.name, &command, &plan.args, &cwd, super::pi::hidden_for("pi", display_bg), &plan.env)?;
+        let mut out = json!({ "ok": true, "mode": "window", "pid": opened.pid, "resumed": false, "display": "foreground", "first_message_sent": !req.first_message.trim().is_empty() });
+        if let Some(n) = opened.note {
+            out["note"] = json!(n);
+        }
+        return Ok(out);
     }
     // 預設接續同名夥伴上一段對話（issue #82）；沒有舊對話才新開
     let resumed = if req.fresh { None } else { super::resume::apply_resume_real(&mut args, &command, prof.engine.as_str(), &req.name, &launch_req.cwd) };
@@ -73,7 +78,7 @@ pub fn start_remote_window(config: &super::config::LaunchConfig, profile: &str, 
         args.extend(pi_args.iter().cloned());
         let files = crate::identity::relay_home().join("pi-first");
         let plan = super::pi::plan(name, &args, super::pi::resolve_ext_state(), "", &files, now_ms())?;
-        return start_window_env(name, &command, &plan.args, &cwd, false, &plan.env);
+        return super::pi_term::open_pi_real(name, &command, &plan.args, &cwd, false, &plan.env).map(|o| o.pid);
     }
     // 同本機開窗：預設接續同名夥伴上一段對話；hidden（測試用）不查真實的對話檔
     if !hidden {
@@ -90,7 +95,7 @@ pub fn start_pi_session(config: &super::config::LaunchConfig, name: &str, cwd: &
     args.extend(["--session".to_string(), session_file.to_string()]);
     let files = crate::identity::relay_home().join("pi-first");
     let plan = super::pi::plan(name, &args, super::pi::resolve_ext_state(), "", &files, now_ms())?;
-    start_window_env(name, &command, &plan.args, &cwd, false, &plan.env)
+    super::pi_term::open_pi_real(name, &command, &plan.args, &cwd, false, &plan.env).map(|o| o.pid)
 }
 
 /// Claude 引擎：在啟動前把 cwd_allow 內、本次使用的資料夾標成已信任（失敗只記 log，不擋啟動）。
@@ -140,7 +145,7 @@ pub(super) fn start_window(title: &str, command: &str, args: &[String], cwd: &Pa
     start_window_env(title, command, args, cwd, hidden, &[])
 }
 
-/// 同 [`start_window`]，另外在視窗裡先設好額外的環境變數（pi 的 ASN_PI_NAME）
+/// 同 [`start_window`]，另外在視窗裡先設好額外的環境變數（pi 的 ASN_PI_NAME）；經 pi 時是自帶終端開不起來的退路（見 pi_term）
 pub(super) fn start_window_env(title: &str, command: &str, args: &[String], cwd: &Path, hidden: bool, env: &[(String, String)]) -> Result<u32, String> {
     #[cfg(windows)]
     {

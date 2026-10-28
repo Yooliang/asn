@@ -134,6 +134,12 @@ impl super::console_resolve::ConsoleOs for RealConsoleOs {
     fn find_wt_windows(&self, wt_pid: u32) -> Vec<super::console_resolve::ConsoleWin> {
         win::find_wt_windows(wt_pid)
     }
+    fn own_wezterm(&self) -> Vec<u32> {
+        own_wezterm_pids()
+    }
+    fn find_wez_windows(&self, gui_pid: u32) -> Vec<super::console_resolve::ConsoleWin> {
+        win::find_wez_windows(gui_pid)
+    }
     fn table(&self) -> Vec<super::switch::Proc> {
         super::switch::winapi::process_table()
     }
@@ -194,6 +200,10 @@ pub(crate) struct WindowSnapshot {
     pub console: Vec<(u32, bool)>,
     /// Windows Terminal 的頂層視窗：(擁有者程序編號, 是否可見)
     pub wt: Vec<(u32, bool)>,
+    /// WezTerm 的頂層視窗：(擁有者程序編號, 是否可見)（#475）
+    pub wez: Vec<(u32, bool)>,
+    /// ASN 自己開的 WezTerm GUI 程序編號（#475）
+    pub own_wez: Vec<u32>,
     pub procs: Vec<super::switch::Proc>,
     pub own: u32,
 }
@@ -210,6 +220,12 @@ impl super::console_resolve::ConsoleOs for WindowSnapshot {
     fn find_wt_windows(&self, wt_pid: u32) -> Vec<super::console_resolve::ConsoleWin> {
         self.wt.iter().filter(|(p, _)| *p == wt_pid).map(|(_, v)| super::console_resolve::ConsoleWin { hwnd: 0, visible: *v }).collect()
     }
+    fn own_wezterm(&self) -> Vec<u32> {
+        self.own_wez.clone()
+    }
+    fn find_wez_windows(&self, gui_pid: u32) -> Vec<super::console_resolve::ConsoleWin> {
+        self.wez.iter().filter(|(p, _)| *p == gui_pid).map(|(_, v)| super::console_resolve::ConsoleWin { hwnd: 0, visible: *v }).collect()
+    }
     fn table(&self) -> Vec<super::switch::Proc> {
         self.procs.clone()
     }
@@ -218,10 +234,22 @@ impl super::console_resolve::ConsoleOs for WindowSnapshot {
     }
 }
 
+/// ASN 自己開的 WezTerm（自帶終端）的 GUI 程序編號：從終端服務的對照表來（#475）；沒有自帶終端的建置是空的
+fn own_wezterm_pids() -> Vec<u32> {
+    #[cfg(desktop)]
+    {
+        super::term::own_gui_pids()
+    }
+    #[cfg(not(desktop))]
+    {
+        Vec::new()
+    }
+}
+
 pub(crate) fn window_snapshot() -> WindowSnapshot {
     #[cfg(all(windows, not(test)))]
     {
-        WindowSnapshot { console: win::console_windows(), wt: win::wt_windows(), procs: super::switch::winapi::process_table(), own: std::process::id() }
+        WindowSnapshot { console: win::console_windows(), wt: win::wt_windows(), wez: win::wez_windows(), own_wez: own_wezterm_pids(), procs: super::switch::winapi::process_table(), own: std::process::id() }
     }
     #[cfg(not(all(windows, not(test))))]
     {
@@ -365,6 +393,39 @@ pub(crate) mod win {
             EnumWindows(Some(each_wt_top), &mut out as *mut Vec<(u32, bool)> as LPARAM);
         }
         out
+    }
+
+    unsafe extern "system" fn each_wez_top(hwnd: HWND, lp: LPARAM) -> i32 {
+        let out = &mut *(lp as *mut Vec<(u32, bool, i64)>);
+        if class_is(hwnd, WEZ_CLASS) {
+            let mut p = 0u32;
+            GetWindowThreadProcessId(hwnd, &mut p);
+            if p != 0 {
+                out.push((p, IsWindowVisible(hwnd) != 0, hwnd as isize as i64));
+            }
+        }
+        1
+    }
+
+    /// WezTerm 的頂層視窗類別（#475 實測：一個 GUI 程序擁有一扇）
+    const WEZ_CLASS: &str = "org.wezfurlong.wezterm";
+
+    fn wez_all() -> Vec<(u32, bool, i64)> {
+        let mut out: Vec<(u32, bool, i64)> = Vec::new();
+        unsafe {
+            EnumWindows(Some(each_wez_top), &mut out as *mut Vec<(u32, bool, i64)> as LPARAM);
+        }
+        out
+    }
+
+    /// 所有 WezTerm 頂層視窗的（擁有者程序編號, 可見）；只列出、不動
+    pub fn wez_windows() -> Vec<(u32, bool)> {
+        wez_all().into_iter().map(|(p, v, _)| (p, v)).collect()
+    }
+
+    /// 這個 WezTerm GUI 程序擁有的頂層視窗（只列出，不動）
+    pub fn find_wez_windows(gui_pid: u32) -> Vec<crate::launch::console_resolve::ConsoleWin> {
+        wez_all().into_iter().filter(|(p, _, _)| *p == gui_pid).map(|(_, visible, hwnd)| crate::launch::console_resolve::ConsoleWin { hwnd, visible }).collect()
     }
 
     /// 所有 ConsoleWindowClass 頂層視窗的（擁有者程序編號, 可見）；只列出、不動，不用 AttachConsole
