@@ -168,6 +168,12 @@ fn env_lines(env: &[(String, String)]) -> String {
         .collect()
 }
 
+/// 程式結束後把終端機的特殊模式關掉：滑鼠追蹤（1000／1002／1003）、滑鼠座標格式（1005／1006／1015）、焦點事件（1004）、
+/// 貼上括號（2004），再把游標顯示回來。pi 這類全螢幕程式被「關閉」直接結束時來不及自己還原，
+/// 不關的話之後移動滑鼠，PowerShell 會一直印出「[555;102;30M」這種字。
+#[cfg_attr(not(windows), allow(dead_code))]
+const TERMINAL_RESET_PS: &str = "$esc = [char]27; [Console]::Write((@('?1000l', '?1002l', '?1003l', '?1005l', '?1006l', '?1015l', '?1004l', '?2004l', '?25h') | ForEach-Object { $esc + '[' + $_ }) -join '')";
+
 #[cfg_attr(not(windows), allow(dead_code))]
 fn build_window_script_env(title: &str, command: &str, args: &[String], env: &[(String, String)]) -> String {
     let env_set = env_lines(env);
@@ -187,11 +193,13 @@ fn build_window_script_env(title: &str, command: &str, args: &[String], env: &[(
          Write-Host ('[ASN] 無法啟動：' + $_.Exception.Message) -ForegroundColor Red\n\
          $code = -1\n\
          }}\n\
+         {reset}\n\
          Write-Host ''\n\
          Write-Host ('[ASN] 程式已結束（結束碼 ' + $code + '）。上面如果有錯誤訊息請截圖回報；關閉這個視窗即可。') -ForegroundColor Yellow\n",
         title = ps_quote(title),
         env_set = env_set,
-        call = call
+        call = call,
+        reset = TERMINAL_RESET_PS
     )
 }
 
@@ -378,6 +386,9 @@ mod tests {
         assert!(sc.contains(r"& 'C:\Program Files\Claude Code\claude.exe' '--dangerously-skip-permissions' '-n' '小良哥-1' '--remote-control' '小良哥-1'"));
         assert!(sc.contains("WindowTitle = '小良哥-1'"));
         assert!(sc.contains("程式已結束"));
+        let reset = sc.find("?1003l").expect("結束後關掉滑鼠追蹤");
+        assert!(reset < sc.find("程式已結束").unwrap(), "先還原終端機，再印結束訊息");
+        assert!(sc.contains("'?1006l'") && sc.contains("'?1015l'") && sc.contains("'?1004l'"), "滑鼠座標格式與焦點事件也關掉");
     }
 
     #[test]
