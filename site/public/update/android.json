@@ -1,8 +1,8 @@
 {
-  "version": "0.1.96",
-  "versionCode": 1096,
-  "url": "https://asnmessenger.web.app/update/ASN_0.1.96_android.apk",
-  "sha256": "8291bf5560308b69ebb1d78e1246d27093aef7eeca5f4fe49b7fc60c404b0045",
-  "notes": "名單頭像右下角顯示廠商小圖；開新夥伴的設備清單不再列出已永久移除的設備",
-  "bytes": 9448932
+  "version": "0.1.99",
+  "versionCode": 1099,
+  "url": "https://asnmessenger.web.app/update/ASN_0.1.99_android.apk",
+  "sha256": "6a074794b2f36a4ce5fd923ed2a431f7ecb2f0bd4d43b2960cbbe02c0157fa90",
+  "notes": "與電腦版 0.1.99 同步：內建通道切換模型、「關」分成停止與移除、pi 改名、Claude 額度條",
+  "bytes": 9453028
 }
