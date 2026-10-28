@@ -19,7 +19,7 @@ import { DEVICE_TEXT, canRemoveRow, dropAfter, moveFlags, removedRows, visibleRo
 export const SETTING_OPS = [
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
-  'closeTo', 'autostart', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'claude-mod-auto',
+  'closeTo', 'autostart', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login',
 ]
 
 export const SettingsPanel = {
@@ -340,8 +340,8 @@ export const SettingsPanel = {
           </section>
           <section class="set-card" aria-label="Claude 外掛" v-if="st.claudeModAuto !== null && st.claudeModAuto !== undefined">
             <b>Claude 外掛</b>
-            <label class="chk"><input type="checkbox" :checked="st.claudeModAuto" @change="act('claude-mod-auto', $event.target.checked)" /><span>自動安裝或更新 Claude 外掛</span></label>
-            <small>關掉後 ASN 不再自動安裝或更新 Claude 外掛；已經裝的會留著，要移除請在 Claude Code 裡用 /plugin 移除 asn。</small>
+            <label class="chk"><input type="checkbox" checked disabled /><span>自動安裝或更新 Claude 外掛</span></label>
+            <small>ASN 必要元件，會自動安裝和更新。</small>
             <small v-if="st.accounts && st.accounts.mod" role="status">{{ st.accounts.mod }}</small>
           </section>
           <section class="set-card" aria-label="額度回報" v-if="st.quotaHook">
