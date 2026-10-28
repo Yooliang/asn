@@ -1758,10 +1758,12 @@ mod slash_it {
         assert!(until(|| control_file(&h, "sid-b").is_some()).await, "寫了控制檔");
         std::fs::write(status_path(&h, "sid-b"), "").unwrap(); // 外掛正在寫：檔案被截成空的
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        assert!(h.fr.acked().is_empty(), "半份不算外掛沒了，也還沒做完：不 ack");
+        // 偶發失敗追查（#472 之後全套跑時出現過一次，抓不到現場）：每個斷言都帶上當下的 ack、回信與 log，下次再出現就有線索
+        let state = |h: &H| format!("acked={:?} replies={:?} log={:?}", h.fr.acked(), replies(h, &uid(1)), h.core.log.recent());
+        assert!(h.fr.acked().is_empty(), "半份不算外掛沒了，也還沒做完：不 ack；{}", state(&h));
         plugin_reply(&h, "sid-b", &uid(1), true, "已壓縮");
-        assert!(until(|| h.fr.acked().contains(&uid(1))).await, "外掛寫完：照常成功並 ack");
-        assert_eq!(replies(&h, &uid(1))[0]["body"].as_str(), Some("已壓縮"));
+        assert!(until(|| h.fr.acked().contains(&uid(1))).await, "外掛寫完：照常成功並 ack；{}", state(&h));
+        assert_eq!(replies(&h, &uid(1)).first().and_then(|r| r["body"].as_str()), Some("已壓縮"), "{}", state(&h));
     }
 
     #[tokio::test]
