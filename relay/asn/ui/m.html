@@ -355,6 +355,15 @@
                 </template>
             <p class="m-note" v-else>這個版本不提供自動檢查新版本。</p>
           </div>
+          <div class="m-card m-form m-rel" aria-label="版本紀錄">
+            <b>版本紀錄</b>
+            <p class="m-note" v-if="relNote" role="status">{{ relNote }}</p>
+            <button class="m-btn" type="button" v-if="rel.phase === 'error'" @click="loadRel(true)">{{ RETRY_LABEL }}</button>
+            <article class="m-rel-item" v-for="e in relLog" :key="e.version">
+              <header><span class="m-rel-ver">{{ e.version }}</span><span class="m-rel-tag" v-if="e.tag === 'current'">目前版本</span><span class="m-rel-date" v-if="e.date">{{ e.date }}</span></header>
+              <ul><li v-for="(l, i) in e.lines" :key="i">{{ l }}</li></ul>
+            </article>
+          </div>
         </template>
         <template v-else-if="settingCat === 'about'">
           <div class="m-card m-form">

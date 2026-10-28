@@ -95,15 +95,13 @@ test('release.mjs --dry-run --print-notes：沒給 --notes 印 CHANGELOG 最新�
   assert.equal(fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8'), before)
 })
 
-test('打包：prep.mjs 把 CHANGELOG 轉成 ui/vendor/changelog.json（跟 vendor 一樣不進 git），畫面從 vendor/ 讀', async () => {
-  const p = spawnSync(process.execPath, ['scripts/prep.mjs'], { cwd: root, encoding: 'utf8' })
-  assert.equal(p.status, 0, p.stderr)
-  const json = JSON.parse(fs.readFileSync(path.join(root, 'ui', 'vendor', 'changelog.json'), 'utf8'))
-  assert.deepEqual(json, parseChangelog(realLog))
-  assert.deepEqual((await import(pathToFileURL(path.join(root, 'ui', 'vendor', 'changelog.mjs')).href)).default, json, '.mjs 版同內容')
-  assert.match(fs.readFileSync(path.join(root, '.gitignore'), 'utf8'), /ui\/vendor\//)
+test('打包：prep.mjs 不再產生 vendor/changelog.*；畫面改從後台資料庫讀（#462），CHANGELOG.md 只給發版腳本用', async () => {
+  const prep = fs.readFileSync(path.join(root, 'scripts', 'prep.mjs'), 'utf8')
+  assert.doesNotMatch(prep, /changelog\.(json|mjs)|parseChangelog/)
   const list = fs.readFileSync(path.join(root, 'ui', 'list.js'), 'utf8')
-  assert.ok(list.includes("import('./vendor/changelog.mjs')") && list.includes('buildLogView('))
+  assert.doesNotMatch(list, /vendor\/changelog/)
+  assert.ok(list.includes('buildLogView(') && list.includes('loadReleases('))
+  assert.ok(fs.existsSync(path.join(root, 'CHANGELOG.md')), 'CHANGELOG.md 保留（發版腳本產更新說明用）')
 })
 
 test('設定「更新」表單：開關與立即檢查照舊，下面是版本更新記錄（標籤、日期、多行）', async () => {
@@ -122,5 +120,9 @@ test('設定「更新」表單：開關與立即檢查照舊，下面是版本�
   assert.ok(html.indexOf('0.1.3') < html.indexOf('0.1.2'), '新到舊')
   for (const t of ['可更新', '目前版本', '2026-10-22', '新乙', '乙']) assert.ok(html.includes(t), t)
   const empty = await renderToString(Vue.createSSRApp(SettingsPanel, { st: { autoCheck: true, upd: { manual: '', status: updateStatus({}) }, accounts: { savedSeq: 0 } }, catKey: 'update' }))
-  assert.ok(empty.includes('沒有可顯示的更新記錄'))
+  assert.ok(!empty.includes('沒有可顯示的更新記錄'), '舊說法拿掉了；沒資料時說什麼由 logNote 決定（#462）')
+  const note = await renderToString(Vue.createSSRApp(SettingsPanel, { st: { autoCheck: true, upd: { manual: '', status: updateStatus({}) }, accounts: { savedSeq: 0 }, logNote: '暫時讀不到版本紀錄', logRetry: true }, catKey: 'update' }))
+  assert.ok(note.includes('暫時讀不到版本紀錄') && note.includes('重試'), '讀不到：照實說並給重試')
+  const ok = await renderToString(Vue.createSSRApp(SettingsPanel, { st: { autoCheck: true, upd: { manual: '', status: updateStatus({}) }, accounts: { savedSeq: 0 }, logNote: '', logRetry: false, log: [{ version: '0.1.1', date: '', lines: ['<b>不是標籤</b>'], tag: '' }] }, catKey: 'update' }))
+  assert.ok(ok.includes('&lt;b&gt;不是標籤&lt;/b&gt;') && !ok.includes('<b>不是標籤'), '內容只用文字插值')
 })
