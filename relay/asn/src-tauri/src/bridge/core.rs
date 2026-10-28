@@ -74,6 +74,8 @@ pub struct Config {
     pub handoff_dir: PathBuf,
     /// 其他引擎（第五段）：ASN_ENGINES（舊名 IRORI_ENGINES）的值（逗號分隔的 acp／codex）；None＝自動（有 agents.json 載 acp、有 ~/.codex 載 codex）
     pub engines: Option<String>,
+    /// engines 是舊名清單補上 pi 的（#467，啟動時記一行 log）
+    pub engines_pi_added: bool,
     /// 引擎子程序環境的來源（啟動時的環境變數快照）
     pub engine_env: Vec<(String, String)>,
     /// ACP 工作者設定檔（預設 `~/.asn/agents.json`，與舊橋同一份；ASN_AGENTS_FILE 可改，舊名 IRORI_AGENTS_FILE 仍可用）
@@ -92,6 +94,13 @@ pub struct Config {
 impl Config {
     pub fn from_env(node: &str, work_dir: PathBuf) -> Config {
         let test_handoff = work_dir.join("handoff");
+        // 測試時絕不碰真實的設定：只載 Claude
+        let engines = if cfg!(test) {
+            super::engines::EngineSpec { spec: Some("claude".into()), pi_added: false }
+        } else {
+            let (new, old) = crate::envc::get_pair("ASN_ENGINES");
+            super::engines::engine_spec(new.as_deref(), old.as_deref())
+        };
         let (work_dir_agents, work_dir_home) = (work_dir.join("agents.json"), work_dir.join("home"));
         let home = crate::identity::home_dir();
         let list = |k: &str| crate::envc::get(k).unwrap_or_default().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect::<Vec<_>>();
@@ -126,7 +135,8 @@ impl Config {
             // 測試時絕不碰真實家目錄：往來記錄放進工作資料夾底下
             handoff_dir: if cfg!(test) { test_handoff } else { corrlog::default_dir() },
             // 測試時絕不碰真實的設定與 ~/.codex：只載 Claude，路徑都放進工作資料夾底下
-            engines: if cfg!(test) { Some("claude".into()) } else { crate::envc::get("ASN_ENGINES").filter(|s| !s.trim().is_empty()) },
+            engines: engines.spec,
+            engines_pi_added: engines.pi_added,
             engine_env: std::env::vars().collect(),
             agents_file: if cfg!(test) { work_dir_agents } else { crate::envc::get_os("ASN_AGENTS_FILE").filter(|s| !s.is_empty()).map(PathBuf::from).unwrap_or_else(|| crate::identity::relay_home().join("agents.json")) },
             home: if cfg!(test) { work_dir_home } else { home },
@@ -538,8 +548,13 @@ impl Core {
         // 主控台視窗表一輪只列一次（EnumWindows，不接上別人的主控台），名單裡所有有視窗的條目共用
         let (mut procs, snap) = tokio::task::spawn_blocking(move || (super::procscan::scan_system_excluding(&registered), crate::launch::console::window_snapshot())).await.unwrap_or_default();
         roster::apply_hidden(&mut self.roster, &snap);
+        let pi_loaded = self.engines.as_ref().is_some_and(|e| e.has("pi"));
         for p in procs.iter_mut() {
             p.hidden = roster::hidden_of(&snap, p.pid);
+            // 前景（互動）pi 沒登記成可收信視窗：說明原因，不要看起來像一般自己開的程式（#467）。-p 等背景單次執行本來就不登記
+            if p.engine == "pi" && !p.background {
+                p.detail = Some(super::engines::pi_unregistered_detail(pi_loaded).to_string());
+            }
         }
         let mut body = roster::roster_body_with_procs(&self.roster, asn.as_deref(), launcher, &procs);
         // 這台電腦的 Claude 外掛狀態：啟動檢查完與狀態變化時才附（舊後台會丟掉這個欄位，不壞）

@@ -209,6 +209,9 @@ pub fn start_with(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>, laun
         pids: engines::PidBook::new(&cfg.work_dir),
         data_dir: cfg.data_dir.clone(),
     };
+    if cfg.engines_pi_added {
+        log.line("engines: 舊名 IRORI_ENGINES 的清單沒列 pi（那時還沒有 pi），自動載入 pi；要關掉 pi 請改設 ASN_ENGINES");
+    }
     let engine_set = engines::build(&ectx, cfg.engines.as_deref());
     if let Some(e) = &engine_set {
         core.set_engines(e.clone());

@@ -228,6 +228,10 @@ impl EngineSet {
     pub fn new(engines: Vec<Arc<dyn Engine>>, events: EventTx) -> Arc<EngineSet> {
         Arc::new(EngineSet { engines, cache: Mutex::new(HashMap::new()), events })
     }
+    /// 有沒有載入這個引擎（例如 "pi"）
+    pub fn has(&self, id: &str) -> bool {
+        self.engines.iter().any(|e| e.id() == id)
+    }
     pub fn start(&self) {
         for e in &self.engines {
             e.start();
@@ -321,6 +325,38 @@ pub fn want_pi(spec: Option<&str>) -> bool {
     spec.map(|s| s.split(',').any(|x| x.trim().eq_ignore_ascii_case("pi"))).unwrap_or(true)
 }
 
+/// 實際要用的引擎清單（#467）
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct EngineSpec {
+    pub spec: Option<String>,
+    /// 清單來自舊名、裡面沒列 pi，所以自動補上 pi（啟動時記一行 log）
+    pub pi_added: bool,
+}
+
+/// ASN_ENGINES 與舊名（IRORI_ENGINES）的原值 → 實際清單。
+/// 舊名是以前機器橋留下的清單，那時還沒有 pi：只有舊名時 pi 一律載入。新名跟舊名一樣也當作舊名
+/// （ASN 給子程序的環境兩個名字都帶，見 envc::mirror，從那裡開的 ASN 會兩個都看到）。新名明確設了就照它。
+pub fn engine_spec(new: Option<&str>, old: Option<&str>) -> EngineSpec {
+    let clean = |v: Option<&str>| v.map(str::trim).filter(|s| !s.is_empty()).map(String::from);
+    let (n, o) = (clean(new), clean(old));
+    match (n, o) {
+        (Some(n), o) if o.as_deref() != Some(n.as_str()) => EngineSpec { spec: Some(n), pi_added: false },
+        (_, Some(o)) if !want_pi(Some(&o)) => EngineSpec { spec: Some(format!("{o},pi")), pi_added: true },
+        (_, o) => EngineSpec { spec: o, pi_added: false },
+    }
+}
+
+/// 名單上「看得到 pi 程序、但沒登記成可收信視窗」的原因（#467）：pi 那段沒載入＝被設定關掉；有載入＝擴充沒裝或不相容
+pub fn pi_unregistered_detail(pi_loaded: bool) -> &'static str {
+    if pi_loaded {
+        PI_NOT_REGISTERED
+    } else {
+        PI_DISABLED
+    }
+}
+pub const PI_DISABLED: &str = "pi 被設定關掉了（ASN_ENGINES），收不到信、不能改名";
+pub const PI_NOT_REGISTERED: &str = "這個 pi 沒有登記到 ASN：沒裝 ASN 的 pi 擴充，或 pi 版本和擴充不相容";
+
 /// 依設定建引擎集合；沒有任何非 Claude 引擎回 None
 pub fn build(ctx: &EngineCtx, spec: Option<&str>) -> Option<Arc<EngineSet>> {
     let home = codex::codex_home(&ctx.env, &ctx.home);
@@ -399,6 +435,21 @@ mod tests {
         assert!(want_pi(Some("claude, PI")));
         assert!(!want_pi(Some("claude,acp")));
         assert!(!want_pi(Some("")));
+    }
+
+    #[test]
+    fn 引擎清單_只有舊名時一律補上_pi_新名明確設了就照它() {
+        let s = |spec: &str, pi_added| EngineSpec { spec: Some(spec.into()), pi_added };
+        assert_eq!(engine_spec(None, Some("claude,acp,codex")), s("claude,acp,codex,pi", true), "工作機的情況：舊名沒列 pi");
+        assert_eq!(engine_spec(Some(" "), Some("claude,acp,codex")), s("claude,acp,codex,pi", true), "新名空白＝沒設");
+        assert_eq!(engine_spec(Some("claude,acp,codex"), Some("claude,acp,codex")), s("claude,acp,codex,pi", true), "兩個一樣＝ASN 帶給子程序的，當舊名");
+        assert_eq!(engine_spec(None, Some("claude,pi")), s("claude,pi", false), "舊名已列 pi：不用補");
+        assert_eq!(engine_spec(Some("claude,acp"), None), s("claude,acp", false), "新名明確設了：照它，不補 pi");
+        assert_eq!(engine_spec(Some("claude"), Some("claude,acp,codex")), s("claude", false), "新名和舊名不同：照新名");
+        assert_eq!(engine_spec(None, None), EngineSpec::default());
+        assert!(want_pi(engine_spec(None, Some("claude,acp,codex")).spec.as_deref()));
+        assert_eq!(pi_unregistered_detail(false), PI_DISABLED);
+        assert_eq!(pi_unregistered_detail(true), PI_NOT_REGISTERED);
     }
 
     #[test]

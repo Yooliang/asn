@@ -115,6 +115,12 @@ pub fn get(new: &str) -> Option<String> {
     pick(&|k| std::env::var(k).ok(), new)
 }
 
+/// 新名與舊名各自的原值（要分辨值是從哪個名字來的才用，例如 ASN_ENGINES，見 bridge::engines::engine_spec）
+pub fn get_pair(new: &str) -> (Option<String>, Option<String>) {
+    debug_assert!(legacy(new).is_some(), "環境變數 {new} 沒登記在 envc::PAIRS");
+    (std::env::var(new).ok(), legacy(new).and_then(|o| std::env::var(o).ok()))
+}
+
 /// 同 [`get`]，但回 OsString（路徑類用）
 pub fn get_os(new: &str) -> Option<OsString> {
     let n = std::env::var_os(new);

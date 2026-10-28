@@ -31,6 +31,8 @@ pub struct ProcAgent {
     pub background: bool,
     /// 主控台視窗是否隱藏（只在確定時有值，見 roster::hidden_of）；名單只在有值時帶 hidden
     pub hidden: Option<bool>,
+    /// 名單上的說明（#467：前景 pi 沒登記成可收信視窗的原因）；沒有就不帶
+    pub detail: Option<String>,
 }
 
 /// 名單上限，避免失控時灌爆名單
@@ -52,6 +54,9 @@ impl ProcAgent {
         }
         if let Some(h) = self.hidden {
             o["hidden"] = json!(h);
+        }
+        if let Some(d) = &self.detail {
+            o["detail"] = json!(d); // 後台名單本來就收 detail，舊用戶端略過
         }
         o
     }
@@ -249,7 +254,7 @@ pub fn scan_excluding(table: &[ProcInfo], self_pid: u32, skip: &[u32]) -> Vec<Pr
             continue;
         }
         let (model, label) = model_of(args);
-        out.push(ProcAgent { pid: p.pid, engine: engine.to_string(), model, label, background: is_background(args), hidden: None });
+        out.push(ProcAgent { pid: p.pid, engine: engine.to_string(), model, label, background: is_background(args), hidden: None, detail: None });
     }
     out.sort_by(|a, b| a.engine.cmp(&b.engine).then(a.pid.cmp(&b.pid)));
     out.truncate(MAX_AGENTS);
@@ -531,11 +536,19 @@ mod hidden_tests {
 
     #[test]
     fn 程序條目_hidden_有值才帶() {
-        let mut a = ProcAgent { pid: 7, engine: "grok".into(), model: None, label: None, background: false, hidden: None };
+        let mut a = ProcAgent { pid: 7, engine: "grok".into(), model: None, label: None, background: false, hidden: None, detail: None };
         assert!(a.to_json().get("hidden").is_none());
         a.hidden = Some(true);
         assert_eq!(a.to_json()["hidden"], json!(true));
         a.hidden = Some(false);
         assert_eq!(a.to_json()["hidden"], json!(false));
+    }
+
+    #[test]
+    fn 程序條目_detail_有值才帶() {
+        let mut a = ProcAgent { pid: 7, engine: "pi".into(), model: None, label: None, background: false, hidden: None, detail: None };
+        assert!(a.to_json().get("detail").is_none());
+        a.detail = Some(crate::bridge::engines::PI_DISABLED.into());
+        assert_eq!(a.to_json()["detail"], json!(crate::bridge::engines::PI_DISABLED));
     }
 }
