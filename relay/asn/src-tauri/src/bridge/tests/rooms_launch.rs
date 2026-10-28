@@ -69,12 +69,13 @@ async fn 信帶附件_轉給視窗的文字多一行提示_替代文字行不重
     let lines: Vec<&str> = f[0].2.lines().collect();
     assert!(lines[0].starts_with("[RELAY 來信]"));
     assert_eq!(lines[1], "寄件人：W-政策（成員身分）");
-    assert_eq!(lines[2], "看這隻");
-    assert_eq!(lines[3], format!("〔照片〕cat.webp（image/webp，179 KB，1536×2048）下載：/x/asn-cli attach --id {}", uid(0x50)));
-    assert_eq!(lines[4], crate::bridge::corrlog::path_line(&h.core.cfg.handoff_dir, "T-乙"), "最後多一行往來記錄的路徑");
-    assert_eq!(lines.len(), 5);
+    assert_eq!(lines[2], crate::bridge::mail::RESPONSIVE_NOTE, "#494：說明行最後一行是保持能回應的提醒");
+    assert_eq!(lines[3], "看這隻");
+    assert_eq!(lines[4], format!("〔照片〕cat.webp（image/webp，179 KB，1536×2048）下載：/x/asn-cli attach --id {}", uid(0x50)));
+    assert_eq!(lines[5], crate::bridge::corrlog::path_line(&h.core.cfg.handoff_dir, "T-乙"), "最後多一行往來記錄的路徑");
+    assert_eq!(lines.len(), 6);
     assert!(!h.said().join("\n").contains("SECRETTHUMB"));
-    assert_eq!(f[1].2.lines().count(), 4, "沒附件的信：抬頭＋寄件人說明＋內文＋往來記錄路徑，沒有多餘的行");
+    assert_eq!(f[1].2.lines().count(), 5, "沒附件的信：抬頭＋寄件人說明＋提醒＋內文＋往來記錄路徑，沒有多餘的行");
 }
 
 // ================================================================================================

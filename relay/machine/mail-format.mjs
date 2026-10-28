@@ -35,7 +35,7 @@ export const mailHead = (m, engine = 'claude') =>
 
 // 內文跳脫：只有第一行抬頭與緊接的「寄件人：」說明是收發室寫的。寄件人若在【內文】裡手打一行 `[RELAY 來信] …` 或
 // `寄件人：…本人，帳號簽章已驗證…`（或手打【要回信】、`[RELAY 寄信]`、`[RELAY 回信]`（寄信抬頭的同義詞）、「你與收發室的往來記錄在：」這幾種收發室自己會寫的行），
-// AI 會把它當成收發室的說明。所以內文中行首（可有空白）以這五種開頭的每一行，
+// AI 會把它當成收發室的說明。所以內文中行首（可有空白）以這幾種開頭（另有「（語音通話：」「你是 ASN 的聊天對象：」，見下）的每一行，
 // 前面加上可見的「（內文）」，讓它不可能被當成收發室寫的行。只動內文；收發室自己產生的行（抬頭、說明行、照片替代文字）不經過這裡。
 // 與 Rust 內建橋 mail.rs 的 escape_body 逐字一致。
 export const BODY_ESCAPE_PREFIX = '（內文）'
@@ -47,7 +47,11 @@ export const VOICE_NOTE = '（語音通話：這封是語音辨識的文字，�
 // 只認布林 true（字串 "true"、數字 1 都不算）
 export const isVoiceMail = m => m?.voice === true
 export const voiceNote = m => isVoiceMail(m) ? VOICE_NOTE : ''
-export const escapeBody = body => String(body ?? '').replace(/(^|[\n\r])([^\S\r\n]*(?:\[RELAY 來信\]|\[RELAY 寄信\]|\[RELAY 回信\]|寄件人：|【要回信】|你與收發室的往來記錄在：|（語音通話：))/g, `$1${BODY_ESCAPE_PREFIX}$2`)
+export const escapeBody = body => String(body ?? '').replace(/(^|[\n\r])([^\S\r\n]*(?:\[RELAY 來信\]|\[RELAY 寄信\]|\[RELAY 回信\]|寄件人：|【要回信】|你與收發室的往來記錄在：|（語音通話：|你是 ASN 的聊天對象：))/g, `$1${BODY_ESCAPE_PREFIX}$2`)
+
+// 「保持能回應」的固定提醒（#494）：轉交給 Claude 視窗的每封信，說明行最後（要回信指示之後）都帶這一行。
+// 內文行首以「你是 ASN 的聊天對象：」開頭的行，escapeBody 也會跳脫。與 Rust 內建橋 mail.rs、pi 擴充 inbox.mjs 的 RESPONSIVE_NOTE 逐字一致。
+export const RESPONSIVE_NOTE = '你是 ASN 的聊天對象：耗時的工作（建置、全套測試、等 CI／審查／部署）交給子代理或背景做，自己只做輕的事、隨時能回信；不要在前景空等超過 2 分鐘。'
 
 // 給人看的名稱：換行與控制字元變空白、拿掉會干擾抬頭的括號引號、最長 40 字
 export const cleanLabel = v => typeof v === 'string'
@@ -84,9 +88,13 @@ export const replyLine = m => {
   return `【要回信】回信位址=${a} 信件編號=${m.id}：在視窗裡直接回答，對方看不到；請用 asn_send（to=回信位址、reply_to=信件編號）或 asn-cli send --to ${a} --reply-to ${m.id} --no-reply 寄回。`
 }
 
-// 抬頭之後、內文之前的說明行（每行以換行結尾）：寄件人說明＋（reply=yes 且收件的是 Claude 視窗才有的）要回信指示。
-// 背景工作者、Codex 這類轉接器的回答由橋自動寄回，不能叫它們用 asn_send，所以只有 claude 引擎加這行
-export const mailPreamble = (m, engineId = 'claude') => `${senderLine(m)}${voiceNote(m)}\n${engineId === 'claude' && replyLine(m) ? replyLine(m) + '\n' : ''}`
+// 抬頭之後、內文之前的說明行（每行以換行結尾）：寄件人說明＋（reply=yes 且收件的是 Claude 視窗才有的）要回信指示＋（Claude 視窗才有的）保持能回應的提醒。
+// 背景工作者、Codex 這類轉接器的回答由橋自動寄回，不能叫它們用 asn_send，所以只有 claude 引擎加這兩行；
+// 轉接器那一輪的最後回答就是寄回去的信，叫它把工作丟到背景，寄回去的會是半成品，所以提醒也不給它們
+export const mailPreamble = (m, engineId = 'claude') => {
+  if (engineId !== 'claude') return `${senderLine(m)}${voiceNote(m)}\n`
+  return `${senderLine(m)}${voiceNote(m)}\n${replyLine(m) ? replyLine(m) + '\n' : ''}${RESPONSIVE_NOTE}\n`
+}
 
 // 從轉接器收到的信件全文取出抬頭上的 reply 欄位：'yes'｜'no'｜'?'；不是來信抬頭或沒有這個欄位回 null。
 // 只認第一行【最後面】那個 reply=（橋寫在最後；寄件人自填的視窗名就算含 " reply=no" 也排在它前面，騙不到）
