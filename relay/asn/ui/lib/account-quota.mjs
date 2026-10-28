@@ -43,3 +43,40 @@ export function quotaView(a, now = Date.now()) {
   const ago = agoText(a.at, now)
   return { known: true, text: parts.join('、'), meta: stale ? `${ago}・資料較舊` : ago, resetText, stale, exhausted }
 }
+
+// ---- 電腦版設定頁的額度條（#374）：5 小時、每週兩條剩餘百分比，重置時間寫「約 N 小時後」 ----
+export const NO_QUOTA_TEXT = '沒有額度資料'   // Codex、Grok 沒有額度回報
+export const NOT_CONNECTED_TEXT = '尚未接上，到「啟動設定」的「額度回報」接上'
+export const LOW_PCT = 20   // 剩這麼多以下，條改成警示色
+
+/** 重置時間 → 「約 N 小時後重置」（不到 1 小時寫「不到 1 小時後重置」；已過或沒有就空字串）。who＝哪一條的（例如「5 小時額度」），放在最前面 */
+export function resetIn(resetAt, now = Date.now(), who = '') {
+  const t = Date.parse(resetAt ?? '')
+  if (!Number.isFinite(t) || t <= now) return ''
+  const h = Math.round((t - now) / 3600_000)
+  return `${who}${h < 1 ? '不到 1 小時後重置' : `約 ${h} 小時後重置`}`
+}
+
+/**
+ * 重置時間是哪一條的：跟電腦端 claude_quota.rs 的規則一致——用完（剩 0%）的那條；兩條都用完是較晚的那個（兩條都要等）；
+ * 都沒用完就是 5 小時那條（沒有 5 小時的就是每週的）
+ */
+export function resetOwner(five, week) {
+  if (five === 0 && week === 0) return '兩條額度都'
+  if (week === 0) return '每週額度'
+  if (five === 0 || five != null) return '5 小時額度'
+  return week != null ? '每週額度' : ''
+}
+
+/**
+ * 一個 Claude 帳號的額度條。hookOn＝這台的「額度回報」有沒有接上（還沒查到給 null）。
+ * 回 { bars: [{ key, label, pct, low }], note, reset, meta, stale }；沒有數字時 bars 是空的，note 寫原因（沒接上就提醒去接上），不編數字
+ */
+export function quotaBars(a, { hookOn = null, now = Date.now() } = {}) {
+  const v = quotaView(a, now)
+  const bars = [['five', '5 小時', pct(a?.five_hour_pct)], ['week', '每週', pct(a?.weekly_pct)]]
+    .filter(([, , p]) => p != null && v.known)
+    .map(([key, label, p]) => ({ key, label, pct: p, low: p <= LOW_PCT }))
+  if (!bars.length) return { bars, note: hookOn === false ? NOT_CONNECTED_TEXT : v.text, reset: '', meta: '', stale: true }
+  return { bars, note: '', reset: resetIn(a?.reset_at, now, resetOwner(pct(a?.five_hour_pct), pct(a?.weekly_pct))), meta: v.meta, stale: v.stale }
+}
