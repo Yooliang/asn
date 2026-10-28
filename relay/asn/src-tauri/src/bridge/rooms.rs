@@ -75,17 +75,20 @@ fn has_relation(msg: &Value) -> bool {
     room_header("", msg).contains(" relation=")
 }
 
-/// 轉交給視窗的群組訊息文字（標頭、提示、內文＋附件提示行）
+/// 轉交給視窗的群組訊息文字（標頭、提示、內文＋附件提示行）；不分引擎的部分（沒有「保持能回應」的提醒）
 pub fn room_text(room_name: &str, msg: &Value, attach_cmd: Option<&str>) -> String {
-    room_text_waited(room_name, msg, attach_cmd, 0)
+    room_text_waited(room_name, msg, attach_cmd, 0, "respond")
 }
 
-/// 同 room_text；多位被叫醒（順位資訊總數 ≥ 2）時，提示行後面多一行「順位：…」。waited_ms＝依順位已延遲的毫秒數
-pub fn room_text_waited(room_name: &str, msg: &Value, attach_cmd: Option<&str>, waited_ms: u64) -> String {
+/// 同 room_text；多位被叫醒（順位資訊總數 ≥ 2）時，提示行後面多一行「順位：…」。waited_ms＝依順位已延遲的毫秒數。
+/// 收件視窗自己會寄信（engine_id 是 claude、pi；與個人信 mail::preamble 同一個界線）時，說明行最後（順位行之後、內文之前）
+/// 多一行「保持能回應」的提醒（#494，mail::RESPONSIVE_NOTE）
+pub fn room_text_waited(room_name: &str, msg: &Value, attach_cmd: Option<&str>, waited_ms: u64, engine_id: &str) -> String {
     let body = msg.get("body").and_then(Value::as_str).unwrap_or("");
     let hint = if has_relation(msg) { format!("{ROOM_HINT}{RELATION_HINT}") } else { ROOM_HINT.to_string() };
     let rank_line = wake_of(msg).filter(|w| w.total >= 2).map(|w| format!("{}\n", wake_line(&w, waited_ms))).unwrap_or_default();
-    format!("{}\n{}\n{}{}", room_header(room_name, msg), hint, rank_line, body_with_notes(body, msg.get("attachments"), attach_cmd))
+    let note = if super::mail::sends_own_mail(engine_id) { format!("{}\n", super::mail::RESPONSIVE_NOTE) } else { String::new() };
+    format!("{}\n{}\n{}{}{}", room_header(room_name, msg), hint, rank_line, note, body_with_notes(body, msg.get("attachments"), attach_cmd))
 }
 
 // ---- 順位（#230）：同一封信同時叫醒多個 AI，依順位延遲，延遲後重看群組再決定回不回 ----------------------
@@ -402,11 +405,11 @@ mod tests {
     #[test]
     fn 順位_說明行只在多位被叫醒時出現_舊格式的訊息文字不變() {
         let plain = json!({"seq": 3, "from": "W~W-政策", "trust": "member", "body": "b"});
-        assert_eq!(room_text("G", &plain, None), room_text_waited("G", &plain, None, 60_000));
+        assert_eq!(room_text("G", &plain, None), room_text_waited("G", &plain, None, 60_000, "respond"));
         let solo = json!({"seq": 3, "from": "W~W-政策", "trust": "member", "body": "b", "wake": {"rank": 1, "total": 1, "before": []}});
         assert_eq!(room_text("G", &solo, None), room_text("G", &plain, None), "只有一位被叫醒不加行");
         let m = json!({"seq": 3, "from": "W~W-政策", "trust": "member", "body": "b", "wake": {"rank": 2, "total": 2, "before": ["甲"]}});
-        let t = room_text_waited("G", &m, None, 60_000);
+        let t = room_text_waited("G", &m, None, 60_000, "respond");
         let lines: Vec<&str> = t.lines().collect();
         assert_eq!(lines[1], ROOM_HINT, "第二行仍是固定提示");
         assert!(lines[2].starts_with("順位：你是第 2 順位（共 2 位被叫醒，前面順位：甲）。已依順位等待 60 秒"));
@@ -452,5 +455,29 @@ mod tests {
         assert!(Cursors::load(d.path()).all().is_empty());
         std::fs::write(d.path().join("rooms-cursor.json"), r#"{"R1|T~x":2,"bad":"s"}"#).unwrap();
         assert_eq!(Cursors::load(d.path()).get("R1|T~x"), Some(2));
+    }
+
+    /// #494：與 relay/machine/test/room-header-label.test.mjs 的「保持能回應」向量逐字相同
+    #[test]
+    fn 群組信_保持能回應提醒_只給自己寄信的視窗_放在說明行最後() {
+        use crate::bridge::mail::RESPONSIVE_NOTE;
+        let plain = json!({"seq": 3, "from": "W~W-政策", "trust": "member", "body": "b"});
+        for eng in ["claude", "pi"] {
+            assert_eq!(room_text_waited("G", &plain, None, 0, eng), format!("[群組 G] trust=member from=W/W-政策 #3\n{ROOM_HINT}\n{RESPONSIVE_NOTE}\nb"), "{eng}");
+            // 有 relation、有順位行：提醒排在順位行之後、內文之前
+            let m = json!({"seq": 3, "from": "W~W-政策", "trust": "member", "relation": "other", "body": "b", "wake": {"rank": 2, "total": 2, "before": ["甲"]}});
+            let t = room_text_waited("G", &m, None, 60_000, eng);
+            let lines: Vec<&str> = t.lines().collect();
+            assert_eq!(lines[1], format!("{ROOM_HINT}{RELATION_HINT}"));
+            assert!(lines[2].starts_with("順位：你是第 2 順位"));
+            assert_eq!(lines[3], RESPONSIVE_NOTE);
+            assert_eq!(lines[4], "b");
+            assert_eq!(lines.len(), 5);
+        }
+        // 自動回信的轉接器：橋代寄那一輪的回答，不給提醒（文字與 room_text 相同）
+        for eng in ["respond", "codex", "gemini", "acp"] {
+            assert_eq!(room_text_waited("G", &plain, None, 0, eng), room_text("G", &plain, None), "{eng}");
+            assert!(!room_text_waited("G", &plain, None, 0, eng).contains(RESPONSIVE_NOTE));
+        }
     }
 }

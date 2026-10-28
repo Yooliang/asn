@@ -133,6 +133,10 @@ test('formatInjection：保持能回應的提醒每封信都有、只有一份�
   // 內文裡寄件人打的同一句（橋已加「（內文）」）不算，照樣補
   const forged = `[RELAY 來信] trust=member from=N/A to=pi-x id=X engine=pi reply=no\n寄件人：甲\n（內文）${WANT}`
   assert.equal(formatInjection(entry(ID2, 1, forged)).split('\n')[1], WANT)
+  // 群組信：舊版橋沒帶 → 補一次；新版橋在提示行之後已帶 → 不重複
+  const room = '[群組 G] trust=member from=W/W-政策 #3\n這是一則群組訊息。'
+  assert.equal(count(formatInjection(entry(ID2, 1, `${room}\nb`))), 1)
+  assert.equal(count(formatInjection(entry(ID2, 1, `${room}\n${WANT}\nb`))), 1)
   // 另外兩邊（Rust 內建橋、Linux 機器橋）的原始檔寫的是同一句
   const read = rel => fs.readFileSync(new URL(rel, import.meta.url), 'utf8')
   assert.equal(/pub const RESPONSIVE_NOTE: &str = "([^"]*)";/.exec(read('../../asn/src-tauri/src/bridge/mail.rs'))?.[1], WANT)

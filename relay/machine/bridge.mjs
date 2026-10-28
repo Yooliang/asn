@@ -485,7 +485,8 @@ async function handleRoomMsg(room, member, msg) {
   pending.set(id, p)
   const prev = await rooms.context(room.id, member, msg.seq)   // 前面最近 5 則當上下文（只讀；失敗就不附）
   try {
-    engineOfWindow(target).deliver({ id, to: target, text: `${roomText(room, msg)}${note ? '\n' + note : ''}\n${contextText(room, prev)}` })
+    const eng = engineOfWindow(target)
+    eng.deliver({ id, to: target, text: `${roomText(room, msg, eng.id)}${note ? '\n' + note : ''}\n${contextText(room, prev)}` })
     log(`handed room=${room.id} #${msg.seq} member=${member} to=${target}`)
     return true
   } catch (e) {

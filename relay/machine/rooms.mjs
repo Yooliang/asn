@@ -6,6 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { bodyWithNotes } from './attach-format.mjs'
+import { RESPONSIVE_NOTE, sendsOwnMail } from './mail-format.mjs'
 
 export const ROOM_HINT = '這是一則群組訊息。請先看下面的歷史紀錄，確定這件事跟你有關（被點名、或是在回你剛才說的事）才回覆；跟你無關就不要回。'
 export const NO_REPLY_RE = /（不需回覆）|\[no-reply\]/i
@@ -42,7 +43,10 @@ export function roomHeader(room, msg) {
   const rel = relationOf(msg)
   return `[群組 ${room.name}] trust=${msg.trust ?? ''} from=${fromText(msg)}${rel ? ` relation=${rel}` : ''} #${msg.seq}`
 }
-export const roomText = (room, msg) => `${roomHeader(room, msg)}\n${ROOM_HINT}${relationOf(msg) ? RELATION_HINT : ''}\n${bodyWithNotes(msg.body ?? '', msg.attachments)}`
+// engineId：收件視窗的引擎。自己會寄信的 Claude 視窗（sendsOwnMail，與個人信同一個界線）在提示行之後、內文之前多一行
+// 「保持能回應」的提醒（#494）；沒給引擎（Aegis 橋問成員的那條路）或自動回信的轉接器不加
+export const roomText = (room, msg, engineId = '') =>
+  `${roomHeader(room, msg)}\n${ROOM_HINT}${relationOf(msg) ? RELATION_HINT : ''}\n${sendsOwnMail(engineId) ? RESPONSIVE_NOTE + '\n' : ''}${bodyWithNotes(msg.body ?? '', msg.attachments)}`
 
 // 轉交點名訊息時附的上下文：前面最近幾則（舊→新，每則一行、過長截斷）＋怎麼往回翻
 export const CONTEXT_COUNT = 5

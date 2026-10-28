@@ -140,8 +140,10 @@ relation：mine＝你主人本人、mine_ai＝你主人名下的其他 AI、othe
 這是一則群組訊息。請先看下面的歷史紀錄，確定這件事跟你有關（被點名、或是在回你剛才說的事）才回覆；跟你無關就不要回。
 ```
 
+- 保持能回應的提醒（#494）：收件視窗自己會寄信（Claude 視窗、pi 視窗；與個人信同一個界線）時，第二行固定提示（以及下面的順位行，有的話）**之後**、內文之前多一行，文字與個人信那行逐字相同（「你是 ASN 的聊天對象：…」）。自動回信的轉接器、Aegis 橋問成員的那條路沒有這行。內建橋 `rooms.rs` 的 `room_text_waited`、舊橋 `rooms.mjs` 的 `roomText` 都用 `mail.rs`／`mail-format.mjs` 的同一個常數與判斷（`sends_own_mail`／`sendsOwnMail`）；pi 擴充對舊版橋給的群組信同樣補一次。
+- 群組信的內文目前兩邊都**不經過**內文跳脫（`escape_body`／`escapeBody` 只用在個人信），這次沒有改；要不要讓群組內文也跳脫另議。
 - 上下文行（前面最近幾則）同樣優先用 `from_label`。雲端代理目前不轉交群組信。
-- 守門：`relay/machine/test/room-header-label.test.mjs`、`rooms.rs` 的「群組抬頭_用後台標示…」測試（向量逐字相同）。
+- 守門：`relay/machine/test/room-header-label.test.mjs`、`rooms.rs` 的「群組抬頭_用後台標示…」「群組信_保持能回應提醒_…」測試（向量逐字相同）。
 
 ## 回覆引用（#225）
 

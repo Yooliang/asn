@@ -216,12 +216,17 @@ pub const VOICE_NOTE: &str = "（語音通話：這封是語音辨識的文字�
 /// 內文行首以「你是 ASN 的聊天對象：」開頭的行會被 escape_body 跳脫，所以內文冒充無效
 pub const RESPONSIVE_NOTE: &str = "你是 ASN 的聊天對象：耗時的工作（建置、全套測試、等 CI／審查／部署）交給子代理或背景做，自己只做輕的事、隨時能回信；不要在前景空等超過 2 分鐘。";
 
+/// 收件視窗自己會寄信（claude、pi）：要回信指示與「保持能回應」的提醒只給這兩種（個人信與群組信同一個界線）。
+/// 背景工作者、Codex 這類轉接器的回答由橋自動寄回，不能叫它們用 asn_send；
+/// 它們那一輪的最後回答就是寄回去的信，叫它把工作丟到背景，寄回去的會是半成品
+pub fn sends_own_mail(engine_id: &str) -> bool {
+    matches!(engine_id, "claude" | "pi")
+}
+
 /// 抬頭之後、內文之前的說明行（各行以換行結尾）：寄件人說明（語音通話時後面接固定提醒）＋（reply=yes 才有的）要回信指示＋保持能回應的提醒
 pub fn preamble(m: &Mail, engine_id: &str) -> String {
     let mut out = format!("{}{}\n", sender_line(m), if m.voice { VOICE_NOTE } else { "" });
-    // 背景工作者、Codex 這類轉接器的回答由橋自動寄回，不能叫它們用 asn_send，所以只有自己會寄信的 claude、pi 視窗加這兩行。
-    // 「保持能回應」也只給這兩種：轉接器那一輪的最後回答就是寄回去的信，叫它把工作丟到背景，寄回去的會是半成品
-    if matches!(engine_id, "claude" | "pi") {
+    if sends_own_mail(engine_id) {
         if let Some(r) = reply_line(m) {
             out += &r;
             out.push('\n');

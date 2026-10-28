@@ -124,7 +124,7 @@ test('bridge 群組：只轉 for_me；點名轉給對的視窗；owner 發的轉
     assert.equal(rec.find(r => key(r) === 'T-視窗甲#4').id, roomUuid('R1', 4, 'T~T-視窗甲'))
     // 標頭、提示、內文
     const j3 = rec.find(r => key(r) === 'T-視窗甲#3').text
-    assert.match(j3, /\n\[群組 專案群\] trust=member from=W\/W-政策 #3\n這是一則群組訊息。請先看下面的歷史紀錄，確定這件事跟你有關（被點名、或是在回你剛才說的事）才回覆；跟你無關就不要回。\n群組內文-3\n---- 前面 1 則（舊→新）----\n#2 政策：群組內文-2\n（要看更多：node "[^"]+room\.mjs" --room-read R1 --last 20）\nMAIL>>>$/)
+    assert.match(j3, /\n\[群組 專案群\] trust=member from=W\/W-政策 #3\n這是一則群組訊息。請先看下面的歷史紀錄，確定這件事跟你有關（被點名、或是在回你剛才說的事）才回覆；跟你無關就不要回。\n你是 ASN 的聊天對象：耗時的工作（建置、全套測試、等 CI／審查／部署）交給子代理或背景做，自己只做輕的事、隨時能回信；不要在前景空等超過 2 分鐘。\n群組內文-3\n---- 前面 1 則（舊→新）----\n#2 政策：群組內文-2\n（要看更多：node "[^"]+room\.mjs" --room-read R1 --last 20）\nMAIL>>>$/)
     // #4 的上下文是 #2、#3（舊→新），不含自己
     assert.match(d4.text, /---- 前面 2 則（舊→新）----\n#2 政策：群組內文-2\n#3 政策：群組內文-3\n（要看更多/)
     // 所有 room_read 都帶 since、不帶 mark（不動後端已讀）

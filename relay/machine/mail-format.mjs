@@ -90,9 +90,10 @@ export const replyLine = m => {
 
 // 抬頭之後、內文之前的說明行（每行以換行結尾）：寄件人說明＋（reply=yes 且收件的是 Claude 視窗才有的）要回信指示＋（Claude 視窗才有的）保持能回應的提醒。
 // 背景工作者、Codex 這類轉接器的回答由橋自動寄回，不能叫它們用 asn_send，所以只有 claude 引擎加這兩行；
-// 轉接器那一輪的最後回答就是寄回去的信，叫它把工作丟到背景，寄回去的會是半成品，所以提醒也不給它們
+// 轉接器那一輪的最後回答就是寄回去的信，叫它把工作丟到背景，寄回去的會是半成品，所以提醒也不給它們（群組信 rooms.mjs 的 roomText 同一個界線）
+export const sendsOwnMail = engineId => engineId === 'claude'
 export const mailPreamble = (m, engineId = 'claude') => {
-  if (engineId !== 'claude') return `${senderLine(m)}${voiceNote(m)}\n`
+  if (!sendsOwnMail(engineId)) return `${senderLine(m)}${voiceNote(m)}\n`
   return `${senderLine(m)}${voiceNote(m)}\n${replyLine(m) ? replyLine(m) + '\n' : ''}${RESPONSIVE_NOTE}\n`
 }
 

@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { roomHeader, roomText, RELATION_HINT, ROOM_HINT, contextText } from '../rooms.mjs'
+import { RESPONSIVE_NOTE } from '../mail-format.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const room = { id: 'R', name: 'Asn' }
@@ -38,4 +39,17 @@ test('與 Rust 內建橋的固定文字逐字一致、規格文件有寫', () =>
   assert.ok(rs.includes(RELATION_HINT))
   const doc = fs.readFileSync(path.join(here, '../../../docs/design/MAIL-HEADER.md'), 'utf8')
   assert.ok(doc.includes(RELATION_HINT) && doc.includes('relation='))
+})
+// #494：與 Rust rooms.rs「群組信_保持能回應提醒_…」測試同一組向量
+test('保持能回應提醒：Claude 視窗的群組信在提示行之後、內文之前多一行；沒給引擎或自動回信的轉接器不加', () => {
+  const plain = { seq: 3, from: 'W~W-政策', trust: 'member', body: 'b' }
+  assert.equal(roomText({ name: 'G' }, plain, 'claude'), `[群組 G] trust=member from=W/W-政策 #3\n${ROOM_HINT}\n${RESPONSIVE_NOTE}\nb`)
+  const lines = roomText({ name: 'G' }, { ...plain, relation: 'other' }, 'claude').split('\n')
+  assert.deepEqual(lines.slice(1), [ROOM_HINT + RELATION_HINT, RESPONSIVE_NOTE, 'b'])
+  for (const eng of [undefined, '', 'acp', 'codex', 'gemini']) {
+    assert.equal(roomText({ name: 'G' }, plain, eng), `[群組 G] trust=member from=W/W-政策 #3\n${ROOM_HINT}\nb`, String(eng))
+  }
+  // Rust 內建橋的群組抬頭用同一個常數（mail::RESPONSIVE_NOTE）、同一個判斷（sends_own_mail）
+  const rs = fs.readFileSync(path.join(here, '../../asn/src-tauri/src/bridge/rooms.rs'), 'utf8')
+  assert.ok(rs.includes('super::mail::sends_own_mail(engine_id)') && rs.includes('super::mail::RESPONSIVE_NOTE'))
 })

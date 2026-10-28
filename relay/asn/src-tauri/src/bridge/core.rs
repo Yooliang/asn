@@ -1391,9 +1391,11 @@ impl Core {
         self.pending.push(p);
         self.persist();
         let prev = self.room_context(&room_id, member, seq).await; // 前面最近 5 則當上下文（只讀；失敗就不附）
+        // 自動回信的 worker 由橋代寄回答：不附「保持能回應」的提醒（與個人信同一個判斷）
+        let pre_engine = if self.is_respond(&target) { "respond".to_string() } else { self.engine_of(&target) };
         let text = format!(
             "{}{}\n{}",
-            rooms::room_text_waited(&room_name, msg, self.cfg.attach_cmd.as_deref(), waited_ms),
+            rooms::room_text_waited(&room_name, msg, self.cfg.attach_cmd.as_deref(), waited_ms, &pre_engine),
             if note.is_empty() { String::new() } else { format!("\n{note}") },
             {
                 let late = rooms::late_text(extras, waited_ms);

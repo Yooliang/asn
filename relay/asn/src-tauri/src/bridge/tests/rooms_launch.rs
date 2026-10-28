@@ -109,8 +109,8 @@ async fn 群組_只轉_for_me_點名轉給對的視窗_標頭提示與上下文_
     assert_eq!(f.iter().find(|x| key(x) == "T-視窗甲#4").unwrap().0, room_uuid("R1", 4, "T~T-視窗甲"));
     // 標頭、提示、內文、上下文（前面最近的幾則，舊→新）、往回翻的指令
     let j3 = &f.iter().find(|x| key(x) == "T-視窗甲#3").unwrap().2;
-    assert_eq!(j3, &format!("[群組 專案群] trust=member from=W/W-政策 #3\n{ROOM_HINT}\n群組內文-3\n---- 前面 1 則（舊→新）----\n#2 政策：群組內文-2\n（要看更多：/x/asn-cli room --room-read R1 --last 20）
-{}", crate::bridge::corrlog::path_line(&h.core.cfg.handoff_dir, "T-視窗甲")));
+    assert_eq!(j3, &format!("[群組 專案群] trust=member from=W/W-政策 #3\n{ROOM_HINT}\n{}\n群組內文-3\n---- 前面 1 則（舊→新）----\n#2 政策：群組內文-2\n（要看更多：/x/asn-cli room --room-read R1 --last 20）
+{}", crate::bridge::mail::RESPONSIVE_NOTE, crate::bridge::corrlog::path_line(&h.core.cfg.handoff_dir, "T-視窗甲")));
     assert!(d4.2.contains("---- 前面 2 則（舊→新）----\n#2 政策：群組內文-2\n#3 政策：群組內文-3\n（要看更多"));
     assert!(d4.2.starts_with("[群組 專案群] trust=owner from=主人 #4\n"));
     // 所有 room_read 都帶 since、不帶 mark（不動後端已讀）；視窗帶 as_agent、節點本身不帶；起算點是 read_seq
