@@ -17,7 +17,7 @@ export const CONNECT_TEXT = {
   piLogin: '登入 pi',
   piLoginNote: '請在打開的視窗輸入 /login，ASN 不會看到你的登入資料',
   modTitle: 'Claude 外掛',
-  modDesc: '讓 Claude 視窗能收發信。取消勾選代表以後不自動安裝或更新；已經裝的會留著。',
+  modDesc: 'ASN 必要元件，會自動安裝和更新。',
   done: '完成',
   running: '處理中…',
   enter: '進入名單',
@@ -25,13 +25,13 @@ export const CONNECT_TEXT = {
   skipped: '沒有勾選，之後可以到設定再做',
 }
 
-/** 預設勾選：額度不勾（要改別的程式的設定檔）；pi 偵測到才勾；Claude 外掛勾（跟現在自動安裝一致） */
-export const connectDefaults = ({ piDetected = false } = {}) => ({ quota: false, pi: Boolean(piDetected), mod: true })
+/** 預設勾選（小良哥的決定，#343）：額度預設打勾，按「完成」就算確認；pi 偵測到才勾；Claude 外掛固定勾選、不能取消 */
+export const connectDefaults = ({ piDetected = false } = {}) => ({ quota: true, pi: Boolean(piDetected), mod: true })
 
 /**
  * 依勾選執行。ops：{ quotaConnect(), piInstall(), modAuto(on) }（都是 async）。
  * - 額度、pi：有勾才做；沒勾就不動（pi 沒偵測到時不做）
- * - Claude 外掛：勾選＝打開「自動安裝或更新」並馬上檢查一次；沒勾＝把開關關掉（不裝也不更新，已經裝的不動）
+ * - Claude 外掛：必要元件，不管 choice 怎麼傳都一律打開「自動安裝或更新」並馬上檢查一次
  * 一項失敗不影響其他項。回 [{ key, ok, text }]（每項一列，給畫面照實顯示）
  */
 export async function runConnect(choice, ops, { piDetected = false } = {}) {
@@ -48,7 +48,7 @@ export async function runConnect(choice, ops, { piDetected = false } = {}) {
   else out.push({ key: 'quota', ok: true, text: CONNECT_TEXT.skipped })
   if (choice.pi && piDetected) await step('pi', () => ops.piInstall(), '已開啟，之後自己開的 pi 也能收發信')
   else out.push({ key: 'pi', ok: true, text: piDetected ? CONNECT_TEXT.skipped : CONNECT_TEXT.piMissing })
-  await step('mod', () => ops.modAuto(Boolean(choice.mod)), choice.mod ? '會自動安裝或更新' : '已關閉自動安裝或更新；已經裝的會留著')
+  await step('mod', () => ops.modAuto(true), '會自動安裝或更新')
   return out
 }
 
@@ -87,7 +87,7 @@ export const ConnectStep = {
         <button class="aero-btn" type="button" v-if="piDetected" @click.prevent="login">{{ T.piLogin }}</button>
         <small v-if="loginMsg">{{ loginMsg }}</small>
         <small v-if="resultOf('pi')" :class="{ 'login-err': !resultOf('pi').ok }">{{ resultOf('pi').text }}</small></span></label>
-      <label class="connect-card"><input type="checkbox" v-model="choice.mod" :disabled="busy || !!results"><span><b>{{ T.modTitle }}</b><small>{{ T.modDesc }}</small><small v-if="resultOf('mod')" :class="{ 'login-err': !resultOf('mod').ok }">{{ resultOf('mod').text }}</small></span></label>
+      <label class="connect-card"><input type="checkbox" checked disabled><span><b>{{ T.modTitle }}</b><small>{{ T.modDesc }}</small><small v-if="resultOf('mod')" :class="{ 'login-err': !resultOf('mod').ok }">{{ resultOf('mod').text }}</small></span></label>
       <button type="button" class="aero-btn login-btn" v-if="!results" :disabled="busy" @click="submit">{{ busy ? T.running : T.done }}</button>
       <button type="button" class="aero-btn login-btn" v-else @click="enter">{{ T.enter }}</button>
     </div>`,

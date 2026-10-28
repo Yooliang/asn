@@ -509,12 +509,16 @@ async fn agy_太久沒動靜_中止並回報_行程崩潰_回報_之後仍可用
 #[tokio::test]
 async fn agy_佇列_一次一輪_依序回覆_忙碌時名單是_busy_超過上限先不收() {
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({"queue_max": 2}))])), &[], "acp", &[]).await;
-    h.fr.put(to_agent(1, "Gemini", "甲"));
+    // 第一封卡在閘門：假 agy 等到閘門檔出現才回（#498：不靠時間，斷言 busy 與「先不收」時第一輪一定還在進行）
+    let gate = h.work.path().join("gate-1");
+    h.fr.put(to_agent(1, "Gemini", &format!("甲\n@@GATE {}", gate.display())));
     h.fr.put(to_agent(2, "Gemini", "乙"));
     h.fr.put(to_agent(3, "Gemini", "丙"));
     h.core.pull("test", now()).await;
     h.set.refresh_all().await;
     assert_eq!(h.set.windows()[0].status.as_deref(), Some("busy"));
+    assert!(h.bodies().iter().all(|x| !x.contains("收到：")), "放行前不該有回覆：{:?}", h.bodies());
+    std::fs::write(&gate, "go").unwrap();
     h.wait("兩封回覆", |h| h.bodies().iter().filter(|b| b.contains("收到：")).count() == 2).await;
     let b = h.bodies();
     assert!(b.iter().any(|x| x.contains("前面還排著 2 封信，這封先不收")), "{b:?}");

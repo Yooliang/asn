@@ -397,7 +397,11 @@ const quotaHook = reactive({ raw: null, busy: false, confirm: false, msg: '' })
 // Claude 外掛「自動安裝或更新」開關（#343）：null＝還沒查到（舊版 Rust 沒有這個指令就不顯示）
 const claudeModAuto = ref(null)
 async function loadClaudeModAuto() {
-  try { claudeModAuto.value = await invoke('claude_mod_auto_get') } catch { claudeModAuto.value = null }
+  try {
+    claudeModAuto.value = await invoke('claude_mod_auto_get')
+    // 必要元件、不能取消：0.1.100～0.1.104 版期間在設定裡關過的，這裡改回打開（小良哥的決定，#343）
+    if (claudeModAuto.value === false) claudeModAuto.value = await invoke('claude_mod_auto_set', { on: true })
+  } catch { claudeModAuto.value = null }
 }
 async function loadQuotaHook() {
   try { quotaHook.raw = await transport.quotaHookStatus() } catch { quotaHook.raw = null }
@@ -1613,7 +1617,6 @@ const app = createApp({
         case 'pi-setup-install': await runPiSetup(() => transport.piSetupInstall(), PI_SETUP_TEXT.installed); break
         case 'pi-setup-remove': await runPiSetup(() => transport.piSetupRemove(), PI_SETUP_TEXT.removed); break
         case 'pi-login': try { await invoke('ai_cli_login', { toolId: 'pi' }); piSetup.msg = CONNECT_TEXT.piLoginNote } catch (e) { piSetup.msg = piSetupError(e) } break
-        case 'claude-mod-auto': try { claudeModAuto.value = await invoke('claude_mod_auto_set', { on: value === true }) } catch (e) { accounts.state.mod = `沒有成功：${String(e?.message ?? e)}`; await loadClaudeModAuto() } break
         case 'open-ui-log': uiLogMsg.value = ''; uiLogMsg.value = await openUiLog(invoke); break
         case 'avatar-remove': await removeAvatar(); break
         case 'avatar-upload': avBusy.value = true; try { say((await uploadAvatarFile(value, { toDataUrl: async u => u, setAvatar: v => core.setSelfAvatar(v) })).message) } finally { avBusy.value = false } break   // 分離視窗已在自己那邊裁好圖，送來的是 data URL

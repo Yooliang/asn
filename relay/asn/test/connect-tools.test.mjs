@@ -10,15 +10,15 @@ function ops({ fail = [] } = {}) {
   return { calls, o: { quotaConnect: mk('quota'), piInstall: mk('pi'), modAuto: mk('mod') } }
 }
 
-test('預設勾選：額度不勾、pi 偵測到才勾、Claude 外掛勾', () => {
-  assert.deepEqual(connectDefaults({ piDetected: true }), { quota: false, pi: true, mod: true })
-  assert.deepEqual(connectDefaults({ piDetected: false }), { quota: false, pi: false, mod: true })
+test('預設勾選（小良哥的決定）：額度預設打勾、pi 偵測到才勾、Claude 外掛勾', () => {
+  assert.deepEqual(connectDefaults({ piDetected: true }), { quota: true, pi: true, mod: true })
+  assert.deepEqual(connectDefaults({ piDetected: false }), { quota: true, pi: false, mod: true })
 })
 
-test('勾選都取消：不安裝、不接任何東西；只把 Claude 外掛的自動安裝開關關掉', async () => {
+test('額度與 pi 都取消：不接、不裝；Claude 外掛是必要元件，照樣打開自動安裝（不能取消）', async () => {
   const { calls, o } = ops()
   const r = await runConnect({ quota: false, pi: false, mod: false }, o, { piDetected: true })
-  assert.deepEqual(calls, [['mod', false]], '沒有接額度、沒有裝 pi 擴充；Claude 外掛只是關掉開關（不裝也不更新）')
+  assert.deepEqual(calls, [['mod', true]], '沒有接額度、沒有裝 pi 擴充；Claude 外掛一律打開，連 choice.mod 傳 false 也一樣')
   assert.ok(r.every(x => x.ok))
 })
 
@@ -39,7 +39,7 @@ test('沒偵測到 pi：就算勾了也不裝，照實說明；登入只是幫�
   assert.match(PI_DOC_URL, /^https:\/\/github\.com\//)
 })
 
-test('接線：只有電腦版的引導頁有這一步（名字填好之後）；手機引導不變；設定頁有 Claude 外掛開關與 pi 登入', () => {
+test('接線：只有電腦版的引導頁有這一步（名字填好之後）；手機引導不變；設定頁的 Claude 外掛是固定勾選反灰、有 pi 登入', () => {
   const html = fs.readFileSync(new URL('../ui/onboard.html', import.meta.url), 'utf8')
   assert.match(html, /<connect-step v-if="connect" :api="connectApi" @done="finish"><\/connect-step>/)
   assert.match(html, /@done="connect = true"/)
@@ -48,7 +48,7 @@ test('接線：只有電腦版的引導頁有這一步（名字填好之後）�
   assert.match(js, /modAuto: on => invoke\('claude_mod_auto_set', \{ on \}\)/)
   assert.match(js, /piLogin: \(\) => invoke\('ai_cli_login', \{ toolId: 'pi' \}\)/)
   const sp = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8')
-  assert.match(sp, /act\('claude-mod-auto', \$event\.target\.checked\)/)
-  assert.match(sp, /關掉後 ASN 不再自動安裝或更新 Claude 外掛；已經裝的會留著/)
+  assert.doesNotMatch(sp, /act\('claude-mod-auto'/, '設定裡不能再有關掉 Claude 外掛自動安裝的開關')
+  assert.match(sp, /ASN 必要元件，會自動安裝和更新/)
   assert.match(sp, /act\('pi-login'\)/)
 })

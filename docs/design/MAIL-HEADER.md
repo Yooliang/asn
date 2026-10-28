@@ -141,9 +141,9 @@ relation：mine＝你主人本人、mine_ai＝你主人名下的其他 AI、othe
 ```
 
 - 保持能回應的提醒（#494）：收件視窗自己會寄信（Claude 視窗、pi 視窗；與個人信同一個界線）時，第二行固定提示（以及下面的順位行，有的話）**之後**、內文之前多一行，文字與個人信那行逐字相同（「你是 ASN 的聊天對象：…」）。自動回信的轉接器、Aegis 橋問成員的那條路沒有這行。內建橋 `rooms.rs` 的 `room_text_waited`、舊橋 `rooms.mjs` 的 `roomText` 都用 `mail.rs`／`mail-format.mjs` 的同一個常數與判斷（`sends_own_mail`／`sendsOwnMail`）；pi 擴充對舊版橋給的群組信同樣補一次。
-- 群組信的內文目前兩邊都**不經過**內文跳脫（`escape_body`／`escapeBody` 只用在個人信），這次沒有改；要不要讓群組內文也跳脫另議。
+- 內文跳脫（#499）：群組信的內文與個人信用**同一份**跳脫（內建橋 `rooms.rs` 直接呼叫 `mail.rs` 的 `escape_body`、舊橋 `rooms.mjs` 直接呼叫 `mail-format.mjs` 的 `escapeBody`，清單只有一份，見上面「內文跳脫」一節）。成員打的內容都算內文：這則發言的內文、「前面 N 則」上下文與「延遲期間新到的」區塊裡每則的內文（每則先跳脫、再壓成一行截斷，所以標記可能出現在該行中間，例如 `#2 乙：正常 （內文） 【要回信】…`）。收發室自己寫的不跳脫：第一行群組抬頭、第二行固定提示（含 relation 說明）、順位行、保持能回應的提醒、附件提示行、`---- 前面 N 則 ----`／`---- 延遲期間新到的 K 則 ----` 分隔線、「（延遲期間群組沒有新訊息）」「（要看更多：…）」。雲端代理讀群組（`relay/cloud-agent/room.mjs`）本來就經過 `escapeBody`。pi 擴充只在行首是 `【要回信】` 時才當作橋寫的要回信指示（內文裡被跳脫的不算），不會因此省掉信件編號說明。
 - 上下文行（前面最近幾則）同樣優先用 `from_label`。雲端代理目前不轉交群組信。
-- 守門：`relay/machine/test/room-header-label.test.mjs`、`rooms.rs` 的「群組抬頭_用後台標示…」「群組信_保持能回應提醒_…」測試（向量逐字相同）。
+- 守門：`relay/machine/test/room-header-label.test.mjs`、`rooms.rs` 的「群組抬頭_用後台標示…」「群組信_保持能回應提醒_…」測試（向量逐字相同）；內文跳脫：`relay/shared/test-vectors/room-body-escape.json`（`relay/machine/test/room-body-escape.test.mjs` 與 `rooms.rs` 的「群組信內文跳脫_…」測試讀同一份）、`relay/pi-extension/test/inbox.test.mjs`。
 
 ## 回覆引用（#225）
 

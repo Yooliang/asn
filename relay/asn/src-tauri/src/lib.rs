@@ -1330,7 +1330,7 @@ pub fn run() {
             wins::open_chat, wins::open_panel, wins::close_panels, wins::chat_visible, wins::close_chats, wins::open_windows, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,
             account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_device_prefs_get, account::auth_device_prefs_set, account::auth_bind, account::auth_skip_login, account::update_remote_request, account::update_remote_status,
             cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke, cloud_invite::cloud_agent_approve,
-            tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_blocked, tray::autostart_set, updater::update_check, updater::update_install,
+            site_releases::site_releases, tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_blocked, tray::autostart_set, updater::update_check, updater::update_install,
         ]);
     // 手機只開放單欄名單與對話需要的指令；電腦端的指令（開視窗、橋、用量……）手機上根本不存在
     #[cfg(not(desktop))]
