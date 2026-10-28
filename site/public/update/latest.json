@@ -1,11 +1,11 @@
 {
-  "version": "0.1.103",
-  "notes": "新增：夥伴可以用 asn avatar set --file <圖> 換自己的頭像（png、jpg、webp，會自動裁成正方形、縮小），asn avatar clear 改回自動產生；名單和群組會顯示夥伴自訂的頭像。",
-  "pub_date": "2026-10-28T11:35:35.958Z",
+  "version": "0.1.104",
+  "notes": "改進：收發室轉進夥伴視窗的信（含群組信）多一行提醒：耗時的工作交給子代理或背景做，自己隨時能回信，不在前景空等（#494）。手機：這是最後一個自行安裝版，App 會常駐提示改用 Google Play 版（先移除這個版本，再到 Play 搜尋 ASN）；之後手機版只在 Google Play 發布。",
+  "pub_date": "2026-10-28T14:36:42.062Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjcrZ1ZxN2NaMWxzTFAvbDRpQ1MreXEyUzJMUm95eFBBeWpUMWMvZzFoOThrV0RjeU1NUVd6SFRFWTg4WnllMEVVeEg5dEFUZGcybkp5ZHdwVndPZWdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMTg3MzM1CWZpbGU6QVNOXzAuMS4xMDNfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS4xMDMKdk43Mjk0YkNyeS80bGY5SHhlMzdody9aWlY4Q0Jhd1NaK0JybCtNMVZmNzVRRjNNeHI0UkpuQkI5YnU5Zmk2bjhWdlBBbWI3QnJlbitrS1pYWlJvRFE9PQo=",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.103_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjUrZUgzWTRBaE1IZG4xK0czR1YvMk1UcTEwL3FsYlM1NVJSVjR3QWdhOUxNMHFRalhVZExnUUo2b21JOGdZalZIM0ZTUktoWUlKaWVPOGhEbld4aXdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMTk4MjAxCWZpbGU6QVNOXzAuMS4xMDRfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS4xMDQKcXpUNmR0TU13RHN0VUlMWm1CcG9QaDFoam1nNW9tVVBKMWlyZStCK1F2M0xNN2gwK0Q1bllNOXZKYUwyckhRa3JKNWtPa01JV1gxc1dBL1pBOHMzQ3c9PQo=",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.104_x64-setup.exe"
     }
   }
 }
