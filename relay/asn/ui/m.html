@@ -418,6 +418,7 @@
                     </fieldset>
                     <!-- 經 pi（D2 #422）：那台回報的 pi 模型清單；預設第一個 -->
                     <label class="m-field" v-if="lchRunKey === 'pi' && lchPi.ok">經 pi 的模型<select class="set-sel" v-model="lch.piModel"><option value="">{{ lchPi.defaultModel }}（預設）</option><option v-for="pm in lchPi.models" :key="pm.model" :value="pm.model">{{ pm.model }}</option></select></label>
+                    <p class="m-note" v-if="lchRunKey === 'pi' && lchPi.ok">{{ PI_REMOTE_VERSION_NOTE }}</p>
                     <label class="m-field">工作資料夾<select class="set-sel" v-model="lch.cwd"><option v-for="c in lchChoices.cwds" :key="c" :value="c">{{ c }}</option></select></label>
                     <label class="m-field">名字<input class="set-input" v-model="lch.name" maxlength="40" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
                     <label class="m-field">第一句話（選填）<textarea class="set-area" v-model="lch.first" rows="3" maxlength="4000"></textarea></label>

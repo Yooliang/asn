@@ -55,3 +55,18 @@ test('送出前檢查：沒有能用的開法、經 pi 沒選到清單裡的模�
   assert.match(launchFormError(f(), elig, { run: 'pi', piOk: false }), /經 pi 的模型/)
   assert.equal(launchFormError(f(), elig), '', '舊的呼叫方式照常')
 })
+
+test('舊版電腦提醒與開好時寫出實際模型（asn真 審 #471）', async () => {
+  const { PI_REMOTE_VERSION_NOTE, appearedModel, progressView } = await import('../ui/lib/mobile-launch.mjs')
+  assert.match(PI_REMOTE_VERSION_NOTE, /0\.1\.101 以上/)
+  const friends = [{ node: 'H', agent: '小皮', status: 'online', model: 'minimax/MiniMax-M3' }, { node: 'H', agent: '舊的', status: 'offline', model: 'x' }]
+  assert.equal(appearedModel(friends, 'H', '小皮'), 'minimax/MiniMax-M3')
+  assert.equal(appearedModel(friends, 'H', '舊的'), '', '離線的不算')
+  assert.equal(progressView(null, true, '小皮', 'minimax/MiniMax-M3').text, '「小皮」已經開好了（模型：minimax/MiniMax-M3），可以直接對話。')
+  assert.equal(progressView(null, true, '小皮').text, '「小皮」已經開好了，可以直接對話。', '沒回報模型：照舊')
+  const fs = await import('node:fs')
+  const m = fs.readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8')
+  const l = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
+  assert.ok(m.includes(`<p class="m-note" v-if="lchRunKey === 'pi' && lchPi.ok">{{ PI_REMOTE_VERSION_NOTE }}</p>`), '手機：選經 pi 時寫提醒')
+  assert.ok(l.includes('dlgRemote">{{ PI_REMOTE_VERSION_NOTE }}</p>'), '電腦版替別台開也寫')
+})

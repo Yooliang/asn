@@ -73,6 +73,8 @@ export function launchFormError(f, elig, { run = 'term', piOk = true } = {}) {
 // 那台要開放遠端管理，名單回報才會帶它的 pi 模型清單（launcher.pi_models）
 export const PI_REMOTE_NO_LIST = '那台要開放遠端管理才會回報可用的模型'
 export const PI_REMOTE_NO_PI = '那台電腦沒有偵測到 pi'
+// 0.1.101 以前的電腦會略過選的模型、用 pi 自己的預設開（asn真 決定不加能力旗標，改成提醒＋開好時寫出實際模型）
+export const PI_REMOTE_VERSION_NOTE = '那台的 ASN 要 0.1.101 以上，才會照選的模型開'
 const PI_ONLY_CHANNELS = { acp: { status: 'no', why: '沒有內建通道' }, pi: { status: 'ok', why: '只能經 pi 開' }, term: { status: 'no', why: '不走終端' } }
 
 // 那台的 pi：有沒有 pi 的啟動設定、回報了哪些模型
@@ -156,8 +158,10 @@ export function launchErrorText(msg) {
 }
 
 // 進度：launchers 回的那一筆（status：pending／taken／ok／failed／unconfirmed）＋名單上新視窗出現了沒
-export function progressView(row, appeared, name = '') {
-  if (appeared) return { phase: 'done', text: `「${name}」已經開好了，可以直接對話。` }
+// model＝名單上那個新視窗回報的模型（經 pi 時是「提供者/模型」）：開好時寫出實際的模型，選的跟開出來的不同一看就知道
+export function progressView(row, appeared, name = '', model = '') {
+  const m = String(model ?? '').trim()
+  if (appeared) return { phase: 'done', text: m ? `「${name}」已經開好了（模型：${m}），可以直接對話。` : `「${name}」已經開好了，可以直接對話。` }
   switch (row?.status) {
     case 'failed': return { phase: 'failed', text: `沒有開成功：${friendlyDetail(row.detail)}` }
     case 'ok': return { phase: 'waiting', text: '視窗已經開好，等它出現在名單上…' }
@@ -167,6 +171,9 @@ export function progressView(row, appeared, name = '') {
   }
 }
 const friendlyDetail = d => String(d ?? '').trim().slice(0, 200) || '沒有說明原因'
+
+// 新視窗在名單上回報的模型（還沒出現或沒回報＝空字串）
+export const appearedModel = (friends, node, name) => (friends ?? []).find(f => f.node === node && (f.agent === name || f.nick === name) && f.status !== 'offline' && f.pending !== true)?.model ?? ''
 
 // 新視窗出現在名單上了沒（線上的才算）
 export const appearedIn = (friends, node, name) => (friends ?? []).some(f => f.node === node && (f.agent === name || f.nick === name) && f.status !== 'offline' && f.pending !== true)
