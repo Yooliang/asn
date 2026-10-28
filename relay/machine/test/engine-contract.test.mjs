@@ -74,7 +74,8 @@ const wins = [{ name: '假視窗甲', status: 'idle', cwd_label: 'proj' }, { nam
 test('契約：名單上報帶 engine、不含 hidden 視窗；沒有 openWindow 能力時 launcher 為 null', async () => {
   const r = await runWithFakeEngine({ inbox: [], windows: [...wins, { name: '隱藏', status: 'idle', cwd_label: 'x', hidden: true }], until: c => c.st.rosterPosts.length > 0 })
   const body = r.st.rosterPosts[0]
-  assert.deepEqual(body.agents, [
+  assert.ok(Number.isFinite(body.agents[1].active_at) && body.agents[0].active_at === undefined, '忙碌的視窗帶最後活動時間，閒著且沒收過信的不帶')   // E2～E4
+  assert.deepEqual(body.agents.map(({ active_at, ...rest }) => rest), [
     { name: '假視窗甲', status: 'idle', cwd_label: 'proj', engine: 'fake' },
     { name: '假視窗乙', status: 'busy', cwd_label: 'other', engine: 'fake' },
   ])

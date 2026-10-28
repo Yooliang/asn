@@ -306,6 +306,16 @@ node <ASN 原始碼>/relay/machine/recv.mjs --once     # 拉一次、印出、ac
 - 安全：預設不轉進「完全存取」視窗；不用 `--dangerously-bypass-approvals-and-sandbox`；子行程清掉 `OPENAI_API_KEY` 等。
 - 檢查工具：`node tools-codex-probe.mjs status|send|open`。測試：`test/codex-engine.test.mjs`（假 codex `test/fake-codex.mjs`；含讓 bridge.mjs 載入 codex 轉接器的整合測試）。
 
+### pi 轉接器（`engines/pi.mjs`，#456）
+
+`ASN_ENGINES=claude,pi` 載入（Linux 機器橋預設只有 claude，要自己加）。對裝了 ASN 擴充的互動 pi（`relay/pi-extension/`）做「名單＋轉交」，檔案約定與 Rust 橋的 `bridge/engines/pi.rs` 一致：
+
+- 名單：讀 `<使用者資料夾>/pi-windows/<sessionId>.json`（擴充每 60 秒寫一次）。只收檔名＝sessionId、`engine` 是 pi、5 分鐘內更新、pid 還活著的；名字重複的後者加 `-pid`；擴充版本太舊時名單上提醒更新。
+- 轉交：把信原子寫成 `<使用者資料夾>/pi-inbox/<sessionId>/<信件編號>.json`，寫成功才算已轉交；擴充注入對話後移到 `done/`。同編號重投是覆蓋。視窗不在線同步失敗，信留在信箱。
+- 回信：pi 自己用 `asn_send`（`reply_to` 帶編號）寄，橋不等回覆。不開子程序、不碰金鑰。
+- 順手清理：登記檔 pid 已死超過一天的、沒有登記檔又超過 7 天的收件匣。
+- 名單上報：所有引擎的視窗都會帶可選欄位 `active_at`（信投遞成功、或這一輪看到視窗在忙），pi 另帶 `model`、`detail`（擴充太舊）、`mod_loaded`；舊後台會丟掉這些欄位。
+
 ### acp 轉接器：背景工作者（Gemini 等，`engines/acp.mjs`，#134 第一期）
 
 `ASN_ENGINES=claude,acp` 載入（`run-bridge.ps1 -Engines claude,acp`）。不接「使用者已開的視窗」，而是依 `~/.asn/agents.json`（範本 `agents.example.json`，`ASN_AGENTS_FILE` 可改路徑）長駐啟動一批**工作者**（背景 AI），名單上以工作者名出現（roster 的 `engine` 欄位＝`roster_engine`，例如 `gemini`）。
