@@ -244,6 +244,8 @@ async fn roster_once<A: MailApi>(api: &A, cfg: &InboxCfg, blocked_until: &mut u6
     // 本機執行中的代理（僅顯示、不可收信；開關見 procscan::enabled）
     let procs = tokio::task::spawn_blocking(crate::bridge::procscan::scan_system).await.unwrap_or_default();
     let body = crate::bridge::roster::roster_body_with_procs(&windows, None, Value::Null, &procs);
+    // 靠舊環境變數名才拿到設定的舊名（只送名字；新版一律帶，沒用到是空陣列）
+    let body = crate::bridge::roster::with_legacy_env(body, crate::envc::used_legacy());
     match api.call("roster", Some(body)).await {
         Ok(_) => {
             if *warned {

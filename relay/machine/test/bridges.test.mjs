@@ -141,6 +141,13 @@ test('aegis: 白名單、成功帶 reply_to、error 重試一次、404、其他 
     // cwd_label 一律空：畫面會把它當標題副標露出，不能是 slug
     assert.deepEqual(r.map(a => a.cwd_label), ['', '', '', '', ''])
     assert.equal((log.match(/roster post failed/g) || []).length, 1)
+    // used_legacy_env（F4 PR-2）：頂層、陣列、排序；這裡全用舊名設定，所以舊名都列出，只有名字沒有值
+    const used = st.rosterPosts[0].used_legacy_env
+    assert.ok(Array.isArray(used), '名單頂層帶 used_legacy_env（陣列）')
+    assert.deepEqual(used, [...used].sort())
+    for (const n of ['IRORI_AEGIS_ALLOW', 'IRORI_AEGIS_RETRY_MS', 'IRORI_AEGIS_URL', 'IRORI_RELAY_ID']) assert.ok(used.includes(n), n)
+    assert.ok(used.every(n => /^IRORI_[A-Z0-9_]+$/.test(n)))
+    assert.ok(r.every(a => !('used_legacy_env' in a)), '不放在每位代理')
   } finally { await st.close() }
 })
 
@@ -227,10 +234,15 @@ test('aegis: 只設新名 ASN_AEGIS_* 也能跑；新舊名都設以新名為準
     await runBridge({
       script: 'bridge-aegis.mjs', st,
       env: { ASN_AEGIS_URL: `http://127.0.0.1:${st.port}`, ASN_AEGIS_ALLOW: 'alpha', IRORI_AEGIS_ALLOW: 'someone-else' },
-      until: () => st.acked.has(uid(1)),
+      until: () => st.acked.has(uid(1)) && st.rosterPosts.length >= 1,
     })
     assert.deepEqual(st.asks.map(a => a.target), ['alpha'])
     assert.equal(st.sent[0].body, '新名答')
+    // 新名有值：不算靠舊名（ALLOW 兩個都設、URL 只設新名）；RELAY_ID 等由 runBridge 用舊名設，照列
+    const used = st.rosterPosts[0].used_legacy_env
+    assert.ok(Array.isArray(used))
+    assert.ok(!used.includes('IRORI_AEGIS_ALLOW') && !used.includes('IRORI_AEGIS_URL'), JSON.stringify(used))
+    assert.ok(used.includes('IRORI_RELAY_ID'))
   } finally { await st.close() }
 })
 
@@ -278,6 +290,11 @@ test('bridge: 沒指定收件人且預設收件人不在線 → 不丟給最近�
     assert.doesNotMatch(log, /fallback/)
     assert.equal((log.match(/roster post failed/g) || []).length, 1)
     assert.equal(st.acked.size, 0, '交給本人的信不能由橋 ack')
+    // used_legacy_env（F4 PR-2）：頂層、陣列；這裡用舊名設定，舊名列出、排序
+    const used = st.rosterPosts[0].used_legacy_env
+    assert.ok(Array.isArray(used), '名單頂層帶 used_legacy_env（陣列）')
+    assert.deepEqual(used, [...used].sort())
+    for (const n of ['IRORI_RELAY_DEFAULT_AGENT', 'IRORI_RELAY_ID', 'IRORI_RELAY_URL']) assert.ok(used.includes(n), n)
   } finally { await st.close() }
 })
 

@@ -4,7 +4,7 @@
 // - inbox: Realtime bell + 2 min poll -> 轉接器 deliver（Claude：收發室 worker，claude -p，只有 ListAgents/SendMessage）
 //   -> SendMessage 給本機視窗 -> 等回覆（onReply）-> relay send (reply_to) back to the sender
 // No private Claude Code protocol is used; everything goes through public CLI flags and the public SendMessage tool.
-import { envGet } from './env-compat.mjs'
+import { envGet, usedLegacyEnv } from './env-compat.mjs'
 import { pickAnon } from './anon.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -107,9 +107,10 @@ async function refreshRoster() {
   try {
     // engine 欄位：仲介的 roster 端點只取 name／status／cwd_label（多餘欄位直接忽略，不會 400），舊仲介安全
     // platform／launch_closed_reason（0.2 H2）：開新夥伴精靈用來寫 Linux 的設定方法與這台自己寫的不開放原因；舊仲介忽略
+    // used_legacy_env（F4 PR-2）：靠舊環境變數名才拿到設定的舊名（只有名字、排序去重，沒用到是空陣列）；舊仲介忽略
     const closed = readClosed(LAUNCHER_FILE)
     markBusyActive()
-    await api('roster', { method: 'POST', body: { agents: roster.map(rosterEntry), launcher: launcher.summary(), platform: platformOf(), launch_closed_reason: closed.closed ? closed.reason : null } })
+    await api('roster', { method: 'POST', body: { agents: roster.map(rosterEntry), launcher: launcher.summary(), platform: platformOf(), launch_closed_reason: closed.closed ? closed.reason : null, used_legacy_env: usedLegacyEnv() } })
     rosterWarned = false
   } catch (e) {
     if (!rosterWarned) { log(`roster post failed: ${e.message} (will keep trying quietly)`); rosterWarned = true }

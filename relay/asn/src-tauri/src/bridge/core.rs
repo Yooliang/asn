@@ -560,7 +560,9 @@ impl Core {
         }
         // 在忙也算活躍（E4）：這一輪忙碌的視窗記成現在；名單上沒有的名字不保留
         self.active = roster::active_marks(&self.active, &self.roster, now);
-        let mut body = roster::with_active(roster::roster_body_with_procs(&self.roster, asn.as_deref(), launcher, &procs), &self.active);
+        let body = roster::with_active(roster::roster_body_with_procs(&self.roster, asn.as_deref(), launcher, &procs), &self.active);
+        // 靠舊環境變數名才拿到設定的舊名（只送名字；新版一律帶，沒用到是空陣列）
+        let mut body = roster::with_legacy_env(body, crate::envc::used_legacy());
         // 這台電腦的 Claude 外掛狀態：啟動檢查完與狀態變化時才附（舊後台會丟掉這個欄位，不壞）
         let due = roster::mod_report_due((self.mod_src)(), self.mod_sent.as_ref(), now);
         if let Some(m) = &due {

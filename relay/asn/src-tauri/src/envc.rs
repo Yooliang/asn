@@ -5,8 +5,9 @@
 //! 金鑰類（[`SECRET_NAMES`]）新舊名都不可交給子程序。只記變數名，不記值。
 //!
 //! 新增一個改名時，必須加進 [`PAIRS`]；守門測試會掃原始碼，確認沒有程式還在直接讀 `IRORI_*`。
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::ffi::OsString;
+use std::sync::Mutex;
 
 /// （新名, 舊名）。舊名多半就是把 `ASN_` 換成 `IRORI_`；`IRORI_ASN_*` 的重複 ASN 去掉。
 pub const PAIRS: &[(&str, &str)] = &[
@@ -110,30 +111,108 @@ pub fn pick(lookup: &dyn Fn(&str) -> Option<String>, new: &str) -> Option<String
     }
 }
 
-/// 讀本行程的環境變數（新名優先，沒有才讀舊名）
-pub fn get(new: &str) -> Option<String> {
-    pick(&|k| std::env::var(k).ok(), new)
+// ---- 靠舊名才拿到設定的記錄（名單回報頂層的 used_legacy_env，F4 PR-2，issue #423） ----------------
+
+/// 記下「新名沒有值、退回舊名而且舊名有值」的舊名（只記名字，不記值）。
+/// 全域只有一份 [`USED`]；測試各自建一份 `LegacyLog::new()` 傳進 `*_noting`，互不干擾。
+pub struct LegacyLog(Mutex<BTreeSet<&'static str>>);
+
+impl LegacyLog {
+    pub const fn new() -> LegacyLog {
+        LegacyLog(Mutex::new(BTreeSet::new()))
+    }
+
+    fn note(&self, old: &'static str) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).insert(old);
+    }
+
+    /// 排序去重後的舊名（新的 Vec，不外洩內部集合）
+    pub fn names(&self) -> Vec<String> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).iter().map(|s| s.to_string()).collect()
+    }
+
+    /// 測試用：清空
+    #[cfg(test)]
+    pub fn clear(&self) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
 }
 
-/// 新名與舊名各自的原值（要分辨值是從哪個名字來的才用，例如 ASN_ENGINES，見 bridge::engines::engine_spec）
+/// 本程序讀自己的環境（[`get`]／[`get_os`]／[`get_pair`]、引擎環境快照的 `env_get`）時的記錄。
+/// [`mirror`]／[`mirror_vec`]（交給子程序時新舊名都帶）與 [`pick_from`] 不記。
+pub static USED: LegacyLog = LegacyLog::new();
+
+/// 名單回報頂層的 `used_legacy_env`：這個程序啟動後靠舊名才拿到設定的環境變數舊名，排序去重；沒用到是空陣列
+pub fn used_legacy() -> Vec<String> {
+    USED.names()
+}
+
+/// 同 [`pick`]，另外在「新名沒有值、退回舊名而且舊名有值」時記下舊名
+pub fn pick_noting(lookup: &dyn Fn(&str) -> Option<String>, new: &str, log: &LegacyLog) -> Option<String> {
+    let n = lookup(new);
+    if !filled(&n) {
+        if let Some(old) = legacy(new) {
+            if filled(&lookup(old)) {
+                log.note(old);
+            }
+        }
+    }
+    pick(lookup, new)
+}
+
+/// 讀本行程的環境變數（新名優先，沒有才讀舊名）
+pub fn get(new: &str) -> Option<String> {
+    pick_noting(&|k| std::env::var(k).ok(), new, &USED)
+}
+
+/// 新名與舊名各自的原值（要分辨值是從哪個名字來的才用，例如 ASN_ENGINES，見 bridge::engines::engine_spec）。
+/// 新名沒有值、舊名有值時記進 [`USED`]（呼叫端這時就是用舊名）。
 pub fn get_pair(new: &str) -> (Option<String>, Option<String>) {
     debug_assert!(legacy(new).is_some(), "環境變數 {new} 沒登記在 envc::PAIRS");
-    (std::env::var(new).ok(), legacy(new).and_then(|o| std::env::var(o).ok()))
+    let pair = (std::env::var(new).ok(), legacy(new).and_then(|o| std::env::var(o).ok()));
+    note_pair(new, &pair, &USED);
+    pair
+}
+
+fn note_pair(new: &str, (n, o): &(Option<String>, Option<String>), log: &LegacyLog) {
+    if !filled(n) && filled(o) {
+        if let Some(old) = legacy(new) {
+            log.note(old);
+        }
+    }
 }
 
 /// 同 [`get`]，但回 OsString（路徑類用）
 pub fn get_os(new: &str) -> Option<OsString> {
-    let n = std::env::var_os(new);
+    get_os_noting(&|k| std::env::var_os(k), new, &USED)
+}
+
+fn get_os_noting(lookup: &dyn Fn(&str) -> Option<OsString>, new: &str, log: &LegacyLog) -> Option<OsString> {
+    let n = lookup(new);
     if n.as_ref().map(|s| !s.is_empty()).unwrap_or(false) {
         return n;
     }
     debug_assert!(legacy(new).is_some(), "環境變數 {new} 沒登記在 envc::PAIRS");
-    legacy(new).and_then(std::env::var_os).or(n)
+    let Some(old) = legacy(new) else { return n };
+    match lookup(old) {
+        Some(o) => {
+            if !o.to_string_lossy().trim().is_empty() {
+                log.note(old);
+            }
+            Some(o)
+        }
+        None => n,
+    }
 }
 
 /// 從一份環境快照讀（變數名大小寫不分，Windows 的環境變數就是這樣）
 pub fn pick_from(vars: &[(String, String)], new: &str) -> Option<String> {
     pick(&|k| vars.iter().find(|(n, _)| n.eq_ignore_ascii_case(k)).map(|(_, v)| v.clone()), new)
+}
+
+/// 同 [`pick_from`]，另外記進 [`USED`]：只給「本程序環境的快照」用（引擎的 `env_get`），組子程序的環境不要用
+pub fn pick_from_noting(vars: &[(String, String)], new: &str) -> Option<String> {
+    pick_noting(&|k| vars.iter().find(|(n, _)| n.eq_ignore_ascii_case(k)).map(|(_, v)| v.clone()), new, &USED)
 }
 
 /// 給子程序的環境：登記過的（非金鑰）變數新舊名都帶，值以新名優先。已存在的其他變數原樣不動。
@@ -185,6 +264,77 @@ mod tests {
             assert_eq!(pick(&look(&[(new, "  "), (old, "o")]), new).as_deref(), Some("o"), "{new} 新名空白");
             assert_eq!(pick(&look(&[]), new), None, "{new} 都沒設");
         }
+    }
+
+    fn vector_cases() -> Vec<serde_json::Value> {
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../shared/test-vectors/legacy-env.json");
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap();
+        v["cases"].as_array().unwrap().clone()
+    }
+
+    fn strs(v: &serde_json::Value) -> Vec<String> {
+        v.as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect()
+    }
+
+    /// 共用向量（relay/shared/test-vectors/legacy-env.json）：只有舊名＝列入、只有新名＝不列、兩個都有＝不列、新名空白＋舊名有值＝列入
+    #[test]
+    fn 舊名記錄_共用向量() {
+        let cases = vector_cases();
+        assert!(cases.len() >= 4, "向量至少要有四種情況");
+        for c in cases {
+            let name = c["name"].as_str().unwrap();
+            let env: Vec<(String, String)> = c["env"].as_object().unwrap().iter().map(|(k, v)| (k.clone(), v.as_str().unwrap().to_string())).collect();
+            let lookup = |k: &str| env.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
+            // get 與 get_pair 兩條讀法各自記錄，結果要一樣
+            let (log, log_pair) = (LegacyLog::new(), LegacyLog::new());
+            for key in strs(&c["read"]) {
+                let new = format!("ASN_{key}");
+                pick_noting(&lookup, &new, &log);
+                let pair = (lookup(&new), legacy(&new).and_then(|o| lookup(o)));
+                note_pair(&new, &pair, &log_pair);
+            }
+            assert_eq!(log.names(), strs(&c["used"]), "{name}");
+            assert_eq!(log_pair.names(), strs(&c["used"]), "{name}（get_pair）");
+        }
+    }
+
+    #[test]
+    fn 舊名記錄_路徑類_get_os() {
+        fn look(pairs: Vec<(&'static str, &'static str)>) -> impl Fn(&str) -> Option<OsString> {
+            move |k| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| OsString::from(*v))
+        }
+        let log = LegacyLog::new();
+        assert_eq!(get_os_noting(&look(vec![("IRORI_HOME", "/o")]), "ASN_HOME", &log), Some(OsString::from("/o")));
+        assert_eq!(log.names(), vec!["IRORI_HOME"], "只有舊名＝列入");
+        let log = LegacyLog::new();
+        get_os_noting(&look(vec![("ASN_HOME", "/n")]), "ASN_HOME", &log);
+        get_os_noting(&look(vec![("ASN_HOME", "/n"), ("IRORI_HOME", "/o")]), "ASN_HOME", &log);
+        get_os_noting(&look(vec![("ASN_HOME", ""), ("IRORI_HOME", " ")]), "ASN_HOME", &log);
+        assert!(log.names().is_empty(), "只有新名、兩個都有、舊名空白都不列");
+        let log = LegacyLog::new();
+        get_os_noting(&look(vec![("ASN_HOME", ""), ("IRORI_HOME", "/o")]), "ASN_HOME", &log);
+        assert_eq!(log.names(), vec!["IRORI_HOME"], "新名空字串＋舊名有值＝列入");
+    }
+
+    #[test]
+    fn 舊名記錄_排序去重_可清空_子程序環境不算() {
+        let log = LegacyLog::new();
+        log.note("IRORI_RELAY_URL");
+        log.note("IRORI_RELAY_ID");
+        log.note("IRORI_RELAY_URL");
+        assert_eq!(log.names(), vec!["IRORI_RELAY_ID", "IRORI_RELAY_URL"]);
+        log.clear();
+        assert!(log.names().is_empty());
+        // mirror／mirror_vec／pick_from 是組子程序的環境，不記進全域。
+        // 全域可能有別的測試讀過的名字，所以挑一個測試裡不會直接讀的名字，只看它有沒有被加進去
+        let probe = "IRORI_CODEX_REPLY_NOTE".to_string();
+        let before = USED.names().contains(&probe);
+        let mut m: HashMap<String, String> = HashMap::new();
+        m.insert(probe.clone(), "x".into());
+        mirror(&mut m);
+        mirror_vec(vec![(probe.clone(), "x".into())]);
+        pick_from(&[(probe.clone(), "x".into())], "ASN_CODEX_REPLY_NOTE");
+        assert_eq!(USED.names().contains(&probe), before);
     }
 
     #[test]

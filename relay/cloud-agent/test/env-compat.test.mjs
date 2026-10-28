@@ -1,5 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { applyEnvCompat, hasRelayKey, withoutRelayEnv, SCRUB_ENV_PREFIXES } from '../env-compat.mjs'
 import { resolveConfig, readKey, readAnonKey, NO_KEY_MSG } from '../config.mjs'
 import { BUILTIN_ANON } from '../../machine/anon.mjs'
@@ -70,4 +73,18 @@ test('readAnonKey：新名優先、內建 anon、舊名 IRORI_RELAY_ANON_KEY 經
   assert.equal(readAnonKey(cfg, childEnv({ ASN_RELAY_ANON_KEY: mine })), mine)
   const { env } = applyEnvCompat({ IRORI_RELAY_ANON_KEY: mine })
   assert.equal(readAnonKey(cfg, env), mine)
+})
+
+// used_legacy_env（F4 PR-2）：與 Rust envc.rs、machine env-compat.mjs 讀同一份向量（雲端在入口一次讀完整張對照表，不看 read）
+const LEGACY_VECTORS = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'shared', 'test-vectors', 'legacy-env.json'), 'utf8')).cases
+
+test('legacyNames：共用向量（只有舊名＝列入、只有新名＝不列、兩個都有＝不列、新名空白＋舊名有值＝列入）', () => {
+  assert.ok(LEGACY_VECTORS.length >= 4)
+  for (const c of LEGACY_VECTORS) assert.deepEqual(applyEnvCompat(c.env).legacyNames, c.used, c.name)
+})
+
+test('legacyNames：排序、只有名字不含值', () => {
+  const { legacyNames } = applyEnvCompat({ IRORI_RELAY_URL: 'https://secret.example', IRORI_CLOUD_HOME: '/w', IRORI_RELAY_ID: 'n' })
+  assert.deepEqual(legacyNames, ['IRORI_CLOUD_HOME', 'IRORI_RELAY_ID', 'IRORI_RELAY_URL'])
+  assert.ok(!JSON.stringify(legacyNames).includes('secret.example'))
 })

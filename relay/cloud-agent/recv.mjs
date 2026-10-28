@@ -48,8 +48,10 @@ export const roomRecordOf = (room, member, agent, m) => ({
 // 收信核心（可單獨測試）：api(action, {method, body}) 是 relay-core 的 api
 export function createReceiver({
   api, cfg, log, now = () => Date.now(), listAllFn, env = rosterScanEnvFrom(cfg),
-  sleep, backoffMs,
+  sleep, backoffMs, usedLegacyEnv = [],
 }) {
+  // 名單回報頂層的 used_legacy_env（F4 PR-2）：入口 applyEnvCompat 的 legacyNames（只有名字），排序去重
+  const legacyEnv = [...new Set(usedLegacyEnv)].sort()
   ensureDir(cfg.mailDir, 0o700)
   const seen = new Set(readJsonl(cfg.inboxFile).map(m => m?.id).filter(Boolean))   // 重啟後靠檔案去重
 
@@ -124,7 +126,7 @@ export function createReceiver({
     if (now() < blockedUntil) return false
     const agents = await resolveCloudAgents(cfg, env, listAllFn)
     try {
-      await api('roster', { method: 'POST', body: { agents } })
+      await api('roster', { method: 'POST', body: { agents, used_legacy_env: [...legacyEnv] } })
       if (warned) log('roster ok again')
       warned = false
       return true
@@ -156,7 +158,7 @@ export async function main(rawEnv = process.env) {
   process.on('unhandledRejection', e => log(`unhandled: ${e?.stack ?? e}`))
 
   const core = createCore({ baseUrl: cfg.baseUrl, key, anonKey: readAnonKey(cfg, env), log, workDir: cfg.mailDir })
-  const rx = createReceiver({ api: core.api, cfg, log })
+  const rx = createReceiver({ api: core.api, cfg, log, usedLegacyEnv: compat.legacyNames })
   log(`recv starting node=${cfg.node} window=${cfg.name} backend=${backendHostCode(cfg.baseUrl)} inbox=${cfg.inboxFile}`)
   void rx.rosterOnce()
   setInterval(() => void rx.rosterOnce(), cfg.rosterMs)

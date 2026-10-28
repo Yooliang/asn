@@ -182,9 +182,10 @@ pub fn codex_child_env(vars: &[(String, String)]) -> Vec<(String, String)> {
 }
 
 /// 讀環境快照。名字登記在 [`crate::envc::PAIRS`] 的，新名（ASN_）優先、沒有才讀舊名（IRORI_）；其他名字照舊精確比對
+/// 這份快照是本程序的環境（`engine_env`），退回舊名時記進 `envc::USED`（名單回報的 used_legacy_env）
 pub fn env_get(vars: &[(String, String)], k: &str) -> Option<String> {
     if crate::envc::legacy(k).is_some() {
-        return crate::envc::pick_from(vars, k);
+        return crate::envc::pick_from_noting(vars, k);
     }
     vars.iter().find(|(n, _)| n.eq_ignore_ascii_case(k)).map(|(_, v)| v.clone())
 }

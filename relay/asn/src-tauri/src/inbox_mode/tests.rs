@@ -248,6 +248,7 @@ async fn 主迴圈_啟動就回報名單並收信_補拉收到後來的信_門�
     let roster = b.fake.of("roster");
     assert!(!roster.is_empty());
     assert_eq!(roster[0].json()["agents"][0]["name"], "家用-收件匣");
+    assert!(roster[0].json()["used_legacy_env"].is_array(), "名單頂層帶 used_legacy_env（陣列）");
     b.mails.lock().unwrap().push(mail(B, "之後來的"));
     assert!(wait_until(|| lines(d.path()).len() == 2).await, "補拉沒收到後來的信");
     shutdown.notify_one();

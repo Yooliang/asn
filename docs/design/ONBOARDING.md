@@ -351,6 +351,18 @@ AUTH.md 已建議：人類動作不要塞進現有 `relay` 函式的金鑰驗證
 - 移除前條件：日誌（以及用戶端回報的 `legacy_names` 旗標，隨 `roster` 附帶，後端只計數）顯示沒有節點還在使用舊名。
 - 移除時：刪除對照表與相容連結的建立、刪除守門測試中的容許清單；之後守門測試要求 repo 內（除歷史文件外）不得出現 `IRORI_`、`.irori-relay`。
 
+#### 5.4.1 名單回報的 `used_legacy_env`（F4，#423）
+
+上一節的「`legacy_names` 旗標」實際的欄位名是 **`used_legacy_env`**，放在名單回報（`roster`）的**頂層**（每位代理的欄位會被後台白名單丟掉，所以不能放在代理清單裡）。
+
+- 內容：字串陣列，只放**這個程序啟動後讀設定時，新名沒有值（沒設或只有空白）、退回舊名而且舊名有值**的環境變數**舊名**，例如 `["IRORI_RELAY_ID","IRORI_AEGIS_URL"]`。只送名字，絕不送值或路徑；排序去重；沒用到送 `[]`。
+- 新版一律帶這個欄位；**看不到這個欄位＝舊版用戶端**（0.1.104 以前）。後台只收 `^IRORI_[A-Z0-9_]{1,64}$` 而且在舊名白名單內的名字，最多 64 個。
+- 三邊都送，判定規則相同（共用向量 `relay/shared/test-vectors/legacy-env.json`）：
+  - 電腦版與 Linux 無頭版：`envc.rs` 的 `get`／`get_os`／`get_pair` 與引擎環境快照的 `env_get` 退回舊名時記下；`mirror`／`mirror_vec`（交給子程序時新舊名都帶）不算。名單送出點在 `bridge/core.rs` 與 `inbox_mode.rs`（`roster::with_legacy_env`）。
+  - Linux 機器橋與 Aegis 橋：`relay/machine/env-compat.mjs` 的 `envGet` 退回舊名時記下（`withBothNames` 不算），`bridge.mjs`、`bridge-aegis.mjs` 送名單時帶 `usedLegacyEnv()`。
+  - 雲端代理：入口 `applyEnvCompat` 回傳的 `legacyNames`，由 `recv.mjs` 帶進名單。
+- 已知盲點：雲端代理的 `send.mjs`、`room.mjs` 是單次指令，不送名單，用舊名也抓不到；電腦版另外開的子程序（例如 `send.mjs`）也一樣。
+
 ### 5.5 要改的地方（總表）
 
 依盤點（`git grep`，詳見附錄）：

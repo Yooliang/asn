@@ -8,7 +8,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { RENAMED, SECRET_NAMES, envGet, isSecretEnvName, withBothNames } from '../env-compat.mjs'
+import { RENAMED, SECRET_NAMES, envGet, isSecretEnvName, withBothNames, createLegacyLog, usedLegacyEnv, resetUsedLegacyEnv } from '../env-compat.mjs'
 import { childEnv } from '../launcher.mjs'
 import { codexChildEnv, resolveCodex } from '../engines/codex-bin.mjs'
 import { parsePullBackoffMs } from '../pull-retry.mjs'
@@ -139,4 +139,32 @@ test('守門：relay/machine 的程式不再直接讀 IRORI_*，一律走 envGet
 test('守門：relay/machine 的檔案一律 LF（會在 Linux 上跑）', () => {
   const crlf = sources(MACHINE).filter(f => fs.readFileSync(f, 'utf8').includes('\r')).map(f => path.relative(MACHINE, f))
   assert.deepEqual(crlf, [])
+})
+
+// ---- used_legacy_env（F4 PR-2，issue #423）：靠舊名才拿到設定的記錄 ----------------------------------
+const LEGACY_VECTORS = JSON.parse(fs.readFileSync(path.join(here, '..', '..', 'shared', 'test-vectors', 'legacy-env.json'), 'utf8')).cases
+
+test('舊名記錄：共用向量（只有舊名＝列入、只有新名＝不列、兩個都有＝不列、新名空白＋舊名有值＝列入）', () => {
+  assert.ok(LEGACY_VECTORS.length >= 4)
+  for (const c of LEGACY_VECTORS) {
+    const log = createLegacyLog()
+    for (const k of c.read) envGet(c.env, k, log)
+    assert.deepEqual(log.names(), c.used, c.name)
+  }
+})
+
+test('舊名記錄：全域那份排序去重、回傳新陣列；組子程序環境（withBothNames）不算', () => {
+  resetUsedLegacyEnv()
+  try {
+    envGet({ IRORI_RELAY_URL: 'u' }, 'RELAY_URL')
+    envGet({ IRORI_RELAY_ID: 'n' }, 'RELAY_ID')
+    envGet({ IRORI_RELAY_URL: 'u' }, 'RELAY_URL')
+    const a = usedLegacyEnv()
+    assert.deepEqual(a, ['IRORI_RELAY_ID', 'IRORI_RELAY_URL'])
+    a.push('IRORI_X')
+    assert.deepEqual(usedLegacyEnv(), ['IRORI_RELAY_ID', 'IRORI_RELAY_URL'], '改回傳的陣列不影響內部')
+    resetUsedLegacyEnv()
+    withBothNames({ IRORI_LAUNCH_DIR: '/d', IRORI_RELAY_ID: 'n' })
+    assert.deepEqual(usedLegacyEnv(), [], '交給子程序的環境不記')
+  } finally { resetUsedLegacyEnv() }
 })
