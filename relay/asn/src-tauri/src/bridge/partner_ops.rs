@@ -1298,8 +1298,11 @@ impl PartnerOps {
         if live {
             return failed("這位夥伴已經在線上");
         }
-        // 3. 找對話紀錄，從裡面取原本的工作資料夾
+        // 3. 找對話紀錄，從裡面取原本的工作資料夾；不是 Claude 的就看是不是 pi 的對話檔（#468）
         let Some(cwd) = find_transcript_cwd(&self.dirs.projects, sid) else {
+            if let Some(found) = self.find_pi_session(sid) {
+                return self.resume_pi(name, found);
+            }
             return failed("找不到原本的對話紀錄，只能開新的夥伴");
         };
         // 4. 資料夾必須在本機啟動設定允許的清單內
@@ -1349,6 +1352,58 @@ impl PartnerOps {
             (true, Some((pid, session))) => ok("視窗已喚醒", Some(json!({ "pid": pid, "session_id": session }))),
             _ => unconfirmed("視窗已送出，但一直沒看到同名的視窗出現（可能卡在「是否信任此資料夾」，請到電腦前看一下）"),
         }
+    }
+
+    /// pi 的對話檔：檔名的編號＝sid，而且檔頭的 id 也是 sid（只讀檔頭，不讀對話內容）；找不到或不只一個都回 None
+    fn find_pi_session(&self, sid: &str) -> Option<super::engines::pi_adopt::Found> {
+        use super::engines::pi_adopt as pa;
+        let hits: Vec<(PathBuf, pa::Header)> = pa::list_session_files(&pa::sessions_dir(&self.env.pi_agent_dir()))
+            .into_iter()
+            .filter(|f| f.file_id == sid)
+            .filter_map(|f| pa::read_header(&f.path).filter(|h| h.id == sid).map(|h| (f.path, h)))
+            .collect();
+        match hits.as_slice() {
+            [(path, h)] => Some(pa::Found { path: path.clone(), session_id: h.id.clone(), cwd: h.cwd.clone(), via: pa::Via::Arg }),
+            _ => None,
+        }
+    }
+
+    /// 喚醒 pi（#468）：在對話檔記的資料夾、用同一段對話（--session）和原本的名字開一個由 ASN 管理的 pi；
+    /// 檢查照開新夥伴（遠端開關、資料夾白名單、名字規則、同名）。登記上名單才算成功，失敗照實回報並附手動接回的指令
+    fn resume_pi(&self, name: &str, found: super::engines::pi_adopt::Found) -> OpResult {
+        let manual = super::engines::pi_adopt::manual_command(&found);
+        let config = match self.env.launch_config() {
+            Ok(c) => c,
+            Err(e) => return failed(if e.is_empty() { "這台電腦還沒有可用的啟動設定".to_string() } else { e }),
+        };
+        if !config.profiles.contains_key("pi") {
+            return failed("這台電腦的啟動設定裡沒有 pi，無法喚醒");
+        }
+        let mut req = LaunchReq { profile: "pi", name, cwd: found.cwd.clone() };
+        if let Err(e) = check_launch(&config, &mut req, &[], self.env.now_ms()) {
+            return failed(format!("{e}，不能從遠端喚醒"));
+        }
+        if self.name_taken_here(name) {
+            return failed("這位夥伴已經在線上");
+        }
+        // 動手前再驗一次本機開關
+        if !self.env.allow_remote() {
+            return failed(CONSENT_OFF);
+        }
+        let session = crate::launch::local::strip_verbatim_prefix(&found.path.to_string_lossy());
+        let pid = match self.env.launch_pi_session(&config, name, &req.cwd, &session) {
+            Ok(p) => p,
+            Err(e) => return failed(format!("pi 沒開起來（{e}）。對話檔還在，可以手動接回：{manual}")),
+        };
+        let os = self.env.os();
+        let home = self.env.pi_home();
+        let appeared = switch::wait_until(os, self.env.timing().appear_wait_ms, self.env.timing().poll_ms, || {
+            super::engines::pi_control::window_session_id(&home, name, self.env.now_ms(), |p| os.alive(p)).is_some()
+        });
+        if !appeared {
+            return unconfirmed(format!("pi 開了，但還沒出現在名單上（可能卡在啟動，或 ASN 的 pi 擴充沒載入）。對話檔還在，可以手動接回：{manual}"));
+        }
+        ok("已喚醒：用同一段對話開了由 ASN 管理的 pi", Some(json!({ "kind": "pi_resume", "pid": pid, "session_id": found.session_id })))
     }
 
     /// 接班換手：記下前任 → 請前任把交接寫到規範資料夾 → 等檔案出現且大小穩定（上限 10 分鐘，逾時照樣換手並註明）
