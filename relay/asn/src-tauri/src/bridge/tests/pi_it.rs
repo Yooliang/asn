@@ -25,6 +25,7 @@ async fn pi_視窗_名單可見_收信寫進收件匣_已轉交才_ack_抬頭帶
         notify: Arc::new(|_| {}),
         pids: PidBook::new(work.path()),
         data_dir: None,
+        handoff_dir: None,
     };
     let set = engines::build(&ctx, Some("pi")).expect("有載入 pi 引擎");
     let mut core = new_core(&fr, work.path(), sessions.path(), sink.clone(), now());

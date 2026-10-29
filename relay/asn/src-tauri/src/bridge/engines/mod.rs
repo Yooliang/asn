@@ -208,6 +208,8 @@ pub struct EngineCtx {
     pub pids: Arc<PidBook>,
     /// ASN 資料夾（launch-prefs.json 在這裡；開新夥伴佇列驗證工作資料夾授權用）；測試與沒有資料夾的情況是 None
     pub data_dir: Option<PathBuf>,
+    /// 往來記錄資料夾（換班接手、換新對話時把名下的往來記錄當前情帶進新對話）；測試與沒有的情況是 None
+    pub handoff_dir: Option<PathBuf>,
 }
 
 impl EngineCtx {

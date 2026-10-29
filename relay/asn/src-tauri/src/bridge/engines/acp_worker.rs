@@ -266,6 +266,8 @@ pub struct WorkerInit {
     pub make_driver: MakeDriver,
     pub events: EventTx,
     pub pids: Arc<PidBook>,
+    /// 往來記錄資料夾：換班接手時把名下的往來記錄當前情帶進新對話；None＝不帶
+    pub handoff_dir: Option<std::path::PathBuf>,
 }
 
 pub struct Worker {
@@ -684,7 +686,7 @@ impl Worker {
                     let mut s = self.st.lock().unwrap();
                     let prev = (s.need_preamble, s.handover.clone());
                     s.need_preamble = true;
-                    s.handover = Some(admin::handover_prompt(&cfg.name, &format!("前任的對話（{dropped}）綁著過期的登入，重開後仍然 401，已改開新對話。")));
+                    s.handover = Some(admin::handover_prompt(&cfg.name, &format!("前任的對話（{dropped}）綁著過期的登入，重開後仍然 401，已改開新對話。"), &self.history()));
                     prev
                 };
                 let old = self.st.lock().unwrap().driver.take();

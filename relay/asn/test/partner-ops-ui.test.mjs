@@ -197,6 +197,7 @@ test('對話框文字：重開要確認、換班接手依引擎說不同的事�
   assert.equal(r.auto, false); assert.equal(r.title, '重開'); assert.match(r.lead, /內建通道/); assert.match(r.lead, /對話會保留/)
   const acp = opDialogText('handover', 'Gemini', '', 'acp')
   assert.ok(acp.points.some(p => /不會請前任寫交接/.test(p)))
+  assert.equal(acp.title, '開新對話'); assert.equal(acp.ok, '開新對話'); assert.ok(acp.points.some(p => /往來記錄/.test(p)), '開新對話要說明會帶入往來記錄')
   const claude = opDialogText('handover', '小文', '')
   assert.ok(claude.points.some(p => /先請它把交接寫到一個檔案/.test(p)))
   for (const t of [r, acp, claude]) for (const s of [t.title, t.lead, t.ok, ...t.points]) assert.ok(!/[A-Za-z]{4,}/.test(s.replace('Gemini', '')), `純中文：${s}`)
