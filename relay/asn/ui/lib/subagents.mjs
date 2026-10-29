@@ -1,5 +1,6 @@
 // 對話上方功能列的「子代理」按鈕（#27）：顯示這個 Claude 視窗正在跑幾個子代理、各自在做什麼。
 // 只放純邏輯；後端指令 subagents_query 在 src-tauri/src/launch/subagents.rs（讀對話記錄檔）。
+import { partnerEngine } from './partner-ops.mjs'
 
 /** 多久問一次（只在對話視窗開著時）。 */
 export const SUBAGENT_POLL_MS = 5000
@@ -8,7 +9,7 @@ export const SUBAGENT_POLL_MS = 5000
 export function canOfferSubagents(friend, { selfNode, engine }) {
   if (!friend || friend.pending) return false
   if (engine !== 'claude') return false
-  if (friend.engine === 'acp') return false
+  if (partnerEngine(friend) === 'acp') return false
   return friend.node === selfNode
 }
 

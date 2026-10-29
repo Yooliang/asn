@@ -58,7 +58,8 @@ export const ChatPane = {
     hintNames: { type: Array, default: () => [] },  // 名單上的夥伴（給語音辨識偏向名字用，選填）；通話對象自己一定會帶
     enterSends: { type: Boolean, default: true },  // Enter 直接送出（電腦預設）；手機的軟鍵盤 Enter 是換行，傳送靠按鈕
     roomCards: { type: Array, default: () => [] },  // 群組：待主持人確認的請求卡片（lib/groups.mjs 的 confirmCards）；非群組不用
-    groupMenu: { type: Boolean, default: false },   // 電腦版：對話上方的「⋯」（邀請別人加入、成員與設定）；手機版有自己的「⋯」，不開這個
+    groupMenu: { type: Boolean, default: false },
+    piModelsFor: { type: Function, default: null },   // 電腦版名單視窗：別台電腦的 pi 模型清單（給大按鈕「切換模型」用，和名單右鍵同一份）   // 電腦版：對話上方的「⋯」（邀請別人加入、成員與設定）；手機版有自己的「⋯」，不開這個
   },
   emits: ['send', 'nudge', 'toggle-dp', 'attach', 'call-state', 'group-decide', 'group-menu'],
   setup(props, { emit }) {
@@ -337,7 +338,7 @@ export const ChatPane = {
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
-  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :active="active" :callable="!!call && !callApi" v-if="!isRoom || opsItems.length" :ops="opsItems" @ops="pickMenu" @call="startCall"></action-bar>
+  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :active="active" :callable="!!call && !callApi" v-if="!isRoom || opsItems.length" :ops="opsItems" :pi-models-for="piModelsFor" @ops="pickMenu" @call="startCall"></action-bar>
   <div class="chatpane-body">
   <div class="chatpane-main">
   <div class="conv">

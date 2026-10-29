@@ -97,6 +97,39 @@ export const maskProbeSource = ({ steps, mask, cover }) => `(async () => {
   return { ok: true, why: '' };
 })()`
 
+// 固定 6 顆大按鈕（#539）：依序找 .actionbar 裡的 .abtn，比對 data-slot、名稱與反灰；名單與查詢是非同步的，等到一致或逾時（回最後一次的差異）
+export const BAR_MEMBERS = {
+  claude: [{ id: 'P', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }],
+  offline: [{ id: 'P', agents: [{ name: 'demo', status: 'idle', online: false, cwd_label: 'demo' }] }],
+  acp: [{ id: 'P', agents: [{ name: 'demo', status: 'idle', engine: 'gemini', cwd_label: 'demo' }] }],
+}
+// [data-slot, 名稱, 反灰]
+export const BAR_PROBES = {
+  claude: { bar: [['call', '通話', false], ['window', '後台隱藏', false], ['model', '切換模型', false], ['subs', '子代理', false], ['tasks', '工作項目', true], ['manage', '管理', false]] },
+  offline: { bar: [['call', '通話', true], ['window', '前台／後台', true], ['model', '切換模型', true], ['subs', '子代理', true], ['tasks', '工作項目', true], ['manage', '管理', false]] },
+  acp: { bar: [['call', '通話', false], ['window', 'ACP 模式', true], ['model', '切換模型', false], ['subs', '子代理', true], ['tasks', '工作項目', true], ['manage', '管理', false]] },
+}
+export const barProbeSource = ({ bar }) => `(async () => {
+  const want = ${JSON.stringify(bar)};
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let why = '';
+  for (let i = 0; i < 60; i++) {
+    const bars = [...document.querySelectorAll('.actionbar')].filter(b => b.offsetParent !== null);
+    const btns = bars.length === 1 ? [...bars[0].querySelectorAll('.abtn')] : [];
+    const got = btns.map(b => [b.dataset.slot || '', b.querySelector('.ab-name')?.textContent.replace(/\s*▾\s*$/, '').trim() || '', b.disabled]);
+    why = bars.length !== 1 ? '看得到的功能列有 ' + bars.length + ' 條' : JSON.stringify(got) === JSON.stringify(want) ? '' : '按鈕不符：' + JSON.stringify(got);
+    if (!why) {
+      const bad = btns.find(b => b.disabled && !b.title);
+      if (bad) why = bad.dataset.slot + ' 反灰卻沒有原因';
+      else if (btns.some(b => b.disabled && b.title.length > 20)) why = '反灰原因超過 20 字';
+      else return { ok: true, why: '' };
+    }
+    await sleep(100);
+  }
+  return { ok: false, why };
+})()`
+export const probeSource = probe => (probe.bar ? barProbeSource(probe) : maskProbeSource(probe))
+
 // ---- 入口頁清單：每個情境載一頁，指定假狀態、等待的畫面特徵 ----
 // ready：頁面掛上後必須存在的選擇器；頁面不能被導走（導走＝流程錯）
 export const SCENARIOS = [
@@ -114,6 +147,10 @@ export const SCENARIOS = [
   // 對話框遮罩（#536）：打開對話框後，遮罩要蓋滿整個視窗，左上使用者區與名單也點不到
   { name: 'list-dialog-mask', page: 'list.html', state: { signedIn: true, partnerTab: true }, ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: MASK_PROBES.desktop },
   { name: 'm-dialog-mask', page: 'm.html', state: { signedIn: true }, ready: '#app.m .m-pager .m-search', probe: MASK_PROBES.mobile },
+  // 固定 6 顆大按鈕（#539）：閒置 Claude、離線 Claude、ACP 工作者，各自依序都在、反灰正確、反灰有 20 字內的原因
+  { name: 'list-bar-fixed', page: 'list.html', state: { signedIn: true, bar: 'claude' }, ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: BAR_PROBES.claude },
+  { name: 'list-bar-fixed-offline', page: 'list.html', state: { signedIn: true, bar: 'offline' }, ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: BAR_PROBES.offline },
+  { name: 'list-bar-fixed-acp', page: 'list.html', state: { signedIn: true, bar: 'acp' }, ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: BAR_PROBES.acp },
 ]
 // 刻意不測的 ui/*.html（要寫理由）；其餘 html 都必須有情境（見單元測試）
 export const EXCLUDED_PAGES = {
@@ -135,6 +172,12 @@ export const tableFor = scenario => {
   if (scenario.state.onboard) t.store_load = { by: 'name', values: {}, fallback: null }
   if (scenario.state.devicesPage) t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(ROSTER_ME) } }
   if (scenario.state.partnerTab) { t.relay_list = { members: PARTNER_MEMBERS }; t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(PARTNER_ME) } } }
+  if (scenario.state.bar) {
+    t.relay_list = { members: BAR_MEMBERS[scenario.state.bar] }
+    t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(PARTNER_ME) } }
+    t.relay_launchers = { machines: [{ node: 'P', online: true, launcher: { profiles: [] } }] }   // 這台開放遠端管理：ACP 的切換模型可按
+    t.partner_console_query = { can_toggle: true, visible: true }
+  }
   if (scenario.state.roster) t.acct_roster = ROSTER_SAMPLE   // 沒放＝後台沒部署（指令被拒），畫面要退回舊的顯示、不出錯
   return t
 }

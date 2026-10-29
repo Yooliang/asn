@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 對話功能列：工作項目（夾板上的待辦清單） -->
+  <defs>
+    <linearGradient id="t" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#cfe2f5"/></linearGradient>
+    <linearGradient id="k" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7fb8f0"/><stop offset="1" stop-color="#2c70c0"/></linearGradient>
+  </defs>
+  <rect x="6" y="4.5" width="20" height="25" rx="2.5" fill="url(#t)" stroke="#4a5d73" stroke-width="1.4"/>
+  <rect x="11.5" y="2.5" width="9" height="4.5" rx="1.4" fill="url(#k)" stroke="#4a5d73" stroke-width="1.2"/>
+  <path d="M9.5 12.5l1.6 1.6 2.8-3M9.5 18.5l1.6 1.6 2.8-3" fill="none" stroke="#2c70c0" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="9.6" y="23" width="3.6" height="3.6" rx=".6" fill="none" stroke="#4a5d73" stroke-width="1.2"/>
+  <path d="M16 12.6h7M16 18.6h7M16 24.8h7" fill="none" stroke="#4a5d73" stroke-width="1.6" stroke-linecap="round"/>
+</svg>

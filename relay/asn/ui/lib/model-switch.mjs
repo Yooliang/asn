@@ -1,6 +1,7 @@
 // 對話中切換模型（名單右鍵「切換模型 ▸」與之後的對話上方功能列 #40 共用）。
 // 只放純邏輯與一個小控制器，不碰 Vue、不碰 DOM；後端指令在 src-tauri/src/launch/switch.rs。
 import { CLAUDE_MODELS } from './model-catalog.mjs'
+import { partnerEngine } from './partner-ops.mjs'
 
 /** 查詢最久等多久（右鍵選單不能被慢的查詢卡住）；切換本身要等舊視窗關掉、新對話出現，不設前端逾時。 */
 export const MODEL_QUERY_TIMEOUT_MS = 2500
@@ -26,10 +27,11 @@ export function canOfferModelSwitch(friend, { selfNode, engine }) {
 /** 「切換模型」為什麼不能用（能用回空字串）：選單固定顯示這一項，不能用時把原因寫在項目下面。判斷與 canOfferModelSwitch 完全相同。 */
 export function modelSwitchBlock(friend, { selfNode, engine }) {
   if (!friend) return '沒有選到夥伴'
-  if (friend.pending) return '這個視窗還在開啟中，開好後才能切換模型'
-  if (friend.engine === 'acp') return '這個夥伴由 ASN 內建通道執行，沒有視窗，不能切換模型'
-  if (engine !== 'claude') return '這位夥伴用的引擎還不能在這裡切換模型'
-  if (friend.node !== selfNode) return '這個視窗在另一台電腦上，要到那台電腦的 ASN 才能切換模型'
+  if (friend.pending) return '視窗還在開啟中'
+  // 名單上 ACP 工作者的 engine 是 gemini／grok 等，要用 partnerEngine 判斷；它們的切換模型走夥伴管理（actionbar.mjs 的 modelViaPartnerOp）
+  if (partnerEngine(friend) === 'acp') return '內建通道執行，沒有視窗'
+  if (engine !== 'claude') return '這個引擎還不能切換模型'
+  if (friend.node !== selfNode) return '視窗在另一台電腦上'
   return ''
 }
 

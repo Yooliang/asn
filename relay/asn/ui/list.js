@@ -41,18 +41,18 @@ import { PI_SETUP_TEXT, piSetupError, piSetupView } from './lib/pi-setup.mjs'
 import { CONNECT_TEXT } from './lib/connect-tools.mjs'
 import { QUOTA_HOOK_TEXT, quotaHookError, quotaHookView } from './lib/quota-hook.mjs'
 import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
-import { CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, buddyConsoleItem, consoleReq, engineForProfile,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice, foregroundOnlyProfile, withTimeout } from './lib/partner-launch-ui.mjs'
+import { BUDDY_CONSOLE_LABEL, CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, consoleReq, engineForProfile,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice, foregroundOnlyProfile, withTimeout } from './lib/partner-launch-ui.mjs'
 import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
 import { PartnerOpDialog, loadOpsContext } from './lib/partner-ops-ui.mjs'
 import { LAUNCHERS_POLL_MS, isAuthDenied, nextLaunchersDelay } from './lib/launcher-poll.mjs'
-import { initialOpsCtx, partnerEngine, sharedWhy } from './lib/partner-ops.mjs'
+import { initialOpsCtx, sharedWhy } from './lib/partner-ops.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
-import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
+import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, runArchive, withArchivedGroup } from './lib/archive.mjs'
 import { backgroundRestoreNoticeText, collectLaunchFailures, findBackgroundTimeouts, launchFailedNoticeText } from './lib/partner-launch-notify.mjs'
 import { ONBOARD_STORE, planOnboarding } from './lib/onboard.mjs'
 import { friendId } from './lib/roster.mjs'
-import { canOfferModelSwitch, confirmText, createModelSwitcher, modelSwitchBlock } from './lib/model-switch.mjs'
-import { consoleBlock } from './lib/actionbar.mjs'
+import { canOfferModelSwitch, confirmText, createModelSwitcher } from './lib/model-switch.mjs'
+import { WINDOW_LABEL, barSlots, consoleBlock, modelViaPartnerOp, partnerMenuItems } from './lib/actionbar.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
 import { channelRows, runChoices, runOptions, vendorRows } from './lib/model-catalog.mjs'
 import { cleanPiModels, piChoiceFor, piLaunchArgs, piOnlyVendorRows, providerStates } from './lib/pi-models.mjs'
@@ -631,12 +631,16 @@ async function refreshOpsCtx() {
   Object.assign(opsCtx, ctx)
   if (ctx.signedIn === null || !ctx.loaded) opsCtxAt = 0   // 查詢失敗不要擋住下一次重查
 }
-const buddyOpItems = computed(() => manageItems(buddyMenuFriend.value, { ...opsCtx, friends: friends.value, asn: asnMap.value }))   // 項目固定；「切換模型」那一項在畫面上換成下面原本的子選單（順序不變）
+// 右鍵選單和對話上方大按鈕／「管理」用同一份項目與反灰規則（#539 第 7 點）：
+// 前台／後台（或 ACP 模式）與切換模型＝barSlots 的第 2、3 格；其餘＝partnerMenuItems（和「管理」同一份，key 去掉 p: 前綴）
+const buddyOpsCtx = computed(() => ({ ...opsCtx, friends: friends.value, asn: asnMap.value }))
+const buddyOpItems = computed(() => partnerMenuItems(buddyMenuFriend.value, buddyOpsCtx.value, info.node).map(i => ({ ...i, key: i.key.slice(2) })))
 const opDlg = reactive({ open: false, op: '', friend: null, item: null })
 function openPartnerOp(it) {
   const f = buddyMenuFriend.value
   if (!f || !it?.ok) return   // 反灰的項目：點了不送出任何動作，選單也不收起（可以接著讀說明）
   closeBuddyMenu()
+  if (it.key === 'adopt') { void adoptLoad(); return }   // 「把這台電腦上開著的終端納入管理…」：和對話上方「管理」同一個接手清單
   if (it.key === 'archive' || it.key === 'unarchive') { void setArchived(f, it.key === 'archive'); return }
   Object.assign(opDlg, { open: true, op: it.key, friend: f, item: it })
 }
@@ -653,12 +657,20 @@ async function setArchived(f, archived) {
 function closeOpDlg() { opDlg.open = false }
 // 右鍵選單立刻出現（固定有「開啟對話」）；主控台切換項目先顯示「檢查中…」，查到才可按，逾時／查不到就停用
 const buddyConsole = reactive({ state: 'none', visible: true, reason: '' })
-const buddyConsoleItemView = computed(() => buddyConsoleItem(buddyConsole.state, buddyConsole.reason))
 // 「切換模型 ▸」：只有本機的 Claude 視窗會出現；查詢逾時或查不到就停用並說明原因（共用 lib/model-switch.mjs，功能列 #40 也用它）
 const modelSwitcher = createModelSwitcher({ transport, log: m => console.info('[ASN]', m) })
 const buddyModel = reactive({ show: false, state: 'none', reason: '', current: '', items: [], open: false, st: null })
 function resetBuddyModel() { Object.assign(buddyModel, { show: false, state: 'none', reason: '', current: '', items: [], open: false, st: null }) }
-const buddySubEnabled = computed(() => buddyModel.state !== 'none' && buddyModel.state !== 'checking' && buddyModel.items.length > 0)
+// 第 2、3 格（不是 AI 夥伴就沒有）：Claude 視窗的切換模型帶查詢結果（buddyModel），其他照查詢前的條件
+const buddySlots = computed(() => {
+  const c = buddyMenuFriend.value
+  if (!c || !buddyOpItems.value.length) return null
+  const s = barSlots(c, { selfNode: info.node, api: true, console: buddyConsole, ops: buddyOpsCtx.value, modelQuery: buddyModel.show ? buddyModel : null })
+  // 右鍵的字固定不隨狀態改（「背景／前台切換」）；ACP 工作者和大按鈕一樣寫「ACP 模式」
+  return { window: { ...s[1], label: s[1].label === WINDOW_LABEL.acp ? WINDOW_LABEL.acp : BUDDY_CONSOLE_LABEL }, model: s[2] }
+})
+const buddyModelOp = computed(() => modelViaPartnerOp(buddyMenuFriend.value))   // ACP 工作者、pi 視窗：切換模型開對話框（ACP 輸入代號、pi 向 pi 查清單），不用子選單
+const buddySubEnabled = computed(() => Boolean(buddySlots.value?.model.ok) && !buddyModelOp.value && buddyModel.items.length > 0)
 let buddySubTimer = null
 watch([() => buddyOpItems.value.length, () => buddyConsole.state, () => buddyModel.show], () => { if (buddyMenu.value) void placeBuddyMenu() })
 async function placeBuddySub() {
@@ -682,21 +694,13 @@ function subEvent(ev, delay = 0) {
 }
 // 右鍵選單的說明小字：同一個原因影響多個項目只在最上方寫一次（notes），各項目只留自己獨有的原因（why）
 const buddyMenuView = computed(() => sharedWhy([
-  { key: 'console', ok: !buddyConsoleItemView.value.disabled, reason: buddyConsoleItemView.value.tip },
-  ...buddyOpItems.value.map(i => (i.key === 'model' && !buddyIsPi.value ? { key: 'model', ok: buddySubEnabled.value, reason: buddyModelWhy.value } : i)),
+  ...(buddySlots.value ? [{ key: 'console', ok: buddySlots.value.window.ok, reason: buddySlots.value.window.reason }, { key: 'model', ok: buddySlots.value.model.ok, reason: buddySlots.value.model.reason }] : []),
+  ...buddyOpItems.value,
 ]))
-const buddyIsPi = computed(() => partnerEngine(buddyMenuFriend.value) === 'pi')   // pi 的「切換模型」沒有固定清單：不用子選單，開對話框輸入
+const buddyModelItem = computed(() => ({ key: 'model', label: '切換模型', ok: Boolean(buddySlots.value?.model.ok), reason: buddySlots.value?.model.reason ?? '' }))
 const buddyWhyOf = key => buddyMenuView.value.rows.find(r => r.key === key)?.why ?? ''
 const buddyModelLabel = computed(() => '切換模型 ▸')   // 文字固定，不隨狀態改字；不能用的原因寫在下面一行
-// 「切換模型」固定出現；不能用時的原因：這個夥伴根本不適用（modelSwitchBlock）→ 檢查中 → 查到切不了的原因
-const buddyModelWhy = computed(() => {
-  const c = buddyMenuFriend.value
-  if (!c) return ''
-  if (!buddyModel.show) return modelSwitchBlock(c, { selfNode: info.node, engine: c.engine || engineForProfile(c.launchProfile || 'claude') })
-  if (buddyModel.state === 'checking') return '檢查中…'
-  if (buddyModel.state === 'none') return buddyModel.reason || '找不到這個視窗'
-  return buddyModel.items.length ? '' : '查不到可切換的模型'
-})
+const buddyModelWhy = computed(() => buddySlots.value?.model.reason ?? '')
 const modelDlg = reactive({ open: false, name: '', target: null, current: '', busy: false, error: '', manual: '', done: '', copied: false, st: null })
 const modelDlgText = computed(() => confirmText(modelDlg.name, modelDlg.current, modelDlg.target?.label ?? '', { ownWindow: Boolean(modelDlg.st?.raw?.ownWindow) }))
 function closeModelDlg() { if (!modelDlg.busy) modelDlg.open = false }
@@ -761,6 +765,7 @@ async function openBuddyMenu(c, e) {
 async function toggleBuddyConsole() {
   const c = buddyMenuFriend.value
   if (!c || buddyConsole.state !== 'toggle') return   // 反灰（檢查中或切不了）：點了什麼都不做，選單不收起，使用者可以讀說明
+  if (!buddySlots.value?.window.ok) return   // 和大按鈕同一套規則（例如離線）反灰時也不動
   const eng = c.engine || engineForProfile(c.launchProfile || 'claude')
   const nextVis = !buddyConsole.visible
   try {
@@ -1678,8 +1683,8 @@ const app = createApp({
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
       opDlg, closeOpDlg, buddyOpItems, openPartnerOp, archiveNote, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
-      buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddyConsoleItemView, buddyMenuOpenChat, toggleBuddyConsole,
-      buddyModel, buddyIsPi, buddyModelLabel, buddyModelWhy, buddyMenuView, buddyWhyOf, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,
+      buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddySlots, buddyModelItem, buddyMenuOpenChat, toggleBuddyConsole,
+      buddyModel, buddyModelOp, buddyModelLabel, buddyModelWhy, buddyMenuView, buddyWhyOf, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,
       launchToolRows, launchPrefs, launchCwdText, saveLaunchPrefs, setLaunchCwdText,
     }
   },

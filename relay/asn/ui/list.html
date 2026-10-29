@@ -198,7 +198,7 @@
       <li v-if="!chatTabMenuPanel"><button type="button" role="menuitem" @click="menuTogglePin">{{ tabPinLabel }}</button></li>
     </ul>
     <div class="chat-stack">
-      <chat-pane v-for="t in mergedTabs" :key="t.id" v-show="view === 'chat' && t.id === ui.active" :friend="t" :me="me" :log="logs[t.id] || []" :friend-av="avOf(t)" :me-av="meAv" :win-mode="ui.mode" :dp-mode="ui.dpMode" :bubble="ui.bubble" :toolbar="ui.toolbar" :dp-collapsed="ui.collapsed" :active="view === 'chat' && t.id === ui.active" :voice="voice" :hint-names="friends" :agent-api="transport" :self-node="selfNode"
+      <chat-pane v-for="t in mergedTabs" :key="t.id" v-show="view === 'chat' && t.id === ui.active" :friend="t" :me="me" :log="logs[t.id] || []" :friend-av="avOf(t)" :me-av="meAv" :win-mode="ui.mode" :dp-mode="ui.dpMode" :bubble="ui.bubble" :toolbar="ui.toolbar" :dp-collapsed="ui.collapsed" :active="view === 'chat' && t.id === ui.active" :voice="voice" :hint-names="friends" :agent-api="transport" :self-node="selfNode" :pi-models-for="remotePiModelsFor"
         :room-cards="hub.st.cards[t.id.slice(5)] || []" :group-menu="true" @group-menu="op => openGroupMenu(t.id, op)" @group-decide="(cid, ok) => decideCard(t.id, cid, ok)"
         :photo-api="photoApi" :shot-api="shotApi" :load-older="loadOlder" @call-state="on => setPaneCall(t.id, on)" @send="(text, opts) => sendTo(t.id, text, opts)" @nudge="nudgeTo(t.id)" @attach="(p, cap) => sendAttachTo(t.id, p, cap)" @toggle-dp="toggleDp"></chat-pane>
       <!-- 終端的對話分頁（#331）：上方狀態、中間時間軸與畫面文字（純文字）、等你回答時的選項按鈕、下方輸入框與確認列 -->
@@ -278,13 +278,14 @@
   <ul class="av-menu buddy-menu" v-if="buddyMenu" ref="buddyMenuEl" :style="{ left: buddyMenuPos.x + 'px', top: buddyMenuPos.y + 'px' }" role="menu" @click.stop>
     <li><button type="button" role="menuitem" @click="buddyMenuOpenChat">開啟對話</button></li>
     <li class="menu-note menu-shared" v-for="n in buddyMenuView.notes" :key="n" role="note">{{ n }}</li>
-    <li><button type="button" role="menuitem" :class="{ off: buddyConsoleItemView.disabled }" :aria-disabled="buddyConsoleItemView.disabled ? 'true' : 'false'" aria-describedby="buddy-why-console" :title="buddyConsoleItemView.tip" @click="toggleBuddyConsole"><span class="mi-t">{{ buddyConsoleItemView.label }}</span><small class="menu-why" id="buddy-why-console" v-if="buddyWhyOf('console')">{{ buddyWhyOf('console') }}</small></button></li>
-    <template v-for="it in buddyOpItems" :key="it.key">
-      <li v-if="it.key === 'model' && !buddyIsPi" class="model-sub">
+    <template v-if="buddySlots">
+      <li><button type="button" role="menuitem" :class="{ off: !buddySlots.window.ok }" :aria-disabled="buddySlots.window.ok ? 'false' : 'true'" aria-describedby="buddy-why-console" :title="buddySlots.window.reason" @click="toggleBuddyConsole"><span class="mi-t">{{ buddySlots.window.label }}</span><small class="menu-why" id="buddy-why-console" v-if="buddyWhyOf('console')">{{ buddyWhyOf('console') }}</small></button></li>
+      <li v-if="!buddyModelOp" class="model-sub">
         <button type="button" role="menuitem" ref="buddyModelBtn" aria-haspopup="true" :aria-expanded="buddyModel.open" :class="{ off: !buddySubEnabled }" :aria-disabled="buddySubEnabled ? 'false' : 'true'" aria-describedby="buddy-why-model" :title="buddyModelWhy" @mouseenter="subEvent('hover')" @mouseleave="subEvent('leave', 180)" @click="subEvent('click')" @keydown.right.prevent="subEvent('right')" @keydown.left.prevent="subEvent('leave')"><span class="mi-t">{{ buddyModelLabel }}</span><small class="menu-why" id="buddy-why-model" v-if="!buddySubEnabled && buddyWhyOf('model')">{{ buddyWhyOf('model') }}</small></button>
       </li>
-      <li v-else><button type="button" role="menuitem" :class="{ off: !it.ok }" :aria-disabled="it.ok ? 'false' : 'true'" :aria-describedby="it.ok ? null : 'buddy-why-' + it.key" :title="it.reason" @click="openPartnerOp(it)"><span class="mi-t">{{ it.label }}{{ ['resume', 'close', 'archive', 'unarchive'].includes(it.key) ? '' : '…' }}</span><small class="menu-why" :id="'buddy-why-' + it.key" v-if="!it.ok && buddyWhyOf(it.key)">{{ buddyWhyOf(it.key) }}</small></button></li>
+      <li v-else><button type="button" role="menuitem" :class="{ off: !buddyModelItem.ok }" :aria-disabled="buddyModelItem.ok ? 'false' : 'true'" aria-describedby="buddy-why-model" :title="buddyModelItem.reason" @click="openPartnerOp(buddyModelItem)"><span class="mi-t">切換模型…</span><small class="menu-why" id="buddy-why-model" v-if="!buddyModelItem.ok && buddyWhyOf('model')">{{ buddyWhyOf('model') }}</small></button></li>
     </template>
+    <li v-for="it in buddyOpItems" :key="it.key"><button type="button" role="menuitem" :class="{ off: !it.ok }" :aria-disabled="it.ok ? 'false' : 'true'" :aria-describedby="it.ok ? null : 'buddy-why-' + it.key" :title="it.reason" @click="openPartnerOp(it)"><span class="mi-t">{{ it.label }}</span><small class="menu-why" :id="'buddy-why-' + it.key" v-if="!it.ok && buddyWhyOf(it.key)">{{ buddyWhyOf(it.key) }}</small></button></li>
   </ul>
   <ul class="av-menu buddy-menu buddy-subpop" v-if="buddyMenu && buddyModel.open && buddyModel.items.length" ref="buddySubEl" :style="{ left: buddySubPos.x + 'px', top: buddySubPos.y + 'px', visibility: buddySubPos.ready ? 'visible' : 'hidden' }" role="menu" @click.stop @mouseenter="subEvent('hover')" @mouseleave="subEvent('leave', 180)">
     <li class="menu-note">目前：{{ buddyModel.current }}</li>
