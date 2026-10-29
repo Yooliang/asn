@@ -54,11 +54,19 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     try { s.grok = (await invoke('grok_accounts_list')) ?? [] } catch { s.grok = [] }   // 舊版 Rust 沒有這個指令就當沒有
     try { s.codex = (await invoke('codex_account_current')) ?? null; s.codexErr = '' } catch (e) { s.codex = null; s.codexErr = errText(e) }
     try { s.mod = (await invoke('claude_mod_status')) ?? '' } catch { /* 舊版 Rust 沒有這個指令就不顯示 */ }
-    // 各帳號上次記下的額度（沒有紀錄或舊版 Rust 沒有這個指令就維持「額度未知」）
-    try {
-      const q = (await invoke('claude_quota_all')) ?? {}
-      s.list = s.list.map(a => ({ ...a, ...quotaOf(q[a.email]) }))
-    } catch { /* 略過 */ }
+    await refreshQuota()
+  }
+  // 只重讀這台各帳號上次記下的額度（每 5 分鐘、打開設定頁時呼叫；不重抓帳號清單）。
+  // 先拿掉舊的額度欄位再套新的：紀錄被清掉的帳號要回到「額度未知」。讀不到（舊版 Rust 沒有這個指令）就維持原樣
+  const QUOTA_KEYS = ['five_hour_pct', 'weekly_pct', 'reset_at', 'at']
+  const refreshQuota = async () => {
+    let q
+    try { q = (await invoke('claude_quota_all')) ?? {} } catch { return }
+    if (!Array.isArray(s.list)) return
+    s.list = s.list.map(a => {
+      const base = Object.fromEntries(Object.entries(a).filter(([k]) => !QUOTA_KEYS.includes(k)))
+      return { ...base, ...quotaOf(q[a.email]) }
+    })
   }
   // 帳號庫變了，就把新清單回報給收發室（讓擁有者設備看得到）；後台沒部署或沒連線都不吵使用者
   const report = async () => { try { await invoke('acct_remote_report') } catch { /* 略過 */ } }
@@ -179,7 +187,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
   }
   return {
     state: s,
-    refresh, report, onAuto, loadReports, remoteNodes, remoteSelect, remoteLoad, remoteSwitch, grokSwitch, pollIncoming, approve, decline, dismissDone, undo, loadTrust, setAllowSwitch,
+    refresh, refreshQuota, report, onAuto, loadReports, remoteNodes, remoteSelect, remoteLoad, remoteSwitch, grokSwitch, pollIncoming, approve, decline, dismissDone, undo, loadTrust, setAllowSwitch,
     addCurrent: () => run(async () => { const a = await invoke('claude_account_save'); s.savedSeq++; return `已加入 ${a.email}。` }),
     switchTo: email => run(async () => { const r = await invoke('claude_account_switch', { email }); return `已切換到 ${r.email}。${SWITCH_NOTICE}` }),
     // 刪除要按兩次（第一次變成「確認刪除」），避免誤觸

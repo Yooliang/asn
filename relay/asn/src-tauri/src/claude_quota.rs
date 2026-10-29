@@ -14,6 +14,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+mod merge;
+
 pub const MAX_ACCOUNTS: usize = 20;
 const MAX_INPUT: usize = 1_000_000;
 
@@ -29,12 +31,15 @@ pub struct Quota {
     pub at: String,
 }
 
-/// 從狀態列資料解析出來的額度（還沒有記錄時間）
+/// 從狀態列資料解析出來的額度（還沒有記錄時間）。`five_reset_ms`／`week_reset_ms` 是兩條各自的重置時間，
+/// 只用來判斷新舊（見 merge.rs），不寫進檔案；檔案仍只存一個 `reset_at`。
 #[derive(Debug, PartialEq, Clone)]
 pub struct Parsed {
     pub five_hour_pct: Option<u8>,
     pub weekly_pct: Option<u8>,
     pub reset_at: Option<String>,
+    pub five_reset_ms: Option<i64>,
+    pub week_reset_ms: Option<i64>,
 }
 
 pub fn quota_path(home: &Path) -> PathBuf {
@@ -62,6 +67,27 @@ pub fn iso_secs(ms: i64) -> String {
     format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", r / 3600, r % 3600 / 60, r % 60)
 }
 
+/// `iso_secs` 寫出的格式（`2026-10-24T12:00:00Z`）→ 毫秒；其他格式回 None
+pub fn parse_iso_secs(s: &str) -> Option<i64> {
+    let b = s.as_bytes();
+    if b.len() != 20 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' || b[13] != b':' || b[16] != b':' || b[19] != b'Z' {
+        return None;
+    }
+    let num = |r: std::ops::Range<usize>| s.get(r).filter(|t| t.bytes().all(|c| c.is_ascii_digit())).and_then(|t| t.parse::<i64>().ok());
+    let (y, m, d, hh, mm, ss) = (num(0..4)?, num(5..7)?, num(8..10)?, num(11..13)?, num(14..16)?, num(17..19)?);
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) || hh > 23 || mm > 59 || ss > 59 {
+        return None;
+    }
+    let y2 = if m <= 2 { y - 1 } else { y };
+    let era = if y2 >= 0 { y2 } else { y2 - 399 } / 400;
+    let yoe = y2 - era * 400;
+    let mp = if m > 2 { m - 3 } else { m + 9 };
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    Some((days * 86400 + hh * 3600 + mm * 60 + ss) * 1000)
+}
+
 // ---------- 解析 ----------
 fn used_to_left(v: &Value) -> Option<u8> {
     let used = v.as_f64().filter(|u| u.is_finite() && *u >= 0.0)?;
@@ -83,8 +109,22 @@ fn window(rl: &Value, key: &str, now_ms: i64) -> Option<(u8, Option<i64>)> {
     Some((left, reset))
 }
 
+/// 要存的那一個重置時間屬於哪一條，規則跟介面的 `resetOwner`（account-quota.mjs）一致：
+/// 用完（剩 0%）的那條；兩條都用完給較晚的；都沒用完就是 5 小時那條（沒有 5 小時那條才是每週的）。
+/// 那條自己沒有重置時間就是 None——不拿另一條的來頂，免得畫面標「5 小時額度」卻是每週的時間。
+pub fn pick_reset(five: Option<(u8, Option<i64>)>, week: Option<(u8, Option<i64>)>) -> Option<i64> {
+    match (five, week) {
+        (Some((0, a)), Some((0, b))) => a.max(b),
+        (Some((0, a)), _) => a,
+        (_, Some((0, b))) => b,
+        (Some((_, a)), _) => a,
+        (None, Some((_, b))) => b,
+        (None, None) => None,
+    }
+}
+
 /// 狀態列資料 → 額度。只讀 `rate_limits.five_hour／seven_day` 的已用百分比與重置時間；
-/// 重置時間給「用完的那個視窗」（兩個都用完給較晚的），都沒用完就給 5 小時視窗的。沒有任何視窗就是 None。
+/// 存的重置時間見 `pick_reset`。沒有任何視窗就是 None。
 pub fn parse_statusline(text: &str, now_ms: i64) -> Option<Parsed> {
     let v: Value = serde_json::from_str(text).ok()?;
     let rl = v.get("rate_limits")?;
@@ -93,9 +133,14 @@ pub fn parse_statusline(text: &str, now_ms: i64) -> Option<Parsed> {
     if five.is_none() && week.is_none() {
         return None;
     }
-    let spent: Vec<i64> = [five, week].iter().flatten().filter(|(p, _)| *p == 0).filter_map(|(_, r)| *r).collect();
-    let reset = spent.iter().max().copied().or_else(|| five.and_then(|(_, r)| r)).or_else(|| week.and_then(|(_, r)| r));
-    Some(Parsed { five_hour_pct: five.map(|f| f.0), weekly_pct: week.map(|w| w.0), reset_at: reset.map(iso_secs) })
+    let reset = pick_reset(five, week);
+    Some(Parsed {
+        five_hour_pct: five.map(|f| f.0),
+        weekly_pct: week.map(|w| w.0),
+        reset_at: reset.map(iso_secs),
+        five_reset_ms: five.and_then(|f| f.1),
+        week_reset_ms: week.and_then(|w| w.1),
+    })
 }
 
 // ---------- 讀寫 ----------
@@ -127,9 +172,14 @@ pub fn load_all(home: &Path) -> HashMap<String, Quota> {
     out
 }
 
-fn record(home: &Path, email: &str, p: Parsed, now_ms: i64) -> Result<(), String> {
+/// 記一筆：跟這個帳號現有的紀錄兩條各自判斷、逐欄合併（規則見 merge.rs）。不收的寫進 log。
+/// 有收進任何一條回 Ok(true)；兩條都不收就不動檔案，回 Ok(false)。
+fn record(home: &Path, email: &str, p: Parsed, now_ms: i64) -> Result<bool, String> {
     let mut all = load_all(home);
-    all.insert(email.to_string(), Quota { five_hour_pct: p.five_hour_pct, weekly_pct: p.weekly_pct, reset_at: p.reset_at, at: iso_secs(now_ms) });
+    let (merged, skipped) = merge::merge(all.get(email), &p, now_ms);
+    merge::log_skipped(home, &skipped, now_ms);
+    let Some(q) = merged else { return Ok(false) };
+    all.insert(email.to_string(), q);
     if all.len() > MAX_ACCOUNTS {
         let mut by_age: Vec<(String, String)> = all.iter().map(|(k, q)| (q.at.clone(), k.clone())).collect();
         by_age.sort();
@@ -139,17 +189,19 @@ fn record(home: &Path, email: &str, p: Parsed, now_ms: i64) -> Result<(), String
         }
     }
     let text = serde_json::to_string(&all).map_err(|e| e.to_string())?;
-    crate::claude_json::write_atomic(&quota_path(home), text.as_bytes()).map_err(|e| e.to_string())
+    crate::claude_json::write_atomic(&quota_path(home), text.as_bytes()).map_err(|e| e.to_string())?;
+    Ok(true)
 }
 
-/// 狀態列掛鉤：把輸入裡的額度記在目前登入的帳號底下。有記下回 true；沒登入、沒額度、輸入太大或寫檔失敗回 false。
+/// 狀態列掛鉤：把輸入裡的額度記在目前登入的帳號底下。有記下回 true；
+/// 沒登入、沒額度、輸入太大、兩條都判斷成不收（舊數字或別的帳號）或寫檔失敗回 false。
 pub fn hook(home: &Path, input: &str, now_ms: i64) -> bool {
     if input.len() > MAX_INPUT {
         return false;
     }
     let Some(parsed) = parse_statusline(input, now_ms) else { return false };
     let Some(email) = claude_accounts::current_email(home) else { return false };
-    record(home, &email, parsed, now_ms).is_ok()
+    record(home, &email, parsed, now_ms).unwrap_or(false)
 }
 
 /// 前端讀本機各帳號的額度紀錄（email → 額度）
