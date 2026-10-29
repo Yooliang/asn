@@ -120,10 +120,12 @@ fn 每週_調查員的例子_別的帳號的較晚重置時間不收_新一期�
     let gmail = ms("2026-11-01T16:00:00Z");
     let yooliang = ms("2026-11-04T09:00:00Z");
     let next_gmail = ms("2026-11-08T16:00:00Z");
+    // 現在＝gmail 重置前 3 天（重置時間要在「現在 +8 天」內才收）
+    let start = gmail - 3 * 86_400_000;
     let h = home_as("a@x.test");
-    assert!(hook(h.path(), &status(None, Some((30.0, gmail))), NOW));
+    assert!(hook(h.path(), &status(None, Some((30.0, gmail))), start));
     // 記著 gmail（11/2 還沒到），舊視窗送來 yooliang 的數字
-    assert!(!hook(h.path(), &status(None, Some((5.0, yooliang))), NOW + H));
+    assert!(!hook(h.path(), &status(None, Some((5.0, yooliang))), start + H));
     assert_eq!(q(&h).weekly_pct, Some(70));
     assert!(log(&h).contains("每週額度沒收") && log(&h).contains("還沒重置"));
     // 時間推到 11/2 過後
@@ -143,7 +145,8 @@ fn 每週_差_7_天倍數的誤差_10_分鐘內才算() {
     let w = |d: i64| judge(Kind::Week, Some((50, Some(old))), 80, Some(old + d), now);
     assert!(w(WEEK_MS).is_ok());
     assert!(w(WEEK_MS + 9 * 60_000).is_ok());
-    assert!(w(2 * WEEK_MS - 9 * 60_000).is_ok(), "隔了兩週也算");
+    // 隔了兩週：現在要推到記著的過了 6 天，新的重置時間才落在「現在 +8 天」內
+    assert!(judge(Kind::Week, Some((50, Some(old))), 80, Some(old + 2 * WEEK_MS - 9 * 60_000), old + 6 * 86_400_000).is_ok(), "隔了兩週也算");
     assert!(w(WEEK_MS + 11 * 60_000).is_err());
     assert!(w(3 * 86_400_000).is_err());
     // 5 小時那條不看倍數：記著的過了，任何較晚的都收
@@ -212,7 +215,9 @@ fn 共用案例_每一個都跟預期一致() {
     let v: Value = serde_json::from_str(SHARED_CASES).expect("共用案例要是 JSON");
     let c = &v["constants"];
     assert_eq!((c["same_period_ms"].as_i64(), c["week_ms"].as_i64(), c["expired_after_ms"].as_i64()), (Some(SAME_MS), Some(WEEK_MS), Some(WEEK_MS)), "常數跟案例檔一致");
+    assert_eq!((c["reset_past_ms"].as_i64(), c["reset_future_ms"].as_i64()), (Some(RESET_PAST_MS), Some(RESET_FUTURE_MS)), "重置時間範圍跟案例檔一致");
     let cases = v["cases"].as_array().expect("cases");
+    assert!(cases.iter().any(|t| t["reason"] == "reset_out_of_range"), "要有範圍外的反向案例");
     assert!(cases.len() >= 20, "案例不該變少：{}", cases.len());
     let win = |w: &Value| -> Option<(u8, Option<i64>)> {
         if w.is_null() {
@@ -245,7 +250,7 @@ fn 共用案例_每一個都跟預期一致() {
     assert!(wrong.is_empty(), "跟共用案例不一致：{wrong:#?}");
     // 代碼表裡的每個代碼，Rust 都可能回（反過來也守：Rust 回的代碼都在表裡）
     let codes: Vec<&str> = v["reasons"].as_object().unwrap().keys().map(String::as_str).collect();
-    for c in ["same_period_rise", "earlier", "later_not_expired", "not_week_multiple"] {
+    for c in ["same_period_rise", "earlier", "later_not_expired", "not_week_multiple", "reset_out_of_range"] {
         assert!(codes.contains(&c), "{c} 不在案例檔的代碼表");
     }
 }
@@ -314,4 +319,49 @@ fn 不收的原因代碼跟後台一致() {
     assert_eq!(judge(Kind::Five, old, 50, Some(NOW + 5 * H), NOW).unwrap_err().code, "later_not_expired");
     assert_eq!(judge(Kind::Week, old, 50, Some(NOW + 5 * H), NOW + 2 * H).unwrap_err().code, "not_week_multiple");
     assert!(judge_for(Vendor::Codex, Kind::Week, old, 50, Some(NOW + 5 * H), NOW + 2 * H).is_ok(), "Codex 每週不看倍數");
+    assert_eq!(judge(Kind::Five, None, 50, Some(NOW + 9 * 86_400_000), NOW).unwrap_err().code, "reset_out_of_range");
+}
+
+// ---------- 重置時間的合理範圍（#524 審查）：現在前 1 天到後 8 天 ----------
+const DAY: i64 = 86_400_000;
+
+#[test]
+fn 範圍_很遠的重置時間不收_也不會存進來() {
+    let h = home_as("a@x.test");
+    let far = ms("2099-01-01T00:00:00Z");
+    assert!(!hook(h.path(), &status(None, Some((30.0, far))), NOW), "2099 年的重置時間不收");
+    assert!(load_all(h.path()).get("a@x.test").is_none(), "沒有紀錄時也不會存進來");
+    assert!(log(&h).contains("每週額度沒收") && log(&h).contains("不在現在前 1 天到後 8 天之間"), "{}", log(&h));
+    // 之後正常的回報照收
+    assert!(hook(h.path(), &status(None, Some((40.0, NOW + 100 * H))), NOW + 60_000));
+    assert_eq!(q(&h).weekly_pct, Some(60));
+    // 已經有正常紀錄時，送很遠的也不收，正常的那條不動
+    assert!(!hook(h.path(), &status(None, Some((10.0, far))), NOW + 120_000));
+    assert_eq!((q(&h).weekly_pct, q(&h).reset_at), (Some(60), Some(iso_secs(NOW + 100 * H))));
+}
+
+#[test]
+fn 範圍_已經存了很遠的重置時間_正常的照收_鎖住的會解開() {
+    let h = home_as("a@x.test");
+    std::fs::create_dir_all(h.path().join(".asn")).unwrap();
+    let far = "2099-01-01T00:00:00Z";
+    std::fs::write(super::super::quota_path(h.path()), json!({ "a@x.test": { "weekly_pct": 70, "reset_at": far, "at": iso_secs(NOW) } }).to_string()).unwrap();
+    assert!(hook(h.path(), &status(None, Some((60.0, NOW + 100 * H))), NOW + 60_000), "記著 2099 年的，正常的要收");
+    assert_eq!((q(&h).weekly_pct, q(&h).reset_at), (Some(40), Some(iso_secs(NOW + 100 * H))));
+    // 解開以後照一般規則：同一期回升不收
+    assert!(!hook(h.path(), &status(None, Some((20.0, NOW + 100 * H))), NOW + 120_000));
+}
+
+#[test]
+fn 範圍_邊界_後_8_天內收_超過不收_前_1_天內收_超過不收() {
+    let j = |r: i64| judge(Kind::Five, None, 50, Some(r), NOW);
+    assert!(j(NOW + 8 * DAY).is_ok(), "剛好 8 天");
+    assert!(j(NOW + 8 * DAY + 1000).is_err());
+    assert!(j(NOW - DAY).is_ok(), "剛好前 1 天");
+    assert!(j(NOW - DAY - 1000).is_err());
+    // 記著的剛好在 +8 天內仍照一般規則（較早不收）；超過 +8 天才當沒有重置時間
+    assert!(judge(Kind::Five, Some((40, Some(NOW + 8 * DAY))), 90, Some(NOW + H), NOW).is_err());
+    assert!(judge(Kind::Five, Some((40, Some(NOW + 8 * DAY + 1000))), 90, Some(NOW + H), NOW).is_ok());
+    // 記著的早於前 1 天不另外處理，照「已過 7 天才照收」（過 2 天、差不是 7 天倍數仍不收）
+    assert!(judge(Kind::Week, Some((40, Some(NOW - 2 * DAY))), 90, Some(NOW + 3 * DAY), NOW).is_err());
 }
