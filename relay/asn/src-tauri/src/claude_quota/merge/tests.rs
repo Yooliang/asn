@@ -20,9 +20,10 @@ fn status(five: Option<(f64, i64)>, week: Option<(f64, i64)>) -> String {
     }
     json!({ "rate_limits": Value::Object(rl) }).to_string()
 }
+/// 假的登入狀態：目前帳號要有 accountUuid 才認得（少了它掛鉤會一律回 false）
 fn home_as(email: &str) -> tempfile::TempDir {
     let h = tempfile::tempdir().unwrap();
-    std::fs::write(h.path().join(".claude.json"), json!({ "oauthAccount": { "emailAddress": email } }).to_string()).unwrap();
+    std::fs::write(h.path().join(".claude.json"), json!({ "oauthAccount": { "emailAddress": email, "accountUuid": "11111111-2222-3333-4444-555555555555" } }).to_string()).unwrap();
     h
 }
 fn q(h: &tempfile::TempDir) -> Quota {
