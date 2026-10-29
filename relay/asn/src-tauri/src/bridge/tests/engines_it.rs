@@ -1605,6 +1605,30 @@ async fn acp_改名_寫檔失敗就把改過的都改回去_用原名重開() {
 }
 
 #[tokio::test]
+async fn acp_改名後_有活的同名視窗就照原名送給它_舊名對照不能蓋過_沒有活的才送新名字() {
+    let state = tempfile::tempdir().unwrap();
+    let (mut h, admin, old) = rename_rig(&state, vec![]).await;
+    rename_blocking(&admin, &old, "小葛").await.unwrap();
+    wait_pid(&admin, "小葛", |_| true).await;
+    // 新開一個叫舊名的 Claude 視窗：寄給舊名的信送到它，不是改名後的工作者
+    put_session(h.sessions.path(), 5100, &old, "idle", now());
+    roster_now(&mut h).await;
+    assert_eq!(h.set.canonical_name(&old), "小葛", "引擎那一層還記得對照");
+    h.put_pull(to_agent(1, &old, "給新開的同名視窗")).await;
+    let said = h.sink.said.lock().unwrap().join("\n");
+    assert!(said.contains("給新開的同名視窗"), "交給同名的 Claude 視窗：{said}");
+    assert!(h.fr.sent().is_empty(), "改名後的工作者沒有收到：{:?}", h.fr.sent());
+    assert!(h.core.log.recent().join("\n").contains("skipped"), "舊名對照被略過要記 log");
+    // 那個視窗關掉了（名單上沒有活的舊名）：才交給新名字
+    std::fs::remove_file(h.sessions.path().join("5100.json")).unwrap();
+    roster_now(&mut h).await;
+    h.put_pull(to_agent(2, &old, "沒有同名視窗了")).await;
+    h.wait("回覆", |h| h.fr.sent().len() == 1).await;
+    assert_eq!(h.fr.sent()[0]["from_agent"].as_str(), Some("小葛"));
+    assert!(!h.sink.said.lock().unwrap().join("\n").contains("沒有同名視窗了"), "沒有交給已關的視窗");
+}
+
+#[tokio::test]
 async fn acp_改名後再接手同一段對話_回已經接過了_不重複開() {
     let state = tempfile::tempdir().unwrap();
     let (h, admin, old) = rename_rig(&state, vec![]).await;

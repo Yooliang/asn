@@ -435,6 +435,17 @@ impl Core {
     fn agent_of(&self, name: &str) -> Option<&Window> {
         self.roster.iter().find(|w| w.name == name)
     }
+    /// 信上的收件名換成名單上的名字（Aegis 成員代號、內建通道工作者改名前的舊名）。
+    /// 名單上現在就有這個名字的視窗或夥伴（Claude 視窗、pi、其他引擎都算）時一律照原名送給它，舊名對照不能蓋過活的同名視窗（#266）
+    fn canonical_target(&self, id: &str, name: &str) -> String {
+        let Some(e) = self.engines.as_ref() else { return name.to_string() };
+        let c = e.canonical_name(name);
+        if c != name && self.agent_of(name).is_some() {
+            self.log.line(&format!("id={id} to={name}: a live window has this name, rename/alias mapping to {c} skipped"));
+            return name.to_string();
+        }
+        c
+    }
     /// 自動回信模式下，這個名字就是 worker 自己扮的視窗
     fn is_respond(&self, name: &str) -> bool {
         self.cfg.respond.as_deref() == Some(name)
@@ -811,7 +822,7 @@ impl Core {
         let from_agent = m.from_agent.clone().unwrap_or_default();
         let mut note = String::new();
         let target = match m.to_agent.clone() {
-            Some(t) => self.engines.as_ref().map(|e| e.canonical_name(&t)).unwrap_or(t),
+            Some(t) => self.canonical_target(&m.id, &t),
             None => match self.unaddressed_window() {
                 // 使用者指定了「沒指定收件人的信交給誰」而且那個視窗在線：照設定給它
                 Some(w) => {
@@ -1381,7 +1392,7 @@ impl Core {
         let room_name = room.get("name").and_then(Value::as_str).unwrap_or("").to_string();
         let seq = json_u64(msg.get("seq"));
         // 成員代號（slug）也認：換成名單上的名字（Aegis；其他引擎原樣）
-        let window = self.engines.as_ref().map(|e| e.canonical_name(&rooms::member_window(member))).unwrap_or_else(|| rooms::member_window(member));
+        let window = self.canonical_target(&format!("room:{seq}"), &rooms::member_window(member));
         let mut note = String::new();
         let target;
         if window.is_empty() {
