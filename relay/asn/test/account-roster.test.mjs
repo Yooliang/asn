@@ -117,6 +117,22 @@ test('Codex 的窗照 5 小時、每週、其他由短到長排', () => {
   for (const p of q.parts) assert.ok(len(p) <= 20)
 })
 
+test('接成一行的字（設備卡、切換對話框）：後台給 4 個窗也只放 5 小時、每週兩窗，≤20 字；逐窗的 parts 照列', () => {
+  const e = entry({ vendor: 'codex', windows: [win('w43200', 100, H), win('w1440', 100, H), win('weekly', 100, H), win('five_hour', 100, H)] })
+  const q = rosterQuota(e, { nodeLabel, now: NOW })
+  assert.equal(q.text, '5 小時剩 100%、每週剩 100%')
+  assert.ok(len(q.text) <= 20, `${q.text}（${len(q.text)}）`)
+  assert.equal(q.parts.length, 4, '「我的帳號」區照樣逐窗列出')
+  // 設備卡與切換對話框用的就是這一行
+  const r = roster([e])
+  const t = buildDeviceTree({ friends, nodeOrder: [S, W], selfNode: S, reports: { [W]: { ...reports[W] } }, self, now: NOW, roster: r })
+  assert.equal(t.find(d => d.key === W).vendors.find(v => v.key === 'codex').accounts[0].quota.text, q.text)
+  const dv = dialogView({ ...remote, list: [{ vendor: 'codex', email: 'a@x.test', plan: '', current: true }] }, '', NOW, { quotaOf: x => rosterQuotaFor(r, 'codex', x, { nodeLabel, now: NOW }) })
+  assert.equal(dv.rows[0].quotaText, q.text)
+  // 只有其他長度的窗（目前不會發生）：放最短的一窗，不留空白
+  assert.equal(rosterQuota(entry({ windows: [win('w43200', 9, H), win('w1440', 50, H)] }), { nodeLabel, now: NOW }).text, '每天剩 50%')
+})
+
 test('不改輸入：轉換前後的列表一模一樣', () => {
   const r = roster([entry(), entry({ vendor: 'codex', windows: [] })])
   const before = JSON.stringify(r)
@@ -173,6 +189,18 @@ test('讀列表：成功回列表；404／forbidden／格式不對都回 null，
   assert.equal(await fetchRoster(async () => ({ error: 'forbidden' }), log), null)
   assert.equal(logs.length, 3)
   assert.equal(ROSTER_POLL_MS, 5 * 60_000, '跟現有 5 分鐘的節奏一致')
+})
+
+test('讀列表：讀成功過一次，之後讀失敗（錯誤、forbidden、格式不對）都沿用上一次的；從沒成功過才回 null', async () => {
+  const log = () => {}
+  const prev = roster([entry()])
+  for (const fail of [async () => { throw 'acct_roster HTTP 500 internal' }, async () => ({ error: 'forbidden' }), async () => ({ accounts: 'x' })]) {
+    assert.equal(await fetchRoster(fail, log, prev), prev)
+    assert.equal(await fetchRoster(fail, log, null), null)
+    assert.equal(await fetchRoster(fail, log, { error: 'forbidden' }), null, '上一次本來就不能用的不算')
+  }
+  const next = roster([])
+  assert.equal(await fetchRoster(async () => next, log, prev), next, '讀成功就換新的')
 })
 
 // ---------- 設備卡：有列表用列表、沒有退回舊顯示 ----------
@@ -278,6 +306,28 @@ test('電腦：accounts 讀列表用 acct_roster，讀不到是 null 不報錯',
   assert.equal(ok.state.roster.accounts.length, 1)
 })
 
+test('電腦：先讀成功一次、再讀失敗 → 設備卡與「我的帳號」仍是上一次的列表；從沒成功 → 退回那台回報的數字', async () => {
+  let fail = false
+  const invoke = async cmd => { if (cmd !== 'acct_roster') return null; if (fail) throw 'acct_roster HTTP 403 forbidden'; return roster([entry()]) }
+  const ui = createAccountsUi({ invoke, reactive: x => x })
+  const orig = console.info; console.info = () => {}
+  try {
+    await ui.refreshRoster()
+    fail = true
+    await ui.refreshRoster()
+  } finally { console.info = orig }
+  const tree = r => buildDeviceTree({ friends, nodeOrder: [S, W], selfNode: S, reports, self, now: NOW, roster: r })
+  const quotaOfA = t => t.find(d => d.key === W).vendors.find(v => v.key === 'claude').accounts.find(a => a.email === 'a@x.test').quota.text
+  assert.equal(quotaOfA(tree(ui.state.roster)), '5 小時剩 40%、每週剩 72%', '仍是上一次列表的數字')
+  assert.equal(rosterView(ui.state.roster, { nodeLabel, now: NOW }).vendors[0].accounts[0].quota.meta, '3 小時前・工作機')
+  // 從沒成功過
+  const never = createAccountsUi({ invoke: async () => { throw 'acct_roster HTTP 404 not_found' }, reactive: x => x })
+  console.info = () => {}
+  try { await never.refreshRoster(); await never.refreshRoster() } finally { console.info = orig }
+  assert.equal(never.state.roster, null)
+  assert.equal(quotaOfA(tree(never.state.roster)), '5 小時剩 99%、每週剩 99%', '退回那台自己回報的')
+})
+
 test('接線：電腦打開「設備與帳號」讀一次、開著時跟 5 分鐘排程一起讀；手機用 android_acct_roster、進頁讀一次', () => {
   const list = read('ui/list.js'), m = read('ui/m.js'), html = read('ui/m.html'), lhtml = read('ui/list.html')
   assert.match(list, /normalizeCatKey\(k\) === 'devices'\) void accounts\.refreshRoster\(\)/)
@@ -288,6 +338,8 @@ test('接線：電腦打開「設備與帳號」讀一次、開著時跟 5 分�
   assert.match(lhtml, /a\.quotaText/)
   assert.match(m, /acctRoster: \(\) => invoke\('android_acct_roster'\)/)
   assert.match(m, /void loadRoster\(\)/)
+  assert.match(m, /fetchRoster\(acctTransport\.acctRoster, undefined, acctRoster\.value\)/, '手機讀不到也沿用上一次讀成功的')
+  assert.match(read('ui/lib/claude-accounts.mjs'), /fetchRoster\(\(\) => invoke\('acct_roster'\), undefined, s\.roster\)/)
   assert.match(m, /ROSTER_POLL_MS\)/)
   assert.match(m, /roster: acctRoster\.value/)
   assert.match(html, /class="m-dv-my"/)

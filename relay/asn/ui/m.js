@@ -500,9 +500,10 @@ const app = createApp({
     const acctKeys = computed(() => new Set(acctButtonDevices(groups.value, info.node).filter(g => !devPrefs.deviceRemoved.includes(g.node)).map(g => g.key)))
     // 整頁＝電腦版「設備與帳號」：資料用電腦版同一份整理函式；別台電腦的帳號逐台向後台讀（只讀選到的那台）
     const acctSw = reactive({ phase: 'pick', page: 'list', node: '', picked: '', reports: {}, view: null, removedOpen: false })
-    // 帳號列表（#374）：進「設備與帳號」讀一次，開著時每 5 分鐘再讀（跟電腦版同一個節奏）；讀不到是 null，畫面退回各台自己回報的
+    // 帳號列表（#374）：進「設備與帳號」讀一次，開著時每 5 分鐘再讀（跟電腦版同一個節奏）；
+    // 讀不到沿用上一次讀成功的，從沒成功過才是 null（畫面退回各台自己回報的）
     const acctRoster = ref(null)
-    const loadRoster = async () => { acctRoster.value = await fetchRoster(acctTransport.acctRoster) }
+    const loadRoster = async () => { acctRoster.value = await fetchRoster(acctTransport.acctRoster, undefined, acctRoster.value) }
     setInterval(() => { if (fourthPage.value?.kind === 'acct' && document.visibilityState === 'visible') void loadRoster() }, ROSTER_POLL_MS)
     const acctMy = computed(() => acctRosterView(acctRoster.value, { friends: friends.value, selfNode: info.node }))
     const acctAllDevs = computed(() => acctDeviceTree({ friends: friends.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, reports: acctSw.reports, launchers: lchData.machines, roster: acctRoster.value }))

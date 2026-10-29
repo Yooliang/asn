@@ -70,7 +70,7 @@ function cleanWindows(entry) {
 /**
  * 一個帳號的額度顯示（形狀跟 account-quota.mjs 的 quotaView 相同，設備卡的樣板直接用）：
  *   { known, text, parts, meta, resetText, stale, exhausted, gone }
- *   parts：每個額度窗一句（「5 小時剩 40%」）；text＝parts 用頓號接起來；沒有數字時 text 寫原因（不留空白）
+ *   parts：每個額度窗一句（「5 小時剩 40%」）；text＝一行版，只接 5 小時、每週兩窗；沒有數字時 text 寫原因（不留空白）
  *   meta：「3 小時前・工作機」；目前沒有任何一台還在回報的寫「3 天前讀的・工作機」
  */
 export function rosterQuota(entry, { nodeLabel = () => UNNAMED_DEVICE, now = Date.now() } = {}) {
@@ -88,9 +88,13 @@ export function rosterQuota(entry, { nodeLabel = () => UNNAMED_DEVICE, now = Dat
     return { known: false, text, parts: [text], meta, resetText: '', stale: true, exhausted: false, gone }
   }
   const parts = wins.map(w => `${windowLabel(w.name)}剩 ${w.pct}%`)
+  // 接成一行的 text（設備卡、切換對話框）只放 5 小時、每週兩窗，才不會超過 20 字；其他窗只在「我的帳號」區逐窗列出（parts）。
+  // 只有其他長度的窗時（目前不會發生），放最短的那一窗，不讓這一行變成空白
+  const main = wins.filter(w => ['5 小時', '每週'].includes(windowLabel(w.name)))
+  const line = (main.length ? main : wins.slice(0, 1)).map(w => `${windowLabel(w.name)}剩 ${w.pct}%`).join('、')
   const out = wins.filter(w => w.pct === 0 && w.reset != null && w.reset > now).sort((a, b) => b.reset - a.reset)[0]
   return {
-    known: true, text: parts.join('、'), parts, meta,
+    known: true, text: line, parts, meta,
     resetText: out ? resetIn(new Date(out.reset).toISOString(), now, `${windowLabel(out.name)}額度`) : '',
     stale: now - latest.read > STALE_MS, exhausted: Boolean(out), gone,
   }
@@ -136,15 +140,18 @@ export function rosterView(roster, opts = {}) {
 
 /**
  * 向後台讀一次列表。call：() => Promise（電腦 invoke('acct_roster')、手機 invoke('android_acct_roster')）。
- * 讀不到（後台沒部署 404、沒登入、forbidden、格式不對）回 null，只在 console 記一筆，不報錯給使用者。
+ * 讀不到（後台沒部署 404、沒登入、forbidden、格式不對）時回 prev（上一次讀成功的列表，照它自己的「N 小時前」顯示），
+ * 網路短斷不會在新舊數字間跳；從沒讀成功過（prev 是 null）才回 null，畫面退回各設備自己回報的數字。只在 console 記一筆，不報錯給使用者。
  */
-export async function fetchRoster(call, log = (...a) => console.info(...a)) {
+export async function fetchRoster(call, log = (...a) => console.info(...a), prev = null) {
+  const keep = rosterOk(prev) ? prev : null
+  const why = keep ? '沿用上一次讀到的列表' : '改用各設備自己回報的額度'
   try {
     const v = await call()
     if (rosterOk(v)) return v
-    log('[帳號列表] 後台沒有回列表，改用各設備自己回報的額度', v?.error ?? '')
+    log(`[帳號列表] 後台沒有回列表，${why}`, v?.error ?? '')
   } catch (e) {
-    log('[帳號列表] 讀不到，改用各設備自己回報的額度', typeof e === 'string' ? e : e?.message ?? String(e))
+    log(`[帳號列表] 讀不到，${why}`, typeof e === 'string' ? e : e?.message ?? String(e))
   }
-  return null
+  return keep
 }

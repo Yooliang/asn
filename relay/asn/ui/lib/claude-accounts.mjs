@@ -50,8 +50,9 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     mod: '',        // Claude 外掛自動安裝的狀態文字（Rust 背景工作寫好；空字串＝不顯示）
     roster: null,   // 後台的帳號列表（#374，acct_roster）；讀不到是 null，畫面退回各設備自己回報的數字
   })
-  // 帳號列表：打開「設備與帳號」時讀一次，之後跟額度一樣每 5 分鐘（list.js 排程）。讀不到只記 console，不吵使用者
-  const refreshRoster = async () => { s.roster = await fetchRoster(() => invoke('acct_roster')) }
+  // 帳號列表：打開「設備與帳號」時讀一次，之後跟額度一樣每 5 分鐘（list.js 排程）。
+  // 讀不到沿用上一次讀成功的；從沒成功過才是 null（退回各設備自己回報的）。只記 console，不吵使用者
+  const refreshRoster = async () => { s.roster = await fetchRoster(() => invoke('acct_roster'), undefined, s.roster) }
   const refresh = async () => {
     try { s.list = await invoke('claude_accounts_list') } catch (e) { s.msg = errText(e) }
     try { s.current = (await invoke('claude_account_current')) ?? null } catch { s.current = null }
