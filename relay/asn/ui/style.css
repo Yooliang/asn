@@ -91,7 +91,7 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .buddy-subpop,.av-menu.buddy-subpop{z-index:63;list-style:none;padding:2px 0;width:max-content}
 .menu-shared{display:block;max-width:260px;padding:3px 12px 5px;font-size:11px;line-height:1.35;color:var(--muted);white-space:normal;list-style:none;border-bottom:1px solid rgba(0,0,0,.08)}
 .buddy-subpop .menu-note{padding:2px 8px;font-size:11px;color:var(--muted);white-space:normal}
-/* 夥伴管理對話框：接班換手的分段進度、詳情列 */
+/* 夥伴管理對話框：換班接手的分段進度、詳情列 */
 .op-field{display:flex;flex-direction:column;gap:4px;font-size:12px}
 .op-steps{margin:0;padding-left:20px;font-size:13px;line-height:1.6}
 .op-steps .op-step-done{color:var(--muted)}

@@ -1,4 +1,4 @@
-// 手機版與電腦版「管理夥伴視窗」（手機對話頁右上角「⋯」選單、電腦版名單右鍵：詳情、改名、切換模型、關閉視窗、接班換手、喚醒）的純邏輯。
+// 手機版與電腦版「管理夥伴視窗」（手機對話頁右上角「⋯」選單、電腦版名單右鍵：詳情、改名、切換模型、關閉視窗、換班接手、喚醒）的純邏輯。
 // 視窗在那台電腦上，手機只下指令（後台 relay 的 partner_op／partner_ops，要本人簽章；設計見 docs/design/PARTNER-OPS.md）。
 // node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。給人看的文字純繁體中文，不顯示節點代號與夥伴 ID。
 import { NAME_RE } from './mobile-launch.mjs'
@@ -7,20 +7,20 @@ import { isRelayRoom } from './roster.mjs'
 export const OPS = ['info', 'rename', 'model', 'close', 'handover', 'resume', 'restart', 'remove']
 // Claude 視窗：在線的五項；離線的只有「喚醒」
 export const ONLINE_OPS = ['info', 'rename', 'model', 'close', 'handover']
-// ACP 工作者（Gemini 等收發室自己跑的背景工作者）：詳情、改名、切換模型、關閉（只停止本次執行，不改設定檔）、重開、接班換手、移除；喚醒電腦端會回「這類夥伴不支援」，所以反灰。
+// ACP 工作者（Gemini 等收發室自己跑的背景工作者）：詳情、改名、切換模型、關閉（只停止本次執行，不改設定檔）、重開、換班接手、移除；喚醒電腦端會回「這類夥伴不支援」，所以反灰。
 // 切換模型（0.2 B4）：Grok 用原生切換不重開；Gemini（agy）帶同一段對話重開。移除（0.2 B3）：只移除「開新夥伴」與接手開出來的。
 // 改名（B5，#266）：同樣只改「開新夥伴」與接手開出來的，對話保留、短暫重開。名單分不出哪些寫在 agents.json，所以不在這裡擋，由電腦端回「設定檔裡的名字，請改設定檔」。
 // 舊版電腦端（改名是 0.1.107 起）會回「這類夥伴不支援」
 export const ACP_OPS = ['info', 'rename', 'model', 'close', 'restart', 'handover', 'remove']
 // 已停止（被「關閉」、名單上留著）的工作者：只能看詳情、重開、移除（改名也要先重開）
 export const ACP_STOPPED_OPS = ['info', 'restart', 'remove']
-export const OP_LABEL = { info: '詳情', rename: '改名', model: '切換模型', close: '關閉視窗', handover: '接班換手', resume: '喚醒', restart: '重開', remove: '移除' }
+export const OP_LABEL = { info: '詳情', rename: '改名', model: '切換模型', close: '關閉視窗', handover: '換班接手', resume: '喚醒', restart: '重開', remove: '移除' }
 export const NOTE_MAX = 1000
 export const MODEL_RE = /^[A-Za-z0-9._[\]-]{1,60}$/
 export const OP_POLL_MS = 3000
 export const OP_GIVE_UP_MS = 3 * 60 * 1000   // 後台 2 分鐘沒被取走會自己標失敗；這裡多留一分鐘
 export const QUEUE_GIVE_UP_MS = 15 * 60 * 1000   // 改名、切換模型遇到視窗忙碌，外掛會排隊等閒置（電腦端最多等 10 分鐘），處理中的上限放寬
-export const HANDOVER_GIVE_UP_MS = 15 * 60 * 1000   // 接班換手要等前任寫交接（最久 10 分鐘），處理中的上限放寬
+export const HANDOVER_GIVE_UP_MS = 15 * 60 * 1000   // 換班接手要等前任寫交接（最久 10 分鐘），處理中的上限放寬
 
 export const REASON = {
   needLogin: '要先登入，才能管理夥伴視窗',
@@ -34,7 +34,7 @@ export const REASON = {
   cloud: '這是雲端代理，在雲端執行，沒有電腦上的視窗可以管理',
   otherEngine: '這位夥伴用的引擎尚未實機驗證，暫不開放從這裡管理視窗',
   alreadyOnline: '這個視窗在線上，不需要喚醒',
-  restartOnlyAcp: '「重開」只用在 ASN 內建通道的工作者；一般視窗請用「接班換手」',
+  restartOnlyAcp: '「重開」只用在 ASN 內建通道的工作者；一般視窗請用「換班接手」',
   removeOnlyAcp: '「移除」只用在 ASN 內建通道的工作者；一般視窗請用「關閉視窗」，不用的夥伴可以封存',
 }
 // 背景工作者（ACP）用不到的項目的說明
@@ -46,7 +46,7 @@ const ACP_WHY = {
 export const PI_OPS = ['rename', 'model', 'close']
 const PI_WHY = {
   info: '這是 pi 視窗，詳情還沒開放',
-  handover: '這是 pi 視窗，接班換手還沒開放',
+  handover: '這是 pi 視窗，換班接手還沒開放',
   restart: REASON.restartOnlyAcp,
   remove: REASON.removeOnlyAcp,
 }
@@ -126,7 +126,7 @@ export function processReason(f) {
 }
 
 // 接手：使用者自己在終端機開的 grok（前景程序條目），可以讓 ASN 的 Grok 工作者載入同一段對話。
-// 沿用「接班換手」這個動作代號（後台與簽章流程不用改），選單上改叫「接手」；真正找得到哪一段對話由電腦端決定，找不到會回原因。
+// 沿用「handover」這個動作代號（後台與簽章流程不用改），選單上改叫「接手」；真正找得到哪一段對話由電腦端決定，找不到會回原因。
 export const ADOPT_LABEL = '接手'
 export const ADOPT_ACK = '我已了解：接手後我會先關掉終端機那個 grok，兩邊同時用同一段對話可能互相覆蓋'
 export const isGrokAdoptable = f => isProcessEntry(f) && /^grok\b/i.test(String(f?.engine ?? '').trim() || String(f?.agent ?? f?.nick ?? '')) && /（前景）\s*$/.test(String(f?.agent ?? f?.nick ?? ''))
@@ -179,7 +179,7 @@ export function isManageable(friend, ctx = {}) {
 
 // 選單項目 { key, label, ok, reason }：項目固定。任何 AI 夥伴（Claude 視窗、背景工作者、雲端代理、其他引擎、在線或離線）都給同一套、同一個順序（MENU_KEYS）；
 // 用不到的項目不隱藏，一律 ok:false，reason 寫明這一項為什麼不能用（逐案不同，只寫程式真的判斷得出的條件）。不是 AI 夥伴（人、手機、收發室）回空陣列。
-// 可用時的條件與原本完全相同：Claude 視窗在線＝詳情、改名、切換模型、關閉視窗、接班換手；Claude 視窗離線＝喚醒；背景工作者＝詳情、重開、接班換手。
+// 可用時的條件與原本完全相同：Claude 視窗在線＝詳情、改名、切換模型、關閉視窗、換班接手；Claude 視窗離線＝喚醒；背景工作者＝詳情、重開、換班接手。
 // ctx：{ machines（節點→設定）, loaded, signedIn, friends, asn, nonWindowNodes, supported（後台有沒有 partner_op；false＝舊後台） }
 export const MENU_KEYS = ['info', 'rename', 'model', 'close', 'handover', 'resume', 'restart', 'remove']
 export function menuItems(friend, ctx = {}) {
@@ -314,11 +314,11 @@ const DONE_TEXT = {
   rename: '已改名。',
   model: '已切換模型。',
   close: '視窗已關閉，對話記錄還在。',
-  handover: '接班換手完成，新視窗開好了。',
+  handover: '換班接手完成，新視窗開好了。',
   resume: '已喚醒，視窗開好了。',
   restart: '已重開，對話保留。',
 }
-// 接班換手的三個階段（電腦端用 detail 回報 stage:代號）
+// 換班接手的三個階段（電腦端用 detail 回報 stage:代號）
 export const HANDOVER_STEPS = [
   { key: 'handoff', text: '請前任寫交接' },
   { key: 'closing', text: '關閉前任視窗' },
@@ -339,7 +339,7 @@ function reasonText(detail) {
 
 // 進度：partner_ops 回的那一筆（status：pending／taken／ok／failed／unconfirmed）。
 // opts：{ op, sentAt（送出時間，毫秒）, now（毫秒）}；等太久還沒結果就當逾時
-// 接班換手的結果補充：交接檔位置（給人看）；前任沒寫完要說
+// 換班接手的結果補充：交接檔位置（給人看）；前任沒寫完要說
 function handoverExtra(result) {
   const r = result && typeof result === 'object' && !Array.isArray(result) ? result : {}
   const lines = []
@@ -348,7 +348,7 @@ function handoverExtra(result) {
   return lines
 }
 
-// 進度：回 { phase, done, text, steps?, extra? }。接班換手處理中依電腦端回報的階段（detail＝stage:代號）分段顯示：
+// 進度：回 { phase, done, text, steps?, extra? }。換班接手處理中依電腦端回報的階段（detail＝stage:代號）分段顯示：
 // 請前任寫交接 → 關閉前任視窗 → 開新視窗 → 完成；steps 是各階段的狀態（done／active／todo），完成時附交接檔位置
 export function progressView(row, { op = row?.op, sentAt = 0, now = Date.now() } = {}) {
   const waited = sentAt ? now - sentAt : 0

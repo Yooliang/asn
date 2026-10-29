@@ -56,7 +56,7 @@ test('buildFriends：在線的帶 contextPct；離線、壞值、舊後台沒有
   assert.deepEqual(f.map(x => [x.agent, x.contextPct]), [['H-甲', 85], ['H-乙', null], ['H-丙', null], ['H-丁', null], ['H-戊', null]])
 })
 
-test('手機提醒：前景跳橫幅（帶接班換手、停留較久、不震動）；背景不跳；正在看那位也要跳；一般訊息橫幅沒有換手', () => {
+test('手機提醒：前景跳橫幅（帶換班接手、停留較久、不震動）；背景不跳；正在看那位也要跳；一般訊息橫幅沒有換手', () => {
   const n = { kind: 'context', friend: { id: 'A', nick: '甲', status: 'busy', hue: 1 }, line: '甲 的上下文已用 92%，快要壓縮了' }
   const p = mobilePlan(n, { openId: '', foreground: true })
   assert.equal(p.banner.id, 'A'); assert.equal(p.banner.handover, true); assert.equal(p.banner.ms, CONTEXT_BANNER_MS); assert.equal(p.vibrate, 0)
@@ -92,13 +92,13 @@ test('核心：名單升破 90％才發提醒事件，點開用的好友帶在�
   assert.equal(core.friends.get('T/T-甲')?.contextPct ?? null, null, '視窗不在名單：用量不沿用舊值')
 })
 
-test('接線：電腦版與手機版名單都顯示用量小字；手機橫幅有「接班換手」按鈕並接到同一個換手流程', async () => {
+test('接線：電腦版與手機版名單都顯示用量小字；手機橫幅有「換班接手」按鈕並接到同一個換手流程', async () => {
   const { readFileSync } = await import('node:fs')
   const rd = f => readFileSync(new URL(`../ui/${f}`, import.meta.url), 'utf8')
   for (const f of ['list.html', 'm.html']) assert.match(rd(f), /<span class="b-ctx" :class="\{ danger: contextLabel\(c\)\.danger \}" v-if="contextLabel\(c\)">\{\{ contextLabel\(c\)\.text \}\}<\/span>/, f)
-  assert.match(rd('m.html'), /<button class="m-banner-act"[^>]*v-if="banner\.handover" @click\.stop="bannerHandover">接班換手<\/button>/)
+  assert.match(rd('m.html'), /<button class="m-banner-act"[^>]*v-if="banner\.handover" @click\.stop="bannerHandover">換班接手<\/button>/)
   const js = rd('m.js')
-  assert.match(js, /async function bannerHandover\(\)[\s\S]*pickOp\('handover'\)/, '直接帶到接班換手的確認框')
+  assert.match(js, /async function bannerHandover\(\)[\s\S]*pickOp\('handover'\)/, '直接帶到換班接手的確認框')
   assert.match(js, /bannerHandover, contextLabel/, '要交給樣板')
   assert.match(rd('list.js'), /contextLabel, avOf/, '電腦版要交給樣板')
 })

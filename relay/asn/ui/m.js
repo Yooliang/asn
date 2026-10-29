@@ -389,7 +389,7 @@ const app = createApp({
     const tabLabel = t => tabLabelOf(t, fourthTitle.value)
     const closePage = () => fourthNav.closePage()   // 內頁的「關閉」：整個收起第四頁籤，回到進來之前的頁籤
     const openBanner = () => { const b = banner.value; banner.value = null; if (b) openChat(b.id) }
-    // 橫幅上的「接班換手」：開啟那位的對話，直接帶到「接班換手」的確認框（不能換手時停在「⋯」選單，由選單說明原因）
+    // 橫幅上的「換班接手」：開啟那位的對話，直接帶到「換班接手」的確認框（不能換手時停在「⋯」選單，由選單說明原因）
     async function bannerHandover() {
       const b = banner.value; banner.value = null
       if (!b) return
@@ -644,7 +644,7 @@ const app = createApp({
       lastChat.value = id; banner.value = null
       fourthNav.closePage('chats')
     }
-    // ---------- 「⋯」選單：管理這位夥伴的視窗（詳情、改名、切換模型、關閉視窗、接班換手；離線的只有喚醒） ----------
+    // ---------- 「⋯」選單：管理這位夥伴的視窗（詳情、改名、切換模型、關閉視窗、換班接手；離線的只有喚醒） ----------
     // 判斷全部用 lib/partner-ops.mjs 的 menuItems／opFormError／progressView，手機不另寫一套。手機只下指令，視窗在那台電腦上
     const opsCtx = computed(() => ({ machines: lchData.machines, loaded: lchData.loaded, signedIn: acctSigned(), authError: acct.value.error, friends: friends.value, nonWindowNodes: [info.node] }))
     const opsItems = computed(() => (chatFriend.value ? manageItems(chatFriend.value, opsCtx.value) : []))

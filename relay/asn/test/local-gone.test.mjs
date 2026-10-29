@@ -1,4 +1,4 @@
-// 關閉視窗／接班換手之後，本機名單不留殘影：本機現讀曾經看到、這次不見的視窗，立刻轉離線（不等後台下一輪名單）。
+// 關閉視窗／換班接手之後，本機名單不留殘影：本機現讀曾經看到、這次不見的視窗，立刻轉離線（不等後台下一輪名單）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { AsnCore } from '../ui/lib/core.mjs'

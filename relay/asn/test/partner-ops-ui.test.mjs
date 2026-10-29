@@ -33,7 +33,7 @@ test('送出並輪詢：只送 node／name／op 與該動作的欄位，進度�
   const { v, seen } = await run(api, F('H', '小文'), 'handover', { note: ' 先看 PR ', newName: 'x', model: 'y' })
   assert.deepEqual(api.calls.op, [{ node: 'H', name: '小文', op: 'handover', note: '先看 PR' }])
   assert.deepEqual(api.calls.ops, [['op-1'], ['op-1'], ['op-1'], ['op-1']])
-  assert.deepEqual(seen.map(x => x.text), ['正在發送指令…', '正在發送指令…', '請前任寫交接中…', '關閉前任視窗中…', '接班換手完成，新視窗開好了。'])
+  assert.deepEqual(seen.map(x => x.text), ['正在發送指令…', '正在發送指令…', '請前任寫交接中…', '關閉前任視窗中…', '換班接手完成，新視窗開好了。'])
   assert.equal(v.phase, 'done'); assert.deepEqual(v.extra, ['交接檔：D:/h/a.md'])
 })
 
@@ -67,9 +67,9 @@ test('設定載入：沒登入、查不到的都當沒查到（反灰說明）�
   assert.deepEqual(await loadOpsContext({ authStatus: async () => { throw new Error('x') }, launchers: async () => { throw new Error('y') } }), { machines: {}, loaded: false, signedIn: null, checking: false, authError: 'x', loadError: '暫時連不上，請稍後再試' }, '查不到的原文只進 console，畫面說使用者能做什麼（#380）')
 })
 
-test('對話框文字：接班換手說明流程、全部純中文、不出現節點代號與夥伴 ID', () => {
+test('對話框文字：換班接手說明流程、全部純中文、不出現節點代號與夥伴 ID', () => {
   const h = opDialogText('handover', '小文', '家用機')
-  assert.equal(h.title, '接班換手')
+  assert.equal(h.title, '換班接手')
   assert.match(h.lead, /「小文」/); assert.match(h.lead, /家用機/)
   assert.match(h.points.join(''), /交接.*關掉.*同一個名字/s)
   assert.equal(opDialogText('close', '小文', '家用機').lead, '關掉「小文」在「家用機」上的視窗？對話記錄會留著。')
@@ -82,7 +82,7 @@ test('對話框文字：接班換手說明流程、全部純中文、不出現�
   }
 })
 
-test('接手的對話框：講明先關掉終端機那個 grok、兩邊同時用可能互相覆蓋，並要求勾選確認；一般接班換手沒有這些', () => {
+test('接手的對話框：講明先關掉終端機那個 grok、兩邊同時用可能互相覆蓋，並要求勾選確認；一般換班接手沒有這些', () => {
   const t = opDialogText('handover', 'grok #65324（前景）', '家用機', 'adopt')
   assert.equal(t.title, '接手')
   assert.equal(t.ok, '接手')
@@ -192,7 +192,7 @@ test('三個畫面都用「未知」當初始值，不再寫死 signedIn:false',
   assert.ok(!/props\.friend [!=]== f/.test(read('ui/lib/actionbar.mjs')), '查詢回來要比夥伴 ID，不能比物件')
 })
 
-test('對話框文字：重開要確認、接班換手依引擎說不同的事（ACP 不請前任寫交接）', () => {
+test('對話框文字：重開要確認、換班接手依引擎說不同的事（ACP 不請前任寫交接）', () => {
   const r = opDialogText('restart', 'Gemini', '家用機', 'acp')
   assert.equal(r.auto, false); assert.equal(r.title, '重開'); assert.match(r.lead, /內建通道/); assert.match(r.lead, /對話會保留/)
   const acp = opDialogText('handover', 'Gemini', '', 'acp')

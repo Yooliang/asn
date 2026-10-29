@@ -52,11 +52,11 @@ test('改名完成：對話跳到新名字；沒完成或不是改名不動', ()
   assert.equal(renamedChatId(f, 'close', { newName: '小文二' }, { phase: 'done' }), '')
 })
 
-test('頂端進度條：主句、接班換手分段（✓／…／○）、交接檔位置；沒有進度不顯示', () => {
+test('頂端進度條：主句、換班接手分段（✓／…／○）、交接檔位置；沒有進度不顯示', () => {
   assert.equal(runBanner(null), null); assert.equal(runBanner({ op: 'close' }), null)
   const b = runBanner({ op: 'handover', view: { phase: 'working', done: false, text: '關閉前任視窗中…', steps: [{ key: 'handoff', text: '請前任寫交接', state: 'done' }, { key: 'closing', text: '關閉前任視窗', state: 'active' }, { key: 'opening', text: '開新視窗', state: 'todo' }] } })
   assert.deepEqual(b.steps.map(s => s.mark), ['✓', '…', '○']); assert.equal(b.done, false)
-  const d = runBanner({ op: 'handover', view: { phase: 'done', done: true, text: '接班換手完成，新視窗開好了。', extra: ['交接檔：x'] } })
+  const d = runBanner({ op: 'handover', view: { phase: 'done', done: true, text: '換班接手完成，新視窗開好了。', extra: ['交接檔：x'] } })
   assert.equal(d.done, true); assert.deepEqual(d.extra, ['交接檔：x'])
 })
 

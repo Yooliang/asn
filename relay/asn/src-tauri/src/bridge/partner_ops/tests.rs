@@ -696,7 +696,7 @@ fn 切換模型_沒有外掛_走既有流程_換模型重開_忙碌時拒絕() {
 }
 
 // ================================================================================================
-// 接班換手（handover）
+// 換班接手（handover）
 // ================================================================================================
 
 /// 前任（sid-220）的對話紀錄：projects/某資料夾/sid-220.jsonl
@@ -709,7 +709,7 @@ fn write_old_transcript(r: &Rig) -> PathBuf {
 }
 
 #[test]
-fn 接班換手_請前任寫交接_等檔案_關前任_同名開新_不帶_resume_第一句話指向對話紀錄與交接檔() {
+fn 換班接手_請前任寫交接_等檔案_關前任_同名開新_不帶_resume_第一句話指向對話紀錄與交接檔() {
     let r = rig(Opt::default());
     let transcript = write_old_transcript(&r);
     let res = r.run("handover", json!({ "note": "先看 PR 12。
@@ -738,7 +738,7 @@ fn 接班換手_請前任寫交接_等檔案_關前任_同名開新_不帶_resum
 }
 
 #[test]
-fn 接班換手_前任沒寫完_逾時仍會換手_第一句話註明() {
+fn 換班接手_前任沒寫完_逾時仍會換手_第一句話註明() {
     for tell_fails in [false, true] {
         let r = rig(Opt::default());
         write_old_transcript(&r);
@@ -755,7 +755,7 @@ fn 接班換手_前任沒寫完_逾時仍會換手_第一句話註明() {
 }
 
 #[test]
-fn 接班換手_交接檔大小還在變_不算寫完_穩定了才算() {
+fn 換班接手_交接檔大小還在變_不算寫完_穩定了才算() {
     let r = rig(Opt::default());
     write_old_transcript(&r);
     // 每次輪詢（sleep）都把檔案加長，直到逾時：永遠不穩定
@@ -776,7 +776,7 @@ fn 接班換手_交接檔大小還在變_不算寫完_穩定了才算() {
 }
 
 #[test]
-fn 接班換手_沒找到前任的對話紀錄_第一句話只指向交接檔() {
+fn 換班接手_沒找到前任的對話紀錄_第一句話只指向交接檔() {
     let r = rig(Opt::default());
     let res = r.run("handover", json!({}));
     assert_eq!(res.status, "ok", "{}", res.detail);
@@ -785,7 +785,7 @@ fn 接班換手_沒找到前任的對話紀錄_第一句話只指向交接檔() 
 }
 
 #[test]
-fn 接班換手_新視窗_session_沒換不算成功_仍回交接檔位置() {
+fn 換班接手_新視窗_session_沒換不算成功_仍回交接檔位置() {
     let r = rig(Opt::default());
     *r.env.appear.lock().unwrap() = Some((502, "sid-220".into()));
     let res = r.run("handover", json!({}));
@@ -794,7 +794,7 @@ fn 接班換手_新視窗_session_沒換不算成功_仍回交接檔位置() {
 }
 
 #[test]
-fn 接班換手守門_交接檔路徑只在規範資料夾內_檔名只有安全字元_有夥伴_id_用夥伴_id() {
+fn 換班接手守門_交接檔路徑只在規範資料夾內_檔名只有安全字元_有夥伴_id_用夥伴_id() {
     let base = Path::new("handoff-base");
     let root = base.join(HANDOFF_SUBDIR);
     for key in ["../../evil", "a/b\\c", "..", "", "C:\\x", "名字 空白;rm", "p_0123456789abcdef0123", &"長".repeat(200)] {
@@ -1371,7 +1371,7 @@ fn 過期_指令_外掛還活著就送_沒動靜短逾時回沒有回應() {
 }
 
 // ================================================================================================
-// ACP 工作者（收發室自己跑的 Gemini、agy 等）：只支援詳情、重開、接班換手
+// ACP 工作者（收發室自己跑的 Gemini、agy 等）：只支援詳情、重開、換班接手
 // ================================================================================================
 
 struct FakeAcp {
@@ -1521,7 +1521,7 @@ fn 接手_做不到就不接手_回中文原因_工作者入口完全沒被呼�
 }
 
 #[test]
-fn 接手_工作者載入失敗的原因原樣回報_一般名字的接班換手不受影響() {
+fn 接手_工作者載入失敗的原因原樣回報_一般名字的換班接手不受影響() {
     let r = rig(Opt::default());
     grok_rig(&r, grok_active(), true);
     let a = with_acp(&r, &["Grok"]);
@@ -1545,7 +1545,7 @@ fn acp_run(r: &Rig, op: &str, extra: Value) -> OpResult {
 }
 
 #[test]
-fn acp_詳情_重開_接班換手_交給工作者管理入口_不碰任何程序() {
+fn acp_詳情_重開_換班接手_交給工作者管理入口_不碰任何程序() {
     let r = rig(Opt::default());
     let a = with_acp(&r, &["Gemini"]);
     let v = acp_run(&r, "info", json!({})).result.unwrap();
@@ -1558,7 +1558,7 @@ fn acp_詳情_重開_接班換手_交給工作者管理入口_不碰任何程序
     assert_eq!(res.result.unwrap()["handoff_done"], false);
     assert_eq!(*a.calls.lock().unwrap(), vec!["restart Gemini".to_string(), "handover Gemini [別動資料庫]".to_string()]);
     assert!(r.terminated().is_empty() && r.launched().is_empty() && r.os().closed.lock().unwrap().is_empty(), "不用名稱找程序、不結束任何程序、不開視窗");
-    assert!(r.env.progress.lock().unwrap().iter().any(|s| s == "stage:opening"), "接班換手有回報階段");
+    assert!(r.env.progress.lock().unwrap().iter().any(|s| s == "stage:opening"), "換班接手有回報階段");
 }
 
 #[test]
@@ -1693,7 +1693,7 @@ fn acp_關閉_交給工作者管理入口停止_不碰任何其他程序_本機�
 }
 
 #[test]
-fn acp_重開與接班換手要本機開放遠端管理_詳情不用_動手前再驗一次() {
+fn acp_重開與換班接手要本機開放遠端管理_詳情不用_動手前再驗一次() {
     let r = rig(Opt { allow_first: 0, ..Opt::default() });
     let a = with_acp(&r, &["Gemini"]);
     assert_eq!(acp_run(&r, "info", json!({})).status, "ok");
@@ -1766,7 +1766,7 @@ fn 保護名單_ASN視窗名改名後跟著換() {
 }
 
 // ================================================================================================
-// 關閉／接班換手後不留殘影
+// 關閉／換班接手後不留殘影
 // ================================================================================================
 
 /// 把 220 的 session 檔改成真實的毫秒時間戳 startedAt，並設定「程序建立時間」
@@ -1804,7 +1804,7 @@ fn 關閉後_session_檔的_sessionid_對不上就不刪() {
 }
 
 #[test]
-fn 接班換手後_前任的_sessions_檔也清掉_新視窗的檔還在() {
+fn 換班接手後_前任的_sessions_檔也清掉_新視窗的檔還在() {
     let r = rig(Opt::default());
     let res = r.run("handover", json!({}));
     assert_eq!(res.status, "ok", "{}", res.detail);

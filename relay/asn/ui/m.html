@@ -43,7 +43,7 @@
     <div class="m-banner" v-if="banner" role="status" @click="openBanner">
       <span class="dp xs" :class="'st-' + banner.status"><span><img :src="avById(banner.id)" alt=""></span></span>
       <span class="m-banner-tx" :class="{ wrap: banner.handover }"><b v-html="emo(banner.nick)"></b><small>{{ banner.line }}</small></span>
-      <button class="m-banner-act" type="button" v-if="banner.handover" @click.stop="bannerHandover">接班換手</button>
+      <button class="m-banner-act" type="button" v-if="banner.handover" @click.stop="bannerHandover">換班接手</button>
     </div>
     <!-- 一句話的提示（底部，幾秒後自己消失，點一下就關）：例如離開進行中的畫面後，帳號切換完成或失敗 -->
     <div class="m-toast" v-if="toast" role="status" @click="toast = ''">{{ toast }}</div>
