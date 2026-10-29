@@ -1485,7 +1485,8 @@ const app = createApp({
     void accounts.loadTrust()
     // 本機帳號庫清單定期回報給收發室（只有 email、方案、使用中）；別台送來的切換指令定期取走（預設要本機按確認才切）。--shot 不輪詢指令。
     setTimeout(() => void accounts.report(), 5_000)
-    setInterval(() => void accounts.report(), 5 * 60_000)
+    // 每 5 分鐘回報時順便重讀這台的額度紀錄，設備卡的額度條才不會停在開機那時的數字
+    setInterval(() => { void accounts.report(); void accounts.refreshQuota() }, 5 * 60_000)
     void listen('claude-mod-status', e => { accounts.state.mod = String(e.payload ?? '') })   // Rust 背景安裝 Claude 外掛完成
     void listen('claude-account-auto', e => void accounts.onAuto(e.payload))
     void listen('grok-account-auto', e => void accounts.onAuto(e.payload))   // Grok 自動加入也走同一支：重抓清單並回報   // Rust 背景工作自動加入／回存之後
@@ -1624,7 +1625,10 @@ const app = createApp({
       }
     }
     // 分離模式的指引、設定視窗：開起來先問一聲（hello），樞紐回目前要顯示哪一篇與設定快照；之後設定一變就推新快照
-    watch(() => ui.panel.setting, k => { if (k === 'usage') void usage.refresh() }, { immediate: true })
+    watch(() => ui.panel.setting, k => {
+      if (k === 'usage') void usage.refresh()
+      if (k) void accounts.refreshQuota()   // 打開設定頁（或換頁籤）時重讀額度
+    }, { immediate: true })
     const pushSettings = () => { if (ui.mode === 'split') emit('asn:settings', settingsState.value) }
     watch(settingsState, pushSettings, { deep: true })
     void listen('asn:cmd', c => {

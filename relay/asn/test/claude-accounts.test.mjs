@@ -2,6 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { quotaBars } from '../ui/lib/account-quota.mjs'
 import { OTHER_VENDORS, SWITCH_NOTICE, accountLine, codexLine, createAccountsUi, isFinalStatus, remoteStatusText } from '../ui/lib/claude-accounts.mjs'
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')
@@ -215,4 +216,32 @@ test('手機要求切換後的彈窗：Claude 不說要重開、不提已併掉�
   assert.ok(block.includes('「允許切換帳號」'))
   assert.ok(!/Claude 視窗要關掉重開/.test(block), 'Claude 切換不用重開')
   assert.ok(/Grok 視窗要關掉重開/.test(block), 'Grok 還是要重開')
+})
+
+test('只重讀額度：不重抓帳號清單，畫面的額度條換成新數字；紀錄沒了回到額度未知；讀不到維持原樣', async () => {
+  const at = new Date().toISOString()
+  let quota = { 'a@x.test': { five_hour_pct: 80, weekly_pct: 90, at } }
+  const { f, ui } = mk({ claude_accounts_list: [{ email: 'a@x.test', plan: 'max', current: true }, { email: 'b@x.test', plan: 'pro', current: false }], claude_account_current: null, codex_account_current: null, claude_quota_all: () => { if (quota instanceof Error) throw quota; return quota } })
+  await ui.refresh()
+  assert.deepEqual(quotaBars(ui.state.list[0]).bars.map(b => b.pct), [80, 90])
+  quota = { 'a@x.test': { five_hour_pct: 4, weekly_pct: 55, at }, 'b@x.test': { weekly_pct: 30, at } }
+  f.calls.length = 0
+  await ui.refreshQuota()
+  assert.deepEqual(f.calls.map(c => c[0]), ['claude_quota_all'], '只讀額度')
+  assert.deepEqual(quotaBars(ui.state.list[0]).bars.map(b => b.pct), [4, 55])
+  assert.deepEqual(quotaBars(ui.state.list[1]).bars.map(b => b.pct), [30])
+  assert.equal(ui.state.list[0].plan, 'max', '帳號其他欄位不動')
+  quota = { 'b@x.test': { weekly_pct: 30, at } }
+  await ui.refreshQuota()
+  assert.equal(ui.state.list[0].five_hour_pct, undefined, '紀錄沒了就回到額度未知')
+  assert.equal(quotaBars(ui.state.list[0]).bars.length, 0)
+  quota = new Error('舊版沒有這個指令')
+  await ui.refreshQuota()
+  assert.deepEqual(quotaBars(ui.state.list[1]).bars.map(b => b.pct), [30], '讀不到就維持原樣')
+})
+
+test('重讀額度接線：每 5 分鐘回報時順便重讀、打開設定頁時重讀', () => {
+  const js = read('ui/list.js')
+  assert.match(js, /setInterval\(\(\) => \{ void accounts\.report\(\); void accounts\.refreshQuota\(\) \}, 5 \* 60_000\)/)
+  assert.match(js, /watch\(\(\) => ui\.panel\.setting, k => \{[^]*?if \(k\) void accounts\.refreshQuota\(\)[^]*?\}, \{ immediate: true \}\)/)
 })

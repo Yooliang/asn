@@ -59,7 +59,7 @@ export function resetIn(resetAt, now = Date.now(), who = '') {
 
 /**
  * 重置時間是哪一條的：跟電腦端 claude_quota.rs 的規則一致——用完（剩 0%）的那條；兩條都用完是較晚的那個（兩條都要等）；
- * 都沒用完就是 5 小時那條（沒有 5 小時的就是每週的）
+ * 都沒用完就是 5 小時那條（沒有 5 小時的就是每週的）。那條自己沒有重置時間時，電腦端不存（不拿另一條的來頂），這裡就不會標錯
  */
 export function resetOwner(five, week) {
   if (five === 0 && week === 0) return '兩條額度都'
