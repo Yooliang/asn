@@ -5,6 +5,7 @@ import { confirmCards } from './groups.mjs'
 import { ROOM_FIRST_LOAD, ROOM_LOAD_FAIL_TEXT, applyReads, applyWakes, hasPendingReads, hasPendingWakes, mergeRoomLog, memberIdentity, needsRead, postError, readSince, roomErrorText, roomItems, roomLog } from './mobile-rooms.mjs'
 import { groupErrorText } from './groups.mjs'
 
+// visible(群組代號)：使用者現在正在看這個群組嗎（可回 Promise）；沒指定 mark 的讀取只有看著的那個才標已讀
 export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd = 'relay_room_read', postCmd = 'relay_room_post', attachCmd = 'relay_send_attachment', photos = false, visible = () => true, now = () => Date.now(), reactive = x => x }) {
   const st = reactive({ rooms: [], loaded: false, err: false, logs: {}, cards: {}, note: '', deciding: false })
   const raw = id => st.rooms.find(r => r?.id === id) ?? null
@@ -32,10 +33,11 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
     const log = st.logs[id] ?? []
     const first = !log.length
     const unread = row.unread > 0
-    const seen = typeof mark === 'boolean' ? mark : visible()   // mark:false＝背景讀進來（例如重開還原的分頁），不標已讀
     if (!first && !force && !needsRead(log, row.lastSeq) && !unread) return await refreshReceipts(id, ident, log)
     reading.add(id)
     try {
+      // mark:false＝背景讀進來（例如重開還原的分頁）；沒指定就問這個群組現在是不是正在看（背景分頁、視窗看不到都不標已讀）
+      const seen = typeof mark === 'boolean' ? mark : (await Promise.resolve().then(() => visible(id)).catch(() => false)) === true
       // 後台只在讀到新訊息時才標已讀：未讀還在就多讀最後一則
       const since = unread && !first ? Math.max(0, readSince(log, row.lastSeq) - 1) : readSince(log, row.lastSeq)
       const r = await invoke(readCmd, { room: id, agent: ident.agent || null, since, limit: first ? ROOM_FIRST_LOAD : 200, mark: seen })

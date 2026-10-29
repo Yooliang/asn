@@ -170,7 +170,7 @@ test('工具列位置：預設在輸入框上方；只有 top／bottom，壞值�
 })
 
 // 守門：對話區元件真的用了這些純函式決定版面；樞紐有接上設定與分頁（拿掉就紅）
-test('守門：元件依 paneClasses／msgLayout／foldArrow 排版；樞紐用 switchMode／tabVisible 並存三個設定', () => {
+test('守門：元件依 paneClasses／msgLayout／foldArrow 排版；樞紐用 switchMode／chatShown 並存三個設定', () => {
   const pane = fs.readFileSync(path.join(UI, 'lib', 'chatpane.mjs'), 'utf8')
   assert.ok(pane.includes('paneClasses({ dpMode: props.dpMode, bubble: props.bubble, collapsed: props.dpCollapsed, toolbar: props.toolbar })'))
   assert.ok(pane.includes('msgLayout(k, { dpMode: props.dpMode, bubble: props.bubble })'))
@@ -187,7 +187,7 @@ test('守門：元件依 paneClasses／msgLayout／foldArrow 排版；樞紐用 
   assert.ok(css.includes('.tb-bottom .compose-main{flex-direction:column-reverse}'))
   for (const t of ['tone-same', 'tone-me', 'tone-them']) assert.ok(css.includes('.m-body.' + t), `style.css 缺 ${t}`)
   const hub = fs.readFileSync(path.join(UI, 'list.js'), 'utf8')
-  for (const k of ['switchMode(from, to', 'tabVisible(ui, id', 'toggleCollapsed(ui.collapsed)', 'closeChatTab(ui, id)', 'openChatTab(ui, id', 'pinnedChat', 'dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed']) assert.ok(hub.includes(k), `list.js 缺 ${k}`)
+  for (const k of ['switchMode(from, to', 'chatShown(ui, id', 'toggleCollapsed(ui.collapsed)', 'closeChatTab(ui, id)', 'openChatTab(ui, id', 'pinnedChat', 'dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed']) assert.ok(hub.includes(k), `list.js 缺 ${k}`)
   const htmlTab = fs.readFileSync(path.join(UI, 'list.html'), 'utf8')
   assert.ok(htmlTab.includes('@contextmenu.prevent="openChatTabMenu(t.id, $event)"'))
   // 選單不能放在 .tabbar 裡面（tabbar overflow:hidden 會把選單裁掉，右鍵看起來像沒反應）
