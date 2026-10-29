@@ -478,7 +478,7 @@ export const ChatPane = {
   <teleport to="body" :disabled="!callApi">
     <call-view v-if="callActive" :state="call.state" :name="plain(friend.nick)" :avatar="friendAv" :hue="friend.hue" :status="friend.status" :phase-text="callApi && callApi.phaseText" @hangup="hangUp" @mute="call.toggleMute()"></call-view>
   </teleport>
-  <annotator v-if="annot" :blob="annot.blob" :caption="draft.trim()" :busy="annot.busy" :message="annot.msg" @done="annotDone" @cancel="annotCancel"></annotator>
+  <teleport to="body" v-if="annot"><annotator :blob="annot.blob" :caption="draft.trim()" :busy="annot.busy" :message="annot.msg" @done="annotDone" @cancel="annotCancel"></annotator></teleport>
   <teleport to="body" v-if="viewer">
   <div class="photo-viewer" @click.self="closeViewer" @keydown.esc="closeViewer" role="dialog" aria-modal="true" aria-label="放大看照片">
     <div class="pv-bar">

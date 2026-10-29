@@ -64,6 +64,39 @@ export const fakeTable = ({ signedIn = true, needsLogin = false } = {}) => ({
   // 故意沒放的指令（例如 android_update_check、ai_cli_detect）：呼叫會被拒絕，模擬真機沒註冊它的情況
 })
 
+// 遮罩檢查（#536）：steps＝依序點的 [選擇器, 文字]，mask＝遮罩選擇器，cover＝必須被遮罩蓋住的區塊
+export const MASK_PROBES = {
+  desktop: { steps: [['.actionbar .abtn[aria-label="管理"]', ''], ['.ab-ops button:not(.off)', '詳情']], mask: '.dlg-back', cover: ['.me .me-dp', '.me-info', '.rail', '.list-pane .content', '.tabbar'] },
+  mobile: { steps: [['.m-plus-wrap .m-icon-btn', ''], ['.m-plus-menu button', '建立群組']], mask: '.gs-back', cover: ['.m-head .m-me', '.m-head .m-plus-wrap', '.m-search'] },
+}
+// 夥伴分頁情境：名單上有一個在線的 Claude 視窗，整合模式開著它的對話分頁（大按鈕區有「管理」）
+export const PARTNER_MEMBERS = [{ id: 'P', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }]
+export const PARTNER_ME = { winMode: 'merged', session: { v: 1, tabs: [{ id: 'P/demo' }], active: { id: 'P/demo' }, panel: { guide: '', setting: '' }, windows: [], panelWindows: [] } }
+
+// 在頁面內執行（await）：依序點開對話框，再檢查遮罩蓋滿視窗、指定區塊的左上角點下去會落在遮罩上
+export const maskProbeSource = ({ steps, mask, cover }) => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const find = async (sel, text) => { for (let i = 0; i < 50; i++) { const el = [...document.querySelectorAll(sel)].find(e => !text || e.textContent.includes(text)); if (el) return el; await sleep(100) } return null };
+  for (const [sel, text] of ${JSON.stringify(steps)}) {
+    const el = await find(sel, text);
+    if (!el) return { ok: false, why: '找不到 ' + sel + (text ? '「' + text + '」' : '') };
+    el.click(); await sleep(200);
+  }
+  const back = await find(${JSON.stringify(mask)}, '');
+  if (!back) return { ok: false, why: '對話框沒有打開（找不到 ' + ${JSON.stringify(mask)} + '）' };
+  const r = back.getBoundingClientRect();
+  if (r.left > 0 || r.top > 0 || r.right < innerWidth || r.bottom < innerHeight) return { ok: false, why: '遮罩沒有蓋滿視窗：' + [r.left, r.top, r.right, r.bottom].map(Math.round).join(',') };
+  for (const sel of ${JSON.stringify(cover)}) {
+    const t = document.querySelector(sel);
+    if (!t) return { ok: false, why: '找不到要被蓋住的 ' + sel };
+    const b = t.getBoundingClientRect();
+    const x = Math.min(b.left + 6, b.right - 1), y = Math.min(b.top + 6, b.bottom - 1);
+    const hit = document.elementFromPoint(x, y);
+    if (!hit || !back.contains(hit)) return { ok: false, why: sel + ' 沒被遮罩蓋住（點到 ' + (hit ? hit.tagName.toLowerCase() + '.' + String(hit.className).trim().split(/\s+/).join('.') : '空白') + '）' };
+  }
+  return { ok: true, why: '' };
+})()`
+
 // ---- 入口頁清單：每個情境載一頁，指定假狀態、等待的畫面特徵 ----
 // ready：頁面掛上後必須存在的選擇器；頁面不能被導走（導走＝流程錯）
 export const SCENARIOS = [
@@ -78,6 +111,9 @@ export const SCENARIOS = [
   { name: 'panel', page: 'panel.html', state: { signedIn: true }, ready: '#app.win' },
   { name: 'askpass', page: 'askpass.html', state: { signedIn: true }, ready: '#app' },
   { name: 'toast', page: 'toast.html', state: { signedIn: true }, ready: '#app' },
+  // 對話框遮罩（#536）：打開對話框後，遮罩要蓋滿整個視窗，左上使用者區與名單也點不到
+  { name: 'list-dialog-mask', page: 'list.html', state: { signedIn: true, partnerTab: true }, ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: MASK_PROBES.desktop },
+  { name: 'm-dialog-mask', page: 'm.html', state: { signedIn: true }, ready: '#app.m .m-pager .m-search', probe: MASK_PROBES.mobile },
 ]
 // 刻意不測的 ui/*.html（要寫理由）；其餘 html 都必須有情境（見單元測試）
 export const EXCLUDED_PAGES = {
@@ -98,6 +134,7 @@ export const tableFor = scenario => {
   const t = fakeTable(scenario.state)
   if (scenario.state.onboard) t.store_load = { by: 'name', values: {}, fallback: null }
   if (scenario.state.devicesPage) t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(ROSTER_ME) } }
+  if (scenario.state.partnerTab) { t.relay_list = { members: PARTNER_MEMBERS }; t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(PARTNER_ME) } } }
   if (scenario.state.roster) t.acct_roster = ROSTER_SAMPLE   // 沒放＝後台沒部署（指令被拒），畫面要退回舊的顯示、不出錯
   return t
 }

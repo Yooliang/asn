@@ -213,7 +213,7 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 @keyframes m-drop{from{transform:translateY(-120%);opacity:0}to{transform:none;opacity:1}}
 @media (prefers-reduced-motion:reduce){.m-banner{animation:none}}
 /* 一句話的提示：底部置中、讓出手勢列，深底白字；點一下就關 */
-.m-toast{position:fixed;z-index:85;left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom,0px) + 72px);padding:12px 14px;border-radius:10px;background:rgba(28,36,48,.92);color:#fff;font-size:15px;line-height:1.4;text-align:center;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+.m-toast{position:fixed;z-index:calc(var(--z-mask) + 10);left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom,0px) + 72px);padding:12px 14px;border-radius:10px;background:rgba(28,36,48,.92);color:#fff;font-size:15px;line-height:1.4;text-align:center;box-shadow:0 4px 14px rgba(0,0,0,.25)}
 
 /* 開新夥伴：蓋滿整個畫面的表單 */
 .m-sheet{position:fixed;z-index:70;inset:0;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px);background:linear-gradient(180deg,var(--glass-top),var(--glass-bottom) 55%,#a9cdee)}
@@ -286,7 +286,7 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-chat .msg .m-body.md-on a{padding:2px 0}
 
 /* 「⋯」選單：底部浮層，蓋在三個分頁之外（position:fixed 的最外層元素，不被分頁排的 transform／裁切影響）；項目觸控目標 ≥ 44px */
-.m-ops{position:fixed;z-index:80;inset:0;display:flex;flex-direction:column;justify-content:flex-end;background:rgba(15,30,50,.45)}
+.m-ops{position:fixed;z-index:var(--z-mask);inset:0;display:flex;flex-direction:column;justify-content:flex-end;background:rgba(15,30,50,.45)}
 .m-ops-panel{display:flex;flex-direction:column;gap:8px;max-height:85dvh;overflow-y:auto;overscroll-behavior:contain;padding:14px 16px calc(16px + env(safe-area-inset-bottom,0px));background:var(--panel);border-radius:16px 16px 0 0;border-top:1px solid var(--line);box-shadow:0 -4px 16px rgba(0,0,0,.25)}
 .m-ops-h{margin:0 0 2px;font-size:17px;font-weight:800;color:var(--title-fg);overflow-wrap:anywhere}
 .m-ops-item{flex:none;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;gap:2px;width:100%;min-height:52px;padding:8px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel-soft);text-align:left;cursor:pointer;font:inherit;color:inherit}

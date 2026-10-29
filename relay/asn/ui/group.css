@@ -1,6 +1,6 @@
 /* 群組（真人好友與群組 1b）：對話框（建立、邀請、加入、成員與設定）、待主持人確認卡片、發言者徽章、對話上方的「⋯」。電腦版與手機版共用。
    顏色沿用 style.css 的變數；窄視窗（手機、窄的名單視窗）對話框從底部升起，寬視窗置中。 */
-.gs-back{position:fixed;z-index:90;inset:0;display:flex;align-items:flex-end;justify-content:center;background:rgba(15,30,50,.45)}
+.gs-back{position:fixed;z-index:var(--z-mask);inset:0;display:flex;align-items:flex-end;justify-content:center;background:rgba(15,30,50,.45)}
 .gs-panel{display:flex;flex-direction:column;width:100%;max-width:440px;max-height:88dvh;background:var(--panel);color:var(--fg);border-radius:14px 14px 0 0;border-top:1px solid var(--line);box-shadow:0 -4px 16px rgba(0,0,0,.25);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media (min-width:560px){.gs-back{align-items:center}.gs-panel{border-radius:10px;border:1px solid var(--line);box-shadow:0 10px 30px rgba(0,30,70,.35)}}
 .gs-head{flex:none;display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);background:linear-gradient(var(--panel-soft),var(--panel-head));border-radius:inherit}

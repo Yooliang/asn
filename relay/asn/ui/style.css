@@ -9,6 +9,7 @@
   --msg-st-muted:#8a97a8; --msg-st-read:#1f7ad6;
   --font-ui:"Segoe UI",Tahoma,"Microsoft JhengHei","Noto Sans TC",sans-serif;
   color-scheme:light;
+  --z-mask:1000;   /* 對話框遮罩的層級（#536）：所有對話框都 teleport 到 body 並用這一層，遮罩蓋滿整個視窗 */
 }
 *{box-sizing:border-box}
 html,body{height:100%;margin:0;overflow:hidden}
@@ -109,7 +110,7 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .partner-channels{margin:2px 0 6px;padding:0;list-style:none;font-size:11px;color:var(--muted)}.partner-channels li{margin:1px 0}.partner-channels small{display:block;margin-left:1em}   /* 開新夥伴：三條通道說明（#351） */
 .partner-channels .ch-ok b{color:#2e7d32}.partner-channels .ch-no b{color:var(--muted)}
 .launch-picker .launch-why{display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:2px;white-space:normal}
-.partner-dlg-back{position:fixed;inset:0;z-index:70;background:rgba(10,24,40,.45);display:flex;align-items:center;justify-content:center;padding:12px}
+.partner-dlg-back{position:fixed;inset:0;z-index:var(--z-mask);background:rgba(10,24,40,.45);display:flex;align-items:center;justify-content:center;padding:12px}
 .partner-dlg{min-width:min(420px,96vw);max-width:480px;padding:14px 16px;border:1px solid #7a9ec4;border-radius:6px;background:var(--panel);box-shadow:0 8px 28px rgba(0,30,70,.35);display:flex;flex-direction:column;gap:8px}
 .partner-dlg h3{margin:0 0 4px;font-size:15px}
 .launch-notice-body{margin:0;white-space:pre-line;font-size:13px;line-height:1.45}
@@ -563,7 +564,7 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .settings .ver-line { display: block; margin-top: 12px; color: #6b7a8c; }
 
 /* 截圖標註畫面（對話區全區浮層） */
-.annot{position:absolute;inset:0;z-index:25;display:flex;flex-direction:column;background:rgba(10,24,40,.9);color:#fff}
+.annot{position:fixed;inset:0;z-index:var(--z-mask);display:flex;flex-direction:column;background:rgba(10,24,40,.9);color:#fff}
 .an-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:6px 10px;flex:none;background:linear-gradient(var(--panel-soft),var(--panel-head));color:var(--title-fg);border-bottom:1px solid var(--line)}
 .an-group{display:inline-flex;align-items:center;gap:3px}
 .an-btn,.an-size{border:1px solid transparent;background:none;border-radius:3px;padding:3px 6px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;color:inherit;min-width:28px;min-height:26px}
@@ -621,8 +622,8 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .chlog-tag.upd{background:#c28a00}
 .chlog-item ul{margin:3px 0 0;padding-left:18px;font-size:12px}
 
-/* 共用對話框（設定分類、指引內容）：position:fixed 蓋在最上層，不放進 overflow:hidden 的容器；內容區自己捲動 */
-.dlg-back{position:fixed;inset:0;z-index:75;background:rgba(10,24,40,.45);display:flex;align-items:center;justify-content:center;padding:12px}
+/* 共用對話框（設定分類、指引內容、夥伴管理）：teleport 到 body、position:fixed、層級 --z-mask，遮罩蓋滿整個視窗；內容區自己捲動 */
+.dlg-back{position:fixed;inset:0;z-index:var(--z-mask);background:rgba(10,24,40,.45);display:flex;align-items:center;justify-content:center;padding:12px}
 .dlg{width:min(520px,100%);max-height:100%;display:flex;flex-direction:column;border:1px solid #7a9ec4;border-radius:6px;background:var(--panel);color:var(--fg);box-shadow:0 8px 28px rgba(0,30,70,.35);overflow:hidden;outline:0}
 .dlg-head{flex:none;display:flex;align-items:center;gap:8px;padding:6px 6px 6px 12px;border-bottom:1px solid var(--line);background:linear-gradient(var(--panel-soft),var(--panel-head))}
 .dlg-head h3{flex:1;min-width:0;margin:0;font-size:14px;color:var(--title-fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
