@@ -57,6 +57,14 @@ pub fn build_report_with_quota(list: &[AccountInfo], codex: Option<&CodexLogin>,
 
 /// 同上，再加 Grok 帳號庫（只有 email、是否使用中；沒有方案與額度）。總共最多 20 筆：Claude 14、Grok 5、Codex 1。
 pub fn build_report_full(list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount]) -> Value {
+    build_report_windows(list, codex, quotas, grok, &[])
+}
+
+/// 同上，再帶額度窗 `windows`（#374，格式同後台 parseWindows：`{ name, left_pct, resets_at, read_at }`）：
+/// - Claude：有額度紀錄的帳號同時帶舊四欄與 `windows`（舊後台丟掉 windows，不壞）。
+/// - Codex：`codex_windows` 是呼叫端已確認「跟目前登入的帳號對得上」的額度窗（見 codex_quota.rs）；空的就不帶。
+/// - Grok：不帶額度。筆數上限跟以前一樣。
+pub fn build_report_windows(list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value]) -> Value {
     let mut rows: Vec<Value> = list
         .iter()
         .take(if grok.is_empty() { 19 } else { 14 })
@@ -73,6 +81,10 @@ pub fn build_report_full(list: &[AccountInfo], codex: Option<&CodexLogin>, quota
                     o.insert("reset_at".into(), json!(v));
                 }
                 o.insert("at".into(), json!(q.at));
+                let w = q.windows();
+                if !w.is_empty() {
+                    o.insert("windows".into(), json!(w));
+                }
             }
             row
         })
@@ -80,7 +92,11 @@ pub fn build_report_full(list: &[AccountInfo], codex: Option<&CodexLogin>, quota
     if let Some(c) = codex.filter(|c| c.mode == "chatgpt") {
         if let Some(email) = claude_accounts::normalize_email(&c.email) {
             let plan: String = c.plan.chars().filter(|ch| !ch.is_control()).take(30).collect();
-            rows.push(json!({ "vendor": "codex", "email": email, "plan": plan, "current": true }));
+            let mut row = json!({ "vendor": "codex", "email": email, "plan": plan, "current": true });
+            if !codex_windows.is_empty() {
+                row["windows"] = json!(codex_windows.iter().take(4).collect::<Vec<_>>());
+            }
+            rows.push(row);
         }
     }
     for g in grok.iter().take(5) {
@@ -297,8 +313,8 @@ pub fn decide(taken: &mut HashMap<String, (String, Instant)>, id: &str, allowed:
 }
 
 // ---------- 送給收發室的動作 ----------
-pub async fn report(relay: &Relay, list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount]) -> Result<Value, String> {
-    let full = build_report_full(list, codex, quotas, grok);
+pub async fn report(relay: &Relay, list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value]) -> Result<Value, String> {
+    let full = build_report_windows(list, codex, quotas, grok, codex_windows);
     let has_codex = full["accounts"].as_array().is_some_and(|a| a.iter().any(|r| r["vendor"] == "codex" || r["vendor"] == "grok"));
     match relay.api("acct_report", Some(full)).await {
         // 舊後台只認 claude，看到 codex 會整份退回：退一步只回報 Claude，不讓原本的回報壞掉
@@ -594,6 +610,61 @@ mod tests {
         let n = build_report_full(&many, Some(&codex("c@x.test", "plus", "chatgpt")), &HashMap::new(), &gs)["accounts"].as_array().unwrap().len();
         assert!(n <= 20, "後端上限 20 筆，實際 {n}");
         assert!(!v.to_string().contains("token") && !v.to_string().contains("key"));
+    }
+
+    fn quota(five: u8, week: u8) -> Quota {
+        Quota {
+            five_hour_pct: Some(five),
+            weekly_pct: Some(week),
+            reset_at: Some("2026-10-24T14:00:00Z".into()),
+            at: "2026-10-24T12:00:00Z".into(),
+            five_reset_at: Some("2026-10-24T14:00:00Z".into()),
+            week_reset_at: Some("2026-10-30T00:00:00Z".into()),
+            five_at: Some("2026-10-24T12:00:00Z".into()),
+            week_at: Some("2026-10-24T11:00:00Z".into()),
+        }
+    }
+
+    #[test]
+    fn 回報_claude_同時帶舊四欄與額度窗_codex_帶對得上的額度窗_grok_不帶_總數不超過二十筆() {
+        use crate::grok_accounts::GrokAccount;
+        let qs: HashMap<String, Quota> = (0..30).map(|i| (format!("u{i}@x.test"), quota(40, 70))).collect();
+        let many: Vec<_> = (0..30).map(|i| acct(&format!("u{i}@x.test"), i == 0)).collect();
+        let gs: Vec<_> = (0..30).map(|i| GrokAccount { email: format!("g{i}@x.test"), current: false, saved: true }).collect();
+        let cw = vec![json!({ "name": "five_hour", "left_pct": 95, "resets_at": "2026-10-24T14:00:00Z", "read_at": "2026-10-24T12:00:00Z" })];
+        let v = build_report_windows(&many, Some(&codex("c@x.test", "plus", "chatgpt")), &qs, &gs, &cw);
+        let rows = v["accounts"].as_array().unwrap();
+        assert!(rows.len() <= 20, "後端上限 20 筆，實際 {}", rows.len());
+        let first = &rows[0];
+        for k in ["five_hour_pct", "weekly_pct", "reset_at", "at"] {
+            assert!(first.get(k).is_some(), "舊四欄要照送：{k}");
+        }
+        assert_eq!(first["windows"], json!([
+            { "name": "five_hour", "left_pct": 40, "resets_at": "2026-10-24T14:00:00Z", "read_at": "2026-10-24T12:00:00Z" },
+            { "name": "weekly", "left_pct": 70, "resets_at": "2026-10-30T00:00:00Z", "read_at": "2026-10-24T11:00:00Z" },
+        ]));
+        let cx = rows.iter().find(|r| r["vendor"] == "codex").expect("要有 codex");
+        assert_eq!(cx["windows"], json!(cw));
+        assert!(cx.get("five_hour_pct").is_none(), "codex 不帶舊四欄");
+        assert!(rows.iter().filter(|r| r["vendor"] == "grok").all(|r| r.get("windows").is_none()), "grok 不送額度");
+        assert!(rows.iter().all(|r| r.get("windows").and_then(Value::as_array).map(|w| w.len()).unwrap_or(0) <= 4), "每筆最多 4 窗");
+        // 沒有額度窗就跟以前一樣
+        assert_eq!(build_report_windows(&many, Some(&codex("c@x.test", "plus", "chatgpt")), &HashMap::new(), &gs, &[]), build_report_full(&many, Some(&codex("c@x.test", "plus", "chatgpt")), &HashMap::new(), &gs));
+    }
+
+    #[test]
+    fn 回報_codex_額度窗只在帳號跟目前登入對得上才帶() {
+        let d = tempfile::tempdir().unwrap();
+        let now = 1_792_843_200_000_i64; // 2026-10-24T12:00:00Z
+        let rl = json!({ "rateLimits": { "primary": { "usedPercent": 5, "windowDurationMins": 300, "resetsAt": 1_792_850_400 }, "secondary": { "usedPercent": 1, "windowDurationMins": 10080, "resetsAt": 1_793_000_000 } } });
+        crate::codex_quota::save(d.path(), "me@x.test", &crate::codex_quota::windows_from_rate_limits(&rl, now), now).unwrap();
+        let mine = crate::codex_quota::windows_for(d.path(), "me@x.test", now);
+        let v = build_report_windows(&[], Some(&codex("me@x.test", "plus", "chatgpt")), &HashMap::new(), &[], &mine);
+        assert_eq!(v["accounts"][0]["windows"][0]["left_pct"], 95, "用掉 5% 剩 95%");
+        assert_eq!(v["accounts"][0]["windows"][1]["name"], "weekly");
+        let other = crate::codex_quota::windows_for(d.path(), "other@x.test", now);
+        let v = build_report_windows(&[], Some(&codex("other@x.test", "plus", "chatgpt")), &HashMap::new(), &[], &other);
+        assert!(v["accounts"][0].get("windows").is_none(), "換了帳號：舊帳號的額度不帶");
     }
 
     #[test]

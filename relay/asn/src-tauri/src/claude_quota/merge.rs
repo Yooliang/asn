@@ -14,9 +14,12 @@
 //!   已經記在檔裡、晚於「現在 +8 天」的舊值，判斷時當成沒有重置時間（照收新的），讓已經被鎖住的自己解開。
 //!   記著的舊值早於「現在 −1 天」不另外處理：那是正常過期的期，交給上面「已過 7 天就照收」的規則。
 //!
-//! 檔案目前只存一個 `reset_at`，它屬於哪一條照 `pick_reset` 的規則推回來；推不出來（兩條都用完時存的是較晚的那個，
-//! 分不出是哪條的）就當那條沒有重置時間。兩條各存一個重置時間是下一步的事。
-//! 記錄時間 `at`：只有真的收進新值時才更新成現在；兩條都不收就整筆不動。
+//! 兩條各自的重置時間（#374）：新版檔案每條存自己的 `five_reset_at`／`week_reset_at`，判斷時用它；
+//! 舊版寫的檔只有一個 `reset_at`，才照 `pick_reset` 的規則推回它屬於哪一條；推不出來（兩條都用完時存的是較晚的那個，
+//! 分不出是哪條的）就當那條沒有重置時間。舊的 `reset_at` 照舊寫（舊版 ASN 讀檔只認它）。
+//! 記錄時間 `at`：只有真的收進新值時才更新成現在；兩條都不收就整筆不動。各條另記自己的讀取時間 `five_at`／`week_at`
+//! （那條這次有收才更新成現在；沒收就留原本的，舊檔沒有就用整筆的 `at`）。
+//! 判斷規則與後台共用一份案例（tests/fixtures/quota-merge-cases.json），不收的原因用同一組代碼（`Reject::code`）。
 use super::{iso_secs, parse_iso_secs, pick_reset, Parsed, Quota};
 use std::path::Path;
 
@@ -29,6 +32,14 @@ const RESET_PAST_MS: i64 = 86_400_000;
 const RESET_FUTURE_MS: i64 = 8 * 86_400_000;
 const LOG_FILE: &str = "claude-quota.log";
 const LOG_MAX_BYTES: u64 = 64 * 1024;
+
+/// 哪個廠牌的額度：Claude 的每週那條要看 7 天倍數，Codex 不看（#1372）
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Vendor {
+    Claude,
+    #[cfg_attr(not(test), allow(dead_code))]
+    Codex,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Kind {
@@ -52,8 +63,30 @@ pub struct Skipped {
     pub reason: String,
 }
 
-/// 現有紀錄裡的那一個重置時間屬於哪一條：(5 小時的, 每週的)
-fn stored_resets(q: &Quota) -> (Option<i64>, Option<i64>) {
+/// 不收的原因：`code` 跟後台與共用案例的代碼一致（same_period_rise／earlier／later_not_expired／not_week_multiple／reset_out_of_range），
+/// `detail` 是給 log 看的中文說明（不含 email）
+#[derive(Debug, PartialEq, Clone)]
+pub struct Reject {
+    pub code: &'static str,
+    pub detail: String,
+}
+fn reject(code: &'static str, detail: String) -> Result<(), Reject> {
+    Err(Reject { code, detail })
+}
+
+/// 現有紀錄裡兩條各自的重置時間：(5 小時的, 每週的)。新版檔案那條有存就直接用；
+/// 那條沒存（舊版寫的檔）才從舊的單一 `reset_at` 推回來。
+pub(super) fn stored_resets(q: &Quota) -> (Option<i64>, Option<i64>) {
+    let (f, w) = legacy_resets(q);
+    let own = |s: &Option<String>, legacy: Option<i64>| match s {
+        Some(t) => parse_iso_secs(t),
+        None => legacy,
+    };
+    (own(&q.five_reset_at, f), own(&q.week_reset_at, w))
+}
+
+/// 舊版檔案的那一個重置時間屬於哪一條：(5 小時的, 每週的)
+fn legacy_resets(q: &Quota) -> (Option<i64>, Option<i64>) {
     let r = q.reset_at.as_deref().and_then(parse_iso_secs);
     match (q.five_hour_pct, q.weekly_pct) {
         (Some(0), Some(0)) => (None, None),
@@ -69,11 +102,16 @@ fn near_week_multiple(diff_ms: i64) -> bool {
     k >= 1 && (diff_ms - k * WEEK_MS).abs() <= SAME_MS
 }
 
-/// 一條要不要收：收回 Ok(())，不收回原因
-pub fn judge(kind: Kind, old: Option<(u8, Option<i64>)>, new_pct: u8, new_reset: Option<i64>, now_ms: i64) -> Result<(), String> {
+/// 一條要不要收（Claude 的規則）：收回 Ok(())，不收回原因
+pub fn judge(kind: Kind, old: Option<(u8, Option<i64>)>, new_pct: u8, new_reset: Option<i64>, now_ms: i64) -> Result<(), Reject> {
+    judge_for(Vendor::Claude, kind, old, new_pct, new_reset, now_ms)
+}
+
+/// 一條要不要收：收回 Ok(())，不收回原因。規則見檔頭；只有 Claude 的每週那條看 7 天倍數。
+pub fn judge_for(vendor: Vendor, kind: Kind, old: Option<(u8, Option<i64>)>, new_pct: u8, new_reset: Option<i64>, now_ms: i64) -> Result<(), Reject> {
     if let Some(r) = new_reset {
         if r < now_ms - RESET_PAST_MS || r > now_ms + RESET_FUTURE_MS {
-            return Err(format!("重置時間 {} 不在現在前 1 天到後 8 天之間，不收", iso_secs(r)));
+            return reject("reset_out_of_range", format!("重置時間 {} 不在現在前 1 天到後 8 天之間，不收", iso_secs(r)));
         }
     }
     // 記著的重置時間晚於現在 +8 天＝之前收進來的錯誤值：當成沒有重置時間，照收新的
@@ -85,16 +123,16 @@ pub fn judge(kind: Kind, old: Option<(u8, Option<i64>)>, new_pct: u8, new_reset:
     }
     let diff = new_reset - old_reset;
     if diff.abs() <= SAME_MS {
-        return if new_pct <= old_pct { Ok(()) } else { Err(format!("同一期剩餘回升（{old_pct}% → {new_pct}%），留著較低的")) };
+        return if new_pct <= old_pct { Ok(()) } else { reject("same_period_rise", format!("同一期剩餘回升（{old_pct}% → {new_pct}%），留著較低的")) };
     }
     if diff < 0 {
-        return Err(format!("重置時間 {} 比記著的 {} 早，是舊視窗的數字", iso_secs(new_reset), iso_secs(old_reset)));
+        return reject("earlier", format!("重置時間 {} 比記著的 {} 早，是舊視窗的數字", iso_secs(new_reset), iso_secs(old_reset)));
     }
     if old_reset > now_ms {
-        return Err(format!("記著的這期 {} 還沒重置，卻來了更晚的 {}，當成別的帳號", iso_secs(old_reset), iso_secs(new_reset)));
+        return reject("later_not_expired", format!("記著的這期 {} 還沒重置，卻來了更晚的 {}，當成別的帳號", iso_secs(old_reset), iso_secs(new_reset)));
     }
-    if kind == Kind::Week && !near_week_multiple(diff) {
-        return Err(format!("新舊重置時間 {} 與 {} 相差不是 7 天的倍數，當成別的帳號", iso_secs(old_reset), iso_secs(new_reset)));
+    if vendor == Vendor::Claude && kind == Kind::Week && !near_week_multiple(diff) {
+        return reject("not_week_multiple", format!("新舊重置時間 {} 與 {} 相差不是 7 天的倍數，當成別的帳號", iso_secs(old_reset), iso_secs(new_reset)));
     }
     Ok(())
 }
@@ -104,7 +142,18 @@ fn merge_one(kind: Kind, old: Option<(u8, Option<i64>)>, new: Option<(u8, Option
     let Some((pct, reset)) = new else { return (old, false, None) };
     match judge(kind, old, pct, reset, now_ms) {
         Ok(()) => (Some((pct, reset)), true, None),
-        Err(reason) => (old, false, Some(Skipped { kind, reason })),
+        Err(r) => (old, false, Some(Skipped { kind, reason: r.detail })),
+    }
+}
+
+/// 一條的讀取時間：這次收了是現在；沒收就留原本的（舊檔沒有各條的就用整筆的 at）；這條沒數字就沒有
+fn read_at(took: bool, has: bool, own: Option<&String>, old_at: Option<&String>, now: &str) -> Option<String> {
+    if took {
+        Some(now.to_string())
+    } else if has {
+        own.or(old_at).cloned()
+    } else {
+        None
     }
 }
 
@@ -119,8 +168,18 @@ pub fn merge(old: Option<&Quota>, p: &Parsed, now_ms: i64) -> (Option<Quota>, Ve
     if !took_five && !took_week {
         return (None, skipped);
     }
-    let reset_at = pick_reset(five, week).map(iso_secs);
-    let q = Quota { five_hour_pct: five.map(|f| f.0), weekly_pct: week.map(|w| w.0), reset_at, at: iso_secs(now_ms) };
+    let now = iso_secs(now_ms);
+    let old_at = old.map(|q| &q.at);
+    let q = Quota {
+        five_hour_pct: five.map(|f| f.0),
+        weekly_pct: week.map(|w| w.0),
+        reset_at: pick_reset(five, week).map(iso_secs),
+        five_reset_at: five.and_then(|f| f.1).map(iso_secs),
+        week_reset_at: week.and_then(|w| w.1).map(iso_secs),
+        five_at: read_at(took_five, five.is_some(), old.and_then(|q| q.five_at.as_ref()), old_at, &now),
+        week_at: read_at(took_week, week.is_some(), old.and_then(|q| q.week_at.as_ref()), old_at, &now),
+        at: now,
+    };
     (Some(q), skipped)
 }
 

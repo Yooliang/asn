@@ -17,3 +17,9 @@ test('電腦版與手機版共用的指令：兩邊的清單都要註冊（版�
   assert.ok(desktop.includes('site_releases::site_releases'), 'site_releases 沒註冊在電腦版的指令清單')
   assert.ok(mobile.includes('site_releases::site_releases'), 'site_releases 沒註冊在手機版的指令清單')
 })
+
+test('帳號列表（#374）：電腦版註冊 acct_roster、手機版註冊 android::android_acct_roster', () => {
+  assert.match(desktop, /[\s,]acct_roster[\s,]/, 'acct_roster 沒註冊在電腦版的指令清單')
+  assert.ok(mobile.includes('android::android_acct_roster'), 'android_acct_roster 沒註冊在手機版的指令清單')
+  assert.doesNotMatch(mobile, /[\s,]acct_roster[\s,]/, '電腦版的 acct_roster 不能在手機清單')
+})
