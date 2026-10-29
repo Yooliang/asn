@@ -14,6 +14,26 @@ const REVIVE_AFTER_MS: u64 = 60_000;
 /// 登入失效（401）自動重開驅動的冷卻：每個工作者一小時最多一次（#517）
 const AUTH_RETRY_COOLDOWN_MS: u64 = 60 * 60 * 1000;
 const KEEPALIVE_MS: u64 = 20_000;
+/// 測試用：讓某個工作者第 N 次「開新驅動」失敗（模擬暫時開不起來），用來驗證丟掉舊對話後開驅動失敗會把對話放回去
+#[cfg(test)]
+pub(crate) mod test_hooks {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    static FAIL_SPAWN_IN: Mutex<Option<HashMap<String, u32>>> = Mutex::new(None);
+    pub fn fail_spawn_in(name: &str, n: u32) {
+        FAIL_SPAWN_IN.lock().unwrap().get_or_insert_with(HashMap::new).insert(name.to_string(), n);
+    }
+    pub fn should_fail_spawn(name: &str) -> bool {
+        let mut g = FAIL_SPAWN_IN.lock().unwrap();
+        let Some(m) = g.as_mut() else { return false };
+        let Some(v) = m.get_mut(name) else { return false };
+        if *v == 0 {
+            return false;
+        }
+        *v -= 1;
+        *v == 0
+    }
+}
 
 fn now_ms() -> u64 {
     crate::heartbeat::now_ms()
@@ -416,6 +436,10 @@ impl Worker {
         if let Some(d) = usable(self) {
             return Ok(d);
         }
+        #[cfg(test)]
+        if test_hooks::should_fail_spawn(&self.i.cfg.name) {
+            return Err(WorkerError::new("crash", "測試：暫時開不起新驅動"));
+        }
         let (old, gen) = {
             let mut s = self.st.lock().unwrap();
             s.driver_gen += 1;
@@ -607,6 +631,7 @@ impl Worker {
         };
         let mut r = d.turn(format!("{first}{}", job.text), cfg.turn_timeout_ms, cfg.turn_max_ms).await;
         remember(&d);
+        let mut conv_note = String::new(); // 這次改開了新對話：附在回覆後面讓寄件人知道
         // 登入失效（401）：長時間跑的驅動憑證到期，換一個新的驅動（重新讀登入）把同一封信再試一次；重開後還失效才報「需要登入」。
         // 每個工作者一小時最多自動重開一次，不無限重試（#517）
         if r.as_ref().err().map(|e| e.code == "auth").unwrap_or(false) && self.take_auth_retry() {
@@ -636,7 +661,17 @@ impl Worker {
                 if let Some(old) = old {
                     old.stop();
                 }
-                d = self.ensure_driver(self.base_full()).await?;
+                d = match self.ensure_driver(self.base_full()).await {
+                    Ok(d) => d,
+                    Err(e) => {
+                        // 開不起新驅動（多半是暫時的錯）：舊對話編號與狀態放回去，免得因為一次暫時的錯就把對話丟了
+                        self.i.store.set(&cfg, &dropped);
+                        let mut s = self.st.lock().unwrap();
+                        s.need_preamble = prev_preamble;
+                        s.handover = prev_handover;
+                        return Err(e);
+                    }
+                };
                 let first = {
                     let s = self.st.lock().unwrap();
                     format!("{}{}", preamble_for(&cfg), s.handover.as_deref().map(|h| format!("{h}\n\n---\n")).unwrap_or_default())
@@ -656,11 +691,17 @@ impl Worker {
                     s.need_preamble = prev_preamble;
                     s.handover = prev_handover;
                 } else {
-                    self.notice_owners("conv-reset", &format!("{} 存著的舊對話壞了（重開後仍 401），已丟掉舊對話 {dropped}、改開新對話；它不記得之前聊過的內容。", cfg.name), Some(job));
+                    self.log(format!("已丟掉舊對話 {dropped}，改用新對話"));
+                    conv_note = format!("\n\n（備註：{} 存著的舊對話壞了，這次改開新對話，它不記得之前聊過的內容。）", cfg.name);
+                    // 給擁有者的通知不帶內部對話編號（編號只寫日誌）
+                    self.notice_owners("conv-reset", &format!("{} 存著的舊對話壞了（重開後仍然登入失效），已改開新對話；它不記得之前聊過的內容。", cfg.name), Some(job));
                 }
             }
         }
         let mut res = r?;
+        if !conv_note.is_empty() {
+            res.text.push_str(&conv_note);
+        }
         {
             let mut s = self.st.lock().unwrap();
             s.need_preamble = false;

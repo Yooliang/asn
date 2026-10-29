@@ -28,6 +28,16 @@ test('畫面檔案（ui）裡沒有舊說法，只用「換班接手」', () => 
   assert.deepEqual(hits, [])
 })
 
+test('官網（site 的頁面與種子檔）也不含舊說法', () => {
+  const hits = []
+  for (const f of walk(path.join(root, '..', '..', 'site'))) {
+    if (f.includes(path.sep + 'node_modules' + path.sep)) continue
+    const text = fs.readFileSync(f, 'utf8')
+    for (const w of BANNED) if (text.includes(w)) hits.push(`${path.relative(root, f)}：${w}`)
+  }
+  assert.deepEqual(hits, [])
+})
+
 test('Rust 端寫進畫面的字串（動作名稱、橫幅）也不含舊說法，而且確實用了新說法', () => {
   const rs = fs.readFileSync(path.join(root, 'src-tauri', 'src', 'bridge', 'partner_ops.rs'), 'utf8')
   for (const w of BANNED) assert.ok(!rs.includes(w), `partner_ops.rs 還有舊說法 ${w}`)

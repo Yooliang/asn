@@ -397,7 +397,7 @@ async fn agy_收信回覆_同一段對話_重啟後_resume() {
 async fn agy_重開後還是登入失效_存著的舊對話壞了_丟掉改開新對話再試_寄件人看到正常回覆_帳本換新編號() {
     let state = tempfile::tempdir().unwrap();
     let st = state.path().display().to_string();
-    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[("FAKE_AGY_STATE", &st)], "acp", &[]).await;
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({"ask": {"notify": [{"node": "PC1"}]}}))])), &[("FAKE_AGY_STATE", &st)], "acp", &[]).await;
     // 第一封：把這段對話標成壞掉（當下的行程照常回覆）
     h.put_pull(to_agent(1, "Gemini", "@@POISON")).await;
     h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
@@ -409,10 +409,56 @@ async fn agy_重開後還是登入失效_存著的舊對話壞了_丟掉改開�
     h.wait("換新對話後回覆", |h| h.bodies().iter().any(|b| b.contains("收到：") && b.contains("下一任") && b.contains("第1輪"))).await;   // 新對話：第一則附換手說明、第 1 輪
     assert!(!h.bodies().iter().any(|b| b.contains("需要登入")), "{:?}", h.bodies());
     assert_ne!(sid(&h), bad, "帳本換成新的對話編號");
+    assert!(h.bodies().iter().any(|b| b.contains("收到：") && b.contains("舊對話壞了，這次改開新對話")), "寄件人要知道這次是新對話：{:?}", h.bodies());
+    let notices = h.notices.lock().unwrap().clone();
+    assert!(notices.iter().any(|n| n.to_node == "PC1" && n.body.contains("已改開新對話")), "{notices:?}");
+    assert!(!notices.iter().any(|n| n.body.contains(&bad)), "給擁有者的通知不帶內部對話編號：{notices:?}");
     assert!(h.log_text().contains(&format!("存著的對話 {bad} 重開後仍然 401")), "日誌寫明丟掉的編號：{}", h.log_text());
     h.set.refresh_all().await;
     h.core.refresh_roster(now()).await;
     assert_eq!(h.last_roster()["agents"][0]["status"], "idle");
+}
+
+#[tokio::test]
+async fn agy_丟掉舊對話後新對話也登入失效_是真的沒登入_舊對話編號放回去_下一封照舊接著聊() {
+    let state = tempfile::tempdir().unwrap();
+    let st = state.path().display().to_string();
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[("FAKE_AGY_STATE", &st)], "acp", &[]).await;
+    let sid = |h: &EH| serde_json::from_str::<Value>(&std::fs::read_to_string(h.work.path().join("acp-workers.json")).unwrap()).unwrap()["workers"]["Gemini"]["session_id"].as_str().unwrap().to_string();
+    h.put_pull(to_agent(1, "Gemini", "你好")).await;
+    h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
+    let before = sid(&h);
+    // 永遠登入失效：重開仍 401 → 丟掉舊對話開新的也 401 → 是真的沒登入，編號要放回去
+    h.put_pull(to_agent(2, "Gemini", "@@AUTH")).await;
+    h.wait("需要登入", |h| h.bodies().iter().any(|b| b.contains("需要登入"))).await;
+    assert_eq!(sid(&h), before, "新對話也失效時，舊對話編號放回去");
+    // 好了之後下一封接著原本那段對話聊（不附換手說明）
+    h.put_pull(to_agent(3, "Gemini", "好了")).await;
+    h.wait("接著聊", |h| h.bodies().iter().any(|b| b.contains("收到：好了"))).await;
+    assert!(!h.bodies().iter().any(|b| b.contains("下一任")), "{:?}", h.bodies());
+    assert_eq!(sid(&h), before);
+}
+
+#[tokio::test]
+async fn agy_丟掉舊對話後開不起新驅動_暫時的錯不能讓對話丟掉_編號與開場狀態放回去() {
+    let state = tempfile::tempdir().unwrap();
+    let st = state.path().display().to_string();
+    let mut h = eh(Some(json!([worker("FailSpawn", "agy-stream", json!({}))])), &[("FAKE_AGY_STATE", &st)], "acp", &[]).await;
+    let sid = |h: &EH| serde_json::from_str::<Value>(&std::fs::read_to_string(h.work.path().join("acp-workers.json")).unwrap()).unwrap()["workers"]["FailSpawn"]["session_id"].as_str().unwrap().to_string();
+    h.put_pull(to_agent(1, "FailSpawn", "你好")).await;
+    h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
+    let before = sid(&h);
+    // 這一封：401 → 自動重開（第 1 次開驅動）仍 401 → 丟掉舊對話後再開驅動（第 2 次）暫時失敗
+    crate::bridge::engines::acp_worker::test_hooks::fail_spawn_in("FailSpawn", 2);
+    h.put_pull(to_agent(2, "FailSpawn", "@@AUTH")).await;
+    h.wait("丟掉舊對話", |h| h.log_text().contains("丟掉它，改開新對話再試一次")).await;
+    h.wait("失敗回報", |h| h.bodies().iter().any(|b| b.contains("暫時開不起新驅動") || b.contains("出錯") || b.contains("起不來"))).await;
+    assert_eq!(sid(&h), before, "開不起新驅動：舊對話編號放回去");
+    // 下一封恢復正常，接著原本那段聊、不當成新對話
+    h.put_pull(to_agent(3, "FailSpawn", "好了")).await;
+    h.wait("接著聊", |h| h.bodies().iter().any(|b| b.contains("收到：好了"))).await;
+    assert!(!h.bodies().iter().any(|b| b.contains("下一任")), "{:?}", h.bodies());
+    assert_eq!(sid(&h), before);
 }
 
 #[tokio::test]
