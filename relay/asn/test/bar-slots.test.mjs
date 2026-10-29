@@ -41,11 +41,13 @@ test('閒置的本機 Claude：沒有背景工作時工作項目反灰，其餘�
   assert.equal(view(F(), { ...CTX, callable: false }).call.reason, '這個畫面沒有語音功能')
 })
 
-test('離線的 Claude：通話、前台／後台、切換模型、子代理都反灰並說要先喚醒；管理可按（喚醒在裡面）', () => {
+test('離線的 Claude：第 2 格變「喚醒」可按；通話、切換模型、子代理反灰並說要先喚醒；管理可按', () => {
   const v = view(F({ status: 'offline' }))
-  assert.deepEqual(oks(F({ status: 'offline' })), [false, false, false, false, false, true])
+  assert.deepEqual(oks(F({ status: 'offline' })), [false, true, false, false, false, true])
   assert.equal(v.call.reason, '夥伴離線，不能通話')
-  for (const k of ['window', 'model', 'subs']) assert.equal(v[k].reason, '夥伴離線，要先喚醒', k)
+  assert.deepEqual([v.window.label, v.window.wake], ['喚醒', true])
+  for (const k of ['model', 'subs']) assert.equal(v[k].reason, '夥伴離線，要先喚醒', k)
+  assert.equal(view(F({ status: 'offline' }), { ...CTX, wake: false }).window.reason, '夥伴離線，要先喚醒', '右鍵（wake:false）照舊反灰')
 })
 
 test('ACP 工作者（名單上 engine 是 gemini／grok）：第 2 格「ACP 模式」反灰；切換模型可按（照右鍵 menuItems）；子代理不適用', () => {
@@ -112,7 +114,7 @@ test('長原因縮成 20 字內：認得的換短說法，其餘截斷', () => {
 
 test('接線：名單右鍵用 barSlots 的第 2、3 格與 partnerMenuItems；ACP／pi 的切換模型開夥伴管理對話框', () => {
   const js = read('ui/list.js'), html = read('ui/list.html'), bar = read('ui/lib/actionbar.mjs')
-  assert.match(js, /const s = barSlots\(c, \{ selfNode: info\.node, api: true, console: buddyConsole, ops: buddyOpsCtx\.value, modelQuery: buddyModel\.show \? buddyModel : null \}\)/)
+  assert.match(js, /const s = barSlots\(c, \{ selfNode: info\.node, api: true, wake: false, console: buddyConsole, ops: buddyOpsCtx\.value, modelQuery: buddyModel\.show \? buddyModel : null \}\)/)
   assert.match(js, /if \(it\.key === 'adopt'\) \{ void adoptLoad\(\); return \}/)
   assert.match(html, /@click="openPartnerOp\(buddyModelItem\)"/)
   assert.match(bar, /if \(modelViaPartnerOp\(props\.friend\)\) \{[^\n]*Object\.assign\(opDlg, \{ open: true, item: \{ key: 'model'/)

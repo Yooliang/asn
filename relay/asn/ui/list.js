@@ -41,7 +41,7 @@ import { PI_SETUP_TEXT, piSetupError, piSetupView } from './lib/pi-setup.mjs'
 import { CONNECT_TEXT } from './lib/connect-tools.mjs'
 import { QUOTA_HOOK_TEXT, quotaHookError, quotaHookView } from './lib/quota-hook.mjs'
 import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
-import { BUDDY_CONSOLE_LABEL, CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, consoleReq, engineForProfile,launchDeviceRows, launchDisableReason, remoteModelRows, showDisplayModeChoice, foregroundOnlyProfile, withTimeout } from './lib/partner-launch-ui.mjs'
+import { BUDDY_CONSOLE_LABEL, CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, consoleReq, engineForProfile, launchDeviceRows, localProfileEngine, launchDisableReason, remoteModelRows, showDisplayModeChoice, foregroundOnlyProfile, withTimeout } from './lib/partner-launch-ui.mjs'
 import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
 import { PartnerOpDialog, loadOpsContext } from './lib/partner-ops-ui.mjs'
 import { LAUNCHERS_POLL_MS, isAuthDenied, nextLaunchersDelay } from './lib/launcher-poll.mjs'
@@ -492,7 +492,7 @@ const partnerRunChoice = computed(() => {
 })
 const partnerRunModel = computed({ get: () => partnerRunChoice.value, set: v => { partnerDlg.run = v } })   // 預設選項要真的勾起來
 // 第 2 頁「型號」（#539 之四）：這家有清單、開在這台、運行對得上才出現；預設＝不指定（照原本的開法）。清單跟「切換模型」同一份（switchModelsFor）
-const launchModel = computed(() => launchModelChoices(dlgRow.value?.id, partnerRunChoice.value, { local: partnerDlg.node === info.node }))
+const launchModel = computed(() => launchModelChoices(dlgRow.value?.id, partnerRunChoice.value, { local: partnerDlg.node === info.node, engine: localProfileEngine(partnerDlg.profile, remoteLaunchers.value[info.node]) }))
 const launchModelPick = computed(() => (launchModel.value.show && launchModel.value.models.some(m => m.id === partnerDlg.model) ? partnerDlg.model : ''))
 const partnerCanRun = computed(() => { const o = partnerRun.value.options.find(x => x.key === partnerRunChoice.value); return Boolean(o && o.ok && o.key !== 'self') })
 const TERM_WEZ_TOOLS = ['grok', 'agy']   // 後端 term_start 只收這兩個
@@ -636,7 +636,8 @@ async function refreshOpsCtx() {
   if (ctx.signedIn === null || !ctx.loaded) opsCtxAt = 0   // 查詢失敗不要擋住下一次重查
 }
 // 右鍵選單和對話上方大按鈕／「管理」用同一份項目與反灰規則（#539 第 7 點）：
-// 前台／後台（或 ACP 模式）與切換模型＝barSlots 的第 2、3 格；其餘＝partnerMenuItems（和「管理」同一份，key 去掉 p: 前綴）
+// 前台／後台（或 ACP 模式）與切換模型＝barSlots 的第 2、3 格；其餘＝partnerMenuItems（key 去掉 p: 前綴）。
+// 右鍵沒有大按鈕列，所以第 2 格不換成喚醒（wake:false），喚醒留在右鍵選單裡；對話頁的「管理」則拿掉喚醒（在第 2 格）
 const buddyOpsCtx = computed(() => ({ ...opsCtx, friends: friends.value, asn: asnMap.value }))
 const buddyOpItems = computed(() => partnerMenuItems(buddyMenuFriend.value, buddyOpsCtx.value, info.node).map(i => ({ ...i, key: i.key.slice(2) })))
 const opDlg = reactive({ open: false, op: '', friend: null, item: null })
@@ -669,7 +670,7 @@ function resetBuddyModel() { Object.assign(buddyModel, { show: false, state: 'no
 const buddySlots = computed(() => {
   const c = buddyMenuFriend.value
   if (!c || !buddyOpItems.value.length) return null
-  const s = barSlots(c, { selfNode: info.node, api: true, console: buddyConsole, ops: buddyOpsCtx.value, modelQuery: buddyModel.show ? buddyModel : null })
+  const s = barSlots(c, { selfNode: info.node, api: true, wake: false, console: buddyConsole, ops: buddyOpsCtx.value, modelQuery: buddyModel.show ? buddyModel : null })
   // 右鍵的字固定不隨狀態改（「背景／前台切換」）；ACP 工作者和大按鈕一樣寫「ACP 模式」
   return { window: { ...s[1], label: s[1].label === WINDOW_LABEL.acp ? WINDOW_LABEL.acp : BUDDY_CONSOLE_LABEL }, model: s[2] }
 })
@@ -893,11 +894,10 @@ async function openRoomChat(id) {
   await hub.open(rid)
   pushLog(id); sync()
 }
-// 對話上方「群組」與「管理」的選單動作：邀請別人加入、輸入邀請碼加入、加我的另一個 AI、成員與設定（開在名單視窗；分開模式的對話視窗也是請名單視窗代開）
+// 對話上方「群組」與「管理」的選單動作：邀請別人加入、加我的另一個 AI、成員與設定（開在名單視窗；分開模式的對話視窗也是請名單視窗代開）
 async function openGroupMenu(chatId, what) {
   await invoke('show_main').catch(() => {})
   if (what === 'adopt') { await adoptLoad(); return }   // 對話窗「管理」→「把這台電腦上開著的終端納入管理…」
-  if (what === 'join') { groupFlow.openJoin(); return }   // 和名單「＋」的「加入群組…」同一個對話框
   if (isRoomChat(chatId)) {
     const rid = roomIdOf(chatId), r = hub.raw(rid)
     if (what === 'manage') groupFlow.openManage(rid)

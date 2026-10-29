@@ -100,6 +100,21 @@ export function engineForProfile(profileId) {
   return 'claude'
 }
 
+/**
+ * 這台電腦某個 profile 的 engine（開新夥伴選型號用，要跟後端 launch_model_plan 同一個判斷）：
+ * 這台有回報啟動設定（launcher 摘要）就用回報裡的 engine（沒有這欄＝沒寫，回空字串）；沒回報（沒開放遠端管理）就用內建設定（launch/profiles.rs）的 engine；
+ * 目錄外的自訂 profile 又沒回報＝不知道，當成沒寫。注意：不能用 engineForProfile，它對不認得的一律當 Claude。
+ */
+export const BUILTIN_PROFILE_ENGINE = { claude: 'claude', codex: 'codex', gemini: 'acp', grok: 'acp', pi: 'pi' }
+export function localProfileEngine(profileId, selfLauncher) {
+  const list = Array.isArray(selfLauncher?.profiles) ? selfLauncher.profiles : null
+  if (list) {
+    const p = list.find(x => x?.id === profileId)
+    if (p) return typeof p.engine === 'string' ? p.engine : ''
+  }
+  return Object.hasOwn(BUILTIN_PROFILE_ENGINE, profileId) ? BUILTIN_PROFILE_ENGINE[profileId] : ''
+}
+
 export function consoleToggleLabel(visible) {
   return visible ? '切到背景' : '叫回前台'
 }

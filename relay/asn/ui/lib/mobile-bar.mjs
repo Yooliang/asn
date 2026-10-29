@@ -34,14 +34,14 @@ export const MobileBar = {
       emit('pick', s.key)
     }
     onBeforeUnmount(() => { clearTimeout(pressTimer); clearTimeout(tipTimer) })
-    return { tip, tap, press, release, showTip, icon: k => BAR_ICON[k] ?? BAR_ICON.manage, slotTip }
+    return { tip, tap, press, release, showTip, icon: s => BAR_ICON[s.wake ? 'wake' : s.key] ?? BAR_ICON.manage, slotTip }
   },
   template: `
 <div class="m-abar" v-if="slots.length">
   <div class="m-abar-row" role="toolbar" aria-label="代理功能列">
     <button v-for="s in slots" :key="s.key" class="m-abtn" type="button" :data-slot="s.key" :aria-disabled="s.ok ? null : 'true'" :aria-label="s.label" :title="slotTip(s)"
       @click="tap(s)" @pointerdown="press(s)" @pointerup="release" @pointercancel="release" @pointerleave="release" @contextmenu.prevent="showTip(s)">
-      <img :src="icon(s.key)" alt="" width="28" height="28"><span class="m-abadge" v-if="s.count > 0" :aria-label="s.count + ' 件'">{{ s.count }}</span>
+      <img :src="icon(s)" alt="" width="28" height="28"><span class="m-abadge" v-if="s.count > 0" :aria-label="s.count + ' 件'">{{ s.count }}</span>
     </button>
   </div>
   <p class="m-abar-tip" v-if="tip" role="status">{{ tip }}</p>

@@ -110,13 +110,14 @@ export const TASKS_SAMPLE = { ok: true, known: true, count: 3, items: [{ id: 'b1
 // [data-slot, 名稱, 反灰]
 export const BAR_PROBES = {
   claude: { bar: [['call', '通話', false], ['window', '後台隱藏', false], ['model', '切換模型', false], ['subs', '子代理', false], ['tasks', '工作項目', true], ['manage', '管理', false]], badge: '' },
-  offline: { bar: [['call', '通話', true], ['window', '前台／後台', true], ['model', '切換模型', true], ['subs', '子代理', true], ['tasks', '工作項目', true], ['manage', '管理', false]] },
+  // #539 收尾：離線時第 2 格是「喚醒」、可按、換喚醒圖示；點了開喚醒對話框；「管理」裡不再有喚醒
+  offline: { bar: [['call', '通話', true], ['window', '喚醒', false], ['model', '切換模型', true], ['subs', '子代理', true], ['tasks', '工作項目', true], ['manage', '管理', false]], wake: true },
   acp: { bar: [['call', '通話', false], ['window', 'ACP 模式', true], ['model', '切換模型', false], ['subs', '子代理', true], ['tasks', '工作項目', true], ['manage', '管理', false]] },
   // 有背景工作：工作項目可按、徽章 3；按下去列出 2 件＋「還有 1 件」；header 不再有「背景工作 N 件」
   tasks: { bar: [['call', '通話', false], ['window', '後台隱藏', false], ['model', '切換模型', false], ['subs', '子代理', false], ['tasks', '工作項目', false], ['manage', '管理', false]], badge: '3', taskItems: ['建置', '跑測試', '還有 1 件沒列出'], header: 'demo' },
 }
-export const barProbeSource = ({ bar, badge, taskItems, header }) => `(async () => {
-  const want = ${JSON.stringify(bar)};
+export const barProbeSource = ({ bar, badge, taskItems, header, wake }) => `(async () => {
+  const want = ${JSON.stringify(bar)}, wantWake = ${JSON.stringify(wake === true)};
   const wantBadge = ${JSON.stringify(badge ?? null)}, wantItems = ${JSON.stringify(taskItems ?? null)}, wantHeader = ${JSON.stringify(header ?? null)};
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   let why = '';
@@ -145,6 +146,21 @@ export const barProbeSource = ({ bar, badge, taskItems, header }) => `(async () 
           const h = document.querySelector('.to-psm')?.textContent.trim() ?? '';
           if (h !== wantHeader) return { ok: false, why: 'header 個人訊息是「' + h + '」，應為「' + wantHeader + '」' };
         }
+        // 第 2 格：喚醒時是喚醒圖示、點了開「喚醒」對話框，「管理」選單裡沒有喚醒；不是喚醒時是視窗圖示
+        const wb = btns.find(b => b.dataset.slot === 'window');
+        const wimg = wb?.querySelector('img')?.getAttribute('src') ?? '';
+        if (wantWake) {
+          if (wimg !== 'img/ab-wake.svg') return { ok: false, why: '喚醒的圖示是「' + wimg + '」' };
+          const mg = btns.find(b => b.dataset.slot === 'manage');
+          mg.click(); await sleep(200);
+          const left = [...document.querySelectorAll('.ab-menu .mi-t')].map(e => e.textContent.trim()).filter(t => /喚醒/.test(t));
+          window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); await sleep(150);
+          if (left.length) return { ok: false, why: '「管理」裡還有喚醒' };
+          wb.click();
+          let dlg = null;
+          for (let j = 0; j < 30 && !dlg; j++) { await sleep(100); dlg = document.querySelector('.dlg[role="dialog"][aria-label="喚醒"]') }
+          if (!dlg) return { ok: false, why: '點了喚醒沒有開喚醒對話框' };
+        } else if (wb && wimg !== 'img/ab-window.svg') return { ok: false, why: '第 2 格圖示是「' + wimg + '」' };
         if (wantItems) {
           tb.click();
           let items = [];
@@ -164,14 +180,17 @@ export const barProbeSource = ({ bar, badge, taskItems, header }) => `(async () 
 export const MBAR_ME = { lastChat: 'Q/demo', navTab: 'chats' }
 export const MBAR_MEMBERS = {
   claude: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }],
+  offline: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', online: false, cwd_label: 'demo' }] }],
   acp: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', engine: 'gemini', cwd_label: 'demo' }] }],
 }
+// [data-slot, 反灰, 名稱（選填：aria-label 要一致）]；wake＝第 2 格是喚醒：換圖示、「⋯」不列喚醒、點了送出喚醒（進度顯示在對話頁頂端）
 export const MBAR_PROBES = {
-  claude: { mbar: [['call', true], ['window', true], ['model', false], ['subs', true], ['tasks', true], ['manage', false]] },
+  claude: { mbar: [['call', true], ['window', true, '前台／後台'], ['model', false], ['subs', true], ['tasks', true], ['manage', false]] },
+  offline: { mbar: [['call', true], ['window', false, '喚醒'], ['model', true], ['subs', true], ['tasks', true], ['manage', false]], wake: true },
   acp: { mbar: [['call', true], ['window', true], ['model', false], ['subs', true], ['tasks', true], ['manage', false]] },
 }
-export const mbarProbeSource = ({ mbar }) => `(async () => {
-  const want = ${JSON.stringify(mbar)};
+export const mbarProbeSource = ({ mbar, wake }) => `(async () => {
+  const want = ${JSON.stringify(mbar.map(x => [x[0], x[1]]))}, names = ${JSON.stringify(mbar.map(x => x[2] ?? null))}, wantWake = ${JSON.stringify(wake === true)};
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   let why = '';
   for (let i = 0; i < 60; i++) {
@@ -184,6 +203,10 @@ export const mbarProbeSource = ({ mbar }) => `(async () => {
       if (r.right > innerWidth + 1 || btns.some(b => b.getBoundingClientRect().top !== btns[0].getBoundingClientRect().top)) return { ok: false, why: '412 寬放不成一列' };
       if (btns.some(b => b.hasAttribute('disabled'))) return { ok: false, why: '反灰不能用 disabled' };
       if (btns.some(b => !b.getAttribute('aria-label'))) return { ok: false, why: '按鈕沒有名稱（aria-label）' };
+      const badName = btns.findIndex((b, n) => names[n] !== null && b.getAttribute('aria-label') !== names[n]);
+      if (badName >= 0) return { ok: false, why: btns[badName].dataset.slot + ' 的名稱是「' + btns[badName].getAttribute('aria-label') + '」，應為「' + names[badName] + '」' };
+      const wb = btns.find(b => b.dataset.slot === 'window'), wimg = wb.querySelector('img')?.getAttribute('src') ?? '';
+      if (wimg !== (wantWake ? 'img/ab-wake.svg' : 'img/ab-window.svg')) return { ok: false, why: '第 2 格圖示是「' + wimg + '」' };
       const bad = btns.find(b => b.getAttribute('aria-disabled') === 'true' && !/：/.test(b.title));
       if (bad) return { ok: false, why: bad.dataset.slot + ' 反灰卻沒有原因' };
       if (btns.some(b => b.querySelector('.ab-name, .m-abtn-name'))) return { ok: false, why: '手機一列只顯示圖示' };
@@ -197,8 +220,16 @@ export const mbarProbeSource = ({ mbar }) => `(async () => {
       dots.click(); await sleep(300);
       const items = [...document.querySelectorAll('.m-ops-panel .m-ops-item .m-opt-t')].map(e => e.textContent.trim());
       if (!items.length) return { ok: false, why: '「⋯」選單是空的' };
-      const moved = items.filter(t => /切換模型|前台|背景／前台/.test(t));
+      const moved = items.filter(t => /切換模型|前台|背景／前台|喚醒/.test(t));
       if (moved.length) return { ok: false, why: '「⋯」還有：' + moved.join('、') };
+      if (wantWake) {
+        history.back(); await sleep(300);
+        wb.click();
+        let run = null;
+        for (let j = 0; j < 30 && !run; j++) { await sleep(100); run = document.querySelector('.m-ops-run') }
+        if (!run) return { ok: false, why: '點了喚醒沒有送出（對話頁頂端沒有進度）' };
+        if (document.querySelector('.m-ops-panel')) return { ok: false, why: '喚醒送出後「⋯」選單沒有收起' };
+      }
       return { ok: true, why: '' };
     }
     await sleep(100);
@@ -206,8 +237,8 @@ export const mbarProbeSource = ({ mbar }) => `(async () => {
   return { ok: false, why };
 })()`
 
-// 群組分頁（#539 之二）：按鈕列有「群組」，選單是四項；「管理」不再有這四項（沒有管理也可以）
-export const GROUP_ITEMS = ['邀請別人加入', '輸入邀請碼加入', '加我的另一個 AI', '成員與設定']
+// 群組分頁（#539 之二）：按鈕列有「群組」，選單是三項（#539 收尾拿掉「輸入邀請碼加入」）；「管理」不再有這些（沒有管理也可以）
+export const GROUP_ITEMS = ['邀請別人加入', '加我的另一個 AI', '成員與設定']
 export const GROUP_ROOM = { id: 'g1', name: '測試群', members: [{ member: 'P~測試機', name: '測試機' }], mine: [{ member: 'P~測試機', unread: 0 }], last_seq: 0, created_at: '2026-10-29T00:00:00Z' }
 export const GROUP_ME = { winMode: 'merged', session: { v: 1, tabs: [{ id: 'room:g1' }], active: { id: 'room:g1' }, panel: { guide: '', setting: '' }, windows: [], panelWindows: [] } }
 export const groupProbeSource = ({ group }) => `(async () => {
@@ -233,8 +264,24 @@ export const groupProbeSource = ({ group }) => `(async () => {
   }
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.mbar ? '手機大按鈕檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.mbar ? mbarProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+// 手機群組對話（#539 收尾）：大按鈕列只有「群組」一顆，按下去的選單（「⋯」那一層）是同樣三項，沒有「輸入邀請碼加入」
+export const MGROUP_ME = { lastChat: 'room:g1', navTab: 'chats' }
+export const mgroupProbeSource = ({ mgroup }) => `(async () => {
+  const want = ${JSON.stringify(mgroup)};
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let btn = null;
+  for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-abar-row .m-abtn')].find(b => b.offsetParent !== null && b.dataset.slot === 'group') || null; if (!btn) await sleep(100) }
+  if (!btn) return { ok: false, why: '群組對話沒有「群組」大按鈕' };
+  const all = [...document.querySelectorAll('.m-abar-row .m-abtn')].map(b => b.dataset.slot);
+  if (JSON.stringify(all) !== '["group"]') return { ok: false, why: '群組對話的大按鈕不符：' + JSON.stringify(all) };
+  btn.click();
+  let got = [];
+  for (let i = 0; i < 30; i++) { await sleep(100); got = [...document.querySelectorAll('.m-ops-panel .m-ops-item .m-opt-t')].map(e => e.textContent.trim()); if (got.length) break }
+  if (JSON.stringify(got) !== JSON.stringify(want)) return { ok: false, why: '群組選單不符：' + JSON.stringify(got) };
+  return { ok: true, why: '' };
+})()`
+export const probeKind = probe => (probe.mgroup ? '手機群組按鈕檢查' : probe.mbar ? '手機大按鈕檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.mgroup ? mgroupProbeSource(probe) : probe.mbar ? mbarProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // ---- 入口頁清單：每個情境載一頁，指定假狀態、等待的畫面特徵 ----
 // ready：頁面掛上後必須存在的選擇器；頁面不能被導走（導走＝流程錯）
@@ -263,6 +310,9 @@ export const SCENARIOS = [
   // 手機大按鈕列（#539 之四）：412 寬，Claude 視窗與 ACP 工作者各驗 6 顆、反灰與原因、⋯ 選單內容
   { name: 'm-bar-claude', page: 'm.html', state: { signedIn: true, mbar: 'claude' }, ready: '#app.m .m-abar-row', probe: MBAR_PROBES.claude },
   { name: 'm-bar-acp', page: 'm.html', state: { signedIn: true, mbar: 'acp' }, ready: '#app.m .m-abar-row', probe: MBAR_PROBES.acp },
+  // #539 收尾：手機離線的夥伴第 2 格是「喚醒」可按；群組對話的「群組」選單沒有「輸入邀請碼加入」
+  { name: 'm-bar-offline', page: 'm.html', state: { signedIn: true, mbar: 'offline' }, ready: '#app.m .m-abar-row', probe: MBAR_PROBES.offline },
+  { name: 'm-group-chat', page: 'm.html', state: { signedIn: true, mgroup: true }, ready: '#app.m .m-abar-row', probe: { mgroup: GROUP_ITEMS } },
   { name: 'list-group-tab', page: 'list.html', state: { signedIn: true, groupTab: true }, ready: '#app.win .actionbar', probe: { group: GROUP_ITEMS } },
 ]
 // 刻意不測的 ui/*.html（要寫理由）；其餘 html 都必須有情境（見單元測試）
@@ -296,6 +346,12 @@ export const tableFor = scenario => {
     t.relay_list = { members: MBAR_MEMBERS[scenario.state.mbar] }
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MBAR_ME) } }
     t.android_launchers = { machines: [{ node: 'Q', online: true, launcher: { profiles: [] } }] }   // 那台開放遠端管理：切換模型、管理可按
+  }
+  if (scenario.state.mgroup) {
+    t.relay_rooms = { rooms: [GROUP_ROOM] }
+    t.android_room_read = { messages: [] }
+    t.relay_group = { by: 'action', values: { group_confirm_list: { confirms: [] } }, fallback: null }
+    t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MGROUP_ME) } }
   }
   if (scenario.state.groupTab) {
     t.relay_rooms = { rooms: [GROUP_ROOM] }
