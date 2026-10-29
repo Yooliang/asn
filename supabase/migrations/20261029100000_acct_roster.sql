@@ -24,7 +24,7 @@
 -- 回復：supabase/sql/rollback/20261029100000_acct_roster_down.sql（drop 函式與表；表裡是回報算出來的資料，drop 仍算刪資料，執行前先問）。
 begin;
 
-create table relay.asn_user_accounts (
+create table if not exists relay.asn_user_accounts (
   user_id uuid not null,
   vendor text not null,
   account text not null,
@@ -40,7 +40,7 @@ create table relay.asn_user_accounts (
   constraint asn_user_accounts_plan_check check (char_length(plan) <= 30),
   constraint asn_user_accounts_windows_check check (jsonb_typeof(windows) = 'array' and jsonb_array_length(windows) <= 4)
 );
-create index asn_user_accounts_user_seen_idx on relay.asn_user_accounts (user_id, seen_at desc);
+create index if not exists asn_user_accounts_user_seen_idx on relay.asn_user_accounts (user_id, seen_at desc);
 alter table relay.asn_user_accounts enable row level security;
 revoke all on relay.asn_user_accounts from public, anon, authenticated;
 
@@ -49,6 +49,9 @@ revoke all on relay.asn_user_accounts from public, anon, authenticated;
 --   新舊重置時間相差 10 分鐘內＝同一期，剩餘只能下降（回升＝same_period_rise）；新的較早＝earlier；
 --   新的較晚但 old 還沒過＝later_not_expired；Claude 的每週窗另要新舊差接近 7 天倍數（誤差 10 分鐘），否則 not_week_multiple。
 --   Codex 每週窗與所有 5 小時窗不看倍數。
+--   重置時間的合理範圍（#524 審查）：新的重置時間要在「現在 −1 天」到「現在 +8 天」之間，否則 reset_out_of_range（不收）；
+--   現記的重置時間晚於「現在 +8 天」（之前收進來的錯誤值）＝當成沒有重置時間，照收新的，讓已被鎖住的窗自己解開。
+--   現記的早於「現在 −1 天」不另外處理：那是正常過期的期，交給「已過 7 天就收」。
 create or replace function public.asn_relay_acct_window_judge(p_vendor text, p_name text, p_old jsonb, p_new jsonb, p_now timestamptz)
  returns text
  language plpgsql
@@ -61,11 +64,19 @@ declare
   v_diff numeric;
   v_k numeric;
 begin
-  if p_old is null or jsonb_typeof(p_old->'resets_at') is distinct from 'string' or jsonb_typeof(p_new->'resets_at') is distinct from 'string' then
+  if jsonb_typeof(p_new->'resets_at') = 'string' then
+    v_new_r := (p_new->>'resets_at')::timestamptz;
+    if v_new_r < p_now - interval '1 day' or v_new_r > p_now + interval '8 days' then
+      return 'reset_out_of_range';
+    end if;
+  end if;
+  if p_old is null or jsonb_typeof(p_old->'resets_at') is distinct from 'string' or v_new_r is null then
     return null;
   end if;
   v_old_r := (p_old->>'resets_at')::timestamptz;
-  v_new_r := (p_new->>'resets_at')::timestamptz;
+  if v_old_r > p_now + interval '8 days' then
+    return null;
+  end if;
   if p_now > v_old_r + interval '7 days' then
     return null;
   end if;
@@ -107,7 +118,8 @@ end;
 $function$;
 
 -- 新版回報的 windows 整理：只收 claude、codex；壞掉的單窗丟掉（不退回整份）；同名只留第一個；最多 4 個。
---   left_pct 0～100 取整；read_at 必填、不得晚於現在 10 分鐘以上；resets_at 可空，給了卻壞掉就丟這一窗。
+--   left_pct 0～100 取整；read_at 必填、不得晚於現在 10 分鐘以上；resets_at 可空，給了卻壞掉、
+--   或不在「現在 −1 天」到「現在 +8 天」之間（例如 2099 年，#524 審查）就丟這一窗。
 create or replace function public.asn_relay_acct_windows_clean(p_vendor text, p_windows jsonb, p_node text, p_now timestamptz)
  returns jsonb
  language plpgsql
@@ -138,6 +150,7 @@ begin
     if v_w ? 'resets_at' and jsonb_typeof(v_w->'resets_at') <> 'null' then
       v_reset := public.asn_relay_acct_iso(v_w->'resets_at');
       continue when v_reset is null;
+      continue when v_reset::timestamptz < p_now - interval '1 day' or v_reset::timestamptz > p_now + interval '8 days';
     end if;
     continue when exists (select 1 from jsonb_array_elements(v_out) o where o->>'name' = v_name);
     v_out := v_out || jsonb_build_array(jsonb_build_object(
@@ -224,15 +237,19 @@ begin
       return jsonb_build_object('error', 'bad_request');
     end if;
   end loop;
-  for v_row in select e from jsonb_array_elements(p_accounts) with ordinality t(e, i) order by i loop
+  -- 依 (vendor, email) 的順序逐筆鎖，兩台電腦以相反順序回報同兩個帳號時不會互等成死結（#524 審查）
+  for v_row in select e from jsonb_array_elements(p_accounts) with ordinality t(e, i) order by e->>'vendor', e->>'email', i loop
     v_vendor := v_row->>'vendor';
     v_email := v_row->>'email';
     v_plan := btrim(coalesce(v_row->>'plan', ''));
     v_new := case
       when v_vendor = 'grok' then '[]'::jsonb
       when v_row ? 'windows' then public.asn_relay_acct_windows_clean(v_vendor, v_row->'windows', p_node, v_now)
-      when v_vendor = 'claude' then public.asn_relay_acct_legacy_windows(v_row, p_node)
       else '[]'::jsonb end;
+    -- 沒帶 windows、或帶了但清完一窗都不剩：Claude 退回舊四欄（#524 審查）
+    if v_vendor = 'claude' and v_new = '[]'::jsonb then
+      v_new := public.asn_relay_acct_legacy_windows(v_row, p_node);
+    end if;
     insert into relay.asn_user_accounts (user_id, vendor, account, plan, seen_node)
       values (v_user, v_vendor, v_email, v_plan, p_node)
       on conflict (user_id, vendor, account) do nothing;

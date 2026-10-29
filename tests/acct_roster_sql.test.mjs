@@ -40,7 +40,7 @@ test('靜態：編號在最新 migration 之後；舊函式與舊表一字不動
 
 test('共用案例檔：格式完整（之後 Rust 用 include_str! 讀同一份）', () => {
   assert.ok(Array.isArray(cases.doc) && cases.doc.length > 0)
-  assert.deepEqual(Object.keys(cases.reasons).sort(), ['earlier', 'later_not_expired', 'not_week_multiple', 'same_period_rise'])
+  assert.deepEqual(Object.keys(cases.reasons).sort(), ['earlier', 'later_not_expired', 'not_week_multiple', 'reset_out_of_range', 'same_period_rise'])
   assert.ok(cases.cases.length >= 15)
   const ids = new Set()
   for (const c of cases.cases) {
@@ -184,8 +184,44 @@ test('實跑（pglite）：兩台逐窗合併；同期回升不收並回原因�
   w = (await rows(db))[0]
   assert.deepEqual(w.windows.map(x => [x.name, x.left_pct, x.read_node]), [['five_hour', 40, 'W'], ['weekly', 60, 'H']])
   // 較早的不收；現記的還沒過卻來更晚的不收
-  const r2 = await report(db, 'W', [{ ...C, windows: [win('five_hour', 10, iso(NOW - 3 * H)), win('weekly', 99, iso(NOW + 10 * D))] }])
+  const r2 = await report(db, 'W', [{ ...C, windows: [win('five_hour', 10, iso(NOW - 3 * H)), win('weekly', 99, iso(NOW + 5 * D))] }])
   assert.deepEqual(r2.skipped.map(s => s.reason), ['earlier', 'later_not_expired'])
+})
+
+test('實跑（pglite）：重置時間不在「現在 −1 天～+8 天」的窗丟掉；已存 2099 年的會被正常回報解開（#524 審查）', { skip }, async () => {
+  const { db } = await setup()
+  const FAR = '2099-01-01T00:00:00Z', RW = iso(NOW + 3 * D)
+  // 新版 windows：2099 年那窗清理時就丟掉，不會存進去；同一份裡正常的那窗照收
+  const r = await report(db, 'W', [{ ...C, windows: [win('weekly', 10, FAR), win('five_hour', 40, iso(NOW + 9 * D)), win('five_hour', 50, iso(NOW + 2 * H))] }])
+  assert.deepEqual(r, { ok: true, count: 1, skipped: [] })
+  assert.deepEqual((await rows(db))[0].windows.map(w => [w.name, w.left_pct]), [['five_hour', 50]])
+  // 之後正常的每週回報照收
+  await report(db, 'H', [{ ...C, windows: [win('weekly', 70, RW)] }])
+  assert.deepEqual((await rows(db))[0].windows.map(w => [w.name, w.left_pct]), [['five_hour', 50], ['weekly', 70]])
+  // 舊版四欄帶 2099 年：清理不經 windows_clean，由判斷擋下並回原因代碼
+  const r2 = await report(db, 'W', [{ ...C, weekly_pct: 5, reset_at: FAR, at: AT }])
+  assert.deepEqual(r2.skipped, [{ vendor: 'claude', window: 'weekly', reason: 'reset_out_of_range' }])
+  assert.equal((await rows(db))[0].windows.find(w => w.name === 'weekly').left_pct, 70)
+  // 已經存了 2099 年（例如舊版判斷時收進來的）：正常的回報照收，鎖住的解開
+  await db.query(`update relay.asn_user_accounts set windows = jsonb_build_array(jsonb_build_object(
+    'name', 'weekly', 'left_pct', 40, 'resets_at', '${FAR}', 'read_at', '${AT}', 'read_node', 'W'))`)
+  const r3 = await report(db, 'H', [{ ...C, windows: [win('weekly', 90, RW)] }])
+  assert.deepEqual(r3.skipped, [])
+  assert.deepEqual((await rows(db))[0].windows.map(w => [w.name, w.left_pct, w.resets_at]), [['weekly', 90, RW]])
+})
+
+test('實跑（pglite）：windows 清完一窗都不剩時 Claude 退回舊四欄；回報順序不影響結果；migration 可以重跑（#524 審查）', { skip }, async () => {
+  const { db } = await setup()
+  await report(db, 'W', [{ ...C, five_hour_pct: 60, reset_at: iso(NOW + 2 * H), at: AT, windows: [win('weekly', 10, '2099-01-01T00:00:00Z')] }])
+  assert.deepEqual((await rows(db))[0].windows.map(w => [w.name, w.left_pct]), [['five_hour', 60]])
+  // 兩個帳號、兩種順序：都照 (廠牌, email) 的順序處理，結果一樣
+  const B = { ...C, email: 'b@x.test', windows: [win('weekly', 30, iso(NOW + 3 * D))] }
+  const A = { ...C, windows: [win('weekly', 20, iso(NOW + 3 * D))] }
+  const r = await report(db, 'H', [B, A])
+  assert.deepEqual(r, { ok: true, count: 2, skipped: [] })
+  assert.deepEqual((await rows(db)).map(x => [x.account, x.windows.find(w => w.name === 'weekly').left_pct]), [['a@x.test', 20], ['b@x.test', 30]])
+  await db.exec(mig)
+  assert.equal((await rows(db)).length, 2, '重跑不壞、資料還在')
 })
 
 test('實跑（pglite）：讀取只回自己的；A 讀不到 B；沒簽章或簽章不是這台的主人 forbidden；附哪幾台在用', { skip }, async () => {

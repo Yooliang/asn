@@ -68,7 +68,14 @@ export function parseQuota(a: Json): Pick<ReportedAccount, "five_hour_pct" | "we
 // 規則跟資料庫的 asn_relay_acct_windows_clean 相同（那邊會再檢查一次，並把 Codex 的 w300／w10080 轉成 five_hour／weekly）。
 export const MAX_WINDOWS = 4;
 const WINDOW_NAME_RE = /^(five_hour|weekly|w[0-9]{1,6})$/;
-export function parseWindows(v: unknown): QuotaWindow[] {
+// 重置時間的合理範圍（#524 審查）：「現在 −1 天」到「現在 +8 天」，超出就丟那一窗（不然一個 2099 年的值會把那一窗永遠鎖住）
+export const RESET_PAST_MS = 24 * 60 * 60 * 1000;
+export const RESET_FUTURE_MS = 8 * 24 * 60 * 60 * 1000;
+export function resetInRange(iso: string, now = Date.now()): boolean {
+  const t = Date.parse(iso);
+  return t >= now - RESET_PAST_MS && t <= now + RESET_FUTURE_MS;
+}
+export function parseWindows(v: unknown, now = Date.now()): QuotaWindow[] {
   if (!Array.isArray(v)) return [];
   const out: QuotaWindow[] = [];
   for (const w of v.slice(0, 16)) {
@@ -80,7 +87,7 @@ export function parseWindows(v: unknown): QuotaWindow[] {
     let reset: string | null = null;
     if (w.resets_at != null) {
       reset = isoOrNull(w.resets_at, null);
-      if (reset == null) continue;
+      if (reset == null || !resetInRange(reset, now)) continue;
     }
     if (out.some((o) => o.name === w.name)) continue;
     out.push({ name: w.name, left_pct: left, resets_at: reset, read_at: read });
@@ -101,7 +108,9 @@ export function parseReport(b: Json): ReportedAccount[] | null {
       plan = a.plan.trim();
     }
     if (a.current != null && typeof a.current !== "boolean") return null;
-    const windows = a.vendor !== "grok" && Array.isArray(a.windows) ? { windows: parseWindows(a.windows) } : {};
+    // 清完一窗都不剩就不帶 windows，讓資料庫退回舊四欄（#524 審查）
+    const cleaned = a.vendor !== "grok" && Array.isArray(a.windows) ? parseWindows(a.windows) : [];
+    const windows = cleaned.length ? { windows: cleaned } : {};
     out.push({ vendor: a.vendor, email, plan, current: a.current === true, ...(a.vendor === "claude" ? parseQuota(a) : {}), ...windows });
   }
   return out;

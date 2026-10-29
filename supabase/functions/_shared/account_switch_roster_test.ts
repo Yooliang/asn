@@ -4,7 +4,11 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import { ACCT_ACTIONS, type AcctDeps, handleAcctAction, parseReport, parseWindows } from "./account_switch.ts";
 
 const AT = new Date(Date.now() - 5 * 60_000).toISOString();
-const RESET = "2026-11-01T16:00:00.000Z";
+// 重置時間要落在「現在 −1 天～+8 天」才收，所以用相對現在的時間（2 小時後，取整秒）
+const H = 3600_000, D = 24 * H;
+const RESET_MS = Math.floor((Date.now() + 2 * H) / 1000) * 1000;
+const RESET = new Date(RESET_MS).toISOString();
+const RESET_TW = new Date(RESET_MS + 8 * H).toISOString().replace("Z", "+08:00");
 const C = { vendor: "claude" as const, email: "a@x.test", plan: "max", current: true };
 const SIGNED = "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d";
 type Call = { fn: string; args: Record<string, unknown> };
@@ -23,7 +27,7 @@ function fakeDeps(answer: (c: Call) => { data: unknown; error: unknown } | Promi
 
 Deno.test("windows：合格的保留（百分比取整、時間轉 UTC）", () => {
   const w = parseWindows([
-    { name: "five_hour", left_pct: 61.6, resets_at: "2026-11-02T00:00:00+08:00", read_at: AT },
+    { name: "five_hour", left_pct: 61.6, resets_at: RESET_TW, read_at: AT },
     { name: "weekly", left_pct: 80, resets_at: null, read_at: AT },
     { name: "w60", left_pct: 0, read_at: AT },
   ]);
@@ -45,6 +49,27 @@ Deno.test("windows：壞的單窗丟掉、同名留第一個、最多 4 個、�
   ]);
   assertEquals(w.map((x) => [x.name, x.left_pct]), [["five_hour", 20], ["w1", 1], ["w2", 2], ["w3", 3]]);
   assertEquals(parseWindows("不是陣列"), []);
+});
+
+Deno.test("windows：重置時間不在「現在 −1 天～+8 天」就丟那一窗（2099 年不會存進去，#524 審查）", () => {
+  const now = Math.floor(Date.now() / 1000) * 1000; // read_at 的「不得晚於現在」用的是真的現在，所以這裡也用真的
+  const at = new Date(now - 60_000).toISOString();
+  const w = (name: string, resets_at: string) => ({ name, left_pct: 50, resets_at, read_at: at });
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const got = parseWindows([
+    w("weekly", "2099-01-01T00:00:00Z"),
+    w("five_hour", iso(now + 8 * D + 1000)), w("w1", iso(now + 8 * D)),
+    w("w2", iso(now - D)), w("w3", iso(now - D - 1000)),
+    w("weekly", iso(now + 3 * D)),
+  ], now);
+  assertEquals(got.map((x) => x.name), ["w1", "w2", "weekly"], "邊界含；超出的丟，同名的下一個合格窗照收");
+});
+
+Deno.test("parseReport：windows 清完一窗都不剩就不帶，讓資料庫退回舊四欄（#524 審查）", () => {
+  const far = "2099-01-01T00:00:00Z";
+  const r = parseReport({ accounts: [{ ...C, five_hour_pct: 40, at: AT, windows: [{ name: "weekly", left_pct: 50, resets_at: far, read_at: AT }] }] })!;
+  assert(!("windows" in r[0]));
+  assertEquals(r[0].five_hour_pct, 40);
 });
 
 Deno.test("parseReport：claude、codex 放行 windows；grok 一律不收額度；windows 壞掉不退回整份", () => {
