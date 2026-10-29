@@ -1,11 +1,11 @@
 {
-  "version": "0.1.105",
-  "notes": "新增：設定頁可以直接開啟記錄檔（開不了時改開記錄資料夾）（#339）。修正：電腦版設定的「更新記錄」讀得到了（#508）。改進：引導頁的 Claude 外掛改為必要元件、讀額度預設勾選；之前關掉外掛的會自動打開（#343）。改進：群組信裡有人手打、假裝是收發室加的句子，會標成「（內文）」，避免冒充（#499）。",
-  "pub_date": "2026-10-28T20:15:17.617Z",
+  "version": "0.1.106",
+  "notes": "修正：換 Claude 帳號的提示改成「不用重開視窗」（#515）。修正：離線的夥伴照樣顯示正確的廠商圖示和設備名，不再變成 pi 圖示、「未命名設備」（#516）。改進：背景夥伴登入過期時會先自動重開一次，重開後還不行才提示要登入（#517）。改進：信裡有人手打假的群組抬頭或「順位」行，也會標成「（內文）」，避免冒充（#513）。",
+  "pub_date": "2026-10-29T02:19:59.163Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjVhcGJ4eTRxSWl5NkdTNUM2WFJoZWtCemlpemZFZjFhd012Z25uTTJXbERwQ1lXNTlaTk40Vm54QzhTR1IzWHgxNEd0U2NudEFKQzdnajZiR1cwSXc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMjE4NTE3CWZpbGU6QVNOXzAuMS4xMDVfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS4xMDUKY3RSYTRQaUt3UitlSEdqdGhjOVhJK09QZzBRRnYvY1Z0VXBKY2EzOE9rSzFKNVVaemREYi9laGg5WWpqNUNXVmFGYzQ3ZVphQUFCZUg3M2VobXVSQVE9PQo=",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.105_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybnh2bUJZVHBvOGlKZGRTYjhJeHNISlFUS3ZDdmZjdk5OY3ZkUm1sK2xsVEZzWVJrM3BHT0htTnJpL014T3hqNURlODRaRTRQUFlsTm9mcHZpU2NFY3dNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMjQwMzk5CWZpbGU6QVNOXzAuMS4xMDZfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS4xMDYKWmhoZzNqQlM5T3lWZy85NFVSZ2twckt2SWJlRVFDRW5rdVloaUlIUjRNZDNBN0tOaUJqRndXWG1SYkk1aHAvVG00ZnRGUCs2NkZ3b1lWR3BNUU5mQmc9PQo=",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.106_x64-setup.exe"
     }
   }
 }
