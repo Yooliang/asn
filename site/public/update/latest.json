@@ -1,11 +1,11 @@
 {
-  "version": "0.1.109",
-  "notes": "修正：對話框的遮罩現在會蓋滿整個視窗，左上的使用者區和名單也會被蓋住（#536）。修正：換班接手時，如果啟動時寫死了舊的模型版本，新視窗不會再被換回舊版。修正：自動換新對話時，前情裡不再出現重複的那封信。",
-  "pub_date": "2026-10-29T15:01:10.099Z",
+  "version": "0.1.110",
+  "notes": "新功能：對話頁固定 6 顆大按鈕，用不到的反灰並寫原因；手機也有同一排按鈕（#539）。新功能：夥伴離線時，同一格變成喚醒。新功能：群組對話多一顆「群組」按鈕，放邀請、成員與設定。新功能：「工作項目」按鈕顯示背景工作件數，本機夥伴按下去看得到列表。新功能：切換模型和開新夥伴用同一份型號清單；在這台電腦開 Claude、Gemini 夥伴時可以先選型號。修正：重開後群組分頁會保留。修正：沒在看的群組分頁不會被標成已讀。",
+  "pub_date": "2026-10-29T23:03:26.010Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybndYaHNEa1BJbm9BU1VZc3VpOUMzSHI3ZU41dEtsRDlSNjRGOVljNUpHaGRHVzU3clpoUmV4Zi9sVkVlQWxTYmdZZE10bkNKSGVWUkdSayt0VVhoeGdvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMjg2MDcwCWZpbGU6QVNOXzAuMS4xMDlfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS4xMDkKM3c4WGNGc3BsbVkxTDVqYkR5c3U1RnlTS0g4Y2NML1FQVzVFc1JJMWxjR1Q1Y1dnTmgxcGRKMmRZaVZPREtqMkdvdTUvTjBqbWVmbnFabTFCN0s5Qnc9PQo=",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.109_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybnh0NHJUcFdIeSsxQ3RGUmVOcDRUd21mWmVvZTF6K295MWdaVGZHUzJ4MXN4S0JnTlMyTFdISlNWNm1lM1pvMHRnb0FrQ0MxU2xMejllZEFJRGFUSGdvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMzE1MDA1CWZpbGU6QVNOXzAuMS4xMTBfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS4xMTAKZXhQM2Z5SVg0a0hqNEV3aXIvdGNoSTVjTUtNMmh5WTNyaW5TWll0TmxwZTRSQmR5T3NQMlRuMHFwM3VEUkpDZ0tUQm5jak1xMlh4VFNxTTJNeUxQQ0E9PQo=",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.110_x64-setup.exe"
     }
   }
 }
