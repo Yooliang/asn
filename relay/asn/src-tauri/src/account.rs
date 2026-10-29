@@ -358,22 +358,22 @@ pub async fn auth_account_name_set(auth: State<'_, AuthState>, name: String) -> 
     Ok(v.get("name").and_then(Value::as_str).map(String::from).unwrap_or(name))
 }
 
-/// 「AI 之間互相叫醒的上限」：0～20 的整數（0＝AI 不能互相叫醒）；與後台 asn_account_settings 的規則一致
+/// 「AI 之間互相叫醒的上限」：0～200 的整數（0＝AI 不能互相叫醒）；與後台 asn_account_settings 的規則一致
 pub fn clean_ai_wake_limit(n: i64) -> Result<i64, String> {
-    if (0..=20).contains(&n) {
+    if (0..=200).contains(&n) {
         Ok(n)
     } else {
-        Err("上限要在 0 到 20 之間".into())
+        Err("上限要在 0 到 200 之間".into())
     }
 }
 
-/// 讀帳號設定裡 AI 互相叫醒的上限（後台 account_settings 動作，要本人登入憑證）；沒設過是 5
+/// 讀帳號設定裡 AI 互相叫醒的上限（後台 account_settings 動作，要本人登入憑證）；沒設過是 20
 #[tauri::command]
 pub async fn auth_ai_wake_limit_get(auth: State<'_, AuthState>) -> Result<i64, String> {
     let c = ctx()?;
     let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
     let v = call(&c.client, &c.relay_url, &token, "account_settings", None, json!({})).await?;
-    Ok(v.get("ai_wake_limit").and_then(Value::as_i64).unwrap_or(5))
+    Ok(v.get("ai_wake_limit").and_then(Value::as_i64).unwrap_or(20))
 }
 
 /// 改帳號設定裡 AI 互相叫醒的上限：回存好的值
@@ -521,8 +521,8 @@ mod tests {
     fn 互相叫醒上限驗證() {
         assert_eq!(clean_ai_wake_limit(0), Ok(0));
         assert_eq!(clean_ai_wake_limit(5), Ok(5));
-        assert_eq!(clean_ai_wake_limit(20), Ok(20));
-        assert!(clean_ai_wake_limit(-1).is_err() && clean_ai_wake_limit(21).is_err());
+        assert_eq!(clean_ai_wake_limit(200), Ok(200));
+        assert!(clean_ai_wake_limit(-1).is_err() && clean_ai_wake_limit(201).is_err());
     }
 
     #[test]

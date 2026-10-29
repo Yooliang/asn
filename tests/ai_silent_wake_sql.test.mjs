@@ -2,7 +2,7 @@
 // 1. 靜態：交易內、不刪資料、新函式只授權 service_role、時間戳比 20261024160000 新。
 // 2. 實跑（需要 @electric-sql/pglite；沒裝略過，pglite 測試不加 --test-force-exit）：
 //    - asn_relay_room_ai_chain：從「截止序號之前最近一則真人發言」起算；AI 有 @ 點名 AI 算一輪；AI 沒 @ 但 wake_info 有通過者也算一輪；
-//      全部略過的不算；真人再發言重新起算；只算截止序號之前；非成員被擋；上限讀主持人帳號設定（預設 5、0 照給）
+//      全部略過的不算；真人再發言重新起算；只算截止序號之前；非成員被擋；上限讀主持人帳號設定（預設 20、0 照給）
 //    - 發言時的檢查（room_ai_chain_blocked）也把靠判斷叫醒的輪算進去
 //    - wake_set 回傳存下的版本（先到先得，輸的人拿到第一份）；lim 標記讀出來是 limited:true；別租戶讀者只看到 x: 代號、不含節點代號
 // 3. 還原驗證：拿掉「wake_info 有通過者也算一輪」、「截止序號」，對應測試要變紅。
@@ -62,6 +62,8 @@ async function boot({ mutate } = {}) {
       ('${W1}', '工作機', 'k2', 'bell-w1', 'member', '${T1}', '${U1}', 'active', '工作機'),
       ('${Q2}', '財務室電腦', 'k3', 'bell-q2', 'member', '${T2}', '${U2}', 'active', '電腦');
     insert into relay.roster(node, name, engine) values ('${W1}', '財務', 'claude'), ('${W1}', '管理', 'claude'), ('${W1}', '監看', 'claude'), ('${Q2}', '助理', 'claude');`)
+  // 預設已改 20（20261029120000）；這份測試的情境都以 5 輪為準，所以明設主持人帳號 5
+  await db.exec(`update relay.tenants set features = coalesce(features, '{}'::jsonb) || '{"ai_wake_limit":5}'::jsonb where id = '${T1}'`)
   return db
 }
 async function rpc(db, fn, args = {}) {

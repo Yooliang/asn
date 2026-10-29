@@ -167,13 +167,13 @@ export async function handleAccountAction(
     return { status: 200, body: { name: d.name } };
   }
 
-  // 帳號層設定（migration 20261023190000_group_ai_wake_limit.sql）：目前只有「AI 之間互相叫醒的上限」ai_wake_limit（0～20，預設 5）。
+  // 帳號層設定（migration 20261023190000_group_ai_wake_limit.sql，範圍與預設見 20261029120000_ai_wake_limit_200.sql）：目前只有「AI 之間互相叫醒的上限」ai_wake_limit（0～200，預設 20）。
   // body 帶 ai_wake_limit ＝改；沒帶＝讀。一律要本人的登入憑證（上面已驗過）。
   if (action === "account_settings") {
     const o = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
     let limit: number | null = null;
     if (o.ai_wake_limit !== undefined && o.ai_wake_limit !== null) {
-      if (typeof o.ai_wake_limit !== "number" || !Number.isInteger(o.ai_wake_limit) || o.ai_wake_limit < 0 || o.ai_wake_limit > 20) {
+      if (typeof o.ai_wake_limit !== "number" || !Number.isInteger(o.ai_wake_limit) || o.ai_wake_limit < 0 || o.ai_wake_limit > 200) {
         return { status: 400, body: { error: "bad_request" } };
       }
       limit = o.ai_wake_limit;
