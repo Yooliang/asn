@@ -50,6 +50,17 @@ const ITEM_RETRY_MAX = 3   // 同一封信處理失敗幾次後就先 ack 掉，
 // 一次收到超過這麼多封「Rust 代收的信」（畫面沒開時存下來的，m.spooled）就不逐封跳提示、只跳一則摘要（#339：曾一次湧進 437 封）
 export const SPOOL_QUIET_OVER = 3
 
+// 舊好友存檔的一筆：畫面離線時還要用的欄位。model（模型）決定 pi 夥伴的廠商小圖示、device（設備名）與 kind（設備種類，手機與否）決定設備分組的名字與圖示；
+// 這三欄名單沒給就不寫（舊存檔本來就沒有，讀回時照舊退回 pi 圖示／未命名設備）。欄位名與名單（buildFriends）一致，讀回直接沿用
+const optStr = (key, v) => (typeof v === 'string' && v.trim() ? { [key]: v.trim() } : {})
+export const savedFriendOf = f => ({
+  id: f.id, node: f.node, agent: f.agent, nick: f.nick, psm: f.psm, engine: f.engine,
+  ...optStr('model', f.model), ...optStr('device', f.device), ...optStr('kind', f.kind),
+  ...(f.partnerId ? { partnerId: f.partnerId } : {}), lastAt: f.lastAt ?? 0, known: true, onRoster: f.onRoster === true,
+})
+// 讀回存檔的一筆：這三欄只收非空字串（存檔是本機檔，壞掉或被改過的值不帶進畫面）；沒有就不補，畫面照舊退回
+export const restoredFriendOf = ({ model, device, kind, ...rest }) => ({ ...rest, ...optStr('model', model), ...optStr('device', device), ...optStr('kind', kind) })
+
 export class AsnCore {
   constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, localMs = 2_000, soonGapMs = 1_000, statusPollMs = STATUS_POLL_MS, aliases = [], stepMs = STEP_MS }) {
     // 讀取類的呼叫一律加逾時（寄信、寄檔另有自己的流程，不在這裡限時）。收信（inbox、ack）可能一次要走好幾個名字，給兩倍時間
@@ -99,7 +110,7 @@ export class AsnCore {
   // ---------- 啟動／停止 ----------
   async start() {
     const saved = await withTimeout(this.store.load(), this.stepMs, 'load').catch(e => { this.log(`load failed: ${e.message}`); return null })
-    for (const f of saved?.friends ?? []) this.friends.set(f.id, this.#decorate({ ...f, psm: cleanPsm(f.psm, f.node), status: 'offline', unread: 0, waiting: false, replyTo: null }))
+    for (const f of saved?.friends ?? []) this.friends.set(f.id, this.#decorate({ ...restoredFriendOf(f), psm: cleanPsm(f.psm, f.node), status: 'offline', unread: 0, waiting: false, replyTo: null }))
     for (const [id, l] of Object.entries(saved?.logs ?? {})) this.logs.set(id, l)
     this.readDirty = cleanMarks(saved?.readDirty)   // 上次離線時沒送出的已讀位置，連線後補送
     this.emit('state')
@@ -620,7 +631,7 @@ export class AsnCore {
     const withLog = [...this.friends.values()].filter(f => this.logs.has(f.id) || f.known)
     try {
       await withTimeout(this.store.save({
-        friends: withLog.map(f => ({ id: f.id, node: f.node, agent: f.agent, nick: f.nick, psm: f.psm, engine: f.engine, ...(f.partnerId ? { partnerId: f.partnerId } : {}), lastAt: f.lastAt ?? 0, known: true, onRoster: f.onRoster === true })),
+        friends: withLog.map(savedFriendOf),
         logs: Object.fromEntries(withLog.filter(f => this.logs.has(f.id)).map(f => [f.id, this.logs.get(f.id).slice(-LOG_KEEP)])),
         ...(Object.keys(this.readDirty).length ? { readDirty: this.readDirty } : {}),
       }), this.stepMs, 'save')
