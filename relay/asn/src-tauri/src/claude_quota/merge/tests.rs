@@ -231,6 +231,7 @@ fn 共用案例_每一個都跟預期一致() {
         let vendor = match t["vendor"].as_str() {
             Some("claude") => Vendor::Claude,
             Some("codex") => Vendor::Codex,
+            Some("gemini") => Vendor::Gemini,
             o => panic!("{id} 廠牌不認得：{o:?}"),
         };
         let kind = match t["window"].as_str() {
