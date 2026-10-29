@@ -440,6 +440,19 @@ async fn agy_網路暫時斷線_等一下自動再試一次_成功就當沒事_�
 }
 
 #[tokio::test]
+async fn agy_網路重試的等待期間工作者被停掉_不重開驅動_不重試_結案這一輪() {
+    crate::bridge::engines::acp_worker::test_hooks::net_wait_for("StopWait", 1500);
+    let mut h = eh(Some(json!([worker("StopWait", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    h.put_pull(to_agent(1, "StopWait", "@@NET")).await;
+    h.wait("進入等待", |h| h.log_text().contains("網路暫時斷線：等")).await;
+    h.set.stop();
+    tokio::time::sleep(std::time::Duration::from_millis(2200)).await;
+    let log = h.log_text();
+    assert!(log.contains("等待重試期間工作者已被關閉：不再重試"), "{log}");
+    assert!(!log.contains("再試一次後恢復正常") && !log.contains("再試一次仍然斷線"), "等待後不能又拉起驅動重送：{log}");
+}
+
+#[tokio::test]
 async fn agy_網路斷線前這一輪已經動過手_不整封重送_回可能做了一半_檔案只寫一次() {
     crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(50);
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;

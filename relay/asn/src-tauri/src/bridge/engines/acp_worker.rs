@@ -26,6 +26,14 @@ pub(crate) mod test_hooks {
     use std::collections::HashMap;
     use std::sync::Mutex;
     static FAIL_SPAWN_IN: Mutex<Option<HashMap<String, u32>>> = Mutex::new(None);
+    static NET_WAIT: Mutex<Option<HashMap<String, u64>>> = Mutex::new(None);
+    /// 讓某個工作者網路重試前等久一點（全域那個值會被別的測試改掉，等待期間要做事的測試不能靠它）
+    pub fn net_wait_for(name: &str, ms: u64) {
+        NET_WAIT.lock().unwrap().get_or_insert_with(HashMap::new).insert(name.to_string(), ms);
+    }
+    pub fn net_wait_override(name: &str) -> Option<u64> {
+        NET_WAIT.lock().unwrap().as_ref().and_then(|m| m.get(name).copied())
+    }
     pub fn fail_spawn_in(name: &str, n: u32) {
         FAIL_SPAWN_IN.lock().unwrap().get_or_insert_with(HashMap::new).insert(name.to_string(), n);
     }
@@ -648,8 +656,16 @@ impl Worker {
                 r = Err(WorkerError::new("agent", "網路斷線，這一輪可能做了一半"));
             } else {
                 let wait = NET_RETRY_MS.load(std::sync::atomic::Ordering::Relaxed);
+                #[cfg(test)]
+                let wait = test_hooks::net_wait_override(&cfg.name).unwrap_or(wait);
                 self.log(format!("網路暫時斷線：等 {} 秒自動再試一次", wait / 1000));
                 tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+                // 等的這段時間若被人按了「關閉」或「移除」，就不要再把驅動拉起來（#528）
+                let gone = { let s = self.st.lock().unwrap(); s.admin_stopped || s.stopping };
+                if gone {
+                    self.log("等待重試期間工作者已被關閉：不再重試");
+                    return Err(WorkerError::new("agent", "工作者已被關閉，這封信沒有再重試"));
+                }
                 d = self.ensure_driver(self.base_full()).await?;
                 r = d.turn(format!("{first}{}", job.text), cfg.turn_timeout_ms, cfg.turn_max_ms).await;
                 remember(&d);
