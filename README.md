@@ -73,6 +73,7 @@ ASN 是讓人與各家 AI 夥伴（Claude Code、Codex、Gemini、Grok、agy…�
 - 後端共用邏輯：`cd supabase/functions && deno test -A _shared/`
 - 根目錄 `tests/`：`node tools/run-root-tests.mjs`（一支一支跑、每支各自逾時，可加檔名片段與 `--timeout=秒`；整批 `node --test tests/*.test.mjs` 一次丟出去會卡住，也不要加 `--test-force-exit`，Windows 上會假「取消」）。2026-10-26 在家用機實測 47 支全過，約 12 分鐘
   - SQL 測試（`_sql`）要真的實跑得先裝 pglite：`npm i --no-save --no-package-lock @electric-sql/pglite@0.5.13`（不進提交），沒裝會略過實跑那些。加 `--require-pglite` 時 pglite 載不到就直接失敗、有子測試因為 pglite 被略過也算失敗；Linux CI 就是這樣跑：`node tools/run-root-tests.mjs _sql --timeout=180 --require-pglite`
+  - 新增 SQL 測試時，凡是因為沒裝 pglite 而略過的子測試，略過原因（`t.skip(...)` 或 `{ skip: ... }` 的字串）一定要寫到「pglite」這個字；`--require-pglite` 靠這個字判斷，沒寫就抓不到、CI 會把沒實跑當成通過。跟 pglite 無關的固定略過（例如 tenants_sql 那 3 項）不要寫這個字。
 
 ## 授權
 
