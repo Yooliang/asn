@@ -70,6 +70,8 @@ mod cloud_invite;
 #[cfg(desktop)]
 mod codex_accounts;
 #[cfg(desktop)]
+mod codex_quota;
+#[cfg(desktop)]
 mod grok_accounts;
 #[cfg(desktop)]
 mod launch;
@@ -323,7 +325,20 @@ async fn acct_remote_report(app: State<'_, App>) -> Result<Value, String> {
     let quotas = tauri::async_runtime::spawn_blocking(|| claude_quota::load_all(&claude_accounts::claude_home())).await.unwrap_or_default();
     // Grok 帳號庫（email 與是否使用中）；沒有就是空的
     let grok = tauri::async_runtime::spawn_blocking(grok_accounts::local_list).await.unwrap_or_default();
-    acct_remote::report(relay.as_ref(), &list, codex.as_ref(), &quotas, &grok).await
+    // Codex 的額度窗：橋的 Codex 引擎存在工作資料夾；帳號跟目前登入對得上才帶（沒開 Codex 橋接就沒有）
+    let work_dir = app.work_dir.clone();
+    let login = codex.as_ref().filter(|c| c.mode == "chatgpt").map(|c| c.email.clone());
+    let codex_windows = tauri::async_runtime::spawn_blocking(move || login.map(|e| codex_quota::windows_for(&work_dir, &e, heartbeat::now_ms() as i64)).unwrap_or_default()).await.unwrap_or_default();
+    acct_remote::report(relay.as_ref(), &list, codex.as_ref(), &quotas, &grok, &codex_windows).await
+}
+/// 帳號列表（#374）：本人所有設備回報的各廠牌帳號與額度。要本人簽章；沒登入回錯，不打後台
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+async fn acct_roster(app: State<'_, App>, auth: State<'_, auth::AuthState>) -> Result<Value, String> {
+    let r = relay_of(&app)?;
+    let token = account::signing_token(&auth).await;
+    r.acct_roster_signed(token.as_deref()).await
 }
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
@@ -1324,7 +1339,7 @@ pub fn run() {
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_mod::claude_mod_auto_get, claude_mod::claude_mod_auto_set, claude_quota::claude_quota_all, statusline_hook::claude_quota_hook_status, statusline_hook::claude_quota_hook_connect, statusline_hook::claude_quota_hook_disconnect,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,
-            acct_remote_report, acct_remote_list, acct_remote_request, acct_remote_status, acct_remote_pending, acct_remote_apply, acct_remote_decline, acct_remote_allow_get, acct_remote_allow_set,
+            acct_remote_report, acct_remote_list, acct_roster, acct_remote_request, acct_remote_status, acct_remote_pending, acct_remote_apply, acct_remote_decline, acct_remote_allow_get, acct_remote_allow_set,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
             wins::open_chat, wins::open_panel, wins::close_panels, wins::chat_visible, wins::close_chats, wins::open_windows, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,
@@ -1338,7 +1353,7 @@ pub fn run() {
         startup_info, relay_list, relay_inbox, relay_ack, relay_rooms, relay_group, invite_pending, relay_send, relay_chat_history, relay_read_sync, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_avatar, relay_partner_avatar, relay_set_avatar,
         set_presence, set_window_name, store_load, store_save, quit_app, capture_ui_ready, shot_frontend_log, open_link,
         account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_device_prefs_get, account::auth_device_prefs_set, account::auth_bind,
-        site_releases::site_releases, android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, android::android_acct_list, android::android_acct_switch, android::android_acct_status, android::android_term_req_list, android::android_term_req_decide, android::android_secret_pending, android::android_secret_reply, android::android_room_read, android::android_room_post, relay_partner_list, relay_partner_succeed,
+        site_releases::site_releases, android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, android::android_acct_list, android::android_acct_roster, android::android_acct_switch, android::android_acct_status, android::android_term_req_list, android::android_term_req_decide, android::android_secret_pending, android::android_secret_reply, android::android_room_read, android::android_room_post, relay_partner_list, relay_partner_succeed,
     ]);
     let builder = builder
         .setup(move |app| {

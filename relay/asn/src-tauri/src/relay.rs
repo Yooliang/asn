@@ -714,6 +714,11 @@ impl Relay {
         let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法查看電腦的帳號")?;
         self.api_signed("acct_list", Some(b), Some(t)).await
     }
+    /// 帳號列表（#374，電腦與手機共用）：本人所有設備回報的帳號與額度。一定要本人簽章（後台沒簽章回 forbidden）；沒憑證在打後台之前就回錯
+    pub async fn acct_roster_signed(&self, token: Option<&str>) -> Result<Value, String> {
+        let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法查看帳號列表")?;
+        self.api_signed("acct_roster", Some(json!({})), Some(t)).await
+    }
     /// 送出「切換帳號」指令（只帶目標 email）。要本人簽章；回 { id }
     pub async fn acct_switch_signed(&self, node: &str, email: &str, token: Option<&str>) -> Result<Value, String> {
         let b = build_acct_switch_body(node, email)?;
@@ -1251,6 +1256,19 @@ b", "op": "close" }),
         assert_eq!(s.len(), 2);
         assert!(s.iter().all(|x| x.to_lowercase().contains("x-asn-user: bearer usertoken-9")), "{s:?}");
         assert!(s[0].contains("action=acct_list") && s[1].contains("action=acct_switch"));
+    }
+
+    #[tokio::test]
+    async fn 帳號列表_沒有本人簽章不送出_有簽章帶標頭() {
+        let (url, seen) = fake_server(200);
+        let r = Relay::new(url, "secret-key".into(), "P".into(), "P-ASN".into());
+        assert!(r.acct_roster_signed(None).await.unwrap_err().contains("尚未登入"));
+        assert!(r.acct_roster_signed(Some("")).await.is_err(), "空憑證等於沒有");
+        assert!(seen.lock().unwrap().is_empty(), "沒簽章時完全沒有打後台");
+        r.acct_roster_signed(Some("usertoken-9")).await.unwrap();
+        let s = seen.lock().unwrap();
+        assert_eq!(s.len(), 1);
+        assert!(s[0].contains("action=acct_roster") && s[0].to_lowercase().contains("x-asn-user: bearer usertoken-9"), "{s:?}");
     }
 
     #[cfg(desktop)]

@@ -359,6 +359,18 @@ impl Inner {
     }
 
     // ---- 登入與額度 ----
+    /// 帳號列表（#374）：把這次讀到的額度窗連同當下帳號存進工作資料夾（不在 ~/.codex）。
+    /// 帳號先看 account/read 回的 email；舊版 Codex 沒回 email 才用登入檔裡的 email（codex_accounts，只取 email）。
+    /// 都讀不到就不存；寫不進去只記 log
+    fn save_quota(&self, acc: &Value, rl: &Value) {
+        let from_login = || crate::codex_accounts::current(&self.home).ok().flatten().filter(|c| c.mode == "chatgpt").map(|c| c.email);
+        let Some(email) = crate::codex_quota::email_from_account(acc).or_else(from_login) else { return };
+        let windows = crate::codex_quota::windows_from_rate_limits(rl, now_ms() as i64);
+        if let Err(e) = crate::codex_quota::save(&self.ctx.work_dir, &email, &windows, now_ms() as i64) {
+            self.once("quota-save", format!("Codex 額度存不進工作資料夾（略過）：{e}"));
+        }
+    }
+
     async fn refresh_health(&self, force: bool) -> Health {
         let cur = self.health.lock().unwrap().clone();
         if !force && now_ms().saturating_sub(cur.t) < self.health_ttl_ms {
@@ -382,6 +394,7 @@ impl Inner {
                     let ty = acc.pointer("/account/type").and_then(Value::as_str).unwrap_or("").to_string();
                     match self.request("account/rateLimits/read", Value::Null).await {
                         Ok(rl) => {
+                            self.save_quota(&acc, &rl);
                             let r = rl.get("rateLimits").cloned().unwrap_or(Value::Null);
                             if rl.get("ordinaryUsageAllowed").and_then(Value::as_bool) == Some(false) || r.get("rateLimitReachedType").map(|v| !v.is_null()).unwrap_or(false) {
                                 let w = if r.get("rateLimitReachedType").and_then(Value::as_str) == Some("secondary") { r.get("secondary") } else { r.get("primary") };

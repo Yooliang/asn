@@ -100,6 +100,14 @@ pub async fn android_acct_list(app: State<'_, App>, auth: State<'_, crate::auth:
     r.acct_list_signed(&node, token.as_deref()).await
 }
 
+/// 帳號列表（#374）：本人所有設備回報的各廠牌帳號與額度（跟電腦版的 acct_roster 同一個後台動作）。要本人簽章；沒登入回錯，不打後台
+#[tauri::command]
+pub async fn android_acct_roster(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>) -> Result<serde_json::Value, String> {
+    let r = relay_of(&app)?;
+    let token = crate::account::signing_token(&auth).await;
+    r.acct_roster_signed(token.as_deref()).await
+}
+
 /// 送出「切換成這個 email」的指令（對方電腦預設要使用者按同意才會換）。要本人簽章；沒登入回錯，不打後台。回 { id }
 #[tauri::command]
 pub async fn android_acct_switch(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>, node: String, email: String) -> Result<serde_json::Value, String> {

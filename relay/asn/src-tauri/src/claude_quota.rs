@@ -20,7 +20,10 @@ pub const MAX_ACCOUNTS: usize = 20;
 const MAX_INPUT: usize = 1_000_000;
 
 /// 一個帳號的額度紀錄。百分比是「剩餘」；`at` 是記錄時間（UTC，秒）。
-#[derive(Serialize, Debug, PartialEq, Clone)]
+/// `reset_at` 是舊欄位（兩條共用一個，屬於哪條見 `pick_reset`），舊版 ASN 只認它，照舊寫。
+/// 新欄位（#374，舊版讀檔會略過）：`five_reset_at`／`week_reset_at` 是兩條各自的重置時間，
+/// `five_at`／`week_at` 是兩條各自最後收進新值的時間（讀取時間）。全部選填。
+#[derive(Serialize, Debug, PartialEq, Clone, Default)]
 pub struct Quota {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub five_hour_pct: Option<u8>,
@@ -29,10 +32,18 @@ pub struct Quota {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reset_at: Option<String>,
     pub at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub five_reset_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub week_reset_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub five_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub week_at: Option<String>,
 }
 
 /// 從狀態列資料解析出來的額度（還沒有記錄時間）。`five_reset_ms`／`week_reset_ms` 是兩條各自的重置時間，
-/// 只用來判斷新舊（見 merge.rs），不寫進檔案；檔案仍只存一個 `reset_at`。
+/// 用來判斷新舊（見 merge.rs），也寫進檔案的 `five_reset_at`／`week_reset_at`。
 #[derive(Debug, PartialEq, Clone)]
 pub struct Parsed {
     pub five_hour_pct: Option<u8>,
@@ -163,8 +174,20 @@ pub fn load_all(home: &Path) -> HashMap<String, Quota> {
         let (five, week) = (pct_of(v.get("five_hour_pct")), pct_of(v.get("weekly_pct")));
         let at = v.get("at").and_then(Value::as_str).filter(|s| iso_like(s));
         let (true, Some(at)) = (five.is_some() || week.is_some(), at) else { continue };
-        let reset_at = v.get("reset_at").and_then(Value::as_str).filter(|s| iso_like(s)).map(String::from);
-        out.insert(k, Quota { five_hour_pct: five, weekly_pct: week, reset_at, at: at.to_string() });
+        let s = |key: &str| v.get(key).and_then(Value::as_str).filter(|s| iso_like(s)).map(String::from);
+        // 某條沒有百分比，它的重置時間與讀取時間也不留
+        let only = |has: bool, x: Option<String>| x.filter(|_| has);
+        let q = Quota {
+            five_hour_pct: five,
+            weekly_pct: week,
+            reset_at: s("reset_at"),
+            at: at.to_string(),
+            five_reset_at: only(five.is_some(), s("five_reset_at")),
+            week_reset_at: only(week.is_some(), s("week_reset_at")),
+            five_at: only(five.is_some(), s("five_at")),
+            week_at: only(week.is_some(), s("week_at")),
+        };
+        out.insert(k, q);
         if out.len() >= MAX_ACCOUNTS {
             break;
         }
@@ -202,6 +225,22 @@ pub fn hook(home: &Path, input: &str, now_ms: i64) -> bool {
     let Some(parsed) = parse_statusline(input, now_ms) else { return false };
     let Some(email) = claude_accounts::current_email(home) else { return false };
     record(home, &email, parsed, now_ms).unwrap_or(false)
+}
+
+impl Quota {
+    /// 回報用的額度窗（#374，格式同後台 parseWindows）：`{ name, left_pct, resets_at, read_at }`，
+    /// name 是 five_hour／weekly。重置時間用各條自己的；舊檔沒有才從舊的 `reset_at` 推（推不出來就是 null）；
+    /// 讀取時間用各條自己的，沒有就用整筆的 `at`。
+    pub fn windows(&self) -> Vec<Value> {
+        let (r5, rw) = merge::stored_resets(self);
+        let mut out = vec![];
+        for (name, pct, reset, read) in [("five_hour", self.five_hour_pct, r5, &self.five_at), ("weekly", self.weekly_pct, rw, &self.week_at)] {
+            let Some(left) = pct else { continue };
+            let read_at = read.as_deref().unwrap_or(&self.at);
+            out.push(serde_json::json!({ "name": name, "left_pct": left, "resets_at": reset.map(iso_secs), "read_at": read_at }));
+        }
+        out
+    }
 }
 
 /// 前端讀本機各帳號的額度紀錄（email → 額度）
@@ -287,7 +326,8 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
         let mut keys: Vec<&String> = v["a@x.test"].as_object().unwrap().keys().collect();
         keys.sort();
-        assert_eq!(keys, ["at", "five_hour_pct", "reset_at", "weekly_pct"]);
+        assert_eq!(keys, ["at", "five_at", "five_hour_pct", "five_reset_at", "reset_at", "week_at", "week_reset_at", "weekly_pct"]);
+        assert_eq!((v["a@x.test"]["five_reset_at"].as_str(), v["a@x.test"]["week_reset_at"].as_str()), (Some("2026-10-24T14:00:00Z"), Some("2026-10-26T07:33:20Z")), "兩條各存自己的重置時間");
     }
 
     #[test]
@@ -343,7 +383,11 @@ mod tests {
         write_cj(h.path(), "a@x.test");
         hook(h.path(), &status(38.0, 1_792_850_400, 20.0, 1_793_000_000), NOW);
         let v = build_report_with_quota(&[acct("a@x.test", true), acct("b@x.test", false)], None, &load_all(h.path()));
-        assert_eq!(v["accounts"][0], json!({ "vendor": "claude", "email": "a@x.test", "plan": "max", "current": true, "five_hour_pct": 62, "weekly_pct": 80, "reset_at": "2026-10-24T14:00:00Z", "at": "2026-10-24T12:00:00Z" }));
+        assert_eq!(v["accounts"][0], json!({ "vendor": "claude", "email": "a@x.test", "plan": "max", "current": true, "five_hour_pct": 62, "weekly_pct": 80, "reset_at": "2026-10-24T14:00:00Z", "at": "2026-10-24T12:00:00Z",
+            "windows": [
+                { "name": "five_hour", "left_pct": 62, "resets_at": "2026-10-24T14:00:00Z", "read_at": "2026-10-24T12:00:00Z" },
+                { "name": "weekly", "left_pct": 80, "resets_at": "2026-10-26T07:33:20Z", "read_at": "2026-10-24T12:00:00Z" }
+            ] }), "同時帶舊四欄與額度窗，兩條各有自己的重置時間");
         assert_eq!(v["accounts"][1], json!({ "vendor": "claude", "email": "b@x.test", "plan": "max", "current": false }), "沒有紀錄的帳號不帶任何額度欄位");
         let low = v.to_string().to_lowercase();
         for bad in ["token", "secret", "org", "uuid"] {

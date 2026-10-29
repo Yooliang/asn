@@ -20,9 +20,10 @@ fn status(five: Option<(f64, i64)>, week: Option<(f64, i64)>) -> String {
     }
     json!({ "rate_limits": Value::Object(rl) }).to_string()
 }
+/// 假的登入狀態：目前帳號要有 accountUuid 才認得（#522 原本漏了這個，掛鉤一律回 false）
 fn home_as(email: &str) -> tempfile::TempDir {
     let h = tempfile::tempdir().unwrap();
-    std::fs::write(h.path().join(".claude.json"), json!({ "oauthAccount": { "emailAddress": email } }).to_string()).unwrap();
+    std::fs::write(h.path().join(".claude.json"), json!({ "oauthAccount": { "emailAddress": email, "accountUuid": "11111111-2222-3333-4444-555555555555" } }).to_string()).unwrap();
     h
 }
 fn q(h: &tempfile::TempDir) -> Quota {
@@ -174,7 +175,7 @@ fn 分不出新舊時照舊收下() {
     assert!(judge(Kind::Five, Some((4, Some(NOW + H))), 90, None, NOW).is_ok());
     assert!(judge(Kind::Week, None, 90, Some(NOW + H), NOW).is_ok());
     // 兩條都用完時存的是較晚的那個，分不出是哪條的，兩條都當沒有重置時間
-    let both = Quota { five_hour_pct: Some(0), weekly_pct: Some(0), reset_at: Some(iso_secs(NOW + H)), at: iso_secs(NOW) };
+    let both = Quota { five_hour_pct: Some(0), weekly_pct: Some(0), reset_at: Some(iso_secs(NOW + H)), at: iso_secs(NOW), ..Default::default() };
     assert_eq!(stored_resets(&both), (None, None));
 }
 
@@ -201,4 +202,116 @@ fn log_超過上限只留後半_不會無限長() {
     let l = log(&h);
     assert!((l.len() as u64) < LOG_MAX_BYTES, "{}", l.len());
     assert!(l.ends_with("5 小時額度沒收：測試\n"));
+}
+
+// ---------- 共用案例（#374）：跟後台 SQL 讀同一份，規則不會分成兩套 ----------
+const SHARED_CASES: &str = include_str!("../../../../../../tests/fixtures/quota-merge-cases.json");
+
+#[test]
+fn 共用案例_每一個都跟預期一致() {
+    let v: Value = serde_json::from_str(SHARED_CASES).expect("共用案例要是 JSON");
+    let c = &v["constants"];
+    assert_eq!((c["same_period_ms"].as_i64(), c["week_ms"].as_i64(), c["expired_after_ms"].as_i64()), (Some(SAME_MS), Some(WEEK_MS), Some(WEEK_MS)), "常數跟案例檔一致");
+    let cases = v["cases"].as_array().expect("cases");
+    assert!(cases.len() >= 20, "案例不該變少：{}", cases.len());
+    let win = |w: &Value| -> Option<(u8, Option<i64>)> {
+        if w.is_null() {
+            return None;
+        }
+        Some((w["left_pct"].as_u64().unwrap() as u8, w["resets_at"].as_str().map(ms)))
+    };
+    let mut wrong = vec![];
+    for t in cases {
+        let id = t["id"].as_str().unwrap();
+        let vendor = match t["vendor"].as_str() {
+            Some("claude") => Vendor::Claude,
+            Some("codex") => Vendor::Codex,
+            o => panic!("{id} 廠牌不認得：{o:?}"),
+        };
+        let kind = match t["window"].as_str() {
+            Some("five_hour") => Kind::Five,
+            Some("weekly") => Kind::Week,
+            o => panic!("{id} 窗名不認得：{o:?}"),
+        };
+        let (new_pct, new_reset) = win(&t["new"]).expect("new 一定有");
+        let got = judge_for(vendor, kind, win(&t["old"]), new_pct, new_reset, ms(t["now"].as_str().unwrap()));
+        let want_accept = t["accept"].as_bool().unwrap();
+        let want_reason = t["reason"].as_str();
+        let got_reason = got.as_ref().err().map(|r| r.code);
+        if got.is_ok() != want_accept || got_reason != want_reason {
+            wrong.push(format!("{id}：預期 {want_accept}/{want_reason:?}，實際 {}/{got_reason:?}", got.is_ok()));
+        }
+    }
+    assert!(wrong.is_empty(), "跟共用案例不一致：{wrong:#?}");
+    // 代碼表裡的每個代碼，Rust 都可能回（反過來也守：Rust 回的代碼都在表裡）
+    let codes: Vec<&str> = v["reasons"].as_object().unwrap().keys().map(String::as_str).collect();
+    for c in ["same_period_rise", "earlier", "later_not_expired", "not_week_multiple"] {
+        assert!(codes.contains(&c), "{c} 不在案例檔的代碼表");
+    }
+}
+
+// ---------- 兩條各記自己的重置時間（#374） ----------
+#[test]
+fn 新格式_兩條各存自己的重置時間與讀取時間_舊欄位照寫() {
+    let h = home_as("a@x.test");
+    let (r5, rw) = (NOW + 2 * H, NOW + 100 * H);
+    assert!(hook(h.path(), &status(Some((96.0, r5)), Some((100.0, rw))), NOW));
+    let got = q(&h);
+    assert_eq!((got.five_reset_at.clone(), got.week_reset_at.clone()), (Some(iso_secs(r5)), Some(iso_secs(rw))));
+    assert_eq!(got.reset_at, Some(iso_secs(rw)), "舊的 reset_at 照 pick_reset：每週用完給每週的");
+    assert_eq!((got.five_at.clone(), got.week_at.clone()), (Some(iso_secs(NOW)), Some(iso_secs(NOW))));
+    // 只有 5 小時那條收進新值：它的讀取時間更新，每週那條留原本的
+    assert!(hook(h.path(), &status(Some((97.0, r5)), None), NOW + 60_000));
+    let got = q(&h);
+    assert_eq!((got.five_at, got.week_at, got.at), (Some(iso_secs(NOW + 60_000)), Some(iso_secs(NOW)), iso_secs(NOW + 60_000)));
+}
+
+#[test]
+fn 兩條都用完時每週那條也分得出新舊_以前的限制解掉了() {
+    // 舊做法兩條都用完時只存一個較晚的時間，兩條都當沒有重置時間、照收；現在各存一個，每週回升照樣擋下
+    let h = home_as("a@x.test");
+    let (r5, rw) = (NOW + 2 * H, NOW + 100 * H);
+    assert!(hook(h.path(), &status(Some((100.0, r5)), Some((100.0, rw))), NOW));
+    assert!(!hook(h.path(), &status(None, Some((60.0, rw))), NOW + 60_000), "同一期每週回升不收");
+    assert_eq!(q(&h).weekly_pct, Some(0));
+    assert!(log(&h).contains("每週額度沒收"));
+}
+
+#[test]
+fn 舊格式的檔照樣讀得到_沒有各條重置時間就照舊反推() {
+    let h = home_as("a@x.test");
+    std::fs::create_dir_all(h.path().join(".asn")).unwrap();
+    let r5 = NOW + 2 * H;
+    std::fs::write(super::super::quota_path(h.path()), json!({ "a@x.test": { "five_hour_pct": 40, "weekly_pct": 70, "reset_at": iso_secs(r5), "at": iso_secs(NOW) } }).to_string()).unwrap();
+    let got = q(&h);
+    assert_eq!((got.five_hour_pct, got.weekly_pct, got.reset_at.clone(), got.five_reset_at.clone(), got.five_at.clone()), (Some(40), Some(70), Some(iso_secs(r5)), None, None));
+    assert_eq!(stored_resets(&got), (Some(r5), None), "舊檔：沒用完時那一個屬於 5 小時那條");
+    // 回報的額度窗：讀取時間退回整筆的 at；每週那條推不出重置時間就是 null
+    let w = got.windows();
+    assert_eq!(w[0], json!({ "name": "five_hour", "left_pct": 40, "resets_at": iso_secs(r5), "read_at": iso_secs(NOW) }));
+    assert_eq!(w[1], json!({ "name": "weekly", "left_pct": 70, "resets_at": null, "read_at": iso_secs(NOW) }));
+    // 舊檔照舊判斷：5 小時回升不收
+    assert!(!hook(h.path(), &status(Some((50.0, r5)), None), NOW + 60_000));
+    // 新格式的檔：不認得的欄位舊版會略過（這裡確認新版讀新欄位、各條沒百分比的就不留）
+    std::fs::write(super::super::quota_path(h.path()), json!({ "a@x.test": { "weekly_pct": 70, "at": iso_secs(NOW), "five_reset_at": iso_secs(r5), "week_reset_at": "壞", "week_at": iso_secs(NOW) } }).to_string()).unwrap();
+    let got = q(&h);
+    assert_eq!((got.five_reset_at, got.week_reset_at, got.week_at), (None, None, Some(iso_secs(NOW))), "沒有 5 小時百分比就不留它的重置時間；格式不對的丟掉");
+}
+
+#[test]
+fn 新格式那條明寫的重置時間優先_不拿舊的反推() {
+    let r5 = NOW + 2 * H;
+    let rw = NOW + 100 * H;
+    let qq = Quota { five_hour_pct: Some(0), weekly_pct: Some(0), reset_at: Some(iso_secs(rw)), at: iso_secs(NOW), five_reset_at: Some(iso_secs(r5)), week_reset_at: Some(iso_secs(rw)), ..Default::default() };
+    assert_eq!(stored_resets(&qq), (Some(r5), Some(rw)));
+}
+
+#[test]
+fn 不收的原因代碼跟後台一致() {
+    let old = Some((40, Some(NOW + H)));
+    assert_eq!(judge(Kind::Five, old, 50, Some(NOW + H), NOW).unwrap_err().code, "same_period_rise");
+    assert_eq!(judge(Kind::Five, old, 50, Some(NOW - H), NOW).unwrap_err().code, "earlier");
+    assert_eq!(judge(Kind::Five, old, 50, Some(NOW + 5 * H), NOW).unwrap_err().code, "later_not_expired");
+    assert_eq!(judge(Kind::Week, old, 50, Some(NOW + 5 * H), NOW + 2 * H).unwrap_err().code, "not_week_multiple");
+    assert!(judge_for(Vendor::Codex, Kind::Week, old, 50, Some(NOW + 5 * H), NOW + 2 * H).is_ok(), "Codex 每週不看倍數");
 }
