@@ -96,7 +96,8 @@ pub(crate) fn launch_model_plan(engine: &str, background: bool, model: &str) -> 
         return Ok(ModelPlan::Record(m.to_string()));
     }
     match engine {
-        "claude" | "" => Ok(ModelPlan::Arg(m.to_string())),
+        // 只認明寫 "claude"：沒寫 engine 的自訂 profile 不知道是什麼程式，不補 --model
+        "claude" => Ok(ModelPlan::Arg(m.to_string())),
         _ => Err("這個廠牌開新夥伴時不能指定型號".into()),
     }
 }
@@ -463,7 +464,7 @@ mod tests {
         assert_eq!(launch_model_plan("claude", false, ""), Ok(ModelPlan::None));
         assert_eq!(launch_model_plan("claude", false, "  "), Ok(ModelPlan::None), "空白＝不指定");
         assert_eq!(launch_model_plan("claude", false, "sonnet"), Ok(ModelPlan::Arg("sonnet".into())));
-        assert_eq!(launch_model_plan("", false, "opus"), Ok(ModelPlan::Arg("opus".into())), "沒寫 engine 的自訂 profile 視為 Claude");
+        assert!(launch_model_plan("", false, "opus").is_err(), "沒寫 engine 的自訂 profile 不補 --model");
         assert_eq!(launch_model_plan("gemini", true, "gemini-3.8-flash-high"), Ok(ModelPlan::Record("gemini-3.8-flash-high".into())));
         assert!(launch_model_plan("codex", false, "gpt-5.5").is_err(), "Codex 視窗先不帶型號");
         assert!(launch_model_plan("claude", false, "--dangerously").is_err(), "不能以 - 開頭（會被當成旗標）");
