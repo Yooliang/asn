@@ -9,6 +9,10 @@
 //!   5 小時那條不能用倍數判斷：5 小時的期從那期第一則訊息起算，不是固定格子。
 //! - 記著的重置時間已經過了超過 7 天：新來的照收，不做上面的判斷（避免廠商改了重置時間後永遠收不進新數字）。兩條都適用。
 //! - 任一邊沒有重置時間、或記著的那條本來就沒有數字：分不出新舊，照舊收下（跟以前一樣）。
+//! - 重置時間的合理範圍（#524 審查）：新來的重置時間要落在「現在 −1 天」到「現在 +8 天」之間，超出就不收那一條、記 log
+//!   （不然一個 2099 年的重置時間存進來，之後正常的回報都會被當成「比較早」，那條永遠鎖死；過期 7 天的退路也等不到）。
+//!   已經記在檔裡、晚於「現在 +8 天」的舊值，判斷時當成沒有重置時間（照收新的），讓已經被鎖住的自己解開。
+//!   記著的舊值早於「現在 −1 天」不另外處理：那是正常過期的期，交給上面「已過 7 天就照收」的規則。
 //!
 //! 兩條各自的重置時間（#374）：新版檔案每條存自己的 `five_reset_at`／`week_reset_at`，判斷時用它；
 //! 舊版寫的檔只有一個 `reset_at`，才照 `pick_reset` 的規則推回它屬於哪一條；推不出來（兩條都用完時存的是較晚的那個，
@@ -22,6 +26,10 @@ use std::path::Path;
 /// 重置時間相差這麼多以內算同一個時間
 const SAME_MS: i64 = 10 * 60_000;
 const WEEK_MS: i64 = 7 * 86_400_000;
+/// 新來的重置時間最早可以是現在往前這麼久
+const RESET_PAST_MS: i64 = 86_400_000;
+/// 重置時間最晚可以是現在往後這麼久（每週那條最多 7 天後，多留 1 天）
+const RESET_FUTURE_MS: i64 = 8 * 86_400_000;
 const LOG_FILE: &str = "claude-quota.log";
 const LOG_MAX_BYTES: u64 = 64 * 1024;
 
@@ -55,7 +63,7 @@ pub struct Skipped {
     pub reason: String,
 }
 
-/// 不收的原因：`code` 跟後台與共用案例的代碼一致（same_period_rise／earlier／later_not_expired／not_week_multiple），
+/// 不收的原因：`code` 跟後台與共用案例的代碼一致（same_period_rise／earlier／later_not_expired／not_week_multiple／reset_out_of_range），
 /// `detail` 是給 log 看的中文說明（不含 email）
 #[derive(Debug, PartialEq, Clone)]
 pub struct Reject {
@@ -101,6 +109,13 @@ pub fn judge(kind: Kind, old: Option<(u8, Option<i64>)>, new_pct: u8, new_reset:
 
 /// 一條要不要收：收回 Ok(())，不收回原因。規則見檔頭；只有 Claude 的每週那條看 7 天倍數。
 pub fn judge_for(vendor: Vendor, kind: Kind, old: Option<(u8, Option<i64>)>, new_pct: u8, new_reset: Option<i64>, now_ms: i64) -> Result<(), Reject> {
+    if let Some(r) = new_reset {
+        if r < now_ms - RESET_PAST_MS || r > now_ms + RESET_FUTURE_MS {
+            return reject("reset_out_of_range", format!("重置時間 {} 不在現在前 1 天到後 8 天之間，不收", iso_secs(r)));
+        }
+    }
+    // 記著的重置時間晚於現在 +8 天＝之前收進來的錯誤值：當成沒有重置時間，照收新的
+    let old = old.map(|(p, r)| (p, r.filter(|&r| r <= now_ms + RESET_FUTURE_MS)));
     let Some((old_pct, Some(old_reset))) = old else { return Ok(()) };
     let Some(new_reset) = new_reset else { return Ok(()) };
     if now_ms > old_reset + WEEK_MS {
