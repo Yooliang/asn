@@ -114,7 +114,7 @@ pub fn build_report_all(list: &[AccountInfo], codex: Option<&CodexLogin>, quotas
     json!({ "accounts": rows })
 }
 
-/// 回報要依序試的內容（#1529）：先送完整的；被退回時
+/// 回報要依序試的內容（#1529）：先送完整的；被後台以 HTTP 400 退回時（其他錯誤不退步，見 [`send_attempts`]）
 /// 1. 有 gemini：拿掉 gemini 再送（還沒部署 #542 的 relay 看到 gemini 會整份退回，不能因此連 Claude／Codex／Grok 都送不上）；
 /// 2. 有 codex 或 grok：只送 Claude（更舊的後台只認 claude）。
 pub fn report_attempts(list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value], gemini: &[Value]) -> Vec<Value> {
@@ -133,18 +133,41 @@ pub fn report_attempts(list: &[AccountInfo], codex: Option<&CodexLogin>, quotas:
     out
 }
 
-/// 依序送 attempts，第一個成功的就停；全部失敗回最後一個錯誤
-pub async fn send_attempts<F, Fut>(attempts: Vec<Value>, mut send: F) -> Result<Value, String>
+/// 錯誤字串形如「acct_report HTTP 400 bad_request」：只有 400（後台看不懂這份內容）才值得拿掉廠牌再送
+fn is_bad_request(err: &str) -> bool {
+    err.split_whitespace().collect::<Vec<_>>().windows(2).any(|w| w == ["HTTP", "400"])
+}
+
+fn report_vendors(v: &Value) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    for r in v["accounts"].as_array().into_iter().flatten() {
+        if let Some(x) = r["vendor"].as_str().filter(|x| !out.iter().any(|o| o == x)) {
+            out.push(x.to_string());
+        }
+    }
+    out
+}
+
+/// 依序送 attempts，第一個成功的就停。**只有後台回 400 才退一步**送下一份；
+/// 網路錯、5xx、401 等直接回那個錯誤（換內容也沒用，不連送）。每退一步呼叫 log 一次：拿掉哪些廠牌、原因。
+pub async fn send_attempts<F, Fut>(attempts: Vec<Value>, mut send: F, mut log: impl FnMut(String)) -> Result<Value, String>
 where
     F: FnMut(Value) -> Fut,
     Fut: std::future::Future<Output = Result<Value, String>>,
 {
     let mut last = Err("沒有可回報的內容".to_string());
-    for a in attempts {
+    let mut it = attempts.into_iter().peekable();
+    while let Some(a) = it.next() {
+        let before = report_vendors(&a);
         last = send(a).await;
-        if last.is_ok() {
+        let Err(e) = &last else { break };
+        if !is_bad_request(e) {
             break;
         }
+        let Some(next) = it.peek() else { break };
+        let after = report_vendors(next);
+        let dropped: Vec<&str> = before.iter().filter(|v| !after.contains(v)).map(String::as_str).collect();
+        log(format!("帳號回報被後台退回（HTTP 400：{e}），拿掉 {} 再送", dropped.join("、")));
     }
     last
 }
@@ -357,10 +380,10 @@ pub fn decide(taken: &mut HashMap<String, (String, Instant)>, id: &str, allowed:
 }
 
 // ---------- 送給收發室的動作 ----------
-/// 被退回時的退路見 [`report_attempts`]：拿掉 gemini 再送，再不行只送 Claude
+/// 被退回（HTTP 400）時的退路見 [`report_attempts`]：拿掉 gemini 再送，再不行只送 Claude；其他錯誤不退步
 pub async fn report(relay: &Relay, list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value], gemini: &[Value]) -> Result<Value, String> {
     let attempts = report_attempts(list, codex, quotas, grok, codex_windows, gemini);
-    send_attempts(attempts, |body| relay.api("acct_report", Some(body))).await
+    send_attempts(attempts, |body| relay.api("acct_report", Some(body)), |line| eprintln!("{line}")).await
 }
 /// 有登入就帶本人簽章（#380：成員角色的電腦不帶會被後台擋 403）；沒登入照舊不帶
 pub async fn remote_list(relay: &Relay, node: &str, token: Option<&str>) -> Result<Value, String> {
@@ -735,18 +758,23 @@ mod tests {
         let attempts = report_attempts(&list, Some(&cx), &HashMap::new(), &[], &[], &[gem("m@x.test", true)]);
         let sent = std::sync::Arc::new(Mutex::new(Vec::<Value>::new()));
         let s2 = sent.clone();
-        // 模擬舊 relay：有 gemini 整份退回，其他照收
-        let r = send_attempts(attempts, move |body| {
-            let s2 = s2.clone();
-            async move {
-                s2.lock().unwrap().push(body.clone());
-                if body.to_string().contains("\"gemini\"") {
-                    Err("bad_request".to_string())
-                } else {
-                    Ok(json!({ "ok": true }))
+        let mut logs = vec![];
+        // 模擬舊 relay：有 gemini 整份以 400 退回，其他照收
+        let r = send_attempts(
+            attempts,
+            move |body| {
+                let s2 = s2.clone();
+                async move {
+                    s2.lock().unwrap().push(body.clone());
+                    if body.to_string().contains("\"gemini\"") {
+                        Err("acct_report HTTP 400 bad_request".to_string())
+                    } else {
+                        Ok(json!({ "ok": true }))
+                    }
                 }
-            }
-        })
+            },
+            |l| logs.push(l),
+        )
         .await;
         assert!(r.is_ok());
         let sent = sent.lock().unwrap();
@@ -754,9 +782,58 @@ mod tests {
         let ok = &sent[1];
         assert!(ok["accounts"].as_array().unwrap().iter().any(|r| r["vendor"] == "codex"), "拿掉的只有 gemini，codex 不能跟著掉");
         assert!(ok["accounts"].as_array().unwrap().iter().any(|r| r["vendor"] == "claude"));
-        // 全部失敗回最後一個錯誤
-        let all_fail = send_attempts(vec![json!(1), json!(2)], |_| async { Err::<Value, String>("x".into()) }).await;
-        assert_eq!(all_fail, Err::<Value, String>("x".to_string()));
+        assert_eq!(logs.len(), 1, "退一步記一行");
+        assert!(logs[0].contains("400") && logs[0].contains("拿掉 gemini 再送"), "{logs:?}");
+    }
+
+    fn three_attempts() -> Vec<Value> {
+        let list = [acct("a@x.test", true)];
+        let cx = codex("c@x.test", "plus", "chatgpt");
+        report_attempts(&list, Some(&cx), &HashMap::new(), &[], &[], &[gem("m@x.test", true)])
+    }
+
+    /// 每次都回同一個錯誤，回（送了幾次, log 行）
+    async fn count_sends(err: &str) -> (usize, Vec<String>, Result<Value, String>) {
+        let n = std::sync::Arc::new(Mutex::new(0usize));
+        let n2 = n.clone();
+        let err = err.to_string();
+        let mut logs = vec![];
+        let r = send_attempts(
+            three_attempts(),
+            move |_| {
+                let (n2, err) = (n2.clone(), err.clone());
+                async move {
+                    *n2.lock().unwrap() += 1;
+                    Err::<Value, String>(err)
+                }
+            },
+            |l| logs.push(l),
+        )
+        .await;
+        let sent = *n.lock().unwrap();
+        (sent, logs, r)
+    }
+
+    #[tokio::test]
+    async fn 一直回_400_才一路退到只送_claude_每步記拿掉的廠牌() {
+        assert_eq!(three_attempts().len(), 3);
+        let (sent, logs, r) = count_sends("acct_report HTTP 400 bad_request").await;
+        assert_eq!(sent, 3);
+        assert_eq!(r, Err("acct_report HTTP 400 bad_request".to_string()), "全部失敗回最後一個錯誤");
+        assert_eq!(logs.len(), 2, "{logs:?}");
+        assert!(logs[0].contains("拿掉 gemini 再送"), "{logs:?}");
+        assert!(logs[1].contains("拿掉 codex 再送"), "{logs:?}");
+        assert!(logs.iter().all(|l| l.contains("HTTP 400")));
+    }
+
+    #[tokio::test]
+    async fn 網路錯_5xx_401_404_只送一次不退步() {
+        for err in ["acct_report 連線失敗：timed out", "acct_report HTTP 500", "acct_report HTTP 503 unavailable", "acct_report HTTP 401 unauthorized", "acct_report HTTP 404 not_found", "acct_report HTTP 4001"] {
+            let (sent, logs, r) = count_sends(err).await;
+            assert_eq!(sent, 1, "{err}：不能換內容連送");
+            assert!(logs.is_empty(), "{err}");
+            assert_eq!(r, Err(err.to_string()));
+        }
     }
 
     #[test]
