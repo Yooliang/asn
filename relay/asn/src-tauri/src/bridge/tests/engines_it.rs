@@ -416,6 +416,26 @@ async fn agy_重開後還是登入失效_存著的舊對話壞了_丟掉改開�
 }
 
 #[tokio::test]
+async fn agy_網路暫時斷線_等一下自動再試一次_成功就當沒事_還是斷才回暫時連不上_不當成登入問題() {
+    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(50);
+    let dir = tempfile::tempdir().unwrap();
+    let m1 = dir.path().join("net1").display().to_string();
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    // 第一封：第一次連線被中斷，等一下再試就成功；寄件人只看到正常回覆
+    h.put_pull(to_agent(1, "Gemini", &format!("@@NET_ONCE {m1}"))).await;
+    h.wait("再試後成功", |h| h.bodies().iter().any(|b| b.contains("收到：") && b.contains("NET_ONCE"))).await;
+    assert!(!h.bodies().iter().any(|b| b.contains("暫時連不上") || b.contains("需要登入")), "{:?}", h.bodies());
+    assert!(h.log_text().contains("網路暫時斷線") && h.log_text().contains("再試一次後恢復正常"), "{}", h.log_text());
+    // 第二封：每次都斷，再試一次仍然斷 → 回「Google 暫時連不上，稍後再試」，不是需要登入
+    h.put_pull(to_agent(2, "Gemini", "@@NET")).await;
+    h.wait("暫時連不上", |h| h.bodies().iter().any(|b| b.contains("Google 暫時連不上，稍後再試"))).await;
+    assert!(!h.bodies().iter().any(|b| b.contains("需要登入")), "{:?}", h.bodies());
+    h.set.refresh_all().await;
+    h.core.refresh_roster(now()).await;
+    assert_ne!(h.last_roster()["agents"][0]["status"], "login-required");
+}
+
+#[tokio::test]
 async fn agy_子行程環境是白名單_金鑰不外洩_env_pass_才帶() {
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[("OPENAI_API_KEY", "sk-should-not-leak"), ("FAKE_X", "1")], "acp", &[]).await;
     h.put_pull(to_agent(1, "Gemini", "@@ENV OPENAI_API_KEY")).await;

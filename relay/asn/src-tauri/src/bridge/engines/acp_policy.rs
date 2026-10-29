@@ -409,6 +409,39 @@ pub fn classify_failure(text: &str) -> Option<&'static str> {
     None
 }
 
+/// 引擎回報的錯誤是不是「網路暫時斷了」（連線被中斷、被重設、DNS／TLS 失敗）。這類通常幾秒後就好，值得自動再試一次；
+/// 登入、額度已經先分過類，這裡不會誤判它們（先判 [`classify_failure`]）。只認明確的網路字眼，認不出來的當一般錯誤
+pub fn is_network_error(text: &str) -> bool {
+    if classify_failure(text).is_some() {
+        return false;
+    }
+    let t = text.to_lowercase();
+    let t = t.split_whitespace().collect::<Vec<_>>().join(" ");
+    [
+        "wsarecv",
+        "wsasend",
+        "connection reset",
+        "connection refused",
+        "connection aborted",
+        "connection closed",
+        "a connection attempt failed",
+        "an existing connection was forcibly closed",
+        "broken pipe",
+        "econnreset",
+        "econnaborted",
+        "etimedout",
+        "i/o timeout",
+        "no such host",
+        "tls handshake",
+        "unexpected eof",
+        "dial tcp",
+        "network is unreachable",
+        "temporary failure in name resolution",
+    ]
+    .iter()
+    .any(|k| t.contains(k))
+}
+
 /// 帶分類的錯誤。code：auth／quota／timeout／crash／violation／agent／stopped
 #[derive(Clone, Debug)]
 pub struct WorkerError {
@@ -431,6 +464,17 @@ impl WorkerError {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn 網路斷線判斷_只認明確的網路字眼_登入額度不算() {
+        assert!(is_network_error(r#"API error (attempt 1): request failed: Post "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse": read tcp 192.168.0.101:57534->172.217.113.4:443: wsarecv: A connection attempt failed"#));
+        assert!(is_network_error("read tcp 1.2.3.4:5->6.7.8.9:443: wsarecv: An existing connection was forcibly closed by the remote host."));
+        assert!(is_network_error("dial tcp: lookup example.com: no such host"));
+        assert!(!is_network_error("UNAUTHENTICATED (code 401): Request had invalid authentication credentials"));
+        assert!(!is_network_error("RESOURCE_EXHAUSTED: quota exceeded for this account"));
+        assert!(!is_network_error("fatal: boom"));
+        assert!(!is_network_error(""));
+    }
 
     #[test]
     fn 類別對照() {

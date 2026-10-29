@@ -2,7 +2,7 @@
 //! 對應 engines/acp-worker.mjs。不知道仲介與橋，只透過事件通道（已轉交／失敗／回覆）與 Notifier（寄授權詢問／登入通知）跟外面講話。
 use super::acp_approvals::{ask_text, Answer, Approvals, Target};
 use super::acp_config::{NotifyTo, WorkerCfg};
-use super::acp_policy::{category_label, decide, Req, Verdict, WorkerError};
+use super::acp_policy::{category_label, decide, is_network_error, Req, Verdict, WorkerError};
 use super::rpc::Log;
 use super::{BoxFut, EngineEvent, EventTx, Notice, Notifier, PidBook};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -14,6 +14,12 @@ const REVIVE_AFTER_MS: u64 = 60_000;
 /// 登入失效（401）自動重開驅動的冷卻：每個工作者一小時最多一次（#517）
 const AUTH_RETRY_COOLDOWN_MS: u64 = 60 * 60 * 1000;
 const KEEPALIVE_MS: u64 = 20_000;
+/// 網路暫時斷線：等這麼久再試一次（毫秒）。測試會調小
+static NET_RETRY_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(10_000);
+#[cfg(test)]
+pub fn set_net_retry_ms_for_test(ms: u64) {
+    NET_RETRY_MS.store(ms, std::sync::atomic::Ordering::Relaxed);
+}
 
 fn now_ms() -> u64 {
     crate::heartbeat::now_ms()
@@ -607,6 +613,22 @@ impl Worker {
         };
         let mut r = d.turn(format!("{first}{}", job.text), cfg.turn_timeout_ms, cfg.turn_max_ms).await;
         remember(&d);
+        // 網路暫時斷線（連不上 Google 之類）：等一下自動再試一次，還是斷才回「暫時連不上」。
+        // 登入、額度不在這裡處理（is_network_error 會排除它們）
+        if r.as_ref().err().map(|e| e.code == "agent" && is_network_error(&e.message)).unwrap_or(false) {
+            let wait = NET_RETRY_MS.load(std::sync::atomic::Ordering::Relaxed);
+            self.log(format!("網路暫時斷線：等 {} 秒自動再試一次", wait / 1000));
+            tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+            d = self.ensure_driver(self.base_full()).await?;
+            r = d.turn(format!("{first}{}", job.text), cfg.turn_timeout_ms, cfg.turn_max_ms).await;
+            remember(&d);
+            let still = r.as_ref().err().map(|e| e.code == "agent" && is_network_error(&e.message)).unwrap_or(false);
+            self.log(if still { "再試一次仍然斷線" } else { "再試一次後恢復正常" });
+            if still {
+                let who = if cfg.protocol == "agy-stream" { "Google" } else { "網路" };
+                r = Err(WorkerError::new("agent", format!("{who} 暫時連不上，稍後再試")));
+            }
+        }
         // 登入失效（401）：長時間跑的驅動憑證到期，換一個新的驅動（重新讀登入）把同一封信再試一次；重開後還失效才報「需要登入」。
         // 每個工作者一小時最多自動重開一次，不無限重試（#517）
         if r.as_ref().err().map(|e| e.code == "auth").unwrap_or(false) && self.take_auth_retry() {
