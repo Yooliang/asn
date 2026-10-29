@@ -13,7 +13,7 @@ const W = (node, agent, extra = {}) => ({ id: `${node}/${agent}`, node, agent, n
 // ---- 接手使用者自己在終端機開的 grok（前景程序條目）----
 const GROK = (extra = {}) => ({ id: 'H/grok #65324（前景）', node: 'H', agent: 'grok #65324（前景）', nick: 'grok #65324（前景）', status: 'busy', engine: 'grok', entryKind: 'process', receivable: false, device: '設備H', ...extra })
 
-test('接手：前景 grok 程序條目的「接班換手」位置變成可用的「接手」，其餘項目仍反灰（自己開的，只能顯示）', async () => {
+test('接手：前景 grok 程序條目的「換班接手」位置變成可用的「接手」，其餘項目仍反灰（自己開的，只能顯示）', async () => {
   const { isGrokAdoptable, ADOPT_LABEL } = await import('../ui/lib/partner-ops.mjs')
   assert.equal(ADOPT_LABEL, '接手')
   assert.equal(isGrokAdoptable(GROK()), true)
@@ -31,9 +31,9 @@ test('接手：背景 grok、其他引擎的程序條目、沒登入、電腦沒
   assert.equal(h(GROK({ agent: 'grok #9（背景）', nick: 'grok #9（背景）' })).ok, false)
   assert.equal(isGrokAdoptable(GROK({ engine: 'pi', agent: 'pi #5（前景）' })), false)
   assert.equal(h(GROK({ engine: 'pi', agent: 'pi #5（前景）' })).label, '接手', 'pi 的前景程序條目也能接手（0.2 A5，見 pi-adopt-ui.test.mjs）')
-  assert.equal(h(GROK({ engine: 'codex', agent: 'codex #5（前景）' })).label, '接班換手', '其他引擎維持原本的名稱')
+  assert.equal(h(GROK({ engine: 'codex', agent: 'codex #5（前景）' })).label, '換班接手', '其他引擎維持原本的名稱')
   assert.equal(isGrokAdoptable(GROK({ entryKind: '', agent: 'grok' })), false, '不是程序條目（例如 ASN 的 Grok 工作者）不算接手')
-  assert.equal(h(GROK({ entryKind: '', agent: 'grok' })).label, '接班換手', 'ASN 的 Grok 工作者走一般接班換手（#234 之後可用）')
+  assert.equal(h(GROK({ entryKind: '', agent: 'grok' })).label, '換班接手', 'ASN 的 Grok 工作者走一般換班接手（#234 之後可用）')
   assert.equal(h(GROK(), { ...ctx, signedIn: false }).reason, REASON.needLogin)
   assert.equal(h(GROK({ node: 'C', id: 'C/x' })).reason, REASON.closed)
   assert.equal(h(GROK({ node: 'W', id: 'W/x' })).reason, REASON.offline)
@@ -60,11 +60,11 @@ test('接手完成：說明專屬工作者載入了同一段對話並提醒先�
   assert.match(progressView({ status: 'failed', detail: '找不到這個 grok 正在用的對話，所以不接手' }, { op: 'handover' }).text, /沒有成功：找不到這個 grok/)
 })
 
-test('選單固定八項（詳情、改名、切換模型、關閉視窗、接班換手、喚醒、重開、移除）；在線的 Claude 視窗前五項能用，喚醒、重開、移除反灰並說明', () => {
+test('選單固定八項（詳情、改名、切換模型、關閉視窗、換班接手、喚醒、重開、移除）；在線的 Claude 視窗前五項能用，喚醒、重開、移除反灰並說明', () => {
   const items = menuItems(W('H', '小文'), ctx)
   assert.deepEqual(items.map(i => i.key), MENU_KEYS)
   assert.deepEqual(MENU_KEYS, OPS)
-  assert.deepEqual(items.map(i => i.label), ['詳情', '改名', '切換模型', '關閉視窗', '接班換手', '喚醒', '重開', '移除'])
+  assert.deepEqual(items.map(i => i.label), ['詳情', '改名', '切換模型', '關閉視窗', '換班接手', '喚醒', '重開', '移除'])
   assert.deepEqual(items.map(i => i.ok), [true, true, true, true, true, false, false, false])
   assert.equal(items[5].reason, REASON.alreadyOnline)
   assert.equal(items[6].reason, REASON.restartOnlyAcp)
@@ -141,7 +141,7 @@ test('送出前檢查與請求內容：只放該動作的欄位；節點與視�
   assert.equal(opFormError(W('C', 'a'), 'close', {}, blocked), REASON.closed, '反灰的項目不送出')
 })
 
-test('接班換手的進度分段：請前任寫交接 → 關閉前任視窗 → 開新視窗 → 完成（附交接檔位置）', () => {
+test('換班接手的進度分段：請前任寫交接 → 關閉前任視窗 → 開新視窗 → 完成（附交接檔位置）', () => {
   const t0 = 1_000_000
   const at = (detail, now = t0 + 1000) => progressView({ status: 'taken', detail }, { op: 'handover', sentAt: t0, now })
   const states = v => v.steps.map(s => s.state)
@@ -152,12 +152,12 @@ test('接班換手的進度分段：請前任寫交接 → 關閉前任視窗 �
   assert.equal(at('stage:evil <b>').text, '正在處理…', '看不懂的階段不外露')
   const p = 'C:/Users/x/.asn/handoff/交接/p_1/20261022-101500.md'
   const done = progressView({ status: 'ok', result: { handoff_path: p, handoff_done: true } }, { op: 'handover' })
-  assert.deepEqual([done.phase, done.text, states(done), done.extra], ['done', '接班換手完成，新視窗開好了。', ['done', 'done', 'done'], ['交接檔：' + p]])
+  assert.deepEqual([done.phase, done.text, states(done), done.extra], ['done', '換班接手完成，新視窗開好了。', ['done', 'done', 'done'], ['交接檔：' + p]])
   const partial = progressView({ status: 'ok', result: { handoff_path: 'D:/h/a.md', handoff_done: false } }, { op: 'handover' })
   assert.match(partial.extra.join(' '), /前任沒有寫完交接/)
   assert.deepEqual(progressView({ status: 'ok' }, { op: 'handover' }).extra, [], '沒有結果也不壞')
   assert.deepEqual(progressView({ status: 'ok' }, { op: 'resume' }), { phase: 'done', done: true, text: '已喚醒，視窗開好了。' })
-  // 處理中的上限：接班換手要等前任寫交接，放寬到 15 分鐘；其他動作仍是 3 分鐘
+  // 處理中的上限：換班接手要等前任寫交接，放寬到 15 分鐘；其他動作仍是 3 分鐘
   assert.equal(at('stage:handoff', t0 + OP_GIVE_UP_MS + 1).done, false)
   assert.equal(at('stage:handoff', t0 + HANDOVER_GIVE_UP_MS + 1).done, true)
   assert.equal(progressView({ status: 'taken' }, { op: 'close', sentAt: t0, now: t0 + OP_GIVE_UP_MS + 1 }).done, true)
@@ -197,7 +197,7 @@ test('進度：已送出 → 電腦正在處理 → 完成／失敗原因；等�
   assert.deepEqual(progressView({ status: 'taken' }, { sentAt: t0, now: t0 + 1000 }), { phase: 'working', done: false, text: '正在處理…' })
   assert.equal(progressView({ status: 'ok' }, { op: 'rename' }).text, '已改名。')
   assert.match(progressView({ status: 'ok' }, { op: 'close' }).text, /已關閉/)
-  assert.match(progressView({ status: 'ok' }, { op: 'handover' }).text, /接班換手/)
+  assert.match(progressView({ status: 'ok' }, { op: 'handover' }).text, /換班接手/)
   assert.equal(progressView({ status: 'ok', op: 'model' }).text, '已切換模型。', 'op 取自那一筆')
   assert.ok(progressView({ status: 'ok' }).done)
   assert.equal(progressView({ status: 'failed', detail: '找不到這個視窗' }).text, '沒有成功：找不到這個視窗')
@@ -248,7 +248,7 @@ test('守門：手機指令清單有兩個簽章指令；沒有電腦端指令�
   assert.match(read('..', '..', 'supabase', 'functions', 'relay', 'index.ts'), /action === "partner_op" \|\| action === "partner_ops" \|\| action === "partner_archive"\) \? await signedUserId/)
 })
 
-test('依引擎決定哪幾項能用（項目一律固定八項）：Claude 前五項；ACP 工作者詳情、改名、切換模型、關閉、重開、接班換手、移除；雲端代理與其他引擎全部反灰並說明', () => {
+test('依引擎決定哪幾項能用（項目一律固定八項）：Claude 前五項；ACP 工作者詳情、改名、切換模型、關閉、重開、換班接手、移除；雲端代理與其他引擎全部反灰並說明', () => {
   const keys = f => menuItems(f, ctx).map(i => i.key)
   const okKeys = f => menuItems(f, ctx).filter(i => i.ok).map(i => i.key)
   assert.deepEqual(keys(W('H', '小文')), MENU_KEYS)
@@ -258,7 +258,7 @@ test('依引擎決定哪幾項能用（項目一律固定八項）：Claude 前�
     const items = menuItems(W('H', 'Gemini', { engine, kind: 'claude' }), ctx)
     assert.deepEqual(items.map(i => i.key), MENU_KEYS, engine)
     assert.deepEqual(items.filter(i => i.ok).map(i => i.key), ['info', 'rename', 'model', 'close', 'handover', 'restart', 'remove'], engine)
-    assert.deepEqual(items.filter(i => i.ok).map(i => i.label), ['詳情', '改名', '切換模型', '關閉', '接班換手', '重開', '移除'])
+    assert.deepEqual(items.filter(i => i.ok).map(i => i.label), ['詳情', '改名', '切換模型', '關閉', '換班接手', '重開', '移除'])
     const why = Object.fromEntries(items.filter(i => !i.ok).map(i => [i.key, i.reason]))
     assert.deepEqual(Object.keys(why), ['resume'], '只剩喚醒不能用')
     assert.match(why.resume, /不需要喚醒/)
@@ -273,7 +273,7 @@ test('依引擎決定哪幾項能用（項目一律固定八項）：Claude 前�
     assert.equal(isAiPartner(f, ctx), true, '還是 AI 夥伴（封存用）')
   }
   assert.equal(partnerEngine(W('G', 'Grok', { engine: 'grok', kind: 'grok' })), 'cloud')
-  assert.equal(partnerEngine(W('H', 'Grok', { engine: 'grok' })), 'acp', '本機 Grok 背景工作者（沒有 kind）走 ACP，重開與接班換手可用（#234）')
+  assert.equal(partnerEngine(W('H', 'Grok', { engine: 'grok' })), 'acp', '本機 Grok 背景工作者（沒有 kind）走 ACP，重開與換班接手可用（#234）')
   assert.equal(partnerEngine(W('H', '小碼', { engine: 'codex' })), 'other')
 })
 
@@ -318,7 +318,7 @@ test('ACP 工作者的詳情：引擎、模型、權限、工作資料夾、程�
   assert.ok(!infoRows({ has_session: true, load_session: null }).some(r => r.label === '對話接續'), '還不知道就不列')
 })
 
-test('接班換手完成：ACP 工作者沒有請前任寫交接，說明新對話從空白開始', () => {
+test('換班接手完成：ACP 工作者沒有請前任寫交接，說明新對話從空白開始', () => {
   const v = progressView({ status: 'ok', result: { kind: 'acp', handoff_done: false } }, { op: 'handover' })
   assert.deepEqual(v.extra, ['這類夥伴沒有請前任寫交接，新對話從空白開始，第一句是接班說明。'])
   const c = progressView({ status: 'ok', result: { handoff_done: false } }, { op: 'handover' })

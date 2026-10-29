@@ -619,7 +619,7 @@ async function placeBuddyMenu() {
   if (!r) return
   Object.assign(buddyMenuPos, placeMenu(buddyMenuOrigin, { w: r.width, h: r.height }, viewSize()))
 }
-// 夥伴管理（詳情、改名、關閉視窗、接班換手、喚醒）：項目與判斷全部來自 lib/partner-ops.mjs，和手機同一套
+// 夥伴管理（詳情、改名、關閉視窗、換班接手、喚醒）：項目與判斷全部來自 lib/partner-ops.mjs，和手機同一套
 const opsCtx = reactive(initialOpsCtx())
 let opsCtxAt = 0
 async function refreshOpsCtx() {

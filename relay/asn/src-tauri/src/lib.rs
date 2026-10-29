@@ -963,7 +963,7 @@ async fn relay_partner_succeed(app: State<'_, App>, auth: State<'_, auth::AuthSt
     let token = account::signing_token(&auth).await;
     r.partner_succeed(&predecessor, &node, &name, token.as_deref()).await
 }
-/// 電腦版名單右鍵管理夥伴視窗（詳情、改名、關閉、接班換手、喚醒）：和手機同一個後台動作，要本人簽章；沒登入回錯，不打後台。回 { id }
+/// 電腦版名單右鍵管理夥伴視窗（詳情、改名、關閉、換班接手、喚醒）：和手機同一個後台動作，要本人簽章；沒登入回錯，不打後台。回 { id }
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]

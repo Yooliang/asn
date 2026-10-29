@@ -23,7 +23,7 @@ const MATRIX = [
   ['grok 雲端代理（engine=grok, kind=grok）', P('ASN-開發', 'grok'), { close: false, model: false, restart: false, handover: false }],
 ]
 for (const [label, friend, want] of MATRIX) {
-  test(`現況：${label} 的 關閉／切換模型／重開／接班換手 ＝ ${JSON.stringify(want)}`, () => {
+  test(`現況：${label} 的 關閉／切換模型／重開／換班接手 ＝ ${JSON.stringify(want)}`, () => {
     const got = Object.fromEntries(['close', 'model', 'restart', 'handover'].map(k => [k, ok(friend, k).ok]))
     assert.deepEqual(got, want)
     assert.deepEqual(menuItems(friend, ctx).map(i => i.key), MENU_KEYS, '項目固定不變')
@@ -51,7 +51,7 @@ test('現況：電腦端（partner_ops.rs）——非 Claude 的關閉與切換�
   assert.match(rs, /找不到這個夥伴的 Claude 視窗/, 'find_target 只認 Claude 的 sessions 檔')
   assert.match(rs, /_ => failed\(UNSUPPORTED\)/, 'ACP 工作者其餘動作回「這類夥伴不支援」')
   const admin = fs.readFileSync(new URL('../src-tauri/src/bridge/engines/acp_admin.rs', import.meta.url), 'utf8')
-  assert.match(admin, /管詳情、重開、接班換手、關閉（停止本次執行，不改設定檔）、切換模型、移除、改名七件事；喚醒不支援/)
+  assert.match(admin, /管詳情、重開、換班接手、關閉（停止本次執行，不改設定檔）、切換模型、移除、改名七件事；喚醒不支援/)
   assert.match(rs, /return self\.rename_acp\(op, acp\)/, 'ACP 工作者的改名交給工作者管理入口')
   assert.match(rs, /acp\.set_model\(&op\.name, op\.model\.trim\(\)\)/, 'ACP 工作者的切換模型交給工作者比對可選清單')
 })
@@ -66,7 +66,7 @@ test('pi 喚醒（#468）：離線的 pi 可以喚醒（條件同 Claude：登�
 })
 
 // ---- 缺口（尚未做；node:test 的 todo：跑得過會顯示、跑不過不算失敗，補完行為後把 todo 拿掉）----
-test('ASN 自己跑的 Grok 背景工作者（名單 engine=grok、沒有 kind）跟 Gemini 一樣有「重開」「接班換手」（#234）', () => {
+test('ASN 自己跑的 Grok 背景工作者（名單 engine=grok、沒有 kind）跟 Gemini 一樣有「重開」「換班接手」（#234）', () => {
   const worker = P('Grok', 'grok', { kind: undefined })
   assert.equal(partnerEngine(worker), 'acp')
   assert.equal(ok(worker, 'restart').ok, true)

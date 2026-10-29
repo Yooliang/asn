@@ -394,6 +394,28 @@ async fn agy_收信回覆_同一段對話_重啟後_resume() {
 }
 
 #[tokio::test]
+async fn agy_重開後還是登入失效_存著的舊對話壞了_丟掉改開新對話再試_寄件人看到正常回覆_帳本換新編號() {
+    let state = tempfile::tempdir().unwrap();
+    let st = state.path().display().to_string();
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[("FAKE_AGY_STATE", &st)], "acp", &[]).await;
+    // 第一封：把這段對話標成壞掉（當下的行程照常回覆）
+    h.put_pull(to_agent(1, "Gemini", "@@POISON")).await;
+    h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
+    let sid = |h: &EH| serde_json::from_str::<Value>(&std::fs::read_to_string(h.work.path().join("acp-workers.json")).unwrap()).unwrap()["workers"]["Gemini"]["session_id"].as_str().unwrap().to_string();
+    let bad = sid(&h);
+    // 橋重啟：新行程用同一個編號接回壞掉的對話 → 401；自動重開還是接回同一段 → 仍 401 → 丟掉它改開新對話，同一封信成功
+    h.restart().await;
+    h.put_pull(to_agent(2, "Gemini", "你好")).await;
+    h.wait("換新對話後回覆", |h| h.bodies().iter().any(|b| b.contains("收到：") && b.contains("下一任") && b.contains("第1輪"))).await;   // 新對話：第一則附換手說明、第 1 輪
+    assert!(!h.bodies().iter().any(|b| b.contains("需要登入")), "{:?}", h.bodies());
+    assert_ne!(sid(&h), bad, "帳本換成新的對話編號");
+    assert!(h.log_text().contains(&format!("存著的對話 {bad} 重開後仍然 401")), "日誌寫明丟掉的編號：{}", h.log_text());
+    h.set.refresh_all().await;
+    h.core.refresh_roster(now()).await;
+    assert_eq!(h.last_roster()["agents"][0]["status"], "idle");
+}
+
+#[tokio::test]
 async fn agy_子行程環境是白名單_金鑰不外洩_env_pass_才帶() {
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[("OPENAI_API_KEY", "sk-should-not-leak"), ("FAKE_X", "1")], "acp", &[]).await;
     h.put_pull(to_agent(1, "Gemini", "@@ENV OPENAI_API_KEY")).await;
@@ -927,7 +949,7 @@ fn 整條路徑_start_接上引擎_信送進_gemini_回覆寄回_結束時只關
 }
 
 // ================================================================================================
-// 遠端管理 ACP 工作者：詳情、重開、接班換手（真的啟動假的工作者程序）
+// 遠端管理 ACP 工作者：詳情、重開、換班接手（真的啟動假的工作者程序）
 // ================================================================================================
 
 async fn wait_pid(admin: &Arc<dyn engines::acp_admin::AcpAdmin>, name: &str, f: impl Fn(u64) -> bool) -> u64 {
@@ -944,7 +966,7 @@ async fn wait_pid(admin: &Arc<dyn engines::acp_admin::AcpAdmin>, name: &str, f: 
 }
 
 #[tokio::test]
-async fn acp_遠端管理_詳情_重開只結束記在帳本的程序且對話保留_接班換手開新對話並附接班說明() {
+async fn acp_遠端管理_詳情_重開只結束記在帳本的程序且對話保留_換班接手開新對話並附接班說明() {
     let state = tempfile::tempdir().unwrap();
     let st = state.path().display().to_string();
     let mut h = eh(Some(json!([worker("Gemini", "acp", json!({ "model": "gemini-2.5-pro" }))])), &[("FAKE_ACP_STATE", &st), ("FAKE_ACP_LOAD", "1")], "acp", &[("T-甲", "idle")]).await;
@@ -969,7 +991,7 @@ async fn acp_遠端管理_詳情_重開只結束記在帳本的程序且對話�
     h.wait("回覆2", |h| h.fr.sent().len() == 2).await;
     assert!(h.bodies()[1].contains("[第2輪]") && !h.bodies()[1].contains("含說明"), "重開後接續同一段對話：{}", h.bodies()[1]);
     let sid1 = serde_json::from_str::<Value>(&std::fs::read_to_string(h.work.path().join("acp-workers.json")).unwrap()).unwrap()["workers"]["Gemini"]["session_id"].as_str().unwrap().to_string();
-    // 接班換手：清掉對話、結束程序、開新的；第一則提示附接班說明（含使用者補的話）
+    // 換班接手：清掉對話、結束程序、開新的；第一則提示附接班說明（含使用者補的話）
     let r = admin.handover("Gemini", "別動資料庫").unwrap();
     assert_eq!((r["pid"].as_u64(), r["handoff_done"].clone()), (Some(pid2), json!(false)));
     wait_pid(&admin, "Gemini", |p| p != pid2).await;
@@ -1040,7 +1062,7 @@ async fn acp_遠端管理_關閉只結束帳本上的程序_名單標已停止_�
 }
 
 #[tokio::test]
-async fn agy_遠端管理_重開保留對話_接班換手換新對話() {
+async fn agy_遠端管理_重開保留對話_換班接手換新對話() {
     let state = tempfile::tempdir().unwrap();
     let st = state.path().display().to_string();
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[("FAKE_AGY_STATE", &st)], "acp", &[]).await;
@@ -1570,7 +1592,7 @@ async fn acp_改名_設定檔裡的_沒對話的_已停止的_同名的_都擋�
     let (a2, o2) = (admin.clone(), old.clone());
     tokio::task::spawn_blocking(move || a2.restart(&o2)).await.unwrap().unwrap();
     wait_pid(&admin, &old, |_| true).await;
-    // 接班換手後還沒有對話：後台會當成新夥伴，所以擋
+    // 換班接手後還沒有對話：後台會當成新夥伴，所以擋
     let (a2, o2) = (admin.clone(), old.clone());
     tokio::task::spawn_blocking(move || a2.handover(&o2, "")).await.unwrap().unwrap();
     assert_eq!(rename_blocking(&admin, &old, "小新").await.unwrap_err(), "還沒有對話，請先寄一封信給它");

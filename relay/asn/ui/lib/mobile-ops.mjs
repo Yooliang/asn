@@ -20,7 +20,7 @@ export function chatPageState(friends, lastId) {
 }
 
 // ---------- 「⋯」選單 ----------
-// 每個項目點下去的下一步：form＝要先填（改名）、pick＝要先選（切換模型）、confirm＝要先確認（關閉、接班換手）、run＝直接送出（詳情、喚醒）
+// 每個項目點下去的下一步：form＝要先填（改名）、pick＝要先選（切換模型）、confirm＝要先確認（關閉、換班接手）、run＝直接送出（詳情、喚醒）
 export const OP_STEP = { rename: 'form', model: 'pick', close: 'confirm', handover: 'confirm', restart: 'confirm', remove: 'confirm', info: 'run', resume: 'run' }
 export const opStep = op => OP_STEP[op] ?? ''
 // 詳情的結果留在選單裡看；其他動作送出後選單收起，進度顯示在對話頁頂端
@@ -33,7 +33,7 @@ export const phoneModels = () => CLAUDE_MODELS.map(m => ({ id: m.id, label: m.la
 // 改名完成後，對話分頁要跳到新名字（同一位夥伴）。回新的 id；不是改名或沒完成就回空字串
 export const renamedChatId = (friend, op, input, view) => (op === 'rename' && view?.phase === 'done' ? friendId(friend.node, String(input?.newName ?? '').trim()) : '')
 
-// 對話頁頂端的進度條：run＝{ op, name, view }；回 null＝不顯示。steps 是接班換手的分段，extra 是補充（交接檔位置）
+// 對話頁頂端的進度條：run＝{ op, name, view }；回 null＝不顯示。steps 是換班接手的分段，extra 是補充（交接檔位置）
 export const STEP_MARK = { done: '✓', active: '…', todo: '○' }
 export function runBanner(run) {
   const v = run?.view

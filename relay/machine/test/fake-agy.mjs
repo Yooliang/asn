@@ -4,6 +4,7 @@
 //   @@RUN <指令>     送出執行指令步驟；沒帶 --dangerously-skip-permissions 就被「權限拒絕」（空回覆＋denied_actions）
 //   @@AUTH / @@QUOTA 回 status=ERROR 的 result 並結束（結束碼 1）
 //   @@AUTH_ONCE <路徑>  第一次（那個檔案還不存在）建檔並回登入失效，之後（檔案在了）照一般信處理：模擬「舊行程憑證過期、新行程正常」（#517）
+//   @@POISON         正常回覆，但把這段 conversation 標成壞掉：之後任何行程用 --conversation 接回它，每一輪都回登入失效（401）；開新對話才正常（#517：存著的舊對話綁著過期登入）
 //   @@SLEEP          送出一個步驟之後就不再有動靜（看門狗測試）
 //   @@GATE <路徑>    送出一個進行中的步驟，等到那個檔案出現才繼續（測試建檔＝放行）；放行後照一般信處理，回覆不含這個暗號
 //   @@CRASH          往 stderr 寫字然後結束碼 3
@@ -25,13 +26,15 @@ const opt = n => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : '' }
 const stateDir = process.env.FAKE_AGY_STATE || ''
 const out = o => process.stdout.write(JSON.stringify(o) + '\n')
 const stateFile = id => path.join(stateDir, `${id}.json`)
-const loadTurns = id => { try { return JSON.parse(fs.readFileSync(stateFile(id), 'utf8')).turns } catch { return 0 } }
-const saveTurns = (id, turns) => { if (stateDir) fs.writeFileSync(stateFile(id), JSON.stringify({ turns })) }
+const loadState = id => { try { return JSON.parse(fs.readFileSync(stateFile(id), 'utf8')) } catch { return {} } }
+const loadTurns = id => loadState(id).turns || 0
+const saveTurns = (id, turns, poisoned) => { if (stateDir) fs.writeFileSync(stateFile(id), JSON.stringify({ turns, poisoned: poisoned ?? loadState(id).poisoned })) }
 
 let conv = opt('--conversation')
 if (conv && !(stateDir && fs.existsSync(stateFile(conv)))) { process.stderr.write(`warning: conversation "${conv}" not found\n`); conv = '' }
 if (!conv) conv = `conv-${Math.random().toString(16).slice(2, 10)}`
 let turns = loadTurns(conv)
+const resumedPoisoned = Boolean(opt('--conversation')) && Boolean(conv) && Boolean(loadState(conv).poisoned)   // 這個行程是接回一段壞掉的對話
 let inited = false
 let step = 0
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -84,6 +87,8 @@ async function handle(line) {
     out({ event: 'step_update', step_update: { conversation_id: conv, step_index: si, state: 'ERROR', step_type: 'tool', tool_name: 'view_file', tool_info: { name: 'view_file', parameters: { AbsolutePath: 'C:/nope.md' }, error: { type: 'TOOL_ERROR', message: 'declaring permissions: cortex tool view_file: convert tool call for permissions: model output error: failed to read file: The system cannot find the file specified.' } } } })
     return resultOf('找不到那個檔案')
   }
+  if (resumedPoisoned) return fail('UNAUTHENTICATED (code 401): Request had invalid authentication credentials (authentication required)', 1)
+  if (/@@POISON/.test(body)) { saveTurns(conv, turns, true); return resultOf('已標記壞掉') }
   if (/@@HEAD/.test(body)) return resultOf(content.split('\n').find(l => l.startsWith('[RELAY 來信]')) ?? '')
   if (/授權已核可/.test(body)) return resultOf(`ran-after-grant (${flags})`)
   if ((t = /@@AUTH_ONCE\s+(\S+)/.exec(body)) && !fs.existsSync(t[1])) { fs.writeFileSync(t[1], 'x'); return fail('UNAUTHENTICATED (code 401): Request had invalid authentication credentials (authentication required)', 1) }

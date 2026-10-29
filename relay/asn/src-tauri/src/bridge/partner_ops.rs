@@ -1,7 +1,7 @@
 //! 遠端管理夥伴視窗（電腦端執行）：手機對話頁「⋯」選單下令，後台排進 `partner_op_pending`，這裡取走、在本機執行、回報 `partner_op_result`。
 //! 設計與安全規則見 docs/design/PARTNER-OPS.md；外掛控制檔格式見該文件「外掛控制檔格式」一節。
 //!
-//! 動作：info（唯讀）、rename、model、close、handover（接班換手）、resume（喚醒：視窗已關，用同一個 sessionId 在原工作資料夾接回對話）。作業系統動作（讀命令列、列程序、結束、開視窗）全走
+//! 動作：info（唯讀）、rename、model、close、handover（換班接手）、resume（喚醒：視窗已關，用同一個 sessionId 在原工作資料夾接回對話）。作業系統動作（讀命令列、列程序、結束、開視窗）全走
 //! `launch/switch.rs` 的 `Os` 介面與 `OpsEnv`，測試用假實作，不會真的開視窗或結束程序。
 //!
 //! 守門（每條都有單元測試與還原驗證）：
@@ -36,7 +36,7 @@ pub(crate) const DETAIL_MAX: usize = 500;
 pub(crate) const RESULT_MAX_BYTES: usize = 4096;
 pub(crate) const CONSENT_OFF: &str = "這台電腦沒有開啟「允許遠端開視窗與管理視窗」";
 pub(crate) const HANDOFF_SUBDIR: &str = "交接";
-/// ACP 工作者（收發室自己跑的背景工作者）只支援詳情、重開、接班換手；其他操作與 Claude 以外的夥伴一律回這句
+/// ACP 工作者（收發室自己跑的背景工作者）只支援詳情、重開、換班接手；其他操作與 Claude 以外的夥伴一律回這句
 pub(crate) const UNSUPPORTED: &str = "這類夥伴不支援這個操作";
 const PROTECTED: &str = "ASN 通知與 ASN 自己的視窗不能操作";
 /// pi 視窗的程序可能是哪個執行檔（npm 裝的 pi 由 node 跑；單檔版是 pi，也有人用 bun 跑）。關閉前登記的 pid 必須是其中之一
@@ -50,7 +50,7 @@ pub(crate) fn ask_handoff_text(path: &Path) -> String {
     format!("要換手了：請把交接寫到 {}，寫完回覆『交接完成』。", path.display())
 }
 
-/// 接班換手的第一句話：先讀前任最後一段對話紀錄（從最後往前看）和交接檔；沒寫完交接就明說；使用者補了話換行附上「前任交代：…」
+/// 換班接手的第一句話：先讀前任最後一段對話紀錄（從最後往前看）和交接檔；沒寫完交接就明說；使用者補了話換行附上「前任交代：…」
 pub(crate) fn handover_prompt(name: &str, note: &str, transcript: Option<&Path>, handoff: &Path, complete: bool) -> String {
     let mut s = match transcript {
         Some(t) => format!("你是『{name}』的下一任，前任的上下文用完了。先讀前任最後一段對話紀錄 {}（從最後往前看）和交接檔 {}，接著把手上的工作做下去。", t.display(), handoff.display()),
@@ -101,7 +101,7 @@ pub(crate) trait OpsEnv: Send + Sync {
     fn mod_probe_ms(&self) -> u64;
     /// 本機啟動設定（profile、工作資料夾允許清單）；每次現讀。喚醒用它決定能不能在原資料夾開、怎麼開
     fn launch_config(&self) -> Result<LaunchConfig, String>;
-    /// 把一段話當成信送進某個視窗（接班換手時請前任寫交接）。失敗回原因
+    /// 把一段話當成信送進某個視窗（換班接手時請前任寫交接）。失敗回原因
     fn tell(&self, name: &str, text: &str) -> Result<(), String>;
     /// 中途回報階段（只更新後台那筆的 detail，狀態仍是處理中）。失敗一律忽略（舊後台沒有這個動作）
     fn progress(&self, op_id: &str, detail: &str);
@@ -218,7 +218,7 @@ impl Op {
             "rename" => format!("改名為「{}」", clean(&self.new_name, 40)),
             "model" => format!("切換模型為 {}", clean(&self.model, 60)),
             "close" => "關閉視窗".into(),
-            "handover" => "接班換手".into(),
+            "handover" => "換班接手".into(),
             "resume" => "喚醒視窗".into(),
             "restart" => "重開".into(),
             o => format!("不認得的動作 {}", clean(o, 20)),
@@ -396,7 +396,7 @@ impl PartnerOps {
         self.acp.lock().unwrap().clone()
     }
 
-    /// 名字對得上收發室管理的 ACP 工作者：只支援詳情、重開、接班換手、關閉（停止本次執行）、切換模型、移除、改名，其餘回「這類夥伴不支援」。
+    /// 名字對得上收發室管理的 ACP 工作者：只支援詳情、重開、換班接手、關閉（停止本次執行）、切換模型、移除、改名，其餘回「這類夥伴不支援」。
     /// 動的是工作者驅動記錄在案的 pid，不找程序、不比對名稱；同名的 Claude 視窗還活著時不猜
     fn execute_acp(&self, op: &Op, acp: &dyn AcpAdmin) -> OpResult {
         if (self.protect)(&op.name, 0) {
@@ -835,7 +835,7 @@ impl PartnerOps {
         if op.op != "info" && !self.env.allow_remote() {
             return failed(CONSENT_OFF);
         }
-        // 使用者自己在終端機開的 grok（名單上的「grok #pid（前景）」）：「接班換手」在這裡的意思是「接手」
+        // 使用者自己在終端機開的 grok（名單上的「grok #pid（前景）」）：「換班接手」在這裡的意思是「接手」
         if op.op == "handover" {
             if let Some(pid) = super::engines::pi_adopt::proc_pid(&op.name) {
                 return self.execute_pi_adopt(op, pid);
@@ -1467,7 +1467,7 @@ impl PartnerOps {
         ok("已喚醒：用同一段對話開了由 ASN 管理的 pi", Some(json!({ "kind": "pi_resume", "pid": pid, "session_id": found.session_id })))
     }
 
-    /// 接班換手：記下前任 → 請前任把交接寫到規範資料夾 → 等檔案出現且大小穩定（上限 10 分鐘，逾時照樣換手並註明）
+    /// 換班接手：記下前任 → 請前任把交接寫到規範資料夾 → 等檔案出現且大小穩定（上限 10 分鐘，逾時照樣換手並註明）
     /// → 關掉前任（沿用既有安全規則）→ 同名開新 session（不帶 --resume），第一句話指向前任對話紀錄與交接檔
     fn handover(&self, op: &Op, t: switch::Target) -> OpResult {
         let key = self.corr.pid_of(&t.name).unwrap_or_else(|| t.name.clone());
@@ -1539,7 +1539,7 @@ pub(crate) fn find_transcript_cwd(projects: &Path, sid: &str) -> Option<String> 
     find_transcript(projects, sid).map(|(_, c)| c)
 }
 
-/// 同上，連對話紀錄的完整路徑一起回（接班換手要告訴新視窗去讀哪個檔）
+/// 同上，連對話紀錄的完整路徑一起回（換班接手要告訴新視窗去讀哪個檔）
 pub(crate) fn find_transcript(projects: &Path, sid: &str) -> Option<(PathBuf, String)> {
     if !roster::valid_sid(sid) {
         return None;

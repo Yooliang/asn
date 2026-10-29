@@ -50,7 +50,7 @@ export async function runPartnerOp(api, friend, op, input, { onUpdate = () => {}
 // 各動作的對話框文字（給人看；device＝設備名）。confirm＝要先確認；auto＝不用確認直接送出
 export function opDialogText(op, name, device = '', engine = 'claude') {
   const where = device ? `在「${device}」上的` : ''
-  const title = { info: `${name} 的詳情`, rename: '改名', close: '關閉視窗', handover: '接班換手', resume: '喚醒', restart: '重開', remove: '移除' }[op] ?? OP_LABEL[op] ?? ''
+  const title = { info: `${name} 的詳情`, rename: '改名', close: '關閉視窗', handover: '換班接手', resume: '喚醒', restart: '重開', remove: '移除' }[op] ?? OP_LABEL[op] ?? ''
   switch (op) {
     case 'model': if (engine === 'acp') return {
       title, lead: `要把「${name}」${where}內建通道的工作者換成哪個模型？請輸入模型代號，例如 grok-4.6 或 gemini-3.8-flash-high。`, ok: '切換', auto: false, placeholder: '例如 grok-4.6',
@@ -81,10 +81,10 @@ export function opDialogText(op, name, device = '', engine = 'claude') {
       points: ['ASN 會找出這個 grok 正在用的那一段對話，找不到或不只一段就不會接手，並告訴你原因', '另外開一個專屬的 Grok 工作者載入同一段對話，之後寄給它的信會接在這段對話後面，回覆照一般工作者寄回', '接手後請先關掉終端機那個 grok，兩邊同時用同一段對話可能互相覆蓋', 'ASN 不會替你關掉終端機裡的 grok'],
     }
     return engine === 'acp' ? {
-      title, lead: `要讓「${name}」${where}內建通道的工作者接班換手嗎？`, ok: '開始換手', auto: false,
+      title, lead: `要讓「${name}」${where}內建通道的工作者換班接手嗎？`, ok: '開始換手', auto: false,
       points: ['這類夥伴不會請前任寫交接，也沒有前任的對話紀錄可讀', '清掉目前的對話，結束它的程序，由 ASN 重新啟動', '新的對話第一句會是接班說明，請它先向寄件人確認進度'],
     } : {
-      title, lead: `要讓「${name}」${where}視窗接班換手嗎？`, ok: '開始換手', auto: false,
+      title, lead: `要讓「${name}」${where}視窗換班接手嗎？`, ok: '開始換手', auto: false,
       points: ['先請它把交接寫到一個檔案（最久等十分鐘，沒寫完也會繼續）', '再關掉它的視窗', '用同一個名字開一個新的，新夥伴會先讀交接檔和前任最後的對話紀錄，接著把工作做下去'],
     }
     case 'resume': return { title, lead: `叫醒「${name}」${where}視窗，接回原本的對話。`, points: [], ok: '喚醒', auto: true }
@@ -171,7 +171,7 @@ export const PartnerOpDialog = {
   </template>
   <template v-else>
     <p class="launch-notice-body" :class="{ 'model-err': st.view && st.view.phase === 'failed' }" role="status">{{ st.view && st.view.text }}</p>
-    <ol class="op-steps" v-if="st.view && st.view.steps" aria-label="接班換手的進度">
+    <ol class="op-steps" v-if="st.view && st.view.steps" aria-label="換班接手的進度">
       <li v-for="s in st.view.steps" :key="s.key" :class="'op-step-' + s.state">{{ s.text }}</li>
     </ol>
     <p class="launch-notice-body" v-for="l in (st.view && st.view.extra) || []" :key="l">{{ l }}</p>

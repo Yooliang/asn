@@ -149,7 +149,7 @@ export const MSG_VIBRATE_MS = 60
 // 「對方登入」類的提示不打擾手機（不跳、不震）。
 export function notifyPlan(n, { openId = '', foreground = true, prefs = DEFAULT_PREFS } = {}) {
   const none = { banner: null, vibrate: 0, shake: false }
-  // 上下文快滿的提醒：前景時跳橫幅（帶「接班換手」按鈕），不震動；正在看那位的對話也要提醒（那正是用量在漲的地方）
+  // 上下文快滿的提醒：前景時跳橫幅（帶「換班接手」按鈕），不震動；正在看那位的對話也要提醒（那正是用量在漲的地方）
   if (n?.kind === 'context') return { banner: foreground ? { ...bannerOf(n), handover: true, ms: CONTEXT_BANNER_MS } : null, vibrate: 0, shake: false }
   if (!n || (n.kind !== 'msg' && n.kind !== 'nudge')) return none
   const id = n.friend?.id ?? ''

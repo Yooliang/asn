@@ -1,4 +1,4 @@
-//! 工作者的遠端管理（詳情、重開、接班換手）。放在 acp_worker 的子模組，才讀得到它的私有欄位。
+//! 工作者的遠端管理（詳情、重開、換班接手）。放在 acp_worker 的子模組，才讀得到它的私有欄位。
 //! 只動收發室自己啟動、記錄在案的驅動程序：結束的是驅動回報的那個 pid（帳本上的那一個），絕不用名稱比對找程序。
 use super::{Store, Worker};
 use crate::bridge::engines::acp_config::WorkerCfg;
@@ -18,7 +18,7 @@ fn run_blocking<T: Send + 'static>(fut: impl std::future::Future<Output = T> + S
     rx.recv_timeout(wait).map_err(|_| "工作者太久沒有回應，稍後再試".to_string())
 }
 
-/// 接班換手給新對話的第一則提示（比照 Claude 視窗的接班說明）：ACP 工作者沒有前任的對話紀錄檔可讀，
+/// 換班接手給新對話的第一則提示（比照 Claude 視窗的接班說明）：ACP 工作者沒有前任的對話紀錄檔可讀，
 /// 換手時也沒有請前任寫交接，所以明說「從空白開始」，請它先向寄件人確認進度；使用者補的話換行附上
 pub fn handover_prompt(name: &str, note: &str) -> String {
     let mut s = format!(
@@ -63,7 +63,7 @@ pub struct WorkerSnapshot {
 }
 
 impl Store {
-    /// 清掉某個工作者的對話編號（接班換手）。下次啟動時會開全新的對話
+    /// 清掉某個工作者的對話編號（換班接手）。下次啟動時會開全新的對話
     pub fn clear(&self, cfg: &WorkerCfg) {
         let mut g = self.state.lock().unwrap();
         if g.remove(&cfg.name).is_some() {
@@ -143,7 +143,7 @@ impl Worker {
     }
 
     /// 關閉（停止本次執行）：結束驅動程序，不再收信，名單上暫時看不到；只改記憶體狀態，不動 agents.json 等設定檔。
-    /// 「重開」「接班換手」或 ASN 重啟可恢復。回被結束的 pid（本來就沒在跑 0）
+    /// 「重開」「換班接手」或 ASN 重啟可恢復。回被結束的 pid（本來就沒在跑 0）
     pub fn admin_stop(self: &Arc<Self>) -> Result<u32, String> {
         if self.st.lock().unwrap().admin_stopped {
             return Err("這個工作者已經關閉了".into());
@@ -299,7 +299,7 @@ impl Worker {
         }
     }
 
-    /// 接班換手：清掉對話編號、結束驅動程序後重開；第一則提示是接班說明。回被結束的 pid
+    /// 換班接手：清掉對話編號、結束驅動程序後重開；第一則提示是接班說明。回被結束的 pid
     pub fn admin_handover(self: &Arc<Self>, note: &str) -> Result<u32, String> {
         let (pid, d) = self.take_driver_for_admin()?;
         if let Some(d) = d {
@@ -311,7 +311,7 @@ impl Worker {
             s.need_preamble = true;
             s.handover = Some(handover_prompt(&self.i.cfg.name, note));
         }
-        self.log(format!("遠端管理：接班換手（結束程序 pid={pid}，對話編號已清掉）"));
+        self.log(format!("遠端管理：換班接手（結束程序 pid={pid}，對話編號已清掉）"));
         self.revive_after_admin_stop();
         self.warm();
         Ok(pid)

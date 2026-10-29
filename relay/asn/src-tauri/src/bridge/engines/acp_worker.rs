@@ -214,13 +214,13 @@ struct St {
     queue: VecDeque<Job>,
     need_preamble: bool,
     stopping: bool,
-    /// 遠端管理按了「關閉」：驅動已結束、不再收信；名單上留著、狀態是「已停止」（stopped）。「重開」「接班換手」或 ASN 重啟後恢復。不改任何設定檔
+    /// 遠端管理按了「關閉」：驅動已結束、不再收信；名單上留著、狀態是「已停止」（stopped）。「重開」「換班接手」或 ASN 重啟後恢復。不改任何設定檔
     admin_stopped: bool,
     owner_notice_at: HashMap<&'static str, u64>,
     turn_grant: HashSet<String>,
     driver: Option<Arc<dyn Driver>>,
     driver_gen: u64,
-    /// 接班換手後的第一則提示（新對話成功處理第一輪才清掉）
+    /// 換班接手後的第一則提示（新對話成功處理第一輪才清掉）
     handover: Option<String>,
     /// 最近一次啟動驅動失敗的原因（成功啟動就清空）。接手要靠它知道載入有沒有成功
     start_error: String,
@@ -619,6 +619,46 @@ impl Worker {
             r = d.turn(format!("{first}{}", job.text), cfg.turn_timeout_ms, cfg.turn_max_ms).await;
             remember(&d);
             self.log(if r.is_ok() { "重開後恢復正常" } else { "重開後仍然登入失效" });
+            // 重開後還是 401：多半是存著的那段舊對話本身壞了（綁著過期的登入），重開只會接回同一段。丟掉它、開新對話再試一次（#517）
+            let dropped = self.i.store.get(&cfg);
+            if r.as_ref().err().map(|e| e.code == "auth").unwrap_or(false) && !dropped.is_empty() {
+                self.log(format!("存著的對話 {dropped} 重開後仍然 401：丟掉它，改開新對話再試一次"));
+                self.i.store.clear(&cfg);
+                let (prev_preamble, prev_handover) = {
+                    // 走換班接手同一條路（遠端管理的 admin_handover）：新對話第一則附換手說明，並寫明前任對話壞掉的原因
+                    let mut s = self.st.lock().unwrap();
+                    let prev = (s.need_preamble, s.handover.clone());
+                    s.need_preamble = true;
+                    s.handover = Some(admin::handover_prompt(&cfg.name, &format!("前任的對話（{dropped}）綁著過期的登入，重開後仍然 401，已改開新對話。")));
+                    prev
+                };
+                let old = self.st.lock().unwrap().driver.take();
+                if let Some(old) = old {
+                    old.stop();
+                }
+                d = self.ensure_driver(self.base_full()).await?;
+                let first = {
+                    let s = self.st.lock().unwrap();
+                    format!("{}{}", preamble_for(&cfg), s.handover.as_deref().map(|h| format!("{h}\n\n---\n")).unwrap_or_default())
+                };
+                r = d.turn(format!("{first}{}", job.text), cfg.turn_timeout_ms, cfg.turn_max_ms).await;
+                remember(&d);
+                let ok = r.is_ok();
+                self.log(if ok { "改開新對話後恢復正常" } else { "改開新對話後仍然登入失效" });
+                if !ok {
+                    // 新對話也失效＝是真的沒登入，不是舊對話壞了：把原本的對話編號與狀態放回去，免得白白丟掉前情；下一輪再從舊對話開始
+                    self.i.store.set(&cfg, &dropped);
+                    let old = self.st.lock().unwrap().driver.take();
+                    if let Some(old) = old {
+                        old.stop();
+                    }
+                    let mut s = self.st.lock().unwrap();
+                    s.need_preamble = prev_preamble;
+                    s.handover = prev_handover;
+                } else {
+                    self.notice_owners("conv-reset", &format!("{} 存著的舊對話壞了（重開後仍 401），已丟掉舊對話 {dropped}、改開新對話；它不記得之前聊過的內容。", cfg.name), Some(job));
+                }
+            }
         }
         let mut res = r?;
         {
@@ -791,5 +831,5 @@ impl Guard for WorkerGuard {
     }
 }
 
-// 遠端管理夥伴（詳情、重開、接班換手）用的方法放在子模組，才能讀這裡的私有欄位
+// 遠端管理夥伴（詳情、重開、換班接手）用的方法放在子模組，才能讀這裡的私有欄位
 pub mod admin;

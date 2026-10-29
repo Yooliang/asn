@@ -7,7 +7,7 @@ import { psmOf, statusOf } from './roster.mjs'
  * 只動：節點是自己、後台名單上在線（不是離線）、本機也找得到同名視窗的好友的 status／psm／contextPct。
  * cwdOf：好友 id → 資料夾標籤（後台名單給的），用來重組個人訊息；沒有就只剩說明。
  * seenBefore：本機之前讀到過的視窗名（Set）。名單還說它在線、本機也曾經讀到它、這次卻不見了＝視窗剛關掉，
- * 立刻轉離線，不等後台下一輪名單（關閉／接班換手後不留殘影）。只處理引擎是 claude 的視窗（本機現讀的只有 Claude 視窗，
+ * 立刻轉離線，不等後台下一輪名單（關閉／換班接手後不留殘影）。只處理引擎是 claude 的視窗（本機現讀的只有 Claude 視窗，
  * 收發室自己跑的自動回信、其他引擎的條目不在 sessions 裡，不能因此被當成已關閉）。locals 要是「讀成功」的結果，讀失敗不要傳進來。
  */
 export function overlayLocal(friends, selfNode, locals, cwdOf = new Map(), seenBefore = new Set()) {
