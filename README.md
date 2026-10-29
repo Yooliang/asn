@@ -72,6 +72,7 @@ ASN 是讓人與各家 AI 夥伴（Claude Code、Codex、Gemini、Grok、agy…�
 - `relay/machine`、`relay/cloud-agent`：`node --test --test-force-exit --test-timeout=120000 test/*.test.mjs`（強制結束＋單支逾時，失敗不會掛著）
 - 後端共用邏輯：`cd supabase/functions && deno test -A _shared/`
 - 根目錄 `tests/`：`node tools/run-root-tests.mjs`（一支一支跑、每支各自逾時，可加檔名片段與 `--timeout=秒`；整批 `node --test tests/*.test.mjs` 一次丟出去會卡住，也不要加 `--test-force-exit`，Windows 上會假「取消」）。2026-10-26 在家用機實測 47 支全過，約 12 分鐘
+  - SQL 測試（`_sql`）要真的實跑得先裝 pglite：`npm i --no-save --no-package-lock @electric-sql/pglite@0.5.13`（不進提交），沒裝會略過實跑那些。加 `--require-pglite` 時 pglite 載不到就直接失敗、有子測試因為 pglite 被略過也算失敗；Linux CI 就是這樣跑：`node tools/run-root-tests.mjs _sql --timeout=180 --require-pglite`
 
 ## 授權
 

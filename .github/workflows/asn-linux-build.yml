@@ -5,14 +5,45 @@ on:
     branches: [main]
     paths:
       - 'relay/asn/**'
+      - 'supabase/migrations/**'
+      - 'supabase/sql/**'
+      - 'tests/**'
+      - 'tools/run-root-tests.mjs'
       - '.github/workflows/asn-linux-build.yml'
   pull_request:
     paths:
       - 'relay/asn/**'
+      - 'supabase/migrations/**'
+      - 'supabase/sql/**'
+      - 'tests/**'
+      - 'tools/run-root-tests.mjs'
       - '.github/workflows/asn-linux-build.yml'
   workflow_dispatch:
 
 jobs:
+  # 根目錄 SQL 測試（tests/*_sql.test.mjs）：裝 pglite（記憶體內 Postgres）真的套用 migration 實跑。
+  # 版本固定 0.5.13（本機實際跑過的版本）；--no-save --no-package-lock：不產生、不改任何 package 檔。
+  # --require-pglite：pglite 載不到就直接失敗；任何一支有子測試「因為 pglite」被略過也算失敗，不讓「略過」看起來像「通過」。
+  #   （tenants_sql 有 3 項因舊 irori 額度邏輯固定略過，原因跟 pglite 無關，不算。）
+  sql-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 安裝 pglite（固定版本，不寫 package 檔）
+        run: npm i --no-save --no-package-lock @electric-sql/pglite@0.5.13
+
+      - name: 測試執行器本身的單元測試
+        run: node --test tests/run_root_tests.test.mjs
+
+      - name: 根目錄 SQL 測試（pglite 實跑，有略過就失敗）
+        run: node tools/run-root-tests.mjs _sql --timeout=180 --require-pglite
+
+
   build:
     runs-on: ubuntu-24.04
     defaults:

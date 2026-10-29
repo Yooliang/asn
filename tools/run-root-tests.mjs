@@ -11,16 +11,25 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-/** 參數 → { filters, timeoutSec }；--timeout 不是正整數就用預設 60 */
+/** 參數 → { filters, timeoutSec, requirePglite }；--timeout 不是正整數就用預設 60；
+ *  --require-pglite＝pglite 載不到就整批不跑、直接失敗，且任何子測試因為 pglite 被略過也算失敗（CI 用，見 asn-linux-build.yml）。
+ *  只看「因為 pglite」的略過：tenants_sql 有 3 項因舊 irori 額度邏輯而固定略過，跟 pglite 無關，不算。 */
 export function parseArgs(argv) {
   const filters = []
   let timeoutSec = 60
+  let requirePglite = false
   for (const a of argv) {
     const m = /^--timeout=(.*)$/.exec(a)
     if (m) { const n = Number(m[1]); if (Number.isInteger(n) && n > 0) timeoutSec = n; continue }
+    if (a === '--require-pglite') { requirePglite = true; continue }
     if (!a.startsWith('--')) filters.push(a.toLowerCase())
   }
-  return { filters, timeoutSec }
+  return { filters, timeoutSec, requirePglite }
+}
+
+/** node --test 輸出裡「因為 pglite 而略過」的子測試那幾行（tap：「ok N - 名稱 # SKIP 原因」；spec：「﹣ 名稱 … # 原因」），原因提到 pglite 才算 */
+export function pgliteSkips(out) {
+  return String(out ?? '').split(/\r?\n/).map(l => l.trim()).filter(l => (/^ok \d+ - .*# SKIP\b/.test(l) || /^﹣ /.test(l)) && /pglite/i.test(l.slice(l.lastIndexOf('#'))))
 }
 
 /** tests/ 底下的 *.test.mjs（排序固定）；有篩選字就只留檔名含任一個的 */
@@ -34,17 +43,24 @@ export function classify(r) {
   return r.status === 0 ? 'passed' : 'failed'
 }
 
-function main() {
-  const { filters, timeoutSec } = parseArgs(process.argv.slice(2))
+async function main() {
+  const { filters, timeoutSec, requirePglite } = parseArgs(process.argv.slice(2))
+  if (requirePglite) {
+    try { await import('@electric-sql/pglite') } catch (e) { console.error(`--require-pglite：載不到 @electric-sql/pglite（${e.code ?? e.message}），不跑`); process.exit(1) }
+  }
   const files = pickFiles(fs.readdirSync(path.join(root, 'tests')), filters)
   if (!files.length) { console.error('沒有符合的測試檔'); process.exit(1) }
   const res = { passed: [], failed: [], timeout: [] }
   for (const f of files) {
     const t0 = Date.now()
     const r = spawnSync(process.execPath, ['--test', `--test-timeout=${timeoutSec * 1000}`, path.join('tests', f)], { cwd: root, encoding: 'utf8', timeout: (timeoutSec + 10) * 1000, killSignal: 'SIGKILL' })
-    const kind = classify({ ...r, signal: r.signal === 'SIGKILL' ? 'SIGTERM' : r.signal })
+    let kind = classify({ ...r, signal: r.signal === 'SIGKILL' ? 'SIGTERM' : r.signal })
+    const pskips = requirePglite ? pgliteSkips((r.stdout ?? '') + (r.stderr ?? '')) : []
+    const skipNote = kind === 'passed' && pskips.length ? `，因 pglite 略過 ${pskips.length} 項` : ''
+    if (skipNote) kind = 'failed'
     res[kind].push(f)
-    console.log(`${kind === 'passed' ? '過' : kind === 'timeout' ? '逾時' : '失敗'}  ${f}  (${((Date.now() - t0) / 1000).toFixed(1)}s)`)
+    console.log(`${kind === 'passed' ? '過' : kind === 'timeout' ? '逾時' : '失敗'}  ${f}  (${((Date.now() - t0) / 1000).toFixed(1)}s${skipNote})`)
+    if (skipNote) console.log(pskips.slice(0, 12).map(l => '    ' + l).join('\n'))
     if (kind !== 'passed') console.log(((r.stdout ?? '') + (r.stderr ?? '')).split('\n').filter(l => /not ok|ℹ (pass|fail)|Error|error/.test(l)).slice(0, 12).map(l => '    ' + l).join('\n'))
   }
   console.log(`\n共 ${files.length} 支：過 ${res.passed.length}、失敗 ${res.failed.length}、逾時 ${res.timeout.length}`)
@@ -53,4 +69,4 @@ function main() {
   process.exit(res.failed.length || res.timeout.length ? 1 : 0)
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main()
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main()
