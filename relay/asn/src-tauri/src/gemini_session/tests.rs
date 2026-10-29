@@ -107,6 +107,31 @@ fn 轉不出短路徑_或回原長路徑仍有空白特殊字元_就不帶_setti
 }
 
 #[test]
+fn 走不帶_settings_的退路時_刪掉_asn_資料夾裡舊的設定檔() {
+    let asn = tempfile::tempdir().unwrap();
+    let cli = asn.path().join("asn-cli.exe");
+    let old = asn.path().join("gemini-session-settings.json");
+    let other = asn.path().join("other.json");
+    std::fs::write(&other, "{}").unwrap();
+    // 轉不出短路徑、短路徑仍含特殊字元、asn-cli 路徑不能用：三種退路都要刪掉上一次留下的設定檔
+    let cases: [(&str, Option<&str>, PathBuf); 3] = [
+        ("轉不出", None, cli.clone()),
+        ("短路徑仍含", Some(r"C:\Users\A B\x.cmd"), cli.clone()),
+        ("asn-cli", Some(SHORT), PathBuf::from("C:/a%P%/asn-cli.exe")),
+    ];
+    for (want, short, c) in cases {
+        std::fs::write(&old, r#"{"statusLine":{}}"#).unwrap();
+        let e = prepare_with(asn.path(), &c, true, |_| short.map(String::from)).unwrap_err();
+        assert!(e.contains(want), "{e}");
+        assert!(!old.exists(), "{want}：舊的設定檔要刪掉");
+    }
+    assert!(other.exists(), "只刪自己的設定檔");
+    // 本來就沒有舊檔：照樣回原因，不因刪不到而出錯
+    let e = prepare_with(asn.path(), &cli, true, |_| None).unwrap_err();
+    assert!(e.contains("轉不出") && !e.contains("刪不掉"), "{e}");
+}
+
+#[test]
 fn 非_windows_不寫_cmd_也不轉短路徑() {
     let asn = tempfile::tempdir().unwrap();
     let cli = asn.path().join("asn-cli");

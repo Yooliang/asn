@@ -95,8 +95,24 @@ pub fn prepare(asn_home: &Path, asn_cli: &Path, windows: bool) -> Result<Vec<Str
     prepare_with(asn_home, asn_cli, windows, short_path)
 }
 
-/// 同 [`prepare`]，短路徑的轉法由呼叫端給（測試用）
+/// 同 [`prepare`]，短路徑的轉法由呼叫端給（測試用）。
+/// 走「不帶 --settings」的退路時，順手刪掉 ASN 資料夾裡上一次留下的設定檔（#539，調查員 #1574、asn真 #1576）：
+/// 舊檔裡是上次的指令，不該留著讓人以為還在用。刪不掉（不是「本來就沒有」）只把原因接在錯誤說明後面，照樣走退路。
 pub fn prepare_with(asn_home: &Path, asn_cli: &Path, windows: bool, shorten: impl Fn(&Path) -> Option<String>) -> Result<Vec<String>, String> {
+    prepare_inner(asn_home, asn_cli, windows, shorten).map_err(|e| match discard_settings(asn_home) {
+        Ok(()) => e,
+        Err(why) => format!("{e}（舊設定檔刪不掉：{why}）"),
+    })
+}
+
+fn discard_settings(asn_home: &Path) -> Result<(), String> {
+    match std::fs::remove_file(asn_home.join(SETTINGS_FILE)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
+        _ => Ok(()),
+    }
+}
+
+fn prepare_inner(asn_home: &Path, asn_cli: &Path, windows: bool, shorten: impl Fn(&Path) -> Option<String>) -> Result<Vec<String>, String> {
     let cli = asn_cli.to_string_lossy().into_owned();
     if !path_ok(&cli, windows) {
         return Err("asn-cli 的路徑含有不能放進指令的字元，這次不接 Gemini 狀態列".into());

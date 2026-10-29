@@ -184,6 +184,8 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .abtn:hover:not([aria-disabled="true"]),.abtn.on{border-color:#8fb6de;background:linear-gradient(#fbfdff 0 45%,#d6e8fa 50%,#e6f1fc);box-shadow:inset 0 0 0 1px rgba(255,255,255,.7)}
 .abtn:active:not([aria-disabled="true"]){background:linear-gradient(#c9def3,#e1eefb)}
 .abtn[aria-disabled="true"]{opacity:.5;cursor:default}
+.abtn .ab-icon{position:relative;display:block}
+.ab-badge{position:absolute;top:-3px;right:-8px;min-width:16px;height:16px;padding:0 4px;box-sizing:border-box;border-radius:8px;background:#d9534f;color:#fff;font-size:11px;line-height:16px;font-weight:bold;text-align:center}
 .ab-menu{position:absolute;top:100%;left:0;z-index:20;list-style:none;margin:2px 0 0;padding:3px;min-width:150px;background:var(--panel);border:1px solid #7a9ec4;border-radius:4px;box-shadow:0 6px 18px rgba(0,30,70,.25)}
 .ab-sep{height:1px;margin:3px 4px;background:var(--line);list-style:none}
 .ab-note{align-self:center;margin-left:8px;font-size:12px;color:var(--muted);max-width:320px}
