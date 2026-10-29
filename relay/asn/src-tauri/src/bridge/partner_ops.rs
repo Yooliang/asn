@@ -1505,19 +1505,63 @@ impl PartnerOps {
         };
         // 3. 關前任、同名開新對話：不帶 --resume／--continue／--session-id，名字與模型不變
         let prompt = handover_prompt(&t2.name, &op.note, transcript.as_deref(), &path, complete);
-        let argv = switch::rewrite_args_opts(&t2.args, None, &t2.name, switch::current_model(&t2.args).as_deref(), Some(&prompt));
+        // 模型：前任現在實際在用的（在視窗裡用 /model 換過，啟動參數看不出來，所以先看對話紀錄最後一則回覆的模型），
+        // 讀不到才用它啟動時的參數；兩邊都沒有就不指定（用啟動設定的預設）。新視窗用的模型寫進結果，讓人看得到（不再默默變笨）
+        let (model, model_basis) = pick_handover_model(transcript.as_deref().and_then(last_assistant_model), switch::current_model(&t2.args));
+        let argv = switch::rewrite_args_opts(&t2.args, None, &t2.name, model.as_deref(), Some(&prompt));
         let mut r = self.reopen(Some(op), &t2, &t2.name.clone(), argv, true);
         if r.status != "failed" {
-            let extra = json!({ "handoff_path": path.to_string_lossy(), "handoff_done": complete });
+            let extra = json!({ "handoff_path": path.to_string_lossy(), "handoff_done": complete, "model": model, "model_basis": model_basis });
             match r.result.as_mut().and_then(Value::as_object_mut) {
                 Some(m) => {
                     m.insert("handoff_path".into(), extra["handoff_path"].clone());
                     m.insert("handoff_done".into(), extra["handoff_done"].clone());
+                    m.insert("model".into(), extra["model"].clone());
+                    m.insert("model_basis".into(), extra["model_basis"].clone());
                 }
                 None => r.result = Some(extra),
             }
         }
         r
+    }
+}
+
+/// 對話紀錄最後一則助理回覆用的模型（只讀檔尾 512 KB）：換班接手要讓新視窗和前任用同一個模型。
+/// 跳過子代理的回覆（isSidechain）與 `<synthetic>` 這類不是真模型的名字，名字格式不合就不採用；讀不到、沒有回覆都回 None
+pub(crate) fn last_assistant_model(transcript: &Path) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(transcript).ok()?;
+    let len = f.metadata().ok()?.len();
+    let start = len.saturating_sub(512 * 1024);
+    f.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = Vec::new();
+    f.take(512 * 1024).read_to_end(&mut buf).ok()?;
+    let text = String::from_utf8_lossy(&buf);
+    text.lines().rev().find_map(|l| {
+        let v: Value = serde_json::from_str(l.trim()).ok()?;
+        // 子代理（isSidechain）的回覆不算：它們常用較小的模型，拿來當前任的模型會讓新視窗被降級
+        if v.get("type").and_then(Value::as_str) != Some("assistant") || v.get("isSidechain").and_then(Value::as_bool) == Some(true) {
+            return None;
+        }
+        let m = v.pointer("/message/model").and_then(Value::as_str)?.trim();
+        (!m.starts_with('<') && switch::valid_model(m)).then(|| m.to_string())
+    })
+}
+
+/// 模型屬於哪一系列：名字（小寫，去掉 `[1m]` 之類後綴）裡含的 opus／sonnet／haiku／fable；認不出來是 None
+fn model_series(m: &str) -> Option<&'static str> {
+    let base = m.split('[').next().unwrap_or(m).to_lowercase();
+    ["opus", "sonnet", "haiku", "fable"].into_iter().find(|s| base.contains(s))
+}
+
+/// 換班接手給新視窗的模型：回 (模型, 依據)。依據：record＝取對話紀錄裡前任實際用的；launch_same＝啟動參數和紀錄同一系列，
+/// 沿用啟動參數原樣（保住 `[1m]` 長脈絡這類紀錄看不出來的後綴）；launch＝紀錄讀不到，退回啟動參數（不保證和前任現在用的一樣）；none＝都沒有
+fn pick_handover_model(recorded: Option<String>, launched: Option<String>) -> (Option<String>, &'static str) {
+    match (recorded, launched) {
+        (Some(r), Some(l)) if model_series(&r).is_some() && model_series(&r) == model_series(&l) => (Some(l), "launch_same"),
+        (Some(r), _) => (Some(r), "record"),
+        (None, Some(l)) => (Some(l), "launch"),
+        (None, None) => (None, "none"),
     }
 }
 

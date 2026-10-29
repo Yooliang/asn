@@ -738,6 +738,71 @@ fn 換班接手_請前任寫交接_等檔案_關前任_同名開新_不帶_resum
 }
 
 #[test]
+fn 換班接手_新視窗用前任現在用的模型_不是啟動參數裡的舊值_讀不到才退回啟動參數() {
+    // 啟動參數是 --model opus，但前任在視窗裡換過模型：對話紀錄最後一則助理回覆是 claude-fable-5-1（後面還有一則 synthetic 要跳過）
+    let r = rig(Opt::default());
+    let f = write_old_transcript(&r);
+    let lines = [
+        json!({ "type": "assistant", "message": { "model": "claude-sonnet-5-5" } }),
+        json!({ "type": "assistant", "message": { "model": "claude-fable-5-1" } }),
+        json!({ "type": "assistant", "message": { "model": "<synthetic>" } }),
+        json!({ "type": "user", "message": { "model": "claude-haiku-5-5" } }),
+    ];
+    let mut text = std::fs::read_to_string(&f).unwrap();
+    for l in lines { text.push('\n'); text.push_str(&l.to_string()); }
+    std::fs::write(&f, text).unwrap();
+    let res = r.run("handover", json!({}));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    let argv = r.launched().remove(0).2;
+    assert!(argv_has(&argv, &["--model", "claude-fable-5-1"]) && !argv.iter().any(|a| a == "opus"), "{argv:?}");
+    let v = res.result.unwrap();
+    assert_eq!((v["model"].as_str(), v["model_basis"].as_str()), (Some("claude-fable-5-1"), Some("record")), "結果寫出新視窗用的模型與依據");
+    // 紀錄裡沒有助理回覆：退回啟動參數的 opus
+    let r2 = rig(Opt::default());
+    write_old_transcript(&r2);
+    let res2 = r2.run("handover", json!({}));
+    assert!(argv_has(&r2.launched().remove(0).2, &["--model", "opus"]));
+    let v2 = res2.result.unwrap();
+    assert_eq!((v2["model"].as_str(), v2["model_basis"].as_str()), (Some("opus"), Some("launch")), "紀錄讀不到＝退回啟動參數");
+}
+
+#[test]
+fn 換班接手的模型_同系列沿用啟動參數原樣_不同系列用紀錄_紀錄讀不到退回啟動參數() {
+    let s = |x: &str| Some(x.to_string());
+    // 啟動時帶 opus[1m]、紀錄只寫 claude-opus-5-5：同系列，保住長脈絡的 opus[1m]
+    assert_eq!(pick_handover_model(s("claude-opus-5-5"), s("opus[1m]")), (s("opus[1m]"), "launch_same"));
+    assert_eq!(pick_handover_model(s("claude-opus-5-5"), s("claude-opus-4-5")), (s("claude-opus-4-5"), "launch_same"));
+    // 在視窗裡換過系列（啟動 sonnet、現在 opus）：用紀錄的
+    assert_eq!(pick_handover_model(s("claude-opus-5-5"), s("sonnet")), (s("claude-opus-5-5"), "record"));
+    assert_eq!(pick_handover_model(s("claude-fable-5-1"), s("opus")), (s("claude-fable-5-1"), "record"));
+    // 啟動沒帶模型：用紀錄的；紀錄讀不到：退回啟動參數；都沒有：不指定
+    assert_eq!(pick_handover_model(s("claude-opus-5-5"), None), (s("claude-opus-5-5"), "record"));
+    assert_eq!(pick_handover_model(None, s("opus[1m]")), (s("opus[1m]"), "launch"));
+    assert_eq!(pick_handover_model(None, None), (None, "none"));
+    // 認不出系列的名字不當同系列
+    assert_eq!(pick_handover_model(s("claude-x-1"), s("claude-x-1")), (s("claude-x-1"), "record"));
+}
+
+#[test]
+fn 對話紀錄的模型_只看助理回覆_跳過不是真模型的名字_壞行與壞名字不採用() {
+    let t = tempfile::tempdir().unwrap();
+    let f = t.path().join("a.jsonl");
+    let w = |lines: &[&str]| std::fs::write(&f, lines.join("\n")).unwrap();
+    w(&[r#"{"type":"assistant","message":{"model":"claude-opus-5-5"}}"#, "不是 json", r#"{"type":"assistant","message":{"model":"<synthetic>"}}"#]);
+    assert_eq!(last_assistant_model(&f).as_deref(), Some("claude-opus-5-5"));
+    // 子代理（isSidechain）的回覆不算，即使它是最後一則；isSidechain 為 false 或沒有的才算
+    w(&[r#"{"type":"assistant","isSidechain":false,"message":{"model":"claude-opus-5-5"}}"#, r#"{"type":"assistant","isSidechain":true,"message":{"model":"claude-haiku-5-5"}}"#]);
+    assert_eq!(last_assistant_model(&f).as_deref(), Some("claude-opus-5-5"));
+    w(&[r#"{"type":"assistant","isSidechain":true,"message":{"model":"claude-haiku-5-5"}}"#]);
+    assert_eq!(last_assistant_model(&f), None, "只有子代理的回覆＝讀不到");
+    w(&[r#"{"type":"assistant","message":{"model":"bad model;"}}"#]);
+    assert_eq!(last_assistant_model(&f), None);
+    w(&[r#"{"type":"user","message":{"model":"claude-opus-5-5"}}"#]);
+    assert_eq!(last_assistant_model(&f), None);
+    assert_eq!(last_assistant_model(&t.path().join("沒有.jsonl")), None);
+}
+
+#[test]
 fn 換班接手_前任沒寫完_逾時仍會換手_第一句話註明() {
     for tell_fails in [false, true] {
         let r = rig(Opt::default());
