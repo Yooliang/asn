@@ -95,7 +95,7 @@ test('接線守門：電腦版存與還原、手機版存與還原、Rust 視窗
   const l = read('ui/list.js'), m = read('ui/m.js'), w = read('src-tauri/src/wins.rs'), lib = read('src-tauri/src/lib.rs')
   assert.ok(l.includes('session: sess.ready ? currentSession() : sess.saved'), '還原完成前不得把存檔蓋成空的')
   assert.ok(l.includes('() => ui.tabs, () => ui.active, () => ui.panel, () => sess.wins'), '分頁變動要觸發存檔')
-  assert.ok(l.includes('restoreSession(sess.saved'), '開機要還原')
+  assert.ok(l.includes('planRestore(sess.saved'), '開機要還原')
   assert.ok(l.includes("invoke('open_windows')"), '分開模式要問 Rust 有哪些視窗開著')
   assert.ok(l.includes('trailingThrottle(') && l.includes("'pagehide'"), '節流寫入並在離開時補寫')
   assert.ok(m.includes('restoreMobileTab(saved.navTab)') && m.includes('navTab: nav.tab'), '手機版要存要還原大分頁')
