@@ -469,7 +469,7 @@ impl PartnerOps {
     fn rename_acp(&self, op: &Op, acp: &dyn AcpAdmin) -> OpResult {
         let new = op.new_name.trim();
         if !valid_partner_name(new) {
-            return failed("新名字只能用英數、連字號、中文，1～40 字，不能以連字號開頭");
+            return failed(super::engines::acp_admin::BAD_NAME);
         }
         if new.eq_ignore_ascii_case(&op.name) {
             return failed("新名字和現在的一樣");

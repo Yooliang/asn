@@ -248,7 +248,7 @@ test('守門：手機指令清單有兩個簽章指令；沒有電腦端指令�
   assert.match(read('..', '..', 'supabase', 'functions', 'relay', 'index.ts'), /action === "partner_op" \|\| action === "partner_ops" \|\| action === "partner_archive"\) \? await signedUserId/)
 })
 
-test('依引擎決定哪幾項能用（項目一律固定八項）：Claude 前五項；ACP 工作者詳情、切換模型、關閉、重開、接班換手、移除；雲端代理與其他引擎全部反灰並說明', () => {
+test('依引擎決定哪幾項能用（項目一律固定八項）：Claude 前五項；ACP 工作者詳情、改名、切換模型、關閉、重開、接班換手、移除；雲端代理與其他引擎全部反灰並說明', () => {
   const keys = f => menuItems(f, ctx).map(i => i.key)
   const okKeys = f => menuItems(f, ctx).filter(i => i.ok).map(i => i.key)
   assert.deepEqual(keys(W('H', '小文')), MENU_KEYS)
@@ -257,10 +257,11 @@ test('依引擎決定哪幾項能用（項目一律固定八項）：Claude 前�
   for (const engine of ['gemini', 'agy', 'acp', 'Gemini']) {
     const items = menuItems(W('H', 'Gemini', { engine, kind: 'claude' }), ctx)
     assert.deepEqual(items.map(i => i.key), MENU_KEYS, engine)
-    assert.deepEqual(items.filter(i => i.ok).map(i => i.key), ['info', 'model', 'close', 'handover', 'restart', 'remove'], engine)
-    assert.deepEqual(items.filter(i => i.ok).map(i => i.label), ['詳情', '切換模型', '關閉', '接班換手', '重開', '移除'])
+    assert.deepEqual(items.filter(i => i.ok).map(i => i.key), ['info', 'rename', 'model', 'close', 'handover', 'restart', 'remove'], engine)
+    assert.deepEqual(items.filter(i => i.ok).map(i => i.label), ['詳情', '改名', '切換模型', '關閉', '接班換手', '重開', '移除'])
     const why = Object.fromEntries(items.filter(i => !i.ok).map(i => [i.key, i.reason]))
-    assert.equal(new Set(Object.values(why)).size, 2, '兩項說明逐案不同')
+    assert.deepEqual(Object.keys(why), ['resume'], '只剩喚醒不能用')
+    assert.match(why.resume, /不需要喚醒/)
     assert.ok(Object.values(why).every(r => !/[A-Za-z]{4,}/.test(r.replace(/ASN/g, ''))), '原因不夾英文')
     assert.equal(partnerEngine(W('H', 'g', { engine })), 'acp')
   }
@@ -280,10 +281,8 @@ test('ACP 工作者的項目也受登入、開放、離線的條件管；離線�
   const g = (node, extra = {}) => W(node, 'Gemini', { engine: 'gemini', ...extra })
   const sel = items => items.filter(i => ACP_OPS.includes(i.key))
   const closed = sel(menuItems(g('C'), ctx))
-  assert.deepEqual(closed.map(i => [i.key, i.ok]), [['info', true], ['model', false], ['close', false], ['handover', false], ['restart', false], ['remove', false]], '沒開放：只有詳情能用')
-  assert.equal(closed[1].reason, REASON.closed)
-  assert.equal(closed[2].reason, REASON.closed)
-  assert.equal(closed[3].reason, REASON.closed)
+  assert.deepEqual(closed.map(i => [i.key, i.ok]), [['info', true], ['rename', false], ['model', false], ['close', false], ['handover', false], ['restart', false], ['remove', false]], '沒開放：只有詳情能用')
+  assert.ok(closed.slice(1).every(i => i.reason === REASON.closed))
   assert.ok(sel(menuItems(g('H'), { ...ctx, signedIn: false })).every(i => !i.ok && i.reason === REASON.needLogin))
   assert.ok(sel(menuItems(g('W'), ctx)).every(i => !i.ok && i.reason === REASON.offline))
   const off = menuItems(g('H', { status: 'offline' }), ctx)
@@ -324,4 +323,29 @@ test('接班換手完成：ACP 工作者沒有請前任寫交接，說明新對�
   assert.deepEqual(v.extra, ['這類夥伴沒有請前任寫交接，新對話從空白開始，第一句是接班說明。'])
   const c = progressView({ status: 'ok', result: { handoff_done: false } }, { op: 'handover' })
   assert.deepEqual(c.extra, ['前任沒有寫完交接，新夥伴會以前任的對話紀錄為主。'])
+})
+
+test('內建通道工作者的改名（B5，#266）：在線可用、已停止反灰且說明 20 字內；送出內容與表單檢查同其他夥伴；電腦端的簡短說明照實顯示', () => {
+  const g = (extra = {}) => W('H', 'Gemini', { engine: 'gemini', ...extra })
+  const item = (f, key = 'rename') => menuItems(f, ctx).find(i => i.key === key)
+  assert.deepEqual([item(g()).ok, item(g()).reason], [true, ''])
+  assert.ok(ACP_OPS.includes('rename'))
+  assert.equal(item(W('H', 'Grok', { engine: 'grok' })).ok, true, '本機 Grok 背景工作者也可以改名')
+  const stopped = item(g({ status: 'stopped' }))
+  assert.equal(stopped.ok, false)
+  assert.equal(stopped.reason, '已停止，先按「重開」才能「改名」')
+  for (const key of ['rename', 'model', 'close', 'handover']) {
+    const r = item(g({ status: 'stopped' }), key).reason
+    assert.ok(r && r.length <= 20, `已停止的「${key}」說明 20 字內：${r}`)
+  }
+  const f = g()
+  assert.deepEqual(buildOpRequest(f, 'rename', { newName: ' 小葛 ' }), { node: 'H', name: 'Gemini', op: 'rename', new_name: '小葛' })
+  assert.equal(opFormError(f, 'rename', { newName: '小葛' }, item(f)), '')
+  assert.match(opFormError(f, 'rename', { newName: '-壞' }, item(f)), /名字/)
+  assert.match(opFormError(f, 'rename', { newName: 'Gemini' }, item(f)), /一樣/)
+  // 寫在 agents.json 的：名單分不出來，由電腦端回簡短說明，畫面照實顯示
+  for (const m of ['設定檔裡的名字，請改設定檔', '改名失敗，已恢復原名', '改名失敗，有檔案沒改回', '還沒有對話，請先寄一封信給它', '已停止，請先重開', '名字只能用英數、中文、連字號']) {
+    assert.equal(opErrorText(m), m)
+    assert.ok(m.length <= 20, m)
+  }
 })

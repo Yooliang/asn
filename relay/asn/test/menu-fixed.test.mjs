@@ -32,7 +32,8 @@ test('說明逐案不同、寫的是程式真的判斷得出的條件', () => {
   const why = (name, key) => manageItems(KINDS[name], ctx).find(i => i.key === key).reason
   assert.equal(why('背景工作者在線', 'close'), '', '背景工作者可以「關閉」（停止本次執行）')
   assert.equal(why('背景工作者在線', 'model'), '', '背景工作者可以切換模型（0.2 B4）')
-  assert.match(why('背景工作者在線', 'rename'), /沒有視窗可以改名/)
+  assert.equal(why('背景工作者在線', 'rename'), '', '背景工作者可以改名（B5，#266）')
+  assert.match(why('背景工作者離線', 'rename'), /已離線/)
   assert.match(why('沒開放遠端管理', 'rename'), /沒有開放遠端管理/)
   assert.match(why('Claude 離線', 'rename'), /已離線/)
   assert.match(why('雲端代理', 'info'), /雲端代理/)

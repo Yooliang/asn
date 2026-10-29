@@ -62,7 +62,8 @@ export function opDialogText(op, name, device = '', engine = 'claude') {
     }
     case 'rename': return {
       title, lead: `要把「${name}」改成什麼名字？名字只能用英數、連字號、中文，1～40 字，不能以連字號開頭。`, ok: '改名', auto: false,
-      points: engine === 'pi' ? ['視窗不會關，對話保留；pi 重開、接回同一段對話後名字還在', 'pi 正在工作時會先排隊，做完這一輪就改', '要新版的 pi ASN 擴充；舊的會請你先更新'] : [],
+      points: engine === 'pi' ? ['視窗不會關，對話保留；pi 重開、接回同一段對話後名字還在', 'pi 正在工作時會先排隊，做完這一輪就改', '要新版的 pi ASN 擴充；舊的會請你先更新']
+        : engine === 'acp' ? ['對話保留，工作者會短暫重開（幾秒）', '寄給舊名字的信，7 天內會轉給新名字', '正在處理信件時不能改，等它做完再試', '寫在這台電腦 agents.json 裡的工作者不能從這裡改名，要到電腦上改設定檔'] : [],
     }
     case 'close': if (engine === 'acp') return { title: '關閉', lead: `要關閉「${name}」${where}內建通道的工作者嗎？會結束它的程序，這次不再收信，名單上暫時看不到；不會改設定檔，重啟 ASN 後會恢復。`, points: [], ok: '關閉', auto: false }
       return { title, lead: `關掉「${name}」${where}視窗？對話記錄會留著。`, points: [], ok: '關閉視窗', auto: false }
