@@ -2,13 +2,14 @@
   "doc": [
     "額度窗合併的共用測試案例（#374／#1342／#1372）：後台 SQL（tests/acct_roster_sql.test.mjs）與電腦端 Rust（include_str!）讀同一份，規則不會分成兩套。",
     "每個案例＝一個額度窗「現記的 old」遇到「新來的 new」，在時間 now 判斷收不收。",
-    "欄位：id 案例編號；note 說明；vendor 廠牌（claude／codex）；window 窗名（five_hour＝5 小時、weekly＝每週）；now 判斷當下（UTC，ISO 8601）；",
+    "欄位：id 案例編號；note 說明；vendor 廠牌（claude／codex／gemini）；window 窗名（five_hour＝5 小時、weekly＝每週）；now 判斷當下（UTC，ISO 8601）；",
     "old 現記的這一窗（null＝還沒記過）；new 新來的這一窗；left_pct 剩餘百分比（0～100 整數）；resets_at 重置時間（UTC，null＝沒有）；",
     "accept true＝收下、false＝不收；reason 不收的原因代碼（收下時為 null），代碼意義見 reasons。",
     "規則（依序）：新的重置時間不在「now −1 天」到「now +8 天」之間＝不收（reset_out_of_range）；old 的重置時間晚於「now +8 天」＝當成 old 沒有重置時間；",
     "沒有 old 或任一邊沒有重置時間＝收；now 晚於 old 重置時間超過 7 天＝收；新舊重置時間相差 10 分鐘內＝同一期，剩餘只能下降；",
     "新的較早＝不收；新的較晚但 old 還沒過＝不收；Claude 的每週窗另要新舊差接近 7 天倍數（誤差 10 分鐘）；Codex 每週窗與所有 5 小時窗不看倍數。",
     "old 的重置時間早於「now −1 天」不另外處理（正常過期的期，交給「超過 7 天＝收」）。範圍兩端都含（剛好 −1 天、剛好 +8 天＝在範圍內）。",
+    "Gemini（#1515／#1519）：照 Codex 規則（不看 7 天倍數），另加一條——在範圍檢查之後，old 是 100%（滿額、沒用過的桶）就照收新的；agy 對沒用過的桶每次給的重置時間都是「現在＋整個窗長」、一直往後跑。old 不是 100%、new 是 100% 照舊判斷。這條只限 gemini，claude、codex 不套。",
     "台灣時間對照：2026-11-01T16:00:00Z＝11/2 00:00（gmail）、2026-11-04T09:00:00Z＝11/4 17:00（yooliang）。"
   ],
   "constants": {
@@ -517,6 +518,241 @@
       },
       "accept": false,
       "reason": "reset_out_of_range"
+    },
+    {
+      "id": "g01",
+      "note": "Gemini 每週：滿額遇滿額，隔 1 小時重置時間跟著往後 1 小時＝照收（只更新重置時間與讀取時間）",
+      "vendor": "gemini",
+      "window": "weekly",
+      "now": "2026-11-01T05:00:00Z",
+      "old": {
+        "left_pct": 100,
+        "resets_at": "2026-11-08T04:00:00Z"
+      },
+      "new": {
+        "left_pct": 100,
+        "resets_at": "2026-11-08T05:00:00Z"
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "g02",
+      "note": "Gemini 每週：滿額後開始用，重置時間固定在開始用的時間＋7 天（比記著的晚 1 小時）＝照收",
+      "vendor": "gemini",
+      "window": "weekly",
+      "now": "2026-11-01T05:00:00Z",
+      "old": {
+        "left_pct": 100,
+        "resets_at": "2026-11-08T04:00:00Z"
+      },
+      "new": {
+        "left_pct": 95,
+        "resets_at": "2026-11-08T05:00:00Z"
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "g03",
+      "note": "Gemini 每週：記著 30%、3 天後重置，來了 100%、7 天後重置＝還沒過卻來更晚的，不收",
+      "vendor": "gemini",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": {
+        "left_pct": 30,
+        "resets_at": "2026-11-04T04:00:00Z"
+      },
+      "new": {
+        "left_pct": 100,
+        "resets_at": "2026-11-08T04:00:00Z"
+      },
+      "accept": false,
+      "reason": "later_not_expired"
+    },
+    {
+      "id": "g04",
+      "note": "Gemini 5 小時：滿額遇滿額，隔 2 小時＝照收",
+      "vendor": "gemini",
+      "window": "five_hour",
+      "now": "2026-11-01T06:00:00Z",
+      "old": {
+        "left_pct": 100,
+        "resets_at": "2026-11-01T09:00:00Z"
+      },
+      "new": {
+        "left_pct": 100,
+        "resets_at": "2026-11-01T11:00:00Z"
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "g05",
+      "note": "Gemini 每週：同一期剩餘回升＝不收",
+      "vendor": "gemini",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-04T09:00:00Z"
+      },
+      "new": {
+        "left_pct": 60,
+        "resets_at": "2026-11-04T09:05:00Z"
+      },
+      "accept": false,
+      "reason": "same_period_rise"
+    },
+    {
+      "id": "g06",
+      "note": "Gemini 每週：同一期剩餘下降＝收",
+      "vendor": "gemini",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-04T09:00:00Z"
+      },
+      "new": {
+        "left_pct": 35,
+        "resets_at": "2026-11-04T09:00:00Z"
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "g07",
+      "note": "Gemini 每週：重置時間比記著的早＝不收",
+      "vendor": "gemini",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-04T09:00:00Z"
+      },
+      "new": {
+        "left_pct": 90,
+        "resets_at": "2026-11-03T09:00:00Z"
+      },
+      "accept": false,
+      "reason": "earlier"
+    },
+    {
+      "id": "g08",
+      "note": "Gemini 每週：記著的已過，來的差 2 天 17 小時（不是 7 天倍數）＝照收，不看倍數",
+      "vendor": "gemini",
+      "window": "weekly",
+      "now": "2026-11-02T17:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "new": {
+        "left_pct": 90,
+        "resets_at": "2026-11-04T09:00:00Z"
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "g09",
+      "note": "Gemini 每週：記著的已過超過 7 天＝照收",
+      "vendor": "gemini",
+      "window": "weekly",
+      "now": "2026-11-09T01:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "new": {
+        "left_pct": 90,
+        "resets_at": "2026-11-10T09:00:00Z"
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "g10",
+      "note": "Gemini 每週：新的在現在 +8 天又 1 秒＝不收",
+      "vendor": "gemini",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-04T09:00:00Z"
+      },
+      "new": {
+        "left_pct": 90,
+        "resets_at": "2026-11-09T04:00:01Z"
+      },
+      "accept": false,
+      "reason": "reset_out_of_range"
+    },
+    {
+      "id": "g11",
+      "note": "Gemini 5 小時：新的早於現在 −1 天＝不收",
+      "vendor": "gemini",
+      "window": "five_hour",
+      "now": "2026-11-01T04:00:00Z",
+      "old": null,
+      "new": {
+        "left_pct": 90,
+        "resets_at": "2026-10-31T03:59:59Z"
+      },
+      "accept": false,
+      "reason": "reset_out_of_range"
+    },
+    {
+      "id": "g12",
+      "note": "Gemini：記著的是滿額，新的重置時間超出範圍＝照樣不收（範圍先檢查）",
+      "vendor": "gemini",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": {
+        "left_pct": 100,
+        "resets_at": "2026-11-08T04:00:00Z"
+      },
+      "new": {
+        "left_pct": 100,
+        "resets_at": "2099-01-01T00:00:00Z"
+      },
+      "accept": false,
+      "reason": "reset_out_of_range"
+    },
+    {
+      "id": "g13",
+      "note": "Codex 不套滿額規則：滿額遇滿額、隔 1 小時重置時間往後＝照舊不收",
+      "vendor": "codex",
+      "window": "weekly",
+      "now": "2026-11-01T05:00:00Z",
+      "old": {
+        "left_pct": 100,
+        "resets_at": "2026-11-08T04:00:00Z"
+      },
+      "new": {
+        "left_pct": 100,
+        "resets_at": "2026-11-08T05:00:00Z"
+      },
+      "accept": false,
+      "reason": "later_not_expired"
+    },
+    {
+      "id": "g14",
+      "note": "Claude 不套滿額規則：滿額後來了更晚的＝照舊不收",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-01T05:00:00Z",
+      "old": {
+        "left_pct": 100,
+        "resets_at": "2026-11-08T04:00:00Z"
+      },
+      "new": {
+        "left_pct": 95,
+        "resets_at": "2026-11-08T05:00:00Z"
+      },
+      "accept": false,
+      "reason": "later_not_expired"
     }
   ]
 }

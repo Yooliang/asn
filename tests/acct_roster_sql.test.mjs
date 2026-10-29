@@ -45,7 +45,7 @@ test('共用案例檔：格式完整（之後 Rust 用 include_str! 讀同一份
   const ids = new Set()
   for (const c of cases.cases) {
     assert.ok(!ids.has(c.id), c.id); ids.add(c.id)
-    assert.ok(['claude', 'codex'].includes(c.vendor) && ['five_hour', 'weekly'].includes(c.window), c.id)
+    assert.ok(['claude', 'codex', 'gemini'].includes(c.vendor) && ['five_hour', 'weekly'].includes(c.window), c.id)
     assert.equal(c.accept, c.reason === null, c.id)
     if (c.reason) assert.ok(c.reason in cases.reasons, c.id)
   }
@@ -93,9 +93,10 @@ const H = 3600_000, D = 24 * H
 const C = { vendor: 'claude', email: 'a@x.test', plan: 'max', current: true }
 const win = (name, left_pct, resets_at, read_at = AT) => ({ name, left_pct, resets_at, read_at })
 
-test('實跑（pglite）：共用案例全部照預期（同一份案例檔）', { skip }, async () => {
+// gemini 的案例要套 20261029130000_acct_roster_gemini.sql 才對（滿額規則在那支），在 tests/acct_roster_gemini_sql.test.mjs 跑全部案例
+test('實跑（pglite）：共用案例全部照預期（同一份案例檔；gemini 的見 acct_roster_gemini_sql）', { skip }, async () => {
   const { db } = await setup()
-  for (const c of cases.cases) {
+  for (const c of cases.cases.filter(x => x.vendor !== 'gemini')) {
     const r = (await db.query('select public.asn_relay_acct_window_judge($1, $2, $3::jsonb, $4::jsonb, $5::timestamptz) r',
       [c.vendor, c.window, c.old == null ? null : JSON.stringify(c.old), JSON.stringify(c.new), c.now])).rows[0].r
     assert.equal(r, c.reason, `${c.id} ${c.note}`)

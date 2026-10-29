@@ -19,6 +19,10 @@
 //! 分不出是哪條的）就當那條沒有重置時間。舊的 `reset_at` 照舊寫（舊版 ASN 讀檔只認它）。
 //! 記錄時間 `at`：只有真的收進新值時才更新成現在；兩條都不收就整筆不動。各條另記自己的讀取時間 `five_at`／`week_at`
 //! （那條這次有收才更新成現在；沒收就留原本的，舊檔沒有就用整筆的 `at`）。
+//! Gemini（#374，asn真 #1519）：規則照 Codex（不看 7 天倍數），另加一條——記著的那條是 100%（滿額、沒用過）就照收新的。
+//!   agy 對沒用過的額度桶，每次給的重置時間都是「現在＋整個窗長」、會一直往後跑；不加這條，滿額遇滿額（隔 10 分鐘以上）
+//!   或滿額後開始用（重置時間固定成開始用的時間＋窗長）都會被當成「還沒過卻來了更晚的」擋掉，畫面停在 100% 最多 7 天。
+//!   記著的不是 100%、新來的是 100% 照舊判斷（不收）。只限 Gemini：Claude 有記錯帳號的問題，Codex、Grok 維持原樣。
 //! 判斷規則與後台共用一份案例（tests/fixtures/quota-merge-cases.json），不收的原因用同一組代碼（`Reject::code`）。
 use super::{iso_secs, parse_iso_secs, pick_reset, Parsed, Quota};
 use std::path::Path;
@@ -33,12 +37,14 @@ const RESET_FUTURE_MS: i64 = 8 * 86_400_000;
 const LOG_FILE: &str = "claude-quota.log";
 const LOG_MAX_BYTES: u64 = 64 * 1024;
 
-/// 哪個廠牌的額度：Claude 的每週那條要看 7 天倍數，Codex 不看（#1372）
+/// 哪個廠牌的額度：Claude 的每週那條要看 7 天倍數，Codex、Gemini 不看（#1372）；Gemini 記著的是 100% 就照收（#1519）
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Vendor {
     Claude,
     #[cfg_attr(not(test), allow(dead_code))]
     Codex,
+    #[cfg_attr(not(test), allow(dead_code))]
+    Gemini,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -107,7 +113,7 @@ pub fn judge(kind: Kind, old: Option<(u8, Option<i64>)>, new_pct: u8, new_reset:
     judge_for(Vendor::Claude, kind, old, new_pct, new_reset, now_ms)
 }
 
-/// 一條要不要收：收回 Ok(())，不收回原因。規則見檔頭；只有 Claude 的每週那條看 7 天倍數。
+/// 一條要不要收：收回 Ok(())，不收回原因。規則見檔頭；只有 Claude 的每週那條看 7 天倍數；Gemini 記著 100% 照收。
 pub fn judge_for(vendor: Vendor, kind: Kind, old: Option<(u8, Option<i64>)>, new_pct: u8, new_reset: Option<i64>, now_ms: i64) -> Result<(), Reject> {
     if let Some(r) = new_reset {
         if r < now_ms - RESET_PAST_MS || r > now_ms + RESET_FUTURE_MS {
@@ -116,6 +122,10 @@ pub fn judge_for(vendor: Vendor, kind: Kind, old: Option<(u8, Option<i64>)>, new
     }
     // 記著的重置時間晚於現在 +8 天＝之前收進來的錯誤值：當成沒有重置時間，照收新的
     let old = old.map(|(p, r)| (p, r.filter(|&r| r <= now_ms + RESET_FUTURE_MS)));
+    // Gemini 記著的是 100%（沒用過的桶，重置時間會一直往後跑）：照收新的（#1519）
+    if vendor == Vendor::Gemini && matches!(old, Some((100, _))) {
+        return Ok(());
+    }
     let Some((old_pct, Some(old_reset))) = old else { return Ok(()) };
     let Some(new_reset) = new_reset else { return Ok(()) };
     if now_ms > old_reset + WEEK_MS {

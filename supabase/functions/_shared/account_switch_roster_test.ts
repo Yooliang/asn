@@ -97,6 +97,37 @@ Deno.test("acct_report：先照舊呼叫舊函式（不帶 windows），再呼�
   assertEquals(calls[1].args, { p_node: "W", p_accounts: [{ ...C, five_hour_pct: 40, at: AT, windows: w }] });
 });
 
+// ---------- Gemini（#374，asn真 #1515）：relay 放行 gemini；舊回報函式不收 gemini，呼叫前拿掉 ----------
+const G = { vendor: "gemini" as const, email: "g@x.test", plan: "Google AI Pro", current: true };
+
+Deno.test("parseReport：gemini 放行；只留 five_hour、weekly 兩窗；不收舊四欄；多餘欄位丟掉", () => {
+  const r = parseReport({ accounts: [{ ...G, email: "G@X.test", five_hour_pct: 5, at: AT, session_id: "S", cwd: "C:/x", windows: [
+    { name: "five_hour", left_pct: 97.7, resets_at: RESET, read_at: AT }, { name: "w60", left_pct: 5, read_at: AT },
+    { name: "w10080", left_pct: 5, read_at: AT }, { name: "weekly", left_pct: 30, resets_at: null, read_at: AT },
+  ] }] });
+  assertEquals(r, [{ ...G, windows: [{ name: "five_hour", left_pct: 98, resets_at: RESET, read_at: AT }, { name: "weekly", left_pct: 30, resets_at: null, read_at: AT }] }]);
+  assert(!JSON.stringify(r).includes("C:/x") && !JSON.stringify(r).includes("session"));
+  assertEquals(parseReport({ accounts: [{ ...G, windows: [{ name: "w60", left_pct: 5, read_at: AT }] }] }), [G], "清完不剩就不帶 windows");
+  assertEquals(parseReport({ accounts: [{ ...G, email: "壞掉" }] }), null);
+  assertEquals(parseReport({ accounts: [{ vendor: "openai", email: "a@x.test" }] }), null, "其他廠牌照舊整份退回");
+});
+
+Deno.test("acct_report：gemini 不交給舊函式（不然整份退回），新的 roster_report 照帶", async () => {
+  const { deps, calls } = fakeDeps();
+  const w = [{ name: "weekly", left_pct: 30, resets_at: RESET, read_at: AT }];
+  const r = await handleAcctAction(deps, { id: "W" }, "acct_report", { accounts: [{ ...G, windows: w }, C, { vendor: "codex", email: "c@x.test", current: false }] });
+  assertEquals(r.status, 200);
+  assertEquals(calls.map((c) => c.fn), ["asn_relay_acct_report", "asn_relay_acct_roster_report"]);
+  assertEquals(calls[0].args.p_accounts, [C, { vendor: "codex", email: "c@x.test", plan: "", current: false }]);
+  assertEquals(calls[1].args.p_accounts, [{ ...G, windows: w }, C, { vendor: "codex", email: "c@x.test", plan: "", current: false }]);
+  // 只有 gemini：舊函式收到空清單（這台沒有 claude／codex／grok 帳號），新的照帶
+  const only = fakeDeps();
+  const r2 = await handleAcctAction(only.deps, { id: "W" }, "acct_report", { accounts: [{ ...G, windows: w }] });
+  assertEquals(r2.status, 200);
+  assertEquals(only.calls[0].args.p_accounts, []);
+  assertEquals(only.calls[1].args.p_accounts, [{ ...G, windows: w }]);
+});
+
 Deno.test("acct_report：roster_report 失敗（錯誤、拋例外、回 error）只記 log，照樣回 ok", async () => {
   const answers: Array<(c: Call) => { data: unknown; error: unknown } | Promise<never>> = [
     () => ({ data: null, error: { message: "function does not exist" } }),

@@ -44,7 +44,7 @@ export function cleanEmail(v: unknown): string | null {
 
 // 額度窗（#374 帳號列表）：name＝five_hour／weekly／w<分鐘數>；left_pct＝剩餘 0～100 整數；resets_at＝重置時間（可空）；read_at＝那台電腦讀到的時間
 export type QuotaWindow = { name: string; left_pct: number; resets_at: string | null; read_at: string };
-export type ReportedAccount = { vendor: "claude" | "codex" | "grok"; email: string; plan: string; current: boolean; five_hour_pct?: number; weekly_pct?: number; reset_at?: string; at?: string; windows?: QuotaWindow[] };
+export type ReportedAccount = { vendor: "claude" | "codex" | "grok" | "gemini"; email: string; plan: string; current: boolean; five_hour_pct?: number; weekly_pct?: number; reset_at?: string; at?: string; windows?: QuotaWindow[] };
 
 // 剩餘額度（#228，全部選填）：five_hour_pct／weekly_pct 是 0～100 的剩餘百分比，reset_at 是重置時間，at 是那台電腦記下數字的時間。
 // 只收 Claude。不合格的欄位單獨丟掉（不退回整份，免得額度壞掉拖累帳號清單）；沒有合格的百分比或沒有合格的 at 就整組不收。
@@ -64,7 +64,7 @@ export function parseQuota(a: Json): Pick<ReportedAccount, "five_hour_pct" | "we
   const reset = isoOrNull(a.reset_at, null);
   return { ...(five != null ? { five_hour_pct: five } : {}), ...(week != null ? { weekly_pct: week } : {}), ...(reset != null ? { reset_at: reset } : {}), at };
 }
-// 新版的額度窗（#374）：只收 claude、codex（grok 一律不收）。壞掉的單窗丟掉，不退回整份；同名只留第一個；最多 4 個。
+// 新版的額度窗（#374）：只收 claude、codex、gemini（grok 一律不收；gemini 只收 five_hour、weekly，#1515）。壞掉的單窗丟掉，不退回整份；同名只留第一個；最多 4 個。
 // 規則跟資料庫的 asn_relay_acct_windows_clean 相同（那邊會再檢查一次，並把 Codex 的 w300／w10080 轉成 five_hour／weekly）。
 export const MAX_WINDOWS = 4;
 const WINDOW_NAME_RE = /^(five_hour|weekly|w[0-9]{1,6})$/;
@@ -75,6 +75,7 @@ export function resetInRange(iso: string, now = Date.now()): boolean {
   const t = Date.parse(iso);
   return t >= now - RESET_PAST_MS && t <= now + RESET_FUTURE_MS;
 }
+const GEMINI_WINDOWS = new Set(["five_hour", "weekly"]);
 export function parseWindows(v: unknown, now = Date.now()): QuotaWindow[] {
   if (!Array.isArray(v)) return [];
   const out: QuotaWindow[] = [];
@@ -94,12 +95,15 @@ export function parseWindows(v: unknown, now = Date.now()): QuotaWindow[] {
   }
   return out;
 }
-// 回報的清單：每筆只留 vendor／email／plan／current（claude 另可帶額度四欄；claude、codex 另可帶 windows）；任何一筆不合格整份退回（回 null）
+// 回報的清單：每筆只留 vendor／email／plan／current（claude 另可帶額度四欄；claude、codex、gemini 另可帶 windows）；任何一筆不合格整份退回（回 null）
+const VENDORS = new Set(["claude", "codex", "grok", "gemini"]);
+// 舊的 asn_relay_acct_report／relay.asn_accounts 不收 gemini（有一筆就整份退回），呼叫前要先拿掉（#1515）
+export const LEGACY_VENDORS = new Set(["claude", "codex", "grok"]);
 export function parseReport(b: Json): ReportedAccount[] | null {
   if (!b || typeof b !== "object" || !Array.isArray(b.accounts) || b.accounts.length > MAX_ACCOUNTS) return null;
   const out: ReportedAccount[] = [];
   for (const a of b.accounts) {
-    if (!a || typeof a !== "object" || (a.vendor !== "claude" && a.vendor !== "codex" && a.vendor !== "grok")) return null;
+    if (!a || typeof a !== "object" || !VENDORS.has(a.vendor)) return null;
     const email = cleanEmail(a.email);
     if (!email) return null;
     let plan = "";
@@ -109,7 +113,8 @@ export function parseReport(b: Json): ReportedAccount[] | null {
     }
     if (a.current != null && typeof a.current !== "boolean") return null;
     // 清完一窗都不剩就不帶 windows，讓資料庫退回舊四欄（#524 審查）
-    const cleaned = a.vendor !== "grok" && Array.isArray(a.windows) ? parseWindows(a.windows) : [];
+    const parsed = a.vendor !== "grok" && Array.isArray(a.windows) ? parseWindows(a.windows) : [];
+    const cleaned = a.vendor === "gemini" ? parsed.filter((w) => GEMINI_WINDOWS.has(w.name)) : parsed;
     const windows = cleaned.length ? { windows: cleaned } : {};
     out.push({ vendor: a.vendor, email, plan, current: a.current === true, ...(a.vendor === "claude" ? parseQuota(a) : {}), ...windows });
   }
@@ -169,8 +174,8 @@ export async function handleAcctAction(deps: AcctDeps, me: { id: string }, actio
   if (action === "acct_report") {
     const accounts = parseReport(params);
     if (!accounts) return fail("bad_request");
-    // 舊的 asn_relay_acct_report 照舊（不帶 windows，交給它的內容跟以前一模一樣）
-    const legacy = accounts.map(({ windows: _w, ...rest }) => rest);
+    // 舊的 asn_relay_acct_report 照舊（不帶 windows、拿掉 gemini，交給它的內容跟以前一模一樣）；gemini 只寫帳號列表
+    const legacy = accounts.filter((a) => LEGACY_VENDORS.has(a.vendor)).map(({ windows: _w, ...rest }) => rest);
     const r = await call(deps, "asn_relay_acct_report", { p_node: me.id, p_accounts: legacy });
     if (isReply(r)) return r;
     await rosterReport(deps, me.id, accounts);
