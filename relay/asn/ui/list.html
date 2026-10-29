@@ -395,9 +395,16 @@
           <small class="partner-run-why" v-else-if="c.note">{{ c.note }}</small>
         </label>
       </fieldset>
+      <!-- #539 之四：選完廠牌與運行，這家有型號清單才出現（跟「切換模型」同一份）；預設不指定 -->
+      <label class="partner-model-pick" v-if="launchModel.show">型號
+        <select class="set-sel" v-model="partnerDlg.model" aria-label="型號">
+          <option value="">不指定（照預設）</option>
+          <option v-for="m in launchModel.models" :key="m.id" :value="m.id">{{ m.label }}</option>
+        </select>
+      </label>
       </div>
       <div v-show="partnerDlg.step === 3">
-      <p class="partner-sum">{{ dlgRow ? dlgRow.label : '' }}・{{ (partnerRun.options.find(o => o.key === partnerRunChoice) || {}).label }}<template v-if="partnerDlg.node &amp;&amp; partnerDlg.node !== selfNode &amp;&amp; partnerDlg.deviceLabel">・{{ partnerDlg.deviceLabel }}</template></p>
+      <p class="partner-sum">{{ dlgRow ? dlgRow.label : '' }}<template v-if="launchModel.show &amp;&amp; partnerDlg.model">（{{ (launchModel.models.find(m => m.id === partnerDlg.model) || {}).label }}）</template>・{{ (partnerRun.options.find(o => o.key === partnerRunChoice) || {}).label }}<template v-if="partnerDlg.node &amp;&amp; partnerDlg.node !== selfNode &amp;&amp; partnerDlg.deviceLabel">・{{ partnerDlg.deviceLabel }}</template></p>
       <!-- 經 pi（#351）：列出這家在 pi 的模型（打開對話框時向 pi 查的，不寫死）；預設第一個 -->
       <label v-if="partnerRunChoice === 'pi' &amp;&amp; piChoice.ok">pi 的模型
         <select class="set-sel" v-model="partnerDlg.piModel" aria-label="經 pi 開的模型">

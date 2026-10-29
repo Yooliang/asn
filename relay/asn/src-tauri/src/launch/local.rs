@@ -26,9 +26,17 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
     if !pi_model_args.is_empty() && prof.engine != "pi" {
         return Err("只有經 pi 開的夥伴能指定提供者與模型".into());
     }
+    let model_plan = launch_model_plan(prof.engine.as_str(), prof.mode == LaunchMode::Background, &req.model)?;
+    if model_plan != ModelPlan::None && !pi_model_args.is_empty() {
+        return Err("經 pi 開的夥伴請用 pi 的模型，不能另外指定型號".into());
+    }
     maybe_trust_claude_cwd(prof.engine.as_str(), &launch_req.cwd);
 
     if prof.mode == LaunchMode::Background {
+        // 選了型號：先記進 acp-models.json，工作者建起來時就套用（重開 ASN 也照這個型號）
+        if let ModelPlan::Record(m) = &model_plan {
+            crate::bridge::engines::acp_models::set(&work_dir.join(crate::bridge::engines::acp_models::MODELS_FILE), &req.name, m)?;
+        }
         enqueue_background(work_dir, &req.profile, &req.name, &launch_req.cwd)?;
         return Ok(json!({ "ok": true, "mode": "background", "queued": true }));
     }
@@ -48,6 +56,9 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
         }
         return Ok(out);
     }
+    if let ModelPlan::Arg(m) = &model_plan {
+        args = with_model_arg(&args, m);
+    }
     // 預設接續同名夥伴上一段對話（issue #82）；沒有舊對話才新開
     let resumed = if req.fresh { None } else { super::resume::apply_resume_real(&mut args, &command, prof.engine.as_str(), &req.name, &launch_req.cwd) };
     let pid = start_window(&req.name, &command, &args, &cwd, display_bg)?;
@@ -58,6 +69,59 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
         "resumed": resumed.is_some(),
         "display": if display_bg { "background" } else { "foreground" }
     }))
+}
+
+/// 開新夥伴選了型號要怎麼帶（#539 之四）
+#[derive(Debug, PartialEq)]
+pub(crate) enum ModelPlan {
+    /// 沒選（照原本的開法）
+    None,
+    /// Claude 視窗：啟動參數帶 `--model <代號>`
+    Arg(String),
+    /// 內建通道（背景）工作者：記進 acp-models.json，建工作者時套用
+    Record(String),
+}
+
+/// 型號要怎麼帶：空＝不指定；代號只收英數與 . _ -（英數開頭、60 字內）；
+/// 背景模式（Gemini 等內建通道）記下來；視窗只有 Claude 收 `--model`（Codex 的參數包在 cmd /c 與 resume 子指令裡，先不做）
+pub(crate) fn launch_model_plan(engine: &str, background: bool, model: &str) -> Result<ModelPlan, String> {
+    let m = model.trim();
+    if m.is_empty() {
+        return Ok(ModelPlan::None);
+    }
+    if !crate::bridge::engines::acp_models::valid_model(m) {
+        return Err("型號代號格式不對（只能用英數與 . _ -）".into());
+    }
+    if background {
+        return Ok(ModelPlan::Record(m.to_string()));
+    }
+    match engine {
+        "claude" | "" => Ok(ModelPlan::Arg(m.to_string())),
+        _ => Err("這個廠牌開新夥伴時不能指定型號".into()),
+    }
+}
+
+/// 把啟動參數裡原有的 `--model <值>`／`--model=<值>` 拿掉，最後補上 `--model <代號>`（profile 自己寫了 --model 也以這次選的為準）
+pub(crate) fn with_model_arg(args: &[String], model: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(args.len() + 2);
+    let mut skip = false;
+    for a in args {
+        if skip {
+            skip = false;
+            continue;
+        }
+        if a == "--model" {
+            skip = true;
+            continue;
+        }
+        if a.starts_with("--model=") {
+            continue;
+        }
+        out.push(a.clone());
+    }
+    out.push("--model".into());
+    out.push(model.to_string());
+    out
 }
 
 /// 遠端開視窗（內建收發室橋）用：驗證（profile、名字、白名單、上限）都已在呼叫端做完，
@@ -389,6 +453,30 @@ fn pick_linux_terminal() -> Option<Term> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sv(a: &[&str]) -> Vec<String> {
+        a.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn 開新夥伴選型號_claude視窗帶model_內建通道記下_其他廠牌報錯() {
+        assert_eq!(launch_model_plan("claude", false, ""), Ok(ModelPlan::None));
+        assert_eq!(launch_model_plan("claude", false, "  "), Ok(ModelPlan::None), "空白＝不指定");
+        assert_eq!(launch_model_plan("claude", false, "sonnet"), Ok(ModelPlan::Arg("sonnet".into())));
+        assert_eq!(launch_model_plan("", false, "opus"), Ok(ModelPlan::Arg("opus".into())), "沒寫 engine 的自訂 profile 視為 Claude");
+        assert_eq!(launch_model_plan("gemini", true, "gemini-3.8-flash-high"), Ok(ModelPlan::Record("gemini-3.8-flash-high".into())));
+        assert!(launch_model_plan("codex", false, "gpt-5.5").is_err(), "Codex 視窗先不帶型號");
+        assert!(launch_model_plan("claude", false, "--dangerously").is_err(), "不能以 - 開頭（會被當成旗標）");
+        assert!(launch_model_plan("claude", false, "a b").is_err());
+    }
+
+    #[test]
+    fn 帶型號_拿掉原有的model_補在最後() {
+        let a = sv(&["--dangerously-skip-permissions", "-n", "小乙", "--model", "opus", "--remote-control", "小乙"]);
+        assert_eq!(with_model_arg(&a, "haiku"), sv(&["--dangerously-skip-permissions", "-n", "小乙", "--remote-control", "小乙", "--model", "haiku"]));
+        assert_eq!(with_model_arg(&sv(&["--model=opus", "-n", "x"]), "sonnet"), sv(&["-n", "x", "--model", "sonnet"]));
+        assert_eq!(with_model_arg(&[], "sonnet"), sv(&["--model", "sonnet"]));
+    }
 
     fn decode(enc: &str) -> String {
         use base64::Engine;

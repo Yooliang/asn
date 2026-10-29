@@ -19,16 +19,17 @@ import { POLL_MS as SECRET_POLL_MS, TEXT as SECRET_TEXT, countdownText as secret
 import { POLL_MS as TQ_POLL_MS, TEXT as TERMREQ_TEXT, countdownText as tqCountdownText, decideArgs as tqDecideArgs, errorText as tqError, normalizeList as tqList, nextToAsk as tqNext } from './lib/term-ask.mjs'
 import { friendId } from './lib/roster.mjs'
 import { restoreMobileTab } from './lib/session.mjs'
-import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, showsInSheet } from './lib/mobile-ops.mjs'
+import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneBarSlots, phoneModels, phoneOpsRows, renamedChatId, runBanner, showsInSheet } from './lib/mobile-ops.mjs'
+import { groupMenuItems } from './lib/actionbar.mjs'
+import { canCallPartner } from './lib/mobile-call.mjs'
 import { OP_LABEL, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, opFormError, dialogEngine, partnerEngine, piModelChoices, sharedWhy } from './lib/partner-ops.mjs'
 import { cleanPiModels } from './lib/pi-models.mjs'
-import { BUDDY_CONSOLE_LABEL } from './lib/partner-launch-ui.mjs'
 import { fetchRoster, ROSTER_POLL_MS } from './lib/account-roster.mjs'
 import { ACCT_TEXT, ACCT_PAGE_TITLE, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS } from './lib/mobile-acct.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, dropSlot, moveDevice, moveFlags, pruneRemoved, removeDevice, removedRows, reorderDevice, restoreDevice, showDevice, visibleRows, canRemoveRow, DEVICE_TEXT } from './lib/device-order.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
-import { opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
+import { acpSwitchChoices, opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
 import { defaultPartnerName } from './lib/partner.mjs'
 import { groupHeading, statusNote } from './lib/tabs.mjs'
 import { emo, plain } from './lib/text.mjs'
@@ -326,7 +327,7 @@ const app = createApp({
     const groupItems = computed(() => {
       const f = chatFriend.value
       if (!f) return []
-      if (f.room) return [{ key: 'invite', label: '邀請別人加入' }, { key: 'addai', label: '加我的另一個 AI' }, { key: 'manage', label: '成員與設定' }]
+      if (f.room) return groupMenuItems(f)   // 跟電腦版「群組」按鈕同一份（#539 之四）
       return canInviteFrom(f) ? [{ key: 'invite', label: '邀請別人加入' }] : []
     })
     function pickGroup(key) {
@@ -334,7 +335,8 @@ const app = createApp({
       if (!f) return
       history.back()   // 先收起「⋯」選單，再開群組對話框
       setTimeout(() => {
-        if (key === 'manage' && f.room) groupFlow.openManage(roomIdOf(f.id))
+        if (key === 'join' && f.room) groupFlow.openJoin()
+        else if (key === 'manage' && f.room) groupFlow.openManage(roomIdOf(f.id))
         else if (key === 'addai' && f.room) groupFlow.openManage(roomIdOf(f.id), { focusAdd: true })
         else if (f.room) groupFlow.openInvite({ type: 'room', roomId: roomIdOf(f.id), name: f.nick })
         else groupFlow.openInvite({ type: 'friend', friend: f })
@@ -657,11 +659,22 @@ const app = createApp({
     // 判斷全部用 lib/partner-ops.mjs 的 menuItems／opFormError／progressView，手機不另寫一套。手機只下指令，視窗在那台電腦上
     const opsCtx = computed(() => ({ machines: lchData.machines, loaded: lchData.loaded, signedIn: acctSigned(), authError: acct.value.error, friends: friends.value, nonWindowNodes: [info.node] }))
     const opsItems = computed(() => (chatFriend.value ? manageItems(chatFriend.value, opsCtx.value) : []))
-    // 選單畫面上的列：最前面固定「背景／前台切換」（手機不能切換，永遠反灰並說明），接著 manageItems 的全部項目，順序和電腦版一致
-    const opsRows = computed(() => (opsItems.value.length ? [{ key: 'console', label: BUDDY_CONSOLE_LABEL, ok: false, reason: '手機不能切換視窗的前景或背景，要到放著這個視窗的電腦上操作' }, ...opsItems.value] : []))
+    // 選單畫面上的列（#539 之四）：前台／後台與切換模型已搬到大按鈕列，這裡只留其他管理項目，順序和電腦版一致
+    const opsRows = computed(() => phoneOpsRows(opsItems.value))
+    // 對話頁的大按鈕列：跟電腦版同一套 barSlots（6 格；群組只有「群組」），反灰與原因都一樣
+    const barView = computed(() => phoneBarSlots(chatFriend.value, { callable: !!callApi && canCallPartner(chatFriend.value), ops: opsCtx.value, manageCount: opsRows.value.length }))
+    // 大按鈕的可按條件要各台電腦的在線與開放狀態：對話頁換到一位夥伴時，還沒查過就查一次（「⋯」打開時照舊會再查）
+    watch(() => chatFriend.value?.id, id => { if (id && !chatFriend.value?.room && !lchData.loaded) void loadLaunchers() }, { immediate: true })
+    function onBar(key) {
+      const s = barView.value.find(x => x.key === key)
+      if (!s?.ok) return
+      if (key === 'manage' || key === 'group') { openOps(); return }
+      if (key === 'model') { openOps(); pickOp('model') }
+    }
     const opsView = computed(() => sharedWhy(opsRows.value))   // 同一個原因只在選單最上方寫一次
     const ops = reactive({ phase: 'menu', newName: '', note: '', ack: false, model: '', error: '', view: null })
-    const opsText = computed(() => opDialogText(ops.phase, chatFriend.value?.agent || chatFriend.value?.nick || '', chatFriend.value?.device || '', dialogEngine(chatFriend.value)))
+    const opsAcp = computed(() => acpSwitchChoices(chatFriend.value))   // 內建通道工作者的型號清單（Gemini 有、Grok 沒有＝手動輸入），跟電腦版同一份
+    const opsText = computed(() => opDialogText(ops.phase, chatFriend.value?.agent || chatFriend.value?.nick || '', chatFriend.value?.device || '', dialogEngine(chatFriend.value), { hasList: opsAcp.value.models.length > 0 }))
     const opsTitle = computed(() => (ops.phase === 'menu' ? (chatFriend.value?.nick ?? '') : opsText.value.title || OP_LABEL[ops.phase] || ''))
     const opsModels = phoneModels(), opsModelNote = MODEL_NOTE
     const opsIsPi = computed(() => ['pi', 'acp'].includes(partnerEngine(chatFriend.value)))   // pi 與內建通道的工作者沒有固定的模型清單：改成輸入框（Claude 的常用清單對它們不適用）
@@ -690,6 +703,7 @@ const app = createApp({
       if (opStep(op) === 'run') void submitOp(op)
       else {
         if (op === 'model' && opsPiChoices.value.groups.length) ops.model = opsPiChoices.value.selected
+        if (op === 'model' && opsAcp.value.models.length) ops.model = opsAcp.value.selected
         ops.phase = op
       }
     }
@@ -700,6 +714,8 @@ const app = createApp({
       const input = { newName: ops.newName, model: ops.model, note: ops.note, ack: ops.ack }
       const piGroups = op === 'model' ? opsPiChoices.value.groups : []
       if (piGroups.length && !piGroups.some(g => g.options.some(o => o.value === input.model))) { ops.error = PI_MODEL_PICK_ERR; return }
+      const acpList = op === 'model' ? opsAcp.value.models : []
+      if (acpList.length && !acpList.some(m => m.id === input.model)) { ops.error = '請從清單選一個模型'; return }
       const err = opFormError(f, op, input, item)
       if (err) { ops.error = err; return }
       const token = ++opsToken
@@ -952,7 +968,7 @@ const app = createApp({
       nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, STATUS, headTone, CONN_LABEL, info, banner, shake, refreshing,
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
-      avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, opsView, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
+      avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, opsView, barView, onBar, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       acctSw, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, ACCT_PAGE_TITLE, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,

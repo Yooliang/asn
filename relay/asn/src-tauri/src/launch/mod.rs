@@ -61,6 +61,9 @@ pub struct LocalLaunchReq {
     pub pi_provider: String,
     #[serde(default)]
     pub pi_model: String,
+    /// 開新夥伴選的型號（#539 之四，空＝不指定）：Claude 視窗帶 `--model`，內建通道記進 acp-models.json；其他廠牌給了就報錯
+    #[serde(default)]
+    pub model: String,
 }
 
 #[derive(Serialize, Deserialize)]

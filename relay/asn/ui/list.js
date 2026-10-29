@@ -54,7 +54,7 @@ import { friendId } from './lib/roster.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher } from './lib/model-switch.mjs'
 import { WINDOW_LABEL, barSlots, consoleBlock, modelViaPartnerOp, partnerMenuItems } from './lib/actionbar.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
-import { channelRows, runChoices, runOptions, vendorRows } from './lib/model-catalog.mjs'
+import { channelRows, launchModelChoices, runChoices, runOptions, vendorRows } from './lib/model-catalog.mjs'
 import { cleanPiModels, piChoiceFor, piLaunchArgs, piOnlyVendorRows, providerStates } from './lib/pi-models.mjs'
 import { PI_REMOTE_VERSION_NOTE, buildLaunchRequest as remoteLaunchRequest, launchPiChoice, launchRun, launchVendors } from './lib/mobile-launch.mjs'
 import { createMic } from './lib/mic.mjs'
@@ -437,7 +437,7 @@ const launchToolRows = computed(() => MODEL_CATALOG.map(m => modelUiRow(m, cliTo
 const partnerModels = computed(() => launchToolRows.value)
 // 對話框裡的模型列：本機看偵測到的 CLI；別台設備看那台回報的 profile
 const dlgModels = computed(() => (partnerDlg.node && partnerDlg.node !== info.node ? remoteModelRows(remoteLaunchers.value[partnerDlg.node]) : partnerModels.value))
-const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '', display: 'foreground', run: '', step: 1, piModel: '', vendor: '' })
+const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '', display: 'foreground', run: '', step: 1, piModel: '', vendor: '', model: '' })
 const partnerFgOnly = computed(() => partnerDlg.node === info.node && foregroundOnlyProfile(partnerDlg.profile))
 // 「運行」四選一（#351、小良哥 10/27 定案）：內建通道 ＞ 經 pi ＞ ASN 開的終端（進階）＞ 自己開的 CLI（只作說明，永遠不能選）。
 // 目錄決定哪個能選；不能選的灰掉並寫原因；第一個能選的標「建議」。
@@ -491,6 +491,9 @@ const partnerRunChoice = computed(() => {
   return cur ? cur.key : partnerRun.value.selected
 })
 const partnerRunModel = computed({ get: () => partnerRunChoice.value, set: v => { partnerDlg.run = v } })   // 預設選項要真的勾起來
+// 第 2 頁「型號」（#539 之四）：這家有清單、開在這台、運行對得上才出現；預設＝不指定（照原本的開法）。清單跟「切換模型」同一份（switchModelsFor）
+const launchModel = computed(() => launchModelChoices(dlgRow.value?.id, partnerRunChoice.value, { local: partnerDlg.node === info.node }))
+const launchModelPick = computed(() => (launchModel.value.show && launchModel.value.models.some(m => m.id === partnerDlg.model) ? partnerDlg.model : ''))
 const partnerCanRun = computed(() => { const o = partnerRun.value.options.find(x => x.key === partnerRunChoice.value); return Boolean(o && o.ok && o.key !== 'self') })
 const TERM_WEZ_TOOLS = ['grok', 'agy']   // 後端 term_start 只收這兩個
 const partnerChannels = computed(() => channelRows(dlgModels.value.find(m => m.profileId === partnerDlg.profile)))   // #351：這個模型三條通道的狀態，只顯示說明
@@ -529,6 +532,7 @@ function pickPartnerModel(m) {
   partnerDlg.vendor = m.id
   partnerDlg.profile = m.profileId
   partnerDlg.run = ''
+  partnerDlg.model = ''
   partnerDlg.modeLabel = m.modeLabel
   partnerDlg.name = defaultPartnerName(friends.value, m.viaPiOnly ? m.id : m.profileId)
   // pi 是互動式，只能前台；換回其他模型時還原成使用者上次的選擇
@@ -796,7 +800,7 @@ async function submitPartnerDlg() {
       if (partnerRunChoice.value === 'pi' && !viaPi) throw new Error('pi 的模型清單裡沒有這個模型，請重新選一次')
       await transport.partnerLaunchLocal(viaPi
         ? { profile: 'pi', name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, display: 'foreground', first_message: partnerDlg.firstMessage.trim(), pi_provider: viaPi.provider, pi_model: viaPi.model }
-        : { profile: partnerDlg.profile, name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, display, first_message: foregroundOnly ? partnerDlg.firstMessage.trim() : '' })
+        : { profile: partnerDlg.profile, name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, display, first_message: foregroundOnly ? partnerDlg.firstMessage.trim() : '', ...(launchModelPick.value ? { model: launchModelPick.value } : {}) })
     } else {
       // 經 pi：profile 一律 pi，帶那台清單裡的提供者與模型（不在清單裡就不送）；其他開法照舊
       const body = remoteLaunchRequest({ node: partnerDlg.node, profile: partnerDlg.profile, name: partnerDlg.name, cwd: partnerDlg.cwd, first: partnerDlg.firstMessage, piModel: partnerDlg.piModel }, { run: partnerRunChoice.value, row: dlgRow.value, launcher: dlgRemoteLauncher.value })
@@ -1679,7 +1683,7 @@ const app = createApp({
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
       termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termsClose, termSendAsk, termSendPhone, termSendBack, termSendConfirm, SEND_MAX,
       termPane, termPaneRow, termPaneActive, termRoster, termComposer, openTermTab, termPaneAnswer, termTimeline, entryLabel,
-      dlgRow, dlgVendors, dlgRemote, PI_REMOTE_VERSION_NOTE, piChoice, partnerRunChoice, partnerRunModel, partnerCanRun, termWaitCount, openWaitingTerm,
+      dlgRow, dlgVendors, dlgRemote, PI_REMOTE_VERSION_NOTE, piChoice, partnerRunChoice, partnerRunModel, partnerCanRun, launchModel, termWaitCount, openWaitingTerm,
       adopt, adoptLoad, adoptClose, adoptDo, adoptRelease, adoptUnlockAsk, adoptUnlockCancel, adoptUnlockConfirm, UNLOCK_TEXT,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,

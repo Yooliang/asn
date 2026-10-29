@@ -6,6 +6,7 @@ import { machinesByNode } from './mobile-launch.mjs'
 import { launchersErrorText } from './launcher-poll.mjs'
 import { ACP_NEWCONV_LABEL, ADOPT_ACK, PI_ADOPT_ACK, OP_LABEL, OP_POLL_MS, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, buildOpRequest, dialogEngine, infoRows, opErrorText, opFormError, piModelChoices, progressView } from './partner-ops.mjs'
 import { cleanPiModels } from './pi-models.mjs'
+import { switchModelsFor } from './model-catalog.mjs'
 
 const errText = e => String(e?.message ?? e ?? '').replace(/\s+/g, ' ').trim().slice(0, 80) || '原因不明'
 
@@ -48,12 +49,23 @@ export async function runPartnerOp(api, friend, op, input, { onUpdate = () => {}
 }
 
 // 各動作的對話框文字（給人看；device＝設備名）。confirm＝要先確認；auto＝不用確認直接送出
-export function opDialogText(op, name, device = '', engine = 'claude') {
+/**
+ * 內建通道工作者「切換模型」的清單（#539 之四）：讀 switchModelsFor(名單上的 engine，例如 gemini)；沒有清單（grok 等）回空陣列＝手動輸入。
+ * selected：目前的模型在清單裡就選它，否則第一個。回 { models, selected }
+ */
+export function acpSwitchChoices(friend) {
+  if (dialogEngine(friend) !== 'acp') return { models: [], selected: '' }
+  const models = switchModelsFor(friend?.engine)
+  const cur = String(friend?.model ?? '')
+  return { models, selected: models.some(m => m.id === cur) ? cur : (models[0]?.id ?? '') }
+}
+
+export function opDialogText(op, name, device = '', engine = 'claude', { hasList = false } = {}) {
   const where = device ? `在「${device}」上的` : ''
   const title = { info: `${name} 的詳情`, rename: '改名', close: '關閉視窗', handover: '換班接手', resume: '喚醒', restart: '重開', remove: '移除' }[op] ?? OP_LABEL[op] ?? ''
   switch (op) {
     case 'model': if (engine === 'acp') return {
-      title, lead: `要把「${name}」${where}內建通道的工作者換成哪個模型？請輸入模型代號，例如 grok-4.6 或 gemini-3.8-flash-high。`, ok: '切換', auto: false, placeholder: '例如 grok-4.6',
+      title, lead: hasList ? `要把「${name}」${where}內建通道的工作者換成哪個模型？` : `要把「${name}」${where}內建通道的工作者換成哪個模型？請輸入模型代號，例如 grok-4.6 或 gemini-3.8-flash-high。`, ok: '切換', auto: false, placeholder: '例如 grok-4.6',
       points: ['只能選這個工作者列得出來的模型；不在清單裡會被拒絕，並列出可以選的', 'Grok 直接換，不會重開；Gemini 會帶同一段對話短暫重開（幾秒）', '工作者正在處理信件時不能換，等它做完再試', '選好的會記下來，重開 ASN 也照新的模型'],
     }
     return {
@@ -107,8 +119,10 @@ export const PartnerOpDialog = {
   setup(props, { emit }) {
     const { ref, reactive, computed, onMounted, onBeforeUnmount } = globalThis.Vue
     const name = props.friend.agent || props.friend.nick
-    const text = computed(() => opDialogText(props.op, name, props.friend.device, dialogEngine(props.friend)))
-    const form = reactive({ newName: name, note: '', ack: false, model: '' })
+    const acp = props.op === 'model' ? acpSwitchChoices(props.friend) : { models: [], selected: '' }
+    const acpModels = acp.models
+    const text = computed(() => opDialogText(props.op, name, props.friend.device, dialogEngine(props.friend), { hasList: acpModels.length > 0 }))
+    const form = reactive({ newName: name, note: '', ack: false, model: acp.selected })
     const st = reactive({ phase: 'form', error: '', busy: false, view: null })
     // pi 切換模型的下拉選單：查得到清單才用（null＝還在查或查不到，畫輸入框）
     const isPiModel = props.op === 'model' && dialogEngine(props.friend) === 'pi'
@@ -116,7 +130,7 @@ export const PartnerOpDialog = {
     const piNote = computed(() => (isPiModel && !pi.loading && !pi.groups ? PI_MODEL_REMOTE_NOTE : ''))
     async function loadPiModels() {
       try {
-        const c = piModelChoices(cleanPiModels(await props.piModels()), props.friend.model)
+        const c = piModelChoices(switchModelsFor('pi', { piModels: cleanPiModels(await props.piModels()) }), props.friend.model)
         if (c.groups.length) { pi.groups = c.groups; form.model = c.selected }
       } catch (e) { console.info('[ASN] 查 pi 模型清單失敗，改用輸入框', e?.message ?? e) }
       pi.loading = false
@@ -125,6 +139,7 @@ export const PartnerOpDialog = {
     async function submit() {
       if (st.busy) return
       if (pi.groups && !pi.groups.some(g => g.options.some(o => o.value === form.model))) { st.error = PI_MODEL_PICK_ERR; return }
+      if (acpModels.length && !acpModels.some(m => m.id === form.model)) { st.error = '請從清單選一個模型'; return }
       const err = opFormError(props.friend, props.op, form, props.item)
       if (err) { st.error = err; return }
       st.error = ''; st.busy = true; st.phase = 'progress'
@@ -139,7 +154,7 @@ export const PartnerOpDialog = {
       if (pi.loading) void loadPiModels()
     })
     onBeforeUnmount(() => { closed = true })
-    return { text, form, st, submit, close, name, pi, piNote }
+    return { text, form, st, submit, close, name, pi, piNote, acpModels }
   },
   template: `
 <asn-dialog :title="text.title" @close="close">
@@ -148,7 +163,12 @@ export const PartnerOpDialog = {
     <label class="op-field" v-if="op === 'rename'">新名字
       <input class="set-input" type="text" v-model="form.newName" maxlength="40" aria-label="新名字" @keydown.enter.prevent="submit">
     </label>
-    <label class="op-field" v-if="op === 'model' && pi.groups">模型
+    <label class="op-field" v-if="op === 'model' && acpModels.length">模型
+      <select class="set-sel" v-model="form.model" aria-label="模型">
+        <option v-for="m in acpModels" :key="m.id" :value="m.id">{{ m.label }}</option>
+      </select>
+    </label>
+    <label class="op-field" v-else-if="op === 'model' && pi.groups">模型
       <select class="set-sel" v-model="form.model" aria-label="模型">
         <optgroup v-for="g in pi.groups" :key="g.provider" :label="g.provider"><option v-for="o in g.options" :key="o.value" :value="o.value">{{ o.label }}</option></optgroup>
       </select>
