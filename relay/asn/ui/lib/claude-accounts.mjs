@@ -3,7 +3,7 @@
 // 帳號以 email 識別；介面只會拿到 email／方案／是否使用中，權杖不經過前端。
 import { quotaOf } from './account-quota.mjs'
 
-export const SWITCH_NOTICE = '開著的 Claude 視窗要關掉重開，才會用新帳號。'
+export const SWITCH_NOTICE = '已切換，開著的 Claude 視窗不用重開。'
 
 export function accountLine(a) {
   return [a.email, a.plan].filter(Boolean).join(' · ')
@@ -26,7 +26,7 @@ export function remoteStatusText(st, email = '') {
   switch (st?.status) {
     case 'pending': return '已送出，等對方電腦取走指令…'
     case 'taken': return '對方電腦正在等使用者按確認…'
-    case 'ok': return `對方已切換到 ${email}。對方開著的 Claude 視窗要關掉重開，才會用新帳號。`
+    case 'ok': return `對方已切換到 ${email}。對方開著的 Claude 視窗不用重開。`
     case 'denied': return '對方電腦上的使用者沒有同意。'
     case 'failed': return `切換失敗：${st.detail || '原因不明'}`
     default: return ''

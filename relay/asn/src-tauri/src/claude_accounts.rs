@@ -535,7 +535,7 @@ pub fn switch_impl(home: &Path, email: &str, fault: Fault) -> R<SwitchOutcome> {
             AccErr::from(e)
         });
     }
-    Ok(SwitchOutcome { email, notice: "切換好了。開著的 Claude 視窗要關掉重開，才會用新帳號。".into() })
+    Ok(SwitchOutcome { email, notice: "切換好了，開著的 Claude 視窗不用重開。".into() })
 }
 
 /// 還原到最近一次切換之前：把切換前的備份（`.asn\\claude-backup`，只留最近一次）寫回去。
@@ -547,7 +547,7 @@ pub fn undo_last_switch(home: &Path) -> R<String> {
     if let Ok(t) = std::fs::read(bk.join("claude.json")) {
         write_atomic(&cj_path(home), &t)?;
     }
-    Ok("已還原到切換前的帳號。開著的 Claude 視窗要關掉重開，才會用還原後的帳號。".into())
+    Ok("已還原到切換前的帳號，開著的 Claude 視窗不用重開。".into())
 }
 
 static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -786,7 +786,7 @@ mod tests {
         let before = read(cj_path(h));
         let out = switch_to(h, "B@x.test").unwrap();
         assert_eq!(out.email, "b@x.test");
-        assert!(out.notice.contains("重開"));
+        assert!(out.notice.contains("不用重開"));
         assert_eq!(read(cred_path(h)), cred("B1"));
         assert_eq!(read(dir_of(h, "a@x.test").join(CRED)), cred("A2"), "甲的最新權杖要回存");
         let after = read(cj_path(h));
