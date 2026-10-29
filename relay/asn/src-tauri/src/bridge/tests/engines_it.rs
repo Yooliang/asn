@@ -496,6 +496,24 @@ async fn agy_沒登入_額度用完_回報並標示狀態_通知指定的人() {
 }
 
 #[tokio::test]
+async fn agy_登入失效_自動重開一次把同一封信再試_成功就不報需要登入_一小時內不重複重開() {
+    let dir = tempfile::tempdir().unwrap();
+    let m1 = dir.path().join("once1").display().to_string();
+    let m2 = dir.path().join("once2").display().to_string();
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    // 第一封：舊驅動回 401，自動重開後同一封信成功；寄件人只看到正常回覆
+    h.put_pull(to_agent(1, "Gemini", &format!("@@AUTH_ONCE {m1}"))).await;
+    h.wait("重試後成功", |h| h.bodies().iter().any(|b| b.contains("收到：") && b.contains("AUTH_ONCE"))).await;
+    assert!(!h.bodies().iter().any(|b| b.contains("需要登入")), "{:?}", h.bodies());
+    h.set.refresh_all().await;
+    h.core.refresh_roster(now()).await;
+    assert_eq!(h.last_roster()["agents"][0]["status"], "idle");
+    // 第二封又 401：一小時內已經自動重開過，不再重開，照舊回報需要登入
+    h.put_pull(to_agent(2, "Gemini", &format!("@@AUTH_ONCE {m2}"))).await;
+    h.wait("需要登入", |h| h.bodies().iter().any(|b| b.contains("需要登入"))).await;
+}
+
+#[tokio::test]
 async fn agy_太久沒動靜_中止並回報_行程崩潰_回報_之後仍可用() {
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({"turn_timeout_ms": 1500}))])), &[], "acp", &[]).await;
     h.put_pull(to_agent(1, "Gemini", "@@SLEEP")).await;

@@ -11,6 +11,8 @@ use std::sync::{Arc, Mutex};
 const MAX_REPLY_CHARS: usize = 18_000; // 仲介單封上限 20000 字
 const OWNER_NOTICE_COOLDOWN_MS: u64 = 3_600_000;
 const REVIVE_AFTER_MS: u64 = 60_000;
+/// 登入失效（401）自動重開驅動的冷卻：每個工作者一小時最多一次（#517）
+const AUTH_RETRY_COOLDOWN_MS: u64 = 60 * 60 * 1000;
 const KEEPALIVE_MS: u64 = 20_000;
 
 fn now_ms() -> u64 {
@@ -203,6 +205,8 @@ struct St {
     start_error: String,
     /// 實際要用的模型：啟動時＝設定（已套用 acp-models.json 記下的），遠端「切換模型」後換成新的。下次啟動驅動就用它
     model: String,
+    /// 最近一次「登入失效（401）自動重開驅動再試一次」的時間；一小時內不重複，登入真的壞了才不會一直重開（#517）
+    auth_retry_at: u64,
 }
 
 pub struct WorkerInit {
@@ -247,6 +251,7 @@ impl Worker {
                 handover: None,
                 start_error: String::new(),
                 model: i.cfg.model.clone(),
+                auth_retry_at: 0,
             }),
             i,
             start_lock: tokio::sync::Mutex::new(()),
@@ -550,6 +555,17 @@ impl Worker {
         format!("\n\n（備註：{} 想做的這些動作依這個工作者的政策被拒絕了：\n{}）", self.i.cfg.name, denied.iter().take(5).map(|d| format!("- {}", d.summary)).collect::<Vec<_>>().join("\n"))
     }
 
+    /// 這次可不可以做「登入失效自動重開」：距上次超過一小時才行，行就記下時間
+    fn take_auth_retry(&self) -> bool {
+        let mut s = self.st.lock().unwrap();
+        let now = now_ms();
+        if now.saturating_sub(s.auth_retry_at) < AUTH_RETRY_COOLDOWN_MS && s.auth_retry_at != 0 {
+            return false;
+        }
+        s.auth_retry_at = now;
+        true
+    }
+
     async fn run_turn(self: &Arc<Self>, job: &Job) -> Result<TurnResult, WorkerError> {
         let cfg = self.i.cfg.clone();
         self.st.lock().unwrap().turn_grant.clear();
@@ -568,8 +584,21 @@ impl Worker {
                 self.i.store.set(&cfg, &id);
             }
         };
-        let r = d.turn(format!("{first}{}", job.text), cfg.turn_timeout_ms, cfg.turn_max_ms).await;
+        let mut r = d.turn(format!("{first}{}", job.text), cfg.turn_timeout_ms, cfg.turn_max_ms).await;
         remember(&d);
+        // 登入失效（401）：長時間跑的驅動憑證到期，換一個新的驅動（重新讀登入）把同一封信再試一次；重開後還失效才報「需要登入」。
+        // 每個工作者一小時最多自動重開一次，不無限重試（#517）
+        if r.as_ref().err().map(|e| e.code == "auth").unwrap_or(false) && self.take_auth_retry() {
+            self.log("登入失效（401）：自動重開驅動再試一次");
+            let old = self.st.lock().unwrap().driver.take();
+            if let Some(old) = old {
+                old.stop();
+            }
+            d = self.ensure_driver(self.base_full()).await?;
+            r = d.turn(format!("{first}{}", job.text), cfg.turn_timeout_ms, cfg.turn_max_ms).await;
+            remember(&d);
+            self.log(if r.is_ok() { "重開後恢復正常" } else { "重開後仍然登入失效" });
+        }
         let mut res = r?;
         {
             let mut s = self.st.lock().unwrap();

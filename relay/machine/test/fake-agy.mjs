@@ -3,6 +3,7 @@
 //   @@WRITE <路徑>   送出寫檔工具步驟，150ms 後才真的寫（絆線測試：被殺就不會有檔案）
 //   @@RUN <指令>     送出執行指令步驟；沒帶 --dangerously-skip-permissions 就被「權限拒絕」（空回覆＋denied_actions）
 //   @@AUTH / @@QUOTA 回 status=ERROR 的 result 並結束（結束碼 1）
+//   @@AUTH_ONCE <路徑>  第一次（那個檔案還不存在）建檔並回登入失效，之後（檔案在了）照一般信處理：模擬「舊行程憑證過期、新行程正常」（#517）
 //   @@SLEEP          送出一個步驟之後就不再有動靜（看門狗測試）
 //   @@GATE <路徑>    送出一個進行中的步驟，等到那個檔案出現才繼續（測試建檔＝放行）；放行後照一般信處理，回覆不含這個暗號
 //   @@CRASH          往 stderr 寫字然後結束碼 3
@@ -85,7 +86,8 @@ async function handle(line) {
   }
   if (/@@HEAD/.test(body)) return resultOf(content.split('\n').find(l => l.startsWith('[RELAY 來信]')) ?? '')
   if (/授權已核可/.test(body)) return resultOf(`ran-after-grant (${flags})`)
-  if (/@@AUTH/.test(body)) return fail('not logged in: run `agy` and sign in with your Google account (authentication required)', 1)
+  if ((t = /@@AUTH_ONCE\s+(\S+)/.exec(body)) && !fs.existsSync(t[1])) { fs.writeFileSync(t[1], 'x'); return fail('UNAUTHENTICATED (code 401): Request had invalid authentication credentials (authentication required)', 1) }
+  if (/@@AUTH(?!_ONCE)/.test(body)) return fail('not logged in: run `agy` and sign in with your Google account (authentication required)', 1)
   if (/@@QUOTA/.test(body)) return fail('RESOURCE_EXHAUSTED: quota exceeded for this account', 1)
   if (/@@CRASH/.test(body)) { process.stderr.write('fatal: boom\n'); process.exit(3) }
   if (/@@SLEEP/.test(body)) { out({ event: 'step_update', step_update: { conversation_id: conv, step_index: step++, state: 'ACTIVE', step_type: 'agent_response', text_delta: 'zzz' } }); return }
