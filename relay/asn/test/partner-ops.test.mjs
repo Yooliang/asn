@@ -328,6 +328,8 @@ test('換班接手完成：ACP 工作者沒有請前任寫交接，說明新對�
 test('換班接手完成：結果說出新視窗用的模型（和前任一樣）；沒回報模型就不寫', () => {
   const v = progressView({ status: 'ok', result: { handoff_path: 'C:/h/x.md', handoff_done: true, model: 'claude-opus-5-5' } }, { op: 'handover' })
   assert.deepEqual(v.extra, ['交接檔：C:/h/x.md', '新視窗用的模型：claude-opus-5-5（和前任一樣）'])
+  assert.deepEqual(progressView({ status: 'ok', result: { handoff_done: true, model: 'opus[1m]', model_basis: 'launch_same' } }, { op: 'handover' }).extra, ['新視窗用的模型：opus[1m]（和前任一樣）'])
+  assert.deepEqual(progressView({ status: 'ok', result: { handoff_done: true, model: 'opus', model_basis: 'launch' } }, { op: 'handover' }).extra, ['新視窗用的模型：opus（讀不到前任現在用的，沿用它啟動時的設定）'], '退回啟動參數時不寫「和前任一樣」')
   assert.deepEqual(progressView({ status: 'ok', result: { handoff_done: true, model: null } }, { op: 'handover' }).extra, [])
 })
 

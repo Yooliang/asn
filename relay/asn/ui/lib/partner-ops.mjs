@@ -346,7 +346,7 @@ function handoverExtra(result) {
   const r = result && typeof result === 'object' && !Array.isArray(result) ? result : {}
   const lines = []
   if (typeof r.handoff_path === 'string' && r.handoff_path) lines.push(`交接檔：${short(r.handoff_path, 300)}`)
-  if (typeof r.model === 'string' && r.model.trim()) lines.push(`新視窗用的模型：${short(r.model.trim(), 80)}（和前任一樣）`)
+  if (typeof r.model === 'string' && r.model.trim()) lines.push(`新視窗用的模型：${short(r.model.trim(), 80)}${r.model_basis === 'launch' ? '（讀不到前任現在用的，沿用它啟動時的設定）' : '（和前任一樣）'}`)
   if (r.handoff_done === false) lines.push(r.kind === 'acp' ? '這類夥伴沒有請前任寫交接；新對話第一句是接班說明，並附上收發室替它記的往來記錄當前情。' : '前任沒有寫完交接，新夥伴會以前任的對話紀錄為主。')
   return lines
 }
