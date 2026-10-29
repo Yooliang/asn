@@ -3,7 +3,8 @@
 // 權杖只在各自那台電腦搬，不經過手機也不進收發室（清單裡只有 email、方案、是否使用中）。
 // node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。給人看的文字純繁體中文。
 import { agoText } from './cloud-invite.mjs'
-import { CLOSE_NOTE } from './device-acct-dialog.mjs'
+import { CLOSE_NOTE, rowQuota } from './device-acct-dialog.mjs'
+import { nodeLabelOf, rosterQuotaFor, rosterView } from './account-roster.mjs'
 import { isFinalStatus, remoteStatusText } from './claude-accounts.mjs'
 import { QUOTA_NOTE } from './account-quota.mjs'
 import { buildDeviceTree, SELF_LABEL } from './device-tree.mjs'
@@ -31,9 +32,10 @@ export const acctReportOf = r => (r && !r.loading ? { error: r.msg || '', asnOnl
 // 切換流程只認 Claude：把某台的回報濾成 acctSheetView 要的形狀
 export const acctClaudeRemote = r => ({ loading: r?.loading === true, asnOnline: r?.asnOnline === true, reportedAt: r?.reportedAt ?? '', msg: r?.msg ?? '', list: (Array.isArray(r?.list) ? r.list : []).filter(a => a?.vendor === 'claude') })
 
-export function acctDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', reports = {}, launchers = {}, now = Date.now() } = {}) {
+// roster：後台帳號列表（android_acct_roster，#374）；跟電腦版同一套 account-roster.mjs，讀不到（null）就退回各台自己回報的
+export function acctDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', reports = {}, launchers = {}, roster = null, now = Date.now() } = {}) {
   const rep = Object.fromEntries(Object.entries(reports).map(([k, r]) => [k, acctReportOf(r)]).filter(([, r]) => r))
-  return buildDeviceTree({ friends, nodeOrder, deviceOrder, shown, removed, selfNode, launchers, reports: rep, now }).map(d => ({
+  return buildDeviceTree({ friends, nodeOrder, deviceOrder, shown, removed, selfNode, launchers, reports: rep, roster, now }).map(d => ({
     ...d,
     label: d.self && d.label === SELF_LABEL ? PHONE_LABEL : d.label,
     // 手機（本機與別支）只顯示，不提供切換，也不顯示「ASN 沒有在線」的提示
@@ -55,8 +57,15 @@ export function acctButtonDevices(groups, selfNode) {
     && !(g.items ?? []).some(f => ['phone', 'mobile', 'android'].includes(String(f?.kind ?? '').toLowerCase())))
 }
 
+// 「我的帳號」整區（手機設備列表最上面）：跟電腦版同一份 rosterView；手機自己不回報帳號，本機標「這支手機」
+export const acctRosterView = (roster, { friends = [], selfNode = '', now = Date.now() } = {}) =>
+  rosterView(roster, { nodeLabel: nodeLabelOf(friends, { selfNode, selfLabel: PHONE_LABEL }), now })
+
 // remote：{ loading, asnOnline, reportedAt, msg, list:[{email,plan,current}] }；picked：使用者點選的 email
-export function acctSheetView(remote, picked = '', now = Date.now()) {
+// roster：後台帳號列表（#374）；有的話每列帶額度（quotaText／quotaMeta），沒有就不寫額度
+export function acctSheetView(remote, picked = '', now = Date.now(), { roster = null, friends = [], selfNode = '' } = {}) {
+  const nodeLabel = nodeLabelOf(friends, { selfNode, selfLabel: PHONE_LABEL })
+  const quotaOf = email => rosterQuotaFor(roster, 'claude', email, { nodeLabel, now })
   const list = Array.isArray(remote?.list) ? remote.list : []
   const cur = list.find(a => a.current)
   const online = remote?.asnOnline === true
@@ -68,7 +77,7 @@ export function acctSheetView(remote, picked = '', now = Date.now()) {
     currentText: cur ? `目前使用：${cur.email}` : '目前使用：（那台沒有回報）',
     currentEmail: cur?.email ?? '',
     reportedText: ago ? `最後回報：${ago}` : '',
-    rows: list.map(a => ({ email: a.email, plan: a.plan || '', current: a.current === true, picked: a.email === picked && !a.current })),
+    rows: list.map(a => ({ email: a.email, plan: a.plan || '', current: a.current === true, picked: a.email === picked && !a.current, ...rowQuota(quotaOf(a.email)) })),
     empty: !remote?.loading && !list.length ? ACCT_TEXT.empty : (!remote?.loading && list.length < 2 ? ACCT_TEXT.needTwo : ''),
     canPick: online && !remote?.loading && list.length >= 2,
     pickEmail: pick ? pick.email : '',

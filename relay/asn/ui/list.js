@@ -65,6 +65,7 @@ import { startCallPoll } from './lib/call-poll.mjs'
 import { isCallActive } from './lib/call-session.mjs'
 import { accountLine, codexLine, createAccountsUi } from './lib/claude-accounts.mjs'
 import { buildDeviceTree } from './lib/device-tree.mjs'
+import { nodeLabelOf, rosterQuotaFor, rosterView } from './lib/account-roster.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, moveDevice, pruneRemoved, removeDevice, reorderDevice, showDevice, visibleRows } from './lib/device-order.mjs'
 import { dialogTitle as deviceAcctTitle, dialogView as deviceAcctViewOf, CONFIRM_NOTE as DEVICE_CONFIRM_NOTE, CLOSE_NOTE as DEVICE_CLOSE_NOTE } from './lib/device-acct-dialog.mjs'
@@ -1486,7 +1487,9 @@ const app = createApp({
     // 本機帳號庫清單定期回報給收發室（只有 email、方案、使用中）；別台送來的切換指令定期取走（預設要本機按確認才切）。--shot 不輪詢指令。
     setTimeout(() => void accounts.report(), 5_000)
     // 每 5 分鐘回報時順便重讀這台的額度紀錄，設備卡的額度條才不會停在開機那時的數字
-    setInterval(() => { void accounts.report(); void accounts.refreshQuota() }, 5 * 60_000)
+    // 帳號列表（#374）也跟著這個節奏，但只在「設備與帳號」開著時讀（打開那一刻另讀一次，見下面監看設定頁那段）
+    const devicesOpen = () => normalizeCatKey(ui.panel.setting) === 'devices'
+    setInterval(() => { void accounts.report(); void accounts.refreshQuota(); if (devicesOpen()) void accounts.refreshRoster() }, 5 * 60_000)
     void listen('claude-mod-status', e => { accounts.state.mod = String(e.payload ?? '') })   // Rust 背景安裝 Claude 外掛完成
     void listen('claude-account-auto', e => void accounts.onAuto(e.payload))
     void listen('grok-account-auto', e => void accounts.onAuto(e.payload))   // Grok 自動加入也走同一支：重抓清單並回報   // Rust 背景工作自動加入／回存之後
@@ -1514,6 +1517,7 @@ const app = createApp({
       if (!node) return
       deviceAcct.node = node; deviceAcct.label = deviceTree.value.find(d => d.key === node)?.label ?? accounts.remoteNodes().find(d => d.key === node)?.label ?? ''; deviceAcct.selected = email   // 設備頁籤上點某個帳號的「切換」＝預先選好那個帳號，仍要在對話框按送出
       void invoke('show_main').catch(() => {})
+      if (!accounts.state.roster) void accounts.refreshRoster()   // 從名單右鍵直接開、還沒讀過帳號列表：讀一次讓各帳號帶額度
       await accounts.remoteSelect(node, vendor)
     }
     const deviceMenuSwitch = async () => {
@@ -1527,7 +1531,7 @@ const app = createApp({
         ...remoteLaunchers.value,
         [info.node]: { profiles: partnerModels.value.filter(m => m.installed).map(m => ({ id: m.profileId ?? m.id })) },
       },
-      reports: accounts.state.reports,
+      reports: accounts.state.reports, roster: accounts.state.roster,
       self: { claude: accounts.state.list, grok: accounts.state.grok, codex: { loggedIn: Boolean(accounts.state.codex), text: codexLine(accounts.state.codex, accounts.state.codexErr) } },
     }))
     const otherDeviceNodes = () => launchDeviceRowsList.value.map(d => d.key).filter(k => k && k !== info.node).slice(0, 20)
@@ -1536,7 +1540,13 @@ const app = createApp({
       if (missing.length) void accounts.loadReports(missing)
     }, { immediate: true })
     const closeDeviceAcct = () => { deviceAcct.node = '' }
-    const deviceAcctView = computed(() => deviceAcctViewOf(accounts.state.remote, deviceAcct.selected))
+    // 帳號列表裡的設備名（#374）：跟設備樹同一份名單
+    const rosterNodeLabel = computed(() => nodeLabelOf(friends.value, { selfNode: info.node }))
+    const deviceAcctView = computed(() => deviceAcctViewOf(accounts.state.remote, deviceAcct.selected, Date.now(), {
+      quotaOf: email => rosterQuotaFor(accounts.state.roster, accounts.state.remote.vendor, email, { nodeLabel: rosterNodeLabel.value }),
+    }))
+    // 設定「設備與帳號」最上面的「我的帳號」：後台讀不到時是 null，不顯示這一區
+    const myAccounts = computed(() => rosterView(accounts.state.roster, { nodeLabel: rosterNodeLabel.value }))
     const deviceAcctTitleText = computed(() => deviceAcctTitle(deviceAcct.label))
     const deviceAcctSubmit = () => { const v = deviceAcctView.value; if (v.canSwitch) void accounts.remoteSwitch(v.switchEmail) }
     const installFromSettings = async () => {
@@ -1554,7 +1564,7 @@ const app = createApp({
       notify: notifyPrefs.value, frame: frame.value, mode: ui.mode, dpMode: ui.dpMode, toolbar: ui.toolbar, bubble: ui.bubble,
       tabDim: dims.tabDim, groupDim: dims.groupDim,
       voice: { cfg: { tts_voice: voiceCfg.tts_voice, tts_auto: voiceCfg.tts_auto, stt_lang: voiceCfg.stt_lang, stt_model: voiceCfg.stt_model }, enabled: ttsVoices.value.enabled, voices: ttsVoices.value.voices, sttReady: Boolean(sttSt.value?.ready), installBusy: voice.state.install.busy, note: voice.state.install.text || voiceMsg.value || sttText.value },
-      devices: deviceTree.value,
+      devices: deviceTree.value, myAccounts: myAccounts.value,
       accounts: {
         list: accounts.state.list, current: accounts.state.current, codexLine: codexLine(accounts.state.codex, accounts.state.codexErr),
         busy: accounts.state.busy, confirmDel: accounts.state.confirmDel, msg: accounts.state.msg, allowSwitch: accounts.state.allowSwitch, autoAdd: autoAddClaude.value, autoNote: accounts.state.autoNote,
@@ -1628,6 +1638,7 @@ const app = createApp({
     watch(() => ui.panel.setting, k => {
       if (k === 'usage') void usage.refresh()
       if (k) void accounts.refreshQuota()   // 打開設定頁（或換頁籤）時重讀額度
+      if (normalizeCatKey(k) === 'devices') void accounts.refreshRoster()   // 打開「設備與帳號」時讀一次帳號列表（#374）
     }, { immediate: true })
     const pushSettings = () => { if (ui.mode === 'split') emit('asn:settings', settingsState.value) }
     watch(settingsState, pushSettings, { deep: true })

@@ -242,6 +242,6 @@ test('只重讀額度：不重抓帳號清單，畫面的額度條換成新數�
 
 test('重讀額度接線：每 5 分鐘回報時順便重讀、打開設定頁時重讀', () => {
   const js = read('ui/list.js')
-  assert.match(js, /setInterval\(\(\) => \{ void accounts\.report\(\); void accounts\.refreshQuota\(\) \}, 5 \* 60_000\)/)
+  assert.match(js, /setInterval\(\(\) => \{ void accounts\.report\(\); void accounts\.refreshQuota\(\);[^\n]*\}, 5 \* 60_000\)/)   // #374 起同一支也順便讀帳號列表
   assert.match(js, /watch\(\(\) => ui\.panel\.setting, k => \{[^]*?if \(k\) void accounts\.refreshQuota\(\)[^]*?\}, \{ immediate: true \}\)/)
 })

@@ -7,8 +7,11 @@ export const CLOSE_NOTE = '切換後馬上生效，那台電腦開著的 Claude 
 
 export const dialogTitle = label => `切換「${label || '這台設備'}」的 Claude 帳號`
 
+// 帳號列的額度（#374）：quotaOf(email) 回 account-roster.mjs 的 rosterQuota（列表裡沒有回 undefined，就不寫額度）
+export const rowQuota = q => (q ? { quotaText: q.text, quotaMeta: q.meta, quotaStale: q.stale === true } : { quotaText: '', quotaMeta: '', quotaStale: false })
+
 // remote：accounts.state.remote；selected：使用者在清單上選的 email（空＝還沒選）
-export function dialogView(remote, selected = '', now = Date.now()) {
+export function dialogView(remote, selected = '', now = Date.now(), { quotaOf = () => undefined } = {}) {
   const list = Array.isArray(remote?.list) ? remote.list : []
   const cur = list.find(a => a.current)
   const ago = agoText(remote?.reportedAt, now)
@@ -19,7 +22,7 @@ export function dialogView(remote, selected = '', now = Date.now()) {
     onlineText: remote?.loading ? '讀取中…' : online ? '那台電腦的 ASN 在線' : '那台電腦的 ASN 目前沒有在線',
     currentText: cur ? `目前使用：${cur.email}` : '目前使用：（那台沒有回報）',
     reportedText: ago ? `最後回報：${ago}` : '最後回報：（沒有紀錄）',
-    rows: list.map(a => ({ email: a.email, plan: a.plan || '', current: a.current === true, picked: a.email === selected && !a.current })),
+    rows: list.map(a => ({ email: a.email, plan: a.plan || '', current: a.current === true, picked: a.email === selected && !a.current, ...rowQuota(quotaOf(a.email)) })),
     canSwitch: Boolean(pick) && online && !remote?.busy && !remote?.loading,
     switchEmail: pick ? pick.email : '',
     status: remote?.loading ? '' : remote?.msg || '',

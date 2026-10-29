@@ -315,7 +315,7 @@
     <p class="launch-notice-body">{{ deviceAcctView.onlineText }}<br>{{ deviceAcctView.currentText }}<br>{{ deviceAcctView.reportedText }}</p>
     <ul class="acct-list" v-if="deviceAcctView.rows.length">
       <li v-for="a in deviceAcctView.rows" :key="a.email">
-        <label class="chk"><input type="radio" name="device-acct" :value="a.email" :checked="a.picked" :disabled="a.current || accounts.state.remote.busy" @change="deviceAcct.selected = a.email" /><span class="acct-txt"><span class="acct-name">{{ a.email }}<em v-if="a.current">使用中</em></span><small v-if="a.plan">{{ a.plan }}</small></span></label>
+        <label class="chk"><input type="radio" name="device-acct" :value="a.email" :checked="a.picked" :disabled="a.current || accounts.state.remote.busy" @change="deviceAcct.selected = a.email" /><span class="acct-txt"><span class="acct-name">{{ a.email }}<em v-if="a.current">使用中</em></span><small v-if="a.plan">{{ a.plan }}</small><small class="acct-quota" :class="{ stale: a.quotaStale }" v-if="a.quotaText">{{ a.quotaText }}<template v-if="a.quotaMeta">（{{ a.quotaMeta }}）</template></small></span></label>
       </li>
     </ul>
     <p class="launch-notice-body" role="status">{{ deviceAcctView.status }}</p>

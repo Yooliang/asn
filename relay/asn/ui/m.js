@@ -23,7 +23,8 @@ import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, rena
 import { OP_LABEL, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, opFormError, dialogEngine, partnerEngine, piModelChoices, sharedWhy } from './lib/partner-ops.mjs'
 import { cleanPiModels } from './lib/pi-models.mjs'
 import { BUDDY_CONSOLE_LABEL } from './lib/partner-launch-ui.mjs'
-import { ACCT_TEXT, ACCT_PAGE_TITLE, acctButtonDevices, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS } from './lib/mobile-acct.mjs'
+import { fetchRoster, ROSTER_POLL_MS } from './lib/account-roster.mjs'
+import { ACCT_TEXT, ACCT_PAGE_TITLE, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS } from './lib/mobile-acct.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, dropSlot, moveDevice, moveFlags, pruneRemoved, removeDevice, removedRows, reorderDevice, restoreDevice, showDevice, visibleRows, canRemoveRow, DEVICE_TEXT } from './lib/device-order.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
@@ -83,6 +84,7 @@ const acctTransport = {
   acctList: node => invoke('android_acct_list', { node }),
   acctSwitch: (node, email) => invoke('android_acct_switch', { node, email }),
   acctStatus: ids => invoke('android_acct_status', { ids }),
+  acctRoster: () => invoke('android_acct_roster'),   // 帳號列表（#374）：跟電腦版同一個後台動作
 }
 // 照片放大與收到的檔案：另存＝存進 App 私有資料夾，再請外殼複製到「下載/ASN」
 const photoApi = {
@@ -498,7 +500,13 @@ const app = createApp({
     const acctKeys = computed(() => new Set(acctButtonDevices(groups.value, info.node).filter(g => !devPrefs.deviceRemoved.includes(g.node)).map(g => g.key)))
     // 整頁＝電腦版「設備與帳號」：資料用電腦版同一份整理函式；別台電腦的帳號逐台向後台讀（只讀選到的那台）
     const acctSw = reactive({ phase: 'pick', page: 'list', node: '', picked: '', reports: {}, view: null, removedOpen: false })
-    const acctAllDevs = computed(() => acctDeviceTree({ friends: friends.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, reports: acctSw.reports, launchers: lchData.machines }))
+    // 帳號列表（#374）：進「設備與帳號」讀一次，開著時每 5 分鐘再讀（跟電腦版同一個節奏）；
+    // 讀不到沿用上一次讀成功的，從沒成功過才是 null（畫面退回各台自己回報的）
+    const acctRoster = ref(null)
+    const loadRoster = async () => { acctRoster.value = await fetchRoster(acctTransport.acctRoster, undefined, acctRoster.value) }
+    setInterval(() => { if (fourthPage.value?.kind === 'acct' && document.visibilityState === 'visible') void loadRoster() }, ROSTER_POLL_MS)
+    const acctMy = computed(() => acctRosterView(acctRoster.value, { friends: friends.value, selfNode: info.node }))
+    const acctAllDevs = computed(() => acctDeviceTree({ friends: friends.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, reports: acctSw.reports, launchers: lchData.machines, roster: acctRoster.value }))
     // 整台離線、夥伴全封存、沒未讀的設備不列頁籤；收在「已隱藏的設備」，可手動顯示
     const acctDevs = computed(() => visibleRows(acctAllDevs.value))   // 列表＝全部設備（含已隱藏，淡色標「已隱藏」）；永久移除的收在底部
     const acctRemoved = computed(() => removedRows(acctAllDevs.value))
@@ -511,7 +519,7 @@ const app = createApp({
     watch([() => friends.value, () => devPrefs.deviceRemoved], () => { const next = pruneRemoved(devPrefs.deviceRemoved, friends.value, { selfNode: info.node }); if (next.length !== devPrefs.deviceRemoved.length) devPrefs.deviceRemoved = next }, { deep: true })
     const acctLabel = computed(() => acctCur.value?.label ?? '')
     const acctRep = computed(() => acctSw.reports[acctCur.value?.key] ?? null)
-    const acctView = computed(() => acctSheetView(acctClaudeRemote(acctRep.value), acctSw.picked))
+    const acctView = computed(() => acctSheetView(acctClaudeRemote(acctRep.value), acctSw.picked, Date.now(), { roster: acctRoster.value, friends: friends.value, selfNode: info.node }))
     const acctConfirm = computed(() => acctConfirmText(acctLabel.value, acctView.value.currentEmail, acctView.value.pickEmail))
     let acctToken = 0, acctEpoch = 0, acctRunSeq = 0   // acctToken：畫面還在不在（離開就換）；acctRunSeq：第幾個切換（送出新的才換）
     async function loadAcct(node, force = false) {
@@ -535,6 +543,7 @@ const app = createApp({
       if (g?.node && acctDevs.value.some(d => d.key === g.node)) { acctSw.node = g.node; acctSw.page = 'detail' } else acctSw.node = ''
       if (!fourthNav.openPage(acctPage(acctSw.node))) return
       if (!lchData.loaded) void loadLaunchers()
+      void loadRoster()
       if (acctSw.page === 'detail') void loadAcct(g.node)
     }
     function openAcctDevice(key) {
@@ -944,7 +953,7 @@ const app = createApp({
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, opsView, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
-      acctSw, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, ACCT_PAGE_TITLE, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct,
+      acctSw, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, ACCT_PAGE_TITLE, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT,
