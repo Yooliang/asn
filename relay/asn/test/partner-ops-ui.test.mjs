@@ -118,13 +118,13 @@ test('喚醒按鈕：只有離線的 AI 夥伴才顯示；條件與右鍵選單�
 
 test('接線：名單右鍵用 menuItems（不另寫判斷、不重複切換模型）；喚醒按鈕與圖示；接班舊介面已清掉', () => {
   const js = read('ui/list.js'), html = read('ui/list.html'), bar = read('ui/lib/actionbar.mjs')
-  assert.match(js, /manageItems\(buddyMenuFriend\.value, \{ \.\.\.opsCtx, friends: friends\.value, asn: asnMap\.value \}\)\)/)
-  assert.doesNotMatch(js, /buddyOpItems = computed\([^\n]*\.filter\(/, '項目固定，不再過濾掉任何一項（切換模型換成子選單但位置不變）')
+  // #539：右鍵和對話上方「管理」用同一份 partnerMenuItems（內部是 manageItems；切換模型改由 barSlots 的那一格負責）
+  assert.match(js, /const buddyOpsCtx = computed\(\(\) => \(\{ \.\.\.opsCtx, friends: friends\.value, asn: asnMap\.value \}\)\)/)
+  assert.match(js, /buddyOpItems = computed\(\(\) => partnerMenuItems\(buddyMenuFriend\.value, buddyOpsCtx\.value, info\.node\)/)
   assert.match(html, /v-for="it in buddyOpItems"[^>]*>[\s\S]*?:aria-disabled="it\.ok \? 'false' : 'true'"[\s\S]*?:title="it\.reason" @click="openPartnerOp\(it\)"/)
   assert.match(html, /<partner-op-dialog v-if="opDlg\.open"/)
   assert.match(js, /app\.component\('partner-op-dialog', PartnerOpDialog\)/)
-  assert.match(bar, /aria-label="喚醒"/); assert.match(bar, /v-if="wake\.show" class="abtn" type="button" :disabled="!wake\.ok" :title="wake\.ok \? '[^']*' : wake\.reason"/, '不能用就反灰、原因寫在提示')
-  assert.match(fs.readFileSync(new URL('../ui/img/ab-wake.svg', import.meta.url), 'utf8'), /^<svg/)
+  assert.doesNotMatch(bar, /aria-label="喚醒"/, '#539：喚醒不放大按鈕，改在「管理」裡（p:resume，離線才可按）')
   for (const f of ['ui/list.js', 'ui/list.html', 'ui/m.js', 'ui/m.html', 'ui/lib/tauri.mjs']) assert.doesNotMatch(read(f), /這是誰的接班|succeed|Succession|successor|partnerList|relay_partner_list/i, f)
   assert.ok(!fs.existsSync(new URL('../ui/lib/succession.mjs', import.meta.url)))
   const tauri = read('ui/lib/tauri.mjs')

@@ -10,7 +10,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { findBrowser, injectSource, maskProbeSource, mountCheckSource, parseSmokeArgs, pathOf, selectScenarios, tableFor } from './smoke-lib.mjs'
+import { findBrowser, injectSource, mountCheckSource, probeSource, parseSmokeArgs, pathOf, selectScenarios, tableFor } from './smoke-lib.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ui = path.join(root, 'ui')
@@ -98,14 +98,14 @@ async function runScenario(cdp, sc, base) {
   if (check.ok) { await sleep(1000); check = await evalCheck() }   // 掛上後再等一下，讓首次渲染與啟動後的非同步例外跑完
   let probeWhy = ''
   if (check.ok && sc.probe) {
-    try { const v = (await S('Runtime.evaluate', { expression: maskProbeSource(sc.probe), awaitPromise: true, returnByValue: true })).result.value; if (!v?.ok) probeWhy = v?.why || '沒有回結果' } catch (e) { probeWhy = `執行失敗：${e.message}` }
+    try { const v = (await S('Runtime.evaluate', { expression: probeSource(sc.probe), awaitPromise: true, returnByValue: true })).result.value; if (!v?.ok) probeWhy = v?.why || '沒有回結果' } catch (e) { probeWhy = `執行失敗：${e.message}` }
   }
   let missing = []
   try { missing = (await S('Runtime.evaluate', { expression: 'globalThis.__smokeMissing || []', returnByValue: true })).result.value ?? [] } catch { /* 頁面已離開 */ }
   await cdp.send('Target.closeTarget', { targetId }).catch(() => {})
   const problems = [...errors]
   if (!check.ok) problems.unshift(`沒有掛上：${check.why}`)
-  if (probeWhy) problems.push(`遮罩檢查：${probeWhy}`)
+  if (probeWhy) problems.push(`${sc.probe.bar ? '大按鈕檢查' : '遮罩檢查'}：${probeWhy}`)
   return { problems, missing }
 }
 

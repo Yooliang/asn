@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { manageItems } from '../ui/lib/archive.mjs'
 import { MENU_KEYS } from '../ui/lib/partner-ops.mjs'
-import { consoleBlock, canOfferConsole, managePanelItems, wakeButtonView } from '../ui/lib/actionbar.mjs'
+import { consoleBlock, canOfferConsole, managePanelItems, partnerMenuItems, wakeButtonView } from '../ui/lib/actionbar.mjs'
 import { canOfferModelSwitch, modelSwitchBlock } from '../ui/lib/model-switch.mjs'
 
 const read = p => fs.readFileSync(new URL(`../${p}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -42,34 +42,35 @@ test('說明逐案不同、寫的是程式真的判斷得出的條件', () => {
   assert.equal(new Set(['Claude 在線', 'Claude 離線', '雲端代理', '其他引擎', '沒開放遠端管理'].map(n => why(n, 'close'))).size, 5, '關閉視窗的說明：Claude 在線沒有說明，其餘四種各不相同（共五種）')
 })
 
-test('背景／前台切換與切換模型：固定出現，原因與啟用條件共用同一個判斷', () => {
-  const cases = [F('H', 'a'), F('X', 'a'), F('H', 'a', { pending: true }), F('H', 'a', { engine: 'acp' }), { room: true, node: 'H' }, null]
+test('前台／後台與切換模型：原因與啟用條件共用同一個判斷；ACP 工作者看 partnerEngine（名單上 engine 是 gemini／grok）', () => {
+  const acp = F('H', 'a', { engine: 'gemini' })
+  const cases = [F('H', 'a'), F('X', 'a'), F('H', 'a', { pending: true }), acp, F('H', 'a', { engine: 'grok' }), { room: true, node: 'H' }, null]
   for (const f of cases) {
     assert.equal(canOfferConsole(f, 'H'), consoleBlock(f, 'H') === '', JSON.stringify(f))
-    if (consoleBlock(f, 'H')) assert.ok(consoleBlock(f, "H").length > 4)
+    if (consoleBlock(f, 'H')) assert.ok(consoleBlock(f, 'H').length <= 20)
   }
-  assert.equal(consoleBlock(F('X', 'a'), 'H'), '這個視窗在另一台電腦上，只能在那台電腦的 ASN 切換前景或背景')
-  assert.equal(consoleBlock(F('H', 'a', { engine: 'acp' }), 'H'), '這個夥伴由 ASN 內建通道執行，沒有視窗可以切換')
-  for (const [f, engine] of [[F('H', 'a'), 'claude'], [F('X', 'a'), 'claude'], [F('H', 'a'), 'codex'], [F('H', 'a', { engine: 'acp' }), 'acp'], [F('H', 'a', { pending: true }), 'claude']]) {
+  assert.equal(consoleBlock(F('X', 'a'), 'H'), '視窗在另一台電腦上')
+  assert.equal(consoleBlock(acp, 'H'), '內建通道執行，沒有視窗', 'engine 是 gemini 的 ACP 工作者也要判斷到')
+  assert.equal(consoleBlock(F('H', 'a', { engine: 'grok' }), 'H'), '內建通道執行，沒有視窗')
+  for (const [f, engine] of [[F('H', 'a'), 'claude'], [F('X', 'a'), 'claude'], [F('H', 'a'), 'codex'], [acp, 'gemini'], [F('H', 'a', { pending: true }), 'claude']]) {
     assert.equal(canOfferModelSwitch(f, { selfNode: 'H', engine }), modelSwitchBlock(f, { selfNode: 'H', engine }) === '')
+    assert.ok(modelSwitchBlock(f, { selfNode: 'H', engine }).length <= 20)
   }
   assert.match(modelSwitchBlock(F('X', 'a'), { selfNode: 'H', engine: 'claude' }), /另一台電腦/)
-  assert.match(modelSwitchBlock(F('H', 'a', { engine: 'acp' }), { selfNode: 'H', engine: 'acp' }), /內建通道/)
+  assert.match(modelSwitchBlock(acp, { selfNode: 'H', engine: 'gemini' }), /內建通道/)
 })
 
-test('對話上方「管理」：背景／前台切換排最前面，其後和右鍵、手機同順序；問不到就反灰', () => {
+test('對話上方「管理」：和右鍵同一份 partnerMenuItems（不含前後景切換、切換模型），納入管理在封存之前；反灰說明 20 字內', () => {
   for (const [name, f] of Object.entries(KINDS)) {
-    const keys = managePanelItems(f, ctx).map(i => i.key)
-    // 「把這台電腦上開著的終端納入管理…」固定放在封存／取消封存之前（#753）
-    const fixed = FIXED.map(k => `p:${k}`)
+    const items = managePanelItems(f, ctx, [], { selfNode: 'H' })
+    const fixed = FIXED.filter(k => k !== 'model').map(k => `p:${k}`)
     const at = fixed.findIndex(k => /archive/.test(k))
-    const want = ['p:console', ...(at < 0 ? [...fixed, 'p:adopt'] : [...fixed.slice(0, at), 'p:adopt', ...fixed.slice(at)])]
-    assert.deepEqual(keys, want, name)
+    const want = at < 0 ? [...fixed, 'p:adopt'] : [...fixed.slice(0, at), 'p:adopt', ...fixed.slice(at)]
+    assert.deepEqual(items.map(i => i.key), want, name)
+    assert.deepEqual(items, partnerMenuItems(f, ctx, 'H'), `${name}：管理與右鍵同一份`)
+    for (const i of items) assert.ok(i.reason.length <= 20, `${name} ${i.key}：${i.reason}`)
+    assert.ok(!items.some(i => i.key === 'p:console' || i.key === 'p:model'), name)
   }
-  const on = managePanelItems(F('H', 'a'), ctx, [], { console: { ok: true, reason: '' }, model: { ok: true, reason: '' } })
-  assert.equal(on.find(i => i.key === 'p:console').ok, true)
-  const off = managePanelItems(F('H', 'a'), ctx, [], { console: { ok: false, reason: '檢查中…' } }).find(i => i.key === 'p:console')
-  assert.deepEqual([off.ok, off.reason], [false, '檢查中…'])
 })
 
 test('離線的背景工作者、其他引擎不會冒出「喚醒」大按鈕（固定選單不改變大按鈕的出現條件）', () => {

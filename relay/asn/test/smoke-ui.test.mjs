@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import vm from 'node:vm'
 import { fileURLToPath } from 'node:url'
-import { EXCLUDED_PAGES, MASK_PROBES, PARTNER_ME, SCENARIOS, browserCandidates, fakeTable, findBrowser, injectSource, maskProbeSource, mountCheckSource, parseSmokeArgs, pathOf, selectScenarios, tableFor } from '../scripts/smoke-lib.mjs'
+import { BAR_PROBES, EXCLUDED_PAGES, MASK_PROBES, barProbeSource, probeSource, PARTNER_ME, SCENARIOS, browserCandidates, fakeTable, findBrowser, injectSource, maskProbeSource, mountCheckSource, parseSmokeArgs, pathOf, selectScenarios, tableFor } from '../scripts/smoke-lib.mjs'
 import { SKIP_WARNING, smokeGate, splitSkipFlag } from '../scripts/smoke-gate.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -87,7 +87,7 @@ test('掛上判斷的表達式：語法正確、帶入選擇器與預期路徑',
 })
 
 test('對話框遮罩情境（#536）：電腦與手機各一，檢查左上使用者區與名單；表達式語法正確', async () => {
-  const mask = SCENARIOS.filter(s => s.probe)
+  const mask = SCENARIOS.filter(s => s.probe && !s.probe.bar)
   assert.deepEqual(mask.map(s => s.name), ['list-dialog-mask', 'm-dialog-mask'])
   assert.ok(MASK_PROBES.desktop.cover.includes('.me .me-dp') && MASK_PROBES.desktop.cover.includes('.rail'))
   assert.ok(MASK_PROBES.mobile.cover.includes('.m-head .m-me'))
@@ -141,4 +141,18 @@ test('三支發版腳本都在打包前接了關卡；package.json 有 smoke:ui'
   order('scripts/release-play.mjs', 'smokeGate({', "'scripts/prep.mjs'")
   order('scripts/release-play.mjs', 'smokeGate({', 'keytool')
   for (const f of ['release', 'release-android', 'release-play']) assert.ok(read(`scripts/${f}.mjs`).includes('--skip-smoke'), `${f} 的失敗訊息要提到 --skip-smoke`)
+})
+
+test('固定 6 顆大按鈕情境（#539）：閒置 Claude、離線 Claude、ACP 各一，6 顆依序、反灰狀態；表達式語法正確', async () => {
+  const bar = SCENARIOS.filter(s => s.probe?.bar)
+  assert.deepEqual(bar.map(s => s.name), ['list-bar-fixed', 'list-bar-fixed-offline', 'list-bar-fixed-acp'])
+  for (const s of bar) {
+    assert.deepEqual(s.probe.bar.map(x => x[0]), ['call', 'window', 'model', 'subs', 'tasks', 'manage'], s.name)
+    assert.equal(probeSource(s.probe), barProbeSource(s.probe))
+    assert.doesNotThrow(() => new vm.Script(barProbeSource(s.probe)))
+  }
+  assert.deepEqual(BAR_PROBES.acp.bar[1], ['window', 'ACP 模式', true])
+  const ctx = vm.createContext({}); ctx.globalThis = ctx
+  vm.runInContext(injectSource(tableFor(SCENARIOS.find(s => s.name === 'list-bar-fixed-acp'))), ctx)
+  assert.equal((await ctx.__TAURI__.core.invoke('relay_list')).members[0].agents[0].engine, 'gemini')
 })

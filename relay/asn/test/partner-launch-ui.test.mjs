@@ -36,7 +36,8 @@ test('右鍵選單的「背景／前台切換」：文字固定不隨狀態改�
   assert.match(buddyConsoleItem('none').tip, /找不到/)
   assert.equal(buddyConsoleItem('toggle', why).tip, '', '能按的時候不放提示')
   const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
-  assert.match(html, /:aria-disabled="buddyConsoleItemView\.disabled \? 'true' : 'false'"[^>]*>[^]*?\{\{ buddyConsoleItemView\.label \}\}/, '選單項目沒有 v-if（不隱藏），反灰用 aria-disabled 並附說明')
+  assert.match(html, /<li><button type="button" role="menuitem" :class="\{ off: !buddySlots\.window\.ok \}" :aria-disabled="buddySlots\.window\.ok \? 'false' : 'true'"[^>]*>[^]*?\{\{ buddySlots\.window\.label \}\}/, '選單項目沒有 v-if（不隱藏），反灰用 aria-disabled 並附說明（規則和大按鈕同一個 barSlots）')
+  assert.match(fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8'), /label: s\[1\]\.label === WINDOW_LABEL\.acp \? WINDOW_LABEL\.acp : BUDDY_CONSOLE_LABEL/, '右鍵的字固定（ACP 工作者寫 ACP 模式）')
 })
 
 test('名單右鍵選單的固定項目不依賴查詢結果，而且查詢有逾時', () => {
@@ -85,8 +86,8 @@ test('右鍵選單反灰時把原因接到滑鼠提示（list.js 存 reason、li
   const js = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
   const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
   assert.match(js, /buddyConsole\.reason = String\(q\?\.reason/)
-  assert.match(js, /buddyConsoleItem\(buddyConsole\.state, buddyConsole\.reason\)/)
-  assert.match(html, /:title="buddyConsoleItemView\.tip"/)
+  assert.match(js, /barSlots\(c, \{ selfNode: info\.node, api: true, console: buddyConsole,/, '原因由 barSlots 從 buddyConsole（state、reason）算出')
+  assert.match(html, /:title="buddySlots\.window\.reason"/)
 })
 
 test('主控台查詢請求帶明確欄位（引擎、名字、條目種類、選填 pid），不從顯示名解析', () => {
