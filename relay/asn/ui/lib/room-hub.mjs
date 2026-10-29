@@ -24,7 +24,7 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
   let reading = new Set()
   let noWakes = false
   // 讀一個群組的新訊息（第一次讀最近 ROOM_FIRST_LOAD 則）；回 true＝有新資料
-  async function read(id, { force = false } = {}) {
+  async function read(id, { force = false, mark } = {}) {
     const room = raw(id), row = rowOf(id)
     if (!room || !row || reading.has(id)) return false
     const ident = identityOf(id)
@@ -32,15 +32,16 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
     const log = st.logs[id] ?? []
     const first = !log.length
     const unread = row.unread > 0
+    const seen = typeof mark === 'boolean' ? mark : visible()   // mark:false＝背景讀進來（例如重開還原的分頁），不標已讀
     if (!first && !force && !needsRead(log, row.lastSeq) && !unread) return await refreshReceipts(id, ident, log)
     reading.add(id)
     try {
       // 後台只在讀到新訊息時才標已讀：未讀還在就多讀最後一則
       const since = unread && !first ? Math.max(0, readSince(log, row.lastSeq) - 1) : readSince(log, row.lastSeq)
-      const r = await invoke(readCmd, { room: id, agent: ident.agent || null, since, limit: first ? ROOM_FIRST_LOAD : 200, mark: visible() })
+      const r = await invoke(readCmd, { room: id, agent: ident.agent || null, since, limit: first ? ROOM_FIRST_LOAD : 200, mark: seen })
       const mine = (room.mine ?? []).map(m => m?.member)
       st.logs[id] = applyWakes(applyReads(mergeRoomLog(log, roomLog(r?.messages, mine, room.members, { photos })), r?.reads), r?.wakes)
-      if (visible()) for (const m of room.mine ?? []) if (m.member === ident.key) m.unread = 0
+      if (seen) for (const m of room.mine ?? []) if (m.member === ident.key) m.unread = 0
       st.note = ''
       return true
     } catch (e) { st.note = roomErrorText(e?.message) || ROOM_LOAD_FAIL_TEXT; return false } finally { reading.delete(id) }
@@ -67,7 +68,7 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
   }
 
   // 打開一個群組：讀訊息與確認卡片
-  async function open(id) { await refresh(); await Promise.all([read(id, { force: true }), loadCards(id)]) }
+  async function open(id, { mark } = {}) { await refresh(); await Promise.all([read(id, { force: true, mark }), loadCards(id)]) }
 
   async function post(id, text, opts = {}) {
     const ident = identityOf(id)

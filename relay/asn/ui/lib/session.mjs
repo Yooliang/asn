@@ -118,6 +118,24 @@ export function restoreSession(saved, { friends = [], pinned = [] } = {}) {
   return { tabs, active, panel, windows, panelWindows, pinned: pin, dropped }
 }
 
+/** 還原時要對照的對象：1 對 1 夥伴（陣列或 Map）加上群組（假夥伴，id 是 room:<群組代號>） */
+export function restoreTargets(friends, rooms = []) {
+  const list = Array.isArray(friends) ? friends : [...(friends?.values?.() ?? [])]
+  return [...list, ...(Array.isArray(rooms) ? rooms : [])]
+}
+
+/** 現在能不能還原：1 對 1 名單與群組列表都載完才行；群組列表讀取失敗（roomsErr）先不還原，等之後重抓成功 */
+export const canRestore = ({ rosterLoaded, roomsLoaded, roomsErr } = {}) => rosterLoaded === true && roomsLoaded === true && roomsErr !== true
+
+/**
+ * 開機還原的計畫：還不能還原回 null（呼叫端維持存檔不動、不設 ready，免得把群組分頁洗掉）；
+ * 可以就回 restoreSession 的結果（對照名單含群組；已退出的群組照規則略過）。
+ */
+export function planRestore(saved, { friends = [], rooms = [], pinned = [], rosterLoaded, roomsLoaded, roomsErr } = {}) {
+  if (!canRestore({ rosterLoaded, roomsLoaded, roomsErr })) return null
+  return restoreSession(saved, { friends: restoreTargets(friends, rooms), pinned })
+}
+
 /** 兩份整理過的狀態是否一樣（沒變就不必寫檔） */
 export const sameSession = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 

@@ -28,7 +28,7 @@ import { isRoomChat, roomIdOf, roomPseudoFriend } from './lib/mobile-rooms.mjs'
 import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatarFile, selfAvatarSrc } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, switchMode, tabVisible, toggleCollapsed } from './lib/merge.mjs'
-import { normalizeSession, restoreSession, sameSession, snapshotSession, trailingThrottle } from './lib/session.mjs'
+import { normalizeSession, planRestore, sameSession, snapshotSession, trailingThrottle } from './lib/session.mjs'
 import { chatTabSameZone, closeAllChatTabs, closeIdleChatTabs, idleTabIds, withCallState, dropInsertBefore, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
 import { nowPlayingLine, normalizeNowPlaying } from './lib/now-playing.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, normalizeClose, normalizeFrame, totalUnread, notifyFromSaved, notifyPlan, notifyWith } from './lib/prefs.mjs'
@@ -1695,28 +1695,36 @@ const root = app.mount('#app')
 await core.start()
 sync()
 
-// 還原上次開著的分頁與對話視窗：要等名單載入（夥伴 ID 才對得上）；名單一直連不上就維持存檔不動，不會把它蓋掉
-async function restoreOpenSession() {
-  const r = restoreSession(sess.saved, { friends: core.friends, pinned: ui.pinnedChat })
+// 還原上次開著的分頁與對話視窗：要等 1 對 1 名單（夥伴 ID 才對得上）與群組列表都載入；名單一直連不上、或群組列表讀取失敗，
+// 就維持存檔不動，不會把它蓋掉（群組列表每 60 秒重抓，成功時再還原）
+const restorePlan = () => planRestore(sess.saved, { friends: core.friends, rooms: roomFriends.value, pinned: ui.pinnedChat, rosterLoaded: core.rosterLoaded, roomsLoaded: hub.st.loaded, roomsErr: hub.st.err })
+async function restoreOpenSession(r) {
   if (JSON.stringify(r.pinned) !== JSON.stringify(ui.pinnedChat)) ui.pinnedChat = r.pinned
   for (const k of PANEL_KINDS) if (!ui.panel[k]) ui.panel[k] = k === 'setting' ? normalizeCatKey(r.panel[k]) : r.panel[k]
+  let rooms = []
   if (ui.mode === 'merged') {
     const tabs = orderTabs([...r.tabs, ...ui.tabs.filter(id => !r.tabs.includes(id))], ui.pinnedChat)
     ui.tabs = tabs
     if (!ui.active || !tabs.includes(ui.active)) ui.active = r.active || tabs.at(-1) || ''
+    rooms = tabs.filter(isRoomChat)
+    for (const id of rooms) openedRooms.add(id)   // 群組分頁要持續讀新訊息（不經 openRoomChat：它會把主視窗拉到前面）
     for (const id of tabs) if (!isPanelTab(id)) pushLog(id)
-    if (ui.active && !isPanelTab(ui.active)) { core.markRead(ui.active); void core.syncHistory(ui.active) }
+    if (ui.active && !isPanelTab(ui.active) && !isRoomChat(ui.active)) { core.markRead(ui.active); void core.syncHistory(ui.active) }
   } else {
     for (const id of r.windows) await openChat(id)
     for (const kind of r.panelWindows) await openPanel(kind, ui.panel[kind])
   }
   sess.ready = true
   sync()
+  // 整合模式的群組分頁讀進訊息：只有目前分頁照常標已讀，背景的分頁不標
+  for (const id of rooms) { await hub.open(roomIdOf(id), id === ui.active ? {} : { mark: false }); pushLog(id) }
+  if (rooms.length) sync()
 }
 if (!info.shot) {
   let restoring = false
-  const go = () => { if (restoring || !core.rosterLoaded) return; restoring = true; void restoreOpenSession() }
+  const go = () => { if (restoring) return; const r = restorePlan(); if (!r) return; restoring = true; void restoreOpenSession(r) }
   go(); core.on('state', go)
+  watch(() => [hub.st.loaded, hub.st.err], go)   // 群組列表載完（或讀取失敗後重抓成功）也試一次
   setInterval(() => void pollOpenWindows(), 3000)
 }
 
