@@ -2,6 +2,7 @@
 // 檔案操作全在 Rust（claude_accounts.rs、codex_accounts.rs、acct_remote.rs），這裡只呼叫指令並整理訊息。
 // 帳號以 email 識別；介面只會拿到 email／方案／是否使用中，權杖不經過前端。
 import { quotaOf } from './account-quota.mjs'
+import { fetchRoster } from './account-roster.mjs'
 
 export const SWITCH_NOTICE = '已切換，開著的 Claude 視窗不用重開。'
 
@@ -47,7 +48,10 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     savedSeq: 0,
     autoNote: '',   // 背景自動加入成功時的一行小字
     mod: '',        // Claude 外掛自動安裝的狀態文字（Rust 背景工作寫好；空字串＝不顯示）
+    roster: null,   // 後台的帳號列表（#374，acct_roster）；讀不到是 null，畫面退回各設備自己回報的數字
   })
+  // 帳號列表：打開「設備與帳號」時讀一次，之後跟額度一樣每 5 分鐘（list.js 排程）。讀不到只記 console，不吵使用者
+  const refreshRoster = async () => { s.roster = await fetchRoster(() => invoke('acct_roster')) }
   const refresh = async () => {
     try { s.list = await invoke('claude_accounts_list') } catch (e) { s.msg = errText(e) }
     try { s.current = (await invoke('claude_account_current')) ?? null } catch { s.current = null }
@@ -187,7 +191,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
   }
   return {
     state: s,
-    refresh, refreshQuota, report, onAuto, loadReports, remoteNodes, remoteSelect, remoteLoad, remoteSwitch, grokSwitch, pollIncoming, approve, decline, dismissDone, undo, loadTrust, setAllowSwitch,
+    refresh, refreshQuota, refreshRoster, report, onAuto, loadReports, remoteNodes, remoteSelect, remoteLoad, remoteSwitch, grokSwitch, pollIncoming, approve, decline, dismissDone, undo, loadTrust, setAllowSwitch,
     addCurrent: () => run(async () => { const a = await invoke('claude_account_save'); s.savedSeq++; return `已加入 ${a.email}。` }),
     switchTo: email => run(async () => { const r = await invoke('claude_account_switch', { email }); return `已切換到 ${r.email}。${SWITCH_NOTICE}` }),
     // 刪除要按兩次（第一次變成「確認刪除」），避免誤觸

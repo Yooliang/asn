@@ -223,6 +223,25 @@
               </header>
           <div class="m-sheet-body m-dv">
             <template v-if="acctSw.phase === 'pick' && !acctCur">
+              <!-- 我的帳號（#374）：按廠牌列出本人全部帳號；後台讀不到（acctMy 是 null）就不顯示這一區 -->
+              <section class="m-dv-my" v-if="acctMy" role="region" :aria-label="acctMy.title">
+                <h3 class="m-dv-my-h">{{ acctMy.title }}</h3>
+                <p class="m-fine" v-if="acctMy.empty">{{ acctMy.empty }}</p>
+                <div class="m-dv-my-v" v-for="v in acctMy.vendors" :key="v.key" :data-vendor="v.key">
+                  <header class="m-dv-vh"><span class="m-dv-vi" aria-hidden="true" v-html="vendorIconSvg(v.key)"></span><b>{{ v.label }}</b></header>
+                  <ul class="m-dv-accts">
+                    <li class="m-dv-acct" :class="{ cur: a.current }" v-for="a in v.accounts" :key="a.account">
+                      <span class="m-dv-mail">{{ a.account }}</span>
+                      <span class="m-dv-side"><span class="m-dv-plan" v-if="a.plan">{{ a.plan }}</span><span class="m-dv-cur" v-if="a.current">使用中</span></span>
+                      <span class="m-dv-quota" :class="{ stale: a.quota.stale, 'quota-out': a.quota.exhausted }">
+                        <span v-for="(p, i) in a.quota.parts" :key="i">{{ i ? '、' : '' }}{{ p }}</span>
+                        <span v-if="a.quota.resetText">・{{ a.quota.resetText }}</span>
+                        <span v-if="a.quota.meta">（{{ a.quota.meta }}）</span>
+                      </span>
+                    </li>
+                  </ul>
+                </div>
+              </section>
               <p class="m-note" v-if="!acctDevs.length">{{ DEVICE_TEXT.empty }}</p>
               <ul class="m-dv-list" aria-label="設備" v-else>
                 <li v-for="d in acctDevs" :key="d.key" :data-dev="d.key" class="m-dv-row" :class="{ hid: d.hidden, off: !d.online, dragging: acctDrag.key === d.key, 'drop-before': acctDrag.over === d.key && !acctDrag.after, 'drop-after': acctDrag.over === d.key && acctDrag.after }">

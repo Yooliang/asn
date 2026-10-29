@@ -10,6 +10,7 @@ import { agoText } from './cloud-invite.mjs'
 import { accountLine } from './claude-accounts.mjs'
 import { UNNAMED_DEVICE } from './text.mjs'
 import { quotaView } from './account-quota.mjs'
+import { nodeLabelOf, rosterLookup, rosterQuota } from './account-roster.mjs'
 import { modelVendorKey } from './vendor-icons.mjs'
 
 export const NOT_REPORTED = '未回報'
@@ -47,9 +48,19 @@ function accountView(rows, { loggedOut = false } = {}) {
  * asn：節點 → 在線的 ASN 視窗列；launchers：節點 → 啟動器回報（profiles）
  * reports：節點 → { error, asnOnline, reportedAt, accounts:[{vendor,email,plan,current}] }（acct_remote_list 的結果）
  * self：{ claude:[{email,plan,current}], codex:{ loggedIn, text } }（本機的帳號庫與 Codex 登入）
+ * roster：後台的帳號列表（account-roster.mjs，#374）。別台設備的帳號額度優先看列表（用廠牌＋帳號對）；
+ *   列表沒有這個帳號、或後台讀不到（null）就退回那台自己回報的數字。本機這台照 #1339 一律用本機紀錄，不看列表。
  */
-export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', asn = {}, launchers = {}, reports = {}, self = {}, now = Date.now() } = {}) {
+export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', asn = {}, launchers = {}, reports = {}, self = {}, roster = null, now = Date.now() } = {}) {
   const rows = launchDeviceRows(friends, { selfNode, nodeOrder, deviceOrder })
+  const look = rosterLookup(roster)
+  const nodeLabel = nodeLabelOf(friends, { selfNode, selfLabel: SELF_LABEL })
+  // 別台設備一個帳號的額度：列表有就用列表，沒有就用那台回報的（舊的回報只有 Claude 有額度）
+  const remoteQuota = (k, a) => {
+    const e = look(k, a.email)
+    if (e) return { quota: rosterQuota(e, { nodeLabel, now }) }
+    return k === 'claude' ? { quota: quotaView(a, now) } : {}
+  }
   return rows.map(d => {
     const node = d.key
     const isSelf = node === selfNode
@@ -80,7 +91,7 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
         const k = vendorKey(a?.vendor)
         if (SKIP.has(k) || !a?.email) continue
         keys.add(k)
-        ;(accts[k] ??= []).push({ email: a.email, plan: a.plan, current: a.current === true, ...(k === 'claude' ? { quota: quotaView(a, now) } : {}) })
+        ;(accts[k] ??= []).push({ email: a.email, plan: a.plan, current: a.current === true, ...remoteQuota(k, a) })
       }
     }
     const ago = !isSelf && rep && !rep.error ? agoText(rep.reportedAt, now) : ''

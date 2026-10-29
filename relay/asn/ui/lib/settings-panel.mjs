@@ -140,6 +140,27 @@ export const SettingsPanel = {
       <template v-if="cat === 'devices'">
         <div class="dv-set">
           <template v-if="!curDev">
+            <section class="dv-my" v-if="st.myAccounts" :aria-label="st.myAccounts.title">
+              <h3 class="dv-my-h">{{ st.myAccounts.title }}</h3>
+              <small v-if="st.myAccounts.empty">{{ st.myAccounts.empty }}</small>
+              <div class="dv-my-v" v-for="v in st.myAccounts.vendors" :key="v.key" :data-vendor="v.key">
+                <header class="dv-vh"><span class="dv-vicon" aria-hidden="true" v-html="vendorIcon(v.key)"></span><b>{{ v.label }}</b></header>
+                <ul class="dv-accts">
+                  <li :class="['dv-acct', { cur: a.current }]" v-for="a in v.accounts" :key="a.account">
+                    <span class="dv-mail">{{ a.account }}</span>
+                    <span class="dv-side">
+                      <span class="dv-plan" v-if="a.plan">{{ a.plan }}</span>
+                      <span class="dv-cur" v-if="a.current">使用中</span>
+                    </span>
+                    <span class="dv-quota" :class="{ stale: a.quota.stale, out: a.quota.exhausted }">
+                      <span v-for="(p, i) in a.quota.parts" :key="i">{{ i ? '、' : '' }}{{ p }}</span>
+                      <span v-if="a.quota.resetText">・{{ a.quota.resetText }}</span>
+                      <span v-if="a.quota.meta">（{{ a.quota.meta }}）</span>
+                    </span>
+                  </li>
+                </ul>
+              </div>
+            </section>
             <small v-if="!devs.length">{{ DEVICE_TEXT.empty }}</small>
             <ul class="dv-list" aria-label="設備" v-else>
               <li v-for="d in devs" :key="d.key" :data-dev="d.key" :class="['dv-row', { hid: d.hidden, off: !d.online, dragging: dragKey === d.key, 'drop-before': overKey === d.key && !overAfter, 'drop-after': overKey === d.key && overAfter }]" :draggable="!d.self" @click="onRow(d.key, $event)" @dragstart="dragStart(d.key, $event)" @dragover="dragOver(d.key, $event)" @drop="drop(d.key, $event)" @dragend="clearDrag">
