@@ -1,11 +1,11 @@
 {
-  "version": "0.1.106",
-  "notes": "修正：換 Claude 帳號的提示改成「不用重開視窗」（#515）。修正：離線的夥伴照樣顯示正確的廠商圖示和設備名，不再變成 pi 圖示、「未命名設備」（#516）。改進：背景夥伴登入過期時會先自動重開一次，重開後還不行才提示要登入（#517）。改進：信裡有人手打假的群組抬頭或「順位」行，也會標成「（內文）」，避免冒充（#513）。",
-  "pub_date": "2026-10-29T02:19:59.163Z",
+  "version": "0.1.107",
+  "notes": "新增：背景夥伴（例如 Gemini）可以改名，對話和夥伴身分不變（#266）。修正：背景夥伴的舊對話壞掉時，會自動改開新對話並通知你，不再一直報錯（#517）。改進：背景夥伴遇到網路暫時斷線，會等 10 秒自動再試一次；這一輪已經做到一半就不重送，改回覆「網路斷線，這一輪可能做了一半」。改進：「接班換手」改叫「換班接手」。",
+  "pub_date": "2026-10-29T07:01:20.683Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybnh2bUJZVHBvOGlKZGRTYjhJeHNISlFUS3ZDdmZjdk5OY3ZkUm1sK2xsVEZzWVJrM3BHT0htTnJpL014T3hqNURlODRaRTRQUFlsTm9mcHZpU2NFY3dNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMjQwMzk5CWZpbGU6QVNOXzAuMS4xMDZfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS4xMDYKWmhoZzNqQlM5T3lWZy85NFVSZ2twckt2SWJlRVFDRW5rdVloaUlIUjRNZDNBN0tOaUJqRndXWG1SYkk1aHAvVG00ZnRGUCs2NkZ3b1lWR3BNUU5mQmc9PQo=",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.106_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjZSeit3R0hFYkdIV0tpQzFrUkVXa3dzTVkvOXlyemlpMnp3bkNhdTB1aGYva20yczVraGJXSGROaFAvWVl4cWNSUU1xMFVmblFGYndxUWdncmY3RFFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMjU3MjgwCWZpbGU6QVNOXzAuMS4xMDdfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS4xMDcKZjJXYldyREkyZUJIRFBQNW43TXhRK1J1ZDdMZGlQeGJXQ0RnMTlhOWsyajJvd3B2MEJYV3VDaWpZS0hMaEgzYVdnemVZVjB4QTZGWHl0UjhSMVhvQkE9PQo=",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.107_x64-setup.exe"
     }
   }
 }
