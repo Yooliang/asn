@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import vm from 'node:vm'
 import { fileURLToPath } from 'node:url'
-import { EXCLUDED_PAGES, SCENARIOS, browserCandidates, fakeTable, findBrowser, injectSource, mountCheckSource, parseSmokeArgs, pathOf, selectScenarios, tableFor } from '../scripts/smoke-lib.mjs'
+import { EXCLUDED_PAGES, MASK_PROBES, PARTNER_ME, SCENARIOS, browserCandidates, fakeTable, findBrowser, injectSource, maskProbeSource, mountCheckSource, parseSmokeArgs, pathOf, selectScenarios, tableFor } from '../scripts/smoke-lib.mjs'
 import { SKIP_WARNING, smokeGate, splitSkipFlag } from '../scripts/smoke-gate.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -84,6 +84,19 @@ test('掛上判斷的表達式：語法正確、帶入選擇器與預期路徑',
   const r = vm.runInContext(src, ctx)
   assert.equal(r.ok, false)
   assert.match(r.why, /#app/)
+})
+
+test('對話框遮罩情境（#536）：電腦與手機各一，檢查左上使用者區與名單；表達式語法正確', async () => {
+  const mask = SCENARIOS.filter(s => s.probe)
+  assert.deepEqual(mask.map(s => s.name), ['list-dialog-mask', 'm-dialog-mask'])
+  assert.ok(MASK_PROBES.desktop.cover.includes('.me .me-dp') && MASK_PROBES.desktop.cover.includes('.rail'))
+  assert.ok(MASK_PROBES.mobile.cover.includes('.m-head .m-me'))
+  for (const s of mask) assert.doesNotThrow(() => new vm.Script(maskProbeSource(s.probe)))
+  // 電腦版情境：整合模式開著夥伴分頁，名單上有這個夥伴
+  const ctx = vm.createContext({}); ctx.globalThis = ctx
+  vm.runInContext(injectSource(tableFor(SCENARIOS.find(s => s.name === 'list-dialog-mask'))), ctx)
+  assert.deepEqual(JSON.parse(await ctx.__TAURI__.core.invoke('store_load', { name: 'me' })), PARTNER_ME)
+  assert.equal((await ctx.__TAURI__.core.invoke('relay_list')).members[0].agents[0].name, 'demo')
 })
 
 test('找瀏覽器：指定路徑優先；找不到給清楚中文錯誤；候選依平台', () => {
