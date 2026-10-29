@@ -1,11 +1,11 @@
 {
-  "version": "0.1.107",
-  "notes": "新增：背景夥伴（例如 Gemini）可以改名，對話和夥伴身分不變（#266）。修正：背景夥伴的舊對話壞掉時，會自動改開新對話並通知你，不再一直報錯（#517）。改進：背景夥伴遇到網路暫時斷線，會等 10 秒自動再試一次；這一輪已經做到一半就不重送，改回覆「網路斷線，這一輪可能做了一半」。改進：「接班換手」改叫「換班接手」。",
-  "pub_date": "2026-10-29T07:01:20.683Z",
+  "version": "0.1.108",
+  "notes": "新增：後台以 ASN 帳號彙整各廠牌帳號與額度（帳號列表第一批）。修正：額度顯示會記到錯的帳號、舊數字蓋掉新數字的問題。改進：叫醒上限可設到 200，預設 20。新增：手機可以開新對話。修正：重試時按關閉，不會再自動拉起視窗。修正：換班接手時，新視窗沿用前任實際在用的模型。",
+  "pub_date": "2026-10-29T13:07:12.551Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjZSeit3R0hFYkdIV0tpQzFrUkVXa3dzTVkvOXlyemlpMnp3bkNhdTB1aGYva20yczVraGJXSGROaFAvWVl4cWNSUU1xMFVmblFGYndxUWdncmY3RFFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMjU3MjgwCWZpbGU6QVNOXzAuMS4xMDdfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS4xMDcKZjJXYldyREkyZUJIRFBQNW43TXhRK1J1ZDdMZGlQeGJXQ0RnMTlhOWsyajJvd3B2MEJYV3VDaWpZS0hMaEgzYVdnemVZVjB4QTZGWHl0UjhSMVhvQkE9PQo=",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.107_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjhzd2RsU0h6T3lBUG5PekM3Qm5qZndvUFBuY2ltbHNTeTZGdlpmeGRXamQweWxjUmh3Ti9Yd25qOXpVTnZGbTBzUC9mVU9SbjNJaDRiMkRra3N0OEFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMjc5MjMyCWZpbGU6QVNOXzAuMS4xMDhfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS4xMDgKWEtuM3MvYlNUUUVPSFBYNCtnVXRBYllUSnlwQ2FUNWdBK1V2T1RXNld3TVMydk1MTzZrdHp2dVlCVjc0Q1BDRXpmWitRV0lqb1dQdnNzUGo4QU1EQXc9PQo=",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.108_x64-setup.exe"
     }
   }
 }
