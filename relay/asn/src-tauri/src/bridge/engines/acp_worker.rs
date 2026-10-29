@@ -127,14 +127,35 @@ impl Store {
         self.persist(&g);
     }
     fn persist(&self, g: &HashMap<String, (String, String, String)>) {
+        if let Err(e) = self.write(g) {
+            (self.log)(format!("acp-workers.json 存不了：{e}"));
+        }
+    }
+    fn write(&self, g: &HashMap<String, (String, String, String)>) -> std::io::Result<()> {
         let workers: serde_json::Map<String, serde_json::Value> = g
             .iter()
             .map(|(k, (i, p, c))| (k.clone(), serde_json::json!({ "session_id": i, "protocol": p, "command": c, "updated": now_ms() })))
             .collect();
         let text = serde_json::json!({ "version": 1, "workers": workers }).to_string();
-        if let Err(e) = crate::write_atomic(&self.file, &text) {
-            (self.log)(format!("acp-workers.json 存不了：{e}"));
-        }
+        crate::write_atomic(&self.file, &text)
+    }
+    /// 改名（遠端管理）：把對話編號從舊名搬到新名，寫檔成功才算數（失敗回原因、記憶體不變）。帳本裡沒有舊名＝錯誤
+    pub fn rename(&self, from: &str, to: &str) -> Result<(), String> {
+        let mut g = self.state.lock().unwrap();
+        let v = g.get(from).cloned().ok_or("帳本裡沒有這個工作者的對話")?;
+        let mut next = g.clone();
+        next.remove(from);
+        next.insert(to.to_string(), v);
+        self.write(&next).map_err(|e| {
+            (self.log)(format!("acp-workers.json 改名 {from} → {to} 存不了：{e}"));
+            "對話帳本寫不進去".to_string()
+        })?;
+        *g = next;
+        Ok(())
+    }
+    /// 記一行 log（改名時其他檔案寫不進去的細節記在這裡，畫面只給簡短原因）
+    pub fn note(&self, m: String) {
+        (self.log)(m)
     }
 }
 
@@ -689,6 +710,11 @@ impl Worker {
     pub fn enqueue(self: &Arc<Self>, job: Job) {
         if self.st.lock().unwrap().admin_stopped {
             let _ = self.i.events.send(EngineEvent::Fail(job.id, format!("{} 工作者已被關閉（在夥伴管理按了關閉），這封信沒有處理；在夥伴管理按「重開」或重啟 ASN 後恢復", self.i.cfg.name)));
+            return;
+        }
+        // 改名、移除途中已經停掉的舊工作者：明說沒處理，不讓信卡在不會再跑的佇列裡
+        if self.st.lock().unwrap().stopping {
+            let _ = self.i.events.send(EngineEvent::Fail(job.id, format!("{} 工作者正在關閉，這封信沒有處理", self.i.cfg.name)));
             return;
         }
         let (unavailable, reason, outstanding) = {

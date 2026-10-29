@@ -11,6 +11,7 @@ pub mod acp_client;
 pub mod acp_config;
 pub mod acp_models;
 pub mod acp_policy;
+pub mod acp_renames;
 pub mod acp_worker;
 pub mod codex;
 // Codex 視窗的關閉與切換模型（#235，未實機驗證）；選單接線由 partner_ops 接上前先允許未使用

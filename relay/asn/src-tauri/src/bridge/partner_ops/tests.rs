@@ -1415,6 +1415,13 @@ impl AcpAdmin for FakeAcp {
         }
         Ok(json!({ "kind": "acp", "pid": 4321, "model": model, "restarted": model.starts_with("gemini"), "saved": true }))
     }
+    fn rename(&self, name: &str, new_name: &str) -> Result<Value, String> {
+        self.calls.lock().unwrap().push(format!("rename {name} {new_name}"));
+        match self.fail_with.lock().unwrap().clone() {
+            Some(e) => Err(e),
+            None => Ok(json!({ "kind": "acp", "pid": 4321, "old_name": name, "new_name": new_name })),
+        }
+    }
     fn handover(&self, name: &str, note: &str) -> Result<Value, String> {
         self.calls.lock().unwrap().push(format!("handover {name} [{note}]"));
         Ok(json!({ "kind": "acp", "pid": 4321, "handoff_done": false }))
@@ -1590,15 +1597,69 @@ fn acp_移除_交給工作者_被拒照實回_遠端開關關著不做_不是內
 }
 
 #[test]
-fn acp_改名_喚醒_一律這類夥伴不支援() {
+fn acp_喚醒_這類夥伴不支援() {
     let r = rig(Opt::default());
     let a = with_acp(&r, &["Gemini"]);
-    for (op, extra) in [("rename", json!({ "new_name": "新名字" })), ("resume", json!({ "session_id": "sid-zzzzzzzz" }))] {
-        let res = acp_run(&r, op, extra);
-        assert_eq!((res.status, res.detail.as_str()), ("failed", UNSUPPORTED), "{op}");
-    }
+    let res = acp_run(&r, "resume", json!({ "session_id": "sid-zzzzzzzz" }));
+    assert_eq!((res.status, res.detail.as_str()), ("failed", UNSUPPORTED));
     assert!(a.calls.lock().unwrap().is_empty());
     assert!(r.terminated().is_empty() && r.launched().is_empty());
+}
+
+#[test]
+fn acp_改名_交給工作者管理入口_回報階段_不碰任何程序_被拒照實回() {
+    let r = rig(Opt::default());
+    let a = with_acp(&r, &["Gemini"]);
+    let res = acp_run(&r, "rename", json!({ "new_name": " 小新 " }));
+    assert_eq!((res.status, res.detail.as_str()), ("ok", "已改名，對話保留"));
+    assert_eq!(res.result.unwrap()["new_name"], json!("小新"));
+    assert_eq!(*a.calls.lock().unwrap(), vec!["rename Gemini 小新".to_string()], "名字去掉前後空白再交給工作者");
+    let st = r.env.progress.lock().unwrap().clone();
+    assert!(st.iter().any(|s| s == "stage:closing") && st.iter().any(|s| s == "stage:opening"), "{st:?}");
+    assert!(r.terminated().is_empty() && r.launched().is_empty() && r.os().closed.lock().unwrap().is_empty(), "不用名稱找程序、不結束、不開視窗");
+    *a.fail_with.lock().unwrap() = Some("設定檔裡的名字，請改設定檔".into());
+    let res = acp_run(&r, "rename", json!({ "new_name": "小新" }));
+    assert_eq!((res.status, res.detail.as_str()), ("failed", "設定檔裡的名字，請改設定檔"));
+}
+
+#[test]
+fn acp_改名_名字不合格_和現在一樣_只差大小寫_都不叫工作者() {
+    let r = rig(Opt::default());
+    let a = with_acp(&r, &["Gemini"]);
+    for (new, want) in [("-壞", "英數"), ("", "英數"), (&"長".repeat(41), "英數"), ("Gemini", "一樣"), ("gemini", "一樣"), ("GEMINI", "一樣")] {
+        let res = acp_run(&r, "rename", json!({ "new_name": new }));
+        assert!(res.status == "failed" && res.detail.contains(want), "{new}：{}", res.detail);
+    }
+    assert!(a.calls.lock().unwrap().is_empty());
+}
+
+#[test]
+fn acp_改名_撞到_claude_視窗_pi_收發室_asn_自己的名字_不分大小寫_都擋() {
+    let r = rig(Opt::default());
+    let a = with_acp(&r, &["Gemini"]);
+    write_session(&r.sessions, 5001, "sid-5001", "Alpha", "idle", "D:/g/x");
+    r.os().alive.lock().unwrap().insert(5001);
+    put_pi_window_ext(&r, "Beta", 4001, "idle");
+    for new in ["Alpha", "alpha", "ALPHA", "beta", "T-收發室", "T-ASN", "別的收發室"] {
+        let res = acp_run(&r, "rename", json!({ "new_name": new }));
+        assert_eq!(res.status, "failed", "{new}");
+        assert!(res.detail.contains("同名"), "{new}：{}", res.detail);
+    }
+    assert!(a.calls.lock().unwrap().is_empty(), "撞名就不叫工作者");
+    // 已經結束的 Claude 視窗不算撞名
+    write_session(&r.sessions, 5002, "sid-5002", "Gamma", "idle", "D:/g/x");
+    assert_eq!(acp_run(&r, "rename", json!({ "new_name": "gamma" })).status, "ok");
+}
+
+#[test]
+fn acp_改名_遠端開關_送出前與動手前各驗一次() {
+    let r = rig(Opt { allow_first: 0, ..Opt::default() });
+    let a = with_acp(&r, &["Gemini"]);
+    assert_eq!(acp_run(&r, "rename", json!({ "new_name": "小新" })).detail, CONSENT_OFF);
+    let r2 = rig(Opt { allow_first: 1, ..Opt::default() });
+    let a2 = with_acp(&r2, &["Gemini"]);
+    assert_eq!(acp_run(&r2, "rename", json!({ "new_name": "小新" })).detail, CONSENT_OFF, "第一次驗過、動手前關掉了");
+    assert!(a.calls.lock().unwrap().is_empty() && a2.calls.lock().unwrap().is_empty());
 }
 
 #[test]

@@ -396,7 +396,7 @@ impl PartnerOps {
         self.acp.lock().unwrap().clone()
     }
 
-    /// 名字對得上收發室管理的 ACP 工作者：只支援詳情、重開、接班換手、關閉（停止本次執行）、切換模型、移除，其餘回「這類夥伴不支援」。
+    /// 名字對得上收發室管理的 ACP 工作者：只支援詳情、重開、接班換手、關閉（停止本次執行）、切換模型、移除、改名，其餘回「這類夥伴不支援」。
     /// 動的是工作者驅動記錄在案的 pid，不找程序、不比對名稱；同名的 Claude 視窗還活著時不猜
     fn execute_acp(&self, op: &Op, acp: &dyn AcpAdmin) -> OpResult {
         if (self.protect)(&op.name, 0) {
@@ -411,7 +411,10 @@ impl PartnerOps {
                 Some(r) => ok("", Some(r)),
                 None => failed("找不到這個工作者"),
             },
-            "restart" | "handover" | "close" | "model" | "remove" => {
+            "restart" | "handover" | "close" | "model" | "remove" | "rename" => {
+                if op.op == "rename" {
+                    return self.rename_acp(op, acp);
+                }
                 // 守門 4：動手前再驗一次本機開關
                 if !self.env.allow_remote() {
                     return failed(CONSENT_OFF);
@@ -459,6 +462,43 @@ impl PartnerOps {
             }
             _ => failed(UNSUPPORTED),
         }
+    }
+
+    /// 內建通道工作者「改名」（B5，#266）：名字格式與撞名檢查同 pi 改名，但撞名不分大小寫，而且收發室與 ASN 自己的視窗名也算。
+    /// 內建通道工作者之間（含名冊裡沒開起來的）的撞名、能不能改（設定檔裡的、沒對話的、已停止的）由工作者管理入口判斷
+    fn rename_acp(&self, op: &Op, acp: &dyn AcpAdmin) -> OpResult {
+        let new = op.new_name.trim();
+        if !valid_partner_name(new) {
+            return failed("新名字只能用英數、連字號、中文，1～40 字，不能以連字號開頭");
+        }
+        if new.eq_ignore_ascii_case(&op.name) {
+            return failed("新名字和現在的一樣");
+        }
+        // 守門 4：動手前再驗一次本機開關
+        if !self.env.allow_remote() {
+            return failed(CONSENT_OFF);
+        }
+        if self.name_taken_ci(new) {
+            return failed("這台電腦已經有同名的視窗，換個名字");
+        }
+        self.stage(op, "closing");
+        match acp.rename(&op.name, new) {
+            Ok(r) => {
+                self.stage(op, "opening");
+                ok("已改名，對話保留", Some(r))
+            }
+            Err(e) => failed(e),
+        }
+    }
+
+    /// 不分大小寫：這台電腦上有沒有這個名字的 Claude 視窗（活著的）、pi 視窗，或它是收發室／ASN 自己的視窗名
+    fn name_taken_ci(&self, name: &str) -> bool {
+        let os = self.env.os();
+        let same = |n: Option<&str>| n.is_some_and(|n| n.eq_ignore_ascii_case(name));
+        let claude = console::read_sessions(&self.dirs.sessions).iter().any(|s| same(s.get("name").and_then(Value::as_str)) && s.get("pid").and_then(Value::as_u64).map(|p| os.alive(p as u32)).unwrap_or(false));
+        let pi_dir = super::engines::pi::windows_dir(&self.env.pi_home());
+        let pi = super::engines::pi::read_windows(&pi_dir, self.env.now_ms(), |p| os.alive(p)).iter().any(|w| same(Some(w.name.as_str())));
+        claude || pi || (self.protect)(name, 0) || name.ends_with("收發室")
     }
 
     /// 名單上有這個 pi 視窗（pi 擴充的登記檔，程序還活著），而且同名的 Claude 視窗不存在（同名時不猜，照 Claude 處理）
