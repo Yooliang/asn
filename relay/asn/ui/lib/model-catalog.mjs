@@ -127,11 +127,14 @@ export function switchModelsFor(engine, { piModels = null } = {}) {
 /**
  * 開新夥伴第 2 頁「型號」（#539 之四）：選完廠牌與運行後，這家有清單才出現（預設＝不指定，照原本的開法）。
  * 只有開在這台電腦才能選（遠端開帶型號要改後台開窗表，還沒做）；Claude 只在開成視窗時帶 --model，Gemini 只在內建通道時記下型號。
+ * 跟後端 launch_model_plan（launch/local.rs）同一個判斷：內建通道（背景）照記；開成視窗只認 profile 明寫 engine "claude"，
+ * 沒寫 engine 的自訂 profile 後端會回錯誤，所以不出下拉。engine＝這次要用的 profile 的 engine（partner-launch-ui.mjs 的 localProfileEngine）。
  * 回 { show, models }。
  */
 export const LAUNCH_MODEL_RUN = { claude: 'term', gemini: 'acp' }
-export function launchModelChoices(vendorId, run, { local = false } = {}) {
+const engineAccepts = (run, engine) => run === 'acp' || engine === 'claude'
+export function launchModelChoices(vendorId, run, { local = false, engine = '' } = {}) {
   const models = switchModelsFor(vendorId)
-  const ok = local && models.length > 0 && LAUNCH_MODEL_RUN[vendorId] === run
+  const ok = local && models.length > 0 && LAUNCH_MODEL_RUN[vendorId] === run && engineAccepts(run, engine)
   return { show: ok, models: ok ? models : [] }
 }

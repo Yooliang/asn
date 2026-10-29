@@ -60,14 +60,15 @@ test('前台／後台與切換模型：原因與啟用條件共用同一個判�
   assert.match(modelSwitchBlock(acp, { selfNode: 'H', engine: 'gemini' }), /內建通道/)
 })
 
-test('對話上方「管理」：和右鍵同一份 partnerMenuItems（不含前後景切換、切換模型），納入管理在封存之前；反灰說明 20 字內', () => {
+test('對話上方「管理」：右鍵的 partnerMenuItems 拿掉喚醒（在第 2 格；不含前後景切換、切換模型），納入管理在封存之前；反灰說明 20 字內', () => {
   for (const [name, f] of Object.entries(KINDS)) {
     const items = managePanelItems(f, ctx, [], { selfNode: 'H' })
-    const fixed = FIXED.filter(k => k !== 'model').map(k => `p:${k}`)
+    const fixed = FIXED.filter(k => k !== 'model' && k !== 'resume').map(k => `p:${k}`)
     const at = fixed.findIndex(k => /archive/.test(k))
     const want = at < 0 ? [...fixed, 'p:adopt'] : [...fixed.slice(0, at), 'p:adopt', ...fixed.slice(at)]
     assert.deepEqual(items.map(i => i.key), want, name)
-    assert.deepEqual(items, partnerMenuItems(f, ctx, 'H'), `${name}：管理與右鍵同一份`)
+    assert.deepEqual(items, partnerMenuItems(f, ctx, 'H').filter(i => i.key !== 'p:resume'), `${name}：管理＝右鍵拿掉喚醒`)
+    assert.ok(partnerMenuItems(f, ctx, 'H').some(i => i.key === 'p:resume'), `${name}：右鍵保留喚醒（沒有大按鈕列）`)
     for (const i of items) assert.ok(i.reason.length <= 20, `${name} ${i.key}：${i.reason}`)
     assert.ok(!items.some(i => i.key === 'p:console' || i.key === 'p:model'), name)
   }

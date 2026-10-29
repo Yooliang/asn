@@ -87,7 +87,7 @@ test('掛上判斷的表達式：語法正確、帶入選擇器與預期路徑',
 })
 
 test('對話框遮罩情境（#536）：電腦與手機各一，檢查左上使用者區與名單；表達式語法正確', async () => {
-  const mask = SCENARIOS.filter(s => s.probe && !s.probe.bar && !s.probe.group && !s.probe.mbar)
+  const mask = SCENARIOS.filter(s => s.probe && !s.probe.bar && !s.probe.group && !s.probe.mbar && !s.probe.mgroup)
   assert.deepEqual(mask.map(s => s.name), ['list-dialog-mask', 'm-dialog-mask'])
   assert.ok(MASK_PROBES.desktop.cover.includes('.me .me-dp') && MASK_PROBES.desktop.cover.includes('.rail'))
   assert.ok(MASK_PROBES.mobile.cover.includes('.m-head .m-me'))
@@ -101,11 +101,12 @@ test('對話框遮罩情境（#536）：電腦與手機各一，檢查左上使�
 
 test('手機大按鈕情境（#539 之四）：412 寬、Claude 與 ACP 各一，6 顆依序、反灰正確；表達式語法正確；夥伴開在另一台', async () => {
   const sc = SCENARIOS.filter(s => s.probe?.mbar)
-  assert.deepEqual(sc.map(s => s.name), ['m-bar-claude', 'm-bar-acp'])
+  assert.deepEqual(sc.map(s => s.name), ['m-bar-claude', 'm-bar-acp', 'm-bar-offline'])
   for (const s of sc) {
     assert.ok(s.page.startsWith('m.html'), '手機頁以 412 寬開')
     assert.deepEqual(s.probe.mbar.map(x => x[0]), ['call', 'window', 'model', 'subs', 'tasks', 'manage'])
-    assert.deepEqual(s.probe.mbar.filter(x => !x[1]).map(x => x[0]), ['model', 'manage'], '手機上能按的只有切換模型與管理（假環境沒有語音）')
+    const can = s.probe.wake ? ['window', 'manage'] : ['model', 'manage']
+    assert.deepEqual(s.probe.mbar.filter(x => !x[1]).map(x => x[0]), can, '手機上能按的：在線＝切換模型與管理；離線＝喚醒與管理（假環境沒有語音）')
     assert.doesNotThrow(() => new vm.Script(probeSource(s.probe)))
     assert.equal(probeKind(s.probe), '手機大按鈕檢查')
     const ctx = vm.createContext({}); ctx.globalThis = ctx
@@ -113,6 +114,24 @@ test('手機大按鈕情境（#539 之四）：412 寬、Claude 與 ACP 各一�
     assert.equal(JSON.parse(await ctx.__TAURI__.core.invoke('store_load', { name: 'me' })).lastChat, 'Q/demo')
     assert.equal((await ctx.__TAURI__.core.invoke('android_launchers')).machines[0].node, 'Q')
   }
+})
+
+test('手機群組對話情境（#539 收尾）：最後使用的是群組、假群組列表；「群組」選單三項、沒有「輸入邀請碼加入」；表達式語法正確', async () => {
+  const sc = SCENARIOS.find(s => s.name === 'm-group-chat')
+  assert.ok(sc && sc.page.startsWith('m.html'))
+  assert.deepEqual(sc.probe.mgroup, GROUP_ITEMS)
+  assert.ok(!GROUP_ITEMS.includes('輸入邀請碼加入'))
+  assert.equal(probeKind(sc.probe), '手機群組按鈕檢查')
+  assert.doesNotThrow(() => new vm.Script(probeSource(sc.probe)))
+  const ctx = vm.createContext({}); ctx.globalThis = ctx
+  vm.runInContext(injectSource(tableFor(sc)), ctx)
+  const inv = ctx.__TAURI__.core.invoke
+  assert.equal(JSON.parse(await inv('store_load', { name: 'me' })).lastChat, 'room:g1')
+  assert.equal((await inv('relay_rooms')).rooms[0].id, 'g1')
+  const off = SCENARIOS.find(s => s.name === 'm-bar-offline')
+  assert.equal(off.probe.wake, true)
+  assert.deepEqual(off.probe.mbar[1], ['window', false, '喚醒'])
+  assert.doesNotThrow(() => new vm.Script(probeSource(off.probe)))
 })
 
 test('找瀏覽器：指定路徑優先；找不到給清楚中文錯誤；候選依平台', () => {
@@ -168,6 +187,9 @@ test('固定 6 顆大按鈕情境（#539）：閒置 Claude、離線 Claude、AC
     assert.doesNotThrow(() => new vm.Script(barProbeSource(s.probe)))
   }
   assert.deepEqual(BAR_PROBES.acp.bar[1], ['window', 'ACP 模式', true])
+  assert.deepEqual([BAR_PROBES.offline.bar[1], BAR_PROBES.offline.wake], [['window', '喚醒', false], true], '離線時第 2 格是喚醒、可按')
+  assert.deepEqual(BAR_PROBES.claude.bar[1], ['window', '後台隱藏', false], '在線時照舊前後台')
+  assert.match(barProbeSource(BAR_PROBES.offline), /img\/ab-wake\.svg/)
   const ctx = vm.createContext({}); ctx.globalThis = ctx
   vm.runInContext(injectSource(tableFor(SCENARIOS.find(s => s.name === 'list-bar-fixed-acp'))), ctx)
   assert.equal((await ctx.__TAURI__.core.invoke('relay_list')).members[0].agents[0].engine, 'gemini')
@@ -195,7 +217,7 @@ test('群組分頁情境（#539 之二）：假群組列表＋session 帶 room: 
   const sc = SCENARIOS.find(s => s.name === 'list-group-tab')
   assert.ok(sc, '要有群組分頁情境')
   assert.deepEqual(sc.probe.group, GROUP_ITEMS)
-  assert.deepEqual(GROUP_ITEMS, ['邀請別人加入', '輸入邀請碼加入', '加我的另一個 AI', '成員與設定'])
+  assert.deepEqual(GROUP_ITEMS, ['邀請別人加入', '加我的另一個 AI', '成員與設定'], '#539 收尾拿掉「輸入邀請碼加入」')
   assert.equal(probeSource(sc.probe), groupProbeSource(sc.probe))
   assert.equal(probeKind(sc.probe), '群組按鈕檢查')
   assert.doesNotThrow(() => new vm.Script(groupProbeSource(sc.probe)))

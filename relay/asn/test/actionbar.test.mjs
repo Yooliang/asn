@@ -43,11 +43,13 @@ test('功能列按鈕都有中文 aria-label 與提示（能用放說明、反�
   const t = read('ui/lib/actionbar.mjs')
   assert.match(t, /aria-label="切換模型" :title="slot\.model\.ok \? MODEL_TIP : slot\.model\.reason"/)
   assert.match(t, /const MODEL_TIP = '[^']*[一-鿿]/)
-  assert.match(t, /:aria-label="slot\.window\.label" :title="slot\.window\.ok \? consoleView\.tip : slot\.window\.reason"/)
+  assert.match(t, /:aria-label="slot\.window\.label" :title="slot\.window\.ok \? \(slot\.window\.wake \? WAKE_TIP : consoleView\.tip\) : slot\.window\.reason"/)
   assert.match(t, /aria-label="工作項目" :title="slot\.tasks\.ok \? TASKS_TIP : slot\.tasks\.reason"/)
   assert.match(t, /role="toolbar" aria-label="代理功能列"/)
-  const imgs = [...t.matchAll(/(?:src="|icon: \{ type: String, default: '|icon=")(img\/[^"']+)["']/g)].map(m => m[1])
-  assert.deepEqual(imgs, ['img/ab-more.svg', 'img/ab-call.svg', 'img/ab-window.svg', 'img/ab-model.svg', 'img/ab-agent.svg', 'img/ab-tasks.svg', 'img/ab-group.svg'])
+  const imgs = [...t.matchAll(/(?:src="|icon: \{ type: String, default: '|icon="|\? ')(img\/[^"']+)["']/g)].map(m => m[1])
+  assert.deepEqual(imgs, ['img/ab-more.svg', 'img/ab-call.svg', 'img/ab-wake.svg', 'img/ab-model.svg', 'img/ab-agent.svg', 'img/ab-tasks.svg', 'img/ab-group.svg'])
+  assert.match(t, /:src="slot\.window\.wake \? 'img\/ab-wake\.svg' : 'img\/ab-window\.svg'"/, '第 2 格離線時換喚醒圖示')
+  imgs.push('img/ab-window.svg')
   for (const m of imgs) assert.match(fs.readFileSync(path.join(root, 'ui', m), 'utf8'), /^<svg/, m)
   assert.ok(!/v-html|innerHTML/.test(t))
 })
@@ -61,7 +63,7 @@ test('固定 6 顆（#539）：通話、前台／後台、切換模型、子代�
   assert.match(t, /:data-slot="slotKey"[^>]*:aria-disabled="disabled \? 'true' : null"/)
   assert.match(t, /slotKey: \{ type: String, default: 'manage' \}, label: \{ type: String, default: '管理' \}/, '管理是 OpsMenuButton 的預設')
   assert.doesNotMatch(t, /v-if="(showCall|showConsole|showModel|showSubs|wake\.show)"/, '不再整顆藏起來')
-  assert.doesNotMatch(t, /aria-label="喚醒"/, '喚醒移進「管理」')
+  assert.doesNotMatch(t, /aria-label="喚醒"/, '喚醒不另放一顆：離線時第 2 格的名稱是喚醒')
 })
 
 test('兩種對話視窗都把 transport 與本機節點傳給對話區，對話區放了功能列', () => {
@@ -73,7 +75,7 @@ test('兩種對話視窗都把 transport 與本機節點傳給對話區，對話
 
 test('管理按鈕：可邀請的一對一一項，群組與其他沒有（群組的搬到「群組」按鈕，#539 之二）；群組不放通話與主控台', () => {
   assert.deepEqual(opsMenuItems({ room: true }), [])
-  assert.deepEqual(groupMenuItems({ room: true }).map(i => [i.key, i.label]), [['invite', '邀請別人加入'], ['join', '輸入邀請碼加入'], ['addai', '加我的另一個 AI'], ['manage', '成員與設定']])
+  assert.deepEqual(groupMenuItems({ room: true }).map(i => [i.key, i.label]), [['invite', '邀請別人加入'], ['addai', '加我的另一個 AI'], ['manage', '成員與設定']], '#539 收尾拿掉「輸入邀請碼加入」')
   assert.deepEqual(groupMenuItems({ id: 'H/a', node: 'H', agent: 'a' }), [], '一對一沒有群組按鈕')
   assert.deepEqual(groupMenuItems(null), [])
   assert.equal(opsMenuItems(null).length, 0)
@@ -97,8 +99,8 @@ test('「⋯」搬到大按鈕區：收件人列不再有選單，大按鈕區�
   assert.match(ab, /<template v-if="!isRoom && api">/)
   assert.match(ab, /<ops-menu-button v-if="showGroup" slot-key="group" label="群組" icon="img\/ab-group\.svg"[^>]*:items="groupAll" @pick="pickGroup">/)
   assert.match(ab, /<ops-menu-button v-if="\(!isRoom && api\) \|\| opsAll\.length"/)
-  // 「輸入邀請碼加入」和名單「＋」的「加入群組…」走同一個對話框
-  assert.match(read('ui/list.js'), /if \(what === 'join'\) \{ groupFlow\.openJoin\(\); return \}/)
+  // 對話上方不再有「輸入邀請碼加入」；名單「＋」的「加入群組…」照舊
+  assert.doesNotMatch(read('ui/list.js'), /what === 'join'/)
   assert.match(read('ui/list.html'), /groupFlow\.openJoin\(\)/)
 })
 
@@ -115,18 +117,17 @@ test('群組列表：未讀徽章垂直置中、不被拉長；大頭像與個�
   assert.ok(roomHue('團購群') >= 0 && roomHue('團購群') < 360)
 })
 
-test('一對一「管理」選單（#539 瘦身）：沒有前後景切換與切換模型；喚醒在這裡（離線才可按）；分隔線後接邀請；反灰原因 20 字內', async () => {
+test('一對一「管理」選單（#539 瘦身）：沒有前後景切換、切換模型與喚醒（喚醒在第 2 格）；分隔線後接邀請；反灰原因 20 字內', async () => {
   const { managePanelItems } = await import('../ui/lib/actionbar.mjs')
   const f = { id: 'H/a', node: 'H', agent: 'asn-2', window: 'w1', status: 'online' }
   const ctx = { loaded: true, signedIn: true, machines: { H: { online: true, launcher: true } } }
   const inv = opsMenuItems(f)
   const it = managePanelItems(f, ctx, inv, { selfNode: 'H' })
-  assert.deepEqual(it.map(i => i.key), ['p:info', 'p:rename', 'p:close', 'p:handover', 'p:resume', 'p:restart', 'p:remove', 'p:adopt', 'p:archive', 'invite'])
-  assert.deepEqual(it.map(i => i.ok), [true, true, true, true, false, false, false, true, true, true], '在線：喚醒、重開、移除不適用')
+  assert.deepEqual(it.map(i => i.key), ['p:info', 'p:rename', 'p:close', 'p:handover', 'p:restart', 'p:remove', 'p:adopt', 'p:archive', 'invite'])
+  assert.deepEqual(it.map(i => i.ok), [true, true, true, true, false, false, true, true, true], '在線：重開、移除不適用')
   for (const i of it) { assert.equal(Boolean(i.reason), !i.ok, i.key); assert.ok(i.reason.length <= 20, `${i.key}：${i.reason}`) }
-  assert.equal(it.find(i => i.key === 'p:resume').reason, '這個視窗在線上，不需要喚醒')
   const off = managePanelItems({ ...f, status: 'offline' }, ctx, inv, { selfNode: 'H' })
-  assert.equal(off.find(i => i.key === 'p:resume').ok, true, '離線時才可以喚醒')
+  assert.equal(off.some(i => i.key === 'p:resume'), false, '離線時喚醒在第 2 格，不在管理')
   assert.match(off.find(i => i.key === 'p:rename').reason, /已離線/)
   assert.equal(it.find(i => i.key === 'invite').sep, true, '邀請前有分隔線')
   assert.ok(!it.some(i => i.sep && i.key !== 'invite'))
@@ -144,7 +145,7 @@ test('一對一「管理」選單（#539 瘦身）：沒有前後景切換與切
   assert.match(t, /<small class="menu-why" v-if="it\.ok === false && it\.why" :id="'ops-why-' \+ it\.key">\{\{ it\.why \}\}<\/small>/)
   assert.doesNotMatch(t, /:disabled="it\.ok === false"/, '不用原生 disabled')
   assert.match(t, /function pick\(it\) \{ if \(it\.ok === false\) return;/)
-  assert.match(t, /const it = opsAll\.value\.find\(i => i\.key === key\)\s*\n\s*if \(!it\?\.ok\) return/)
+  assert.match(t, /const it = key === 'p:resume' \? \(wakeItem\.wake \? wakeItem : null\) : opsAll\.value\.find\(i => i\.key === key\)\s*\n\s*if \(!it\?\.ok\) return/, '喚醒看第 2 格，其餘看管理選單')
 })
 
 test('大按鈕反灰改 aria-disabled（#1571）：沒有原生 disabled、反灰有原因、點了在 handler 擋掉；樣式跟著改', () => {

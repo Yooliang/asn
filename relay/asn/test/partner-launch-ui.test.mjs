@@ -86,7 +86,7 @@ test('右鍵選單反灰時把原因接到滑鼠提示（list.js 存 reason、li
   const js = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
   const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
   assert.match(js, /buddyConsole\.reason = String\(q\?\.reason/)
-  assert.match(js, /barSlots\(c, \{ selfNode: info\.node, api: true, console: buddyConsole,/, '原因由 barSlots 從 buddyConsole（state、reason）算出')
+  assert.match(js, /barSlots\(c, \{ selfNode: info\.node, api: true, wake: false, console: buddyConsole,/, '原因由 barSlots 從 buddyConsole（state、reason）算出')
   assert.match(html, /:title="buddySlots\.window\.reason"/)
 })
 

@@ -41,17 +41,17 @@ test('內建通道切換模型：Gemini 有清單（預設目前的，不在清�
 })
 
 test('開新夥伴選型號：只在這台、Claude 開成視窗、Gemini 內建通道時出現；其他不出現', () => {
-  assert.deepEqual(launchModelChoices('claude', 'term', { local: true }), { show: true, models: CLAUDE_MODELS })
-  assert.deepEqual(launchModelChoices('gemini', 'acp', { local: true }), { show: true, models: GEMINI_MODELS })
+  assert.deepEqual(launchModelChoices('claude', 'term', { local: true, engine: 'claude' }), { show: true, models: CLAUDE_MODELS })
+  assert.deepEqual(launchModelChoices('gemini', 'acp', { local: true, engine: 'acp' }), { show: true, models: GEMINI_MODELS })
   for (const [v, r, local] of [['claude', 'term', false], ['claude', 'pi', true], ['gemini', 'term', true], ['grok', 'acp', true], ['codex', 'term', true], ['pi', 'pi', true], ['', '', true]]) {
-    assert.deepEqual(launchModelChoices(v, r, { local }), { show: false, models: [] }, `${v}/${r}/${local}`)
+    assert.deepEqual(launchModelChoices(v, r, { local, engine: 'claude' }), { show: false, models: [] }, `${v}/${r}/${local}`)
   }
 })
 
 test('開新夥伴接線：第 2 頁有型號下拉（預設不指定），本機開時帶 model', () => {
   const html = read('ui/list.html'), js = read('ui/list.js')
   assert.match(html, /<label class="partner-model-pick" v-if="launchModel\.show">型號[\s\S]*?<option value="">不指定（照預設）<\/option>[\s\S]*?v-for="m in launchModel\.models"/)
-  assert.match(js, /launchModelChoices\(dlgRow\.value\?\.id, partnerRunChoice\.value, \{ local: partnerDlg\.node === info\.node \}\)/)
+  assert.match(js, /launchModelChoices\(dlgRow\.value\?\.id, partnerRunChoice\.value, \{ local: partnerDlg\.node === info\.node, engine: localProfileEngine\(partnerDlg\.profile, remoteLaunchers\.value\[info\.node\]\) \}\)/)
   assert.match(js, /\.\.\.\(launchModelPick\.value \? \{ model: launchModelPick\.value \} : \{\}\)/)
   assert.match(read('ui/lib/partner-ops-ui.mjs'), /<label class="op-field" v-if="op === 'model' && acpModels\.length">模型/)
   assert.match(read('src-tauri/src/launch/mod.rs'), /pub model: String,/)

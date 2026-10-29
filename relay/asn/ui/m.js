@@ -335,8 +335,7 @@ const app = createApp({
       if (!f) return
       history.back()   // 先收起「⋯」選單，再開群組對話框
       setTimeout(() => {
-        if (key === 'join' && f.room) groupFlow.openJoin()
-        else if (key === 'manage' && f.room) groupFlow.openManage(roomIdOf(f.id))
+        if (key === 'manage' && f.room) groupFlow.openManage(roomIdOf(f.id))
         else if (key === 'addai' && f.room) groupFlow.openManage(roomIdOf(f.id), { focusAdd: true })
         else if (f.room) groupFlow.openInvite({ type: 'room', roomId: roomIdOf(f.id), name: f.nick })
         else groupFlow.openInvite({ type: 'friend', friend: f })
@@ -668,6 +667,7 @@ const app = createApp({
     function onBar(key) {
       const s = barView.value.find(x => x.key === key)
       if (!s?.ok) return
+      if (key === 'window' && s.wake) { openOps(); pickOp('resume'); return }   // 離線時第 2 格是喚醒：跟原本「⋯」裡的喚醒同一條路（送出時收起選單、進度顯示在對話頁頂端）
       if (key === 'manage' || key === 'group') { openOps(); return }
       if (key === 'model') { openOps(); pickOp('model') }
     }

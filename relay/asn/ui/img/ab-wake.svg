@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 對話功能列：喚醒（離線的夥伴） -->
+  <defs>
+    <linearGradient id="w" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd977"/><stop offset="1" stop-color="#f0a42a"/></linearGradient>
+  </defs>
+  <circle cx="16" cy="17" r="11.5" fill="url(#w)" stroke="#8a5a12" stroke-width="1.4"/>
+  <path d="M16 10.5v7" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
+  <path d="M11.2 13.2a6.6 6.6 0 1 0 9.6 0" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M24.5 4.5l1.6-1.6M27 8l2.2-.6M21 3.2l.4-2.1" fill="none" stroke="#f0a42a" stroke-width="1.4" stroke-linecap="round"/>
+</svg>
