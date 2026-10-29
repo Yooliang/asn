@@ -386,6 +386,7 @@ mod tests {
                 notify: Arc::new(|_| {}),
                 pids: PidBook::new(work),
                 data_dir: None,
+                handoff_dir: None,
             };
             let eng = AcpEngine::new(ctx, None);
             eng.set_queue_env(env.clone());

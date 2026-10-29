@@ -1,5 +1,6 @@
 // 假的 agy（原生 stream-json 模式）：給 acp 轉接器的測試用，不碰任何真的 AI。事件格式照 agy 1.2.16 實測。
 // 訊息裡的暗號決定行為（前導的工作者說明、[RELAY 來信] 標頭會被忽略）：
+//   @@ECHO_ALL       回整則訊息原文（看換班接手說明與帶進來的前情）
 //   @@WRITE <路徑>   送出寫檔工具步驟，150ms 後才真的寫（絆線測試：被殺就不會有檔案）
 //   @@RUN <指令>     送出執行指令步驟；沒帶 --dangerously-skip-permissions 就被「權限拒絕」（空回覆＋denied_actions）
 //   @@AUTH / @@QUOTA 回 status=ERROR 的 result 並結束（結束碼 1）
@@ -54,6 +55,7 @@ async function handle(line) {
   out({ event: 'step_update', step_update: { conversation_id: conv, step_index: step++, state: 'DONE', step_type: 'user_input' } })
   const mail = content.includes('\n---\n') ? content.slice(content.indexOf('\n---\n') + 5) : content
   let body = mail.replace(/^\[RELAY 來信\][^\n]*\n?/, '').replace(/^寄件人：[^\n]*\n?/, '').replace(/^【要回信】[^\n]*\n?/, '')
+  body = body.replace(/以下是收發室替你記的往來記錄[\s\S]*?(?=\[RELAY 來信\])/, '')   // 換班接手帶進來的前情裡的舊暗號不算這一封的暗號
   const gate = /@@GATE\s+(\S+)/.exec(body)
   if (gate) {
     out({ event: 'step_update', step_update: { conversation_id: conv, step_index: step++, state: 'ACTIVE', step_type: 'agent_response', text_delta: '...' } })
@@ -91,6 +93,7 @@ async function handle(line) {
   }
   if (resumedPoisoned) return fail('UNAUTHENTICATED (code 401): Request had invalid authentication credentials (authentication required)', 1)
   if (/@@POISON/.test(body)) { saveTurns(conv, turns, true); return resultOf('已標記壞掉') }
+  if (/@@ECHO_ALL/.test(body)) return resultOf(content)   // 回整則訊息（連換班接手的說明、前情一起）
   if (/@@HEAD/.test(body)) return resultOf(content.split('\n').find(l => l.startsWith('[RELAY 來信]')) ?? '')
   if (/授權已核可/.test(body)) return resultOf(`ran-after-grant (${flags})`)
   if ((t = /@@AUTH_ONCE\s+(\S+)/.exec(body)) && !fs.existsSync(t[1])) { fs.writeFileSync(t[1], 'x'); return fail('UNAUTHENTICATED (code 401): Request had invalid authentication credentials (authentication required)', 1) }

@@ -33,7 +33,7 @@ test('接手：背景 grok、其他引擎的程序條目、沒登入、電腦沒
   assert.equal(h(GROK({ engine: 'pi', agent: 'pi #5（前景）' })).label, '接手', 'pi 的前景程序條目也能接手（0.2 A5，見 pi-adopt-ui.test.mjs）')
   assert.equal(h(GROK({ engine: 'codex', agent: 'codex #5（前景）' })).label, '換班接手', '其他引擎維持原本的名稱')
   assert.equal(isGrokAdoptable(GROK({ entryKind: '', agent: 'grok' })), false, '不是程序條目（例如 ASN 的 Grok 工作者）不算接手')
-  assert.equal(h(GROK({ entryKind: '', agent: 'grok' })).label, '換班接手', 'ASN 的 Grok 工作者走一般換班接手（#234 之後可用）')
+  assert.equal(h(GROK({ entryKind: '', agent: 'grok' })).label, '開新對話', 'ASN 的 Grok 工作者是內建通道的工作者：換班接手對它就是開新對話（#234 之後可用）')
   assert.equal(h(GROK(), { ...ctx, signedIn: false }).reason, REASON.needLogin)
   assert.equal(h(GROK({ node: 'C', id: 'C/x' })).reason, REASON.closed)
   assert.equal(h(GROK({ node: 'W', id: 'W/x' })).reason, REASON.offline)
@@ -258,7 +258,7 @@ test('依引擎決定哪幾項能用（項目一律固定八項）：Claude 前�
     const items = menuItems(W('H', 'Gemini', { engine, kind: 'claude' }), ctx)
     assert.deepEqual(items.map(i => i.key), MENU_KEYS, engine)
     assert.deepEqual(items.filter(i => i.ok).map(i => i.key), ['info', 'rename', 'model', 'close', 'handover', 'restart', 'remove'], engine)
-    assert.deepEqual(items.filter(i => i.ok).map(i => i.label), ['詳情', '改名', '切換模型', '關閉', '換班接手', '重開', '移除'])
+    assert.deepEqual(items.filter(i => i.ok).map(i => i.label), ['詳情', '改名', '切換模型', '關閉', '開新對話', '重開', '移除'])
     const why = Object.fromEntries(items.filter(i => !i.ok).map(i => [i.key, i.reason]))
     assert.deepEqual(Object.keys(why), ['resume'], '只剩喚醒不能用')
     assert.match(why.resume, /不需要喚醒/)
@@ -318,9 +318,9 @@ test('ACP 工作者的詳情：引擎、模型、權限、工作資料夾、程�
   assert.ok(!infoRows({ has_session: true, load_session: null }).some(r => r.label === '對話接續'), '還不知道就不列')
 })
 
-test('換班接手完成：ACP 工作者沒有請前任寫交接，說明新對話從空白開始', () => {
+test('換班接手完成：ACP 工作者沒有請前任寫交接，說明新對話第一句是接班說明、附往來記錄當前情', () => {
   const v = progressView({ status: 'ok', result: { kind: 'acp', handoff_done: false } }, { op: 'handover' })
-  assert.deepEqual(v.extra, ['這類夥伴沒有請前任寫交接，新對話從空白開始，第一句是接班說明。'])
+  assert.deepEqual(v.extra, ['這類夥伴沒有請前任寫交接；新對話第一句是接班說明，並附上收發室替它記的往來記錄當前情。'])
   const c = progressView({ status: 'ok', result: { handoff_done: false } }, { op: 'handover' })
   assert.deepEqual(c.extra, ['前任沒有寫完交接，新夥伴會以前任的對話紀錄為主。'])
 })
@@ -348,4 +348,13 @@ test('內建通道工作者的改名（B5，#266）：在線可用、已停止�
     assert.equal(opErrorText(m), m)
     assert.ok(m.length <= 20, m)
   }
+})
+
+test('需要登入：提醒條種類是 login、說明講清楚要到哪台電腦做什麼；沒有設備名也說得通', async () => {
+  const { warnKind, loginNote } = await import('../ui/lib/head-tone.mjs')
+  assert.equal(warnKind('login-required'), 'login'); assert.equal(warnKind('stopped'), 'stopped'); assert.equal(warnKind('busy'), 'status')
+  const n = loginNote({ nick: 'Gemini審查', device: '家用機', engine: 'gemini', agent: 'Gemini審查' })
+  assert.match(n, /「家用機」/); assert.match(n, /agy/); assert.match(n, /Google/); assert.ok(!/[A-Za-z]{4,}/.test(n.replace(/agy|Google/g, '').replace('Gemini審查', '')), `純中文：${n}`)
+  assert.match(loginNote({ nick: '小葛', engine: 'grok' }), /它所在的那台電腦/)
+  assert.ok(!/agy/.test(loginNote({ nick: '小葛', engine: 'grok' })), 'agy 只對 Gemini 這類')
 })

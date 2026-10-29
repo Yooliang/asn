@@ -72,6 +72,7 @@ async fn boot(fr: &FakeRelay, work: &Path, home: &Path, sessions: &Path, sink: A
         notify: Arc::new(move |n| n2.lock().unwrap().push(n)),
         pids: PidBook::new(work),
         data_dir: None,
+        handoff_dir: Some(work.join("handoff")),
     };
     let set = engines::build(&ctx, Some(spec)).expect("有載入的引擎");
     let mut core = new_core(fr, work, sessions, sink, now());
@@ -417,6 +418,23 @@ async fn agy_重開後還是登入失效_存著的舊對話壞了_丟掉改開�
     h.set.refresh_all().await;
     h.core.refresh_roster(now()).await;
     assert_eq!(h.last_roster()["agents"][0]["status"], "idle");
+}
+
+#[tokio::test]
+async fn agy_舊對話壞了改開新對話_名下的往來記錄當前情帶進去() {
+    let state = tempfile::tempdir().unwrap();
+    let st = state.path().display().to_string();
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[("FAKE_AGY_STATE", &st)], "acp", &[]).await;
+    let hist = h.work.path().join("handoff");
+    std::fs::create_dir_all(&hist).unwrap();
+    std::fs::write(hist.join("Gemini.md"), "▌ 2026-10-28 09:00 收到｜小良 → Gemini｜id=a1\n預算表放在 D 槽的財務資料夾\n\n").unwrap();
+    h.put_pull(to_agent(1, "Gemini", "@@POISON")).await;
+    h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
+    h.restart().await;
+    h.put_pull(to_agent(2, "Gemini", "@@ECHO_ALL")).await;
+    h.wait("新對話的第一則", |h| h.bodies().iter().any(|b| b.contains("下一任"))).await;
+    let got = h.bodies().into_iter().find(|b| b.contains("下一任")).unwrap();
+    assert!(got.contains("往來記錄") && got.contains("預算表放在 D 槽的財務資料夾"), "換新對話要把往來記錄帶進去：{got}");
 }
 
 #[tokio::test]
@@ -938,7 +956,7 @@ async fn codex_不可用_版本太舊_名單不列_deliver_同步失敗() {
     assert!(h.log_text().contains("比已驗證的最低版本"), "{}", h.log_text());
     // 引擎本身：deliver 同步 throw（橋把信留在 inbox）
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let ctx = EngineCtx { log: Arc::new(|_| {}), work_dir: d.path().to_path_buf(), home: d.path().to_path_buf(), agents_file: d.path().join("a.json"), env: Arc::new(cx.env.clone()), events: tx, notify: Arc::new(|_| {}), pids: PidBook::new(d.path()), data_dir: None };
+    let ctx = EngineCtx { log: Arc::new(|_| {}), work_dir: d.path().to_path_buf(), home: d.path().to_path_buf(), agents_file: d.path().join("a.json"), env: Arc::new(cx.env.clone()), events: tx, notify: Arc::new(|_| {}), pids: PidBook::new(d.path()), data_dir: None, handoff_dir: None };
     let e = engines::codex::CodexEngine::new(ctx);
     e.probe().await;
     assert!(!e.usable());

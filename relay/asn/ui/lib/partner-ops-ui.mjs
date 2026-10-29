@@ -4,7 +4,7 @@
 import { AsnDialog } from './dialog.mjs'
 import { machinesByNode } from './mobile-launch.mjs'
 import { launchersErrorText } from './launcher-poll.mjs'
-import { ADOPT_ACK, PI_ADOPT_ACK, OP_LABEL, OP_POLL_MS, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, buildOpRequest, dialogEngine, infoRows, opErrorText, opFormError, piModelChoices, progressView } from './partner-ops.mjs'
+import { ACP_NEWCONV_LABEL, ADOPT_ACK, PI_ADOPT_ACK, OP_LABEL, OP_POLL_MS, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, buildOpRequest, dialogEngine, infoRows, opErrorText, opFormError, piModelChoices, progressView } from './partner-ops.mjs'
 import { cleanPiModels } from './pi-models.mjs'
 
 const errText = e => String(e?.message ?? e ?? '').replace(/\s+/g, ' ').trim().slice(0, 80) || '原因不明'
@@ -81,8 +81,8 @@ export function opDialogText(op, name, device = '', engine = 'claude') {
       points: ['ASN 會找出這個 grok 正在用的那一段對話，找不到或不只一段就不會接手，並告訴你原因', '另外開一個專屬的 Grok 工作者載入同一段對話，之後寄給它的信會接在這段對話後面，回覆照一般工作者寄回', '接手後請先關掉終端機那個 grok，兩邊同時用同一段對話可能互相覆蓋', 'ASN 不會替你關掉終端機裡的 grok'],
     }
     return engine === 'acp' ? {
-      title, lead: `要讓「${name}」${where}內建通道的工作者換班接手嗎？`, ok: '開始換手', auto: false,
-      points: ['這類夥伴不會請前任寫交接，也沒有前任的對話紀錄可讀', '清掉目前的對話，結束它的程序，由 ASN 重新啟動', '新的對話第一句會是接班說明，請它先向寄件人確認進度'],
+      title: ACP_NEWCONV_LABEL, lead: `要替「${name}」${where}內建通道的工作者開新對話嗎？`, ok: ACP_NEWCONV_LABEL, auto: false,
+      points: ['清掉目前的對話，結束它的程序，由 ASN 重新啟動；它不會記得之前聊過的內容', '這類夥伴不會請前任寫交接，所以新對話會帶入收發室替它記的往來記錄當前情（最近的一段）', '第一句會是接班說明，請它先向寄件人確認進度', '對話壞掉、一直報錯時可以用這個救回來'],
     } : {
       title, lead: `要讓「${name}」${where}視窗換班接手嗎？`, ok: '開始換手', auto: false,
       points: ['先請它把交接寫到一個檔案（最久等十分鐘，沒寫完也會繼續）', '再關掉它的視窗', '用同一個名字開一個新的，新夥伴會先讀交接檔和前任最後的對話紀錄，接著把工作做下去'],

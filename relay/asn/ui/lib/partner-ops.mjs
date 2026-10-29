@@ -91,6 +91,8 @@ export const PI_MODEL_REMOTE_NOTE = '查不到這台的模型清單（那台要�
 export const PI_MODEL_HINT = '請輸入模型，例如 claude-sonnet-5 或 anthropic/claude-sonnet-5（只能用英數與 . _ -，合起來最多 60 字）'
 // 背景工作者沒有視窗：「關閉」是停止它本次的執行
 export const ACP_CLOSE_LABEL = '關閉'
+// 內建通道的工作者沒有前任的對話紀錄可讀，「換班接手」對它就是清掉舊對話、開新對話（並把名下的往來記錄當前情帶進去）；動作代號仍是 handover
+export const ACP_NEWCONV_LABEL = '開新對話'
 export const STALE_TEXT = 'ASN 版本可能太舊，或沒有在跑'
 
 // 不是 AI 夥伴的對象：人、手機，群組、ASN 與收發室視窗
@@ -189,7 +191,7 @@ export function menuItems(friend, ctx = {}) {
   return MENU_KEYS.map(key => {
     const reason = itemReason(key, friend, engine, offline, ctx)
     const adopt = key === 'handover' && isAdoptable(friend)
-    const label = adopt ? ADOPT_LABEL : key === 'close' && engine === 'acp' ? ACP_CLOSE_LABEL : OP_LABEL[key]
+    const label = adopt ? ADOPT_LABEL : key === 'close' && engine === 'acp' ? ACP_CLOSE_LABEL : key === 'handover' && engine === 'acp' ? ACP_NEWCONV_LABEL : OP_LABEL[key]
     return { key, label, ok: !reason, reason }
   })
 }
@@ -344,7 +346,7 @@ function handoverExtra(result) {
   const r = result && typeof result === 'object' && !Array.isArray(result) ? result : {}
   const lines = []
   if (typeof r.handoff_path === 'string' && r.handoff_path) lines.push(`交接檔：${short(r.handoff_path, 300)}`)
-  if (r.handoff_done === false) lines.push(r.kind === 'acp' ? '這類夥伴沒有請前任寫交接，新對話從空白開始，第一句是接班說明。' : '前任沒有寫完交接，新夥伴會以前任的對話紀錄為主。')
+  if (r.handoff_done === false) lines.push(r.kind === 'acp' ? '這類夥伴沒有請前任寫交接；新對話第一句是接班說明，並附上收發室替它記的往來記錄當前情。' : '前任沒有寫完交接，新夥伴會以前任的對話紀錄為主。')
   return lines
 }
 

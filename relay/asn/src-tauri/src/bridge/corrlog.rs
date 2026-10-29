@@ -70,6 +70,45 @@ pub fn pid_file_of(dir: &Path, partner_id: &str) -> PathBuf {
     dir.join(format!("{}.md", safe_name(partner_id)))
 }
 
+/// 換班接手／換新對話時帶給新對話的前情：這個視窗名底下往來記錄最後面的 `max_chars` 字（從完整的一筆開始切）。
+/// 先找視窗名的檔；沒有就找檔頭「目前名字」等於它的檔（改名後以夥伴 ID 為檔名的），取最近改過的。沒有記錄回空字串；不改任何檔
+pub fn history_tail(dir: &Path, name: &str, max_chars: usize) -> String {
+    let direct = file_of(dir, name);
+    let file = if direct.is_file() {
+        Some(direct)
+    } else {
+        let want = format!("目前名字：{name}");
+        std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "md"))
+            .filter(|p| {
+                use std::io::Read;
+                let mut buf = [0u8; 512];
+                let n = std::fs::File::open(p).and_then(|mut f| f.read(&mut buf)).unwrap_or(0);
+                String::from_utf8_lossy(&buf[..n]).lines().next().is_some_and(|l| l.starts_with(HEADER_PREFIX) && l.trim_end().ends_with(&want))
+            })
+            .max_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
+    };
+    let Some(file) = file else { return String::new() };
+    let text = std::fs::read_to_string(&file).unwrap_or_default();
+    let (_, body) = split_header(&text);
+    let body = body.trim();
+    let total = body.chars().count();
+    if total <= max_chars {
+        return body.to_string();
+    }
+    let cut: String = body.chars().skip(total - max_chars).collect();
+    // 從下一筆的開頭接起，不從半筆開始
+    let tail = match cut.find(&format!("\n{MARK}")) {
+        Some(i) => &cut[i + 1..],
+        None => cut.as_str(),
+    };
+    format!("（更早的記錄省略）\n{tail}")
+}
+
 /// 附在每封轉交信最後的那一行（格式固定）；`file` 是實際要寫的檔
 pub fn path_line_of(file: &Path) -> String {
     format!("你與收發室的往來記錄在：{}（接手前請先讀）", file.display())
@@ -364,6 +403,27 @@ mod tests {
 
     fn e<'a>(ts: u64, dir: Dir, id: &'a str, body: &'a str) -> Entry<'a> {
         Entry { ts_ms: ts, dir, from: "H/甲", to: "乙", id, body, attachments: &[] }
+    }
+
+    #[test]
+    fn 前情_取往來記錄最後面一段_從完整一筆開始_沒記錄是空_找得到改名後的檔() {
+        let t = tempfile::tempdir().unwrap();
+        let dir = t.path().join("handoff");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(history_tail(&dir, "甲", 1000), "", "沒有檔");
+        let c = CorrLog::new(dir.clone());
+        for i in 0..30 {
+            c.append("甲", &Entry { ts_ms: 1_000 * (i + 1), dir: Dir::Received, from: "乙", to: "甲", id: &format!("m{i}"), body: &format!("第{i}封的內容"), attachments: &[] }).unwrap();
+        }
+        let all = history_tail(&dir, "甲", 1_000_000);
+        assert!(all.contains("第0封的內容") && all.contains("第29封的內容") && !all.contains("夥伴 ID"), "全部都在、檔頭不帶：{all}");
+        let part = history_tail(&dir, "甲", 300);
+        assert!(part.starts_with("（更早的記錄省略）\n▌"), "從完整一筆開始：{part}");
+        assert!(part.contains("第29封的內容") && !part.contains("第0封的內容"));
+        // 檔名是夥伴 ID（改名後）：用檔頭的目前名字找
+        std::fs::write(dir.join("p_0123456789abcdef012345.md"), format!("{}\n\n▌ x\n改名後的記錄\n", header_line("p_0123456789abcdef012345", "丙"))).unwrap();
+        assert!(history_tail(&dir, "丙", 1000).contains("改名後的記錄"));
+        assert_eq!(history_tail(&dir, "丁", 1000), "");
     }
 
     #[test]
