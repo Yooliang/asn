@@ -20,6 +20,26 @@ static NET_RETRY_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64
 pub fn set_net_retry_ms_for_test(ms: u64) {
     NET_RETRY_MS.store(ms, std::sync::atomic::Ordering::Relaxed);
 }
+/// 測試用：讓某個工作者第 N 次「開新驅動」失敗（模擬暫時開不起來），用來驗證丟掉舊對話後開驅動失敗會把對話放回去
+#[cfg(test)]
+pub(crate) mod test_hooks {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    static FAIL_SPAWN_IN: Mutex<Option<HashMap<String, u32>>> = Mutex::new(None);
+    pub fn fail_spawn_in(name: &str, n: u32) {
+        FAIL_SPAWN_IN.lock().unwrap().get_or_insert_with(HashMap::new).insert(name.to_string(), n);
+    }
+    pub fn should_fail_spawn(name: &str) -> bool {
+        let mut g = FAIL_SPAWN_IN.lock().unwrap();
+        let Some(m) = g.as_mut() else { return false };
+        let Some(v) = m.get_mut(name) else { return false };
+        if *v == 0 {
+            return false;
+        }
+        *v -= 1;
+        *v == 0
+    }
+}
 
 fn now_ms() -> u64 {
     crate::heartbeat::now_ms()
@@ -422,6 +442,10 @@ impl Worker {
         if let Some(d) = usable(self) {
             return Ok(d);
         }
+        #[cfg(test)]
+        if test_hooks::should_fail_spawn(&self.i.cfg.name) {
+            return Err(WorkerError::new("crash", "測試：暫時開不起新驅動"));
+        }
         let (old, gen) = {
             let mut s = self.st.lock().unwrap();
             s.driver_gen += 1;
@@ -618,8 +642,9 @@ impl Worker {
         // 登入、額度不在這裡處理（is_network_error 會排除它們）
         let net_err = r.as_ref().err().filter(|e| e.code == "agent" && is_network_error(&e.message)).cloned();
         if let Some(e) = net_err {
-            if e.had_steps {
-                self.log("網路斷線，但這一輪已經有工具步驟：不自動重送");
+            // 只有 agy 驅動會記「這一輪有沒有工具步驟」；通用 ACP 驅動不知道，保守起見不自動重送（asn調查員／asn真 #526）
+            if e.had_steps || cfg.protocol != "agy-stream" {
+                self.log(if e.had_steps { "網路斷線，但這一輪已經有工具步驟：不自動重送" } else { "網路斷線，這類工作者不知道這一輪有沒有動過手：不自動重送" });
                 r = Err(WorkerError::new("agent", "網路斷線，這一輪可能做了一半"));
             } else {
                 let wait = NET_RETRY_MS.load(std::sync::atomic::Ordering::Relaxed);
@@ -636,6 +661,7 @@ impl Worker {
                 }
             }
         }
+        let mut conv_note = String::new(); // 這次改開了新對話：附在回覆後面讓寄件人知道
         // 登入失效（401）：長時間跑的驅動憑證到期，換一個新的驅動（重新讀登入）把同一封信再試一次；重開後還失效才報「需要登入」。
         // 每個工作者一小時最多自動重開一次，不無限重試（#517）
         if r.as_ref().err().map(|e| e.code == "auth").unwrap_or(false) && self.take_auth_retry() {
@@ -665,7 +691,17 @@ impl Worker {
                 if let Some(old) = old {
                     old.stop();
                 }
-                d = self.ensure_driver(self.base_full()).await?;
+                d = match self.ensure_driver(self.base_full()).await {
+                    Ok(d) => d,
+                    Err(e) => {
+                        // 開不起新驅動（多半是暫時的錯）：舊對話編號與狀態放回去，免得因為一次暫時的錯就把對話丟了
+                        self.i.store.set(&cfg, &dropped);
+                        let mut s = self.st.lock().unwrap();
+                        s.need_preamble = prev_preamble;
+                        s.handover = prev_handover;
+                        return Err(e);
+                    }
+                };
                 let first = {
                     let s = self.st.lock().unwrap();
                     format!("{}{}", preamble_for(&cfg), s.handover.as_deref().map(|h| format!("{h}\n\n---\n")).unwrap_or_default())
@@ -685,11 +721,17 @@ impl Worker {
                     s.need_preamble = prev_preamble;
                     s.handover = prev_handover;
                 } else {
-                    self.notice_owners("conv-reset", &format!("{} 存著的舊對話壞了（重開後仍 401），已丟掉舊對話 {dropped}、改開新對話；它不記得之前聊過的內容。", cfg.name), Some(job));
+                    self.log(format!("已丟掉舊對話 {dropped}，改用新對話"));
+                    conv_note = format!("\n\n（備註：{} 存著的舊對話壞了，這次改開新對話，它不記得之前聊過的內容。）", cfg.name);
+                    // 給擁有者的通知不帶內部對話編號（編號只寫日誌）
+                    self.notice_owners("conv-reset", &format!("{} 存著的舊對話壞了（重開後仍然登入失效），已改開新對話；它不記得之前聊過的內容。", cfg.name), Some(job));
                 }
             }
         }
         let mut res = r?;
+        if !conv_note.is_empty() {
+            res.text.push_str(&conv_note);
+        }
         {
             let mut s = self.st.lock().unwrap();
             s.need_preamble = false;

@@ -126,7 +126,7 @@ export function processReason(f) {
 }
 
 // 接手：使用者自己在終端機開的 grok（前景程序條目），可以讓 ASN 的 Grok 工作者載入同一段對話。
-// 沿用「換班接手」這個動作代號（後台與簽章流程不用改），選單上改叫「接手」；真正找得到哪一段對話由電腦端決定，找不到會回原因。
+// 沿用「handover」這個動作代號（後台與簽章流程不用改），選單上改叫「接手」；真正找得到哪一段對話由電腦端決定，找不到會回原因。
 export const ADOPT_LABEL = '接手'
 export const ADOPT_ACK = '我已了解：接手後我會先關掉終端機那個 grok，兩邊同時用同一段對話可能互相覆蓋'
 export const isGrokAdoptable = f => isProcessEntry(f) && /^grok\b/i.test(String(f?.engine ?? '').trim() || String(f?.agent ?? f?.nick ?? '')) && /（前景）\s*$/.test(String(f?.agent ?? f?.nick ?? ''))
