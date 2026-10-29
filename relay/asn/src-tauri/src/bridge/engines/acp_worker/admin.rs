@@ -309,8 +309,8 @@ impl Worker {
     }
 
     /// 名下的往來記錄（最近一段），換班接手與自動換新對話時當前情帶進去；沒設資料夾或沒記錄是空字串
-    pub(super) fn history(&self) -> String {
-        self.i.handoff_dir.as_deref().map(|d| crate::bridge::corrlog::history_tail(d, &self.i.cfg.name, HISTORY_MAX_CHARS)).unwrap_or_default()
+    pub(super) fn history(&self, skip_id: Option<&str>) -> String {
+        self.i.handoff_dir.as_deref().map(|d| crate::bridge::corrlog::history_tail(d, &self.i.cfg.name, HISTORY_MAX_CHARS, skip_id)).unwrap_or_default()
     }
 
     /// 換班接手：清掉對話編號、結束驅動程序後重開；第一則提示是接班說明。回被結束的 pid
@@ -323,7 +323,7 @@ impl Worker {
         {
             let mut s = self.st.lock().unwrap();
             s.need_preamble = true;
-            s.handover = Some(handover_prompt(&self.i.cfg.name, note, &self.history()));
+            s.handover = Some(handover_prompt(&self.i.cfg.name, note, &self.history(None)));
         }
         self.log(format!("遠端管理：換班接手（結束程序 pid={pid}，對話編號已清掉）"));
         self.revive_after_admin_stop();
