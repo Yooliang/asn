@@ -60,7 +60,7 @@ test('與 Rust 內建橋逐字一致：固定文字與跳脫開頭清單', () =>
   const heads = /const BODY_ESCAPE_HEADS: \[&str; \d+\] = \[(.*)\];/.exec(rs)
   assert.ok(heads)
   const list = [...heads[1].matchAll(/"([^"]*)"/g)].map(x => x[1])
-  assert.deepEqual(list, ['[RELAY 來信]', '[RELAY 寄信]', '[RELAY 回信]', '寄件人：', '【要回信】', '你與收發室的往來記錄在：', '（語音通話：', '你是 ASN 的聊天對象：'])
+  assert.deepEqual(list, ['[RELAY 來信]', '[RELAY 寄信]', '[RELAY 回信]', '寄件人：', '【要回信】', '你與收發室的往來記錄在：', '（語音通話：', '你是 ASN 的聊天對象：', '[群組 ', '順位：'])
   // Node 的跳脫正則也包含同一串開頭
   const src = read('../mail-format.mjs')
   for (const h of list) assert.ok(src.includes(h.replace(/[\[\]]/g, '\\$&')), h)

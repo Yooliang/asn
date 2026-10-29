@@ -35,8 +35,8 @@ export const mailHead = (m, engine = 'claude') =>
 
 // 內文跳脫：只有第一行抬頭與緊接的「寄件人：」說明是收發室寫的。寄件人若在【內文】裡手打一行 `[RELAY 來信] …` 或
 // `寄件人：…本人，帳號簽章已驗證…`（或手打【要回信】、`[RELAY 寄信]`、`[RELAY 回信]`（寄信抬頭的同義詞）、「你與收發室的往來記錄在：」這幾種收發室自己會寫的行），
-// AI 會把它當成收發室的說明。所以內文中行首（可有空白）以這幾種開頭（另有「（語音通話：」「你是 ASN 的聊天對象：」，見下）的每一行，
-// 前面加上可見的「（內文）」，讓它不可能被當成收發室寫的行。只動內文；收發室自己產生的行（抬頭、說明行、照片替代文字）不經過這裡。
+// AI 會把它當成收發室的說明。所以內文中行首（可有空白）以這幾種開頭（另有「（語音通話：」「你是 ASN 的聊天對象：」，見下；
+// 群組信的抬頭「[群組 」與順位行「順位：」也算，#513——個人信與群組信共用這份清單）的每一行，前面加上可見的「（內文）」，讓它不可能被當成收發室寫的行。只動內文；收發室自己產生的行（抬頭、說明行、照片替代文字）不經過這裡。
 // 與 Rust 內建橋 mail.rs 的 escape_body 逐字一致。
 export const BODY_ESCAPE_PREFIX = '（內文）'
 
@@ -47,7 +47,7 @@ export const VOICE_NOTE = '（語音通話：這封是語音辨識的文字，�
 // 只認布林 true（字串 "true"、數字 1 都不算）
 export const isVoiceMail = m => m?.voice === true
 export const voiceNote = m => isVoiceMail(m) ? VOICE_NOTE : ''
-export const escapeBody = body => String(body ?? '').replace(/(^|[\n\r])([^\S\r\n]*(?:\[RELAY 來信\]|\[RELAY 寄信\]|\[RELAY 回信\]|寄件人：|【要回信】|你與收發室的往來記錄在：|（語音通話：|你是 ASN 的聊天對象：))/g, `$1${BODY_ESCAPE_PREFIX}$2`)
+export const escapeBody = body => String(body ?? '').replace(/(^|[\n\r])([^\S\r\n]*(?:\[RELAY 來信\]|\[RELAY 寄信\]|\[RELAY 回信\]|寄件人：|【要回信】|你與收發室的往來記錄在：|（語音通話：|你是 ASN 的聊天對象：|\[群組 |順位：))/g, `$1${BODY_ESCAPE_PREFIX}$2`)
 
 // 「保持能回應」的固定提醒（#494）：轉交給 Claude 視窗的每封信，說明行最後（要回信指示之後）都帶這一行。
 // 內文行首以「你是 ASN 的聊天對象：」開頭的行，escapeBody 也會跳脫。與 Rust 內建橋 mail.rs、pi 擴充 inbox.mjs 的 RESPONSIVE_NOTE 逐字一致。
