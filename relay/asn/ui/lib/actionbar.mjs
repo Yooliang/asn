@@ -2,6 +2,8 @@
 // 分層原則（小良哥 10/21）：只影響「這一則訊息」的（傳檔、截圖、表情、震動、語音）留在輸入框旁的小工具列；影響「整個代理」的才放這裡。
 // #539：一對一固定 6 格（通話／前台顯示・後台隱藏或 ACP 模式／切換模型／子代理／工作項目／管理），用不到的反灰、原因寫在提示（20 字內），不再隱藏。
 // 格子的內容與反灰規則全部在純函式 barSlots；名單右鍵（list.js）也用同一個函式與 partnerMenuItems，兩邊不各寫一套。
+// #539 之二：群組對話放「群組」一顆（groupMenuItems）；群組沒有「管理」。
+// 反灰一律用 aria-disabled（不用原生 disabled）：滑鼠停上去看得到 title 的原因、鍵盤 Tab 停得到；點了在 handler 裡擋掉。
 import { isDisplayOnly } from './display-only.mjs'
 import { AsnDialog } from './dialog.mjs'
 import { confirmText, createModelSwitcher, modelSwitchBlock } from './model-switch.mjs'
@@ -156,14 +158,19 @@ export function barSlots(friend, ctx = {}) {
 /** 切換模型要不要走夥伴管理的對話框（ACP 手動輸入代號、pi 向 pi 查清單）；否則是 Claude 視窗的型號選單。 */
 export const modelViaPartnerOp = friend => ['acp', 'pi'].includes(partnerEngine(friend))
 
-/** 群組「管理」大按鈕的選單項目：邀請別人加入、加我的另一個 AI、成員與設定；一對一：只有能邀請的夥伴才有「邀請別人加入」。 */
-export function opsMenuItems(friend) {
-  if (!friend) return []
-  if (friend.room === true) return [
+/** 群組對話「群組」大按鈕的選單項目（#539 之二）：邀請別人加入、輸入邀請碼加入（和名單「＋」的加入群組同一個對話框）、加我的另一個 AI、成員與設定。 */
+export function groupMenuItems(friend) {
+  if (friend?.room !== true) return []
+  return [
     { key: 'invite', label: '邀請別人加入' },
+    { key: 'join', label: '輸入邀請碼加入' },
     { key: 'addai', label: '加我的另一個 AI' },
     { key: 'manage', label: '成員與設定' },
   ]
+}
+/** 一對一「管理」選單分隔線後的項目：只有能邀請的夥伴才有「邀請別人加入」。群組的都搬到「群組」按鈕（groupMenuItems），這裡回空。 */
+export function opsMenuItems(friend) {
+  if (!friend || friend.room === true) return []
   return canInviteFrom(friend) ? [{ key: 'invite', label: '邀請別人加入' }] : []
 }
 
@@ -208,10 +215,17 @@ export function consoleButtonView(visible) {
     : { label: WINDOW_LABEL.show, tip: '把這個代理的視窗叫回前台' }
 }
 
-/** 「管理」大按鈕＋選單：選單搬到 body 用 position:fixed 定位（不被對話區的捲動容器、輸入框蓋住或裁掉）。沒有項目時反灰，原因放提示。 */
+/**
+ * 大按鈕＋選單（「管理」與群組的「群組」共用）：選單搬到 body 用 position:fixed 定位（不被對話區的捲動容器、輸入框蓋住或裁掉）。
+ * 不能用時反灰（aria-disabled），原因放提示；點了不打開。
+ */
+const MANAGE_TIP = '詳情、改名、喚醒、邀請別人加入等管理動作'
 export const OpsMenuButton = {
   name: 'OpsMenuButton',
-  props: { items: { type: Array, default: () => [] }, disabled: { type: Boolean, default: false }, reason: { type: String, default: '' } },
+  props: {
+    items: { type: Array, default: () => [] }, disabled: { type: Boolean, default: false }, reason: { type: String, default: '' },
+    slotKey: { type: String, default: 'manage' }, label: { type: String, default: '管理' }, icon: { type: String, default: 'img/ab-more.svg' }, tip: { type: String, default: MANAGE_TIP },
+  },
   emits: ['pick'],
   setup(props, { emit }) {
     const { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount } = globalThis.Vue
@@ -237,8 +251,8 @@ export const OpsMenuButton = {
   },
   template: `
 <div class="ab-wrap">
-  <button class="abtn" type="button" ref="btn" data-slot="manage" :class="{ on: open }" :disabled="disabled" aria-haspopup="true" :aria-expanded="open" aria-label="管理" :title="disabled ? reason : '詳情、改名、喚醒、邀請別人加入等管理動作'" @click="toggle">
-    <img src="img/ab-more.svg" alt="" width="32" height="32"><span class="ab-name">管理 ▾</span>
+  <button class="abtn" type="button" ref="btn" :data-slot="slotKey" :class="{ on: open }" :aria-disabled="disabled ? 'true' : null" aria-haspopup="true" :aria-expanded="open" :aria-label="label" :title="disabled ? reason : tip" @click="toggle">
+    <img :src="icon" alt="" width="32" height="32"><span class="ab-name">{{ label }} ▾</span>
   </button>
   <teleport to="body">
     <ul class="ab-menu ab-ops" v-if="open" ref="pop" role="menu" :style="{ left: pos.x + 'px', top: pos.y + 'px', visibility: pos.ready ? 'visible' : 'hidden' }">
@@ -261,7 +275,8 @@ export const ActionBar = {
     api: { type: Object, default: null },        // 要有 partnerConsoleQuery／partnerConsoleSet／modelSwitchQuery／modelSwitchRun（lib/tauri.mjs 的 transport）；沒給就不放一對一的 6 格
     active: { type: Boolean, default: true },
     callable: { type: Boolean, default: false },   // 這個視窗有語音功能（由對話區決定）
-    ops: { type: Array, default: () => [] },       // 「管理」按鈕的邀請等項目（opsMenuItems）
+    ops: { type: Array, default: () => [] },       // 一對一「管理」按鈕分隔線後的邀請（opsMenuItems）
+    group: { type: Array, default: () => [] },     // 群組對話「群組」按鈕的項目（groupMenuItems）；有給才放這顆
     piModelsFor: { type: Function, default: null },   // 別台電腦的 pi 模型清單（名單視窗的 remotePiModelsFor）；沒給＝別台的 pi 退回輸入框
   },
   emits: ['call', 'ops'],
@@ -285,7 +300,10 @@ export const ActionBar = {
       subagents: Boolean(props.api?.subagentsQuery), subLabel: subView.value.label, ops: opsCtx, manageCount: opsAll.value.length,
     }))
     const slot = computed(() => Object.fromEntries(slotList.value.map(s => [s.key, s])))
-    const showBar = computed(() => Boolean(props.api) || opsAll.value.length > 0)
+    const showBar = computed(() => Boolean(props.api) || opsAll.value.length > 0 || (isRoom.value && props.group.length > 0))
+    const showGroup = computed(() => isRoom.value && props.group.length > 0)
+    const groupAll = computed(() => props.group.map(i => ({ ...i, ok: true, reason: '' })))
+    const pickGroup = key => emit('ops', key)   // 開在名單視窗（openGroupMenu）；分開模式的對話視窗也是請名單視窗代開
     const showSubs = computed(() => slot.value.subs.ok)
     const consoleView = computed(() => consoleButtonView(cons.visible))
     const switcher = computed(() => (props.api ? createModelSwitcher({ transport: props.api, log: m => console.info('[ASN]', m) }) : null))
@@ -306,7 +324,7 @@ export const ActionBar = {
       if (q?.can_toggle ?? q?.canToggle) { cons.state = 'toggle'; cons.visible = Boolean(q.visible) } else { cons.state = 'none'; cons.reason = String(q?.reason || '') }
     }
     async function toggleConsole() {
-      if (cons.busy || cons.state !== 'toggle') return
+      if (!slot.value.window.ok || cons.busy || cons.state !== 'toggle') return
       cons.busy = true
       try {
         const r = await props.api.partnerConsoleSet({ ...consoleReq(props.friend, engine.value), visible: !cons.visible })
@@ -388,6 +406,7 @@ export const ActionBar = {
       try { await navigator.clipboard.writeText(dlg.manual); dlg.copied = true } catch (e) { console.info('[ASN] 複製失敗', e.message) }
     }
     function startCall() { if (slot.value.call.ok) emit('call') }
+    function onTasks() { /* 下一版開放：反灰期間點了什麼都不做 */ }
     const onDoc = e => { if ((model.open || subs.open) && root.value && !root.value.contains(e.target)) { model.open = false; subs.open = false } }
     onMounted(() => { document.addEventListener('mousedown', onDoc, true); if (props.active) void loadConsole(); startSubs(); void loadOps() })
     onBeforeUnmount(() => { document.removeEventListener('mousedown', onDoc, true); stopSubs(); clearTimeout(opsRetry) })
@@ -395,19 +414,19 @@ export const ActionBar = {
     watch(() => props.friend?.id, () => { model.open = false; subs.open = false; opDlg.open = false; void loadConsole(); startSubs(); void loadOps() })
     watch(() => props.friend?.status, () => { void loadConsole(); void loadOps() })
     watch(showSubs, () => startSubs())
-    return { root, isRoom, showBar, slot, opsAll, pickOps, archiveNote, opDlg, piModels, startCall, cons, model, subs, subView, toggleSubs, onModel, dlg, consoleView, dlgText, toggleConsole, pick, closeDlg, submit, copyManual, CALL_TIP, MODEL_TIP }
+    return { root, isRoom, showBar, showGroup, groupAll, pickGroup, onTasks, slot, opsAll, pickOps, archiveNote, opDlg, piModels, startCall, cons, model, subs, subView, toggleSubs, onModel, dlg, consoleView, dlgText, toggleConsole, pick, closeDlg, submit, copyManual, CALL_TIP, MODEL_TIP }
   },
   template: `
 <div class="actionbar" ref="root" v-if="showBar" role="toolbar" aria-label="代理功能列">
   <template v-if="!isRoom && api">
-    <button class="abtn" type="button" data-slot="call" :disabled="!slot.call.ok" aria-label="通話" :title="slot.call.ok ? CALL_TIP : slot.call.reason" @click="startCall">
+    <button class="abtn" type="button" data-slot="call" :aria-disabled="slot.call.ok ? null : 'true'" aria-label="通話" :title="slot.call.ok ? CALL_TIP : slot.call.reason" @click="startCall">
       <img src="img/ab-call.svg" alt="" width="32" height="32"><span class="ab-name">通話</span>
     </button>
-    <button class="abtn" type="button" data-slot="window" :disabled="!slot.window.ok || cons.busy" :aria-label="slot.window.label" :title="slot.window.ok ? consoleView.tip : slot.window.reason" @click="toggleConsole">
+    <button class="abtn" type="button" data-slot="window" :aria-disabled="slot.window.ok && !cons.busy ? null : 'true'" :aria-label="slot.window.label" :title="slot.window.ok ? consoleView.tip : slot.window.reason" @click="toggleConsole">
       <img src="img/ab-window.svg" alt="" width="32" height="32"><span class="ab-name">{{ slot.window.label }}</span>
     </button>
     <div class="ab-wrap">
-      <button class="abtn" type="button" data-slot="model" :class="{ on: model.open }" :disabled="!slot.model.ok" aria-haspopup="true" :aria-expanded="model.open" aria-label="切換模型" :title="slot.model.ok ? MODEL_TIP : slot.model.reason" @click="onModel">
+      <button class="abtn" type="button" data-slot="model" :class="{ on: model.open }" :aria-disabled="slot.model.ok ? null : 'true'" aria-haspopup="true" :aria-expanded="model.open" aria-label="切換模型" :title="slot.model.ok ? MODEL_TIP : slot.model.reason" @click="onModel">
         <img src="img/ab-model.svg" alt="" width="32" height="32"><span class="ab-name">切換模型 ▾</span>
       </button>
       <ul class="ab-menu" v-if="model.open" role="menu">
@@ -423,7 +442,7 @@ export const ActionBar = {
       </ul>
     </div>
     <div class="ab-wrap">
-      <button class="abtn" type="button" data-slot="subs" :class="{ on: subs.open }" :disabled="!slot.subs.ok" aria-haspopup="true" :aria-expanded="subs.open" :aria-label="slot.subs.label" :title="slot.subs.ok ? subView.tip : slot.subs.reason" @click="toggleSubs">
+      <button class="abtn" type="button" data-slot="subs" :class="{ on: subs.open }" :aria-disabled="slot.subs.ok ? null : 'true'" aria-haspopup="true" :aria-expanded="subs.open" :aria-label="slot.subs.label" :title="slot.subs.ok ? subView.tip : slot.subs.reason" @click="toggleSubs">
         <img src="img/ab-agent.svg" alt="" width="32" height="32"><span class="ab-name">{{ slot.subs.label }} ▾</span>
       </button>
       <ul class="ab-menu ab-subs" v-if="subs.open" role="menu">
@@ -432,11 +451,12 @@ export const ActionBar = {
         <li class="menu-note" v-if="subView.more">還有 {{ subView.more }} 個沒列出</li>
       </ul>
     </div>
-    <button class="abtn" type="button" data-slot="tasks" :disabled="!slot.tasks.ok" aria-label="工作項目" :title="slot.tasks.reason">
+    <button class="abtn" type="button" data-slot="tasks" :aria-disabled="slot.tasks.ok ? null : 'true'" aria-label="工作項目" :title="slot.tasks.reason" @click="onTasks">
       <img src="img/ab-tasks.svg" alt="" width="32" height="32"><span class="ab-name">工作項目</span>
     </button>
   </template>
   <partner-op-dialog v-if="opDlg.open" :friend="friend" :op="opDlg.item.key" :item="opDlg.item" :api="api" :pi-models="piModels" @close="opDlg.open = false"></partner-op-dialog>
+  <ops-menu-button v-if="showGroup" slot-key="group" label="群組" icon="img/ab-group.svg" tip="邀請、輸入邀請碼、加 AI、成員與設定" :items="groupAll" @pick="pickGroup"></ops-menu-button>
   <ops-menu-button v-if="(!isRoom && api) || opsAll.length" :items="opsAll" :disabled="!isRoom && !slot.manage.ok" :reason="slot.manage.reason" @pick="pickOps"></ops-menu-button>
   <span class="ab-note" v-if="archiveNote" role="status">{{ archiveNote }}</span>
   <asn-dialog v-if="dlg.open" :title="dlgText.title" @close="closeDlg">

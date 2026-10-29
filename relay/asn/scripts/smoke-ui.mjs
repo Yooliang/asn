@@ -10,7 +10,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { findBrowser, injectSource, mountCheckSource, probeSource, parseSmokeArgs, pathOf, selectScenarios, tableFor } from './smoke-lib.mjs'
+import { findBrowser, injectSource, mountCheckSource, probeKind, probeSource, parseSmokeArgs, pathOf, selectScenarios, tableFor } from './smoke-lib.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ui = path.join(root, 'ui')
@@ -105,7 +105,7 @@ async function runScenario(cdp, sc, base) {
   await cdp.send('Target.closeTarget', { targetId }).catch(() => {})
   const problems = [...errors]
   if (!check.ok) problems.unshift(`沒有掛上：${check.why}`)
-  if (probeWhy) problems.push(`${sc.probe.bar ? '大按鈕檢查' : '遮罩檢查'}：${probeWhy}`)
+  if (probeWhy) problems.push(`${probeKind(sc.probe)}：${probeWhy}`)
   return { problems, missing }
 }
 
