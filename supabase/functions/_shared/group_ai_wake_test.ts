@@ -4,7 +4,7 @@ import { shouldRespond } from "./rooms.ts";
 
 // AI 之間互相叫醒（migration 20261023190000_group_ai_wake_limit.sql）：
 //  1. 叫醒判斷：AI 發的訊息明確點名另一個 AI，被點名的要被叫醒；超過上限（wake_ok=false）就不叫醒
-//  2. account_settings 動作：讀／改 ai_wake_limit（0～20）
+//  2. account_settings 動作：讀／改 ai_wake_limit（0～200）
 //  3. migration 靜態檢查（輪數的 SQL 實跑在 tests/group_ai_wake_sql.test.mjs）
 
 Deno.test("shouldRespond：AI 發言點名另一個 AI 會叫醒；沒點名的 AI 訊息、點名別人、自己發的不叫醒", () => {
@@ -46,12 +46,12 @@ Deno.test("account_settings：要登入憑證；沒帶 ai_wake_limit ＝讀", as
   assertEquals(t.calls[0], { fn: "asn_account_settings", args: { p_user: UID, p_ai_wake_limit: null } });
 });
 
-Deno.test("account_settings：帶 ai_wake_limit ＝改（0～20 整數）；其他一律 400 且不碰資料庫", async () => {
+Deno.test("account_settings：帶 ai_wake_limit ＝改（0～200 整數）；其他一律 400 且不碰資料庫", async () => {
   const t = deps({ ai_wake_limit: 0 });
   const r = await handleAccountAction(t.d, "account_settings", `Bearer ${JWT}`, null, { ai_wake_limit: 0 });
   assertEquals(r.status, 200);
   assertEquals(t.calls[0].args, { p_user: UID, p_ai_wake_limit: 0 });
-  for (const bad of [-1, 21, 2.5, "5", true, NaN]) {
+  for (const bad of [-1, 201, 2.5, "5", true, NaN]) {
     const x = await handleAccountAction(t.d, "account_settings", `Bearer ${JWT}`, null, { ai_wake_limit: bad });
     assertEquals(x.status, 400, String(bad));
   }

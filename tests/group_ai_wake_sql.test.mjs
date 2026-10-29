@@ -4,7 +4,7 @@
 //    - 預設 5 輪：真人發言後，AI 點名 AI 的前 5 則叫醒，第 6 則起 suppressed 並對被點名者 wake_ok=false
 //    - 真人再發言就重新起算；沒點名 AI 的 AI 訊息、點名真人的 AI 訊息不算一輪
 //    - 上限 0：AI 完全不能叫醒 AI，真人點名 AI 照常
-//    - 帳號設定可調（asn_account_settings：預設 5、0～20、其他 bad_request）
+//    - 帳號設定可調（asn_account_settings：預設 20、0～200、其他 bad_request（20261029120000 放寬））
 //    - 跨租戶群組用「主持人」帳號的設定，不是發言者的
 // 3. 還原驗證：拿掉 room_post 的上限檢查、或拿掉「真人發言重置」，對應測試要變紅。
 import test from 'node:test'
@@ -85,10 +85,11 @@ async function oneTenantRoom(db) {
   return g.id
 }
 
-test('實跑：預設 5 輪——前 5 則 AI 點名 AI 會叫醒，第 6 則起不叫醒且被點名者讀到 wake_ok=false', { skip }, async () => {
+test('實跑：上限 5 輪——前 5 則 AI 點名 AI 會叫醒，第 6 則起不叫醒且被點名者讀到 wake_ok=false', { skip }, async () => {
   const db = await boot()
   const room = await oneTenantRoom(db)
-  assert.deepEqual(await rpc(db, 'asn_account_settings', { p_user: U1 }), { ai_wake_limit: 5 }, '沒設定＝5')
+  assert.deepEqual(await rpc(db, 'asn_account_settings', { p_user: U1 }), { ai_wake_limit: 20 }, '沒設定＝20')
+  await setLimit(db, U1, 5)
   await human(db, room, '大家接力討論', [A])
   for (let i = 1; i <= 5; i++) {
     const r = await aiPost(db, room, i % 2 ? A : B, '第' + i + '輪', [i % 2 ? B : A])
@@ -106,6 +107,7 @@ test('實跑：預設 5 輪——前 5 則 AI 點名 AI 會叫醒，第 6 則起
 
 test('實跑：真人發言就重新起算；沒點名 AI 的 AI 訊息、只點名真人的 AI 訊息不算一輪', { skip }, async () => {
   const db = await boot()
+  await setLimit(db, U1, 5)
   const room = await oneTenantRoom(db)
   await human(db, room, '開始', [A])
   for (let i = 0; i < 5; i++) await aiPost(db, room, A, '來回' + i, [B])
@@ -115,6 +117,7 @@ test('實跑：真人發言就重新起算；沒點名 AI 的 AI 訊息、只點
   assert.deepEqual(r.suppressed, [], '真人發言後重算')
   // 不算一輪的訊息：沒點名、點名真人
   const db2 = await boot()
+  await setLimit(db2, U1, 5)
   const room2 = await oneTenantRoom(db2)
   await human(db2, room2, '開始')
   for (let i = 0; i < 4; i++) await aiPost(db2, room2, A, '旁白' + i, [])
@@ -137,14 +140,14 @@ test('實跑：上限 0——AI 完全不能叫醒 AI；真人點名 AI 照常�
   assert.deepEqual(r.suppressed, [B])
 })
 
-test('實跑：帳號設定——預設 5、可調 0～20、超出或不是整數 bad_request、查無帳號 not_found；調了立刻生效', { skip }, async () => {
+test('實跑：帳號設定——預設 20、可調 0～200、超出或不是整數 bad_request、查無帳號 not_found；調了立刻生效', { skip }, async () => {
   const db = await boot()
-  assert.deepEqual(await rpc(db, 'asn_account_settings', { p_user: U1 }), { ai_wake_limit: 5 })
-  assert.deepEqual(await setLimit(db, U1, 20), { ai_wake_limit: 20 })
   assert.deepEqual(await rpc(db, 'asn_account_settings', { p_user: U1 }), { ai_wake_limit: 20 })
-  assert.equal((await setLimit(db, U1, 21)).error, 'bad_request')
+  assert.deepEqual(await setLimit(db, U1, 200), { ai_wake_limit: 200 })
+  assert.deepEqual(await rpc(db, 'asn_account_settings', { p_user: U1 }), { ai_wake_limit: 200 })
+  assert.equal((await setLimit(db, U1, 201)).error, 'bad_request')
   assert.equal((await setLimit(db, U1, -1)).error, 'bad_request')
-  assert.deepEqual(await rpc(db, 'asn_account_settings', { p_user: U1 }), { ai_wake_limit: 20 }, '壞值不改')
+  assert.deepEqual(await rpc(db, 'asn_account_settings', { p_user: U1 }), { ai_wake_limit: 200 }, '壞值不改')
   assert.equal((await rpc(db, 'asn_account_settings', { p_user: '99999999-9999-9999-9999-999999999999' })).error, 'not_found')
   assert.equal((await rpc(db, 'asn_account_settings', { p_user: null })).error, 'bad_request')
   // 改成 2：第 3 則起擋（被擋的也算一輪）；改成 4：再多放一則
@@ -161,6 +164,14 @@ test('實跑：帳號設定——預設 5、可調 0～20、超出或不是整�
   assert.equal((await q(db, `select features->>'x' x from relay.tenants where id = '${T1}'`))[0].x, '1')
 })
 
+test('實跑：已經設過值的帳號不變（舊值照讀），沒設過的才是預設 20；超出 200 的壞資料讀成 200、不是數字的當沒設', { skip }, async () => {
+  const db = await boot()
+  const setRaw = v => db.exec(`update relay.tenants set features = coalesce(features, '{}'::jsonb) || '{"ai_wake_limit":${v}}'::jsonb where id = '${T1}'`)
+  for (const v of [0, 5, 7, 20, 150]) { await setRaw(v); assert.deepEqual(await rpc(db, 'asn_account_settings', { p_user: U1 }), { ai_wake_limit: v }, '舊值 ' + v) }
+  await setRaw(999); assert.deepEqual(await rpc(db, 'asn_account_settings', { p_user: U1 }), { ai_wake_limit: 200 })
+  await setRaw('"abc"'); assert.deepEqual(await rpc(db, 'asn_account_settings', { p_user: U1 }), { ai_wake_limit: 20 })
+})
+
 test('實跑：跨租戶群組用主持人帳號的設定，不看發言者的', { skip }, async () => {
   const db = await boot()
   const g = await rpc(db, 'asn_relay_group_create', { p_user: U1, p_node: P1, p_name: '跨租戶', p_ai: [A, B] })
@@ -174,7 +185,7 @@ test('實跑：跨租戶群組用主持人帳號的設定，不看發言者的',
   const members = await rpc(db, 'asn_relay_group_members', { p_node: Q2, p_agent: null, p_room: room, p_owner: false, p_signed_user: U2 })
   const refA = members.members.find(m => m.name === '財務').key
   const guestAi = (body, mentions) => post(db, { node: Q2, agent: '助理', room, body, mentions })
-  // 受邀者把自己的上限設成 0，主持人沒設（5）→ 以主持人為準，客人的 AI 仍可叫醒
+  // 受邀者把自己的上限設成 0，主持人沒設（20）→ 以主持人為準，客人的 AI 仍可叫醒
   await setLimit(db, U2, 0)
   await post(db, { node: Q2, room, signed: U2, body: '財務員發話', mentions: [refA] })
   assert.deepEqual((await guestAi('助理點名財務', [refA])).suppressed, [], '客人設 0 無效，看主持人')
@@ -190,6 +201,7 @@ test('實跑：跨租戶群組用主持人帳號的設定，不看發言者的',
 const runReverts = async (name, mutate, expectRed) => {
   if (skip) return
   const db = await boot({ mutate: { [MIG]: mutate } })
+  await setLimit(db, U1, 5)
   const room = await oneTenantRoom(db)
   await human(db, room, '開始', [A])
   let blocked = false
@@ -205,6 +217,7 @@ test('還原驗證：拿掉「真人發言重置」，真人發言後仍被擋',
   assert.notEqual(mutate(read(MIG)), read(MIG), '改寫有生效')
   assert.notEqual(mutate(read(MIG2)), read(MIG2), '新定義的改寫也有生效')
   const db = await boot({ mutate: { [MIG]: mutate, [MIG2]: mutate } })
+  await setLimit(db, U1, 5)
   const room = await oneTenantRoom(db)
   await human(db, room, '開始')
   for (let i = 0; i < 5; i++) await aiPost(db, room, A, 'x' + i, [B])

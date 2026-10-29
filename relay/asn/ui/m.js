@@ -917,8 +917,8 @@ const app = createApp({
       try { ownerName.value = await authApi.setAccountName(c.name); nameErr.value = ''; nameDraft.value = c.name }
       catch (e) { nameDraft.value = myName.value; nameErr.value = e.message; setTimeout(() => { nameErr.value = '' }, 5000) }
     }
-    // 群組裡 AI 之間互相叫醒的上限（帳號層設定，預設 5）：改了存後台；不合格或失敗就還原並提示
-    const wakeDraft = ref('5'), wakeErr = ref('')
+    // 群組裡 AI 之間互相叫醒的上限（帳號層設定，預設 20）：改了存後台；不合格或失敗就還原並提示
+    const wakeDraft = ref('20'), wakeErr = ref('')
     const commitWake = async () => {
       const c = checkAiWakeLimit(wakeDraft.value)
       if (!c.ok) { wakeErr.value = c.error; setTimeout(() => { wakeErr.value = '' }, 5000); void loadWake(); return }

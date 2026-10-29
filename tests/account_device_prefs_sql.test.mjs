@@ -88,7 +88,7 @@ test('實跑：沒設過是 null；寫入後讀得回來（rev 保留、at 由�
   const w = await put(db, P(1000))
   assert.deepEqual(w.prefs.order, ['a1', 'b2']); assert.equal(w.prefs.rev, 1000); assert.ok(w.prefs.at > 1_700_000_000_000)
   assert.deepEqual((await get(db)).prefs, w.prefs)
-  assert.equal((await rpc(db, 'asn_account_settings', { p_user: U1 })).ai_wake_limit, 5, '不影響 ai_wake_limit')
+  assert.equal((await rpc(db, 'asn_account_settings', { p_user: U1 })).ai_wake_limit, 20, '不影響 ai_wake_limit')
 })
 
 test('實跑：內容相同不動（rev、at 都不變）；rev 一樣或較舊但內容不同不覆蓋並標 stale', { skip }, async () => {

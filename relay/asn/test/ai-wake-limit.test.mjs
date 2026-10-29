@@ -6,12 +6,12 @@ import { checkAiWakeLimit, AI_WAKE_LIMIT_DEFAULT, AI_WAKE_LIMIT_LABEL } from '..
 
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
-test('輸入檢查：0～20 的整數（數字或文字）；其他不合格並給中文提示', () => {
-  assert.equal(AI_WAKE_LIMIT_DEFAULT, 5)
-  for (const [raw, v] of [['0', 0], [5, 5], [' 7 ', 7], ['20', 20], ['05', 5]]) assert.deepEqual(checkAiWakeLimit(raw), { ok: true, value: v, error: '' }, String(raw))
-  for (const raw of ['', ' ', '-1', '21', '99', '2.5', 'abc', '1e1', null, undefined, '１２']) {
+test('輸入檢查：0～200 的整數（數字或文字）；其他不合格並給中文提示', () => {
+  assert.equal(AI_WAKE_LIMIT_DEFAULT, 20)
+  for (const [raw, v] of [['0', 0], [5, 5], [' 7 ', 7], ['20', 20], ['200', 200], ['05', 5]]) assert.deepEqual(checkAiWakeLimit(raw), { ok: true, value: v, error: '' }, String(raw))
+  for (const raw of ['', ' ', '-1', '201', '999', '1000', '2.5', 'abc', '1e1', null, undefined, '１２']) {
     const r = checkAiWakeLimit(raw)
-    assert.equal(r.ok, false, String(raw)); assert.match(r.error, /0 到 20/); assert.equal(r.value, 5)
+    assert.equal(r.ok, false, String(raw)); assert.match(r.error, /0 到 200/); assert.equal(r.value, 20)
   }
 })
 

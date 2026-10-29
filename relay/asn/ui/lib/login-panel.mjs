@@ -14,7 +14,7 @@ export const LoginPanel = {
     // 帳號名稱（我的名字，所有設備共用）：登入後才有；改了走後台 account_name
     const nameText = ref(''), nameBusy = ref(false), nameMsg = ref('')
     // 群組裡 AI 之間互相叫醒的上限（帳號層設定）
-    const wakeText = ref('5'), wakeBusy = ref(false), wakeMsg = ref('')
+    const wakeText = ref('20'), wakeBusy = ref(false), wakeMsg = ref('')
     const view = computed(() => accountView(status.value, info.value))
     const refresh = async () => {
       try {
@@ -61,7 +61,7 @@ export const LoginPanel = {
         <small>帳號的名字，所有設備共用。</small>
       </label>
       <label class="login-name" v-if="view.signedIn">{{ AI_WAKE_LIMIT_LABEL }}
-        <span class="login-name-row"><input class="set-input" type="number" min="0" max="20" step="1" v-model="wakeText" :disabled="wakeBusy" aria-label="AI 之間互相叫醒的上限" @keydown.enter.prevent="saveWake"><button class="aero-btn" type="button" :disabled="wakeBusy" @click="saveWake">儲存</button></span>
+        <span class="login-name-row"><input class="set-input" type="number" min="0" max="200" step="1" v-model="wakeText" :disabled="wakeBusy" aria-label="AI 之間互相叫醒的上限" @keydown.enter.prevent="saveWake"><button class="aero-btn" type="button" :disabled="wakeBusy" @click="saveWake">儲存</button></span>
         <small>{{ AI_WAKE_LIMIT_NOTE }}</small>
       </label>
       <small v-if="wakeMsg" role="status">{{ wakeMsg }}</small>
