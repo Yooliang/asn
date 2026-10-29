@@ -420,6 +420,40 @@ async fn agy_重開後還是登入失效_存著的舊對話壞了_丟掉改開�
 }
 
 #[tokio::test]
+async fn agy_網路暫時斷線_等一下自動再試一次_成功就當沒事_還是斷才回暫時連不上_不當成登入問題() {
+    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(50);
+    let dir = tempfile::tempdir().unwrap();
+    let m1 = dir.path().join("net1").display().to_string();
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    // 第一封：第一次連線被中斷，等一下再試就成功；寄件人只看到正常回覆
+    h.put_pull(to_agent(1, "Gemini", &format!("@@NET_ONCE {m1}"))).await;
+    h.wait("再試後成功", |h| h.bodies().iter().any(|b| b.contains("收到：") && b.contains("NET_ONCE"))).await;
+    assert!(!h.bodies().iter().any(|b| b.contains("暫時連不上") || b.contains("需要登入")), "{:?}", h.bodies());
+    assert!(h.log_text().contains("網路暫時斷線") && h.log_text().contains("再試一次後恢復正常"), "{}", h.log_text());
+    // 第二封：每次都斷，再試一次仍然斷 → 回「Google 暫時連不上，稍後再試」，不是需要登入
+    h.put_pull(to_agent(2, "Gemini", "@@NET")).await;
+    h.wait("暫時連不上", |h| h.bodies().iter().any(|b| b.contains("Google 暫時連不上，稍後再試"))).await;
+    assert!(!h.bodies().iter().any(|b| b.contains("需要登入")), "{:?}", h.bodies());
+    h.set.refresh_all().await;
+    h.core.refresh_roster(now()).await;
+    assert_ne!(h.last_roster()["agents"][0]["status"], "login-required");
+}
+
+#[tokio::test]
+async fn agy_網路斷線前這一輪已經動過手_不整封重送_回可能做了一半_檔案只寫一次() {
+    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(50);
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    let mark = h.work.path().join("workers").join("Gemini").join("steps.txt");
+    // 先有工具步驟（寫了一行）才斷線：不能重送，否則會寫第二次
+    h.put_pull(to_agent(1, "Gemini", &format!("@@WRITE_NET {}", mark.display()))).await;
+    h.wait("可能做了一半", |h| h.bodies().iter().any(|b| b.contains("網路斷線，這一輪可能做了一半"))).await;
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    assert_eq!(std::fs::read_to_string(&mark).unwrap().lines().count(), 1, "只動手一次，沒有被重送");
+    assert!(!h.bodies().iter().any(|b| b.contains("暫時連不上") || b.contains("需要登入")), "{:?}", h.bodies());
+    assert!(!h.log_text().contains("等 0 秒自動再試") && !h.log_text().contains("網路暫時斷線：等"), "{}", h.log_text());
+}
+
+#[tokio::test]
 async fn agy_丟掉舊對話後新對話也登入失效_是真的沒登入_舊對話編號放回去_下一封照舊接著聊() {
     let state = tempfile::tempdir().unwrap();
     let st = state.path().display().to_string();
@@ -459,6 +493,16 @@ async fn agy_丟掉舊對話後開不起新驅動_暫時的錯不能讓對話丟
     h.wait("接著聊", |h| h.bodies().iter().any(|b| b.contains("收到：好了"))).await;
     assert!(!h.bodies().iter().any(|b| b.contains("下一任")), "{:?}", h.bodies());
     assert_eq!(sid(&h), before);
+}
+
+#[tokio::test]
+async fn acp_通用驅動網路斷線_不知道這一輪有沒有動過手_不自動重送_回可能做了一半() {
+    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(50);
+    let mut h = eh(Some(json!([worker("Gemini", "acp", json!({}))])), &[], "acp", &[]).await;
+    h.put_pull(to_agent(1, "Gemini", "@@NET")).await;
+    h.wait("可能做了一半", |h| h.bodies().iter().any(|b| b.contains("網路斷線，這一輪可能做了一半"))).await;
+    assert!(!h.bodies().iter().any(|b| b.contains("暫時連不上") || b.contains("需要登入")), "{:?}", h.bodies());
+    assert!(h.log_text().contains("不自動重送") && !h.log_text().contains("網路暫時斷線：等"), "{}", h.log_text());
 }
 
 #[tokio::test]

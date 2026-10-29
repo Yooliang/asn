@@ -2,7 +2,7 @@
 //! 對應 engines/acp-worker.mjs。不知道仲介與橋，只透過事件通道（已轉交／失敗／回覆）與 Notifier（寄授權詢問／登入通知）跟外面講話。
 use super::acp_approvals::{ask_text, Answer, Approvals, Target};
 use super::acp_config::{NotifyTo, WorkerCfg};
-use super::acp_policy::{category_label, decide, Req, Verdict, WorkerError};
+use super::acp_policy::{category_label, decide, is_network_error, Req, Verdict, WorkerError};
 use super::rpc::Log;
 use super::{BoxFut, EngineEvent, EventTx, Notice, Notifier, PidBook};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -14,6 +14,12 @@ const REVIVE_AFTER_MS: u64 = 60_000;
 /// 登入失效（401）自動重開驅動的冷卻：每個工作者一小時最多一次（#517）
 const AUTH_RETRY_COOLDOWN_MS: u64 = 60 * 60 * 1000;
 const KEEPALIVE_MS: u64 = 20_000;
+/// 網路暫時斷線：等這麼久再試一次（毫秒）。測試會調小
+static NET_RETRY_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(10_000);
+#[cfg(test)]
+pub fn set_net_retry_ms_for_test(ms: u64) {
+    NET_RETRY_MS.store(ms, std::sync::atomic::Ordering::Relaxed);
+}
 /// 測試用：讓某個工作者第 N 次「開新驅動」失敗（模擬暫時開不起來），用來驗證丟掉舊對話後開驅動失敗會把對話放回去
 #[cfg(test)]
 pub(crate) mod test_hooks {
@@ -631,6 +637,30 @@ impl Worker {
         };
         let mut r = d.turn(format!("{first}{}", job.text), cfg.turn_timeout_ms, cfg.turn_max_ms).await;
         remember(&d);
+        // 網路暫時斷線（連不上 Google 之類）：這一輪還沒有任何工具步驟就斷的，等一下自動再試一次；
+        // 已經動過手的（跑過指令、改過檔）不重送，免得做第二次，回「可能做了一半」讓人決定。
+        // 登入、額度不在這裡處理（is_network_error 會排除它們）
+        let net_err = r.as_ref().err().filter(|e| e.code == "agent" && is_network_error(&e.message)).cloned();
+        if let Some(e) = net_err {
+            // 只有 agy 驅動會記「這一輪有沒有工具步驟」；通用 ACP 驅動不知道，保守起見不自動重送（asn調查員／asn真 #526）
+            if e.had_steps || cfg.protocol != "agy-stream" {
+                self.log(if e.had_steps { "網路斷線，但這一輪已經有工具步驟：不自動重送" } else { "網路斷線，這類工作者不知道這一輪有沒有動過手：不自動重送" });
+                r = Err(WorkerError::new("agent", "網路斷線，這一輪可能做了一半"));
+            } else {
+                let wait = NET_RETRY_MS.load(std::sync::atomic::Ordering::Relaxed);
+                self.log(format!("網路暫時斷線：等 {} 秒自動再試一次", wait / 1000));
+                tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+                d = self.ensure_driver(self.base_full()).await?;
+                r = d.turn(format!("{first}{}", job.text), cfg.turn_timeout_ms, cfg.turn_max_ms).await;
+                remember(&d);
+                let still = r.as_ref().err().map(|e| e.code == "agent" && is_network_error(&e.message)).unwrap_or(false);
+                self.log(if still { "再試一次仍然斷線" } else { "再試一次後恢復正常" });
+                if still {
+                    let who = if cfg.protocol == "agy-stream" { "Google" } else { "網路" };
+                    r = Err(WorkerError::new("agent", format!("{who} 暫時連不上，稍後再試")));
+                }
+            }
+        }
         let mut conv_note = String::new(); // 這次改開了新對話：附在回覆後面讓寄件人知道
         // 登入失效（401）：長時間跑的驅動憑證到期，換一個新的驅動（重新讀登入）把同一封信再試一次；重開後還失效才報「需要登入」。
         // 每個工作者一小時最多自動重開一次，不無限重試（#517）

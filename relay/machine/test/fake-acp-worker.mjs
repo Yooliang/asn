@@ -5,6 +5,7 @@
 //   @@READ <路徑>  → session/request_permission（kind=read）
 //   @@MULTI        → 連續三個 execute 請求（測「這次全部允許」）
 //   @@SLEEP        → 沒有任何動靜（看門狗）
+//   @@NET          → 這一輪回網路斷線錯誤（連線被中斷），給「網路斷線不自動重送」的測試用
 //   @@GATE <路徑>  → 等到那個檔案出現才繼續（測試建檔＝放行），之後照一般信處理
 // 回覆文字列出每個請求的結果：edit:allowed / execute:denied …
 // 這一則附了開頭說明時，回覆最後另附〈名=說明裡的名字〉；說明裡告知改名時再附〈改名〉
@@ -75,6 +76,7 @@ async function prompt(m) {
   }
   let t
   if (/@@SLEEP/.test(body)) return
+  if (/@@NET/.test(body)) return out({ id: m.id, error: { code: -32603, message: 'request failed: Post "https://example.googleapis.com/v1:stream": read tcp 192.168.0.101:5->1.2.3.4:443: wsarecv: A connection attempt failed' } })
   if ((t = /@@GATE\s+(\S+)/.exec(body))) while (!fs.existsSync(t[1])) await new Promise(r => setTimeout(r, 20))
   if ((t = /@@EDIT\s+(\S+)/.exec(body))) await req('edit', { locations: [{ path: t[1] }] })
   if ((t = /@@READ\s+(\S+)/.exec(body))) await req('read', { locations: [{ path: t[1] }] })
