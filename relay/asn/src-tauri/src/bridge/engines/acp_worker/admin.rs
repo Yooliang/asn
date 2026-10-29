@@ -33,6 +33,11 @@ pub fn handover_prompt(name: &str, note: &str) -> String {
     s
 }
 
+/// 改名後給工作者的提示（接在開頭說明後面）：名字改了、對話照舊
+pub fn rename_prompt(old_name: &str, new_name: &str) -> String {
+    format!("使用者把你的名字改成了『{new_name}』（原本叫『{old_name}』）。之後請用新名字自稱；前面的對話與手上的工作照舊接著做。")
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum LoadState {
     Loading,
@@ -170,6 +175,46 @@ impl Worker {
         self.i.store.clear(&self.i.cfg);
         self.log(format!("遠端管理：移除（結束程序 pid={pid}，對話編號已清掉；工作資料夾的檔案留著）"));
         Ok(pid)
+    }
+
+    /// 改名的第一步（給 acp_admin 用）：正在處理信件、啟動中就拒絕；結束驅動程序、不再收信、取消等著的授權，**不清對話編號**（要搬到新名字）。
+    /// 改名失敗時呼叫 [`Worker::start`] 就用原名原樣重開。回被結束的 pid（本來就沒在跑 0）
+    pub fn admin_detach(self: &Arc<Self>) -> Result<u32, String> {
+        let (pid, d) = {
+            let mut s = self.st.lock().unwrap();
+            Self::admin_busy(&s)?;
+            s.stopping = true;
+            let d = s.driver.take();
+            (d.as_ref().filter(|d| d.alive()).map(|d| d.pid()).unwrap_or(0), d)
+        };
+        if let Some(d) = d {
+            d.stop();
+        }
+        self.i.approvals.cancel_all(&self.i.cfg.name);
+        self.log(format!("遠端管理：改名前先停下（結束程序 pid={pid}，對話編號留著）"));
+        Ok(pid)
+    }
+
+    /// 改名用：同一份設定（含目前實際用的模型、原本的工作資料夾），只換名字
+    pub fn renamed_cfg(&self, new_name: &str) -> WorkerCfg {
+        WorkerCfg { name: new_name.to_string(), ..(*self.cfg_now()).clone() }
+    }
+
+    /// 還沒送出去的第一則提示（例如接手說明）：改名後的新工作者要接著帶
+    pub fn pending_intro(&self) -> Option<String> {
+        let s = self.st.lock().unwrap();
+        s.handover.clone().filter(|_| s.need_preamble)
+    }
+
+    /// 改名後的新工作者：下一輪重送開頭說明（裡面是新名字），並告訴它名字改了；before＝舊工作者還沒送出的提示，接在前面
+    pub fn mark_renamed(&self, old_name: &str, before: Option<String>) {
+        let note = rename_prompt(old_name, &self.i.cfg.name);
+        let mut s = self.st.lock().unwrap();
+        s.need_preamble = true;
+        s.handover = Some(match before {
+            Some(b) => format!("{b}\n{note}"),
+            None => note,
+        });
     }
 
     /// 之前被「關閉」過：恢復收信並通知名單有變（沒被關過就什麼都不做）

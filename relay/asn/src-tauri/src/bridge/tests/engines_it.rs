@@ -1393,3 +1393,249 @@ async fn acp_名單帶對話編號_後台靠它認得同一位夥伴() {
     let sid = saved["workers"]["Gemini"]["session_id"].as_str().unwrap().to_string();
     assert_eq!(h.set.windows()[0].session_id.as_deref(), Some(sid.as_str()), "名單帶的是工作者目前的對話編號");
 }
+
+// ================================================================================================
+// 改名（B5，#266）：內建通道工作者用新名字重建、帶原本的對話重開（假的 ACP 程式；用接手開出來的專屬工作者，它在名冊裡才能改）
+// ================================================================================================
+
+async fn rename_blocking(admin: &Arc<dyn engines::acp_admin::AcpAdmin>, name: &str, new_name: &str) -> Result<Value, String> {
+    let (a, n, m) = (admin.clone(), name.to_string(), new_name.to_string());
+    tokio::task::spawn_blocking(move || a.rename(&n, &m)).await.unwrap()
+}
+
+fn read_json(h: &EH, file: &str) -> Value {
+    serde_json::from_str(&std::fs::read_to_string(h.work.path().join(file)).unwrap_or_default()).unwrap_or(Value::Null)
+}
+
+/// 接手一段已有 2 輪的對話（sess-grok1），開出專屬工作者「grok-接手-專案」；extra 是額外的工作者設定
+async fn rename_rig(state: &tempfile::TempDir, extra: Vec<Value>) -> (EH, Arc<dyn engines::acp_admin::AcpAdmin>, String) {
+    std::fs::write(state.path().join("sess-grok1.json"), r#"{"turns":2}"#).unwrap();
+    let st = state.path().display().to_string();
+    let mut workers = vec![grok_base()];
+    workers.extend(extra);
+    let h = eh(Some(json!(workers)), &[("FAKE_ACP_STATE", &st), ("FAKE_ACP_LOAD", "1"), ("FAKE_ACP_MODELS", "grok-4.7,grok-4.6")], "acp", &[]).await;
+    let admin = h.set.acp_admin().unwrap();
+    let cwd = h.work.path().join("專案");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let name = adopt_blocking(&admin, "sess-grok1", &cwd.display().to_string()).await.unwrap()["name"].as_str().unwrap().to_string();
+    wait_pid(&admin, &name, |_| true).await;
+    (h, admin, name)
+}
+
+async fn roster_now(h: &mut EH) {
+    h.set.refresh_all().await;
+    h.core.refresh_roster(now()).await;
+}
+
+async fn wait_not_busy(admin: &Arc<dyn engines::acp_admin::AcpAdmin>, name: &str) {
+    for _ in 0..600 {
+        if admin.info(name).unwrap()["status"] != json!("busy") {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    }
+    panic!("一直在忙");
+}
+
+#[tokio::test]
+async fn acp_改名_名單換新名字對話編號不變_下一輪接著原本的對話且說明是新名字_檔案換新key_重啟還在_寄給舊名的信收得到() {
+    let state = tempfile::tempdir().unwrap();
+    let (mut h, admin, old) = rename_rig(&state, vec![]).await;
+    set_model_blocking(&admin, &old, "grok-4.6").await.unwrap();
+    roster_now(&mut h).await;
+    h.put_pull(to_agent(1, &old, "一")).await;
+    h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
+    assert!(h.bodies()[0].contains("[第3輪 含說明"), "{}", h.bodies()[0]);
+    wait_not_busy(&admin, &old).await;
+    let pid = wait_pid(&admin, &old, |_| true).await;
+    let r = rename_blocking(&admin, &old, "小葛").await.unwrap();
+    assert_eq!((r["pid"].as_u64(), r["old_name"].as_str(), r["new_name"].as_str()), (Some(pid), Some(old.as_str()), Some("小葛")));
+    assert!(admin.has_worker("小葛") && !admin.has_worker(&old), "工作者清單換成新名字");
+    let new_pid = wait_pid(&admin, "小葛", |p| p != pid).await;
+    assert!(!crate::heartbeat::pid_alive(pid as u32), "舊驅動結束了");
+    assert_eq!(admin.info("小葛").unwrap()["cwd"].as_str(), Some(h.work.path().join("專案").display().to_string().as_str()), "工作資料夾不變");
+    assert_eq!(admin.info("小葛").unwrap()["model"], json!("grok-4.6"), "選過的模型跟著走");
+    // 名單：新名字、同一個對話編號（後台靠它認得是同一位改名）
+    roster_now(&mut h).await;
+    let ws = h.set.windows();
+    assert!(ws.iter().all(|w| w.name != old), "名單上沒有舊名字");
+    assert_eq!(ws.iter().find(|w| w.name == "小葛").and_then(|w| w.session_id.clone()).as_deref(), Some("sess-grok1"));
+    // 帳本、接手名冊、記下的模型都換成新 key，另記一筆舊名對照
+    let workers = read_json(&h, "acp-workers.json");
+    assert_eq!(workers["workers"]["小葛"]["session_id"], json!("sess-grok1"));
+    assert!(workers["workers"].get(&old).is_none(), "{workers}");
+    assert_eq!(engines::acp_admin::read_adopted(&h.work.path().join("acp-adopted.json")).iter().map(|e| e.0.clone()).collect::<Vec<_>>(), vec!["小葛".to_string()]);
+    let models = recorded_models(&h);
+    assert_eq!((models["models"]["小葛"].clone(), models["models"].get(&old).is_none()), (json!("grok-4.6"), true), "{models}");
+    let renamed = read_json(&h, "acp-renames.json");
+    assert_eq!((renamed["renamed"][0]["from"].as_str(), renamed["renamed"][0]["to"].as_str()), (Some(old.as_str()), Some("小葛")), "{renamed}");
+    // 下一輪：接著原本的對話（第 4 輪），重送開頭說明，裡面是新名字並告知改名
+    h.put_pull(to_agent(2, "小葛", "二")).await;
+    h.wait("回覆2", |h| h.fr.sent().len() == 2).await;
+    let b = h.bodies()[1].clone();
+    assert!(b.contains("[第4輪 含說明") && b.contains("〈名=小葛〉〈改名〉"), "{b}");
+    assert_eq!(h.fr.sent()[1]["from_agent"].as_str(), Some("小葛"));
+    assert_eq!(wait_pid(&admin, "小葛", |_| true).await, new_pid);
+    // 寄給舊名的信交給新名字；說明只在改名後第一輪
+    h.put_pull(to_agent(3, &old, "三")).await;
+    h.wait("回覆3", |h| h.fr.sent().len() == 3).await;
+    assert!(h.bodies()[2].contains("[第5輪") && !h.bodies()[2].contains("含說明"), "{}", h.bodies()[2]);
+    assert_eq!(h.fr.sent()[2]["from_agent"].as_str(), Some("小葛"));
+    // 重啟 ASN：還是新名字，接著同一段對話；舊名對照還在
+    h.restart().await;
+    let admin = h.set.acp_admin().unwrap();
+    assert!(admin.has_worker("小葛") && !admin.has_worker(&old), "重啟後還是新名字");
+    assert_eq!(h.set.canonical_name(&old), "小葛", "重啟後舊名對照還在");
+    h.put_pull(to_agent(4, &old, "四")).await;
+    h.wait("回覆4", |h| h.fr.sent().len() == 4).await;
+    assert!(h.bodies()[3].contains("[第6輪"), "{}", h.bodies()[3]);
+    // 7 天後忘掉：舊名不再換成新名字
+    let mut v = read_json(&h, "acp-renames.json");
+    v["renamed"][0]["at"] = json!(now() - engines::acp_renames::KEEP_MS - 1);
+    std::fs::write(h.work.path().join("acp-renames.json"), v.to_string()).unwrap();
+    assert_eq!(h.set.canonical_name(&old), old, "滿 7 天就忘");
+}
+
+#[tokio::test]
+async fn acp_改名_連續改名串起來_改回原名照常() {
+    let state = tempfile::tempdir().unwrap();
+    let (mut h, admin, old) = rename_rig(&state, vec![]).await;
+    rename_blocking(&admin, &old, "小乙").await.unwrap();
+    wait_pid(&admin, "小乙", |_| true).await;
+    rename_blocking(&admin, "小乙", "小丙").await.unwrap();
+    wait_pid(&admin, "小丙", |_| true).await;
+    assert_eq!((h.set.canonical_name(&old), h.set.canonical_name("小乙")), ("小丙".to_string(), "小丙".to_string()), "A→B→C 串起來");
+    roster_now(&mut h).await;
+    h.put_pull(to_agent(1, &old, "一")).await;
+    h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
+    assert_eq!(h.fr.sent()[0]["from_agent"].as_str(), Some("小丙"));
+    assert!(h.bodies()[0].contains("[第3輪 含說明") && h.bodies()[0].contains("〈名=小丙〉〈改名〉"), "{}", h.bodies()[0]);
+    // 改回原名：原名是活的名字了，不再被轉走
+    wait_not_busy(&admin, "小丙").await;
+    rename_blocking(&admin, "小丙", &old).await.unwrap();
+    assert_eq!(h.set.canonical_name(&old), old);
+    assert_eq!(h.set.canonical_name("小乙"), old);
+}
+
+#[tokio::test]
+async fn acp_改名_處理信件中拒絕且什麼都不動_做完再改就行() {
+    let state = tempfile::tempdir().unwrap();
+    let (mut h, admin, old) = rename_rig(&state, vec![]).await;
+    roster_now(&mut h).await;
+    let gate = h.work.path().join("gate-rename");
+    h.put_pull(to_agent(1, &old, &format!("一\n@@GATE {}", gate.display()))).await;
+    // 第一封卡在閘門（#498：不靠時間）；信一排進去名單就是忙碌，放行前一直是
+    assert_eq!(admin.info(&old).unwrap()["status"], json!("busy"), "閘門沒放行前一定是忙碌");
+    let pid = wait_pid(&admin, &old, |_| true).await;
+    let before = (std::fs::read_to_string(h.work.path().join("acp-workers.json")).unwrap(), std::fs::read_to_string(h.work.path().join("acp-adopted.json")).unwrap());
+    let e = rename_blocking(&admin, &old, "小葛").await.unwrap_err();
+    assert!(e.contains("正在處理信件"), "{e}");
+    assert!(admin.has_worker(&old) && !admin.has_worker("小葛"));
+    assert_eq!(wait_pid(&admin, &old, |_| true).await, pid, "程序沒被碰");
+    let after = (std::fs::read_to_string(h.work.path().join("acp-workers.json")).unwrap(), std::fs::read_to_string(h.work.path().join("acp-adopted.json")).unwrap());
+    assert_eq!(before, after, "帳本與名冊沒動");
+    assert!(!h.work.path().join("acp-renames.json").exists(), "沒記舊名對照");
+    std::fs::write(&gate, "go").unwrap();
+    h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
+    assert_eq!(h.fr.sent()[0]["from_agent"].as_str(), Some(old.as_str()), "那封信照原名做完");
+    wait_not_busy(&admin, &old).await;
+    rename_blocking(&admin, &old, "小葛").await.unwrap();
+    assert!(admin.has_worker("小葛"));
+}
+
+#[tokio::test]
+async fn acp_改名_設定檔裡的_沒對話的_已停止的_同名的_都擋下且說明簡短() {
+    let state = tempfile::tempdir().unwrap();
+    let (h, admin, old) = rename_rig(&state, vec![worker("Gemini", "acp", json!({}))]).await;
+    // 名冊裡有、這次沒開起來的也算同名
+    std::fs::write(h.work.path().join("acp-partners.json"), json!({ "version": 1, "partners": [{ "name": "幽靈", "profile": "grok", "cwd": "C:/x", "at": 1 }] }).to_string()).unwrap();
+    let upper = old.to_uppercase();
+    for (new, want) in [("grok", "已有同名的夥伴，換個名字"), ("GEMINI", "已有同名的夥伴，換個名字"), ("幽靈", "已有同名的夥伴，換個名字"), (upper.as_str(), "新名字和現在的一樣")] {
+        assert_eq!(rename_blocking(&admin, &old, new).await.unwrap_err(), want, "{new}");
+    }
+    let e = rename_blocking(&admin, "Gemini", "小新").await.unwrap_err();
+    assert_eq!(e, "設定檔裡的名字，請改設定檔");
+    for msg in [e.as_str(), "還沒有對話，請先寄一封信給它", "已停止，請先重開", "已有同名的夥伴，換個名字"] {
+        assert!(msg.chars().count() <= 20, "給人看的說明 20 字內：{msg}");
+    }
+    // 已停止：先重開
+    let (a2, o2) = (admin.clone(), old.clone());
+    tokio::task::spawn_blocking(move || a2.stop(&o2)).await.unwrap().unwrap();
+    assert_eq!(rename_blocking(&admin, &old, "小新").await.unwrap_err(), "已停止，請先重開");
+    let (a2, o2) = (admin.clone(), old.clone());
+    tokio::task::spawn_blocking(move || a2.restart(&o2)).await.unwrap().unwrap();
+    wait_pid(&admin, &old, |_| true).await;
+    // 接班換手後還沒有對話：後台會當成新夥伴，所以擋
+    let (a2, o2) = (admin.clone(), old.clone());
+    tokio::task::spawn_blocking(move || a2.handover(&o2, "")).await.unwrap().unwrap();
+    assert_eq!(rename_blocking(&admin, &old, "小新").await.unwrap_err(), "還沒有對話，請先寄一封信給它");
+    assert!(admin.has_worker(&old) && admin.has_worker("Gemini") && !admin.has_worker("小新"), "都沒動");
+    assert!(!h.work.path().join("acp-renames.json").exists());
+}
+
+#[tokio::test]
+async fn acp_改名_寫檔失敗就把改過的都改回去_用原名重開() {
+    let state = tempfile::tempdir().unwrap();
+    let (mut h, admin, old) = rename_rig(&state, vec![]).await;
+    set_model_blocking(&admin, &old, "grok-4.6").await.unwrap();
+    roster_now(&mut h).await;
+    h.put_pull(to_agent(1, &old, "一")).await;
+    h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
+    wait_not_busy(&admin, &old).await;
+    // 最後一步（舊名對照）寫不進去：那個位置是一個資料夾
+    let blocker = h.work.path().join("acp-renames.json");
+    std::fs::create_dir_all(blocker.join("擋住")).unwrap();
+    let e = rename_blocking(&admin, &old, "小葛").await.unwrap_err();
+    assert!(e.starts_with("改名失敗，已恢復原名："), "{e}");
+    assert!(e.contains("舊名對照寫不進去"), "{e}");
+    assert!(admin.has_worker(&old) && !admin.has_worker("小葛"), "工作者清單還是原名");
+    let workers = read_json(&h, "acp-workers.json");
+    assert_eq!(workers["workers"][&old]["session_id"], json!("sess-grok1"), "帳本改回原名：{workers}");
+    assert!(workers["workers"].get("小葛").is_none());
+    assert_eq!(engines::acp_admin::read_adopted(&h.work.path().join("acp-adopted.json"))[0].0, old, "接手名冊改回原名");
+    let models = recorded_models(&h);
+    assert_eq!((models["models"][&old].clone(), models["models"].get("小葛").is_none()), (json!("grok-4.6"), true), "{models}");
+    assert!(h.log_text().contains("舊名對照寫不進去"), "細節記在 log");
+    // 用原名重開，接著原本的對話，不重送說明
+    wait_pid(&admin, &old, |_| true).await;
+    h.put_pull(to_agent(2, &old, "二")).await;
+    h.wait("回覆2", |h| h.fr.sent().len() == 2).await;
+    assert!(h.bodies()[1].contains("[第4輪") && !h.bodies()[1].contains("含說明"), "{}", h.bodies()[1]);
+    assert_eq!(h.fr.sent()[1]["from_agent"].as_str(), Some(old.as_str()));
+}
+
+#[tokio::test]
+async fn acp_改名後_有活的同名視窗就照原名送給它_舊名對照不能蓋過_沒有活的才送新名字() {
+    let state = tempfile::tempdir().unwrap();
+    let (mut h, admin, old) = rename_rig(&state, vec![]).await;
+    rename_blocking(&admin, &old, "小葛").await.unwrap();
+    wait_pid(&admin, "小葛", |_| true).await;
+    // 新開一個叫舊名的 Claude 視窗：寄給舊名的信送到它，不是改名後的工作者
+    put_session(h.sessions.path(), 5100, &old, "idle", now());
+    roster_now(&mut h).await;
+    assert_eq!(h.set.canonical_name(&old), "小葛", "引擎那一層還記得對照");
+    h.put_pull(to_agent(1, &old, "給新開的同名視窗")).await;
+    let said = h.sink.said.lock().unwrap().join("\n");
+    assert!(said.contains("給新開的同名視窗"), "交給同名的 Claude 視窗：{said}");
+    assert!(h.fr.sent().is_empty(), "改名後的工作者沒有收到：{:?}", h.fr.sent());
+    assert!(h.core.log.recent().join("\n").contains("skipped"), "舊名對照被略過要記 log");
+    // 那個視窗關掉了（名單上沒有活的舊名）：才交給新名字
+    std::fs::remove_file(h.sessions.path().join("5100.json")).unwrap();
+    roster_now(&mut h).await;
+    h.put_pull(to_agent(2, &old, "沒有同名視窗了")).await;
+    h.wait("回覆", |h| h.fr.sent().len() == 1).await;
+    assert_eq!(h.fr.sent()[0]["from_agent"].as_str(), Some("小葛"));
+    assert!(!h.sink.said.lock().unwrap().join("\n").contains("沒有同名視窗了"), "沒有交給已關的視窗");
+}
+
+#[tokio::test]
+async fn acp_改名後再接手同一段對話_回已經接過了_不重複開() {
+    let state = tempfile::tempdir().unwrap();
+    let (h, admin, old) = rename_rig(&state, vec![]).await;
+    rename_blocking(&admin, &old, "小葛").await.unwrap();
+    let cwd = h.work.path().join("專案").display().to_string();
+    let again = adopt_blocking(&admin, "sess-grok1", &cwd).await.unwrap();
+    assert_eq!((again["already"].clone(), again["name"].as_str()), (json!(true), Some("小葛")));
+    assert!(!admin.has_worker(&old), "沒有用原本的名字再開一個");
+    assert_eq!(engines::acp_admin::read_adopted(&h.work.path().join("acp-adopted.json")).len(), 1);
+}

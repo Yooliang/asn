@@ -52,7 +52,7 @@ pub struct AcpDriver {
 }
 
 /// 後台夥伴表的 session 欄只收 ^[A-Za-z0-9_-]{8,80}$，不符的不送（送了會被丟掉，還可能讓整份名單被拒）
-fn roster_session_ok(s: &str) -> bool {
+pub(crate) fn roster_session_ok(s: &str) -> bool {
     (8..=80).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
@@ -568,6 +568,7 @@ impl Engine for AcpEngine {
             models_file: wd.join(super::acp_models::MODELS_FILE),
             partners_file: wd.join(super::partner_queue::PARTNERS_FILE),
             adopted_file: wd.join(ADOPTED_FILE),
+            renames_file: wd.join(super::acp_renames::RENAMES_FILE),
             events: self.ctx.events.clone(),
         }))
     }
@@ -576,6 +577,17 @@ impl Engine for AcpEngine {
         for (_, w) in self.workers.lock().unwrap().iter() {
             w.stop();
         }
+    }
+
+    /// 寄給改名前舊名的信：7 天內換成現在的名字（連續改名串起來）。舊名現在還是某個工作者的名字、或串到的名字已經不在，就不換
+    fn canonical_name(&self, name: &str) -> Option<String> {
+        let ws = self.workers.lock().unwrap();
+        if ws.iter().any(|(n, _)| n == name) {
+            return None;
+        }
+        let list = super::acp_renames::read(&self.ctx.work_dir.join(super::acp_renames::RENAMES_FILE), now_ms());
+        let to = super::acp_renames::resolve(&list, name)?;
+        ws.iter().any(|(n, _)| *n == to).then_some(to)
     }
 
     fn list(&self) -> BoxFut<'_, Option<Vec<Window>>> {

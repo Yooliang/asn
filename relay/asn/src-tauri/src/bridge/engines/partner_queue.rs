@@ -170,6 +170,16 @@ pub fn forget(file: &Path, name: &str) -> Result<(), String> {
     crate::write_atomic(file, &v.to_string()).map_err(|e| format!("名冊寫不進去：{e}"))
 }
 
+/// 名冊裡某一筆改名（遠端管理「改名」；舊名不分大小寫）：只換名字，profile、工作資料夾、建立時間原樣保留。名冊裡沒有＝錯誤
+pub fn rename(file: &Path, from: &str, to: &str) -> Result<(), String> {
+    let t = std::fs::read_to_string(file).map_err(|e| format!("名冊讀不到：{e}"))?;
+    let mut v: Value = serde_json::from_str(&t).map_err(|e| format!("名冊讀不懂：{e}"))?;
+    let arr = v.get_mut("partners").and_then(Value::as_array_mut).ok_or("名冊裡沒有這一筆")?;
+    let e = arr.iter_mut().find(|e| e.get("name").and_then(Value::as_str).is_some_and(|n| n.eq_ignore_ascii_case(from))).ok_or("名冊裡沒有這一筆")?;
+    e["name"] = json!(to);
+    crate::write_atomic(file, &v.to_string()).map_err(|e| format!("名冊寫不進去：{e}"))
+}
+
 /// 名冊每筆的建立時間（毫秒；舊檔沒有就是 0），鍵是小寫名字
 fn read_at_map(file: &Path) -> std::collections::HashMap<String, u64> {
     let Ok(t) = std::fs::read_to_string(file) else { return Default::default() };
@@ -326,6 +336,24 @@ mod tests {
             record_failure(w, &format!("n{i}"), "grok", "x");
         }
         assert_eq!(std::fs::read_to_string(w.join(FAIL_FILE)).unwrap().lines().count(), FAIL_KEEP, "失敗紀錄只留最近的");
+    }
+
+    #[test]
+    fn 名冊改名_只換名字_模型資料夾建立時間原樣_其他筆不動_沒有這一筆回錯() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join(PARTNERS_FILE);
+        assert!(rename(&f, "小格", "小新").is_err(), "沒有名冊");
+        remember(&f, "小格", "grok", "C:/x");
+        remember(&f, "小雙", "gemini", "C:/y");
+        let at = read_at_map(&f);
+        rename(&f, "小格", "小新").unwrap();
+        assert_eq!(read_partners(&f), vec![("小新".to_string(), "grok".to_string(), "C:/x".to_string()), ("小雙".to_string(), "gemini".to_string(), "C:/y".to_string())]);
+        let at2 = read_at_map(&f);
+        assert_eq!((at2["小新"], at2["小雙"]), (at["小格"], at["小雙"]), "建立時間保留");
+        assert_eq!(rename(&f, "小格", "別的").unwrap_err(), "名冊裡沒有這一筆");
+        rename(&f, "小新", "Big").unwrap();
+        rename(&f, "big", "小格").unwrap();
+        assert_eq!(read_partners(&f)[0].0, "小格", "舊名不分大小寫");
     }
 
     struct H {

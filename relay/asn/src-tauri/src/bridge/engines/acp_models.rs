@@ -60,6 +60,14 @@ pub fn remove(file: &Path, name: &str) -> Result<(), String> {
     write(file, &m)
 }
 
+/// 改名時把記下的模型搬到新名字（沒記過＝什麼都不做；檔案壞了當沒有，同啟動時）
+pub fn rename(file: &Path, from: &str, to: &str) -> Result<(), String> {
+    let mut m = read(file).unwrap_or_default();
+    let Some(model) = m.remove(from) else { return Ok(()) };
+    m.insert(to.to_string(), model);
+    write(file, &m)
+}
+
 /// `agy models` 的輸出（stdout；開頭的「Fetching available models...」在 stderr）：一行一個「模型代號<Tab>顯示名稱」，取第一欄。
 /// 空行與沒有 Tab 的行（說明文字等）一律略過
 pub fn parse_agy_models(stdout: &str) -> Vec<String> {
@@ -109,6 +117,19 @@ pub fn not_listed(model: &str, list: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 改名_記下的模型搬到新名字_沒記過不動檔案() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join(MODELS_FILE);
+        rename(&f, "甲", "乙").unwrap();
+        assert!(!f.exists(), "沒記過就不寫檔");
+        set(&f, "甲", "grok-4.6").unwrap();
+        set(&f, "丙", "grok-4.7").unwrap();
+        rename(&f, "甲", "乙").unwrap();
+        let m = read(&f).unwrap();
+        assert_eq!((m.get("乙").map(String::as_str), m.contains_key("甲"), m.get("丙").map(String::as_str)), (Some("grok-4.6"), false, Some("grok-4.7")));
+    }
 
     #[test]
     fn 模型代號_只收英數與點底線連字號_開頭不能是符號() {

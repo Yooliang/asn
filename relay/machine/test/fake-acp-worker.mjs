@@ -5,7 +5,9 @@
 //   @@READ <路徑>  → session/request_permission（kind=read）
 //   @@MULTI        → 連續三個 execute 請求（測「這次全部允許」）
 //   @@SLEEP        → 沒有任何動靜（看門狗）
+//   @@GATE <路徑>  → 等到那個檔案出現才繼續（測試建檔＝放行），之後照一般信處理
 // 回覆文字列出每個請求的結果：edit:allowed / execute:denied …
+// 這一則附了開頭說明時，回覆最後另附〈名=說明裡的名字〉；說明裡告知改名時再附〈改名〉
 // 環境變數：FAKE_ACP_LOAD=1 宣告 loadSession；FAKE_ACP_AUTH=1 → session/new 回 Authentication required；FAKE_ACP_STATE=資料夾（存 session 與輪數）
 //   FAKE_ACP_MODELS=a,b,c → session/new、session/load 回 models（可選 a,b,c，目前是第一個），收 session/set_model，回覆附「模型=目前的」
 import fs from 'node:fs'
@@ -57,6 +59,11 @@ const ask = (sessionId, toolCall) => new Promise(resolve => {
     { optionId: 'no', name: 'Reject', kind: 'reject_once' }] } })
 })
 
+const introOf = text => {
+  const who = /背景工作者「([^」]+)」/.exec(text)
+  return who ? ` 〈名=${who[1]}〉${text.includes('名字改成了') ? '〈改名〉' : ''}` : ''
+}
+
 async function prompt(m) {
   const sid = m.params.sessionId
   const text = m.params.prompt.map(p => p.text).join('')
@@ -68,6 +75,7 @@ async function prompt(m) {
   }
   let t
   if (/@@SLEEP/.test(body)) return
+  if ((t = /@@GATE\s+(\S+)/.exec(body))) while (!fs.existsSync(t[1])) await new Promise(r => setTimeout(r, 20))
   if ((t = /@@EDIT\s+(\S+)/.exec(body))) await req('edit', { locations: [{ path: t[1] }] })
   if ((t = /@@READ\s+(\S+)/.exec(body))) await req('read', { locations: [{ path: t[1] }] })
   if ((t = /@@EXEC\s+(.+)/.exec(body))) await req('execute', { rawInput: { command: t[1].trim() } })
@@ -75,7 +83,7 @@ async function prompt(m) {
   if (/@@MULTI/.test(body)) for (const c of ['a', 'b', 'c']) await req('execute', { rawInput: { command: `cmd-${c}` } })
   const n = turnsOf(sid) + 1
   if (stateDir) fs.writeFileSync(sFile(sid), JSON.stringify({ turns: n }))
-  const reply = `收到：${body.replace(/^\[RELAY 來信\][^\n]*\n?/, '').replace(/^寄件人：[^\n]*\n?/, '').replace(/^【要回信】[^\n]*\n?/, '').trim().slice(0, 60)} [${[`第${n}輪`, results.join(','), text.includes('背景工作者') ? '含說明' : '', text.includes('下一任') ? '接班' : '', curModel ? `模型=${curModel}` : ''].filter(Boolean).join(' ')}]`
+  const reply = `收到：${body.replace(/^\[RELAY 來信\][^\n]*\n?/, '').replace(/^寄件人：[^\n]*\n?/, '').replace(/^【要回信】[^\n]*\n?/, '').trim().slice(0, 60)} [${[`第${n}輪`, results.join(','), text.includes('背景工作者') ? '含說明' : '', text.includes('下一任') ? '接班' : '', curModel ? `模型=${curModel}` : ''].filter(Boolean).join(' ')}]${introOf(text)}`
   out({ method: 'session/update', params: { sessionId: sid, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: reply } } } })
   out({ id: m.id, result: { stopReason: 'end_turn' } })
 }
