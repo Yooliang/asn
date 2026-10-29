@@ -24,10 +24,10 @@ import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
 import { copyText, createGroupApi, roomHue, roomInitial } from './lib/groups.mjs'
 import { createRoomHub } from './lib/room-hub.mjs'
-import { isRoomChat, roomIdOf, roomPseudoFriend } from './lib/mobile-rooms.mjs'
+import { isRoomChat, roomChatId, roomIdOf, roomPseudoFriend } from './lib/mobile-rooms.mjs'
 import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatarFile, selfAvatarSrc } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
-import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, switchMode, tabVisible, toggleCollapsed } from './lib/merge.mjs'
+import { BUBBLES, BUBBLE_LABEL, TOOLBARS, TOOLBAR_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, normalizeBubble, normalizeDpMode, normalizeLook, normalizeMode, normalizeSize, switchMode, chatShown, toggleCollapsed } from './lib/merge.mjs'
 import { normalizeSession, planRestore, sameSession, snapshotSession, trailingThrottle } from './lib/session.mjs'
 import { chatTabSameZone, closeAllChatTabs, closeIdleChatTabs, idleTabIds, withCallState, dropInsertBefore, closeChatTab, closeOtherChatTabs, closeRightChatTabs, isPinned, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from './lib/ctabs.mjs'
 import { nowPlayingLine, normalizeNowPlaying } from './lib/now-playing.mjs'
@@ -247,10 +247,11 @@ async function pollOpenWindows() {   // 分開模式開著哪些對話視窗，�
   } catch { /* 取不到就維持上次 */ }
 }
 
+// 整合模式：只有「目前分頁」且主視窗開著沒最小化才算看得到；分開模式：那段對話自己的視窗開著沒最小化（1 對 1 與群組共用）
+const chatShownId = id => chatShown(ui, id, { mainVisible: () => invoke('main_visible'), chatVisible: cid => invoke('chat_visible', { id: cid }) })
 const core = new AsnCore({
   transport, store: store('chats'), selfNode: info.node, windowName: info.window_name,
-  // 整合模式：只有「目前分頁」且主視窗開著沒最小化才算看得到
-  isChatVisible: async id => (ui.mode === 'merged' ? tabVisible(ui, id, await invoke('main_visible')) : invoke('chat_visible', { id })),
+  isChatVisible: chatShownId,
   aliases: info.old_names,
   pollMs: info.poll_ms, rosterMs: info.roster_ms,
   log: m => console.info('[ASN]', m),
@@ -259,7 +260,7 @@ const core = new AsnCore({
 // ---------- 群組（真人好友與群組）：群組在名單的「群組」分頁，點進去在對話分頁（整合）或對話視窗（分開）聊 ----------
 // 群組對話用「假夥伴」接上既有的對話窗：id 是 room:<群組代號>。發言、讀取、同意／拒絕都走 Rust 指令並帶本人簽章
 const groupApi = createGroupApi(invoke)
-const hub = createRoomHub({ invoke, groupApi, selfNode: info.node, windowName: info.window_name, photos: true, reactive, visible: () => document.visibilityState === 'visible' })
+const hub = createRoomHub({ invoke, groupApi, selfNode: info.node, windowName: info.window_name, photos: true, reactive, visible: rid => chatShownId(roomChatId(rid)) })   // 只有正在看的群組才標已讀（背景分頁、視窗看不到都不標）
 const roomRows = computed(() => hub.rows())
 const roomFriends = computed(() => roomRows.value.map(r => ({ ...roomPseudoFriend(r), unread: r.unread })))
 const openedRooms = new Set()   // 開過的群組對話（整合模式的分頁、分開模式的視窗）：這些要持續讀新訊息
@@ -974,7 +975,7 @@ const sendMsg = async (id, text, opts) => {
 }
 const nudgeTo = id => (isRoomChat(id) ? undefined : core.nudge(id))
 const sendAttachTo = async (id, item, caption) => { if (isRoomChat(id)) { await hub.postAttachment(roomIdOf(id), item, caption); pushLog(id); return } const r = await core.sendAttachment(id, item, caption); if (!r.ok) console.info('[ASN] attachment failed', r.error) }
-const activateTab = id => { ui.active = id; core.markRead(id); sync() }   // 指引、設定的分頁 id 不是好友，markRead 會直接略過
+const activateTab = id => { ui.active = id; core.markRead(id); sync(); if (isRoomChat(id) && openedRooms.has(id)) void hub.read(roomIdOf(id)).then(() => { pushLog(id); sync() }) }   // 指引、設定的分頁 id 不是好友，markRead 會直接略過；切到群組分頁＝現在看著它，有未讀就標已讀
 const closeOneChatTab = id => { Object.assign(ui, closeChatTab(ui, id)); if (ui.active) core.markRead(ui.active); sync() }
 const applyChatTabClose = patch => { Object.assign(ui, patch); if (ui.active) core.markRead(ui.active); sync() }
 const toggleDp = () => { ui.collapsed = toggleCollapsed(ui.collapsed) }

@@ -31,6 +31,12 @@ export function closeTab(st, id) {
 }
 // 整合模式下這位好友的對話「看得到」嗎（來信要不要算未讀、要不要彈提示）：是目前分頁，且主視窗開著沒最小化
 export const tabVisible = (st, id, windowVisible) => Boolean(windowVisible) && st.active === id
+// 這段對話使用者現在看得到嗎（1 對 1 與群組共用；決定來信算不算未讀、要不要標已讀）
+//   整合模式：是目前分頁，且主視窗開著沒最小化；分開模式：這段對話自己的視窗開著沒最小化
+// st＝{ mode, active }；mainVisible()／chatVisible(id) 由呼叫端問視窗狀態（可回 Promise），只問需要的那一個
+export async function chatShown(st, id, { mainVisible, chatVisible }) {
+  return normalizeMode(st?.mode) === 'merged' ? tabVisible(st, id, await mainVisible()) : Boolean(await chatVisible(id))
+}
 
 // 切換視窗模式時，已開的對話怎麼接：
 //   分開→整合：已開的對話視窗（windowIds）全關掉、變成分頁（最後一個當目前分頁）
