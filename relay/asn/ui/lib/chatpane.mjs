@@ -11,7 +11,7 @@ import { applyMention, markMentions, mentionOptions, mentionQuery } from './ment
 import { FILE_ACCEPT, formatBytes, photoExpired, photoTitle } from './photo.mjs'
 import { attachmentFromFile, imageFromBlob } from './photo-canvas.mjs'
 import { Annotator } from './annotator.mjs'
-import { ActionBar, opsMenuItems } from './actionbar.mjs'
+import { ActionBar, groupMenuItems, opsMenuItems } from './actionbar.mjs'
 import { CallView } from './call-view.mjs'
 import { ConfirmCards } from './group-sheet.mjs'
 import { roomAttachAllowed } from './groups.mjs'
@@ -58,8 +58,8 @@ export const ChatPane = {
     hintNames: { type: Array, default: () => [] },  // 名單上的夥伴（給語音辨識偏向名字用，選填）；通話對象自己一定會帶
     enterSends: { type: Boolean, default: true },  // Enter 直接送出（電腦預設）；手機的軟鍵盤 Enter 是換行，傳送靠按鈕
     roomCards: { type: Array, default: () => [] },  // 群組：待主持人確認的請求卡片（lib/groups.mjs 的 confirmCards）；非群組不用
-    groupMenu: { type: Boolean, default: false },
-    piModelsFor: { type: Function, default: null },   // 電腦版名單視窗：別台電腦的 pi 模型清單（給大按鈕「切換模型」用，和名單右鍵同一份）   // 電腦版：對話上方的「⋯」（邀請別人加入、成員與設定）；手機版有自己的「⋯」，不開這個
+    groupMenu: { type: Boolean, default: false },   // 電腦版：對話上方大按鈕區的「群組」（邀請、輸入邀請碼、加 AI、成員與設定）與一對一「管理」裡的邀請；手機版有自己的「⋯」，不開這個
+    piModelsFor: { type: Function, default: null },   // 電腦版名單視窗：別台電腦的 pi 模型清單（給大按鈕「切換模型」用，和名單右鍵同一份）
   },
   emits: ['send', 'nudge', 'toggle-dp', 'attach', 'call-state', 'group-decide', 'group-menu'],
   setup(props, { emit }) {
@@ -68,7 +68,8 @@ export const ChatPane = {
     const msgsEl = ref(null), composeEl = ref(null)
     const isRoom = computed(() => props.friend?.room === true)
     const attachOk = computed(() => roomAttachAllowed(props.friend))   // 群組有外部成員（別的帳號）時沒有附件鈕
-    const opsItems = computed(() => (props.groupMenu ? opsMenuItems(props.friend) : []))   // 大按鈕區的「管理」選單
+    const opsItems = computed(() => (props.groupMenu ? opsMenuItems(props.friend) : []))   // 大按鈕區「管理」選單裡的邀請（一對一）
+    const groupItems = computed(() => (props.groupMenu ? groupMenuItems(props.friend) : []))   // 群組對話的「群組」按鈕選單
     const pickMenu = op => emit('group-menu', op)
     const isAsn = computed(() => isAsnWindow(props.friend))
     const showWaiting = computed(() => showsWaiting(props.friend))
@@ -334,11 +335,11 @@ export const ChatPane = {
     const docEl = ref(null)
     // 訊息內文裡的連結：不在 WebView 導覽，一律交給系統瀏覽器（Rust 端 open_link 再驗一次協定）
     const onBodyClick = ev => handleLinkClick(ev, url => globalThis.__TAURI__?.core?.invoke?.('open_link', { url }))
-    return { displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, attachOk, opsItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, attachOk, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
-  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :active="active" :callable="!!call && !callApi" v-if="!isRoom || opsItems.length" :ops="opsItems" :pi-models-for="piModelsFor" @ops="pickMenu" @call="startCall"></action-bar>
+  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :active="active" :callable="!!call && !callApi" v-if="!isRoom || opsItems.length || groupItems.length" :ops="opsItems" :group="groupItems" :pi-models-for="piModelsFor" @ops="pickMenu" @call="startCall"></action-bar>
   <div class="chatpane-body">
   <div class="chatpane-main">
   <div class="conv">

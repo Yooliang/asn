@@ -43,7 +43,7 @@ test('輪詢間隔不會太密也不會太慢', () => {
 test('功能列接上子代理按鈕：用 canOfferSubagents 把關、圖示存在、關閉視窗時停止輪詢', () => {
   const t = read('ui/lib/actionbar.mjs')
   assert.match(t, /const showSubs = computed\(\(\) => slot\.value\.subs\.ok\)/, '#539：子代理那一格由 barSlots 把關，固定顯示、用不到就反灰')
-  assert.match(t, /data-slot="subs"[^>]*:disabled="!slot\.subs\.ok"/)
+  assert.match(t, /data-slot="subs"[^>]*:aria-disabled="slot\.subs\.ok \? null : 'true'"/)
   assert.match(t, /src="img\/ab-agent\.svg"/)
   assert.match(read('ui/img/ab-agent.svg'), /^<svg/)
   assert.match(t, /onBeforeUnmount\(\(\) => \{[^\n]*stopSubs\(\)/)

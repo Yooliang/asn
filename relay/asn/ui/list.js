@@ -889,10 +889,11 @@ async function openRoomChat(id) {
   await hub.open(rid)
   pushLog(id); sync()
 }
-// 對話上方「⋯」：邀請別人加入、成員與設定（開在名單視窗；分開模式的對話視窗也是請名單視窗代開）
+// 對話上方「群組」與「管理」的選單動作：邀請別人加入、輸入邀請碼加入、加我的另一個 AI、成員與設定（開在名單視窗；分開模式的對話視窗也是請名單視窗代開）
 async function openGroupMenu(chatId, what) {
   await invoke('show_main').catch(() => {})
   if (what === 'adopt') { await adoptLoad(); return }   // 對話窗「管理」→「把這台電腦上開著的終端納入管理…」
+  if (what === 'join') { groupFlow.openJoin(); return }   // 和名單「＋」的「加入群組…」同一個對話框
   if (isRoomChat(chatId)) {
     const rid = roomIdOf(chatId), r = hub.raw(rid)
     if (what === 'manage') groupFlow.openManage(rid)

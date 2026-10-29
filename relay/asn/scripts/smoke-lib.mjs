@@ -116,19 +116,57 @@ export const barProbeSource = ({ bar }) => `(async () => {
   for (let i = 0; i < 60; i++) {
     const bars = [...document.querySelectorAll('.actionbar')].filter(b => b.offsetParent !== null);
     const btns = bars.length === 1 ? [...bars[0].querySelectorAll('.abtn')] : [];
-    const got = btns.map(b => [b.dataset.slot || '', b.querySelector('.ab-name')?.textContent.replace(/\s*▾\s*$/, '').trim() || '', b.disabled]);
+    const off = b => b.getAttribute('aria-disabled') === 'true';
+    const got = btns.map(b => [b.dataset.slot || '', b.querySelector('.ab-name')?.textContent.replace(/\s*▾\s*$/, '').trim() || '', off(b)]);
     why = bars.length !== 1 ? '看得到的功能列有 ' + bars.length + ' 條' : JSON.stringify(got) === JSON.stringify(want) ? '' : '按鈕不符：' + JSON.stringify(got);
     if (!why) {
-      const bad = btns.find(b => b.disabled && !b.title);
-      if (bad) why = bad.dataset.slot + ' 反灰卻沒有原因';
-      else if (btns.some(b => b.disabled && b.title.length > 20)) why = '反灰原因超過 20 字';
-      else return { ok: true, why: '' };
+      const bad = btns.find(b => off(b) && !b.title);
+      if (btns.some(b => b.hasAttribute('disabled'))) why = '反灰不能用 disabled（滑鼠、Tab 讀不到原因）';
+      else if (bad) why = bad.dataset.slot + ' 反灰卻沒有原因';
+      else if (btns.some(b => off(b) && b.title.length > 20)) why = '反灰原因超過 20 字';
+      else {
+        // 反灰的選單鈕點了不能打開選單
+        for (const b of btns.filter(b => off(b) && b.getAttribute('aria-haspopup'))) {
+          b.click(); await sleep(150);
+          if (b.getAttribute('aria-expanded') === 'true' || document.querySelector('.ab-menu')) return { ok: false, why: b.dataset.slot + ' 反灰卻點得開' };
+        }
+        return { ok: true, why: '' };
+      }
     }
     await sleep(100);
   }
   return { ok: false, why };
 })()`
-export const probeSource = probe => (probe.bar ? barProbeSource(probe) : maskProbeSource(probe))
+
+// 群組分頁（#539 之二）：按鈕列有「群組」，選單是四項；「管理」不再有這四項（沒有管理也可以）
+export const GROUP_ITEMS = ['邀請別人加入', '輸入邀請碼加入', '加我的另一個 AI', '成員與設定']
+export const GROUP_ROOM = { id: 'g1', name: '測試群', members: [{ member: 'P~測試機', name: '測試機' }], mine: [{ member: 'P~測試機', unread: 0 }], last_seq: 0, created_at: '2026-10-29T00:00:00Z' }
+export const GROUP_ME = { winMode: 'merged', session: { v: 1, tabs: [{ id: 'room:g1' }], active: { id: 'room:g1' }, panel: { guide: '', setting: '' }, windows: [], panelWindows: [] } }
+export const groupProbeSource = ({ group }) => `(async () => {
+  const want = ${JSON.stringify(group)};
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const shown = sel => [...document.querySelectorAll(sel)].filter(e => e.offsetParent !== null);
+  const menuText = () => [...document.querySelectorAll('.ab-menu')].flatMap(m => [...m.querySelectorAll('.mi-t')].map(e => e.textContent.trim()));
+  const esc = () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  let btn = null;
+  for (let i = 0; i < 60 && !btn; i++) { btn = shown('.actionbar .abtn[data-slot="group"]')[0] || null; if (!btn) await sleep(100) }
+  if (!btn) return { ok: false, why: '群組分頁沒有「群組」按鈕' };
+  if (btn.hasAttribute('disabled')) return { ok: false, why: '「群組」按鈕不能用 disabled' };
+  btn.click(); await sleep(200);
+  const got = menuText();
+  if (JSON.stringify(got) !== JSON.stringify(want)) return { ok: false, why: '群組選單不符：' + JSON.stringify(got) };
+  esc(); await sleep(150);
+  const mg = shown('.actionbar .abtn[data-slot="manage"]')[0];
+  if (mg) {
+    mg.click(); await sleep(200);
+    const left = menuText().filter(t => want.includes(t));
+    esc();
+    if (left.length) return { ok: false, why: '「管理」裡還有：' + left.join('、') };
+  }
+  return { ok: true, why: '' };
+})()`
+export const probeKind = probe => (probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // ---- 入口頁清單：每個情境載一頁，指定假狀態、等待的畫面特徵 ----
 // ready：頁面掛上後必須存在的選擇器；頁面不能被導走（導走＝流程錯）
@@ -151,6 +189,8 @@ export const SCENARIOS = [
   { name: 'list-bar-fixed', page: 'list.html', state: { signedIn: true, bar: 'claude' }, ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: BAR_PROBES.claude },
   { name: 'list-bar-fixed-offline', page: 'list.html', state: { signedIn: true, bar: 'offline' }, ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: BAR_PROBES.offline },
   { name: 'list-bar-fixed-acp', page: 'list.html', state: { signedIn: true, bar: 'acp' }, ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: BAR_PROBES.acp },
+  // 群組按鈕（#539 之二）：整合模式開著群組分頁，按鈕列有「群組」（四項），「管理」不再放這些
+  { name: 'list-group-tab', page: 'list.html', state: { signedIn: true, groupTab: true }, ready: '#app.win .actionbar', probe: { group: GROUP_ITEMS } },
 ]
 // 刻意不測的 ui/*.html（要寫理由）；其餘 html 都必須有情境（見單元測試）
 export const EXCLUDED_PAGES = {
@@ -177,6 +217,12 @@ export const tableFor = scenario => {
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(PARTNER_ME) } }
     t.relay_launchers = { machines: [{ node: 'P', online: true, launcher: { profiles: [] } }] }   // 這台開放遠端管理：ACP 的切換模型可按
     t.partner_console_query = { can_toggle: true, visible: true }
+  }
+  if (scenario.state.groupTab) {
+    t.relay_rooms = { rooms: [GROUP_ROOM] }
+    t.relay_room_read = { messages: [] }
+    t.relay_group = { by: 'action', values: { group_confirm_list: { confirms: [] } }, fallback: null }
+    t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(GROUP_ME) } }
   }
   if (scenario.state.roster) t.acct_roster = ROSTER_SAMPLE   // 沒放＝後台沒部署（指令被拒），畫面要退回舊的顯示、不出錯
   return t

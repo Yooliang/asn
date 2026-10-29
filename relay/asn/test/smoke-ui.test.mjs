@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import vm from 'node:vm'
 import { fileURLToPath } from 'node:url'
-import { BAR_PROBES, EXCLUDED_PAGES, MASK_PROBES, barProbeSource, probeSource, PARTNER_ME, SCENARIOS, browserCandidates, fakeTable, findBrowser, injectSource, maskProbeSource, mountCheckSource, parseSmokeArgs, pathOf, selectScenarios, tableFor } from '../scripts/smoke-lib.mjs'
+import { BAR_PROBES, EXCLUDED_PAGES, GROUP_ITEMS, groupProbeSource, probeKind, MASK_PROBES, barProbeSource, probeSource, PARTNER_ME, SCENARIOS, browserCandidates, fakeTable, findBrowser, injectSource, maskProbeSource, mountCheckSource, parseSmokeArgs, pathOf, selectScenarios, tableFor } from '../scripts/smoke-lib.mjs'
 import { SKIP_WARNING, smokeGate, splitSkipFlag } from '../scripts/smoke-gate.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -87,7 +87,7 @@ test('掛上判斷的表達式：語法正確、帶入選擇器與預期路徑',
 })
 
 test('對話框遮罩情境（#536）：電腦與手機各一，檢查左上使用者區與名單；表達式語法正確', async () => {
-  const mask = SCENARIOS.filter(s => s.probe && !s.probe.bar)
+  const mask = SCENARIOS.filter(s => s.probe && !s.probe.bar && !s.probe.group)
   assert.deepEqual(mask.map(s => s.name), ['list-dialog-mask', 'm-dialog-mask'])
   assert.ok(MASK_PROBES.desktop.cover.includes('.me .me-dp') && MASK_PROBES.desktop.cover.includes('.rail'))
   assert.ok(MASK_PROBES.mobile.cover.includes('.m-head .m-me'))
@@ -155,4 +155,26 @@ test('固定 6 顆大按鈕情境（#539）：閒置 Claude、離線 Claude、AC
   const ctx = vm.createContext({}); ctx.globalThis = ctx
   vm.runInContext(injectSource(tableFor(SCENARIOS.find(s => s.name === 'list-bar-fixed-acp'))), ctx)
   assert.equal((await ctx.__TAURI__.core.invoke('relay_list')).members[0].agents[0].engine, 'gemini')
+})
+
+test('群組分頁情境（#539 之二）：假群組列表＋session 帶 room: 分頁；檢查「群組」四項、「管理」不再有它們；反灰檢查改看 aria-disabled', async () => {
+  const sc = SCENARIOS.find(s => s.name === 'list-group-tab')
+  assert.ok(sc, '要有群組分頁情境')
+  assert.deepEqual(sc.probe.group, GROUP_ITEMS)
+  assert.deepEqual(GROUP_ITEMS, ['邀請別人加入', '輸入邀請碼加入', '加我的另一個 AI', '成員與設定'])
+  assert.equal(probeSource(sc.probe), groupProbeSource(sc.probe))
+  assert.equal(probeKind(sc.probe), '群組按鈕檢查')
+  assert.doesNotThrow(() => new vm.Script(groupProbeSource(sc.probe)))
+  const ctx = vm.createContext({}); ctx.globalThis = ctx
+  vm.runInContext(injectSource(tableFor(sc)), ctx)
+  const inv = ctx.__TAURI__.core.invoke
+  assert.equal((await inv('relay_rooms')).rooms[0].id, 'g1')
+  const me = JSON.parse(await inv('store_load', { name: 'me' }))
+  assert.deepEqual(me.session.tabs, [{ id: 'room:g1' }])
+  assert.equal(JSON.stringify(await inv('relay_group', { action: 'group_confirm_list' })), '{"confirms":[]}')
+  // 大按鈕檢查：反灰看 aria-disabled、有原生 disabled 就失敗、反灰的選單鈕點了不能打開
+  const bar = barProbeSource(BAR_PROBES.offline)
+  assert.ok(bar.includes(`getAttribute('aria-disabled') === 'true'`))
+  assert.ok(bar.includes(`hasAttribute('disabled')`))
+  assert.ok(bar.includes('反灰卻點得開'))
 })
