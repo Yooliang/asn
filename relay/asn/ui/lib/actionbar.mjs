@@ -3,11 +3,13 @@
 // #539：一對一固定 6 格（通話／前台顯示・後台隱藏或 ACP 模式／切換模型／子代理／工作項目／管理），用不到的反灰、原因寫在提示（20 字內），不再隱藏。
 // 格子的內容與反灰規則全部在純函式 barSlots；名單右鍵（list.js）也用同一個函式與 partnerMenuItems，兩邊不各寫一套。
 // #539 之二：群組對話放「群組」一顆（groupMenuItems）；群組沒有「管理」。
+// #539 之三：「工作項目」顯示背景工作件數（從個人訊息讀，遠端也有）；按下去列出本機 Claude 視窗正在跑的背景工作（tasks_query）。
 // 反灰一律用 aria-disabled（不用原生 disabled）：滑鼠停上去看得到 title 的原因、鍵盤 Tab 停得到；點了在 handler 裡擋掉。
 import { isDisplayOnly } from './display-only.mjs'
 import { AsnDialog } from './dialog.mjs'
 import { confirmText, createModelSwitcher, modelSwitchBlock } from './model-switch.mjs'
 import { SUBAGENT_POLL_MS, subagentView } from './subagents.mjs'
+import { taskCountOf, taskView } from './tasks.mjs'
 import { CONSOLE_QUERY_TIMEOUT_MS, consoleReq, engineForProfile, withTimeout } from './partner-launch-ui.mjs'
 import { REASON, initialOpsCtx, menuItems, partnerEngine, sharedWhy } from './partner-ops.mjs'
 import { manageItems, runArchive } from './archive.mjs'
@@ -94,7 +96,8 @@ export function wakeButtonView(friend, ctx = {}) {
 // ---------- 固定 6 格 ----------
 export const BAR_KEYS = ['call', 'window', 'model', 'subs', 'tasks', 'manage']
 export const WINDOW_LABEL = { hide: '後台隱藏', show: '前台顯示', idle: '前台／後台', acp: 'ACP 模式' }
-export const TASKS_WHY = '下一版開放'
+// 工作項目反灰的原因：沒有背景工作、在別台電腦（件數照樣顯示，列表只有本機讀得到）
+export const TASKS_WHY = { none: '目前沒有背景工作', remote: '只有本機看得到列表', noApi: '這個畫面不能查看' }
 const BAR_LABEL = { call: '通話', window: WINDOW_LABEL.idle, model: '切換模型', subs: '子代理', tasks: '工作項目', manage: '管理' }
 const OFFLINE_WHY = '夥伴離線，要先喚醒'
 const slot = (key, label, why) => ({ key, label, ok: !why, reason: why ? briefWhy(why) : '' })
@@ -136,22 +139,29 @@ function subsSlot(f, engine, ctx) {
     || (f.node !== ctx.selfNode ? '視窗在另一台電腦上' : '') || (f.status === 'offline' ? OFFLINE_WHY : '') || (ctx.subagents ? '' : '這個畫面不能查看')
   return slot('subs', ctx.subLabel || BAR_LABEL.subs, why)
 }
+// 工作項目：件數從個人訊息讀（slot 多帶 count）；0 件、離線、開啟中反灰；別台電腦的有件數也反灰（列表只有本機讀得到）
+function tasksSlot(f, ctx) {
+  const count = f.status === 'offline' || f.pending ? 0 : taskCountOf(f.psm)
+  const why = (f.pending ? '視窗還在開啟中' : '') || (f.status === 'offline' ? OFFLINE_WHY : '') || (count > 0 ? '' : TASKS_WHY.none)
+    || (f.node !== ctx.selfNode ? TASKS_WHY.remote : '') || (ctx.tasks ? '' : TASKS_WHY.noApi)
+  return { ...slot('tasks', BAR_LABEL.tasks, why), count }
+}
 
 /**
  * 一對一對話上方的固定 6 格（#539）：回 [{ key, label, ok, reason }]，順序固定為 BAR_KEYS；不能用的 ok:false，reason 20 字內。
  * ctx：{ selfNode, api（有沒有 transport）, callable（有沒有語音）, console（{ state, visible, reason }：查主控台的結果）,
- *        subagents（能不能查子代理）, subLabel, ops（夥伴管理要用的設定：loadOpsContext）, modelQuery（選填：切換模型的查詢結果）, manageCount（管理選單有幾項） }
- * 第 2 格依夥伴類型：ACP 工作者固定「ACP 模式」反灰；其他是前台顯示／後台隱藏。「工作項目」這一版先反灰（下一版開放）。
+ *        subagents（能不能查子代理）, tasks（能不能查背景工作列表）, subLabel, ops（夥伴管理要用的設定：loadOpsContext）, modelQuery（選填：切換模型的查詢結果）, manageCount（管理選單有幾項） }
+ * 第 2 格依夥伴類型：ACP 工作者固定「ACP 模式」反灰；其他是前台顯示／後台隱藏。「工作項目」多帶 count（背景工作件數，沒有＝0）。
  */
 export function barSlots(friend, ctx = {}) {
-  if (!friend) return BAR_KEYS.map(k => ({ key: k, label: BAR_LABEL[k], ok: false, reason: '沒有選到夥伴' }))
+  if (!friend) return BAR_KEYS.map(k => ({ key: k, label: BAR_LABEL[k], ok: false, reason: '沒有選到夥伴', ...(k === 'tasks' ? { count: 0 } : {}) }))
   const engine = partnerEngine(friend)
   return [
     slot('call', BAR_LABEL.call, callBlock(friend, { hasVoice: ctx.callable === true })),
     windowSlot(friend, engine, ctx),
     modelSlot(friend, engine, ctx),
     subsSlot(friend, engine, ctx),
-    slot('tasks', BAR_LABEL.tasks, TASKS_WHY),
+    tasksSlot(friend, ctx),
     slot('manage', BAR_LABEL.manage, (ctx.manageCount ?? 0) > 0 ? '' : '沒有可管理的項目'),
   ]
 }
@@ -265,6 +275,7 @@ export const OpsMenuButton = {
 
 const CALL_TIP = '語音通話：用說的跟這位夥伴對話，回信會念出來（再按掛斷）'
 const MODEL_TIP = '切換這個代理使用的模型'
+const TASKS_TIP = '看這個代理正在跑的背景工作'
 
 export const ActionBar = {
   name: 'ActionBar',
@@ -285,6 +296,7 @@ export const ActionBar = {
     const cons = reactive({ state: 'none', visible: true, busy: false, reason: '' })   // state：none／checking／toggle
     const model = reactive({ open: false, state: 'none', reason: '', current: '', items: [], st: null })
     const subs = reactive({ open: false, q: null })
+    const tasks = reactive({ open: false, q: null, loading: false })
     const dlg = reactive({ open: false, target: null, busy: false, error: '', manual: '', done: '', copied: false })
     const root = ref(null)
     const opsCtx = reactive(initialOpsCtx())
@@ -294,10 +306,11 @@ export const ActionBar = {
     const name = computed(() => props.friend?.agent || props.friend?.nick || '')
     const isRoom = computed(() => props.friend?.room === true)
     const subView = computed(() => subagentView(subs.q))
+    const taskList = computed(() => taskView(tasks.q, slot.value.tasks.count))
     const opsAll = computed(() => (props.api && !isRoom.value ? managePanelItems(props.friend, opsCtx, props.ops, { selfNode: props.selfNode }) : props.ops.map(i => ({ ...i, ok: true, reason: '' }))))
     const slotList = computed(() => barSlots(props.friend, {
       selfNode: props.selfNode, api: Boolean(props.api), callable: props.callable, console: cons,
-      subagents: Boolean(props.api?.subagentsQuery), subLabel: subView.value.label, ops: opsCtx, manageCount: opsAll.value.length,
+      subagents: Boolean(props.api?.subagentsQuery), tasks: Boolean(props.api?.tasksQuery), subLabel: subView.value.label, ops: opsCtx, manageCount: opsAll.value.length,
     }))
     const slot = computed(() => Object.fromEntries(slotList.value.map(s => [s.key, s])))
     const showBar = computed(() => Boolean(props.api) || opsAll.value.length > 0 || (isRoom.value && props.group.length > 0))
@@ -373,7 +386,7 @@ export const ActionBar = {
       void loadSubs()
       subTimer = setInterval(() => { if (props.active) void loadSubs() }, SUBAGENT_POLL_MS)
     }
-    function toggleSubs() { if (!slot.value.subs.ok) return; subs.open = !subs.open; model.open = false; if (subs.open) void loadSubs() }
+    function toggleSubs() { if (!slot.value.subs.ok) return; subs.open = !subs.open; model.open = false; tasks.open = false; if (subs.open) void loadSubs() }
     // 切換模型：ACP／pi 開夥伴管理的對話框（和名單右鍵同一條路）；Claude 視窗開型號選單
     function onModel() {
       if (!slot.value.model.ok) return
@@ -381,7 +394,7 @@ export const ActionBar = {
       void toggleModelMenu()
     }
     async function toggleModelMenu() {
-      subs.open = false
+      subs.open = false; tasks.open = false
       if (model.open) { model.open = false; return }
       model.open = true
       model.state = 'checking'
@@ -406,15 +419,30 @@ export const ActionBar = {
       try { await navigator.clipboard.writeText(dlg.manual); dlg.copied = true } catch (e) { console.info('[ASN] 複製失敗', e.message) }
     }
     function startCall() { if (slot.value.call.ok) emit('call') }
-    function onTasks() { /* 下一版開放：反灰期間點了什麼都不做 */ }
-    const onDoc = e => { if ((model.open || subs.open) && root.value && !root.value.contains(e.target)) { model.open = false; subs.open = false } }
+    // 工作項目：打開時向本機查一次列表（狀態檔隨每輪結束更新，打開當下讀就夠）；反灰時點了什麼都不做
+    async function loadTasks() {
+      const f = props.friend
+      tasks.loading = true
+      try {
+        const q = await withTimeout(props.api.tasksQuery({ name: name.value }), CONSOLE_QUERY_TIMEOUT_MS)
+        if (sameFriend(props.friend, f)) tasks.q = q
+      } catch (e) { console.info('[ASN] 背景工作查詢', e.message) } finally { tasks.loading = false }
+    }
+    function onTasks() {
+      if (!slot.value.tasks.ok) return
+      model.open = false; subs.open = false
+      tasks.open = !tasks.open
+      if (tasks.open) { tasks.q = null; void loadTasks() }
+    }
+    const onDoc = e => { if ((model.open || subs.open || tasks.open) && root.value && !root.value.contains(e.target)) { model.open = false; subs.open = false; tasks.open = false } }
     onMounted(() => { document.addEventListener('mousedown', onDoc, true); if (props.active) void loadConsole(); startSubs(); void loadOps() })
     onBeforeUnmount(() => { document.removeEventListener('mousedown', onDoc, true); stopSubs(); clearTimeout(opsRetry) })
     watch(() => props.active, a => { if (a) { void loadConsole(); void loadSubs(); void loadOps() } })
-    watch(() => props.friend?.id, () => { model.open = false; subs.open = false; opDlg.open = false; void loadConsole(); startSubs(); void loadOps() })
+    watch(() => props.friend?.id, () => { model.open = false; subs.open = false; tasks.open = false; tasks.q = null; opDlg.open = false; void loadConsole(); startSubs(); void loadOps() })
     watch(() => props.friend?.status, () => { void loadConsole(); void loadOps() })
     watch(showSubs, () => startSubs())
-    return { root, isRoom, showBar, showGroup, groupAll, pickGroup, onTasks, slot, opsAll, pickOps, archiveNote, opDlg, piModels, startCall, cons, model, subs, subView, toggleSubs, onModel, dlg, consoleView, dlgText, toggleConsole, pick, closeDlg, submit, copyManual, CALL_TIP, MODEL_TIP }
+    watch(() => slot.value.tasks.ok, ok => { if (!ok) tasks.open = false })
+    return { root, isRoom, showBar, showGroup, groupAll, pickGroup, onTasks, tasks, taskList, TASKS_TIP, slot, opsAll, pickOps, archiveNote, opDlg, piModels, startCall, cons, model, subs, subView, toggleSubs, onModel, dlg, consoleView, dlgText, toggleConsole, pick, closeDlg, submit, copyManual, CALL_TIP, MODEL_TIP }
   },
   template: `
 <div class="actionbar" ref="root" v-if="showBar" role="toolbar" aria-label="代理功能列">
@@ -451,9 +479,19 @@ export const ActionBar = {
         <li class="menu-note" v-if="subView.more">還有 {{ subView.more }} 個沒列出</li>
       </ul>
     </div>
-    <button class="abtn" type="button" data-slot="tasks" :aria-disabled="slot.tasks.ok ? null : 'true'" aria-label="工作項目" :title="slot.tasks.reason" @click="onTasks">
-      <img src="img/ab-tasks.svg" alt="" width="32" height="32"><span class="ab-name">工作項目</span>
-    </button>
+    <div class="ab-wrap">
+      <button class="abtn" type="button" data-slot="tasks" :class="{ on: tasks.open }" :aria-disabled="slot.tasks.ok ? null : 'true'" aria-haspopup="true" :aria-expanded="tasks.open" aria-label="工作項目" :title="slot.tasks.ok ? TASKS_TIP : slot.tasks.reason" @click="onTasks">
+        <span class="ab-icon"><img src="img/ab-tasks.svg" alt="" width="32" height="32"><span class="ab-badge" v-if="slot.tasks.count > 0" :aria-label="slot.tasks.count + ' 件'">{{ slot.tasks.count }}</span></span><span class="ab-name">工作項目 ▾</span>
+      </button>
+      <ul class="ab-menu ab-subs ab-tasks" v-if="tasks.open" role="menu">
+        <li class="menu-note" v-if="tasks.loading && !tasks.q">檢查中…</li>
+        <template v-else>
+          <li class="menu-note" v-if="!taskList.items.length && !taskList.more">{{ taskList.empty }}</li>
+          <li class="ab-sub" v-for="it in taskList.items" :key="it.id" role="menuitem"><span class="ab-sub-text">{{ it.text }}</span><span class="ab-sub-kind" v-if="it.kind">{{ it.kind }}</span></li>
+          <li class="menu-note" v-if="taskList.more">還有 {{ taskList.more }} 件沒列出</li>
+        </template>
+      </ul>
+    </div>
   </template>
   <partner-op-dialog v-if="opDlg.open" :friend="friend" :op="opDlg.item.key" :item="opDlg.item" :api="api" :pi-models="piModels" @close="opDlg.open = false"></partner-op-dialog>
   <ops-menu-button v-if="showGroup" slot-key="group" label="群組" icon="img/ab-group.svg" tip="邀請、輸入邀請碼、加 AI、成員與設定" :items="groupAll" @pick="pickGroup"></ops-menu-button>

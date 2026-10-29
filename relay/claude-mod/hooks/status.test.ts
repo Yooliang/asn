@@ -1,10 +1,10 @@
 import { expect, test } from 'claude-code/testing'
-import { buildStatus, createStatus, cronDetail, finalState, HEARTBEAT_MS, questionDetail, statusPath } from './status'
+import { buildStatus, createStatus, cronDetail, finalState, HEARTBEAT_MS, MAX_TASKS, questionDetail, statusPath, taskList } from './status'
 
 // 假引擎：env.get 給家目錄、fs.read 給 plugin.json、fs.write 收進 writes（可設成失敗）
 const SID = 'sess-1'
 const PATH = 'C:/Users/u/.asn/status/sess-1.json'
-type Doc = { sessionId: string; state: string; detail: string; at: number; turnId: string; plugin: string }
+type Doc = { sessionId: string; state: string; detail: string; at: number; turnId: string; plugin: string; tasks?: { id: string; desc: string; kind?: string }[] }
 
 const rig = async ($: any, on: any, opts: { failWrite?: boolean } = {}) => {
   const writes: { path: string; doc: Doc }[] = []
@@ -91,6 +91,61 @@ test('有 background_tasks→background（Stop 先到）', async ($, on) => {
   await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
   await r.flush()
   expect(r.last()).toMatchObject({ state: 'background', detail: '背景工作 2 件' })
+  expect(r.last()?.tasks).toEqual([{ id: '1', desc: '' }, { id: '2', desc: '' }])
+})
+
+// background_tasks 每筆的欄位（Claude Code 型別 BackgroundTaskSummary）：id、type、status、description，shell 才有 command（不存）
+test('背景工作列表：只取 id／說明／類型，不存指令，壞格式略過、說明截斷遮金鑰', () => {
+  const long = '跑'.repeat(100)
+  const out = taskList([
+    { id: 'b1', type: 'shell', status: 'running', description: 'npm  test\n  全套', command: 'curl -H "Authorization: Bearer sk-abcdefghijklmnopqrstuvwxyz" x' },
+    { id: 'b2', type: 'subagent', status: 'running', description: long, agent_type: 'Explore' },
+    { id: 'b3', type: 'monitor', description: 'token=hunter2hunter2 跑看看 ghp_0123456789abcdefABCDEF' },
+    null, 'str', 42, [], { id: 7, description: 8, type: { x: 1 } },
+    { id: '../../x', description: '路徑符號的代號不收' },
+    { type: 'workflow', name: 'w', description: '沒有代號也列' },
+  ])
+  expect(out[0]).toEqual({ id: 'b1', desc: 'npm test 全套', kind: 'shell' })
+  expect(JSON.stringify(out)).not.toContain('curl')
+  expect(JSON.stringify(out)).not.toContain('sk-abc')
+  expect(out[1].desc).toBe(`${'跑'.repeat(60)}…`)
+  expect(out[1].kind).toBe('subagent')
+  expect(out[2].desc).not.toContain('hunter2')
+  expect(out[2].desc).not.toContain('ghp_0123')
+  expect(out[2].desc).toContain('跑看看')
+  expect(out.slice(3)).toEqual([{ id: '', desc: '路徑符號的代號不收' }, { id: '', desc: '沒有代號也列', kind: 'workflow' }])
+  expect(taskList(Array.from({ length: 50 }, (_, i) => ({ id: `t${i}`, description: 'x' }))).length).toBe(MAX_TASKS)
+  expect(taskList(undefined as never)).toEqual([])
+  expect(taskList('壞' as never)).toEqual([])
+})
+
+test('背景工作列表：寫進狀態檔、心跳與控制結果都保留、下一輪沒有就拿掉', async ($, on) => {
+  const r = await rig($, on)
+  await start($)
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [{ id: 'b1', type: 'shell', status: 'running', description: '建置', command: 'cargo build' }], session_crons: [] } as never)
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await r.flush()
+  expect(r.last()).toMatchObject({ state: 'background', detail: '背景工作 1 件', tasks: [{ id: 'b1', desc: '建置', kind: 'shell' }] })
+  await $.turn.start({ text: 'again', turnId: 't2' })
+  await r.flush()
+  expect(r.last()?.tasks).toBeUndefined()
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [], session_crons: [] } as never)
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' })
+  await r.flush()
+  expect(r.last()).toMatchObject({ state: 'idle' })
+  expect(r.last()?.tasks).toBeUndefined()
+})
+
+test('背景工作列表：控制結果重寫時保留 tasks', async () => {
+  const writes: Record<string, unknown>[] = []
+  const io = { home: async () => 'C:/Users/u', sid: async () => SID, read: async () => '{}', write: async (_p: string, t: string) => void writes.push(JSON.parse(t)), log: () => undefined, root: '/r' }
+  const st = createStatus(() => 1)
+  st.turnStart(io, 't1')
+  st.stop(io, { background_tasks: [{ id: 'b1', description: '跑測試' }] })
+  st.turnComplete(io, 'answer')
+  await st.setControl(io, { id: 'c1', ok: true, detail: '好' })
+  expect(writes[writes.length - 1]).toMatchObject({ state: 'background', tasks: [{ id: 'b1', desc: '跑測試' }], control: { id: 'c1' } })
 })
 
 test('有 session_crons→scheduled（Stop 晚到也會覆蓋 turn.complete 先寫的 idle）', async ($, on) => {

@@ -52,6 +52,7 @@ mod 把這個視窗的細部狀態寫到本機檔，給 ASN 內建橋讀進 rost
   - `state`：`busy`｜`idle`｜`waiting_user`｜`background`｜`scheduled`
   - `detail`：人看得懂的短字串，例如 `背景工作 2 件`、`ScheduleWakeup 13:20`、`AskUserQuestion：<問題前 80 字>`、`中斷`、`出錯`、`已結束`
   - `at`：寫檔時間（epoch 毫秒）；`turnId`：目前這一輪；`plugin`：`asn@<plugin.json 的 version>`
+  - `tasks`（選填，#539 之三）：`state` 為 `background` 時寫，`[{ id, desc, kind? }]`，最多 20 筆。取自 Stop hook `background_tasks` 每筆的 `id`、`description`、`type`；`command`（指令全文）與 `last_assistant_message` 不存。說明壓成一行、遮掉像金鑰的字串、截到 60 字。ASN 對話頁「工作項目」按鈕讀它列出本機的背景工作。
 - **狀態轉換**（只看主迴圈，子代理輪次一律忽略）：
   - `session.start` → `idle`；`turn.start` → `busy`。
   - `AskUserQuestion` 呼叫前 → `waiting_user`，使用者答完回來 → `busy`。純觀察，不改也不擋該工具。

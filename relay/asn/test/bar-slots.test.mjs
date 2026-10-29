@@ -9,7 +9,7 @@ import { canOfferSubagents } from '../ui/lib/subagents.mjs'
 const read = p => fs.readFileSync(new URL(`../${p}`, import.meta.url), 'utf8')
 const F = (o = {}) => ({ id: 'H/a', node: 'H', agent: 'a', nick: 'a', status: 'idle', engine: 'claude', ...o })
 const ops = { loaded: true, signedIn: true, machines: { H: { online: true, launcher: { profiles: [] } } } }
-const CTX = { selfNode: 'H', api: true, callable: true, console: { state: 'toggle', visible: true }, subagents: true, ops, manageCount: 5 }
+const CTX = { selfNode: 'H', api: true, callable: true, console: { state: 'toggle', visible: true }, subagents: true, tasks: true, ops, manageCount: 5 }
 const view = (f, ctx = CTX) => Object.fromEntries(barSlots(f, ctx).map(s => [s.key, s]))
 const oks = (f, ctx = CTX) => barSlots(f, ctx).map(s => s.ok)
 
@@ -29,9 +29,9 @@ test('固定 6 格、順序不變；任何夥伴都 6 格；反灰一定有原�
   assert.deepEqual(BAR_KEYS, ['call', 'window', 'model', 'subs', 'tasks', 'manage'])
 })
 
-test('閒置的本機 Claude：除了工作項目（下一版開放）全部可按；第 2 格依視窗狀態寫後台隱藏／前台顯示', () => {
+test('閒置的本機 Claude：沒有背景工作時工作項目反灰，其餘全部可按；第 2 格依視窗狀態寫後台隱藏／前台顯示', () => {
   assert.deepEqual(oks(F()), [true, true, true, true, false, true])
-  assert.equal(view(F()).tasks.reason, TASKS_WHY)
+  assert.deepEqual([view(F()).tasks.reason, view(F()).tasks.count], [TASKS_WHY.none, 0])
   assert.equal(view(F()).window.label, '後台隱藏')
   assert.equal(view(F(), { ...CTX, console: { state: 'toggle', visible: false } }).window.label, '前台顯示')
   const checking = view(F(), { ...CTX, console: { state: 'checking' } }).window
@@ -118,4 +118,18 @@ test('接線：名單右鍵用 barSlots 的第 2、3 格與 partnerMenuItems；A
   assert.match(bar, /if \(modelViaPartnerOp\(props\.friend\)\) \{[^\n]*Object\.assign\(opDlg, \{ open: true, item: \{ key: 'model'/)
   assert.match(bar, /:pi-models="piModels"/)
   assert.doesNotMatch(bar + js + read('ui/lib/model-switch.mjs') + read('ui/lib/subagents.mjs'), /friend\.engine === 'acp'|c\.engine === 'acp'/, 'ACP 一律看 partnerEngine')
+})
+
+test('工作項目（#539 之三）：件數從個人訊息讀；本機有件數可按；0 件、離線、開啟中、別台電腦、不能查的畫面反灰', () => {
+  const busy = F({ psm: 'demo・背景工作 3 件' })
+  assert.deepEqual(view(busy).tasks, { key: 'tasks', label: '工作項目', ok: true, reason: '', count: 3 })
+  const remote = view(F({ node: 'W', psm: 'demo・背景工作 2 件' })).tasks
+  assert.deepEqual([remote.ok, remote.reason, remote.count], [false, TASKS_WHY.remote, 2], '別台電腦照樣顯示件數，列表只有本機看得到')
+  assert.deepEqual([view(F({ psm: 'demo' })).tasks.ok, view(F({ psm: 'demo' })).tasks.reason], [false, TASKS_WHY.none])
+  const off = view(F({ status: 'offline', psm: 'demo・背景工作 3 件' })).tasks
+  assert.deepEqual([off.ok, off.count, off.reason], [false, 0, '夥伴離線，要先喚醒'], '離線時舊的件數不算')
+  assert.deepEqual([view(F({ pending: true, psm: '背景工作 1 件' })).tasks.reason], ['視窗還在開啟中'])
+  assert.equal(view(busy, { ...CTX, tasks: false }).tasks.reason, TASKS_WHY.noApi)
+  for (const r of Object.values(TASKS_WHY)) assert.ok(r.length <= WHY_MAX, r)
+  assert.equal(barSlots(null).find(s => s.key === 'tasks').count, 0)
 })

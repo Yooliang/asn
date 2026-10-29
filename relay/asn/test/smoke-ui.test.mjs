@@ -145,7 +145,7 @@ test('三支發版腳本都在打包前接了關卡；package.json 有 smoke:ui'
 
 test('固定 6 顆大按鈕情境（#539）：閒置 Claude、離線 Claude、ACP 各一，6 顆依序、反灰狀態；表達式語法正確', async () => {
   const bar = SCENARIOS.filter(s => s.probe?.bar)
-  assert.deepEqual(bar.map(s => s.name), ['list-bar-fixed', 'list-bar-fixed-offline', 'list-bar-fixed-acp'])
+  assert.deepEqual(bar.map(s => s.name), ['list-bar-fixed', 'list-bar-fixed-offline', 'list-bar-fixed-acp', 'list-bar-tasks'])
   for (const s of bar) {
     assert.deepEqual(s.probe.bar.map(x => x[0]), ['call', 'window', 'model', 'subs', 'tasks', 'manage'], s.name)
     assert.equal(probeSource(s.probe), barProbeSource(s.probe))
@@ -155,6 +155,24 @@ test('固定 6 顆大按鈕情境（#539）：閒置 Claude、離線 Claude、AC
   const ctx = vm.createContext({}); ctx.globalThis = ctx
   vm.runInContext(injectSource(tableFor(SCENARIOS.find(s => s.name === 'list-bar-fixed-acp'))), ctx)
   assert.equal((await ctx.__TAURI__.core.invoke('relay_list')).members[0].agents[0].engine, 'gemini')
+})
+
+test('工作項目情境（#539 之三）：有件數時可按、徽章數字、列表打得開、header 拿掉件數；0 件的情境反灰、沒有徽章', async () => {
+  const sc = SCENARIOS.find(s => s.name === 'list-bar-tasks')
+  assert.ok(sc, '要有工作項目情境')
+  assert.deepEqual(sc.probe.bar.find(x => x[0] === 'tasks'), ['tasks', '工作項目', false])
+  assert.deepEqual([sc.probe.badge, sc.probe.header], ['3', 'demo'])
+  assert.deepEqual(sc.probe.taskItems, ['建置', '跑測試', '還有 1 件沒列出'])
+  assert.deepEqual(BAR_PROBES.claude.bar.find(x => x[0] === 'tasks'), ['tasks', '工作項目', true])
+  assert.equal(BAR_PROBES.claude.badge, '', '0 件不顯示徽章')
+  const src = barProbeSource(sc.probe)
+  assert.doesNotThrow(() => new vm.Script(src))
+  assert.match(src, /\.ab-badge/)
+  const ctx = vm.createContext({}); ctx.globalThis = ctx
+  vm.runInContext(injectSource(tableFor(sc)), ctx)
+  const inv = ctx.__TAURI__.core.invoke
+  assert.equal((await inv('relay_list')).members[0].agents[0].detail, '背景工作 3 件')
+  assert.equal((await inv('tasks_query', { req: { name: 'demo' } })).items.length, 2)
 })
 
 test('群組分頁情境（#539 之二）：假群組列表＋session 帶 room: 分頁；檢查「群組」四項、「管理」不再有它們；反灰檢查改看 aria-disabled', async () => {

@@ -12,6 +12,7 @@ import { FILE_ACCEPT, formatBytes, photoExpired, photoTitle } from './photo.mjs'
 import { attachmentFromFile, imageFromBlob } from './photo-canvas.mjs'
 import { Annotator } from './annotator.mjs'
 import { ActionBar, groupMenuItems, opsMenuItems } from './actionbar.mjs'
+import { headerPsm } from './tasks.mjs'
 import { CallView } from './call-view.mjs'
 import { ConfirmCards } from './group-sheet.mjs'
 import { roomAttachAllowed } from './groups.mjs'
@@ -335,7 +336,9 @@ export const ChatPane = {
     const docEl = ref(null)
     // 訊息內文裡的連結：不在 WebView 導覽，一律交給系統瀏覽器（Rust 端 open_link 再驗一次協定）
     const onBodyClick = ev => handleLinkClick(ev, url => globalThis.__TAURI__?.core?.invoke?.('open_link', { url }))
-    return { displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, attachOk, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    // header 的個人訊息：背景工作件數已經在「工作項目」大按鈕上，拿掉那段（#539 之三）；群組照舊
+    const toPsm = computed(() => (props.friend?.room === true ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
+    return { toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, attachOk, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -345,7 +348,7 @@ export const ChatPane = {
   <div class="conv">
     <div class="conv-main">
       <div class="to-line" :class="{ 'is-offline': !isRoom && friend.status === 'offline' }"><asn-avatar class="to-av" v-if="!isRoom" :src="friendAv" :friend="friend" :status="friend.status" :hue="friend.hue"></asn-avatar><span v-html="emo(friend.nick)"></span>
-        <span class="to-psm" v-if="friend.psm" v-html="emo(friend.psm)"></span>
+        <span class="to-psm" v-if="toPsm" v-html="emo(toPsm)"></span>
         <span class="to-busy to-readonly" v-if="displayOnly">{{ DISPLAY_ONLY_TAG }}</span>
         <span class="to-busy" v-if="warn && warn !== 'offline' && warn !== 'stopped' && warn !== 'login'">{{ STATUS[friend.status] }}，可能無法馬上回應</span>
       </div>
