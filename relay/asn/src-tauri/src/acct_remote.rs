@@ -65,9 +65,17 @@ pub fn build_report_full(list: &[AccountInfo], codex: Option<&CodexLogin>, quota
 /// - Codex：`codex_windows` 是呼叫端已確認「跟目前登入的帳號對得上」的額度窗（見 codex_quota.rs）；空的就不帶。
 /// - Grok：不帶額度。筆數上限跟以前一樣。
 pub fn build_report_windows(list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value]) -> Value {
+    build_report_all(list, codex, quotas, grok, codex_windows, &[])
+}
+
+/// 同上，再加 Gemini（#374 第二張）：`gemini` 是 gemini_quota::report_rows 組好的列（最多 5 個，最近讀到的是使用中）。
+/// Gemini 佔的名額從 Claude 那邊扣，總數仍不超過 20。
+pub fn build_report_all(list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value], gemini: &[Value]) -> Value {
+    let gemini = &gemini[..gemini.len().min(crate::gemini_quota::MAX_REPORT)];
+    let claude_max = if grok.is_empty() { 19 } else { 14 } - gemini.len();
     let mut rows: Vec<Value> = list
         .iter()
-        .take(if grok.is_empty() { 19 } else { 14 })
+        .take(claude_max)
         .map(|a| {
             let mut row = json!({ "vendor": "claude", "email": a.email, "plan": a.plan, "current": a.current });
             if let (Some(q), Some(o)) = (quotas.get(&a.email), row.as_object_mut()) {
@@ -102,7 +110,43 @@ pub fn build_report_windows(list: &[AccountInfo], codex: Option<&CodexLogin>, qu
     for g in grok.iter().take(5) {
         rows.push(json!({ "vendor": "grok", "email": g.email, "plan": "", "current": g.current }));
     }
+    rows.extend(gemini.iter().cloned());
     json!({ "accounts": rows })
+}
+
+/// 回報要依序試的內容（#1529）：先送完整的；被退回時
+/// 1. 有 gemini：拿掉 gemini 再送（還沒部署 #542 的 relay 看到 gemini 會整份退回，不能因此連 Claude／Codex／Grok 都送不上）；
+/// 2. 有 codex 或 grok：只送 Claude（更舊的後台只認 claude）。
+pub fn report_attempts(list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value], gemini: &[Value]) -> Vec<Value> {
+    let full = build_report_all(list, codex, quotas, grok, codex_windows, gemini);
+    let has = |v: &Value, vendors: &[&str]| v["accounts"].as_array().is_some_and(|a| a.iter().any(|r| vendors.iter().any(|x| r["vendor"] == *x)));
+    let mut out = vec![];
+    if has(&full, &["gemini"]) {
+        out.push(full.clone());
+    }
+    let no_gemini = build_report_windows(list, codex, quotas, grok, codex_windows);
+    let older = has(&no_gemini, &["codex", "grok"]);
+    out.push(no_gemini);
+    if older {
+        out.push(build_report_with_quota(list, None, quotas));
+    }
+    out
+}
+
+/// 依序送 attempts，第一個成功的就停；全部失敗回最後一個錯誤
+pub async fn send_attempts<F, Fut>(attempts: Vec<Value>, mut send: F) -> Result<Value, String>
+where
+    F: FnMut(Value) -> Fut,
+    Fut: std::future::Future<Output = Result<Value, String>>,
+{
+    let mut last = Err("沒有可回報的內容".to_string());
+    for a in attempts {
+        last = send(a).await;
+        if last.is_ok() {
+            break;
+        }
+    }
+    last
 }
 
 /// 設定：remote_trust_own＝信任自己的設備，不用本機確認（預設 false）
@@ -313,14 +357,10 @@ pub fn decide(taken: &mut HashMap<String, (String, Instant)>, id: &str, allowed:
 }
 
 // ---------- 送給收發室的動作 ----------
-pub async fn report(relay: &Relay, list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value]) -> Result<Value, String> {
-    let full = build_report_windows(list, codex, quotas, grok, codex_windows);
-    let has_codex = full["accounts"].as_array().is_some_and(|a| a.iter().any(|r| r["vendor"] == "codex" || r["vendor"] == "grok"));
-    match relay.api("acct_report", Some(full)).await {
-        // 舊後台只認 claude，看到 codex 會整份退回：退一步只回報 Claude，不讓原本的回報壞掉
-        Err(_) if has_codex => relay.api("acct_report", Some(build_report_with_quota(list, None, quotas))).await, // 舊後台不認 codex／grok 時退回只報 Claude
-        r => r,
-    }
+/// 被退回時的退路見 [`report_attempts`]：拿掉 gemini 再送，再不行只送 Claude
+pub async fn report(relay: &Relay, list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value], gemini: &[Value]) -> Result<Value, String> {
+    let attempts = report_attempts(list, codex, quotas, grok, codex_windows, gemini);
+    send_attempts(attempts, |body| relay.api("acct_report", Some(body))).await
 }
 /// 有登入就帶本人簽章（#380：成員角色的電腦不帶會被後台擋 403）；沒登入照舊不帶
 pub async fn remote_list(relay: &Relay, node: &str, token: Option<&str>) -> Result<Value, String> {
@@ -650,6 +690,73 @@ mod tests {
         assert!(rows.iter().all(|r| r.get("windows").and_then(Value::as_array).map(|w| w.len()).unwrap_or(0) <= 4), "每筆最多 4 窗");
         // 沒有額度窗就跟以前一樣
         assert_eq!(build_report_windows(&many, Some(&codex("c@x.test", "plus", "chatgpt")), &HashMap::new(), &gs, &[]), build_report_full(&many, Some(&codex("c@x.test", "plus", "chatgpt")), &HashMap::new(), &gs));
+    }
+
+    fn gem(email: &str, current: bool) -> Value {
+        json!({ "vendor": "gemini", "email": email, "plan": "Google AI Pro", "current": current,
+                "windows": [{ "name": "weekly", "left_pct": 30, "resets_at": "2026-10-30T00:00:00Z", "read_at": "2026-10-24T12:00:00Z" }] })
+    }
+
+    #[test]
+    fn 回報帶_gemini_佔的名額從_claude_扣_總數不超過二十筆() {
+        use crate::grok_accounts::GrokAccount;
+        let many: Vec<_> = (0..30).map(|i| acct(&format!("u{i}@x.test"), i == 0)).collect();
+        let gs: Vec<_> = (0..30).map(|i| GrokAccount { email: format!("g{i}@x.test"), current: false, saved: true }).collect();
+        let gems: Vec<_> = (0..9).map(|i| gem(&format!("m{i}@x.test"), i == 0)).collect();
+        let none: Vec<GrokAccount> = vec![];
+        for grok in [gs.as_slice(), none.as_slice()] {
+            let v = build_report_all(&many, Some(&codex("c@x.test", "plus", "chatgpt")), &HashMap::new(), grok, &[], &gems);
+            let rows = v["accounts"].as_array().unwrap();
+            assert_eq!(rows.len(), 20, "剛好塞滿 20 筆");
+            let g: Vec<_> = rows.iter().filter(|r| r["vendor"] == "gemini").collect();
+            assert_eq!(g.len(), crate::gemini_quota::MAX_REPORT);
+            assert_eq!(*g[0], gems[0], "gemini 的列原樣送出（含額度窗）");
+            assert!(rows.iter().any(|r| r["vendor"] == "codex"));
+        }
+        assert_eq!(build_report_all(&many, None, &HashMap::new(), &gs, &[], &[]), build_report_full(&many, None, &HashMap::new(), &gs), "沒有 gemini 就跟以前一樣");
+    }
+
+    #[test]
+    fn 回報退路_先拿掉_gemini_再送_還不行才只送_claude() {
+        let list = [acct("a@x.test", true)];
+        let cx = codex("c@x.test", "plus", "chatgpt");
+        let at = report_attempts(&list, Some(&cx), &HashMap::new(), &[], &[], &[gem("m@x.test", true)]);
+        let vendors = |v: &Value| v["accounts"].as_array().unwrap().iter().map(|r| r["vendor"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert_eq!(at.iter().map(vendors).collect::<Vec<_>>(), vec![vec!["claude", "codex", "gemini"], vec!["claude", "codex"], vec!["claude"]]);
+        // 沒有 gemini：跟以前一樣（有 codex 才多一個只送 Claude 的退路）
+        assert_eq!(report_attempts(&list, Some(&cx), &HashMap::new(), &[], &[], &[]).iter().map(vendors).collect::<Vec<_>>(), vec![vec!["claude", "codex"], vec!["claude"]]);
+        assert_eq!(report_attempts(&list, None, &HashMap::new(), &[], &[], &[]).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn 還沒部署的_relay_退回_gemini_時_claude_與_codex_照樣送上去() {
+        let list = [acct("a@x.test", true)];
+        let cx = codex("c@x.test", "plus", "chatgpt");
+        let attempts = report_attempts(&list, Some(&cx), &HashMap::new(), &[], &[], &[gem("m@x.test", true)]);
+        let sent = std::sync::Arc::new(Mutex::new(Vec::<Value>::new()));
+        let s2 = sent.clone();
+        // 模擬舊 relay：有 gemini 整份退回，其他照收
+        let r = send_attempts(attempts, move |body| {
+            let s2 = s2.clone();
+            async move {
+                s2.lock().unwrap().push(body.clone());
+                if body.to_string().contains("\"gemini\"") {
+                    Err("bad_request".to_string())
+                } else {
+                    Ok(json!({ "ok": true }))
+                }
+            }
+        })
+        .await;
+        assert!(r.is_ok());
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 2, "只多送一次");
+        let ok = &sent[1];
+        assert!(ok["accounts"].as_array().unwrap().iter().any(|r| r["vendor"] == "codex"), "拿掉的只有 gemini，codex 不能跟著掉");
+        assert!(ok["accounts"].as_array().unwrap().iter().any(|r| r["vendor"] == "claude"));
+        // 全部失敗回最後一個錯誤
+        let all_fail = send_attempts(vec![json!(1), json!(2)], |_| async { Err::<Value, String>("x".into()) }).await;
+        assert_eq!(all_fail, Err::<Value, String>("x".to_string()));
     }
 
     #[test]

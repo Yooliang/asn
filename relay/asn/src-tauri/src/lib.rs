@@ -72,6 +72,10 @@ mod codex_accounts;
 #[cfg(desktop)]
 mod codex_quota;
 #[cfg(desktop)]
+mod gemini_quota;
+#[cfg(desktop)]
+mod gemini_session;
+#[cfg(desktop)]
 mod grok_accounts;
 #[cfg(desktop)]
 mod launch;
@@ -329,7 +333,9 @@ async fn acct_remote_report(app: State<'_, App>) -> Result<Value, String> {
     let work_dir = app.work_dir.clone();
     let login = codex.as_ref().filter(|c| c.mode == "chatgpt").map(|c| c.email.clone());
     let codex_windows = tauri::async_runtime::spawn_blocking(move || login.map(|e| codex_quota::windows_for(&work_dir, &e, heartbeat::now_ms() as i64)).unwrap_or_default()).await.unwrap_or_default();
-    acct_remote::report(relay.as_ref(), &list, codex.as_ref(), &quotas, &grok, &codex_windows).await
+    // Gemini：ASN 開的 agy 視窗狀態列記下的帳號與額度（沒開過就是空的）
+    let gemini = tauri::async_runtime::spawn_blocking(|| gemini_quota::report_rows(&gemini_quota::load_all(&identity::home_dir()), heartbeat::now_ms() as i64)).await.unwrap_or_default();
+    acct_remote::report(relay.as_ref(), &list, codex.as_ref(), &quotas, &grok, &codex_windows, &gemini).await
 }
 /// 帳號列表（#374）：本人所有設備回報的各廠牌帳號與額度。要本人簽章；沒登入回錯，不打後台
 #[cfg(feature = "gui")]

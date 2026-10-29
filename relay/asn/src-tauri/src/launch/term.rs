@@ -196,6 +196,9 @@ enum Source {
     Absent,
 }
 
+/// 產生 agy 額外參數的函式（每次開 agy 終端時叫一次）
+pub type AgyArgs = Box<dyn Fn() -> Vec<String> + Send + Sync>;
+
 /// 自己開過的終端。只認這張表裡的編號，呼叫端給的其他編號一律拒絕。
 pub struct TermService<R, F> {
     source: Source,
@@ -206,6 +209,9 @@ pub struct TermService<R, F> {
     runner: R,
     fs: F,
     status_gap: Duration,
+    /// 開 agy 時另外帶的參數（#374：`--settings <檔>` 接上 Gemini 狀態列，見 gemini_session.rs）。
+    /// 正式由 live() 設定；沒設（測試、沒有畫面的建置）就照舊只跑執行檔。回空的＝這次不帶。
+    agy_args: Option<AgyArgs>,
     inner: Mutex<Inner>,
     /// 單元測試注入啟動設定，避免依賴本機 launcher.json。
     #[cfg(test)]
@@ -222,6 +228,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             runner,
             fs,
             status_gap: STATUS_GAP,
+            agy_args: None,
             inner: Mutex::new(Inner {
                 next: 0,
                 sessions: Vec::new(),
@@ -242,6 +249,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             runner,
             fs,
             status_gap: STATUS_GAP,
+            agy_args: None,
             inner: Mutex::new(Inner {
                 next: 0,
                 sessions: Vec::new(),
@@ -263,6 +271,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             runner,
             fs,
             status_gap: STATUS_GAP,
+            agy_args: None,
             inner: Mutex::new(Inner {
                 next: 0,
                 sessions: Vec::new(),
@@ -320,7 +329,29 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     pub fn start(&self, profile: &str, cwd: &str, config: &LaunchConfig) -> Result<String, String> {
         let command = resolve_command(profile, config)?;
         let cwd = authorize_cwd(config, cwd)?;
-        self.open(profile, cwd, &[command], None).map(|(id, _)| id)
+        let argv = self.argv_for(profile, command);
+        self.open(profile, cwd, &argv, None).map(|(id, _)| id)
+    }
+
+    /// 設定開 agy 時另外帶的參數（只對 agy；grok 不帶）
+    pub fn set_agy_args(&mut self, f: AgyArgs) {
+        self.agy_args = Some(f);
+    }
+
+    /// 執行檔＋額外參數。額外參數只認 `--settings <值>` 這一組，其他一律不帶（避免被當成任意指令的入口）。
+    fn argv_for(&self, profile: &str, command: String) -> Vec<String> {
+        let mut argv = vec![command];
+        if profile == "agy" {
+            if let Some(f) = &self.agy_args {
+                let extra = f();
+                if let [flag, value] = extra.as_slice() {
+                    if flag == "--settings" && !value.trim().is_empty() && !value.chars().any(|c| c.is_control()) {
+                        argv.extend(extra);
+                    }
+                }
+            }
+        }
+        argv
     }
 
     /// 經 pi 開在 ASN 自帶的終端（#475）。指令與參數由呼叫端照本機 pi 的啟動設定組好（build_spawn_spec＋pi::plan，跟原生主控台同一份），
@@ -1422,7 +1453,8 @@ pub type LiveTerms = TermService<wezterm::RealRunner, wezterm::RealFs>;
 
 #[cfg(feature = "gui")]
 pub fn live(data_dir: &Path) -> LiveTerms {
-    let svc = TermService::from_env(data_dir.join("wezterm-term.lua"), data_dir.join("wezterm-terms.json"), crate::identity::home_dir(), wezterm::RealRunner, wezterm::RealFs);
+    let mut svc = TermService::from_env(data_dir.join("wezterm-term.lua"), data_dir.join("wezterm-terms.json"), crate::identity::home_dir(), wezterm::RealRunner, wezterm::RealFs);
+    svc.set_agy_args(Box::new(crate::gemini_session::live_args));
     if let Err(e) = svc.reclaim() {
         eprintln!("終端對照表接手失敗（不中斷啟動）：{e}");
     }
@@ -1908,6 +1940,24 @@ mod tests {
         assert_eq!(json["started_ms"], 1_000);
         assert_eq!(json["cwd"], rig.cwd);
         assert_cli_uses_socket(&rig.runner);
+    }
+
+    #[test]
+    fn agy_帶上_settings_參數_grok_不帶_其他參數一律不收() {
+        let mut rig = make(default_profiles(), vec![]);
+        rig.svc.set_agy_args(Box::new(|| vec!["--settings".into(), "C:/asn/gemini-session-settings.json".into()]));
+        rig.svc.start("agy", &rig.cwd, &rig.config).unwrap();
+        rig.svc.start("grok", &rig.cwd, &rig.config).unwrap();
+        let starts = started_args(&rig.runner);
+        assert_eq!(starts[0], vec!["start", "--always-new-process", "--cwd", rig.cwd.as_str(), "--workspace", "asn-1", "--", "C:/bin/agy.exe", "--settings", "C:/asn/gemini-session-settings.json"]);
+        assert_eq!(starts[1], vec!["start", "--always-new-process", "--cwd", rig.cwd.as_str(), "--workspace", "asn-2", "--", "C:/bin/grok.exe"], "grok 不帶");
+        // 只認 --settings 這一組：別的旗標、多出來的參數、空值都不帶
+        for bad in [vec!["--dangerously-skip-permissions".to_string(), "x".into()], vec!["--settings".into(), "a".into(), "b".into()], vec!["--settings".into(), " ".into()], vec![]] {
+            let mut rig = make(default_profiles(), vec![]);
+            rig.svc.set_agy_args(Box::new(move || bad.clone()));
+            rig.svc.start("agy", &rig.cwd, &rig.config).unwrap();
+            assert_eq!(started_args(&rig.runner)[0].last().map(String::as_str), Some("C:/bin/agy.exe"));
+        }
     }
 
     #[test]
