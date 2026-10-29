@@ -51,23 +51,48 @@ test('設備名截到 8 字；空的寫「未命名設備」', () => {
   assert.equal(shortDevice(''), '未命名設備')
 })
 
-test('有數字：每窗一句「5 小時剩 40%」，時間寫「3 小時前・工作機」', () => {
+test('有數字：每窗一句「5 小時剩 40%・3 小時前」，一行版時間寫「3 小時前・工作機」', () => {
   const q = rosterQuota(entry(), { nodeLabel, now: NOW })
   assert.equal(q.known, true)
-  assert.deepEqual(q.parts, ['5 小時剩 40%', '每週剩 72%'])
+  assert.deepEqual(q.parts, ['5 小時剩 40%・3 小時前', '每週剩 72%・3 小時前'])
   assert.equal(q.text, '5 小時剩 40%、每週剩 72%')
   assert.equal(q.meta, '3 小時前・工作機')
+  assert.equal(q.listMeta, '工作機', '「我的帳號」區括號只寫哪台讀的')
   assert.equal(q.stale, false)
   assert.equal(q.exhausted, false)
   assert.equal(q.gone, false)
   assertShort(q)
 })
 
-test('時間取最晚讀到的那一窗，設備也是那一窗的；設備名長的截到 8 字', () => {
-  const e = entry({ windows: [win('five_hour', 10, 2 * H, { read_node: S }), win('weekly', 50, 30 * 60_000, { read_node: 'long' })] })
+test('每窗各自標自己的讀取時間；一行版標較舊的那窗（舊數字不能看起來像新的，#527 審查）', () => {
+  const e = entry({ windows: [win('five_hour', 40, 2 * D, { read_node: 'long' }), win('weekly', 50, 10 * 60_000, { read_node: S })] })
   const q = rosterQuota(e, { nodeLabel: n => (n === 'long' ? '小良哥的超級無敵大電腦' : nodeLabel(n)), now: NOW })
-  assert.equal(q.meta, '30 分鐘前・小良哥的超級無敵')
+  assert.deepEqual(q.parts, ['5 小時剩 40%・2 天前', '每週剩 50%・10 分鐘前'])
+  assert.equal(q.text, '5 小時剩 40%、每週剩 50%')
+  assert.equal(q.meta, '2 天前・小良哥的超級無敵', '兩窗時間不同：標較舊的那個與那台')
+  assert.equal(q.stale, true, '較舊的那窗超過時限就標舊')
+  assert.equal(q.listMeta, '小良哥的超級無敵、家用機', '兩台讀的都列')
   assertShort(q)
+})
+
+test('重置時間已經過了的窗：不列進一行；「我的帳號」區寫「已重置，待更新」（#527 審查）', () => {
+  const e = entry({ windows: [win('five_hour', 3, 30 * 60_000, { resets_at: iso(NOW - 10 * 60_000) }), win('weekly', 60, 2 * H, { resets_at: iso(NOW + 3 * D) })] })
+  const q = rosterQuota(e, { nodeLabel, now: NOW })
+  assert.equal(q.text, '每週剩 60%', '已重置的 5 小時那窗不列')
+  assert.equal(q.meta, '2 小時前・工作機', '時間跟著一行裡剩下的那窗')
+  assert.deepEqual(q.parts, ['5 小時已重置，待更新', '每週剩 60%・2 小時前'])
+  assert.equal(q.known, true)
+  assertShort(q)
+  // 兩窗都過了：一行寫「已重置，待更新」，不列舊數字
+  const both = rosterQuota(entry({ windows: [win('five_hour', 3, H, { resets_at: iso(NOW - 1000) }), win('weekly', 60, 3 * H, { resets_at: iso(NOW - H) })] }), { nodeLabel, now: NOW })
+  assert.equal(both.text, '已重置，待更新')
+  assert.equal(both.known, false)
+  assert.equal(both.stale, true)
+  assert.ok(!/\d+%/.test(both.text + both.parts.join('')), '不出現舊的百分比')
+  assertShort(both)
+  // 重置時間剛好等於現在＝已過
+  const edge = rosterQuota(entry({ windows: [win('five_hour', 3, H, { resets_at: iso(NOW) })] }), { nodeLabel, now: NOW })
+  assert.equal(edge.text, '已重置，待更新')
 })
 
 test('不再回報的帳號（nodes 空）：標「N 天前讀的」', () => {
@@ -113,7 +138,7 @@ test('用完而且還沒重置：標用完，寫哪一窗約幾小時後重置',
 
 test('Codex 的窗照 5 小時、每週、其他由短到長排', () => {
   const q = rosterQuota(entry({ vendor: 'codex', windows: [win('w43200', 9, H), win('weekly', 80, H), win('five_hour', 60, H)] }), { nodeLabel, now: NOW })
-  assert.deepEqual(q.parts, ['5 小時剩 60%', '每週剩 80%', '30 天剩 9%'])
+  assert.deepEqual(q.parts, ['5 小時剩 60%・1 小時前', '每週剩 80%・1 小時前', '30 天剩 9%・1 小時前'])
   for (const p of q.parts) assert.ok(len(p) <= 20)
 })
 
@@ -278,11 +303,16 @@ test('電腦設定頁：設備列表最上面有「我的帳號」，按廠牌�
   const html = await render({ devices: [], accounts: ACCT, myAccounts: my })
   assert.match(html, /<section class="dv-my"[^>]*aria-label="我的帳號"/)
   assert.ok(html.includes('data-vendor="claude"') && html.includes('data-vendor="codex"'))
-  assert.ok(html.includes('5 小時剩 40%') && html.includes('每週剩 72%') && html.includes('3 小時前・工作機'))
+  assert.ok(html.includes('5 小時剩 40%') && html.includes('每週剩 72%') && html.includes('5 小時剩 40%・3 小時前') && html.includes('（工作機）'))
   assert.ok(html.includes('開 Codex 後才讀得到'))
   assert.ok(html.includes('使用中'))
   const none = await render({ devices: [], accounts: ACCT, myAccounts: null })
   assert.ok(!none.includes('dv-my'))
+  // 已重置的窗寫「已重置，待更新」、不出現舊百分比；手機版樣板也改用 listMeta（#527 審查）
+  const past = rosterView(roster([entry({ windows: [win('five_hour', 3, H, { resets_at: iso(NOW - H) }), win('weekly', 60, 2 * D)] })]), { nodeLabel, now: NOW })
+  const h2 = await render({ devices: [], accounts: ACCT, myAccounts: past })
+  assert.ok(h2.includes('5 小時已重置，待更新') && h2.includes('每週剩 60%・2 天前') && !h2.includes('剩 3%'))
+  assert.ok(read('ui/m.html').includes('（{{ a.quota.listMeta }}）'))
 })
 
 test('電腦設定頁：「我的帳號」在設備列表之前', async () => {

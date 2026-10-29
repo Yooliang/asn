@@ -155,7 +155,7 @@ export const SettingsPanel = {
                     <span class="dv-quota" :class="{ stale: a.quota.stale, out: a.quota.exhausted }">
                       <span v-for="(p, i) in a.quota.parts" :key="i">{{ i ? '、' : '' }}{{ p }}</span>
                       <span v-if="a.quota.resetText">・{{ a.quota.resetText }}</span>
-                      <span v-if="a.quota.meta">（{{ a.quota.meta }}）</span>
+                      <span v-if="a.quota.listMeta">（{{ a.quota.listMeta }}）</span>
                     </span>
                   </li>
                 </ul>

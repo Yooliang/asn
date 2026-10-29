@@ -14,6 +14,7 @@ export const ROSTER_TEXT = {
   codexOff: '開 Codex 後才讀得到',
   empty: '還沒有帳號回報',
   current: '使用中',
+  resetPending: '已重置，待更新',   // 那一窗的重置時間已經過了：記著的百分比不代表現在（#527 審查）
 }
 export const ROSTER_POLL_MS = 5 * 60_000   // 開著「設備與帳號」時多久重讀一次（跟額度回報同一個節奏，不另開更密的）
 export const DEVICE_MAX = 8  // 「3 小時前・工作機」的設備名最多幾個字
@@ -69,34 +70,52 @@ function cleanWindows(entry) {
 
 /**
  * 一個帳號的額度顯示（形狀跟 account-quota.mjs 的 quotaView 相同，設備卡的樣板直接用）：
- *   { known, text, parts, meta, resetText, stale, exhausted, gone }
- *   parts：每個額度窗一句（「5 小時剩 40%」）；text＝一行版，只接 5 小時、每週兩窗；沒有數字時 text 寫原因（不留空白）
- *   meta：「3 小時前・工作機」；目前沒有任何一台還在回報的寫「3 天前讀的・工作機」
+ *   { known, text, parts, meta, listMeta, resetText, stale, exhausted, gone }
+ *   parts：「我的帳號」區逐窗一句，各窗標自己的讀取時間與哪台讀的（「5 小時剩 40%・2 天前・工作機」）；
+ *     重置時間已經過了的窗寫「5 小時已重置，待更新」（那個百分比已經不代表現在）
+ *   text＋meta：設備卡、切換對話框的一行版。只接 5 小時、每週兩窗，跳過已重置的窗；
+ *     兩窗讀取時間不同時，meta 標**較舊**的那個（「2 天前・工作機」），stale 也看較舊的——舊數字不能看起來像新的（#527 審查）
+ *   listMeta：「我的帳號」區那一行後面的括號：有窗時只寫哪台讀的（時間各窗自己標了，最多兩台）；沒有任何窗時同 meta（最後一次回報）
+ *   目前沒有任何一台還在回報的，時間寫成「3 天前讀的」
  */
 export function rosterQuota(entry, { nodeLabel = () => UNNAMED_DEVICE, now = Date.now() } = {}) {
   const wins = cleanWindows(entry)
   const gone = !Array.isArray(entry?.nodes) || entry.nodes.length === 0
-  const latest = wins.reduce((best, w) => (!best || w.read > best.read ? w : best), null)
-  const at = latest ? latest.read : time(entry?.seen_at)
-  const node = latest ? latest.node : (typeof entry?.seen_node === 'string' ? entry.seen_node : '')
-  const ago = at != null ? agoText(new Date(at).toISOString(), now) : ''
-  const where = node ? shortDevice(nodeLabel(node)) : ''
-  const when = ago && gone ? `${ago}讀的` : ago
-  const meta = [when, where].filter(Boolean).join('・')
+  const stamp = (at, node) => {
+    const ago = at != null ? agoText(new Date(at).toISOString(), now) : ''
+    const when = ago && gone ? `${ago}讀的` : ago
+    return [when, node ? shortDevice(nodeLabel(node)) : ''].filter(Boolean).join('・')
+  }
   if (!wins.length) {
     const text = entry?.vendor === 'codex' ? ROSTER_TEXT.codexOff : ROSTER_TEXT.noQuota
-    return { known: false, text, parts: [text], meta, resetText: '', stale: true, exhausted: false, gone }
+    const meta = stamp(time(entry?.seen_at), typeof entry?.seen_node === 'string' ? entry.seen_node : '')
+    return { known: false, text, parts: [text], meta, listMeta: meta, resetText: '', stale: true, exhausted: false, gone }
   }
-  const parts = wins.map(w => `${windowLabel(w.name)}剩 ${w.pct}%`)
-  // 接成一行的 text（設備卡、切換對話框）只放 5 小時、每週兩窗，才不會超過 20 字；其他窗只在「我的帳號」區逐窗列出（parts）。
+  const expired = w => w.reset != null && w.reset <= now
+  const parts = wins.map(w => (expired(w)
+    ? `${windowLabel(w.name)}${ROSTER_TEXT.resetPending}`
+    : [`${windowLabel(w.name)}剩 ${w.pct}%`, stamp(w.read, '')].filter(Boolean).join('・')))
+  // 「我的帳號」區括號裡只寫哪台讀的（時間已在各窗自己標了）；不同台讀的最多列兩台，免得超過 20 字
+  const devices = [...new Set(wins.filter(w => w.node).map(w => shortDevice(nodeLabel(w.node))))].slice(0, 2)
+  const listMeta = devices.join('、')
+  // 接成一行的 text 只放 5 小時、每週兩窗，才不會超過 20 字；其他窗只在「我的帳號」區逐窗列出（parts）。
   // 只有其他長度的窗時（目前不會發生），放最短的那一窗，不讓這一行變成空白
   const main = wins.filter(w => ['5 小時', '每週'].includes(windowLabel(w.name)))
-  const line = (main.length ? main : wins.slice(0, 1)).map(w => `${windowLabel(w.name)}剩 ${w.pct}%`).join('、')
+  const inLine = main.length ? main : wins.slice(0, 1)
+  const live = inLine.filter(w => !expired(w))
+  const oldestOf = list => list.reduce((o, w) => (!o || w.read < o.read ? w : o), null)
   const out = wins.filter(w => w.pct === 0 && w.reset != null && w.reset > now).sort((a, b) => b.reset - a.reset)[0]
+  const resetText = out ? resetIn(new Date(out.reset).toISOString(), now, `${windowLabel(out.name)}額度`) : ''
+  if (!live.length) {
+    // 這一行該放的窗都已經重置過了：數字不代表現在，不列，寫「已重置，待更新」
+    const o = oldestOf(inLine)
+    return { known: false, text: ROSTER_TEXT.resetPending, parts, meta: stamp(o.read, o.node), listMeta, resetText, stale: true, exhausted: Boolean(out), gone }
+  }
+  const oldest = oldestOf(live)
   return {
-    known: true, text: line, parts, meta,
-    resetText: out ? resetIn(new Date(out.reset).toISOString(), now, `${windowLabel(out.name)}額度`) : '',
-    stale: now - latest.read > STALE_MS, exhausted: Boolean(out), gone,
+    known: true, text: live.map(w => `${windowLabel(w.name)}剩 ${w.pct}%`).join('、'), parts,
+    meta: stamp(oldest.read, oldest.node), listMeta, resetText,
+    stale: now - oldest.read > STALE_MS, exhausted: Boolean(out), gone,
   }
 }
 
