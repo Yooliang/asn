@@ -6,6 +6,7 @@
 //   @@AUTH_ONCE <路徑>  第一次（那個檔案還不存在）建檔並回登入失效，之後（檔案在了）照一般信處理：模擬「舊行程憑證過期、新行程正常」（#517）
 //   @@POISON         正常回覆，但把這段 conversation 標成壞掉：之後任何行程用 --conversation 接回它，每一輪都回登入失效（401）；開新對話才正常（#517：存著的舊對話綁著過期登入）
 //   @@NET_ONCE <路徑>  第一次（那個檔案還不存在）建檔並回「連線被中斷」這類網路錯誤，之後照一般信處理；@@NET 每次都回（#網路斷線自動再試）
+//   @@WRITE_NET <路徑>  先送出寫檔工具步驟並真的寫檔，然後才回網路錯誤（斷線前已經動過手：上層不能整封重送）
 //   @@SLEEP          送出一個步驟之後就不再有動靜（看門狗測試）
 //   @@GATE <路徑>    送出一個進行中的步驟，等到那個檔案出現才繼續（測試建檔＝放行）；放行後照一般信處理，回覆不含這個暗號
 //   @@CRASH          往 stderr 寫字然後結束碼 3
@@ -94,6 +95,13 @@ async function handle(line) {
   if (/授權已核可/.test(body)) return resultOf(`ran-after-grant (${flags})`)
   if ((t = /@@AUTH_ONCE\s+(\S+)/.exec(body)) && !fs.existsSync(t[1])) { fs.writeFileSync(t[1], 'x'); return fail('UNAUTHENTICATED (code 401): Request had invalid authentication credentials (authentication required)', 1) }
   const NETERR = 'API error (attempt 1): request failed: Post "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse": read tcp 192.168.0.101:57534->172.217.113.4:443: wsarecv: A connection attempt failed'
+  if ((t = /@@WRITE_NET\s+(\S+)/.exec(body))) {
+    const si = step++
+    out({ event: 'step_update', step_update: { conversation_id: conv, step_index: si, state: 'ACTIVE', step_type: 'tool', tool_name: 'write_to_file', tool_info: { name: 'write_to_file', parameters: { TargetFile: t[1] } } } })
+    fs.appendFileSync(t[1], 'w\n')   // 每次真的動手都留一行：測試用它數有沒有被重送
+    out({ event: 'step_update', step_update: { conversation_id: conv, step_index: si, state: 'DONE', step_type: 'tool', tool_name: 'write_to_file', tool_info: { name: 'write_to_file', parameters: { TargetFile: t[1] } } } })
+    return fail(NETERR, 1)
+  }
   if ((t = /@@NET_ONCE\s+(\S+)/.exec(body)) && !fs.existsSync(t[1])) { fs.writeFileSync(t[1], 'x'); return fail(NETERR, 1) }
   if (/@@NET(?!_ONCE)/.test(body)) return fail(NETERR, 1)
   if (/@@AUTH(?!_ONCE)/.test(body)) return fail('not logged in: run `agy` and sign in with your Google account (authentication required)', 1)

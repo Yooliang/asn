@@ -449,10 +449,12 @@ pub struct WorkerError {
     pub message: String,
     pub spawn_failed: bool,
     pub summary: Option<String>,
+    /// 這一輪失敗前已經有工具步驟（跑過指令、改過檔…）：不能把整封信重送，會做第二次
+    pub had_steps: bool,
 }
 impl WorkerError {
     pub fn new(code: &'static str, message: impl Into<String>) -> WorkerError {
-        WorkerError { code, message: message.into(), spawn_failed: false, summary: None }
+        WorkerError { code, message: message.into(), spawn_failed: false, summary: None, had_steps: false }
     }
     /// 依錯誤文字分類（沒登入／額度），分不出來用 fallback 代碼
     pub fn classify(text: &str, fallback: &'static str, message: impl Into<String>) -> WorkerError {

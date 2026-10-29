@@ -38,6 +38,8 @@ struct Cur {
     denied: Vec<Denied>,
     seen: HashSet<String>,
     violation: Option<(String, String)>,
+    /// 這一輪出現過任何工具步驟（含失敗的）：之後失敗時要告訴上層「已經動手了」
+    tools: bool,
 }
 
 struct Shared {
@@ -52,6 +54,10 @@ impl Shared {
     fn finish(&self, r: Result<TurnResult, WorkerError>) {
         let c = self.cur.lock().unwrap().take();
         if let Some(mut c) = c {
+            let mut r = r;
+            if let Err(e) = &mut r {
+                e.had_steps |= c.tools;
+            }
             if let Some(tx) = c.tx.take() {
                 let _ = tx.send(r);
             }
@@ -132,6 +138,9 @@ fn on_step(sh: &Arc<Shared>, a: &DriverArgs, s: Value) {
     }
     if s.get("step_type").and_then(Value::as_str) != Some("tool") {
         return;
+    }
+    if let Some(c) = sh.cur.lock().unwrap().as_mut() {
+        c.tools = true;
     }
     let info = describe_agy_tool(s.get("tool_name").and_then(Value::as_str).unwrap_or(""), s.pointer("/tool_info/parameters"));
     let key = s.get("step_index").map(|v| v.to_string()).unwrap_or_default();
@@ -260,7 +269,7 @@ impl Driver for AgyDriver {
                 if g.is_some() {
                     return Err(WorkerError::new("agent", "上一輪還沒結束"));
                 }
-                *g = Some(Cur { tx: Some(tx), denied: vec![], seen: HashSet::new(), violation: None });
+                *g = Some(Cur { tx: Some(tx), denied: vec![], seen: HashSet::new(), violation: None, tools: false });
             }
             let started = now_ms();
             self.touch();

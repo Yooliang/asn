@@ -613,20 +613,27 @@ impl Worker {
         };
         let mut r = d.turn(format!("{first}{}", job.text), cfg.turn_timeout_ms, cfg.turn_max_ms).await;
         remember(&d);
-        // 網路暫時斷線（連不上 Google 之類）：等一下自動再試一次，還是斷才回「暫時連不上」。
+        // 網路暫時斷線（連不上 Google 之類）：這一輪還沒有任何工具步驟就斷的，等一下自動再試一次；
+        // 已經動過手的（跑過指令、改過檔）不重送，免得做第二次，回「可能做了一半」讓人決定。
         // 登入、額度不在這裡處理（is_network_error 會排除它們）
-        if r.as_ref().err().map(|e| e.code == "agent" && is_network_error(&e.message)).unwrap_or(false) {
-            let wait = NET_RETRY_MS.load(std::sync::atomic::Ordering::Relaxed);
-            self.log(format!("網路暫時斷線：等 {} 秒自動再試一次", wait / 1000));
-            tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
-            d = self.ensure_driver(self.base_full()).await?;
-            r = d.turn(format!("{first}{}", job.text), cfg.turn_timeout_ms, cfg.turn_max_ms).await;
-            remember(&d);
-            let still = r.as_ref().err().map(|e| e.code == "agent" && is_network_error(&e.message)).unwrap_or(false);
-            self.log(if still { "再試一次仍然斷線" } else { "再試一次後恢復正常" });
-            if still {
-                let who = if cfg.protocol == "agy-stream" { "Google" } else { "網路" };
-                r = Err(WorkerError::new("agent", format!("{who} 暫時連不上，稍後再試")));
+        let net_err = r.as_ref().err().filter(|e| e.code == "agent" && is_network_error(&e.message)).cloned();
+        if let Some(e) = net_err {
+            if e.had_steps {
+                self.log("網路斷線，但這一輪已經有工具步驟：不自動重送");
+                r = Err(WorkerError::new("agent", "網路斷線，這一輪可能做了一半"));
+            } else {
+                let wait = NET_RETRY_MS.load(std::sync::atomic::Ordering::Relaxed);
+                self.log(format!("網路暫時斷線：等 {} 秒自動再試一次", wait / 1000));
+                tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+                d = self.ensure_driver(self.base_full()).await?;
+                r = d.turn(format!("{first}{}", job.text), cfg.turn_timeout_ms, cfg.turn_max_ms).await;
+                remember(&d);
+                let still = r.as_ref().err().map(|e| e.code == "agent" && is_network_error(&e.message)).unwrap_or(false);
+                self.log(if still { "再試一次仍然斷線" } else { "再試一次後恢復正常" });
+                if still {
+                    let who = if cfg.protocol == "agy-stream" { "Google" } else { "網路" };
+                    r = Err(WorkerError::new("agent", format!("{who} 暫時連不上，稍後再試")));
+                }
             }
         }
         // 登入失效（401）：長時間跑的驅動憑證到期，換一個新的驅動（重新讀登入）把同一封信再試一次；重開後還失效才報「需要登入」。

@@ -436,6 +436,20 @@ async fn agy_網路暫時斷線_等一下自動再試一次_成功就當沒事_�
 }
 
 #[tokio::test]
+async fn agy_網路斷線前這一輪已經動過手_不整封重送_回可能做了一半_檔案只寫一次() {
+    crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(50);
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    let mark = h.work.path().join("workers").join("Gemini").join("steps.txt");
+    // 先有工具步驟（寫了一行）才斷線：不能重送，否則會寫第二次
+    h.put_pull(to_agent(1, "Gemini", &format!("@@WRITE_NET {}", mark.display()))).await;
+    h.wait("可能做了一半", |h| h.bodies().iter().any(|b| b.contains("網路斷線，這一輪可能做了一半"))).await;
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    assert_eq!(std::fs::read_to_string(&mark).unwrap().lines().count(), 1, "只動手一次，沒有被重送");
+    assert!(!h.bodies().iter().any(|b| b.contains("暫時連不上") || b.contains("需要登入")), "{:?}", h.bodies());
+    assert!(!h.log_text().contains("等 0 秒自動再試") && !h.log_text().contains("網路暫時斷線：等"), "{}", h.log_text());
+}
+
+#[tokio::test]
 async fn agy_子行程環境是白名單_金鑰不外洩_env_pass_才帶() {
     let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[("OPENAI_API_KEY", "sk-should-not-leak"), ("FAKE_X", "1")], "acp", &[]).await;
     h.put_pull(to_agent(1, "Gemini", "@@ENV OPENAI_API_KEY")).await;
