@@ -58,7 +58,9 @@ Deno.test("acct_report：節點取自金鑰（body 指定的節點被忽略）",
   const { deps, calls } = fakeDeps(() => ({ ok: true, count: 1 }));
   const r = await handleAcctAction(deps, { id: "W" }, "acct_report", { node: "H", accounts: [{ vendor: "claude", email: "a@x.test", plan: "max", current: true }] });
   assertEquals(r, { status: 200, body: { ok: true, count: 1 } });
-  assertEquals(calls, [{ fn: "asn_relay_acct_report", args: { p_node: "W", p_accounts: [{ vendor: "claude", email: "a@x.test", plan: "max", current: true }] } }]);
+  // 第二筆是帳號列表（#374）：同樣只用金鑰所屬的節點
+  const acc = [{ vendor: "claude", email: "a@x.test", plan: "max", current: true }];
+  assertEquals(calls, [{ fn: "asn_relay_acct_report", args: { p_node: "W", p_accounts: acc } }, { fn: "asn_relay_acct_roster_report", args: { p_node: "W", p_accounts: acc } }]);
   const bad = fakeDeps();
   assertEquals((await handleAcctAction(bad.deps, { id: "W" }, "acct_report", { accounts: [{ vendor: "claude", email: "x" }] })).status, 400);
   assertEquals(bad.calls, [], "格式不對不碰資料庫");
@@ -126,5 +128,5 @@ Deno.test("relay/index.ts：帳號動作排在金鑰驗證之後，行動者是 
 });
 
 Deno.test("動作清單與分派一致", () => {
-  assertEquals([...ACCT_ACTIONS].sort(), ["acct_list", "acct_report", "acct_switch", "acct_switch_pending", "acct_switch_result", "acct_switch_status"]);
+  assertEquals([...ACCT_ACTIONS].sort(), ["acct_list", "acct_report", "acct_roster", "acct_switch", "acct_switch_pending", "acct_switch_result", "acct_switch_status"]);
 });
