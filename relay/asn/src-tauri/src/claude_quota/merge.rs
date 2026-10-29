@@ -43,7 +43,6 @@ pub enum Vendor {
     Claude,
     #[cfg_attr(not(test), allow(dead_code))]
     Codex,
-    #[cfg_attr(not(test), allow(dead_code))]
     Gemini,
 }
 
@@ -109,6 +108,7 @@ fn near_week_multiple(diff_ms: i64) -> bool {
 }
 
 /// 一條要不要收（Claude 的規則）：收回 Ok(())，不收回原因
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn judge(kind: Kind, old: Option<(u8, Option<i64>)>, new_pct: u8, new_reset: Option<i64>, now_ms: i64) -> Result<(), Reject> {
     judge_for(Vendor::Claude, kind, old, new_pct, new_reset, now_ms)
 }
@@ -148,9 +148,9 @@ pub fn judge_for(vendor: Vendor, kind: Kind, old: Option<(u8, Option<i64>)>, new
 }
 
 /// 合併一條：新來的沒有這條就留舊的；有就判斷。回 (合併後的這條, 有沒有收進新值, 沒收的原因)
-fn merge_one(kind: Kind, old: Option<(u8, Option<i64>)>, new: Option<(u8, Option<i64>)>, now_ms: i64) -> (Option<(u8, Option<i64>)>, bool, Option<Skipped>) {
+fn merge_one(vendor: Vendor, kind: Kind, old: Option<(u8, Option<i64>)>, new: Option<(u8, Option<i64>)>, now_ms: i64) -> (Option<(u8, Option<i64>)>, bool, Option<Skipped>) {
     let Some((pct, reset)) = new else { return (old, false, None) };
-    match judge(kind, old, pct, reset, now_ms) {
+    match judge_for(vendor, kind, old, pct, reset, now_ms) {
         Ok(()) => (Some((pct, reset)), true, None),
         Err(r) => (old, false, Some(Skipped { kind, reason: r.detail })),
     }
@@ -169,11 +169,16 @@ fn read_at(took: bool, has: bool, own: Option<&String>, old_at: Option<&String>,
 
 /// 現有紀錄（可能沒有）＋新來的額度 → (要寫入的紀錄, 沒收的原因)。兩條都沒收時紀錄是 None（不動檔案）。
 pub fn merge(old: Option<&Quota>, p: &Parsed, now_ms: i64) -> (Option<Quota>, Vec<Skipped>) {
+    merge_for(Vendor::Claude, old, p, now_ms)
+}
+
+/// 同 [`merge`]，指定廠牌的判斷規則（Gemini 的本機檔用 `Vendor::Gemini`，#374）
+pub fn merge_for(vendor: Vendor, old: Option<&Quota>, p: &Parsed, now_ms: i64) -> (Option<Quota>, Vec<Skipped>) {
     let (old_five_r, old_week_r) = old.map(stored_resets).unwrap_or((None, None));
     let old_five = old.and_then(|q| q.five_hour_pct).map(|v| (v, old_five_r));
     let old_week = old.and_then(|q| q.weekly_pct).map(|v| (v, old_week_r));
-    let (five, took_five, s1) = merge_one(Kind::Five, old_five, p.five_hour_pct.map(|v| (v, p.five_reset_ms)), now_ms);
-    let (week, took_week, s2) = merge_one(Kind::Week, old_week, p.weekly_pct.map(|v| (v, p.week_reset_ms)), now_ms);
+    let (five, took_five, s1) = merge_one(vendor, Kind::Five, old_five, p.five_hour_pct.map(|v| (v, p.five_reset_ms)), now_ms);
+    let (week, took_week, s2) = merge_one(vendor, Kind::Week, old_week, p.weekly_pct.map(|v| (v, p.week_reset_ms)), now_ms);
     let skipped: Vec<Skipped> = [s1, s2].into_iter().flatten().collect();
     if !took_five && !took_week {
         return (None, skipped);
@@ -200,24 +205,35 @@ pub fn log_path(home: &Path) -> std::path::PathBuf {
 /// 沒收的寫進 `~/.asn/claude-quota.log`（不含 email；超過 64 KB 只留後半）。寫不進去不影響記額度。
 /// 不印到標準錯誤：這支掛在狀態列上，不能弄髒狀態列。
 pub fn log_skipped(home: &Path, skipped: &[Skipped], now_ms: i64) {
-    use std::io::Write;
     if skipped.is_empty() {
         return;
     }
-    let p = log_path(home);
+    append_log(&log_path(home), &skipped_lines(skipped, now_ms));
+}
+
+/// 沒收的原因 → log 文字（一條一行，不含 email）
+pub fn skipped_lines(skipped: &[Skipped], now_ms: i64) -> String {
+    let at = iso_secs(now_ms);
+    skipped.iter().map(|s| format!("{at} {}沒收：{}\n", s.kind.label(), s.reason)).collect()
+}
+
+/// 附加到 log 檔（超過 64 KB 只留後半）。寫不進去就算了：呼叫端掛在狀態列上，不能因此失敗，也不印到標準錯誤。
+pub fn append_log(p: &Path, text: &str) {
+    use std::io::Write;
+    if text.is_empty() {
+        return;
+    }
     if let Some(dir) = p.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    if std::fs::metadata(&p).map(|m| m.len() > LOG_MAX_BYTES).unwrap_or(false) {
-        if let Ok(t) = std::fs::read_to_string(&p) {
+    if std::fs::metadata(p).map(|m| m.len() > LOG_MAX_BYTES).unwrap_or(false) {
+        if let Ok(t) = std::fs::read_to_string(p) {
             let mid = t.len() / 2;
             let keep = t.as_bytes()[mid..].iter().position(|&b| b == b'\n').map(|i| &t[mid + i + 1..]).unwrap_or("");
-            let _ = std::fs::write(&p, keep);
+            let _ = std::fs::write(p, keep);
         }
     }
-    let at = iso_secs(now_ms);
-    let text: String = skipped.iter().map(|s| format!("{at} {}沒收：{}\n", s.kind.label(), s.reason)).collect();
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) {
         let _ = f.write_all(text.as_bytes());
     }
 }

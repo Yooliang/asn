@@ -14,7 +14,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-mod merge;
+pub(crate) mod merge;
 
 pub const MAX_ACCOUNTS: usize = 20;
 const MAX_INPUT: usize = 1_000_000;
@@ -162,6 +162,27 @@ fn pct_of(v: Option<&Value>) -> Option<u8> {
     v.and_then(Value::as_u64).filter(|n| *n <= 100).map(|n| n as u8)
 }
 
+/// 額度檔裡的一筆 → Quota：每個欄位逐一驗證（超出範圍／格式不對的丟掉）；沒有任何百分比或沒有記錄時間就是 None。
+/// Gemini 的本機檔（gemini_quota.rs）也用這份。
+pub(crate) fn quota_from_value(v: &Value) -> Option<Quota> {
+    let (five, week) = (pct_of(v.get("five_hour_pct")), pct_of(v.get("weekly_pct")));
+    let at = v.get("at").and_then(Value::as_str).filter(|s| iso_like(s));
+    let (true, Some(at)) = (five.is_some() || week.is_some(), at) else { return None };
+    let s = |key: &str| v.get(key).and_then(Value::as_str).filter(|s| iso_like(s)).map(String::from);
+    // 某條沒有百分比，它的重置時間與讀取時間也不留
+    let only = |has: bool, x: Option<String>| x.filter(|_| has);
+    Some(Quota {
+        five_hour_pct: five,
+        weekly_pct: week,
+        reset_at: s("reset_at"),
+        at: at.to_string(),
+        five_reset_at: only(five.is_some(), s("five_reset_at")),
+        week_reset_at: only(week.is_some(), s("week_reset_at")),
+        five_at: only(five.is_some(), s("five_at")),
+        week_at: only(week.is_some(), s("week_at")),
+    })
+}
+
 /// 讀額度檔：檔案不存在或壞掉是空的；每個欄位逐一驗證（超出範圍／格式不對的丟掉），鍵必須是已正規化的 email，
 /// 沒有任何百分比或沒有記錄時間的整筆不收。
 pub fn load_all(home: &Path) -> HashMap<String, Quota> {
@@ -171,22 +192,7 @@ pub fn load_all(home: &Path) -> HashMap<String, Quota> {
         if claude_accounts::normalize_email(&k).as_deref() != Some(k.as_str()) {
             continue;
         }
-        let (five, week) = (pct_of(v.get("five_hour_pct")), pct_of(v.get("weekly_pct")));
-        let at = v.get("at").and_then(Value::as_str).filter(|s| iso_like(s));
-        let (true, Some(at)) = (five.is_some() || week.is_some(), at) else { continue };
-        let s = |key: &str| v.get(key).and_then(Value::as_str).filter(|s| iso_like(s)).map(String::from);
-        // 某條沒有百分比，它的重置時間與讀取時間也不留
-        let only = |has: bool, x: Option<String>| x.filter(|_| has);
-        let q = Quota {
-            five_hour_pct: five,
-            weekly_pct: week,
-            reset_at: s("reset_at"),
-            at: at.to_string(),
-            five_reset_at: only(five.is_some(), s("five_reset_at")),
-            week_reset_at: only(week.is_some(), s("week_reset_at")),
-            five_at: only(five.is_some(), s("five_at")),
-            week_at: only(week.is_some(), s("week_at")),
-        };
+        let Some(q) = quota_from_value(&v) else { continue };
         out.insert(k, q);
         if out.len() >= MAX_ACCOUNTS {
             break;

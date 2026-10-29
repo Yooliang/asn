@@ -263,7 +263,7 @@ pub fn run_original(asn_home: &Path, input: &[u8]) -> (Vec<u8>, i32) {
 }
 
 #[cfg(feature = "gui")]
-fn asn_cli_path() -> PathBuf {
+pub(crate) fn asn_cli_path() -> PathBuf {
     let exe = std::env::current_exe().unwrap_or_default();
     exe.parent().map(|d| d.join(if cfg!(windows) { "asn-cli.exe" } else { "asn-cli" })).unwrap_or_default()
 }
