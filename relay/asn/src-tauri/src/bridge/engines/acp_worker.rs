@@ -702,7 +702,7 @@ impl Worker {
                     let mut s = self.st.lock().unwrap();
                     let prev = (s.need_preamble, s.handover.clone());
                     s.need_preamble = true;
-                    s.handover = Some(admin::handover_prompt(&cfg.name, &format!("前任的對話（{dropped}）綁著過期的登入，重開後仍然 401，已改開新對話。"), &self.history()));
+                    s.handover = Some(admin::handover_prompt(&cfg.name, &format!("前任的對話（{dropped}）綁著過期的登入，重開後仍然 401，已改開新對話。"), &self.history(Some(&job.id))));
                     prev
                 };
                 let old = self.st.lock().unwrap().driver.take();

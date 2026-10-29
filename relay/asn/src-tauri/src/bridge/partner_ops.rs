@@ -1554,11 +1554,21 @@ fn model_series(m: &str) -> Option<&'static str> {
     ["opus", "sonnet", "haiku", "fable"].into_iter().find(|s| base.contains(s))
 }
 
+/// 去掉 `[1m]` 之類的後綴
+fn strip_suffix(m: &str) -> &str {
+    m.split('[').next().unwrap_or(m)
+}
+
+/// 不帶版本的別名（opus、opus[1m]）：去掉後綴後沒有數字
+fn is_alias(m: &str) -> bool {
+    !strip_suffix(m).bytes().any(|b| b.is_ascii_digit())
+}
+
 /// 換班接手給新視窗的模型：回 (模型, 依據)。依據：record＝取對話紀錄裡前任實際用的；launch_same＝啟動參數和紀錄同一系列，
 /// 沿用啟動參數原樣（保住 `[1m]` 長脈絡這類紀錄看不出來的後綴）；launch＝紀錄讀不到，退回啟動參數（不保證和前任現在用的一樣）；none＝都沒有
 fn pick_handover_model(recorded: Option<String>, launched: Option<String>) -> (Option<String>, &'static str) {
     match (recorded, launched) {
-        (Some(r), Some(l)) if model_series(&r).is_some() && model_series(&r) == model_series(&l) => (Some(l), "launch_same"),
+        (Some(r), Some(l)) if model_series(&r).is_some() && model_series(&r) == model_series(&l) && (is_alias(&l) || strip_suffix(&l) == strip_suffix(&r)) => (Some(l), "launch_same"),
         (Some(r), _) => (Some(r), "record"),
         (None, Some(l)) => (Some(l), "launch"),
         (None, None) => (None, "none"),

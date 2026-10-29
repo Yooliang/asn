@@ -71,8 +71,9 @@ pub fn pid_file_of(dir: &Path, partner_id: &str) -> PathBuf {
 }
 
 /// 換班接手／換新對話時帶給新對話的前情：這個視窗名底下往來記錄最後面的 `max_chars` 字（從完整的一筆開始切）。
-/// 先找視窗名的檔；沒有就找檔頭「目前名字」等於它的檔（改名後以夥伴 ID 為檔名的），取最近改過的。沒有記錄回空字串；不改任何檔
-pub fn history_tail(dir: &Path, name: &str, max_chars: usize) -> String {
+/// 先找視窗名的檔；沒有就找檔頭「目前名字」等於它的檔（改名後以夥伴 ID 為檔名的），取最近改過的。沒有記錄回空字串；不改任何檔。
+/// `skip_id` 有值就濾掉標頭 id 等於它的那幾筆（自動換新對話時，觸發的那封信已記在檔裡，新對話還會再收到一次，不重複帶）
+pub fn history_tail(dir: &Path, name: &str, max_chars: usize, skip_id: Option<&str>) -> String {
     let direct = file_of(dir, name);
     let file = if direct.is_file() {
         Some(direct)
@@ -95,6 +96,15 @@ pub fn history_tail(dir: &Path, name: &str, max_chars: usize) -> String {
     let Some(file) = file else { return String::new() };
     let text = std::fs::read_to_string(&file).unwrap_or_default();
     let (_, body) = split_header(&text);
+    let kept;
+    let body = match skip_id {
+        Some(id) => {
+            let tag = format!("｜id={id}");
+            kept = split_entries(body).into_iter().filter(|e| !e.lines().next().is_some_and(|l| l.trim_end().ends_with(&tag))).collect::<String>();
+            kept.as_str()
+        }
+        None => body,
+    };
     let body = body.trim();
     let total = body.chars().count();
     if total <= max_chars {
@@ -410,20 +420,24 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let dir = t.path().join("handoff");
         std::fs::create_dir_all(&dir).unwrap();
-        assert_eq!(history_tail(&dir, "甲", 1000), "", "沒有檔");
+        assert_eq!(history_tail(&dir, "甲", 1000, None), "", "沒有檔");
         let c = CorrLog::new(dir.clone());
         for i in 0..30 {
             c.append("甲", &Entry { ts_ms: 1_000 * (i + 1), dir: Dir::Received, from: "乙", to: "甲", id: &format!("m{i}"), body: &format!("第{i}封的內容"), attachments: &[] }).unwrap();
         }
-        let all = history_tail(&dir, "甲", 1_000_000);
+        let all = history_tail(&dir, "甲", 1_000_000, None);
         assert!(all.contains("第0封的內容") && all.contains("第29封的內容") && !all.contains("夥伴 ID"), "全部都在、檔頭不帶：{all}");
-        let part = history_tail(&dir, "甲", 300);
+        let part = history_tail(&dir, "甲", 300, None);
         assert!(part.starts_with("（更早的記錄省略）\n▌"), "從完整一筆開始：{part}");
         assert!(part.contains("第29封的內容") && !part.contains("第0封的內容"));
         // 檔名是夥伴 ID（改名後）：用檔頭的目前名字找
         std::fs::write(dir.join("p_0123456789abcdef012345.md"), format!("{}\n\n▌ x\n改名後的記錄\n", header_line("p_0123456789abcdef012345", "丙"))).unwrap();
-        assert!(history_tail(&dir, "丙", 1000).contains("改名後的記錄"));
-        assert_eq!(history_tail(&dir, "丁", 1000), "");
+        assert!(history_tail(&dir, "丙", 1000, None).contains("改名後的記錄"));
+        assert_eq!(history_tail(&dir, "丁", 1000, None), "");
+        // 濾掉觸發那封信（同 id）：只拿掉那一筆，其他都在；id 要整段相符（m2 不誤濾 m29）
+        let skipped = history_tail(&dir, "甲", 1_000_000, Some("m29"));
+        assert!(!skipped.contains("第29封的內容") && skipped.contains("第28封的內容") && skipped.contains("第2封的內容"), "{skipped}");
+        assert!(history_tail(&dir, "甲", 1_000_000, Some("m2")).contains("第29封的內容"));
     }
 
     #[test]

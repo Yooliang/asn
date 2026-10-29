@@ -771,7 +771,9 @@ fn 換班接手的模型_同系列沿用啟動參數原樣_不同系列用紀錄
     let s = |x: &str| Some(x.to_string());
     // 啟動時帶 opus[1m]、紀錄只寫 claude-opus-5-5：同系列，保住長脈絡的 opus[1m]
     assert_eq!(pick_handover_model(s("claude-opus-5-5"), s("opus[1m]")), (s("opus[1m]"), "launch_same"));
-    assert_eq!(pick_handover_model(s("claude-opus-5-5"), s("claude-opus-4-5")), (s("claude-opus-4-5"), "launch_same"));
+    // 啟動參數有明確版本、與紀錄不同（在視窗裡升過版）：用紀錄的，不換回舊版；去掉後綴後完全相同才沿用原樣
+    assert_eq!(pick_handover_model(s("claude-opus-5-5"), s("claude-opus-4-5")), (s("claude-opus-5-5"), "record"));
+    assert_eq!(pick_handover_model(s("claude-opus-5-5"), s("claude-opus-5-5[1m]")), (s("claude-opus-5-5[1m]"), "launch_same"));
     // 在視窗裡換過系列（啟動 sonnet、現在 opus）：用紀錄的
     assert_eq!(pick_handover_model(s("claude-opus-5-5"), s("sonnet")), (s("claude-opus-5-5"), "record"));
     assert_eq!(pick_handover_model(s("claude-fable-5-1"), s("opus")), (s("claude-fable-5-1"), "record"));
