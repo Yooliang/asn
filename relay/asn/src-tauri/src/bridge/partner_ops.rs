@@ -1505,20 +1505,45 @@ impl PartnerOps {
         };
         // 3. 關前任、同名開新對話：不帶 --resume／--continue／--session-id，名字與模型不變
         let prompt = handover_prompt(&t2.name, &op.note, transcript.as_deref(), &path, complete);
-        let argv = switch::rewrite_args_opts(&t2.args, None, &t2.name, switch::current_model(&t2.args).as_deref(), Some(&prompt));
+        // 模型：前任現在實際在用的（在視窗裡用 /model 換過，啟動參數看不出來，所以先看對話紀錄最後一則回覆的模型），
+        // 讀不到才用它啟動時的參數；兩邊都沒有就不指定（用啟動設定的預設）。新視窗用的模型寫進結果，讓人看得到（不再默默變笨）
+        let model = transcript.as_deref().and_then(last_assistant_model).or_else(|| switch::current_model(&t2.args));
+        let argv = switch::rewrite_args_opts(&t2.args, None, &t2.name, model.as_deref(), Some(&prompt));
         let mut r = self.reopen(Some(op), &t2, &t2.name.clone(), argv, true);
         if r.status != "failed" {
-            let extra = json!({ "handoff_path": path.to_string_lossy(), "handoff_done": complete });
+            let extra = json!({ "handoff_path": path.to_string_lossy(), "handoff_done": complete, "model": model });
             match r.result.as_mut().and_then(Value::as_object_mut) {
                 Some(m) => {
                     m.insert("handoff_path".into(), extra["handoff_path"].clone());
                     m.insert("handoff_done".into(), extra["handoff_done"].clone());
+                    m.insert("model".into(), extra["model"].clone());
                 }
                 None => r.result = Some(extra),
             }
         }
         r
     }
+}
+
+/// 對話紀錄最後一則助理回覆用的模型（只讀檔尾 512 KB）：換班接手要讓新視窗和前任用同一個模型。
+/// 跳過 `<synthetic>` 這類不是真模型的名字，名字格式不合就不採用；讀不到、沒有回覆都回 None
+pub(crate) fn last_assistant_model(transcript: &Path) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(transcript).ok()?;
+    let len = f.metadata().ok()?.len();
+    let start = len.saturating_sub(512 * 1024);
+    f.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = Vec::new();
+    f.take(512 * 1024).read_to_end(&mut buf).ok()?;
+    let text = String::from_utf8_lossy(&buf);
+    text.lines().rev().find_map(|l| {
+        let v: Value = serde_json::from_str(l.trim()).ok()?;
+        if v.get("type").and_then(Value::as_str) != Some("assistant") {
+            return None;
+        }
+        let m = v.pointer("/message/model").and_then(Value::as_str)?.trim();
+        (!m.starts_with('<') && switch::valid_model(m)).then(|| m.to_string())
+    })
 }
 
 /// 喚醒用的啟動參數（含程式本身）：第一個 Claude 視窗型 profile（claude 優先），固定參數照啟動設定，

@@ -738,6 +738,47 @@ fn 換班接手_請前任寫交接_等檔案_關前任_同名開新_不帶_resum
 }
 
 #[test]
+fn 換班接手_新視窗用前任現在用的模型_不是啟動參數裡的舊值_讀不到才退回啟動參數() {
+    // 啟動參數是 --model opus，但前任在視窗裡換過模型：對話紀錄最後一則助理回覆是 claude-fable-5-1（後面還有一則 synthetic 要跳過）
+    let r = rig(Opt::default());
+    let f = write_old_transcript(&r);
+    let lines = [
+        json!({ "type": "assistant", "message": { "model": "claude-sonnet-5-5" } }),
+        json!({ "type": "assistant", "message": { "model": "claude-fable-5-1" } }),
+        json!({ "type": "assistant", "message": { "model": "<synthetic>" } }),
+        json!({ "type": "user", "message": { "model": "claude-haiku-5-5" } }),
+    ];
+    let mut text = std::fs::read_to_string(&f).unwrap();
+    for l in lines { text.push('\n'); text.push_str(&l.to_string()); }
+    std::fs::write(&f, text).unwrap();
+    let res = r.run("handover", json!({}));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    let argv = r.launched().remove(0).2;
+    assert!(argv_has(&argv, &["--model", "claude-fable-5-1"]) && !argv.iter().any(|a| a == "opus"), "{argv:?}");
+    assert_eq!(res.result.unwrap()["model"], "claude-fable-5-1", "結果寫出新視窗用的模型");
+    // 紀錄裡沒有助理回覆：退回啟動參數的 opus
+    let r2 = rig(Opt::default());
+    write_old_transcript(&r2);
+    let res2 = r2.run("handover", json!({}));
+    assert!(argv_has(&r2.launched().remove(0).2, &["--model", "opus"]));
+    assert_eq!(res2.result.unwrap()["model"], "opus");
+}
+
+#[test]
+fn 對話紀錄的模型_只看助理回覆_跳過不是真模型的名字_壞行與壞名字不採用() {
+    let t = tempfile::tempdir().unwrap();
+    let f = t.path().join("a.jsonl");
+    let w = |lines: &[&str]| std::fs::write(&f, lines.join("\n")).unwrap();
+    w(&[r#"{"type":"assistant","message":{"model":"claude-opus-5-5"}}"#, "不是 json", r#"{"type":"assistant","message":{"model":"<synthetic>"}}"#]);
+    assert_eq!(last_assistant_model(&f).as_deref(), Some("claude-opus-5-5"));
+    w(&[r#"{"type":"assistant","message":{"model":"bad model;"}}"#]);
+    assert_eq!(last_assistant_model(&f), None);
+    w(&[r#"{"type":"user","message":{"model":"claude-opus-5-5"}}"#]);
+    assert_eq!(last_assistant_model(&f), None);
+    assert_eq!(last_assistant_model(&t.path().join("沒有.jsonl")), None);
+}
+
+#[test]
 fn 換班接手_前任沒寫完_逾時仍會換手_第一句話註明() {
     for tell_fails in [false, true] {
         let r = rig(Opt::default());

@@ -325,6 +325,12 @@ test('換班接手完成：ACP 工作者沒有請前任寫交接，說明新對�
   assert.deepEqual(c.extra, ['前任沒有寫完交接，新夥伴會以前任的對話紀錄為主。'])
 })
 
+test('換班接手完成：結果說出新視窗用的模型（和前任一樣）；沒回報模型就不寫', () => {
+  const v = progressView({ status: 'ok', result: { handoff_path: 'C:/h/x.md', handoff_done: true, model: 'claude-opus-5-5' } }, { op: 'handover' })
+  assert.deepEqual(v.extra, ['交接檔：C:/h/x.md', '新視窗用的模型：claude-opus-5-5（和前任一樣）'])
+  assert.deepEqual(progressView({ status: 'ok', result: { handoff_done: true, model: null } }, { op: 'handover' }).extra, [])
+})
+
 test('內建通道工作者的改名（B5，#266）：在線可用、已停止反灰且說明 20 字內；送出內容與表單檢查同其他夥伴；電腦端的簡短說明照實顯示', () => {
   const g = (extra = {}) => W('H', 'Gemini', { engine: 'gemini', ...extra })
   const item = (f, key = 'rename') => menuItems(f, ctx).find(i => i.key === key)

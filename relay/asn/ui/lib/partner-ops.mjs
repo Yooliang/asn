@@ -341,11 +341,12 @@ function reasonText(detail) {
 
 // 進度：partner_ops 回的那一筆（status：pending／taken／ok／failed／unconfirmed）。
 // opts：{ op, sentAt（送出時間，毫秒）, now（毫秒）}；等太久還沒結果就當逾時
-// 換班接手的結果補充：交接檔位置（給人看）；前任沒寫完要說
+// 換班接手的結果補充：交接檔位置、新視窗用的模型（給人看）；前任沒寫完要說
 function handoverExtra(result) {
   const r = result && typeof result === 'object' && !Array.isArray(result) ? result : {}
   const lines = []
   if (typeof r.handoff_path === 'string' && r.handoff_path) lines.push(`交接檔：${short(r.handoff_path, 300)}`)
+  if (typeof r.model === 'string' && r.model.trim()) lines.push(`新視窗用的模型：${short(r.model.trim(), 80)}（和前任一樣）`)
   if (r.handoff_done === false) lines.push(r.kind === 'acp' ? '這類夥伴沒有請前任寫交接；新對話第一句是接班說明，並附上收發室替它記的往來記錄當前情。' : '前任沒有寫完交接，新夥伴會以前任的對話紀錄為主。')
   return lines
 }
