@@ -1634,6 +1634,18 @@ fn acp_改名_名字不合格_和現在一樣_只差大小寫_都不叫工作者
 }
 
 #[test]
+fn acp_改名_入口自己回的說明都在_20_字內() {
+    let r = rig(Opt::default());
+    let _a = with_acp(&r, &["Gemini"]);
+    write_session(&r.sessions, 5001, "sid-5001", "Alpha", "idle", "D:/g/x");
+    r.os().alive.lock().unwrap().insert(5001);
+    for new in ["-壞", "gemini", "alpha", "小新"] {
+        let d = acp_run(&r, "rename", json!({ "new_name": new })).detail;
+        assert!(!d.is_empty() && d.chars().count() <= 20, "{new}：{d}");
+    }
+}
+
+#[test]
 fn acp_改名_撞到_claude_視窗_pi_收發室_asn_自己的名字_不分大小寫_都擋() {
     let r = rig(Opt::default());
     let a = with_acp(&r, &["Gemini"]);

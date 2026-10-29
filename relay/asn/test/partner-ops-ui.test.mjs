@@ -235,6 +235,17 @@ test('已停止（0.2 B3）：名單狀態 stopped 不當成線上；內建通�
   assert.match(items.find(i => i.key === 'model').reason, /已停止，先按「重開」/)
 })
 
+test('內建通道工作者改名（B5，#266）的對話框：寫明對話保留、短暫重開、舊名的信會轉、忙時不能改、設定檔裡的要到電腦上改', () => {
+  const t = opDialogText('rename', 'Gemini', '工作機', 'acp')
+  const all = t.points.join('\n')
+  assert.equal(t.ok, '改名')
+  assert.match(all, /對話保留/)
+  assert.match(all, /短暫重開/)
+  assert.match(all, /舊名字的信/)
+  assert.match(all, /處理信件時不能改/)
+  assert.match(all, /agents\.json.*改設定檔/)
+})
+
 test('pi 改名（0.2 A4）的對話框：寫明不關視窗、重開後名字還在、忙時排隊、要新版擴充；Claude 的改名文字不變', () => {
   const t = opDialogText('rename', '小丙', '工作機', 'pi')
   const all = t.points.join('\n')

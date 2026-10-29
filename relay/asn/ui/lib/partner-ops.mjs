@@ -7,10 +7,12 @@ import { isRelayRoom } from './roster.mjs'
 export const OPS = ['info', 'rename', 'model', 'close', 'handover', 'resume', 'restart', 'remove']
 // Claude 視窗：在線的五項；離線的只有「喚醒」
 export const ONLINE_OPS = ['info', 'rename', 'model', 'close', 'handover']
-// ACP 工作者（Gemini 等收發室自己跑的背景工作者）：詳情、切換模型、關閉（只停止本次執行，不改設定檔）、重開、接班換手；改名、喚醒電腦端會回「這類夥伴不支援」，所以反灰。
-// 切換模型（0.2 B4）：Grok 用原生切換不重開；Gemini（agy）帶同一段對話重開。移除（0.2 B3）：只移除「開新夥伴」與接手開出來的。舊版電腦端會回「這類夥伴不支援」
-export const ACP_OPS = ['info', 'model', 'close', 'restart', 'handover', 'remove']
-// 已停止（被「關閉」、名單上留著）的工作者：只能看詳情、重開、移除
+// ACP 工作者（Gemini 等收發室自己跑的背景工作者）：詳情、改名、切換模型、關閉（只停止本次執行，不改設定檔）、重開、接班換手、移除；喚醒電腦端會回「這類夥伴不支援」，所以反灰。
+// 切換模型（0.2 B4）：Grok 用原生切換不重開；Gemini（agy）帶同一段對話重開。移除（0.2 B3）：只移除「開新夥伴」與接手開出來的。
+// 改名（B5，#266）：同樣只改「開新夥伴」與接手開出來的，對話保留、短暫重開。名單分不出哪些寫在 agents.json，所以不在這裡擋，由電腦端回「設定檔裡的名字，請改設定檔」。
+// 舊版電腦端（改名是 0.1.107 起）會回「這類夥伴不支援」
+export const ACP_OPS = ['info', 'rename', 'model', 'close', 'restart', 'handover', 'remove']
+// 已停止（被「關閉」、名單上留著）的工作者：只能看詳情、重開、移除（改名也要先重開）
 export const ACP_STOPPED_OPS = ['info', 'restart', 'remove']
 export const OP_LABEL = { info: '詳情', rename: '改名', model: '切換模型', close: '關閉視窗', handover: '接班換手', resume: '喚醒', restart: '重開', remove: '移除' }
 export const NOTE_MAX = 1000
@@ -37,7 +39,6 @@ export const REASON = {
 }
 // 背景工作者（ACP）用不到的項目的說明
 const ACP_WHY = {
-  rename: '這個夥伴由 ASN 內建通道執行，沒有視窗可以改名',
   resume: '這個夥伴由 ASN 內建通道執行，不需要喚醒；要重新啟動請用「重開」',
 }
 // pi 視窗：開放「切換模型」「改名」（0.2 A4；經 pi 擴充的控制檔，電腦端見 bridge/engines/pi_control.rs）與「關閉」（只結束那個 pi 與子孫，見 partner_ops.rs close_pi）；
@@ -209,7 +210,7 @@ function itemReason(key, friend, engine, offline, ctx) {
   if (engine === 'acp') {
     if (!ACP_OPS.includes(key)) return ACP_WHY[key]
     if (offline) return `這個內建通道的工作者已離線，現在不能「${label}」`
-    if (friend.status === 'stopped' && !ACP_STOPPED_OPS.includes(key)) return `這個工作者已停止，先按「重開」才能「${label}」`
+    if (friend.status === 'stopped' && !ACP_STOPPED_OPS.includes(key)) return `已停止，先按「重開」才能「${label}」`   // 20 字內（小良哥 #1227）
     return gateReason(key, friend, ctx)
   }
   if (key === 'resume') return offline ? resumeReason(friend, ctx) : REASON.alreadyOnline

@@ -101,8 +101,27 @@ enum Roster {
     Adopted,
 }
 
-/// 改名的一步：做下去，失敗回原因；成功就留一個「改回去」
-type Undo = Box<dyn FnOnce()>;
+/// 改名的一步做完後留下的「改回去」：(這一步叫什麼, 改回去的動作)。改回去失敗回原因，由 [`roll_back`] 記 log
+type Undo = (&'static str, Box<dyn FnOnce() -> Result<(), String>>);
+
+/// 改名的新名字不合格（20 字內；完整規則：英數、連字號、中文，1～40 字，不能以連字號開頭，畫面送出前也會先擋）
+pub const BAD_NAME: &str = "名字只能用英數、中文、連字號";
+/// 改名失敗、檔案都改回去了（細節在 log）
+pub const RENAME_FAILED: &str = "改名失敗，已恢復原名";
+/// 改名失敗，而且有檔案沒能改回去（細節在 log）
+pub const RENAME_HALF: &str = "改名失敗，有檔案沒改回";
+
+/// 倒著執行「改回去」；任何一步改回去失敗都記一筆（不吞掉），回「全部改回去了沒」
+fn roll_back(undo: Vec<Undo>, note: &dyn Fn(String), from: &str, to: &str) -> bool {
+    let mut all = true;
+    for (what, u) in undo.into_iter().rev() {
+        if let Err(e) = u() {
+            all = false;
+            note(format!("acp: 改名 {from} → {to} 失敗後還原失敗：{what}沒能改回去（{e}）"));
+        }
+    }
+    all
+}
 
 impl AcpAdminImpl {
     fn find(&self, name: &str) -> Option<WorkerHandle> {
@@ -112,7 +131,7 @@ impl AcpAdminImpl {
     /// 改名前的檢查（握著工作者清單時呼叫，什麼都不動）：回 (在清單裡的位置, 從哪份名冊來)
     fn rename_check(&self, ws: &[(String, WorkerHandle)], name: &str, new_name: &str) -> Result<(usize, Roster), String> {
         if !crate::launch::config::valid_partner_name(new_name) {
-            return Err("新名字只能用英數、連字號、中文，1～40 字，不能以連字號開頭".into());
+            return Err(BAD_NAME.into());
         }
         if new_name.eq_ignore_ascii_case(name) {
             return Err("新名字和現在的一樣".into());
@@ -144,7 +163,7 @@ impl AcpAdminImpl {
     }
 
     /// 改名的檔案搬移：帳本 → 名冊（或接手名冊）→ 記下的模型 → 舊名對照。每一步成功就記一個「改回去」；
-    /// 哪一步失敗就把前面做過的反向改回去，回簡短原因（細節記 log）
+    /// 哪一步失敗就把前面做過的反向改回去，回簡短說明（20 字內，細節記 log）；改回去也失敗的記「還原失敗」，說明改成「有檔案沒改回」
     fn move_files(&self, store: &Arc<Store>, roster: Roster, name: &str, new_name: &str) -> Result<(), String> {
         let mut undo: Vec<Undo> = vec![];
         let (from, to) = (name.to_string(), new_name.to_string());
@@ -153,11 +172,9 @@ impl AcpAdminImpl {
             what.to_string()
         };
         let r = (|| -> Result<(), String> {
-            store.rename(&from, &to)?;
+            store.rename(&from, &to).map_err(|e| fail("對話帳本改不了", e))?;
             let (s, a, b) = (store.clone(), to.clone(), from.clone());
-            undo.push(Box::new(move || {
-                let _ = s.rename(&a, &b);
-            }));
+            undo.push(("對話帳本", Box::new(move || s.rename(&a, &b))));
             let (file, a, b) = match roster {
                 Roster::Partners => {
                     super::partner_queue::rename(&self.partners_file, &from, &to).map_err(|e| fail("名冊寫不進去", e))?;
@@ -168,24 +185,20 @@ impl AcpAdminImpl {
                     (self.adopted_file.clone(), to.clone(), from.clone())
                 }
             };
-            undo.push(Box::new(move || {
-                let _ = if roster == Roster::Partners { super::partner_queue::rename(&file, &a, &b) } else { rename_adopted(&file, &a, &b) };
-            }));
+            let label = if roster == Roster::Partners { "名冊" } else { "接手名冊" };
+            undo.push((label, Box::new(move || if roster == Roster::Partners { super::partner_queue::rename(&file, &a, &b) } else { rename_adopted(&file, &a, &b) })));
             super::acp_models::rename(&self.models_file, &from, &to).map_err(|e| fail("記下的模型寫不進去", e))?;
             let (file, a, b) = (self.models_file.clone(), to.clone(), from.clone());
-            undo.push(Box::new(move || {
-                let _ = super::acp_models::rename(&file, &a, &b);
-            }));
+            undo.push(("記下的模型", Box::new(move || super::acp_models::rename(&file, &a, &b))));
             // 最後一步：寫不進去時檔案原樣（原子寫入），不用另外改回去
             super::acp_renames::record(&self.renames_file, &from, &to, crate::heartbeat::now_ms()).map_err(|e| fail("舊名對照寫不進去", e))?;
             Ok(())
         })();
-        if r.is_err() {
-            for u in undo.into_iter().rev() {
-                u();
-            }
+        match r {
+            Ok(()) => Ok(()),
+            Err(_) if roll_back(undo, &|m| store.note(m), name, new_name) => Err(RENAME_FAILED.into()),
+            Err(_) => Err(RENAME_HALF.into()),
         }
-        r
     }
 }
 
@@ -261,12 +274,12 @@ impl AcpAdmin for AcpAdminImpl {
     fn rename(&self, name: &str, new_name: &str) -> Result<Value, String> {
         let env = self.adopt.as_ref().ok_or("工作者管理還沒啟動")?;
         let mut ws = self.workers.lock().unwrap();
-        let (i, roster) = self.rename_check(&ws, name, new_name)?;
+        let (i, roster) = self.rename_check(&ws, name, new_name).inspect_err(|e| env.store.note(format!("acp: 工作者 {name} 改名為 {new_name} 擋下：{e}")))?;
         let old = ws[i].1.clone();
         let pid = old.admin_detach()?;
         if let Err(e) = self.move_files(&env.store, roster, name, new_name) {
             old.start();
-            return Err(format!("改名失敗，已恢復原名：{e}"));
+            return Err(e);
         }
         let w = (env.make)(Arc::new(old.renamed_cfg(new_name)));
         w.mark_renamed(name, old.pending_intro());
@@ -347,5 +360,41 @@ impl AcpAdmin for AcpAdminImpl {
         let _ = write_adopted(&env.file, &list);
         let _ = env.events.send(EngineEvent::RosterChanged);
         Ok(json!({ "kind": "adopt", "name": name, "already": false }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 改名還原_倒著做_改回去失敗的每一步都記一筆_不吞掉() {
+        let order = Arc::new(Mutex::new(Vec::<&str>::new()));
+        let step = |name: &'static str, res: Result<(), String>| -> Undo {
+            let o = order.clone();
+            (name, Box::new(move || {
+                o.lock().unwrap().push(name);
+                res
+            }))
+        };
+        let undo = vec![step("對話帳本", Ok(())), step("接手名冊", Err("磁碟滿了".into())), step("記下的模型", Err("檔案被鎖住".into()))];
+        let logs = Mutex::new(Vec::<String>::new());
+        assert!(!roll_back(undo, &|m| logs.lock().unwrap().push(m), "甲", "乙"), "有一步沒改回去");
+        assert_eq!(*order.lock().unwrap(), vec!["記下的模型", "接手名冊", "對話帳本"], "倒著改回去，失敗了也繼續做完");
+        let logs = logs.into_inner().unwrap();
+        assert_eq!(logs.len(), 2, "{logs:?}");
+        assert!(logs[0].contains("還原失敗") && logs[0].contains("記下的模型") && logs[0].contains("檔案被鎖住") && logs[0].contains("甲 → 乙"), "{logs:?}");
+        assert!(logs[1].contains("還原失敗") && logs[1].contains("接手名冊") && logs[1].contains("磁碟滿了"), "{logs:?}");
+        // 全部改回去：不記
+        let logs = Mutex::new(Vec::<String>::new());
+        assert!(roll_back(vec![step("對話帳本", Ok(()))], &|m| logs.lock().unwrap().push(m), "甲", "乙"));
+        assert!(logs.into_inner().unwrap().is_empty());
+    }
+
+    #[test]
+    fn 改名的說明都在_20_字內() {
+        for m in [BAD_NAME, RENAME_FAILED, RENAME_HALF] {
+            assert!(m.chars().count() <= 20, "{m}");
+        }
     }
 }

@@ -1555,7 +1555,12 @@ async fn acp_改名_設定檔裡的_沒對話的_已停止的_同名的_都擋�
     }
     let e = rename_blocking(&admin, "Gemini", "小新").await.unwrap_err();
     assert_eq!(e, "設定檔裡的名字，請改設定檔");
-    for msg in [e.as_str(), "還沒有對話，請先寄一封信給它", "已停止，請先重開", "已有同名的夥伴，換個名字"] {
+    let bad = rename_blocking(&admin, &old, "-壞").await.unwrap_err();
+    assert_eq!(bad, engines::acp_admin::BAD_NAME);
+    assert!(h.log_text().contains("擋下：設定檔裡的名字"), "擋下的原因也記 log");
+    // 改名的每一句說明（含失敗、處理中）都在 20 字內（小良哥 #1227），細節記 log
+    let all = [e.as_str(), bad.as_str(), "還沒有對話，請先寄一封信給它", "已停止，請先重開", "已有同名的夥伴，換個名字", "新名字和現在的一樣", "找不到這個工作者", "工作者正在處理信件，等它做完再試", "工作者正在啟動，稍後再試", "這個工作者正在關閉", "工作者管理還沒啟動", engines::acp_admin::RENAME_FAILED, engines::acp_admin::RENAME_HALF];
+    for msg in all {
         assert!(msg.chars().count() <= 20, "給人看的說明 20 字內：{msg}");
     }
     // 已停止：先重開
@@ -1586,8 +1591,7 @@ async fn acp_改名_寫檔失敗就把改過的都改回去_用原名重開() {
     let blocker = h.work.path().join("acp-renames.json");
     std::fs::create_dir_all(blocker.join("擋住")).unwrap();
     let e = rename_blocking(&admin, &old, "小葛").await.unwrap_err();
-    assert!(e.starts_with("改名失敗，已恢復原名："), "{e}");
-    assert!(e.contains("舊名對照寫不進去"), "{e}");
+    assert_eq!(e, engines::acp_admin::RENAME_FAILED, "說明簡短，原因不放進說明");
     assert!(admin.has_worker(&old) && !admin.has_worker("小葛"), "工作者清單還是原名");
     let workers = read_json(&h, "acp-workers.json");
     assert_eq!(workers["workers"][&old]["session_id"], json!("sess-grok1"), "帳本改回原名：{workers}");
@@ -1596,6 +1600,7 @@ async fn acp_改名_寫檔失敗就把改過的都改回去_用原名重開() {
     let models = recorded_models(&h);
     assert_eq!((models["models"][&old].clone(), models["models"].get("小葛").is_none()), (json!("grok-4.6"), true), "{models}");
     assert!(h.log_text().contains("舊名對照寫不進去"), "細節記在 log");
+    assert!(!h.log_text().contains("還原失敗"), "全部改回去了，不記還原失敗");
     // 用原名重開，接著原本的對話，不重送說明
     wait_pid(&admin, &old, |_| true).await;
     h.put_pull(to_agent(2, &old, "二")).await;
