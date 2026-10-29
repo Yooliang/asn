@@ -95,3 +95,43 @@ export const CLAUDE_MODELS = [
   { id: 'sonnet', family: 'sonnet', label: 'Sonnet' },
   { id: 'haiku', family: 'haiku', label: 'Haiku' },
 ]
+
+/**
+ * Gemini（agy 內建通道）可選的型號（#539 之四）：取自 `agy models` 的輸出（2026-10-30，只取 gemini 開頭的代號與顯示名）。
+ * 真正能不能用以那台 agy 為準：切換時後端會再跑一次 `agy models` 比對，清單外的會被拒絕並列出可選的。
+ */
+export const GEMINI_MODELS = [
+  { id: 'gemini-4-argon-high', label: 'Gemini 4 Argon (High)' },
+  { id: 'gemini-4-argon-medium', label: 'Gemini 4 Argon (Medium)' },
+  { id: 'gemini-4-argon-low', label: 'Gemini 4 Argon (Low)' },
+  { id: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)' },
+  { id: 'gemini-3.8-flash-medium', label: 'Gemini 3.8 Flash (Medium)' },
+  { id: 'gemini-3.8-flash-low', label: 'Gemini 3.8 Flash (Low)' },
+]
+
+/**
+ * 「切換模型」與「開新夥伴選型號」共用的型號清單（#539 之四，asn真 #1556 第 4 點：兩邊是同一份）。
+ * engine：claude／pi／gemini／grok／codex…（ACP 工作者用名單上的 engine，例如 gemini）。
+ * pi 沒有固定清單：傳入向 pi 查到的清單（pi-models.mjs 的 cleanPiModels 結果），原樣回傳。
+ * 回 [{ id, label }]；回空陣列＝這家沒有清單，畫面退回手動輸入代號（grok、codex 目前如此）。
+ */
+export function switchModelsFor(engine, { piModels = null } = {}) {
+  switch (String(engine ?? '').toLowerCase()) {
+    case 'claude': return CLAUDE_MODELS
+    case 'gemini': return GEMINI_MODELS
+    case 'pi': return Array.isArray(piModels) ? piModels : []
+    default: return []
+  }
+}
+
+/**
+ * 開新夥伴第 2 頁「型號」（#539 之四）：選完廠牌與運行後，這家有清單才出現（預設＝不指定，照原本的開法）。
+ * 只有開在這台電腦才能選（遠端開帶型號要改後台開窗表，還沒做）；Claude 只在開成視窗時帶 --model，Gemini 只在內建通道時記下型號。
+ * 回 { show, models }。
+ */
+export const LAUNCH_MODEL_RUN = { claude: 'term', gemini: 'acp' }
+export function launchModelChoices(vendorId, run, { local = false } = {}) {
+  const models = switchModelsFor(vendorId)
+  const ok = local && models.length > 0 && LAUNCH_MODEL_RUN[vendorId] === run
+  return { show: ok, models: ok ? models : [] }
+}

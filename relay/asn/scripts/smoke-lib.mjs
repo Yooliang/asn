@@ -159,6 +159,53 @@ export const barProbeSource = ({ bar, badge, taskItems, header }) => `(async () 
   return { ok: false, why };
 })()`
 
+// 手機對話頁大按鈕列（#539 之四）：412 寬一列 6 顆只放圖示，跟電腦版同一套反灰；手機沒有的反灰並有原因；「⋯」不再列前台／後台與切換模型
+// 手機自己是節點 P；夥伴開在另一台電腦 Q（手機只能遠端管理）
+export const MBAR_ME = { lastChat: 'Q/demo', navTab: 'chats' }
+export const MBAR_MEMBERS = {
+  claude: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }],
+  acp: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', engine: 'gemini', cwd_label: 'demo' }] }],
+}
+export const MBAR_PROBES = {
+  claude: { mbar: [['call', true], ['window', true], ['model', false], ['subs', true], ['tasks', true], ['manage', false]] },
+  acp: { mbar: [['call', true], ['window', true], ['model', false], ['subs', true], ['tasks', true], ['manage', false]] },
+}
+export const mbarProbeSource = ({ mbar }) => `(async () => {
+  const want = ${JSON.stringify(mbar)};
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let why = '';
+  for (let i = 0; i < 60; i++) {
+    const rows = [...document.querySelectorAll('.m-abar-row')].filter(b => b.offsetParent !== null);
+    const btns = rows.length === 1 ? [...rows[0].querySelectorAll('.m-abtn')] : [];
+    const got = btns.map(b => [b.dataset.slot || '', b.getAttribute('aria-disabled') === 'true']);
+    why = rows.length !== 1 ? '看得到的大按鈕列有 ' + rows.length + ' 條' : JSON.stringify(got) === JSON.stringify(want) ? '' : '按鈕不符：' + JSON.stringify(got);
+    if (!why) {
+      const r = rows[0].getBoundingClientRect();
+      if (r.right > innerWidth + 1 || btns.some(b => b.getBoundingClientRect().top !== btns[0].getBoundingClientRect().top)) return { ok: false, why: '412 寬放不成一列' };
+      if (btns.some(b => b.hasAttribute('disabled'))) return { ok: false, why: '反灰不能用 disabled' };
+      if (btns.some(b => !b.getAttribute('aria-label'))) return { ok: false, why: '按鈕沒有名稱（aria-label）' };
+      const bad = btns.find(b => b.getAttribute('aria-disabled') === 'true' && !/：/.test(b.title));
+      if (bad) return { ok: false, why: bad.dataset.slot + ' 反灰卻沒有原因' };
+      if (btns.some(b => b.querySelector('.ab-name, .m-abtn-name'))) return { ok: false, why: '手機一列只顯示圖示' };
+      // 點反灰的只顯示原因
+      btns.find(b => b.dataset.slot === 'subs').click(); await sleep(150);
+      const tip = document.querySelector('.m-abar-tip')?.textContent.trim() ?? '';
+      if (!/子代理：/.test(tip)) return { ok: false, why: '點反灰的子代理沒顯示原因：' + tip };
+      // 「⋯」選單：不再有前台／後台與切換模型
+      const dots = document.querySelector('.m-chathead .m-icon-btn[aria-label="更多操作"]');
+      if (!dots) return { ok: false, why: '找不到「⋯」' };
+      dots.click(); await sleep(300);
+      const items = [...document.querySelectorAll('.m-ops-panel .m-ops-item .m-opt-t')].map(e => e.textContent.trim());
+      if (!items.length) return { ok: false, why: '「⋯」選單是空的' };
+      const moved = items.filter(t => /切換模型|前台|背景／前台/.test(t));
+      if (moved.length) return { ok: false, why: '「⋯」還有：' + moved.join('、') };
+      return { ok: true, why: '' };
+    }
+    await sleep(100);
+  }
+  return { ok: false, why };
+})()`
+
 // 群組分頁（#539 之二）：按鈕列有「群組」，選單是四項；「管理」不再有這四項（沒有管理也可以）
 export const GROUP_ITEMS = ['邀請別人加入', '輸入邀請碼加入', '加我的另一個 AI', '成員與設定']
 export const GROUP_ROOM = { id: 'g1', name: '測試群', members: [{ member: 'P~測試機', name: '測試機' }], mine: [{ member: 'P~測試機', unread: 0 }], last_seq: 0, created_at: '2026-10-29T00:00:00Z' }
@@ -186,8 +233,8 @@ export const groupProbeSource = ({ group }) => `(async () => {
   }
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.mbar ? '手機大按鈕檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.mbar ? mbarProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // ---- 入口頁清單：每個情境載一頁，指定假狀態、等待的畫面特徵 ----
 // ready：頁面掛上後必須存在的選擇器；頁面不能被導走（導走＝流程錯）
@@ -213,6 +260,9 @@ export const SCENARIOS = [
   // 工作項目（#539 之三）：本機 Claude 有 3 件背景工作，按鈕可按、數字顯示、列表打得開；上面三個情境是 0 件反灰、沒有徽章
   { name: 'list-bar-tasks', page: 'list.html', state: { signedIn: true, bar: 'tasks' }, ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: BAR_PROBES.tasks },
   // 群組按鈕（#539 之二）：整合模式開著群組分頁，按鈕列有「群組」（四項），「管理」不再放這些
+  // 手機大按鈕列（#539 之四）：412 寬，Claude 視窗與 ACP 工作者各驗 6 顆、反灰與原因、⋯ 選單內容
+  { name: 'm-bar-claude', page: 'm.html', state: { signedIn: true, mbar: 'claude' }, ready: '#app.m .m-abar-row', probe: MBAR_PROBES.claude },
+  { name: 'm-bar-acp', page: 'm.html', state: { signedIn: true, mbar: 'acp' }, ready: '#app.m .m-abar-row', probe: MBAR_PROBES.acp },
   { name: 'list-group-tab', page: 'list.html', state: { signedIn: true, groupTab: true }, ready: '#app.win .actionbar', probe: { group: GROUP_ITEMS } },
 ]
 // 刻意不測的 ui/*.html（要寫理由）；其餘 html 都必須有情境（見單元測試）
@@ -241,6 +291,11 @@ export const tableFor = scenario => {
     t.relay_launchers = { machines: [{ node: 'P', online: true, launcher: { profiles: [] } }] }   // 這台開放遠端管理：ACP 的切換模型可按
     t.partner_console_query = { can_toggle: true, visible: true }
     if (scenario.state.bar === 'tasks') t.tasks_query = TASKS_SAMPLE
+  }
+  if (scenario.state.mbar) {
+    t.relay_list = { members: MBAR_MEMBERS[scenario.state.mbar] }
+    t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MBAR_ME) } }
+    t.android_launchers = { machines: [{ node: 'Q', online: true, launcher: { profiles: [] } }] }   // 那台開放遠端管理：切換模型、管理可按
   }
   if (scenario.state.groupTab) {
     t.relay_rooms = { rooms: [GROUP_ROOM] }

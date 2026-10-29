@@ -98,7 +98,9 @@ export const BAR_KEYS = ['call', 'window', 'model', 'subs', 'tasks', 'manage']
 export const WINDOW_LABEL = { hide: '後台隱藏', show: '前台顯示', idle: '前台／後台', acp: 'ACP 模式' }
 // 工作項目反灰的原因：沒有背景工作、在別台電腦（件數照樣顯示，列表只有本機讀得到）
 export const TASKS_WHY = { none: '目前沒有背景工作', remote: '只有本機看得到列表', noApi: '這個畫面不能查看' }
-const BAR_LABEL = { call: '通話', window: WINDOW_LABEL.idle, model: '切換模型', subs: '子代理', tasks: '工作項目', manage: '管理' }
+// 手機沒有的功能（#539 之四）：反灰並寫原因
+export const PHONE_WHY = { window: '手機不能切換前台／後台', subs: '手機看不到子代理', tasks: '手機看不到工作列表' }
+export const BAR_LABEL = { call: '通話', window: WINDOW_LABEL.idle, model: '切換模型', subs: '子代理', tasks: '工作項目', manage: '管理' }
 const OFFLINE_WHY = '夥伴離線，要先喚醒'
 const slot = (key, label, why) => ({ key, label, ok: !why, reason: why ? briefWhy(why) : '' })
 
@@ -110,6 +112,7 @@ function consoleStateWhy(c = {}) {
 }
 function windowSlot(f, engine, ctx) {
   if (engine === 'acp') return { key: 'window', label: WINDOW_LABEL.acp, ok: false, reason: '內建通道執行，沒有視窗' }
+  if (ctx.phone) return slot('window', WINDOW_LABEL.idle, PHONE_WHY.window)
   const c = ctx.console ?? {}
   const why = consoleBlock(f, ctx.selfNode) || (f.status === 'offline' ? OFFLINE_WHY : '') || (ctx.api ? '' : '這個畫面不能切換視窗') || consoleStateWhy(c)
   const label = why ? WINDOW_LABEL.idle : c.visible ? WINDOW_LABEL.hide : WINDOW_LABEL.show
@@ -122,35 +125,39 @@ function modelQueryWhy(q) {
   if (q.state === 'none') return q.reason || '找不到這個視窗'
   return Array.isArray(q.items) && q.items.length ? '' : '查不到可切換的模型'
 }
-// 切換模型：ACP 工作者、pi 視窗走夥伴管理（和右鍵同一套 menuItems：ACP 手動輸入代號、pi 向 pi 查清單）；其他走 Claude 視窗的切換
+// 夥伴管理（menuItems）那一項「切換模型」的原因：ACP、pi，以及手機（手機一律走遠端 partner_op）
+function modelOpWhy(f, ctx) {
+  const it = menuItems(f, ctx.ops ?? {}).find(i => i.key === 'model')
+  return it ? it.reason : '這位夥伴不能切換模型'
+}
+// 切換模型：ACP 工作者、pi 視窗走夥伴管理（和右鍵同一套 menuItems：清單讀 switchModelsFor，沒有清單才手動輸入）；其他走 Claude 視窗的切換
 function modelSlot(f, engine, ctx) {
   if (f.pending) return slot('model', BAR_LABEL.model, '視窗還在開啟中')
+  if (ctx.phone) return slot('model', BAR_LABEL.model, (isDisplayOnly(f) ? '只能顯示，不能切換' : '') || modelOpWhy(f, ctx))
   if (!ctx.api) return slot('model', BAR_LABEL.model, '這個畫面不能切換模型')
-  if (engine === 'acp' || engine === 'pi') {
-    const it = menuItems(f, ctx.ops ?? {}).find(i => i.key === 'model')
-    return slot('model', BAR_LABEL.model, it ? it.reason : '這位夥伴不能切換模型')
-  }
+  if (engine === 'acp' || engine === 'pi') return slot('model', BAR_LABEL.model, modelOpWhy(f, ctx))
   const why = (isDisplayOnly(f) ? '只能顯示，不能切換' : '') || modelSwitchBlock(f, { selfNode: ctx.selfNode, engine: friendEngine(f) })
     || (f.status === 'offline' ? OFFLINE_WHY : '') || modelQueryWhy(ctx.modelQuery)
   return slot('model', BAR_LABEL.model, why)
 }
 function subsSlot(f, engine, ctx) {
   const why = (f.pending ? '視窗還在開啟中' : '') || (isDisplayOnly(f) ? '只能顯示，不能查看' : '') || (engine !== 'claude' ? '只有 Claude 有子代理' : '')
-    || (f.node !== ctx.selfNode ? '視窗在另一台電腦上' : '') || (f.status === 'offline' ? OFFLINE_WHY : '') || (ctx.subagents ? '' : '這個畫面不能查看')
+    || (ctx.phone ? PHONE_WHY.subs : '') || (f.node !== ctx.selfNode ? '視窗在另一台電腦上' : '') || (f.status === 'offline' ? OFFLINE_WHY : '') || (ctx.subagents ? '' : '這個畫面不能查看')
   return slot('subs', ctx.subLabel || BAR_LABEL.subs, why)
 }
-// 工作項目：件數從個人訊息讀（slot 多帶 count）；0 件、離線、開啟中反灰；別台電腦的有件數也反灰（列表只有本機讀得到）
+// 工作項目：件數從個人訊息讀（slot 多帶 count）；0 件、離線、開啟中反灰；別台電腦的有件數也反灰（列表只有本機讀得到）；手機一律只看件數
 function tasksSlot(f, ctx) {
   const count = f.status === 'offline' || f.pending ? 0 : taskCountOf(f.psm)
   const why = (f.pending ? '視窗還在開啟中' : '') || (f.status === 'offline' ? OFFLINE_WHY : '') || (count > 0 ? '' : TASKS_WHY.none)
-    || (f.node !== ctx.selfNode ? TASKS_WHY.remote : '') || (ctx.tasks ? '' : TASKS_WHY.noApi)
+    || (ctx.phone ? PHONE_WHY.tasks : '') || (f.node !== ctx.selfNode ? TASKS_WHY.remote : '') || (ctx.tasks ? '' : TASKS_WHY.noApi)
   return { ...slot('tasks', BAR_LABEL.tasks, why), count }
 }
 
 /**
  * 一對一對話上方的固定 6 格（#539）：回 [{ key, label, ok, reason }]，順序固定為 BAR_KEYS；不能用的 ok:false，reason 20 字內。
  * ctx：{ selfNode, api（有沒有 transport）, callable（有沒有語音）, console（{ state, visible, reason }：查主控台的結果）,
- *        subagents（能不能查子代理）, tasks（能不能查背景工作列表）, subLabel, ops（夥伴管理要用的設定：loadOpsContext）, modelQuery（選填：切換模型的查詢結果）, manageCount（管理選單有幾項） }
+ *        subagents（能不能查子代理）, tasks（能不能查背景工作列表）, subLabel, ops（夥伴管理要用的設定：loadOpsContext）, modelQuery（選填：切換模型的查詢結果）, manageCount（管理選單有幾項）,
+ *        phone（手機：視窗在別台電腦上，前台／後台、子代理、工作項目列表都反灰並寫原因；切換模型走遠端夥伴管理） }
  * 第 2 格依夥伴類型：ACP 工作者固定「ACP 模式」反灰；其他是前台顯示／後台隱藏。「工作項目」多帶 count（背景工作件數，沒有＝0）。
  */
 export function barSlots(friend, ctx = {}) {

@@ -98,7 +98,7 @@ test('頁面腳本語法正確（list.js、m.js、chat.js 與群組模組）：�
 test('加我的另一個 AI 入口＋群組附件放行：選單項目、聚焦區塊、旗標不再整個群組禁用', () => {
   assert.match(read('ui', 'lib', 'actionbar.mjs'), /key: 'addai', label: '加我的另一個 AI'/)
   assert.match(read('ui', 'list.js'), /what === 'addai'\) groupFlow\.openManage\(rid, \{ focusAdd: true \}\)/)
-  assert.match(read('ui', 'm.js'), /key: 'addai', label: '加我的另一個 AI'/); assert.match(read('ui', 'm.js'), /key === 'addai' && f\.room\) groupFlow\.openManage/)
+  assert.match(read('ui', 'm.js'), /if \(f\.room\) return groupMenuItems\(f\)/, '手機群組選單跟電腦版同一份（含加我的另一個 AI）'); assert.match(read('ui', 'm.js'), /key === 'addai' && f\.room\) groupFlow\.openManage/)
   assert.match(read('ui', 'lib', 'group-sheet.mjs'), /<h3 class="gs-h"[^>]*>加我的另一個 AI<\/h3>/)
   assert.doesNotMatch(read('ui', 'lib', 'mobile-rooms.mjs'), /attachments: false/, '假夥伴不再寫死 attachments:false（只有 external 才隱藏附件鈕）')
   assert.match(read('ui', 'list.js'), /hub\.postAttachment\(roomIdOf\(id\), item, caption\)/); assert.match(read('ui', 'm.js'), /hub\.postAttachment\(roomIdOf\(id\), item, caption\)/)
