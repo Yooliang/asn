@@ -42,7 +42,9 @@ export function cleanEmail(v: unknown): string | null {
   return e.length >= 3 && e.length <= 120 && EMAIL_RE.test(e) ? e : null;
 }
 
-export type ReportedAccount = { vendor: "claude" | "codex" | "grok"; email: string; plan: string; current: boolean; five_hour_pct?: number; weekly_pct?: number; reset_at?: string; at?: string };
+// 額度窗（#374 帳號列表）：name＝five_hour／weekly／w<分鐘數>；left_pct＝剩餘 0～100 整數；resets_at＝重置時間（可空）；read_at＝那台電腦讀到的時間
+export type QuotaWindow = { name: string; left_pct: number; resets_at: string | null; read_at: string };
+export type ReportedAccount = { vendor: "claude" | "codex" | "grok"; email: string; plan: string; current: boolean; five_hour_pct?: number; weekly_pct?: number; reset_at?: string; at?: string; windows?: QuotaWindow[] };
 
 // 剩餘額度（#228，全部選填）：five_hour_pct／weekly_pct 是 0～100 的剩餘百分比，reset_at 是重置時間，at 是那台電腦記下數字的時間。
 // 只收 Claude。不合格的欄位單獨丟掉（不退回整份，免得額度壞掉拖累帳號清單）；沒有合格的百分比或沒有合格的 at 就整組不收。
@@ -62,7 +64,37 @@ export function parseQuota(a: Json): Pick<ReportedAccount, "five_hour_pct" | "we
   const reset = isoOrNull(a.reset_at, null);
   return { ...(five != null ? { five_hour_pct: five } : {}), ...(week != null ? { weekly_pct: week } : {}), ...(reset != null ? { reset_at: reset } : {}), at };
 }
-// 回報的清單：每筆只留 vendor／email／plan／current；任何一筆不合格整份退回（回 null）
+// 新版的額度窗（#374）：只收 claude、codex（grok 一律不收）。壞掉的單窗丟掉，不退回整份；同名只留第一個；最多 4 個。
+// 規則跟資料庫的 asn_relay_acct_windows_clean 相同（那邊會再檢查一次，並把 Codex 的 w300／w10080 轉成 five_hour／weekly）。
+export const MAX_WINDOWS = 4;
+const WINDOW_NAME_RE = /^(five_hour|weekly|w[0-9]{1,6})$/;
+// 重置時間的合理範圍（#524 審查）：「現在 −1 天」到「現在 +8 天」，超出就丟那一窗（不然一個 2099 年的值會把那一窗永遠鎖住）
+export const RESET_PAST_MS = 24 * 60 * 60 * 1000;
+export const RESET_FUTURE_MS = 8 * 24 * 60 * 60 * 1000;
+export function resetInRange(iso: string, now = Date.now()): boolean {
+  const t = Date.parse(iso);
+  return t >= now - RESET_PAST_MS && t <= now + RESET_FUTURE_MS;
+}
+export function parseWindows(v: unknown, now = Date.now()): QuotaWindow[] {
+  if (!Array.isArray(v)) return [];
+  const out: QuotaWindow[] = [];
+  for (const w of v.slice(0, 16)) {
+    if (out.length >= MAX_WINDOWS) break;
+    if (!w || typeof w !== "object" || typeof w.name !== "string" || !WINDOW_NAME_RE.test(w.name)) continue;
+    const left = pctOrNull(w.left_pct);
+    const read = isoOrNull(w.read_at, FUTURE_SLACK_MS);
+    if (left == null || read == null) continue;
+    let reset: string | null = null;
+    if (w.resets_at != null) {
+      reset = isoOrNull(w.resets_at, null);
+      if (reset == null || !resetInRange(reset, now)) continue;
+    }
+    if (out.some((o) => o.name === w.name)) continue;
+    out.push({ name: w.name, left_pct: left, resets_at: reset, read_at: read });
+  }
+  return out;
+}
+// 回報的清單：每筆只留 vendor／email／plan／current（claude 另可帶額度四欄；claude、codex 另可帶 windows）；任何一筆不合格整份退回（回 null）
 export function parseReport(b: Json): ReportedAccount[] | null {
   if (!b || typeof b !== "object" || !Array.isArray(b.accounts) || b.accounts.length > MAX_ACCOUNTS) return null;
   const out: ReportedAccount[] = [];
@@ -76,7 +108,10 @@ export function parseReport(b: Json): ReportedAccount[] | null {
       plan = a.plan.trim();
     }
     if (a.current != null && typeof a.current !== "boolean") return null;
-    out.push({ vendor: a.vendor, email, plan, current: a.current === true, ...(a.vendor === "claude" ? parseQuota(a) : {}) });
+    // 清完一窗都不剩就不帶 windows，讓資料庫退回舊四欄（#524 審查）
+    const cleaned = a.vendor !== "grok" && Array.isArray(a.windows) ? parseWindows(a.windows) : [];
+    const windows = cleaned.length ? { windows: cleaned } : {};
+    out.push({ vendor: a.vendor, email, plan, current: a.current === true, ...(a.vendor === "claude" ? parseQuota(a) : {}), ...windows });
   }
   return out;
 }
@@ -102,9 +137,31 @@ async function call(deps: AcctDeps, fn: string, args: Record<string, unknown>): 
 }
 const isReply = (x: { data: Json } | Reply): x is Reply => "status" in x;
 
+// 帳號列表（#374）：舊回報寫完後再寫一份到 relay.asn_user_accounts。失敗只記 log（不含 email），不影響 acct_report 的回覆。
+async function rosterReport(deps: AcctDeps, node: string, accounts: ReportedAccount[]): Promise<void> {
+  try {
+    const { data, error } = await deps.rpc("asn_relay_acct_roster_report", { p_node: node, p_accounts: accounts });
+    if (error) {
+      console.warn("asn_relay_acct_roster_report failed", node, error);
+      return;
+    }
+    if (data && typeof data === "object" && typeof data.error === "string") {
+      if (data.error !== "not_claimed") console.warn("asn_relay_acct_roster_report", node, data.error);
+      return;
+    }
+    const skipped: Json[] = Array.isArray(data?.skipped) ? data.skipped : [];
+    if (skipped.length) {
+      console.info("asn_relay_acct_roster_report skipped", node, skipped.map((x) => `${x?.vendor}/${x?.window}:${x?.reason}`).join(","));
+    }
+  } catch (e) {
+    console.warn("asn_relay_acct_roster_report threw", node, e instanceof Error ? e.message : String(e));
+  }
+}
+
 // 節點金鑰的動作（relay 函式）：
 //   acct_report／acct_switch_pending／acct_switch_result：ASN 回報自己的清單、取走自己的待辦、回報結果（只動得到金鑰所屬的節點）
 //   acct_list／acct_switch／acct_switch_status：擁有者節點（SQL 判斷 role = 'owner'）看別台清單、送指令、查結果
+//   acct_roster：本人的帳號列表（#374），一定要本人簽章，只回自己的；沒簽章不呼叫資料庫
 // signedUser：本人簽章驗過的使用者 id（只有 acct_list／acct_switch 會收；手機節點是 member，靠簽章證明「這個節點與租戶都是這個人的」才准）。
 // 沒簽章就不帶 p_signed_user，行為與以前完全相同（只有 role = owner 的節點准）。
 export async function handleAcctAction(deps: AcctDeps, me: { id: string }, action: string, params: Json, signedUser: string | null = null): Promise<Reply> {
@@ -112,8 +169,18 @@ export async function handleAcctAction(deps: AcctDeps, me: { id: string }, actio
   if (action === "acct_report") {
     const accounts = parseReport(params);
     if (!accounts) return fail("bad_request");
-    const r = await call(deps, "asn_relay_acct_report", { p_node: me.id, p_accounts: accounts });
-    return isReply(r) ? r : { status: 200, body: { ok: true, count: r.data?.count ?? accounts.length } };
+    // 舊的 asn_relay_acct_report 照舊（不帶 windows，交給它的內容跟以前一模一樣）
+    const legacy = accounts.map(({ windows: _w, ...rest }) => rest);
+    const r = await call(deps, "asn_relay_acct_report", { p_node: me.id, p_accounts: legacy });
+    if (isReply(r)) return r;
+    await rosterReport(deps, me.id, accounts);
+    return { status: 200, body: { ok: true, count: r.data?.count ?? accounts.length } };
+  }
+  if (action === "acct_roster") {
+    // 帳號列表只給本人：沒簽章直接 forbidden，不呼叫資料庫
+    if (!signedUser) return fail("forbidden");
+    const r = await call(deps, "asn_relay_acct_roster", { p_actor: me.id, p_signed_user: signedUser });
+    return isReply(r) ? r : { status: 200, body: r.data };
   }
   if (action === "acct_list") {
     if (typeof params?.node !== "string" || !NODE_ID_RE.test(params.node)) return fail("bad_request");
@@ -149,4 +216,4 @@ export async function handleAcctAction(deps: AcctDeps, me: { id: string }, actio
   }
   return { status: 404, body: { error: "not_found" } };
 }
-export const ACCT_ACTIONS = new Set(["acct_report", "acct_list", "acct_switch", "acct_switch_pending", "acct_switch_result", "acct_switch_status"]);
+export const ACCT_ACTIONS = new Set(["acct_report", "acct_list", "acct_switch", "acct_switch_pending", "acct_switch_result", "acct_switch_status", "acct_roster"]);

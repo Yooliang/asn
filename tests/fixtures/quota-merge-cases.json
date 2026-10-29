@@ -1,0 +1,522 @@
+{
+  "doc": [
+    "額度窗合併的共用測試案例（#374／#1342／#1372）：後台 SQL（tests/acct_roster_sql.test.mjs）與電腦端 Rust（include_str!）讀同一份，規則不會分成兩套。",
+    "每個案例＝一個額度窗「現記的 old」遇到「新來的 new」，在時間 now 判斷收不收。",
+    "欄位：id 案例編號；note 說明；vendor 廠牌（claude／codex）；window 窗名（five_hour＝5 小時、weekly＝每週）；now 判斷當下（UTC，ISO 8601）；",
+    "old 現記的這一窗（null＝還沒記過）；new 新來的這一窗；left_pct 剩餘百分比（0～100 整數）；resets_at 重置時間（UTC，null＝沒有）；",
+    "accept true＝收下、false＝不收；reason 不收的原因代碼（收下時為 null），代碼意義見 reasons。",
+    "規則（依序）：新的重置時間不在「now −1 天」到「now +8 天」之間＝不收（reset_out_of_range）；old 的重置時間晚於「now +8 天」＝當成 old 沒有重置時間；",
+    "沒有 old 或任一邊沒有重置時間＝收；now 晚於 old 重置時間超過 7 天＝收；新舊重置時間相差 10 分鐘內＝同一期，剩餘只能下降；",
+    "新的較早＝不收；新的較晚但 old 還沒過＝不收；Claude 的每週窗另要新舊差接近 7 天倍數（誤差 10 分鐘）；Codex 每週窗與所有 5 小時窗不看倍數。",
+    "old 的重置時間早於「now −1 天」不另外處理（正常過期的期，交給「超過 7 天＝收」）。範圍兩端都含（剛好 −1 天、剛好 +8 天＝在範圍內）。",
+    "台灣時間對照：2026-11-01T16:00:00Z＝11/2 00:00（gmail）、2026-11-04T09:00:00Z＝11/4 17:00（yooliang）。"
+  ],
+  "constants": {
+    "same_period_ms": 600000,
+    "week_ms": 604800000,
+    "expired_after_ms": 604800000,
+    "reset_past_ms": 86400000,
+    "reset_future_ms": 691200000
+  },
+  "reasons": {
+    "same_period_rise": "同一期剩餘回升",
+    "earlier": "重置時間比現記的早",
+    "later_not_expired": "現記的還沒過，卻來了更晚的",
+    "not_week_multiple": "新舊重置時間差不是 7 天倍數",
+    "reset_out_of_range": "重置時間不在現在前 1 天到後 8 天之間"
+  },
+  "cases": [
+    {
+      "id": "c01",
+      "note": "每週：gmail 這期（11/2 00:00）還沒過，卻來了 yooliang 的 11/4 17:00＝別的帳號",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "new": {
+        "left_pct": 90,
+        "resets_at": "2026-11-04T09:00:00Z"
+      },
+      "accept": false,
+      "reason": "later_not_expired"
+    },
+    {
+      "id": "c02",
+      "note": "每週：11/2 已過，來 11/4 17:00，差 2 天 17 小時不是 7 天倍數＝別的帳號",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-02T16:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "new": {
+        "left_pct": 90,
+        "resets_at": "2026-11-04T09:00:00Z"
+      },
+      "accept": false,
+      "reason": "not_week_multiple"
+    },
+    {
+      "id": "c03",
+      "note": "每週：11/2 已過，來 11/9 00:00（剛好 7 天）＝新的一期",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-02T16:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "new": {
+        "left_pct": 100,
+        "resets_at": "2026-11-08T16:00:00Z"
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "c04",
+      "note": "每週：來 11/9 00:05（差 7 天又 5 分鐘，在誤差內）",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-02T16:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "new": {
+        "left_pct": 100,
+        "resets_at": "2026-11-08T16:05:00Z"
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "c05",
+      "note": "每週：來 11/9 00:11（差 7 天又 11 分鐘，超過誤差）",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-02T16:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "new": {
+        "left_pct": 100,
+        "resets_at": "2026-11-08T16:11:00Z"
+      },
+      "accept": false,
+      "reason": "not_week_multiple"
+    },
+    {
+      "id": "c06",
+      "note": "同一期剩餘回升＝舊視窗的數字",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "new": {
+        "left_pct": 50,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "accept": false,
+      "reason": "same_period_rise"
+    },
+    {
+      "id": "c07",
+      "note": "同一期剩餘下降＝收",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "new": {
+        "left_pct": 30,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "c08",
+      "note": "重置時間差 5 分鐘仍算同一期，下降＝收",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "new": {
+        "left_pct": 35,
+        "resets_at": "2026-11-01T16:05:00Z"
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "c09",
+      "note": "重置時間差 9 分鐘仍算同一期，回升＝不收",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "new": {
+        "left_pct": 45,
+        "resets_at": "2026-11-01T16:09:00Z"
+      },
+      "accept": false,
+      "reason": "same_period_rise"
+    },
+    {
+      "id": "c10",
+      "note": "重置時間比記著的早（12 小時前）＝舊視窗的數字",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "new": {
+        "left_pct": 95,
+        "resets_at": "2026-10-31T16:00:00Z"
+      },
+      "accept": false,
+      "reason": "earlier"
+    },
+    {
+      "id": "c11",
+      "note": "5 小時：記著的已過，來更晚的，不看 7 天倍數",
+      "vendor": "claude",
+      "window": "five_hour",
+      "now": "2026-11-01T17:00:00Z",
+      "old": {
+        "left_pct": 20,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "new": {
+        "left_pct": 100,
+        "resets_at": "2026-11-01T21:17:00Z"
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "c12",
+      "note": "5 小時：記著的還沒過，卻來了更晚的＝不收",
+      "vendor": "claude",
+      "window": "five_hour",
+      "now": "2026-11-01T15:00:00Z",
+      "old": {
+        "left_pct": 20,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "new": {
+        "left_pct": 100,
+        "resets_at": "2026-11-01T21:17:00Z"
+      },
+      "accept": false,
+      "reason": "later_not_expired"
+    },
+    {
+      "id": "c13",
+      "note": "Codex 每週：不檢查 7 天倍數",
+      "vendor": "codex",
+      "window": "weekly",
+      "now": "2026-11-02T16:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "new": {
+        "left_pct": 90,
+        "resets_at": "2026-11-04T09:00:00Z"
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "c14",
+      "note": "記著的沒有重置時間＝照收",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": null
+      },
+      "new": {
+        "left_pct": 90,
+        "resets_at": "2026-11-04T09:00:00Z"
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "c15",
+      "note": "新來的沒有重置時間＝照收",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "new": {
+        "left_pct": 90,
+        "resets_at": null
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "c16",
+      "note": "還沒記過這一窗＝照收",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": null,
+      "new": {
+        "left_pct": 90,
+        "resets_at": "2026-11-04T09:00:00Z"
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "c17",
+      "note": "記著的已過超過 7 天（現在 11/9 01:00）＝照收，不看倍數",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-08T17:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "new": {
+        "left_pct": 100,
+        "resets_at": "2026-11-11T21:00:00Z"
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "c18",
+      "note": "剛好過了 7 天（不算超過）＝照一般規則判斷",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-08T16:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "new": {
+        "left_pct": 100,
+        "resets_at": "2026-11-11T21:00:00Z"
+      },
+      "accept": false,
+      "reason": "not_week_multiple"
+    },
+    {
+      "id": "c19",
+      "note": "每週：差 14 天也算 7 天倍數（現在 11/8 08:00，新的重置時間在 8 天內）",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-08T00:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "new": {
+        "left_pct": 100,
+        "resets_at": "2026-11-15T16:00:00Z"
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "c20",
+      "note": "Codex 5 小時：比記著的早一樣不收",
+      "vendor": "codex",
+      "window": "five_hour",
+      "now": "2026-11-01T04:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "new": {
+        "left_pct": 90,
+        "resets_at": "2026-11-01T10:00:00Z"
+      },
+      "accept": false,
+      "reason": "earlier"
+    },
+    {
+      "id": "c21",
+      "note": "還沒記過，送 2099 年的重置時間＝不收（不會存進來）",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": null,
+      "new": {
+        "left_pct": 90,
+        "resets_at": "2099-01-01T00:00:00Z"
+      },
+      "accept": false,
+      "reason": "reset_out_of_range"
+    },
+    {
+      "id": "c22",
+      "note": "記著正常的，送 2099 年的重置時間＝不收",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "new": {
+        "left_pct": 90,
+        "resets_at": "2099-01-01T00:00:00Z"
+      },
+      "accept": false,
+      "reason": "reset_out_of_range"
+    },
+    {
+      "id": "c23",
+      "note": "已存 2099 年的重置時間，送正常的＝收（被鎖住的自己解開）",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2099-01-01T00:00:00Z"
+      },
+      "new": {
+        "left_pct": 90,
+        "resets_at": "2026-11-04T09:00:00Z"
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "c24",
+      "note": "邊界：新的剛好在現在 +8 天＝收",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": null,
+      "new": {
+        "left_pct": 90,
+        "resets_at": "2026-11-09T04:00:00Z"
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "c25",
+      "note": "邊界：新的在現在 +8 天又 1 秒＝不收",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": null,
+      "new": {
+        "left_pct": 90,
+        "resets_at": "2026-11-09T04:00:01Z"
+      },
+      "accept": false,
+      "reason": "reset_out_of_range"
+    },
+    {
+      "id": "c26",
+      "note": "邊界：新的剛好在現在 −1 天＝收",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": null,
+      "new": {
+        "left_pct": 90,
+        "resets_at": "2026-10-31T04:00:00Z"
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "c27",
+      "note": "邊界：新的在現在 −1 天又 1 秒＝不收",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": null,
+      "new": {
+        "left_pct": 90,
+        "resets_at": "2026-10-31T03:59:59Z"
+      },
+      "accept": false,
+      "reason": "reset_out_of_range"
+    },
+    {
+      "id": "c28",
+      "note": "邊界：記著的剛好在現在 +8 天仍算數，送較早的＝不收",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-09T04:00:00Z"
+      },
+      "new": {
+        "left_pct": 90,
+        "resets_at": "2026-11-04T09:00:00Z"
+      },
+      "accept": false,
+      "reason": "earlier"
+    },
+    {
+      "id": "c29",
+      "note": "邊界：記著的在現在 +8 天又 1 秒＝當成沒有重置時間，照收",
+      "vendor": "claude",
+      "window": "weekly",
+      "now": "2026-11-01T04:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-09T04:00:01Z"
+      },
+      "new": {
+        "left_pct": 90,
+        "resets_at": "2026-11-04T09:00:00Z"
+      },
+      "accept": true,
+      "reason": null
+    },
+    {
+      "id": "c30",
+      "note": "Codex 5 小時：送 2099 年的重置時間一樣不收",
+      "vendor": "codex",
+      "window": "five_hour",
+      "now": "2026-11-01T04:00:00Z",
+      "old": {
+        "left_pct": 40,
+        "resets_at": "2026-11-01T16:00:00Z"
+      },
+      "new": {
+        "left_pct": 90,
+        "resets_at": "2099-01-01T00:00:00Z"
+      },
+      "accept": false,
+      "reason": "reset_out_of_range"
+    }
+  ]
+}

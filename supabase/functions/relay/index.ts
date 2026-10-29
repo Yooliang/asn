@@ -568,8 +568,8 @@ Deno.serve(async (req) => {
   if (action && ACCT_ACTIONS.has(action)) {
     const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
-    // 手機（member 節點）靠本人簽章才准看別台清單、送切換；其他動作不讀簽章
-    const signedAcct = (action === "acct_list" || action === "acct_switch") ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
+    // 手機（member 節點）靠本人簽章才准看別台清單、送切換；帳號列表（acct_roster，#374）只認簽章；其他動作不讀簽章
+    const signedAcct = (action === "acct_list" || action === "acct_switch" || action === "acct_roster") ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
     const r = await handleAcctAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedAcct);
     return json(r.status, r.body);
   }
