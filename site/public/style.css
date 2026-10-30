@@ -113,6 +113,8 @@ footer a { margin-right: 16px; }
 
 /* 藍圖與更新日誌頁 */
 .road { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 16px; align-items: start; }
+/* 待辦與優先順序：三欄由上到下排成一欄（需要負責人決定 → 近期 → 之後） */
+#todo-lanes .road { grid-template-columns: 1fr; }
 .lane { padding: 18px 20px 14px; }
 .lane h3 { margin: 0 0 8px; font-size: 18px; }
 .lane ul { padding-left: 1.2em; margin: 0; }
