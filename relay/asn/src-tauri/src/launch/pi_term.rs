@@ -1,7 +1,8 @@
 //! 經 pi 開新夥伴時優先開在 ASN 自帶的終端（WezTerm，#475）：那裡一個 pi 一扇專屬視窗，名單能切前景／背景。
 //! 這台沒有自帶的終端、或開不起來時，退回 Windows 原生主控台（#476 的開法），並用白話說明；細節只進 log。
-//! 只管「經 pi」：Claude 夥伴照 #476 一律用原生主控台，不走這裡。
+//! 只管「經 pi」：Claude 夥伴走 local::start_window（0.2.0 起同樣先開在自帶終端，見 win_term），不走這裡。
 //! 自帶終端的服務由畫面那一層在啟動時交給 [`super::term::set_global`]；這裡只透過 [`PiTermHost`] 介面用它，測試注入假的，不碰全域狀態。
+use super::win_term::WinOpenError;
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
@@ -14,8 +15,9 @@ pub(crate) const PI_TERM_FAILED: &str = "ASN 自帶的終端開不起來，改�
 pub(crate) trait PiTermHost: Send + Sync {
     /// 這台找得到自帶的終端
     fn available(&self) -> bool;
-    /// 在 cwd 開 argv（argv[0] 是 pi），GUI 只拿到 env；回承載 pi 的 GUI 程序編號
-    fn start_pi(&self, cwd: &Path, argv: &[String], env: &BTreeMap<String, String>) -> Result<u32, String>;
+    /// 在 cwd 開 argv（argv[0] 是 pi），GUI 只拿到 env；hidden＝開完立刻隱藏（背景開）。回承載 pi 的 GUI 程序編號
+    /// 失敗分兩種（見 win_term::WinOpenError）：還沒啟動才可以退回原生主控台
+    fn start_pi(&self, cwd: &Path, argv: &[String], env: &BTreeMap<String, String>, hidden: bool) -> Result<u32, WinOpenError>;
 }
 
 /// 開好了：pid＝承載 pi 的程序（自帶終端是 GUI、原生主控台是 powershell）；note＝退回原生主控台時給使用者看的說明
@@ -38,7 +40,7 @@ pub(crate) fn pi_term_env(base: HashMap<String, String>, extra: &[(String, Strin
 }
 
 /// 經 pi 開一個夥伴：有自帶的終端就開在裡面，否則（或開失敗）用 fallback 開原生主控台。
-/// hidden（背景開）只有原生主控台做得到，直接走 fallback、不另外說明
+/// hidden（背景開）：0.2.0 起跟 claude 同一套（設計 1.4），一樣開在自帶終端、開完立刻隱藏
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn open_pi(
     host: Option<&dyn PiTermHost>,
@@ -50,18 +52,20 @@ pub(crate) fn open_pi(
     env: &[(String, String)],
     fallback: &dyn Fn() -> Result<u32, String>,
 ) -> Result<PiOpened, String> {
-    if hidden {
-        return fallback().map(|pid| PiOpened { pid, note: None });
-    }
     let note = match host.filter(|h| h.available()) {
         None => PI_TERM_NONE,
         Some(h) => {
             let argv: Vec<String> = std::iter::once(command.to_string()).chain(args.iter().cloned()).collect();
-            match h.start_pi(cwd, &argv, &pi_term_env(base_env, env)) {
+            match h.start_pi(cwd, &argv, &pi_term_env(base_env, env), hidden) {
                 Ok(pid) => return Ok(PiOpened { pid, note: None }),
-                Err(e) => {
-                    elog!("經 pi 開在 ASN 自帶的終端失敗，改用原生主控台：{e}");
+                Err(WinOpenError::NotStarted(e)) => {
+                    elog!("經 pi 開在 ASN 自帶的終端失敗（還沒啟動），改用原生主控台：{e}");
                     PI_TERM_FAILED
+                }
+                // 已經啟動之後才失敗：裡面的 pi 可能已經在跑，不再開第二份（asn真 審 #573）
+                Err(WinOpenError::Started(e)) => {
+                    elog!("經 pi 開：自帶終端已啟動但後續失敗，不改用原生主控台：{e}");
+                    return Err(format!("{}：{e}", super::win_term::STARTED_BUT_FAILED));
                 }
             }
         }
@@ -72,11 +76,13 @@ pub(crate) fn open_pi(
 /// 正式：經 pi 開夥伴（本機開、遠端開、接手、喚醒共用）。自帶的終端從全域取；沒有畫面的建置、測試一律沒有
 pub(crate) fn open_pi_real(name: &str, command: &str, args: &[String], cwd: &Path, hidden: bool, env: &[(String, String)]) -> Result<PiOpened, String> {
     let host = host();
-    let r = open_pi(host.as_deref(), super::config::child_env(), command, args, cwd, hidden, env, &|| super::local::start_window_env(name, command, args, cwd, hidden, env))?;
+    let r = open_pi(host.as_deref(), super::config::child_env(), command, args, cwd, hidden, env, &|| super::local::start_console_window_env(name, command, args, cwd, hidden, env))?;
     if let Some(n) = r.note {
         elog!("經 pi 開「{name}」：{n}");
     }
-    Ok(r)
+    // 畫面上的提示跟 claude 同一套：這次執行只講一次（設計 1.5）
+    let note = r.note.filter(|_| super::win_term::first_fallback_note());
+    Ok(PiOpened { pid: r.pid, note })
 }
 
 fn host() -> Option<std::sync::Arc<dyn PiTermHost>> {
@@ -97,20 +103,22 @@ mod tests {
 
     struct FakeHost {
         available: bool,
-        result: Result<u32, String>,
+        result: Result<u32, WinOpenError>,
         got: Mutex<Vec<(String, Vec<String>, BTreeMap<String, String>)>>,
+        hidden: Mutex<Vec<bool>>,
     }
     impl PiTermHost for FakeHost {
         fn available(&self) -> bool {
             self.available
         }
-        fn start_pi(&self, cwd: &Path, argv: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
+        fn start_pi(&self, cwd: &Path, argv: &[String], env: &BTreeMap<String, String>, hidden: bool) -> Result<u32, WinOpenError> {
             self.got.lock().unwrap().push((cwd.to_string_lossy().into_owned(), argv.to_vec(), env.clone()));
+            self.hidden.lock().unwrap().push(hidden);
             self.result.clone()
         }
     }
-    fn host(available: bool, result: Result<u32, String>) -> FakeHost {
-        FakeHost { available, result, got: Mutex::new(vec![]) }
+    fn host(available: bool, result: Result<u32, WinOpenError>) -> FakeHost {
+        FakeHost { available, result, got: Mutex::new(vec![]), hidden: Mutex::new(vec![]) }
     }
     fn base() -> HashMap<String, String> {
         // 照真的路徑：先過 child_env 的過濾
@@ -149,7 +157,7 @@ mod tests {
 
     #[test]
     fn 沒有自帶終端或開不起來_退回原生主控台並用白話說明() {
-        for (h, want) in [(None, PI_TERM_NONE), (Some(host(false, Ok(1))), PI_TERM_NONE), (Some(host(true, Err("wezterm-gui.exe 錯誤碼 5".into()))), PI_TERM_FAILED)] {
+        for (h, want) in [(None, PI_TERM_NONE), (Some(host(false, Ok(1))), PI_TERM_NONE), (Some(host(true, Err(WinOpenError::NotStarted("wezterm-gui.exe 錯誤碼 5".into())))), PI_TERM_FAILED)] {
             let r = open_pi(h.as_ref().map(|x| x as &dyn PiTermHost), base(), "pi", &args(), Path::new("D:\\p"), false, &[], &|| Ok(77)).unwrap();
             assert_eq!(r, PiOpened { pid: 77, note: Some(want) });
             assert!(!want.contains("wezterm") && !want.contains("錯誤碼"), "說明不帶技術細節");
@@ -158,11 +166,27 @@ mod tests {
     }
 
     #[test]
-    fn 背景開_只有原生主控台做得到_直接走原生且不說明() {
+    fn 背景開_跟_claude_同一套_開在自帶終端並要求隱藏() {
         let h = host(true, Ok(4321));
         let r = open_pi(Some(&h), base(), "pi", &args(), Path::new("D:\\p"), true, &[], &|| Ok(9)).unwrap();
-        assert_eq!(r, PiOpened { pid: 9, note: None });
-        assert!(h.got.lock().unwrap().is_empty());
+        assert_eq!(r, PiOpened { pid: 4321, note: None }, "背景開也先用自帶終端（設計 1.4）");
+        assert_eq!(*h.hidden.lock().unwrap(), vec![true], "要求開完就隱藏");
+        // 自帶終端不在：背景開照舊退回原生主控台（Hidden 樣式）
+        let r = open_pi(None, base(), "pi", &args(), Path::new("D:\\p"), true, &[], &|| Ok(9)).unwrap();
+        assert_eq!(r.pid, 9);
+    }
+
+    #[test]
+    fn 自帶終端已啟動之後才失敗_不退回原生主控台() {
+        let h = host(true, Err(WinOpenError::Started("終端已啟動但對照表寫入失敗".into())));
+        let fb = std::cell::Cell::new(false);
+        let e = open_pi(Some(&h), base(), "pi", &args(), Path::new("D:\\p"), false, &[], &|| {
+            fb.set(true);
+            Ok(9)
+        })
+        .unwrap_err();
+        assert!(!fb.get(), "不能再開第二份");
+        assert!(e.contains("對照表寫入失敗"), "{e}");
     }
 
     #[test]
@@ -219,7 +243,7 @@ mod tests {
         let argv: Vec<String> = std::iter::once(command.clone()).chain(plan.args.iter().cloned()).collect();
         let env = pi_term_env(super::super::config::child_env(), &plan.env);
         assert!(!env.contains_key("ASN_RELAY_KEY"));
-        let gui = <super::super::term::LiveTerms as PiTermHost>::start_pi(&svc, &cwd, &argv, &env).expect("開在自帶終端");
+        let gui = <super::super::term::LiveTerms as PiTermHost>::start_pi(&svc, &cwd, &argv, &env, false).expect("開在自帶終端");
         println!("GUI pid={gui}");
         let home = crate::identity::home_dir();
         let dir = crate::bridge::engines::pi::windows_dir(&home);
@@ -293,6 +317,8 @@ mod tests {
     fn 守門_經_pi_的四條路都走這個入口_claude_不走() {
         let local = include_str!("local.rs");
         assert_eq!(local.matches("super::pi_term::open_pi_real(").count(), 3, "本機開、遠端開、接手／喚醒（start_pi_session）都要走自帶終端優先");
-        assert!(!local.contains("start_window_env(&req.name, &command, &plan.args"), "本機經 pi 不能直接開原生主控台");
+        assert!(!local.contains("start_console_window_env(&req.name, &command, &plan.args"), "本機經 pi 不能直接開原生主控台");
+        let pt = include_str!("pi_term.rs");
+        assert!(pt.contains("super::local::start_console_window_env("), "pi 的退路直接開原生主控台（自帶終端已經試過，不再繞回開窗點重試）");
     }
 }

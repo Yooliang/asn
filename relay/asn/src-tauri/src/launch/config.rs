@@ -274,15 +274,47 @@ mod child_env_tests {
         assert_eq!(env["ASN_RELAY_URL"], "http://127.0.0.1:1");
     }
 
-    /// 守門：每個開視窗的地方（一般主控台、Linux 終端機、換模型重開的 WT 分頁）都要換成乾淨的環境，不然字會變純白
+    /// 守門：每個開視窗的地方都要換成乾淨的環境（不然字會變純白，ASN_RELAY_KEY 等金鑰類變數也會漏進 claude 視窗）。
+    /// 0.2.0 起 Windows 開窗走 ASN 自帶的 WezTerm、退路才用原生主控台（conhost）：兩條都要涵蓋（設計 1.5、第十節 6）
     #[test]
     fn 守門_開視窗都用乾淨的環境() {
         let local = include_str!("local.rs");
         let switch = include_str!("switch.rs");
-        let marker = ["env_clear()", ".envs(super::config::child_env())"];
-        assert!(local.matches(marker[0]).count() >= 3, "local.rs 的三個開視窗路徑都要 env_clear");
+        let wez = include_str!("wezterm.rs");
+        let body = local.split("#[cfg(test)]").next().unwrap();
+        // Windows 取出的檔案可能是 CRLF：起點字串裡的換行兩種都試
+        let fn_body = |src: &'static str, start: &str, end: &str| -> &'static str {
+            let crlf = start.replace('\n', "\r\n");
+            src.split(start).nth(1).or_else(|| src.split(crlf.as_str()).nth(1)).unwrap_or_else(|| panic!("找不到 {start}")).split(end).next().unwrap()
+        };
+        // 1. Windows 開窗點：走 WezTerm，傳進去的環境經過 child_env
+        let win = fn_body(body, "fn start_window_windows(", "fn start_console_window_windows(");
+        assert!(win.contains("win_term::open_window_real("), "Windows 開窗走 WezTerm（退路才用 conhost）");
+        assert!(win.contains("term_env(super::config::child_env()"), "傳進 WezTerm 的環境經過 child_env");
+        // WezTerm 那邊不繼承 ASN 自己的環境：spawn_clean 先 env_clear 再只放給的變數
+        let clean = fn_body(wez, "fn spawn_clean(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {\n        let mut cmd", "fn started_ms");
+        assert!(clean.contains(".env_clear()") && clean.contains(".envs(env)"), "WezTerm 的 GUI 只拿到給它的環境");
+        let svc = include_str!("term.rs");
+        let start_window = fn_body(svc, "pub(crate) fn start_window(", "pub fn own_gui_windows");
+        assert!(start_window.contains("Some(&spec.env)"), "開窗點開的視窗一定走 start_in_workspace_clean（給了 env）");
+        // 2. 退路主控台（含經 pi 的退路）：照舊 env_clear＋child_env
+        let console = fn_body(body, "fn start_console_window_windows(", "#[cfg(not(windows))]");
+        assert!(console.contains(".env_clear()") && console.contains(".envs(super::config::child_env())"), "退路主控台要 env_clear＋child_env");
+        assert!(console.contains("conhost.exe"), "退路明確用 Windows 原生主控台開（#476）");
+        // 3. Linux 終端機兩條路
+        let unix = fn_body(body, "fn start_window_unix(", "struct Term");
+        assert_eq!(unix.matches(".env_clear().envs(super::config::child_env())").count(), 2, "Linux 的兩個開視窗路徑都要 env_clear＋child_env");
+        // 4. 換模型重開走開窗點（環境清理在那裡），不交給 Windows Terminal
         assert!(switch.contains("local::start_window("), "換模型重開走 local::start_window（環境清理在那裡）");
         assert!(!local.contains("wt.exe") && !local.contains("spawn_wt"), "開夥伴不再交給 Windows Terminal（#476）");
-        assert!(local.contains("conhost.exe"), "明確用 Windows 原生主控台開（#476）");
+    }
+
+    /// 金鑰類變數實際過一次濾網：開窗點用的 term_env(child_env_from(...)) 不會帶 ASN_RELAY_KEY 等
+    #[test]
+    fn 開窗點的環境實際濾掉金鑰類變數() {
+        let base = child_env_from([("PATH", "p"), ("ASN_RELAY_KEY", "k"), ("IRORI_RELAY_KEY", "k2"), ("asn_relay_anon_key", "a"), ("CLAUDECODE", "1")].iter().map(|(k, v)| (k.to_string(), v.to_string())));
+        let env = super::super::win_term::term_env(base, &[]);
+        let keys: Vec<_> = env.keys().cloned().collect();
+        assert_eq!(keys, ["PATH"]);
     }
 }

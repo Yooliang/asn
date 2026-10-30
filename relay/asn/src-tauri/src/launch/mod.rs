@@ -14,6 +14,7 @@ mod resume;
 mod subagents;
 mod tasks;
 pub(crate) mod switch;
+pub(crate) mod win_term;
 #[cfg(desktop)]
 #[allow(dead_code)]
 pub(crate) mod wezterm;

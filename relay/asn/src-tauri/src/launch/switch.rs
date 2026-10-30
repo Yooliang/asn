@@ -355,6 +355,14 @@ pub(crate) trait Os {
     }
     /// 對該 pid 的主控台視窗送關閉訊息；有送出才回 true
     fn close_window(&self, pid: u32) -> bool;
+    /// ASN 自己開的 WezTerm（對照表裡的）：（GUI 程序編號, 開的時候量到的建立時間）。預設沒有，現有的假 Os 不用改
+    fn own_wez(&self) -> Vec<(u32, u64)> {
+        Vec::new()
+    }
+    /// 收掉 ASN 自己開的某個 WezTerm GUI（裡面會再核對一次建立時間，對不上就不動）
+    fn stop_wez(&self, _gui_pid: u32) -> Result<(), String> {
+        Err("這台沒有 ASN 自帶的終端".into())
+    }
     fn terminate(&self, pid: u32) -> Result<(), String>;
     fn own_pid(&self) -> u32 {
         std::process::id()
@@ -510,13 +518,51 @@ pub(crate) fn query_with(os: &dyn Os, dir: &Path, req: &SwitchQueryReq) -> Switc
                 cwd: Some(t.cwd.clone()),
                 status: t.status.clone(),
                 model: current_model(&t.args),
-                own_window: asn_host_of(os, &os.processes(), t.pid).is_none(),
+                own_window: !opened_by_asn(os, &os.processes(), t.pid),
             }
         }
     }
 }
 
-/// 這個 Claude 的直接父殼若是 ASN 自己開視窗用的承載 PowerShell，回傳它的 pid；使用者自己開的視窗回 None
+/// ASN 自帶終端的 GUI 程序名
+pub(crate) const WEZ_GUI: &str = "wezterm-gui.exe";
+
+/// 0.2.0「ASN 開的」（設計 1.2）：這個程序往上 8 層內找到的 wezterm-gui 在對照表裡、而且現在的建立時間和開的時候量到的一樣，回那個 GUI。
+/// 不在表上、查不到建立時間、建立時間不同（編號被別的程序拿去用了）一律 None＝不是 ASN 開的
+pub(crate) fn asn_wez_of(os: &dyn Os, table: &[Proc], pid: u32) -> Option<u32> {
+    let gui = ancestors(table, pid).into_iter().take(8).find(|a| table.iter().any(|p| p.pid == *a && p.name == WEZ_GUI))?;
+    let (_, was) = os.own_wez().into_iter().find(|(g, _)| *g == gui)?;
+    (os.started_ms(gui) == Some(was)).then_some(gui)
+}
+
+/// WezTerm 每個窗格的虛擬主控台宿主（不算「別的程序」）
+const WEZ_PANE_HOSTS: &[&str] = &["openconsole.exe", "conhost.exe"];
+
+/// 收 GUI 之前的檢查（asn真 審 #573）：這個 GUI 底下除了剛結束的那棵（ended）與窗格宿主之外，還有沒有活著的程序
+/// （使用者自己在那扇 WezTerm 多開的分頁、別的殼）。有就不收
+pub(crate) fn wez_has_others(os: &dyn Os, gui: u32, ended: &[u32]) -> bool {
+    let table = os.processes();
+    let mut order = vec![gui];
+    let mut idx = 0;
+    while idx < order.len() {
+        let cur = order[idx];
+        for c in table.iter().filter(|p| p.ppid == cur && p.pid != cur) {
+            if !order.contains(&c.pid) {
+                order.push(c.pid);
+            }
+        }
+        idx += 1;
+    }
+    table.iter().filter(|p| order[1..].contains(&p.pid)).any(|p| !ended.contains(&p.pid) && !WEZ_PANE_HOSTS.contains(&p.name.as_str()) && os.alive(p.pid))
+}
+
+/// 這個視窗是不是 ASN 開的：自帶終端（對照表＋建立時間），或舊式主控台的承載 PowerShell（過渡期保留，第三節）
+pub(crate) fn opened_by_asn(os: &dyn Os, table: &[Proc], pid: u32) -> bool {
+    asn_wez_of(os, table, pid).is_some() || asn_host_of(os, table, pid).is_some()
+}
+
+/// 舊式（0.1.x 原生主控台）：這個 Claude 的直接父殼若是 ASN 自己開視窗用的承載 PowerShell，回傳它的 pid；其他視窗回 None。
+/// 0.2.0 起新開的視窗在自帶終端裡（見 asn_wez_of），這個只為了認得升級前開的舊視窗，第 4 階段之後才拿掉
 pub(crate) fn asn_host_of(os: &dyn Os, table: &[Proc], pid: u32) -> Option<u32> {
     parent_of(table, pid).filter(|p| (p.name == "powershell.exe" || p.name == "pwsh.exe") && os.cmdline(p.pid).map(|l| is_asn_host_cmdline(&l)).unwrap_or(false)).map(|p| p.pid)
 }
@@ -527,7 +573,7 @@ pub(crate) struct Plan {
     pub cwd: PathBuf,
     /// 含程式本身
     pub argv: Vec<String>,
-    /// 原本在 Windows Terminal 分頁裡（只做記錄：#476 起重開一律用 Windows 原生主控台，見 local::start_window）
+    /// 原本在 Windows Terminal 分頁裡（只做記錄：重開一律走 local::start_window，0.2.0 起是自帶的 WezTerm）
     #[allow(dead_code)]
     pub in_wt: bool,
 }
@@ -539,7 +585,12 @@ pub(crate) fn fail(stage: &str, reason: impl Into<String>, manual: &str, closed:
 /// 關掉一個已確認的視窗：（polite 時）先送關閉訊息等幾秒；沒走就只強制結束 `allowed`（kill_set 算出來的）內的 pid；
 /// 承載殼（host）還在才補一刀；最後確認目標 pid 真的消失。回 Err(中文原因)。
 /// `polite=false`：不送關閉訊息，直接結束清單內的 pid（使用者自己開的視窗：關閉訊息會把使用者的終端機一起關掉）。
+/// ASN 自帶終端裡的視窗（設計 1.3）：沒有承載殼，一律不送關閉訊息；先結束 claude 那棵（allowed），確認消失後再收掉那個 GUI
+/// （stop_wez 會核對建立時間，對不上就不動；收不掉只記 log，claude 已經結束，視窗停在最後的畫面）。
 pub(crate) fn close_session(os: &dyn Os, t: &Timing, target_pid: u32, allowed: &[u32], host: Option<u32>, polite: bool) -> Result<(), String> {
+    // 要在結束之前找：claude 一結束，程序表就找不到它往上的 GUI 了
+    let wez = asn_wez_of(os, &os.processes(), target_pid);
+    let polite = polite && wez.is_none();
     let sent = polite && os.close_window(target_pid);
     if sent && wait_until(os, t.close_grace_ms, t.poll_ms, || !os.alive(target_pid)) {
         // 視窗關了，連同承載的殼一起走；殼若還在才補一刀
@@ -561,6 +612,13 @@ pub(crate) fn close_session(os: &dyn Os, t: &Timing, target_pid: u32, allowed: &
     }
     if !wait_until(os, t.gone_wait_ms, t.poll_ms, || !os.alive(target_pid)) {
         return Err("原視窗沒有關掉".into());
+    }
+    if let Some(gui) = wez {
+        if wez_has_others(os, gui, allowed) {
+            elog!("關夥伴視窗：程式已結束；自帶終端的視窗（{gui}）裡還有別的程序，不收");
+        } else if let Err(e) = os.stop_wez(gui) {
+            elog!("關夥伴視窗：程式已結束，但收不掉自帶終端的視窗（{gui}）：{e}");
+        }
     }
     Ok(())
 }
@@ -654,7 +712,7 @@ pub fn model_switch_run(req: SwitchRunReq) -> Result<Value, String> {
     Ok(run_with(&RealOs, &dir, &req, &real_launch, &Timing::real()))
 }
 
-/// 照計畫重開：一律用 Windows 原生主控台（#476；原本在 Windows Terminal 分頁裡的也一樣，重開後就能單獨切前景／背景）
+/// 照計畫重開：走開窗點 local::start_window（0.2.0 起先開在 ASN 自帶的 WezTerm，找不到才用原生主控台；原本在 Windows Terminal 分頁裡的也一樣）
 pub(crate) fn real_launch(plan: &Plan) -> Result<(), String> {
     local::start_window(&plan.name, &plan.argv[0], &plan.argv[1..], &plan.cwd, false).map(|_| ())
 }
@@ -680,6 +738,12 @@ impl Os for RealOs {
     }
     fn close_window(&self, pid: u32) -> bool {
         winapi::post_close(pid)
+    }
+    fn own_wez(&self) -> Vec<(u32, u64)> {
+        super::term::own_gui_windows()
+    }
+    fn stop_wez(&self, gui_pid: u32) -> Result<(), String> {
+        super::term::stop_own_gui(gui_pid)
     }
     fn terminate(&self, pid: u32) -> Result<(), String> {
         winapi::terminate(pid)
@@ -1177,6 +1241,159 @@ mod tests {
 
     fn quick() -> Timing {
         Timing { close_grace_ms: 0, gone_wait_ms: 0, appear_wait_ms: 0, poll_ms: 1 }
+    }
+
+    // ---- 0.2.0：自帶終端裡的視窗（設計 1.2、1.3）
+
+    /// 程序樹：explorer(100) → wezterm-gui(500) → openconsole(501) → claude(502) → node(503)；另有舊式 conhost(600) → powershell(601) → claude(602)
+    struct WezFake {
+        table: Vec<Proc>,
+        alive: RefCell<HashSet<u32>>,
+        own: Vec<(u32, u64)>,
+        started: std::collections::HashMap<u32, u64>,
+        cmd: std::collections::HashMap<u32, String>,
+        trace: RefCell<Vec<String>>,
+        stop_result: Result<(), String>,
+    }
+    impl Os for WezFake {
+        fn cmdline(&self, pid: u32) -> Option<String> {
+            self.cmd.get(&pid).cloned()
+        }
+        fn processes(&self) -> Vec<Proc> {
+            self.table.clone()
+        }
+        fn alive(&self, pid: u32) -> bool {
+            self.alive.borrow().contains(&pid)
+        }
+        fn started_ms(&self, pid: u32) -> Option<u64> {
+            self.started.get(&pid).copied()
+        }
+        fn close_window(&self, pid: u32) -> bool {
+            self.trace.borrow_mut().push(format!("close_window:{pid}"));
+            false
+        }
+        fn own_wez(&self) -> Vec<(u32, u64)> {
+            self.own.clone()
+        }
+        fn stop_wez(&self, gui: u32) -> Result<(), String> {
+            self.trace.borrow_mut().push(format!("stop_wez:{gui}"));
+            self.stop_result.clone()
+        }
+        fn terminate(&self, pid: u32) -> Result<(), String> {
+            self.trace.borrow_mut().push(format!("terminate:{pid}"));
+            self.alive.borrow_mut().remove(&pid);
+            Ok(())
+        }
+        fn own_pid(&self) -> u32 {
+            300
+        }
+        fn sleep(&self, _ms: u64) {}
+    }
+    fn wez_fake(own: Vec<(u32, u64)>, gui_now: Option<u64>) -> WezFake {
+        let table = vec![p(100, 1, "explorer.exe"), p(300, 100, "asn.exe"), p(500, 100, "wezterm-gui.exe"), p(501, 500, "openconsole.exe"), p(502, 501, "claude.exe"), p(503, 502, "node.exe"), p(600, 100, "conhost.exe"), p(601, 600, "powershell.exe"), p(602, 601, "claude.exe")];
+        let mut started = std::collections::HashMap::new();
+        if let Some(t) = gui_now {
+            started.insert(500, t);
+        }
+        let script = super::local::window_launcher_args("舊", "claude.exe", &[]);
+        WezFake {
+            table,
+            alive: RefCell::new([100, 300, 500, 501, 502, 503, 600, 601, 602].into_iter().collect()),
+            own,
+            started,
+            cmd: [(601, format!("powershell.exe {script}"))].into_iter().collect(),
+            trace: RefCell::new(vec![]),
+            stop_result: Ok(()),
+        }
+    }
+
+    #[test]
+    fn asn_開的判斷_對照表命中且建立時間相符才算() {
+        let f = wez_fake(vec![(500, 1_000)], Some(1_000));
+        assert_eq!(asn_wez_of(&f, &f.table, 502), Some(500), "claude 往上找到對照表裡的 GUI（中間隔一層 OpenConsole）");
+        assert_eq!(asn_wez_of(&f, &f.table, 503), Some(500), "claude 底下的子程序也一樣");
+        assert!(opened_by_asn(&f, &f.table, 502));
+        // 建立時間不符：編號被別的程序拿去用了
+        let f = wez_fake(vec![(500, 1_000)], Some(2_000));
+        assert_eq!(asn_wez_of(&f, &f.table, 502), None);
+        assert!(!opened_by_asn(&f, &f.table, 502));
+        // 查不到建立時間也不算
+        let f = wez_fake(vec![(500, 1_000)], None);
+        assert_eq!(asn_wez_of(&f, &f.table, 502), None);
+        // 不在對照表：使用者自己開的 WezTerm
+        let f = wez_fake(vec![], Some(1_000));
+        assert_eq!(asn_wez_of(&f, &f.table, 502), None);
+        assert!(!opened_by_asn(&f, &f.table, 502), "不認得的一律當外部");
+    }
+
+    #[test]
+    fn asn_開的判斷_舊式主控台照舊認得() {
+        let f = wez_fake(vec![], None);
+        assert_eq!(asn_host_of(&f, &f.table, 602), Some(601), "升級前開的舊視窗：承載 PowerShell");
+        assert!(opened_by_asn(&f, &f.table, 602));
+        assert_eq!(asn_wez_of(&f, &f.table, 602), None);
+    }
+
+    #[test]
+    fn 關閉自帶終端裡的視窗_先結束_claude_那棵再收_gui_不送關閉訊息() {
+        let f = wez_fake(vec![(500, 1_000)], Some(1_000));
+        let host = asn_host_of(&f, &f.table, 502);
+        assert_eq!(host, None, "沒有承載殼");
+        let allowed = kill_set_with(&f.table, 502, host, 300, &|_| None);
+        assert_eq!(allowed, vec![503, 502], "只有 claude 與子程序，不含 GUI 與 OpenConsole");
+        // 呼叫端照舊傳 polite=host.is_some()（false）；就算傳 true，自帶終端裡的也不送關閉訊息
+        close_session(&f, &quick(), 502, &allowed, host, true).unwrap();
+        assert_eq!(*f.trace.borrow(), vec!["terminate:503".to_string(), "terminate:502".into(), "stop_wez:500".into()], "先結束 claude 那棵，再收 GUI");
+    }
+
+    #[test]
+    fn 關閉時_gui_建立時間不符就不收_也不送關閉訊息() {
+        let f = wez_fake(vec![(500, 1_000)], Some(2_000));
+        let allowed = kill_set_with(&f.table, 502, None, 300, &|_| None);
+        close_session(&f, &quick(), 502, &allowed, None, false).unwrap();
+        assert_eq!(*f.trace.borrow(), vec!["terminate:503".to_string(), "terminate:502".into()], "不認得的 GUI 不動");
+    }
+
+    #[test]
+    fn 收_gui_之前_底下還有別的程序就不收() {
+        // 使用者在那扇 WezTerm 多開了一個分頁：openconsole(505) → pwsh(506)
+        let mut f = wez_fake(vec![(500, 1_000)], Some(1_000));
+        f.table.extend([p(505, 500, "openconsole.exe"), p(506, 505, "pwsh.exe")]);
+        f.alive.borrow_mut().extend([505, 506]);
+        let allowed = kill_set_with(&f.table, 502, None, 300, &|_| None);
+        close_session(&f, &quick(), 502, &allowed, None, false).unwrap();
+        assert_eq!(*f.trace.borrow(), vec!["terminate:503".to_string(), "terminate:502".into()], "別的分頁還在：只結束 claude 那棵，不收 GUI");
+        // 只剩窗格宿主與已結束的 claude：收
+        let f = wez_fake(vec![(500, 1_000)], Some(1_000));
+        let allowed = kill_set_with(&f.table, 502, None, 300, &|_| None);
+        close_session(&f, &quick(), 502, &allowed, None, false).unwrap();
+        assert!(f.trace.borrow().contains(&"stop_wez:500".to_string()));
+        assert!(!wez_has_others(&f, 500, &allowed));
+        // 底下的程序已經結束（程序表殘留）不算
+        let mut f = wez_fake(vec![(500, 1_000)], Some(1_000));
+        f.table.push(p(507, 500, "cmd.exe"));
+        assert!(!wez_has_others(&f, 500, &[502, 503]), "507 不在活著的清單裡");
+        f.alive.borrow_mut().insert(507);
+        assert!(wez_has_others(&f, 500, &[502, 503]));
+    }
+
+    #[test]
+    fn 關閉時_收_gui_失敗不算關閉失敗() {
+        let mut f = wez_fake(vec![(500, 1_000)], Some(1_000));
+        f.stop_result = Err("這個程式編號現在是別的程序".into());
+        let allowed = kill_set_with(&f.table, 502, None, 300, &|_| None);
+        assert!(close_session(&f, &quick(), 502, &allowed, None, false).is_ok(), "claude 已經結束，視窗停在最後畫面");
+    }
+
+    #[test]
+    fn 關閉舊式主控台視窗_照舊先送關閉訊息_不碰自帶終端() {
+        let f = wez_fake(vec![(500, 1_000)], Some(1_000));
+        let host = asn_host_of(&f, &f.table, 602);
+        let allowed = kill_set_with(&f.table, 602, host, 300, &|_| None);
+        close_session(&f, &quick(), 602, &allowed, host, host.is_some()).unwrap();
+        let tr = f.trace.borrow();
+        assert_eq!(tr.first().map(String::as_str), Some("close_window:602"), "舊式視窗照舊先送關閉訊息");
+        assert!(!tr.iter().any(|x| x.starts_with("stop_wez")));
     }
 
     fn write_session(dir: &Path, pid: u32, sid: &str, name: &str, status: &str, cwd: &str) {

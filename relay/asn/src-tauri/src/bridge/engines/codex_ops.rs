@@ -14,7 +14,7 @@
 //! - 切換模型：關閉後照原命令列重開，去掉舊的 `-m`／`--model`，在 `resume` 前面插入 `-m <新模型>`；
 //!   重開後確認出現新的 codex 程序（不是舊 pid、命令列帶著新模型與同一個接續目標）。
 //! - 對話進行中（名單狀態忙碌）不動，回「等它閒置」。
-use crate::launch::switch::{asn_host_of, close_session, in_windows_terminal, is_idle, kill_set_with, manual_command, parse_cmdline, wait_until, Os, Plan, Proc, Timing};
+use crate::launch::switch::{asn_host_of, close_session, in_windows_terminal, is_idle, kill_set_with, manual_command, opened_by_asn, parse_cmdline, wait_until, Os, Plan, Proc, Timing};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
@@ -151,8 +151,9 @@ pub(crate) fn close(os: &dyn Os, timing: &Timing, name: &str, thread_id: &str, s
     let table = os.processes();
     let t = resolve(os, &table, name, thread_id)?;
     let (host, allowed, _) = guard(os, &table, &t)?;
+    // 使用者自己開的才會留下終端機分頁；ASN 開的（自帶終端或舊式主控台）整扇收掉
+    let kept = !opened_by_asn(os, &table, t.pid);
     close_session(os, timing, t.pid, &allowed, host, host.is_some())?;
-    let kept = host.is_none();
     Ok(json!({ "pid": t.pid, "kept_terminal": kept, "detail": if kept { "已結束 Codex；原本的終端機分頁會留下" } else { "已關閉視窗" } }))
 }
 
