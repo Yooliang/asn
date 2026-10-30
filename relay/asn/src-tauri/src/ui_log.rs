@@ -136,11 +136,55 @@ pub fn relaunch_command(exe: &Path, args: &[std::ffi::OsString]) -> std::process
     c
 }
 
-/// 開一個新的自己（參數照舊），成功回 Ok；呼叫端接著結束本程式。取代 tauri 的 `AppHandle::restart`（它讓新程序繼承本程序的 stderr）
+/// 新程序等舊程序結束用的參數：`--after-pid <舊 pid>`（不然舊的心跳還新鮮，新的會被判成「同名已在跑」自己退出）
+pub const AFTER_PID_FLAG: &str = "--after-pid";
+/// 舊程序最多等多久
+pub const AFTER_PID_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// 重開時給新程序的參數：拿掉舊的 `--after-pid <x>`，最後補上本程序的 pid
+pub fn relaunch_args(old: &[std::ffi::OsString], my_pid: u32) -> Vec<std::ffi::OsString> {
+    let mut out = Vec::new();
+    let mut it = old.iter();
+    while let Some(a) = it.next() {
+        if a == AFTER_PID_FLAG {
+            it.next();
+            continue;
+        }
+        out.push(a.clone());
+    }
+    out.push(AFTER_PID_FLAG.into());
+    out.push(my_pid.to_string().into());
+    out
+}
+
+/// 從參數取 `--after-pid` 後面那個數字；沒有或不是數字回 None
+pub fn after_pid(args: &[String]) -> Option<u32> {
+    let i = args.iter().position(|a| a == AFTER_PID_FLAG)?;
+    let v = args.get(i + 1)?;
+    (!v.is_empty() && v.chars().all(|c| c.is_ascii_digit())).then(|| v.parse().ok()).flatten()
+}
+
+/// 等 pid 結束：只在它確定是 asn 時才等，最多 `timeout`。回傳是否已結束（不是 asn、本來就不在都算結束）
+pub fn wait_gone(pid: u32, timeout: std::time::Duration, alive: impl Fn(u32) -> bool, is_asn: impl Fn(u32) -> Option<bool>) -> bool {
+    if is_asn(pid) != Some(true) {
+        return true;
+    }
+    let end = std::time::Instant::now() + timeout;
+    while alive(pid) {
+        if std::time::Instant::now() >= end {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    true
+}
+
+/// 開一個新的自己（參數照舊，再帶 `--after-pid <本程序>`），成功回 Ok；呼叫端接著結束本程式。
+/// 取代 tauri 的 `AppHandle::restart`（它讓新程序繼承本程序的 stderr）
 pub fn relaunch_self() -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
-    relaunch_command(&exe, &args).spawn().map(|_| ()).map_err(|e| e.to_string())
+    let old: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    relaunch_command(&exe, &relaunch_args(&old, std::process::id())).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -213,6 +257,48 @@ mod tests {
         let (exe, args) = (std::path::PathBuf::from("/bin/sh"), vec!["-c".into(), "echo out; echo err 1>&2".into()]);
         let st = relaunch_command(&exe, &args).status().unwrap();
         assert!(st.success());
+    }
+
+    #[test]
+    fn 重開參數_換掉舊的_after_pid_補上本程序() {
+        let a: Vec<std::ffi::OsString> = ["--background", "--after-pid", "11", "asn://invite/x"].iter().map(|s| s.into()).collect();
+        let out: Vec<String> = relaunch_args(&a, 42).into_iter().map(|s| s.into_string().unwrap()).collect();
+        assert_eq!(out, ["--background", "asn://invite/x", "--after-pid", "42"]);
+    }
+
+    #[test]
+    fn after_pid_只收數字() {
+        let v = |xs: &[&str]| xs.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(after_pid(&v(&["asn.exe", "--after-pid", "1234"])), Some(1234));
+        assert_eq!(after_pid(&v(&["asn.exe", "--after-pid", "12a"])), None);
+        assert_eq!(after_pid(&v(&["asn.exe", "--after-pid", "-5"])), None);
+        assert_eq!(after_pid(&v(&["asn.exe", "--after-pid", "+5"])), None, "u32 的 parse 收 +5，這裡不收");
+        assert_eq!(after_pid(&v(&["asn.exe", "--after-pid"])), None);
+        assert_eq!(after_pid(&v(&["asn.exe"])), None);
+    }
+
+    #[test]
+    fn 舊的還活著先等_結束後才往下_不是_asn_不等() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let n = AtomicU32::new(0);
+        // 前 3 次問都還活著，第 4 次結束
+        let gone = wait_gone(7, std::time::Duration::from_secs(5), |_| n.fetch_add(1, Ordering::SeqCst) < 3, |_| Some(true));
+        assert!(gone && n.load(Ordering::SeqCst) >= 4, "要等到舊的結束才回");
+        // 一直活著：等到逾時回 false（照原規則判斷同名）
+        assert!(!wait_gone(7, std::time::Duration::from_millis(250), |_| true, |_| Some(true)));
+        // 那個 pid 不是 asn（被別的程式重用）或查不到：不等
+        let t = std::time::Instant::now();
+        assert!(wait_gone(7, std::time::Duration::from_secs(5), |_| true, |_| Some(false)));
+        assert!(wait_gone(7, std::time::Duration::from_secs(5), |_| true, |_| None));
+        assert!(t.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    #[test]
+    fn 啟動時同名檢查之前先等_after_pid() {
+        let src = include_str!("lib.rs");
+        let wait = src.find("ui_log::wait_gone(").expect("run() 要等 --after-pid");
+        let check = src.find("heartbeat::other_instance(&work_dir").unwrap();
+        assert!(wait < check, "要在同名檢查之前等");
     }
 
     #[test]
