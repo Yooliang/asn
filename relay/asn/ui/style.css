@@ -800,6 +800,8 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dv-bp{flex:none;min-width:5em;font-variant-numeric:tabular-nums}
 @media (prefers-color-scheme:dark){.dv-quota.out{color:#ff9a90}.dv-quota.stale{color:#b4c0cc}}
 .dv-cur{padding:1px 8px;border-radius:4px;font-size:11px;font-weight:600;background:var(--accent);color:#fff}
+.dv-incomplete{padding:1px 8px;border:1px solid #a86f00;border-radius:4px;font-size:11px;color:#a86f00}
+.dv-why{display:block;font-size:11px}
 .dv-none{display:flex;align-items:center;gap:6px;padding:8px 10px;border:1px dashed var(--line);border-radius:5px;color:var(--muted);font-size:12px;font-style:italic}
 .dv-empty{display:flex;flex-direction:column;align-items:center;gap:8px;padding:28px 12px;border:1px dashed var(--line);border-radius:6px;background:var(--panel-soft);color:var(--muted)}
 .dv-vb .aero-btn{white-space:nowrap;font-size:12px;padding:3px 8px}

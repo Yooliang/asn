@@ -78,6 +78,10 @@ pub fn build_report_all(list: &[AccountInfo], codex: Option<&CodexLogin>, quotas
         .take(claude_max)
         .map(|a| {
             let mut row = json!({ "vendor": "claude", "email": a.email, "plan": a.plan, "current": a.current });
+            // 存的登入不完整（沒有 refreshToken）只帶這個布林；正常的帳號不多帶欄位
+            if a.login_incomplete {
+                row["login_incomplete"] = json!(true);
+            }
             if let (Some(q), Some(o)) = (quotas.get(&a.email), row.as_object_mut()) {
                 if let Some(v) = q.five_hour_pct {
                     o.insert("five_hour_pct".into(), json!(v));
@@ -653,7 +657,7 @@ mod tests {
     const U: &str = "11111111-2222-3333-4444-555555555555";
 
     fn acct(email: &str, current: bool) -> AccountInfo {
-        AccountInfo { email: email.into(), plan: "max".into(), org: "ORG-SECRET".into(), current, saved: true }
+        AccountInfo { email: email.into(), plan: "max".into(), org: "ORG-SECRET".into(), current, saved: true, login_incomplete: false }
     }
 
     #[test]
@@ -964,6 +968,35 @@ mod tests {
     }
 
     #[test]
+    fn 遠端切到登入不完整的帳號_回報失敗原因_本機登入沒動() {
+        let d = tempfile::tempdir().unwrap();
+        let h = d.path().to_path_buf();
+        let login = |uuid: &str, email: &str, cred: &str| {
+            std::fs::create_dir_all(h.join(".claude")).unwrap();
+            std::fs::write(h.join(".claude").join(".credentials.json"), cred).unwrap();
+            std::fs::write(h.join(".claude.json"), format!(r#"{{"oauthAccount":{{"accountUuid":"{uuid}","emailAddress":"{email}"}}}}"#)).unwrap();
+            claude_accounts::save_current(&h).unwrap();
+        };
+        login("u-b", "b@x.test", r#"{"claudeAiOauth":{"accessToken":"FAKE-ACCESS-B"}}"#);
+        login("u-a", "a@x.test", r#"{"claudeAiOauth":{"accessToken":"FAKE-ACCESS-A","refreshToken":"FAKE-REFRESH-A"}}"#);
+        let before = std::fs::read(h.join(".claude").join(".credentials.json")).unwrap();
+        let mut m = taken_with(U, "b@x.test");
+        // 跟正式的 claude_accounts::local_switch 一樣走 switch_to → switch_impl
+        let r = decide(&mut m, U, true, |e| claude_accounts::switch_to(&h, e).map(|o| o.notice).map_err(|e| e.to_string()));
+        assert_eq!(r, Some(("failed", claude_accounts::INCOMPLETE_LOGIN_MSG.to_string())));
+        assert_eq!(std::fs::read(h.join(".claude").join(".credentials.json")).unwrap(), before);
+    }
+
+    #[test]
+    fn 回報只對登入不完整的帳號多帶布林() {
+        let mut bad = acct("b@x.test", false);
+        bad.login_incomplete = true;
+        let v = build_report(&[acct("a@x.test", true), bad], None);
+        assert!(v["accounts"][0].get("login_incomplete").is_none(), "正常帳號不多帶欄位");
+        assert_eq!(v["accounts"][1]["login_incomplete"], json!(true));
+    }
+
+    #[test]
     fn 沒取走過的編號不能憑空切換() {
         let mut m = HashMap::new();
         assert!(decide(&mut m, U, true, |_| panic!("不該被呼叫")).is_none());
@@ -1008,7 +1041,7 @@ mod tests {
     }
     fn login(home: &Path, uuid: &str, email: &str, tag: &str) {
         std::fs::create_dir_all(home.join(".claude")).unwrap();
-        std::fs::write(home.join(".claude").join(".credentials.json"), format!(r#"{{"claudeAiOauth":{{"accessToken":"FAKE-{tag}","subscriptionType":"max"}}}}"#)).unwrap();
+        std::fs::write(home.join(".claude").join(".credentials.json"), format!(r#"{{"claudeAiOauth":{{"accessToken":"FAKE-{tag}","refreshToken":"FAKE-REFRESH-{tag}","subscriptionType":"max"}}}}"#)).unwrap();
         std::fs::write(home.join(".claude.json"), format!("{{\n  \"oauthAccount\": {{\n    \"accountUuid\": \"{uuid}\",\n    \"emailAddress\": \"{email}\"\n  }}\n}}\n")).unwrap();
     }
 

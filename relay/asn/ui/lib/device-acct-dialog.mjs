@@ -1,6 +1,10 @@
 // 名單設備標題右鍵「切換這台的 Claude 帳號…」打開的專屬對話框：純邏輯。
 // 載入清單、送出切換、等結果都沿用 claude-accounts.mjs 的 remote 狀態（remoteSelect／remoteSwitch），這裡只整理要顯示的字。
 import { agoText } from './cloud-invite.mjs'
+import { INCOMPLETE_LABEL, INCOMPLETE_REASON, loginIncomplete } from './claude-accounts.mjs'
+
+// 存的登入不完整的帳號：標「登入不完整」、不能選，並寫原因
+export const incompleteRow = a => (loginIncomplete(a) ? { incomplete: true, incompleteLabel: INCOMPLETE_LABEL, incompleteReason: INCOMPLETE_REASON } : { incomplete: false, incompleteLabel: '', incompleteReason: '' })
 
 export const CONFIRM_NOTE = '送出後，那台電腦會跳出確認視窗，對方按「同意」後才會切換；如果對方設定了信任自己的設備，就會直接切換、不再詢問。'
 export const CLOSE_NOTE = '切換後馬上生效，那台電腦開著的 Claude 視窗不用重開。'
@@ -16,13 +20,13 @@ export function dialogView(remote, selected = '', now = Date.now(), { quotaOf = 
   const cur = list.find(a => a.current)
   const ago = agoText(remote?.reportedAt, now)
   const online = remote?.asnOnline === true
-  const pick = list.find(a => a.email === selected && !a.current)
+  const pick = list.find(a => a.email === selected && !a.current && !loginIncomplete(a))
   return {
     online,
     onlineText: remote?.loading ? '讀取中…' : online ? '那台電腦的 ASN 在線' : '那台電腦的 ASN 目前沒有在線',
     currentText: cur ? `目前使用：${cur.email}` : '目前使用：（那台沒有回報）',
     reportedText: ago ? `最後回報：${ago}` : '最後回報：（沒有紀錄）',
-    rows: list.map(a => ({ email: a.email, plan: a.plan || '', current: a.current === true, picked: a.email === selected && !a.current, ...rowQuota(quotaOf(a.email)) })),
+    rows: list.map(a => ({ email: a.email, plan: a.plan || '', current: a.current === true, picked: a === pick, ...incompleteRow(a), ...rowQuota(quotaOf(a.email)) })),
     canSwitch: Boolean(pick) && online && !remote?.busy && !remote?.loading,
     switchEmail: pick ? pick.email : '',
     status: remote?.loading ? '' : remote?.msg || '',

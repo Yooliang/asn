@@ -282,7 +282,11 @@ mod child_env_tests {
         let switch = include_str!("switch.rs");
         let wez = include_str!("wezterm.rs");
         let body = local.split("#[cfg(test)]").next().unwrap();
-        let fn_body = |src: &'static str, start: &str, end: &str| -> &'static str { src.split(start).nth(1).unwrap_or_else(|| panic!("找不到 {start}")).split(end).next().unwrap() };
+        // Windows 取出的檔案可能是 CRLF：起點字串裡的換行兩種都試
+        let fn_body = |src: &'static str, start: &str, end: &str| -> &'static str {
+            let crlf = start.replace('\n', "\r\n");
+            src.split(start).nth(1).or_else(|| src.split(crlf.as_str()).nth(1)).unwrap_or_else(|| panic!("找不到 {start}")).split(end).next().unwrap()
+        };
         // 1. Windows 開窗點：走 WezTerm，傳進去的環境經過 child_env
         let win = fn_body(body, "fn start_window_windows(", "fn start_console_window_windows(");
         assert!(win.contains("win_term::open_window_real("), "Windows 開窗走 WezTerm（退路才用 conhost）");
