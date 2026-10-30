@@ -301,8 +301,39 @@ export const mattachProbeSource = ({ mattach }) => `(async () => {
   if (call[1]?.payload?.room !== 'g1') return { ok: false, why: '附件沒有帶群組代號：' + JSON.stringify(call[1]?.payload?.room) };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.mattach ? '手機群組附件檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mbar ? '手機大按鈕檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.mattach ? mattachProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mbar ? mbarProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+// 額度畫面（#374 之三）：「我的帳號」區每個廠牌（data-vendor）的文字要依序含 want 列的每一段；先等 open 指定的入口（手機要從設置點進「設備與帳號」）
+export const QUOTA_PROBES = {
+  gemini: { quota: '.dv-my', want: { claude: ['Claude', '5 小時剩 40%', '每週剩 72%'], gemini: ['Gemini', '5 小時剩', '每週剩'] } },
+  geminiEmpty: { quota: '.dv-my', want: { claude: ['Claude', '5 小時剩 40%', '每週剩 72%'], gemini: ['Gemini', '開 Gemini 視窗後才讀得到'] } },
+  mobile: { quota: '.m-dv-my', open: '設備與帳號', want: { claude: ['Claude', '5 小時剩 40%', '每週剩 72%'], gemini: ['Gemini', '5 小時剩', '每週剩'] } },
+}
+export const quotaProbeSource = ({ quota, open = '', want }) => `(async () => {
+  const sel = ${JSON.stringify(quota)}, open = ${JSON.stringify(open)}, want = ${JSON.stringify(want)};
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  if (open) {
+    let btn = null;
+    for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes(open)) || null; if (!btn) await sleep(100) }
+    if (!btn) return { ok: false, why: '找不到「' + open + '」' };
+    btn.click();
+  }
+  let why = '';
+  for (let i = 0; i < 60; i++) {
+    const box = document.querySelector(sel);
+    why = box ? '' : '找不到「我的帳號」區';
+    if (box) for (const [v, parts] of Object.entries(want)) {
+      const el = box.querySelector('[data-vendor="' + v + '"]');
+      const text = el ? el.textContent.replace(/\\s+/g, ' ') : '';
+      let at = 0;
+      for (const p of parts) { const k = text.indexOf(p, at); if (k < 0) { why = (el ? v + ' 少了「' + p + '」：' + text : '沒有 ' + v + ' 這一組'); break } at = k + p.length }
+      if (why) break;
+    }
+    if (!why) return { ok: true, why: '' };
+    await sleep(100);
+  }
+  return { ok: false, why };
+})()`
+export const probeKind = probe => (probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mbar ? '手機大按鈕檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mbar ? mbarProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // ---- 入口頁清單：每個情境載一頁，指定假狀態、等待的畫面特徵 ----
 // ready：頁面掛上後必須存在的選擇器；頁面不能被導走（導走＝流程錯）
@@ -312,6 +343,10 @@ export const SCENARIOS = [
   { name: 'list', page: 'list.html', state: { signedIn: true }, ready: '#app.win' },
   { name: 'list-roster', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: true }, ready: '#app.win .dv-my .dv-acct' },
   { name: 'list-roster-missing', page: 'list.html', state: { signedIn: true, devicesPage: true }, ready: '#app.win .dv-set' },
+  // Gemini 額度（#374 之三）：有額度時兩條都顯示、沒資料時寫提示；Claude 那一組照舊。手機從設置點進「設備與帳號」看同一區
+  { name: 'list-roster-gemini', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'gemini' }, ready: '#app.win .dv-my .dv-acct', probe: QUOTA_PROBES.gemini },
+  { name: 'list-roster-gemini-empty', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'geminiEmpty' }, ready: '#app.win .dv-my .dv-acct', probe: QUOTA_PROBES.geminiEmpty },
+  { name: 'm-roster-gemini', page: 'm.html', state: { signedIn: true, mroster: true }, ready: '#app.m .m-row-btn', probe: QUOTA_PROBES.mobile },
   { name: 'chat', page: 'chat.html?id=P%2Fdemo', state: { signedIn: true }, ready: '#app.win' },
   { name: 'onboard', page: 'onboard.html', state: { signedIn: true, onboard: true }, ready: '#app.win' },
   { name: 'login', page: 'login.html', state: { signedIn: false, needsLogin: true }, ready: '#app.win' },
@@ -354,6 +389,11 @@ export const ROSTER_SAMPLE = {
     { vendor: 'codex', account: 'me@example.com', plan: 'plus', windows: [], seen_at: '2026-10-28T21:00:00Z', seen_node: 'P', nodes: [] },
   ],
 }
+const GEMINI_ROW = { vendor: 'gemini', account: 'me@example.com', plan: 'Google AI Pro', windows: [{ name: 'five_hour', left_pct: 55, resets_at: null, read_at: '2026-10-28T22:00:00Z', read_node: 'P' }, { name: 'weekly', left_pct: 81, resets_at: null, read_at: '2026-10-28T22:00:00Z', read_node: 'P' }], seen_at: '2026-10-28T22:00:00Z', seen_node: 'P', nodes: [] }
+export const ROSTER_GEMINI = { ...ROSTER_SAMPLE, accounts: [...ROSTER_SAMPLE.accounts, GEMINI_ROW] }
+export const ROSTER_GEMINI_EMPTY = { ...ROSTER_SAMPLE, accounts: [...ROSTER_SAMPLE.accounts, { ...GEMINI_ROW, windows: [] }] }
+const ROSTERS = { gemini: ROSTER_GEMINI, geminiEmpty: ROSTER_GEMINI_EMPTY }
+export const MROSTER_ME = { navTab: 'me' }
 export const tableFor = scenario => {
   const t = fakeTable(scenario.state)
   if (scenario.state.onboard) t.store_load = { by: 'name', values: {}, fallback: null }
@@ -384,7 +424,8 @@ export const tableFor = scenario => {
     t.relay_group = { by: 'action', values: { group_confirm_list: { confirms: [] } }, fallback: null }
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(GROUP_ME) } }
   }
-  if (scenario.state.roster) t.acct_roster = ROSTER_SAMPLE   // 沒放＝後台沒部署（指令被拒），畫面要退回舊的顯示、不出錯
+  if (scenario.state.roster) t.acct_roster = ROSTERS[scenario.state.roster] ?? ROSTER_SAMPLE   // 沒放＝後台沒部署（指令被拒），畫面要退回舊的顯示、不出錯
+  if (scenario.state.mroster) { t.android_acct_roster = ROSTER_GEMINI; t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MROSTER_ME) } } }
   return t
 }
 
