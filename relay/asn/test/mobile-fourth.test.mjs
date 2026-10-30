@@ -166,6 +166,29 @@ test('細部那台不見了又點另一台：取代目前這層，不留一筆�
   h.press(); assert.equal(h.st.fourth, null)
 })
 
+test('停在細部、底下沒有列表那層（照記錄重開）時又點另一台：不取代唯一一層，返回鍵仍退得回、不是整頁收起', () => {
+  const h = harness()
+  h.r.go(pageNav(acctPage('W'))); h.r.onPop(pageNav(acctPage('W')))   // 第四頁籤已收起，卻退到細部的舊記錄＝照記錄重開，底下是否有列表那層不確定
+  assert.deepEqual(h.st.fourth.page, acctPage('W'))
+  h.r.pushLayer(acctPage('P'), { replace: true })   // 畫面顯示列表（W 不在名單），使用者點 P：標了取代
+  assert.deepEqual(h.st.fourth.page, acctPage('P'))
+  h.press()
+  assert.ok(h.st.fourth, '返回一次不該直接收起整頁（取代唯一一層的話就會）')
+  assert.equal(h.nav.tab, PAGE_TAB)
+})
+
+test('細部那台不見了又點另一台：底下確有列表層才取代；退回列表後再進細部仍可取代', () => {
+  const h = harness('me')
+  h.r.openPage(acctPage('W'))
+  const before = h.depth()
+  h.r.pushLayer(acctPage('P'), { replace: true })
+  assert.equal(h.depth(), before, '取代＝不多一筆記錄')
+  h.press(); assert.deepEqual(h.st.fourth.page, acctPage())
+  h.r.pushLayer(acctPage('W')); h.r.pushLayer(acctPage('P'), { replace: true })
+  h.press(); assert.deepEqual(h.st.fourth.page, acctPage())
+  h.press(); assert.equal(h.st.fourth, null); assert.equal(h.nav.tab, 'me')
+})
+
 test('浮層開著時不切頁、不開內頁；浮層從第四頁籤上退回來照常', () => {
   const h = harness()
   h.r.openPage(settingPage('me'))
