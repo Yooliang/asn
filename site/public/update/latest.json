@@ -1,11 +1,11 @@
 {
-  "version": "0.1.111",
-  "notes": "新功能：「我的帳號」和設備卡顯示 Gemini 額度（#374）。新功能：5 小時、每週兩條額度各自寫重置時間。新功能：Gemini 帳號會標「使用中」。修正：手機「設備與帳號」頁重新排版，每張帳號卡固定三行，方案寫 Max、Pro。",
-  "pub_date": "2026-10-30T03:07:50.458Z",
+  "version": "0.1.112",
+  "notes": "新功能：手機對話頁拿掉上方圖示列，功能都收進右上角「⋯」，喚醒、切換模型排最前面。修正：內建通道夥伴的「重開」「移除」按了沒反應。修正：存的登入不完整的 Claude 帳號不能再切換過去，帳號清單標「登入不完整」。修正：手機「設備與帳號」頁按返回退不回列表。",
+  "pub_date": "2026-10-30T21:05:52.753Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjZvVTVzZk9vK0RrTW1mNXJhQ2hqL1hkR3dwVDlWdi9rY3QvNXdINHpINGQ4dm1IRDNYVWNCa0dFU3grcktOSU56cEVtbjdhQVBiY0lVRjJyZkdDREEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMzI5NjcwCWZpbGU6QVNOXzAuMS4xMTFfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS4xMTEKNUZGN09YN1hIZ3RuWll0QmhKbjlZT2tpTU80cDV3Y3NQeW9JRjJDV3c3K3dpK3JjbUVsdjNmNFkyalFlRlYwQXV0VFk3V25zb3FuMzRpVWtnL1JvQXc9PQo=",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.111_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjZrdmdlcjk5ODVjdysrM2JUUTBEY2ZhUnUyTVVrTkRZKzJZZGJTdG1YRU0xRXFuMno3aWlsNFRXSzVLdFhseFdkRzI3S1ZPNDRzSEhDSmlnSzRMRmdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMzk0MzUyCWZpbGU6QVNOXzAuMS4xMTJfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS4xMTIKRVlSamdVZVdPaTBhb3Y1WGdtZGxIQmFqTllLME5Oc0FKaC9CYVZpcDVNRHNTNndjcGRwVnk5NFc2ejZYU2NXbUlxOXJHMTZuT0xMYjN2YUVzNENkQlE9PQo=",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.112_x64-setup.exe"
     }
   }
 }
