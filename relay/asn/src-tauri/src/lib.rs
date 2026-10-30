@@ -1244,6 +1244,8 @@ pub fn run() {
     #[cfg(desktop)]
     let background = args.iter().any(|a| a == tray::BACKGROUND_FLAG);
     let shot = args.iter().position(|a| a == "--shot").and_then(|i| args.get(i + 1)).map(PathBuf::from);
+    #[cfg(desktop)]
+    let is_shot = shot.is_some();
 
     // 使用者資料夾合併式遷移（#14 R2）：只做一次、失敗就照舊用舊位置；截圖模式（假家目錄）不做
     if shot.is_none() {
@@ -1257,6 +1259,14 @@ pub fn run() {
         Err(e) => (None, String::new(), Some(e), PathBuf::new(), None, None),
     };
     let _ = relay;
+    // panic 先寫進 ui.log 再結束（#1749：panic = "abort"，以前閃退什麼都沒留下）；截圖模式不寫
+    #[cfg(desktop)]
+    if !is_shot {
+        ui_log::install_panic_hook(work_dir.clone());
+    }
+    // 自己結束時寫原因用的資料夾（截圖模式不寫）
+    #[cfg(desktop)]
+    let exit_log_dir = if is_shot { PathBuf::new() } else { work_dir.clone() };
 
     // --shot 只准連本機假後端（紅線：測試不碰真實 relay）
     if shot.is_some() {
@@ -1279,6 +1289,12 @@ pub fn run() {
         Arc::new(r)
     });
 
+    // 自己重開的新程序（--after-pid <舊 pid>）：先等舊的結束再做同名檢查，不然舊的心跳還新鮮會被判成同名已在跑（#581 審）
+    #[cfg(desktop)]
+    if let Some(old) = ui_log::after_pid(&args) {
+        ui_log::wait_gone(old, ui_log::AFTER_PID_WAIT, heartbeat::pid_alive, heartbeat::is_asn_process);
+    }
+
     // 同一個視窗名只留一個 ASN（另一個還活著就退出，同 recv.mjs 的 exit 3）。
     // 這個新開的是被邀請連結叫起來的（asn://invite/<碼>）：先把碼放進信箱檔，正在跑的那個 ASN 會取走並跳出「加入群組」
     if let Some(r) = &relay_obj {
@@ -1288,6 +1304,8 @@ pub fn run() {
                 let _ = invite_link::drop_in_inbox(&work_dir, &code);
             }
             eprintln!("視窗「{}」已經有一個 ASN 在跑（pid {}）", r.window_name(), h.pid);
+            #[cfg(desktop)]
+            ui_log::log_exit(&exit_log_dir, &format!("同一個視窗名已經有 ASN 在跑（pid {}），這個不開", h.pid));
             std::process::exit(3);
         }
     }
@@ -1647,8 +1665,10 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("ASN 啟動失敗");
 
-    app.run(|h, ev| {
+    app.run(move |h, ev| {
         if let tauri::RunEvent::Exit = ev {
+            #[cfg(desktop)]
+            ui_log::log_exit(&exit_log_dir, "正常結束");
             cleanup(h);
         }
     });
