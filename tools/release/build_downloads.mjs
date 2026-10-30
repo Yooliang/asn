@@ -25,7 +25,8 @@ const INSTALLER = path.join(MACHINE, 'installer')
 const EXCLUDE_DIRS = new Set(['test', 'installer', 'node_modules'])
 const EXCLUDE_FILE = name =>
   /^tools-.*\.mjs$/.test(name) || /\.(key|log|pid|tmp)$/i.test(name) || name === 'pending.json' ||
-  name.startsWith('.') || name === 'bridge-aegis.mjs' || name.endsWith('.service')
+  name.startsWith('.') || name.endsWith('.service') ||
+  /aegis/i.test(name)   // Aegis 轉接橋只在 Linux 跑：bridge-aegis.mjs 與它的 aegis-config.mjs 等一律不進 Windows 包
 // 打包完再檢查一次：zip 裡不能出現的路徑（金鑰、測試、紀錄、執行狀態）
 export const FORBIDDEN_IN_ZIP = /(^|\/)(test|node_modules|\.git)\/|\.(key|log|pid|tmp)$|(^|\/)pending\.json$|(^|\/)tools-[^/]*$|(^|\/)\.env/i
 

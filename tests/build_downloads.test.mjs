@@ -58,7 +58,7 @@ test('排除規則：用假的專案目錄塞進金鑰／測試／紀錄／開�
   fs.mkdirSync(path.join(m, 'engines'), { recursive: true })
   fs.mkdirSync(path.join(m, 'node_modules', 'x'), { recursive: true })
   for (const f of ['bridge.mjs', 'engines/a.mjs', 'H.key', 'W-1.key', 'pending.json', 'bridge.log', 'bridge.pid', 'mailbox.pid', 'tools-roundtrip.mjs',
-    'test/a.test.mjs', 'node_modules/x/i.js', '.env', 'bridge-aegis.mjs', 'irori-relay-aegis.service', 'agents.example.json']) {
+    'test/a.test.mjs', 'node_modules/x/i.js', '.env', 'bridge-aegis.mjs', 'aegis-config.mjs', 'irori-relay-aegis.service', 'agents.example.json']) {
     fs.writeFileSync(path.join(m, f), 'SECRET-DO-NOT-SHIP')
   }
   fs.writeFileSync(path.join(m, 'installer', 'install.ps1'), 'x')
