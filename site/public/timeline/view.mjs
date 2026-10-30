@@ -1,6 +1,6 @@
 // 藍圖頁與開發日誌頁的畫面：一律用 createElement＋textContent 建節點，資料庫內容絕不當 HTML 插入。
 // 守門測試會掃這個資料夾，不准出現 innerHTML 這類寫法。兩頁共用同一套時間軸樣式（style.css 的 .tl）。
-import { parseBlocks, STATUS_LABEL, MEETING_FIELDS, issueUrl, taipeiParts } from './model.mjs'
+import { parseBlocks, STATUS_LABEL, MEETING_FIELDS, issueUrl, taipeiParts, EMPTY_LANE_TEXT } from './model.mjs'
 
 const ATTRS = new Set(['class', 'id', 'scope', 'data-label', 'aria-label', 'aria-hidden', 'role', 'rel', 'target'])
 
@@ -127,7 +127,7 @@ export function meetingCard(m) {
 export function lanesView(lanes) {
   return h('div', { class: 'road' }, lanes.map(l => h('div', { class: 'glass lane' },
     h('h3', null, h('span', { class: `status ${l.tone}` }, l.label)),
-    h('ul', null, l.items.map(i => itemNode(i))))))
+    l.items.length ? h('ul', null, l.items.map(i => itemNode(i))) : h('p', { class: 'lane-empty' }, EMPTY_LANE_TEXT))))
 }
 
 // ---- 支援總表 ----
