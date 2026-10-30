@@ -380,7 +380,7 @@ mod tests {
     }
 
     fn acct(email: &str, current: bool) -> AccountInfo {
-        AccountInfo { email: email.into(), plan: "max".into(), org: "ORG".into(), current, saved: true }
+        AccountInfo { email: email.into(), plan: "max".into(), org: "ORG".into(), current, saved: true, login_incomplete: false }
     }
 
     #[test]

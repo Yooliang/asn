@@ -19,6 +19,17 @@ use std::path::{Path, PathBuf};
 const CRED: &str = ".credentials.json";
 const FRAG: &str = "account.json";
 const KEY: &str = "oauthAccount";
+/// 切換到「存的登入不完整」的帳號時回給使用者的話（本機與遠端切換同一句）
+pub const INCOMPLETE_LOGIN_MSG: &str = "這個帳號存的登入不完整，請重新登入一次再加入";
+
+/// 權杖檔裡有沒有非空的 `claudeAiOauth.refreshToken`。只回布林：權杖內容不複製、不回傳、不進 log。
+/// 不是 JSON、缺欄位、不是字串、空字串（含只有空白）都算沒有。
+pub fn has_refresh_token(cred: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(cred)
+        .ok()
+        .and_then(|v| v.pointer("/claudeAiOauth/refreshToken").and_then(|x| x.as_str()).map(|t| !t.trim().is_empty()))
+        .unwrap_or(false)
+}
 
 #[derive(Debug, PartialEq)]
 pub enum AccErr {
@@ -26,6 +37,8 @@ pub enum AccErr {
     NotFound,
     NoLogin,
     CurrentUnsaved,
+    /// 帳號庫裡存的權杖沒有 refreshToken（缺欄位或空字串）：切過去馬上會被撤銷，整台的 Claude 都失效
+    IncompleteLogin,
     Corrupt(&'static str),
     Io(String),
 }
@@ -37,6 +50,7 @@ impl fmt::Display for AccErr {
             AccErr::NotFound => write!(f, "找不到這個帳號"),
             AccErr::NoLogin => write!(f, "這台電腦目前沒有 Claude 登入，請先登入再加入帳號"),
             AccErr::CurrentUnsaved => write!(f, "目前登入的帳號還沒加入帳號庫，切走會遺失；請等 ASN 自動加入（約一分鐘）後再切換"),
+            AccErr::IncompleteLogin => write!(f, "{INCOMPLETE_LOGIN_MSG}"),
             AccErr::Corrupt(what) => write!(f, "{what}"),
             AccErr::Io(e) => write!(f, "檔案操作失敗：{e}"),
         }
@@ -58,6 +72,8 @@ pub struct AccountInfo {
     pub current: bool,
     /// 已經在帳號庫裡（`list` 一律 true；`current_login` 才可能是 false）
     pub saved: bool,
+    /// 存的登入不完整（權杖檔沒有 refreshToken）：不能切換過去。只是布林，不含任何權杖內容
+    pub login_incomplete: bool,
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -408,7 +424,8 @@ fn info_of(frag: &str, email: &str, cred_file: &Path, current: bool) -> AccountI
             .and_then(|v| v.pointer("/claudeAiOauth/subscriptionType").and_then(|x| x.as_str().map(String::from)))
             .unwrap_or_default()
     });
-    AccountInfo { email: email.to_string(), plan, org: field(&a, "organizationName"), current, saved: true }
+    let login_incomplete = !std::fs::read(cred_file).map(|b| has_refresh_token(&b)).unwrap_or(false);
+    AccountInfo { email: email.to_string(), plan, org: field(&a, "organizationName"), current, saved: true, login_incomplete }
 }
 
 pub fn list(home: &Path) -> Vec<AccountInfo> {
@@ -470,6 +487,11 @@ pub fn switch_impl(home: &Path, email: &str, fault: Fault) -> R<SwitchOutcome> {
     let tgt_frag = std::fs::read_to_string(dir.join(FRAG)).map_err(|_| AccErr::NotFound)?;
     serde_json::from_slice::<serde_json::Value>(&tgt_cred).map_err(|_| AccErr::Corrupt("帳號庫裡的權杖檔壞了"))?;
     uuid_of_fragment(&tgt_frag).ok_or(AccErr::Corrupt("帳號庫裡的帳號資訊壞了"))?;
+    // 0. 存的登入沒有 refreshToken 就在動到任何檔案（回存、備份、換權杖）之前拒絕：
+    //    切過去會立刻被撤銷，整台的 Claude 都會失效（10-30 工作機事故）。本機「切換」與遠端切換都經過這裡。
+    if !has_refresh_token(&tgt_cred) {
+        return Err(AccErr::IncompleteLogin);
+    }
 
     // 1. 先把目前的權杖回存到它所屬的帳號（權杖會自動換新，庫裡的舊副本可能已失效）
     let old_cred = read_cred(home)?;
@@ -851,6 +873,95 @@ mod tests {
         let (c0, j0) = (read(cred_path(h)), read(cj_path(h)));
         assert!(switch_to(h, "a@x.test").is_err());
         assert_eq!((read(cred_path(h)), read(cj_path(h))), (c0, j0));
+    }
+
+    // ---------- 存的登入不完整（沒有 refreshToken）：切換前就拒絕（10-30 工作機事故） ----------
+    /// 家目錄底下所有檔案（相對路徑 → 內容），用來證明「什麼都沒動」
+    fn snapshot(h: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+        fn walk(root: &Path, d: &Path, out: &mut std::collections::BTreeMap<String, Vec<u8>>) {
+            for e in fs::read_dir(d).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(root, &p, out);
+                } else {
+                    out.insert(p.strip_prefix(root).unwrap().to_string_lossy().to_string(), fs::read(&p).unwrap());
+                }
+            }
+        }
+        let mut out = std::collections::BTreeMap::new();
+        walk(h, h, &mut out);
+        out
+    }
+    /// 庫裡有 a（目前登入、權杖已換新過）與 b；b 存的權杖換成 `b_cred`
+    fn two_accounts_b_cred(h: &Path, b_cred: &str) {
+        login(h, "u-b", "b@x.test", "B1");
+        save_current(h).unwrap();
+        login(h, "u-a", "a@x.test", "A1");
+        save_current(h).unwrap();
+        fs::write(cred_path(h), cred("A2")).unwrap(); // 目前的權杖換新過：正常切換會先回存，這裡不該回存
+        fs::write(dir_of(h, "b@x.test").join(CRED), b_cred).unwrap();
+    }
+
+    #[test]
+    fn 判斷有沒有_refresh_token_只看非空字串() {
+        assert!(has_refresh_token(cred("X").as_bytes()));
+        assert!(!has_refresh_token(br#"{"claudeAiOauth":{"accessToken":"FAKE-ACCESS","expiresAt":1}}"#));
+        assert!(!has_refresh_token(br#"{"claudeAiOauth":{"accessToken":"FAKE-ACCESS","refreshToken":""}}"#));
+        assert!(!has_refresh_token(br#"{"claudeAiOauth":{"accessToken":"FAKE-ACCESS","refreshToken":"   "}}"#));
+        assert!(!has_refresh_token(br#"{"claudeAiOauth":{"refreshToken":null}}"#));
+        assert!(!has_refresh_token(br#"{"claudeAiOauth":{"refreshToken":123}}"#));
+        assert!(!has_refresh_token(br#"{"refreshToken":"FAKE-REFRESH"}"#), "要在 claudeAiOauth 底下");
+        assert!(!has_refresh_token(b"not json"));
+    }
+
+    #[test]
+    fn 切到沒有_refresh_token_的帳號_動手前拒絕_所有檔案都沒動() {
+        let d = setup();
+        let h = d.path();
+        two_accounts_b_cred(h, r#"{"claudeAiOauth":{"accessToken":"FAKE-ACCESS-B","expiresAt":1,"subscriptionType":"max"}}"#);
+        let before = snapshot(h);
+        let r = switch_to(h, "b@x.test");
+        assert_eq!(r, Err(AccErr::IncompleteLogin));
+        assert_eq!(r.unwrap_err().to_string(), "這個帳號存的登入不完整，請重新登入一次再加入");
+        assert_eq!(snapshot(h), before, "目前登入、帳號庫、備份一個位元組都沒動");
+        assert!(!backup_dir(h).exists(), "連備份都還沒做");
+        assert_eq!(current_email(h).as_deref(), Some("a@x.test"));
+    }
+
+    #[test]
+    fn 切到_refresh_token_是空字串的帳號_動手前拒絕_所有檔案都沒動() {
+        let d = setup();
+        let h = d.path();
+        two_accounts_b_cred(h, r#"{"claudeAiOauth":{"accessToken":"FAKE-ACCESS-B","refreshToken":"","expiresAt":1}}"#);
+        let before = snapshot(h);
+        // 寫入失敗注入點也走不到：在任何寫檔之前就停
+        assert_eq!(switch_impl(h, "b@x.test", Fault::AfterCredentials), Err(AccErr::IncompleteLogin));
+        assert_eq!(snapshot(h), before);
+    }
+
+    #[test]
+    fn 切到登入完整的帳號照常切換() {
+        let d = setup();
+        let h = d.path();
+        two_accounts_b_cred(h, &cred("B9"));
+        let out = switch_to(h, "b@x.test").unwrap();
+        assert_eq!(out.email, "b@x.test");
+        assert_eq!(read(cred_path(h)), cred("B9"));
+        assert_eq!(read(dir_of(h, "a@x.test").join(CRED)), cred("A2"), "切走前回存目前的權杖");
+    }
+
+    #[test]
+    fn 清單標出登入不完整_只是布林_不含權杖() {
+        let d = setup();
+        let h = d.path();
+        two_accounts_b_cred(h, r#"{"claudeAiOauth":{"accessToken":"FAKE-ACCESS-B","refreshToken":""}}"#);
+        let l = list(h);
+        let flags: Vec<(&str, bool)> = l.iter().map(|a| (a.email.as_str(), a.login_incomplete)).collect();
+        assert_eq!(flags, vec![("a@x.test", false), ("b@x.test", true)]);
+        let shown = serde_json::to_string(&l).unwrap();
+        assert!(!shown.contains("FAKE-"), "清單不可含權杖：{shown}");
+        assert!(shown.contains("\"login_incomplete\":true"));
+        assert!(!current_login(h).unwrap().login_incomplete);
     }
 
     #[test]

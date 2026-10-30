@@ -3,7 +3,8 @@
 // 權杖只在各自那台電腦搬，不經過手機也不進收發室（清單裡只有 email、方案、是否使用中）。
 // node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。給人看的文字純繁體中文。
 import { agoText } from './cloud-invite.mjs'
-import { CLOSE_NOTE, rowQuota } from './device-acct-dialog.mjs'
+import { CLOSE_NOTE, incompleteRow, rowQuota } from './device-acct-dialog.mjs'
+import { loginIncomplete } from './claude-accounts.mjs'
 import { nodeLabelOf, rosterQuotaFor, rosterView } from './account-roster.mjs'
 import { isFinalStatus, remoteStatusText } from './claude-accounts.mjs'
 import { QUOTA_NOTE } from './account-quota.mjs'
@@ -70,14 +71,14 @@ export function acctSheetView(remote, picked = '', now = Date.now(), { roster = 
   const cur = list.find(a => a.current)
   const online = remote?.asnOnline === true
   const ago = agoText(remote?.reportedAt, now)
-  const pick = list.find(a => a.email === picked && !a.current)
+  const pick = list.find(a => a.email === picked && !a.current && !loginIncomplete(a))
   return {
     online,
     onlineText: remote?.loading ? '讀取中…' : online ? '那台電腦的 ASN 在線' : '那台電腦的 ASN 目前沒有在線，無法切換',
     currentText: cur ? `目前使用：${cur.email}` : '目前使用：（那台沒有回報）',
     currentEmail: cur?.email ?? '',
     reportedText: ago ? `最後回報：${ago}` : '',
-    rows: list.map(a => ({ email: a.email, plan: a.plan || '', current: a.current === true, picked: a.email === picked && !a.current, ...rowQuota(quotaOf(a.email)) })),
+    rows: list.map(a => ({ email: a.email, plan: a.plan || '', current: a.current === true, picked: a === pick, ...incompleteRow(a), ...rowQuota(quotaOf(a.email)) })),
     empty: !remote?.loading && !list.length ? ACCT_TEXT.empty : (!remote?.loading && list.length < 2 ? ACCT_TEXT.needTwo : ''),
     canPick: online && !remote?.loading && list.length >= 2,
     pickEmail: pick ? pick.email : '',

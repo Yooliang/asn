@@ -48,7 +48,7 @@ test('設備樹：廠商帶出各自的帳號清單（email、方案、使用中
     self: { claude: [{ email: 's@x.test', plan: 'max', current: true }], codex: { loggedIn: true, text: 'c@x.test · plus' } },
   })
   const self = t.find(d => d.self), w = t.find(d => !d.self)
-  assert.deepEqual(self.vendors.find(v => v.key === 'claude').accounts, [{ email: 's@x.test', plan: 'max', current: true, quota: { known: false, text: '額度未知', meta: '', resetText: '', resetLine: '', bars: [], oldText: '', stale: true, exhausted: false } }])   // Claude 帳號都帶額度；沒有紀錄就是「額度未知」
+  assert.deepEqual(self.vendors.find(v => v.key === 'claude').accounts, [{ email: 's@x.test', plan: 'max', current: true, incomplete: false, quota: { known: false, text: '額度未知', meta: '', resetText: '', resetLine: '', bars: [], oldText: '', stale: true, exhausted: false } }])   // Claude 帳號都帶額度；沒有紀錄就是「額度未知」
   assert.deepEqual(self.vendors.find(v => v.key === 'gemini').accounts, [])
   assert.equal(self.vendors.find(v => v.key === 'codex').accounts[0].email, 'c@x.test · plus')
   assert.deepEqual(w.vendors.find(v => v.key === 'claude').accounts.map(a => a.email), ['w1@x.test', 'w2@x.test'])
