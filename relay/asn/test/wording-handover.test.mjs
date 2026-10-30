@@ -28,10 +28,20 @@ test('畫面檔案（ui）裡沒有舊說法，只用「換班接手」', () => 
   assert.deepEqual(hits, [])
 })
 
+// 歷史檔不掃：已套用的種子 migration 不再修改（改了也不會更新線上資料庫），而種子快照 seed-source/roadmap.html
+// 是那支 migration 的來源，要跟它保持一致（tests/roadmap_page.test.mjs「種子 SQL 與產生腳本一致」）。
+// 線上藍圖的字樣由領隊直接改 site item（asn_site_roadmap_items 等資料表）更新。其他檔照擋。
+const repo = path.join(root, '..', '..')
+const HISTORICAL = new Set([
+  path.join(repo, 'supabase', 'migrations', '20261027100100_site_content_seed.sql'),
+  path.join(repo, 'site', 'tools', 'seed-source', 'roadmap.html'),
+])
+
 test('官網（site 的頁面與種子檔）也不含舊說法', () => {
   const hits = []
-  for (const f of walk(path.join(root, '..', '..', 'site'))) {
+  for (const f of walk(path.join(repo, 'site'))) {
     if (f.includes(path.sep + 'node_modules' + path.sep)) continue
+    if (HISTORICAL.has(path.resolve(f))) continue
     const text = fs.readFileSync(f, 'utf8')
     for (const w of BANNED) if (text.includes(w)) hits.push(`${path.relative(root, f)}：${w}`)
   }
