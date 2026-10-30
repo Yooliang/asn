@@ -115,6 +115,16 @@ export function buildLanes(lanes, items, section) {
   }))
 }
 
+// 欄裡沒有項目時顯示的一句話（欄位標題照留，讓人知道這欄確實是空的，而不是沒讀到）
+export const EMPTY_LANE_TEXT = '目前沒有'
+
+// 藍圖頁「待辦與優先順序」區：已發佈（released）的項目不再列在待辦，只留在上面的時間軸。
+// 欄位全被濾光時不隱藏整欄，改由畫面寫「目前沒有」（empty 為 true）。
+export function buildTodoLanes(lanes, items) {
+  return buildLanes(lanes, items.filter(i => i.status !== 'released'), 'todo')
+    .map(l => ({ ...l, empty: l.items.length === 0 }))
+}
+
 // 支援總表：列依 sort_order，每列帶齊每個功能欄的格子（缺的格子當「待確認」）
 export function buildMatrix(columns, rows, cells) {
   const cols = [...columns].sort(bySort)

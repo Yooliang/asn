@@ -245,3 +245,55 @@ test('待辦欄位與總表：依排序組好，缺的格子當「待確認」',
   const m = M.buildMatrix([{ column_key: 'a', label: 'A', sort_order: 1 }], [{ row_key: 'x', name: 'X', kind: 'k', note: 'n', sort_order: 1 }], [])
   assert.equal(m.rows[0].cells[0].status, 'tbc')
 })
+
+// 測試用的極簡 document：只記錄標籤、屬性與子節點，足夠檢查畫面結構
+const fakeDocument = () => {
+  const el = tag => ({ tag, attrs: {}, children: [], setAttribute(k, v) { this.attrs[k] = v }, append(...c) { this.children.push(...c) } })
+  return { createElement: el, createDocumentFragment: () => el('#fragment'), createTextNode: text => ({ text }) }
+}
+const textOf = n => (n.text ?? '') + (n.children ?? []).map(textOf).join('')
+const findAll = (n, pred) => [...(pred(n) ? [n] : []), ...(n.children ?? []).flatMap(c => findAll(c, pred))]
+
+test('待辦區不列已發佈的項目，時間軸照樣用它們；欄位被濾光時留著欄位、寫「目前沒有」', async () => {
+  const d = rowsFromSeed()
+  const released = [
+    { item_key: 'todo-decide-x', section: 'todo', lane: 'decide', title: '已發佈的決定', body: 'a', refs: [], status: 'released', version: '0.1.94', sort_order: 1 },
+    { item_key: 'todo-next-x', section: 'todo', lane: 'next', title: '已發佈的近期', body: 'b', refs: [], status: 'released', version: null, sort_order: 999 },
+  ]
+  const items = [...d.items.filter(i => !(i.section === 'todo' && i.lane === 'decide')), ...released]
+  const lanes = M.buildTodoLanes(d.lanes, items)
+  assert.deepEqual(lanes.map(l => l.label), ['一、需要負責人決定', '二、近期（依序）', '三、之後'], '欄位都在，順序不變')
+  assert.ok(lanes.every(l => l.items.every(i => i.status !== 'released')), '待辦區不含已發佈的項目')
+  assert.deepEqual(lanes.map(l => l.items.length), [0, 20, 6])
+  assert.deepEqual(lanes.map(l => l.empty), [true, false, false])
+  assert.equal(M.buildLanes(d.lanes, items, 'todo')[0].items.length, 1, '原本的 buildLanes 不過濾')
+
+  // 時間軸不受影響：藍圖區已發佈的項目照樣出現在過去
+  const tl = M.buildRoadmapTimeline(d.releases, items)
+  const pastItems = [...tl.earlier, ...tl.past.flatMap(n => n.items)]
+  assert.ok(pastItems.length > 0 && pastItems.every(i => i.status === 'released'))
+  assert.deepEqual(tl, M.buildRoadmapTimeline(d.releases, d.items), '時間軸結果跟加這些待辦前一樣')
+
+  // 畫面：空欄寫「目前沒有」、不出空清單；有項目的欄照常列出
+  globalThis.document = fakeDocument()
+  try {
+    const { lanesView } = await import('../site/public/timeline/view.mjs')
+    const view = lanesView(lanes)
+    const [emptyLane, nextLane] = view.children
+    assert.equal(findAll(emptyLane, n => n.tag === 'ul').length, 0)
+    const p = findAll(emptyLane, n => n.tag === 'p')
+    assert.equal(p.length, 1)
+    assert.equal(p[0].attrs.class, 'lane-empty')
+    assert.equal(textOf(p[0]), M.EMPTY_LANE_TEXT)
+    assert.equal(findAll(nextLane, n => n.tag === 'ul')[0].children.length, 20)
+    assert.ok(!textOf(view).includes('已發佈的'), '已發佈的項目不出現在畫面')
+  } finally {
+    delete globalThis.document
+  }
+})
+
+test('藍圖頁的待辦區用 buildTodoLanes（不是不過濾的 buildLanes）', () => {
+  const js = fs.readFileSync(path.join(root, 'site/public/timeline/roadmap.mjs'), 'utf8')
+  assert.match(js, /lanesView\(buildTodoLanes\(/)
+  assert.doesNotMatch(js, /buildLanes\(/)
+})

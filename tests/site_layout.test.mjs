@@ -6,6 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { NAV, BRAND, PAGES, applyLayout, renderHeader, renderHead, markers } from '../site/make-layout.mjs'
+import { UPDATE_BASE, INSTALLER_HREF_RE, installerUrl, patchDownloadLink } from '../relay/asn/scripts/release-lib.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const pub = p => path.join(root, 'site/public', p)
@@ -18,6 +19,15 @@ const section = (html, name) => {
 }
 const files = Object.keys(PAGES)
 const pageHtml = f => read(`site/public/${f}`)
+
+// 頁面載入的外部資源（CSP 的 default-src 'self' 會擋）：任何標籤的 src="http(s)://"、非 <a> 標籤（<link> 等）的 href="http(s)://"。
+// <a href> 是使用者點了才走的連結，不是頁面載入的資源，CSP 不管；但官網目前唯一允許的外部連結是首頁下載按鈕的安裝檔
+// （發版腳本 relay/asn/scripts/release.mjs 用 patchDownloadLink 改寫成 installerUrl(版本)），其他外部連結照樣擋，要加請先改這裡。
+const externalRefs = html => [...html.matchAll(/<([a-z][a-z0-9]*)\b[^>]*?\s(src|href)="(https?:\/\/[^"]*)"/gi)]
+  .map(m => ({ tag: m[1].toLowerCase(), attr: m[2].toLowerCase(), url: m[3] }))
+const isInstallerLink = r => r.tag === 'a' && r.attr === 'href' && r.url.startsWith(UPDATE_BASE)
+  && new RegExp(INSTALLER_HREF_RE.source).test(`href="${r.url}"`)
+const disallowedExternal = html => externalRefs(html).filter(r => !isInstallerLink(r))
 
 test('各頁的共用區段與 make-layout.mjs 產生的一致（改了選單要重跑 node site/make-layout.mjs）', () => {
   for (const f of files) {
@@ -85,9 +95,25 @@ test('符合網站的內容安全政策：套用共用版面的頁面沒有行�
     assert.ok(!/\sstyle=/i.test(html), `${f} 有 style=`)
     assert.ok(!/\son[a-z]+=/i.test(html), `${f} 有行內事件`)
     assert.ok(!/<script(?![^>]*\ssrc=)/i.test(html), `${f} 有行內腳本`)
-    assert.ok(!/(src|href)="https?:\/\//i.test(html), `${f} 有外部資源`)
+    assert.deepEqual(disallowedExternal(html), [], `${f} 有外部資源`)
   }
   for (const f of ['index.html', 'privacy.html', 'terms.html', 'skill/index.html']) assert.ok(!/<script/i.test(pageHtml(f)), `${f} 不該有腳本`)
+})
+
+test('外部資源檢查：發版腳本改寫後的首頁仍符合；外部腳本、樣式表、圖片與其他外部連結照樣擋', () => {
+  const index = pageHtml('index.html')
+  assert.ok((index.match(INSTALLER_HREF_RE) ?? []).length >= 1, '首頁要有下載按鈕的安裝檔連結（發版腳本靠它改版本）')
+  const released = patchDownloadLink(index, installerUrl('9.9.9'))
+  assert.notEqual(released, index)
+  assert.ok(released.includes(installerUrl('9.9.9')))
+  assert.deepEqual(disallowedExternal(released), [])
+  for (const bad of [
+    '<script src="https://cdn.example.com/a.js"></script>',
+    '<link rel="stylesheet" href="https://fonts.example.com/a.css">',
+    '<img src="https://img.example.com/a.png" alt="">',
+    '<a href="https://other.example.com/update/ASN_0.1.1_x64-setup.exe">x</a>',
+    `<a href="${UPDATE_BASE}other.zip">x</a>`,
+  ]) assert.equal(disallowedExternal(bad).length, 1, bad)
 })
 
 test('頁尾連結各頁一致，用語不出現舊名詞', () => {

@@ -119,6 +119,7 @@ footer a { margin-right: 16px; }
 .lane li { margin: 6px 0; font-size: 15px; color: var(--ink-soft); }
 .lane li strong { color: var(--ink); }
 .lane li ul { margin-top: 4px; }
+.lane-empty { margin: 6px 0; font-size: 15px; color: var(--ink-soft); }
 .status { display: inline-block; padding: 1px 14px; border-radius: 99px; font-size: 15px; font-weight: 700; border: 1px solid; }
 .status.done { background: #def5e3; color: #1d6b34; border-color: #9bd3a8; }
 .status.doing { background: #dcecfb; color: #0b5fb0; border-color: #8fb8dc; }
