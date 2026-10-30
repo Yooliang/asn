@@ -300,7 +300,7 @@
                             </span>
                           </li>
                         </ul>
-                        <div class="m-dv-none" v-else>{{ acctRep && acctRep.loading ? '讀取中…' : '目前未回報任何帳號' }}</div>
+                        <div class="m-dv-none" v-else>{{ acctRep && acctRep.loading ? '讀取中…' : (v.note || '目前未回報任何帳號') }}</div>
                         <small class="m-fine" v-if="v.switchHint">{{ v.switchHint }}</small>
                         <small class="m-fine" v-if="v.key === 'claude' && v.accounts.length && v.switchable">{{ ACCT_TEXT.quotaNote }}</small>
                       </div>

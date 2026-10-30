@@ -12,14 +12,17 @@ export const ROSTER_TEXT = {
   title: '我的帳號',
   noQuota: '額度讀不到',
   codexOff: '開 Codex 後才讀得到',
+  geminiOff: '開 Gemini 視窗後才讀得到',   // Gemini 額度只有 ASN 開的 Gemini 視窗讀得到（#374 之三）
   empty: '還沒有帳號回報',
   current: '使用中',
   resetPending: '已重置，待更新',   // 那一窗的重置時間已經過了：記著的百分比不代表現在（#527 審查）
 }
 export const ROSTER_POLL_MS = 5 * 60_000   // 開著「設備與帳號」時多久重讀一次（跟額度回報同一個節奏，不另開更密的）
 export const DEVICE_MAX = 8  // 「3 小時前・工作機」的設備名最多幾個字
-const VENDOR_RANK = { claude: 0, codex: 1, grok: 2 }
-const VENDOR_NAME = { claude: 'Claude', codex: 'OpenAI（Codex）', grok: 'Grok' }
+const VENDOR_RANK = { claude: 0, codex: 1, gemini: 2, grok: 3 }
+const VENDOR_NAME = { claude: 'Claude', codex: 'OpenAI（Codex）', gemini: 'Gemini', grok: 'Grok' }
+// 沒有額度窗時寫什麼：Codex、Gemini 要開過才讀得到；其他寫「額度讀不到」
+const NO_WINDOW_TEXT = { codex: 'codexOff', gemini: 'geminiOff' }
 
 const pct = v => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 100 ? Math.round(v) : null)
 const time = v => { const t = Date.parse(typeof v === 'string' ? v : ''); return Number.isFinite(t) ? t : null }
@@ -80,14 +83,16 @@ function cleanWindows(entry) {
  */
 export function rosterQuota(entry, { nodeLabel = () => UNNAMED_DEVICE, now = Date.now() } = {}) {
   const wins = cleanWindows(entry)
-  const gone = !Array.isArray(entry?.nodes) || entry.nodes.length === 0
+  // gemini 的 nodes 後台一律回空陣列（20261029130000_acct_roster_gemini：nodes 來自舊表、舊表不收 gemini），
+  // 看不出有沒有設備還在回報，所以不當成「沒有設備在回報」
+  const gone = entry?.vendor !== 'gemini' && (!Array.isArray(entry?.nodes) || entry.nodes.length === 0)
   const stamp = (at, node) => {
     const ago = at != null ? agoText(new Date(at).toISOString(), now) : ''
     const when = ago && gone ? `${ago}讀的` : ago
     return [when, node ? shortDevice(nodeLabel(node)) : ''].filter(Boolean).join('・')
   }
   if (!wins.length) {
-    const text = entry?.vendor === 'codex' ? ROSTER_TEXT.codexOff : ROSTER_TEXT.noQuota
+    const text = ROSTER_TEXT[NO_WINDOW_TEXT[entry?.vendor] ?? 'noQuota']
     const meta = stamp(time(entry?.seen_at), typeof entry?.seen_node === 'string' ? entry.seen_node : '')
     return { known: false, text, parts: [text], meta, listMeta: meta, resetText: '', stale: true, exhausted: false, gone }
   }
@@ -131,6 +136,20 @@ export function rosterLookup(roster) {
 export function rosterQuotaFor(roster, vendor, account, opts = {}) {
   const e = rosterLookup(roster)(vendor, account)
   return e ? rosterQuota(e, opts) : undefined
+}
+
+/**
+ * 某台設備上某廠牌的帳號（目前給 Gemini 用：它不在各台自己的帳號回報裡，只在列表）。
+ * 認哪台：任一額度窗的 read_node 或 seen_node 是這台。回 [{ email, plan, current:false, quota }]；列表不能用回空陣列
+ */
+export function rosterAccountsOn(roster, vendor, node, opts = {}) {
+  if (!rosterOk(roster) || !node) return []
+  const want = String(vendor ?? '').toLowerCase()
+  return roster.accounts
+    .filter(e => String(e?.vendor ?? '').toLowerCase() === want && e?.account
+      && (e.seen_node === node || (Array.isArray(e.windows) && e.windows.some(w => w?.read_node === node))))
+    .map(e => ({ email: String(e.account).trim(), plan: typeof e.plan === 'string' ? e.plan : '', current: false, quota: rosterQuota(e, opts) }))
+    .sort((a, b) => a.email.localeCompare(b.email))
 }
 
 /**
