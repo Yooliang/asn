@@ -343,6 +343,13 @@ impl<'a> WezTerm<'a> {
     /// 同 start_in_workspace，但 GUI（與裡面的程式）只拿到 env 加上隔離設定檔的路徑，不繼承 ASN 自己的環境（#475 經 pi）。
     /// env 由呼叫端先照 child_env 濾掉金鑰類變數
     pub fn start_in_workspace_clean(&self, cwd: &Path, workspace: &str, command: &[String], env: &BTreeMap<String, String>) -> Result<Window, String> {
+        let gui_pid = self.spawn_in_workspace_clean(cwd, workspace, command, env)?;
+        self.wait_sock(gui_pid)
+    }
+
+    /// start_in_workspace_clean 的前半：只啟動 GUI、回程序編號，不等通訊檔。
+    /// 回 Err＝GUI 根本沒啟動（參數不合法、執行檔起不來），呼叫端可以放心改走別的路；回 Ok 之後的失敗就不能再另外開一份
+    pub fn spawn_in_workspace_clean(&self, cwd: &Path, workspace: &str, command: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
         if command.is_empty() {
             return Err("沒有指定要執行的指令".to_string());
         }
@@ -361,8 +368,7 @@ impl<'a> WezTerm<'a> {
         args.extend(command.iter().cloned());
         let mut merged = env.clone();
         merged.extend(self.config_env());
-        let gui_pid = self.runner.spawn_clean(&self.dir.gui, &args, &merged)?;
-        self.wait_sock(gui_pid)
+        self.runner.spawn_clean(&self.dir.gui, &args, &merged)
     }
 
     fn spawn_gui(&self, args: Vec<String>) -> Result<Window, String> {
@@ -370,8 +376,8 @@ impl<'a> WezTerm<'a> {
         self.wait_sock(gui_pid)
     }
 
-    /// 等新開的 GUI 的通訊檔出現；逾時就結束剛開的視窗
-    fn wait_sock(&self, gui_pid: u32) -> Result<Window, String> {
+    /// 等新開的 GUI 的通訊檔出現；逾時就結束剛開的視窗（只在建立時間跟剛開時量到的相同才結束，量不到或不同就不動、照實說）
+    pub fn wait_sock(&self, gui_pid: u32) -> Result<Window, String> {
         let started_ms = self.runner.started_ms(gui_pid);
         let sock = sock_path(&self.home, gui_pid);
         let start = Instant::now();
@@ -381,8 +387,16 @@ impl<'a> WezTerm<'a> {
                 return Ok(Window { gui_pid, sock, started_ms });
             }
             if start.elapsed() >= self.sock_wait {
-                self.runner.kill_tree(gui_pid); // 剛開的視窗連同子行程一起清掉，不留桌面孤兒視窗
-                return Err(format!("等了 {} 秒，WezTerm 的通訊檔仍未出現：{}（已結束剛啟動的視窗）", self.sock_wait.as_secs(), sock.display()));
+                // 剛開的視窗連同子行程一起清掉，不留桌面孤兒視窗；但只動建立時間相符的那個（編號可能已被回收）
+                let waited = self.sock_wait.as_secs();
+                return match (started_ms, self.runner.started_ms(gui_pid)) {
+                    (Some(was), Some(now)) if was == now => {
+                        self.runner.kill_tree(gui_pid);
+                        Err(format!("等了 {waited} 秒，WezTerm 的通訊檔仍未出現：{}（已結束剛啟動的視窗）", sock.display()))
+                    }
+                    (_, None) => Err(format!("等了 {waited} 秒，WezTerm 的通訊檔仍未出現：{}（剛啟動的視窗已經不在）", sock.display())),
+                    _ => Err(format!("等了 {waited} 秒，WezTerm 的通訊檔仍未出現：{}（確認不了是同一個程序，沒有結束它）", sock.display())),
+                };
             }
             self.runner.sleep(step);
         }
@@ -867,7 +881,8 @@ mod tests {
 
     #[test]
     fn start_returns_sock_when_present_else_times_out() {
-        let r = FakeRunner { spawn_pid: 1, ..Default::default() };
+        // 第一次 start 量一次；第二次 start 量一次、逾時再量一次（相符才結束）
+        let r = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(5), Some(5), Some(5)]), ..Default::default() };
         let fs = FakeFs::default();
         fs.files.borrow_mut().insert(sock_path(Path::new("H"), 1));
         let w = wez(&r, &fs);
@@ -884,6 +899,24 @@ mod tests {
         let e = w2.start(Path::new("C:/work"), &["agy.exe".to_string()]).unwrap_err();
         assert!(e.contains("通訊檔仍未出現"));
         assert_eq!(*r.tree_killed.borrow(), vec![1], "逾時要把剛啟動的視窗連子行程一起結束，不留孤兒視窗");
+    }
+
+    #[test]
+    fn 等不到通訊檔_建立時間不符或量不到就不結束() {
+        let fs = FakeFs::default();
+        // 剛開時量到 5，逾時時變成 6：編號被別的程序拿去用了
+        let r = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(5), Some(6)]), ..Default::default() };
+        let e = wez(&r, &fs).start(Path::new("C:/work"), &["agy.exe".to_string()]).unwrap_err();
+        assert!(e.contains("沒有結束它"), "{e}");
+        assert!(r.tree_killed.borrow().is_empty());
+        // 剛開時就量不到
+        let r = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![None, Some(5)]), ..Default::default() };
+        assert!(wez(&r, &fs).start(Path::new("C:/work"), &["agy.exe".to_string()]).is_err());
+        assert!(r.tree_killed.borrow().is_empty());
+        // 逾時時已經不在
+        let r = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(5), None]), ..Default::default() };
+        assert!(wez(&r, &fs).start(Path::new("C:/work"), &["agy.exe".to_string()]).unwrap_err().contains("已經不在"));
+        assert!(r.tree_killed.borrow().is_empty());
     }
 
     /// 真的 WezTerm 實測（預設不跑，會在桌面開一個視窗）：

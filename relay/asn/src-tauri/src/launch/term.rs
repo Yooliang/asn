@@ -380,30 +380,40 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// 資料夾也由呼叫端照開新夥伴的規則驗過；這裡只再確認「執行的真的是 pi」、資料夾存在。
     /// env＝已照 child_env 濾掉金鑰類變數的環境，GUI 與 pi 只拿到這些（不繼承 ASN 自己的環境）。回（終端編號, GUI 的程序編號）
     pub fn start_pi(&self, cwd: &Path, argv: &[String], env: &BTreeMap<String, String>) -> Result<(String, u32), String> {
-        let Some(exe) = argv.first() else { return Err("沒有指定要執行的指令".into()) };
+        self.start_pi_staged(cwd, argv, env).map_err(|e| match e {
+            super::win_term::WinOpenError::NotStarted(m) | super::win_term::WinOpenError::Started(m) => m,
+        })
+    }
+
+    /// 同 start_pi，失敗時另外說明 GUI 啟動了沒有（pi 的退路也只在還沒啟動時才走，見 pi_term）
+    pub(crate) fn start_pi_staged(&self, cwd: &Path, argv: &[String], env: &BTreeMap<String, String>) -> Result<(String, u32), super::win_term::WinOpenError> {
+        use super::win_term::WinOpenError::NotStarted;
+        let Some(exe) = argv.first() else { return Err(NotStarted("沒有指定要執行的指令".into())) };
         if !crate::bridge::procscan::is_pi_process(exe, argv) {
-            return Err("要開的程式不是 pi，已拒絕".into());
+            return Err(NotStarted("要開的程式不是 pi，已拒絕".into()));
         }
         if !cwd.is_dir() {
-            return Err(format!("工作資料夾不存在：{}", cwd.display()));
+            return Err(NotStarted(format!("工作資料夾不存在：{}", cwd.display())));
         }
-        self.open("pi", cwd.to_path_buf(), argv, Some(env), &OpenExtra::default())
+        self.open_staged("pi", cwd.to_path_buf(), argv, Some(env), &OpenExtra::default())
     }
 
     /// 開窗點（local::start_window）開夥伴視窗（0.2.0 第 1 階段，設計 1.1～1.2）。指令與參數由呼叫端照本機啟動設定組好，這裡不改一個字；
     /// 只再確認種類、資料夾存在。env＝已照 child_env 濾掉金鑰類變數的環境。寫進對照表（kind、session_id），回（終端編號, GUI 的程序編號）
-    pub(crate) fn start_window(&self, cwd: &Path, spec: &super::win_term::WinSpec) -> Result<(String, u32), String> {
+    /// 失敗分兩種（見 win_term::WinOpenError）：GUI 還沒啟動（NotStarted，上層可改用原生主控台）、已經啟動之後才失敗（Started，上層不能再開一份）
+    pub(crate) fn start_window(&self, cwd: &Path, spec: &super::win_term::WinSpec) -> Result<(String, u32), super::win_term::WinOpenError> {
+        use super::win_term::WinOpenError::NotStarted;
         if spec.argv.is_empty() {
-            return Err("沒有指定要執行的指令".into());
+            return Err(NotStarted("沒有指定要執行的指令".into()));
         }
         if spec.kind != super::win_term::KIND_CLAUDE && spec.kind != super::win_term::KIND_WINDOW {
-            return Err("不認得的視窗種類".into());
+            return Err(NotStarted("不認得的視窗種類".into()));
         }
         if !cwd.is_dir() {
-            return Err(format!("工作資料夾不存在：{}", cwd.display()));
+            return Err(NotStarted(format!("工作資料夾不存在：{}", cwd.display())));
         }
         let extra = OpenExtra { kind: spec.kind.to_string(), session_id: spec.session_id.clone(), label: normalize_title(&spec.title).ok() };
-        self.open(spec.kind, cwd.to_path_buf(), &spec.argv, Some(&spec.env), &extra)
+        self.open_staged(spec.kind, cwd.to_path_buf(), &spec.argv, Some(&spec.env), &extra)
     }
 
     /// ASN 自己開的終端（不含接手的窗格）的（GUI 程序編號, 開的時候量到的建立時間）：判斷「ASN 開的」要兩個都對（設計 1.2）
@@ -436,8 +446,17 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// 開一個終端並記進對照表：視窗帶 workspace `asn-{編號}`、分頁標題 `ASN:{編號}`；標題設不下去就結束剛開的視窗，不留沒有標記的孤兒。
     /// env 有給＝GUI 只拿到這些環境變數（經 pi）；沒給＝照舊繼承（agy／grok）
     fn open(&self, profile: &str, cwd: PathBuf, command: &[String], env: Option<&BTreeMap<String, String>>, extra: &OpenExtra) -> Result<(String, u32), String> {
-        let dir = self.dir()?;
-        let id = self.alloc_id()?;
+        self.open_staged(profile, cwd, command, env, extra).map_err(|e| match e {
+            super::win_term::WinOpenError::NotStarted(m) | super::win_term::WinOpenError::Started(m) => m,
+        })
+    }
+
+    /// 同 open，失敗時另外說明 GUI 啟動了沒有：spawn 之前（找資料夾、配編號、啟動執行檔）失敗＝NotStarted；
+    /// spawn 之後（等通訊檔、list、設標題、寫對照表）失敗＝Started，這時已嘗試結束剛開的視窗（只動建立時間相符的那個），但不保證已經不在
+    fn open_staged(&self, profile: &str, cwd: PathBuf, command: &[String], env: Option<&BTreeMap<String, String>>, extra: &OpenExtra) -> Result<(String, u32), super::win_term::WinOpenError> {
+        use super::win_term::WinOpenError::{NotStarted, Started};
+        let dir = self.dir().map_err(NotStarted)?;
+        let id = self.alloc_id().map_err(NotStarted)?;
         let workspace = format!("asn-{id}");
         // 夥伴視窗在編號後面接名字（認領只看前面的 ASN:編號）
         let title = match &extra.label {
@@ -446,17 +465,21 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         };
         let w = self.wez(&dir);
         let win = match env {
-            Some(e) => w.start_in_workspace_clean(&cwd, &workspace, command, e)?,
-            None => w.start_in_workspace(&cwd, &workspace, command)?,
+            Some(e) => {
+                let gui = w.spawn_in_workspace_clean(&cwd, &workspace, command, e).map_err(NotStarted)?;
+                w.wait_sock(gui).map_err(Started)?
+            }
+            // agy／grok（終端面板）：不經開窗點、沒有退路，失敗一律當已啟動（保守）
+            None => w.start_in_workspace(&cwd, &workspace, command).map_err(Started)?,
         };
         let panes = match w.list(&win.sock) {
             Ok(p) if !p.is_empty() => p,
-            Ok(_) => return fail_close(&w, &win, "WezTerm 視窗裡沒有可操作的窗格".into()),
-            Err(e) => return fail_close(&w, &win, e),
+            Ok(_) => return fail_close(&w, &win, "WezTerm 視窗裡沒有可操作的窗格".into()).map_err(Started),
+            Err(e) => return fail_close(&w, &win, e).map_err(Started),
         };
         let pane_id = panes.iter().find(|p| p.is_active).map(|p| p.pane_id).unwrap_or(panes[0].pane_id);
         if let Err(e) = w.set_tab_title(&win.sock, pane_id, &title) {
-            return fail_close(&w, &win, format!("無法設定終端標題：{e}"));
+            return fail_close(&w, &win, format!("無法設定終端標題：{e}")).map_err(Started);
         }
         {
             let mut g = self.inner.lock().unwrap();
@@ -480,7 +503,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 g.sessions.retain(|s| s.id != id);
             }
             let _ = self.persist();
-            return Err(format!("終端已啟動但對照表寫入失敗，已嘗試結束視窗：{e}"));
+            return Err(Started(format!("終端已啟動但對照表寫入失敗，已嘗試結束視窗：{e}")));
         }
         Ok((id, win.gui_pid))
     }
@@ -1725,8 +1748,8 @@ impl super::win_term::WinTermHost for LiveTerms {
     fn available(&self) -> bool {
         self.dir().is_ok()
     }
-    fn open_window(&self, cwd: &Path, spec: &super::win_term::WinSpec) -> Result<u32, String> {
-        self.ensure_config()?;
+    fn open_window(&self, cwd: &Path, spec: &super::win_term::WinSpec) -> Result<u32, super::win_term::WinOpenError> {
+        self.ensure_config().map_err(super::win_term::WinOpenError::NotStarted)?;
         let (_, gui) = TermService::start_window(self, cwd, spec)?;
         if spec.hidden {
             hide_gui(gui);
@@ -1752,9 +1775,9 @@ impl super::pi_term::PiTermHost for LiveTerms {
     fn available(&self) -> bool {
         self.dir().is_ok()
     }
-    fn start_pi(&self, cwd: &Path, argv: &[String], env: &BTreeMap<String, String>, hidden: bool) -> Result<u32, String> {
-        self.ensure_config()?;
-        let (_, gui) = TermService::start_pi(self, cwd, argv, env)?;
+    fn start_pi(&self, cwd: &Path, argv: &[String], env: &BTreeMap<String, String>, hidden: bool) -> Result<u32, super::win_term::WinOpenError> {
+        self.ensure_config().map_err(super::win_term::WinOpenError::NotStarted)?;
+        let (_, gui) = TermService::start_pi_staged(self, cwd, argv, env)?;
         if hidden {
             hide_gui(gui);
         }
@@ -1808,6 +1831,10 @@ mod tests {
         /// `wezterm cli list-clients --format json` 的假輸出。
         list_clients_json: RefCell<String>,
         trace: RefCell<Vec<String>>,
+        /// 真＝啟動 GUI 本身就失敗（執行檔起不來）
+        spawn_fail: RefCell<bool>,
+        /// 第一次 list 時先跑一下（模擬開視窗之後才出狀況）
+        on_list: RefCell<Option<Box<dyn Fn()>>>,
     }
 
     fn default_list_clients_json() -> String {
@@ -1828,6 +1855,8 @@ mod tests {
             version_out: RefCell::new("wezterm 20240203-110809-5046fc22".into()),
             list_clients_json: RefCell::new(default_list_clients_json()),
             trace: RefCell::new(Vec::new()),
+            spawn_fail: RefCell::new(false),
+            on_list: RefCell::new(None),
         }
     }
 
@@ -1862,6 +1891,9 @@ mod tests {
             } else if args.iter().any(|a| a == "list-clients") {
                 self.inner.list_clients_json.borrow().clone()
             } else if args.get(1).map(|a| a.as_str()) == Some("list") {
+                if let Some(f) = self.inner.on_list.borrow_mut().take() {
+                    f();
+                }
                 let mut q = self.inner.list_jsons.borrow_mut();
                 if q.is_empty() {
                     self.inner.list_json.borrow().clone()
@@ -1885,6 +1917,9 @@ mod tests {
             })
         }
         fn spawn(&self, _p: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
+            if *self.inner.spawn_fail.borrow() {
+                return Err("無法啟動 wezterm-gui.exe：假的失敗".into());
+            }
             self.inner.calls.borrow_mut().push((args.to_vec(), env.clone()));
             Ok(42)
         }
@@ -2990,13 +3025,74 @@ mod tests {
         assert!(rig.runner.killed().is_empty());
     }
 
+    fn count_starts(r: &FakeRunner) -> usize {
+        r.args().iter().filter(|a| a.first().map(String::as_str) == Some("start")).count()
+    }
+
+    #[test]
+    fn 開窗點_還沒啟動就失敗是_not_started_可以走退路() {
+        use super::super::win_term::WinOpenError;
+        // 找不到 WezTerm
+        let dir = tempfile::tempdir().unwrap();
+        let fs = FakeFs { files: Rc::new(RefCell::new(HashSet::new())) };
+        let runner = FakeRunner { inner: Rc::new(fake_inner(vec![], "[]".into(), String::new())) };
+        let svc = TermService::without_wezterm(dir.path().join("wezterm-terms.json"), "H".into(), runner.clone(), fs);
+        assert!(matches!(svc.start_window(dir.path(), &claude_spec(None)), Err(WinOpenError::NotStarted(_))));
+        // 執行檔起不來
+        let rig = make(default_profiles(), vec![]);
+        *rig.runner.inner.spawn_fail.borrow_mut() = true;
+        assert!(matches!(rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(None)), Err(WinOpenError::NotStarted(_))));
+        // 資料夾不存在
+        assert!(matches!(rig.svc.start_window(Path::new("Z:/ASN-不存在-xyz"), &claude_spec(None)), Err(WinOpenError::NotStarted(_))));
+        assert!(rig.runner.killed().is_empty());
+    }
+
+    #[test]
+    fn 開窗點_已啟動之後各步驟失敗是_started_不走退路_只開過一次() {
+        use super::super::win_term::WinOpenError;
+        // 設不了標題，而且收不掉（建立時間不符）
+        let rig = make(default_profiles(), vec![Some(1_000), Some(2_000)]);
+        *rig.runner.inner.fail_substr.borrow_mut() = Some("set-tab-title".into());
+        let e = rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("s1"))).unwrap_err();
+        assert!(matches!(&e, WinOpenError::Started(m) if m.contains("無法設定終端標題") && m.contains("結束剛啟動的視窗也失敗")), "{e:?}");
+        assert!(rig.runner.killed().is_empty(), "建立時間不符就不結束");
+        assert_eq!(count_starts(&rig.runner), 1);
+        assert!(rig.svc.own_gui_pids().is_empty());
+        // 讀不到窗格
+        let rig = make(default_profiles(), vec![]);
+        *rig.runner.inner.fail_substr.borrow_mut() = Some("list".into());
+        assert!(matches!(rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(None)), Err(WinOpenError::Started(_))));
+        assert_eq!(rig.runner.killed(), vec![42], "建立時間相符的才結束");
+        // 視窗裡沒有窗格
+        let rig = make(default_profiles(), vec![]);
+        *rig.runner.inner.list_json.borrow_mut() = "[]".into();
+        assert!(matches!(rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(None)), Err(WinOpenError::Started(_))));
+        assert_eq!(count_starts(&rig.runner), 1);
+    }
+
+    #[test]
+    fn 開窗點_已啟動之後對照表寫不進去也是_started() {
+        use super::super::win_term::WinOpenError;
+        let rig = make(default_profiles(), vec![]);
+        // 編號配好之後才把對照表檔換成資料夾：開視窗後的寫入會失敗
+        let svc = &rig.svc;
+        let store = rig.store.clone();
+        *rig.runner.inner.on_list.borrow_mut() = Some(Box::new(move || {
+            let _ = std::fs::remove_file(&store);
+            let _ = std::fs::create_dir_all(store.join("擋住"));
+        }));
+        let e = svc.start_window(Path::new(&rig.cwd), &claude_spec(None)).unwrap_err();
+        assert!(matches!(&e, WinOpenError::Started(m) if m.contains("對照表寫入失敗")), "{e:?}");
+        assert_eq!(count_starts(&rig.runner), 1);
+    }
+
     #[test]
     fn 開窗點只收_claude_與_window_資料夾要存在() {
         let rig = make(default_profiles(), vec![]);
         let mut bad = claude_spec(None);
         bad.kind = "agy";
         assert!(rig.svc.start_window(Path::new(&rig.cwd), &bad).is_err());
-        assert!(rig.svc.start_window(Path::new("Z:/ASN-不存在-xyz"), &claude_spec(None)).unwrap_err().contains("不存在"));
+        assert!(matches!(rig.svc.start_window(Path::new("Z:/ASN-不存在-xyz"), &claude_spec(None)), Err(super::super::win_term::WinOpenError::NotStarted(m)) if m.contains("不存在")));
         let mut empty = claude_spec(None);
         empty.argv.clear();
         assert!(rig.svc.start_window(Path::new(&rig.cwd), &empty).is_err());

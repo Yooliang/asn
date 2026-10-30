@@ -31,12 +31,25 @@ pub(crate) struct WinSpec {
     pub hidden: bool,
 }
 
+/// 自帶終端開不起來的兩種情況：決定能不能改用原生主控台（asn真 審 #573）
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum WinOpenError {
+    /// GUI 還沒啟動就失敗（找不到 WezTerm、資料夾不存在、執行檔起不來）：沒有任何程式在跑，可以改用原生主控台
+    NotStarted(String),
+    /// GUI 已經啟動之後才失敗（等不到通訊檔、讀不到窗格、設不了標題、對照表寫不進去）：裡面的 claude 可能已經在跑，
+    /// 不能再開第二份（同一個 --resume 兩個程序會一起寫同一段對話），直接回錯
+    Started(String),
+}
+
+/// GUI 已經啟動之後失敗時，給使用者看的開頭（後面接原因）
+pub(crate) const STARTED_BUT_FAILED: &str = "內建終端已開，但沒能登記這扇視窗，為了不重複開同一段對話，沒有改用一般視窗";
+
 /// ASN 自帶的終端（正式＝TermService；測試換成假的）
 pub(crate) trait WinTermHost: Send + Sync {
     /// 這台找得到自帶的終端
     fn available(&self) -> bool;
     /// 在 cwd 開 spec，寫進對照表；回 GUI 的程序編號
-    fn open_window(&self, cwd: &Path, spec: &WinSpec) -> Result<u32, String>;
+    fn open_window(&self, cwd: &Path, spec: &WinSpec) -> Result<u32, WinOpenError>;
 }
 
 /// 開好了：pid＝自帶終端的 GUI，或退路主控台的承載 PowerShell；note＝第一次改用一般視窗時給使用者看的話
@@ -80,13 +93,18 @@ pub(crate) fn spec_for(title: &str, command: &str, args: &[String], hidden: bool
     WinSpec { kind, title: title.to_string(), session_id: if kind == KIND_CLAUDE { session_id_of(args) } else { None }, argv, env, hidden }
 }
 
-/// 有自帶的終端就開在裡面，否則（或開失敗）用 fallback 開原生主控台。改用一般視窗只在第一次回 note（noted 記這件事）
+/// 有自帶的終端就開在裡面，否則（或 GUI 還沒啟動就失敗）用 fallback 開原生主控台。改用一般視窗只在第一次回 note（noted 記這件事）。
+/// GUI 已經啟動之後才失敗：不走退路，照實回錯（不另外再開一份）
 pub(crate) fn open_window(host: Option<&dyn WinTermHost>, cwd: &Path, spec: &WinSpec, noted: &AtomicBool, fallback: &dyn Fn() -> Result<u32, String>) -> Result<Opened, String> {
     match host.filter(|h| h.available()) {
         None => eprintln!("開「{}」：這台沒有 ASN 自帶的終端，改用原生主控台", spec.title),
         Some(h) => match h.open_window(cwd, spec) {
             Ok(pid) => return Ok(Opened { pid, note: None }),
-            Err(e) => eprintln!("開「{}」在 ASN 自帶的終端失敗，改用原生主控台：{e}", spec.title),
+            Err(WinOpenError::NotStarted(e)) => eprintln!("開「{}」在 ASN 自帶的終端失敗（還沒啟動），改用原生主控台：{e}", spec.title),
+            Err(WinOpenError::Started(e)) => {
+                eprintln!("開「{}」：自帶終端已啟動但後續失敗，不改用原生主控台：{e}", spec.title);
+                return Err(format!("{STARTED_BUT_FAILED}：{e}"));
+            }
         },
     }
     let pid = fallback()?;
@@ -123,19 +141,19 @@ mod tests {
 
     struct FakeHost {
         available: bool,
-        result: Result<u32, String>,
+        result: Result<u32, WinOpenError>,
         got: Mutex<Vec<(String, WinSpec)>>,
     }
     impl WinTermHost for FakeHost {
         fn available(&self) -> bool {
             self.available
         }
-        fn open_window(&self, cwd: &Path, spec: &WinSpec) -> Result<u32, String> {
+        fn open_window(&self, cwd: &Path, spec: &WinSpec) -> Result<u32, WinOpenError> {
             self.got.lock().unwrap().push((cwd.to_string_lossy().into_owned(), spec.clone()));
             self.result.clone()
         }
     }
-    fn host(available: bool, result: Result<u32, String>) -> FakeHost {
+    fn host(available: bool, result: Result<u32, WinOpenError>) -> FakeHost {
         FakeHost { available, result, got: Mutex::new(vec![]) }
     }
     fn sv(a: &[&str]) -> Vec<String> {
@@ -197,7 +215,7 @@ mod tests {
     fn 找不到或開不起來_退回原生主控台_只提示一次() {
         let noted = AtomicBool::new(false);
         let spec = spec_for("小乙", "claude.exe", &[], false, BTreeMap::new());
-        let cases: Vec<Option<FakeHost>> = vec![None, Some(host(false, Ok(1))), Some(host(true, Err("wezterm-gui.exe 錯誤碼 5".into())))];
+        let cases: Vec<Option<FakeHost>> = vec![None, Some(host(false, Ok(1))), Some(host(true, Err(WinOpenError::NotStarted("wezterm-gui.exe 錯誤碼 5".into()))))];
         let mut notes = Vec::new();
         for h in &cases {
             let r = open_window(h.as_ref().map(|x| x as &dyn WinTermHost), Path::new("D:\\p"), &spec, &noted, &|| Ok(77)).unwrap();
@@ -207,6 +225,23 @@ mod tests {
         assert_eq!(notes, vec![Some(WIN_TERM_FALLBACK), None, None], "只在第一次提示");
         assert!(!WIN_TERM_FALLBACK.contains("wezterm") && !WIN_TERM_FALLBACK.contains("錯誤碼"), "說明不帶技術細節");
         assert!(cases[1].as_ref().unwrap().got.lock().unwrap().is_empty(), "找不到就不去開");
+    }
+
+    #[test]
+    fn 自帶終端已啟動之後才失敗_不走退路_不開第二份() {
+        let noted = AtomicBool::new(false);
+        let spec = spec_for("小乙", "claude.exe", &sv(&["-n", "小乙", "--resume", "sid-1"]), false, BTreeMap::new());
+        let h = host(true, Err(WinOpenError::Started("無法設定終端標題：假的失敗".into())));
+        let fb = std::cell::Cell::new(0);
+        let e = open_window(Some(&h), Path::new("D:\\p"), &spec, &noted, &|| {
+            fb.set(fb.get() + 1);
+            Ok(77)
+        })
+        .unwrap_err();
+        assert_eq!(fb.get(), 0, "GUI 已經啟動就不能再開原生主控台（同一個 --resume 會有兩份）");
+        assert!(e.starts_with(STARTED_BUT_FAILED) && e.contains("無法設定終端標題"), "照實說原因：{e}");
+        assert!(!noted.load(Ordering::SeqCst), "沒改用一般視窗");
+        assert_eq!(h.got.lock().unwrap().len(), 1, "只開過一次");
     }
 
     #[test]

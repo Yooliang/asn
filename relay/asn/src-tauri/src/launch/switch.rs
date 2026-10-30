@@ -535,6 +535,27 @@ pub(crate) fn asn_wez_of(os: &dyn Os, table: &[Proc], pid: u32) -> Option<u32> {
     (os.started_ms(gui) == Some(was)).then_some(gui)
 }
 
+/// WezTerm 每個窗格的虛擬主控台宿主（不算「別的程序」）
+const WEZ_PANE_HOSTS: &[&str] = &["openconsole.exe", "conhost.exe"];
+
+/// 收 GUI 之前的檢查（asn真 審 #573）：這個 GUI 底下除了剛結束的那棵（ended）與窗格宿主之外，還有沒有活著的程序
+/// （使用者自己在那扇 WezTerm 多開的分頁、別的殼）。有就不收
+pub(crate) fn wez_has_others(os: &dyn Os, gui: u32, ended: &[u32]) -> bool {
+    let table = os.processes();
+    let mut order = vec![gui];
+    let mut idx = 0;
+    while idx < order.len() {
+        let cur = order[idx];
+        for c in table.iter().filter(|p| p.ppid == cur && p.pid != cur) {
+            if !order.contains(&c.pid) {
+                order.push(c.pid);
+            }
+        }
+        idx += 1;
+    }
+    table.iter().filter(|p| order[1..].contains(&p.pid)).any(|p| !ended.contains(&p.pid) && !WEZ_PANE_HOSTS.contains(&p.name.as_str()) && os.alive(p.pid))
+}
+
 /// 這個視窗是不是 ASN 開的：自帶終端（對照表＋建立時間），或舊式主控台的承載 PowerShell（過渡期保留，第三節）
 pub(crate) fn opened_by_asn(os: &dyn Os, table: &[Proc], pid: u32) -> bool {
     asn_wez_of(os, table, pid).is_some() || asn_host_of(os, table, pid).is_some()
@@ -593,7 +614,9 @@ pub(crate) fn close_session(os: &dyn Os, t: &Timing, target_pid: u32, allowed: &
         return Err("原視窗沒有關掉".into());
     }
     if let Some(gui) = wez {
-        if let Err(e) = os.stop_wez(gui) {
+        if wez_has_others(os, gui, allowed) {
+            eprintln!("關夥伴視窗：程式已結束；自帶終端的視窗（{gui}）裡還有別的程序，不收");
+        } else if let Err(e) = os.stop_wez(gui) {
             eprintln!("關夥伴視窗：程式已結束，但收不掉自帶終端的視窗（{gui}）：{e}");
         }
     }
@@ -1329,6 +1352,29 @@ mod tests {
         let allowed = kill_set_with(&f.table, 502, None, 300, &|_| None);
         close_session(&f, &quick(), 502, &allowed, None, false).unwrap();
         assert_eq!(*f.trace.borrow(), vec!["terminate:503".to_string(), "terminate:502".into()], "不認得的 GUI 不動");
+    }
+
+    #[test]
+    fn 收_gui_之前_底下還有別的程序就不收() {
+        // 使用者在那扇 WezTerm 多開了一個分頁：openconsole(505) → pwsh(506)
+        let mut f = wez_fake(vec![(500, 1_000)], Some(1_000));
+        f.table.extend([p(505, 500, "openconsole.exe"), p(506, 505, "pwsh.exe")]);
+        f.alive.borrow_mut().extend([505, 506]);
+        let allowed = kill_set_with(&f.table, 502, None, 300, &|_| None);
+        close_session(&f, &quick(), 502, &allowed, None, false).unwrap();
+        assert_eq!(*f.trace.borrow(), vec!["terminate:503".to_string(), "terminate:502".into()], "別的分頁還在：只結束 claude 那棵，不收 GUI");
+        // 只剩窗格宿主與已結束的 claude：收
+        let f = wez_fake(vec![(500, 1_000)], Some(1_000));
+        let allowed = kill_set_with(&f.table, 502, None, 300, &|_| None);
+        close_session(&f, &quick(), 502, &allowed, None, false).unwrap();
+        assert!(f.trace.borrow().contains(&"stop_wez:500".to_string()));
+        assert!(!wez_has_others(&f, 500, &allowed));
+        // 底下的程序已經結束（程序表殘留）不算
+        let mut f = wez_fake(vec![(500, 1_000)], Some(1_000));
+        f.table.push(p(507, 500, "cmd.exe"));
+        assert!(!wez_has_others(&f, 500, &[502, 503]), "507 不在活著的清單裡");
+        f.alive.borrow_mut().insert(507);
+        assert!(wez_has_others(&f, 500, &[502, 503]));
     }
 
     #[test]

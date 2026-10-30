@@ -2,6 +2,7 @@
 //! 這台沒有自帶的終端、或開不起來時，退回 Windows 原生主控台（#476 的開法），並用白話說明；細節只進 log。
 //! 只管「經 pi」：Claude 夥伴走 local::start_window（0.2.0 起同樣先開在自帶終端，見 win_term），不走這裡。
 //! 自帶終端的服務由畫面那一層在啟動時交給 [`super::term::set_global`]；這裡只透過 [`PiTermHost`] 介面用它，測試注入假的，不碰全域狀態。
+use super::win_term::WinOpenError;
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
@@ -15,7 +16,8 @@ pub(crate) trait PiTermHost: Send + Sync {
     /// 這台找得到自帶的終端
     fn available(&self) -> bool;
     /// 在 cwd 開 argv（argv[0] 是 pi），GUI 只拿到 env；hidden＝開完立刻隱藏（背景開）。回承載 pi 的 GUI 程序編號
-    fn start_pi(&self, cwd: &Path, argv: &[String], env: &BTreeMap<String, String>, hidden: bool) -> Result<u32, String>;
+    /// 失敗分兩種（見 win_term::WinOpenError）：還沒啟動才可以退回原生主控台
+    fn start_pi(&self, cwd: &Path, argv: &[String], env: &BTreeMap<String, String>, hidden: bool) -> Result<u32, WinOpenError>;
 }
 
 /// 開好了：pid＝承載 pi 的程序（自帶終端是 GUI、原生主控台是 powershell）；note＝退回原生主控台時給使用者看的說明
@@ -56,9 +58,14 @@ pub(crate) fn open_pi(
             let argv: Vec<String> = std::iter::once(command.to_string()).chain(args.iter().cloned()).collect();
             match h.start_pi(cwd, &argv, &pi_term_env(base_env, env), hidden) {
                 Ok(pid) => return Ok(PiOpened { pid, note: None }),
-                Err(e) => {
-                    eprintln!("經 pi 開在 ASN 自帶的終端失敗，改用原生主控台：{e}");
+                Err(WinOpenError::NotStarted(e)) => {
+                    eprintln!("經 pi 開在 ASN 自帶的終端失敗（還沒啟動），改用原生主控台：{e}");
                     PI_TERM_FAILED
+                }
+                // 已經啟動之後才失敗：裡面的 pi 可能已經在跑，不再開第二份（asn真 審 #573）
+                Err(WinOpenError::Started(e)) => {
+                    eprintln!("經 pi 開：自帶終端已啟動但後續失敗，不改用原生主控台：{e}");
+                    return Err(format!("{}：{e}", super::win_term::STARTED_BUT_FAILED));
                 }
             }
         }
@@ -96,7 +103,7 @@ mod tests {
 
     struct FakeHost {
         available: bool,
-        result: Result<u32, String>,
+        result: Result<u32, WinOpenError>,
         got: Mutex<Vec<(String, Vec<String>, BTreeMap<String, String>)>>,
         hidden: Mutex<Vec<bool>>,
     }
@@ -104,13 +111,13 @@ mod tests {
         fn available(&self) -> bool {
             self.available
         }
-        fn start_pi(&self, cwd: &Path, argv: &[String], env: &BTreeMap<String, String>, hidden: bool) -> Result<u32, String> {
+        fn start_pi(&self, cwd: &Path, argv: &[String], env: &BTreeMap<String, String>, hidden: bool) -> Result<u32, WinOpenError> {
             self.got.lock().unwrap().push((cwd.to_string_lossy().into_owned(), argv.to_vec(), env.clone()));
             self.hidden.lock().unwrap().push(hidden);
             self.result.clone()
         }
     }
-    fn host(available: bool, result: Result<u32, String>) -> FakeHost {
+    fn host(available: bool, result: Result<u32, WinOpenError>) -> FakeHost {
         FakeHost { available, result, got: Mutex::new(vec![]), hidden: Mutex::new(vec![]) }
     }
     fn base() -> HashMap<String, String> {
@@ -150,7 +157,7 @@ mod tests {
 
     #[test]
     fn 沒有自帶終端或開不起來_退回原生主控台並用白話說明() {
-        for (h, want) in [(None, PI_TERM_NONE), (Some(host(false, Ok(1))), PI_TERM_NONE), (Some(host(true, Err("wezterm-gui.exe 錯誤碼 5".into()))), PI_TERM_FAILED)] {
+        for (h, want) in [(None, PI_TERM_NONE), (Some(host(false, Ok(1))), PI_TERM_NONE), (Some(host(true, Err(WinOpenError::NotStarted("wezterm-gui.exe 錯誤碼 5".into())))), PI_TERM_FAILED)] {
             let r = open_pi(h.as_ref().map(|x| x as &dyn PiTermHost), base(), "pi", &args(), Path::new("D:\\p"), false, &[], &|| Ok(77)).unwrap();
             assert_eq!(r, PiOpened { pid: 77, note: Some(want) });
             assert!(!want.contains("wezterm") && !want.contains("錯誤碼"), "說明不帶技術細節");
@@ -167,6 +174,19 @@ mod tests {
         // 自帶終端不在：背景開照舊退回原生主控台（Hidden 樣式）
         let r = open_pi(None, base(), "pi", &args(), Path::new("D:\\p"), true, &[], &|| Ok(9)).unwrap();
         assert_eq!(r.pid, 9);
+    }
+
+    #[test]
+    fn 自帶終端已啟動之後才失敗_不退回原生主控台() {
+        let h = host(true, Err(WinOpenError::Started("終端已啟動但對照表寫入失敗".into())));
+        let fb = std::cell::Cell::new(false);
+        let e = open_pi(Some(&h), base(), "pi", &args(), Path::new("D:\\p"), false, &[], &|| {
+            fb.set(true);
+            Ok(9)
+        })
+        .unwrap_err();
+        assert!(!fb.get(), "不能再開第二份");
+        assert!(e.contains("對照表寫入失敗"), "{e}");
     }
 
     #[test]
