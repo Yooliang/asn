@@ -173,8 +173,8 @@ pub async fn auto_loop(first: std::time::Duration, every: std::time::Duration, o
         if let Ok((out, st)) = r {
             steady = st;
             match &out {
-                AutoOutcome::Added(e) => eprintln!("已自動加入 Grok 帳號 {e}"),
-                AutoOutcome::Updated(e) => eprintln!("已更新 Grok 帳號 {e} 的登入資料"),
+                AutoOutcome::Added(e) => elog!("已自動加入 Grok 帳號 {e}"),
+                AutoOutcome::Updated(e) => elog!("已更新 Grok 帳號 {e} 的登入資料"),
                 AutoOutcome::Nothing => {}
             }
             if out != AutoOutcome::Nothing {

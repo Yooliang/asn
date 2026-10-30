@@ -615,9 +615,9 @@ pub(crate) fn close_session(os: &dyn Os, t: &Timing, target_pid: u32, allowed: &
     }
     if let Some(gui) = wez {
         if wez_has_others(os, gui, allowed) {
-            eprintln!("關夥伴視窗：程式已結束；自帶終端的視窗（{gui}）裡還有別的程序，不收");
+            elog!("關夥伴視窗：程式已結束；自帶終端的視窗（{gui}）裡還有別的程序，不收");
         } else if let Err(e) = os.stop_wez(gui) {
-            eprintln!("關夥伴視窗：程式已結束，但收不掉自帶終端的視窗（{gui}）：{e}");
+            elog!("關夥伴視窗：程式已結束，但收不掉自帶終端的視窗（{gui}）：{e}");
         }
     }
     Ok(())

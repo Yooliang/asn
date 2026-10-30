@@ -26,7 +26,7 @@ pub fn start(app: &AppHandle, relay: Arc<Relay>) -> Arc<Notify> {
                         Ok(_) => break,
                         Err(e) => {
                             // 後台還沒部署這個動作（404）等：只記一行，不含任何內容
-                            eprintln!("[ASN] 查密碼請求失敗：{e}");
+                            elog!("[ASN] 查密碼請求失敗：{e}");
                             break;
                         }
                     }

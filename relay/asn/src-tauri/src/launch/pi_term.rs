@@ -59,12 +59,12 @@ pub(crate) fn open_pi(
             match h.start_pi(cwd, &argv, &pi_term_env(base_env, env), hidden) {
                 Ok(pid) => return Ok(PiOpened { pid, note: None }),
                 Err(WinOpenError::NotStarted(e)) => {
-                    eprintln!("經 pi 開在 ASN 自帶的終端失敗（還沒啟動），改用原生主控台：{e}");
+                    elog!("經 pi 開在 ASN 自帶的終端失敗（還沒啟動），改用原生主控台：{e}");
                     PI_TERM_FAILED
                 }
                 // 已經啟動之後才失敗：裡面的 pi 可能已經在跑，不再開第二份（asn真 審 #573）
                 Err(WinOpenError::Started(e)) => {
-                    eprintln!("經 pi 開：自帶終端已啟動但後續失敗，不改用原生主控台：{e}");
+                    elog!("經 pi 開：自帶終端已啟動但後續失敗，不改用原生主控台：{e}");
                     return Err(format!("{}：{e}", super::win_term::STARTED_BUT_FAILED));
                 }
             }
@@ -78,7 +78,7 @@ pub(crate) fn open_pi_real(name: &str, command: &str, args: &[String], cwd: &Pat
     let host = host();
     let r = open_pi(host.as_deref(), super::config::child_env(), command, args, cwd, hidden, env, &|| super::local::start_console_window_env(name, command, args, cwd, hidden, env))?;
     if let Some(n) = r.note {
-        eprintln!("經 pi 開「{name}」：{n}");
+        elog!("經 pi 開「{name}」：{n}");
     }
     // 畫面上的提示跟 claude 同一套：這次執行只講一次（設計 1.5）
     let note = r.note.filter(|_| super::win_term::first_fallback_note());

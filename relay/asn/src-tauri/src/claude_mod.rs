@@ -203,7 +203,7 @@ fn write_marker(data_dir: &Path, mod_dir: &Path, now_secs: u64) {
     let ver = plugin_version(mod_dir).unwrap_or_default();
     let body = serde_json::json!({ "installedVersion": ver, "installedAt": now_secs, "dir": mod_dir.to_string_lossy() });
     if let Err(e) = crate::write_atomic(&data_dir.join(MARKER_FILE), &format!("{}\n", serde_json::to_string_pretty(&body).unwrap_or_default())) {
-        eprintln!("[claude-mod] 寫標記檔失敗：{e}");
+        elog!("[claude-mod] 寫標記檔失敗：{e}");
     }
 }
 
@@ -292,7 +292,7 @@ pub fn install_with(runner: &dyn Runner, claude: &Path, mod_dir: &Path, data_dir
         }
         None if !first => {
             // 使用者自己解除安裝了：尊重，不重裝；更新標記版本避免每次啟動都來查
-            eprintln!("[claude-mod] 使用者已解除安裝 {PLUGIN_ID}，不重裝，只更新標記版本為 {want}");
+            elog!("[claude-mod] 使用者已解除安裝 {PLUGIN_ID}，不重裝，只更新標記版本為 {want}");
             write_marker(data_dir, mod_dir, now_secs);
             Outcome::Uninstalled
         }
@@ -339,15 +339,15 @@ pub fn run(runner: &dyn Runner, path_var: &OsStr, extra: &[PathBuf], mod_dir: &P
         }
     }
     let Some(claude) = find_claude(path_var, extra) else {
-        eprintln!("[claude-mod] 找不到 claude 指令，略過外掛安裝");
+        elog!("[claude-mod] 找不到 claude 指令，略過外掛安裝");
         return Outcome::NoClaude;
     };
     if want.is_none() {
-        eprintln!("[claude-mod] 安裝資料夾裡沒有外掛檔案：{}", mod_dir.display());
+        elog!("[claude-mod] 安裝資料夾裡沒有外掛檔案：{}", mod_dir.display());
         return Outcome::Failed("安裝資料夾裡找不到外掛檔案".into());
     }
     let out = install_with(runner, &claude, mod_dir, data_dir, now_secs, marker.is_none());
-    eprintln!("[claude-mod] {}", out.line());
+    elog!("[claude-mod] {}", out.line());
     out
 }
 
@@ -414,7 +414,7 @@ fn prune_with(cache_root: &Path, current: &str, now: std::time::SystemTime, mtim
         }
         match std::fs::remove_dir_all(&path) {
             Ok(()) => removed.push(name),
-            Err(e) => eprintln!("[claude-mod] 清舊版快取失敗（{name}）：{e}"),
+            Err(e) => elog!("[claude-mod] 清舊版快取失敗（{name}）：{e}"),
         }
     }
     removed
@@ -442,7 +442,7 @@ pub fn run_real(data_dir: &Path) -> Outcome {
     if let Outcome::Installed(v) = &out {
         let gone = prune_plugin_cache(&plugin_cache_root(&home), v);
         if !gone.is_empty() {
-            eprintln!("[claude-mod] 已清掉舊版快取：{}", gone.join("、"));
+            elog!("[claude-mod] 已清掉舊版快取：{}", gone.join("、"));
         }
     }
     out

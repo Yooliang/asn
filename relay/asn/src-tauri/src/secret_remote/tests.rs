@@ -475,7 +475,7 @@ fn 守門_掃描器看得到所有檔案() {
 
 #[test]
 fn 守門_密碼與密文不進log不進格式化輸出() {
-    let macros = ["println!(", "eprintln!(", "format!(", "writeln!(", "write!(", "print!(", "eprint!(", "dbg!(", "panic!(", "log::", "tracing::", "json!("];
+    let macros = ["println!(", "eprintln!(", "elog!(", "olog!(", "format!(", "writeln!(", "write!(", "print!(", "eprint!(", "dbg!(", "panic!(", "log::", "tracing::", "json!("];
     let words = ["secret", "password", "cipher", "plain", "verdict", "body", "pass", "key"];
     let mut bad = vec![];
     for (name, text) in sources() {

@@ -132,7 +132,7 @@ pub fn run(args: &[String], env: &ClientEnv, out: &mut dyn Write, err: &mut dyn 
 pub fn run_process(args: &[String]) -> i32 {
     std::thread::spawn(|| {
         std::thread::sleep(std::time::Duration::from_secs(15 * 60));
-        eprintln!("ASN 密碼小幫手：等太久了，已放棄。");
+        elog!("ASN 密碼小幫手：等太久了，已放棄。");
         std::process::exit(EXIT_TIMEOUT);
     });
     let env = ClientEnv::from_process();

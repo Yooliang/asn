@@ -309,12 +309,12 @@ pub fn migrate_at_startup() {
         let base = crate::identity::home_dir();
         match migrate_unless_override(&base, crate::envc::get("ASN_HOME").as_deref(), &RealOps) {
             Outcome::Nothing(_) => {}
-            Outcome::Skipped(r) => eprintln!("[asn] 資料夾遷移略過：{r}"),
+            Outcome::Skipped(r) => elog!("[asn] 資料夾遷移略過：{r}"),
             Outcome::Migrated { moved, conflicts, whole } => {
-                eprintln!("[asn] 資料夾已遷移到 .asn（整個改名：{whole}；搬 {} 項、衝突 {} 項：{}）", moved.len(), conflicts.len(), conflicts.join("、"))
+                elog!("[asn] 資料夾已遷移到 .asn（整個改名：{whole}；搬 {} 項、衝突 {} 項：{}）", moved.len(), conflicts.len(), conflicts.join("、"))
             }
             Outcome::Failed { reason, rollback_errors } => {
-                eprintln!("[asn] 資料夾遷移失敗，已倒回、沿用舊位置：{reason}{}", if rollback_errors.is_empty() { String::new() } else { format!("；倒回有 {} 項沒成功：{}", rollback_errors.len(), rollback_errors.join("、")) })
+                elog!("[asn] 資料夾遷移失敗，已倒回、沿用舊位置：{reason}{}", if rollback_errors.is_empty() { String::new() } else { format!("；倒回有 {} 項沒成功：{}", rollback_errors.len(), rollback_errors.join("、")) })
             }
         }
     }

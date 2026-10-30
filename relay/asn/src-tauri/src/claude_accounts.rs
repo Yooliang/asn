@@ -171,7 +171,7 @@ fn restrict_dir(dir: &Path) {
                 .map(|s| s.success())
                 .unwrap_or(false);
             if !ok {
-                eprintln!("claude 帳號庫：無法限縮資料夾權限（沿用家目錄的權限）");
+                elog!("claude 帳號庫：無法限縮資料夾權限（沿用家目錄的權限）");
             }
         }
     }
@@ -661,8 +661,8 @@ pub async fn auto_loop(data_dir: PathBuf, first: std::time::Duration, every: std
         if let Ok((out, st)) = r {
             steady = st;
             match &out {
-                AutoOutcome::Added(e) => eprintln!("已自動加入 {e}"),
-                AutoOutcome::Updated(e) => eprintln!("已更新 {e} 的登入憑證"),
+                AutoOutcome::Added(e) => elog!("已自動加入 {e}"),
+                AutoOutcome::Updated(e) => elog!("已更新 {e} 的登入憑證"),
                 AutoOutcome::Nothing => {}
             }
             if out != AutoOutcome::Nothing {

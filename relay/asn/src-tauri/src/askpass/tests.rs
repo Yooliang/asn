@@ -526,7 +526,7 @@ fn 守門_掃描器看得到所有檔案() {
 #[test]
 fn 守門_密碼不進log不進格式化輸出() {
     // 任何會輸出文字的巨集那一行，都不准提到密碼／內容變數
-    let macros = ["println!(", "eprintln!(", "format!(", "writeln!(", "write!(", "print!(", "eprint!(", "dbg!(", "panic!(", "unwrap_or_else(|e| e", "log::", "tracing::"];
+    let macros = ["println!(", "eprintln!(", "elog!(", "olog!(", "format!(", "writeln!(", "write!(", "print!(", "eprint!(", "dbg!(", "panic!(", "unwrap_or_else(|e| e", "log::", "tracing::"];
     let mut bad = vec![];
     for (name, text) in sources() {
         for (i, line) in code_only(&text).lines().enumerate() {
