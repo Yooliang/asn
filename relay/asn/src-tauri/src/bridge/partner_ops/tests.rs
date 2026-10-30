@@ -2330,3 +2330,12 @@ fn pi_喚醒_對話檔檔名與檔頭對不上_或同一個編號有兩個檔_�
     assert!(resume(&r2, "Pi妹妹", SID_A).detail.contains("找不到原本的對話紀錄"), "不唯一不猜");
     assert!(r.env.pi_launched.lock().unwrap().is_empty() && r2.env.pi_launched.lock().unwrap().is_empty());
 }
+
+#[test]
+fn 執行端認得的操作與送出前的白名單同一份() {
+    let mut known = KNOWN_OPS.to_vec();
+    known.sort();
+    let mut sent = crate::relay::PARTNER_OPS.to_vec();
+    sent.sort();
+    assert_eq!(known, sent, "bridge/partner_ops.rs 的 KNOWN_OPS 要與 relay.rs 的 PARTNER_OPS 一致");
+}

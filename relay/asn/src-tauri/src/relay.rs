@@ -820,8 +820,11 @@ pub fn build_launchers_body(ids: Option<&[String]>) -> Result<Value, String> {
     }
 }
 
-/// 夥伴視窗管理的動作：詳情、改名、切換模型、關閉、轉交下一任（與後台同一份清單）
-pub const PARTNER_OPS: [&str; 6] = ["info", "rename", "model", "close", "handover", "resume"];
+/// 夥伴視窗管理的動作：詳情、改名、切換模型、關閉、轉交下一任、喚醒、重開、移除。
+/// 要與畫面 ui/lib/partner-ops.mjs 的 OPS、後台 supabase/functions/_shared/partner_ops.ts 的 PARTNER_OPS、
+/// 執行端 bridge/partner_ops.rs 的 KNOWN_OPS 同一份清單（測試會對）；電腦版與手機版送出都經過這裡。
+/// 重開（restart）、移除（remove）跟詳情一樣只帶 node／name／op（後台 parsePartnerOp 也不收額外欄位）。
+pub const PARTNER_OPS: [&str; 8] = ["info", "rename", "model", "close", "handover", "resume", "restart", "remove"];
 /// 模型字串：1～60 字，只允許英數與 . _ [ ] -（與後台同一條規則）
 pub fn valid_model_str(s: &str) -> bool {
     let n = s.chars().count();
@@ -1187,6 +1190,46 @@ mod tests {
         assert!(build_launchers_body(Some(&vec![id; 21])).is_err());
     }
 
+    /// 從 ui/lib/partner-ops.mjs 取出每一行 `export const XXX_OPS = [...]`（含 OPS）裡的操作名稱
+    fn ui_partner_ops() -> Vec<(String, Vec<String>)> {
+        let src = include_str!("../../ui/lib/partner-ops.mjs");
+        let mut out = Vec::new();
+        for line in src.lines() {
+            let Some(rest) = line.trim_start().strip_prefix("export const ") else { continue };
+            let Some((name, value)) = rest.split_once('=') else { continue };
+            let name = name.trim();
+            if !(name == "OPS" || name.ends_with("_OPS")) {
+                continue;
+            }
+            let value = value.trim();
+            let Some(inner) = value.strip_prefix('[').and_then(|v| v.split_once(']')).map(|(a, _)| a) else { continue };
+            let ops: Vec<String> = inner.split(',').map(|s| s.trim().trim_matches('\'').trim_matches('"').to_string()).filter(|s| !s.is_empty()).collect();
+            out.push((name.to_string(), ops));
+        }
+        out
+    }
+
+    #[test]
+    fn 管理視窗_畫面上的每個操作送出前都認得() {
+        let lists = ui_partner_ops();
+        let all = lists.iter().find(|(n, _)| n == "OPS").map(|(_, o)| o.clone()).expect("partner-ops.mjs 要有 export const OPS");
+        assert!(all.len() >= 8, "OPS 解析結果不對：{all:?}");
+        let mut ui_set: Vec<&str> = all.iter().map(String::as_str).collect();
+        ui_set.sort();
+        let mut ours = PARTNER_OPS.to_vec();
+        ours.sort();
+        assert_eq!(ui_set, ours, "畫面 OPS 與 PARTNER_OPS 要同一份清單");
+        for (list, ops) in &lists {
+            for op in ops {
+                assert!(PARTNER_OPS.contains(&op.as_str()), "{list} 的 {op} 不在 PARTNER_OPS");
+                let r = build_partner_op_body(&json!({ "node": "H", "name": "小文", "op": op }));
+                if let Err(e) = &r {
+                    assert!(!e.contains("不認得這個操作"), "{list} 的 {op} 送出前被擋：{e}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn 管理視窗_請求只留該動作的欄位_格式擋在前面() {
         let base = |op: &str| json!({ "node": "H", "name": "小文", "op": op, "new_name": "新名-2", "model": "opus[1m]", "note": " 接著做 ", "command": "calc.exe" });
@@ -1197,6 +1240,8 @@ mod tests {
         assert_eq!(build_partner_op_body(&base("handover")).unwrap(), json!({ "node": "H", "name": "小文", "op": "handover", "note": "接著做" }));
         assert_eq!(build_partner_op_body(&json!({ "node": "H", "name": "小文", "op": "resume", "session_id": "../x", "note": "n", "new_name": "x" })).unwrap(), json!({ "node": "H", "name": "小文", "op": "resume" }), "喚醒：session 由後台查，不收畫面傳的");
         assert_eq!(build_partner_op_body(&json!({ "node": "H", "name": "小文", "op": "handover", "note": "  " })).unwrap(), json!({ "node": "H", "name": "小文", "op": "handover" }));
+        assert_eq!(build_partner_op_body(&base("restart")).unwrap(), json!({ "node": "H", "name": "小文", "op": "restart" }), "重開：只帶 node／name／op");
+        assert_eq!(build_partner_op_body(&base("remove")).unwrap(), json!({ "node": "H", "name": "小文", "op": "remove" }), "移除：只帶 node／name／op");
         let bad = [
             json!({ "node": "H;x", "name": "a", "op": "close" }), json!({ "node": "H", "name": "", "op": "close" }), json!({ "node": "H", "name": "a
 b", "op": "close" }),
