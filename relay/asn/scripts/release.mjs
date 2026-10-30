@@ -10,7 +10,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { smokeGate, splitSkipFlag } from './smoke-gate.mjs'
-import { buildLatestJson, installerName, parseArgs, resolveNotes } from './release-lib.mjs'
+import { buildLatestJson, installerName, installerUrl, parseArgs, patchDownloadLink, resolveNotes } from './release-lib.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const siteUpdate = path.join(root, '..', '..', 'site', 'public', 'update')
@@ -78,6 +78,13 @@ fs.mkdirSync(out, { recursive: true })
 fs.copyFileSync(exe, path.join(out, name))
 fs.copyFileSync(sigFile, path.join(out, `${name}.sig`))
 fs.writeFileSync(path.join(out, 'latest.json'), `${JSON.stringify(latest, null, 2)}\n`)
+if (!opts.dryRun) {   // 官網首頁的下載按鈕連到這版安裝檔（讀 latest.json 的網址規則，不寫死版號）
+  const indexFile = path.join(siteUpdate, '..', 'index.html')
+  const html = fs.readFileSync(indexFile, 'utf8')
+  const patched = patchDownloadLink(html, installerUrl(version))
+  if (patched === html && !html.includes(installerUrl(version))) fail('官網首頁找不到下載按鈕的安裝檔連結（site/public/index.html）')
+  if (patched !== html) fs.writeFileSync(indexFile, patched)
+}
 console.log(`已產生：${out}`)
 console.log(`  ${name}、${name}.sig、latest.json`)
 console.log(opts.dryRun ? '演練完成：沒有改版本號，也沒有動官網目錄。' : '下一步：提交版本號與 site/public/update/latest.json，再由人部署官網（firebase deploy --only hosting，在 site/ 底下）。')
