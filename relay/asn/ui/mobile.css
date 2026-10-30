@@ -328,7 +328,7 @@ body > .callview.mobile{position:fixed;inset:0;z-index:90;padding:calc(env(safe-
 .m-chat .tool.icon.dict .dict-state{font-size:14px;font-weight:600;white-space:nowrap}
 .m-chat .call-end-note{text-align:center;font-size:13px;color:var(--title-fg);opacity:.7;margin:4px 0}
 
-/* 群組對話：名單裡的群組列、對話頁（沿用對話版面，群組沒有震動、語音輸入；傳照片、傳檔案照常，有外部成員時由 attachOk 拿掉） */
+/* 群組對話：名單裡的群組列、對話頁（沿用對話版面，群組沒有震動、語音輸入；傳照片、傳檔案照常，有外部成員的群組也一樣） */
 .m-room-ic{display:flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:12px;color:#fff;background:linear-gradient(160deg,#6fb6f0,#2f6fb8);box-shadow:0 0 0 2px #cfe3f7}
 .m-chat.is-room .toolbar>.tool.dict,.m-chat.is-room .toolbar>.tool.mic{display:none}
 .m-rooms-actions{display:flex;gap:8px;padding:6px 14px 8px}
