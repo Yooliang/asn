@@ -1289,6 +1289,12 @@ pub fn run() {
         Arc::new(r)
     });
 
+    // 自己重開的新程序（--after-pid <舊 pid>）：先等舊的結束再做同名檢查，不然舊的心跳還新鮮會被判成同名已在跑（#581 審）
+    #[cfg(desktop)]
+    if let Some(old) = ui_log::after_pid(&args) {
+        ui_log::wait_gone(old, ui_log::AFTER_PID_WAIT, heartbeat::pid_alive, heartbeat::is_asn_process);
+    }
+
     // 同一個視窗名只留一個 ASN（另一個還活著就退出，同 recv.mjs 的 exit 3）。
     // 這個新開的是被邀請連結叫起來的（asn://invite/<碼>）：先把碼放進信箱檔，正在跑的那個 ASN 會取走並跳出「加入群組」
     if let Some(r) = &relay_obj {
