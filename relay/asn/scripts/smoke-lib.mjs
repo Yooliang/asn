@@ -370,8 +370,52 @@ export const mcardsProbeSource = ({ open }) => `(async () => {
   if (Array.from(foot.textContent.trim()).length > 20) return { ok: false, why: '說明超過 20 字' };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+// 手機「設備與帳號」返回（修返回鍵退不回設備列表）：從夥伴列表某台設備旁「選項」進來（直接開那台細部）或從設置進來（先看列表），
+// 按系統返回鍵一層一層退：細部 → 設備列表 → 收起整頁；兩種進法、一台或多台設備都要。列表＝有 .m-dv-list，細部＝第四頁籤開著但沒有列表
+export const MACCT_BACK_PROBE = { macctBack: true }
+export const macctBackProbeSource = () => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const vis = sel => [...document.querySelectorAll(sel)].some(e => e.offsetParent !== null);
+  const view = () => !vis('.m-fourth') ? 'closed' : vis('.m-dv-list') ? 'list' : 'detail';
+  const waitView = async want => { for (let i = 0; i < 30 && view() !== want; i++) await sleep(100); await sleep(150); return view() };
+  const press = async want => { history.back(); return waitView(want) };
+  const one = document.querySelectorAll('.m-ghead-act').length < 2;
+  const steps = [];
+  const check = (label, got, want) => { steps.push(label + '=' + got); return got === want ? null : { ok: false, why: label + '：應為 ' + want + '，實際 ' + got + '（' + steps.join('；') + '）' } };
+  // 一、夥伴列表某台設備旁的「選項」
+  const opt = [...document.querySelectorAll('.m-ghead-act')][0];
+  if (!opt) return { ok: false, why: '夥伴列表找不到設備旁的「選項」' };
+  opt.click();
+  let bad = check('選項進來', await waitView('detail'), 'detail'); if (bad) return bad;
+  bad = check('返回一次', await press('list'), 'list'); if (bad) return bad;
+  if (!one) {
+    const rows = [...document.querySelectorAll('.m-dv-go')];
+    rows[rows.length - 1].click();
+    bad = check('點另一台', await waitView('detail'), 'detail'); if (bad) return bad;
+    bad = check('再返回', await press('list'), 'list'); if (bad) return bad;
+  }
+  bad = check('返回收起', await press('closed'), 'closed'); if (bad) return bad;
+  // 二、從設置進來：先看列表，點一台，返回
+  const go = [...document.querySelectorAll('.m-tab, [role=tab], button')].find(b => b.textContent.trim() === '我' || b.getAttribute('aria-label') === '我');
+  if (go) { go.click(); await sleep(300) }
+  let btn = null;
+  for (let i = 0; i < 30 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes('設備與帳號')) || null; if (!btn) await sleep(100) }
+  if (!btn) return { ok: false, why: '找不到設置裡的「設備與帳號」（' + steps.join('；') + '）' };
+  btn.click();
+  bad = check('設置進來', await waitView('list'), 'list'); if (bad) return bad;
+  document.querySelector('.m-dv-go').click();
+  bad = check('設置點一台', await waitView('detail'), 'detail'); if (bad) return bad;
+  bad = check('設置返回一次', await press('list'), 'list'); if (bad) return bad;
+  bad = check('設置返回收起', await press('closed'), 'closed'); if (bad) return bad;
+  return { ok: true, why: steps.join('；') };
+})()`
+const MACCT_ME = { navTab: 'list' }
+const MACCT_MEMBERS = {
+  one: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }],
+  two: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }, { id: 'R', name: '工作機', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }],
+}
+export const probeKind = probe => (probe.macctBack ? '手機設備與帳號返回檢查' : probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mchat ? '手機對話頁檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.macctBack ? macctBackProbeSource(probe) : probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mchat ? mchatProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -416,6 +460,8 @@ export const SCENARIOS = [
   { name: 'list-roster-resets', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: RESET_PROBES.resets },
   { name: 'list-roster-reset-passed', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'resetPassed' }, ready: '#app.win .dv-my .dv-acct', probe: RESET_PROBES.passed },
   { name: 'm-acct-cards', page: 'm.html', state: { signedIn: true, mroster: 'cards' }, ready: '#app.m .m-row-btn', probe: MCARDS_PROBE, shot: 'm-acct-cards.png' },
+  { name: 'm-acct-back-one', page: 'm.html', state: { signedIn: true, macct: 'one' }, ready: '#app.m .m-ghead-act', probe: MACCT_BACK_PROBE },
+  { name: 'm-acct-back-two', page: 'm.html', state: { signedIn: true, macct: 'two' }, ready: '#app.m .m-ghead-act', probe: MACCT_BACK_PROBE },
   { name: 'chat', page: 'chat.html?id=P%2Fdemo', state: { signedIn: true }, ready: '#app.win' },
   { name: 'onboard', page: 'onboard.html', state: { signedIn: true, onboard: true }, ready: '#app.win' },
   { name: 'login', page: 'login.html', state: { signedIn: false, needsLogin: true }, ready: '#app.win' },
@@ -498,6 +544,12 @@ export const tableFor = scenario => {
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(GROUP_ME) } }
   }
   if (scenario.state.roster) t.acct_roster = ROSTERS[scenario.state.roster] ?? ROSTER_SAMPLE   // 沒放＝後台沒部署（指令被拒），畫面要退回舊的顯示、不出錯
+  if (scenario.state.macct) {
+    t.relay_list = { members: MACCT_MEMBERS[scenario.state.macct] }
+    t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MACCT_ME) } }
+    t.android_launchers = { machines: [] }
+    t.android_acct_roster = ROSTER_SAMPLE
+  }
   if (scenario.state.mroster) { t.android_acct_roster = scenario.state.mroster === 'cards' ? cardsRoster() : ROSTER_GEMINI; t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MROSTER_ME) } } }
   return t
 }

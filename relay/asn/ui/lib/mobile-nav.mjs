@@ -25,6 +25,8 @@ export function pageTitle(raw) {
 export function createMobileNav({ history, nav, st, now = () => Date.now() }) {
   // 退掉第四頁籤的記錄後要接著做的事（history.go 是非同步的，等 popstate 回來才做）：{ tab } 切到某分頁、{ page } 換一個內頁、{ close, tab } 收起後切到某分頁
   let pending = null
+  // 第四頁籤實際在瀏覽記錄裡佔幾筆（取代那一層前要確認底下真有一層，否則取代會把唯一一層換掉，返回鍵就直接收起整頁）
+  let layers = 0
   const setNav = n => {
     const prev = nav.tab
     const { page, ...rest } = n
@@ -45,7 +47,9 @@ export function createMobileNav({ history, nav, st, now = () => Date.now() }) {
   }
   // 切到第四頁籤：把內頁的每一層推回記錄
   function showPage() {
-    for (const p of pageLayers(st.fourth.page)) history.pushState(pageNav(p), '')
+    const ls = pageLayers(st.fourth.page)
+    for (const p of ls) history.pushState(pageNav(p), '')
+    layers = ls.length
     setNav({ tab: PAGE_TAB, sheet: '' })
   }
   const leavePage = then => { pending = then; history.go(-depth()) }
@@ -69,7 +73,8 @@ export function createMobileNav({ history, nav, st, now = () => Date.now() }) {
   function pushLayer(raw, { replace = false } = {}) {
     const p = normalizePage(raw)
     if (!p || nav.tab !== PAGE_TAB || !st.fourth) return
-    if (replace) history.replaceState(pageNav(p), ''); else history.pushState(pageNav(p), '')
+    if (replace && layers > 1) history.replaceState(pageNav(p), '')
+    else { history.pushState(pageNav(p), ''); layers++ }
     st.fourth = { ...st.fourth, page: p }
   }
   // 整個收起第四頁籤（內頁的「關閉」）：一次退掉它所有的記錄，popstate 回來時收起並回原頁籤；給了 tab 就收起後切到那一頁（例如開好夥伴直接去對話）
@@ -90,6 +95,7 @@ export function createMobileNav({ history, nav, st, now = () => Date.now() }) {
       return
     }
     if (n.tab === PAGE_TAB) {   // 退回內頁的上一層（或從浮層退回第四頁籤）；第四頁籤已經收起又退到它的舊記錄＝照記錄重開
+      layers = st.fourth ? Math.min(layers, pageLayers(n.page).length) || 1 : 1   // 照記錄重開時底下有沒有列表層不確定，當作只有這一層
       st.fourth = st.fourth ? { ...st.fourth, page: n.page } : openFourth(n.page, 'list')
       setNav(n)
       return
