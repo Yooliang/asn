@@ -87,7 +87,7 @@ test('掛上判斷的表達式：語法正確、帶入選擇器與預期路徑',
 })
 
 test('對話框遮罩情境（#536）：電腦與手機各一，檢查左上使用者區與名單；表達式語法正確', async () => {
-  const mask = SCENARIOS.filter(s => s.probe && !s.probe.bar && !s.probe.group && !s.probe.mbar && !s.probe.mgroup && !s.probe.quota)
+  const mask = SCENARIOS.filter(s => s.probe && !s.probe.bar && !s.probe.group && !s.probe.mbar && !s.probe.mgroup && !s.probe.quota && !s.probe.mcards)
   assert.deepEqual(mask.map(s => s.name), ['list-dialog-mask', 'm-dialog-mask'])
   assert.ok(MASK_PROBES.desktop.cover.includes('.me .me-dp') && MASK_PROBES.desktop.cover.includes('.rail'))
   assert.ok(MASK_PROBES.mobile.cover.includes('.m-head .m-me'))

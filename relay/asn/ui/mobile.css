@@ -137,13 +137,31 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-vi svg{width:22px;height:22px}
 .m-dv-vb{display:flex;flex-direction:column;gap:8px;padding:10px 12px}
 .m-dv-accts{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
-.m-dv-acct{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;min-height:44px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+/* 帳號卡固定三行（#374）：第一行帳號＋右邊固定位置的「切換」／「使用中」；第二行方案；第三行額度條 */
+.m-dv-acct{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"mail act" "plan plan" "quota quota";align-items:center;column-gap:8px;row-gap:4px;min-height:44px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.m-dv-acct>.m-dv-mail{grid-area:mail}
+.m-dv-act{grid-area:act;display:flex;align-items:center;justify-content:flex-end;min-width:60px}
+.m-dv-planrow{grid-area:plan;display:flex}
+.m-dv-acct>.m-dv-quota{grid-area:quota}
+.m-dv-bars{display:flex;flex-direction:column;gap:4px;margin:2px 0}
+.m-dv-bar{display:grid;grid-template-columns:3.4em minmax(40px,1fr) 4.2em auto;align-items:center;gap:6px}
+.m-dv-bl{color:var(--muted)}
+.m-dv-track{height:8px;border-radius:4px;background:var(--panel-soft);border:1px solid var(--line);overflow:hidden}
+.m-dv-fill{display:block;height:100%;background:var(--online)}
+.m-dv-fill.low{background:var(--busy)}
+.m-dv-bp{font-variant-numeric:tabular-nums;white-space:nowrap}
+.m-dv-br{color:var(--muted);white-space:nowrap;font-size:12px}
+.m-dv-bar.done .m-dv-br{color:var(--fg)}
+.m-dv-qmeta{display:flex;flex-wrap:wrap;gap:0 8px;color:var(--muted);font-size:12px}
+.m-dv-old{padding:0 6px;border:1px solid var(--line);border-radius:4px}
+.m-dv-foot{margin:10px 0 0;text-align:center}
 .m-dv-acct.cur{background:var(--panel-soft)}
 .m-dv-mail{min-width:0;font-size:15px;overflow-wrap:anywhere}
 .m-dv-side{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .m-dv-plan{padding:1px 8px;border:1px solid var(--line);border-radius:4px;font-size:12px;color:var(--muted)}
 .m-dv-quota{flex:1 0 100%;font-size:13px;line-height:1.5;color:var(--fg)}
-.m-dv-quota.stale{color:var(--muted);font-style:italic}
+.m-dv-quota.stale{color:var(--muted)}
+.m-dv-quota.stale .m-dv-bars{opacity:.55}
 .m-dv-quota.quota-out{color:#b3261e;font-weight:600}
 @media (prefers-color-scheme:dark){.m-dv-quota.quota-out{color:#ff9a90}.m-dv-quota.stale{color:#b4c0cc}}
 .m-dv-cur{padding:2px 9px;border-radius:4px;font-size:12px;font-weight:600;background:var(--accent);color:#fff}

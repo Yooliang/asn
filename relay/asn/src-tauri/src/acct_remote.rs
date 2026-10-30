@@ -89,6 +89,12 @@ pub fn build_report_all(list: &[AccountInfo], codex: Option<&CodexLogin>, quotas
                     o.insert("reset_at".into(), json!(v));
                 }
                 o.insert("at".into(), json!(q.at));
+                // 兩條各自的重置時間（#374，給舊表 relay.asn_accounts 用）：只送檔案裡記著的，舊檔沒有就不送，不從 reset_at 猜
+                for (k, v, pct) in [("five_reset_at", &q.five_reset_at, q.five_hour_pct), ("week_reset_at", &q.week_reset_at, q.weekly_pct)] {
+                    if let (Some(v), Some(_)) = (v, pct) {
+                        o.insert(k.into(), json!(v));
+                    }
+                }
                 let w = q.windows();
                 if !w.is_empty() {
                     o.insert("windows".into(), json!(w));
@@ -702,6 +708,12 @@ mod tests {
         for k in ["five_hour_pct", "weekly_pct", "reset_at", "at"] {
             assert!(first.get(k).is_some(), "舊四欄要照送：{k}");
         }
+        assert_eq!((first["five_reset_at"].as_str(), first["week_reset_at"].as_str()), (Some("2026-10-24T14:00:00Z"), Some("2026-10-30T00:00:00Z")), "兩條各自的重置時間也送（舊表用，#374）");
+        let mut old = quota(40, 70);
+        old.five_reset_at = None;
+        old.week_reset_at = None;
+        let one = build_report_windows(&many[..1], None, &HashMap::from([("u0@x.test".to_string(), old)]), &[], &[]);
+        assert!(one["accounts"][0].get("five_reset_at").is_none() && one["accounts"][0].get("week_reset_at").is_none(), "舊檔沒有就不送，不從舊的 reset_at 猜");
         assert_eq!(first["windows"], json!([
             { "name": "five_hour", "left_pct": 40, "resets_at": "2026-10-24T14:00:00Z", "read_at": "2026-10-24T12:00:00Z" },
             { "name": "weekly", "left_pct": 70, "resets_at": "2026-10-30T00:00:00Z", "read_at": "2026-10-24T11:00:00Z" },

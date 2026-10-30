@@ -230,13 +230,22 @@
                 <div class="m-dv-my-v" v-for="v in acctMy.vendors" :key="v.key" :data-vendor="v.key">
                   <header class="m-dv-vh"><span class="m-dv-vi" aria-hidden="true" v-html="vendorIconSvg(v.key)"></span><b>{{ v.label }}</b></header>
                   <ul class="m-dv-accts">
+                    <!-- 帳號卡固定三行：帳號＋右邊固定的「使用中」、方案、額度條（#374） -->
                     <li class="m-dv-acct" :class="{ cur: a.current }" v-for="a in v.accounts" :key="a.account">
                       <span class="m-dv-mail">{{ a.account }}</span>
-                      <span class="m-dv-side"><span class="m-dv-plan" v-if="a.plan">{{ a.plan }}</span><span class="m-dv-cur" v-if="a.current">使用中</span></span>
+                      <span class="m-dv-act"><span class="m-dv-cur" v-if="a.current">使用中</span></span>
+                      <span class="m-dv-planrow"><span class="m-dv-plan">{{ planLabel(a.plan) || PLAN_UNKNOWN }}</span></span>
                       <span class="m-dv-quota" :class="{ stale: a.quota.stale, 'quota-out': a.quota.exhausted }">
-                        <span v-for="(p, i) in a.quota.parts" :key="i">{{ i ? '、' : '' }}{{ p }}</span>
-                        <span v-if="a.quota.resetText">・{{ a.quota.resetText }}</span>
-                        <span v-if="a.quota.listMeta">（{{ a.quota.listMeta }}）</span>
+                        <span class="m-dv-bars" v-if="a.quota.bars && a.quota.bars.length">
+                          <span class="m-dv-bar" v-for="b in a.quota.bars" :key="b.key" :class="{ done: b.expired }">
+                            <span class="m-dv-bl">{{ b.label }}</span>
+                            <span class="m-dv-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="b.pct" :aria-label="b.label + '剩餘額度'"><span class="m-dv-fill" :class="{ low: b.low }" :style="{ width: (b.expired ? 0 : b.pct) + '%' }"></span></span>
+                            <span class="m-dv-bp">{{ b.expired ? '' : '剩 ' + b.pct + '%' }}</span>
+                            <span class="m-dv-br" v-if="b.reset">{{ b.reset }}</span>
+                          </span>
+                        </span>
+                        <span v-else>{{ a.quota.text }}</span>
+                        <span class="m-dv-qmeta" v-if="a.quota.resetLine || a.quota.oldText || a.quota.meta"><span v-if="a.quota.resetLine">{{ a.quota.resetLine }}</span><span class="m-dv-old" v-if="a.quota.oldText">{{ a.quota.oldText }}</span><span v-if="a.quota.meta">{{ a.quota.meta }}</span></span>
                       </span>
                     </li>
                   </ul>
@@ -262,9 +271,9 @@
                 </ul>
               </div>
               <button type="button" class="m-btn m-ops-cancel" @click="closePage">{{ ACCT_TEXT.close }}</button>
+              <p class="m-fine m-dv-foot">{{ ACCT_TEXT.quotaNote }}</p>
             </template>
             <template v-else-if="acctSw.phase === 'pick'">
-              <button type="button" class="m-dv-back" @click="acctBackToList">{{ DEVICE_TEXT.back }}</button>
               <section class="m-dv-dev" role="region" :aria-label="acctCur.label">
                 <div class="m-dv-dh">
                   <h3 class="m-dv-name">{{ acctCur.label }}</h3>
@@ -286,29 +295,37 @@
                       <header class="m-dv-vh"><span class="m-dv-vi" aria-hidden="true" v-html="vendorIconSvg(v.key)"></span><b>{{ v.label }}</b></header>
                       <div class="m-dv-vb">
                         <ul class="m-dv-accts" v-if="v.accounts.length">
+                          <!-- 帳號卡固定三行：帳號＋右邊固定的「切換」／「使用中」、方案、額度條（#374） -->
                           <li class="m-dv-acct" :class="{ cur: a.current }" v-for="a in v.accounts" :key="a.email">
                             <span class="m-dv-mail">{{ a.email }}</span>
-                            <span class="m-dv-side">
-                              <span class="m-dv-plan" v-if="a.plan">{{ a.plan }}</span>
+                            <span class="m-dv-act">
                               <span class="m-dv-cur" v-if="a.current">使用中</span>
                               <button type="button" class="m-dv-sw" v-else-if="v.key === 'claude' && (v.switchable || v.switchHint)" :disabled="!v.switchable" @click="startAcctSwitch(a.email)">切換</button>
                             </span>
+                            <span class="m-dv-planrow"><span class="m-dv-plan">{{ planLabel(a.plan) || PLAN_UNKNOWN }}</span></span>
                             <span class="m-dv-quota" :class="{ stale: a.quota.stale, 'quota-out': a.quota.exhausted }" v-if="a.quota">
-                              <span>{{ a.quota.text }}</span>
-                              <span v-if="a.quota.resetText">・{{ a.quota.resetText }}</span>
-                              <span v-if="a.quota.meta">（{{ a.quota.meta }}）</span>
+                              <span class="m-dv-bars" v-if="a.quota.bars && a.quota.bars.length">
+                                <span class="m-dv-bar" v-for="b in a.quota.bars" :key="b.key" :class="{ done: b.expired }">
+                                  <span class="m-dv-bl">{{ b.label }}</span>
+                                  <span class="m-dv-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="b.pct" :aria-label="b.label + '剩餘額度'"><span class="m-dv-fill" :class="{ low: b.low }" :style="{ width: (b.expired ? 0 : b.pct) + '%' }"></span></span>
+                                  <span class="m-dv-bp">{{ b.expired ? '' : '剩 ' + b.pct + '%' }}</span>
+                                  <span class="m-dv-br" v-if="b.reset">{{ b.reset }}</span>
+                                </span>
+                              </span>
+                              <span v-else>{{ a.quota.text }}</span>
+                              <span class="m-dv-qmeta" v-if="a.quota.resetLine || a.quota.oldText || a.quota.meta"><span v-if="a.quota.resetLine">{{ a.quota.resetLine }}</span><span class="m-dv-old" v-if="a.quota.oldText">{{ a.quota.oldText }}</span><span v-if="a.quota.meta">{{ a.quota.meta }}</span></span>
                             </span>
                           </li>
                         </ul>
                         <div class="m-dv-none" v-else>{{ acctRep && acctRep.loading ? '讀取中…' : (v.note || '目前未回報任何帳號') }}</div>
                         <small class="m-fine" v-if="v.switchHint">{{ v.switchHint }}</small>
-                        <small class="m-fine" v-if="v.key === 'claude' && v.accounts.length && v.switchable">{{ ACCT_TEXT.quotaNote }}</small>
                       </div>
                     </li>
                   </ul>
                 </div>
               </section>
               <button type="button" class="m-btn m-ops-cancel" @click="closePage">{{ ACCT_TEXT.close }}</button>
+              <p class="m-fine m-dv-foot">{{ ACCT_TEXT.quotaNote }}</p>
             </template>
             <template v-else-if="acctSw.phase === 'rm'">
               <p class="m-ops-lead" role="alert">{{ acctRemoveText }}</p>

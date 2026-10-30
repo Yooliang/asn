@@ -12,7 +12,7 @@ import { accountLine } from './claude-accounts.mjs'
 import { catByKey, normalizeCatKey } from './settings-cats.mjs'
 import { vendorIconSvg } from './vendor-icons.mjs'
 import { USAGE_NOTE } from './usage.mjs'
-import { NO_QUOTA_TEXT, quotaBars, quotaView } from './account-quota.mjs'
+import { NO_QUOTA_TEXT, planLabel, quotaBars, quotaView } from './account-quota.mjs'
 import { DEVICE_TEXT, canRemoveRow, dropAfter, moveFlags, removedRows, visibleRows } from './device-order.mjs'
 
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
@@ -80,7 +80,7 @@ export const SettingsPanel = {
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return {
       fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions,
-      cat, catIcon, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, onRow, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT,
+      cat, catIcon, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, onRow, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel,
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL,
       CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS, DIMS,
@@ -149,13 +149,21 @@ export const SettingsPanel = {
                   <li :class="['dv-acct', { cur: a.current }]" v-for="a in v.accounts" :key="a.account">
                     <span class="dv-mail">{{ a.account }}</span>
                     <span class="dv-side">
-                      <span class="dv-plan" v-if="a.plan">{{ a.plan }}</span>
+                      <span class="dv-plan" v-if="a.plan">{{ planLabel(a.plan) }}</span>
                       <span class="dv-cur" v-if="a.current">使用中</span>
                     </span>
                     <span class="dv-quota" :class="{ stale: a.quota.stale, out: a.quota.exhausted }">
-                      <span v-for="(p, i) in a.quota.parts" :key="i">{{ i ? '、' : '' }}{{ p }}</span>
-                      <span v-if="a.quota.resetText">・{{ a.quota.resetText }}</span>
-                      <span v-if="a.quota.listMeta">（{{ a.quota.listMeta }}）</span>
+                      <span class="dv-bars" v-if="a.quota.bars && a.quota.bars.length">
+                        <span class="dv-bar" v-for="b in a.quota.bars" :key="b.key" :class="{ done: b.expired }">
+                          <span class="dv-bl">{{ b.label }}</span>
+                          <span class="dv-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="b.pct" :aria-label="b.label + '剩餘額度'"><span class="dv-fill" :class="{ low: b.low }" :style="{ width: (b.expired ? 0 : b.pct) + '%' }"></span></span>
+                          <span class="dv-bp">{{ b.expired ? '' : '剩 ' + b.pct + '%' }}</span>
+                          <span class="dv-br" v-if="b.reset">{{ b.reset }}</span>
+                        </span>
+                      </span>
+                      <span v-else>{{ a.quota.text }}</span>
+                      <span class="dv-old" v-if="a.quota.oldText">{{ a.quota.oldText }}</span>
+                      <span v-if="a.quota.meta">（{{ a.quota.meta }}）</span>
                     </span>
                   </li>
                 </ul>
@@ -205,17 +213,18 @@ export const SettingsPanel = {
                         <li :class="['dv-acct', { cur: a.current }]" v-for="a in st.accounts.list" :key="a.email">
                           <span class="dv-mail">{{ a.email }}</span>
                           <span class="dv-side">
-                            <span class="dv-plan" v-if="a.plan">{{ a.plan }}</span>
+                            <span class="dv-plan" v-if="a.plan">{{ planLabel(a.plan) }}</span>
                             <span class="dv-cur" v-if="a.current">使用中</span>
                             <button class="aero-btn" type="button" @click="act('acct-switch', a.email)" :disabled="st.accounts.busy || a.current">切換</button>
                             <button class="aero-btn" type="button" @click="act('acct-remove', a.email)" :disabled="st.accounts.busy">{{ st.accounts.confirmDel === a.email ? '確認刪除' : '刪除' }}</button>
                           </span>
                           <span class="dv-quota" :class="{ stale: qb(a).stale, out: qv(a).exhausted }">
                             <span class="dv-bars" v-if="qb(a).bars.length">
-                              <span class="dv-bar" v-for="b in qb(a).bars" :key="b.key">
+                              <span class="dv-bar" v-for="b in qb(a).bars" :key="b.key" :class="{ done: b.expired }">
                                 <span class="dv-bl">{{ b.label }}</span>
-                                <span class="dv-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="b.pct" :aria-label="b.label + '剩餘額度'"><span class="dv-fill" :class="{ low: b.low }" :style="{ width: b.pct + '%' }"></span></span>
-                                <span class="dv-bp">剩 {{ b.pct }}%</span>
+                                <span class="dv-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="b.pct" :aria-label="b.label + '剩餘額度'"><span class="dv-fill" :class="{ low: b.low }" :style="{ width: (b.expired ? 0 : b.pct) + '%' }"></span></span>
+                                <span class="dv-bp">{{ b.expired ? '' : '剩 ' + b.pct + '%' }}</span>
+                                <span class="dv-br" v-if="b.reset">{{ b.reset }}</span>
                               </span>
                             </span>
                             <span v-else>{{ qb(a).note }}</span>
@@ -238,14 +247,23 @@ export const SettingsPanel = {
                         <li :class="['dv-acct', { cur: a.current }]" v-for="a in v.accounts" :key="a.email">
                           <span class="dv-mail">{{ a.email }}</span>
                           <span class="dv-side">
-                            <span class="dv-plan" v-if="a.plan">{{ a.plan }}</span>
+                            <span class="dv-plan" v-if="a.plan">{{ planLabel(a.plan) }}</span>
                             <span class="dv-cur" v-if="a.current">使用中</span>
                             <button class="aero-btn" type="button" v-else-if="(v.key === 'claude' || v.key === 'grok') && !curDev.self && (v.switchable || v.switchHint)" :disabled="!v.switchable" @click="act('device-switch', { node: curDev.key, email: a.email, vendor: v.key })">切換</button>
                             <button class="aero-btn" type="button" v-else-if="v.key === 'grok' && curDev.self && v.accounts.length > 1" :disabled="st.accounts.busy" @click="act('grok-switch', a.email)">切換</button>
                           </span>
                           <span class="dv-quota" :class="{ stale: a.quota.stale, out: a.quota.exhausted }" v-if="a.quota">
-                            <span>{{ a.quota.text }}</span>
-                            <span v-if="a.quota.resetText">・{{ a.quota.resetText }}</span>
+                            <span class="dv-bars" v-if="a.quota.bars && a.quota.bars.length">
+                              <span class="dv-bar" v-for="b in a.quota.bars" :key="b.key" :class="{ done: b.expired }">
+                                <span class="dv-bl">{{ b.label }}</span>
+                                <span class="dv-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="b.pct" :aria-label="b.label + '剩餘額度'"><span class="dv-fill" :class="{ low: b.low }" :style="{ width: (b.expired ? 0 : b.pct) + '%' }"></span></span>
+                                <span class="dv-bp">{{ b.expired ? '' : '剩 ' + b.pct + '%' }}</span>
+                                <span class="dv-br" v-if="b.reset">{{ b.reset }}</span>
+                              </span>
+                            </span>
+                            <span v-else>{{ a.quota.text }}</span>
+                            <span v-if="a.quota.resetLine">・{{ a.quota.resetLine }}</span>
+                            <span class="dv-old" v-if="a.quota.oldText">{{ a.quota.oldText }}</span>
                             <span v-if="a.quota.meta">（{{ a.quota.meta }}）</span>
                           </span>
                           <span class="dv-quota stale" v-else-if="v.key === 'codex' || v.key === 'grok'">{{ NO_QUOTA_TEXT }}</span>

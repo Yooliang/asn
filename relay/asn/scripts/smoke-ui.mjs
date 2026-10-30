@@ -10,7 +10,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { findBrowser, injectSource, mountCheckSource, probeKind, probeSource, parseSmokeArgs, pathOf, selectScenarios, tableFor } from './smoke-lib.mjs'
+import { findBrowser, injectSource, mountCheckSource, probeKind, probeSource, parseSmokeArgs, pathOf, selectScenarios, shotPath, tableFor } from './smoke-lib.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ui = path.join(root, 'ui')
@@ -100,13 +100,23 @@ async function runScenario(cdp, sc, base) {
   if (check.ok && sc.probe) {
     try { const v = (await S('Runtime.evaluate', { expression: probeSource(sc.probe), awaitPromise: true, returnByValue: true })).result.value; if (!v?.ok) probeWhy = v?.why || '沒有回結果' } catch (e) { probeWhy = `執行失敗：${e.message}` }
   }
+  // 情境帶 shot（#374）：探測完存一張截圖（ASN_SMOKE_SHOTS 指定的資料夾，沒指定放暫存資料夾）；存不了只記一筆，不算失敗
+  let shot = ''
+  if (check.ok && sc.shot) {
+    try {
+      const { data } = await S('Page.captureScreenshot', { format: 'png' })
+      shot = shotPath(sc.shot)
+      fs.mkdirSync(path.dirname(shot), { recursive: true })
+      fs.writeFileSync(shot, Buffer.from(data, 'base64'))
+    } catch (e) { shot = ''; console.log(`    截圖存不了：${e.message}`) }
+  }
   let missing = []
   try { missing = (await S('Runtime.evaluate', { expression: 'globalThis.__smokeMissing || []', returnByValue: true })).result.value ?? [] } catch { /* 頁面已離開 */ }
   await cdp.send('Target.closeTarget', { targetId }).catch(() => {})
   const problems = [...errors]
   if (!check.ok) problems.unshift(`沒有掛上：${check.why}`)
   if (probeWhy) problems.push(`${probeKind(sc.probe)}：${probeWhy}`)
-  return { problems, missing }
+  return { problems, missing, shot }
 }
 
 let failed = 0
@@ -132,6 +142,7 @@ try {
       console.error(`✗ ${sc.name}（${sc.page}）失敗 ${sec}s`)
       for (const p of r.problems) console.error(`    ${p}`)
     } else console.log(`✓ ${sc.name}（${sc.page}）${sec}s`)
+    if (r.shot) console.log(`    截圖：${r.shot}`)
     if (opts.verbose && r.missing.length) console.log(`    被拒絕的未註冊指令：${[...new Set(r.missing)].join('、')}`)
   }
   cdp.close()

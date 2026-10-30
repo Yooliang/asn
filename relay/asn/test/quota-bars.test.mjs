@@ -9,7 +9,7 @@ const at = new Date(NOW - 10 * 60_000).toISOString()
 
 test('有數字：兩條剩餘百分比，剩 20% 以下標警示；重置寫「約 N 小時後」', () => {
   const v = quotaBars({ five_hour_pct: 64, weekly_pct: 12, reset_at: new Date(NOW + 3 * 3600_000 + 10 * 60_000).toISOString(), at }, { hookOn: true, now: NOW })
-  assert.deepEqual(v.bars, [{ key: 'five', label: '5 小時', pct: 64, low: false }, { key: 'week', label: '每週', pct: 12, low: true }])
+  assert.deepEqual(v.bars, [{ key: 'five', label: '5 小時', pct: 64, low: false, reset: '', expired: false }, { key: 'week', label: '每週', pct: 12, low: true, reset: '', expired: false }], '舊版紀錄（沒有各自的重置時間）：條上不寫')
   assert.equal(v.reset, '5 小時額度約 3 小時後重置', '都沒用完：重置時間是 5 小時那條的')
   assert.equal(v.note, '')
   assert.equal(v.stale, false)

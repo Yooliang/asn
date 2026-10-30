@@ -1,7 +1,9 @@
 // 啟動冒煙測試的純邏輯：參數、入口頁清單、假 Tauri 回應表、瀏覽器尋找、掛上判斷。
 // smoke-ui.mjs 負責真的起伺服器與無頭瀏覽器；這裡不碰程序與網路，方便單元測試。
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
+import { resetWhen } from '../ui/lib/account-quota.mjs'
 
 const badTimeout = () => new Error('--timeout 要是不小於 1000 的毫秒數')
 export const parseSmokeArgs = argv => {
@@ -125,7 +127,7 @@ export const barProbeSource = ({ bar, badge, taskItems, header, wake }) => `(asy
     const bars = [...document.querySelectorAll('.actionbar')].filter(b => b.offsetParent !== null);
     const btns = bars.length === 1 ? [...bars[0].querySelectorAll('.abtn')] : [];
     const off = b => b.getAttribute('aria-disabled') === 'true';
-    const got = btns.map(b => [b.dataset.slot || '', b.querySelector('.ab-name')?.textContent.replace(/\s*▾\s*$/, '').trim() || '', off(b)]);
+    const got = btns.map(b => [b.dataset.slot || '', b.querySelector('.ab-name')?.textContent.replace(/\\s*▾\\s*$/, '').trim() || '', off(b)]);
     why = bars.length !== 1 ? '看得到的功能列有 ' + bars.length + ' 條' : JSON.stringify(got) === JSON.stringify(want) ? '' : '按鈕不符：' + JSON.stringify(got);
     if (!why) {
       const bad = btns.find(b => off(b) && !b.title);
@@ -281,13 +283,15 @@ export const mgroupProbeSource = ({ mgroup }) => `(async () => {
   return { ok: true, why: '' };
 })()`
 // 額度畫面（#374 之三）：「我的帳號」區每個廠牌（data-vendor）的文字要依序含 want 列的每一段；先等 open 指定的入口（手機要從設置點進「設備與帳號」）
+// #374：兩條改成額度條（「5 小時」「剩 40%」各自一段）；absent＝那一組裡不能出現的字
+const CLAUDE_BARS = ['Claude', '5 小時', '剩 40%', '每週', '剩 72%']
 export const QUOTA_PROBES = {
-  gemini: { quota: '.dv-my', want: { claude: ['Claude', '5 小時剩 40%', '每週剩 72%'], gemini: ['Gemini', '5 小時剩', '每週剩'] } },
-  geminiEmpty: { quota: '.dv-my', want: { claude: ['Claude', '5 小時剩 40%', '每週剩 72%'], gemini: ['Gemini', '開 Gemini 視窗後才讀得到'] } },
-  mobile: { quota: '.m-dv-my', open: '設備與帳號', want: { claude: ['Claude', '5 小時剩 40%', '每週剩 72%'], gemini: ['Gemini', '5 小時剩', '每週剩'] } },
+  gemini: { quota: '.dv-my', want: { claude: CLAUDE_BARS, gemini: ['Gemini', '5 小時', '剩', '每週', '剩'] } },
+  geminiEmpty: { quota: '.dv-my', want: { claude: CLAUDE_BARS, gemini: ['Gemini', '開 Gemini 視窗後才讀得到'] } },
+  mobile: { quota: '.m-dv-my', open: '設備與帳號', want: { claude: CLAUDE_BARS, gemini: ['Gemini', '5 小時', '剩', '每週', '剩'] } },
 }
-export const quotaProbeSource = ({ quota, open = '', want }) => `(async () => {
-  const sel = ${JSON.stringify(quota)}, open = ${JSON.stringify(open)}, want = ${JSON.stringify(want)};
+export const quotaProbeSource = ({ quota, open = '', want, absent = {} }) => `(async () => {
+  const sel = ${JSON.stringify(quota)}, open = ${JSON.stringify(open)}, want = ${JSON.stringify(want)}, absent = ${JSON.stringify(absent)};
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   if (open) {
     let btn = null;
@@ -304,6 +308,7 @@ export const quotaProbeSource = ({ quota, open = '', want }) => `(async () => {
       const text = el ? el.textContent.replace(/\\s+/g, ' ') : '';
       let at = 0;
       for (const p of parts) { const k = text.indexOf(p, at); if (k < 0) { why = (el ? v + ' 少了「' + p + '」：' + text : '沒有 ' + v + ' 這一組'); break } at = k + p.length }
+      if (!why) for (const p of absent[v] ?? []) if (text.includes(p)) { why = v + ' 不該出現「' + p + '」：' + text; break }
       if (why) break;
     }
     if (!why) return { ok: true, why: '' };
@@ -311,9 +316,78 @@ export const quotaProbeSource = ({ quota, open = '', want }) => `(async () => {
   }
   return { ok: false, why };
 })()`
-export const probeKind = probe => (probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mbar ? '手機大按鈕檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mbar ? mbarProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+// 手機「設備與帳號」帳號卡（#374）：每張固定三行（帳號＋右邊固定位置的「使用中」／「切換」、方案、額度）；
+// 方案寫 Max 這類、沒有底線；額度兩條各有重置時間；舊資料寫「資料較舊」且不是斜體；頁內沒有第二個返回；說明在最下面
+export const MCARDS_PROBE = { mcards: true, open: '設備與帳號' }
+export const mcardsProbeSource = ({ open }) => `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const open = ${JSON.stringify(open)};
+  let btn = null;
+  for (let i = 0; i < 60 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes(open)) || null; if (!btn) await sleep(100) }
+  if (!btn) return { ok: false, why: '找不到「' + open + '」' };
+  btn.click();
+  let cards = [];
+  for (let i = 0; i < 60 && cards.length < 2; i++) { cards = [...document.querySelectorAll('.m-dv-my .m-dv-acct')].filter(c => c.offsetParent !== null); if (cards.length < 2) await sleep(100) }
+  if (cards.length < 2) return { ok: false, why: '帳號卡少於 2 張：' + cards.length };
+  await sleep(300);
+  const rect = (c, sel) => { const e = c.querySelector(sel); return e ? e.getBoundingClientRect() : null };
+  let right = null;
+  for (const c of cards) {
+    const mail = rect(c, '.m-dv-mail'), act = rect(c, '.m-dv-act'), plan = rect(c, '.m-dv-planrow'), quota = rect(c, '.m-dv-quota');
+    const name = (c.closest('[data-vendor]')?.dataset.vendor ?? '') + ' ' + (c.querySelector('.m-dv-mail')?.textContent.trim() ?? '');
+    if (!mail || !act || !plan || !quota) return { ok: false, why: name + ' 不是三行卡片（少了某一行）' };
+    if (Math.abs((act.top + act.bottom) / 2 - (mail.top + mail.bottom) / 2) > Math.max(mail.height, act.height) / 2) return { ok: false, why: name + ' 的使用中／切換不在第一行' };
+    if (plan.top < mail.bottom - 1 || quota.top < plan.bottom - 1) return { ok: false, why: name + ' 三行順序不對' };
+    if (right === null) right = act.right; else if (Math.abs(act.right - right) > 1) return { ok: false, why: name + ' 的使用中／切換位置跟別張不一樣' };
+    const planText = c.querySelector('.m-dv-plan')?.textContent.trim() ?? '';
+    if (!planText || /_/.test(planText)) return { ok: false, why: name + ' 的方案寫成「' + planText + '」' };
+    if (getComputedStyle(c.querySelector('.m-dv-quota')).fontStyle === 'italic') return { ok: false, why: name + ' 的額度是斜體' };
+  }
+  const claude = cards.find(c => c.closest('[data-vendor="claude"]'));
+  if (!claude) return { ok: false, why: '沒有 Claude 帳號卡' };
+  if (claude.querySelector('.m-dv-plan')?.textContent.trim() !== 'Max') return { ok: false, why: 'claude_max 沒寫成 Max' };
+  const bars = [...claude.querySelectorAll('.m-dv-bar')];
+  if (bars.length !== 2) return { ok: false, why: 'Claude 額度條是 ' + bars.length + ' 條' };
+  if (bars.some(b => !(b.querySelector('.m-dv-br')?.textContent.trim() ?? '').endsWith('重置'))) return { ok: false, why: 'Claude 額度條沒有各自的重置時間' };
+  if (!cards.some(c => c.textContent.includes('資料較舊'))) return { ok: false, why: '舊資料那張沒寫「資料較舊」' };
+  if (document.querySelector('.m-fourth .m-dv-back')) return { ok: false, why: '頁內還有第二個返回' };
+  const foot = document.querySelector('.m-fourth .m-dv-foot');
+  if (!foot) return { ok: false, why: '最下面沒有說明' };
+  const last = [...foot.parentElement.children].filter(e => e.offsetParent !== null).at(-1);
+  if (last !== foot) return { ok: false, why: '說明不在最下面' };
+  if (Array.from(foot.textContent.trim()).length > 20) return { ok: false, why: '說明超過 20 字' };
+  return { ok: true, why: '' };
+})()`
+export const probeKind = probe => (probe.mcards ? '手機帳號卡檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mbar ? '手機大按鈕檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.mcards ? mcardsProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mbar ? mbarProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
+// 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
+const SMOKE_NOW = Date.now()
+const toMinute = ms => new Date(Math.floor(ms / 60_000) * 60_000).toISOString()
+export function resetRoster(now = SMOKE_NOW, { passed = false } = {}) {
+  const read = toMinute(now - 10 * 60_000)
+  const five = passed ? toMinute(now - 30 * 60_000) : toMinute(now + 3 * 3600_000 + 10 * 60_000)
+  const week = toMinute(now + 3 * 24 * 3600_000)
+  return {
+    now: toMinute(now),
+    accounts: [{ vendor: 'claude', account: 'me@example.com', plan: 'claude_max', seen_at: read, seen_node: 'P', nodes: [{ node: 'P', current: true, reported_at: read }],
+      windows: [{ name: 'five_hour', left_pct: 40, resets_at: five, read_at: read, read_node: 'P' }, { name: 'weekly', left_pct: 72, resets_at: week, read_at: read, read_node: 'P' }] }],
+  }
+}
+const RESET_WEEK_TEXT = resetWhen(resetRoster().accounts[0].windows[1].resets_at, SMOKE_NOW)
+export const RESET_PROBES = {
+  resets: { quota: '.dv-my', want: { claude: ['Claude', '5 小時', '剩 40%', '約 3 小時後重置', '每週', '剩 72%', RESET_WEEK_TEXT] } },
+  passed: { quota: '.dv-my', want: { claude: ['Claude', '5 小時', '可能已恢復', '每週', '剩 72%'] }, absent: { claude: ['剩 40%'] } },
+}
+// 手機三行卡片：Claude（claude_max、兩條各有重置時間、使用中）＋ Gemini 一張舊資料（9 小時前讀的）＋ Codex 沒有額度
+function cardsRoster(now = SMOKE_NOW) {
+  const r = resetRoster(now)
+  const old = toMinute(now - 9 * 3600_000)
+  return { ...r, accounts: [...r.accounts,
+    { vendor: 'gemini', account: 'me@example.com', plan: 'Google AI Pro', seen_at: old, seen_node: 'P', nodes: [{ node: 'P', current: true, reported_at: old }],
+      windows: [{ name: 'five_hour', left_pct: 55, resets_at: toMinute(now + 2 * 3600_000), read_at: old, read_node: 'P' }, { name: 'weekly', left_pct: 81, resets_at: toMinute(now + 4 * 24 * 3600_000), read_at: old, read_node: 'P' }] },
+    { vendor: 'codex', account: 'me@example.com', plan: 'plus', windows: [], seen_at: old, seen_node: 'P', nodes: [] }] }
+}
 // ---- 入口頁清單：每個情境載一頁，指定假狀態、等待的畫面特徵 ----
 // ready：頁面掛上後必須存在的選擇器；頁面不能被導走（導走＝流程錯）
 export const SCENARIOS = [
@@ -326,6 +400,10 @@ export const SCENARIOS = [
   { name: 'list-roster-gemini', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'gemini' }, ready: '#app.win .dv-my .dv-acct', probe: QUOTA_PROBES.gemini },
   { name: 'list-roster-gemini-empty', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'geminiEmpty' }, ready: '#app.win .dv-my .dv-acct', probe: QUOTA_PROBES.geminiEmpty },
   { name: 'm-roster-gemini', page: 'm.html', state: { signedIn: true, mroster: true }, ready: '#app.m .m-row-btn', probe: QUOTA_PROBES.mobile },
+  // 兩條額度各自的重置時間（#374）：電腦「我的帳號」各條自己寫；已過的寫「可能已恢復」、不寫舊百分比；手機三行卡片（存截圖）
+  { name: 'list-roster-resets', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: RESET_PROBES.resets },
+  { name: 'list-roster-reset-passed', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'resetPassed' }, ready: '#app.win .dv-my .dv-acct', probe: RESET_PROBES.passed },
+  { name: 'm-acct-cards', page: 'm.html', state: { signedIn: true, mroster: 'cards' }, ready: '#app.m .m-row-btn', probe: MCARDS_PROBE, shot: 'm-acct-cards.png' },
   { name: 'chat', page: 'chat.html?id=P%2Fdemo', state: { signedIn: true }, ready: '#app.win' },
   { name: 'onboard', page: 'onboard.html', state: { signedIn: true, onboard: true }, ready: '#app.win' },
   { name: 'login', page: 'login.html', state: { signedIn: false, needsLogin: true }, ready: '#app.win' },
@@ -368,7 +446,9 @@ export const ROSTER_SAMPLE = {
 const GEMINI_ROW = { vendor: 'gemini', account: 'me@example.com', plan: 'Google AI Pro', windows: [{ name: 'five_hour', left_pct: 55, resets_at: null, read_at: '2026-10-28T22:00:00Z', read_node: 'P' }, { name: 'weekly', left_pct: 81, resets_at: null, read_at: '2026-10-28T22:00:00Z', read_node: 'P' }], seen_at: '2026-10-28T22:00:00Z', seen_node: 'P', nodes: [] }
 export const ROSTER_GEMINI = { ...ROSTER_SAMPLE, accounts: [...ROSTER_SAMPLE.accounts, GEMINI_ROW] }
 export const ROSTER_GEMINI_EMPTY = { ...ROSTER_SAMPLE, accounts: [...ROSTER_SAMPLE.accounts, { ...GEMINI_ROW, windows: [] }] }
-const ROSTERS = { gemini: ROSTER_GEMINI, geminiEmpty: ROSTER_GEMINI_EMPTY }
+const ROSTERS = { gemini: ROSTER_GEMINI, geminiEmpty: ROSTER_GEMINI_EMPTY, resets: resetRoster(), resetPassed: resetRoster(SMOKE_NOW, { passed: true }) }
+/** 截圖存哪：環境變數 ASN_SMOKE_SHOTS 指定的資料夾，沒指定就放暫存資料夾（不放 repo 裡） */
+export const shotPath = (name, env = process.env) => path.join(env.ASN_SMOKE_SHOTS || path.join(os.tmpdir(), 'asn-smoke-shots'), name)
 export const MROSTER_ME = { navTab: 'me' }
 export const tableFor = scenario => {
   const t = fakeTable(scenario.state)
@@ -400,7 +480,7 @@ export const tableFor = scenario => {
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(GROUP_ME) } }
   }
   if (scenario.state.roster) t.acct_roster = ROSTERS[scenario.state.roster] ?? ROSTER_SAMPLE   // 沒放＝後台沒部署（指令被拒），畫面要退回舊的顯示、不出錯
-  if (scenario.state.mroster) { t.android_acct_roster = ROSTER_GEMINI; t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MROSTER_ME) } } }
+  if (scenario.state.mroster) { t.android_acct_roster = scenario.state.mroster === 'cards' ? cardsRoster() : ROSTER_GEMINI; t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MROSTER_ME) } } }
   return t
 }
 

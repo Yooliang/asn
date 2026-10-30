@@ -140,13 +140,13 @@ test('電腦設定頁「我的帳號」：Gemini 兩窗都顯示；沒資料寫�
   const withG = await render({ devices: [], accounts: ACCT, myAccounts: rosterView(roster([claude(), gemini()]), { nodeLabel, now: NOW }) })
   assert.ok(withG.includes('data-vendor="gemini"'))
   assert.ok(withG.includes('<b>Gemini</b>'))
-  assert.ok(withG.includes('5 小時剩 55%・2 小時前') && withG.includes('每週剩 81%・2 小時前'))
+  assert.ok(withG.includes('剩 55%') && withG.includes('剩 81%') && withG.includes('2 小時前'), '兩條額度條（#374）')
   const noG = await render({ devices: [], accounts: ACCT, myAccounts: rosterView(roster([claude(), gemini({ windows: [] })]), { nodeLabel, now: NOW }) })
   assert.ok(noG.includes('開 Gemini 視窗後才讀得到'))
   const only = await render({ devices: [], accounts: ACCT, myAccounts: rosterView(roster([claude()]), { nodeLabel, now: NOW }) })
   const claudePart = h => h.slice(h.indexOf('data-vendor="claude"'), h.indexOf('</div>', h.indexOf('data-vendor="claude"')))
   assert.equal(claudePart(withG), claudePart(only))
-  assert.ok(claudePart(only).includes('5 小時剩 40%・3 小時前'))
+  assert.ok(claudePart(only).includes('剩 40%') && claudePart(only).includes('3 小時前'))
 })
 
 // ---------- 冒煙情境 ----------
@@ -159,10 +159,10 @@ test('冒煙情境：有 Gemini 額度兩條都顯示、沒資料顯示提示、
   assert.deepEqual(tableFor(mob).android_acct_roster, ROSTER_GEMINI)
   assert.equal(ROSTER_GEMINI.accounts.find(a => a.vendor === 'claude').windows.length, 2)
   assert.deepEqual(ROSTER_GEMINI.accounts.filter(a => a.vendor === 'claude'), ROSTER_SAMPLE.accounts.filter(a => a.vendor === 'claude'), 'Claude 那一筆跟原本的冒煙資料相同')
-  assert.deepEqual(QUOTA_PROBES.gemini.want.gemini, ['Gemini', '5 小時剩', '每週剩'], '先認組名：舊畫面寫成小寫的 gemini')
+  assert.deepEqual(QUOTA_PROBES.gemini.want.gemini, ['Gemini', '5 小時', '剩', '每週', '剩'], '先認組名：舊畫面寫成小寫的 gemini；#374 起是兩條額度條')
   assert.deepEqual(QUOTA_PROBES.geminiEmpty.want.gemini, ['Gemini', '開 Gemini 視窗後才讀得到'])
   for (const p of [QUOTA_PROBES.gemini, QUOTA_PROBES.geminiEmpty, QUOTA_PROBES.mobile]) {
-    assert.deepEqual(p.want.claude, ['Claude', '5 小時剩 40%', '每週剩 72%'], 'Claude 一定一起檢查')
+    assert.deepEqual(p.want.claude, ['Claude', '5 小時', '剩 40%', '每週', '剩 72%'], 'Claude 一定一起檢查')
     assert.doesNotThrow(() => new vm.Script(quotaProbeSource(p)))
     assert.equal(probeSource(p), quotaProbeSource(p))
     assert.equal(probeKind(p), '額度畫面檢查')

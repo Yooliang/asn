@@ -779,7 +779,11 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dv-side{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .dv-plan{padding:1px 7px;border:1px solid var(--line);border-radius:4px;font-size:11px;color:var(--muted)}
 .dv-quota{flex:1 0 100%;font-size:12px;line-height:1.5;color:var(--fg)}
-.dv-quota.stale{color:var(--muted);font-style:italic}
+.dv-quota.stale{color:var(--muted)}
+.dv-quota.stale .dv-bars{opacity:.55}
+.dv-br{flex:none;color:var(--muted);white-space:nowrap}
+.dv-bar.done .dv-br{color:var(--fg)}
+.dv-old{margin-left:6px;padding:0 6px;border:1px solid var(--line);border-radius:4px;font-size:11px}
 .dv-quota.out{color:#b3261e;font-weight:600}
 .dv-bars{display:flex;flex-direction:column;gap:3px;margin:2px 0}
 /* 「我的帳號」（#374）：設備列表上面，按廠牌列出本人全部帳號 */
@@ -787,7 +791,7 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dv-my-h{margin:0;font-size:13px}
 .dv-my-v{border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .dv-my-v .dv-accts{padding:8px 10px}
-.acct-quota.stale{font-style:italic}
+.acct-quota.stale{opacity:.7}
 .dv-bar{display:flex;align-items:center;gap:6px}
 .dv-bl{flex:none;width:3.6em;color:var(--muted)}
 .dv-track{flex:1;max-width:220px;height:8px;border-radius:4px;background:var(--panel-soft);border:1px solid var(--line);overflow:hidden}

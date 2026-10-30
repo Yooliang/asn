@@ -390,6 +390,7 @@ mod tests {
         hook(h.path(), &status(38.0, 1_792_850_400, 20.0, 1_793_000_000), NOW);
         let v = build_report_with_quota(&[acct("a@x.test", true), acct("b@x.test", false)], None, &load_all(h.path()));
         assert_eq!(v["accounts"][0], json!({ "vendor": "claude", "email": "a@x.test", "plan": "max", "current": true, "five_hour_pct": 62, "weekly_pct": 80, "reset_at": "2026-10-24T14:00:00Z", "at": "2026-10-24T12:00:00Z",
+            "five_reset_at": "2026-10-24T14:00:00Z", "week_reset_at": "2026-10-26T07:33:20Z",
             "windows": [
                 { "name": "five_hour", "left_pct": 62, "resets_at": "2026-10-24T14:00:00Z", "read_at": "2026-10-24T12:00:00Z" },
                 { "name": "weekly", "left_pct": 80, "resets_at": "2026-10-26T07:33:20Z", "read_at": "2026-10-24T12:00:00Z" }
