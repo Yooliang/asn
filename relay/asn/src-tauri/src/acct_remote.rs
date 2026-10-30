@@ -393,7 +393,7 @@ pub fn decide(taken: &mut HashMap<String, (String, Instant)>, id: &str, allowed:
 /// 被退回（HTTP 400）時的退路見 [`report_attempts`]：拿掉 gemini 再送，再不行只送 Claude；其他錯誤不退步
 pub async fn report(relay: &Relay, list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value], gemini: &[Value]) -> Result<Value, String> {
     let attempts = report_attempts(list, codex, quotas, grok, codex_windows, gemini);
-    send_attempts(attempts, |body| relay.api("acct_report", Some(body)), |line| eprintln!("{line}")).await
+    send_attempts(attempts, |body| relay.api("acct_report", Some(body)), |line| elog!("{line}")).await
 }
 /// 有登入就帶本人簽章（#380：成員角色的電腦不帶會被後台擋 403）；沒登入照舊不帶
 pub async fn remote_list(relay: &Relay, node: &str, token: Option<&str>) -> Result<Value, String> {
@@ -490,7 +490,7 @@ async fn post_result(relay: &Relay, id: &str, status: &str, detail: &str) -> Res
     match relay.api("acct_switch_result", Some(json!({ "id": id, "status": status, "detail": detail }))).await {
         Ok(_) => ResultSend::Sent,
         Err(e) => {
-            eprintln!("acct_switch_result failed: {e}");
+            elog!("acct_switch_result failed: {e}");
             classify_send_error(&e)
         }
     }

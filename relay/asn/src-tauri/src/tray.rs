@@ -74,7 +74,7 @@ pub fn build(app: &AppHandle) {
         Ok(())
     })();
     if let Err(e) = built {
-        eprintln!("系統匣圖示建立失敗：{e}");
+        elog!("系統匣圖示建立失敗：{e}");
         app.state::<TrayFailed>().0.store(true, Ordering::Relaxed);
     }
 }

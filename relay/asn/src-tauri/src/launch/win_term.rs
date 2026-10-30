@@ -97,12 +97,12 @@ pub(crate) fn spec_for(title: &str, command: &str, args: &[String], hidden: bool
 /// GUI 已經啟動之後才失敗：不走退路，照實回錯（不另外再開一份）
 pub(crate) fn open_window(host: Option<&dyn WinTermHost>, cwd: &Path, spec: &WinSpec, noted: &AtomicBool, fallback: &dyn Fn() -> Result<u32, String>) -> Result<Opened, String> {
     match host.filter(|h| h.available()) {
-        None => eprintln!("開「{}」：這台沒有 ASN 自帶的終端，改用原生主控台", spec.title),
+        None => elog!("開「{}」：這台沒有 ASN 自帶的終端，改用原生主控台", spec.title),
         Some(h) => match h.open_window(cwd, spec) {
             Ok(pid) => return Ok(Opened { pid, note: None }),
-            Err(WinOpenError::NotStarted(e)) => eprintln!("開「{}」在 ASN 自帶的終端失敗（還沒啟動），改用原生主控台：{e}", spec.title),
+            Err(WinOpenError::NotStarted(e)) => elog!("開「{}」在 ASN 自帶的終端失敗（還沒啟動），改用原生主控台：{e}", spec.title),
             Err(WinOpenError::Started(e)) => {
-                eprintln!("開「{}」：自帶終端已啟動但後續失敗，不改用原生主控台：{e}", spec.title);
+                elog!("開「{}」：自帶終端已啟動但後續失敗，不改用原生主控台：{e}", spec.title);
                 return Err(format!("{STARTED_BUT_FAILED}：{e}"));
             }
         },
