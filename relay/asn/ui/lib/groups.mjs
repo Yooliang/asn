@@ -46,7 +46,6 @@ const ERR = {
   already_decided: '這個請求已經處理過了。',
   expired: '這個請求已過期。',
   no_host: '這個群組找不到主持人。',
-  external_no_attachments: '這個群組有外部成員，暫不支援附件。',
   internal: '伺服器發生錯誤，晚點再試。',
 }
 const HTTP_STATUS = { 401: 'unauthorized', 403: 'forbidden', 404: 'not_found', 410: 'invite_expired', 429: 'rate_limited' }
@@ -165,8 +164,6 @@ export const kindOf = m => (m?.from_kind === 'ai' || m?.from_kind === 'human' ? 
 export const safeLabel = s => String(s ?? '').replace(/\bx:[0-9a-f-]{8,}\b/gi, '').replace(/\S+~\S+/g, t => t.slice(t.indexOf('~') + 1)).trim()
 
 // ---------- 附件 ----------
-// 群組裡能不能傳附件：只有 external=true（有外部成員＝別人的帳號）才隱藏；只有本人與自己的 AI 的群組照常能傳
-export const roomAttachAllowed = f => !f?.room || f.external !== true
 
 // ---------- 主持人確認 ----------
 export const CONFIRM_STATUS_TEXT = { pending: '等待主持人確認', approved: '主持人已同意', denied: '主持人已拒絕', expired: '已過期' }

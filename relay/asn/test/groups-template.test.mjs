@@ -38,11 +38,11 @@ test('電腦版 list.html、chat.html 與手機版 m.html 能編譯', () => {
   }
 })
 
-test('附件鈕：照片、檔案、截圖都要 attachOk 才出現；群組不顯示震動與通話；外部成員的群組沒有附件鈕', () => {
+test('附件鈕：照片、檔案、截圖在群組（含有外部成員的群組）照常出現；群組不顯示震動與通話；不再有 attachOk 擋附件', () => {
   const tpl = templateOf(chatpane)
-  for (const re of [/<button[^>]*v-if="attachOk"[^>]*@click="fileEl/, /<button[^>]*v-if="attachOk"[^>]*@click="docEl/, /<template v-if="attachOk"><button[^>]*v-if="shotApi && shotOk"[^>]*aria-label="截圖"/]) assert.match(tpl, re)
+  for (const re of [/<button class="tool icon" type="button" @click="fileEl/, /<button class="tool icon" type="button" @click="docEl/, /<button[^>]*v-if="shotApi && shotOk"[^>]*aria-label="截圖"/]) assert.match(tpl, re)
+  assert.doesNotMatch(chatpane, /attachOk|roomAttachAllowed/, '附件鈕不再因外部成員而藏起來（0.1.111）')
   assert.match(tpl, /<button[^>]*v-if="!isRoom"[^>]*@click="nudge"/)
-  assert.match(chatpane, /roomAttachAllowed\(props\.friend\)/)
   assert.match(tpl, /<confirm-cards v-if="isRoom"/, '群組對話上方有確認卡片')
 })
 

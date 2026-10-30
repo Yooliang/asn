@@ -70,7 +70,6 @@ export const GroupSheet = {
       </template>
 
       <template v-else-if="s.view === 'manage'">
-        <p class="gs-note" v-if="s.external">這個群組有外部成員（別的帳號），暫時不能傳附件。</p>
         <h3 class="gs-h">真人</h3>
         <ul class="gs-members">
           <li v-for="m in s.members.filter(x => x.kind === 'human')" :key="m.ref"><span class="gs-av human" aria-hidden="true">{{ m.label.slice(0, 1) }}</span><span class="gs-name">{{ m.label }}</span><small class="gs-badge" v-if="m.host">主持人</small><small class="gs-badge" v-if="m.mine">你</small></li>

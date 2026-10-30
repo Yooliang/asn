@@ -2,7 +2,7 @@
 // 守門：簽章動作都走 relay_group（Rust 端帶本人簽章）、外部成員的群組不能傳附件、畫面上不出現節點代號與 x: 代號。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { INVITE_NOTE, SEED_DEFAULT, SEED_MAX, addableAi, aiChoices, buildCreate, canInviteFrom, clampSeed, confirmCards, createError, createGroupApi, groupErrorText, inviteAsnLink, inviteBody, inviteLead, inviteLink, inviteView, memberRows, parseInviteInput, pendingCount, previewView, roomAttachAllowed, safeLabel, seedPreview, speakerLabels, windowKeyOf } from '../ui/lib/groups.mjs'
+import { INVITE_NOTE, SEED_DEFAULT, SEED_MAX, addableAi, aiChoices, buildCreate, canInviteFrom, clampSeed, confirmCards, createError, createGroupApi, groupErrorText, inviteAsnLink, inviteBody, inviteLead, inviteLink, inviteView, memberRows, parseInviteInput, pendingCount, previewView, safeLabel, seedPreview, speakerLabels, windowKeyOf } from '../ui/lib/groups.mjs'
 import { roomLog } from '../ui/lib/mobile-rooms.mjs'
 
 const CODE = 'AbCdEf0123456789_-xyz'
@@ -24,7 +24,7 @@ test('錯誤文字：後台代碼、Rust 訊息都變中文，不外洩代碼', 
     ['group_invite_accept HTTP 409 already_member', /已經在/], ['group_invite_accept HTTP 409 own_invite', /自己發出/], ['group_invite_preview HTTP 404 invalid_invite', /不正確/],
     ['group_leave HTTP 409 host_must_transfer', /主持人/], ['group_create HTTP 409 room_limit', /上限/], ['group_confirm_decide HTTP 403 forbidden', /本人/],
     ['group_confirm_decide HTTP 409 already_decided', /處理過/], ['尚未登入，無法使用群組', /登入/], ['group_create 連線失敗：x', /網路/], ['group_create HTTP 429', /頻繁/],
-    ['group_create HTTP 401', /登入/], ['群組名稱要 1 到 60 字', /群組名稱/], ['奇怪的錯誤 HTTP 500 boom', /失敗/], ['room_post HTTP 403 external_no_attachments', /外部成員/],
+    ['group_create HTTP 401', /登入/], ['群組名稱要 1 到 60 字', /群組名稱/], ['奇怪的錯誤 HTTP 500 boom', /失敗/],
   ]
   for (const [raw, want] of cases) {
     const t = groupErrorText(raw)
@@ -106,13 +106,9 @@ test('訊息轉對話記錄：真人與 AI 用不同徽章；我的 AI 也有發
   assert.equal(safeLabel('財務 x:0b9c8f3a-1111 T~財務'), '財務  財務')
 })
 
-test('附件：有外部成員的群組一律不能傳；一對一不受影響', () => {
-  assert.equal(roomAttachAllowed({ room: true, external: true, attachments: true }), false)
-  assert.equal(roomAttachAllowed({ room: true, external: false, attachments: true }), true)
-  assert.equal(roomAttachAllowed({ room: true, external: false }), true, '只有本人與自己的 AI 的群組能傳附件')
-  assert.equal(roomAttachAllowed({ room: true, attachments: false }), true, '舊的 attachments 旗標不再擋')
-  assert.equal(roomAttachAllowed({ room: true }), true)
-  assert.equal(roomAttachAllowed({ node: 'T', agent: 'a' }), true); assert.equal(roomAttachAllowed(null), true)
+test('附件：有外部成員的群組也能傳（0.1.111 起不再有 roomAttachAllowed 這道擋）', async () => {
+  const groups = await import('../ui/lib/groups.mjs')
+  assert.equal('roomAttachAllowed' in groups, false)
 })
 
 test('主持人確認卡片：主持人才有同意／拒絕；非主持人只看狀態；待處理在前、已處理只留 3 則', () => {
