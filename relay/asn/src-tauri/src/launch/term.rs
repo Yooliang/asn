@@ -1456,7 +1456,7 @@ pub fn live(data_dir: &Path) -> LiveTerms {
     let mut svc = TermService::from_env(data_dir.join("wezterm-term.lua"), data_dir.join("wezterm-terms.json"), crate::identity::home_dir(), wezterm::RealRunner, wezterm::RealFs);
     svc.set_agy_args(Box::new(crate::gemini_session::live_args));
     if let Err(e) = svc.reclaim() {
-        eprintln!("終端對照表接手失敗（不中斷啟動）：{e}");
+        elog!("終端對照表接手失敗（不中斷啟動）：{e}");
     }
     svc
 }
