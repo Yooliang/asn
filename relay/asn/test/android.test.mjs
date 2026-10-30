@@ -472,5 +472,6 @@ test('手機群組對話：讀走節點金鑰、發言走要本人簽章的專�
   assert.doesNotMatch(js, /invoke\('relay_send'[^\n]*room/i, '群組發言不經一般寄信')
   const html = read('ui', 'm.html'), css = read('ui', 'mobile.css')
   assert.match(html, /ROOM_GROUP_KEY/, '夥伴分頁有群組對話分組'); assert.match(html, /is-room/)
-  assert.match(css, /\.m-chat\.is-room \.toolbar>\.tool\{display:none\}/, '群組沒有震動、傳照片、傳檔案：工具列的鈕藏起來')
+  assert.match(css, /\.m-chat\.is-room \.toolbar>\.tool\.dict,\.m-chat\.is-room \.toolbar>\.tool\.mic\{display:none\}/, '群組沒有語音輸入、麥克風：這兩顆藏起來；傳照片、傳檔案照常（0.1.111）')
+  assert.doesNotMatch(css, /\.is-room \.toolbar>\.tool\{display:none\}/, '群組工具列不能整排藏掉')
 })
