@@ -1,12 +1,14 @@
-// #539 之四：模型清單共用（switchModelsFor）、開新夥伴選型號、手機大按鈕列
+// #539 之四：模型清單共用（switchModelsFor）、開新夥伴選型號；手機對話頁不放按鈕列，管理項目都在「⋯」
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { CLAUDE_MODELS, GEMINI_MODELS, launchModelChoices, switchModelsFor } from '../ui/lib/model-catalog.mjs'
 import { createModelSwitcher } from '../ui/lib/model-switch.mjs'
 import { acpSwitchChoices, opDialogText } from '../ui/lib/partner-ops-ui.mjs'
-import { BAR_KEYS, PHONE_WHY, WHY_MAX } from '../ui/lib/actionbar.mjs'
-import { BAR_ICON, phoneBarSlots, phoneModels, phoneOpsRows, slotTip } from '../ui/lib/mobile-ops.mjs'
+import * as mobileOps from '../ui/lib/mobile-ops.mjs'
+import { PHONE_LEAD_OPS, phoneModels, phoneOpsRows } from '../ui/lib/mobile-ops.mjs'
+import { manageItems } from '../ui/lib/archive.mjs'
+import { headerPsm } from '../ui/lib/tasks.mjs'
 import { MODEL_RE } from '../ui/lib/partner-ops.mjs'
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')
@@ -60,54 +62,50 @@ test('開新夥伴接線：第 2 頁有型號下拉（預設不指定），本�
 const F = (over = {}) => ({ id: 'H/小文', node: 'H', agent: '小文', nick: '小文', status: 'idle', ...over })
 const OPS = { machines: { H: { online: true, launcher: {} } }, loaded: true, signedIn: true }
 
-test('手機大按鈕：跟電腦版同樣 6 格、同樣順序；手機沒有的反灰並寫原因（20 字內）', () => {
-  const s = phoneBarSlots(F(), { callable: true, ops: OPS, manageCount: 3 })
-  assert.deepEqual(s.map(x => x.key), BAR_KEYS)
-  const by = Object.fromEntries(s.map(x => [x.key, x]))
-  assert.equal(by.call.ok, true)
-  assert.deepEqual([by.window.ok, by.window.reason], [false, PHONE_WHY.window])
-  assert.equal(by.model.ok, true, '切換模型走遠端夥伴管理')
-  assert.deepEqual([by.subs.ok, by.subs.reason], [false, PHONE_WHY.subs])
-  assert.equal(by.tasks.ok, false)
-  assert.equal(by.manage.ok, true)
-  for (const x of s) if (!x.ok) { assert.ok(x.reason, x.key); assert.ok(x.reason.length <= WHY_MAX, x.reason) }
-  for (const x of s) assert.ok(BAR_ICON[x.key], x.key)
-})
-
-test('手機大按鈕：有背景工作顯示件數但列表反灰；ACP 第 2 格是「ACP 模式」；沒語音、離線、沒管理項目都反灰', () => {
-  const t = Object.fromEntries(phoneBarSlots(F({ psm: '背景工作 3 件' }), { callable: true, ops: OPS, manageCount: 1 }).map(x => [x.key, x]))
-  assert.deepEqual([t.tasks.count, t.tasks.ok, t.tasks.reason], [3, false, PHONE_WHY.tasks])
-  const a = Object.fromEntries(phoneBarSlots(F({ engine: 'gemini' }), { callable: true, ops: OPS, manageCount: 1 }).map(x => [x.key, x]))
-  assert.deepEqual([a.window.label, a.window.ok], ['ACP 模式', false])
-  assert.equal(a.subs.reason, '只有 Claude 有子代理')
-  const n = Object.fromEntries(phoneBarSlots(F(), { callable: false, ops: OPS, manageCount: 0 }).map(x => [x.key, x]))
-  assert.equal(n.call.ok, false); assert.equal(n.manage.ok, false)
-  const off = Object.fromEntries(phoneBarSlots(F({ status: 'offline' }), { callable: true, ops: OPS, manageCount: 1 }).map(x => [x.key, x]))
-  assert.equal(off.call.ok, false); assert.equal(off.model.ok, false)
-})
-
-test('手機大按鈕：群組只有一顆「群組」；沒選人就沒有按鈕', () => {
-  assert.deepEqual(phoneBarSlots({ id: 'room:g1', room: true, nick: '群' }, {}), [{ key: 'group', label: '群組', ok: true, reason: '' }])
-  assert.deepEqual(phoneBarSlots(null), [])
-  assert.equal(slotTip({ label: '子代理', ok: false, reason: '手機看不到子代理' }), '子代理：手機看不到子代理')
-  assert.equal(slotTip({ label: '通話', ok: true, reason: '' }), '通話')
-})
-
-test('手機「⋯」選單：拿掉前台／後台與切換模型，其餘照原順序', () => {
-  const items = [{ key: 'console' }, { key: 'info' }, { key: 'rename' }, { key: 'model' }, { key: 'close' }]
-  assert.deepEqual(phoneOpsRows(items).map(i => i.key), ['info', 'rename', 'close'])
+test('手機「⋯」選單：喚醒、切換模型排最前面，其餘照原順序；不列前台／後台', () => {
+  assert.deepEqual(PHONE_LEAD_OPS, ['resume', 'model'])
+  const items = [{ key: 'console' }, { key: 'info' }, { key: 'rename' }, { key: 'model' }, { key: 'close' }, { key: 'handover' }, { key: 'resume' }, { key: 'archive' }]
+  assert.deepEqual(phoneOpsRows(items).map(i => i.key), ['resume', 'model', 'info', 'rename', 'close', 'handover', 'archive'])
+  assert.deepEqual(phoneOpsRows([{ key: 'info' }, { key: 'close' }]).map(i => i.key), ['info', 'close'], '沒有喚醒／切換模型就照原樣')
   assert.deepEqual(phoneOpsRows(null), [])
+  assert.deepEqual(phoneOpsRows([null, { key: 'info' }]).map(i => i.key), ['info'])
+  const orig = items.map(i => i.key)
+  phoneOpsRows(items)
+  assert.deepEqual(items.map(i => i.key), orig, '不改動傳進來的陣列')
 })
 
-test('手機接線：對話頁帶大按鈕列、⋯ 不列 console、ACP 有型號下拉、群組選單同電腦版', () => {
-  const mhtml = read('ui/m.html'), mjs = read('ui/m.js'), pane = read('ui/lib/chatpane.mjs'), bar = read('ui/lib/mobile-bar.mjs')
-  assert.match(mhtml, /<chat-pane [^>]*:phone-bar="barView" @bar="onBar"/)
-  assert.match(pane, /<mobile-bar v-if="phoneBar" :slots="phoneBar" @pick="onBar"><\/mobile-bar>/)
-  assert.match(mjs, /const barView = computed\(\(\) => phoneBarSlots\(chatFriend\.value,/)
-  assert.doesNotMatch(mjs, /key: 'console', label: BUDDY_CONSOLE_LABEL/)
+test('手機「⋯」實際項目（manageItems）：離線 Claude 前兩項是喚醒（可按）、切換模型；在線的是喚醒（反灰）、切換模型（可按）', () => {
+  const off = phoneOpsRows(manageItems(F({ status: 'offline' }), OPS))
+  assert.deepEqual(off.slice(0, 2).map(i => [i.key, i.label, i.ok]), [['resume', '喚醒', true], ['model', '切換模型', false]])
+  const on = phoneOpsRows(manageItems(F(), OPS))
+  assert.deepEqual(on.slice(0, 2).map(i => [i.key, i.label, i.ok]), [['resume', '喚醒', false], ['model', '切換模型', true]])
+  assert.equal(on.some(i => i.key === 'console'), false)
+  assert.deepEqual(on.slice(2).map(i => i.key), manageItems(F(), OPS).map(i => i.key).filter(k => !PHONE_LEAD_OPS.includes(k)), '其餘照原順序')
+})
+
+test('大按鈕列的手機版已拿掉：mobile-ops 不再匯出格子／圖示，mobile-bar.mjs 刪除', () => {
+  for (const k of ['phoneBarSlots', 'BAR_ICON', 'slotTip', 'GROUP_SLOT_LABEL', 'PHONE_MOVED_OPS', 'BAR_LABEL']) assert.equal(k in mobileOps, false, k)
+  assert.equal(fs.existsSync(new URL('../ui/lib/mobile-bar.mjs', import.meta.url)), false)
+  assert.doesNotMatch(read('ui/mobile.css'), /\.m-abar|\.m-abtn/)
+})
+
+test('手機接線：對話頁不放任何按鈕列（手機版、電腦版都沒有）；⋯ 在；ACP 有型號下拉；群組／邀請排在管理項目之後', () => {
+  const mhtml = read('ui/m.html'), mjs = read('ui/m.js'), pane = read('ui/lib/chatpane.mjs')
+  assert.match(mhtml, /<chat-pane [^>]*:no-bar="true"/, '手機對話頁關掉上方功能列')
+  assert.doesNotMatch(mhtml, /phone-bar|barView|onBar/)
+  assert.doesNotMatch(mjs, /barView|onBar|phoneBarSlots/)
+  assert.doesNotMatch(pane, /mobile-bar|MobileBar|phoneBar/)
+  assert.match(pane, /noBar: \{ type: Boolean, default: false \}/, '電腦版預設照舊有功能列')
+  assert.match(pane, /<action-bar [^>]*v-if="!noBar && \(!isRoom/, 'noBar 時電腦版的功能列也不出現')
+  assert.match(mhtml, /aria-label="更多操作" v-if="opsItems\.length \|\| groupItems\.length" @click="openOps"/)
   assert.match(mhtml, /v-else-if="opsAcp\.models\.length" v-model="ops\.model"/)
-  // 反灰用 aria-disabled、點了只顯示原因不送出；名稱與原因放 aria-label／title
-  assert.match(bar, /:aria-disabled="s\.ok \? null : 'true'" :aria-label="s\.label" :title="slotTip\(s\)"/)
-  assert.doesNotMatch(bar, /:disabled=/)
-  assert.match(bar, /if \(!s\.ok\) \{ showTip\(s\); return \}/)
+  assert.ok(mhtml.indexOf('v-for="i in opsView.rows"') < mhtml.indexOf('v-for="g in groupItems"'), '喚醒、切換模型在選單最前面，邀請排後面')
+  assert.match(pane, /class="tool icon call" type="button" v-if="showCallBtn && !displayOnly"/, '通話鈕照舊在輸入列')
+})
+
+test('個人訊息的「背景工作 N 件」：手機（noBar）保留，電腦版照舊拿掉', () => {
+  const pane = read('ui/lib/chatpane.mjs')
+  assert.match(pane, /const toPsm = computed\(\(\) => \(props\.friend\?\.room === true \|\| props\.noBar \? props\.friend\?\.psm \?\? '' : headerPsm\(props\.friend\?\.psm\)\)\)/)
+  assert.equal(headerPsm('demo・背景工作 3 件'), 'demo', '電腦版照舊剝')
+  assert.match(read('ui/m.html'), /<template v-if="chatFriend\.psm"> · <span v-html="emo\(chatFriend\.psm\)"><\/span><\/template>/, '手機標頭直接顯示個人訊息（含件數）')
 })

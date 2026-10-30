@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { BAR_KEYS, WAKE_LABEL, barSlots, groupMenuItems, managePanelItems, partnerMenuItems } from '../ui/lib/actionbar.mjs'
-import { BAR_ICON, phoneBarSlots, phoneOpsRows } from '../ui/lib/mobile-ops.mjs'
+import { phoneOpsRows } from '../ui/lib/mobile-ops.mjs'
 import { launchModelChoices } from '../ui/lib/model-catalog.mjs'
 import { localProfileEngine } from '../ui/lib/partner-launch-ui.mjs'
 import { manageItems } from '../ui/lib/archive.mjs'
@@ -73,20 +73,12 @@ test('pickOps 的喚醒不能因為管理選單拿掉喚醒就失效：找項目
   assert.match(t, /const wakeItem = slot\.value\.window/)
 })
 
-test('手機第 2 格：離線變「喚醒」可按、圖示換喚醒；在線照舊前後台反灰；「⋯」不再列喚醒；按下去走 resume', () => {
-  const pctx = { callable: true, ops: { ...ops, machines: { Q: { online: true, launcher: {} } } }, manageCount: 3 }
-  const off = phoneBarSlots(F({ node: 'Q', status: 'offline' }), pctx).find(s => s.key === 'window')
-  assert.deepEqual([off.label, off.ok, off.wake], ['喚醒', true, true])
-  const on = phoneBarSlots(F({ node: 'Q' }), pctx).find(s => s.key === 'window')
-  assert.deepEqual([on.label, on.ok, Boolean(on.wake)], ['前台／後台', false, false])
-  assert.equal(BAR_ICON.wake, 'img/ab-wake.svg')
-  const rows = phoneOpsRows(manageItems(F({ node: 'Q', status: 'offline' }), pctx.ops))
-  assert.equal(rows.some(i => i.key === 'resume'), false)
-  const bar = read('ui/lib/mobile-bar.mjs')
-  assert.match(bar, /:src="icon\(s\)"/)
-  assert.match(bar, /icon: s => BAR_ICON\[s\.wake \? 'wake' : s\.key\]/)
+test('手機「⋯」：離線的喚醒排第一、可按；按下去走 resume（跟電腦版同一份 menuItems）', () => {
+  const pops = { ...ops, machines: { Q: { online: true, launcher: {} } } }
+  const rows = phoneOpsRows(manageItems(F({ node: 'Q', status: 'offline' }), pops))
+  assert.deepEqual([rows[0].key, rows[0].ok], ['resume', true])
   const m = read('ui/m.js')
-  assert.match(m, /if \(key === 'window' && s\.wake\) \{ openOps\(\); pickOp\('resume'\); return \}/)
+  assert.match(m, /function pickOp\(op\) \{\s*\n\s*const item = opsItems\.value\.find\(i => i\.key === op\)/)
 })
 
 test('群組按鈕拿掉「輸入邀請碼加入」（電腦與手機同一份）；提示不提邀請碼；加入別的群組照舊走「＋」', () => {
