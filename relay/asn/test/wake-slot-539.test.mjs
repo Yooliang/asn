@@ -75,7 +75,8 @@ test('pickOps 的喚醒不能因為管理選單拿掉喚醒就失效：找項目
 
 test('手機「⋯」：離線的喚醒排第一、可按；按下去走 resume（跟電腦版同一份 menuItems）', () => {
   const pops = { ...ops, machines: { Q: { online: true, launcher: {} } } }
-  const rows = phoneOpsRows(manageItems(F({ node: 'Q', status: 'offline' }), pops))
+  const rows = phoneOpsRows(manageItems(F({ node: 'Q', status: 'offline' }), pops), F({ node: 'Q', status: 'offline' }))
+  assert.equal(phoneOpsRows(manageItems(F({ node: 'Q' }), pops), F({ node: 'Q' })).some(i => i.key === 'resume'), false, '在線不列喚醒')
   assert.deepEqual([rows[0].key, rows[0].ok], ['resume', true])
   const m = read('ui/m.js')
   assert.match(m, /function pickOp\(op\) \{\s*\n\s*const item = opsItems\.value\.find\(i => i\.key === op\)/)

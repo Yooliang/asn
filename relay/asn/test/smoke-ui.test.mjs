@@ -99,13 +99,12 @@ test('對話框遮罩情境（#536）：電腦與手機各一，檢查左上使�
   assert.equal((await ctx.__TAURI__.core.invoke('relay_list')).members[0].agents[0].name, 'demo')
 })
 
-test('手機對話頁情境（不放按鈕列）：412 寬、Claude／ACP／離線各一；「⋯」前兩項是喚醒與切換模型；標頭留背景工作件數；存兩張截圖；表達式語法正確', async () => {
+test('手機對話頁情境（不放按鈕列）：412 寬、Claude／ACP／離線各一；「⋯」永遠用不到的不列、前兩項依夥伴而定；標頭留背景工作件數；存三張截圖；表達式語法正確', async () => {
   const sc = SCENARIOS.filter(s => s.probe?.mchat)
-  assert.deepEqual(sc.map(s => s.name), ['m-chat-plain', 'm-chat-claude', 'm-chat-acp', 'm-chat-offline'])
+  assert.deepEqual(sc.map(s => s.name), ['m-chat-plain', 'm-chat-claude', 'm-chat-acp', 'm-chat-offline-menu', 'm-chat-offline'])
   for (const s of sc) {
     assert.ok(s.page.startsWith('m.html'), '手機頁以 412 寬開')
     assert.doesNotMatch(s.ready, /m-abar/, '不再等大按鈕列')
-    if (s.probe.mchat.menu !== false) assert.deepEqual(s.probe.mchat.lead.map(x => x[0]), ['喚醒', '切換模型'])
     assert.doesNotThrow(() => new vm.Script(probeSource(s.probe)))
     assert.equal(probeKind(s.probe), '手機對話頁檢查')
     const ctx = vm.createContext({}); ctx.globalThis = ctx
@@ -116,7 +115,12 @@ test('手機對話頁情境（不放按鈕列）：412 寬、Claude／ACP／離�
   const by = Object.fromEntries(sc.map(s => [s.name, s]))
   assert.deepEqual(by['m-chat-offline'].probe.mchat.lead, [['喚醒', false], ['切換模型', true]], '離線：喚醒可按、切換模型反灰')
   assert.equal(by['m-chat-offline'].probe.mchat.wake, true)
-  assert.deepEqual(by['m-chat-claude'].probe.mchat.lead, [['喚醒', true], ['切換模型', false]], '在線：切換模型可按、喚醒反灰')
+  assert.deepEqual(by['m-chat-claude'].probe.mchat.lead, [['切換模型', false], ['詳情', false]], '在線 Claude：前兩項是切換模型、詳情')
+  assert.deepEqual(by['m-chat-claude'].probe.mchat.absent, ['喚醒', '重開', '移除'], '在線不列喚醒；一般視窗不列重開、移除')
+  assert.deepEqual(by['m-chat-acp'].probe.mchat.present, ['重開', '移除'], '內建通道有重開、移除')
+  assert.ok(by['m-chat-acp'].probe.mchat.absent.includes('喚醒'))
+  assert.equal(by['m-chat-offline-menu'].shot, 'm-chat-ops-offline.png', '離線的「⋯」截圖在送出喚醒之前')
+  assert.deepEqual(by['m-chat-offline-menu'].probe.mchat.lead, by['m-chat-offline'].probe.mchat.lead)
   assert.equal(by['m-chat-claude'].probe.mchat.tasks, '背景工作 3 件')
   assert.deepEqual([by['m-chat-plain'].shot, by['m-chat-claude'].shot], ['m-chat.png', 'm-chat-ops.png'])
   const src = probeSource(by['m-chat-plain'].probe)

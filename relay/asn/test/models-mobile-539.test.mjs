@@ -6,7 +6,7 @@ import { CLAUDE_MODELS, GEMINI_MODELS, launchModelChoices, switchModelsFor } fro
 import { createModelSwitcher } from '../ui/lib/model-switch.mjs'
 import { acpSwitchChoices, opDialogText } from '../ui/lib/partner-ops-ui.mjs'
 import * as mobileOps from '../ui/lib/mobile-ops.mjs'
-import { PHONE_LEAD_OPS, phoneModels, phoneOpsRows } from '../ui/lib/mobile-ops.mjs'
+import { ACP_ONLY_OPS, PHONE_LEAD_OPS, phoneModels, phoneOpApplies, phoneOpsRows } from '../ui/lib/mobile-ops.mjs'
 import { manageItems } from '../ui/lib/archive.mjs'
 import { headerPsm } from '../ui/lib/tasks.mjs'
 import { MODEL_RE } from '../ui/lib/partner-ops.mjs'
@@ -74,13 +74,34 @@ test('手機「⋯」選單：喚醒、切換模型排最前面，其餘照原�
   assert.deepEqual(items.map(i => i.key), orig, '不改動傳進來的陣列')
 })
 
-test('手機「⋯」實際項目（manageItems）：離線 Claude 前兩項是喚醒（可按）、切換模型；在線的是喚醒（反灰）、切換模型（可按）', () => {
-  const off = phoneOpsRows(manageItems(F({ status: 'offline' }), OPS))
+const keys = rows => rows.map(i => i.key)
+test('手機「⋯」實際項目：永遠用不到的不列，暫時不能用的反灰寫原因', () => {
+  // 在線 Claude：沒有喚醒、重開、移除；前兩項是切換模型、詳情
+  const on = phoneOpsRows(manageItems(F(), OPS), F())
+  assert.deepEqual(keys(on), ['model', 'info', 'rename', 'close', 'handover', 'archive'])
+  assert.deepEqual(on.slice(0, 2).map(i => [i.label, i.ok]), [['切換模型', true], ['詳情', true]])
+  // 離線 Claude：喚醒（可按）、切換模型（反灰寫原因）排最前；改名等暫時不能用也反灰
+  const offF = F({ status: 'offline' })
+  const off = phoneOpsRows(manageItems(offF, OPS), offF)
   assert.deepEqual(off.slice(0, 2).map(i => [i.key, i.label, i.ok]), [['resume', '喚醒', true], ['model', '切換模型', false]])
-  const on = phoneOpsRows(manageItems(F(), OPS))
-  assert.deepEqual(on.slice(0, 2).map(i => [i.key, i.label, i.ok]), [['resume', '喚醒', false], ['model', '切換模型', true]])
-  assert.equal(on.some(i => i.key === 'console'), false)
-  assert.deepEqual(on.slice(2).map(i => i.key), manageItems(F(), OPS).map(i => i.key).filter(k => !PHONE_LEAD_OPS.includes(k)), '其餘照原順序')
+  assert.match(off[1].reason, /離線/)
+  assert.equal(off.some(i => ACP_ONLY_OPS.includes(i.key)), false)
+  assert.ok(off.filter(i => i.key !== 'resume' && i.key !== 'archive' && i.key !== 'info').every(i => !i.ok && i.reason))
+  // 內建通道（ACP）：有重開、移除，沒有喚醒（在線、離線都一樣）
+  const acp = F({ engine: 'gemini' }), acpOff = F({ engine: 'gemini', status: 'offline' })
+  assert.deepEqual(keys(phoneOpsRows(manageItems(acp, OPS), acp)), ['model', 'info', 'rename', 'close', 'handover', 'restart', 'remove', 'archive'])
+  assert.equal(phoneOpsRows(manageItems(acpOff, OPS), acpOff).some(i => i.key === 'resume'), false)
+  // pi：離線才有喚醒；沒有重開、移除；還沒開放的（詳情、換班接手）照舊反灰
+  const pi = F({ engine: 'pi' }), piOff = F({ engine: 'pi', status: 'offline' })
+  const piRows = phoneOpsRows(manageItems(pi, OPS), pi)
+  assert.deepEqual(keys(piRows), ['model', 'info', 'rename', 'close', 'handover', 'archive'])
+  assert.equal(piRows.find(i => i.key === 'info').ok, false)
+  assert.equal(keys(phoneOpsRows(manageItems(piOff, OPS), piOff))[0], 'resume')
+  // 雲端代理：沒有視窗可管理，只剩封存
+  const cloud = F({ engine: 'grok-cloud', kind: 'grok' })
+  assert.deepEqual(keys(phoneOpsRows(manageItems(cloud, OPS), cloud)), ['archive'])
+  // 沒給 friend：只排序、只拿掉前台／後台
+  assert.equal(phoneOpApplies('restart', null), true); assert.equal(phoneOpApplies('console', null), false)
 })
 
 test('大按鈕列的手機版已拿掉：mobile-ops 不再匯出格子／圖示，mobile-bar.mjs 刪除', () => {

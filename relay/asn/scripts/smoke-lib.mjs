@@ -178,7 +178,7 @@ export const barProbeSource = ({ bar, badge, taskItems, header, wake }) => `(asy
 })()`
 
 // 手機對話頁（不放按鈕列）：上方沒有任何按鈕列（手機版、電腦版的都沒有），管理項目都在右上角「⋯」；
-// 「⋯」最前面兩項是喚醒、切換模型；前台／後台不列；個人訊息照樣顯示「背景工作 N 件」
+// 「⋯」不列永遠用不到的項目（前台／後台、在線的喚醒、一般視窗的重開／移除），喚醒、切換模型排最前；個人訊息照樣顯示「背景工作 N 件」
 // 手機自己是節點 P；夥伴開在另一台電腦 Q（手機只能遠端管理）
 export const MBAR_ME = { lastChat: 'Q/demo', navTab: 'chats' }
 export const MBAR_MEMBERS = {
@@ -186,15 +186,16 @@ export const MBAR_MEMBERS = {
   offline: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', online: false, cwd_label: 'demo' }] }],
   acp: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', engine: 'gemini', cwd_label: 'demo' }] }],
 }
-// lead＝「⋯」前幾項的 [名稱, 反灰]；tasks＝標頭要看到的字（選填）；menu:false＝不打開「⋯」（截對話頁本身）；wake＝點第一項（喚醒）要送出
+// lead＝「⋯」前幾項的 [名稱, 反灰]；present／absent＝一定要有／不能有的項目；tasks＝標頭要看到的字（選填）；menu:false＝不打開「⋯」（截對話頁本身）；wake＝點第一項（喚醒）要送出
 export const MCHAT_PROBES = {
   plain: { mchat: { menu: false, tasks: '背景工作 3 件' } },
-  claude: { mchat: { lead: [['喚醒', true], ['切換模型', false]], tasks: '背景工作 3 件' } },
-  acp: { mchat: { lead: [['喚醒', true], ['切換模型', false]] } },
-  offline: { mchat: { lead: [['喚醒', false], ['切換模型', true]], wake: true } },
+  claude: { mchat: { lead: [['切換模型', false], ['詳情', false]], tasks: '背景工作 3 件', absent: ['喚醒', '重開', '移除'] } },
+  acp: { mchat: { lead: [['切換模型', false], ['詳情', false]], present: ['重開', '移除'], absent: ['喚醒'] } },
+  offlineMenu: { mchat: { lead: [['喚醒', false], ['切換模型', true]], absent: ['重開', '移除'] } },
+  offline: { mchat: { lead: [['喚醒', false], ['切換模型', true]], absent: ['重開', '移除'], wake: true } },
 }
 export const mchatProbeSource = ({ mchat }) => `(async () => {
-  const want = ${JSON.stringify({ lead: [], tasks: '', menu: true, wake: false, ...mchat })};
+  const want = ${JSON.stringify({ lead: [], present: [], absent: [], tasks: '', menu: true, wake: false, ...mchat })};
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const shown = sel => [...document.querySelectorAll(sel)].filter(e => e.offsetParent !== null);
   for (let i = 0; i < 60 && !document.querySelector('.m-chat .chatpane'); i++) await sleep(100);
@@ -214,7 +215,10 @@ export const mchatProbeSource = ({ mchat }) => `(async () => {
   const items = rows.map(b => [b.querySelector('.m-opt-t')?.textContent.trim() ?? '', b.getAttribute('aria-disabled') === 'true']);
   if (!items.length) return { ok: false, why: '「⋯」選單是空的' };
   if (JSON.stringify(items.slice(0, want.lead.length)) !== JSON.stringify(want.lead)) return { ok: false, why: '「⋯」前幾項不符：' + JSON.stringify(items) };
-  const bad = items.filter(([t]) => /前台|後台/.test(t));
+  const names = items.map(x => x[0]);
+  const lack = want.present.filter(t => !names.includes(t));
+  if (lack.length) return { ok: false, why: '「⋯」少了：' + lack.join('、') };
+  const bad = items.filter(([t]) => /前台|後台/.test(t) || want.absent.includes(t));
   if (bad.length) return { ok: false, why: '「⋯」不該有：' + bad.map(x => x[0]).join('、') };
   if (want.wake) {
     rows[0].click();
@@ -428,10 +432,11 @@ export const SCENARIOS = [
   // 工作項目（#539 之三）：本機 Claude 有 3 件背景工作，按鈕可按、數字顯示、列表打得開；上面三個情境是 0 件反灰、沒有徽章
   { name: 'list-bar-tasks', page: 'list.html', state: { signedIn: true, bar: 'tasks' }, ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: BAR_PROBES.tasks },
   // 群組按鈕（#539 之二）：整合模式開著群組分頁，按鈕列有「群組」（四項），「管理」不再放這些
-  // 手機對話頁（不放按鈕列）：412 寬，Claude 視窗、ACP 工作者、離線 Claude；上方沒有按鈕列、「⋯」前兩項是喚醒與切換模型、標頭留著背景工作件數
+  // 手機對話頁（不放按鈕列）：412 寬，Claude 視窗、ACP 工作者、離線 Claude；上方沒有按鈕列、「⋯」不列永遠用不到的項目（在線：切換模型、詳情在前；離線：喚醒、切換模型在前；內建通道才有重開、移除）、標頭留著背景工作件數
   { name: 'm-chat-plain', page: 'm.html', state: { signedIn: true, mbar: 'claude' }, ready: '#app.m .m-chat .chatpane', probe: MCHAT_PROBES.plain, shot: 'm-chat.png' },
   { name: 'm-chat-claude', page: 'm.html', state: { signedIn: true, mbar: 'claude' }, ready: '#app.m .m-chat .chatpane', probe: MCHAT_PROBES.claude, shot: 'm-chat-ops.png' },
   { name: 'm-chat-acp', page: 'm.html', state: { signedIn: true, mbar: 'acp' }, ready: '#app.m .m-chat .chatpane', probe: MCHAT_PROBES.acp },
+  { name: 'm-chat-offline-menu', page: 'm.html', state: { signedIn: true, mbar: 'offline' }, ready: '#app.m .m-chat .chatpane', probe: MCHAT_PROBES.offlineMenu, shot: 'm-chat-ops-offline.png' },
   { name: 'm-chat-offline', page: 'm.html', state: { signedIn: true, mbar: 'offline' }, ready: '#app.m .m-chat .chatpane', probe: MCHAT_PROBES.offline },
   // 手機群組對話：「⋯」裡是群組的三項（沒有「輸入邀請碼加入」）
   { name: 'm-group-chat', page: 'm.html', state: { signedIn: true, mgroup: true }, ready: '#app.m .m-chat .chatpane', probe: { mgroup: GROUP_ITEMS } },

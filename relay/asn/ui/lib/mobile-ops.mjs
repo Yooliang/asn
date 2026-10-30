@@ -3,6 +3,7 @@
 // node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。給人看的文字純繁體中文，不顯示節點代號與夥伴 ID。
 import { switchModelsFor } from './model-catalog.mjs'
 import { friendId } from './roster.mjs'
+import { MENU_KEYS, partnerEngine } from './partner-ops.mjs'
 
 // ---------- 「對話」分頁：最後使用的那一位 ----------
 export const EMPTY_CHAT_TEXT = '從夥伴分頁點一位開始對話'
@@ -47,10 +48,25 @@ export function runBanner(run) {
 
 // ---------- 「⋯」選單的列 ----------
 // 手機對話頁上方不放大按鈕列，所有管理項目都在「⋯」裡：最常用的喚醒、切換模型排最前面，其餘照 manageItems 的順序。
-// 前台／後台手機不能切，不列。
+// 這種夥伴永遠用不到的項目不列；暫時不能用的（離線、電腦沒開放、沒登入…）照舊反灰寫原因。
+//   - 前台／後台：手機不能切，不列
+//   - 喚醒：只有離線時列（內建通道的工作者不需要喚醒，不列）
+//   - 重開、移除：只對 ASN 內建通道的工作者列
+//   - 雲端代理：沒有電腦上的視窗，管理項目都不列，只剩封存
+// friend 沒給就只排序、只拿掉前台／後台
 export const PHONE_LEAD_OPS = ['resume', 'model']
 export const PHONE_HIDDEN_OPS = ['console']
-export function phoneOpsRows(items) {
-  const list = (items ?? []).filter(i => i && !PHONE_HIDDEN_OPS.includes(i.key))
+export const ACP_ONLY_OPS = ['restart', 'remove']
+export function phoneOpApplies(key, friend) {
+  if (PHONE_HIDDEN_OPS.includes(key)) return false
+  if (!friend) return true
+  const engine = partnerEngine(friend)
+  if (engine === 'cloud') return !MENU_KEYS.includes(key)
+  if (key === 'resume') return friend.status === 'offline' && engine !== 'acp'
+  if (ACP_ONLY_OPS.includes(key)) return engine === 'acp'
+  return true
+}
+export function phoneOpsRows(items, friend = null) {
+  const list = (items ?? []).filter(i => i && phoneOpApplies(i.key, friend))
   return [...PHONE_LEAD_OPS.flatMap(k => list.filter(i => i.key === k)), ...list.filter(i => !PHONE_LEAD_OPS.includes(i.key))]
 }

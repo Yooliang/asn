@@ -658,8 +658,9 @@ const app = createApp({
     // 判斷全部用 lib/partner-ops.mjs 的 menuItems／opFormError／progressView，手機不另寫一套。手機只下指令，視窗在那台電腦上
     const opsCtx = computed(() => ({ machines: lchData.machines, loaded: lchData.loaded, signedIn: acctSigned(), authError: acct.value.error, friends: friends.value, nonWindowNodes: [info.node] }))
     const opsItems = computed(() => (chatFriend.value ? manageItems(chatFriend.value, opsCtx.value) : []))
-    // 選單畫面上的列：手機對話頁上方沒有按鈕列，管理項目都在這裡；喚醒、切換模型排最前面，其餘順序和電腦版一致（前台／後台手機不能切，不列）
-    const opsRows = computed(() => phoneOpsRows(opsItems.value))
+    // 選單畫面上的列：手機對話頁上方沒有按鈕列，管理項目都在這裡；喚醒、切換模型排最前面，其餘順序和電腦版一致。
+    // 這位夥伴永遠用不到的不列（在線的喚醒、一般視窗的重開／移除…），暫時不能用的反灰寫原因（規則在 mobile-ops.mjs phoneOpApplies）
+    const opsRows = computed(() => phoneOpsRows(opsItems.value, chatFriend.value))
     const opsView = computed(() => sharedWhy(opsRows.value))   // 同一個原因只在選單最上方寫一次
     const ops = reactive({ phase: 'menu', newName: '', note: '', ack: false, model: '', error: '', view: null })
     const opsAcp = computed(() => acpSwitchChoices(chatFriend.value))   // 內建通道工作者的型號清單（Gemini 有、Grok 沒有＝手動輸入），跟電腦版同一份
