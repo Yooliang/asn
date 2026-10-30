@@ -10,7 +10,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { smokeGate, splitSkipFlag } from './smoke-gate.mjs'
-import { buildLatestJson, installerName, parseArgs, resolveNotes } from './release-lib.mjs'
+import { buildLatestJson, installerName, installerUrl, parseArgs, patchDownloadLink, resolveNotes } from './release-lib.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const siteUpdate = path.join(root, '..', '..', 'site', 'public', 'update')
@@ -78,8 +78,15 @@ fs.mkdirSync(out, { recursive: true })
 fs.copyFileSync(exe, path.join(out, name))
 fs.copyFileSync(sigFile, path.join(out, `${name}.sig`))
 fs.writeFileSync(path.join(out, 'latest.json'), `${JSON.stringify(latest, null, 2)}\n`)
+if (!opts.dryRun) {   // 官網首頁的下載按鈕連到這版安裝檔（讀 latest.json 的網址規則，不寫死版號）
+  const indexFile = path.join(siteUpdate, '..', 'index.html')
+  const html = fs.readFileSync(indexFile, 'utf8')
+  const patched = patchDownloadLink(html, installerUrl(version))
+  if (patched === html && !html.includes(installerUrl(version))) fail('官網首頁找不到下載按鈕的安裝檔連結（site/public/index.html）')
+  if (patched !== html) fs.writeFileSync(indexFile, patched)
+}
 console.log(`已產生：${out}`)
 console.log(`  ${name}、${name}.sig、latest.json`)
-console.log(opts.dryRun ? '演練完成：沒有改版本號，也沒有動官網目錄。' : '下一步：提交版本號與 site/public/update/latest.json，再由人部署官網（firebase deploy --only hosting，在 site/ 底下）。')
+console.log(opts.dryRun ? '演練完成：沒有改版本號，也沒有動官網目錄。' : '下一步：提交版本號、site/public/update/latest.json 與 site/public/index.html（下載按鈕連結），再由人部署官網（firebase deploy --only hosting，在 site/ 底下）。')
 // 官網的藍圖與開發日誌從 2026-10-27 起讀資料庫（public.asn_site_releases 等），這支腳本不寫官網頁面；發版記錄用 asn-cli site release 寫入（#400，限官網寫入名單上的帳號）
 if (!opts.dryRun) console.log(`提醒：用 asn-cli site release --version ${version} --date <YYYY-MM-DD> --commit <短碼> --item "…" --platform 官網 加這一版，再用 asn-cli site item --key … --status released --version ${version} 更新待辦（用法見 site/README.md），官網的藍圖與開發日誌才會出現。`)

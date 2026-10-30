@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { CHECK_MS, autoCheckFromSaved, compareVersions, firstLine, initialUpdateState, isNewer, manualResultText, progressText, updateNoticeText, withAvailable, withFailure, withInstalling, withProgress } from '../ui/lib/update.mjs'
-import { PLATFORM, buildLatestJson, changelogFirstSection, installerName, installerUrl, parseArgs, pickNotes } from '../scripts/release-lib.mjs'
+import { PLATFORM, patchDownloadLink, buildLatestJson, changelogFirstSection, installerName, installerUrl, parseArgs, pickNotes } from '../scripts/release-lib.mjs'
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')
 
@@ -140,4 +140,17 @@ test('設定：公鑰在設定檔、來源固定 https、產 .sig；私鑰不在
   assert.doesNotMatch(rel, /readFileSync\(keyFile/, '腳本不讀私鑰內容')
   assert.doesNotMatch(rel, /console\.[a-z]+\([^)]*(PASSWORD|password)/, '不印密碼')
   assert.equal(JSON.parse(read('package.json')).scripts.release, 'node scripts/release.mjs')
+})
+
+test('官網首頁下載按鈕（0.1.111）：連到 latest.json 現在這版的安裝檔，兩顆都是；發版腳本會把連結換成新版；沒有「尚未開放」', () => {
+  const html = fs.readFileSync(new URL('../../../site/public/index.html', import.meta.url), 'utf8')
+  const latest = JSON.parse(fs.readFileSync(new URL('../../../site/public/update/latest.json', import.meta.url), 'utf8'))
+  const url = latest.platforms[PLATFORM].url
+  const links = [...html.matchAll(/class="btn" href="([^"]*)"/g)].map(m => m[1])
+  assert.deepEqual(links, [url, url], '首頁頂部與下載區兩顆按鈕都連到 latest.json 的安裝檔（發版時 release.mjs 會自動換）')
+  assert.ok(!/尚未開放|即將開放下載|aria-disabled="true"/.test(html))
+  const next = installerUrl('0.2.0')
+  const out = patchDownloadLink(html, next)
+  assert.deepEqual([...out.matchAll(/class="btn" href="([^"]*)"/g)].map(m => m[1]), [next, next])
+  assert.equal(patchDownloadLink('<a href="#download">x</a>', next), '<a href="#download">x</a>', '沒有安裝檔連結就不動')
 })
