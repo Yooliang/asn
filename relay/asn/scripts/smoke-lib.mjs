@@ -280,7 +280,7 @@ export const mgroupProbeSource = ({ mgroup }) => `(async () => {
   if (JSON.stringify(got) !== JSON.stringify(want)) return { ok: false, why: '群組選單不符：' + JSON.stringify(got) };
   return { ok: true, why: '' };
 })()`
-// 手機群組附件：沒有外部成員的群組看得到「傳照片」「傳送檔案」，選一個檔案會送出 room 附件；有外部成員兩顆都不見
+// 手機群組附件：群組（含有外部成員的群組）看得到「傳照片」「傳送檔案」，選一個檔案會送出 room 附件
 export const mattachProbeSource = ({ mattach }) => `(async () => {
   const want = ${JSON.stringify(mattach)};
   const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -369,9 +369,9 @@ export const SCENARIOS = [
   // #539 收尾：手機離線的夥伴第 2 格是「喚醒」可按；群組對話的「群組」選單沒有「輸入邀請碼加入」
   { name: 'm-bar-offline', page: 'm.html', state: { signedIn: true, mbar: 'offline' }, ready: '#app.m .m-abar-row', probe: MBAR_PROBES.offline },
   { name: 'm-group-chat', page: 'm.html', state: { signedIn: true, mgroup: true }, ready: '#app.m .m-abar-row', probe: { mgroup: GROUP_ITEMS } },
-  // 手機群組附件（0.1.111）：沒有外部成員看得到「傳照片」「傳送檔案」且送得出去；有外部成員兩顆都不見
+  // 手機群組附件（0.1.111）：沒有外部成員、有外部成員的群組都看得到「傳照片」「傳送檔案」且送得出去
   { name: 'm-group-attach', page: 'm.html', state: { signedIn: true, mgroup: true }, ready: '#app.m .m-abar-row', probe: { mattach: { labels: ['傳照片', '傳送檔案'] } } },
-  { name: 'm-group-attach-external', page: 'm.html', state: { signedIn: true, mgroup: true, external: true }, ready: '#app.m .m-abar-row', probe: { mattach: { labels: [] } } },
+  { name: 'm-group-attach-external', page: 'm.html', state: { signedIn: true, mgroup: true, external: true }, ready: '#app.m .m-abar-row', probe: { mattach: { labels: ['傳照片', '傳送檔案'] } } },
   { name: 'list-group-tab', page: 'list.html', state: { signedIn: true, groupTab: true }, ready: '#app.win .actionbar', probe: { group: GROUP_ITEMS } },
 ]
 // 刻意不測的 ui/*.html（要寫理由）；其餘 html 都必須有情境（見單元測試）

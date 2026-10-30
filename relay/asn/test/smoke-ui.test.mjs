@@ -235,11 +235,11 @@ test('群組分頁情境（#539 之二）：假群組列表＋session 帶 room: 
   assert.ok(bar.includes('反灰卻點得開'))
 })
 
-test('手機群組附件情境（0.1.111）：沒有外部成員兩顆都在且送得出去、有外部成員都不見；假回應表帶 external；表達式語法正確', async () => {
+test('手機群組附件情境（0.1.111）：沒有外部成員、有外部成員的群組兩顆都在且送得出去；假回應表帶 external；表達式語法正確', async () => {
   const yes = SCENARIOS.find(s => s.name === 'm-group-attach'), no = SCENARIOS.find(s => s.name === 'm-group-attach-external')
   assert.ok(yes && no && yes.page.startsWith('m.html') && no.page.startsWith('m.html'))
   assert.deepEqual(yes.probe.mattach.labels, ['傳照片', '傳送檔案'])
-  assert.deepEqual(no.probe.mattach.labels, [])
+  assert.deepEqual(no.probe.mattach.labels, ['傳照片', '傳送檔案'], '有外部成員的群組也能傳附件（0.1.111）')
   assert.equal(tableFor(yes).relay_rooms.rooms[0].external, undefined)
   assert.equal(tableFor(no).relay_rooms.rooms[0].external, true)
   for (const sc of [yes, no]) {

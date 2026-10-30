@@ -612,11 +612,7 @@ Deno.serve(async (req) => {
       if (!att.ok) return json(att.reply.status, att.reply.body);
       attIds = att.ids;
       const roomId = typeof params.room === "string" ? params.room : "";
-      // 有別的租戶的成員的群組，第 1 期禁止傳附件（下載授權目前以租戶過濾）
-      if (attIds.length) {
-        const ext = await db.rpc("asn_relay_group_has_external", { p_node: me.id, p_room: roomId });
-        if (ext.data === true) return json(403, { error: "external_no_attachments", detail: "這個群組有外部成員，暫不支援附件" });
-      }
+      // 有外部成員的群組也能傳附件：下載授權改依「群組現有成員的設備」（asn_relay_attach_access）
       if (attIds.length) deps.beforeRing = async (seq) => { await bindAttachments({ rpc }, me.id, attIds, { room: roomId, seq }); };
     }
     const r = await handleNodeRoomAction(deps, me, action, params);

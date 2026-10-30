@@ -569,7 +569,7 @@ test('實跑：沒有外部成員的群組恢復附件——本人的其他設�
 
 test('還原驗證：拿掉 allow_others 欄位／下載授權補丁 → 上面兩個測試要變紅', { skip }, async () => {
   const cutAo = s => s.replace(/^\s*'allow_others'.*$/gm, '').replace(/or exists \(select 1 from relay.room_members rm join relay.rooms r[\s\S]*?is not distinct from v_t\);/, ';')   // room_members_view 的最新定義在 20261025000000_room_member_presence.sql（其前身 20261024160000、20261023180000 也要拿掉）
-  const db = await boot({ mutate: { [M_P1C]: cutAo, '20261024160000_member_device_label.sql': cutAo, '20261025000000_room_member_presence.sql': cutAo } })
+  const db = await boot({ mutate: { [M_P1C]: cutAo, '20261024160000_member_device_label.sql': cutAo, '20261025000000_room_member_presence.sql': cutAo, '20261030010000_room_attach_external.sql': cutAo } })   // 下載授權的最新定義在 20261030
   const room = await twoTenantRoom(db)
   const m = await membersAs(db, { node: P1, room, signed: U1 })
   assert.equal(m.members.find(x => x.member_kind === 'ai').allow_others, undefined, '欄位被拿掉了')
