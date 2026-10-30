@@ -61,14 +61,19 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
     }
     // 預設接續同名夥伴上一段對話（issue #82）；沒有舊對話才新開
     let resumed = if req.fresh { None } else { super::resume::apply_resume_real(&mut args, &command, prof.engine.as_str(), &req.name, &launch_req.cwd) };
-    let pid = start_window(&req.name, &command, &args, &cwd, display_bg)?;
-    Ok(json!({
+    let opened = start_window_noted(&req.name, &command, &args, &cwd, display_bg)?;
+    let mut out = json!({
         "ok": true,
         "mode": "window",
-        "pid": pid,
+        "pid": opened.pid,
         "resumed": resumed.is_some(),
         "display": if display_bg { "background" } else { "foreground" }
-    }))
+    });
+    // 自帶終端開不起來、改用一般視窗：只在第一次提示（見 win_term）
+    if let Some(n) = opened.note {
+        out["note"] = json!(n);
+    }
+    Ok(out)
 }
 
 /// 開新夥伴選了型號要怎麼帶（#539 之四）
@@ -127,7 +132,7 @@ pub(crate) fn with_model_arg(args: &[String], model: &str) -> Vec<String> {
 
 /// 遠端開視窗（內建收發室橋）用：驗證（profile、名字、白名單、上限）都已在呼叫端做完，
 /// 這裡只做「自動信任資料夾 → 依本機設定組命令 → 開視窗」。指令只來自本機的 profile，遠端只決定 profile 名、名字與資料夾。
-/// hidden＝視窗樣式 Hidden（測試用，正式一律 false）。回傳外層視窗（PowerShell）的 PID。
+/// hidden＝背景開（測試用，正式一律 false）。回傳視窗的 PID（自帶終端＝GUI；退路主控台＝承載的 PowerShell）。
 /// pi_args＝經 pi 的 --provider／--model（呼叫端已驗過格式與這台 pi 列得出來；只有 pi 的 profile 收）
 pub fn start_remote_window(config: &super::config::LaunchConfig, profile: &str, name: &str, cwd: &str, hidden: bool, pi_args: &[String]) -> Result<u32, String> {
     let prof = config.profiles.get(profile).ok_or_else(|| "沒有這個啟動設定".to_string())?;
@@ -206,21 +211,46 @@ fn quote_arg(a: &str) -> String {
     format!("\"{}\"", a.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
+/// 開夥伴視窗的唯一入口（0.2.0 第 1 階段，設計 1.1）：開新夥伴（本機／遠端）、接回對話、換模型重開、改名退路、接班換手都經這裡。
+/// Windows：先開在 ASN 自帶的 WezTerm（寫進對照表），找不到或開不起來才開原生主控台。參數照呼叫端給的，一個字都不改。
 pub(super) fn start_window(title: &str, command: &str, args: &[String], cwd: &Path, hidden: bool) -> Result<u32, String> {
-    start_window_env(title, command, args, cwd, hidden, &[])
+    start_window_noted(title, command, args, cwd, hidden).map(|o| o.pid)
 }
 
-/// 同 [`start_window`]，另外在視窗裡先設好額外的環境變數（pi 的 ASN_PI_NAME）；經 pi 時是自帶終端開不起來的退路（見 pi_term）
-pub(super) fn start_window_env(title: &str, command: &str, args: &[String], cwd: &Path, hidden: bool, env: &[(String, String)]) -> Result<u32, String> {
+/// 同 [`start_window`]，另外帶回「改用一般視窗」的提示（只有第一次有，給開新夥伴的畫面顯示）
+pub(super) fn start_window_noted(title: &str, command: &str, args: &[String], cwd: &Path, hidden: bool) -> Result<super::win_term::Opened, String> {
     #[cfg(windows)]
     {
-        start_window_windows(title, command, args, cwd, hidden, env)
+        start_window_windows(title, command, args, cwd, hidden)
     }
     #[cfg(not(windows))]
     {
         let _ = title;
+        start_window_unix(command, args, cwd, &[]).map(|pid| super::win_term::Opened { pid, note: None })
+    }
+}
+
+/// 直接開原生主控台（不試自帶終端），另外在視窗裡先設好額外的環境變數（pi 的 ASN_PI_NAME）。
+/// 只給經 pi 的退路用：pi_term 已經先試過自帶終端了（見 pi_term）
+pub(super) fn start_console_window_env(title: &str, command: &str, args: &[String], cwd: &Path, hidden: bool, env: &[(String, String)]) -> Result<u32, String> {
+    #[cfg(windows)]
+    {
+        start_console_window_windows(title, command, args, cwd, hidden, env)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (title, hidden);
         start_window_unix(command, args, cwd, env)
     }
+}
+
+/// Windows 開窗點：環境先過 child_env（金鑰類變數、繼承來的 CLAUDE* 都不帶進視窗），交給自帶終端；退路開原生主控台（同樣 env_clear＋child_env）
+#[cfg(windows)]
+fn start_window_windows(title: &str, command: &str, args: &[String], cwd: &Path, hidden: bool) -> Result<super::win_term::Opened, String> {
+    let env = super::win_term::term_env(super::config::child_env(), &[]);
+    let spec = super::win_term::spec_for(title, command, args, hidden, env);
+    let dir = std::path::PathBuf::from(strip_verbatim_prefix(&cwd.to_string_lossy()));
+    super::win_term::open_window_real(&dir, &spec, &|| start_console_window_windows(title, command, args, cwd, hidden, &[]))
 }
 
 /// PowerShell 單引號字串（內部單引號加倍），整串都是字面值，不會展開 $ 或反引號。
@@ -332,11 +362,12 @@ fn parse_launcher_output(stdout: &str, stderr: &str, success: bool) -> Result<u3
     }
 }
 
+/// 退路：原生主控台（#476 的開法；0.2.0 起只在自帶終端找不到或開不起來時用）。
 /// 回傳的 PID 是「承載視窗的 PowerShell」，不是 claude 本身（claude 是它的子程序、共用同一個主控台）。
 /// 主控台顯示／隱藏另外靠 ~/.claude/sessions 依名字找 claude 的 PID，不依賴這個值。
 #[cfg(windows)]
-fn start_window_windows(title: &str, command: &str, args: &[String], cwd: &Path, hidden: bool, env: &[(String, String)]) -> Result<u32, String> {
-    // 一律用 Windows 原生主控台開（#476）：明確交給 conhost.exe，不管這台的預設終端機是什麼。
+fn start_console_window_windows(title: &str, command: &str, args: &[String], cwd: &Path, hidden: bool, env: &[(String, String)]) -> Result<u32, String> {
+    // 退路一律用 Windows 原生主控台開（#476）：明確交給 conhost.exe，不管這台的預設終端機是什麼。
     // Windows Terminal 的所有視窗共用同一個程序，只要使用者開著別的 WT 視窗，ASN 開的夥伴就無法單獨切前景／背景；
     // 原生主控台一個程序一扇視窗，現有的切換本來就支援。
     // 失敗要大聲：舊版 Start-Process 出錯時 PowerShell 仍以結束碼 0 離開、stdout 空白、stderr 被丟掉，
@@ -550,7 +581,7 @@ mod tests {
     #[ignore]
     fn 真機_視窗會留著() {
         let dir = std::env::temp_dir();
-        let pid = start_window_windows("ASN 測試", "cmd.exe", &["/c".into(), "echo ASN 測試 & exit 3".into()], &dir, false, &[]).unwrap();
+        let pid = start_console_window_windows("ASN 測試", "cmd.exe", &["/c".into(), "echo ASN 測試 & exit 3".into()], &dir, false, &[]).unwrap();
         println!("ASN_TEST_PID={pid}");
         std::thread::sleep(std::time::Duration::from_secs(3));
         let list = Command::new("tasklist").no_window().args(["/FI", &format!("PID eq {pid}"), "/NH"]).output().unwrap();
@@ -564,7 +595,7 @@ mod tests {
     #[test]
     fn 啟動失敗_錯誤原文會被帶出來() {
         let bad = Path::new(r"C:\ASN-不存在的資料夾-xyz");
-        let e = start_window_windows("t", "cmd.exe", &[], bad, true, &[]).unwrap_err();
+        let e = start_console_window_windows("t", "cmd.exe", &[], bad, true, &[]).unwrap_err();
         assert!(e.starts_with("開不起來"), "{e}");
         assert!(e.len() > "開不起來：".len(), "{e}");
     }

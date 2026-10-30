@@ -47,12 +47,20 @@ pub trait Runner {
 /// 檔案檢查介面
 pub trait Fs {
     fn exists(&self, p: &Path) -> bool;
+    /// 檔案大小（不是檔案或不存在＝None）。找 WezTerm 時大小為 0 的占位檔當找不到（build.rs 沒取過檔時放的空檔）。
+    /// 預設：存在就當有內容（測試的假檔案系統不用改）
+    fn file_len(&self, p: &Path) -> Option<u64> {
+        self.exists(p).then_some(1)
+    }
 }
 
 pub struct RealFs;
 impl Fs for RealFs {
     fn exists(&self, p: &Path) -> bool {
         p.exists()
+    }
+    fn file_len(&self, p: &Path) -> Option<u64> {
+        std::fs::metadata(p).ok().filter(|m| m.is_file()).map(|m| m.len())
     }
 }
 
@@ -161,7 +169,9 @@ pub fn locate_with(env: Option<PathBuf>, bundled: Option<PathBuf>, fs: &dyn Fs) 
     let dir = env.or(bundled).ok_or_else(|| NOT_FOUND.to_string())?;
     let gui = dir.join("wezterm-gui.exe");
     let cli = dir.join("wezterm.exe");
-    if !fs.exists(&gui) || !fs.exists(&cli) {
+    // 大小為 0 的檔（build.rs 的占位空檔、被防毒清空的檔）當找不到，免得開到一半才失敗
+    let usable = |p: &Path| fs.file_len(p).is_some_and(|n| n > 0);
+    if !usable(&gui) || !usable(&cli) {
         return Err(NOT_FOUND.to_string());
     }
     Ok(WezTermDir { gui, cli })
@@ -520,10 +530,18 @@ mod tests {
     #[derive(Default)]
     struct FakeFs {
         files: RefCell<HashSet<PathBuf>>,
+        /// 大小為 0 的檔（存在，但只是占位）
+        empty: RefCell<HashSet<PathBuf>>,
     }
     impl Fs for FakeFs {
         fn exists(&self, p: &Path) -> bool {
-            self.files.borrow().contains(p)
+            self.files.borrow().contains(p) || self.empty.borrow().contains(p)
+        }
+        fn file_len(&self, p: &Path) -> Option<u64> {
+            if self.empty.borrow().contains(p) {
+                return Some(0);
+            }
+            self.files.borrow().contains(p).then_some(1)
         }
     }
 
@@ -786,6 +804,33 @@ mod tests {
         assert_eq!(locate_with(Some("E".into()), Some("B".into()), &fs).unwrap().cli, PathBuf::from("E/wezterm.exe"));
         assert!(locate_with(None, None, &fs).is_err());
         assert!(bundled_dir().is_some_and(|d| d.ends_with("wezterm")), "附帶的在安裝資料夾的 wezterm 底下");
+    }
+
+    #[test]
+    fn locate_大小為0的占位檔當找不到() {
+        let fs = FakeFs::default();
+        fs.empty.borrow_mut().insert("B/wezterm.exe".into());
+        fs.empty.borrow_mut().insert("B/wezterm-gui.exe".into());
+        assert!(locate_with(None, Some("B".into()), &fs).is_err(), "兩個都是空檔");
+        fs.empty.borrow_mut().remove(Path::new("B/wezterm.exe"));
+        fs.files.borrow_mut().insert("B/wezterm.exe".into());
+        assert!(locate_with(None, Some("B".into()), &fs).is_err(), "GUI 是空檔也不行");
+        fs.empty.borrow_mut().clear();
+        fs.files.borrow_mut().insert("B/wezterm-gui.exe".into());
+        assert!(locate_with(None, Some("B".into()), &fs).is_ok(), "都有內容才算找得到");
+    }
+
+    #[test]
+    fn 真的檔案系統_空檔大小是0_資料夾不算檔案() {
+        let d = tempfile::tempdir().unwrap();
+        let empty = d.path().join("e.exe");
+        std::fs::write(&empty, b"").unwrap();
+        let full = d.path().join("f.exe");
+        std::fs::write(&full, b"MZ").unwrap();
+        assert_eq!(RealFs.file_len(&empty), Some(0));
+        assert_eq!(RealFs.file_len(&full), Some(2));
+        assert_eq!(RealFs.file_len(d.path()), None);
+        assert_eq!(RealFs.file_len(&d.path().join("沒有")), None);
     }
 
     #[test]
