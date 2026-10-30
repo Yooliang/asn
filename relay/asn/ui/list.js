@@ -799,9 +799,11 @@ async function submitPartnerDlg() {
       // 經 pi：一律用 pi 的啟動設定，帶這次查到清單裡的提供者與模型（piLaunchArgs 驗過才送，清單外的不送）
       const viaPi = partnerRunChoice.value === 'pi' ? piLaunchArgs(dlgRow.value?.id, partnerDlg.piModel || piChoice.value.defaultModel, piInfo.models, piInfo.providers) : null
       if (partnerRunChoice.value === 'pi' && !viaPi) throw new Error('pi 的模型清單裡沒有這個模型，請重新選一次')
-      await transport.partnerLaunchLocal(viaPi
+      const opened = await transport.partnerLaunchLocal(viaPi
         ? { profile: 'pi', name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, display: 'foreground', first_message: partnerDlg.firstMessage.trim(), pi_provider: viaPi.provider, pi_model: viaPi.model }
         : { profile: partnerDlg.profile, name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, display, first_message: foregroundOnly ? partnerDlg.firstMessage.trim() : '', ...(launchModelPick.value ? { model: launchModelPick.value } : {}) })
+      // 內建終端開不起來、改用一般視窗：後端只在 ASN 這次執行的第一次帶 note，這裡照實顯示
+      if (opened?.note) showLaunchNotice({ title: '已改用一般視窗', body: opened.note })
     } else {
       // 經 pi：profile 一律 pi，帶那台清單裡的提供者與模型（不在清單裡就不送）；其他開法照舊
       const body = remoteLaunchRequest({ node: partnerDlg.node, profile: partnerDlg.profile, name: partnerDlg.name, cwd: partnerDlg.cwd, first: partnerDlg.firstMessage, piModel: partnerDlg.piModel }, { run: partnerRunChoice.value, row: dlgRow.value, launcher: dlgRemoteLauncher.value })
