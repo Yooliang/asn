@@ -301,10 +301,18 @@ fn restart_soon(app: &App, handle: AppHandle) {
     if cfg!(target_os = "android") {
         return;
     }
+    #[cfg(desktop)]
+    let work_dir = app.work_dir.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(600)).await;
         crate::cleanup(&handle);
-        handle.restart();
+        // 不用 tauri 的 AppHandle 重開：它讓新程序繼承本程序的 stderr，斷掉的管線會一路傳下去（#1771）
+        #[cfg(desktop)]
+        match crate::ui_log::relaunch_self() {
+            Ok(()) => crate::ui_log::log_exit(&work_dir, "重新啟動（登入狀態改變）"),
+            Err(e) => crate::ui_log::log_exit(&work_dir, &format!("重新啟動失敗：{e}")),
+        }
+        handle.exit(0);
     });
 }
 

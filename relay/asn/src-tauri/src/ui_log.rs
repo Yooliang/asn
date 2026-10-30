@@ -107,12 +107,12 @@ pub fn log_exit(dir: &Path, reason: &str) {
     let _ = append(dir, &[exit_line(crate::heartbeat::now_ms() as i64, reason)]);
 }
 
-/// 裝 panic hook：先把 panic 寫進 ui.log，再交給原本的 hook（印到 stderr）。panic = "abort"，寫完程式就結束
+/// 裝 panic hook：把 panic 寫進 ui.log 就好，不再交給預設 hook。預設 hook 會寫 stderr，
+/// 10-30 家用機閃退正是 stderr 是斷掉的管線、寫不進去才 panic，再寫一次只會在 hook 裡又失敗（#1767）。panic = "abort"，寫完程式就結束
 pub fn install_panic_hook(dir: PathBuf) {
     if dir.as_os_str().is_empty() {
         return;
     }
-    let prev = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let msg = info
             .payload()
@@ -123,8 +123,24 @@ pub fn install_panic_hook(dir: PathBuf) {
         let loc = info.location().map(|l| (l.file(), l.line(), l.column()));
         let t = std::thread::current();
         let _ = append(&dir, &[panic_line(crate::heartbeat::now_ms() as i64, t.name(), loc, &msg)]);
-        prev(info);
     }));
+}
+
+// ---------- 自己重開（#1771）：新程序的 stdin／stdout／stderr 一律接空，不繼承可能已斷的管線 ----------
+
+/// 重開用的指令：同一個執行檔、同樣的參數，三個標準輸入輸出都接空、不開主控台視窗
+pub fn relaunch_command(exe: &Path, args: &[std::ffi::OsString]) -> std::process::Command {
+    use crate::nowin::NoWindow;
+    let mut c = std::process::Command::new(exe);
+    c.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).no_window();
+    c
+}
+
+/// 開一個新的自己（參數照舊），成功回 Ok；呼叫端接著結束本程式。取代 tauri 的 `AppHandle::restart`（它讓新程序繼承本程序的 stderr）
+pub fn relaunch_self() -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    relaunch_command(&exe, &args).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -165,6 +181,38 @@ mod tests {
         let _ = std::panic::take_hook(); // 拆掉，別影響其他測試
         let t = std::fs::read_to_string(path(d.path())).unwrap();
         assert!(t.contains("程式錯誤結束（panic）") && t.contains("執行緒=測試執行緒") && t.contains("ui_log.rs:") && t.contains("訊息=測試用的 panic"), "{t}");
+    }
+
+    #[test]
+    fn panic_hook_寫完_ui_log_不再交給預設_hook() {
+        // 預設 hook 會寫 stderr；stderr 是斷掉的管線時會在 hook 裡再失敗一次（#1767）
+        let src = include_str!("ui_log.rs");
+        let hook = src.split("pub fn install_panic_hook").nth(1).unwrap().split("
+}").next().unwrap();
+        assert!(!hook.contains("take_hook") && !hook.contains("prev(info)"), "hook 不該再呼叫原本的 hook");
+    }
+
+    #[test]
+    fn 重開自己_三個標準輸入輸出都接空_而且不再用_tauri_的_restart() {
+        let src = include_str!("ui_log.rs");
+        let f = src.split("pub fn relaunch_command").nth(1).unwrap().split("
+}").next().unwrap();
+        for k in [".stdin(std::process::Stdio::null())", ".stdout(std::process::Stdio::null())", ".stderr(std::process::Stdio::null())"] {
+            assert!(f.contains(k), "缺 {k}");
+        }
+        let acct = include_str!("account.rs");
+        assert!(!acct.contains("handle.restart()") && acct.contains("crate::ui_log::relaunch_self()"), "account.rs 的重開要走 relaunch_self");
+    }
+
+    #[test]
+    fn 重開的新程序真的開得起來_輸出不接到本程序() {
+        // 用系統內建的指令試：會往 stdout／stderr 寫字，接空也能正常結束
+        #[cfg(windows)]
+        let (exe, args) = (std::path::PathBuf::from(std::env::var("ComSpec").unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".into())), vec!["/c".into(), "echo out & echo err 1>&2".into()]);
+        #[cfg(not(windows))]
+        let (exe, args) = (std::path::PathBuf::from("/bin/sh"), vec!["-c".into(), "echo out; echo err 1>&2".into()]);
+        let st = relaunch_command(&exe, &args).status().unwrap();
+        assert!(st.success());
     }
 
     #[test]
