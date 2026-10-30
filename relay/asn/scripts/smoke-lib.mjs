@@ -282,6 +282,27 @@ export const mgroupProbeSource = ({ mgroup }) => `(async () => {
   if (JSON.stringify(got) !== JSON.stringify(want)) return { ok: false, why: '群組選單不符：' + JSON.stringify(got) };
   return { ok: true, why: '' };
 })()`
+// 手機群組附件：沒有外部成員的群組看得到「傳照片」「傳送檔案」，選一個檔案會送出 room 附件；有外部成員兩顆都不見
+export const mattachProbeSource = ({ mattach }) => `(async () => {
+  const want = ${JSON.stringify(mattach)};
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const labels = () => [...document.querySelectorAll('.m-chat .toolbar>.tool')].filter(b => b.offsetParent !== null).map(b => b.getAttribute('aria-label'));
+  for (let i = 0; i < 60 && !document.querySelector('.m-chat .toolbar .tool'); i++) await sleep(100);
+  const got = labels().filter(l => l === '傳照片' || l === '傳送檔案');
+  if (JSON.stringify(got) !== JSON.stringify(want.labels)) return { ok: false, why: '群組工具列的附件鈕不符：' + JSON.stringify(got) };
+  const bad = labels().filter(l => /語音|麥克風|聽寫/.test(l || ''));
+  if (want.labels.length && bad.length) return { ok: false, why: '群組不該有語音鈕：' + bad.join('、') };
+  if (!want.labels.length) return { ok: true, why: '' };
+  const input = document.querySelector('.m-chat .toolbar input[type=file]:not([accept="image/*"])');
+  if (!input) return { ok: false, why: '找不到傳送檔案的 input' };
+  const dt = new DataTransfer(); dt.items.add(new File(['hello'], 'a.txt', { type: 'text/plain' }));
+  input.files = dt.files; input.dispatchEvent(new Event('change', { bubbles: true }));
+  let call = null;
+  for (let i = 0; i < 40 && !call; i++) { await sleep(100); call = (globalThis.__smokeCalls || []).find(c => c[0] === 'relay_send_attachment') }
+  if (!call) return { ok: false, why: '選了檔案沒有送出附件' };
+  if (call[1]?.payload?.room !== 'g1') return { ok: false, why: '附件沒有帶群組代號：' + JSON.stringify(call[1]?.payload?.room) };
+  return { ok: true, why: '' };
+})()`
 // 額度畫面（#374 之三）：「我的帳號」區每個廠牌（data-vendor）的文字要依序含 want 列的每一段；先等 open 指定的入口（手機要從設置點進「設備與帳號」）
 // #374：兩條改成額度條（「5 小時」「剩 40%」各自一段）；absent＝那一組裡不能出現的字
 const CLAUDE_BARS = ['Claude', '5 小時', '剩 40%', '每週', '剩 72%']
@@ -358,8 +379,8 @@ export const mcardsProbeSource = ({ open }) => `(async () => {
   if (Array.from(foot.textContent.trim()).length > 20) return { ok: false, why: '說明超過 20 字' };
   return { ok: true, why: '' };
 })()`
-export const probeKind = probe => (probe.mcards ? '手機帳號卡檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mbar ? '手機大按鈕檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
-export const probeSource = probe => (probe.mcards ? mcardsProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mbar ? mbarProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
+export const probeKind = probe => (probe.mcards ? '手機帳號卡檢查' : probe.mattach ? '手機群組附件檢查' : probe.quota ? '額度畫面檢查' : probe.mgroup ? '手機群組按鈕檢查' : probe.mbar ? '手機大按鈕檢查' : probe.bar ? '大按鈕檢查' : probe.group ? '群組按鈕檢查' : '遮罩檢查')
+export const probeSource = probe => (probe.mcards ? mcardsProbeSource(probe) : probe.mattach ? mattachProbeSource(probe) : probe.quota ? quotaProbeSource(probe) : probe.mgroup ? mgroupProbeSource(probe) : probe.mbar ? mbarProbeSource(probe) : probe.bar ? barProbeSource(probe) : probe.group ? groupProbeSource(probe) : maskProbeSource(probe))
 
 // 兩條各自的重置時間（#374）：時間要跟著現在走（畫面用瀏覽器的現在算），所以載入時算一次，探測要找的字用同一個時間算
 const SMOKE_NOW = Date.now()
@@ -426,6 +447,9 @@ export const SCENARIOS = [
   // #539 收尾：手機離線的夥伴第 2 格是「喚醒」可按；群組對話的「群組」選單沒有「輸入邀請碼加入」
   { name: 'm-bar-offline', page: 'm.html', state: { signedIn: true, mbar: 'offline' }, ready: '#app.m .m-abar-row', probe: MBAR_PROBES.offline },
   { name: 'm-group-chat', page: 'm.html', state: { signedIn: true, mgroup: true }, ready: '#app.m .m-abar-row', probe: { mgroup: GROUP_ITEMS } },
+  // 手機群組附件（0.1.111）：沒有外部成員看得到「傳照片」「傳送檔案」且送得出去；有外部成員兩顆都不見
+  { name: 'm-group-attach', page: 'm.html', state: { signedIn: true, mgroup: true }, ready: '#app.m .m-abar-row', probe: { mattach: { labels: ['傳照片', '傳送檔案'] } } },
+  { name: 'm-group-attach-external', page: 'm.html', state: { signedIn: true, mgroup: true, external: true }, ready: '#app.m .m-abar-row', probe: { mattach: { labels: [] } } },
   { name: 'list-group-tab', page: 'list.html', state: { signedIn: true, groupTab: true }, ready: '#app.win .actionbar', probe: { group: GROUP_ITEMS } },
 ]
 // 刻意不測的 ui/*.html（要寫理由）；其餘 html 都必須有情境（見單元測試）
@@ -468,7 +492,8 @@ export const tableFor = scenario => {
     t.android_launchers = { machines: [{ node: 'Q', online: true, launcher: { profiles: [] } }] }   // 那台開放遠端管理：切換模型、管理可按
   }
   if (scenario.state.mgroup) {
-    t.relay_rooms = { rooms: [GROUP_ROOM] }
+    t.relay_rooms = { rooms: [scenario.state.external ? { ...GROUP_ROOM, external: true } : GROUP_ROOM] }
+    t.relay_send_attachment = { seq: 1 }
     t.android_room_read = { messages: [] }
     t.relay_group = { by: 'action', values: { group_confirm_list: { confirms: [] } }, fallback: null }
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MGROUP_ME) } }
@@ -493,6 +518,7 @@ export const injectSource = table => `(() => {
     window: { getCurrentWindow: () => ({ startResizeDragging() {}, label: 'smoke' }) },
     core: { invoke: async (cmd, args) => {
       if (!Object.prototype.hasOwnProperty.call(T, cmd)) { missing.push(cmd); throw 'command ' + cmd + ' not found' }
+      (globalThis.__smokeCalls ||= []).push([cmd, args]);
       const v = T[cmd];
       if (v && typeof v === 'object' && v.by) { const k = args && args[v.by]; return Object.prototype.hasOwnProperty.call(v.values, k) ? v.values[k] : v.fallback }
       return v === undefined ? null : JSON.parse(JSON.stringify(v));

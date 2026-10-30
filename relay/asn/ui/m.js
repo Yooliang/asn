@@ -286,7 +286,7 @@ const app = createApp({
     // ---------- 群組對話：名單裡的一個分組（永遠顯示，沒有群組時有「建立群組」「加入群組」）；點進去在對話分頁看訊息、發言（lastChat 記成 room:<代號>） ----------
     // 資料與動作都在 lib/room-hub.mjs（電腦版共用）；發言與讀取走 Rust 指令並帶本人簽章
     const groupApi = createGroupApi(invoke)
-    const hub = createRoomHub({ invoke, groupApi, selfNode: info.node, windowName: info.window_name, readCmd: 'android_room_read', postCmd: 'android_room_post', reactive, visible: rid => core.isChatVisible(roomChatId(rid)) })   // 跟 1 對 1 同一套：只有正在看的那個群組才標已讀
+    const hub = createRoomHub({ invoke, groupApi, selfNode: info.node, windowName: info.window_name, readCmd: 'android_room_read', postCmd: 'android_room_post', photos: true, reactive, visible: rid => core.isChatVisible(roomChatId(rid)) })   // 跟 1 對 1 同一套：只有正在看的那個群組才標已讀
     const rooms = computed(() => hub.st.rooms)
     const roomsLoaded = computed(() => hub.st.loaded), roomsErr = computed(() => hub.st.err)
     const roomLogs = hub.st.logs   // 群組代號 → 對話記錄

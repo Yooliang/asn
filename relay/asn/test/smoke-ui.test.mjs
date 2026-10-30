@@ -87,7 +87,7 @@ test('掛上判斷的表達式：語法正確、帶入選擇器與預期路徑',
 })
 
 test('對話框遮罩情境（#536）：電腦與手機各一，檢查左上使用者區與名單；表達式語法正確', async () => {
-  const mask = SCENARIOS.filter(s => s.probe && !s.probe.bar && !s.probe.group && !s.probe.mbar && !s.probe.mgroup && !s.probe.quota && !s.probe.mcards)
+  const mask = SCENARIOS.filter(s => s.probe && !s.probe.bar && !s.probe.group && !s.probe.mbar && !s.probe.mgroup && !s.probe.quota && !s.probe.mcards && !s.probe.mattach)
   assert.deepEqual(mask.map(s => s.name), ['list-dialog-mask', 'm-dialog-mask'])
   assert.ok(MASK_PROBES.desktop.cover.includes('.me .me-dp') && MASK_PROBES.desktop.cover.includes('.rail'))
   assert.ok(MASK_PROBES.mobile.cover.includes('.m-head .m-me'))
@@ -233,4 +233,22 @@ test('群組分頁情境（#539 之二）：假群組列表＋session 帶 room: 
   assert.ok(bar.includes(`getAttribute('aria-disabled') === 'true'`))
   assert.ok(bar.includes(`hasAttribute('disabled')`))
   assert.ok(bar.includes('反灰卻點得開'))
+})
+
+test('手機群組附件情境（0.1.111）：沒有外部成員兩顆都在且送得出去、有外部成員都不見；假回應表帶 external；表達式語法正確', async () => {
+  const yes = SCENARIOS.find(s => s.name === 'm-group-attach'), no = SCENARIOS.find(s => s.name === 'm-group-attach-external')
+  assert.ok(yes && no && yes.page.startsWith('m.html') && no.page.startsWith('m.html'))
+  assert.deepEqual(yes.probe.mattach.labels, ['傳照片', '傳送檔案'])
+  assert.deepEqual(no.probe.mattach.labels, [])
+  assert.equal(tableFor(yes).relay_rooms.rooms[0].external, undefined)
+  assert.equal(tableFor(no).relay_rooms.rooms[0].external, true)
+  for (const sc of [yes, no]) {
+    assert.equal(probeKind(sc.probe), '手機群組附件檢查')
+    assert.doesNotThrow(() => new vm.Script(probeSource(sc.probe)))
+  }
+  const css = fs.readFileSync(fileURLToPath(new URL('../ui/mobile.css', import.meta.url)), 'utf8')
+  assert.ok(!/\.is-room \.toolbar>\.tool\s*\{\s*display:\s*none/.test(css), '群組工具列不能整排藏掉（附件鈕要看得到）')
+  const mjs = fs.readFileSync(fileURLToPath(new URL('../ui/m.js', import.meta.url)), 'utf8')
+  assert.ok(/createRoomHub\(\{.*photos: true/.test(mjs), '手機群組要帶 photos:true，附件照片才看得到')
+  assert.ok(/\.is-room \.toolbar>\.tool\.dict/.test(css) && /\.is-room \.toolbar>\.tool\.mic/.test(css), '群組只藏語音輸入與麥克風')
 })

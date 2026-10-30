@@ -31,6 +31,10 @@ export const resolveNotes = ({ arg, changelog, version, date }) => {
   return { notes: a, newChangelog: addChangelogSection(changelog, { version, date, notes: a }) }
 }
 
+// 官網首頁的下載按鈕連結跟著這版安裝檔走：把頁面裡所有指到安裝檔的 href 換成新網址（沒有符合的就原樣回傳）
+export const INSTALLER_HREF_RE = /href="[^"]*\/update\/ASN_\d+\.\d+\.\d+_x64-setup\.exe"/g
+export const patchDownloadLink = (html, url) => html.replace(INSTALLER_HREF_RE, `href="${url}"`)
+
 export const installerName = version => `ASN_${version}_x64-setup.exe`
 export const installerUrl = version => `${UPDATE_BASE}${encodeURIComponent(installerName(version))}`
 
