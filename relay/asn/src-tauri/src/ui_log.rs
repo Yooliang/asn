@@ -56,9 +56,124 @@ pub fn append(dir: &Path, lines: &[String]) -> Result<usize, String> {
     Ok(rows.len())
 }
 
+// ---------- 程式結束的原因（#1749：10-30 家用機閃退 4 次，panic 訊息沒進任何記錄，查不出是哪一行） ----------
+
+/// panic 訊息裡看起來像權杖的長字串（32 字以上的英數與 `-_.+/=`）換成「…略…」；訊息最多留 200 字。
+/// panic 訊息通常是「called `Option::unwrap()` on a `None` value」之類，但 expect 的字串可能帶進變數，保險起見再遮一次
+pub fn redact(msg: &str) -> String {
+    let mut out = String::new();
+    let mut run = String::new();
+    let flush = |run: &mut String, out: &mut String| {
+        if run.chars().count() >= 32 {
+            out.push_str("…略…");
+        } else {
+            out.push_str(run);
+        }
+        run.clear();
+    };
+    for c in msg.chars() {
+        if c.is_ascii_alphanumeric() || "-_.+/=".contains(c) {
+            run.push(c);
+        } else {
+            flush(&mut run, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut run, &mut out);
+    out.chars().take(200).collect()
+}
+
+/// panic 那一行：時間、執行緒名、檔案行號、遮過的訊息
+pub fn panic_line(now_ms: i64, thread: Option<&str>, location: Option<(&str, u32, u32)>, msg: &str) -> String {
+    let at = location.map(|(f, l, c)| format!("{f}:{l}:{c}")).unwrap_or_else(|| "不明".into());
+    format!(
+        "{} error [ASN] 程式錯誤結束（panic）：執行緒={} 位置={} 訊息={}",
+        crate::claude_quota::iso_secs(now_ms),
+        thread.unwrap_or("未命名"),
+        at,
+        redact(msg)
+    )
+}
+
+/// 程式自己結束時寫一行原因；沒有這行就表示是被結束（工作管理員、關機、閃退）
+pub fn exit_line(now_ms: i64, reason: &str) -> String {
+    format!("{} info [ASN] 程式結束：{}", crate::claude_quota::iso_secs(now_ms), reason)
+}
+
+pub fn log_exit(dir: &Path, reason: &str) {
+    if dir.as_os_str().is_empty() {
+        return;
+    }
+    let _ = append(dir, &[exit_line(crate::heartbeat::now_ms() as i64, reason)]);
+}
+
+/// 裝 panic hook：先把 panic 寫進 ui.log，再交給原本的 hook（印到 stderr）。panic = "abort"，寫完程式就結束
+pub fn install_panic_hook(dir: PathBuf) {
+    if dir.as_os_str().is_empty() {
+        return;
+    }
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let msg = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_default();
+        let loc = info.location().map(|l| (l.file(), l.line(), l.column()));
+        let t = std::thread::current();
+        let _ = append(&dir, &[panic_line(crate::heartbeat::now_ms() as i64, t.name(), loc, &msg)]);
+        prev(info);
+    }));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn panic_那一行_有執行緒_檔案行號_訊息() {
+        let l = panic_line(0, Some("tokio-runtime-worker"), Some(("src/bridge/core.rs", 12, 5)), "called `Option::unwrap()` on a `None` value");
+        assert_eq!(l, "1970-01-01T00:00:00Z error [ASN] 程式錯誤結束（panic）：執行緒=tokio-runtime-worker 位置=src/bridge/core.rs:12:5 訊息=called `Option::unwrap()` on a `None` value");
+        assert!(panic_line(0, None, None, "x").contains("執行緒=未命名 位置=不明"));
+    }
+
+    #[test]
+    fn panic_訊息裡像權杖的長字串要遮掉_而且限長() {
+        let tok = format!("sk-ant-oat01-{}", "A".repeat(40));
+        let r = redact(&format!("bad token {tok} here"));
+        assert_eq!(r, "bad token …略… here");
+        assert!(!r.contains("AAAA"));
+        assert!(!panic_line(0, None, None, &tok).contains("AAAA"), "寫進記錄的那一行也要遮");
+        assert_eq!(redact("短字 abc123 不遮"), "短字 abc123 不遮");
+        assert_eq!(redact(&"字".repeat(300)).chars().count(), 200);
+    }
+
+    #[test]
+    fn panic_hook_真的寫進_ui_log() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().to_path_buf();
+        let h = std::thread::Builder::new()
+            .name("測試執行緒".into())
+            .spawn(move || {
+                install_panic_hook(dir);
+                let v: Option<u8> = None;
+                v.expect("測試用的 panic");
+            })
+            .unwrap();
+        assert!(h.join().is_err());
+        let _ = std::panic::take_hook(); // 拆掉，別影響其他測試
+        let t = std::fs::read_to_string(path(d.path())).unwrap();
+        assert!(t.contains("程式錯誤結束（panic）") && t.contains("執行緒=測試執行緒") && t.contains("ui_log.rs:") && t.contains("訊息=測試用的 panic"), "{t}");
+    }
+
+    #[test]
+    fn 自己結束寫一行原因_沒有資料夾就不寫() {
+        let d = tempfile::tempdir().unwrap();
+        log_exit(d.path(), "同一個視窗名已經有 ASN 在跑");
+        assert!(std::fs::read_to_string(path(d.path())).unwrap().contains("info [ASN] 程式結束：同一個視窗名已經有 ASN 在跑"));
+        log_exit(Path::new(""), "x"); // 不會 panic、不會寫到奇怪的地方
+    }
 
     #[test]
     fn 每行拿掉控制字元_限長_空白行不寫() {
