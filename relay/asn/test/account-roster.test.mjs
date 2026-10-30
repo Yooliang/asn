@@ -303,16 +303,18 @@ test('電腦設定頁：設備列表最上面有「我的帳號」，按廠牌�
   const html = await render({ devices: [], accounts: ACCT, myAccounts: my })
   assert.match(html, /<section class="dv-my"[^>]*aria-label="我的帳號"/)
   assert.ok(html.includes('data-vendor="claude"') && html.includes('data-vendor="codex"'))
-  assert.ok(html.includes('5 小時剩 40%') && html.includes('每週剩 72%') && html.includes('5 小時剩 40%・3 小時前') && html.includes('（工作機）'))
+  // #374：改成兩條額度條（5 小時、每週），各自寫重置時間；括號裡寫較舊那窗的時間與哪台讀的
+  assert.ok(html.includes('剩 40%') && html.includes('剩 72%') && html.includes('（3 小時前・工作機）'))
+  assert.match(html, /role="progressbar"/)
   assert.ok(html.includes('開 Codex 後才讀得到'))
   assert.ok(html.includes('使用中'))
   const none = await render({ devices: [], accounts: ACCT, myAccounts: null })
   assert.ok(!none.includes('dv-my'))
-  // 已重置的窗寫「已重置，待更新」、不出現舊百分比；手機版樣板也改用 listMeta（#527 審查）
+  // 已重置的窗寫「可能已恢復」、不出現舊百分比（#527 審查、#374）
   const past = rosterView(roster([entry({ windows: [win('five_hour', 3, H, { resets_at: iso(NOW - H) }), win('weekly', 60, 2 * D)] })]), { nodeLabel, now: NOW })
   const h2 = await render({ devices: [], accounts: ACCT, myAccounts: past })
-  assert.ok(h2.includes('5 小時已重置，待更新') && h2.includes('每週剩 60%・2 天前') && !h2.includes('剩 3%'))
-  assert.ok(read('ui/m.html').includes('（{{ a.quota.listMeta }}）'))
+  assert.ok(h2.includes('可能已恢復') && h2.includes('剩 60%') && !h2.includes('剩 3%'))
+  assert.ok(read('ui/m.html').includes('{{ a.quota.meta }}'))
 })
 
 test('電腦設定頁：「我的帳號」在設備列表之前', async () => {

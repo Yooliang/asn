@@ -249,10 +249,11 @@ test('手機列表：整列一個大按鈕（高度至少 56px）進細部頁、
   for (const gone of ['重新整理', 'refreshAcct', 'm-dv-hidden', '已隱藏的設備（', 'm-dv-tabs']) assert.ok(!pane.includes(gone) && !css.includes(gone === 'm-dv-hidden' ? '.m-dv-hidden' : '@@'), `手機不該還有「${gone}」`)
 })
 
-test('手機細部頁：頂部「‹ 返回」回列表；標題列返回鍵先回列表；從夥伴列表「選項」進來直接開那一台', () => {
+test('手機細部頁：標題列返回鍵先回列表（頁內不再另放「‹ 返回」，#374）；從夥伴列表「選項」進來直接開那一台', () => {
   const html = read('ui/m.html'), js = read('ui/m.js')
   const pane = /<section class="m-pg m-fourth"[\s\S]*?<!-- \/第四頁籤 -->/.exec(html)[0]
-  assert.match(pane, /class="m-dv-back"[^>]*@click="acctBackToList">\{\{ DEVICE_TEXT\.back \}\}/)
+  assert.doesNotMatch(pane, /class="m-dv-back"/, '只留標題列那一個返回')
+  assert.match(pane, /<button class="m-icon-btn" type="button" aria-label="返回" @click="back">/)
   assert.match(pane, /v-else-if="acctSw\.phase === 'pick'"/)
   assert.match(js, /const acctBackToList = \(\) => back\(\)/, '#461：細部是第四頁籤上的一層，「‹ 返回」、標題列返回、系統返回鍵都退一筆記錄')
   assert.match(js, /fourthNav\.pushLayer\(acctPage\(key\), \{ replace: stale \}\)/, '點一台進細部＝多一層')

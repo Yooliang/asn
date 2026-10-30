@@ -44,9 +44,10 @@ export function cleanEmail(v: unknown): string | null {
 
 // 額度窗（#374 帳號列表）：name＝five_hour／weekly／w<分鐘數>；left_pct＝剩餘 0～100 整數；resets_at＝重置時間（可空）；read_at＝那台電腦讀到的時間
 export type QuotaWindow = { name: string; left_pct: number; resets_at: string | null; read_at: string };
-export type ReportedAccount = { vendor: "claude" | "codex" | "grok" | "gemini"; email: string; plan: string; current: boolean; five_hour_pct?: number; weekly_pct?: number; reset_at?: string; at?: string; windows?: QuotaWindow[] };
+export type ReportedAccount = { vendor: "claude" | "codex" | "grok" | "gemini"; email: string; plan: string; current: boolean; five_hour_pct?: number; weekly_pct?: number; reset_at?: string; five_reset_at?: string; week_reset_at?: string; at?: string; windows?: QuotaWindow[] };
 
 // 剩餘額度（#228，全部選填）：five_hour_pct／weekly_pct 是 0～100 的剩餘百分比，reset_at 是重置時間，at 是那台電腦記下數字的時間。
+// five_reset_at／week_reset_at（#374，選填）：兩條各自的重置時間（reset_at 是舊的、兩條共用一個，照收）。
 // 只收 Claude。不合格的欄位單獨丟掉（不退回整份，免得額度壞掉拖累帳號清單）；沒有合格的百分比或沒有合格的 at 就整組不收。
 const FUTURE_SLACK_MS = 10 * 60 * 1000;
 function isoOrNull(v: unknown, maxFutureMs: number | null): string | null {
@@ -57,12 +58,18 @@ function isoOrNull(v: unknown, maxFutureMs: number | null): string | null {
   return new Date(t).toISOString();
 }
 const pctOrNull = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 100 ? Math.round(v) : null);
-export function parseQuota(a: Json): Pick<ReportedAccount, "five_hour_pct" | "weekly_pct" | "reset_at" | "at"> {
+export function parseQuota(a: Json): Pick<ReportedAccount, "five_hour_pct" | "weekly_pct" | "reset_at" | "five_reset_at" | "week_reset_at" | "at"> {
   const five = pctOrNull(a.five_hour_pct), week = pctOrNull(a.weekly_pct);
   const at = isoOrNull(a.at, FUTURE_SLACK_MS);
   if ((five == null && week == null) || at == null) return {};
   const reset = isoOrNull(a.reset_at, null);
-  return { ...(five != null ? { five_hour_pct: five } : {}), ...(week != null ? { weekly_pct: week } : {}), ...(reset != null ? { reset_at: reset } : {}), at };
+  // 兩條各自的重置時間（#374）：只在那條的百分比也收了時才留
+  const fiveReset = five != null ? isoOrNull(a.five_reset_at, null) : null;
+  const weekReset = week != null ? isoOrNull(a.week_reset_at, null) : null;
+  return {
+    ...(five != null ? { five_hour_pct: five } : {}), ...(week != null ? { weekly_pct: week } : {}), ...(reset != null ? { reset_at: reset } : {}),
+    ...(fiveReset != null ? { five_reset_at: fiveReset } : {}), ...(weekReset != null ? { week_reset_at: weekReset } : {}), at,
+  };
 }
 // 新版的額度窗（#374）：只收 claude、codex、gemini（grok 一律不收；gemini 只收 five_hour、weekly，#1515）。壞掉的單窗丟掉，不退回整份；同名只留第一個；最多 4 個。
 // 規則跟資料庫的 asn_relay_acct_windows_clean 相同（那邊會再檢查一次，並把 Codex 的 w300／w10080 轉成 five_hour／weekly）。

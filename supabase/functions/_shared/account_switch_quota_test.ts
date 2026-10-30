@@ -41,3 +41,15 @@ Deno.test("acct_report 把整理過的額度交給資料庫函式", async () => 
   await handleAcctAction(deps, { id: "W" }, "acct_report", { accounts: [{ ...C, five_hour_pct: 40, at: AT }] });
   assertEquals(calls[0].args.p_accounts, [{ ...C, five_hour_pct: 40, at: AT }]);
 });
+
+Deno.test("兩條各自的重置時間（#374）：合格就保留，只在那條百分比也在時才留；壞的單獨丟掉；交給舊函式", async () => {
+  const r = parseReport({ accounts: [{ ...C, five_hour_pct: 40, weekly_pct: 70, reset_at: "2026-10-24T15:00:00Z", five_reset_at: "2026-10-24T15:00:00Z", week_reset_at: "2026-10-30T06:00:00Z", at: AT }] })!;
+  assertEquals(r[0], { ...C, five_hour_pct: 40, weekly_pct: 70, reset_at: "2026-10-24T15:00:00.000Z", five_reset_at: "2026-10-24T15:00:00.000Z", week_reset_at: "2026-10-30T06:00:00.000Z", at: AT });
+  const only5 = parseReport({ accounts: [{ ...C, five_hour_pct: 40, five_reset_at: "壞掉", week_reset_at: "2026-10-30T06:00:00Z", at: AT }] })!;
+  assertEquals(only5[0], { ...C, five_hour_pct: 40, at: AT }, "壞的丟掉；沒有每週百分比就不留每週的重置時間");
+  const calls: Array<{ fn: string; args: Record<string, unknown> }> = [];
+  const deps = { rpc: (fn: string, args: Record<string, unknown>) => { calls.push({ fn, args }); return Promise.resolve({ data: { ok: true, count: 1 }, error: null }); }, ring: () => Promise.resolve() };
+  await handleAcctAction(deps, { id: "W" }, "acct_report", { accounts: [{ ...C, weekly_pct: 70, week_reset_at: "2026-10-30T06:00:00Z", at: AT }] });
+  assertEquals(calls[0].fn, "asn_relay_acct_report");
+  assertEquals(calls[0].args.p_accounts, [{ ...C, weekly_pct: 70, week_reset_at: "2026-10-30T06:00:00.000Z", at: AT }]);
+});

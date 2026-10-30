@@ -48,7 +48,7 @@ test('設備樹：廠商帶出各自的帳號清單（email、方案、使用中
     self: { claude: [{ email: 's@x.test', plan: 'max', current: true }], codex: { loggedIn: true, text: 'c@x.test · plus' } },
   })
   const self = t.find(d => d.self), w = t.find(d => !d.self)
-  assert.deepEqual(self.vendors.find(v => v.key === 'claude').accounts, [{ email: 's@x.test', plan: 'max', current: true, quota: { known: false, text: '額度未知', meta: '', resetText: '', stale: true, exhausted: false } }])   // Claude 帳號都帶額度；沒有紀錄就是「額度未知」
+  assert.deepEqual(self.vendors.find(v => v.key === 'claude').accounts, [{ email: 's@x.test', plan: 'max', current: true, quota: { known: false, text: '額度未知', meta: '', resetText: '', resetLine: '', bars: [], oldText: '', stale: true, exhausted: false } }])   // Claude 帳號都帶額度；沒有紀錄就是「額度未知」
   assert.deepEqual(self.vendors.find(v => v.key === 'gemini').accounts, [])
   assert.equal(self.vendors.find(v => v.key === 'codex').accounts[0].email, 'c@x.test · plus')
   assert.deepEqual(w.vendors.find(v => v.key === 'claude').accounts.map(a => a.email), ['w1@x.test', 'w2@x.test'])
@@ -111,8 +111,8 @@ test('第 3 層（其他設備）：Claude 每個帳號一列——信箱、方�
   const html = await render({ catKey: 'devices', dev: 'W' })
   const rows = [...html.matchAll(/<li class="dv-acct[^"]*"[\s\S]*?<\/li>/g)].map(m => m[0])
   const w1 = rows.find(r => r.includes('w1@b.c')), w2 = rows.find(r => r.includes('w2@b.c'))
-  assert.ok(w1.includes('class="dv-plan">pro<') && w1.includes('class="dv-cur">使用中<') && !w1.includes('切換'))
-  assert.ok(w2.includes('class="dv-plan">max<') && w2.includes('>切換<') && !w2.includes('使用中'))
+  assert.ok(w1.includes('class="dv-plan">Pro<') && w1.includes('class="dv-cur">使用中<') && !w1.includes('切換'), '方案寫 Pro、Max（#374）')
+  assert.ok(w2.includes('class="dv-plan">Max<') && w2.includes('>切換<') && !w2.includes('使用中'))
   assert.ok(!/<button[^>]*disabled[^>]*>切換/.test(w2), '對方 ASN 在線＝可切換')
   assert.match(html, /class="dv-none"[^>]*>[\s\S]*目前未回報任何帳號/)
   // 其他廠商只顯示：沒有任何切換或刪除

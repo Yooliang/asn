@@ -4,16 +4,58 @@
 import { agoText } from './cloud-invite.mjs'
 
 export const STALE_MS = 6 * 3600_000
-export const QUOTA_NOTE = '額度是那台電腦上次記下的數字，只有用過的帳號才有；沒有紀錄的寫「額度未知」，超過 6 小時的標「資料較舊」。'
+export const QUOTA_NOTE = '額度是各台電腦上次讀到的數字。'   // 手機「設備與帳號」最下面的一句（#374 縮短）
 
 const pct = v => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 100 ? Math.round(v) : null)
 
-// 只取四個額度欄位（其他欄位一律丟掉）
+// 只取額度欄位（舊四欄＋兩條各自的重置時間，#374；其他欄位一律丟掉）
+const QUOTA_KEYS = ['five_hour_pct', 'weekly_pct', 'reset_at', 'at', 'five_reset_at', 'week_reset_at']
 export function quotaOf(a) {
   if (!a || typeof a !== 'object') return undefined
-  const q = {}
-  for (const k of ['five_hour_pct', 'weekly_pct', 'reset_at', 'at']) if (a[k] != null) q[k] = a[k]
-  return q
+  return Object.fromEntries(QUOTA_KEYS.filter(k => a[k] != null).map(k => [k, a[k]]))
+}
+
+// ---- 一條額度自己的重置時間（#374）----
+export const RESET_PASSED = '可能已恢復'   // 重置時間已經過了：記著的百分比不代表現在
+export const OLD_TEXT = '資料較舊'
+export const PLAN_UNKNOWN = '方案未知'   // 帳號卡第二行：沒有回報方案時
+const WEEKDAYS = ['週日', '週一', '週二', '週三', '週四', '週五', '週六']
+const two = n => String(n).padStart(2, '0')
+
+/** 重置時間 → 「約 N 分鐘後重置」「約 N 小時後重置」（一天內）、「週六 14:00 重置」（超過一天，本地時區）、已過「可能已恢復」；沒有或壞掉回空字串 */
+export function resetWhen(resetAt, now = Date.now()) {
+  const t = Date.parse(typeof resetAt === 'string' ? resetAt : '')
+  if (!Number.isFinite(t)) return ''
+  const ms = t - now
+  if (ms <= 0) return RESET_PASSED
+  if (ms < 3600_000) return `約 ${Math.min(59, Math.max(1, Math.round(ms / 60_000)))} 分鐘後重置`
+  if (ms <= 24 * 3600_000) return `約 ${Math.round(ms / 3600_000)} 小時後重置`
+  const d = new Date(t)
+  return `${WEEKDAYS[d.getDay()]} ${two(d.getHours())}:${two(d.getMinutes())} 重置`
+}
+
+/** 一條額度條：{ key, label, pct, low, reset, expired }。reset＝這條自己的重置時間（空＝不寫）；expired＝重置時間已過（畫面不寫舊百分比） */
+export function quotaBar(key, label, p, resetAt, now = Date.now()) {
+  const reset = resetWhen(resetAt, now)
+  return { key, label, pct: p, low: p <= LOW_PCT, reset, expired: reset === RESET_PASSED }
+}
+
+/** 方案 → 給人看的名字：claude_max「Max」、pro「Pro」、claude_max_20x「Max 20x」；有空白或大寫的（例如「Google AI Pro」）照舊 */
+export function planLabel(plan) {
+  const s = typeof plan === 'string' ? plan.trim() : ''
+  if (!s || /[\sA-Z]/.test(s) || !/^[a-z0-9_-]+$/.test(s)) return s
+  const words = s.replace(/^(claude|chatgpt|openai|anthropic)[_-]/, '').split(/[_-]+/).filter(Boolean)
+  return words.map(w => (/^\d/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1))).join(' ')
+}
+
+// 有沒有兩條各自的重置時間（新版電腦才有；舊版只有一個 reset_at）
+const hasSplit = a => typeof a?.five_reset_at === 'string' || typeof a?.week_reset_at === 'string'
+// 兩條額度條（5 小時、每週）：新欄位各帶各的重置時間；舊版不帶（整段另寫一句）
+function barsOf(a, now) {
+  const split = hasSplit(a)
+  return [['five', '5 小時', pct(a?.five_hour_pct), a?.five_reset_at], ['week', '每週', pct(a?.weekly_pct), a?.week_reset_at]]
+    .filter(([, , p]) => p != null)
+    .map(([key, label, p, r]) => quotaBar(key, label, p, split ? r : undefined, now))
 }
 
 function clock(ms, now) {
@@ -26,7 +68,7 @@ export function quotaView(a, now = Date.now()) {
   const five = pct(a?.five_hour_pct), week = pct(a?.weekly_pct)
   const at = Date.parse(a?.at ?? '')
   if ((five == null && week == null) || !Number.isFinite(at)) {
-    return { known: false, text: '額度未知', meta: '', resetText: '', stale: true, exhausted: false }
+    return { known: false, text: '額度未知', meta: '', resetText: '', resetLine: '', bars: [], oldText: '', stale: true, exhausted: false }
   }
   const parts = []
   if (five != null) parts.push(`5 小時剩 ${five}%`)
@@ -41,7 +83,15 @@ export function quotaView(a, now = Date.now()) {
   }
   const stale = now - at > STALE_MS
   const ago = agoText(a.at, now)
-  return { known: true, text: parts.join('、'), meta: stale ? `${ago}・資料較舊` : ago, resetText, stale, exhausted }
+  // bars：兩條額度條（#374）。有新欄位時各條自己寫重置時間，resetLine 空；舊版電腦沒有新欄位，resetLine＝照舊的那一句
+  // oldText 空：「資料較舊」已經寫在 meta 裡
+  const split = hasSplit(a)
+  const zeroBar = split ? barsOf(a, now).find(b => b.pct === 0 && b.reset && !b.expired) : null
+  if (split) { exhausted = Boolean(zeroBar); resetText = zeroBar ? zeroBar.reset : resetText }
+  return {
+    known: true, text: parts.join('、'), meta: stale ? `${ago}・${OLD_TEXT}` : ago, resetText, resetLine: split ? '' : resetText,
+    bars: barsOf(a, now), oldText: '', stale, exhausted,
+  }
 }
 
 // ---- 電腦版設定頁的額度條（#374）：5 小時、每週兩條剩餘百分比，重置時間寫「約 N 小時後」 ----
@@ -74,9 +124,9 @@ export function resetOwner(five, week) {
  */
 export function quotaBars(a, { hookOn = null, now = Date.now() } = {}) {
   const v = quotaView(a, now)
-  const bars = [['five', '5 小時', pct(a?.five_hour_pct)], ['week', '每週', pct(a?.weekly_pct)]]
-    .filter(([, , p]) => p != null && v.known)
-    .map(([key, label, p]) => ({ key, label, pct: p, low: p <= LOW_PCT }))
+  const bars = v.known ? v.bars : []
   if (!bars.length) return { bars, note: hookOn === false ? NOT_CONNECTED_TEXT : v.text, reset: '', meta: '', stale: true }
-  return { bars, note: '', reset: resetIn(a?.reset_at, now, resetOwner(pct(a?.five_hour_pct), pct(a?.weekly_pct))), meta: v.meta, stale: v.stale }
+  // 有兩條各自的重置時間（#374）就各條自己寫，這一句空；舊版紀錄照舊寫一句、標明是哪一條的
+  const reset = hasSplit(a) ? '' : resetIn(a?.reset_at, now, resetOwner(pct(a?.five_hour_pct), pct(a?.weekly_pct)))
+  return { bars, note: '', reset, meta: v.meta, stale: v.stale }
 }

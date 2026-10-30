@@ -5,7 +5,7 @@
 //   windows 空陣列＝沒有額度資料；nodes 空陣列＝目前沒有任何一台還在回報它（後台保留 30 天）。
 // 後台沒部署、沒登入、回錯（404／forbidden）時一律當「沒有列表」（null），畫面退回各設備自己回報的數字。
 import { agoText } from './cloud-invite.mjs'
-import { STALE_MS, resetIn } from './account-quota.mjs'
+import { OLD_TEXT, STALE_MS, planLabel, quotaBar, resetIn } from './account-quota.mjs'
 import { UNNAMED_DEVICE } from './text.mjs'
 
 export const ROSTER_TEXT = {
@@ -80,6 +80,7 @@ function cleanWindows(entry) {
  *     兩窗讀取時間不同時，meta 標**較舊**的那個（「2 天前・工作機」），stale 也看較舊的——舊數字不能看起來像新的（#527 審查）
  *   listMeta：「我的帳號」區那一行後面的括號：有窗時只寫哪台讀的（時間各窗自己標了，最多兩台）；沒有任何窗時同 meta（最後一次回報）
  *   目前沒有任何一台還在回報的，時間寫成「3 天前讀的」
+ *   bars（#374）：一行版那幾窗的額度條，每條自己寫重置時間（已過寫「可能已恢復」、不寫舊百分比）；oldText：舊資料寫「資料較舊」
  */
 export function rosterQuota(entry, { nodeLabel = () => UNNAMED_DEVICE, now = Date.now() } = {}) {
   const wins = cleanWindows(entry)
@@ -94,7 +95,7 @@ export function rosterQuota(entry, { nodeLabel = () => UNNAMED_DEVICE, now = Dat
   if (!wins.length) {
     const text = ROSTER_TEXT[NO_WINDOW_TEXT[entry?.vendor] ?? 'noQuota']
     const meta = stamp(time(entry?.seen_at), typeof entry?.seen_node === 'string' ? entry.seen_node : '')
-    return { known: false, text, parts: [text], meta, listMeta: meta, resetText: '', stale: true, exhausted: false, gone }
+    return { known: false, text, parts: [text], meta, listMeta: meta, resetText: '', bars: [], oldText: '', stale: true, exhausted: false, gone }
   }
   const expired = w => w.reset != null && w.reset <= now
   const parts = wins.map(w => (expired(w)
@@ -111,16 +112,18 @@ export function rosterQuota(entry, { nodeLabel = () => UNNAMED_DEVICE, now = Dat
   const oldestOf = list => list.reduce((o, w) => (!o || w.read < o.read ? w : o), null)
   const out = wins.filter(w => w.pct === 0 && w.reset != null && w.reset > now).sort((a, b) => b.reset - a.reset)[0]
   const resetText = out ? resetIn(new Date(out.reset).toISOString(), now, `${windowLabel(out.name)}額度`) : ''
+  const bars = inLine.map(w => quotaBar(w.name, windowLabel(w.name), w.pct, w.reset != null ? new Date(w.reset).toISOString() : undefined, now))
   if (!live.length) {
     // 這一行該放的窗都已經重置過了：數字不代表現在，不列，寫「已重置，待更新」
     const o = oldestOf(inLine)
-    return { known: false, text: ROSTER_TEXT.resetPending, parts, meta: stamp(o.read, o.node), listMeta, resetText, stale: true, exhausted: Boolean(out), gone }
+    return { known: false, text: ROSTER_TEXT.resetPending, parts, meta: stamp(o.read, o.node), listMeta, resetText, bars, oldText: '', stale: true, exhausted: Boolean(out), gone }
   }
   const oldest = oldestOf(live)
+  const stale = now - oldest.read > STALE_MS
   return {
     known: true, text: live.map(w => `${windowLabel(w.name)}剩 ${w.pct}%`).join('、'), parts,
-    meta: stamp(oldest.read, oldest.node), listMeta, resetText,
-    stale: now - oldest.read > STALE_MS, exhausted: Boolean(out), gone,
+    meta: stamp(oldest.read, oldest.node), listMeta, resetText, bars, oldText: stale ? OLD_TEXT : '',
+    stale, exhausted: Boolean(out), gone,
   }
 }
 
@@ -140,15 +143,19 @@ export function rosterQuotaFor(roster, vendor, account, opts = {}) {
 
 /**
  * 某台設備上某廠牌的帳號（目前給 Gemini 用：它不在各台自己的帳號回報裡，只在列表）。
- * 認哪台：任一額度窗的 read_node 或 seen_node 是這台。回 [{ email, plan, current:false, quota }]；列表不能用回空陣列
+ * 後台有帶 nodes（20261030100000_acct_reset_times 之後）：只列這台正在用的（current），標使用中——同一個帳號兩台都讀過，只列在用的那台。
+ * nodes 是空的（舊後台）：照舊認「哪台讀的」（任一額度窗的 read_node 或 seen_node 是這台），current 一律 false。
+ * 回 [{ email, plan, current, quota }]；列表不能用回空陣列
  */
 export function rosterAccountsOn(roster, vendor, node, opts = {}) {
   if (!rosterOk(roster) || !node) return []
   const want = String(vendor ?? '').toLowerCase()
+  const usingHere = e => Array.isArray(e.nodes) && e.nodes.some(n => n?.node === node && n.current === true)
+  const readHere = e => e.seen_node === node || (Array.isArray(e.windows) && e.windows.some(w => w?.read_node === node))
   return roster.accounts
     .filter(e => String(e?.vendor ?? '').toLowerCase() === want && e?.account
-      && (e.seen_node === node || (Array.isArray(e.windows) && e.windows.some(w => w?.read_node === node))))
-    .map(e => ({ email: String(e.account).trim(), plan: typeof e.plan === 'string' ? e.plan : '', current: false, quota: rosterQuota(e, opts) }))
+      && (Array.isArray(e.nodes) && e.nodes.length ? usingHere(e) : readHere(e)))
+    .map(e => ({ email: String(e.account).trim(), plan: planLabel(e.plan), current: usingHere(e), quota: rosterQuota(e, opts) }))
     .sort((a, b) => a.email.localeCompare(b.email))
 }
 
@@ -164,7 +171,7 @@ export function rosterView(roster, opts = {}) {
     const account = String(e?.account ?? '').trim()
     if (!vendor || !account) continue
     const row = {
-      vendor, account, plan: typeof e.plan === 'string' ? e.plan : '',
+      vendor, account, plan: planLabel(e.plan),
       current: Array.isArray(e.nodes) && e.nodes.some(n => n?.current === true),
       quota: rosterQuota(e, opts),
     }
