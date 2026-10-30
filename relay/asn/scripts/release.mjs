@@ -87,6 +87,6 @@ if (!opts.dryRun) {   // 官網首頁的下載按鈕連到這版安裝檔（讀 
 }
 console.log(`已產生：${out}`)
 console.log(`  ${name}、${name}.sig、latest.json`)
-console.log(opts.dryRun ? '演練完成：沒有改版本號，也沒有動官網目錄。' : '下一步：提交版本號與 site/public/update/latest.json，再由人部署官網（firebase deploy --only hosting，在 site/ 底下）。')
+console.log(opts.dryRun ? '演練完成：沒有改版本號，也沒有動官網目錄。' : '下一步：提交版本號、site/public/update/latest.json 與 site/public/index.html（下載按鈕連結），再由人部署官網（firebase deploy --only hosting，在 site/ 底下）。')
 // 官網的藍圖與開發日誌從 2026-10-27 起讀資料庫（public.asn_site_releases 等），這支腳本不寫官網頁面；發版記錄用 asn-cli site release 寫入（#400，限官網寫入名單上的帳號）
 if (!opts.dryRun) console.log(`提醒：用 asn-cli site release --version ${version} --date <YYYY-MM-DD> --commit <短碼> --item "…" --platform 官網 加這一版，再用 asn-cli site item --key … --status released --version ${version} 更新待辦（用法見 site/README.md），官網的藍圖與開發日誌才會出現。`)
