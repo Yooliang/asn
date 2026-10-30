@@ -250,7 +250,7 @@ mod tests {
         let src = include_str!("cloud_invite.rs");
         let prod = &src[..src.find("#[cfg(test)]").unwrap()];
         // 用拼接避免這個檢查把自己的字串當成命中
-        for banned in [["std::", "fs"].concat(), ["write", "_atomic"].concat(), ["print", "ln!"].concat(), ["e", "println!"].concat(), ["log", "::"].concat(), ["tracing", "::"].concat(), ["static ", "mut"].concat(), ["lazy", "_static"].concat(), ["OnceLock"].concat(), ["store", "_save"].concat()] {
+        for banned in [["std::", "fs"].concat(), ["write", "_atomic"].concat(), ["print", "ln!"].concat(), ["e", "println!"].concat(), ["e", "log!"].concat(), ["o", "log!"].concat(), ["log", "::"].concat(), ["tracing", "::"].concat(), ["static ", "mut"].concat(), ["lazy", "_static"].concat(), ["OnceLock"].concat(), ["store", "_save"].concat()] {
             assert!(!prod.contains(&banned), "cloud_invite.rs 不該出現 {banned}（金鑰不寫檔、不寫 log、不快取）");
         }
         assert!(prod.contains(r#"field("key", &"<不顯示>")"#), "Debug 要遮住金鑰");

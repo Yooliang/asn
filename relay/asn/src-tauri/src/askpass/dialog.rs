@@ -128,7 +128,7 @@ impl Confirmer for TauriConfirmer {
             let win = match built {
                 Ok(w) => w,
                 Err(e) => {
-                    eprintln!("[ASN] 密碼請求視窗開不起來：{e}");
+                    elog!("[ASN] 密碼請求視窗開不起來：{e}");
                     return Verdict::Cancelled;
                 }
             };
@@ -192,7 +192,7 @@ pub fn start(app: &AppHandle) {
             Ok(h) => {
                 let _ = h.await;
             }
-            Err(e) => eprintln!("[ASN] 密碼小幫手管道沒有啟動：{e}"),
+            Err(e) => elog!("[ASN] 密碼小幫手管道沒有啟動：{e}"),
         }
     });
 }

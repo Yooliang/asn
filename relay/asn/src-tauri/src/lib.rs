@@ -5,6 +5,10 @@
 #![cfg_attr(not(desktop), allow(dead_code, unused_variables, unused_imports))]
 // 無視窗版（沒有 gui）不編視窗與指令那一半，留下的共用函式與型別在這裡看起來「沒人叫」：不當成警告
 #![cfg_attr(not(feature = "gui"), allow(dead_code, unused_variables, unused_imports))]
+// 寫不進去就略過的列印巨集 elog!／olog!（標準的 eprintln／println 寫失敗會 panic，release 是 panic=abort 會閃退，見 elog.rs）
+// 要放在所有模組之前，後面的模組才看得到這兩個巨集
+#[macro_use]
+mod elog;
 // ---- 手機與電腦都有的模組 ----
 #[cfg(feature = "gui")]
 mod account;
@@ -850,7 +854,7 @@ fn capture_ui_ready(app: State<'_, App>, tag: String) -> Result<(), String> {
 #[tauri::command]
 fn shot_frontend_log(app: State<'_, App>, level: String, message: String) {
     if app.shot.is_some() {
-        eprintln!("[asn-ui {level}] {message}");
+        elog!("[asn-ui {level}] {message}");
     }
 }
 
@@ -1274,7 +1278,7 @@ pub fn run() {
         let u = identity::base_url(crate::envc::get("ASN_RELAY_URL"));
         let ok = u.starts_with("http://127.0.0.1") || u.starts_with("http://localhost");
         if !ok {
-            eprintln!("--shot 只能搭配指向本機假後端的 ASN_RELAY_URL（http://127.0.0.1…）");
+            elog!("--shot 只能搭配指向本機假後端的 ASN_RELAY_URL（http://127.0.0.1…）");
             std::process::exit(5);
         }
     }
@@ -1303,7 +1307,7 @@ pub fn run() {
             if let Some(code) = invite_link::invite_code_from_args(&args) {
                 let _ = invite_link::drop_in_inbox(&work_dir, &code);
             }
-            eprintln!("視窗「{}」已經有一個 ASN 在跑（pid {}）", r.window_name(), h.pid);
+            elog!("視窗「{}」已經有一個 ASN 在跑（pid {}）", r.window_name(), h.pid);
             #[cfg(desktop)]
             ui_log::log_exit(&exit_log_dir, &format!("同一個視窗名已經有 ASN 在跑（pid {}），這個不開", h.pid));
             std::process::exit(3);
@@ -1444,12 +1448,12 @@ pub fn run() {
                         let Some(r) = h.state::<App>().relay.clone() else { return };
                         match r.fallback_tick(heartbeat::now_ms(), stale).await {
                             Ok(n) if n > 0 => {
-                                eprintln!("window fallback: took {n} mail(s) for ASN window, spool={}", r.spool_len());
+                                elog!("window fallback: took {n} mail(s) for ASN window, spool={}", r.spool_len());
                                 tray::set_tray_unread(h.clone(), r.spool_len() as u32);
                                 let _ = h.emit("window-spool", r.spool_len());
                             }
                             Ok(_) => {}
-                            Err(e) => eprintln!("window fallback failed: {e}"),
+                            Err(e) => elog!("window fallback failed: {e}"),
                         }
                     }
                 });
@@ -1475,8 +1479,8 @@ pub fn run() {
                 tauri::async_runtime::spawn(async {
                     tokio::time::sleep(std::time::Duration::from_secs(20)).await;
                     match tauri::async_runtime::spawn_blocking(launch::pi_setup::auto_install_real).await {
-                        Ok(Some(Ok(_))) => eprintln!("pi 與 ASN 互通：已自動安裝擴充"),
-                        Ok(Some(Err(e))) => eprintln!("pi 與 ASN 互通：自動安裝沒成功：{e}"),
+                        Ok(Some(Ok(_))) => elog!("pi 與 ASN 互通：已自動安裝擴充"),
+                        Ok(Some(Err(e))) => elog!("pi 與 ASN 互通：自動安裝沒成功：{e}"),
                         _ => {}
                     }
                 });
@@ -1588,7 +1592,7 @@ pub fn run() {
                         }
                         for n in &names {
                             if let Err(e) = heartbeat::write_heartbeat(&wd, n, std::process::id(), heartbeat::now_ms()) {
-                                eprintln!("heartbeat failed: {e}");
+                                elog!("heartbeat failed: {e}");
                             }
                         }
                         last = names;

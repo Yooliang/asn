@@ -311,7 +311,7 @@ impl Relay {
                 false
             }
             Err(e) => {
-                eprintln!("asn_presence failed: {e}");
+                elog!("asn_presence failed: {e}");
                 true
             }
         }
@@ -324,7 +324,7 @@ impl Relay {
     pub async fn report_update_result(&self, ok: bool, detail: &str) {
         let body = json!({ "ok": ok, "detail": detail.chars().filter(|c| !c.is_control()).take(200).collect::<String>() });
         if let Err(e) = self.api_with("asn_update_result", Some(body), Duration::from_secs(10)).await {
-            eprintln!("asn_update_result failed: {e}");
+            elog!("asn_update_result failed: {e}");
         }
     }
     /// 關閉時盡力回報一次離線（失敗、逾時都不擋關閉）；只送一次。在獨立執行緒裡跑，不論從哪個執行緒呼叫都安全。
@@ -461,7 +461,7 @@ impl Relay {
         let Some(dir) = self.owner_dir.lock().unwrap().clone() else { return };
         let t = serde_json::to_string(&*self.spool.lock().unwrap()).unwrap_or_else(|_| "[]".into());
         if let Err(e) = std::fs::write(dir.join(SPOOL_FILE), t) {
-            eprintln!("spool save failed: {e}");
+            elog!("spool save failed: {e}");
         }
     }
     /// 畫面沒在收信時代收寄給本機 ASN 視窗的信：存進代收區、存檔、再向後台 ack（delivered_at 才會有值）。
@@ -633,7 +633,7 @@ impl Relay {
             match self.api("set_name", Some(build_set_name_body(&self.window_name()))).await {
                 Ok(_) => break,
                 Err(e) if set_name_unsupported(&e) => break,
-                Err(e) => eprintln!("set_name failed: {e}"),
+                Err(e) => elog!("set_name failed: {e}"),
             }
         }
         self.sync_window_renames().await;
@@ -644,7 +644,7 @@ impl Relay {
             match self.api("window_rename", Some(body)).await {
                 Ok(_) => {}
                 Err(e) if set_name_unsupported(&e) => return,
-                Err(e) => eprintln!("window_rename failed: {e}"),
+                Err(e) => elog!("window_rename failed: {e}"),
             }
         }
     }

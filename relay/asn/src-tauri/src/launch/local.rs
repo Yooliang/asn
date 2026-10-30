@@ -171,7 +171,7 @@ fn maybe_trust_claude_cwd(engine: &str, cwd: &str) {
     let home = claude_home();
     let key = claude_project_key(Path::new(cwd));
     if let Err(e) = ensure_project_trusted(&home, &key) {
-        eprintln!("開新夥伴前寫入 Claude 資料夾信任失敗（不影響啟動）：{e}");
+        elog!("開新夥伴前寫入 Claude 資料夾信任失敗（不影響啟動）：{e}");
     }
 }
 
@@ -388,7 +388,7 @@ try {
     let r = parse_launcher_output(&stdout, &stderr, out.status.success());
     // 開起來了但有話要說（例如等不到 powershell、回傳的是 conhost 的 PID）：記一行，不當成失敗
     if r.is_ok() && !stderr.trim().is_empty() {
-        eprintln!("開夥伴視窗：{}", stderr.trim());
+        elog!("開夥伴視窗：{}", stderr.trim());
     }
     r
 }

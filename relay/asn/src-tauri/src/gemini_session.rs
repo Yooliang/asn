@@ -138,13 +138,13 @@ fn prepare_inner(asn_home: &Path, asn_cli: &Path, windows: bool, shorten: impl F
 pub fn live_args() -> Vec<String> {
     let cli = crate::statusline_hook::asn_cli_path();
     if !cli.is_file() {
-        eprintln!("Gemini 狀態列：找不到 asn-cli，這次不接");
+        elog!("Gemini 狀態列：找不到 asn-cli，這次不接");
         return vec![];
     }
     match prepare(&crate::identity::relay_home(), &cli, cfg!(windows)) {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("Gemini 狀態列：{e}");
+            elog!("Gemini 狀態列：{e}");
             vec![]
         }
     }

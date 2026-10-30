@@ -195,9 +195,9 @@ fn real_copier(from: &Path, to: &Path) -> io::Result<u64> {
 
 fn log(label: &str, o: &Outcome) {
     match o {
-        Outcome::Copied { files, bytes } => eprintln!("[asn] {label}已複製到新識別資料夾（{files} 個檔、{bytes} 位元組）；舊資料夾保留"),
-        Outcome::Blocked(w) => eprintln!("[asn] {label}遷移略過（{w}），這次沿用舊資料夾"),
-        Outcome::Failed(w) => eprintln!("[asn] {label}遷移失敗，這次沿用舊資料夾：{w}"),
+        Outcome::Copied { files, bytes } => elog!("[asn] {label}已複製到新識別資料夾（{files} 個檔、{bytes} 位元組）；舊資料夾保留"),
+        Outcome::Blocked(w) => elog!("[asn] {label}遷移略過（{w}），這次沿用舊資料夾"),
+        Outcome::Failed(w) => elog!("[asn] {label}遷移失敗，這次沿用舊資料夾：{w}"),
         _ => {}
     }
 }

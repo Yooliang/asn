@@ -220,13 +220,13 @@ pub async fn ads_fetch() -> Vec<Ad> {
                 // 圖抓不到、太大、格式不對都只是這一則退回樣板，不影響其他廣告
                 match download(&format!("{SITE}{}", ad.image_path), MAX_IMAGE_BYTES).await.ok().and_then(|b| image_data_uri(&b)) {
                     Some(uri) => ad.small_image = uri,
-                    None => eprintln!("[asn] 廣告圖不可用，退回樣板：{}", ad.key),
+                    None => elog!("[asn] 廣告圖不可用，退回樣板：{}", ad.key),
                 }
             }
             ads
         }
         Err(e) => {
-            eprintln!("[asn] 抓廣告清單失敗，用打包備用：{e}");
+            elog!("[asn] 抓廣告清單失敗，用打包備用：{e}");
             vec![]
         }
     }

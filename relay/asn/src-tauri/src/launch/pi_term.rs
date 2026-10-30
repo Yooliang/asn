@@ -60,7 +60,7 @@ pub(crate) fn open_pi(
             match h.start_pi(cwd, &argv, &pi_term_env(base_env, env)) {
                 Ok(pid) => return Ok(PiOpened { pid, note: None }),
                 Err(e) => {
-                    eprintln!("經 pi 開在 ASN 自帶的終端失敗，改用原生主控台：{e}");
+                    elog!("經 pi 開在 ASN 自帶的終端失敗，改用原生主控台：{e}");
                     PI_TERM_FAILED
                 }
             }
@@ -74,7 +74,7 @@ pub(crate) fn open_pi_real(name: &str, command: &str, args: &[String], cwd: &Pat
     let host = host();
     let r = open_pi(host.as_deref(), super::config::child_env(), command, args, cwd, hidden, env, &|| super::local::start_window_env(name, command, args, cwd, hidden, env))?;
     if let Some(n) = r.note {
-        eprintln!("經 pi 開「{name}」：{n}");
+        elog!("經 pi 開「{name}」：{n}");
     }
     Ok(r)
 }

@@ -89,7 +89,7 @@ pub async fn site_releases(force: Option<bool>) -> Result<Vec<Value>, String> {
             Ok(v)
         }
         Err(e) => {
-            eprintln!("[ASN] 版本紀錄讀取失敗：{e}");
+            elog!("[ASN] 版本紀錄讀取失敗：{e}");
             Err(UNREADABLE.to_string())
         }
     }
