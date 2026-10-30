@@ -6,6 +6,11 @@ import { fetchRoster } from './account-roster.mjs'
 
 export const SWITCH_NOTICE = '已切換，開著的 Claude 視窗不用重開。'
 
+// 存的登入不完整（權杖檔缺更新用的權杖）：Rust 只給 login_incomplete 這個布林，切過去整台的 Claude 都會失效，所以不能選
+export const INCOMPLETE_LABEL = '登入不完整'
+export const INCOMPLETE_REASON = '這個帳號存的登入不完整，請重新登入一次再加入'
+export const loginIncomplete = a => a?.login_incomplete === true || a?.incomplete === true
+
 export function accountLine(a) {
   return [a.email, a.plan].filter(Boolean).join(' · ')
 }
@@ -194,7 +199,11 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     state: s,
     refresh, refreshQuota, refreshRoster, report, onAuto, loadReports, remoteNodes, remoteSelect, remoteLoad, remoteSwitch, grokSwitch, pollIncoming, approve, decline, dismissDone, undo, loadTrust, setAllowSwitch,
     addCurrent: () => run(async () => { const a = await invoke('claude_account_save'); s.savedSeq++; return `已加入 ${a.email}。` }),
-    switchTo: email => run(async () => { const r = await invoke('claude_account_switch', { email }); return `已切換到 ${r.email}。${SWITCH_NOTICE}` }),
+    // 登入不完整的帳號畫面上已經反灰；這裡再擋一次（Rust 端 switch_impl 也會拒絕）
+    switchTo: async email => {
+      if ((s.list ?? []).some(a => a.email === email && loginIncomplete(a))) { s.msg = INCOMPLETE_REASON; return }
+      return run(async () => { const r = await invoke('claude_account_switch', { email }); return `已切換到 ${r.email}。${SWITCH_NOTICE}` })
+    },
     // 刪除要按兩次（第一次變成「確認刪除」），避免誤觸
     remove: email => {
       if (s.confirmDel !== email) { s.confirmDel = email; s.msg = ''; return }
