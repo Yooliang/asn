@@ -61,6 +61,18 @@ export const savedFriendOf = f => ({
 // 讀回存檔的一筆：這三欄只收非空字串（存檔是本機檔，壞掉或被改過的值不帶進畫面）；沒有就不補，畫面照舊退回
 export const restoredFriendOf = ({ model, device, kind, ...rest }) => ({ ...rest, ...optStr('model', model), ...optStr('device', device), ...optStr('kind', kind) })
 
+const REPLY_PREVIEW_MAX = 40
+const firstLine = t => { const l = String(t ?? '').split(/\r?\n/).map(x => x.trim()).find(Boolean) ?? ''; return l.length > REPLY_PREVIEW_MAX ? l.slice(0, REPLY_PREVIEW_MAX) + '…' : l }
+// 對話記錄推算「最後一封要回、而且我還沒回的信」的後台信件 id：從最後往前，先碰到我送出的就沒有；對方標明不用回的（ask:false）跳過
+export function pendingReplyOf(lg) {
+  for (let i = (lg?.length ?? 0) - 1; i >= 0; i--) {
+    const e = lg[i]
+    if (e.k === 'me') return null
+    if (e.k === 'them' && e.ask !== false && typeof (e.mid ?? e.id) === 'string') return e.mid ?? e.id
+  }
+  return null
+}
+
 export class AsnCore {
   constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, localMs = 2_000, soonGapMs = 1_000, statusPollMs = STATUS_POLL_MS, aliases = [], stepMs = STEP_MS }) {
     // 讀取類的呼叫一律加逾時（寄信、寄檔另有自己的流程，不在這裡限時）。收信（inbox、ack）可能一次要走好幾個名字，給兩倍時間
@@ -112,6 +124,7 @@ export class AsnCore {
     const saved = await withTimeout(this.store.load(), this.stepMs, 'load').catch(e => { this.log(`load failed: ${e.message}`); return null })
     for (const f of saved?.friends ?? []) this.friends.set(f.id, this.#decorate({ ...restoredFriendOf(f), psm: cleanPsm(f.psm, f.node), status: 'offline', unread: 0, waiting: false, replyTo: null }))
     for (const [id, l] of Object.entries(saved?.logs ?? {})) this.logs.set(id, l)
+    for (const f of this.friends.values()) f.replyTo = pendingReplyOf(this.logs.get(f.id))   // 回信綁原信：重開後從對話記錄還原，不只存在記憶體
     this.readDirty = cleanMarks(saved?.readDirty)   // 上次離線時沒送出的已讀位置，連線後補送
     this.emit('state')
     await this.refreshRoster()
@@ -354,7 +367,7 @@ export class AsnCore {
     const dup = lg.some(x => x.id === rid || x.id === m.id || x.rid === rid)
     // 沒指定收件視窗、由橋交給本人的信：先標出「XX 寄來的信沒有指定收件人」，由使用者決定轉給誰或自己回；震動信一律只顯示「傳送了一個震動」，不加這行
     if (shown && !nudge && !dup && m.unaddressed === true) lg.push({ k: 'sys', text: `${plain(f.nick)} 寄來的信沒有指定收件人`, t })
-    if (shown) { if (!dup) lg.push({ k: 'them', text, t, id: rid, ...(photos.length ? { photos } : {}) }); f.lastAt = t; f.replyTo = m.id }
+    if (shown) { if (!dup) lg.push({ k: 'them', text, t, id: rid, mid: m.id, ...(m.expects_reply === false ? { ask: false } : {}), ...(photos.length ? { photos } : {}) }); f.lastAt = t; if (m.expects_reply !== false) f.replyTo = m.id }
     if (m.reply_to) this.#markReplied(m.reply_to, typeof m.created_at === 'string' ? m.created_at : new Date(t).toISOString())
     // 視窗狀態查不到（沒回應、出錯）就當沒看見：照常記進對話、算未讀，不卡住收信
     const visible = await withTimeout(this.isChatVisible(r.id), this.stepMs, 'isChatVisible').catch(() => false)
@@ -378,6 +391,20 @@ export class AsnCore {
 
   // ---------- 寄信 ----------
   // opts.voice＝true：語音通話中辨識出來的句子。寄信帶結構化旗標 voice（收信端的收發室據此提醒夥伴），本機記錄也標上，畫面顯示「語音」小標示
+  // 回信綁原信：目前這位夥伴綁著的那封信的第一行（輸入框上方的「回覆：…」標籤用）；沒綁就是 null
+  replyPreview(id) {
+    const f = this.friends.get(id)
+    if (!f?.replyTo) return null
+    const e = (this.logs.get(id) ?? []).find(x => x.k === 'them' && (x.mid ?? x.id) === f.replyTo)
+    return e ? firstLine(e.text) : ''
+  }
+
+  // 使用者關掉標籤：這次回信不帶 reply_to（下一封新來信會再綁）
+  dropReply(id) {
+    const f = this.friends.get(id)
+    if (f) { f.replyTo = null; this.emit('state') }
+  }
+
   async send(id, raw, opts = {}) {
     const voice = opts?.voice === true
     const f = this.friends.get(id)
