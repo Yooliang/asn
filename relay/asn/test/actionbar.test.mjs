@@ -88,7 +88,7 @@ test('「⋯」搬到大按鈕區：收件人列不再有選單，大按鈕區�
   const pane = read('ui/lib/chatpane.mjs')
   assert.ok(!/to-menu/.test(pane), '收件人列不該再有「⋯」')
   assert.ok(!/to-menu/.test(read('ui/group.css')))
-  assert.match(pane, /<action-bar [^>]*v-if="!phoneBar && \(!isRoom \|\| opsItems\.length \|\| groupItems\.length\)" :ops="opsItems" :group="groupItems" :pi-models-for="piModelsFor" @ops="pickMenu"/, '群組對話也要有大按鈕區')
+  assert.match(pane, /<action-bar [^>]*v-if="!noBar && \(!isRoom \|\| opsItems\.length \|\| groupItems\.length\)" :ops="opsItems" :group="groupItems" :pi-models-for="piModelsFor" @ops="pickMenu"/, '群組對話也要有大按鈕區')
   assert.match(pane, /groupMenu: \{ type: Boolean, default: false \},\s+\/\/ 電腦版：對話上方大按鈕區/, 'groupMenu 的說明在自己那行（#1570）')
   assert.doesNotMatch(pane, /piModelsFor: \{[^\n]*\/\/[^\n]*\/\//, 'piModelsFor 那行不再接著別的註解')
   const ab = read('ui/lib/actionbar.mjs')
