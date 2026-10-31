@@ -215,7 +215,7 @@ fn 停之前數得出有幾個窗格_停只停_pid_檔記的那一個() {
 
 #[test]
 fn lua_長字串避開收尾記號() {
-    assert_eq!(config_text(Path::new(r"C:\a\sock")).lines().nth(1).unwrap(), r"return { unix_domains = { { name = 'asn', socket_path = [[C:\a\sock]] } } }");
+    assert_eq!(config_text(Path::new(r"C:\a\sock")).lines().nth(1).unwrap(), r#"return { exit_behavior = "Hold", unix_domains = { { name = 'asn', socket_path = [[C:\a\sock]] } } }"#);
     let t = config_text(Path::new(r"C:\a]]b\sock"));
     assert!(t.contains(r"[=[C:\a]]b\sock]=]"), "{t}");
 }
@@ -372,4 +372,21 @@ fn 守門_清過期的鎖先改名再核對內容_不直接刪() {
     let body = &src[src.find("fn acquire(p: &Path, r: &dyn Runner)").unwrap()..src.find("fn lock_stale(").unwrap()];
     assert!(!body.contains("remove_file(p)"), "不能直接刪鎖檔（會刪到別人剛建的新鎖）");
     assert!(body.contains("std::fs::rename(p, &tmp)") && body.contains("== seen"));
+}
+
+#[test]
+fn 登錄檔撞名與金鑰類名字_只看名字_不分大小寫() {
+    let names: Vec<String> = ["Path", "asn_pi_name", "ASN_RELAY_KEY", "claude_code_x", "No_Color", "CLAUDE_CONFIG_DIR", "Temp", "irori_relay_anon_key"].iter().map(|s| s.to_string()).collect();
+    let pane: BTreeMap<String, String> = [("PATH".to_string(), "x".to_string()), ("ASN_PI_NAME".to_string(), "小皮".to_string()), ("CLAUDE_CONFIG_DIR".to_string(), "D:/c".to_string())].into();
+    let (collide, secret) = registry_conflicts(&names, &pane);
+    assert_eq!(collide, ["Path", "asn_pi_name", "CLAUDE_CONFIG_DIR"], "窗格也要設的名字：登錄檔的值會蓋過去");
+    assert_eq!(secret, ["ASN_RELAY_KEY", "claude_code_x", "No_Color", "irori_relay_anon_key"], "child_env 會濾掉的名字；CLAUDE_CONFIG_DIR 是例外");
+    assert_eq!(registry_conflicts(&[], &pane), (vec![], vec![]));
+}
+
+#[test]
+fn 讀登錄檔使用者變數名字_不當掉_名字裡沒有等號() {
+    // 只驗不 panic、回的是名字（這台電腦的 HKCU\Environment 是什麼不管）；非 Windows 為空
+    let n = user_env_names();
+    assert!(n.iter().all(|s| !s.is_empty() && !s.contains('=')), "{n:?}");
 }

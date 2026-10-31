@@ -55,14 +55,14 @@ pub fn paths(local_app_data: &Path) -> Result<MuxPaths, String> {
     Ok(MuxPaths { config: dir.join("mux.lua"), pid: dir.join("mux.pid"), lock: dir.join("start.lock"), sock, dir })
 }
 
-/// 只設 socket 位置的設定檔。用 Lua 長字串放路徑（不需要跳脫）；路徑裡若剛好有收尾記號就加等號層級避開
+/// 只設 socket 位置與「程式結束後窗格留著」的設定檔（exit_behavior 跟第 1 階段的隔離設定一樣，當掉的窗格還看得到最後的畫面）。用 Lua 長字串放路徑（不需要跳脫）；路徑裡若剛好有收尾記號就加等號層級避開
 pub fn config_text(sock: &Path) -> String {
     let s = sock.to_string_lossy();
     let mut eq = String::new();
     while s.contains(&format!("]{eq}]")) {
         eq.push('=');
     }
-    format!("-- ASN 產生的終端服務設定（只設連線檔位置），請勿手改\nreturn {{ unix_domains = {{ {{ name = 'asn', socket_path = [{eq}[{s}]{eq}] }} }} }}\n")
+    format!("-- ASN 產生的終端服務設定（只設連線檔位置），請勿手改\nreturn {{ exit_behavior = \"Hold\", unix_domains = {{ {{ name = 'asn', socket_path = [{eq}[{s}]{eq}] }} }} }}\n")
 }
 
 /// 下 cli 的程序的環境：只有白名單（`child_env` 的結果）加上 socket 位置
@@ -88,7 +88,7 @@ fn tries(d: Duration) -> u32 {
     (d.as_millis() / POLL.as_millis()) as u32
 }
 
-/// pid 檔：`<pid> <建立時間毫秒>`
+/// 讀 pid 檔：`<pid> <建立時間毫秒>`
 fn read_pid(p: &Path) -> Option<(u32, u64)> {
     let t = std::fs::read_to_string(p).ok()?;
     let mut it = t.split_whitespace();
@@ -138,6 +138,13 @@ impl Mux<'_> {
     fn recorded_alive(&self) -> Option<u32> {
         let (pid, at) = read_pid(&self.paths.pid)?;
         (self.runner.started_ms(pid) == Some(at)).then_some(pid)
+    }
+
+    /// 開窗格時用：pid 檔記的 mux 還活著（建立時間對得上）就回（程序編號, 建立時間）；否則 None。
+    /// 窗格的 Window 就是用這組值記錄 mux（見 wezterm::Window::mux），認領時再核對一次
+    pub fn live_pid(&self) -> Option<(u32, u64)> {
+        let (pid, at) = read_pid(&self.paths.pid)?;
+        (self.runner.started_ms(pid) == Some(at)).then_some((pid, at))
     }
 
     /// 每隔 `POLL` 試連一次，最多 `d`（用次數算，等待一律經過 runner.sleep，測試不真的等）
@@ -255,6 +262,60 @@ impl Drop for StartLock {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
     }
+}
+
+/// 使用者環境變數（HKCU\Environment）裡所有變數的**名字**。只列名字，絕不讀值（值可能是金鑰）；非 Windows、讀不到＝空。
+/// 規格 11.2-6：WezTerm 會把這些變數加進每個窗格，而且登錄檔的值蓋過呼叫端給的
+pub fn user_env_names() -> Vec<String> {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{ERROR_MORE_DATA, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS};
+        use windows_sys::Win32::System::Registry::{RegCloseKey, RegEnumValueW, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE};
+        let sub: Vec<u16> = "Environment".encode_utf16().chain(std::iter::once(0)).collect();
+        let mut out = vec![];
+        unsafe {
+            let mut key: HKEY = std::ptr::null_mut();
+            if RegOpenKeyExW(HKEY_CURRENT_USER, sub.as_ptr(), 0, KEY_QUERY_VALUE, &mut key) != ERROR_SUCCESS {
+                return out;
+            }
+            let mut i = 0u32;
+            // 登錄檔變數名上限 16383 個字元；資料的緩衝區與長度都給空指標＝只取名字，不讀值
+            let mut buf = vec![0u16; 16384];
+            loop {
+                let mut len = buf.len() as u32;
+                let rc = RegEnumValueW(key, i, buf.as_mut_ptr(), &mut len, std::ptr::null(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
+                if rc == ERROR_NO_MORE_ITEMS {
+                    break;
+                }
+                if rc == ERROR_SUCCESS || rc == ERROR_MORE_DATA {
+                    // 預設值的名字是空字串，不是變數
+                    if rc == ERROR_SUCCESS && len > 0 {
+                        out.push(String::from_utf16_lossy(&buf[..len as usize]));
+                    }
+                } else {
+                    break;
+                }
+                i += 1;
+            }
+            RegCloseKey(key);
+        }
+        out
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
+}
+
+/// 登錄檔變數名 vs 這個窗格要給的環境（名字比對一律不分大小寫）：
+/// - `collide`：窗格環境也要設的名字。登錄檔的值會蓋過我們給的，夥伴自己的值就沒了；
+/// - `secret_like`：`child_env` 會濾掉的名字（`CLAUDE*`、`NO_COLOR`、金鑰類）。登錄檔裡有的話 WezTerm 仍會帶進窗格。
+/// 只回名字。這裡不改登錄檔；怎麼處理（包裝指令、提示使用者）是 TODO(B2b-2)
+pub fn registry_conflicts(names: &[String], pane_env: &BTreeMap<String, String>) -> (Vec<String>, Vec<String>) {
+    let ours: std::collections::HashSet<String> = pane_env.keys().map(|k| k.to_ascii_uppercase()).collect();
+    let collide = names.iter().filter(|n| ours.contains(&n.to_ascii_uppercase())).cloned().collect();
+    let secret_like = names.iter().filter(|n| super::config::env_filtered_out(n)).cloned().collect();
+    (collide, secret_like)
 }
 
 /// 更新留下的舊執行檔（安裝程式把占用中的檔改名成 `.old`、`.old1`…）：ASN 啟動時試著刪，舊 mux 還在用的刪不掉就留到下次。

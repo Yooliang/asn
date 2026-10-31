@@ -16,6 +16,8 @@ pub const CLI_TIMEOUT: Duration = Duration::from_secs(15);
 pub const SOCK_WAIT: Duration = Duration::from_secs(15);
 pub const ENTER_DELAY: Duration = Duration::from_millis(150);
 pub const MAX_LINE_CHARS: usize = 4000;
+/// 執行檔本身起不來時錯誤訊息的開頭（呼叫端靠它分辨「根本沒執行」與「執行了但逾時」）
+pub const CANNOT_RUN: &str = "無法執行";
 const TRUNC_MARK: &str = "…（已截斷）";
 
 /// 外部程式的執行結果
@@ -30,6 +32,11 @@ pub struct RunOutput {
 pub trait Runner {
     /// 執行並等待；逾時要結束子行程並回錯誤
     fn run(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<RunOutput, String>;
+    /// 同 run，但子行程只拿到 env 裡的變數（先清空環境再放白名單；B2b 的 mux cli spawn 用，設計 11.2-5）。
+    /// 預設＝run（測試的假 runner 照樣記下 env）
+    fn run_clean(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<RunOutput, String> {
+        self.run(program, args, env, timeout)
+    }
     /// 啟動後不等待，回傳行程編號
     fn spawn(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String>;
     /// 同 spawn，但子行程只拿到 env 裡的變數（不繼承 ASN 自己的環境；#475 經 pi 開在自帶終端用）。
@@ -74,48 +81,13 @@ impl Runner for RealRunner {
     fn run(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<RunOutput, String> {
         let mut cmd = Command::new(program);
         cmd.no_window().args(args).envs(env).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        let mut child = cmd.spawn().map_err(|e| format!("無法執行 {}：{e}", program.display()))?;
-        let mut out = child.stdout.take();
-        let mut err = child.stderr.take();
-        let t_out = std::thread::spawn(move || {
-            let mut s = Vec::new();
-            if let Some(o) = out.as_mut() {
-                let _ = o.read_to_end(&mut s);
-            }
-            s
-        });
-        let t_err = std::thread::spawn(move || {
-            let mut s = Vec::new();
-            if let Some(o) = err.as_mut() {
-                let _ = o.read_to_end(&mut s);
-            }
-            s
-        });
-        let start = Instant::now();
-        loop {
-            match child.try_wait() {
-                Ok(Some(st)) => {
-                    let so = t_out.join().unwrap_or_default();
-                    let se = t_err.join().unwrap_or_default();
-                    return Ok(RunOutput {
-                        success: st.success(),
-                        stdout: String::from_utf8_lossy(&so).into_owned(),
-                        stderr: String::from_utf8_lossy(&se).into_owned(),
-                    });
-                }
-                Ok(None) => {
-                    if start.elapsed() >= timeout {
-                        // cli 若在 socket 突然消失時自己拉起了 mux-server，那是它的子行程：連整棵樹一起結束（此刻 child 還活著，編號不會被回收）
-                        let _ = Command::new("taskkill").no_window().args(["/PID", &child.id().to_string(), "/T", "/F"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        return Err(format!("WezTerm 指令逾時（{} 秒），已結束該子行程", timeout.as_secs()));
-                    }
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-                Err(e) => return Err(format!("等待子行程失敗：{e}")),
-            }
-        }
+        exec_with_timeout(cmd, program, timeout)
+    }
+
+    fn run_clean(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<RunOutput, String> {
+        let mut cmd = Command::new(program);
+        cmd.no_window().env_clear().args(args).envs(env).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        exec_with_timeout(cmd, program, timeout)
     }
 
     fn spawn(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
@@ -154,6 +126,52 @@ impl Runner for RealRunner {
 
     fn sleep(&self, d: Duration) {
         std::thread::sleep(d);
+    }
+}
+
+/// RealRunner::run／run_clean 共用：啟動、讀兩條管道、逾時就連整棵樹結束
+fn exec_with_timeout(mut cmd: Command, program: &Path, timeout: Duration) -> Result<RunOutput, String> {
+    let mut child = cmd.spawn().map_err(|e| format!("{CANNOT_RUN} {}：{e}", program.display()))?;
+    let mut out = child.stdout.take();
+    let mut err = child.stderr.take();
+    let t_out = std::thread::spawn(move || {
+        let mut s = Vec::new();
+        if let Some(o) = out.as_mut() {
+            let _ = o.read_to_end(&mut s);
+        }
+        s
+    });
+    let t_err = std::thread::spawn(move || {
+        let mut s = Vec::new();
+        if let Some(o) = err.as_mut() {
+            let _ = o.read_to_end(&mut s);
+        }
+        s
+    });
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(st)) => {
+                let so = t_out.join().unwrap_or_default();
+                let se = t_err.join().unwrap_or_default();
+                return Ok(RunOutput {
+                    success: st.success(),
+                    stdout: String::from_utf8_lossy(&so).into_owned(),
+                    stderr: String::from_utf8_lossy(&se).into_owned(),
+                });
+            }
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    // cli 若在 socket 突然消失時自己拉起了 mux-server，那是它的子行程：連整棵樹一起結束（此刻 child 還活著，編號不會被回收）
+                    let _ = Command::new("taskkill").no_window().args(["/PID", &child.id().to_string(), "/T", "/F"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!("WezTerm 指令逾時（{} 秒），已結束該子行程", timeout.as_secs()));
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(e) => return Err(format!("等待子行程失敗：{e}")),
+        }
     }
 }
 
@@ -285,6 +303,9 @@ pub struct Window {
     pub sock: PathBuf,
     /// 視窗程序啟動當下量到的建立時間；stop 靠它確認還是同一個程序（量不到＝None，stop 會拒絕動手）
     pub started_ms: Option<u64>,
+    /// 窗格在共用的 mux 裡（B2b）：`gui_pid` 是 mux 的程序編號、`sock` 是 mux 的連線檔，絕對不能拿來 kill_tree
+    /// （會把所有夥伴一起結束）。`WezTerm::stop` 看到這個就拒絕；關窗格只能走 `kill_pane`
+    pub mux: bool,
 }
 
 pub fn sock_path(home: &Path, gui_pid: u32) -> PathBuf {
@@ -340,7 +361,7 @@ pub struct PaneInfo {
 }
 
 /// workspace 名稱：非空，且沒有空白與控制字元（要能安全放進一個參數）。
-fn workspace_name_ok(name: &str) -> bool {
+pub(crate) fn workspace_name_ok(name: &str) -> bool {
     !name.is_empty() && !name.chars().any(|c| c.is_whitespace() || c.is_control())
 }
 
@@ -382,6 +403,8 @@ pub struct WezTerm<'a> {
     pub cli_timeout: Duration,
     pub sock_wait: Duration,
     pub enter_delay: Duration,
+    /// 連的是共用 mux（B2b）：每條 cli 都插入 `--no-auto-start`，連不上時不准 cli 自己起一個 mux（設計 11.2-2）
+    pub no_auto_start: bool,
 }
 
 impl<'a> WezTerm<'a> {
@@ -395,6 +418,7 @@ impl<'a> WezTerm<'a> {
             cli_timeout: CLI_TIMEOUT,
             sock_wait: SOCK_WAIT,
             enter_delay: ENTER_DELAY,
+            no_auto_start: false,
         }
     }
 
@@ -485,7 +509,7 @@ impl<'a> WezTerm<'a> {
         let step = Duration::from_millis(100);
         loop {
             if self.fs.exists(&sock) {
-                return Ok(Window { gui_pid, sock, started_ms });
+                return Ok(Window { gui_pid, sock, started_ms, mux: false });
             }
             if start.elapsed() >= self.sock_wait {
                 // 剛開的視窗連同子行程一起清掉，不留桌面孤兒視窗；但只動建立時間相符的那個（編號可能已被回收）
@@ -514,7 +538,9 @@ impl<'a> WezTerm<'a> {
         self.cli(sock, &args).map(|_| ())
     }
 
-    /// 執行 `wezterm.exe cli ...`。socket 不存在時絕不執行（否則 cli 會卡住並悄悄啟動 mux-server）
+    /// 執行 `wezterm.exe cli ...`。socket 不存在時絕不執行（否則 cli 會卡住並悄悄啟動 mux-server）。
+    /// 這裡（list、get-text、send-text、set-tab-title、kill-pane…）用一般的 run、不清空環境：這些指令不開窗格，
+    /// 下指令的程序的環境不會進到任何夥伴那邊。只有開窗格的 spawn 才走 run_clean（見 term.rs::open_mux）
     fn cli(&self, sock: &Path, args: &[String]) -> Result<String, String> {
         if !self.fs.exists(sock) {
             return Err(format!("WezTerm 通訊檔不存在（視窗可能已關閉）：{}", sock.display()));
@@ -522,6 +548,9 @@ impl<'a> WezTerm<'a> {
         let mut env = self.config_env();
         env.insert("WEZTERM_UNIX_SOCKET".to_string(), sock.to_string_lossy().into_owned());
         let mut full: Vec<String> = vec!["cli".into()];
+        if self.no_auto_start {
+            full.push("--no-auto-start".into());
+        }
         full.extend(args.iter().cloned());
         let out = self.runner.run(&self.dir.cli, &full, &env, self.cli_timeout)?;
         if !out.success {
@@ -557,6 +586,11 @@ impl<'a> WezTerm<'a> {
         }
         let s = self.cli(sock, &args)?;
         s.trim().parse::<u64>().map_err(|_| format!("無法解析新 pane 編號：{}", s.trim()))
+    }
+
+    /// 關掉共用 mux 裡的一個窗格（只結束那個窗格，不動 mux 與其他夥伴）
+    pub fn kill_pane(&self, sock: &Path, pane_id: u64) -> Result<(), String> {
+        self.cli(sock, &["kill-pane".to_string(), "--pane-id".into(), pane_id.to_string()]).map(|_| ())
     }
 
     pub fn get_text(&self, sock: &Path, pane_id: u64, start_line: Option<i32>) -> Result<String, String> {
@@ -605,7 +639,11 @@ impl<'a> WezTerm<'a> {
     /// - 現在查不到這個編號 → 視窗早就沒了，視為完成；
     /// - 現在的建立時間和當初不同 → 編號已被別的程式用了，拒絕且不動它；
     /// - 相同才結束。
+    /// 窗格在共用 mux 裡的（`win.mux`）一律拒絕：gui_pid 是 mux 的編號，kill_tree 會把所有夥伴一起結束。
     pub fn stop(&self, win: &Window) -> Result<(), String> {
+        if win.mux {
+            return Err("這個窗格在共用的終端服務裡，不能用結束程序的方式關（會連其他夥伴一起結束）".to_string());
+        }
         let Some(was) = win.started_ms else {
             return Err("沒有記下視窗程序的建立時間，無法確認是同一個程序，不結束它".to_string());
         };
