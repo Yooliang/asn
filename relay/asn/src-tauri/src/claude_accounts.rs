@@ -706,16 +706,21 @@ fn fingerprint(home: &Path) -> u64 {
     std::fs::read(cj_path(home)).ok().hash(&mut h);
     h.finish()
 }
-/// ASN 自己（切換、還原）寫完登入檔後的指紋：背景檢查看到這個就知道不是別的程式改的。以家目錄分開記
-static OWN_WRITE: std::sync::Mutex<Vec<(PathBuf, u64)>> = std::sync::Mutex::new(Vec::new());
+/// ASN 自己（切換、還原）寫進登入檔的是哪個帳號（以家目錄分開記）。不記指紋：Claude 開著時常改寫 .claude.json，
+/// 切完到下一次背景檢查之間檔案多半已經不一樣了；只要帳號是 ASN 寫的那個、權杖也沒對到別的帳號，就不是別的程式換的
+static OWN_WRITE: std::sync::Mutex<Vec<(PathBuf, Option<String>)>> = std::sync::Mutex::new(Vec::new());
 fn mark_own_write(home: &Path) {
-    let fp = fingerprint(home);
+    let email = current_email(home);
     let mut v = OWN_WRITE.lock().unwrap_or_else(|e| e.into_inner());
     v.retain(|(p, _)| p != home);
-    v.push((home.to_path_buf(), fp));
+    v.push((home.to_path_buf(), email));
 }
-fn is_own_write(home: &Path, fp: u64) -> bool {
-    OWN_WRITE.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|(p, f)| p == home && *f == fp)
+/// 這次看到的帳號是不是 ASN 剛寫進去的那個；是就消掉這筆紀錄（只抵銷一次帳號變動）
+fn take_own_write(home: &Path, claimed: &Option<String>) -> bool {
+    let mut v = OWN_WRITE.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(i) = v.iter().position(|(p, e)| p == home && e == claimed) else { return false };
+    v.remove(i);
+    true
 }
 /// 目前的權杖檔和庫裡哪一個帳號存的那份一模一樣（只在本機比對位元組，不連外）
 fn cred_owner(home: &Path) -> Option<String> {
@@ -746,11 +751,14 @@ impl Watch {
         let claimed = current_email(home);
         let prev = self.fp.replace(fp);
         let prev_email = std::mem::replace(&mut self.email, claimed.clone());
-        if prev.is_none() || prev == Some(fp) || is_own_write(home, fp) {
+        if prev.is_none() || prev == Some(fp) {
             return None;
         }
         let actual = cred_owner(home);
         let mismatch = actual.is_some() && actual != claimed;
+        if !mismatch && prev_email != claimed && take_own_write(home, &claimed) {
+            return None; // ASN 自己切的（之後 Claude 又改寫過 .claude.json 也一樣）
+        }
         (prev_email != claimed || mismatch).then_some(ExternalChange { actual, claimed })
     }
 }
@@ -1425,6 +1433,34 @@ mod tests {
         w.check(h);
         sw(h, "b@x.test").unwrap();
         assert_eq!(w.check(h), None, "ASN 自己切的");
+    }
+
+    #[test]
+    fn ASN_切換後_claude_json_又被改寫_不誤報_但之後別的程式換帳號照報() {
+        let d = setup();
+        let h = d.path();
+        login(h, "u-b", "b@x.test", "B1");
+        save_current(h).unwrap();
+        login(h, "u-a", "a@x.test", "A1");
+        save_current(h).unwrap();
+        let mut w = Watch::default();
+        w.check(h);
+        sw(h, "b@x.test").unwrap();
+        // 下一次背景檢查前，開著的 Claude 改寫了 .claude.json 其他欄位、也換新了權杖
+        let cj_now = read(cj_path(h)).replace("\"numStartups\": 7", "\"numStartups\": 8");
+        fs::write(cj_path(h), cj_now).unwrap();
+        fs::write(cred_path(h), cred("B2")).unwrap();
+        assert_eq!(w.check(h), None, "帳號是 ASN 寫的那個、權杖沒對到別人：不是別的程式換的");
+        // 抵銷只用一次：之後別的程式把它換回甲，照報
+        login(h, "u-a", "a@x.test", "A1");
+        assert_eq!(w.check(h).map(|x| x.actual), Some(Some("a@x.test".into())));
+        // ASN 切到乙，但緊接著權杖被換成甲存的那份（帳號資訊和權杖對不上）：照報
+        login(h, "u-a", "a@x.test", "A1");
+        w.check(h);
+        sw(h, "b@x.test").unwrap();
+        fs::write(cred_path(h), read(dir_of(h, "a@x.test").join(CRED))).unwrap();
+        let x = w.check(h).unwrap();
+        assert_eq!((x.actual.as_deref(), x.claimed.as_deref()), (Some("a@x.test"), Some("b@x.test")));
     }
 
     #[test]
