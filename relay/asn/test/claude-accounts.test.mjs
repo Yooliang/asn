@@ -179,6 +179,13 @@ test('自動加入：Rust 背景工作通知後顯示一行小字、清單即時
   assert.ok(f.calls.some(c => c[0] === 'acct_remote_report'))
 })
 
+test('登入檔被其他程式換過：顯示實際帳號一行小字並回報', async () => {
+  const { f, ui } = mk({ claude_accounts_list: [{ email: 'b@x.test', plan: 'max', current: true }], claude_account_current: { email: 'b@x.test', saved: true }, codex_account_current: null, acct_remote_report: {} })
+  await ui.onAuto({ kind: 'external', email: 'b@x.test' })
+  assert.equal(ui.state.autoNote, '登入檔被其他程式換過，現在是 b@x.test')
+  assert.ok(f.calls.some(c => c[0] === 'acct_remote_report'))
+})
+
 test('自動加入接線守門：開關預設開、存進 asn-me.json、設定頁有開關、Rust 背景工作已啟動', () => {
   const panel = read('ui/lib/settings-panel.mjs'), js = read('ui/list.js'), rs = read('src-tauri/src/lib.rs')
   assert.match(js, /autoAddClaude = ref\(true\)/, '固定開啟，不看舊存檔')

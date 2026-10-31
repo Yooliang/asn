@@ -475,11 +475,90 @@ pub fn delete(home: &Path, email: &str) -> R<()> {
     Ok(())
 }
 
-pub fn switch_to(home: &Path, email: &str) -> R<SwitchOutcome> {
-    switch_impl(home, email, Fault::None)
+// ---------- 切走前核對：這份權杖到底是哪個帳號 ----------
+/// 向 Anthropic 查權杖所屬帳號的端點。寫死、只走 HTTPS、只連 Anthropic 自己的網域，不能從設定或環境變數改
+const PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
+const PROFILE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// 查詢結果（不含權杖）
+#[derive(Debug, PartialEq, Clone)]
+pub enum Lookup {
+    Account { uuid: String, email: String },
+    /// 401：權杖已失效。只記下來，不刷新、不改寫登入檔（通知使用者交給登入失效通知那件）
+    Unauthorized,
+    Timeout,
+    /// 其他失敗（沒有權杖、連不上、回應看不懂）
+    Failed,
 }
 
-pub fn switch_impl(home: &Path, email: &str, fault: Fault) -> R<SwitchOutcome> {
+/// 正式的查詢：只在切走那一刻呼叫一次。測試不連外，一律當查詢失敗
+pub fn profile_lookup(cred: &[u8]) -> Lookup {
+    #[cfg(test)]
+    {
+        let _ = cred;
+        Lookup::Failed
+    }
+    #[cfg(not(test))]
+    {
+        fetch_profile(PROFILE_URL, cred, PROFILE_TIMEOUT)
+    }
+}
+
+fn access_token(cred: &[u8]) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_slice(cred).ok()?;
+    v.pointer("/claudeAiOauth/accessToken")?.as_str().filter(|t| !t.trim().is_empty()).map(String::from)
+}
+
+fn parse_profile(v: &serde_json::Value) -> Lookup {
+    let uuid = v.pointer("/account/uuid").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    match v.pointer("/account/email").and_then(|x| x.as_str()).and_then(normalize_email) {
+        Some(email) => Lookup::Account { uuid, email },
+        None => Lookup::Failed,
+    }
+}
+
+/// 拿權杖查一次帳號資料（另開執行緒跑，呼叫端可能在非同步環境裡）。權杖只放在請求標頭，
+/// 錯誤一律轉成 `Lookup` 的類別，不帶原始錯誤訊息；不跟隨轉址
+fn fetch_profile(url: &str, cred: &[u8], timeout: std::time::Duration) -> Lookup {
+    let Some(tok) = access_token(cred) else { return Lookup::Failed };
+    let url = url.to_string();
+    let t = std::thread::spawn(move || -> Lookup {
+        let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else { return Lookup::Failed };
+        rt.block_on(async move {
+            let Ok(c) = reqwest::Client::builder().timeout(timeout).redirect(reqwest::redirect::Policy::none()).build() else { return Lookup::Failed };
+            match c.get(&url).bearer_auth(&tok).header("anthropic-beta", "oauth-2025-04-20").send().await {
+                Err(e) if e.is_timeout() => Lookup::Timeout,
+                Err(_) => Lookup::Failed,
+                Ok(r) if r.status() == reqwest::StatusCode::UNAUTHORIZED => Lookup::Unauthorized,
+                Ok(r) if !r.status().is_success() => Lookup::Failed,
+                Ok(r) => match r.json::<serde_json::Value>().await {
+                    Ok(v) => parse_profile(&v),
+                    Err(e) if e.is_timeout() => Lookup::Timeout,
+                    Err(_) => Lookup::Failed,
+                },
+            }
+        })
+    });
+    t.join().unwrap_or(Lookup::Failed)
+}
+
+/// 查到的帳號是不是庫裡這一份（uuid 相同或 email 相同）；回 log 用的結果類別
+fn verdict(l: &Lookup, owner_uuid: &str, owner_email: &str) -> (bool, String) {
+    match l {
+        Lookup::Account { uuid, email } if (!uuid.is_empty() && uuid == owner_uuid) || email == owner_email => (true, "相符".into()),
+        Lookup::Account { email, .. } => (false, format!("不符（權杖其實是 {email}）")),
+        Lookup::Unauthorized => (false, "401".into()),
+        Lookup::Timeout => (false, "逾時".into()),
+        Lookup::Failed => (false, "查詢失敗".into()),
+    }
+}
+
+pub fn switch_to(home: &Path, email: &str) -> R<SwitchOutcome> {
+    switch_impl(home, email, Fault::None, &profile_lookup)
+}
+
+/// `who`：查這份權杖是哪個帳號（正式是 `profile_lookup`，測試傳假的）。查不到或對不上只是「不回存」，切換照常
+pub fn switch_impl(home: &Path, email: &str, fault: Fault, who: &dyn Fn(&[u8]) -> Lookup) -> R<SwitchOutcome> {
     let email = normalize_email(email).ok_or(AccErr::BadEmail)?;
     migrate_legacy(home);
     let dir = account_dir(home, &email)?;
@@ -493,7 +572,8 @@ pub fn switch_impl(home: &Path, email: &str, fault: Fault) -> R<SwitchOutcome> {
         return Err(AccErr::IncompleteLogin);
     }
 
-    // 1. 先把目前的權杖回存到它所屬的帳號（權杖會自動換新，庫裡的舊副本可能已失效）
+    // 1. 先把目前的權杖回存到它所屬的帳號（權杖會自動換新，庫裡的舊副本可能已失效）。
+    //    回存前先查這份權杖真的是那個帳號：登入檔可能被別的程式換過（10-31 Orca 事故），對不上或查不到就不存
     let old_cred = read_cred(home)?;
     let old_cj = std::fs::read_to_string(cj_path(home)).ok();
     let cur = current_fragment(home)?;
@@ -501,8 +581,14 @@ pub fn switch_impl(home: &Path, email: &str, fault: Fault) -> R<SwitchOutcome> {
         (Some(c), Some((frag, uuid))) => {
             let cur_email = email_of_fragment(frag);
             let owner = saved_accounts(home).into_iter().find(|s| &s.uuid == uuid || Some(&s.email) == cur_email.as_ref()).ok_or(AccErr::CurrentUnsaved)?;
-            write_atomic(&owner.dir.join(CRED), c)?;
-            write_atomic(&owner.dir.join(FRAG), frag.as_bytes())?;
+            let (ok, what) = verdict(&who(c), &owner.uuid, &owner.email);
+            if ok {
+                write_atomic(&owner.dir.join(CRED), c)?;
+                write_atomic(&owner.dir.join(FRAG), frag.as_bytes())?;
+                elog!("切走前核對 {}：{what}，已回存", owner.email);
+            } else {
+                elog!("切走前核對 {}：{what}，這次不回存", owner.email);
+            }
         }
         (Some(_), None) => return Err(AccErr::CurrentUnsaved),
         _ => {}
@@ -557,6 +643,7 @@ pub fn switch_impl(home: &Path, email: &str, fault: Fault) -> R<SwitchOutcome> {
             AccErr::from(e)
         });
     }
+    mark_own_write(home);
     Ok(SwitchOutcome { email, notice: "切換好了，開著的 Claude 視窗不用重開。".into() })
 }
 
@@ -569,6 +656,7 @@ pub fn undo_last_switch(home: &Path) -> R<String> {
     if let Ok(t) = std::fs::read(bk.join("claude.json")) {
         write_atomic(&cj_path(home), &t)?;
     }
+    mark_own_write(home);
     Ok("已還原到切換前的帳號，開著的 Claude 視窗不用重開。".into())
 }
 
@@ -583,8 +671,10 @@ pub enum AutoOutcome {
     Nothing,
     /// 目前登入的帳號原本不在帳號庫，已加入
     Added(String),
-    /// 已在帳號庫，但權杖自動換新過：已回存最新一份
+    /// 已在帳號庫，但權杖自動換新過：已回存最新一份（Claude 不再每分鐘回存，只剩 Grok 用）
     Updated(String),
+    /// 登入檔被別的程式（不是 ASN）換成另一個帳號：內容是權杖實際所屬的帳號（認不出來就用 .claude.json 寫的）
+    External(String),
 }
 
 /// 自動加入固定開啟（原本看 asn-me.json 的 `autoAddClaude`，現在不再有開關，寫什麼都當開）
@@ -593,29 +683,98 @@ pub fn auto_enabled_from_saved(text: &str) -> bool {
     true
 }
 
-/// 做一次：目前登入不在庫就加入；在庫但權杖檔（或帳號資訊）和庫裡不同就回存；沒登入什麼都不動。
+/// 做一次：目前登入不在庫就加入；已在庫就什麼都不做；沒登入什麼都不動。
+/// 不再每分鐘回存：權杖和 .claude.json 可能被別的程式各換一半，配錯對存進庫裡會把別人的權杖存在這個帳號名下；
+/// 回存只在切走那一刻、先核對過才做（見 `switch_impl`）。
 /// 呼叫端要自己持有 `LOCK`（見 `auto_tick`），避免和切換同時寫檔。只比對與寫入檔案，權杖不進 log。
 pub fn auto_sync(home: &Path) -> R<AutoOutcome> {
-    let Some(cred) = read_cred(home)? else { return Ok(AutoOutcome::Nothing) };
+    let Some(_) = read_cred(home)? else { return Ok(AutoOutcome::Nothing) };
     let Some((frag, uuid)) = current_fragment(home)? else { return Ok(AutoOutcome::Nothing) };
     let Some(email) = email_of_fragment(&frag) else { return Ok(AutoOutcome::Nothing) };
-    let owner = saved_accounts(home).into_iter().find(|s| s.uuid == uuid || s.email == email);
-    let Some(owner) = owner else {
-        save_current(home)?;
-        return Ok(AutoOutcome::Added(email));
-    };
-    let same_cred = std::fs::read(owner.dir.join(CRED)).map(|b| b == cred).unwrap_or(false);
-    let same_frag = owner.frag == frag;
-    if same_cred && same_frag {
+    if saved_accounts(home).into_iter().any(|s| s.uuid == uuid || s.email == email) {
         return Ok(AutoOutcome::Nothing);
     }
-    if !same_cred {
-        write_atomic(&owner.dir.join(CRED), &cred)?;
+    save_current(home)?;
+    Ok(AutoOutcome::Added(email))
+}
+
+// ---------- 登入檔被別的程式改寫（像 Orca）：回報實際是哪個帳號 ----------
+fn fingerprint(home: &Path) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    std::fs::read(cred_path(home)).ok().hash(&mut h);
+    std::fs::read(cj_path(home)).ok().hash(&mut h);
+    h.finish()
+}
+/// ASN 自己（切換、還原）寫進登入檔的是哪個帳號（以家目錄分開記）。不記指紋：Claude 開著時常改寫 .claude.json，
+/// 切完到下一次背景檢查之間檔案多半已經不一樣了；只要帳號是 ASN 寫的那個、權杖也沒對到別的帳號，就不是別的程式換的
+static OWN_WRITE: std::sync::Mutex<Vec<(PathBuf, Option<String>)>> = std::sync::Mutex::new(Vec::new());
+fn mark_own_write(home: &Path) {
+    let email = current_email(home);
+    let mut v = OWN_WRITE.lock().unwrap_or_else(|e| e.into_inner());
+    v.retain(|(p, _)| p != home);
+    v.push((home.to_path_buf(), email));
+}
+/// 這次看到的帳號是不是 ASN 剛寫進去的那個；是就消掉這筆紀錄（只抵銷一次帳號變動）
+fn take_own_write(home: &Path, claimed: &Option<String>) -> bool {
+    let mut v = OWN_WRITE.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(i) = v.iter().position(|(p, e)| p == home && e == claimed) else { return false };
+    v.remove(i);
+    true
+}
+/// 目前的權杖檔和庫裡哪一個帳號存的那份一模一樣（只在本機比對位元組，不連外）
+fn cred_owner(home: &Path) -> Option<String> {
+    let cur = std::fs::read(cred_path(home)).ok()?;
+    saved_accounts(home).into_iter().find(|s| std::fs::read(s.dir.join(CRED)).map(|b| b == cur).unwrap_or(false)).map(|s| s.email)
+}
+
+/// 外部改寫的偵測結果（只有 email，沒有權杖）
+#[derive(Debug, PartialEq, Clone)]
+pub struct ExternalChange {
+    /// 權杖實際所屬的帳號（和庫裡某份權杖一模一樣才認得出來）
+    pub actual: Option<String>,
+    /// .claude.json 寫的帳號
+    pub claimed: Option<String>,
+}
+
+/// 記著上一次看到的登入檔。只在本機比對檔案，不連外、不寫檔
+#[derive(Default)]
+pub struct Watch {
+    fp: Option<u64>,
+    email: Option<String>,
+}
+impl Watch {
+    /// 登入檔和上次不同、不是 ASN 自己寫的，而且換了帳號（.claude.json 的帳號變了，或權杖其實是另一個帳號）才回報；
+    /// Claude 自己換新權杖（帳號沒變、權杖認不出來）不算。第一次看到只記下來
+    pub fn check(&mut self, home: &Path) -> Option<ExternalChange> {
+        let fp = fingerprint(home);
+        let claimed = current_email(home);
+        let prev = self.fp.replace(fp);
+        let prev_email = std::mem::replace(&mut self.email, claimed.clone());
+        if prev.is_none() || prev == Some(fp) {
+            return None;
+        }
+        let actual = cred_owner(home);
+        let mismatch = actual.is_some() && actual != claimed;
+        if !mismatch && prev_email != claimed && take_own_write(home, &claimed) {
+            return None; // ASN 自己切的（之後 Claude 又改寫過 .claude.json 也一樣）
+        }
+        (prev_email != claimed || mismatch).then_some(ExternalChange { actual, claimed })
     }
-    if !same_frag {
-        write_atomic(&owner.dir.join(FRAG), frag.as_bytes())?;
+}
+impl ExternalChange {
+    /// log 用的一句話（只有 email）
+    pub fn line(&self) -> String {
+        let c = self.claimed.as_deref().unwrap_or("（沒有帳號資訊）");
+        match &self.actual {
+            Some(a) if Some(a) == self.claimed.as_ref() => format!("登入檔被其他程式換過：現在是 {a}"),
+            Some(a) => format!("登入檔被其他程式換過：權杖其實是 {a}，.claude.json 寫的是 {c}"),
+            None => format!("登入檔被其他程式換過：.claude.json 寫的是 {c}，權杖認不出是哪個帳號"),
+        }
     }
-    Ok(AutoOutcome::Updated(owner.email))
+    pub fn outcome(&self) -> AutoOutcome {
+        AutoOutcome::External(self.actual.clone().or_else(|| self.claimed.clone()).unwrap_or_default())
+    }
 }
 
 /// 拿著 `lock` 做一次 `auto_sync`（背景工作傳進和切換、加入、刪除共用的那把 `LOCK`）
@@ -630,11 +789,7 @@ pub fn auto_tick(lock: &std::sync::Mutex<()>, home: &Path) -> R<AutoOutcome> {
 pub struct Steady(Option<u64>);
 impl Steady {
     pub fn settled(&mut self, home: &Path) -> bool {
-        use std::hash::{Hash, Hasher};
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        std::fs::read(cred_path(home)).ok().hash(&mut h);
-        std::fs::read(cj_path(home)).ok().hash(&mut h);
-        let now = Some(h.finish());
+        let now = Some(fingerprint(home));
         let ok = self.0 == now;
         self.0 = now;
         ok
@@ -644,29 +799,39 @@ impl Steady {
 /// 背景工作：先等 `first`，之後每 `every` 看一次 asn-me.json 的開關，開著就同步一次；有動作就叫 `on_event`
 pub async fn auto_loop(data_dir: PathBuf, first: std::time::Duration, every: std::time::Duration, on_event: impl Fn(&AutoOutcome) + Send + 'static) {
     tokio::time::sleep(first).await;
-    let mut steady = Steady::default();
+    let mut state = (Steady::default(), Watch::default());
     loop {
         let dd = data_dir.clone();
-        let mut steady_in = std::mem::take(&mut steady);
+        let (mut steady_in, mut watch_in) = std::mem::take(&mut state);
         let r = tokio::task::spawn_blocking(move || {
             let on = std::fs::read_to_string(dd.join("asn-me.json")).map(|t| auto_enabled_from_saved(&t)).unwrap_or(true);
             if !on {
-                return (AutoOutcome::Nothing, steady_in);
+                return (vec![], (steady_in, watch_in));
             }
             let home = claude_home();
-            let out = if steady_in.settled(&home) { auto_tick(&LOCK, &home).unwrap_or(AutoOutcome::Nothing) } else { AutoOutcome::Nothing };
-            (out, steady_in)
+            let mut outs = vec![];
+            if steady_in.settled(&home) {
+                let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(x) = watch_in.check(&home) {
+                    elog!("{}", x.line());
+                    outs.push(x.outcome());
+                }
+                drop(_g);
+                match auto_tick(&LOCK, &home) {
+                    Ok(AutoOutcome::Nothing) | Err(_) => {}
+                    Ok(o) => outs.push(o),
+                }
+            }
+            (outs, (steady_in, watch_in))
         })
         .await;
-        if let Ok((out, st)) = r {
-            steady = st;
-            match &out {
-                AutoOutcome::Added(e) => elog!("已自動加入 {e}"),
-                AutoOutcome::Updated(e) => elog!("已更新 {e} 的登入憑證"),
-                AutoOutcome::Nothing => {}
-            }
-            if out != AutoOutcome::Nothing {
-                on_event(&out);
+        if let Ok((outs, st)) = r {
+            state = st;
+            for out in &outs {
+                if let AutoOutcome::Added(e) = out {
+                    elog!("已自動加入 {e}");
+                }
+                on_event(out);
             }
         }
         tokio::time::sleep(every).await;
@@ -743,6 +908,19 @@ mod tests {
     fn dir_of(h: &Path, email: &str) -> PathBuf {
         store_root(h).join(email_dir_name(email))
     }
+    /// 假的帳號查詢：權杖 FAKE-ACCESS-A1 → u-a／a@x.test（照標籤第一個字母），不連外
+    fn fake_who(c: &[u8]) -> Lookup {
+        match access_token(c).and_then(|t| t.strip_prefix("FAKE-ACCESS-").and_then(|r| r.chars().next())) {
+            Some(ch) => {
+                let l = ch.to_ascii_lowercase();
+                Lookup::Account { uuid: format!("u-{l}"), email: format!("{l}@x.test") }
+            }
+            None => Lookup::Failed,
+        }
+    }
+    fn sw(h: &Path, email: &str) -> R<SwitchOutcome> {
+        switch_impl(h, email, Fault::None, &fake_who)
+    }
     fn emails(h: &Path) -> Vec<String> {
         list(h).into_iter().map(|a| a.email).collect()
     }
@@ -759,7 +937,7 @@ mod tests {
         save_current(h).unwrap();
         login(h, "u-a", "a@x.test", "A1");
         let (c0, j0) = (read(cred_path(h)), read(cj_path(h)));
-        switch_to(h, "b@x.test").unwrap();
+        sw(h, "b@x.test").unwrap();
         assert_ne!(read(cred_path(h)), c0);
         undo_last_switch(h).unwrap();
         assert_eq!((read(cred_path(h)), read(cj_path(h))), (c0, j0), "回到切換前");
@@ -806,7 +984,7 @@ mod tests {
         // 甲換新權杖（使用中自動更新）：切走前要回存
         login(h, "u-a", "a@x.test", "A2");
         let before = read(cj_path(h));
-        let out = switch_to(h, "B@x.test").unwrap();
+        let out = sw(h, "B@x.test").unwrap();
         assert_eq!(out.email, "b@x.test");
         assert!(out.notice.contains("不用重開"));
         assert_eq!(read(cred_path(h)), cred("B1"));
@@ -820,7 +998,7 @@ mod tests {
         assert_eq!(&before[e..], &after[e2..]);
         assert!(after.contains("\"projects\": {\"D:\\\\x\": {\"a\": [1, 2,3]}}") && after.contains("\"tail\":   null"));
         // 換回來：甲拿到 A2，乙的權杖回存
-        switch_to(h, "a@x.test").unwrap();
+        sw(h, "a@x.test").unwrap();
         assert_eq!(read(cred_path(h)), cred("A2"));
         assert_eq!(read(dir_of(h, "b@x.test").join(CRED)), cred("B1"));
         assert_eq!(read(cj_path(h)), before, "來回之後 .claude.json 與原本完全相同");
@@ -836,7 +1014,7 @@ mod tests {
         save_current(h).unwrap();
         login(h, "u-c", "c@x.test", "C1");
         let (c0, j0) = (read(cred_path(h)), read(cj_path(h)));
-        assert_eq!(switch_to(h, "a@x.test"), Err(AccErr::CurrentUnsaved));
+        assert_eq!(sw(h, "a@x.test"), Err(AccErr::CurrentUnsaved));
         assert_eq!((read(cred_path(h)), read(cj_path(h))), (c0, j0), "什麼都沒動");
         let cur = current_login(h).unwrap();
         assert_eq!((cur.email.as_str(), cur.saved), ("c@x.test", false));
@@ -852,7 +1030,7 @@ mod tests {
         save_current(h).unwrap();
         login(h, "u-a", "a@x.test", "A2");
         let (c0, j0) = (read(cred_path(h)), read(cj_path(h)));
-        let r = switch_impl(h, "b@x.test", Fault::AfterCredentials);
+        let r = switch_impl(h, "b@x.test", Fault::AfterCredentials, &fake_who);
         assert!(matches!(r, Err(AccErr::Io(_))), "{r:?}");
         assert_eq!(read(cred_path(h)), c0);
         assert_eq!(read(cj_path(h)), j0);
@@ -871,7 +1049,7 @@ mod tests {
         save_current(h).unwrap();
         fs::write(cj_path(h), "{壞掉").unwrap();
         let (c0, j0) = (read(cred_path(h)), read(cj_path(h)));
-        assert!(switch_to(h, "a@x.test").is_err());
+        assert!(sw(h, "a@x.test").is_err());
         assert_eq!((read(cred_path(h)), read(cj_path(h))), (c0, j0));
     }
 
@@ -920,7 +1098,7 @@ mod tests {
         let h = d.path();
         two_accounts_b_cred(h, r#"{"claudeAiOauth":{"accessToken":"FAKE-ACCESS-B","expiresAt":1,"subscriptionType":"max"}}"#);
         let before = snapshot(h);
-        let r = switch_to(h, "b@x.test");
+        let r = sw(h, "b@x.test");
         assert_eq!(r, Err(AccErr::IncompleteLogin));
         assert_eq!(r.unwrap_err().to_string(), "這個帳號存的登入不完整，請重新登入一次再加入");
         assert_eq!(snapshot(h), before, "目前登入、帳號庫、備份一個位元組都沒動");
@@ -935,7 +1113,7 @@ mod tests {
         two_accounts_b_cred(h, r#"{"claudeAiOauth":{"accessToken":"FAKE-ACCESS-B","refreshToken":"","expiresAt":1}}"#);
         let before = snapshot(h);
         // 寫入失敗注入點也走不到：在任何寫檔之前就停
-        assert_eq!(switch_impl(h, "b@x.test", Fault::AfterCredentials), Err(AccErr::IncompleteLogin));
+        assert_eq!(switch_impl(h, "b@x.test", Fault::AfterCredentials, &fake_who), Err(AccErr::IncompleteLogin));
         assert_eq!(snapshot(h), before);
     }
 
@@ -944,7 +1122,7 @@ mod tests {
         let d = setup();
         let h = d.path();
         two_accounts_b_cred(h, &cred("B9"));
-        let out = switch_to(h, "b@x.test").unwrap();
+        let out = sw(h, "b@x.test").unwrap();
         assert_eq!(out.email, "b@x.test");
         assert_eq!(read(cred_path(h)), cred("B9"));
         assert_eq!(read(dir_of(h, "a@x.test").join(CRED)), cred("A2"), "切走前回存目前的權杖");
@@ -968,7 +1146,7 @@ mod tests {
     fn 找不到帳號() {
         let d = setup();
         login(d.path(), "u-a", "a@x.test", "A1");
-        assert_eq!(switch_to(d.path(), "no@x.test"), Err(AccErr::NotFound));
+        assert_eq!(sw(d.path(), "no@x.test"), Err(AccErr::NotFound));
         assert_eq!(delete(d.path(), "no@x.test"), Err(AccErr::NotFound));
     }
 
@@ -978,7 +1156,7 @@ mod tests {
         let h = d.path();
         login(h, "u-a", "a@x.test", "A1");
         for bad in ["", "..", "../x", "..\\x@y", "a/b@x", "a@b@c", "@x.test", "a@", "C:\\x@y", "x y@z", "a\nb@c", "a*@b", &format!("{}@x.test", "長".repeat(120))] {
-            assert_eq!(switch_to(h, bad), Err(AccErr::BadEmail), "{bad:?}");
+            assert_eq!(sw(h, bad), Err(AccErr::BadEmail), "{bad:?}");
             assert_eq!(delete(h, bad), Err(AccErr::BadEmail), "{bad:?}");
         }
         assert!(!store_root(h).exists(), "擋下來的 email 不可建出任何資料夾");
@@ -1029,7 +1207,7 @@ mod tests {
         assert_eq!(read(dir_of(h, "b@x.test").join(CRED)), cred("B1"));
         // 遷移後切換照常運作，且目前登入（甲）判得出來
         assert_eq!(list(h).into_iter().filter(|a| a.current).map(|a| a.email).collect::<Vec<_>>(), vec!["a@x.test"]);
-        switch_to(h, "b@x.test").unwrap();
+        sw(h, "b@x.test").unwrap();
         assert_eq!(read(cred_path(h)), cred("B1"));
         // 目標已存在：不覆蓋、清單不重複
         let dup = store_root(h).join("甲的複本");
@@ -1073,7 +1251,7 @@ mod tests {
     }
 
     #[test]
-    fn 自動回存_權杖換新就更新庫裡那份_其他帳號不動() {
+    fn 不再每分鐘回存_權杖換新也不動庫裡那份() {
         let d = setup();
         let h = d.path();
         login(h, "u-a", "a@x.test", "A1");
@@ -1081,10 +1259,208 @@ mod tests {
         login(h, "u-b", "b@x.test", "B1");
         save_current(h).unwrap();
         login(h, "u-a", "a@x.test", "A2");
-        assert_eq!(auto_sync(h), Ok(AutoOutcome::Updated("a@x.test".into())));
-        assert_eq!(read(dir_of(h, "a@x.test").join(CRED)), cred("A2"));
-        assert_eq!(read(dir_of(h, "b@x.test").join(CRED)), cred("B1"));
-        assert!(fs::read_dir(dir_of(h, "a@x.test")).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().contains("asn-tmp")), "不留暫存檔");
+        assert_eq!(auto_sync(h), Ok(AutoOutcome::Nothing));
+        assert_eq!(read(dir_of(h, "a@x.test").join(CRED)), cred("A1"), "背景不回存，只在切走時核對過才存");
+        // 10-31 事故的樣子：權杖換成乙的、.claude.json 還寫甲。背景也不能把乙的權杖存到甲名下
+        fs::write(cred_path(h), cred("B1")).unwrap();
+        assert_eq!(auto_sync(h), Ok(AutoOutcome::Nothing));
+        assert_eq!(read(dir_of(h, "a@x.test").join(CRED)), cred("A1"));
+    }
+
+    /// 庫裡有甲（A1）乙（B1），目前登入是甲、權杖已換新成 A2；用 `l` 當查詢結果切到乙，回傳甲在庫裡那份
+    fn switch_with_lookup(l: Lookup) -> String {
+        let d = setup();
+        let h = d.path();
+        login(h, "u-a", "a@x.test", "A1");
+        save_current(h).unwrap();
+        login(h, "u-b", "b@x.test", "B1");
+        save_current(h).unwrap();
+        login(h, "u-a", "a@x.test", "A2");
+        let out = switch_impl(h, "b@x.test", Fault::None, &|_| l.clone()).expect("查詢結果不影響切換");
+        assert_eq!(out.email, "b@x.test");
+        assert_eq!(read(cred_path(h)), cred("B1"), "切換照常完成");
+        assert!(read(cj_path(h)).contains("b@x.test"));
+        read(dir_of(h, "a@x.test").join(CRED))
+    }
+
+    #[test]
+    fn 切走前核對_相符才回存() {
+        assert_eq!(switch_with_lookup(Lookup::Account { uuid: "u-a".into(), email: "a@x.test".into() }), cred("A2"));
+        assert_eq!(switch_with_lookup(Lookup::Account { uuid: "".into(), email: "a@x.test".into() }), cred("A2"), "沒有 uuid 時看 email");
+    }
+
+    #[test]
+    fn 切走前核對_不符就不存() {
+        assert_eq!(switch_with_lookup(Lookup::Account { uuid: "u-b".into(), email: "b@x.test".into() }), cred("A1"));
+    }
+
+    #[test]
+    fn 切走前核對_401_就不存() {
+        assert_eq!(switch_with_lookup(Lookup::Unauthorized), cred("A1"));
+    }
+
+    #[test]
+    fn 切走前核對_逾時或失敗就不存() {
+        assert_eq!(switch_with_lookup(Lookup::Timeout), cred("A1"));
+        assert_eq!(switch_with_lookup(Lookup::Failed), cred("A1"));
+    }
+
+    #[test]
+    fn 切走前只查一次_而且只查目前的權杖_背景同步不查() {
+        let d = setup();
+        let h = d.path();
+        login(h, "u-a", "a@x.test", "A1");
+        save_current(h).unwrap();
+        login(h, "u-b", "b@x.test", "B1");
+        save_current(h).unwrap();
+        login(h, "u-a", "a@x.test", "A2");
+        let seen = std::cell::RefCell::new(vec![]);
+        sw_seen(h, &seen);
+        assert_eq!(*seen.borrow(), vec![cred("A2").into_bytes()]);
+        let src = include_str!("claude_accounts.rs").replace("\r\n", "\n");
+        let body = &src[src.find("pub fn auto_sync(").unwrap()..src.find("// ---------- 登入檔被別的程式改寫").unwrap()];
+        assert!(!body.contains("lookup") && !body.contains("who("), "背景同步不可連外查詢");
+    }
+    fn sw_seen(h: &Path, seen: &std::cell::RefCell<Vec<Vec<u8>>>) {
+        switch_impl(h, "b@x.test", Fault::None, &|c| {
+            seen.borrow_mut().push(c.to_vec());
+            Lookup::Failed
+        })
+        .unwrap();
+    }
+
+    /// 本機假伺服器：回一次 `reply`（None＝不回，讓它逾時），把收到的請求送回來
+    fn fake_server(reply: Option<String>) -> (String, std::sync::mpsc::Receiver<String>) {
+        use std::io::{Read, Write};
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/api/oauth/profile", l.local_addr().unwrap());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut s, _) = l.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let n = s.read(&mut buf).unwrap_or(0);
+            let _ = tx.send(String::from_utf8_lossy(&buf[..n]).to_string());
+            match reply {
+                Some(r) => {
+                    let _ = s.write_all(r.as_bytes());
+                }
+                None => std::thread::sleep(std::time::Duration::from_secs(3)),
+            }
+        });
+        (url, rx)
+    }
+    fn http(status: &str, body: &str) -> Option<String> {
+        Some(format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()))
+    }
+    const T: std::time::Duration = std::time::Duration::from_millis(800);
+
+    #[test]
+    fn 查帳號_200_拿到_email_與_uuid_權杖只在標頭() {
+        let (url, rx) = fake_server(http("200 OK", r#"{"account":{"uuid":"u-a","email":"A@x.test"},"organization":{"uuid":"o"}}"#));
+        assert_eq!(fetch_profile(&url, cred("A1").as_bytes(), T), Lookup::Account { uuid: "u-a".into(), email: "a@x.test".into() });
+        let req = rx.recv().unwrap().to_lowercase();
+        assert!(req.contains("authorization: bearer fake-access-a1"), "{req}");
+        assert!(!req.contains("fake-refresh"), "refresh token 不送出去");
+    }
+
+    #[test]
+    fn 查帳號_401() {
+        let (url, _rx) = fake_server(http("401 Unauthorized", ""));
+        assert_eq!(fetch_profile(&url, cred("A1").as_bytes(), T), Lookup::Unauthorized);
+    }
+
+    #[test]
+    fn 查帳號_逾時() {
+        let (url, _rx) = fake_server(None);
+        let t0 = std::time::Instant::now();
+        assert_eq!(fetch_profile(&url, cred("A1").as_bytes(), T), Lookup::Timeout);
+        assert!(t0.elapsed() < std::time::Duration::from_secs(3), "逾時就放手");
+    }
+
+    #[test]
+    fn 查帳號_其他狀況都算失敗() {
+        let (url, _rx) = fake_server(http("500 Oops", ""));
+        assert_eq!(fetch_profile(&url, cred("A1").as_bytes(), T), Lookup::Failed);
+        let (url, _rx) = fake_server(Some("HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:9/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into()));
+        assert_eq!(fetch_profile(&url, cred("A1").as_bytes(), T), Lookup::Failed, "不跟隨轉址");
+        let (url, _rx) = fake_server(http("200 OK", "{}"));
+        assert_eq!(fetch_profile(&url, cred("A1").as_bytes(), T), Lookup::Failed, "沒有 email");
+        assert_eq!(fetch_profile("http://127.0.0.1:9/", br#"{"claudeAiOauth":{}}"#, T), Lookup::Failed, "沒有權杖就不送");
+    }
+
+    #[test]
+    fn 查詢網址寫死_只走_https_的_anthropic_網域_逾時五秒() {
+        assert!(PROFILE_URL.starts_with("https://api.anthropic.com/"));
+        assert_eq!(PROFILE_TIMEOUT, std::time::Duration::from_secs(5));
+        let src = include_str!("claude_accounts.rs").replace("\r\n", "\n");
+        let prod = &src[..src.find("#[cfg(test)]\nmod tests").unwrap()];
+        assert_eq!(prod.matches("fetch_profile(").count(), 2, "只有定義與 profile_lookup 這一個呼叫");
+        assert!(prod.contains("fetch_profile(PROFILE_URL, cred, PROFILE_TIMEOUT)"));
+        let def = &prod[prod.find("const PROFILE_URL").unwrap()..prod.find("pub fn switch_to(").unwrap()];
+        assert!(!def.contains("envc::") && !def.contains("env::var"), "不能從環境變數改");
+    }
+
+    #[test]
+    fn 外部程式改寫登入檔_回報實際帳號_自己換新權杖或_ASN_切換不報() {
+        let d = setup();
+        let h = d.path();
+        login(h, "u-b", "b@x.test", "B1");
+        save_current(h).unwrap();
+        login(h, "u-a", "a@x.test", "A1");
+        save_current(h).unwrap();
+        let mut w = Watch::default();
+        assert_eq!(w.check(h), None, "第一次只記下來");
+        assert_eq!(w.check(h), None, "沒變");
+        fs::write(cred_path(h), cred("A2")).unwrap();
+        assert_eq!(w.check(h), None, "Claude 自己換新權杖：帳號沒變");
+        // 只換了權杖（換成乙存的那份），.claude.json 還寫甲：權杖其實是乙
+        fs::write(cred_path(h), cred("B1")).unwrap();
+        let x = w.check(h).unwrap();
+        assert_eq!(x, ExternalChange { actual: Some("b@x.test".into()), claimed: Some("a@x.test".into()) });
+        assert_eq!(x.outcome(), AutoOutcome::External("b@x.test".into()));
+        assert!(x.line().contains("權杖其實是 b@x.test") && x.line().contains("a@x.test"), "{}", x.line());
+        // 兩個檔都換成乙
+        fs::write(cj_path(h), cj("u-b", "b@x.test")).unwrap();
+        let x = w.check(h).unwrap();
+        assert_eq!(x.line(), "登入檔被其他程式換過：現在是 b@x.test");
+        // 換成庫裡沒有的權杖、帳號也變了：認不出權杖，報 .claude.json 寫的
+        login(h, "u-c", "c@x.test", "C1");
+        let x = w.check(h).unwrap();
+        assert_eq!((x.actual.clone(), x.outcome()), (None, AutoOutcome::External("c@x.test".into())));
+        assert!(!x.line().contains("FAKE-"));
+        // ASN 自己切換：不報
+        login(h, "u-a", "a@x.test", "A1");
+        w.check(h);
+        sw(h, "b@x.test").unwrap();
+        assert_eq!(w.check(h), None, "ASN 自己切的");
+    }
+
+    #[test]
+    fn ASN_切換後_claude_json_又被改寫_不誤報_但之後別的程式換帳號照報() {
+        let d = setup();
+        let h = d.path();
+        login(h, "u-b", "b@x.test", "B1");
+        save_current(h).unwrap();
+        login(h, "u-a", "a@x.test", "A1");
+        save_current(h).unwrap();
+        let mut w = Watch::default();
+        w.check(h);
+        sw(h, "b@x.test").unwrap();
+        // 下一次背景檢查前，開著的 Claude 改寫了 .claude.json 其他欄位、也換新了權杖
+        let cj_now = read(cj_path(h)).replace("\"numStartups\": 7", "\"numStartups\": 8");
+        fs::write(cj_path(h), cj_now).unwrap();
+        fs::write(cred_path(h), cred("B2")).unwrap();
+        assert_eq!(w.check(h), None, "帳號是 ASN 寫的那個、權杖沒對到別人：不是別的程式換的");
+        // 抵銷只用一次：之後別的程式把它換回甲，照報
+        login(h, "u-a", "a@x.test", "A1");
+        assert_eq!(w.check(h).map(|x| x.actual), Some(Some("a@x.test".into())));
+        // ASN 切到乙，但緊接著權杖被換成甲存的那份（帳號資訊和權杖對不上）：照報
+        login(h, "u-a", "a@x.test", "A1");
+        w.check(h);
+        sw(h, "b@x.test").unwrap();
+        fs::write(cred_path(h), read(dir_of(h, "a@x.test").join(CRED))).unwrap();
+        let x = w.check(h).unwrap();
+        assert_eq!((x.actual.as_deref(), x.claimed.as_deref()), (Some("a@x.test"), Some("b@x.test")));
     }
 
     #[test]
@@ -1152,7 +1528,7 @@ mod tests {
         let t = std::thread::spawn(move || tx.send(auto_tick(&l2, &h2)).unwrap());
         assert!(rx.recv_timeout(std::time::Duration::from_millis(300)).is_err(), "切換還沒做完，自動同步不可動手");
         assert_eq!(read(dir_of(&h, "a@x.test").join(CRED)), cred("A1"), "鎖著的時候庫裡沒被改");
-        switch_to(&h, "b@x.test").unwrap(); // 切換做完（先回存甲的 A2）
+        sw(&h, "b@x.test").unwrap(); // 切換做完（先回存甲的 A2）
         drop(guard);
         let out = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
         t.join().unwrap();
