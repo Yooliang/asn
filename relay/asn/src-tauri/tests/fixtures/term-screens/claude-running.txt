@@ -1,0 +1,24 @@
+
+ ▐▛███▛█   Claude Code v2.1.316
+▝▜██████▀  Sonnet 5.5 · Claude Ultra
+ ▝▝   ▝▝   ~\AppData\Local\Temp\c1trust · /rc
+
+
+❯ Run this exact shell command and nothing else: echo c1-sample
+
+
+
+
+
+
+
+
+
+
+✻ Mustering…
+
+────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────
+
+  ⏸ manual mode on · ← 2 agents
