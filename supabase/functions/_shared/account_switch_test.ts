@@ -44,6 +44,36 @@ Deno.test("parseReport：每筆只留四個欄位，權杖類的多餘欄位丟�
   }
 });
 
+Deno.test("parseReport：login_failed／login_incomplete 收布林、不帶當 false（不輸出）、型別不合整份退回", () => {
+  const r = parseReport({ accounts: [{ vendor: "claude", email: "a@x.test", current: true, login_failed: true, login_incomplete: true }, { vendor: "claude", email: "b@x.test", login_failed: false }, { vendor: "claude", email: "c@x.test" }] });
+  assertEquals(r, [
+    { vendor: "claude", email: "a@x.test", plan: "", current: true, login_failed: true, login_incomplete: true },
+    { vendor: "claude", email: "b@x.test", plan: "", current: false },
+    { vendor: "claude", email: "c@x.test", plan: "", current: false },
+  ]);
+  for (const bad of ["yes", 1, "true", {}]) {
+    assertEquals(parseReport({ accounts: [{ vendor: "claude", email: "a@x.test", login_failed: bad }] }), null);
+    assertEquals(parseReport({ accounts: [{ vendor: "claude", email: "a@x.test", login_incomplete: bad }] }), null);
+  }
+});
+
+Deno.test("acct_login_alert：收件人不由用戶端指定、只轉四個固定欄位；格式不合不呼叫資料庫；成功敲門鈴", async () => {
+  const f = fakeDeps(() => ({ ok: true, bell_topics: ["bell-A", "bell-A", "bell-B"] }));
+  const r = await handleAcctAction(f.deps, { id: "W" }, "acct_login_alert", { computer: "工作機", last_at: "2026-10-31T13:35:00Z", email: "A@x.test", timeouts: 3, to: "u:evil", to_node: "X", body: "Login expired SECRET", error_text: "SECRET", node: "Z" });
+  assertEquals(r.status, 200);
+  assertEquals(f.calls, [{ fn: "asn_relay_login_alert", args: { p_node: "W", p_computer: "工作機", p_last_at: "2026-10-31T13:35:00.000Z", p_email: "a@x.test", p_timeouts: 3 } }]);
+  assertEquals(f.rings, ["bell-A", "bell-B"]);
+  const g = fakeDeps();
+  for (const bad of [{}, { computer: "", last_at: "2026-10-31T13:35:00Z" }, { computer: "x\ny", last_at: "2026-10-31T13:35:00Z" }, { computer: "x", last_at: "壞" }, { computer: "x", last_at: "2026-10-31T13:35:00Z", email: "bad" },
+    { computer: "x", last_at: "2026-10-31T13:35:00Z", timeouts: -1 }, { computer: "x", last_at: "2026-10-31T13:35:00Z", timeouts: 1000 }, { computer: "x", last_at: "2026-10-31T13:35:00Z", timeouts: "3" }]) {
+    assertEquals((await handleAcctAction(g.deps, { id: "W" }, "acct_login_alert", bad)).status, 400, JSON.stringify(bad));
+  }
+  assertEquals(g.calls.length, 0);
+  const h = fakeDeps(() => ({ error: "rate_limited" }));
+  assertEquals((await handleAcctAction(h.deps, { id: "W" }, "acct_login_alert", { computer: "x", last_at: "2026-10-31T13:35:00Z" })).status, 429);
+  assertEquals(h.rings.length, 0);
+});
+
 Deno.test("parseSwitch：指令只帶節點與 email；多餘欄位（憑證、指令）丟掉", () => {
   assertEquals(parseSwitch({ node: "W", vendor: "claude", email: "B@X.test", token: "SECRET", command: "calc.exe" }), { node: "W", vendor: "claude", email: "b@x.test" });
   assertEquals(parseSwitch({ node: "W;x", vendor: "claude", email: "b@x.test" }), { error: "bad_request" });
@@ -128,5 +158,5 @@ Deno.test("relay/index.ts：帳號動作排在金鑰驗證之後，行動者是 
 });
 
 Deno.test("動作清單與分派一致", () => {
-  assertEquals([...ACCT_ACTIONS].sort(), ["acct_list", "acct_report", "acct_roster", "acct_switch", "acct_switch_pending", "acct_switch_result", "acct_switch_status"]);
+  assertEquals([...ACCT_ACTIONS].sort(), ["acct_list", "acct_login_alert", "acct_report", "acct_roster", "acct_switch", "acct_switch_pending", "acct_switch_result", "acct_switch_status"]);
 });

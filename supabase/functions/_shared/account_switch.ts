@@ -44,7 +44,7 @@ export function cleanEmail(v: unknown): string | null {
 
 // 額度窗（#374 帳號列表）：name＝five_hour／weekly／w<分鐘數>；left_pct＝剩餘 0～100 整數；resets_at＝重置時間（可空）；read_at＝那台電腦讀到的時間
 export type QuotaWindow = { name: string; left_pct: number; resets_at: string | null; read_at: string };
-export type ReportedAccount = { vendor: "claude" | "codex" | "grok" | "gemini"; email: string; plan: string; current: boolean; five_hour_pct?: number; weekly_pct?: number; reset_at?: string; five_reset_at?: string; week_reset_at?: string; at?: string; windows?: QuotaWindow[] };
+export type ReportedAccount = { vendor: "claude" | "codex" | "grok" | "gemini"; email: string; plan: string; current: boolean; login_failed?: true; login_incomplete?: true; five_hour_pct?: number; weekly_pct?: number; reset_at?: string; five_reset_at?: string; week_reset_at?: string; at?: string; windows?: QuotaWindow[] };
 
 // 剩餘額度（#228，全部選填）：five_hour_pct／weekly_pct 是 0～100 的剩餘百分比，reset_at 是重置時間，at 是那台電腦記下數字的時間。
 // five_reset_at／week_reset_at（#374，選填）：兩條各自的重置時間（reset_at 是舊的、兩條共用一個，照收）。
@@ -119,11 +119,14 @@ export function parseReport(b: Json): ReportedAccount[] | null {
       plan = a.plan.trim();
     }
     if (a.current != null && typeof a.current !== "boolean") return null;
+    // 登入失效、登入不完整（0.1.113）：不帶就當 false（輸出時不帶欄位）；型別不合整份退回
+    if (a.login_failed != null && typeof a.login_failed !== "boolean") return null;
+    if (a.login_incomplete != null && typeof a.login_incomplete !== "boolean") return null;
     // 清完一窗都不剩就不帶 windows，讓資料庫退回舊四欄（#524 審查）
     const parsed = a.vendor !== "grok" && Array.isArray(a.windows) ? parseWindows(a.windows) : [];
     const cleaned = a.vendor === "gemini" ? parsed.filter((w) => GEMINI_WINDOWS.has(w.name)) : parsed;
     const windows = cleaned.length ? { windows: cleaned } : {};
-    out.push({ vendor: a.vendor, email, plan, current: a.current === true, ...(a.vendor === "claude" ? parseQuota(a) : {}), ...windows });
+    out.push({ vendor: a.vendor, email, plan, current: a.current === true, ...(a.login_failed === true ? { login_failed: true as const } : {}), ...(a.login_incomplete === true ? { login_incomplete: true as const } : {}), ...(a.vendor === "claude" ? parseQuota(a) : {}), ...windows });
   }
   return out;
 }
@@ -188,6 +191,19 @@ export async function handleAcctAction(deps: AcctDeps, me: { id: string }, actio
     await rosterReport(deps, me.id, accounts);
     return { status: 200, body: { ok: true, count: r.data?.count ?? accounts.length } };
   }
+  if (action === "acct_login_alert") {
+    // 登入失效通知（0.1.113）：只寄給「這個節點自己的擁有者」，收件人與內文都由資料庫決定；這裡只收四個固定欄位，其餘（含錯誤原文）一律丟掉
+    const computer = typeof params?.computer === "string" ? params.computer : "";
+    const email = params?.email == null ? null : cleanEmail(params.email);
+    const timeouts = params?.timeouts == null ? 0 : params.timeouts;
+    const lastAt = typeof params?.last_at === "string" && params.last_at.length <= 40 && !Number.isNaN(Date.parse(params.last_at)) ? new Date(params.last_at).toISOString() : null;
+    if (!computer || Array.from(computer).length > 40 || /[\u0000-\u001f\u007f-\u009f]/.test(computer) || !lastAt || (params?.email != null && !email) || !Number.isInteger(timeouts) || timeouts < 0 || timeouts > 999) return fail("bad_request");
+    const r = await call(deps, "asn_relay_login_alert", { p_node: me.id, p_computer: computer.trim(), p_last_at: lastAt, p_email: email, p_timeouts: timeouts });
+    if (isReply(r)) return r;
+    const bells: unknown[] = Array.isArray(r.data?.bell_topics) ? r.data.bell_topics : [r.data?.bell_topic];
+    for (const t of new Set<string>(bells.filter((x: unknown): x is string => typeof x === "string" && x.length > 0))) await deps.ring(t);
+    return { status: 200, body: { ok: true } };
+  }
   if (action === "acct_roster") {
     // 帳號列表只給本人：沒簽章直接 forbidden，不呼叫資料庫
     if (!signedUser) return fail("forbidden");
@@ -228,4 +244,4 @@ export async function handleAcctAction(deps: AcctDeps, me: { id: string }, actio
   }
   return { status: 404, body: { error: "not_found" } };
 }
-export const ACCT_ACTIONS = new Set(["acct_report", "acct_list", "acct_switch", "acct_switch_pending", "acct_switch_result", "acct_switch_status", "acct_roster"]);
+export const ACCT_ACTIONS = new Set(["acct_report", "acct_list", "acct_switch", "acct_switch_pending", "acct_switch_result", "acct_switch_status", "acct_roster", "acct_login_alert"]);
