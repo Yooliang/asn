@@ -1,11 +1,11 @@
 {
-  "version": "0.1.112",
-  "notes": "新功能：手機對話頁拿掉上方圖示列，功能都收進右上角「⋯」，喚醒、切換模型排最前面。修正：內建通道夥伴的「重開」「移除」按了沒反應。修正：存的登入不完整的 Claude 帳號不能再切換過去，帳號清單標「登入不完整」。修正：手機「設備與帳號」頁按返回退不回列表。",
-  "pub_date": "2026-10-30T21:05:52.753Z",
+  "version": "0.1.113",
+  "notes": "修正：某些情況下 ASN 開起來幾秒就自己關掉（印記錄寫不進去時整個程式結束）。改善：ASN 若因程式錯誤結束，會把原因寫進記錄，方便追查。修正：登入狀態改變後的自動重開更穩，不會沿用已失效的輸出。",
+  "pub_date": "2026-10-30T23:21:53.803Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjZrdmdlcjk5ODVjdysrM2JUUTBEY2ZhUnUyTVVrTkRZKzJZZGJTdG1YRU0xRXFuMno3aWlsNFRXSzVLdFhseFdkRzI3S1ZPNDRzSEhDSmlnSzRMRmdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMzk0MzUyCWZpbGU6QVNOXzAuMS4xMTJfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS4xMTIKRVlSamdVZVdPaTBhb3Y1WGdtZGxIQmFqTllLME5Oc0FKaC9CYVZpcDVNRHNTNndjcGRwVnk5NFc2ejZYU2NXbUlxOXJHMTZuT0xMYjN2YUVzNENkQlE9PQo=",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.112_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjVYUCsyZkpLakkxWVRMeVRic3RhMENLdnZ1NDR5MEVINXpYWlhWOFkxYjh4NmRMNUkyeTVsYUY1SkM0TERRckNOeDdqVDdTWDVSeGZxVFVLSXdmSmdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNDAyNTEzCWZpbGU6QVNOXzAuMS4xMTNfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS4xMTMKVzFUTVlmQVROdFhMeDEvMHJXV2g1N3Q1dGdaYThMUEdXVUI2MU9obTJ6UFdLVXVLVG5pd3haWTZUc3JpVURFK09NQ1ZjT2FoN2VJeE5KTS9kaEVQRGc9PQo=",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.113_x64-setup.exe"
     }
   }
 }
