@@ -37,6 +37,11 @@ pub trait Runner {
     fn spawn_clean(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
         self.spawn(program, args, env)
     }
+    /// 同 spawn_clean，再加上脫離：新程序群組、盡量脫離 ASN 所在的 Job Object，ASN 結束時不會被帶走（B2 的 mux 用）。
+    /// 預設＝spawn_clean（測試的假 runner 照樣記下 env）
+    fn spawn_detached(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
+        self.spawn_clean(program, args, env)
+    }
     /// 結束一個自己剛啟動的行程與它的子行程樹（等 socket 逾時要清掉剛開的視窗，不留桌面孤兒）
     fn kill_tree(&self, pid: u32);
     /// 行程的建立時間（毫秒，查不到＝None）：結束行程前用來確認還是當初啟動的那一個，防程式編號被回收後誤殺別人
@@ -127,6 +132,18 @@ impl Runner for RealRunner {
         Ok(child.id())
     }
 
+    fn spawn_detached(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
+        const NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        const BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+        // ASN 若被放在不准脫離的 Job Object 裡，帶 BREAKAWAY 會被拒；退回只開新程序群組，並記下來（這種情況 ASN 結束時 mux 可能被帶走）
+        create_detached(program, args, env, NEW_PROCESS_GROUP | BREAKAWAY_FROM_JOB)
+            .or_else(|_| {
+                elog!("終端服務：無法脫離 ASN 所在的工作群組，改用一般方式啟動（ASN 結束時可能一起結束）");
+                create_detached(program, args, env, NEW_PROCESS_GROUP)
+            })
+            .map_err(|e| format!("無法啟動 {}：{e}", program.display()))
+    }
+
     fn started_ms(&self, pid: u32) -> Option<u64> {
         crate::heartbeat::process_started_ms(pid)
     }
@@ -138,6 +155,90 @@ impl Runner for RealRunner {
     fn sleep(&self, d: Duration) {
         std::thread::sleep(d);
     }
+}
+
+/// Windows 命令列的單一參數引號（照 MSVC 的拆參數規則：引號前的反斜線加倍、結尾反斜線加倍）
+pub(crate) fn quote_arg(a: &str) -> String {
+    if !a.is_empty() && !a.contains([' ', '\t', '"']) {
+        return a.to_string();
+    }
+    let mut out = String::from("\"");
+    let mut bs = 0usize;
+    for c in a.chars() {
+        match c {
+            '\\' => bs += 1,
+            '"' => {
+                out.push_str(&"\\".repeat(bs * 2 + 1));
+                out.push('"');
+                bs = 0;
+            }
+            _ => {
+                out.push_str(&"\\".repeat(bs));
+                out.push(c);
+                bs = 0;
+            }
+        }
+    }
+    out.push_str(&"\\".repeat(bs * 2));
+    out.push('"');
+    out
+}
+
+/// 環境區塊：每個變數一段 `名=值` 以 0 結尾，最後再多一個 0（只有 env 裡的變數）
+pub(crate) fn env_block(env: &BTreeMap<String, String>) -> Vec<u16> {
+    let mut b: Vec<u16> = vec![];
+    for (k, v) in env {
+        b.extend(format!("{k}={v}").encode_utf16());
+        b.push(0);
+    }
+    if b.is_empty() {
+        b.push(0);
+    }
+    b.push(0);
+    b
+}
+
+/// 脫離啟動：直接呼叫 CreateProcessW，**不繼承任何控制代碼**（std 的 Command 一律繼承，會讓長駐的 mux 一直握著
+/// ASN 的標準輸出管道；實測從管道下測試時，測試程序結束了讀管道的那端還一直等不到結束）。
+/// 環境只有 env；工作資料夾設成執行檔所在的資料夾（不占住 ASN 啟動時的資料夾）；不開視窗
+#[cfg(windows)]
+fn create_detached(program: &Path, args: &[String], env: &BTreeMap<String, String>, flags: u32) -> std::io::Result<u32> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{CreateProcessW, CREATE_UNICODE_ENVIRONMENT, PROCESS_INFORMATION, STARTUPINFOW};
+    let wide = |p: &std::ffi::OsStr| p.encode_wide().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let app = wide(program.as_os_str());
+    let line = std::iter::once(quote_arg(&program.to_string_lossy())).chain(args.iter().map(|a| quote_arg(a))).collect::<Vec<_>>().join(" ");
+    let mut line: Vec<u16> = line.encode_utf16().chain(std::iter::once(0)).collect();
+    let envb = env_block(env);
+    let cwd = program.parent().map(|d| wide(d.as_os_str()));
+    unsafe {
+        let mut si: STARTUPINFOW = std::mem::zeroed();
+        si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+        let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
+        let ok = CreateProcessW(
+            app.as_ptr(),
+            line.as_mut_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            0, // 不繼承控制代碼
+            crate::nowin::NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | flags,
+            envb.as_ptr() as *const std::ffi::c_void,
+            cwd.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+            &si,
+            &mut pi,
+        );
+        if ok == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        Ok(pi.dwProcessId)
+    }
+}
+#[cfg(not(windows))]
+fn create_detached(program: &Path, args: &[String], env: &BTreeMap<String, String>, _flags: u32) -> std::io::Result<u32> {
+    Command::new(program).no_window().env_clear().args(args).envs(env).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map(|c| c.id())
 }
 
 /// 找到的 WezTerm 資料夾
