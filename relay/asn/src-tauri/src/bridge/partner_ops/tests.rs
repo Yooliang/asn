@@ -2339,3 +2339,51 @@ fn 執行端認得的操作與送出前的白名單同一份() {
     sent.sort();
     assert_eq!(known, sent, "bridge/partner_ops.rs 的 KNOWN_OPS 要與 relay.rs 的 PARTNER_OPS 一致");
 }
+
+// ---------- #593：喚醒找不到對話紀錄，pi 的兩種情況分開講 ----------
+const SID_PI: &str = "01a19067-d6cf-72d2-8995-c9e714ffa73b";
+
+#[test]
+fn 對話編號像不像_pi() {
+    assert!(looks_like_pi_sid(SID_PI));
+    assert!(!looks_like_pi_sid("aaaaaaaa-1111-4222-8333-444444444444"), "v4 是 Claude 的");
+    assert!(!looks_like_pi_sid(SID_A) && !looks_like_pi_sid(SID));
+    assert!(!looks_like_pi_sid("01a19067-d6cf-72d2-8995-c9e714ffa73"), "長度不對");
+    assert!(!looks_like_pi_sid("01a19067-d6cf-72d2-8995-c9e714ffa7zz"), "不是十六進位");
+}
+
+#[test]
+fn pi_喚醒_還沒講過話_說沒有紀錄檔_不說壞掉() {
+    let r = rig(Opt::default());
+    put_pi_file(&r, SID_A, SID_A); // sessions 資料夾在，只是沒有這個編號
+    *r.env.cfg.lock().unwrap() = Ok(pi_adopt_cfg(&r));
+    let res = resume(&r, "Pi妹妹", SID_PI);
+    assert_eq!((res.status, res.detail.as_str()), ("failed", PI_NEVER_TALKED));
+    assert!(res.detail.contains("還沒講過話") && res.detail.contains("開新的夥伴"));
+    assert!(r.env.pi_launched.lock().unwrap().is_empty());
+}
+
+#[test]
+fn pi_喚醒_設定資料夾不在_說找不到設定資料夾並提示環境變數() {
+    let r = rig(Opt::default());
+    *r.env.cfg.lock().unwrap() = Ok(pi_adopt_cfg(&r));
+    assert!(!r.env.pi_home.join(".pi").join("agent").join("sessions").exists());
+    let res = resume(&r, "Pi妹妹", SID_PI);
+    assert_eq!(res.detail, PI_NO_AGENT_DIR);
+    assert!(res.detail.contains("PI_CODING_AGENT_DIR"));
+}
+
+#[test]
+fn pi_喚醒_有這個編號的檔但接不回_照舊說找不到原本的對話紀錄() {
+    let r = rig(Opt::default());
+    put_pi_file(&r, SID_PI, "bbbbbbbb-1111-2222-3333-444444444444"); // 檔頭對不上
+    *r.env.cfg.lock().unwrap() = Ok(pi_adopt_cfg(&r));
+    assert_eq!(resume(&r, "Pi妹妹", SID_PI).detail, NO_RECORD);
+}
+
+#[test]
+fn claude_的編號找不到紀錄_照舊一句() {
+    let r = rig(Opt::default());
+    *r.env.cfg.lock().unwrap() = Ok(pi_adopt_cfg(&r));
+    assert_eq!(resume(&r, "離線夥伴", "aaaaaaaa-1111-4222-8333-444444444444").detail, NO_RECORD, "不是 pi 的編號就不提 pi");
+}
