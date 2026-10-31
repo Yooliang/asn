@@ -27,8 +27,10 @@ pub const SOCK_MAX: usize = 100;
 /// 等新起的 mux 開始接受連線
 pub const START_WAIT: Duration = Duration::from_secs(15);
 const POLL: Duration = Duration::from_millis(200);
+/// 剛起的 mux 查建立時間的重試次數
+const BIRTH_RETRIES: u32 = 5;
 const CLI_TIMEOUT: Duration = Duration::from_secs(10);
-/// 啟動鎖超過這麼久沒放掉就當作上一個 ASN 起到一半當掉了
+/// 啟動鎖的內容還沒寫好（空的或看不懂）超過這麼久，才當作寫鎖的程序起到一半當掉了
 const LOCK_STALE: Duration = Duration::from_secs(60);
 /// 窗格 0 跑的程式：立刻結束（見檔頭）
 const PANE0: [&str; 3] = ["cmd.exe", "/c", "exit"];
@@ -48,7 +50,7 @@ pub fn paths(local_app_data: &Path) -> Result<MuxPaths, String> {
     let dir = local_app_data.join("ASN").join("m");
     let sock = dir.join("sock");
     if sock.as_os_str().len() >= SOCK_MAX {
-        return Err(format!("終端服務的連線檔路徑太長（{} 字元，上限 {}），請把使用者資料夾放到短一點的路徑", sock.as_os_str().len(), SOCK_MAX - 1));
+        return Err(format!("終端服務的連線檔路徑太長（長度 {}，上限 {}），請把使用者資料夾放到短一點的路徑", sock.as_os_str().len(), SOCK_MAX - 1));
     }
     Ok(MuxPaths { config: dir.join("mux.lua"), pid: dir.join("mux.pid"), lock: dir.join("start.lock"), sock, dir })
 }
@@ -165,15 +167,26 @@ impl Mux<'_> {
         }
         std::fs::write(&self.paths.config, config_text(&self.paths.sock)).map_err(|e| format!("寫入終端服務設定失敗：{e}"))?;
         let pid = self.runner.spawn_detached(&self.server, &server_args(&self.paths.config), &self.base_env)?;
-        let at = self.runner.started_ms(pid);
-        if let Some(at) = at {
-            let _ = std::fs::write(&self.paths.pid, format!("{pid} {at}"));
+        // 查不到建立時間就寫不了 pid 檔，之後停不了它、起不來也清不掉，會成為孤兒：短暫重試，還是查不到就結束它
+        // （剛起的這一刻編號不可能已經被回收）
+        let mut at = self.runner.started_ms(pid);
+        for _ in 0..BIRTH_RETRIES {
+            if at.is_some() {
+                break;
+            }
+            self.runner.sleep(POLL);
+            at = self.runner.started_ms(pid);
         }
+        let Some(at) = at else {
+            self.runner.kill_tree(pid);
+            return Err("終端服務起來了，但查不到它的建立時間，無法確認之後停的是同一個，已結束它".into());
+        };
+        let _ = std::fs::write(&self.paths.pid, format!("{pid} {at}"));
         if self.wait_alive(START_WAIT) {
             return Ok(Ensure::Started { pid });
         }
         // 起不來：只清自己剛起的那一個（建立時間對得上才動）
-        if at.is_some() && self.runner.started_ms(pid) == at {
+        if self.runner.started_ms(pid) == Some(at) {
             self.runner.kill_tree(pid);
         }
         let _ = std::fs::remove_file(&self.paths.pid);
@@ -189,18 +202,34 @@ impl Mux<'_> {
     }
 }
 
-/// 啟動鎖：`create_new` 拿到才算；檔案超過 `LOCK_STALE` 沒放就當上一個 ASN 起到一半當掉，清掉重拿。離開時刪掉
+/// 啟動鎖：`create_new` 拿到才算，內容寫「pid 建立時間」。過期看**寫鎖的那個程序還在不在**（建立時間對得上），不看檔案時間；
+/// 內容還沒寫好（空的、看不懂）才退回看檔案時間（超過 `LOCK_STALE`）。
+/// 清過期的鎖時先改名到自己的暫存名、再讀一次，內容跟判過期時一樣才刪；不一樣（別人剛清掉舊鎖、建了自己的新鎖）就改回去。
+/// 這樣兩個 ASN 同時判定過期時，後到的那個不會把先到那個的新鎖刪掉（#606 審查）。離開時刪掉
 struct StartLock(PathBuf);
 impl StartLock {
     fn acquire(p: &Path, r: &dyn Runner) -> Result<Self, String> {
+        let me = std::process::id();
+        let mine = format!("{me} {}", r.started_ms(me).unwrap_or(0));
         let mut left = tries(START_WAIT);
         loop {
             match std::fs::OpenOptions::new().write(true).create_new(true).open(p) {
-                Ok(_) => return Ok(StartLock(p.to_path_buf())),
+                Ok(mut f) => {
+                    use std::io::Write;
+                    let _ = f.write_all(mine.as_bytes());
+                    return Ok(StartLock(p.to_path_buf()));
+                }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    let stale = std::fs::metadata(p).and_then(|m| m.modified()).ok().and_then(|m| m.elapsed().ok()).is_some_and(|age| age >= LOCK_STALE);
-                    if stale {
-                        let _ = std::fs::remove_file(p);
+                    let seen = std::fs::read_to_string(p).unwrap_or_default();
+                    if lock_stale(p, &seen, r) {
+                        let tmp = p.with_file_name(format!("start.lock.stale.{me}"));
+                        if std::fs::rename(p, &tmp).is_ok() {
+                            if std::fs::read_to_string(&tmp).unwrap_or_default() == seen {
+                                let _ = std::fs::remove_file(&tmp);
+                            } else if std::fs::rename(&tmp, p).is_err() {
+                                let _ = std::fs::remove_file(&tmp);
+                            }
+                        }
                         continue;
                     }
                     if left == 0 {
@@ -212,6 +241,14 @@ impl StartLock {
                 Err(e) => return Err(format!("拿終端服務啟動鎖失敗：{e}")),
             }
         }
+    }
+}
+/// 鎖過期了沒：內容是「pid 建立時間」就看那個程序還在不在；內容還沒寫好就看檔案時間
+fn lock_stale(p: &Path, content: &str, r: &dyn Runner) -> bool {
+    let mut it = content.split_whitespace();
+    match (it.next().and_then(|x| x.parse::<u32>().ok()), it.next().and_then(|x| x.parse::<u64>().ok())) {
+        (Some(pid), Some(at)) => r.started_ms(pid) != Some(at),
+        _ => std::fs::metadata(p).and_then(|m| m.modified()).ok().and_then(|m| m.elapsed().ok()).is_some_and(|age| age >= LOCK_STALE),
     }
 }
 impl Drop for StartLock {

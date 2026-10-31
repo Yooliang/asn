@@ -12,13 +12,15 @@ struct Fake {
     killed: RefCell<Vec<u32>>,
     birth: RefCell<BTreeMap<u32, u64>>,
     list_json: String,
+    /// 起完之後查不到建立時間
+    no_birth: bool,
     /// 起完之後這個編號被別的程式拿走（第二次查建立時間就變了）
     reborn: bool,
     birth_queries: Cell<usize>,
 }
 impl Fake {
     fn new() -> Self {
-        Fake { calls: RefCell::new(vec![]), tries: Cell::new(0), alive_after: Cell::new(None), alive_once_started: true, started: RefCell::new(vec![]), killed: RefCell::new(vec![]), birth: RefCell::new(BTreeMap::new()), list_json: "[]".into(), reborn: false, birth_queries: Cell::new(0) }
+        Fake { calls: RefCell::new(vec![]), tries: Cell::new(0), alive_after: Cell::new(None), alive_once_started: true, started: RefCell::new(vec![]), killed: RefCell::new(vec![]), birth: RefCell::new(BTreeMap::new()), list_json: "[]".into(), no_birth: false, reborn: false, birth_queries: Cell::new(0) }
     }
     fn cli_calls(&self) -> Vec<Vec<String>> {
         self.calls.borrow().iter().filter(|c| c.0.ends_with("wezterm.exe")).map(|c| c.1.clone()).collect()
@@ -39,17 +41,22 @@ impl Runner for Fake {
         self.calls.borrow_mut().push((program.to_string_lossy().into(), args.to_vec(), env.clone()));
         let pid = 4000 + self.started.borrow().len() as u32;
         self.started.borrow_mut().push(pid);
-        self.birth.borrow_mut().insert(pid, 777);
+        if !self.no_birth {
+            self.birth.borrow_mut().insert(pid, 777);
+        }
         Ok(pid)
     }
     fn kill_tree(&self, pid: u32) {
         self.killed.borrow_mut().push(pid);
     }
     fn started_ms(&self, pid: u32) -> Option<u64> {
-        let n = self.birth_queries.get();
-        self.birth_queries.set(n + 1);
-        if self.reborn && n > 0 && self.started.borrow().contains(&pid) {
-            return Some(888);
+        // 只數剛起的那些編號被查的次數（啟動鎖也會查 ASN 自己的編號，不算）
+        if self.started.borrow().contains(&pid) {
+            let n = self.birth_queries.get();
+            self.birth_queries.set(n + 1);
+            if self.reborn && n > 0 {
+                return Some(888);
+            }
         }
         self.birth.borrow().get(&pid).copied()
     }
@@ -65,8 +72,9 @@ fn mux<'a>(r: &'a Fake, d: &Path) -> Mux<'a> {
 
 #[test]
 fn socket_放短路徑_太長就拒絕() {
-    let p = paths(Path::new(r"C:\Users\u\AppData\Local")).unwrap();
-    assert_eq!(p.sock, PathBuf::from(r"C:\Users\u\AppData\Local\ASN\m\sock"));
+    let base = Path::new(r"C:\Users\u\AppData\Local");
+    let p = paths(base).unwrap();
+    assert_eq!(p.sock, base.join("ASN").join("m").join("sock"), "跟平台無關的寫法（CI 在 Linux 上跑）");
     assert!(p.sock.as_os_str().len() < SOCK_MAX);
     let long = format!(r"C:\Users\{}\AppData\Local", "x".repeat(80));
     let e = paths(Path::new(&long)).unwrap_err();
@@ -306,4 +314,62 @@ fn 起了卻連不上_編號已被別的程式拿走就不殺() {
     r.reborn = true;
     assert!(mux(&r, d.path()).ensure().is_err());
     assert!(r.killed.borrow().is_empty(), "建立時間對不上：不是剛才起的那一個");
+}
+
+#[test]
+fn 起了卻查不到建立時間_結束它並回錯_不留孤兒() {
+    let d = tempfile::tempdir().unwrap();
+    let mut r = Fake::new();
+    r.no_birth = true;
+    let m = mux(&r, d.path());
+    assert!(m.ensure().unwrap_err().contains("查不到它的建立時間"));
+    assert_eq!(*r.killed.borrow(), vec![4000], "用剛拿到的編號結束它");
+    assert!(!m.paths.pid.exists());
+}
+
+#[test]
+fn 啟動鎖_寫鎖的程序不在了才算過期_還在就等() {
+    // 寫鎖的程序（3100）不在了：清掉鎖、照常起
+    let d = tempfile::tempdir().unwrap();
+    let r = Fake::new();
+    let m = mux(&r, d.path());
+    std::fs::create_dir_all(&m.paths.dir).unwrap();
+    std::fs::write(&m.paths.lock, "3100 123").unwrap();
+    assert_eq!(m.ensure(), Ok(Ensure::Started { pid: 4000 }));
+    assert!(!m.paths.lock.exists() && !m.paths.dir.join(format!("start.lock.stale.{}", std::process::id())).exists(), "暫存名也清掉");
+    // 寫鎖的程序（3200）還在：就算檔案很舊也等，等不到就放棄，不起任何東西、不動別人的鎖
+    let d2 = tempfile::tempdir().unwrap();
+    let r2 = Fake::new();
+    r2.birth.borrow_mut().insert(3200, 456);
+    let m2 = mux(&r2, d2.path());
+    std::fs::create_dir_all(&m2.paths.dir).unwrap();
+    std::fs::write(&m2.paths.lock, "3200 456").unwrap();
+    let f = std::fs::File::options().write(true).open(&m2.paths.lock).unwrap();
+    f.set_modified(std::time::SystemTime::now() - Duration::from_secs(3600)).unwrap();
+    drop(f);
+    assert!(m2.ensure().unwrap_err().contains("另一個 ASN 正在啟動"));
+    assert!(r2.started.borrow().is_empty());
+    assert_eq!(std::fs::read_to_string(&m2.paths.lock).unwrap(), "3200 456");
+}
+
+#[test]
+fn 啟動鎖_判過期只看寫鎖的程序_內容還沒寫好的新鎖不算過期() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("start.lock");
+    let r = Fake::new();
+    r.birth.borrow_mut().insert(3300, 789);
+    std::fs::write(&p, "3300 789").unwrap();
+    assert!(!lock_stale(&p, "3300 789", &r), "主人還活著就不算過期");
+    assert!(lock_stale(&p, "3100 123", &r), "主人不在了");
+    assert!(lock_stale(&p, "3300 788", &r), "編號被回收（建立時間不同）也算不在");
+    std::fs::write(&p, "").unwrap();
+    assert!(!lock_stale(&p, "", &r), "剛建、內容還沒寫好的鎖不算過期");
+}
+
+#[test]
+fn 守門_清過期的鎖先改名再核對內容_不直接刪() {
+    let src = include_str!("../mux.rs").replace("\r\n", "\n");
+    let body = &src[src.find("fn acquire(p: &Path, r: &dyn Runner)").unwrap()..src.find("fn lock_stale(").unwrap()];
+    assert!(!body.contains("remove_file(p)"), "不能直接刪鎖檔（會刪到別人剛建的新鎖）");
+    assert!(body.contains("std::fs::rename(p, &tmp)") && body.contains("== seen"));
 }
