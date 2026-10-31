@@ -1,0 +1,22 @@
+ ctrl+o more
+ Press ctrl+o to show full startup help and loaded resources.
+
+ Pi can explain its own features and look up its docs. Ask it how to use or
+ extend Pi.
+
+[Skills]
+  computer-use, find-skills, orca-cli, orchestration
+
+
+ fd not found. Downloading...
+ ripgrep not found. Downloading...
+ ripgrep installed to
+ C:\Users\<user>\AppData\Local\Temp\<scratch>\emptypi\bin\rg.exe
+ fd installed to
+ C:\Users\<user>\AppData\Local\Temp\<scratch>\emptypi\bin\fd.exe
+
+────────────────────────────────────────────────────────────────────────────────
+55
+────────────────────────────────────────────────────────────────────────────────
+C:\Users\<user>\AppData\Local\Temp\claude\G--\fbdf696e-47e4-4e0b-8c61-9b6eb...
+0.0%/272k (auto)                                       (openai) gpt-5.5 • medium

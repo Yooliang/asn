@@ -1,0 +1,4 @@
+# synthetic：不是真實畫面。字串取自 claude.exe 2.1.316 內嵌文字（三種變體各一行）。
+  ⎿  Login expired · Please run /login
+  ⎿  OAuth token revoked · Please run /login
+  ⎿  API Error: 401 Invalid API key · Please run /login
