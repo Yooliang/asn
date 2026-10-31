@@ -7,7 +7,7 @@ import { isDeviceHidden, isDeviceRemoved } from './device-order.mjs'
 import { MODEL_CATALOG } from './model-catalog.mjs'
 import { engineKey, engineRank } from './tabs.mjs'
 import { agoText } from './cloud-invite.mjs'
-import { accountLine, loginIncomplete } from './claude-accounts.mjs'
+import { accountLine, loginIncomplete, loginFailed } from './claude-accounts.mjs'
 import { UNNAMED_DEVICE } from './text.mjs'
 import { quotaView } from './account-quota.mjs'
 import { ROSTER_TEXT, nodeLabelOf, rosterAccountsOn, rosterLookup, rosterQuota } from './account-roster.mjs'
@@ -91,7 +91,7 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
         const k = vendorKey(a?.vendor)
         if (SKIP.has(k) || !a?.email) continue
         keys.add(k)
-        ;(accts[k] ??= []).push({ email: a.email, plan: a.plan, current: a.current === true, incomplete: k === 'claude' && loginIncomplete(a), ...remoteQuota(k, a) })
+        ;(accts[k] ??= []).push({ email: a.email, plan: a.plan, current: a.current === true, incomplete: k === 'claude' && loginIncomplete(a), ...(k === 'claude' && loginFailed(a) ? { loginFailed: true } : {}), ...remoteQuota(k, a) })
       }
     }
     // Gemini（#374 之三）：不在各台的帳號回報裡，帳號與額度只在列表；認「哪台讀的」。這台有 Gemini 帳號才算有這個廠商
