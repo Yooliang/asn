@@ -19,6 +19,9 @@ pub(crate) mod win_term;
 #[allow(dead_code)]
 pub(crate) mod wezterm;
 #[cfg(desktop)]
+#[allow(dead_code)] // B2a 只放生命週期，呼叫點在 B2b 接上
+pub(crate) mod mux;
+#[cfg(desktop)]
 mod term_adopt;
 #[cfg(desktop)]
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
