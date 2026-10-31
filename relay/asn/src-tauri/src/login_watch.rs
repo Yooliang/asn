@@ -336,7 +336,7 @@ pub struct RelayNotifier {
 }
 impl OwnerNotifier for RelayNotifier {
     fn notify_owner(&self, n: &Notice) -> Result<(), String> {
-        tauri::async_runtime::block_on(self.relay.api("acct_login_alert", Some(n.payload()))).map(|_| ()).map_err(|e| classify_error(&e).to_string())
+        crate::rt::block_on(self.relay.api("acct_login_alert", Some(n.payload()))).map(|_| ()).map_err(|e| classify_error(&e).to_string())
     }
 }
 
