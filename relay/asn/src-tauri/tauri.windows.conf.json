@@ -3,6 +3,7 @@
     "resources": {
       "resources/wezterm/wezterm-gui.exe": "wezterm/wezterm-gui.exe",
       "resources/wezterm/wezterm.exe": "wezterm/wezterm.exe",
+      "resources/wezterm/wezterm-mux-server.exe": "wezterm/wezterm-mux-server.exe",
       "resources/wezterm/conpty.dll": "wezterm/conpty.dll",
       "resources/wezterm/OpenConsole.exe": "wezterm/OpenConsole.exe",
       "resources/wezterm/libEGL.dll": "wezterm/libEGL.dll",
