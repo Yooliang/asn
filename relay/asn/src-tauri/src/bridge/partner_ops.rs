@@ -236,6 +236,17 @@ pub(crate) struct OpResult {
 fn ok(detail: impl Into<String>, result: Option<Value>) -> OpResult {
     OpResult { status: "ok", detail: detail.into(), result }
 }
+/// 喚醒找不到對話紀錄（#593 拆成三句）
+const NO_RECORD: &str = "找不到原本的對話紀錄，只能開新的夥伴";
+const PI_NEVER_TALKED: &str = "這段對話還沒講過話，pi 沒有留下紀錄檔（pi 要等第一句話才會存檔），沒有東西可以接回；請開新的夥伴";
+const PI_NO_AGENT_DIR: &str = "找不到 pi 的設定資料夾，沒辦法接回這段對話；如果 pi 的設定不在預設位置，請設定 PI_CODING_AGENT_DIR 後重開 ASN";
+
+/// pi 的對話編號是 UUIDv7（第三段以 7 開頭）；Claude 用的是隨機的 v4
+fn looks_like_pi_sid(sid: &str) -> bool {
+    let p: Vec<&str> = sid.split('-').collect();
+    sid.len() == 36 && p.iter().map(|x| x.len()).eq([8, 4, 4, 4, 12]) && p[2].starts_with('7') && sid.chars().all(|c| c == '-' || c.is_ascii_hexdigit())
+}
+
 fn failed(detail: impl Into<String>) -> OpResult {
     OpResult { status: "failed", detail: detail.into(), result: None }
 }
@@ -1369,7 +1380,10 @@ impl PartnerOps {
             if let Some(found) = self.find_pi_session(sid) {
                 return self.resume_pi(name, found);
             }
-            return failed("找不到原本的對話紀錄，只能開新的夥伴");
+            if let Some(why) = self.pi_no_record_reason(sid) {
+                return failed(why);
+            }
+            return failed(NO_RECORD);
         };
         // 4. 資料夾必須在本機啟動設定允許的清單內
         let cfg = match self.env.launch_config() {
@@ -1418,6 +1432,24 @@ impl PartnerOps {
             (true, Some((pid, session))) => ok("視窗已喚醒", Some(json!({ "pid": pid, "session_id": session }))),
             _ => unconfirmed("視窗已送出，但一直沒看到同名的視窗出現（可能卡在「是否信任此資料夾」，請到電腦前看一下）"),
         }
+    }
+
+    /// 找不到對話檔時，pi 的兩種情況要分開講（#593）：pi 要等對話裡有第一句話才會存檔，所以「還沒講過話」不是壞掉；
+    /// 設定資料夾不在就是另一回事。對話編號不像 pi 的（不是 UUIDv7），或 pi 確實有這個編號的檔但接不回（檔頭不符、不只一個），
+    /// 回 None，照舊說「找不到原本的對話紀錄」。只看資料夾與檔名，不讀內容
+    fn pi_no_record_reason(&self, sid: &str) -> Option<&'static str> {
+        use super::engines::pi_adopt as pa;
+        if !looks_like_pi_sid(sid) {
+            return None;
+        }
+        let dir = pa::sessions_dir(&self.env.pi_agent_dir());
+        if !dir.is_dir() {
+            return Some(PI_NO_AGENT_DIR);
+        }
+        if pa::list_session_files(&dir).iter().any(|f| f.file_id == sid) {
+            return None;
+        }
+        Some(PI_NEVER_TALKED)
     }
 
     /// pi 的對話檔：檔名的編號＝sid，而且檔頭的 id 也是 sid（只讀檔頭，不讀對話內容）；找不到或不只一個都回 None

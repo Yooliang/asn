@@ -1,0 +1,24 @@
+
+ ▀▀█  v1.4.0
+ █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash ·
+ ctrl+o more
+ Press ctrl+o to show full startup help and loaded resources.
+
+ Pi can explain its own features and look up its docs. Ask it how to use or
+ extend Pi.
+
+[Skills]
+  computer-use, find-skills, nas-search, orca-cli, orchestration
+
+[Extensions]
+  aegis-quota.ts, aegis-remember-model.ts, aegis-update.ts,
+orca-agent-status.ts, orca-prefill.ts, orca-titlebar-spinner.ts, pi-extension
+
+
+ <個人狀態列已遮>
+────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────
+C:\Users\<user>\AppData\Local\Temp\c1trust
+0.0%/1.0M (auto)                            (anthropic) claude-sonnet-5-5 • high
+額度 [--------------------] 0% 11/01 重置 ASN 可收信

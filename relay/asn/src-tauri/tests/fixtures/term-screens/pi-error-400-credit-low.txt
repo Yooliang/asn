@@ -1,0 +1,24 @@
+[Skills]
+  computer-use, find-skills, nas-search, orca-cli, orchestration
+
+[Extensions]
+  aegis-quota.ts, aegis-remember-model.ts, aegis-update.ts,
+orca-agent-status.ts, orca-prefill.ts, orca-titlebar-spinner.ts, pi-extension
+
+
+ Reply with just OK
+
+
+ Error: 400
+ {"type":"error","error":{"type":"invalid_request_error","message":"Your credit
+ balance is too low to access the Anthropic API. Please go to Plans & Billing
+ to upgrade or purchase credits."},"request_id":"req_<已遮>"}
+ If this looks like a pi bug, /bug sends a report to the developers.
+
+ <個人狀態列已遮>
+────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────
+C:\Users\<user>\AppData\Local\Temp\c1trust
+0.3%/1.0M (auto)                            (anthropic) claude-sonnet-5-5 • high
+額度 [--------------------] 0% 11/01 重置 ASN 可收信

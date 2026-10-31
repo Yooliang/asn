@@ -108,7 +108,7 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     era * 146097 + doe - 719468
 }
 /// 自 1970-01-01 起的天數 → (年, 月, 日)
-fn civil_from_days(z: i64) -> (i64, i64, i64) {
+pub(crate) fn civil_from_days(z: i64) -> (i64, i64, i64) {
     let z = z + 719468;
     let era = if z >= 0 { z } else { z - 146096 } / 146097;
     let doe = z - era * 146097;
@@ -266,12 +266,12 @@ pub struct Scanner {
     models: HashMap<String, Arc<str>>,
 }
 
-fn mtime_ms(md: &std::fs::Metadata) -> i64 {
+pub(crate) fn mtime_ms(md: &std::fs::Metadata) -> i64 {
     md.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
 
 /// 遞迴找 *.jsonl（含子資料夾；不跟符號連結；深度上限避免意外迴圈）
-fn walk(dir: &Path, depth: u32, out: &mut Vec<(PathBuf, std::fs::Metadata)>) {
+pub(crate) fn walk(dir: &Path, depth: u32, out: &mut Vec<(PathBuf, std::fs::Metadata)>) {
     if depth > 6 {
         return;
     }
@@ -480,7 +480,7 @@ impl PeriodAcc {
 static SCANNER: Mutex<Option<Scanner>> = Mutex::new(None);
 
 /// 真實的 Claude 設定資料夾：`CLAUDE_CONFIG_DIR`（可用逗號列多個）；沒設就 `<家目錄>\.claude` 與 `<家目錄>\.config\claude`
-fn real_roots() -> Vec<PathBuf> {
+pub(crate) fn real_roots() -> Vec<PathBuf> {
     if let Some(v) = std::env::var_os("CLAUDE_CONFIG_DIR") {
         let v = v.to_string_lossy().into_owned();
         let l: Vec<PathBuf> = v.split(',').map(str::trim).filter(|s| !s.is_empty()).map(PathBuf::from).collect();

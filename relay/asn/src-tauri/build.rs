@@ -11,7 +11,7 @@ fn ensure_wezterm_placeholders() {
     }
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources").join("wezterm");
     let _ = std::fs::create_dir_all(&dir);
-    for f in ["wezterm-gui.exe", "wezterm.exe", "conpty.dll", "OpenConsole.exe", "libEGL.dll", "libGLESv2.dll", "LICENSE.md", "SOURCE.txt"] {
+    for f in ["wezterm-gui.exe", "wezterm.exe", "wezterm-mux-server.exe", "conpty.dll", "OpenConsole.exe", "libEGL.dll", "libGLESv2.dll", "LICENSE.md", "SOURCE.txt"] {
         let p = dir.join(f);
         if !p.exists() {
             let _ = std::fs::write(&p, b"");

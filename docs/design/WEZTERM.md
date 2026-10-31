@@ -268,3 +268,40 @@
 4. 關程序前三項核對：映像是 claude／node、`startedAt` 與程序實際建立時間相符（嚴格版，查不到就不關）、結束前再比一次。關的時候寫死 `polite=false`。
 5. 版本號：第 1 階段發版前由雯確認 0.2.0-rc.N 在 updater（latest.json 比版本）與 Play versionCode 換算都行，行就用 rc，不行就 0.1.113 起；結果貼群組再發。
 6. env_clear 斷言改寫後要涵蓋 WezTerm 開窗與退路主控台兩條（1.5）。
+
+## 十一、mux 生命週期（B0 實測，給 0.2.0 第 2 階段 B2）
+
+> 調查員 2026-10-31 在工作機實測（session 1 桌面中斷中）。WezTerm 用同版官方 zip（20240203-110809-5046fc22），socket 用短路徑，只關自己開的 PID。原始紀錄見 PR #598 留言。
+
+### 11.1 實測結果
+
+| 項目 | 結果 |
+|---|---|
+| 預設窗格 0 | mux-server 一啟動就自己開一個窗格（id 0，workspace `default`，預設跑 cmd）。它繼承 **mux-server 自己的完整環境**。用 `wezterm-mux-server -- <程式>` 可以指定窗格 0 跑什麼 |
+| `cli spawn` 開的窗格環境 | ＝**下 cli 指令那個程序的環境**＋**登錄檔使用者變數（HKCU\Environment）**。mux-server 自己的環境**不會**帶進來 |
+| 登錄檔與呼叫端同名 | **登錄檔優先**：呼叫端把 `ASN_RELAY_DEFAULT_AGENT` 設成別的值，窗格裡仍是登錄檔的值。env_clear 清不掉登錄檔變數 |
+| `cli spawn` 能否逐窗格帶環境 | 沒有 env 參數（只有 `--cwd`、`--workspace`、`--new-window` 等）；只能靠呼叫端程序的環境 |
+| cli 連不上 socket | **預設會自己跑 `wezterm-mux-server --daemonize`**（用預設設定和預設 socket）。加 `--no-auto-start` 後 27ms 回錯，不起任何東西 |
+| 同一個 socket 起第二個 mux | 起得來，而且**搶走 socket**；之後 cli 只看得到第二個。第一個 mux 和它的窗格繼續跑，但再也連不到 |
+| 只結束 mux（不帶子程序） | 底下的 OpenConsole 與窗格程式**全部跟著結束**，沒有孤兒；夥伴一起斷 |
+| 窗格全部關閉 | mux **不會**自己結束 |
+| 啟動 mux 的程序結束 | mux 照樣活著 |
+| 多個用戶端同時連 | 16 條 list／get-text 平行，全數成功（0.07 秒） |
+| socket 路徑 126 字元 | 起不來：`path must be shorter than SUN_LEN` |
+| mux 執行中覆蓋執行檔 | 覆蓋失敗（busy），**改名可以** |
+| GUI `connect` 接 mux（桌面中斷） | `front_end` OpenGL、Software 都是 `Failed to create window: The OpenGL implementation is too old`；WebGpu 起得來（未能確認畫面）。GUI 結束不影響窗格 |
+
+### 11.2 B2 照這樣做
+
+1. **一個使用者一個 mux**，socket 固定放短路徑（例如 `%LOCALAPPDATA%\ASN\m\sock`，B2 加長度測試）。
+2. **每條 cli 都帶 `--no-auto-start`**，並明給 `WEZTERM_UNIX_SOCKET`。
+3. **起 mux 前先試連**（`cli --no-auto-start list`）：連得上就沿用，連不上才起新的。起新的之前，再確認沒有別的 ASN 實例正在起（用檔案鎖，或在已知路徑放 pid 檔，核對建立時間）。
+4. **啟動 mux 時環境先過 `child_env`**，並指定窗格 0 跑一個無害、不會結束的程式；窗格 0 不給夥伴用，也不送字。
+5. **下 cli spawn 的程序先清空環境，只放白名單**（`child_env` 的結果＋該夥伴自己的變數），跟第 1 階段 wezterm.rs:117 同一份規則。config.rs:283 的斷言改成檢查 cli spawn 的環境。
+6. **登錄檔使用者變數**：
+   - 逐夥伴給的變數（例如 `ASN_PI_NAME`）不能跟登錄檔裡的同名；B2 啟動時讀 HKCU\Environment 的**名字**（不讀值），撞名就記 log，並改用包裝指令設定。
+   - `child_env` 會濾掉的名字（`CLAUDE*`、`NO_COLOR`、`envc::is_secret` 判為金鑰的）如果出現在登錄檔，WezTerm 會把它們帶回窗格。B2 遇到這種情況，要嘛用包裝指令在窗格裡先清掉，要嘛在夥伴清單提示「使用者環境變數裡有金鑰類變數，請移到別處」。不可以自動改使用者的登錄檔。
+   - 未實測：第 1 階段 `wezterm-gui start` 開的窗格是否也會把登錄檔變數加回來（推測會，同一套 WezTerm 程式碼）。B4 順手驗。
+7. **停 mux 只由 ASN 決定**：mux 不會自己結束，也不跟著 ASN 結束（0.2.0 的目標是 ASN 關掉時夥伴繼續跑）。只在使用者明確要求、或更新流程需要時停；停之前要講清楚「會中斷 N 個夥伴」。
+8. **更新**：安裝程式先把執行中的 mux 執行檔改名（`.old`）再放新檔；舊 mux 繼續跑到下次重開，`.old` 檔在下次啟動、沒有舊 mux 在跑時清掉。conpty.dll、OpenConsole.exe 也被 mux 占用，要一起這樣處理（只實測過 mux 執行檔本身，B4 驗這兩個）。
+9. **看畫面的 GUI**：`connect` 失敗只影響「看」，不影響夥伴；失敗時給人看的話＝「這台電腦的桌面目前沒有人登入，開不了終端畫面；夥伴照常在背景執行」。

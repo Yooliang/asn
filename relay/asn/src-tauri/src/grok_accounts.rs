@@ -175,7 +175,7 @@ pub async fn auto_loop(first: std::time::Duration, every: std::time::Duration, o
             match &out {
                 AutoOutcome::Added(e) => elog!("已自動加入 Grok 帳號 {e}"),
                 AutoOutcome::Updated(e) => elog!("已更新 Grok 帳號 {e} 的登入資料"),
-                AutoOutcome::Nothing => {}
+                AutoOutcome::Nothing | AutoOutcome::External(_) => {}
             }
             if out != AutoOutcome::Nothing {
                 on_event(&out);
