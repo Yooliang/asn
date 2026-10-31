@@ -342,15 +342,13 @@ async fn acct_remote_report(app: State<'_, App>) -> Result<Value, String> {
     let codex_windows = tauri::async_runtime::spawn_blocking(move || login.map(|e| codex_quota::windows_for(&work_dir, &e, heartbeat::now_ms() as i64)).unwrap_or_default()).await.unwrap_or_default();
     // Gemini：ASN 開的 agy 視窗狀態列記下的帳號與額度（沒開過就是空的）
     let gemini = tauri::async_runtime::spawn_blocking(|| gemini_quota::report_rows(&gemini_quota::load_all(&identity::home_dir()), heartbeat::now_ms() as i64)).await.unwrap_or_default();
-    // 登入失效（對話紀錄判定，見 login_watch.rs）：隨帳號回報帶 login_failed；通知送出路徑待後台，目前是空殼
+    // 登入失效（對話紀錄判定，見 login_watch.rs）：隨帳號回報帶 login_failed；判定為失效時用節點金鑰呼叫後台 acct_login_alert 通知本人
     let ctx = login_watch::NoticeCtx {
         computer: account::computer_name(|k| std::env::var(k).ok()),
         email: list.iter().find(|a| a.current).map(|a| a.email.clone()).unwrap_or_default(),
-        timeouts: 0, // 轉交逾時次數目前沒有計數來源，內文會略過這一句
-        tz_offset_min: 0, // 本機時差目前沒有來源；後台路徑定案接上通知時一併補
-        node: relay.node.clone(),
     };
-    let login_failed = tauri::async_runtime::spawn_blocking(move || login_watch::tick_real(heartbeat::now_ms() as i64, &ctx)).await.unwrap_or(false);
+    let notifier = login_watch::RelayNotifier { relay: relay.clone() };
+    let login_failed = tauri::async_runtime::spawn_blocking(move || login_watch::tick_real(heartbeat::now_ms() as i64, &ctx, &notifier)).await.unwrap_or(false);
     acct_remote::report(relay.as_ref(), &list, codex.as_ref(), &quotas, &grok, &codex_windows, &gemini, login_failed).await
 }
 /// 帳號列表（#374）：本人所有設備回報的各廠牌帳號與額度。要本人簽章；沒登入回錯，不打後台
