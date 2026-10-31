@@ -18,6 +18,8 @@ use std::path::{Path, PathBuf};
 
 const CRED: &str = ".credentials.json";
 const FRAG: &str = "account.json";
+/// 切走時查不到帳號（逾時、連不上）的權杖先放這裡，跟正式那份同一個資料夾；切換不會拿它來用，切回這個帳號時再查一次
+const QUAR: &str = ".credentials.unverified.json";
 const KEY: &str = "oauthAccount";
 /// 切換到「存的登入不完整」的帳號時回給使用者的話（本機與遠端切換同一句）
 pub const INCOMPLETE_LOGIN_MSG: &str = "這個帳號存的登入不完整，請重新登入一次再加入";
@@ -581,17 +583,42 @@ pub fn switch_impl(home: &Path, email: &str, fault: Fault, who: &dyn Fn(&[u8]) -
         (Some(c), Some((frag, uuid))) => {
             let cur_email = email_of_fragment(frag);
             let owner = saved_accounts(home).into_iter().find(|s| &s.uuid == uuid || Some(&s.email) == cur_email.as_ref()).ok_or(AccErr::CurrentUnsaved)?;
-            let (ok, what) = verdict(&who(c), &owner.uuid, &owner.email);
+            let l = who(c);
+            let (ok, what) = verdict(&l, &owner.uuid, &owner.email);
             if ok {
                 write_atomic(&owner.dir.join(CRED), c)?;
                 write_atomic(&owner.dir.join(FRAG), frag.as_bytes())?;
+                let _ = std::fs::remove_file(owner.dir.join(QUAR)); // 已有核對過的新權杖，舊的隔離檔沒用了
                 elog!("切走前核對 {}：{what}，已回存", owner.email);
+            } else if matches!(l, Lookup::Timeout | Lookup::Failed) {
+                // 查不到不代表不對：先隔離，切回這個帳號時再查（#591）
+                write_atomic(&owner.dir.join(QUAR), c)?;
+                elog!("切走前核對 {}：{what}，先存成隔離檔，切回時再核對", owner.email);
             } else {
                 elog!("切走前核對 {}：{what}，這次不回存", owner.email);
             }
         }
         (Some(_), None) => return Err(AccErr::CurrentUnsaved),
         _ => {}
+    }
+
+    // 1b. 要切去的帳號有隔離檔：切回這一刻查一次。相符就改用它（切換成功後才轉正）；不符或 401 刪掉；查不到留著下次再查
+    let mut tgt_cred = tgt_cred;
+    let mut quar_done: Option<bool> = None; // Some(true)＝轉正、Some(false)＝刪掉
+    if let Ok(q) = std::fs::read(dir.join(QUAR)) {
+        let tgt_uuid = uuid_of_fragment(&tgt_frag).unwrap_or_default();
+        let l = if has_refresh_token(&q) { who(&q) } else { Lookup::Unauthorized };
+        let (ok, what) = verdict(&l, &tgt_uuid, &email);
+        if ok {
+            tgt_cred = q;
+            quar_done = Some(true);
+            elog!("切回 {email} 前核對隔離檔：{what}，改用隔離檔");
+        } else if matches!(l, Lookup::Timeout | Lookup::Failed) {
+            elog!("切回 {email} 前核對隔離檔：{what}，留著下次再查");
+        } else {
+            quar_done = Some(false);
+            elog!("切回 {email} 前核對隔離檔：{what}，刪掉");
+        }
     }
 
     // 2. 先算好新的 .claude.json（算不出來就在動手前停下）
@@ -642,6 +669,16 @@ pub fn switch_impl(home: &Path, email: &str, fault: Fault, who: &dyn Fn(&[u8]) -
         } else {
             AccErr::from(e)
         });
+    }
+    match quar_done {
+        Some(true) => {
+            write_atomic(&dir.join(CRED), &tgt_cred)?;
+            let _ = std::fs::remove_file(dir.join(QUAR));
+        }
+        Some(false) => {
+            let _ = std::fs::remove_file(dir.join(QUAR));
+        }
+        None => {}
     }
     mark_own_write(home);
     Ok(SwitchOutcome { email, notice: "切換好了，開著的 Claude 視窗不用重開。".into() })
@@ -751,7 +788,12 @@ impl Watch {
         let claimed = current_email(home);
         let prev = self.fp.replace(fp);
         let prev_email = std::mem::replace(&mut self.email, claimed.clone());
-        if prev.is_none() || prev == Some(fp) {
+        if prev.is_none() {
+            // 第一次看到：ASN 在這之前切過的紀錄已經沒有可抵銷的對象，清掉免得之後少報一次
+            OWN_WRITE.lock().unwrap_or_else(|e| e.into_inner()).retain(|(p, _)| p != home);
+            return None;
+        }
+        if prev == Some(fp) {
             return None;
         }
         let actual = cred_owner(home);
@@ -1433,6 +1475,121 @@ mod tests {
         w.check(h);
         sw(h, "b@x.test").unwrap();
         assert_eq!(w.check(h), None, "ASN 自己切的");
+    }
+
+    // ---------- #591 隔離檔：切走時查不到 → 先隔離；切回時再查一次 ----------
+    fn tag_of(c: &[u8]) -> String {
+        access_token(c).and_then(|t| t.strip_prefix("FAKE-ACCESS-").map(String::from)).unwrap_or_default()
+    }
+    /// 甲（A1）乙（B1）在庫，目前是甲、權杖已換新成 A2；切走時查 A2 一律得到 `away`，切到乙
+    fn away_with(h: &Path, away: Lookup) {
+        login(h, "u-a", "a@x.test", "A1");
+        save_current(h).unwrap();
+        login(h, "u-b", "b@x.test", "B1");
+        save_current(h).unwrap();
+        login(h, "u-a", "a@x.test", "A2");
+        switch_impl(h, "b@x.test", Fault::None, &|c| if tag_of(c) == "A2" { away.clone() } else { fake_who(c) }).unwrap();
+        assert_eq!(read(cred_path(h)), cred("B1"), "隔離檔不會被拿去切換");
+    }
+    /// 切回甲，查隔離檔（A2）得到 `back`
+    fn back_with(h: &Path, back: Lookup) -> R<SwitchOutcome> {
+        switch_impl(h, "a@x.test", Fault::None, &|c| if tag_of(c) == "A2" { back.clone() } else { fake_who(c) })
+    }
+    fn quar(h: &Path) -> PathBuf {
+        dir_of(h, "a@x.test").join(QUAR)
+    }
+    fn acct_a() -> Lookup {
+        Lookup::Account { uuid: "u-a".into(), email: "a@x.test".into() }
+    }
+
+    #[test]
+    fn 隔離檔_切走查詢逾時或失敗_存成隔離檔_正式那份不動() {
+        for l in [Lookup::Timeout, Lookup::Failed] {
+            let d = setup();
+            let h = d.path();
+            away_with(h, l);
+            assert_eq!(read(quar(h)), cred("A2"), "跟正式那份同一個資料夾");
+            assert_eq!(read(dir_of(h, "a@x.test").join(CRED)), cred("A1"));
+            assert_eq!(emails(h), vec!["a@x.test", "b@x.test"], "清單不受影響");
+            assert!(!serde_json::to_string(&list(h)).unwrap().contains("FAKE-"));
+        }
+    }
+
+    #[test]
+    fn 隔離檔_切走時_401_或不符_不存隔離檔() {
+        for l in [Lookup::Unauthorized, Lookup::Account { uuid: "u-b".into(), email: "b@x.test".into() }] {
+            let d = setup();
+            let h = d.path();
+            away_with(h, l);
+            assert!(!quar(h).exists());
+        }
+    }
+
+    #[test]
+    fn 隔離檔_切回時相符_改用隔離檔並轉正() {
+        let d = setup();
+        let h = d.path();
+        away_with(h, Lookup::Timeout);
+        back_with(h, acct_a()).unwrap();
+        assert_eq!(read(cred_path(h)), cred("A2"), "切回用的是隔離檔那份新權杖");
+        assert_eq!(read(dir_of(h, "a@x.test").join(CRED)), cred("A2"), "轉正");
+        assert!(!quar(h).exists());
+    }
+
+    #[test]
+    fn 隔離檔_切回時不符或_401_刪掉_用正式那份() {
+        for l in [Lookup::Account { uuid: "u-b".into(), email: "b@x.test".into() }, Lookup::Unauthorized] {
+            let d = setup();
+            let h = d.path();
+            away_with(h, Lookup::Timeout);
+            back_with(h, l).unwrap();
+            assert_eq!(read(cred_path(h)), cred("A1"));
+            assert!(!quar(h).exists(), "查到不符就刪掉");
+        }
+    }
+
+    #[test]
+    fn 隔離檔_切回時又查不到_留著下次再查() {
+        let d = setup();
+        let h = d.path();
+        away_with(h, Lookup::Timeout);
+        back_with(h, Lookup::Timeout).unwrap();
+        assert_eq!(read(cred_path(h)), cred("A1"));
+        assert_eq!(read(quar(h)), cred("A2"));
+    }
+
+    #[test]
+    fn 隔離檔_切換失敗不轉正_之後切走核對相符就清掉() {
+        let d = setup();
+        let h = d.path();
+        away_with(h, Lookup::Timeout);
+        let r = switch_impl(h, "a@x.test", Fault::AfterCredentials, &|c| if tag_of(c) == "A2" { acct_a() } else { fake_who(c) });
+        assert!(r.is_err());
+        assert_eq!(read(dir_of(h, "a@x.test").join(CRED)), cred("A1"), "切換沒成功，不轉正");
+        assert_eq!(read(quar(h)), cred("A2"));
+        // 切回甲但隔離檔查不到（用正式那份 A1），使用中換新成 A3，切走時核對相符：A3 回存，舊隔離檔清掉
+        back_with(h, Lookup::Timeout).unwrap();
+        fs::write(cred_path(h), cred("A3")).unwrap();
+        sw(h, "b@x.test").unwrap();
+        assert_eq!(read(dir_of(h, "a@x.test").join(CRED)), cred("A3"));
+        assert!(!quar(h).exists());
+    }
+
+    #[test]
+    fn 背景檢查還沒記下第一次狀態前_ASN_切換的紀錄會清掉_之後不少報() {
+        let d = setup();
+        let h = d.path();
+        login(h, "u-b", "b@x.test", "B1");
+        save_current(h).unwrap();
+        login(h, "u-a", "a@x.test", "A1");
+        save_current(h).unwrap();
+        sw(h, "b@x.test").unwrap(); // 剛開機就切換：背景檢查還沒看過
+        let mut w = Watch::default();
+        assert_eq!(w.check(h), None, "第一次只記下來");
+        login(h, "u-a", "a@x.test", "A1"); // 別的程式換成甲
+        w.check(h).expect("要報");
+        login(h, "u-b", "b@x.test", "B1"); // 別的程式又換回乙：乙是 ASN 先前寫過的帳號，但那筆紀錄早該清掉
+        assert!(w.check(h).is_some(), "不能被開機前留下的紀錄抵銷");
     }
 
     #[test]
