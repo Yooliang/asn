@@ -251,6 +251,7 @@ pub fn adopt_pane(
             gui_pid: pid,
             sock,
             started_ms: Some(started_ms),
+            mux: false,
         },
         pane_id,
         cwd: canon.to_string_lossy().into_owned(),

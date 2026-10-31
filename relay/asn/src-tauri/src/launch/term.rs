@@ -195,6 +195,9 @@ struct StoreTerm {
     /// 0.2.0：claude 視窗開的時候參數裡的對話編號。舊對照表沒有這欄＝None
     #[serde(default, skip_serializing_if = "Option::is_none")]
     session_id: Option<String>,
+    /// B2b：窗格在共用 mux 裡（pid／started_ms 記的是 mux）。舊對照表沒有這欄＝第 1 階段（自己的 GUI），照舊認領
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    mux: bool,
 }
 
 enum Loaded {
@@ -230,6 +233,10 @@ pub struct TermService<R, F> {
     /// 開 agy 時另外帶的參數（#374：`--settings <檔>` 接上 Gemini 狀態列，見 gemini_session.rs）。
     /// 正式由 live() 設定；沒設（測試、沒有畫面的建置）就照舊只跑執行檔。回空的＝這次不帶。
     agy_args: Option<AgyArgs>,
+    /// B2b 開關（預設關＝行為跟第 1 階段完全一樣）。開了就改開在共用的 mux 裡；正式由 live() 讀 ASN_TERM_MUX 設定
+    use_mux: bool,
+    /// mux 的檔案放在這底下的 ASN\m（正式＝%LOCALAPPDATA%；測試注入暫存資料夾）
+    mux_base: Option<PathBuf>,
     inner: Mutex<Inner>,
     /// 單元測試注入啟動設定，避免依賴本機 launcher.json。
     #[cfg(test)]
@@ -247,6 +254,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             fs,
             status_gap: STATUS_GAP,
             agy_args: None,
+            use_mux: false,
+            mux_base: std::env::var_os("LOCALAPPDATA").map(PathBuf::from),
             inner: Mutex::new(Inner {
                 next: 0,
                 sessions: Vec::new(),
@@ -268,6 +277,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             fs,
             status_gap: STATUS_GAP,
             agy_args: None,
+            use_mux: false,
+            mux_base: std::env::var_os("LOCALAPPDATA").map(PathBuf::from),
             inner: Mutex::new(Inner {
                 next: 0,
                 sessions: Vec::new(),
@@ -290,6 +301,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             fs,
             status_gap: STATUS_GAP,
             agy_args: None,
+            use_mux: false,
+            mux_base: std::env::var_os("LOCALAPPDATA").map(PathBuf::from),
             inner: Mutex::new(Inner {
                 next: 0,
                 sessions: Vec::new(),
@@ -309,6 +322,17 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         super::config::load_launch_config()
     }
 
+    /// 開／關 B2b 的 mux 模式。正式只由 live() 依 ASN_TERM_MUX 設一次
+    pub fn set_use_mux(&mut self, on: bool) {
+        self.use_mux = on;
+    }
+
+    /// 測試注入 mux 檔案的位置（不碰真的 %LOCALAPPDATA%）
+    #[cfg(test)]
+    fn set_mux_base(&mut self, base: PathBuf) {
+        self.mux_base = Some(base);
+    }
+
     /// 測試注入兩次取樣的間隔。正式路徑用 STATUS_GAP，不呼叫這個。
     #[cfg(test)]
     fn set_status_gap(&mut self, gap: Duration) {
@@ -325,7 +349,9 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     }
 
     fn wez(&self, dir: &WezTermDir) -> WezTerm<'_> {
-        WezTerm::new(dir.clone(), self.config_file.clone(), self.home.clone(), &self.runner, &self.fs)
+        let mut w = WezTerm::new(dir.clone(), self.config_file.clone(), self.home.clone(), &self.runner, &self.fs);
+        w.no_auto_start = self.use_mux;
+        w
     }
 
     /// 隔離用的 WezTerm 設定。沒有才寫一份（避免吃到使用者的 `~/.wezterm.lua`）；舊版寫的空設定升級成帶 exit_behavior 的；
@@ -418,7 +444,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
 
     /// ASN 自己開的終端（不含接手的窗格）的（GUI 程序編號, 開的時候量到的建立時間）：判斷「ASN 開的」要兩個都對（設計 1.2）
     pub fn own_gui_windows(&self) -> Vec<(u32, u64)> {
-        self.inner.lock().unwrap().sessions.iter().filter_map(|s| s.window.started_ms.map(|t| (s.window.gui_pid, t))).collect()
+        self.inner.lock().unwrap().sessions.iter().filter(|s| !s.window.mux).filter_map(|s| s.window.started_ms.map(|t| (s.window.gui_pid, t))).collect()
     }
 
     /// 關夥伴視窗的最後一步（設計 1.3）：claude 那棵已經結束後，收掉承載它的 GUI。
@@ -426,7 +452,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     pub fn stop_gui(&self, gui_pid: u32) -> Result<(), String> {
         let (id, window) = {
             let g = self.inner.lock().unwrap();
-            let s = g.sessions.iter().find(|s| s.window.gui_pid == gui_pid).ok_or_else(|| "這個視窗不是 ASN 開的，不關".to_string())?;
+            let s = g.sessions.iter().find(|s| !s.window.mux && s.window.gui_pid == gui_pid).ok_or_else(|| "這個視窗不是 ASN 開的，不關".to_string())?;
             (s.id.clone(), s.window.clone())
         };
         let dir = self.dir()?;
@@ -440,7 +466,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
 
     /// ASN 自己開的終端（不含接手的窗格）各自的 GUI 程序編號：切前景／背景只認這些（#475）
     pub fn own_gui_pids(&self) -> Vec<u32> {
-        self.inner.lock().unwrap().sessions.iter().map(|s| s.window.gui_pid).collect()
+        self.inner.lock().unwrap().sessions.iter().filter(|s| !s.window.mux).map(|s| s.window.gui_pid).collect()
     }
 
     /// 開一個終端並記進對照表：視窗帶 workspace `asn-{編號}`、分頁標題 `ASN:{編號}`；標題設不下去就結束剛開的視窗，不留沒有標記的孤兒。
@@ -463,6 +489,9 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             Some(l) => format!("ASN:{id} {l}"),
             None => format!("ASN:{id}"),
         };
+        if self.use_mux {
+            return self.open_mux(&dir, profile, cwd, command, env, id, workspace, title, extra);
+        }
         let w = self.wez(&dir);
         let win = match env {
             Some(e) => {
@@ -504,6 +533,91 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             }
             let _ = self.persist();
             return Err(Started(format!("終端已啟動但對照表寫入失敗，已嘗試結束視窗：{e}")));
+        }
+        Ok((id, win.gui_pid))
+    }
+
+    /// 這個使用者的 mux（wezterm.exe 與 wezterm-mux-server.exe 放在同一個資料夾；檔案放在 mux_base\ASN\m）
+    fn mux_handle(&self, dir: &WezTermDir, base_env: BTreeMap<String, String>) -> Result<super::mux::Mux<'_>, String> {
+        let base = self.mux_base.as_ref().ok_or_else(|| "找不到使用者的本機資料夾（LOCALAPPDATA），無法使用終端服務".to_string())?;
+        let paths = super::mux::paths(base)?;
+        Ok(super::mux::Mux { runner: &self.runner, cli: dir.cli.clone(), server: dir.cli.with_file_name(super::mux::MUX_EXE), paths, base_env })
+    }
+
+    /// B2b：開在共用的 mux 裡（只在 use_mux 時由 open_staged 呼叫）。一條 `cli spawn --new-window` 開出窗格並印出窗格編號，
+    /// 沒有 GUI、沒有等通訊檔。失敗分段同 open_staged：窗格還沒建立（找 mux、起 mux、spawn、解析編號）＝NotStarted；
+    /// 建立之後（設標題、寫對照表）失敗＝Started，這時只關那一個窗格（kill-pane），絕不結束 mux 程序。
+    /// 環境：下 cli 的程序先清空再只放白名單（run_clean，設計 11.2-5）。env 有給（夥伴視窗、pi）＝用給的；沒給（終端面板的 agy／grok）
+    /// 在 mux 模式也只拿 child_env 白名單（決定：第 1 階段是繼承 ASN 的環境，mux 的窗格本來就拿不到 ASN 的環境，這裡明確收斂成白名單）
+    #[allow(clippy::too_many_arguments)]
+    fn open_mux(&self, dir: &WezTermDir, profile: &str, cwd: PathBuf, command: &[String], env: Option<&BTreeMap<String, String>>, id: String, workspace: String, title: String, extra: &OpenExtra) -> Result<(String, u32), super::win_term::WinOpenError> {
+        use super::mux;
+        use super::win_term::WinOpenError::{NotStarted, Started};
+        if command.is_empty() {
+            return Err(NotStarted("沒有指定要執行的指令".into()));
+        }
+        if !wezterm::workspace_name_ok(&workspace) {
+            return Err(NotStarted("workspace 名稱不合法".into()));
+        }
+        let base_env: BTreeMap<String, String> = super::config::child_env().into_iter().collect();
+        let m = self.mux_handle(dir, base_env.clone()).map_err(NotStarted)?;
+        let paths = m.paths.clone();
+        m.ensure().map_err(NotStarted)?;
+        let Some((mux_pid, mux_at)) = m.live_pid() else {
+            return Err(NotStarted("找不到終端服務的 pid 紀錄（不是 ASN 起的？），不在這個服務裡開窗格".into()));
+        };
+        let pane_env = env.cloned().unwrap_or(base_env);
+        // 登錄檔使用者變數（11.2-6）：只記名字。TODO(B2b-2)：UI 提示與包裝指令（窗格裡先清掉／設定）在下一個提交
+        let (collide, secret_like) = mux::registry_conflicts(&registry_env_names(), &pane_env);
+        for n in &collide {
+            elog!("終端服務：使用者環境變數裡有「{n}」，會蓋過這個窗格自己的設定");
+        }
+        for n in &secret_like {
+            elog!("終端服務：使用者環境變數裡有「{n}」（金鑰類或會被濾掉的名字），WezTerm 會把它帶進窗格");
+        }
+        let cwd_s = cwd.to_string_lossy().into_owned();
+        let mut sub: Vec<&str> = vec!["spawn", "--new-window", "--workspace", &workspace, "--cwd", &cwd_s, "--"];
+        sub.extend(command.iter().map(String::as_str));
+        // 逾時或回的不是窗格編號：窗格可能其實已經開了，當作已啟動（不讓呼叫端退到原生主控台再開一份）
+        let out = self.runner.run_clean(&dir.cli, &mux::cli_args(&sub), &mux::cli_env(&pane_env, &paths.sock), wezterm::CLI_TIMEOUT).map_err(Started)?;
+        if !out.success {
+            return Err(NotStarted(format!("終端服務開不出窗格：{}", out.stderr.trim())));
+        }
+        let pane_id: u64 = out.stdout.trim().parse().map_err(|_| Started(format!("無法解析新窗格編號：{}", out.stdout.trim())))?;
+        let win = Window { gui_pid: mux_pid, sock: paths.sock, started_ms: Some(mux_at), mux: true };
+        let w = self.wez(dir);
+        // 窗格已經開了：後面任何一步失敗都只關這一個窗格
+        let close_pane = |why: String| -> super::win_term::WinOpenError {
+            match w.kill_pane(&win.sock, pane_id) {
+                Ok(()) => Started(why),
+                Err(e) => Started(format!("{why}（關閉剛開的窗格也失敗：{e}）")),
+            }
+        };
+        if let Err(e) = w.set_tab_title(&win.sock, pane_id, &title) {
+            return Err(close_pane(format!("無法設定終端標題：{e}")));
+        }
+        {
+            let mut g = self.inner.lock().unwrap();
+            g.sessions.push(Session {
+                id: id.clone(),
+                profile: profile.to_string(),
+                window: win.clone(),
+                pane_id,
+                workspace,
+                title,
+                cwd: cwd_s,
+                send_granted: true,
+                kind: extra.kind.clone(),
+                session_id: extra.session_id.clone(),
+            });
+        }
+        if let Err(e) = self.persist() {
+            {
+                let mut g = self.inner.lock().unwrap();
+                g.sessions.retain(|s| s.id != id);
+            }
+            let _ = self.persist();
+            return Err(close_pane(format!("終端已啟動但對照表寫入失敗，已嘗試關閉窗格：{e}")));
         }
         Ok((id, win.gui_pid))
     }
@@ -593,7 +707,17 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let snap = self.snapshot_owned(id)?;
         let dir = self.dir()?;
         let w = self.wez(&dir);
-        w.stop(&snap.window)?;
+        if snap.window.mux {
+            // 共用 mux 裡的窗格：只關這個窗格，絕不 kill_tree（snap.window.gui_pid 是 mux 的編號）。
+            // mux 的連線檔都不在了＝mux 已經沒了、窗格跟著沒了，視為完成（同第 1 階段「視窗早已不在」）
+            if let Err(e) = w.kill_pane(&snap.window.sock, snap.pane_id) {
+                if self.fs.exists(&snap.window.sock) {
+                    return Err(e);
+                }
+            }
+        } else {
+            w.stop(&snap.window)?;
+        }
         {
             let mut g = self.inner.lock().unwrap();
             g.sessions.retain(|s| s.id != id);
@@ -816,7 +940,24 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 Some(now) if now == saved => {}
                 _ => continue,
             }
-            let sock = wezterm::sock_path(&self.home, term.pid);
+            let sock = if term.mux {
+                // mux 的列：連線檔是 mux 的，而且 pid 檔記的也要是同一個 mux（建立時間對得上），不然不認。
+                // 開關沒開時不碰（也不下 cli）：留在檔案裡，等開關打開再認
+                if !self.use_mux {
+                    parked.push(term);
+                    continue;
+                }
+                let Ok(m) = self.mux_handle(&dir, BTreeMap::new()) else {
+                    parked.push(term);
+                    continue;
+                };
+                if m.live_pid() != Some((term.pid, saved)) {
+                    continue;
+                }
+                m.paths.sock.clone()
+            } else {
+                wezterm::sock_path(&self.home, term.pid)
+            };
             if !self.fs.exists(&sock) {
                 parked.push(term);
                 continue;
@@ -839,6 +980,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                     gui_pid: term.pid,
                     sock,
                     started_ms: Some(saved),
+                    mux: term.mux,
                 },
                 pane_id: pane.pane_id,
                 workspace: format!("asn-{}", term.id),
@@ -1106,6 +1248,7 @@ fn session_to_store(s: &Session) -> StoreTerm {
         send_granted: s.send_granted,
         kind: s.kind.clone(),
         session_id: s.session_id.clone(),
+        mux: s.window.mux,
     }
 }
 
@@ -1131,6 +1274,18 @@ struct OpenExtra {
     session_id: Option<String>,
     /// 接在分頁標題 ASN:編號 後面的名字（已過 normalize_title）
     label: Option<String>,
+}
+
+/// 使用者環境變數（HKCU\Environment）的變數名字。測試不讀這台電腦真的登錄檔
+fn registry_env_names() -> Vec<String> {
+    #[cfg(test)]
+    {
+        Vec::new()
+    }
+    #[cfg(not(test))]
+    {
+        super::mux::user_env_names()
+    }
 }
 
 fn id_ok(id: &str) -> bool {
@@ -1569,6 +1724,8 @@ pub type LiveTerms = TermService<wezterm::RealRunner, wezterm::RealFs>;
 pub fn live(data_dir: &Path) -> LiveTerms {
     let mut svc = TermService::from_env(data_dir.join("wezterm-term.lua"), data_dir.join("wezterm-terms.json"), crate::identity::home_dir(), wezterm::RealRunner, wezterm::RealFs);
     svc.set_agy_args(Box::new(crate::gemini_session::live_args));
+    // B2b 開關：只在 ASN_TERM_MUX=1 才開在共用的 mux 裡，預設關。啟動時讀一次（要在 reclaim 之前，認領 mux 的列要看它）
+    svc.set_use_mux(std::env::var("ASN_TERM_MUX").is_ok_and(|v| v == "1"));
     if let Err(e) = svc.reclaim() {
         elog!("終端對照表接手失敗（不中斷啟動）：{e}");
     }
@@ -1751,7 +1908,8 @@ impl super::win_term::WinTermHost for LiveTerms {
     fn open_window(&self, cwd: &Path, spec: &super::win_term::WinSpec) -> Result<u32, super::win_term::WinOpenError> {
         self.ensure_config().map_err(super::win_term::WinOpenError::NotStarted)?;
         let (_, gui) = TermService::start_window(self, cwd, spec)?;
-        if spec.hidden {
+        // mux 模式沒有自己的 GUI 視窗可藏（gui 是 mux 的程序編號，不能拿去找視窗）
+        if spec.hidden && !self.use_mux {
             hide_gui(gui);
         }
         Ok(gui)
@@ -1778,7 +1936,7 @@ impl super::pi_term::PiTermHost for LiveTerms {
     fn start_pi(&self, cwd: &Path, argv: &[String], env: &BTreeMap<String, String>, hidden: bool) -> Result<u32, super::win_term::WinOpenError> {
         self.ensure_config().map_err(super::win_term::WinOpenError::NotStarted)?;
         let (_, gui) = TermService::start_pi_staged(self, cwd, argv, env)?;
-        if hidden {
+        if hidden && !self.use_mux {
             hide_gui(gui);
         }
         Ok(gui)
@@ -1835,6 +1993,10 @@ mod tests {
         spawn_fail: RefCell<bool>,
         /// 第一次 list 時先跑一下（模擬開視窗之後才出狀況）
         on_list: RefCell<Option<Box<dyn Fn()>>>,
+        /// 走 run_clean 的呼叫（mux 的 cli spawn）：（參數, 環境）
+        clean_calls: RefCell<Vec<(Vec<String>, BTreeMap<String, String>)>>,
+        /// `cli spawn` 印出的窗格編號
+        spawn_out: RefCell<String>,
     }
 
     fn default_list_clients_json() -> String {
@@ -1857,6 +2019,8 @@ mod tests {
             trace: RefCell::new(Vec::new()),
             spawn_fail: RefCell::new(false),
             on_list: RefCell::new(None),
+            clean_calls: RefCell::new(Vec::new()),
+            spawn_out: RefCell::new(String::new()),
         }
     }
 
@@ -1879,7 +2043,9 @@ mod tests {
     impl Runner for FakeRunner {
         fn run(&self, _p: &Path, args: &[String], env: &BTreeMap<String, String>, _timeout: Duration) -> Result<wezterm::RunOutput, String> {
             self.inner.calls.borrow_mut().push((args.to_vec(), env.clone()));
-            let kind = args.get(1).cloned().unwrap_or_default();
+            // mux 模式的 cli 在 "cli" 後面多一個 --no-auto-start：比對子命令時先拿掉
+            let sub: Vec<String> = args.iter().filter(|a| a.as_str() != "--no-auto-start").cloned().collect();
+            let kind = sub.get(1).cloned().unwrap_or_default();
             self.inner.trace.borrow_mut().push(format!("run:{kind}"));
             if let Some(sub) = self.inner.fail_substr.borrow().clone() {
                 if args.iter().any(|a| a.contains(&sub)) {
@@ -1890,7 +2056,9 @@ mod tests {
                 self.inner.version_out.borrow().clone()
             } else if args.iter().any(|a| a == "list-clients") {
                 self.inner.list_clients_json.borrow().clone()
-            } else if args.get(1).map(|a| a.as_str()) == Some("list") {
+            } else if kind == "spawn" {
+                self.inner.spawn_out.borrow().clone()
+            } else if kind == "list" {
                 if let Some(f) = self.inner.on_list.borrow_mut().take() {
                     f();
                 }
@@ -1915,6 +2083,10 @@ mod tests {
                 stdout,
                 stderr: String::new(),
             })
+        }
+        fn run_clean(&self, p: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<wezterm::RunOutput, String> {
+            self.inner.clean_calls.borrow_mut().push((args.to_vec(), env.clone()));
+            self.run(p, args, env, timeout)
         }
         fn spawn(&self, _p: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
             if *self.inner.spawn_fail.borrow() {
@@ -3613,5 +3785,255 @@ mod tests {
         let _ = gui.wait();
         let _ = std::fs::remove_dir_all(&tmp);
         result.expect("真機驗收失敗");
+    }
+
+    /// B2b：開在共用 mux 裡的行為。開關預設關（其餘測試全部是關著跑的），這裡才打開
+    mod mux_mode {
+        use super::*;
+        use crate::launch::mux;
+
+        const MUX_PID: u32 = 4000;
+
+        /// 開著 mux 模式的 rig：mux 檔案放在暫存資料夾、pid 檔記著一個建立時間對得上的 mux、連線檔「存在」，
+        /// `cli spawn` 印出窗格 9
+        fn mux_rig() -> (Rig, mux::MuxPaths) {
+            let mut rig = make(default_profiles(), vec![]);
+            let base = rig._dir.path().join("lad");
+            let paths = mux::paths(&base).unwrap();
+            std::fs::create_dir_all(&paths.dir).unwrap();
+            std::fs::write(&paths.pid, format!("{MUX_PID} 1000")).unwrap();
+            rig.files.borrow_mut().insert(paths.sock.clone());
+            rig.svc.set_use_mux(true);
+            rig.svc.set_mux_base(base);
+            *rig.runner.inner.spawn_out.borrow_mut() = "9\n".into();
+            *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-1", "ASN:1", 9, 0);
+            (rig, paths)
+        }
+
+        fn pi_argv() -> Vec<String> {
+            ["pi", "-e", "ext.ts", "--model", "M"].iter().map(|s| s.to_string()).collect()
+        }
+
+        /// 所有 cli 呼叫（含 mux 自己的試連），參數開頭是 "cli"
+        fn cli_calls(r: &FakeRunner) -> Vec<(Vec<String>, BTreeMap<String, String>)> {
+            r.inner.calls.borrow().iter().filter(|(a, _)| a.first().map(String::as_str) == Some("cli")).cloned().collect()
+        }
+
+        fn sub_of(args: &[String]) -> Vec<&str> {
+            args.iter().map(String::as_str).filter(|a| *a != "--no-auto-start").collect()
+        }
+
+        fn count_sub(r: &FakeRunner, sub: &str) -> usize {
+            cli_calls(r).iter().filter(|(a, _)| sub_of(a).get(1) == Some(&sub)).count()
+        }
+
+        #[test]
+        fn 開_pi_只下一條_spawn_走_run_clean_環境只有給的加_socket_不起_gui() {
+            let (rig, paths) = mux_rig();
+            let env: BTreeMap<String, String> = [("ASN_PI_NAME".to_string(), "小皮".to_string()), ("PATH".to_string(), "C:/bin".to_string())].into();
+            let (id, pid) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &env).unwrap();
+            assert_eq!((id.as_str(), pid), ("1", MUX_PID), "回的是 mux 的編號");
+            let clean = rig.runner.inner.clean_calls.borrow();
+            assert_eq!(clean.len(), 1, "開窗格只有一條 cli（spawn），而且走 run_clean");
+            let mut want: Vec<String> = ["cli", "--no-auto-start", "spawn", "--new-window", "--workspace", "asn-1", "--cwd"].iter().map(|s| s.to_string()).collect();
+            want.push(rig.cwd.clone());
+            want.push("--".into());
+            want.extend(pi_argv());
+            assert_eq!(clean[0].0, want);
+            let mut want_env = env.clone();
+            want_env.insert("WEZTERM_UNIX_SOCKET".into(), paths.sock.to_string_lossy().into_owned());
+            assert_eq!(clean[0].1, want_env, "環境＝給的環境加 socket 位置，沒有設定檔路徑或其他東西");
+            drop(clean);
+            assert_eq!(count_sub(&rig.runner, "spawn"), 1);
+            assert!(rig.runner.inner.calls.borrow().iter().all(|(a, _)| a.first().map(String::as_str) == Some("cli")), "沒有 wezterm-gui（start）也沒有別的啟動");
+            assert!(started_args(&rig.runner).is_empty());
+            let titles: Vec<_> = cli_calls(&rig.runner).into_iter().filter(|(a, _)| a.iter().any(|x| x == "set-tab-title")).collect();
+            assert_eq!(titles[0].0, ["cli", "--no-auto-start", "set-tab-title", "--pane-id", "9", "ASN:1"]);
+            assert_eq!(titles[0].1.get("WEZTERM_UNIX_SOCKET").map(String::as_str), Some(paths.sock.to_string_lossy().as_ref()));
+            assert!(rig.runner.killed().is_empty());
+            let listed = rig.svc.list();
+            assert_eq!((listed[0].pid, listed[0].started_ms), (MUX_PID, Some(1000)));
+            let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
+            assert_eq!(v["terms"][0]["mux"], true);
+            assert_eq!((v["terms"][0]["pid"].as_u64(), v["terms"][0]["pane_id"].as_u64()), (Some(u64::from(MUX_PID)), Some(9)));
+        }
+
+        #[test]
+        fn 終端面板的_agy_在_mux_模式也只拿白名單環境() {
+            let (rig, paths) = mux_rig();
+            rig.svc.start("agy", &rig.cwd, &rig.config).unwrap();
+            let clean = rig.runner.inner.clean_calls.borrow();
+            assert_eq!(clean.len(), 1);
+            let mut want: BTreeMap<String, String> = crate::launch::config::child_env().into_iter().collect();
+            want.insert("WEZTERM_UNIX_SOCKET".into(), paths.sock.to_string_lossy().into_owned());
+            assert_eq!(clean[0].1, want);
+            assert!(clean[0].0.ends_with(&["--".to_string(), "C:/bin/agy.exe".to_string()]));
+        }
+
+        #[test]
+        fn 每條_cli_都帶_no_auto_start_與_mux_的_socket() {
+            let (rig, paths) = mux_rig();
+            let id = rig.svc.start("grok", &rig.cwd, &rig.config).unwrap();
+            rig.svc.read(&id, 5).unwrap();
+            rig.svc.rename(&id, "新名").unwrap();
+            rig.svc.confirm_send(&id, "hi", true).unwrap();
+            rig.svc.stop(&id).unwrap();
+            let calls = cli_calls(&rig.runner);
+            assert!(calls.len() >= 6);
+            for (a, env) in &calls {
+                assert_eq!(&a[..2], ["cli", "--no-auto-start"], "{a:?}");
+                assert_eq!(env.get("WEZTERM_UNIX_SOCKET").map(String::as_str), Some(paths.sock.to_string_lossy().as_ref()), "{a:?}");
+            }
+        }
+
+        #[test]
+        fn 關閉只關窗格_不結束任何程序_也不列進_gui_清單() {
+            let (rig, _) = mux_rig();
+            let id = rig.svc.start("agy", &rig.cwd, &rig.config).unwrap();
+            assert!(rig.svc.own_gui_pids().is_empty(), "mux 的編號不是 GUI，不能被切前景／背景或結束");
+            assert!(rig.svc.own_gui_windows().is_empty());
+            assert!(rig.svc.stop_gui(MUX_PID).unwrap_err().contains("不是 ASN 開的"));
+            assert!(rig.runner.killed().is_empty());
+            rig.svc.stop(&id).unwrap();
+            let kills: Vec<_> = cli_calls(&rig.runner).into_iter().filter(|(a, _)| a.iter().any(|x| x == "kill-pane")).collect();
+            assert_eq!(kills.len(), 1);
+            assert_eq!(kills[0].0, ["cli", "--no-auto-start", "kill-pane", "--pane-id", "9"]);
+            assert!(rig.runner.killed().is_empty(), "絕不 kill_tree（會把所有夥伴一起結束）");
+            assert!(rig.svc.list().is_empty());
+            let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
+            assert!(v["terms"].as_array().unwrap().is_empty());
+        }
+
+        #[test]
+        fn wezterm_stop_看到_mux_視窗一律拒絕且不動任何程序() {
+            let (rig, paths) = mux_rig();
+            let fs = FakeFs { files: rig.files.clone() };
+            let dir = WezTermDir { gui: "W/wezterm-gui.exe".into(), cli: "W/wezterm.exe".into() };
+            let w = WezTerm::new(dir, "cfg.lua".into(), "H".into(), &rig.runner, &fs);
+            let win = Window { gui_pid: MUX_PID, sock: paths.sock, started_ms: Some(1000), mux: true };
+            assert!(w.stop(&win).unwrap_err().contains("共用的終端服務"));
+            assert!(rig.runner.killed().is_empty());
+            // 對照：同樣的內容不是 mux 就會結束（證明拒絕來自 mux 旗標，不是別的條件）
+            w.stop(&Window { mux: false, ..win }).unwrap();
+            assert_eq!(rig.runner.killed(), vec![MUX_PID]);
+        }
+
+        #[test]
+        fn 設標題失敗只關那個窗格_回已啟動() {
+            let (rig, _) = mux_rig();
+            *rig.runner.inner.fail_substr.borrow_mut() = Some("set-tab-title".into());
+            let e = rig.svc.start_pi_staged(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap_err();
+            let crate::launch::win_term::WinOpenError::Started(m) = e else { panic!("窗格已經開了，應該是已啟動的失敗") };
+            assert!(m.contains("無法設定終端標題"), "{m}");
+            let kills: Vec<_> = cli_calls(&rig.runner).into_iter().filter(|(a, _)| a.iter().any(|x| x == "kill-pane")).collect();
+            assert_eq!(kills.len(), 1, "只關剛開的那個窗格");
+            assert_eq!(kills[0].0, ["cli", "--no-auto-start", "kill-pane", "--pane-id", "9"]);
+            assert!(rig.runner.killed().is_empty());
+            assert!(rig.svc.list().is_empty() && rig.svc.own_gui_pids().is_empty());
+        }
+
+        #[test]
+        fn 開窗格回的不是編號_當作已啟動_不退路再開一份_也不關任何東西() {
+            let (rig, paths) = mux_rig();
+            *rig.runner.inner.spawn_out.borrow_mut() = "不是編號".into();
+            let e = rig.svc.start_pi_staged(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap_err();
+            assert!(matches!(e, crate::launch::win_term::WinOpenError::Started(_)), "窗格可能其實開了：不能讓呼叫端退到原生主控台再開一份");
+            assert_eq!(count_sub(&rig.runner, "kill-pane"), 0);
+            // pid 檔對不上（不是 ASN 起的 mux）：不在裡面開
+            std::fs::write(&paths.pid, format!("{MUX_PID} 777")).unwrap();
+            *rig.runner.inner.spawn_out.borrow_mut() = "9".into();
+            let e = rig.svc.start_pi_staged(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap_err();
+            assert!(matches!(e, crate::launch::win_term::WinOpenError::NotStarted(_)));
+            assert_eq!(count_sub(&rig.runner, "spawn"), 1, "第二次沒有再 spawn");
+        }
+
+        /// 同一份對照表檔、同一組假執行器，另起一個服務（等於 ASN 重啟）
+        fn restarted(rig: &Rig, mux_on: bool) -> TermService<FakeRunner, FakeFs> {
+            let mut svc = TermService::fixed(
+                WezTermDir { gui: "W/wezterm-gui.exe".into(), cli: "W/wezterm.exe".into() },
+                "cfg.lua".into(),
+                rig.store.clone(),
+                rig.home.clone(),
+                rig.runner.clone(),
+                FakeFs { files: rig.files.clone() },
+            );
+            svc.set_use_mux(mux_on);
+            svc.set_mux_base(rig.svc.mux_base.clone().unwrap());
+            svc
+        }
+
+        #[test]
+        fn 對照表寫出_mux_欄位_重啟後認回來() {
+            let (rig, _) = mux_rig();
+            let id = rig.svc.start("agy", &rig.cwd, &rig.config).unwrap();
+            let svc2 = restarted(&rig, true);
+            svc2.reclaim().unwrap();
+            let listed = svc2.list();
+            assert_eq!((listed[0].id.as_str(), listed[0].pid, listed[0].started_ms), (id.as_str(), MUX_PID, Some(1000)));
+            assert!(svc2.own_gui_pids().is_empty(), "認回來的 mux 窗格照樣不是 GUI");
+            svc2.stop(&id).unwrap();
+            assert_eq!(count_sub(&rig.runner, "kill-pane"), 1);
+            assert!(rig.runner.killed().is_empty());
+        }
+
+        #[test]
+        fn 重啟認領_pid_檔對不上或窗格沒標記就不認() {
+            // pid 檔記的 mux 不是這個建立時間：不認、不結束
+            let (rig, paths) = mux_rig();
+            rig.svc.start("agy", &rig.cwd, &rig.config).unwrap();
+            std::fs::write(&paths.pid, format!("{MUX_PID} 777")).unwrap();
+            let svc2 = restarted(&rig, true);
+            svc2.reclaim().unwrap();
+            assert!(svc2.list().is_empty());
+            assert!(rig.runner.killed().is_empty());
+
+            // 窗格清單裡沒有 ASN 標記：不認
+            let (rig, _) = mux_rig();
+            rig.svc.start("agy", &rig.cwd, &rig.config).unwrap();
+            *rig.runner.inner.list_json.borrow_mut() = one_pane("default", "別人的", 9, 0);
+            let svc2 = restarted(&rig, true);
+            svc2.reclaim().unwrap();
+            assert!(svc2.list().is_empty());
+        }
+
+        #[test]
+        fn 重啟認領_開關沒開就不碰_列留著_打開後認得() {
+            let (rig, _) = mux_rig();
+            rig.svc.start("agy", &rig.cwd, &rig.config).unwrap();
+            let before = rig.runner.args().len();
+            let svc2 = restarted(&rig, false);
+            svc2.reclaim().unwrap();
+            assert!(svc2.list().is_empty());
+            assert_eq!(rig.runner.args().len(), before, "不下 cli");
+            let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
+            assert_eq!(v["terms"][0]["mux"], true, "列還在檔案裡");
+            let svc3 = restarted(&rig, true);
+            svc3.reclaim().unwrap();
+            assert_eq!(svc3.list().len(), 1);
+        }
+
+        #[test]
+        fn 舊列沒有_mux_欄_就算開關開著也照第_1_階段認領() {
+            let (rig, _) = mux_rig();
+            rig.files.borrow_mut().insert(sock());
+            *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-4", "ASN:4", 7, 1);
+            write_store(&rig.store, 4, &row("4", "grok", "1000", ""));
+            let svc2 = restarted(&rig, true);
+            svc2.reclaim().unwrap();
+            assert_eq!(svc2.list()[0].pid, 42);
+            assert_eq!(svc2.own_gui_pids(), vec![42], "第 1 階段的視窗照舊算 GUI");
+        }
+
+        #[test]
+        fn 開關預設關_行為跟以前一樣() {
+            let rig = make(default_profiles(), vec![]);
+            assert!(!rig.svc.use_mux);
+            rig.svc.start("agy", &rig.cwd, &rig.config).unwrap();
+            assert_eq!(started_args(&rig.runner).len(), 1);
+            assert!(rig.runner.inner.clean_calls.borrow().is_empty());
+            assert!(rig.runner.args().iter().all(|a| !a.iter().any(|x| x == "--no-auto-start")));
+            let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
+            assert!(v["terms"][0].get("mux").is_none(), "第 1 階段的列不多寫新欄位");
+        }
     }
 }
