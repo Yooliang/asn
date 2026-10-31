@@ -1,4 +1,4 @@
-// 內建終端機用的 WezTerm 隨 Windows 安裝檔附帶：版本固定、雜湊核對、只取 6 個檔，設定與下載腳本要一致。
+// 內建終端機用的 WezTerm 隨 Windows 安裝檔附帶：版本固定、雜湊核對、只取 7 個檔，設定與下載腳本要一致。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -14,8 +14,33 @@ test('版本與雜湊寫死：20240203 穩定版，雜湊是 64 位十六進位'
   assert.match(WEZTERM_LICENSE_SHA256, /^[0-9a-f]{64}$/)
 })
 
-test('只附 6 個必要檔（不附 mux-server、除錯檔、mesa 軟體算圖），加上授權與來源說明', () => {
-  assert.deepEqual([...WEZTERM_FILES].sort(), ['OpenConsole.exe', 'conpty.dll', 'libEGL.dll', 'libGLESv2.dll', 'wezterm-gui.exe', 'wezterm.exe'])
+test('只附 7 個必要檔（含 mux-server；不附除錯檔、mesa 軟體算圖），加上授權與來源說明', () => {
+  assert.deepEqual([...WEZTERM_FILES].sort(), ['OpenConsole.exe', 'conpty.dll', 'libEGL.dll', 'libGLESv2.dll', 'wezterm-gui.exe', 'wezterm-mux-server.exe', 'wezterm.exe'])
+})
+
+test('mux-server 與其他檔同一個壓縮檔、同一份雜湊核對：腳本取它、來源說明列它、缺檔會明確報錯、建置占位也有它', () => {
+  const src = read('scripts', 'fetch-wezterm.mjs')
+  assert.ok(WEZTERM_FILES.includes('wezterm-mux-server.exe'))
+  assert.match(src, /壓縮檔裡找不到/)
+  const sourceText = src.match(/const SOURCE_TEXT = `([^`]*)`/)[1]
+  assert.match(sourceText, /wezterm-mux-server\.exe/)
+  assert.ok(sourceText.includes('${WEZTERM_ZIP_SHA256}'))
+  assert.match(sourceText, /7 個檔/)
+  assert.match(read('src-tauri', 'build.rs'), /"wezterm-mux-server\.exe"/)
+})
+
+test('安裝掛鉤：更新前先把 wezterm 資料夾裡的 mux 執行檔改名 .old（先刪舊的 .old、檔案存在才改名），裝完與解除安裝順手清', () => {
+  const h = read('src-tauri', 'installer-hooks.nsh')
+  const body = name => h.match(new RegExp(name + '\\n([\\s\\S]*?)!macroend'))[1]
+  const old = '$INSTDIR\\wezterm\\wezterm-mux-server.old'
+  const exe = '$INSTDIR\\wezterm\\wezterm-mux-server.exe'
+  const pre = body('NSIS_HOOK_PREINSTALL')
+  const iDel = pre.indexOf(`Delete "${old}"`)
+  const iIf = pre.indexOf(`IfFileExists "${exe}" 0 +2\n    Rename "${exe}" "${old}"`)
+  assert.ok(iDel >= 0 && iIf > iDel, '先刪舊 .old，再判斷存在才改名')
+  assert.ok(body('NSIS_HOOK_POSTINSTALL').includes(`Delete "${old}"`))
+  assert.ok(body('NSIS_HOOK_POSTUNINSTALL').includes(`Delete "${old}"`))
+  assert.ok(!/(taskkill|nsExec|KillProcess)/i.test(h), '掛鉤不殺任何程序')
 })
 
 test('Windows 專屬設定列的資源就是下載腳本取得的那些檔，放在安裝資料夾的 wezterm 底下；通用設定不列（Linux／安卓不該要這些檔）', () => {
