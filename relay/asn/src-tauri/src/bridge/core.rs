@@ -19,6 +19,8 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+mod dup;
+
 /// 後台節點信箱一次最多回幾封（與 asn_relay_inbox 的 limit 一致）
 const INBOX_PAGE: usize = 50;
 /// 一輪收信最多往後多拿幾批
@@ -276,6 +278,8 @@ pub struct Core {
     respond_sent: String,
     /// 0.2 E2／E4（#397）：各視窗最後一次收到信或被看到在忙的時間（毫秒），名單回報時帶給後台；只存記憶體
     active: BTreeMap<String, u64>,
+    /// 收件名同時有兩個以上視窗而留在信箱的信：信件編號 → 第一次說明的時間（#584；只存記憶體）
+    dup_held: HashMap<String, u64>,
 }
 
 /// 自動回信模式：交辦後這段時間內，就算 worker 這一輪的結果已回來，仍視為忙碌（它可能正接著處理排隊中的下一則）
@@ -323,7 +327,7 @@ impl Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, created: Arc::new(crate::heartbeat::process_started_ms), now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
-            partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, respond_sent: String::new(), active: BTreeMap::new(),
+            partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
         };
         c.restore();
         c
@@ -864,6 +868,10 @@ impl Core {
             }
             self.ack_ids(&[m.id.clone()]).await;
             return None;
+        }
+        // 同名的 Claude 視窗有兩個以上（#584）：不交給收發員，跟寄件人講清楚，信留在信箱等剩一個時自動重送
+        if let Some(r) = self.dup_gate(&m, &target, &Origin::of(&p)).await {
+            return r;
         }
         // 本人傳來的「/指令」：目標是有 ASN 外掛的 Claude 視窗就交給外掛執行（背景等它做完，不擋其他信）；
         // 其他視窗（沒有外掛、Codex、Gemini 等）照舊當普通信投遞，並另外回一封說明

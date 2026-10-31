@@ -4,6 +4,7 @@
 pub mod attach;
 pub mod core;
 pub mod corrlog;
+pub mod dup_session;
 pub mod engines;
 pub mod handoff;
 pub mod launcher;

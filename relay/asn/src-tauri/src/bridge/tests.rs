@@ -1922,6 +1922,8 @@ async fn 名單回報_外掛狀態只在第一次與變化時附_沒有狀態或
     assert_eq!(mods, vec![Value::Null, json!({"state":"checking"}), Value::Null, json!({"state":"installed","version":"0.4.2"}), Value::Null, json!({"state":"installed","version":"0.4.2"})]);
     assert!(posts.iter().all(|p| p["agents"][0]["name"] == "T-甲"), "名單內容照舊");
 }
+
+    mod dup;
 }
 
 // ---- 名單即時回報（外掛狀態檔一變就報）------------------------------------------------------------
