@@ -52,6 +52,8 @@ pub const STATUS_GAP: Duration = Duration::from_secs(1);
 /// 使用者給的那段標題（不含 ASN 前綴）最長幾個字。WezTerm 自己的上限這份程式沒核過，先用跟夥伴改名一樣的長度。
 pub const MAX_TITLE_CHARS: usize = 40;
 const STORE_VERSION: u32 = 1;
+/// mux 窗格操作前核對到 mux 已經不是開窗格時那一個
+const MUX_GONE: &str = "終端服務重新啟動過，這個窗格已經跟著舊的服務結束了；請重新開";
 const TRUNC_MARK: &str = "…（已截斷）";
 /// grok 1.0.70 登入後閒置時，輸入框那一行的行首。空框後面可以是佔位「…」，那不算使用者正在打字。
 const GROK_INPUT_MARK: &str = "│ ❯";
@@ -578,8 +580,10 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let cwd_s = cwd.to_string_lossy().into_owned();
         let mut sub: Vec<&str> = vec!["spawn", "--new-window", "--workspace", &workspace, "--cwd", &cwd_s, "--"];
         sub.extend(command.iter().map(String::as_str));
-        // 逾時或回的不是窗格編號：窗格可能其實已經開了，當作已啟動（不讓呼叫端退到原生主控台再開一份）
-        let out = self.runner.run_clean(&dir.cli, &mux::cli_args(&sub), &mux::cli_env(&pane_env, &paths.sock), wezterm::CLI_TIMEOUT).map_err(Started)?;
+        // 連 wezterm.exe 都起不來（RealRunner 回「無法執行…」）＝窗格一定沒開，可以退到原生主控台；
+        // 逾時或回的不是窗格編號：窗格可能其實已經開了，當作已啟動（不讓呼叫端再開一份）
+        let ran = self.runner.run_clean(&dir.cli, &mux::cli_args(&sub), &mux::cli_env(&pane_env, &paths.sock), wezterm::CLI_TIMEOUT);
+        let out = ran.map_err(|e| if e.starts_with(wezterm::CANNOT_RUN) { NotStarted(e) } else { Started(e) })?;
         if !out.success {
             return Err(NotStarted(format!("終端服務開不出窗格：{}", out.stderr.trim())));
         }
@@ -704,7 +708,11 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             g.adopted.retain(|s| s.id != id);
             return Ok(());
         }
-        let snap = self.snapshot_owned(id)?;
+        let snap = match self.snapshot_owned(id) {
+            // mux 已經換過：窗格跟著舊 mux 沒了，verify_mux 也已經把這一列移除，視為關好（同第 1 階段「視窗早已不在」）
+            Err(e) if e == MUX_GONE => return Ok(()),
+            r => r?,
+        };
         let dir = self.dir()?;
         let w = self.wez(&dir);
         if snap.window.mux {
@@ -1018,7 +1026,34 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         Err("沒有這個終端".into())
     }
 
+    /// 取一份可操作的快照。共用 mux 裡的窗格先核對 mux 還是開窗格時那一個（見 `verify_mux`）
     fn snapshot(&self, id: &str) -> Result<SessionSnap, String> {
+        let snap = self.snapshot_raw(id)?;
+        self.verify_mux(&snap)?;
+        Ok(snap)
+    }
+
+    /// mux 當掉後被下一次 `ensure()` 重新起來，新 mux 的窗格編號會從頭算：對照表裡舊的窗格編號可能對到新 mux 裡
+    /// 別的夥伴。所以 mux 窗格的每一個操作（讀畫面、送字、代答、改名、關閉）前都核對 pid 檔記的 mux（pid＋建立時間）
+    /// 跟開窗格時記下的一樣；對不上就把這一列移除（窗格已經跟著舊 mux 沒了）並回錯，不對新 mux 下任何指令（#607 審查）
+    fn verify_mux(&self, snap: &SessionSnap) -> Result<(), String> {
+        if !snap.window.mux {
+            return Ok(());
+        }
+        let dir = self.dir()?;
+        let live = self.mux_handle(&dir, BTreeMap::new())?.live_pid();
+        if live.is_some_and(|(pid, at)| pid == snap.window.gui_pid && Some(at) == snap.window.started_ms) {
+            return Ok(());
+        }
+        {
+            let mut g = self.inner.lock().unwrap();
+            g.sessions.retain(|s| s.id != snap.id);
+        }
+        let _ = self.persist();
+        Err(MUX_GONE.into())
+    }
+
+    fn snapshot_raw(&self, id: &str) -> Result<SessionSnap, String> {
         let g = self.inner.lock().unwrap();
         if let Some(s) = g.sessions.iter().find(|s| s.id == id) {
             // 夥伴視窗（claude／window）：讀畫面、送字、代答、改名、從面板關閉都是之後的階段，現在一律拒絕
@@ -1997,6 +2032,8 @@ mod tests {
         clean_calls: RefCell<Vec<(Vec<String>, BTreeMap<String, String>)>>,
         /// `cli spawn` 印出的窗格編號
         spawn_out: RefCell<String>,
+        /// run_clean 直接回這個錯（模擬 wezterm.exe 起不來或逾時）
+        clean_err: RefCell<Option<String>>,
     }
 
     fn default_list_clients_json() -> String {
@@ -2021,6 +2058,7 @@ mod tests {
             on_list: RefCell::new(None),
             clean_calls: RefCell::new(Vec::new()),
             spawn_out: RefCell::new(String::new()),
+            clean_err: RefCell::new(None),
         }
     }
 
@@ -2086,6 +2124,9 @@ mod tests {
         }
         fn run_clean(&self, p: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<wezterm::RunOutput, String> {
             self.inner.clean_calls.borrow_mut().push((args.to_vec(), env.clone()));
+            if let Some(e) = self.inner.clean_err.borrow().clone() {
+                return Err(e);
+            }
             self.run(p, args, env, timeout)
         }
         fn spawn(&self, _p: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
@@ -3884,6 +3925,43 @@ mod tests {
                 assert_eq!(&a[..2], ["cli", "--no-auto-start"], "{a:?}");
                 assert_eq!(env.get("WEZTERM_UNIX_SOCKET").map(String::as_str), Some(paths.sock.to_string_lossy().as_ref()), "{a:?}");
             }
+        }
+
+        #[test]
+        fn mux_重新啟動過_舊窗格的操作一律拒絕_不對新_mux_下指令_列也移除() {
+            let (rig, paths) = mux_rig();
+            let a = rig.svc.start("agy", &rig.cwd, &rig.config).unwrap();
+            let b = rig.svc.start("agy", &rig.cwd, &rig.config).unwrap();
+            let before = cli_calls(&rig.runner).len();
+            // mux 當掉後被重新起來：pid 檔換成另一個（建立時間不同）
+            std::fs::write(&paths.pid, "4001 1000").unwrap(); // 新的 mux（另一個編號、活著）
+            let e = rig.svc.read(&a, 5).unwrap_err();
+            assert!(e.contains("重新啟動過"), "{e}");
+            assert!(rig.svc.confirm_send(&b, "hi", true).unwrap_err().contains("重新啟動過"));
+            assert_eq!(cli_calls(&rig.runner).len(), before, "不對新 mux 下任何指令（舊的窗格編號可能對到別的夥伴）");
+            assert!(rig.svc.list().is_empty(), "兩列都移除了");
+            let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
+            assert!(v["terms"].as_array().unwrap().is_empty());
+            // 關閉：視為已經關好，不下 kill-pane
+            let c = {
+                std::fs::write(&paths.pid, format!("{MUX_PID} 1000")).unwrap();
+                rig.svc.start("agy", &rig.cwd, &rig.config).unwrap()
+            };
+            std::fs::write(&paths.pid, "4002 1000").unwrap();
+            rig.svc.stop(&c).unwrap();
+            assert_eq!(count_sub(&rig.runner, "kill-pane"), 0);
+            assert!(rig.runner.killed().is_empty());
+        }
+
+        #[test]
+        fn 開窗格的指令連起都起不來_是沒啟動_逾時才當已啟動() {
+            let (rig, _) = mux_rig();
+            *rig.runner.inner.clean_err.borrow_mut() = Some(format!("{} W/wezterm.exe：找不到檔案", wezterm::CANNOT_RUN));
+            let e = rig.svc.start_pi_staged(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap_err();
+            assert!(matches!(e, crate::launch::win_term::WinOpenError::NotStarted(_)), "窗格一定沒開：可以退到原生主控台");
+            *rig.runner.inner.clean_err.borrow_mut() = Some("WezTerm 指令逾時（15 秒），已結束該子行程".into());
+            let e = rig.svc.start_pi_staged(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap_err();
+            assert!(matches!(e, crate::launch::win_term::WinOpenError::Started(_)), "窗格可能已經開了：不退路");
         }
 
         #[test]

@@ -279,16 +279,17 @@ pub fn user_env_names() -> Vec<String> {
                 return out;
             }
             let mut i = 0u32;
+            // 登錄檔變數名上限 16383 個字元；資料的緩衝區與長度都給空指標＝只取名字，不讀值
+            let mut buf = vec![0u16; 16384];
             loop {
-                // 登錄檔變數名上限 16383 個字元；資料的緩衝區與長度都給空指標＝只取名字，不讀值
-                let mut buf = vec![0u16; 16384];
                 let mut len = buf.len() as u32;
                 let rc = RegEnumValueW(key, i, buf.as_mut_ptr(), &mut len, std::ptr::null(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
                 if rc == ERROR_NO_MORE_ITEMS {
                     break;
                 }
                 if rc == ERROR_SUCCESS || rc == ERROR_MORE_DATA {
-                    if rc == ERROR_SUCCESS {
+                    // 預設值的名字是空字串，不是變數
+                    if rc == ERROR_SUCCESS && len > 0 {
                         out.push(String::from_utf16_lossy(&buf[..len as usize]));
                     }
                 } else {

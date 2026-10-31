@@ -16,6 +16,8 @@ pub const CLI_TIMEOUT: Duration = Duration::from_secs(15);
 pub const SOCK_WAIT: Duration = Duration::from_secs(15);
 pub const ENTER_DELAY: Duration = Duration::from_millis(150);
 pub const MAX_LINE_CHARS: usize = 4000;
+/// 執行檔本身起不來時錯誤訊息的開頭（呼叫端靠它分辨「根本沒執行」與「執行了但逾時」）
+pub const CANNOT_RUN: &str = "無法執行";
 const TRUNC_MARK: &str = "…（已截斷）";
 
 /// 外部程式的執行結果
@@ -129,7 +131,7 @@ impl Runner for RealRunner {
 
 /// RealRunner::run／run_clean 共用：啟動、讀兩條管道、逾時就連整棵樹結束
 fn exec_with_timeout(mut cmd: Command, program: &Path, timeout: Duration) -> Result<RunOutput, String> {
-    let mut child = cmd.spawn().map_err(|e| format!("無法執行 {}：{e}", program.display()))?;
+    let mut child = cmd.spawn().map_err(|e| format!("{CANNOT_RUN} {}：{e}", program.display()))?;
     let mut out = child.stdout.take();
     let mut err = child.stderr.take();
     let t_out = std::thread::spawn(move || {
@@ -536,7 +538,9 @@ impl<'a> WezTerm<'a> {
         self.cli(sock, &args).map(|_| ())
     }
 
-    /// 執行 `wezterm.exe cli ...`。socket 不存在時絕不執行（否則 cli 會卡住並悄悄啟動 mux-server）
+    /// 執行 `wezterm.exe cli ...`。socket 不存在時絕不執行（否則 cli 會卡住並悄悄啟動 mux-server）。
+    /// 這裡（list、get-text、send-text、set-tab-title、kill-pane…）用一般的 run、不清空環境：這些指令不開窗格，
+    /// 下指令的程序的環境不會進到任何夥伴那邊。只有開窗格的 spawn 才走 run_clean（見 term.rs::open_mux）
     fn cli(&self, sock: &Path, args: &[String]) -> Result<String, String> {
         if !self.fs.exists(sock) {
             return Err(format!("WezTerm 通訊檔不存在（視窗可能已關閉）：{}", sock.display()));
