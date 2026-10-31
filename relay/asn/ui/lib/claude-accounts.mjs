@@ -185,6 +185,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
   // Rust 背景工作（每分鐘）自動加入／回存後的通知：只有 kind 與 email，沒有權杖
   const onAuto = async ev => {
     if (ev?.kind === 'added' && ev.email) s.autoNote = `已自動加入 ${ev.email}`
+    if (ev?.kind === 'external' && ev.email) s.autoNote = `登入檔被其他程式換過，現在是 ${ev.email}`
     await refresh()
     void report()
   }
