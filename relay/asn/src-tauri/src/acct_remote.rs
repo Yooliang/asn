@@ -143,6 +143,24 @@ pub fn report_attempts(list: &[AccountInfo], codex: Option<&CodexLogin>, quotas:
     out
 }
 
+/// 登入失效（login_watch.rs 判定）：在「使用中」的 Claude 那列多帶 `login_failed:true`（和 `login_incomplete` 一樣，只有真的才帶）。
+/// 舊後台若因不認得這個欄位以 HTTP 400 退回整份，退路會接著送不帶這個欄位的原版（[`send_attempts`] 只在 400 才往下一份），
+/// 所以回報不會因為多這個欄位整份失敗。沒失效就原樣回傳。
+pub fn with_login_failed(attempts: Vec<Value>, failed: bool) -> Vec<Value> {
+    if !failed {
+        return attempts;
+    }
+    let flagged = attempts.iter().cloned().map(|mut a| {
+        for r in a["accounts"].as_array_mut().into_iter().flatten() {
+            if r["vendor"] == "claude" && r["current"] == true {
+                r["login_failed"] = json!(true);
+            }
+        }
+        a
+    });
+    flagged.chain(attempts.iter().cloned()).collect()
+}
+
 /// 錯誤字串形如「acct_report HTTP 400 bad_request」：只有 400（後台看不懂這份內容）才值得拿掉廠牌再送
 fn is_bad_request(err: &str) -> bool {
     err.split_whitespace().collect::<Vec<_>>().windows(2).any(|w| w == ["HTTP", "400"])
@@ -391,8 +409,8 @@ pub fn decide(taken: &mut HashMap<String, (String, Instant)>, id: &str, allowed:
 
 // ---------- 送給收發室的動作 ----------
 /// 被退回（HTTP 400）時的退路見 [`report_attempts`]：拿掉 gemini 再送，再不行只送 Claude；其他錯誤不退步
-pub async fn report(relay: &Relay, list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value], gemini: &[Value]) -> Result<Value, String> {
-    let attempts = report_attempts(list, codex, quotas, grok, codex_windows, gemini);
+pub async fn report(relay: &Relay, list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value], gemini: &[Value], login_failed: bool) -> Result<Value, String> {
+    let attempts = with_login_failed(report_attempts(list, codex, quotas, grok, codex_windows, gemini), login_failed);
     send_attempts(attempts, |body| relay.api("acct_report", Some(body)), |line| elog!("{line}")).await
 }
 /// 有登入就帶本人簽章（#380：成員角色的電腦不帶會被後台擋 403）；沒登入照舊不帶
@@ -994,6 +1012,39 @@ mod tests {
         let v = build_report(&[acct("a@x.test", true), bad], None);
         assert!(v["accounts"][0].get("login_incomplete").is_none(), "正常帳號不多帶欄位");
         assert_eq!(v["accounts"][1]["login_incomplete"], json!(true));
+    }
+
+    #[test]
+    fn 登入失效只標使用中的_claude_那列_沒失效原樣不動() {
+        let mut bad = acct("b@x.test", false);
+        bad.login_incomplete = true;
+        let list = [acct("a@x.test", true), bad];
+        let base = report_attempts(&list, None, &HashMap::new(), &[], &[], &[]);
+        assert_eq!(with_login_failed(base.clone(), false), base, "沒失效不多帶欄位");
+        let v = with_login_failed(base.clone(), true);
+        assert_eq!(v.len(), base.len() * 2, "帶旗標的在前、原版當退路在後");
+        assert_eq!(v[0]["accounts"][0]["login_failed"], json!(true));
+        assert!(v[0]["accounts"][1].get("login_failed").is_none(), "非使用中的不標");
+        assert_eq!(v[0]["accounts"][1]["login_incomplete"], json!(true), "登入不完整照樣一起帶");
+        assert!(v[1]["accounts"][0].get("login_failed").is_none(), "退路是原版");
+    }
+
+    #[tokio::test]
+    async fn 舊後台因多了登入失效欄位退回_400_時_退路送原版_回報不整份失敗() {
+        let list = [acct("a@x.test", true)];
+        let attempts = with_login_failed(report_attempts(&list, None, &HashMap::new(), &[], &[], &[]), true);
+        let sent = std::sync::Arc::new(Mutex::new(vec![]));
+        let s2 = sent.clone();
+        let r = send_attempts(attempts, move |body| {
+            let s = s2.clone();
+            async move {
+                let has = body["accounts"][0].get("login_failed").is_some();
+                s.lock().unwrap().push(has);
+                if has { Err("acct_report HTTP 400 bad_request".to_string()) } else { Ok(json!({ "ok": true })) }
+            }
+        }, |_| {}).await;
+        assert!(r.is_ok());
+        assert_eq!(*sent.lock().unwrap(), vec![true, false]);
     }
 
     #[test]

@@ -10,6 +10,9 @@ export const SWITCH_NOTICE = '已切換，開著的 Claude 視窗不用重開。
 export const INCOMPLETE_LABEL = '登入不完整'
 export const INCOMPLETE_REASON = '這個帳號存的登入不完整，請重新登入一次再加入'
 export const loginIncomplete = a => a?.login_incomplete === true || a?.incomplete === true
+// 那台電腦目前的 Claude 登入失效（橋接程式從對話紀錄判定後隨帳號回報帶來的布林）：標紅、不用請使用者去猜為什麼視窗全停
+export const LOGIN_FAILED_LABEL = '登入失效'
+export const loginFailed = a => a?.login_failed === true
 
 export function accountLine(a) {
   return [a.email, a.plan].filter(Boolean).join(' · ')

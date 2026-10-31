@@ -84,6 +84,6 @@ test('畫面接線：切換按鈕在登入不完整時反灰，並寫出標籤�
   assert.match(m, /class="m-dv-sw"[^>]*:disabled="!v\.switchable \|\| a\.incomplete"/, '手機帳號卡')
   assert.ok(m.includes('{{ INCOMPLETE_LABEL }}') && m.includes('{{ INCOMPLETE_REASON }}'))
   const mjs = read('ui/m.js')
-  assert.match(mjs, /import \{ INCOMPLETE_LABEL, INCOMPLETE_REASON \} from '\.\/lib\/claude-accounts\.mjs'/)
+  assert.match(mjs, /import \{ INCOMPLETE_LABEL, INCOMPLETE_REASON(, LOGIN_FAILED_LABEL)? \} from '\.\/lib\/claude-accounts\.mjs'/)
   assert.match(mjs, /PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON,/)
 })
