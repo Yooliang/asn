@@ -4,7 +4,7 @@
 //! 自帶終端的服務由畫面那一層在啟動時交給 [`super::term::set_global`]；這裡只透過 [`PiTermHost`] 介面用它，測試注入假的，不碰全域狀態。
 use super::win_term::WinOpenError;
 use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// 這台沒有 ASN 自帶的終端（找不到 WezTerm，或這個建置沒有畫面）
 pub(crate) const PI_TERM_NONE: &str = "這台沒有 ASN 自帶的終端，改用一般視窗開";
@@ -73,8 +73,16 @@ pub(crate) fn open_pi(
     fallback().map(|pid| PiOpened { pid, note: Some(note) })
 }
 
+/// 交給 pi 的工作資料夾拿掉 Windows 長路徑前綴（`\\?\`）：遠端開時資料夾經過 canonicalize 會帶上它，
+/// pi 拿 cwd 組 sessions 底下的資料夾名，名字裡出現 `?` 就建不了，pi 一啟動就當掉（#601）。
+/// 在 `open_pi_real` 本身做，本機開、遠端開、接手／喚醒三條路都經過這裡；自帶終端的對照表記的也是拿掉後的
+pub(crate) fn pi_cwd(cwd: &Path) -> PathBuf {
+    PathBuf::from(super::local::strip_verbatim_prefix(&cwd.to_string_lossy()))
+}
+
 /// 正式：經 pi 開夥伴（本機開、遠端開、接手、喚醒共用）。自帶的終端從全域取；沒有畫面的建置、測試一律沒有
 pub(crate) fn open_pi_real(name: &str, command: &str, args: &[String], cwd: &Path, hidden: bool, env: &[(String, String)]) -> Result<PiOpened, String> {
+    let cwd = &pi_cwd(cwd);
     let host = host();
     let r = open_pi(host.as_deref(), super::config::child_env(), command, args, cwd, hidden, env, &|| super::local::start_console_window_env(name, command, args, cwd, hidden, env))?;
     if let Some(n) = r.note {
@@ -320,5 +328,24 @@ mod tests {
         assert!(!local.contains("start_console_window_env(&req.name, &command, &plan.args"), "本機經 pi 不能直接開原生主控台");
         let pt = include_str!("pi_term.rs");
         assert!(pt.contains("super::local::start_console_window_env("), "pi 的退路直接開原生主控台（自帶終端已經試過，不再繞回開窗點重試）");
+    }
+
+    #[test]
+    fn 交給_pi_的資料夾拿掉長路徑前綴() {
+        assert_eq!(pi_cwd(Path::new(r"\\?\G:\GsEnergy")), PathBuf::from(r"G:\GsEnergy"));
+        assert_eq!(pi_cwd(Path::new(r"\\?\UNC\srv\share\x")), PathBuf::from(r"\\srv\share\x"));
+        assert_eq!(pi_cwd(Path::new(r"C:\Users\u")), PathBuf::from(r"C:\Users\u"), "沒有前綴就不動");
+        assert!(!pi_cwd(Path::new(r"\\?\G:\GsEnergy")).to_string_lossy().contains('?'));
+    }
+
+    #[test]
+    fn 守門_open_pi_real_一進來就拿掉前綴_三條路都經過它() {
+        let pt = include_str!("pi_term.rs").replace("\r\n", "\n");
+        let body = &pt[pt.find("pub(crate) fn open_pi_real(").unwrap()..];
+        let first = body.lines().nth(1).unwrap().trim();
+        assert_eq!(first, "let cwd = &pi_cwd(cwd);", "第一行就換掉 cwd，自帶終端與退路都用拿掉前綴的那個");
+        let local = include_str!("local.rs");
+        assert_eq!(local.matches("super::pi_term::open_pi_real(").count(), 3);
+        assert!(!local.contains("pi_cwd("), "修在 open_pi_real 本身，不在呼叫點");
     }
 }
