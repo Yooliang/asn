@@ -16,6 +16,8 @@ pub const CLI_TIMEOUT: Duration = Duration::from_secs(15);
 pub const SOCK_WAIT: Duration = Duration::from_secs(15);
 pub const ENTER_DELAY: Duration = Duration::from_millis(150);
 pub const MAX_LINE_CHARS: usize = 4000;
+/// 執行檔本身起不來時錯誤訊息的開頭（呼叫端靠它分辨「根本沒執行」與「執行了但逾時」）
+pub const CANNOT_RUN: &str = "無法執行";
 const TRUNC_MARK: &str = "…（已截斷）";
 
 /// 外部程式的執行結果
@@ -30,12 +32,22 @@ pub struct RunOutput {
 pub trait Runner {
     /// 執行並等待；逾時要結束子行程並回錯誤
     fn run(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<RunOutput, String>;
+    /// 同 run，但子行程只拿到 env 裡的變數（先清空環境再放白名單；B2b 的 mux cli spawn 用，設計 11.2-5）。
+    /// 預設＝run（測試的假 runner 照樣記下 env）
+    fn run_clean(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<RunOutput, String> {
+        self.run(program, args, env, timeout)
+    }
     /// 啟動後不等待，回傳行程編號
     fn spawn(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String>;
     /// 同 spawn，但子行程只拿到 env 裡的變數（不繼承 ASN 自己的環境；#475 經 pi 開在自帶終端用）。
     /// 預設＝spawn（測試的假 runner 照樣記下 env）
     fn spawn_clean(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
         self.spawn(program, args, env)
+    }
+    /// 同 spawn_clean，再加上脫離：新程序群組、盡量脫離 ASN 所在的 Job Object，ASN 結束時不會被帶走（B2 的 mux 用）。
+    /// 預設＝spawn_clean（測試的假 runner 照樣記下 env）
+    fn spawn_detached(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
+        self.spawn_clean(program, args, env)
     }
     /// 結束一個自己剛啟動的行程與它的子行程樹（等 socket 逾時要清掉剛開的視窗，不留桌面孤兒）
     fn kill_tree(&self, pid: u32);
@@ -69,48 +81,13 @@ impl Runner for RealRunner {
     fn run(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<RunOutput, String> {
         let mut cmd = Command::new(program);
         cmd.no_window().args(args).envs(env).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        let mut child = cmd.spawn().map_err(|e| format!("無法執行 {}：{e}", program.display()))?;
-        let mut out = child.stdout.take();
-        let mut err = child.stderr.take();
-        let t_out = std::thread::spawn(move || {
-            let mut s = Vec::new();
-            if let Some(o) = out.as_mut() {
-                let _ = o.read_to_end(&mut s);
-            }
-            s
-        });
-        let t_err = std::thread::spawn(move || {
-            let mut s = Vec::new();
-            if let Some(o) = err.as_mut() {
-                let _ = o.read_to_end(&mut s);
-            }
-            s
-        });
-        let start = Instant::now();
-        loop {
-            match child.try_wait() {
-                Ok(Some(st)) => {
-                    let so = t_out.join().unwrap_or_default();
-                    let se = t_err.join().unwrap_or_default();
-                    return Ok(RunOutput {
-                        success: st.success(),
-                        stdout: String::from_utf8_lossy(&so).into_owned(),
-                        stderr: String::from_utf8_lossy(&se).into_owned(),
-                    });
-                }
-                Ok(None) => {
-                    if start.elapsed() >= timeout {
-                        // cli 若在 socket 突然消失時自己拉起了 mux-server，那是它的子行程：連整棵樹一起結束（此刻 child 還活著，編號不會被回收）
-                        let _ = Command::new("taskkill").no_window().args(["/PID", &child.id().to_string(), "/T", "/F"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        return Err(format!("WezTerm 指令逾時（{} 秒），已結束該子行程", timeout.as_secs()));
-                    }
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-                Err(e) => return Err(format!("等待子行程失敗：{e}")),
-            }
-        }
+        exec_with_timeout(cmd, program, timeout)
+    }
+
+    fn run_clean(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<RunOutput, String> {
+        let mut cmd = Command::new(program);
+        cmd.no_window().env_clear().args(args).envs(env).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        exec_with_timeout(cmd, program, timeout)
     }
 
     fn spawn(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
@@ -127,6 +104,18 @@ impl Runner for RealRunner {
         Ok(child.id())
     }
 
+    fn spawn_detached(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
+        const NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        const BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+        // ASN 若被放在不准脫離的 Job Object 裡，帶 BREAKAWAY 會被拒；退回只開新程序群組，並記下來（這種情況 ASN 結束時 mux 可能被帶走）
+        create_detached(program, args, env, NEW_PROCESS_GROUP | BREAKAWAY_FROM_JOB)
+            .or_else(|_| {
+                elog!("終端服務：無法脫離 ASN 所在的工作群組，改用一般方式啟動（ASN 結束時可能一起結束）");
+                create_detached(program, args, env, NEW_PROCESS_GROUP)
+            })
+            .map_err(|e| format!("無法啟動 {}：{e}", program.display()))
+    }
+
     fn started_ms(&self, pid: u32) -> Option<u64> {
         crate::heartbeat::process_started_ms(pid)
     }
@@ -138,6 +127,136 @@ impl Runner for RealRunner {
     fn sleep(&self, d: Duration) {
         std::thread::sleep(d);
     }
+}
+
+/// RealRunner::run／run_clean 共用：啟動、讀兩條管道、逾時就連整棵樹結束
+fn exec_with_timeout(mut cmd: Command, program: &Path, timeout: Duration) -> Result<RunOutput, String> {
+    let mut child = cmd.spawn().map_err(|e| format!("{CANNOT_RUN} {}：{e}", program.display()))?;
+    let mut out = child.stdout.take();
+    let mut err = child.stderr.take();
+    let t_out = std::thread::spawn(move || {
+        let mut s = Vec::new();
+        if let Some(o) = out.as_mut() {
+            let _ = o.read_to_end(&mut s);
+        }
+        s
+    });
+    let t_err = std::thread::spawn(move || {
+        let mut s = Vec::new();
+        if let Some(o) = err.as_mut() {
+            let _ = o.read_to_end(&mut s);
+        }
+        s
+    });
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(st)) => {
+                let so = t_out.join().unwrap_or_default();
+                let se = t_err.join().unwrap_or_default();
+                return Ok(RunOutput {
+                    success: st.success(),
+                    stdout: String::from_utf8_lossy(&so).into_owned(),
+                    stderr: String::from_utf8_lossy(&se).into_owned(),
+                });
+            }
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    // cli 若在 socket 突然消失時自己拉起了 mux-server，那是它的子行程：連整棵樹一起結束（此刻 child 還活著，編號不會被回收）
+                    let _ = Command::new("taskkill").no_window().args(["/PID", &child.id().to_string(), "/T", "/F"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!("WezTerm 指令逾時（{} 秒），已結束該子行程", timeout.as_secs()));
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(e) => return Err(format!("等待子行程失敗：{e}")),
+        }
+    }
+}
+
+/// Windows 命令列的單一參數引號（照 MSVC 的拆參數規則：引號前的反斜線加倍、結尾反斜線加倍）
+pub(crate) fn quote_arg(a: &str) -> String {
+    if !a.is_empty() && !a.contains([' ', '\t', '"']) {
+        return a.to_string();
+    }
+    let mut out = String::from("\"");
+    let mut bs = 0usize;
+    for c in a.chars() {
+        match c {
+            '\\' => bs += 1,
+            '"' => {
+                out.push_str(&"\\".repeat(bs * 2 + 1));
+                out.push('"');
+                bs = 0;
+            }
+            _ => {
+                out.push_str(&"\\".repeat(bs));
+                out.push(c);
+                bs = 0;
+            }
+        }
+    }
+    out.push_str(&"\\".repeat(bs * 2));
+    out.push('"');
+    out
+}
+
+/// 環境區塊：每個變數一段 `名=值` 以 0 結尾，最後再多一個 0（只有 env 裡的變數）
+pub(crate) fn env_block(env: &BTreeMap<String, String>) -> Vec<u16> {
+    let mut b: Vec<u16> = vec![];
+    for (k, v) in env {
+        b.extend(format!("{k}={v}").encode_utf16());
+        b.push(0);
+    }
+    if b.is_empty() {
+        b.push(0);
+    }
+    b.push(0);
+    b
+}
+
+/// 脫離啟動：直接呼叫 CreateProcessW，**不繼承任何控制代碼**（std 的 Command 一律繼承，會讓長駐的 mux 一直握著
+/// ASN 的標準輸出管道；實測從管道下測試時，測試程序結束了讀管道的那端還一直等不到結束）。
+/// 環境只有 env；工作資料夾設成執行檔所在的資料夾（不占住 ASN 啟動時的資料夾）；不開視窗
+#[cfg(windows)]
+fn create_detached(program: &Path, args: &[String], env: &BTreeMap<String, String>, flags: u32) -> std::io::Result<u32> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{CreateProcessW, CREATE_UNICODE_ENVIRONMENT, PROCESS_INFORMATION, STARTUPINFOW};
+    let wide = |p: &std::ffi::OsStr| p.encode_wide().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let app = wide(program.as_os_str());
+    let line = std::iter::once(quote_arg(&program.to_string_lossy())).chain(args.iter().map(|a| quote_arg(a))).collect::<Vec<_>>().join(" ");
+    let mut line: Vec<u16> = line.encode_utf16().chain(std::iter::once(0)).collect();
+    let envb = env_block(env);
+    let cwd = program.parent().map(|d| wide(d.as_os_str()));
+    unsafe {
+        let mut si: STARTUPINFOW = std::mem::zeroed();
+        si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+        let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
+        let ok = CreateProcessW(
+            app.as_ptr(),
+            line.as_mut_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            0, // 不繼承控制代碼
+            crate::nowin::NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | flags,
+            envb.as_ptr() as *const std::ffi::c_void,
+            cwd.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+            &si,
+            &mut pi,
+        );
+        if ok == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        Ok(pi.dwProcessId)
+    }
+}
+#[cfg(not(windows))]
+fn create_detached(program: &Path, args: &[String], env: &BTreeMap<String, String>, _flags: u32) -> std::io::Result<u32> {
+    Command::new(program).no_window().env_clear().args(args).envs(env).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map(|c| c.id())
 }
 
 /// 找到的 WezTerm 資料夾
@@ -184,6 +303,9 @@ pub struct Window {
     pub sock: PathBuf,
     /// 視窗程序啟動當下量到的建立時間；stop 靠它確認還是同一個程序（量不到＝None，stop 會拒絕動手）
     pub started_ms: Option<u64>,
+    /// 窗格在共用的 mux 裡（B2b）：`gui_pid` 是 mux 的程序編號、`sock` 是 mux 的連線檔，絕對不能拿來 kill_tree
+    /// （會把所有夥伴一起結束）。`WezTerm::stop` 看到這個就拒絕；關窗格只能走 `kill_pane`
+    pub mux: bool,
 }
 
 pub fn sock_path(home: &Path, gui_pid: u32) -> PathBuf {
@@ -239,7 +361,7 @@ pub struct PaneInfo {
 }
 
 /// workspace 名稱：非空，且沒有空白與控制字元（要能安全放進一個參數）。
-fn workspace_name_ok(name: &str) -> bool {
+pub(crate) fn workspace_name_ok(name: &str) -> bool {
     !name.is_empty() && !name.chars().any(|c| c.is_whitespace() || c.is_control())
 }
 
@@ -281,6 +403,8 @@ pub struct WezTerm<'a> {
     pub cli_timeout: Duration,
     pub sock_wait: Duration,
     pub enter_delay: Duration,
+    /// 連的是共用 mux（B2b）：每條 cli 都插入 `--no-auto-start`，連不上時不准 cli 自己起一個 mux（設計 11.2-2）
+    pub no_auto_start: bool,
 }
 
 impl<'a> WezTerm<'a> {
@@ -294,6 +418,7 @@ impl<'a> WezTerm<'a> {
             cli_timeout: CLI_TIMEOUT,
             sock_wait: SOCK_WAIT,
             enter_delay: ENTER_DELAY,
+            no_auto_start: false,
         }
     }
 
@@ -384,7 +509,7 @@ impl<'a> WezTerm<'a> {
         let step = Duration::from_millis(100);
         loop {
             if self.fs.exists(&sock) {
-                return Ok(Window { gui_pid, sock, started_ms });
+                return Ok(Window { gui_pid, sock, started_ms, mux: false });
             }
             if start.elapsed() >= self.sock_wait {
                 // 剛開的視窗連同子行程一起清掉，不留桌面孤兒視窗；但只動建立時間相符的那個（編號可能已被回收）
@@ -413,7 +538,9 @@ impl<'a> WezTerm<'a> {
         self.cli(sock, &args).map(|_| ())
     }
 
-    /// 執行 `wezterm.exe cli ...`。socket 不存在時絕不執行（否則 cli 會卡住並悄悄啟動 mux-server）
+    /// 執行 `wezterm.exe cli ...`。socket 不存在時絕不執行（否則 cli 會卡住並悄悄啟動 mux-server）。
+    /// 這裡（list、get-text、send-text、set-tab-title、kill-pane…）用一般的 run、不清空環境：這些指令不開窗格，
+    /// 下指令的程序的環境不會進到任何夥伴那邊。只有開窗格的 spawn 才走 run_clean（見 term.rs::open_mux）
     fn cli(&self, sock: &Path, args: &[String]) -> Result<String, String> {
         if !self.fs.exists(sock) {
             return Err(format!("WezTerm 通訊檔不存在（視窗可能已關閉）：{}", sock.display()));
@@ -421,6 +548,9 @@ impl<'a> WezTerm<'a> {
         let mut env = self.config_env();
         env.insert("WEZTERM_UNIX_SOCKET".to_string(), sock.to_string_lossy().into_owned());
         let mut full: Vec<String> = vec!["cli".into()];
+        if self.no_auto_start {
+            full.push("--no-auto-start".into());
+        }
         full.extend(args.iter().cloned());
         let out = self.runner.run(&self.dir.cli, &full, &env, self.cli_timeout)?;
         if !out.success {
@@ -456,6 +586,11 @@ impl<'a> WezTerm<'a> {
         }
         let s = self.cli(sock, &args)?;
         s.trim().parse::<u64>().map_err(|_| format!("無法解析新 pane 編號：{}", s.trim()))
+    }
+
+    /// 關掉共用 mux 裡的一個窗格（只結束那個窗格，不動 mux 與其他夥伴）
+    pub fn kill_pane(&self, sock: &Path, pane_id: u64) -> Result<(), String> {
+        self.cli(sock, &["kill-pane".to_string(), "--pane-id".into(), pane_id.to_string()]).map(|_| ())
     }
 
     pub fn get_text(&self, sock: &Path, pane_id: u64, start_line: Option<i32>) -> Result<String, String> {
@@ -504,7 +639,11 @@ impl<'a> WezTerm<'a> {
     /// - 現在查不到這個編號 → 視窗早就沒了，視為完成；
     /// - 現在的建立時間和當初不同 → 編號已被別的程式用了，拒絕且不動它；
     /// - 相同才結束。
+    /// 窗格在共用 mux 裡的（`win.mux`）一律拒絕：gui_pid 是 mux 的編號，kill_tree 會把所有夥伴一起結束。
     pub fn stop(&self, win: &Window) -> Result<(), String> {
+        if win.mux {
+            return Err("這個窗格在共用的終端服務裡，不能用結束程序的方式關（會連其他夥伴一起結束）".to_string());
+        }
         let Some(was) = win.started_ms else {
             return Err("沒有記下視窗程序的建立時間，無法確認是同一個程序，不結束它".to_string());
         };

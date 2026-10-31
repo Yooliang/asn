@@ -226,13 +226,16 @@ pub fn child_env() -> std::collections::HashMap<String, String> {
     child_env_from(std::env::vars())
 }
 
+/// `child_env` 會濾掉的名字：CLAUDE*（除了使用者自己設的 CLAUDE_CONFIG_DIR）、NO_COLOR、金鑰類（不分大小寫）
+pub fn env_filtered_out(name: &str) -> bool {
+    let u = name.to_ascii_uppercase();
+    u != "CLAUDE_CONFIG_DIR" && (u.starts_with("CLAUDE") || u == "NO_COLOR" || crate::envc::is_secret(&u))
+}
+
 pub fn child_env_from(vars: impl Iterator<Item = (String, String)>) -> std::collections::HashMap<String, String> {
-    let mut out: std::collections::HashMap<String, String> = vars
-        .filter(|(k, _)| {
-            let u = k.to_ascii_uppercase();
-            u == "CLAUDE_CONFIG_DIR" || !(u.starts_with("CLAUDE") || u == "NO_COLOR" || crate::envc::is_secret(&u))
-        })
-        .collect();
+    // WEZTERM_* 一律不帶：ASN 若是從 WezTerm 裡開的，這些指著別的終端（包括 socket 位置）；mux 的 socket 只由
+    // mux::cli_env 加在下 cli 的那個程序上，窗格裡的由 WezTerm 自己設（接受的風險，見 mux.rs 檔頭）
+    let mut out: std::collections::HashMap<String, String> = vars.filter(|(k, _)| !env_filtered_out(k) && !k.to_ascii_uppercase().starts_with("WEZTERM_")).collect();
     // 登記過的非金鑰變數新舊名都帶（沒更新的舊程式照樣讀得到）
     crate::envc::mirror(&mut out);
     out
@@ -294,6 +297,16 @@ mod child_env_tests {
         // WezTerm 那邊不繼承 ASN 自己的環境：spawn_clean 先 env_clear 再只放給的變數
         let clean = fn_body(wez, "fn spawn_clean(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {\n        let mut cmd", "fn started_ms");
         assert!(clean.contains(".env_clear()") && clean.contains(".envs(env)"), "WezTerm 的 GUI 只拿到給它的環境");
+        // 5. mux 模式（B2b，設計 11.2-5）：下 cli spawn 的程序也要先清空環境、只放白名單，而且開窗格真的走 run_clean
+        let clean_run = fn_body(wez, "fn run_clean(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<RunOutput, String> {
+        let mut cmd", "exec_with_timeout");
+        assert!(clean_run.contains(".env_clear()") && clean_run.contains(".envs(env)"), "RealRunner::run_clean 要 env_clear 再只放給的環境");
+        let svc_src = include_str!("term.rs");
+        let open_mux = fn_body(svc_src, "fn open_mux(", "    /// 使用者在 UI 確認後才把文字送進自己開的終端");
+        assert!(open_mux.contains("self.runner.run_clean("), "mux 的開窗格要走 run_clean，不能走會繼承 ASN 環境的 run");
+        assert!(!open_mux.contains("self.runner.run(") && !open_mux.contains("spawn_in_workspace_clean"), "mux 分支不能退回繼承環境的路");
+        let open_staged = fn_body(svc_src, "fn open_staged(", "    fn mux_handle(");
+        assert!(open_staged.contains("self.open_mux("), "use_mux 時 open_staged 要交給 open_mux");
         let svc = include_str!("term.rs");
         let start_window = fn_body(svc, "pub(crate) fn start_window(", "pub fn own_gui_windows");
         assert!(start_window.contains("Some(&spec.env)"), "開窗點開的視窗一定走 start_in_workspace_clean（給了 env）");
@@ -316,5 +329,30 @@ mod child_env_tests {
         let env = super::super::win_term::term_env(base, &[]);
         let keys: Vec<_> = env.keys().cloned().collect();
         assert_eq!(keys, ["PATH"]);
+    }
+
+    #[test]
+    fn 白名單不帶任何_wezterm_變數_socket_只由_cli_env_加在下_cli_的程序上() {
+        // 變數名用 concat! 組，免得這份原始碼本身出現那個字串（mux 的守門測試要求 config.rs 裡沒有它）
+        let key = concat!("WEZTERM_", "UNIX_SOCKET");
+        let out = child_env_from(
+            [("PATH", "C:\\bin"), (key, "C:\\x\\sock"), ("wezterm_pane", "3"), ("WEZTERM_EXECUTABLE", "C:\\w\\wezterm.exe")].into_iter().map(|(k, v)| (k.to_string(), v.to_string())),
+        );
+        assert!(out.keys().all(|k| !k.to_ascii_uppercase().starts_with("WEZTERM_")), "{out:?}");
+        assert_eq!(out.get("PATH").map(String::as_str), Some("C:\\bin"));
+        // 程式（不含測試）裡設 socket 位置的只有兩處：mux::cli_env（共用 mux）與第 1 階段每個 GUI 的 cli()（B2c 收掉）
+        let prod = |src: &str| src.replace("\r\n", "\n").split("#[cfg(test)]\nmod ").next().unwrap().to_string();
+        let files = [
+            ("config.rs", prod(include_str!("config.rs"))),
+            ("local.rs", prod(include_str!("local.rs"))),
+            ("term.rs", prod(include_str!("term.rs"))),
+            ("pi_term.rs", prod(include_str!("pi_term.rs"))),
+            ("win_term.rs", prod(include_str!("win_term.rs"))),
+            ("mux.rs", prod(include_str!("mux.rs"))),
+            ("wezterm.rs", prod(include_str!("wezterm.rs"))),
+        ];
+        let sets: Vec<(&str, usize)> = files.iter().map(|(n, s)| (*n, s.matches(&format!("\"{key}\"")).count())).filter(|(_, c)| *c > 0).collect();
+        assert_eq!(sets, [("mux.rs", 1), ("wezterm.rs", 1)], "socket 位置不能從別處加進任何環境");
+        assert!(files[5].1.contains("pub fn cli_env(base: &BTreeMap<String, String>, sock: &Path)"));
     }
 }
