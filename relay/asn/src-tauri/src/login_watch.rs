@@ -1,17 +1,19 @@
-//! 登入失效偵測（設計：docs/design/LOGIN-EXPIRED-ALERT.md）。
+//! 登入失效偵測與通知（設計：docs/design/LOGIN-EXPIRED-ALERT.md）。
 //!
 //! Claude 登入壞掉時，對話紀錄（`<家目錄>\.claude\projects\**\*.jsonl`）會多一筆合成的助理回覆，
-//! 有結構化欄位 `isApiErrorMessage:true` 與 `error`，不必比對文字。本檔只做三件事：
+//! 有結構化欄位 `isApiErrorMessage:true` 與 `error`，不必比對文字。本檔做這幾件事：
 //! 1. 增量讀紀錄新增的行，轉成 [`Ev`]（只有「登入類錯誤」與「真的模型回覆」兩種，欄位只有種類與時間）；
-//! 2. [`Watch`] 狀態機判定失效／恢復／該不該通知；
-//! 3. [`notice`] 組通知內文（純函式），經 [`OwnerNotifier`] 交出去。
+//! 2. [`Watch`] 狀態機判定失效／恢復／該不該通知；**每個家目錄各一份**（[`Monitor`]），不同家目錄的錯誤與回覆不混算；
+//! 3. [`notice`] 組通知的四個欄位（純函式），經 [`OwnerNotifier`] 交給後台動作 `acct_login_alert`，
+//!    收件人與內文由後台決定，這裡不指定收件人。
 //!
 //! 隱私規定（asn真 審 #579）：讀紀錄只取 `type`／`isApiErrorMessage`／`error`／`model`／`usage` 是否存在／時間戳；
 //! 訊息內容與 `text` 不反序列化（結構裡根本沒有那個欄位）、不留、不進通知、不進 log。
-//! `Ev` 沒有任何字串欄位，所以不可能把內容帶出去。
+//! `Ev` 沒有任何字串欄位，所以不可能把內容帶出去。log 只寫固定句型與錯誤類別，不寫後台回應原文。
 //!
 //! 紅線：函式一律吃路徑與時間參數；只有 [`tick_real`] 會決定真實家目錄，測試不得呼叫它。
 use serde::Deserialize;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
@@ -23,10 +25,15 @@ pub const WINDOW_MS: i64 = 10 * 60_000;
 pub const LOOKBACK_MS: i64 = 30 * 60_000;
 /// 失效期間最多每隔這麼久再提醒一次
 pub const REMIND_MS: i64 = 6 * 3_600_000;
+/// 失效標記的壽命：最後一次登入錯誤之後這麼久都沒有新的錯誤，就當作已經不是失效中
+/// （登入已修好但一直沒用 Claude 時，不會永遠顯示失效）
+pub const FAIL_TTL_MS: i64 = 12 * 3_600_000;
 /// 第一次看到一個檔案時最多讀它最後這麼多位元組
 const TAIL_BYTES: u64 = 256 * 1024;
 /// 算登入失效的錯誤種類；`rate_limit`（額度用完）與 `server_error`（暫時性）不算
 pub const LOGIN_ERRORS: [&str; 2] = ["authentication_failed", "oauth_org_not_allowed"];
+/// 登入檔名（只看修改時間，不讀內容）
+const CRED_FILE: &str = ".credentials.json";
 
 // ---------- 解析：只宣告要的欄位，其餘（含訊息內容）反序列化時直接丟掉 ----------
 #[derive(Deserialize)]
@@ -151,6 +158,8 @@ pub struct Alert {
     pub kind: AlertKind,
     /// 最後一次登入錯誤的時間（毫秒，UTC）
     pub last_error_ms: i64,
+    /// 這一輪失效的起點（第一筆算數的登入錯誤）；轉交逾時次數從這裡起算
+    pub episode_start_ms: i64,
 }
 
 #[derive(Default)]
@@ -159,6 +168,10 @@ pub struct Watch {
     failed: bool,
     last_notify_ms: Option<i64>,
     last_error_ms: i64,
+    episode_start_ms: i64,
+    /// 目前帳號的 email 與它開始使用的時間：這個時間之前的錯誤是舊帳號的，不算
+    email: Option<String>,
+    since_ms: i64,
 }
 
 impl Watch {
@@ -167,9 +180,36 @@ impl Watch {
         self.failed
     }
 
-    /// 餵進新事件並判定。只收最近 30 分鐘內的事件；回傳要不要通知（失效期間只通知一次，每 6 小時最多再提醒一次）。
+    /// 告知目前使用的帳號。換了帳號（和上次記的不同）就清掉舊帳號的錯誤與失效狀態，
+    /// 之後只認這一刻起的錯誤。email 讀不到（空字串）不當作換帳號。
+    pub fn on_account(&mut self, email: &str, now_ms: i64) {
+        let email = email.trim().to_lowercase();
+        if email.is_empty() {
+            return;
+        }
+        match &self.email {
+            Some(old) if *old == email => {}
+            Some(_) => {
+                self.events.clear();
+                self.failed = false;
+                self.last_notify_ms = None;
+                self.since_ms = now_ms;
+                self.email = Some(email);
+            }
+            None => self.email = Some(email),
+        }
+    }
+
+    /// 同 [`Watch::feed_with`]，不看登入檔
     pub fn feed(&mut self, evs: &[Ev], now_ms: i64) -> Option<Alert> {
-        let floor = now_ms - LOOKBACK_MS;
+        self.feed_with(evs, now_ms, None)
+    }
+
+    /// 餵進新事件並判定。只收最近 30 分鐘內、且在目前帳號開始使用之後的事件；
+    /// 回傳要不要通知（失效期間只通知一次，每 6 小時最多再提醒一次）。
+    /// `login_file_ms`：登入檔的修改時間（讀不到給 None）。失效之後登入檔被更新＝重新登入過，算恢復。
+    pub fn feed_with(&mut self, evs: &[Ev], now_ms: i64, login_file_ms: Option<i64>) -> Option<Alert> {
+        let floor = (now_ms - LOOKBACK_MS).max(self.since_ms);
         self.events.extend(evs.iter().copied().filter(|e| e.ts >= floor));
         self.events.retain(|e| e.ts >= floor);
         self.events.sort_by_key(|e| e.ts);
@@ -179,13 +219,21 @@ impl Watch {
             self.last_error_ms = t;
         }
         if self.failed {
-            // 恢復：失效之後看到真的模型回覆
-            if last_reply.is_some_and(|r| r >= self.last_error_ms) {
+            // 恢復：①失效之後看到真的模型回覆 ②失效之後登入檔被更新 ③很久沒有新的登入錯誤（標記過期）
+            let replied = last_reply.is_some_and(|r| r >= self.last_error_ms);
+            let relogin = login_file_ms.is_some_and(|m| m > self.last_error_ms);
+            let stale = now_ms - self.last_error_ms >= FAIL_TTL_MS;
+            if replied || relogin || stale {
                 self.failed = false;
                 self.last_notify_ms = None;
+                if relogin || stale {
+                    // 沒有真回覆當分界：把舊的錯誤整批作廢，免得下一輪又被它們湊成「失效」
+                    self.events.clear();
+                    self.since_ms = if relogin { login_file_ms.unwrap_or(now_ms) } else { now_ms };
+                }
             } else if self.last_notify_ms.is_some_and(|t| now_ms - t >= REMIND_MS) {
                 self.last_notify_ms = Some(now_ms);
-                return Some(Alert { kind: AlertKind::Reminder, last_error_ms: self.last_error_ms });
+                return Some(Alert { kind: AlertKind::Reminder, last_error_ms: self.last_error_ms, episode_start_ms: self.episode_start_ms });
             }
             return None;
         }
@@ -193,99 +241,154 @@ impl Watch {
         if errs.windows(2).any(|w| w[1] - w[0] <= WINDOW_MS) {
             self.failed = true;
             self.last_notify_ms = Some(now_ms);
-            return Some(Alert { kind: AlertKind::First, last_error_ms: self.last_error_ms });
+            self.episode_start_ms = errs[0];
+            return Some(Alert { kind: AlertKind::First, last_error_ms: self.last_error_ms, episode_start_ms: self.episode_start_ms });
         }
         None
     }
 }
 
-// ---------- 通知內文（純函式） ----------
-pub struct NoticeInput<'a> {
-    pub computer: &'a str,
-    pub last_error_ms: i64,
-    /// 目前帳號 email；讀不到給空字串
-    pub email: &'a str,
-    /// 這段時間轉交逾時的次數（佐證用；0 就不寫這一句）
-    pub timeouts: u32,
-    /// 瀏覽器式時差：UTC 減本機，分鐘（同 usage.rs）
-    pub tz_offset_min: i32,
-    /// 這台電腦的節點代號；按鈕打開「設備與帳號」時停在這台
-    pub node: &'a str,
+// ---------- 轉交逾時次數（只作佐證，不參與判定） ----------
+/// 橋每次因「收發室沒有完成轉交」寄出逾時通知時記一筆（同一個程序內的橋；見 bridge/core.rs）。只留最近 24 小時。
+#[derive(Default)]
+pub struct TimeoutLog(Mutex<Vec<i64>>);
+impl TimeoutLog {
+    pub fn record(&self, now_ms: i64) {
+        let mut v = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        v.push(now_ms);
+        v.retain(|&t| t >= now_ms - 24 * 3_600_000);
+    }
+    /// `since_ms` 起（含）記到的次數
+    pub fn count_since(&self, since_ms: i64) -> u32 {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|&&t| t >= since_ms).count() as u32
+    }
 }
-/// 按鈕資料：只開頁面（`openAcct({node})`），不帶任何切換權限、不帶 email、不帶簽章
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Button {
-    pub label: &'static str,
-    pub action: &'static str,
-    pub node: String,
+static FORWARD_TIMEOUTS: TimeoutLog = TimeoutLog(Mutex::new(Vec::new()));
+/// 橋寄出「轉交逾時」通知時呼叫
+pub fn record_forward_timeout(now_ms: i64) {
+    FORWARD_TIMEOUTS.record(now_ms);
 }
+
+// ---------- 通知（純函式＋出口） ----------
+/// 送給後台的四個欄位（後台依節點查擁有者與組內文；時間一律 UTC）
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Notice {
-    pub body: String,
-    pub button: Button,
+    pub computer: String,
+    /// 最後一次登入錯誤的時間，UTC ISO 8601
+    pub last_at: String,
+    /// 目前帳號 email；讀不到或格式不像 email 就是 None
+    pub email: Option<String>,
+    /// 失效期間轉交逾時的次數（佐證用；後台上限 999）
+    pub timeouts: u32,
+}
+
+impl Notice {
+    /// 後台動作 `acct_login_alert` 的 body：只有四個欄位，沒有收件人、沒有錯誤原文
+    pub fn payload(&self) -> Value {
+        json!({ "computer": self.computer, "last_at": self.last_at, "email": self.email, "timeouts": self.timeouts })
+    }
 }
 
 fn clean(s: &str, max: usize) -> String {
     s.chars().filter(|c| !c.is_control()).collect::<String>().trim().chars().take(max).collect()
 }
-/// 本機時間 HH:MM
-pub fn time_text(ms: i64, tz_offset_min: i32) -> String {
-    let m = (ms / 60_000 - tz_offset_min as i64).rem_euclid(1440);
-    format!("{:02}:{:02}", m / 60, m % 60)
+/// 毫秒（UTC）轉 `YYYY-MM-DDTHH:MM:SS.000Z`
+pub fn iso_utc(ms: i64) -> String {
+    let (y, m, d) = crate::usage::civil_from_days(ms.div_euclid(86_400_000));
+    let r = ms.rem_euclid(86_400_000);
+    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.000Z", r / 3_600_000, r / 60_000 % 60, r / 1000 % 60)
 }
-/// 組通知：只放電腦名、最後錯誤時間、帳號 email、轉交逾時次數；不帶錯誤原文
-pub fn notice(i: &NoticeInput) -> Notice {
-    let computer = clean(i.computer, 40);
-    let email = clean(i.email, 100);
-    let who = if email.is_empty() { "帳號不明".to_string() } else { format!("帳號 {email}") };
-    let mut body = format!("「{computer}」的 Claude 登入失效（最後一次錯誤 {}，{who}）。", time_text(i.last_error_ms, i.tz_offset_min));
-    if i.timeouts > 0 {
-        body.push_str(&format!("這段時間轉交逾時 {} 次。", i.timeouts));
+/// 組通知：只放電腦名、最後錯誤時間、帳號 email、轉交逾時次數
+pub fn notice(computer: &str, last_error_ms: i64, email: &str, timeouts: u32) -> Notice {
+    let computer = clean(computer, 40);
+    let email = clean(email, 100).to_lowercase();
+    let email_ok = email.contains('@') && !email.contains(char::is_whitespace);
+    Notice {
+        computer: if computer.is_empty() { "這台電腦".to_string() } else { computer },
+        last_at: iso_utc(last_error_ms),
+        email: email_ok.then_some(email),
+        timeouts: timeouts.min(999),
     }
-    Notice { body, button: Button { label: "開啟設備與帳號", action: "open_acct", node: clean(i.node, 64) } }
 }
 
-/// 寄給這台電腦擁有者本人的出口。實作由後台路徑決定（設計文件第二節「要確認的一點」）；
-/// 這裡用 trait 隔開，判定與組裝不依賴它。
+/// 後台錯誤只記類別，不記回應原文
+pub fn classify_error(e: &str) -> &'static str {
+    for c in ["rate_limited", "not_claimed", "unknown_to_node", "bad_request"] {
+        if e.contains(c) {
+            return c;
+        }
+    }
+    if e.contains("連線失敗") {
+        "network"
+    } else {
+        "other"
+    }
+}
+
+/// 寄給這台電腦擁有者本人的出口。失敗只回類別（[`classify_error`]）。
 pub trait OwnerNotifier {
     fn notify_owner(&self, n: &Notice) -> Result<(), String>;
 }
-/// 後台「寄給擁有者」的路徑還沒定：先不送，回一句固定的說明（不含任何紀錄內容）
-pub struct PendingBackend;
-pub const PENDING_BACKEND_MSG: &str = "登入失效通知：後台寄給擁有者的路徑尚未提供，這次不送";
-impl OwnerNotifier for PendingBackend {
-    fn notify_owner(&self, _: &Notice) -> Result<(), String> {
-        Err(PENDING_BACKEND_MSG.to_string())
+/// 真送出：呼叫後台動作 `acct_login_alert`（用節點金鑰，和其他帳號回報同一條連線）。
+/// 一次只送一次，不重試；每節點每小時最多 3 封由後台限制。
+pub struct RelayNotifier {
+    pub relay: std::sync::Arc<crate::relay::Relay>,
+}
+impl OwnerNotifier for RelayNotifier {
+    fn notify_owner(&self, n: &Notice) -> Result<(), String> {
+        crate::rt::block_on(self.relay.api("acct_login_alert", Some(n.payload()))).map(|_| ()).map_err(|e| classify_error(&e).to_string())
     }
 }
 
 pub struct NoticeCtx {
     pub computer: String,
+    /// 目前帳號 email（讀不到給空字串）
     pub email: String,
-    pub timeouts: u32,
-    pub tz_offset_min: i32,
-    pub node: String,
 }
 
-/// 一次輪詢：讀新行 → 判定 → 該通知就組內文交給 notifier。log 只收固定句型（沒有紀錄內容）。回傳目前是否失效。
-pub fn tick(w: &mut Watch, t: &mut Tailer, roots: &[PathBuf], now_ms: i64, ctx: &NoticeCtx, notifier: &dyn OwnerNotifier, mut log: impl FnMut(String)) -> bool {
-    let evs = t.poll(roots, now_ms);
-    if let Some(a) = w.feed(&evs, now_ms) {
-        let n = notice(&NoticeInput { computer: &ctx.computer, last_error_ms: a.last_error_ms, email: &ctx.email, timeouts: ctx.timeouts, tz_offset_min: ctx.tz_offset_min, node: &ctx.node });
-        match notifier.notify_owner(&n) {
-            Ok(()) => log(format!("登入失效通知已送出（{}）", if a.kind == AlertKind::First { "首次" } else { "提醒" })),
-            Err(e) => log(e),
+/// 各家目錄各自的判定狀態：不同家目錄的錯誤、回覆、登入檔互不影響
+#[derive(Default)]
+pub struct Monitor {
+    homes: HashMap<PathBuf, (Watch, Tailer)>,
+}
+
+impl Monitor {
+    /// 一次輪詢：每個家目錄讀新行 → 判定 → 該通知就交給 notifier（同一輪最多送一封）。
+    /// `timeouts_since`：給失效起點，回這段時間的轉交逾時次數。log 只收固定句型。回傳任何一個家目錄是否失效。
+    pub fn tick(&mut self, roots: &[PathBuf], now_ms: i64, ctx: &NoticeCtx, timeouts_since: &dyn Fn(i64) -> u32, notifier: &dyn OwnerNotifier, mut log: impl FnMut(String)) -> bool {
+        self.homes.retain(|p, _| roots.contains(p));
+        let mut alert: Option<Alert> = None;
+        let mut failed = false;
+        for r in roots {
+            let (w, t) = self.homes.entry(r.clone()).or_default();
+            w.on_account(&ctx.email, now_ms);
+            let evs = t.poll(std::slice::from_ref(r), now_ms);
+            let cred = std::fs::metadata(r.join(CRED_FILE)).ok().map(|m| crate::usage::mtime_ms(&m));
+            if let Some(a) = w.feed_with(&evs, now_ms, cred) {
+                if alert.is_none_or(|x| x.kind == AlertKind::Reminder && a.kind == AlertKind::First) {
+                    alert = Some(a);
+                }
+            }
+            failed |= w.failed();
         }
+        if let Some(a) = alert {
+            let n = notice(&ctx.computer, a.last_error_ms, &ctx.email, timeouts_since(a.episode_start_ms));
+            let which = if a.kind == AlertKind::First { "首次" } else { "提醒" };
+            match notifier.notify_owner(&n) {
+                Ok(()) => log(format!("登入失效通知已送出（{which}）")),
+                Err(cat) => log(format!("登入失效通知未送出（{which}）：{cat}")),
+            }
+        }
+        failed
     }
-    w.failed()
 }
 
-static STATE: Mutex<Option<(Watch, Tailer)>> = Mutex::new(None);
+static STATE: Mutex<Option<Monitor>> = Mutex::new(None);
 /// 真實家目錄版本（給帳號回報用）：回傳目前是否登入失效
-pub fn tick_real(now_ms: i64, ctx: &NoticeCtx) -> bool {
+pub fn tick_real(now_ms: i64, ctx: &NoticeCtx, notifier: &dyn OwnerNotifier) -> bool {
     let mut g = STATE.lock().unwrap_or_else(|e| e.into_inner());
-    let (w, t) = g.get_or_insert_with(Default::default);
-    tick(w, t, &crate::usage::real_roots(), now_ms, ctx, &PendingBackend, |s| elog!("{s}"))
+    let m = g.get_or_insert_with(Default::default);
+    m.tick(&crate::usage::real_roots(), now_ms, ctx, &|since| FORWARD_TIMEOUTS.count_since(since), notifier, |s| elog!("{s}"))
 }
 
 #[cfg(test)]
@@ -348,7 +451,7 @@ mod tests {
         assert_eq!(w.feed(&[fail(0)], now), None);
         assert!(!w.failed());
         let a = w.feed(&[fail(2)], now).expect("第二筆要通知");
-        assert_eq!(a, Alert { kind: AlertKind::First, last_error_ms: t0() + 2 * MIN });
+        assert_eq!(a, Alert { kind: AlertKind::First, last_error_ms: t0() + 2 * MIN, episode_start_ms: t0() });
         assert!(w.failed());
     }
 
@@ -398,7 +501,8 @@ mod tests {
         assert_eq!(a.kind, AlertKind::Reminder);
         assert_eq!(a.last_error_ms, t0() + MIN);
         assert_eq!(w.feed(&[], n0 + REMIND_MS + 1), None, "提醒後重新計時");
-        assert!(w.feed(&[], n0 + 2 * REMIND_MS).is_some());
+        w.feed(&[], n0 + 2 * REMIND_MS);
+        assert!(!w.failed(), "再六小時已超過標記壽命，不再提醒、標記過期");
     }
 
     #[test]
@@ -416,6 +520,70 @@ mod tests {
         let mut w = Watch::default();
         assert_eq!(w.feed(&[fail(0)], t0() + MIN), None);
         assert_eq!(w.feed(&[fail(35)], t0() + 36 * MIN), None, "第一筆已超過三十分鐘");
+    }
+
+    // ---------- #589 調查員三點 ----------
+    #[test]
+    fn 剛換帳號_舊帳號的錯誤不算新帳號的() {
+        let mut w = Watch::default();
+        w.on_account("a@x.test", t0());
+        assert!(w.feed(&[fail(0), fail(1)], t0() + 2 * MIN).is_some());
+        assert!(w.failed());
+        // 5 分鐘時切到 b：失效狀態清掉
+        w.on_account("B@x.test", t0() + 5 * MIN);
+        assert!(!w.failed(), "換帳號後不再沿用舊帳號的失效");
+        // 舊帳號切換前的錯誤晚到（時間戳在切換之前）：不算
+        assert_eq!(w.feed(&[fail(2), fail(3)], t0() + 6 * MIN), None);
+        assert!(!w.failed());
+        // 切換之後 b 真的連續失敗才算
+        assert!(w.feed(&[fail(7), fail(8)], t0() + 9 * MIN).is_some());
+        // 同一個帳號（大小寫不同）不算換帳號
+        w.on_account("b@X.test", t0() + 10 * MIN);
+        assert!(w.failed());
+    }
+
+    #[test]
+    fn 切換前的一筆加切換後的一筆湊不成兩筆() {
+        let mut w = Watch::default();
+        w.on_account("a@x.test", t0());
+        assert_eq!(w.feed(&[fail(0)], t0() + MIN), None);
+        w.on_account("b@x.test", t0() + 2 * MIN);
+        assert_eq!(w.feed(&[fail(3)], t0() + 4 * MIN), None, "舊帳號那筆不能拿來和新帳號湊數");
+        assert!(!w.failed());
+    }
+
+    #[test]
+    fn email_讀不到不當作換帳號() {
+        let mut w = Watch::default();
+        w.on_account("a@x.test", t0());
+        assert!(w.feed(&[fail(0), fail(1)], t0() + 2 * MIN).is_some());
+        w.on_account("", t0() + 3 * MIN);
+        assert!(w.failed());
+    }
+
+    #[test]
+    fn 登入修好但一直沒用_登入檔更新就算恢復() {
+        let mut w = Watch::default();
+        assert!(w.feed_with(&[fail(0), fail(1)], t0() + 2 * MIN, Some(t0() - MIN)).is_some());
+        assert_eq!(w.feed_with(&[], t0() + 3 * MIN, Some(t0() + MIN)), None, "登入檔沒比最後錯誤新：仍在失效");
+        assert!(w.failed());
+        assert_eq!(w.feed_with(&[], t0() + 4 * MIN, Some(t0() + 3 * MIN)), None);
+        assert!(!w.failed(), "登入檔在失效之後被更新（重新登入）");
+        // 舊錯誤已作廢：沒有新錯誤就不會又變回失效；之後再連續失敗才通知
+        assert_eq!(w.feed_with(&[], t0() + 5 * MIN, Some(t0() + 3 * MIN)), None);
+        assert!(!w.failed());
+        assert!(w.feed_with(&[fail(10), fail(11)], t0() + 12 * MIN, Some(t0() + 3 * MIN)).is_some());
+    }
+
+    #[test]
+    fn 失效標記很久沒有新錯誤就過期() {
+        let mut w = Watch::default();
+        assert!(w.feed(&[fail(0), fail(1)], t0() + 2 * MIN).is_some());
+        let last = t0() + MIN;
+        w.feed(&[], last + FAIL_TTL_MS - 1);
+        assert!(w.failed(), "未到壽命");
+        w.feed(&[], last + FAIL_TTL_MS);
+        assert!(!w.failed(), "超過壽命沒有新錯誤，不再顯示失效");
     }
 
     // ---------- 讀檔 ----------
@@ -438,9 +606,7 @@ mod tests {
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64
     }
     fn iso(ms: i64) -> String {
-        let (y, m, d) = crate::usage::civil_from_days(ms.div_euclid(86_400_000));
-        let r = ms.rem_euclid(86_400_000);
-        format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.000Z", r / 3_600_000, r / 60_000 % 60, r / 1000 % 60)
+        iso_utc(ms)
     }
 
     #[test]
@@ -471,8 +637,7 @@ mod tests {
         assert!(t.poll(&[PathBuf::from("Z:/不存在的資料夾")], now_ms()).is_empty());
     }
 
-    // ---------- 隱私 ----------
-    const SECRET: &str = "SECRET-CONTENT-sk-ant-12345-機密內文";
+    // ---------- 多個家目錄 ----------
     struct Capture(Mutex<Vec<Notice>>);
     impl OwnerNotifier for Capture {
         fn notify_owner(&self, n: &Notice) -> Result<(), String> {
@@ -481,11 +646,55 @@ mod tests {
         }
     }
     fn ctx() -> NoticeCtx {
-        NoticeCtx { computer: "工作機".into(), email: "a@x.test".into(), timeouts: 3, tz_offset_min: -480, node: "node-w".into() }
+        NoticeCtx { computer: "工作機".into(), email: "a@x.test".into() }
     }
 
     #[test]
-    fn 訊息內容不會出現在事件_通知內文_或_log() {
+    fn 兩個家目錄各一筆錯誤_不混在一起湊成兩筆() {
+        let (d1, d2) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let now = now_ms();
+        write(d1.path(), "a/s.jsonl", &[auth_line(&iso(now - 3 * MIN))]);
+        write(d2.path(), "a/s.jsonl", &[auth_line(&iso(now - 2 * MIN))]);
+        let roots = vec![d1.path().to_path_buf(), d2.path().to_path_buf()];
+        let cap = Capture(Mutex::new(vec![]));
+        let mut m = Monitor::default();
+        let failed = m.tick(&roots, now, &ctx(), &|_| 0, &cap, |_| {});
+        assert!(!failed, "各家目錄只有一筆，不算失效");
+        assert!(cap.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn 另一個家目錄的真回覆不會讓這個家目錄恢復() {
+        let (d1, d2) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let now = now_ms();
+        write(d1.path(), "a/s.jsonl", &[auth_line(&iso(now - 4 * MIN)), auth_line(&iso(now - 3 * MIN))]);
+        write(d2.path(), "a/s.jsonl", &[reply_line(&iso(now - MIN))]);
+        let roots = vec![d2.path().to_path_buf(), d1.path().to_path_buf()];
+        let cap = Capture(Mutex::new(vec![]));
+        let mut m = Monitor::default();
+        assert!(m.tick(&roots, now, &ctx(), &|_| 0, &cap, |_| {}), "有回覆的家目錄排在前面，另一個家目錄仍是失效");
+        assert_eq!(cap.0.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn 登入檔更新後該家目錄恢復() {
+        let d = tempfile::tempdir().unwrap();
+        let now = now_ms();
+        write(d.path(), "a/s.jsonl", &[auth_line(&iso(now - 4 * MIN)), auth_line(&iso(now - 3 * MIN))]);
+        let roots = vec![d.path().to_path_buf()];
+        let cap = Capture(Mutex::new(vec![]));
+        let mut m = Monitor::default();
+        assert!(m.tick(&roots, now, &ctx(), &|_| 0, &cap, |_| {}));
+        // 重新登入：登入檔（內容不重要，只看修改時間）出現且比最後錯誤新
+        std::fs::write(d.path().join(CRED_FILE), "x").unwrap();
+        assert!(!m.tick(&roots, now_ms().max(now) + MIN, &ctx(), &|_| 0, &cap, |_| {}), "登入檔比最後錯誤新＝恢復");
+    }
+
+    // ---------- 隱私與通知 ----------
+    const SECRET: &str = "SECRET-CONTENT-sk-ant-12345-機密內文";
+
+    #[test]
+    fn 訊息內容不會出現在事件_通知_或_log() {
         let now = now_ms();
         let leak = |ts: &str| auth_line(ts).replace("Login expired · Please run /login", SECRET);
         // 事件層：含內容的失效行與回覆行
@@ -498,18 +707,20 @@ mod tests {
         let dir2 = tempfile::tempdir().unwrap();
         write(dir2.path(), "a/s.jsonl", &[leak(&iso(now - 3 * MIN)), leak(&iso(now - 2 * MIN))]);
         let cap = Capture(Mutex::new(vec![]));
-        let (mut w, mut t2) = (Watch::default(), Tailer::default());
+        let mut m = Monitor::default();
         let mut logs = vec![];
-        let failed = tick(&mut w, &mut t2, &[dir2.path().to_path_buf()], now, &ctx(), &cap, |s| logs.push(s));
+        let failed = m.tick(&[dir2.path().to_path_buf()], now, &ctx(), &|_| 2, &cap, |s| logs.push(s));
         assert!(failed);
         let sent = cap.0.lock().unwrap();
         assert_eq!(sent.len(), 1);
         assert!(!logs.is_empty());
-        let all = format!("{:?} {:?} {:?} {:?}", sent[0], logs, w.events, evs);
+        let all = format!("{:?} {:?} {:?} {:?}", sent[0], sent[0].payload(), logs, evs);
         for bad in ["SECRET", "sk-ant", "機密", "Login expired"] {
             assert!(!all.contains(bad), "通知、log、狀態不含紀錄內容（{bad}）：{all}");
         }
-        assert!(sent[0].body.contains("a@x.test") && sent[0].body.contains("工作機"));
+        assert_eq!(sent[0].computer, "工作機");
+        assert_eq!(sent[0].email.as_deref(), Some("a@x.test"));
+        assert_eq!(sent[0].timeouts, 2, "逾時次數取自 timeouts_since");
     }
 
     #[test]
@@ -520,21 +731,111 @@ mod tests {
         assert!(!head.contains("content:") && !head.contains("text:"), "Line／Msg 不得宣告內容欄位");
     }
 
-    // ---------- 通知內文 ----------
     #[test]
-    fn 通知內文只放電腦名_時間_email_逾時次數_按鈕只開頁面() {
-        let n = notice(&NoticeInput { computer: "工作機", last_error_ms: crate::usage::parse_ts_ms("2026-10-30T13:35:00Z").unwrap(), email: "a@x.test", timeouts: 3, tz_offset_min: -480, node: "node-w" });
-        assert_eq!(n.body, "「工作機」的 Claude 登入失效（最後一次錯誤 21:35，帳號 a@x.test）。這段時間轉交逾時 3 次。");
-        assert_eq!(n.button, Button { label: "開啟設備與帳號", action: "open_acct", node: "node-w".into() });
-        let n0 = notice(&NoticeInput { computer: "W", last_error_ms: 0, email: "", timeouts: 0, tz_offset_min: 0, node: "n" });
-        assert_eq!(n0.body, "「W」的 Claude 登入失效（最後一次錯誤 00:00，帳號不明）。");
-        let n1 = notice(&NoticeInput { computer: "A\nB\u{0}", last_error_ms: 0, email: "x@y.test\r\n", timeouts: 0, tz_offset_min: 0, node: "n" });
-        assert!(!n1.body.contains('\n') && !n1.body.contains('\r') && !n1.body.contains('\u{0}'));
+    fn 通知只有四個欄位_時間是_utc_沒有時差殘留() {
+        let n = notice("工作機", crate::usage::parse_ts_ms("2026-10-30T13:35:00Z").unwrap(), "A@X.test", 3);
+        assert_eq!(n.payload(), json!({ "computer": "工作機", "last_at": "2026-10-30T13:35:00.000Z", "email": "a@x.test", "timeouts": 3 }));
+        assert_eq!(n.payload().as_object().unwrap().len(), 4, "沒有收件人、沒有其他欄位");
+        let n0 = notice("W", 0, "", 0);
+        assert_eq!(n0.payload(), json!({ "computer": "W", "last_at": "1970-01-01T00:00:00.000Z", "email": null, "timeouts": 0 }));
+        let n1 = notice("A\nB\u{0}", 0, "x y@z", 5000);
+        assert!(!n1.computer.contains('\n') && !n1.computer.contains('\u{0}'));
+        assert_eq!(n1.email, None, "不像 email 就不送");
+        assert_eq!(n1.timeouts, 999);
+        assert_eq!(notice("  ", 0, "", 0).computer, "這台電腦");
+        assert_eq!(notice(&"長".repeat(80), 0, "", 0).computer.chars().count(), 40);
+        let src = include_str!("login_watch.rs");
+        assert!(!src.contains(&["tz_offset", "_min"].concat()), "不再有本機時差殘留");
     }
 
     #[test]
-    fn 後台路徑未定_空殼送出回固定說明() {
-        let n = notice(&NoticeInput { computer: "W", last_error_ms: 0, email: "", timeouts: 0, tz_offset_min: 0, node: "n" });
-        assert_eq!(PendingBackend.notify_owner(&n), Err(PENDING_BACKEND_MSG.to_string()));
+    fn 轉交逾時次數_只算失效起點之後() {
+        let l = TimeoutLog::default();
+        l.record(1000);
+        l.record(5000);
+        l.record(9000);
+        assert_eq!(l.count_since(5000), 2);
+        assert_eq!(l.count_since(0), 3);
+        assert_eq!(l.count_since(9001), 0);
+        l.record(1000 + 25 * 3_600_000);
+        assert_eq!(l.count_since(0), 1, "超過 24 小時的舊紀錄會被清掉");
+    }
+
+    #[test]
+    fn 後台錯誤只留類別() {
+        assert_eq!(classify_error("acct_login_alert HTTP 429 rate_limited"), "rate_limited");
+        assert_eq!(classify_error("acct_login_alert HTTP 403 not_claimed"), "not_claimed");
+        assert_eq!(classify_error("acct_login_alert HTTP 404 unknown_to_node"), "unknown_to_node");
+        assert_eq!(classify_error("acct_login_alert HTTP 400 bad_request"), "bad_request");
+        assert_eq!(classify_error("acct_login_alert 連線失敗：timed out SECRET-KEY"), "network");
+        assert_eq!(classify_error("acct_login_alert HTTP 500 boom-SECRET"), "other");
+    }
+
+    /// 本機假後端：回固定狀態與內容，記下請求（只連 127.0.0.1）
+    fn fake_server(status: &str, body: &'static str) -> (String, std::sync::Arc<Mutex<Vec<String>>>) {
+        use std::io::{Read, Write};
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://127.0.0.1:{}/relay", l.local_addr().unwrap().port());
+        let seen = std::sync::Arc::new(Mutex::new(vec![]));
+        let s2 = seen.clone();
+        let status = status.to_string();
+        std::thread::spawn(move || {
+            for c in l.incoming() {
+                let Ok(mut c) = c else { break };
+                let mut buf = vec![0u8; 16384];
+                let n = c.read(&mut buf).unwrap_or(0);
+                s2.lock().unwrap().push(String::from_utf8_lossy(&buf[..n]).to_string());
+                let _ = write!(c, "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len());
+            }
+        });
+        (url, seen)
+    }
+
+    #[test]
+    fn 真送出_打_acct_login_alert_只帶四個欄位() {
+        let (url, seen) = fake_server("200 OK", r#"{"ok":true}"#);
+        let relay = std::sync::Arc::new(crate::relay::Relay::new(url, "TEST-KEY".into(), "node-w".into(), "w".into()));
+        let n = RelayNotifier { relay };
+        assert_eq!(n.notify_owner(&notice("工作機", 0, "a@x.test", 2)), Ok(()));
+        let reqs = seen.lock().unwrap();
+        assert_eq!(reqs.len(), 1);
+        assert!(reqs[0].starts_with("POST /relay?action=acct_login_alert"), "{}", reqs[0]);
+        let body: Value = serde_json::from_str(reqs[0].split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(body, json!({ "computer": "工作機", "last_at": "1970-01-01T00:00:00.000Z", "email": "a@x.test", "timeouts": 2 }));
+    }
+
+    #[test]
+    fn 後台拒絕只記類別_不重試_不_panic() {
+        for (status, body, cat) in [("429 Too Many Requests", r#"{"error":"rate_limited"}"#, "rate_limited"), ("403 Forbidden", r#"{"error":"not_claimed"}"#, "not_claimed"), ("404 Not Found", r#"{"error":"unknown_to_node"}"#, "unknown_to_node")] {
+            let (url, seen) = fake_server(status, body);
+            let n = RelayNotifier { relay: std::sync::Arc::new(crate::relay::Relay::new(url, "TEST-KEY".into(), "node-w".into(), "w".into())) };
+            assert_eq!(n.notify_owner(&notice("W", 0, "", 0)), Err(cat.to_string()));
+            assert_eq!(seen.lock().unwrap().len(), 1, "只打一次，不重試");
+        }
+        // 連不上（沒有人在聽的埠）：網路錯誤，不 panic
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://127.0.0.1:{}/relay", l.local_addr().unwrap().port());
+        drop(l);
+        let n = RelayNotifier { relay: std::sync::Arc::new(crate::relay::Relay::new(url, "TEST-KEY".into(), "node-w".into(), "w".into())) };
+        assert_eq!(n.notify_owner(&notice("W", 0, "", 0)), Err("network".to_string()));
+    }
+
+    #[test]
+    fn 通知失敗時_失效判定照常_log_只有類別() {
+        struct Fail;
+        impl OwnerNotifier for Fail {
+            fn notify_owner(&self, _: &Notice) -> Result<(), String> {
+                Err("rate_limited".into())
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let now = now_ms();
+        write(dir.path(), "a/s.jsonl", &[auth_line(&iso(now - 3 * MIN)), auth_line(&iso(now - 2 * MIN))]);
+        let mut logs = vec![];
+        let mut m = Monitor::default();
+        assert!(m.tick(&[dir.path().to_path_buf()], now, &ctx(), &|_| 0, &Fail, |s| logs.push(s)), "通知失敗不影響失效判定");
+        assert_eq!(logs, vec!["登入失效通知未送出（首次）：rate_limited".to_string()]);
+        m.tick(&[dir.path().to_path_buf()], now + MIN, &ctx(), &|_| 0, &Fail, |s| logs.push(s));
+        assert_eq!(logs.len(), 1, "不重試轟炸：失效期間不再送");
     }
 }
