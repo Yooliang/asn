@@ -29,18 +29,34 @@ test('mux-server 與其他檔同一個壓縮檔、同一份雜湊核對：腳本
   assert.match(read('src-tauri', 'build.rs'), /"wezterm-mux-server\.exe"/)
 })
 
-test('安裝掛鉤：更新前先把 wezterm 資料夾裡的 mux 執行檔改名 .old（先刪舊的 .old、檔案存在才改名），裝完與解除安裝順手清', () => {
+test('安裝掛鉤：WEZTERM_FILES 每個檔更新前都改名（清單一致）；.old 刪不掉就輪替到 .old1～.old9；裝完與解除安裝清 .old*', () => {
   const h = read('src-tauri', 'installer-hooks.nsh')
   const body = name => h.match(new RegExp(name + '\\n([\\s\\S]*?)!macroend'))[1]
-  const old = '$INSTDIR\\wezterm\\wezterm-mux-server.old'
-  const exe = '$INSTDIR\\wezterm\\wezterm-mux-server.exe'
   const pre = body('NSIS_HOOK_PREINSTALL')
-  const iDel = pre.indexOf(`Delete "${old}"`)
-  const iIf = pre.indexOf(`IfFileExists "${exe}" 0 +2\n    Rename "${exe}" "${old}"`)
-  assert.ok(iDel >= 0 && iIf > iDel, '先刪舊 .old，再判斷存在才改名')
-  assert.ok(body('NSIS_HOOK_POSTINSTALL').includes(`Delete "${old}"`))
-  assert.ok(body('NSIS_HOOK_POSTUNINSTALL').includes(`Delete "${old}"`))
+  // 掛鉤手寫的清單必須與 WEZTERM_FILES 完全一致（新增檔漏列、多列都會紅），編號不重複
+  const rows = [...pre.matchAll(/!insertmacro ASN_ROTATE (\d+) (\S+)/g)].map(m => [m[1], m[2]])
+  assert.deepEqual(rows.map(r => r[1]).sort(), [...WEZTERM_FILES].sort())
+  assert.equal(new Set(rows.map(r => r[0])).size, rows.length, '標籤編號不可重複')
+  // 輪替：先刪、刪不掉就試下一個名字（.old、.old1～.old9），只動 wezterm 資料夾
+  const rot = h.match(/!macro ASN_ROTATE ID FILE\n([\s\S]*?)!macroend/)[1]
+  const sufs = [...rot.matchAll(/ASN_TRY_OLD \$\{ID\} \$\{FILE\} (\.old\d?)/g)].map(m => m[1])
+  assert.deepEqual(sufs, ['.old', ...Array.from({ length: 9 }, (_, i) => `.old${i + 1}`)])
+  const tryOld = h.match(/!macro ASN_TRY_OLD ID FILE SUF\n([\s\S]*?)!macroend/)[1]
+  const iDel = tryOld.indexOf('Delete "$INSTDIR\\wezterm\\${FILE}${SUF}"')
+  const iSkip = tryOld.indexOf('IfFileExists "$INSTDIR\\wezterm\\${FILE}${SUF}" +3 0')
+  const iRen = tryOld.indexOf('Rename "$INSTDIR\\wezterm\\${FILE}" "$INSTDIR\\wezterm\\${FILE}${SUF}"')
+  assert.ok(iDel >= 0 && iSkip > iDel && iRen > iSkip, '先刪、還在就跳過、否則改名')
+  assert.match(tryOld, /Goto asn_done_\$\{ID\}/)
+  assert.ok(rot.includes('IfFileExists "$INSTDIR\\wezterm\\${FILE}" 0 asn_done_${ID}'), '檔案不存在就略過')
+  for (const m of ['NSIS_HOOK_PREINSTALL', 'NSIS_HOOK_POSTINSTALL', 'NSIS_HOOK_POSTUNINSTALL']) {
+    assert.ok(body(m).includes('Delete "$INSTDIR\\wezterm\\*.old*"'), `${m} 要清 .old*`)
+  }
   assert.ok(!/(taskkill|nsExec|KillProcess)/i.test(h), '掛鉤不殺任何程序')
+  const code = h.replace(/^;.*$/gm, '')
+  assert.ok(!/\$INSTDIR\\(?!wezterm\\|asn-cli|asn-askpass)[^"]*\.old/.test(code), '只動 wezterm 資料夾與既有的兩個檔')
+  const wild = code.split('\n').filter(l => /Delete .*\*/.test(l))
+  assert.ok(wild.length >= 3 && wild.every(l => l.includes('Delete "$INSTDIR\\wezterm\\*.old*"')), '萬用字元只能出現在 wezterm 子資料夾路徑下')
+  assert.ok(rot.includes('.old9'), '輪替上限到 .old9')
 })
 
 test('Windows 專屬設定列的資源就是下載腳本取得的那些檔，放在安裝資料夾的 wezterm 底下；通用設定不列（Linux／安卓不該要這些檔）', () => {
