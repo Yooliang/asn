@@ -3753,6 +3753,24 @@ mod tests {
     }
 
     #[test]
+    fn 通訊檔先出現_之後才崩潰_也換_webgpu_備援再開一次() {
+        // 工作機實測（#595）：GUI 先建好通訊檔、之後才報 OpenGL 建不起視窗而退出
+        wezterm::OBSERVE_TICKS.with(|c| c.set(wezterm::full_observe_ticks()));
+        let mut started = vec![Some(1_000), Some(1_000), None]; // 第一次：剛開、第一次核對還在、第二次已退出
+        started.push(Some(1_000)); // 第二次：剛開
+        started.extend(vec![Some(1_000); 10]); // 活過整段觀察
+        let (rig, cfg, svc) = no_window_rig(started);
+        let files = rig.files.clone();
+        *rig.runner.inner.on_spawn.borrow_mut() = Some(Box::new(move |_| {
+            files.borrow_mut().insert(sock());
+        }));
+        let (_, gui) = svc.start_window(Path::new(&rig.cwd), &claude_spec(None)).unwrap();
+        assert_eq!(gui, 42);
+        assert_eq!(count_starts(&rig.runner), 2);
+        assert!(cfg.with_file_name("cfg-webgpu.lua").exists(), "第二次用備援設定檔");
+    }
+
+    #[test]
     fn 備援設定從隔離設定產生_只多一個_front_end() {
         assert_eq!(with_webgpu(ISOLATED_CONFIG), "return { exit_behavior = \"Hold\", front_end = \"WebGpu\" }\n");
         assert_eq!(with_webgpu(LEGACY_CONFIG), "return { front_end = \"WebGpu\" }\n");

@@ -24,6 +24,26 @@ const NO_WINDOW_MARK: &str = "Failed to create window";
 /// 讀 GUI log 的大小上限（超過就不讀）
 const LOG_READ_MAX: u64 = 256 * 1024;
 /// 等通訊檔時，每隔多久才去看一次 GUI 的 log（log 可能有幾百 KB，不必每 100 毫秒讀一次）
+/// 觀察要核對幾次。單元測試預設 0（既有測試都用排好的建立時間序列，不該被多出來的核對吃掉）；要測觀察的測試自己用 set_observe_ticks 開
+#[cfg(not(test))]
+fn observe_ticks() -> u32 {
+    (SOCK_OBSERVE.as_millis() / SOCK_OBSERVE_STEP.as_millis()) as u32
+}
+#[cfg(test)]
+thread_local! {
+    pub(crate) static OBSERVE_TICKS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+#[cfg(test)]
+fn observe_ticks() -> u32 {
+    OBSERVE_TICKS.with(|c| c.get())
+}
+#[cfg(test)]
+pub(crate) fn full_observe_ticks() -> u32 {
+    (SOCK_OBSERVE.as_millis() / SOCK_OBSERVE_STEP.as_millis()) as u32
+}
+/// 通訊檔出現後，GUI 要再活過這麼久才算開成功（#595：OpenGL 建不起視窗是在通訊檔之後才報）
+const SOCK_OBSERVE: Duration = Duration::from_secs(2);
+const SOCK_OBSERVE_STEP: Duration = Duration::from_millis(200);
 const LOG_POLL: Duration = Duration::from_millis(500);
 /// 建不起視窗時給人看的一句話（#595）
 pub const NO_WINDOW_MSG: &str = "這台電腦現在開不了圖形視窗（常見原因：遠端桌面已中斷），請先接回桌面再試";
@@ -594,7 +614,7 @@ impl<'a> WezTerm<'a> {
         let mut log_checked: Option<Instant> = None;
         loop {
             if self.fs.exists(&sock) {
-                return Ok(Window { gui_pid, sock, started_ms, mux: false });
+                return self.observe_after_sock(gui_pid, started_ms, sock);
             }
             if let Some(gui_started) = started_ms {
                 if log_checked.map_or(true, |t| t.elapsed() >= LOG_POLL) {
@@ -618,6 +638,28 @@ impl<'a> WezTerm<'a> {
             }
             self.runner.sleep(step);
         }
+    }
+
+    /// 通訊檔出現不等於視窗開成功：GUI 會先建好通訊檔，之後才報建不起視窗而退出（B4 工作機實測，#595）。
+    /// 所以再觀察 SOCK_OBSERVE（每 SOCK_OBSERVE_STEP 一次核對建立時間）：
+    /// 期間 GUI 退出且 log 有那句 → 照 NoWindow 路走（清子孫、刪通訊檔）；退出但 log 沒那句 → Other（當作已啟動，不重開）；活過 → 成功。
+    /// 量不到 GUI 的建立時間就沒辦法觀察，照舊看到通訊檔即成功
+    fn observe_after_sock(&self, gui_pid: u32, started_ms: Option<u64>, sock: PathBuf) -> Result<Window, SockFail> {
+        let ok = Window { gui_pid, sock: sock.clone(), started_ms, mux: false };
+        let Some(gui_started) = started_ms else {
+            return Ok(ok);
+        };
+        let ticks = observe_ticks();
+        for _ in 0..ticks {
+            self.runner.sleep(SOCK_OBSERVE_STEP);
+            if self.runner.started_ms(gui_pid) != started_ms {
+                if self.gui_log_says_no_window(gui_pid, gui_started) {
+                    return self.no_window(gui_pid, gui_started, &sock);
+                }
+                return Err(SockFail::Other("WezTerm 視窗開起來後又退出了，原因不明，為免同一段對話重複開，沒有重開".to_string()));
+            }
+        }
+        Ok(ok)
     }
 
     /// GUI 的 log 檔路徑：WezTerm 把 log 寫在通訊檔旁邊，檔名是 `wezterm-gui.exe-log-<程序編號>.txt`
@@ -1248,12 +1290,74 @@ mod tests {
         let e = wez(&r, &fs).wait_sock_classified(1).unwrap_err();
         assert!(matches!(&e, SockFail::Other(m) if m.contains("通訊檔仍未出現")), "{e:?}");
         assert!(fs.removed.borrow().is_empty());
-        // 通訊檔有出現：是成功，就算 log 裡有那句
+    }
+
+    fn observe_all() {
+        OBSERVE_TICKS.with(|c| c.set(full_observe_ticks()));
+    }
+    fn fs_sock_then_log(log: &str) -> FakeFs {
         let fs = FakeFs::default();
         fs.files.borrow_mut().insert(sock_path(Path::new("H"), 1));
-        fs.texts.borrow_mut().insert(gui_log(1), "Failed to create window".into());
+        fs.texts.borrow_mut().insert(gui_log(1), log.into());
+        fs
+    }
+
+    #[test]
+    fn 通訊檔先出現_之後才崩潰_log_有那句_走_no_window_並清掉通訊檔和子程序() {
+        observe_all();
+        let fs = fs_sock_then_log("Failed to create window");
+        // 剛開 5；第一次核對還在，第二次已經不在
+        let r = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(5), Some(5), None]), ..Default::default() };
+        *r.descendants.borrow_mut() = vec![7];
+        r.pid_started.borrow_mut().insert(7, vec![Some(6), None]);
+        let e = wez(&r, &fs).wait_sock_classified(1).unwrap_err();
+        assert_eq!(e, SockFail::NoWindow(NO_WINDOW_MSG.to_string()));
+        assert_eq!(*r.tree_killed.borrow(), vec![7]);
+        assert_eq!(*fs.removed.borrow(), vec![sock_path(Path::new("H"), 1)], "要刪的是這個 GUI 的通訊檔");
+    }
+
+    #[test]
+    fn 通訊檔先出現_之後退出但_log_沒有那句_回_other_不重開不刪() {
+        observe_all();
+        let fs = fs_sock_then_log("別的訊息");
         let r = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(5), None]), ..Default::default() };
+        let e = wez(&r, &fs).wait_sock_classified(1).unwrap_err();
+        assert!(matches!(e, SockFail::Other(_)), "{e:?}");
+        assert!(r.tree_killed.borrow().is_empty());
+        assert!(fs.removed.borrow().is_empty());
+    }
+
+    #[test]
+    fn 通訊檔先出現_退出但_log_是這個_gui_之前留下的_回_other() {
+        observe_all();
+        let fs = fs_sock_then_log("Failed to create window");
+        fs.modified.borrow_mut().insert(gui_log(1), 4); // 早於 GUI 建立時間 5
+        let r = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(5), None]), ..Default::default() };
+        let e = wez(&r, &fs).wait_sock_classified(1).unwrap_err();
+        assert!(matches!(e, SockFail::Other(_)), "{e:?}");
+        assert!(fs.removed.borrow().is_empty());
+    }
+
+    #[test]
+    fn 通訊檔出現後活過兩秒才算成功_只等兩秒() {
+        observe_all();
+        let fs = fs_sock_then_log("Failed to create window");
+        let r = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(5); 12]), ..Default::default() };
+        let w = wez(&r, &fs).wait_sock_classified(1).unwrap();
+        assert_eq!(w.gui_pid, 1);
+        let total: Duration = r.sleeps.borrow().iter().sum();
+        assert_eq!(total, Duration::from_secs(2), "只等 2 秒");
+        assert!(r.sleeps.borrow().iter().all(|d| *d == Duration::from_millis(200)), "每 0.2 秒核對一次");
+        assert!(r.tree_killed.borrow().is_empty());
+    }
+
+    #[test]
+    fn 通訊檔出現但量不到建立時間_沒法觀察_照舊算成功() {
+        observe_all();
+        let fs = fs_sock_then_log("Failed to create window");
+        let r = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![None]), ..Default::default() };
         assert!(wez(&r, &fs).wait_sock_classified(1).is_ok());
+        assert!(r.sleeps.borrow().is_empty());
     }
 
     fn no_window_fs() -> FakeFs {
