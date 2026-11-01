@@ -117,7 +117,7 @@ pub(crate) fn term_env(base: HashMap<String, String>, extra: &[(String, String)]
 /// 組一扇視窗：Claude 本體記 kind "claude"，其餘記 "window"
 pub(crate) fn spec_for(title: &str, command: &str, args: &[String], hidden: bool, env: BTreeMap<String, String>) -> WinSpec {
     let argv: Vec<String> = std::iter::once(command.to_string()).chain(args.iter().cloned()).collect();
-    let kind = if super::switch::looks_like_claude(&argv) { KIND_CLAUDE } else { KIND_WINDOW };
+    let kind = if super::switch::looks_like_claude(&argv) || super::switch::wraps_claude(&argv) { KIND_CLAUDE } else { KIND_WINDOW };
     WinSpec { kind, title: title.to_string(), session_id: if kind == KIND_CLAUDE { session_id_of(args) } else { None }, argv, env, hidden }
 }
 
@@ -220,6 +220,12 @@ mod tests {
         assert_eq!(s.argv, sv(&[r"C:\bin\claude.exe", "-n", "小乙", "--resume", "sid-9"]), "指令與參數原樣，一個字都不改");
         let c = spec_for("小丙", "cmd.exe", &sv(&["/c", "codex", "resume", "t1"]), false, BTreeMap::new());
         assert_eq!((c.kind, c.session_id), (KIND_WINDOW, None));
+        // 外殼包著的 claude 也記成 claude（#622）；包著 cd x; claude 的不算
+        let p = spec_for("小丁", "powershell", &sv(&["-NoExit", "-Command", "claude -n 小丁"]), false, BTreeMap::new());
+        assert_eq!(p.kind, KIND_CLAUDE);
+        assert_eq!(p.argv, sv(&["powershell", "-NoExit", "-Command", "claude -n 小丁"]), "指令與參數原樣");
+        let q = spec_for("小戊", "powershell", &sv(&["-Command", "cd x; claude"]), false, BTreeMap::new());
+        assert_eq!(q.kind, KIND_WINDOW);
     }
 
     #[test]
