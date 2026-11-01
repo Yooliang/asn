@@ -22,6 +22,9 @@ export const CIPHER_MIN = 100;
 export const CIPHER_MAX = 2048;
 const PUB_RE = /^[A-Za-z0-9_-]{43}$/;
 const CIPHER_RE = /^[A-Za-z0-9_-]+$/;
+// 登入網址：官方登入網域的 https（埠只能 443），後面只許可見的 ASCII（不含空白、控制字元、反斜線）。與資料庫的檢查約束同一條規則
+export const LINK_MAX = 2048;
+export const LINK_RE = /^https:\/\/([a-z0-9-]+\.)*(claude\.ai|claude\.com|anthropic\.com)(:443)?([/?#][\x21-\x5b\x5d-\x7e]*)?$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const ERROR_TEXT: Record<string, string> = {
@@ -45,7 +48,7 @@ export const fail = (code: string): Reply => ({ status: STATUS[code] ?? 400, bod
 
 const hasControl = (s: string) => /[\u0000-\u001f\u007f‪-‮⁦-⁩]/.test(s);
 
-export type SecretRequest = { pub: string; program: string; purpose: string; ttl: number };
+export type SecretRequest = { pub: string; program: string; purpose: string; ttl: number; link: string | null };
 
 // 第一層格式檢查（不查資料庫）；多餘的欄位一律丟掉
 export function parseSecretRequest(b: Json): SecretRequest | { error: string } {
@@ -59,7 +62,13 @@ export function parseSecretRequest(b: Json): SecretRequest | { error: string } {
     if (typeof b.ttl !== "number" || !Number.isInteger(b.ttl) || b.ttl < TTL_MIN || b.ttl > TTL_MAX) return { error: "bad_request" };
     ttl = b.ttl;
   }
-  return { pub, program, purpose, ttl };
+  // 登入網址（選填）：只有 ASN 的登入流程會帶；格式不合一律擋，不寫進資料庫
+  let link: string | null = null;
+  if (b.link != null) {
+    if (typeof b.link !== "string" || b.link.length < 12 || b.link.length > LINK_MAX || !LINK_RE.test(b.link)) return { error: "bad_request" };
+    link = b.link;
+  }
+  return { pub, program, purpose, ttl, link };
 }
 
 export type SecretReply = { id: string; cipher: string | null; deny: boolean };
@@ -86,15 +95,21 @@ async function call(deps: LaunchDeps, fn: string, args: Record<string, unknown>)
 const isReply = (x: { data: Json } | Reply): x is Reply => "status" in x;
 
 // 節點金鑰的動作：
-//   secret_request／secret_fetch：請求端（任何有主人的節點）建立請求、取回答
+//   secret_request／secret_fetch：請求端（任何有主人的節點）建立請求、取回答；請求若帶登入網址（link），一定要本人簽章
 //   secret_pending／secret_reply：本人的設備查待確認的請求、回覆密文或拒絕（**一定要本人簽章**，沒簽章 401 不打資料庫）
 export async function handleSecretAction(deps: LaunchDeps, me: { id: string }, action: string, params: Json, signedUser: string | null = null): Promise<Reply> {
   if (action === "secret_request") {
     const req = parseSecretRequest(params);
     if ("error" in req) return fail(req.error);
-    const r = await call(deps, "asn_relay_secret_request", {
-      p_node: me.id, p_pub: req.pub, p_program: req.program, p_purpose: req.purpose, p_ttl_seconds: req.ttl,
-    });
+    // 帶登入網址的請求一定要本人簽章：AI 視窗只有節點金鑰、沒有登入憑證，不能自己推一個假的登入頁到本人手機。沒簽章在打資料庫之前就 401
+    if (req.link !== null && !signedUser) return fail("unauthorized");
+    const r = req.link !== null
+      ? await call(deps, "asn_relay_secret_request_link", {
+        p_node: me.id, p_pub: req.pub, p_program: req.program, p_purpose: req.purpose, p_ttl_seconds: req.ttl, p_link: req.link, p_signed_user: signedUser,
+      })
+      : await call(deps, "asn_relay_secret_request", {
+        p_node: me.id, p_pub: req.pub, p_program: req.program, p_purpose: req.purpose, p_ttl_seconds: req.ttl,
+      });
     if (isReply(r)) return r;
     for (const t of Array.isArray(r.data?.bell_topics) ? r.data.bell_topics : []) if (typeof t === "string") await deps.ring(t);
     return { status: 200, body: { id: r.data.id, expires_at: r.data.expires_at, seconds_left: r.data.seconds_left } };

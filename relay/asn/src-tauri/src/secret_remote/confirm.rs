@@ -114,6 +114,8 @@ pub async fn list_for_ui(be: &dyn Backend, token: Option<&str>) -> Result<serde_
             serde_json::json!({
                 "id": r.id, "node_name": r.node_name, "program": r.program, "purpose": r.purpose,
                 "fingerprint": fingerprint(&r.pub_b64), "seconds_left": r.seconds_left,
+                // 登入網址：只給通過官方網域檢查的（wire::parse_pending 已驗過）；畫面只顯示網域、用按鈕打開
+                "link": r.link, "link_host": r.link.as_deref().and_then(super::link::login_link_host),
             })
         })
         .collect();

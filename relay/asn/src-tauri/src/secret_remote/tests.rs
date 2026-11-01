@@ -16,6 +16,7 @@ use zeroize::Zeroizing;
 const FAKE_PASS: &str = "fake-pass-不是真的-0123";
 const TOKEN: &str = "usertoken-9";
 const ID1: &str = "11111111-1111-1111-1111-111111111111";
+const ID2: &str = "33333333-3333-3333-3333-333333333333";
 
 // ---- 記憶體假後端：行為對照 migration 的語意（一次性、取走即清），並記下進出的每一份 JSON ----
 
@@ -445,6 +446,73 @@ fn 待確認清單_壞資料略過_文字清理過() {
     assert!(wire::parse_pending(&json!({})).is_empty() && wire::parse_pending(&json!("x")).is_empty());
 }
 
+// ---- 登入網址（#628 第 3 段）----
+
+const GOOD_LINK: &str = "https://claude.ai/oauth/authorize?client_id=C&redirect_uri=R&state=S&code_challenge=H";
+
+#[test]
+fn 帶網址的請求內容_網址格式不對在送出前就擋下() {
+    let p = "B".repeat(43);
+    let b = wire::build_request_body_link(&p, "Claude Code 登入", "登入", 120, GOOD_LINK).unwrap();
+    assert_eq!(b["link"], GOOD_LINK);
+    assert_eq!(b["pub"], p);
+    for bad in ["http://claude.ai/x", "https://evil.example/x", "https://claude.ai@evil.com/x", "https://claude.ai.evil.com/", ""] {
+        assert!(wire::build_request_body_link(&p, "g", "u", 120, bad).is_err(), "{bad}");
+    }
+    // 沒帶網址的請求內容沒有 link 欄位
+    assert!(wire::build_request_body(&p, "g", "u", 120).unwrap().get("link").is_none());
+}
+
+#[test]
+fn 待確認清單的網址_官方網域留下_沒附是_none_不是官方網域整筆不顯示() {
+    let p = "B".repeat(43);
+    let mk = |extra: serde_json::Value| {
+        let mut r = json!({ "id": ID1, "node": "NEWPC", "node_name": "新電腦", "program": "Claude Code 登入", "purpose": "x", "pub": p, "seconds_left": 50 });
+        if let (Some(o), Some(e)) = (r.as_object_mut(), extra.as_object()) {
+            o.extend(e.clone());
+        }
+        json!({ "requests": [r] })
+    };
+    let l = wire::parse_pending(&mk(json!({ "link": GOOD_LINK })));
+    assert_eq!(l.len(), 1);
+    assert_eq!(l[0].link.as_deref(), Some(GOOD_LINK));
+    assert_eq!(wire::parse_pending(&mk(json!({ "link": null }))).first().map(|r| r.link.clone()), Some(None));
+    assert_eq!(wire::parse_pending(&mk(json!({}))).first().map(|r| r.link.clone()), Some(None), "舊後台沒有 link 欄位");
+    for bad in [json!("https://evil.example/x"), json!("http://claude.ai/x"), json!("https://claude.ai@evil.com/"), json!(5), json!({"a":1}), json!("")] {
+        assert!(wire::parse_pending(&mk(json!({ "link": bad.clone() }))).is_empty(), "{bad}");
+    }
+}
+
+struct OnlyPending(Value);
+impl Backend for OnlyPending {
+    fn request(&self, _b: Value) -> BoxFut<'_, Result<Value, String>> {
+        Box::pin(async { Err("x".to_string()) })
+    }
+    fn fetch(&self, _b: Value) -> BoxFut<'_, Result<Value, String>> {
+        Box::pin(async { Err("x".to_string()) })
+    }
+    fn pending<'a>(&'a self, _t: Option<&'a str>) -> BoxFut<'a, Result<Value, String>> {
+        Box::pin(async move { Ok(self.0.clone()) })
+    }
+    fn reply<'a>(&'a self, _b: Value, _t: Option<&'a str>) -> BoxFut<'a, Result<Value, String>> {
+        Box::pin(async { Err("x".to_string()) })
+    }
+}
+
+#[tokio::test]
+async fn 手機清單帶網址與網域_不官方的不出現() {
+    let one = |id: &str, pubk: &str, link: Value| json!({ "id": id, "node": "NEWPC", "node_name": "新電腦", "program": "Claude Code 登入", "purpose": "x", "pub": pubk, "seconds_left": 50, "link": link });
+    let be = OnlyPending(json!({ "requests": [one(ID1, &"B".repeat(43), json!(GOOD_LINK)), one(ID2, &"C".repeat(43), json!("https://evil.example/x"))] }));
+    let v = list_for_ui(&be, Some("T")).await.unwrap();
+    let items = v["requests"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "不是官方網域的那筆不顯示");
+    assert_eq!((items[0]["link"].as_str(), items[0]["link_host"].as_str()), (Some(GOOD_LINK), Some("claude.ai")));
+    // 沒附網址：link 與 link_host 都是 null
+    let be = OnlyPending(json!({ "requests": [one(ID1, &"B".repeat(43), Value::Null)] }));
+    let v = list_for_ui(&be, Some("T")).await.unwrap();
+    assert!(v["requests"][0]["link"].is_null() && v["requests"][0]["link_host"].is_null());
+}
+
 // ---- 守門：原始碼掃描 ----
 
 fn sources() -> Vec<(String, String)> {
@@ -539,6 +607,8 @@ fn 守門_本人設備的動作一定經過本人簽章的後端介面() {
         assert!(!t.contains(".api(") && !t.contains("api_signed("), "{name} 不能繞過 Backend 直接打後台");
     }
     let w = code_only(&std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/secret_remote/wire.rs")).unwrap());
-    assert_eq!(w.matches("api_signed(").count(), 2, "只有 pending 與 reply 兩處帶本人簽章");
-    assert_eq!(w.matches("filter(|t| !t.is_empty()).ok_or(NOT_SIGNED)?").count(), 2, "兩處都要先驗有憑證");
+    assert_eq!(w.matches("api_signed(").count(), 3, "只有 pending、reply 與帶登入網址的 request_signed 三處帶本人簽章");
+    assert_eq!(w.matches("filter(|t| !t.is_empty()).ok_or(NOT_SIGNED)?").count(), 2, "pending、reply 兩處都要先驗有憑證");
+    // 帶登入網址的請求：憑證是空的就不送（後台也會擋，這裡先擋）
+    assert!(w.contains("if token.is_empty() {") && w.contains("api_signed(\"secret_request\""), "request_signed 要先驗有憑證");
 }

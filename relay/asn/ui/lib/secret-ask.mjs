@@ -21,17 +21,42 @@ export function errorText(e) {
   return '送出失敗，請稍後再試'
 }
 
-// Rust 端已清理過文字；這裡只收需要的欄位與型別，其餘丟掉
+// 登入網址（#628）：請求可以附一個官方登入頁的網址，讓本人在手機上打開、授權、把授權碼貼回。
+// 不信 Rust 端或後台回來的內容，這裡再驗一次（與 Rust 的 secret_remote/link.rs、資料庫約束、Edge Function 同一條規則）：
+// 只收 https；主機是官方登入網域本身或其子網域；埠只能 443；不能帶帳號密碼；整串只許可見 ASCII 且沒有反斜線。
+export const LOGIN_HOSTS = ['claude.ai', 'claude.com', 'anthropic.com']
+export function loginLinkHost(url) {
+  if (typeof url !== 'string' || url.length < 12 || url.length > 2048) return null
+  if (!url.startsWith('https://')) return null
+  for (let i = 0; i < url.length; i++) { const c = url.charCodeAt(i); if (c < 0x21 || c > 0x7e || c === 0x5c) return null }
+  const rest = url.slice('https://'.length)
+  const end = rest.search(/[/?#]/)
+  const authority = end < 0 ? rest : rest.slice(0, end)
+  if (!authority || authority.includes('@')) return null
+  let host = authority
+  const colon = authority.indexOf(':')
+  if (colon >= 0) { if (authority.slice(colon + 1) !== '443') return null; host = authority.slice(0, colon) }
+  if (!/^[a-z0-9.-]+$/.test(host)) return null
+  const ok = LOGIN_HOSTS.some(h => host === h || (host.endsWith('.' + h) && !host.startsWith('.') && !host.slice(0, -h.length).includes('..')))
+  return ok ? host : null
+}
+
+// Rust 端已清理過文字；這裡只收需要的欄位與型別，其餘丟掉。
+// 有附網址但不是官方登入網域：整筆不顯示（寧可不顯示，也不讓本人點到不明網址）
 export function normalizeList(raw) {
   const list = Array.isArray(raw?.requests) ? raw.requests : []
   return list
     .filter(r => r && typeof r.id === 'string' && typeof r.fingerprint === 'string')
+    .filter(r => r.link == null || loginLinkHost(r.link) !== null)
     .map(r => ({
       id: r.id,
       nodeName: String(r.node_name ?? ''),
       program: String(r.program ?? ''),
       purpose: String(r.purpose ?? ''),
       fingerprint: r.fingerprint,
+      // 打開登入頁的網址與畫面上顯示的網域（只顯示網域，網址的其他部分不顯示）
+      link: r.link == null ? '' : r.link,
+      linkHost: r.link == null ? '' : loginLinkHost(r.link),
       secondsLeft: Number.isFinite(r.seconds_left) ? Math.max(0, Math.floor(r.seconds_left)) : 0,
     }))
     .filter(r => r.secondsLeft > 0)
@@ -61,6 +86,10 @@ export const TEXT = {
   purposeLabel: '要做什麼（對方自報）',
   fpLabel: '核對碼',
   fpNote: '若請求端畫面也顯示同一組核對碼，才表示是同一個請求。',
+  linkLabel: '登入頁的網域',
+  openLink: '開啟登入頁',
+  linkLead: '這台電腦正在登入。請先開啟登入頁、完成授權，再把頁面上顯示的授權碼貼到下面。',
+  codeLabel: '授權碼',
   inputLabel: '密碼',
   ok: '送出',
   deny: '拒絕',

@@ -81,7 +81,8 @@ impl LoginEngine for ClaudeLogin<'_> {
 
     fn invalid_code_hint(&self, line: &str) -> bool {
         let l = line.to_lowercase();
-        l.contains("invalid code") || l.contains("oauth error") || l.contains("expired")
+        // 實測（新家用機）授權碼錯誤時印的是「Login failed: Request failed with status code 400」，結束碼 1，不會再問一次
+        l.contains("invalid code") || l.contains("oauth error") || l.contains("expired") || l.contains("login failed") || l.contains("status code 400")
     }
 
     fn check_login(&self) -> Result<bool, String> {
@@ -261,6 +262,8 @@ mod tests {
         let e = eng(&fc);
         assert!(e.invalid_code_hint("OAuth error: Invalid code"));
         assert!(e.invalid_code_hint("code has EXPIRED"));
+        // 實測的真實輸出
+        assert!(e.invalid_code_hint("Login failed: Request failed with status code 400"));
         assert!(!e.invalid_code_hint("Opening browser"));
     }
 }

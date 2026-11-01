@@ -17,11 +17,21 @@ pub struct Opts {
     pub ttl_secs: u64,
     /// 輪詢間隔
     pub poll: Duration,
+    /// 登入網址與本人簽章（登入憑證）。兩個一起有、一起沒有；只有 `agent_setup` 能設（見 [`Opts::with_link`]）
+    link: Option<(String, String)>,
 }
 
 impl Opts {
     pub fn new(program: &str, purpose: &str) -> Opts {
-        Opts { program: program.into(), purpose: purpose.into(), ttl_secs: wire::TTL_DEFAULT, poll: Duration::from_secs(2) }
+        Opts { program: program.into(), purpose: purpose.into(), ttl_secs: wire::TTL_DEFAULT, poll: Duration::from_secs(2), link: None }
+    }
+
+    /// 附上登入網址（桌面專用）。型別只有 `agent_setup` 建得出來，所以 `asn-cli` 與其他模組沒辦法呼叫這個方法；
+    /// 這種請求後台一定要本人簽章，所以同時要交登入憑證。憑證不進 log、不進錯誤訊息
+    #[cfg(desktop)]
+    pub fn with_link(mut self, link: &crate::agent_setup::link::LoginLink, sign_token: String) -> Opts {
+        self.link = Some((link.as_str().to_string(), sign_token));
+        self
     }
 }
 
@@ -59,8 +69,17 @@ pub struct StartInfo<'a> {
 pub async fn request_secret(be: &dyn Backend, opts: &Opts, on_start: &mut dyn FnMut(&StartInfo)) -> Result<Zeroizing<Vec<u8>>, Failure> {
     let key = RequestKey::generate().map_err(|e| Failure::Backend(e.to_string()))?;
     let pub_b64 = key.public_b64();
-    let body = wire::build_request_body(&pub_b64, &opts.program, &opts.purpose, opts.ttl_secs).map_err(Failure::Backend)?;
-    let started = wire::parse_started(&be.request(body).await.map_err(Failure::Backend)?).map_err(Failure::Backend)?;
+    let started_json = match &opts.link {
+        Some((link, token)) => {
+            let body = wire::build_request_body_link(&pub_b64, &opts.program, &opts.purpose, opts.ttl_secs, link).map_err(Failure::Backend)?;
+            be.request_signed(body, token).await.map_err(Failure::Backend)?
+        }
+        None => {
+            let body = wire::build_request_body(&pub_b64, &opts.program, &opts.purpose, opts.ttl_secs).map_err(Failure::Backend)?;
+            be.request(body).await.map_err(Failure::Backend)?
+        }
+    };
+    let started = wire::parse_started(&started_json).map_err(Failure::Backend)?;
     on_start(&StartInfo { id: &started.id, fingerprint: &fingerprint(&pub_b64), seconds_left: started.seconds_left });
     // 本地也自己算一次期限（後台說過期就會回 expired；這裡多給 10 秒的網路寬限，免得後台不回應時永遠等下去）
     let deadline = Instant::now() + Duration::from_secs(started.seconds_left + 10);

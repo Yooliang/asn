@@ -56,7 +56,7 @@ Deno.test("請求：節點一律是金鑰所屬的自己，欄位整理過；成
 });
 
 Deno.test("格式不對在進資料庫前就擋下（公鑰、說明長度與控制字元、有效期限範圍、密文格式）", async () => {
-  assertEquals(parseSecretRequest(REQ), { ...REQ, ttl: 180 });
+  assertEquals(parseSecretRequest(REQ), { ...REQ, ttl: 180, link: null });
   for (const bad of [null, [], {}, { ...REQ, pub: "short" }, { ...REQ, pub: "A".repeat(44) }, { ...REQ, pub: "A".repeat(42) + "+" },
     { ...REQ, program: "" }, { ...REQ, program: "x".repeat(81) }, { ...REQ, program: "a\nb" }, { ...REQ, purpose: "x".repeat(201) },
     { ...REQ, purpose: "a‮b" }, { ...REQ, ttl: 29 }, { ...REQ, ttl: 601 }, { ...REQ, ttl: 1.5 }, { ...REQ, ttl: "180" }]) {
@@ -125,4 +125,68 @@ Deno.test("守門：密碼區塊不把請求內容放進 ring（門鈴只帶主�
   const src = await Deno.readTextFile(new URL("./secret_remote.ts", import.meta.url));
   const rings = [...src.matchAll(/deps\.ring\(([^)]*)\)/g)].map((m) => m[1]);
   assertEquals(rings, ["t", "r.data.bell_topic"]);
+});
+
+// ---------- 登入網址（link，#628 第 3 段）----------
+const LINK = "https://claude.ai/oauth/authorize?client_id=C&state=S&code_challenge=H&redirect_uri=R";
+
+Deno.test("帶登入網址的請求沒有本人簽章：401，完全不打資料庫（AI 只有節點金鑰，不能自己推登入頁）", async () => {
+  const { deps, calls, rings } = fakeDeps();
+  const r = await handleSecretAction(deps, { id: "CLOUD" }, "secret_request", { ...REQ, link: LINK }, null);
+  assertEquals([r.status, r.body.error], [401, "unauthorized"]);
+  assertEquals(calls, []);
+  assertEquals(rings, []);
+});
+
+Deno.test("帶登入網址且有簽章：走帶網址的函式，簽章者取自驗證結果，不收請求內容裡自報的", async () => {
+  const { deps, calls, rings } = fakeDeps(() => ({ data: { id: ID, expires_at: "2026-11-01T00:00:00Z", seconds_left: 120, bell_topics: ["b1"] } }));
+  const r = await handleSecretAction(deps, { id: "NEWPC" }, "secret_request", { ...REQ, link: LINK, ttl: 120, p_signed_user: "evil", p_node: "evil" }, USER);
+  assertEquals(r.status, 200);
+  assertEquals(calls.length, 1);
+  assertEquals(calls[0], {
+    fn: "asn_relay_secret_request_link",
+    args: { p_node: "NEWPC", p_pub: PUB, p_program: "git.exe", p_purpose: "git push 到 github", p_ttl_seconds: 120, p_link: LINK, p_signed_user: USER },
+  });
+  assertEquals(rings, ["b1"]);
+  assertFalse(JSON.stringify(r.body).includes("oauth"), "回應不帶網址");
+});
+
+Deno.test("沒帶登入網址的請求照舊走原本的函式，不管有沒有簽章", async () => {
+  const { deps, calls } = fakeDeps(() => ({ data: { id: ID, seconds_left: 120, bell_topics: [] } }));
+  await handleSecretAction(deps, { id: "CLOUD" }, "secret_request", REQ, USER);
+  await handleSecretAction(deps, { id: "CLOUD" }, "secret_request", REQ, null);
+  assertEquals(calls.map((c) => c.fn), ["asn_relay_secret_request", "asn_relay_secret_request"]);
+  assertFalse("p_link" in calls[0].args);
+});
+
+Deno.test("登入網址格式：只收官方網域的 https；其他寫法在進資料庫前就擋下", async () => {
+  for (const ok of [LINK, "https://claude.ai", "https://www.claude.ai/a", "https://platform.claude.com/x", "https://console.anthropic.com/oauth", "https://claude.ai:443/x"]) {
+    assertEquals(parseSecretRequest({ ...REQ, link: ok }), { ...REQ, ttl: 180, link: ok }, ok);
+  }
+  for (const bad of [
+    "http://claude.ai/x", "https://claude.ai.evil.com/x", "https://evilclaude.ai/x", "https://claude.ai@evil.com/x", "https://evil.com/claude.ai",
+    "https://claude.ai:8443/x", "https://claude.ai/x y", "https://claude.ai/\u0000", "https://claude.ai/x\\y", "https://CLAUDE.AI/x", "https://claude\u3002ai/x",
+    "javascript:alert(1)", "https://", "", "x".repeat(20), "https://claude.ai/" + "a".repeat(2100), 123, {}, [], true,
+  ]) {
+    const r = parseSecretRequest({ ...REQ, link: bad as unknown });
+    assert("error" in r, `應該擋下：${String(bad).slice(0, 40)}`);
+  }
+  // 沒有 link 欄位或 null：不算錯
+  assertEquals(parseSecretRequest({ ...REQ, link: null }), { ...REQ, ttl: 180, link: null });
+});
+
+Deno.test("資料庫出錯時，log 與回應都不含登入網址", async () => {
+  const logged: string[] = [];
+  const orig = console.error;
+  console.error = (...a: unknown[]) => logged.push(a.map(String).join(" "));
+  try {
+    const { deps } = fakeDeps(() => ({ error: { code: "23514", message: "violates " + LINK, details: LINK } }));
+    const r = await handleSecretAction(deps, { id: "NEWPC" }, "secret_request", { ...REQ, link: LINK }, USER);
+    assertEquals(r.status, 500);
+    assertFalse(JSON.stringify(r.body).includes("oauth"));
+    const all = logged.join(" | ");
+    assertFalse(all.includes("oauth"), all);
+  } finally {
+    console.error = orig;
+  }
 });
