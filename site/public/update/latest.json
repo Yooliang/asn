@@ -1,11 +1,11 @@
 {
-  "version": "0.1.114",
-  "notes": "新功能：Claude 登入失效時，主動寄信通知你，手機帳號頁也會標「登入失效」。新功能：同一段對話不小心開了兩個視窗時，信先不亂送，告訴你是哪兩個視窗，並附「關掉其中一個」的按鈕，剩一個時自動補送。改善：切換帳號更穩，只在切走時存登入資料，存之前先確認是哪個帳號；查不到時先另外保存，切回時再核對。改善：登入檔被其他程式改寫時，會回報實際是哪個帳號。修正：從手機喚醒 pi 不會一開就當掉；喚醒失敗時講清楚是哪一種情況。",
-  "pub_date": "2026-11-01T01:19:24.597Z",
+  "version": "0.2.0",
+  "notes": "新版本：0.2.0。修正：使用者資料夾是中文名稱的電腦，開不了 Claude 等夥伴（路徑變亂碼）。改善：Gemini 夥伴只能寫進目前這段對話的暫存資料夾，寫到 .ssh、.asn 這類資料夾會直接中止。新功能（實驗，預設關閉）：內建終端機，夥伴可以在 ASN 關掉後繼續跑，也能看畫面、切到前景或背景；桌面沒有人登入時會自動換一種顯示方式，真的開不了畫面會直接說明。",
+  "pub_date": "2026-11-01T12:56:40.687Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybitBTmF4d2NXZ3BqL24yUmZPSndtb3VtRHA5MWJRRDJ2eDZaNWVhMjViekY2dy9uUDVHN1VvMEhBazdpQ1p0QzZUVUJBQVNmOFhqditwd3dTb0RKd0FzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNDk1OTY0CWZpbGU6QVNOXzAuMS4xMTRfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS4xMTQKZWNCZEY4MWZmcCsyRjNEK04rbDZPY2cyR0hndmlTRU05aFIvRWpFTE9yN0FCVTl1UVkwbjhUY2lTQkpXSEZPeHF3SEh1VEo4ZHdaSnB6UGRaZHZoQUE9PQo=",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.114_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjZReUZYeWJnTnZPZnlyVEJaRm54NjhrK1M2NGhmYXd1My9nRk95cE9UdkJKLzZ2a1VZMHV5OXVIMDM2MHJ1NEZKUklpUEFhZ3NhV21NOXRXbEdoK0FRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNTM3ODAwCWZpbGU6QVNOXzAuMi4wX3g2NC1zZXR1cC5leGUJdmVyc2lvbjowLjIuMApmVzZKcGNNdklRQllXMTQzazdDeTlWZ3dqRzZMSVl2OEZHV3h5dUhtdnNsVjJRZkhnVUljajJ4QnNic2ZYZk9YVXFZNlM4K1k1NTFjUXRtWmNYUVVCdz09Cg==",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.0_x64-setup.exe"
     }
   }
 }
