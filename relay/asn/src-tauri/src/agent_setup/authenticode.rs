@@ -115,7 +115,7 @@ mod real_tests {
     #[test]
     fn 官方_claude_的簽章驗得過_簽署者完全相符() {
         let Some(p) = local_signed_exe() else {
-            eprintln!("略過：這台電腦沒有裝官方 claude.exe");
+            elog!("略過：這台電腦沒有裝官方 claude.exe");
             return;
         };
         let who = SystemSignatureCheck.signer(&p).expect("官方 claude.exe 應有有效簽章");
@@ -133,7 +133,7 @@ mod real_tests {
     #[test]
     fn 簽章驗過後內容被改就不通過() {
         let Some(src) = local_signed_exe() else {
-            eprintln!("略過：這台電腦沒有裝官方 claude.exe");
+            elog!("略過：這台電腦沒有裝官方 claude.exe");
             return;
         };
         let d = tempfile::tempdir().unwrap();
