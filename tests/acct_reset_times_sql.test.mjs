@@ -28,7 +28,7 @@ const body = (sql, name) => { const s = sql.indexOf(`create or replace function 
 
 test('靜態：編號在最新之後；三支函式簽章不變；寫入只多 gemini 兩段；只授權 service_role；回復檔換回原版', () => {
   const files = fs.readdirSync(new URL('../supabase/migrations/', import.meta.url)).filter(f => f.endsWith('.sql')).sort()
-  assert.equal(files.at(-1), FILE, '是最新的一支')
+  assert.ok(files.at(-1) >= FILE, "編號在最新之後（之後可有更新的）")
   assert.equal((mig.match(/create or replace function/g) ?? []).length, 3)
   // 簽章跟原版一樣（不會變成新多載）
   for (const [name, src] of [['asn_relay_acct_quota', quota0], ['asn_relay_acct_roster_report', gem], ['asn_relay_acct_roster', roster]]) {

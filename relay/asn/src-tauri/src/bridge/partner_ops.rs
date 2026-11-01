@@ -598,11 +598,12 @@ impl PartnerOps {
         if !allowed.contains(&w.pid) {
             return failed("守門：這個程序不允許結束");
         }
+        // 使用者自己開的才會留下終端機分頁；ASN 開的（自帶終端或舊式主控台）整扇收掉
+        let kept = !switch::opened_by_asn(os, &table, w.pid);
         self.stage(op, "closing");
         if let Err(e) = switch::close_session(os, &self.env.timing(), w.pid, &allowed, host, host.is_some()) {
             return failed(e);
         }
-        let kept = host.is_none();
         ok(if kept { "已結束 pi；原本的終端機分頁會留下" } else { "已關閉視窗" }, Some(json!({ "engine": "pi", "pid": w.pid, "kept_terminal": kept })))
     }
 
@@ -1177,7 +1178,7 @@ impl PartnerOps {
     fn info(&self, t: &switch::Target) -> OpResult {
         let os = self.env.os();
         let table = os.processes();
-        let host = switch::asn_host_of(os, &table, t.pid);
+        let asn = switch::opened_by_asn(os, &table, t.pid);
         let st = self.mod_status(&t.session_id);
         let model = st.as_ref().and_then(|s| s.get("model")).and_then(Value::as_str).filter(|m| switch::valid_model(m)).map(String::from).or_else(|| switch::current_model(&t.args));
         let mut chain: Vec<String> = switch::ancestors(&table, t.pid).into_iter().rev().filter_map(|p| table.iter().find(|x| x.pid == p)).map(|p| clean(&p.name, 60)).collect();
@@ -1193,7 +1194,7 @@ impl PartnerOps {
             "cwd": clean(&t.cwd, 300),
             "started_at": started,
             "status": t.status,
-            "opened_by": if host.is_some() { "asn" } else { "user" },
+            "opened_by": if asn { "asn" } else { "user" },
             "shell_chain": chain,
             "mod_installed": st.is_some(),
         });
@@ -1226,12 +1227,13 @@ impl PartnerOps {
             Ok(g) => g,
             Err(e) => return failed(e),
         };
-        // 守門 3：使用者自己開的視窗（沒有 ASN 承載殼）不送關閉訊息，只結束 claude 與子孫，留下終端機
+        // 使用者自己開的才會留下終端機分頁；ASN 開的（自帶終端或舊式主控台）整扇收掉。要在關之前判斷（關了就找不到往上的 GUI）
+        let kept = !switch::opened_by_asn(self.env.os(), &self.env.os().processes(), t.pid);
+        // 守門 3：沒有 ASN 承載殼的視窗不送關閉訊息，只結束 claude 與子孫（自帶終端裡的，結束後再收掉那個 GUI，見 close_session）
         if let Err(e) = switch::close_session(self.env.os(), &self.env.timing(), t.pid, &allowed, host, host.is_some()) {
             return failed(e);
         }
         self.forget_session(t);
-        let kept = host.is_none();
         ok(if kept { "已結束 Claude；原本的終端機分頁會留下" } else { "已關閉視窗" }, Some(json!({ "pid": t.pid, "kept_terminal": kept })))
     }
 

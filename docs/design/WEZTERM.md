@@ -268,3 +268,70 @@
 4. 關程序前三項核對：映像是 claude／node、`startedAt` 與程序實際建立時間相符（嚴格版，查不到就不關）、結束前再比一次。關的時候寫死 `polite=false`。
 5. 版本號：第 1 階段發版前由雯確認 0.2.0-rc.N 在 updater（latest.json 比版本）與 Play versionCode 換算都行，行就用 rc，不行就 0.1.113 起；結果貼群組再發。
 6. env_clear 斷言改寫後要涵蓋 WezTerm 開窗與退路主控台兩條（1.5）。
+
+## 十一、mux 生命週期（B0 實測，給 0.2.0 第 2 階段 B2）
+
+> 調查員 2026-10-31 在工作機實測（session 1 桌面中斷中）。WezTerm 用同版官方 zip（20240203-110809-5046fc22），socket 用短路徑，只關自己開的 PID。原始紀錄見 PR #598 留言。
+
+### 11.1 實測結果
+
+| 項目 | 結果 |
+|---|---|
+| 預設窗格 0 | mux-server 一啟動就自己開一個窗格（id 0，workspace `default`，預設跑 cmd）。它繼承 **mux-server 自己的完整環境**。用 `wezterm-mux-server -- <程式>` 可以指定窗格 0 跑什麼 |
+| `cli spawn` 開的窗格環境 | ＝**下 cli 指令那個程序的環境**＋**登錄檔使用者變數（HKCU\Environment）**。mux-server 自己的環境**不會**帶進來 |
+| 登錄檔與呼叫端同名 | **登錄檔優先**：呼叫端把 `ASN_RELAY_DEFAULT_AGENT` 設成別的值，窗格裡仍是登錄檔的值。env_clear 清不掉登錄檔變數 |
+| `cli spawn` 能否逐窗格帶環境 | 沒有 env 參數（只有 `--cwd`、`--workspace`、`--new-window` 等）；只能靠呼叫端程序的環境 |
+| cli 連不上 socket | **預設會自己跑 `wezterm-mux-server --daemonize`**（用預設設定和預設 socket）。加 `--no-auto-start` 後 27ms 回錯，不起任何東西 |
+| 同一個 socket 起第二個 mux | 起得來，而且**搶走 socket**；之後 cli 只看得到第二個。第一個 mux 和它的窗格繼續跑，但再也連不到 |
+| 只結束 mux（不帶子程序） | 底下的 OpenConsole 與窗格程式**全部跟著結束**，沒有孤兒；夥伴一起斷 |
+| 窗格全部關閉 | mux **不會**自己結束 |
+| 啟動 mux 的程序結束 | mux 照樣活著 |
+| 多個用戶端同時連 | 16 條 list／get-text 平行，全數成功（0.07 秒） |
+| socket 路徑 126 字元 | 起不來：`path must be shorter than SUN_LEN` |
+| mux 執行中覆蓋執行檔 | 覆蓋失敗（busy），**改名可以** |
+| GUI `connect` 接 mux（桌面中斷） | `front_end` OpenGL、Software 都是 `Failed to create window: The OpenGL implementation is too old`；WebGpu 起得來（未能確認畫面）。GUI 結束不影響窗格 |
+
+### 11.2 B2 照這樣做
+
+1. **一個使用者一個 mux**，socket 固定放短路徑（例如 `%LOCALAPPDATA%\ASN\m\sock`，B2 加長度測試）。
+2. **每條 cli 都帶 `--no-auto-start`**，並明給 `WEZTERM_UNIX_SOCKET`。
+3. **起 mux 前先試連**（`cli --no-auto-start list`）：連得上就沿用，連不上才起新的。起新的之前，再確認沒有別的 ASN 實例正在起（用檔案鎖，或在已知路徑放 pid 檔，核對建立時間）。
+4. **啟動 mux 時環境先過 `child_env`**，並指定窗格 0 跑一個無害、不會結束的程式；窗格 0 不給夥伴用，也不送字。
+5. **下 cli spawn 的程序先清空環境，只放白名單**（`child_env` 的結果＋該夥伴自己的變數），跟第 1 階段 wezterm.rs:117 同一份規則。config.rs:283 的斷言改成檢查 cli spawn 的環境。
+6. **登錄檔使用者變數**：
+   - 逐夥伴給的變數（例如 `ASN_PI_NAME`）不能跟登錄檔裡的同名；B2 啟動時讀 HKCU\Environment 的**名字**（不讀值），撞名就記 log，並改用包裝指令設定。
+   - `child_env` 會濾掉的名字（`CLAUDE*`、`NO_COLOR`、`envc::is_secret` 判為金鑰的）如果出現在登錄檔，WezTerm 會把它們帶回窗格。B2 遇到這種情況，要嘛用包裝指令在窗格裡先清掉，要嘛在夥伴清單提示「使用者環境變數裡有金鑰類變數，請移到別處」。不可以自動改使用者的登錄檔。
+   - 未實測：第 1 階段 `wezterm-gui start` 開的窗格是否也會把登錄檔變數加回來（推測會，同一套 WezTerm 程式碼）。B4 順手驗。
+7. **停 mux 只由 ASN 決定**：mux 不會自己結束，也不跟著 ASN 結束（0.2.0 的目標是 ASN 關掉時夥伴繼續跑）。只在使用者明確要求、或更新流程需要時停；停之前要講清楚「會中斷 N 個夥伴」。
+8. **更新**：安裝程式先把執行中的 mux 執行檔改名（`.old`）再放新檔；舊 mux 繼續跑到下次重開，`.old` 檔在下次啟動、沒有舊 mux 在跑時清掉。conpty.dll、OpenConsole.exe 也被 mux 占用，要一起這樣處理（只實測過 mux 執行檔本身，B4 驗這兩個）。
+9. **看畫面的 GUI**：`connect` 失敗只影響「看」，不影響夥伴；失敗時給人看的話＝「這台電腦的桌面目前沒有人登入，開不了終端畫面；夥伴照常在背景執行」。
+
+### 11.3 B2a 實測補充（asn-2，2026-10-31，家用機，同版官方 zip）
+
+| 項目 | 結果 |
+|---|---|
+| 窗格 0 跑完就結束 | mux 照樣活著；之後 `cli spawn` 開的窗格編號是 1、2、3…，**編號不會重用**，所以夥伴不可能拿到 0 |
+| 沒有任何窗格時開新窗格 | 不帶 `--new-window` 會報「`--pane-id` was not specified…」而失敗；**一律帶 `--new-window`**（或 `--workspace`）才開得起來 |
+| 窗格看得到的 WezTerm 變數 | `WEZTERM_UNIX_SOCKET`、`WEZTERM_PANE`、`WEZTERM_EXECUTABLE`、`WEZTERM_CONFIG_FILE` 等由 WezTerm 自己設進窗格（見下方「接受的風險」） |
+| 用 std 的 `Command` 起 mux | mux 會繼承起它那個程序的可繼承控制代碼（含標準輸出管道）。實測從管道下測試，測試程序結束了，讀管道那端還一直等不到結束，直到 mux 被停掉。**改用 `CreateProcessW`、不繼承控制代碼** 後就沒有這個問題 |
+| 起 mux 的程序結束 | mux 還在（不繼承控制代碼＋新程序群組＋盡量脫離 Job Object）。實測紀錄：PR B2a 說明 |
+
+決定：
+- **窗格 0 跑 `cmd /c exit`，立刻結束**，不留常駐的 cmd（回應 asn真 #599 第 3 點）。
+- **接受的風險**：WezTerm 會把 socket 位置設進每個窗格，夥伴程序因此能連上 mux、讀別的夥伴的畫面、送字過去。同一個使用者的程序本來就連得到這個 socket，不是新的邊界；環境白名單擋不住這件事。ASN 自己不把 socket 路徑放進窗格白名單（`config.rs` 有守門測試）。
+
+## 十二、開關：ASN_TERM_WEZTERM 與 ASN_TERM_MUX（#611）
+
+為了讓 main 隨時可以發版，第 1 階段（#573）的 WezTerm 開窗放在開關後面。
+
+- **`ASN_TERM_WEZTERM=1`**：ASN 開的夥伴視窗才走自帶的 WezTerm。**預設關。**
+- **`ASN_TERM_MUX=1`**（#607）：開在共用的 mux。**WezTerm 開關也開才有效**；WezTerm 關著時單獨設這個沒有作用。這是對 #607 的刻意改動，關係的唯一定義在 `win_term::switches_from`。
+- 兩個開關都在 ASN 啟動時讀一次，執行中改環境變數不會生效，要重開 ASN。
+- **關著時等同 0.1.113**：開窗（開新夥伴、接回對話、換模型重開、換班接手）直接開原生主控台；經 pi 的背景開也走原生主控台（前景開本來就先用自帶終端）；「ASN 開的」只認舊式承載 PowerShell；關閉不收自帶終端的視窗；隔離設定檔維持空設定；不認領對照表裡的夥伴視窗列；不啟用 mux。
+
+### 從 #573 開發版升級上來要注意
+
+- 要設 `ASN_TERM_WEZTERM=1` 才維持 WezTerm 開窗；沒設就回到原生主控台。
+- 先前開著時留下的 WezTerm 視窗，關著之後會被當成使用者自己開的：按「關閉」只結束 Claude，視窗本身要手動關。**升級前先把這些視窗關掉。**
+- 因為上一點，關著時對照表裡的夥伴視窗列不認領，只改標為保留（留在檔案裡、不查不碰）；之後再把開關打開，會照常認回。
+- 隔離設定檔如果內容恰好是第 1 階段寫的 Hold 版本（`return { exit_behavior = "Hold" }`，一個字不差），關著時會改寫回 `return {}`；使用者改過、內容不同的檔不動。再把開關打開，空設定會照舊升級成 Hold 版本。
