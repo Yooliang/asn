@@ -13,6 +13,7 @@
 在 `relay/asn` 底下：
 1. 合併已核可的 PR（`git fetch origin pull/N/head:prN`，核對 SHA，`git merge --no-ff`），跑 `npm test`（前端）與 `cd src-tauri && cargo test --lib`（Rust）。前端有 2 項「缺口」測試（Codex／pi 能關閉）一直是紅的，是刻意標記的缺口，不是你弄壞的。
 2. `npm run release -- --notes "<中文更新說明>"`（桌面版；會自動升版號、打包、簽章）。如果手機端有改，再跑 `npm run release:android -- --notes "…"` 與 `npm run release:play -- --upload`（安卓需要環境變數：`JAVA_HOME`＝Android Studio 的 jbr、`ANDROID_HOME`＝Sdk、`NDK_HOME`＝Sdk\ndk\28.2.13676358）。
+   - 版號改了以後、推任何東西之前，再跑一次 `npm test`。main 的 CI 測的是舊版號，看不到版號本身造成的紅（0.2.0 踩過：changelog 測試只認 0.1.x，安裝檔發了才發現合回 main 的 PR 紅了）。要換次版號（例如 0.2.x → 0.3.0）時，先用 `node scripts/bump.mjs minor` 改版號，再跑 `npm run release -- --no-bump --notes "…"`。
 3. 官網內容：藍圖、待辦、支援總表、發版與會議記錄都在資料庫（`public.asn_site_*`，寫法見 `site/README.md`），**發版不用再改官網頁面**。發完用 `asn-cli site release --version <版本> --date <YYYY-MM-DD> --commit <短碼> --item "…" --platform 官網 --platform 家用機` 加這一版，再用 `asn-cli site item --key <項目代號> --status released --version <版本>` 把待辦的狀態更新（`npm run release` 結束時會印出這行指令；用法見 `site/README.md`）。只有在官網寫入名單（`relay.site_writers`，以帳號／租戶為單位）上的帳號能寫，名單要有專案負責人的租戶。支援總表這一期還沒有指令，仍由維護者下 SQL。只有改了選單或版面才需要 `node site/make-layout.mjs` 與 `node --test tests/site_layout.test.mjs`。
 4. 提交版本檔與 `site/public/update/*`，推上去；`cd site && npx firebase-tools deploy --only hosting`（很慢，丟背景跑，跑完用 `curl https://asnmessenger.web.app/update/latest.json` 確認版本）。
 5. 在自己這台安裝：先**只關自己記下的 ASN 程序**，再 `MSYS_NO_PATHCONV=1 ./ASN_<版本>_x64-setup.exe /S`（Git Bash 會把 `/S` 當路徑，必須加那個環境變數），然後用 PowerShell `Start-Process "$env:LOCALAPPDATA\ASN\asn.exe"` 啟動。
