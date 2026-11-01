@@ -280,7 +280,8 @@ pub fn inside_agy_scratch(paths: &[String], scratch: &Path, base: &Path) -> bool
 }
 
 /// 使用者資料夾底下放登入資料、金鑰、對話記錄的地方：寫到這些地方算真的越權，整輪中止，不給它換位置再試（#608）
-const SENSITIVE_HOME_DIRS: [&str; 10] = [".gemini", ".ssh", ".asn", ".irori-relay", ".claude", ".codex", ".pi", ".aws", ".config", ".gnupg"];
+// ASN 的新舊資料夾名取自 home.rs（舊名只准寫在那裡）
+const SENSITIVE_HOME_DIRS: [&str; 10] = [".gemini", ".ssh", crate::home::NEW_NAME, crate::home::LEGACY_NAME, ".claude", ".codex", ".pi", ".aws", ".config", ".gnupg"];
 
 pub fn sensitive_write(paths: &[String], user_home: &Path, base: &Path) -> bool {
     let real_home = std::fs::canonicalize(user_home).unwrap_or_else(|_| user_home.to_path_buf());
@@ -697,8 +698,8 @@ mod tests {
 
     #[cfg(windows)]
     fn junction(link: &Path, target: &Path) {
-        let st = std::process::Command::new("cmd").args(["/c", "mklink", "/J"]).arg(link).arg(target).output().unwrap();
-        assert!(st.status.success(), "{st:?}");
+        use crate::home::Ops;
+        crate::home::RealOps.make_link(link, target).unwrap();
     }
 
     #[cfg(windows)]
