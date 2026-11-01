@@ -40,6 +40,9 @@ use std::time::Duration;
 pub(crate) const ISOLATED_CONFIG: &str = "return { exit_behavior = \"Hold\" }\n";
 /// 0.1.113 寫的隔離設定（開關 ASN_TERM_WEZTERM 關著時照舊寫這份）
 pub(crate) const LEGACY_CONFIG: &str = "return {}\n";
+/// 建不起視窗時的備援設定（#595）：改用 WebGpu 顯示方式（OpenGL 與 Software 在桌面斷線時都建不起視窗，只有 WebGpu 起得來）
+const WEBGPU_CONFIG_HOLD: &str = "return { exit_behavior = \"Hold\", front_end = \"WebGpu\" }\n";
+const WEBGPU_CONFIG: &str = "return { front_end = \"WebGpu\" }\n";
 /// 舊版寫的空設定：升級時換成 ISOLATED_CONFIG（使用者改過的內容一律不動）
 const OLD_DEFAULT_CONFIG: &str = "return {}";
 
@@ -411,6 +414,19 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         std::fs::write(&self.config_file, content).map_err(|e| format!("無法建立隔離的 WezTerm 設定：{e}"))
     }
 
+    /// 備援用的設定檔（#595）：跟隔離設定同一份內容再加 `front_end = "WebGpu"`，放在同資料夾、檔名加 `-webgpu`。
+    /// 這份是 ASN 自己的備援，每次都照現在的開關重寫；使用者的設定檔不動。回它的路徑
+    fn ensure_webgpu_config(&self) -> Result<PathBuf, String> {
+        let name = self.config_file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "wezterm".into());
+        let path = self.config_file.with_file_name(format!("{name}-webgpu.lua"));
+        let content = if self.hold_config { WEBGPU_CONFIG_HOLD } else { WEBGPU_CONFIG };
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent).map_err(|e| format!("無法建立終端設定資料夾：{e}"))?;
+        }
+        std::fs::write(&path, content).map_err(|e| format!("無法建立備援的 WezTerm 設定：{e}"))?;
+        Ok(path)
+    }
+
     /// 開一個終端。profile 只准 agy／grok，執行檔與工作資料夾都來自既有啟動設定，不接受呼叫端指定的指令。
     /// 視窗帶 workspace `asn-{編號}`，分頁標題設成 `ASN:{編號}`。標題設不下去就結束剛開的視窗，不留沒有標記的孤兒。
     pub fn start(&self, profile: &str, cwd: &str, config: &LaunchConfig) -> Result<String, String> {
@@ -535,7 +551,22 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let win = match env {
             Some(e) => {
                 let gui = w.spawn_in_workspace_clean(&cwd, &workspace, command, e).map_err(NotStarted)?;
-                w.wait_sock(gui).map_err(Started)?
+                match w.wait_sock_classified(gui) {
+                    Ok(win) => win,
+                    Err(wezterm::SockFail::Other(m)) => return Err(Started(m)),
+                    // 建不起視窗（#595）：GUI 已退出、沒有視窗。換成 WebGpu 顯示方式再開一次；還是不行就當沒啟動，呼叫端退到原生主控台
+                    Err(wezterm::SockFail::NoWindow(_)) => {
+                        elog!("WezTerm 建不起視窗，改用 WebGpu 顯示方式再開一次");
+                        let alt_cfg = self.ensure_webgpu_config().map_err(NotStarted)?;
+                        let w2 = WezTerm::new(dir.clone(), alt_cfg, self.home.clone(), &self.runner, &self.fs);
+                        let gui2 = w2.spawn_in_workspace_clean(&cwd, &workspace, command, e).map_err(NotStarted)?;
+                        match w2.wait_sock_classified(gui2) {
+                            Ok(win) => win,
+                            Err(wezterm::SockFail::NoWindow(m)) => return Err(NotStarted(m)),
+                            Err(wezterm::SockFail::Other(m)) => return Err(Started(m)),
+                        }
+                    }
+                }
             }
             // agy／grok（終端面板）：不經開窗點、沒有退路，失敗一律當已啟動（保守）
             None => w.start_in_workspace(&cwd, &workspace, command).map_err(Started)?,
@@ -2331,9 +2362,16 @@ mod tests {
     struct FakeFs {
         files: Rc<RefCell<HashSet<PathBuf>>>,
     }
+    thread_local! {
+        /// 假的檔案系統裡可讀的文字檔（GUI 的 log）；測試各跑在自己的執行緒，互不影響
+        static LOG_TEXTS: RefCell<HashMap<PathBuf, String>> = RefCell::new(HashMap::new());
+    }
     impl Fs for FakeFs {
         fn exists(&self, p: &Path) -> bool {
             self.files.borrow().contains(p)
+        }
+        fn read_text(&self, p: &Path) -> Option<String> {
+            LOG_TEXTS.with(|m| m.borrow().get(p).cloned())
         }
     }
 
@@ -2367,6 +2405,8 @@ mod tests {
         clean_err: RefCell<Option<String>>,
         /// 某個程序編號依序吐出的建立時間（優先於 started 佇列；空了就回預設值）：模擬那個程序結束了或編號被拿去用
         pid_started: RefCell<HashMap<u32, Vec<Option<u64>>>>,
+        /// 每次啟動 GUI 後呼叫，參數是這是第幾次啟動（從 1 起）：模擬第 N 次才開得起視窗
+        on_spawn: RefCell<Option<Box<dyn Fn(usize)>>>,
     }
 
     fn default_list_clients_json() -> String {
@@ -2393,6 +2433,7 @@ mod tests {
             spawn_out: RefCell::new(String::new()),
             clean_err: RefCell::new(None),
             pid_started: RefCell::new(HashMap::new()),
+            on_spawn: RefCell::new(None),
         }
     }
 
@@ -2468,6 +2509,10 @@ mod tests {
                 return Err("無法啟動 wezterm-gui.exe：假的失敗".into());
             }
             self.inner.calls.borrow_mut().push((args.to_vec(), env.clone()));
+            if let Some(f) = self.inner.on_spawn.borrow().as_ref() {
+                let n = self.inner.calls.borrow().iter().filter(|(a, _)| a.first().map(|s| s == "start").unwrap_or(false)).count();
+                f(n);
+            }
             Ok(42)
         }
         fn kill_tree(&self, pid: u32) {
@@ -3660,6 +3705,57 @@ mod tests {
         let e = svc.start_window(Path::new(&rig.cwd), &claude_spec(None)).unwrap_err();
         assert!(matches!(&e, WinOpenError::Started(m) if m.contains("對照表寫入失敗")), "{e:?}");
         assert_eq!(count_starts(&rig.runner), 1);
+    }
+
+    /// 建不起視窗的組合：log 寫那句、sock 一開始不存在、GUI 每次啟動後都量得到建立時間、之後量不到（已退出）。設定檔放在暫存資料夾
+    fn no_window_rig(started: Vec<Option<u64>>) -> (Rig, PathBuf, TermService<FakeRunner, FakeFs>) {
+        let rig = make(default_profiles(), vec![]);
+        rig.files.borrow_mut().remove(&sock());
+        LOG_TEXTS.with(|m| m.borrow_mut().insert(PathBuf::from("H/.local/share/wezterm/wezterm-gui.exe-log-42.txt"), "ERROR  Failed to create window: The OpenGL implementation is too old
+".into()));
+        rig.runner.inner.pid_started.borrow_mut().insert(42, started);
+        let cfg = rig._dir.path().join("cfg.lua");
+        let mut svc = TermService::fixed(
+            WezTermDir { gui: "W/wezterm-gui.exe".into(), cli: "W/wezterm.exe".into() },
+            cfg.clone(),
+            rig.store.clone(),
+            rig.home.clone(),
+            rig.runner.clone(),
+            FakeFs { files: rig.files.clone() },
+        );
+        svc.set_hold_config(true);
+        (rig, cfg, svc)
+    }
+
+    #[test]
+    fn 建不起視窗_換_webgpu_備援設定再開一次_第二次成功就用它() {
+        let (rig, cfg, svc) = no_window_rig(vec![Some(1_000), None, Some(1_000)]);
+        let files = rig.files.clone();
+        *rig.runner.inner.on_spawn.borrow_mut() = Some(Box::new(move |n| {
+            if n == 2 {
+                files.borrow_mut().insert(sock());
+            }
+        }));
+        let (_, gui) = svc.start_window(Path::new(&rig.cwd), &claude_spec(None)).unwrap();
+        assert_eq!(gui, 42);
+        assert_eq!(count_starts(&rig.runner), 2, "第一次建不起視窗、第二次換設定");
+        let cfgs: Vec<String> = rig.runner.inner.calls.borrow().iter().filter(|(a, _)| a.first().map(|s| s == "start").unwrap_or(false)).map(|(_, e)| e.get("WEZTERM_CONFIG_FILE").cloned().unwrap_or_default()).collect();
+        assert_eq!(cfgs[0], cfg.to_string_lossy());
+        let alt = cfg.with_file_name("cfg-webgpu.lua");
+        assert_eq!(cfgs[1], alt.to_string_lossy(), "第二次用備援設定檔");
+        assert_eq!(std::fs::read_to_string(&alt).unwrap(), WEBGPU_CONFIG_HOLD);
+        assert!(!cfg.exists(), "使用者那份（主設定）不被這條路徑碰");
+        assert!(rig.runner.killed().is_empty(), "退出的程序不再結束");
+    }
+
+    #[test]
+    fn 建不起視窗_備援也不行_是_not_started_可以退到原生主控台() {
+        use super::super::win_term::WinOpenError;
+        let (rig, _, svc) = no_window_rig(vec![Some(1_000), None, Some(1_000), None]);
+        let e = svc.start_window(Path::new(&rig.cwd), &claude_spec(None)).unwrap_err();
+        assert!(matches!(&e, WinOpenError::NotStarted(m) if m == wezterm::NO_WINDOW_MSG), "{e:?}");
+        assert_eq!(count_starts(&rig.runner), 2, "最多重試一次，不無限重開");
+        assert!(rig.svc.own_gui_pids().is_empty() && svc.own_gui_pids().is_empty() && svc.list().is_empty(), "沒有登記任何視窗");
     }
 
     #[test]

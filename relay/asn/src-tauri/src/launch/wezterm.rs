@@ -19,6 +19,12 @@ pub const MAX_LINE_CHARS: usize = 4000;
 /// 執行檔本身起不來時錯誤訊息的開頭（呼叫端靠它分辨「根本沒執行」與「執行了但逾時」）
 pub const CANNOT_RUN: &str = "無法執行";
 const TRUNC_MARK: &str = "…（已截斷）";
+/// WezTerm 建不起視窗時 log 裡的那句（桌面斷線、OpenGL 太舊都是這句；英文原文只用來比對，不給人看）
+const NO_WINDOW_MARK: &str = "Failed to create window";
+/// 讀 GUI log 的大小上限（超過就不讀）
+const LOG_READ_MAX: u64 = 256 * 1024;
+/// 建不起視窗時給人看的一句話（#595）
+pub const NO_WINDOW_MSG: &str = "這台電腦現在開不了圖形視窗（常見原因：遠端桌面已中斷），請先接回桌面再試";
 
 /// 外部程式的執行結果
 #[derive(Debug, Clone, Default)]
@@ -64,6 +70,12 @@ pub trait Fs {
     fn file_len(&self, p: &Path) -> Option<u64> {
         self.exists(p).then_some(1)
     }
+    /// 讀一個小文字檔（讀不到、太大＝None）。只用來看 WezTerm 自己的 log；預設讀不到（測試的假檔案系統不用改）
+    fn read_text(&self, _p: &Path) -> Option<String> {
+        None
+    }
+    /// 刪一個檔（只用在清自己剛啟動、已退出的 GUI 留下的通訊檔）；預設不做事
+    fn remove_file(&self, _p: &Path) {}
 }
 
 pub struct RealFs;
@@ -73,6 +85,16 @@ impl Fs for RealFs {
     }
     fn file_len(&self, p: &Path) -> Option<u64> {
         std::fs::metadata(p).ok().filter(|m| m.is_file()).map(|m| m.len())
+    }
+    fn read_text(&self, p: &Path) -> Option<String> {
+        let m = std::fs::metadata(p).ok().filter(|m| m.is_file())?;
+        if m.len() > LOG_READ_MAX {
+            return None;
+        }
+        std::fs::read(p).ok().map(|b| String::from_utf8_lossy(&b).into_owned())
+    }
+    fn remove_file(&self, p: &Path) {
+        let _ = std::fs::remove_file(p);
     }
 }
 
@@ -308,6 +330,23 @@ pub struct Window {
     pub mux: bool,
 }
 
+/// 等通訊檔失敗的兩種（#595）
+#[derive(Debug, Clone, PartialEq)]
+pub enum SockFail {
+    /// GUI 已退出、建不起視窗：沒有任何視窗，裡面的程式也不會留在跑，可以換方式再開。內容是給人看的一句話
+    NoWindow(String),
+    /// 其他（逾時等）：維持原本的處理，視為視窗可能已開
+    Other(String),
+}
+
+impl SockFail {
+    pub fn into_message(self) -> String {
+        match self {
+            SockFail::NoWindow(m) | SockFail::Other(m) => m,
+        }
+    }
+}
+
 pub fn sock_path(home: &Path, gui_pid: u32) -> PathBuf {
     home.join(".local").join("share").join("wezterm").join(format!("gui-sock-{gui_pid}"))
 }
@@ -503,6 +542,12 @@ impl<'a> WezTerm<'a> {
 
     /// 等新開的 GUI 的通訊檔出現；逾時就結束剛開的視窗（只在建立時間跟剛開時量到的相同才結束，量不到或不同就不動、照實說）
     pub fn wait_sock(&self, gui_pid: u32) -> Result<Window, String> {
+        self.wait_sock_classified(gui_pid).map_err(SockFail::into_message)
+    }
+
+    /// 同 wait_sock，但把「GUI 已經退出、log 寫建不起視窗」獨立出來（#595）：這時沒有視窗，呼叫端可以換方式再試。
+    /// 判斷要三件都成立才算：GUI 的 log 有那句、通訊檔從沒出現、GUI 程序已經不在（建立時間量得到才比；量不到就不下結論，照舊等到逾時）
+    pub fn wait_sock_classified(&self, gui_pid: u32) -> Result<Window, SockFail> {
         let started_ms = self.runner.started_ms(gui_pid);
         let sock = sock_path(&self.home, gui_pid);
         let start = Instant::now();
@@ -511,20 +556,34 @@ impl<'a> WezTerm<'a> {
             if self.fs.exists(&sock) {
                 return Ok(Window { gui_pid, sock, started_ms, mux: false });
             }
+            if self.gui_log_says_no_window(gui_pid) && started_ms.is_some() && self.runner.started_ms(gui_pid) != started_ms {
+                elog!("WezTerm 建不起視窗（GUI 已退出，log 寫 {NO_WINDOW_MARK}）");
+                self.fs.remove_file(&sock);
+                return Err(SockFail::NoWindow(NO_WINDOW_MSG.to_string()));
+            }
             if start.elapsed() >= self.sock_wait {
                 // 剛開的視窗連同子行程一起清掉，不留桌面孤兒視窗；但只動建立時間相符的那個（編號可能已被回收）
                 let waited = self.sock_wait.as_secs();
                 return match (started_ms, self.runner.started_ms(gui_pid)) {
                     (Some(was), Some(now)) if was == now => {
                         self.runner.kill_tree(gui_pid);
-                        Err(format!("等了 {waited} 秒，WezTerm 的通訊檔仍未出現：{}（已結束剛啟動的視窗）", sock.display()))
+                        Err(SockFail::Other(format!("等了 {waited} 秒，WezTerm 的通訊檔仍未出現：{}（已結束剛啟動的視窗）", sock.display())))
                     }
-                    (_, None) => Err(format!("等了 {waited} 秒，WezTerm 的通訊檔仍未出現：{}（剛啟動的視窗已經不在）", sock.display())),
-                    _ => Err(format!("等了 {waited} 秒，WezTerm 的通訊檔仍未出現：{}（確認不了是同一個程序，沒有結束它）", sock.display())),
+                    (_, None) => Err(SockFail::Other(format!("等了 {waited} 秒，WezTerm 的通訊檔仍未出現：{}（剛啟動的視窗已經不在）", sock.display()))),
+                    _ => Err(SockFail::Other(format!("等了 {waited} 秒，WezTerm 的通訊檔仍未出現：{}（確認不了是同一個程序，沒有結束它）", sock.display()))),
                 };
             }
             self.runner.sleep(step);
         }
+    }
+
+    /// GUI 的 log 檔路徑：WezTerm 把 log 寫在通訊檔旁邊，檔名是 `wezterm-gui.exe-log-<程序編號>.txt`
+    fn gui_log_path(&self, gui_pid: u32) -> PathBuf {
+        self.home.join(".local").join("share").join("wezterm").join(format!("wezterm-gui.exe-log-{gui_pid}.txt"))
+    }
+
+    fn gui_log_says_no_window(&self, gui_pid: u32) -> bool {
+        self.fs.read_text(&self.gui_log_path(gui_pid)).is_some_and(|t| t.contains(NO_WINDOW_MARK))
     }
 
     /// `wezterm cli set-tab-title --pane-id <id> <標題>`。
@@ -685,8 +744,17 @@ mod tests {
         files: RefCell<HashSet<PathBuf>>,
         /// 大小為 0 的檔（存在，但只是占位）
         empty: RefCell<HashSet<PathBuf>>,
+        /// 可讀的文字檔（GUI 的 log）
+        texts: RefCell<BTreeMap<PathBuf, String>>,
+        removed: RefCell<Vec<PathBuf>>,
     }
     impl Fs for FakeFs {
+        fn read_text(&self, p: &Path) -> Option<String> {
+            self.texts.borrow().get(p).cloned()
+        }
+        fn remove_file(&self, p: &Path) {
+            self.removed.borrow_mut().push(p.to_path_buf());
+        }
         fn exists(&self, p: &Path) -> bool {
             self.files.borrow().contains(p) || self.empty.borrow().contains(p)
         }
@@ -1056,6 +1124,47 @@ mod tests {
         let r = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(5), None]), ..Default::default() };
         assert!(wez(&r, &fs).start(Path::new("C:/work"), &["agy.exe".to_string()]).unwrap_err().contains("已經不在"));
         assert!(r.tree_killed.borrow().is_empty());
+    }
+
+    fn gui_log(pid: u32) -> PathBuf {
+        PathBuf::from(format!("H/.local/share/wezterm/wezterm-gui.exe-log-{pid}.txt"))
+    }
+
+    #[test]
+    fn 建不起視窗_gui_退出且_log_有那句_回_no_window_不結束任何程序() {
+        let fs = FakeFs::default();
+        fs.texts.borrow_mut().insert(gui_log(1), "09:31:12  ERROR  Failed to create window: The OpenGL implementation is too old to work with glium
+".into());
+        // 剛開時量到 5，之後量不到：GUI 已經退出
+        let r = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(5), None]), ..Default::default() };
+        let e = wez(&r, &fs).start(Path::new("C:/work"), &["agy.exe".to_string()]).unwrap_err();
+        assert_eq!(e, NO_WINDOW_MSG, "給人看的一句話，不含英文原文");
+        assert!(r.tree_killed.borrow().is_empty(), "已經退出的程序不再結束");
+        assert_eq!(*fs.removed.borrow(), vec![sock_path(Path::new("H"), 1)], "只清自己這個程序編號的通訊檔");
+    }
+
+    #[test]
+    fn 建不起視窗的判斷_三件缺一不可() {
+        // log 沒有那句：維持逾時處理
+        let fs = FakeFs::default();
+        fs.texts.borrow_mut().insert(gui_log(1), "別的訊息
+".into());
+        let r = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(5), Some(5), None]), ..Default::default() };
+        let e = wez(&r, &fs).start(Path::new("C:/work"), &["agy.exe".to_string()]).unwrap_err();
+        assert!(e.contains("通訊檔仍未出現"), "{e}");
+        // 剛開時量不到建立時間：無從確認 GUI 退出，不下結論
+        let fs = FakeFs::default();
+        fs.texts.borrow_mut().insert(gui_log(1), "Failed to create window".into());
+        let r = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![None, None]), ..Default::default() };
+        let e = wez(&r, &fs).wait_sock_classified(1).unwrap_err();
+        assert!(matches!(&e, SockFail::Other(m) if m.contains("通訊檔仍未出現")), "{e:?}");
+        assert!(fs.removed.borrow().is_empty());
+        // 通訊檔有出現：是成功，就算 log 裡有那句
+        let fs = FakeFs::default();
+        fs.files.borrow_mut().insert(sock_path(Path::new("H"), 1));
+        fs.texts.borrow_mut().insert(gui_log(1), "Failed to create window".into());
+        let r = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(5), None]), ..Default::default() };
+        assert!(wez(&r, &fs).wait_sock_classified(1).is_ok());
     }
 
     /// 真的 WezTerm 實測（預設不跑，會在桌面開一個視窗）：
