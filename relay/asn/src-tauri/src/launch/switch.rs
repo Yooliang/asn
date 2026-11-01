@@ -516,6 +516,11 @@ pub(crate) fn query_with(os: &dyn Os, dir: &Path, req: &SwitchQueryReq) -> Switc
     }
 }
 
+/// 這個視窗是不是 ASN 開的。release 分支適配：0.1.113 沒有自帶終端，只認承載 PowerShell（main 上的同名函式另含 asn_wez_of）
+pub(crate) fn opened_by_asn(os: &dyn Os, table: &[Proc], pid: u32) -> bool {
+    asn_host_of(os, table, pid).is_some()
+}
+
 /// 這個 Claude 的直接父殼若是 ASN 自己開視窗用的承載 PowerShell，回傳它的 pid；使用者自己開的視窗回 None
 pub(crate) fn asn_host_of(os: &dyn Os, table: &[Proc], pid: u32) -> Option<u32> {
     parent_of(table, pid).filter(|p| (p.name == "powershell.exe" || p.name == "pwsh.exe") && os.cmdline(p.pid).map(|l| is_asn_host_cmdline(&l)).unwrap_or(false)).map(|p| p.pid)
