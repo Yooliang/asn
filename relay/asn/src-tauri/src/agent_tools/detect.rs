@@ -7,16 +7,28 @@ pub fn binary_on_path(name: &str) -> bool {
     resolve_binary(name).is_some()
 }
 
-/// `where` 的輸出常把 npm 的無副檔名殼（給 sh 用，Windows 不能直接執行）排在 `.cmd` 前面；
-/// 優先挑 `.exe`／`.com`／`.cmd`／`.bat`，都沒有才退回第一行。
+/// npm 的無副檔名殼（給 sh 用，Windows 不能直接執行）常排在 `.cmd` 前面；
+/// 優先挑 `.exe`／`.com`／`.cmd`／`.bat`，都沒有才退回第一個。
 #[cfg_attr(not(windows), allow(dead_code))]
-fn pick_windows_candidate(where_output: &str) -> Option<String> {
-    let lines: Vec<&str> = where_output.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
-    let runnable = |l: &&&str| {
-        let low = l.to_ascii_lowercase();
+fn pick_windows_candidate(cands: &[PathBuf]) -> Option<PathBuf> {
+    let runnable = |p: &&PathBuf| {
+        let low = p.to_string_lossy().to_ascii_lowercase();
         [".exe", ".com", ".cmd", ".bat"].iter().any(|e| low.ends_with(e))
     };
-    lines.iter().find(runnable).or_else(|| lines.first()).map(|l| l.to_string())
+    cands.iter().find(runnable).or_else(|| cands.first()).cloned()
+}
+
+/// PATH 每個資料夾依序找 `name` 本身與 `name`＋PATHEXT 各副檔名（同 `where` 的順序），只留真的存在的檔案。
+/// 不呼叫 `where`：它的輸出是主控台字碼頁（繁中 Windows 是 Big5），當 UTF-8 解會把中文使用者資料夾解壞，
+/// 拿到不存在的路徑（新家用機的使用者資料夾是中文，claude 一開就以 code 1 結束）。
+#[cfg_attr(not(windows), allow(dead_code))]
+fn path_candidates(path: &std::ffi::OsStr, pathext: &str, name: &str) -> Vec<PathBuf> {
+    let exts: Vec<String> = pathext.split(';').map(str::trim).filter(|e| !e.is_empty()).map(str::to_ascii_lowercase).collect();
+    std::env::split_paths(path)
+        .filter(|d| !d.as_os_str().is_empty())
+        .flat_map(|d| std::iter::once(d.join(name)).chain(exts.iter().map(|e| d.join(format!("{name}{e}"))).collect::<Vec<_>>()))
+        .filter(|p| p.is_file())
+        .collect()
 }
 
 /// PATH 上第一個可執行檔路徑（與 agent-tools-detect.mjs 的 lookup 對齊）；找不到再看官方安裝程式固定放的位置。
@@ -84,15 +96,9 @@ fn resolve_on_path(name: &str) -> Option<PathBuf> {
     }
     #[cfg(windows)]
     {
-        let out = std::process::Command::new("where").no_window()
-            .arg(name)
-            .output()
-            .ok()?;
-        if !out.status.success() {
-            return None;
-        }
-        let text = String::from_utf8_lossy(&out.stdout).into_owned();
-        pick_windows_candidate(&text).map(PathBuf::from)
+        let path = std::env::var_os("PATH")?;
+        let pathext = std::env::var("PATHEXT").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_string());
+        pick_windows_candidate(&path_candidates(&path, &pathext, name))
     }
     #[cfg(not(windows))]
     {
@@ -163,15 +169,34 @@ mod tests {
 
 #[cfg(test)]
 mod pick_tests {
-    use super::pick_windows_candidate;
+    use super::{path_candidates, pick_windows_candidate};
+    use std::path::PathBuf;
 
     #[test]
     fn 無副檔名的殼排在前面時改挑可執行的() {
-        let out = "C:/npm/claude\r\nC:/npm/claude.cmd\r\n";
-        assert_eq!(pick_windows_candidate(out).unwrap(), "C:/npm/claude.cmd");
-        let exe = "C:/x/claude.exe\r\nC:/y/claude.cmd\r\n";
-        assert_eq!(pick_windows_candidate(exe).unwrap(), "C:/x/claude.exe");
-        assert_eq!(pick_windows_candidate("C:/only/claude\r\n").unwrap(), "C:/only/claude");
-        assert!(pick_windows_candidate("").is_none());
+        let p = |v: &[&str]| v.iter().map(PathBuf::from).collect::<Vec<_>>();
+        assert_eq!(pick_windows_candidate(&p(&["C:/npm/claude", "C:/npm/claude.cmd"])).unwrap(), PathBuf::from("C:/npm/claude.cmd"));
+        assert_eq!(pick_windows_candidate(&p(&["C:/x/claude.exe", "C:/y/claude.cmd"])).unwrap(), PathBuf::from("C:/x/claude.exe"));
+        assert_eq!(pick_windows_candidate(&p(&["C:/only/claude"])).unwrap(), PathBuf::from("C:/only/claude"));
+        assert!(pick_windows_candidate(&[]).is_none());
+    }
+
+    /// 新家用機：使用者資料夾是中文，舊做法經 `where` 拿到亂碼路徑
+    #[test]
+    fn 中文資料夾的路徑原樣找到_不存在的不收() {
+        let tmp = tempfile::tempdir().unwrap();
+        let npm = tmp.path().join("牧陽").join("npm");
+        let bin = tmp.path().join("牧陽").join(".local").join("bin");
+        std::fs::create_dir_all(&npm).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(npm.join("claude"), b"#!/bin/sh").unwrap();
+        std::fs::write(bin.join("claude.exe"), b"MZ").unwrap();
+        let missing = tmp.path().join("沒有這個資料夾");
+        let path = std::env::join_paths([missing, npm.clone(), bin.clone()]).unwrap();
+        let got = path_candidates(&path, ".COM;.EXE;.BAT;.CMD", "claude");
+        assert_eq!(got, vec![npm.join("claude"), bin.join("claude.exe")], "依 PATH 順序、只留存在的檔案");
+        let pick = pick_windows_candidate(&got).unwrap();
+        assert_eq!(pick, bin.join("claude.exe"));
+        assert!(pick.is_file(), "挑到的路徑要能直接用");
     }
 }
