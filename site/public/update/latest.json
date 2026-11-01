@@ -1,11 +1,11 @@
 {
-  "version": "0.1.113",
-  "notes": "修正：某些情況下 ASN 開起來幾秒就自己關掉（印記錄寫不進去時整個程式結束）。改善：ASN 若因程式錯誤結束，會把原因寫進記錄，方便追查。修正：登入狀態改變後的自動重開更穩，不會沿用已失效的輸出。",
-  "pub_date": "2026-10-30T23:21:53.803Z",
+  "version": "0.1.114",
+  "notes": "新功能：Claude 登入失效時，主動寄信通知你，手機帳號頁也會標「登入失效」。新功能：同一段對話不小心開了兩個視窗時，信先不亂送，告訴你是哪兩個視窗，並附「關掉其中一個」的按鈕，剩一個時自動補送。改善：切換帳號更穩，只在切走時存登入資料，存之前先確認是哪個帳號；查不到時先另外保存，切回時再核對。改善：登入檔被其他程式改寫時，會回報實際是哪個帳號。修正：從手機喚醒 pi 不會一開就當掉；喚醒失敗時講清楚是哪一種情況。",
+  "pub_date": "2026-11-01T01:19:24.597Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjVYUCsyZkpLakkxWVRMeVRic3RhMENLdnZ1NDR5MEVINXpYWlhWOFkxYjh4NmRMNUkyeTVsYUY1SkM0TERRckNOeDdqVDdTWDVSeGZxVFVLSXdmSmdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNDAyNTEzCWZpbGU6QVNOXzAuMS4xMTNfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS4xMTMKVzFUTVlmQVROdFhMeDEvMHJXV2g1N3Q1dGdaYThMUEdXVUI2MU9obTJ6UFdLVXVLVG5pd3haWTZUc3JpVURFK09NQ1ZjT2FoN2VJeE5KTS9kaEVQRGc9PQo=",
-      "url": "https://asnmessenger.web.app/update/ASN_0.1.113_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybitBTmF4d2NXZ3BqL24yUmZPSndtb3VtRHA5MWJRRDJ2eDZaNWVhMjViekY2dy9uUDVHN1VvMEhBazdpQ1p0QzZUVUJBQVNmOFhqditwd3dTb0RKd0FzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNDk1OTY0CWZpbGU6QVNOXzAuMS4xMTRfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS4xMTQKZWNCZEY4MWZmcCsyRjNEK04rbDZPY2cyR0hndmlTRU05aFIvRWpFTE9yN0FCVTl1UVkwbjhUY2lTQkpXSEZPeHF3SEh1VEo4ZHdaSnB6UGRaZHZoQUE9PQo=",
+      "url": "https://asnmessenger.web.app/update/ASN_0.1.114_x64-setup.exe"
     }
   }
 }
