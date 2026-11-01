@@ -48,6 +48,8 @@ mod term_remote;
 #[cfg(desktop)]
 mod ads;
 #[cfg(desktop)]
+mod agent_setup;
+#[cfg(desktop)]
 mod agent_tools;
 #[cfg(desktop)]
 pub mod askpass;
