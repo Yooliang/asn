@@ -373,12 +373,11 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     #[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
     fn ensure_config(&self) -> Result<(), String> {
         if self.config_file.is_file() {
-            // 開關關著（hold_config=false）＝0.1.113：已存在就不動，不做升級
-            if !self.hold_config {
-                return Ok(());
-            }
+            // 開關關著（hold_config=false）＝0.1.113 的空設定：已存在的不升級；
+            // 唯一例外（#611）：內容剛好等於第 1 階段寫的 ISOLATED_CONFIG（一個字不差）才改回空設定，其他內容（使用者改過的）一律不動
             let old = std::fs::read_to_string(&self.config_file).unwrap_or_default();
-            if old.trim() != OLD_DEFAULT_CONFIG {
+            let ours_to_rewrite = if self.hold_config { old.trim() == OLD_DEFAULT_CONFIG } else { old == ISOLATED_CONFIG };
+            if !ours_to_rewrite {
                 return Ok(());
             }
         }
@@ -954,6 +953,11 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             if restored.iter().any(|s| s.id == term.id) || parked.iter().any(|s| s.id == term.id) {
                 continue;
             }
+            // #611：開關關著（0.1.113 不認夥伴視窗的列）＝kind 不是空的列（第 1 階段留下的）一律 parked：留在檔案裡、不查不碰，等開關打開再認
+            if park_companion_row(self.hold_config, &term) {
+                parked.push(term);
+                continue;
+            }
             if !reclaim_candidate(&term) {
                 continue;
             }
@@ -1302,6 +1306,11 @@ fn session_to_store(s: &Session) -> StoreTerm {
         session_id: s.session_id.clone(),
         mux: s.window.mux,
     }
+}
+
+/// 開關關著時，夥伴視窗的列（kind 非空）不認領、改 parked（#611）
+fn park_companion_row(wezterm_on: bool, t: &StoreTerm) -> bool {
+    !wezterm_on && !t.kind.is_empty()
 }
 
 /// 檔案裡這一列能不能當認領候選。其他 profile、空編號、程序編號 0 都直接丟掉，不查、不結束。
@@ -2661,6 +2670,16 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "return {}\n", "0.1.113 寫的內容");
         svc.ensure_config().unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "return {}\n", "關著不升級成 Hold");
+        // #611：第 1 階段寫的 Hold 版本（一個字不差）關著時改回空設定
+        std::fs::write(&path, ISOLATED_CONFIG).unwrap();
+        svc.ensure_config().unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "return {}\n", "是我們寫的 Hold 版本要改回");
+        // 不是我們寫的（多一個字、使用者改過）一律不動
+        for custom in ["return { exit_behavior = \"Hold\", font_size = 12 }\n", "return { exit_behavior = \"Hold\" }\n-- 我的", "return { exit_behavior = \"Hold\" }"] {
+            std::fs::write(&path, custom).unwrap();
+            svc.ensure_config().unwrap();
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), custom, "不是我們寫的不動：{custom}");
+        }
     }
 
     fn one_pane(workspace: &str, tab: &str, pane: u64, cursor_x: i64) -> String {
@@ -3377,7 +3396,8 @@ mod tests {
 
     #[test]
     fn asn_重開後_claude_視窗_對得上就認回來_帶回_kind_與_session_id() {
-        let rig = make(default_profiles(), vec![Some(1_000)]);
+        let mut rig = make(default_profiles(), vec![Some(1_000)]);
+        rig.svc.set_hold_config(true); // 開關開著才認領夥伴視窗的列
         *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-6", "ASN:6 小乙", 7, 1);
         write_store(&rig.store, 6, &row("6", "claude", "1000", r#","kind":"claude","session_id":"s9""#));
         rig.svc.reclaim().unwrap();
@@ -3386,11 +3406,27 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
         assert_eq!((v["terms"][0]["kind"].as_str(), v["terms"][0]["session_id"].as_str()), (Some("claude"), Some("s9")));
         // 建立時間對不上：不認、不關
-        let rig = make(default_profiles(), vec![Some(2_000)]);
+        let mut rig = make(default_profiles(), vec![Some(2_000)]);
+        rig.svc.set_hold_config(true);
         *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-6", "ASN:6", 7, 1);
         write_store(&rig.store, 6, &row("6", "claude", "1000", r#","kind":"claude""#));
         rig.svc.reclaim().unwrap();
         assert!(rig.svc.own_gui_windows().is_empty());
+        assert!(rig.runner.killed().is_empty());
+    }
+
+    #[test]
+    fn 開關關著_夥伴視窗的列不認領_留在檔案裡_不下_cli_pi_的列照舊認() {
+        let rig = make(default_profiles(), vec![Some(1_000), Some(1_000)]);
+        *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-6", "ASN:6 小乙", 7, 1);
+        let claude = row("5", "claude", "1000", r#","kind":"claude","session_id":"s9""#);
+        write_store(&rig.store, 7, &format!("{claude},{}", row("6", "pi", "1000", "")));
+        rig.svc.reclaim().unwrap();
+        assert_eq!(rig.svc.own_gui_windows().len(), 1, "只有 pi 的列被認回，claude 列不認領");
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
+        let ids: Vec<&str> = v["terms"].as_array().unwrap().iter().filter_map(|t| t["id"].as_str()).collect();
+        assert!(ids.contains(&"5"), "claude 列 parked＝留在檔案裡：{ids:?}");
+        assert_eq!(rig.svc.list().len(), 1, "pi 的列照舊認回來（0.1.113 的行為）");
         assert!(rig.runner.killed().is_empty());
     }
 
