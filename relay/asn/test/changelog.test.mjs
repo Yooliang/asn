@@ -26,13 +26,23 @@ test('解析：新到舊、版本與日期、條列去掉符號、CRLF 也行、
   assert.deepEqual(parseChangelog('## 0.2.0\n- 沒日期'), [{ version: '0.2.0', date: '', lines: ['沒日期'] }])
 })
 
-test('真實的 CHANGELOG：0.1.2 到 0.1.13 都有、由新到舊、每版至少一條、純中文沒有英文夾雜的版本說明外殼', () => {
+test('真實的 CHANGELOG：0.1.2 起每版都有、由新到舊、每版至少一條、純中文沒有英文夾雜的版本說明外殼', () => {
   const es = parseChangelog(realLog)
-  // 不寫死最新版號（每次發版都會多一段）：最新一段＝package.json 版本，往下逐版遞減到 0.1.2
+  // 不寫死最新版號（每次發版都會多一段）：最新一段＝package.json 版本；跨次版號（0.1.x → 0.2.0）也要認得
   const cur = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version
-  const last = Number(cur.split('.')[2])
-  const want = Array.from({ length: last - 1 }, (_, i) => `0.1.${last - i}`)
-  assert.deepEqual(es.map(e => e.version), want)
+  const vs = es.map(e => e.version)
+  assert.equal(vs[0], cur)
+  const num = v => v.split('.').map(Number)
+  const newer = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]
+  for (let i = 1; i < vs.length; i++) assert.ok(newer(num(vs[i - 1]), num(vs[i])) > 0, `${vs[i - 1]} 要比 ${vs[i]} 新`)
+  // 每個次版號裡逐版不跳號：0.1.x 從 0.1.2 開始，之後的次版號從 .0 開始
+  const byMinor = new Map()
+  for (const v of vs) { const [a, b, c] = num(v); const k = `${a}.${b}`; byMinor.set(k, [...(byMinor.get(k) ?? []), c]) }
+  for (const [k, cs] of byMinor) {
+    const first = k === '0.1' ? 2 : 0
+    assert.deepEqual(cs, Array.from({ length: cs[0] - first + 1 }, (_, i) => cs[0] - i), `${k}.x 有跳號或缺版`)
+  }
+  assert.ok(byMinor.has('0.1'), '0.1.x 的記錄不能不見')
   for (const e of es) { assert.match(e.date, /^\d{4}-\d{2}-\d{2}$/, e.version); assert.ok(e.lines.length >= 1, e.version) }
   assert.equal(changelogFirstSection(realLog).split('\n')[0].startsWith('- '), true, '最新一段可直接當 latest.json 的 notes')
 })
