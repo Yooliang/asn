@@ -23,6 +23,8 @@ const TRUNC_MARK: &str = "…（已截斷）";
 const NO_WINDOW_MARK: &str = "Failed to create window";
 /// 讀 GUI log 的大小上限（超過就不讀）
 const LOG_READ_MAX: u64 = 256 * 1024;
+/// 等通訊檔時，每隔多久才去看一次 GUI 的 log（log 可能有幾百 KB，不必每 100 毫秒讀一次）
+const LOG_POLL: Duration = Duration::from_millis(500);
 /// 建不起視窗時給人看的一句話（#595）
 pub const NO_WINDOW_MSG: &str = "這台電腦現在開不了圖形視窗（常見原因：遠端桌面已中斷），請先接回桌面再試";
 
@@ -57,6 +59,11 @@ pub trait Runner {
     }
     /// 結束一個自己剛啟動的行程與它的子行程樹（等 socket 逾時要清掉剛開的視窗，不留桌面孤兒）
     fn kill_tree(&self, pid: u32);
+    /// 這個程序底下所有還活著的子孫（沿著父程序編號往下找；中間那層已經退出也找得到，因為父編號是登記在子程序上的）。
+    /// 建立時間比 pid 早的要由呼叫端自己濾掉（編號可能被重用）。預設沒有（測試的假 runner 不用改）
+    fn descendants_of(&self, _pid: u32) -> Vec<u32> {
+        Vec::new()
+    }
     /// 行程的建立時間（毫秒，查不到＝None）：結束行程前用來確認還是當初啟動的那一個，防程式編號被回收後誤殺別人
     fn started_ms(&self, pid: u32) -> Option<u64>;
     fn sleep(&self, d: Duration);
@@ -72,6 +79,10 @@ pub trait Fs {
     }
     /// 讀一個小文字檔（讀不到、太大＝None）。只用來看 WezTerm 自己的 log；預設讀不到（測試的假檔案系統不用改）
     fn read_text(&self, _p: &Path) -> Option<String> {
+        None
+    }
+    /// 檔案的最後修改時間（Unix 毫秒；量不到＝None）
+    fn modified_ms(&self, _p: &Path) -> Option<u64> {
         None
     }
     /// 刪一個檔（只用在清自己剛啟動、已退出的 GUI 留下的通訊檔）；預設不做事
@@ -92,6 +103,10 @@ impl Fs for RealFs {
             return None;
         }
         std::fs::read(p).ok().map(|b| String::from_utf8_lossy(&b).into_owned())
+    }
+    fn modified_ms(&self, p: &Path) -> Option<u64> {
+        let t = std::fs::metadata(p).ok()?.modified().ok()?;
+        t.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_millis() as u64)
     }
     fn remove_file(&self, p: &Path) {
         let _ = std::fs::remove_file(p);
@@ -140,6 +155,21 @@ impl Runner for RealRunner {
 
     fn started_ms(&self, pid: u32) -> Option<u64> {
         crate::heartbeat::process_started_ms(pid)
+    }
+
+    fn descendants_of(&self, pid: u32) -> Vec<u32> {
+        let table = crate::bridge::orphans::process_table();
+        let mut out: Vec<u32> = vec![];
+        let mut frontier = vec![pid];
+        while let Some(p) = frontier.pop() {
+            for (child, parent) in &table {
+                if *parent == p && *child != pid && !out.contains(child) {
+                    out.push(*child);
+                    frontier.push(*child);
+                }
+            }
+        }
+        out
     }
 
     fn kill_tree(&self, pid: u32) {
@@ -552,14 +582,18 @@ impl<'a> WezTerm<'a> {
         let sock = sock_path(&self.home, gui_pid);
         let start = Instant::now();
         let step = Duration::from_millis(100);
+        let mut log_checked: Option<Instant> = None;
         loop {
             if self.fs.exists(&sock) {
                 return Ok(Window { gui_pid, sock, started_ms, mux: false });
             }
-            if self.gui_log_says_no_window(gui_pid) && started_ms.is_some() && self.runner.started_ms(gui_pid) != started_ms {
-                elog!("WezTerm 建不起視窗（GUI 已退出，log 寫 {NO_WINDOW_MARK}）");
-                self.fs.remove_file(&sock);
-                return Err(SockFail::NoWindow(NO_WINDOW_MSG.to_string()));
+            if let Some(gui_started) = started_ms {
+                if log_checked.map_or(true, |t| t.elapsed() >= LOG_POLL) {
+                    log_checked = Some(Instant::now());
+                    if self.gui_log_says_no_window(gui_pid, gui_started) && self.runner.started_ms(gui_pid) != started_ms {
+                        return self.no_window(gui_pid, gui_started, &sock);
+                    }
+                }
             }
             if start.elapsed() >= self.sock_wait {
                 // 剛開的視窗連同子行程一起清掉，不留桌面孤兒視窗；但只動建立時間相符的那個（編號可能已被回收）
@@ -582,8 +616,41 @@ impl<'a> WezTerm<'a> {
         self.home.join(".local").join("share").join("wezterm").join(format!("wezterm-gui.exe-log-{gui_pid}.txt"))
     }
 
-    fn gui_log_says_no_window(&self, gui_pid: u32) -> bool {
-        self.fs.read_text(&self.gui_log_path(gui_pid)).is_some_and(|t| t.contains(NO_WINDOW_MARK))
+    /// log 有那句，而且是這個 GUI 寫的：log 檔不會自己清，程序編號可能被重用，所以修改時間不能早於 GUI 的建立時間（量不到修改時間就不擋）
+    fn gui_log_says_no_window(&self, gui_pid: u32, gui_started_ms: u64) -> bool {
+        let path = self.gui_log_path(gui_pid);
+        if self.fs.modified_ms(&path).is_some_and(|m| m < gui_started_ms) {
+            return false;
+        }
+        self.fs.read_text(&path).is_some_and(|t| t.contains(NO_WINDOW_MARK))
+    }
+
+    /// 判為建不起視窗之前，先確認 GUI 底下沒有留下還在跑的程式（GUI 自己退出時，它開的主控台與裡面的 claude 不一定跟著結束；
+    /// 留著再重開，同一段對話會有兩個 claude 在接）。只動「建立時間不早於 GUI」的子孫（編號被重用的不是它的）。
+    /// 結束不了、或量不到它的建立時間而確認不了：回 Other，當作已啟動，呼叫端不重開
+    fn no_window(&self, gui_pid: u32, gui_started_ms: u64, sock: &Path) -> Result<Window, SockFail> {
+        let mut stuck: Vec<u32> = vec![];
+        for pid in self.runner.descendants_of(gui_pid) {
+            match self.runner.started_ms(pid) {
+                Some(c) if c >= gui_started_ms => {
+                    self.runner.kill_tree(pid);
+                    if self.runner.started_ms(pid) == Some(c) {
+                        stuck.push(pid);
+                    } else {
+                        elog!("WezTerm 建不起視窗：結束了留下的子程序 {pid}");
+                    }
+                }
+                Some(_) => {}
+                None => stuck.push(pid),
+            }
+        }
+        if !stuck.is_empty() {
+            elog!("WezTerm 建不起視窗，但底下還有程序沒能確認結束：{stuck:?}，不重開");
+            return Err(SockFail::Other(format!("視窗沒開起來，但底下還有 {} 個程式沒能確認結束，為免同一段對話重複開，沒有重開", stuck.len())));
+        }
+        elog!("WezTerm 建不起視窗（GUI 已退出，log 寫 {NO_WINDOW_MARK}）");
+        self.fs.remove_file(sock);
+        Err(SockFail::NoWindow(NO_WINDOW_MSG.to_string()))
     }
 
     /// `wezterm cli set-tab-title --pane-id <id> <標題>`。
@@ -747,8 +814,12 @@ mod tests {
         /// 可讀的文字檔（GUI 的 log）
         texts: RefCell<BTreeMap<PathBuf, String>>,
         removed: RefCell<Vec<PathBuf>>,
+        modified: RefCell<BTreeMap<PathBuf, u64>>,
     }
     impl Fs for FakeFs {
+        fn modified_ms(&self, p: &Path) -> Option<u64> {
+            self.modified.borrow().get(p).copied()
+        }
         fn read_text(&self, p: &Path) -> Option<String> {
             self.texts.borrow().get(p).cloned()
         }
@@ -776,8 +847,14 @@ mod tests {
         spawn_pid: u32,
         tree_killed: RefCell<Vec<u32>>,
         started: RefCell<Vec<Option<u64>>>, // 每次 started_ms 依序回傳（用完回 None）
+        /// 某個程序編號專屬的 started_ms 佇列（優先於 started）
+        pid_started: RefCell<BTreeMap<u32, Vec<Option<u64>>>>,
+        descendants: RefCell<Vec<u32>>,
     }
     impl Runner for FakeRunner {
+        fn descendants_of(&self, _pid: u32) -> Vec<u32> {
+            self.descendants.borrow().clone()
+        }
         fn run(&self, _p: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<RunOutput, String> {
             self.calls.borrow_mut().push((args.to_vec(), env.clone()));
             if self.timeout_err {
@@ -797,7 +874,10 @@ mod tests {
         fn kill_tree(&self, pid: u32) {
             self.tree_killed.borrow_mut().push(pid);
         }
-        fn started_ms(&self, _pid: u32) -> Option<u64> {
+        fn started_ms(&self, pid: u32) -> Option<u64> {
+            if let Some(q) = self.pid_started.borrow_mut().get_mut(&pid) {
+                return if q.is_empty() { None } else { q.remove(0) };
+            }
             let mut v = self.started.borrow_mut();
             if v.is_empty() {
                 None
@@ -1165,6 +1245,56 @@ mod tests {
         fs.texts.borrow_mut().insert(gui_log(1), "Failed to create window".into());
         let r = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(5), None]), ..Default::default() };
         assert!(wez(&r, &fs).wait_sock_classified(1).is_ok());
+    }
+
+    fn no_window_fs() -> FakeFs {
+        let fs = FakeFs::default();
+        fs.texts.borrow_mut().insert(gui_log(1), "Failed to create window".into());
+        fs
+    }
+
+    #[test]
+    fn 建不起視窗_gui_底下留下的子程序先結束_成功才回_no_window() {
+        let fs = no_window_fs();
+        let r = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(5), None]), ..Default::default() };
+        *r.descendants.borrow_mut() = vec![7, 8];
+        // 7：比 GUI 晚建立、殺得掉；8：建立時間比 GUI 早（編號被重用，不是它的子孫）
+        r.pid_started.borrow_mut().insert(7, vec![Some(6), None]);
+        r.pid_started.borrow_mut().insert(8, vec![Some(4)]);
+        let e = wez(&r, &fs).wait_sock_classified(1).unwrap_err();
+        assert_eq!(e, SockFail::NoWindow(NO_WINDOW_MSG.to_string()));
+        assert_eq!(*r.tree_killed.borrow(), vec![7], "只結束確定是 GUI 底下的；建立時間比 GUI 早的不動");
+    }
+
+    #[test]
+    fn 建不起視窗_底下的程序結束不了或確認不了_回_other_不重開() {
+        // 殺了還在
+        let fs = no_window_fs();
+        let r = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(5), None]), ..Default::default() };
+        *r.descendants.borrow_mut() = vec![7];
+        r.pid_started.borrow_mut().insert(7, vec![Some(6), Some(6)]);
+        let e = wez(&r, &fs).wait_sock_classified(1).unwrap_err();
+        assert!(matches!(&e, SockFail::Other(m) if m.contains("沒有重開")), "{e:?}");
+        assert!(fs.removed.borrow().is_empty());
+        // 量不到建立時間：確認不了
+        let fs = no_window_fs();
+        let r = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(5), None]), ..Default::default() };
+        *r.descendants.borrow_mut() = vec![7];
+        let e = wez(&r, &fs).wait_sock_classified(1).unwrap_err();
+        assert!(matches!(e, SockFail::Other(_)), "{e:?}");
+        assert!(r.tree_killed.borrow().is_empty(), "確認不了的不亂殺");
+    }
+
+    #[test]
+    fn 舊的_log_不算_修改時間早於_gui_建立時間() {
+        let fs = no_window_fs();
+        fs.modified.borrow_mut().insert(gui_log(1), 4); // GUI 建立於 5，log 是更早的舊檔（編號被重用）
+        let r = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(5), None]), ..Default::default() };
+        let e = wez(&r, &fs).wait_sock_classified(1).unwrap_err();
+        assert!(matches!(&e, SockFail::Other(m) if m.contains("通訊檔仍未出現")), "{e:?}");
+        fs.modified.borrow_mut().insert(gui_log(1), 6);
+        let r = FakeRunner { spawn_pid: 1, started: RefCell::new(vec![Some(5), None]), ..Default::default() };
+        assert!(matches!(wez(&r, &fs).wait_sock_classified(1), Err(SockFail::NoWindow(_))));
     }
 
     /// 真的 WezTerm 實測（預設不跑，會在桌面開一個視窗）：

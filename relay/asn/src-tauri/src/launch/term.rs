@@ -40,9 +40,16 @@ use std::time::Duration;
 pub(crate) const ISOLATED_CONFIG: &str = "return { exit_behavior = \"Hold\" }\n";
 /// 0.1.113 寫的隔離設定（開關 ASN_TERM_WEZTERM 關著時照舊寫這份）
 pub(crate) const LEGACY_CONFIG: &str = "return {}\n";
-/// 建不起視窗時的備援設定（#595）：改用 WebGpu 顯示方式（OpenGL 與 Software 在桌面斷線時都建不起視窗，只有 WebGpu 起得來）
-const WEBGPU_CONFIG_HOLD: &str = "return { exit_behavior = \"Hold\", front_end = \"WebGpu\" }\n";
-const WEBGPU_CONFIG: &str = "return { front_end = \"WebGpu\" }\n";
+/// 建不起視窗時的備援設定（#595）：同一份隔離設定再加 `front_end = "WebGpu"`（OpenGL 與 Software 在桌面斷線時都建不起視窗，只有 WebGpu 起得來）。
+/// 從目前那份設定產生，之後隔離設定加什麼，備援設定自動跟著有
+pub(crate) fn with_webgpu(cfg: &str) -> String {
+    let inner = cfg.find('{').zip(cfg.rfind('}')).map(|(a, b)| cfg[a + 1..b].trim().trim_end_matches(',').trim()).unwrap_or("");
+    if inner.is_empty() {
+        "return { front_end = \"WebGpu\" }\n".to_string()
+    } else {
+        format!("return {{ {inner}, front_end = \"WebGpu\" }}\n")
+    }
+}
 /// 舊版寫的空設定：升級時換成 ISOLATED_CONFIG（使用者改過的內容一律不動）
 const OLD_DEFAULT_CONFIG: &str = "return {}";
 
@@ -419,11 +426,11 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     fn ensure_webgpu_config(&self) -> Result<PathBuf, String> {
         let name = self.config_file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "wezterm".into());
         let path = self.config_file.with_file_name(format!("{name}-webgpu.lua"));
-        let content = if self.hold_config { WEBGPU_CONFIG_HOLD } else { WEBGPU_CONFIG };
+        let content = with_webgpu(if self.hold_config { ISOLATED_CONFIG } else { LEGACY_CONFIG });
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
             std::fs::create_dir_all(parent).map_err(|e| format!("無法建立終端設定資料夾：{e}"))?;
         }
-        std::fs::write(&path, content).map_err(|e| format!("無法建立備援的 WezTerm 設定：{e}"))?;
+        std::fs::write(&path, &content).map_err(|e| format!("無法建立備援的 WezTerm 設定：{e}"))?;
         Ok(path)
     }
 
@@ -3743,9 +3750,18 @@ mod tests {
         assert_eq!(cfgs[0], cfg.to_string_lossy());
         let alt = cfg.with_file_name("cfg-webgpu.lua");
         assert_eq!(cfgs[1], alt.to_string_lossy(), "第二次用備援設定檔");
-        assert_eq!(std::fs::read_to_string(&alt).unwrap(), WEBGPU_CONFIG_HOLD);
+        assert_eq!(std::fs::read_to_string(&alt).unwrap(), with_webgpu(ISOLATED_CONFIG));
         assert!(!cfg.exists(), "使用者那份（主設定）不被這條路徑碰");
         assert!(rig.runner.killed().is_empty(), "退出的程序不再結束");
+    }
+
+    #[test]
+    fn 備援設定從隔離設定產生_只多一個_front_end() {
+        assert_eq!(with_webgpu(ISOLATED_CONFIG), "return { exit_behavior = \"Hold\", front_end = \"WebGpu\" }\n");
+        assert_eq!(with_webgpu(LEGACY_CONFIG), "return { front_end = \"WebGpu\" }\n");
+        // 隔離設定以後加了別的項目，備援設定要一起有（拿掉 front_end 就等於原本那份）
+        let future = "return { exit_behavior = \"Hold\", enable_tab_bar = false }\n";
+        assert_eq!(with_webgpu(future).replace(", front_end = \"WebGpu\"", ""), future);
     }
 
     #[test]
