@@ -18,6 +18,7 @@ import { ConfirmCards } from './group-sheet.mjs'
 import { readLabel, readTitle } from './mobile-rooms.mjs'
 import { canCallPartner } from './mobile-call.mjs'
 import { CALL_END_NOTE, splitCallEnd } from './call-end.mjs'
+import { dupCloseLabel, dupCloseText, shownMine, splitDupMark } from './dup-windows.mjs'
 import { DICT_PHASE_TEXT, DICT_TIP, appendDictation } from './mobile-dictation.mjs'
 import { isVoiceMsg } from './voice-mark.mjs'
 import { shotFileName } from './shot.mjs'
@@ -315,11 +316,21 @@ export const ChatPane = {
       onBeforeUnmount(() => dict.stop())
     }
     // 對方（通話對象）回信最後一行的結束記號不顯示在對話裡，改顯示一行小提示
+    // 同名兩個視窗的說明（#584）：記號行改成「關掉」按鈕；自己寄出的關閉指令改顯示白話
     const shownBody = m => {
-      const b = m?.k === 'them' ? splitCallEnd(m.text) : { text: String(m?.text ?? ''), ends: false }
-      return { ...b, text: splitQuote(b.text).body }   // 開頭的引用行改畫成引用列，不重複顯示在內文
+      const b = m?.k === 'them' ? splitCallEnd(m.text) : { text: shownMine(m?.text), ends: false }
+      const d = m?.k === 'them' && !isRoom.value ? splitDupMark(b.text) : { text: b.text, wins: [] }
+      return { ...b, text: splitQuote(d.text).body, dup: d.wins }   // 開頭的引用行改畫成引用列，不重複顯示在內文
     }
     const voiceNote = computed(() => props.voice?.state.note || call?.state.note || dict?.state.note || props.voice?.state.tts.error || '')
+    // 同名兩個視窗的「關掉第 N 個」：本人按了才寄關閉指令（#584）
+    const dupDone = ref(new Set())
+    const closeDup = (m, i, w) => {
+      if (displayOnly.value) return
+      dupDone.value = new Set(dupDone.value).add(msgKey(m, i))   // 同一則說明只按一次，免得連關兩個
+      emit('send', dupCloseText(w.pid))
+    }
+    const dupPressed = (m, i) => dupDone.value.has(msgKey(m, i))
     onMounted(() => {
       scrollDown(); if (props.active) composeEl.value && composeEl.value.focus()
       if (props.shotApi) props.shotApi.supported().then(v => { shotOk.value = v === true }).catch(() => {})
@@ -338,7 +349,7 @@ export const ChatPane = {
     // header 的個人訊息：背景工作件數已經在「工作項目」大按鈕上，拿掉那段（#539 之三）；群組照舊
     // 手機（noBar）沒有那顆按鈕，件數照樣留在個人訊息裡
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -382,6 +393,9 @@ export const ChatPane = {
               </div>
               <button v-if="msgQuote(m)" class="quote" type="button" @click="jumpTo(m, i)" :title="'跳到原訊息：' + plain(msgQuote(m).excerpt)"><b>{{ plain(msgQuote(m).author) }}</b><span>{{ plain(msgQuote(m).excerpt) }}</span></button>
               <div class="m-body" :class="['tone-' + lay(m.k).tone, 'md-on']" v-if="shownBody(m).text" v-html="bodyHtml(shownBody(m).text)" @click="onBodyClick"></div>
+              <div class="dup-act" v-if="shownBody(m).dup.length" aria-label="關掉重複的視窗">
+                <button v-for="w in shownBody(m).dup" :key="w.pid" class="dup-close" type="button" :disabled="dupPressed(m, i) || displayOnly" @click="closeDup(m, i, w)" :title="dupCloseLabel(w.n)">{{ dupCloseLabel(w.n) }}</button>
+              </div>
               <div class="m-act" v-if="canReply(m) || (m.wake && m.wake.length)">
                 <button v-if="canReply(m)" class="reply-btn" type="button" @click="startReply(m, i)" aria-label="回覆這則訊息" title="回覆這則訊息">回覆</button>
                 <div class="wake-tags" v-if="m.wake && m.wake.length" aria-label="叫醒順序"><template v-for="(w, wi) in m.wake" :key="wi"><span v-if="wi > 0 && !w.off && !m.wake[wi - 1].off" class="wake-arrow" aria-hidden="true">→</span><span class="wake-tag" :class="{ off: w.off }" :title="w.off ? '不通知' : ''">{{ w.label }}</span></template></div>

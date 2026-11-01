@@ -2387,3 +2387,5 @@ fn claude_的編號找不到紀錄_照舊一句() {
     *r.env.cfg.lock().unwrap() = Ok(pi_adopt_cfg(&r));
     assert_eq!(resume(&r, "離線夥伴", "aaaaaaaa-1111-4222-8333-444444444444").detail, NO_RECORD, "不是 pi 的編號就不提 pi");
 }
+
+mod dup;
