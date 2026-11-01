@@ -13,6 +13,34 @@ pub(crate) const WIN_TERM_FALLBACK: &str = "內建終端開不起來，改用一
 /// 這次 ASN 執行期間有沒有講過「改用一般視窗」（只提示一次）
 static FALLBACK_NOTED: AtomicBool = AtomicBool::new(false);
 
+/// 0.2.0 第 1 階段的總開關（#611）：預設關。關著＝Windows 開窗與 0.1.113 一樣（claude／codex 視窗開在原生主控台，
+/// 經 pi 只有前景開在自帶終端、背景開走原生主控台，關閉看承載 PowerShell）；開了才走自帶 WezTerm（本檔其餘部分）。
+/// 啟動時由 term::live() 讀一次環境變數後設定（同 ASN_TERM_MUX 的讀法），執行中不再變。
+static WEZTERM_WINDOWS: AtomicBool = AtomicBool::new(false);
+
+/// 開關環境變數名：`ASN_TERM_WEZTERM=1` 才讓 ASN 開的夥伴視窗走自帶 WezTerm
+pub(crate) const ENV_WEZTERM: &str = "ASN_TERM_WEZTERM";
+/// B2b 的開關環境變數名（#607）：`ASN_TERM_MUX=1` 才開在共用 mux。它建立在 WezTerm 之上，見 [`switches_from`]
+pub(crate) const ENV_MUX: &str = "ASN_TERM_MUX";
+
+/// 兩個開關的關係（唯一定義處）：回（WezTerm 開窗, mux 模式）。
+/// - WezTerm 開窗：ASN_TERM_WEZTERM=1 才開，預設關。
+/// - mux 模式：ASN_TERM_MUX=1 **而且** WezTerm 開窗也開才算；WezTerm 關著時 ASN_TERM_MUX=1 無效（mux 只是 WezTerm 窗格的放法，沒有 WezTerm 就沒有東西可放）。
+pub(crate) fn switches_from(wezterm: Option<&str>, mux: Option<&str>) -> (bool, bool) {
+    let wez = wezterm == Some("1");
+    (wez, wez && mux == Some("1"))
+}
+
+/// 啟動時設定一次（term::live() 呼叫）
+pub(crate) fn set_wezterm_windows(on: bool) {
+    WEZTERM_WINDOWS.store(on, Ordering::SeqCst);
+}
+
+/// 現在開著嗎（預設 false）
+pub(crate) fn wezterm_windows() -> bool {
+    WEZTERM_WINDOWS.load(Ordering::SeqCst)
+}
+
 /// 對照表裡記的視窗種類：Claude Code 本體記 "claude"；其他經這裡開的程式（例如 Codex）記 "window"
 pub(crate) const KIND_CLAUDE: &str = "claude";
 pub(crate) const KIND_WINDOW: &str = "window";
@@ -112,10 +140,18 @@ pub(crate) fn open_window(host: Option<&dyn WinTermHost>, cwd: &Path, spec: &Win
     Ok(Opened { pid, note: first.then_some(WIN_TERM_FALLBACK) })
 }
 
-/// 正式：自帶的終端從全域取（沒有畫面的建置、測試一律沒有）
+/// 開關的分岔點：關著＝直接用 fallback（0.1.113 的 start_window_windows：原生主控台、不提示、不碰自帶終端）；開著才走 [`open_window`]
+pub(crate) fn open_window_gated(on: bool, host: Option<&dyn WinTermHost>, cwd: &Path, spec: &WinSpec, noted: &AtomicBool, fallback: &dyn Fn() -> Result<u32, String>) -> Result<Opened, String> {
+    if !on {
+        return fallback().map(|pid| Opened { pid, note: None });
+    }
+    open_window(host, cwd, spec, noted, fallback)
+}
+
+/// 正式：自帶的終端從全域取（沒有畫面的建置、測試一律沒有）；開關見 [`wezterm_windows`]
 pub(crate) fn open_window_real(cwd: &Path, spec: &WinSpec, fallback: &dyn Fn() -> Result<u32, String>) -> Result<Opened, String> {
     let host = host();
-    open_window(host.as_deref(), cwd, spec, &FALLBACK_NOTED, fallback)
+    open_window_gated(wezterm_windows(), host.as_deref(), cwd, spec, &FALLBACK_NOTED, fallback)
 }
 
 /// 「改用一般視窗」這次執行還沒講過就回 true 並記下（pi 的退路也照這一套只提示一次）
@@ -251,6 +287,61 @@ mod tests {
         let e = open_window(None, Path::new("D:\\p"), &spec, &noted, &|| Err("開不起來：找不到檔案".into())).unwrap_err();
         assert!(e.contains("開不起來"));
         assert!(!noted.load(Ordering::SeqCst));
+    }
+
+    // ---- #611：開關（ASN_TERM_WEZTERM，預設關）
+
+    #[test]
+    fn 開關關著_開窗直接走原生主控台_不碰自帶終端_不提示() {
+        let h = host(true, Ok(4321));
+        let noted = AtomicBool::new(false);
+        let spec = spec_for("小乙", "claude.exe", &sv(&["-n", "小乙"]), false, BTreeMap::new());
+        let r = open_window_gated(false, Some(&h), Path::new("D:\\proj"), &spec, &noted, &|| Ok(77)).unwrap();
+        assert_eq!(r, Opened { pid: 77, note: None }, "跟 0.1.113 一樣：回承載殼的 pid、沒有說明");
+        assert!(h.got.lock().unwrap().is_empty(), "關著不能去開自帶終端");
+        assert!(!noted.load(Ordering::SeqCst));
+        // 退路自己失敗就照實回錯
+        assert!(open_window_gated(false, Some(&h), Path::new("D:\\p"), &spec, &noted, &|| Err("開不起來：x".into())).is_err());
+    }
+
+    #[test]
+    fn 開關開著_開窗走自帶終端() {
+        let h = host(true, Ok(4321));
+        let noted = AtomicBool::new(false);
+        let spec = spec_for("小乙", "claude.exe", &[], false, BTreeMap::new());
+        let r = open_window_gated(true, Some(&h), Path::new("D:\\proj"), &spec, &noted, &|| Ok(77)).unwrap();
+        assert_eq!(r.pid, 4321);
+        assert_eq!(h.got.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn 兩個開關的關係_mux_要_wezterm_也開才算() {
+        assert_eq!(switches_from(None, None), (false, false), "預設全關");
+        assert_eq!(switches_from(None, Some("1")), (false, false), "WezTerm 關著時 ASN_TERM_MUX=1 無效");
+        assert_eq!(switches_from(Some("0"), Some("1")), (false, false));
+        assert_eq!(switches_from(Some("1"), None), (true, false), "只開 WezTerm 不開 mux");
+        assert_eq!(switches_from(Some("1"), Some("1")), (true, true));
+        assert_eq!(switches_from(Some("true"), Some("1")), (false, false), "只認 1");
+    }
+
+    #[test]
+    fn 守門_開關預設關_開窗與關閉的分岔點都看同一個開關() {
+        assert!(!wezterm_windows(), "沒人設定時預設關");
+        let wt = include_str!("win_term.rs").split("#[cfg(test)]").next().unwrap();
+        assert!(wt.contains("open_window_gated(wezterm_windows(),"), "open_window_real 用開關決定");
+        let term = include_str!("term.rs");
+        let live = term.split("pub fn live(").nth(1).unwrap().split("#[cfg(feature = \"gui\")]").next().unwrap();
+        assert!(live.contains("switches_from(") && live.contains("set_wezterm_windows(wez)") && live.contains("set_use_mux(mux)") && live.contains("set_hold_config(wez)"), "live() 讀一次、mux 只吃 switches_from 算出來的值");
+        assert!(!live.contains("set_use_mux(std::env"), "mux 不能直接吃環境變數");
+        let own = term.split("pub(crate) fn own_gui_windows()").nth(1).unwrap().split("pub(crate) fn stop_own_gui").next().unwrap();
+        assert!(own.contains("!super::win_term::wezterm_windows()"), "關著時不認自帶終端裡的夥伴視窗（關閉、opened_by_asn 都靠這個）");
+        let stop = term.split("pub(crate) fn stop_own_gui").nth(1).unwrap().split("/// 背景開").next().unwrap();
+        assert!(stop.contains("!super::win_term::wezterm_windows()"), "關著時不收 GUI");
+        let local = include_str!("local.rs");
+        let win = local.split("fn start_window_windows").nth(1).unwrap().split("fn start_console_window_windows").next().unwrap();
+        assert!(win.contains("start_console_window_windows(title, command, args, cwd, hidden, &[])"), "退路＝0.1.113 的開法，參數原樣");
+        let pi = include_str!("pi_term.rs");
+        assert!(pi.contains("open_pi_gated(super::win_term::wezterm_windows(),"), "經 pi 的正式入口用開關");
     }
 
     /// 守門（1.1）：各條路都經 local::start_window 這一個開窗點，不各自開 WezTerm 或主控台

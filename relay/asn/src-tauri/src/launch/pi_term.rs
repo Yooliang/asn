@@ -73,6 +73,26 @@ pub(crate) fn open_pi(
     fallback().map(|pid| PiOpened { pid, note: Some(note) })
 }
 
+/// 開關的分岔點（#611）：關著時背景開（hidden）照 0.1.113 直接走 fallback（原生主控台、不說明、不碰自帶終端）；
+/// 前景開本來就先用自帶終端（#475，0.1.113 就是這樣），不受開關影響；開著時背景開也開在自帶終端（0.2.0 第 1 階段）
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn open_pi_gated(
+    wezterm_windows: bool,
+    host: Option<&dyn PiTermHost>,
+    base_env: HashMap<String, String>,
+    command: &str,
+    args: &[String],
+    cwd: &Path,
+    hidden: bool,
+    env: &[(String, String)],
+    fallback: &dyn Fn() -> Result<u32, String>,
+) -> Result<PiOpened, String> {
+    if hidden && !wezterm_windows {
+        return fallback().map(|pid| PiOpened { pid, note: None });
+    }
+    open_pi(host, base_env, command, args, cwd, hidden, env, fallback)
+}
+
 /// 交給 pi 的工作資料夾拿掉 Windows 長路徑前綴（`\\?\`）：遠端開時資料夾經過 canonicalize 會帶上它，
 /// pi 拿 cwd 組 sessions 底下的資料夾名，名字裡出現 `?` 就建不了，pi 一啟動就當掉（#601）。
 /// 在 `open_pi_real` 本身做，本機開、遠端開、接手／喚醒三條路都經過這裡；自帶終端的對照表記的也是拿掉後的
@@ -84,7 +104,7 @@ pub(crate) fn pi_cwd(cwd: &Path) -> PathBuf {
 pub(crate) fn open_pi_real(name: &str, command: &str, args: &[String], cwd: &Path, hidden: bool, env: &[(String, String)]) -> Result<PiOpened, String> {
     let cwd = &pi_cwd(cwd);
     let host = host();
-    let r = open_pi(host.as_deref(), super::config::child_env(), command, args, cwd, hidden, env, &|| super::local::start_console_window_env(name, command, args, cwd, hidden, env))?;
+    let r = open_pi_gated(super::win_term::wezterm_windows(), host.as_deref(), super::config::child_env(), command, args, cwd, hidden, env, &|| super::local::start_console_window_env(name, command, args, cwd, hidden, env))?;
     if let Some(n) = r.note {
         elog!("經 pi 開「{name}」：{n}");
     }
@@ -171,6 +191,21 @@ mod tests {
             assert!(!want.contains("wezterm") && !want.contains("錯誤碼"), "說明不帶技術細節");
         }
         assert!(host(false, Ok(1)).got.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn 開關關著_背景開照_0_1_113_直接走原生主控台_前景開照舊先用自帶終端() {
+        let h = host(true, Ok(4321));
+        let r = open_pi_gated(false, Some(&h), base(), "pi", &args(), Path::new("D:\\p"), true, &[], &|| Ok(9)).unwrap();
+        assert_eq!(r, PiOpened { pid: 9, note: None });
+        assert!(h.got.lock().unwrap().is_empty(), "背景開、開關關著＝不碰自帶終端");
+        let r = open_pi_gated(false, Some(&h), base(), "pi", &args(), Path::new("D:\\p"), false, &[], &|| Ok(9)).unwrap();
+        assert_eq!(r.pid, 4321, "前景開 0.1.113 就先用自帶終端（#475）");
+        assert_eq!(*h.hidden.lock().unwrap(), vec![false]);
+        // 開關開著：背景開也開在自帶終端並要求隱藏
+        let r = open_pi_gated(true, Some(&h), base(), "pi", &args(), Path::new("D:\\p"), true, &[], &|| Ok(9)).unwrap();
+        assert_eq!(r.pid, 4321);
+        assert_eq!(*h.hidden.lock().unwrap(), vec![false, true]);
     }
 
     #[test]
