@@ -88,7 +88,7 @@ pub enum Outcome {
 }
 
 pub struct Limits {
-    /// 整個登入的時間上限（從開子程序算起）
+    /// 整個登入的時間上限（從開子程序算起；含等網址、等手機、等程序結束）
     pub total: Duration,
     /// 等網址：每次等多久、最多等幾次
     pub poll: Duration,
@@ -118,21 +118,36 @@ const MAX_URL_LINES: u32 = 200;
 const MAX_LOGGED_LINES: u32 = 30;
 const MAX_DRAIN_LINES: u32 = 50;
 
-/// 記 log 前把網址的參數遮掉（參數含一次性的 state 與 challenge）
+/// 記 log 前把網址的參數遮掉（參數含一次性的 state 與 challenge）。
+/// 不管網址前面黏著什麼（括號、`URL:`、`<`、tab），只要出現 `http://` 或 `https://` 就從那裡起到下一個空白為止，遮掉 `?`、`#` 之後的部分
 pub fn redact_line(line: &str) -> String {
-    line.split(' ')
-        .map(|tok| {
-            if tok.starts_with("http://") || tok.starts_with("https://") {
-                match tok.find(['?', '#']) {
-                    Some(i) => format!("{}?…", &tok[..i]),
-                    None => tok.to_string(),
-                }
-            } else {
-                tok.to_string()
+    let lower = line.to_ascii_lowercase();
+    let mut out = String::with_capacity(line.len());
+    let mut i = 0;
+    while i < line.len() {
+        let rest = &lower[i..];
+        let hit = match (rest.find("http://"), rest.find("https://")) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        let Some(off) = hit else {
+            out.push_str(&line[i..]);
+            break;
+        };
+        let start = i + off;
+        out.push_str(&line[i..start]);
+        let end = line[start..].find(char::is_whitespace).map(|e| start + e).unwrap_or(line.len());
+        let url = &line[start..end];
+        match url.find(['?', '#']) {
+            Some(q) => {
+                out.push_str(&url[..q]);
+                out.push_str("?…");
             }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+            None => out.push_str(url),
+        }
+        i = end;
+    }
+    out
 }
 
 pub fn run_login(eng: &dyn LoginEngine, sp: &dyn Spawner, phone: &dyn Phone, lim: &Limits, report: &dyn Fn(Step)) -> Outcome {
@@ -191,6 +206,10 @@ fn one_round(eng: &dyn LoginEngine, sp: &dyn Spawner, phone: &dyn Phone, lim: &L
                 if polls >= lim.url_polls {
                     break;
                 }
+                if started.elapsed() >= lim.total {
+                    proc.kill_tree();
+                    return Round::Done(Outcome::TimedOut);
+                }
             }
             ReadLine::Eof => break,
         }
@@ -202,7 +221,12 @@ fn one_round(eng: &dyn LoginEngine, sp: &dyn Spawner, phone: &dyn Phone, lim: &L
 
     // 2. 把網址送到手機，等本人貼回授權碼
     report(Step::UrlSent);
-    let remaining = lim.total.saturating_sub(started.elapsed());
+    // 整個登入不超過 total：給手機的時間要預留寫入授權碼後等程序結束的那一段
+    let remaining = lim.total.saturating_sub(started.elapsed()).saturating_sub(lim.exit_wait);
+    if remaining.is_zero() {
+        proc.kill_tree();
+        return Round::Done(Outcome::TimedOut);
+    }
     let secret = match phone.ask_code(&url, remaining) {
         Ask::Code(s) => s,
         Ask::Declined => {
@@ -352,7 +376,7 @@ mod tests {
         }
     }
 
-    const URL: &str = "https://claude.ai/oauth/authorize?code=true&state=ST4TE&code_challenge=CH4LL";
+    const URL: &str = "https://claude.ai/oauth/authorize?code=true&client_id=CL1ENT&redirect_uri=https%3A%2F%2Fexample%2Fcb&state=ST4TE&code_challenge=CH4LL";
     const SECRET: &str = "SECRET-XYZ-123";
 
     struct Rig {
@@ -491,6 +515,50 @@ mod tests {
             let t = all_text(&o);
             for secret in [SECRET, "ST4TE", "CH4LL"] {
                 assert!(!t.contains(secret), "結果文字帶出了 {secret}：{t}");
+            }
+        }
+    }
+
+    #[test]
+    fn 整個登入的時間不超過上限_預留等結束的時間() {
+        // 總時間不夠留給「寫入授權碼後等結束」時，不問手機、直接結束
+        let r = rig(vec![good_script()], vec![code()]);
+        let lim = Limits { total: Duration::from_secs(60), exit_wait: Duration::from_secs(60), ..small() };
+        let o = run_login_with(&r.busy, &r.eng, &r.sp, &r.phone, &lim, &|_| {});
+        assert_eq!(o, Outcome::TimedOut);
+        assert!(r.phone.urls.borrow().is_empty());
+        assert_eq!(*r.sh.killed.borrow(), 1);
+        // 夠的時候，給手機的是「總時間減去已用減去等結束」
+        struct Rec(RefCell<Option<Duration>>);
+        impl Phone for Rec {
+            fn ask_code(&self, _u: &str, w: Duration) -> Ask {
+                *self.0.borrow_mut() = Some(w);
+                Ask::Declined
+            }
+        }
+        let r = rig(vec![good_script()], vec![]);
+        let rec = Rec(RefCell::new(None));
+        let lim = Limits { total: Duration::from_secs(600), exit_wait: Duration::from_secs(60), ..small() };
+        run_login_with(&r.busy, &r.eng, &r.sp, &rec, &lim, &|_| {});
+        let w = rec.0.borrow().unwrap();
+        assert!(w <= Duration::from_secs(540) && w > Duration::from_secs(530), "{w:?}");
+    }
+
+    #[test]
+    fn 記_log_前網址參數會遮掉_不管前面黏著什麼() {
+        for (input, keep) in [
+            (format!("({URL})"), "(https://claude.ai/oauth/authorize?…"),
+            (format!("URL:{URL}"), "URL:https://claude.ai/oauth/authorize?…"),
+            (format!("<{URL}>"), "<https://claude.ai/oauth/authorize?…"),
+            (format!("a\t{URL}\tb"), "a\thttps://claude.ai/oauth/authorize?…\tb"),
+            (format!("go {URL} and {URL}"), "go https://claude.ai/oauth/authorize?… and https://claude.ai/oauth/authorize?…"),
+            (URL.to_uppercase(), "HTTPS://CLAUDE.AI/OAUTH/AUTHORIZE?…"),
+            (format!("http://claude.ai/x?state=ST4TE"), "http://claude.ai/x?…"),
+        ] {
+            let s = redact_line(&input);
+            assert_eq!(s, keep, "{input}");
+            for p in ["ST4TE", "CH4LL", "CL1ENT", "state=", "ST4TE".to_lowercase().as_str()] {
+                assert!(!s.contains(p), "{s} 漏了 {p}");
             }
         }
     }
