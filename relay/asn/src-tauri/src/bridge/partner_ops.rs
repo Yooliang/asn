@@ -1094,36 +1094,39 @@ impl PartnerOps {
 
     /// 把 /指令交給視窗的外掛，放背景執行（不擋收信）：做完回信給寄件人（只告知）、寫往來記錄與 log，最後 ack 原信
     pub(crate) fn start_command(self: &Arc<Self>, job: CommandJob, sid: String) {
-        {
-            let mut c = self.cmds.lock().unwrap();
-            if c.len() > 2000 {
-                c.retain(|_, done| !*done);
-            }
-            c.insert(job.mail_id.clone(), false);
-        }
+        self.mark_job_started(&job.mail_id);
         let me = self.clone();
         tokio::spawn(async move {
             let (m2, j2) = (me.clone(), job.clone());
             let (good, text) = tokio::task::spawn_blocking(move || m2.command_blocking(&j2, &sid)).await.unwrap_or_else(|e| (false, format!("沒執行 /{}：背景工作失敗：{e}", job.command)));
-            me.record_command(&job, good, &text);
-            let mut b = json!({ "to_node": job.from_node, "body": text, "reply_to": job.mail_id, "from_agent": job.reply_from, "expects_reply": false });
-            if !job.from_agent.is_empty() {
-                b["to_agent"] = json!(job.from_agent);
-            }
-            if let Err(e) = me.relay.api("send", Some(b)).await {
-                me.log.line(&format!("slash command reply failed id={}: {e}", job.mail_id));
-            }
-            match me.relay.api("ack", Some(json!({ "ids": [job.mail_id] }))).await {
-                Ok(_) => {
-                    me.cmds.lock().unwrap().insert(job.mail_id.clone(), true);
-                }
-                Err(e) => {
-                    // 沒 ack 成功：標成做完，下次再看到這封信時由橋重 ack，絕不再執行一次
-                    me.log.line(&format!("slash command ack failed id={}: {e}", job.mail_id));
-                    me.cmds.lock().unwrap().insert(job.mail_id.clone(), true);
-                }
-            }
+            me.finish_job(&job, good, &text).await;
         });
+    }
+
+    /// 信件來的指令開始處理：記成進行中（之後再看到同一封信不再執行）
+    fn mark_job_started(&self, mail_id: &str) {
+        let mut c = self.cmds.lock().unwrap();
+        if c.len() > 2000 {
+            c.retain(|_, done| !*done);
+        }
+        c.insert(mail_id.to_string(), false);
+    }
+
+    /// 信件來的指令做完：寫往來記錄與 log、回信給寄件人（只告知），最後 ack 原信
+    async fn finish_job(&self, job: &CommandJob, good: bool, text: &str) {
+        self.record_command(job, good, text);
+        let mut b = json!({ "to_node": job.from_node, "body": text, "reply_to": job.mail_id, "from_agent": job.reply_from, "expects_reply": false });
+        if !job.from_agent.is_empty() {
+            b["to_agent"] = json!(job.from_agent);
+        }
+        if let Err(e) = self.relay.api("send", Some(b)).await {
+            self.log.line(&format!("slash command reply failed id={}: {e}", job.mail_id));
+        }
+        if let Err(e) = self.relay.api("ack", Some(json!({ "ids": [job.mail_id] }))).await {
+            // 沒 ack 成功：一樣標成做完，下次再看到這封信時由橋重 ack，絕不再執行一次
+            self.log.line(&format!("slash command ack failed id={}: {e}", job.mail_id));
+        }
+        self.cmds.lock().unwrap().insert(job.mail_id.clone(), true);
     }
 
     /// 等同一個視窗前面的操作做完（控制檔一次只放一筆），再寫控制檔、等外掛回報。回要寄給寄件人的內文
@@ -1661,6 +1664,8 @@ fn first_cwd(path: &Path) -> Option<String> {
     }
     None
 }
+
+mod dup;
 
 #[cfg(test)]
 mod tests;
