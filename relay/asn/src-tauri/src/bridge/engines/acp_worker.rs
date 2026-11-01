@@ -2,7 +2,7 @@
 //! 對應 engines/acp-worker.mjs。不知道仲介與橋，只透過事件通道（已轉交／失敗／回覆）與 Notifier（寄授權詢問／登入通知）跟外面講話。
 use super::acp_approvals::{ask_text, Answer, Approvals, Target};
 use super::acp_config::{NotifyTo, WorkerCfg};
-use super::acp_policy::{category_label, decide, is_network_error, Req, Verdict, WorkerError};
+use super::acp_policy::{category_label, decide, inside_agy_scratch, is_network_error, Req, Verdict, WorkerError};
 use super::rpc::Log;
 use super::{BoxFut, EngineEvent, EventTx, Notice, Notifier, PidBook};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -69,8 +69,9 @@ pub struct TurnResult {
 pub trait Guard: Send + Sync {
     /// 標準 ACP：agent 送來權限請求時（可等人）
     fn ask_permission(&self, info: Req) -> BoxFut<'static, bool>;
-    /// agy 原生：只能事後絆線。state＝步驟狀態（ACTIVE／DONE…）；full_access＝這個驅動是用放行旗標啟動的
-    fn check_tool(&self, info: &Req, state: &str, full_access: bool) -> Result<(), String>;
+    /// agy 原生：只能事後絆線。state＝步驟狀態（ACTIVE／DONE…）；full_access＝這個驅動是用放行旗標啟動的；
+    /// scratch＝agy 目前這段對話自己的暫存資料夾（#608，寫在這裡面不受白名單資料夾限制，但仍照寫入的政策）
+    fn check_tool(&self, info: &Req, state: &str, full_access: bool, scratch: Option<&std::path::Path>) -> Result<(), String>;
 }
 
 pub trait Driver: Send + Sync {
@@ -191,6 +192,11 @@ impl Store {
     pub fn note(&self, m: String) {
         (self.log)(m)
     }
+}
+
+/// 寫到不能寫的位置後，接回同一段對話送給它的提醒（#608）
+pub fn redirect_note(path: &str, cwd: &std::path::Path) -> String {
+    format!("（收發室提醒）這個位置不能寫：{path}。剛才那一步已被中止。請把檔案改寫到工作資料夾 {}（暫存檔也可以放你這段對話自己的 scratch 資料夾），然後繼續完成剛才的工作，最後照原本信件的要求回覆。", cwd.display())
 }
 
 pub fn preamble_for(cfg: &WorkerCfg) -> String {
@@ -679,6 +685,22 @@ impl Worker {
                 }
             }
         }
+        // 寫到不能寫的位置（不是敏感位置）：agy 已經被中止，接回同一段對話告訴它換位置，讓它自己做完。一輪最多一次，
+        // 再犯就照一般的違規結案（#608）。agy 原生通道沒辦法只拒絕那一步，所以只能「中止＋接續」
+        if let Some(path) = r.as_ref().err().and_then(|e| e.redirect.clone()) {
+            self.log(format!("寫到不能寫的位置（{path}）：接回同一段對話，請它改寫到工作資料夾"));
+            let old = self.st.lock().unwrap().driver.take();
+            if let Some(old) = old {
+                old.stop();
+            }
+            d = self.ensure_driver(self.base_full()).await?;
+            let note = redirect_note(&path, &cfg.cwd);
+            // 接不回原本的對話（新對話不知道前情）：連同開場說明與原本的信一起送
+            let text = if d.resume_lost() { format!("{}{note}\n\n---\n{}", preamble_for(&cfg), job.text) } else { note };
+            r = d.turn(text, cfg.turn_timeout_ms, cfg.turn_max_ms).await;
+            remember(&d);
+            self.log(if r.is_ok() { "換位置後完成" } else { "換位置後仍然失敗" });
+        }
         let mut conv_note = String::new(); // 這次改開了新對話：附在回覆後面讓寄件人知道
         // 登入失效（401）：長時間跑的驅動憑證到期，換一個新的驅動（重新讀登入）把同一封信再試一次；重開後還失效才報「需要登入」。
         // 每個工作者一小時最多自動重開一次，不無限重試（#517）
@@ -900,7 +922,7 @@ impl Guard for WorkerGuard {
             verdict == Verdict::Allow
         })
     }
-    fn check_tool(&self, info: &Req, state: &str, full_access: bool) -> Result<(), String> {
+    fn check_tool(&self, info: &Req, state: &str, full_access: bool, scratch: Option<&std::path::Path>) -> Result<(), String> {
         let me = &self.0;
         let c = info.category.as_str();
         if c == "internal" || c == "read" {
@@ -912,7 +934,12 @@ impl Guard for WorkerGuard {
             let granted = cfg.permissions.rule("execute") == Verdict::Allow || me.st.lock().unwrap().turn_grant.contains("execute") || full_access;
             return if state == "DONE" && !granted { Err("指令被執行了，但這個工作者不允許執行指令".into()) } else { Ok(()) };
         }
-        let (v, reason) = decide(&cfg.permissions, info, &cfg.cwd);
+        let (v, reason) = if c == "write" && scratch.is_some_and(|s| inside_agy_scratch(&info.paths, s, &cfg.cwd)) {
+            let v = cfg.permissions.rule("write");
+            (v, format!("寫入這段對話自己的暫存資料夾，寫入的政策是 {}", v.name()))
+        } else {
+            decide(&cfg.permissions, info, &cfg.cwd)
+        };
         if v == Verdict::Allow || (v == Verdict::Ask && me.st.lock().unwrap().turn_grant.contains(c)) {
             return Ok(());
         }

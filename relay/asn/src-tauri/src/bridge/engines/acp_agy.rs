@@ -3,7 +3,7 @@
 //! 對應 engines/acp-driver-agy.mjs。權限的現實（實測）：agy 無頭模式不能問人，指令會被它自己拒絕，但寫檔不問就直接寫，
 //! 所以看每個工具步驟的事件，違反政策就立刻殺掉行程（絆線：能擋住後續動作並明確回報，但那一次寫入可能已經發生）。
 use super::acp_config::WorkerCfg;
-use super::acp_policy::{describe_agy_tool, WorkerError};
+use super::acp_policy::{agy_scratch, agy_user_home, describe_agy_tool, sensitive_write, WorkerError};
 use super::acp_worker::{Denied, Driver, DriverArgs, TurnResult};
 use super::rpc::{Rpc, SpawnOpts};
 use super::{acp_clean_env, BoxFut};
@@ -37,7 +37,8 @@ struct Cur {
     tx: Option<oneshot::Sender<Result<TurnResult, WorkerError>>>,
     denied: Vec<Denied>,
     seen: HashSet<String>,
-    violation: Option<(String, String)>,
+    /// （原因, 摘要, 可以請它換位置再寫的路徑）
+    violation: Option<(String, String, Option<String>)>,
     /// 這一輪出現過任何工具步驟（含失敗的）：之後失敗時要告訴上層「已經動手了」
     tools: bool,
 }
@@ -85,9 +86,10 @@ impl AgyDriver {
 fn kill_with(sh: &Arc<Shared>, why: &'static str) {
     let violation = sh.cur.lock().unwrap().as_ref().and_then(|c| c.violation.clone());
     let err = match (why, violation) {
-        ("violation", Some((reason, summary))) => {
+        ("violation", Some((reason, summary, redirect))) => {
             let mut e = WorkerError::new("violation", reason);
             e.summary = Some(summary);
+            e.redirect = redirect;
             e
         }
         ("stop", _) => WorkerError::new("stopped", "工作者被停止"),
@@ -157,9 +159,13 @@ fn on_step(sh: &Arc<Shared>, a: &DriverArgs, s: Value) {
     if let Some(c) = sh.cur.lock().unwrap().as_mut() {
         c.seen.insert(key);
     }
-    if let Err(reason) = a.guard.check_tool(&info, state, a.full_access) {
+    let home = agy_user_home(&a.env);
+    let sid = sh.sid.lock().unwrap().clone();
+    if let Err(reason) = a.guard.check_tool(&info, state, a.full_access, agy_scratch(&home, &sid).as_deref()) {
+        // 寫到不能寫、但不是放登入資料或金鑰的地方：上層接回同一段對話請它改寫到工作資料夾（#608）；寫到敏感位置或其他種類的違規照舊整輪中止
+        let redirect = (info.category == "write" && !info.paths.is_empty() && !sensitive_write(&info.paths, &home, &a.cfg.cwd)).then(|| info.paths.join("、"));
         if let Some(c) = sh.cur.lock().unwrap().as_mut() {
-            c.violation = Some((reason.clone(), info.summary.clone()));
+            c.violation = Some((reason.clone(), info.summary.clone(), redirect));
         }
         (a.log)(format!("policy violation: {} ({reason}) → kill agy", info.summary));
         kill_with(sh, "violation");
@@ -175,9 +181,10 @@ fn on_result(sh: &Arc<Shared>, r: Value) {
         let Some(c) = g.as_ref() else { return };
         (c.violation.clone(), c.denied.clone())
     };
-    if let Some((reason, summary)) = violation {
+    if let Some((reason, summary, redirect)) = violation {
         let mut e = WorkerError::new("violation", reason);
         e.summary = Some(summary);
+        e.redirect = redirect;
         return sh.finish(Err(e));
     }
     for d in r.get("denied_actions").and_then(Value::as_array).into_iter().flatten() {

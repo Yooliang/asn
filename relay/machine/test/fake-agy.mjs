@@ -1,7 +1,7 @@
 // 假的 agy（原生 stream-json 模式）：給 acp 轉接器的測試用，不碰任何真的 AI。事件格式照 agy 1.2.16 實測。
 // 訊息裡的暗號決定行為（前導的工作者說明、[RELAY 來信] 標頭會被忽略）：
 //   @@ECHO_ALL       回整則訊息原文（看換班接手說明與帶進來的前情）
-//   @@WRITE <路徑>   送出寫檔工具步驟，150ms 後才真的寫（絆線測試：被殺就不會有檔案）
+//   @@WRITE <路徑>   送出寫檔工具步驟，150ms 後才真的寫（絆線測試：被殺就不會有檔案）；FAKE_AGY_STUBBORN=1 時收到「這個位置不能寫」的提醒也照寫
 //   @@RUN <指令>     送出執行指令步驟；沒帶 --dangerously-skip-permissions 就被「權限拒絕」（空回覆＋denied_actions）
 //   @@AUTH / @@QUOTA 回 status=ERROR 的 result 並結束（結束碼 1）
 //   @@AUTH_ONCE <路徑>  第一次（那個檔案還不存在）建檔並回登入失效，之後（檔案在了）照一般信處理：模擬「舊行程憑證過期、新行程正常」（#517）
@@ -67,7 +67,8 @@ async function handle(line) {
   const flags = `${flag('--dangerously-skip-permissions') ? 'full' : 'normal'}${opt('--model') ? `/${opt('--model')}` : ''}`
 
   let t
-  if ((t = /@@WRITE\s+(\S+)/.exec(body))) {
+  // FAKE_AGY_STUBBORN=1：收到「這個位置不能寫」的提醒時，照樣再寫同一個位置（測試一輪只給一次換位置的機會）
+  if ((t = /@@WRITE\s+(\S+)/.exec(body) || (process.env.FAKE_AGY_STUBBORN === '1' && /這個位置不能寫：(\S+?)。/.exec(body)))) {
     const si = step++
     out({ event: 'step_update', step_update: { conversation_id: conv, step_index: si, state: 'ACTIVE', step_type: 'tool', tool_name: 'write_to_file', tool_info: { name: 'write_to_file', parameters: { TargetFile: t[1] } } } })
     await sleep(150)

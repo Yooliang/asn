@@ -227,6 +227,81 @@ pub fn decide(policy: &Permissions, req: &Req, base: &Path) -> (Verdict, String)
     (rule, format!("{}的政策是 {}", category_label(&req.category), rule.name()))
 }
 
+// ---- agy 自己這段對話的暫存資料夾（#608）----
+
+/// agy 用的使用者資料夾：它的環境裡的 USERPROFILE，再來 HOME，都沒有就用這台電腦的
+pub fn agy_user_home(env: &[(String, String)]) -> PathBuf {
+    let get = |n: &str| env.iter().find(|(k, v)| k.eq_ignore_ascii_case(n) && !v.trim().is_empty()).map(|(_, v)| PathBuf::from(v));
+    get("USERPROFILE").or_else(|| get("HOME")).unwrap_or_else(crate::identity::home_dir)
+}
+
+/// 這段對話的 scratch：`<家>/.gemini/antigravity-cli/brain/<對話編號>/scratch`。
+/// 對話編號空著或不像編號（只收英數與 -、_）就沒有，免得拼出 `..` 之類跑到別處
+pub fn agy_scratch(user_home: &Path, sid: &str) -> Option<PathBuf> {
+    if sid.is_empty() || sid.len() > 100 || !sid.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return None;
+    }
+    Some(user_home.join(".gemini").join("antigravity-cli").join("brain").join(sid).join("scratch"))
+}
+
+/// 解析成實際位置：最深一層存在的上層用 canonicalize 解開捷徑與 junction，還不存在的部分接在後面（resolve 已去掉 `.`、`..`）
+pub fn real_path(base: &Path, p: &str) -> Option<PathBuf> {
+    let abs = resolve(base, p);
+    let mut cur = abs.as_path();
+    let mut rest: Vec<&std::ffi::OsStr> = vec![];
+    loop {
+        if let Ok(c) = std::fs::canonicalize(cur) {
+            let mut out = c;
+            for r in rest.iter().rev() {
+                out.push(r);
+            }
+            return Some(out);
+        }
+        rest.push(cur.file_name()?);
+        cur = cur.parent()?;
+    }
+}
+
+/// 寫入的路徑解析成實際位置後，是不是都在這段對話的 scratch 裡。
+/// scratch 一定要已經存在，而且它和上面的對話資料夾都不能是捷徑或 junction（實際位置要等於 brain 的實際位置接上 `<編號>/scratch`）
+pub fn inside_agy_scratch(paths: &[String], scratch: &Path, base: &Path) -> bool {
+    let (Some(sid_dir), Some(brain)) = (scratch.parent(), scratch.parent().and_then(Path::parent)) else { return false };
+    let (Ok(real_scratch), Ok(real_brain), Some(sid)) = (std::fs::canonicalize(scratch), std::fs::canonicalize(brain), sid_dir.file_name()) else { return false };
+    if norm(&real_scratch) != norm(&real_brain.join(sid).join("scratch")) {
+        return false;
+    }
+    let root = norm(&real_scratch);
+    let root = root.trim_end_matches('/');
+    !paths.is_empty()
+        && paths.iter().all(|p| match real_path(base, p) {
+            Some(r) => norm(&r).starts_with(&format!("{root}/")),
+            None => false,
+        })
+}
+
+/// 使用者資料夾底下放登入資料、金鑰、對話記錄的地方：寫到這些地方算真的越權，整輪中止，不給它換位置再試（#608）
+const SENSITIVE_HOME_DIRS: [&str; 10] = [".gemini", ".ssh", ".asn", ".irori-relay", ".claude", ".codex", ".pi", ".aws", ".config", ".gnupg"];
+
+pub fn sensitive_write(paths: &[String], user_home: &Path, base: &Path) -> bool {
+    let real_home = std::fs::canonicalize(user_home).unwrap_or_else(|_| user_home.to_path_buf());
+    paths.iter().any(|p| {
+        // 實際位置與字面位置都比：路徑或使用者資料夾本身都可能經過捷徑
+        let mut cands = vec![resolve(base, p)];
+        cands.extend(real_path(base, p));
+        cands.iter().any(|c| {
+            let r = norm(c);
+            let r = r.trim_start_matches("//?/");
+            SENSITIVE_HOME_DIRS.iter().any(|d| {
+                [real_home.as_path(), user_home].iter().any(|h| {
+                    let h = norm(&h.join(d));
+                    let h = h.trim_start_matches("//?/").trim_end_matches('/').to_string();
+                    r == h || r.starts_with(&format!("{h}/"))
+                })
+            })
+        })
+    })
+}
+
 // ---- 摘要（要寄給人看的，不含機密）----
 
 fn is_secret_key_word(w: &str) -> bool {
@@ -450,11 +525,12 @@ pub struct WorkerError {
     pub spawn_failed: bool,
     pub summary: Option<String>,
     /// 這一輪失敗前已經有工具步驟（跑過指令、改過檔…）：不能把整封信重送，會做第二次
-    pub had_steps: bool,
+    pub had_steps: bool,    /// 寫到不能寫的位置、但不是敏感位置（#608）：帶那個路徑，上層接回同一段對話請它改寫到工作資料夾，一輪最多一次
+    pub redirect: Option<String>,
 }
 impl WorkerError {
     pub fn new(code: &'static str, message: impl Into<String>) -> WorkerError {
-        WorkerError { code, message: message.into(), spawn_failed: false, summary: None, had_steps: false }
+        WorkerError { code, message: message.into(), spawn_failed: false, summary: None, had_steps: false, redirect: None }
     }
     /// 依錯誤文字分類（沒登入／額度），分不出來用 fallback 代碼
     pub fn classify(text: &str, fallback: &'static str, message: impl Into<String>) -> WorkerError {
@@ -577,5 +653,95 @@ mod tests {
         assert_eq!(classify_failure("額度用完了"), Some("quota"));
         assert_eq!(classify_failure("segfault at 0x4010"), None);
         assert_eq!(classify_failure("code 4012 happened"), None);
+    }
+
+    fn s(p: &Path) -> String {
+        p.display().to_string()
+    }
+
+    #[test]
+    fn agy_scratch_對話編號空著或不像編號就沒有() {
+        let h = Path::new("/u");
+        assert_eq!(agy_scratch(h, ""), None);
+        assert_eq!(agy_scratch(h, ".."), None);
+        assert_eq!(agy_scratch(h, "a/b"), None);
+        assert_eq!(agy_scratch(h, r"a\b"), None);
+        assert_eq!(agy_scratch(h, "abc-1_2"), Some(h.join(".gemini").join("antigravity-cli").join("brain").join("abc-1_2").join("scratch")));
+    }
+
+    #[test]
+    fn agy_user_home_先看它環境的_userprofile_再看_home() {
+        let e = |v: &[(&str, &str)]| v.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect::<Vec<_>>();
+        assert_eq!(agy_user_home(&e(&[("HOME", "/h"), ("UserProfile", "/p")])), PathBuf::from("/p"));
+        assert_eq!(agy_user_home(&e(&[("HOME", "/h"), ("USERPROFILE", " ")])), PathBuf::from("/h"));
+    }
+
+    #[test]
+    fn inside_agy_scratch_只認目前對話的_scratch_其他位置與跳出去的都不算() {
+        let d = tempfile::tempdir().unwrap();
+        let sc = agy_scratch(d.path(), "c1").unwrap();
+        let base = d.path();
+        // scratch 還不存在：不放行
+        assert!(!inside_agy_scratch(&[s(&sc.join("a.md"))], &sc, base));
+        std::fs::create_dir_all(&sc).unwrap();
+        std::fs::create_dir_all(sc.parent().unwrap().join(".system_generated")).unwrap();
+        assert!(inside_agy_scratch(&[s(&sc.join("a.md")), s(&sc.join("sub").join("b.md"))], &sc, base));
+        assert!(!inside_agy_scratch(&[], &sc, base), "沒帶路徑不放行");
+        assert!(!inside_agy_scratch(&[s(&sc)], &sc, base), "scratch 本身不是裡面的檔");
+        assert!(!inside_agy_scratch(&[s(&sc.join("..").join(".system_generated").join("x"))], &sc, base));
+        assert!(!inside_agy_scratch(&[s(&sc.join("a.md")), s(&d.path().join("x"))], &sc, base), "有一個在外面就不行");
+        // 相對路徑以工作資料夾為準，不是 scratch
+        assert!(!inside_agy_scratch(&["a.md".into()], &sc, base));
+    }
+
+    #[cfg(windows)]
+    fn junction(link: &Path, target: &Path) {
+        let st = std::process::Command::new("cmd").args(["/c", "mklink", "/J"]).arg(link).arg(target).output().unwrap();
+        assert!(st.status.success(), "{st:?}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn inside_agy_scratch_經過_junction_跳出去的不算_scratch_本身是_junction_也不算() {
+        let d = tempfile::tempdir().unwrap();
+        let out = d.path().join("elsewhere");
+        std::fs::create_dir_all(&out).unwrap();
+        let sc = agy_scratch(d.path(), "c1").unwrap();
+        std::fs::create_dir_all(&sc).unwrap();
+        junction(&sc.join("j"), &out);
+        assert!(!inside_agy_scratch(&[s(&sc.join("j").join("x.txt"))], &sc, d.path()));
+        std::fs::write(out.join("e.txt"), "x").unwrap();
+        assert!(!inside_agy_scratch(&[s(&sc.join("j").join("e.txt"))], &sc, d.path()), "已經存在的檔也一樣");
+        // scratch 自己是 junction（指到別處）：整個不放行
+        let sc2 = agy_scratch(d.path(), "c2").unwrap();
+        std::fs::create_dir_all(sc2.parent().unwrap()).unwrap();
+        junction(&sc2, &out);
+        assert!(!inside_agy_scratch(&[s(&sc2.join("x.txt"))], &sc2, d.path()));
+        // 對照：正常的 scratch 放行（證明上面不是因為別的原因失敗）
+        assert!(inside_agy_scratch(&[s(&sc.join("x.txt"))], &sc, d.path()));
+    }
+
+    #[test]
+    fn sensitive_write_使用者資料夾底下放登入資料的地方() {
+        let d = tempfile::tempdir().unwrap();
+        let h = d.path();
+        let w = h.join("work");
+        for p in [h.join(".gemini").join("oauth_creds.json"), h.join(".gemini").join("antigravity-cli").join("brain").join("c1").join(".system_generated").join("x"), h.join(".ssh").join("id"), h.join(".asn")] {
+            assert!(sensitive_write(&[s(&p)], h, &w), "{}", p.display());
+        }
+        assert!(sensitive_write(&["../.claude/x".into()], h, &w), "相對路徑解開後也算");
+        for p in [w.join("a.txt"), h.join("Desktop").join("a.txt"), h.join(".geminiX").join("a")] {
+            assert!(!sensitive_write(&[s(&p)], h, &w), "{}", p.display());
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn sensitive_write_經過_junction_指進去的也算() {
+        let d = tempfile::tempdir().unwrap();
+        let h = d.path();
+        std::fs::create_dir_all(h.join(".gemini")).unwrap();
+        junction(&h.join("innocent"), &h.join(".gemini"));
+        assert!(sensitive_write(&[s(&h.join("innocent").join("x.json"))], h, h));
     }
 }
