@@ -69,6 +69,16 @@ pub(crate) fn read_sessions(dir: &Path) -> Vec<Value> {
     out
 }
 
+/// 工作階段記錄裡這個 pid 的名字（B2c：由程序反查它是哪個夥伴）。沒有這筆或沒有名字＝None
+pub(crate) fn session_name_of(sessions: &[Value], pid: u32) -> Option<String> {
+    sessions
+        .iter()
+        .find(|s| s.get("pid").and_then(Value::as_u64) == Some(u64::from(pid)))
+        .and_then(|s| s.get("name").and_then(Value::as_str))
+        .filter(|n| !n.is_empty())
+        .map(String::from)
+}
+
 /// 從工作階段記錄挑出名字相符、互動式、而且程序還活著的 pid；同名多筆取最近啟動的
 pub(crate) fn pick_session_pid(sessions: &[Value], name: &str, alive: impl Fn(u32) -> bool) -> Option<u32> {
     sessions
@@ -148,6 +158,18 @@ impl super::console_resolve::ConsoleOs for RealConsoleOs {
     }
 }
 
+/// B2c：這個夥伴若開在共用終端服務（mux）裡，回對照表的終端編號。先照原本的方式找到程序，再看它是不是在 mux 底下、
+/// 而且是對照表記的那個 mux 裡同名的夥伴窗格；不是就照第 1 階段的做法（回 None）
+#[cfg(windows)]
+fn mux_target(req: &PartnerConsoleReq) -> Option<(u32, String)> {
+    use super::console_resolve::{resolve_pid, Ask};
+    let src = load_sources(req);
+    let ask = Ask { engine: &req.engine, name: &req.name, kind: req.kind.as_deref().unwrap_or(""), pid: req.pid };
+    let pid = resolve_pid(&ask, &src, &win::pid_alive).ok()?;
+    let mux = super::switch::mux_ancestor(&super::switch::winapi::process_table(), pid, &|p| crate::heartbeat::process_started_ms(p))?;
+    Some((pid, super::term::mux_partner_in(mux, &req.name)?))
+}
+
 fn query_console(req: &PartnerConsoleReq) -> Result<ConsoleQuery, String> {
     if req.name.is_empty() {
         return Ok(ConsoleQuery { ok: false, can_toggle: None, visible: None, reason: Some("缺少名字".into()), pid: None, hwnd: None });
@@ -159,6 +181,13 @@ fn query_console(req: &PartnerConsoleReq) -> Result<ConsoleQuery, String> {
     #[cfg(windows)]
     {
         use super::console_resolve::{find_for, resolve_pid, Ask};
+        if let Some((pid, id)) = mux_target(req) {
+            let q = super::term::mux_console_query(&id);
+            return Ok(match q.get("visible").and_then(Value::as_bool) {
+                Some(v) => ConsoleQuery { ok: true, can_toggle: Some(true), visible: Some(v), reason: None, pid: Some(pid), hwnd: None },
+                None => ConsoleQuery::no(q.get("reason").and_then(Value::as_str).unwrap_or("無法切換"), Some(pid)),
+            });
+        }
         let src = load_sources(req);
         let ask = Ask { engine: &req.engine, name: &req.name, kind: req.kind.as_deref().unwrap_or(""), pid: req.pid };
         let pid = match resolve_pid(&ask, &src, &win::pid_alive) {
@@ -173,6 +202,13 @@ fn query_console(req: &PartnerConsoleReq) -> Result<ConsoleQuery, String> {
 }
 
 fn set_console_visible(req: &PartnerConsoleReq, visible: bool) -> Result<Value, String> {
+    // B2c：開在共用終端服務裡的夥伴沒有自己的視窗：前台＝開看畫面的 GUI、背景＝收掉它（窗格照常跑）
+    #[cfg(windows)]
+    if !req.name.is_empty() {
+        if let Some((_, id)) = mux_target(req) {
+            return Ok(super::term::mux_console_set(&id, visible));
+        }
+    }
     let q = query_console(req)?;
     if q.can_toggle != Some(true) || q.hwnd.is_none() {
         return Ok(json!({ "ok": false, "reason": q.reason.unwrap_or_else(|| "無法切換".into()) }));
@@ -510,6 +546,14 @@ mod tests {
         assert_eq!(pick_session_pid(&all, "甲", |_| false), None);
         assert_eq!(pick_session_pid(&all, "丙", |_| true), None);
         assert_eq!(pick_session_pid(&all, "乙", |_| true), Some(12));
+    }
+
+    #[test]
+    fn 由_pid_反查夥伴名字() {
+        let all = vec![sess(10, "甲", 100, "interactive"), sess(11, "乙", 200, "interactive"), json!({ "pid": 12, "name": "" })];
+        assert_eq!(session_name_of(&all, 11), Some("乙".to_string()));
+        assert_eq!(session_name_of(&all, 12), None, "沒有名字不猜");
+        assert_eq!(session_name_of(&all, 99), None);
     }
 
     #[test]

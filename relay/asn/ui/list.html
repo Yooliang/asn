@@ -86,6 +86,7 @@
             <button class="search-ic" type="button" title="搜尋" aria-label="搜尋" @click="focusSearch"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
           </div>
           <p class="archive-note" v-if="archiveNote" role="status">{{ archiveNote }}</p>
+          <p class="archive-note env-notice" v-if="envNotice" role="status">{{ envNotice }}</p>
           <div class="list">
             <div v-for="g in shown" :key="g.key">
               <button class="g-head" type="button" @click="collapsed[g.key] = !collapsed[g.key]" @contextmenu.prevent="g.kind !== 'archived' && openDeviceMenu(g, $event)" :aria-expanded="!collapsed[g.key]">

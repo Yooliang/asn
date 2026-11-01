@@ -205,7 +205,8 @@ fn 別的_ASN_拿著啟動鎖_等它_過期的鎖會清掉() {
 fn 停之前數得出有幾個窗格_停只停_pid_檔記的那一個() {
     let d = tempfile::tempdir().unwrap();
     let mut r = Fake::new();
-    r.list_json = r#"[{"pane_id":1},{"pane_id":2}]"#.into();
+    // 窗格 0（workspace default，Hold 留著的畫面）不算夥伴
+    r.list_json = r#"[{"pane_id":0,"workspace":"default"},{"pane_id":1,"workspace":"asn-1"},{"pane_id":2,"workspace":"asn-2"}]"#.into();
     r.alive_after.set(Some(0));
     let m = mux(&r, d.path());
     assert_eq!(m.pane_count(), Ok(2));
@@ -215,7 +216,7 @@ fn 停之前數得出有幾個窗格_停只停_pid_檔記的那一個() {
 
 #[test]
 fn lua_長字串避開收尾記號() {
-    assert_eq!(config_text(Path::new(r"C:\a\sock")).lines().nth(1).unwrap(), r#"return { exit_behavior = "Hold", unix_domains = { { name = 'asn', socket_path = [[C:\a\sock]] } } }"#);
+    assert_eq!(config_text(Path::new(r"C:\a\sock")).lines().nth(1).unwrap(), r#"return { exit_behavior = "Hold", unix_domains = { { name = 'asn', socket_path = [[C:\a\sock]], no_serve_automatically = true } } }"#, "看畫面的 GUI 連不上時不能自己起 mux");
     let t = config_text(Path::new(r"C:\a]]b\sock"));
     assert!(t.contains(r"[=[C:\a]]b\sock]=]"), "{t}");
 }
@@ -389,4 +390,44 @@ fn 讀登錄檔使用者變數名字_不當掉_名字裡沒有等號() {
     // 只驗不 panic、回的是名字（這台電腦的 HKCU\Environment 是什麼不管）；非 Windows 為空
     let n = user_env_names();
     assert!(n.iter().all(|s| !s.is_empty() && !s.contains('=')), "{n:?}");
+}
+
+#[test]
+fn 撞名只看窗格自己的變數_跟共用白名單一樣的和_path_不算() {
+    let base: BTreeMap<String, String> = [("PATH".to_string(), "C:/bin".to_string()), ("USERPROFILE".to_string(), "C:/u".to_string())].into();
+    let mut pane = base.clone();
+    pane.insert("ASN_PI_NAME".into(), "小皮".into());
+    pane.insert("PATH".into(), "D:/extra;C:/bin".into());
+    let names: Vec<String> = ["Path", "asn_pi_name", "UserProfile", "Temp"].iter().map(|s| s.to_string()).collect();
+    assert_eq!(pane_collisions(&names, &pane, &base), ["asn_pi_name"], "PATH 不算；跟白名單一樣的 USERPROFILE 不是這個窗格自己的");
+    assert!(pane_collisions(&names, &base, &base).is_empty(), "沒有逐窗格的變數就不會撞");
+    assert!(pane_collisions(&[], &pane, &base).is_empty());
+}
+
+#[test]
+fn 金鑰類變數的提示_只列名字_最多五個() {
+    assert_eq!(secret_notice(&[]), None);
+    assert_eq!(secret_notice(&["Path".to_string(), "Temp".to_string()]), None, "一般變數不提示");
+    let one = secret_notice(&["Path".to_string(), "ASN_RELAY_KEY".to_string()]).unwrap();
+    assert_eq!(one, "使用者環境變數裡有看起來像金鑰的變數（ASN_RELAY_KEY），會被帶進每個夥伴的終端；建議移到別處");
+    assert!(!one.contains("Path"));
+    let two = secret_notice(&["ASN_RELAY_KEY".to_string(), "claude_code_x".to_string()]).unwrap();
+    assert!(two.contains("（ASN_RELAY_KEY、claude_code_x）"), "{two}");
+    let many: Vec<String> = (0..8).map(|i| format!("CLAUDE_X{i}")).collect();
+    let n = secret_notice(&many).unwrap();
+    assert!(n.contains("CLAUDE_X4、…）") && !n.contains("CLAUDE_X5"), "{n}");
+}
+
+#[test]
+fn 起好之後關掉_hold_留著的窗格_0() {
+    let d = tempfile::tempdir().unwrap();
+    let r = Fake::new();
+    assert_eq!(mux(&r, d.path()).ensure(), Ok(Ensure::Started { pid: 4000 }));
+    let kills: Vec<_> = r.cli_calls().into_iter().filter(|a| a.iter().any(|x| x == "kill-pane")).collect();
+    assert_eq!(kills, vec![vec!["cli", "--no-auto-start", "kill-pane", "--pane-id", "0"].into_iter().map(String::from).collect::<Vec<_>>()]);
+    // 沿用既有的 mux：不關任何窗格
+    let r2 = Fake::new();
+    r2.alive_after.set(Some(0));
+    assert_eq!(mux(&r2, d.path()).ensure(), Ok(Ensure::Reused));
+    assert!(r2.cli_calls().iter().all(|a| !a.iter().any(|x| x == "kill-pane")));
 }

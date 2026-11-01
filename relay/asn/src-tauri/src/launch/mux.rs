@@ -62,7 +62,9 @@ pub fn config_text(sock: &Path) -> String {
     while s.contains(&format!("]{eq}]")) {
         eq.push('=');
     }
-    format!("-- ASN 產生的終端服務設定（只設連線檔位置），請勿手改\nreturn {{ exit_behavior = \"Hold\", unix_domains = {{ {{ name = 'asn', socket_path = [{eq}[{s}]{eq}] }} }} }}\n")
+    // no_serve_automatically：`wezterm connect` 不吃 --no-auto-start，連不上時預設會自己起一個 mux；
+    // 看畫面的 GUI 若這樣起出第二個 mux，unview 結束 GUI 時還會連它的窗格一起砍掉（#615 審查）
+    format!("-- ASN 產生的終端服務設定（只設連線檔位置），請勿手改\nreturn {{ exit_behavior = \"Hold\", unix_domains = {{ {{ name = 'asn', socket_path = [{eq}[{s}]{eq}], no_serve_automatically = true }} }} }}\n")
 }
 
 /// 下 cli 的程序的環境：只有白名單（`child_env` 的結果）加上 socket 位置
@@ -131,7 +133,9 @@ impl Mux<'_> {
             return Err("終端服務沒有在跑".into());
         }
         let v: serde_json::Value = serde_json::from_str(&o.stdout).map_err(|_| "終端服務回的清單看不懂".to_string())?;
-        Ok(v.as_array().map(|a| a.len()).unwrap_or(0))
+        // 只數夥伴的窗格（workspace asn-N）。mux.lua 有 exit_behavior = "Hold"，窗格 0 的 cmd 結束後畫面會留著（workspace default），
+        // 不是夥伴，不算（B2c 實測）
+        Ok(v.as_array().map(|a| a.iter().filter(|p| p.get("workspace").and_then(|w| w.as_str()).is_some_and(|w| w.starts_with("asn-"))).count()).unwrap_or(0))
     }
 
     /// pid 檔記的 mux 還活著（建立時間對得上，防程式編號被回收）
@@ -190,6 +194,8 @@ impl Mux<'_> {
         };
         let _ = std::fs::write(&self.paths.pid, format!("{pid} {at}"));
         if self.wait_alive(START_WAIT) {
+            // 窗格 0 的 cmd 已經結束，但 Hold 讓它的畫面留著：關掉（剛起的 mux 只有這一個窗格，不會關到夥伴；失敗也無妨）
+            let _ = self.cli(&["kill-pane", "--pane-id", "0"]);
             return Ok(Ensure::Started { pid });
         }
         // 起不來：只清自己剛起的那一個（建立時間對得上才動）
@@ -310,12 +316,39 @@ pub fn user_env_names() -> Vec<String> {
 /// 登錄檔變數名 vs 這個窗格要給的環境（名字比對一律不分大小寫）：
 /// - `collide`：窗格環境也要設的名字。登錄檔的值會蓋過我們給的，夥伴自己的值就沒了；
 /// - `secret_like`：`child_env` 會濾掉的名字（`CLAUDE*`、`NO_COLOR`、金鑰類）。登錄檔裡有的話 WezTerm 仍會帶進窗格。
-/// 只回名字。這裡不改登錄檔；怎麼處理（包裝指令、提示使用者）是 TODO(B2b-2)
+/// 只回名字。這裡不改登錄檔；提示在 `secret_notice`；撞名時的包裝指令是 TODO(B2c-wrapper)，目前撞名一律不在 mux 裡開（見 `pane_collisions`）
 pub fn registry_conflicts(names: &[String], pane_env: &BTreeMap<String, String>) -> (Vec<String>, Vec<String>) {
     let ours: std::collections::HashSet<String> = pane_env.keys().map(|k| k.to_ascii_uppercase()).collect();
     let collide = names.iter().filter(|n| ours.contains(&n.to_ascii_uppercase())).cloned().collect();
     let secret_like = names.iter().filter(|n| super::config::env_filtered_out(n)).cloned().collect();
     (collide, secret_like)
+}
+
+/// 登錄檔變數名 vs 這個窗格自己的變數：窗格環境裡「跟共用白名單（`base`）不同」的那些（逐夥伴給的，例如 `ASN_PI_NAME`），
+/// 若在登錄檔也有同名的，登錄檔的值會蓋過（B0 實測），夥伴就拿到錯的值。名字比對不分大小寫，只回名字。
+/// `PATH`、`PATHEXT` 不算：Windows 本來就會把使用者的和系統的串在一起，幾乎每台電腦的登錄檔都有 Path，算進來就誰都開不了
+pub fn pane_collisions(names: &[String], pane_env: &BTreeMap<String, String>, base: &BTreeMap<String, String>) -> Vec<String> {
+    let own: std::collections::HashSet<String> = pane_env
+        .iter()
+        .filter(|(k, v)| base.get(*k) != Some(*v))
+        .map(|(k, _)| k.to_ascii_uppercase())
+        .filter(|k| k != "PATH" && k != "PATHEXT")
+        .collect();
+    names.iter().filter(|n| own.contains(&n.to_ascii_uppercase())).cloned().collect()
+}
+
+/// 夥伴清單上的提示（規格 11.2-6）：登錄檔使用者變數裡有 `child_env` 會濾掉的名字（看起來像金鑰的），WezTerm 會把它們帶進每個夥伴的終端。
+/// 只列名字（最多 5 個，每個最多 40 字），沒有就回 None。不改使用者的登錄檔
+pub fn secret_notice(names: &[String]) -> Option<String> {
+    let (_, secret_like) = registry_conflicts(names, &BTreeMap::new());
+    if secret_like.is_empty() {
+        return None;
+    }
+    let mut shown: Vec<String> = secret_like.iter().take(5).map(|n| n.chars().take(40).collect()).collect();
+    if secret_like.len() > 5 {
+        shown.push("…".into());
+    }
+    Some(format!("使用者環境變數裡有看起來像金鑰的變數（{}），會被帶進每個夥伴的終端；建議移到別處", shown.join("、")))
 }
 
 /// 更新留下的舊執行檔（安裝程式把占用中的檔改名成 `.old`、`.old1`…）：ASN 啟動時試著刪，舊 mux 還在用的刪不掉就留到下次。

@@ -34,6 +34,7 @@ export const transport = {
   partnerConsoleQuery: req => invoke('partner_console_query', { req }),
   partnerConsoleSet: req => invoke('partner_console_set', { req }),
   termStart: req => invoke('term_start', { req }),           // { profile: 'grok'|'agy', cwd } → { id }；只在使用者於「開終端…」按「開啟」後呼叫
+  termEnvNotice: () => invoke('term_env_notice'),            // 共用終端服務開著、而且使用者環境變數裡有看起來像金鑰的變數時回一句話（只含變數名字），否則 null（只在電腦版）
   termList: () => invoke('term_list'),                       // 這次由 ASN 開啟的終端：[{ id, profile, pid, started_ms, cwd }]（只在電腦版）
   termStatus: req => invoke('term_status', { req }),         // { id } → { state, prompt? }；等你回答時帶 prompt
   termRead: req => invoke('term_read', { req }),             // { id, lines } → 畫面最後幾行的純文字（只讀，不送任何鍵）
