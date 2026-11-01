@@ -17,12 +17,13 @@ use std::time::Duration;
 pub const RELEASE_BASE: &str = "https://downloads.claude.ai/claude-code-releases";
 /// 簽署者必須完全等於這個名稱
 pub const EXPECTED_SIGNER: &str = "Anthropic, PBC";
-/// 取版本號的頻道（新電腦的自動更新也跟著這個頻道）
+/// 取版本號用 stable；裝完照官方預設，自動更新跟 latest（ASN 只負責裝上驗過的那一版，不改使用者的設定）
 const CHANNEL: &str = "stable";
 const MAX_VERSION_BYTES: u64 = 64;
 const MAX_MANIFEST_BYTES: u64 = 512 * 1024;
 const MAX_BINARY_BYTES: u64 = 800 * 1024 * 1024;
-const INSTALL_TIMEOUT: Duration = Duration::from_secs(300);
+/// 官方安裝程式自己還會下載一次（新家用機實測 238 秒），要留夠長的餘裕
+const INSTALL_TIMEOUT: Duration = Duration::from_secs(900);
 const VERSION_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// 執行安裝程式（逾時要殺掉整棵程序樹並回錯）。結束碼 `None` 不會出現：逾時一律回 `Err`
@@ -541,6 +542,11 @@ mod tests {
         for bad in ["2.1.3160", "12.1.316", "v2.1.316", "x 2.1.316", "", "2.1.31"] {
             assert!(!version_matches(bad, "2.1.316"), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn 安裝逾時要留夠長_實測要花約_238_秒() {
+        assert!(INSTALL_TIMEOUT >= Duration::from_secs(900), "{INSTALL_TIMEOUT:?}");
     }
 
     #[test]
