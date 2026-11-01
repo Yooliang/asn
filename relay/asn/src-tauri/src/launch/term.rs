@@ -72,6 +72,8 @@ pub(crate) const VIEW_NO_DESKTOP: &str = "這台電腦的桌面目前沒有人�
 const VIEW_FAIL_WINDOW: Duration = Duration::from_secs(3);
 const VIEW_POLL: Duration = Duration::from_millis(200);
 const VIEW_BIRTH_RETRIES: u32 = 5;
+/// 看畫面的 GUI 至少要活過這麼久才算開成功：桌面沒人登入時它會先冒出視窗、約 0.3 秒後才崩潰（B4 工作機實測）
+const VIEW_MIN_ALIVE: Duration = Duration::from_secs(1);
 const TRUNC_MARK: &str = "…（已截斷）";
 /// grok 1.0.70 登入後閒置時，輸入框那一行的行首。空框後面可以是佔位「…」，那不算使用者正在打字。
 const GROK_INPUT_MARK: &str = "│ ❯";
@@ -905,8 +907,10 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             at = self.runner.started_ms(pid);
         }
         let Some(at) = at else { return Err(VIEW_NO_DESKTOP.into()) };
-        for _ in 0..(VIEW_FAIL_WINDOW.as_millis() / VIEW_POLL.as_millis()) {
-            if viewer_window_up(pid) {
+        // 至少活過 VIEW_MIN_ALIVE（期間每次都核對建立時間）；之後看到視窗就算成功，看不到就等到 VIEW_FAIL_WINDOW 為止還活著也算
+        let min_polls = VIEW_MIN_ALIVE.as_millis() / VIEW_POLL.as_millis();
+        for i in 0..(VIEW_FAIL_WINDOW.as_millis() / VIEW_POLL.as_millis()) {
+            if i >= min_polls && self.runner.window_up(pid) {
                 break;
             }
             self.runner.sleep(VIEW_POLL);
@@ -1553,19 +1557,6 @@ fn view_args(config: &Path, workspace: &str) -> Vec<String> {
 /// 分頁標題 `ASN:{編號} {名字}` 裡的名字（沒有名字＝None）
 fn partner_label<'a>(id: &str, title: &'a str) -> Option<&'a str> {
     title.strip_prefix("ASN:")?.strip_prefix(id)?.strip_prefix(' ').filter(|l| !l.is_empty())
-}
-
-/// 看畫面的 GUI 的視窗已經出現（早點確定成功，不必等滿失敗判斷的時間）。測試、沒有畫面的建置＝false
-fn viewer_window_up(pid: u32) -> bool {
-    #[cfg(all(windows, feature = "gui", not(test)))]
-    {
-        !super::console::win::find_wez_windows(pid).is_empty()
-    }
-    #[cfg(not(all(windows, feature = "gui", not(test))))]
-    {
-        let _ = pid;
-        false
-    }
 }
 
 /// 已經開著的看畫面 GUI：叫到最前面（找不到視窗就算了）
@@ -2414,6 +2405,8 @@ mod tests {
         pid_started: RefCell<HashMap<u32, Vec<Option<u64>>>>,
         /// 每次啟動 GUI 後呼叫，參數是這是第幾次啟動（從 1 起）：模擬第 N 次才開得起視窗
         on_spawn: RefCell<Option<Box<dyn Fn(usize)>>>,
+        /// 看畫面的 GUI 的視窗已經出現（真＝一問就有）
+        window_up: RefCell<bool>,
     }
 
     fn default_list_clients_json() -> String {
@@ -2441,6 +2434,7 @@ mod tests {
             clean_err: RefCell::new(None),
             pid_started: RefCell::new(HashMap::new()),
             on_spawn: RefCell::new(None),
+            window_up: RefCell::new(false),
         }
     }
 
@@ -2524,6 +2518,9 @@ mod tests {
         }
         fn kill_tree(&self, pid: u32) {
             self.inner.tree_killed.borrow_mut().push(pid);
+        }
+        fn window_up(&self, _pid: u32) -> bool {
+            *self.inner.window_up.borrow()
         }
         fn started_ms(&self, pid: u32) -> Option<u64> {
             if let Some(q) = self.inner.pid_started.borrow_mut().get_mut(&pid) {
@@ -4707,6 +4704,32 @@ mod tests {
             assert!(rig.svc.viewing(&id));
             // 撐過判斷時間就算成功，不會一直等下去（3 秒／0.2 秒＝15 次）
             assert!(rig.runner.inner.sleeps.borrow().len() <= 16);
+        }
+
+        #[test]
+        fn 看畫面_視窗冒出來但不到一秒就崩潰_回開不了_不算成功() {
+            // B4 工作機實測：桌面沒人登入時 GUI 先冒出視窗，約 0.3 秒後崩潰
+            let (rig, _) = mux_rig();
+            let id = open_partner(&rig);
+            *rig.runner.inner.window_up.borrow_mut() = true;
+            rig.runner.inner.pid_started.borrow_mut().insert(42, vec![Some(5_000), Some(5_000), None]);
+            assert_eq!(rig.svc.view(&id).unwrap_err(), VIEW_NO_DESKTOP);
+            assert!(!rig.svc.viewing(&id));
+            assert!(rig.runner.killed().is_empty(), "已經結束的不用殺，更不碰 mux");
+            assert_eq!(kill_panes(&rig.runner), 0, "夥伴照常在背景執行");
+        }
+
+        #[test]
+        fn 看畫面_視窗出現而且活過一秒才算成功_不用等滿判斷時間() {
+            let (rig, _) = mux_rig();
+            let id = open_partner(&rig);
+            *rig.runner.inner.window_up.borrow_mut() = true;
+            rig.runner.inner.pid_started.borrow_mut().insert(42, vec![Some(5_000); 20]);
+            let before = rig.runner.inner.sleeps.borrow().len();
+            rig.svc.view(&id).unwrap();
+            assert!(rig.svc.viewing(&id));
+            let waited: Duration = rig.runner.inner.sleeps.borrow()[before..].iter().sum();
+            assert_eq!(waited, VIEW_MIN_ALIVE, "剛好等滿一秒：每次都核對建立時間，視窗早就出現也不提早算成功");
         }
 
         #[test]

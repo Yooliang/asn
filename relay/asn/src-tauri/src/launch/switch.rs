@@ -574,9 +574,10 @@ pub(crate) fn wez_has_others(os: &dyn Os, gui: u32, ended: &[u32]) -> bool {
     table.iter().filter(|p| order[1..].contains(&p.pid)).any(|p| !ended.contains(&p.pid) && !WEZ_PANE_HOSTS.contains(&p.name.as_str()) && os.alive(p.pid))
 }
 
-/// 這個視窗是不是 ASN 開的：自帶終端（對照表＋建立時間），或舊式主控台的承載 PowerShell（過渡期保留，第三節）
+/// 這個視窗是不是 ASN 開的：自帶終端（對照表＋建立時間）、共用終端服務（mux）裡 ASN 開的窗格（B2c，對照表核對），
+/// 或舊式主控台的承載 PowerShell（過渡期保留，第三節）。ASN 開的關閉時整個收掉，不會留下終端機分頁
 pub(crate) fn opened_by_asn(os: &dyn Os, table: &[Proc], pid: u32) -> bool {
-    asn_wez_of(os, table, pid).is_some() || asn_host_of(os, table, pid).is_some()
+    asn_wez_of(os, table, pid).is_some() || asn_host_of(os, table, pid).is_some() || os.mux_session_of(pid).is_some()
 }
 
 /// 舊式（0.1.x 原生主控台）：這個 Claude 的直接父殼若是 ASN 自己開視窗用的承載 PowerShell，回傳它的 pid；其他視窗回 None。
@@ -1467,6 +1468,15 @@ mod tests {
     fn mux_fake(sess: Option<&str>) -> MuxFake {
         let table = vec![p(100, 1, "explorer.exe"), p(300, 100, "asn.exe"), p(700, 100, "wezterm-mux-server.exe"), p(701, 700, "openconsole.exe"), p(702, 700, "claude.exe"), p(703, 702, "node.exe")];
         MuxFake { table, alive: RefCell::new([100, 300, 700, 701, 702, 703].into_iter().collect()), sess: sess.map(String::from), stop_result: Ok(()), trace: RefCell::new(vec![]) }
+    }
+
+    #[test]
+    fn asn_開的判斷_共用終端裡對照表認得的窗格也算_認不得的不算() {
+        // 關閉時的回覆靠它：mux 窗格會整個收掉，不能說「原本的終端機分頁會留下」（B4 工作機實測）
+        let f = mux_fake(Some("7"));
+        assert!(opened_by_asn(&f, &f.table, 702));
+        let f = mux_fake(None);
+        assert!(!opened_by_asn(&f, &f.table, 702), "在某個 mux 底下但對照表沒記：當外部");
     }
 
     #[test]

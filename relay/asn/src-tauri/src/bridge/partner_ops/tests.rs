@@ -27,6 +27,9 @@ struct FakeOs {
     cwds: Mutex<HashMap<u32, String>>,
     /// 結束時不理（模擬程序關不掉）
     immortal: Mutex<HashSet<u32>>,
+    /// 開在共用終端服務（mux）裡、對照表認得的程序 → 終端編號；關掉的窗格記在 mux_stopped
+    mux_sess: Mutex<HashMap<u32, String>>,
+    mux_stopped: Mutex<Vec<String>>,
 }
 
 impl Os for FakeOs {
@@ -63,6 +66,13 @@ impl Os for FakeOs {
         if let Some(f) = self.on_sleep.lock().unwrap().as_ref() {
             f();
         }
+    }
+    fn mux_session_of(&self, pid: u32) -> Option<String> {
+        self.mux_sess.lock().unwrap().get(&pid).cloned()
+    }
+    fn stop_mux_session(&self, id: &str) -> Result<(), String> {
+        self.mux_stopped.lock().unwrap().push(id.to_string());
+        Ok(())
     }
 }
 
@@ -288,6 +298,8 @@ fn rig(o: Opt) -> Rig {
         on_sleep: Mutex::new(None),
         cwds: Mutex::new(HashMap::new()),
         immortal: Mutex::new(HashSet::new()),
+        mux_sess: Mutex::new(HashMap::new()),
+        mux_stopped: Mutex::new(Vec::new()),
     });
     let env = Arc::new(FakeEnv {
         os,
@@ -448,6 +460,18 @@ fn 規則2_關閉_asn_開的視窗_連承載殼一起收_仍不碰別人() {
     let t = r.terminated();
     assert!(t.contains(&220) && t.contains(&221) && t.contains(&210), "{t:?}");
     assert!(!t.contains(&100) && !t.contains(&231) && !t.contains(&300), "{t:?}");
+}
+
+#[test]
+fn 規則2_關閉共用終端服務裡_asn_開的窗格_回已關閉視窗_不說終端機分頁會留下() {
+    // B4 工作機實測：mux 窗格關閉後整個收掉，回覆卻寫「原本的終端機分頁會留下」
+    let r = rig(Opt::default());
+    r.os().mux_sess.lock().unwrap().insert(220, "7".into());
+    let res = r.run("close", json!({}));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert_eq!(res.detail, "已關閉視窗");
+    assert_eq!(res.result.unwrap()["kept_terminal"], false);
+    assert_eq!(*r.os().mux_stopped.lock().unwrap(), vec!["7".to_string()], "那個窗格收掉了");
 }
 
 #[test]
