@@ -38,6 +38,8 @@ use std::time::Duration;
 /// ASN 自己的 WezTerm 設定檔內容（隔離，不讀使用者的 ~/.wezterm.lua）。
 /// exit_behavior = "Hold"：程式結束後視窗留著，讓人看得到最後的畫面（取代以前承載 PowerShell 印的「程式已結束」）
 pub(crate) const ISOLATED_CONFIG: &str = "return { exit_behavior = \"Hold\" }\n";
+/// 0.1.113 寫的隔離設定（開關 ASN_TERM_WEZTERM 關著時照舊寫這份）
+pub(crate) const LEGACY_CONFIG: &str = "return {}\n";
 /// 舊版寫的空設定：升級時換成 ISOLATED_CONFIG（使用者改過的內容一律不動）
 const OLD_DEFAULT_CONFIG: &str = "return {}";
 
@@ -237,6 +239,9 @@ pub struct TermService<R, F> {
     agy_args: Option<AgyArgs>,
     /// B2b 開關（預設關＝行為跟第 1 階段完全一樣）。開了就改開在共用的 mux 裡；正式由 live() 讀 ASN_TERM_MUX 設定
     use_mux: bool,
+    /// 隔離設定檔要不要帶 exit_behavior = "Hold"（0.2.0 第 1 階段的做法）。預設 false＝跟 0.1.113 一樣只寫空設定；
+    /// 正式由 live() 在 ASN_TERM_WEZTERM=1 時設 true（#611）
+    hold_config: bool,
     /// mux 的檔案放在這底下的 ASN\m（正式＝%LOCALAPPDATA%；測試注入暫存資料夾）
     mux_base: Option<PathBuf>,
     inner: Mutex<Inner>,
@@ -257,6 +262,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             status_gap: STATUS_GAP,
             agy_args: None,
             use_mux: false,
+            hold_config: false,
             mux_base: std::env::var_os("LOCALAPPDATA").map(PathBuf::from),
             inner: Mutex::new(Inner {
                 next: 0,
@@ -280,6 +286,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             status_gap: STATUS_GAP,
             agy_args: None,
             use_mux: false,
+            hold_config: false,
             mux_base: std::env::var_os("LOCALAPPDATA").map(PathBuf::from),
             inner: Mutex::new(Inner {
                 next: 0,
@@ -304,6 +311,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             status_gap: STATUS_GAP,
             agy_args: None,
             use_mux: false,
+            hold_config: false,
             mux_base: std::env::var_os("LOCALAPPDATA").map(PathBuf::from),
             inner: Mutex::new(Inner {
                 next: 0,
@@ -325,6 +333,10 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     }
 
     /// 開／關 B2b 的 mux 模式。正式只由 live() 依 ASN_TERM_MUX 設一次
+    pub fn set_hold_config(&mut self, on: bool) {
+        self.hold_config = on;
+    }
+
     pub fn set_use_mux(&mut self, on: bool) {
         self.use_mux = on;
     }
@@ -361,8 +373,11 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     #[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
     fn ensure_config(&self) -> Result<(), String> {
         if self.config_file.is_file() {
+            // 開關關著（hold_config=false）＝0.1.113 的空設定：已存在的不升級；
+            // 唯一例外（#611）：內容剛好等於第 1 階段寫的 ISOLATED_CONFIG（一個字不差）才改回空設定，其他內容（使用者改過的）一律不動
             let old = std::fs::read_to_string(&self.config_file).unwrap_or_default();
-            if old.trim() != OLD_DEFAULT_CONFIG {
+            let ours_to_rewrite = if self.hold_config { old.trim() == OLD_DEFAULT_CONFIG } else { old == ISOLATED_CONFIG };
+            if !ours_to_rewrite {
                 return Ok(());
             }
         }
@@ -371,7 +386,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 std::fs::create_dir_all(parent).map_err(|e| format!("無法建立終端設定資料夾：{e}"))?;
             }
         }
-        std::fs::write(&self.config_file, ISOLATED_CONFIG).map_err(|e| format!("無法建立隔離的 WezTerm 設定：{e}"))
+        let content = if self.hold_config { ISOLATED_CONFIG } else { LEGACY_CONFIG };
+        std::fs::write(&self.config_file, content).map_err(|e| format!("無法建立隔離的 WezTerm 設定：{e}"))
     }
 
     /// 開一個終端。profile 只准 agy／grok，執行檔與工作資料夾都來自既有啟動設定，不接受呼叫端指定的指令。
@@ -937,6 +953,11 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             if restored.iter().any(|s| s.id == term.id) || parked.iter().any(|s| s.id == term.id) {
                 continue;
             }
+            // #611：開關關著（0.1.113 不認夥伴視窗的列）＝kind 不是空的列（第 1 階段留下的）一律 parked：留在檔案裡、不查不碰，等開關打開再認
+            if park_companion_row(self.hold_config, &term) {
+                parked.push(term);
+                continue;
+            }
             if !reclaim_candidate(&term) {
                 continue;
             }
@@ -1285,6 +1306,11 @@ fn session_to_store(s: &Session) -> StoreTerm {
         session_id: s.session_id.clone(),
         mux: s.window.mux,
     }
+}
+
+/// 開關關著時，夥伴視窗的列（kind 非空）不認領、改 parked（#611）
+fn park_companion_row(wezterm_on: bool, t: &StoreTerm) -> bool {
+    !wezterm_on && !t.kind.is_empty()
 }
 
 /// 檔案裡這一列能不能當認領候選。其他 profile、空編號、程序編號 0 都直接丟掉，不查、不結束。
@@ -1760,7 +1786,11 @@ pub fn live(data_dir: &Path) -> LiveTerms {
     let mut svc = TermService::from_env(data_dir.join("wezterm-term.lua"), data_dir.join("wezterm-terms.json"), crate::identity::home_dir(), wezterm::RealRunner, wezterm::RealFs);
     svc.set_agy_args(Box::new(crate::gemini_session::live_args));
     // B2b 開關：只在 ASN_TERM_MUX=1 才開在共用的 mux 裡，預設關。啟動時讀一次（要在 reclaim 之前，認領 mux 的列要看它）
-    svc.set_use_mux(std::env::var("ASN_TERM_MUX").is_ok_and(|v| v == "1"));
+    // #611：mux 建立在 WezTerm 開窗之上——ASN_TERM_WEZTERM 沒開時 ASN_TERM_MUX=1 無效（關係定義在 win_term::switches_from）
+    let (wez, mux) = super::win_term::switches_from(std::env::var(super::win_term::ENV_WEZTERM).ok().as_deref(), std::env::var(super::win_term::ENV_MUX).ok().as_deref());
+    super::win_term::set_wezterm_windows(wez);
+    svc.set_hold_config(wez);
+    svc.set_use_mux(mux);
     if let Err(e) = svc.reclaim() {
         elog!("終端對照表接手失敗（不中斷啟動）：{e}");
     }
@@ -1892,6 +1922,10 @@ pub(crate) fn win_host() -> Option<std::sync::Arc<dyn super::win_term::WinTermHo
 pub(crate) fn own_gui_windows() -> Vec<(u32, u64)> {
     #[cfg(all(feature = "gui", not(test)))]
     {
+        // 開關關著（#611）＝0.1.113：不認自帶終端裡的夥伴視窗，「ASN 開的」只看舊式承載 PowerShell
+        if !super::win_term::wezterm_windows() {
+            return Vec::new();
+        }
         GLOBAL.get().map(|t| t.own_gui_windows()).unwrap_or_default()
     }
     #[cfg(not(all(feature = "gui", not(test))))]
@@ -1904,6 +1938,9 @@ pub(crate) fn own_gui_windows() -> Vec<(u32, u64)> {
 pub(crate) fn stop_own_gui(gui_pid: u32) -> Result<(), String> {
     #[cfg(all(feature = "gui", not(test)))]
     {
+        if !super::win_term::wezterm_windows() {
+            return Err("自帶終端開窗沒有開啟".into());
+        }
         GLOBAL.get().ok_or_else(|| "終端服務還沒準備好".to_string())?.stop_gui(gui_pid)
     }
     #[cfg(not(all(feature = "gui", not(test))))]
@@ -2598,7 +2635,7 @@ mod tests {
         let runner = FakeRunner {
             inner: Rc::new(fake_inner(vec![], "[]".into(), String::new())),
         };
-        let svc = TermService::fixed(
+        let mut svc = TermService::fixed(
             WezTermDir {
                 gui: "W/wezterm-gui.exe".into(),
                 cli: "W/wezterm.exe".into(),
@@ -2609,6 +2646,7 @@ mod tests {
             runner,
             fs,
         );
+        svc.set_hold_config(true); // 開關開著（ASN_TERM_WEZTERM=1）才帶 exit_behavior
         svc.ensure_config().unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), ISOLATED_CONFIG);
         assert!(ISOLATED_CONFIG.contains("exit_behavior = \"Hold\""), "程式結束後視窗留著（設計 1.4）");
@@ -2619,6 +2657,29 @@ mod tests {
         std::fs::write(&path, "return { kept = true }\n").unwrap();
         svc.ensure_config().unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "return { kept = true }\n", "已存在的隔離設定不可覆蓋");
+    }
+
+    #[test]
+    fn 開關關著_隔離設定檔照_0_1_113_寫空設定_已存在的不動不升級() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wezterm-term.lua");
+        let fs = FakeFs { files: Rc::new(RefCell::new(HashSet::new())) };
+        let runner = FakeRunner { inner: Rc::new(fake_inner(vec![], "[]".into(), String::new())) };
+        let svc = TermService::fixed(WezTermDir { gui: "W/wezterm-gui.exe".into(), cli: "W/wezterm.exe".into() }, path.clone(), dir.path().join("wezterm-terms.json"), "H".into(), runner, fs);
+        svc.ensure_config().unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "return {}\n", "0.1.113 寫的內容");
+        svc.ensure_config().unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "return {}\n", "關著不升級成 Hold");
+        // #611：第 1 階段寫的 Hold 版本（一個字不差）關著時改回空設定
+        std::fs::write(&path, ISOLATED_CONFIG).unwrap();
+        svc.ensure_config().unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "return {}\n", "是我們寫的 Hold 版本要改回");
+        // 不是我們寫的（多一個字、使用者改過）一律不動
+        for custom in ["return { exit_behavior = \"Hold\", font_size = 12 }\n", "return { exit_behavior = \"Hold\" }\n-- 我的", "return { exit_behavior = \"Hold\" }"] {
+            std::fs::write(&path, custom).unwrap();
+            svc.ensure_config().unwrap();
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), custom, "不是我們寫的不動：{custom}");
+        }
     }
 
     fn one_pane(workspace: &str, tab: &str, pane: u64, cursor_x: i64) -> String {
@@ -3335,7 +3396,8 @@ mod tests {
 
     #[test]
     fn asn_重開後_claude_視窗_對得上就認回來_帶回_kind_與_session_id() {
-        let rig = make(default_profiles(), vec![Some(1_000)]);
+        let mut rig = make(default_profiles(), vec![Some(1_000)]);
+        rig.svc.set_hold_config(true); // 開關開著才認領夥伴視窗的列
         *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-6", "ASN:6 小乙", 7, 1);
         write_store(&rig.store, 6, &row("6", "claude", "1000", r#","kind":"claude","session_id":"s9""#));
         rig.svc.reclaim().unwrap();
@@ -3344,11 +3406,27 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
         assert_eq!((v["terms"][0]["kind"].as_str(), v["terms"][0]["session_id"].as_str()), (Some("claude"), Some("s9")));
         // 建立時間對不上：不認、不關
-        let rig = make(default_profiles(), vec![Some(2_000)]);
+        let mut rig = make(default_profiles(), vec![Some(2_000)]);
+        rig.svc.set_hold_config(true);
         *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-6", "ASN:6", 7, 1);
         write_store(&rig.store, 6, &row("6", "claude", "1000", r#","kind":"claude""#));
         rig.svc.reclaim().unwrap();
         assert!(rig.svc.own_gui_windows().is_empty());
+        assert!(rig.runner.killed().is_empty());
+    }
+
+    #[test]
+    fn 開關關著_夥伴視窗的列不認領_留在檔案裡_不下_cli_pi_的列照舊認() {
+        let rig = make(default_profiles(), vec![Some(1_000), Some(1_000)]);
+        *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-6", "ASN:6 小乙", 7, 1);
+        let claude = row("5", "claude", "1000", r#","kind":"claude","session_id":"s9""#);
+        write_store(&rig.store, 7, &format!("{claude},{}", row("6", "pi", "1000", "")));
+        rig.svc.reclaim().unwrap();
+        assert_eq!(rig.svc.own_gui_windows().len(), 1, "只有 pi 的列被認回，claude 列不認領");
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
+        let ids: Vec<&str> = v["terms"].as_array().unwrap().iter().filter_map(|t| t["id"].as_str()).collect();
+        assert!(ids.contains(&"5"), "claude 列 parked＝留在檔案裡：{ids:?}");
+        assert_eq!(rig.svc.list().len(), 1, "pi 的列照舊認回來（0.1.113 的行為）");
         assert!(rig.runner.killed().is_empty());
     }
 
