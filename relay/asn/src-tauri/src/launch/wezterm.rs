@@ -67,6 +67,10 @@ pub trait Runner {
     /// 行程的建立時間（毫秒，查不到＝None）：結束行程前用來確認還是當初啟動的那一個，防程式編號被回收後誤殺別人
     fn started_ms(&self, pid: u32) -> Option<u64>;
     fn sleep(&self, d: Duration);
+    /// 這個程序（看畫面的 GUI）的視窗已經出現。預設＝false（測試、沒有畫面的建置）
+    fn window_up(&self, _pid: u32) -> bool {
+        false
+    }
 }
 
 /// 檔案檢查介面
@@ -151,6 +155,11 @@ impl Runner for RealRunner {
                 create_detached(program, args, env, NEW_PROCESS_GROUP)
             })
             .map_err(|e| format!("無法啟動 {}：{e}", program.display()))
+    }
+
+    #[cfg(all(windows, feature = "gui"))]
+    fn window_up(&self, pid: u32) -> bool {
+        !super::console::win::find_wez_windows(pid).is_empty()
     }
 
     fn started_ms(&self, pid: u32) -> Option<u64> {
