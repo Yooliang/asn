@@ -129,6 +129,34 @@ pub(crate) fn looks_like_claude(args: &[String]) -> bool {
     false
 }
 
+/// 外殼包著的 Claude（#622）：`powershell`／`pwsh` 的 `-Command`（或 `-c`）、`cmd` 的 `/c`（或 `/k`）後面，第一個指令是 claude（或 claude.exe 的完整路徑）。
+/// 只用來決定對照表記的種類，不改使用者的啟動設定；守門（要不要碰這個程序）仍用 [`looks_like_claude`]，不放寬。
+/// `cd x; claude` 不算：第一個指令不是 claude。
+pub(crate) fn wraps_claude(args: &[String]) -> bool {
+    let Some(first) = args.first() else { return false };
+    let flags: &[&str] = match exe_stem(first).as_str() {
+        "powershell" | "pwsh" => &["-command", "-c"],
+        "cmd" => &["/c", "/k"],
+        _ => return false,
+    };
+    let Some(at) = args.iter().skip(1).position(|a| flags.contains(&a.to_lowercase().as_str())) else { return false };
+    let script = args[at + 2..].join(" ");
+    first_command(&script).is_some_and(|c| exe_stem(&c) == "claude")
+}
+
+/// 一段指令字串的第一個指令：略過開頭的呼叫符號 `&`，引號包住的整段算一個（路徑可含空白），沒引號的到空白或分號為止
+fn first_command(script: &str) -> Option<String> {
+    let t = script.trim_start().trim_start_matches('&').trim_start();
+    let mut chars = t.chars();
+    let first = chars.next()?;
+    if first == '"' || first == '\'' {
+        let rest: String = chars.collect();
+        return rest.find(first).map(|i| rest[..i].to_string()).filter(|c| !c.is_empty());
+    }
+    let end = t.find(|c: char| c.is_whitespace() || c == ';').unwrap_or(t.len());
+    Some(t[..end].to_string()).filter(|c| !c.is_empty())
+}
+
 /// 目前模型：最後一個 `--model <值>` 或 `--model=<值>`；沒有就是 None（顯示「預設」）。
 pub(crate) fn current_model(args: &[String]) -> Option<String> {
     let rest = &args[program_len(args).min(args.len())..];
@@ -1023,6 +1051,28 @@ mod tests {
         assert!(!looks_like_claude(&v(&["node.exe", "server.js", "--claude"])), "旗標裡有 claude 不算");
         assert!(!looks_like_claude(&v(&["notepad.exe"])));
         assert!(!looks_like_claude(&[]));
+    }
+
+    #[test]
+    fn 外殼包著的_claude_只認第一個指令是_claude() {
+        // PowerShell 包裝（工作機 default 啟動設定的樣子）：-Command 後面一整串、或拆成多個參數
+        assert!(wraps_claude(&v(&["powershell", "-NoExit", "-Command", "claude --resume abc -n 小乙"])));
+        assert!(wraps_claude(&v(&["pwsh.exe", "-NoLogo", "-c", r"& 'C:\Users\a b\.local\bin\claude.exe' --model opus"])));
+        assert!(wraps_claude(&v(&["powershell.exe", "-Command", "claude", "--resume", "abc"])));
+        // cmd 包裝
+        assert!(wraps_claude(&v(&["cmd.exe", "/c", "claude --resume abc"])));
+        assert!(wraps_claude(&v(&["CMD", "/K", r#""C:\bin\claude.exe" -n x"#])));
+        // 第一個指令不是 claude：不算（cd x; claude、claude 只是參數、其他程式）
+        assert!(!wraps_claude(&v(&["powershell", "-NoExit", "-Command", "cd x; claude --resume abc"])));
+        assert!(!wraps_claude(&v(&["cmd.exe", "/c", "echo claude"])));
+        assert!(!wraps_claude(&v(&["powershell", "-Command", "codex resume t1"])));
+        assert!(!wraps_claude(&v(&["powershell", "-Command", "claudette run"])), "名字只是開頭相同不算");
+        // 沒有 -Command／/c、不是外殼、空的
+        assert!(!wraps_claude(&v(&["powershell", "-NoExit"])));
+        assert!(!wraps_claude(&v(&["claude.exe", "-c", "claude"])), "claude 本身的 -c 不是外殼");
+        assert!(!wraps_claude(&[]));
+        // 守門不放寬：包著的不算 looks_like_claude（切模型等守門仍不碰這種程序）
+        assert!(!looks_like_claude(&v(&["powershell", "-Command", "claude"])));
     }
 
     #[test]
