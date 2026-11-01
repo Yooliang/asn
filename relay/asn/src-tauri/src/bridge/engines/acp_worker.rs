@@ -687,6 +687,7 @@ impl Worker {
         }
         // 寫到不能寫的位置（不是敏感位置）：agy 已經被中止，接回同一段對話告訴它換位置，讓它自己做完。一輪最多一次，
         // 再犯就照一般的違規結案（#608）。agy 原生通道沒辦法只拒絕那一步，所以只能「中止＋接續」
+        let mut conv_note = String::new(); // 附在回覆後面讓寄件人知道的備註（中途換過位置、改開了新對話）
         if let Some(path) = r.as_ref().err().and_then(|e| e.redirect.clone()) {
             self.log(format!("寫到不能寫的位置（{path}）：接回同一段對話，請它改寫到工作資料夾"));
             let old = self.st.lock().unwrap().driver.take();
@@ -700,8 +701,9 @@ impl Worker {
             r = d.turn(text, cfg.turn_timeout_ms, cfg.turn_max_ms).await;
             remember(&d);
             self.log(if r.is_ok() { "換位置後完成" } else { "換位置後仍然失敗" });
+            // 絆線是事後才殺：被擋的那一次可能已經寫進去了，照實告訴寄件人
+            conv_note.push_str(&format!("\n\n（收發室）中途有一次寫到不允許的位置：{path}，已中止並請它改寫到工作資料夾；那個位置可能已經留下檔案。"));
         }
-        let mut conv_note = String::new(); // 這次改開了新對話：附在回覆後面讓寄件人知道
         // 登入失效（401）：長時間跑的驅動憑證到期，換一個新的驅動（重新讀登入）把同一封信再試一次；重開後還失效才報「需要登入」。
         // 每個工作者一小時最多自動重開一次，不無限重試（#517）
         if r.as_ref().err().map(|e| e.code == "auth").unwrap_or(false) && self.take_auth_retry() {
@@ -762,7 +764,7 @@ impl Worker {
                     s.handover = prev_handover;
                 } else {
                     self.log(format!("已丟掉舊對話 {dropped}，改用新對話"));
-                    conv_note = format!("\n\n（備註：{} 存著的舊對話壞了，這次改開新對話，它不記得之前聊過的內容。）", cfg.name);
+                    conv_note.push_str(&format!("\n\n（備註：{} 存著的舊對話壞了，這次改開新對話，它不記得之前聊過的內容。）", cfg.name));
                     // 給擁有者的通知不帶內部對話編號（編號只寫日誌）
                     self.notice_owners("conv-reset", &format!("{} 存著的舊對話壞了（重開後仍然登入失效），已改開新對話；它不記得之前聊過的內容。", cfg.name), Some(job));
                 }

@@ -567,6 +567,8 @@ async fn agy_資料夾外寫檔被絆線中止_接回同一段對話請它換位
     // 假 agy 回「收到：<送給它的話>」：送的是換位置的提醒，而且是同一段對話（第 2 輪）
     assert!(b.contains("收到：（收發室提醒）這個位置不能寫") && b.contains("[第2輪"), "{b}");
     assert!(!b.contains("想做不被允許的事"), "{b}");
+    // 被擋的那一次可能已經寫進去了：回覆後面照實附一行
+    assert!(b.contains(&format!("（收發室）中途有一次寫到不允許的位置：{}，已中止並請它改寫到工作資料夾；那個位置可能已經留下檔案。", target.display())), "{b}");
     assert!(h.log_text().contains("接回同一段對話"), "{}", h.log_text());
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     assert!(!target.exists());

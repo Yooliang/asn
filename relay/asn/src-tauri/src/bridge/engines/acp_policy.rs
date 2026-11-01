@@ -525,7 +525,8 @@ pub struct WorkerError {
     pub spawn_failed: bool,
     pub summary: Option<String>,
     /// 這一輪失敗前已經有工具步驟（跑過指令、改過檔…）：不能把整封信重送，會做第二次
-    pub had_steps: bool,    /// 寫到不能寫的位置、但不是敏感位置（#608）：帶那個路徑，上層接回同一段對話請它改寫到工作資料夾，一輪最多一次
+    pub had_steps: bool,
+    /// 寫到不能寫的位置、但不是敏感位置（#608）：帶那個路徑，上層接回同一段對話請它改寫到工作資料夾，一輪最多一次
     pub redirect: Option<String>,
 }
 impl WorkerError {
