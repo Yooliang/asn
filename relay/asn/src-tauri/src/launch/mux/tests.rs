@@ -205,7 +205,8 @@ fn 別的_ASN_拿著啟動鎖_等它_過期的鎖會清掉() {
 fn 停之前數得出有幾個窗格_停只停_pid_檔記的那一個() {
     let d = tempfile::tempdir().unwrap();
     let mut r = Fake::new();
-    r.list_json = r#"[{"pane_id":1},{"pane_id":2}]"#.into();
+    // 窗格 0（workspace default，Hold 留著的畫面）不算夥伴
+    r.list_json = r#"[{"pane_id":0,"workspace":"default"},{"pane_id":1,"workspace":"asn-1"},{"pane_id":2,"workspace":"asn-2"}]"#.into();
     r.alive_after.set(Some(0));
     let m = mux(&r, d.path());
     assert_eq!(m.pane_count(), Ok(2));
@@ -415,4 +416,18 @@ fn 金鑰類變數的提示_只列名字_最多五個() {
     let many: Vec<String> = (0..8).map(|i| format!("CLAUDE_X{i}")).collect();
     let n = secret_notice(&many).unwrap();
     assert!(n.contains("CLAUDE_X4、…）") && !n.contains("CLAUDE_X5"), "{n}");
+}
+
+#[test]
+fn 起好之後關掉_hold_留著的窗格_0() {
+    let d = tempfile::tempdir().unwrap();
+    let r = Fake::new();
+    assert_eq!(mux(&r, d.path()).ensure(), Ok(Ensure::Started { pid: 4000 }));
+    let kills: Vec<_> = r.cli_calls().into_iter().filter(|a| a.iter().any(|x| x == "kill-pane")).collect();
+    assert_eq!(kills, vec![vec!["cli", "--no-auto-start", "kill-pane", "--pane-id", "0"].into_iter().map(String::from).collect::<Vec<_>>()]);
+    // 沿用既有的 mux：不關任何窗格
+    let r2 = Fake::new();
+    r2.alive_after.set(Some(0));
+    assert_eq!(mux(&r2, d.path()).ensure(), Ok(Ensure::Reused));
+    assert!(r2.cli_calls().iter().all(|a| !a.iter().any(|x| x == "kill-pane")));
 }

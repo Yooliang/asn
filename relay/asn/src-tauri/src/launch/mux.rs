@@ -131,7 +131,9 @@ impl Mux<'_> {
             return Err("終端服務沒有在跑".into());
         }
         let v: serde_json::Value = serde_json::from_str(&o.stdout).map_err(|_| "終端服務回的清單看不懂".to_string())?;
-        Ok(v.as_array().map(|a| a.len()).unwrap_or(0))
+        // 只數夥伴的窗格（workspace asn-N）。mux.lua 有 exit_behavior = "Hold"，窗格 0 的 cmd 結束後畫面會留著（workspace default），
+        // 不是夥伴，不算（B2c 實測）
+        Ok(v.as_array().map(|a| a.iter().filter(|p| p.get("workspace").and_then(|w| w.as_str()).is_some_and(|w| w.starts_with("asn-"))).count()).unwrap_or(0))
     }
 
     /// pid 檔記的 mux 還活著（建立時間對得上，防程式編號被回收）
@@ -190,6 +192,8 @@ impl Mux<'_> {
         };
         let _ = std::fs::write(&self.paths.pid, format!("{pid} {at}"));
         if self.wait_alive(START_WAIT) {
+            // 窗格 0 的 cmd 已經結束，但 Hold 讓它的畫面留著：關掉（剛起的 mux 只有這一個窗格，不會關到夥伴；失敗也無妨）
+            let _ = self.cli(&["kill-pane", "--pane-id", "0"]);
             return Ok(Ensure::Started { pid });
         }
         // 起不來：只清自己剛起的那一個（建立時間對得上才動）
