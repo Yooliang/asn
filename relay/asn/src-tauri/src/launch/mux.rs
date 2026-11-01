@@ -62,7 +62,9 @@ pub fn config_text(sock: &Path) -> String {
     while s.contains(&format!("]{eq}]")) {
         eq.push('=');
     }
-    format!("-- ASN 產生的終端服務設定（只設連線檔位置），請勿手改\nreturn {{ exit_behavior = \"Hold\", unix_domains = {{ {{ name = 'asn', socket_path = [{eq}[{s}]{eq}] }} }} }}\n")
+    // no_serve_automatically：`wezterm connect` 不吃 --no-auto-start，連不上時預設會自己起一個 mux；
+    // 看畫面的 GUI 若這樣起出第二個 mux，unview 結束 GUI 時還會連它的窗格一起砍掉（#615 審查）
+    format!("-- ASN 產生的終端服務設定（只設連線檔位置），請勿手改\nreturn {{ exit_behavior = \"Hold\", unix_domains = {{ {{ name = 'asn', socket_path = [{eq}[{s}]{eq}], no_serve_automatically = true }} }} }}\n")
 }
 
 /// 下 cli 的程序的環境：只有白名單（`child_env` 的結果）加上 socket 位置

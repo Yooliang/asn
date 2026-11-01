@@ -808,9 +808,10 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         if !snap.window.mux {
             return Err("這個視窗不在共用的終端服務裡，沒有可以另外開的畫面".into());
         }
+        // 「有沒有在看」與「登記正在開」在同一次持鎖裡做完：兩個請求同時進來時，只有一個會去開 GUI（#615 審查）
         let front = {
             let mut g = self.inner.lock().unwrap();
-            match g.viewers.iter().find(|v| v.id == id).cloned() {
+            let front = match g.viewers.iter().find(|v| v.id == id).cloned() {
                 Some(v) if v.starting => return Ok(()),
                 Some(v) if self.runner.started_ms(v.pid) == Some(v.started_ms) => Some(v.pid),
                 Some(_) => {
@@ -819,13 +820,16 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                     None
                 }
                 None => None,
+            };
+            if front.is_none() {
+                g.viewers.push(Viewer { id: id.to_string(), pid: 0, started_ms: 0, starting: true });
             }
+            front
         };
         if let Some(pid) = front {
             viewer_to_front(pid);
             return Ok(());
         }
-        self.inner.lock().unwrap().viewers.push(Viewer { id: id.to_string(), pid: 0, started_ms: 0, starting: true });
         let r = self.start_viewer(id);
         let mut g = self.inner.lock().unwrap();
         g.viewers.retain(|v| v.id != id);
@@ -845,8 +849,9 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         }
         let dir = self.dir()?;
         let m = self.mux_handle(&dir, BTreeMap::new())?;
-        // 設定檔是起 mux 時寫的；被刪了就補回（內容只有 socket 位置），不然 GUI 會讀到預設設定、找不到 asn 這個連線
-        if !m.paths.config.is_file() {
+        // 設定檔是起 mux 時寫的；被刪了或是舊版寫的（沒有 no_serve_automatically）就補成現在的內容，
+        // 不然 GUI 會讀到預設設定、找不到 asn 這個連線，或在 mux 掛掉時自己起一個
+        if std::fs::read_to_string(&m.paths.config).ok().as_deref() != Some(super::mux::config_text(&m.paths.sock).as_str()) {
             std::fs::write(&m.paths.config, super::mux::config_text(&m.paths.sock)).map_err(|e| format!("寫入終端服務設定失敗：{e}"))?;
         }
         let args = view_args(&m.paths.config, &workspace);
@@ -4511,6 +4516,26 @@ mod tests {
             assert!(rig.svc.viewing(&id));
             assert!(rig.runner.killed().is_empty());
             assert_eq!(kill_panes(&rig.runner), 0);
+        }
+
+        #[test]
+        fn 看畫面_舊版設定檔補成現在的內容_連不上時不自己起_mux() {
+            let (rig, paths) = mux_rig();
+            let id = open_partner(&rig);
+            std::fs::write(&paths.config, "return { unix_domains = { { name = 'asn', socket_path = [[x]] } } }").unwrap();
+            rig.svc.view(&id).unwrap();
+            let cfg = std::fs::read_to_string(&paths.config).unwrap();
+            assert_eq!(cfg, mux::config_text(&paths.sock));
+            assert!(cfg.contains("no_serve_automatically = true"), "wezterm connect 不吃 --no-auto-start，要靠設定擋");
+        }
+
+        #[test]
+        fn 守門_看畫面的檢查與登記正在開在同一次持鎖裡() {
+            let src = include_str!("term.rs").replace("\r\n", "\n");
+            let body = &src[src.find("    pub fn view(&self, id: &str) -> Result<(), String> {").unwrap()..src.find("    fn start_viewer(&self, id: &str)").unwrap()];
+            let locked = &body[body.find("let mut g = self.inner.lock().unwrap();").unwrap()..body.find("if let Some(pid) = front {").unwrap()];
+            assert!(locked.contains("starting: true"), "登記正在開要在同一次持鎖裡，不然兩個請求會各開一個 GUI");
+            assert_eq!(body.matches("starting: true").count(), 1);
         }
 
         #[test]

@@ -216,7 +216,7 @@ fn 停之前數得出有幾個窗格_停只停_pid_檔記的那一個() {
 
 #[test]
 fn lua_長字串避開收尾記號() {
-    assert_eq!(config_text(Path::new(r"C:\a\sock")).lines().nth(1).unwrap(), r#"return { exit_behavior = "Hold", unix_domains = { { name = 'asn', socket_path = [[C:\a\sock]] } } }"#);
+    assert_eq!(config_text(Path::new(r"C:\a\sock")).lines().nth(1).unwrap(), r#"return { exit_behavior = "Hold", unix_domains = { { name = 'asn', socket_path = [[C:\a\sock]], no_serve_automatically = true } } }"#, "看畫面的 GUI 連不上時不能自己起 mux");
     let t = config_text(Path::new(r"C:\a]]b\sock"));
     assert!(t.contains(r"[=[C:\a]]b\sock]=]"), "{t}");
 }
