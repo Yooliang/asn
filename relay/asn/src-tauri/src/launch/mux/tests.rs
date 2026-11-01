@@ -390,3 +390,29 @@ fn 讀登錄檔使用者變數名字_不當掉_名字裡沒有等號() {
     let n = user_env_names();
     assert!(n.iter().all(|s| !s.is_empty() && !s.contains('=')), "{n:?}");
 }
+
+#[test]
+fn 撞名只看窗格自己的變數_跟共用白名單一樣的和_path_不算() {
+    let base: BTreeMap<String, String> = [("PATH".to_string(), "C:/bin".to_string()), ("USERPROFILE".to_string(), "C:/u".to_string())].into();
+    let mut pane = base.clone();
+    pane.insert("ASN_PI_NAME".into(), "小皮".into());
+    pane.insert("PATH".into(), "D:/extra;C:/bin".into());
+    let names: Vec<String> = ["Path", "asn_pi_name", "UserProfile", "Temp"].iter().map(|s| s.to_string()).collect();
+    assert_eq!(pane_collisions(&names, &pane, &base), ["asn_pi_name"], "PATH 不算；跟白名單一樣的 USERPROFILE 不是這個窗格自己的");
+    assert!(pane_collisions(&names, &base, &base).is_empty(), "沒有逐窗格的變數就不會撞");
+    assert!(pane_collisions(&[], &pane, &base).is_empty());
+}
+
+#[test]
+fn 金鑰類變數的提示_只列名字_最多五個() {
+    assert_eq!(secret_notice(&[]), None);
+    assert_eq!(secret_notice(&["Path".to_string(), "Temp".to_string()]), None, "一般變數不提示");
+    let one = secret_notice(&["Path".to_string(), "ASN_RELAY_KEY".to_string()]).unwrap();
+    assert_eq!(one, "使用者環境變數裡有看起來像金鑰的變數（ASN_RELAY_KEY），會被帶進每個夥伴的終端；建議移到別處");
+    assert!(!one.contains("Path"));
+    let two = secret_notice(&["ASN_RELAY_KEY".to_string(), "claude_code_x".to_string()]).unwrap();
+    assert!(two.contains("（ASN_RELAY_KEY、claude_code_x）"), "{two}");
+    let many: Vec<String> = (0..8).map(|i| format!("CLAUDE_X{i}")).collect();
+    let n = secret_notice(&many).unwrap();
+    assert!(n.contains("CLAUDE_X4、…）") && !n.contains("CLAUDE_X5"), "{n}");
+}

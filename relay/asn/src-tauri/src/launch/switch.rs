@@ -363,6 +363,14 @@ pub(crate) trait Os {
     fn stop_wez(&self, _gui_pid: u32) -> Result<(), String> {
         Err("這台沒有 ASN 自帶的終端".into())
     }
+    /// B2c：這個程序所在的共用終端服務（mux）裡的夥伴窗格，回對照表的終端編號。預設沒有，現有的假 Os 不用改
+    fn mux_session_of(&self, _pid: u32) -> Option<String> {
+        None
+    }
+    /// B2c：關共用 mux 裡的夥伴窗格（只關那個窗格＋收掉看它的 GUI，絕不動 mux 程序）
+    fn stop_mux_session(&self, _id: &str) -> Result<(), String> {
+        Err("這台沒有 ASN 的共用終端服務".into())
+    }
     fn terminate(&self, pid: u32) -> Result<(), String>;
     fn own_pid(&self) -> u32 {
         std::process::id()
@@ -535,6 +543,16 @@ pub(crate) fn asn_wez_of(os: &dyn Os, table: &[Proc], pid: u32) -> Option<u32> {
     (os.started_ms(gui) == Some(was)).then_some(gui)
 }
 
+/// 共用終端服務（B2）的程序名
+pub(crate) const MUX_SERVER: &str = "wezterm-mux-server.exe";
+
+/// B2c：這個程序往上 8 層內的 wezterm-mux-server（編號, 現在的建立時間）；查不到建立時間＝None。
+/// 這只說「它在某個 mux 底下」；是不是 ASN 開窗格時記的那個 mux，由對照表（term::partner_in_mux）核對編號＋建立時間
+pub(crate) fn mux_ancestor(table: &[Proc], pid: u32, started: &dyn Fn(u32) -> Option<u64>) -> Option<(u32, u64)> {
+    let mux = ancestors(table, pid).into_iter().take(8).find(|a| table.iter().any(|p| p.pid == *a && p.name == MUX_SERVER))?;
+    Some((mux, started(mux)?))
+}
+
 /// WezTerm 每個窗格的虛擬主控台宿主（不算「別的程序」）
 const WEZ_PANE_HOSTS: &[&str] = &["openconsole.exe", "conhost.exe"];
 
@@ -590,6 +608,8 @@ pub(crate) fn fail(stage: &str, reason: impl Into<String>, manual: &str, closed:
 pub(crate) fn close_session(os: &dyn Os, t: &Timing, target_pid: u32, allowed: &[u32], host: Option<u32>, polite: bool) -> Result<(), String> {
     // 要在結束之前找：claude 一結束，程序表就找不到它往上的 GUI 了
     let wez = asn_wez_of(os, &os.processes(), target_pid);
+    // B2c：開在共用 mux 裡的（沒有自己的 GUI）：結束後改關它的窗格。mux 是 claude 的祖先，kill_set 本來就不會動它
+    let mux_sess = if wez.is_none() { os.mux_session_of(target_pid) } else { None };
     let polite = polite && wez.is_none();
     let sent = polite && os.close_window(target_pid);
     if sent && wait_until(os, t.close_grace_ms, t.poll_ms, || !os.alive(target_pid)) {
@@ -618,6 +638,11 @@ pub(crate) fn close_session(os: &dyn Os, t: &Timing, target_pid: u32, allowed: &
             elog!("關夥伴視窗：程式已結束；自帶終端的視窗（{gui}）裡還有別的程序，不收");
         } else if let Err(e) = os.stop_wez(gui) {
             elog!("關夥伴視窗：程式已結束，但收不掉自帶終端的視窗（{gui}）：{e}");
+        }
+    }
+    if let Some(id) = mux_sess {
+        if let Err(e) = os.stop_mux_session(&id) {
+            elog!("關夥伴視窗：程式已結束，但關不掉共用終端裡的窗格（{id}）：{e}");
         }
     }
     Ok(())
@@ -744,6 +769,15 @@ impl Os for RealOs {
     }
     fn stop_wez(&self, gui_pid: u32) -> Result<(), String> {
         super::term::stop_own_gui(gui_pid)
+    }
+    fn mux_session_of(&self, pid: u32) -> Option<String> {
+        // 名字從 Claude 的工作階段記錄來（跟名單切前景／背景找程序是同一份）；程序要真的在 mux 底下、而且是對照表記的那個 mux
+        let name = console::session_name_of(&console::read_sessions(&console::sessions_dir()?), pid)?;
+        let mux = mux_ancestor(&winapi::process_table(), pid, &|p| crate::heartbeat::process_started_ms(p))?;
+        super::term::mux_partner_in(mux, &name)
+    }
+    fn stop_mux_session(&self, id: &str) -> Result<(), String> {
+        super::term::stop_mux_partner(id)
     }
     fn terminate(&self, pid: u32) -> Result<(), String> {
         winapi::terminate(pid)
@@ -1383,6 +1417,87 @@ mod tests {
         f.stop_result = Err("這個程式編號現在是別的程序".into());
         let allowed = kill_set_with(&f.table, 502, None, 300, &|_| None);
         assert!(close_session(&f, &quick(), 502, &allowed, None, false).is_ok(), "claude 已經結束，視窗停在最後畫面");
+    }
+
+    // ---- B2c：開在共用終端服務（mux）裡的夥伴視窗
+
+    /// 程序樹：explorer(100) → asn(300)；mux(700) → openconsole(701)；mux(700) → claude(702) → node(703)
+    struct MuxFake {
+        table: Vec<Proc>,
+        alive: RefCell<HashSet<u32>>,
+        sess: Option<String>,
+        stop_result: Result<(), String>,
+        trace: RefCell<Vec<String>>,
+    }
+    impl Os for MuxFake {
+        fn cmdline(&self, _pid: u32) -> Option<String> {
+            None
+        }
+        fn processes(&self) -> Vec<Proc> {
+            self.table.clone()
+        }
+        fn alive(&self, pid: u32) -> bool {
+            self.alive.borrow().contains(&pid)
+        }
+        fn close_window(&self, pid: u32) -> bool {
+            self.trace.borrow_mut().push(format!("close_window:{pid}"));
+            false
+        }
+        fn stop_wez(&self, gui: u32) -> Result<(), String> {
+            self.trace.borrow_mut().push(format!("stop_wez:{gui}"));
+            Ok(())
+        }
+        fn mux_session_of(&self, pid: u32) -> Option<String> {
+            if pid == 702 { self.sess.clone() } else { None }
+        }
+        fn stop_mux_session(&self, id: &str) -> Result<(), String> {
+            self.trace.borrow_mut().push(format!("stop_mux:{id}"));
+            self.stop_result.clone()
+        }
+        fn terminate(&self, pid: u32) -> Result<(), String> {
+            self.trace.borrow_mut().push(format!("terminate:{pid}"));
+            self.alive.borrow_mut().remove(&pid);
+            Ok(())
+        }
+        fn own_pid(&self) -> u32 {
+            300
+        }
+        fn sleep(&self, _ms: u64) {}
+    }
+    fn mux_fake(sess: Option<&str>) -> MuxFake {
+        let table = vec![p(100, 1, "explorer.exe"), p(300, 100, "asn.exe"), p(700, 100, "wezterm-mux-server.exe"), p(701, 700, "openconsole.exe"), p(702, 700, "claude.exe"), p(703, 702, "node.exe")];
+        MuxFake { table, alive: RefCell::new([100, 300, 700, 701, 702, 703].into_iter().collect()), sess: sess.map(String::from), stop_result: Ok(()), trace: RefCell::new(vec![]) }
+    }
+
+    #[test]
+    fn 找_mux_祖先_往上八層內_要查得到建立時間() {
+        let f = mux_fake(None);
+        assert_eq!(mux_ancestor(&f.table, 702, &|p| Some(u64::from(p) * 10)), Some((700, 7000)));
+        assert_eq!(mux_ancestor(&f.table, 703, &|p| Some(u64::from(p) * 10)), Some((700, 7000)), "子程序也一樣");
+        assert_eq!(mux_ancestor(&f.table, 702, &|_| None), None, "查不到建立時間就不認");
+        assert_eq!(mux_ancestor(&f.table, 300, &|_| Some(1)), None, "ASN 自己不在任何 mux 底下");
+    }
+
+    #[test]
+    fn 關閉共用終端裡的視窗_先結束_claude_那棵_再關窗格_不碰_mux_與自帶_gui() {
+        let f = mux_fake(Some("7"));
+        let allowed = kill_set_with(&f.table, 702, None, 300, &|_| None);
+        assert_eq!(allowed, vec![703, 702], "mux 是 claude 的祖先，不在可結束的清單裡");
+        close_session(&f, &quick(), 702, &allowed, None, false).unwrap();
+        assert_eq!(*f.trace.borrow(), vec!["terminate:703".to_string(), "terminate:702".into(), "stop_mux:7".into()], "先結束 claude，再關那一個窗格");
+        assert!(f.alive(700), "mux 還活著");
+    }
+
+    #[test]
+    fn 關閉共用終端裡的視窗_認不出窗格或關窗格失敗_不算關閉失敗() {
+        let f = mux_fake(None);
+        let allowed = kill_set_with(&f.table, 702, None, 300, &|_| None);
+        close_session(&f, &quick(), 702, &allowed, None, false).unwrap();
+        assert_eq!(*f.trace.borrow(), vec!["terminate:703".to_string(), "terminate:702".into()], "對照表認不出這個窗格：不下任何關窗格指令");
+        let mut f = mux_fake(Some("7"));
+        f.stop_result = Err("沒有這個終端".into());
+        let allowed = kill_set_with(&f.table, 702, None, 300, &|_| None);
+        assert!(close_session(&f, &quick(), 702, &allowed, None, false).is_ok(), "claude 已經結束，窗格停在最後畫面");
     }
 
     #[test]

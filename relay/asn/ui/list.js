@@ -40,6 +40,7 @@ import { MODEL_CATALOG, cliInstalled, defaultPartnerName, injectPendingGroups, m
 import { PI_SETUP_TEXT, piSetupError, piSetupView } from './lib/pi-setup.mjs'
 import { CONNECT_TEXT } from './lib/connect-tools.mjs'
 import { QUOTA_HOOK_TEXT, quotaHookError, quotaHookView } from './lib/quota-hook.mjs'
+import { loadEnvNotice } from './lib/env-notice.mjs'
 import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
 import { BUDDY_CONSOLE_LABEL, CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, consoleReq, engineForProfile, launchDeviceRows, localProfileEngine, launchDisableReason, remoteModelRows, showDisplayModeChoice, foregroundOnlyProfile, withTimeout } from './lib/partner-launch-ui.mjs'
 import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
@@ -650,6 +651,10 @@ function openPartnerOp(it) {
   Object.assign(opDlg, { open: true, op: it.key, friend: f, item: it })
 }
 // 封存／取消封存：記在帳號層（後台），立刻重新拉名單；結果用名單上方的一行字說明
+// 使用者環境變數裡有看起來像金鑰的變數時的提醒（共用終端服務開著才有；只含變數名字）。查不到、舊版後端沒有這個命令都當沒有
+const envNotice = ref('')
+void loadEnvNotice(transport).then(t => { envNotice.value = t })
+setInterval(() => void loadEnvNotice(transport).then(t => { envNotice.value = t }), 10 * 60_000)
 const archiveNote = ref('')
 let archiveNoteTimer = null
 async function setArchived(f, archived) {
@@ -776,6 +781,7 @@ async function toggleBuddyConsole() {
   try {
     const r = await transport.partnerConsoleSet({ ...consoleReq(c, eng), visible: nextVis })
     if (r?.ok) buddyConsole.visible = Boolean(r.visible)
+    else if (r?.notify && r.reason) showLaunchNotice({ title: '開不了終端畫面', body: String(r.reason) })   // 共用終端服務的畫面開不起來（桌面沒人登入…）：夥伴照常在背景跑
   } catch (e) { console.info('[ASN] 主控台切換', e.message) }
   closeBuddyMenu()
 }
@@ -1689,7 +1695,7 @@ const app = createApp({
       adopt, adoptLoad, adoptClose, adoptDo, adoptRelease, adoptUnlockAsk, adoptUnlockCancel, adoptUnlockConfirm, UNLOCK_TEXT,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
-      opDlg, closeOpDlg, buddyOpItems, openPartnerOp, archiveNote, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
+      opDlg, closeOpDlg, buddyOpItems, openPartnerOp, archiveNote, envNotice, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddySlots, buddyModelItem, buddyMenuOpenChat, toggleBuddyConsole,
       buddyModel, buddyModelOp, buddyModelLabel, buddyModelWhy, buddyMenuView, buddyWhyOf, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,
       launchToolRows, launchPrefs, launchCwdText, saveLaunchPrefs, setLaunchCwdText,
