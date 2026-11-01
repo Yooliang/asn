@@ -1,7 +1,9 @@
 //! 在 Windows 上安裝官方 Claude Code：取代過去的「`irm 網址 | iex`」。
 //! 做的事和官方安裝腳本一樣（下載版本號與清單、下載執行檔、比對 sha256、執行 `claude.exe install`），
-//! 但多兩道門：下載完把檔案鎖成「別人不能改、不能刪」，鎖著重算一次雜湊、驗數位簽章、再直接執行同一個檔案
+//! 但多三道門：下載完把檔案鎖成「別人不能改、不能刪」，鎖著重算一次雜湊、驗數位簽章、再直接執行同一個檔案
 //! （不搬、不重開，驗過的就是跑的）；簽署者必須完全等於 `Anthropic, PBC`。任何一步不通過就刪檔、不執行。
+//! 版本從 `stable` 頻道取，執行時把驗過的確切版本號交給安裝程式（不只寫頻道名），裝完再驗裝出來的 `claude.exe`
+//! （簽章有效、簽署者相符、`--version` 等於驗過的版本號）才算成功。
 //! 全程只連 `downloads.claude.ai`，不跟轉址。
 
 use super::authenticode::SignatureCheck;
@@ -15,16 +17,19 @@ use std::time::Duration;
 pub const RELEASE_BASE: &str = "https://downloads.claude.ai/claude-code-releases";
 /// 簽署者必須完全等於這個名稱
 pub const EXPECTED_SIGNER: &str = "Anthropic, PBC";
-/// 交給 `claude.exe install` 的頻道
+/// 取版本號的頻道（新電腦的自動更新也跟著這個頻道）
 const CHANNEL: &str = "stable";
 const MAX_VERSION_BYTES: u64 = 64;
 const MAX_MANIFEST_BYTES: u64 = 512 * 1024;
 const MAX_BINARY_BYTES: u64 = 800 * 1024 * 1024;
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(300);
+const VERSION_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// 執行安裝程式（逾時要殺掉整棵程序樹並回錯）。結束碼 `None` 不會出現：逾時一律回 `Err`
 pub trait Exec {
     fn run_installer(&self, exe: &Path, args: &[&str], cwd: &Path, timeout: Duration) -> Result<i32, String>;
+    /// 執行 `exe --version` 取標準輸出（逾時殺掉並回錯）
+    fn version_output(&self, exe: &Path, timeout: Duration) -> Result<String, String>;
 }
 
 pub struct Deps<'a> {
@@ -52,8 +57,8 @@ pub fn platform() -> Result<&'static str, String> {
     }
 }
 
-fn url_latest() -> String {
-    format!("{RELEASE_BASE}/latest")
+fn url_channel() -> String {
+    format!("{RELEASE_BASE}/{CHANNEL}")
 }
 fn url_manifest(version: &str) -> String {
     format!("{RELEASE_BASE}/{version}/manifest.json")
@@ -155,7 +160,7 @@ pub fn install(d: &Deps, work: &Path, platform: &str, final_exe: &Path) -> Resul
     std::fs::create_dir_all(work).map_err(|e| format!("無法建立下載資料夾：{e}"))?;
     clean_stale(work);
 
-    let version = d.fetch.get_text(&url_latest(), MAX_VERSION_BYTES)?.trim().to_string();
+    let version = d.fetch.get_text(&url_channel(), MAX_VERSION_BYTES)?.trim().to_string();
     if !valid_version(&version) {
         return Err("官方回的版本號格式不對，已放棄安裝".to_string());
     }
@@ -199,18 +204,36 @@ pub fn install(d: &Deps, work: &Path, platform: &str, final_exe: &Path) -> Resul
             return Err(e);
         }
     };
-    let outcome = verify_then_run(d, &guard, &path, &want_sum, work);
+    let outcome = verify_then_run(d, &guard, &path, &want_sum, &version, work);
     drop(guard);
     remove_with_retry(&path);
     outcome?;
-
-    if !final_exe.exists() {
-        return Err("安裝程式說完成了，但找不到安裝好的 claude.exe".to_string());
-    }
+    verify_installed(d, final_exe, &version)?;
     Ok(format!("已安裝 Claude Code {version}。"))
 }
 
-fn verify_then_run(d: &Deps, guard: &File, path: &Path, want_sum: &str, work: &Path) -> Result<(), String> {
+/// 裝出來的 `claude.exe` 也要驗：存在、簽章有效且簽署者相符、`--version` 的版本等於我們驗過的那一版
+fn verify_installed(d: &Deps, final_exe: &Path, version: &str) -> Result<(), String> {
+    if !final_exe.exists() {
+        return Err("安裝程式說完成了，但找不到安裝好的 claude.exe".to_string());
+    }
+    let who = d.sig.signer(final_exe).map_err(|e| format!("裝好的 claude.exe 數位簽章沒通過：{e}"))?;
+    if who != EXPECTED_SIGNER {
+        return Err("裝好的 claude.exe 簽署者不是 Anthropic, PBC".to_string());
+    }
+    let out = d.exec.version_output(final_exe, VERSION_TIMEOUT).map_err(|e| format!("問不出裝好的 claude.exe 的版本：{e}"))?;
+    if !version_matches(&out, version) {
+        return Err(format!("裝好的 claude.exe 版本和驗證過的 {version} 不一致，沒有算成功"));
+    }
+    Ok(())
+}
+
+/// `--version` 的輸出第一個字必須完全等於版本號（例如 `2.1.309 (Claude Code)`）
+fn version_matches(output: &str, version: &str) -> bool {
+    output.split_whitespace().next() == Some(version)
+}
+
+fn verify_then_run(d: &Deps, guard: &File, path: &Path, want_sum: &str, version: &str, work: &Path) -> Result<(), String> {
     // 鎖住之後再算一次：之前到鎖住之間若被換掉，這裡抓得到
     if hash_open_file(guard)? != want_sum {
         return Err("下載的檔案在驗證前被改動，已放棄安裝".to_string());
@@ -219,7 +242,8 @@ fn verify_then_run(d: &Deps, guard: &File, path: &Path, want_sum: &str, work: &P
     if who != EXPECTED_SIGNER {
         return Err("Claude Code 的簽署者不是 Anthropic, PBC，已放棄安裝".to_string());
     }
-    let code = d.exec.run_installer(path, &["install", CHANNEL], work, INSTALL_TIMEOUT)?;
+    // 把驗過的確切版本號交給安裝程式：取版本號之後頻道剛好更新，裝的也還是驗過的這一版
+    let code = d.exec.run_installer(path, &["install", version], work, INSTALL_TIMEOUT)?;
     if code != 0 {
         return Err(format!("官方安裝程式回報失敗（結束碼 {code}）"));
     }
@@ -241,6 +265,10 @@ pub fn install_here() -> Result<String, String> {
 pub struct RealExec;
 
 impl Exec for RealExec {
+    fn version_output(&self, exe: &Path, timeout: Duration) -> Result<String, String> {
+        Self::version_impl(exe, timeout)
+    }
+
     fn run_installer(&self, exe: &Path, args: &[&str], cwd: &Path, timeout: Duration) -> Result<i32, String> {
         use crate::nowin::NoWindow;
         use std::process::{Command, Stdio};
@@ -270,6 +298,42 @@ impl Exec for RealExec {
             }
             std::thread::sleep(Duration::from_millis(200));
         }
+    }
+}
+
+impl RealExec {
+    fn version_impl(exe: &Path, timeout: Duration) -> Result<String, String> {
+        use crate::nowin::NoWindow;
+        use std::process::{Command, Stdio};
+        let mut child = Command::new(exe)
+            .no_window()
+            .arg("--version")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("無法執行 --version：{e}"))?;
+        let pid = child.id();
+        let start = std::time::Instant::now();
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) => {}
+                Err(e) => return Err(format!("等不到 --version 結束：{e}")),
+            }
+            if start.elapsed() >= timeout {
+                let _ = Command::new("taskkill").no_window().args(["/PID", &pid.to_string(), "/T", "/F"]).output();
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("--version 跑太久，已結束它".to_string());
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let mut out = String::new();
+        if let Some(so) = child.stdout.take() {
+            let _ = so.take(4096).read_to_string(&mut out);
+        }
+        Ok(out)
     }
 }
 
@@ -310,11 +374,19 @@ mod tests {
 
     struct FakeSig {
         result: Result<String, String>,
+        /// 驗「裝好的 claude.exe」時另外用的結果（None＝跟 result 一樣）
+        final_result: Option<Result<String, String>>,
+        final_exe: PathBuf,
         seen: RefCell<Vec<PathBuf>>,
     }
     impl SignatureCheck for FakeSig {
         fn signer(&self, path: &Path) -> Result<String, String> {
             self.seen.borrow_mut().push(path.to_path_buf());
+            if path == self.final_exe {
+                if let Some(r) = &self.final_result {
+                    return r.clone();
+                }
+            }
             self.result.clone()
         }
     }
@@ -325,6 +397,8 @@ mod tests {
         ran: RefCell<Vec<(PathBuf, Vec<String>, Option<String>)>>,
         /// 讓「安裝好的 claude.exe」出現
         make: Option<PathBuf>,
+        /// 裝好的 claude.exe 的 `--version` 輸出
+        version: Result<String, String>,
     }
     impl Exec for FakeExec {
         fn run_installer(&self, exe: &Path, args: &[&str], _cwd: &Path, _t: Duration) -> Result<i32, String> {
@@ -335,6 +409,9 @@ mod tests {
                 std::fs::write(p, b"installed").unwrap();
             }
             self.code.clone()
+        }
+        fn version_output(&self, _exe: &Path, _t: Duration) -> Result<String, String> {
+            self.version.clone()
         }
     }
 
@@ -350,14 +427,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let platform = "win32-x64";
         let mut fetch = FakeFetch::default();
-        fetch.texts.insert(url_latest(), "2.1.316\n".into());
+        fetch.texts.insert(url_channel(), "2.1.316\n".into());
         fetch.texts.insert(url_manifest("2.1.316"), manifest_for("2.1.316", platform, manifest_body));
         fetch.bins.insert(url_binary("2.1.316", platform), body.to_vec());
         let final_exe = dir.path().join("home").join("claude.exe");
         Rig {
             fetch,
-            sig: FakeSig { result: Ok(EXPECTED_SIGNER.into()), seen: RefCell::new(vec![]) },
-            exec: FakeExec { code: Ok(0), ran: RefCell::new(vec![]), make: Some(final_exe.clone()) },
+            sig: FakeSig { result: Ok(EXPECTED_SIGNER.into()), final_result: None, final_exe: final_exe.clone(), seen: RefCell::new(vec![]) },
+            exec: FakeExec { code: Ok(0), ran: RefCell::new(vec![]), make: Some(final_exe.clone()), version: Ok("2.1.316 (Claude Code)
+".into()) },
             final_exe,
             dir,
         }
@@ -379,8 +457,11 @@ mod tests {
         assert!(msg.contains("2.1.316"), "{msg}");
         let ran = r.exec.ran.borrow();
         assert_eq!(ran.len(), 1, "只執行一次");
-        assert_eq!(ran[0].1, vec!["install".to_string(), "stable".to_string()]);
-        assert_eq!(r.sig.seen.borrow().as_slice(), &[ran[0].0.clone()], "驗簽章的路徑就是執行的路徑");
+        assert_eq!(ran[0].1, vec!["install".to_string(), "2.1.316".to_string()], "交給安裝程式的是驗過的確切版本號，不是頻道名");
+        let seen = r.sig.seen.borrow();
+        assert_eq!(seen[0], ran[0].0, "驗簽章的路徑就是執行的路徑");
+        assert_eq!(seen[1], r.final_exe, "裝完還要驗裝好的 claude.exe");
+        assert_eq!(seen.len(), 2);
         assert_eq!(ran[0].2.as_deref(), Some(sum_of(BIN).as_str()), "執行當下檔案內容就是驗過雜湊的那份");
         assert!(leftovers(&r).is_empty(), "跑完下載檔刪掉：{:?}", leftovers(&r));
     }
@@ -432,6 +513,42 @@ mod tests {
     }
 
     #[test]
+    fn 裝好的_claude_簽章或簽署者不對_不算成功() {
+        let mut r = rig(BIN, BIN);
+        r.sig.final_result = Some(Ok("Someone Else".into()));
+        assert!(run(&r).unwrap_err().contains("簽署者"));
+        r.sig.final_result = Some(Err("數位簽章驗證沒通過".into()));
+        assert!(run(&r).unwrap_err().contains("簽章沒通過"));
+    }
+
+    #[test]
+    fn 裝好的版本和驗過的不同或問不出來_不算成功() {
+        let mut r = rig(BIN, BIN);
+        r.exec.version = Ok("2.1.309 (Claude Code)".into());
+        let e = run(&r).unwrap_err();
+        assert!(e.contains("不一致") && e.contains("2.1.316"), "{e}");
+        r.exec.version = Err("跑太久".into());
+        assert!(run(&r).unwrap_err().contains("問不出"));
+        r.exec.version = Ok("".into());
+        assert!(run(&r).unwrap_err().contains("不一致"));
+    }
+
+    #[test]
+    fn 版本輸出只認第一個字完全等於版本號() {
+        assert!(version_matches("2.1.316 (Claude Code)
+", "2.1.316"));
+        assert!(version_matches("2.1.316", "2.1.316"));
+        for bad in ["2.1.3160", "12.1.316", "v2.1.316", "x 2.1.316", "", "2.1.31"] {
+            assert!(!version_matches(bad, "2.1.316"), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn 取版本號走_stable_頻道() {
+        assert_eq!(url_channel(), "https://downloads.claude.ai/claude-code-releases/stable");
+    }
+
+    #[test]
     fn 裝完找不到_claude_exe_不算成功() {
         let mut r = rig(BIN, BIN);
         r.exec.make = None;
@@ -447,7 +564,7 @@ mod tests {
             assert!(!valid_version(bad), "{bad:?}");
         }
         let mut r = rig(BIN, BIN);
-        r.fetch.texts.insert(url_latest(), "<html>error</html>".into());
+        r.fetch.texts.insert(url_channel(), "<html>error</html>".into());
         assert!(run(&r).unwrap_err().contains("版本號"));
         assert!(r.exec.ran.borrow().is_empty());
     }
@@ -505,7 +622,7 @@ mod tests {
         let p = work.join("claude-swapped.exe");
         std::fs::write(&p, b"MZ swapped in between").unwrap();
         let guard = open_locked(&p).unwrap();
-        let e = verify_then_run(&Deps { fetch: &r.fetch, sig: &r.sig, exec: &r.exec }, &guard, &p, &sum_of(BIN), &work).unwrap_err();
+        let e = verify_then_run(&Deps { fetch: &r.fetch, sig: &r.sig, exec: &r.exec }, &guard, &p, &sum_of(BIN), "2.1.316", &work).unwrap_err();
         assert!(e.contains("被改動"), "{e}");
         assert!(r.sig.seen.borrow().is_empty());
         assert!(r.exec.ran.borrow().is_empty());
@@ -516,7 +633,7 @@ mod tests {
     #[ignore = "需要網路；手動執行：cargo test --lib real_release_endpoints -- --ignored --nocapture"]
     fn real_release_endpoints() {
         let f = super::super::net::RealFetch;
-        let v = f.get_text(&url_latest(), MAX_VERSION_BYTES).unwrap();
+        let v = f.get_text(&url_channel(), MAX_VERSION_BYTES).unwrap();
         let v = v.trim();
         assert!(valid_version(v), "{v}");
         let m = f.get_text(&url_manifest(v), MAX_MANIFEST_BYTES).unwrap();
