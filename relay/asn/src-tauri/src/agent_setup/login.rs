@@ -150,6 +150,19 @@ pub fn redact_line(line: &str) -> String {
     out
 }
 
+/// 一行子程序輸出要寫進 log 的內容。長網址被折行時，第二行起是純參數字串（不含 http），遮不到：
+/// 所以一看到網址開頭（http:// 或 https://），那一行照 `redact_line` 遮，之後的行只記字數、不記內容
+fn loggable(line: &str, url_seen: &mut bool) -> String {
+    if *url_seen {
+        return format!("（登入網址之後的一行，{} 個字，內容不記）", line.chars().count());
+    }
+    let lower = line.to_ascii_lowercase();
+    if lower.contains("http://") || lower.contains("https://") {
+        *url_seen = true;
+    }
+    redact_line(line)
+}
+
 pub fn run_login(eng: &dyn LoginEngine, sp: &dyn Spawner, phone: &dyn Phone, lim: &Limits, report: &dyn Fn(Step)) -> Outcome {
     run_login_with(&BUSY, eng, sp, phone, lim, report)
 }
@@ -184,6 +197,7 @@ fn one_round(eng: &dyn LoginEngine, sp: &dyn Spawner, phone: &dyn Phone, lim: &L
     // 1. 等網址
     let mut url: Option<String> = None;
     let (mut polls, mut seen, mut logged) = (0u32, 0u32, 0u32);
+    let mut url_seen = false;
     loop {
         match proc.read_line(lim.poll) {
             ReadLine::Line(raw) => {
@@ -191,7 +205,7 @@ fn one_round(eng: &dyn LoginEngine, sp: &dyn Spawner, phone: &dyn Phone, lim: &L
                 let clean = strip_ansi(&raw);
                 if logged < MAX_LOGGED_LINES {
                     logged += 1;
-                    elog!("登入程序輸出：{}", redact_line(&clean));
+                    elog!("登入程序輸出：{}", loggable(&clean, &mut url_seen));
                 }
                 if let Some(u) = eng.find_url(&clean) {
                     url = Some(u);
@@ -580,6 +594,53 @@ mod tests {
         assert_eq!(s.bytes(), b"ABC");
         s.wipe();
         assert_eq!(s.bytes(), &[0, 0, 0]);
+    }
+
+    #[test]
+    fn 網址被折行時_第二行起的純參數字串不記內容() {
+        let mut seen = false;
+        // 網址開頭那行照遮
+        let first = loggable("Open: https://claude.ai/oauth/authorize?client_id=C&redirect_uri=R", &mut seen);
+        assert_eq!(first, "Open: https://claude.ai/oauth/authorize?…");
+        assert!(seen);
+        // 折行後的後續行：不含 http，只記字數
+        for rest in ["&state=ST4TE&code_challenge=CH4LL", "ST4TE", "", "Paste code here if prompted >"] {
+            let t = loggable(rest, &mut seen);
+            assert!(t.contains("內容不記"), "{t}");
+            assert!(!t.contains("ST4TE") && !t.contains("CH4LL") && !t.contains("state="), "{t}");
+        }
+        // 沒有網址的行在網址出現前照常記
+        let mut seen = false;
+        assert_eq!(loggable("Opening browser to sign in…", &mut seen), "Opening browser to sign in…");
+        assert!(!seen);
+    }
+
+    #[test]
+    fn 網址折成三行_後兩行都只記字數() {
+        let mut seen = false;
+        let a = loggable("請開啟 https://claude.ai/oauth/authorize?client_id=C&redirect_uri=https%3A%2F%2Fx%2Fcb&", &mut seen);
+        assert!(a.ends_with("authorize?…"), "{a}");
+        let b = loggable("state=ST4TE&code_chal", &mut seen);
+        let c = loggable("lenge=CH4LL&code=true", &mut seen);
+        for t in [&b, &c] {
+            assert!(t.contains("內容不記"), "{t}");
+            for p in ["ST4TE", "CH4LL", "code_chal", "lenge", "state"] {
+                assert!(!t.contains(p), "{t} 漏了 {p}");
+            }
+        }
+    }
+
+    #[test]
+    fn 參數值從中間切斷_沒有等號也不記內容() {
+        let mut seen = false;
+        loggable("https://claude.ai/oauth/authorize?client_id=C&state=ST4", &mut seen);
+        // 第二行只剩被切斷的值，不含 = 也不含任何關鍵字
+        let t = loggable("TE-and-more-of-the-state-value", &mut seen);
+        assert!(t.contains("內容不記") && !t.contains("TE-and"), "{t}");
+        // 不論網址的參數齊不齊，網址出現過之後的每一行都一樣處理（含白名單之外的網域）
+        let mut seen = false;
+        loggable("see https://evil.example/x?a=b", &mut seen);
+        assert!(loggable("c=d&e=f", &mut seen).contains("內容不記"));
     }
 
     #[test]
