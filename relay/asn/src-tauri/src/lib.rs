@@ -1464,7 +1464,12 @@ pub fn run() {
     let frame_data_dir = data_dir.clone();
     let bridge_data_dir = data_dir.clone();
     let auto_acct_dir = data_dir.clone();
-    let auth_state = auth::AuthState::new(auth::default_store(&data_dir));
+    #[cfg_attr(not(desktop), allow(unused_mut))]
+    let mut auth_state = auth::AuthState::new(auth::default_store(&data_dir));
+    #[cfg(desktop)]
+    {
+        auth_state.on_signout = Some(ui_log::signout_logger(exit_log_dir.clone()));
+    }
     // 端到端測試用：--shot 模式下假裝已登入（只連本機假後端；正式執行沒有這條路）
     if shot.is_some() {
         if let Some(email) = crate::envc::get("ASN_SHOT_LOGIN") {

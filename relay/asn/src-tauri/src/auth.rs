@@ -331,8 +331,8 @@ pub fn session_from_json(text: &str, now: u64) -> Result<Session, String> {
 
 #[derive(Debug)]
 pub enum AuthFail {
-    /// 登入憑證被後台拒絕（過期、撤銷、授權碼不對）：需要重新登入
-    Rejected(String),
+    /// 登入憑證被後台拒絕（過期、撤銷、授權碼不對）：需要重新登入。第二欄是給記錄用的狀態碼與錯誤代碼
+    Rejected(String, String),
     /// 網路或後台暫時有問題：不必清掉已存的登入
     Transient(String),
 }
@@ -366,10 +366,8 @@ async fn token_request(client: &reqwest::Client, auth_base: &str, anon: &str, gr
     let why = serde_json::from_str::<TokenErr>(&text).ok().and_then(|e| e.error_description).unwrap_or_default();
     let why: String = why.chars().take(120).collect();
     if status.is_client_error() && !temporary_client_error(status.as_u16()) {
-        if grant == "refresh_token" {
-            elog!("登入服務拒絕更新憑證，清掉登入：status={} error_code={}", status.as_u16(), token_error_code(&text));
-        }
-        Err(AuthFail::Rejected(if why.is_empty() { format!("登入服務拒絕（{}）", status.as_u16()) } else { why }))
+        let detail = format!("status={} error_code={}", status.as_u16(), token_error_code(&text));
+        Err(AuthFail::Rejected(if why.is_empty() { format!("登入服務拒絕（{}）", status.as_u16()) } else { why }, detail))
     } else {
         Err(AuthFail::Transient(format!("登入服務暫時有問題（{}）", status.as_u16())))
     }
@@ -524,6 +522,8 @@ pub struct AuthState {
     mem: Mutex<Option<Session>>,
     pub cancel: Arc<AtomicBool>,
     busy: AtomicBool,
+    /// 因更新憑證被拒絕而清掉登入時呼叫（參數只有狀態碼與錯誤代碼）：正式版接到 ui.log，安裝版的 stderr 看不到
+    pub on_signout: Option<Box<dyn Fn(&str) + Send + Sync>>,
 }
 
 #[derive(Debug, PartialEq, serde::Serialize)]
@@ -542,7 +542,7 @@ impl Drop for BusyGuard<'_> {
 
 impl AuthState {
     pub fn new(store: Box<dyn TokenStore>) -> Self {
-        Self { store, mem: Mutex::new(None), cancel: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false) }
+        Self { store, mem: Mutex::new(None), cancel: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false), on_signout: None }
     }
 
     /// 只給 `--shot` 測試用：假裝已登入（記憶體裡放一組假權杖，不寫存檔），讓端到端測試能走「已登入」的情境。
@@ -602,7 +602,10 @@ impl AuthState {
                 self.set_session(s)?;
                 Ok(t)
             }
-            Err(AuthFail::Rejected(_)) => {
+            Err(AuthFail::Rejected(_, detail)) => {
+                if let Some(note) = &self.on_signout {
+                    note(&detail);
+                }
                 let _ = self.sign_out();
                 Err("登入已過期，請重新登入".into())
             }
@@ -638,7 +641,7 @@ impl AuthState {
                 self.set_session(s)?;
                 Ok(self.status())
             }
-            Err(AuthFail::Rejected(m)) | Err(AuthFail::Transient(m)) => Err(m),
+            Err(AuthFail::Rejected(m, _)) | Err(AuthFail::Transient(m)) => Err(m),
         }
     }
 }
@@ -898,7 +901,7 @@ mod tests {
     async fn 換取權杖_後台拒絕與暫時錯誤要分開() {
         let (p1, h1) = fake_auth_server("400 Bad Request", r#"{"error_description":"invalid flow state"}"#);
         match exchange_code(&reqwest::Client::new(), &format!("http://127.0.0.1:{p1}"), "A", "c", "v").await {
-            Err(AuthFail::Rejected(m)) => assert!(m.contains("invalid flow state")),
+            Err(AuthFail::Rejected(m, _)) => assert!(m.contains("invalid flow state")),
             _ => panic!("應該是被拒絕"),
         }
         let _ = h1.join();
@@ -971,6 +974,29 @@ mod tests {
         assert!(a.access_token(&reqwest::Client::new(), &format!("http://127.0.0.1:{p}"), "A").await.is_err());
         let _ = h.join();
         assert!(!path.exists(), "憑證無效才刪");
+    }
+
+    #[cfg(all(feature = "gui", desktop))]
+    #[tokio::test]
+    async fn 清掉登入時_狀態碼寫進_ui_log_暫時錯誤不寫_不含憑證與_email() {
+        let d = tempfile::tempdir().unwrap();
+        let store = MemStore::default();
+        store.save(&StoredLogin { refresh_token: "RT-SECRET".into(), email: Some("a@b.c".into()) }).unwrap();
+        let mut a = AuthState::new(Box::new(store));
+        a.on_signout = Some(crate::ui_log::signout_logger(d.path().to_path_buf()));
+        let log = crate::ui_log::path(d.path());
+        let (p, h) = fake_auth_server("409 Conflict", r#"{"error_code":"conflict"}"#);
+        assert!(a.access_token(&reqwest::Client::new(), &format!("http://127.0.0.1:{p}"), "A").await.is_err());
+        let _ = h.join();
+        assert!(!log.exists(), "暫時錯誤沒有清登入，不寫");
+        let (p, h) = fake_auth_server("400 Bad Request", r#"{"error_code":"refresh_token_not_found","msg":"secret-message"}"#);
+        assert!(a.access_token(&reqwest::Client::new(), &format!("http://127.0.0.1:{p}"), "A").await.is_err());
+        let _ = h.join();
+        let t = std::fs::read_to_string(&log).unwrap();
+        assert!(t.contains("status=400") && t.contains("error_code=refresh_token_not_found"), "{t}");
+        for leak in ["RT-SECRET", "a@b.c", "secret-message"] {
+            assert!(!t.contains(leak), "{t}");
+        }
     }
 
     #[test]

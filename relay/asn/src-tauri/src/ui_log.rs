@@ -107,6 +107,16 @@ pub fn log_exit(dir: &Path, reason: &str) {
     let _ = append(dir, &[exit_line(crate::heartbeat::now_ms() as i64, reason)]);
 }
 
+/// 因更新憑證被拒絕而清掉登入時寫一行（detail 只有狀態碼與錯誤代碼）；資料夾是空的（截圖模式）不寫
+pub fn signout_logger(dir: PathBuf) -> Box<dyn Fn(&str) + Send + Sync> {
+    Box::new(move |detail| {
+        if !dir.as_os_str().is_empty() {
+            let line = format!("{} info [ASN] 登入服務拒絕更新憑證，已清掉登入：{}", crate::claude_quota::iso_secs(crate::heartbeat::now_ms() as i64), detail);
+            let _ = append(&dir, &[line]);
+        }
+    })
+}
+
 /// 裝 panic hook：把 panic 寫進 ui.log 就好，不再交給預設 hook。預設 hook 會寫 stderr，
 /// 10-30 家用機閃退正是 stderr 是斷掉的管線、寫不進去才 panic，再寫一次只會在 hook 裡又失敗（#1767）。panic = "abort"，寫完程式就結束
 pub fn install_panic_hook(dir: PathBuf) {
