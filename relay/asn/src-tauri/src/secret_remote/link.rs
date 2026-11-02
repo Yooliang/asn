@@ -103,6 +103,23 @@ mod tests {
         }
     }
 
+    /// 五處（資料庫、Edge Function、Rust、手機畫面）共用的正反例：`supabase/functions/_shared/login_link_cases.json`
+    #[test]
+    fn 共用正反例() {
+        let v: serde_json::Value = serde_json::from_str(include_str!("../../../../../supabase/functions/_shared/login_link_cases.json")).unwrap();
+        let expand = |s: &str| s.replace("<A*2100>", &"a".repeat(2100));
+        let (good, bad) = (v["good"].as_array().unwrap(), v["bad"].as_array().unwrap());
+        assert!(good.len() >= 5 && bad.len() >= 20, "測資不能被清空");
+        for g in good {
+            let g = expand(g.as_str().unwrap());
+            assert!(valid_login_link(&g), "{g}");
+        }
+        for b in bad {
+            let b = expand(b.as_str().unwrap());
+            assert!(!valid_login_link(&b), "{b:?}");
+        }
+    }
+
     #[test]
     fn 畫面只顯示網域() {
         assert_eq!(login_link_host("https://claude.ai/oauth/authorize?state=SECRETISH").as_deref(), Some("claude.ai"));

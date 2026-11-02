@@ -13,3 +13,4 @@ pub mod login;
 pub mod net;
 pub mod phone;
 pub mod proc;
+pub mod setup;

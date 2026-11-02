@@ -12,7 +12,8 @@ use std::time::Duration;
 const PROGRAM: &str = "Claude Code 登入";
 const PURPOSE: &str = "在新電腦登入 Claude Code：開啟登入頁授權，再貼上頁面顯示的授權碼";
 
-pub struct SecretPhone<'a> {
+/// 只有 agent_setup 能建立（asn調查員 #2145）：它收任何字串網址，外面的模組不能拿來推網址
+pub(in crate::agent_setup) struct SecretPhone<'a> {
     pub be: &'a dyn Backend,
     /// 本人簽章（登入憑證）。呼叫端（桌面按鈕、手機觸發的遠端指令）負責取得；不進 log
     pub sign_token: String,

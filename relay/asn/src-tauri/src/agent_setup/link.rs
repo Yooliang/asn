@@ -45,7 +45,7 @@ mod tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut stack = vec![root.clone()];
         let mut hits = vec![];
-        let (a, b) = (["Login", "Link"].concat(), [".with", "_link("].concat());
+        let (a, b, c) = (["Login", "Link"].concat(), [".with", "_link("].concat(), ["Secret", "Phone"].concat());
         while let Some(d) = stack.pop() {
             for e in std::fs::read_dir(&d).unwrap().flatten() {
                 let p = e.path();
@@ -57,7 +57,7 @@ mod tests {
                         continue;
                     }
                     let text = std::fs::read_to_string(&p).unwrap();
-                    if text.contains(&a) || text.contains(&b) {
+                    if text.contains(&a) || text.contains(&b) || text.contains(&c) {
                         hits.push(rel);
                     }
                 }
