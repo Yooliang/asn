@@ -15,8 +15,9 @@ const PURPOSE: &str = "在新電腦登入 Claude Code：開啟登入頁授權，
 /// 只有 agent_setup 能建立（asn調查員 #2145）：它收任何字串網址，外面的模組不能拿來推網址
 pub(in crate::agent_setup) struct SecretPhone<'a> {
     pub be: &'a dyn Backend,
-    /// 本人簽章（登入憑證）。呼叫端（桌面按鈕、手機觸發的遠端指令）負責取得；不進 log
-    pub sign_token: String,
+    /// 取本人簽章（登入憑證）的函式，**在送出請求前才呼叫**：安裝要好幾分鐘，按下去時取好的權杖可能在安裝途中過期。
+    /// 來源只有視窗程式的記憶體（由呼叫端建好傳進來）；取得的字串不進 log
+    pub token: &'a dyn Fn() -> Option<String>,
     /// 輪詢間隔
     pub poll: Duration,
 }
@@ -27,12 +28,15 @@ impl Phone for SecretPhone<'_> {
             Ok(l) => l,
             Err(_) => return Ask::Failed("登入網址不是官方登入網域，沒有送到手機".to_string()),
         };
+        let Some(sign_token) = (self.token)().filter(|t| !t.is_empty()) else {
+            return Ask::Failed("請重新登入你的帳號，才能把登入網址送到手機".to_string());
+        };
         // 有效期限要落在後台允許的範圍；不夠最短時間就當逾時（不送一個一定會過期的請求）
         let secs = wait.as_secs();
         if secs < TTL_MIN {
             return Ask::TimedOut;
         }
-        let mut opts = Opts::new(PROGRAM, PURPOSE).with_link(&link, self.sign_token.clone());
+        let mut opts = Opts::new(PROGRAM, PURPOSE).with_link(&link, sign_token);
         opts.ttl_secs = secs.min(TTL_MAX);
         opts.poll = self.poll;
         let res = crate::rt::block_on(request_secret(self.be, &opts, &mut |_| {}));
@@ -113,8 +117,11 @@ mod tests {
         }
     }
 
+    fn tok() -> Option<String> {
+        Some(TOKEN.to_string())
+    }
     fn phone(f: &Fake) -> SecretPhone<'_> {
-        SecretPhone { be: f, sign_token: TOKEN.to_string(), poll: Duration::from_millis(5) }
+        SecretPhone { be: f, token: &tok, poll: Duration::from_millis(5) }
     }
     fn text(a: Ask) -> String {
         match a {
@@ -137,6 +144,30 @@ mod tests {
         assert_eq!(signed[0].0["program"], PROGRAM);
         assert_eq!(*f.plain_requests.lock().unwrap(), 0, "帶網址的請求不能走沒簽章的路");
         assert!(signed[0].0["ttl"].as_u64().unwrap() <= TTL_MAX);
+    }
+
+    #[test]
+    fn 簽章在送出前才取_用最新的那一份() {
+        // 安裝要好幾分鐘：建立 SecretPhone 之後權杖換新了，送出的必須是換新後的
+        let cur = std::cell::RefCell::new(Some("OLD-TOKEN".to_string()));
+        let get = || cur.borrow().clone();
+        let f = Fake { secret: Some("AUTH".into()), status: Mutex::new(vec!["answered"]), ..Default::default() };
+        let p = SecretPhone { be: &f, token: &get, poll: Duration::from_millis(5) };
+        *cur.borrow_mut() = Some("NEW-TOKEN".to_string());
+        assert_eq!(text(p.ask_code(LINK, Duration::from_secs(300))), "AUTH");
+        assert_eq!(f.signed.lock().unwrap()[0].1, "NEW-TOKEN");
+    }
+
+    #[test]
+    fn 取不到簽章_不送出_訊息固定() {
+        for none in [None, Some(String::new())] {
+            let get = || none.clone();
+            let f = Fake::default();
+            let p = SecretPhone { be: &f, token: &get, poll: Duration::from_millis(5) };
+            let t = text(p.ask_code(LINK, Duration::from_secs(300)));
+            assert!(t.starts_with("Failed:") && t.contains("重新登入"), "{t}");
+            assert!(f.signed.lock().unwrap().is_empty() && *f.plain_requests.lock().unwrap() == 0, "沒簽章不能送出任何請求");
+        }
     }
 
     #[test]

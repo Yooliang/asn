@@ -252,6 +252,8 @@ fn verify_then_run(d: &Deps, guard: &File, path: &Path, want_sum: &str, version:
 
 /// 真正的環境：ASN 自己的資料夾放下載檔，裝好的位置是使用者資料夾下的 `.local\bin\claude.exe`
 pub fn install_here() -> Result<String, String> {
+    // 兩條路（設定的一鍵安裝、agent_tools 的安裝鈕）都會到這裡：同一時間只允許一個，不然會同時下載、同時動同一個檔案
+    let _busy = InstallBusy::take()?;
     let platform = platform()?;
     let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from).ok_or_else(|| "找不到使用者資料夾".to_string())?;
     let final_exe = home.join(".local").join("bin").join("claude.exe");
@@ -260,6 +262,64 @@ pub fn install_here() -> Result<String, String> {
     let sig = super::authenticode::SystemSignatureCheck;
     let exec = RealExec;
     install(&Deps { fetch: &fetch, sig: &sig, exec: &exec }, &work, platform, &final_exe)
+}
+
+static INSTALL_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+struct InstallBusy;
+impl InstallBusy {
+    fn take() -> Result<Self, String> {
+        take_flag(&INSTALL_BUSY).map(|_| InstallBusy)
+    }
+}
+impl Drop for InstallBusy {
+    fn drop(&mut self) {
+        INSTALL_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+fn take_flag(flag: &std::sync::atomic::AtomicBool) -> Result<(), String> {
+    if flag.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        Err("已經有一個 Claude Code 安裝在進行，請等它結束".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+/// 這台電腦上現有的 `claude.exe` 狀況（開始安裝之前先看，已經好好的就不動它）
+#[derive(Debug, PartialEq, Eq)]
+pub enum Existing {
+    /// 沒有這個檔案
+    Missing,
+    /// 簽章有效、簽署者是 Anthropic, PBC、`--version` 跑得出來：帶版本號。不比版本：Claude 會自己更新，比了反而可能把新版降回頻道版本
+    Healthy(String),
+    /// 有檔案但不能用（簽章不對、簽署者不對、跑不起來）：要重裝
+    Broken(String),
+}
+
+pub fn inspect(d: &Deps, final_exe: &Path) -> Existing {
+    if !final_exe.exists() {
+        return Existing::Missing;
+    }
+    match d.sig.signer(final_exe) {
+        Ok(who) if who == EXPECTED_SIGNER => {}
+        Ok(_) => return Existing::Broken("現有的 claude.exe 簽署者不是 Anthropic, PBC".to_string()),
+        Err(e) => return Existing::Broken(format!("現有的 claude.exe 數位簽章沒通過：{e}")),
+    }
+    match d.exec.version_output(final_exe, VERSION_TIMEOUT) {
+        Ok(out) => match out.split_whitespace().next() {
+            Some(v) if valid_version(v) => Existing::Healthy(v.to_string()),
+            _ => Existing::Broken("現有的 claude.exe 的版本輸出看不懂".to_string()),
+        },
+        Err(e) => Existing::Broken(format!("現有的 claude.exe 跑不起來：{e}")),
+    }
+}
+
+pub fn inspect_here() -> Existing {
+    let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from) else {
+        return Existing::Broken("找不到使用者資料夾".to_string());
+    };
+    let final_exe = home.join(".local").join("bin").join("claude.exe");
+    inspect(&Deps { fetch: &super::net::RealFetch, sig: &super::authenticode::SystemSignatureCheck, exec: &RealExec }, &final_exe)
 }
 
 pub struct RealExec;
@@ -653,5 +713,74 @@ mod tests {
         assert_eq!(hash_open_file(&g).unwrap(), sum_of(b"abc"));
         drop(g);
         assert!(std::fs::remove_file(&p).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod inspect_tests {
+    use super::*;
+
+    struct Sig(Result<&'static str, &'static str>);
+    impl SignatureCheck for Sig {
+        fn signer(&self, _p: &Path) -> Result<String, String> {
+            self.0.map(|s| s.to_string()).map_err(|e| e.to_string())
+        }
+    }
+    struct Ver(Result<&'static str, &'static str>);
+    impl Exec for Ver {
+        fn run_installer(&self, _e: &Path, _a: &[&str], _c: &Path, _t: Duration) -> Result<i32, String> {
+            panic!("檢查現況不能執行安裝程式")
+        }
+        fn version_output(&self, _e: &Path, _t: Duration) -> Result<String, String> {
+            self.0.map(|s| s.to_string()).map_err(|e| e.to_string())
+        }
+    }
+    struct NoNet;
+    impl Fetch for NoNet {
+        fn get_text(&self, _u: &str, _m: u64) -> Result<String, String> {
+            panic!("檢查現況不能上網")
+        }
+        fn download(&self, _u: &str, _o: &mut dyn Write, _m: u64) -> Result<u64, String> {
+            panic!("檢查現況不能上網")
+        }
+    }
+
+    fn run(file: bool, sig: Result<&'static str, &'static str>, ver: Result<&'static str, &'static str>) -> Existing {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("claude.exe");
+        if file {
+            std::fs::File::create(&exe).unwrap().write_all(b"MZ").unwrap();
+        }
+        inspect(&Deps { fetch: &NoNet, sig: &Sig(sig), exec: &Ver(ver) }, &exe)
+    }
+
+    #[test]
+    fn 現況分三種() {
+        assert_eq!(run(false, Ok(EXPECTED_SIGNER), Ok("2.1.309 (Claude Code)")), Existing::Missing);
+        // 版本不用等於頻道的版本：自動更新過的新版一樣算好
+        assert_eq!(run(true, Ok(EXPECTED_SIGNER), Ok("2.1.316 (Claude Code)")), Existing::Healthy("2.1.316".to_string()));
+        assert!(matches!(run(true, Ok("Someone Else"), Ok("2.1.309")), Existing::Broken(_)));
+        assert!(matches!(run(true, Err("簽章無效"), Ok("2.1.309")), Existing::Broken(_)));
+        assert!(matches!(run(true, Ok(EXPECTED_SIGNER), Err("跑不起來")), Existing::Broken(_)));
+        assert!(matches!(run(true, Ok(EXPECTED_SIGNER), Ok("not a version")), Existing::Broken(_)));
+        assert!(matches!(run(true, Ok(EXPECTED_SIGNER), Ok("")), Existing::Broken(_)));
+    }
+
+    #[test]
+    fn 安裝的鎖_第二個被擋_放掉後可再取() {
+        let flag = std::sync::atomic::AtomicBool::new(false);
+        assert!(take_flag(&flag).is_ok());
+        assert!(take_flag(&flag).unwrap_err().contains("已經有"));
+        flag.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(take_flag(&flag).is_ok());
+    }
+
+    /// 兩條安裝的路都經過 install_here；鎖要放在 install_here 裡面，不能只放在其中一條路
+    #[test]
+    fn 守門_鎖在_install_here_裡() {
+        let src = include_str!("claude_install.rs");
+        let body = &src[..src.find("#[cfg(test)]").unwrap()];
+        let at = body.find("pub fn install_here()").unwrap();
+        assert!(body[at..].contains("InstallBusy::take()?"), "install_here 一開始就要取鎖");
     }
 }

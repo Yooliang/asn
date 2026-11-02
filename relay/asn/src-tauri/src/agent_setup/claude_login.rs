@@ -100,6 +100,47 @@ impl LoginEngine for ClaudeLogin<'_> {
     }
 }
 
+/// 登入前先看這台電腦現在的登入狀態。已登入的電腦**不重新登入**（會動到正在用的帳號）；看不懂就說看不懂，不當成沒登入
+#[derive(Debug, PartialEq, Eq)]
+pub enum LoginState {
+    In,
+    Out,
+    Unknown(String),
+}
+
+/// `claude auth status` 的輸出。實測（空設定資料夾）：未登入時結束碼 1、輸出仍是 JSON 且 `loggedIn: false`；已登入結束碼 0、`loggedIn: true`。
+/// 所以以 JSON 的 `loggedIn` 為準，不看結束碼；已登入卻結束碼不是 0、或沒有 `loggedIn` 欄位、或不是 JSON，都算看不懂
+pub fn parse_status(code: i32, out: &str) -> LoginState {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(out.trim()) else {
+        return LoginState::Unknown(format!("登入狀態的輸出格式不認得（結束碼 {code}）"));
+    };
+    match v.get("loggedIn").and_then(|x| x.as_bool()) {
+        Some(false) => LoginState::Out,
+        Some(true) if code == 0 => LoginState::In,
+        Some(true) => LoginState::Unknown(format!("登入狀態自相矛盾（說已登入，結束碼卻是 {code}）")),
+        None => LoginState::Unknown("登入狀態的輸出沒有 loggedIn 欄位".to_string()),
+    }
+}
+
+pub fn login_state(exe: &Path, runner: &dyn CaptureRunner) -> LoginState {
+    match runner.run(exe, &["auth", "status"], STATUS_TIMEOUT) {
+        Ok((code, out)) => parse_status(code, &out),
+        Err(e) => LoginState::Unknown(format!("問不出登入狀態：{e}")),
+    }
+}
+
+/// 真的環境的登入狀態（沒有 claude.exe 當作還沒登入）
+pub fn login_state_here() -> LoginState {
+    let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from) else {
+        return LoginState::Unknown("找不到使用者資料夾".to_string());
+    };
+    let exe = home.join(".local").join("bin").join("claude.exe");
+    if !exe.exists() {
+        return LoginState::Out;
+    }
+    login_state(&exe, &RealCapture)
+}
+
 /// 開始登入前先確認要交出授權碼的那支程式是官方的（簽章有效、簽署者完全等於 Anthropic, PBC）
 pub fn precheck_exe(exe: &Path, sig: &dyn SignatureCheck) -> Result<(), String> {
     let who = sig.signer(exe).map_err(|e| format!("claude.exe 的數位簽章沒通過，沒有開始登入：{e}"))?;
@@ -135,6 +176,29 @@ pub fn login_here(phone: &dyn Phone, report: &dyn Fn(Step)) -> Outcome {
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    #[test]
+    fn 登入狀態_以_json_的_loggedin_為準() {
+        // 實測：未登入結束碼 1 但輸出是 JSON
+        assert_eq!(parse_status(1, r#"{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}"#), LoginState::Out);
+        assert_eq!(parse_status(0, r#"{"loggedIn":true,"authMethod":"claude.ai"}"#), LoginState::In);
+        // 別種登入方式（例如 API 金鑰）也是已登入：不能被覆蓋
+        assert_eq!(parse_status(0, r#"{"loggedIn":true,"authMethod":"api_key"}"#), LoginState::In);
+        for (code, out) in [(0, "Not logged in"), (1, ""), (0, "{}"), (0, r#"{"loggedIn":"yes"}"#), (1, r#"{"loggedIn":true}"#), (2, "panic: x")] {
+            assert!(matches!(parse_status(code, out), LoginState::Unknown(_)), "{code} {out:?}");
+        }
+    }
+
+    #[test]
+    fn 登入狀態_指令跑不起來_算看不懂() {
+        struct Boom;
+        impl CaptureRunner for Boom {
+            fn run(&self, _e: &Path, _a: &[&str], _t: Duration) -> Result<(i32, String), String> {
+                Err("逾時".to_string())
+            }
+        }
+        assert!(matches!(login_state(Path::new("claude.exe"), &Boom), LoginState::Unknown(_)));
+    }
 
     #[test]
     fn 網域只收官方_https() {
