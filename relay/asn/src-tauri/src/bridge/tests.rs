@@ -607,6 +607,38 @@ async fn worker_回報_fail_寄回失敗說明並_ack() {
     assert_eq!(h.fr.sent()[0]["body"], "[收發室] 轉交給 T-乙 失敗：對方不收");
     assert_eq!(h.fr.acked(), vec![uid(1)]);
     assert!(h.core.pending.is_empty());
+    assert!(h.core.log.has("forward-fail kind=mail"));
+}
+
+#[tokio::test]
+async fn 退信通知被退_不再發通知_照樣_ack() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.fr.put(mail(1, json!({"body": "[收發室] 轉交給 X 失敗：原因"})));
+    h.core.pull("test", T0).await;
+    h.core.on_worker_line(res(&format!("FAIL {} 對方不收", uid(1))), T0 + 5).await;
+    assert!(h.fr.sent().is_empty(), "不連環");
+    assert_eq!(h.fr.acked(), vec![uid(1)]);
+    assert!(h.core.pending.is_empty() && h.core.log.has("itself a notice"));
+    // 逾時那條路也一樣
+    h.fr.put(mail(2, json!({"body": "[收發室] 轉交給 X 逾時"})));
+    h.core.pull("test", T0 + 10).await;
+    h.core.tick(T0 + 10 + 121_000).await;
+    assert!(h.fr.sent().is_empty());
+    assert_eq!(h.fr.acked().len(), 2);
+}
+
+#[tokio::test]
+async fn 同一個_worker_失敗累積才警告_重啟歸零() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    for n in 1..=3 {
+        assert!(!h.core.log.has("worker-fail-streak"), "第 {n} 次之前不警告");
+        h.fr.put(mail(n, json!({})));
+        h.core.pull("test", T0 + n as u64).await;
+        h.core.on_worker_line(res(&format!("FAIL {} 原因", uid(n))), T0 + n as u64).await;
+    }
+    assert!(h.core.log.has("WARN worker-fail-streak count=3"));
+    h.core.on_worker_line(WorkerLine::Started(1), T0 + 10).await;
+    assert_eq!(h.core.worker_fails, 0);
 }
 
 #[tokio::test]

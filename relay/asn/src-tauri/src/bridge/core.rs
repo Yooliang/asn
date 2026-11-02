@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 mod dup;
+mod fail_notice;
 mod misroute;
 mod quota;
 
@@ -338,6 +339,12 @@ pub struct Core {
     fwd_text: HashMap<String, (String, String)>,
     /// 已經因為送錯重送過一次的編號（第二次還是錯就回 Fail）
     misrouted_once: HashSet<String>,
+    /// 這封信本身就是收發室通知（編號）：被退時不再發通知
+    bounce_notices: HashSet<String>,
+    /// 群組訊息轉交失敗的通知冷卻（群組, 收件視窗）→（上次貼的時間, 冷卻中略過幾則）
+    room_fail_notices: HashMap<(String, String), (u64, u32)>,
+    /// 這個 worker 啟動以來回報失敗幾次
+    pub(super) worker_fails: u32,
     /// 已經通知過送錯的編號（每個編號只通知一次）
     misroute_notified: HashSet<String>,
     /// 轉交給 worker 的來信是誰寄的（編號 → 來源）：送錯通知寄件人用；只存記憶體，數量有上限
@@ -409,7 +416,7 @@ impl Core {
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
-            quota_until: 0, quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), probing: false,
+            quota_until: 0, quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), probing: false,
         };
         c.restore();
         c
@@ -529,6 +536,7 @@ impl Core {
         self.held_items.remove(id);
         self.fwd_items.remove(id);
         self.fwd_rooms.remove(id);
+        self.bounce_notices.remove(id);
         self.persist();
     }
     fn online_names(&self) -> HashSet<&str> {
@@ -1067,6 +1075,7 @@ impl Core {
         match self.deliver(&m.id, &target, &text) {
             Ok(_) => {
                 self.log.line(&format!("handed id={} from={}/{} to={target}", m.id, m.from_node, from_agent));
+                self.note_if_notice(&m.id, &m.body);
                 if self.fwd_origin.len() >= 400 {
                     self.fwd_origin.clear();
                 }
@@ -1137,6 +1146,7 @@ impl Core {
         self.now = now;
         match l {
             WorkerLine::Started(_) => {
+                self.worker_fails = 0;
                 self.parser.reset_process();
                 self.respond_open = false; // worker 重啟：舊的一輪不會再有結果了
             }
@@ -1158,6 +1168,7 @@ impl Core {
                         }
                         WorkerEvent::Fail(id, reason) => {
                             self.quota_release("worker reported fail");
+                            self.count_worker_fail();
                             self.on_fail(&id, &reason).await
                         }
                         WorkerEvent::Misrouted { id, expected, actual } => self.on_misrouted(&id, &expected, &actual).await,
@@ -1255,11 +1266,15 @@ impl Core {
         let (o, target, from_agent) = (Origin::of(&self.pending[i]), self.pending[i].target.clone(), self.pending[i].from_agent.clone());
         self.log.line(&format!("forward failed id={id}: {reason}"));
         if self.pending[i].room.is_some() {
-            self.remove(id); // 群組訊息：只記 log，不回群組
+            self.room_forward_failed(id, "room").await;
+            self.remove(id);
             return;
         }
+        self.count_forward_fail("mail", id, &target);
         if Self::is_mailbox_sender(&from_agent) {
             self.log.line(&format!("forward failure notice to mailbox sender {}/{} not sent id={id}", o.from_node, from_agent));
+        } else if self.bounce_notices.contains(id) {
+            self.log.line(&format!("forward failure notice not sent id={id}: the failed mail is itself a notice"));
         } else {
             let why = if reason.is_empty() { "原因不明" } else { reason };
             // 失敗通知用「對方視窗」的名義寄回、掛在原信底下：寄件人在跟那個視窗的對話框裡直接看到，不是另一個「收發室」視窗
@@ -1675,6 +1690,7 @@ impl Core {
         match self.deliver(&id, &target, &text) {
             Ok(_) => {
                 self.log.line(&format!("handed room={room_id} #{seq} member={member} to={target}"));
+                self.note_if_notice(&id, msg.get("body").and_then(Value::as_str).unwrap_or(""));
                 if !self.is_respond(&target) && self.via_worker(&target) {
                     self.fwd_rooms.insert(id.clone(), RoomFwd { room_id: room_id.clone(), room_name: room_name.clone(), member: member.to_string(), seq, received_at: late.unwrap_or(self.now) });
                 }
@@ -1847,6 +1863,7 @@ impl Core {
                 self.write_inflight();
                 if p.room.is_some() {
                     self.log.line(&format!("room forward timeout id={id} -> {}", p.target));
+                    self.room_forward_failed(&id, "room-timeout").await;
                     self.remove(&id);
                     continue;
                 }
@@ -1860,8 +1877,11 @@ impl Core {
                 // 登入失效通知附「轉交逾時 N 次」的佐證；無視窗橋沒有登入失效判定（login_watch 只在 gui 建置才有），不用記
                 #[cfg(feature = "gui")]
                 crate::login_watch::record_forward_timeout(now as i64);
+                self.count_forward_fail("mail-timeout", &id, &p.target);
                 if Self::is_mailbox_sender(&p.from_agent) {
                     self.log.line(&format!("forward timeout notice to mailbox sender not sent id={id}"));
+                } else if self.bounce_notices.contains(&id) {
+                    self.log.line(&format!("forward timeout notice not sent id={id}: the failed mail is itself a notice"));
                 } else {
                     self.send_back(&Origin::of(&p), &format!("[收發室] 轉交給 {} 逾時（收發室沒有完成轉交）", p.target), None, None).await;
                 }

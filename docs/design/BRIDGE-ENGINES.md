@@ -12,7 +12,7 @@ issue #12 內建橋第五期。`BRIDGE-RUST.md` 的第一至四段讓 ASN 內建
 
 共同規則（與 Claude 一致，核心 `core.rs` 不分引擎）：
 
-- 引擎回報「已轉交」（`Sent`）核心才 ack 並開始計時；失敗（`Fail`）寄 `[收發室] 轉交給 … 失敗：<原因>` 給寄件人；回覆（`Reply`）依信件編號對上 pending，找不到就轉給最近一次交辦的人。
+- 引擎回報「已轉交」（`Sent`）核心才 ack 並開始計時；失敗（`Fail`）寄 `[收發室] 轉交給 … 失敗：<原因>` 給寄件人（被退的信本身就是收發室通知時不再寄）；群組訊息轉交失敗或逾時，在群組貼一則不點名的說明（同一收件視窗 10 分鐘一則）；每次失敗寫一行 `forward-fail kind=…` 到 log，同一個 worker 累積 3 次起留 `WARN worker-fail-streak`；回覆（`Reply`）依信件編號對上 pending，找不到就轉給最近一次交辦的人。
 - 逾時、忙碌延後、遲到回覆、不需回覆（`reply=no`）、收發室系統信不回、`asn send --reply-to` 直接回覆的記號，全部沿用核心既有流程。
 - 名單狀態：`idle`／`busy`；ACP 工作者沒登入或額度用完標 `login-required`／`quota`，Codex 標 `login-required`／`limit`（核心的忙碌判斷只認 busy／working／running，標示用狀態不會被當成忙碌而延後通知）。
 - 名單回報與夥伴同步的引擎名：ACP 工作者用設定檔的 `roster_engine`（例如 `gemini`），Codex 是 `codex`，Claude 是 `claude`。信件抬頭 `engine=` 也用同一個名字。
