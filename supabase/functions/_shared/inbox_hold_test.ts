@@ -11,17 +11,16 @@ Deno.test("守門：relay 的 roster 動作在名單寫入之後才處理 inbox_
   const src = (await Deno.readTextFile(new URL("../relay/index.ts", import.meta.url))).replace(/\r\n/g, "\n");
   const i = src.indexOf('if (action === "roster"');
   const blk = src.slice(i, src.indexOf("// 節點改自己的顯示名", i));
-  assert(blk.includes('db.rpc("asn_relay_set_inbox_hold", { p_node: me.id, p_until: hold, p_computer: x.computer, p_held: x.held, p_capped: x.capped })'));
+  assert(blk.includes('db.rpc("asn_relay_set_inbox_hold", { p_node: me.id, p_until: hold, p_held: x.held, p_capped: x.capped })'));
   assert(blk.indexOf("asn_relay_set_inbox_hold") > blk.indexOf('db.rpc("asn_relay_roster"'), "名單先寫");
   const part = blk.slice(blk.indexOf('if ("inbox_hold_until" in b)'), blk.indexOf("syncNodeAuto"));
   assert(!part.includes("return json("), "收信暫停失敗不擋名單");
 });
 
-Deno.test("sanitizeInboxHoldExtra：設備名 1～40 字無控制字元、筆數 0～99999、旗標只認 true", () => {
-  assertEquals(sanitizeInboxHoldExtra({ inbox_hold_computer: " 家用機 ", inbox_hold_count: 7, inbox_hold_capped: true }), { computer: "家用機", held: 7, capped: true });
-  assertEquals(sanitizeInboxHoldExtra({}), { computer: null, held: 0, capped: false });
-  assertEquals(sanitizeInboxHoldExtra({ inbox_hold_computer: "a\nb", inbox_hold_count: -1, inbox_hold_capped: "true" }), { computer: null, held: 0, capped: false });
-  assertEquals(sanitizeInboxHoldExtra({ inbox_hold_computer: "字".repeat(41), inbox_hold_count: 1e9 }).computer, null);
+Deno.test("sanitizeInboxHoldExtra：筆數 0～99999、旗標只認 true，設備名不收", () => {
+  assertEquals(sanitizeInboxHoldExtra({ inbox_hold_computer: "偽造", inbox_hold_count: 7, inbox_hold_capped: true }), { held: 7, capped: true });
+  assertEquals(sanitizeInboxHoldExtra({}), { held: 0, capped: false });
+  assertEquals(sanitizeInboxHoldExtra({ inbox_hold_count: -1, inbox_hold_capped: "true" }), { held: 0, capped: false });
   assertEquals(sanitizeInboxHoldExtra({ inbox_hold_count: 1e9 }).held, 99999);
   assertEquals(sanitizeInboxHoldExtra({ inbox_hold_count: 1.5 }).held, 0);
 });
