@@ -337,6 +337,18 @@ pub enum AuthFail {
     Transient(String),
 }
 
+/// 這幾個 4xx 是「晚點再試」（逾時、衝突、太早、太頻繁），不是憑證有問題：不能因此登出
+fn temporary_client_error(status: u16) -> bool {
+    matches!(status, 408 | 409 | 425 | 429)
+}
+
+/// 登入服務回的錯誤代碼，給 log 用（只留英數與底線，不帶其他內容）
+fn token_error_code(text: &str) -> String {
+    let v: serde_json::Value = serde_json::from_str(text).unwrap_or_default();
+    let code = v.get("error_code").and_then(|c| c.as_str()).or_else(|| v.get("error").and_then(|c| c.as_str())).unwrap_or("");
+    code.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').take(40).collect()
+}
+
 async fn token_request(client: &reqwest::Client, auth_base: &str, anon: &str, grant: &str, body: serde_json::Value) -> Result<Session, AuthFail> {
     let r = client
         .post(format!("{auth_base}/auth/v1/token?grant_type={grant}"))
@@ -353,7 +365,10 @@ async fn token_request(client: &reqwest::Client, auth_base: &str, anon: &str, gr
     }
     let why = serde_json::from_str::<TokenErr>(&text).ok().and_then(|e| e.error_description).unwrap_or_default();
     let why: String = why.chars().take(120).collect();
-    if status.is_client_error() {
+    if status.is_client_error() && !temporary_client_error(status.as_u16()) {
+        if grant == "refresh_token" {
+            elog!("登入服務拒絕更新憑證，清掉登入：status={} error_code={}", status.as_u16(), token_error_code(&text));
+        }
         Err(AuthFail::Rejected(if why.is_empty() { format!("登入服務拒絕（{}）", status.as_u16()) } else { why }))
     } else {
         Err(AuthFail::Transient(format!("登入服務暫時有問題（{}）", status.as_u16())))
@@ -919,6 +934,57 @@ mod tests {
         let _ = h.join();
         assert!(e.contains("重新登入"));
         assert!(!a.status().signed_in, "被拒絕就清掉");
+    }
+
+    #[tokio::test]
+    async fn 逾時衝突太頻繁不登出_下次重試成功() {
+        let store = MemStore::default();
+        store.save(&StoredLogin { refresh_token: "RT".into(), email: None }).unwrap();
+        let a = AuthState::new(Box::new(store));
+        for status in ["408 Request Timeout", "409 Conflict", "425 Too Early", "429 Too Many Requests"] {
+            let (p, h) = fake_auth_server(status, r#"{"error_code":"conflict","msg":"Too many concurrent token refresh requests"}"#);
+            let e = a.access_token(&reqwest::Client::new(), &format!("http://127.0.0.1:{p}"), "A").await.unwrap_err();
+            let _ = h.join();
+            assert!(!e.contains("重新登入"), "{status}: {e}");
+            assert!(a.status().signed_in, "{status} 不登出");
+        }
+        let (p, h) = fake_auth_server("200 OK", r#"{"access_token":"AT2","refresh_token":"RT2","expires_in":3600}"#);
+        assert_eq!(a.access_token(&reqwest::Client::new(), &format!("http://127.0.0.1:{p}"), "A").await.unwrap(), "AT2", "下次呼叫會重試");
+        assert!(h.join().unwrap().contains("\"refresh_token\":\"RT\""), "重試用的是原本的更新憑證");
+    }
+
+    #[tokio::test]
+    async fn 檔案儲存_409_不刪登入檔_400_才刪() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("login.bin");
+        #[cfg(windows)]
+        let st = FileStore { path: path.clone(), prot: Dpapi };
+        #[cfg(not(windows))]
+        let st = FileStore { path: path.clone(), prot: PlainFile };
+        st.save(&StoredLogin { refresh_token: "RT".into(), email: None }).unwrap();
+        let a = AuthState::new(Box::new(st));
+        let (p, h) = fake_auth_server("409 Conflict", "{}");
+        assert!(a.access_token(&reqwest::Client::new(), &format!("http://127.0.0.1:{p}"), "A").await.is_err());
+        let _ = h.join();
+        assert!(path.exists(), "暫時錯誤要留著登入檔");
+        let (p, h) = fake_auth_server("400 Bad Request", r#"{"error_code":"refresh_token_not_found","msg":"Invalid Refresh Token"}"#);
+        assert!(a.access_token(&reqwest::Client::new(), &format!("http://127.0.0.1:{p}"), "A").await.is_err());
+        let _ = h.join();
+        assert!(!path.exists(), "憑證無效才刪");
+    }
+
+    #[test]
+    fn 暫時錯誤的狀態碼與錯誤代碼過濾() {
+        for c in [408, 409, 425, 429] {
+            assert!(temporary_client_error(c), "{c}");
+        }
+        for c in [400, 401, 403, 404, 422, 500] {
+            assert!(!temporary_client_error(c), "{c}");
+        }
+        assert_eq!(token_error_code(r#"{"error_code":"refresh_token_not_found"}"#), "refresh_token_not_found");
+        assert_eq!(token_error_code(r#"{"error":"invalid_grant"}"#), "invalid_grant");
+        assert_eq!(token_error_code(r#"{"error_code":"a b@c.d"}"#), "abcd", "只留英數與底線");
+        assert_eq!(token_error_code("不是 JSON"), "");
     }
 
     // ----- 檔案儲存 -----
