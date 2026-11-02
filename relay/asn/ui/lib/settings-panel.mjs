@@ -207,6 +207,7 @@ export const SettingsPanel = {
                 <span class="dv-chev" aria-hidden="true">&rsaquo;</span>
               </li>
             </ul>
+            <cloud-invite-panel></cloud-invite-panel>
           </template>
           <section class="dv-dev" v-else :aria-label="curDev.label">
             <div class="dv-dev-h">
@@ -308,7 +309,6 @@ export const SettingsPanel = {
               </ul>
             </div>
           </section>
-          <cloud-invite-panel></cloud-invite-panel>
         </div>
       </template>
       <template v-if="catKey === 'look'">

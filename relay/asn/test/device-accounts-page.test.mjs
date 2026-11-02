@@ -146,7 +146,8 @@ test('對方 ASN 沒在線：切換鈕停用並寫原因；離線設備整體偏
 
 test('這台的頁籤：完整的帳號管理（切換、刪除、加入、自動加入、信任自己的設備）都在', async () => {
   const html = await render({ catKey: 'devices', dev: 'H' })
-  for (const w of ['a@b.c', 'p@b.c', '使用中', '切換', '刪除', '允許切換帳號', '邀請雲端代理', 'x@openai.test', '這台']) assert.ok(html.includes(w), `少了「${w}」`)
+  for (const w of ['a@b.c', 'p@b.c', '使用中', '切換', '刪除', '允許切換帳號', 'x@openai.test', '這台']) assert.ok(html.includes(w), `少了「${w}」`)
+  assert.ok(!html.includes('邀請雲端代理'), '雲端代理只放設備列表頁，細部頁沒有（asn真 在 #678 的要求）')
   const cur = /<li class="dv-acct[^"]*"[^>]*>(?:(?!<\/li>)[\s\S])*a@b\.c[\s\S]*?<\/li>/.exec(html)[0]
   assert.match(cur, /<button[^>]*disabled[^>]*>切換<\/button>/, '使用中的帳號不能再切換')
   for (const op of ['acct-switch', 'acct-remove', 'acct-allow-switch']) assert.ok(SettingsPanel.template.includes(`act('${op}'`), op)
