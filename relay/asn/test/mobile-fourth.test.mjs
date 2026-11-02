@@ -48,7 +48,7 @@ test('頁籤列：沒有第四頁籤時三個，有時四個；標題用內頁�
   assert.equal(tabLabel('chats'), '對話'); assert.equal(tabLabel('list'), '夥伴'); assert.equal(tabLabel('me'), '設置')
   assert.equal(tabLabel(PAGE_TAB, '通知'), '通知')
   assert.equal(pageTitle(settingPage('notify')), '通知')
-  assert.equal(pageTitle(acctPage('W')), '設備與帳號')
+  assert.equal(pageTitle(acctPage('W')), '設備')
   assert.equal(pageTitle(guidePage()), '使用指引')
   assert.notEqual(pageTitle(guidePage('faq')), '使用指引', '單篇用那一篇的標題'); assert.ok(pageTitle(guidePage('faq')))
   assert.equal(pageTitle(null), '')

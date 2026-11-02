@@ -25,7 +25,9 @@ export const ACCT_TEXT = {
 // 「選項」整頁＝電腦版「設備與帳號」：橫向設備頁籤 → 廠商卡片 → 帳號列。資料用電腦版同一份整理函式（device-tree），不另寫一套。
 // 手機拿得到的資料比電腦少：沒有「在線的 ASN 視窗」清單（在線只看名單狀態）、沒有本機帳號庫（手機本機頁籤只顯示）；
 // 別台電腦的帳號要逐台向後台讀（android_acct_list），所以只讀選到的那一台。
-export const ACCT_PAGE_TITLE = '設備與帳號'
+// 這一頁的標題跟著分頁變（#650）：設備或帳號，不再寫「設備與帳號」。在看某台設備的細部時一律是「設備」
+export const ACCT_TITLES = Object.freeze({ devices: '設備', accounts: '帳號' })
+export const acctPageTitle = tab => ACCT_TITLES[tab === 'accounts' ? 'accounts' : 'devices']
 const PHONE_LABEL = '這支手機'
 
 // reports：節點 → { loading, asnOnline, reportedAt, msg, list:[{vendor,email,plan,current}] }（手機自己存的形狀）

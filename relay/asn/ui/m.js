@@ -26,7 +26,7 @@ import { cleanPiModels } from './lib/pi-models.mjs'
 import { fetchRoster, ROSTER_POLL_MS, ROSTER_TEXT, usedOnText } from './lib/account-roster.mjs'
 import { PLAN_UNKNOWN, planLabel } from './lib/account-quota.mjs'
 import { INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL } from './lib/claude-accounts.mjs'
-import { ACCT_TEXT, ACCT_PAGE_TITLE, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS, ACCT_TABS, acctTabOf, acctSwitchTargets as acctSwitchTargetsOf } from './lib/mobile-acct.mjs'
+import { ACCT_TEXT, acctPageTitle, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS, ACCT_TABS, acctTabOf, acctSwitchTargets as acctSwitchTargetsOf } from './lib/mobile-acct.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, dropSlot, moveDevice, moveFlags, pruneRemoved, removeDevice, removedRows, reorderDevice, restoreDevice, showDevice, visibleRows, canRemoveRow, DEVICE_TEXT } from './lib/device-order.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
@@ -389,7 +389,7 @@ const app = createApp({
     const back = () => history.back()
     // 第四頁籤：目前的內頁與標題（頁籤列上的字就是內頁的標題）
     const fourthPage = computed(() => fourthSt.fourth?.page ?? null)
-    const fourthTitle = computed(() => (fourthPage.value?.kind === 'launch' ? lchTitle.value : pageTitle(fourthPage.value)))   // 開新夥伴的標題跟著畫面（送出後的進度畫面叫「開新夥伴」）
+    const fourthTitle = computed(() => (fourthPage.value?.kind === 'launch' ? lchTitle.value : fourthPage.value?.kind === 'acct' ? acctTitle.value : pageTitle(fourthPage.value)))   // 開新夥伴的標題跟著畫面（送出後的進度畫面叫「開新夥伴」）
     const tabLabel = t => tabLabelOf(t, fourthTitle.value)
     const closePage = () => fourthNav.closePage()   // 內頁的「關閉」：整個收起第四頁籤，回到進來之前的頁籤
     const openBanner = () => { const b = banner.value; banner.value = null; if (b) openChat(b.id) }
@@ -515,6 +515,7 @@ const app = createApp({
     const acctFlags = computed(() => moveFlags(acctDevs.value, info.node))
     const showHiddenDevice = key => { devPrefs.deviceShown = showDevice(devPrefs.deviceShown, key) }
     // 細部頁：只有 page 是 detail 且那台還在列表裡才有（被移除或消失就退回列表）
+    const acctTitle = computed(() => acctPageTitle(acctCur.value ? 'devices' : acctSw.tab))   // 標題跟著分頁（看某台細部時是「設備」）
     const acctCur = computed(() => (acctSw.page === 'detail' ? acctDevs.value.find(d => d.key === acctSw.node) ?? null : null))
     const acctCanRemove = computed(() => canRemoveRow(acctCur.value))
     // 設備活過來（又有在線視窗或未讀）就自動從永久移除名單解除
@@ -963,7 +964,7 @@ const app = createApp({
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
-      acctSw, setAcctTab, acctSwitchOn, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a), usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, ACCT_PAGE_TITLE, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
+      acctSw, setAcctTab, acctSwitchOn, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a), usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT,

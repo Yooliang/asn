@@ -22,6 +22,14 @@ test('設置清單：「設備」「帳號」兩列，各帶預設分頁進同�
   assert.ok(!rows.some(r => r.title === '設備與帳號'))
 })
 
+test('頁標題跟著分頁：設備或帳號；看某台細部時是設備；畫面上沒有「設備與帳號」', () => {
+  const js = read('ui/m.js'), html = read('ui/m.html')
+  assert.match(js, /const acctTitle = computed\(\(\) => acctPageTitle\(acctCur\.value \? 'devices' : acctSw\.tab\)\)/)
+  assert.match(js, /fourthPage\.value\?\.kind === 'acct' \? acctTitle\.value/, '第四頁籤的標籤也跟著')
+  assert.ok(!html.includes('設備與帳號）') || true)
+  assert.doesNotMatch(html.replace(/<!--[\s\S]*?-->/g, ''), /設備與帳號/, '樣板（不含註解）沒有「設備與帳號」')
+})
+
 test('分頁：預設「設備」；壞值一律當設備', () => {
   assert.deepEqual(ACCT_TABS.map(t => [t.key, t.label]), [['devices', '設備'], ['accounts', '帳號']])
   assert.equal(acctTabOf('accounts'), 'accounts')

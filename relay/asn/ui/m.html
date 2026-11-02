@@ -219,12 +219,12 @@
               <!-- 設備與帳號（替電腦切換 Claude 帳號）：先看設備列表，點一台進細部（多一層，返回鍵回列表）；選帳號 → 確認 → 送出並等對方電腦回報 -->
               <header class="m-head m-chathead">
                 <button class="m-icon-btn" type="button" aria-label="返回" @click="back"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M15 4.5L7.5 12 15 19.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-                <div class="m-head-tx"><div class="m-title">{{ ACCT_PAGE_TITLE }}</div></div>
+                <div class="m-head-tx"><div class="m-title">{{ acctTitle }}</div></div>
               </header>
           <div class="m-sheet-body m-dv">
             <template v-if="acctSw.phase === 'pick' && !acctCur">
               <!-- 上方兩個分頁（#650）：設備＝設備列表；帳號＝我的帳號（用在哪幾台、切換到…） -->
-              <div class="m-dv-seg" role="tablist" aria-label="設備與帳號">
+              <div class="m-dv-seg" role="tablist" aria-label="設備或帳號">
                 <button type="button" role="tab" class="m-dv-segbtn" :class="{ on: acctSw.tab === t.key }" :aria-selected="acctSw.tab === t.key ? 'true' : 'false'" v-for="t in ACCT_TABS" :key="t.key" :data-tab="t.key" @click="setAcctTab(t.key)">{{ t.label }}</button>
               </div>
               <!-- 我的帳號（#374）：按廠牌列出本人全部帳號；後台讀不到（acctMy 是 null）就寫提示 -->

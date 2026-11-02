@@ -9,14 +9,14 @@ import { normalizeNav, pageNav, tabList, tabNav } from './mobile.mjs'
 import { PAGE_TAB, fourthExpired, fourthOnTab, normalizePage, openFourth, pageLayers } from './mobile-fourth.mjs'
 import { mobileSettingTitle } from './mobile-settings.mjs'
 import { GUIDE_ENTRY_LABEL, phoneGuide } from './mobile-guides.mjs'
-import { ACCT_PAGE_TITLE } from './mobile-acct.mjs'
+import { acctPageTitle } from './mobile-acct.mjs'
 
 // 第四頁籤的標題：內頁的標題（指引單篇用那一篇的標題；開新夥伴第 2 步叫「設定這位夥伴」）
 export const LAUNCH_TITLE = { 1: '開新夥伴', 2: '設定這位夥伴' }
 export function pageTitle(raw) {
   const p = normalizePage(raw)
   if (!p) return ''
-  if (p.kind === 'acct') return ACCT_PAGE_TITLE
+  if (p.kind === 'acct') return acctPageTitle('devices')   // 預設；實際標題畫面上依分頁換（m.js 的 acctTitle）
   if (p.kind === 'launch') return LAUNCH_TITLE[p.step]
   if (p.kind === 'setting') return mobileSettingTitle(p.cat)
   return p.guide ? (phoneGuide(p.guide)?.guide.title ?? GUIDE_ENTRY_LABEL) : GUIDE_ENTRY_LABEL
