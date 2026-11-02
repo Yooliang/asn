@@ -1,4 +1,4 @@
-//! 收發室 worker 的 Claude 額度用完（todo-next-173）：扣住不 ack、通知、重置後依序重送。
+//! 收發室 worker 的 Claude 額度用完（todo-next-173）：扣住不 ack、通知、每小時試送最舊的一封，恢復後依序重送。
 //! 時間都從 TQ 起算（避開別的測試對 login_watch 逾時記錄的寫入），不用真的等待。
 use super::*;
 use super::rooms_launch::{room, rmsg, set_rooms};
@@ -79,11 +79,11 @@ async fn 通知_同寄件人一次_主人一次_收發室寄的與系統通知�
 }
 
 #[tokio::test]
-async fn 重置後依原收到順序重送_帶延遲抬頭_轉交逾時從重送重新計時() {
+async fn 恢復後依原收到順序重送_試送成功就解除_重置時間還沒到也一樣_帶延遲抬頭_逾時重新計時() {
     // 這個測試會真的讓轉交逾時並被記一筆；用較早的時間區段，免得別的測試「沒有被記到逾時」的檢查被它污染
     const TQ: u64 = T0 + 200 * 86_400_000;
     const RESETS_S: u64 = TQ / 1000 + 3 * 3600;
-    const UNTIL: u64 = RESETS_S * 1000 + 60_000;
+    let probe = TQ + 1000 + HOUR; // 扣住後每小時試送一次，第一次在一小時後（重置時間是三小時後）
     let mut h = harness(&[("T-乙", "idle")]).await;
     h.fr.put(mail(1, json!({})));
     h.core.pull("test", TQ).await;
@@ -92,71 +92,156 @@ async fn 重置後依原收到順序重送_帶延遲抬頭_轉交逾時從重送
     h.core.pull("test", TQ + 600_000).await;
     h.fr.put(mail(3, json!({"body": "這封因額度用完延遲，原本 03:33 收到\n真內文"})));
     h.core.pull("test", TQ + 900_000).await;
-    h.core.tick(UNTIL - 1).await;
-    assert_eq!(h.said().len(), 1, "還沒到重置時間");
-    h.core.tick(UNTIL).await;
+    h.core.tick(probe - 1).await;
+    assert_eq!(h.said().len(), 1, "還沒到試送時間");
+    // 試送：只送最舊的一封，其餘繼續扣住
+    h.core.tick(probe).await;
+    assert_eq!(h.said().len(), 2, "只試送一封");
+    assert_eq!(held_ids(&h).len(), 2);
+    h.core.tick(probe + 5000).await;
+    assert_eq!(h.said().len(), 2, "試送結果出來前不再送");
+    // 試送成功（worker 回報 SENT）＝額度其實恢復了：重置時間還沒到也立刻解除，下一個 tick 依原收到順序重送其餘的
+    h.core.on_worker_line(res(&format!("SENT {}", uid(1))), probe + 6000).await;
+    assert_eq!(h.core.inbox_hold_until(), None);
+    h.core.tick(probe + 10_000).await;
     let said = h.said();
-    assert_eq!(said.len(), 4, "原本那封＋三封重送");
+    assert_eq!(said.len(), 4, "原本那封＋試送那封＋後兩封重送");
     let f: Vec<(String, String)> = said[1..].iter().map(|t| (t.split("id=").nth(1).unwrap().split(' ').next().unwrap().to_string(), t.clone())).collect();
     assert_eq!(f.iter().map(|x| x.0.clone()).collect::<Vec<_>>(), vec![uid(1), uid(2), uid(3)], "依原收到順序");
     for (i, (_, t)) in f.iter().enumerate() {
         let recv = [TQ, TQ + 600_000, TQ + 900_000][i];
         let lines: Vec<&str> = t.lines().collect();
         assert!(lines[2].starts_with("[RELAY 來信]"), "{}", lines[2]);
-        assert_eq!(lines[3], quota_late_line(recv), "延遲抬頭在抬頭之後");
-        assert!(lines[3].contains(&taipei_hm(recv)));
+        assert!(lines[3].starts_with("寄件人："), "{}", lines[3]);
+        assert_eq!(lines[4], quota_late_line(recv), "延遲抬頭在「寄件人：」那行之後");
+        assert!(lines[4].contains(&taipei_hm(recv)));
     }
     // 信件內文裡手打的同樣字樣會被加「（內文）」
     assert!(f[2].1.contains("\n（內文）這封因額度用完延遲，原本 03:33 收到\n真內文"), "{}", f[2].1);
     // 轉交逾時從重送重新計時：重送後 119 秒內不逾時，之後才逾時
-    h.core.tick(UNTIL + 119_000).await;
+    h.core.tick(probe + 10_000 + 119_000).await;
     assert!(bodies(&h).iter().all(|b| !b.contains("逾時")));
-    h.core.tick(UNTIL + 121_000).await;
+    h.core.tick(probe + 10_000 + 121_000).await;
     assert!(bodies(&h).iter().filter(|b| b.contains("逾時")).count() >= 1);
 }
 
 #[tokio::test]
-async fn 重送成功後_ack_並照常等回覆() {
+async fn 語音通話的信_延遲抬頭放在語音說明之後() {
     let mut h = harness(&[("T-乙", "idle")]).await;
-    h.fr.put(mail(1, json!({})));
+    h.fr.put(mail(1, json!({"voice": true})));
     h.core.pull("test", TQ).await;
     h.core.on_worker_line(quota_line(RESETS_S), TQ + 1000).await;
-    h.core.tick(UNTIL).await;
-    assert!(h.fr.acked().is_empty());
-    h.core.on_worker_line(res(&format!("SENT {}", uid(1))), UNTIL + 500).await;
-    assert_eq!(h.fr.acked(), vec![uid(1)]);
-    assert_eq!(h.core.pending[0].state, State::Waiting);
-    // 恢復後再用完是新的一次：寄件人與主人會再通知一次
-    h.core.on_worker_line(quota_line((UNTIL / 1000) + 3 * 3600), UNTIL + 600).await;
-    h.fr.put(mail(2, json!({})));
-    h.core.pull("test", UNTIL + 700).await;
-    assert_eq!(notices_to(&h, "W", "W-政策"), 2);
+    h.core.tick(TQ + 1000 + HOUR).await;
+    let t = h.said()[1].clone();
+    let lines: Vec<&str> = t.lines().collect();
+    assert!(lines[3].starts_with("寄件人：") && lines[3].contains("語音通話"), "{}", lines[3]);
+    assert_eq!(lines[4], quota_late_line(TQ));
 }
 
 #[tokio::test]
-async fn 重送又撞額度_再扣住_不重複通知_延遲抬頭仍是原本收到的時間() {
+async fn worker_回報_fail_也代表在工作_解除扣住() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.fr.put(mail(1, json!({})));
+    h.fr.put(mail(2, json!({})));
+    h.core.pull("test", TQ).await;
+    h.core.on_worker_line(quota_line(RESETS_S), TQ + 1000).await;
+    assert_eq!(held_ids(&h).len(), 2);
+    h.core.tick(TQ + 1000 + HOUR).await;
+    h.core.on_worker_line(res(&format!("FAIL {} 找不到視窗", uid(1))), TQ + 2000 + HOUR).await;
+    assert_eq!(h.core.inbox_hold_until(), None);
+    h.core.tick(TQ + 3000 + HOUR).await;
+    assert_eq!(h.said().len(), 4, "原本兩封＋試送一封＋重送一封");
+}
+#[tokio::test]
+async fn 試送成功後_ack_並照常等回覆() {
     let mut h = harness(&[("T-乙", "idle")]).await;
     h.fr.put(mail(1, json!({})));
     h.core.pull("test", TQ).await;
     h.core.on_worker_line(quota_line(RESETS_S), TQ + 1000).await;
     h.core.tick(UNTIL).await;
     assert_eq!(h.said().len(), 2);
-    // 重送時 worker 又回額度用完（這次又給了新的時間）
-    let next_s = UNTIL / 1000 + 2 * 3600;
-    h.core.on_worker_line(quota_line(next_s), UNTIL + 2000).await;
+    assert!(h.fr.acked().is_empty());
+    h.core.on_worker_line(res(&format!("SENT {}", uid(1))), UNTIL + 500).await;
+    assert_eq!(h.fr.acked(), vec![uid(1)]);
+    assert_eq!(h.core.pending[0].state, State::Waiting);
+    // 恢復後再用完是新的一次：寄件人會再通知一次
+    h.core.on_worker_line(quota_line((UNTIL / 1000) + 3 * 3600), UNTIL + 600).await;
+    h.fr.put(mail(2, json!({})));
+    h.core.pull("test", UNTIL + 700).await;
+    assert_eq!(notices_to(&h, "W", "W-政策"), 2);
+}
+#[tokio::test]
+async fn 試送又撞額度_繼續扣住_暫停時間只延長_不重複通知_延遲抬頭仍是原本收到的時間() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", TQ).await;
+    h.core.on_worker_line(quota_line(RESETS_S), TQ + 1000).await;
+    let p1 = TQ + 1000 + HOUR;
+    h.core.tick(p1).await;
+    assert_eq!(h.said().len(), 2, "第一次試送");
+    // 試送時 worker 又回額度用完（這次又給了新的時間）
+    let next_s = p1 / 1000 + 2 * 3600;
+    h.core.on_worker_line(quota_line(next_s), p1 + 2000).await;
     assert_eq!(held_ids(&h), vec![uid(1)]);
     assert!(h.fr.acked().is_empty());
     assert_eq!(notices_to(&h, "W", "W-政策"), 1, "不重複通知寄件人");
-    assert_eq!(owner_notices(&h), 0);
-    h.core.tick(next_s * 1000 + 59_000).await;
-    assert_eq!(h.said().len(), 2, "新的重置時間前不重送");
-    h.core.tick(next_s * 1000 + 60_000).await;
+    assert_eq!(h.core.inbox_hold_until(), Some(next_s * 1000 + 60_000), "暫停時間延長");
+    h.core.tick(p1 + 2000 + HOUR - 1).await;
+    assert_eq!(h.said().len(), 2, "下一次試送前不送");
+    h.core.tick(p1 + 2000 + HOUR).await;
     let said = h.said();
     assert_eq!(said.len(), 3);
     assert!(said[2].contains(&quota_late_line(TQ)), "仍寫最初收到的時間：{}", said[2]);
     assert_eq!(crate::login_watch::forward_timeouts_since(TQ as i64 - 1), 0);
 }
 
+#[tokio::test]
+async fn 試送一直沒有回應_信不丟_不寄逾時_不_ack_回到扣住() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", TQ).await;
+    h.core.on_worker_line(quota_line(RESETS_S), TQ + 1000).await;
+    let p1 = TQ + 1000 + HOUR;
+    h.core.tick(p1).await;
+    assert_eq!(h.said().len(), 2);
+    h.core.tick(p1 + 121_000).await;
+    assert!(bodies(&h).iter().all(|b| !b.contains("逾時")), "{:?}", bodies(&h));
+    assert!(h.fr.acked().is_empty());
+    assert_eq!(held_ids(&h), vec![uid(1)], "試送沒回應＝試送失敗，信回到扣住");
+    assert!(h.core.inbox_hold_until().is_some());
+    assert_eq!(crate::login_watch::forward_timeouts_since(TQ as i64 - 1), 0);
+    h.core.tick(p1 + 121_000 + HOUR).await;
+    assert_eq!(h.said().len(), 3, "一小時後再試一次");
+}
+
+#[tokio::test]
+async fn 時間不明連撞三輪_暫停只會延長_不會中途報空值_最後恢復才報一次() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", TQ).await;
+    let unknown = |t: u64| quota_line(t / 1000 - 10); // 重置時間是過去＝不可信，當作不明
+    let mut a = TQ + 1000;
+    h.core.on_worker_line(unknown(a), a).await;
+    h.core.tick(a + 2000).await;
+    for _ in 0..3 {
+        let p = a + HOUR; // 每小時試送一次
+        h.core.tick(p).await;
+        a = p + 2000;
+        h.core.on_worker_line(unknown(a), a).await; // 試送又撞額度
+        h.core.tick(a + 2000).await;
+    }
+    let posts = hold_posts(&h);
+    assert_eq!(posts[0], Value::Null, "啟動的空值");
+    let vals: Vec<u64> = posts[1..].iter().map(|v| v.as_u64().expect("扣住期間不能報空值")).collect();
+    assert!(vals.len() >= 3 && vals.windows(2).all(|w| w[0] < w[1]), "只延長：{vals:?}");
+    // 最後真的恢復（worker 回報 SENT）才報空值
+    h.core.on_worker_line(res(&format!("SENT {}", uid(1))), a + 5000).await;
+    h.core.tick(a + 10_000).await;
+    let posts = hold_posts(&h);
+    assert_eq!(posts.iter().filter(|v| v.is_null()).count(), 2, "只有啟動與最後恢復兩次空值：{posts:?}");
+    assert_eq!(posts.last().unwrap(), &Value::Null);
+    assert_eq!(notices_to(&h, "W", "W-政策"), 1, "整段只通知寄件人一次");
+}
 #[tokio::test]
 async fn 假額度_時間不明或不可信_一小時後再試_信不丟不_ack() {
     let mut h = harness(&[("T-乙", "idle")]).await;
@@ -192,36 +277,68 @@ async fn 假額度_時間不明或不可信_一小時後再試_信不丟不_ack(
 }
 
 #[tokio::test]
-async fn 扣住有上限_超過的不收_不_ack_留在伺服器_另通知主人一次() {
+async fn 扣住有上限_超過的不收_不_ack_留在伺服器_旗標報給後台一次() {
     let mut h = harness(&[("T-乙", "idle")]).await;
     h.fr.put(mail(1, json!({})));
     h.core.pull("test", TQ).await;
     h.core.on_worker_line(quota_line(RESETS_S), TQ + 1000).await;
-    for n in 2..=205 {
+    for n in 2..=45 {
         h.fr.put(mail(n, json!({})));
     }
     h.core.pull("test", TQ + 2000).await;
-    assert_eq!(held_ids(&h).len(), 200);
-    assert!(h.core.pending.iter().all(|p| p.id != uid(205)));
+    assert_eq!(held_ids(&h).len(), 40, "個人信上限 40（信箱一頁 50 封，留 10 封空位）");
+    assert!(h.core.pending.iter().all(|p| p.id != uid(45)));
     assert!(h.fr.acked().is_empty());
     assert!(h.core.log.has("quota hold full"));
     assert_eq!(h.core.log.count("quota hold full"), 5, "每封只記一次 log（5 封超過）");
-    // 超過上限的旗標由名單回報帶給後台（後台寄給主人），每次額度用完只帶一次；順便帶設備名與扣住筆數
+    // 超過上限的旗標由名單回報帶給後台（後台寄給主人），每次額度用完只帶一次；順便帶扣住筆數
     h.core.tick(TQ + 4000).await;
     let posts = hold_bodies(&h);
     assert_eq!(posts.len(), 2, "啟動的空值一次、暫停開始（含超過上限）一次：{posts:?}");
-    assert_eq!((posts[1]["inbox_hold_count"].clone(), posts[1]["inbox_hold_capped"].clone()), (json!(200), json!(true)));
+    assert_eq!((posts[1]["inbox_hold_count"].clone(), posts[1]["inbox_hold_capped"].clone()), (json!(40), json!(true)));
     // 再拉一次：超過的仍留在伺服器，不重複報
     h.core.pull("test", TQ + 3000).await;
     h.core.tick(TQ + 9000).await;
     assert_eq!(hold_bodies(&h).len(), 2);
-    // 重置後處理掉扣住的，超過的下一次拉才收
-    h.core.tick(UNTIL).await;
-    assert_eq!(h.said().len(), 201);
-    h.core.pull("test", UNTIL + 10).await;
-    assert!(h.core.pending.iter().any(|p| p.id == uid(205)));
+    // 試送成功解除後處理掉扣住的，超過的下一次拉才收
+    h.core.tick(TQ + 1000 + HOUR).await;
+    h.core.on_worker_line(res(&format!("SENT {}", uid(1))), TQ + 2000 + HOUR).await;
+    h.core.tick(TQ + 3000 + HOUR).await;
+    assert_eq!(h.said().len(), 41, "原本 1 封＋試送 1 封＋重送 39 封");
+    h.core.pull("test", TQ + 4000 + HOUR).await;
+    assert!(h.core.pending.iter().any(|p| p.id == uid(45)));
 }
 
+#[tokio::test]
+async fn 扣住的信占滿信箱一頁時_超過上限的視窗名被排除_其他引擎視窗的信照常處理() {
+    let mut h = harness(&[("T-乙", "idle"), ("T-丙", "idle")]).await;
+    {
+        let mut s = h.fr.st.lock().unwrap();
+        s.inbox_page = 50;
+        s.honor_exclude = true;
+    }
+    // 另一種引擎的視窗（不經收發室 worker，額度用完不受影響）；沒載入引擎，轉交會失敗，但能證明這封沒被額度閘門扣住
+    let mut g = h.core.roster[0].clone();
+    g.name = "T-G".into();
+    g.engine = "gemini".into();
+    h.core.roster.push(g);
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", TQ).await;
+    h.core.on_worker_line(quota_line(RESETS_S), TQ + 1000).await;
+    // T-乙 的信先排滿扣住上限（40 封）；T-丙 的信 55 封全部超過上限、不收，也不 ack，會一直留在信箱裡；最後一封是其他引擎視窗的
+    for n in 2..=40 {
+        h.fr.put(mail(n, json!({})));
+    }
+    for n in 41..=95 {
+        h.fr.put(mail(n, json!({"to_agent": "T-丙"})));
+    }
+    h.fr.put(mail(96, json!({"to_agent": "T-G"})));
+    h.core.pull("test", TQ + 2000).await;
+    assert_eq!(held_ids(&h).len(), 40);
+    // 第一頁（50 封）是 40 封扣住的加 10 封 T-丙 的；T-丙 要和 T-乙 一起被排除，下一輪才拉得到後面其他視窗的信
+    assert!(h.core.log.has(&format!("cannot hand id={}", uid(96))), "第 96 封（其他引擎視窗）有被拉到、沒被額度閘門扣住");
+    assert!(!held_ids(&h).contains(&uid(96)));
+}
 #[tokio::test]
 async fn 扣住的信存檔_重啟後與重新拉到的同一封依_id_去重_內文不進檔案() {
     let mut h = harness(&[("T-乙", "idle")]).await;
@@ -241,20 +358,19 @@ async fn 扣住的信存檔_重啟後與重新拉到的同一封依_id_去重_�
     c2.pull("test", TQ + 6000).await;
     c2.pull("test", TQ + 7000).await;
     assert_eq!(c2.pending.len(), 1);
-    assert!(sink2.said.lock().unwrap().is_empty(), "重置時間前不重送");
+    assert!(sink2.said.lock().unwrap().is_empty(), "試送時間前不送");
     assert!(c2.inbox_hold_until().is_some(), "重啟後重置時間還在，繼續扣住");
-    c2.tick(UNTIL).await;
-    // 補回內文後重送：抬頭寫原本收到的時間（從存檔的 t0）
+    c2.tick(TQ + 5000 + HOUR).await; // 重啟後第一次試送
+    // 補回內文後試送：抬頭寫原本收到的時間（從存檔的 t0）
     let said = sink2.said.lock().unwrap().clone();
     assert_eq!(said.len(), 1, "只送一次");
-    assert_eq!(said[0].lines().nth(3).unwrap(), quota_late_line(TQ));
+    assert_eq!(said[0].lines().nth(4).unwrap(), quota_late_line(TQ));
     assert!(said[0].contains("機密內文不該進檔案"));
     assert_eq!(c2.pending.len(), 1);
     assert!(h.fr.acked().is_empty());
 }
-
 #[tokio::test]
-async fn 群組_額度期間扣住_重置後帶延遲抬頭轉交_轉交中的群組訊息撞額度也改扣住() {
+async fn 群組_額度期間扣住_只有群組訊息時也能試送_恢復後帶延遲抬頭轉交_轉交中的群組訊息撞額度也改扣住() {
     let mut h = harness(&[("T-視窗甲", "idle")]).await;
     let mine = json!([{"member": "T~T-視窗甲", "read_seq": 1}]);
     set_rooms(&h, vec![room(vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}}))], mine.clone())]);
@@ -270,14 +386,20 @@ async fn 群組_額度期間扣住_重置後帶延遲抬頭轉交_轉交中的�
     assert_eq!(h.said().len(), 1);
     assert!(h.fr.st.lock().unwrap().room_posts.is_empty());
     assert_eq!(bodies(&h).iter().filter(|b| b.contains("額度用完")).count(), 0, "群組不發即時通知（主人通知由後台寄）");
-    // 重置後依序轉交，帶延遲抬頭（原本收到的時間）
-    h.core.tick(UNTIL).await;
+    // 沒有個人信，只有群組訊息被扣住：每小時也要能試送最舊的一則
+    h.core.tick(TQ + 1000 + HOUR).await;
+    let said = h.said();
+    assert_eq!(said.len(), 2, "試送最舊的 #2：{said:?}");
+    assert!(said[1].contains("#2") && said[1].contains(&quota_late_line(TQ)));
+    // 試送成功（worker 回報 SENT）＝恢復：其餘的依序轉交，帶延遲抬頭
+    let id = crate::bridge::rooms::room_uuid("R1", 2, "T~T-視窗甲");
+    h.core.on_worker_line(res(&format!("SENT {id}")), TQ + 2000 + HOUR).await;
+    assert_eq!(h.core.inbox_hold_until(), None);
+    h.core.tick(TQ + 3000 + HOUR).await;
     let said = h.said();
     assert_eq!(said.len(), 3, "{said:?}");
-    assert!(said[1].contains("#2") && said[1].contains(&quota_late_line(TQ)));
     assert!(said[2].contains("#3") && said[2].contains(&quota_late_line(TQ + 2000)));
 }
-
 #[tokio::test]
 async fn 群組_扣住超過保留期_不轉交_恢復時改發一則摘要() {
     let mut h = harness(&[("T-視窗甲", "idle")]).await;
@@ -286,9 +408,11 @@ async fn 群組_扣住超過保留期_不轉交_恢復時改發一則摘要() {
     set_rooms(&h, vec![room(vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}})), rmsg(3, json!({"forMe": {"T-視窗甲": true}})), rmsg(4, json!({"forMe": {"T-視窗甲": true}}))], mine)]);
     h.core.pull_rooms(TQ + 1000).await;
     assert!(h.said().is_empty());
-    // 過了 24 小時保留期才恢復
+    // 過了 24 小時保留期才恢復（全部都超過保留期、沒有可試送的：到了重置時間就解除）
     let late = TQ + 25 * HOUR;
     h.core.tick(late).await;
+    assert_eq!(h.core.inbox_hold_until(), None);
+    h.core.tick(late + 1000).await;
     let said = h.said();
     assert_eq!(said.len(), 1, "{said:?}");
     assert!(said[0].contains("額度用完期間群組 專案群 有 3 則沒有轉交，範圍 #2～#4，要看請讀群組"), "{}", said[0]);
@@ -298,7 +422,6 @@ async fn 群組_扣住超過保留期_不轉交_恢復時改發一則摘要() {
     h.core.tick(late + 60_000).await;
     assert_eq!(h.said().len(), 1);
 }
-
 #[tokio::test]
 async fn 內文行首手打延遲抬頭字樣_轉交時加內文前綴() {
     let mut h = harness(&[("T-乙", "idle")]).await;
@@ -329,20 +452,21 @@ async fn 收信暫停時間回報給後台_扣住時送一次值_恢復時送一
     assert_eq!(h.core.inbox_hold_until(), Some(UNTIL));
     h.core.tick(TQ + 5000).await;
     h.core.tick(TQ + 10_000).await;
-    h.core.tick(TQ + 3 * HOUR - 120_000).await;
+    h.core.tick(TQ + HOUR).await;
     assert_eq!(hold_posts(&h), vec![Value::Null, json!(UNTIL)], "扣住時只送一次值，不重複");
     let b = &hold_bodies(&h)[1];
     assert_eq!((b["inbox_hold_count"].clone(), b.get("inbox_hold_computer").cloned()), (json!(1), None), "只帶扣住筆數，設備名由後台讀");
     assert!(b.get("inbox_hold_capped").is_none());
-    // 重置後重送：恢復時送一次空值
-    h.core.tick(UNTIL).await;
-    h.core.tick(UNTIL + 5000).await;
+    // 一小時後試送；試送成功才恢復：送一次空值
+    h.core.tick(TQ + 1000 + HOUR).await;
+    h.core.on_worker_line(res(&format!("SENT {}", uid(1))), TQ + 2000 + HOUR).await;
+    h.core.tick(TQ + 5000 + HOUR).await;
+    h.core.tick(TQ + 10_000 + HOUR).await;
     assert_eq!(h.core.inbox_hold_until(), None);
     assert_eq!(hold_posts(&h), vec![Value::Null, json!(UNTIL), Value::Null]);
 }
-
 #[tokio::test]
-async fn 額度重置時間存檔_重啟後還沒到就繼續扣住_不重送_範圍不對當作沒有() {
+async fn 額度重置時間存檔_重啟後還沒到就繼續扣住_只試送一封_範圍不對當作沒有() {
     let mut h = harness(&[("T-乙", "idle")]).await;
     h.fr.put(mail(1, json!({})));
     h.core.pull("test", TQ).await;
@@ -356,16 +480,19 @@ async fn 額度重置時間存檔_重啟後還沒到就繼續扣住_不重送_�
     c2.refresh_roster(TQ + 5000).await;
     c2.pull("test", TQ + 6000).await;
     c2.tick(TQ + 7000).await;
-    c2.tick(UNTIL - 1).await;
-    assert!(sink2.said.lock().unwrap().is_empty(), "重置時間前不重送");
+    assert!(sink2.said.lock().unwrap().is_empty(), "試送時間前不送");
     h.fr.put(mail(2, json!({})));
     c2.pull("test", TQ + 8000).await;
     assert!(sink2.said.lock().unwrap().is_empty(), "重啟後新進的信也扣住");
     assert!(c2.pending.iter().all(|p| p.state == State::Held));
     assert_eq!(notices_to(&h, "W", "W-政策"), 2, "已通知過的寄件人記錄不存檔：重啟後新進的信會再通知一次，之後同一次不再重複");
-    c2.tick(UNTIL).await;
-    assert_eq!(sink2.said.lock().unwrap().len(), 2, "到了才重送");
+    // 重啟後的第一次試送：只送最舊的一封（不是全部）
+    c2.tick(TQ + 5000 + HOUR).await;
+    assert_eq!(sink2.said.lock().unwrap().len(), 1);
+    c2.on_worker_line(res(&format!("SENT {}", uid(1))), TQ + 6000 + HOUR).await;
     assert_eq!(c2.inbox_hold_until(), None);
+    c2.tick(TQ + 10_000 + HOUR).await;
+    assert_eq!(sink2.said.lock().unwrap().len(), 2, "恢復後重送其餘的");
     assert!(!std::fs::read_to_string(h.work.path().join("pending.json")).unwrap().contains("quotaUntil"));
     // 範圍不對（已過去、超過 8 天）：當作沒有
     for bad in [TQ, TQ + 9 * 86_400_000] {

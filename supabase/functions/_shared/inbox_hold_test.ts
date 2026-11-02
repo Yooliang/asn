@@ -15,6 +15,7 @@ Deno.test("守門：relay 的 roster 動作在名單寫入之後才處理 inbox_
   assert(blk.indexOf("asn_relay_set_inbox_hold") > blk.indexOf('db.rpc("asn_relay_roster"'), "名單先寫");
   const part = blk.slice(blk.indexOf('if ("inbox_hold_until" in b)'), blk.indexOf("syncNodeAuto"));
   assert(!part.includes("return json("), "收信暫停失敗不擋名單");
+  assert(part.includes("hd?.notify === \"failed\"") && part.includes("console.warn(\"set_inbox_hold notify\""), "寄信失敗或被限流要記 warn");
 });
 
 Deno.test("sanitizeInboxHoldExtra：筆數 0～99999、旗標只認 true，設備名不收", () => {

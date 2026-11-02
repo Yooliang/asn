@@ -323,7 +323,8 @@ Deno.serve(async (req) => {
         const { data: hd, error: he } = await db.rpc("asn_relay_set_inbox_hold", { p_node: me.id, p_until: hold, p_held: x.held, p_capped: x.capped });
         if (he) console.warn("set_inbox_hold", me.id, he.message ?? he);
         else if (hd?.error) console.warn("set_inbox_hold", me.id, hd.error);
-        else for (const t of new Set<string>((Array.isArray(hd?.bell_topics) ? hd.bell_topics : []).filter((t: unknown): t is string => typeof t === "string" && t.length > 0))) await ring(t);
+        else if (hd?.notify === "failed" || hd?.notify === "rate_limited") console.warn("set_inbox_hold notify", me.id, hd.notify);
+        if (!he && !hd?.error) for (const t of new Set<string>((Array.isArray(hd?.bell_topics) ? hd.bell_topics : []).filter((t: unknown): t is string => typeof t === "string" && t.length > 0))) await ring(t);
       }
     }
     // 名單裡視窗帶 renamed_from（改名前的名字）：先把群組成員改名，再做自動入群（否則新名會被當成新視窗、舊名被標離開）

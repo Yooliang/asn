@@ -206,11 +206,14 @@ impl Origin {
     }
 }
 
-/// 額度用完時最多扣住幾筆（個人信＋群組訊息合計）；超過的信不收（不 ack，留在伺服器下次再拉）
-const QUOTA_HOLD_MAX: usize = 200;
+/// 額度用完時最多扣住幾封個人信；超過的信不收（不 ack，留在伺服器下次再拉）。
+/// 比信箱一頁（INBOX_PAGE）少 10 封：扣住的信不 ack 會一直排在信箱最前面，不留空位整頁會被它們占滿
+const QUOTA_MAIL_MAX: usize = INBOX_PAGE - 10;
+/// 額度用完時最多扣住幾則群組訊息（群組在伺服器端、靠游標讀，不占信箱）
+const QUOTA_ROOM_MAX: usize = 200;
 /// 額度重置時間加的緩衝（毫秒）
 const QUOTA_MARGIN_MS: u64 = 60_000;
-/// 讀不到重置時間（或值不可信）時，多久後再試（毫秒）
+/// 讀不到重置時間（或值不可信）時，多久後再試；扣住期間的試送也是每隔這麼久一次（毫秒）
 const QUOTA_RETRY_MS: u64 = 3_600_000;
 
 /// 額度用完而扣住的個人信（內文只在記憶體；重啟後靠重新拉到的同一封補回）
@@ -329,6 +332,11 @@ pub struct Core {
     hold_try_at: u64,
     /// 超過上限的旗標已經報給後台（每次額度用完只報一次）
     cap_sent: bool,
+    /// 扣住期間下一次試送的時間（毫秒；只存記憶體）
+    next_probe_at: u64,
+    /// 試送中的那一封（信件編號或群組訊息編號）；試送時放行額度閘門
+    probe_id: Option<String>,
+    probing: bool,
 }
 
 /// 自動回信模式：交辦後這段時間內，就算 worker 這一輪的結果已回來，仍視為忙碌（它可能正接著處理排隊中的下一則）
@@ -377,7 +385,7 @@ impl Core {
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
-            quota_until: 0, quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), late_from: None, hold_sent: None, hold_try_at: 0, cap_sent: false,
+            quota_until: 0, quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), late_from: None, hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probing: false,
         };
         c.restore();
         c
@@ -455,6 +463,7 @@ impl Core {
         if st.quota_until > self.now && st.quota_until <= self.now + 8 * 86_400_000 {
             self.quota_until = st.quota_until;
             self.quota_ep = Some(Default::default());
+            self.next_probe_at = (self.now + QUOTA_RETRY_MS).min(st.quota_until);
             self.log.line(&format!("quota hold restored: until {}", super::mail::taipei_hm(st.quota_until)));
         }
     }
@@ -983,9 +992,9 @@ impl Core {
             }
         }
         // 收發室 worker 額度還沒重置：先扣住（不送 worker、不 ack），重置後依序重送
-        if self.quota_active(self.now) && self.via_worker(&target) {
-            self.quota_hold_mail(p, &m, raw).await;
-            return None;
+        if self.quota_active(self.now) && self.via_worker(&target) && !self.probing {
+            // 已達扣住上限的信不收：回傳收件視窗名，下一輪拉信排除它，才拉得到信箱裡其他視窗的信
+            return if self.quota_hold_mail(p, &m, raw).await { None } else { Some(target) };
         }
         let late = self.late_from.take();
         let origin = Origin::of(&p);
@@ -998,11 +1007,7 @@ impl Core {
         let body = attach::notes_for(&mail::escape_body(&m.body), &m.attachments, self.cfg.attach_cmd.as_deref());
         // 自動回信的 worker 由橋代寄回答：不附「請用 asn_send 回信」那行
         let pre_engine = if self.is_respond(&target) { "respond".to_string() } else { self.engine_of(&target) };
-        let text = format!("{}\n{}{}{}", mail_head(&m, &self.engine_label_of(&target)), mail::preamble(&m, &pre_engine),if note.is_empty() { String::new() } else { format!("{note}\n") }, body);
-        let text = match late {
-            Some(t) => Self::with_late_line(text, t),
-            None => text,
-        };
+        let text = format!("{}\n{}{}{}", mail_head(&m, &self.engine_label_of(&target)), mail::preamble_late(&m, &pre_engine, late),if note.is_empty() { String::new() } else { format!("{note}\n") }, body);
         let text = self.with_path_line(text, &target);
         match self.deliver(&m.id, &target, &text) {
             Ok(_) => {
@@ -1087,13 +1092,18 @@ impl Core {
                 }
                 for ev in r.events {
                     match ev {
-                        WorkerEvent::Sent(id) => self.on_sent(&id).await,
-                        WorkerEvent::Fail(id, reason) => self.on_fail(&id, &reason).await,
+                        WorkerEvent::Sent(id) => {
+                            self.quota_release("worker reported sent"); // worker 真的在工作＝額度恢復
+                            self.on_sent(&id).await
+                        }
+                        WorkerEvent::Fail(id, reason) => {
+                            self.quota_release("worker reported fail");
+                            self.on_fail(&id, &reason).await
+                        }
                         WorkerEvent::Quota { resets_at, kind } => self.on_quota(resets_at, &kind).await,
                         WorkerEvent::Reply { from, text } => {
-                            if self.quota_until == 0 {
-                                self.quota_ep = None; // 自動回信模式：worker 真的回答了＝額度恢復，下次用完再通知
-                            }
+                            self.quota_release("worker replied"); // 自動回信模式：worker 真的回答了＝額度恢復，下次用完再通知
+                            self.quota_ep = None;
                             // 自動回信：worker 只扮一個視窗，名字以設定為準（不信模型寫的 from）
                             let from = self.cfg.respond.clone().unwrap_or(from);
                             self.on_reply(&from, &text, None).await
@@ -1465,61 +1475,67 @@ impl Core {
     /// 到期的順位訊息：重讀群組（自該則之後），把延遲期間新到的訊息附上再轉交。轉交成功才移除；失敗退避 30 秒再試，連續 120 次放棄
     pub async fn release_held(&mut self, now: u64) {
         self.now = now;
-        // 收發室 worker 額度還沒重置：整批先不轉交
-        if self.quota_active(now) {
+        // 收發室 worker 額度扣住中：整批先不轉交（試送由 quota_probe 一次一則）
+        if self.quota_until > 0 {
             return;
         }
-        let due: Vec<Held> = self.held.items().iter().filter(|h| h.due <= now).cloned().collect();
+        // 額度扣住過的群組訊息（held_at > 0）恢復後馬上轉交，不看原本的到期時間
+        let due: Vec<Held> = self.held.items().iter().filter(|h| h.due <= now || h.held_at > 0).cloned().collect();
         let mut expired: Vec<Held> = vec![];
         for h in due {
-            if self.idx(&rooms::room_uuid(&h.room_id, h.seq, &h.member)).is_some() {
-                self.drop_held(&h, "already handed");
-                continue;
-            }
-            // 額度扣住超過保留期：不轉交，恢復時改發一則摘要
-            if h.held_at > 0 && now.saturating_sub(h.held_at) > self.cfg.late_keep_ms {
-                self.drop_held(&h, "quota hold over keep time: summarized");
-                expired.push(h);
-                continue;
-            }
-            if !self.roster_ok {
-                continue;
-            }
-            let window = rooms::member_window(&h.member);
-            let as_agent = if window.is_empty() { String::new() } else { format!("&as_agent={}", crate::relay::encode_component(&window)) };
-            let since = h.seq.saturating_sub(1);
-            let res = self.relay.api(&format!("room_read&room={}{as_agent}&since={since}&limit=100", crate::relay::encode_component(&h.room_id)), None).await;
-            let mut delivered = false;
-            match res {
-                Err(e) => self.log.line(&format!("held room_read failed room={} #{}: {e}", h.room_id, h.seq)),
-                Ok(r) => {
-                    let mut msgs: Vec<Value> = r.get("messages").and_then(Value::as_array).cloned().unwrap_or_default();
-                    msgs.sort_by_key(|m| json_u64(m.get("seq")));
-                    let Some(orig) = msgs.iter().find(|m| json_u64(m.get("seq")) == h.seq).cloned() else {
-                        self.drop_held(&h, "message no longer readable");
-                        continue;
-                    };
-                    let extras: Vec<Value> = msgs.into_iter().filter(|m| json_u64(m.get("seq")) > h.seq && m.get("from").and_then(Value::as_str) != Some(h.member.as_str())).collect();
-                    let mut orig = orig;
-                    orig["wake"] = json!({ "rank": h.wake.rank, "total": h.wake.total, "before": h.wake.before });
-                    let room = json!({ "id": h.room_id, "name": h.room_name });
-                    self.late_from = (h.held_at > 0).then_some(h.held_at);
-                    delivered = self.deliver_room_msg(&room, &h.member, &orig, h.delay_ms.max(1), &extras).await;
-                    self.late_from = None;
-                }
-            }
-            if delivered {
-                if let Err(e) = self.held.remove(&h.room_id, h.seq, &h.member) {
-                    self.log.line(&format!("rooms held save failed: {e}"));
-                }
-            } else if h.fails + 1 >= 120 {
-                self.drop_held(&h, "gave up after repeated failures");
-            } else if let Err(e) = self.held.defer(&h.room_id, h.seq, &h.member, now + 30_000) {
-                self.log.line(&format!("rooms held save failed: {e}"));
-            }
+            self.release_held_item(&h, now, &mut expired).await;
         }
         if !expired.is_empty() {
             self.quota_room_summary(&expired);
+        }
+    }
+
+    /// 轉交一則排隊中的群組訊息（超過額度保留期的放進 expired，由呼叫端發摘要）
+    async fn release_held_item(&mut self, h: &Held, now: u64, expired: &mut Vec<Held>) {
+        if self.idx(&rooms::room_uuid(&h.room_id, h.seq, &h.member)).is_some() {
+            self.drop_held(h, "already handed");
+            return;
+        }
+        // 額度扣住超過保留期：不轉交，恢復時改發一則摘要
+        if h.held_at > 0 && now.saturating_sub(h.held_at) > self.cfg.late_keep_ms {
+            self.drop_held(h, "quota hold over keep time: summarized");
+            expired.push(h.clone());
+            return;
+        }
+        if !self.roster_ok {
+            return;
+        }
+        let window = rooms::member_window(&h.member);
+        let as_agent = if window.is_empty() { String::new() } else { format!("&as_agent={}", crate::relay::encode_component(&window)) };
+        let since = h.seq.saturating_sub(1);
+        let res = self.relay.api(&format!("room_read&room={}{as_agent}&since={since}&limit=100", crate::relay::encode_component(&h.room_id)), None).await;
+        let mut delivered = false;
+        match res {
+            Err(e) => self.log.line(&format!("held room_read failed room={} #{}: {e}", h.room_id, h.seq)),
+            Ok(r) => {
+                let mut msgs: Vec<Value> = r.get("messages").and_then(Value::as_array).cloned().unwrap_or_default();
+                msgs.sort_by_key(|m| json_u64(m.get("seq")));
+                let Some(orig) = msgs.iter().find(|m| json_u64(m.get("seq")) == h.seq).cloned() else {
+                    self.drop_held(h, "message no longer readable");
+                    return;
+                };
+                let extras: Vec<Value> = msgs.into_iter().filter(|m| json_u64(m.get("seq")) > h.seq && m.get("from").and_then(Value::as_str) != Some(h.member.as_str())).collect();
+                let mut orig = orig;
+                orig["wake"] = json!({ "rank": h.wake.rank, "total": h.wake.total, "before": h.wake.before });
+                let room = json!({ "id": h.room_id, "name": h.room_name });
+                self.late_from = (h.held_at > 0).then_some(h.held_at);
+                delivered = self.deliver_room_msg(&room, &h.member, &orig, h.delay_ms.max(1), &extras).await;
+                self.late_from = None;
+            }
+        }
+        if delivered {
+            if let Err(e) = self.held.remove(&h.room_id, h.seq, &h.member) {
+                self.log.line(&format!("rooms held save failed: {e}"));
+            }
+        } else if h.fails + 1 >= 120 {
+            self.drop_held(h, "gave up after repeated failures");
+        } else if let Err(e) = self.held.defer(&h.room_id, h.seq, &h.member, now + 30_000) {
+            self.log.line(&format!("rooms held save failed: {e}"));
         }
     }
 
@@ -1733,6 +1749,12 @@ impl Core {
             let Some(i) = self.idx(&id) else { continue };
             let p = self.pending[i].clone();
             if p.state == State::Forwarding && now.saturating_sub(p.t0) > self.cfg.forward_timeout_ms {
+                // 額度扣住期間試送的那一封沒等到 worker 的任何回報：當作試送失敗，信回到扣住（不寄逾時通知、不 ack、不記轉交逾時），一小時後再試
+                if self.probe_id.as_deref() == Some(id.as_str()) {
+                    self.log.line(&format!("quota probe id={id} got no answer: back to held"));
+                    self.on_quota(None, "probe timeout").await;
+                    continue;
+                }
                 self.pending[i].state = State::Done;
                 if p.room.is_some() {
                     self.log.line(&format!("room forward timeout id={id} -> {}", p.target));

@@ -225,7 +225,16 @@ pub fn sends_own_mail(engine_id: &str) -> bool {
 
 /// 抬頭之後、內文之前的說明行（各行以換行結尾）：寄件人說明（語音通話時後面接固定提醒）＋（reply=yes 才有的）要回信指示＋保持能回應的提醒
 pub fn preamble(m: &Mail, engine_id: &str) -> String {
+    preamble_late(m, engine_id, None)
+}
+
+/// 同 preamble；late＝這封因額度用完延遲、原本收到的時間（毫秒）時，在「寄件人：」那行（含語音說明）之後加一行延遲說明（收發室寫的）
+pub fn preamble_late(m: &Mail, engine_id: &str, late: Option<u64>) -> String {
     let mut out = format!("{}{}\n", sender_line(m), if m.voice { VOICE_NOTE } else { "" });
+    if let Some(t) = late {
+        out += &quota_late_line(t);
+        out.push('\n');
+    }
     if sends_own_mail(engine_id) {
         if let Some(r) = reply_line(m) {
             out += &r;

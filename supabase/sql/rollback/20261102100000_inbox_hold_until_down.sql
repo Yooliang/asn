@@ -1,5 +1,5 @@
--- 退回 20261102100000_inbox_hold_until.sql：拿掉設定函式與欄位（欄位裡的值只是暫存的提示，丟掉不影響其他功能）。
+-- 退回 20261102100000_inbox_hold_until.sql：只拿掉設定函式，欄位 relay.nodes.inbox_hold_until 刻意保留——
+-- #648 的 asn_relay_inbox_watch 也讀這個欄位，丟掉欄位會讓它壞掉；欄位只是可空的提示時間，留著無害。
 begin;
 drop function if exists public.asn_relay_set_inbox_hold(text, timestamptz, integer, boolean);
-alter table relay.nodes drop column if exists inbox_hold_until;
 commit;

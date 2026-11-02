@@ -24,7 +24,9 @@ test('靜態：可空欄位、單一函式、只授權 service_role、回復檔�
   assert.match(mig, /public\.asn_relay_send\(p_node, v_agent, public\.asn_person_alias\(v_owner\), null, v_body, null, false, null, false\)/, 'reply=no、收件人只能是節點擁有者')
   assert.doesNotMatch(mig, /grant [^;]*to (anon|authenticated|public)|drop |create table|truncate/i)
   assert.ok(down.includes(`drop function if exists public.${SIG};`))
-  assert.match(down, /drop column if exists inbox_hold_until/)
+  assert.doesNotMatch(down, /drop column/i, '欄位刻意保留：#648 的 asn_relay_inbox_watch 也讀它')
+  assert.match(down, /asn_relay_inbox_watch/)
+  assert.match(mig, /'notify', v_notify/)
 })
 
 let PGlite = null
@@ -37,11 +39,11 @@ async function setup() {
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, status text default 'active', owner_user uuid, name text);
     create table relay.messages(id uuid default gen_random_uuid() primary key, fanout_id uuid, from_node text, from_agent text, to_node text, body text, expects_reply boolean, created_at timestamptz default now());
-    insert into relay.nodes(id, owner_user, name) values ('H', '${OWNER}', '家用機'), ('W', '${OWNER}', '工作機'), ('X', null, '無主');
+    insert into relay.nodes(id, owner_user, name) values ('H', '${OWNER}', '家用機'), ('W', '${OWNER}', '工作機'), ('X', null, '無主'), ('F', '${OWNER}', '壞掉的');
     create function public.asn_user_owns_node(u uuid, n text) returns boolean language sql as $$ select n <> 'W' $$;
     create function public.asn_person_alias(u uuid) returns text language sql as $$ select 'u:owner' $$;
     create function public.asn_relay_send(a text, b text, c text, d text, e text, f uuid, g boolean, h uuid, i boolean) returns jsonb language plpgsql as $$
-      begin insert into relay.messages(from_node, from_agent, to_node, body, expects_reply) values (a, b, c, e, g); return jsonb_build_object('bell_topics', jsonb_build_array('bell-1')); end $$;`)
+      begin if a = 'F' then return jsonb_build_object('error', 'boom'); end if; insert into relay.messages(from_node, from_agent, to_node, body, expects_reply) values (a, b, c, e, g); return jsonb_build_object('bell_topics', jsonb_build_array('bell-1')); end $$;`)
   await db.exec(mig)
   return db
 }
@@ -72,15 +74,15 @@ test('實跑（pglite）：只動自己的節點、值夾在 now() 到 now()+8 �
 test('實跑（pglite）：暫停開始寄一封給擁有者；延長與重複設值不再寄；清掉後再開始才寄；超過上限另寄一封；每小時最多 3 封', { skip }, async () => {
   const db = await setup()
   const r = await set(db, 'H', ahead(3), 5)
-  assert.deepEqual(r.bell_topics, ['bell-1'])
+  assert.deepEqual([r.bell_topics, r.notify], [['bell-1'], 'sent'])
   let m = await msgs(db, 'H')
   assert.equal(m.length, 1)
   assert.equal(m[0].to_node, 'u:owner', '收件人只能是節點擁有者')
   assert.equal(m[0].expects_reply, false)
   assert.match(m[0].body, /^這台（家用機）的收發室 Claude 額度用完，約 \d\d:\d\d（台北）重置；扣住 5 封，重置後自動轉交。$/)
   // 暫停期間重複設值、延長：不再寄
-  await set(db, 'H', ahead(3), 6)
-  await set(db, 'H', ahead(5), 9)
+  assert.equal((await set(db, 'H', ahead(3), 6)).notify, 'skipped')
+  assert.equal((await set(db, 'H', ahead(5), 9)).notify, 'skipped')
   assert.equal((await msgs(db, 'H')).length, 1)
   // 超過上限：另寄一封說明（暫停進行中）
   await set(db, 'H', ahead(5), 200, true)
@@ -93,7 +95,7 @@ test('實跑（pglite）：暫停開始寄一封給擁有者；延長與重複�
   await set(db, 'H', ahead(2), 1)
   assert.equal((await msgs(db, 'H')).length, 3)
   await set(db, 'H', null)
-  await set(db, 'H', ahead(2), 1)
+  assert.equal((await set(db, 'H', ahead(2), 1)).notify, 'rate_limited')
   assert.equal((await msgs(db, 'H')).length, 3, '限流')
   assert.ok(Number(await secs(db, 'H')) > 0, '限流只擋信，時間仍設')
 })
@@ -111,4 +113,21 @@ test('實跑（pglite）：設備名讀 relay.nodes.name；名字空白時省略
   assert.equal((await set(db, 'X', ahead(1), 1)).ok, true, '沒有擁有者')
   assert.equal((await msgs(db, 'W')).length + (await msgs(db, 'X')).length, 0)
   assert.ok(Number(await secs(db, 'W')) > 0)
+})
+
+test('實跑（pglite）：寄信失敗回 notify=failed 但時間照設；到期前延長（寬限 15 分鐘內）不當成新的一次', { skip }, async () => {
+  const db = await setup()
+  const r = await set(db, 'F', ahead(1), 1)
+  assert.deepEqual([r.ok, r.notify, r.bell_topics], [true, 'failed', []])
+  assert.ok(Number(await secs(db, 'F')) > 0, '寄信失敗不影響設定時間')
+  await set(db, 'H', ahead(1), 1)
+  assert.equal((await msgs(db, 'H')).length, 1)
+  // 電腦端試送時剛好到期、延長的那一包晚幾分鐘到：不算新的一次
+  await db.exec("update relay.nodes set inbox_hold_until = now() - interval '5 minutes' where id = 'H'")
+  assert.equal((await set(db, 'H', ahead(1), 1)).notify, 'skipped')
+  assert.equal((await msgs(db, 'H')).length, 1)
+  // 過期超過 15 分鐘才當成新的一次
+  await db.exec("update relay.nodes set inbox_hold_until = now() - interval '20 minutes' where id = 'H'")
+  assert.equal((await set(db, 'H', ahead(1), 1)).notify, 'sent')
+  assert.equal((await msgs(db, 'H')).length, 2)
 })
