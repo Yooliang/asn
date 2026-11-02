@@ -17,6 +17,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { sentMarkName } from './sent-mark.mjs'
+import { wakeNote } from './mail-format.mjs'
 import { AttachFail } from './attach-download.mjs'
 import { MAX_FILES, attachmentText, prepareFiles, uploadItems } from './attach-upload.mjs'
 import { BASE_URL, Fail, HOME_DIR, findCaller, inspectCaller, machineNode, readMachineKey, readSession, sessionsDir } from './identity.mjs'
@@ -156,6 +157,7 @@ export async function main(argv) {
   if (a.room) {
     const r = await call(key, 'room_post', { room: a.room, body, from_agent: caller.name, attachment_ids })
     console.log(`posted room=${a.room}${r?.seq != null ? ` seq=${r.seq}` : ''} from=${node}/${caller.name}`)
+    if (wakeNote(r)) console.log(wakeNote(r))
   } else {
     const r = await call(key, 'send', { to_node: toNode, to_agent: toAgent || undefined, body, reply_to: a.replyTo || undefined, from_agent: caller.name, expects_reply: expectsReply, attachment_ids })
     if (a.replyTo) markReplied(node, a.replyTo)

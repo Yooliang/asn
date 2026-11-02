@@ -14,7 +14,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createCore } from '../machine/relay-core.mjs'
 import { bodyWithNotes } from '../machine/attach-format.mjs'
-import { cleanLabel, escapeBody } from '../machine/mail-format.mjs'
+import { cleanLabel, escapeBody, wakeNote } from '../machine/mail-format.mjs'
 import { Fail, NO_KEY_MSG, readKey, resolveCloudAgents, resolveConfig, rosterScanEnvFrom } from './config.mjs'
 import { applyEnvCompat } from './env-compat.mjs'
 import { cloudCmd } from './attach.mjs'
@@ -138,6 +138,7 @@ export async function main(argv, rawEnv = process.env, out = line => process.std
     if (a.reply) payload.reply_to = a.reply
     const r = await call('room_post', { method: 'POST', body: payload })
     out(`posted room=${room.id} seq=${r?.seq ?? '?'} as=${asWindow(room) ? winKey : cfg.node}${a.reply ? ` reply=${a.reply}` : ''}`)
+    if (wakeNote(r)) out(wakeNote(r))
     return 0
   }
 

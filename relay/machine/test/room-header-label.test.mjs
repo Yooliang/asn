@@ -1,5 +1,6 @@
 // 群組信抬頭：寄件人用後台的 from_label、帶 relation、不外露帳號代號。向量與 Rust rooms.rs 測試逐字相同。
 import { test } from 'node:test'
+import { wakeNote } from '../mail-format.mjs'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -52,4 +53,11 @@ test('保持能回應提醒：Claude 視窗的群組信在提示行之後、內�
   // Rust 內建橋的群組抬頭用同一個常數（mail::RESPONSIVE_NOTE）、同一個判斷（sends_own_mail）
   const rs = fs.readFileSync(path.join(here, '../../asn/src-tauri/src/bridge/rooms.rs'), 'utf8')
   assert.ok(rs.includes('super::mail::sends_own_mail(engine_id)') && rs.includes('super::mail::RESPONSIVE_NOTE'))
+})
+
+test('群組發言達叫醒上限的提示：有人數、沒人數、沒達上限', () => {
+  assert.match(wakeNote({ seq: 1, wake_limited: true, not_woken: 2 }), /沒有叫醒 2 位：.*私信/)
+  assert.match(wakeNote({ wake_limited: true }), /沒有叫醒人：/)
+  assert.equal(wakeNote({ seq: 1 }), '')
+  assert.equal(wakeNote({ wake_limited: false, not_woken: 2 }), '')
 })

@@ -236,7 +236,9 @@ export async function postMessage(
   if (isReply(res)) return res;
   if (deps.beforeRing) await deps.beforeRing(res.data.seq);
   await Promise.all((res.data.bell_topics ?? []).map((t: string) => deps.ring(t)));
-  return { status: 200, body: { seq: res.data.seq, mentions } };
+  // 達 AI 互相叫醒上限：這次點名沒有叫醒人，回給發言者知道（人數就好，不回成員鍵）
+  const notWoken = res.data.wake_limited === true && Array.isArray(res.data.suppressed) ? res.data.suppressed.length : 0;
+  return { status: 200, body: { seq: res.data.seq, mentions, ...(notWoken > 0 ? { wake_limited: true, not_woken: notWoken } : {}) } };
 }
 
 // 無 @ 的 AI 訊息的叫醒結果。任何一步失敗都回「不叫醒」

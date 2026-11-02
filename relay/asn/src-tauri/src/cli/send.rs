@@ -16,7 +16,16 @@ use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 
 const MAX_BODY: usize = 20000;
+
 
+/// 群組發言達 AI 互相叫醒上限時要印的提示（room_post 的回應帶 wake_limited）。訊息已寫進群組，結束碼仍是 0
+pub(super) fn wake_note(r: &Value) -> Option<String> {
+    if r.get("wake_limited").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    let who = r.get("not_woken").and_then(Value::as_i64).map_or("人".to_string(), |n| format!(" {n} 位"));
+    Some(format!("（這次點名沒有叫醒{who}：已達 AI 互相叫醒上限，對方只留未讀。要對方馬上看到請改用私信；真人發言後會重新計算）"))
+}
 fn usage() -> String {
     format!(
         "用法：
@@ -227,6 +236,9 @@ pub async fn main(argv: &[String], env: &Env, io: &mut Io<'_>) -> R<i32> {
         let r = rl.api("room_post", Some(b)).await.map_err(backend)?;
         let seq = r.get("seq").and_then(Value::as_i64).map(|s| format!(" seq={s}")).unwrap_or_default();
         io.outln(&format!("posted room={room}{seq} from={}/{}", id.node, me.name));
+        if let Some(n) = wake_note(&r) {
+            io.outln(&n);
+        }
     } else {
         let mut b = json!({ "to_node": to_node, "body": body, "from_agent": me.name, "expects_reply": expects_reply });
         if !to_agent.is_empty() {
