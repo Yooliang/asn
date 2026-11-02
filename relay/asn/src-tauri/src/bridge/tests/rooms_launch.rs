@@ -99,7 +99,7 @@ async fn 群組_只轉_for_me_點名轉給對的視窗_標頭提示與上下文_
     h.core.pull("test", T0).await;
     let f = fwd(&h.said());
     // 恰好 3 次轉交（#2 不轉）
-    let key = |x: &(String, String, String)| format!("{}#{}", x.1, x.2.split(" #").nth(1).unwrap().split('\n').next().unwrap());
+    let key = |x: &(String, String, String)| format!("{}#{}", x.1, x.2.split(" #").nth(1).unwrap().split(|c| c == ' ' || c == '\n').next().unwrap());
     let mut keys: Vec<String> = f.iter().map(key).collect();
     keys.sort();
     assert_eq!(keys, vec!["T-甲#4", "T-視窗甲#3", "T-視窗甲#4"]);
@@ -109,10 +109,10 @@ async fn 群組_只轉_for_me_點名轉給對的視窗_標頭提示與上下文_
     assert_eq!(f.iter().find(|x| key(x) == "T-視窗甲#4").unwrap().0, room_uuid("R1", 4, "T~T-視窗甲"));
     // 標頭、提示、內文、上下文（前面最近的幾則，舊→新）、往回翻的指令
     let j3 = &f.iter().find(|x| key(x) == "T-視窗甲#3").unwrap().2;
-    assert_eq!(j3, &format!("[群組 專案群] trust=member from=W/W-政策 #3\n{ROOM_HINT}\n{}\n群組內文-3\n---- 前面 1 則（舊→新）----\n#2 政策：群組內文-2\n（要看更多：/x/asn-cli room --room-read R1 --last 20）
-{}", crate::bridge::mail::RESPONSIVE_NOTE, crate::bridge::corrlog::path_line(&h.core.cfg.handoff_dir, "T-視窗甲")));
+    assert_eq!(j3, &format!("[群組 專案群] trust=member from=W/W-政策 #3 id={}\n{ROOM_HINT}\n{}\n群組內文-3\n---- 前面 1 則（舊→新）----\n#2 政策：群組內文-2\n（要看更多：/x/asn-cli room --room-read R1 --last 20）
+{}", room_uuid("R1", 3, "T~T-視窗甲"), crate::bridge::mail::RESPONSIVE_NOTE, crate::bridge::corrlog::path_line(&h.core.cfg.handoff_dir, "T-視窗甲")));
     assert!(d4.2.contains("---- 前面 2 則（舊→新）----\n#2 政策：群組內文-2\n#3 政策：群組內文-3\n（要看更多"));
-    assert!(d4.2.starts_with("[群組 專案群] trust=owner from=主人 #4\n"));
+    assert!(d4.2.starts_with("[群組 專案群] trust=owner from=主人 #4 id="));
     // 所有 room_read 都帶 since、不帶 mark（不動後端已讀）；視窗帶 as_agent、節點本身不帶；起算點是 read_seq
     let rs = reads(&h);
     assert!(!rs.is_empty() && rs.iter().all(|r| !r["since"].is_null() && r["mark"].is_null()));
@@ -120,7 +120,9 @@ async fn 群組_只轉_for_me_點名轉給對的視窗_標頭提示與上下文_
     assert!(rs.iter().any(|r| r["as_agent"].is_null() && r["since"] == 1));
     // 轉交完成（worker 回 SENT）：群組訊息不 ack
     let ids: Vec<String> = f.iter().map(|x| x.0.clone()).collect();
-    h.core.on_worker_line(res(&ids.iter().map(|i| format!("SENT {i}")).collect::<Vec<_>>().join("\n")), T0 + 10).await;
+    for i in &ids {
+        worker_ok(&mut h.core, i, T0 + 10).await;
+    }
     assert!(h.fr.acked().is_empty(), "群組沒有信箱可 ack");
     // 回覆經收發室貼回群組：視窗成員帶視窗名、節點本身（成員 key＝T）不帶 from_agent
     h.core.on_worker_line(res(&reply_block("T-視窗甲", "我來回覆")), T0 + 20).await;
@@ -157,7 +159,7 @@ async fn 群組_沒有游標且_read_seq_為_0_從最新起算不補播_既有�
     // 視窗甲：既有游標 2 → 只轉 #3；節點本身：無游標＋read_seq=0 → 從 last_seq=3 起算 → 不轉；T-不在：略過
     let f = fwd(&h.said());
     assert_eq!(f.iter().map(|x| x.1.as_str()).collect::<Vec<_>>(), vec!["T-視窗甲"]);
-    assert!(f[0].2.starts_with("[群組 專案群] trust=member from=W/W-政策 #3\n"));
+    assert!(f[0].2.starts_with("[群組 專案群] trust=member from=W/W-政策 #3 id="));
     let c = cursor_file(&h);
     assert_eq!((c["R1|T"].as_u64(), c["R1|T~T-不在"].as_u64()), (Some(3), Some(3)));
     assert!(h.core.log.has("window T-不在 not forwardable: skipped"));
@@ -169,7 +171,7 @@ async fn 群組_回覆含不需回覆不貼回_貼回遇到_429_只記_log_不�
     set_rooms(&h, vec![room(vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}}))], json!([{"member": "T~T-視窗甲", "read_seq": 1}]))]);
     h.core.pull("test", T0).await;
     let id = fwd(&h.said())[0].0.clone();
-    h.core.on_worker_line(res(&format!("SENT {id}")), T0 + 1).await;
+    worker_ok(&mut h.core, &id, T0 + 1).await;
     h.core.on_worker_line(res(&reply_block("T-視窗甲", "好的（不需回覆）")), T0 + 2).await;
     assert!(posts(&h).is_empty());
     assert!(h.core.log.has("marked no-reply: not posted"));
@@ -179,7 +181,7 @@ async fn 群組_回覆含不需回覆不貼回_貼回遇到_429_只記_log_不�
     set_rooms(&g, vec![room(vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}}))], json!([{"member": "T~T-視窗甲", "read_seq": 1}]))]);
     g.core.pull("test", T0).await;
     let id = fwd(&g.said())[0].0.clone();
-    g.core.on_worker_line(res(&format!("SENT {id}")), T0 + 1).await;
+    worker_ok(&mut g.core, &id, T0 + 1).await;
     g.core.on_worker_line(res(&reply_block("T-視窗甲", "回覆內容")), T0 + 2).await;
     assert_eq!(posts(&g).len(), 1);
     assert!(g.core.log.has("rate-limited"));
@@ -209,7 +211,7 @@ async fn 群組_轉交失敗不回群組不留對應_worker_掛了游標不前�
     set_rooms(&h, vec![room(vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}})), rmsg(3, json!({"forMe": {"T-視窗甲": true}}))], json!([{"member": "T~T-視窗甲", "read_seq": 1}]))]);
     h.core.pull("test", T0 + 3000).await;
     let id3 = fwd(&h.said()).last().unwrap().0.clone();
-    h.core.on_worker_line(res(&format!("SENT {id3}")), T0 + 3001).await;
+    worker_ok(&mut h.core, &id3, T0 + 3001).await;
     h.core.tick(T0 + 3001 + 601_000).await;
     assert!(h.core.pending.is_empty() && h.fr.sent().is_empty() && posts(&h).is_empty());
 }
@@ -220,7 +222,7 @@ async fn 群組_橋重啟後還在等的群組訊息回覆仍貼得回_群組項
     set_rooms(&h, vec![room(vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}}))], json!([{"member": "T~T-視窗甲", "read_seq": 1}]))]);
     h.core.pull("test", T0).await;
     let id = fwd(&h.said())[0].0.clone();
-    h.core.on_worker_line(res(&format!("SENT {id}")), T0 + 1).await;
+    worker_ok(&mut h.core, &id, T0 + 1).await;
     let saved: Value = serde_json::from_str(&std::fs::read_to_string(h.work.path().join("pending.json")).unwrap()).unwrap();
     assert_eq!(saved["pending"][0]["room"], json!({"id": "R1", "seq": 2, "window": "T-視窗甲"}), "與 Node 橋同格式");
     restart(&mut h, T0 + 5000).await;
@@ -273,8 +275,7 @@ async fn 群組順位_第二順位先不轉交_到期才轉_期間不擋其他�
     h.core.pull("test", T0).await;
     let f = fwd(&h.said());
     assert_eq!(f.len(), 1, "只有 #3 立即轉交；#2 排隊等 60 秒，沒有擋住 #3");
-    assert!(f[0].2.starts_with("[群組 專案群] trust=member from=W/W-政策 #3
-"));
+    assert!(f[0].2.starts_with("[群組 專案群] trust=member from=W/W-政策 #3 id="));
     assert_eq!(cursor_file(&h)["R1|T~T-視窗甲"].as_u64(), Some(3), "排隊的信先記起來，游標照常前進（不因延遲而重複轉交）");
     assert_eq!(held_file(&h).as_array().unwrap().len(), 1, "排隊的信寫進 rooms-held.json");
     h.core.tick(T0 + 59_000).await;
@@ -286,8 +287,7 @@ async fn 群組順位_第二順位先不轉交_到期才轉_期間不擋其他�
     let f = fwd(&h.said());
     assert_eq!(f.len(), 2);
     let late = &f[1].2;
-    assert!(late.starts_with("[群組 專案群] trust=member from=W/W-政策 #2
-"));
+    assert!(late.starts_with("[群組 專案群] trust=member from=W/W-政策 #2 id="));
     assert!(late.contains("順位：你是第 2 順位（共 3 位被叫醒，前面順位：正見（阿明））"), "{late}");
     assert!(late.contains("---- 延遲期間新到的 2 則（舊→新）----
 #3 政策：群組內文-3
@@ -347,7 +347,7 @@ async fn 群組順位_橋重啟後排隊的信不遺失_到期只轉一次_已�
     let f = fwd(&h.said());
     assert_eq!(f.len(), 1);
     assert_eq!(f[0].0, room_uuid("R1", 2, "T~T-視窗甲"));
-    h.core.on_worker_line(res(&format!("SENT {}", f[0].0)), T0 + 60_001).await;
+    worker_ok(&mut h.core, &f[0].0, T0 + 60_001).await;
     restart(&mut h, T0 + 70_000).await;
     h.core.tick(T0 + 200_000).await;
     h.core.pull("test", T0 + 200_000).await;

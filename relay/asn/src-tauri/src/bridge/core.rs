@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 mod dup;
+mod misroute;
 mod quota;
 
 /// 後台節點信箱一次最多回幾封（與 asn_relay_inbox 的 limit 一致）
@@ -333,6 +334,14 @@ pub struct Core {
     fwd_rooms: HashMap<String, RoomFwd>,
     /// 重送中：這則原本收到的時間（轉交文字要加延遲抬頭）
     late_from: Option<u64>,
+    /// 核對轉交對象：送給 worker 還在進行中的訊息（編號 → (目標, 帶編號的全文)），送錯時用同一份重送一次
+    fwd_text: HashMap<String, (String, String)>,
+    /// 已經因為送錯重送過一次的編號（第二次還是錯就回 Fail）
+    misrouted_once: HashSet<String>,
+    /// 已經通知過送錯的編號（每個編號只通知一次）
+    misroute_notified: HashSet<String>,
+    /// 轉交給 worker 的來信是誰寄的（編號 → 來源）：送錯通知寄件人用；只存記憶體，數量有上限
+    fwd_origin: HashMap<String, Origin>,
     /// 上次成功回報給後台的 inbox_hold_until（None＝還沒報過；啟動後第一次名單一定報一次，順便清掉上次沒收乾淨的舊值）
     hold_sent: Option<Option<u64>>,
     /// 上次為了回報收信暫停而重報名單的時間（失敗時不要每個 tick 都重試）
@@ -400,10 +409,16 @@ impl Core {
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
-            quota_until: 0, quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), late_from: None, hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), probing: false,
+            quota_until: 0, quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), probing: false,
         };
         c.restore();
         c
+    }
+
+    /// 測試用：送給 worker、還在進行中的訊息（目標, 帶編號的全文）
+    #[cfg(test)]
+    pub fn fwd_probe(&self, id: &str) -> Option<(String, String)> {
+        self.fwd_text.get(id).cloned()
     }
 
     pub fn sink(&self) -> Arc<dyn WorkerSink> {
@@ -906,8 +921,32 @@ impl Core {
             self.respond_open = self.respond_open || r.is_ok();
             return r;
         }
-        self.parser.register(id, to);
-        self.sink.say(forward_text(&self.parser.nonce, id, to, text))
+        // 核對轉交對象：第一行行尾一定要有這封的編號（hook 與 SENT 比對都只認行尾），先記下 {編號: 目標} 再送
+        let text = super::forward_gate::ensure_head_id(text, id);
+        self.parser.register_head(id, to, super::forward_gate::head_hash(super::forward_gate::first_line(&text)));
+        if self.fwd_text.len() >= 400 {
+            self.fwd_text.clear(); // 只有送錯要重送時才用得到，爆量時整批丟掉也不影響正常轉交
+        }
+        self.fwd_text.insert(id.to_string(), (to.to_string(), text.clone()));
+        self.write_inflight();
+        let r = self.sink.say(forward_text(&self.parser.nonce, id, to, &text));
+        if r.is_err() {
+            self.parser.forget(id);
+            self.fwd_text.remove(id);
+            self.write_inflight();
+        }
+        r
+    }
+
+    /// inflight 有變動就重寫 hook 讀的檔（寫不進去只記 log：hook 讀不到會把轉交擋下，worker 回報失敗，不會送錯）
+    fn write_inflight(&mut self) {
+        if !self.parser.take_dirty() {
+            return;
+        }
+        if let Err(e) = super::forward_gate::write_inflight(&self.cfg.work_dir, &self.parser.inflight_items()) {
+            self.parser.mark_dirty(); // 沒寫成：旗標設回去，下一個 tick 再試
+            self.log.line(&format!("inflight file write failed: {e}"));
+        }
     }
 
     pub async fn handle_mail(&mut self, m: Mail) {
@@ -1028,6 +1067,10 @@ impl Core {
         match self.deliver(&m.id, &target, &text) {
             Ok(_) => {
                 self.log.line(&format!("handed id={} from={}/{} to={target}", m.id, m.from_node, from_agent));
+                if self.fwd_origin.len() >= 400 {
+                    self.fwd_origin.clear();
+                }
+                self.fwd_origin.insert(m.id.clone(), origin.clone());
                 if !self.is_respond(&target) && self.via_worker(&target) {
                     self.fwd_items.insert(m.id.clone(), HeldItem { mail: m.clone(), raw: raw.clone(), received_at: late.unwrap_or(self.now) });
                 }
@@ -1103,6 +1146,7 @@ impl Core {
                 for l in &r.logs {
                     self.log.line(l);
                 }
+                self.write_inflight();
                 if r.turn_done {
                     self.respond_open = false;
                 }
@@ -1116,6 +1160,7 @@ impl Core {
                             self.quota_release("worker reported fail");
                             self.on_fail(&id, &reason).await
                         }
+                        WorkerEvent::Misrouted { id, expected, actual } => self.on_misrouted(&id, &expected, &actual).await,
                         WorkerEvent::Quota { resets_at, kind } => {
                             if self.cfg.respond.is_some() {
                                 // 自動回信模式不參與扣住：worker 自己回答，沒有「轉交中」可扣，照原本的等回覆逾時流程
@@ -1766,6 +1811,7 @@ impl Core {
         if let Some(e) = &self.engines {
             e.poll();
         }
+        self.prune_inflight();
         self.release_held(now).await;
         self.quota_tick(now).await;
         self.flush_owner_receipts(now).await;
@@ -1796,6 +1842,9 @@ impl Core {
                     }
                 }
                 self.pending[i].state = State::Done;
+                self.parser.forget(&id);
+                self.fwd_text.remove(&id);
+                self.write_inflight();
                 if p.room.is_some() {
                     self.log.line(&format!("room forward timeout id={id} -> {}", p.target));
                     self.remove(&id);

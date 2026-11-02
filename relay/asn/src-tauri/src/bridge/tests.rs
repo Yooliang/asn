@@ -324,8 +324,26 @@ impl H {
         let id = m["id"].as_str().unwrap().to_string();
         self.fr.put(m);
         self.core.pull("test", now).await;
-        self.core.on_worker_line(res(&format!("SENT {id}")), now).await;
+        worker_ok(&mut self.core, &id, now).await;
     }
+}
+
+/// 假 worker 成功轉交：照橋送進去的內容（收件人與訊息原樣）還原出 SendMessage 呼叫與成功的工具結果，再接 SENT 確認
+pub fn ok_send_lines(tid: &str, to: &str, message: &str) -> Vec<WorkerLine> {
+    let call = json!({"type": "assistant", "message": {"model": "claude-haiku", "content": [{"type": "tool_use", "id": tid, "name": "SendMessage",
+        "input": {"to": to, "message": message, "recipient": to, "content": format!("{}…", message.chars().take(40).collect::<String>()), "summary": "轉交 relay 來信", "type": "message", "recipient_kind": "name"}}]}});
+    let result = json!({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": tid,
+        "content": [{"type": "text", "text": "{\"success\":true,\"message\":\"sent\",\"msg_id\":\"m-1\"}"}]}]}});
+    vec![WorkerLine::Line(call.to_string()), WorkerLine::Line(result.to_string())]
+}
+
+/// worker 照橋送進去的內容成功轉交了這個編號（SendMessage 呼叫成功）
+pub async fn worker_ok(core: &mut Core, id: &str, now: u64) {
+    let (to, text) = core.fwd_probe(id).unwrap_or_else(|| panic!("橋沒有送過編號 {id}"));
+    for l in ok_send_lines(&format!("toolu_{id}"), &to, &text) {
+        core.on_worker_line(l, now).await;
+    }
+    core.on_worker_line(res(&format!("SENT {id}")), now).await;
 }
 
 // ---- 名單（上線）----------------------------------------------------------------------------------
@@ -456,7 +474,7 @@ async fn 收信轉交_內文包在外部資料區塊_sent_之後才_ack() {
     assert!(said[0].contains(&format!("[RELAY 來信] trust=member from=W/W-政策 to=T-乙 id={} engine=claude reply=yes\n寄件人：W-政策（成員身分）\n【要回信】回信位址=W/W-政策 信件編號={}：", uid(1), uid(1))));
     assert!(said[0].contains("\n內文-1"));
     assert!(h.fr.acked().is_empty(), "worker 還沒回報 SENT 之前不 ack");
-    h.core.on_worker_line(res(&format!("SENT {}", uid(1))), T0 + 50).await;
+    worker_ok(&mut h.core, &uid(1), T0 + 50).await;
     assert_eq!(h.fr.acked(), vec![uid(1)]);
     assert_eq!(h.core.pending[0].state, State::Waiting);
 }
@@ -565,7 +583,7 @@ async fn 信先到_名單後到_名單到之前不_ack_不回找不到_名單到
     core.pull("after-roster", T0 + 3).await;
     assert_eq!(sink.said.lock().unwrap().len(), 1, "名單到後信正常轉交");
     assert!(fr.sent().is_empty());
-    core.on_worker_line(res(&format!("SENT {}", uid(1))), T0 + 4).await;
+    worker_ok(&mut core, &uid(1), T0 + 4).await;
     assert!(!core.pending.is_empty() || fr.acked().contains(&uid(1)));
 }
 
@@ -625,10 +643,19 @@ async fn 收發室漏寫_sent_行但_sendmessage_真的成功_也算已轉交() 
     let mut h = harness(&[("T-乙", "idle")]).await;
     h.fr.put(mail(1, json!({})));
     h.core.pull("test", T0).await;
-    let call = json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"SendMessage","input":{"to":"T-乙","message":format!("[RELAY 來信] id={} engine=claude reply=yes\n內文-1", uid(1))}}]}});
-    h.core.on_worker_line(WorkerLine::Line(call.to_string()), T0 + 1).await;
-    let done = json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"{}"}]}});
-    h.core.on_worker_line(WorkerLine::Line(done.to_string()), T0 + 2).await;
+    let (to, text) = h.core.fwd_probe(&uid(1)).unwrap();
+    // 呼叫還沒有結果：不算
+    let mut first = ok_send_lines("toolu_1", &to, &text).into_iter();
+    h.core.on_worker_line(first.next().unwrap(), T0 + 1).await;
+    assert!(h.fr.acked().is_empty());
+    // 呼叫失敗（沒有 is_error，內容是 success:false）：不算
+    let bad = json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":[{"type":"text","text":"{\"success\":false,\"message\":\"No agent\"}"}]}]}});
+    h.core.on_worker_line(WorkerLine::Line(bad.to_string()), T0 + 2).await;
+    assert!(h.fr.acked().is_empty());
+    // 呼叫成功（worker 沒寫 SENT 行）：算已轉交
+    for l in ok_send_lines("toolu_2", &to, &text) {
+        h.core.on_worker_line(l, T0 + 3).await;
+    }
     assert_eq!(h.fr.acked(), vec![uid(1)]);
     h.core.tick(T0 + 200_000).await;
     assert!(h.fr.sent().is_empty(), "不會再報轉交逾時");
@@ -744,7 +771,7 @@ async fn 收件視窗提醒_五分鐘閒置沒回_只提醒一次() {
     h.core.tick(T0 + 301_000).await;
     let said = h.said();
     assert_eq!(said.len(), base + 1);
-    assert!(said[base].contains(&format!("\n（收發室提醒）你還沒回覆 W-政策（成員身分） 的信 {}，若已處理完請用 asn_send 寄回結果\n", uid(1))), "{}", said[base]);
+    assert!(said[base].contains(&format!("\n（收發室提醒）你還沒回覆 W-政策（成員身分） 的信 {}，若已處理完請用 asn_send 寄回結果 id=", uid(1))), "{}", said[base]);
     h.core.tick(T0 + 350_000).await;
     h.core.tick(T0 + 450_000).await;
     assert_eq!(h.said().len(), base + 1, "只提醒一次");
@@ -1256,6 +1283,13 @@ fn fake_claude_child() {
         let to = rest.split("to=").nth(1).unwrap_or("").split(']').next().unwrap_or("").to_string();
         let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&record).unwrap();
         writeln!(f, "{}", json!({"id": id, "to": to, "nonce_ok": rest.starts_with(&nonce), "text": text})).unwrap();
+        // 成功轉交以 SendMessage 呼叫成功為準：先印呼叫與成功的結果，再印 SENT 確認
+        let msg = text.split("<<<MAIL\n").nth(1).and_then(|t| t.rsplit_once("\nMAIL>>>")).map(|x| x.0.to_string()).unwrap_or_default();
+        for l in ok_send_lines("toolu_fake", &to, &msg) {
+            if let WorkerLine::Line(x) = l {
+                println!("{x}");
+            }
+        }
         let mut out = format!("SENT {id}");
         if let Ok(r) = std::env::var("FAKE_REPLY") {
             out += &format!("\n<<REPLY-{nonce} from={to}>>\n{r}\n<<END-{nonce}>>");
@@ -1362,7 +1396,7 @@ async fn 往來記錄_轉交與回覆都追加_信尾多一行路徑_附件名�
     let want = super::corrlog::path_line(&h.core.cfg.handoff_dir, "T-乙");
     assert!(said[0].ends_with(&format!("\n{want}\nMAIL>>>")), "路徑行在內文區塊的最後");
     assert!(want.starts_with("你與收發室的往來記錄在：") && want.ends_with("T-乙.md（接手前請先讀）"));
-    h.core.on_worker_line(res(&format!("SENT {}", uid(1))), T0 + 10).await;
+    worker_ok(&mut h.core, &uid(1), T0 + 10).await;
     h.core.on_worker_line(res(&reply_block("T-乙", "好的，已處理")), T0 + 3_000).await;
     let t = corr_text(&h, "T-乙");
     assert!(t.contains(&format!("收到｜W/W-政策 → T-乙｜id={}", uid(1))), "{t}");
@@ -1446,7 +1480,7 @@ async fn 夥伴_id_回報名字與_session_記憶體留_id_往來記錄檔名與
     // 轉交一封信後，記錄檔（#153：檔名是夥伴 ID）第一行是檔頭，記錄照常；信上「往來記錄在」指向同一個檔
     fr.put(mail(1, json!({})));
     core.pull("test", T0).await;
-    core.on_worker_line(res(&format!("SENT {}", uid(1))), T0 + 10).await;
+    worker_ok(&mut core, &uid(1), T0 + 10).await;
     let f = super::corrlog::pid_file_of(&core.cfg.handoff_dir, PID_B);
     assert_eq!(f.file_name().unwrap().to_string_lossy(), format!("{PID_B}.md"));
     assert!(!super::corrlog::file_of(&core.cfg.handoff_dir, "T-乙").exists(), "有夥伴 ID 就不寫視窗名檔");
@@ -1474,7 +1508,7 @@ async fn 夥伴_id_後台不支援_404_靜默停用_只記一次_信與記錄照
     assert_eq!(core.partner_id("T-乙"), None);
     fr.put(mail(1, json!({})));
     core.pull("test", T0 + 10).await;
-    core.on_worker_line(res(&format!("SENT {}", uid(1))), T0 + 20).await;
+    worker_ok(&mut core, &uid(1), T0 + 20).await;
     let t = std::fs::read_to_string(super::corrlog::file_of(&core.cfg.handoff_dir, "T-乙")).unwrap();
     assert!(t.starts_with('▌') && !t.contains("夥伴 ID"), "沒有 ID 就沒有檔頭：{t}");
 }
@@ -1505,6 +1539,8 @@ mod aegis_it;
 mod engines_it;
 mod pi_it;
 mod quota_it;
+mod e2e_real;
+mod gate_it;
 mod respond_it;
 mod rooms_launch;
 
@@ -1547,7 +1583,7 @@ async fn 信箱堵塞_舊後台不認得_exclude_行為照舊_不報錯_ack_與�
     put_many(&h.fr, 1, 6, "T-ASN");
     h.fr.put(mail(500, json!({"to_agent": "T-乙"})));
     h.core.pull("test", T0).await;
-    h.core.on_worker_line(res(&format!("SENT {}", uid(500))), T0).await;
+    worker_ok(&mut h.core, &uid(500), T0).await;
     assert_eq!(h.said().len(), 1);
     assert!(!h.core.log.has("pull failed"));
     assert!(h.fr.acked().iter().all(|i| *i == uid(500)) || h.fr.acked().is_empty());
