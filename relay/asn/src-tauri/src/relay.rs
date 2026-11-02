@@ -1333,6 +1333,23 @@ b", "op": "close" }),
         assert!(s[2..].iter().all(|x| !x.to_lowercase().contains("x-asn-user")), "沒登入或空憑證不帶簽章標頭：{s:?}");
     }
 
+    #[cfg(desktop)]
+    #[tokio::test]
+    async fn 電腦版送切換帳號_有登入帶簽章_沒登入照舊不帶() {
+        // 成員角色的電腦（例如 40家用）不帶簽章，後台回 403 forbidden；有登入就要帶，擁有者角色的電腦沒登入照舊
+        let (url, seen) = fake_server(200);
+        let r = Relay::new(url, "secret-key".into(), "P".into(), "P-ASN".into());
+        crate::acct_remote::remote_request(&r, "W", "b@x.test", "claude", Some("usertoken-9")).await.unwrap();
+        crate::acct_remote::remote_request(&r, "W", "b@x.test", "grok", Some("usertoken-9")).await.unwrap();
+        crate::acct_remote::remote_request(&r, "W", "b@x.test", "claude", None).await.unwrap();
+        crate::acct_remote::remote_request(&r, "W", "b@x.test", "claude", Some("")).await.unwrap();
+        let s = seen.lock().unwrap();
+        assert_eq!(s.len(), 4);
+        assert!(s.iter().all(|x| x.contains("action=acct_switch")), "{s:?}");
+        assert!(s[..2].iter().all(|x| x.to_lowercase().contains("x-asn-user: bearer usertoken-9")), "{s:?}");
+        assert!(s[2..].iter().all(|x| !x.to_lowercase().contains("x-asn-user")), "沒登入或空憑證不帶簽章標頭：{s:?}");
+    }
+
     #[tokio::test]
     async fn 遠端開視窗_沒有本人簽章不送出_有簽章帶標頭() {
         let (url, seen) = fake_server(200);

@@ -371,8 +371,9 @@ async fn acct_remote_list(app: State<'_, App>, auth: State<'_, auth::AuthState>,
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
-async fn acct_remote_request(app: State<'_, App>, node: String, email: String, vendor: Option<String>) -> Result<Value, String> {
-    acct_remote::remote_request(relay_of(&app)?.as_ref(), &node, &email, vendor.as_deref().unwrap_or("claude")).await
+async fn acct_remote_request(app: State<'_, App>, auth: State<'_, auth::AuthState>, node: String, email: String, vendor: Option<String>) -> Result<Value, String> {
+    let token = account::signing_token(&auth).await;
+    acct_remote::remote_request(relay_of(&app)?.as_ref(), &node, &email, vendor.as_deref().unwrap_or("claude"), token.as_deref()).await
 }
 #[cfg(feature = "gui")]
 #[cfg(desktop)]

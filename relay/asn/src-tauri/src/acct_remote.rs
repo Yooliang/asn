@@ -420,7 +420,8 @@ pub async fn remote_list(relay: &Relay, node: &str, token: Option<&str>) -> Resu
     }
     relay.api_signed("acct_list", Some(json!({ "node": node })), token).await
 }
-pub async fn remote_request(relay: &Relay, node: &str, email: &str, vendor: &str) -> Result<Value, String> {
+/// 與 `remote_list` 同一條規則：有登入就帶本人簽章（成員角色的電腦不帶會被後台擋 403），沒登入照舊不帶
+pub async fn remote_request(relay: &Relay, node: &str, email: &str, vendor: &str, token: Option<&str>) -> Result<Value, String> {
     if !valid_node(node) {
         return Err("設備代號不對".into());
     }
@@ -428,7 +429,7 @@ pub async fn remote_request(relay: &Relay, node: &str, email: &str, vendor: &str
         return Err("目前只支援切換 Claude、Grok 帳號".into());
     }
     let email = claude_accounts::normalize_email(email).ok_or("email 格式不對")?;
-    relay.api("acct_switch", Some(json!({ "node": node, "vendor": vendor, "email": email }))).await
+    relay.api_signed("acct_switch", Some(json!({ "node": node, "vendor": vendor, "email": email })), token).await
 }
 pub async fn remote_status(relay: &Relay, ids: Vec<String>) -> Result<Value, String> {
     if ids.is_empty() || ids.len() > 20 || !ids.iter().all(|i| is_uuid(i)) {
