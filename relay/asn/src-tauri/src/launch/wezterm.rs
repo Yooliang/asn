@@ -461,15 +461,28 @@ pub struct PaneInfo {
 /// 判斷窗格結束用：往回讀畫面底部幾行
 pub(crate) const PANE_PROBE_LINES: i32 = 20;
 
-/// 窗格畫面尾端有沒有 ASN 自己留的結束標記（見 `local::exit_marker`、`local::mux_wrapped_argv`）。
-/// 一定要是整行、而且 nonce 對得上這個窗格的才算（夥伴自己印出格式一樣的行，因為不知道 nonce，騙不了）。
-/// 沒有 → None（還在跑，或讀不到）；有 → Some(結束碼)。同一個 nonce 出現多次取最後一個。
+/// 窗格畫面裡有沒有 ASN 自己留的結束標記 `[asn-exit <暗號> <結束碼>]`（見 `local::exit_marker`、`local::mux_wrapped_argv`）。
+/// 先把換行全部拿掉再找：get-text 照欄寬折行，標記可能被拆成兩行；包裝殼結束時 WezTerm 的 Hold 訊息也會跟它搶著寫，
+/// 標記可能被插進別的字串中間或前後黏著字。所以不要求整行，只要暗號對得上。
+/// 暗號是開窗時隨機產生的（32 位十六進位），夥伴猜不到，偽造不了。同一個暗號出現多次取最後一個。
+/// 沒有 → None（還在跑，或讀不到）。
 pub(crate) fn pane_exit_from_screen(text: &str, nonce: &str) -> Option<i32> {
     if nonce.is_empty() {
         return None;
     }
+    let flat: String = text.chars().filter(|c| *c != '\n' && *c != '\r').collect();
     let head = format!("[asn-exit {nonce} ");
-    text.lines().rev().map(str::trim).find_map(|l| l.strip_prefix(head.as_str())?.strip_suffix(']')?.parse::<i32>().ok())
+    let mut end = flat.len();
+    while let Some(i) = flat[..end].rfind(&head) {
+        let rest = &flat[i + head.len()..];
+        if let Some(close) = rest.find(']') {
+            if let Ok(code) = rest[..close].parse::<i32>() {
+                return Some(code);
+            }
+        }
+        end = i;
+    }
+    None
 }
 
 /// workspace 名稱：非空，且沒有空白與控制字元（要能安全放進一個參數）。
@@ -878,18 +891,48 @@ mod tests {
     #[test]
     fn 窗格結束標記_nonce_對得上才算_取結束碼() {
         use super::pane_exit_from_screen as f;
-        let screen = "claude 的畫面\n...\n\n[asn-exit abc123 3]\n";
-        assert_eq!(f(screen, "abc123"), Some(3));
-        assert_eq!(f("[asn-exit abc123 0]\n", "abc123"), Some(0));
-        assert_eq!(f("[asn-exit abc123 -1]\n", "abc123"), Some(-1));
-        // 夥伴自己印出格式對、nonce 不對的行：不算
-        assert_eq!(f(screen, "zzz"), None);
-        assert_eq!(f("echo [asn-exit abc123 3] 不是整行\n", "abc123"), None);
-        assert_eq!(f("[asn-exit abc123 x]\n", "abc123"), None, "結束碼不是數字");
-        assert_eq!(f("Welcome to Claude Code\n> \n", "abc123"), None);
-        assert_eq!(f(screen, ""), None, "沒有 nonce 就判斷不出來");
-        // 偽造的在前、真的在最後：取最後一行
-        assert_eq!(f("[asn-exit abc123 9]\nxx\n[asn-exit abc123 2]\n", "abc123"), Some(2));
+        let n = "0123456789abcdef0123456789abcdef";
+        let screen = format!("claude 的畫面\n...\n\n[asn-exit {n} 3]\n");
+        assert_eq!(f(&screen, n), Some(3));
+        assert_eq!(f(&format!("[asn-exit {n} 0]\n"), n), Some(0));
+        assert_eq!(f(&format!("[asn-exit {n} -1]\n"), n), Some(-1));
+        // 暗號不對、結束碼不是數字、沒有暗號：不算
+        assert_eq!(f(&screen, "zzz"), None);
+        assert_eq!(f(&format!("[asn-exit {n} x]\n"), n), None);
+        assert_eq!(f(&format!("[asn-exit {n} 1"), n), None, "沒收尾");
+        assert_eq!(f("Welcome to Claude Code\n> \n", n), None);
+        assert_eq!(f(&screen, ""), None);
+        // 前後黏著其他字也認得到
+        assert_eq!(f(&format!("前面的字[asn-exit {n} 7]後面的字"), n), Some(7));
+        // 偽造的在前、真的在最後：取最後一個；最後一個壞掉就退回前一個好的
+        assert_eq!(f(&format!("[asn-exit {n} 9]\nxx\n[asn-exit {n} 2]\n"), n), Some(2));
+        assert_eq!(f(&format!("[asn-exit {n} 9]\n[asn-exit {n} 屍]\n"), n), Some(9));
+    }
+
+    #[test]
+    fn 窗格結束標記_被_hold_訊息插進_base64_中間_也認得到() {
+        use super::pane_exit_from_screen as f;
+        let n = "aabbccddeeff00112233445566778899";
+        // 實機：[asn-exit … -1] 後面緊接著 WezTerm 的 Hold 訊息（包裝殼的 -EncodedCommand 整串 base64）
+        let screen = format!("[asn-exit {n} -1]JwAKACQAYwBv\n👍 Process \"powershell.exe -EncodedCommand JwAKACQAYwBvAGQAZQ\" in domain \"local\" completed.\nThis message is shown because exit_behavior=\"Hold\"\n");
+        assert_eq!(f(&screen, n), Some(-1));
+        // 標記被 Hold 訊息插在中間（結束碼之前）：只要整串標記還連在一起就認得到
+        let split = format!("[asn-exit {n} 4]\nxxxx");
+        assert_eq!(f(&split, n), Some(4));
+    }
+
+    #[test]
+    fn 窗格結束標記_被八十欄折行拆成兩行_也認得到() {
+        use super::pane_exit_from_screen as f;
+        let n = "00112233445566778899aabbccddeeff";
+        let line = format!("[asn-exit {n} 12]");
+        for cut in [3, 10, 20, line.len() - 2, line.len() - 1] {
+            let (a, b) = line.split_at(cut);
+            let screen = format!("前面的輸出\n{a}\n{b}\n");
+            assert_eq!(f(&screen, n), Some(12), "在第 {cut} 個字元折行");
+        }
+        // 折行時帶 \r\n
+        assert_eq!(f(&format!("[asn-exit {n} \r\n5]"), n), Some(5));
     }
 
     use super::*;

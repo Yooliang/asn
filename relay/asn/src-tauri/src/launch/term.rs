@@ -63,6 +63,32 @@ const EARLY_EXIT_WATCH: Duration = Duration::from_secs(5);
 /// 盯的間隔
 const EARLY_EXIT_POLL: Duration = Duration::from_millis(500);
 
+/// 工作階段記錄裡有沒有這個名字、`since_ms` 之後才啟動、程序還活著的 claude：有＝它已經起來了（比一開就結束的窗口更早的訊號）。
+/// 純邏輯，`alive` 由外面傳入。啟動時間比 `since_ms` 早的是舊的同名工作階段，不算。
+pub(crate) fn session_ready(sessions: &[serde_json::Value], name: &str, since_ms: u64, alive: &dyn Fn(u32) -> bool) -> bool {
+    !name.is_empty()
+        && sessions.iter().any(|s| {
+            s.get("name").and_then(|v| v.as_str()) == Some(name)
+                && s.get("startedAt").and_then(|v| v.as_u64()).is_some_and(|t| t >= since_ms)
+                && s.get("pid").and_then(|v| v.as_u64()).and_then(|p| u32::try_from(p).ok()).is_some_and(alive)
+        })
+}
+
+/// 正式：讀本機的工作階段記錄。測試不讀這台電腦真的記錄（一律 false，等滿時間）。
+/// 夥伴若用別的 Claude 設定資料夾，這裡讀不到，就只是等滿時間，不會誤判。
+fn partner_session_started(name: &str, since_ms: u64) -> bool {
+    #[cfg(not(test))]
+    {
+        let Some(dir) = super::console::sessions_dir() else { return false };
+        session_ready(&super::console::read_sessions(&dir), name, since_ms, &crate::heartbeat::pid_alive)
+    }
+    #[cfg(test)]
+    {
+        let _ = (name, since_ms);
+        false
+    }
+}
+
 /// 夥伴一開就結束的失敗原因（結束碼印不出來就不帶）
 fn early_exit_text(code: i32) -> String {
     format!("夥伴一開就結束（結束碼 {code}）")
@@ -700,6 +726,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let cwd_s = cwd.to_string_lossy().into_owned();
         // 夥伴窗格：外面包一層 PowerShell，程式結束後印帶暗號的結束標記（Hold 不會把結束寫進 mux 的畫面，只能自己留）
         let exit_nonce = (!extra.kind.is_empty()).then(new_nonce);
+        let spawned_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
         let wrapped: Vec<String> = match &exit_nonce {
             Some(n) => super::local::mux_wrapped_argv(command, n),
             None => command.to_vec(),
@@ -729,7 +756,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         // 夥伴視窗開了立刻以錯誤結束（claude 起不來等）：Hold 會讓窗格留著，但這不是「開成功」。
         // 短時間內看窗格有沒有已結束；有就收掉窗格、回失敗與原因
         if let Some(n) = &exit_nonce {
-            if let Some(code) = self.early_exit(&w, &win.sock, pane_id, n) {
+            let name = extra.label.clone().unwrap_or_default();
+            if let Some(code) = self.early_exit(&w, &win.sock, pane_id, n, &|| partner_session_started(&name, spawned_ms)) {
                 return Err(close_pane(early_exit_text(code)));
             }
         }
@@ -761,12 +789,16 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     }
 
     /// 剛開的夥伴窗格在 [`EARLY_EXIT_WATCH`] 內有沒有結束；有就回結束碼（見 [`wezterm::pane_exit_from_screen`]）。等待走 runner.sleep
-    fn early_exit(&self, w: &WezTerm<'_>, sock: &Path, pane_id: u64, nonce: &str) -> Option<i32> {
+    /// `started` 回 true＝這個夥伴已經確定起來了（claude 寫了工作階段記錄），不必再等滿時間。
+    fn early_exit(&self, w: &WezTerm<'_>, sock: &Path, pane_id: u64, nonce: &str, started: &dyn Fn() -> bool) -> Option<i32> {
         let polls = EARLY_EXIT_WATCH.as_millis() / EARLY_EXIT_POLL.as_millis();
         for _ in 0..polls {
             self.runner.sleep(EARLY_EXIT_POLL);
             if let Some(code) = w.pane_exit(sock, pane_id, Some(nonce)) {
                 return Some(code);
+            }
+            if started() {
+                return None;
             }
         }
         None
@@ -4997,6 +5029,25 @@ mod tests {
             assert_eq!(kill_panes(&rig.runner), 0);
             assert_eq!(rig.svc.partner_in_mux((MUX_PID, 1000), "小乙"), Some(id));
             assert!(rig.runner.inner.sleeps.borrow().iter().all(|d| d.as_millis() <= 500) && rig.runner.inner.sleeps.borrow().len() <= 10);
+        }
+
+        #[test]
+        fn 夥伴工作階段記錄已出現_提早結束等待() {
+            fix_nonce();
+            let sessions = vec![serde_json::json!({ "pid": 11, "name": "小乙", "startedAt": 5_000u64 })];
+            assert!(session_ready(&sessions, "小乙", 4_000, &|_| true));
+            assert!(!session_ready(&sessions, "小乙", 6_000, &|_| true), "舊的同名工作階段不算");
+            assert!(!session_ready(&sessions, "小乙", 4_000, &|_| false), "程序已不在不算");
+            assert!(!session_ready(&sessions, "小甲", 4_000, &|_| true));
+            assert!(!session_ready(&sessions, "", 4_000, &|_| true));
+            let (rig, _) = mux_rig();
+            let dir = rig.svc.dir().unwrap();
+            let w = rig.svc.wez(&dir);
+            assert_eq!(rig.svc.early_exit(&w, Path::new("s"), 9, NONCE, &|| true), None);
+            assert_eq!(rig.runner.inner.sleeps.borrow().len(), 1, "起來了就只等一輪");
+            rig.runner.inner.sleeps.borrow_mut().clear();
+            assert_eq!(rig.svc.early_exit(&w, Path::new("s"), 9, NONCE, &|| false), None);
+            assert_eq!(rig.runner.inner.sleeps.borrow().len(), 10, "沒有訊號就等滿");
         }
 
         #[test]
