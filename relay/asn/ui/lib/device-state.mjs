@@ -93,3 +93,25 @@ export function installAction({ vendor, isSelf = false, phone = false, online = 
 
 /** 主要幾家 AI：設備卡上就算這台沒用到也要列出「未安裝／不確定」 */
 export const CORE_VENDORS = Object.freeze(['claude', 'codex', 'grok'])
+
+const SHORT_TEXT = Object.freeze({
+  [STATE.LOGGED_IN]: '已登入',
+  [STATE.LOGIN_FAILED]: '登入失效',
+  [STATE.INSTALLED_LOGGED_OUT]: '已安裝未登入',
+  [STATE.LOGGED_OUT]: '沒有登入',
+  [STATE.NOT_INSTALLED]: '未安裝',
+  [STATE.UNKNOWN_INSTALL]: '不確定是否安裝',
+})
+
+/**
+ * 設備列表每一列的一行摘要，例如「Claude 已登入、Codex 未安裝」。
+ * 手機沒有；別台離線看不到狀態；別台回報不是新的就只說一句「還沒收到這台的回報」（不逐家說，免得被讀成沒登入）
+ */
+export function deviceStateLine({ vendors = [], missing = [], phone = false, online = true, self = false } = {}) {
+  if (phone) return ''
+  if (!self && !online) return '離線，看不到狀態'
+  const all = [...vendors, ...missing]
+  if (!all.length) return ''
+  if (all.some(v => v.state === STATE.NO_REPORT)) return STATE_TEXT[STATE.NO_REPORT]
+  return all.filter(v => SHORT_TEXT[v.state]).map(v => `${v.label} ${SHORT_TEXT[v.state]}`).join('、')
+}

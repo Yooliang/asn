@@ -14,27 +14,31 @@ import { VENDOR_ICON_KEYS, vendorIconSvg } from '../ui/lib/vendor-icons.mjs'
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
 // ---------- 分類 ----------
-test('分類：帳號與設備併成一類（鍵沿用 devices、標題「設備與帳號」），舊的 accounts 鍵正規化到 devices', () => {
-  assert.ok(!SETTING_KEYS.includes('accounts'))
+test('分類：「設備與帳號」拆成「設備」（devices）和「帳號」（accounts）兩類，沒有別名；自己的 ASN 帳號仍在「個人」', () => {
+  assert.ok(SETTING_KEYS.includes('devices') && SETTING_KEYS.includes('accounts'))
   assert.equal(SETTING_KEYS.filter(k => k === 'devices').length, 1)
-  assert.equal(catByKey('devices').title, '設備與帳號')
-  assert.ok(!SETTING_CATS.some(c => c.title === '帳號' || c.title === '設備'))
-  assert.equal(normalizeCatKey('accounts'), 'devices')
+  assert.equal(catByKey('devices').title, '設備')
+  assert.equal(catByKey('accounts').title, '帳號')
+  assert.ok(!SETTING_CATS.some(c => c.title === '設備與帳號'), '畫面上不再有「設備與帳號」')
+  assert.equal(normalizeCatKey('accounts'), 'accounts')
   assert.equal(normalizeCatKey('devices'), 'devices')
   assert.equal(normalizeCatKey('look'), 'look')
-  assert.equal(catByKey('accounts')?.key, 'devices', '舊存檔或連結裡的 accounts 還找得到')
-  assert.equal(panelTitle('setting', 'accounts'), '設定：設備與帳號')
+  assert.equal(catByKey('me').title, '個人')
+  assert.equal(panelTitle('setting', 'accounts'), '設定：帳號')
+  assert.equal(panelTitle('setting', 'devices'), '設定：設備')
   assert.equal(catByKey('nope'), null)
+  // 順序：個人、設備、帳號
+  assert.deepEqual(SETTING_KEYS.slice(0, 3), ['me', 'devices', 'accounts'])
 })
 
-test('摘要：設備數與帳號數合在一行，缺欄位不丟錯', () => {
+test('摘要：設備頁寫設備數與在線數，帳號頁寫本機 Claude 帳號庫；缺欄位不丟錯', () => {
   const devices = [{ online: true }, { online: false }, { online: true }]
-  assert.equal(catSummary('devices', { devices, accountCount: 2, accountCurrent: 'a@x.test' }), '3 台設備，2 台在線；2 個 Claude 帳號，使用中：a@x.test')
-  assert.equal(catSummary('devices', { devices, accountCount: 0 }), '3 台設備，2 台在線；還沒有加入過帳號')
-  assert.equal(catSummary('devices', { devices, accountCount: 0, accountCurrent: 'a@x.test' }), '3 台設備，2 台在線；使用中：a@x.test（還沒加入帳號庫）')
-  assert.equal(catSummary('devices', { devices, accountCount: 2 }), '3 台設備，2 台在線；2 個 Claude 帳號')
-  assert.ok(catSummary('devices', {}).trim())
-  assert.equal(catSummary('accounts', { devices, accountCount: 2 }), catSummary('devices', { devices, accountCount: 2 }), '舊鍵給同一句')
+  assert.equal(catSummary('devices', { devices, accountCount: 2 }), '3 台設備，2 台在線')
+  assert.equal(catSummary('accounts', { devices, accountCount: 2, accountCurrent: 'a@x.test' }), '2 個 Claude 帳號，使用中：a@x.test')
+  assert.equal(catSummary('accounts', { devices, accountCount: 0 }), '還沒有加入過帳號')
+  assert.equal(catSummary('accounts', { devices, accountCount: 0, accountCurrent: 'a@x.test' }), '使用中：a@x.test（還沒加入帳號庫）')
+  assert.equal(catSummary('accounts', { devices, accountCount: 2 }), '2 個 Claude 帳號')
+  assert.ok(catSummary('devices', {}).trim() && catSummary('accounts', {}).trim())
 })
 
 // ---------- 資料：每個廠商帶帳號清單 ----------
@@ -164,8 +168,11 @@ test('這台沒有 Codex 登入：Codex 卡片寫登入說明，不整張消失'
   assert.ok(html.includes('這台電腦目前沒有登入 Codex。') && html.includes(vendorIconSvg('codex')))
 })
 
-test('舊的 accounts 鍵與新的 devices 鍵畫出同一頁；其他類別不混進來', async () => {
-  assert.equal(await render({ catKey: 'accounts' }), await render({ catKey: 'devices' }))
+test('「設備」和「帳號」是兩頁：各畫各的，不混在一起；其他類別不混進來', async () => {
+  const dev = await render({ catKey: 'devices' }), acct = await render({ catKey: 'accounts' })
+  assert.notEqual(dev, acct)
+  assert.ok(!dev.includes('class="dv-my"'), '設備頁沒有「我的帳號」')
+  assert.ok(!acct.includes('class="dv-list"') && !acct.includes('雲端代理'), '帳號頁沒有設備列表與雲端代理')
   const look = await render({ catKey: 'look' }, st({ frame: 'custom', mode: 'merged', dpMode: 'left', toolbar: 'top', bubble: 'none' }))
   assert.ok(!look.includes('dv-set') && !look.includes('重新整理'))
 })

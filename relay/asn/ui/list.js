@@ -1508,7 +1508,7 @@ const app = createApp({
     setTimeout(() => void accounts.report(), 5_000)
     // 每 5 分鐘回報時順便重讀這台的額度紀錄，設備卡的額度條才不會停在開機那時的數字
     // 帳號列表（#374）也跟著這個節奏，但只在「設備與帳號」開著時讀（打開那一刻另讀一次，見下面監看設定頁那段）
-    const devicesOpen = () => normalizeCatKey(ui.panel.setting) === 'devices'
+    const devicesOpen = () => ['devices', 'accounts'].includes(normalizeCatKey(ui.panel.setting))
     setInterval(() => { void accounts.report(); void accounts.refreshQuota(); if (devicesOpen()) void accounts.refreshRoster() }, 5 * 60_000)
     void listen('claude-mod-status', e => { accounts.state.mod = String(e.payload ?? '') })   // Rust 背景安裝 Claude 外掛完成
     void listen('claude-account-auto', e => void accounts.onAuto(e.payload))
@@ -1658,7 +1658,7 @@ const app = createApp({
     watch(() => ui.panel.setting, k => {
       if (k === 'usage') void usage.refresh()
       if (k) void accounts.refreshQuota()   // 打開設定頁（或換頁籤）時重讀額度
-      if (normalizeCatKey(k) === 'devices') void accounts.refreshRoster()   // 打開「設備與帳號」時讀一次帳號列表（#374）
+      if (['devices', 'accounts'].includes(normalizeCatKey(k))) void accounts.refreshRoster()   // 打開「設備」或「帳號」時讀一次帳號列表（#374）
     }, { immediate: true })
     const pushSettings = () => { if (ui.mode === 'split') emit('asn:settings', settingsState.value) }
     watch(settingsState, pushSettings, { deep: true })

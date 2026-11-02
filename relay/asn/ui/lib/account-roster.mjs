@@ -15,6 +15,8 @@ export const ROSTER_TEXT = {
   geminiOff: '開 Gemini 視窗後才讀得到',   // Gemini 額度只有 ASN 開的 Gemini 視窗讀得到（#374 之三）
   empty: '還沒有帳號回報',
   current: '使用中',
+  noList: '現在讀不到帳號列表，請稍後再開一次。',
+  usedOn: '用在',
   resetPending: '已重置，待更新',   // 那一窗的重置時間已經過了：記著的百分比不代表現在（#527 審查）
 }
 export const ROSTER_POLL_MS = 5 * 60_000   // 開著「設備與帳號」時多久重讀一次（跟額度回報同一個節奏，不另開更密的）
@@ -174,6 +176,8 @@ export function rosterView(roster, opts = {}) {
       vendor, account, plan: planLabel(e.plan),
       current: Array.isArray(e.nodes) && e.nodes.some(n => n?.current === true),
       quota: rosterQuota(e, opts),
+      // 用在哪幾台（目前還有在回報這個帳號的設備；使用中的排前面）
+      usedOn: usedOnOf(e, opts),
     }
     groups.set(vendor, [...(groups.get(vendor) ?? []), row])
   }
@@ -182,6 +186,21 @@ export function rosterView(roster, opts = {}) {
     .map(([key, accounts]) => ({ key, label: VENDOR_NAME[key] ?? key, accounts: [...accounts].sort((x, y) => x.account.localeCompare(y.account)) }))
   return { title: ROSTER_TEXT.title, empty: vendors.length ? '' : ROSTER_TEXT.empty, vendors }
 }
+
+/** 這個帳號用在哪幾台：後台 nodes（目前還有在回報它的設備）→ [{ node, label, current }]，使用中的排前面 */
+function usedOnOf(e, opts) {
+  const label = typeof opts?.nodeLabel === 'function' ? opts.nodeLabel : () => ''
+  const seen = new Set()
+  const list = []
+  for (const n of Array.isArray(e?.nodes) ? e.nodes : []) {
+    const node = typeof n?.node === 'string' ? n.node : ''
+    if (!node || seen.has(node)) continue
+    seen.add(node)
+    list.push({ node, label: label(node) || UNNAMED_DEVICE, current: n.current === true })
+  }
+  return list.sort((a, b) => Number(b.current) - Number(a.current))   // 使用中的排前面，其餘保持後台給的順序（不依語系排，免得不同機器順序不一樣）
+}
+export const usedOnText = row => (row?.usedOn ?? []).map(n => (n.current ? `${n.label}（使用中）` : n.label)).join('、')
 
 /**
  * 向後台讀一次列表。call：() => Promise（電腦 invoke('acct_roster')、手機 invoke('android_acct_roster')）。

@@ -295,10 +295,10 @@ test('手機設備卡與「我的帳號」：跟電腦版同一套轉換', () =>
 const ACCT = { list: [], current: null, codexLine: '', busy: false, confirmDel: '', msg: '', allowSwitch: true, autoNote: '', mod: '', remote: { node: '', devices: [], list: [], loading: false, busy: false, msg: '' } }
 const render = async st => {
   globalThis.Vue = Vue
-  return renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st, catKey: 'devices', meAv: '' }) }))
+  return renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st, catKey: 'accounts', meAv: '' }) }))
 }
 
-test('電腦設定頁：設備列表最上面有「我的帳號」，按廠牌列出帳號與額度；沒有列表就不出現', async () => {
+test('電腦設定頁：「帳號」頁有「我的帳號」，按廠牌列出帳號與額度；沒有列表寫提示', async () => {
   const my = rosterView(roster([entry(), entry({ vendor: 'codex', windows: [] })]), { nodeLabel, now: NOW })
   const html = await render({ devices: [], accounts: ACCT, myAccounts: my })
   assert.match(html, /<section class="dv-my"[^>]*aria-label="我的帳號"/)
@@ -310,6 +310,7 @@ test('電腦設定頁：設備列表最上面有「我的帳號」，按廠牌�
   assert.ok(html.includes('使用中'))
   const none = await render({ devices: [], accounts: ACCT, myAccounts: null })
   assert.ok(!none.includes('dv-my'))
+  assert.ok(none.includes('現在讀不到帳號列表'), '沒有列表時寫提示，不是一整頁空白')
   // 已重置的窗寫「可能已恢復」、不出現舊百分比（#527 審查、#374）
   const past = rosterView(roster([entry({ windows: [win('five_hour', 3, H, { resets_at: iso(NOW - H) }), win('weekly', 60, 2 * D)] })]), { nodeLabel, now: NOW })
   const h2 = await render({ devices: [], accounts: ACCT, myAccounts: past })
@@ -317,11 +318,14 @@ test('電腦設定頁：設備列表最上面有「我的帳號」，按廠牌�
   assert.ok(read('ui/m.html').includes('{{ a.quota.meta }}'))
 })
 
-test('電腦設定頁：「我的帳號」在設備列表之前', async () => {
+test('電腦設定頁：「我的帳號」只在「帳號」頁，「設備」頁沒有；設備列表只在「設備」頁', async () => {
   const my = rosterView(roster([entry()]), { nodeLabel, now: NOW })
   const devices = [{ key: W, label: '工作機', self: false, kind: '電腦', online: true, onlineText: '在線', reportedText: '', empty: '', vendors: [] }]
-  const html = await render({ devices, accounts: ACCT, myAccounts: my })
-  assert.ok(html.indexOf('class="dv-my"') >= 0 && html.indexOf('class="dv-my"') < html.indexOf('class="dv-list"'))
+  const acctPage = await render({ devices, accounts: ACCT, myAccounts: my })
+  assert.ok(acctPage.includes('class="dv-my"') && !acctPage.includes('class="dv-list"'))
+  globalThis.Vue = Vue
+  const devPage = await renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st: { devices, accounts: ACCT, myAccounts: my }, catKey: 'devices', meAv: '' }) }))
+  assert.ok(devPage.includes('class="dv-list"') && !devPage.includes('class="dv-my"'))
 })
 
 // ---------- 讀取時機與接線 ----------
@@ -360,9 +364,9 @@ test('電腦：先讀成功一次、再讀失敗 → 設備卡與「我的帳號
   assert.equal(quotaOfA(tree(never.state.roster)), '5 小時剩 99%、每週剩 99%', '退回那台自己回報的')
 })
 
-test('接線：電腦打開「設備與帳號」讀一次、開著時跟 5 分鐘排程一起讀；手機用 android_acct_roster、進頁讀一次', () => {
+test('接線：電腦打開「設備」或「帳號」讀一次、開著時跟 5 分鐘排程一起讀；手機用 android_acct_roster、進頁讀一次', () => {
   const list = read('ui/list.js'), m = read('ui/m.js'), html = read('ui/m.html'), lhtml = read('ui/list.html')
-  assert.match(list, /normalizeCatKey\(k\) === 'devices'\) void accounts\.refreshRoster\(\)/)
+  assert.match(list, /\['devices', 'accounts'\]\.includes\(normalizeCatKey\(k\)\)\) void accounts\.refreshRoster\(\)/)
   assert.match(list, /5 \* 60_000\)/)
   assert.match(list, /if \(devicesOpen\(\)\) void accounts\.refreshRoster\(\)/)
   assert.match(list, /roster: accounts\.state\.roster/)

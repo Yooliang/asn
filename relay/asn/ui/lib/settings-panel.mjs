@@ -14,6 +14,7 @@ import { vendorIconSvg } from './vendor-icons.mjs'
 import { USAGE_NOTE } from './usage.mjs'
 import { NO_QUOTA_TEXT, planLabel, quotaBars, quotaView } from './account-quota.mjs'
 import { DEVICE_TEXT, canRemoveRow, dropAfter, moveFlags, removedRows, visibleRows } from './device-order.mjs'
+import { ROSTER_TEXT, usedOnText } from './account-roster.mjs'
 
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
 export const SETTING_OPS = [
@@ -76,11 +77,28 @@ export const SettingsPanel = {
       }
       return list
     })
+    // 帳號頁：這個帳號可以切到哪幾台（本機的 Claude／Grok 帳號庫，或別台設備回報裡有這個帳號、對方 ASN 在線、可切換、而且它還沒在用的）
+    const switchTargets = (vendor, a) => {
+      if (vendor !== 'claude' && vendor !== 'grok') return []
+      const mail = String(a?.account ?? '').trim().toLowerCase()
+      const out = []
+      for (const d of allDevs.value) {
+        if (d.hidden || d.removed) continue
+        const v = (d.vendors ?? []).find(x => x.key === vendor)
+        const has = (v?.accounts ?? []).find(x => String(x.email ?? '').trim().toLowerCase() === mail)
+        if (!has || has.current || has.incomplete) continue
+        if (d.self) {
+          if (vendor === 'claude') out.push({ key: d.key, label: '這台', op: 'acct-switch', value: has.email })
+          else if ((v.accounts ?? []).length > 1) out.push({ key: d.key, label: '這台', op: 'grok-switch', value: has.email })
+        } else if (v.switchable) out.push({ key: d.key, label: d.label, op: 'device-switch', value: { node: d.key, email: has.email, vendor } })
+      }
+      return out
+    }
     const act = (op, value) => emit('act', op, value)
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return {
       fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions,
-      cat, catIcon, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, onRow, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON,
+      cat, catIcon, ROSTER_TEXT, usedOnText, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, onRow, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON,
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL,
       CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS, DIMS,
@@ -137,10 +155,9 @@ export const SettingsPanel = {
           <small role="status">{{ st.voice.note }}</small>
         </div>
       </template>
-      <template v-if="cat === 'devices'">
-        <div class="dv-set">
-          <template v-if="!curDev">
-            <section class="dv-my" v-if="st.myAccounts" :aria-label="st.myAccounts.title">
+      <template v-if="cat === 'accounts'">
+        <div class="dv-set dv-acctpage">
+          <section class="dv-my" v-if="st.myAccounts" :aria-label="st.myAccounts.title">
               <h3 class="dv-my-h">{{ st.myAccounts.title }}</h3>
               <small v-if="st.myAccounts.empty">{{ st.myAccounts.empty }}</small>
               <div class="dv-my-v" v-for="v in st.myAccounts.vendors" :key="v.key" :data-vendor="v.key">
@@ -165,14 +182,24 @@ export const SettingsPanel = {
                       <span class="dv-old" v-if="a.quota.oldText">{{ a.quota.oldText }}</span>
                       <span v-if="a.quota.meta">（{{ a.quota.meta }}）</span>
                     </span>
+                    <small class="dv-used" v-if="a.usedOn && a.usedOn.length">{{ ROSTER_TEXT.usedOn }}：{{ usedOnText(a) }}</small>
+                    <span class="dv-sw" v-if="switchTargets(v.key, a).length" role="group" :aria-label="'切換 ' + a.account">
+                      <button class="aero-btn" type="button" v-for="t in switchTargets(v.key, a)" :key="t.key" :disabled="st.accounts && st.accounts.busy" @click="act(t.op, t.value)">切換到{{ t.label }}</button>
+                    </span>
                   </li>
                 </ul>
               </div>
             </section>
+          <small class="dv-none" v-else>{{ ROSTER_TEXT.noList }}</small>
+        </div>
+      </template>
+      <template v-if="cat === 'devices'">
+        <div class="dv-set">
+          <template v-if="!curDev">
             <small v-if="!devs.length">{{ DEVICE_TEXT.empty }}</small>
             <ul class="dv-list" aria-label="設備" v-else>
               <li v-for="d in devs" :key="d.key" :data-dev="d.key" :class="['dv-row', { hid: d.hidden, off: !d.online, dragging: dragKey === d.key, 'drop-before': overKey === d.key && !overAfter, 'drop-after': overKey === d.key && overAfter }]" :draggable="!d.self" @click="onRow(d.key, $event)" @dragstart="dragStart(d.key, $event)" @dragover="dragOver(d.key, $event)" @drop="drop(d.key, $event)" @dragend="clearDrag">
-                <button class="dv-row-go" type="button" :aria-label="'查看 ' + d.label + ' 的帳號'"><span class="dv-name">{{ d.label }}</span><span class="dv-tag kind" v-if="d.kind !== '電腦'">{{ d.kind }}</span><span :class="['dv-tag', d.online ? 'on' : 'off']">{{ d.onlineText }}</span><span class="dv-tag me" v-if="d.self">這台</span><span class="dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span></button>
+                <button class="dv-row-go" type="button" :aria-label="'查看 ' + d.label + ' 的帳號'"><span class="dv-name">{{ d.label }}</span><span class="dv-tag kind" v-if="d.kind !== '電腦'">{{ d.kind }}</span><span :class="['dv-tag', d.online ? 'on' : 'off']">{{ d.onlineText }}</span><span class="dv-tag me" v-if="d.self">這台</span><span class="dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span><small class="dv-line" v-if="d.stateLine">{{ d.stateLine }}</small></button>
                 <span class="dv-row-move" v-if="!d.self" role="group" aria-label="設備順序">
                   <button class="aero-btn" type="button" :disabled="!flags[d.key].up" :aria-label="'上移 ' + d.label" @click.stop="act('device-move', { node: d.key, dir: -1 })">{{ DEVICE_TEXT.moveUp }}</button>
                   <button class="aero-btn" type="button" :disabled="!flags[d.key].down" :aria-label="'下移 ' + d.label" @click.stop="act('device-move', { node: d.key, dir: 1 })">{{ DEVICE_TEXT.moveDown }}</button>
@@ -206,7 +233,7 @@ export const SettingsPanel = {
               <div class="dv-empty" v-if="!curVendors.length"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h13v9H3zM1 18h17M19 8h3v11h-3z"></path></svg><span>{{ curDev.empty || '這台設備還沒有回報任何廠商' }}</span></div>
               <ul class="dv-vendors" v-else>
                 <li :class="['dv-vendor', 'v-' + v.key]" v-for="v in curVendors" :key="v.key">
-                  <header class="dv-vh"><span class="dv-vicon" aria-hidden="true" v-html="vendorIcon(v.iconKey || v.key)"></span><b>{{ v.label }}</b><small class="dv-via" v-if="v.via">經 {{ v.via }}</small></header>
+                  <header class="dv-vh"><span class="dv-vicon" aria-hidden="true" v-html="vendorIcon(v.iconKey || v.key)"></span><b>{{ v.label }}</b><small class="dv-via" v-if="v.via">經 {{ v.via }}</small><small :class="['dv-state', 'st-' + v.state]" v-if="v.stateText">{{ v.stateText }}</small></header>
                   <div class="dv-vb">
                     <template v-if="curDev.self && v.key === 'claude'">
                       <ul class="dv-accts" v-if="st.accounts.list.length">
