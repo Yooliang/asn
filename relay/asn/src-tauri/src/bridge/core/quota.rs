@@ -13,6 +13,11 @@ impl Core {
         (self.quota_until > 0).then_some(self.quota_until)
     }
 
+    /// 超過上限的旗標還沒報給後台（暫停進行中、有超過上限、還沒報過）
+    pub(super) fn hold_cap_due(&self) -> bool {
+        self.inbox_hold_until().is_some() && !self.cap_sent && self.quota_ep.as_ref().is_some_and(|e| e.capped)
+    }
+
     pub(super) fn quota_active(&self, now: u64) -> bool {
         self.quota_until > 0 && now < self.quota_until
     }
@@ -70,7 +75,6 @@ impl Core {
         for m in newly {
             self.quota_notify_sender(&m).await;
         }
-        self.quota_notify_owner().await;
     }
 
     /// 通知私信原寄件人：同一寄件人同一次額度用完只通知一次；收發室寄來的與收發室自己寫的通知不回
@@ -89,36 +93,15 @@ impl Core {
         self.send_back(&o, &text, None, Some(false)).await;
     }
 
-    /// 通知這台電腦的主人（同一次額度用完只一次）。
-    /// 後台現有的主人通知 acct_login_alert 是固定的「登入失效」內文、不能帶自訂文字，所以改寄一封信到本機 ASN 自己的視窗（本人的畫面）
-    pub(super) async fn quota_notify_owner(&mut self) {
-        let Some(ep) = self.quota_ep.as_mut() else { return };
-        if ep.owner {
-            return;
-        }
-        ep.owner = true;
-        let text = format!("[收發室] 這台電腦（{}）的收發室 Claude 額度用完，約 {}（台北）重置；重置前收到的信先扣住、重置後自動轉交（最多扣住 {QUOTA_HOLD_MAX} 筆，超過的不收）。", self.cfg.node, taipei_hm(self.quota_until));
-        self.send_owner(&text).await;
-    }
-
-    async fn send_owner(&self, text: &str) {
-        let b = json!({ "to_node": self.cfg.node, "to_agent": self.relay.window_name(), "body": text, "from_agent": self.cfg.mailbox_name, "expects_reply": false });
-        if let Err(e) = self.relay.api("send", Some(b)).await {
-            self.log.line(&format!("quota owner notice failed: {e}"));
-        }
-    }
-
-    /// 扣住的筆數已達上限：這筆不收（不 ack、不推進游標，留在伺服器下次再拉）；記 log，並另外通知主人一次
+    /// 扣住的筆數已達上限：這筆不收（不 ack、不推進游標，留在伺服器下次再拉）；記 log。
+    /// 通知主人由後台寄：名單回報會帶 inbox_hold_capped（每次額度用完只帶一次），見 refresh_roster
     pub(super) async fn quota_cap_hit(&mut self, what: &str) {
         if self.unrouted.insert(format!("quota-cap:{what}")) {
             self.log.line(&format!("quota hold full ({QUOTA_HOLD_MAX}): {what} not taken (left on server)"));
         }
-        let Some(ep) = self.quota_ep.as_mut() else { return };
-        if ep.capped {
-            return;
+        if let Some(ep) = self.quota_ep.as_mut() {
+            ep.capped = true;
         }
-        ep.capped = true;
-        self.send_owner(&format!("[收發室] 額度用完期間扣住的信已達 {QUOTA_HOLD_MAX} 筆上限，超過的先不收（留在伺服器，重置後再處理）。")).await;
     }
 
     /// 額度還沒重置時進來的個人信：扣住（Held），不送 worker、不 ack。回 true＝已扣住（或已達上限而不收），呼叫端直接結束
@@ -136,7 +119,6 @@ impl Core {
         self.persist();
         self.log.line(&format!("mail id={} held for quota (not acked)", m.id));
         self.quota_notify_sender(m).await;
-        self.quota_notify_owner().await;
         true
     }
 
@@ -205,6 +187,7 @@ impl Core {
         }
         let mut order: Vec<(u64, usize, String)> = self.pending.iter().enumerate().filter(|(_, p)| p.state == State::Held && self.held_items.contains_key(&p.id)).map(|(i, p)| (p.t0, i, p.id.clone())).collect();
         self.quota_until = 0;
+        self.persist();
         if order.is_empty() {
             return;
         }

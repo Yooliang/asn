@@ -127,11 +127,13 @@ pub struct Loaded {
     pub last: std::collections::BTreeMap<String, LastReq>,
     pub dropped: usize,
     pub error: Option<String>,
+    /// 收發室 worker 額度重置時間（毫秒，0＝沒有；範圍由呼叫端驗）
+    pub quota_until: u64,
 }
 
 /// 讀檔＋清過期
 pub fn load_state(file: &Path, now: u64, keep_ms: u64) -> Loaded {
-    let mut out = Loaded { pending: vec![], last: Default::default(), dropped: 0, error: None };
+    let mut out = Loaded { pending: vec![], last: Default::default(), dropped: 0, error: None, quota_until: 0 };
     let raw = match std::fs::read_to_string(file) {
         Ok(r) => r,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return out,
@@ -151,6 +153,7 @@ pub fn load_state(file: &Path, now: u64, keep_ms: u64) -> Loaded {
         out.error = Some("格式不符".into());
         return out;
     }
+    out.quota_until = data.get("quotaUntil").and_then(num).unwrap_or(0);
     for r in data.get("pending").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]) {
         match from_record(r) {
             Some(p) if now.saturating_sub(if p.state == State::Notified { p.notified_at.unwrap_or(0) } else { p.t0 }) <= keep_ms => out.pending.push(p),

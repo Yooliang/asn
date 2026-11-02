@@ -67,7 +67,7 @@ async fn 通知_同寄件人一次_主人一次_收發室寄的與系統通知�
     assert_eq!(notices_to(&h, "W", "W-別人"), 1);
     assert_eq!(notices_to(&h, "W", "W-收發室"), 0, "收發室寄來的不回通知");
     assert_eq!(notices_to(&h, "W", "W-乙乙"), 0, "收發室寫的系統通知不回通知");
-    assert_eq!(owner_notices(&h), 1, "主人只通知一次");
+    assert_eq!(owner_notices(&h), 0, "主人通知改由後台寄（名單回報帶暫停時間），不寄到本機視窗");
     // 通知內容：設備名、台北時間、reply=no
     let n = h.fr.sent().into_iter().find(|s| s["to_agent"] == "W-政策").unwrap();
     assert_eq!(n["body"].as_str().unwrap(), format!("[收發室] 這台（T）的收發室 Claude 額度用完，約 {}（台北）重置；信已收到，重置後自動轉交。", taipei_hm(UNTIL)));
@@ -75,7 +75,7 @@ async fn 通知_同寄件人一次_主人一次_收發室寄的與系統通知�
     // 再來一次 quota 事件（同一次額度用完）：不重複通知
     h.core.on_worker_line(quota_line(RESETS_S), TQ + 3000).await;
     assert_eq!(notices_to(&h, "W", "W-政策"), 1);
-    assert_eq!(owner_notices(&h), 1);
+    assert_eq!(owner_notices(&h), 0);
 }
 
 #[tokio::test]
@@ -131,7 +131,6 @@ async fn 重送成功後_ack_並照常等回覆() {
     h.fr.put(mail(2, json!({})));
     h.core.pull("test", UNTIL + 700).await;
     assert_eq!(notices_to(&h, "W", "W-政策"), 2);
-    assert_eq!(owner_notices(&h), 2);
 }
 
 #[tokio::test]
@@ -148,7 +147,7 @@ async fn 重送又撞額度_再扣住_不重複通知_延遲抬頭仍是原本�
     assert_eq!(held_ids(&h), vec![uid(1)]);
     assert!(h.fr.acked().is_empty());
     assert_eq!(notices_to(&h, "W", "W-政策"), 1, "不重複通知寄件人");
-    assert_eq!(owner_notices(&h), 1, "不重複通知主人");
+    assert_eq!(owner_notices(&h), 0);
     h.core.tick(next_s * 1000 + 59_000).await;
     assert_eq!(h.said().len(), 2, "新的重置時間前不重送");
     h.core.tick(next_s * 1000 + 60_000).await;
@@ -207,10 +206,15 @@ async fn 扣住有上限_超過的不收_不_ack_留在伺服器_另通知主人
     assert!(h.fr.acked().is_empty());
     assert!(h.core.log.has("quota hold full"));
     assert_eq!(h.core.log.count("quota hold full"), 5, "每封只記一次 log（5 封超過）");
-    assert_eq!(owner_notices(&h), 2, "額度用完一次、超過上限一次");
-    // 再拉一次：超過的仍留在伺服器，不重複通知
+    // 超過上限的旗標由名單回報帶給後台（後台寄給主人），每次額度用完只帶一次；順便帶設備名與扣住筆數
+    h.core.tick(TQ + 4000).await;
+    let posts = hold_bodies(&h);
+    assert_eq!(posts.len(), 2, "啟動的空值一次、暫停開始（含超過上限）一次：{posts:?}");
+    assert_eq!((posts[1]["inbox_hold_count"].clone(), posts[1]["inbox_hold_computer"].clone(), posts[1]["inbox_hold_capped"].clone()), (json!(200), json!("T"), json!(true)));
+    // 再拉一次：超過的仍留在伺服器，不重複報
     h.core.pull("test", TQ + 3000).await;
-    assert_eq!(owner_notices(&h), 2);
+    h.core.tick(TQ + 9000).await;
+    assert_eq!(hold_bodies(&h).len(), 2);
     // 重置後處理掉扣住的，超過的下一次拉才收
     h.core.tick(UNTIL).await;
     assert_eq!(h.said().len(), 201);
@@ -237,8 +241,9 @@ async fn 扣住的信存檔_重啟後與重新拉到的同一封依_id_去重_�
     c2.pull("test", TQ + 6000).await;
     c2.pull("test", TQ + 7000).await;
     assert_eq!(c2.pending.len(), 1);
-    assert!(sink2.said.lock().unwrap().is_empty(), "重置前（沒有額度記錄）也要等 tick 才重送");
-    c2.tick(TQ + 8000).await;
+    assert!(sink2.said.lock().unwrap().is_empty(), "重置時間前不重送");
+    assert!(c2.inbox_hold_until().is_some(), "重啟後重置時間還在，繼續扣住");
+    c2.tick(UNTIL).await;
     // 補回內文後重送：抬頭寫原本收到的時間（從存檔的 t0）
     let said = sink2.said.lock().unwrap().clone();
     assert_eq!(said.len(), 1, "只送一次");
@@ -264,7 +269,7 @@ async fn 群組_額度期間扣住_重置後帶延遲抬頭轉交_轉交中的�
     h.core.pull_rooms(TQ + 2000).await;
     assert_eq!(h.said().len(), 1);
     assert!(h.fr.st.lock().unwrap().room_posts.is_empty());
-    assert_eq!(bodies(&h).iter().filter(|b| b.contains("額度用完")).count(), 1, "只有主人那一則，群組不發即時通知");
+    assert_eq!(bodies(&h).iter().filter(|b| b.contains("額度用完")).count(), 0, "群組不發即時通知（主人通知由後台寄）");
     // 重置後依序轉交，帶延遲抬頭（原本收到的時間）
     h.core.tick(UNTIL).await;
     let said = h.said();
@@ -308,6 +313,9 @@ async fn 內文行首手打延遲抬頭字樣_轉交時加內文前綴() {
 fn hold_posts(h: &H) -> Vec<Value> {
     h.fr.rosters().iter().filter_map(|r| r.get("inbox_hold_until").cloned()).collect()
 }
+fn hold_bodies(h: &H) -> Vec<Value> {
+    h.fr.rosters().into_iter().filter(|r| r.get("inbox_hold_until").is_some()).collect()
+}
 
 #[tokio::test]
 async fn 收信暫停時間回報給後台_扣住時送一次值_恢復時送一次空值_不重複() {
@@ -323,9 +331,48 @@ async fn 收信暫停時間回報給後台_扣住時送一次值_恢復時送一
     h.core.tick(TQ + 10_000).await;
     h.core.tick(TQ + 3 * HOUR - 120_000).await;
     assert_eq!(hold_posts(&h), vec![Value::Null, json!(UNTIL)], "扣住時只送一次值，不重複");
+    let b = &hold_bodies(&h)[1];
+    assert_eq!((b["inbox_hold_count"].clone(), b["inbox_hold_computer"].clone()), (json!(1), json!("T")), "帶設備名與扣住筆數，後台據此寄給主人");
+    assert!(b.get("inbox_hold_capped").is_none());
     // 重置後重送：恢復時送一次空值
     h.core.tick(UNTIL).await;
     h.core.tick(UNTIL + 5000).await;
     assert_eq!(h.core.inbox_hold_until(), None);
     assert_eq!(hold_posts(&h), vec![Value::Null, json!(UNTIL), Value::Null]);
+}
+
+#[tokio::test]
+async fn 額度重置時間存檔_重啟後還沒到就繼續扣住_不重送_範圍不對當作沒有() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", TQ).await;
+    h.core.on_worker_line(quota_line(RESETS_S), TQ + 1000).await;
+    let text = std::fs::read_to_string(h.work.path().join("pending.json")).unwrap();
+    assert!(text.contains(&format!("\"quotaUntil\":{UNTIL}")), "{text}");
+    // 重啟：重置時間之前繼續扣住，信重新拉到也不重送
+    let sink2 = Arc::new(FakeSink::default());
+    let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), sink2.clone(), TQ + 5000);
+    assert_eq!(c2.inbox_hold_until(), Some(UNTIL));
+    c2.refresh_roster(TQ + 5000).await;
+    c2.pull("test", TQ + 6000).await;
+    c2.tick(TQ + 7000).await;
+    c2.tick(UNTIL - 1).await;
+    assert!(sink2.said.lock().unwrap().is_empty(), "重置時間前不重送");
+    h.fr.put(mail(2, json!({})));
+    c2.pull("test", TQ + 8000).await;
+    assert!(sink2.said.lock().unwrap().is_empty(), "重啟後新進的信也扣住");
+    assert!(c2.pending.iter().all(|p| p.state == State::Held));
+    assert_eq!(notices_to(&h, "W", "W-政策"), 2, "已通知過的寄件人記錄不存檔：重啟後新進的信會再通知一次，之後同一次不再重複");
+    c2.tick(UNTIL).await;
+    assert_eq!(sink2.said.lock().unwrap().len(), 2, "到了才重送");
+    assert_eq!(c2.inbox_hold_until(), None);
+    assert!(!std::fs::read_to_string(h.work.path().join("pending.json")).unwrap().contains("quotaUntil"));
+    // 範圍不對（已過去、超過 8 天）：當作沒有
+    for bad in [TQ, TQ + 9 * 86_400_000] {
+        let mut v: Value = serde_json::from_str(&std::fs::read_to_string(h.work.path().join("pending.json")).unwrap()).unwrap();
+        v["quotaUntil"] = json!(bad);
+        std::fs::write(h.work.path().join("pending.json"), v.to_string()).unwrap();
+        let c3 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), TQ + 5000);
+        assert_eq!(c3.inbox_hold_until(), None, "{bad}");
+    }
 }
