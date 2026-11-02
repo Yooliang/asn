@@ -359,7 +359,28 @@ Deno.serve(async (req) => {
       if (u.error) console.error(u.error);
       else update_requested = u.data?.requested === true;
     }
-    return json(200, update_requested ? { ok: true, update_requested: true } : { ok: true });
+    // 順便問「本人有沒有要這台安裝並登入 Claude Code」（手機觸發；失敗不影響在線回報）。回送出者的使用者代號，ASN 要比對自己登入的是不是同一個人
+    let setup: { requested_by: string } | null = null;
+    if (p.status !== "offline") {
+      const s = await db.rpc("asn_relay_setup_poll", { p_node: me.id, p_version: p.version });
+      if (s.error) console.error(s.error);
+      else if (s.data?.requested === true && typeof s.data?.requested_by === "string") setup = { requested_by: s.data.requested_by };
+    }
+    return json(200, {
+      ok: true,
+      ...(update_requested ? { update_requested: true } : {}),
+      ...(setup ? { setup_requested: true, setup_requested_by: setup.requested_by } : {}),
+    });
+  }
+  // 安裝並登入的結果（ASN 取走請求後回報：ok、固定句子的原因、重裝說明）。只動金鑰所屬的自己節點
+  if (action === "asn_setup_result" && req.method === "POST") {
+    const b = await req.json().catch(() => null);
+    const okField = b && typeof b === "object" && !Array.isArray(b) ? (b as Record<string, unknown>) : null;
+    if (!okField || typeof okField.ok !== "boolean" || (okField.detail != null && typeof okField.detail !== "string") || (okField.replaced != null && typeof okField.replaced !== "string")) return json(400, { error: "bad_request" });
+    const { data, error } = await db.rpc("asn_relay_setup_result", { p_node: me.id, p_ok: okField.ok, p_detail: okField.detail ?? null, p_replaced: okField.replaced ?? null });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    if (data?.error) return json(400, { error: data.error });
+    return json(200, { ok: true });
   }
   // 遠端更新的結果（ASN 取走請求後回報：ok＝例如已是最新版，false＝失敗與原因）。只動金鑰所屬的自己節點
   if (action === "asn_update_result" && req.method === "POST") {

@@ -19,11 +19,19 @@ pub struct Opts {
     pub poll: Duration,
     /// 登入網址與本人簽章（登入憑證）。兩個一起有、一起沒有；只有 `agent_setup` 能設（見 [`Opts::with_link`]）
     link: Option<(String, String)>,
+    /// 有人取消了嗎？等待期間每輪看一次，回來的密文也先看一次。取消了就不交出任何東西
+    cancel: Option<fn() -> bool>,
 }
 
 impl Opts {
     pub fn new(program: &str, purpose: &str) -> Opts {
-        Opts { program: program.into(), purpose: purpose.into(), ttl_secs: wire::TTL_DEFAULT, poll: Duration::from_secs(2), link: None }
+        Opts { program: program.into(), purpose: purpose.into(), ttl_secs: wire::TTL_DEFAULT, poll: Duration::from_secs(2), link: None, cancel: None }
+    }
+
+    /// 取消旗標：回 true 就停止等待並丟棄回來的密文（`Failure::Cancelled`）
+    pub fn with_cancel(mut self, cancel: fn() -> bool) -> Opts {
+        self.cancel = Some(cancel);
+        self
     }
 
     /// 附上登入網址（桌面專用）。型別只有 `agent_setup` 建得出來，所以 `asn-cli` 與其他模組沒辦法呼叫這個方法；
@@ -44,6 +52,8 @@ pub enum Failure {
     Expired,
     /// 後台或網路的問題
     Backend(String),
+    /// 這邊（請求端）取消了：不再等，回來的密文也丟棄不開封
+    Cancelled,
     /// 取回的密文解不開（金鑰不對、被竄改、編號對不上）：**不交付任何東西**
     DecryptFailed,
 }
@@ -53,6 +63,7 @@ impl std::fmt::Display for Failure {
         match self {
             Failure::Denied => f.write_str("你的設備上有人按了取消，沒有取得密碼"),
             Failure::Expired => f.write_str("等不到確認，請求已過期"),
+            Failure::Cancelled => f.write_str("已取消，沒有取得密碼"),
             Failure::Backend(e) => write!(f, "{e}"),
             Failure::DecryptFailed => f.write_str("收到的內容解不開，已丟棄，沒有交付任何東西"),
         }
@@ -67,6 +78,10 @@ pub struct StartInfo<'a> {
 }
 
 pub async fn request_secret(be: &dyn Backend, opts: &Opts, on_start: &mut dyn FnMut(&StartInfo)) -> Result<Zeroizing<Vec<u8>>, Failure> {
+    let is_cancelled = || opts.cancel.is_some_and(|c| c());
+    if is_cancelled() {
+        return Err(Failure::Cancelled);
+    }
     let key = RequestKey::generate().map_err(|e| Failure::Backend(e.to_string()))?;
     let pub_b64 = key.public_b64();
     let started_json = match &opts.link {
@@ -85,6 +100,9 @@ pub async fn request_secret(be: &dyn Backend, opts: &Opts, on_start: &mut dyn Fn
     let deadline = Instant::now() + Duration::from_secs(started.seconds_left + 10);
     let fetch_body = wire::build_fetch_body(&started.id).map_err(Failure::Backend)?;
     loop {
+        if is_cancelled() {
+            return Err(Failure::Cancelled);
+        }
         match wire::parse_fetched(&be.fetch(fetch_body.clone()).await.map_err(Failure::Backend)?).map_err(Failure::Backend)? {
             Fetched::Pending => {
                 if Instant::now() >= deadline {
@@ -96,6 +114,10 @@ pub async fn request_secret(be: &dyn Backend, opts: &Opts, on_start: &mut dyn Fn
             Fetched::Expired => return Err(Failure::Expired),
             Fetched::Delivered => return Err(Failure::Backend("這筆請求的密文已被取走過".into())),
             Fetched::Answered(cipher) => {
+                // 取消了：連解密都不做，授權碼不交出去（私鑰隨 key 丟棄）
+                if is_cancelled() {
+                    return Err(Failure::Cancelled);
+                }
                 // key 在這裡被消耗：解密不論成敗，私鑰都沒了
                 return key.open(&started.id, &cipher).map_err(|e: CryptoError| {
                     let _ = e;

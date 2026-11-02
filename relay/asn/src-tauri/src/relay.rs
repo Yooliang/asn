@@ -33,6 +33,8 @@ pub struct Relay {
     presence_closed: AtomicBool,
     /// 後台在回報回應裡說「本人要這台更新」：記下來等迴圈取走（只取一次，後台也只回一次）
     update_requested: AtomicBool,
+    /// 手機要這台安裝並登入 Claude Code：後台說的送出者使用者代號（取走一次就清掉）
+    setup_requested: Mutex<Option<String>>,
     pub presence_wake: tokio::sync::Notify,
     /// 正在聽的歌（預設關；開了才有值，回報時蓋過個人訊息）
     pub now_playing: std::sync::Arc<crate::nowplaying::NowPlaying>,
@@ -281,7 +283,7 @@ impl Relay {
     pub fn new(base: String, key: String, node: String, window: String) -> Relay {
         Relay {
             client: reqwest::Client::new(), base, key, node, window: Mutex::new(window), old: Mutex::new(vec![]), ack_agent: Mutex::new(HashMap::new()), unaddressed: Mutex::new(vec![]), unaddressed_acked: Mutex::new(vec![]), bridge_on: AtomicBool::new(false), owner_dir: Mutex::new(None),
-            presence: Mutex::new(("online".into(), String::new())), presence_off: AtomicBool::new(false), presence_closed: AtomicBool::new(false), update_requested: AtomicBool::new(false),
+            presence: Mutex::new(("online".into(), String::new())), presence_off: AtomicBool::new(false), presence_closed: AtomicBool::new(false), update_requested: AtomicBool::new(false), setup_requested: Mutex::new(None),
             presence_wake: tokio::sync::Notify::new(), now_playing: Default::default(),
             ui_inbox_ms: AtomicU64::new(0), started_ms: crate::heartbeat::now_ms(), spool: Mutex::new(vec![]),
         }
@@ -304,6 +306,11 @@ impl Relay {
                 if v.get("update_requested").and_then(Value::as_bool) == Some(true) {
                     self.update_requested.store(true, Ordering::SeqCst);
                 }
+                if v.get("setup_requested").and_then(Value::as_bool) == Some(true) {
+                    // 送出者只收字串；格式由本機把關檢查（agent_setup::remote::gate）
+                    let by = v.get("setup_requested_by").and_then(Value::as_str).unwrap_or("").chars().take(64).collect::<String>();
+                    *self.setup_requested.lock().unwrap() = Some(by);
+                }
                 true
             }
             Err(e) if set_name_unsupported(&e) => {
@@ -319,6 +326,18 @@ impl Relay {
     /// 取走「要求更新」的旗標（有就回 true，並清掉，不會重複觸發）
     pub fn take_update_request(&self) -> bool {
         self.update_requested.swap(false, Ordering::SeqCst)
+    }
+    /// 取走「手機要這台安裝並登入」的請求（有就回送出者的使用者代號，並清掉，不會重複觸發）
+    pub fn take_setup_request(&self) -> Option<String> {
+        self.setup_requested.lock().unwrap().take()
+    }
+    /// 安裝並登入的結果回報到手機：ok、固定句子的原因、重裝說明（後台各留前 200 字）。失敗只記 log
+    pub async fn report_setup_result(&self, ok: bool, detail: &str, replaced: Option<&str>) {
+        let clean = |s: &str| s.chars().filter(|c| !c.is_control()).take(200).collect::<String>();
+        let body = json!({ "ok": ok, "detail": clean(detail), "replaced": replaced.map(clean) });
+        if let Err(e) = self.api_with("asn_setup_result", Some(body), Duration::from_secs(10)).await {
+            elog!("asn_setup_result failed: {e}");
+        }
     }
     /// 遠端更新的結果：ok＝不用更新（已是最新版）；失敗帶原因（後台只留前 200 字）。失敗只記 log
     pub async fn report_update_result(&self, ok: bool, detail: &str) {
@@ -1689,6 +1708,26 @@ b", "at": 5 }] }), json!({ "marks": [{ "at": 5 }] })] {
         assert!(s[0].starts_with("POST /relay?action=asn_update_result"));
         assert!(s[0].to_lowercase().contains("x-relay-key: secret-key"));
         assert!(s[0].contains(r#""ok":false"#) && s[0].contains("下載失敗") && !s[0].contains("\\n"));
+    }
+
+    #[tokio::test]
+    async fn 手機要求安裝並登入_旗標只取一次_帶送出者_結果回報只用節點金鑰() {
+        let (url, _seen) = fake_server(200);
+        let r = Relay::new(url, "k".into(), "H".into(), "H-ASN".into());
+        assert!(r.report_presence("0.2.2", Duration::from_secs(5)).await);
+        assert_eq!(r.take_setup_request(), None, "回應沒旗標就沒有請求");
+        let (url, _seen) = fake_server_with(200, r#"{"ok":true,"setup_requested":true,"setup_requested_by":"11111111-1111-1111-1111-111111111111"}"#);
+        let r = Relay::new(url, "secret-key".into(), "H".into(), "H-ASN".into());
+        assert!(r.report_presence("0.2.2", Duration::from_secs(5)).await);
+        assert_eq!(r.take_setup_request().as_deref(), Some("11111111-1111-1111-1111-111111111111"));
+        assert_eq!(r.take_setup_request(), None, "只取一次，不會重複啟動");
+        let (url, seen) = fake_server(200);
+        let r = Relay::new(url, "secret-key".into(), "H".into(), "H-ASN".into());
+        r.report_setup_result(false, "原因\n兩行", Some("換過\n的")).await;
+        let s = seen.lock().unwrap();
+        assert!(s[0].starts_with("POST /relay?action=asn_setup_result"));
+        assert!(s[0].to_lowercase().contains("x-relay-key: secret-key") && !s[0].to_lowercase().contains("x-asn-user"), "回報只用節點金鑰");
+        assert!(s[0].contains(r#""ok":false"#) && s[0].contains("原因兩行") && s[0].contains("換過的") && !s[0].contains("\\n"));
     }
 
     fn send_payload() -> Value {

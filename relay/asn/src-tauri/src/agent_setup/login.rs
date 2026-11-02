@@ -50,6 +50,8 @@ pub enum Ask {
     TimedOut,
     /// 送不出去、沒有簽章等：固定文字，不含授權碼與網址參數
     Failed(String),
+    /// 這台電腦前的人按了取消：不再等，回來的授權碼也不交出去
+    Cancelled,
 }
 
 /// 把登入網址送到手機、等本人貼回授權碼。真的實作（secret_remote）在後面的段落
@@ -85,6 +87,8 @@ pub enum Outcome {
     Declined,
     TimedOut,
     Failed(String),
+    /// 人在這台電腦前按了取消
+    Cancelled,
 }
 
 pub struct Limits {
@@ -254,6 +258,10 @@ fn one_round(eng: &dyn LoginEngine, sp: &dyn Spawner, phone: &dyn Phone, lim: &L
         Ask::Failed(e) => {
             proc.kill_tree();
             return Round::Done(Outcome::Failed(e));
+        }
+        Ask::Cancelled => {
+            proc.kill_tree();
+            return Round::Done(Outcome::Cancelled);
         }
     };
 
@@ -453,7 +461,7 @@ mod tests {
 
     #[test]
     fn 手機端不要_逾時_送不出去_都結束子程序且不寫授權碼() {
-        for (ans, want) in [(Ask::Declined, Outcome::Declined), (Ask::TimedOut, Outcome::TimedOut), (Ask::Failed("手機送不出去".into()), Outcome::Failed("手機送不出去".into()))] {
+        for (ans, want) in [(Ask::Declined, Outcome::Declined), (Ask::Cancelled, Outcome::Cancelled), (Ask::TimedOut, Outcome::TimedOut), (Ask::Failed("手機送不出去".into()), Outcome::Failed("手機送不出去".into()))] {
             let r = rig(vec![good_script()], vec![ans]);
             assert_eq!(go(&r), want);
             assert_eq!(*r.sh.killed.borrow(), 1);

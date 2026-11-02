@@ -331,6 +331,25 @@ pub fn inspect_here() -> Existing {
     inspect(&Deps { fetch: &super::net::RealFetch, sig: &super::authenticode::SystemSignatureCheck, exec: &RealExec }, &final_exe)
 }
 
+/// 在給定的資料夾裡找 claude 的執行檔或啟動腳本，**只看檔案在不在，不執行任何東西**（npm 等別的方式裝的 claude 會在這裡被找到）
+pub fn find_on_path_in(dirs: impl Iterator<Item = PathBuf>) -> Option<PathBuf> {
+    const NAMES: [&str; 5] = ["claude.exe", "claude.cmd", "claude.bat", "claude.ps1", "claude"];
+    for d in dirs {
+        for n in NAMES {
+            let p = d.join(n);
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn find_on_path() -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    find_on_path_in(std::env::split_paths(&path))
+}
+
 pub struct RealExec;
 
 impl Exec for RealExec {
@@ -733,6 +752,7 @@ mod tests {
 #[cfg(test)]
 mod inspect_tests {
     use super::*;
+    use std::io::Write as _;
 
     struct Sig(Result<&'static str, &'static str>);
     impl SignatureCheck for Sig {
@@ -779,6 +799,21 @@ mod inspect_tests {
         assert!(matches!(run(true, Ok(EXPECTED_SIGNER), Err("跑不起來")), Existing::Broken(BrokenKind::CannotRun, _)));
         assert!(matches!(run(true, Ok(EXPECTED_SIGNER), Ok("not a version")), Existing::Broken(BrokenKind::CannotRun, _)));
         assert!(matches!(run(true, Ok(EXPECTED_SIGNER), Ok("")), Existing::Broken(BrokenKind::CannotRun, _)));
+    }
+
+    #[test]
+    fn 掃_path_只找路徑_找得到各種寫法的_claude() {
+        let dir = tempfile::tempdir().unwrap();
+        let empty = tempfile::tempdir().unwrap();
+        assert_eq!(find_on_path_in([empty.path().to_path_buf()].into_iter()), None);
+        for name in ["claude.cmd", "claude.ps1", "claude.exe"] {
+            let d = tempfile::tempdir().unwrap();
+            std::fs::File::create(d.path().join(name)).unwrap().write_all(b"not executed").unwrap();
+            assert_eq!(find_on_path_in([empty.path().to_path_buf(), d.path().to_path_buf()].into_iter()), Some(d.path().join(name)), "{name}");
+        }
+        // 資料夾同名不算
+        std::fs::create_dir(dir.path().join("claude.exe")).unwrap();
+        assert_eq!(find_on_path_in([dir.path().to_path_buf()].into_iter()), None);
     }
 
     #[test]
