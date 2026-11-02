@@ -400,3 +400,9 @@ html,body.m-body{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff
 .m-rel-ver{font-weight:600}
 .m-rel-tag,.m-rel-date{font-size:12px;color:var(--muted)}
 .m-rel-item ul{margin:4px 0 0;padding-left:18px;font-size:13px}
+.m-dv-setup{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.m-dv-confirm,.m-dv-prog{display:flex;flex-direction:column;gap:6px}
+.m-dv-confirm p,.m-dv-prog p{margin:0;line-height:1.5;font-size:14px}
+.m-dv-sbtns{display:flex;flex-wrap:wrap;gap:8px}
+.m-dv-prog b.ok{color:var(--ok,#1b7f3b)}
+.m-dv-prog b.bad{color:var(--danger,#b3261e)}
