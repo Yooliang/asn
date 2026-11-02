@@ -1,4 +1,4 @@
-// 收信暫停提示（20261102140000_inbox_hold_until.sql）：
+// 收信暫停提示（20261102160000_inbox_hold_until.sql）：
 // 1. 靜態：只加可空欄位與一支函式、只授權 service_role、security definer、search_path 空、回復檔拿掉兩者。
 // 2. 實跑（有安裝 @electric-sql/pglite 時）：只動得到自己的節點、值被夾在 now() 到 now()+8 天、可以清成 null、停用或不存在的節點動不到；
 //    暫停開始時寄一封給擁有者（內文、reply=no），延長或重複設值不再寄，設備名不合或擁有者核對不過只設時間不寄，每小時最多 3 封。
@@ -6,7 +6,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
-const F = '20261102140000_inbox_hold_until.sql'
+const F = '20261102160000_inbox_hold_until.sql'
 const SIG = 'asn_relay_set_inbox_hold(text, timestamptz, integer, boolean)'
 const rd = s => s.replace(/\r+\n/g, '\n')
 const mig = rd(fs.readFileSync(new URL(`../supabase/migrations/${F}`, import.meta.url), 'utf8'))
