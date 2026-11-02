@@ -15,8 +15,8 @@ const TOAST_GAP: f64 = 8.0;
 const TOAST_MAX: usize = 3;
 const TOAST_MS: u64 = 5500;
 /// 安裝並登入的常駐進度小窗（#650 E1）
-const PROG_W: f64 = 340.0;
-const PROG_H: f64 = 176.0;
+const PROG_W: f64 = 360.0;
+const PROG_H: f64 = 208.0;
 const PROG_LABEL: &str = "setup-progress";
 /// 第幾輪：每次開小窗加一。結束後的自動關窗要帶著自己那一輪的編號，編號不同就不關（新的一輪已經接手）
 static PROG_ROUND: AtomicU64 = AtomicU64::new(0);
@@ -542,7 +542,7 @@ mod tests {
     #[test]
     fn 進度小窗疊在提示視窗上方不重疊且在工作區內() {
         for sf in [1.0, 1.5, 2.0] {
-            let (wa_x, wa_y, wa_w, wa_h) = (0, 0, 1920, 1040);
+            let (wa_x, wa_y, wa_w, wa_h) = (0, 0, (1920.0 * sf) as i32, (1040.0 * sf) as i32);   // 工作區的物理像素跟著縮放比例
             let (x, y) = progress_origin(wa_x, wa_y, wa_w, wa_h, sf);
             let toast_top = wa_y + wa_h - ((TOAST_H + TOAST_GAP) * sf) as i32 * TOAST_MAX as i32;
             assert!(y + (PROG_H * sf) as i32 <= toast_top, "{sf}：不能壓到最上面那個提示位置");
