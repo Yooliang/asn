@@ -74,6 +74,8 @@ async fn 送錯_不_ack_重送一次給正確的視窗_通知寄件人_固定文
     let n = notice_to_sender(&h);
     assert_eq!(n.len(), 1);
     assert!(n[0].contains("可能已被讀取") && !n[0].contains("機密內文"), "{}", n[0]);
+    // 只寫寄件人自己指定的收件人，不寫實際拿到信的視窗名（那可能是這台電腦上別人的）
+    assert!(n[0].contains("你寄給 T-乙 的信") && n[0].contains("已重新轉交給 T-乙") && !n[0].contains("T-丙"), "{}", n[0]);
     let sent = h.fr.sent().into_iter().find(|s| s["body"].as_str().unwrap_or("").contains("可能已被讀取")).unwrap();
     assert_eq!((sent["to_node"].as_str(), sent["expects_reply"].clone()), (Some("W"), json!(false)));
     // 拿錯信的視窗收到更正（有自己的編號，hook 放行）

@@ -145,23 +145,45 @@ struct PendingCall {
     correct: bool,
 }
 
-/// 工具結果有沒有成功：只認內容解析出來 `success:true`（內容可能是字串、物件或文字區塊的陣列；解析不出來就不算）。
-/// SendMessage 失敗時不會帶 is_error，內容是 `{"success":false,...}`
-pub fn tool_result_success(c: &serde_json::Value) -> bool {
+/// SendMessage 工具結果的判讀
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ToolOutcome {
+    /// 明確成功：內容解析出 `success:true`
+    Ok,
+    /// 明確失敗：is_error=true，或內容解析出 `success:false`（SendMessage 失敗時不帶 is_error，內容是 `{"success":false,...}`）
+    Failed,
+    /// 看不懂：解析不出 success 欄位（Claude Code 改了格式、內容不是 JSON 等）。
+    /// 呼叫的收件人與編號都正確時照成功算（否則格式一變，所有轉交都會走逾時），由呼叫端另記一行警告
+    Unknown,
+}
+
+/// 判讀 tool_result 的內容（可能是字串、物件，或文字區塊的陣列）
+pub fn tool_result_outcome(c: &serde_json::Value) -> ToolOutcome {
     if c.get("is_error").and_then(|v| v.as_bool()) == Some(true) {
-        return false;
+        return ToolOutcome::Failed;
     }
     fn parse(s: &str) -> Option<bool> {
         serde_json::from_str::<serde_json::Value>(s).ok()?.get("success")?.as_bool()
     }
+    let of = |r: Option<bool>| match r {
+        Some(true) => ToolOutcome::Ok,
+        Some(false) => ToolOutcome::Failed,
+        None => ToolOutcome::Unknown,
+    };
     match c.get("content") {
-        Some(serde_json::Value::String(s)) => parse(s) == Some(true),
-        Some(serde_json::Value::Object(o)) => o.get("success").and_then(|v| v.as_bool()) == Some(true),
+        Some(serde_json::Value::String(s)) => of(parse(s)),
+        Some(serde_json::Value::Object(o)) => of(o.get("success").and_then(|v| v.as_bool())),
         Some(serde_json::Value::Array(a)) => {
-            let texts: Vec<Option<bool>> = a.iter().filter_map(|x| x.get("text").and_then(|t| t.as_str())).map(parse).collect();
-            !texts.is_empty() && texts.iter().all(|r| *r == Some(true))
+            let rs: Vec<Option<bool>> = a.iter().filter_map(|x| x.get("text").and_then(|t| t.as_str())).map(parse).collect();
+            if rs.contains(&Some(false)) {
+                ToolOutcome::Failed
+            } else if !rs.is_empty() && rs.iter().all(|r| *r == Some(true)) {
+                ToolOutcome::Ok
+            } else {
+                ToolOutcome::Unknown
+            }
         }
-        _ => false,
+        _ => ToolOutcome::Unknown,
     }
 }
 
@@ -175,6 +197,8 @@ pub struct Parser {
     misrouted_buf: Vec<(String, String, String)>,
     /// inflight 有變動（核心要重寫 hook 讀的 inflight 檔）
     dirty: bool,
+    /// 「工具結果看不懂」的警告已經記過（每次啟動只記第一次，不洗版）
+    warned_unrecognized: bool,
     last_cost: f64,
 }
 
@@ -257,7 +281,7 @@ pub fn has_foreign_nonce(txt: &str, nonce: &str) -> bool {
 
 impl Parser {
     pub fn new(nonce: &str) -> Parser {
-        Parser { nonce: nonce.into(), inflight: vec![], recent: Default::default(), send_calls: HashMap::new(), misrouted_buf: vec![], dirty: false, last_cost: 0.0 }
+        Parser { nonce: nonce.into(), inflight: vec![], recent: Default::default(), send_calls: HashMap::new(), misrouted_buf: vec![], dirty: false, warned_unrecognized: false, last_cost: 0.0 }
     }
     /// 轉交一封信前登記（id → 目標視窗）
     pub fn register(&mut self, id: &str, to: &str) {
@@ -354,7 +378,12 @@ impl Parser {
                 } else if ty == "user" && ct == "tool_result" {
                     let tid = c.get("tool_use_id").and_then(|v| v.as_str()).unwrap_or("");
                     if let Some(call) = self.send_calls.remove(tid) {
-                        if tool_result_success(c) {
+                        let outcome = tool_result_outcome(c);
+                        if outcome == ToolOutcome::Unknown && !self.warned_unrecognized {
+                            self.warned_unrecognized = true;
+                            out.logs.push(format!("forward result unrecognized id={} (counted as {})", call.id, if call.correct { "sent" } else { "delivered" }));
+                        }
+                        if outcome != ToolOutcome::Failed {
                             if call.correct {
                                 self.sent_once(&call.id, &mut out);
                             } else if !self.misrouted_buf.iter().any(|(i, _, a)| *i == call.id && *a == call.actual) {
@@ -727,18 +756,15 @@ mod tests {
     }
 
     #[test]
-    fn 呼叫失敗不算_沒有_is_error_也一樣_解析不出來也不算() {
+    fn 明確失敗不算_沒有_is_error_也一樣() {
         let mut p = Parser::new(N);
         p.register(A, "T-甲");
         let m = format!("x id={A}");
         let fails = [
             json!("{\"success\":false,\"message\":\"No agent named 'T-甲' is reachable.\"}"),
             json!([{"type":"text","text":"{\"success\":false,\"message\":\"No agent\"}"}]),
-            json!("{}"),
-            json!("ok"),
-            json!([]),
-            json!([{"type":"tool_reference","tool_name":"SendMessage"}]),
-            json!(null),
+            json!([{"type":"text","text":OK},{"type":"text","text":"{\"success\":false}"}]),
+            json!({"success": false}),
         ];
         for (i, c) in fails.into_iter().enumerate() {
             let tid = format!("toolu_f{i}");
@@ -753,6 +779,47 @@ mod tests {
     }
 
     #[test]
+    fn 工具結果看不懂_收件人與編號都對就照成功算_只記一次警告() {
+        let mut p = Parser::new(N);
+        // 看不懂：不是 JSON、沒有 success 欄位、空內容、完全不同的格式
+        let unknown = [json!("ok"), json!("{}"), json!([]), json!([{"type":"tool_reference","tool_name":"SendMessage"}]), json!(null), json!({"status":"delivered"})];
+        let mut warns = 0;
+        for (i, c) in unknown.into_iter().enumerate() {
+            let id = format!("00000000-0000-0000-0000-0000000002{i:02}");
+            p.register(&id, "T-甲");
+            let tid = format!("toolu_u{i}");
+            p.feed(&call(&tid, "T-甲", &format!("x id={id}")));
+            let r = p.feed(&done(&tid, c.clone()));
+            assert_eq!(r.events, vec![WorkerEvent::Sent(id.clone())], "{c}");
+            warns += r.logs.iter().filter(|l| l.contains("forward result unrecognized")).count();
+            if i == 0 {
+                assert_eq!(r.logs, vec![format!("forward result unrecognized id={id} (counted as sent)")]);
+            }
+        }
+        assert_eq!(warns, 1, "每次啟動只記第一次，不洗版");
+        // 看不懂，但收件人不對：照樣當作已送出去（送錯），輪結束時通報
+        let mut q = Parser::new(N);
+        q.register(A, "T-甲");
+        q.feed(&call("toolu_w", "T-乙", &format!("x id={A}")));
+        q.feed(&done("toolu_w", json!("ok")));
+        assert_eq!(q.feed(&result("")).events, vec![WorkerEvent::Misrouted { id: A.into(), expected: "T-甲".into(), actual: "T-乙".into() }]);
+        // 看不懂，但根本不是帶編號的轉交（沒有編號／編號不在進行中）：不算
+        let mut r = Parser::new(N);
+        r.feed(&call("toolu_x", "T-甲", "沒有編號的訊息"));
+        assert!(r.feed(&done("toolu_x", json!("ok"))).events.is_empty());
+    }
+
+    #[test]
+    fn 工具結果三種判讀() {
+        assert_eq!(tool_result_outcome(&json!({"content": OK})), ToolOutcome::Ok);
+        assert_eq!(tool_result_outcome(&json!({"content": [{"type":"text","text":OK}]})), ToolOutcome::Ok);
+        assert_eq!(tool_result_outcome(&json!({"content": "{\"success\":false}"})), ToolOutcome::Failed);
+        assert_eq!(tool_result_outcome(&json!({"is_error": true, "content": OK})), ToolOutcome::Failed);
+        assert_eq!(tool_result_outcome(&json!({"content": "ok"})), ToolOutcome::Unknown);
+        assert_eq!(tool_result_outcome(&json!({})), ToolOutcome::Unknown);
+    }
+
+    #[test]
     fn 收件人錯_呼叫成功_輪結束時通報_misrouted_不算_sent() {
         let mut p = Parser::new(N);
         p.register(A, "T-甲");
@@ -764,7 +831,9 @@ mod tests {
         assert_eq!(p.inflight_len(), 1, "不算轉交成功");
         // 送錯但工具結果失敗（例如被 hook 擋下）：沒有送出去，不通報
         p.feed(&call("toolu_2", "T-乙", &format!("x id={A}")));
-        p.feed(&done("toolu_2", json!("收件人應為 T-甲")));
+        // 實測的 hook deny：tool_result 帶 is_error=true，內容是 hook 給的理由
+        let denied = json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_2","content":"收件人應為 T-甲","is_error":true}]}});
+        p.feed(&denied.to_string());
         assert!(p.feed(&result("")).events.is_empty());
     }
 

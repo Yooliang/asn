@@ -16,7 +16,7 @@ impl Core {
             self.misroute_notified.clear();
         }
         if self.misroute_notified.insert(id.to_string()) {
-            self.misroute_notify_sender(id, expected, actual).await;
+            self.misroute_notify_sender(id, expected).await;
             self.misroute_correct_receiver(id, expected, actual);
         }
         // 已經算轉交成功（Sent）的，只通知；還在轉交中的才重送
@@ -52,7 +52,7 @@ impl Core {
 
     /// 寄件人收到固定文字的通知（不帶信件內文）。群組訊息、收發室寄來的不通知。
     /// 通知「本人」另有後台通知類型要加，還沒做（要先跟審查者談），這裡只記 log
-    async fn misroute_notify_sender(&mut self, id: &str, expected: &str, actual: &str) {
+    async fn misroute_notify_sender(&mut self, id: &str, expected: &str) {
         let origin = match self.idx(id) {
             Some(i) if self.pending[i].room.is_some() => None,
             Some(i) => Some(Origin::of(&self.pending[i])),
@@ -63,7 +63,8 @@ impl Core {
         if Self::is_mailbox_sender(&o.from_agent) {
             return;
         }
-        let text = format!("[收發室] 你寄的那封信（編號 {id}）疑似被轉交到不是預定收件人的視窗（預定 {expected}、實際 {actual}），可能已被讀取。");
+        // 只寫寄件人自己指定的收件人；實際收到的視窗名可能是這台電腦上別人的，不寫進通知
+        let text = format!("[收發室] 你寄給 {expected} 的信（編號 {id}）曾被誤送到同一台電腦的另一個視窗，可能已被讀取，已重新轉交給 {expected}。");
         self.send_back(&o, &text, None, Some(false)).await;
     }
 
