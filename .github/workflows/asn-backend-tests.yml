@@ -1,22 +1,11 @@
 name: ASN 後端與機器橋測試
 
-# 和 asn-linux-build.yml 分開：這三個資料夾不連 Rust，改它們不用等 Rust 建置。
+# 和 asn-linux-build.yml 分開：這些測試不連 Rust，約兩分鐘跑完。
+# 每張 PR 都跑、不篩路徑：有跨資料夾的守門（例如 legacy_env 會讀 envc.rs），用路徑篩選就會漏（#685）。
 on:
   push:
     branches: [main]
-    paths:
-      - 'relay/machine/**'
-      - 'relay/cloud-agent/**'
-      - 'supabase/functions/**'
-      - 'relay/asn/src-tauri/src/envc.rs'
-      - '.github/workflows/asn-backend-tests.yml'
   pull_request:
-    paths:
-      - 'relay/machine/**'
-      - 'relay/cloud-agent/**'
-      - 'supabase/functions/**'
-      - 'relay/asn/src-tauri/src/envc.rs'
-      - '.github/workflows/asn-backend-tests.yml'
   workflow_dispatch:
 
 jobs:
