@@ -58,13 +58,13 @@ test('實跑（pglite）：擁有者收到固定內文，只有設備名與信�
   assert.equal(m[0].to_node, 'u:000a', '收件人是這個節點的擁有者')
   assert.equal(m[0].expects_reply, false)
   assert.ok(m[0].from_agent.endsWith('收發室'))
-  assert.equal(m[0].body, `這台（家用機）的收發室把一封信（編號 ${MAIL}）轉交錯了視窗，可能已被讀取；已重新轉交給原收件人。`)
+  assert.equal(m[0].body, `這台（家用機）的收發室把一封信（編號 ${MAIL}）轉交錯了視窗，可能已被讀取；收發室正在重新轉交給原收件人。`)
   // 沒有編號（群組訊息）：不帶編號
   const g = await notice(db, 'P', null)
   assert.equal(g.notify, 'sent')
   const mp = await msgs(db, 'P')
   assert.equal(mp[0].to_node, 'u:000b', '別的節點的擁有者是另一個人')
-  assert.equal(mp[0].body, '這台（手機）的收發室把一則訊息轉交錯了視窗，可能已被讀取；已重新轉交給原收件人。')
+  assert.equal(mp[0].body, '這台（手機）的收發室把一則訊息轉交錯了視窗，可能已被讀取；收發室正在重新轉交給原收件人。')
   assert.equal((await msgs(db, 'H')).length, 1, 'H 的擁有者沒有收到 P 的通知')
 })
 

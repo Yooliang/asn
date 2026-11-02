@@ -4,7 +4,7 @@
 -- 最後呼叫既有的 asn_relay_send。
 --  asn_relay_misroute_notice(p_node, p_mail_id)：
 --   - p_node 取自節點金鑰（Edge Function 帶入）；沒有收件人參數，收件人只能是這個節點自己的擁有者。節點不存在或已停用回 forbidden。
---   - 內文固定：「這台（設備名）的收發室把一封信（編號 …）轉交錯了視窗，可能已被讀取；已重新轉交給原收件人。」
+--   - 內文固定：「這台（設備名）的收發室把一封信（編號 …）轉交錯了視窗，可能已被讀取；收發室正在重新轉交給原收件人。」
 --     設備名讀 relay.nodes.name（去控制字元、最多 40 字，讀不到就省略括號）；p_mail_id 為空（群組訊息）時改寫「一則訊息」不帶編號。
 --     不帶任何視窗名，也不帶信件內文。編號只是呼叫端給的 uuid 型別值，這裡不查它存不存在（限流與固定內文已把濫用的影響壓到最小）。
 --   - 寄件名「轉交核對收發室」（以「收發室」結尾，橋不會回覆它）；reply=no。
@@ -46,7 +46,7 @@ begin
     else
       v_body := '這台' || case when v_computer <> '' then '（' || v_computer || '）' else '' end || '的收發室把'
         || case when p_mail_id is null then '一則訊息' else '一封信（編號 ' || p_mail_id::text || '）' end
-        || '轉交錯了視窗，可能已被讀取；已重新轉交給原收件人。';
+        || '轉交錯了視窗，可能已被讀取；收發室正在重新轉交給原收件人。';
       v_res := public.asn_relay_send(p_node, v_agent, public.asn_person_alias(v_owner), null, v_body, null, false, null, false);
       if v_res is null or v_res ? 'error' then
         v_notify := 'failed';
