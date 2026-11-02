@@ -58,6 +58,64 @@ pub const MAX_READ_LINES: i32 = 500;
 /// 讀回文字的字數上限（超出截斷）。與送字的單行上限是兩件事。
 pub const MAX_READ_CHARS: usize = 64_000;
 /// 忙閒只看畫面底部這幾行。
+/// 開夥伴窗格後盯多久，看它是不是一開就結束（claude 起不來等）
+const EARLY_EXIT_WATCH: Duration = Duration::from_secs(5);
+/// 盯的間隔
+const EARLY_EXIT_POLL: Duration = Duration::from_millis(500);
+
+/// 工作階段記錄裡有沒有這個名字、`since_ms` 之後才啟動、程序還活著的 claude：有＝它已經起來了（比一開就結束的窗口更早的訊號）。
+/// 純邏輯，`alive` 由外面傳入。啟動時間比 `since_ms` 早的是舊的同名工作階段，不算。
+pub(crate) fn session_ready(sessions: &[serde_json::Value], name: &str, since_ms: u64, alive: &dyn Fn(u32) -> bool) -> bool {
+    !name.is_empty()
+        && sessions.iter().any(|s| {
+            s.get("name").and_then(|v| v.as_str()) == Some(name)
+                && s.get("startedAt").and_then(|v| v.as_u64()).is_some_and(|t| t >= since_ms)
+                && s.get("pid").and_then(|v| v.as_u64()).and_then(|p| u32::try_from(p).ok()).is_some_and(alive)
+        })
+}
+
+/// 正式：讀本機的工作階段記錄。測試不讀這台電腦真的記錄（一律 false，等滿時間）。
+/// 夥伴若用別的 Claude 設定資料夾，這裡讀不到，就只是等滿時間，不會誤判。
+fn partner_session_started(name: &str, since_ms: u64) -> bool {
+    #[cfg(not(test))]
+    {
+        let Some(dir) = super::console::sessions_dir() else { return false };
+        session_ready(&super::console::read_sessions(&dir), name, since_ms, &crate::heartbeat::pid_alive)
+    }
+    #[cfg(test)]
+    {
+        let _ = (name, since_ms);
+        false
+    }
+}
+
+/// 夥伴一開就結束的失敗原因（結束碼印不出來就不帶）
+fn early_exit_text(code: i32) -> String {
+    format!("夥伴一開就結束（結束碼 {code}）")
+}
+
+#[cfg(test)]
+thread_local! {
+    /// 測試固定結束標記的暗號（不設就隨機）
+    static TEST_NONCE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// 結束標記的暗號：16 位元組隨機的十六進位
+fn new_nonce() -> String {
+    #[cfg(test)]
+    if let Some(n) = TEST_NONCE.with(|n| n.borrow().clone()) {
+        return n;
+    }
+    let mut b = [0u8; 16];
+    if getrandom::fill(&mut b).is_err() {
+        // 亂數取不到的極端情況：退回時間與程序編號（仍然夥伴猜不到整個值）
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+        b[..8].copy_from_slice(&(t as u64).to_le_bytes());
+        b[8..12].copy_from_slice(&std::process::id().to_le_bytes());
+    }
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
 const STATUS_LINES: i32 = 40;
 /// 兩次取樣的正式間隔。測試用 set_status_gap 注入更短的值。
 pub const STATUS_GAP: Duration = Duration::from_secs(1);
@@ -167,6 +225,8 @@ struct Session {
     kind: String,
     /// claude 視窗開的時候參數裡的對話編號（新對話還沒有）
     session_id: Option<String>,
+    /// mux 夥伴窗格的結束標記暗號（開窗時隨機產生，見 `local::mux_wrapped_argv`）。沒有＝判斷不出這個窗格結束了沒
+    exit_nonce: Option<String>,
 }
 
 struct SessionSnap {
@@ -232,6 +292,9 @@ struct StoreTerm {
     /// B2b：窗格在共用 mux 裡（pid／started_ms 記的是 mux）。舊對照表沒有這欄＝第 1 階段（自己的 GUI），照舊認領
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     mux: bool,
+    /// 結束標記暗號。舊對照表沒有這欄＝None（0.2.0 先前開的窗格，判斷不出結束，當作活著）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    exit_nonce: Option<String>,
 }
 
 enum Loaded {
@@ -602,6 +665,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 send_granted: true,
                 kind: extra.kind.clone(),
                 session_id: extra.session_id.clone(),
+                exit_nonce: None,
             });
         }
         if let Err(e) = self.persist() {
@@ -660,8 +724,15 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             elog!("終端服務：使用者環境變數裡有「{n}」（金鑰類或會被濾掉的名字），WezTerm 會把它帶進窗格");
         }
         let cwd_s = cwd.to_string_lossy().into_owned();
+        // 夥伴窗格：外面包一層 PowerShell，程式結束後印帶暗號的結束標記（Hold 不會把結束寫進 mux 的畫面，只能自己留）
+        let exit_nonce = (!extra.kind.is_empty()).then(new_nonce);
+        let spawned_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+        let wrapped: Vec<String> = match &exit_nonce {
+            Some(n) => super::local::mux_wrapped_argv(command, n),
+            None => command.to_vec(),
+        };
         let mut sub: Vec<&str> = vec!["spawn", "--new-window", "--workspace", &workspace, "--cwd", &cwd_s, "--"];
-        sub.extend(command.iter().map(String::as_str));
+        sub.extend(wrapped.iter().map(String::as_str));
         // 連 wezterm.exe 都起不來（RealRunner 回「無法執行…」）＝窗格一定沒開，可以退到原生主控台；
         // 逾時或回的不是窗格編號：窗格可能其實已經開了，當作已啟動（不讓呼叫端再開一份）
         let ran = self.runner.run_clean(&dir.cli, &mux::cli_args(&sub), &mux::cli_env(&pane_env, &paths.sock), wezterm::CLI_TIMEOUT);
@@ -682,6 +753,14 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         if let Err(e) = w.set_tab_title(&win.sock, pane_id, &title) {
             return Err(close_pane(format!("無法設定終端標題：{e}")));
         }
+        // 夥伴視窗開了立刻以錯誤結束（claude 起不來等）：Hold 會讓窗格留著，但這不是「開成功」。
+        // 短時間內看窗格有沒有已結束；有就收掉窗格、回失敗與原因
+        if let Some(n) = &exit_nonce {
+            let name = extra.label.clone().unwrap_or_default();
+            if let Some(code) = self.early_exit(&w, &win.sock, pane_id, n, &|| partner_session_started(&name, spawned_ms)) {
+                return Err(close_pane(early_exit_text(code)));
+            }
+        }
         {
             let mut g = self.inner.lock().unwrap();
             g.sessions.push(Session {
@@ -695,6 +774,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 send_granted: true,
                 kind: extra.kind.clone(),
                 session_id: extra.session_id.clone(),
+                exit_nonce: exit_nonce.clone(),
             });
         }
         if let Err(e) = self.persist() {
@@ -706,6 +786,22 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             return Err(close_pane(format!("終端已啟動但對照表寫入失敗，已嘗試關閉窗格：{e}")));
         }
         Ok((id, win.gui_pid))
+    }
+
+    /// 剛開的夥伴窗格在 [`EARLY_EXIT_WATCH`] 內有沒有結束；有就回結束碼（見 [`wezterm::pane_exit_from_screen`]）。等待走 runner.sleep
+    /// `started` 回 true＝這個夥伴已經確定起來了（claude 寫了工作階段記錄），不必再等滿時間。
+    fn early_exit(&self, w: &WezTerm<'_>, sock: &Path, pane_id: u64, nonce: &str, started: &dyn Fn() -> bool) -> Option<i32> {
+        let polls = EARLY_EXIT_WATCH.as_millis() / EARLY_EXIT_POLL.as_millis();
+        for _ in 0..polls {
+            self.runner.sleep(EARLY_EXIT_POLL);
+            if let Some(code) = w.pane_exit(sock, pane_id, Some(nonce)) {
+                return Some(code);
+            }
+            if started() {
+                return None;
+            }
+        }
+        None
     }
 
     /// 使用者在 UI 確認後才把文字送進自己開的終端。不收程序編號或通訊路徑。
@@ -946,10 +1042,34 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         if !self.use_mux {
             return None;
         }
-        let g = self.inner.lock().unwrap();
-        let mut hit = g.sessions.iter().filter(|s| s.window.mux && !s.kind.is_empty() && s.window.gui_pid == mux.0 && s.window.started_ms == Some(mux.1) && partner_label(&s.id, &s.title) == Some(name));
-        let first = hit.next()?;
-        hit.next().is_none().then(|| first.id.clone())
+        let hits: Vec<(String, u64, PathBuf, Option<String>)> = {
+            let g = self.inner.lock().unwrap();
+            g.sessions.iter().filter(|s| s.window.mux && !s.kind.is_empty() && s.window.gui_pid == mux.0 && s.window.started_ms == Some(mux.1) && partner_label(&s.id, &s.title) == Some(name)).map(|s| (s.id.clone(), s.pane_id, s.window.sock.clone(), s.exit_nonce.clone())).collect()
+        };
+        if hits.is_empty() {
+            return None;
+        }
+        // 已經結束的窗格（Hold 留著的）不算同名夥伴：收掉並從對照表移除。讀不到畫面就當作還活著
+        let live = match self.dir() {
+            Ok(dir) => {
+                let w = self.wez(&dir);
+                let mut live = Vec::new();
+                for (id, pane, sock, nonce) in hits {
+                    if w.pane_exit(&sock, pane, nonce.as_deref()).is_some() {
+                        let _ = w.kill_pane(&sock, pane);
+                        self.inner.lock().unwrap().sessions.retain(|s| s.id != id);
+                        let _ = self.persist();
+                    } else {
+                        live.push(id);
+                    }
+                }
+                live
+            }
+            Err(_) => hits.into_iter().map(|h| h.0).collect(),
+        };
+        let mut it = live.into_iter();
+        let first = it.next()?;
+        it.next().is_none().then_some(first)
     }
 
     /// 夥伴清單的「前台／背景」在 mux 視窗上的查詢：前台＝看畫面的 GUI 開著
@@ -1214,7 +1334,15 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                     continue;
                 }
             };
-            let Some(pane) = pick_pane(&panes, &term.id, term.pane_id) else {
+            // 已結束的窗格（Hold 留著）不認領，順手收掉；讀不到畫面當作還活著
+            let ended = |p: &wezterm::PaneInfo| {
+                let dead = w.pane_exit(&sock, p.pane_id, term.exit_nonce.as_deref()).is_some();
+                if dead && pane_is_ours(&term.id, p) {
+                    let _ = w.kill_pane(&sock, p.pane_id);
+                }
+                dead
+            };
+            let Some(pane) = pick_pane(&panes, &term.id, term.pane_id, &ended) else {
                 continue;
             };
             let title = if title_marks(&pane.tab_title, &term.id) { pane.tab_title.clone() } else { format!("ASN:{}", term.id) };
@@ -1234,6 +1362,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 send_granted: term.send_granted,
                 kind: term.kind.clone(),
                 session_id: term.session_id.clone(),
+                exit_nonce: term.exit_nonce.clone(),
             });
         }
         let mut next = file.next;
@@ -1526,6 +1655,7 @@ fn session_to_store(s: &Session) -> StoreTerm {
         kind: s.kind.clone(),
         session_id: s.session_id.clone(),
         mux: s.window.mux,
+        exit_nonce: s.exit_nonce.clone(),
     }
 }
 
@@ -1618,8 +1748,9 @@ fn pane_is_ours(id: &str, pane: &wezterm::PaneInfo) -> bool {
     pane.workspace == format!("asn-{id}") || title_marks(&pane.tab_title, id)
 }
 
-fn pick_pane<'a>(panes: &'a [wezterm::PaneInfo], id: &str, saved_pane: u64) -> Option<&'a wezterm::PaneInfo> {
-    let ours: Vec<&wezterm::PaneInfo> = panes.iter().filter(|p| pane_is_ours(id, p)).collect();
+/// 認領用：挑這個編號的窗格。已結束的窗格（`ended` 為真）不算，所以一個活的加一個死的，認到活的；全是死的＝None
+fn pick_pane<'a>(panes: &'a [wezterm::PaneInfo], id: &str, saved_pane: u64, ended: &dyn Fn(&wezterm::PaneInfo) -> bool) -> Option<&'a wezterm::PaneInfo> {
+    let ours: Vec<&wezterm::PaneInfo> = panes.iter().filter(|p| pane_is_ours(id, p) && !ended(p)).collect();
     if ours.is_empty() {
         return None;
     }
@@ -3031,6 +3162,19 @@ mod tests {
             svc.ensure_config().unwrap();
             assert_eq!(std::fs::read_to_string(&path).unwrap(), custom, "不是我們寫的不動：{custom}");
         }
+    }
+
+    fn pane_of(id: u64, tab: &str, active: bool) -> wezterm::PaneInfo {
+        serde_json::from_str(&format!(r#"{{"pane_id":{id},"tab_id":1,"is_active":{active},"workspace":"asn-1","tab_title":"{tab}"}}"#)).unwrap()
+    }
+
+    #[test]
+    fn 認領挑窗格_死窗格不算_一活一死認到活的() {
+        let panes = vec![pane_of(7, "ASN:1 小乙", true), pane_of(8, "ASN:1 小乙", false)];
+        // 存的是 7，但 7 已結束：認 8
+        assert_eq!(pick_pane(&panes, "1", 7, &|p| p.pane_id == 7).map(|p| p.pane_id), Some(8));
+        assert_eq!(pick_pane(&panes, "1", 7, &|_| false).map(|p| p.pane_id), Some(7));
+        assert!(pick_pane(&panes, "1", 7, &|_| true).is_none(), "全死＝不認領");
     }
 
     fn one_pane(workspace: &str, tab: &str, pane: u64, cursor_x: i64) -> String {
@@ -4654,6 +4798,7 @@ mod tests {
             let cfg = std::fs::read_to_string(&paths.config).unwrap();
             assert_eq!(cfg, mux::config_text(&paths.sock));
             assert!(cfg.contains("no_serve_automatically = true"), "wezterm connect 不吃 --no-auto-start，要靠設定擋");
+            assert!(cfg.contains("exit_behavior = \"Hold\"") && cfg.contains("exit_behavior_messaging = \"None\""), "結束時不印整串包裝指令，免得擠掉結束標記");
         }
 
         #[test]
@@ -4709,6 +4854,7 @@ mod tests {
             assert_eq!(VIEW_NO_DESKTOP, "這台電腦的桌面目前沒有人登入，開不了終端畫面；夥伴照常在背景執行");
             let (rig, _) = mux_rig();
             let id = open_partner(&rig);
+            rig.runner.inner.sleeps.borrow_mut().clear(); // 開窗格後盯有沒有一開就結束的等待不算在看畫面的等待裡
             // 第一次問建立時間是起來了（5000），下一次問就沒了
             rig.runner.inner.pid_started.borrow_mut().insert(42, vec![Some(5_000), None]);
             let e = rig.svc.view(&id).unwrap_err();
@@ -4842,6 +4988,133 @@ mod tests {
             rig.runner.inner.pid_started.borrow_mut().insert(42, vec![Some(5_000), None]);
             let r = rig.svc.console_set_mux(&id, true);
             assert_eq!(r, serde_json::json!({ "ok": false, "reason": VIEW_NO_DESKTOP, "notify": true }));
+        }
+
+        /// 固定暗號（開窗時產生的暗號測試可預測）與一個「程式已結束」的畫面
+        const NONCE: &str = "n0nce";
+        const DEAD_SCREEN: &str = "claude 啟動失敗的輸出\n\n[asn-exit n0nce 1]\n";
+
+        fn fix_nonce() {
+            TEST_NONCE.with(|n| *n.borrow_mut() = Some(NONCE.to_string()));
+        }
+
+        #[test]
+        fn 夥伴一開就以錯誤結束_回失敗帶結束碼_收掉窗格_不留對照表() {
+            fix_nonce();
+            let (rig, _) = mux_rig();
+            *rig.runner.inner.screen.borrow_mut() = DEAD_SCREEN.into();
+            let e = rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-1"))).unwrap_err();
+            match e {
+                crate::launch::win_term::WinOpenError::Started(m) => assert_eq!(m, "夥伴一開就結束（結束碼 1）"),
+                _ => panic!("應該是已啟動後失敗"),
+            }
+            assert_eq!(kill_panes(&rig.runner), 1, "死窗格要收掉");
+            assert_eq!(rig.svc.partner_in_mux((MUX_PID, 1000), "小乙"), None, "沒有留下對照表的列");
+        }
+
+        #[test]
+        fn 夥伴畫面自己印出格式對但暗號不對的標記_不算結束() {
+            fix_nonce();
+            let (rig, _) = mux_rig();
+            *rig.runner.inner.screen.borrow_mut() = "[asn-exit guess 1]\n[asn-exit n0nce2 1]\n".into();
+            let id = open_partner(&rig);
+            assert_eq!(kill_panes(&rig.runner), 0);
+            assert_eq!(rig.svc.partner_in_mux((MUX_PID, 1000), "小乙"), Some(id));
+        }
+
+        #[test]
+        fn 夥伴開了還活著_照常成功_只等固定時間() {
+            fix_nonce();
+            let (rig, _) = mux_rig();
+            let id = open_partner(&rig);
+            assert_eq!(kill_panes(&rig.runner), 0);
+            assert_eq!(rig.svc.partner_in_mux((MUX_PID, 1000), "小乙"), Some(id));
+            assert!(rig.runner.inner.sleeps.borrow().iter().all(|d| d.as_millis() <= 500) && rig.runner.inner.sleeps.borrow().len() <= 10);
+        }
+
+        #[test]
+        fn 夥伴工作階段記錄已出現_提早結束等待() {
+            fix_nonce();
+            let sessions = vec![serde_json::json!({ "pid": 11, "name": "小乙", "startedAt": 5_000u64 })];
+            assert!(session_ready(&sessions, "小乙", 4_000, &|_| true));
+            assert!(!session_ready(&sessions, "小乙", 6_000, &|_| true), "舊的同名工作階段不算");
+            assert!(!session_ready(&sessions, "小乙", 4_000, &|_| false), "程序已不在不算");
+            assert!(!session_ready(&sessions, "小甲", 4_000, &|_| true));
+            assert!(!session_ready(&sessions, "", 4_000, &|_| true));
+            let (rig, _) = mux_rig();
+            let dir = rig.svc.dir().unwrap();
+            let w = rig.svc.wez(&dir);
+            assert_eq!(rig.svc.early_exit(&w, Path::new("s"), 9, NONCE, &|| true), None);
+            assert_eq!(rig.runner.inner.sleeps.borrow().len(), 1, "起來了就只等一輪");
+            rig.runner.inner.sleeps.borrow_mut().clear();
+            assert_eq!(rig.svc.early_exit(&w, Path::new("s"), 9, NONCE, &|| false), None);
+            assert_eq!(rig.runner.inner.sleeps.borrow().len(), 10, "沒有訊號就等滿");
+        }
+
+        #[test]
+        fn 夥伴窗格的指令外面包一層_powershell_帶暗號_原指令原樣_終端面板的不包() {
+            fix_nonce();
+            let (rig, _) = mux_rig();
+            open_partner(&rig);
+            let clean = rig.runner.inner.clean_calls.borrow();
+            let args = &clean[0].0;
+            let i = args.iter().position(|a| a == "--").unwrap();
+            assert!(args[i + 1].to_lowercase().ends_with("powershell.exe"), "{:?}", &args[i + 1..]);
+            let enc = &args[args.iter().position(|a| a == "-EncodedCommand").unwrap() + 1];
+            use base64::Engine;
+            let bytes = base64::engine::general_purpose::STANDARD.decode(enc).unwrap();
+            let u: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+            let script = String::from_utf16(&u).unwrap();
+            assert!(script.contains("New-Object Diagnostics.ProcessStartInfo 'C:/bin/claude.exe', '-n 小乙 --resume sid-1'"), "原指令用 ProcessStartInfo：{script}");
+            assert!(script.contains("[asn-exit n0nce '"), "{script}");
+            drop(clean);
+            // pi（終端面板，沒有 kind）照舊直接跑，不包
+            let env: BTreeMap<String, String> = [("PATH".to_string(), "C:/bin".to_string())].into();
+            rig.runner.inner.clean_calls.borrow_mut().clear();
+            rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &env).unwrap();
+            let clean = rig.runner.inner.clean_calls.borrow();
+            let a = &clean[0].0;
+            let i = a.iter().position(|x| x == "--").unwrap();
+            assert_eq!(a[i + 1], "pi");
+        }
+
+        #[test]
+        fn 同名一活一死_認到活的_死的收掉並移除() {
+            fix_nonce();
+            let (rig, _) = mux_rig();
+            let first = open_partner(&rig);
+            let second = open_partner(&rig);
+            assert_eq!(rig.svc.partner_in_mux((MUX_PID, 1000), "小乙"), None, "兩個都活著：不猜");
+            // 之後第一個的畫面變成已結束，第二個還活著（依序讀畫面）
+            *rig.runner.inner.screens.borrow_mut() = vec![DEAD_SCREEN.into(), String::new()];
+            assert_eq!(rig.svc.partner_in_mux((MUX_PID, 1000), "小乙"), Some(second.clone()));
+            assert_eq!(kill_panes(&rig.runner), 1);
+            // 死的已從對照表移除
+            *rig.runner.inner.screens.borrow_mut() = vec![];
+            assert_eq!(rig.svc.partner_in_mux((MUX_PID, 1000), "小乙"), Some(second));
+            let _ = first;
+        }
+
+        #[test]
+        fn 只剩一個死窗格_不算夥伴() {
+            fix_nonce();
+            let (rig, _) = mux_rig();
+            let _ = open_partner(&rig);
+            *rig.runner.inner.screens.borrow_mut() = vec![DEAD_SCREEN.into()];
+            assert_eq!(rig.svc.partner_in_mux((MUX_PID, 1000), "小乙"), None);
+        }
+
+        #[test]
+        fn 沒有暗號的舊窗格_判斷不出結束_當作活著_不讀畫面() {
+            fix_nonce();
+            let (rig, _) = mux_rig();
+            let id = open_partner(&rig);
+            // 把對照表那一列的暗號拿掉（0.2.0 先前開的窗格）
+            rig.svc.inner.lock().unwrap().sessions.iter_mut().for_each(|s| s.exit_nonce = None);
+            *rig.runner.inner.screens.borrow_mut() = vec![DEAD_SCREEN.into()];
+            let before = count_sub(&rig.runner, "get-text");
+            assert_eq!(rig.svc.partner_in_mux((MUX_PID, 1000), "小乙"), Some(id));
+            assert_eq!(count_sub(&rig.runner, "get-text"), before, "沒有暗號就不讀畫面");
         }
 
         #[test]

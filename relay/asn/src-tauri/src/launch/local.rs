@@ -281,7 +281,17 @@ fn start_window_windows(title: &str, command: &str, args: &[String], cwd: &Path,
 /// PowerShell 單引號字串（內部單引號加倍），整串都是字面值，不會展開 $ 或反引號。
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(super) fn ps_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "''"))
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    for c in s.chars() {
+        out.push(c);
+        // PowerShell 把彎單引號 U+2018、U+2019、U+201A、U+201B 也當單引號：路徑或訊息裡有它們也要加倍，否則字串會提前結束
+        if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}') {
+            out.push(c);
+        }
+    }
+    out.push('\'');
+    out
 }
 
 /// 去掉 Windows 的長路徑前綴（canonicalize 會加）；不少 CLI 對它處理不一致，工作資料夾也會被當成不同的專案路徑。
@@ -350,6 +360,80 @@ fn encode_ps_command(script: &str) -> String {
     use base64::Engine;
     let bytes: Vec<u8> = script.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
     base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+/// mux 窗格裡的結束標記：夥伴程式結束後印這一行（`nonce` 是開窗時隨機產生、記在對照表那一列的）。
+/// WezTerm 的 Hold 不會把「程式結束」寫進 mux 的畫面緩衝（實測 get-text 只有程式自己的輸出），所以由 ASN 自己留標記。
+pub(crate) fn exit_marker(nonce: &str, code: i32) -> String {
+    format!("[asn-exit {nonce} {code}]")
+}
+
+/// 照 Windows 的命令列規則（CommandLineToArgvW）組一個參數：空字串 → `""`；不含空白與 `"` 的原樣；
+/// 其餘用雙引號包住，`"` 前面的反斜線數量乘 2 再加 1（再接 `"`），結尾的反斜線乘 2，其他反斜線照原樣。
+pub(crate) fn win_cmdline_arg(a: &str) -> String {
+    if a.is_empty() {
+        return "\"\"".into();
+    }
+    if !a.chars().any(|c| matches!(c, ' ' | '\t' | '\n' | '\u{b}' | '"')) {
+        return a.to_string();
+    }
+    let mut out = String::with_capacity(a.len() + 2);
+    out.push('"');
+    let mut slashes = 0usize;
+    for c in a.chars() {
+        match c {
+            '\\' => slashes += 1,
+            '"' => {
+                out.extend(std::iter::repeat('\\').take(slashes * 2 + 1));
+                out.push('"');
+                slashes = 0;
+            }
+            _ => {
+                out.extend(std::iter::repeat('\\').take(slashes));
+                out.push(c);
+                slashes = 0;
+            }
+        }
+    }
+    out.extend(std::iter::repeat('\\').take(slashes * 2));
+    out.push('"');
+    out
+}
+
+/// 多個參數接成一條命令列（不含程式本身）
+pub(crate) fn win_cmdline(args: &[String]) -> String {
+    args.iter().map(|a| win_cmdline_arg(a)).collect::<Vec<_>>().join(" ")
+}
+
+/// 開在 mux 窗格裡的夥伴：外面包一層 PowerShell，跑完原指令後印 [`exit_marker`]。
+/// 全部走 -EncodedCommand（UTF-16LE Base64），中文路徑與引號不必跳脫。
+/// 原指令不用 `&` 呼叫：PowerShell 5.1 傳原生參數會壞（雙引號、空字串、結尾反斜線，順序也亂）。
+/// 改用 ProcessStartInfo，命令列由這裡照 Windows 規則（[`win_cmdline`]）組好；程式路徑與命令列都放成單引號字面值。
+/// 沒有重導向，子程序沿用窗格的主控台。不用 -NoExit：程式結束、標記印完後承載就結束，窗格靠 exit_behavior=Hold 留著。
+pub(crate) fn mux_wrapped_argv(argv: &[String], nonce: &str) -> Vec<String> {
+    let prog = argv.first().map(String::as_str).unwrap_or("");
+    let rest = if argv.len() > 1 { win_cmdline(&argv[1..]) } else { String::new() };
+    let script = format!(
+        "$code = 0\n\
+         try {{\n\
+         $psi = New-Object Diagnostics.ProcessStartInfo {prog}, {rest}\n\
+         $psi.UseShellExecute = $false\n\
+         $p = [Diagnostics.Process]::Start($psi)\n\
+         $p.WaitForExit()\n\
+         $code = $p.ExitCode\n\
+         }} catch {{\n\
+         Write-Host ('[ASN] 無法啟動：' + $_.Exception.Message) -ForegroundColor Red\n\
+         $code = -1\n\
+         }}\n\
+         {reset}\n\
+         Write-Host ''\n\
+         Write-Host ('[asn-exit {nonce} ' + $code + ']')\n",
+        prog = ps_quote(prog),
+        rest = ps_quote(&rest),
+        reset = TERMINAL_RESET_PS
+    );
+    let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+    vec![format!(r"{root}\System32\WindowsPowerShell\v1.0\powershell.exe"), "-NoLogo".into(), "-NoProfile".into(), "-ExecutionPolicy".into(), "Bypass".into(), "-EncodedCommand".into(), encode_ps_command(&script)]
 }
 
 /// 外層 PowerShell（承載視窗）的參數字串：-NoExit 讓視窗留著。
@@ -643,6 +727,49 @@ mod tests {
         let bytes = base64::engine::general_purpose::STANDARD.decode(enc).unwrap();
         let u: Vec<u16> = bytes.chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
         String::from_utf16(&u).unwrap()
+    }
+
+    #[test]
+    fn 彎單引號也加倍_路徑裡有它不會讓字串提前結束() {
+        assert_eq!(ps_quote("it\u{2019}s"), "'it\u{2019}\u{2019}s'");
+        assert_eq!(ps_quote("\u{2018}\u{201A}\u{201B}"), "'\u{2018}\u{2018}\u{201A}\u{201A}\u{201B}\u{201B}'");
+        assert_eq!(ps_quote(r"C:\使用者\牧’陽"), "'C:\\使用者\\牧\u{2019}\u{2019}陽'");
+        assert_eq!(ps_quote("a'\u{2019}b"), "'a''\u{2019}\u{2019}b'");
+    }
+
+    #[test]
+    fn windows_命令列_照_commandlinetoargvw_規則組() {
+        let a = win_cmdline_arg;
+        assert_eq!(a("plain"), "plain");
+        assert_eq!(a(""), r#""""#);
+        assert_eq!(a("a b"), r#""a b""#);
+        assert_eq!(a("中文 牧陽"), r#""中文 牧陽""#);
+        assert_eq!(a("中文"), "中文", "沒有空白與引號就原樣");
+        assert_eq!(a(r#"a"b"#), r#""a\"b""#);
+        assert_eq!(a(r#"he said "hi""#), r#""he said \"hi\"""#);
+        assert_eq!(a(r"x\"), r"x\", "不含空白的結尾反斜線原樣");
+        assert_eq!(a(r"C:\Program Files\x\"), r#""C:\Program Files\x\\""#, "結尾反斜線乘 2");
+        assert_eq!(a(r"C:\a\b c"), r#""C:\a\b c""#, "路徑中間的反斜線不動");
+        assert_eq!(a(r#"a\"b c"#), r#""a\\\"b c""#, "引號前的反斜線乘 2 再加 1");
+        let args: Vec<String> = ["a\"b", "", "a b", "中文 牧陽", "x\\", "he said \"hi\"", "C:\\Program Files\\x\\", "it\u{2019}s"].iter().map(|s| s.to_string()).collect();
+        // 反過來照規則拆回去要得到原參數
+        let parsed = crate::launch::switch::parse_cmdline(&format!("prog {}", win_cmdline(&args)));
+        assert_eq!(parsed[1..], args[..]);
+    }
+
+    #[test]
+    fn 包裝腳本用_processstartinfo_不用_呼叫運算子() {
+        let argv: Vec<String> = ["C:\\Users\\牧’陽\\claude.exe", "-n", "小 乙", ""].iter().map(|s| s.to_string()).collect();
+        let w = mux_wrapped_argv(&argv, "abc");
+        let enc = &w[w.iter().position(|a| a == "-EncodedCommand").unwrap() + 1];
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD.decode(enc).unwrap();
+        let u: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let script = String::from_utf16(&u).unwrap();
+        assert!(script.contains("New-Object Diagnostics.ProcessStartInfo 'C:\\Users\\牧’’陽\\claude.exe', '-n \"小 乙\" \"\"'"), "{script}");
+        assert!(script.contains("UseShellExecute = $false") && script.contains("WaitForExit()") && script.contains("$p.ExitCode"));
+        assert!(!script.contains("& '"), "不用 & 呼叫：{script}");
+        assert!(script.contains("[asn-exit abc '"));
     }
 
     #[test]

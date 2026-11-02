@@ -21,11 +21,12 @@ fn pick_windows_candidate(cands: &[PathBuf]) -> Option<PathBuf> {
 /// PATH 每個資料夾依序找 `name` 本身與 `name`＋PATHEXT 各副檔名（同 `where` 的順序），只留真的存在的檔案。
 /// 不呼叫 `where`：它的輸出是主控台字碼頁（繁中 Windows 是 Big5），當 UTF-8 解會把中文使用者資料夾解壞，
 /// 拿到不存在的路徑（新家用機的使用者資料夾是中文，claude 一開就以 code 1 結束）。
+/// 跟 `where` 不同：不找目前資料夾，PATH 裡的相對項目也略過（不從工作資料夾撿執行檔）。
 #[cfg_attr(not(windows), allow(dead_code))]
 fn path_candidates(path: &std::ffi::OsStr, pathext: &str, name: &str) -> Vec<PathBuf> {
     let exts: Vec<String> = pathext.split(';').map(str::trim).filter(|e| !e.is_empty()).map(str::to_ascii_lowercase).collect();
     std::env::split_paths(path)
-        .filter(|d| !d.as_os_str().is_empty())
+        .filter(|d| d.is_absolute())
         .flat_map(|d| std::iter::once(d.join(name)).chain(exts.iter().map(|e| d.join(format!("{name}{e}"))).collect::<Vec<_>>()))
         .filter(|p| p.is_file())
         .collect()
@@ -173,6 +174,14 @@ mod pick_tests {
     use std::path::PathBuf;
 
     #[test]
+    fn path_裡的相對項目不從目前資料夾撿檔案() {
+        // cargo test 的目前資料夾是套件根目錄，Cargo.toml 在那裡；絕對項目找得到，相對的「.」要略過
+        let path = std::env::join_paths([PathBuf::from(".")]).unwrap();
+        assert!(PathBuf::from("Cargo.toml").is_file());
+        assert!(path_candidates(&path, "", "Cargo.toml").is_empty(), "相對項目不找");
+    }
+
+    #[test]
     fn 無副檔名的殼排在前面時改挑可執行的() {
         let p = |v: &[&str]| v.iter().map(PathBuf::from).collect::<Vec<_>>();
         assert_eq!(pick_windows_candidate(&p(&["C:/npm/claude", "C:/npm/claude.cmd"])).unwrap(), PathBuf::from("C:/npm/claude.cmd"));
@@ -192,7 +201,7 @@ mod pick_tests {
         std::fs::write(npm.join("claude"), b"#!/bin/sh").unwrap();
         std::fs::write(bin.join("claude.exe"), b"MZ").unwrap();
         let missing = tmp.path().join("沒有這個資料夾");
-        let path = std::env::join_paths([missing, npm.clone(), bin.clone()]).unwrap();
+        let path = std::env::join_paths([missing, PathBuf::from("相對項目"), npm.clone(), bin.clone()]).unwrap();
         let got = path_candidates(&path, ".COM;.EXE;.BAT;.CMD", "claude");
         assert_eq!(got, vec![npm.join("claude"), bin.join("claude.exe")], "依 PATH 順序、只留存在的檔案");
         let pick = pick_windows_candidate(&got).unwrap();
