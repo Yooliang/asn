@@ -10,6 +10,7 @@ pub mod confirm;
 #[cfg(all(desktop, feature = "gui"))]
 pub mod desktop;
 pub mod crypto;
+pub mod link;
 pub mod requester;
 pub mod wire;
 

@@ -559,7 +559,7 @@ Deno.serve(async (req) => {
   if (action && SECRET_ACTIONS.has(action)) {
     if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
     const raw = await req.json().catch(() => null);
-    const signedSecret = (action === "secret_pending" || action === "secret_reply") ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
+    const signedSecret = (action === "secret_pending" || action === "secret_reply" || action === "secret_request") ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
     const r = await handleSecretAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, raw, signedSecret);
     return json(r.status, r.body);
   }

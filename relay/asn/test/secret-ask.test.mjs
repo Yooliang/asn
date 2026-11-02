@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { normalizeList, nextToAsk, countdownText, secretError, errorText, POLL_MS, TEXT } from '../ui/lib/secret-ask.mjs'
+import { normalizeList, nextToAsk, countdownText, secretError, errorText, loginLinkHost, POLL_MS, TEXT } from '../ui/lib/secret-ask.mjs'
 import { viewModel } from '../ui/lib/askpass-dialog.mjs'
 import { secretNav, normalizeNav } from '../ui/lib/mobile.mjs'
 
@@ -15,7 +15,7 @@ test('清單：只收欄位完整且還有時間的；其餘丟掉', () => {
     { id: 'c', program: 'g', purpose: 'p' },
     null,
   ] })
-  assert.deepEqual(l, [{ id: 'a', nodeName: '雲端代理', program: 'git', purpose: 'push', fingerprint: 'ab12-cd34', secondsLeft: 59 }])
+  assert.deepEqual(l, [{ id: 'a', nodeName: '雲端代理', program: 'git', purpose: 'push', fingerprint: 'ab12-cd34', link: '', linkHost: '', secondsLeft: 59 }])
   assert.deepEqual(normalizeList(null), []); assert.deepEqual(normalizeList({ requests: 'x' }), [])
 })
 
@@ -80,4 +80,44 @@ test('守門：手機面板接線——只呼叫兩個指令，密碼只進輸�
 test('守門：後台沒有登入時手機不打確認動作（Rust 端驗簽章，畫面也先看 signed_in）', () => {
   const js = read('../ui/m.js')
   assert.match(js, /async function checkSecrets\(\) \{\s*if \(sec\.busy \|\| sec\.cur \|\| nav\.sheet \|\| !acct\.value\.signed_in/)
+})
+
+// ---------- 登入網址（#628 第 3 段）----------
+const LINK = 'https://claude.ai/oauth/authorize?client_id=C&state=ST4TE&code_challenge=CH4LL&redirect_uri=R'
+
+test('登入網址：只收官方登入網域的 https，畫面只顯示網域', () => {
+  assert.equal(loginLinkHost(LINK), 'claude.ai')
+  assert.equal(loginLinkHost('https://platform.claude.com:443/x'), 'platform.claude.com')
+  assert.equal(loginLinkHost('https://console.anthropic.com/oauth'), 'console.anthropic.com')
+  for (const bad of [
+    '', null, undefined, 5, 'http://claude.ai/x', 'https://claude.ai.evil.com/x', 'https://evilclaude.ai/x', 'https://claude.ai@evil.com/x',
+    'https://evil.com/claude.ai', 'https://evil.com?x=claude.ai', 'https://claude.ai:8443/x', 'https://claude.ai/x y', 'https://claude.ai/x\ty',
+    'https://claude.ai/x\\y', 'https://CLAUDE.AI/x', 'https://claude。ai/x', 'https://claude.ai./x', 'https://.claude.ai/x', 'https://a..claude.ai/x',
+    'javascript:alert(1)', 'https://', 'claude.ai', 'https://claude.ai/' + 'a'.repeat(2100), 'https://claude.ai/é',
+  ]) assert.equal(loginLinkHost(bad), null, String(bad).slice(0, 40))
+})
+
+test('清單：有附官方登入網址的留下網址與網域；附了不官方的網址，整筆不顯示；沒附的 link 是空字串', () => {
+  const base = { node_name: '新電腦', program: 'Claude Code 登入', purpose: '登入', fingerprint: 'ab12-cd34', seconds_left: 50 }
+  const l = normalizeList({ requests: [
+    { ...base, id: 'a', link: LINK },
+    { ...base, id: 'b', link: 'https://evil.example/oauth' },
+    { ...base, id: 'c', link: 'http://claude.ai/x' },
+    { ...base, id: 'd', link: null },
+    { ...base, id: 'e' },
+    { ...base, id: 'f', link: 5 },
+  ] })
+  assert.deepEqual(l.map(r => r.id), ['a', 'd', 'e'])
+  assert.deepEqual([l[0].link, l[0].linkHost], [LINK, 'claude.ai'])
+  assert.deepEqual([l[1].link, l[1].linkHost, l[2].link], ['', '', ''])
+})
+
+test('畫面：有網址才顯示網域與「開啟登入頁」；連結只用驗過的網址、新分頁開啟、不帶來源', () => {
+  const html = read('../ui/m.html')
+  const panel = html.slice(html.indexOf("nav.sheet === 'secret'"), html.indexOf('SECRET_TEXT.later'))
+  assert.match(panel, /<a v-if="sec\.cur\.link" class="m-btn m-btn-big" :href="sec\.cur\.link" target="_blank" rel="noopener noreferrer">\{\{ SECRET_TEXT\.openLink \}\}<\/a>/)
+  assert.match(panel, /<dd v-if="sec\.cur\.link">\{\{ sec\.cur\.linkHost \}\}<\/dd>/)
+  assert.doesNotMatch(panel, /\{\{ sec\.cur\.link \}\}/, '畫面不直接印出整串網址（只顯示網域）')
+  assert.equal(TEXT.openLink, '開啟登入頁')
+  assert.equal(TEXT.linkLabel, '登入頁的網域')
 })

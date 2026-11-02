@@ -169,6 +169,12 @@ fn 參數不對_不打後台() {
         let (c, out, _) = go(&f.env, &args, "");
         assert_eq!((c, out.as_str()), (1, ""), "{args:?}");
     }
+    // 條件 A：asn-cli 沒有任何辦法附登入網址（AI 不能透過它把假的登入頁推到手機）
+    for args in [vec!["secret", "request", "--purpose", "x", "--link", "https://claude.ai/x"], vec!["secret", "request", "--purpose", "x", "--url", "https://claude.ai/x"]] {
+        let (c, out, err) = go(&f.env, &args, "");
+        assert_eq!((c, out.as_str()), (1, ""), "{args:?}");
+        assert!(err.contains("不認得的參數"), "{err}");
+    }
     // 超出範圍的有效期限在送出之前就擋下
     let (c, out, _) = go(&f.env, &["secret", "request", "--purpose", "x", "--ttl", "5"], "");
     assert_eq!((c, out.as_str()), (4, ""));

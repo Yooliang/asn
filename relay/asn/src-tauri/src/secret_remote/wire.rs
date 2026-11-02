@@ -27,6 +27,10 @@ const NOT_SIGNED: &str = "尚未登入，無法確認密碼請求";
 pub trait Backend: Send + Sync {
     /// 請求端：建立請求（節點金鑰）。回 { id, seconds_left }
     fn request(&self, body: Value) -> BoxFut<'_, Result<Value, String>>;
+    /// 請求端：建立**帶登入網址**的請求。一定要本人簽章（後台拒絕沒簽章的，AI 拿得到節點金鑰、拿不到登入憑證）。預設不支援
+    fn request_signed<'a>(&'a self, _body: Value, _token: &'a str) -> BoxFut<'a, Result<Value, String>> {
+        Box::pin(async move { Err("這個後端不支援帶登入網址的請求".to_string()) })
+    }
     /// 請求端：取回答（節點金鑰）。回 { status, cipher? }
     fn fetch(&self, body: Value) -> BoxFut<'_, Result<Value, String>>;
     /// 本人設備：待確認的請求（要本人簽章；沒憑證不送）
@@ -38,6 +42,14 @@ pub trait Backend: Send + Sync {
 impl Backend for Relay {
     fn request(&self, body: Value) -> BoxFut<'_, Result<Value, String>> {
         Box::pin(async move { self.api("secret_request", Some(body)).await })
+    }
+    fn request_signed<'a>(&'a self, body: Value, token: &'a str) -> BoxFut<'a, Result<Value, String>> {
+        Box::pin(async move {
+            if token.is_empty() {
+                return Err(NOT_SIGNED.to_string());
+            }
+            self.api_signed("secret_request", Some(body), Some(token)).await
+        })
     }
     fn fetch(&self, body: Value) -> BoxFut<'_, Result<Value, String>> {
         Box::pin(async move { self.api("secret_fetch", Some(body)).await })
@@ -80,6 +92,16 @@ pub fn build_request_body(pub_b64: &str, program: &str, purpose: &str, ttl: u64)
         return Err(format!("有效期限要在 {TTL_MIN}～{TTL_MAX} 秒之間"));
     }
     Ok(json!({ "pub": pub_b64, "program": program, "purpose": purpose, "ttl": ttl }))
+}
+
+/// 帶登入網址的請求內容：網址一定要是官方登入網域的 https（送出前先驗，與後台同一條規則）
+pub fn build_request_body_link(pub_b64: &str, program: &str, purpose: &str, ttl: u64, link: &str) -> Result<Value, String> {
+    if !super::link::valid_login_link(link) {
+        return Err("登入網址不是官方登入網域的 https".into());
+    }
+    let mut body = build_request_body(pub_b64, program, purpose, ttl)?;
+    body["link"] = Value::String(link.to_string());
+    Ok(body)
 }
 
 pub fn build_fetch_body(id: &str) -> Result<Value, String> {
@@ -154,6 +176,8 @@ pub struct PendingReq {
     /// 請求端自報
     pub purpose: String,
     pub pub_b64: String,
+    /// 登入網址（請求端附的）。只留通過官方網域檢查的；沒附就是 None
+    pub link: Option<String>,
     pub seconds_left: u64,
 }
 
@@ -169,6 +193,12 @@ pub fn parse_pending(v: &Value) -> Vec<PendingReq> {
             if left == 0 {
                 return None;
             }
+            // 有附網址但不是官方登入網域：整筆請求不顯示（不信後台或請求端回來的內容，寧可不顯示也不讓本人點到不明網址）
+            let link = match r.get("link") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(u)) if super::link::valid_login_link(u) => Some(u.clone()),
+                Some(_) => return None,
+            };
             Some(PendingReq {
                 id: id.to_ascii_lowercase(),
                 node: node.to_string(),
@@ -176,6 +206,7 @@ pub fn parse_pending(v: &Value) -> Vec<PendingReq> {
                 program: clean_display(s("program")?, PROGRAM_MAX),
                 purpose: clean_display(s("purpose")?, PURPOSE_MAX),
                 pub_b64: pub_b64.to_string(),
+                link,
                 seconds_left: left.min(TTL_MAX),
             })
         })
