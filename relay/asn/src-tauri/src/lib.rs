@@ -426,6 +426,66 @@ fn agent_setup_remote_allow_get(app: State<'_, App>) -> bool {
 fn agent_setup_remote_allow_set(app: State<'_, App>, on: bool) -> Result<(), String> {
     agent_setup::switch::set_remote_allowed(&app.data_dir, on)
 }
+/// 取本人簽章的函式（來源只有視窗程式的記憶體）。在安裝並登入的執行緒裡被呼叫（不是非同步工作執行緒），用 block_on 等權杖是安全的
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+fn agent_setup_token_fn(handle: &AppHandle) -> agent_setup::setup::TokenFn {
+    let h = handle.clone();
+    Arc::new(move || rt::block_on(async { account::signing_token(&h.state::<auth::AuthState>()).await }).filter(|t| !t.is_empty()))
+}
+/// 確認窗要給本人看的文字（固定）：做什麼、不做什麼
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+fn agent_setup_plan() -> &'static str {
+    "將在這台電腦安裝官方的 Claude Code（從 downloads.claude.ai 下載，驗過雜湊與數位簽章，簽署者必須是 Anthropic, PBC），再把登入網址送到你的手機，由你在手機上授權。已經裝好的不會重裝，已經登入的不會重新登入。"
+}
+/// 人在這台電腦前按了取消：在目前這一步做完之後生效
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+fn agent_setup_cancel() {
+    agent_setup::setup::request_cancel();
+}
+/// 手機觸發的安裝並登入（presence 回應帶來的請求）：本機三道把關過了才開始，開始時跳出看得見的通知（附取消），結果回報到手機
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+async fn run_remote_setup(handle: AppHandle, relay: Arc<Relay>, requested_by: String) {
+    use agent_setup::remote::{gate, Gate};
+    let app = handle.state::<App>();
+    let token = account::signing_token(&handle.state::<auth::AuthState>()).await;
+    if let Gate::Refuse(why) = gate(agent_setup::switch::remote_allowed(&app.data_dir), token.as_deref(), &requested_by) {
+        elog!("手機要求安裝並登入被拒絕：{why}");
+        relay.report_setup_result(false, why, None).await;
+        return;
+    }
+    let _ = handle.emit("agent-setup-remote", serde_json::json!({ "phase": "starting", "text": "正在依你手機的要求安裝並登入 Claude Code", "cancellable": true }));
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let (h1, h2) = (handle.clone(), handle.clone());
+    let started = agent_setup::setup::start_claude(
+        relay.clone(),
+        agent_setup_token_fn(&handle),
+        move |e| {
+            let _ = h1.emit("agent-setup", e.to_json());
+        },
+        move |d| {
+            let _ = tx.send(d);
+        },
+    );
+    if let Err(e) = started {
+        relay.report_setup_result(false, &e, None).await;
+        return;
+    }
+    match rx.await {
+        Ok(d) => {
+            let _ = h2.emit("agent-setup", d.to_json());
+            let (ok, text, replaced) = d.report_fields();
+            relay.report_setup_result(ok, &text, replaced.as_deref()).await;
+        }
+        Err(_) => relay.report_setup_result(false, "安裝並登入中途中斷", None).await,
+    }
+}
+
 /// 本人在這台電腦上按「安裝並登入 Claude Code」。本人簽章不在這裡取好帶著走：安裝要好幾分鐘，權杖可能中途過期，
 /// 所以建一個「取權杖的函式」交給流程，登入網址送出前才取（來源仍只有視窗程式的記憶體）。
 /// 沒登入帳號就不開始（登入網址要靠本人簽章才送得到手機）；已經有一個在跑，直接回錯；
@@ -433,12 +493,14 @@ fn agent_setup_remote_allow_set(app: State<'_, App>, on: bool) -> Result<(), Str
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
-async fn agent_setup_start(app: State<'_, App>, auth: State<'_, auth::AuthState>, handle: AppHandle) -> Result<(), String> {
+async fn agent_setup_start(app: State<'_, App>, auth: State<'_, auth::AuthState>, handle: AppHandle, confirmed: bool) -> Result<(), String> {
+    // 本機確認：畫面要先把 agent_setup_plan 的文字給本人看，本人按了才帶 confirmed = true。沒確認就不開始（不能只有按鈕沒有確認窗）
+    if !confirmed {
+        return Err("需要你先確認才能開始".to_string());
+    }
     let relay = relay_of(&app)?;
     account::signing_token(&auth).await.filter(|t| !t.is_empty()).ok_or("請先登入你的帳號，才能把登入網址送到手機")?;
-    let h = handle.clone();
-    // 這個函式在安裝並登入的執行緒裡被呼叫（不是非同步工作執行緒），用 block_on 等權杖是安全的
-    let token: agent_setup::setup::TokenFn = Arc::new(move || rt::block_on(async { account::signing_token(&h.state::<auth::AuthState>()).await }).filter(|t| !t.is_empty()));
+    let token = agent_setup_token_fn(&handle);
     let (h1, h2) = (handle.clone(), handle);
     agent_setup::setup::start_claude(
         relay,
@@ -1433,7 +1495,7 @@ pub fn run() {
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_mod::claude_mod_auto_get, claude_mod::claude_mod_auto_set, claude_quota::claude_quota_all, statusline_hook::claude_quota_hook_status, statusline_hook::claude_quota_hook_connect, statusline_hook::claude_quota_hook_disconnect,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,
-            acct_remote_report, acct_remote_list, acct_roster, acct_remote_request, acct_remote_status, acct_remote_pending, acct_remote_apply, acct_remote_decline, acct_remote_allow_get, acct_remote_allow_set, agent_setup_remote_allow_get, agent_setup_remote_allow_set, agent_setup_start,
+            acct_remote_report, acct_remote_list, acct_roster, acct_remote_request, acct_remote_status, acct_remote_pending, acct_remote_apply, acct_remote_decline, acct_remote_allow_get, acct_remote_allow_set, agent_setup_remote_allow_get, agent_setup_remote_allow_set, agent_setup_start, agent_setup_plan, agent_setup_cancel,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
             wins::open_chat, wins::open_panel, wins::close_panels, wins::chat_visible, wins::close_chats, wins::open_windows, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,
@@ -1634,6 +1696,11 @@ pub fn run() {
                                     Err(e) => r5.report_update_result(false, &e).await,
                                 }
                             });
+                        }
+                        // 本人在手機上要這台安裝並登入 Claude Code：本機三道把關（開關、已登入、同一個人）過了才做
+                        #[cfg(desktop)]
+                        if let Some(by) = r4.take_setup_request() {
+                            tauri::async_runtime::spawn(run_remote_setup(up_handle.clone(), r4.clone(), by));
                         }
                         tokio::select! {
                             _ = tokio::time::sleep(every) => {}

@@ -10,5 +10,6 @@ pub mod login;
 pub mod net;
 pub mod phone;
 pub mod proc;
+pub mod remote;
 pub mod setup;
 pub mod switch;

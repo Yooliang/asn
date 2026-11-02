@@ -38,6 +38,8 @@ pub enum Finish {
     InstalledKeptLogin(String),
     /// 這台沒辦法背景登入，請退回開終端機
     NeedTerminal(String),
+    /// 人在這台電腦前按了「取消」（取消在每一步之間生效；正在下載或等手機貼授權碼的那一步會先做完）
+    Cancelled,
     Declined,
     TimedOut,
     Failed(String),
@@ -74,6 +76,16 @@ pub struct Done {
 }
 
 impl Done {
+    /// 回報到手機的三個欄位：成功與否、固定句子的說明、重裝說明（沒重裝就是 None）
+    pub fn report_fields(&self) -> (bool, String, Option<String>) {
+        let j = self.to_json();
+        (
+            j["ok"].as_bool().unwrap_or(false),
+            j["text"].as_str().unwrap_or("").to_string(),
+            j["replaced"].as_str().map(|s| s.to_string()),
+        )
+    }
+
     pub fn to_json(&self) -> serde_json::Value {
         let mut v = self.finish.to_json();
         if let Some(k) = self.replaced {
@@ -112,6 +124,7 @@ impl Finish {
             Finish::AlreadyReady(v) => json!({ "phase": "done", "ok": true, "already": true, "text": format!("這台電腦已經安裝 Claude Code {v} 並登入，沒有重新安裝或登入"), "version": v }),
             Finish::InstalledKeptLogin(v) => json!({ "phase": "done", "ok": true, "kept_login": true, "text": format!("已安裝 Claude Code {v}，沿用這台電腦現有的登入"), "version": v }),
             Finish::NeedTerminal(t) => json!({ "phase": "done", "ok": false, "terminal": true, "text": t }),
+            Finish::Cancelled => json!({ "phase": "done", "ok": false, "cancelled": true, "text": "已在這台電腦上取消" }),
             Finish::Declined => json!({ "phase": "done", "ok": false, "text": "你在手機上拒絕了這次登入" }),
             Finish::TimedOut => json!({ "phase": "done", "ok": false, "text": "等太久了，登入逾時" }),
             Finish::Failed(e) => json!({ "phase": "done", "ok": false, "text": e }),
@@ -120,6 +133,12 @@ impl Finish {
 }
 
 static BUSY: AtomicBool = AtomicBool::new(false);
+static CANCEL: AtomicBool = AtomicBool::new(false);
+
+/// 人在這台電腦前按了「取消」。只影響目前正在跑的那一次（下一次開始時清掉）
+pub fn request_cancel() {
+    CANCEL.store(true, Ordering::SeqCst);
+}
 
 /// 同一時間只允許一個安裝並登入。取到的鎖交給執行緒，結束（含 panic）時放掉
 #[derive(Debug)]
@@ -144,6 +163,8 @@ pub struct Steps<'a> {
     pub inspect: &'a dyn Fn() -> Existing,
     pub install: &'a dyn Fn() -> Result<String, String>,
     pub state: &'a dyn Fn() -> LoginState,
+    /// 有人在這台電腦上按了取消？每一步開始前問一次
+    pub cancelled: &'a dyn Fn() -> bool,
     /// PATH 上有沒有別的方式裝的 claude（只找路徑、不執行）。沒有原生安裝的 claude.exe 但 PATH 上有，就不再裝一份
     pub on_path: &'a dyn Fn() -> Option<String>,
     pub login: &'a dyn Fn(&dyn Phone, &dyn Fn(Step)) -> Outcome,
@@ -152,6 +173,9 @@ pub struct Steps<'a> {
 /// 核心流程：先看現況，沒裝好才安裝，沒登入才用手機登入
 pub fn run_with(s: &Steps, phone: &dyn Phone, report: &dyn Fn(Event)) -> Done {
     report(Event::Checking);
+    if (s.cancelled)() {
+        return Done { finish: Finish::Cancelled, replaced: None, installed: false };
+    }
     let mut replaced = None;
     let (version, installed_now) = match (s.inspect)() {
         Existing::Healthy(v) => (v, false),
@@ -170,6 +194,9 @@ pub fn run_with(s: &Steps, phone: &dyn Phone, report: &dyn Fn(Event)) -> Done {
                 elog!("現有的 claude.exe 不能用，將重新安裝官方版（{k:?}）：{detail}");
                 replaced = Some(*k);
             }
+            if (s.cancelled)() {
+                return Done { finish: Finish::Cancelled, replaced, installed: false };
+            }
             report(Event::Installing(replaced));
             match (s.install)() {
                 Ok(v) => (v, true),
@@ -183,12 +210,18 @@ pub fn run_with(s: &Steps, phone: &dyn Phone, report: &dyn Fn(Event)) -> Done {
 
 fn finish_after(s: &Steps, phone: &dyn Phone, report: &dyn Fn(Event), version: String, installed_now: bool) -> Finish {
     report(Event::Installed(version.clone()));
+    if (s.cancelled)() {
+        return Finish::Cancelled;
+    }
     match (s.state)() {
         // 說法要和實際相符：本來就好才說「什麼都沒動」，剛裝完的要說裝了、沿用現有的登入
         LoginState::In if installed_now => return Finish::InstalledKeptLogin(version),
         LoginState::In => return Finish::AlreadyReady(version),
         LoginState::Unknown(why) => return Finish::Failed(format!("{why}。為了不蓋掉現有的登入，沒有繼續；請先在終端機確認登入狀態")),
         LoginState::Out => {}
+    }
+    if (s.cancelled)() {
+        return Finish::Cancelled;
     }
     match (s.login)(phone, &|st| report(Event::Login(st))) {
         Outcome::Verified => Finish::Ready(version),
@@ -206,6 +239,7 @@ pub type TokenFn = Arc<dyn Fn() -> Option<String> + Send + Sync>;
 /// 否則在新的執行緒裡跑，立刻回來，結束時呼叫 `done` 一次。
 pub fn start_claude(relay: Arc<Relay>, token: TokenFn, report: impl Fn(Event) + Send + 'static, done: impl FnOnce(Done) + Send + 'static) -> Result<(), String> {
     let busy = Busy::take(&BUSY)?;
+    CANCEL.store(false, Ordering::SeqCst);
     let spawned = std::thread::Builder::new().name("asn-agent-setup".into()).spawn(move || {
         let _busy = busy;
         let get = move || token();
@@ -214,6 +248,7 @@ pub fn start_claude(relay: Arc<Relay>, token: TokenFn, report: impl Fn(Event) + 
             inspect: &super::claude_install::inspect_here,
             install: &super::claude_install::install_here,
             state: &super::claude_login::login_state_here,
+            cancelled: &|| CANCEL.load(Ordering::SeqCst),
             on_path: &|| super::claude_install::find_on_path().map(|p| p.to_string_lossy().into_owned()),
             login: &|p, r| super::claude_login::login_here(p, r),
         };
@@ -246,7 +281,13 @@ mod tests {
     }
 
     fn run_full_path(existing: Existing, install: Result<&str, &str>, state: LoginState, login: Outcome, on_path: Option<String>) -> (Done, Vec<Event>, Calls) {
+        run_full_cancel(existing, install, state, login, on_path, 0)
+    }
+
+    /// `cancel_at_poll`：第幾次問「有沒有取消」開始回 true（0＝從不取消）
+    fn run_full_cancel(existing: Existing, install: Result<&str, &str>, state: LoginState, login: Outcome, on_path: Option<String>, cancel_at_poll: u32) -> (Done, Vec<Event>, Calls) {
         let calls = Calls::default();
+        let (cancel_at, polls) = (Cell::new(cancel_at_poll), Cell::new(0));
         let ev = RefCell::new(vec![]);
         let state = RefCell::new(Some(state));
         let login = RefCell::new(Some(login));
@@ -258,6 +299,7 @@ mod tests {
                 install.map(|s| s.to_string()).map_err(|e| e.to_string())
             },
             state: &|| state.borrow_mut().take().unwrap(),
+            cancelled: &|| cancel_at.get() != 0 && { let n = polls.get() + 1; polls.set(n); n >= cancel_at.get() },
             on_path: &|| on_path.clone(),
             login: &|_, rep| {
                 calls.login.set(calls.login.get() + 1);
@@ -310,6 +352,38 @@ mod tests {
         // 裝成功但後面登入失敗：程式確實換掉了，用「才重新安裝的」
         let (d, _, _) = run_full(Existing::Broken(BrokenKind::BadSignature, "x".into()), Ok("2.1.309"), LoginState::Out, Outcome::Failed("x".into()));
         assert!(d.installed && d.to_json()["replaced"].as_str().unwrap().contains("才重新安裝的"));
+    }
+
+    #[test]
+    fn 回報到手機的欄位_成功失敗_重裝說明() {
+        let (d, _, _) = run_full(Existing::Missing, Ok("2.1.309"), LoginState::Out, Outcome::Verified);
+        let (ok, text, replaced) = d.report_fields();
+        assert!(ok && text.contains("2.1.309") && replaced.is_none());
+        let (d, _, _) = run_full(Existing::Broken(BrokenKind::BadSignature, "x".into()), Err("下載失敗"), LoginState::Out, Outcome::Verified);
+        let (ok, text, replaced) = d.report_fields();
+        assert!(!ok && text == "下載失敗");
+        assert!(replaced.unwrap().contains("那支程式還在原位"));
+    }
+
+    #[test]
+    fn 取消_在每一步之間生效_取消後的步驟都不做() {
+        // 第 1 次問（開始前）就取消：什麼都不做
+        let (d, _, c) = run_full_cancel(Existing::Missing, Ok("1.0.0"), LoginState::Out, Outcome::Verified, None, 1);
+        assert_eq!(d.finish, Finish::Cancelled);
+        assert_eq!((c.install.get(), c.login.get()), (0, 0));
+        // 第 2 次問（要安裝之前）取消：不安裝
+        let (d, _, c) = run_full_cancel(Existing::Missing, Ok("1.0.0"), LoginState::Out, Outcome::Verified, None, 2);
+        assert_eq!(d.finish, Finish::Cancelled);
+        assert_eq!((c.install.get(), c.login.get()), (0, 0));
+        // 第 3 次問（裝完、看登入狀態之前）取消：裝了，但不登入
+        let (d, _, c) = run_full_cancel(Existing::Missing, Ok("1.0.0"), LoginState::Out, Outcome::Verified, None, 3);
+        assert_eq!(d.finish, Finish::Cancelled);
+        assert_eq!((c.install.get(), c.login.get()), (1, 0));
+        // 已裝好的電腦，第 3 次問（要登入之前）取消：不登入
+        let (d, _, c) = run_full_cancel(Existing::Healthy("1.0.0".into()), Err("x"), LoginState::Out, Outcome::Verified, None, 3);
+        assert_eq!(d.finish, Finish::Cancelled);
+        assert_eq!((c.install.get(), c.login.get()), (0, 0));
+        assert_eq!(Finish::Cancelled.to_json()["cancelled"], true);
     }
 
     #[test]
