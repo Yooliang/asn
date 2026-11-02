@@ -294,13 +294,13 @@ export const mattachProbeSource = ({ mattach }) => `(async () => {
   if (call[1]?.payload?.room !== 'g1') return { ok: false, why: '附件沒有帶群組代號：' + JSON.stringify(call[1]?.payload?.room) };
   return { ok: true, why: '' };
 })()`
-// 額度畫面（#374 之三）：「我的帳號」區每個廠牌（data-vendor）的文字要依序含 want 列的每一段；先等 open 指定的入口（手機要從設置點進「設備與帳號」）
+// 額度畫面（#374 之三）：「我的帳號」區每個廠牌（data-vendor）的文字要依序含 want 列的每一段；先等 open 指定的入口（手機要從設置點進「帳號」）
 // #374：兩條改成額度條（「5 小時」「剩 40%」各自一段）；absent＝那一組裡不能出現的字
 const CLAUDE_BARS = ['Claude', '5 小時', '剩 40%', '每週', '剩 72%']
 export const QUOTA_PROBES = {
   gemini: { quota: '.dv-my', want: { claude: CLAUDE_BARS, gemini: ['Gemini', '5 小時', '剩', '每週', '剩'] } },
   geminiEmpty: { quota: '.dv-my', want: { claude: CLAUDE_BARS, gemini: ['Gemini', '開 Gemini 視窗後才讀得到'] } },
-  mobile: { quota: '.m-dv-my', open: '設備與帳號', want: { claude: CLAUDE_BARS, gemini: ['Gemini', '5 小時', '剩', '每週', '剩'] } },
+  mobile: { quota: '.m-dv-my', open: '帳號', want: { claude: CLAUDE_BARS, gemini: ['Gemini', '5 小時', '剩', '每週', '剩'] } },
 }
 export const quotaProbeSource = ({ quota, open = '', want, absent = {} }) => `(async () => {
   const sel = ${JSON.stringify(quota)}, open = ${JSON.stringify(open)}, want = ${JSON.stringify(want)}, absent = ${JSON.stringify(absent)};
@@ -330,7 +330,7 @@ export const quotaProbeSource = ({ quota, open = '', want, absent = {} }) => `(a
 })()`
 // 手機「設備與帳號」帳號卡（#374）：每張固定三行（帳號＋右邊固定位置的「使用中」／「切換」、方案、額度）；
 // 方案寫 Max 這類、沒有底線；額度兩條各有重置時間；舊資料寫「資料較舊」且不是斜體；頁內沒有第二個返回；說明在最下面
-export const MCARDS_PROBE = { mcards: true, open: '設備與帳號' }
+export const MCARDS_PROBE = { mcards: true, open: '帳號' }
 export const mcardsProbeSource = ({ open }) => `(async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const open = ${JSON.stringify(open)};
@@ -396,11 +396,11 @@ export const macctBackProbeSource = () => `(async () => {
   }
   bad = check('返回收起', await press('closed'), 'closed'); if (bad) return bad;
   // 二、從設置進來：先看列表，點一台，返回
-  const go = [...document.querySelectorAll('.m-tab, [role=tab], button')].find(b => b.textContent.trim() === '我' || b.getAttribute('aria-label') === '我');
+  const go = [...document.querySelectorAll('.m-tab, [role=tab], button')].find(b => b.textContent.trim() === '設置' || b.getAttribute('aria-label') === '設置');
   if (go) { go.click(); await sleep(300) }
   let btn = null;
-  for (let i = 0; i < 30 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes('設備與帳號')) || null; if (!btn) await sleep(100) }
-  if (!btn) return { ok: false, why: '找不到設置裡的「設備與帳號」（' + steps.join('；') + '）' };
+  for (let i = 0; i < 30 && !btn; i++) { btn = [...document.querySelectorAll('.m-row-btn')].find(b => b.textContent.includes('設備')) || null; if (!btn) await sleep(100) }
+  if (!btn) return { ok: false, why: '找不到設置裡的「設備」（' + steps.join('；') + '）' };
   btn.click();
   bad = check('設置進來', await waitView('list'), 'list'); if (bad) return bad;
   document.querySelector('.m-dv-go').click();
@@ -452,7 +452,7 @@ export const SCENARIOS = [
   { name: 'list', page: 'list.html', state: { signedIn: true }, ready: '#app.win' },
   { name: 'list-roster', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: true }, ready: '#app.win .dv-my .dv-acct' },
   { name: 'list-roster-missing', page: 'list.html', state: { signedIn: true, devicesPage: true }, ready: '#app.win .dv-set' },
-  // Gemini 額度（#374 之三）：有額度時兩條都顯示、沒資料時寫提示；Claude 那一組照舊。手機從設置點進「設備與帳號」看同一區
+  // Gemini 額度（#374 之三）：有額度時兩條都顯示、沒資料時寫提示；Claude 那一組照舊。手機從設置點進「帳號」看同一區
   { name: 'list-roster-gemini', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'gemini' }, ready: '#app.win .dv-my .dv-acct', probe: QUOTA_PROBES.gemini },
   { name: 'list-roster-gemini-empty', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'geminiEmpty' }, ready: '#app.win .dv-my .dv-acct', probe: QUOTA_PROBES.geminiEmpty },
   { name: 'm-roster-gemini', page: 'm.html', state: { signedIn: true, mroster: true }, ready: '#app.m .m-row-btn', probe: QUOTA_PROBES.mobile },
@@ -498,8 +498,8 @@ export const EXCLUDED_PAGES = {
 }
 
 // 這個情境的完整假回應表（引導情境不預設「已引導」，讓引導畫面出現）
-// 帳號列表（#374）情境：整合模式、上次開著「設定：設備與帳號」，開機就會讀 acct_roster
-export const ROSTER_ME = { winMode: 'merged', session: { v: 1, tabs: [{ id: '@setting' }], active: { id: '@setting' }, panel: { guide: '', setting: 'devices' }, windows: [], panelWindows: [] } }
+// 帳號列表（#374）情境：整合模式、上次開著「設定：帳號」，開機就會讀 acct_roster
+export const ROSTER_ME = { winMode: 'merged', session: { v: 1, tabs: [{ id: '@setting' }], active: { id: '@setting' }, panel: { guide: '', setting: 'accounts' }, windows: [], panelWindows: [] } }
 export const ROSTER_SAMPLE = {
   now: '2026-10-29T00:00:00Z',
   accounts: [

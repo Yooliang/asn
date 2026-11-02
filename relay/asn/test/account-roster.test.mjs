@@ -390,5 +390,5 @@ test('冒煙情境：有列表時「我的帳號」出現；後台沒部署（�
   assert.match(ok.ready, /\.dv-my/)
   assert.deepEqual(tableFor(ok).acct_roster, ROSTER_SAMPLE)
   assert.equal('acct_roster' in tableFor(miss), false)
-  assert.equal(JSON.parse(tableFor(ok).store_load.values.me).session.panel.setting, 'devices')
+  assert.equal(JSON.parse(tableFor(ok).store_load.values.me).session.panel.setting, 'accounts')
 })
