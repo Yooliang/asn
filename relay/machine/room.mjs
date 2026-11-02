@@ -11,6 +11,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { BASE_URL, Fail, HOME_DIR, findCaller, machineNode, readMachineKey } from './identity.mjs'
 import { bodyWithNotes, normalizeAttachments } from './attach-format.mjs'
+import { cleanLabel } from './mail-format.mjs'
 
 const MAX_LAST = 200
 const USAGE = `用法：
@@ -18,7 +19,7 @@ const USAGE = `用法：
   node room.mjs --room-read <群組id|群組名> [--last N | --since SEQ] [--json]
     --last N     最近 N 則（預設 20，最多 ${MAX_LAST}）
     --since SEQ  第 SEQ 則之後的（最多 ${MAX_LAST} 則）
-    --json       每則一行 JSON（seq/from/from_name/trust/at/mentions/body）
+    --json       每則一行 JSON（seq/from/from_name/trust/at/mentions/body；後台有給標示時多 from_label）
 只讀、不改已讀；身分（節點~視窗名）自動判定，不能自填。`
 
 export function parseArgs(argv) {
@@ -63,7 +64,7 @@ function writeSeen(node, seen) {
 }
 
 const oneLine = (s, n) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n) + '…' : t }
-const fromText = m => m.from_name || (m.from === '~owner' ? '主人' : String(m.from ?? '').replace(/~/g, '/'))
+const fromText = m => cleanLabel(m.from_display_label) || m.from_name || (m.from === '~owner' ? '主人' : String(m.from ?? '').replace(/~/g, '/'))
 export function formatMessage(m) {
   const at = m.at ? new Date(m.at).toLocaleString('zh-TW', { hour12: false, timeZone: 'Asia/Taipei' }) : ''
   const body = bodyWithNotes(String(m.body ?? '').replace(/\r\n/g, '\n'), m.attachments).split('\n').join('\n    ')
@@ -104,7 +105,7 @@ export async function main(argv, out = line => process.stdout.write(line + '\n')
   const msgs = (res?.messages ?? []).filter(m => m.seq > since).sort((x, y) => x.seq - y.seq)
   if (!a.json) out(`[群組 ${room.name}]（${room.id}）第 ${since + 1}～${msgs.at(-1)?.seq ?? since} 則，共 ${res?.last_seq ?? lastSeq} 則`)
   for (const m of msgs) {
-    out(a.json ? JSON.stringify({ seq: m.seq, from: m.from, from_name: m.from_name ?? null, trust: m.trust ?? null, at: m.at ?? null, mentions: m.mentions ?? [], body: bodyWithNotes(m.body, m.attachments), ...(normalizeAttachments(m.attachments).length ? { attachments: normalizeAttachments(m.attachments) } : {}) }) : formatMessage(m))
+    out(a.json ? JSON.stringify({ seq: m.seq, ...(cleanLabel(m.from_display_label) ? { from_label: cleanLabel(m.from_display_label) } : {}), from: m.from, from_name: m.from_name ?? null, trust: m.trust ?? null, at: m.at ?? null, mentions: m.mentions ?? [], body: bodyWithNotes(m.body, m.attachments), ...(normalizeAttachments(m.attachments).length ? { attachments: normalizeAttachments(m.attachments) } : {}) }) : formatMessage(m))
   }
   if (!a.json && !msgs.length) out('（沒有訊息）')
   const top = msgs.at(-1)?.seq

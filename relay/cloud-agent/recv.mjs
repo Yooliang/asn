@@ -38,7 +38,7 @@ const wakeOf = w => (w && Number.isInteger(w.rank) && Number.isInteger(w.total) 
 export const roomRecordOf = (room, member, agent, m) => ({
   id: `room:${room.id}:${m.seq}:${member}`, room: room.id, room_name: typeof room.name === 'string' ? room.name : null, seq: m.seq,
   trust: m.trust ?? null, relation: relationOf(m),
-  from_node: m.from ?? null, from_agent: m.from_name ?? null, from_label: typeof m.from_label === 'string' ? m.from_label : null,
+  from_node: m.from ?? null, from_agent: m.from_name ?? null, from_label: typeof m.from_display_label === 'string' && m.from_display_label ? m.from_display_label : typeof m.from_label === 'string' ? m.from_label : null,
   to_agent: agent || null, reply_to: null, created_at: m.at ?? null, expects_reply: null,
   body: m.body ?? '', received_at: new Date().toISOString(),
   ...(wakeOf(m.wake) ? { wake: wakeOf(m.wake) } : {}),

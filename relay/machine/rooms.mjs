@@ -27,9 +27,9 @@ export function cleanLabel(s) {
   const t = Array.from(String(s ?? '')).map(c => (/\p{Cc}/u.test(c) ? ' ' : c)).filter(c => !'「」『』[]【】'.includes(c)).join('')
   return Array.from(t.split(/\s+/).filter(Boolean).join('_')).slice(0, 40).join('')
 }
-// 寄件人標示：後台的 from_label 優先；舊後台退回節點/視窗名；帳號代號（/u:…、~u:…）一律不外露
+// 寄件人標示：後台的 from_display_label（自己帳號的夥伴帶設備名、別的帳號的夥伴帶主人名）優先，其次 from_label；舊後台退回節點/視窗名；帳號代號（/u:…、~u:…）一律不外露
 export function fromText(msg) {
-  const label = cleanLabel(typeof msg.from_label === 'string' ? msg.from_label : '')
+  const label = cleanLabel(typeof msg.from_display_label === 'string' ? msg.from_display_label : '') || cleanLabel(typeof msg.from_label === 'string' ? msg.from_label : '')
   if (label) return label
   const from = typeof msg.from === 'string' ? msg.from : ''
   if (/^[/~]*u:/.test(from)) return cleanLabel(typeof msg.from_name === 'string' ? msg.from_name : '') || '成員'
@@ -55,7 +55,7 @@ export const roomText = (room, msg, engineId = '') =>
 export const CONTEXT_COUNT = 5
 const ROOM_CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), 'room.mjs')
 export function contextText(room, prev) {
-  const line = m => `#${m.seq} ${cleanLabel(m.from_label) ? fromText(m) : (cleanLabel(m.from_name) || fromText(m))}：${escapeBody(String(m.body ?? '')).replace(/\s+/g, ' ').trim().slice(0, 300)}`
+  const line = m => `#${m.seq} ${cleanLabel(m.from_display_label) || cleanLabel(m.from_label) ? fromText(m) : (cleanLabel(m.from_name) || fromText(m))}：${escapeBody(String(m.body ?? '')).replace(/\s+/g, ' ').trim().slice(0, 300)}`
   const head = prev.length ? `---- 前面 ${prev.length} 則（舊→新）----\n${prev.map(line).join('\n')}\n` : ''
   return `${head}（要看更多：node "${ROOM_CLI}" --room-read ${room.id} --last 20）`
 }
