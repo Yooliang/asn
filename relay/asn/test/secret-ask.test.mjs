@@ -97,6 +97,14 @@ test('登入網址：只收官方登入網域的 https，畫面只顯示網域',
   ]) assert.equal(loginLinkHost(bad), null, String(bad).slice(0, 40))
 })
 
+test('登入網址：共用正反例（與資料庫、Edge Function、Rust 讀同一份）', () => {
+  const cases = JSON.parse(fs.readFileSync(new URL('../../../supabase/functions/_shared/login_link_cases.json', import.meta.url), 'utf8'))
+  const expand = s => s.replace('<A*2100>', 'a'.repeat(2100))
+  assert.ok(cases.good.length >= 5 && cases.bad.length >= 20, '測資不能被清空')
+  for (const g of cases.good) assert.notEqual(loginLinkHost(expand(g)), null, g)
+  for (const b of cases.bad) assert.equal(loginLinkHost(expand(b)), null, b.slice(0, 40))
+})
+
 test('清單：有附官方登入網址的留下網址與網域；附了不官方的網址，整筆不顯示；沒附的 link 是空字串', () => {
   const base = { node_name: '新電腦', program: 'Claude Code 登入', purpose: '登入', fingerprint: 'ab12-cd34', seconds_left: 50 }
   const l = normalizeList({ requests: [

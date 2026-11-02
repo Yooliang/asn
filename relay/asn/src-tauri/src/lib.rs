@@ -417,6 +417,44 @@ fn acct_remote_allow_set(app: State<'_, App>, on: bool) -> Result<(), String> {
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
+fn agent_setup_remote_allow_get(app: State<'_, App>) -> bool {
+    agent_setup::switch::remote_allowed(&app.data_dir)
+}
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+fn agent_setup_remote_allow_set(app: State<'_, App>, on: bool) -> Result<(), String> {
+    agent_setup::switch::set_remote_allowed(&app.data_dir, on)
+}
+/// 本人在這台電腦上按「安裝並登入 Claude Code」。本人簽章不在這裡取好帶著走：安裝要好幾分鐘，權杖可能中途過期，
+/// 所以建一個「取權杖的函式」交給流程，登入網址送出前才取（來源仍只有視窗程式的記憶體）。
+/// 沒登入帳號就不開始（登入網址要靠本人簽章才送得到手機）；已經有一個在跑，直接回錯；
+/// 進度與結果用事件 `agent-setup` 送給畫面，立刻回來。
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+async fn agent_setup_start(app: State<'_, App>, auth: State<'_, auth::AuthState>, handle: AppHandle) -> Result<(), String> {
+    let relay = relay_of(&app)?;
+    account::signing_token(&auth).await.filter(|t| !t.is_empty()).ok_or("請先登入你的帳號，才能把登入網址送到手機")?;
+    let h = handle.clone();
+    // 這個函式在安裝並登入的執行緒裡被呼叫（不是非同步工作執行緒），用 block_on 等權杖是安全的
+    let token: agent_setup::setup::TokenFn = Arc::new(move || rt::block_on(async { account::signing_token(&h.state::<auth::AuthState>()).await }).filter(|t| !t.is_empty()));
+    let (h1, h2) = (handle.clone(), handle);
+    agent_setup::setup::start_claude(
+        relay,
+        token,
+        move |e| {
+            let _ = h1.emit("agent-setup", e.to_json());
+        },
+        move |r| {
+            let _ = h2.emit("agent-setup", r.to_json());
+        },
+    )
+}
+
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
 async fn partner_launch_local(app: State<'_, App>, req: launch::LocalLaunchReq) -> Result<Value, String> {
     launch::partner_launch_local(app.node.clone(), app.work_dir.clone(), app.data_dir.clone(), req).await
 }
@@ -1395,7 +1433,7 @@ pub fn run() {
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_mod::claude_mod_auto_get, claude_mod::claude_mod_auto_set, claude_quota::claude_quota_all, statusline_hook::claude_quota_hook_status, statusline_hook::claude_quota_hook_connect, statusline_hook::claude_quota_hook_disconnect,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,
-            acct_remote_report, acct_remote_list, acct_roster, acct_remote_request, acct_remote_status, acct_remote_pending, acct_remote_apply, acct_remote_decline, acct_remote_allow_get, acct_remote_allow_set,
+            acct_remote_report, acct_remote_list, acct_roster, acct_remote_request, acct_remote_status, acct_remote_pending, acct_remote_apply, acct_remote_decline, acct_remote_allow_get, acct_remote_allow_set, agent_setup_remote_allow_get, agent_setup_remote_allow_set, agent_setup_start,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
             wins::open_chat, wins::open_panel, wins::close_panels, wins::chat_visible, wins::close_chats, wins::open_windows, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,

@@ -1,0 +1,39 @@
+{
+  "說明": "登入網址規則的共用正反例。五處實作（資料庫約束與函式、Edge Function、Rust、手機畫面）的測試都讀這一份；改規則或新增網域時，這裡加案例，五處一起過。字串裡的 <A*2100> 代表連續 2100 個 a。",
+  "good": [
+    "https://claude.ai/oauth/authorize?client_id=C&state=S&code_challenge=H&redirect_uri=R",
+    "https://claude.ai",
+    "https://www.claude.ai/a",
+    "https://platform.claude.com/x?y=1#z",
+    "https://console.anthropic.com/oauth",
+    "https://claude.ai:443/x",
+    "https://a-b.c.claude.ai/x"
+  ],
+  "bad": [
+    "",
+    "https://",
+    "http://claude.ai/x",
+    "https://claude.ai.evil.com/x",
+    "https://evilclaude.ai/x",
+    "https://claude.ai@evil.com/x",
+    "https://evil.com/claude.ai",
+    "https://evil.com?x=claude.ai",
+    "https://claude.ai:8443/x",
+    "https://claude.ai:/x",
+    "https://claude.ai/x y",
+    "https://claude.ai/x\ty",
+    "https://claude.ai/x\\y",
+    "https://claude.ai/\u0000",
+    "https://CLAUDE.AI/x",
+    "https://claude。ai/x",
+    "https://claude.ai./x",
+    "https://.claude.ai/x",
+    "https://a..claude.ai/x",
+    "https://claude.ai/é",
+    "https://claude_ai/x",
+    "javascript:alert(1)",
+    "claude.ai",
+    "ftp://claude.ai/x",
+    "https://claude.ai/<A*2100>"
+  ]
+}

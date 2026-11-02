@@ -190,3 +190,12 @@ Deno.test("資料庫出錯時，log 與回應都不含登入網址", async () =>
     console.error = orig;
   }
 });
+
+// 五處共用的正反例（資料庫、Edge Function、Rust、手機畫面都讀同一份）
+Deno.test("登入網址格式：共用正反例", async () => {
+  const cases = JSON.parse(await Deno.readTextFile(new URL("./login_link_cases.json", import.meta.url)));
+  const expand = (s: string) => s.replace("<A*2100>", "a".repeat(2100));
+  assert(cases.good.length >= 5 && cases.bad.length >= 20, "測資不能被清空");
+  for (const g of cases.good) assert(!("error" in parseSecretRequest({ ...REQ, link: expand(g) })), g);
+  for (const b of cases.bad) assert("error" in parseSecretRequest({ ...REQ, link: expand(b) }), `應該擋下：${b.slice(0, 40)}`);
+});
