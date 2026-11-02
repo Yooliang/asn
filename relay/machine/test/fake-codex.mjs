@@ -17,7 +17,35 @@ const CALLS = process.env.FAKE_CODEX_CALLS
 const HOME = process.env.CODEX_HOME
 const record = o => { if (CALLS) fs.appendFileSync(CALLS, JSON.stringify(o) + '\n') }
 const load = () => JSON.parse(fs.readFileSync(STATE, 'utf8'))
-const save = st => fs.writeFileSync(STATE, JSON.stringify(st))
+const nap = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+// 整份寫到暫存檔再換名，別的行程不會讀到寫到一半的內容（Windows 上對方正開著檔時換名會暫時失敗，稍等再試）
+const save = st => {
+  const tmp = `${STATE}.${process.pid}.tmp`
+  fs.writeFileSync(tmp, JSON.stringify(st))
+  for (let i = 0; ; i++) {
+    try { return fs.renameSync(tmp, STATE) } catch (e) {
+      if (i >= 100 || !['EPERM', 'EBUSY', 'EACCES'].includes(e.code)) throw e
+      nap(10)
+    }
+  }
+}
+// queue 和各 app-server 是不同行程，都會「讀、改、寫」狀態檔；不排隊的話後寫的會蓋掉先寫的（少一個 turn）。
+// 鎖是資料夾：建得起來才算拿到。持有者被殺掉時鎖會留著，等超過 3 秒就接手
+const LOCK = `${STATE}.lock`
+let held = false
+const release = () => { if (held) { held = false; try { fs.rmdirSync(LOCK) } catch {} } }
+process.on('exit', release)
+function locked(fn) {
+  let t0 = Date.now()
+  for (;;) {
+    try { fs.mkdirSync(LOCK); held = true; break } catch (e) {
+      if (!['EEXIST', 'EPERM', 'EACCES'].includes(e.code)) throw e   // Windows：別人正在刪這個資料夾時會回 EPERM
+      if (Date.now() - t0 > 3000) { try { fs.rmdirSync(LOCK) } catch {} t0 = Date.now() }
+      nap(5)
+    }
+  }
+  try { return fn() } finally { release() }
+}
 const uuid = n => `00000000-0000-7000-8000-${n.toString(16).padStart(12, '0')}`
 
 // 到時間的進行中 turn 算完成（lazy：誰讀到誰結算）
@@ -46,6 +74,7 @@ if (argv[0] === '--version') {
 } else if (argv[0] === 'queue') {
   record({ cmd: 'queue', argv })
   if (process.env.FAKE_CODEX_QUEUE_FAIL) { console.error(`Error: ${process.env.FAKE_CODEX_QUEUE_FAIL}`); process.exit(1) }
+  locked(() => {
   const st = load()
   const key = flag('--thread')
   const t = st.threads.find(x => x.id === key || x.name === key)
@@ -64,6 +93,7 @@ if (argv[0] === '--version') {
   })
   save(st)
   console.log(`Queued message ${uuid(n)} for thread ${t.id}.`)
+  })
 } else if (argv[0] === 'app-server') {
   const made = []   // 這個行程替 thread/start 建的鎖檔，結束時刪掉（真 codex 乾淨結束才釋放 thread-writer-lock）
   const cleanup = () => { for (const f of made) try { fs.unlinkSync(f) } catch {} }
@@ -76,6 +106,7 @@ if (argv[0] === '--version') {
     let m; try { m = JSON.parse(line) } catch { return }
     if (m.id == null) return
     record({ cmd: 'rpc', method: m.method, params: m.params })
+    locked(() => {
     const st = finalize(load())
     const find = id => st.threads.find(t => t.id === id)
     switch (m.method) {
@@ -108,6 +139,7 @@ if (argv[0] === '--version') {
       }
       default: return error(m.id, `method not found: ${m.method}`)
     }
+    })
   })
 } else {
   console.error(`fake codex: unsupported ${argv.join(' ')}`)
