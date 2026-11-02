@@ -5,6 +5,8 @@
 //! （代表它真的在工作）就解除、依序重送其餘；又撞到額度就繼續扣住（暫停時間只會延長，不會先清掉，也不重複通知）。
 //! 這樣主人提早換帳號、或 rate_limit_event 的 rejected 其實請求照常進行時，不必等到重置時間。
 //! 安全底線：就算被假訊息騙進來，最壞只是延後一小時再試，絕不丟信、絕不 ack。
+//! 不含自動回信模式（cfg.respond）：那個模式的 worker 自己回答，信交出去就算已轉交（立刻 ack），沒有「轉交中」可以扣，
+//! 扣住與試送都沒有意義，所以額度事件在該模式一律略過，照原本的等回覆逾時流程。
 use super::*;
 use crate::bridge::mail::{quota_late_line, taipei_hm};
 use crate::bridge::rooms::Wake;
@@ -112,6 +114,7 @@ impl Core {
                 self.pending[i].state = State::Held;
                 self.pending[i].t0 = it.received_at;
                 newly.push(it.mail.clone());
+                self.held_first.entry(id.clone()).or_insert(it.received_at);
                 self.held_items.insert(id.clone(), it);
                 self.log.line(&format!("mail id={id} held for quota (not acked)"));
             }
@@ -160,7 +163,9 @@ impl Core {
             self.quota_cap_hit(&m.id, QUOTA_MAIL_MAX).await;
             return false;
         }
-        let received = self.late_from.take().unwrap_or(self.now);
+        // 第一次收到的時間：重送中用 late_from；信被重新拉回再扣住時用 held_first（延遲抬頭才不會變成最後一次拉到的時間）
+        let received = self.late_from.take().or_else(|| self.held_first.get(&m.id).copied()).unwrap_or(self.now);
+        self.held_first.insert(m.id.clone(), received);
         p.state = State::Held;
         p.t0 = received;
         p.t = received;
@@ -280,23 +285,88 @@ impl Core {
         };
         self.next_probe_at = now + QUOTA_RETRY_MS;
         self.probe_after_reset = now >= self.quota_until; // 暫停時間已過才試送：第一次沒回應就解除
-        self.quota_until = self.quota_until.max(now + QUOTA_RETRY_MS); // 先延長，試送失敗時暫停時間不會中斷
+        self.probe_prev_until = self.quota_until;
+        self.quota_until = self.quota_until.max(now + QUOTA_RETRY_MS); // 先延長，試送期間暫停時間不會中斷
         self.probing = true;
-        if let (true, Some((_, _, id))) = (pick_mail, mail) {
-            if let Some(it) = self.held_items.remove(&id) {
-                self.log.line(&format!("quota probe: sending oldest held mail id={id}"));
-                self.pending.retain(|p| p.id != id);
-                self.late_from = Some(it.received_at);
-                self.handle_mail_raw(it.mail, it.raw).await;
-                self.late_from = None;
-                self.probe_id = Some(id);
+        let mut expired: Vec<Held> = vec![];
+        let outcome = if let (true, Some((_, _, id))) = (pick_mail, mail) {
+            match self.held_items.remove(&id) {
+                Some(it) => {
+                    self.log.line(&format!("quota probe: sending oldest held mail id={id}"));
+                    self.pending.retain(|p| p.id != id);
+                    self.late_from = Some(it.received_at);
+                    let left = self.handle_mail_raw(it.mail, it.raw).await;
+                    self.late_from = None;
+                    if self.pending.iter().any(|p| p.id == id && p.state == State::Forwarding) {
+                        self.probe_id = Some(id);
+                        RelOutcome::Delivered
+                    } else if left.is_some() {
+                        RelOutcome::Failed // 沒交成（worker 掛了）：信留在信箱，算一次沒回應
+                    } else {
+                        RelOutcome::Gone // 正常處理掉了（例如收件視窗已不在，回了說明並 ack）
+                    }
+                }
+                None => RelOutcome::Gone,
             }
         } else if let Some(h) = room {
             self.log.line(&format!("quota probe: sending oldest held room message room={} #{}", h.room_id, h.seq));
-            self.probe_id = Some(rooms::room_uuid(&h.room_id, h.seq, &h.member));
-            self.release_held_item(&h, now, &mut vec![]).await;
-        }
+            let r = self.release_held_item(&h, now, &mut expired).await;
+            if matches!(r, RelOutcome::Delivered) {
+                self.probe_id = Some(rooms::room_uuid(&h.room_id, h.seq, &h.member));
+            }
+            r
+        } else {
+            RelOutcome::Gone
+        };
         self.probing = false;
+        if !expired.is_empty() {
+            self.quota_room_summary(&expired);
+        }
+        match outcome {
+            RelOutcome::Delivered => {}
+            RelOutcome::Failed => {
+                self.quota_probe_miss("probe could not be handed to the worker");
+            }
+            RelOutcome::Gone => {
+                // 這一則本身不需要試送了：不算沒回應，還原暫停時間，下一個 tick 換下一則
+                self.quota_until = self.probe_prev_until;
+                self.next_probe_at = now;
+            }
+        }
+        self.persist();
+    }
+
+    /// 試送沒有得到 worker 的回報（逾時，或根本交不出去）算一次沒回應。沒回應不是額度用完的證據（worker 可能卡死或壞了），
+    /// 所以不延長暫停：已過暫停時間才試送的，第一次就解除；還沒到的，連續第二次才解除。回 true＝已解除（信走一般流程）
+    pub(super) fn quota_probe_miss(&mut self, why: &str) -> bool {
+        self.probe_misses += 1;
+        if self.probe_after_reset || self.probe_misses >= 2 {
+            self.log.line(&format!("quota probe miss {} ({why}): hold released, normal flow", self.probe_misses));
+            self.quota_release(why);
+            self.quota_ep = None;
+            true
+        } else {
+            self.log.line(&format!("quota probe miss {} ({why}): back to held, retry in an hour", self.probe_misses));
+            self.quota_until = self.probe_prev_until; // 沒回應不延長暫停
+            self.probe_id = None;
+            false
+        }
+    }
+
+    /// Sent 比額度事件晚到、而那封是群組訊息（已排進 HeldStore）：其實已經轉交成功，從清單拿掉並開始等回覆，恢復後不再轉交一次
+    pub(super) fn quota_sent_after_hold_room(&mut self, id: &str) {
+        let Some(h) = self.held.items().iter().find(|h| h.held_at > 0 && rooms::room_uuid(&h.room_id, h.seq, &h.member) == id).cloned() else { return };
+        let window = rooms::member_window(&h.member);
+        let target = if window.is_empty() { self.unaddressed_window().unwrap_or_default() } else { self.canonical_target(&format!("room:{}", h.seq), &window) };
+        if let Err(e) = self.held.remove(&h.room_id, h.seq, &h.member) {
+            self.log.line(&format!("rooms held save failed: {e}"));
+            return;
+        }
+        self.log.line(&format!("sent room={} #{} arrived after the quota event: already forwarded, not resending", h.room_id, h.seq));
+        let mut p = Pending::new(id, "", "", &target, self.now, false);
+        p.room = Some(RoomRef { id: h.room_id.clone(), seq: h.seq, window });
+        p.state = State::Waiting;
+        self.pending.push(p);
         self.persist();
     }
 }

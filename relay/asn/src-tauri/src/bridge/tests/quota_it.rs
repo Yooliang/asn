@@ -2,6 +2,7 @@
 //! 時間都從 TQ 起算（避開別的測試對 login_watch 逾時記錄的寫入），不用真的等待。
 use super::*;
 use super::rooms_launch::{room, rmsg, set_rooms};
+use std::sync::atomic::Ordering;
 use crate::bridge::mail::{quota_late_line, taipei_hm};
 
 const TQ: u64 = T0 + 400 * 86_400_000;
@@ -579,4 +580,167 @@ async fn 額度重置時間存檔_重啟後還沒到就繼續扣住_只試送一
         let c3 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), TQ + 5000);
         assert_eq!(c3.inbox_hold_until(), None, "{bad}");
     }
+}
+
+#[tokio::test]
+async fn 試送交不出去也算沒回應_連續兩次解除_信重新拉回後延遲抬頭仍是第一次收到的時間() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", TQ).await;
+    h.core.on_worker_line(quota_line(RESETS_S), TQ + 1000).await;
+    h.sink.down.store(true, Ordering::SeqCst); // worker 一直壞著：交不出去
+    let p1 = TQ + 1000 + HOUR;
+    h.core.tick(p1).await;
+    assert_eq!(h.core.inbox_hold_until(), Some(UNTIL), "第一次交不出去：還沒到暫停時間，暫停不延長也還沒解除");
+    assert!(h.fr.acked().is_empty());
+    h.core.pull("test", p1 + 1000).await; // 信沒 ack，留在信箱，重新拉回、再扣住
+    assert_eq!(held_ids(&h), vec![uid(1)]);
+    // 第二次試送仍交不出去：解除，名單報空值，不是無限期扣著
+    let p2 = p1 + HOUR;
+    h.core.tick(p2).await;
+    assert_eq!(h.core.inbox_hold_until(), None, "連續兩次交不出去就解除");
+    h.core.tick(p2 + 10_000).await;
+    h.core.tick(p2 + 20_000).await;
+    assert_eq!(*hold_posts(&h).last().unwrap(), Value::Null);
+    assert!(h.fr.acked().is_empty(), "從頭到尾沒有 ack");
+    // 解除後 worker 好了：信走一般流程轉交，延遲抬頭寫第一次收到的時間（不是最後一次拉到的時間）
+    h.sink.down.store(false, Ordering::SeqCst);
+    h.core.pull("test", p2 + 30_000).await;
+    let said = h.said();
+    assert!(said.last().unwrap().contains(&quota_late_line(TQ)), "{}", said.last().unwrap());
+}
+
+#[tokio::test]
+async fn 過了暫停時間才試送_交不出去_第一次就解除() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", TQ).await;
+    h.core.on_worker_line(quota_line(TQ / 1000 - 10), TQ + 1000).await; // 時間不明：暫停一小時
+    h.sink.down.store(true, Ordering::SeqCst);
+    h.core.tick(TQ + 1000 + HOUR).await;
+    assert_eq!(h.core.inbox_hold_until(), None);
+    assert!(h.fr.acked().is_empty());
+}
+
+#[tokio::test]
+async fn 群組試送交不出去也算沒回應_最後解除() {
+    let mut h = harness(&[("T-視窗甲", "idle")]).await;
+    h.core.on_worker_line(quota_line(RESETS_S), TQ).await;
+    let mine = json!([{"member": "T~T-視窗甲", "read_seq": 1}]);
+    set_rooms(&h, vec![room(vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}}))], mine)]);
+    h.core.pull_rooms(TQ + 1000).await;
+    set_rooms(&h, vec![]); // 群組讀不到了：試送時 room_read 失敗
+    let p1 = TQ + HOUR;
+    h.core.tick(p1).await;
+    assert!(h.core.inbox_hold_until().is_some());
+    h.core.tick(p1 + HOUR).await;
+    assert_eq!(h.core.inbox_hold_until(), None, "連續兩次試送都失敗：解除");
+}
+
+/// 一則額度扣住的群組訊息（#2）；Sent 事件讓扣住解除。回傳解除的時間
+async fn room_held_then_released(h: &mut H) -> u64 {
+    h.fr.put(mail(1, json!({"to_agent": "T-乙"})));
+    h.core.pull("test", TQ).await;
+    h.core.on_worker_line(quota_line(RESETS_S), TQ + 1000).await;
+    let mine = json!([{"member": "T~T-視窗甲", "read_seq": 1}]);
+    set_rooms(h, vec![room(vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}}))], mine)]);
+    h.core.pull_rooms(TQ + 2000).await;
+    assert!(h.core.log.has("room=R1 #2 member=T~T-視窗甲 held for quota"));
+    h.core.on_worker_line(res(&format!("SENT {}", uid(1))), TQ + 3000).await; // worker 回報 SENT＝恢復
+    assert_eq!(h.core.inbox_hold_until(), None);
+    TQ + 3000
+}
+
+#[tokio::test]
+async fn 恢復後群組訊息轉交失敗_照三十秒退避重試_不是每個_tick_都試() {
+    let mut h = harness(&[("T-乙", "idle"), ("T-視窗甲", "idle")]).await;
+    let t = room_held_then_released(&mut h).await;
+    h.sink.down.store(true, Ordering::SeqCst);
+    let n = |h: &H| h.core.log.count("cannot hand room=R1 #2");
+    h.core.tick(t + 1000).await;
+    assert_eq!(n(&h), 1);
+    h.core.tick(t + 2000).await;
+    h.core.tick(t + 10_000).await;
+    h.core.tick(t + 20_000).await;
+    assert_eq!(n(&h), 1, "三十秒內不重試");
+    h.core.tick(t + 32_000).await;
+    assert_eq!(n(&h), 2, "三十秒後才試第二次");
+    // 好了就轉交成功，訊息還在
+    h.sink.down.store(false, Ordering::SeqCst);
+    let before = h.said().len();
+    h.core.tick(t + 70_000).await;
+    let said = h.said();
+    assert_eq!(said.len(), before + 1);
+    assert!(said.last().unwrap().contains("#2"));
+}
+
+#[tokio::test]
+async fn 恢復後群組訊息一直轉交失敗_真的放棄時改發摘要_不無聲丟掉() {
+    let mut h = harness(&[("T-乙", "idle"), ("T-視窗甲", "idle")]).await;
+    let t = room_held_then_released(&mut h).await;
+    set_rooms(&h, vec![]); // 群組讀不到：每次都失敗
+    for k in 1..=130u64 {
+        h.core.tick(t + k * 31_000).await;
+    }
+    assert!(h.core.log.has("gave up after repeated failures"));
+    let said = h.said();
+    assert!(said.iter().any(|t| t.contains("額度用完期間群組 專案群 有 1 則沒有轉交，範圍 #2～#2，要看請讀群組")), "{said:?}");
+}
+
+#[tokio::test]
+async fn sent_比額度事件晚到_不再重送_直接當作已轉交_進入等回覆() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", TQ).await;
+    h.core.on_worker_line(quota_line(RESETS_S), TQ + 1000).await;
+    assert_eq!(held_ids(&h), vec![uid(1)]);
+    h.core.on_worker_line(res(&format!("SENT {}", uid(1))), TQ + 1500).await; // Sent 晚到
+    assert!(held_ids(&h).is_empty());
+    assert_eq!(h.core.pending[0].state, State::Waiting, "進入等回覆");
+    assert_eq!(h.fr.acked(), vec![uid(1)]);
+    h.core.tick(TQ + 10_000).await;
+    h.core.tick(TQ + HOUR).await;
+    assert_eq!(h.said().len(), 1, "只轉交一次");
+}
+
+#[tokio::test]
+async fn sent_比額度事件晚到_群組訊息也不再轉交一次() {
+    let mut h = harness(&[("T-視窗甲", "idle")]).await;
+    let mine = json!([{"member": "T~T-視窗甲", "read_seq": 1}]);
+    set_rooms(&h, vec![room(vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}}))], mine)]);
+    h.core.pull_rooms(TQ).await;
+    h.core.on_worker_line(quota_line(RESETS_S), TQ + 1000).await;
+    assert!(h.core.pending.is_empty());
+    let id = crate::bridge::rooms::room_uuid("R1", 2, "T~T-視窗甲");
+    h.core.on_worker_line(res(&format!("SENT {id}")), TQ + 1500).await;
+    assert_eq!(h.core.pending.len(), 1);
+    assert_eq!(h.core.pending[0].state, State::Waiting);
+    h.core.tick(TQ + 10_000).await;
+    h.core.tick(TQ + HOUR).await;
+    assert_eq!(h.said().len(), 1, "只轉交一次");
+}
+
+#[tokio::test]
+async fn 自動回信模式不參與扣住_額度事件略過_照原流程() {
+    let fr = FakeRelay::start();
+    let work = tempfile::tempdir().unwrap();
+    let sessions = tempfile::tempdir().unwrap();
+    let sink = Arc::new(FakeSink::default());
+    let mut core = new_core(&fr, work.path(), sessions.path(), sink.clone(), TQ);
+    core.cfg.respond = Some("T-linux".into());
+    core.cfg.default_agent = String::new();
+    core.refresh_roster(TQ).await;
+    fr.put(mail(1, json!({"to_agent": "T-linux"})));
+    core.pull("test", TQ).await;
+    assert_eq!(sink.said.lock().unwrap().len(), 1);
+    core.on_worker_line(quota_line(RESETS_S), TQ + 1000).await;
+    assert_eq!(core.inbox_hold_until(), None, "不參與扣住");
+    assert!(core.log.has("respond mode does not hold mail"));
+    // 額度事件之後到的信：照原流程交給 worker，不扣
+    fr.put(mail(2, json!({"to_agent": "T-linux"})));
+    core.pull("test", TQ + 2000).await;
+    assert_eq!(sink.said.lock().unwrap().len(), 2);
+    assert!(core.pending.iter().all(|p| p.state != State::Held));
+    core.tick(TQ + HOUR).await;
+    assert_eq!(core.inbox_hold_until(), None);
 }
