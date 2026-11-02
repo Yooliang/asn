@@ -461,18 +461,15 @@ pub struct PaneInfo {
 /// 判斷窗格結束用：往回讀畫面底部幾行
 pub(crate) const PANE_PROBE_LINES: i32 = 20;
 
-/// 窗格畫面尾端有沒有 WezTerm 在「程式結束、窗格留著」（exit_behavior = Hold）時印的訊息。
-/// 沒有 → None（還在跑，或讀不到）；有 → Some(結束碼)，結束碼印不出來（被訊號結束等）是 Some(None)。
-/// WezTerm 印的是以 ⚠ 開頭的一行：非 0 結束是「Process … didn't exit cleanly」，接著一行「Exited with code N」；
-/// 正常結束是「Process … completed.」（視為結束碼 0）。只認以 ⚠ 開頭的行，夥伴自己畫面上寫到這些字不算。
-pub(crate) fn pane_exit_from_screen(text: &str) -> Option<Option<i32>> {
-    let lines: Vec<&str> = text.lines().map(str::trim).collect();
-    let i = lines.iter().rposition(|l| l.starts_with('⚠') && l.contains("Process") && (l.contains("didn't exit cleanly") || l.contains("completed")))?;
-    if !lines[i].contains("didn't exit cleanly") {
-        return Some(Some(0));
+/// 窗格畫面尾端有沒有 ASN 自己留的結束標記（見 `local::exit_marker`、`local::mux_wrapped_argv`）。
+/// 一定要是整行、而且 nonce 對得上這個窗格的才算（夥伴自己印出格式一樣的行，因為不知道 nonce，騙不了）。
+/// 沒有 → None（還在跑，或讀不到）；有 → Some(結束碼)。同一個 nonce 出現多次取最後一個。
+pub(crate) fn pane_exit_from_screen(text: &str, nonce: &str) -> Option<i32> {
+    if nonce.is_empty() {
+        return None;
     }
-    let code = lines[i + 1..].iter().find_map(|l| l.split_once("Exited with code ").and_then(|(_, n)| n.trim().trim_end_matches('.').parse::<i32>().ok()));
-    Some(code)
+    let head = format!("[asn-exit {nonce} ");
+    text.lines().rev().map(str::trim).find_map(|l| l.strip_prefix(head.as_str())?.strip_suffix(']')?.parse::<i32>().ok())
 }
 
 /// workspace 名稱：非空，且沒有空白與控制字元（要能安全放進一個參數）。
@@ -795,10 +792,12 @@ impl<'a> WezTerm<'a> {
         self.cli(sock, &args)
     }
 
-    /// 這個窗格的程式是不是已經結束（窗格因 Hold 還留著）。回結束碼（見 [`pane_exit_from_screen`]）；還在跑或讀不到畫面＝None（當作還活著）
-    pub fn pane_exit(&self, sock: &Path, pane_id: u64) -> Option<Option<i32>> {
+    /// 這個窗格的程式是不是已經結束（窗格因 Hold 還留著）。回結束碼（見 [`pane_exit_from_screen`]）；
+    /// 還在跑、讀不到畫面、或沒有 nonce（0.2.0 先前開的窗格，判斷不出來）＝None（當作還活著；沒有 nonce 就不讀畫面）
+    pub fn pane_exit(&self, sock: &Path, pane_id: u64, nonce: Option<&str>) -> Option<i32> {
+        let nonce = nonce?;
         let text = self.get_text(sock, pane_id, Some(-PANE_PROBE_LINES)).ok()?;
-        pane_exit_from_screen(&text)
+        pane_exit_from_screen(&text, nonce)
     }
 
     /// 送一行文字（不含 Enter）：先壓成單行，用 --no-paste
@@ -877,28 +876,20 @@ impl<'a> WezTerm<'a> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn 窗格結束訊息_解出結束碼() {
+    fn 窗格結束標記_nonce_對得上才算_取結束碼() {
         use super::pane_exit_from_screen as f;
-        let bad = "$ claude
-
-⚠️  Process \"claude\" didn't exit cleanly
-Exited with code 1.
-";
-        assert_eq!(f(bad), Some(Some(1)));
-        assert_eq!(f("
-⚠️  Process \"claude\" didn't exit cleanly
-Terminated by signal
-"), Some(None), "印不出結束碼");
-        assert_eq!(f("⚠️  Process \"cmd\" completed.
-"), Some(Some(0)));
-        // 夥伴自己的畫面寫到這些字（不是以 ⚠ 開頭的行）不算結束
-        assert_eq!(f("the Process completed.
-Exited with code 1
-"), None);
-        assert_eq!(f("Welcome to Claude Code
-> 
-"), None);
-        assert_eq!(f(""), None);
+        let screen = "claude 的畫面\n...\n\n[asn-exit abc123 3]\n";
+        assert_eq!(f(screen, "abc123"), Some(3));
+        assert_eq!(f("[asn-exit abc123 0]\n", "abc123"), Some(0));
+        assert_eq!(f("[asn-exit abc123 -1]\n", "abc123"), Some(-1));
+        // 夥伴自己印出格式對、nonce 不對的行：不算
+        assert_eq!(f(screen, "zzz"), None);
+        assert_eq!(f("echo [asn-exit abc123 3] 不是整行\n", "abc123"), None);
+        assert_eq!(f("[asn-exit abc123 x]\n", "abc123"), None, "結束碼不是數字");
+        assert_eq!(f("Welcome to Claude Code\n> \n", "abc123"), None);
+        assert_eq!(f(screen, ""), None, "沒有 nonce 就判斷不出來");
+        // 偽造的在前、真的在最後：取最後一行
+        assert_eq!(f("[asn-exit abc123 9]\nxx\n[asn-exit abc123 2]\n", "abc123"), Some(2));
     }
 
     use super::*;

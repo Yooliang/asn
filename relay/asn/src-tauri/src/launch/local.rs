@@ -352,6 +352,43 @@ fn encode_ps_command(script: &str) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
+/// mux 窗格裡的結束標記：夥伴程式結束後印這一行（`nonce` 是開窗時隨機產生、記在對照表那一列的）。
+/// WezTerm 的 Hold 不會把「程式結束」寫進 mux 的畫面緩衝（實測 get-text 只有程式自己的輸出），所以由 ASN 自己留標記。
+pub(crate) fn exit_marker(nonce: &str, code: i32) -> String {
+    format!("[asn-exit {nonce} {code}]")
+}
+
+/// 開在 mux 窗格裡的夥伴：外面包一層 PowerShell，跑完原指令後印 [`exit_marker`]。
+/// 全部走 -EncodedCommand（UTF-16LE Base64），中文路徑與引號不必跳脫；指令與參數原樣（PowerShell 單引號字面值）。
+/// 不用 -NoExit：程式結束、標記印完後承載就結束，窗格靠 exit_behavior=Hold 留著。
+pub(crate) fn mux_wrapped_argv(argv: &[String], nonce: &str) -> Vec<String> {
+    let mut call = String::new();
+    for (i, a) in argv.iter().enumerate() {
+        if i == 0 {
+            call.push_str("& ");
+        } else {
+            call.push(' ');
+        }
+        call.push_str(&ps_quote(a));
+    }
+    let script = format!(
+        "$code = 0\n\
+         try {{\n\
+         {call}\n\
+         $code = if ($null -eq $LASTEXITCODE) {{ 0 }} else {{ $LASTEXITCODE }}\n\
+         }} catch {{\n\
+         Write-Host ('[ASN] 無法啟動：' + $_.Exception.Message) -ForegroundColor Red\n\
+         $code = -1\n\
+         }}\n\
+         {reset}\n\
+         Write-Host ''\n\
+         Write-Host ('[asn-exit {nonce} ' + $code + ']')\n",
+        reset = TERMINAL_RESET_PS
+    );
+    let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+    vec![format!(r"{root}\System32\WindowsPowerShell\v1.0\powershell.exe"), "-NoLogo".into(), "-NoProfile".into(), "-ExecutionPolicy".into(), "Bypass".into(), "-EncodedCommand".into(), encode_ps_command(&script)]
+}
+
 /// 外層 PowerShell（承載視窗）的參數字串：-NoExit 讓視窗留著。
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(super) fn window_launcher_args(title: &str, command: &str, args: &[String]) -> String {
