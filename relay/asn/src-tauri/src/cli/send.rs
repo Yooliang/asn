@@ -16,7 +16,7 @@ use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 
 const MAX_BODY: usize = 20000;
-
+
 
 /// 群組發言達 AI 互相叫醒上限時要印的提示（room_post 的回應帶 wake_limited）。訊息已寫進群組，結束碼仍是 0
 pub(super) fn wake_note(r: &Value) -> Option<String> {
