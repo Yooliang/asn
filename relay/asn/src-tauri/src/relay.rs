@@ -267,8 +267,23 @@ pub fn clean_presence_psm(s: &str) -> String {
     s.chars().filter(|c| !c.is_control()).collect::<String>().trim().chars().take(PRESENCE_PSM_MAX).collect()
 }
 /// asn_presence 的請求內容：視窗名、版本、狀態、個人訊息（沒有就不送）。節點由後端依金鑰決定，這裡不送。
+/// 這台設備的平台（後台 relay.nodes.platform 只收這幾個值）：電腦版 windows／macos／linux，安卓版 android；認不出的不帶
+pub fn platform_name() -> Option<&'static str> {
+    match std::env::consts::OS {
+        "windows" => Some("windows"),
+        "macos" => Some("macos"),
+        "linux" => Some("linux"),
+        "android" => Some("android"),
+        "ios" => Some("ios"),
+        _ => None,
+    }
+}
+
 pub fn build_presence_body(window: &str, version: &str, status: &str, psm: &str) -> Value {
     let mut m = Map::new();
+    if let Some(p) = platform_name() {
+        m.insert("platform".into(), json!(p));
+    }
     m.insert("window_name".into(), json!(window));
     m.insert("version".into(), json!(version));
     m.insert("status".into(), json!(normalize_presence_status(status)));
@@ -1588,11 +1603,15 @@ b", "at": 5 }] }), json!({ "marks": [{ "at": 5 }] })] {
 
     #[test]
     fn 在線回報_內容欄位_狀態白名單_個人訊息清理() {
-        assert_eq!(build_presence_body("H-ASN", "0.1.13", "busy", ""), json!({ "window_name": "H-ASN", "version": "0.1.13", "status": "busy" }));
-        assert_eq!(
-            build_presence_body("H-ASN", "0.1.13", "away", "  聽歌\u{7}中  "),
-            json!({ "window_name": "H-ASN", "version": "0.1.13", "status": "away", "psm": "聽歌中" })
-        );
+        let mut busy = json!({ "window_name": "H-ASN", "version": "0.1.13", "status": "busy" });
+        let mut away = json!({ "window_name": "H-ASN", "version": "0.1.13", "status": "away", "psm": "聽歌中" });
+        // 這台設備的平台（#652）：認得出就帶，其他欄位不變
+        if let Some(p) = platform_name() {
+            busy["platform"] = json!(p);
+            away["platform"] = json!(p);
+        }
+        assert_eq!(build_presence_body("H-ASN", "0.1.13", "busy", ""), busy);
+        assert_eq!(build_presence_body("H-ASN", "0.1.13", "away", "  聽歌\u{7}中  "), away);
         // 不認得的狀態當線上；offline 照送（後端刪列）
         assert_eq!(normalize_presence_status("hacked"), "online");
         assert_eq!(normalize_presence_status("offline"), "offline");
@@ -1600,6 +1619,20 @@ b", "at": 5 }] }), json!({ "marks": [{ "at": 5 }] })] {
         assert_eq!(clean_presence_psm(&"字".repeat(100)).chars().count(), PRESENCE_PSM_MAX);
         // 請求內容裡沒有節點欄位（節點由後端依金鑰決定）
         assert!(build_presence_body("w", "1.2.3", "online", "x").get("node").is_none());
+    }
+
+    /// 後台 relay.nodes.platform 只收固定幾個值；這台跑的作業系統要對得上（安卓版 target_os = android → "android"）
+    #[test]
+    fn 在線回報帶平台_只用後台認得的值() {
+        let allowed = ["windows", "macos", "linux", "android", "ios"];
+        let p = platform_name();
+        assert!(p.map_or(true, |v| allowed.contains(&v)), "{p:?}");
+        #[cfg(windows)]
+        assert_eq!(p, Some("windows"));
+        #[cfg(target_os = "android")]
+        assert_eq!(p, Some("android"));
+        let body = build_presence_body("w", "1.2.3", "online", "");
+        assert_eq!(body.get("platform").and_then(Value::as_str), p);
     }
 
     /// 本機假後端：每個連線回一個固定狀態碼，並記下請求（只連 127.0.0.1）
@@ -1652,6 +1685,7 @@ b", "at": 5 }] }), json!({ "marks": [{ "at": 5 }] })] {
         let v = build_presence_body("H-ASN", "0.1.13", "online", &crate::nowplaying::compose_psm("", "夜曲 - 周杰倫"));
         let mut keys: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
         keys.sort();
+        keys.retain(|k| k != "platform"); // 平台是這台設備自己的作業系統（#652），不是播放資訊
         assert_eq!(keys, ["psm", "status", "version", "window_name"], "沒有多餘欄位（無專輯圖、應用程式、進度）");
     }
 

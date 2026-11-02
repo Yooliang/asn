@@ -8,12 +8,15 @@ export const PSM_MAX = 80;
 export const VERSION_RE = /^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}(-[0-9A-Za-z.]{1,16})?$/;
 export const STATUSES = ["online", "away", "busy", "offline"] as const;
 export type AsnStatus = (typeof STATUSES)[number];
+// 這台設備的平台（選填；#652）：電腦版帶 windows／macos／linux，安卓版帶 android。不認得的值當沒帶（不拒絕整筆回報，新版值舊後台也不壞）
+export const PLATFORMS = ["linux", "windows", "macos", "android", "ios"] as const;
 
 export interface AsnPresence {
   window_name: string;
   version: string;
   status: AsnStatus;
   psm: string | null;
+  platform: string | null;
 }
 
 export function parseAsnPresence(b: unknown): AsnPresence | null {
@@ -30,5 +33,6 @@ export function parseAsnPresence(b: unknown): AsnPresence | null {
     if (Array.from(t).length > PSM_MAX || /[\u0000-\u001f\u007f-\u009f]/.test(t)) return null;
     psm = t === "" ? null : t;
   }
-  return { window_name, version: o.version, status: o.status as AsnStatus, psm };
+  const platform = typeof o.platform === "string" && (PLATFORMS as readonly string[]).includes(o.platform) ? o.platform : null;
+  return { window_name, version: o.version, status: o.status as AsnStatus, psm, platform };
 }

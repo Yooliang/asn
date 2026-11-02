@@ -226,7 +226,7 @@ Deno.test("node_setup_request：登入憑證決定使用者、body 的 user 被�
 });
 
 Deno.test("node_setup_request：別人的設備 404、對方不在線 409、太頻繁 429、資料庫錯誤 500 且不洩漏內容", async () => {
-  for (const [code, status] of [["not_found", 404], ["asn_offline", 409], ["asn_outdated", 409], ["rate_limited", 429]] as const) {
+  for (const [code, status] of [["not_found", 404], ["asn_offline", 409], ["asn_outdated", 409], ["unsupported_platform", 409], ["rate_limited", 429]] as const) {
     const f = fake({}, () => ({ error: code }));
     const r = await handleAccountAction(f.deps, "node_setup_request", bearer, null, { node: "NEWPC" });
     assertEquals(r.status, status, code);

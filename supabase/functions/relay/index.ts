@@ -373,6 +373,11 @@ Deno.serve(async (req) => {
       if (u.error) console.error(u.error);
       else update_requested = u.data?.requested === true;
     }
+    // 這台設備的平台（選填；電腦版與安卓版帶）：只改自己節點的 platform，不碰機器橋回報的 launch_closed_reason。失敗只記 log，不影響在線回報
+    if (p.platform) {
+      const pl = await db.rpc("asn_relay_set_node_platform", { p_node: me.id, p_platform: p.platform });
+      if (pl.error) console.warn("set_node_platform", me.id, pl.error.message ?? pl.error);
+    }
     // 順便問「本人有沒有要這台安裝並登入 Claude Code」（手機觸發；失敗不影響在線回報）。回送出者的使用者代號，ASN 要比對自己登入的是不是同一個人
     let setup: { requested_by: string } | null = null;
     if (p.status !== "offline") {
