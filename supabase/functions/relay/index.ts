@@ -15,6 +15,7 @@ import { normalizeRosterAgents, rosterBellTopics } from "../_shared/roster.ts";
 import { parseWindowRename, renamesFromRoster } from "../_shared/window_rename.ts";
 import { sanitizeClaudeMod } from "../_shared/claude_mod.ts";
 import { sanitizeInboxHold, sanitizeInboxHoldExtra } from "../_shared/inbox_hold.ts";
+import { parseMisrouteNotice } from "../_shared/misroute_notice.ts";
 import { sanitizeNodePlatform } from "../_shared/node_platform.ts";
 import { applyLegacyEnv } from "../_shared/legacy_env.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
@@ -354,6 +355,18 @@ Deno.serve(async (req) => {
     if (data?.error === "not_found") return json(404, { error: "not_found" });
     if (data?.error) return json(400, { error: data.error });
     return json(200, { ok: true });
+  }
+  // 核對轉交對象：收發室把信轉交錯了視窗，後台寄固定內文的通知給這個節點的擁有者（節點一律是金鑰所屬的 me.id）。失敗只記 warn，不影響轉交
+  if (action === "misroute_notice" && req.method === "POST") {
+    const p = parseMisrouteNotice(await req.json().catch(() => null));
+    if (p === null) return json(400, { error: "bad_request" });
+    const { data, error } = await db.rpc("asn_relay_misroute_notice", { p_node: me.id, p_mail_id: p.mailId });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    if (data?.error === "forbidden") return json(403, { error: "forbidden" });
+    if (data?.error) return json(400, { error: data.error });
+    if (data?.notify === "failed" || data?.notify === "rate_limited") console.warn("misroute_notice notify", me.id, data.notify);
+    for (const t of new Set<string>((Array.isArray(data?.bell_topics) ? data.bell_topics : []).filter((t: unknown): t is string => typeof t === "string" && t.length > 0))) await ring(t);
+    return json(200, { ok: true, notify: data?.notify ?? "skipped" });
   }
   // ASN 回報在線狀態與版本（每 60 秒一次；關閉時 status=offline＝刪掉那一列）。節點一律是金鑰所屬的 me.id
   if (action === "asn_presence" && req.method === "POST") {

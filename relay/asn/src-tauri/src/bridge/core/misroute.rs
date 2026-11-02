@@ -16,6 +16,7 @@ impl Core {
             self.misroute_notified.clear();
         }
         if self.misroute_notified.insert(id.to_string()) {
+            self.misroute_notify_owner(id).await;
             self.misroute_notify_sender(id, expected).await;
             self.misroute_correct_receiver(id, expected, actual);
         }
@@ -50,15 +51,28 @@ impl Core {
         }
     }
 
-    /// 寄件人收到固定文字的通知（不帶信件內文）。群組訊息、收發室寄來的不通知。
-    /// 通知「本人」另有後台通知類型要加，還沒做（要先跟審查者談），這裡只記 log
+    /// 通知這台電腦的主人：請後台寄一封固定內文的通知給節點擁有者（內文只有設備名與信件編號，由後台決定）。
+    /// 失敗（後台還沒有這個動作、連不上）只記 log，不影響重送、Fail 與寄件人通知
+    async fn misroute_notify_owner(&mut self, id: &str) {
+        // 群組訊息沒有信件編號
+        let is_mail = match self.idx(id) {
+            Some(i) => self.pending[i].room.is_none(),
+            None => self.fwd_origin.contains_key(id),
+        };
+        let body = json!({ "mail_id": if is_mail { json!(id) } else { Value::Null } });
+        match self.relay.api("misroute_notice", Some(body)).await {
+            Ok(_) => self.log.line(&format!("misrouted id={id}: owner notice requested")),
+            Err(e) => self.log.line(&format!("misrouted id={id}: owner notice failed: {e}")),
+        }
+    }
+
+    /// 寄件人收到固定文字的通知（不帶信件內文）。群組訊息、收發室寄來的不通知
     async fn misroute_notify_sender(&mut self, id: &str, expected: &str) {
         let origin = match self.idx(id) {
             Some(i) if self.pending[i].room.is_some() => None,
             Some(i) => Some(Origin::of(&self.pending[i])),
             None => self.fwd_origin.get(id).cloned(),
         };
-        self.log.line(&format!("misrouted id={id}: owner notice not sent (backend notification type not available yet)"));
         let Some(o) = origin else { return };
         if Self::is_mailbox_sender(&o.from_agent) {
             return;
