@@ -33,6 +33,8 @@ export function piBackends(friends) {
   return keys
 }
 const vendorKey = e => { const k = String(e ?? '').trim().toLowerCase(); return VENDOR_OF[k] ?? k }
+// 一台的啟動器 profiles：電腦版放 { profiles }，手機版放整筆電腦設定 { launcher: { profiles } }；沒開放（沒有）回 null
+export const profilesOf = l => (Array.isArray(l?.profiles) ? l.profiles : Array.isArray(l?.launcher?.profiles) ? l.launcher.profiles : null)
 
 // 一個廠商底下的帳號 → 顯示用的字
 function accountView(rows, { loggedOut = false } = {}) {
@@ -45,13 +47,15 @@ function accountView(rows, { loggedOut = false } = {}) {
 
 /**
  * friends：名單（node、device、engine、kind、status）；nodeOrder：節點順序；selfNode：本機節點
- * asn：節點 → 在線的 ASN 視窗列；launchers：節點 → 啟動器回報（profiles）
+ * asn：節點 → 在線的 ASN 視窗列；launchers：節點 → 啟動器回報。電腦版放啟動器本身 { profiles }，手機版放整筆電腦設定 { launcher: { profiles } }（兩種都認）；
+ *   本機那筆可多帶 detected: false＝本機偵測還沒跑完（這時不能說「未安裝」）
+ * machines：節點 → { platform }（後台回報的平台，#652）。電腦版是 remoteMachines、手機版是 machinesByNode
  * reports：節點 → { error, asnOnline, reportedAt, accounts:[{vendor,email,plan,current}] }（acct_remote_list 的結果）
  * self：{ claude:[{email,plan,current}], codex:{ loggedIn, text } }（本機的帳號庫與 Codex 登入）
  * roster：後台的帳號列表（account-roster.mjs，#374）。別台設備的帳號額度優先看列表（用廠牌＋帳號對）；
  *   列表沒有這個帳號、或後台讀不到（null）就退回那台自己回報的數字。本機這台照 #1339 一律用本機紀錄，不看列表。
  */
-export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', asn = {}, launchers = {}, reports = {}, self = {}, roster = null, now = Date.now() } = {}) {
+export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', asn = {}, launchers = {}, machines = {}, reports = {}, self = {}, roster = null, now = Date.now() } = {}) {
   const rows = launchDeviceRows(friends, { selfNode, nodeOrder, deviceOrder })
   const look = rosterLookup(roster)
   const nodeLabel = nodeLabelOf(friends, { selfNode, selfLabel: SELF_LABEL })
@@ -68,7 +72,7 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
     const named = mine.find(f => f.device)?.device ?? ''
     const label = named || (isSelf ? SELF_LABEL : UNNAMED_DEVICE)
     // 手機：後台回報的平台優先（launchers[node].platform，#652），沒有再看名單的種類
-    const platform = String(launchers[node]?.platform ?? '').toLowerCase()
+    const platform = String(machines[node]?.platform ?? launchers[node]?.platform ?? '').toLowerCase()
     const phone = isPhoneDevice({ platform, kinds: mine.map(f => f.kind) })
     const isOn = isSelf || (Array.isArray(asn[node]) && asn[node].length > 0) || mine.some(f => f.status && f.status !== 'offline')
     const rep = reports[node] ?? null
@@ -76,7 +80,7 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
     // 這台有哪些廠商：視窗用的引擎、啟動器回報的 CLI、帳號回報裡的廠商、本機登入的帳號
     const keys = new Set()
     for (const f of mine) { const k = vendorKey(engineKey(f)); if (!SKIP.has(k)) keys.add(k) }
-    for (const p of launchers[node]?.profiles ?? []) {
+    for (const p of profilesOf(launchers[node]) ?? []) {
       const cat = MODEL_CATALOG.find(m => m.profileId === p?.id)
       const k = vendorKey(cat?.id ?? p?.id)
       if (!SKIP.has(k)) keys.add(k)
@@ -84,13 +88,14 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
     // 這台裝了哪些 AI：視窗在用的引擎、啟動器回報的 CLI；啟動器沒開放（沒有 profiles）就是「不知道」，不能當成沒裝
     const installedKeys = new Set()
     for (const f of mine) { const k = vendorKey(engineKey(f)); if (!SKIP.has(k)) installedKeys.add(k) }
-    for (const p of launchers[node]?.profiles ?? []) {
+    for (const p of profilesOf(launchers[node]) ?? []) {
       const cat = MODEL_CATALOG.find(m => m.profileId === p?.id)
       const k = vendorKey(cat?.id ?? p?.id)
       if (!SKIP.has(k)) installedKeys.add(k)
     }
-    const installedKnown = Array.isArray(launchers[node]?.profiles)
-    const installedOf = k => (installedKeys.has(k) ? true : (isSelf || installedKnown ? false : null))
+    // 沒有啟動器回報、或本機偵測還沒跑完（detected: false）＝不知道，不能說「沒裝」
+    const installedKnown = profilesOf(launchers[node]) !== null && launchers[node]?.detected !== false
+    const installedOf = k => (installedKeys.has(k) ? true : (installedKnown ? false : null))
     const accts = {}
     if (isSelf) {
       accts.claude = (self.claude ?? []).map(a => ({ email: a.email, plan: a.plan, current: a.current === true, incomplete: loginIncomplete(a), quota: quotaView(a, now) }))

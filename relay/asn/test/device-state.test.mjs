@@ -67,7 +67,8 @@ test('手機：後台回報的平台優先；舊版手機（平台空）退回�
 test('安裝並登入的按鈕：只有 Claude、手機不給、已登入不給、別台要在線且回報是新的', () => {
   const ok = { vendor: 'claude', online: true, asnOnline: true }
   for (const state of [STATE.NOT_INSTALLED, STATE.INSTALLED_LOGGED_OUT, STATE.LOGGED_OUT, STATE.UNKNOWN_INSTALL]) {
-    assert.deepEqual(installAction({ ...ok, isSelf: true, state }), { kind: 'local' }, state)
+    // 本機偵測很快就有結果：還不確定有沒有裝時先不給
+    assert.deepEqual(installAction({ ...ok, isSelf: true, state }), state === STATE.UNKNOWN_INSTALL ? null : { kind: 'local' }, state)
     assert.deepEqual(installAction({ ...ok, state }), { kind: 'remote' }, state)
   }
   assert.equal(installAction({ ...ok, state: STATE.LOGGED_IN }), null, '已登入的不給（換帳號走切換帳號）')
