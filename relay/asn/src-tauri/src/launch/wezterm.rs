@@ -458,8 +458,11 @@ pub struct PaneInfo {
     pub is_active: bool,
 }
 
-/// 判斷窗格結束用：往回讀畫面底部幾行
-pub(crate) const PANE_PROBE_LINES: i32 = 20;
+/// 判斷窗格結束用：往回讀畫面底部幾行。
+/// 正在跑的舊 mux 還是用舊的 mux.lua 起的（沒有 exit_behavior_messaging = "None"），包裝殼結束時 WezTerm 的 Hold 訊息會把整串
+/// `-EncodedCommand <base64>` 印出來，6000 字的指令約 200 多行，會把標記擠出最後 20 行。這一列沒有記指令長度，
+/// 所以用固定的保守值 400（實測 6000 字夠用，仍在 term::MAX_READ_LINES 內）；新起的 mux 不印那段訊息，畫面很短，多讀無妨。
+pub(crate) const PANE_PROBE_LINES: i32 = 400;
 
 /// 窗格畫面裡有沒有 ASN 自己留的結束標記 `[asn-exit <暗號> <結束碼>]`（見 `local::exit_marker`、`local::mux_wrapped_argv`）。
 /// 先把換行全部拿掉再找：get-text 照欄寬折行，標記可能被拆成兩行；包裝殼結束時 WezTerm 的 Hold 訊息也會跟它搶著寫，
@@ -888,6 +891,21 @@ impl<'a> WezTerm<'a> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 窗格結束標記_被舊_mux_的長_hold_訊息擠出最後二十行_讀四百行找得到() {
+        use super::{pane_exit_from_screen as f, PANE_PROBE_LINES};
+        let n = "0123456789abcdef0123456789abcdef";
+        // 標記之後接著 Hold 訊息：整串 base64 約 230 行
+        let mut screen = format!("[asn-exit {n} 0]\n");
+        for i in 0..230 {
+            screen.push_str(&format!("JwAKACQAYwBvAGQAZQAgAD0AIAAwAAoAdAByAHkAIAB7AAoA{i:04}\n"));
+        }
+        let tail = |k: usize| screen.lines().rev().take(k).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
+        assert_eq!(f(&tail(20), n), None, "只讀 20 行會漏掉");
+        assert_eq!(f(&tail(PANE_PROBE_LINES as usize), n), Some(0));
+        assert!(PANE_PROBE_LINES <= 500, "不超過 term 的讀取上限");
+    }
+
     #[test]
     fn 窗格結束標記_nonce_對得上才算_取結束碼() {
         use super::pane_exit_from_screen as f;

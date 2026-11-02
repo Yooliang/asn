@@ -4798,6 +4798,7 @@ mod tests {
             let cfg = std::fs::read_to_string(&paths.config).unwrap();
             assert_eq!(cfg, mux::config_text(&paths.sock));
             assert!(cfg.contains("no_serve_automatically = true"), "wezterm connect 不吃 --no-auto-start，要靠設定擋");
+            assert!(cfg.contains("exit_behavior = \"Hold\"") && cfg.contains("exit_behavior_messaging = \"None\""), "結束時不印整串包裝指令，免得擠掉結束標記");
         }
 
         #[test]
