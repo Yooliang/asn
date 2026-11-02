@@ -25,17 +25,17 @@ fn fwd(said: &[String]) -> Vec<(String, String, String)> {
         .collect()
 }
 
-fn rmsg(seq: u64, extra: Value) -> Value {
+pub(super) fn rmsg(seq: u64, extra: Value) -> Value {
     let mut m = json!({"seq": seq, "from": "W~W-政策", "from_name": "政策", "trust": "member", "body": format!("群組內文-{seq}"), "mentions": [], "at": "t", "forMe": {}});
     for (k, v) in extra.as_object().unwrap() {
         m[k] = v.clone();
     }
     m
 }
-fn room(messages: Vec<Value>, mine: Value) -> Value {
+pub(super) fn room(messages: Vec<Value>, mine: Value) -> Value {
     json!({"id": "R1", "name": "專案群", "last_seq": messages.last().unwrap()["seq"], "mine": mine, "messages": messages})
 }
-fn set_rooms(h: &H, rooms: Vec<Value>) {
+pub(super) fn set_rooms(h: &H, rooms: Vec<Value>) {
     h.fr.st.lock().unwrap().rooms = rooms;
 }
 fn reads(h: &H) -> Vec<Value> {

@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 mod dup;
+mod quota;
 
 /// 後台節點信箱一次最多回幾封（與 asn_relay_inbox 的 limit 一致）
 const INBOX_PAGE: usize = 50;
@@ -205,6 +206,38 @@ impl Origin {
     }
 }
 
+/// 額度用完時最多扣住幾筆（個人信＋群組訊息合計）；超過的信不收（不 ack，留在伺服器下次再拉）
+const QUOTA_HOLD_MAX: usize = 200;
+/// 額度重置時間加的緩衝（毫秒）
+const QUOTA_MARGIN_MS: u64 = 60_000;
+/// 讀不到重置時間（或值不可信）時，多久後再試（毫秒）
+const QUOTA_RETRY_MS: u64 = 3_600_000;
+
+/// 額度用完而扣住的個人信（內文只在記憶體；重啟後靠重新拉到的同一封補回）
+struct HeldItem {
+    mail: Mail,
+    raw: Option<Value>,
+    /// 原本收到的時間（毫秒）；重送的延遲抬頭用
+    received_at: u64,
+}
+
+/// 轉交給 worker 還沒確認的群組訊息（額度用完時改排進 HeldStore，重置後重讀）
+struct RoomFwd {
+    room_id: String,
+    room_name: String,
+    member: String,
+    seq: u64,
+    received_at: u64,
+}
+
+/// 一次額度用完期間已經通知過哪些寄件人（同一次只通知一次；worker 證明恢復後清掉）
+#[derive(Default)]
+struct QuotaEpisode {
+    /// 扣住的信超過上限（名單回報帶給後台，由後台通知主人）
+    capped: bool,
+    senders: HashSet<String>,
+}
+
 const NOTICE_TTL_MS: u64 = 600_000;
 /// 本人傳的 /指令，但目標視窗沒有 ASN 外掛：照普通信投遞，另外回這句
 /// 交給本人的信：寬限期內本人收下（ack）就不寄說明（本人會直接回答）；過了還沒人看才說明
@@ -280,6 +313,22 @@ pub struct Core {
     active: BTreeMap<String, u64>,
     /// 收件名同時有兩個以上視窗而留在信箱的信：信件編號 → 第一次說明的時間（#584；只存記憶體）
     dup_held: HashMap<String, u64>,
+    /// 收發室 worker 的 Claude 額度用完，到這個時間（毫秒）前不送信給 worker；0＝沒有
+    quota_until: u64,
+    quota_ep: Option<QuotaEpisode>,
+    /// 扣住的個人信（信件編號 → 內文）
+    held_items: HashMap<String, HeldItem>,
+    /// 已交給 worker、還沒確認的個人信與群組訊息：額度用完時轉成扣住
+    fwd_items: HashMap<String, HeldItem>,
+    fwd_rooms: HashMap<String, RoomFwd>,
+    /// 重送中：這則原本收到的時間（轉交文字要加延遲抬頭）
+    late_from: Option<u64>,
+    /// 上次成功回報給後台的 inbox_hold_until（None＝還沒報過；啟動後第一次名單一定報一次，順便清掉上次沒收乾淨的舊值）
+    hold_sent: Option<Option<u64>>,
+    /// 上次為了回報收信暫停而重報名單的時間（失敗時不要每個 tick 都重試）
+    hold_try_at: u64,
+    /// 超過上限的旗標已經報給後台（每次額度用完只報一次）
+    cap_sent: bool,
 }
 
 /// 自動回信模式：交辦後這段時間內，就算 worker 這一輪的結果已回來，仍視為忙碌（它可能正接著處理排隊中的下一則）
@@ -328,6 +377,7 @@ impl Core {
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
+            quota_until: 0, quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), late_from: None, hold_sent: None, hold_try_at: 0, cap_sent: false,
         };
         c.restore();
         c
@@ -401,9 +451,18 @@ impl Core {
         }
         self.pending = st.pending;
         self.last_requester = st.last;
+        // 存下來的額度重置時間再驗一次範圍：已過去或超過 8 天就當作沒有
+        if st.quota_until > self.now && st.quota_until <= self.now + 8 * 86_400_000 {
+            self.quota_until = st.quota_until;
+            self.quota_ep = Some(Default::default());
+            self.log.line(&format!("quota hold restored: until {}", super::mail::taipei_hm(st.quota_until)));
+        }
     }
     fn persist(&mut self) {
-        let snap = pending::snapshot(&self.pending, &self.last_requester);
+        let mut snap = pending::snapshot(&self.pending, &self.last_requester);
+        if self.quota_until > 0 {
+            snap["quotaUntil"] = json!(self.quota_until); // 額度重置時間：重啟後還沒到就繼續扣住，不白撞一次額度
+        }
         let text = snap.to_string();
         if text == self.last_saved {
             return;
@@ -428,6 +487,9 @@ impl Core {
     }
     fn remove(&mut self, id: &str) {
         self.pending.retain(|p| p.id != id);
+        self.held_items.remove(id);
+        self.fwd_items.remove(id);
+        self.fwd_rooms.remove(id);
         self.persist();
     }
     fn online_names(&self) -> HashSet<&str> {
@@ -601,9 +663,27 @@ impl Core {
         if let Some(m) = &due {
             body["mod"] = m.clone();
         }
+        // 收發室 worker 額度用完而暫停收信到什麼時候（毫秒；null＝沒有）：值有變才附，給後台的收信監控抑制通知用
+        // 後台在暫停開始時寄通知給擁有者（扣住筆數由這裡帶，設備名由後台讀；超過上限的旗標每次額度用完只帶一次）
+        let hold = self.inbox_hold_until();
+        let cap_due = self.hold_cap_due();
+        let hold_due = self.hold_sent != Some(hold) || cap_due;
+        if hold_due {
+            body["inbox_hold_until"] = json!(hold);
+            if hold.is_some() {
+                body["inbox_hold_count"] = json!(self.quota_held_total());
+            }
+            if cap_due {
+                body["inbox_hold_capped"] = json!(true);
+            }
+        }
         match self.relay.api("roster", Some(body)).await {
             Ok(_) => {
                 self.roster_warned = false;
+                if hold_due {
+                    self.hold_sent = Some(hold);
+                    self.cap_sent = if hold.is_none() { false } else { self.cap_sent || cap_due };
+                }
                 if let Some(m) = due {
                     self.mod_sent = Some((m.to_string(), now));
                 }
@@ -704,7 +784,12 @@ impl Core {
                     dup.push(m.id);
                     continue;
                 }
-                if self.idx(&m.id).is_some() {
+                if let Some(i) = self.idx(&m.id) {
+                    // 重啟後留下的額度扣住信（只有 id 與收到時間）：靠重新拉到的同一封補回內文，不重複收
+                    if self.pending[i].state == State::Held && !self.held_items.contains_key(&m.id) {
+                        self.log.line(&format!("held mail id={} pulled again: content restored", m.id));
+                        self.held_items.insert(m.id.clone(), HeldItem { mail: m.clone(), raw: Some(raw.clone()), received_at: self.pending[i].t0 });
+                    }
                     // 已在處理中、還沒 ack：同樣佔著信箱的位置
                     held.extend(m.to_agent.clone());
                     continue;
@@ -897,6 +982,12 @@ impl Core {
                 _ => no_mod_notice = true,
             }
         }
+        // 收發室 worker 額度還沒重置：先扣住（不送 worker、不 ack），重置後依序重送
+        if self.quota_active(self.now) && self.via_worker(&target) {
+            self.quota_hold_mail(p, &m, raw).await;
+            return None;
+        }
+        let late = self.late_from.take();
         let origin = Origin::of(&p);
         self.pending.push(p);
         if !no_reply {
@@ -908,10 +999,17 @@ impl Core {
         // 自動回信的 worker 由橋代寄回答：不附「請用 asn_send 回信」那行
         let pre_engine = if self.is_respond(&target) { "respond".to_string() } else { self.engine_of(&target) };
         let text = format!("{}\n{}{}{}", mail_head(&m, &self.engine_label_of(&target)), mail::preamble(&m, &pre_engine),if note.is_empty() { String::new() } else { format!("{note}\n") }, body);
+        let text = match late {
+            Some(t) => Self::with_late_line(text, t),
+            None => text,
+        };
         let text = self.with_path_line(text, &target);
         match self.deliver(&m.id, &target, &text) {
             Ok(_) => {
                 self.log.line(&format!("handed id={} from={}/{} to={target}", m.id, m.from_node, from_agent));
+                if !self.is_respond(&target) && self.via_worker(&target) {
+                    self.fwd_items.insert(m.id.clone(), HeldItem { mail: m.clone(), raw: raw.clone(), received_at: late.unwrap_or(self.now) });
+                }
                 let names: Vec<String> = m.attachments.iter().map(|a| a.name.clone()).collect();
                 self.corr_note(&target, Dir::Received, &Self::node_agent(&m.from_node, &from_agent), &target, &m.id, &m.body, &names);
                 if no_mod_notice && !self.is_respond(&target) {
@@ -980,7 +1078,7 @@ impl Core {
             }
             WorkerLine::Exited(_) => self.respond_open = false,
             WorkerLine::Line(line) => {
-                let r = self.parser.feed(&line);
+                let r = self.parser.feed_at(&line, now);
                 for l in &r.logs {
                     self.log.line(l);
                 }
@@ -991,7 +1089,11 @@ impl Core {
                     match ev {
                         WorkerEvent::Sent(id) => self.on_sent(&id).await,
                         WorkerEvent::Fail(id, reason) => self.on_fail(&id, &reason).await,
+                        WorkerEvent::Quota { resets_at, kind } => self.on_quota(resets_at, &kind).await,
                         WorkerEvent::Reply { from, text } => {
+                            if self.quota_until == 0 {
+                                self.quota_ep = None; // 自動回信模式：worker 真的回答了＝額度恢復，下次用完再通知
+                            }
                             // 自動回信：worker 只扮一個視窗，名字以設定為準（不信模型寫的 from）
                             let from = self.cfg.respond.clone().unwrap_or(from);
                             self.on_reply(&from, &text, None).await
@@ -1011,6 +1113,9 @@ impl Core {
             return;
         }
         self.pending[i].state = State::Waiting;
+        if self.quota_until == 0 && !self.is_respond(&self.pending[i].target) {
+            self.quota_ep = None; // 收發室 worker 真的完成了轉交＝額度恢復，下次用完再通知
+        }
         self.persist();
         let (target, t0, no_reply) = (self.pending[i].target.clone(), self.pending[i].t0, self.pending[i].no_reply);
         if let Some(r) = self.pending[i].room.clone() {
@@ -1312,6 +1417,14 @@ impl Core {
             self.log.line(&format!("room={} #{} member={member}: skipped (Jev score below threshold)", room.get("id").and_then(Value::as_str).unwrap_or(""), json_u64(msg.get("seq"))));
             return true;
         }
+        // 收發室 worker 額度還沒重置：群組訊息不即時通知，先扣住（存檔，游標照常前進），重置後再轉交
+        if self.quota_active(self.now) {
+            let w = self.canonical_target("room", &rooms::member_window(member));
+            let target = if w.is_empty() { self.unaddressed_window().unwrap_or_default() } else { w };
+            if target.is_empty() || self.via_worker(&target) {
+                return self.quota_hold_room(room, member, msg).await;
+            }
+        }
         // 順位延遲（#230）：同時被叫醒多位時，第 N 順位先排隊 (N-1) × 間隔；排隊（已存檔）就算處理完，游標照常前進
         if let Some(w) = rooms::wake_of(msg) {
             let delay = rooms::stagger_delay_ms(&w, self.cfg.room_stagger_ms);
@@ -1329,7 +1442,7 @@ impl Core {
         if self.idx(&id).is_some() || self.held.contains(&room_id, seq, member) {
             return true;
         }
-        let h = Held { room_id: room_id.clone(), room_name: room.get("name").and_then(Value::as_str).unwrap_or("").to_string(), member: member.to_string(), seq, due: self.now + delay_ms, delay_ms, wake: wake.clone(), fails: 0 };
+        let h = Held { room_id: room_id.clone(), room_name: room.get("name").and_then(Value::as_str).unwrap_or("").to_string(), member: member.to_string(), seq, due: self.now + delay_ms, delay_ms, wake: wake.clone(), fails: 0, held_at: 0 };
         match self.held.add(h) {
             Ok(_) => {
                 self.log.line(&format!("room={room_id} #{seq} member={member} rank {}/{}: held {}s before handing", wake.rank, wake.total, delay_ms / 1000));
@@ -1352,10 +1465,21 @@ impl Core {
     /// 到期的順位訊息：重讀群組（自該則之後），把延遲期間新到的訊息附上再轉交。轉交成功才移除；失敗退避 30 秒再試，連續 120 次放棄
     pub async fn release_held(&mut self, now: u64) {
         self.now = now;
+        // 收發室 worker 額度還沒重置：整批先不轉交
+        if self.quota_active(now) {
+            return;
+        }
         let due: Vec<Held> = self.held.items().iter().filter(|h| h.due <= now).cloned().collect();
+        let mut expired: Vec<Held> = vec![];
         for h in due {
             if self.idx(&rooms::room_uuid(&h.room_id, h.seq, &h.member)).is_some() {
                 self.drop_held(&h, "already handed");
+                continue;
+            }
+            // 額度扣住超過保留期：不轉交，恢復時改發一則摘要
+            if h.held_at > 0 && now.saturating_sub(h.held_at) > self.cfg.late_keep_ms {
+                self.drop_held(&h, "quota hold over keep time: summarized");
+                expired.push(h);
                 continue;
             }
             if !self.roster_ok {
@@ -1379,7 +1503,9 @@ impl Core {
                     let mut orig = orig;
                     orig["wake"] = json!({ "rank": h.wake.rank, "total": h.wake.total, "before": h.wake.before });
                     let room = json!({ "id": h.room_id, "name": h.room_name });
+                    self.late_from = (h.held_at > 0).then_some(h.held_at);
                     delivered = self.deliver_room_msg(&room, &h.member, &orig, h.delay_ms.max(1), &extras).await;
+                    self.late_from = None;
                 }
             }
             if delivered {
@@ -1392,6 +1518,9 @@ impl Core {
                 self.log.line(&format!("rooms held save failed: {e}"));
             }
         }
+        if !expired.is_empty() {
+            self.quota_room_summary(&expired);
+        }
     }
 
     /// 實際轉交一則群組訊息給視窗。waited_ms＞0＝這是依順位延遲後的轉交，附上 extras（延遲期間新到的訊息）。true＝處理完
@@ -1399,6 +1528,7 @@ impl Core {
         let room_id = room.get("id").and_then(Value::as_str).unwrap_or("").to_string();
         let room_name = room.get("name").and_then(Value::as_str).unwrap_or("").to_string();
         let seq = json_u64(msg.get("seq"));
+        let late = self.late_from.take();
         // 成員代號（slug）也認：換成名單上的名字（Aegis；其他引擎原樣）
         let window = self.canonical_target(&format!("room:{seq}"), &rooms::member_window(member));
         let mut note = String::new();
@@ -1442,10 +1572,17 @@ impl Core {
                 if late.is_empty() { ctx } else { format!("{ctx}\n{late}") }
             }
         );
+        let text = match late {
+            Some(t) => Self::with_late_line(text, t),
+            None => text,
+        };
         let text = self.with_path_line(text, &target);
         match self.deliver(&id, &target, &text) {
             Ok(_) => {
                 self.log.line(&format!("handed room={room_id} #{seq} member={member} to={target}"));
+                if !self.is_respond(&target) && self.via_worker(&target) {
+                    self.fwd_rooms.insert(id.clone(), RoomFwd { room_id: room_id.clone(), room_name: room_name.clone(), member: member.to_string(), seq, received_at: late.unwrap_or(self.now) });
+                }
                 let names: Vec<String> = attach::normalize(msg.get("attachments")).iter().map(|a| a.name.clone()).collect();
                 let from = rooms::from_text(msg);
                 self.corr_note(&target, Dir::Received, &format!("群組 {room_name} {from}"), &target, &id, msg.get("body").and_then(Value::as_str).unwrap_or(""), &names);
@@ -1580,7 +1717,13 @@ impl Core {
             e.poll();
         }
         self.release_held(now).await;
+        self.quota_tick(now).await;
         self.flush_owner_receipts(now).await;
+        // 收信暫停的時間變了（開始扣住、或恢復）：馬上重報名單把值帶給後台（還沒報過第一次的交給啟動時的名單）
+        if self.hold_sent.is_some_and(|h| h != self.inbox_hold_until() || self.hold_cap_due()) && now.saturating_sub(self.hold_try_at) >= self.cfg.watch_gap_ms {
+            self.hold_try_at = now;
+            self.refresh_roster(now).await;
+        }
         // 自動回信：自己視窗的忙碌／閒置變了就立刻重報名單（防抖間隔同本機視窗監看）
         if self.cfg.respond.is_some() && self.respond_status() != self.respond_sent && now.saturating_sub(self.roster_at) >= self.cfg.watch_gap_ms {
             self.refresh_roster(now).await;

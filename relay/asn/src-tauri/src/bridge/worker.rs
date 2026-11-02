@@ -89,6 +89,30 @@ pub enum WorkerEvent {
     Sent(String),
     Fail(String, String),
     Reply { from: String, text: String },
+    /// Claude 額度用完（收發室 worker 自己的額度）。resets_at＝重置時間（秒，已驗過範圍；不明為 None），kind＝額度種類（只給 log）
+    Quota { resets_at: Option<u64>, kind: String },
+}
+
+/// resetsAt（秒）只在「現在之後、8 天之內」才採信，其餘當作不明（假額度最壞只是一小時後再試）
+pub fn valid_resets_at(secs: u64, now_ms: u64) -> Option<u64> {
+    let now_s = now_ms / 1000;
+    (secs > now_s && secs <= now_s + 8 * 86_400).then_some(secs)
+}
+
+/// result 文字是不是「hit your … limit」這類額度用完的說法（只在 is_error=true 時才呼叫）
+fn is_limit_text(t: &str) -> bool {
+    let l = t.to_lowercase();
+    l.find("hit your").is_some_and(|i| l[i..].contains("limit"))
+}
+
+/// 從 rate_limit_info 物件取額度事件（status 必須是 rejected）
+fn quota_of_info(info: &serde_json::Value, now_ms: u64) -> Option<WorkerEvent> {
+    if info.get("status").and_then(|v| v.as_str()) != Some("rejected") {
+        return None;
+    }
+    let resets_at = info.get("resetsAt").and_then(|v| v.as_u64().or_else(|| v.as_f64().filter(|f| *f >= 0.0).map(|f| f as u64))).and_then(|s| valid_resets_at(s, now_ms));
+    let kind = info.get("rateLimitType").and_then(|v| v.as_str()).unwrap_or("").chars().take(40).collect();
+    Some(WorkerEvent::Quota { resets_at, kind })
 }
 
 #[derive(Debug, Default)]
@@ -219,9 +243,32 @@ impl Parser {
     }
 
     pub fn feed(&mut self, line: &str) -> Parsed {
+        self.feed_at(line, crate::heartbeat::now_ms())
+    }
+
+    /// now_ms＝現在時間（毫秒），只用來驗 resetsAt 的範圍（核心傳自己的時鐘，測試才不必等真實時間）
+    pub fn feed_at(&mut self, line: &str, now_ms: u64) -> Parsed {
         let mut out = Parsed::default();
         let Ok(ev) = serde_json::from_str::<serde_json::Value>(line) else { return out };
         let ty = ev.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        // 額度用完的三種說法。欄位位置兩種都讀（頂層，或包在 message 裡）；信件內文裡的同樣字樣不算
+        if ty == "rate_limit_event" {
+            if let Some(q) = ev.get("rate_limit_info").and_then(|i| quota_of_info(i, now_ms)) {
+                out.events.push(q);
+            }
+            return out;
+        }
+        if ty == "assistant" && ev.pointer("/message/model").and_then(|v| v.as_str()) == Some("<synthetic>") {
+            let api_error = ev.get("apiError").or_else(|| ev.pointer("/message/apiError")).and_then(|v| v.as_str());
+            if api_error == Some("usage_limit_reached") {
+                let params = ev.get("apiErrorParams").or_else(|| ev.pointer("/message/apiErrorParams"));
+                let info = params.and_then(|p| p.get("rate_limit_info")).or_else(|| ev.get("rate_limit_info"));
+                // 結構化欄位說是額度用完，就算 status 缺漏也算（resetsAt 讀不到就是不明）
+                let q = info.and_then(|i| quota_of_info(i, now_ms)).unwrap_or(WorkerEvent::Quota { resets_at: None, kind: String::new() });
+                out.events.push(q);
+            }
+            return out;
+        }
         if ty == "assistant" || ty == "user" {
             let content = ev.pointer("/message/content").and_then(|c| c.as_array()).cloned().unwrap_or_default();
             for c in &content {
@@ -252,6 +299,10 @@ impl Parser {
         let delta = cost - self.last_cost;
         self.last_cost = cost;
         let txt = ev.get("result").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        // 文字比對只在 is_error=true 才算；信件內文裡的同樣字樣（is_error=false 的回覆）不算
+        if ev.get("is_error").and_then(|v| v.as_bool()) == Some(true) && is_limit_text(&txt) {
+            out.events.push(WorkerEvent::Quota { resets_at: None, kind: String::new() });
+        }
         let dur = ev.get("duration_ms").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let one_line: String = txt.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(160).collect();
         out.logs.push(format!("worker turn dur={dur}ms cost=${delta:.4} is_error={} :: {one_line}", ev.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false)));
@@ -668,5 +719,73 @@ mod tests {
         assert_eq!(p.inflight_len(), INFLIGHT_MAX);
         assert!(p.feed("不是 json").events.is_empty());
         assert!(p.feed(&json!({"type":"system"}).to_string()).events.is_empty());
+    }
+
+    // ---- 額度用完偵測 ----
+    const NOW: u64 = 1_800_000_000_000;
+    const RESETS: u64 = 1_800_000_000 + 3 * 3600;
+    fn synth(extra: serde_json::Value) -> String {
+        let mut v = json!({"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"You've hit your weekly limit · resets 12am (Asia/Taipei)"}]},"apiError":"usage_limit_reached","apiErrorParams":{"rate_limit_info":{"status":"rejected","resetsAt":RESETS,"rateLimitType":"seven_day"}}});
+        for (k, x) in extra.as_object().unwrap() {
+            v[k] = x.clone();
+        }
+        v.to_string()
+    }
+    fn quota(resets_at: Option<u64>, kind: &str) -> Vec<WorkerEvent> {
+        vec![WorkerEvent::Quota { resets_at, kind: kind.into() }]
+    }
+
+    #[test]
+    fn 額度偵測_三種來源都認() {
+        let mut p = Parser::new(N);
+        // 合成的助理回覆（apiError）
+        assert_eq!(p.feed_at(&synth(json!({})), NOW).events, quota(Some(RESETS), "seven_day"));
+        // 欄位包在 message 裡也讀得到
+        let wrapped = json!({"type":"assistant","message":{"model":"<synthetic>","content":[],"apiError":"usage_limit_reached","apiErrorParams":{"rate_limit_info":{"status":"rejected","resetsAt":RESETS,"rateLimitType":"five_hour"}}}}).to_string();
+        assert_eq!(p.feed_at(&wrapped, NOW).events, quota(Some(RESETS), "five_hour"));
+        // rate_limit_event
+        let ev = json!({"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":RESETS,"rateLimitType":"seven_day"}}).to_string();
+        assert_eq!(p.feed_at(&ev, NOW).events, quota(Some(RESETS), "seven_day"));
+        // result is_error=true 且文字符合
+        let r = json!({"type":"result","is_error":true,"result":"You've hit your session limit · resets 3pm","duration_ms":1,"total_cost_usd":0}).to_string();
+        assert_eq!(p.feed_at(&r, NOW).events, quota(None, ""));
+    }
+
+    #[test]
+    fn 額度偵測_不是額度的不認() {
+        let mut p = Parser::new(N);
+        // rate_limit_event 但 status 不是 rejected
+        let ok = json!({"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":RESETS}}).to_string();
+        assert!(p.feed_at(&ok, NOW).events.is_empty());
+        // result is_error=false 的同字樣（例如信件內文被複述）
+        let fine = json!({"type":"result","is_error":false,"result":"對方寫：You've hit your weekly limit","duration_ms":1,"total_cost_usd":0}).to_string();
+        assert!(p.feed_at(&fine, NOW).events.is_empty());
+        let no_flag = json!({"type":"result","result":"You've hit your weekly limit","duration_ms":1,"total_cost_usd":0}).to_string();
+        assert!(p.feed_at(&no_flag, NOW).events.is_empty());
+        // 一般 assistant（含 tool_use 的 message 內文有同樣字樣）、不是 synthetic 模型
+        let tool = json!({"type":"assistant","message":{"model":"claude-haiku","content":[{"type":"tool_use","id":"t1","name":"SendMessage","input":{"to":"T-甲","message":"You've hit your weekly limit apiError usage_limit_reached"}}]}}).to_string();
+        assert!(p.feed_at(&tool, NOW).events.is_empty());
+        let text = json!({"type":"assistant","message":{"model":"claude-haiku","content":[{"type":"text","text":"You've hit your weekly limit"}]},"apiError":"usage_limit_reached"}).to_string();
+        assert!(p.feed_at(&text, NOW).events.is_empty());
+        // user 事件（工具結果）內文同樣字樣
+        let user = json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"x","content":"You've hit your weekly limit"}]}}).to_string();
+        assert!(p.feed_at(&user, NOW).events.is_empty());
+        // is_error=true 但不是額度
+        let err = json!({"type":"result","is_error":true,"result":"boom","duration_ms":1,"total_cost_usd":0}).to_string();
+        assert!(p.feed_at(&err, NOW).events.is_empty());
+    }
+
+    #[test]
+    fn 額度偵測_resets_at_過去或超過八天當不明() {
+        let mut p = Parser::new(N);
+        let past = synth(json!({"apiErrorParams":{"rate_limit_info":{"status":"rejected","resetsAt":1_700_000_000u64,"rateLimitType":"x"}}}));
+        assert_eq!(p.feed_at(&past, NOW).events, quota(None, "x"));
+        let far = synth(json!({"apiErrorParams":{"rate_limit_info":{"status":"rejected","resetsAt":1_800_000_000u64 + 9 * 86_400,"rateLimitType":"x"}}}));
+        assert_eq!(p.feed_at(&far, NOW).events, quota(None, "x"));
+        let edge = synth(json!({"apiErrorParams":{"rate_limit_info":{"status":"rejected","resetsAt":1_800_000_000u64 + 8 * 86_400,"rateLimitType":"x"}}}));
+        assert_eq!(p.feed_at(&edge, NOW).events, quota(Some(1_800_000_000 + 8 * 86_400), "x"));
+        // 沒有 apiErrorParams：仍是額度用完，只是時間不明
+        let bare = json!({"type":"assistant","message":{"model":"<synthetic>","content":[]},"apiError":"usage_limit_reached"}).to_string();
+        assert_eq!(p.feed_at(&bare, NOW).events, quota(None, ""));
     }
 }
