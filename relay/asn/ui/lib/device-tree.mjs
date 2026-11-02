@@ -12,10 +12,10 @@ import { UNNAMED_DEVICE } from './text.mjs'
 import { quotaView } from './account-quota.mjs'
 import { ROSTER_TEXT, nodeLabelOf, rosterAccountsOn, rosterLookup, rosterQuota } from './account-roster.mjs'
 import { modelVendorKey } from './vendor-icons.mjs'
+import { CORE_VENDORS, STATE, STATE_TEXT, installAction, isPhoneDevice, reportFreshness, vendorState } from './device-state.mjs'
 
 export const NOT_REPORTED = '未回報'
 export const SELF_LABEL = '這台電腦'
-const PHONE_KINDS = new Set(['phone', 'mobile', 'android'])
 // 引擎名稱 → 廠商鍵（gpt 與 codex 是同一家）；asn 視窗與其他不算廠商
 const VENDOR_OF = { gpt: 'codex' }
 const SKIP = new Set(['asn', 'other', ''])
@@ -67,7 +67,9 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
     const mine = friends.filter(f => f.node === node)
     const named = mine.find(f => f.device)?.device ?? ''
     const label = named || (isSelf ? SELF_LABEL : UNNAMED_DEVICE)
-    const phone = mine.some(f => PHONE_KINDS.has(String(f.kind ?? '').toLowerCase()))
+    // 手機：後台回報的平台優先（launchers[node].platform，#652），沒有再看名單的種類
+    const platform = String(launchers[node]?.platform ?? '').toLowerCase()
+    const phone = isPhoneDevice({ platform, kinds: mine.map(f => f.kind) })
     const isOn = isSelf || (Array.isArray(asn[node]) && asn[node].length > 0) || mine.some(f => f.status && f.status !== 'offline')
     const rep = reports[node] ?? null
 
@@ -79,6 +81,16 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
       const k = vendorKey(cat?.id ?? p?.id)
       if (!SKIP.has(k)) keys.add(k)
     }
+    // 這台裝了哪些 AI：視窗在用的引擎、啟動器回報的 CLI；啟動器沒開放（沒有 profiles）就是「不知道」，不能當成沒裝
+    const installedKeys = new Set()
+    for (const f of mine) { const k = vendorKey(engineKey(f)); if (!SKIP.has(k)) installedKeys.add(k) }
+    for (const p of launchers[node]?.profiles ?? []) {
+      const cat = MODEL_CATALOG.find(m => m.profileId === p?.id)
+      const k = vendorKey(cat?.id ?? p?.id)
+      if (!SKIP.has(k)) installedKeys.add(k)
+    }
+    const installedKnown = Array.isArray(launchers[node]?.profiles)
+    const installedOf = k => (installedKeys.has(k) ? true : (isSelf || installedKnown ? false : null))
     const accts = {}
     if (isSelf) {
       accts.claude = (self.claude ?? []).map(a => ({ email: a.email, plan: a.plan, current: a.current === true, incomplete: loginIncomplete(a), quota: quotaView(a, now) }))
@@ -110,10 +122,22 @@ export function buildDeviceTree({ friends = [], nodeOrder = [], deviceOrder = []
       const via = k === 'pi' ? piBackends(mine) : []
       // 有 Gemini 但列表裡沒有它的帳號：還沒讀到額度，提示開 Gemini 視窗
       const note = k === 'gemini' && !list.length ? { note: ROSTER_TEXT.geminiOff } : {}
-      return { key: k, label: vendorLabel(k), ...note, ...(via.length ? { via: via.map(x => PI_VIA_LABEL[x]).join('、'), iconKey: via.length === 1 ? via[0] : 'pi' } : {}), account: v.text, reported: v.reported, extra: v.extra, accounts: list, switchable, switchHint: canPick && !switchable ? '對方電腦的 ASN 沒有在線，無法切換' : '' }
+      // 這一家在這台的狀態（已登入／登入失效／已安裝還沒登入／沒登入／未安裝／還沒收到回報）：給「設備」頁用，帳號頁不看
+      const st = vendorState({ isSelf, rep, accounts: list, installed: installedOf(k), now })
+      const action = installAction({ vendor: k, isSelf, phone, online: isOn, asnOnline: rep?.asnOnline, state: st.state })
+      return { key: k, label: vendorLabel(k), state: st.state, stateText: st.text, ...(st.reason ? { stateReason: st.reason } : {}), ...(action ? { action } : {}), ...note, ...(via.length ? { via: via.map(x => PI_VIA_LABEL[x]).join('、'), iconKey: via.length === 1 ? via[0] : 'pi' } : {}), account: v.text, reported: v.reported, extra: v.extra, accounts: list, switchable, switchHint: canPick && !switchable ? '對方電腦的 ASN 沒有在線，無法切換' : '' }
+    })
+    // 主要幾家 AI 這台沒用到的：本機偵測得到就說未安裝；別台看啟動器有沒有回報，沒回報就老實說不確定
+    const have = new Set(vendors.map(v => v.key))
+    const missing = (phone ? [] : CORE_VENDORS).filter(k => !have.has(k)).map(k => {
+      const inst = installedOf(k)
+      const fresh = isSelf || reportFreshness(rep, now) === 'fresh'
+      const state = !fresh ? STATE.NO_REPORT : inst === false ? STATE.NOT_INSTALLED : STATE.UNKNOWN_INSTALL
+      const action = installAction({ vendor: k, isSelf, phone, online: isOn, asnOnline: rep?.asnOnline, state })
+      return { key: k, label: vendorLabel(k), state, stateText: STATE_TEXT[state], ...(action ? { action } : {}) }
     })
     return {
-      key: node, label, self: isSelf, hidden: isDeviceHidden(node, friends, { selfNode, shown }), removed: isDeviceRemoved(node, removed, { selfNode }), kind: phone ? '手機' : '電腦', online: isOn, onlineText: isOn ? '在線' : '離線',
+      key: node, label, self: isSelf, platform, phone, missing, hidden: isDeviceHidden(node, friends, { selfNode, shown }), removed: isDeviceRemoved(node, removed, { selfNode }), kind: phone ? '手機' : '電腦', online: isOn, onlineText: isOn ? '在線' : '離線',
       reportedText: ago ? `帳號最後回報：${ago}` : (!isSelf && rep?.error ? '帳號回報讀取失敗' : ''),
       vendors, empty: vendors.length ? '' : '這台設備還沒有回報任何廠商',
     }
