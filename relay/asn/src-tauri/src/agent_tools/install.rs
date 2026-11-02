@@ -68,6 +68,10 @@ fn run_install(def: &ToolDef) -> Result<String, String> {
 fn run_native_installer(def: &ToolDef) -> Result<String, String> {
     #[cfg(windows)]
     {
+        // Claude：自己下載、驗雜湊與數位簽章再執行，不跑網路上抓下來的腳本（#628）；其他工具 0.2.3 起逐一換過去
+        if uses_verified_installer(&def.id) {
+            return crate::agent_setup::claude_install::install_here();
+        }
         let url = def
             .install_ps1_url
             .clone()
@@ -108,6 +112,11 @@ fn run_native_installer(def: &ToolDef) -> Result<String, String> {
         }
         Ok(format!("{} 官方安裝程式已執行完成。", def.label.clone()))
     }
+}
+
+/// 已換成「驗過再執行」安裝流程的工具（Windows）。其餘還走官方腳本，等後續版本換
+pub(crate) fn uses_verified_installer(tool_id: &str) -> bool {
+    tool_id == "claude"
 }
 
 fn run_npm_global(package: &str) -> Result<String, String> {
@@ -170,6 +179,18 @@ fn spawn_interactive_terminal(program: &str, args: &[String]) -> Result<(), Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn claude_走驗證式安裝_不再用_irm_管到_iex() {
+        assert!(uses_verified_installer("claude"));
+        assert!(!uses_verified_installer("codex"), "其他工具這版還走官方腳本");
+        // claude 的 Windows 安裝路徑上不能再出現「下載腳本直接執行」
+        let src = include_str!("install.rs");
+        let start = src.find("fn run_native_installer").unwrap();
+        let body = &src[start..src[start..].find("#[cfg(not(windows))]").map(|i| start + i).unwrap()];
+        let before_fallback = &body[..body.find("let url = def").unwrap()];
+        assert!(before_fallback.contains("uses_verified_installer(&def.id)"));
+    }
 
     #[test]
     fn 未知工具回錯() {
