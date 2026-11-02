@@ -33,7 +33,11 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
     // 開窗之前先查這台電腦上有沒有同名而且還活著的夥伴：有就沿用、切到前景，不另開第二個（issue #596）
     if prof.mode != LaunchMode::Background {
         let live = super::console::live_partner_pid(prof.engine.as_str(), &req.name);
-        if let Some(out) = existing_partner_reply(live, || super::console::bring_partner_to_front(prof.engine.as_str(), &req.name)) {
+        if let Some(mut out) = existing_partner_reply(live, || super::console::bring_partner_to_front(prof.engine.as_str(), &req.name)) {
+            // 對話框填了開場訊息：夥伴已經在跑，不會再收到開場訊息，明說沒送出
+            if !req.first_message.trim().is_empty() {
+                out["initial_dropped"] = json!(true);
+            }
             return Ok(out);
         }
     }
@@ -511,15 +515,40 @@ mod tests {
         a.iter().map(|s| s.to_string()).collect()
     }
 
+    const 起點: u64 = 1_700_000_000_000;
+
     fn 工作階段(pid: u64, name: &str) -> Value {
-        json!({ "pid": pid, "name": name, "kind": "interactive", "startedAt": pid })
+        json!({ "pid": pid, "name": name, "kind": "interactive", "startedAt": 起點 + pid })
     }
 
-    /// 開之前的查法：和 partner_console_query 同一個 resolve_pid（claude 讀 sessions、程序要活著）
+    /// 程序建立時間：和 session 的 startedAt 同一刻（同一個程序）
+    fn 同一刻(pid: u32) -> Option<u64> {
+        Some(起點 + u64::from(pid) - 2_000)
+    }
+
+    /// 開之前的查法：console::resolve_live_partner（partner_console_query 同一個 resolve_pid＋建立時間核對）
     fn 查同名(engine: &str, name: &str, sessions: Vec<Value>, alive: &dyn Fn(u32) -> bool) -> Option<u32> {
-        use super::super::console_resolve::{resolve_pid, Ask, Sources};
-        let src = Sources { sessions, ..Default::default() };
-        resolve_pid(&Ask { engine, name, kind: "", pid: None }, &src, alive).ok()
+        查同名_建立時間(engine, name, sessions, alive, &同一刻)
+    }
+
+    fn 查同名_建立時間(engine: &str, name: &str, sessions: Vec<Value>, alive: &dyn Fn(u32) -> bool, created: &dyn Fn(u32) -> Option<u64>) -> Option<u32> {
+        let src = super::super::console_resolve::Sources { sessions, ..Default::default() };
+        super::super::console::resolve_live_partner(engine, name, &src, alive, created)
+    }
+
+    #[test]
+    fn pid被重用或查不到建立時間_當作不在_照常開新的() {
+        let ss = || vec![工作階段(8936, "B4正式")];
+        assert_eq!(查同名_建立時間("claude", "B4正式", ss(), &|_| true, &|p| 同一刻(p)), Some(8936), "名字對、pid 活著、建立時間也對");
+        // 程序是 session 之後很久才建立的（pid 被無關程序重用），或早了很多
+        assert_eq!(查同名_建立時間("claude", "B4正式", ss(), &|_| true, &|_| Some(起點 + 8936 + 3_600_000)), None);
+        assert_eq!(查同名_建立時間("claude", "B4正式", ss(), &|_| true, &|_| Some(起點 - 3_600_000)), None);
+        // 拿不到建立時間：不確定就當作不在
+        assert_eq!(查同名_建立時間("claude", "B4正式", ss(), &|_| true, &|_| None), None);
+        assert!(existing_partner_reply(None, || panic!("對不上就不該去切前景")).is_none());
+        // 對不上的舊記錄不擋住真正活著的同名夥伴
+        let two = vec![工作階段(100, "B4正式"), 工作階段(200, "B4正式")];
+        assert_eq!(查同名_建立時間("claude", "B4正式", two, &|_| true, &|p| if p == 100 { 同一刻(p) } else { Some(1) }), Some(100));
     }
 
     #[test]
@@ -580,6 +609,7 @@ mod tests {
         let f = src.split("pub fn partner_launch_local").nth(1).unwrap().split("pub(crate) enum ModelPlan").next().unwrap();
         let check = f.find("existing_partner_reply(").expect("本機開新夥伴要先查同名");
         assert!(f.contains("console::live_partner_pid("), "活著的判斷要用 partner_console_query 同一套");
+        assert!(f.contains("initial_dropped"), "同名夥伴已在跑時，填了的開場訊息要標示沒送出");
         for open in ["start_window_noted(", "open_pi_real("] {
             assert!(check < f.find(open).unwrap(), "查同名要在 {open} 之前");
         }

@@ -53,3 +53,10 @@ test('同名夥伴已在跑的通知文案', () => {
   assert.match(bad.body, /沒有另外開新的/)
   assert.match(bad.body, /找不到這個夥伴的主控台視窗/)
 })
+
+test('同名夥伴已在跑：填了開場訊息要說沒送出', () => {
+  const n = existingPartnerNoticeText('B4正式', '', true)
+  assert.match(n.body, /已切到前景/)
+  assert.match(n.body, /開場訊息沒有送出/)
+  assert.doesNotMatch(existingPartnerNoticeText('B4正式').body, /開場訊息/)
+})

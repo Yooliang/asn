@@ -796,6 +796,7 @@ async function submitPartnerDlg() {
   const display = !foregroundOnly && partnerShowDisplay.value && partnerDlg.display === 'background' ? 'background' : 'foreground'
   const pend = pendingFriend({ node: partnerDlg.node, device: partnerDlg.deviceLabel, name: partnerDlg.name.trim(), profileId: partnerDlg.profile, mode, launchDisplay: display })
   launchPending.value = [...launchPending.value, pend]
+  let existingHit = false   // 同名夥伴已在跑（沒另外開新的）
   try {
     if (partnerDlg.node === info.node) {
       if (partnerShowDisplay.value) {
@@ -810,9 +811,10 @@ async function submitPartnerDlg() {
         : { profile: partnerDlg.profile, name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, display, first_message: foregroundOnly ? partnerDlg.firstMessage.trim() : '', ...(launchModelPick.value ? { model: launchModelPick.value } : {}) })
       // 內建終端開不起來、改用一般視窗：後端只在 ASN 這次執行的第一次帶 note，這裡照實顯示
       if (opened?.existing) {
+        existingHit = true
         // 同名夥伴已在跑：後端沒有另開，只把原本那個切到前景；不會多出新的夥伴，所以拿掉啟動中列
         launchPending.value = launchPending.value.filter(p => p.id !== pend.id)
-        showLaunchNotice(existingPartnerNoticeText(partnerDlg.name, opened.reason))
+        showLaunchNotice(existingPartnerNoticeText(partnerDlg.name, opened.reason, opened.initial_dropped))
       } else if (opened?.note) showLaunchNotice({ title: '已改用一般視窗', body: opened.note })
     } else {
       // 經 pi：profile 一律 pi，帶那台清單裡的提供者與模型（不在清單裡就不送）；其他開法照舊
@@ -824,7 +826,7 @@ async function submitPartnerDlg() {
     Object.assign(launchPrefs, bumpRecentCwd(launchPrefs, partnerDlg.cwd))
     void saveLaunchPrefs()
     closePartnerDlg()
-    if (partnerDlg.node === info.node && !foregroundOnly && partnerDlg.firstMessage.trim()) {
+    if (partnerDlg.node === info.node && !foregroundOnly && !existingHit && partnerDlg.firstMessage.trim()) {
       setTimeout(async () => {
         const id = friendId(partnerDlg.node, partnerDlg.name.trim())
         if (core.friends.has(id)) await core.send(id, partnerDlg.firstMessage.trim())
