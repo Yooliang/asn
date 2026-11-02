@@ -801,11 +801,12 @@ mod tests {
     #[test]
     fn 真執行器_輸出遠超管線緩衝區也能正常結束_輸出只留上限() {
         // 30000 行 × 50 字 ≈ 1.5MB，遠大於管線緩衝區（Windows 預設只有 4KB）
-        let r = RealRunner { timeout: std::time::Duration::from_secs(30) };
+        // 上限放寬到 120 秒：負載高時光啟動 PowerShell 就可能超過 30 秒（#656）；卡死一樣會逾時，抓得到
+        let r = RealRunner { timeout: std::time::Duration::from_secs(120) };
         let started = std::time::Instant::now();
         let (code, out) = r.run(Path::new("powershell"), &ps("1..30000 | ForEach-Object { 'x' * 50 }")).expect("大量輸出也要能跑完，不能卡到逾時");
         assert_eq!(code, 0);
-        assert!(started.elapsed() < std::time::Duration::from_secs(25), "不該等到逾時：{:?}", started.elapsed());
+        assert!(started.elapsed() < std::time::Duration::from_secs(100), "不該等到逾時：{:?}", started.elapsed());
         assert!(!out.is_empty() && out.len() <= OUT_CAP, "輸出要有內容、而且最多留上限：{}", out.len());
     }
 
