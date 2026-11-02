@@ -50,6 +50,13 @@ fn replaced_before(k: BrokenKind) -> &'static str {
         BrokenKind::CannotRun => "現有的 claude.exe 跑不起來，將重新安裝官方版",
     }
 }
+/// 想重裝壞掉的 claude.exe 但沒裝成：那支程式還在原位，不能讓讀的人以為已經處理好了
+fn replaced_failed(k: BrokenKind) -> &'static str {
+    match k {
+        BrokenKind::BadSignature => "原本的 claude.exe 簽章或簽署者不對，重新安裝失敗，那支程式還在原位，請先不要使用",
+        BrokenKind::CannotRun => "原本的 claude.exe 跑不起來，重新安裝失敗，它還在原位",
+    }
+}
 fn replaced_after(k: BrokenKind) -> &'static str {
     match k {
         BrokenKind::BadSignature => "這次是因為原本的 claude.exe 簽章或簽署者不對才重新安裝的，那支程式可能被換過",
@@ -62,13 +69,15 @@ fn replaced_after(k: BrokenKind) -> &'static str {
 pub struct Done {
     pub finish: Finish,
     pub replaced: Option<BrokenKind>,
+    /// 這次有跑安裝而且成功（`replaced` 有值但這裡是 false ＝ 想重裝但沒裝成，壞掉的程式還在原位）
+    pub installed: bool,
 }
 
 impl Done {
     pub fn to_json(&self) -> serde_json::Value {
         let mut v = self.finish.to_json();
         if let Some(k) = self.replaced {
-            v["replaced"] = serde_json::json!(replaced_after(k));
+            v["replaced"] = serde_json::json!(if self.installed { replaced_after(k) } else { replaced_failed(k) });
             v["replaced_kind"] = serde_json::json!(match k {
                 BrokenKind::BadSignature => "bad_signature",
                 BrokenKind::CannotRun => "cannot_run",
@@ -135,6 +144,8 @@ pub struct Steps<'a> {
     pub inspect: &'a dyn Fn() -> Existing,
     pub install: &'a dyn Fn() -> Result<String, String>,
     pub state: &'a dyn Fn() -> LoginState,
+    /// PATH 上有沒有別的方式裝的 claude（只找路徑、不執行）。沒有原生安裝的 claude.exe 但 PATH 上有，就不再裝一份
+    pub on_path: &'a dyn Fn() -> Option<String>,
     pub login: &'a dyn Fn(&dyn Phone, &dyn Fn(Step)) -> Outcome,
 }
 
@@ -144,6 +155,15 @@ pub fn run_with(s: &Steps, phone: &dyn Phone, report: &dyn Fn(Event)) -> Done {
     let mut replaced = None;
     let (version, installed_now) = match (s.inspect)() {
         Existing::Healthy(v) => (v, false),
+        Existing::Missing if (s.on_path)().is_some() => {
+            let p = (s.on_path)().unwrap_or_default();
+            elog!("PATH 上已經有 claude（{p}），不重複安裝");
+            return Done {
+                finish: Finish::NeedTerminal(format!("這台電腦的 PATH 上已經有 claude（{p}），不是 ASN 管理的官方原生安裝。為了不再裝一份，請在終端機確認要沿用哪一個")),
+                replaced: None,
+                installed: false,
+            };
+        }
         existing => {
             if let Existing::Broken(k, detail) = &existing {
                 // 原因不丟掉：寫 log、進度事件、結果都帶到
@@ -153,12 +173,12 @@ pub fn run_with(s: &Steps, phone: &dyn Phone, report: &dyn Fn(Event)) -> Done {
             report(Event::Installing(replaced));
             match (s.install)() {
                 Ok(v) => (v, true),
-                Err(e) => return Done { finish: Finish::Failed(e), replaced },
+                Err(e) => return Done { finish: Finish::Failed(e), replaced, installed: false },
             }
         }
     };
     let finish = finish_after(s, phone, report, version, installed_now);
-    Done { finish, replaced }
+    Done { finish, replaced, installed: installed_now }
 }
 
 fn finish_after(s: &Steps, phone: &dyn Phone, report: &dyn Fn(Event), version: String, installed_now: bool) -> Finish {
@@ -194,6 +214,7 @@ pub fn start_claude(relay: Arc<Relay>, token: TokenFn, report: impl Fn(Event) + 
             inspect: &super::claude_install::inspect_here,
             install: &super::claude_install::install_here,
             state: &super::claude_login::login_state_here,
+            on_path: &|| super::claude_install::find_on_path().map(|p| p.to_string_lossy().into_owned()),
             login: &|p, r| super::claude_login::login_here(p, r),
         };
         done(run_with(&steps, &phone, &report));
@@ -221,6 +242,10 @@ mod tests {
     }
 
     fn run_full(existing: Existing, install: Result<&str, &str>, state: LoginState, login: Outcome) -> (Done, Vec<Event>, Calls) {
+        run_full_path(existing, install, state, login, None)
+    }
+
+    fn run_full_path(existing: Existing, install: Result<&str, &str>, state: LoginState, login: Outcome, on_path: Option<String>) -> (Done, Vec<Event>, Calls) {
         let calls = Calls::default();
         let ev = RefCell::new(vec![]);
         let state = RefCell::new(Some(state));
@@ -233,6 +258,7 @@ mod tests {
                 install.map(|s| s.to_string()).map_err(|e| e.to_string())
             },
             state: &|| state.borrow_mut().take().unwrap(),
+            on_path: &|| on_path.clone(),
             login: &|_, rep| {
                 calls.login.set(calls.login.get() + 1);
                 rep(Step::UrlSent);
@@ -270,11 +296,36 @@ mod tests {
     }
 
     #[test]
-    fn 重裝失敗也要讓本人看到原因() {
+    fn 重裝失敗_說法要說沒裝成_那支程式還在原位() {
         let (d, _, _) = run_full(Existing::Broken(BrokenKind::BadSignature, "x".into()), Err("下載失敗"), LoginState::Out, Outcome::Verified);
         assert_eq!(d.finish, Finish::Failed("下載失敗".into()));
         assert_eq!(d.replaced, Some(BrokenKind::BadSignature));
-        assert!(d.to_json()["replaced"].as_str().unwrap().contains("可能被換過"));
+        assert!(!d.installed);
+        let t = d.to_json()["replaced"].as_str().unwrap().to_string();
+        assert_eq!(t, "原本的 claude.exe 簽章或簽署者不對，重新安裝失敗，那支程式還在原位，請先不要使用");
+        assert!(!t.contains("才重新安裝的"), "沒裝成就不能說成已經處理好了");
+        // 跑不起來的版本
+        let (d, _, _) = run_full(Existing::Broken(BrokenKind::CannotRun, "x".into()), Err("下載失敗"), LoginState::Out, Outcome::Verified);
+        assert!(d.to_json()["replaced"].as_str().unwrap().contains("重新安裝失敗"));
+        // 裝成功但後面登入失敗：程式確實換掉了，用「才重新安裝的」
+        let (d, _, _) = run_full(Existing::Broken(BrokenKind::BadSignature, "x".into()), Ok("2.1.309"), LoginState::Out, Outcome::Failed("x".into()));
+        assert!(d.installed && d.to_json()["replaced"].as_str().unwrap().contains("才重新安裝的"));
+    }
+
+    #[test]
+    fn path_上已有別的方式裝的_claude_不再裝一份_回請用終端機() {
+        let (d, ev, c) = run_full_path(Existing::Missing, Err("不該安裝"), LoginState::Out, Outcome::Failed("不該登入".into()), Some("C:\\Users\\x\\AppData\\Roaming\\npm\\claude.cmd".into()));
+        assert!(matches!(&d.finish, Finish::NeedTerminal(t) if t.contains("npm") && t.contains("PATH")), "{:?}", d.finish);
+        assert_eq!((c.install.get(), c.login.get()), (0, 0));
+        assert!(!ev.iter().any(|e| matches!(e, Event::Installing(_))));
+        assert!(d.to_json()["terminal"] == true);
+        // 原生位置有壞掉的 claude.exe：照舊重裝（不看 PATH）
+        let (d, _, c) = run_full_path(Existing::Broken(BrokenKind::CannotRun, "x".into()), Ok("2.1.309"), LoginState::Out, Outcome::Verified, Some("C:\\x\\claude.cmd".into()));
+        assert_eq!(c.install.get(), 1);
+        assert_eq!(d.finish, Finish::Ready("2.1.309".into()));
+        // PATH 上沒有：照舊安裝
+        let (_, _, c) = run_full_path(Existing::Missing, Ok("2.1.309"), LoginState::Out, Outcome::Verified, None);
+        assert_eq!(c.install.get(), 1);
     }
 
     #[test]
