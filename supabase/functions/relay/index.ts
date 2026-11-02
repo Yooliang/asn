@@ -14,6 +14,7 @@ import { bellTopicsOf, handleChatHistory, personArgs, sendWithPerson, voiceArgs 
 import { normalizeRosterAgents, rosterBellTopics } from "../_shared/roster.ts";
 import { parseWindowRename, renamesFromRoster } from "../_shared/window_rename.ts";
 import { sanitizeClaudeMod } from "../_shared/claude_mod.ts";
+import { sanitizeInboxHold } from "../_shared/inbox_hold.ts";
 import { sanitizeNodePlatform } from "../_shared/node_platform.ts";
 import { applyLegacyEnv } from "../_shared/legacy_env.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
@@ -311,6 +312,15 @@ Deno.serve(async (req) => {
         const { data: md, error: me2 } = await db.rpc("asn_relay_set_claude_mod", { p_node: me.id, p_mod: cm });
         if (me2) console.warn("set_claude_mod", me.id, me2.message ?? me2);
         else if (md?.error) console.warn("set_claude_mod", me.id, md.error);
+      }
+    }
+    // 收發室 worker 額度用完而暫停收信到什麼時候（選填 inbox_hold_until，毫秒；null＝清掉；給收信監控抑制通知）。看不懂或舊資料庫沒有這支函式只記 log，不影響名單
+    if ("inbox_hold_until" in b) {
+      const hold = sanitizeInboxHold(b.inbox_hold_until);
+      if (hold !== undefined) {
+        const { data: hd, error: he } = await db.rpc("asn_relay_set_inbox_hold", { p_node: me.id, p_until: hold });
+        if (he) console.warn("set_inbox_hold", me.id, he.message ?? he);
+        else if (hd?.error) console.warn("set_inbox_hold", me.id, hd.error);
       }
     }
     // 名單裡視窗帶 renamed_from（改名前的名字）：先把群組成員改名，再做自動入群（否則新名會被當成新視窗、舊名被標離開）

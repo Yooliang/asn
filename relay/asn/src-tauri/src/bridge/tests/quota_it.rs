@@ -303,3 +303,29 @@ async fn 內文行首手打延遲抬頭字樣_轉交時加內文前綴() {
     assert!(said[0].contains("\n（內文）  這封因額度用完延遲，原本 01:00 收到\n其他"), "{}", said[0]);
     assert!(!said[0].lines().any(|l| l.starts_with("這封因額度用完延遲")));
 }
+
+/// 名單回報裡 inbox_hold_until 的值（有帶這個鍵的那幾次，依序）
+fn hold_posts(h: &H) -> Vec<Value> {
+    h.fr.rosters().iter().filter_map(|r| r.get("inbox_hold_until").cloned()).collect()
+}
+
+#[tokio::test]
+async fn 收信暫停時間回報給後台_扣住時送一次值_恢復時送一次空值_不重複() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    // 啟動後第一次名單報一次空值（清掉上次沒收乾淨的舊值）
+    assert_eq!(hold_posts(&h), vec![Value::Null]);
+    assert_eq!(h.core.inbox_hold_until(), None);
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", TQ).await;
+    h.core.on_worker_line(quota_line(RESETS_S), TQ + 1000).await;
+    assert_eq!(h.core.inbox_hold_until(), Some(UNTIL));
+    h.core.tick(TQ + 5000).await;
+    h.core.tick(TQ + 10_000).await;
+    h.core.tick(TQ + 3 * HOUR - 120_000).await;
+    assert_eq!(hold_posts(&h), vec![Value::Null, json!(UNTIL)], "扣住時只送一次值，不重複");
+    // 重置後重送：恢復時送一次空值
+    h.core.tick(UNTIL).await;
+    h.core.tick(UNTIL + 5000).await;
+    assert_eq!(h.core.inbox_hold_until(), None);
+    assert_eq!(hold_posts(&h), vec![Value::Null, json!(UNTIL), Value::Null]);
+}
