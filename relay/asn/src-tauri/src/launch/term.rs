@@ -5064,7 +5064,7 @@ mod tests {
             let bytes = base64::engine::general_purpose::STANDARD.decode(enc).unwrap();
             let u: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
             let script = String::from_utf16(&u).unwrap();
-            assert!(script.contains("& 'C:/bin/claude.exe' '-n' '小乙' '--resume' 'sid-1'"), "原指令原樣：{script}");
+            assert!(script.contains("New-Object Diagnostics.ProcessStartInfo 'C:/bin/claude.exe', '-n 小乙 --resume sid-1'"), "原指令用 ProcessStartInfo：{script}");
             assert!(script.contains("[asn-exit n0nce '"), "{script}");
             drop(clean);
             // pi（終端面板，沒有 kind）照舊直接跑，不包
