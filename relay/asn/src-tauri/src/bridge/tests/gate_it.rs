@@ -230,3 +230,54 @@ async fn 扣住的群組訊息真的放行或放棄後_編號才從_inflight_拿
     }
     assert!(!forward_gate::read_inflight(h.work.path()).unwrap().contains_key(&id));
 }
+
+fn owner_requests(h: &H) -> Vec<Value> {
+    h.fr.st.lock().unwrap().misroute_notices.clone()
+}
+
+#[tokio::test]
+async fn 送錯時請後台通知本人一次_只帶信件編號_不帶視窗名與內文() {
+    let mut h = harness(&[("T-乙", "idle"), ("T-丙", "idle")]).await;
+    h.fr.put(mail(1, json!({"body": "機密內文不該出現"})));
+    h.core.pull("test", T0).await;
+    send_to(&mut h.core, &uid(1), "T-丙", "toolu_w1", T0 + 10).await;
+    let reqs = owner_requests(&h);
+    assert_eq!(reqs, vec![json!({"mail_id": uid(1)})], "只帶信件編號");
+    // 第二次送錯（回 Fail）、同一個編號：不再請後台通知
+    send_to(&mut h.core, &uid(1), "T-丙", "toolu_w2", T0 + 20).await;
+    assert_eq!(owner_requests(&h).len(), 1);
+    // 對錯都有的情況也通知（另一封）
+    h.fr.put(mail(2, json!({})));
+    h.core.pull("test", T0 + 30).await;
+    let (_, text) = h.core.fwd_probe(&uid(2)).unwrap();
+    for l in ok_send_lines("toolu_a", "T-丙", &text).into_iter().chain(ok_send_lines("toolu_b", "T-乙", &text)) {
+        h.core.on_worker_line(l, T0 + 31).await;
+    }
+    h.core.on_worker_line(res(""), T0 + 32).await;
+    assert_eq!(owner_requests(&h).len(), 2);
+    assert_eq!(h.fr.acked(), vec![uid(1), uid(2)]);
+}
+
+#[tokio::test]
+async fn 後台通知失敗_只記_log_重送與寄件人通知照常() {
+    let mut h = harness(&[("T-乙", "idle"), ("T-丙", "idle")]).await;
+    h.fr.st.lock().unwrap().misroute_status = 404; // 舊後台沒有這個動作
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", T0).await;
+    send_to(&mut h.core, &uid(1), "T-丙", "toolu_w1", T0 + 10).await;
+    assert!(h.core.log.has("owner notice failed"));
+    assert_eq!(forwards_of(&h.said(), &uid(1)).len(), 2, "照常重送一次");
+    assert_eq!(notice_to_sender(&h).len(), 1, "寄件人照常通知");
+    assert!(h.fr.acked().is_empty());
+}
+
+#[tokio::test]
+async fn 群組訊息送錯_請後台通知本人_不帶編號() {
+    let mut h = harness(&[("T-視窗甲", "idle"), ("T-丙", "idle")]).await;
+    let mine = json!([{"member": "T~T-視窗甲", "read_seq": 1}]);
+    set_rooms(&h, vec![room(vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}}))], mine)]);
+    h.core.pull_rooms(T0).await;
+    let id = crate::bridge::rooms::room_uuid("R1", 2, "T~T-視窗甲");
+    send_to(&mut h.core, &id, "T-丙", "toolu_g1", T0 + 10).await;
+    assert_eq!(owner_requests(&h), vec![json!({"mail_id": null})]);
+}

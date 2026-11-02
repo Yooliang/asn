@@ -49,6 +49,9 @@ struct FState {
     inbox_queries: Vec<String>,
     /// send 的 reply_to 在這份名單內就回 500（模擬寄回失敗；Aegis 引擎測「寄回成功才 ack」用）
     send_fail_reply_to: Vec<String>,
+    /// 核對轉交對象：本人通知（misroute_notice）收到的請求；misroute_status 不為 0 就回這個狀態碼（模擬後台沒這個動作或壞了）
+    misroute_notices: Vec<Value>,
+    misroute_status: u16,
 }
 
 fn pct_decode(s: &str) -> String {
@@ -174,6 +177,14 @@ fn handle_conn(mut c: std::net::TcpStream, st: Arc<Mutex<FState>>) {
         "send" => {
             s.sent.push(body);
             (200, json!({"id": uid(900 + s.sent.len() as u32)}))
+        }
+        "misroute_notice" => {
+            s.misroute_notices.push(body);
+            if s.misroute_status != 0 {
+                (s.misroute_status, json!({"error": "x"}))
+            } else {
+                (200, json!({"ok": true, "notify": "sent"}))
+            }
         }
         "roster" => {
             s.rosters.push(body);
