@@ -1,4 +1,4 @@
-// 收信暫停提示（20261101100000_inbox_hold_until.sql）：
+// 收信暫停提示（20261102100000_inbox_hold_until.sql）：
 // 1. 靜態：只加可空欄位與一支函式、只授權 service_role、security definer、search_path 空、回復檔拿掉兩者。
 // 2. 實跑（有安裝 @electric-sql/pglite 時）：只動得到自己的節點、值被夾在 now() 到 now()+8 天、可以清成 null、停用或不存在的節點動不到；
 //    暫停開始時寄一封給擁有者（內文、reply=no），延長或重複設值不再寄，設備名不合或擁有者核對不過只設時間不寄，每小時最多 3 封。
@@ -6,7 +6,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
-const F = '20261101100000_inbox_hold_until.sql'
+const F = '20261102100000_inbox_hold_until.sql'
 const SIG = 'asn_relay_set_inbox_hold(text, timestamptz, text, integer, boolean)'
 const rd = s => s.replace(/\r+\n/g, '\n')
 const mig = rd(fs.readFileSync(new URL(`../supabase/migrations/${F}`, import.meta.url), 'utf8'))
@@ -14,7 +14,7 @@ const down = rd(fs.readFileSync(new URL(`../supabase/sql/rollback/${F.replace('.
 
 test('靜態：可空欄位、單一函式、只授權 service_role、回復檔拿掉兩者', () => {
   const files = fs.readdirSync(new URL('../supabase/migrations/', import.meta.url)).filter(f => f.endsWith('.sql')).sort()
-  assert.ok(files.indexOf(F) > files.indexOf('20261031110000_acct_login_alert_notify.sql'), '編號在最新一支之後')
+  assert.ok(files.indexOf(F) > files.indexOf('20261101230000_secret_link.sql'), '編號在最新一支之後')
   assert.match(mig, /alter table relay\.nodes add column if not exists inbox_hold_until timestamptz;/)
   assert.equal((mig.match(/^create or replace function/gim) ?? []).length, 1)
   assert.match(mig, /security definer\s+set search_path to ''/)

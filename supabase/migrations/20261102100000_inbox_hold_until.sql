@@ -14,8 +14,8 @@
 --     - 回傳 {ok:true, bell_topics:[…]}：Edge Function 依此敲門鈴，讓擁有者的畫面立刻看到信。
 -- 相容：只新增可空欄位與新函式，沒有改既有函式；舊電腦端不帶欄位＝不動，舊後台沒有這個欄位時電腦端送的值被丟掉，不壞。
 -- 部署順序：本 migration → relay（Edge Function）→ 電腦端。
---   部署：npx supabase db query --linked -f supabase/migrations/20261101100000_inbox_hold_until.sql
--- 回復：supabase/sql/rollback/20261101100000_inbox_hold_until_down.sql（已寄出的信不受影響）。
+--   部署：npx supabase db query --linked -f supabase/migrations/20261102100000_inbox_hold_until.sql
+-- 回復：supabase/sql/rollback/20261102100000_inbox_hold_until_down.sql（已寄出的信不受影響）。
 begin;
 
 alter table relay.nodes add column if not exists inbox_hold_until timestamptz;
