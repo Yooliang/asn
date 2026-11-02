@@ -203,6 +203,11 @@ Deno.test("確認請求（AI 端）：要指定視窗、類別在清單內、摘
   assertEquals(calls[0].fn, "asn_relay_group_confirm_request");
   assertEquals(calls[0].args.p_node, "H");
   assertEquals(calls[0].args.p_agent, "財務");
+  // 安裝軟體也是危險操作的一類（#628）；清單外的仍然 400
+  const inst = await handleNodeRoomAction(d, me, "room_confirm_request", { room: "g1", as_agent: "財務", kind: "install_software", summary: "在新電腦安裝 Claude Code" });
+  assertEquals(inst.status, 200);
+  assertEquals(calls[calls.length - 1].args.p_kind, "install_software");
+  assertEquals((await handleNodeRoomAction(d, me, "room_confirm_request", { room: "g1", as_agent: "財務", kind: "install", summary: "x" })).status, 400);
   assertEquals((await handleNodeRoomAction(d, me, "room_confirm_status", { as_agent: "財務", id: "不是 uuid" })).status, 400);
   const st = await handleNodeRoomAction(roomDeps(calls, { status: "approved" }), me, "room_confirm_status", { as_agent: "財務", id: ID });
   assertEquals(st.body.status, "approved");

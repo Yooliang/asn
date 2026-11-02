@@ -15,7 +15,7 @@ export const ROOM_ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
 export const OWNER_ONLY_ACTIONS = new Set(["room_create", "room_add", "room_remove", "room_pin_set"]);
 
 // 危險操作類別（規格 2.5.1）：被別人點名的 AI 做這些之前，必須先請主持人在群組確認
-export const CONFIRM_KINDS = ["data_change", "deploy", "spend", "external_send", "account_config", "other"] as const;
+export const CONFIRM_KINDS = ["data_change", "deploy", "spend", "external_send", "account_config", "install_software", "other"] as const;
 
 export type RoomMember = { key: string; name: string; role?: string; kind?: string; node_role?: string; label?: string; display_label?: string; member_kind?: string };
 export type RoomMessage = {
