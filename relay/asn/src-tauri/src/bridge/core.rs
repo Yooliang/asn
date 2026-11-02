@@ -1603,7 +1603,9 @@ impl Core {
                     self.remove(&id);
                     continue;
                 }
-                crate::login_watch::record_forward_timeout(now as i64); // 登入失效通知附「轉交逾時 N 次」的佐證
+                // 登入失效通知附「轉交逾時 N 次」的佐證；無視窗橋沒有登入失效判定（login_watch 只在 gui 建置才有），不用記
+                #[cfg(feature = "gui")]
+                crate::login_watch::record_forward_timeout(now as i64);
                 if Self::is_mailbox_sender(&p.from_agent) {
                     self.log.line(&format!("forward timeout notice to mailbox sender not sent id={id}"));
                 } else {

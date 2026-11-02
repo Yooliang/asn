@@ -44,6 +44,27 @@ jobs:
         run: node tools/run-root-tests.mjs _sql --timeout=180 --require-pglite
 
 
+  # 無視窗橋（asn-bridge，Linux 節點用）：下面的 build 只編 gui 版，這個組合沒人編就會壞了也不知道。
+  # 刻意不裝 gtk／webkit：相依要是又牽到視窗函式庫，這裡也會紅。
+  bridge-check:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: relay/asn/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: relay/asn/src-tauri -> target
+          key: bridge-check
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: 檢查無視窗橋能編譯
+        run: cargo check --locked --no-default-features --bin asn-bridge
+
   build:
     runs-on: ubuntu-24.04
     defaults:
