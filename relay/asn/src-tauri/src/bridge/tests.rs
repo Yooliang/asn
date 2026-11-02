@@ -1720,8 +1720,9 @@ mod slash_it {
     fn owner(n: u32, body: &str, to: &str) -> Value {
         mail(n, json!({"trust": "owner", "from_node": "T", "from_agent": PERSON, "sender_display": "小良", "body": body, "to_agent": to, "expects_reply": false}))
     }
+    // 上限 30 秒：條件一成立就返回，平常不會變慢；機器負載高時 4 秒不夠（#656）
     async fn until(mut f: impl FnMut() -> bool) -> bool {
-        for _ in 0..400 {
+        for _ in 0..3000 {
             if f() {
                 return true;
             }
