@@ -116,7 +116,7 @@ export const CloudInvitePanel = {
   },
   template: `<section class="set-card cloud-set" aria-label="雲端代理">
       <header class="vendor-h"><b>雲端代理</b><small>讓跑在雲端的 AI 代理加入 ASN</small></header>
-      <small v-if="signedIn === false">請先在上面的「登入狀態」登入，才能邀請雲端代理。</small>
+      <small v-if="signedIn === false">請先在「個人」登入，才能邀請雲端代理。</small>
       <template v-else>
         <div v-if="created" class="cloud-created">
           <b>已建立「{{ created.name }}」</b>

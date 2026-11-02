@@ -133,7 +133,7 @@ test('手機：設備卡與「我的帳號」用同一套，Gemini 照樣出現�
 const ACCT = { list: [], current: null, codexLine: '', busy: false, confirmDel: '', msg: '', allowSwitch: true, autoNote: '', mod: '', remote: { node: '', devices: [], list: [], loading: false, busy: false, msg: '' } }
 const render = async (st, curDev = '') => {
   globalThis.Vue = Vue
-  return renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st, catKey: 'devices', meAv: '', ...(curDev ? { initialDev: curDev } : {}) }) }))
+  return renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st, catKey: 'accounts', meAv: '', ...(curDev ? { initialDev: curDev } : {}) }) }))
 }
 
 test('電腦設定頁「我的帳號」：Gemini 兩窗都顯示；沒資料寫提示；Claude 那一段不變', async () => {

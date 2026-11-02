@@ -11,9 +11,9 @@ import { closesDialog } from '../ui/lib/dialog.mjs'
 
 const read = f => fs.readFileSync(new URL(`../ui/${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
-test('分類：十一類（帳號併進設備與帳號）、順序與鍵固定、標題與圖示都有、鍵不重複', () => {
-  assert.deepEqual(SETTING_KEYS, ['me', 'devices', 'look', 'tabs', 'notify', 'voice', 'window', 'launch', 'usage', 'update', 'about'])
-  assert.deepEqual(SETTING_CATS.map(c => c.title), ['個人', '設備與帳號', '外觀', '分頁與分組', '通知', '語音', '視窗與系統匣', '啟動設定', '用量', '更新', '關於'])
+test('分類：十二類（設備與帳號拆成設備、帳號）、順序與鍵固定、標題與圖示都有、鍵不重複', () => {
+  assert.deepEqual(SETTING_KEYS, ['me', 'devices', 'accounts', 'look', 'tabs', 'notify', 'voice', 'window', 'launch', 'usage', 'update', 'about'])
+  assert.deepEqual(SETTING_CATS.map(c => c.title), ['個人', '設備', '帳號', '外觀', '分頁與分組', '通知', '語音', '視窗與系統匣', '啟動設定', '用量', '更新', '關於'])
   assert.equal(new Set(SETTING_KEYS).size, SETTING_CATS.length)
   for (const c of SETTING_CATS) assert.ok(/^M[0-9A-Za-z .,-]+$/.test(c.icon), `${c.key} 圖示`)
   assert.equal(catByKey('voice').title, '語音')
@@ -33,8 +33,10 @@ test('摘要：每一類都有一行文字，缺欄位不丟錯', () => {
 test('摘要：照目前的值顯示', () => {
   assert.equal(catSummary('me', { hasUpload: true }), '已上傳大頭貼')
   assert.equal(catSummary('me', { hasUpload: false }), '自動產生的大頭貼')
-  assert.equal(catSummary('devices', { accountCount: 0 }), '還沒有設備；還沒有加入過帳號')
-  assert.equal(catSummary('devices', { devices: [{ online: true }], accountCount: 2, accountCurrent: 'a@x.test' }), '1 台設備，1 台在線；2 個 Claude 帳號，使用中：a@x.test')
+  assert.equal(catSummary('devices', { accountCount: 0 }), '還沒有設備')
+  assert.equal(catSummary('accounts', { accountCount: 0 }), '還沒有加入過帳號')
+  assert.equal(catSummary('devices', { devices: [{ online: true }], accountCount: 2, accountCurrent: 'a@x.test' }), '1 台設備，1 台在線')
+  assert.equal(catSummary('accounts', { devices: [{ online: true }], accountCount: 2, accountCurrent: 'a@x.test' }), '2 個 Claude 帳號，使用中：a@x.test')
   const look = catSummary('look', { frame: 'native', mode: 'merged', dpMode: 'side', toolbar: 'top', bubble: 'bubble' })
   assert.ok(look.includes('Windows 原生'), look)
   assert.equal(catSummary('tabs', { tabDim: 'device', groupDim: 'status' }), '分頁依設備、分組依活躍度')
@@ -92,8 +94,10 @@ const render = async (catKey, st = fullState()) => {
 test('設定表單：每一類都轉得出來，各類原本的項目都在', async () => {
   const want = {
     me: ['登入狀態', '尚未登入', '用 Google 登入', '用 GitHub 登入', '大頭貼', '選擇圖片', '移除，改回自動產生', '目前用的是自動產生的大頭貼。'],
-    // 設備與帳號：進來先是設備列表（名稱、類型、在線狀態、›）；帳號管理與廠商在細部頁，見 device-accounts-page／device-list-page
+    // 設備：進來先是設備列表（名稱、類型、在線狀態、›）；廠商在細部頁，見 device-accounts-page／device-list-page
     devices: ['家用機', '工作機', '手機一號', '在線'],
+    // 帳號：我的帳號（後台列表）；這份狀態沒有列表，所以寫提示
+    accounts: ['現在讀不到帳號列表'],
     look: ['視窗外框', '視窗模式', '頭像模式', '工具列位置', '文字底色'],
     tabs: ['分頁依', '分組依'],
     notify: ['右下角通知', '通知聲音', '震動聲音', '收到檔案聲音'],
