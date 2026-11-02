@@ -114,7 +114,7 @@ test('實跑（pglite）：共用正反例（與 Edge Function、Rust、手機�
   assert.ok(cases.good.length >= 5 && cases.bad.length >= 20, '測資不能被清空')
   let i = 200
   // 空字元連資料庫的參數都送不進去（編碼錯誤），不在這裡比；其餘照比
-  for (const b of cases.bad.filter(x => !x.includes(' '))) assert.equal((await reqLink({ link: expand(b), pub: pub(i++) })).error, 'bad_request', b.slice(0, 40))
+  for (const b of cases.bad.filter(x => !x.includes('\0'))) assert.equal((await reqLink({ link: expand(b), pub: pub(i++) })).error, 'bad_request', b.slice(0, 40))
   assert.equal((await q('select count(*)::int n from relay.secret_requests'))[0].n, 0)
   for (const g of cases.good) {
     assert.ok((await reqLink({ link: expand(g), pub: pub(i++) })).id, g)
