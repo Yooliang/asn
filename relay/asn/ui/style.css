@@ -772,6 +772,14 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dv-vicon{flex:none;display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;color:var(--fg)}
 .dv-vicon svg{width:20px;height:20px}
 .dv-via{color:var(--muted, inherit);opacity:.75;font-weight:400}
+/* 設備列的一行 AI 狀態（獨佔一行）、廠商標頭的狀態標籤、帳號頁「用在哪幾台」與「切換到…」（174 的 C） */
+.dv-line{flex:1 0 100%;color:var(--muted);font-size:12px;line-height:1.4}
+.dv-state{margin-left:auto;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:400;background:var(--panel-head);color:var(--muted)}
+.dv-state.st-logged_in{background:color-mix(in srgb,var(--online) 18%,transparent);color:var(--online)}
+.dv-state.st-login_failed{background:color-mix(in srgb,var(--away) 25%,transparent);color:#8a5a00}
+.dv-used{flex:1 1 auto;min-width:0;color:var(--muted);font-size:11px}
+.dv-sw{display:inline-flex;flex-wrap:wrap;gap:6px;margin-left:auto}
+@media (prefers-color-scheme:dark){.dv-state.st-login_failed{color:#f0b84a}}
 .dv-vb{display:flex;flex-direction:column;gap:8px;padding:10px 12px}
 .dv-accts{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
 .dv-acct{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:7px 10px;border:1px solid var(--line);border-radius:5px;background:var(--panel)}
