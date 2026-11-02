@@ -543,6 +543,9 @@ mod tests {
         // 程序是 session 之後很久才建立的（pid 被無關程序重用），或早了很多
         assert_eq!(查同名_建立時間("claude", "B4正式", ss(), &|_| true, &|_| Some(起點 + 8936 + 3_600_000)), None);
         assert_eq!(查同名_建立時間("claude", "B4正式", ss(), &|_| true, &|_| Some(起點 - 3_600_000)), None);
+        // 不對稱容差：程序比 startedAt 早 30 秒（啟動慢）算同一個，晚 30 秒不算
+        assert_eq!(查同名_建立時間("claude", "B4正式", ss(), &|_| true, &|_| Some(起點 + 8936 - 30_000)), Some(8936));
+        assert_eq!(查同名_建立時間("claude", "B4正式", ss(), &|_| true, &|_| Some(起點 + 8936 + 30_000)), None);
         // 拿不到建立時間：不確定就當作不在
         assert_eq!(查同名_建立時間("claude", "B4正式", ss(), &|_| true, &|_| None), None);
         assert!(existing_partner_reply(None, || panic!("對不上就不該去切前景")).is_none());

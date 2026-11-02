@@ -170,16 +170,18 @@ fn mux_target(req: &PartnerConsoleReq) -> Option<(u32, String)> {
     Some((pid, super::term::mux_partner_in(mux, &req.name)?))
 }
 
-/// session 檔的 startedAt 與程序建立時間最多差多少仍算同一個程序（毫秒）。
-/// startedAt 是 Claude 啟動完成後才寫的，程序建立時間在它之前幾秒內（啟動耗時）；差太多就是 pid 被別的程序重用了。
-pub(crate) const SESSION_PROC_TOLERANCE_MS: u64 = 10_000;
+/// 程序建立時間最多比 session 檔的 startedAt 早多少仍算同一個程序（毫秒）。
+/// startedAt 是 Claude 啟動完成後才寫的，所以程序一定比它早建立；啟動慢的機器（例如防毒在掃描）可能要超過十幾秒。
+pub(crate) const SESSION_PROC_EARLY_MS: u64 = 60_000;
+/// 程序建立時間最多比 startedAt 晚多少仍算同一個程序（毫秒）：理論上不會晚，預留時鐘誤差。
+pub(crate) const SESSION_PROC_LATE_MS: u64 = 5_000;
 
 /// 這個 pid 的程序真的是 session 檔記的那個（嚴格版，只給「開新夥伴前先查」用）：
-/// 兩邊的時間都要拿得到、而且差距在 [`SESSION_PROC_TOLERANCE_MS`] 內；拿不到或對不上一律當作不是，寧可照常開新的。
+/// 兩邊的時間都要拿得到，而且程序建立時間落在 [startedAt − 早, startedAt + 晚] 內；拿不到或對不上一律當作不是，寧可照常開新的。
 /// （和 `roster::same_process` 不同：它查不到就當同一個，是為了不誤砍活視窗；這裡的誤判代價是「永遠開不出來」。）
 pub(crate) fn session_matches_process(started_at_ms: u64, created_ms: Option<u64>) -> bool {
     match created_ms {
-        Some(c) if started_at_ms > 0 => c.abs_diff(started_at_ms) <= SESSION_PROC_TOLERANCE_MS,
+        Some(c) if started_at_ms > 0 => c >= started_at_ms.saturating_sub(SESSION_PROC_EARLY_MS) && c <= started_at_ms.saturating_add(SESSION_PROC_LATE_MS),
         _ => false,
     }
 }
