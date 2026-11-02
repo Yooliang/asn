@@ -8,12 +8,14 @@ on:
       - 'relay/machine/**'
       - 'relay/cloud-agent/**'
       - 'supabase/functions/**'
+      - 'relay/asn/src-tauri/src/envc.rs'
       - '.github/workflows/asn-backend-tests.yml'
   pull_request:
     paths:
       - 'relay/machine/**'
       - 'relay/cloud-agent/**'
       - 'supabase/functions/**'
+      - 'relay/asn/src-tauri/src/envc.rs'
       - '.github/workflows/asn-backend-tests.yml'
   workflow_dispatch:
 
