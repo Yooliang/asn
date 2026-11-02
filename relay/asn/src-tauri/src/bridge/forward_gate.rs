@@ -207,6 +207,33 @@ mod tests {
     }
 
     #[test]
+    fn 行尾編號_from_的值含空白_也含_id_字樣_仍只認行尾那個() {
+        // 群組抬頭的 from 變成「名字（設備名）」，設備名可能含空白，甚至帶 ` id=…`
+        let head = format!("[群組 專案群] trust=member from=W/牧陽（牧陽 Aegis id={B} x） #3 id={A}");
+        assert_eq!(trailing_id(&head).as_deref(), Some(A));
+        let head = format!("[群組 專案群] trust=member from=W/牧陽（家 id={B} engine=claude reply=yes） #3 id={A}");
+        assert_eq!(trailing_id(&head).as_deref(), Some(A));
+        // 來信抬頭：from 裡有空白與 id=…，行尾固定尾巴前的那個才算
+        let head = format!("[RELAY 來信] trust=member from=W/牧陽 Aegis id={B} to=T-甲 id={A} engine=claude reply=yes");
+        assert_eq!(trailing_id(&head).as_deref(), Some(A));
+        // from 的值最後一段是 id=…、真正的編號沒補上：不能把 from 裡的當成編號
+        assert_eq!(trailing_id(&format!("[群組 專案群] trust=member from=W/牧陽 Aegis id={B} #3")), None);
+    }
+
+    #[test]
+    fn hook_群組抬頭_from_含空白與_id_字樣_只看行尾的編號() {
+        let f = flight();
+        let ok = format!("[群組 專案群] trust=member from=W/牧陽（牧陽 Aegis id={B}） #3 id={A}
+內文");
+        assert_eq!(check(&call("T-甲", &ok), Some(&f)).0, Verdict::Allow);
+        // from 裡的 id 是進行中的、行尾卻是不在進行中的編號：擋
+        let flight_b: HashMap<String, String> = [(B.to_string(), "T-乙".to_string())].into_iter().collect();
+        assert!(matches!(check(&call("T-乙", &ok), Some(&flight_b)).0, Verdict::Deny(_)), "from 裡的 id 不算");
+        // 行尾編號對、收件人錯：照樣擋
+        assert_eq!(check(&call("T-丙", &ok), Some(&f)).0, Verdict::Deny("收件人應為 T-甲".into()));
+    }
+
+    #[test]
     fn 補編號_已有就不動_沒有就補在第一行行尾() {
         let head = format!("[RELAY 來信] trust=member from=W/X to=T id={A} engine=claude reply=yes");
         let t = format!("{head}\n內文");
