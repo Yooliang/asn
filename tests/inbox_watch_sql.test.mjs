@@ -25,7 +25,8 @@ test('靜態：排程可重跑（先取消同名排程再建）、先用 false �
   assert.match(cron, /cron\.unschedule\('asn-inbox-watch'\) where exists/)
   assert.match(cron, /cron\.schedule\('asn-inbox-watch', '\*\/5 \* \* \* \*', \$\$ select public\.asn_relay_inbox_watch\(false\); \$\$\)/)
   assert.doesNotMatch(sql, /insert into relay\.messages/)
-  assert.match(sql, /public\.asn_relay_send\(r\.id, v_agent, v_alias, null, v_body, null, false, null, false\)/)
+  assert.match(sql, /v_res := public\.asn_relay_send\(r\.id, v_agent, v_alias, null, v_body, null, false, null, false\)/)
+  assert.match(sql, /v_agent constant text := '收信監控收發室'/, '寄件人名稱以收發室結尾')
 })
 
 let PGlite = null
@@ -45,6 +46,7 @@ async function boot() {
     create function public.asn_relay_send(p_from_node text, p_from_agent text, p_to_node text, p_to_agent text, p_body text, p_reply_to uuid, p_expects_reply boolean, p_signed_user uuid, p_as_person boolean)
       returns jsonb language plpgsql as $$ begin
         if p_from_node = 'BOOM' then raise exception 'send failed'; end if;
+        if p_from_node = 'REFUSED' then return jsonb_build_object('error', 'unknown_to_node'); end if;
         insert into relay.messages(from_node, from_agent, to_node, body) values (p_from_node, p_from_agent, p_to_node, p_body);
         return jsonb_build_object('ok', true); end $$;`)
   // pglite 沒有 pg_cron：只跑排程之前的部分
@@ -56,20 +58,27 @@ async function boot() {
   const unacked = (to, ago, n = 1) => db.query(
     "insert into relay.messages(from_node, from_agent, to_node, body, created_at) select 'SENDER', 'x', $1, 'b', now() - $2::interval from generate_series(1, $3)", [to, ago, n])
   const run = async send => (await q('select public.asn_relay_inbox_watch($1) r', [send]))[0].r
-  const sent = () => q("select from_node, body from relay.messages where from_agent = '收信監控' order by created_at, body")
+  const sent = () => q("select from_node, body from relay.messages where from_agent = '收信監控收發室' order by created_at, body")
+  // 讓「標成卡住」已經過了 N 分鐘（模擬持續卡著）
+  const aged = (id, mins) => db.query("update relay.inbox_watch set stuck_since = now() - ($2 || ' minutes')::interval where node = $1", [id, String(mins)])
   const st = id => q('select * from relay.inbox_watch where node = $1', [id]).then(r => r[0])
-  return { db, q, node, unacked, run, sent, st }
+  return { db, q, node, unacked, run, sent, st, aged }
 }
 
 test('實跑：卡 16 分鐘＝stuck；影子跑不寄；開寄信後補寄一次；之後不重複', { skip }, async () => {
-  const { node, unacked, run, sent, st } = await boot()
+  const { node, unacked, run, sent, st, aged } = await boot()
   await node('PC', { machine: '新電腦' })
   await unacked('PC', '16 minutes', 3)
   assert.deepEqual(await run(false), { nodes: 1, stuck: 1, sent: 0, send_enabled: false })
   assert.equal((await st('PC')).state, 'stuck')
   assert.equal((await st('PC')).level, '1-10')
   assert.equal((await sent()).length, 0, '影子跑不寄信')
-  assert.equal((await run(true)).sent, 1, '開寄信後第一輪補寄')
+  assert.equal((await run(true)).sent, 0, '剛標成卡住還不到 10 分鐘：只標記，不寄（電腦剛開機不誤報）')
+  await aged('PC', 11)
+  assert.equal((await run(false)).sent, 0, '已經卡夠久了，但影子跑（p_send = false）還是不寄')
+  assert.equal((await sent()).length, 0)
+  assert.equal((await st('PC')).notified_at, null)
+  assert.equal((await run(true)).sent, 1, '持續卡著超過 10 分鐘，開寄信後補寄')
   const m = await sent()
   assert.equal(m.length, 1)
   assert.match(m[0].body, /新電腦.*3 封.*卡住/)
@@ -89,9 +98,11 @@ test('實跑：筆數分級；5～15 分鐘不算卡；沒信不算卡', { skip 
 })
 
 test('實跑：24 小時再提醒；恢復寄一封；介於兩個門檻之間不恢復；影子跑期間就恢復的不寄恢復', { skip }, async () => {
-  const { db, node, unacked, run, sent, st } = await boot()
+  const { db, node, unacked, run, sent, st, aged } = await boot()
   await node('PC', { machine: '新電腦' })
   await unacked('PC', '16 minutes')
+  await run(true)
+  await aged('PC', 11)
   await run(true)
   assert.equal((await sent()).length, 1)
   // 24 小時內不再提醒；超過 24 小時再提醒一次
@@ -137,14 +148,17 @@ test('實跑：手機、不在線、停用、額度扣住中的節點不看；�
 })
 
 test('實跑：擁有者查不到、單一節點寄信出錯，不影響其他節點；每節點每小時最多 3 封', { skip }, async () => {
-  const { db, node, unacked, run, sent, st } = await boot()
-  await node('NOOWNER', { owner: null }); await node('BOOM'); await node('GOOD', { machine: '好電腦' }); await node('BUSY', { machine: '忙電腦' })
-  for (const id of ['NOOWNER', 'BOOM', 'GOOD', 'BUSY']) await unacked(id, '20 minutes')
-  for (let i = 0; i < 3; i++) await db.query("insert into relay.messages(from_node, from_agent, to_node, body, fanout_id) values ('BUSY', '收信監控', 'u:x', 'old', gen_random_uuid())")
+  const { db, node, unacked, run, sent, st, aged } = await boot()
+  await node('NOOWNER', { owner: null }); await node('BOOM'); await node('REFUSED'); await node('GOOD', { machine: '好電腦' }); await node('BUSY', { machine: '忙電腦' })
+  for (const id of ['NOOWNER', 'BOOM', 'REFUSED', 'GOOD', 'BUSY']) await unacked(id, '20 minutes')
+  await run(true)
+  for (const id of ['NOOWNER', 'BOOM', 'REFUSED', 'GOOD', 'BUSY']) await aged(id, 11)
+  for (let i = 0; i < 3; i++) await db.query("insert into relay.messages(from_node, from_agent, to_node, body, fanout_id) values ('BUSY', '收信監控收發室', 'u:x', 'old', gen_random_uuid())")
   const r = await run(true)
-  assert.equal(r.nodes, 4)
-  assert.deepEqual((await sent()).filter(m => m.body !== 'old').map(m => m.from_node), ['GOOD'], '只有 GOOD 寄成功；沒有擁有者、出錯、超過每小時 3 封的都沒寄')
-  for (const id of ['NOOWNER', 'BOOM', 'GOOD', 'BUSY']) assert.equal((await st(id)).state, 'stuck', id)
+  assert.equal(r.nodes, 5)
+  assert.equal(r.sent, 1)
+  assert.deepEqual((await sent()).filter(m => m.body !== 'old').map(m => m.from_node), ['GOOD'], '只有 GOOD 寄成功；沒有擁有者、丟例外、被拒絕（回傳 error）、超過每小時 3 封的都沒寄')
+  for (const id of ['NOOWNER', 'BOOM', 'REFUSED', 'GOOD', 'BUSY']) assert.equal((await st(id)).state, 'stuck', id)
   assert.ok((await st('GOOD')).notified_at, '寄成功的才記 notified_at')
-  assert.equal((await st('BUSY')).notified_at, null, '沒寄成的下一輪再試')
+  for (const id of ['REFUSED', 'BOOM', 'BUSY']) assert.equal((await st(id)).notified_at, null, id + ' 沒寄成，下一輪再試')
 })
