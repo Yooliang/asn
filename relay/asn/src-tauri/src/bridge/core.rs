@@ -336,6 +336,10 @@ pub struct Core {
     next_probe_at: u64,
     /// 試送中的那一封（信件編號或群組訊息編號）；試送時放行額度閘門
     probe_id: Option<String>,
+    /// 連續幾次試送沒等到 worker 的任何回報（收到真的 Quota 事件就歸零）
+    probe_misses: u32,
+    /// 這次試送是在暫停時間已過之後才送的
+    probe_after_reset: bool,
     probing: bool,
 }
 
@@ -385,7 +389,7 @@ impl Core {
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
-            quota_until: 0, quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), late_from: None, hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probing: false,
+            quota_until: 0, quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), late_from: None, hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probing: false,
         };
         c.restore();
         c
@@ -1475,12 +1479,11 @@ impl Core {
     /// 到期的順位訊息：重讀群組（自該則之後），把延遲期間新到的訊息附上再轉交。轉交成功才移除；失敗退避 30 秒再試，連續 120 次放棄
     pub async fn release_held(&mut self, now: u64) {
         self.now = now;
-        // 收發室 worker 額度扣住中：整批先不轉交（試送由 quota_probe 一次一則）
-        if self.quota_until > 0 {
-            return;
-        }
+        // 收發室 worker 額度扣住中：經過 worker 的項目先不轉交（額度扣住的由 quota_probe 一次一則試送）；
+        // 其他引擎（Gemini、Codex 等）的視窗不經 worker，順位延遲到時間照常轉交
+        let hold = self.quota_until > 0;
         // 額度扣住過的群組訊息（held_at > 0）恢復後馬上轉交，不看原本的到期時間
-        let due: Vec<Held> = self.held.items().iter().filter(|h| h.due <= now || h.held_at > 0).cloned().collect();
+        let due: Vec<Held> = self.held.items().iter().filter(|h| (h.due <= now || h.held_at > 0) && (!hold || (h.held_at == 0 && !self.room_item_via_worker(h)))).cloned().collect();
         let mut expired: Vec<Held> = vec![];
         for h in due {
             self.release_held_item(&h, now, &mut expired).await;
@@ -1749,11 +1752,22 @@ impl Core {
             let Some(i) = self.idx(&id) else { continue };
             let p = self.pending[i].clone();
             if p.state == State::Forwarding && now.saturating_sub(p.t0) > self.cfg.forward_timeout_ms {
-                // 額度扣住期間試送的那一封沒等到 worker 的任何回報：當作試送失敗，信回到扣住（不寄逾時通知、不 ack、不記轉交逾時），一小時後再試
+                // 額度扣住期間試送的那一封沒等到 worker 的任何回報：沒回應不是額度用完的證據（worker 可能卡死或壞了），
+                // 所以不延長暫停。已經過了暫停時間才試送的，第一次沒回應就解除；還沒到的，連續第二次沒回應才解除。
+                // 還沒解除時這封回到扣住（不寄逾時通知、不 ack、不記轉交逾時），一小時後再試；解除時走下面一般的逾時流程
                 if self.probe_id.as_deref() == Some(id.as_str()) {
-                    self.log.line(&format!("quota probe id={id} got no answer: back to held"));
-                    self.on_quota(None, "probe timeout").await;
-                    continue;
+                    self.probe_misses += 1;
+                    if self.probe_after_reset || self.probe_misses >= 2 {
+                        self.log.line(&format!("quota probe id={id} got no answer (miss {}): hold released, normal timeout", self.probe_misses));
+                        self.quota_release("probe unanswered");
+                        self.quota_ep = None;
+                    } else {
+                        self.log.line(&format!("quota probe id={id} got no answer (miss {}): back to held", self.probe_misses));
+                        self.probe_id = None;
+                        self.quota_hold_forwarding();
+                        self.persist();
+                        continue;
+                    }
                 }
                 self.pending[i].state = State::Done;
                 if p.room.is_some() {

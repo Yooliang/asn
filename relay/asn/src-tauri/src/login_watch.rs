@@ -273,6 +273,11 @@ pub fn record_forward_timeout(now_ms: i64) {
 pub fn forward_timeouts_since(since_ms: i64) -> u32 {
     FORWARD_TIMEOUTS.count_since(since_ms)
 }
+/// 測試用：[lo_ms, hi_ms] 之間記到的逾時次數（測試平行跑，各測試用自己獨有的時間區段才不會互相污染）
+#[cfg(test)]
+pub fn forward_timeouts_between(lo_ms: i64, hi_ms: i64) -> u32 {
+    FORWARD_TIMEOUTS.0.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|&&t| t >= lo_ms && t <= hi_ms).count() as u32
+}
 
 // ---------- 通知（純函式＋出口） ----------
 /// 送給後台的四個欄位（後台依節點查擁有者與組內文；時間一律 UTC）

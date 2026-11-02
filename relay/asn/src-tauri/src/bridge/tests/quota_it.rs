@@ -196,22 +196,99 @@ async fn 試送又撞額度_繼續扣住_暫停時間只延長_不重複通知_�
 }
 
 #[tokio::test]
-async fn 試送一直沒有回應_信不丟_不寄逾時_不_ack_回到扣住() {
+async fn 試送沒回應不是額度用完的證據_連續兩次沒回應就解除_走一般逾時並記轉交逾時() {
+    // 這個測試會真的讓轉交逾時並被記一筆；用較早的時間區段，免得別的測試「沒有被記到逾時」的檢查被它污染
+    const TQ: u64 = T0 + 150 * 86_400_000;
+    const RESETS_S: u64 = TQ / 1000 + 3 * 3600;
     let mut h = harness(&[("T-乙", "idle")]).await;
     h.fr.put(mail(1, json!({})));
     h.core.pull("test", TQ).await;
     h.core.on_worker_line(quota_line(RESETS_S), TQ + 1000).await;
+    let until = h.core.inbox_hold_until();
+    // 第一次試送（還沒到暫停時間）：沒回應 → 這封回到扣住，不寄逾時、不 ack、不記轉交逾時，暫停時間不延長
     let p1 = TQ + 1000 + HOUR;
     h.core.tick(p1).await;
     assert_eq!(h.said().len(), 2);
     h.core.tick(p1 + 121_000).await;
     assert!(bodies(&h).iter().all(|b| !b.contains("逾時")), "{:?}", bodies(&h));
     assert!(h.fr.acked().is_empty());
-    assert_eq!(held_ids(&h), vec![uid(1)], "試送沒回應＝試送失敗，信回到扣住");
-    assert!(h.core.inbox_hold_until().is_some());
-    assert_eq!(crate::login_watch::forward_timeouts_since(TQ as i64 - 1), 0);
-    h.core.tick(p1 + 121_000 + HOUR).await;
+    assert_eq!(held_ids(&h), vec![uid(1)], "第一次沒回應：回到扣住");
+    assert_eq!(h.core.inbox_hold_until(), until, "沒回應不延長暫停");
+    assert_eq!(crate::login_watch::forward_timeouts_between(TQ as i64 - 1, TQ as i64 + 10 * HOUR as i64), 0);
+    // 第二次試送（一小時後，仍沒到暫停時間）：連續第二次沒回應 → 解除，信走一般流程（轉交逾時通知、ack、記轉交逾時）
+    let p2 = p1 + HOUR;
+    h.core.tick(p2).await;
     assert_eq!(h.said().len(), 3, "一小時後再試一次");
+    h.core.tick(p2 + 121_000).await;
+    assert_eq!(h.core.inbox_hold_until(), None, "連續兩次沒回應：解除扣住（名單會報空值）");
+    assert!(bodies(&h).iter().any(|b| b.contains("逾時")), "走一般逾時通知");
+    assert_eq!(h.fr.acked(), vec![uid(1)]);
+    assert!(crate::login_watch::forward_timeouts_between(TQ as i64 - 1, TQ as i64 + 10 * HOUR as i64) >= 1, "照舊記轉交逾時");
+    assert!(held_ids(&h).is_empty());
+    h.core.tick(p2 + 130_000).await;
+    h.core.tick(p2 + 140_000).await;
+    assert_eq!(*hold_posts(&h).last().unwrap(), Value::Null, "最後報空值");
+}
+
+#[tokio::test]
+async fn 過了暫停時間才試送_第一次沒回應就解除() {
+    const TQ: u64 = T0 + 150 * 86_400_000;
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", TQ).await;
+    // 時間不明：暫停一小時，第一次試送就在暫停時間到的時候
+    h.core.on_worker_line(quota_line(TQ / 1000 - 10), TQ + 1000).await;
+    let p1 = TQ + 1000 + HOUR;
+    h.core.tick(p1).await;
+    assert_eq!(h.said().len(), 2);
+    h.core.tick(p1 + 121_000).await;
+    assert_eq!(h.core.inbox_hold_until(), None, "已過暫停時間才試送：第一次沒回應就解除");
+    assert!(bodies(&h).iter().any(|b| b.contains("逾時")));
+    assert_eq!(h.fr.acked(), vec![uid(1)]);
+}
+
+#[tokio::test]
+async fn 中間收到真的額度事件_沒回應的計數歸零() {
+    const TQ: u64 = T0 + 150 * 86_400_000;
+    const RESETS_S: u64 = TQ / 1000 + 6 * 3600;
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", TQ).await;
+    h.core.on_worker_line(quota_line(RESETS_S), TQ + 1000).await;
+    let p1 = TQ + 1000 + HOUR;
+    h.core.tick(p1).await;
+    h.core.tick(p1 + 121_000).await; // 第一次沒回應
+    let p2 = p1 + HOUR;
+    h.core.tick(p2).await;
+    h.core.on_worker_line(quota_line(RESETS_S), p2 + 2000).await; // 這次 worker 明確回報額度用完：計數歸零
+    h.core.tick(p2 + 125_000).await;
+    assert!(h.core.inbox_hold_until().is_some() && held_ids(&h) == vec![uid(1)]);
+    let p3 = p2 + 2000 + HOUR;
+    h.core.tick(p3).await;
+    h.core.tick(p3 + 121_000).await; // 歸零後的第一次沒回應：仍扣住
+    assert!(h.core.inbox_hold_until().is_some(), "計數已歸零，只算第一次沒回應");
+    assert_eq!(held_ids(&h), vec![uid(1)]);
+    assert!(h.fr.acked().is_empty());
+}
+
+#[tokio::test]
+async fn 額度扣住期間_其他引擎視窗的群組排隊訊息到時間照常轉交_經過_worker_的不放() {
+    let mut h = harness(&[("T-視窗甲", "idle")]).await;
+    // 另一種引擎的視窗（不經收發室 worker）；沒載入引擎，轉交會失敗，但能證明這則有被放行處理
+    let mut g = h.core.roster[0].clone();
+    g.name = "T-G".into();
+    g.engine = "gemini".into();
+    h.core.roster.push(g);
+    h.core.on_worker_line(quota_line(RESETS_S), TQ).await;
+    let rank2 = |seq: u64, who: &str| rmsg(seq, json!({"forMe": {who: true}, "wake": {"rank": 2, "total": 2, "before": ["別人"]}}));
+    set_rooms(&h, vec![room(vec![rank2(2, "T-G"), rank2(3, "T-視窗甲")], json!([{"member": "T~T-G", "read_seq": 1}, {"member": "T~T-視窗甲", "read_seq": 1}]))]);
+    h.core.pull_rooms(TQ + 2000).await;
+    assert!(h.said().is_empty());
+    // 順位延遲 60 秒後到時間：Gemini 視窗那則照常轉交（這裡因為沒載入引擎而失敗，但有被處理）；經過 worker 的那則仍扣住
+    h.core.tick(TQ + 2000 + 61_000).await;
+    assert!(h.core.log.has("cannot hand room=R1 #2"), "非 worker 引擎的排隊訊息到時間照常轉交");
+    assert!(!h.core.log.has("cannot hand room=R1 #3"));
+    assert!(h.said().is_empty(), "經過 worker 的群組訊息不放");
 }
 
 #[tokio::test]

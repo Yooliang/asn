@@ -53,6 +53,7 @@ impl Core {
         }
         self.quota_until = 0;
         self.probe_id = None;
+        self.probe_misses = 0;
         self.log.line(&format!("quota hold released ({why}): resending held mail in order"));
         self.persist();
     }
@@ -81,7 +82,17 @@ impl Core {
         self.probe_id = None;
         self.log.line(&format!("worker quota exhausted ({kind}): hold until {} (resets_at={resets_at:?}), next probe {}", taipei_hm(until), taipei_hm(self.next_probe_at)));
         self.quota_ep.get_or_insert_with(Default::default);
-        // 轉交中的信：個人信改成 Held；群組訊息改排進 HeldStore（存檔，重置後向後台重讀）
+        self.probe_misses = 0; // 收到真的額度事件：試送沒回應的計數歸零
+        let newly = self.quota_hold_forwarding();
+        self.persist();
+        for m in newly {
+            self.quota_notify_sender(&m).await;
+        }
+    }
+
+    /// 轉交中的信改成扣住：個人信改成 Held；群組訊息改排進 HeldStore（存檔，恢復後向後台重讀）。回傳新扣住的個人信（通知寄件人用）
+    pub(super) fn quota_hold_forwarding(&mut self) -> Vec<Mail> {
+        let until = self.quota_until;
         let ids: Vec<String> = self.pending.iter().filter(|p| p.state == State::Forwarding).map(|p| p.id.clone()).collect();
         let mut newly: Vec<Mail> = vec![];
         for id in ids {
@@ -105,10 +116,14 @@ impl Core {
                 self.log.line(&format!("mail id={id} held for quota (not acked)"));
             }
         }
-        self.persist();
-        for m in newly {
-            self.quota_notify_sender(&m).await;
-        }
+        newly
+    }
+
+    /// 排隊中的群組訊息的收件視窗是不是要經過收發室 worker（額度扣住時，其他引擎的視窗不受影響）
+    pub(super) fn room_item_via_worker(&self, h: &Held) -> bool {
+        let w = self.canonical_target(&format!("room:{}", h.room_id), &rooms::member_window(&h.member));
+        let target = if w.is_empty() { self.unaddressed_window().unwrap_or_default() } else { w };
+        target.is_empty() || self.via_worker(&target)
     }
 
     /// 通知私信原寄件人：同一寄件人同一次額度用完只通知一次；收發室寄來的與收發室自己寫的通知不回
@@ -264,6 +279,7 @@ impl Core {
             }
         };
         self.next_probe_at = now + QUOTA_RETRY_MS;
+        self.probe_after_reset = now >= self.quota_until; // 暫停時間已過才試送：第一次沒回應就解除
         self.quota_until = self.quota_until.max(now + QUOTA_RETRY_MS); // 先延長，試送失敗時暫停時間不會中斷
         self.probing = true;
         if let (true, Some((_, _, id))) = (pick_mail, mail) {
