@@ -49,7 +49,7 @@ import { LAUNCHERS_POLL_MS, isAuthDenied, nextLaunchersDelay } from './lib/launc
 import { initialOpsCtx, sharedWhy } from './lib/partner-ops.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, runArchive, withArchivedGroup } from './lib/archive.mjs'
-import { backgroundRestoreNoticeText, collectLaunchFailures, findBackgroundTimeouts, launchFailedNoticeText } from './lib/partner-launch-notify.mjs'
+import { backgroundRestoreNoticeText, collectLaunchFailures, existingPartnerNoticeText, findBackgroundTimeouts, launchFailedNoticeText } from './lib/partner-launch-notify.mjs'
 import { ONBOARD_STORE, planOnboarding } from './lib/onboard.mjs'
 import { friendId } from './lib/roster.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher } from './lib/model-switch.mjs'
@@ -796,6 +796,7 @@ async function submitPartnerDlg() {
   const display = !foregroundOnly && partnerShowDisplay.value && partnerDlg.display === 'background' ? 'background' : 'foreground'
   const pend = pendingFriend({ node: partnerDlg.node, device: partnerDlg.deviceLabel, name: partnerDlg.name.trim(), profileId: partnerDlg.profile, mode, launchDisplay: display })
   launchPending.value = [...launchPending.value, pend]
+  let existingHit = false   // 同名夥伴已在跑（沒另外開新的）
   try {
     if (partnerDlg.node === info.node) {
       if (partnerShowDisplay.value) {
@@ -809,7 +810,12 @@ async function submitPartnerDlg() {
         ? { profile: 'pi', name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, display: 'foreground', first_message: partnerDlg.firstMessage.trim(), pi_provider: viaPi.provider, pi_model: viaPi.model }
         : { profile: partnerDlg.profile, name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, display, first_message: foregroundOnly ? partnerDlg.firstMessage.trim() : '', ...(launchModelPick.value ? { model: launchModelPick.value } : {}) })
       // 內建終端開不起來、改用一般視窗：後端只在 ASN 這次執行的第一次帶 note，這裡照實顯示
-      if (opened?.note) showLaunchNotice({ title: '已改用一般視窗', body: opened.note })
+      if (opened?.existing) {
+        existingHit = true
+        // 同名夥伴已在跑：後端沒有另開，只把原本那個切到前景；不會多出新的夥伴，所以拿掉啟動中列
+        launchPending.value = launchPending.value.filter(p => p.id !== pend.id)
+        showLaunchNotice(existingPartnerNoticeText(partnerDlg.name, opened.reason, opened.initial_dropped))
+      } else if (opened?.note) showLaunchNotice({ title: '已改用一般視窗', body: opened.note })
     } else {
       // 經 pi：profile 一律 pi，帶那台清單裡的提供者與模型（不在清單裡就不送）；其他開法照舊
       const body = remoteLaunchRequest({ node: partnerDlg.node, profile: partnerDlg.profile, name: partnerDlg.name, cwd: partnerDlg.cwd, first: partnerDlg.firstMessage, piModel: partnerDlg.piModel }, { run: partnerRunChoice.value, row: dlgRow.value, launcher: dlgRemoteLauncher.value })
@@ -820,7 +826,7 @@ async function submitPartnerDlg() {
     Object.assign(launchPrefs, bumpRecentCwd(launchPrefs, partnerDlg.cwd))
     void saveLaunchPrefs()
     closePartnerDlg()
-    if (partnerDlg.node === info.node && !foregroundOnly && partnerDlg.firstMessage.trim()) {
+    if (partnerDlg.node === info.node && !foregroundOnly && !existingHit && partnerDlg.firstMessage.trim()) {
       setTimeout(async () => {
         const id = friendId(partnerDlg.node, partnerDlg.name.trim())
         if (core.friends.has(id)) await core.send(id, partnerDlg.firstMessage.trim())

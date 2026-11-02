@@ -10,6 +10,17 @@ export function backgroundRestoreNoticeText(partnerName) {
   }
 }
 
+export function existingPartnerNoticeText(partnerName, reason, initialDropped = false) {
+  const name = String(partnerName ?? '').trim() || '夥伴'
+  const why = String(reason ?? '').trim()
+  const base = why ? `「${name}」已經在跑，沒有另外開新的。切到前景沒成功：${why}` : `「${name}」已經在跑，已切到前景。`
+  return {
+    title: '夥伴已在跑',
+    body: initialDropped ? `${base}
+開場訊息沒有送出。` : base,
+  }
+}
+
 export function launchFailedNoticeText(partnerName, detail) {
   const name = String(partnerName ?? '').trim() || '夥伴'
   const reason = String(detail ?? '').trim() || '原因不明'
