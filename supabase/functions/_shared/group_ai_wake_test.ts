@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { ACCOUNT_ACTIONS, type AccountDeps, handleAccountAction } from "./account.ts";
-import { shouldRespond } from "./rooms.ts";
+import { postMessage, shouldRespond } from "./rooms.ts";
 
 // AI 之間互相叫醒（migration 20261023190000_group_ai_wake_limit.sql）：
 //  1. 叫醒判斷：AI 發的訊息明確點名另一個 AI，被點名的要被叫醒；超過上限（wake_ok=false）就不叫醒
@@ -83,4 +83,15 @@ Deno.test("migration：交易內、新函式只給 service_role、不刪東西�
     .replace(/  v_human := [^\n]*\n  -- AI 發言[\s\S]*?  end if;\n/, "  v_sup := relay.room_wake_filter(p_room, v_st, v_rt, v_mentions);\n  v_human := v_trust = 'owner' or v_key = '~owner' or v_key like '~u:%';\n")
     .replace(",\n                            'wake_limited', v_limited);", ");");
   assertEquals(stripped, fn(base));
+});
+
+Deno.test("發言達叫醒上限：回應帶 wake_limited 與人數，不回成員鍵；沒達上限不帶", async () => {
+  const mk = (extra: Record<string, unknown>) => ({
+    ring: () => Promise.resolve(),
+    rpc: (fn: string) => Promise.resolve({ data: fn === "asn_relay_room_members" ? { members: [] } : { seq: 5, bell_topics: [], ...extra }, error: null }),
+  });
+  const limited = await postMessage(mk({ wake_limited: true, suppressed: ["W~甲", "W~乙"] }) as never, { node: "W", agent: "丙" }, "r1", "嗨");
+  assertEquals(limited.body, { seq: 5, mentions: [], wake_limited: true, not_woken: 2 });
+  const normal = await postMessage(mk({ wake_limited: false, suppressed: ["W~甲"] }) as never, { node: "W", agent: "丙" }, "r1", "嗨");
+  assertEquals(normal.body, { seq: 5, mentions: [] });
 });

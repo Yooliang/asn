@@ -105,6 +105,51 @@ test('實跑：上限 5 輪——前 5 則 AI 點名 AI 會叫醒，第 6 則起
   assert.equal((await q(db, `select count(*)::int n from relay.room_wakes`))[0].n, 0, '同租戶本來就不記叫醒額度')
 })
 
+test('實跑：達上限時群組多一則系統訊息——每一輪只寫一則、不算輪數、不叫醒人；真人發言後下一輪再寫', { skip }, async () => {
+  const db = await boot()
+  const room = await oneTenantRoom(db)
+  await setLimit(db, U1, 1)
+  await human(db, room, '開始', [A])
+  await aiPost(db, room, A, '第1輪', [B])
+  const notices = async () => (await q(db, `select seq, body, mentions, from_kind from relay.room_messages where room_id = $1 and from_kind = 'system' and body like '（AI 之間%' order by seq`, [room]))
+  assert.equal((await notices()).length, 0, '還沒達上限不寫')
+  const r2 = await aiPost(db, room, B, '第2輪', [A])
+  assert.equal(r2.wake_limited, true)
+  let n = await notices()
+  assert.equal(n.length, 1, '第一次達上限寫一則')
+  assert.equal(n[0].seq, r2.seq + 1, '回傳的 seq 仍是發言那則')
+  assert.deepEqual(n[0].mentions, [], '系統訊息不點名任何人')
+  assert.match(n[0].body, /主人可在設定調高上限/)
+  await aiPost(db, room, A, '第3輪', [B])
+  assert.equal((await notices()).length, 1, '同一輪不重複')
+  // 系統訊息不算輪數：真人發言後從零算，上限 1 時第一則 AI 點名照常叫醒
+  await human(db, room, '繼續', [A])
+  const r4 = await aiPost(db, room, A, '第4輪', [B])
+  assert.equal(r4.wake_limited, false)
+  assert.deepEqual(r4.suppressed, [])
+  assert.equal((await notices()).length, 1, '還沒再達上限')
+  assert.equal((await aiPost(db, room, B, '第5輪', [A])).wake_limited, true)
+  assert.equal((await notices()).length, 2, '新的一輪再寫一則')
+  // 真人讀得到
+  const rd = await readAs(db, { node: P1, room, signed: U1 })
+  assert.ok(rd.messages.some(m => m.from_kind === 'system' && /已達上限/.test(m.body)))
+})
+
+test('靜態：叫醒上限提示的 migration 只多加行；回復腳本放回原文', () => {
+  const body = s => { const i = s.indexOf('$function$') + 10; return s.slice(i, s.indexOf('$function$', i)).trim().split('\n').map(l => l.trimEnd()) }
+  const NEW = read('20261102180000_wake_limit_notice.sql')
+  const old = read('20261023190000_group_ai_wake_limit.sql')
+  const a = body(old.slice(old.indexOf('create or replace function public.asn_relay_room_post')))
+  const b = body(NEW.slice(NEW.indexOf('CREATE OR REPLACE FUNCTION public.asn_relay_room_post')))
+  let j = 0
+  for (const l of b) if (j < a.length && l === a[j]) j++
+  assert.equal(j, a.length, '原有的行都要在，順序不變')
+  assert.equal(b.length - a.length, 10, '只多 10 行')
+  assert.doesNotMatch(NEW, /grant execute|revoke all|create policy|create table|drop /i)
+  const down = fs.readFileSync(new URL('../supabase/sql/rollback/20261102180000_wake_limit_notice_down.sql', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+  assert.deepEqual(body(down), a, '回復腳本是原文')
+})
+
 test('實跑：真人發言就重新起算；沒點名 AI 的 AI 訊息、只點名真人的 AI 訊息不算一輪', { skip }, async () => {
   const db = await boot()
   await setLimit(db, U1, 5)
@@ -200,7 +245,7 @@ test('實跑：跨租戶群組用主持人帳號的設定，不看發言者的',
 // ===== 還原驗證：拿掉被守的東西，測試要變紅 =====
 const runReverts = async (name, mutate, expectRed) => {
   if (skip) return
-  const db = await boot({ mutate: { [MIG]: mutate } })
+  const db = await boot({ mutate: { [MIG]: mutate, '20261102180000_wake_limit_notice.sql': mutate } })
   await setLimit(db, U1, 5)
   const room = await oneTenantRoom(db)
   await human(db, room, '開始', [A])

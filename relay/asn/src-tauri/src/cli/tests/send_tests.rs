@@ -139,6 +139,16 @@ fn 格式與內容檢查_全部結束碼_1_不打後端_超過_20000_字被擋_�
 }
 
 #[test]
+fn 群組發言達叫醒上限會印提示_沒達上限不印() {
+    use crate::cli::send::wake_note;
+    assert_eq!(wake_note(&json!({"seq": 1})), None);
+    assert_eq!(wake_note(&json!({"seq": 1, "wake_limited": false, "not_woken": 2})), None);
+    let n = wake_note(&json!({"seq": 1, "wake_limited": true, "not_woken": 2})).unwrap();
+    assert!(n.contains("沒有叫醒 2 位") && n.contains("私信"), "{n}");
+    assert!(wake_note(&json!({"wake_limited": true})).unwrap().contains("沒有叫醒人"));
+}
+
+#[test]
 fn 群組_stdin_body_file_後端錯誤_節點自動判定() {
     let b = backend(200);
     let f = fx(&b.url(), Some("T-視窗甲"));

@@ -53,6 +53,9 @@ export const escapeBody = body => String(body ?? '').replace(/(^|[\n\r])([^\S\r\
 // 內文行首以「你是 ASN 的聊天對象：」開頭的行，escapeBody 也會跳脫。與 Rust 內建橋 mail.rs、pi 擴充 inbox.mjs 的 RESPONSIVE_NOTE 逐字一致。
 export const RESPONSIVE_NOTE = '你是 ASN 的聊天對象：耗時的工作（建置、全套測試、等 CI／審查／部署）交給子代理或背景做，自己只做輕的事、隨時能回信；不要在前景空等超過 2 分鐘。'
 
+// 群組發言達 AI 互相叫醒上限時要印的提示（room_post 的回應帶 wake_limited）；沒達上限回空字串。與 Rust cli/send.rs 的 wake_note 逐字一致
+export const wakeNote = r => (r?.wake_limited === true ? `（這次點名沒有叫醒${Number.isInteger(r.not_woken) ? ` ${r.not_woken} 位` : '人'}：已達 AI 互相叫醒上限，對方只留未讀。要對方馬上看到請改用私信；真人發言後會重新計算）` : '')
+
 // 給人看的名稱：換行與控制字元變空白、拿掉會干擾抬頭的括號引號、最長 40 字
 export const cleanLabel = v => typeof v === 'string'
   ? v.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').replace(/[「」『』\[\]【】]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40)
