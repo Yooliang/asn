@@ -1,7 +1,7 @@
 //! `asn room confirm-request`／`asn room confirm-status`：群組裡被別人點名的 AI，做危險操作之前請主持人確認、查有沒有放行。
 //! 規格見 docs/design/HUMANS-AND-GROUPS.md 2.5.1：這是機制，不是提示——後台記一筆待確認，只有主持人本人（簽章）按了同意才算放行，放行只能用一次、24 小時內有效。
 //!   asn room confirm-request --room <群組id|群組名> --kind <類別> --summary "<一句話說明要做什麼>"
-//!     類別：data_change（修改或刪除既有資料，含既有檔案）、deploy（部署上線）、spend（花錢付款）、external_send（對外寄送）、account_config（動到帳號或設定）、other（其他不可回復的操作）
+//!     類別：data_change（修改或刪除既有資料，含既有檔案）、deploy（部署上線）、spend（花錢付款）、external_send（對外寄送）、account_config（動到帳號或設定）、install_software（安裝軟體）、other（其他不可回復的操作）
 //!     成功：印「已請主持人確認」與 id（uuid）；確認前一律不要執行
 //!   asn room confirm-status <id> [--peek]
 //!     查放行狀態並印出：approved（可以做，這次查詢就把放行用掉）、pending、denied、used、expired；--peek 只看不用掉
@@ -13,13 +13,14 @@ use super::{Fail, Io, R};
 use crate::relay::encode_component;
 use serde_json::{json, Value};
 
-pub const KINDS: [&str; 6] = ["data_change", "deploy", "spend", "external_send", "account_config", "other"];
-pub const KIND_LABEL: [(&str, &str); 6] = [
+pub const KINDS: [&str; 7] = ["data_change", "deploy", "spend", "external_send", "account_config", "install_software", "other"];
+pub const KIND_LABEL: [(&str, &str); 7] = [
     ("data_change", "修改或刪除既有資料"),
     ("deploy", "部署"),
     ("spend", "花錢或付款"),
     ("external_send", "對外寄送"),
     ("account_config", "動到主人的帳號或設定"),
+    ("install_software", "安裝軟體"),
     ("other", "其他不可回復的操作"),
 ];
 const SUMMARY_MAX: usize = 500;
@@ -27,7 +28,7 @@ const SUMMARY_MAX: usize = 500;
 fn usage() -> String {
     "用法：
   asn room confirm-request --room <群組id|群組名> --kind <類別> --summary \"<一句話說明要做什麼>\"
-    類別：data_change（修改或刪除既有資料）、deploy（部署）、spend（花錢或付款）、external_send（對外寄送）、account_config（動到帳號或設定）、other（其他不可回復的操作）
+    類別：data_change（修改或刪除既有資料）、deploy（部署）、spend（花錢或付款）、external_send（對外寄送）、account_config（動到帳號或設定）、install_software（安裝軟體）、other（其他不可回復的操作）
     會在群組點名主持人；主持人確認前一律不要執行
   asn room confirm-status <id> [--peek]
     approved＝可以做（放行只能用一次，查詢就會用掉；--peek 只看不用掉）；pending 等待中；denied 被拒絕；used 已用過；expired 過期

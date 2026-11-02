@@ -354,6 +354,48 @@ test('實跑：代號不外洩——別租戶的輸出掃不到節點代號、�
 })
 
 // ===== 危險操作確認 =====
+// ===== install_software 類別（20261102150000_confirm_install_software.sql）=====
+test('靜態：install_software 的 migration——函式本體只比原文多這一個類別，其餘逐字相同；授權不變', () => {
+  const NEW = read('20261102150000_confirm_install_software.sql')
+  const ORIG = read(M_ACTIONS)
+  const grab = (src, start) => { const i = src.indexOf(start); return src.slice(i, src.indexOf('$function$;', i) + '$function$;'.length) }
+  for (const start of ['create or replace function relay.confirm_kind_label(p_kind text)', 'create or replace function public.asn_relay_group_confirm_request(']) {
+    const a = grab(ORIG, start).split('\n'), b = grab(NEW, start).split('\n')
+    assert.equal(a.length, b.length, start)
+    const diff = a.map((l, i) => [l, b[i]]).filter(([x, y]) => x !== y)
+    assert.equal(diff.length, 1, `${start} 只能改一行：${JSON.stringify(diff)}`)
+    assert.equal(diff[0][1], diff[0][0].replace(" else '其他不可回復的操作'", " when 'install_software' then '安裝軟體' else '其他不可回復的操作'").replace("'account_config', 'other')", "'account_config', 'install_software', 'other')"))
+  }
+  assert.doesNotMatch(NEW, /grant execute|revoke all|create policy|create table|drop table|drop function/i, '授權與資料表都不動')
+  assert.match(NEW, /drop constraint if exists room_confirms_kind_check/)
+  assert.match(NEW, /check \(kind in \('data_change', 'deploy', 'spend', 'external_send', 'account_config', 'install_software', 'other'\)\)/)
+  const down = fs.readFileSync(new URL('../supabase/sql/rollback/20261102150000_confirm_install_software_down.sql', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+  assert.match(down, /update relay\.room_confirms set kind = 'other' where kind = 'install_software'/)
+  assert.doesNotMatch(down.split('\n').filter(l => !l.startsWith('--')).join('\n'), /install_software' then|'install_software', 'other'/, '回復腳本只剩六類')
+})
+
+test('實跑：install_software 可以請求；顯示名是「安裝軟體」；壞類別仍擋；直接寫入表也只收七類', { skip }, async () => {
+  const db = await boot()
+  const room = await twoTenantRoom(db)
+  const ask = kind => rpc(db, 'asn_relay_group_confirm_request', { p_node: W1, p_agent: '財務', p_room: room, p_kind: kind, p_summary: '在新電腦安裝 Claude Code' })
+  const ok = await ask('install_software')
+  assert.ok(ok.id, JSON.stringify(ok))
+  assert.equal((await q(db, `select kind from relay.room_confirms where id = $1`, [ok.id]))[0].kind, 'install_software')
+  assert.equal((await q(db, `select relay.confirm_kind_label('install_software') l`))[0].l, '安裝軟體')
+  assert.match((await q(db, `select body from relay.room_messages where seq = $2 and room_id = $1`, [room, ok.seq]))[0].body, /危險操作（安裝軟體）/)
+  assert.equal((await ask('install_stuff')).error, 'bad_kind')
+  assert.equal((await ask('rm_rf')).error, 'bad_kind')
+  await assert.rejects(db.exec(`update relay.room_confirms set kind = 'hack' where id = '${ok.id}'`), /room_confirms_kind_check/)
+  // 其他六類照舊（每次請求後先拒絕掉，免得撞到同一個 AI 最多 5 筆待確認的上限）
+  const deny = id => rpc(db, 'asn_relay_group_confirm_decide', { p_user: U1, p_node: P1, p_room: room, p_id: id, p_approve: false })
+  await deny(ok.id)
+  for (const k of ['data_change', 'deploy', 'spend', 'external_send', 'account_config', 'other']) {
+    const r = await ask(k)
+    assert.ok(r.id, k)
+    await deny(r.id)
+  }
+})
+
 test('實跑：確認流程——拒絕、重複、過期、非成員、壞類別、AI 不能代為確認、主持人離開的保護', { skip }, async () => {
   const db = await boot()
   const room = await twoTenantRoom(db)

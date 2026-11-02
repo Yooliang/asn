@@ -10,10 +10,10 @@ const read = (...p) => fs.readFileSync(path.join(root, ...p), 'utf8').replace(/\
 const skill = read('relay', 'claude-mod', 'skills', 'asn', 'SKILL.md')
 const kindsOf = src => [...src.matchAll(/"([a-z_]+)"/g)].map(m => m[1])
 
-test('危險操作類別：後台、asn-cli、技能文件列的是同一組六類', () => {
+test('危險操作類別：後台、asn-cli、技能文件列的是同一組七類', () => {
   const backend = kindsOf(/CONFIRM_KINDS = \[([^\]]*)\]/.exec(read('supabase', 'functions', '_shared', 'rooms.ts'))[1])
-  const cli = kindsOf(/pub const KINDS: \[&str; 6\] = \[([^\]]*)\]/.exec(read('relay', 'asn', 'src-tauri', 'src', 'cli', 'confirm.rs'))[1])
-  assert.deepEqual(backend, ['data_change', 'deploy', 'spend', 'external_send', 'account_config', 'other'])
+  const cli = kindsOf(/pub const KINDS: \[&str; 7\] = \[([^\]]*)\]/.exec(read('relay', 'asn', 'src-tauri', 'src', 'cli', 'confirm.rs'))[1])
+  assert.deepEqual(backend, ['data_change', 'deploy', 'spend', 'external_send', 'account_config', 'install_software', 'other'])
   assert.deepEqual(cli, backend, 'asn-cli 的類別要和後台一致')
   for (const k of backend) assert.ok(skill.includes(`\`${k}\``), `技能文件少了類別 ${k}`)
 })
