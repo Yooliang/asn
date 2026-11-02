@@ -15,7 +15,7 @@ export const CANCEL_HINT = '已要求取消。目前這一步做完就會停下�
 export const CLOSE_LABEL = '關閉'
 export const FIRST_LINE = '正在準備'
 
-export const initialView = () => ({ title: TITLE.working, line: FIRST_LINE, notes: [], done: false, ok: null, cancelled: false, cancelRequested: false, terminal: false })
+export const initialView = () => ({ title: TITLE.working, line: FIRST_LINE, notes: [], done: false, ok: null, cancelled: false, cancelRequested: false, terminal: false, already: false, keptLogin: false })
 
 const clean = s => String(s ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim().slice(0, 200)
 
@@ -32,6 +32,8 @@ export function applyEvent(view, e) {
     v.ok = e.ok === true
     v.cancelled = e.cancelled === true
     v.terminal = e.terminal === true
+    v.already = e.already === true
+    v.keptLogin = e.kept_login === true
     v.title = v.cancelled ? TITLE.cancelled : v.ok ? TITLE.ok : TITLE.failed
     v.line = text || (v.ok ? '完成' : '沒有完成')
     const note = clean(e.replaced)

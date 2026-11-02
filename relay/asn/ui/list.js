@@ -65,6 +65,7 @@ import { createCallBeats } from './lib/call-beats.mjs'
 import { startCallPoll } from './lib/call-poll.mjs'
 import { isCallActive } from './lib/call-session.mjs'
 import { accountLine, codexLine, createAccountsUi } from './lib/claude-accounts.mjs'
+import { createAgentInstall, installView } from './lib/agent-install.mjs'
 import { buildDeviceTree } from './lib/device-tree.mjs'
 import { splitMachines } from './lib/remote-machines.mjs'
 import { nodeLabelOf, rosterQuotaFor, rosterView } from './lib/account-roster.mjs'
@@ -1504,6 +1505,10 @@ const app = createApp({
     // 設定頁「用量」：打開那一頁才讀本機記錄（Rust 端有快取，不會每次重掃）
     const usage = createUsageUi({ invoke, reactive })
     void accounts.loadTrust()
+    // 設備細部頁「安裝並登入 Claude Code」：確認窗、進度（agent-setup 事件，手機要求的那一輪也會來）、取消、結果
+    const agentInstall = createAgentInstall({ invoke, reactive, signedIn: async () => (await authApi.status().catch(() => null))?.signed_in === true })
+    void agentInstall.load()
+    void listen('agent-setup', e => agentInstall.onEvent(e))   // listen 已經把事件裡的內容（payload）直接交給函式
     // 本機帳號庫清單定期回報給收發室（只有 email、方案、使用中）；別台送來的切換指令定期取走（預設要本機按確認才切）。--shot 不輪詢指令。
     setTimeout(() => void accounts.report(), 5_000)
     // 每 5 分鐘回報時順便重讀這台的額度紀錄，設備卡的額度條才不會停在開機那時的數字
@@ -1585,6 +1590,7 @@ const app = createApp({
       tabDim: dims.tabDim, groupDim: dims.groupDim,
       voice: { cfg: { tts_voice: voiceCfg.tts_voice, tts_auto: voiceCfg.tts_auto, stt_lang: voiceCfg.stt_lang, stt_model: voiceCfg.stt_model }, enabled: ttsVoices.value.enabled, voices: ttsVoices.value.voices, sttReady: Boolean(sttSt.value?.ready), installBusy: voice.state.install.busy, note: voice.state.install.text || voiceMsg.value || sttText.value },
       devices: deviceTree.value, myAccounts: myAccounts.value,
+      install: installView(agentInstall.state),
       accounts: {
         list: accounts.state.list, current: accounts.state.current, codexLine: codexLine(accounts.state.codex, accounts.state.codexErr),
         busy: accounts.state.busy, confirmDel: accounts.state.confirmDel, msg: accounts.state.msg, allowSwitch: accounts.state.allowSwitch, autoAdd: autoAddClaude.value, autoNote: accounts.state.autoNote,
@@ -1619,6 +1625,13 @@ const app = createApp({
         case 'acct-switch': await accounts.switchTo(value); break
         case 'acct-remove': await accounts.remove(value); break
         case 'acct-allow-switch': await accounts.setAllowSwitch(value === true); break
+        case 'install-ask': await agentInstall.ask(); break
+        case 'install-yes': await agentInstall.confirm(); break
+        case 'install-no': agentInstall.decline(); break
+        case 'install-cancel': await agentInstall.cancel(); break
+        case 'install-terminal': await agentInstall.openTerminal(); break
+        case 'install-close': agentInstall.dismiss(); break
+        case 'install-allow': await agentInstall.setRemoteAllow(value === true); break
         case 'grok-switch': await accounts.grokSwitch(String(value ?? '')); break
         case 'device-move': devPrefs.deviceOrder = moveDevice(deviceTree.value.map(d => d.key), String(value?.node ?? ''), value?.dir === -1 ? -1 : 1, { selfNode: info.node, visible: visibleRows(deviceTree.value).map(d => d.key) }); break
         case 'device-reorder': devPrefs.deviceOrder = reorderDevice(deviceTree.value.map(d => d.key), String(value?.drag ?? ''), String(value?.target ?? ''), value?.after === true, { selfNode: info.node }); break
