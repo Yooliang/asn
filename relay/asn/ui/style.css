@@ -269,6 +269,14 @@ html.toast-page,html.toast-page body{background:transparent}
 .toast-body .tx{min-width:0}
 .toast-body b{display:block;color:var(--link);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .toast-body small{display:block;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* 安裝並登入的常駐進度小窗（#650 E1）：跟提示同一個外框，但不自己消失、有按鈕、文字可以折行 */
+.sp{display:block;width:100%;height:100vh;border:1px solid rgba(40,80,130,.7);border-radius:7px;background:linear-gradient(180deg,var(--glass-top),var(--glass-bottom));box-shadow:inset 0 0 0 1px var(--glass-edge),0 6px 18px rgba(0,0,0,.28);overflow:hidden}
+.sp .titlebar{height:24px;font-size:12px}
+.sp-body{display:flex;flex-direction:column;gap:6px;padding:10px 12px;height:calc(100% - 24px);background:linear-gradient(var(--panel),var(--panel-soft));border:1px solid var(--line);border-radius:3px;overflow:auto}
+.sp-title{color:var(--link);font-size:13px;line-height:1.35}
+.sp-line{margin:0;font-size:12px;line-height:1.45;color:var(--fg);overflow-wrap:anywhere}
+.sp-line.note{color:var(--muted)}
+.sp-btns{display:flex;justify-content:flex-end;margin-top:auto}
 @keyframes slide-in{from{transform:translateY(110%);opacity:0}to{transform:translateY(0);opacity:1}}
 @media (prefers-reduced-motion:reduce){.toast{animation:none}}
 

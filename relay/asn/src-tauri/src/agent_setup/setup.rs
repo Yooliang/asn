@@ -48,21 +48,21 @@ pub enum Finish {
 /// 重裝的原因，固定文字（不帶路徑與系統錯誤）
 fn replaced_before(k: BrokenKind) -> &'static str {
     match k {
-        BrokenKind::BadSignature => "現有的 claude.exe 簽章或簽署者不對，將重新安裝官方版",
-        BrokenKind::CannotRun => "現有的 claude.exe 跑不起來，將重新安裝官方版",
+        BrokenKind::BadSignature => "這台電腦上的 Claude Code 看起來不是官方版本，將重新安裝",
+        BrokenKind::CannotRun => "這台電腦上的 Claude Code 跑不起來，將重新安裝",
     }
 }
 /// 想重裝壞掉的 claude.exe 但沒裝成：那支程式還在原位，不能讓讀的人以為已經處理好了
 fn replaced_failed(k: BrokenKind) -> &'static str {
     match k {
-        BrokenKind::BadSignature => "原本的 claude.exe 簽章或簽署者不對，重新安裝失敗，那支程式還在原位，請先不要使用",
-        BrokenKind::CannotRun => "原本的 claude.exe 跑不起來，重新安裝失敗，它還在原位",
+        BrokenKind::BadSignature => "原本的 Claude Code 看起來不是官方版本，重新安裝失敗，那支程式還在原位，請先不要使用",
+        BrokenKind::CannotRun => "原本的 Claude Code 跑不起來，重新安裝失敗，那支程式還在原位",
     }
 }
 fn replaced_after(k: BrokenKind) -> &'static str {
     match k {
-        BrokenKind::BadSignature => "這次是因為原本的 claude.exe 簽章或簽署者不對才重新安裝的，那支程式可能被換過",
-        BrokenKind::CannotRun => "這次是因為原本的 claude.exe 跑不起來才重新安裝的",
+        BrokenKind::BadSignature => "這次是因為原本的 Claude Code 看起來不是官方版本才重新安裝的，那支程式可能被換過",
+        BrokenKind::CannotRun => "這次是因為原本的 Claude Code 跑不起來才重新安裝的",
     }
 }
 
@@ -135,6 +135,10 @@ impl Finish {
 static BUSY: AtomicBool = AtomicBool::new(false);
 static CANCEL: AtomicBool = AtomicBool::new(false);
 
+/// 現在有沒有一輪安裝並登入在跑（手機要求進來時，先看這個，別去動正在跑的那一輪的小窗）
+pub fn is_busy() -> bool {
+    BUSY.load(Ordering::SeqCst)
+}
 /// 人在這台電腦前按了「取消」。只影響目前正在跑的那一次（下一次開始時清掉）
 pub fn request_cancel() {
     CANCEL.store(true, Ordering::SeqCst);
@@ -328,7 +332,7 @@ mod tests {
         assert_eq!(d.replaced, Some(BrokenKind::BadSignature));
         assert!(ev.contains(&Event::Installing(Some(BrokenKind::BadSignature))), "{ev:?}");
         let before = Event::Installing(Some(BrokenKind::BadSignature)).to_json()["text"].as_str().unwrap().to_string();
-        assert!(before.contains("簽章或簽署者不對") && before.contains("重新安裝"), "{before}");
+        assert!(before == "這台電腦上的 Claude Code 看起來不是官方版本，將重新安裝", "{before}");
         let j = d.to_json();
         assert!(j["replaced"].as_str().unwrap().contains("可能被換過"), "{j}");
         assert_eq!(j["replaced_kind"], "bad_signature");
@@ -349,7 +353,7 @@ mod tests {
         assert_eq!(d.replaced, Some(BrokenKind::BadSignature));
         assert!(!d.installed);
         let t = d.to_json()["replaced"].as_str().unwrap().to_string();
-        assert_eq!(t, "原本的 claude.exe 簽章或簽署者不對，重新安裝失敗，那支程式還在原位，請先不要使用");
+        assert_eq!(t, "原本的 Claude Code 看起來不是官方版本，重新安裝失敗，那支程式還在原位，請先不要使用");
         assert!(!t.contains("才重新安裝的"), "沒裝成就不能說成已經處理好了");
         // 跑不起來的版本
         let (d, _, _) = run_full(Existing::Broken(BrokenKind::CannotRun, "x".into()), Err("下載失敗"), LoginState::Out, Outcome::Verified);

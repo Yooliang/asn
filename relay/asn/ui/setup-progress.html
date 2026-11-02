@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-Hant" class="toast-page">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ASN 安裝並登入</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app" v-cloak>
+  <section class="sp" role="status" aria-live="polite" :aria-label="v.title">
+    <div class="titlebar"><span class="t-icon"></span><span class="t-text"><span class="brand">Agent Sync Network Messenger</span></span></div>
+    <div class="sp-body">
+      <b class="sp-title">{{ v.title }}</b>
+      <p class="sp-line" v-for="(l, i) in lines" :key="i" :class="{ note: i > 0 }">{{ l }}</p>
+      <div class="sp-btns">
+        <button type="button" class="aero-btn" v-if="!v.done" :disabled="!can" @click="cancel">{{ CANCEL_LABEL }}</button>
+        <button type="button" class="aero-btn" v-else @click="close">{{ CLOSE_LABEL }}</button>
+      </div>
+    </div>
+  </section>
+</div>
+<script src="vendor/vue.global.prod.js"></script>
+<script type="module" src="setup-progress.js"></script>
+</body>
+</html>
