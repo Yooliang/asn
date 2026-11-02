@@ -210,7 +210,7 @@ async fn 群組_轉交失敗在群組留說明不留對應_worker_掛了游標�
     let p = posts(&h);
     assert_eq!(p.len(), 1);
     let body = p[0]["body"].as_str().unwrap();
-    assert!(body.contains("#2") && body.contains("T-視窗甲") && !body.contains('@') && !body.contains("找不到視窗"), "{body}");
+    assert!(body.contains("#2") && body.contains("沒有轉交給 T-視窗甲，對方還沒看到") && !body.contains('@') && !body.contains("找不到視窗"), "{body}");
     assert!(h.core.log.has("forward-fail kind=room"));
     // 另一則：SENT 後一直沒人回 → 逾時直接清掉，不通知任何人
     set_rooms(&h, vec![room(vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}})), rmsg(3, json!({"forMe": {"T-視窗甲": true}}))], json!([{"member": "T~T-視窗甲", "read_seq": 1}]))]);
@@ -249,7 +249,7 @@ async fn 群組_轉交失敗通知有冷卻_通知本身被退不再通知_轉�
     let p = posts(&h);
     assert_eq!(p.len(), 2);
     let body = p[1]["body"].as_str().unwrap();
-    assert!(body.contains("#5") && body.contains("另有 1 則"), "{body}");
+    assert!(body.contains("#5") && body.contains("可能沒有轉交給 T-視窗甲") && !body.contains("對方還沒看到") && body.contains("另有 1 則"), "{body}");
     assert!(h.core.log.has("forward-fail kind=room-timeout"));
 }
 

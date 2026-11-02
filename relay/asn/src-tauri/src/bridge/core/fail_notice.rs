@@ -13,11 +13,12 @@ const WORKER_FAIL_WARN_AT: u32 = 3;
 /// 之後每多這麼多次再警告一次
 const WORKER_FAIL_WARN_EVERY: u32 = 10;
 
-/// 不寫 @：不點名任何人，通知不會指定叫醒誰
-fn room_notice_text(seq: u64, target: &str, skipped: u32) -> String {
+/// 不寫 @：不點名任何人，通知不會指定叫醒誰。逾時只知道沒等到回報，信可能已經到了，說法不能講死
+fn room_notice_text(seq: u64, target: &str, skipped: u32, timed_out: bool) -> String {
     let name = target.replace('@', "");
-    let more = if skipped > 0 { format!("這段時間另有 {skipped} 則也沒轉交。") } else { String::new() };
-    format!("{ROOM_NOTICE_HEAD}{seq} 沒有轉交給 {name}，對方還沒看到。{more}需要對方處理請重新點名，或請對方讀群組。")
+    let what = if timed_out { format!("可能沒有轉交給 {name}。") } else { format!("沒有轉交給 {name}，對方還沒看到。") };
+    let more = if skipped > 0 { format!("這段時間另有 {skipped} 則情況相同。") } else { String::new() };
+    format!("{ROOM_NOTICE_HEAD}{seq} {what}{more}需要對方處理請重新點名，或請對方讀群組。")
 }
 
 impl Core {
@@ -42,8 +43,8 @@ impl Core {
         }
     }
 
-    /// 群組訊息轉交失敗：貼一則說明到群組，不經收發室。通知本身失敗就不再通知；同一個收件視窗有冷卻
-    pub(super) async fn room_forward_failed(&mut self, id: &str, kind: &str) {
+    /// 群組訊息轉交失敗或逾時：貼一則說明到群組，不經收發室。通知本身失敗就不再通知；同一個收件視窗有冷卻
+    pub(super) async fn room_forward_failed(&mut self, id: &str, kind: &str, timed_out: bool) {
         let Some(p) = self.idx(id).map(|i| self.pending[i].clone()) else { return };
         let Some(room) = p.room else { return };
         self.count_forward_fail(kind, id, &p.target);
@@ -63,7 +64,7 @@ impl Core {
             Some((_, n)) => *n,
             None => 0,
         };
-        let posted = self.post_room(&room, &room_notice_text(room.seq, &p.target, skipped)).await;
+        let posted = self.post_room(&room, &room_notice_text(room.seq, &p.target, skipped, timed_out)).await;
         self.log.line(&format!("room failure notice room={} #{} -> {} posted={posted}", room.id, room.seq, p.target));
         if posted {
             self.room_fail_notices.insert(key, (now, 0));

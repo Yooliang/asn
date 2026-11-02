@@ -1266,7 +1266,7 @@ impl Core {
         let (o, target, from_agent) = (Origin::of(&self.pending[i]), self.pending[i].target.clone(), self.pending[i].from_agent.clone());
         self.log.line(&format!("forward failed id={id}: {reason}"));
         if self.pending[i].room.is_some() {
-            self.room_forward_failed(id, "room").await;
+            self.room_forward_failed(id, "room", false).await;
             self.remove(id);
             return;
         }
@@ -1863,7 +1863,7 @@ impl Core {
                 self.write_inflight();
                 if p.room.is_some() {
                     self.log.line(&format!("room forward timeout id={id} -> {}", p.target));
-                    self.room_forward_failed(&id, "room-timeout").await;
+                    self.room_forward_failed(&id, "room-timeout", true).await;
                     self.remove(&id);
                     continue;
                 }
