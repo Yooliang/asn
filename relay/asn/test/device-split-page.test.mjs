@@ -108,6 +108,12 @@ test('設備摘要一行：手機沒有、離線看不到、沒收到回報只�
   assert.equal(deviceStateLine({ online: false, self: true, vendors: [v('Claude', STATE.LOGGED_IN)] }), 'Claude 已登入', '本機不看在線')
   assert.equal(deviceStateLine({ vendors: [v('Claude', STATE.NO_REPORT)], missing: [v('Grok', STATE.NO_REPORT)] }), '還沒收到這台的回報')
   assert.equal(deviceStateLine({ vendors: [v('Claude', STATE.LOGGED_IN)], missing: [v('Grok', STATE.NOT_INSTALLED), v('Codex', STATE.UNKNOWN_INSTALL)] }), 'Claude 已登入、Grok 未安裝、Codex 不確定是否安裝')
+  // 全部不確定：合成一句，不重複三次（asn真 在 #680 的意見）
+  const all3 = ['Claude', 'OpenAI（Codex）', 'Grok'].map(n => v(n, STATE.UNKNOWN_INSTALL))
+  assert.equal(deviceStateLine({ missing: all3 }), '不確定這台裝了哪些 AI')
+  assert.equal(deviceStateLine({ vendors: [all3[0]], missing: all3.slice(1) }), '不確定這台裝了哪些 AI')
+  // 部分不確定：不確定的併成一組
+  assert.equal(deviceStateLine({ vendors: [v('Claude', STATE.LOGGED_IN)], missing: all3.slice(1) }), 'Claude 已登入、OpenAI（Codex）／Grok 不確定是否安裝')
   assert.equal(deviceStateLine({}), '')
 })
 

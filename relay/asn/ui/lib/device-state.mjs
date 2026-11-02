@@ -113,5 +113,11 @@ export function deviceStateLine({ vendors = [], missing = [], phone = false, onl
   const all = [...vendors, ...missing]
   if (!all.length) return ''
   if (all.some(v => v.state === STATE.NO_REPORT)) return STATE_TEXT[STATE.NO_REPORT]
-  return all.filter(v => SHORT_TEXT[v.state]).map(v => `${v.label} ${SHORT_TEXT[v.state]}`).join('、')
+  const shown = all.filter(v => SHORT_TEXT[v.state])
+  // 全部都不確定有沒有裝：合成一句，不要「Claude 不確定、Codex 不確定、Grok 不確定」重複三次
+  if (shown.length && shown.every(v => v.state === STATE.UNKNOWN_INSTALL)) return '不確定這台裝了哪些 AI'
+  // 部分不確定：不確定的併成一組（「Codex／Grok 不確定是否安裝」）
+  const known = shown.filter(v => v.state !== STATE.UNKNOWN_INSTALL).map(v => `${v.label} ${SHORT_TEXT[v.state]}`)
+  const unknown = shown.filter(v => v.state === STATE.UNKNOWN_INSTALL).map(v => v.label)
+  return [...known, ...(unknown.length ? [`${unknown.join('／')} ${SHORT_TEXT[STATE.UNKNOWN_INSTALL]}`] : [])].join('、')
 }
