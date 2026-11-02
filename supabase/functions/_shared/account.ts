@@ -212,7 +212,7 @@ export async function handleAccountAction(
     return { status: 200, body: { ok: true, already: d?.already === true, state: d?.state } };
   }
 
-  // 手機替自己帳號下的電腦「安裝並登入 Claude Code」（見 supabase/migrations/20261102120000_setup_requests.sql）：
+  // 手機替自己帳號下的電腦「安裝並登入 Claude Code」（見 supabase/migrations/20261102140000_setup_requests.sql）：
   // 身分一定是登入憑證驗過的本人（上面已驗），節點金鑰（AI 視窗拿得到的）建立不了；對別人的節點一律 not_found
   if (action === "node_setup_request") {
     const node = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>).node : null;

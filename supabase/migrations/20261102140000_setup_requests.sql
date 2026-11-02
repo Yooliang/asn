@@ -17,7 +17,7 @@
 --   asn_relay_setup_result(p_node, ...)    只動 relay.setup_requests 裡 node = p_node 且 status = 'taken' 的那一列
 -- 沒有改既有資料表、沒有改既有函式。
 -- 部署順序：本 migration → relay（Edge Function，新動作）→ 發新版 ASN。提早上任何一步都不會壞（舊 Edge 沒有這些動作，回 404）。
--- 回復：supabase/sql/rollback/20261102120000_setup_requests_down.sql（drop 這四支函式與一張表，已送出的登入網址請求不受影響）。
+-- 回復：supabase/sql/rollback/20261102140000_setup_requests_down.sql（drop 這四支函式與一張表，已送出的登入網址請求不受影響）。
 begin;
 
 create table relay.setup_requests (

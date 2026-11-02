@@ -1,4 +1,4 @@
-// 手機替新電腦「安裝並登入 Claude Code」的遠端請求（20261102120000_setup_requests.sql；#628 第 4b 段）：
+// 手機替新電腦「安裝並登入 Claude Code」的遠端請求（20261102140000_setup_requests.sql；#628 第 4b 段）：
 // 1. 靜態：四個 security definer 函式 search_path 空、只授權 service_role；新表開 RLS 沒有 policy。
 // 2. 實跑（pglite，沒裝就略過）：只有本人對自己的在線電腦能建立；一個節點一筆、10 分鐘過期、每小時最多 6 次、失敗後 1 分鐘內不能重送；
 //    ASN 取走時拿到送出者；結果只動 taken 的那一列；手機看得到自己各節點的狀態。
@@ -6,7 +6,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
-const sql = fs.readFileSync(new URL('../supabase/migrations/20261102120000_setup_requests.sql', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const sql = fs.readFileSync(new URL('../supabase/migrations/20261102140000_setup_requests.sql', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
 test('靜態：四個函式 security definer、search_path 空、只授權 service_role；新表開 RLS 沒有 policy', () => {
   const sigs = ['asn_setup_request\\(uuid, text\\)', 'asn_setup_status\\(uuid\\)', 'asn_relay_setup_poll\\(text\\)', 'asn_relay_setup_result\\(text, boolean, text, text\\)']
