@@ -74,9 +74,11 @@ pub(crate) fn schtasks_not_found(raw: &[u8]) -> bool {
     has(UTF8) || has(BIG5) || en.contains("cannot find") || en.contains("does not exist")
 }
 
-/// 停用失敗後，排程算不算「本來就不存在」：輸出說找不到，或 /Query 查不到（結束碼非 0）。/Query 沒跑成（None）只看文字
-pub(crate) fn task_gone(change_output: &[u8], query_ok: Option<bool>) -> bool {
-    schtasks_not_found(change_output) || query_ok == Some(false)
+/// 停用失敗後，排程算不算「本來就不存在」：/Change 的輸出說找不到，或 /Query 失敗而且它的輸出也說找不到。
+/// /Query 結束碼非 0 不夠：權限不足等也會是非 0，那時排程其實在，不能當成不存在。
+/// `query`＝/Query 的（是否成功, 原始輸出）；沒跑成（None）只看 /Change 的文字
+pub(crate) fn task_gone(change_output: &[u8], query: Option<(bool, &[u8])>) -> bool {
+    schtasks_not_found(change_output) || matches!(query, Some((false, out)) if schtasks_not_found(out))
 }
 
 /// 停用工作排程（只停用）。非 Windows 沒有這個排程，視為完成
@@ -91,10 +93,19 @@ pub fn disable_task(name: &str) -> Result<(), String> {
         // 文字比對（原始位元組）對不上時，再問一次 /Query：查得到＝排程在，只是停用不了；查不到＝不存在
         let mut raw = out.stderr.clone();
         raw.extend_from_slice(&out.stdout);
-        let query_ok = std::process::Command::new("schtasks").no_window().args(["/Query", "/TN", name]).output().ok().map(|o| o.status.success());
-        if task_gone(&raw, query_ok) {
+        let query = std::process::Command::new("schtasks").no_window().args(["/Query", "/TN", name]).output().ok().map(|o| {
+            let mut q = o.stderr.clone();
+            q.extend_from_slice(&o.stdout);
+            (o.status.success(), q)
+        });
+        if task_gone(&raw, query.as_ref().map(|(ok, q)| (*ok, q.as_slice()))) {
             return Ok(());
         }
+        // 停用失敗、/Query 也沒說找不到（權限不足等）：照原本的失敗回，並留一行 log 方便查
+        elog!("停用工作排程 {name} 失敗：/Change 結束碼 {:?}，/Query {}", out.status.code(), match &query {
+            Some((ok, _)) => format!("{}", if *ok { "查得到（排程在）" } else { "失敗但輸出不是找不到" }),
+            None => "沒跑成".to_string(),
+        });
         Err(format!("停用不了工作排程 {name}"))
     }
     #[cfg(not(windows))]
@@ -166,9 +177,14 @@ mod tests {
     #[test]
     fn 停用失敗後_排程是不是本來就不存在() {
         let big5: &[u8] = &[0xA8, 0x74, 0xB2, 0xCE, 0xA7, 0xE4, 0xA4, 0xA3, 0xA8, 0xEC];
+        let denied = "錯誤: 存取被拒。".as_bytes();
         assert!(task_gone(big5, None), "文字說找不到，/Query 沒跑成也算");
-        assert!(task_gone(b"", Some(false)), "文字看不懂但 /Query 查不到＝不存在");
-        assert!(!task_gone(b"", Some(true)), "查得到：排程在，只是停用不了");
+        assert!(task_gone(b"", Some((false, big5))), "/Query 失敗而且輸出也說找不到（Big5）＝不存在");
+        assert!(task_gone(b"", Some((false, "ERROR: The system cannot find the file specified.".as_bytes()))));
+        assert!(task_gone(b"", Some((false, "錯誤: 系統找不到指定的檔案。".as_bytes()))));
+        assert!(!task_gone(b"", Some((false, denied))), "/Query 失敗但是權限不足：排程可能在，不能當成不存在");
+        assert!(!task_gone(b"", Some((false, b""))), "/Query 失敗、沒有輸出：不確定，不當成不存在");
+        assert!(!task_gone(b"", Some((true, b""))), "查得到：排程在，只是停用不了");
         assert!(!task_gone(b"", None), "什麼都不確定：不當成不存在");
     }
 

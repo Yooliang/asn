@@ -728,7 +728,11 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let exit_nonce = (!extra.kind.is_empty()).then(new_nonce);
         let spawned_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
         let wrapped: Vec<String> = match &exit_nonce {
-            Some(n) => super::local::mux_wrapped_argv(command, n),
+            Some(n) => {
+                // 包裝殼啟動時 PowerShell 會擴充 PSModulePath，夥伴的環境要還原成這個窗格開窗時給的值（沒給就移除）
+                let psmp = pane_env.iter().find(|(k, _)| k.eq_ignore_ascii_case("PSModulePath")).map(|(_, v)| v.as_str());
+                super::local::mux_wrapped_argv(command, n, psmp)
+            }
             None => command.to_vec(),
         };
         let mut sub: Vec<&str> = vec!["spawn", "--new-window", "--workspace", &workspace, "--cwd", &cwd_s, "--"];

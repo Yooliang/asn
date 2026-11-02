@@ -405,29 +405,65 @@ pub(crate) fn win_cmdline(args: &[String]) -> String {
     args.iter().map(|a| win_cmdline_arg(a)).collect::<Vec<_>>().join(" ")
 }
 
+/// 命令列第 0 個是不是 cmd（只看檔名）、第 1 個是不是 /c 或 /k
+fn is_cmd_switch(argv: &[String]) -> bool {
+    let stem = argv.first().map(|p| p.rsplit(['\\', '/']).next().unwrap_or(p).to_ascii_lowercase());
+    matches!(stem.as_deref(), Some("cmd") | Some("cmd.exe")) && argv.get(1).is_some_and(|a| a.eq_ignore_ascii_case("/c") || a.eq_ignore_ascii_case("/k"))
+}
+
+/// 要交給 ProcessStartInfo 的命令列（不含程式本身）。
+/// 一般程式照 [`win_cmdline`]。`cmd /c <程式> <參數…>` 要特別處理：cmd 對 /c 後面的字串有自己的去引號規則
+/// （第一個字元是引號時，除非「剛好兩個引號、中間沒有 &<>()@^| 特殊字元、有空白、而且是個存在的執行檔」，
+/// 否則會把第一個和最後一個引號拿掉），路徑含空白或括號（Program Files (x86)）又帶別的引號參數就會被拆錯。
+/// 所以整串外面再包一層引號，cmd 拿掉的就是這一層，裡面原樣。
+pub(crate) fn mux_cmdline(argv: &[String]) -> String {
+    if is_cmd_switch(argv) {
+        let inner = win_cmdline(&argv[2..]);
+        return if inner.is_empty() { argv[1].clone() } else { format!("{} \"{}\"", argv[1], inner) };
+    }
+    if argv.len() > 1 { win_cmdline(&argv[1..]) } else { String::new() }
+}
+
 /// 開在 mux 窗格裡的夥伴：外面包一層 PowerShell，跑完原指令後印 [`exit_marker`]。
 /// 全部走 -EncodedCommand（UTF-16LE Base64），中文路徑與引號不必跳脫。
 /// 原指令不用 `&` 呼叫：PowerShell 5.1 傳原生參數會壞（雙引號、空字串、結尾反斜線，順序也亂）。
-/// 改用 ProcessStartInfo，命令列由這裡照 Windows 規則（[`win_cmdline`]）組好；程式路徑與命令列都放成單引號字面值。
+/// 改用 ProcessStartInfo，命令列由這裡照 Windows 規則（[`mux_cmdline`]）組好；程式路徑與命令列都放成單引號字面值。
 /// 沒有重導向，子程序沿用窗格的主控台。不用 -NoExit：程式結束、標記印完後承載就結束，窗格靠 exit_behavior=Hold 留著。
-pub(crate) fn mux_wrapped_argv(argv: &[String], nonce: &str) -> Vec<String> {
+///
+/// 印標記那段放在 `finally`：夥伴和包裝殼共用同一個主控台，按 Ctrl+C 時 PowerShell 會停掉管線，
+/// `WaitForExit()` 之後的語句不會跑，catch 也接不到；`$code` 先設成 STATUS_CONTROL_C_EXIT（-1073741510，被中斷），
+/// finally 裡程序已結束拿得到 ExitCode 才覆蓋。
+///
+/// 環境：包裝殼自己是 `powershell -ExecutionPolicy Bypass`，PowerShell 啟動時會在自己的環境裡加 PSExecutionPolicyPreference 與
+/// 擴充 PSModulePath，子程序會繼承到。PSExecutionPolicyPreference 一律移除；PSModulePath 還原成窗格開窗時給的值
+/// （`ps_module_path`，沒給就移除），夥伴看到的環境跟沒包裝時一樣。
+pub(crate) fn mux_wrapped_argv(argv: &[String], nonce: &str, ps_module_path: Option<&str>) -> Vec<String> {
     let prog = argv.first().map(String::as_str).unwrap_or("");
-    let rest = if argv.len() > 1 { win_cmdline(&argv[1..]) } else { String::new() };
+    let rest = mux_cmdline(argv);
+    let module_line = match ps_module_path {
+        Some(v) => format!("$psi.EnvironmentVariables['PSModulePath'] = {}", ps_quote(v)),
+        None => "$psi.EnvironmentVariables.Remove('PSModulePath')".to_string(),
+    };
     let script = format!(
-        "$code = 0\n\
+        "$code = -1073741510\n\
+         $p = $null\n\
          try {{\n\
          $psi = New-Object Diagnostics.ProcessStartInfo {prog}, {rest}\n\
          $psi.UseShellExecute = $false\n\
+         $psi.EnvironmentVariables.Remove('PSExecutionPolicyPreference')\n\
+         {module_line}\n\
          $p = [Diagnostics.Process]::Start($psi)\n\
          $p.WaitForExit()\n\
          $code = $p.ExitCode\n\
          }} catch {{\n\
          Write-Host ('[ASN] 無法啟動：' + $_.Exception.Message) -ForegroundColor Red\n\
          $code = -1\n\
-         }}\n\
+         }} finally {{\n\
+         try {{ if ($null -ne $p -and $p.HasExited) {{ $code = $p.ExitCode }} }} catch {{}}\n\
          {reset}\n\
          Write-Host ''\n\
-         Write-Host ('[asn-exit {nonce} ' + $code + ']')\n",
+         Write-Host ('[asn-exit {nonce} ' + $code + ']')\n\
+         }}\n",
         prog = ps_quote(prog),
         rest = ps_quote(&rest),
         reset = TERMINAL_RESET_PS
@@ -757,10 +793,73 @@ mod tests {
         assert_eq!(parsed[1..], args[..]);
     }
 
+    fn decode_script(w: &[String]) -> String {
+        let enc = &w[w.iter().position(|a| a == "-EncodedCommand").unwrap() + 1];
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD.decode(enc).unwrap();
+        let u: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        String::from_utf16(&u).unwrap()
+    }
+
+    #[test]
+    fn 包裝腳本_標記放在_finally_被中斷時預設結束碼是_ctrl_c() {
+        let w = mux_wrapped_argv(&["claude.exe".to_string()], "abc", None);
+        let s = decode_script(&w);
+        assert!(s.starts_with("$code = -1073741510\n"), "{s}");
+        let fin = s.split("} finally {").nth(1).expect("要有 finally 區塊");
+        assert!(fin.contains("[asn-exit abc '"), "標記在 finally 裡：{s}");
+        assert!(fin.contains("$p.HasExited") && fin.contains("$code = $p.ExitCode"), "{s}");
+        let before = s.split("} finally {").next().unwrap();
+        assert!(!before.contains("[asn-exit"), "try／catch 裡不印標記：{s}");
+    }
+
+    #[test]
+    fn 包裝腳本_夥伴環境不帶_powershell_自己加的變數() {
+        let s = decode_script(&mux_wrapped_argv(&["claude.exe".to_string()], "abc", Some(r"C:\mods;D:\m’x")));
+        assert!(s.contains("$psi.EnvironmentVariables.Remove('PSExecutionPolicyPreference')"), "{s}");
+        assert!(s.contains(r"$psi.EnvironmentVariables['PSModulePath'] = 'C:\mods;D:\m’’x'"), "還原成開窗時給的值（彎引號加倍）：{s}");
+        let s = decode_script(&mux_wrapped_argv(&["claude.exe".to_string()], "abc", None));
+        assert!(s.contains("$psi.EnvironmentVariables.Remove('PSModulePath')"), "沒給就移除：{s}");
+    }
+
+    /// cmd /c 對後面字串的去引號規則（`cmd /?`）：第一個字元是引號時，同時符合四點才原樣（剛好兩個引號、中間沒有特殊字元、有空白、是執行檔名），
+    /// 否則拿掉第一個與最後一個引號
+    fn cmd_c_effective(line: &str) -> String {
+        if !line.starts_with('"') {
+            return line.to_string();
+        }
+        let quotes = line.matches('"').count();
+        let keep = quotes == 2 && {
+            let inner = &line[1..line.find('"').map(|_| line[1..].find('"').unwrap() + 1).unwrap()];
+            let low = inner.to_ascii_lowercase();
+            !inner.chars().any(|c| "&<>()@^|".contains(c)) && inner.chars().any(char::is_whitespace) && (low.ends_with(".cmd") || low.ends_with(".exe"))
+        };
+        if keep {
+            return line.to_string();
+        }
+        let last = line.rfind('"').unwrap();
+        format!("{}{}", &line[1..last], &line[last + 1..])
+    }
+
+    #[test]
+    fn codex_cmd_c_命令列_經過_cmd_的去引號規則後沒被拆錯() {
+        let codex = |path: &str| -> Vec<String> { ["cmd.exe", "/c", path, "-c", "check_for_update_on_startup=false", "-s", "workspace-write", "-a", "on-request", "resume", "小乙"].iter().map(|s| s.to_string()).collect() };
+        for path in [r"C:\Users\牧 陽\AppData\Roaming\npm\codex.cmd", r"C:\Program Files (x86)\nodejs\codex.cmd", r"C:\npm\codex.cmd"] {
+            let line = mux_cmdline(&codex(path));
+            let after_c = line.strip_prefix("/c ").unwrap();
+            let eff = cmd_c_effective(after_c);
+            let want = format!("{} -c check_for_update_on_startup=false -s workspace-write -a on-request resume 小乙", win_cmdline_arg(path));
+            assert_eq!(eff, want, "cmd 實際執行的字串：{line}");
+        }
+        // 其他程式不受影響
+        assert_eq!(mux_cmdline(&["claude.exe".to_string(), "-n".into(), "a b".into()]), "-n \"a b\"");
+        assert_eq!(mux_cmdline(&["cmd.exe".to_string(), "/c".into()]), "/c");
+    }
+
     #[test]
     fn 包裝腳本用_processstartinfo_不用_呼叫運算子() {
         let argv: Vec<String> = ["C:\\Users\\牧’陽\\claude.exe", "-n", "小 乙", ""].iter().map(|s| s.to_string()).collect();
-        let w = mux_wrapped_argv(&argv, "abc");
+        let w = mux_wrapped_argv(&argv, "abc", None);
         let enc = &w[w.iter().position(|a| a == "-EncodedCommand").unwrap() + 1];
         use base64::Engine;
         let bytes = base64::engine::general_purpose::STANDARD.decode(enc).unwrap();
