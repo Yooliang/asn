@@ -331,10 +331,22 @@ pub fn session_from_json(text: &str, now: u64) -> Result<Session, String> {
 
 #[derive(Debug)]
 pub enum AuthFail {
-    /// 登入憑證被後台拒絕（過期、撤銷、授權碼不對）：需要重新登入
-    Rejected(String),
+    /// 登入憑證被後台拒絕（過期、撤銷、授權碼不對）：需要重新登入。第二欄是給記錄用的狀態碼與錯誤代碼
+    Rejected(String, String),
     /// 網路或後台暫時有問題：不必清掉已存的登入
     Transient(String),
+}
+
+/// 這幾個 4xx 是「晚點再試」（逾時、衝突、太早、太頻繁），不是憑證有問題：不能因此登出
+fn temporary_client_error(status: u16) -> bool {
+    matches!(status, 408 | 409 | 425 | 429)
+}
+
+/// 登入服務回的錯誤代碼，給 log 用（只留英數與底線，不帶其他內容）
+fn token_error_code(text: &str) -> String {
+    let v: serde_json::Value = serde_json::from_str(text).unwrap_or_default();
+    let code = v.get("error_code").and_then(|c| c.as_str()).or_else(|| v.get("error").and_then(|c| c.as_str())).unwrap_or("");
+    code.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').take(40).collect()
 }
 
 async fn token_request(client: &reqwest::Client, auth_base: &str, anon: &str, grant: &str, body: serde_json::Value) -> Result<Session, AuthFail> {
@@ -353,8 +365,9 @@ async fn token_request(client: &reqwest::Client, auth_base: &str, anon: &str, gr
     }
     let why = serde_json::from_str::<TokenErr>(&text).ok().and_then(|e| e.error_description).unwrap_or_default();
     let why: String = why.chars().take(120).collect();
-    if status.is_client_error() {
-        Err(AuthFail::Rejected(if why.is_empty() { format!("登入服務拒絕（{}）", status.as_u16()) } else { why }))
+    if status.is_client_error() && !temporary_client_error(status.as_u16()) {
+        let detail = format!("status={} error_code={}", status.as_u16(), token_error_code(&text));
+        Err(AuthFail::Rejected(if why.is_empty() { format!("登入服務拒絕（{}）", status.as_u16()) } else { why }, detail))
     } else {
         Err(AuthFail::Transient(format!("登入服務暫時有問題（{}）", status.as_u16())))
     }
@@ -509,6 +522,8 @@ pub struct AuthState {
     mem: Mutex<Option<Session>>,
     pub cancel: Arc<AtomicBool>,
     busy: AtomicBool,
+    /// 因更新憑證被拒絕而清掉登入時呼叫（參數只有狀態碼與錯誤代碼）：正式版接到 ui.log，安裝版的 stderr 看不到
+    pub on_signout: Option<Box<dyn Fn(&str) + Send + Sync>>,
 }
 
 #[derive(Debug, PartialEq, serde::Serialize)]
@@ -527,7 +542,7 @@ impl Drop for BusyGuard<'_> {
 
 impl AuthState {
     pub fn new(store: Box<dyn TokenStore>) -> Self {
-        Self { store, mem: Mutex::new(None), cancel: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false) }
+        Self { store, mem: Mutex::new(None), cancel: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false), on_signout: None }
     }
 
     /// 只給 `--shot` 測試用：假裝已登入（記憶體裡放一組假權杖，不寫存檔），讓端到端測試能走「已登入」的情境。
@@ -587,7 +602,10 @@ impl AuthState {
                 self.set_session(s)?;
                 Ok(t)
             }
-            Err(AuthFail::Rejected(_)) => {
+            Err(AuthFail::Rejected(_, detail)) => {
+                if let Some(note) = &self.on_signout {
+                    note(&detail);
+                }
                 let _ = self.sign_out();
                 Err("登入已過期，請重新登入".into())
             }
@@ -623,7 +641,7 @@ impl AuthState {
                 self.set_session(s)?;
                 Ok(self.status())
             }
-            Err(AuthFail::Rejected(m)) | Err(AuthFail::Transient(m)) => Err(m),
+            Err(AuthFail::Rejected(m, _)) | Err(AuthFail::Transient(m)) => Err(m),
         }
     }
 }
@@ -883,7 +901,7 @@ mod tests {
     async fn 換取權杖_後台拒絕與暫時錯誤要分開() {
         let (p1, h1) = fake_auth_server("400 Bad Request", r#"{"error_description":"invalid flow state"}"#);
         match exchange_code(&reqwest::Client::new(), &format!("http://127.0.0.1:{p1}"), "A", "c", "v").await {
-            Err(AuthFail::Rejected(m)) => assert!(m.contains("invalid flow state")),
+            Err(AuthFail::Rejected(m, _)) => assert!(m.contains("invalid flow state")),
             _ => panic!("應該是被拒絕"),
         }
         let _ = h1.join();
@@ -919,6 +937,80 @@ mod tests {
         let _ = h.join();
         assert!(e.contains("重新登入"));
         assert!(!a.status().signed_in, "被拒絕就清掉");
+    }
+
+    #[tokio::test]
+    async fn 逾時衝突太頻繁不登出_下次重試成功() {
+        let store = MemStore::default();
+        store.save(&StoredLogin { refresh_token: "RT".into(), email: None }).unwrap();
+        let a = AuthState::new(Box::new(store));
+        for status in ["408 Request Timeout", "409 Conflict", "425 Too Early", "429 Too Many Requests"] {
+            let (p, h) = fake_auth_server(status, r#"{"error_code":"conflict","msg":"Too many concurrent token refresh requests"}"#);
+            let e = a.access_token(&reqwest::Client::new(), &format!("http://127.0.0.1:{p}"), "A").await.unwrap_err();
+            let _ = h.join();
+            assert!(!e.contains("重新登入"), "{status}: {e}");
+            assert!(a.status().signed_in, "{status} 不登出");
+        }
+        let (p, h) = fake_auth_server("200 OK", r#"{"access_token":"AT2","refresh_token":"RT2","expires_in":3600}"#);
+        assert_eq!(a.access_token(&reqwest::Client::new(), &format!("http://127.0.0.1:{p}"), "A").await.unwrap(), "AT2", "下次呼叫會重試");
+        assert!(h.join().unwrap().contains("\"refresh_token\":\"RT\""), "重試用的是原本的更新憑證");
+    }
+
+    #[tokio::test]
+    async fn 檔案儲存_409_不刪登入檔_400_才刪() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("login.bin");
+        #[cfg(windows)]
+        let st = FileStore { path: path.clone(), prot: Dpapi };
+        #[cfg(not(windows))]
+        let st = FileStore { path: path.clone(), prot: PlainFile };
+        st.save(&StoredLogin { refresh_token: "RT".into(), email: None }).unwrap();
+        let a = AuthState::new(Box::new(st));
+        let (p, h) = fake_auth_server("409 Conflict", "{}");
+        assert!(a.access_token(&reqwest::Client::new(), &format!("http://127.0.0.1:{p}"), "A").await.is_err());
+        let _ = h.join();
+        assert!(path.exists(), "暫時錯誤要留著登入檔");
+        let (p, h) = fake_auth_server("400 Bad Request", r#"{"error_code":"refresh_token_not_found","msg":"Invalid Refresh Token"}"#);
+        assert!(a.access_token(&reqwest::Client::new(), &format!("http://127.0.0.1:{p}"), "A").await.is_err());
+        let _ = h.join();
+        assert!(!path.exists(), "憑證無效才刪");
+    }
+
+    #[cfg(all(feature = "gui", desktop))]
+    #[tokio::test]
+    async fn 清掉登入時_狀態碼寫進_ui_log_暫時錯誤不寫_不含憑證與_email() {
+        let d = tempfile::tempdir().unwrap();
+        let store = MemStore::default();
+        store.save(&StoredLogin { refresh_token: "RT-SECRET".into(), email: Some("a@b.c".into()) }).unwrap();
+        let mut a = AuthState::new(Box::new(store));
+        a.on_signout = Some(crate::ui_log::signout_logger(d.path().to_path_buf()));
+        let log = crate::ui_log::path(d.path());
+        let (p, h) = fake_auth_server("409 Conflict", r#"{"error_code":"conflict"}"#);
+        assert!(a.access_token(&reqwest::Client::new(), &format!("http://127.0.0.1:{p}"), "A").await.is_err());
+        let _ = h.join();
+        assert!(!log.exists(), "暫時錯誤沒有清登入，不寫");
+        let (p, h) = fake_auth_server("400 Bad Request", r#"{"error_code":"refresh_token_not_found","msg":"secret-message"}"#);
+        assert!(a.access_token(&reqwest::Client::new(), &format!("http://127.0.0.1:{p}"), "A").await.is_err());
+        let _ = h.join();
+        let t = std::fs::read_to_string(&log).unwrap();
+        assert!(t.contains("status=400") && t.contains("error_code=refresh_token_not_found"), "{t}");
+        for leak in ["RT-SECRET", "a@b.c", "secret-message"] {
+            assert!(!t.contains(leak), "{t}");
+        }
+    }
+
+    #[test]
+    fn 暫時錯誤的狀態碼與錯誤代碼過濾() {
+        for c in [408, 409, 425, 429] {
+            assert!(temporary_client_error(c), "{c}");
+        }
+        for c in [400, 401, 403, 404, 422, 500] {
+            assert!(!temporary_client_error(c), "{c}");
+        }
+        assert_eq!(token_error_code(r#"{"error_code":"refresh_token_not_found"}"#), "refresh_token_not_found");
+        assert_eq!(token_error_code(r#"{"error":"invalid_grant"}"#), "invalid_grant");
+        assert_eq!(token_error_code(r#"{"error_code":"a b@c.d"}"#), "abcd", "只留英數與底線");
+        assert_eq!(token_error_code("不是 JSON"), "");
     }
 
     // ----- 檔案儲存 -----
