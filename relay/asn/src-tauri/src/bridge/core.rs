@@ -664,7 +664,7 @@ impl Core {
             body["mod"] = m.clone();
         }
         // 收發室 worker 額度用完而暫停收信到什麼時候（毫秒；null＝沒有）：值有變才附，給後台的收信監控抑制通知用
-        // 後台在暫停開始時寄通知給擁有者（設備名、扣住筆數由這裡帶；超過上限的旗標每次額度用完只帶一次）
+        // 後台在暫停開始時寄通知給擁有者（扣住筆數由這裡帶，設備名由後台讀；超過上限的旗標每次額度用完只帶一次）
         let hold = self.inbox_hold_until();
         let cap_due = self.hold_cap_due();
         let hold_due = self.hold_sent != Some(hold) || cap_due;
@@ -672,7 +672,6 @@ impl Core {
             body["inbox_hold_until"] = json!(hold);
             if hold.is_some() {
                 body["inbox_hold_count"] = json!(self.quota_held_total());
-                body["inbox_hold_computer"] = json!(self.cfg.node);
             }
             if cap_due {
                 body["inbox_hold_capped"] = json!(true);

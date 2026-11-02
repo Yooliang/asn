@@ -70,7 +70,7 @@ async fn 通知_同寄件人一次_主人一次_收發室寄的與系統通知�
     assert_eq!(owner_notices(&h), 0, "主人通知改由後台寄（名單回報帶暫停時間），不寄到本機視窗");
     // 通知內容：設備名、台北時間、reply=no
     let n = h.fr.sent().into_iter().find(|s| s["to_agent"] == "W-政策").unwrap();
-    assert_eq!(n["body"].as_str().unwrap(), format!("[收發室] 這台（T）的收發室 Claude 額度用完，約 {}（台北）重置；信已收到，重置後自動轉交。", taipei_hm(UNTIL)));
+    assert_eq!(n["body"].as_str().unwrap(), format!("[收發室] 這台的收發室 Claude 額度用完，約 {}（台北）重置；信已收到，重置後自動轉交。", taipei_hm(UNTIL)));
     assert_eq!(n["expects_reply"], json!(false));
     // 再來一次 quota 事件（同一次額度用完）：不重複通知
     h.core.on_worker_line(quota_line(RESETS_S), TQ + 3000).await;
@@ -210,7 +210,7 @@ async fn 扣住有上限_超過的不收_不_ack_留在伺服器_另通知主人
     h.core.tick(TQ + 4000).await;
     let posts = hold_bodies(&h);
     assert_eq!(posts.len(), 2, "啟動的空值一次、暫停開始（含超過上限）一次：{posts:?}");
-    assert_eq!((posts[1]["inbox_hold_count"].clone(), posts[1]["inbox_hold_computer"].clone(), posts[1]["inbox_hold_capped"].clone()), (json!(200), json!("T"), json!(true)));
+    assert_eq!((posts[1]["inbox_hold_count"].clone(), posts[1]["inbox_hold_capped"].clone()), (json!(200), json!(true)));
     // 再拉一次：超過的仍留在伺服器，不重複報
     h.core.pull("test", TQ + 3000).await;
     h.core.tick(TQ + 9000).await;
@@ -332,7 +332,7 @@ async fn 收信暫停時間回報給後台_扣住時送一次值_恢復時送一
     h.core.tick(TQ + 3 * HOUR - 120_000).await;
     assert_eq!(hold_posts(&h), vec![Value::Null, json!(UNTIL)], "扣住時只送一次值，不重複");
     let b = &hold_bodies(&h)[1];
-    assert_eq!((b["inbox_hold_count"].clone(), b["inbox_hold_computer"].clone()), (json!(1), json!("T")), "帶設備名與扣住筆數，後台據此寄給主人");
+    assert_eq!((b["inbox_hold_count"].clone(), b.get("inbox_hold_computer").cloned()), (json!(1), None), "只帶扣住筆數，設備名由後台讀");
     assert!(b.get("inbox_hold_capped").is_none());
     // 重置後重送：恢復時送一次空值
     h.core.tick(UNTIL).await;

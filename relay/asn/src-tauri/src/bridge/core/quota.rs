@@ -8,7 +8,7 @@ use crate::bridge::rooms::Wake;
 
 impl Core {
     /// 這台電腦因收發室 worker 額度用完而暫停收信到什麼時候（毫秒）；沒有暫停回 None。
-    /// 名單回報會把它帶給後台（relay.nodes.inbox_hold_until），收信監控用來抑制通知；值是記憶體狀態，重啟後歸零
+    /// 名單回報會把它帶給後台（relay.nodes.inbox_hold_until），收信監控用來抑制通知；值存在 pending.json（quotaUntil），重啟後驗過範圍才沿用
     pub fn inbox_hold_until(&self) -> Option<u64> {
         (self.quota_until > 0).then_some(self.quota_until)
     }
@@ -88,7 +88,7 @@ impl Core {
         if !ep.senders.insert(key) {
             return;
         }
-        let text = format!("[收發室] 這台（{}）的收發室 Claude 額度用完，約 {}（台北）重置；信已收到，重置後自動轉交。", self.cfg.node, taipei_hm(self.quota_until));
+        let text = format!("[收發室] 這台的收發室 Claude 額度用完，約 {}（台北）重置；信已收到，重置後自動轉交。", taipei_hm(self.quota_until));
         let o = Origin { id: m.id.clone(), from_node: m.from_node.clone(), from_agent };
         self.send_back(&o, &text, None, Some(false)).await;
     }

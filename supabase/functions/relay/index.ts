@@ -318,9 +318,9 @@ Deno.serve(async (req) => {
     if ("inbox_hold_until" in b) {
       const hold = sanitizeInboxHold(b.inbox_hold_until);
       if (hold !== undefined) {
-        // 暫停從沒有變成未來時間時，資料庫函式會寄一封通知給這個節點的擁有者（設備名、扣住筆數由電腦端帶）；回傳的門鈴主題敲一下
+        // 暫停從沒有變成未來時間時，資料庫函式會寄一封通知給這個節點的擁有者（設備名由資料庫讀 relay.nodes.name，扣住筆數由電腦端帶）；回傳的門鈴主題敲一下
         const x = sanitizeInboxHoldExtra(b);
-        const { data: hd, error: he } = await db.rpc("asn_relay_set_inbox_hold", { p_node: me.id, p_until: hold, p_computer: x.computer, p_held: x.held, p_capped: x.capped });
+        const { data: hd, error: he } = await db.rpc("asn_relay_set_inbox_hold", { p_node: me.id, p_until: hold, p_held: x.held, p_capped: x.capped });
         if (he) console.warn("set_inbox_hold", me.id, he.message ?? he);
         else if (hd?.error) console.warn("set_inbox_hold", me.id, hd.error);
         else for (const t of new Set<string>((Array.isArray(hd?.bell_topics) ? hd.bell_topics : []).filter((t: unknown): t is string => typeof t === "string" && t.length > 0))) await ring(t);

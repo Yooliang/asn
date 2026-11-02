@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
 const F = '20261102100000_inbox_hold_until.sql'
-const SIG = 'asn_relay_set_inbox_hold(text, timestamptz, text, integer, boolean)'
+const SIG = 'asn_relay_set_inbox_hold(text, timestamptz, integer, boolean)'
 const rd = s => s.replace(/\r+\n/g, '\n')
 const mig = rd(fs.readFileSync(new URL(`../supabase/migrations/${F}`, import.meta.url), 'utf8'))
 const down = rd(fs.readFileSync(new URL(`../supabase/sql/rollback/${F.replace('.sql', '_down.sql')}`, import.meta.url), 'utf8'))
@@ -35,9 +35,9 @@ const OWNER = 'bbbbbbbb-0000-0000-0000-000000000001'
 async function setup() {
   const db = new PGlite()
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
-    create table relay.nodes(id text primary key, status text default 'active', owner_user uuid);
+    create table relay.nodes(id text primary key, status text default 'active', owner_user uuid, name text);
     create table relay.messages(id uuid default gen_random_uuid() primary key, fanout_id uuid, from_node text, from_agent text, to_node text, body text, expects_reply boolean, created_at timestamptz default now());
-    insert into relay.nodes(id, owner_user) values ('H', '${OWNER}'), ('W', '${OWNER}'), ('X', null);
+    insert into relay.nodes(id, owner_user, name) values ('H', '${OWNER}', '家用機'), ('W', '${OWNER}', '工作機'), ('X', null, '無主');
     create function public.asn_user_owns_node(u uuid, n text) returns boolean language sql as $$ select n <> 'W' $$;
     create function public.asn_person_alias(u uuid) returns text language sql as $$ select 'u:owner' $$;
     create function public.asn_relay_send(a text, b text, c text, d text, e text, f uuid, g boolean, h uuid, i boolean) returns jsonb language plpgsql as $$
@@ -45,7 +45,7 @@ async function setup() {
   await db.exec(mig)
   return db
 }
-const set = async (db, node, until, ...rest) => (await db.query('select public.asn_relay_set_inbox_hold($1, $2::timestamptz, $3, $4, $5) r', [node, until, rest[0] ?? null, rest[1] ?? 0, rest[2] ?? false])).rows[0].r
+const set = async (db, node, until, ...rest) => (await db.query('select public.asn_relay_set_inbox_hold($1, $2::timestamptz, $3, $4) r', [node, until, rest[0] ?? 0, rest[1] ?? false])).rows[0].r
 const secs = async (db, node) => (await db.query(`select extract(epoch from (inbox_hold_until - now())) s from relay.nodes where id = $1`, [node])).rows[0].s
 const msgs = async (db, node) => (await db.query(`select to_node, body, expects_reply from relay.messages where from_node = $1 order by created_at, body`, [node])).rows
 const ahead = h => new Date(Date.now() + h * 3_600_000).toISOString()
@@ -71,7 +71,7 @@ test('實跑（pglite）：只動自己的節點、值夾在 now() 到 now()+8 �
 
 test('實跑（pglite）：暫停開始寄一封給擁有者；延長與重複設值不再寄；清掉後再開始才寄；超過上限另寄一封；每小時最多 3 封', { skip }, async () => {
   const db = await setup()
-  const r = await set(db, 'H', ahead(3), '家用機', 5)
+  const r = await set(db, 'H', ahead(3), 5)
   assert.deepEqual(r.bell_topics, ['bell-1'])
   let m = await msgs(db, 'H')
   assert.equal(m.length, 1)
@@ -79,34 +79,36 @@ test('實跑（pglite）：暫停開始寄一封給擁有者；延長與重複�
   assert.equal(m[0].expects_reply, false)
   assert.match(m[0].body, /^這台（家用機）的收發室 Claude 額度用完，約 \d\d:\d\d（台北）重置；扣住 5 封，重置後自動轉交。$/)
   // 暫停期間重複設值、延長：不再寄
-  await set(db, 'H', ahead(3), '家用機', 6)
-  await set(db, 'H', ahead(5), '家用機', 9)
+  await set(db, 'H', ahead(3), 6)
+  await set(db, 'H', ahead(5), 9)
   assert.equal((await msgs(db, 'H')).length, 1)
   // 超過上限：另寄一封說明（暫停進行中）
-  await set(db, 'H', ahead(5), '家用機', 200, true)
+  await set(db, 'H', ahead(5), 200, true)
   m = await msgs(db, 'H')
   assert.equal(m.length, 2)
   assert.ok(m.some(x => x.body.includes('已達上限')))
   // 清掉後再次開始：再寄；第 4 封被每小時 3 封的限流擋下
   await set(db, 'H', null)
   assert.equal((await msgs(db, 'H')).length, 2, '清掉不寄')
-  await set(db, 'H', ahead(2), '家用機', 1)
+  await set(db, 'H', ahead(2), 1)
   assert.equal((await msgs(db, 'H')).length, 3)
   await set(db, 'H', null)
-  await set(db, 'H', ahead(2), '家用機', 1)
+  await set(db, 'H', ahead(2), 1)
   assert.equal((await msgs(db, 'H')).length, 3, '限流')
   assert.ok(Number(await secs(db, 'H')) > 0, '限流只擋信，時間仍設')
 })
 
-test('實跑（pglite）：設備名不合、擁有者核對不過、沒有擁有者時只設時間不寄信', { skip }, async () => {
+test('實跑（pglite）：設備名讀 relay.nodes.name；名字空白時省略括號；擁有者核對不過、沒有擁有者只設時間不寄信', { skip }, async () => {
   const db = await setup()
-  for (const bad of [null, '', 'x'.repeat(41), 'a\nb']) {
-    assert.equal((await set(db, 'H', ahead(1), bad, 1)).ok, true)
-    await set(db, 'H', null)
-  }
-  assert.equal((await msgs(db, 'H')).length, 0)
-  assert.equal((await set(db, 'W', ahead(1), '工作機', 1)).ok, true, '擁有者核對不過（stub：W）')
-  assert.equal((await set(db, 'X', ahead(1), '無主', 1)).ok, true, '沒有擁有者')
+  await db.exec("update relay.nodes set name = E'  含\n控制字元' || repeat('長', 60) where id = 'H'")
+  assert.equal((await set(db, 'H', ahead(1), 1)).ok, true)
+  const long = (await msgs(db, 'H'))[0].body
+  assert.match(long, /^這台（含控制字元長{35}）的收發室/, '去控制字元、最多 40 字')
+  await db.exec("update relay.nodes set name = '  ', inbox_hold_until = null where id = 'H'; delete from relay.messages")
+  await set(db, 'H', ahead(1), 1)
+  assert.match((await msgs(db, 'H'))[0].body, /^這台的收發室 Claude 額度用完/)
+  assert.equal((await set(db, 'W', ahead(1), 1)).ok, true, '擁有者核對不過（stub：W）')
+  assert.equal((await set(db, 'X', ahead(1), 1)).ok, true, '沒有擁有者')
   assert.equal((await msgs(db, 'W')).length + (await msgs(db, 'X')).length, 0)
   assert.ok(Number(await secs(db, 'W')) > 0)
 })
