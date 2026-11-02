@@ -88,7 +88,17 @@ export function createReceiver({
     if (stale()) return 0
     const cur = readCursors()
     let stored = 0, dirty = false
-    const save = () => { if (dirty) { writeFileAtomic(cfg.roomsFile, JSON.stringify(cur)); dirty = false } }
+    // 游標只能前進、不能倒退或消失：被放棄的舊一輪晚點醒來時，手上的 cur 是它開始時的舊快照，整份寫回會蓋掉新一輪才出現的房間
+    // （下一輪會當成第一次看到、直接跳到 last_seq，中間的訊息就漏了，也沒有 log）。所以 1) 已被放棄的一輪完全不寫  2) 寫之前重讀檔案，逐個 key 取較大的
+    const save = () => {
+      if (!dirty) return
+      if (stale()) { dirty = false; return }
+      const onDisk = readCursors()
+      const merged = { ...onDisk }
+      for (const [k, v] of Object.entries(cur)) merged[k] = Math.max(Number(onDisk[k]) || 0, Number(v) || 0)
+      writeFileAtomic(cfg.roomsFile, JSON.stringify(merged))
+      dirty = false
+    }
     try {
       for (const room of list) {
         for (const mine of room.mine ?? []) {

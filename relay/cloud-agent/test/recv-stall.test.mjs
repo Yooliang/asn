@@ -158,3 +158,62 @@ test('群組分頁：後端一直回同一頁（游標不前進）時不空轉�
     rx2.destroy()
   } finally { rx.destroy(); await st.close(); rm(root) }
 })
+
+// ---- 游標檔（rooms.json）：被放棄的舊一輪晚點醒來，不能把它開始時的舊快照寫回去，蓋掉新一輪才出現的房間 ----
+test('被放棄的舊一輪醒來不寫游標檔：新一輪才出現的房間不會被蓋掉（否則下一輪當成第一次看到、跳到最新，中間的訊息就漏了）', async () => {
+  const fs = await import('node:fs')
+  const st = await startFakeRelay()
+  const { root, cfg } = tmpEnv(st.url)
+  let listCalls = 0
+  const msgs = [6, 7].map(seq => ({ seq, at: new Date().toISOString(), body: 'x', from: 'w02', for_me: false }))
+  const api = async action => {
+    if (action === 'inbox') return { messages: [] }
+    if (action === 'room_list') {
+      listCalls++
+      return { rooms: listCalls === 1 ? [{ id: 'g1', name: '群', last_seq: 7, mine: [{ member: 'n~a' }] }]
+        : [{ id: 'g1', name: '群', last_seq: 7, mine: [{ member: 'n~a' }] }, { id: 'g2', name: '新群', last_seq: 50, mine: [{ member: 'n~a' }] }] }
+    }
+    if (action.startsWith('room_read')) {
+      if (listCalls === 1) await sleep(200)   // 第一輪：後端遲遲不回
+      return { messages: msgs }
+    }
+    throw new Error('unexpected ' + action)
+  }
+  const rx = createReceiver({ api, cfg, log: () => {}, backoffMs: [5], roundTimeoutMs: 50 })
+  try {
+    fs.writeFileSync(cfg.roomsFile, JSON.stringify({ 'g1|n~a': 5 }))
+    void rx.pull('bell')
+    assert.ok(await until(() => { try { return 'g2|n~a' in JSON.parse(fs.readFileSync(cfg.roomsFile, 'utf8')) } catch { return false } }), '新一輪看到新房間並記下游標')
+    await sleep(300)   // 舊一輪現在醒來了
+    const cur = JSON.parse(fs.readFileSync(cfg.roomsFile, 'utf8'))
+    assert.equal(cur['g2|n~a'], 50, '新房間的游標不能被舊快照蓋掉')
+    assert.equal(cur['g1|n~a'], 7)
+  } finally { rx.destroy(); await st.close(); rm(root) }
+})
+
+test('游標檔只能前進：寫之前重讀合併，別處（或新一輪）已經記下的 key 與較大的值不會被蓋掉或倒退', async () => {
+  const fs = await import('node:fs')
+  const st = await startFakeRelay()
+  const { root, cfg } = tmpEnv(st.url)
+  const msgs = [6, 7].map(seq => ({ seq, at: new Date().toISOString(), body: 'x', from: 'w02', for_me: false }))
+  let release
+  const gate = new Promise(r => { release = r })
+  const api = async action => {
+    if (action === 'inbox') return { messages: [] }
+    if (action === 'room_list') return { rooms: [{ id: 'g1', name: '群', last_seq: 7, mine: [{ member: 'n~a' }] }] }
+    if (action.startsWith('room_read')) { await gate; return { messages: msgs } }
+    throw new Error('unexpected ' + action)
+  }
+  const rx = createReceiver({ api, cfg, log: () => {}, backoffMs: [5], roundTimeoutMs: 5000 })
+  try {
+    fs.writeFileSync(cfg.roomsFile, JSON.stringify({ 'g1|n~a': 5 }))
+    const done = rx.pull('poll')
+    await sleep(30)
+    // 這一輪還在等的時候，別處把檔案改成：多一個房間、g1 的游標已經前進到 9
+    fs.writeFileSync(cfg.roomsFile, JSON.stringify({ 'g1|n~a': 9, 'g2|n~a': 50 }))
+    release(); await done; await sleep(30)
+    const cur = JSON.parse(fs.readFileSync(cfg.roomsFile, 'utf8'))
+    assert.equal(cur['g2|n~a'], 50, '別處新增的 key 不能消失')
+    assert.equal(cur['g1|n~a'], 9, '游標不能倒退（本輪只讀到 7）')
+  } finally { rx.destroy(); await st.close(); rm(root) }
+})
