@@ -23,6 +23,7 @@ const clean = s => String(s ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
 export function applyEvent(view, e) {
   const v = { ...view, notes: [...view.notes] }
   if (!e || typeof e !== 'object') return v
+  if (e.phase === 'reset') return initialView()   // 新的一輪開始：舊窗還開著時回到開頭（結果與取消狀態都清掉）
   if (v.done) return v   // 結果已經出來，之後的事件（晚到的進度）不再蓋掉結果
   if (e.phase === 'starting') return v   // 開場事件：標題已經寫了這句
   const text = clean(e.text)

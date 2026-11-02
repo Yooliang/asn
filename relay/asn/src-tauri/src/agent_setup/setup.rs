@@ -135,6 +135,10 @@ impl Finish {
 static BUSY: AtomicBool = AtomicBool::new(false);
 static CANCEL: AtomicBool = AtomicBool::new(false);
 
+/// 現在有沒有一輪安裝並登入在跑（手機要求進來時，先看這個，別去動正在跑的那一輪的小窗）
+pub fn is_busy() -> bool {
+    BUSY.load(Ordering::SeqCst)
+}
 /// 人在這台電腦前按了「取消」。只影響目前正在跑的那一次（下一次開始時清掉）
 pub fn request_cancel() {
     CANCEL.store(true, Ordering::SeqCst);

@@ -459,10 +459,20 @@ async fn run_remote_setup(handle: AppHandle, relay: Arc<Relay>, requested_by: St
         relay.report_setup_result(false, why, None).await;
         return;
     }
-    // 右下角的常駐進度小窗（不搶焦點、主視窗隱藏也看得到）；開不起來也不影響安裝，進度仍有事件
-    if let Err(e) = wins::open_setup_progress(&handle) {
-        elog!("開進度小窗失敗：{e}");
+    // 已經有一輪在跑：直接回報，不去動那一輪的小窗
+    if agent_setup::setup::is_busy() {
+        relay.report_setup_result(false, "這台電腦正在安裝並登入，請稍後再試", None).await;
+        return;
     }
+    // 右下角的常駐進度小窗：人在電腦前看得到、能取消，是不跳本機確認窗的前提。開不起來就不開始，回報手機
+    let round = match wins::open_setup_progress(&handle) {
+        Ok(r) => r,
+        Err(e) => {
+            elog!("開進度小窗失敗，不開始安裝：{e}");
+            relay.report_setup_result(false, "這台電腦無法顯示進度，沒有開始安裝", None).await;
+            return;
+        }
+    };
     let _ = handle.emit("agent-setup-remote", serde_json::json!({ "phase": "starting", "text": "正在依你手機的要求安裝並登入 Claude Code", "cancellable": true }));
     let (tx, rx) = tokio::sync::oneshot::channel();
     let (h1, h2) = (handle.clone(), handle.clone());
@@ -476,7 +486,7 @@ async fn run_remote_setup(handle: AppHandle, relay: Arc<Relay>, requested_by: St
     );
     if let Err(e) = started {
         relay.report_setup_result(false, &e, None).await;
-        wins::close_setup_progress(&handle);
+        wins::close_setup_progress(&handle, round);
         return;
     }
     match rx.await {
@@ -492,7 +502,7 @@ async fn run_remote_setup(handle: AppHandle, relay: Arc<Relay>, requested_by: St
     }
     // 結果留在畫面上幾秒讓人看到，再自己關
     tokio::time::sleep(std::time::Duration::from_secs(wins::PROG_DONE_SECS)).await;
-    wins::close_setup_progress(&handle);
+    wins::close_setup_progress(&handle, round);
 }
 
 /// 本人在這台電腦上按「安裝並登入 Claude Code」。本人簽章不在這裡取好帶著走：安裝要好幾分鐘，權杖可能中途過期，

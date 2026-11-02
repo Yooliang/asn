@@ -28,6 +28,15 @@ test('結果：成功、失敗、已取消各一個標題；結果出來後晚�
   assert.equal(canCancel(v), false)
 })
 
+test('新的一輪開始（小窗還開著）：重來事件把舊結果與取消狀態清掉，新的進度顯示得出來、取消鈕回來', () => {
+  const old = requestCancel(applyEvent(initialView(), { phase: 'done', ok: true, text: '完成' }))
+  assert.equal(old.done, true)
+  const fresh = applyEvent(old, { phase: 'reset' })
+  assert.deepEqual(fresh, initialView())
+  assert.ok(canCancel(fresh))
+  assert.equal(applyEvent(fresh, { phase: 'installing', text: '正在下載' }).line, '正在下載')
+})
+
 test('取消：只記下要求，畫面照實說「這一步做完才停」；只能按一次；做完後不再改', () => {
   const v = requestCancel(initialView())
   assert.equal(canCancel(v), false)
@@ -56,7 +65,13 @@ test('接線守門：小窗頁聽兩種事件、先要快照、取消走既有�
   assert.ok(open.length > 100)
   for (const k of ['.focusable(false)', '.focused(false)', '.skip_taskbar(true)', '.always_on_top(true)']) assert.ok(open.includes(k), k)
   assert.match(lib, /wins::open_setup_progress\(&handle\)/)
-  assert.match(lib, /wins::close_setup_progress\(&handle\)/)
+  assert.match(lib, /wins::close_setup_progress\(&handle, round\)/, '自動關窗要帶自己那一輪的編號')
+  assert.match(wins, /if !is_current_round\(round\)/)
+  // 小窗開不起來就不開始、回報手機；已經有一輪在跑就不去動它的小窗
+  const run = lib.slice(lib.indexOf('async fn run_remote_setup'), lib.indexOf('async fn agent_setup_start'))
+  assert.match(run, /Err\(e\) => \{[\s\S]{0,200}沒有開始安裝[\s\S]{0,80}return;/)
+  assert.ok(run.indexOf('is_busy()') > 0 && run.indexOf('is_busy()') < run.indexOf('open_setup_progress'), '先看有沒有在跑，再開小窗')
+  assert.ok(run.indexOf('open_setup_progress') < run.indexOf('start_claude'), '小窗開成功才開始安裝')
   assert.match(lib, /wins::setup_progress_snapshot/)
   assert.match(read('scripts/smoke-lib.mjs'), /setup-progress\.html/)
   // 畫面文字是人話：不出現檔名、網址、授權碼

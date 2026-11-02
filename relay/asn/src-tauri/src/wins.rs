@@ -4,7 +4,7 @@ use crate::nowin::NoWindow;
 use crate::{App, BROWSER_ARGS};
 use serde::Deserialize;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder, Window};
@@ -18,6 +18,8 @@ const TOAST_MS: u64 = 5500;
 const PROG_W: f64 = 340.0;
 const PROG_H: f64 = 176.0;
 const PROG_LABEL: &str = "setup-progress";
+/// 第幾輪：每次開小窗加一。結束後的自動關窗要帶著自己那一輪的編號，編號不同就不關（新的一輪已經接手）
+static PROG_ROUND: AtomicU64 = AtomicU64::new(0);
 /// 做完之後多久自己關（秒）
 pub const PROG_DONE_SECS: u64 = 8;
 
@@ -29,6 +31,10 @@ pub fn progress_origin(wa_x: i32, wa_y: i32, wa_w: i32, wa_h: i32, sf: f64) -> (
 
 /// 最後一個進度事件：小窗開得比事件慢時，開起來先向這裡要（setup_progress_snapshot）
 static PROG_LAST: Mutex<Vec<serde_json::Value>> = Mutex::new(Vec::new());
+
+fn is_current_round(round: u64) -> bool {
+    PROG_ROUND.load(Ordering::SeqCst) == round
+}
 
 /// 記下最新的進度事件：只留一個；結果（done）出來之後，晚到的進度不蓋掉結果
 fn record_progress(ev: &serde_json::Value) {
@@ -53,11 +59,15 @@ pub fn setup_progress_snapshot() -> Vec<serde_json::Value> {
 
 /// 開常駐進度小窗（已經開著就什麼都不做）：置頂、不搶輸入焦點、不進工作列、無邊框透明、可以點（取消鈕），不會自己關，結束後由呼叫端用 close_setup_progress 關。
 /// 主視窗隱藏或最小化時照樣跳出來（它是獨立的視窗）
-pub fn open_setup_progress(app: &AppHandle) -> Result<(), String> {
-    if app.get_webview_window(PROG_LABEL).is_some() {
-        return Ok(());
-    }
+/// 回傳這一輪的編號。上一輪的小窗還開著（結果還在顯示）就沿用那個視窗，但清掉舊狀態、送「重來」事件讓畫面回到開頭，舊的計時到了也不會關到這一輪
+pub fn open_setup_progress(app: &AppHandle) -> Result<u64, String> {
+    let round = PROG_ROUND.fetch_add(1, Ordering::SeqCst) + 1;
     PROG_LAST.lock().unwrap().clear();
+    if let Some(w) = app.get_webview_window(PROG_LABEL) {
+        let _ = app.emit("agent-setup", serde_json::json!({ "phase": "reset" }));
+        let _ = w.show();
+        return Ok(round);
+    }
     let w = WebviewWindowBuilder::new(app, PROG_LABEL, WebviewUrl::App("setup-progress.html".into()))
         .title("ASN 安裝並登入")
         .inner_size(PROG_W, PROG_H)
@@ -80,10 +90,14 @@ pub fn open_setup_progress(app: &AppHandle) -> Result<(), String> {
         let _ = w.set_position(PhysicalPosition::new(x, y));
     }
     let _ = w.show();
-    Ok(())
+    Ok(round)
 }
 
-pub fn close_setup_progress(app: &AppHandle) {
+/// 關小窗；只有編號還是這一輪才關（新的一輪已經開始就不動它）
+pub fn close_setup_progress(app: &AppHandle, round: u64) {
+    if !is_current_round(round) {
+        return;
+    }
     if let Some(w) = app.get_webview_window(PROG_LABEL) {
         let _ = w.close();
     }
@@ -534,6 +548,15 @@ mod tests {
             assert!(y + (PROG_H * sf) as i32 <= toast_top, "{sf}：不能壓到最上面那個提示位置");
             assert!(x >= 0 && x + (PROG_W * sf) as i32 <= wa_x + wa_w && y >= 0, "{sf}：要在工作區內");
         }
+    }
+
+    #[test]
+    fn 結束後自動關窗只認自己那一輪() {
+        let first = PROG_ROUND.fetch_add(1, Ordering::SeqCst) + 1;
+        assert!(is_current_round(first));
+        let second = PROG_ROUND.fetch_add(1, Ordering::SeqCst) + 1;
+        assert!(!is_current_round(first), "新的一輪開始後，舊的一輪不能再關窗");
+        assert!(is_current_round(second));
     }
 
     #[test]
