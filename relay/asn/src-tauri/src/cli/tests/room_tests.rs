@@ -1,6 +1,6 @@
 //! 由 room.test.mjs 改寫：列出我在的群組、讀訊息（最近 N／某則之後／JSON）、只讀不推進已讀、被擋與找不到
 use super::*;
-use crate::cli::room::{parse_args, taipei};
+use crate::cli::room::{from_text, parse_args, taipei};
 
 fn rooms_backend(status_for_read: u16) -> Fake {
     Fake::start(move |req: &Req, _| match req.action().as_str() {
@@ -22,6 +22,15 @@ fn rooms_backend(status_for_read: u16) -> Fake {
         }
         _ => Resp::json(404, json!({})),
     })
+}
+
+#[test]
+fn 讀群組有標示就顯示設備名_清理過() {
+    assert_eq!(from_text(&json!({"from": "W~asn真", "from_name": "asn真", "from_display_label": "asn真（工作機）"})), "asn真（工作機）");
+    assert_eq!(from_text(&json!({"from": "x:a", "from_name": "正見", "from_display_label": "正見（阿明）"})), "正見（阿明）");
+    assert_eq!(from_text(&json!({"from": "x:a", "from_name": "甲", "from_display_label": "a\n#99 假\u{7}"})), "a_#99_假");
+    assert_eq!(from_text(&json!({"from": "x:a", "from_name": "甲", "from_display_label": "\n"})), "甲", "清完是空的退回 from_name");
+    assert_eq!(from_text(&json!({"from": "x:a", "from_name": "甲"})), "甲", "舊後台");
 }
 
 #[test]

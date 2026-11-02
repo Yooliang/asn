@@ -24,7 +24,7 @@ fn usage() -> String {
   asn room confirm-status <id> [--peek]                  查主持人有沒有放行
     --last N     最近 N 則（預設 20，最多 {MAX_LAST}）
     --since SEQ  第 SEQ 則之後的（最多 {MAX_LAST} 則）
-    --json       每則一行 JSON（seq/from/from_name/trust/at/mentions/body）
+    --json       每則一行 JSON（seq/from/from_name/trust/at/mentions/body；後台有給標示時多 from_label：自己帳號的夥伴「夥伴名（設備名）」）
 只讀、不改已讀；身分（節點~視窗名）自動判定，不能自填。"
     )
 }
@@ -126,7 +126,15 @@ fn one_line(s: &str, n: usize) -> String {
     if t.chars().count() > n { format!("{}…", t.chars().take(n).collect::<String>()) } else { t }
 }
 
-fn from_text(m: &Value) -> String {
+/// 後台算好的標示（自己帳號的夥伴「夥伴名（設備名）」、別的帳號的夥伴「夥伴名（主人名）」），清理過才印
+fn display_label(m: &Value) -> Option<String> {
+    m.get("from_display_label").and_then(Value::as_str).map(crate::bridge::rooms::clean_label).filter(|s| !s.is_empty())
+}
+
+pub(super) fn from_text(m: &Value) -> String {
+    if let Some(l) = display_label(m) {
+        return l;
+    }
     if let Some(n) = m.get("from_name").and_then(Value::as_str).filter(|s| !s.is_empty()) {
         return n.to_string();
     }
@@ -217,6 +225,9 @@ fn json_line(m: &Value, cmd: Option<&str>) -> String {
         serde_json::to_string(m.get("mentions").filter(|v| v.is_array()).unwrap_or(&json!([]))).unwrap_or_default(),
         serde_json::to_string(&body_text(m, cmd, false)).unwrap_or_default()
     );
+    if let Some(l) = display_label(m) {
+        o.push_str(&format!(",\"from_label\":{}", serde_json::to_string(&l).unwrap_or_default()));
+    }
     if !atts.is_empty() {
         o.push_str(&format!(",\"attachments\":[{}]", atts.iter().map(super::recv::attachment_json).collect::<Vec<_>>().join(",")));
     }
