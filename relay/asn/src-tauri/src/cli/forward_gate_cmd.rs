@@ -53,7 +53,7 @@ mod tests {
     #[test]
     fn 放行什麼都不印_不符印_deny_每次都記_log_不記內文() {
         let d = tempfile::tempdir().unwrap();
-        forward_gate::write_inflight(d.path(), &[(A.to_string(), "T-甲".to_string())]).unwrap();
+        forward_gate::write_inflight(d.path(), &[(A.to_string(), "T-甲".to_string(), None)]).unwrap();
         let dir = d.path().display().to_string();
         let call = |to: &str| json!({"tool_name": "SendMessage", "tool_input": {"to": to, "message": format!("機密內文 id={A}")}}).to_string();
         let (code, out, _) = run_gate(&["forward-gate", "--dir", &dir], &call("T-甲"));

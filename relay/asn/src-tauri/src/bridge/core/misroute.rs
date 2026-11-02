@@ -32,7 +32,7 @@ impl Core {
                 self.on_fail(id, MISROUTE_FAIL).await;
                 return;
             };
-            self.parser.register(id, &to);
+            self.parser.register_head(id, &to, super::super::forward_gate::head_hash(super::super::forward_gate::first_line(&text)));
             self.write_inflight();
             match self.sink.say(forward_text(&self.parser.nonce, id, &to, &text)) {
                 Ok(_) => self.log.line(&format!("misrouted id={id}: resent once to {to}")),
@@ -64,7 +64,7 @@ impl Core {
             return;
         }
         // 只寫寄件人自己指定的收件人；實際收到的視窗名可能是這台電腦上別人的，不寫進通知
-        let text = format!("[收發室] 你寄給 {expected} 的信（編號 {id}）曾被誤送到同一台電腦的另一個視窗，可能已被讀取，已重新轉交給 {expected}。");
+        let text = format!("[收發室] 你寄給 {expected} 的信（編號 {id}）曾被誤送到同一台電腦的另一個視窗，可能已被讀取，收發室正在重新轉交給 {expected}。");
         self.send_back(&o, &text, None, Some(false)).await;
     }
 
@@ -76,9 +76,14 @@ impl Core {
         self.tell_window(actual, &format!("（收發室更正）剛才編號 {id} 那封信不是寄給你的，請不要照做，也不要回覆寄件人。"));
     }
 
+    /// 這個編號是額度扣住中的群組訊息（已從 pending 移除、排在清單裡）：它的轉交結果可能還在路上，編號要留到它真的放行或放棄
+    fn held_room_id(&self, id: &str) -> bool {
+        self.held.items().iter().any(|h| h.held_at > 0 && rooms::room_uuid(&h.room_id, h.seq, &h.member) == id)
+    }
+
     /// 定時整理：不在轉交中、也不是剛送出的說明的編號，從 hook 的 inflight 檔拿掉（hook 之後一律擋）
     pub(super) fn prune_inflight(&mut self) {
-        let stale: Vec<String> = self.parser.inflight_pairs().into_iter().map(|(id, _)| id).filter(|id| self.idx(id).is_none() && !self.notice_ids.contains_key(id)).collect();
+        let stale: Vec<String> = self.parser.inflight_pairs().into_iter().map(|(id, _)| id).filter(|id| self.idx(id).is_none() && !self.notice_ids.contains_key(id) && !self.held_room_id(id)).collect();
         for id in stale {
             self.parser.forget(&id);
         }

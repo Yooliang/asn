@@ -1,5 +1,6 @@
 //! 核對轉交對象的整合測試：inflight 檔、hook 判斷、送錯時的重送／Fail／通知／更正。假後端、假 worker，不連真實服務。
 use super::*;
+use super::rooms_launch::{room, rmsg, set_rooms};
 use crate::bridge::forward_gate::{self, Verdict};
 
 /// 假 worker 把這個編號的訊息（原樣）呼叫 SendMessage 送給 actual，工具結果成功，然後這一輪結束
@@ -25,7 +26,8 @@ async fn 橋送出前先記下編號與目標_hook_讀同一份判斷_相符放�
     h.fr.put(mail(1, json!({})));
     h.core.pull("test", T0).await;
     let flight = forward_gate::read_inflight(h.work.path()).unwrap();
-    assert_eq!(flight.get(&uid(1)).map(String::as_str), Some("T-乙"));
+    assert_eq!(flight.get(&uid(1)).map(|i| i.to.as_str()), Some("T-乙"));
+    assert!(flight.get(&uid(1)).unwrap().head.is_some(), "也存了第一行的指紋");
     // worker 實際會呼叫的內容（訊息原樣）：hook 照檔案核對
     let (_, text) = h.core.fwd_probe(&uid(1)).unwrap();
     let call = |to: &str| json!({"tool_name": "SendMessage", "tool_input": {"to": to, "message": text, "recipient": to, "content": text}});
@@ -52,7 +54,7 @@ async fn 橋送的每一則第一行行尾都有自己的編號_提醒_更正_�
     let body = nudge.split("<<<MAIL\n").nth(1).unwrap().rsplit_once("\nMAIL>>>").unwrap().0.to_string();
     let id = forward_gate::trailing_id(forward_gate::first_line(&body)).expect("提醒的第一行行尾有編號");
     let flight = forward_gate::read_inflight(h.work.path()).unwrap();
-    assert_eq!(flight.get(&id).map(String::as_str), Some("T-乙"), "{flight:?} id={id}");
+    assert_eq!(flight.get(&id).map(|i| i.to.as_str()), Some("T-乙"), "{flight:?} id={id}");
     let c = json!({"tool_name": "SendMessage", "tool_input": {"to": "T-乙", "message": body}});
     assert_eq!(forward_gate::check(&c, Some(&flight)).0, Verdict::Allow);
 }
@@ -75,7 +77,7 @@ async fn 送錯_不_ack_重送一次給正確的視窗_通知寄件人_固定文
     assert_eq!(n.len(), 1);
     assert!(n[0].contains("可能已被讀取") && !n[0].contains("機密內文"), "{}", n[0]);
     // 只寫寄件人自己指定的收件人，不寫實際拿到信的視窗名（那可能是這台電腦上別人的）
-    assert!(n[0].contains("你寄給 T-乙 的信") && n[0].contains("已重新轉交給 T-乙") && !n[0].contains("T-丙"), "{}", n[0]);
+    assert!(n[0].contains("你寄給 T-乙 的信") && n[0].contains("收發室正在重新轉交給 T-乙") && !n[0].contains("T-丙"), "{}", n[0]);
     let sent = h.fr.sent().into_iter().find(|s| s["body"].as_str().unwrap_or("").contains("可能已被讀取")).unwrap();
     assert_eq!((sent["to_node"].as_str(), sent["expects_reply"].clone()), (Some("W"), json!(false)));
     // 拿錯信的視窗收到更正（有自己的編號，hook 放行）
@@ -151,4 +153,80 @@ async fn 送錯也算_worker_有在動_解除額度扣住_但不算轉交() {
     send_to(&mut h.core, &uid(1), "T-丙", "toolu_w", T0 + 2).await;
     assert_eq!(h.core.inbox_hold_until(), None, "worker 有在動");
     assert!(h.fr.acked().is_empty());
+}
+
+fn quota_event() -> WorkerLine {
+    WorkerLine::Line(json!({"type":"assistant","message":{"model":"<synthetic>","content":[]},"apiError":"usage_limit_reached"}).to_string())
+}
+
+#[tokio::test]
+async fn 第一行被改過_hook_擋_橋也不算佐證_信維持轉交中() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", T0).await;
+    let (_, text) = h.core.fwd_probe(&uid(1)).unwrap();
+    let altered = text.replacen("trust=", "trust=x", 1);
+    let flight = forward_gate::read_inflight(h.work.path());
+    let c = json!({"tool_name": "SendMessage", "tool_input": {"to": "T-乙", "message": altered, "recipient": "T-乙", "content": "預覽…"}});
+    assert!(matches!(forward_gate::check(&c, flight.as_ref()).0, Verdict::Deny(ref r) if r.contains("抬頭")));
+    for l in ok_send_lines("toolu_a", "T-乙", &altered) {
+        h.core.on_worker_line(l, T0 + 5).await;
+    }
+    h.core.on_worker_line(res(""), T0 + 6).await;
+    assert!(h.fr.acked().is_empty());
+    assert_eq!(h.core.pending[0].state, State::Forwarding);
+}
+
+#[tokio::test]
+async fn inflight_檔寫不進去_旗標保留_下一個_tick_再試() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    // 檔名被一個資料夾占住：寫入失敗
+    std::fs::create_dir(h.work.path().join(forward_gate::INFLIGHT_FILE)).unwrap();
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", T0).await;
+    assert!(h.core.log.has("inflight file write failed"));
+    std::fs::remove_dir(h.work.path().join(forward_gate::INFLIGHT_FILE)).unwrap();
+    assert!(forward_gate::read_inflight(h.work.path()).is_none());
+    h.core.tick(T0 + 5000).await;
+    let flight = forward_gate::read_inflight(h.work.path()).expect("下一個 tick 補寫");
+    assert_eq!(flight.get(&uid(1)).map(|i| i.to.as_str()), Some("T-乙"));
+}
+
+#[tokio::test]
+async fn 額度扣住中的群組訊息_編號留在_inflight_晚到的成功結果仍算_sent_恢復後不再轉交一次() {
+    let mut h = harness(&[("T-視窗甲", "idle")]).await;
+    let mine = json!([{"member": "T~T-視窗甲", "read_seq": 1}]);
+    set_rooms(&h, vec![room(vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}}))], mine)]);
+    h.core.pull_rooms(T0).await;
+    let id = crate::bridge::rooms::room_uuid("R1", 2, "T~T-視窗甲");
+    h.core.on_worker_line(quota_event(), T0 + 1000).await;
+    assert!(h.core.pending.is_empty(), "已從 pending 移到扣住清單");
+    // 下一個 tick 的整理不能把它的編號從 inflight 拿掉
+    h.core.tick(T0 + 6000).await;
+    assert!(forward_gate::read_inflight(h.work.path()).unwrap().contains_key(&id));
+    // 之後才到的成功結果：算 Sent，不會恢復後又轉交一次
+    worker_ok(&mut h.core, &id, T0 + 7000).await;
+    assert_eq!(h.core.pending.len(), 1);
+    h.core.tick(T0 + 8000).await;
+    h.core.tick(T0 + 3_700_000).await;
+    assert_eq!(h.said().len(), 1, "只轉交一次");
+}
+
+#[tokio::test]
+async fn 扣住的群組訊息真的放行或放棄後_編號才從_inflight_拿掉() {
+    let mut h = harness(&[("T-視窗甲", "idle")]).await;
+    let mine = json!([{"member": "T~T-視窗甲", "read_seq": 1}]);
+    set_rooms(&h, vec![room(vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}}))], mine)]);
+    h.core.pull_rooms(T0).await;
+    let id = crate::bridge::rooms::room_uuid("R1", 2, "T~T-視窗甲");
+    h.core.on_worker_line(quota_event(), T0 + 1000).await;
+    h.core.tick(T0 + 6000).await;
+    assert!(forward_gate::read_inflight(h.work.path()).unwrap().contains_key(&id));
+    // 放棄（清單裡沒有了）：下一個 tick 拿掉
+    set_rooms(&h, vec![]);
+    for k in 1..=130u64 {
+        h.core.on_worker_line(res(&format!("FAIL {} x", uid(900))), T0 + k).await; // worker 有在動，解除扣住
+        h.core.tick(T0 + 10_000 + k * 31_000).await;
+    }
+    assert!(!forward_gate::read_inflight(h.work.path()).unwrap().contains_key(&id));
 }

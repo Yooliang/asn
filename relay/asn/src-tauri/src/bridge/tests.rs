@@ -331,7 +331,7 @@ impl H {
 /// 假 worker 成功轉交：照橋送進去的內容（收件人與訊息原樣）還原出 SendMessage 呼叫與成功的工具結果，再接 SENT 確認
 pub fn ok_send_lines(tid: &str, to: &str, message: &str) -> Vec<WorkerLine> {
     let call = json!({"type": "assistant", "message": {"model": "claude-haiku", "content": [{"type": "tool_use", "id": tid, "name": "SendMessage",
-        "input": {"to": to, "message": message, "recipient": to, "content": message, "summary": "轉交 relay 來信", "type": "message", "recipient_kind": "name"}}]}});
+        "input": {"to": to, "message": message, "recipient": to, "content": format!("{}…", message.chars().take(40).collect::<String>()), "summary": "轉交 relay 來信", "type": "message", "recipient_kind": "name"}}]}});
     let result = json!({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": tid,
         "content": [{"type": "text", "text": "{\"success\":true,\"message\":\"sent\",\"msg_id\":\"m-1\"}"}]}]}});
     vec![WorkerLine::Line(call.to_string()), WorkerLine::Line(result.to_string())]

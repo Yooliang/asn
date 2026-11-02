@@ -923,7 +923,7 @@ impl Core {
         }
         // 核對轉交對象：第一行行尾一定要有這封的編號（hook 與 SENT 比對都只認行尾），先記下 {編號: 目標} 再送
         let text = super::forward_gate::ensure_head_id(text, id);
-        self.parser.register(id, to);
+        self.parser.register_head(id, to, super::forward_gate::head_hash(super::forward_gate::first_line(&text)));
         if self.fwd_text.len() >= 400 {
             self.fwd_text.clear(); // 只有送錯要重送時才用得到，爆量時整批丟掉也不影響正常轉交
         }
@@ -943,7 +943,8 @@ impl Core {
         if !self.parser.take_dirty() {
             return;
         }
-        if let Err(e) = super::forward_gate::write_inflight(&self.cfg.work_dir, &self.parser.inflight_pairs()) {
+        if let Err(e) = super::forward_gate::write_inflight(&self.cfg.work_dir, &self.parser.inflight_items()) {
+            self.parser.mark_dirty(); // 沒寫成：旗標設回去，下一個 tick 再試
             self.log.line(&format!("inflight file write failed: {e}"));
         }
     }

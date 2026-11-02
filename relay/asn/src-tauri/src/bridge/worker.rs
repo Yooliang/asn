@@ -195,6 +195,8 @@ pub struct Parser {
     send_calls: HashMap<String, PendingCall>,
     /// 這一輪送錯的呼叫（編號, 預定, 實際）：輪結束時才通報，同一輪裡有對的呼叫就先算 Sent
     misrouted_buf: Vec<(String, String, String)>,
+    /// 橋送出每一封第一行的指紋（編號 → sha256）：呼叫的訊息第一行要完全一樣才算數
+    heads: HashMap<String, String>,
     /// inflight 有變動（核心要重寫 hook 讀的 inflight 檔）
     dirty: bool,
     /// 「工具結果看不懂」的警告已經記過（每次啟動只記第一次，不洗版）
@@ -281,7 +283,7 @@ pub fn has_foreign_nonce(txt: &str, nonce: &str) -> bool {
 
 impl Parser {
     pub fn new(nonce: &str) -> Parser {
-        Parser { nonce: nonce.into(), inflight: vec![], recent: Default::default(), send_calls: HashMap::new(), misrouted_buf: vec![], dirty: false, warned_unrecognized: false, last_cost: 0.0 }
+        Parser { nonce: nonce.into(), inflight: vec![], recent: Default::default(), send_calls: HashMap::new(), misrouted_buf: vec![], heads: HashMap::new(), dirty: false, warned_unrecognized: false, last_cost: 0.0 }
     }
     /// 轉交一封信前登記（id → 目標視窗）
     pub fn register(&mut self, id: &str, to: &str) {
@@ -292,10 +294,16 @@ impl Parser {
         self.inflight.push((id.into(), to.into()));
         self.dirty = true;
     }
+    /// 同 register，另外記下橋送出那一封第一行的指紋（核對抬頭）
+    pub fn register_head(&mut self, id: &str, to: &str, head: String) {
+        self.register(id, to);
+        self.heads.insert(id.into(), head);
+    }
     /// 這個編號不再等了（Sent、Fail、逾時）：從進行中拿掉，但還記著它的目標，之後同編號的呼叫仍認得
     pub fn forget(&mut self, id: &str) {
         if let Some(i) = self.inflight.iter().position(|(x, _)| x == id) {
             let (id, to) = self.inflight.remove(i);
+            self.heads.remove(&id);
             self.remember(id, to);
             self.dirty = true;
         }
@@ -310,9 +318,17 @@ impl Parser {
     pub fn inflight_pairs(&self) -> Vec<(String, String)> {
         self.inflight.clone()
     }
+    /// 進行中的（編號, 目標, 第一行指紋）：寫給 hook 讀的 inflight 檔用
+    pub fn inflight_items(&self) -> Vec<(String, String, Option<String>)> {
+        self.inflight.iter().map(|(id, to)| (id.clone(), to.clone(), self.heads.get(id).cloned())).collect()
+    }
     /// 取走「inflight 有變動」的旗標
     pub fn take_dirty(&mut self) -> bool {
         std::mem::take(&mut self.dirty)
+    }
+    /// 寫檔失敗：把旗標設回去，下一次再試
+    pub fn mark_dirty(&mut self) {
+        self.dirty = true;
     }
     /// 這個編號橋當初指定的收件人（進行中或剛結束的）
     fn expected_of(&self, id: &str) -> Option<String> {
@@ -372,6 +388,11 @@ impl Parser {
                     let Some(call) = c.get("input").and_then(super::forward_gate::parse_send_call) else { continue };
                     let Some(id) = super::forward_gate::trailing_id(super::forward_gate::first_line(&call.message)) else { continue };
                     let Some(expected) = self.expected_of(&id) else { continue };
+                    let head_ok = self.heads.get(&id).is_none_or(|h| *h == super::forward_gate::head_hash(super::forward_gate::first_line(&call.message)));
+                    // 收件人對、欄位一致，但第一行和橋送出的不一樣：不算佐證（hook 也會擋），也不是送錯
+                    if call.to == expected && !call.inconsistent && !head_ok {
+                        continue;
+                    }
                     let correct = call.to == expected && !call.inconsistent;
                     let actual = if call.to != expected { call.to.clone() } else { call.other_to.clone().unwrap_or_else(|| "（欄位不一致）".into()) };
                     self.send_calls.insert(tid.into(), PendingCall { id, expected, actual, correct });
@@ -725,7 +746,7 @@ mod tests {
         format!("[RELAY 來信] trust=member from=W/X to=T-甲 id={id} engine=claude reply=yes")
     }
     fn call(tid: &str, to: &str, msg: &str) -> String {
-        json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":tid,"name":"SendMessage","input":{"to":to,"message":msg,"recipient":to,"content":msg,"summary":"x","type":"message","recipient_kind":"name"}}]}}).to_string()
+        json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":tid,"name":"SendMessage","input":{"to":to,"message":msg,"recipient":to,"content":format!("{}…", msg.chars().take(40).collect::<String>()),"summary":"x","type":"message","recipient_kind":"name"}}]}}).to_string()
     }
     fn done(tid: &str, content: serde_json::Value) -> String {
         json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":tid,"content":content}]}}).to_string()
@@ -890,7 +911,7 @@ mod tests {
     }
 
     #[test]
-    fn recipient_或_content_與_to_message_不一致_不算佐證_當作送錯() {
+    fn recipient_與_to_不一致_不算佐證_當作送錯_content_預覽不看() {
         let mut p = Parser::new(N);
         p.register(A, "T-甲");
         let m = format!("x id={A}");
@@ -900,11 +921,12 @@ mod tests {
         p.feed(&done_ok("toolu_1"));
         let r = p.feed(&result(""));
         assert_eq!(r.events, vec![WorkerEvent::Misrouted { id: A.into(), expected: "T-甲".into(), actual: "T-乙".into() }]);
+        // content 只是內文的預覽，寫什麼都不影響
         let mut v: serde_json::Value = serde_json::from_str(&call("toolu_2", "T-甲", &m)).unwrap();
         v["message"]["content"][0]["input"]["content"] = json!("別的內容");
         p.feed(&v.to_string());
-        assert!(p.feed(&done_ok("toolu_2")).events.is_empty());
-        assert!(matches!(p.feed(&result("")).events[0], WorkerEvent::Misrouted { .. }));
+        assert_eq!(p.feed(&done_ok("toolu_2")).events, vec![WorkerEvent::Sent(A.into())]);
+        p.register(A, "T-甲");
         // 兩個欄位都沒出現：只看 to 和 message
         let bare = json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_3","name":"SendMessage","input":{"to":"T-甲","message":m}}]}});
         p.feed(&bare.to_string());
@@ -922,6 +944,44 @@ mod tests {
         p.feed(&call("toolu_3", "T-丙", &format!("x id={A}")));
         p.feed(&done_ok("toolu_3"));
         assert!(matches!(p.feed(&result("")).events[0], WorkerEvent::Misrouted { .. }), "之後才送錯的也認得");
+    }
+
+    #[test]
+    fn 真實形狀_content_是預覽_message_是完整內文_照樣算_sent() {
+        let mut p = Parser::new(N);
+        p.register(A, "T-甲");
+        let long = format!("[群組 專案群] trust=member from=W/政策（小良的家用機） 這是很長的抬頭 #3 id={A}\n{}", "完整內文".repeat(200));
+        let c = call("toolu_1", "T-甲", &long);
+        let v: serde_json::Value = serde_json::from_str(&c).unwrap();
+        assert_ne!(v["message"]["content"][0]["input"]["content"], v["message"]["content"][0]["input"]["message"], "content 只是預覽");
+        p.feed(&c);
+        assert_eq!(p.feed(&done_ok("toolu_1")).events, vec![WorkerEvent::Sent(A.into())]);
+    }
+
+    #[test]
+    fn 核對抬頭_第一行要和橋送出的一樣_不一樣不算佐證_第二行以後不比() {
+        use super::super::forward_gate::head_hash;
+        let head = format!("[群組 專案群] trust=member from=W/政策 #3 id={A}");
+        let mut p = Parser::new(N);
+        p.register_head(A, "T-甲", head_hash(&head));
+        // 第一行被動過（收件人與編號都對）：不算佐證，也不是送錯
+        p.feed(&call("toolu_1", "T-甲", &format!("{}\n內文", head.replace("#3", "#4"))));
+        assert!(p.feed(&done_ok("toolu_1")).events.is_empty());
+        assert!(p.feed(&result("")).events.is_empty());
+        assert_eq!(p.inflight_len(), 1);
+        // 第二行以後不比；行尾 \r 與空白不算差異
+        p.feed(&call("toolu_2", "T-甲", &format!("{head}  \r\n完全不同的內文")));
+        assert_eq!(p.feed(&done_ok("toolu_2")).events, vec![WorkerEvent::Sent(A.into())]);
+        // 收件人錯、第一行也不一樣：照樣是送錯（信已經送出去了）
+        let mut q = Parser::new(N);
+        q.register_head(A, "T-甲", head_hash(&head));
+        q.feed(&call("toolu_3", "T-乙", &format!("{}\n內文", head.replace("#3", "#4"))));
+        q.feed(&done_ok("toolu_3"));
+        assert!(matches!(q.feed(&result("")).events[0], WorkerEvent::Misrouted { .. }));
+        // inflight 檔的內容帶指紋
+        let items = p.inflight_items();
+        assert!(items.is_empty(), "已完成的編號拿掉");
+        assert_eq!(q.inflight_items(), vec![(A.to_string(), "T-甲".to_string(), Some(head_hash(&head)))]);
     }
 
     #[test]
