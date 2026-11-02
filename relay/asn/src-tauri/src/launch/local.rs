@@ -30,6 +30,13 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
     if model_plan != ModelPlan::None && !pi_model_args.is_empty() {
         return Err("經 pi 開的夥伴請用 pi 的模型，不能另外指定型號".into());
     }
+    // 開窗之前先查這台電腦上有沒有同名而且還活著的夥伴：有就沿用、切到前景，不另開第二個（issue #596）
+    if prof.mode != LaunchMode::Background {
+        let live = super::console::live_partner_pid(prof.engine.as_str(), &req.name);
+        if let Some(out) = existing_partner_reply(live, || super::console::bring_partner_to_front(prof.engine.as_str(), &req.name)) {
+            return Ok(out);
+        }
+    }
     maybe_trust_claude_cwd(prof.engine.as_str(), &launch_req.cwd);
 
     if prof.mode == LaunchMode::Background {
@@ -74,6 +81,20 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
         out["note"] = json!(n);
     }
     Ok(out)
+}
+
+/// 同名夥伴已在跑時的回覆；沒有（None）就照常開新的。
+/// `live`＝同名而且還活著的夥伴 pid；`bring` 把它切到前景，回 `{ok, reason?}`。
+/// 切前景失敗仍回 existing:true 並附原因，不另開一個。
+pub(crate) fn existing_partner_reply(live: Option<u32>, bring: impl FnOnce() -> Value) -> Option<Value> {
+    let pid = live?;
+    let r = bring();
+    let mut out = json!({ "ok": true, "existing": true, "mode": "window", "pid": pid });
+    if r.get("ok").and_then(Value::as_bool) != Some(true) {
+        let why = r.get("reason").and_then(Value::as_str).unwrap_or("無法切到前景");
+        out["reason"] = json!(why);
+    }
+    Some(out)
 }
 
 /// 開新夥伴選了型號要怎麼帶（#539 之四）
@@ -488,6 +509,80 @@ mod tests {
 
     fn sv(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn 工作階段(pid: u64, name: &str) -> Value {
+        json!({ "pid": pid, "name": name, "kind": "interactive", "startedAt": pid })
+    }
+
+    /// 開之前的查法：和 partner_console_query 同一個 resolve_pid（claude 讀 sessions、程序要活著）
+    fn 查同名(engine: &str, name: &str, sessions: Vec<Value>, alive: &dyn Fn(u32) -> bool) -> Option<u32> {
+        use super::super::console_resolve::{resolve_pid, Ask, Sources};
+        let src = Sources { sessions, ..Default::default() };
+        resolve_pid(&Ask { engine, name, kind: "", pid: None }, &src, alive).ok()
+    }
+
+    #[test]
+    fn 同名夥伴還活著_不開新的_回existing並帶pid() {
+        let live = 查同名("claude", "B4正式", vec![工作階段(8936, "B4正式")], &|_| true);
+        assert_eq!(live, Some(8936));
+        let mut called = false;
+        let out = existing_partner_reply(live, || {
+            called = true;
+            json!({ "ok": true, "visible": true })
+        })
+        .expect("同名活夥伴要沿用，不能照常開新的");
+        assert!(called, "要把它切到前景");
+        assert_eq!(out["ok"], json!(true));
+        assert_eq!(out["existing"], json!(true));
+        assert_eq!(out["pid"], json!(8936));
+        assert!(out.get("reason").is_none(), "切成功不帶原因");
+    }
+
+    #[test]
+    fn 切前景失敗仍回existing_附原因_不另開() {
+        let out = existing_partner_reply(Some(8936), || json!({ "ok": false, "reason": "找不到這個夥伴的主控台視窗" })).unwrap();
+        assert_eq!(out["existing"], json!(true));
+        assert_eq!(out["pid"], json!(8936));
+        assert_eq!(out["reason"], json!("找不到這個夥伴的主控台視窗"));
+    }
+
+    #[test]
+    fn 同名但已結束_照常開新的() {
+        // 程序不在（舊視窗結束、mux 死窗格的 claude 也一樣不在）：不算活著
+        let live = 查同名("claude", "B4正式", vec![工作階段(8936, "B4正式")], &|_| false);
+        assert_eq!(live, None);
+        assert!(existing_partner_reply(live, || panic!("沒有活的就不該去切前景")).is_none());
+    }
+
+    #[test]
+    fn 不同名_照常開新的() {
+        let live = 查同名("claude", "B5測試", vec![工作階段(8936, "B4正式")], &|_| true);
+        assert_eq!(live, None);
+        assert!(existing_partner_reply(live, || panic!("不同名不該動別人的視窗")).is_none());
+    }
+
+    #[test]
+    fn 名稱比對_跟夥伴主控台查詢同一套_逐字相同才算同名() {
+        // 沒有另外的正規化：開夥伴的名字本來就限英數、連字號與中文（valid_partner_name，不含空白），查詢也是逐字比對
+        let ss = || vec![工作階段(8936, "B4正式")];
+        assert_eq!(查同名("claude", "b4正式", ss(), &|_| true), None, "大小寫不同不算同名");
+        assert_eq!(查同名("claude", "B4正式 ", ss(), &|_| true), None);
+        assert!(!super::super::config::valid_partner_name("B4 正式"), "名字不可能含空白");
+        // 同名多筆取最近啟動且活著的
+        let two = vec![工作階段(100, "B4正式"), 工作階段(200, "B4正式")];
+        assert_eq!(查同名("claude", "B4正式", two, &|p| p == 100), Some(100));
+    }
+
+    #[test]
+    fn 守門_開窗前先查同名活夥伴() {
+        let src = include_str!("local.rs");
+        let f = src.split("pub fn partner_launch_local").nth(1).unwrap().split("pub(crate) enum ModelPlan").next().unwrap();
+        let check = f.find("existing_partner_reply(").expect("本機開新夥伴要先查同名");
+        assert!(f.contains("console::live_partner_pid("), "活著的判斷要用 partner_console_query 同一套");
+        for open in ["start_window_noted(", "open_pi_real("] {
+            assert!(check < f.find(open).unwrap(), "查同名要在 {open} 之前");
+        }
     }
 
     #[test]

@@ -170,6 +170,31 @@ fn mux_target(req: &PartnerConsoleReq) -> Option<(u32, String)> {
     Some((pid, super::term::mux_partner_in(mux, &req.name)?))
 }
 
+/// 這台電腦上同名而且還活著的夥伴 pid（開新夥伴前先查，避免開出兩個同名的）。
+/// 和 `partner_console_query` 用同一套辨識：`resolve_pid`（Claude 讀 sessions 比對名字、pi 讀登記檔，程序必須還活著）。
+/// mux 窗格裡的 claude 也走這條：窗格已結束、程序不在就不算活著。非 Windows 查不到＝None。
+pub(crate) fn live_partner_pid(engine: &str, name: &str) -> Option<u32> {
+    #[cfg(windows)]
+    {
+        use super::console_resolve::{resolve_pid, Ask};
+        let req = PartnerConsoleReq { engine: engine.into(), name: name.into(), visible: None, kind: None, pid: None };
+        let src = load_sources(&req);
+        let ask = Ask { engine, name, kind: "", pid: None };
+        resolve_pid(&ask, &src, &win::pid_alive).ok()
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (engine, name);
+        None
+    }
+}
+
+/// 把已在跑的同名夥伴切到前景（和夥伴清單的「前台」同一條：mux 開畫面、傳統主控台顯示視窗）。回傳 `{ok, reason?}`
+pub(crate) fn bring_partner_to_front(engine: &str, name: &str) -> Value {
+    let req = PartnerConsoleReq { engine: engine.into(), name: name.into(), visible: Some(true), kind: None, pid: None };
+    set_console_visible(&req, true).unwrap_or_else(|e| json!({ "ok": false, "reason": e }))
+}
+
 fn query_console(req: &PartnerConsoleReq) -> Result<ConsoleQuery, String> {
     if req.name.is_empty() {
         return Ok(ConsoleQuery { ok: false, can_toggle: None, visible: None, reason: Some("缺少名字".into()), pid: None, hwnd: None });

@@ -4,6 +4,7 @@ import {
   BACKGROUND_LAUNCH_TIMEOUT_MS,
   backgroundRestoreNoticeText,
   collectLaunchFailures,
+  existingPartnerNoticeText,
   findBackgroundTimeouts,
   launchFailedNoticeText,
 } from '../ui/lib/partner-launch-notify.mjs'
@@ -42,4 +43,13 @@ test('collectLaunchFailures：對照追蹤列的名字', () => {
     { id: 'b', status: 'ok' },
   ], track)
   assert.deepEqual(fails, [{ id: 'a', name: '夥伴-1', detail: '逾時' }])
+})
+
+test('同名夥伴已在跑的通知文案', () => {
+  const ok = existingPartnerNoticeText('B4正式')
+  assert.equal(ok.title, '夥伴已在跑')
+  assert.equal(ok.body, '「B4正式」已經在跑，已切到前景。')
+  const bad = existingPartnerNoticeText('B4正式', '找不到這個夥伴的主控台視窗')
+  assert.match(bad.body, /沒有另外開新的/)
+  assert.match(bad.body, /找不到這個夥伴的主控台視窗/)
 })
