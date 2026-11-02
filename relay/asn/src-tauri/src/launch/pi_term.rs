@@ -302,9 +302,9 @@ mod tests {
                 break;
             }
             if !answered {
-                let t = std::process::Command::new(&cli0).no_window().env("WEZTERM_UNIX_SOCKET", &sock0).args(["cli", "get-text"]).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+                let t = std::process::Command::new(&cli0).no_window().env("WEZTERM_UNIX_SOCKET", &sock0).args(["cli", "--no-auto-start", "get-text"]).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
                 if t.contains("Trust project folder?") && t.contains("Trust (this session only)") {
-                    let _ = std::process::Command::new(&cli0).no_window().env("WEZTERM_UNIX_SOCKET", &sock0).args(["cli", "send-text", "--no-paste", "\u{1b}[B\u{1b}[B\r"]).output();
+                    let _ = std::process::Command::new(&cli0).no_window().env("WEZTERM_UNIX_SOCKET", &sock0).args(["cli", "--no-auto-start", "send-text", "--no-paste", "\u{1b}[B\u{1b}[B\r"]).output();
                     println!("pi 問要不要信任這個暫存資料夾：選了「只信任這一次」");
                     answered = true;
                 }
@@ -317,7 +317,7 @@ mod tests {
             let id = svc.list().into_iter().find(|t| t.pid == gui).map(|t| t.id).ok_or("對照表裡沒有")?;
             let sock = crate::launch::wezterm::sock_path(&home, gui);
             let cli = std::path::PathBuf::from(std::env::var("ASN_WEZTERM_DIR").unwrap()).join("wezterm.exe");
-            let esc = std::process::Command::new(&cli).no_window().env("WEZTERM_UNIX_SOCKET", &sock).args(["cli", "get-text", "--escapes"]).output().map_err(|e| e.to_string())?;
+            let esc = std::process::Command::new(&cli).no_window().env("WEZTERM_UNIX_SOCKET", &sock).args(["cli", "--no-auto-start", "get-text", "--escapes"]).output().map_err(|e| e.to_string())?;
             let colored = String::from_utf8_lossy(&esc.stdout).contains("\u{1b}[");
             println!("畫面有顏色（ANSI 色碼）：{colored}");
             let before = svc.read(&id, 30)?;

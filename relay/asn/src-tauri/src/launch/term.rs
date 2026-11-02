@@ -89,6 +89,15 @@ fn partner_session_started(name: &str, since_ms: u64) -> bool {
     }
 }
 
+/// 自己的 GUI 視窗是不是確定已經結束：程序不在；或程序在、兩邊的建立時間都有而且不同（編號被別的程序回收）。
+/// 程序在但任一邊建立時間不明＝不確定，當作還在
+pub(crate) fn window_gone(alive: bool, recorded_ms: Option<u64>, now_ms: Option<u64>) -> bool {
+    if !alive {
+        return true;
+    }
+    matches!((recorded_ms, now_ms), (Some(r), Some(n)) if r != n)
+}
+
 /// 夥伴一開就結束的失敗原因（結束碼印不出來就不帶）
 fn early_exit_text(code: i32) -> String {
     format!("夥伴一開就結束（結束碼 {code}）")
@@ -123,6 +132,7 @@ pub const STATUS_GAP: Duration = Duration::from_secs(1);
 pub const MAX_TITLE_CHARS: usize = 40;
 const STORE_VERSION: u32 = 1;
 /// mux 窗格操作前核對到 mux 已經不是開窗格時那一個
+const WINDOW_GONE: &str = "這個終端的視窗已經結束了（已從清單移除）";
 const MUX_GONE: &str = "終端服務重新啟動過，這個窗格已經跟著舊的服務結束了；請重新開";
 /// 看畫面的 GUI 剛起就結束（規格 11.2-9）：只影響「看」，夥伴不受影響。給人看的話，一個字都不能改
 pub(crate) const VIEW_NO_DESKTOP: &str = "這台電腦的桌面目前沒有人登入，開不了終端畫面；夥伴照常在背景執行";
@@ -459,9 +469,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     }
 
     fn wez(&self, dir: &WezTermDir) -> WezTerm<'_> {
-        let mut w = WezTerm::new(dir.clone(), self.config_file.clone(), self.home.clone(), &self.runner, &self.fs);
-        w.no_auto_start = self.use_mux;
-        w
+        WezTerm::new(dir.clone(), self.config_file.clone(), self.home.clone(), &self.runner, &self.fs)
     }
 
     /// 隔離用的 WezTerm 設定。沒有才寫一份（避免吃到使用者的 `~/.wezterm.lua`）；舊版寫的空設定升級成帶 exit_behavior 的；
@@ -1096,6 +1104,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// 第一次畫面含「[stop]」或「Ctrl+c:cancel」就是處理中，直接 busy，不等第二次。
     pub fn status(&self, id: &str) -> Result<TermStatus, String> {
         let snap = self.snapshot(id)?;
+        // 畫面每一輪都走這裡（status → sample → get-text）：先確定視窗還活著，死掉的不下 cli
+        self.verify_window(&snap)?;
         let dir = self.dir()?;
         let w = self.wez(&dir);
         if snap.adopted.is_some() {
@@ -1426,6 +1436,26 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         }
         let _ = self.persist();
         Err(MUX_GONE.into())
+    }
+
+    /// 自己的 GUI 視窗（非 mux）：下 cli 之前先核對視窗程序還在、而且還是開窗當時那一個（編號沒被回收）。
+    /// 程序已經不在、或建立時間對不上，就把這一列移除並回錯，不下任何 cli（通訊檔 gui-sock-<PID> 異常結束後會留著，
+    /// 對著死掉的視窗下 cli 會連不上）。只在「確定結束」時才移除：程序還在但查不到建立時間，寧可保留
+    fn verify_window(&self, snap: &SessionSnap) -> Result<(), String> {
+        if snap.window.mux {
+            return Ok(());
+        }
+        let pid = snap.window.gui_pid;
+        if !window_gone(self.runner.alive(pid), snap.window.started_ms, self.runner.started_ms(pid)) {
+            return Ok(());
+        }
+        {
+            let mut g = self.inner.lock().unwrap();
+            g.sessions.retain(|s| s.id != snap.id);
+            g.adopted.retain(|s| s.id != snap.id);
+        }
+        let _ = self.persist();
+        Err(WINDOW_GONE.into())
     }
 
     fn snapshot_raw_p(&self, id: &str, partner_ok: bool) -> Result<SessionSnap, String> {
@@ -2538,6 +2568,8 @@ mod tests {
         clean_err: RefCell<Option<String>>,
         /// 某個程序編號依序吐出的建立時間（優先於 started 佇列；空了就回預設值）：模擬那個程序結束了或編號被拿去用
         pid_started: RefCell<HashMap<u32, Vec<Option<u64>>>>,
+        /// 假 runner 回報程序還在不在（預設在）
+        proc_dead: RefCell<bool>,
         /// 每次啟動 GUI 後呼叫，參數是這是第幾次啟動（從 1 起）：模擬第 N 次才開得起視窗
         on_spawn: RefCell<Option<Box<dyn Fn(usize)>>>,
         /// 看畫面的 GUI 的視窗已經出現（真＝一問就有）
@@ -2568,6 +2600,7 @@ mod tests {
             spawn_out: RefCell::new(String::new()),
             clean_err: RefCell::new(None),
             pid_started: RefCell::new(HashMap::new()),
+            proc_dead: RefCell::new(false),
             on_spawn: RefCell::new(None),
             window_up: RefCell::new(false),
         }
@@ -2656,6 +2689,9 @@ mod tests {
         }
         fn window_up(&self, _pid: u32) -> bool {
             *self.inner.window_up.borrow()
+        }
+        fn alive(&self, _pid: u32) -> bool {
+            !*self.inner.proc_dead.borrow()
         }
         fn started_ms(&self, pid: u32) -> Option<u64> {
             if let Some(q) = self.inner.pid_started.borrow_mut().get_mut(&pid) {
@@ -2827,8 +2863,8 @@ mod tests {
         assert_eq!(starts[0], vec!["start", "--always-new-process", "--cwd", rig.cwd.as_str(), "--workspace", "asn-1", "--", "C:/bin/agy.exe"]);
         assert_eq!(starts[1], vec!["start", "--always-new-process", "--cwd", rig.cwd.as_str(), "--workspace", "asn-2", "--", "C:/bin/grok.exe"]);
         let titles: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "set-tab-title")).collect();
-        assert_eq!(titles[0], vec!["cli", "set-tab-title", "--pane-id", "7", "ASN:1"]);
-        assert_eq!(titles[1], vec!["cli", "set-tab-title", "--pane-id", "7", "ASN:2"]);
+        assert_eq!(titles[0], vec!["cli", "--no-auto-start", "set-tab-title", "--pane-id", "7", "ASN:1"]);
+        assert_eq!(titles[1], vec!["cli", "--no-auto-start", "set-tab-title", "--pane-id", "7", "ASN:2"]);
         let stored = std::fs::read_to_string(&rig.store).unwrap();
         assert!(!stored.contains("\"sock\""), "對照表不存通訊路徑");
         let v: serde_json::Value = serde_json::from_str(&stored).unwrap();
@@ -3053,7 +3089,7 @@ mod tests {
         assert_eq!(rig.svc.read(&id, 1).unwrap(), "畫面一行");
         assert_eq!(rig.svc.read(&id, MAX_READ_LINES).unwrap(), "畫面一行");
         let gets: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "get-text")).collect();
-        assert_eq!(gets[0], vec!["cli", "get-text", "--pane-id", "7", "--start-line=-1"]);
+        assert_eq!(gets[0], vec!["cli", "--no-auto-start", "get-text", "--pane-id", "7", "--start-line=-1"]);
         assert!(gets[1].iter().any(|a| a == &format!("--start-line=-{MAX_READ_LINES}")));
     }
 
@@ -3070,6 +3106,53 @@ mod tests {
         let exact = rig.svc.read(&id, 3).unwrap();
         assert_eq!(exact.chars().count(), MAX_READ_CHARS);
         assert!(!exact.contains("已截斷"));
+    }
+
+    fn cli_count(r: &FakeRunner) -> usize {
+        r.args().iter().filter(|a| a.first().map(String::as_str) == Some("cli")).count()
+    }
+
+    #[test]
+    fn 視窗程序已不在_通訊檔還在_status_不下_cli_且那一列被移除() {
+        let rig = make(default_profiles(), vec![]);
+        let id = rig.svc.start("grok", &rig.cwd, &rig.config).unwrap();
+        // 異常結束：通訊檔（假檔案系統裡）還在，程序不在了
+        *rig.runner.inner.proc_dead.borrow_mut() = true;
+        let before = cli_count(&rig.runner);
+        let e = rig.svc.status(&id).unwrap_err();
+        assert!(e.contains("已經結束"), "{e}");
+        assert_eq!(cli_count(&rig.runner), before, "不對死掉的視窗下 cli（cli 連不上會自己拉起 mux-server）");
+        assert!(rig.svc.list().is_empty(), "那一列被移除");
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
+        assert!(v["terms"].as_array().unwrap().is_empty(), "對照表也不留");
+    }
+
+    #[test]
+    fn 視窗程序編號被回收_建立時間對不上_也移除_查不到建立時間但程序在則保留() {
+        let rig = make(default_profiles(), vec![]);
+        let id = rig.svc.start("grok", &rig.cwd, &rig.config).unwrap();
+        rig.runner.inner.pid_started.borrow_mut().insert(42, vec![Some(9_999)]);
+        let before = cli_count(&rig.runner);
+        assert!(rig.svc.status(&id).unwrap_err().contains("已經結束"));
+        assert_eq!(cli_count(&rig.runner), before);
+        assert!(rig.svc.list().is_empty());
+
+        // 程序在、只是查不到建立時間：不誤刪
+        let rig = make(default_profiles(), vec![]);
+        let id = rig.svc.start("grok", &rig.cwd, &rig.config).unwrap();
+        rig.runner.inner.pid_started.borrow_mut().insert(42, vec![None]);
+        assert!(rig.svc.status(&id).is_ok());
+        assert_eq!(rig.svc.list().len(), 1, "寧可保留");
+    }
+
+    #[test]
+    fn 視窗是否確定結束的判斷() {
+        assert!(window_gone(false, Some(1), Some(1)), "程序不在");
+        assert!(window_gone(false, None, None));
+        assert!(window_gone(true, Some(1), Some(2)), "編號被回收");
+        assert!(!window_gone(true, Some(1), Some(1)));
+        assert!(!window_gone(true, Some(1), None), "查不到現在的建立時間：不確定，保留");
+        assert!(!window_gone(true, None, Some(1)), "當初沒記：不確定，保留");
     }
 
     #[test]
@@ -3434,7 +3517,7 @@ mod tests {
         let got = rig.svc.answer(&id, "trust_dialog", 1).unwrap();
         assert_eq!(got.keys, "y");
         let sent: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "send-text")).collect();
-        assert_eq!(sent, vec![vec!["cli".to_string(), "send-text".into(), "--pane-id".into(), "7".into(), "--no-paste".into(), "y".into()]]);
+        assert_eq!(sent, vec![vec!["cli".to_string(), "--no-auto-start".into(), "send-text".into(), "--pane-id".into(), "7".into(), "--no-paste".into(), "y".into()]]);
         let trace = rig.runner.inner.trace.borrow().clone();
         assert_eq!(trace[trace.len() - 2], "run:get-text", "送出前要先讀畫面：{trace:?}");
         assert_eq!(trace[trace.len() - 1], "run:send-text");
@@ -3624,7 +3707,7 @@ mod tests {
         assert_eq!(count_cmd(&rig.runner, "set-tab-title"), before, "不合法標題不可呼叫 set-tab-title");
         rig.svc.rename(&id, "  小良  ").unwrap();
         let titles: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "set-tab-title")).collect();
-        assert_eq!(titles.last().unwrap(), &vec!["cli".to_string(), "set-tab-title".into(), "--pane-id".into(), "7".into(), "ASN:1 小良".into()]);
+        assert_eq!(titles.last().unwrap(), &vec!["cli".to_string(), "--no-auto-start".into(), "set-tab-title".into(), "--pane-id".into(), "7".into(), "ASN:1 小良".into()]);
         let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
         assert_eq!(v["terms"][0]["title"], "ASN:1 小良");
         let ok = "名".repeat(40);
@@ -5167,13 +5250,16 @@ mod tests {
         }
 
         #[test]
-        fn 開關預設關_行為跟以前一樣() {
+        fn 開關預設關_行為跟以前一樣_但每條_cli_都帶_no_auto_start() {
             let rig = make(default_profiles(), vec![]);
             assert!(!rig.svc.use_mux);
             rig.svc.start("agy", &rig.cwd, &rig.config).unwrap();
             assert_eq!(started_args(&rig.runner).len(), 1);
             assert!(rig.runner.inner.clean_calls.borrow().is_empty());
-            assert!(rig.runner.args().iter().all(|a| !a.iter().any(|x| x == "--no-auto-start")));
+            // 開關關著也一樣：cli 連不上時不能自己拉起 mux-server（通訊檔留著但視窗已死的洩漏）
+            let cli: Vec<_> = rig.runner.args().into_iter().filter(|a| a.first().map(String::as_str) == Some("cli")).collect();
+            assert!(!cli.is_empty());
+            assert!(cli.iter().all(|a| a.get(1).map(String::as_str) == Some("--no-auto-start")), "{cli:?}");
             let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
             assert!(v["terms"][0].get("mux").is_none(), "第 1 階段的列不多寫新欄位");
         }
