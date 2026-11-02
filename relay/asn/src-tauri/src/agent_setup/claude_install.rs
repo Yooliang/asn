@@ -292,8 +292,16 @@ pub enum Existing {
     Missing,
     /// 簽章有效、簽署者是 Anthropic, PBC、`--version` 跑得出來：帶版本號。不比版本：Claude 會自己更新，比了反而可能把新版降回頻道版本
     Healthy(String),
-    /// 有檔案但不能用（簽章不對、簽署者不對、跑不起來）：要重裝
-    Broken(String),
+    /// 有檔案但不能用：要重裝。`kind` 區分「簽章或簽署者不對（那支程式可能被換過）」和「跑不起來」，本人要看得到；`String` 是細節（寫 log，不上畫面）
+    Broken(BrokenKind, String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrokenKind {
+    /// 數位簽章沒通過，或簽署者不是 Anthropic, PBC
+    BadSignature,
+    /// 簽章沒問題，但 `--version` 跑不出來或看不懂
+    CannotRun,
 }
 
 pub fn inspect(d: &Deps, final_exe: &Path) -> Existing {
@@ -302,21 +310,21 @@ pub fn inspect(d: &Deps, final_exe: &Path) -> Existing {
     }
     match d.sig.signer(final_exe) {
         Ok(who) if who == EXPECTED_SIGNER => {}
-        Ok(_) => return Existing::Broken("現有的 claude.exe 簽署者不是 Anthropic, PBC".to_string()),
-        Err(e) => return Existing::Broken(format!("現有的 claude.exe 數位簽章沒通過：{e}")),
+        Ok(_) => return Existing::Broken(BrokenKind::BadSignature, "現有的 claude.exe 簽署者不是 Anthropic, PBC".to_string()),
+        Err(e) => return Existing::Broken(BrokenKind::BadSignature, format!("現有的 claude.exe 數位簽章沒通過：{e}")),
     }
     match d.exec.version_output(final_exe, VERSION_TIMEOUT) {
         Ok(out) => match out.split_whitespace().next() {
             Some(v) if valid_version(v) => Existing::Healthy(v.to_string()),
-            _ => Existing::Broken("現有的 claude.exe 的版本輸出看不懂".to_string()),
+            _ => Existing::Broken(BrokenKind::CannotRun, "現有的 claude.exe 的版本輸出看不懂".to_string()),
         },
-        Err(e) => Existing::Broken(format!("現有的 claude.exe 跑不起來：{e}")),
+        Err(e) => Existing::Broken(BrokenKind::CannotRun, format!("現有的 claude.exe 跑不起來：{e}")),
     }
 }
 
 pub fn inspect_here() -> Existing {
     let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from) else {
-        return Existing::Broken("找不到使用者資料夾".to_string());
+        return Existing::Broken(BrokenKind::CannotRun, "找不到使用者資料夾".to_string());
     };
     let final_exe = home.join(".local").join("bin").join("claude.exe");
     inspect(&Deps { fetch: &super::net::RealFetch, sig: &super::authenticode::SystemSignatureCheck, exec: &RealExec }, &final_exe)
@@ -759,11 +767,12 @@ mod inspect_tests {
         assert_eq!(run(false, Ok(EXPECTED_SIGNER), Ok("2.1.309 (Claude Code)")), Existing::Missing);
         // 版本不用等於頻道的版本：自動更新過的新版一樣算好
         assert_eq!(run(true, Ok(EXPECTED_SIGNER), Ok("2.1.316 (Claude Code)")), Existing::Healthy("2.1.316".to_string()));
-        assert!(matches!(run(true, Ok("Someone Else"), Ok("2.1.309")), Existing::Broken(_)));
-        assert!(matches!(run(true, Err("簽章無效"), Ok("2.1.309")), Existing::Broken(_)));
-        assert!(matches!(run(true, Ok(EXPECTED_SIGNER), Err("跑不起來")), Existing::Broken(_)));
-        assert!(matches!(run(true, Ok(EXPECTED_SIGNER), Ok("not a version")), Existing::Broken(_)));
-        assert!(matches!(run(true, Ok(EXPECTED_SIGNER), Ok("")), Existing::Broken(_)));
+        // 簽章或簽署者不對＝可能被換過；簽章好但跑不出版本＝跑不起來
+        assert!(matches!(run(true, Ok("Someone Else"), Ok("2.1.309")), Existing::Broken(BrokenKind::BadSignature, _)));
+        assert!(matches!(run(true, Err("簽章無效"), Ok("2.1.309")), Existing::Broken(BrokenKind::BadSignature, _)));
+        assert!(matches!(run(true, Ok(EXPECTED_SIGNER), Err("跑不起來")), Existing::Broken(BrokenKind::CannotRun, _)));
+        assert!(matches!(run(true, Ok(EXPECTED_SIGNER), Ok("not a version")), Existing::Broken(BrokenKind::CannotRun, _)));
+        assert!(matches!(run(true, Ok(EXPECTED_SIGNER), Ok("")), Existing::Broken(BrokenKind::CannotRun, _)));
     }
 
     #[test]

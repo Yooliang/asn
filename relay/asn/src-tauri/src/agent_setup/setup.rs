@@ -8,7 +8,7 @@
 //!   - 已登入：一律不跑 `claude auth login`，直接回「已登入」（要換帳號走切換帳號）
 //!   - 看不出登入狀態：停下來回報，不當成沒登入——寧可多按一次，也不蓋掉別人的登入
 
-use super::claude_install::Existing;
+use super::claude_install::{BrokenKind, Existing};
 use super::claude_login::LoginState;
 use super::login::{Outcome, Phone, Step};
 use super::phone::SecretPhone;
@@ -21,7 +21,8 @@ use std::time::Duration;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     Checking,
-    Installing,
+    /// 開始安裝；`Some` ＝現有的 claude.exe 壞了才重裝，帶原因（本人要知道那支程式可能被換過）
+    Installing(Option<BrokenKind>),
     /// 裝好了（或本來就好好的），帶版本號
     Installed(String),
     Login(Step),
@@ -33,11 +34,48 @@ pub enum Finish {
     Ready(String),
     /// 本來就裝好也登入了，什麼都沒動
     AlreadyReady(String),
+    /// 剛裝好，但這台電腦本來就已經登入：沿用現有的登入，沒有跑登入
+    InstalledKeptLogin(String),
     /// 這台沒辦法背景登入，請退回開終端機
     NeedTerminal(String),
     Declined,
     TimedOut,
     Failed(String),
+}
+
+/// 重裝的原因，固定文字（不帶路徑與系統錯誤）
+fn replaced_before(k: BrokenKind) -> &'static str {
+    match k {
+        BrokenKind::BadSignature => "現有的 claude.exe 簽章或簽署者不對，將重新安裝官方版",
+        BrokenKind::CannotRun => "現有的 claude.exe 跑不起來，將重新安裝官方版",
+    }
+}
+fn replaced_after(k: BrokenKind) -> &'static str {
+    match k {
+        BrokenKind::BadSignature => "這次是因為原本的 claude.exe 簽章或簽署者不對才重新安裝的，那支程式可能被換過",
+        BrokenKind::CannotRun => "這次是因為原本的 claude.exe 跑不起來才重新安裝的",
+    }
+}
+
+/// 一次安裝並登入的結果。`replaced` ＝這次重裝了壞掉的 claude.exe（不管最後成功與否都要讓本人看到）
+#[derive(Debug, PartialEq, Eq)]
+pub struct Done {
+    pub finish: Finish,
+    pub replaced: Option<BrokenKind>,
+}
+
+impl Done {
+    pub fn to_json(&self) -> serde_json::Value {
+        let mut v = self.finish.to_json();
+        if let Some(k) = self.replaced {
+            v["replaced"] = serde_json::json!(replaced_after(k));
+            v["replaced_kind"] = serde_json::json!(match k {
+                BrokenKind::BadSignature => "bad_signature",
+                BrokenKind::CannotRun => "cannot_run",
+            });
+        }
+        v
+    }
 }
 
 impl Event {
@@ -46,8 +84,9 @@ impl Event {
         use serde_json::json;
         match self {
             Event::Checking => json!({ "phase": "checking", "text": "正在確認這台電腦的現況" }),
-            Event::Installing => json!({ "phase": "installing", "text": "正在下載並驗證 Claude Code" }),
-            Event::Installed(v) => json!({ "phase": "installed", "text": format!("Claude Code {v} 已就緒，準備登入"), "version": v }),
+            Event::Installing(None) => json!({ "phase": "installing", "text": "正在下載並驗證 Claude Code" }),
+            Event::Installing(Some(k)) => json!({ "phase": "installing", "text": replaced_before(*k) }),
+            Event::Installed(v) => json!({ "phase": "installed", "text": format!("Claude Code {v} 已就緒"), "version": v }),
             Event::Login(Step::WaitingUrl) => json!({ "phase": "login", "text": "正在取得登入網址" }),
             Event::Login(Step::UrlSent) => json!({ "phase": "login", "text": "登入網址已送到你的手機，請在手機上開啟並貼回授權碼" }),
             Event::Login(Step::CodeSent) => json!({ "phase": "login", "text": "已收到授權碼，正在登入" }),
@@ -62,6 +101,7 @@ impl Finish {
         match self {
             Finish::Ready(v) => json!({ "phase": "done", "ok": true, "text": format!("Claude Code {v} 已安裝並登入"), "version": v }),
             Finish::AlreadyReady(v) => json!({ "phase": "done", "ok": true, "already": true, "text": format!("這台電腦已經安裝 Claude Code {v} 並登入，沒有重新安裝或登入"), "version": v }),
+            Finish::InstalledKeptLogin(v) => json!({ "phase": "done", "ok": true, "kept_login": true, "text": format!("已安裝 Claude Code {v}，沿用這台電腦現有的登入"), "version": v }),
             Finish::NeedTerminal(t) => json!({ "phase": "done", "ok": false, "terminal": true, "text": t }),
             Finish::Declined => json!({ "phase": "done", "ok": false, "text": "你在手機上拒絕了這次登入" }),
             Finish::TimedOut => json!({ "phase": "done", "ok": false, "text": "等太久了，登入逾時" }),
@@ -99,20 +139,33 @@ pub struct Steps<'a> {
 }
 
 /// 核心流程：先看現況，沒裝好才安裝，沒登入才用手機登入
-pub fn run_with(s: &Steps, phone: &dyn Phone, report: &dyn Fn(Event)) -> Finish {
+pub fn run_with(s: &Steps, phone: &dyn Phone, report: &dyn Fn(Event)) -> Done {
     report(Event::Checking);
-    let version = match (s.inspect)() {
-        Existing::Healthy(v) => v,
-        Existing::Missing | Existing::Broken(_) => {
-            report(Event::Installing);
+    let mut replaced = None;
+    let (version, installed_now) = match (s.inspect)() {
+        Existing::Healthy(v) => (v, false),
+        existing => {
+            if let Existing::Broken(k, detail) = &existing {
+                // 原因不丟掉：寫 log、進度事件、結果都帶到
+                elog!("現有的 claude.exe 不能用，將重新安裝官方版（{k:?}）：{detail}");
+                replaced = Some(*k);
+            }
+            report(Event::Installing(replaced));
             match (s.install)() {
-                Ok(v) => v,
-                Err(e) => return Finish::Failed(e),
+                Ok(v) => (v, true),
+                Err(e) => return Done { finish: Finish::Failed(e), replaced },
             }
         }
     };
+    let finish = finish_after(s, phone, report, version, installed_now);
+    Done { finish, replaced }
+}
+
+fn finish_after(s: &Steps, phone: &dyn Phone, report: &dyn Fn(Event), version: String, installed_now: bool) -> Finish {
     report(Event::Installed(version.clone()));
     match (s.state)() {
+        // 說法要和實際相符：本來就好才說「什麼都沒動」，剛裝完的要說裝了、沿用現有的登入
+        LoginState::In if installed_now => return Finish::InstalledKeptLogin(version),
         LoginState::In => return Finish::AlreadyReady(version),
         LoginState::Unknown(why) => return Finish::Failed(format!("{why}。為了不蓋掉現有的登入，沒有繼續；請先在終端機確認登入狀態")),
         LoginState::Out => {}
@@ -131,7 +184,7 @@ pub type TokenFn = Arc<dyn Fn() -> Option<String> + Send + Sync>;
 
 /// 開始安裝並登入 Claude Code（只有 Windows 有完整流程）。已經有一個在跑就**直接回錯**，不開執行緒也不送事件；
 /// 否則在新的執行緒裡跑，立刻回來，結束時呼叫 `done` 一次。
-pub fn start_claude(relay: Arc<Relay>, token: TokenFn, report: impl Fn(Event) + Send + 'static, done: impl FnOnce(Finish) + Send + 'static) -> Result<(), String> {
+pub fn start_claude(relay: Arc<Relay>, token: TokenFn, report: impl Fn(Event) + Send + 'static, done: impl FnOnce(Done) + Send + 'static) -> Result<(), String> {
     let busy = Busy::take(&BUSY)?;
     let spawned = std::thread::Builder::new().name("asn-agent-setup".into()).spawn(move || {
         let _busy = busy;
@@ -167,7 +220,7 @@ mod tests {
         login: Cell<u32>,
     }
 
-    fn run(existing: Existing, install: Result<&str, &str>, state: LoginState, login: Outcome) -> (Finish, Vec<Event>, Calls) {
+    fn run_full(existing: Existing, install: Result<&str, &str>, state: LoginState, login: Outcome) -> (Done, Vec<Event>, Calls) {
         let calls = Calls::default();
         let ev = RefCell::new(vec![]);
         let state = RefCell::new(Some(state));
@@ -190,12 +243,56 @@ mod tests {
         (r, ev.into_inner(), calls)
     }
 
+    fn run(existing: Existing, install: Result<&str, &str>, state: LoginState, login: Outcome) -> (Finish, Vec<Event>, Calls) {
+        let (d, ev, c) = run_full(existing, install, state, login);
+        (d.finish, ev, c)
+    }
+
+    #[test]
+    fn 壞掉重裝_事件和結果都帶原因_簽章不對和跑不起來說法不同() {
+        let (d, ev, _) = run_full(Existing::Broken(BrokenKind::BadSignature, "簽署者不是 Anthropic".into()), Ok("2.1.309"), LoginState::Out, Outcome::Verified);
+        assert_eq!(d.finish, Finish::Ready("2.1.309".into()));
+        assert_eq!(d.replaced, Some(BrokenKind::BadSignature));
+        assert!(ev.contains(&Event::Installing(Some(BrokenKind::BadSignature))), "{ev:?}");
+        let before = Event::Installing(Some(BrokenKind::BadSignature)).to_json()["text"].as_str().unwrap().to_string();
+        assert!(before.contains("簽章或簽署者不對") && before.contains("重新安裝"), "{before}");
+        let j = d.to_json();
+        assert!(j["replaced"].as_str().unwrap().contains("可能被換過"), "{j}");
+        assert_eq!(j["replaced_kind"], "bad_signature");
+        assert!(!j.to_string().contains("Anthropic"), "細節（系統錯誤）不上畫面：{j}");
+
+        let (d, ev, _) = run_full(Existing::Broken(BrokenKind::CannotRun, "逾時".into()), Ok("2.1.309"), LoginState::Out, Outcome::Verified);
+        assert_eq!(d.replaced, Some(BrokenKind::CannotRun));
+        assert!(ev.contains(&Event::Installing(Some(BrokenKind::CannotRun))));
+        let j = d.to_json();
+        assert!(j["replaced"].as_str().unwrap().contains("跑不起來") && !j["replaced"].as_str().unwrap().contains("被換過"), "{j}");
+        assert_eq!(j["replaced_kind"], "cannot_run");
+    }
+
+    #[test]
+    fn 重裝失敗也要讓本人看到原因() {
+        let (d, _, _) = run_full(Existing::Broken(BrokenKind::BadSignature, "x".into()), Err("下載失敗"), LoginState::Out, Outcome::Verified);
+        assert_eq!(d.finish, Finish::Failed("下載失敗".into()));
+        assert_eq!(d.replaced, Some(BrokenKind::BadSignature));
+        assert!(d.to_json()["replaced"].as_str().unwrap().contains("可能被換過"));
+    }
+
+    #[test]
+    fn 沒壞就沒有重裝原因() {
+        for e in [Existing::Missing, Existing::Healthy("1.0.0".into())] {
+            let (d, ev, _) = run_full(e, Ok("1.0.0"), LoginState::In, Outcome::Verified);
+            assert_eq!(d.replaced, None);
+            assert!(d.to_json().get("replaced").is_none());
+            assert!(!ev.iter().any(|x| matches!(x, Event::Installing(Some(_)))));
+        }
+    }
+
     #[test]
     fn 新電腦_裝好又登入成功_依序回報() {
         let (r, ev, c) = run(Existing::Missing, Ok("2.1.309"), LoginState::Out, Outcome::Verified);
         assert_eq!(r, Finish::Ready("2.1.309".into()));
         assert_eq!((c.install.get(), c.login.get()), (1, 1));
-        assert_eq!(ev, vec![Event::Checking, Event::Installing, Event::Installed("2.1.309".into()), Event::Login(Step::UrlSent)]);
+        assert_eq!(ev, vec![Event::Checking, Event::Installing(None), Event::Installed("2.1.309".into()), Event::Login(Step::UrlSent)]);
     }
 
     #[test]
@@ -203,7 +300,23 @@ mod tests {
         let (r, ev, c) = run(Existing::Healthy("2.1.316".into()), Err("不該安裝"), LoginState::In, Outcome::Failed("不該登入".into()));
         assert_eq!(r, Finish::AlreadyReady("2.1.316".into()), "版本用現有的，不比頻道版本");
         assert_eq!((c.install.get(), c.login.get()), (0, 0));
-        assert!(!ev.contains(&Event::Installing));
+        assert!(!ev.contains(&Event::Installing(None)));
+    }
+
+    #[test]
+    fn 剛裝完才發現已登入_不說沒有重新安裝_沿用現有登入() {
+        for existing in [Existing::Missing, Existing::Broken(BrokenKind::BadSignature, "簽章不對".into())] {
+            let (r, _, c) = run(existing, Ok("2.1.309"), LoginState::In, Outcome::Failed("不該登入".into()));
+            assert_eq!(r, Finish::InstalledKeptLogin("2.1.309".into()));
+            assert_eq!((c.install.get(), c.login.get()), (1, 0), "裝了、沒登入");
+            let j = r.to_json();
+            assert_eq!(j["ok"], true);
+            assert!(j["text"].as_str().unwrap().contains("已安裝") && !j["text"].as_str().unwrap().contains("沒有重新安裝"), "{j}");
+            assert!(j.get("already").is_none(), "不能標成本來就好");
+        }
+        // 本來就好才是「什麼都沒動」
+        let j = Finish::AlreadyReady("2.1.309".into()).to_json();
+        assert!(j["text"].as_str().unwrap().contains("沒有重新安裝"));
     }
 
     #[test]
@@ -215,7 +328,7 @@ mod tests {
 
     #[test]
     fn 裝壞了才重裝() {
-        let (r, _, c) = run(Existing::Broken("簽章不對".into()), Ok("2.1.309"), LoginState::Out, Outcome::Verified);
+        let (r, _, c) = run(Existing::Broken(BrokenKind::BadSignature, "簽章不對".into()), Ok("2.1.309"), LoginState::Out, Outcome::Verified);
         assert_eq!(r, Finish::Ready("2.1.309".into()));
         assert_eq!(c.install.get(), 1);
     }
@@ -232,7 +345,7 @@ mod tests {
         let (r, ev, c) = run(Existing::Missing, Err("雜湊不符"), LoginState::Out, Outcome::Verified);
         assert_eq!(r, Finish::Failed("雜湊不符".into()));
         assert_eq!(c.login.get(), 0);
-        assert_eq!(ev, vec![Event::Checking, Event::Installing]);
+        assert_eq!(ev, vec![Event::Checking, Event::Installing(None)]);
     }
 
     #[test]
@@ -246,12 +359,13 @@ mod tests {
 
     #[test]
     fn 回報文字固定_不帶網址與授權碼() {
-        for e in [Event::Checking, Event::Installing, Event::Installed("2.1.309".into()), Event::Login(Step::WaitingUrl), Event::Login(Step::UrlSent), Event::Login(Step::CodeSent), Event::Login(Step::Checking)] {
+        for e in [Event::Checking, Event::Installing(None), Event::Installed("2.1.309".into()), Event::Login(Step::WaitingUrl), Event::Login(Step::UrlSent), Event::Login(Step::CodeSent), Event::Login(Step::Checking)] {
             let t = e.to_json().to_string();
             assert!(!t.contains("http"), "{t}");
         }
         assert_eq!(Finish::Ready("2.1.309".into()).to_json()["ok"], true);
         assert_eq!(Finish::AlreadyReady("2.1.309".into()).to_json()["already"], true);
+        assert!(!Event::Installed("2.1.309".into()).to_json()["text"].as_str().unwrap().contains("登入"), "已就緒的文字不提登入");
         assert_eq!(Finish::Declined.to_json()["ok"], false);
     }
 
