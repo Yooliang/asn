@@ -458,6 +458,23 @@ pub struct PaneInfo {
     pub is_active: bool,
 }
 
+/// 判斷窗格結束用：往回讀畫面底部幾行
+pub(crate) const PANE_PROBE_LINES: i32 = 20;
+
+/// 窗格畫面尾端有沒有 WezTerm 在「程式結束、窗格留著」（exit_behavior = Hold）時印的訊息。
+/// 沒有 → None（還在跑，或讀不到）；有 → Some(結束碼)，結束碼印不出來（被訊號結束等）是 Some(None)。
+/// WezTerm 印的是以 ⚠ 開頭的一行：非 0 結束是「Process … didn't exit cleanly」，接著一行「Exited with code N」；
+/// 正常結束是「Process … completed.」（視為結束碼 0）。只認以 ⚠ 開頭的行，夥伴自己畫面上寫到這些字不算。
+pub(crate) fn pane_exit_from_screen(text: &str) -> Option<Option<i32>> {
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    let i = lines.iter().rposition(|l| l.starts_with('⚠') && l.contains("Process") && (l.contains("didn't exit cleanly") || l.contains("completed")))?;
+    if !lines[i].contains("didn't exit cleanly") {
+        return Some(Some(0));
+    }
+    let code = lines[i + 1..].iter().find_map(|l| l.split_once("Exited with code ").and_then(|(_, n)| n.trim().trim_end_matches('.').parse::<i32>().ok()));
+    Some(code)
+}
+
 /// workspace 名稱：非空，且沒有空白與控制字元（要能安全放進一個參數）。
 pub(crate) fn workspace_name_ok(name: &str) -> bool {
     !name.is_empty() && !name.chars().any(|c| c.is_whitespace() || c.is_control())
@@ -778,6 +795,12 @@ impl<'a> WezTerm<'a> {
         self.cli(sock, &args)
     }
 
+    /// 這個窗格的程式是不是已經結束（窗格因 Hold 還留著）。回結束碼（見 [`pane_exit_from_screen`]）；還在跑或讀不到畫面＝None（當作還活著）
+    pub fn pane_exit(&self, sock: &Path, pane_id: u64) -> Option<Option<i32>> {
+        let text = self.get_text(sock, pane_id, Some(-PANE_PROBE_LINES)).ok()?;
+        pane_exit_from_screen(&text)
+    }
+
     /// 送一行文字（不含 Enter）：先壓成單行，用 --no-paste
     pub fn send_line(&self, sock: &Path, pane_id: u64, text: &str) -> Result<(), String> {
         let line = flatten_line(text);
@@ -853,6 +876,31 @@ impl<'a> WezTerm<'a> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 窗格結束訊息_解出結束碼() {
+        use super::pane_exit_from_screen as f;
+        let bad = "$ claude
+
+⚠️  Process \"claude\" didn't exit cleanly
+Exited with code 1.
+";
+        assert_eq!(f(bad), Some(Some(1)));
+        assert_eq!(f("
+⚠️  Process \"claude\" didn't exit cleanly
+Terminated by signal
+"), Some(None), "印不出結束碼");
+        assert_eq!(f("⚠️  Process \"cmd\" completed.
+"), Some(Some(0)));
+        // 夥伴自己的畫面寫到這些字（不是以 ⚠ 開頭的行）不算結束
+        assert_eq!(f("the Process completed.
+Exited with code 1
+"), None);
+        assert_eq!(f("Welcome to Claude Code
+> 
+"), None);
+        assert_eq!(f(""), None);
+    }
+
     use super::*;
     use std::cell::RefCell;
     use std::collections::HashSet;

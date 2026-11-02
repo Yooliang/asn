@@ -58,6 +58,19 @@ pub const MAX_READ_LINES: i32 = 500;
 /// 讀回文字的字數上限（超出截斷）。與送字的單行上限是兩件事。
 pub const MAX_READ_CHARS: usize = 64_000;
 /// 忙閒只看畫面底部這幾行。
+/// 開夥伴窗格後盯多久，看它是不是一開就結束（claude 起不來等）
+const EARLY_EXIT_WATCH: Duration = Duration::from_secs(5);
+/// 盯的間隔
+const EARLY_EXIT_POLL: Duration = Duration::from_millis(500);
+
+/// 夥伴一開就結束的失敗原因（結束碼印不出來就不帶）
+fn early_exit_text(code: Option<i32>) -> String {
+    match code {
+        Some(n) => format!("夥伴一開就結束（結束碼 {n}）"),
+        None => "夥伴一開就結束".to_string(),
+    }
+}
+
 const STATUS_LINES: i32 = 40;
 /// 兩次取樣的正式間隔。測試用 set_status_gap 注入更短的值。
 pub const STATUS_GAP: Duration = Duration::from_secs(1);
@@ -682,6 +695,13 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         if let Err(e) = w.set_tab_title(&win.sock, pane_id, &title) {
             return Err(close_pane(format!("無法設定終端標題：{e}")));
         }
+        // 夥伴視窗開了立刻以錯誤結束（claude 起不來等）：Hold 會讓窗格留著，但這不是「開成功」。
+        // 短時間內看窗格有沒有已結束；有就收掉窗格、回失敗與原因
+        if !extra.kind.is_empty() {
+            if let Some(code) = self.early_exit(&w, &win.sock, pane_id) {
+                return Err(close_pane(early_exit_text(code)));
+            }
+        }
         {
             let mut g = self.inner.lock().unwrap();
             g.sessions.push(Session {
@@ -706,6 +726,18 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             return Err(close_pane(format!("終端已啟動但對照表寫入失敗，已嘗試關閉窗格：{e}")));
         }
         Ok((id, win.gui_pid))
+    }
+
+    /// 剛開的夥伴窗格在 [`EARLY_EXIT_WATCH`] 內有沒有結束；有就回結束碼（見 [`wezterm::pane_exit_from_screen`]）。等待走 runner.sleep
+    fn early_exit(&self, w: &WezTerm<'_>, sock: &Path, pane_id: u64) -> Option<Option<i32>> {
+        let polls = EARLY_EXIT_WATCH.as_millis() / EARLY_EXIT_POLL.as_millis();
+        for _ in 0..polls {
+            self.runner.sleep(EARLY_EXIT_POLL);
+            if let Some(code) = w.pane_exit(sock, pane_id) {
+                return Some(code);
+            }
+        }
+        None
     }
 
     /// 使用者在 UI 確認後才把文字送進自己開的終端。不收程序編號或通訊路徑。
@@ -946,10 +978,34 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         if !self.use_mux {
             return None;
         }
-        let g = self.inner.lock().unwrap();
-        let mut hit = g.sessions.iter().filter(|s| s.window.mux && !s.kind.is_empty() && s.window.gui_pid == mux.0 && s.window.started_ms == Some(mux.1) && partner_label(&s.id, &s.title) == Some(name));
-        let first = hit.next()?;
-        hit.next().is_none().then(|| first.id.clone())
+        let hits: Vec<(String, u64, PathBuf)> = {
+            let g = self.inner.lock().unwrap();
+            g.sessions.iter().filter(|s| s.window.mux && !s.kind.is_empty() && s.window.gui_pid == mux.0 && s.window.started_ms == Some(mux.1) && partner_label(&s.id, &s.title) == Some(name)).map(|s| (s.id.clone(), s.pane_id, s.window.sock.clone())).collect()
+        };
+        if hits.is_empty() {
+            return None;
+        }
+        // 已經結束的窗格（Hold 留著的）不算同名夥伴：收掉並從對照表移除。讀不到畫面就當作還活著
+        let live = match self.dir() {
+            Ok(dir) => {
+                let w = self.wez(&dir);
+                let mut live = Vec::new();
+                for (id, pane, sock) in hits {
+                    if w.pane_exit(&sock, pane).is_some() {
+                        let _ = w.kill_pane(&sock, pane);
+                        self.inner.lock().unwrap().sessions.retain(|s| s.id != id);
+                        let _ = self.persist();
+                    } else {
+                        live.push(id);
+                    }
+                }
+                live
+            }
+            Err(_) => hits.into_iter().map(|h| h.0).collect(),
+        };
+        let mut it = live.into_iter();
+        let first = it.next()?;
+        it.next().is_none().then_some(first)
     }
 
     /// 夥伴清單的「前台／背景」在 mux 視窗上的查詢：前台＝看畫面的 GUI 開著
@@ -1214,7 +1270,15 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                     continue;
                 }
             };
-            let Some(pane) = pick_pane(&panes, &term.id, term.pane_id) else {
+            // 已結束的窗格（Hold 留著）不認領，順手收掉；讀不到畫面當作還活著
+            let ended = |p: &wezterm::PaneInfo| {
+                let dead = w.pane_exit(&sock, p.pane_id).is_some();
+                if dead && pane_is_ours(&term.id, p) {
+                    let _ = w.kill_pane(&sock, p.pane_id);
+                }
+                dead
+            };
+            let Some(pane) = pick_pane(&panes, &term.id, term.pane_id, &ended) else {
                 continue;
             };
             let title = if title_marks(&pane.tab_title, &term.id) { pane.tab_title.clone() } else { format!("ASN:{}", term.id) };
@@ -1618,8 +1682,9 @@ fn pane_is_ours(id: &str, pane: &wezterm::PaneInfo) -> bool {
     pane.workspace == format!("asn-{id}") || title_marks(&pane.tab_title, id)
 }
 
-fn pick_pane<'a>(panes: &'a [wezterm::PaneInfo], id: &str, saved_pane: u64) -> Option<&'a wezterm::PaneInfo> {
-    let ours: Vec<&wezterm::PaneInfo> = panes.iter().filter(|p| pane_is_ours(id, p)).collect();
+/// 認領用：挑這個編號的窗格。已結束的窗格（`ended` 為真）不算，所以一個活的加一個死的，認到活的；全是死的＝None
+fn pick_pane<'a>(panes: &'a [wezterm::PaneInfo], id: &str, saved_pane: u64, ended: &dyn Fn(&wezterm::PaneInfo) -> bool) -> Option<&'a wezterm::PaneInfo> {
+    let ours: Vec<&wezterm::PaneInfo> = panes.iter().filter(|p| pane_is_ours(id, p) && !ended(p)).collect();
     if ours.is_empty() {
         return None;
     }
@@ -3031,6 +3096,19 @@ mod tests {
             svc.ensure_config().unwrap();
             assert_eq!(std::fs::read_to_string(&path).unwrap(), custom, "不是我們寫的不動：{custom}");
         }
+    }
+
+    fn pane_of(id: u64, tab: &str, active: bool) -> wezterm::PaneInfo {
+        serde_json::from_str(&format!(r#"{{"pane_id":{id},"tab_id":1,"is_active":{active},"workspace":"asn-1","tab_title":"{tab}"}}"#)).unwrap()
+    }
+
+    #[test]
+    fn 認領挑窗格_死窗格不算_一活一死認到活的() {
+        let panes = vec![pane_of(7, "ASN:1 小乙", true), pane_of(8, "ASN:1 小乙", false)];
+        // 存的是 7，但 7 已結束：認 8
+        assert_eq!(pick_pane(&panes, "1", 7, &|p| p.pane_id == 7).map(|p| p.pane_id), Some(8));
+        assert_eq!(pick_pane(&panes, "1", 7, &|_| false).map(|p| p.pane_id), Some(7));
+        assert!(pick_pane(&panes, "1", 7, &|_| true).is_none(), "全死＝不認領");
     }
 
     fn one_pane(workspace: &str, tab: &str, pane: u64, cursor_x: i64) -> String {
@@ -4709,6 +4787,7 @@ mod tests {
             assert_eq!(VIEW_NO_DESKTOP, "這台電腦的桌面目前沒有人登入，開不了終端畫面；夥伴照常在背景執行");
             let (rig, _) = mux_rig();
             let id = open_partner(&rig);
+            rig.runner.inner.sleeps.borrow_mut().clear(); // 開窗格後盯有沒有一開就結束的等待不算在看畫面的等待裡
             // 第一次問建立時間是起來了（5000），下一次問就沒了
             rig.runner.inner.pid_started.borrow_mut().insert(42, vec![Some(5_000), None]);
             let e = rig.svc.view(&id).unwrap_err();
@@ -4842,6 +4921,56 @@ mod tests {
             rig.runner.inner.pid_started.borrow_mut().insert(42, vec![Some(5_000), None]);
             let r = rig.svc.console_set_mux(&id, true);
             assert_eq!(r, serde_json::json!({ "ok": false, "reason": VIEW_NO_DESKTOP, "notify": true }));
+        }
+
+        const HOLD_BAD: &str = "⚠️  Process \"claude\" didn't exit cleanly
+Exited with code 1.
+";
+
+        #[test]
+        fn 夥伴一開就以錯誤結束_回失敗帶結束碼_收掉窗格_不留對照表() {
+            let (rig, _) = mux_rig();
+            *rig.runner.inner.screen.borrow_mut() = HOLD_BAD.into();
+            let e = rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-1"))).unwrap_err();
+            match e {
+                crate::launch::win_term::WinOpenError::Started(m) => assert_eq!(m, "夥伴一開就結束（結束碼 1）"),
+                _ => panic!("應該是已啟動後失敗"),
+            }
+            assert_eq!(kill_panes(&rig.runner), 1, "死窗格要收掉");
+            assert_eq!(rig.svc.partner_in_mux((MUX_PID, 1000), "小乙"), None, "沒有留下對照表的列");
+        }
+
+        #[test]
+        fn 夥伴開了還活著_照常成功_只等固定時間() {
+            let (rig, _) = mux_rig();
+            let id = open_partner(&rig);
+            assert_eq!(kill_panes(&rig.runner), 0);
+            assert_eq!(rig.svc.partner_in_mux((MUX_PID, 1000), "小乙"), Some(id));
+            assert!(rig.runner.inner.sleeps.borrow().iter().all(|d| d.as_millis() <= 500) && rig.runner.inner.sleeps.borrow().len() <= 10);
+        }
+
+        #[test]
+        fn 同名一活一死_認到活的_死的收掉並移除() {
+            let (rig, _) = mux_rig();
+            let first = open_partner(&rig);
+            let second = open_partner(&rig);
+            assert_eq!(rig.svc.partner_in_mux((MUX_PID, 1000), "小乙"), None, "兩個都活著：不猜");
+            // 之後第一個的畫面變成已結束，第二個還活著（依序讀畫面）
+            *rig.runner.inner.screens.borrow_mut() = vec![HOLD_BAD.into(), String::new()];
+            assert_eq!(rig.svc.partner_in_mux((MUX_PID, 1000), "小乙"), Some(second.clone()));
+            assert_eq!(kill_panes(&rig.runner), 1);
+            // 死的已從對照表移除
+            *rig.runner.inner.screens.borrow_mut() = vec![];
+            assert_eq!(rig.svc.partner_in_mux((MUX_PID, 1000), "小乙"), Some(second));
+            let _ = first;
+        }
+
+        #[test]
+        fn 只剩一個死窗格_不算夥伴() {
+            let (rig, _) = mux_rig();
+            let _ = open_partner(&rig);
+            *rig.runner.inner.screens.borrow_mut() = vec![HOLD_BAD.into()];
+            assert_eq!(rig.svc.partner_in_mux((MUX_PID, 1000), "小乙"), None);
         }
 
         #[test]

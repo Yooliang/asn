@@ -64,6 +64,21 @@ pub fn kill_pid(pid: u32) -> Result<(), String> {
     }
 }
 
+/// schtasks 的輸出（原始位元組）是不是在說「找不到這個排程」。
+/// 繁中 Windows 輸出 Big5（「系統找不到指定的檔案」），其他語言常是 UTF-8 或英文，所以直接在位元組上找，不先解碼。
+pub(crate) fn schtasks_not_found(raw: &[u8]) -> bool {
+    const UTF8: &[u8] = "找不到".as_bytes();
+    const BIG5: &[u8] = &[0xA7, 0xE4, 0xA4, 0xA3, 0xA8, 0xEC]; // 「找不到」的 Big5（CP950）
+    let has = |needle: &[u8]| raw.windows(needle.len()).any(|w| w == needle);
+    let en = String::from_utf8_lossy(raw).to_lowercase();
+    has(UTF8) || has(BIG5) || en.contains("cannot find") || en.contains("does not exist")
+}
+
+/// 停用失敗後，排程算不算「本來就不存在」：輸出說找不到，或 /Query 查不到（結束碼非 0）。/Query 沒跑成（None）只看文字
+pub(crate) fn task_gone(change_output: &[u8], query_ok: Option<bool>) -> bool {
+    schtasks_not_found(change_output) || query_ok == Some(false)
+}
+
 /// 停用工作排程（只停用）。非 Windows 沒有這個排程，視為完成
 pub fn disable_task(name: &str) -> Result<(), String> {
     #[cfg(windows)]
@@ -72,9 +87,12 @@ pub fn disable_task(name: &str) -> Result<(), String> {
         if out.status.success() {
             return Ok(());
         }
-        // 排程根本不存在＝沒有東西要停用（不當錯誤）
-        let text = String::from_utf8_lossy(&out.stderr).to_string() + &String::from_utf8_lossy(&out.stdout);
-        if text.contains("找不到") || text.to_lowercase().contains("cannot find") || text.to_lowercase().contains("does not exist") {
+        // 排程根本不存在＝沒有東西要停用（不當錯誤）。不能只靠文字：繁中 Windows 的輸出是 Big5，當 UTF-8 解會永遠比不到「找不到」。
+        // 文字比對（原始位元組）對不上時，再問一次 /Query：查得到＝排程在，只是停用不了；查不到＝不存在
+        let mut raw = out.stderr.clone();
+        raw.extend_from_slice(&out.stdout);
+        let query_ok = std::process::Command::new("schtasks").no_window().args(["/Query", "/TN", name]).output().ok().map(|o| o.status.success());
+        if task_gone(&raw, query_ok) {
             return Ok(());
         }
         Err(format!("停用不了工作排程 {name}"))
@@ -133,6 +151,27 @@ pub fn takeover(work_dir: &Path, node: &str, my_pid: u32, alive: impl Fn(u32) ->
 mod tests {
     use super::*;
     use std::cell::RefCell;
+    #[test]
+    fn schtasks_找不到_big5_utf8_英文都認_別的錯誤不認() {
+        // 繁中 Windows 的 schtasks 輸出：「錯誤: 系統找不到指定的檔案。」（Big5 位元組）
+        let big5: &[u8] = &[0xBF, 0xF9, 0xB3, 0x6F, 0x3A, 0x20, 0xA8, 0x74, 0xB2, 0xCE, 0xA7, 0xE4, 0xA4, 0xA3, 0xA8, 0xEC, 0xAB, 0xFC, 0xA9, 0x77, 0xAA, 0xBA, 0xC0, 0xC9, 0xAE, 0xD7, 0xA1, 0x43];
+        assert!(!String::from_utf8_lossy(big5).contains("找不到"), "當 UTF-8 解會壞掉（舊寫法就是這樣永遠比不到）");
+        assert!(schtasks_not_found(big5));
+        assert!(schtasks_not_found("錯誤: 系統找不到指定的檔案。".as_bytes()));
+        assert!(schtasks_not_found(b"ERROR: The system cannot find the file specified."));
+        assert!(!schtasks_not_found("錯誤: 存取被拒。".as_bytes()));
+        assert!(!schtasks_not_found(&[0xBF, 0xF9, 0xB3, 0x6F, 0x3A, 0x20, 0xA6, 0x73, 0xA8, 0xFA]), "別的 Big5 訊息不算");
+    }
+
+    #[test]
+    fn 停用失敗後_排程是不是本來就不存在() {
+        let big5: &[u8] = &[0xA8, 0x74, 0xB2, 0xCE, 0xA7, 0xE4, 0xA4, 0xA3, 0xA8, 0xEC];
+        assert!(task_gone(big5, None), "文字說找不到，/Query 沒跑成也算");
+        assert!(task_gone(b"", Some(false)), "文字看不懂但 /Query 查不到＝不存在");
+        assert!(!task_gone(b"", Some(true)), "查得到：排程在，只是停用不了");
+        assert!(!task_gone(b"", None), "什麼都不確定：不當成不存在");
+    }
+
 
     #[derive(Default)]
     struct Fake {
