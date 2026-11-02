@@ -468,6 +468,7 @@ export const SCENARIOS = [
   { name: 'panel', page: 'panel.html', state: { signedIn: true }, ready: '#app.win' },
   { name: 'askpass', page: 'askpass.html', state: { signedIn: true }, ready: '#app' },
   { name: 'toast', page: 'toast.html', state: { signedIn: true }, ready: '#app' },
+  { name: 'setup-progress', page: 'setup-progress.html', state: { signedIn: true }, ready: '#app .sp' },
   // 對話框遮罩（#536）：打開對話框後，遮罩要蓋滿整個視窗，左上使用者區與名單也點不到
   { name: 'list-dialog-mask', page: 'list.html', state: { signedIn: true, partnerTab: true }, ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: MASK_PROBES.desktop },
   { name: 'm-dialog-mask', page: 'm.html', state: { signedIn: true }, ready: '#app.m .m-pager .m-search', probe: MASK_PROBES.mobile },

@@ -459,31 +459,40 @@ async fn run_remote_setup(handle: AppHandle, relay: Arc<Relay>, requested_by: St
         relay.report_setup_result(false, why, None).await;
         return;
     }
+    // 右下角的常駐進度小窗（不搶焦點、主視窗隱藏也看得到）；開不起來也不影響安裝，進度仍有事件
+    if let Err(e) = wins::open_setup_progress(&handle) {
+        elog!("開進度小窗失敗：{e}");
+    }
     let _ = handle.emit("agent-setup-remote", serde_json::json!({ "phase": "starting", "text": "正在依你手機的要求安裝並登入 Claude Code", "cancellable": true }));
     let (tx, rx) = tokio::sync::oneshot::channel();
     let (h1, h2) = (handle.clone(), handle.clone());
     let started = agent_setup::setup::start_claude(
         relay.clone(),
         agent_setup_token_fn(&handle),
-        move |e| {
-            let _ = h1.emit("agent-setup", e.to_json());
-        },
+        move |e| wins::progress_emit(&h1, e.to_json()),
         move |d| {
             let _ = tx.send(d);
         },
     );
     if let Err(e) = started {
         relay.report_setup_result(false, &e, None).await;
+        wins::close_setup_progress(&handle);
         return;
     }
     match rx.await {
         Ok(d) => {
-            let _ = h2.emit("agent-setup", d.to_json());
+            wins::progress_emit(&h2, d.to_json());
             let (ok, text, replaced) = d.report_fields();
             relay.report_setup_result(ok, &text, replaced.as_deref()).await;
         }
-        Err(_) => relay.report_setup_result(false, "安裝並登入中途中斷", None).await,
+        Err(_) => {
+            wins::progress_emit(&h2, serde_json::json!({ "phase": "done", "ok": false, "text": "安裝並登入中途中斷" }));
+            relay.report_setup_result(false, "安裝並登入中途中斷", None).await
+        }
     }
+    // 結果留在畫面上幾秒讓人看到，再自己關
+    tokio::time::sleep(std::time::Duration::from_secs(wins::PROG_DONE_SECS)).await;
+    wins::close_setup_progress(&handle);
 }
 
 /// 本人在這台電腦上按「安裝並登入 Claude Code」。本人簽章不在這裡取好帶著走：安裝要好幾分鐘，權杖可能中途過期，
@@ -1498,7 +1507,7 @@ pub fn run() {
             acct_remote_report, acct_remote_list, acct_roster, acct_remote_request, acct_remote_status, acct_remote_pending, acct_remote_apply, acct_remote_decline, acct_remote_allow_get, acct_remote_allow_set, agent_setup_remote_allow_get, agent_setup_remote_allow_set, agent_setup_start, agent_setup_plan, agent_setup_cancel,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
-            wins::open_chat, wins::open_panel, wins::close_panels, wins::chat_visible, wins::close_chats, wins::open_windows, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,
+            wins::open_chat, wins::open_panel, wins::close_panels, wins::chat_visible, wins::close_chats, wins::open_windows, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::setup_progress_snapshot, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,
             account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_device_prefs_get, account::auth_device_prefs_set, account::auth_bind, account::auth_skip_login, account::update_remote_request, account::update_remote_status,
             cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke, cloud_invite::cloud_agent_approve,
             site_releases::site_releases, tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_blocked, tray::autostart_set, updater::update_check, updater::update_install,

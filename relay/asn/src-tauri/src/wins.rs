@@ -14,6 +14,80 @@ const TOAST_H: f64 = 96.0;
 const TOAST_GAP: f64 = 8.0;
 const TOAST_MAX: usize = 3;
 const TOAST_MS: u64 = 5500;
+/// 安裝並登入的常駐進度小窗（#650 E1）
+const PROG_W: f64 = 340.0;
+const PROG_H: f64 = 176.0;
+const PROG_LABEL: &str = "setup-progress";
+/// 做完之後多久自己關（秒）
+pub const PROG_DONE_SECS: u64 = 8;
+
+/// 小窗的位置（物理像素）：貼工作區右下角，疊在 3 個提示視窗的位置之上，永遠不會跟任何一個提示重疊
+pub fn progress_origin(wa_x: i32, wa_y: i32, wa_w: i32, wa_h: i32, sf: f64) -> (i32, i32) {
+    let (pw, ph, th, gap) = ((PROG_W * sf) as i32, (PROG_H * sf) as i32, (TOAST_H * sf) as i32, (TOAST_GAP * sf) as i32);
+    (wa_x + wa_w - pw - gap, wa_y + wa_h - (th + gap) * TOAST_MAX as i32 - ph - gap)
+}
+
+/// 最後一個進度事件：小窗開得比事件慢時，開起來先向這裡要（setup_progress_snapshot）
+static PROG_LAST: Mutex<Vec<serde_json::Value>> = Mutex::new(Vec::new());
+
+/// 記下最新的進度事件：只留一個；結果（done）出來之後，晚到的進度不蓋掉結果
+fn record_progress(ev: &serde_json::Value) {
+    let mut last = PROG_LAST.lock().unwrap();
+    if !last.first().is_some_and(|e| e["phase"] == "done") {
+        last.clear();
+        last.push(ev.clone());
+    }
+}
+
+/// 送一個進度事件給所有視窗（名單裡的進度行與小窗都聽），同時記下來
+pub fn progress_emit(app: &AppHandle, ev: serde_json::Value) {
+    record_progress(&ev);
+    let _ = app.emit("agent-setup", ev);
+}
+
+/// 小窗開起來時向這裡要目前的狀態（最後一個進度，或已經出來的結果）
+#[tauri::command]
+pub fn setup_progress_snapshot() -> Vec<serde_json::Value> {
+    PROG_LAST.lock().unwrap().clone()
+}
+
+/// 開常駐進度小窗（已經開著就什麼都不做）：置頂、不搶輸入焦點、不進工作列、無邊框透明、可以點（取消鈕），不會自己關，結束後由呼叫端用 close_setup_progress 關。
+/// 主視窗隱藏或最小化時照樣跳出來（它是獨立的視窗）
+pub fn open_setup_progress(app: &AppHandle) -> Result<(), String> {
+    if app.get_webview_window(PROG_LABEL).is_some() {
+        return Ok(());
+    }
+    PROG_LAST.lock().unwrap().clear();
+    let w = WebviewWindowBuilder::new(app, PROG_LABEL, WebviewUrl::App("setup-progress.html".into()))
+        .title("ASN 安裝並登入")
+        .inner_size(PROG_W, PROG_H)
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .resizable(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(false)
+        .focusable(false)
+        .visible(false)
+        .disable_drag_drop_handler()
+        .additional_browser_args(BROWSER_ARGS)
+        .build()
+        .map_err(|e| e.to_string())?;
+    if let Ok(Some(m)) = w.primary_monitor() {
+        let wa = m.work_area();
+        let (x, y) = progress_origin(wa.position.x, wa.position.y, wa.size.width as i32, wa.size.height as i32, m.scale_factor());
+        let _ = w.set_position(PhysicalPosition::new(x, y));
+    }
+    let _ = w.show();
+    Ok(())
+}
+
+pub fn close_setup_progress(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window(PROG_LABEL) {
+        let _ = w.close();
+    }
+}
 
 #[derive(Default)]
 pub struct Slots(Mutex<[bool; TOAST_MAX]>);
@@ -450,6 +524,30 @@ fn which_scrot() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 進度小窗疊在提示視窗上方不重疊且在工作區內() {
+        for sf in [1.0, 1.5, 2.0] {
+            let (wa_x, wa_y, wa_w, wa_h) = (0, 0, 1920, 1040);
+            let (x, y) = progress_origin(wa_x, wa_y, wa_w, wa_h, sf);
+            let toast_top = wa_y + wa_h - ((TOAST_H + TOAST_GAP) * sf) as i32 * TOAST_MAX as i32;
+            assert!(y + (PROG_H * sf) as i32 <= toast_top, "{sf}：不能壓到最上面那個提示位置");
+            assert!(x >= 0 && x + (PROG_W * sf) as i32 <= wa_x + wa_w && y >= 0, "{sf}：要在工作區內");
+        }
+    }
+
+    #[test]
+    fn 進度事件只留最新一個且結果出來後不被晚到的進度蓋掉() {
+        use serde_json::json;
+        PROG_LAST.lock().unwrap().clear();
+        record_progress(&json!({"phase": "a"}));
+        record_progress(&json!({"phase": "b"}));
+        assert_eq!(setup_progress_snapshot(), vec![json!({"phase": "b"})]);
+        record_progress(&json!({"phase": "done", "ok": true}));
+        record_progress(&json!({"phase": "late"}));
+        assert_eq!(setup_progress_snapshot(), vec![json!({"phase": "done", "ok": true})]);
+        PROG_LAST.lock().unwrap().clear();
+    }
 
     #[test]
     fn 對話視窗標籤只含合法字元且互不相同() {
