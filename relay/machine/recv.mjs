@@ -65,8 +65,9 @@ export async function main(argv, out = line => process.stdout.write(line + '\n')
   const q = encodeURIComponent(me.name)
   const printed = new Set()   // 已印出但（可能）還沒 ack 成功的信：不重印，只重試 ack
 
-  async function pullOnce() {
+  async function pullOnce(ctx) {
     const { messages = [] } = await core.api(`inbox&agent=${q}`)
+    if (ctx?.stale?.()) return 0   // 這一輪已因整體逾時被放棄：不印、不 ack，新的一輪會處理（printed 去重）
     const ids = []
     for (const m of messages) {
       if (m.to_agent !== me.name) continue   // 後端已過濾；這裡再擋一次，不是寄給本視窗的絕不印、不 ack
