@@ -198,6 +198,8 @@ pub struct Held {
     pub wake: Wake,
     /// 到期後轉交失敗的次數（退避、放棄用）
     pub fails: u32,
+    /// 額度用完而扣住的那一刻（毫秒；0＝不是額度扣住的，只是順位延遲）。重置後轉交時抬頭要寫原本幾點收到，超過保留期改發摘要
+    pub held_at: u64,
 }
 
 impl Held {
@@ -229,6 +231,7 @@ impl HeldStore {
             delay_ms: n("delay_ms").unwrap_or(0),
             wake: wake_of(&serde_json::json!({ "wake": v.get("wake")? }))?,
             fails: n("fails").unwrap_or(0) as u32,
+            held_at: n("held_at").unwrap_or(0),
         })
     }
     pub fn items(&self) -> &[Held] {
@@ -248,7 +251,7 @@ impl HeldStore {
         let arr: Vec<Value> = self
             .items
             .iter()
-            .map(|h| serde_json::json!({ "room_id": h.room_id, "room_name": h.room_name, "member": h.member, "seq": h.seq, "due": h.due, "delay_ms": h.delay_ms, "wake": { "rank": h.wake.rank, "total": h.wake.total, "before": h.wake.before }, "fails": h.fails }))
+            .map(|h| serde_json::json!({ "room_id": h.room_id, "room_name": h.room_name, "member": h.member, "seq": h.seq, "due": h.due, "delay_ms": h.delay_ms, "wake": { "rank": h.wake.rank, "total": h.wake.total, "before": h.wake.before }, "fails": h.fails, "held_at": h.held_at }))
             .collect();
         crate::write_atomic(&self.file, &serde_json::to_string(&arr).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
     }
@@ -435,7 +438,7 @@ mod tests {
     fn 排隊檔_存讀_壞項目略過_空了就刪檔() {
         let d = tempfile::tempdir().unwrap();
         let mut s = HeldStore::load(d.path());
-        let h = Held { room_id: "R1".into(), room_name: "群".into(), member: "T~T-甲".into(), seq: 4, due: 99, delay_ms: 60_000, wake: Wake { rank: 2, total: 3, before: vec!["乙".into()] }, fails: 0 };
+        let h = Held { room_id: "R1".into(), room_name: "群".into(), member: "T~T-甲".into(), seq: 4, due: 99, delay_ms: 60_000, wake: Wake { rank: 2, total: 3, before: vec!["乙".into()] }, fails: 0, held_at: 0 };
         s.add(h.clone()).unwrap();
         assert_eq!(HeldStore::load(d.path()).items(), &[h.clone()]);
         s.defer("R1", 4, "T~T-甲", 200).unwrap();

@@ -349,7 +349,7 @@ async fn 名單回報_格式與_node_橋相同_含_asn_視窗_排除死掉的視
             {"name":"T-乙","status":"busy","cwd_label":"x","engine":"claude","active_at":T0},
             {"name":"T-甲","status":"idle","cwd_label":"x","engine":"claude"},
             {"name":"T-ASN","status":"idle","cwd_label":"","engine":"asn"},
-        ], "launcher": null, "used_legacy_env": []})
+        ], "launcher": null, "used_legacy_env": [], "inbox_hold_until": null})
     );
     assert!(core.roster_ok);
     // used_legacy_env 的來源可換：換成固定的一份，名單頂層照送（只有名字）
@@ -1504,6 +1504,7 @@ async fn 夥伴_id_暫時失敗_500_只記一次_下一輪再試_好了就接上
 mod aegis_it;
 mod engines_it;
 mod pi_it;
+mod quota_it;
 mod respond_it;
 mod rooms_launch;
 
