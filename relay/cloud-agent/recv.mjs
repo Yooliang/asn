@@ -48,15 +48,19 @@ export const roomRecordOf = (room, member, agent, m) => ({
 // 收信核心（可單獨測試）：api(action, {method, body}) 是 relay-core 的 api
 export function createReceiver({
   api, cfg, log, now = () => Date.now(), listAllFn, env = rosterScanEnvFrom(cfg),
-  sleep, backoffMs, usedLegacyEnv = [],
+  sleep, backoffMs, usedLegacyEnv = [], roundTimeoutMs,
 }) {
   // 名單回報頂層的 used_legacy_env（F4 PR-2）：入口 applyEnvCompat 的 legacyNames（只有名字），排序去重
   const legacyEnv = [...new Set(usedLegacyEnv)].sort()
   ensureDir(cfg.mailDir, 0o700)
   const seen = new Set(readJsonl(cfg.inboxFile).map(m => m?.id).filter(Boolean))   // 重啟後靠檔案去重
 
-  async function pullInboxOnce() {
+  // ctx.stale()：這一輪已經因為整體逾時被放棄（見 pull-retry.mjs）。放棄的那一輪晚點才醒來時不再寫、不再 ack，
+  // 免得和新的一輪重複處理同一封；就算同時進行，寫入前都先查 seen、寫完立刻 add（中間沒有 await），同一封信不會寫兩次
+  async function pullInboxOnce(ctx) {
+    const stale = () => ctx?.stale?.() === true
     const { messages = [] } = await api('inbox')
+    if (stale()) return 0
     const ackIds = []
     for (const m of messages) {
       if (!m || typeof m.id !== 'string') continue
@@ -68,18 +72,33 @@ export function createReceiver({
       }
       ackIds.push(m.id)   // 已寫入（含之前就寫入過、上次 ack 失敗的）才 ack
     }
-    for (let i = 0; i < ackIds.length; i += 100) await api('ack', { method: 'POST', body: { ids: ackIds.slice(i, i + 100) } })
+    for (let i = 0; i < ackIds.length; i += 100) {
+      if (stale()) break
+      await api('ack', { method: 'POST', body: { ids: ackIds.slice(i, i + 100) } })
+    }
     return ackIds.length
   }
   // 群組：游標存 cfg.roomsFile。成員身分＝room_list 的 mine[].member（節點本身或「節點~視窗名」）；視窗名當 as_agent
   const readCursors = () => { try { const c = JSON.parse(fs.readFileSync(cfg.roomsFile, 'utf8')); return c && typeof c === 'object' && !Array.isArray(c) ? c : {} } catch { return {} } }
-  async function pullRooms() {
+  async function pullRooms(ctx) {
+    const stale = () => ctx?.stale?.() === true
     let list
     try { list = (await api('room_list'))?.rooms ?? [] }
     catch (e) { if (e.status === 403 || e.status === 404) return 0; throw e }   // 舊後台／沒有群組權限：略過，不影響信箱
+    if (stale()) return 0
     const cur = readCursors()
     let stored = 0, dirty = false
-    const save = () => { if (dirty) { writeFileAtomic(cfg.roomsFile, JSON.stringify(cur)); dirty = false } }
+    // 游標只能前進、不能倒退或消失：被放棄的舊一輪晚點醒來時，手上的 cur 是它開始時的舊快照，整份寫回會蓋掉新一輪才出現的房間
+    // （下一輪會當成第一次看到、直接跳到 last_seq，中間的訊息就漏了，也沒有 log）。所以 1) 已被放棄的一輪完全不寫  2) 寫之前重讀檔案，逐個 key 取較大的
+    const save = () => {
+      if (!dirty) return
+      if (stale()) { dirty = false; return }
+      const onDisk = readCursors()
+      const merged = { ...onDisk }
+      for (const [k, v] of Object.entries(cur)) merged[k] = Math.max(Number(onDisk[k]) || 0, Number(v) || 0)
+      writeFileAtomic(cfg.roomsFile, JSON.stringify(merged))
+      dirty = false
+    }
     try {
       for (const room of list) {
         for (const mine of room.mine ?? []) {
@@ -89,7 +108,9 @@ export function createReceiver({
           if (cur[key] === undefined) { cur[key] = Number(room.last_seq) || 0; dirty = true; continue }   // 第一次看到：從現在開始，不灌歷史
           const agent = member.includes('~') ? member.split('~').slice(1).join('~') : ''
           for (let page = 0; page < ROOM_MAX_PAGES; page++) {
+            if (stale()) return stored
             const res = await api(`room_read&room=${encodeURIComponent(room.id)}${agent ? `&as_agent=${encodeURIComponent(agent)}` : ''}&since=${cur[key]}&limit=${ROOM_PAGE}`)
+            if (stale()) return stored   // 放棄的那一輪：游標不動，新的一輪會從原本的游標重拉（寫入有 seen 去重）
             const msgs = (res?.messages ?? []).filter(m => Number.isInteger(m?.seq) && m.seq > cur[key]).sort((a, b) => a.seq - b.seq)
             for (const m of msgs) {
               const rec = roomRecordOf(room, member, agent, m)
@@ -111,13 +132,14 @@ export function createReceiver({
 
   // 群組拉取失敗不拖累信箱（信箱已先寫、先 ack）：只記一次 log，下一次門鈴或輪詢再拉
   let roomWarned = false
-  async function pullRoomsQuiet() {
-    try { await pullRooms(); if (roomWarned) log('room pull ok again'); roomWarned = false }
+  async function pullRoomsQuiet(ctx) {
+    try { await pullRooms(ctx); if (roomWarned) log('room pull ok again'); roomWarned = false }
     catch (e) { if (!roomWarned) log(`room pull failed: ${e.message} (will retry on next pull)`); roomWarned = true }
   }
 
-  const { pull, destroy } = createPullWithRetry({
-    pullOnce: async () => { const n = await pullInboxOnce(); await pullRoomsQuiet(); return n }, log, sleep, backoffMs: backoffMs ?? parsePullBackoffMs(env),
+  const { pull, destroy, getStats } = createPullWithRetry({
+    pullOnce: async ctx => { const n = await pullInboxOnce(ctx); await pullRoomsQuiet(ctx); return n }, log, sleep, backoffMs: backoffMs ?? parsePullBackoffMs(env),
+    roundTimeoutMs,
   })
 
   // roster：每位代理一列（本機掃描或 config.mjs 的 loadAgents）。403＝沒有 can_roster，只記一次、之後每小時才試
@@ -139,7 +161,7 @@ export function createReceiver({
       return false
     }
   }
-  return { pull, pullOnce: pullInboxOnce, pullRooms, rosterOnce, seen, destroy }
+  return { pull, pullOnce: pullInboxOnce, pullRooms, rosterOnce, seen, destroy, getStats }
 }
 
 export async function main(rawEnv = process.env) {
@@ -167,7 +189,15 @@ export async function main(rawEnv = process.env) {
     catch (e) { log(`whoami failed: ${e.message}`); await core.sleep(wait) }   // 網路暫時不通／IP 剛變：退避重試
   }
   void rx.pull('startup')
+  // 保底收信：不全靠門鈴。每 pollMs 一定要求一次（上一輪還沒結束就合併；卡住的一輪有整體時限，逾時會放掉）
   setInterval(() => void rx.pull('poll'), cfg.pollMs)
+  // 存活紀錄（每小時一行，內容會變所以不會被 log 的重複壓縮吃掉）：之後再停擺時，看最後一行就知道是哪時候開始沒成功
+  const startedAt = Date.now()
+  setInterval(() => {
+    const s = rx.getStats()
+    const ago = s.lastOkAt ? `${Math.round((Date.now() - s.lastOkAt) / 1000)}s ago` : 'never'
+    log(`recv alive up=${Math.round((Date.now() - startedAt) / 60000)}min pulls=${s.rounds} ok=${s.ok} failed=${s.failed} timeouts=${s.timeouts} lastOk=${ago} pulling=${s.pulling}`)
+  }, 3_600_000).unref?.()
   return await new Promise(() => {})   // 長駐
 }
 
