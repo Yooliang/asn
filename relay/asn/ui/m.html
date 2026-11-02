@@ -223,8 +223,13 @@
               </header>
           <div class="m-sheet-body m-dv">
             <template v-if="acctSw.phase === 'pick' && !acctCur">
-              <!-- 我的帳號（#374）：按廠牌列出本人全部帳號；後台讀不到（acctMy 是 null）就不顯示這一區 -->
-              <section class="m-dv-my" v-if="acctMy" role="region" :aria-label="acctMy.title">
+              <!-- 上方兩個分頁（#650）：設備＝設備列表；帳號＝我的帳號（用在哪幾台、切換到…） -->
+              <div class="m-dv-seg" role="tablist" aria-label="設備與帳號">
+                <button type="button" role="tab" class="m-dv-segbtn" :class="{ on: acctSw.tab === t.key }" :aria-selected="acctSw.tab === t.key ? 'true' : 'false'" v-for="t in ACCT_TABS" :key="t.key" :data-tab="t.key" @click="setAcctTab(t.key)">{{ t.label }}</button>
+              </div>
+              <!-- 我的帳號（#374）：按廠牌列出本人全部帳號；後台讀不到（acctMy 是 null）就寫提示 -->
+              <p class="m-fine" v-if="acctSw.tab === 'accounts' && !acctMy">{{ ROSTER_TEXT.noList }}</p>
+              <section class="m-dv-my" v-if="acctSw.tab === 'accounts' && acctMy" role="region" :aria-label="acctMy.title">
                 <h3 class="m-dv-my-h">{{ acctMy.title }}</h3>
                 <p class="m-fine" v-if="acctMy.empty">{{ acctMy.empty }}</p>
                 <div class="m-dv-my-v" v-for="v in acctMy.vendors" :key="v.key" :data-vendor="v.key">
@@ -247,10 +252,13 @@
                         <span v-else>{{ a.quota.text }}</span>
                         <span class="m-dv-qmeta" v-if="a.quota.resetLine || a.quota.oldText || a.quota.meta"><span v-if="a.quota.resetLine">{{ a.quota.resetLine }}</span><span class="m-dv-old" v-if="a.quota.oldText">{{ a.quota.oldText }}</span><span v-if="a.quota.meta">{{ a.quota.meta }}</span></span>
                       </span>
+                      <span class="m-dv-used" v-if="a.usedOn && a.usedOn.length">{{ ROSTER_TEXT.usedOn }}：{{ usedOnText(a) }}</span>
+                      <span class="m-dv-sws" v-if="acctSwitchTargets(v.key, a).length"><button type="button" class="m-dv-sw" v-for="t in acctSwitchTargets(v.key, a)" :key="t.node" @click="acctSwitchOn(t.node, a.account)">切換到{{ t.label }}</button></span>
                     </li>
                   </ul>
                 </div>
               </section>
+              <template v-if="acctSw.tab === 'devices'">
               <p class="m-note" v-if="!acctDevs.length">{{ DEVICE_TEXT.empty }}</p>
               <ul class="m-dv-list" aria-label="設備" v-else>
                 <li v-for="d in acctDevs" :key="d.key" :data-dev="d.key" class="m-dv-row" :class="{ hid: d.hidden, off: !d.online, dragging: acctDrag.key === d.key, 'drop-before': acctDrag.over === d.key && !acctDrag.after, 'drop-after': acctDrag.over === d.key && acctDrag.after }">
@@ -258,7 +266,7 @@
                   <span class="m-dv-grip-gap" v-else aria-hidden="true"></span>
                   <button type="button" class="m-dv-go" @click="openAcctDevice(d.key)">
                     <span class="m-dv-dot" :class="d.online ? 'on' : 'off'" aria-hidden="true"></span>
-                    <span class="m-dv-rn"><b>{{ d.label }}</b><span class="m-dv-rs">{{ d.kind }} · {{ d.onlineText }}<template v-if="d.self"> · 這支手機</template></span></span>
+                    <span class="m-dv-rn"><b>{{ d.label }}</b><span class="m-dv-rs">{{ d.kind }} · {{ d.onlineText }}<template v-if="d.self"> · 這支手機</template></span><span class="m-dv-line" v-if="d.stateLine">{{ d.stateLine }}</span></span>
                     <span class="m-dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
                     <span class="m-dv-chev" aria-hidden="true">&rsaquo;</span>
                   </button>
@@ -270,6 +278,7 @@
                   <li v-for="d in acctRemoved" :key="d.key"><span>{{ d.label }}</span><button type="button" class="m-dv-refresh" @click="acctRestore(d.key)">{{ DEVICE_TEXT.restore }}</button></li>
                 </ul>
               </div>
+              </template>
               <button type="button" class="m-btn m-ops-cancel" @click="closePage">{{ ACCT_TEXT.close }}</button>
               <p class="m-fine m-dv-foot">{{ ACCT_TEXT.quotaNote }}</p>
             </template>
