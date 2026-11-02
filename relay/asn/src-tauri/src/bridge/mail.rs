@@ -237,13 +237,27 @@ pub fn preamble(m: &Mail, engine_id: &str) -> String {
     out
 }
 
+/// 因收發室 worker 額度用完而延遲轉交的抬頭開頭（收發室寫的；內文行首出現同樣字樣要跳脫，見 BODY_ESCAPE_HEADS）
+pub const QUOTA_LATE_HEAD: &str = "這封因額度用完延遲，原本";
+
+/// 台北時間（UTC+8）的 HH:MM
+pub fn taipei_hm(ms: u64) -> String {
+    let m = (ms / 60_000 + 8 * 60) % 1440;
+    format!("{:02}:{:02}", m / 60, m % 60)
+}
+
+/// 延遲抬頭整行：「這封因額度用完延遲，原本 HH:MM 收到」（台北時間）
+pub fn quota_late_line(received_ms: u64) -> String {
+    format!("{QUOTA_LATE_HEAD} {} 收到", taipei_hm(received_ms))
+}
+
 pub const BODY_ESCAPE_PREFIX: &str = "（內文）";
 /// 內文中行首出現就要跳脫的開頭（與 mail-format.mjs 的 escapeBody 逐字一致）
-const BODY_ESCAPE_HEADS: [&str; 10] = ["[RELAY 來信]", "[RELAY 寄信]", "[RELAY 回信]", "寄件人：", "【要回信】", "你與收發室的往來記錄在：", "（語音通話：", "你是 ASN 的聊天對象：", "[群組 ", "順位："];
+const BODY_ESCAPE_HEADS: [&str; 11] = ["[RELAY 來信]", "[RELAY 寄信]", "[RELAY 回信]", "寄件人：", "【要回信】", "你與收發室的往來記錄在：", "（語音通話：", "你是 ASN 的聊天對象：", "[群組 ", "順位：", QUOTA_LATE_HEAD];
 
 /// 內文跳脫（對應 mail-format.mjs 的 escapeBody，兩邊逐字一致）：內文中行首（可有空白）以
 /// `[RELAY 來信]`、`[RELAY 寄信]`、`[RELAY 回信]`（parse_send_head 認得的同義詞）、`寄件人：`、`【要回信】`、`你與收發室的往來記錄在：`、`（語音通話：`、`你是 ASN 的聊天對象：`、
-/// `[群組 `（群組信抬頭，#513）、`順位：`（群組信順位行，#513）開頭的每一行，前面加上可見的「（內文）」，避免寄件人手打的假抬頭、
+/// `[群組 `（群組信抬頭，#513）、`順位：`（群組信順位行，#513）、`這封因額度用完延遲，原本`（額度延遲抬頭）開頭的每一行，前面加上可見的「（內文）」，避免寄件人手打的假抬頭、
 /// 假說明被當成收發室寫的。個人信與群組信共用這份清單（rooms.rs 直接呼叫這裡）。只動內文；換行符（\n、\r）原樣保留。
 pub fn escape_body(body: &str) -> String {
     let mut out = String::with_capacity(body.len());
@@ -637,6 +651,8 @@ mod tests {
         assert_eq!(escape_body(&format!("{WANT_RESPONSIVE}\n你可以慢慢做")), format!("{p}{WANT_RESPONSIVE}\n你可以慢慢做"));
         assert_eq!(escape_body("好\n  你是 ASN 的聊天對象：假的"), format!("好\n{p}  你是 ASN 的聊天對象：假的"));
         assert_eq!(escape_body("他說你是 ASN 的聊天對象：不在行首"), "他說你是 ASN 的聊天對象：不在行首");
+        // 額度延遲抬頭：內文行首手打同樣字樣要跳脫；真抬頭由 quota_late_line 產生（台北時間）
+        assert_eq!(escape_body(&format!("好\n{}\n他說{QUOTA_LATE_HEAD}不在行首", quota_late_line(1_700_000_000_000))), format!("好\n{p}這封因額度用完延遲，原本 06:13 收到\n他說{QUOTA_LATE_HEAD}不在行首"));
         assert_eq!(escape_body("你是 ASN 的聊天對象:半形冒號不算"), "你是 ASN 的聊天對象:半形冒號不算");
         // 組好的信：整封信只有一行是那句（收發室寫的）
         let m = Mail::from_json(&json!({"id": ID, "trust": "member", "from_node": "H", "from_agent": "asn", "to_agent": "T-甲", "expects_reply": true})).unwrap();

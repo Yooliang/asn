@@ -9,6 +9,8 @@ pub const VERSION: u64 = 1;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum State {
     Forwarding,
+    /// 收發室 worker 額度用完而扣住：不算轉交逾時、不 ack，重置後重送。存檔只留 id 與收到時間，內文在記憶體（重啟後靠重新拉到的同一封補回）
+    Held,
     Waiting,
     Notified,
     Done,
@@ -19,6 +21,7 @@ impl State {
             State::Waiting => "waiting",
             State::Notified => "notified",
             State::Forwarding => "forwarding",
+            State::Held => "held",
             State::Done => "done",
         }
     }
@@ -78,9 +81,9 @@ pub fn to_record(p: &Pending) -> Value {
     })
 }
 
-/// 快照：只含 waiting／notified（forwarding 重啟後由 inbox 重送；done 不用留）
+/// 快照：只含 waiting／notified／held（forwarding 重啟後由 inbox 重送；done 不用留）
 pub fn snapshot(pending: &[Pending], last: &std::collections::BTreeMap<String, LastReq>) -> Value {
-    let items: Vec<Value> = pending.iter().filter(|p| matches!(p.state, State::Waiting | State::Notified)).map(to_record).collect();
+    let items: Vec<Value> = pending.iter().filter(|p| matches!(p.state, State::Waiting | State::Notified | State::Held)).map(to_record).collect();
     let mut lr = Map::new();
     for (k, v) in last {
         lr.insert(k.clone(), json!({ "from_node": v.from_node, "from_agent": v.from_agent, "mail_id": v.mail_id, "t": v.t }));
@@ -99,6 +102,7 @@ fn from_record(r: &Value) -> Option<Pending> {
     let state = match s("state")? {
         "waiting" => State::Waiting,
         "notified" => State::Notified,
+        "held" => State::Held,
         _ => return None,
     };
     let (t0, t) = (num(r.get("t0")?)?, num(r.get("t")?)?);
