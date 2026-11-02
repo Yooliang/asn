@@ -7,6 +7,12 @@ use crate::bridge::mail::{quota_late_line, taipei_hm};
 use crate::bridge::rooms::Wake;
 
 impl Core {
+    /// 這台電腦因收發室 worker 額度用完而暫停收信到什麼時候（毫秒）；沒有暫停回 None。
+    /// 名單回報會把它帶給後台（relay.nodes.inbox_hold_until），收信監控用來抑制通知；值是記憶體狀態，重啟後歸零
+    pub fn inbox_hold_until(&self) -> Option<u64> {
+        (self.quota_until > 0).then_some(self.quota_until)
+    }
+
     pub(super) fn quota_active(&self, now: u64) -> bool {
         self.quota_until > 0 && now < self.quota_until
     }
