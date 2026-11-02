@@ -1,0 +1,67 @@
+name: ASN 後端與機器橋測試
+
+# 和 asn-linux-build.yml 分開：這三個資料夾不連 Rust，改它們不用等 Rust 建置。
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'relay/machine/**'
+      - 'relay/cloud-agent/**'
+      - 'supabase/functions/**'
+      - '.github/workflows/asn-backend-tests.yml'
+  pull_request:
+    paths:
+      - 'relay/machine/**'
+      - 'relay/cloud-agent/**'
+      - 'supabase/functions/**'
+      - '.github/workflows/asn-backend-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  edge-functions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: supabase/functions
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: '2.9.3'
+
+      - name: Edge Function 測試（deno）
+        run: deno test -A _shared/
+
+  relay-machine:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: relay/machine
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 機器橋測試（node）
+        run: node --test --test-force-exit --test-timeout=120000 test/*.test.mjs
+
+  relay-cloud-agent:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: relay/cloud-agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 雲端代理測試（node）
+        run: node --test --test-force-exit --test-timeout=120000 test/*.test.mjs
