@@ -85,7 +85,8 @@ export function vendorState({ isSelf = false, rep = null, accounts = [], install
 export function installAction({ vendor, isSelf = false, phone = false, online = false, asnOnline = true, state = '' } = {}) {
   if (vendor !== 'claude' || phone) return null
   if (![STATE.NOT_INSTALLED, STATE.INSTALLED_LOGGED_OUT, STATE.LOGGED_OUT, STATE.UNKNOWN_INSTALL].includes(state)) return null
-  if (isSelf) return { kind: 'local' }
+  // 本機偵測很快就會有結果：還不確定有沒有裝時先不給，免得偵測還沒跑完就出現按鈕
+  if (isSelf) return state === STATE.UNKNOWN_INSTALL ? null : { kind: 'local' }
   if (!online || asnOnline !== true) return null
   return { kind: 'remote' }
 }

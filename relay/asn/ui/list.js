@@ -66,6 +66,7 @@ import { startCallPoll } from './lib/call-poll.mjs'
 import { isCallActive } from './lib/call-session.mjs'
 import { accountLine, codexLine, createAccountsUi } from './lib/claude-accounts.mjs'
 import { buildDeviceTree } from './lib/device-tree.mjs'
+import { splitMachines } from './lib/remote-machines.mjs'
 import { nodeLabelOf, rosterQuotaFor, rosterView } from './lib/account-roster.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, moveDevice, pruneRemoved, removeDevice, reorderDevice, showDevice, visibleRows } from './lib/device-order.mjs'
@@ -366,13 +367,7 @@ async function refreshLaunchers() {
   let err = null
   try {
     const body = await transport.launchers()
-    const map = {}
-    const mach = {}
-    for (const m of body?.machines ?? []) {
-      if (!m?.node) continue
-      if (m.launcher) map[m.node] = m.launcher   // 沒開放（launcher 是 null）的不放進來，照舊算沒開放
-      mach[m.node] = { platform: m.platform ?? null, launch_closed_reason: m.launch_closed_reason ?? null }
-    }
+    const { launchers: map, machines: mach } = splitMachines(body)   // 沒開放（launcher 是 null）的不放進 map，照舊算沒開放
     remoteLaunchers.value = map
     remoteMachines.value = mach
   } catch (e) { err = e }
@@ -1554,8 +1549,8 @@ const app = createApp({
     const deviceTree = computed(() => buildDeviceTree({
       friends: friends.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, asn: asnMap.value, launchers: {
         ...remoteLaunchers.value,
-        [info.node]: { profiles: partnerModels.value.filter(m => m.installed).map(m => ({ id: m.profileId ?? m.id })) },
-      },
+        [info.node]: { profiles: partnerModels.value.filter(m => m.installed).map(m => ({ id: m.profileId ?? m.id })), detected: Object.keys(cliTools.value).length > 0 },
+      }, machines: remoteMachines.value,
       reports: accounts.state.reports, roster: accounts.state.roster,
       self: { claude: accounts.state.list, grok: accounts.state.grok, codex: { loggedIn: Boolean(accounts.state.codex), text: codexLine(accounts.state.codex, accounts.state.codexErr) } },
     }))

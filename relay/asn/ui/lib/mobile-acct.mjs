@@ -34,9 +34,9 @@ export const acctReportOf = r => (r && !r.loading ? { error: r.msg || '', asnOnl
 export const acctClaudeRemote = r => ({ loading: r?.loading === true, asnOnline: r?.asnOnline === true, reportedAt: r?.reportedAt ?? '', msg: r?.msg ?? '', list: (Array.isArray(r?.list) ? r.list : []).filter(a => a?.vendor === 'claude') })
 
 // roster：後台帳號列表（android_acct_roster，#374）；跟電腦版同一套 account-roster.mjs，讀不到（null）就退回各台自己回報的
-export function acctDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', reports = {}, launchers = {}, roster = null, now = Date.now() } = {}) {
+export function acctDeviceTree({ friends = [], nodeOrder = [], deviceOrder = [], shown = [], removed = [], selfNode = '', reports = {}, launchers = {}, machines = launchers, roster = null, now = Date.now() } = {}) {
   const rep = Object.fromEntries(Object.entries(reports).map(([k, r]) => [k, acctReportOf(r)]).filter(([, r]) => r))
-  return buildDeviceTree({ friends, nodeOrder, deviceOrder, shown, removed, selfNode, launchers, reports: rep, roster, now }).map(d => ({
+  return buildDeviceTree({ friends, nodeOrder, deviceOrder, shown, removed, selfNode, launchers, machines, reports: rep, roster, now }).map(d => ({
     ...d,
     label: d.self && d.label === SELF_LABEL ? PHONE_LABEL : d.label,
     // 手機（本機與別支）只顯示，不提供切換，也不顯示「ASN 沒有在線」的提示
