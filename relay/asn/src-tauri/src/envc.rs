@@ -78,6 +78,11 @@ pub const PAIRS: &[(&str, &str)] = &[
     ("ASN_CLAUDE_HOME", "IRORI_ASN_CLAUDE_HOME"),
     ("ASN_CLAUDE_AUTO_MS", "IRORI_ASN_CLAUDE_AUTO_MS"),
     ("ASN_PRESENCE_MS", "IRORI_ASN_PRESENCE_MS"),
+    // 視窗名單的備援輪詢與過期時間、Grok 帳號自動換的間隔（用 env_ms 讀，沒登記除錯版一讀就 panic）
+    ("ASN_WINDOW_FALLBACK_MS", "IRORI_ASN_WINDOW_FALLBACK_MS"),
+    ("ASN_WINDOW_STALE_MS", "IRORI_ASN_WINDOW_STALE_MS"),
+    ("ASN_GROK_AUTO_MS", "IRORI_ASN_GROK_AUTO_MS"),
+    ("ASN_GROK_HOME", "IRORI_ASN_GROK_HOME"),
     ("ASN_MOCK_BIN_DIR", "IRORI_ASN_MOCK_BIN_DIR"),
 ];
 
@@ -425,5 +430,52 @@ mod tests {
             }
         }
         assert!(bad.is_empty(), "這些位置還在直接讀 IRORI_*：{bad:?}");
+    }
+
+    /// 程式裡用讀取函式讀的 `ASN_*` 新名，都要登記在 PAIRS（沒登記，除錯版一讀就 panic，正式版又悄悄少了舊名相容；
+    /// 上面那支只擋「直接讀 IRORI_*」，擋不到「新名忘了登記」）
+    #[test]
+    fn 程式讀的新名都登記在對照表() {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().map(|x| x == "rs").unwrap_or(false) {
+                    out.push(p);
+                }
+            }
+        }
+        let mut files = vec![];
+        walk(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut files);
+        // 只看走 envc 的讀法（直接用 std::env::var 讀的測試／開發用變數不在這裡管）
+        let readers = ["env_u64(", "env_ms(", "envc::get(", "envc::get_os(", "envc::get_os_noting(", "envc::pick("];
+        let mut missing = vec![];
+        for f in files {
+            if f.file_name().map(|n| n == "envc.rs").unwrap_or(false) {
+                continue;
+            }
+            let src = std::fs::read_to_string(&f).unwrap();
+            for (i, line) in src.lines().enumerate() {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                for r in readers {
+                    let mut rest = line;
+                    while let Some(at) = rest.find(&format!("{r}\"ASN_")) {
+                        let tail = &rest[at + r.len() + 1..];
+                        let Some(end) = tail.find('"') else { break };
+                        let name = &tail[..end];
+                        if name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_') && legacy(name).is_none() {
+                            missing.push(format!("{}:{} {name}", f.file_name().unwrap().to_string_lossy(), i + 1));
+                        }
+                        rest = &tail[end..];
+                    }
+                }
+            }
+        }
+        missing.sort();
+        missing.dedup();
+        assert!(missing.is_empty(), "這些新名程式有讀、卻沒登記在 envc::PAIRS：{missing:?}");
     }
 }
