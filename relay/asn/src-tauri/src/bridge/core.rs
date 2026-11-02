@@ -230,11 +230,10 @@ struct RoomFwd {
     received_at: u64,
 }
 
-/// 一次額度用完期間已經通知過誰（同一次只通知一次；worker 證明恢復後清掉）
+/// 一次額度用完期間已經通知過哪些寄件人（同一次只通知一次；worker 證明恢復後清掉）
 #[derive(Default)]
 struct QuotaEpisode {
-    owner: bool,
-    /// 超過扣住上限已另外通知過主人
+    /// 扣住的信超過上限（名單回報帶給後台，由後台通知主人）
     capped: bool,
     senders: HashSet<String>,
 }
@@ -328,6 +327,8 @@ pub struct Core {
     hold_sent: Option<Option<u64>>,
     /// 上次為了回報收信暫停而重報名單的時間（失敗時不要每個 tick 都重試）
     hold_try_at: u64,
+    /// 超過上限的旗標已經報給後台（每次額度用完只報一次）
+    cap_sent: bool,
 }
 
 /// 自動回信模式：交辦後這段時間內，就算 worker 這一輪的結果已回來，仍視為忙碌（它可能正接著處理排隊中的下一則）
@@ -376,7 +377,7 @@ impl Core {
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
-            quota_until: 0, quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), late_from: None, hold_sent: None, hold_try_at: 0,
+            quota_until: 0, quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), late_from: None, hold_sent: None, hold_try_at: 0, cap_sent: false,
         };
         c.restore();
         c
@@ -450,9 +451,18 @@ impl Core {
         }
         self.pending = st.pending;
         self.last_requester = st.last;
+        // 存下來的額度重置時間再驗一次範圍：已過去或超過 8 天就當作沒有
+        if st.quota_until > self.now && st.quota_until <= self.now + 8 * 86_400_000 {
+            self.quota_until = st.quota_until;
+            self.quota_ep = Some(Default::default());
+            self.log.line(&format!("quota hold restored: until {}", super::mail::taipei_hm(st.quota_until)));
+        }
     }
     fn persist(&mut self) {
-        let snap = pending::snapshot(&self.pending, &self.last_requester);
+        let mut snap = pending::snapshot(&self.pending, &self.last_requester);
+        if self.quota_until > 0 {
+            snap["quotaUntil"] = json!(self.quota_until); // 額度重置時間：重啟後還沒到就繼續扣住，不白撞一次額度
+        }
         let text = snap.to_string();
         if text == self.last_saved {
             return;
@@ -654,16 +664,26 @@ impl Core {
             body["mod"] = m.clone();
         }
         // 收發室 worker 額度用完而暫停收信到什麼時候（毫秒；null＝沒有）：值有變才附，給後台的收信監控抑制通知用
+        // 後台在暫停開始時寄通知給擁有者（設備名、扣住筆數由這裡帶；超過上限的旗標每次額度用完只帶一次）
         let hold = self.inbox_hold_until();
-        let hold_due = self.hold_sent != Some(hold);
+        let cap_due = self.hold_cap_due();
+        let hold_due = self.hold_sent != Some(hold) || cap_due;
         if hold_due {
             body["inbox_hold_until"] = json!(hold);
+            if hold.is_some() {
+                body["inbox_hold_count"] = json!(self.quota_held_total());
+                body["inbox_hold_computer"] = json!(self.cfg.node);
+            }
+            if cap_due {
+                body["inbox_hold_capped"] = json!(true);
+            }
         }
         match self.relay.api("roster", Some(body)).await {
             Ok(_) => {
                 self.roster_warned = false;
                 if hold_due {
                     self.hold_sent = Some(hold);
+                    self.cap_sent = if hold.is_none() { false } else { self.cap_sent || cap_due };
                 }
                 if let Some(m) = due {
                     self.mod_sent = Some((m.to_string(), now));
@@ -1701,7 +1721,7 @@ impl Core {
         self.quota_tick(now).await;
         self.flush_owner_receipts(now).await;
         // 收信暫停的時間變了（開始扣住、或恢復）：馬上重報名單把值帶給後台（還沒報過第一次的交給啟動時的名單）
-        if self.hold_sent.is_some_and(|h| h != self.inbox_hold_until()) && now.saturating_sub(self.hold_try_at) >= self.cfg.watch_gap_ms {
+        if self.hold_sent.is_some_and(|h| h != self.inbox_hold_until() || self.hold_cap_due()) && now.saturating_sub(self.hold_try_at) >= self.cfg.watch_gap_ms {
             self.hold_try_at = now;
             self.refresh_roster(now).await;
         }

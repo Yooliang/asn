@@ -14,7 +14,7 @@ import { bellTopicsOf, handleChatHistory, personArgs, sendWithPerson, voiceArgs 
 import { normalizeRosterAgents, rosterBellTopics } from "../_shared/roster.ts";
 import { parseWindowRename, renamesFromRoster } from "../_shared/window_rename.ts";
 import { sanitizeClaudeMod } from "../_shared/claude_mod.ts";
-import { sanitizeInboxHold } from "../_shared/inbox_hold.ts";
+import { sanitizeInboxHold, sanitizeInboxHoldExtra } from "../_shared/inbox_hold.ts";
 import { sanitizeNodePlatform } from "../_shared/node_platform.ts";
 import { applyLegacyEnv } from "../_shared/legacy_env.ts";
 import { checkAvatar } from "../_shared/avatar.ts";
@@ -318,9 +318,12 @@ Deno.serve(async (req) => {
     if ("inbox_hold_until" in b) {
       const hold = sanitizeInboxHold(b.inbox_hold_until);
       if (hold !== undefined) {
-        const { data: hd, error: he } = await db.rpc("asn_relay_set_inbox_hold", { p_node: me.id, p_until: hold });
+        // 暫停從沒有變成未來時間時，資料庫函式會寄一封通知給這個節點的擁有者（設備名、扣住筆數由電腦端帶）；回傳的門鈴主題敲一下
+        const x = sanitizeInboxHoldExtra(b);
+        const { data: hd, error: he } = await db.rpc("asn_relay_set_inbox_hold", { p_node: me.id, p_until: hold, p_computer: x.computer, p_held: x.held, p_capped: x.capped });
         if (he) console.warn("set_inbox_hold", me.id, he.message ?? he);
         else if (hd?.error) console.warn("set_inbox_hold", me.id, hd.error);
+        else for (const t of new Set<string>((Array.isArray(hd?.bell_topics) ? hd.bell_topics : []).filter((t: unknown): t is string => typeof t === "string" && t.length > 0))) await ring(t);
       }
     }
     // 名單裡視窗帶 renamed_from（改名前的名字）：先把群組成員改名，再做自動入群（否則新名會被當成新視窗、舊名被標離開）
