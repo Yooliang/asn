@@ -139,6 +139,9 @@ static CANCEL: AtomicBool = AtomicBool::new(false);
 pub fn request_cancel() {
     CANCEL.store(true, Ordering::SeqCst);
 }
+fn is_cancelled() -> bool {
+    CANCEL.load(Ordering::SeqCst)
+}
 
 /// 同一時間只允許一個安裝並登入。取到的鎖交給執行緒，結束（含 panic）時放掉
 #[derive(Debug)]
@@ -183,7 +186,8 @@ pub fn run_with(s: &Steps, phone: &dyn Phone, report: &dyn Fn(Event)) -> Done {
             let p = (s.on_path)().unwrap_or_default();
             elog!("PATH 上已經有 claude（{p}），不重複安裝");
             return Done {
-                finish: Finish::NeedTerminal(format!("這台電腦的 PATH 上已經有 claude（{p}），不是 ASN 管理的官方原生安裝。為了不再裝一份，請在終端機確認要沿用哪一個")),
+                // 路徑只進 log；回報（會存進後台、顯示到手機）用固定句子，不帶本機路徑與使用者名稱
+                finish: Finish::NeedTerminal("這台電腦已經用別的方式裝了 Claude Code，請在終端機登入".to_string()),
                 replaced: None,
                 installed: false,
             };
@@ -229,6 +233,7 @@ fn finish_after(s: &Steps, phone: &dyn Phone, report: &dyn Fn(Event), version: S
         Outcome::Declined => Finish::Declined,
         Outcome::TimedOut => Finish::TimedOut,
         Outcome::Failed(e) => Finish::Failed(e),
+        Outcome::Cancelled => Finish::Cancelled,
     }
 }
 
@@ -243,12 +248,12 @@ pub fn start_claude(relay: Arc<Relay>, token: TokenFn, report: impl Fn(Event) + 
     let spawned = std::thread::Builder::new().name("asn-agent-setup".into()).spawn(move || {
         let _busy = busy;
         let get = move || token();
-        let phone = SecretPhone { be: relay.as_ref(), token: &get, poll: Duration::from_secs(2) };
+        let phone = SecretPhone { be: relay.as_ref(), token: &get, cancelled: is_cancelled, poll: Duration::from_secs(2) };
         let steps = Steps {
             inspect: &super::claude_install::inspect_here,
             install: &super::claude_install::install_here,
             state: &super::claude_login::login_state_here,
-            cancelled: &|| CANCEL.load(Ordering::SeqCst),
+            cancelled: &is_cancelled,
             on_path: &|| super::claude_install::find_on_path().map(|p| p.to_string_lossy().into_owned()),
             login: &|p, r| super::claude_login::login_here(p, r),
         };
@@ -389,7 +394,9 @@ mod tests {
     #[test]
     fn path_上已有別的方式裝的_claude_不再裝一份_回請用終端機() {
         let (d, ev, c) = run_full_path(Existing::Missing, Err("不該安裝"), LoginState::Out, Outcome::Failed("不該登入".into()), Some("C:\\Users\\x\\AppData\\Roaming\\npm\\claude.cmd".into()));
-        assert!(matches!(&d.finish, Finish::NeedTerminal(t) if t.contains("npm") && t.contains("PATH")), "{:?}", d.finish);
+        assert_eq!(d.finish, Finish::NeedTerminal("這台電腦已經用別的方式裝了 Claude Code，請在終端機登入".to_string()));
+        let (_, text, _) = d.report_fields();
+        assert!(!text.contains("npm") && !text.contains("Users") && !text.contains('\\'), "路徑不能進回報：{text}");
         assert_eq!((c.install.get(), c.login.get()), (0, 0));
         assert!(!ev.iter().any(|e| matches!(e, Event::Installing(_))));
         assert!(d.to_json()["terminal"] == true);

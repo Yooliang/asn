@@ -11,14 +11,25 @@
 -- 主要防線是這裡：請求只能由登入憑證的本人建立，節點金鑰（AI 視窗拿得到的）建立不了。
 --
 -- security definer 函式碰到的資料表（全部 set search_path to ''、只授權 service_role）：
---   asn_setup_request(p_user, p_node)      讀 relay.nodes、relay.asn_presence；讀寫 relay.setup_requests；寫 relay.account_events（稽核與頻率上限）
+--   relay.setup_version_ok(p_version)      純函式，不碰資料表：版本（數字比，不是字串比；0.2.10 > 0.2.2）是否支援這個功能（0.2.2 起）
+--   asn_setup_request(p_user, p_node)      讀 relay.nodes、relay.asn_presence（在線且版本夠新才准）；讀寫 relay.setup_requests；寫 relay.account_events（稽核與頻率上限）
 --   asn_setup_status(p_user)               讀 relay.nodes、relay.setup_requests
---   asn_relay_setup_poll(p_node)           只動 relay.setup_requests 裡 node = p_node 的那一列（節點取自金鑰）
+--   asn_relay_setup_poll(p_node, p_version) 只動 relay.setup_requests 裡 node = p_node 的那一列（節點取自金鑰）；版本太舊的 ASN 不交給它
 --   asn_relay_setup_result(p_node, ...)    只動 relay.setup_requests 裡 node = p_node 且 status = 'taken' 的那一列
 -- 沒有改既有資料表、沒有改既有函式。
 -- 部署順序：本 migration → relay（Edge Function，新動作）→ 發新版 ASN。提早上任何一步都不會壞（舊 Edge 沒有這些動作，回 404）。
 -- 回復：supabase/sql/rollback/20261102140000_setup_requests_down.sql（drop 這四支函式與一張表，已送出的登入網址請求不受影響）。
+-- 版本太舊的 ASN（現在全部都是）看不懂這個功能：不能把請求交給它（會標成 taken 卻不做，手機要等 40 分鐘）。
+-- 建立時就說 asn_outdated，手機提示先更新；取走時版本不夠的也不交。
 begin;
+
+create or replace function relay.setup_version_ok(p_version text)
+ returns boolean language sql immutable set search_path to ''
+as $function$
+  select coalesce(p_version ~ '^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}', false)
+     and string_to_array(substring(p_version from '^[0-9]+\.[0-9]+\.[0-9]+'), '.')::int[] >= array[0, 2, 2];
+$function$;
+revoke all on function relay.setup_version_ok(text) from public, anon, authenticated;
 
 create table relay.setup_requests (
   node text not null,
@@ -55,6 +66,9 @@ begin
   end if;
   if not exists (select 1 from relay.asn_presence where node = p_node and updated_at > now() - interval '3 minutes') then
     return jsonb_build_object('error', 'asn_offline');
+  end if;
+  if not exists (select 1 from relay.asn_presence where node = p_node and updated_at > now() - interval '3 minutes' and relay.setup_version_ok(version)) then
+    return jsonb_build_object('error', 'asn_outdated');
   end if;
   perform pg_advisory_xact_lock(hashtext('setup_request:' || p_user::text));
   select * into v_r from relay.setup_requests where node = p_node for update;
@@ -104,7 +118,7 @@ grant execute on function public.asn_setup_status(uuid) to service_role;
 
 -- ASN 回報在線時順便問：有沒有要我替這台安裝並登入？（節點取自金鑰，只動自己的）
 -- pending → taken 並回 requested＋送出者的使用者代號（只回一次，所以不會重複啟動；ASN 要比對自己登入的是不是同一個人）
-create or replace function public.asn_relay_setup_poll(p_node text)
+create or replace function public.asn_relay_setup_poll(p_node text, p_version text)
  returns jsonb
  language plpgsql
  security definer
@@ -117,6 +131,10 @@ begin
   delete from relay.setup_requests where node = p_node and status = 'pending' and requested_at <= now() - interval '10 minutes';
   update relay.setup_requests set status = 'failed', detail = '電腦沒有回報結果，已逾時', updated_at = now()
     where node = p_node and status = 'taken' and updated_at <= now() - interval '40 minutes';
+  -- 版本不夠新的 ASN 看不懂這個功能，不交給它（請求留著，等夠新的視窗來取，或 10 分鐘後過期）
+  if not relay.setup_version_ok(p_version) then
+    return jsonb_build_object('requested', false);
+  end if;
   select * into v_r from relay.setup_requests where node = p_node for update;
   if not found or v_r.status <> 'pending' then
     return jsonb_build_object('requested', false);
@@ -125,8 +143,8 @@ begin
   return jsonb_build_object('requested', true, 'requested_by', v_r.requested_by, 'kind', v_r.kind);
 end;
 $function$;
-revoke all on function public.asn_relay_setup_poll(text) from public, anon, authenticated;
-grant execute on function public.asn_relay_setup_poll(text) to service_role;
+revoke all on function public.asn_relay_setup_poll(text, text) from public, anon, authenticated;
+grant execute on function public.asn_relay_setup_poll(text, text) to service_role;
 
 -- 對方 ASN 回報結果：ok＝完成；否則 failed 與原因（固定句子，≤ 200 字）。p_replaced＝這次重裝了壞掉的 claude.exe 的說明（選填，≤ 200 字）。
 -- 只動自己節點、只處理 taken 的那一列

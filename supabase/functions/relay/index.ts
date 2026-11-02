@@ -362,7 +362,7 @@ Deno.serve(async (req) => {
     // 順便問「本人有沒有要這台安裝並登入 Claude Code」（手機觸發；失敗不影響在線回報）。回送出者的使用者代號，ASN 要比對自己登入的是不是同一個人
     let setup: { requested_by: string } | null = null;
     if (p.status !== "offline") {
-      const s = await db.rpc("asn_relay_setup_poll", { p_node: me.id });
+      const s = await db.rpc("asn_relay_setup_poll", { p_node: me.id, p_version: p.version });
       if (s.error) console.error(s.error);
       else if (s.data?.requested === true && typeof s.data?.requested_by === "string") setup = { requested_by: s.data.requested_by };
     }

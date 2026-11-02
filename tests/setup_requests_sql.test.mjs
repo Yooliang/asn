@@ -9,7 +9,7 @@ import fs from 'node:fs'
 const sql = fs.readFileSync(new URL('../supabase/migrations/20261102140000_setup_requests.sql', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
 test('靜態：四個函式 security definer、search_path 空、只授權 service_role；新表開 RLS 沒有 policy', () => {
-  const sigs = ['asn_setup_request\\(uuid, text\\)', 'asn_setup_status\\(uuid\\)', 'asn_relay_setup_poll\\(text\\)', 'asn_relay_setup_result\\(text, boolean, text, text\\)']
+  const sigs = ['asn_setup_request\\(uuid, text\\)', 'asn_setup_status\\(uuid\\)', 'asn_relay_setup_poll\\(text, text\\)', 'asn_relay_setup_result\\(text, boolean, text, text\\)']
   for (const sig of sigs) {
     assert.match(sql, new RegExp(`revoke all on function public\\.${sig} from public, anon, authenticated;`), sig)
     assert.match(sql, new RegExp(`grant execute on function public\\.${sig} to service_role;`), sig)
@@ -44,17 +44,17 @@ async function boot() {
   const db = new PGlite()
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema relay;
     create table relay.nodes(id text primary key, status text default 'active', owner_user uuid);
-    create table relay.asn_presence(node text, window_name text default 'w', updated_at timestamptz default now());
+    create table relay.asn_presence(node text, window_name text default 'w', version text, updated_at timestamptz default now());
     create table relay.account_events(id bigint generated always as identity primary key, at timestamptz default now(), user_id uuid, event text not null, node text, detail jsonb);
     insert into relay.nodes(id, owner_user) values ('NEWPC','${U1}'),('N2','${U1}'),('N3','${U1}'),('N4','${U1}'),('N5','${U1}'),('N6','${U1}'),('N7','${U1}'),('OTHER','${U2}'),('OFFLINE','${U1}');
-    insert into relay.asn_presence(node) select id from relay.nodes where id <> 'OFFLINE';`)
+    insert into relay.asn_presence(node, version) select id, '0.2.2' from relay.nodes where id <> 'OFFLINE';`)
   await db.exec(sql.slice(0, sql.indexOf('-- 清理：')) + '\ncommit;')
   const one = async (t, a) => (await db.query(t, a)).rows[0]
   return {
     db,
     request: async (node, user = U1) => (await one('select public.asn_setup_request($1,$2) r', [user, node])).r,
     status: async (user = U1) => (await one('select public.asn_setup_status($1) r', [user])).r,
-    poll: async node => (await one('select public.asn_relay_setup_poll($1) r', [node])).r,
+    poll: async (node, version = '0.2.2') => (await one('select public.asn_relay_setup_poll($1,$2) r', [node, version])).r,
     result: async (node, ok, detail = null, replaced = null) => (await one('select public.asn_relay_setup_result($1,$2,$3,$4) r', [node, ok, detail, replaced])).r,
     row: async node => (await one('select * from relay.setup_requests where node = $1', [node])),
   }
@@ -69,6 +69,28 @@ test('實跑：本人對自己的在線電腦建立；別人的、不存在的�
   assert.equal((await request('NOPE')).error, 'not_found')
   assert.equal((await request('NEWPC', U2)).error, 'not_found', '別人送自己的節點也不行')
   assert.equal((await request('NEWPC', null)).error, 'not_found', '沒有使用者（節點金鑰）建立不了')
+  assert.equal((await request('OFFLINE')).error, 'asn_offline')
+})
+
+test('實跑：版本太舊的 ASN 不能建立（asn_outdated）也不交給它；版本用數字比，不是字串比', { skip }, async () => {
+  const { db, request, poll, row } = await boot()
+  // 版本檢查是數字比：0.2.10 > 0.2.2，0.10.0 > 0.2.2；0.2.1、0.1.99 不夠
+  for (const [v, ok] of [['0.2.2', true], ['0.2.10', true], ['0.10.0', true], ['1.0.0', true], ['0.2.2-beta', true], ['0.2.1', false], ['0.1.99', false], ['0.2.0', false]]) {
+    await db.query("update relay.asn_presence set version = $1 where node = 'NEWPC'", [v])
+    await db.query('delete from relay.setup_requests')
+    await db.query('delete from relay.account_events')
+    const r = await request('NEWPC')
+    assert.equal(r.error === 'asn_outdated', !ok, `${v} → ${JSON.stringify(r)}`)
+  }
+  // 取走時也看版本：舊版的視窗來問，請求留著，不會被吃掉；夠新的視窗來問才交
+  await db.query("update relay.asn_presence set version = '0.2.2' where node = 'NEWPC'")
+  await db.query('delete from relay.setup_requests'); await db.query('delete from relay.account_events')
+  assert.equal((await request('NEWPC')).ok, true)
+  assert.deepEqual(await poll('NEWPC', '0.2.0'), { requested: false })
+  assert.equal((await row('NEWPC')).status, 'pending', '舊版問過，請求還在')
+  assert.equal((await poll('NEWPC', '0.2.2')).requested, true)
+  assert.equal((await row('NEWPC')).status, 'taken')
+  // 離線優先於版本：離線就是離線
   assert.equal((await request('OFFLINE')).error, 'asn_offline')
 })
 

@@ -18,6 +18,8 @@ pub(in crate::agent_setup) struct SecretPhone<'a> {
     /// 取本人簽章（登入憑證）的函式，**在送出請求前才呼叫**：安裝要好幾分鐘，按下去時取好的權杖可能在安裝途中過期。
     /// 來源只有視窗程式的記憶體（由呼叫端建好傳進來）；取得的字串不進 log
     pub token: &'a dyn Fn() -> Option<String>,
+    /// 有人在這台電腦前按了取消？等手機的期間每輪看一次；取消了就不把授權碼交出去
+    pub cancelled: fn() -> bool,
     /// 輪詢間隔
     pub poll: Duration,
 }
@@ -36,7 +38,10 @@ impl Phone for SecretPhone<'_> {
         if secs < TTL_MIN {
             return Ask::TimedOut;
         }
-        let mut opts = Opts::new(PROGRAM, PURPOSE).with_link(&link, sign_token);
+        if (self.cancelled)() {
+            return Ask::Cancelled;
+        }
+        let mut opts = Opts::new(PROGRAM, PURPOSE).with_link(&link, sign_token).with_cancel(self.cancelled);
         opts.ttl_secs = secs.min(TTL_MAX);
         opts.poll = self.poll;
         let res = crate::rt::block_on(request_secret(self.be, &opts, &mut |_| {}));
@@ -54,6 +59,7 @@ impl Phone for SecretPhone<'_> {
             }
             Err(Failure::Denied) => Ask::Declined,
             Err(Failure::Expired) => Ask::TimedOut,
+            Err(Failure::Cancelled) => Ask::Cancelled,
             // 錯誤文字一律用固定句子，不轉述後台或網路的原文
             Err(Failure::Backend(_)) => Ask::Failed("無法把登入網址送到你的手機（網路或後台的問題）".to_string()),
             Err(Failure::DecryptFailed) => Ask::Failed("收到的授權碼解不開，已丟棄".to_string()),
@@ -81,6 +87,9 @@ mod tests {
         backend_err: bool,
         plain_requests: Mutex<u32>,
         signed: Mutex<Vec<(Value, String)>>,
+        /// 每次取回時先呼叫（測試用：模擬那一刻有人按了取消）
+        on_fetch: Option<fn()>,
+        fetches: Mutex<u32>,
     }
     impl Backend for Fake {
         fn request(&self, _b: Value) -> BoxFut<'_, Result<Value, String>> {
@@ -99,6 +108,10 @@ mod tests {
             })
         }
         fn fetch(&self, _b: Value) -> BoxFut<'_, Result<Value, String>> {
+            *self.fetches.lock().unwrap() += 1;
+            if let Some(h) = self.on_fetch {
+                h();
+            }
             let next = self.status.lock().unwrap().pop().unwrap_or("answered");
             let pub_b64 = self.signed.lock().unwrap()[0].0["pub"].as_str().unwrap().to_string();
             let secret = self.secret.clone();
@@ -120,8 +133,11 @@ mod tests {
     fn tok() -> Option<String> {
         Some(TOKEN.to_string())
     }
+    fn never() -> bool {
+        false
+    }
     fn phone(f: &Fake) -> SecretPhone<'_> {
-        SecretPhone { be: f, token: &tok, poll: Duration::from_millis(5) }
+        SecretPhone { be: f, token: &tok, cancelled: never, poll: Duration::from_millis(5) }
     }
     fn text(a: Ask) -> String {
         match a {
@@ -129,6 +145,7 @@ mod tests {
             Ask::Declined => "Declined".into(),
             Ask::TimedOut => "TimedOut".into(),
             Ask::Failed(e) => format!("Failed:{e}"),
+            Ask::Cancelled => "Cancelled".into(),
         }
     }
 
@@ -152,10 +169,39 @@ mod tests {
         let cur = std::cell::RefCell::new(Some("OLD-TOKEN".to_string()));
         let get = || cur.borrow().clone();
         let f = Fake { secret: Some("AUTH".into()), status: Mutex::new(vec!["answered"]), ..Default::default() };
-        let p = SecretPhone { be: &f, token: &get, poll: Duration::from_millis(5) };
+        let p = SecretPhone { be: &f, token: &get, cancelled: never, poll: Duration::from_millis(5) };
         *cur.borrow_mut() = Some("NEW-TOKEN".to_string());
         assert_eq!(text(p.ask_code(LINK, Duration::from_secs(300))), "AUTH");
         assert_eq!(f.signed.lock().unwrap()[0].1, "NEW-TOKEN");
+    }
+
+    static CANCEL_T: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    fn cancel_t() -> bool {
+        CANCEL_T.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// 取消要貫穿等手機的那一段：還沒送出就取消、等待期間取消、授權碼回來的當下才取消——都不能把授權碼交出去
+    #[test]
+    fn 取消_三個時點都不交出授權碼() {
+        use std::sync::atomic::Ordering::SeqCst;
+        // 1) 送出前就取消：完全沒有送出請求
+        CANCEL_T.store(true, SeqCst);
+        let f = Fake { secret: Some("AUTH".into()), status: Mutex::new(vec!["answered"]), ..Default::default() };
+        let p = SecretPhone { be: &f, token: &tok, cancelled: cancel_t, poll: Duration::from_millis(5) };
+        assert_eq!(text(p.ask_code(LINK, Duration::from_secs(300))), "Cancelled");
+        assert!(f.signed.lock().unwrap().is_empty(), "取消了就不送出請求");
+        // 2) 等待期間取消（第一次輪詢還是 pending，之後旗標被按下）：不再等
+        CANCEL_T.store(false, SeqCst);
+        let f = Fake { secret: Some("AUTH".into()), status: Mutex::new(vec!["answered", "pending"]), on_fetch: Some(|| CANCEL_T.store(true, SeqCst)), ..Default::default() };
+        let p = SecretPhone { be: &f, token: &tok, cancelled: cancel_t, poll: Duration::from_millis(5) };
+        assert_eq!(text(p.ask_code(LINK, Duration::from_secs(300))), "Cancelled", "按了取消，之後手機就算貼回授權碼也不交出");
+        assert_eq!(*f.fetches.lock().unwrap(), 1, "取消後下一輪就停，不再去後台取");
+        // 3) 授權碼已經回到後台，取回的當下才發現取消了：不解密、不交出
+        CANCEL_T.store(false, SeqCst);
+        let f = Fake { secret: Some("AUTH".into()), status: Mutex::new(vec!["answered"]), on_fetch: Some(|| CANCEL_T.store(true, SeqCst)), ..Default::default() };
+        let p = SecretPhone { be: &f, token: &tok, cancelled: cancel_t, poll: Duration::from_millis(5) };
+        assert_eq!(text(p.ask_code(LINK, Duration::from_secs(300))), "Cancelled");
+        CANCEL_T.store(false, SeqCst);
     }
 
     #[test]
@@ -163,7 +209,7 @@ mod tests {
         for none in [None, Some(String::new())] {
             let get = || none.clone();
             let f = Fake::default();
-            let p = SecretPhone { be: &f, token: &get, poll: Duration::from_millis(5) };
+            let p = SecretPhone { be: &f, token: &get, cancelled: never, poll: Duration::from_millis(5) };
             let t = text(p.ask_code(LINK, Duration::from_secs(300)));
             assert!(t.starts_with("Failed:") && t.contains("重新登入"), "{t}");
             assert!(f.signed.lock().unwrap().is_empty() && *f.plain_requests.lock().unwrap() == 0, "沒簽章不能送出任何請求");

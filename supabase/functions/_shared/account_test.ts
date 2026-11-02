@@ -226,7 +226,7 @@ Deno.test("node_setup_request：登入憑證決定使用者、body 的 user 被�
 });
 
 Deno.test("node_setup_request：別人的設備 404、對方不在線 409、太頻繁 429、資料庫錯誤 500 且不洩漏內容", async () => {
-  for (const [code, status] of [["not_found", 404], ["asn_offline", 409], ["rate_limited", 429]] as const) {
+  for (const [code, status] of [["not_found", 404], ["asn_offline", 409], ["asn_outdated", 409], ["rate_limited", 429]] as const) {
     const f = fake({}, () => ({ error: code }));
     const r = await handleAccountAction(f.deps, "node_setup_request", bearer, null, { node: "NEWPC" });
     assertEquals(r.status, status, code);
@@ -249,7 +249,7 @@ Deno.test("node_setup_status：只傳登入使用者，回節點清單", async (
 Deno.test("安裝並登入的遠端請求：動作只在帳號動作（要登入憑證）；presence 用金鑰所屬節點取走；結果動作只動自己節點", async () => {
   assert(ACCOUNT_ACTIONS.has("node_setup_request") && ACCOUNT_ACTIONS.has("node_setup_status"));
   const src = await Deno.readTextFile(new URL("../relay/index.ts", import.meta.url));
-  assert(/asn_relay_setup_poll", \{ p_node: me\.id \}/.test(src), "presence 用金鑰所屬節點問");
+  assert(/asn_relay_setup_poll", \{ p_node: me\.id, p_version: p\.version \}/.test(src), "presence 用金鑰所屬節點與回報的版本問");
   assert(/asn_relay_setup_result", \{ p_node: me\.id/.test(src), "結果只寫金鑰所屬的節點");
   // 節點金鑰這邊沒有任何能「建立」請求的呼叫
   assert(!src.includes("asn_setup_request"), "節點金鑰的 Edge 路徑不能呼叫建立請求");

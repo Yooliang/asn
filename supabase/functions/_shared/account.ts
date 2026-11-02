@@ -69,6 +69,7 @@ const ERR_STATUS: Record<string, number> = {
   bad_request: 400,
   not_found: 404,
   asn_offline: 409,
+  asn_outdated: 409,
   rate_limited: 429,
 };
 
