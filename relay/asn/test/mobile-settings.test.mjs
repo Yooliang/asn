@@ -8,7 +8,7 @@ import { SETTING_CATS } from '../ui/lib/settings-cats.mjs'
 import { normalizeNav, pageNav, tabNav } from '../ui/lib/mobile.mjs'
 
 test('分類：只放手機有的設定，鍵、名稱、圖示都沿用電腦版的分類定義', () => {
-  assert.deepEqual(MOBILE_SETTING_KEYS, ['me', 'devices', 'notify', 'update', 'about'])   // #268：補上設備與帳號，順序與電腦版一致
+  assert.deepEqual(MOBILE_SETTING_KEYS, ['me', 'devices', 'accounts', 'notify', 'update', 'about'])   // #268、#650：設備與帳號拆成兩列，順序與電腦版一致
   assert.deepEqual(SETTING_SHEET_KEYS, ['me', 'notify', 'update', 'about'])
   const rows = mobileSettingRows({})
   assert.deepEqual(rows.map(r => r.key), MOBILE_SETTING_KEYS)
@@ -46,9 +46,10 @@ test('導覽：分類頁是第四頁籤上的一頁（#461）；沒有的分類�
 
 test('設備與帳號（#268）：設置列表點了開名單設備卡「選項」的同一頁，不是設置的滿版頁；兩個入口並存', () => {
   assert.equal(settingPage('devices'), null, '沒有設置的一般分類頁')
+  assert.equal(settingPage('accounts'), null, '帳號也沒有設置的一般分類頁')
   const js = readFileSync(new URL('../ui/m.js', import.meta.url), 'utf8')
-  assert.match(js, /const openSetting = key => \{ if \(key === 'devices'\) void openAcct\(\); else askBeforeLeave\(settingPage\(key\), \(\) => fourthNav\.openPage\(settingPage\(key\)\)\) \}/)
-  assert.match(js, /devices: acctDevs\.value \}\)\)/, '摘要用同一份設備列表')
+  assert.match(js, /const openSetting = key => \{ if \(ACCT_SETTING_KEYS\.includes\(key\)\) void openAcct\(\{ tab: key \}\); else askBeforeLeave\(settingPage\(key\), \(\) => fourthNav\.openPage\(settingPage\(key\)\)\) \}/)
+  assert.match(js, /devices: acctDevs\.value, accountCount:/, '摘要用同一份設備列表與帳號數')
   assert.match(js, /tabLabelOf\(t, fourthTitle\.value\)/, '第四頁籤的標籤跟頁標題一致')
   const html = readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8')
   assert.match(html, /@click="openAcct\(g\)"/, '設備卡的入口還在')

@@ -23,10 +23,10 @@ import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, phon
 import { groupMenuItems } from './lib/actionbar.mjs'
 import { OP_LABEL, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, opFormError, dialogEngine, partnerEngine, piModelChoices, sharedWhy } from './lib/partner-ops.mjs'
 import { cleanPiModels } from './lib/pi-models.mjs'
-import { fetchRoster, ROSTER_POLL_MS } from './lib/account-roster.mjs'
+import { fetchRoster, ROSTER_POLL_MS, ROSTER_TEXT, usedOnText } from './lib/account-roster.mjs'
 import { PLAN_UNKNOWN, planLabel } from './lib/account-quota.mjs'
 import { INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL } from './lib/claude-accounts.mjs'
-import { ACCT_TEXT, ACCT_PAGE_TITLE, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS } from './lib/mobile-acct.mjs'
+import { ACCT_TEXT, acctPageTitle, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS, ACCT_TABS, acctTabOf, acctSwitchTargets as acctSwitchTargetsOf } from './lib/mobile-acct.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, dropSlot, moveDevice, moveFlags, pruneRemoved, removeDevice, removedRows, reorderDevice, restoreDevice, showDevice, visibleRows, canRemoveRow, DEVICE_TEXT } from './lib/device-order.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, withArchivedGroup } from './lib/archive.mjs'
@@ -46,7 +46,7 @@ import { createGroupFlow } from './lib/group-flow.mjs'
 import { canInviteFrom, copyText, createGroupApi } from './lib/groups.mjs'
 import { createRoomHub } from './lib/room-hub.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
-import { mobileSettingRows, mobileSettingTitle } from './lib/mobile-settings.mjs'
+import { ACCT_SETTING_KEYS, mobileSettingRows, mobileSettingTitle } from './lib/mobile-settings.mjs'
 import { PAGE_TAB, FOURTH_KEEP_MS, LEAVE_ASK_TEXT, acctPage, fourthMsLeft, guidePage, launchPage, needsLeaveAsk, settingPage } from './lib/mobile-fourth.mjs'
 import { createLeaveAsk, createMobileNav, pageTitle } from './lib/mobile-nav.mjs'
 import { applyRename } from './lib/rename.mjs'
@@ -389,7 +389,7 @@ const app = createApp({
     const back = () => history.back()
     // 第四頁籤：目前的內頁與標題（頁籤列上的字就是內頁的標題）
     const fourthPage = computed(() => fourthSt.fourth?.page ?? null)
-    const fourthTitle = computed(() => (fourthPage.value?.kind === 'launch' ? lchTitle.value : pageTitle(fourthPage.value)))   // 開新夥伴的標題跟著畫面（送出後的進度畫面叫「開新夥伴」）
+    const fourthTitle = computed(() => (fourthPage.value?.kind === 'launch' ? lchTitle.value : fourthPage.value?.kind === 'acct' ? acctTitle.value : pageTitle(fourthPage.value)))   // 開新夥伴的標題跟著畫面（送出後的進度畫面叫「開新夥伴」）
     const tabLabel = t => tabLabelOf(t, fourthTitle.value)
     const closePage = () => fourthNav.closePage()   // 內頁的「關閉」：整個收起第四頁籤，回到進來之前的頁籤
     const openBanner = () => { const b = banner.value; banner.value = null; if (b) openChat(b.id) }
@@ -423,7 +423,7 @@ const app = createApp({
     const guides = phoneGuideList()
     const guideOpen = computed(() => (fourthPage.value?.kind === 'guide' ? phoneGuide(fourthPage.value.guide) : null))
     // 設置分頁＝分類列表（每列一行目前值），點一列在第四頁籤打開該項（左上返回回設置）
-    const settingRows = computed(() => mobileSettingRows({ name: myName.value, hasUpload: selfHasUpload.value, vibrateNudge: prefs.vibrateNudge, vibrateMsg: prefs.vibrateMsg, updateEnabled: upd.enabled, autoUpdate: prefs.autoUpdate, version: info.version, devices: acctDevs.value }))
+    const settingRows = computed(() => mobileSettingRows({ name: myName.value, hasUpload: selfHasUpload.value, vibrateNudge: prefs.vibrateNudge, vibrateMsg: prefs.vibrateMsg, updateEnabled: upd.enabled, autoUpdate: prefs.autoUpdate, version: info.version, devices: acctDevs.value, accountCount: (acctMy.value?.vendors ?? []).reduce((n, v) => n + v.accounts.length, 0) }))
     const settingCat = computed(() => (fourthPage.value?.kind === 'setting' ? fourthPage.value.cat : ''))
     const settingTitle = computed(() => mobileSettingTitle(settingCat.value))
     // 設置 → 更新：版本紀錄從後台公開的 asn_site_releases 讀（Rust 端讀成功的留 10 分鐘），讀不到照實說（#462）
@@ -437,7 +437,7 @@ const app = createApp({
     const relNote = computed(() => releasesNote(rel))
     watch(settingCat, c => { if (c === 'update' && (rel.phase === 'idle' || rel.phase === 'error')) void loadRel() })
     // 設備與帳號（#268）開的是名單設備卡「選項」的同一頁（先看設備列表），其他分類開該分類的內頁；浮層開著時不開（lib/mobile-nav.mjs 擋）
-    const openSetting = key => { if (key === 'devices') void openAcct(); else askBeforeLeave(settingPage(key), () => fourthNav.openPage(settingPage(key))) }
+    const openSetting = key => { if (ACCT_SETTING_KEYS.includes(key)) void openAcct({ tab: key }); else askBeforeLeave(settingPage(key), () => fourthNav.openPage(settingPage(key))) }
     const openGuides = () => askBeforeLeave(guidePage(), () => fourthNav.openPage(guidePage()))
     // 換內頁前先問一句：開新夥伴正在填第 2 步、還沒送出時，要換成別的內頁先問「要離開嗎？」（底部浮層，樣式沿用「⋯」選單；系統返回鍵＝留下）。
     // 選離開：先收起浮層，等浮層的記錄退掉（nav.sheet 變回空）才換；選留下就不動。單純切到前三頁不問（內容會保留 3 分鐘）
@@ -501,7 +501,7 @@ const app = createApp({
     // ---------- 設備卡「切換 Claude 帳號」：選帳號 → 確認 → 送出並等對方電腦回報 ----------
     const acctKeys = computed(() => new Set(acctButtonDevices(groups.value, info.node).filter(g => !devPrefs.deviceRemoved.includes(g.node)).map(g => g.key)))
     // 整頁＝電腦版「設備與帳號」：資料用電腦版同一份整理函式；別台電腦的帳號逐台向後台讀（只讀選到的那台）
-    const acctSw = reactive({ phase: 'pick', page: 'list', node: '', picked: '', reports: {}, view: null, removedOpen: false })
+    const acctSw = reactive({ phase: 'pick', page: 'list', tab: 'devices', node: '', picked: '', reports: {}, view: null, removedOpen: false })
     // 帳號列表（#374）：進「設備與帳號」讀一次，開著時每 5 分鐘再讀（跟電腦版同一個節奏）；
     // 讀不到沿用上一次讀成功的，從沒成功過才是 null（畫面退回各台自己回報的）
     const acctRoster = ref(null)
@@ -515,6 +515,7 @@ const app = createApp({
     const acctFlags = computed(() => moveFlags(acctDevs.value, info.node))
     const showHiddenDevice = key => { devPrefs.deviceShown = showDevice(devPrefs.deviceShown, key) }
     // 細部頁：只有 page 是 detail 且那台還在列表裡才有（被移除或消失就退回列表）
+    const acctTitle = computed(() => acctPageTitle(acctCur.value ? 'devices' : acctSw.tab))   // 標題跟著分頁（看某台細部時是「設備」）
     const acctCur = computed(() => (acctSw.page === 'detail' ? acctDevs.value.find(d => d.key === acctSw.node) ?? null : null))
     const acctCanRemove = computed(() => canRemoveRow(acctCur.value))
     // 設備活過來（又有在線視窗或未讀）就自動從永久移除名單解除
@@ -540,7 +541,7 @@ const app = createApp({
     async function openAcctNow(g) {
       if (nav.sheet) return
       acctEpoch++; acctToken++   // 重新打開：之前還在跑的讀取與切換不再更新這個畫面（切換的結果改用提示說）
-      Object.assign(acctSw, { phase: 'pick', page: 'list', picked: '', view: null, reports: {}, removedOpen: false })
+      Object.assign(acctSw, { phase: 'pick', page: 'list', picked: '', view: null, reports: {}, removedOpen: false, tab: acctTabOf(g?.tab) })
       // 從夥伴列表某台設備旁的「選項」進來：直接開那一台的細部頁（底下墊一層列表，返回鍵回列表）；從別處進來先看列表
       if (g?.node && acctDevs.value.some(d => d.key === g.node)) { acctSw.node = g.node; acctSw.page = 'detail' } else acctSw.node = ''
       if (!fourthNav.openPage(acctPage(acctSw.node))) return
@@ -553,8 +554,11 @@ const app = createApp({
       const stale = !!fourthPage.value?.node   // 細部那台不見了（畫面退回列表）又點另一台：取代那一層，不多留一筆
       acctSw.node = key; acctSw.picked = ''; acctSw.page = 'detail'
       fourthNav.pushLayer(acctPage(key), { replace: stale })
-      void loadAcct(key)
+      return loadAcct(key)
     }
+    // 帳號分頁的「切換到某台」：開那台的細部頁、等它的帳號讀回來，再進確認畫面（現有的選帳號→確認→送出流程，不另做一套）
+    const setAcctTab = t => { acctSw.tab = acctTabOf(t) }
+    const acctSwitchOn = async (node, email) => { await openAcctDevice(node); startAcctSwitch(email) }
     // 返回：細部頁回列表＝退一筆記錄（細部是第四頁籤上的一層；退回列表時 acctSw 由下面的監看整理）。細部頁頂端的「‹ 返回」、標題列返回鍵、系統返回鍵都一樣
     const acctBackToList = () => back()
     // 第四頁籤的內頁換了：設備與帳號的列表／細部跟著記錄走；離開設備與帳號就讓還在跑的讀取與切換不再更新畫面
@@ -960,7 +964,7 @@ const app = createApp({
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
-      acctSw, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, ACCT_PAGE_TITLE, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
+      acctSw, setAcctTab, acctSwitchOn, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a), usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT,

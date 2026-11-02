@@ -110,8 +110,8 @@ test('入口改成低調的「選項」小按鈕，按下在第四頁籤整頁�
   assert.equal(ACCT_TEXT.button, '選項')
   assert.doesNotMatch(ACCT_TEXT.button, /Claude|切換/)
   // 導覽：第四頁籤的標題＝頁標題「設備與帳號」（#268）；對話分頁的標籤永遠是「對話」（設備卡上的按鈕仍叫「選項」）
-  assert.equal(pageTitle(acctPage()), '設備與帳號')
-  assert.equal(tabLabel(PAGE_TAB, pageTitle(acctPage())), '設備與帳號')
+  assert.equal(pageTitle(acctPage()), '設備', '預設標題；畫面上依分頁換成「設備」或「帳號」（m.js 的 acctTitle）')
+  assert.equal(tabLabel(PAGE_TAB, pageTitle(acctPage())), '設備')
   assert.equal(tabLabel('chats'), '對話')
   assert.equal(tabLabel('list'), '夥伴')
   assert.equal(tabLabel('me'), '設置')

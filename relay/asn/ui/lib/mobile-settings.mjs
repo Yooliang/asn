@@ -4,9 +4,10 @@ import { SETTING_CATS, catSummary } from './settings-cats.mjs'
 import { deviceSummary } from './device-tree.mjs'
 
 // 手機有的分類（順序即畫面順序，與電腦版一致）：個人（大頭貼、名字、設備名稱、狀態）、設備與帳號、通知（震動）、更新、關於（版本）
-export const MOBILE_SETTING_KEYS = ['me', 'devices', 'notify', 'update', 'about']
-// 設備與帳號（#268）不是設置的一般分類頁：點了開名單設備卡「選項」進去的同一頁（acct），兩個入口並存
-export const SETTING_SHEET_KEYS = MOBILE_SETTING_KEYS.filter(k => k !== 'devices')
+export const MOBILE_SETTING_KEYS = ['me', 'devices', 'accounts', 'notify', 'update', 'about']
+// 設備、帳號（#268、#650）不是設置的一般分類頁：兩列都開同一頁（acct，上方「設備｜帳號」切換，各帶預設分頁），跟名單設備卡「選項」進去的是同一頁，入口並存
+export const ACCT_SETTING_KEYS = ['devices', 'accounts']
+export const SETTING_SHEET_KEYS = MOBILE_SETTING_KEYS.filter(k => !ACCT_SETTING_KEYS.includes(k))
 // 這些分類點進去是第四頁籤上的一頁（內頁描述見 lib/mobile-fourth.mjs 的 settingPage）
 
 const onOff = v => (v ? '開' : '關')
@@ -18,6 +19,10 @@ export function mobileCatSummary(key, s = {}) {
       return [String(s.name ?? '').trim(), catSummary('me', { hasUpload: s.hasUpload })].filter(Boolean).join('、')
     case 'devices':
       return deviceSummary(s.devices)
+    case 'accounts': {
+      const n = Number.isInteger(s.accountCount) ? s.accountCount : 0
+      return n ? `${n} 個帳號` : '各家 AI 的帳號與額度'
+    }
     case 'notify':
       return `對方傳震動時震動：${onOff(s.vibrateNudge)}、新訊息輕震：${onOff(s.vibrateMsg)}`
     case 'update':

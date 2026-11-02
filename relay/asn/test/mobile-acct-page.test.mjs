@@ -3,7 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { ACCT_PAGE_TITLE, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctReportOf, acctSheetView } from '../ui/lib/mobile-acct.mjs'
+import { acctPageTitle, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctReportOf, acctSheetView } from '../ui/lib/mobile-acct.mjs'
 import { buildDeviceTree } from '../ui/lib/device-tree.mjs'
 import { tabLabel } from '../ui/lib/mobile.mjs'
 import { PAGE_TAB, acctPage } from '../ui/lib/mobile-fourth.mjs'
@@ -96,8 +96,11 @@ test('整頁畫面接線（細部頁）：廠商卡片、帳號列、虛線未�
   assert.match(pane, /acctSw\.phase === 'confirm'/)
   assert.match(pane, /submitAcct/)
   assert.doesNotMatch(pane, /acctSections|ACCT_TEXT\.title\(/)
-  assert.equal(ACCT_PAGE_TITLE, '設備與帳號')
-  assert.match(pane, /ACCT_PAGE_TITLE/)
+  assert.equal(acctPageTitle('devices'), '設備')
+  assert.equal(acctPageTitle('accounts'), '帳號')
+  assert.equal(acctPageTitle('x'), '設備', '壞值當設備')
+  assert.match(pane, /\{\{ acctTitle \}\}/, '標題用 acctTitle（跟著分頁），不再寫死')
+  assert.doesNotMatch(pane.replace(/<!--[\s\S]*?-->/g, ''), /ACCT_PAGE_TITLE|設備與帳號/)
   // 資料只走電腦版的整理函式，手機端不另寫一套
   assert.match(read('ui', 'lib', 'mobile-acct.mjs'), /from '\.\/device-tree\.mjs'/)
   assert.match(js, /acctDeviceTree\(/)
@@ -120,6 +123,6 @@ test('流程行為：點「切換」＝選好帳號進確認畫面；從夥伴�
   assert.match(js, /acctSw\.phase = 'run'\n[\s\S]{0,200}const v = await runAcctSwitch\(acctTransport, node, email, \{ onUpdate: v => \{ if \(token === acctToken\) acctSw\.view = v \}, cancelled: \(\) => run !== acctRunSeq \}\)/, '送出後進進度畫面；離開畫面後照樣等結果（只有送出新的切換才停）')
   assert.match(js, /android_acct_list/)
   assert.match(js, /fourthNav\.openPage\(acctPage\(acctSw\.node\)\)/, '在第四頁籤打開（#461）')
-  assert.equal(tabLabel(PAGE_TAB, pageTitle(acctPage())), '設備與帳號')
+  assert.equal(tabLabel(PAGE_TAB, pageTitle(acctPage())), '設備')
   assert.equal(tabLabel('chats'), '對話')
 })
