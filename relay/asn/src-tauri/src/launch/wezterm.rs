@@ -86,6 +86,10 @@ pub trait Runner {
     }
     /// 行程的建立時間（毫秒，查不到＝None）：結束行程前用來確認還是當初啟動的那一個，防程式編號被回收後誤殺別人
     fn started_ms(&self, pid: u32) -> Option<u64>;
+    /// 這個程序還在不在。預設＝在（測試的假 runner 不用改）
+    fn alive(&self, _pid: u32) -> bool {
+        true
+    }
     fn sleep(&self, d: Duration);
     /// 這個程序（看畫面的 GUI）的視窗已經出現。預設＝false（測試、沒有畫面的建置）
     fn window_up(&self, _pid: u32) -> bool {
@@ -186,6 +190,10 @@ impl Runner for RealRunner {
         crate::heartbeat::process_started_ms(pid)
     }
 
+    fn alive(&self, pid: u32) -> bool {
+        crate::heartbeat::pid_alive(pid)
+    }
+
     fn descendants_of(&self, pid: u32) -> Vec<u32> {
         let table = crate::bridge::orphans::process_table();
         let mut out: Vec<u32> = vec![];
@@ -213,28 +221,20 @@ impl Runner for RealRunner {
 /// RealRunner::run／run_clean 共用：啟動、讀兩條管道、逾時就連整棵樹結束
 fn exec_with_timeout(mut cmd: Command, program: &Path, timeout: Duration) -> Result<RunOutput, String> {
     let mut child = cmd.spawn().map_err(|e| format!("{CANNOT_RUN} {}：{e}", program.display()))?;
-    let mut out = child.stdout.take();
-    let mut err = child.stderr.take();
-    let t_out = std::thread::spawn(move || {
-        let mut s = Vec::new();
-        if let Some(o) = out.as_mut() {
-            let _ = o.read_to_end(&mut s);
-        }
-        s
-    });
-    let t_err = std::thread::spawn(move || {
-        let mut s = Vec::new();
-        if let Some(o) = err.as_mut() {
-            let _ = o.read_to_end(&mut s);
-        }
-        s
-    });
+    // 兩條管道各用一條執行緒邊讀邊放進共用緩衝：子程序結束後，孫程序（例如 cli 自己拉起的 mux-server）可能還握著管道的寫入端，
+    // 讀取永遠不會結束，所以結束後最多等 [`PIPE_DRAIN`]，讀不完就拿目前讀到的（執行緒留著，等孫程序放掉管道自然結束）
+    let (buf_out, t_out) = drain_pipe(child.stdout.take());
+    let (buf_err, t_err) = drain_pipe(child.stderr.take());
     let start = Instant::now();
     loop {
         match child.try_wait() {
             Ok(Some(st)) => {
-                let so = t_out.join().unwrap_or_default();
-                let se = t_err.join().unwrap_or_default();
+                let until = Instant::now() + PIPE_DRAIN;
+                while !(t_out.is_finished() && t_err.is_finished()) && Instant::now() < until {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                let so = buf_out.lock().map(|b| b.clone()).unwrap_or_default();
+                let se = buf_err.lock().map(|b| b.clone()).unwrap_or_default();
                 return Ok(RunOutput {
                     success: st.success(),
                     stdout: String::from_utf8_lossy(&so).into_owned(),
@@ -254,6 +254,30 @@ fn exec_with_timeout(mut cmd: Command, program: &Path, timeout: Duration) -> Res
             Err(e) => return Err(format!("等待子行程失敗：{e}")),
         }
     }
+}
+
+/// 子程序結束後，最多再等多久讓讀管道的執行緒把剩下的讀完
+const PIPE_DRAIN: Duration = Duration::from_secs(1);
+
+/// 開一條執行緒把管道讀進共用緩衝（一塊一塊放，讀到哪放到哪）
+fn drain_pipe<R: Read + Send + 'static>(pipe: Option<R>) -> (std::sync::Arc<std::sync::Mutex<Vec<u8>>>, std::thread::JoinHandle<()>) {
+    let buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let shared = buf.clone();
+    let t = std::thread::spawn(move || {
+        let Some(mut p) = pipe else { return };
+        let mut chunk = [0u8; 8192];
+        loop {
+            match p.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if let Ok(mut b) = shared.lock() {
+                        b.extend_from_slice(&chunk[..n]);
+                    }
+                }
+            }
+        }
+    });
+    (buf, t)
 }
 
 /// Windows 命令列的單一參數引號（照 MSVC 的拆參數規則：引號前的反斜線加倍、結尾反斜線加倍）
@@ -531,8 +555,6 @@ pub struct WezTerm<'a> {
     pub cli_timeout: Duration,
     pub sock_wait: Duration,
     pub enter_delay: Duration,
-    /// 連的是共用 mux（B2b）：每條 cli 都插入 `--no-auto-start`，連不上時不准 cli 自己起一個 mux（設計 11.2-2）
-    pub no_auto_start: bool,
 }
 
 impl<'a> WezTerm<'a> {
@@ -546,7 +568,6 @@ impl<'a> WezTerm<'a> {
             cli_timeout: CLI_TIMEOUT,
             sock_wait: SOCK_WAIT,
             enter_delay: ENTER_DELAY,
-            no_auto_start: false,
         }
     }
 
@@ -754,10 +775,9 @@ impl<'a> WezTerm<'a> {
         }
         let mut env = self.config_env();
         env.insert("WEZTERM_UNIX_SOCKET".to_string(), sock.to_string_lossy().into_owned());
-        let mut full: Vec<String> = vec!["cli".into()];
-        if self.no_auto_start {
-            full.push("--no-auto-start".into());
-        }
+        // 一律帶 --no-auto-start：cli 連不上時預設會自己拉起一個 mux-server（開在預設 sock，cli 照樣連不上就退出，mux 留著沒人管，
+        // 每輪畫面輪詢就多一個）。通訊檔留著但視窗已經死掉就是這種情況。不依賴自動啟動：需要 mux 時由 mux::ensure 明確起
+        let mut full: Vec<String> = vec!["cli".into(), "--no-auto-start".into()];
         full.extend(args.iter().cloned());
         let out = self.runner.run(&self.dir.cli, &full, &env, self.cli_timeout)?;
         if !out.success {
@@ -891,6 +911,33 @@ impl<'a> WezTerm<'a> {
 
 #[cfg(test)]
 mod tests {
+    /// 輔助：測試執行檔自己被當成「很快結束的子程序」跑一次，它留下一個繼承了 stdout 的孫程序（ping 約 8 秒）就結束。
+    /// 沒設環境變數時什麼都不做（平常的測試不會真的跑到）
+    #[test]
+    fn 輔助_留下繼承管道的孫程序後結束() {
+        if std::env::var_os("ASN_TEST_LEAVE_GRANDCHILD").is_none() {
+            return;
+        }
+        use crate::nowin::NoWindow;
+        let _ = std::process::Command::new("ping.exe").no_window().args(["-n", "9", "127.0.0.1"]).stdout(std::process::Stdio::inherit()).stderr(std::process::Stdio::inherit()).spawn();
+    }
+
+    /// 子程序自己很快結束，但留下一個繼承了 stdout 的孫程序（像 cli 自動拉起的 mux-server）：
+    /// 讀管道的執行緒要等孫程序放掉管道才讀得完，不能因此卡住呼叫端
+    #[cfg(windows)]
+    #[test]
+    fn 子程序留下繼承管道的孫程序_不會卡住呼叫端() {
+        let exe = std::env::current_exe().unwrap();
+        use crate::nowin::NoWindow;
+        let mut cmd = std::process::Command::new(&exe);
+        cmd.no_window().args(["--exact", "launch::wezterm::tests::輔助_留下繼承管道的孫程序後結束", "--nocapture"]).env("ASN_TEST_LEAVE_GRANDCHILD", "1").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        let started = std::time::Instant::now();
+        let r = super::exec_with_timeout(cmd, &exe, std::time::Duration::from_secs(30));
+        let took = started.elapsed();
+        assert!(r.is_ok(), "{r:?}");
+        assert!(took < std::time::Duration::from_secs(4), "被孫程序拖住了 {took:?}");
+    }
+
     #[test]
     fn 窗格結束標記_被舊_mux_的長_hold_訊息擠出最後二十行_讀四百行找得到() {
         use super::{pane_exit_from_screen as f, PANE_PROBE_LINES};
@@ -1130,7 +1177,7 @@ mod tests {
         assert_eq!((v[0].cursor_x, v[0].cursor_y), (5, 3));
         assert!(v[0].is_active);
         let calls = r.calls.borrow();
-        assert_eq!(calls[0].0, vec!["cli", "list", "--format", "json"]);
+        assert_eq!(calls[0].0, vec!["cli", "--no-auto-start", "list", "--format", "json"]);
         assert_eq!(calls[0].1.get("WEZTERM_UNIX_SOCKET").unwrap(), "H/gui-sock-1");
         assert_eq!(calls[0].1.get("WEZTERM_CONFIG_FILE").unwrap(), "cfg.lua");
     }
@@ -1144,8 +1191,8 @@ mod tests {
         w.send_line_and_enter(&sock(), 2, "你好\n世界").unwrap();
         let calls = r.calls.borrow();
         assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0].0, vec!["cli", "send-text", "--pane-id", "2", "--no-paste", "你好 世界"]);
-        assert_eq!(calls[1].0, vec!["cli", "send-text", "--pane-id", "2", "--no-paste", "\r"]);
+        assert_eq!(calls[0].0, vec!["cli", "--no-auto-start", "send-text", "--pane-id", "2", "--no-paste", "你好 世界"]);
+        assert_eq!(calls[1].0, vec!["cli", "--no-auto-start", "send-text", "--pane-id", "2", "--no-paste", "\r"]);
         assert_eq!(r.sleeps.borrow().as_slice(), &[Duration::from_millis(77)]);
     }
 
@@ -1313,7 +1360,7 @@ mod tests {
         assert!(w.set_tab_title(&sock(), 7, "A\nB").is_err());
         assert!(r.calls.borrow().is_empty(), "空標題或控制字元不可執行 cli");
         w.set_tab_title(&sock(), 7, "ASN:1 名稱").unwrap();
-        assert_eq!(r.calls.borrow()[0].0, vec!["cli", "set-tab-title", "--pane-id", "7", "ASN:1 名稱"]);
+        assert_eq!(r.calls.borrow()[0].0, vec!["cli", "--no-auto-start", "set-tab-title", "--pane-id", "7", "ASN:1 名稱"]);
         assert_eq!(r.calls.borrow()[0].1.get("WEZTERM_UNIX_SOCKET").unwrap(), "H/gui-sock-1");
     }
 
