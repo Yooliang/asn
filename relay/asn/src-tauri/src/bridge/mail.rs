@@ -262,11 +262,11 @@ pub fn quota_late_line(received_ms: u64) -> String {
 
 pub const BODY_ESCAPE_PREFIX: &str = "（內文）";
 /// 內文中行首出現就要跳脫的開頭（與 mail-format.mjs 的 escapeBody 逐字一致）
-const BODY_ESCAPE_HEADS: [&str; 11] = ["[RELAY 來信]", "[RELAY 寄信]", "[RELAY 回信]", "寄件人：", "【要回信】", "你與收發室的往來記錄在：", "（語音通話：", "你是 ASN 的聊天對象：", "[群組 ", "順位：", QUOTA_LATE_HEAD];
+const BODY_ESCAPE_HEADS: [&str; 14] = ["[RELAY 來信]", "[RELAY 寄信]", "[RELAY 回信]", "寄件人：", "【要回信】", "你與收發室的往來記錄在：", "（語音通話：", "你是 ASN 的聊天對象：", "[群組 ", "順位：", QUOTA_LATE_HEAD, "（收發室提醒）", "（收發室更正）", "（收發室）"];
 
 /// 內文跳脫（對應 mail-format.mjs 的 escapeBody，兩邊逐字一致）：內文中行首（可有空白）以
 /// `[RELAY 來信]`、`[RELAY 寄信]`、`[RELAY 回信]`（parse_send_head 認得的同義詞）、`寄件人：`、`【要回信】`、`你與收發室的往來記錄在：`、`（語音通話：`、`你是 ASN 的聊天對象：`、
-/// `[群組 `（群組信抬頭，#513）、`順位：`（群組信順位行，#513）、`這封因額度用完延遲，原本`（額度延遲抬頭）開頭的每一行，前面加上可見的「（內文）」，避免寄件人手打的假抬頭、
+/// `[群組 `（群組信抬頭，#513）、`順位：`（群組信順位行，#513）、`這封因額度用完延遲，原本`（額度延遲抬頭）、`（收發室提醒）`／`（收發室更正）`／`（收發室）`（收發室自己寫的提醒、更正、說明）開頭的每一行，前面加上可見的「（內文）」，避免寄件人手打的假抬頭、
 /// 假說明被當成收發室寫的。個人信與群組信共用這份清單（rooms.rs 直接呼叫這裡）。只動內文；換行符（\n、\r）原樣保留。
 pub fn escape_body(body: &str) -> String {
     let mut out = String::with_capacity(body.len());

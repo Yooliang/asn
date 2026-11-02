@@ -13,6 +13,7 @@ mod caller;
 mod quota_cmd;
 mod gemini_quota_cmd;
 mod env;
+mod forward_gate_cmd;
 mod recv;
 mod confirm;
 mod room;
@@ -63,7 +64,7 @@ impl Io<'_> {
     }
 }
 
-pub const SUBCOMMANDS: [&str; 12] = ["send", "recv", "room", "attach", "avatar", "secret", "usage", "inbox", "claude-quota", "gemini-quota", "who", "site"];
+pub const SUBCOMMANDS: [&str; 13] = ["send", "recv", "room", "attach", "avatar", "secret", "usage", "inbox", "claude-quota", "gemini-quota", "who", "site", "forward-gate"];
 
 /// 第一個參數是子命令才算命令列呼叫（asn.exe 據此決定要不要跑命令列）
 pub fn is_subcommand(args: &[String]) -> bool {
@@ -86,6 +87,7 @@ const TOP_USAGE: &str = "用法：
   asn usage  report (--file <hourly.json> | --input-tokens N ... --rounds N) / list [--since <ISO>]   （無頭節點自己回報每小時用量）
   asn site   release --version <x.y.z> --date <YYYY-MM-DD> --item \"…\" / meeting --file <meeting.json> / item --key <項目代號> ...   （寫官網的發版、會議、藍圖；限官網寫入名單上的帳號）
   asn claude-quota  < 狀態列資料   （接在 Claude Code 狀態列指令後，記下目前帳號的 5 小時與每週剩餘額度）
+  asn forward-gate --dir <worker 資料夾> < hook 輸入   （收發室 worker 的 PreToolUse hook：核對轉交對象，使用者不用自己呼叫）
   asn gemini-quota  < 狀態列資料   （ASN 開的 agy 視窗自動帶上：記下目前 Gemini 帳號的剩餘額度，印一行狀態）
 各子命令加 --help 看詳細說明。身分（節點、寄件視窗名）自動判定，不能自填。";
 
@@ -117,6 +119,7 @@ pub fn run(args: &[String], env: &Env, io: &mut Io) -> i32 {
             "gemini-quota" => gemini_quota_cmd::main(rest, env, io).await,
             "who" => who::main(rest, env, io).await,
             "site" => site_cmd::main(rest, env, io).await,
+            "forward-gate" => forward_gate_cmd::main(rest, env, io).await,
             "--help" | "-h" | "help" => {
                 io.outln(TOP_USAGE);
                 Ok(0)

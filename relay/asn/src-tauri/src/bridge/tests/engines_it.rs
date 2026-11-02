@@ -1070,7 +1070,7 @@ async fn 共存_名單同時有_claude_gemini_codex_各走各的路_抬頭_engin
     assert!(s.iter().any(|m| m["from_agent"] == "視窗甲" && m["body"] == "codex 說好"), "{s:?}");
     assert!(Cx::message(&cx.queues()[0]).contains("engine=codex"));
     // Claude 的信仍在等 SENT；回報後照舊 ack
-    h.core.on_worker_line(res(&format!("SENT {}", uid(1))), now()).await;
+    worker_ok(&mut h.core, &uid(1), now()).await;
     assert!(h.fr.acked().contains(&uid(1)));
 }
 

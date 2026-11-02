@@ -102,7 +102,7 @@ async fn 恢復後依原收到順序重送_試送成功就解除_重置時間還
     h.core.tick(probe + 5000).await;
     assert_eq!(h.said().len(), 2, "試送結果出來前不再送");
     // 試送成功（worker 回報 SENT）＝額度其實恢復了：重置時間還沒到也立刻解除，下一個 tick 依原收到順序重送其餘的
-    h.core.on_worker_line(res(&format!("SENT {}", uid(1))), probe + 6000).await;
+    worker_ok(&mut h.core, &uid(1), probe + 6000).await;
     assert_eq!(h.core.inbox_hold_until(), None);
     h.core.tick(probe + 10_000).await;
     let said = h.said();
@@ -162,7 +162,7 @@ async fn 試送成功後_ack_並照常等回覆() {
     h.core.tick(UNTIL).await;
     assert_eq!(h.said().len(), 2);
     assert!(h.fr.acked().is_empty());
-    h.core.on_worker_line(res(&format!("SENT {}", uid(1))), UNTIL + 500).await;
+    worker_ok(&mut h.core, &uid(1), UNTIL + 500).await;
     assert_eq!(h.fr.acked(), vec![uid(1)]);
     assert_eq!(h.core.pending[0].state, State::Waiting);
     // 恢復後再用完是新的一次：寄件人會再通知一次
@@ -313,7 +313,7 @@ async fn 時間不明連撞三輪_暫停只會延長_不會中途報空值_最�
     let vals: Vec<u64> = posts[1..].iter().map(|v| v.as_u64().expect("扣住期間不能報空值")).collect();
     assert!(vals.len() >= 3 && vals.windows(2).all(|w| w[0] < w[1]), "只延長：{vals:?}");
     // 最後真的恢復（worker 回報 SENT）才報空值
-    h.core.on_worker_line(res(&format!("SENT {}", uid(1))), a + 5000).await;
+    worker_ok(&mut h.core, &uid(1), a + 5000).await;
     h.core.tick(a + 10_000).await;
     let posts = hold_posts(&h);
     assert_eq!(posts.iter().filter(|v| v.is_null()).count(), 2, "只有啟動與最後恢復兩次空值：{posts:?}");
@@ -380,7 +380,7 @@ async fn 扣住有上限_超過的不收_不_ack_留在伺服器_旗標報給後
     assert_eq!(hold_bodies(&h).len(), 2);
     // 試送成功解除後處理掉扣住的，超過的下一次拉才收
     h.core.tick(TQ + 1000 + HOUR).await;
-    h.core.on_worker_line(res(&format!("SENT {}", uid(1))), TQ + 2000 + HOUR).await;
+    worker_ok(&mut h.core, &uid(1), TQ + 2000 + HOUR).await;
     h.core.tick(TQ + 3000 + HOUR).await;
     assert_eq!(h.said().len(), 41, "原本 1 封＋試送 1 封＋重送 39 封");
     h.core.pull("test", TQ + 4000 + HOUR).await;
@@ -471,7 +471,7 @@ async fn 群組_額度期間扣住_只有群組訊息時也能試送_恢復後�
     assert!(said[1].contains("#2") && said[1].contains(&quota_late_line(TQ)));
     // 試送成功（worker 回報 SENT）＝恢復：其餘的依序轉交，帶延遲抬頭
     let id = crate::bridge::rooms::room_uuid("R1", 2, "T~T-視窗甲");
-    h.core.on_worker_line(res(&format!("SENT {id}")), TQ + 2000 + HOUR).await;
+    worker_ok(&mut h.core, &id, TQ + 2000 + HOUR).await;
     assert_eq!(h.core.inbox_hold_until(), None);
     h.core.tick(TQ + 3000 + HOUR).await;
     let said = h.said();
@@ -537,7 +537,7 @@ async fn 收信暫停時間回報給後台_扣住時送一次值_恢復時送一
     assert!(b.get("inbox_hold_capped").is_none());
     // 一小時後試送；試送成功才恢復：送一次空值
     h.core.tick(TQ + 1000 + HOUR).await;
-    h.core.on_worker_line(res(&format!("SENT {}", uid(1))), TQ + 2000 + HOUR).await;
+    worker_ok(&mut h.core, &uid(1), TQ + 2000 + HOUR).await;
     h.core.tick(TQ + 5000 + HOUR).await;
     h.core.tick(TQ + 10_000 + HOUR).await;
     assert_eq!(h.core.inbox_hold_until(), None);
@@ -567,7 +567,7 @@ async fn 額度重置時間存檔_重啟後還沒到就繼續扣住_只試送一
     // 重啟後的第一次試送：只送最舊的一封（不是全部）
     c2.tick(TQ + 5000 + HOUR).await;
     assert_eq!(sink2.said.lock().unwrap().len(), 1);
-    c2.on_worker_line(res(&format!("SENT {}", uid(1))), TQ + 6000 + HOUR).await;
+    worker_ok(&mut c2, &uid(1), TQ + 6000 + HOUR).await;
     assert_eq!(c2.inbox_hold_until(), None);
     c2.tick(TQ + 10_000 + HOUR).await;
     assert_eq!(sink2.said.lock().unwrap().len(), 2, "恢復後重送其餘的");
@@ -646,7 +646,7 @@ async fn room_held_then_released(h: &mut H) -> u64 {
     set_rooms(h, vec![room(vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}}))], mine)]);
     h.core.pull_rooms(TQ + 2000).await;
     assert!(h.core.log.has("room=R1 #2 member=T~T-視窗甲 held for quota"));
-    h.core.on_worker_line(res(&format!("SENT {}", uid(1))), TQ + 3000).await; // worker 回報 SENT＝恢復
+    worker_ok(&mut h.core, &uid(1), TQ + 3000).await; // worker 回報 SENT＝恢復
     assert_eq!(h.core.inbox_hold_until(), None);
     TQ + 3000
 }
@@ -694,7 +694,7 @@ async fn sent_比額度事件晚到_不再重送_直接當作已轉交_進入等
     h.core.pull("test", TQ).await;
     h.core.on_worker_line(quota_line(RESETS_S), TQ + 1000).await;
     assert_eq!(held_ids(&h), vec![uid(1)]);
-    h.core.on_worker_line(res(&format!("SENT {}", uid(1))), TQ + 1500).await; // Sent 晚到
+    worker_ok(&mut h.core, &uid(1), TQ + 1500).await; // Sent 晚到
     assert!(held_ids(&h).is_empty());
     assert_eq!(h.core.pending[0].state, State::Waiting, "進入等回覆");
     assert_eq!(h.fr.acked(), vec![uid(1)]);
@@ -712,7 +712,7 @@ async fn sent_比額度事件晚到_群組訊息也不再轉交一次() {
     h.core.on_worker_line(quota_line(RESETS_S), TQ + 1000).await;
     assert!(h.core.pending.is_empty());
     let id = crate::bridge::rooms::room_uuid("R1", 2, "T~T-視窗甲");
-    h.core.on_worker_line(res(&format!("SENT {id}")), TQ + 1500).await;
+    worker_ok(&mut h.core, &id, TQ + 1500).await;
     assert_eq!(h.core.pending.len(), 1);
     assert_eq!(h.core.pending[0].state, State::Waiting);
     h.core.tick(TQ + 10_000).await;

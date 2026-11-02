@@ -1,0 +1,88 @@
+//! 核對轉交對象：worker 把信送到不是橋指定的視窗時的處理（hook 與 SENT 比對見 bridge/forward_gate.rs、worker.rs）。
+//! 送錯的那封：不 ack，重送一次給正確的視窗，第二次還是錯就回 Fail；寄件人收到固定文字的通知（不帶內文，寫明可能已被讀取）；
+//! 拿錯信的視窗收到一封固定文字的更正。
+use super::*;
+
+/// 第二次送錯回給寄件人的 Fail 原因
+const MISROUTE_FAIL: &str = "核對轉交對象失敗";
+
+impl Core {
+    /// worker 回報：帶著這封的編號呼叫 SendMessage 並且成功，但收件人不是橋指定的
+    pub(super) async fn on_misrouted(&mut self, id: &str, expected: &str, actual: &str) {
+        self.log.line(&format!("misrouted id={id} expected={expected} actual={actual}"));
+        self.quota_release("worker reported misrouted"); // worker 有在動（但不算轉交成功）
+        // 通知與更正：每個編號各一次（同一個編號對的、錯的呼叫都有時也一樣：算 Sent，照樣通知）
+        if self.misroute_notified.len() >= 1000 {
+            self.misroute_notified.clear();
+        }
+        if self.misroute_notified.insert(id.to_string()) {
+            self.misroute_notify_sender(id, expected, actual).await;
+            self.misroute_correct_receiver(id, expected, actual);
+        }
+        // 已經算轉交成功（Sent）的，只通知；還在轉交中的才重送
+        let Some(i) = self.idx(id) else { return };
+        if self.pending[i].state != State::Forwarding {
+            return;
+        }
+        if self.misrouted_once.len() >= 1000 {
+            self.misrouted_once.clear();
+        }
+        if self.misrouted_once.insert(id.to_string()) {
+            let Some((to, text)) = self.fwd_text.get(id).cloned() else {
+                self.on_fail(id, MISROUTE_FAIL).await;
+                return;
+            };
+            self.parser.register(id, &to);
+            self.write_inflight();
+            match self.sink.say(forward_text(&self.parser.nonce, id, &to, &text)) {
+                Ok(_) => self.log.line(&format!("misrouted id={id}: resent once to {to}")),
+                Err(e) => {
+                    self.log.line(&format!("misrouted id={id}: resend failed: {e}"));
+                    self.on_fail(id, MISROUTE_FAIL).await;
+                }
+            }
+        } else {
+            self.parser.forget(id);
+            self.fwd_text.remove(id);
+            self.write_inflight();
+            self.log.line(&format!("misrouted id={id}: second time, giving up"));
+            self.on_fail(id, MISROUTE_FAIL).await;
+        }
+    }
+
+    /// 寄件人收到固定文字的通知（不帶信件內文）。群組訊息、收發室寄來的不通知。
+    /// 通知「本人」另有後台通知類型要加，還沒做（要先跟審查者談），這裡只記 log
+    async fn misroute_notify_sender(&mut self, id: &str, expected: &str, actual: &str) {
+        let origin = match self.idx(id) {
+            Some(i) if self.pending[i].room.is_some() => None,
+            Some(i) => Some(Origin::of(&self.pending[i])),
+            None => self.fwd_origin.get(id).cloned(),
+        };
+        self.log.line(&format!("misrouted id={id}: owner notice not sent (backend notification type not available yet)"));
+        let Some(o) = origin else { return };
+        if Self::is_mailbox_sender(&o.from_agent) {
+            return;
+        }
+        let text = format!("[收發室] 你寄的那封信（編號 {id}）疑似被轉交到不是預定收件人的視窗（預定 {expected}、實際 {actual}），可能已被讀取。");
+        self.send_back(&o, &text, None, Some(false)).await;
+    }
+
+    /// 拿錯信的視窗收到一封固定文字的更正（這封有自己的編號，hook 才放行）
+    fn misroute_correct_receiver(&mut self, id: &str, expected: &str, actual: &str) {
+        if actual == expected || !self.forwardable(actual) {
+            return;
+        }
+        self.tell_window(actual, &format!("（收發室更正）剛才編號 {id} 那封信不是寄給你的，請不要照做，也不要回覆寄件人。"));
+    }
+
+    /// 定時整理：不在轉交中、也不是剛送出的說明的編號，從 hook 的 inflight 檔拿掉（hook 之後一律擋）
+    pub(super) fn prune_inflight(&mut self) {
+        let stale: Vec<String> = self.parser.inflight_pairs().into_iter().map(|(id, _)| id).filter(|id| self.idx(id).is_none() && !self.notice_ids.contains_key(id)).collect();
+        for id in stale {
+            self.parser.forget(&id);
+        }
+        let live: HashSet<String> = self.parser.inflight_pairs().into_iter().map(|(id, _)| id).collect();
+        self.fwd_text.retain(|id, _| live.contains(id));
+        self.write_inflight();
+    }
+}

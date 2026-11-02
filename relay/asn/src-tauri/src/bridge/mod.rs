@@ -6,6 +6,7 @@ pub mod core;
 pub mod corrlog;
 pub mod dup_session;
 pub mod engines;
+pub mod forward_gate;
 pub mod handoff;
 pub mod launcher;
 pub mod lock;
