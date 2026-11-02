@@ -190,7 +190,7 @@ async fn 群組_回覆含不需回覆不貼回_貼回遇到_429_只記_log_不�
 }
 
 #[tokio::test]
-async fn 群組_轉交失敗不回群組不留對應_worker_掛了游標不前進_逾時不寄通知() {
+async fn 群組_轉交失敗在群組留說明不留對應_worker_掛了游標不前進_逾時不寄通知() {
     let mut h = harness(&[("T-視窗甲", "idle")]).await;
     set_rooms(&h, vec![room(vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}}))], json!([{"member": "T~T-視窗甲", "read_seq": 1}]))]);
     // worker 掛了：轉不出去，游標停在那則前面
@@ -204,16 +204,53 @@ async fn 群組_轉交失敗不回群組不留對應_worker_掛了游標不前�
     h.core.pull("test", T0 + 1000).await;
     let id = fwd(&h.said())[0].0.clone();
     assert_eq!(cursor_file(&h)["R1|T~T-視窗甲"].as_u64(), Some(2));
-    // FAIL：只記 log，不回群組、不寄信、不留對應
+    // FAIL：群組留一則不點名、不帶原因的說明；不寄信、不留對應
     h.core.on_worker_line(res(&format!("FAIL {id} 找不到視窗")), T0 + 2000).await;
-    assert!(h.core.pending.is_empty() && posts(&h).is_empty() && h.fr.sent().is_empty() && h.fr.acked().is_empty());
+    assert!(h.core.pending.is_empty() && h.fr.sent().is_empty() && h.fr.acked().is_empty());
+    let p = posts(&h);
+    assert_eq!(p.len(), 1);
+    let body = p[0]["body"].as_str().unwrap();
+    assert!(body.contains("#2") && body.contains("沒有轉交給 T-視窗甲，對方還沒看到") && !body.contains('@') && !body.contains("找不到視窗"), "{body}");
+    assert!(h.core.log.has("forward-fail kind=room"));
     // 另一則：SENT 後一直沒人回 → 逾時直接清掉，不通知任何人
     set_rooms(&h, vec![room(vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}})), rmsg(3, json!({"forMe": {"T-視窗甲": true}}))], json!([{"member": "T~T-視窗甲", "read_seq": 1}]))]);
     h.core.pull("test", T0 + 3000).await;
     let id3 = fwd(&h.said()).last().unwrap().0.clone();
     worker_ok(&mut h.core, &id3, T0 + 3001).await;
     h.core.tick(T0 + 3001 + 601_000).await;
-    assert!(h.core.pending.is_empty() && h.fr.sent().is_empty() && posts(&h).is_empty());
+    assert!(h.core.pending.is_empty() && h.fr.sent().is_empty() && posts(&h).len() == 1);
+}
+
+#[tokio::test]
+async fn 群組_轉交失敗通知有冷卻_通知本身被退不再通知_轉交逾時也通知() {
+    let mut h = harness(&[("T-視窗甲", "idle")]).await;
+    let me = json!([{"member": "T~T-視窗甲", "read_seq": 1}]);
+    let for_me = || json!({"forMe": {"T-視窗甲": true}});
+    set_rooms(&h, vec![room(vec![rmsg(2, for_me()), rmsg(3, for_me())], me.clone())]);
+    h.core.pull("test", T0).await;
+    let ids = fwd(&h.said());
+    h.core.on_worker_line(res(&format!("FAIL {} 原因", ids[0].0)), T0 + 1).await;
+    h.core.on_worker_line(res(&format!("FAIL {} 原因", ids[1].0)), T0 + 2).await;
+    assert_eq!(posts(&h).len(), 1, "冷卻內不再貼");
+    assert!(h.core.log.has(&format!("forward-fail kind=room id={}", ids[1].0)), "次數照記");
+    // 被退的是通知本身：不貼
+    let notice = "（收發室）群組訊息 #3 沒有轉交給 別人，對方還沒看到。";
+    set_rooms(&h, vec![room(vec![rmsg(2, for_me()), rmsg(3, for_me()), rmsg(4, json!({"forMe": {"T-視窗甲": true}, "body": notice}))], me.clone())]);
+    let t1 = T0 + 700_000;
+    h.core.pull("test", t1).await;
+    let id4 = fwd(&h.said()).last().unwrap().0.clone();
+    h.core.on_worker_line(res(&format!("FAIL {id4} 原因")), t1 + 1).await;
+    assert_eq!(posts(&h).len(), 1, "通知被退不貼");
+    assert!(h.core.log.has("itself a notice"));
+    // 過了冷卻、一般訊息逾時沒轉成：貼一則，並帶上冷卻中略過的則數
+    set_rooms(&h, vec![room(vec![rmsg(2, for_me()), rmsg(3, for_me()), rmsg(4, json!({"forMe": {"T-視窗甲": true}, "body": notice})), rmsg(5, for_me())], me)]);
+    h.core.pull("test", t1 + 2).await;
+    h.core.tick(t1 + 2 + 121_000).await;
+    let p = posts(&h);
+    assert_eq!(p.len(), 2);
+    let body = p[1]["body"].as_str().unwrap();
+    assert!(body.contains("#5") && body.contains("可能沒有轉交給 T-視窗甲") && !body.contains("對方還沒看到") && body.contains("另有 1 則"), "{body}");
+    assert!(h.core.log.has("forward-fail kind=room-timeout"));
 }
 
 #[tokio::test]
