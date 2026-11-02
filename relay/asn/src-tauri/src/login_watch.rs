@@ -268,6 +268,11 @@ static FORWARD_TIMEOUTS: TimeoutLog = TimeoutLog(Mutex::new(Vec::new()));
 pub fn record_forward_timeout(now_ms: i64) {
     FORWARD_TIMEOUTS.record(now_ms);
 }
+/// 測試用：`since_ms` 起記到的逾時次數（驗額度扣住的信沒有被記成轉交逾時）
+#[cfg(test)]
+pub fn forward_timeouts_since(since_ms: i64) -> u32 {
+    FORWARD_TIMEOUTS.count_since(since_ms)
+}
 
 // ---------- 通知（純函式＋出口） ----------
 /// 送給後台的四個欄位（後台依節點查擁有者與組內文；時間一律 UTC）

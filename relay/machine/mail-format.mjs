@@ -47,7 +47,7 @@ export const VOICE_NOTE = '（語音通話：這封是語音辨識的文字，�
 // 只認布林 true（字串 "true"、數字 1 都不算）
 export const isVoiceMail = m => m?.voice === true
 export const voiceNote = m => isVoiceMail(m) ? VOICE_NOTE : ''
-export const escapeBody = body => String(body ?? '').replace(/(^|[\n\r])([^\S\r\n]*(?:\[RELAY 來信\]|\[RELAY 寄信\]|\[RELAY 回信\]|寄件人：|【要回信】|你與收發室的往來記錄在：|（語音通話：|你是 ASN 的聊天對象：|\[群組 |順位：))/g, `$1${BODY_ESCAPE_PREFIX}$2`)
+export const escapeBody = body => String(body ?? '').replace(/(^|[\n\r])([^\S\r\n]*(?:\[RELAY 來信\]|\[RELAY 寄信\]|\[RELAY 回信\]|寄件人：|【要回信】|你與收發室的往來記錄在：|（語音通話：|你是 ASN 的聊天對象：|\[群組 |順位：|這封因額度用完延遲，原本))/g, `$1${BODY_ESCAPE_PREFIX}$2`)
 
 // 「保持能回應」的固定提醒（#494）：轉交給 Claude 視窗的每封信，說明行最後（要回信指示之後）都帶這一行。
 // 內文行首以「你是 ASN 的聊天對象：」開頭的行，escapeBody 也會跳脫。與 Rust 內建橋 mail.rs、pi 擴充 inbox.mjs 的 RESPONSIVE_NOTE 逐字一致。
