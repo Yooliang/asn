@@ -1435,6 +1435,31 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         Ok(snap)
     }
 
+    /// 讀畫面判斷（todo-next-162）要看的夥伴視窗：Claude、有 session 編號。（編號, session）
+    fn watched_partners(&self) -> Vec<(String, String)> {
+        let g = self.inner.lock().unwrap();
+        g.sessions.iter().filter(|s| s.kind == super::win_term::KIND_CLAUDE).filter_map(|s| s.session_id.clone().map(|sid| (s.id.clone(), sid))).collect()
+    }
+
+    /// 這扇 Claude 夥伴視窗停在哪種提示，只回固定代號，不回畫面文字。
+    /// 只給同檔的背景工作用，不接前端命令、CLI、遠端：其他人不能經由這裡讀夥伴畫面（`read`、`status` 照舊拒絕夥伴視窗）。
+    /// 看到結束標記就是 Claude 已經結束，畫面上的東西不算；沒看到不代表還活著（標記可能捲出畫面），名單只對活著的 session 才顯示
+    fn partner_screen_code(&self, id: &str) -> Result<Option<&'static str>, String> {
+        let snap = self.snapshot_p(id, true)?;
+        self.verify_window(&snap)?;
+        let nonce = {
+            let g = self.inner.lock().unwrap();
+            let s = g.sessions.iter().find(|s| s.id == id && s.kind == super::win_term::KIND_CLAUDE).ok_or("不是 Claude 夥伴視窗")?;
+            s.exit_nonce.clone()
+        };
+        let dir = self.dir()?;
+        let text = self.wez(&dir).get_text(&snap.window.sock, snap.pane_id, None)?;
+        if nonce.is_some_and(|n| wezterm::pane_exit_from_screen(&text, &n).is_some()) {
+            return Ok(None);
+        }
+        Ok(super::claude_screen::classify(&text).map(|s| super::claude_screen::status_code(s.kind)))
+    }
+
     /// mux 當掉後被下一次 `ensure()` 重新起來，新 mux 的窗格編號會從頭算：對照表裡舊的窗格編號可能對到新 mux 裡
     /// 別的夥伴。所以 mux 窗格的每一個操作（讀畫面、送字、代答、改名、關閉）前都核對 pid 檔記的 mux（pid＋建立時間）
     /// 跟開窗格時記下的一樣；對不上就把這一列移除（窗格已經跟著舊 mux 沒了）並回錯，不對新 mux 下任何指令（#607 審查）
@@ -2215,6 +2240,92 @@ fn atomic_write(path: &Path, text: &str) -> Result<(), String> {
 
 #[cfg(feature = "gui")]
 pub type LiveTerms = TermService<wezterm::RealRunner, wezterm::RealFs>;
+
+/// 空記憶體（位元組）；讀不到回 None
+#[cfg(all(feature = "gui", windows))]
+fn free_memory_bytes() -> Option<u64> {
+    #[repr(C)]
+    struct MemoryStatusEx {
+        length: u32,
+        memory_load: u32,
+        total_phys: u64,
+        avail_phys: u64,
+        total_page_file: u64,
+        avail_page_file: u64,
+        total_virtual: u64,
+        avail_virtual: u64,
+        avail_extended_virtual: u64,
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GlobalMemoryStatusEx(buffer: *mut MemoryStatusEx) -> i32;
+    }
+    let mut m: MemoryStatusEx = unsafe { std::mem::zeroed() };
+    m.length = std::mem::size_of::<MemoryStatusEx>() as u32;
+    (unsafe { GlobalMemoryStatusEx(&mut m) } != 0).then_some(m.avail_phys)
+}
+#[cfg(all(feature = "gui", not(windows)))]
+fn free_memory_bytes() -> Option<u64> {
+    None
+}
+
+/// 外掛狀態檔的 state（只拿來決定讀的頻率，讀不到就是 None）
+#[cfg(feature = "gui")]
+fn mod_state_of(status_dir: &Path, sid: &str) -> Option<String> {
+    let text = std::fs::read_to_string(status_dir.join(format!("{sid}.json"))).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    v.get("state").and_then(|s| s.as_str()).map(String::from)
+}
+
+/// 寫判斷結果（只有 session、固定代號與時間）；沒有提示就刪掉，名單馬上回到原本的說明
+#[cfg(feature = "gui")]
+fn write_screen_code(dir: &Path, sid: &str, code: Option<&str>, now: u64) {
+    let path = dir.join(format!("{sid}.json"));
+    let Some(code) = code else {
+        let _ = std::fs::remove_file(&path);
+        return;
+    };
+    let _ = std::fs::create_dir_all(dir);
+    let tmp = dir.join(format!("{sid}.{}.tmp", std::process::id()));
+    let body = serde_json::json!({ "sessionId": sid, "code": code, "at": now }).to_string();
+    if std::fs::write(&tmp, body).is_ok() {
+        let _ = std::fs::rename(&tmp, &path);
+    }
+}
+
+/// 背景讀 Claude 夥伴視窗的畫面，判斷卡在哪（todo-next-162 第 2 段）。預設關；這一段只標狀態，沒有按鈕，也不送字
+#[cfg(feature = "gui")]
+pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, data_dir: &Path) {
+    use super::screen_watch::{pace_of, Schedule, ENV_SCREEN_WATCH, TICK_MS};
+    if std::env::var(ENV_SCREEN_WATCH).as_deref() != Ok("1") || std::env::args().any(|a| a == "--shot") {
+        return;
+    }
+    let asn_dir = crate::identity::home_dir().join(".asn");
+    let (status_dir, screen_dir) = (asn_dir.join("status"), asn_dir.join(crate::bridge::roster::SCREEN_DIR));
+    let log_dir = data_dir.to_path_buf();
+    let spawned = std::thread::Builder::new().name("asn-screen-watch".into()).spawn(move || {
+        let mut schedule = Schedule::default();
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(TICK_MS));
+            let now = crate::heartbeat::now_ms();
+            let partners: Vec<(String, String)> = terms.watched_partners().into_iter().filter(|(_, sid)| crate::bridge::roster::valid_sid(sid)).collect();
+            let windows: Vec<(String, super::screen_watch::Pace)> = partners.iter().map(|(id, sid)| (id.clone(), pace_of(mod_state_of(&status_dir, sid).as_deref()))).collect();
+            for id in schedule.due(now, &windows, free_memory_bytes()) {
+                let Some(pace) = windows.iter().find(|(w, _)| *w == id).map(|(_, p)| *p) else { continue };
+                let Some((_, sid)) = partners.iter().find(|(w, _)| *w == id) else { continue };
+                let result = terms.partner_screen_code(&id);
+                write_screen_code(&screen_dir, sid, result.as_ref().ok().copied().flatten(), now);
+                schedule.done(&id, pace, result.is_ok(), now);
+            }
+            if let Some(line) = schedule.report(now, windows.len()) {
+                let _ = crate::ui_log::append(&log_dir, &[format!("{} info [ASN] {line}", crate::claude_quota::iso_secs(now as i64))]);
+            }
+        }
+    });
+    if let Err(e) = spawned {
+        elog!("讀畫面的背景工作開不了（不影響啟動）：{e}");
+    }
+}
 
 #[cfg(feature = "gui")]
 pub fn live(data_dir: &Path) -> LiveTerms {
@@ -5244,6 +5355,42 @@ mod tests {
             let before = count_sub(&rig.runner, "get-text");
             assert_eq!(rig.svc.partner_in_mux((MUX_PID, 1000), "小乙"), Some(id));
             assert_eq!(count_sub(&rig.runner, "get-text"), before, "沒有暗號就不讀畫面");
+        }
+
+        #[test]
+        fn 讀畫面判斷_只回固定代號_終端面板的讀法照舊拒絕夥伴視窗() {
+            let (rig, _) = mux_rig();
+            let id = open_partner(&rig);
+            assert_eq!(rig.svc.watched_partners(), vec![(id.clone(), "sid-1".to_string())]);
+            *rig.runner.inner.screen.borrow_mut() = include_str!("../../tests/fixtures/term-screens/claude-permission-bash.txt").into();
+            assert_eq!(rig.svc.partner_screen_code(&id), Ok(Some("permission")));
+            assert!(rig.svc.read(&id, 5).is_err(), "面板讀畫面仍然拒絕");
+            assert!(rig.svc.status(&id).is_err(), "面板查狀態仍然拒絕");
+            assert!(!rig.svc.list().iter().any(|t| t.id == id), "面板清單不列");
+        }
+
+        #[test]
+        fn 讀畫面判斷_假提示沒有代號_結束標記之後畫面不算_終端面板的視窗不看() {
+            fix_nonce();
+            let (rig, _) = mux_rig();
+            let id = open_partner(&rig);
+            *rig.runner.inner.screen.borrow_mut() = include_str!("../../tests/fixtures/term-screens/claude-lookalike-model-text.txt").into();
+            assert_eq!(rig.svc.partner_screen_code(&id), Ok(None));
+            *rig.runner.inner.screen.borrow_mut() = format!("{}{DEAD_SCREEN}", include_str!("../../tests/fixtures/term-screens/claude-permission-bash.txt"));
+            assert_eq!(rig.svc.partner_screen_code(&id), Ok(None), "已經結束");
+            assert!(rig.svc.partner_screen_code("999").is_err());
+            let panel = rig.svc.start("agy", &rig.cwd, &rig.config).unwrap();
+            assert!(rig.svc.partner_screen_code(&panel).is_err());
+            assert!(!rig.svc.watched_partners().iter().any(|(w, _)| *w == panel));
+        }
+
+        #[test]
+        fn 讀畫面判斷_沒有接到前端命令() {
+            for name in ["partner_screen_code", "watched_partners"] {
+                assert!(!include_str!("../lib.rs").contains(name), "{name}");
+                assert!(!include_str!("../term_remote.rs").contains(name), "{name}");
+                assert!(!include_str!("../bridge/launcher.rs").contains(name), "{name}");
+            }
         }
 
         #[test]

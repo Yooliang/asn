@@ -1479,6 +1479,8 @@ pub fn run() {
     let terms = Arc::new(launch::term::live(&term_data_dir));
     #[cfg(desktop)]
     launch::term::set_global(terms.clone());
+    #[cfg(desktop)]
+    launch::term::start_screen_watch(terms.clone(), &term_data_dir);
     let frame_data_dir = data_dir.clone();
     let bridge_data_dir = data_dir.clone();
     let auto_acct_dir = data_dir.clone();
