@@ -162,6 +162,15 @@ test('歷史 APK：本機和線上都沒有（早就掉了）→ 不擋部署，
   assert.ok(r.skipped.includes('update/ASN_0.1.95_android.apk'))
 })
 
+test('線上回 404：回應內容要丟棄，否則連線一直開著、部署卡住', async () => {
+  const dir = makeSite({ exe: true, apk: true, zip: true })
+  let cancelled = 0
+  const fetchFn = async () => ({ ok: false, status: 404, headers: { get: () => null }, body: { cancel: async () => { cancelled++ } } })
+  const r = await predeploy({ siteDir: dir, fetchFn, history: [oldEntry] })
+  assert.ok(r.skipped.includes('update/ASN_0.1.95_android.apk'))
+  assert.equal(cancelled, 1)
+})
+
 test('歷史 APK：線上的內容和當時記的 sha256 對不起來 → 擋下', async () => {
   const dir = makeSite({ exe: true, apk: true, zip: true })
   await assert.rejects(predeploy({ siteDir: dir, fetchFn: fakeFetch({ 'update/ASN_0.1.95_android.apk': 'tampered' }), history: [oldEntry] }), /sha256|大小/)
