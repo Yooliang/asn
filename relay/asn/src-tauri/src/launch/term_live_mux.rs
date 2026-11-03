@@ -218,9 +218,20 @@ fn 真_claude_留給外面操作() {
     let row = s.inner.lock().unwrap().sessions.iter().find(|x| x.id == id).map(|x| (x.kind.clone(), x.session_id.clone()));
     std::fs::write(flags.join("opened"), format!("{id} {pid} {row:?}")).unwrap();
     elog!("RESULT 開好：{id} {pid} {row:?}");
+    // 記下窗格標題怎麼變（WezTerm 回報的前景）：給 todo-next-162 判斷「前景是不是 Claude」
+    let dir = s.dir().unwrap();
+    let sock = s.inner.lock().unwrap().sessions.iter().find(|x| x.id == id).map(|x| x.window.sock.clone()).unwrap();
+    let mut last = String::new();
     let t = Instant::now();
     while !flags.join("done").exists() && t.elapsed() < Duration::from_secs(600) {
-        std::thread::sleep(Duration::from_millis(200));
+        if let Ok(p) = s.wez(&dir).list(&sock) {
+            let now = p.iter().map(|x| format!("{}|{}", x.pane_id, x.title)).collect::<Vec<_>>().join(";");
+            if now != last {
+                elog!("RESULT 窗格標題 {:?}：{now}", t.elapsed());
+                last = now;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(500));
     }
     // 外面可能已經關窗：查狀態、收尾都照實印
     elog!("RESULT 收尾前表上：{:?}；read：{:?}", rows(&s), s.read(&id, 5).map(|x| x.len()));
