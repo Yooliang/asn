@@ -10,6 +10,7 @@ pub(crate) mod pi_term;
 pub(crate) mod pi_setup;
 pub(crate) mod prefs;
 pub(crate) mod profiles;
+mod claude_screen;
 mod resume;
 mod subagents;
 mod tasks;
