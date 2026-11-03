@@ -191,6 +191,24 @@ mod tests {
         assert!(holder_of(d.path(), me).started_late());
     }
 
+    /// 40家用 實際發生的情況：編號被系統服務占用。一般權限打不開它（名稱與時間都開不了），
+    /// 要靠程序快照認出名稱。services.exe 每台 Windows 都有，一般權限打不開；提權跑時會打得開，測試一樣要過
+    #[cfg(windows)]
+    #[test]
+    fn 真機_編號被打不開的系統服務占用_可以接手_不能結束() {
+        let pid = crate::launch::switch::winapi::process_table().into_iter().find(|p| p.name == "services.exe").expect("有 services.exe").pid;
+        let img = crate::heartbeat::process_image(pid).expect("打不開也要讀得到名稱");
+        assert!(img.to_ascii_lowercase().ends_with("services.exe"), "{img}");
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(pid_file(d.path()), pid.to_string()).unwrap();
+        assert!(crate::heartbeat::pid_alive(pid), "拒絕存取也算活著");
+        assert!(!holder_alive(d.path())(pid), "名稱不對：不算有人在收信");
+        assert!(!may_kill_holder(d.path(), pid), "不能結束");
+        let l = BridgeLock::acquire(d.path(), 7, holder_alive(d.path())).expect("內建橋可以接手");
+        assert_eq!(read_pid(&pid_file(d.path())), Some(7));
+        drop(l);
+    }
+
     #[test]
     fn 守門_拿鎖與結束舊橋都走_holder_alive() {
         let src = include_str!("mod.rs").replace("\r\n", "\n");

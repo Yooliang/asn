@@ -142,9 +142,14 @@ pub fn is_asn_process(pid: u32) -> Option<bool> {
     Some(image_is_asn(comm.trim()))
 }
 
-/// 程序的執行檔（Windows 是完整路徑，其他系統是程序名）。查不到回 None
+/// 程序的執行檔（Windows 是完整路徑，其他系統是程序名）。查不到回 None。
+/// 一般權限打不開系統服務（拒絕存取），這時改用程序快照讀名稱（只有檔名，沒有路徑）
 #[cfg(windows)]
 pub fn process_image(pid: u32) -> Option<String> {
+    process_image_opened(pid).or_else(|| process_image_snapshot(pid))
+}
+#[cfg(windows)]
+fn process_image_opened(pid: u32) -> Option<String> {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION};
     unsafe {
@@ -157,6 +162,31 @@ pub fn process_image(pid: u32) -> Option<String> {
         let ok = QueryFullProcessImageNameW(h, 0, buf.as_mut_ptr(), &mut len) != 0;
         CloseHandle(h);
         ok.then(|| String::from_utf16_lossy(&buf[..len as usize]))
+    }
+}
+#[cfg(windows)]
+fn process_image_snapshot(pid: u32) -> Option<String> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap == INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let mut e: PROCESSENTRY32W = std::mem::zeroed();
+        e.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        let mut found = None;
+        let mut more = Process32FirstW(snap, &mut e) != 0;
+        while more {
+            if e.th32ProcessID == pid {
+                let n = e.szExeFile.iter().position(|c| *c == 0).unwrap_or(e.szExeFile.len());
+                found = Some(String::from_utf16_lossy(&e.szExeFile[..n]));
+                break;
+            }
+            more = Process32NextW(snap, &mut e) != 0;
+        }
+        CloseHandle(snap);
+        found
     }
 }
 #[cfg(not(windows))]
