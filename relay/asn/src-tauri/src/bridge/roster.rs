@@ -108,6 +108,43 @@ pub fn apply_mod_status(windows: &mut [Window], dir: &Path, now_ms: u64) {
             w.mod_loaded = true;
         }
     }
+    apply_screen_codes(windows, &dir.with_file_name(SCREEN_DIR), now_ms);
+}
+
+/// 讀畫面判斷的結果放在 status 資料夾旁邊（`launch::term` 的背景工作寫，預設關）
+pub const SCREEN_DIR: &str = "screen";
+const SCREEN_MAX_AGE_MS: u64 = 120_000;
+const SCREEN_MAX_BYTES: u64 = 512;
+
+/// 代號 → 名單顯示的字。名單別人也可能看到，所以只會是這幾句固定字；檔案裡的其他內容一律不顯示
+fn screen_label(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "permission" => "等你回答：權限",
+        "trust" => "等你回答：信任資料夾",
+        "bypass_warning" => "卡在略過權限警告",
+        "login" => "需要登入",
+        "usage_limit" => "額度用完",
+        "attention" => "需要人工確認",
+        _ => return None,
+    })
+}
+
+/// 畫面判斷只改說明，不改名單狀態：信件要不要轉、提醒什麼時候送都照舊
+fn apply_screen_codes(windows: &mut [Window], dir: &Path, now_ms: u64) {
+    for w in windows.iter_mut() {
+        let Some(sid) = w.session_id.clone().filter(|s| w.engine == "claude" && valid_sid(s)) else { continue };
+        let path = dir.join(format!("{sid}.json"));
+        if std::fs::metadata(&path).map(|m| m.len() > SCREEN_MAX_BYTES).unwrap_or(true) {
+            continue;
+        }
+        let Some(v) = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) else { continue };
+        let fresh = v.get("at").and_then(Value::as_u64).is_some_and(|at| now_ms.abs_diff(at) <= SCREEN_MAX_AGE_MS);
+        if fresh && v.get("sessionId").and_then(Value::as_str) == Some(sid.as_str()) {
+            if let Some(label) = v.get("code").and_then(Value::as_str).and_then(screen_label) {
+                w.detail = Some(label.to_string());
+            }
+        }
+    }
 }
 
 fn read_mod_status(path: &Path, sid: &str, now_ms: u64) -> Option<(String, Option<String>, Option<u8>)> {
@@ -903,4 +940,36 @@ mod tests {
         // 舊的介面（只給 pid）行為不變
         assert_eq!(read_sessions(d.path(), |_| true, 0, "x").unwrap().len(), 4);
     }
+
+    #[test]
+    fn 畫面代號_只顯示固定字_狀態不變_過期或別的內容不顯示() {
+        let root = tempfile::tempdir().unwrap();
+        let (status, screen) = (root.path().join("status"), root.path().join(SCREEN_DIR));
+        std::fs::create_dir_all(&screen).unwrap();
+        let put = |v: Value| std::fs::write(screen.join("s1.json"), v.to_string()).unwrap();
+        let run = || {
+            let mut ws = [win("s1", "idle")];
+            ws[0].status = Some("busy".into());
+            apply_mod_status(&mut ws, &status, NOW);
+            (ws[0].status.clone(), ws[0].detail.clone())
+        };
+        assert_eq!(run(), (Some("busy".to_string()), None), "沒有檔案");
+        for (code, label) in [("permission", "等你回答：權限"), ("trust", "等你回答：信任資料夾"), ("bypass_warning", "卡在略過權限警告"), ("login", "需要登入"), ("usage_limit", "額度用完"), ("attention", "需要人工確認")] {
+            put(json!({"sessionId":"s1","code":code,"at":NOW}));
+            assert_eq!(run(), (Some("busy".to_string()), Some(label.to_string())), "只改說明，不改狀態");
+        }
+        for bad in [
+            json!({"sessionId":"s1","code":"C:\\Users\\me\\secret","at":NOW}),
+            json!({"sessionId":"s1","code":"rm -rf /","at":NOW}),
+            json!({"sessionId":"s1","code":"permission","at":NOW - SCREEN_MAX_AGE_MS - 1}),
+            json!({"sessionId":"s2","code":"permission","at":NOW}),
+            json!({"sessionId":"s1","code":7,"at":NOW}),
+        ] {
+            put(bad.clone());
+            assert_eq!(run().1, None, "{bad}");
+        }
+        put(json!({"sessionId":"s1","code":"permission","detail":"不該出現","text":"畫面內容","at":NOW}));
+        assert_eq!(run().1.as_deref(), Some("等你回答：權限"), "只看代號");
+    }
+
 }

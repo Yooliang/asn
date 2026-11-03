@@ -59,6 +59,18 @@ const USAGE_LIMIT: &str = "You've hit your limit";
 /// 輸入框上方往回看幾行，找登入失效與額度訊息
 const NOTICE_LOOKBACK: usize = 8;
 
+/// 這個種類對應的固定代號（寫進狀態檔的只有它，不含畫面文字；名單顯示的字見 bridge::roster 的 screen_label）
+pub fn status_code(kind: ClaudeScreenKind) -> &'static str {
+    match kind {
+        ClaudeScreenKind::Permission => "permission",
+        ClaudeScreenKind::TrustFolder => "trust",
+        ClaudeScreenKind::BypassWarning => "bypass_warning",
+        ClaudeScreenKind::Login => "login",
+        ClaudeScreenKind::UsageLimit => "usage_limit",
+        ClaudeScreenKind::Attention => "attention",
+    }
+}
+
 /// 判斷畫面。回 None 代表沒有偵測到提示（包含閒置、執行中，以及認不出來的畫面）
 pub fn classify(text: &str) -> Option<ClaudeScreen> {
     let lines: Vec<&str> = text.lines().map(str::trim_end).collect();

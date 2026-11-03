@@ -11,6 +11,8 @@ pub(crate) mod pi_setup;
 pub(crate) mod prefs;
 pub(crate) mod profiles;
 mod claude_screen;
+#[cfg(desktop)]
+mod screen_watch;
 mod resume;
 mod subagents;
 mod tasks;

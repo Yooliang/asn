@@ -666,6 +666,7 @@ impl Core {
             roster::apply_mod_status(&mut l, &self.cfg.status_dir, now);
             let live: Vec<String> = l.iter().filter_map(|w| w.session_id.clone()).collect();
             roster::cleanup_mod_status(&self.cfg.status_dir, &live, now);
+            roster::cleanup_mod_status(&self.cfg.status_dir.with_file_name(roster::SCREEN_DIR), &live, now);
             self.roster_fp = Some(roster::local_fingerprint(&l));
             self.roster_at = now;
             self.claude_roster = l;
