@@ -34,12 +34,17 @@ pub fn legacy_status(work_dir: &Path, my_pid: u32, alive: impl Fn(u32) -> bool) 
 
 /// 對外部世界做事的介面（測試換成假的，不會真的殺程序或動排程）
 pub trait Exec {
+    /// 結束前的核對：這個編號真的是記錄檔的主人（見 lock::Holder::may_kill）
+    fn may_kill(&self, work_dir: &Path, pid: u32) -> bool;
     fn kill_pid(&self, pid: u32) -> Result<(), String>;
     fn disable_task(&self, name: &str) -> Result<(), String>;
 }
 
 pub struct SystemExec;
 impl Exec for SystemExec {
+    fn may_kill(&self, work_dir: &Path, pid: u32) -> bool {
+        super::lock::may_kill_holder(work_dir, pid)
+    }
     fn kill_pid(&self, pid: u32) -> Result<(), String> {
         kill_pid(pid)
     }
@@ -144,11 +149,16 @@ pub fn takeover(work_dir: &Path, node: &str, my_pid: u32, alive: impl Fn(u32) ->
         return Err(TakeoverError::NotConfirmed);
     }
     let Legacy::Running { bridge_pid, mailbox_pid } = legacy_status(work_dir, my_pid, &alive) else { return Err(TakeoverError::NothingToDo) };
+    // 什麼都還沒動之前先核對：編號可能已經被無關的程序用走，確認不了就不動手
+    if !exec.may_kill(work_dir, bridge_pid) {
+        return Err(TakeoverError::Failed(format!("無法確認程序 {bridge_pid} 是舊版收發信小程式，沒有結束任何程序")));
+    }
     exec.disable_task(&task_name(node)).map_err(TakeoverError::Failed)?;
     exec.disable_task(&legacy_task_name(node)).map_err(TakeoverError::Failed)?;
     let mut stopped = vec![];
     if let Some(m) = mailbox_pid {
-        if m != my_pid {
+        // worker 確認不了就跳過：它不是擋住接手的那一個，不能為了它結束無關的程序
+        if m != my_pid && exec.may_kill(work_dir, m) {
             exec.kill_pid(m).map_err(TakeoverError::Failed)?;
             stopped.push(m);
         }
@@ -193,8 +203,13 @@ mod tests {
     struct Fake {
         calls: RefCell<Vec<String>>,
         fail_kill: Option<u32>,
+        /// 核對不過的編號
+        refuse: Vec<u32>,
     }
     impl Exec for Fake {
+        fn may_kill(&self, _work_dir: &Path, pid: u32) -> bool {
+            !self.refuse.contains(&pid)
+        }
         fn kill_pid(&self, pid: u32) -> Result<(), String> {
             self.calls.borrow_mut().push(format!("kill {pid}"));
             if self.fail_kill == Some(pid) { Err("拒絕存取".into()) } else { Ok(()) }
@@ -243,6 +258,23 @@ mod tests {
         let stopped = takeover(d.path(), "H", 7, |_| true, &f, true, true).unwrap();
         assert_eq!(stopped, vec![101, 100]);
         assert_eq!(*f.calls.borrow(), vec!["disable AsnBridge-H", "disable IroriRelayMachine-H", "kill 101", "kill 100"]);
+    }
+
+    #[test]
+    fn 接手_橋的編號核對不過_什麼都不動() {
+        let d = setup("100", Some("101"));
+        let f = Fake { refuse: vec![100], ..Default::default() };
+        let e = takeover(d.path(), "H", 7, |_| true, &f, true, true).unwrap_err();
+        assert!(matches!(e, TakeoverError::Failed(ref m) if m.contains("沒有結束任何程序")), "{e:?}");
+        assert!(f.calls.borrow().is_empty(), "排程不動、程序不殺：{:?}", f.calls.borrow());
+    }
+
+    #[test]
+    fn 接手_worker_的編號核對不過_只跳過它() {
+        let d = setup("100", Some("101"));
+        let f = Fake { refuse: vec![101], ..Default::default() };
+        assert_eq!(takeover(d.path(), "H", 7, |_| true, &f, true, true).unwrap(), vec![100]);
+        assert!(!f.calls.borrow().iter().any(|c| c == "kill 101"), "{:?}", f.calls.borrow());
     }
 
     #[test]

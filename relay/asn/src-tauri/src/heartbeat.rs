@@ -142,6 +142,28 @@ pub fn is_asn_process(pid: u32) -> Option<bool> {
     Some(image_is_asn(comm.trim()))
 }
 
+/// 程序的執行檔（Windows 是完整路徑，其他系統是程序名）。查不到回 None
+#[cfg(windows)]
+pub fn process_image(pid: u32) -> Option<String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION};
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            return None;
+        }
+        let mut buf = [0u16; 1024];
+        let mut len = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(h, 0, buf.as_mut_ptr(), &mut len) != 0;
+        CloseHandle(h);
+        ok.then(|| String::from_utf16_lossy(&buf[..len as usize]))
+    }
+}
+#[cfg(not(windows))]
+pub fn process_image(pid: u32) -> Option<String> {
+    Some(fs::read_to_string(format!("/proc/{pid}/comm")).ok()?.trim().to_string())
+}
+
 /// 執行檔名（不分大小寫、不看路徑）是 asn 或 asn.exe
 pub fn image_is_asn(path: &str) -> bool {
     let file = path.rsplit(['\\', '/']).next().unwrap_or(path).to_ascii_lowercase();
