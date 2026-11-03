@@ -86,6 +86,10 @@ pub trait Runner {
     }
     /// 行程的建立時間（毫秒，查不到＝None）：結束行程前用來確認還是當初啟動的那一個，防程式編號被回收後誤殺別人
     fn started_ms(&self, pid: u32) -> Option<u64>;
+    /// 程序的執行檔完整路徑（查不到＝None）。結束不是剛起的程序前核對用。預設查不到
+    fn exe_path(&self, _pid: u32) -> Option<PathBuf> {
+        None
+    }
     /// 這個程序還在不在。預設＝在（測試的假 runner 不用改）
     fn alive(&self, _pid: u32) -> bool {
         true
@@ -188,6 +192,24 @@ impl Runner for RealRunner {
 
     fn started_ms(&self, pid: u32) -> Option<u64> {
         crate::heartbeat::process_started_ms(pid)
+    }
+
+    #[cfg(windows)]
+    fn exe_path(&self, pid: u32) -> Option<PathBuf> {
+        use std::os::windows::ffi::OsStringExt;
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION};
+        unsafe {
+            let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if h.is_null() {
+                return None;
+            }
+            let mut buf = vec![0u16; 1024];
+            let mut n = buf.len() as u32;
+            let ok = QueryFullProcessImageNameW(h, 0, buf.as_mut_ptr(), &mut n);
+            CloseHandle(h);
+            (ok != 0).then(|| PathBuf::from(std::ffi::OsString::from_wide(&buf[..n as usize])))
+        }
     }
 
     fn alive(&self, pid: u32) -> bool {
