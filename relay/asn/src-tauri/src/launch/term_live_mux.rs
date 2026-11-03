@@ -70,7 +70,7 @@ fn 關單一窗格_其他夥伴照跑_mux_還在() {
     let rig = Rig::new();
     let s = rig.svc();
     let opened: Vec<_> = (0..3).map(|n| rig.open(&s, n)).collect();
-    println!("開了：{opened:?}");
+    elog!("開了：{opened:?}");
     (0..3).for_each(|n| rig.wait_beating(n));
     let mux = opened[0].1;
     assert!(opened.iter().all(|o| o.1 == mux), "三個夥伴應該在同一個 mux");
@@ -80,7 +80,7 @@ fn 關單一窗格_其他夥伴照跑_mux_還在() {
     std::thread::sleep(Duration::from_millis(800));
     let dead = !rig.beating(0);
     let (a, b) = (rig.beating(1), rig.beating(2));
-    println!("關第一個之後：被關的停了={dead} 另外兩個還在跑={a},{b} 表上={:?}", rows(&s));
+    elog!("關第一個之後：被關的停了={dead} 另外兩個還在跑={a},{b} 表上={:?}", rows(&s));
     assert!(dead && a && b);
     assert!(mux_pids().contains(&mux), "mux 不能跟著結束");
     assert_eq!(rows(&s).len(), 2);
@@ -88,7 +88,7 @@ fn 關單一窗格_其他夥伴照跑_mux_還在() {
     s.stop_partner(&opened[1].0).unwrap();
     s.stop_partner(&opened[2].0).unwrap();
     // 最後一個夥伴關掉：ASN 收掉空的 mux（設計 11.2-7）
-    println!("RESULT 關完最後一個後 mux 還在：{}", mux_pids().contains(&mux));
+    elog!("RESULT 關完最後一個後 mux 還在：{}", mux_pids().contains(&mux));
     assert!(!mux_pids().contains(&mux), "沒有夥伴時不留下空 mux");
 }
 
@@ -106,7 +106,7 @@ fn 服務重開_認回夥伴_沿用同一個_mux_個數不增加() {
 
     let s2 = rig.svc();
     s2.reclaim().expect("認領");
-    println!("重開後表上：{:?}", rows(&s2));
+    elog!("重開後表上：{:?}", rows(&s2));
     assert_eq!(rows(&s2).len(), 2, "兩個夥伴都要認回來");
     assert!(rig.beating(10) && rig.beating(11), "重開不影響夥伴");
     let c = rig.open(&s2, 12);
@@ -117,7 +117,7 @@ fn 服務重開_認回夥伴_沿用同一個_mux_個數不增加() {
         s2.stop_partner(id).unwrap();
     }
     assert!(!mux_pids().contains(&a.1), "最後一個夥伴關掉就收掉 mux");
-    println!("RESULT 重開認回 2 個，第 3 個同一個 mux");
+    elog!("RESULT 重開認回 2 個，第 3 個同一個 mux");
 }
 
 #[test]
@@ -144,7 +144,7 @@ fn 舊通訊檔與反覆開關_mux_不累積() {
         seen.push((pid, count));
         assert_eq!(count, 1, "第 {round} 輪 mux 個數");
     }
-    println!("RESULT 8 輪（mux 編號, 個數）：{seen:?}");
+    elog!("RESULT 8 輪（mux 編號, 個數）：{seen:?}");
     assert!(seen.iter().all(|x| x.0 == first.1), "都應該開在同一個 mux");
     s.stop_partner(&first.0).unwrap();
     assert!(!mux_pids().contains(&first.1), "最後一個夥伴關掉就收掉 mux");
@@ -165,7 +165,7 @@ fn 兩段式_1_開夥伴後程序直接結束() {
     let keep = rig.tmp.path().to_path_buf();
     std::fs::write(&state, format!("{}\n{}\n{}\n{}\n", keep.display(), a.0, b.0, a.1)).unwrap();
     std::mem::forget(rig);
-    println!("RESULT 第一段：mux {}，夥伴 {} {}；不收尾直接結束", a.1, a.0, b.0);
+    elog!("RESULT 第一段：mux {}，夥伴 {} {}；不收尾直接結束", a.1, a.0, b.0);
     std::process::exit(0);
 }
 
@@ -179,7 +179,7 @@ fn 兩段式_2_認回並收乾淨() {
     let hb = |n: usize| std::fs::metadata(t.join(format!("hb-{n}.txt"))).map(|m| m.len()).unwrap_or(0);
     let (h0, h1) = (hb(40), hb(41));
     std::thread::sleep(Duration::from_millis(1500));
-    println!("程序結束後夥伴還在跑：{},{}；mux {} 還在：{}", hb(40) > h0, hb(41) > h1, l[3], mux_pids().contains(&l[3].parse().unwrap()));
+    elog!("程序結束後夥伴還在跑：{},{}；mux {} 還在：{}", hb(40) > h0, hb(41) > h1, l[3], mux_pids().contains(&l[3].parse().unwrap()));
     assert!(hb(40) > h0 && hb(41) > h1, "ASN 結束後夥伴要繼續跑");
     let dir = wezterm::locate(&wezterm::RealFs).unwrap();
     let mut s = TermService::fixed(dir, t.join("wezterm-term.lua"), t.join("wezterm-terms.json"), crate::identity::home_dir(), wezterm::RealRunner, wezterm::RealFs);
@@ -193,7 +193,7 @@ fn 兩段式_2_認回並收乾淨() {
     let mux: u32 = l[3].parse().unwrap();
     assert!(!mux_pids().contains(&mux), "最後一個夥伴關掉就收掉 mux");
     let _ = std::fs::remove_dir_all(&t);
-    println!("RESULT 第二段：認回 2 個並收乾淨");
+    elog!("RESULT 第二段：認回 2 個並收乾淨");
 }
 
 /// 畫面操作用（捲動、Ctrl+C、按 X、中文）：開一個真的 claude（haiku，會用到少量額度）留著，等外面操作。
@@ -217,17 +217,17 @@ fn 真_claude_留給外面操作() {
     }
     let row = s.inner.lock().unwrap().sessions.iter().find(|x| x.id == id).map(|x| (x.kind.clone(), x.session_id.clone()));
     std::fs::write(flags.join("opened"), format!("{id} {pid} {row:?}")).unwrap();
-    println!("RESULT 開好：{id} {pid} {row:?}");
+    elog!("RESULT 開好：{id} {pid} {row:?}");
     let t = Instant::now();
     while !flags.join("done").exists() && t.elapsed() < Duration::from_secs(600) {
         std::thread::sleep(Duration::from_millis(200));
     }
     // 外面可能已經關窗：查狀態、收尾都照實印
-    println!("RESULT 收尾前表上：{:?}；read：{:?}", rows(&s), s.read(&id, 5).map(|x| x.len()));
+    elog!("RESULT 收尾前表上：{:?}；read：{:?}", rows(&s), s.read(&id, 5).map(|x| x.len()));
     if mode == "mux" {
-        println!("RESULT stop_partner：{:?}", s.stop_partner(&id));
+        elog!("RESULT stop_partner：{:?}", s.stop_partner(&id));
     } else {
-        println!("RESULT stop_gui：{:?}", s.stop_gui(pid));
+        elog!("RESULT stop_gui：{:?}", s.stop_gui(pid));
     }
     std::thread::sleep(Duration::from_millis(1500));
     let _ = std::fs::write(flags.join("stopped"), "1");
@@ -270,7 +270,7 @@ fn 指令寫法_裸名_cmd_ps1_exe_不存在() {
             std::thread::sleep(Duration::from_secs(5));
             let wrote: Vec<String> = ["cmd", "ps1", "exe"].iter().filter_map(|f| std::fs::read_to_string(out(f)).ok().map(|t| format!("{f}={}", t.trim()))).collect();
             let shown = opened.as_ref().map(|x| x.0.clone()).map_err(|e| format!("{e:?}").chars().take(80).collect::<String>());
-            println!("RESULT {} {name}：開窗={shown:?} 程式寫出={wrote:?}", if use_mux { "mux" } else { "視窗" });
+            elog!("RESULT {} {name}：開窗={shown:?} 程式寫出={wrote:?}", if use_mux { "mux" } else { "視窗" });
             if let Ok((id, pid)) = opened {
                 if use_mux {
                     own_mux = Some(pid);
@@ -282,7 +282,7 @@ fn 指令寫法_裸名_cmd_ps1_exe_不存在() {
         }
         if use_mux {
             let left: Vec<u32> = mux_pids().into_iter().filter(|p| !before.contains(p)).collect();
-            println!("RESULT mux 收尾後留下：{left:?}（最後一個成功的是 {own_mux:?}）");
+            elog!("RESULT mux 收尾後留下：{left:?}（最後一個成功的是 {own_mux:?}）");
             assert!(left.is_empty(), "開窗失敗也不留下空 mux");
         }
     }
