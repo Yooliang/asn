@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder, Window};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Window};
 
 const TOAST_W: f64 = 270.0;
 const TOAST_H: f64 = 96.0;
@@ -57,6 +57,22 @@ pub fn setup_progress_snapshot() -> Vec<serde_json::Value> {
     PROG_LAST.lock().unwrap().clone()
 }
 
+/// 顯示但不啟用視窗。`.focused(false)` 只管建窗當下：tao 建完窗就清掉「不搶焦點」記號，之後的 `show()` 走 SW_SHOW，
+/// ASN 在前景時會把系統前景與輸入焦點搶到這扇窗，`.focusable(false)`（WS_EX_NOACTIVATE）擋不住。
+/// 只有不該拿焦點的小窗用；這個呼叫繞過 tao，所以它記的「可見」狀態不會更新，這些窗之後也不靠它判斷。
+#[cfg(windows)]
+fn show_no_activate(w: &WebviewWindow) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindowAsync, SW_SHOWNOACTIVATE};
+    match w.hwnd() {
+        Ok(h) => unsafe { ShowWindowAsync(h.0 as _, SW_SHOWNOACTIVATE); },
+        Err(_) => { let _ = w.show(); }
+    }
+}
+#[cfg(not(windows))]
+fn show_no_activate(w: &WebviewWindow) {
+    let _ = w.show();
+}
+
 /// 開常駐進度小窗（已經開著就什麼都不做）：置頂、不搶輸入焦點、不進工作列、無邊框透明、可以點（取消鈕），不會自己關，結束後由呼叫端用 close_setup_progress 關。
 /// 主視窗隱藏或最小化時照樣跳出來（它是獨立的視窗）
 /// 回傳這一輪的編號。上一輪的小窗還開著（結果還在顯示）就沿用那個視窗，但清掉舊狀態、送「重來」事件讓畫面回到開頭，舊的計時到了也不會關到這一輪
@@ -65,7 +81,7 @@ pub fn open_setup_progress(app: &AppHandle) -> Result<u64, String> {
     PROG_LAST.lock().unwrap().clear();
     if let Some(w) = app.get_webview_window(PROG_LABEL) {
         let _ = app.emit("agent-setup", serde_json::json!({ "phase": "reset" }));
-        let _ = w.show();
+        show_no_activate(&w);
         return Ok(round);
     }
     let w = WebviewWindowBuilder::new(app, PROG_LABEL, WebviewUrl::App("setup-progress.html".into()))
@@ -89,7 +105,7 @@ pub fn open_setup_progress(app: &AppHandle) -> Result<u64, String> {
         let (x, y) = progress_origin(wa.position.x, wa.position.y, wa.size.width as i32, wa.size.height as i32, m.scale_factor());
         let _ = w.set_position(PhysicalPosition::new(x, y));
     }
-    let _ = w.show();
+    show_no_activate(&w);
     Ok(round)
 }
 
@@ -404,7 +420,7 @@ pub async fn show_toast(app: AppHandle, slots: State<'_, Slots>, toast: Toast) -
         let y = wa.position.y + wa.size.height as i32 - (th + gap) * (slot as i32 + 1);
         let _ = w.set_position(PhysicalPosition::new(x, y));
     }
-    let _ = w.show();
+    show_no_activate(&w);
     let (a2, l2) = (app.clone(), label.clone());
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_millis(TOAST_MS)).await;
