@@ -328,6 +328,20 @@
                           </li>
                         </ul>
                         <div class="m-dv-none" v-else>{{ acctRep && acctRep.loading ? '讀取中…' : (v.note || '目前未回報任何帳號') }}</div>
+                        <div class="m-dv-setup" v-if="v.key === 'claude' && ((showSetupButton(v.key, v.action) && setupSt.stage === 'idle') || (setupSt.node === acctCur.key && setupSt.stage !== 'idle'))">
+                          <button type="button" class="m-btn" v-if="setupSt.stage === 'idle'" @click="setupAsk(acctCur.key)">{{ SETUP_TEXT.button }}</button>
+                          <div class="m-dv-confirm" role="alertdialog" :aria-label="SETUP_TEXT.confirmTitle(acctCur.label)" v-else-if="setupSt.stage === 'confirm'">
+                            <b>{{ SETUP_TEXT.confirmTitle(acctCur.label) }}</b>
+                            <p>{{ SETUP_TEXT.confirmBody }}</p>
+                            <p class="m-fine">{{ SETUP_TEXT.confirmNeed }}</p>
+                            <div class="m-dv-sbtns"><button type="button" class="m-btn" @click="setupYes">{{ SETUP_TEXT.yes }}</button><button type="button" class="m-btn" @click="setupNo">{{ SETUP_TEXT.no }}</button></div>
+                          </div>
+                          <div class="m-dv-prog" role="status" aria-live="polite" v-else>
+                            <b :class="{ ok: setupSt.stage === 'done' && setupSt.ok, bad: setupSt.stage === 'done' && !setupSt.ok }">{{ setupSt.text }}</b>
+                            <p class="m-fine" v-if="setupSt.note">{{ SETUP_TEXT.replaced }}：{{ setupSt.note }}</p>
+                            <div class="m-dv-sbtns" v-if="setupSt.stage === 'done'"><button type="button" class="m-btn" @click="setupClose">{{ SETUP_TEXT.close }}</button></div>
+                          </div>
+                        </div>
                         <small class="m-fine" v-if="v.switchHint">{{ v.switchHint }}</small>
                       </div>
                     </li>

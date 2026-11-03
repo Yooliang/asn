@@ -649,3 +649,27 @@ mod tests {
         assert!(node_in_list(&nodes, "H") && !node_in_list(&nodes, "W") && !node_in_list(&Value::Null, "H"));
     }
 }
+
+/// 手機要某台電腦「安裝並登入 Claude Code」（#628／174 的 F）：後台只認登入憑證的本人，對別人的設備一律 not_found。
+/// 錯誤字串形如 `setup:asn_outdated`（後台的錯誤代碼），畫面再對應成人話；連不上等沒有代碼的錯誤直接回人話。→ { ok, already, state }
+#[tauri::command]
+pub async fn setup_remote_request(app: State<'_, App>, auth: State<'_, AuthState>, node: String) -> Result<Value, String> {
+    if app.shot.is_some() {
+        return Err("--shot 模式不安裝".into());
+    }
+    let c = ctx()?;
+    let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
+    call(&c.client, &c.relay_url, &token, "node_setup_request", None, json!({ "node": node })).await.map_err(|e| if e.code.is_empty() { e.text } else { format!("setup:{}", e.code) })
+}
+
+/// 自己帳號下各設備的安裝請求狀態 → { nodes: [{ id, setup: null | { state: pending | taken | done | failed, detail, replaced, at } }] }。
+/// 沒登入、--shot 模式回空清單（不報錯）。
+#[tauri::command]
+pub async fn setup_remote_status(app: State<'_, App>, auth: State<'_, AuthState>) -> Result<Value, String> {
+    if app.shot.is_some() || !auth.status().signed_in {
+        return Ok(json!({ "nodes": [] }));
+    }
+    let c = ctx()?;
+    let token = auth.access_token(&c.client, &c.auth_base, &c.anon).await?;
+    Ok(call(&c.client, &c.relay_url, &token, "node_setup_status", None, json!({})).await?)
+}

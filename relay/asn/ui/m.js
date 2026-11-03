@@ -26,6 +26,7 @@ import { cleanPiModels } from './lib/pi-models.mjs'
 import { fetchRoster, ROSTER_POLL_MS, ROSTER_TEXT, usedOnText } from './lib/account-roster.mjs'
 import { PLAN_UNKNOWN, planLabel } from './lib/account-quota.mjs'
 import { INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL } from './lib/claude-accounts.mjs'
+import { POLL_MS as SETUP_POLL_MS, SETUP_TEXT, setupErrorText, setupStateOf, setupView, showSetupButton } from './lib/mobile-setup.mjs'
 import { ACCT_TEXT, acctPageTitle, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS, ACCT_TABS, acctTabOf, acctSwitchTargets as acctSwitchTargetsOf } from './lib/mobile-acct.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, dropSlot, moveDevice, moveFlags, pruneRemoved, removeDevice, removedRows, reorderDevice, restoreDevice, showDevice, visibleRows, canRemoveRow, DEVICE_TEXT } from './lib/device-order.mjs'
@@ -559,11 +560,46 @@ const app = createApp({
     // 帳號分頁的「切換到某台」：開那台的細部頁、等它的帳號讀回來，再進確認畫面（現有的選帳號→確認→送出流程，不另做一套）
     const setAcctTab = t => { acctSw.tab = acctTabOf(t) }
     const acctSwitchOn = async (node, email) => { await openAcctDevice(node); startAcctSwitch(email) }
+    // 從手機替電腦安裝並登入 Claude Code（#650 F）：按鈕 → 確認 → 送出 → 每 5 秒查狀態 → 結果。真正的安裝在電腦上做，這裡只下指令與看狀態
+    const setupSt = reactive({ node: '', stage: 'idle', since: 0, saw: false, text: '', note: '', ok: false, msg: '' })
+    let setupTimer = null
+    const setupStop = () => { clearInterval(setupTimer); setupTimer = null }
+    const setupReset = () => { setupStop(); Object.assign(setupSt, { node: '', stage: 'idle', since: 0, saw: false, text: '', note: '', ok: false, msg: '' }) }
+    const setupAsk = node => { setupReset(); Object.assign(setupSt, { node, stage: 'confirm' }) }
+    const setupNo = () => { if (setupSt.stage === 'confirm') setupReset() }
+    const setupPoll = async () => {
+      const node = setupSt.node
+      if (!node || setupSt.stage !== 'waiting') return
+      let st = null
+      try { st = setupStateOf((await invoke('setup_remote_status'))?.nodes, node) } catch { return }   // 查不到這一輪就下一輪再查
+      if (setupSt.node !== node || setupSt.stage !== 'waiting') return
+      if (st) setupSt.saw = true
+      const v = setupView(st, { since: setupSt.since, now: Date.now(), sawRequest: setupSt.saw })
+      Object.assign(setupSt, { text: v.text, note: v.note, ok: v.ok })
+      if (v.done) { setupStop(); setupSt.stage = 'done' }
+    }
+    const setupYes = async () => {
+      if (setupSt.stage !== 'confirm') return
+      const node = setupSt.node
+      setupSt.stage = 'sending'; setupSt.msg = ''; setupSt.text = SETUP_TEXT.sending
+      try {
+        await invoke('setup_remote_request', { node })
+      } catch (e) {
+        if (setupSt.node !== node) return
+        Object.assign(setupSt, { stage: 'done', ok: false, text: setupErrorText(e), note: '' })
+        return
+      }
+      if (setupSt.node !== node) return
+      Object.assign(setupSt, { stage: 'waiting', since: Date.now(), text: SETUP_TEXT.pending })
+      setupTimer = setInterval(() => void setupPoll(), SETUP_POLL_MS)
+      void setupPoll()
+    }
+    const setupClose = () => setupReset()
     // 返回：細部頁回列表＝退一筆記錄（細部是第四頁籤上的一層；退回列表時 acctSw 由下面的監看整理）。細部頁頂端的「‹ 返回」、標題列返回鍵、系統返回鍵都一樣
     const acctBackToList = () => back()
     // 第四頁籤的內頁換了：設備與帳號的列表／細部跟著記錄走；離開設備與帳號就讓還在跑的讀取與切換不再更新畫面
     watch(fourthPage, (p, old) => {
-      if (p?.kind !== 'acct') { if (old?.kind === 'acct') { acctToken++; acctEpoch++ } return }
+      if (p?.kind !== 'acct') { if (old?.kind === 'acct') { acctToken++; acctEpoch++; setupReset() } return }
       if (p.node) { acctSw.node = p.node; acctSw.page = 'detail'; return }
       if (old?.kind === 'acct' && old.node) acctToken++   // 細部退回列表：進行中的切換不再更新畫面
       Object.assign(acctSw, { phase: 'pick', page: 'list', node: '', picked: '' })
@@ -964,7 +1000,7 @@ const app = createApp({
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
-      acctSw, setAcctTab, acctSwitchOn, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a), usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
+      setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, acctSw, setAcctTab, acctSwitchOn, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a), usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT,
