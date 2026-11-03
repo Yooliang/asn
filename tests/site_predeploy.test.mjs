@@ -168,7 +168,7 @@ test('線上回 404：回應內容要丟棄，否則連線一直開著、部署�
   const fetchFn = async () => ({ ok: false, status: 404, headers: { get: () => null }, body: { cancel: async () => { cancelled++ } } })
   const r = await predeploy({ siteDir: dir, fetchFn, history: [oldEntry] })
   assert.ok(r.skipped.includes('update/ASN_0.1.95_android.apk'))
-  assert.equal(cancelled, 1)
+  assert.equal(cancelled, r.skipped.length) // 每一個略過的 404 都要丟棄（含線上沒有的 .sig）
 })
 
 test('歷史 APK：線上的內容和當時記的 sha256 對不起來 → 擋下', async () => {
