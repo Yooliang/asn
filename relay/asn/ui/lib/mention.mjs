@@ -5,7 +5,8 @@ import { KIND_BADGE, safeLabel } from './groups.mjs'
 import { esc } from './text.mjs'
 
 export const MENTION_MAX_QUERY = 20
-export const MENTION_MAX_OPTIONS = 8
+// 選單不截人數：全部列出、自己捲動；列太多時用這句提示還能往下滑（畫面上只在還沒滑到底時顯示）
+export const MENTION_MORE_HINT = '還有更多，往下滑'
 
 // 可以被點名的成員（只給畫面用的 { label, kind }）：自己（本人）不用點；沒有名字的略過；同名只留一個（後台也只認得第一個）
 export function mentionTargets(members) {
@@ -37,7 +38,7 @@ export function mentionOptions(targets, query) {
   const q = String(query ?? '').trim().toLowerCase()
   const list = (Array.isArray(targets) ? targets : []).filter(t => !q || t.label.toLowerCase().includes(q))
   list.sort((a, b) => Number(b.label.toLowerCase().startsWith(q)) - Number(a.label.toLowerCase().startsWith(q)))
-  return list.slice(0, MENTION_MAX_OPTIONS).map(t => ({ ...t, badge: KIND_BADGE[t.kind] ?? '' }))
+  return list.map(t => ({ ...t, badge: KIND_BADGE[t.kind] ?? '' }))
 }
 
 // 選好一位：把「@打到一半的字」換成「@完整名字 」，游標落在空白之後

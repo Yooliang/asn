@@ -7,7 +7,7 @@ import { foldBarArrow, hasSideCol, isCollapsed, msgLayout, paneClasses, sideOf }
 import { autoAvatarDataUrl } from './avatar.mjs'
 import { AsnAvatar } from './avatar-badge.mjs'
 import { QUOTE_PREFIX, composeReply, findQuoted, replyTarget, splitQuote } from './reply-quote.mjs'
-import { applyMention, markMentions, mentionOptions, mentionQuery } from './mention.mjs'
+import { MENTION_MORE_HINT, applyMention, markMentions, mentionOptions, mentionQuery } from './mention.mjs'
 import { FILE_ACCEPT, formatBytes, photoExpired, photoTitle } from './photo.mjs'
 import { attachmentFromFile, imageFromBlob } from './photo-canvas.mjs'
 import { Annotator } from './annotator.mjs'
@@ -130,12 +130,20 @@ export const ChatPane = {
     }
     // ---- 群組 @ 點名：打 @ 跳出成員選單（上下鍵、Enter 或點選）；後台從內文的 @名字 解析點名，不另送欄位 ----
     const mention = ref(null)   // { q, options, idx }；沒有就是選單關著
+    const menuEl = ref(null), mentionMore = ref(false)   // 選單下面還有沒看到的人，就顯示「往下滑」提示
+    function syncMore() {
+      const el = menuEl.value
+      mentionMore.value = !!el && el.scrollHeight - el.scrollTop - el.clientHeight > 4
+    }
+    const afterMenu = () => nextTick(() => { syncMore(); menuEl.value?.querySelector('button.on')?.scrollIntoView({ block: 'nearest' }) })
     const bodyHtml = text => (isRoom.value ? markMentions(renderMarkdown(text), props.friend?.mentionable?.map(t => t.label)) : renderMarkdown(text))
     function onDraftInput() {
       if (!isRoom.value) return
       const q = mentionQuery(draft.value, composeEl.value?.selectionStart)
       const options = q ? mentionOptions(props.friend?.mentionable, q.query) : []
       mention.value = q && options.length ? { q, options, idx: 0 } : null
+      mentionMore.value = false
+      if (mention.value) afterMenu()
     }
     function pickMention(o) {
       const m = mention.value; if (!m) return
@@ -146,7 +154,7 @@ export const ChatPane = {
     }
     function onComposeKey(ev) {
       const m = mention.value; if (!m) return
-      if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') { ev.preventDefault(); m.idx = (m.idx + (ev.key === 'ArrowDown' ? 1 : m.options.length - 1)) % m.options.length }
+      if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') { ev.preventDefault(); m.idx = (m.idx + (ev.key === 'ArrowDown' ? 1 : m.options.length - 1)) % m.options.length; afterMenu() }
       else if (ev.key === 'Tab') { ev.preventDefault(); pickMention() }
       else if (ev.key === 'Escape') { ev.stopPropagation(); mention.value = null }
     }
@@ -349,7 +357,7 @@ export const ChatPane = {
     // header 的個人訊息：背景工作件數已經在「工作項目」大按鈕上，拿掉那段（#539 之三）；群組照舊
     // 手機（noBar）沒有那顆按鈕，件數照樣留在個人訊息裡
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
+    return { dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, showWaiting, warn, loginText, renderMarkdown, onBodyClick, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, photoTitle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -464,8 +472,9 @@ export const ChatPane = {
       </div>
       <div class="reply-bar" v-if="replying"><span class="reply-bar-text"><b>回覆 {{ plain(replying.author) }}</b>：{{ plain(replying.excerpt) }}</span><button class="reply-bar-x" type="button" @click="cancelReply" aria-label="取消回覆" title="取消回覆">✕</button></div>
       <form class="composer" @submit.prevent="send">
-        <ul class="mention-menu" v-if="mention" role="listbox" aria-label="選擇要點名的成員">
+        <ul class="mention-menu" ref="menuEl" v-if="mention" role="listbox" aria-label="選擇要點名的成員" @scroll.passive="syncMore">
           <li v-for="(o, i) in mention.options" :key="o.label"><button type="button" role="option" :class="{ on: i === mention.idx }" :aria-selected="i === mention.idx" @mousedown.prevent @click="pickMention(o)"><span class="mention-name">{{ o.label }}</span><small class="who-badge" :class="'is-' + o.kind">{{ o.badge }}</small></button></li>
+          <li class="mention-more" v-if="mentionMore" aria-hidden="true">{{ MENTION_MORE_HINT }} ▾</li>
         </ul>
         <textarea ref="composeEl" v-model="draft" @input="onDraftInput" @click="onDraftInput" @keydown="onComposeKey" @keydown.enter.exact="onEnter" @paste="onPaste" :placeholder="composeHint" :title="composeTitle || undefined" aria-label="輸入訊息" :disabled="displayOnly"></textarea>
         <button class="aero-btn" type="submit" :disabled="displayOnly || !draft.trim()">傳送</button>
