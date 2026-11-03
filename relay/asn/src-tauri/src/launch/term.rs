@@ -2225,7 +2225,7 @@ fn atomic_write(path: &Path, text: &str) -> Result<(), String> {
 pub type LiveTerms = TermService<wezterm::RealRunner, wezterm::RealFs>;
 
 /// 空記憶體（位元組）；讀不到回 None
-#[cfg(windows)]
+#[cfg(all(feature = "gui", windows))]
 fn free_memory_bytes() -> Option<u64> {
     #[repr(C)]
     struct MemoryStatusEx {
@@ -2247,12 +2247,13 @@ fn free_memory_bytes() -> Option<u64> {
     m.length = std::mem::size_of::<MemoryStatusEx>() as u32;
     (unsafe { GlobalMemoryStatusEx(&mut m) } != 0).then_some(m.avail_phys)
 }
-#[cfg(not(windows))]
+#[cfg(all(feature = "gui", not(windows)))]
 fn free_memory_bytes() -> Option<u64> {
     None
 }
 
 /// 外掛狀態檔的 state（只拿來決定讀的頻率，讀不到就是 None）
+#[cfg(feature = "gui")]
 fn mod_state_of(status_dir: &Path, sid: &str) -> Option<String> {
     let text = std::fs::read_to_string(status_dir.join(format!("{sid}.json"))).ok()?;
     let v: serde_json::Value = serde_json::from_str(&text).ok()?;
@@ -2260,6 +2261,7 @@ fn mod_state_of(status_dir: &Path, sid: &str) -> Option<String> {
 }
 
 /// 寫判斷結果（只有 session、固定代號與時間）；沒有提示就刪掉，名單馬上回到原本的說明
+#[cfg(feature = "gui")]
 fn write_screen_code(dir: &Path, sid: &str, code: Option<&str>, now: u64) {
     let path = dir.join(format!("{sid}.json"));
     let Some(code) = code else {
@@ -2275,6 +2277,7 @@ fn write_screen_code(dir: &Path, sid: &str, code: Option<&str>, now: u64) {
 }
 
 /// 背景讀 Claude 夥伴視窗的畫面，判斷卡在哪（todo-next-162 第 2 段）。預設關；這一段只標狀態，沒有按鈕，也不送字
+#[cfg(feature = "gui")]
 pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, data_dir: &Path) {
     use super::screen_watch::{pace_of, Schedule, ENV_SCREEN_WATCH, TICK_MS};
     if std::env::var(ENV_SCREEN_WATCH).as_deref() != Ok("1") || std::env::args().any(|a| a == "--shot") {
