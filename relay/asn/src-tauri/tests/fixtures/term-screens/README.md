@@ -40,3 +40,18 @@
 - claude 卡額度、登入失效的真實畫面（遇到時再補，同名去掉 `.synthetic`）。
 - pi 的權限詢問、執行中動態字樣（這次的請求很快就回錯誤，沒有取到）。
 - codex、gemini：由 w02/Gemini 協助蒐集。
+
+## 第二批（todo-next-162，2026-11-03）
+
+工作機、claude 2.1.317、窗格 80x24。這台已登入，也接受過略過權限警告，所以**不等於乾淨機器**。遮罩方式同上。
+
+| 檔案 | 狀態 |
+|---|---|
+| claude-permission-write.txt | 權限詢問：寫檔 |
+| claude-permission-webfetch.txt | 權限詢問：讀網頁 |
+| claude-plan-approval.txt | 計畫確認 |
+| claude-ask-user-question.txt | AskUserQuestion |
+| claude-auto-mode-teach.txt | auto 模式的說明選單，下方還有輸入框 |
+| claude-lookalike-model-text.txt | 內容長得像提示，實際上是閒置 |
+| claude-lookalike-tool-output.txt | 同上，內容來自工具輸出 |
+| claude-bypass-warning.synthetic.txt | 第一次略過權限的警告：**未實測**，字串取自執行檔，排版是推測的 |

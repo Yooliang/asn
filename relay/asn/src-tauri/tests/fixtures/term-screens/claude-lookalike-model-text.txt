@@ -1,0 +1,24 @@
+❯ Reply with exactly the full contents of fake.txt as plain text with no code   
+  block and no extra words.                                                     
+                                                                                
+  Read 1 file                                                                   
+                                                                                
+● Do you want to proceed?
+   ❯ 1. Yes                                                                     
+     2. No
+                                                                                
+  Esc to cancel · Tab to amend
+                                                                                
+  Quick safety check: Is this a project you created or one you trust?
+   ❯ No, exit
+     Yes, I trust this folder
+  Enter to confirm · Esc to cancel                                              
+  Do you trust the contents of this directory
+                                                                                
+✻ Crunched for 3s · done 下午0:00                                               
+                                                                                
+──────────────────────────────────────────────────────────────────── t162-test ─
+❯                                                                               
+────────────────────────────────────────────────────────────────────────────────
+                                                                                
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 2 agents
