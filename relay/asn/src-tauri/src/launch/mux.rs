@@ -9,6 +9,7 @@
 //! - 窗格 0：mux 一啟動就自己開一個窗格 0，繼承 mux 的完整環境。我們讓它跑 `cmd /c exit` 立刻結束：
 //!   實測窗格 0 結束後 mux 照樣活著、窗格編號不會重用（之後開的是 1、2…），所以夥伴不可能拿到 0，也不留常駐的 cmd。
 //!   開窗格因此一律要帶 `--new-window`（沒有任何窗格時，不帶會報「不知道目前是哪個窗格」）。
+//! - 沒有夥伴了：ASN 自己收掉空的 mux（`stop_if_empty`），查不準就留著；有夥伴時不動（設計 11.2-7）
 //! - 停 mux 只由 ASN 明確呼叫（會把底下所有夥伴窗格一起結束），呼叫前先用 `pane_count` 告訴使用者會中斷幾個。
 //!
 //! 接受的風險：WezTerm 會把 `WEZTERM_UNIX_SOCKET`、`WEZTERM_PANE` 設進每個窗格，所以夥伴程序知道 socket 在哪，
@@ -43,6 +44,8 @@ pub struct MuxPaths {
     pub config: PathBuf,
     pub pid: PathBuf,
     pub lock: PathBuf,
+    /// 開窗格與收空 mux 互斥的鎖（`Mux::open_lock`、`stop_if_empty`）
+    pub open_lock: PathBuf,
 }
 
 /// 固定放短路徑：`%LOCALAPPDATA%\ASN\m`。路徑太長就拒絕（WezTerm 起不來，還會留下看不懂的錯）
@@ -52,7 +55,7 @@ pub fn paths(local_app_data: &Path) -> Result<MuxPaths, String> {
     if sock.as_os_str().len() >= SOCK_MAX {
         return Err(format!("終端服務的連線檔路徑太長（長度 {}，上限 {}），請把使用者資料夾放到短一點的路徑", sock.as_os_str().len(), SOCK_MAX - 1));
     }
-    Ok(MuxPaths { config: dir.join("mux.lua"), pid: dir.join("mux.pid"), lock: dir.join("start.lock"), sock, dir })
+    Ok(MuxPaths { config: dir.join("mux.lua"), pid: dir.join("mux.pid"), lock: dir.join("start.lock"), open_lock: dir.join("open.lock"), sock, dir })
 }
 
 /// 只設 socket 位置與「程式結束後窗格留著」的設定檔（exit_behavior 跟第 1 階段的隔離設定一樣，當掉的窗格還看得到最後的畫面）。exit_behavior_messaging = "None"：結束時不要讓 WezTerm 把整串包裝指令（-EncodedCommand base64，長指令數百行）印進畫面，會擠掉結束標記。用 Lua 長字串放路徑（不需要跳脫）；路徑裡若剛好有收尾記號就加等號層級避開
@@ -134,8 +137,43 @@ impl Mux<'_> {
         }
         let v: serde_json::Value = serde_json::from_str(&o.stdout).map_err(|_| "終端服務回的清單看不懂".to_string())?;
         // 只數夥伴的窗格（workspace asn-N）。mux.lua 有 exit_behavior = "Hold"，窗格 0 的 cmd 結束後畫面會留著（workspace default），
-        // 不是夥伴，不算（B2c 實測）
-        Ok(v.as_array().map(|a| a.iter().filter(|p| p.get("workspace").and_then(|w| w.as_str()).is_some_and(|w| w.starts_with("asn-"))).count()).unwrap_or(0))
+        // 不是夥伴，不算（B2c 實測）。格式不對一律算看不懂：回 0 會被當成沒有夥伴
+        let rows = v.as_array().ok_or("終端服務回的清單看不懂")?;
+        let mut n = 0;
+        for p in rows {
+            let w = p.get("workspace").and_then(|w| w.as_str()).ok_or("終端服務回的清單看不懂")?;
+            n += usize::from(w.starts_with("asn-"));
+        }
+        Ok(n)
+    }
+
+    /// 開窗格前拿的鎖，spawn 完才放：這段期間 `stop_if_empty` 不會動手，不會關到正要開的窗格。拿不到回錯（不開）
+    pub fn open_lock(&self) -> Result<impl Sized, String> {
+        std::fs::create_dir_all(&self.paths.dir).map_err(|e| format!("建立終端服務資料夾失敗：{e}"))?;
+        StartLock::acquire(&self.paths.open_lock, self.runner)
+    }
+
+    /// 沒有夥伴就收掉這個資料夾記的 mux（設計 11.2-7）。只查一次、不重試，也不等鎖；任何一項查不準都留著：
+    /// pid 檔的編號、建立時間、執行檔路徑都要對得上，清單要讀得懂而且夥伴窗格數是 0。回傳有沒有停
+    pub fn stop_if_empty(&self, reason: &str) -> bool {
+        let Some(pid) = self.recorded_alive() else { return false };
+        // 編號和建立時間對得上還不夠：路徑不是這個資料夾的 mux 執行檔（查不到也算）就不是我們的
+        if !self.runner.exe_path(pid).is_some_and(|p| same_path(&p, &self.server)) {
+            return false;
+        }
+        // 有人正在開窗格：不等，這次不收
+        let Ok(_lock) = StartLock::try_acquire(&self.paths.open_lock, self.runner) else { return false };
+        if self.pane_count() != Ok(0) {
+            return false;
+        }
+        // 拿到鎖之後再核對一次：等鎖與查清單的這段時間，pid 檔記的可能已經換了
+        if self.recorded_alive() != Some(pid) {
+            return false;
+        }
+        let line = format!("終端服務：沒有夥伴了，停掉空的終端服務（程序 {pid}，{reason}）");
+        elog!("{line}");
+        note(&self.paths.dir, &line);
+        self.stop().is_ok()
     }
 
     /// pid 檔記的 mux 還活著（建立時間對得上，防程式編號被回收）
@@ -215,6 +253,85 @@ impl Mux<'_> {
     }
 }
 
+/// 記一行到 `<資料夾>\\mux.log`，事後查得到（視窗程式的 stderr 沒人收）。超過上限就只留後半，寫不進去就算了
+pub fn note(dir: &Path, line: &str) {
+    const MAX: usize = 64 * 1024;
+    let _ = std::fs::create_dir_all(dir);
+    let p = dir.join("mux.log");
+    let mut old = std::fs::read_to_string(&p).unwrap_or_default();
+    if old.len() > MAX {
+        let mut cut = old.len() - MAX / 2;
+        while !old.is_char_boundary(cut) {
+            cut += 1;
+        }
+        old = old[cut..].to_string();
+    }
+    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let _ = std::fs::write(&p, format!("{old}{at} {line}\n"));
+}
+
+/// ASN 自己所在的工作群組（Job Object）對 mux 的影響
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum JobRisk {
+    /// 不在工作群組裡，或工作群組關閉時不會結束成員、或准許脫離
+    Safe,
+    /// 不准脫離、又會在關閉時結束成員：ASN 一結束 mux 和所有夥伴就跟著結束（實測）
+    TakesMuxDown,
+    /// 讀不到：當成不確定
+    Unknown,
+}
+
+const JOB_KILL_ON_CLOSE: u32 = 0x2000;
+const JOB_BREAKAWAY_OK: u32 = 0x800;
+const JOB_SILENT_BREAKAWAY_OK: u32 = 0x1000;
+
+/// `in_job`＝在不在工作群組裡（None＝查不到），`limit`＝限制旗標（None＝查不到）
+pub fn job_risk(in_job: Option<bool>, limit: Option<u32>) -> JobRisk {
+    match (in_job, limit) {
+        (Some(false), _) => JobRisk::Safe,
+        (Some(true), Some(l)) if l & JOB_KILL_ON_CLOSE != 0 && l & (JOB_BREAKAWAY_OK | JOB_SILENT_BREAKAWAY_OK) == 0 => JobRisk::TakesMuxDown,
+        (Some(true), Some(_)) => JobRisk::Safe,
+        _ => JobRisk::Unknown,
+    }
+}
+
+/// 這個程序現在的工作群組：（在不在裡面, 限制旗標）
+#[cfg(windows)]
+pub fn own_job() -> (Option<bool>, Option<u32>) {
+    use windows_sys::Win32::System::JobObjects::{IsProcessInJob, JobObjectExtendedLimitInformation, QueryInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION};
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+    unsafe {
+        let mut inside = 0;
+        if IsProcessInJob(GetCurrentProcess(), std::ptr::null_mut(), &mut inside) == 0 {
+            return (None, None);
+        }
+        if inside == 0 {
+            return (Some(false), None);
+        }
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        let ok = QueryInformationJobObject(std::ptr::null_mut(), JobObjectExtendedLimitInformation, &mut info as *mut _ as *mut _, std::mem::size_of_val(&info) as u32, std::ptr::null_mut());
+        (Some(true), (ok != 0).then_some(info.BasicLimitInformation.LimitFlags))
+    }
+}
+#[cfg(not(windows))]
+pub fn own_job() -> (Option<bool>, Option<u32>) {
+    (Some(false), None)
+}
+
+/// 工作群組狀況的一行紀錄
+pub fn job_line(in_job: Option<bool>, limit: Option<u32>) -> String {
+    let risk = match job_risk(in_job, limit) {
+        JobRisk::Safe => "不影響終端服務",
+        JobRisk::TakesMuxDown => "ASN 結束時終端服務和夥伴會跟著結束",
+        JobRisk::Unknown => "不確定",
+    };
+    format!("工作群組：在裡面={in_job:?} 限制旗標={limit:?}（{risk}）")
+}
+
+fn same_path(a: &Path, b: &Path) -> bool {
+    a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy())
+}
+
 /// 啟動鎖：`create_new` 拿到才算，內容寫「pid 建立時間」。過期看**寫鎖的那個程序還在不在**（建立時間對得上），不看檔案時間；
 /// 內容還沒寫好（空的、看不懂）才退回看檔案時間（超過 `LOCK_STALE`）。
 /// 清過期的鎖時先改名到自己的暫存名、再讀一次，內容跟判過期時一樣才刪；不一樣（別人剛清掉舊鎖、建了自己的新鎖）就改回去。
@@ -222,9 +339,15 @@ impl Mux<'_> {
 struct StartLock(PathBuf);
 impl StartLock {
     fn acquire(p: &Path, r: &dyn Runner) -> Result<Self, String> {
+        Self::acquire_within(p, r, tries(START_WAIT))
+    }
+    /// 別人拿著就立刻回錯，不等
+    fn try_acquire(p: &Path, r: &dyn Runner) -> Result<Self, String> {
+        Self::acquire_within(p, r, 0)
+    }
+    fn acquire_within(p: &Path, r: &dyn Runner, mut left: u32) -> Result<Self, String> {
         let me = std::process::id();
         let mine = format!("{me} {}", r.started_ms(me).unwrap_or(0));
-        let mut left = tries(START_WAIT);
         loop {
             match std::fs::OpenOptions::new().write(true).create_new(true).open(p) {
                 Ok(mut f) => {

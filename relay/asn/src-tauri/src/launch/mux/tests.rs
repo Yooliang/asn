@@ -17,10 +17,11 @@ struct Fake {
     /// 起完之後這個編號被別的程式拿走（第二次查建立時間就變了）
     reborn: bool,
     birth_queries: Cell<usize>,
+    exe: RefCell<BTreeMap<u32, PathBuf>>,
 }
 impl Fake {
     fn new() -> Self {
-        Fake { calls: RefCell::new(vec![]), tries: Cell::new(0), alive_after: Cell::new(None), alive_once_started: true, started: RefCell::new(vec![]), killed: RefCell::new(vec![]), birth: RefCell::new(BTreeMap::new()), list_json: "[]".into(), no_birth: false, reborn: false, birth_queries: Cell::new(0) }
+        Fake { calls: RefCell::new(vec![]), tries: Cell::new(0), alive_after: Cell::new(None), alive_once_started: true, started: RefCell::new(vec![]), killed: RefCell::new(vec![]), birth: RefCell::new(BTreeMap::new()), list_json: "[]".into(), no_birth: false, reborn: false, birth_queries: Cell::new(0), exe: RefCell::new(BTreeMap::new()) }
     }
     fn cli_calls(&self) -> Vec<Vec<String>> {
         self.calls.borrow().iter().filter(|c| c.0.ends_with("wezterm.exe")).map(|c| c.1.clone()).collect()
@@ -61,6 +62,9 @@ impl Runner for Fake {
         self.birth.borrow().get(&pid).copied()
     }
     fn sleep(&self, _d: Duration) {}
+    fn exe_path(&self, pid: u32) -> Option<PathBuf> {
+        self.exe.borrow().get(&pid).cloned()
+    }
 }
 
 fn base() -> BTreeMap<String, String> {
@@ -430,4 +434,168 @@ fn 起好之後關掉_hold_留著的窗格_0() {
     r2.alive_after.set(Some(0));
     assert_eq!(mux(&r2, d.path()).ensure(), Ok(Ensure::Reused));
     assert!(r2.cli_calls().iter().all(|a| !a.iter().any(|x| x == "kill-pane")));
+}
+
+// ---- 收空的 mux（設計 11.2-7）
+
+const MUX_PID: u32 = 7000;
+const SERVER: &str = "W\\wezterm-mux-server.exe";
+
+/// 一個「pid 檔記得到、建立時間與路徑都對得上」的 mux，清單回 `list_json`
+fn empty_rig(list_json: &str) -> (tempfile::TempDir, Fake) {
+    let d = tempfile::tempdir().unwrap();
+    let mut r = Fake::new();
+    r.list_json = list_json.to_string();
+    r.alive_after.set(Some(0));
+    r.birth.borrow_mut().insert(MUX_PID, 555);
+    r.exe.borrow_mut().insert(MUX_PID, PathBuf::from(SERVER));
+    let m = mux(&r, d.path());
+    std::fs::create_dir_all(&m.paths.dir).unwrap();
+    std::fs::write(&m.paths.pid, format!("{MUX_PID} 555")).unwrap();
+    (d, r)
+}
+
+#[test]
+fn 收空_mux_沒有夥伴就停_pid_檔清掉() {
+    let (d, r) = empty_rig(r#"[{"workspace":"default"}]"#);
+    let m = mux(&r, d.path());
+    assert!(m.stop_if_empty("測試"));
+    assert_eq!(*r.killed.borrow(), vec![MUX_PID]);
+    assert!(!m.paths.pid.exists());
+    assert!(!m.paths.open_lock.exists(), "鎖要放掉");
+}
+
+#[test]
+fn 收空_mux_空清單也算沒有夥伴_路徑大小寫不同也算同一個() {
+    let (d, r) = empty_rig("[]");
+    r.exe.borrow_mut().insert(MUX_PID, PathBuf::from(SERVER.to_uppercase()));
+    assert!(mux(&r, d.path()).stop_if_empty("測試"));
+}
+
+#[test]
+fn 收空_mux_還有夥伴_不停() {
+    let (d, r) = empty_rig(r#"[{"workspace":"default"},{"workspace":"asn-3"}]"#);
+    assert!(!mux(&r, d.path()).stop_if_empty("測試"));
+    assert!(r.killed.borrow().is_empty());
+    assert!(mux(&r, d.path()).paths.pid.exists());
+}
+
+#[test]
+fn 收空_mux_清單讀不懂一律不停() {
+    for bad in ["看不懂", "{}", "null", "3", r#"[{"pane_id":1}]"#, r#"[{"workspace":null}]"#, r#"[{"workspace":"default"},{"workspace":7}]"#] {
+        let (d, r) = empty_rig(bad);
+        assert!(!mux(&r, d.path()).stop_if_empty("測試"), "{bad}");
+        assert!(r.killed.borrow().is_empty(), "{bad}");
+    }
+}
+
+#[test]
+fn 收空_mux_連不上或逾時不停() {
+    let (d, mut r) = empty_rig("[]");
+    r.alive_after.set(None);
+    r.alive_once_started = false;
+    assert!(!mux(&r, d.path()).stop_if_empty("測試"));
+    assert!(r.killed.borrow().is_empty());
+}
+
+#[test]
+fn 收空_mux_只問一次清單_不重試_也不起新的() {
+    let (d, mut r) = empty_rig("[]");
+    r.alive_after.set(None);
+    r.alive_once_started = false;
+    assert!(!mux(&r, d.path()).stop_if_empty("測試"));
+    assert_eq!(r.cli_calls().len(), 1, "只查一次");
+    assert_eq!(&r.cli_calls()[0][..2], ["cli", "--no-auto-start"]);
+    assert!(r.started.borrow().is_empty(), "不會起新的 mux");
+}
+
+#[test]
+fn 收空_mux_pid_檔沒有或建立時間不符_不下_cli_不停() {
+    let (d, r) = empty_rig("[]");
+    let m = mux(&r, d.path());
+    std::fs::remove_file(&m.paths.pid).unwrap();
+    assert!(!m.stop_if_empty("測試"));
+
+    let (d2, r2) = empty_rig("[]");
+    let m2 = mux(&r2, d2.path());
+    std::fs::write(&m2.paths.pid, format!("{MUX_PID} 999")).unwrap();
+    assert!(!m2.stop_if_empty("測試"), "編號被回收：建立時間對不上");
+    assert!(r.killed.borrow().is_empty() && r2.killed.borrow().is_empty());
+    assert!(r.cli_calls().is_empty() && r2.cli_calls().is_empty());
+}
+
+#[test]
+fn 收空_mux_路徑對不上或查不到_不下_cli_不停() {
+    let (d, r) = empty_rig("[]");
+    r.exe.borrow_mut().insert(MUX_PID, PathBuf::from("X\\wezterm-mux-server.exe"));
+    assert!(!mux(&r, d.path()).stop_if_empty("測試"), "同名但在別的資料夾");
+    let (d2, r2) = empty_rig("[]");
+    r2.exe.borrow_mut().clear();
+    assert!(!mux(&r2, d2.path()).stop_if_empty("測試"), "查不到路徑");
+    assert!(r.killed.borrow().is_empty() && r2.killed.borrow().is_empty());
+    assert!(r.cli_calls().is_empty() && r2.cli_calls().is_empty());
+}
+
+#[test]
+fn 收空_mux_有人正在開窗格就不停_不等鎖() {
+    let (d, r) = empty_rig("[]");
+    r.birth.borrow_mut().insert(std::process::id(), 1);   // 鎖的主人（這個程序）還活著，鎖才不算過期
+    let m = mux(&r, d.path());
+    let guard = m.open_lock().unwrap();
+    assert!(!m.stop_if_empty("測試"));
+    assert!(r.killed.borrow().is_empty());
+    assert!(r.cli_calls().is_empty(), "拿不到鎖就不查");
+    drop(guard);
+    assert!(m.stop_if_empty("測試"), "開完就收得掉");
+}
+
+#[test]
+fn 收空_mux_多個實例只動自己資料夾記的那個() {
+    let (d, r) = empty_rig("[]");
+    let other = tempfile::tempdir().unwrap();
+    let m2 = mux(&r, other.path());
+    std::fs::create_dir_all(&m2.paths.dir).unwrap();
+    std::fs::write(&m2.paths.pid, "7001 556").unwrap();
+    r.birth.borrow_mut().insert(7001, 556);
+    r.exe.borrow_mut().insert(7001, PathBuf::from(SERVER));
+    assert!(mux(&r, d.path()).stop_if_empty("測試"));
+    assert_eq!(*r.killed.borrow(), vec![MUX_PID], "另一個資料夾的 mux 不動");
+    assert!(m2.paths.pid.exists());
+}
+
+#[test]
+fn 收空_mux_停的時候留紀錄_沒停不留() {
+    let (d, r) = empty_rig("[]");
+    let m = mux(&r, d.path());
+    assert!(m.stop_if_empty("測試原因"));
+    let log = std::fs::read_to_string(m.paths.dir.join("mux.log")).unwrap();
+    assert!(log.contains("測試原因") && log.contains(&MUX_PID.to_string()), "{log}");
+
+    let (d2, r2) = empty_rig(r#"[{"workspace":"asn-1"}]"#);
+    let m2 = mux(&r2, d2.path());
+    assert!(!m2.stop_if_empty("測試原因"));
+    assert!(!m2.paths.dir.join("mux.log").exists());
+}
+
+#[test]
+fn 紀錄檔太大只留後半_不會切壞中文() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("mux.log");
+    std::fs::write(&p, "終端服務".repeat(10_000)).unwrap();
+    note(d.path(), "最新一行");
+    let t = std::fs::read_to_string(&p).unwrap();
+    assert!(t.len() < 40 * 1024 && t.ends_with("最新一行\n"), "{}", t.len());
+}
+
+#[test]
+fn 工作群組_只有不准脫離又關閉時結束成員才會帶走_mux() {
+    use JobRisk::*;
+    assert_eq!(job_risk(Some(false), None), Safe);
+    assert_eq!(job_risk(Some(true), Some(0x2000)), TakesMuxDown, "實測會帶走");
+    assert_eq!(job_risk(Some(true), Some(0x2000 | 0x800)), Safe, "實測活著：可脫離");
+    assert_eq!(job_risk(Some(true), Some(0x2000 | 0x1000)), Safe, "自動脫離");
+    assert_eq!(job_risk(Some(true), Some(0x800)), Safe, "Shell 開的實測旗標");
+    assert_eq!(job_risk(Some(true), Some(0)), Safe, "工作排程器實測旗標：關閉時不結束成員");
+    assert_eq!(job_risk(Some(true), None), Unknown, "讀不到旗標");
+    assert_eq!(job_risk(None, None), Unknown);
 }

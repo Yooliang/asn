@@ -713,6 +713,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let base_env: BTreeMap<String, String> = super::config::child_env().into_iter().collect();
         let m = self.mux_handle(dir, base_env.clone()).map_err(NotStarted)?;
         let paths = m.paths.clone();
+        // 從確認 mux 活著到窗格開好，收空 mux 都不能動手
+        let open_guard = m.open_lock().map_err(NotStarted)?;
         m.ensure().map_err(NotStarted)?;
         let Some((mux_pid, mux_at)) = m.live_pid() else {
             return Err(NotStarted("找不到終端服務的 pid 紀錄（不是 ASN 起的？），不在這個服務裡開窗格".into()));
@@ -748,6 +750,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         // 連 wezterm.exe 都起不來（RealRunner 回「無法執行…」）＝窗格一定沒開，可以退到原生主控台；
         // 逾時或回的不是窗格編號：窗格可能其實已經開了，當作已啟動（不讓呼叫端再開一份）
         let ran = self.runner.run_clean(&dir.cli, &mux::cli_args(&sub), &mux::cli_env(&pane_env, &paths.sock), wezterm::CLI_TIMEOUT);
+        drop(open_guard);
         let out = ran.map_err(|e| if e.starts_with(wezterm::CANNOT_RUN) { NotStarted(e) } else { Started(e) })?;
         if !out.success {
             return Err(NotStarted(format!("終端服務開不出窗格：{}", out.stderr.trim())));
@@ -757,10 +760,13 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let w = self.wez(dir);
         // 窗格已經開了：後面任何一步失敗都只關這一個窗格
         let close_pane = |why: String| -> super::win_term::WinOpenError {
-            match w.kill_pane(&win.sock, pane_id) {
+            let r = match w.kill_pane(&win.sock, pane_id) {
                 Ok(()) => Started(why),
                 Err(e) => Started(format!("{why}（關閉剛開的窗格也失敗：{e}）")),
-            }
+            };
+            // 這可能是唯一一個窗格（夥伴一開就結束）：不留下空的 mux
+            m.stop_if_empty("開窗失敗後沒有夥伴");
+            r
         };
         if let Err(e) = w.set_tab_title(&win.sock, pane_id, &title) {
             return Err(close_pane(format!("無法設定終端標題：{e}")));
@@ -940,7 +946,18 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         // 窗格都沒了，看它的 GUI 也一起收（只收自己起的那一個，見 unview）
         let _ = self.unview(id);
         self.persist()?;
+        if snap.window.mux {
+            self.collect_empty_mux(&dir, "最後一個夥伴關了");
+        }
         Ok(())
+    }
+
+    /// 沒有夥伴就收掉空的 mux（判斷與保險都在 `Mux::stop_if_empty`）
+    fn collect_empty_mux(&self, dir: &WezTermDir, reason: &str) {
+        let base_env: BTreeMap<String, String> = super::config::child_env().into_iter().collect();
+        if let Ok(m) = self.mux_handle(dir, base_env) {
+            m.stop_if_empty(reason);
+        }
     }
 
     /// B2c：要看某個 mux 窗格時才開的 GUI：`wezterm-gui --config-file <mux.lua> connect asn --workspace asn-{編號}`。
@@ -2212,6 +2229,27 @@ pub fn live(data_dir: &Path) -> LiveTerms {
     if let Err(e) = svc.reclaim() {
         elog!("終端對照表接手失敗（不中斷啟動）：{e}");
     }
+    // 工作群組的旗標寫進紀錄（第 4 步的前提：遇到會帶走 mux 的就不用 mux，見設計 11.2）。截圖模式不動
+    if !std::env::args().any(|a| a == "--shot") {
+        if let Some(Ok(paths)) = svc.mux_base.as_ref().map(|b| super::mux::paths(b)) {
+            let (inside, limit) = super::mux::own_job();
+            super::mux::note(&paths.dir, &super::mux::job_line(inside, limit));
+        }
+    }
+    // ASN 當掉後可能留下空的 mux：背景查一次就好，不拖慢啟動、不重試、不會起新的（cli 全帶 --no-auto-start）。截圖模式不動
+    if mux && !std::env::args().any(|a| a == "--shot") {
+        if let (Ok(dir), Some(Ok(paths))) = (svc.dir(), svc.mux_base.as_ref().map(|b| super::mux::paths(b))) {
+            let base_env: BTreeMap<String, String> = super::config::child_env().into_iter().collect();
+            let spawned = std::thread::Builder::new().name("asn-mux-collect".into()).spawn(move || {
+                let runner = wezterm::RealRunner;
+                let m = super::mux::Mux { runner: &runner, cli: dir.cli.clone(), server: dir.cli.with_file_name(super::mux::MUX_EXE), paths, base_env };
+                m.stop_if_empty("ASN 啟動時沒有夥伴");
+            });
+            if let Err(e) = spawned {
+                elog!("終端服務：開不了背景檢查（不影響啟動）：{e}");
+            }
+        }
+    }
     svc
 }
 
@@ -2512,6 +2550,10 @@ pub fn start_live(terms: &LiveTerms, profile: &str, cwd: &str, data_dir: &Path) 
     let id = terms.start(profile, cwd, &config)?;
     Ok(TermStarted { id })
 }
+
+#[cfg(all(test, windows, feature = "gui"))]
+#[path = "term_live_mux.rs"]
+mod live_mux;
 
 #[cfg(test)]
 mod tests {
