@@ -83,6 +83,28 @@ fn once_只印寄給本視窗的信_一行_json_欄位順序固定_印完_ack_�
 }
 
 #[test]
+fn once_本人簽章的私信_退回本視窗一封寄信額度_成員的信與群組外的別人視窗都不退() {
+    use crate::cli::send_rate::take;
+    let (fake, inb) = inbox_backend(false, 0);
+    let f = fx(&fake.url(), Some("T-視窗甲"));
+    let now = crate::heartbeat::now_ms();
+    for _ in 0..3 {
+        take(&f.rh(), "T-視窗甲", 30, now).unwrap();
+    }
+    take(&f.rh(), "T-視窗乙", 30, now).unwrap();
+    let mut owner = mail(1, "T-視窗甲");
+    owner["trust"] = json!("owner");
+    let mut owner_other = mail(2, "T-視窗乙");
+    owner_other["trust"] = json!("owner");
+    *inb.mails.lock().unwrap() = vec![owner, mail(3, "T-視窗甲"), owner_other];
+    let (c, _, err) = go(&f.env, &["recv", "--once"], "");
+    assert_eq!(c, 0, "{err}");
+    // 甲：3 封退回 1 封（成員的信不再退）＝2 封，上限 4 時寄完還剩 1；乙沒收到信，不動
+    assert_eq!(take(&f.rh(), "T-視窗甲", 4, now), Ok(1));
+    assert_eq!(take(&f.rh(), "T-視窗乙", 2, now), Ok(0));
+}
+
+#[test]
 fn once_有附件_body_多一行下載指令_另有_attachments_欄位_不含縮圖() {
     let (fake, inb) = inbox_backend(true, 0);
     let f = fx(&fake.url(), Some("T-視窗甲"));
