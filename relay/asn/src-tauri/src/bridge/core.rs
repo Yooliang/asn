@@ -62,7 +62,7 @@ pub struct Config {
     /// 轉交後多久還沒回就提醒收件視窗一次（reply=yes 的信；10 分鐘的寄件人通知照舊）
     pub nudge_ms: u64,
     pub forward_timeout_ms: u64,
-    /// 收發室 worker 一輪只交一封（todo-next-185）。正式一律開；測試預設關，只有專門測這件事的測試才開（其他測試一次放好幾封信，不是在測這個）
+    /// 收發室 worker 一輪只交一封（todo-next-185）。正式預設開（環境變數 ASN_FORWARD_ONE_PER_TURN=0 可關閉）；測試預設關，只有專門測這件事的測試才開（其他測試一次放好幾封信，不是在測這個）
     pub one_per_turn: bool,
     pub pull_backoff_ms: Vec<u64>,
     pub claude_bin: String,
@@ -130,7 +130,7 @@ impl Config {
             late_max: env_u64("ASN_LATE_MAX", 200) as usize,
             nudge_ms: env_u64("ASN_NUDGE_MS", 300_000),
             forward_timeout_ms: env_u64("ASN_FORWARD_TIMEOUT_MS", 120_000),
-            one_per_turn: true,
+            one_per_turn: crate::envc::get("ASN_FORWARD_ONE_PER_TURN").map(|v| v.trim() != "0").unwrap_or(true),
             pull_backoff_ms: vec![5_000, 10_000, 20_000, 40_000, 60_000],
             claude_bin: std::env::var("CLAUDE_BIN").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "claude".into()),
             claude_pre: vec![],
