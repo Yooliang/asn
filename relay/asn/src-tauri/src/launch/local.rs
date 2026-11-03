@@ -658,6 +658,8 @@ mod tests {
         a.iter().map(|s| s.to_string()).collect()
     }
 
+    // 路徑寫法只有 Windows 對得上（Linux 的 join 用 /）；這段也只有 Windows 開窗用得到
+    #[cfg(windows)]
     #[test]
     fn 包裝前解析_裸名照順序找_ps1_交給_powershell_其他不動() {
         let only = |names: &'static [&'static str]| move |p: &Path| names.iter().any(|n| p.to_string_lossy().ends_with(n));
