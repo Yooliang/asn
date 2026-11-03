@@ -15,11 +15,12 @@ import { USAGE_NOTE } from './usage.mjs'
 import { NO_QUOTA_TEXT, planLabel, quotaBars, quotaView } from './account-quota.mjs'
 import { DEVICE_TEXT, canRemoveRow, dropAfter, moveFlags, removedRows, visibleRows } from './device-order.mjs'
 import { ROSTER_TEXT, usedOnText } from './account-roster.mjs'
+import { INSTALL_TEXT } from './agent-install.mjs'
 
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
 export const SETTING_OPS = [
   'notify', 'now-playing', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
-  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
+  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
   'closeTo', 'autostart', 'bridge-launch', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'quota-hook-ask', 'quota-hook-connect', 'quota-hook-cancel', 'quota-hook-disconnect', 'avatar-remove', 'pi-login', 'open-ui-log',
 ]
 
@@ -98,7 +99,7 @@ export const SettingsPanel = {
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return {
       fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions,
-      cat, catIcon, ROSTER_TEXT, usedOnText, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, onRow, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON,
+      cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, onRow, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON,
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL,
       CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS, DIMS,
@@ -271,6 +272,33 @@ export const SettingsPanel = {
                       <small v-if="st.accounts.mod" role="status">{{ st.accounts.mod }}</small>
                       <label class="chk"><input type="checkbox" :checked="st.accounts.allowSwitch" @change="act('acct-allow-switch', $event.target.checked)" /><span>允許切換帳號</span></label>
                       <small>讓手機或別台設備替這台切換帳號。</small>
+                      <div class="dv-install" v-if="st.install && ((v.action && v.action.kind === 'local') || st.install.stage === 'running' || st.install.stage === 'done')">
+                        <template v-if="st.install.stage === 'idle'">
+                          <button class="aero-btn" type="button" :disabled="st.install.button.disabled" @click="act('install-ask')">{{ INSTALL_TEXT.button }}</button>
+                          <small class="acct-warn" v-if="st.install.button.hint">{{ st.install.button.hint }}</small>
+                          <small v-if="st.install.msg" role="status">{{ st.install.msg }}</small>
+                        </template>
+                        <div class="dv-confirm" role="alertdialog" :aria-label="INSTALL_TEXT.confirmTitle" v-else-if="st.install.stage === 'confirm'">
+                          <b>{{ INSTALL_TEXT.confirmTitle }}</b>
+                          <p>{{ st.install.plan }}</p>
+                          <span class="dv-ibtns">
+                            <button class="aero-btn" type="button" @click="act('install-yes')">{{ INSTALL_TEXT.confirmYes }}</button>
+                            <button class="aero-btn" type="button" @click="act('install-no')">{{ INSTALL_TEXT.confirmNo }}</button>
+                          </span>
+                        </div>
+                        <div class="dv-prog" role="status" aria-live="polite" v-else>
+                          <b :class="['dv-ptitle', st.install.kind]">{{ st.install.title }}</b>
+                          <p v-for="(l, i) in st.install.lines" :key="i" :class="{ note: i > 0 }">{{ l }}</p>
+                          <small v-if="st.install.stage === 'running'">{{ INSTALL_TEXT.progressNote }}</small>
+                          <span class="dv-ibtns">
+                            <button class="aero-btn" type="button" v-if="st.install.stage === 'running'" :disabled="!st.install.canCancel" @click="act('install-cancel')">{{ INSTALL_TEXT.cancel }}</button>
+                            <button class="aero-btn" type="button" v-if="st.install.stage === 'done' && st.install.terminal" @click="act('install-terminal')">{{ INSTALL_TEXT.openTerminal }}</button>
+                            <button class="aero-btn" type="button" v-if="st.install.stage === 'done'" @click="act('install-close')">{{ INSTALL_TEXT.close }}</button>
+                          </span>
+                        </div>
+                      </div>
+                      <label class="chk" v-if="st.install"><input type="checkbox" :checked="st.install.remoteAllow" @change="act('install-allow', $event.target.checked)" /><span>{{ INSTALL_TEXT.allowRemote }}</span></label>
+                      <small v-if="st.install">{{ INSTALL_TEXT.allowRemoteNote }}</small>
                     </template>
                     <template v-else>
                       <ul class="dv-accts" v-if="v.accounts.length">

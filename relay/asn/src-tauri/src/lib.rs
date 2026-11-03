@@ -520,17 +520,35 @@ async fn agent_setup_start(app: State<'_, App>, auth: State<'_, auth::AuthState>
     let relay = relay_of(&app)?;
     account::signing_token(&auth).await.filter(|t| !t.is_empty()).ok_or("請先登入你的帳號，才能把登入網址送到手機")?;
     let token = agent_setup_token_fn(&handle);
-    let (h1, h2) = (handle.clone(), handle);
-    agent_setup::setup::start_claude(
+    // 已經有一輪在跑（可能是手機要求的）：直接回錯，不去動那一輪的小窗
+    if agent_setup::setup::is_busy() {
+        return Err("這台電腦正在安裝並登入，請等它做完".to_string());
+    }
+    // 人就在電腦前：右下角的進度小窗跟手機要求時是同一個（開不起來也沒關係，設備頁裡也看得到進度）
+    let round = wins::open_setup_progress(&handle).map_err(|e| elog!("開進度小窗失敗：{e}")).ok();
+    let (h1, h2) = (handle.clone(), handle.clone());
+    let started = agent_setup::setup::start_claude(
         relay,
         token,
-        move |e| {
-            let _ = h1.emit("agent-setup", e.to_json());
-        },
+        move |e| wins::progress_emit(&h1, e.to_json()),
         move |r| {
-            let _ = h2.emit("agent-setup", r.to_json());
+            wins::progress_emit(&h2, r.to_json());
+            // 結果留在畫面上幾秒再關（編號不是這一輪就不關）
+            if let Some(round) = round {
+                let h = h2.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(wins::PROG_DONE_SECS));
+                    wins::close_setup_progress(&h, round);
+                });
+            }
         },
-    )
+    );
+    if started.is_err() {
+        if let Some(round) = round {
+            wins::close_setup_progress(&handle, round);
+        }
+    }
+    started
 }
 
 #[cfg(feature = "gui")]
