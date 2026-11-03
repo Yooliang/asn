@@ -12,6 +12,9 @@ const LOCK: &str = "send-rate.lock";
 const KEEP_IDS: usize = 200;
 /// 鎖檔超過這麼久還在，當作前一個程序掛掉遺留
 const LOCK_STALE_MS: u128 = 10_000;
+/// 寄信等鎖最多約 2 秒；退額度是在橋的收信迴圈裡做，等太久會卡住收信，所以只等約 0.4 秒，拿不到就不退
+const LOCK_TRIES_SEND: u32 = 50;
+const LOCK_TRIES_REFUND: u32 = 10;
 /// 剩這麼多封（含）以下，寄信後提醒
 pub const WARN_LEFT: usize = 5;
 
@@ -22,11 +25,11 @@ impl Drop for Lock {
     }
 }
 
-/// 拿鎖（最多等約 2 秒）；拿不到回 None，由呼叫端決定要不要照樣做
-fn lock(home: &Path) -> Option<Lock> {
+/// 拿鎖（每次等 40 毫秒，最多 `tries` 次）；拿不到回 None，由呼叫端決定要不要照樣做
+fn lock(home: &Path, tries: u32) -> Option<Lock> {
     let _ = std::fs::create_dir_all(home);
     let p = home.join(LOCK);
-    for _ in 0..50 {
+    for _ in 0..tries {
         match std::fs::OpenOptions::new().write(true).create_new(true).open(&p) {
             Ok(_) => return Some(Lock(p)),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -69,7 +72,7 @@ fn recent_of(all: &Map<String, Value>, window: &str) -> Vec<u64> {
 
 /// 寄一封前先計次。成功回「寄完還剩幾封」；已滿回 Err(幾分鐘後可再寄)
 pub fn take(home: &Path, window: &str, limit: usize, now: u64) -> Result<usize, u64> {
-    let _lock = lock(home); // 拿不到就照樣算：寧可多算一次，也不因為鎖卡住寄不出信
+    let _lock = lock(home, LOCK_TRIES_SEND); // 拿不到就照樣算：寧可多算一次，也不因為鎖卡住寄不出信
     let mut all = load(home, now);
     let recent = recent_of(&all, window);
     if recent.len() >= limit {
@@ -88,7 +91,7 @@ pub fn take(home: &Path, window: &str, limit: usize, now: u64) -> Result<usize, 
 /// 一封信只退一次（`mail_id`）；窗口這一小時沒有任何紀錄就沒有東西可退——額度只會回到上限，不會存成「欠額」。
 /// 拿不到鎖就不退（少退一封比寫壞計數檔好）。回傳這次有沒有真的退。
 pub fn refund(home: &Path, window: &str, mail_id: &str, now: u64) -> bool {
-    let Some(_lock) = lock(home) else { return false };
+    let Some(_lock) = lock(home, LOCK_TRIES_REFUND) else { return false };
     let ids_file = home.join(REFUNDED);
     let mut ids: Vec<String> = std::fs::read_to_string(&ids_file).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
     if ids.iter().any(|i| i == mail_id) {
@@ -116,7 +119,7 @@ pub fn refund(home: &Path, window: &str, mail_id: &str, now: u64) -> bool {
 
 /// 寄完後的提醒（剩很少才有字）
 pub fn warn_text(window: &str, left: usize, limit: usize) -> Option<String> {
-    (left <= WARN_LEFT.min(limit)).then(|| format!("提醒：視窗「{window}」這一小時還能寄 {left} 封（上限 {limit} 封），用完要等一下才能再寄；小良哥直接傳訊息給它會退回額度"))
+    (left <= WARN_LEFT.min(limit)).then(|| format!("提醒：視窗「{window}」這一小時還能寄 {left} 封（上限 {limit} 封），用完要等一下才能再寄；本人直接傳訊息給它會退回額度"))
 }
 
 #[cfg(test)]
@@ -205,6 +208,7 @@ mod tests {
     fn 提醒只在快用完時才出現() {
         assert!(warn_text("甲", 6, 30).is_none());
         assert!(warn_text("甲", 5, 30).unwrap().contains("還能寄 5 封"));
+        assert!(!warn_text("甲", 5, 30).unwrap().contains("小良哥"), "給所有使用者看的字不寫特定人名");
         assert!(warn_text("甲", 0, 30).is_some());
         assert!(warn_text("甲", 2, 2).is_some(), "上限本來就很小時一開始就提醒");
     }
