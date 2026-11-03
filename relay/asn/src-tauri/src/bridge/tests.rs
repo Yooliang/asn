@@ -1487,14 +1487,30 @@ fn 管理器_舊橋活著時不啟動_狀態顯示由舊版負責() {
     let m = super::Manager::new(Some(relay), None, "T".into(), work.path().to_path_buf(), data.path().to_path_buf());
     // 固定開啟：沒有舊橋時 start_if_enabled 會啟動（這裡 relay 連不上，只看 enabled 旗標）
     assert!(m.status().enabled);
-    // 另一個「活著的」pid 寫進 bridge.pid（找一個真的活著且不是自己的：init 類程序用 pid 4 在 Windows、1 在 Unix）
-    let other = if cfg!(windows) { 4 } else { 1 };
+    // 假的舊橋：自己開的長壽命子程序，pid 寫進 bridge.pid（名稱要對得上才算舊橋，見 lock::Holder）
+    use crate::nowin::NoWindow;
+    let mut old = if cfg!(windows) {
+        let mut c = std::process::Command::new("cmd");
+        c.no_window().args(["/c", "ping -n 30 127.0.0.1 >nul"]);
+        c
+    } else {
+        let mut c = std::process::Command::new("sleep");
+        c.no_window().arg("30");
+        c
+    }
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null())
+    .spawn()
+    .unwrap();
+    let other = old.id();
     if crate::heartbeat::pid_alive(other) && other != std::process::id() {
         std::fs::write(super::lock::pid_file(work.path()), other.to_string()).unwrap();
         super::write_settings(data.path(), super::BridgeSettings { enabled: true, ..Default::default() }).unwrap();
         m.start_if_enabled();
         let st = m.status();
         assert!(st.enabled && !st.running && st.legacy && !st.takeover_allowed, "{st:?}");
+        let _ = old.kill();
+        let _ = old.wait();
         assert_eq!(std::fs::read_to_string(super::lock::pid_file(work.path())).unwrap(), other.to_string(), "不動舊橋的 pid 檔");
     }
 }
