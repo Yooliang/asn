@@ -291,6 +291,7 @@ fn cfg(work: &std::path::Path, sessions: &std::path::Path) -> Config {
     c.late_max = 200;
     c.nudge_ms = 300_000;
     c.forward_timeout_ms = 120_000;
+    c.one_per_turn = false; // 多數測試一次放好幾封信；專門測「一輪只交一封」的測試自己打開
     c.pull_backoff_ms = vec![5_000, 10_000, 20_000];
     // 下載指令與群組「要看更多」的指令固定寫死（不依執行檔位置去找）
     c.attach_cmd = Some("/x/asn-cli attach".into());
@@ -893,6 +894,58 @@ async fn 轉交的信頭_本人信用人代號位址_不含_xisu_要回信行格
     assert_eq!(lines[1], "寄件人：asn（「小良的家用機」上的 Claude 視窗，成員身分）");
     assert!(!lines[1].contains('H') || lines[1].contains("成員身分"));
     assert!(!t.contains("【要回信】"));
+}
+
+/// worker 這一輪送進去的轉交文字裡，依序出現的信件編號
+fn said_ids(h: &H) -> Vec<String> {
+    h.said().iter().filter_map(|t| (1..=9).map(uid).find(|id| t.contains(id.as_str()))).collect()
+}
+
+#[tokio::test]
+async fn 一輪只交一封_處理第一封時再來兩封_依序交_不丟不亂_沒有被退回() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.core.cfg.one_per_turn = true;
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", T0).await;
+    assert_eq!(said_ids(&h), vec![uid(1)]);
+    // 處理第一封時再來兩封：這一輪還沒結束，不交、不 ack
+    h.fr.put(mail(2, json!({})));
+    h.fr.put(mail(3, json!({})));
+    h.core.pull("test", T0 + 1_000).await;
+    assert_eq!(said_ids(&h), vec![uid(1)], "中途不塞第二封");
+    assert!(!h.fr.acked().contains(&uid(2)) && !h.fr.acked().contains(&uid(3)));
+    // 第一封做完（worker 回報結果）＝這一輪結束：馬上要再拉
+    worker_ok(&mut h.core, &uid(1), T0 + 2_000).await;
+    assert!(h.core.retry_due(T0 + 2_000), "這一輪結束要馬上再拉一次");
+    h.core.pull("test", T0 + 2_001).await;
+    assert_eq!(said_ids(&h), vec![uid(1), uid(2)], "一次只交一封，依原本順序");
+    worker_ok(&mut h.core, &uid(2), T0 + 3_000).await;
+    h.core.pull("test", T0 + 3_001).await;
+    assert_eq!(said_ids(&h), vec![uid(1), uid(2), uid(3)]);
+    worker_ok(&mut h.core, &uid(3), T0 + 4_000).await;
+    assert!(!h.core.retry_due(T0 + 4_000), "沒有留著的信就不用再拉");
+    // 三封都轉交成功：沒有退回、沒有逾時通知
+    let notes: Vec<String> = h.fr.sent().iter().map(|s| s["body"].as_str().unwrap_or("").to_string()).collect();
+    assert!(notes.iter().all(|b| !b.contains("轉交逾時") && !b.contains("未轉交") && !b.contains("退回")), "{notes:?}");
+    assert_eq!(said_ids(&h).len(), 3, "三封都交出去了");
+}
+
+#[tokio::test]
+async fn 一輪只交一封_這一輪一直不結束_等到轉交逾時就放行_卡住的那封照原流程通知() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.core.cfg.one_per_turn = true;
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", T0).await;
+    h.fr.put(mail(2, json!({})));
+    h.core.pull("test", T0 + 10_000).await;
+    assert_eq!(said_ids(&h), vec![uid(1)]);
+    // 模型卡住：一直沒有結果。逾時後放行，後面的信不會永遠等
+    h.core.tick(T0 + 121_000).await;
+    assert!(h.core.retry_due(T0 + 121_000), "逾時放行後馬上再拉");
+    h.core.pull("test", T0 + 121_001).await;
+    assert_eq!(said_ids(&h), vec![uid(1), uid(2)]);
+    let notes: Vec<String> = h.fr.sent().iter().map(|s| s["body"].as_str().unwrap_or("").to_string()).collect();
+    assert!(notes.iter().any(|b| b.contains("逾時")), "卡住的第一封走原本的逾時通知：{notes:?}");
 }
 
 #[tokio::test]

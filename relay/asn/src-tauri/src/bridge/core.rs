@@ -62,6 +62,8 @@ pub struct Config {
     /// 轉交後多久還沒回就提醒收件視窗一次（reply=yes 的信；10 分鐘的寄件人通知照舊）
     pub nudge_ms: u64,
     pub forward_timeout_ms: u64,
+    /// 收發室 worker 一輪只交一封（todo-next-185）。正式一律開；測試預設關，只有專門測這件事的測試才開（其他測試一次放好幾封信，不是在測這個）
+    pub one_per_turn: bool,
     pub pull_backoff_ms: Vec<u64>,
     pub claude_bin: String,
     pub claude_pre: Vec<String>,
@@ -128,6 +130,7 @@ impl Config {
             late_max: env_u64("ASN_LATE_MAX", 200) as usize,
             nudge_ms: env_u64("ASN_NUDGE_MS", 300_000),
             forward_timeout_ms: env_u64("ASN_FORWARD_TIMEOUT_MS", 120_000),
+            one_per_turn: true,
             pull_backoff_ms: vec![5_000, 10_000, 20_000, 40_000, 60_000],
             claude_bin: std::env::var("CLAUDE_BIN").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "claude".into()),
             claude_pre: vec![],
@@ -319,6 +322,11 @@ pub struct Core {
     roster_at: u64,
     /// 自動回信模式：已交給 worker、這一輪還沒看到它回報結果（名單 busy 的依據之一）
     respond_open: bool,
+    /// 收發室 worker 一輪只交一封（todo-next-185）：已把一封交給 worker、它這一輪還沒結束（記下交出去的時間）。
+    /// 這段時間再來的信與群組訊息先留著不處理（信留在信箱、群組游標不前進），這一輪結束才收下一封；處理中再送進去的信可能轉交失敗
+    fwd_turn_open: Option<u64>,
+    /// 有信或群組訊息因為上面這個先留著；這一輪結束時要馬上再拉一次
+    fwd_gated: bool,
     /// 自動回信模式：上次回報名單時自己視窗的狀態（變了就立刻重報）
     respond_sent: String,
     /// 0.2 E2／E4（#397）：各視窗最後一次收到信或被看到在忙的時間（毫秒），名單回報時帶給後台；只存記憶體
@@ -415,7 +423,7 @@ impl Core {
             cfg, relay, sink, parser: Parser::new(nonce), log, alive, created: Arc::new(crate::heartbeat::process_started_ms), now, roster: vec![], roster_ok: false, roster_warned: false, seen: HashSet::new(), pending: vec![],
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
-            partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
+            partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
             quota_until: 0, quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), probing: false,
         };
         c.restore();
@@ -942,8 +950,31 @@ impl Core {
             self.parser.forget(id);
             self.fwd_text.remove(id);
             self.write_inflight();
+        } else {
+            self.fwd_turn_open = Some(self.now);
         }
         r
+    }
+
+    /// 收發室 worker 這一輪還沒結束：新的信與群組訊息先留著（不處理、不 ack、游標不前進）。回 true＝要先留著
+    fn fwd_busy(&mut self, what: &str) -> bool {
+        let Some(since) = self.fwd_turn_open.filter(|_| self.cfg.one_per_turn) else { return false };
+        if !self.fwd_gated {
+            self.log.line(&format!("{what}: worker turn still open ({}ms), kept for the next pull", self.now.saturating_sub(since)));
+        }
+        self.fwd_gated = true;
+        true
+    }
+
+    /// 這一輪結束（worker 回報結果、重啟、結束，或等太久）：有先留著的就馬上再拉一次
+    fn end_fwd_turn(&mut self, why: &str) {
+        if self.fwd_turn_open.take().is_none() {
+            return;
+        }
+        if std::mem::take(&mut self.fwd_gated) {
+            self.log.line(&format!("worker turn ended ({why}): pulling the mail kept waiting"));
+            self.retry_at = Some(self.now);
+        }
     }
 
     /// inflight 有變動就重寫 hook 讀的檔（寫不進去只記 log：hook 讀不到會把轉交擋下，worker 回報失敗，不會送錯）
@@ -1059,6 +1090,10 @@ impl Core {
             // 已達扣住上限的信不收：回傳收件視窗名，下一輪拉信排除它，才拉得到信箱裡其他視窗的信
             return if self.quota_hold_mail(p, &m, raw).await { None } else { Some(target) };
         }
+        // 收發室 worker 一輪只交一封：它這一輪還沒結束就先不收這封（留在信箱，這一輪結束馬上再拉；順序不變）
+        if self.via_worker(&target) && !self.is_respond(&target) && self.fwd_busy(&format!("id={}", m.id)) {
+            return Some(target);
+        }
         let late = self.late_from.take().or_else(|| self.held_first.get(&m.id).copied());
         let origin = Origin::of(&p);
         self.pending.push(p);
@@ -1149,8 +1184,12 @@ impl Core {
                 self.worker_fails = 0;
                 self.parser.reset_process();
                 self.respond_open = false; // worker 重啟：舊的一輪不會再有結果了
+                self.end_fwd_turn("worker restarted");
             }
-            WorkerLine::Exited(_) => self.respond_open = false,
+            WorkerLine::Exited(_) => {
+                self.respond_open = false;
+                self.end_fwd_turn("worker exited");
+            }
             WorkerLine::Line(line) => {
                 let r = self.parser.feed_at(&line, now);
                 for l in &r.logs {
@@ -1159,6 +1198,7 @@ impl Core {
                 self.write_inflight();
                 if r.turn_done {
                     self.respond_open = false;
+                    self.end_fwd_turn("turn done");
                 }
                 for ev in r.events {
                     match ev {
@@ -1533,6 +1573,12 @@ impl Core {
                 return self.hold_room_msg(room, member, msg, w, delay);
             }
         }
+        // 收發室 worker 一輪只交一封：這一輪還沒結束就先留著（游標不前進，下一次拉信再來，順序不變）
+        let w = self.canonical_target("room", &rooms::member_window(member));
+        let target = if w.is_empty() { self.unaddressed_window().unwrap_or_default() } else { w };
+        if !target.is_empty() && self.via_worker(&target) && !self.is_respond(&target) && self.fwd_busy(&format!("room #{}", json_u64(msg.get("seq")))) {
+            return false;
+        }
         self.deliver_room_msg(room, member, msg, 0, &[]).await
     }
 
@@ -1573,6 +1619,10 @@ impl Core {
         let due: Vec<Held> = self.held.items().iter().filter(|h| (h.due <= now || (h.held_at > 0 && h.fails == 0)) && (!hold || (h.held_at == 0 && !self.room_item_via_worker(h)))).cloned().collect();
         let mut expired: Vec<Held> = vec![];
         for h in due {
+            // 收發室 worker 一輪只交一封：這一輪還沒結束，經過 worker 的先不轉交（不算失敗，下一輪結束後的 tick 再來）
+            if self.room_item_via_worker(&h) && self.fwd_busy(&format!("held room #{}", h.seq)) {
+                continue;
+            }
             self.release_held_item(&h, now, &mut expired).await;
         }
         if !expired.is_empty() {
@@ -1839,6 +1889,10 @@ impl Core {
         // 自動回信：自己視窗的忙碌／閒置變了就立刻重報名單（防抖間隔同本機視窗監看）
         if self.cfg.respond.is_some() && self.respond_status() != self.respond_sent && now.saturating_sub(self.roster_at) >= self.cfg.watch_gap_ms {
             self.refresh_roster(now).await;
+        }
+        // 這一輪一直沒結束（模型卡住）：等到轉交逾時就當它結束，後面的信才不會永遠等；卡住的那封照原本的逾時流程通知
+        if self.fwd_turn_open.is_some_and(|t| now.saturating_sub(t) > self.cfg.forward_timeout_ms) {
+            self.end_fwd_turn("timeout");
         }
         let ids: Vec<String> = self.pending.iter().map(|p| p.id.clone()).collect();
         for id in ids {
