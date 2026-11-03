@@ -80,6 +80,7 @@ export async function predeploy({ siteDir = DEFAULT_SITE, base = DEFAULT_BASE, f
     let res
     try { res = await fetchFn(url, { headers: { 'accept-encoding': 'identity' } }) } catch (e) { throw new Error(`部署前檢查失敗：本機沒有 ${want.rel}，從線上下載也失敗（${e.message}）`) }
     if (!res.ok) {
+      await res.body?.cancel?.() // 不讀的回應要丟棄，否則連線一直開著，程序結束不了、部署卡住
       if ((want.optional || want.history) && res.status === 404) { result.skipped.push(want.rel); continue }
       throw new Error(`部署前檢查失敗：本機沒有 ${want.rel}，線上也拿不到（HTTP ${res.status}）`)
     }
