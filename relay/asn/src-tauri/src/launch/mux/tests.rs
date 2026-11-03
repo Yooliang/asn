@@ -562,3 +562,40 @@ fn 收空_mux_多個實例只動自己資料夾記的那個() {
     assert_eq!(*r.killed.borrow(), vec![MUX_PID], "另一個資料夾的 mux 不動");
     assert!(m2.paths.pid.exists());
 }
+
+#[test]
+fn 收空_mux_停的時候留紀錄_沒停不留() {
+    let (d, r) = empty_rig("[]");
+    let m = mux(&r, d.path());
+    assert!(m.stop_if_empty("測試原因"));
+    let log = std::fs::read_to_string(m.paths.dir.join("mux.log")).unwrap();
+    assert!(log.contains("測試原因") && log.contains(&MUX_PID.to_string()), "{log}");
+
+    let (d2, r2) = empty_rig(r#"[{"workspace":"asn-1"}]"#);
+    let m2 = mux(&r2, d2.path());
+    assert!(!m2.stop_if_empty("測試原因"));
+    assert!(!m2.paths.dir.join("mux.log").exists());
+}
+
+#[test]
+fn 紀錄檔太大只留後半_不會切壞中文() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("mux.log");
+    std::fs::write(&p, "終端服務".repeat(10_000)).unwrap();
+    note(d.path(), "最新一行");
+    let t = std::fs::read_to_string(&p).unwrap();
+    assert!(t.len() < 40 * 1024 && t.ends_with("最新一行\n"), "{}", t.len());
+}
+
+#[test]
+fn 工作群組_只有不准脫離又關閉時結束成員才會帶走_mux() {
+    use JobRisk::*;
+    assert_eq!(job_risk(Some(false), None), Safe);
+    assert_eq!(job_risk(Some(true), Some(0x2000)), TakesMuxDown, "實測會帶走");
+    assert_eq!(job_risk(Some(true), Some(0x2000 | 0x800)), Safe, "實測活著：可脫離");
+    assert_eq!(job_risk(Some(true), Some(0x2000 | 0x1000)), Safe, "自動脫離");
+    assert_eq!(job_risk(Some(true), Some(0x800)), Safe, "Shell 開的實測旗標");
+    assert_eq!(job_risk(Some(true), Some(0)), Safe, "工作排程器實測旗標：關閉時不結束成員");
+    assert_eq!(job_risk(Some(true), None), Unknown, "讀不到旗標");
+    assert_eq!(job_risk(None, None), Unknown);
+}

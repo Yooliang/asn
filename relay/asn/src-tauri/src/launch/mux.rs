@@ -170,7 +170,9 @@ impl Mux<'_> {
         if self.recorded_alive() != Some(pid) {
             return false;
         }
-        elog!("終端服務：沒有夥伴了，停掉空的終端服務（程序 {pid}，{reason}）");
+        let line = format!("終端服務：沒有夥伴了，停掉空的終端服務（程序 {pid}，{reason}）");
+        elog!("{line}");
+        note(&self.paths.dir, &line);
         self.stop().is_ok()
     }
 
@@ -249,6 +251,81 @@ impl Mux<'_> {
         let _ = std::fs::remove_file(&self.paths.pid);
         Ok(())
     }
+}
+
+/// 記一行到 `<資料夾>\\mux.log`，事後查得到（視窗程式的 stderr 沒人收）。超過上限就只留後半，寫不進去就算了
+pub fn note(dir: &Path, line: &str) {
+    const MAX: usize = 64 * 1024;
+    let _ = std::fs::create_dir_all(dir);
+    let p = dir.join("mux.log");
+    let mut old = std::fs::read_to_string(&p).unwrap_or_default();
+    if old.len() > MAX {
+        let mut cut = old.len() - MAX / 2;
+        while !old.is_char_boundary(cut) {
+            cut += 1;
+        }
+        old = old[cut..].to_string();
+    }
+    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let _ = std::fs::write(&p, format!("{old}{at} {line}\n"));
+}
+
+/// ASN 自己所在的工作群組（Job Object）對 mux 的影響
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum JobRisk {
+    /// 不在工作群組裡，或工作群組關閉時不會結束成員、或准許脫離
+    Safe,
+    /// 不准脫離、又會在關閉時結束成員：ASN 一結束 mux 和所有夥伴就跟著結束（實測）
+    TakesMuxDown,
+    /// 讀不到：當成不確定
+    Unknown,
+}
+
+const JOB_KILL_ON_CLOSE: u32 = 0x2000;
+const JOB_BREAKAWAY_OK: u32 = 0x800;
+const JOB_SILENT_BREAKAWAY_OK: u32 = 0x1000;
+
+/// `in_job`＝在不在工作群組裡（None＝查不到），`limit`＝限制旗標（None＝查不到）
+pub fn job_risk(in_job: Option<bool>, limit: Option<u32>) -> JobRisk {
+    match (in_job, limit) {
+        (Some(false), _) => JobRisk::Safe,
+        (Some(true), Some(l)) if l & JOB_KILL_ON_CLOSE != 0 && l & (JOB_BREAKAWAY_OK | JOB_SILENT_BREAKAWAY_OK) == 0 => JobRisk::TakesMuxDown,
+        (Some(true), Some(_)) => JobRisk::Safe,
+        _ => JobRisk::Unknown,
+    }
+}
+
+/// 這個程序現在的工作群組：（在不在裡面, 限制旗標）
+#[cfg(windows)]
+pub fn own_job() -> (Option<bool>, Option<u32>) {
+    use windows_sys::Win32::System::JobObjects::{IsProcessInJob, JobObjectExtendedLimitInformation, QueryInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION};
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+    unsafe {
+        let mut inside = 0;
+        if IsProcessInJob(GetCurrentProcess(), std::ptr::null_mut(), &mut inside) == 0 {
+            return (None, None);
+        }
+        if inside == 0 {
+            return (Some(false), None);
+        }
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        let ok = QueryInformationJobObject(std::ptr::null_mut(), JobObjectExtendedLimitInformation, &mut info as *mut _ as *mut _, std::mem::size_of_val(&info) as u32, std::ptr::null_mut());
+        (Some(true), (ok != 0).then_some(info.BasicLimitInformation.LimitFlags))
+    }
+}
+#[cfg(not(windows))]
+pub fn own_job() -> (Option<bool>, Option<u32>) {
+    (Some(false), None)
+}
+
+/// 工作群組狀況的一行紀錄
+pub fn job_line(in_job: Option<bool>, limit: Option<u32>) -> String {
+    let risk = match job_risk(in_job, limit) {
+        JobRisk::Safe => "不影響終端服務",
+        JobRisk::TakesMuxDown => "ASN 結束時終端服務和夥伴會跟著結束",
+        JobRisk::Unknown => "不確定",
+    };
+    format!("工作群組：在裡面={in_job:?} 限制旗標={limit:?}（{risk}）")
 }
 
 fn same_path(a: &Path, b: &Path) -> bool {

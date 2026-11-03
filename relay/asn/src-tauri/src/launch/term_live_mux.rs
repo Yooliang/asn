@@ -35,7 +35,7 @@ impl Rig {
         let cwd = self.tmp.path().to_path_buf();
         let script = format!("while($true){{[IO.File]::AppendAllText('{}','x');Start-Sleep -Milliseconds 200}}", self.hb(n).display());
         let args = vec!["-NoProfile".to_string(), "-Command".to_string(), script];
-        let env: BTreeMap<String, String> = crate::launch::win_term::term_env(std::env::vars().collect(), &[]);
+        let env: BTreeMap<String, String> = crate::launch::win_term::term_env(crate::launch::config::child_env(), &[]);
         let spec = crate::launch::win_term::spec_for(&format!("測試{n}"), "powershell.exe", &args, false, env);
         s.start_window(&cwd, &spec).unwrap_or_else(|e| panic!("開夥伴 {n} 失敗：{e:?}"))
     }
@@ -195,3 +195,96 @@ fn 兩段式_2_認回並收乾淨() {
     let _ = std::fs::remove_dir_all(&t);
     println!("RESULT 第二段：認回 2 個並收乾淨");
 }
+
+/// 畫面操作用（捲動、Ctrl+C、按 X、中文）：開一個真的 claude（haiku，會用到少量額度）留著，等外面操作。
+/// ASN_15Q_CLAUDE_MODE=window｜mux 選模式；ASN_15Q_FLAGS 是旗標資料夾：這裡寫 `opened`（內容＝編號、程序、種類、對話編號），
+/// 外面寫 `done` 才收尾。mux 模式順便開看畫面的 GUI。
+#[test]
+#[ignore]
+fn 真_claude_留給外面操作() {
+    let (Ok(mode), Some(flags)) = (std::env::var("ASN_15Q_CLAUDE_MODE"), std::env::var_os("ASN_15Q_FLAGS")) else { return };
+    let flags = PathBuf::from(flags);
+    let rig = Rig::new();
+    let mut s = rig.svc();
+    s.set_use_mux(mode == "mux");
+    let cwd = rig.tmp.path().to_path_buf();
+    let env: BTreeMap<String, String> = crate::launch::win_term::term_env(crate::launch::config::child_env(), &[]);
+    let args = vec!["--model".to_string(), "haiku".to_string(), "--session-id".to_string(), "15e00000-0000-4000-8000-00000000abcd".to_string()];
+    let spec = crate::launch::win_term::spec_for("測試claude", "claude", &args, false, env);
+    let (id, pid) = s.start_window(&cwd, &spec).unwrap_or_else(|e| panic!("開 claude 失敗：{e:?}"));
+    if mode == "mux" {
+        s.view(&id).expect("開看畫面的 GUI");
+    }
+    let row = s.inner.lock().unwrap().sessions.iter().find(|x| x.id == id).map(|x| (x.kind.clone(), x.session_id.clone()));
+    std::fs::write(flags.join("opened"), format!("{id} {pid} {row:?}")).unwrap();
+    println!("RESULT 開好：{id} {pid} {row:?}");
+    let t = Instant::now();
+    while !flags.join("done").exists() && t.elapsed() < Duration::from_secs(600) {
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    // 外面可能已經關窗：查狀態、收尾都照實印
+    println!("RESULT 收尾前表上：{:?}；read：{:?}", rows(&s), s.read(&id, 5).map(|x| x.len()));
+    if mode == "mux" {
+        println!("RESULT stop_partner：{:?}", s.stop_partner(&id));
+    } else {
+        println!("RESULT stop_gui：{:?}", s.stop_gui(pid));
+    }
+    std::thread::sleep(Duration::from_millis(1500));
+    let _ = std::fs::write(flags.join("stopped"), "1");
+}
+
+/// 各種指令寫法在兩種模式下開不開得起來（不花額度）：只印結果表，由人判斷。會開幾扇視窗再自己關
+#[test]
+#[ignore]
+fn 指令寫法_裸名_cmd_ps1_exe_不存在() {
+    let before = mux_pids();
+    let rig = Rig::new();
+    // ASN_15Q_DIRNAME 可換資料夾名（例如純英文無空白）比對是不是路徑造成的
+    let dir = rig.tmp.path().join(std::env::var("ASN_15Q_DIRNAME").unwrap_or_else(|_| "有 空白 中文".to_string()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = |n: &str| dir.join(format!("out-{n}.txt"));
+    std::fs::write(dir.join("zzfake.cmd"), "@chcp 65001 >nul\r\n@echo %*> \"%~dp0out-cmd.txt\"\r\n@ping -n 30 127.0.0.1 >nul\r\n").unwrap();
+    std::fs::write(dir.join("zzfake2.ps1"), "$args -join '|' | Set-Content -Encoding utf8 (Join-Path $PSScriptRoot 'out-ps1.txt'); Start-Sleep 30\r\n").unwrap();
+    let args = vec!["a b".to_string(), "中文".to_string()];
+    let cases: Vec<(&str, String, Vec<String>)> = vec![
+        ("裸名cmd", "zzfake".to_string(), args.clone()),
+        ("完整cmd", dir.join("zzfake.cmd").display().to_string(), args.clone()),
+        ("完整ps1", dir.join("zzfake2.ps1").display().to_string(), args.clone()),
+        ("exe", "powershell.exe".to_string(), vec!["-NoProfile".into(), "-Command".into(), format!("'exe' | Set-Content '{}'; Start-Sleep 30", out("exe").display())]),
+        ("不存在", "zzmissing-15q".to_string(), args.clone()),
+    ];
+    for use_mux in [false, true] {
+        let mut s = rig.svc();
+        s.set_use_mux(use_mux);
+        let mut own_mux = None;
+        for (name, prog, a) in &cases {
+            for f in ["cmd", "ps1", "exe"] {
+                let _ = std::fs::remove_file(out(f));
+            }
+            let mut base = crate::launch::config::child_env();
+            let path = format!("{};{}", dir.display(), base.get("PATH").cloned().unwrap_or_default());
+            base.insert("PATH".to_string(), path);
+            let env: BTreeMap<String, String> = crate::launch::win_term::term_env(base, &[]);
+            let spec = crate::launch::win_term::spec_for("指令測試", prog, a, false, env);
+            let opened = s.start_window(&dir, &spec);
+            std::thread::sleep(Duration::from_secs(5));
+            let wrote: Vec<String> = ["cmd", "ps1", "exe"].iter().filter_map(|f| std::fs::read_to_string(out(f)).ok().map(|t| format!("{f}={}", t.trim()))).collect();
+            let shown = opened.as_ref().map(|x| x.0.clone()).map_err(|e| format!("{e:?}").chars().take(80).collect::<String>());
+            println!("RESULT {} {name}：開窗={shown:?} 程式寫出={wrote:?}", if use_mux { "mux" } else { "視窗" });
+            if let Ok((id, pid)) = opened {
+                if use_mux {
+                    own_mux = Some(pid);
+                    let _ = s.stop_partner(&id);
+                } else {
+                    let _ = s.stop_gui(pid);
+                }
+            }
+        }
+        if use_mux {
+            let left: Vec<u32> = mux_pids().into_iter().filter(|p| !before.contains(p)).collect();
+            println!("RESULT mux 收尾後留下：{left:?}（最後一個成功的是 {own_mux:?}）");
+            assert!(left.is_empty(), "開窗失敗也不留下空 mux");
+        }
+    }
+}
+

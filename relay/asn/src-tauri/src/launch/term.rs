@@ -760,10 +760,13 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let w = self.wez(dir);
         // 窗格已經開了：後面任何一步失敗都只關這一個窗格
         let close_pane = |why: String| -> super::win_term::WinOpenError {
-            match w.kill_pane(&win.sock, pane_id) {
+            let r = match w.kill_pane(&win.sock, pane_id) {
                 Ok(()) => Started(why),
                 Err(e) => Started(format!("{why}（關閉剛開的窗格也失敗：{e}）")),
-            }
+            };
+            // 這可能是唯一一個窗格（夥伴一開就結束）：不留下空的 mux
+            m.stop_if_empty("開窗失敗後沒有夥伴");
+            r
         };
         if let Err(e) = w.set_tab_title(&win.sock, pane_id, &title) {
             return Err(close_pane(format!("無法設定終端標題：{e}")));
@@ -2225,6 +2228,13 @@ pub fn live(data_dir: &Path) -> LiveTerms {
     svc.set_use_mux(mux);
     if let Err(e) = svc.reclaim() {
         elog!("終端對照表接手失敗（不中斷啟動）：{e}");
+    }
+    // 工作群組的旗標寫進紀錄（第 4 步的前提：遇到會帶走 mux 的就不用 mux，見設計 11.2）。截圖模式不動
+    if !std::env::args().any(|a| a == "--shot") {
+        if let Some(Ok(paths)) = svc.mux_base.as_ref().map(|b| super::mux::paths(b)) {
+            let (inside, limit) = super::mux::own_job();
+            super::mux::note(&paths.dir, &super::mux::job_line(inside, limit));
+        }
     }
     // ASN 當掉後可能留下空的 mux：背景查一次就好，不拖慢啟動、不重試、不會起新的（cli 全帶 --no-auto-start）。截圖模式不動
     if mux && !std::env::args().any(|a| a == "--shot") {
