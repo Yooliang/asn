@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { applyMention, markMentions, mentionOptions, mentionQuery, mentionTargets } from '../ui/lib/mention.mjs'
+import { MENTION_MORE_HINT, applyMention, markMentions, mentionOptions, mentionQuery, mentionTargets } from '../ui/lib/mention.mjs'
 import { renderMarkdown } from '../ui/lib/markdown.mjs'
 import { roomItems, roomPseudoFriend } from '../ui/lib/mobile-rooms.mjs'
 
@@ -101,4 +101,28 @@ test('樣式：標記與選單在 group.css，電腦版與手機端都載入', (
   assert.match(css, /\.mention\{/)
   assert.match(css, /\.mention-menu\{/)
   assert.match(css, /\.mention-menu button\.on/)
+})
+
+test('成員超過 8 位：打 @ 全部列出，最晚加入的也點得到（0.2.0 起漏掉第 9 位）；篩選與排序照舊', () => {
+  const many = Array.from({ length: 12 }, (_, i) => ({ key: `x:r${i}`, label: `夥伴${i + 1}（工作機）`, member_kind: 'ai', mine: false }))
+  const t = mentionTargets([{ key: '~u:me', label: '牧陽', member_kind: 'human', mine: true }, ...many])
+  const all = mentionOptions(t, '')
+  assert.equal(all.length, 12)
+  assert.equal(all.at(-1).label, '夥伴12（工作機）')
+  assert.deepEqual(mentionOptions(t, '夥伴12').map(o => o.label), ['夥伴12（工作機）'])
+  assert.equal(mentionOptions(t, '夥伴1').length, 4, '夥伴1、10、11、12')
+})
+
+test('選單接線：看得出能往下滑、上下鍵走到的那一列會捲進可視範圍、滑到底提示就收起來', () => {
+  assert.match(MENTION_MORE_HINT, /往下滑/)
+  assert.match(tpl, /class="mention-more" v-if="mentionMore"/)
+  assert.match(tpl, /ref="menuEl"[^>]*@scroll\.passive="syncMore"/)
+  assert.match(chatpane, /scrollHeight - el\.scrollTop - el\.clientHeight > 4/)
+  assert.match(chatpane, /querySelector\('button\.on'\)\?\.scrollIntoView\(\{ block: 'nearest' \}\)/)
+  const key = /function onComposeKey[\s\S]*?afterMenu\(\)/.exec(chatpane)
+  assert.ok(key, '上下鍵移動後要捲動到目前那一列')
+  const css = read('ui', 'group.css')
+  assert.match(css, /\.mention-menu\{[^}]*max-height:220px;overflow-y:auto;scroll-padding-bottom:/)
+  assert.match(css, /\.mention-more\{position:sticky;bottom:/)
+  assert.doesNotMatch(read('ui', 'lib', 'mention.mjs'), /list\.slice\(|MENTION_MAX_OPTIONS/, '選單不再截人數')
 })

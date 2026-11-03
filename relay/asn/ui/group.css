@@ -61,9 +61,10 @@
 .reply-bar-x{flex:none;border:0;background:none;cursor:pointer;color:var(--muted);font-size:14px;line-height:1;padding:4px}
 .mention{display:inline-block;padding:0 5px;margin:0 1px;border-radius:9px;background:#dbe9fb;color:#1b4f8f;font-size:.92em;line-height:1.5;font-weight:600}
 .composer{position:relative}
-.mention-menu{position:absolute;z-index:20;left:0;bottom:100%;margin:0 0 4px;padding:3px;list-style:none;min-width:200px;max-width:100%;max-height:220px;overflow-y:auto;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 4px 14px rgba(0,30,70,.3)}
+.mention-menu{position:absolute;z-index:20;left:0;bottom:100%;margin:0 0 4px;padding:3px;list-style:none;min-width:200px;max-width:100%;max-height:220px;overflow-y:auto;scroll-padding-bottom:30px;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 4px 14px rgba(0,30,70,.3)}
 .mention-menu button{display:flex;align-items:center;gap:8px;width:100%;border:0;background:none;text-align:left;padding:7px 9px;border-radius:5px;cursor:pointer;color:var(--fg);font-size:14px}
 .mention-menu button.on,.mention-menu button:hover{background:#dbe9fb;color:#14375f}
+.mention-more{position:sticky;bottom:-3px;margin:2px -3px -3px;padding:5px 9px;text-align:center;font-size:12px;color:#14375f;background:#eaf2fc;border-top:1px solid var(--line);border-radius:0 0 7px 7px;pointer-events:none}
 .mention-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .m-av-spk{position:relative;flex:none;margin-top:2px;display:flex;flex-direction:column;align-items:center}
 /* AI 發言者頭像：廠商小圖用 <asn-avatar>（style.css 的 .avb，#336），這裡只管離線時頭像淡化 */
@@ -96,6 +97,7 @@
 .room-btn:hover{background:#e6f1fc}
 .room-btn .unread{align-self:center;height:18px;box-sizing:border-box}
 @media (prefers-color-scheme:dark){
+  .mention-more{background:#1f2f45;color:#cfe3ff}
   .mention{background:#2b4468;color:#cfe3ff}.mention-menu button.on,.mention-menu button:hover{background:#2b4468;color:#e6f0ff}
   .gc-list{background:#3a3418}.gc-card{background:#232a33}.gs-input{background:#1c232b}
 }
