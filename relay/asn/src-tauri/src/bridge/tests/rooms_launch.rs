@@ -339,6 +339,35 @@ async fn 群組順位_第二順位先不轉交_到期才轉_期間不擋其他�
 }
 
 #[tokio::test]
+async fn 群組_一輪只交一封_順位延遲到期時_worker_這一輪還沒結束就先不交_做完才交_不算失敗() {
+    let mut h = harness(&[("T-視窗甲", "idle")]).await;
+    h.core.cfg.one_per_turn = true;
+    room_with(
+        &h,
+        vec![
+            rmsg(2, json!({"forMe": {"T-視窗甲": true}, "wake": wake(2, 3, &["正見（阿明）"])})), // 排隊 60 秒
+            rmsg(3, json!({"forMe": {"T-視窗甲": true}})),                                       // 立即
+        ],
+    );
+    h.core.pull("test", T0).await;
+    let f = fwd(&h.said());
+    assert_eq!(f.len(), 1, "#3 立即轉交，這一輪開始");
+    // #2 到期，但 worker 這一輪（#3）還沒結束：不交、仍留在排隊檔、不算轉交失敗
+    h.core.tick(T0 + 60_000).await;
+    assert_eq!(fwd(&h.said()).len(), 1, "這一輪還沒結束，不塞第二則");
+    let held = held_file(&h);
+    assert_eq!(held.as_array().unwrap().len(), 1, "還在排隊檔裡");
+    assert!(held[0]["fails"].is_null() || held[0]["fails"].as_u64() == Some(0), "沒有被記成失敗：{held}");
+    // #3 做完＝一輪結束：下一次 tick 才交 #2
+    worker_ok(&mut h.core, &f[0].0, T0 + 61_000).await;
+    h.core.tick(T0 + 62_000).await;
+    let f = fwd(&h.said());
+    assert_eq!(f.len(), 2);
+    assert!(f[1].2.starts_with("[群組 專案群] trust=member from=W/W-政策 #2 id="), "{}", f[1].2);
+    assert_eq!(held_file(&h).as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
 async fn 群組順位_延遲是順位減一乘間隔_第一順位與沒有順位資訊不延遲_間隔設_0_關閉() {
     let mut h = harness(&[("T-視窗甲", "idle")]).await;
     room_with(&h, vec![rmsg(2, json!({"forMe": {"T-視窗甲": true}, "wake": wake(3, 3, &["甲", "乙"])})), rmsg(3, json!({"forMe": {"T-視窗甲": true}, "wake": wake(1, 3, &[])}))]);
@@ -1120,4 +1149,28 @@ fn 管理器_舊橋退出後自動接手_設定關著或舊橋還在就不動() 
     if let Err(e) = result {
         std::panic::resume_unwind(e);
     }
+}
+
+#[tokio::test]
+async fn 群組_一輪只交一封_同一視窗連來兩則_第一則做完才交第二則_游標不跳過() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.core.cfg.one_per_turn = true;
+    set_rooms(
+        &h,
+        vec![room(
+            vec![rmsg(2, json!({"forMe": {"T-乙": true}})), rmsg(3, json!({"forMe": {"T-乙": true}}))],
+            json!([{"member": "T~T-乙", "read_seq": 1}]),
+        )],
+    );
+    h.core.pull("test", T0).await;
+    let f = fwd(&h.said());
+    assert_eq!(f.len(), 1, "worker 這一輪還沒結束：只交第一則");
+    assert!(f[0].2.contains("群組內文-2"), "{}", f[0].2);
+    // 第一則做完（一輪結束）：馬上再拉，才交第二則
+    worker_ok(&mut h.core, &f[0].0, T0 + 1_000).await;
+    assert!(h.core.retry_due(T0 + 1_000));
+    h.core.pull("test", T0 + 1_001).await;
+    let f = fwd(&h.said());
+    assert_eq!(f.len(), 2);
+    assert!(f[1].2.contains("群組內文-3"), "{}", f[1].2);
 }
