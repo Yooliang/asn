@@ -896,6 +896,30 @@ async fn 轉交的信頭_本人信用人代號位址_不含_xisu_要回信行格
 }
 
 #[tokio::test]
+async fn 本人簽章的私信轉交給視窗_退回那個視窗一封寄信額度_成員的信不退() {
+    use crate::cli::send_rate::take;
+    let now = crate::heartbeat::now_ms();
+    // 成員（夥伴）的信：不退。T-乙 用了 3 封，上限 4 時再寄一封就滿（剩 0）
+    let mut m = harness(&[("T-乙", "idle")]).await;
+    let rate = m.work.path().join("rate");
+    for _ in 0..3 {
+        take(&rate, "T-乙", 30, now).unwrap();
+    }
+    m.forward(mail(1, json!({"from_node": "H", "from_agent": "asn", "expects_reply": false})), T0).await;
+    assert_eq!(take(&rate, "T-乙", 4, now), Ok(0), "成員的信不退");
+    // 本人簽章的信：只退收件視窗那一個
+    let mut g = harness(&[("T-乙", "idle"), ("T-丙", "idle")]).await;
+    let rate = g.work.path().join("rate");
+    for _ in 0..3 {
+        take(&rate, "T-乙", 30, now).unwrap();
+    }
+    take(&rate, "T-丙", 30, now).unwrap();
+    g.forward(mail(2, json!({"trust": "owner", "from_node": "T", "from_agent": "u:3cda66252c34", "sender_display": "小良", "expects_reply": false})), T0).await;
+    assert_eq!(take(&rate, "T-乙", 4, now), Ok(1), "T-乙 3 封退回 1 封＝2 封，上限 4 時寄完還剩 1");
+    assert_eq!(take(&rate, "T-丙", 2, now), Ok(0), "T-丙 不動：1 封，上限 2 時寄完剩 0");
+}
+
+#[tokio::test]
 async fn 延後期間對方回覆了_不寄通知() {
     let mut h = harness(&[("T-乙", "busy")]).await;
     h.forward(mail(1, json!({})), T0).await;

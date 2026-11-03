@@ -99,6 +99,19 @@ fn 每視窗每小時上限_記在_send_rate_json_別的視窗不受影響() {
 }
 
 #[test]
+fn 快到上限時寄完會提醒_剩很多不提醒() {
+    let b = backend(200);
+    let mut f = fx(&b.url(), Some("T-視窗甲"));
+    f.env.send_per_hour = 7;
+    let (c, _, err) = go(&f.env, &["send", "--to", "PC1", "--body", "第1封", "--no-reply"], "");
+    assert_eq!(c, 0, "{err}");
+    assert!(!err.contains("提醒："), "還剩 6 封不提醒：{err}");
+    let (c, _, err) = go(&f.env, &["send", "--to", "PC1", "--body", "第2封", "--no-reply"], "");
+    assert_eq!(c, 0, "{err}");
+    assert!(err.contains("提醒：視窗「T-視窗甲」這一小時還能寄 5 封（上限 7 封）"), "{err}");
+}
+
+#[test]
 fn 同節點寄信_可寄給本機其他視窗_寄給自己這個視窗被擋_不打後端() {
     let b = backend(200);
     let f = fx(&b.url(), Some("T-視窗甲"));

@@ -19,6 +19,7 @@ mod confirm;
 mod room;
 mod secret;
 mod send;
+pub(crate) mod send_rate;
 mod site_cmd;
 mod upload;
 mod usage_cmd;

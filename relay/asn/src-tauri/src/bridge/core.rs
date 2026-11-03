@@ -85,6 +85,8 @@ pub struct Config {
     pub engine_env: Vec<(String, String)>,
     /// ACP 工作者設定檔（預設 `~/.asn/agents.json`，與舊橋同一份；ASN_AGENTS_FILE 可改，舊名 IRORI_AGENTS_FILE 仍可用）
     pub agents_file: PathBuf,
+    /// 寄信額度計數檔（send-rate.json）所在資料夾：本人簽章的私信轉交給視窗時退回一封額度
+    pub rate_home: PathBuf,
     /// 使用者家目錄（找 ~/.codex；測試指到暫存資料夾）
     pub home: PathBuf,
     /// 引擎名單重列的間隔
@@ -106,7 +108,7 @@ impl Config {
             let (new, old) = crate::envc::get_pair("ASN_ENGINES");
             super::engines::engine_spec(new.as_deref(), old.as_deref())
         };
-        let (work_dir_agents, work_dir_home) = (work_dir.join("agents.json"), work_dir.join("home"));
+        let (work_dir_agents, work_dir_home, work_dir_rate) = (work_dir.join("agents.json"), work_dir.join("home"), work_dir.join("rate"));
         let home = crate::identity::home_dir();
         let list = |k: &str| crate::envc::get(k).unwrap_or_default().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect::<Vec<_>>();
         Config {
@@ -144,6 +146,7 @@ impl Config {
             engines_pi_added: engines.pi_added,
             engine_env: std::env::vars().collect(),
             agents_file: if cfg!(test) { work_dir_agents } else { crate::envc::get_os("ASN_AGENTS_FILE").filter(|s| !s.is_empty()).map(PathBuf::from).unwrap_or_else(|| crate::identity::relay_home().join("agents.json")) },
+            rate_home: if cfg!(test) { work_dir_rate } else { crate::identity::relay_home() },
             home: if cfg!(test) { work_dir_home } else { home },
             engine_refresh_ms: env_u64("ASN_ROSTER_MS", 60_000),
             engine_only: false,
@@ -957,6 +960,13 @@ impl Core {
         }
     }
 
+    /// 本人簽章的私信轉交給視窗：退回那個視窗一封寄信額度（群組訊息不走這裡；一封信只退一次）
+    fn refund_owner_mail(&self, m: &Mail, target: &str) {
+        if m.trust == "owner" && crate::cli::send_rate::refund(&self.cfg.rate_home, target, &m.id, crate::heartbeat::now_ms()) {
+            self.log.line(&format!("id={} from the owner: refunded one send for {target}", m.id));
+        }
+    }
+
     pub async fn handle_mail(&mut self, m: Mail) {
         self.handle_mail_raw(m, None).await;
     }
@@ -1062,6 +1072,7 @@ impl Core {
         let late = self.late_from.take().or_else(|| self.held_first.get(&m.id).copied());
         let origin = Origin::of(&p);
         self.pending.push(p);
+        self.refund_owner_mail(&m, &target);
         if !no_reply {
             self.last_requester.insert(target.clone(), LastReq { from_node: m.from_node.clone(), from_agent: from_agent.clone(), mail_id: m.id.clone(), t: self.now });
         }
