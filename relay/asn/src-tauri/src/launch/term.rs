@@ -4002,6 +4002,24 @@ mod tests {
     }
 
     #[test]
+    fn 上一版的隔離設定_開關開著升級成新版_關著改回空設定_改過的不動() {
+        for (hold, want) in [(true, ISOLATED_CONFIG), (false, LEGACY_CONFIG)] {
+            let d = tempfile::tempdir().unwrap();
+            let path = d.path().join("wezterm-term.lua");
+            std::fs::write(&path, PREV_ISOLATED_CONFIG).unwrap();
+            let mut svc = TermService::fixed(wezterm::WezTermDir { gui: "g".into(), cli: "c".into() }, path.clone(), d.path().join("t.json"), d.path().into(), wezterm::RealRunner, wezterm::RealFs);
+            svc.set_hold_config(hold);
+            svc.ensure_config().unwrap();
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), want);
+            let mine = "return { exit_behavior = \"Hold\", font_size = 12 }\n";
+            std::fs::write(&path, mine).unwrap();
+            svc.ensure_config().unwrap();
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), mine, "使用者改過的不動");
+        }
+        assert!(ISOLATED_CONFIG.contains("window_close_confirmation = \"NeverPrompt\"") && ISOLATED_CONFIG.contains("exit_behavior_messaging = \"None\""));
+    }
+
+    #[test]
     fn 開窗點開的_claude_視窗_對照表寫入_kind_與_session_id_參數原樣() {
         let rig = make(default_profiles(), vec![]);
         let spec = claude_spec(Some("sid-123"));
