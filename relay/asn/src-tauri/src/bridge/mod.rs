@@ -120,7 +120,7 @@ pub fn start(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>) -> Result
 
 /// 同 [`start`]，launch_env 有值就接上遠端開視窗（第三段）
 pub fn start_with(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>, launch_env: Option<Arc<dyn LaunchEnv>>) -> Result<Running, StartError> {
-    let lock = lock::BridgeLock::acquire(&cfg.work_dir, std::process::id(), crate::heartbeat::pid_alive).map_err(|e| match e {
+    let lock = lock::BridgeLock::acquire(&cfg.work_dir, std::process::id(), lock::holder_alive(&cfg.work_dir)).map_err(|e| match e {
         lock::LockError::HeldBy(p) => StartError::HeldBy(p),
         lock::LockError::Io(m) => StartError::Other(format!("拿不到收信鎖：{m}")),
     })?;
@@ -343,7 +343,7 @@ impl Manager {
     }
 
     fn legacy(&self) -> bool {
-        !self.node.is_empty() && matches!(handoff::legacy_status(&self.work_dir, std::process::id(), crate::heartbeat::pid_alive), handoff::Legacy::Running { .. })
+        !self.node.is_empty() && matches!(handoff::legacy_status(&self.work_dir, std::process::id(), lock::holder_alive(&self.work_dir)), handoff::Legacy::Running { .. })
     }
 
     #[cfg(test)]
@@ -442,10 +442,10 @@ impl Manager {
     pub async fn takeover(&self, confirmed: bool) -> Result<Status, String> {
         let s = read_settings(&self.data_dir);
         let pid = std::process::id();
-        handoff::takeover(&self.work_dir, &self.node, pid, crate::heartbeat::pid_alive, &handoff::SystemExec, s.allow_takeover, confirmed).map_err(|e| e.text())?;
+        handoff::takeover(&self.work_dir, &self.node, pid, lock::holder_alive(&self.work_dir), &handoff::SystemExec, s.allow_takeover, confirmed).map_err(|e| e.text())?;
         // 等舊橋的 pid 消失（最多 10 秒）才拿鎖
         for _ in 0..40 {
-            if lock::foreign_holder(&self.work_dir, pid, crate::heartbeat::pid_alive).is_none() {
+            if lock::foreign_holder(&self.work_dir, pid, lock::holder_alive(&self.work_dir)).is_none() {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
