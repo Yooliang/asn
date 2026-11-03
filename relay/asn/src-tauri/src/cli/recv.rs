@@ -193,6 +193,10 @@ pub async fn main(argv: &[String], env: &Env, io: &mut Io<'_>) -> R<i32> {
                     if !printed.contains(&mid) {
                         io.outln(&to_line(&m, cmd.as_deref()));
                         printed.insert(mid.clone());
+                        // 本人簽章的私信：退回這個視窗一封寄信額度（群組訊息不走這裡）
+                        if m.get("trust").and_then(Value::as_str) == Some("owner") {
+                            super::send_rate::refund(&env.relay_home, &me.name, &mid, now_ms());
+                        }
                     }
                     ids.push(mid);
                 }

@@ -12,8 +12,8 @@ use super::env::Env;
 use super::upload::{attachment_text, prepare_files, upload_items, MAX_FILES};
 use super::{Fail, Io, R};
 use crate::bridge::core::sent_mark_name;
-use serde_json::{json, Map, Value};
-use std::path::{Path, PathBuf};
+use serde_json::{json, Value};
+use std::path::Path;
 
 const MAX_BODY: usize = 20000;
 
@@ -111,33 +111,9 @@ fn valid_id(s: &str) -> bool {
     crate::identity::valid_id(s)
 }
 
-/// 每視窗每小時上限，記在 ~/.asn/send-rate.json（暫存檔＋rename，避免寫壞）
-fn take_rate(relay_home: &Path, window: &str, limit: usize, now: u64) -> R<()> {
-    let file = relay_home.join("send-rate.json");
-    let mut all: Map<String, Value> = std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
-    let hour = 3_600_000u64;
-    let mut cleaned = Map::new();
-    for (k, v) in all.iter() {
-        let kept: Vec<Value> = v.as_array().map(|a| a.iter().filter(|t| t.as_u64().map(|t| now.saturating_sub(t) < hour).unwrap_or(false)).cloned().collect()).unwrap_or_default();
-        if !kept.is_empty() {
-            cleaned.insert(k.clone(), Value::Array(kept));
-        }
-    }
-    all = cleaned;
-    let recent: Vec<u64> = all.get(window).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
-    if recent.len() >= limit {
-        let wait = (recent[0] + hour - now).div_ceil(60_000);
-        return Err(Fail::new(3, format!("被擋：視窗「{window}」每小時最多寄 {limit} 封，{wait} 分鐘後再試")));
-    }
-    let mut next = recent;
-    next.push(now);
-    all.insert(window.to_string(), json!(next));
-    let _ = std::fs::create_dir_all(relay_home);
-    let tmp = PathBuf::from(format!("{}.{}.tmp", file.display(), std::process::id()));
-    if std::fs::write(&tmp, serde_json::to_string(&all).unwrap_or_default()).is_ok() {
-        let _ = std::fs::rename(&tmp, &file);
-    }
-    Ok(())
+/// 每視窗每小時上限（計數與鎖見 send_rate.rs）；回「寄完還剩幾封」
+fn take_rate(relay_home: &Path, window: &str, limit: usize, now: u64) -> R<usize> {
+    super::send_rate::take(relay_home, window, limit, now).map_err(|wait| Fail::new(3, format!("被擋：視窗「{window}」每小時最多寄 {limit} 封，{wait} 分鐘後再試")))
 }
 
 /// 視窗直接回信（--reply-to）後在本機留記號：機器橋看到就不再寄「10 分鐘內沒有收到回覆」
@@ -224,7 +200,7 @@ pub async fn main(argv: &[String], env: &Env, io: &mut Io<'_>) -> R<i32> {
         return Err(Fail::new(1, format!("收件人就是你自己（{}/{}）；不能寄給自己", id.node, me.name)));
     }
     let now = crate::heartbeat::now_ms();
-    take_rate(&env.relay_home, &me.name, env.send_per_hour, now)?;
+    let left = take_rate(&env.relay_home, &me.name, env.send_per_hour, now)?;
     let rl = relay(&id, &me.name);
     // 附件先傳完並確認；任何一個失敗就丟錯，下面不會寄信
     let attachment_ids = if items.is_empty() { None } else { Some(upload_items(&rl, &items).await?) };
@@ -284,6 +260,9 @@ pub async fn main(argv: &[String], env: &Env, io: &mut Io<'_>) -> R<i32> {
     }
     if !note.is_empty() {
         io.errln(&note);
+    }
+    if let Some(w) = super::send_rate::warn_text(&me.name, left, env.send_per_hour) {
+        io.errln(&w);
     }
     Ok(0)
 }
