@@ -1,11 +1,11 @@
 {
-  "version": "0.2.0",
-  "notes": "新版本：0.2.0。修正：使用者資料夾是中文名稱的電腦，開不了 Claude 等夥伴（路徑變亂碼）。改善：Gemini 夥伴只能寫進目前這段對話的暫存資料夾，寫到 .ssh、.asn 這類資料夾會直接中止。新功能（實驗，預設關閉）：內建終端機，夥伴可以在 ASN 關掉後繼續跑，也能看畫面、切到前景或背景；桌面沒有人登入時會自動換一種顯示方式，真的開不了畫面會直接說明。",
-  "pub_date": "2026-11-01T12:56:40.687Z",
+  "version": "0.2.1",
+  "notes": "新功能：設定拆成「設備」「帳號」兩頁，手機也一樣；設備頁看得到每一台電腦、每一家 AI 的狀態。新功能：收發室額度用完時先扣住信件，額度重置後自動重送。新功能：群組裡看得到訊息來自哪台設備；AI 互相叫醒到達上限時會顯示出來。改善：信轉交錯視窗或轉交失敗時，會通知本人。改善：開同名夥伴前先找有沒有開著的，有就切到前景，不另開。修正：程式在背景累積、吃掉記憶體的問題（關掉的終端機程序沒有結束）。修正：登入服務暫時出錯時不會再被登出。修正：收信程式卡在某一步時不會永久停擺。修正：夥伴一開就結束時會回報失敗。修正：成員電腦切換帳號失敗。已知問題：電腦記憶體非常吃緊時，畫面可能沒有回應，重新開機可恢復；原因還在追查。",
+  "pub_date": "2026-11-03T09:22:16.657Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjZReUZYeWJnTnZPZnlyVEJaRm54NjhrK1M2NGhmYXd1My9nRk95cE9UdkJKLzZ2a1VZMHV5OXVIMDM2MHJ1NEZKUklpUEFhZ3NhV21NOXRXbEdoK0FRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNTM3ODAwCWZpbGU6QVNOXzAuMi4wX3g2NC1zZXR1cC5leGUJdmVyc2lvbjowLjIuMApmVzZKcGNNdklRQllXMTQzazdDeTlWZ3dqRzZMSVl2OEZHV3h5dUhtdnNsVjJRZkhnVUljajJ4QnNic2ZYZk9YVXFZNlM4K1k1NTFjUXRtWmNYUVVCdz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybi9ISHJiVlpPdzNxNm9FVHNOSXBKZVd2bG1lRjBMVUJyb2ZXUysySU9FTk9IRUE4bkdhL09IZEpCcEFJM0JZaEs3Uk9zWGNJL0lwNW1SMVYvakFuZ2dBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNjk3NzM2CWZpbGU6QVNOXzAuMi4xX3g2NC1zZXR1cC5leGUJdmVyc2lvbjowLjIuMQpiQXU4eFNCWEdTZkNpZUVldDR1SFJxNEZRVm12eVlPOU16OFBhMkRmZVRWY1U1WUN1ZjllR3VuOUlmZk5ReVZKTW1SRkNWRmdUYTFTNjM3THdXNm9Cdz09Cg==",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.1_x64-setup.exe"
     }
   }
 }
