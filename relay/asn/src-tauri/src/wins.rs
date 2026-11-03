@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Window};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder, Window};
 
 const TOAST_W: f64 = 270.0;
 const TOAST_H: f64 = 96.0;
@@ -57,22 +57,6 @@ pub fn setup_progress_snapshot() -> Vec<serde_json::Value> {
     PROG_LAST.lock().unwrap().clone()
 }
 
-/// 顯示但不啟用視窗。`.focused(false)` 只管建窗當下：tao 建完窗就清掉「不搶焦點」記號，之後的 `show()` 走 SW_SHOW，
-/// ASN 在前景時會把系統前景與輸入焦點搶到這扇窗，`.focusable(false)`（WS_EX_NOACTIVATE）擋不住。
-/// 只有不該拿焦點的小窗用；這個呼叫繞過 tao，所以它記的「可見」狀態不會更新，這些窗之後也不靠它判斷。
-#[cfg(windows)]
-fn show_no_activate(w: &WebviewWindow) {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindowAsync, SW_SHOWNOACTIVATE};
-    match w.hwnd() {
-        Ok(h) => unsafe { ShowWindowAsync(h.0 as _, SW_SHOWNOACTIVATE); },
-        Err(_) => { let _ = w.show(); }
-    }
-}
-#[cfg(not(windows))]
-fn show_no_activate(w: &WebviewWindow) {
-    let _ = w.show();
-}
-
 /// 開常駐進度小窗（已經開著就什麼都不做）：置頂、不搶輸入焦點、不進工作列、無邊框透明、可以點（取消鈕），不會自己關，結束後由呼叫端用 close_setup_progress 關。
 /// 主視窗隱藏或最小化時照樣跳出來（它是獨立的視窗）
 /// 回傳這一輪的編號。上一輪的小窗還開著（結果還在顯示）就沿用那個視窗，但清掉舊狀態、送「重來」事件讓畫面回到開頭，舊的計時到了也不會關到這一輪
@@ -81,10 +65,16 @@ pub fn open_setup_progress(app: &AppHandle) -> Result<u64, String> {
     PROG_LAST.lock().unwrap().clear();
     if let Some(w) = app.get_webview_window(PROG_LABEL) {
         let _ = app.emit("agent-setup", serde_json::json!({ "phase": "reset" }));
-        show_no_activate(&w);
+        let _ = w.show();   // 舊窗本來就開著，這裡不會再呼叫系統顯示，也就不會搶焦點
         return Ok(round);
     }
-    let w = WebviewWindowBuilder::new(app, PROG_LABEL, WebviewUrl::App("setup-progress.html".into()))
+    let origin = app.primary_monitor().ok().flatten().map(|m| {
+        let wa = m.work_area();
+        let sf = m.scale_factor();
+        let (x, y) = progress_origin(wa.position.x, wa.position.y, wa.size.width as i32, wa.size.height as i32, sf);
+        (x, y, sf)
+    });
+    let mut builder = WebviewWindowBuilder::new(app, PROG_LABEL, WebviewUrl::App("setup-progress.html".into()))
         .title("ASN 安裝並登入")
         .inner_size(PROG_W, PROG_H)
         .decorations(false)
@@ -95,17 +85,19 @@ pub fn open_setup_progress(app: &AppHandle) -> Result<u64, String> {
         .skip_taskbar(true)
         .focused(false)
         .focusable(false)
-        .visible(false)
+        .visible(cfg!(windows))   // 見 show_toast：Windows 要在建窗當下顯示才不會搶焦點
         .disable_drag_drop_handler()
-        .additional_browser_args(BROWSER_ARGS)
-        .build()
-        .map_err(|e| e.to_string())?;
-    if let Ok(Some(m)) = w.primary_monitor() {
-        let wa = m.work_area();
-        let (x, y) = progress_origin(wa.position.x, wa.position.y, wa.size.width as i32, wa.size.height as i32, m.scale_factor());
-        let _ = w.set_position(PhysicalPosition::new(x, y));
+        .additional_browser_args(BROWSER_ARGS);
+    if let Some((x, y, sf)) = origin {
+        builder = builder.position(x as f64 / sf, y as f64 / sf);
     }
-    show_no_activate(&w);
+    let w = builder.build().map_err(|e| e.to_string())?;
+    if let Some((x, y, _)) = origin {
+        let _ = w.set_position(PhysicalPosition::new(x, y));   // 建窗時的位置是邏輯座標；多螢幕縮放不同時這裡校正
+    }
+    if !cfg!(windows) {
+        let _ = w.show();
+    }
     Ok(round)
 }
 
@@ -392,7 +384,16 @@ pub async fn show_toast(app: AppHandle, slots: State<'_, Slots>, toast: Toast) -
     let label = format!("toast-{}-{}", slot, SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
     let status = if ["online", "busy", "away", "offline"].contains(&toast.status.as_str()) { toast.status.as_str() } else { "online" };
     let url = toast_url(&toast, status);
-    let built = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
+    // 貼工作區右下角（扣掉工作列），第 slot 則往上疊
+    let origin = app.primary_monitor().ok().flatten().map(|m| {
+        let sf = m.scale_factor();
+        let wa = m.work_area();
+        let (tw, th, gap) = ((TOAST_W * sf) as i32, (TOAST_H * sf) as i32, (TOAST_GAP * sf) as i32);
+        let x = wa.position.x + wa.size.width as i32 - tw - gap;
+        let y = wa.position.y + wa.size.height as i32 - (th + gap) * (slot as i32 + 1);
+        (x, y, sf)
+    });
+    let mut builder = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
         .title("ASN 提示")
         .inner_size(TOAST_W, TOAST_H)
         .decorations(false)
@@ -403,24 +404,25 @@ pub async fn show_toast(app: AppHandle, slots: State<'_, Slots>, toast: Toast) -
         .skip_taskbar(true)
         .focused(false)
         .focusable(false)
-        .visible(false)
+        // 建窗當下就顯示：tao 只在建窗時用 SW_SHOWNOACTIVATE，建完就清掉不搶焦點的記號；之後才 show() 會走 SW_SHOW，
+        // ASN 在前景時前景與輸入焦點都被這扇窗拿走，WS_EX_NOACTIVATE 也擋不住。直接呼叫 Win32 顯示則會少刷新外框，多出原生標題列。
+        // 其他平台維持原本的先設位置再顯示
+        .visible(cfg!(windows))
         .disable_drag_drop_handler()
-        .additional_browser_args(BROWSER_ARGS)
-        .build();
-    let w = match built {
+        .additional_browser_args(BROWSER_ARGS);
+    if let Some((x, y, sf)) = origin {
+        builder = builder.position(x as f64 / sf, y as f64 / sf);
+    }
+    let w = match builder.build() {
         Ok(w) => w,
         Err(e) => { release(&app, slot); return Err(e.to_string()); }
     };
-    // 貼工作區右下角（扣掉工作列），第 slot 則往上疊
-    if let Ok(Some(m)) = w.primary_monitor() {
-        let sf = m.scale_factor();
-        let wa = m.work_area();
-        let (tw, th, gap) = ((TOAST_W * sf) as i32, (TOAST_H * sf) as i32, (TOAST_GAP * sf) as i32);
-        let x = wa.position.x + wa.size.width as i32 - tw - gap;
-        let y = wa.position.y + wa.size.height as i32 - (th + gap) * (slot as i32 + 1);
-        let _ = w.set_position(PhysicalPosition::new(x, y));
+    if let Some((x, y, _)) = origin {
+        let _ = w.set_position(PhysicalPosition::new(x, y));   // 建窗時的位置是邏輯座標；多螢幕縮放不同時這裡校正
     }
-    show_no_activate(&w);
+    if !cfg!(windows) {
+        let _ = w.show();
+    }
     let (a2, l2) = (app.clone(), label.clone());
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_millis(TOAST_MS)).await;
