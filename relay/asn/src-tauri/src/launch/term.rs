@@ -36,8 +36,11 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 /// ASN 自己的 WezTerm 設定檔內容（隔離，不讀使用者的 ~/.wezterm.lua）。
-/// exit_behavior = "Hold"：程式結束後視窗留著，讓人看得到最後的畫面（取代以前承載 PowerShell 印的「程式已結束」）
-pub(crate) const ISOLATED_CONFIG: &str = "return { exit_behavior = \"Hold\" }\n";
+/// exit_behavior = "Hold"：程式結束後視窗留著，讓人看得到最後的畫面；「程式已結束」由包裝殼印中文，WezTerm 自己的英文提示關掉。
+/// window_close_confirmation：按 X 直接關，不跳英文確認框（asn真 定案）
+pub(crate) const ISOLATED_CONFIG: &str = "return { exit_behavior = \"Hold\", exit_behavior_messaging = \"None\", window_close_confirmation = \"NeverPrompt\" }\n";
+/// 上一版寫的隔離設定：一個字不差才升級
+const PREV_ISOLATED_CONFIG: &str = "return { exit_behavior = \"Hold\" }\n";
 /// 0.1.113 寫的隔離設定（開關 ASN_TERM_WEZTERM 關著時照舊寫這份）
 pub(crate) const LEGACY_CONFIG: &str = "return {}\n";
 /// 建不起視窗時的備援設定（#595）：同一份隔離設定再加 `front_end = "WebGpu"`（OpenGL 與 Software 在桌面斷線時都建不起視窗，只有 WebGpu 起得來）。
@@ -99,6 +102,13 @@ pub(crate) fn window_gone(alive: bool, recorded_ms: Option<u64>, now_ms: Option<
 }
 
 /// 夥伴一開就結束的失敗原因（結束碼印不出來就不帶）
+/// 夥伴視窗的包裝（視窗與 mux 兩種模式共用）。包裝殼啟動時 PowerShell 會擴充 PSModulePath，夥伴的環境要還原成窗格開窗時給的值（沒給就移除）
+fn wrap_partner(command: &[String], nonce: &str, env: &BTreeMap<String, String>) -> Vec<String> {
+    let get = |name: &str| env.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str());
+    let resolved = super::local::resolve_for_wrap(command, get("PATH"), &|p| p.is_file());
+    super::local::mux_wrapped_argv(&resolved, nonce, get("PSModulePath"))
+}
+
 fn early_exit_text(code: i32) -> String {
     format!("夥伴一開就結束（結束碼 {code}）")
 }
@@ -480,7 +490,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             // 開關關著（hold_config=false）＝0.1.113 的空設定：已存在的不升級；
             // 唯一例外（#611）：內容剛好等於第 1 階段寫的 ISOLATED_CONFIG（一個字不差）才改回空設定，其他內容（使用者改過的）一律不動
             let old = std::fs::read_to_string(&self.config_file).unwrap_or_default();
-            let ours_to_rewrite = if self.hold_config { old.trim() == OLD_DEFAULT_CONFIG } else { old == ISOLATED_CONFIG };
+            let ours_to_rewrite = if self.hold_config { old.trim() == OLD_DEFAULT_CONFIG || old == PREV_ISOLATED_CONFIG } else { old == ISOLATED_CONFIG || old == PREV_ISOLATED_CONFIG };
             if !ours_to_rewrite {
                 return Ok(());
             }
@@ -628,6 +638,15 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             return self.open_mux(&dir, profile, cwd, command, env, id, workspace, title, extra);
         }
         let w = self.wez(&dir);
+        // 夥伴視窗跟 mux 一樣包一層（見 local::mux_wrapped_argv）：.cmd 的路徑有空白或中文也跑得起來、
+        // 開不起來看得出來（結束標記）、結束畫面是中文
+        let exit_nonce = (env.is_some() && !extra.kind.is_empty()).then(new_nonce);
+        let spawned_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+        let wrapped: Vec<String> = match (&exit_nonce, env) {
+            (Some(n), Some(e)) => wrap_partner(command, n, e),
+            _ => command.to_vec(),
+        };
+        let command: &[String] = &wrapped;
         let win = match env {
             Some(e) => {
                 let gui = w.spawn_in_workspace_clean(&cwd, &workspace, command, e).map_err(NotStarted)?;
@@ -660,6 +679,13 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         if let Err(e) = w.set_tab_title(&win.sock, pane_id, &title) {
             return fail_close(&w, &win, format!("無法設定終端標題：{e}")).map_err(Started);
         }
+        // 夥伴一開就結束（指令不存在等）：畫面留著不算開成功，關掉視窗、回失敗與原因
+        if let Some(n) = &exit_nonce {
+            let name = extra.label.clone().unwrap_or_default();
+            if let Some(code) = self.early_exit(&w, &win.sock, pane_id, n, &|| partner_session_started(&name, spawned_ms)) {
+                return fail_close(&w, &win, early_exit_text(code)).map_err(Started);
+            }
+        }
         {
             let mut g = self.inner.lock().unwrap();
             g.sessions.push(Session {
@@ -673,7 +699,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 send_granted: true,
                 kind: extra.kind.clone(),
                 session_id: extra.session_id.clone(),
-                exit_nonce: None,
+                exit_nonce: exit_nonce.clone(),
             });
         }
         if let Err(e) = self.persist() {
@@ -738,11 +764,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let exit_nonce = (!extra.kind.is_empty()).then(new_nonce);
         let spawned_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
         let wrapped: Vec<String> = match &exit_nonce {
-            Some(n) => {
-                // 包裝殼啟動時 PowerShell 會擴充 PSModulePath，夥伴的環境要還原成這個窗格開窗時給的值（沒給就移除）
-                let psmp = pane_env.iter().find(|(k, _)| k.eq_ignore_ascii_case("PSModulePath")).map(|(_, v)| v.as_str());
-                super::local::mux_wrapped_argv(command, n, psmp)
-            }
+            Some(n) => wrap_partner(command, n, &pane_env),
             None => command.to_vec(),
         };
         let mut sub: Vec<&str> = vec!["spawn", "--new-window", "--workspace", &workspace, "--cwd", &cwd_s, "--"];
@@ -4238,7 +4260,14 @@ mod tests {
         assert_eq!(row["title"], format!("ASN:{id} 小乙"), "分頁標題是 ASN:編號 接名字");
         let calls = rig.runner.inner.calls.borrow();
         let (args, env) = calls.iter().find(|(a, _)| a.first().map(String::as_str) == Some("start")).expect("有開視窗");
-        assert!(args.ends_with(&spec.argv), "指令與參數原樣交給 WezTerm：{args:?}");
+        // 夥伴視窗包一層 PowerShell（同 mux）：指令與參數都在包裝腳本裡
+        let enc = &args[args.iter().position(|a| a == "-EncodedCommand").expect("有包裝") + 1];
+        let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, enc).unwrap();
+        let wide: Vec<u16> = bytes.chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let script = String::from_utf16(&wide).unwrap();
+        assert!(script.contains(&spec.argv[0]), "{script}");
+        assert!(script.contains("sid-123"), "{script}");
+        assert!(row["exit_nonce"].as_str().is_some_and(|n| script.contains(&format!("[asn-exit {n} "))), "對照表記的暗號跟腳本一致：{row}");
         assert_eq!(env.get("PATH").map(String::as_str), Some("C:/bin"));
         assert_eq!(env.len(), 2, "只帶給的環境（另加隔離設定檔）：{env:?}");
         drop(calls);
@@ -4398,7 +4427,7 @@ mod tests {
 
     #[test]
     fn 備援設定從隔離設定產生_只多一個_front_end() {
-        assert_eq!(with_webgpu(ISOLATED_CONFIG), "return { exit_behavior = \"Hold\", front_end = \"WebGpu\" }\n");
+        assert_eq!(with_webgpu(ISOLATED_CONFIG), "return { exit_behavior = \"Hold\", exit_behavior_messaging = \"None\", window_close_confirmation = \"NeverPrompt\", front_end = \"WebGpu\" }\n");
         assert_eq!(with_webgpu(LEGACY_CONFIG), "return { front_end = \"WebGpu\" }\n");
         // 隔離設定以後加了別的項目，備援設定要一起有（拿掉 front_end 就等於原本那份）
         let future = "return { exit_behavior = \"Hold\", enable_tab_bar = false }\n";
