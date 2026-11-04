@@ -19,6 +19,8 @@ const MAX_BACKOFF_MS: u64 = 300_000;
 const PAUSE_BELOW_BYTES: u64 = 3 * 1024 * 1024 * 1024;
 /// 多久寫一行開銷紀錄
 const REPORT_EVERY_MS: u64 = 600_000;
+/// 還沒有 session 檔的視窗，第一次看到後多久內還讀畫面：信任提示、略過權限警告、登入都出現在這段時間，之後就不再花這個開銷
+const EARLY_MS: u64 = 600_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pace {
@@ -62,6 +64,7 @@ pub fn match_sessions(partners: &[(String, String)], sessions: &[(String, String
 pub struct Schedule {
     next_at: HashMap<String, u64>,
     fails: HashMap<String, u32>,
+    first_seen: HashMap<String, u64>,
     window_start: u64,
     window_reads: u32,
     reads: u64,
@@ -72,6 +75,13 @@ pub struct Schedule {
 }
 
 impl Schedule {
+    /// 還沒有 session 檔的視窗要不要讀：第一次看到後的一段時間內才讀。`current`＝現在表上所有的視窗，關掉的就忘記
+    pub fn early(&mut self, id: &str, now: u64, current: &[&str]) -> bool {
+        self.first_seen.retain(|k, _| current.contains(&k.as_str()));
+        let first = *self.first_seen.entry(id.to_string()).or_insert(now);
+        now.saturating_sub(first) < EARLY_MS
+    }
+
     /// 這一輪要讀哪幾扇。`windows`＝（編號, 頻率）；`free_bytes` 讀不到（None）就不靠它判斷。
     /// 最久沒讀的排前面，所以總量不夠時大家輪流，不會一直讀前面幾扇
     pub fn due(&mut self, now: u64, windows: &[(String, Pace)], free_bytes: Option<u64>) -> Vec<String> {
@@ -220,6 +230,20 @@ mod tests {
         assert_eq!(s.next_at["w0"], NOW + MAX_BACKOFF_MS);
         s.done("w0", Pace::Frequent, true, NOW);
         assert_eq!(s.next_at["w0"], NOW + FREQUENT_MS);
+    }
+
+    #[test]
+    fn 沒有_session_檔的視窗_只在第一次看到後的一段時間內讀() {
+        let mut s = Schedule::default();
+        assert!(s.early("w0", NOW, &["w0"]));
+        assert!(s.early("w0", NOW + EARLY_MS - 1, &["w0"]));
+        assert!(!s.early("w0", NOW + EARLY_MS, &["w0"]), "時間到就不讀");
+        assert!(s.early("w1", NOW + EARLY_MS, &["w0", "w1"]), "另一扇各算各的");
+        assert!(s.early("w0", NOW + EARLY_MS + 1, &["w0"]) == false);
+        s.first_seen.clear();
+        s.early("w0", NOW, &["w0"]);
+        s.early("w1", NOW, &["w1"]);
+        assert!(!s.first_seen.contains_key("w0"), "關掉的視窗就忘記");
     }
 
     #[test]
