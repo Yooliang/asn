@@ -215,6 +215,8 @@ pub struct Parser {
     pub nonce: String,
     inflight: Vec<(String, String)>,
     recent: std::collections::VecDeque<(String, String)>,
+    /// 已經算轉交成功的編號（重新登記就拿掉）：之後才說 FAIL 不算失敗
+    sent_ids: std::collections::VecDeque<String>,
     send_calls: HashMap<String, PendingCall>,
     /// 這一輪送錯的呼叫（編號, 預定, 實際）：輪結束時才通報，同一輪裡有對的呼叫就先算 Sent
     misrouted_buf: Vec<(String, String, String)>,
@@ -309,7 +311,7 @@ pub fn has_foreign_nonce(txt: &str, nonce: &str) -> bool {
 
 impl Parser {
     pub fn new(nonce: &str) -> Parser {
-        Parser { nonce: nonce.into(), inflight: vec![], recent: Default::default(), send_calls: HashMap::new(), misrouted_buf: vec![], heads: HashMap::new(), originals: HashMap::new(), originals_bytes: 0, dirty: false, warned_unrecognized: false, last_cost: 0.0 }
+        Parser { nonce: nonce.into(), inflight: vec![], recent: Default::default(), sent_ids: Default::default(), send_calls: HashMap::new(), misrouted_buf: vec![], heads: HashMap::new(), originals: HashMap::new(), originals_bytes: 0, dirty: false, warned_unrecognized: false, last_cost: 0.0 }
     }
     /// 轉交一封信前登記（id → 目標視窗）
     pub fn register(&mut self, id: &str, to: &str) {
@@ -318,6 +320,7 @@ impl Parser {
             self.drop_original(&old);
         }
         self.inflight.retain(|(i, _)| i != id);
+        self.sent_ids.retain(|i| i != id);
         self.inflight.push((id.into(), to.into()));
         self.dirty = true;
     }
@@ -388,6 +391,10 @@ impl Parser {
     fn sent_once(&mut self, id: &str, out: &mut Parsed) {
         if self.inflight.iter().any(|(x, _)| x == id) {
             self.forget(id);
+            if self.sent_ids.len() >= RECENT_MAX {
+                self.sent_ids.pop_front();
+            }
+            self.sent_ids.push_back(id.to_string());
             out.events.push(WorkerEvent::Sent(id.into()));
         }
     }
@@ -493,6 +500,11 @@ impl Parser {
         // 有 SENT 文字卻一直沒有呼叫佐證的，編號維持進行中，照原本的轉交逾時處理
         for l in txt.lines() {
             if let Some((id, reason)) = keyword_line(l, "FAIL") {
+                // 工具已經回成功才說失敗（例如對方視窗扣住信的通知多跑的那一輪）：信的狀態不變，由那則通知處理
+                if self.sent_ids.contains(&id) {
+                    out.logs.push(format!("worker said FAIL after sent id={id}: ignored"));
+                    continue;
+                }
                 self.forget(&id);
                 out.events.push(WorkerEvent::Fail(id, reason.into()));
             }
@@ -1031,6 +1043,19 @@ mod tests {
         assert_ne!(v["message"]["content"][0]["input"]["content"], v["message"]["content"][0]["input"]["message"], "content 只是預覽");
         p.feed(&c);
         assert_eq!(p.feed(&done_ok("toolu_1")).events, vec![WorkerEvent::Sent(A.into())]);
+    }
+
+    #[test]
+    fn 工具已回成功之後才說_fail_不算失敗_重新登記後才算() {
+        let mut p = Parser::new(N);
+        p.register(A, "T-甲");
+        p.feed(&call("toolu_1", "T-甲", &format!("抬頭 id={A}")));
+        assert_eq!(p.feed(&done_ok("toolu_1")).events, vec![WorkerEvent::Sent(A.into())]);
+        let r = p.feed(&result(&format!("FAIL {A} 對方還沒收下")));
+        assert!(r.events.is_empty(), "{:?}", r.events);
+        assert!(r.logs.iter().any(|l| l.contains("FAIL after sent")), "{:?}", r.logs);
+        p.register(A, "T-甲");
+        assert_eq!(p.feed(&result(&format!("FAIL {A} 找不到視窗"))).events, vec![WorkerEvent::Fail(A.into(), "找不到視窗".into())]);
     }
 
     #[test]
