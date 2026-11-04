@@ -56,6 +56,8 @@ struct Msg {
 pub enum Kind {
     /// 登入類錯誤（`LOGIN_ERRORS` 之一）
     LoginError,
+    /// 橋的收發室 worker 自己回報的登入失效（錯誤文字很明確）：一筆就算失效，不用湊兩筆——信都被扣住之後下一次試送在一小時後，湊不成兩筆，本人就收不到通知
+    WorkerAuth,
     /// 真的模型回覆（`model` 不是 `<synthetic>`、有 usage）
     Reply,
 }
@@ -214,7 +216,8 @@ impl Watch {
         self.events.retain(|e| e.ts >= floor);
         self.events.sort_by_key(|e| e.ts);
         let last_reply = self.events.iter().filter(|e| e.kind == Kind::Reply).map(|e| e.ts).max();
-        let errs: Vec<i64> = self.events.iter().filter(|e| e.kind == Kind::LoginError && last_reply.is_none_or(|r| e.ts > r)).map(|e| e.ts).collect();
+        // worker 回報的登入失效一筆當兩筆算（時間相同，相鄰兩筆距離 0，一定在視窗內）
+        let errs: Vec<i64> = self.events.iter().filter(|e| matches!(e.kind, Kind::LoginError | Kind::WorkerAuth) && last_reply.is_none_or(|r| e.ts > r)).flat_map(|e| if e.kind == Kind::WorkerAuth { vec![e.ts, e.ts] } else { vec![e.ts] }).collect();
         if let Some(&t) = errs.last() {
             self.last_error_ms = t;
         }
@@ -360,6 +363,8 @@ pub struct NoticeCtx {
 #[derive(Default)]
 pub struct Monitor {
     homes: HashMap<PathBuf, (Watch, Tailer)>,
+    /// 橋的收發室 worker 自己遇到的登入錯誤（它不一定留對話紀錄）：下一輪輪詢時併進每個家目錄的事件，用完就清
+    injected: Vec<Ev>,
 }
 
 impl Monitor {
@@ -372,7 +377,8 @@ impl Monitor {
         for r in roots {
             let (w, t) = self.homes.entry(r.clone()).or_default();
             w.on_account(&ctx.email, now_ms);
-            let evs = t.poll(std::slice::from_ref(r), now_ms);
+            let mut evs = t.poll(std::slice::from_ref(r), now_ms);
+            evs.extend(self.injected.iter().copied());
             let cred = std::fs::metadata(r.join(CRED_FILE)).ok().map(|m| crate::usage::mtime_ms(&m));
             if let Some(a) = w.feed_with(&evs, now_ms, cred) {
                 if alert.is_none_or(|x| x.kind == AlertKind::Reminder && a.kind == AlertKind::First) {
@@ -381,6 +387,7 @@ impl Monitor {
             }
             failed |= w.failed();
         }
+        self.injected.clear();
         if let Some(a) = alert {
             let n = notice(&ctx.computer, a.last_error_ms, &ctx.email, timeouts_since(a.episode_start_ms));
             let which = if a.kind == AlertKind::First { "首次" } else { "提醒" };
@@ -393,11 +400,39 @@ impl Monitor {
     }
 }
 
+/// worker 回報的登入失效時間 → 判定用的事件（明確失效，一筆就算）
+fn worker_events(times: Vec<i64>) -> Vec<Ev> {
+    times.into_iter().map(|ts| Ev { kind: Kind::WorkerAuth, ts }).collect()
+}
+
 static STATE: Mutex<Option<Monitor>> = Mutex::new(None);
+/// 橋的收發室 worker 報告它的 Claude 登入失效時記一筆（只有時間，沒有內容）；下一次 [`tick_real`] 併進判定，和對話紀錄裡的登入錯誤同等看待
+static WORKER_ERRORS: Mutex<Vec<i64>> = Mutex::new(Vec::new());
+/// Claude 登入檔（任一個真實設定資料夾）的修改時間比 `since_ms` 新＝這之後重新登入過（只看修改時間，不讀內容）
+pub fn credentials_updated_since(since_ms: u64) -> bool {
+    crate::usage::real_roots().iter().any(|r| std::fs::metadata(r.join(CRED_FILE)).ok().is_some_and(|m| crate::usage::mtime_ms(&m) > since_ms as i64))
+}
+
+/// （給測試看）這個時間之後記了幾筆還沒被判定拿走的 worker 登入錯誤
+#[cfg(test)]
+pub fn worker_errors_since(since_ms: i64) -> usize {
+    WORKER_ERRORS.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|&&t| t >= since_ms).count()
+}
+
+pub fn record_worker_login_error(now_ms: i64) {
+    let mut v = WORKER_ERRORS.lock().unwrap_or_else(|e| e.into_inner());
+    v.push(now_ms);
+    // 不依呼叫端傳來的時間清舊的（測試的假時間會互相清掉）：只限筆數；太舊的由判定那邊的回看範圍忽略
+    if v.len() > 20 {
+        let extra = v.len() - 20;
+        v.drain(..extra);
+    }
+}
 /// 真實家目錄版本（給帳號回報用）：回傳目前是否登入失效
 pub fn tick_real(now_ms: i64, ctx: &NoticeCtx, notifier: &dyn OwnerNotifier) -> bool {
     let mut g = STATE.lock().unwrap_or_else(|e| e.into_inner());
     let m = g.get_or_insert_with(Default::default);
+    m.injected = worker_events(std::mem::take(&mut *WORKER_ERRORS.lock().unwrap_or_else(|e| e.into_inner())));
     m.tick(&crate::usage::real_roots(), now_ms, ctx, &|since| FORWARD_TIMEOUTS.count_since(since), notifier, |s| elog!("{s}"))
 }
 
@@ -670,6 +705,41 @@ mod tests {
         let mut m = Monitor::default();
         let failed = m.tick(&roots, now, &ctx(), &|_| 0, &cap, |_| {});
         assert!(!failed, "各家目錄只有一筆，不算失效");
+        assert!(cap.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn 橋的收發室_worker_回報的登入失效_一筆就算失效_就通知本人_用完就清() {
+        let d = tempfile::tempdir().unwrap();
+        let now = now_ms();
+        let roots = vec![d.path().to_path_buf()];
+        let cap = Capture(Mutex::new(vec![]));
+        let mut m = Monitor::default();
+        m.injected = vec![Ev { kind: Kind::WorkerAuth, ts: now - MIN }];
+        assert!(m.tick(&roots, now, &ctx(), &|_| 0, &cap, |_| {}), "worker 明確回報登入失效：一筆就算失效");
+        assert!(m.injected.is_empty(), "注入的事件用完就清（已在判定裡留著）");
+        assert_eq!(cap.0.lock().unwrap().len(), 1, "通知本人一次");
+        // 同一段失效期間不重複通知
+        m.injected = vec![Ev { kind: Kind::WorkerAuth, ts: now }];
+        m.tick(&roots, now + MIN, &ctx(), &|_| 0, &cap, |_| {});
+        assert_eq!(cap.0.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn worker_回報的時間轉成明確失效的事件_不是一般登入錯誤() {
+        let evs = worker_events(vec![1000, 2000]);
+        assert_eq!(evs, vec![Ev { kind: Kind::WorkerAuth, ts: 1000 }, Ev { kind: Kind::WorkerAuth, ts: 2000 }]);
+    }
+
+    #[test]
+    fn 對話紀錄裡的登入錯誤還是要兩筆才算_只有_worker_回報的一筆當兩筆() {
+        let d = tempfile::tempdir().unwrap();
+        let now = now_ms();
+        let roots = vec![d.path().to_path_buf()];
+        let cap = Capture(Mutex::new(vec![]));
+        let mut m = Monitor::default();
+        m.injected = vec![Ev { kind: Kind::LoginError, ts: now - MIN }];
+        assert!(!m.tick(&roots, now, &ctx(), &|_| 0, &cap, |_| {}), "一般的登入錯誤一筆不算（原規則不變）");
         assert!(cap.0.lock().unwrap().is_empty());
     }
 

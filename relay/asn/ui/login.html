@@ -34,6 +34,7 @@
       </div>
       <h1 class="login-h">歡迎使用 ASN</h1>
       <p class="login-sub">登入後，這台電腦會自動出現在你的名單裡。</p>
+      <p class="login-note" v-if="canSkip" role="status">{{ STILL_RUNNING_NOTE }}</p>
       <button v-for="p in PROVIDERS" :key="p.key" class="aero-btn login-btn" type="button" :disabled="!canStart(phase)" @click="start(p.key)">{{ p.label }}<span class="login-last" v-if="lastProvider === p.key">{{ LAST_USED_LABEL }}</span></button>
       <p class="login-note" v-if="note" role="status">{{ note }}</p>
       <button class="aero-btn login-cancel" type="button" v-if="phase === 'waiting'" @click="cancel">取消</button>

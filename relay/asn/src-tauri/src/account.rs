@@ -278,9 +278,10 @@ pub fn auth_cancel(auth: State<'_, AuthState>) {
     auth.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
-/// 登出：通知後台作廢這個登入（盡力而為），再清掉本機登入權杖與「暫時不登入」記號，重新啟動回到登入畫面。不刪節點金鑰。
+/// 登出：通知後台作廢這個登入（盡力而為），再清掉本機登入權杖與「暫時不登入」記號，重新啟動回到登入畫面（收發信照常）。不刪節點金鑰。
+/// `stop`＝本人在登出時選了「一併停止」：登出後不重新啟動，直接結束 ASN（停止這台的收發信）；沒選（或沒帶）就和以前一樣。
 #[tauri::command]
-pub async fn auth_logout(app: State<'_, App>, auth: State<'_, AuthState>, handle: AppHandle) -> Result<(), String> {
+pub async fn auth_logout(app: State<'_, App>, auth: State<'_, AuthState>, handle: AppHandle, stop: Option<bool>) -> Result<(), String> {
     if let Ok(c) = ctx() {
         if let Ok(t) = auth.access_token(&c.client, &c.auth_base, &c.anon).await {
             let _ = c.client.post(format!("{}/auth/v1/logout?scope=local", c.auth_base)).header("apikey", &c.anon).bearer_auth(t).timeout(std::time::Duration::from_secs(5)).send().await;
@@ -288,8 +289,28 @@ pub async fn auth_logout(app: State<'_, App>, auth: State<'_, AuthState>, handle
     }
     auth.sign_out()?;
     set_login_skipped(&app.data_dir, false)?;
-    restart_soon(&app, handle);
+    if stop == Some(true) {
+        stop_soon(&app, handle);
+    } else {
+        restart_soon(&app, handle);
+    }
     Ok(())
+}
+
+/// 晚一點結束 ASN（不重新啟動），讓指令先把結果回給畫面。登出時本人選了「一併停止」才會走到這裡（--shot 與安卓不動）
+fn stop_soon(app: &App, handle: AppHandle) {
+    if app.shot.is_some() || cfg!(target_os = "android") {
+        return;
+    }
+    #[cfg(desktop)]
+    let work_dir = app.work_dir.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        crate::cleanup(&handle);
+        #[cfg(desktop)]
+        crate::ui_log::log_exit(&work_dir, "結束（登出時選擇一併停止收發）");
+        handle.exit(0);
+    });
 }
 
 /// 晚一點再重新啟動，讓指令先把結果回給畫面（--shot 模式不重啟）

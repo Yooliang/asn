@@ -1731,9 +1731,12 @@ mod tests {
         let h = d.path();
         login(h, "u-a", "a@x.test", "A1");
         save_current(h).unwrap();
-        let o = std::process::Command::new("icacls").no_window().arg(store_root(h)).output().unwrap();
-        let t = String::from_utf8_lossy(&o.stdout).to_lowercase();
-        assert!(!t.contains("everyone") && !t.contains("\\users:") && !t.contains("authenticated users"), "{t}");
-        assert!(t.contains(&std::env::var("USERNAME").unwrap().to_lowercase()));
+        // icacls 的輸出是系統字碼頁（繁中是 CP950），中文使用者名稱當 UTF-8 解會壞掉（#762）；改請 PowerShell 用 UTF-8 列出 ACL
+        let script = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; (Get-Acl -LiteralPath $env:ASN_TEST_ACL_PATH).Access | ForEach-Object { $_.IdentityReference.Value }";
+        let o = std::process::Command::new("powershell").no_window().args(["-NoProfile", "-NonInteractive", "-Command", script]).env("ASN_TEST_ACL_PATH", store_root(h)).output().unwrap();
+        assert!(o.status.success(), "{o:?}");
+        let t = String::from_utf8(o.stdout).unwrap().to_lowercase();
+        assert!(!t.contains("everyone") && !t.contains("\\users") && !t.contains("authenticated users"), "{t}");
+        assert!(t.contains(&std::env::var("USERNAME").unwrap().to_lowercase()), "{t}");
     }
 }

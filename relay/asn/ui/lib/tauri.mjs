@@ -85,7 +85,7 @@ export const authApi = {
   status: () => invoke('auth_status'),                       // → { signed_in, email }
   login: provider => invoke('auth_login', { provider }),     // 開系統瀏覽器登入，等回呼（最久 5 分鐘）→ 狀態
   cancel: () => invoke('auth_cancel'),
-  logout: () => invoke('auth_logout'),                       // 只清登入權杖，不刪節點金鑰；之後自動重新啟動，回到登入畫面
+  logout: (stop = false) => invoke('auth_logout', { stop: stop === true }),   // 只清登入權杖，不刪節點金鑰；之後自動重新啟動，回到登入畫面（收發信照常）；stop＝true 是本人選了「一併停止」：登出後直接結束 ASN
   accountInfo: () => invoke('auth_account_info'),            // → { email, created, node_count, this_node_mine }
   setAccountName: name => invoke('auth_account_name_set', { name }),   // 改帳號名稱（我的名字，所有設備共用）→ 存好的名字
   getAiWakeLimit: () => invoke('auth_ai_wake_limit_get'),   // 帳號設定：AI 之間互相叫醒的上限（0～200，預設 20）
