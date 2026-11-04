@@ -271,7 +271,10 @@ export class AsnCore {
         // 代收的舊信很多時照常進對話、算未讀，但不逐封跳提示與音效，最後合成一則
         // 手機沒開 App 時留下的舊信（backlogAfterMs，只有手機版設）一樣合併
         const backlog = m => m?.spooled === true || (this.backlogAfterMs > 0 && this.now() - (Date.parse(m?.created_at) || this.now()) > this.backlogAfterMs)
-        const quiet = messages.filter(m => backlog(m) && forMe(m) && !this.seen.has(m.id)).length > SPOOL_QUIET_OVER
+        const fresh = messages.filter(m => backlog(m) && forMe(m) && !this.seen.has(m.id))
+        // 手機積信：先取回別台設備的已讀位置，電腦看過的信才不會又算未讀、又跳提示
+        if (this.backlogAfterMs > 0 && fresh.length) await this.syncReads()
+        const quiet = fresh.length > SPOOL_QUIET_OVER
         let quietN = 0, quietLast = null
         for (const m of messages) {
           if (!forMe(m)) continue   // 不是寄給本視窗（或還沒過期的舊名）的絕不處理、不 ack
@@ -371,8 +374,10 @@ export class AsnCore {
     this.#scheduleSave()
     this.emit('state')
     this.emit('log', r.id)
-    if (shown && !quiet) this.emit('notify', { kind: 'msg', friend: f, line: text ? plain(text) : noticeOf(photos), sound: 'msg', toast: !visible, hasFile: photos.some(a => a.kind === 'file') })
-    if (nudge && !quiet) this.emit('notify', { kind: 'nudge', friend: f, line: '傳送了一個震動', sound: 'nudge', toast: !visible, shake: visible })
+    // 別台設備已經讀過：進對話但不提示；合併提示也不算它（回 null）
+    if (already) { if (quiet) return null }
+    else if (shown && !quiet) this.emit('notify', { kind: 'msg', friend: f, line: text ? plain(text) : noticeOf(photos), sound: 'msg', toast: !visible, hasFile: photos.some(a => a.kind === 'file') })
+    if (nudge && !quiet && !already) this.emit('notify', { kind: 'nudge', friend: f, line: '傳送了一個震動', sound: 'nudge', toast: !visible, shake: visible })
     // 回信是扇出給我所有設備的：我在別台設備上說的話這台還沒有，順手補一次（人在別台說、這台只看到 AI 的回覆就會斷掉）
     if (typeof m.fanout_id === 'string') void this.syncHistory(r.id, { force: true })
     return f
