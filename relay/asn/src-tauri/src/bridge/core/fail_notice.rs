@@ -27,6 +27,18 @@ fn room_notice_text(seq: u64, target: &str, skipped: u32, timed_out: bool, reply
     format!("{ROOM_NOTICE_HEAD}{seq} {what}{more}需要對方處理請重新點名，或請對方讀群組。")
 }
 
+/// 群組訊息卡在對方視窗或被拒：不寫 @，說法是「可能」（CLI 只給收件人名字）
+fn room_delivery_text(seq: u64, target: &str, kind: &str, skipped: u32) -> String {
+    let name = target.replace('@', "");
+    let what = match kind {
+        "denied" => format!("可能被 {name} 視窗的使用者拒絕了，沒有送進去。"),
+        "refused" => format!("可能沒送進 {name} 視窗：對方目前不接受其他視窗的信。"),
+        _ => format!("可能卡在 {name} 視窗的確認框，對方還沒看到。需要有人在那台電腦上按確認。"),
+    };
+    let more = if skipped > 0 { format!("這段時間另有 {skipped} 則情況相同。") } else { String::new() };
+    format!("{ROOM_NOTICE_HEAD}{seq} {what}{more}收發室不會重送。")
+}
+
 #[cfg(test)]
 mod notice_tests {
     use super::*;
@@ -39,6 +51,15 @@ mod notice_tests {
         let c = room_notice_text(5, "甲", 2, false, true);
         assert!(c.contains("甲 收到了，但它的回覆被內容過濾擋下，沒有回到群組") && !c.contains("對方還沒看到") && !c.contains("沒有轉交"), "{c}");
         assert!(c.contains("另有 2 則情況相同"));
+    }
+
+    #[test]
+    fn 群組卡住通知三種說法_不點名_都寫可能() {
+        for (kind, word) in [("held", "確認框"), ("denied", "拒絕"), ("refused", "不接受")] {
+            let t = room_delivery_text(5, "@甲", kind, 0);
+            assert!(t.starts_with(ROOM_NOTICE_HEAD) && t.contains(word) && t.contains("可能") && !t.contains('@'), "{t}");
+        }
+        assert!(room_delivery_text(5, "甲", "held", 2).contains("另有 2 則情況相同"));
     }
 }
 
@@ -73,22 +94,43 @@ impl Core {
             self.log.line(&format!("room failure notice not posted id={id}: the failed message is itself a notice"));
             return;
         }
-        let now = self.now;
         let key = (room.id.clone(), p.target.clone());
-        self.room_fail_notices.retain(|_, (t, _)| now.saturating_sub(*t) < ROOM_NOTICE_GAP_MS * 6);
-        let skipped = match self.room_fail_notices.get_mut(&key) {
-            Some((t, n)) if now.saturating_sub(*t) < ROOM_NOTICE_GAP_MS => {
-                *n += 1;
-                self.log.line(&format!("room failure notice skipped id={id}: posted recently for {}", p.target));
-                return;
-            }
-            Some((_, n)) => *n,
-            None => 0,
+        let Some(skipped) = self.room_notice_turn(&key) else {
+            self.log.line(&format!("room failure notice skipped id={id}: posted recently for {}", p.target));
+            return;
         };
         let posted = self.post_room(&room, &room_notice_text(room.seq, &p.target, skipped, timed_out, Self::reply_blocked(why))).await;
         self.log.line(&format!("room failure notice room={} #{} -> {} posted={posted}", room.id, room.seq, p.target));
         if posted {
-            self.room_fail_notices.insert(key, (now, 0));
+            self.room_fail_notices.insert(key, (self.now, 0));
+        }
+    }
+
+    /// 群組訊息卡在對方視窗或被拒：貼一則說明。每種情況各自冷卻，卡住之後被拒絕還是貼得出來
+    pub(super) async fn room_delivery_notice(&mut self, room: &RoomRef, target: &str, kind: &str) {
+        let key = (room.id.clone(), format!("{kind}:{target}"));
+        let Some(skipped) = self.room_notice_turn(&key) else {
+            self.log.line(&format!("room delivery {kind} notice skipped room={} #{}: posted recently for {target}", room.id, room.seq));
+            return;
+        };
+        let posted = self.post_room(room, &room_delivery_text(room.seq, target, kind, skipped)).await;
+        self.log.line(&format!("room delivery {kind} notice room={} #{} -> {target} posted={posted}", room.id, room.seq));
+        if posted {
+            self.room_fail_notices.insert(key, (self.now, 0));
+        }
+    }
+
+    /// 這個群組、這個對象現在能不能貼通知：冷卻中回 None 並記一則；能貼就回冷卻期間略過了幾則
+    fn room_notice_turn(&mut self, key: &(String, String)) -> Option<u32> {
+        let now = self.now;
+        self.room_fail_notices.retain(|_, (t, _)| now.saturating_sub(*t) < ROOM_NOTICE_GAP_MS * 6);
+        match self.room_fail_notices.get_mut(key) {
+            Some((t, n)) if now.saturating_sub(*t) < ROOM_NOTICE_GAP_MS => {
+                *n += 1;
+                None
+            }
+            Some((_, n)) => Some(*n),
+            None => Some(0),
         }
     }
 }

@@ -399,10 +399,10 @@ pub struct Core {
     misroute_notified: HashSet<String>,
     /// 轉交給 worker 的來信是誰寄的（編號 → 來源）：送錯通知寄件人用；只存記憶體，數量有上限
     fwd_origin: HashMap<String, Origin>,
-    /// 最近轉交成功的私信（收件人, 寄件人, 時間）：對方視窗扣住信的通知只有收件人名字，用它對回去
-    recent_forwards: Vec<(String, Origin, u64)>,
-    /// 已經通知過「信可能卡住」的信件編號（每封一次）
-    held_notice_sent: HashSet<String>,
+    /// 最近轉交成功、還沒通知過的信：對方視窗扣住信的通知只有收件人名
+    recent_forwards: Vec<held_notice::Forwarded>,
+    /// 通知過「可能卡住」、還沒有結果的信：之後按拒絕或放行時對回去
+    held_open: Vec<held_notice::Forwarded>,
     /// 上次成功回報給後台的 inbox_hold_until（None＝還沒報過；啟動後第一次名單一定報一次，順便清掉上次沒收乾淨的舊值）
     hold_sent: Option<Option<u64>>,
     /// 上次為了回報收信暫停而重報名單的時間（失敗時不要每個 tick 都重試）
@@ -501,7 +501,7 @@ impl Core {
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
-            wait_alerts: Default::default(), wait_retry_at: 0, wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), recent_forwards: Vec::new(), held_notice_sent: HashSet::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false,
+            wait_alerts: Default::default(), wait_retry_at: 0, wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), recent_forwards: Vec::new(), held_open: Vec::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false,
         };
         c.restore();
         c.started_at = now;
@@ -1548,10 +1548,8 @@ impl Core {
             return;
         }
         self.pending[i].state = State::Waiting;
-        if self.pending[i].room.is_none() {
-            let (target, origin) = (self.pending[i].target.clone(), Origin::of(&self.pending[i]));
-            self.note_forwarded(target, origin);
-        }
+        let forwarded = self.pending[i].clone();
+        self.note_forwarded(&forwarded);
         if self.quota_until == 0 && !self.is_respond(&self.pending[i].target) {
             self.quota_ep = None; // 收發室 worker 真的完成了轉交＝額度恢復，下次用完再通知
         }
