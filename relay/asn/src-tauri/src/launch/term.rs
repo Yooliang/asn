@@ -259,6 +259,16 @@ struct Inner {
     viewers: Vec<Viewer>,
 }
 
+/// 夥伴名單上 mux 夥伴的狀態（`mux_partner_views`）
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct MuxPartnerView {
+    pub name: String,
+    /// 看畫面的 GUI 開著（或正在開）
+    pub viewing: bool,
+    /// 畫面自己不見了（使用者按 X、GUI 當掉）；只回報一次。從名單切到背景不算
+    pub closed: bool,
+}
+
 /// 看某個 mux 窗格的 GUI（`wezterm-gui connect`）。關它不影響窗格（B0 實測）；只認自己起的這一個程序（編號＋建立時間）
 #[derive(Clone)]
 struct Viewer {
@@ -1067,6 +1077,33 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     pub fn viewing(&self, id: &str) -> bool {
         let v = self.inner.lock().unwrap().viewers.iter().find(|v| v.id == id && !v.starting).cloned();
         v.is_some_and(|v| self.runner.started_ms(v.pid) == Some(v.started_ms))
+    }
+
+    /// 名單用：mux 裡每個夥伴的畫面狀態。不下 cli，只查看畫面的 GUI 還在不在，定時呼叫也不貴
+    pub fn mux_partner_views(&self) -> Vec<MuxPartnerView> {
+        if !self.use_mux {
+            return Vec::new();
+        }
+        let (rows, viewers): (Vec<(String, String)>, Vec<Viewer>) = {
+            let g = self.inner.lock().unwrap();
+            let rows = g.sessions.iter().filter(|s| s.window.mux && !s.kind.is_empty()).filter_map(|s| Some((s.id.clone(), partner_label(&s.id, &s.title)?.to_string()))).collect();
+            (rows, g.viewers.clone())
+        };
+        let mut out = Vec::with_capacity(rows.len());
+        for (id, name) in rows {
+            let v = viewers.iter().find(|v| v.id == id);
+            let alive = v.is_some_and(|v| v.starting || self.runner.started_ms(v.pid) == Some(v.started_ms));
+            let mut closed = false;
+            if let (Some(v), false) = (v, alive) {
+                // 紀錄還在、程序不在了：unview 會先移除紀錄，走到這裡就是畫面自己關的。只移除查過的那一個，期間又開了新的不動
+                let mut g = self.inner.lock().unwrap();
+                let before = g.viewers.len();
+                g.viewers.retain(|x| !(x.id == id && !x.starting && x.pid == v.pid && x.started_ms == v.started_ms));
+                closed = g.viewers.len() != before;
+            }
+            out.push(MuxPartnerView { name, viewing: alive, closed });
+        }
+        out
     }
 
     /// 這個 mux（程序編號＋建立時間）裡、名字是 `name` 的夥伴視窗（claude／window）的終端編號。同名不只一個就不猜；
@@ -2647,6 +2684,18 @@ pub(crate) fn mux_console_set(id: &str, visible: bool) -> serde_json::Value {
     {
         let _ = (id, visible);
         serde_json::json!({ "ok": false, "reason": "這個建置沒有自帶的終端" })
+    }
+}
+
+/// 名單上標「背景執行中」用；沒開 mux、沒有畫面的建置、測試＝空
+pub(crate) fn mux_partner_views() -> Vec<MuxPartnerView> {
+    #[cfg(all(feature = "gui", not(test)))]
+    {
+        GLOBAL.get().map(|t| t.mux_partner_views()).unwrap_or_default()
+    }
+    #[cfg(not(all(feature = "gui", not(test))))]
+    {
+        Vec::new()
     }
 }
 
@@ -5177,6 +5226,35 @@ mod tests {
             rig.runner.inner.pid_started.borrow_mut().insert(42, vec![None]);
             rig.svc.view(&id).unwrap();
             assert_eq!(view_spawns(&rig.runner).len(), 2);
+        }
+
+        #[test]
+        fn 名單狀態_按_x_回報一次_從名單切背景不算() {
+            let (rig, _) = mux_rig();
+            let id = open_partner(&rig);
+            let row = |viewing, closed| vec![MuxPartnerView { name: "小乙".into(), viewing, closed }];
+            assert_eq!(rig.svc.mux_partner_views(), row(false, false), "剛開：沒有畫面，在背景");
+            rig.svc.view(&id).unwrap();
+            assert_eq!(rig.svc.mux_partner_views(), row(true, false));
+            // 使用者按 X：程序不在了
+            rig.runner.inner.pid_started.borrow_mut().insert(42, vec![None]);
+            assert_eq!(rig.svc.mux_partner_views(), row(false, true));
+            assert_eq!(rig.svc.mux_partner_views(), row(false, false), "只回報一次");
+            // 從名單切到背景：紀錄先移除，不算按 X
+            rig.svc.view(&id).unwrap();
+            rig.svc.unview(&id).unwrap();
+            assert_eq!(rig.svc.mux_partner_views(), row(false, false));
+            assert_eq!(kill_panes(&rig.runner), 0, "全程不動窗格");
+        }
+
+        #[test]
+        fn 名單狀態_沒有夥伴名字的窗格不列_沒開_mux_是空的() {
+            let (rig, _) = mux_rig();
+            rig.svc.start("agy", &rig.cwd, &rig.config).unwrap();
+            assert!(rig.svc.mux_partner_views().is_empty(), "沒有夥伴名字的窗格不列");
+            let rig2 = make(default_profiles(), vec![]);
+            rig2.svc.start("agy", &rig2.cwd, &rig2.config).unwrap();
+            assert!(rig2.svc.mux_partner_views().is_empty());
         }
 
         #[test]
