@@ -59,6 +59,27 @@ test('建立失敗：回到表單、說明原因、沒有金鑰', async () => {
   assert.equal(s.created, null)
 })
 
+test('建立途中離開這一頁：回來的金鑰不保留，提示撤銷後重來', async () => {
+  const m = make()
+  await m.ui.load(); m.ui.openForm(); m.s.name = '小真'
+  // 先送出，在 create 回來前就離開
+  const p = m.ui.create()
+  await m.ui.leave()   // 還沒等到 create 回來就離開
+  await p
+  assert.equal(m.s.created, null, '金鑰不保留')
+  assert.notEqual(m.s.stage, 'created')
+  assert.equal(m.s.msg, CLOUD_TEXT.lostKey)
+  assert.ok(!JSON.stringify(m.s).includes(KEY))
+})
+
+test('第一次讀取就失敗：畫面看得到原因，不是一直「讀取中」', async () => {
+  const ui = createMobileCloud({ api: { list: async () => [] }, status: async () => { throw new Error('連不上後台') }, clip: { write: async () => {} } })
+  await ui.load()
+  assert.equal(ui.state.signedIn, null)
+  assert.match(ui.state.msg, /連不上後台/)
+  assert.match(read('ui/m.html'), /cloudSt\.signedIn === null">\{\{ cloudSt\.msg \|\| CLOUD_TEXT\.loading \}\}/)
+})
+
 test('代理連上來就顯示已加入', async () => {
   const m = make()
   await m.ui.load(); m.ui.openForm(); m.s.name = '小真'

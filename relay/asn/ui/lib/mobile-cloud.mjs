@@ -32,7 +32,7 @@ export const CLOUD_TEXT = {
   waiting: '等待中…代理照說明做完、連上來後，這裡會顯示已加入。',
   joined: name => `「${name}」已加入。`,
   done: '完成（關掉後看不到金鑰）',
-  clipNote: '複製金鑰後 60 秒會自動清掉剪貼簿（要留在這個畫面）。',
+  clipNote: '複製金鑰後 60 秒會自動清掉剪貼簿：貼完請回到這裡，才清得掉；清掉的是剪貼簿裡當時的內容，中間複製了別的也會被清。',
   clipCleared: '已清掉剪貼簿。',
   empty: '還沒有邀請過雲端代理。',
   revoke: '撤銷', revokeSure: '確認撤銷',
@@ -74,6 +74,7 @@ export function createMobileCloud({ api, status, clip, now = () => Date.now(), t
     confirmId: '',
   })
   let clearTimerId = null, copiedAt = 0, copiedKeyText = ''
+  let epoch = 0   // 離開這一頁就加一：建立途中離開，回來的金鑰不保留（見 create）
 
   const stopClearTimer = () => { if (clearTimerId != null) { timer.clear(clearTimerId); clearTimerId = null } }
 
@@ -94,7 +95,7 @@ export function createMobileCloud({ api, status, clip, now = () => Date.now(), t
       const st = await status()
       s.signedIn = st?.signed_in === true
       s.rows = s.signedIn ? rowsFromList(await api.list(), now()) : []
-    } catch (e) { if (s.signedIn) s.msg = errText(e) } finally { s.loading = false }
+    } catch (e) { s.msg = errText(e) } finally { s.loading = false }
   }
 
   const openForm = () => { s.msg = ''; s.stage = 'form'; s.name = DEFAULT_NAME }
@@ -105,8 +106,10 @@ export function createMobileCloud({ api, status, clip, now = () => Date.now(), t
     const n = cleanName(s.name)
     if (!n) { s.msg = CLOUD_TEXT.nameBad; return }
     s.busy = true; s.msg = ''
+    const my = epoch
     try {
       const c = await api.create(n)
+      if (my !== epoch) { s.msg = CLOUD_TEXT.lostKey; await load(); return }   // 建立途中離開了：代理已建好但金鑰不保留，撤銷後重來
       s.created = { id: c.id, name: c.name, key: c.key, invite: c.invite }
       s.stage = 'created'; s.reveal = false; s.copiedKey = false; s.copiedInvite = false; s.clipNote = ''
       await load()
@@ -137,6 +140,7 @@ export function createMobileCloud({ api, status, clip, now = () => Date.now(), t
   }
   // 離開這一頁：金鑰、表單全丟，剪貼簿也清
   async function leave() {
+    epoch++
     s.created = null; s.reveal = false; s.copiedKey = false; s.copiedInvite = false; s.stage = 'list'
     s.confirmId = ''; s.msg = ''; s.approveForm = false; s.code = ''; s.hostName = ''; s.hostId = ''; s.approved = ''
     await clearClipboard()
