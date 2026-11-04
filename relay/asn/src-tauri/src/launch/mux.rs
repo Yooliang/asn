@@ -167,7 +167,12 @@ impl Mux<'_> {
 
     /// 下 spawn 逾時或回的東西看不懂：窗格可能已經開了或還在開。記下來，[`SPAWN_UNSURE_HOLD`] 內不收空 mux
     pub fn note_spawn_unsure(&self) {
-        let _ = std::fs::write(self.paths.dir.join("spawn-unsure"), "");
+        if let Err(e) = std::fs::write(self.paths.dir.join("spawn-unsure"), "") {
+            // 記號沒寫成：收空 mux 那邊就擋不住了，至少留下線索
+            let line = format!("終端服務：開窗格的結果不確定，但記號寫不進去：{e}");
+            elog!("{line}");
+            note(&self.paths.dir, &line);
+        }
     }
 
     fn spawn_unsure(&self) -> bool {
@@ -190,12 +195,12 @@ impl Mux<'_> {
         if !self.runner.exe_path(pid).is_some_and(|p| is_server_image(&p, &self.server)) {
             return false;
         }
-        // 開窗格逾時過：窗格可能還在開，先不收
+        // 有人正在開窗格：不等，這次不收
+        let Ok(_lock) = StartLock::try_acquire(&self.paths.open_lock, self.runner) else { return false };
+        // 開窗格逾時過：窗格可能還在開，先不收。要在拿到鎖之後查：開窗的一方是放鎖前才寫記號
         if self.spawn_unsure() {
             return false;
         }
-        // 有人正在開窗格：不等，這次不收
-        let Ok(_lock) = StartLock::try_acquire(&self.paths.open_lock, self.runner) else { return false };
         if self.only_pane_zero() != Ok(true) {
             return false;
         }
@@ -303,16 +308,19 @@ pub fn note(dir: &Path, line: &str) {
     let _ = std::fs::write(&p, format!("{old}{at} {line}\n"));
 }
 
-/// 工作群組會帶走 mux 或讀不到旗標時，不用 mux：回（用不用 mux, 給人看的原因）
-pub fn mux_after_job(want: bool, inside: Option<bool>, limit: Option<u32>) -> (bool, Option<String>) {
+/// 工作群組會帶走 mux 或讀不到旗標時，不用 mux：回（用不用 mux, 給人看的原因）。
+/// `earlier_mux`：上次開的 mux 還活著。裡面的夥伴照常跑、不會多開一份（開新夥伴前查的是工作階段，不看 mux），但這次切不到前景
+pub fn mux_after_job(want: bool, inside: Option<bool>, limit: Option<u32>, earlier_mux: bool) -> (bool, Option<String>) {
     if !want {
         return (false, None);
     }
-    match job_risk(inside, limit) {
-        JobRisk::Safe => (true, None),
-        JobRisk::TakesMuxDown => (false, Some("ASN 所在的工作群組會在 ASN 結束時帶走夥伴，這次夥伴開在一般終端視窗".to_string())),
-        JobRisk::Unknown => (false, Some("查不到 ASN 所在工作群組的設定，為了不讓夥伴跟著結束，這次夥伴開在一般終端視窗".to_string())),
-    }
+    let why = match job_risk(inside, limit) {
+        JobRisk::Safe => return (true, None),
+        JobRisk::TakesMuxDown => "這次的啟動方式會讓夥伴跟著 ASN 一起關閉，所以夥伴開在一般視窗",
+        JobRisk::Unknown => "查不到這次的啟動方式會不會讓夥伴跟著 ASN 一起關閉，保險起見，夥伴開在一般視窗",
+    };
+    let more = if earlier_mux { "。先前開的夥伴還在背景跑，這次切不到前景；用平常的方式重開 ASN 就能接回" } else { "" };
+    (false, Some(format!("{why}{more}")))
 }
 
 /// ASN 自己所在的工作群組（Job Object）對 mux 的影響

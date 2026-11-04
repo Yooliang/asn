@@ -2378,7 +2378,8 @@ pub fn live(data_dir: &Path) -> LiveTerms {
     super::win_term::set_wezterm_windows(wez);
     svc.set_hold_config(wez);
     let (inside, limit) = super::mux::own_job();
-    let (mux, why_not) = super::mux::mux_after_job(mux, inside, limit);
+    let earlier_mux = mux && svc.dir().ok().is_some_and(|d| svc.mux_handle(&d, BTreeMap::new()).is_ok_and(|m| m.live_pid().is_some()));
+    let (mux, why_not) = super::mux::mux_after_job(mux, inside, limit, earlier_mux);
     if let Some(why) = why_not {
         elog!("終端服務：{why}");
         if let Some(Ok(paths)) = svc.mux_base.as_ref().map(|b| super::mux::paths(b)) {
@@ -5070,6 +5071,30 @@ mod tests {
             let svc3 = restarted(&rig, true);
             svc3.reclaim().unwrap();
             assert_eq!(svc3.list().len(), 1);
+        }
+
+        /// 上次開的夥伴還活在 mux 裡，這次因工作群組不用 mux（#759）：不碰舊夥伴，也查不到它（切不到前景）；
+        /// 這次開的新視窗寫對照表時不會把舊列洗掉，下次用 mux 開 ASN 就接回。
+        /// 不會多開一份：開新夥伴前查的是工作階段，不看 mux（local.rs 的「同名夥伴還活著_不開新的」「切前景失敗仍回existing」）
+        #[test]
+        fn 這次不用_mux_舊夥伴不碰也查不到_新視窗不洗掉舊列_下次接回() {
+            let (rig, _) = mux_rig();
+            let old = rig.svc.start("agy", &rig.cwd, &rig.config).unwrap();
+            let before = rig.runner.args().len();
+            let svc2 = restarted(&rig, false);
+            svc2.reclaim().unwrap();
+            assert!(svc2.list().is_empty());
+            assert_eq!(rig.runner.args().len(), before, "不下 cli，不碰舊夥伴");
+            assert_eq!(svc2.partner_in_mux((42, 1000), &old), None, "這次切不到前景");
+            let new = svc2.start("agy", &rig.cwd, &rig.config).unwrap();
+            assert_ne!(new, old);
+            let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
+            let rows = v["terms"].as_array().unwrap();
+            assert!(rows.iter().any(|t| t["id"] == old.as_str() && t["mux"] == true), "舊列還在：{rows:?}");
+            assert!(rows.iter().any(|t| t["id"] == new.as_str() && t.get("mux").is_none()), "新視窗不是 mux：{rows:?}");
+            let svc3 = restarted(&rig, true);
+            svc3.reclaim().unwrap();
+            assert!(svc3.list().iter().any(|s| s.id == old), "下次接回");
         }
 
         #[test]

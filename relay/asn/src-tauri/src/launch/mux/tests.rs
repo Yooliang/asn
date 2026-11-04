@@ -18,10 +18,12 @@ struct Fake {
     reborn: bool,
     birth_queries: Cell<usize>,
     exe: RefCell<BTreeMap<u32, PathBuf>>,
+    /// 拿鎖時（鎖會查 ASN 自己的建立時間）才出現的檔：開窗的一方剛好在這之前逾時
+    appears_at_lock: RefCell<Option<PathBuf>>,
 }
 impl Fake {
     fn new() -> Self {
-        Fake { calls: RefCell::new(vec![]), tries: Cell::new(0), alive_after: Cell::new(None), alive_once_started: true, started: RefCell::new(vec![]), killed: RefCell::new(vec![]), birth: RefCell::new(BTreeMap::new()), list_json: "[]".into(), no_birth: false, reborn: false, birth_queries: Cell::new(0), exe: RefCell::new(BTreeMap::new()) }
+        Fake { calls: RefCell::new(vec![]), tries: Cell::new(0), alive_after: Cell::new(None), alive_once_started: true, started: RefCell::new(vec![]), killed: RefCell::new(vec![]), birth: RefCell::new(BTreeMap::new()), list_json: "[]".into(), no_birth: false, reborn: false, birth_queries: Cell::new(0), exe: RefCell::new(BTreeMap::new()), appears_at_lock: RefCell::new(None) }
     }
     fn cli_calls(&self) -> Vec<Vec<String>> {
         self.calls.borrow().iter().filter(|c| c.0.ends_with("wezterm.exe")).map(|c| c.1.clone()).collect()
@@ -51,6 +53,11 @@ impl Runner for Fake {
         self.killed.borrow_mut().push(pid);
     }
     fn started_ms(&self, pid: u32) -> Option<u64> {
+        if pid == std::process::id() {
+            if let Some(f) = self.appears_at_lock.borrow_mut().take() {
+                std::fs::write(f, "").unwrap();
+            }
+        }
         // 只數剛起的那些編號被查的次數（啟動鎖也會查 ASN 自己的編號，不算）
         if self.started.borrow().contains(&pid) {
             let n = self.birth_queries.get();
@@ -633,13 +640,16 @@ fn 收空_mux_執行檔被更新改名成_old_還認得_別的資料夾不算() 
 
 #[test]
 fn 工作群組會帶走或讀不到_就不用_mux_並說明() {
-    assert_eq!(mux_after_job(false, Some(true), Some(0x2000)), (false, None), "本來就沒要開：不多話");
-    assert_eq!(mux_after_job(true, Some(false), None), (true, None));
-    assert_eq!(mux_after_job(true, Some(true), Some(0x800)), (true, None));
-    assert_eq!(mux_after_job(true, Some(true), Some(0)), (true, None));
+    assert_eq!(mux_after_job(false, Some(true), Some(0x2000), true), (false, None), "本來就沒要開：不多話");
+    assert_eq!(mux_after_job(true, Some(false), None, false), (true, None));
+    assert_eq!(mux_after_job(true, Some(true), Some(0x800), true), (true, None));
+    assert_eq!(mux_after_job(true, Some(true), Some(0), false), (true, None));
     for (i, l) in [(Some(true), Some(0x2000)), (Some(true), None), (None, None)] {
-        let (on, why) = mux_after_job(true, i, l);
-        assert!(!on && why.is_some_and(|w| w.contains("一般終端視窗")), "{i:?} {l:?}");
+        let (on, why) = mux_after_job(true, i, l, false);
+        let why = why.unwrap();
+        assert!(!on && why.contains("一般視窗") && !why.contains("工作群組") && !why.contains("重開"), "{i:?} {l:?} {why}");
+        let (on, why) = mux_after_job(true, i, l, true);
+        assert!(!on && why.unwrap().contains("用平常的方式重開 ASN 就能接回"), "{i:?} {l:?}");
     }
 }
 
@@ -649,4 +659,13 @@ fn 收空_mux_執行檔被更新改名成_old_還是收得掉() {
     r.exe.borrow_mut().insert(MUX_PID, PathBuf::from(format!("{SERVER}.old1")));
     assert!(mux(&r, d.path()).stop_if_empty("測試"));
     assert_eq!(*r.killed.borrow(), vec![MUX_PID]);
+}
+
+#[test]
+fn 收空_mux_開窗的一方在拿鎖前才逾時也不停() {
+    let (d, r) = empty_rig("[]");
+    let m = mux(&r, d.path());
+    *r.appears_at_lock.borrow_mut() = Some(m.paths.dir.join("spawn-unsure"));
+    assert!(!m.stop_if_empty("測試"), "鎖放掉之前記號已經寫好，拿到鎖就看得到");
+    assert!(r.killed.borrow().is_empty());
 }
