@@ -110,8 +110,8 @@ export function createMobileNav({ history, nav, st, now = () => Date.now() }) {
     setNav(n)
   }
   // 計時到了就收起（切頁、回到前景、計時器到點都會叫）；正在看第四頁籤時 leftAt 是 0，不會收
-  function check() {
-    if (!fourthExpired(st.fourth, now())) return false
+  function check(keep) {   // keep＝這一頁保留多久（毫秒）；不給＝預設 3 分鐘（雲端代理的金鑰還在畫面上時 m.js 給較長的）
+    if (!fourthExpired(st.fourth, now(), keep)) return false
     st.fourth = null
     return true
   }

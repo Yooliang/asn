@@ -10,6 +10,8 @@ import { COPY_NOTE, DEFAULT_NAME, INVITE_NOTE, POLL_MS, cleanName, joined, rowsF
 
 export { COPY_NOTE, INVITE_NOTE, DEFAULT_NAME, POLL_MS }
 export const CLIP_CLEAR_MS = 60_000
+// 金鑰還在畫面上時，這一頁切走後最多保留多久（一般內頁是 3 分鐘）：複製金鑰常要切去別的 App 或分頁；超過才丟並明講
+export const CLOUD_KEY_KEEP_MS = 30 * 60_000
 // 金鑰還在畫面上時要離開（含系統返回鍵）：先問一次，因為金鑰只顯示一次、不能重發
 export const CLOUD_LEAVE_TEXT = { title: '金鑰還在畫面上', lead: '離開後就看不到這把金鑰，也不能重發，只能撤銷後重新邀請。要離開嗎？', leave: '離開', stay: '留下' }
 
@@ -36,6 +38,7 @@ export const CLOUD_TEXT = {
   done: '完成（關掉後看不到金鑰）',
   clipNote: '複製金鑰後 60 秒會嘗試自動清掉剪貼簿（不保證清得掉）：貼完請回到這裡，才清得掉；清掉的是剪貼簿裡當時的內容，中間複製了別的也會被清。',
   clipCleared: '已清掉剪貼簿。',
+  keyExpired: '金鑰已超過時間丟棄，請撤銷後重新邀請。',
   clipFail: '沒能清掉剪貼簿，金鑰可能還在裡面。請複製別的內容蓋掉。',
   empty: '還沒有邀請過雲端代理。',
   revoke: '撤銷', revokeSure: '確認撤銷',
@@ -78,6 +81,7 @@ export function createMobileCloud({ api, status, clip, now = () => Date.now(), t
   })
   let clearTimerId = null, copiedAt = 0, copiedKeyText = ''
   let loadMsg = ''   // 最近一次讀取失敗留在畫面上的提示（輪詢成功後要消掉，不能一直掛著）
+  let expireNext = false   // 下一次 leave 是因為保留時間到了（要明講金鑰丟了）
   let epoch = 0   // 離開這一頁就加一：建立途中離開，回來的金鑰不保留（見 create）
 
   const stopClearTimer = () => { if (clearTimerId != null) { timer.clear(clearTimerId); clearTimerId = null } }
@@ -143,13 +147,20 @@ export function createMobileCloud({ api, status, clip, now = () => Date.now(), t
   async function done() {
     s.created = null; s.reveal = false; s.copiedKey = false; s.copiedInvite = false; s.stage = 'list'
     await clearClipboard()
+    if (copiedKeyText) s.msg = CLOUD_TEXT.clipFail   // 這時已離開金鑰畫面：清不掉的提示改放在清單頁
   }
+  const markExpired = () => { if (s.created) expireNext = true }
   // 離開這一頁：金鑰、表單全丟，剪貼簿也清
   async function leave() {
     epoch++
+    const hadKey = !!s.created
     s.created = null; s.reveal = false; s.copiedKey = false; s.copiedInvite = false; s.stage = 'list'
     s.confirmId = ''; s.msg = ''; s.approveForm = false; s.code = ''; s.hostName = ''; s.hostId = ''; s.approved = ''
+    const expired = expireNext; expireNext = false
     await clearClipboard()
+    // 清除之後才寫提示（上面清掉了舊提示）：保留時間到了＝明講金鑰丟了；清不掉＝提醒用別的內容蓋掉
+    if (expired && hadKey) s.msg = CLOUD_TEXT.keyExpired
+    else if (copiedKeyText) s.msg = CLOUD_TEXT.clipFail
   }
 
   async function revoke(id) {
@@ -180,5 +191,5 @@ export function createMobileCloud({ api, status, clip, now = () => Date.now(), t
   const cancelApprove = () => { s.approveForm = false }
 
   const justJoined = () => !!s.created && joined(s.rows, s.created.id)
-  return { state: s, load, openForm, cancelForm, create, copyKey, copyInvite, onVisible, done, leave, revoke, approve, openApprove, cancelApprove, justJoined, clearClipboard }
+  return { state: s, markExpired, load, openForm, cancelForm, create, copyKey, copyInvite, onVisible, done, leave, revoke, approve, openApprove, cancelApprove, justJoined, clearClipboard }
 }

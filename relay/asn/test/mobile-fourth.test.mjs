@@ -237,6 +237,6 @@ test('畫面接線：第四頁籤在 pager 最右邊、內頁搬進來；對話�
   assert.doesNotMatch(js, /sheet !== 'acct'|sheet === 'acct'/, '已讀與提示判斷不再排除設備與帳號')
   assert.match(js, /isChatVisible: async id => document\.visibilityState === 'visible' && nav\.tab === 'chats' && lastChat\.value === id/)
   // 計時：切走時排一個計時器；回到前景檢查
-  assert.match(js, /fourthMsLeft\(/); assert.match(js, /visibilitychange[\s\S]{0,120}fourthNav\.check\(\)|fourthNav\.check\(\)[\s\S]{0,40}visibilitychange/)
+  assert.match(js, /fourthMsLeft\(/); assert.match(js, /visibilitychange[\s\S]{0,120}checkFourth\(\)|checkFourth\(\)[\s\S]{0,40}visibilitychange/)
   assert.match(js, /window\.addEventListener\('popstate', e => \{[\s\S]*?fourthNav\.onPop\(e\.state\)/)
 })

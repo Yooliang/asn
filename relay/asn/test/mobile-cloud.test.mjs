@@ -2,7 +2,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { CLIP_CLEAR_MS, CLOUD_LEAVE_TEXT, CLOUD_TEXT, createMobileCloud } from '../ui/lib/mobile-cloud.mjs'
+import { CLIP_CLEAR_MS, CLOUD_KEY_KEEP_MS, CLOUD_LEAVE_TEXT, CLOUD_TEXT, createMobileCloud } from '../ui/lib/mobile-cloud.mjs'
+import { fourthExpired, fourthMsLeft, FOURTH_KEEP_MS } from '../ui/lib/mobile-fourth.mjs'
 import { phoneGuideList } from '../ui/lib/mobile-guides.mjs'
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -119,6 +120,62 @@ test('金鑰還在畫面上時離開（含系統返回鍵）：先問一次；�
   assert.match(js, /keyBackGuard = \(\) => \{[\s\S]*?!cloudSt\.created[\s\S]*?leave\.ask\(null, \(\) => \{ void cloud\.leave\(\); history\.back\(\) \}\)/, '返回鍵先取消、問、選離開才丟金鑰再返回')
   assert.ok(js.includes("window.addEventListener('popstate', e => {\n  if (keyBackGuard()) return"), '返回鍵一進來就先問')
   assert.match(html, /leaveText\.lead/)
+})
+
+function makeFailing() {
+  let fail = true
+  const ui = createMobileCloud({
+    api: { list: async () => ({ nodes: [] }), create: async name => ({ id: 't5-new', name, key: KEY, invite: 'x' }) },
+    status: async () => ({ signed_in: true }),
+    clip: { write: async t => { if (t === '' && fail) throw new Error('denied') } },
+    timer: { set: () => 1, clear: () => {} },
+  })
+  return { ui, s: ui.state, fixIt: () => { fail = false } }
+}
+async function withKey(m) { await m.ui.load(); m.ui.openForm(); m.s.name = '小真'; await m.ui.create(); await m.ui.copyKey() }
+
+test('按「完成」時清不掉剪貼簿：回到清單也看得到提示', async () => {
+  const m = makeFailing(); await withKey(m)
+  await m.ui.done()
+  assert.equal(m.s.stage, 'list')
+  assert.equal(m.s.msg, CLOUD_TEXT.clipFail)
+})
+
+test('離開這一頁時清不掉剪貼簿：提示留在清除之後（不被離開時的清空蓋掉）', async () => {
+  const m = makeFailing(); await withKey(m)
+  await m.ui.leave()
+  assert.equal(m.s.created, null)
+  assert.equal(m.s.msg, CLOUD_TEXT.clipFail)
+})
+
+test('金鑰還在畫面、頁面保留時間到了才丟：明講丟了；沒有金鑰就不講', async () => {
+  const m = makeFailing(); m.fixIt(); await withKey(m)
+  m.ui.markExpired()
+  await m.ui.leave()
+  assert.equal(m.s.created, null)
+  assert.equal(m.s.msg, CLOUD_TEXT.keyExpired)
+  assert.match(CLOUD_TEXT.keyExpired, /撤銷後重新邀請/)
+  const n = makeFailing(); n.fixIt(); await n.ui.load()
+  n.ui.markExpired()   // 沒有金鑰：標記不成立
+  await n.ui.leave()
+  assert.equal(n.s.msg, '')
+})
+
+test('頁面保留時間：預設 3 分鐘；金鑰還在畫面上給 30 分鐘，超過才過期', () => {
+  const fourth = { leftAt: 1_000 }
+  assert.equal(fourthExpired(fourth, 1_000 + FOURTH_KEEP_MS), true)
+  assert.equal(fourthExpired(fourth, 1_000 + FOURTH_KEEP_MS, CLOUD_KEY_KEEP_MS), false, '金鑰還在：3 分鐘不過期')
+  assert.equal(fourthExpired(fourth, 1_000 + CLOUD_KEY_KEEP_MS - 1, CLOUD_KEY_KEEP_MS), false)
+  assert.equal(fourthExpired(fourth, 1_000 + CLOUD_KEY_KEEP_MS, CLOUD_KEY_KEEP_MS), true)
+  assert.equal(fourthMsLeft(fourth, 1_000 + 60_000, CLOUD_KEY_KEEP_MS), CLOUD_KEY_KEEP_MS - 60_000)
+  assert.equal(CLOUD_KEY_KEEP_MS, 30 * 60_000)
+})
+
+test('內頁「關閉」與頁面過期都走金鑰的判斷（接線）', () => {
+  const js = read('ui/m.js')
+  assert.match(js, /const closePage = \(\) => askBeforeLeave\(null, \(\) => fourthNav\.closePage\(\)\)/, '關閉先問')
+  assert.match(js, /checkFourth = \(\) => \{ if \(cloudSt\.created && fourthExpired\(.*?CLOUD_KEY_KEEP_MS\)\) cloud\.markExpired\(\); return fourthNav\.check\(fourthKeepMs\(\)\) \}/)
+  assert.match(js, /cloud\.leave\(\)\.then\(\(\) => \{ if \(cloudSt\.msg\) showToast\(cloudSt\.msg\) \}\)/, '頁面關了就用一句話提示')
 })
 
 test('代理連上來就顯示已加入', async () => {

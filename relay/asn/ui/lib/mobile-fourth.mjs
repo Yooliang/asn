@@ -48,9 +48,9 @@ export function fourthOnTab(fourth, tab, now) {
   if (tab === PAGE_TAB) return fourth.leftAt ? { ...fourth, leftAt: 0 } : fourth
   return fourth.leftAt ? fourth : { ...fourth, leftAt: now }
 }
-export const fourthExpired = (fourth, now) => !!fourth && fourth.leftAt > 0 && now - fourth.leftAt >= FOURTH_KEEP_MS
+export const fourthExpired = (fourth, now, keep = FOURTH_KEEP_MS) => !!fourth && fourth.leftAt > 0 && now - fourth.leftAt >= keep
 // 還剩多久收起（毫秒）；沒在計時回 Infinity
-export const fourthMsLeft = (fourth, now) => (fourth?.leftAt > 0 ? Math.max(0, FOURTH_KEEP_MS - (now - fourth.leftAt)) : Infinity)
+export const fourthMsLeft = (fourth, now, keep = FOURTH_KEEP_MS) => (fourth?.leftAt > 0 ? Math.max(0, keep - (now - fourth.leftAt)) : Infinity)
 
 // ---------- 換內頁前先問一句 ----------
 // 開新夥伴正在填第 2 步、還沒送出（draft＝true）時，要換成別的內頁就先問；選離開才換。單純切到前三頁不問（內容會保留 3 分鐘），再進開新夥伴也不問（接著填）
