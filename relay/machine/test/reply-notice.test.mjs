@@ -1,6 +1,7 @@
 // 逾時不再通知寄件人（小良哥 10/22 裁示：寄件人看已讀狀態）：遲到回覆照寄（原文、不加說明）、收發室系統信不計時、寄給原寄件人視為已回覆；
 // 新增「收件視窗提醒」：轉交後 IRORI_NUDGE_MS 沒回、視窗閒置 → 提醒收件視窗一次。
 // 用假仲介伺服器＋假 claude（agents.json 可在執行中改 status）；用 IRORI_REPLY_TIMEOUT_MS / IRORI_BRIDGE_TICK_MS 縮短時間。
+import { mailHead } from '../mail-format.mjs'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import http from 'node:http'
@@ -213,6 +214,20 @@ test('收發室只寫了 SENT、沒有真的轉交成功 → 不算已轉交，�
       assert.equal(forwardTimeouts(st)[0].reply_to, uid(1), how)
     } finally { await st.close() }
   }
+})
+
+test('同一收件人兩封在途，B 的內文引用 A 的第一行 → 只有 B 算送達（#671）', async () => {
+  const a = mail(1)
+  const st = await fakeServer([a, mail(2, { body: `轉寄：\n${mailHead(a, 'claude')}\n內文` })])
+  try {
+    const { log } = await go({
+      st, env: { FAKE_FORWARD: 'quote', IRORI_FORWARD_TIMEOUT_MS: '60000', IRORI_REPLY_TIMEOUT_MS: '60000' },
+      step: c => new RegExp(`forwarded id=${uid(2)}`).test(c.log),
+      settle: 500,
+    })
+    assert.doesNotMatch(log, new RegExp(`forwarded id=${uid(1)}`), 'A 還沒送')
+    assert.ok(st.acked.has(uid(2)) && !st.acked.has(uid(1)))
+  } finally { await st.close() }
 })
 
 test('收發室完全沒回報，但對方已經用 --reply-to 回了這封 → 不寄「轉交逾時」；沒回的那封照常寄', async () => {

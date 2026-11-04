@@ -21,6 +21,8 @@ rl.on('line', line => {
   // FAKE_FORWARD=silent：什麼都不輸出（模擬收發室完全沒回報）
   // FAKE_FORWARD=text：沒有呼叫 SendMessage，卻寫了 SENT 行；FAKE_FORWARD=wrong：呼叫了但收件人不對，還是寫 SENT 行
   if (process.env.FAKE_FORWARD === 'silent') return
+  // FAKE_FORWARD=quote：內文沒有「轉寄」的信什麼都不回報，留在轉交中；有的才真的呼叫 SendMessage
+  if (process.env.FAKE_FORWARD === 'quote' && !text.includes('轉寄')) return
   if (process.env.FAKE_FORWARD !== 'text') {
     const mailText = text.slice(text.indexOf('<<<MAIL\n') + 8, text.lastIndexOf('\nMAIL>>>'))
     const tid = `toolu_${m[1].slice(-6)}`

@@ -92,7 +92,8 @@ export function createEngine({ log, workDir, mailboxName, model, env = process.e
       if (ev.type === 'assistant' && c.type === 'tool_use' && c.name === 'SendMessage') {
         const to = String(c.input?.to ?? ''), msg = String(c.input?.message ?? '')
         // 私信第一行帶編號；群組訊息不帶，第一行是群組和序號。同一則群組訊息可能同時轉給好幾扇視窗，所以先找收件人也對的
-        const same = [...inflight].filter(([, x]) => msg.includes(x.head))
+        const first = msg.split('\n', 1)[0].trim()
+        const same = [...inflight].filter(([, x]) => first === x.head)   // 比相等：內文引用別封信的第一行不能算那封
         const hit = same.find(([, x]) => x.to === to)
         if (hit) sendCalls.set(c.id, hit[0])
         else for (const [id, x] of same) log(`forward target mismatch id=${id}: expected ${x.to}, worker sent to ${to}`)
@@ -178,7 +179,7 @@ export function createEngine({ log, workDir, mailboxName, model, env = process.e
     // 收發室沒起來時 throw（橋把信留在 inbox 不 ack）
     deliver({ id, to, text }) {
       if (inflight.size >= INFLIGHT_MAX) inflight.delete(inflight.keys().next().value)
-      inflight.set(id, { to, head: text.split('\n', 1)[0] })
+      inflight.set(id, { to, head: text.split('\n', 1)[0].trim() })
       workerSay(`[BRIDGE-FORWARD nonce=${NONCE} id=${id} to=${to}]\n<<<MAIL\n${text}\nMAIL>>>`)
     },
     // 開新視窗用的零件（launcher.mjs 依本機 launcher.json 組好 command/args/cwd/env 後呼叫 openWindow）
