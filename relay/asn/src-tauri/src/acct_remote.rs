@@ -409,9 +409,52 @@ pub fn decide(taken: &mut HashMap<String, (String, Instant)>, id: &str, allowed:
 
 // ---------- 送給收發室的動作 ----------
 /// 被退回（HTTP 400）時的退路見 [`report_attempts`]：拿掉 gemini 再送，再不行只送 Claude；其他錯誤不退步
-pub async fn report(relay: &Relay, list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value], gemini: &[Value], login_failed: bool) -> Result<Value, String> {
+#[allow(clippy::too_many_arguments)]
+pub async fn report(relay: &Relay, list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value], gemini: &[Value], login_failed: bool, log: &impl Fn(String)) -> Result<Value, String> {
     let attempts = with_login_failed(report_attempts(list, codex, quotas, grok, codex_windows, gemini), login_failed);
-    send_attempts(attempts, |body| relay.api("acct_report", Some(body)), |line| elog!("{line}")).await
+    send_attempts(attempts, |body| relay.api("acct_report", Some(body)), log).await
+}
+
+/// 定時回報：失敗也繼續，下一輪再試。紀錄在 tick 裡留
+pub async fn report_loop<F, Fut, T>(first: std::time::Duration, every: std::time::Duration, mut tick: F)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, String>>,
+{
+    tokio::time::sleep(first).await;
+    loop {
+        let _ = tick().await;
+        tokio::time::sleep(every).await;
+    }
+}
+
+/// 失敗每隔這麼多次才再記一筆（5 分鐘一輪＝一小時一筆）
+const REPORT_FAIL_LOG_EVERY: u32 = 12;
+
+/// 回報結果要不要留紀錄：失敗第一次記，之後一小時一筆；恢復時記一筆。成功不記
+#[derive(Default)]
+pub struct ReportLog {
+    fails: u32,
+}
+
+impl ReportLog {
+    pub const fn new() -> Self {
+        ReportLog { fails: 0 }
+    }
+
+    pub fn line<T>(&mut self, r: &Result<T, String>) -> Option<String> {
+        match r {
+            Ok(_) if self.fails == 0 => None,
+            Ok(_) => {
+                let n = std::mem::take(&mut self.fails);
+                Some(format!("帳號回報恢復（之前連續失敗 {n} 次）"))
+            }
+            Err(e) => {
+                self.fails += 1;
+                (self.fails % REPORT_FAIL_LOG_EVERY == 1).then(|| format!("帳號回報失敗（連續第 {} 次）：{e}", self.fails))
+            }
+        }
+    }
 }
 /// 有登入就帶本人簽章（#380：成員角色的電腦不帶會被後台擋 403）；沒登入照舊不帶
 pub async fn remote_list(relay: &Relay, node: &str, token: Option<&str>) -> Result<Value, String> {
@@ -671,6 +714,47 @@ pub async fn decline(relay: &Relay, data_dir: &Path, id: String) -> Result<(), S
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 回報紀錄_失敗第一次記_之後一小時一筆_恢復記一筆_成功不記() {
+        let mut l = ReportLog::new();
+        let ok: Result<(), String> = Ok(());
+        let bad: Result<(), String> = Err("acct_report HTTP 500".into());
+        assert_eq!(l.line(&ok), None);
+        let first = l.line(&bad).unwrap();
+        assert!(first.contains("連續第 1 次") && first.contains("HTTP 500"), "{first}");
+        for _ in 2..=12 {
+            assert_eq!(l.line(&bad), None);
+        }
+        assert!(l.line(&bad).unwrap().contains("連續第 13 次"));
+        assert_eq!(l.line(&ok).unwrap(), "帳號回報恢復（之前連續失敗 13 次）");
+        assert_eq!(l.line(&ok), None);
+        assert!(l.line(&bad).unwrap().contains("連續第 1 次"), "恢復後重新算");
+    }
+
+    #[tokio::test]
+    async fn 定時回報_失敗也繼續下一輪() {
+        let n = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let n2 = n.clone();
+        let tick = move || {
+            let n3 = n2.clone();
+            async move {
+                n3.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Err::<(), String>("連不上".into())
+            }
+        };
+        let run = report_loop(std::time::Duration::from_millis(1), std::time::Duration::from_millis(1), tick);
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(500), run).await;
+        assert!(n.load(std::sync::atomic::Ordering::SeqCst) >= 3);
+    }
+
+    #[test]
+    fn 帳號回報在背景跑_不靠畫面() {
+        let lib = include_str!("lib.rs");
+        assert!(lib.contains("acct_remote::report_loop("), "啟動時開背景回報");
+        let list = include_str!("../../ui/list.js");
+        assert!(!list.contains("accounts.report()"), "畫面不再定時回報：停在登入畫面時那段不會跑");
+    }
+
     use super::*;
 
     const U: &str = "11111111-2222-3333-4444-555555555555";

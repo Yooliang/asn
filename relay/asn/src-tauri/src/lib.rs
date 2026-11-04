@@ -330,6 +330,28 @@ async fn relay_launchers(app: State<'_, App>, auth: State<'_, auth::AuthState>, 
 #[tauri::command]
 async fn acct_remote_report(app: State<'_, App>) -> Result<Value, String> {
     let relay = relay_of(&app)?;
+    report_accounts(relay, app.work_dir.clone()).await
+}
+
+/// 回報一次並留紀錄。背景工作和畫面都走這裡；不用本人登入，只要這台有節點金鑰
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+async fn report_accounts(relay: Arc<Relay>, work_dir: std::path::PathBuf) -> Result<Value, String> {
+    static REPORT_LOG: std::sync::Mutex<acct_remote::ReportLog> = std::sync::Mutex::new(acct_remote::ReportLog::new());
+    let write = |line: String| {
+        let _ = ui_log::append(&work_dir, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(heartbeat::now_ms() as i64))]);
+    };
+    let r = collect_and_report(relay, work_dir.clone(), &write).await;
+    let line = REPORT_LOG.lock().unwrap_or_else(|e| e.into_inner()).line(&r);
+    if let Some(line) = line {
+        write(line);
+    }
+    r
+}
+
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+async fn collect_and_report(relay: Arc<Relay>, work_dir: std::path::PathBuf, write: &(impl Fn(String) + Sync)) -> Result<Value, String> {
     let list = tauri::async_runtime::spawn_blocking(claude_accounts::local_list).await.map_err(|e| e.to_string())?;
     // Codex 目前登入（只有 email／方案）；讀不到或沒登入就不放，不影響 Claude 的回報
     let codex = tauri::async_runtime::spawn_blocking(codex_accounts::codex_account_current).await.ok().and_then(|r| r.ok()).flatten();
@@ -338,7 +360,6 @@ async fn acct_remote_report(app: State<'_, App>) -> Result<Value, String> {
     // Grok 帳號庫（email 與是否使用中）；沒有就是空的
     let grok = tauri::async_runtime::spawn_blocking(grok_accounts::local_list).await.unwrap_or_default();
     // Codex 的額度窗：橋的 Codex 引擎存在工作資料夾；帳號跟目前登入對得上才帶（沒開 Codex 橋接就沒有）
-    let work_dir = app.work_dir.clone();
     let login = codex.as_ref().filter(|c| c.mode == "chatgpt").map(|c| c.email.clone());
     let codex_windows = tauri::async_runtime::spawn_blocking(move || login.map(|e| codex_quota::windows_for(&work_dir, &e, heartbeat::now_ms() as i64)).unwrap_or_default()).await.unwrap_or_default();
     // Gemini：ASN 開的 agy 視窗狀態列記下的帳號與額度（沒開過就是空的）
@@ -350,7 +371,7 @@ async fn acct_remote_report(app: State<'_, App>) -> Result<Value, String> {
     };
     let notifier = login_watch::RelayNotifier { relay: relay.clone() };
     let login_failed = tauri::async_runtime::spawn_blocking(move || login_watch::tick_real(heartbeat::now_ms() as i64, &ctx, &notifier)).await.unwrap_or(false);
-    acct_remote::report(relay.as_ref(), &list, codex.as_ref(), &quotas, &grok, &codex_windows, &gemini, login_failed).await
+    acct_remote::report(relay.as_ref(), &list, codex.as_ref(), &quotas, &grok, &codex_windows, &gemini, login_failed, write).await
 }
 /// 帳號列表（#374）：本人所有設備回報的各廠牌帳號與額度。要本人簽章；沒登入回錯，不打後台
 #[cfg(feature = "gui")]
@@ -1748,6 +1769,13 @@ pub fn run() {
                 // 啟動時把視窗名同步成這台設備的顯示名（別台設備的前台依設備分組時顯示它）
                 let r3 = r.clone();
                 tauri::async_runtime::spawn(async move { r3.sync_device_name().await });
+                // 帳號回報：啟動後 5 秒起每 5 分鐘一次，停在登入畫面也照跑（用節點金鑰，不用本人登入）；--shot 截圖模式不動
+                #[cfg(desktop)]
+                if handle.state::<App>().shot.is_none() {
+                    let (r6, wd6) = (r.clone(), work_dir.clone());
+                    let every = std::time::Duration::from_millis(env_ms("ASN_ACCT_REPORT_MS", 300_000));
+                    tauri::async_runtime::spawn(acct_remote::report_loop(std::time::Duration::from_secs(5), every, move || report_accounts(r6.clone(), wd6.clone())));
+                }
                 // 在線狀態與版本：啟動後（等前端把狀態交過來）與每 60 秒回報一次；前端改狀態會叫醒立刻回報。
                 // 後台還沒部署（404／400）就停止，直到下次啟動；--shot 模式連的是本機假後端。
                 let r4 = r.clone();
