@@ -44,6 +44,7 @@ import { PI_SETUP_TEXT, piSetupError, piSetupView } from './lib/pi-setup.mjs'
 import { CONNECT_TEXT } from './lib/connect-tools.mjs'
 import { QUOTA_HOOK_TEXT, quotaHookError, quotaHookView } from './lib/quota-hook.mjs'
 import { loadEnvNotice } from './lib/env-notice.mjs'
+import { loadMuxViews, backgroundNames, isMuxBackground, closeNoticeOnce } from './lib/mux-views.mjs'
 import { CWD_EMPTY_HINT, bumpRecentCwd, cwdChoices, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
 import { BUDDY_CONSOLE_LABEL, CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, consoleReq, engineForProfile, launchDeviceRows, localProfileEngine, launchDisableReason, remoteModelRows, showDisplayModeChoice, foregroundOnlyProfile, withTimeout } from './lib/partner-launch-ui.mjs'
 import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
@@ -671,6 +672,27 @@ function openPartnerOp(it) {
 const envNotice = ref('')
 void loadEnvNotice(transport).then(t => { envNotice.value = t })
 setInterval(() => void loadEnvNotice(transport).then(t => { envNotice.value = t }), 10 * 60_000)
+// 共用終端服務裡的夥伴：名單標「背景執行中」，第一次按 X 關畫面時說明一次
+const muxBgNames = ref(new Set())
+async function refreshMuxViews() {
+  const views = await loadMuxViews(transport)
+  muxBgNames.value = backgroundNames(views)
+  let storage = null
+  try { storage = window.localStorage } catch { /* 被擋：下面照樣能跑 */ }
+  const notice = closeNoticeOnce(views, storage)
+  if (notice) showLaunchNotice(notice)
+}
+const muxBackground = c => isMuxBackground(c, info.node, muxBgNames.value)
+async function showMuxPartner(c) {
+  const eng = c.engine || engineForProfile(c.launchProfile || 'claude')
+  try {
+    const r = await transport.partnerConsoleSet({ ...consoleReq(c, eng), visible: true })
+    if (!r?.ok && r?.notify && r.reason) showLaunchNotice({ title: '開不了終端畫面', body: String(r.reason) })
+  } catch (e) { console.info('[ASN] 看夥伴畫面', e.message) }
+  void refreshMuxViews()
+}
+void refreshMuxViews()
+setInterval(() => void refreshMuxViews(), 5_000)
 const archiveNote = ref('')
 let archiveNoteTimer = null
 async function setArchived(f, archived) {
@@ -1760,7 +1782,7 @@ const app = createApp({
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
       permissionDlg, permissionDlgView, closePermissionDlg, answerPermission,
-      opDlg, closeOpDlg, buddyOpItems, openPartnerOp, archiveNote, envNotice, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
+      opDlg, closeOpDlg, buddyOpItems, openPartnerOp, archiveNote, envNotice, muxBackground, showMuxPartner, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddySlots, buddyModelItem, buddyMenuOpenChat, toggleBuddyConsole,
       buddyModel, buddyModelOp, buddyModelLabel, buddyModelWhy, buddyMenuView, buddyWhyOf, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,
       launchToolRows, launchPrefs, launchCwdText, saveLaunchPrefs, setLaunchCwdText,

@@ -103,7 +103,7 @@
                   <button class="buddy" :class="{ offline: c.status === 'offline', pending: c.pending }" @click="openChat(c.id)">
                     <asn-avatar :src="avOf(c)" :friend="c" :status="g.kind === 'archived' ? 'offline' : c.status" :off="c.status === 'offline'"></asn-avatar>
                     <span class="b-text">
-                      <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-ctx" :class="{ danger: contextLabel(c).danger }" v-if="contextLabel(c)">{{ contextLabel(c).text }}</span><span class="b-st" v-if="statusNote(c.status)">{{ statusNote(c.status) }}</span></span>
+                      <span class="b-line"><span class="b-nick" v-html="emo(c.nick)"></span><span class="b-ctx" :class="{ danger: contextLabel(c).danger }" v-if="contextLabel(c)">{{ contextLabel(c).text }}</span><span class="b-st" v-if="statusNote(c.status)">{{ statusNote(c.status) }}</span><span class="b-bg" role="button" tabindex="0" v-if="muxBackground(c)" title="沒有開畫面，夥伴照常工作。按一下看畫面" @click.stop="showMuxPartner(c)" @keydown.enter.stop.prevent="showMuxPartner(c)" @keydown.space.stop.prevent="showMuxPartner(c)">背景執行中</span></span>
                       <span class="b-psm" v-if="c.psm" v-html="emo(c.psm)"></span>
                     </span>
                     <span class="unread" v-if="c.unread">{{ c.unread }}</span>
