@@ -356,3 +356,34 @@ test('代收舊信 3 封以內、或不是代收的信：照舊逐封提示', as
   assert.equal(notes.length, 6, '一般新信不受影響')
   assert.ok(notes.every(n => !/代收/.test(n.line)))
 })
+
+// #796 手機沒開 App 時留下的舊信：超過 3 封只跳一則；只有手機版設定；新信照常；系統寄件人也有一列點得到
+test('手機積信：舊信超過 3 封合併提示，新信照常，電腦版不受影響', async () => {
+  const old = new Date(Date.now() - 3_600_000).toISOString()
+  const msgs = Array.from({ length: 5 }, (_, i) => ({ id: `00000000-0000-4000-8000-${String(700 + i).padStart(12, '0')}`, from_node: 'W', from_agent: 'W-政策', to_agent: NAME, body: `舊-${i}`, trust: 'member', created_at: old }))
+  const run = async backlogAfterMs => {
+    const transport = { list: async () => ({ members: roster() }), inbox: async () => ({ messages: msgs }), ack: async () => ({}) }
+    const core = new AsnCore({ transport, store: memStore(), selfNode: 'T', windowName: NAME, isChatVisible: async () => false, pollMs: 60_000, rosterMs: 60_000, backlogAfterMs })
+    const notes = []
+    core.on('notify', n => notes.push(n))
+    await core.pull('test')
+    return { notes, unread: core.snapshot().friends.find(x => x.id === 'W/W-政策').unread }
+  }
+  const phone = await run(300_000)
+  assert.equal(phone.notes.length, 1)
+  assert.equal(phone.unread, 5)
+  const desktop = await run(0)
+  assert.equal(desktop.notes.length, 5)
+  assert.equal(desktop.unread, 5)
+})
+
+test('卡框通知這類系統寄件人：手機也有一列點得到、算未讀', async () => {
+  const msg = { id: '00000000-0000-4000-8000-000000000799', from_node: 'H', from_agent: '等待確認收發室', to_agent: NAME, body: '這台（30家用）的夥伴「小乙」在等你回答，已經等超過 2 分鐘。', trust: 'member', created_at: new Date().toISOString() }
+  const transport = { list: async () => ({ members: roster() }), inbox: async () => ({ messages: [msg] }), ack: async () => ({}) }
+  const core = new AsnCore({ transport, store: memStore(), selfNode: 'T', windowName: NAME, isChatVisible: async () => false, pollMs: 60_000, rosterMs: 60_000, backlogAfterMs: 300_000 })
+  await core.pull('test')
+  const f = core.snapshot().friends.find(x => x.id === 'H/等待確認收發室')
+  assert.ok(f, '要有一列')
+  assert.equal(f.unread, 1)
+  assert.match(core.logOf(f.id)[0].text, /小乙/)
+})

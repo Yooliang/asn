@@ -208,7 +208,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab], () => { const {
   core = new AsnCore({
     transport, store: store('chats'), selfNode: info.node, windowName: info.window_name,
     isChatVisible: async id => document.visibilityState === 'visible' && nav.tab === 'chats' && lastChat.value === id,   // 正在看對話分頁那位才算「看得到」（不算未讀）
-    aliases: info.old_names, pollMs: info.poll_ms, rosterMs: info.roster_ms,
+    aliases: info.old_names, pollMs: info.poll_ms, rosterMs: info.roster_ms, backlogAfterMs: 5 * 60_000,
     log: m => console.info('[ASN]', m),
   })
   const sync = () => { const s = core.snapshot(); friends.value = s.friends; conn.value = s.conn; nodeOrder.value = s.nodeOrder; for (const f of s.friends) refreshLast(f.id) }

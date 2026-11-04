@@ -62,13 +62,13 @@ export const savedFriendOf = f => ({
 export const restoredFriendOf = ({ model, device, kind, ...rest }) => ({ ...rest, ...optStr('model', model), ...optStr('device', device), ...optStr('kind', kind) })
 
 export class AsnCore {
-  constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, localMs = 2_000, soonGapMs = 1_000, statusPollMs = STATUS_POLL_MS, aliases = [], stepMs = STEP_MS }) {
+  constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, localMs = 2_000, soonGapMs = 1_000, statusPollMs = STATUS_POLL_MS, aliases = [], backlogAfterMs = 0, stepMs = STEP_MS }) {
     // 讀取類的呼叫一律加逾時（寄信、寄檔另有自己的流程，不在這裡限時）。收信（inbox、ack）可能一次要走好幾個名字，給兩倍時間
     const guarded = { ...transport }
     for (const k of ['list', 'inbox', 'ack', 'sentStatus', 'avatar', 'partnerAvatar', 'history', 'readSync']) {
       if (typeof transport[k] === 'function') guarded[k] = (...a) => withTimeout(transport[k](...a), k === 'inbox' || k === 'ack' ? stepMs * 2 : stepMs, k)
     }
-    Object.assign(this, { aliases: new Set(aliases), transport: guarded, store, selfNode, windowName, isChatVisible, now, log, pollMs, rosterMs, localMs, statusPollMs, stepMs })
+    Object.assign(this, { backlogAfterMs, aliases: new Set(aliases), transport: guarded, store, selfNode, windowName, isChatVisible, now, log, pollMs, rosterMs, localMs, statusPollMs, stepMs })
     this.localSeen = new Set()   // 本機現讀曾經看到過的視窗名（之後不見＝剛關掉，見 overlayLocal）
     this.cwdOf = new Map()   // 好友 id → 資料夾標籤（後台名單給的），本機現讀狀態時用來重組個人訊息
     // 門鈴響、回到前景時立刻重拉名單；1 秒內多次合併成一次
@@ -269,7 +269,9 @@ export class AsnCore {
         let itemErr = null
         const forMe = m => m.to_agent === this.windowName || this.aliases.has(m.to_agent)
         // 代收的舊信很多時照常進對話、算未讀，但不逐封跳提示與音效，最後合成一則
-        const quiet = messages.filter(m => m?.spooled === true && forMe(m) && !this.seen.has(m.id)).length > SPOOL_QUIET_OVER
+        // 手機沒開 App 時留下的舊信（backlogAfterMs，只有手機版設）一樣合併
+        const backlog = m => m?.spooled === true || (this.backlogAfterMs > 0 && this.now() - (Date.parse(m?.created_at) || this.now()) > this.backlogAfterMs)
+        const quiet = messages.filter(m => backlog(m) && forMe(m) && !this.seen.has(m.id)).length > SPOOL_QUIET_OVER
         let quietN = 0, quietLast = null
         for (const m of messages) {
           if (!forMe(m)) continue   // 不是寄給本視窗（或還沒過期的舊名）的絕不處理、不 ack
@@ -277,7 +279,7 @@ export class AsnCore {
             if (!this.seen.has(m.id)) {
               this.seen.add(m.id)
               if (!this.#noReplyNotice(m)) {
-                const q = quiet && m.spooled === true
+                const q = quiet && backlog(m)
                 const f = await this.#incoming(m, { quiet: q })
                 if (q && f) { quietN++; quietLast = f }
               }
