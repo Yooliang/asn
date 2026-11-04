@@ -1145,6 +1145,13 @@ async fn 轉交失敗通知分清楚兩種_沒轉交_對方收到了但回覆被
     h.core.on_fail(&uid(1), "Your previous response was blocked by content safety filters").await;
     let notes = notice_bodies(&h);
     assert!(notes.iter().any(|b| b.contains("收到信了，但它的回覆被內容過濾擋下") && !b.contains("失敗") && !b.contains("處理了")), "只能確定收到，不說處理了：{notes:?}");
+    // 原因文字同時像 402 又是內容過濾：內容過濾先判（私信與群組一致），不寫成額度用完
+    let mut z = harness(&[("T-乙", "idle")]).await;
+    z.fr.put(mail(3, json!({})));
+    z.core.pull("test", T0).await;
+    z.core.on_fail(&uid(3), "HTTP 402 … Your previous response was blocked by content safety filters").await;
+    let zn = notice_bodies(&z);
+    assert!(zn.iter().any(|b| b.contains("收到信了，但它的回覆被內容過濾擋下") && !b.contains("額度用完")), "{zn:?}");
     let mut g = harness(&[("T-乙", "idle")]).await;
     g.fr.put(mail(2, json!({})));
     g.core.pull("test", T0).await;

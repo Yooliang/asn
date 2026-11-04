@@ -1486,9 +1486,8 @@ impl Core {
         } else {
             let why = if reason.is_empty() { "原因不明" } else { reason };
             // 失敗通知用「對方視窗」的名義寄回、掛在原信底下：寄件人在跟那個視窗的對話框裡直接看到，不是另一個「收發室」視窗
-            let short = Self::short_fail_reason(why);
             let as_target = if target.trim().is_empty() { None } else { Some(target.as_str()) };
-            self.send_back(&o, &Self::fail_notice_text(&target, &short), as_target, None).await;
+            self.send_back(&o, &Self::fail_notice_text(&target, why), as_target, None).await;
         }
         self.ack_ids(&[id.to_string()]).await;
         self.remove(id);

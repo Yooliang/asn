@@ -53,6 +53,11 @@ impl Core {
         if self.quota_until == 0 {
             return;
         }
+        // 登入失效的扣住：worker 真的在工作了（不是「沒東西等」或試送沒回應），告訴登入失效偵測它好了，失效狀態才會解除（不然一時失敗會一直標失效、每 6 小時再提醒）
+        #[cfg(feature = "gui")]
+        if self.hold_auth && matches!(why, "worker reported sent" | "worker reported fail" | "worker reported misrouted" | "worker replied") {
+            crate::login_watch::record_worker_recovered(self.now as i64);
+        }
         self.quota_until = 0;
         self.probe_id = None;
         self.probe_misses = 0;
@@ -83,7 +88,7 @@ impl Core {
 
     /// 收發室 worker 自己的 Claude 登入失效（todo-next-197）：照額度用完的做法扣住——這輪交辦的信放回去、不 ack、不再一封一封試，
     /// 寄件人同一段失效期間只通知一次；恢復靠每小時試送最舊的一封，或偵測到重新登入就提早試送，worker 能工作就依序重送。
-    /// 同時記進登入失效偵測，讓本人收到通知（照原規則）。自動回信模式沒有「轉交中」可扣，照原本的逾時流程
+    /// 同時記進登入失效偵測，讓本人收到通知（worker 明確回報的登入失效一筆就算，見 login_watch 的 WorkerAuth；試送成功就告訴偵測它好了）。自動回信模式沒有「轉交中」可扣，照原本的逾時流程
     pub(super) async fn on_worker_auth_failed(&mut self) {
         #[cfg(feature = "gui")]
         crate::login_watch::record_worker_login_error(self.now as i64);
