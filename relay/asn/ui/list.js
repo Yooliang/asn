@@ -72,6 +72,7 @@ import { createCallBeats } from './lib/call-beats.mjs'
 import { startCallPoll } from './lib/call-poll.mjs'
 import { isCallActive } from './lib/call-session.mjs'
 import { accountLine, codexLine, createAccountsUi } from './lib/claude-accounts.mjs'
+import { createQuotaReaders, quotaReadersView } from './lib/quota-readers.mjs'
 import { createAgentInstall, installView } from './lib/agent-install.mjs'
 import { buildDeviceTree } from './lib/device-tree.mjs'
 import { splitMachines } from './lib/remote-machines.mjs'
@@ -1679,6 +1680,8 @@ const app = createApp({
     }))
     // 設定「設備與帳號」最上面的「我的帳號」：後台讀不到時是 null，不顯示這一區
     const myAccounts = computed(() => rosterView(accounts.state.roster, { nodeLabel: rosterNodeLabel.value }))
+    const quotaReaders = createQuotaReaders({ invoke, onShareChanged: () => { void accounts.refreshRoster() }, reactive })
+    void quotaReaders.load()
     const deviceAcctTitleText = computed(() => deviceAcctTitle(deviceAcct.label))
     const deviceAcctSubmit = () => { const v = deviceAcctView.value; if (v.canSwitch) void accounts.remoteSwitch(v.switchEmail) }
     const installFromSettings = async () => {
@@ -1696,7 +1699,7 @@ const app = createApp({
       notify: notifyPrefs.value, frame: frame.value, mode: ui.mode, dpMode: ui.dpMode, toolbar: ui.toolbar, bubble: ui.bubble,
       tabDim: dims.tabDim, groupDim: dims.groupDim,
       voice: { cfg: { tts_voice: voiceCfg.tts_voice, tts_auto: voiceCfg.tts_auto, stt_lang: voiceCfg.stt_lang, stt_model: voiceCfg.stt_model }, enabled: ttsVoices.value.enabled, voices: ttsVoices.value.voices, sttReady: Boolean(sttSt.value?.ready), installBusy: voice.state.install.busy, note: voice.state.install.text || voiceMsg.value || sttText.value },
-      devices: deviceTree.value, myAccounts: myAccounts.value,
+      devices: deviceTree.value, myAccounts: myAccounts.value, quotaReaders: quotaReadersView(quotaReaders.state),
       install: installView(agentInstall.state),
       accounts: {
         list: accounts.state.list, current: accounts.state.current, codexLine: codexLine(accounts.state.codex, accounts.state.codexErr),
@@ -1733,6 +1736,13 @@ const app = createApp({
         case 'acct-switch': await accounts.switchTo(value); break
         case 'acct-remove': await accounts.remove(value); break
         case 'acct-allow-switch': await accounts.setAllowSwitch(value === true); break
+        case 'quota-source': await quotaReaders.setSource(value?.source, value?.on); break
+        case 'quota-mm-add': await quotaReaders.addMinimax(value); break
+        case 'quota-mm-remove': await quotaReaders.removeMinimax(value); break
+        case 'quota-share': await quotaReaders.share(value); break
+        case 'quota-unshare': await quotaReaders.unshare(value); break
+        case 'quota-copy': await quotaReaders.copyCode(); break
+        case 'quota-close': quotaReaders.closeCode(); break
         case 'install-ask': await agentInstall.ask(); break
         case 'install-yes': await agentInstall.confirm(); break
         case 'install-no': agentInstall.decline(); break
