@@ -49,6 +49,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const ITEM_RETRY_MAX = 3   // 同一封信處理失敗幾次後就先 ack 掉，不讓一封壞信擋住後面所有信
 // 一次收到超過這麼多封「Rust 代收的信」（畫面沒開時存下來的，m.spooled）就不逐封跳提示、只跳一則摘要（#339：曾一次湧進 437 封）
 export const SPOOL_QUIET_OVER = 3
+// 手機積信時等已讀位置最多這麼久：等不到就照常收信，不能讓它卡住收信
+export const BACKLOG_READ_WAIT_MS = 5_000
 
 // 舊好友存檔的一筆：畫面離線時還要用的欄位。model（模型）決定 pi 夥伴的廠商小圖示、device（設備名）與 kind（設備種類，手機與否）決定設備分組的名字與圖示；
 // 這三欄名單沒給就不寫（舊存檔本來就沒有，讀回時照舊退回 pi 圖示／未命名設備）。欄位名與名單（buildFriends）一致，讀回直接沿用
@@ -273,7 +275,7 @@ export class AsnCore {
         const backlog = m => m?.spooled === true || (this.backlogAfterMs > 0 && this.now() - (Date.parse(m?.created_at) || this.now()) > this.backlogAfterMs)
         const fresh = messages.filter(m => backlog(m) && forMe(m) && !this.seen.has(m.id))
         // 手機積信：先取回別台設備的已讀位置，電腦看過的信才不會又算未讀、又跳提示
-        if (this.backlogAfterMs > 0 && fresh.length) await this.syncReads()
+        if (this.backlogAfterMs > 0 && fresh.length) await withTimeout(this.syncReads(), Math.min(this.stepMs, BACKLOG_READ_WAIT_MS), 'readSync').catch(e => this.log(`read_sync skipped: ${e.message}`))
         const quiet = fresh.length > SPOOL_QUIET_OVER
         let quietN = 0, quietLast = null
         for (const m of messages) {

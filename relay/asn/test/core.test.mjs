@@ -2,7 +2,7 @@
 import { nudgeBody } from '../ui/lib/text.mjs'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { AsnCore } from '../ui/lib/core.mjs'
+import { AsnCore, BACKLOG_READ_WAIT_MS } from '../ui/lib/core.mjs'
 import { startFakeRelay, U } from './fake-relay.mjs'
 import { modelVendorKey, vendorBadgeHtml, vendorIconSvg } from '../ui/lib/vendor-icons.mjs'
 import { groupByDevice } from '../ui/lib/roster.mjs'
@@ -417,6 +417,19 @@ test('手機積信：別台已讀的信不算未讀也不提示；之後的新�
   const two = await run([0, 1].map(mk), at(0))
   assert.equal(two.unread, 1)
   assert.deepEqual(two.notes.map(n => n.line), ['信-1'])
+})
+
+test('手機積信：已讀位置一直沒回應，收信最多等一小段，信照常進對話、ack', async () => {
+  assert.equal(BACKLOG_READ_WAIT_MS, 5_000)
+  const msg = { id: '00000000-0000-4000-8000-000000000691', from_node: 'W', from_agent: 'W-政策', to_agent: NAME, body: '信', trust: 'member', created_at: new Date(Date.now() - 3_600_000).toISOString() }
+  const acks = []
+  const transport = { list: async () => ({ members: roster() }), inbox: async () => ({ messages: [msg] }), ack: async ids => { acks.push(...ids); return {} }, readSync: () => new Promise(() => {}) }
+  const core = new AsnCore({ transport, store: memStore(), selfNode: 'T', windowName: NAME, isChatVisible: async () => false, pollMs: 60_000, rosterMs: 60_000, backlogAfterMs: 300_000, stepMs: 200 })
+  const t0 = Date.now()
+  await core.pull('test')
+  assert.ok(Date.now() - t0 < 3_000, '不能卡住')
+  assert.deepEqual(acks, [msg.id])
+  assert.equal(core.snapshot().friends.find(x => x.id === 'W/W-政策').unread, 1)
 })
 
 test('手機積信：已讀位置取不回來也不擋收信', async () => {
