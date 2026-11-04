@@ -368,6 +368,16 @@ Deno.serve(async (req) => {
     for (const t of new Set<string>((Array.isArray(data?.bell_topics) ? data.bell_topics : []).filter((t: unknown): t is string => typeof t === "string" && t.length > 0))) await ring(t);
     return json(200, { ok: true, notify: data?.notify ?? "skipped" });
   }
+  // 夥伴卡在要本人到電腦前確認的畫面：後台寄固定內文給這個節點的擁有者。不讀請求內容，節點一律是金鑰所屬的 me.id
+  if (action === "waiting_notice" && req.method === "POST") {
+    const { data, error } = await db.rpc("asn_relay_waiting_notice", { p_node: me.id });
+    if (error) { console.error(error); return json(500, { error: "internal" }); }
+    if (data?.error === "forbidden") return json(403, { error: "forbidden" });
+    if (data?.error) return json(400, { error: data.error });
+    if (data?.notify === "failed" || data?.notify === "rate_limited") console.warn("waiting_notice notify", me.id, data.notify);
+    for (const t of new Set<string>((Array.isArray(data?.bell_topics) ? data.bell_topics : []).filter((t: unknown): t is string => typeof t === "string"))) await ring(t);
+    return json(200, { ok: true, notify: data?.notify ?? "skipped" });
+  }
   // ASN 回報在線狀態與版本（每 60 秒一次；關閉時 status=offline＝刪掉那一列）。節點一律是金鑰所屬的 me.id
   if (action === "asn_presence" && req.method === "POST") {
     const p = parseAsnPresence(await req.json().catch(() => null));

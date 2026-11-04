@@ -111,6 +111,9 @@ pub fn apply_mod_status(windows: &mut [Window], dir: &Path, now_ms: u64) {
     apply_screen_codes(windows, &dir.with_file_name(SCREEN_DIR), now_ms);
 }
 
+/// 背景工作留給收發室的記號：有夥伴停在要本人到電腦前確認的畫面（見 Core::tick）
+pub const WAITING_NOTICE_FILE: &str = "waiting-notice";
+
 /// 讀畫面判斷的結果放在 status 資料夾旁邊（`launch::term` 的背景工作寫，預設關）
 pub const SCREEN_DIR: &str = "screen";
 const SCREEN_MAX_AGE_MS: u64 = 120_000;

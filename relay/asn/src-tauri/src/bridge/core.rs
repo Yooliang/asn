@@ -960,6 +960,18 @@ impl Core {
         r
     }
 
+    /// 讀畫面的背景工作留了記號：請後台通知本人。不帶任何內容，內文與收件人由後台決定；失敗只記 log，不重試（下一次等待才再通知）
+    async fn send_waiting_notice(&mut self) {
+        let mark = self.cfg.status_dir.with_file_name(roster::SCREEN_DIR).join(roster::WAITING_NOTICE_FILE);
+        if std::fs::remove_file(&mark).is_err() {
+            return;
+        }
+        match self.relay.api("waiting_notice", Some(json!({}))).await {
+            Ok(_) => self.log.line("waiting notice requested"),
+            Err(e) => self.log.line(&format!("waiting notice failed: {e}")),
+        }
+    }
+
     /// 收發室 worker 這一輪還沒結束：新的信與群組訊息先留著（不處理、不 ack、游標不前進）。回 true＝要先留著
     fn fwd_busy(&mut self, what: &str) -> bool {
         let Some(since) = self.fwd_turn_open.filter(|_| self.cfg.one_per_turn) else { return false };
@@ -1890,6 +1902,7 @@ impl Core {
             e.poll();
         }
         self.prune_inflight();
+        self.send_waiting_notice().await;
         self.release_held(now).await;
         self.quota_tick(now).await;
         self.flush_owner_receipts(now).await;

@@ -23,6 +23,7 @@ struct FState {
     inbox: Vec<Value>,
     acked: Vec<String>,
     ack_calls: usize,
+    waiting_notices: Vec<Value>,
     sent: Vec<Value>,
     rosters: Vec<Value>,
     fail_inbox: usize,
@@ -178,6 +179,10 @@ fn handle_conn(mut c: std::net::TcpStream, st: Arc<Mutex<FState>>) {
             s.sent.push(body);
             (200, json!({"id": uid(900 + s.sent.len() as u32)}))
         }
+        "waiting_notice" => {
+            s.waiting_notices.push(body);
+            (200, json!({"ok": true, "notify": "sent"}))
+        }
         "misroute_notice" => {
             s.misroute_notices.push(body);
             if s.misroute_status != 0 {
@@ -225,6 +230,9 @@ impl FakeRelay {
     }
     fn put(&self, m: Value) {
         self.st.lock().unwrap().inbox.push(m);
+    }
+    fn waiting_notices(&self) -> Vec<Value> {
+        self.st.lock().unwrap().waiting_notices.clone()
     }
     fn acked(&self) -> Vec<String> {
         self.st.lock().unwrap().acked.clone()
@@ -899,6 +907,20 @@ async fn 轉交的信頭_本人信用人代號位址_不含_xisu_要回信行格
 /// worker 這一輪送進去的轉交文字裡，依序出現的信件編號
 fn said_ids(h: &H) -> Vec<String> {
     h.said().iter().filter_map(|t| (1..=9).map(uid).find(|id| t.contains(id.as_str()))).collect()
+}
+
+#[tokio::test]
+async fn 等本人確認的記號_收發室通知後台一次_不帶內容_沒有記號不通知() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.core.tick(T0).await;
+    assert!(h.fr.waiting_notices().is_empty());
+    let dir = h.core.cfg.status_dir.with_file_name(super::roster::SCREEN_DIR);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(super::roster::WAITING_NOTICE_FILE), "").unwrap();
+    h.core.tick(T0 + 1_000).await;
+    h.core.tick(T0 + 2_000).await;
+    assert_eq!(h.fr.waiting_notices(), vec![json!({})], "記號用掉就沒了，也不帶內容");
+    assert!(!dir.join(super::roster::WAITING_NOTICE_FILE).exists());
 }
 
 #[tokio::test]

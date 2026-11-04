@@ -60,6 +60,31 @@ pub fn pace_of(mod_state: Option<&str>) -> Pace {
     }
 }
 
+/// 停在略過權限警告多久才通知本人的手機：人可能正要按
+pub const WAITING_NOTICE_AFTER_MS: u64 = 60_000;
+
+/// 哪幾扇視窗持續停在略過權限警告夠久、該通知本人。同一次等待只通知一次；提示消失後再出現才會再通知
+#[derive(Default)]
+pub struct WaitingNotice {
+    since: HashMap<String, (u64, bool)>,
+}
+
+impl WaitingNotice {
+    /// `waiting`＝這一輪讀到停在警告的視窗；`checked`＝這一輪有讀到的視窗（沒讀到的維持原狀）。回 true＝該通知了
+    pub fn update(&mut self, now: u64, waiting: &[&str], checked: &[&str], current: &[&str]) -> bool {
+        self.since.retain(|id, _| current.contains(&id.as_str()) && (waiting.contains(&id.as_str()) || !checked.contains(&id.as_str())));
+        let mut fire = false;
+        for id in waiting {
+            let e = self.since.entry(id.to_string()).or_insert((now, false));
+            if !e.1 && now.saturating_sub(e.0) >= WAITING_NOTICE_AFTER_MS {
+                e.1 = true;
+                fire = true;
+            }
+        }
+        fire
+    }
+}
+
 /// 夥伴視窗 → 它現在的 session。對照表的編號只有接續對話時才有，所以用視窗名去對 session 檔。
 /// `partners`＝（編號, 視窗名），`sessions`＝活著的（視窗名, session）。同名不猜；還沒有 session 檔的（例如停在信任提示）不列
 pub fn match_sessions(partners: &[(String, String)], sessions: &[(String, String)]) -> Vec<(String, String)> {
@@ -268,6 +293,23 @@ mod tests {
         s.early("w0", NOW, &["w0"]);
         s.early("w1", NOW, &["w1"]);
         assert!(!s.first_seen.contains_key("w0"), "關掉的視窗就忘記");
+    }
+
+    #[test]
+    fn 略過權限警告_停滿一分鐘才通知_同一次只通知一次_消失後再出現才再通知() {
+        let mut n = WaitingNotice::default();
+        let (a, all) = (["甲"], ["甲"]);
+        assert!(!n.update(NOW, &a, &a, &all));
+        assert!(!n.update(NOW + WAITING_NOTICE_AFTER_MS - 1, &a, &a, &all));
+        assert!(n.update(NOW + WAITING_NOTICE_AFTER_MS, &a, &a, &all));
+        assert!(!n.update(NOW + 10 * WAITING_NOTICE_AFTER_MS, &a, &a, &all), "只一次");
+        assert!(!n.update(NOW + 11 * WAITING_NOTICE_AFTER_MS, &[], &[], &all), "這輪沒讀到：維持");
+        assert!(!n.update(NOW + 12 * WAITING_NOTICE_AFTER_MS, &a, &a, &all), "還是同一次");
+        assert!(!n.update(NOW + 13 * WAITING_NOTICE_AFTER_MS, &[], &a, &all), "按掉了");
+        assert!(!n.update(NOW + 14 * WAITING_NOTICE_AFTER_MS, &a, &a, &all), "再出現重新起算");
+        assert!(n.update(NOW + 15 * WAITING_NOTICE_AFTER_MS, &a, &a, &all));
+        assert!(!n.update(NOW + 16 * WAITING_NOTICE_AFTER_MS, &[], &[], &[]));
+        assert!(n.since.is_empty(), "視窗關了就忘記");
     }
 
     #[test]

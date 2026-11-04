@@ -2460,6 +2460,7 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, data_dir: &Path) {
         let mut schedule = Schedule::default();
         // 編號 → 目前的提醒
         let mut notices: std::collections::BTreeMap<String, PartnerNotice> = Default::default();
+        let mut waiting = super::screen_watch::WaitingNotice::default();
         loop {
             std::thread::sleep(std::time::Duration::from_millis(TICK_MS));
             let now = crate::heartbeat::now_ms();
@@ -2479,7 +2480,9 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, data_dir: &Path) {
                 }
             }
             notices.retain(|id, _| windows.iter().any(|(w, _)| w == id));
+            let mut checked: Vec<String> = Vec::new();
             for id in schedule.due(now, &windows, free_memory_bytes()) {
+                checked.push(id.clone());
                 let Some(pace) = windows.iter().find(|(w, _)| *w == id).map(|(_, p)| *p) else { continue };
                 let result = terms.partner_screen_code(&id);
                 let code = result.as_ref().ok().copied().flatten();
@@ -2495,6 +2498,13 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, data_dir: &Path) {
                     }
                 }
                 schedule.done(&id, pace, result.is_ok(), now);
+            }
+            let bypass: Vec<&str> = notices.iter().filter(|(id, n)| n.code == "bypass_warning" && checked.contains(id)).map(|(id, _)| id.as_str()).collect();
+            let checked_ids: Vec<&str> = checked.iter().map(String::as_str).collect();
+            if waiting.update(now, &bypass, &checked_ids, &ids) {
+                // 只留一個記號，由收發室通知後台；內文、收件人都由後台決定，這裡沒有任何內容可帶
+                let _ = std::fs::create_dir_all(&screen_dir);
+                let _ = std::fs::write(screen_dir.join(crate::bridge::roster::WAITING_NOTICE_FILE), "");
             }
             if let Ok(mut g) = PARTNER_NOTICES.lock() {
                 *g = notices.values().cloned().collect();
