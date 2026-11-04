@@ -1006,6 +1006,7 @@ async fn 重開後夥伴視窗還沒接回來_信留著不退回不_ack_接回�
     assert_eq!(ids.first().cloned(), Some(uid(1)), "依原順序，先送第一封（一次只交一封，第二封等這一輪結束）");
     let first = h.said().into_iter().next().unwrap();
     let want = super::mail::await_late_line(T0 + 1_000);
+    assert!(!first.contains("2026-"), "沒有後台時間：用收發室先留著的時間");
     assert!(first.lines().any(|l| l == want), "送出時註明原本收到的時間（寄件人那行之後）：{first}");
     assert!(first.lines().position(|l| l == want).unwrap() > first.lines().position(|l| l.starts_with("寄件人：")).unwrap());
 }
@@ -1064,6 +1065,26 @@ async fn 消失超過_5_分鐘收發室還活著_才當成本人關掉_存檔拿
     g.fr.put(mail(1, json!({"to_agent": "T-丙"})));
     g.core.pull("test", T0 + 11 * 60_000 + 1_000).await;
     assert!(notice_bodies(&g).iter().any(|b| b.contains("找不到名叫「T-丙」")), "不見滿 5 分鐘＝本人關掉，存檔拿掉，信照原本退回");
+}
+
+#[tokio::test]
+async fn 先留著的信送出時_原本幾點收到優先用後台記的寄出時間() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    restart_with_known(&mut h, &["T-乙", "T-丙"], T0).await;
+    // 後台記的寄出時間比收發室留住它早很多（半夜寄來、早上才接回）
+    let sent_ms = T0 - 6 * 3_600_000;
+    let secs = (sent_ms / 1000) as i64;
+    let (y, mo, d) = crate::usage::civil_from_days(secs.div_euclid(86400));
+    let rem = secs.rem_euclid(86400);
+    let iso = format!("{y:04}-{mo:02}-{d:02}T{:02}:{:02}:{:02}.000+00:00", rem / 3600, rem % 3600 / 60, rem % 60);
+    h.fr.put(mail(1, json!({"to_agent": "T-丙", "created_at": iso})));
+    h.core.pull("test", T0 + 1_000).await;
+    put_session(h.sessions.path(), 5009, "T-丙", "idle", 50);
+    h.core.refresh_roster(T0 + 600_000).await;
+    h.core.pull("test", T0 + 601_000).await;
+    let first = h.said().into_iter().next().unwrap();
+    assert!(first.lines().any(|l| l == super::mail::await_late_line(sent_ms)), "用後台的寄出時間：{first}");
+    assert!(!first.lines().any(|l| l == super::mail::await_late_line(T0 + 1_000)), "不是收發室留住的時間：{first}");
 }
 
 #[tokio::test]

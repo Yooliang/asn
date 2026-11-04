@@ -1237,7 +1237,8 @@ impl Core {
             return Some(target);
         }
         let late = self.late_from.take().or_else(|| self.held_first.get(&m.id).copied());
-        let await_at = self.await_first.remove(&m.id);
+        // 註明的時間：後台記的寄出時間優先（半夜寄來、早上才接回，不能寫成早上）；沒有才用收發室先留著的時間
+        let await_at = self.await_first.remove(&m.id).map(|t| m.sent_ms.unwrap_or(t));
         let origin = Origin::of(&p);
         self.pending.push(p);
         self.refund_owner_mail(&m, &target);
