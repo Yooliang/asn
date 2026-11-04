@@ -103,7 +103,8 @@ impl Core {
     /// 扣住：額度用完（auth＝false）或收發室登入失效（auth＝true），除了通知寄件人的字、延遲說明的字，做法完全一樣
     async fn on_hold(&mut self, resets_at: Option<u64>, kind: &str, auth: bool) {
         let now = self.now;
-        if self.quota_until == 0 {
+        let was_holding = self.quota_until > 0;
+        if !was_holding {
             self.hold_since = now;
         }
         self.hold_auth = auth;
@@ -111,7 +112,9 @@ impl Core {
         // 暫停時間只會延長：扣住期間試送又撞額度（時間不明）不能把已知的重置時間縮短，也不能先清掉
         self.quota_until = self.quota_until.max(until);
         let until = self.quota_until;
-        self.next_probe_at = (now + QUOTA_RETRY_MS).min(until);
+        // 登入失效的第一次試送提早（約 5 分鐘）：馬上知道是不是暫時的，也讓登入失效偵測湊得到第二筆；之後才每小時一次
+        let first_probe = if auth && !was_holding { AUTH_FIRST_PROBE_MS } else { QUOTA_RETRY_MS };
+        self.next_probe_at = (now + first_probe).min(until);
         self.probe_id = None;
         self.log.line(&format!("worker quota exhausted ({kind}): hold until {} (resets_at={resets_at:?}), next probe {}", taipei_hm(until), taipei_hm(self.next_probe_at)));
         self.quota_ep.get_or_insert_with(Default::default).auth = auth;
@@ -256,7 +259,8 @@ impl Core {
             if window.is_empty() {
                 window = self.unaddressed_window().unwrap_or_default();
             }
-            let text = format!("（收發室）額度用完期間群組 {} 有 {n} 則沒有轉交，範圍 #{lo}～#{hi}，要看請讀群組", rooms::clean_label(&name));
+            let why = if self.hold_auth { "收發室登入失效" } else { "額度用完" };
+            let text = format!("（收發室）{why}期間群組 {} 有 {n} 則沒有轉交，範圍 #{lo}～#{hi}，要看請讀群組", rooms::clean_label(&name));
             if window.is_empty() || !self.forwardable(&window) {
                 self.log.line(&format!("quota room summary room={room_id} not delivered (no window): {n} messages #{lo}-#{hi}"));
                 continue;

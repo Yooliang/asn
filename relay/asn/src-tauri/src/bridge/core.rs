@@ -223,6 +223,8 @@ const QUOTA_ROOM_MAX: usize = 200;
 const QUOTA_MARGIN_MS: u64 = 60_000;
 /// 讀不到重置時間（或值不可信）時，多久後再試；扣住期間的試送也是每隔這麼久一次（毫秒）
 const QUOTA_RETRY_MS: u64 = 3_600_000;
+/// 收發室登入失效時第一次試送提早到這麼久之後（之後才每小時一次）：能很快發現已經好了，也讓登入失效偵測看得到第二筆
+const AUTH_FIRST_PROBE_MS: u64 = 300_000;
 
 /// 額度用完而扣住的個人信（內文只在記憶體；重啟後靠重新拉到的同一封補回）
 struct HeldItem {
@@ -520,8 +522,14 @@ impl Core {
         // 存下來的額度重置時間再驗一次範圍：已過去或超過 8 天就當作沒有
         if st.quota_until > self.now && st.quota_until <= self.now + 8 * 86_400_000 {
             self.quota_until = st.quota_until;
-            self.quota_ep = Some(Default::default());
-            self.next_probe_at = (self.now + QUOTA_RETRY_MS).min(st.quota_until);
+            self.quota_ep = Some(QuotaEpisode { auth: st.quota_auth, ..Default::default() });
+            if st.quota_auth {
+                self.hold_auth = true;
+                self.hold_since = self.now;
+                self.held_auth = st.held_auth.iter().cloned().collect();
+            }
+            let first = if st.quota_auth { AUTH_FIRST_PROBE_MS } else { QUOTA_RETRY_MS };
+            self.next_probe_at = (self.now + first).min(st.quota_until);
             self.log.line(&format!("quota hold restored: until {}", super::mail::taipei_hm(st.quota_until)));
         }
     }
@@ -529,6 +537,11 @@ impl Core {
         let mut snap = pending::snapshot(&self.pending, &self.last_requester);
         if self.quota_until > 0 {
             snap["quotaUntil"] = json!(self.quota_until); // 額度重置時間：重啟後還沒到就繼續扣住，不白撞一次額度
+            if self.hold_auth {
+                snap["quotaAuth"] = json!(true); // 扣住的原因是登入失效：重開後通知與延遲抬頭才不會寫成額度用完
+                let ids: Vec<&String> = self.pending.iter().filter(|p| p.state == State::Held && self.held_auth.contains(&p.id)).map(|p| &p.id).collect();
+                snap["heldAuth"] = json!(ids);
+            }
         }
         let text = snap.to_string();
         if text == self.last_saved {
