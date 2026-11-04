@@ -237,6 +237,7 @@ export const SettingsPanel = {
               <template v-if="st.quotaReaders.extra">
                 <small class="acct-warn" v-for="d in st.quotaReaders.extraDirs.filter(x => x.status)" :key="d.name">{{ d.name }}：{{ d.status }}</small>
                 <small>{{ st.quotaReaders.extraRefresh ? QUOTA_TEXT.refreshActive : QUOTA_TEXT.refreshNote }}</small>
+                <small class="acct-warn">{{ QUOTA_TEXT.refreshRisk }}</small>
                 <small class="acct-warn">{{ QUOTA_TEXT.refreshWarn }}</small>
                 <small v-if="st.quotaReaders.extraRefresh">{{ QUOTA_TEXT.refreshStopped }}</small>
                 <span class="dv-ibtns">

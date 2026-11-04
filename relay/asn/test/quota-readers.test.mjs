@@ -215,3 +215,13 @@ test('自動換新的文字寫明只能有一個程式在換，以及失敗不�
 test('設定頁：沒有額外帳號的人看不到這一區', () => {
   assert.match(SettingsPanel.template, /v-if="st\.quotaReaders\.extraDirs\.length"/)
 })
+
+test('自動換新的開關旁寫明風險：開之前與開著都看得到', () => {
+  assert.equal(QUOTA_TEXT.refreshRisk, '這項使用非公開的登入方式，可能隨時失效，也可能不符合服務條款；失效時會顯示要重新登入。')
+  const t = SettingsPanel.template
+  const risk = t.indexOf('QUOTA_TEXT.refreshRisk')
+  const button = t.indexOf("act('quota-refresh'")
+  assert.ok(risk > 0 && risk < button, '在按鈕之前')
+  const line = t.slice(t.lastIndexOf('<small', risk), risk)
+  assert.doesNotMatch(line, /v-if/, '不管開關狀態都顯示')
+})

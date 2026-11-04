@@ -20,6 +20,7 @@ export const QUOTA_TEXT = {
   refreshActive: '自動換新已打開。',
   refreshNote: '額外帳號的登入約 8 小時到期。打開後，快到期時會自動換新。',
   refreshWarn: '同一個帳號只能有一個程式在換新，否則會被登出。如果還有其他程式在換，請先停掉再打開。',
+  refreshRisk: '這項使用非公開的登入方式，可能隨時失效，也可能不符合服務條款；失效時會顯示要重新登入。',
   refreshStopped: '換新失敗就不會再試，請重新登入該帳號，或關閉後再打開。',
   minimax: 'MiniMax',
   minimaxNote: 'key 只存在這台電腦，存好後不會再顯示。最多 2 個帳號。',
