@@ -723,7 +723,7 @@ async fn term_read(terms: State<'_, Arc<launch::term::LiveTerms>>, req: launch::
     launch::blocking_timeout(move || terms.read(&req.id, req.lines)).await
 }
 
-/// 夥伴卡住的本機提醒：只有視窗名與固定代號（todo-next-162），只給本機畫面
+/// 重開自動接回的結果（#767）：已接回幾位、接不回來的名字與原因，不含對話內容，只給本機畫面
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
@@ -731,6 +731,7 @@ fn auto_resume_status(app: State<'_, App>) -> serde_json::Value {
     launch::auto_resume::read_status(&app.data_dir)
 }
 
+/// 夥伴卡住的本機提醒：只有視窗名與固定代號（todo-next-162），只給本機畫面
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]

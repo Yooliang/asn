@@ -716,8 +716,7 @@ impl Core {
     fn online_names(&self) -> HashSet<&str> {
         self.roster.iter().map(|w| w.name.as_str()).filter(|n| *n != self.cfg.mailbox_name).collect()
     }
-    /// 名單更新：記下看得到的視窗；這次收發室跑著的期間看過、現在不見的，先記下不見的時間（寄給它的信照原本的做法立刻退回），
-    /// 收發室繼續跑過 FORGET_AFTER_MS 它都沒回來，才當成本人關掉、從存檔拿掉。關機時視窗比收發室早結束，收發室活不到那時候，名字會留著
+    /// #767：查一個視窗程序是不是 ASN 開的、用了哪些權限旗標（正式版接真的程序表，測試與沒有桌面時為空）
     fn default_window_probe() -> Option<Arc<dyn Fn(u32) -> (bool, Vec<String>) + Send + Sync>> {
         #[cfg(all(feature = "gui", not(test)))]
         return Some(Arc::new(crate::launch::probe_window));
@@ -748,6 +747,8 @@ impl Core {
         }
     }
 
+    /// 名單更新：記下看得到的視窗；這次收發室跑著的期間看過、現在不見的，先記下不見的時間（寄給它的信照原本的做法立刻退回），
+    /// 收發室繼續跑過 FORGET_AFTER_MS 它都沒回來，才當成本人關掉、從存檔拿掉。關機時視窗比收發室早結束，收發室活不到那時候，名字會留著
     fn note_known_windows(&mut self, now: u64) {
         let names: Vec<(String, String)> = self.roster.iter().filter(|w| w.name != self.cfg.mailbox_name).map(|w| (w.name.clone(), w.engine.clone())).collect();
         let present: HashSet<&str> = names.iter().map(|(n, _)| n.as_str()).collect();
