@@ -1,7 +1,7 @@
 import type { Register } from 'claude-code'
 import { bashRepliedTo, buildSendArgv, guardBash, planAutoReply, resolveCli, sendRepliedTo, startNotice, trackFromText, type ReplyTrack, type StopLike } from './lib'
 import { ABANDONED_NOTE, createControl, POLL_MS } from './control'
-import { createStatus, questionDetail } from './status'
+import { createStatus, questionDetail, questionPrompt } from './status'
 
 const TOOL = 'mcp__asn__asn_send'
 
@@ -126,10 +126,36 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
+  // 跳權限框：只記工具名（AskUserQuestion 由下面那段處理）
+  on('classic.PermissionRequest', ($, e, next) => {
+    const io = { home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: (p: string) => $.fs.read(p), write: (p: string, t: string) => $.fs.write(p, t), sid: () => $.session.id(), log: (t: string) => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage() }
+    if (e.tool_name !== 'AskUserQuestion') void st.setWaitingTool(io, e.tool_name)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // 權限框回答了（工具跑完、失敗或被拒）：工具名清掉
+  on('classic.PostToolUse', ($, e, next) => {
+    const io = { home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: (p: string) => $.fs.read(p), write: (p: string, t: string) => $.fs.write(p, t), sid: () => $.session.id(), log: (t: string) => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage() }
+    void st.clearWaitingTool(io)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  on('classic.PostToolUseFailure', ($, e, next) => {
+    const io = { home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: (p: string) => $.fs.read(p), write: (p: string, t: string) => $.fs.write(p, t), sid: () => $.session.id(), log: (t: string) => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage() }
+    void st.clearWaitingTool(io)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  on('classic.PermissionDenied', ($, e, next) => {
+    const io = { home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: (p: string) => $.fs.read(p), write: (p: string, t: string) => $.fs.write(p, t), sid: () => $.session.id(), log: (t: string) => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage() }
+    void st.clearWaitingTool(io)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
     const isMain = e.agentId === undefined
     const io = { home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: (p: string) => $.fs.read(p), write: (p: string, t: string) => $.fs.write(p, t), sid: () => $.session.id(), log: (t: string) => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage() }
-    if (isMain) void st.write(io, 'waiting_user', questionDetail(e as never))
+    if (isMain) void st.write(io, 'waiting_user', questionDetail(e as never), undefined, questionPrompt(e as never))
     try {
       return await next(e)
     } finally {
