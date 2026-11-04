@@ -109,6 +109,14 @@ impl Schedule {
             self.window_start = now;
             self.window_reads = 0;
         }
+        // 閒置時排在一分鐘後的下一次，開始工作後要提早：權限提示就出現在這時候。讀失敗退避中的不動
+        for (id, pace) in windows {
+            if !self.fails.contains_key(id) {
+                if let Some(at) = self.next_at.get_mut(id) {
+                    *at = (*at).min(now + pace.interval());
+                }
+            }
+        }
         let mut ready: Vec<(u64, &String)> = windows.iter().map(|(id, _)| (self.next_at.get(id).copied().unwrap_or(0), id)).filter(|(at, _)| *at <= now).collect();
         ready.sort();
         let room = MAX_READS_PER_MIN.saturating_sub(self.window_reads) as usize;
@@ -205,6 +213,30 @@ mod tests {
         assert_eq!(s.due(NOW + 5_000, &ws, FREE), vec!["忙"]);
         s.done("忙", Pace::Frequent, true, NOW + 5_000);
         assert_eq!(s.due(NOW + 60_000, &ws, FREE).len(), 2, "閒置的一分鐘才讀");
+    }
+
+    #[test]
+    fn 閒置轉成工作中_下一次提早_不用等滿一分鐘() {
+        let mut s = Schedule::default();
+        let id = "w0".to_string();
+        assert_eq!(s.due(NOW, &[(id.clone(), Pace::Slow)], FREE).len(), 1);
+        s.done("w0", Pace::Slow, true, NOW);
+        let busy = [(id.clone(), Pace::Frequent)];
+        let t = NOW + 1_000;
+        assert!(s.due(t, &busy, FREE).is_empty(), "剛轉成工作中，這一輪還不用讀");
+        assert_eq!(s.due(t + FREQUENT_MS, &busy, FREE), vec!["w0"], "工作中的頻率內就讀到，不等滿一分鐘");
+    }
+
+    #[test]
+    fn 讀失敗退避中_轉成工作中也不提早() {
+        let mut s = Schedule::default();
+        let busy = [("w0".to_string(), Pace::Frequent)];
+        for _ in 0..5 {
+            s.done("w0", Pace::Slow, false, NOW);
+        }
+        assert_eq!(s.next_at["w0"], NOW + MAX_BACKOFF_MS);
+        assert!(s.due(NOW + 10_000, &busy, FREE).is_empty());
+        assert_eq!(s.next_at["w0"], NOW + MAX_BACKOFF_MS);
     }
 
     #[test]
