@@ -1,7 +1,7 @@
 import type { Register } from 'claude-code'
 import { bashRepliedTo, buildSendArgv, guardBash, planAutoReply, resolveCli, sendRepliedTo, startNotice, trackFromText, type ReplyTrack, type StopLike } from './lib'
 import { ABANDONED_NOTE, createControl, POLL_MS } from './control'
-import { createStatus, questionDetail } from './status'
+import { createStatus, questionDetail, questionPrompt } from './status'
 
 const TOOL = 'mcp__asn__asn_send'
 
@@ -129,7 +129,7 @@ export const register: Register = (on, options) => {
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
     const isMain = e.agentId === undefined
     const io = { home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: (p: string) => $.fs.read(p), write: (p: string, t: string) => $.fs.write(p, t), sid: () => $.session.id(), log: (t: string) => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage() }
-    if (isMain) void st.write(io, 'waiting_user', questionDetail(e as never))
+    if (isMain) void st.write(io, 'waiting_user', questionDetail(e as never), undefined, questionPrompt(e as never))
     try {
       return await next(e)
     } finally {

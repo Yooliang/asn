@@ -51,6 +51,9 @@ struct FState {
     send_fail_reply_to: Vec<String>,
     /// 核對轉交對象：本人通知（misroute_notice）收到的請求；misroute_status 不為 0 就回這個狀態碼（模擬後台沒這個動作或壞了）
     misroute_notices: Vec<Value>,
+    /// 夥伴卡在框上的通知（waiting_notice）收到的請求；wait_notice_status 不為 0 就回這個
+    wait_notices: Vec<Value>,
+    wait_notice_status: u16,
     misroute_status: u16,
 }
 
@@ -178,6 +181,11 @@ fn handle_conn(mut c: std::net::TcpStream, st: Arc<Mutex<FState>>) {
             s.sent.push(body);
             (200, json!({"id": uid(900 + s.sent.len() as u32)}))
         }
+        "waiting_notice" if s.wait_notice_status != 0 => (s.wait_notice_status, json!({"error": "boom"})),
+        "waiting_notice" => {
+            s.wait_notices.push(body);
+            (200, json!({"ok": true, "notify": "sent", "bell_topics": []}))
+        }
         "misroute_notice" => {
             s.misroute_notices.push(body);
             if s.misroute_status != 0 {
@@ -228,6 +236,9 @@ impl FakeRelay {
     }
     fn acked(&self) -> Vec<String> {
         self.st.lock().unwrap().acked.clone()
+    }
+    fn wait_notices(&self) -> Vec<Value> {
+        self.st.lock().unwrap().wait_notices.clone()
     }
     fn sent(&self) -> Vec<Value> {
         self.st.lock().unwrap().sent.clone()
@@ -1874,6 +1885,7 @@ mod pi_it;
 mod quota_it;
 mod e2e_real;
 mod gate_it;
+mod wait_it;
 mod respond_it;
 mod rooms_launch;
 

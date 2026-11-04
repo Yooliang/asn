@@ -22,7 +22,11 @@ export type StatusDoc = {
   control?: ControlResult
   // 背景工作列表（#539 之三）：只在 state 為 background 時寫；每筆只有代號、說明、類型，不存指令全文
   tasks?: TaskItem[]
+  // 選擇框的問題和選項：只在 state 為 waiting_user 時寫（夥伴卡住太久時，收發室拿來通知本人）
+  prompt?: QuestionPrompt
 }
+
+export type QuestionPrompt = { question: string; options: string[] }
 
 export type TaskItem = { id: string; desc: string; kind?: string }
 
@@ -86,7 +90,7 @@ export function statusPath(home: string, sessionId: string): string {
 export function buildStatus(
   p: { sessionId: string; state: WinState; detail?: string; turnId?: string; version?: string },
   now: number,
-  extra: { model?: string; context?: ContextUsage; control?: ControlResult; tasks?: TaskItem[] } = {},
+  extra: { model?: string; context?: ContextUsage; control?: ControlResult; tasks?: TaskItem[]; prompt?: QuestionPrompt } = {},
 ): StatusDoc {
   return {
     sessionId: p.sessionId,
@@ -98,6 +102,7 @@ export function buildStatus(
     ...(extra.model ? { model: extra.model } : {}),
     ...(extra.context ? { context: extra.context } : {}),
     ...(extra.control ? { control: extra.control } : {}),
+    ...(extra.prompt ? { prompt: extra.prompt } : {}),
     ...(extra.tasks && extra.tasks.length ? { tasks: extra.tasks } : {}),
   }
 }
@@ -108,6 +113,18 @@ export function contextOf(u: unknown): ContextUsage | undefined {
   if (!c || typeof c.tokens !== 'number' || typeof c.window !== 'number' || !Number.isFinite(c.tokens) || !Number.isFinite(c.window) || c.window <= 0) return undefined
   const percent = typeof c.percent === 'number' && Number.isFinite(c.percent) ? c.percent : Math.round((c.tokens / c.window) * 100)
   return { used: c.tokens, limit: c.window, percent }
+}
+
+// 選擇框的第一題：問題最多 200 字，選項最多 6 個、各 40 字（狀態檔有大小上限）
+export function questionPrompt(e: { questions?: unknown }): QuestionPrompt | undefined {
+  const qs = Array.isArray(e.questions) ? e.questions : []
+  const q0 = qs[0] as { question?: unknown; options?: unknown } | undefined
+  const flat = (s: string, n: number) => [...s.replace(/\s+/g, ' ').trim()].slice(0, n).join('')
+  const question = typeof q0?.question === 'string' ? flat(q0.question, 200) : ''
+  if (!question) return undefined
+  const opts = Array.isArray(q0?.options) ? q0.options : []
+  const options = opts.map(o => (typeof (o as { label?: unknown })?.label === 'string' ? flat((o as { label: string }).label, 40) : '')).filter(Boolean).slice(0, 6)
+  return { question, options }
 }
 
 export function questionDetail(e: { questions?: unknown }): string {
@@ -161,12 +178,12 @@ export function createStatus(clock: () => number = Date.now) {
   let stop: StopInfo | undefined
   let ended: string | undefined // 本輪 turn.complete 的 reason；undefined＝還沒結束
   let control: ControlResult | undefined // 最近一次控制檔結果；之後每次寫檔都保留，橋只認 id
-  let last: { state: WinState; detail: string; tasks?: TaskItem[] } = { state: 'idle', detail: '' }
+  let last: { state: WinState; detail: string; tasks?: TaskItem[]; prompt?: QuestionPrompt } = { state: 'idle', detail: '' }
   let kept: { path: string; doc: StatusDoc } | undefined // 最近一次實際寫出去的內容（心跳只換 at）
 
   // 寫檔排進同一條鏈，順序不亂
-  const write = (io: Io, state: WinState, detail: string, tasks?: TaskItem[]): Promise<unknown> => {
-    last = { state, detail, tasks }
+  const write = (io: Io, state: WinState, detail: string, tasks?: TaskItem[], prompt?: QuestionPrompt): Promise<unknown> => {
+    last = { state, detail, tasks, prompt }
     chain = chain
       .then(async () => {
         const home = await io.home()
@@ -180,7 +197,7 @@ export function createStatus(clock: () => number = Date.now) {
         const sid = await io.sid()
         const model = await Promise.resolve().then(() => io.model?.()).then(m => (typeof m === 'string' ? m : ''), () => '')
         const context = await Promise.resolve().then(() => io.usage?.()).then(contextOf, () => undefined)
-        const doc = buildStatus({ sessionId: sid, state, detail, turnId, version }, clock(), { model, context, control, tasks })
+        const doc = buildStatus({ sessionId: sid, state, detail, turnId, version }, clock(), { model, context, control, tasks, prompt })
         const path = statusPath(home, sid)
         await io.write(path, JSON.stringify(doc))
         kept = { path, doc }

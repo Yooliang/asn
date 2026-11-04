@@ -71,6 +71,8 @@ test('AskUserQuestion：waiting_user（問題前 80 字）→ 回來後 busy，�
   const seq = r.writes.map(w => w.doc.state)
   expect(seq.slice(-2)).toEqual(['waiting_user', 'busy'])
   expect(r.writes.find(w => w.doc.state === 'waiting_user')?.doc.detail).toBe(`AskUserQuestion：${'Q'.repeat(80)}`)
+  expect((r.writes.find(w => w.doc.state === 'waiting_user')?.doc as { prompt?: unknown }).prompt).toEqual({ question: 'Q'.repeat(120), options: [] })
+  expect((r.writes[r.writes.length - 1].doc as { prompt?: unknown }).prompt).toBeUndefined()
 })
 
 test('turn.complete 沒有背景／排程→idle', async ($, on) => {

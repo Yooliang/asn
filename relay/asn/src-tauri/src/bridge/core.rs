@@ -24,6 +24,7 @@ mod fail_notice;
 mod held_notice;
 mod misroute;
 mod quota;
+mod wait_notice;
 
 /// 後台節點信箱一次最多回幾封（與 asn_relay_inbox 的 limit 一致）
 const INBOX_PAGE: usize = 50;
@@ -74,6 +75,8 @@ pub struct Config {
     pub forward_timeout_ms: u64,
     /// 收發室 worker 一輪只交一封（todo-next-185）。正式預設開（環境變數 ASN_FORWARD_ONE_PER_TURN=0 可關閉）；測試預設關，只有專門測這件事的測試才開（其他測試一次放好幾封信，不是在測這個）
     pub one_per_turn: bool,
+    /// 夥伴卡在框上超過兩分鐘通知本人（ASN_WAIT_ALERT=1，預設關；todo-next-162）
+    pub wait_alert: bool,
     pub pull_backoff_ms: Vec<u64>,
     pub claude_bin: String,
     pub claude_pre: Vec<String>,
@@ -143,6 +146,8 @@ impl Config {
             nudge_ms: env_u64("ASN_NUDGE_MS", 300_000),
             forward_timeout_ms: env_u64("ASN_FORWARD_TIMEOUT_MS", 120_000),
             one_per_turn: crate::envc::get("ASN_FORWARD_ONE_PER_TURN").map(|v| v.trim() != "0").unwrap_or(true),
+            // 新變數沒有舊環境名稱，不走 envc 的新舊名對照
+            wait_alert: std::env::var("ASN_WAIT_ALERT").is_ok_and(|v| v.trim() == "1"),
             pull_backoff_ms: vec![5_000, 10_000, 20_000, 40_000, 60_000],
             claude_bin: std::env::var("CLAUDE_BIN").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "claude".into()),
             claude_pre: vec![],
@@ -404,6 +409,12 @@ pub struct Core {
     probe_prev_until: u64,
     /// 扣住過的信第一次收到的時間（信件編號 → 毫秒；ack 才清）：信被重新拉回、再扣住或之後才轉交時，延遲抬頭仍寫第一次收到的時間
     held_first: HashMap<String, u64>,
+    /// 夥伴卡在框上：什麼時候該通知本人
+    wait_alerts: super::wait_alert::WaitAlerts,
+    /// 通知失敗後，這個時間之前不再試
+    wait_retry_at: u64,
+    /// session 檔缺欄位的紀錄已經寫過（每次啟動一次）
+    wait_fields_warned: bool,
     /// 認得的夥伴（#766）：存檔的視窗名單；重開後還沒接回來的夥伴，寄給它的信先留著、群組點名游標不前進
     known: super::known::Known,
     /// 這一次收發室跑著的期間看過的視窗名
@@ -467,7 +478,7 @@ impl Core {
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
-            quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), recent_forwards: Vec::new(), held_notice_sent: HashSet::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), probing: false,
+            wait_alerts: Default::default(), wait_retry_at: 0, wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), recent_forwards: Vec::new(), held_notice_sent: HashSet::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), probing: false,
         };
         c.restore();
         c.started_at = now;
@@ -820,6 +831,9 @@ impl Core {
             list.insert(0, Window::claude(&me, Some(st.into()), "", 0, now, None));
             self.respond_sent = st.to_string();
             self.roster_at = now;
+        }
+        if self.cfg.wait_alert {
+            roster::mark_unknown_status(&mut list);
         }
         self.roster = list;
         self.roster_ok = true;
@@ -2065,6 +2079,7 @@ impl Core {
         self.release_held(now).await;
         self.quota_tick(now).await;
         self.flush_owner_receipts(now).await;
+        self.wait_notice_tick(now).await;
         // 收信暫停的時間變了（開始扣住、或恢復）：馬上重報名單把值帶給後台（還沒報過第一次的交給啟動時的名單）
         if self.hold_sent.is_some_and(|h| h != self.inbox_hold_until() || self.hold_cap_due()) && now.saturating_sub(self.hold_try_at) >= self.cfg.watch_gap_ms {
             self.hold_try_at = now;

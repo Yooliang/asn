@@ -67,6 +67,51 @@ pub const MOD_STATUS_MAX_AGE_MS: u64 = 30 * 60 * 1000;
 pub const MOD_BUSY_MAX_AGE_MS: u64 = 10 * 60 * 1000;
 const MOD_STATUS_MAX_BYTES: u64 = 16 * 1024;
 const MOD_DETAIL_MAX_CHARS: usize = 80;
+/// session 檔沒有 status 的 Claude 視窗：名單上寫這句，不能看起來像沒有卡住（內部欄位可能改版）
+pub const UNKNOWN_STATUS_DETAIL: &str = "狀態不明";
+
+/// 名單標出讀不到狀態的 Claude 視窗（外掛有回報的不算）
+pub fn mark_unknown_status(windows: &mut [Window]) {
+    for w in windows.iter_mut().filter(|w| w.engine == "claude" && w.status.is_none() && w.detail.is_none()) {
+        w.detail = Some(UNKNOWN_STATUS_DETAIL.to_string());
+    }
+}
+
+/// session 檔裡跟「在等人」有關的欄位（Claude 內部欄位，隔離環境實測 2.1.318）
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionWait {
+    pub status: Option<String>,
+    pub waiting_for: Option<String>,
+    /// statusUpdatedAt；0＝沒有
+    pub since: u64,
+}
+
+/// 讀 `<dir>/<pid>.json`。檔案不在或壞掉回 None（視窗可能剛好結束）
+pub fn read_session_wait(dir: &Path, pid: u32) -> Option<SessionWait> {
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(format!("{pid}.json"))).ok()?).ok()?;
+    let text = |k: &str| v.get(k).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(String::from);
+    Some(SessionWait { status: text("status"), waiting_for: text("waitingFor"), since: v.get("statusUpdatedAt").and_then(Value::as_u64).unwrap_or(0) })
+}
+
+/// 外掛回報的選擇框內容，通知本人用：「問題：…；選項：甲、乙」。只有這個 session 正在 waiting_user 才算；沒有就回 None
+pub fn read_mod_question(dir: &Path, sid: &str) -> Option<String> {
+    if !valid_sid(sid) {
+        return None;
+    }
+    let path = dir.join(format!("{sid}.json"));
+    if std::fs::metadata(&path).ok()?.len() > MOD_STATUS_MAX_BYTES {
+        return None;
+    }
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+    if v.get("sessionId").and_then(Value::as_str) != Some(sid) || v.get("state").and_then(Value::as_str) != Some("waiting_user") {
+        return None;
+    }
+    let p = v.get("prompt")?;
+    let question = p.get("question").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())?;
+    let options: Vec<&str> = p.get("options").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+    Some(if options.is_empty() { format!("問題：{question}") } else { format!("問題：{question}；選項：{}", options.join("、")) })
+}
+
 /// 外掛在 session 結束時寫的說明（外掛刪不了檔，只能寫 idle＋這句）；看到它就不採用，名單照 sessions/<pid>.json
 pub const MOD_ENDED_DETAIL: &str = "已結束";
 
