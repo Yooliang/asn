@@ -161,6 +161,39 @@ pub fn with_login_failed(attempts: Vec<Value>, failed: bool) -> Vec<Value> {
     flagged.chain(attempts.iter().cloned()).collect()
 }
 
+/// 額度讀取器（quota_readers.rs，預設關閉）讀到的：Grok 的窗掛到對應帳號那列；MiniMax 另外加列。
+/// 舊後台看到 minimax 會以 HTTP 400 退回整份，所以有 MiniMax 時多一份排在最前面，退回後照原本的順序送（[`send_attempts`] 只在 400 才往下一份）。
+/// 總筆數上限 20：不夠就從後面拿掉非使用中的 Claude。什麼都沒讀到時原樣回傳。
+pub fn with_reader_rows(attempts: Vec<Value>, grok_windows: &HashMap<String, Vec<Value>>, minimax: &[Value]) -> Vec<Value> {
+    let mut out: Vec<Value> = attempts
+        .into_iter()
+        .map(|mut a| {
+            for r in a["accounts"].as_array_mut().into_iter().flatten() {
+                if r["vendor"] != "grok" {
+                    continue;
+                }
+                if let Some(w) = r["email"].as_str().and_then(|e| grok_windows.get(e)) {
+                    r["windows"] = json!(w);
+                }
+            }
+            a
+        })
+        .collect();
+    if minimax.is_empty() || out.is_empty() {
+        return out;
+    }
+    let mut first = out[0].clone();
+    if let Some(rows) = first["accounts"].as_array_mut() {
+        while rows.len() + minimax.len() > 20 {
+            let Some(i) = rows.iter().rposition(|r| r["vendor"] == "claude" && r["current"] != true) else { break };
+            rows.remove(i);
+        }
+        rows.extend(minimax.iter().cloned());
+    }
+    out.insert(0, first);
+    out
+}
+
 /// 錯誤字串形如「acct_report HTTP 400 bad_request」：只有 400（後台看不懂這份內容）才值得拿掉廠牌再送
 fn is_bad_request(err: &str) -> bool {
     err.split_whitespace().collect::<Vec<_>>().windows(2).any(|w| w == ["HTTP", "400"])
@@ -411,7 +444,8 @@ pub fn decide(taken: &mut HashMap<String, (String, Instant)>, id: &str, allowed:
 /// 被退回（HTTP 400）時的退路見 [`report_attempts`]：拿掉 gemini 再送，再不行只送 Claude；其他錯誤不退步
 #[allow(clippy::too_many_arguments)]
 pub async fn report(relay: &Relay, list: &[AccountInfo], codex: Option<&CodexLogin>, quotas: &HashMap<String, Quota>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value], gemini: &[Value], login_failed: bool, log: &impl Fn(String)) -> Result<Value, String> {
-    let attempts = with_login_failed(report_attempts(list, codex, quotas, grok, codex_windows, gemini), login_failed);
+    let (grok_windows, minimax) = crate::quota_readers::report_extras(crate::heartbeat::now_ms() as i64);
+    let attempts = with_reader_rows(with_login_failed(report_attempts(list, codex, quotas, grok, codex_windows, gemini), login_failed), &grok_windows, &minimax);
     send_attempts(attempts, |body| relay.api("acct_report", Some(body)), log).await
 }
 
