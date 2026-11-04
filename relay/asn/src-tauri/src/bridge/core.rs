@@ -25,6 +25,8 @@ mod misroute;
 mod quota;
 
 /// 後台節點信箱一次最多回幾封（與 asn_relay_inbox 的 limit 一致）
+/// 收發室 worker 的 Claude 登入失效時，寫在失敗通知裡的原因（給寄件人看：說發生什麼、怎麼辦）
+pub const AUTH_FAIL_REASON: &str = "這台電腦上收發室用的 Claude 登入失效了，信沒有交出去。請這台電腦的本人重新登入 Claude，登入後再重寄一次";
 const INBOX_PAGE: usize = 50;
 /// 一輪收信最多往後多拿幾批
 const INBOX_ROUNDS: usize = 5;
@@ -1223,6 +1225,7 @@ impl Core {
                             self.count_worker_fail();
                             self.on_fail(&id, &reason).await
                         }
+                        WorkerEvent::AuthFailed => self.on_worker_auth_failed().await,
                         WorkerEvent::Misrouted { id, expected, actual } => self.on_misrouted(&id, &expected, &actual).await,
                         WorkerEvent::Quota { resets_at, kind } => {
                             if self.cfg.respond.is_some() {
@@ -1302,6 +1305,28 @@ impl Core {
     }
 
     /// 失敗原因給人看：認得的錯誤（額度用完）換成白話，其他原樣
+    /// 寄給寄件人的轉交失敗通知內文。三種要分清楚：沒轉交（一般失敗）、收發室登入失效（原因已寫在 why）、
+    /// 對方收到並處理了但最後的回覆被內容過濾擋下（不是沒轉交，不要讓人以為信沒送到）
+    fn fail_notice_text(target: &str, why: &str) -> String {
+        let l = why.to_lowercase();
+        if l.contains("blocked by content safety") || l.contains("content safety filter") {
+            return format!("[收發室] {target} 收到信並處理了，但它最後的回覆被內容過濾擋下，沒有回到你這裡。可以請它再回一次。");
+        }
+        format!("[收發室] 轉交給 {target} 失敗：{}", Self::short_fail_reason(why))
+    }
+
+    /// 收發室 worker 自己的 Claude 登入失效（todo-next-197）：這一輪沒有交出任何信。交辦中的信馬上回報失敗並說明原因，
+    /// 不再等到轉交逾時才說一句沒有說明原因的「逾時」；同時記進登入失效偵測，讓本人收到通知
+    async fn on_worker_auth_failed(&mut self) {
+        self.log.line("worker reported an authentication failure: mail being forwarded fails now");
+        #[cfg(feature = "gui")]
+        crate::login_watch::record_worker_login_error(self.now as i64);
+        let ids: Vec<String> = self.pending.iter().filter(|p| p.state == State::Forwarding).map(|p| p.id.clone()).collect();
+        for id in ids {
+            self.on_fail(&id, AUTH_FAIL_REASON).await;
+        }
+    }
+
     fn short_fail_reason(why: &str) -> String {
         if Self::is_payment_error(why) {
             return "額度用完了（API 402）".into();
@@ -1338,7 +1363,7 @@ impl Core {
             // 失敗通知用「對方視窗」的名義寄回、掛在原信底下：寄件人在跟那個視窗的對話框裡直接看到，不是另一個「收發室」視窗
             let short = Self::short_fail_reason(why);
             let as_target = if target.trim().is_empty() { None } else { Some(target.as_str()) };
-            self.send_back(&o, &format!("[收發室] 轉交給 {target} 失敗：{short}"), as_target, None).await;
+            self.send_back(&o, &Self::fail_notice_text(&target, &short), as_target, None).await;
         }
         self.ack_ids(&[id.to_string()]).await;
         self.remove(id);

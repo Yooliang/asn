@@ -972,6 +972,43 @@ async fn 本人簽章的私信轉交給視窗_退回那個視窗一封寄信額�
     assert_eq!(take(&rate, "T-丙", 2, now), Ok(0), "T-丙 不動：1 封，上限 2 時寄完剩 0");
 }
 
+fn notice_bodies(h: &H) -> Vec<String> {
+    h.fr.sent().iter().map(|s| s["body"].as_str().unwrap_or("").to_string()).collect()
+}
+
+#[tokio::test]
+async fn 收發室_worker_登入失效_交辦中的信馬上回報失敗_說清楚是登入失效_不等轉交逾時() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", T0).await;
+    assert_eq!(h.said().len(), 1, "已交給 worker");
+    // worker 第一輪就回認證失敗（沒有交出任何信）
+    let line = json!({"type":"result","is_error":true,"result":"Failed to authenticate: OAuth session expired and could not be refreshed","duration_ms":101,"total_cost_usd":0}).to_string();
+    h.core.on_worker_line(WorkerLine::Line(line), T0 + 1_000).await;
+    let notes = notice_bodies(&h);
+    assert!(notes.iter().any(|b| b.contains("登入失效") && b.contains("信沒有交出去") && b.contains("重新登入 Claude") && !b.contains("逾時")), "{notes:?}");
+    assert!(h.fr.acked().contains(&uid(1)), "已回報失敗並 ack");
+    // 之後不會再補一則「轉交逾時」
+    let before = notes.len();
+    h.core.tick(T0 + 130_000).await;
+    assert_eq!(notice_bodies(&h).len(), before, "不再寄逾時通知");
+}
+
+#[tokio::test]
+async fn 轉交失敗通知分清楚三種_沒轉交_登入失效_做完但回覆被內容過濾擋下() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", T0).await;
+    h.core.on_fail(&uid(1), "Your previous response was blocked by content safety filters").await;
+    let notes = notice_bodies(&h);
+    assert!(notes.iter().any(|b| b.contains("收到信並處理了") && b.contains("內容過濾") && !b.contains("失敗")), "不是沒轉交：{notes:?}");
+    let mut g = harness(&[("T-乙", "idle")]).await;
+    g.fr.put(mail(2, json!({})));
+    g.core.pull("test", T0).await;
+    g.core.on_fail(&uid(2), "找不到收件人").await;
+    assert!(notice_bodies(&g).iter().any(|b| b.contains("轉交給 T-乙 失敗：找不到收件人")), "一般失敗照舊");
+}
+
 #[tokio::test]
 async fn 延後期間對方回覆了_不寄通知() {
     let mut h = harness(&[("T-乙", "busy")]).await;
