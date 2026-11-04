@@ -2382,15 +2382,23 @@ pub struct PartnerNotice {
 #[cfg(feature = "gui")]
 static PARTNER_NOTICES: Mutex<Vec<PartnerNotice>> = Mutex::new(Vec::new());
 
+/// 權限命令要開關開著才能用
+#[cfg(feature = "gui")]
+fn screen_watch_required() -> Result<(), String> {
+    super::screen_watch::require_enabled(std::env::var(super::screen_watch::ENV_SCREEN_WATCH).ok().as_deref())
+}
+
 /// 本機畫面的命令用：權限詢問的文字
 #[cfg(feature = "gui")]
 pub fn partner_permission_prompt(terms: &LiveTerms, name: &str) -> Result<PermissionPrompt, String> {
+    screen_watch_required()?;
     terms.permission_prompt_with(name, live_session_named(name))
 }
 
 /// 本機畫面的命令用：本人按了允許或拒絕
 #[cfg(feature = "gui")]
 pub fn partner_permission_answer(terms: &LiveTerms, name: &str, hash: &str, allow: bool) -> Result<(), String> {
+    screen_watch_required()?;
     terms.permission_answer_with(name, hash, allow, live_session_named(name))
 }
 
@@ -2404,7 +2412,7 @@ pub fn partner_notices() -> Vec<PartnerNotice> {
 #[cfg(feature = "gui")]
 pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, data_dir: &Path) {
     use super::screen_watch::{match_sessions, pace_of, Schedule, ENV_SCREEN_WATCH, TICK_MS};
-    if std::env::var(ENV_SCREEN_WATCH).as_deref() != Ok("1") || std::env::args().any(|a| a == "--shot") {
+    if !super::screen_watch::enabled(std::env::var(ENV_SCREEN_WATCH).ok().as_deref()) || std::env::args().any(|a| a == "--shot") {
         return;
     }
     let sessions_dir = crate::identity::home_dir().join(".claude").join("sessions");
@@ -5600,6 +5608,17 @@ mod tests {
             assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).is_err());
             assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).is_err());
             assert!(sent(&rig).is_empty());
+        }
+
+        #[test]
+        fn 權限命令_開關關著直接回錯_兩條都有檢查() {
+            let src = include_str!("term.rs").replace("\r\n", "\n");
+            for head in ["pub fn partner_permission_prompt(terms", "pub fn partner_permission_answer(terms"] {
+                let i = src.find(head).unwrap();
+                let body = &src[i..i + src[i..].find("\n}\n").unwrap()];
+                let (gate, call) = (body.find("screen_watch_required()?").expect(head), body.find("terms.permission_").unwrap());
+                assert!(gate < call, "要先檢查開關：{head}");
+            }
         }
 
         #[test]

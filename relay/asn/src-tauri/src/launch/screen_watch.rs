@@ -4,6 +4,20 @@
 use std::collections::HashMap;
 
 pub const ENV_SCREEN_WATCH: &str = "ASN_SCREEN_WATCH";
+/// 開關的值怎麼算開：只有 1
+pub fn enabled(value: Option<&str>) -> bool {
+    value == Some("1")
+}
+
+/// 開關關著就不准用權限命令：預設關的功能不能經這條路讀畫面或送字
+pub fn require_enabled(value: Option<&str>) -> Result<(), String> {
+    if enabled(value) {
+        Ok(())
+    } else {
+        Err("這個功能沒有開啟".to_string())
+    }
+}
+
 /// 一輪的間隔
 pub const TICK_MS: u64 = 5_000;
 /// 一輪進行中（或不知道狀態）的視窗多久讀一次
@@ -160,6 +174,16 @@ mod tests {
         assert_eq!(match_sessions(&partners, &sessions), vec![pair("1", "s-甲")], "乙還沒有檔案、丙兩份不猜、別的不是夥伴");
         let twins = [pair("1", "甲"), pair("2", "甲")];
         assert!(match_sessions(&twins, &[pair("甲", "s")]).is_empty(), "兩扇同名也不猜");
+    }
+
+    #[test]
+    fn 開關只有_1_才算開_關著權限命令回錯() {
+        assert!(enabled(Some("1")));
+        for v in [None, Some(""), Some("0"), Some("true"), Some("11")] {
+            assert!(!enabled(v), "{v:?}");
+            assert!(require_enabled(v).is_err(), "{v:?}");
+        }
+        assert!(require_enabled(Some("1")).is_ok());
     }
 
     #[test]
