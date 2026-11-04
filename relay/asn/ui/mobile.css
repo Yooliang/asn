@@ -406,3 +406,12 @@ html,body.m-body{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff
 .m-dv-sbtns{display:flex;flex-wrap:wrap;gap:8px}
 .m-dv-prog b.ok{color:var(--ok,#1b7f3b)}
 .m-dv-prog b.bad{color:var(--danger,#b3261e)}
+/* 雲端代理（#756）：金鑰輸入框、清單、按鈕列 */
+.m-cloud-step{margin:10px 0 4px;font-weight:600}
+.m-cloud-key{width:100%;box-sizing:border-box;font-family:ui-monospace,Menlo,Consolas,monospace}
+.m-cloud-btns{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0}
+.m-cloud-form{display:flex;flex-direction:column;gap:8px;margin:8px 0}
+.m-cloud-list{list-style:none;margin:8px 0;padding:0;display:flex;flex-direction:column;gap:6px}
+.m-cloud-list li{display:flex;align-items:center;gap:8px;justify-content:space-between}
+.m-cloud-tx{display:flex;flex-direction:column;min-width:0}
+.m-cloud-tx b em{font-style:normal;font-weight:400;font-size:12px;margin-left:6px;color:#2f7d32}

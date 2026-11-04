@@ -1,8 +1,10 @@
 // 手機版「雲端代理」（#756、todo-next-199）：把雲端代理加進好友名單——輸入名字、取得只顯示一次的金鑰與要貼給代理的說明、
-// 看到「已上線」、已加入的清單、重發金鑰、移除。流程與電腦版（lib/cloud-invite.mjs）相同，後台指令也是同一組
-// （cloud_agent_create／list／revoke，用登入憑證，憑證只在 Rust 端；沒登入就不能用），手機沒有多拿任何權限。
+// 看到「已上線」、已加入的清單、移除、輸入短碼核准無畫面主機。流程與電腦版（lib/cloud-invite.mjs）相同，後台指令也是同一組
+// （cloud_agent_create／list／revoke／approve，用登入憑證，憑證只在 Rust 端；沒登入就不能用），手機沒有多拿任何權限。
+// 沒有「重發金鑰」：電腦版也沒有，金鑰弄丟就移除後重新邀請（真正的重發排在 todo-next-200，兩個平台一起做）。
 // 金鑰規矩：只存在這個物件的記憶體，按「完成」、離開這一頁都會丟掉；不寫 localStorage、不寫檔、不進任何記錄。
 // 剪貼簿：複製金鑰後 60 秒清掉（頁面還在前景時）；按「完成」、離開這一頁、回到前景發現已經過了 60 秒也清。
+// 讀剪貼簿在 WebView 會跳權限詢問，所以不讀：一律直接清成空白（本人 60 秒內又複製了別的，也會被清掉）。
 // 這個檔在 node 也要能載入（測試）：Vue、剪貼簿、計時器都由呼叫端傳進來。
 import { COPY_NOTE, DEFAULT_NAME, INVITE_NOTE, POLL_MS, cleanName, joined, rowsFromList } from './cloud-invite.mjs'
 
@@ -36,11 +38,16 @@ export const CLOUD_TEXT = {
   revoke: '撤銷', revokeSure: '確認撤銷',
   revokeNote: '撤銷後，這個代理的金鑰立刻失效，好友名單上也會消失。',
   revoked: '已撤銷，這個代理的金鑰立刻失效。',
-  reissue: '重發金鑰',
-  reissueNote: '會建立一個同名的新代理（新金鑰），舊的先留著；新的接上後再按「撤銷舊的」。',
-  revokeOld: '撤銷舊的',
-  revokeOldSure: '確認撤銷舊的',
-  revokeOldNote: '舊的代理金鑰會立刻失效。確認新的已經接上再撤銷。',
+  lostKey: '金鑰弄丟了：把這個代理撤銷，再重新邀請一次。',
+  approveBtn: '輸入短碼核准主機',
+  approveTitle: '核准無畫面主機',
+  approveCode: '主機上顯示的短碼',
+  approveName: '主機的名字',
+  approveId: '節點代號（可留空，系統自動取）',
+  approveGo: '核准',
+  approveNeedName: '請輸入這台主機的名字（1 到 40 個字）',
+  approveNeedCode: '請輸入主機上顯示的短碼',
+  approved: (name, id) => `已核准「${name}」（${id}），主機會自動拿到金鑰，不用再貼任何東西。`,
   loading: '讀取中…',
 }
 
@@ -48,9 +55,9 @@ const errText = e => String(e?.message ?? e ?? '').trim() || '沒有成功，請
 
 /**
  * deps：
- *   api       { list, create, revoke }（cloudApi）
+ *   api       { list, create, revoke, approve }（cloudApi）
  *   status    () → { signed_in }（authApi.status）
- *   clip      { write(text), read() }（navigator.clipboard 的包裝；read 讀不到可以丟錯）
+ *   clip      { write(text) }（navigator.clipboard 的包裝；不讀剪貼簿）
  *   now       () → 毫秒
  *   timer     { set(fn, ms) → id, clear(id) }
  *   reactive  讓畫面追蹤狀態（測試傳 o => o）
@@ -60,28 +67,25 @@ export function createMobileCloud({ api, status, clip, now = () => Date.now(), t
     signedIn: null,        // null＝還沒問到
     rows: [], loading: false, busy: false, msg: '',
     stage: 'list',         // list｜form｜created
-    name: DEFAULT_NAME, reissueOf: '',
+    name: DEFAULT_NAME,
+    approveForm: false, code: '', hostName: '', hostId: '', approved: '',
     created: null,         // { id, name, key, invite, reissueOf } —— 只在記憶體，按「完成」就丟
     reveal: false, copiedKey: false, copiedInvite: false, clipNote: '',
-    confirmId: '', confirmOld: false,
+    confirmId: '',
   })
   let clearTimerId = null, copiedAt = 0, copiedKeyText = ''
 
   const stopClearTimer = () => { if (clearTimerId != null) { timer.clear(clearTimerId); clearTimerId = null } }
 
-  // 清剪貼簿：能讀到內容而且已經不是我們複製的金鑰（本人又複製了別的），就不去動它；讀不到（沒有權限）就清
+  // 清剪貼簿：不讀（讀會跳權限詢問），直接寫成空白；清不掉就算了，畫面上已寫明要留在這個畫面
   async function clearClipboard() {
     stopClearTimer()
     if (!copiedKeyText) return
-    const mine = copiedKeyText
     copiedKeyText = ''; copiedAt = 0
     try {
-      let cur = null
-      try { cur = await clip.read() } catch { cur = null }
-      if (cur != null && cur !== mine) return
       await clip.write('')
       s.clipNote = CLOUD_TEXT.clipCleared
-    } catch { /* 清不掉就算了：畫面上已經寫明要留在這個畫面 */ }
+    } catch { /* 略過 */ }
   }
 
   async function load() {
@@ -93,11 +97,8 @@ export function createMobileCloud({ api, status, clip, now = () => Date.now(), t
     } catch (e) { if (s.signedIn) s.msg = errText(e) } finally { s.loading = false }
   }
 
-  const openForm = (reissueOf = '') => {
-    s.msg = ''; s.stage = 'form'; s.reissueOf = reissueOf
-    s.name = (reissueOf && s.rows.find(r => r.id === reissueOf)?.name) || DEFAULT_NAME
-  }
-  const cancelForm = () => { if (s.stage === 'form') { s.stage = 'list'; s.reissueOf = '' } }
+  const openForm = () => { s.msg = ''; s.stage = 'form'; s.name = DEFAULT_NAME }
+  const cancelForm = () => { if (s.stage === 'form') s.stage = 'list' }
 
   async function create() {
     if (s.busy || s.stage !== 'form') return
@@ -106,7 +107,7 @@ export function createMobileCloud({ api, status, clip, now = () => Date.now(), t
     s.busy = true; s.msg = ''
     try {
       const c = await api.create(n)
-      s.created = { id: c.id, name: c.name, key: c.key, invite: c.invite, reissueOf: s.reissueOf }
+      s.created = { id: c.id, name: c.name, key: c.key, invite: c.invite }
       s.stage = 'created'; s.reveal = false; s.copiedKey = false; s.copiedInvite = false; s.clipNote = ''
       await load()
     } catch (e) { s.msg = errText(e) } finally { s.busy = false }
@@ -131,13 +132,13 @@ export function createMobileCloud({ api, status, clip, now = () => Date.now(), t
   const onVisible = () => { if (copiedKeyText && now() - copiedAt >= CLIP_CLEAR_MS) void clearClipboard() }
 
   async function done() {
-    s.created = null; s.reveal = false; s.copiedKey = false; s.copiedInvite = false; s.stage = 'list'; s.reissueOf = ''; s.confirmOld = false
+    s.created = null; s.reveal = false; s.copiedKey = false; s.copiedInvite = false; s.stage = 'list'
     await clearClipboard()
   }
   // 離開這一頁：金鑰、表單全丟，剪貼簿也清
   async function leave() {
-    s.created = null; s.reveal = false; s.copiedKey = false; s.copiedInvite = false; s.stage = 'list'; s.reissueOf = ''
-    s.confirmId = ''; s.confirmOld = false; s.msg = ''
+    s.created = null; s.reveal = false; s.copiedKey = false; s.copiedInvite = false; s.stage = 'list'
+    s.confirmId = ''; s.msg = ''; s.approveForm = false; s.code = ''; s.hostName = ''; s.hostId = ''; s.approved = ''
     await clearClipboard()
   }
 
@@ -152,20 +153,22 @@ export function createMobileCloud({ api, status, clip, now = () => Date.now(), t
       await load()
     } catch (e) { s.msg = errText(e) } finally { s.busy = false }
   }
-  // 重發金鑰：先建一個同名的新代理（新金鑰只顯示一次），舊的先留著；新的接上、本人按「撤銷舊的」才撤銷舊的，不會中途把代理弄丟
-  const reissue = id => { if (!s.busy && s.stage === 'list') openForm(id) }
-  async function revokeOld() {
-    const old = s.created?.reissueOf
-    if (!old || s.busy) return
-    if (!s.confirmOld) { s.confirmOld = true; return }
-    s.busy = true; s.msg = ''
+  // 核准無畫面主機：主機上跑 asn-bridge login 會印出短碼；這裡輸入短碼、替主機取名。金鑰不經過這裡（主機自己輪詢拿）
+  async function approve() {
+    if (s.busy) return
+    const n = cleanName(s.hostName)
+    if (!n) { s.msg = CLOUD_TEXT.approveNeedName; return }
+    if (!String(s.code).trim()) { s.msg = CLOUD_TEXT.approveNeedCode; return }
+    s.busy = true; s.msg = ''; s.approved = ''
     try {
-      await api.revoke(old)
-      s.created.reissueOf = ''; s.confirmOld = false; s.msg = CLOUD_TEXT.revoked
-      await load()
+      const r = await api.approve(s.code, n, String(s.hostId).trim())
+      s.approved = CLOUD_TEXT.approved(r?.name || n, r?.id || '')
+      s.approveForm = false; s.code = ''; s.hostName = ''; s.hostId = ''
     } catch (e) { s.msg = errText(e) } finally { s.busy = false }
   }
+  const openApprove = () => { s.msg = ''; s.approved = ''; s.approveForm = true }
+  const cancelApprove = () => { s.approveForm = false }
 
   const justJoined = () => !!s.created && joined(s.rows, s.created.id)
-  return { state: s, load, openForm, cancelForm, create, copyKey, copyInvite, onVisible, done, leave, revoke, reissue, revokeOld, justJoined, clearClipboard }
+  return { state: s, load, openForm, cancelForm, create, copyKey, copyInvite, onVisible, done, leave, revoke, approve, openApprove, cancelApprove, justJoined, clearClipboard }
 }

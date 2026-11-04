@@ -71,7 +71,7 @@ mod claude_mod;
 #[cfg(desktop)]
 mod claude_quota;
 #[cfg(feature = "gui")]
-mod cloud_invite;   // 電腦與手機共用：邀請雲端代理（手機只開放建立、清單、撤銷；核准無畫面主機的短碼只有電腦版）
+mod cloud_invite;   // 電腦與手機共用：邀請雲端代理（建立、清單、撤銷、核准無畫面主機的短碼）
 #[cfg(desktop)]
 mod codex_accounts;
 #[cfg(desktop)]
@@ -1579,7 +1579,7 @@ pub fn run() {
         set_presence, set_window_name, store_load, store_save, quit_app, capture_ui_ready, shot_frontend_log, open_link,
         account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_device_prefs_get, account::auth_device_prefs_set, account::auth_bind,
         account::setup_remote_request, account::setup_remote_status,
-        cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke,
+        cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke, cloud_invite::cloud_agent_approve,
         site_releases::site_releases, android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, android::android_acct_list, android::android_acct_roster, android::android_acct_switch, android::android_acct_status, android::android_term_req_list, android::android_term_req_decide, android::android_secret_pending, android::android_secret_reply, android::android_room_read, android::android_room_post, relay_partner_list, relay_partner_succeed,
     ]);
     let builder = builder
