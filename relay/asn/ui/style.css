@@ -17,6 +17,12 @@ body{font-family:var(--font-ui);font-size:13px;color:var(--fg);background:transp
 button,input,select,textarea{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 [v-cloak]{display:none}
+/* .win 的 display:flex 和 [v-cloak] 一樣大，後寫的會贏：沒有這行，Vue 掛上之前整個樣板原文就露出來 */
+.win[v-cloak]{display:none!important}
+/* Vue 一直沒掛上（檔案沒打包、程式出錯）時 v-cloak 不會被拿掉：等一段時間才顯示提示，平常開啟不會閃。不靠任何程式 */
+.boot-fail{display:none}
+#app[v-cloak]~.boot-fail{display:flex;position:fixed;inset:0;z-index:2147483647;align-items:center;justify-content:center;padding:24px;background:#fff;color:#1a1a1a;font-size:16px;text-align:center;animation:boot-fail-show 0s linear 15s both}
+@keyframes boot-fail-show{from{visibility:hidden}to{visibility:visible}}
 textarea,input{user-select:text;-webkit-user-select:text}
 
 /* ---------- 視窗外框 ---------- */
