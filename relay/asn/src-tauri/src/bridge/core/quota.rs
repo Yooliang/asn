@@ -8,7 +8,7 @@
 //! 不含自動回信模式（cfg.respond）：那個模式的 worker 自己回答，信交出去就算已轉交（立刻 ack），沒有「轉交中」可以扣，
 //! 扣住與試送都沒有意義，所以額度事件在該模式一律略過，照原本的等回覆逾時流程。
 use super::*;
-use crate::bridge::mail::{quota_late_line, taipei_hm};
+use crate::bridge::mail::{hold_late_line, taipei_hm};
 use crate::bridge::rooms::Wake;
 
 impl Core {
@@ -66,24 +66,58 @@ impl Core {
     }
 
     /// 在轉交文字的第一行（抬頭）後面加一行延遲說明
-    pub(super) fn with_late_line(text: String, received_ms: u64) -> String {
+    pub(super) fn with_late_line(text: String, received_ms: u64, auth: bool) -> String {
         match text.split_once('\n') {
-            Some((head, rest)) => format!("{head}\n{}\n{rest}", quota_late_line(received_ms)),
-            None => format!("{text}\n{}", quota_late_line(received_ms)),
+            Some((head, rest)) => format!("{head}\n{}\n{rest}", hold_late_line(received_ms, auth)),
+            None => format!("{text}\n{}", hold_late_line(received_ms, auth)),
         }
+    }
+
+    /// 偵測重新登入的預設做法：Claude 登入檔比「扣住開始」新（只有電腦版才有，測試不用）
+    pub(super) fn default_relogin_check() -> Option<Arc<dyn Fn(u64) -> bool + Send + Sync>> {
+        #[cfg(all(feature = "gui", not(test)))]
+        return Some(Arc::new(|since| crate::login_watch::credentials_updated_since(since)));
+        #[allow(unreachable_code)]
+        None
+    }
+
+    /// 收發室 worker 自己的 Claude 登入失效（todo-next-197）：照額度用完的做法扣住——這輪交辦的信放回去、不 ack、不再一封一封試，
+    /// 寄件人同一段失效期間只通知一次；恢復靠每小時試送最舊的一封，或偵測到重新登入就提早試送，worker 能工作就依序重送。
+    /// 同時記進登入失效偵測，讓本人收到通知（照原規則）。自動回信模式沒有「轉交中」可扣，照原本的逾時流程
+    pub(super) async fn on_worker_auth_failed(&mut self) {
+        #[cfg(feature = "gui")]
+        crate::login_watch::record_worker_login_error(self.now as i64);
+        if self.cfg.respond.is_some() {
+            self.log.line("worker reported an authentication failure (respond mode: not held, normal timeout flow)");
+            return;
+        }
+        self.log.line("worker reported an authentication failure: holding mail until login is restored");
+        self.on_hold(None, "auth", true).await;
     }
 
     /// 收發室 worker 回報額度用完
     pub(super) async fn on_quota(&mut self, resets_at: Option<u64>, kind: &str) {
+        self.on_hold(resets_at, kind, false).await;
+    }
+
+    /// 扣住：額度用完（auth＝false）或收發室登入失效（auth＝true），除了通知寄件人的字、延遲說明的字，做法完全一樣
+    async fn on_hold(&mut self, resets_at: Option<u64>, kind: &str, auth: bool) {
         let now = self.now;
+        let was_holding = self.quota_until > 0;
+        if !was_holding {
+            self.hold_since = now;
+        }
+        self.hold_auth = auth;
         let until = resets_at.map(|s| s * 1000 + QUOTA_MARGIN_MS).filter(|u| *u > now).unwrap_or(now + QUOTA_RETRY_MS);
         // 暫停時間只會延長：扣住期間試送又撞額度（時間不明）不能把已知的重置時間縮短，也不能先清掉
         self.quota_until = self.quota_until.max(until);
         let until = self.quota_until;
-        self.next_probe_at = (now + QUOTA_RETRY_MS).min(until);
+        // 登入失效的第一次試送提早（約 5 分鐘）：馬上知道是不是暫時的，也讓登入失效偵測湊得到第二筆；之後才每小時一次
+        let first_probe = if auth && !was_holding { AUTH_FIRST_PROBE_MS } else { QUOTA_RETRY_MS };
+        self.next_probe_at = (now + first_probe).min(until);
         self.probe_id = None;
         self.log.line(&format!("worker quota exhausted ({kind}): hold until {} (resets_at={resets_at:?}), next probe {}", taipei_hm(until), taipei_hm(self.next_probe_at)));
-        self.quota_ep.get_or_insert_with(Default::default);
+        self.quota_ep.get_or_insert_with(Default::default).auth = auth;
         self.probe_misses = 0; // 收到真的額度事件：試送沒回應的計數歸零
         let newly = self.quota_hold_forwarding();
         self.persist();
@@ -115,6 +149,9 @@ impl Core {
                 self.pending[i].t0 = it.received_at;
                 newly.push(it.mail.clone());
                 self.held_first.entry(id.clone()).or_insert(it.received_at);
+                if self.hold_auth {
+                    self.held_auth.insert(id.clone());
+                }
                 self.held_items.insert(id.clone(), it);
                 self.log.line(&format!("mail id={id} held for quota (not acked)"));
             }
@@ -140,7 +177,11 @@ impl Core {
         if !ep.senders.insert(key) {
             return;
         }
-        let text = format!("[收發室] 這台的收發室 Claude 額度用完，約 {}（台北）重置；信已收到，重置後自動轉交。", taipei_hm(self.quota_until));
+        let text = if self.quota_ep.as_ref().is_some_and(|e| e.auth) {
+            "[收發室] 這台收發室的 Claude 登入失效了，信已收到、先留著，重新登入後會送出。".to_string()
+        } else {
+            format!("[收發室] 這台的收發室 Claude 額度用完，約 {}（台北）重置；信已收到，重置後自動轉交。", taipei_hm(self.quota_until))
+        };
         let o = Origin { id: m.id.clone(), from_node: m.from_node.clone(), from_agent };
         self.send_back(&o, &text, None, Some(false)).await;
     }
@@ -166,6 +207,9 @@ impl Core {
         // 第一次收到的時間：重送中用 late_from；信被重新拉回再扣住時用 held_first（延遲抬頭才不會變成最後一次拉到的時間）
         let received = self.late_from.take().or_else(|| self.held_first.get(&m.id).copied()).unwrap_or(self.now);
         self.held_first.insert(m.id.clone(), received);
+        if self.hold_auth {
+            self.held_auth.insert(m.id.clone());
+        }
         p.state = State::Held;
         p.t0 = received;
         p.t = received;
@@ -215,7 +259,8 @@ impl Core {
             if window.is_empty() {
                 window = self.unaddressed_window().unwrap_or_default();
             }
-            let text = format!("（收發室）額度用完期間群組 {} 有 {n} 則沒有轉交，範圍 #{lo}～#{hi}，要看請讀群組", rooms::clean_label(&name));
+            let why = if self.hold_auth { "收發室登入失效" } else { "額度用完" };
+            let text = format!("（收發室）{why}期間群組 {} 有 {n} 則沒有轉交，範圍 #{lo}～#{hi}，要看請讀群組", rooms::clean_label(&name));
             if window.is_empty() || !self.forwardable(&window) {
                 self.log.line(&format!("quota room summary room={room_id} not delivered (no window): {n} messages #{lo}-#{hi}"));
                 continue;
@@ -239,7 +284,16 @@ impl Core {
         }
         if self.quota_until == 0 {
             self.resend_held().await;
+            if self.quota_held_total() == 0 {
+                self.hold_auth = false;
+            }
         } else {
+            // 登入失效期間偵測到重新登入（登入檔比扣住開始新）：不等下一個整點，馬上試送；試送後重新起算，免得每個 tick 都試
+            if self.hold_auth && now < self.next_probe_at && self.relogin_since.as_ref().is_some_and(|f| f(self.hold_since)) {
+                self.log.line("login credentials updated since the hold started: probing now");
+                self.hold_since = now;
+                self.next_probe_at = now;
+            }
             self.quota_probe(now).await;
         }
     }

@@ -972,6 +972,25 @@ async fn 本人簽章的私信轉交給視窗_退回那個視窗一封寄信額�
     assert_eq!(take(&rate, "T-丙", 2, now), Ok(0), "T-丙 不動：1 封，上限 2 時寄完剩 0");
 }
 
+fn notice_bodies(h: &H) -> Vec<String> {
+    h.fr.sent().iter().map(|s| s["body"].as_str().unwrap_or("").to_string()).collect()
+}
+
+#[tokio::test]
+async fn 轉交失敗通知分清楚兩種_沒轉交_對方收到了但回覆被內容過濾擋下() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.fr.put(mail(1, json!({})));
+    h.core.pull("test", T0).await;
+    h.core.on_fail(&uid(1), "Your previous response was blocked by content safety filters").await;
+    let notes = notice_bodies(&h);
+    assert!(notes.iter().any(|b| b.contains("收到信了，但它的回覆被內容過濾擋下") && !b.contains("失敗") && !b.contains("處理了")), "只能確定收到，不說處理了：{notes:?}");
+    let mut g = harness(&[("T-乙", "idle")]).await;
+    g.fr.put(mail(2, json!({})));
+    g.core.pull("test", T0).await;
+    g.core.on_fail(&uid(2), "找不到收件人").await;
+    assert!(notice_bodies(&g).iter().any(|b| b.contains("轉交給 T-乙 失敗：找不到收件人")), "一般失敗照舊");
+}
+
 #[tokio::test]
 async fn 延後期間對方回覆了_不寄通知() {
     let mut h = harness(&[("T-乙", "busy")]).await;

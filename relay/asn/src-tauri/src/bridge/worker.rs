@@ -94,6 +94,8 @@ pub enum WorkerEvent {
     Misrouted { id: String, expected: String, actual: String },
     /// Claude 額度用完（收發室 worker 自己的額度）。resets_at＝重置時間（秒，已驗過範圍；不明為 None），kind＝額度種類（只給 log）
     Quota { resets_at: Option<u64>, kind: String },
+    /// 收發室 worker 自己的 Claude 登入失效（result 是錯誤、文字是認證失敗）。這一輪沒有交出任何信：交辦中的信馬上回報失敗，並說明是登入失效
+    AuthFailed,
 }
 
 /// resetsAt（秒）只在「現在之後、8 天之內」才採信，其餘當作不明（假額度最壞只是一小時後再試）
@@ -106,6 +108,12 @@ pub fn valid_resets_at(secs: u64, now_ms: u64) -> Option<u64> {
 fn is_limit_text(t: &str) -> bool {
     let l = t.to_lowercase();
     l.find("hit your").is_some_and(|i| l[i..].contains("limit"))
+}
+
+/// result 文字是不是 Claude 登入失效的說法（只在 is_error=true 時才呼叫）：「Failed to authenticate」「OAuth session expired」「Please run /login」
+pub fn is_auth_text(t: &str) -> bool {
+    let l = t.to_lowercase();
+    l.contains("failed to authenticate") || l.contains("oauth session expired") || l.contains("please run /login")
 }
 
 /// 從 rate_limit_info 物件取額度事件（status 必須是 rejected）
@@ -427,6 +435,8 @@ impl Parser {
         // 文字比對只在 is_error=true 才算；信件內文裡的同樣字樣（is_error=false 的回覆）不算
         if ev.get("is_error").and_then(|v| v.as_bool()) == Some(true) && is_limit_text(&txt) {
             out.events.push(WorkerEvent::Quota { resets_at: None, kind: String::new() });
+        } else if ev.get("is_error").and_then(|v| v.as_bool()) == Some(true) && is_auth_text(&txt) {
+            out.events.push(WorkerEvent::AuthFailed);
         }
         let dur = ev.get("duration_ms").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let one_line: String = txt.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(160).collect();
@@ -774,6 +784,23 @@ mod tests {
             p.feed(&call(&tid, "T-甲", &format!("x id={id}")));
             assert_eq!(p.feed(&done(&tid, content)).events, vec![WorkerEvent::Sent(id)]);
         }
+    }
+
+    #[test]
+    fn 登入失效的說法只在_is_error_時才算_信件內文裡的同樣字樣不算() {
+        let mut p = Parser::new(N);
+        let bad = json!({"type":"result","is_error":true,"result":"Failed to authenticate: OAuth session expired and could not be refreshed","duration_ms":101,"total_cost_usd":0}).to_string();
+        assert!(p.feed(&bad).events.iter().any(|e| matches!(e, WorkerEvent::AuthFailed)));
+        for t in ["OAuth session expired", "Please run /login · API Error: 401"] {
+            let l = json!({"type":"result","is_error":true,"result":t,"duration_ms":1,"total_cost_usd":0}).to_string();
+            assert!(p.feed(&l).events.iter().any(|e| matches!(e, WorkerEvent::AuthFailed)), "{t}");
+        }
+        let quoted = json!({"type":"result","is_error":false,"result":"對方寫：Failed to authenticate","duration_ms":1,"total_cost_usd":0}).to_string();
+        assert!(!p.feed(&quoted).events.iter().any(|e| matches!(e, WorkerEvent::AuthFailed)), "不是錯誤輪次不算");
+        let other = json!({"type":"result","is_error":true,"result":"boom","duration_ms":1,"total_cost_usd":0}).to_string();
+        assert!(!p.feed(&other).events.iter().any(|e| matches!(e, WorkerEvent::AuthFailed)), "別的錯誤不算");
+        let limit = json!({"type":"result","is_error":true,"result":"You've hit your session limit · resets 3pm","duration_ms":1,"total_cost_usd":0}).to_string();
+        assert!(!p.feed(&limit).events.iter().any(|e| matches!(e, WorkerEvent::AuthFailed)), "額度用完走原本的額度流程");
     }
 
     #[test]
