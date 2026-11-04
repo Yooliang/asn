@@ -750,9 +750,9 @@ mod tests {
     #[test]
     fn 帳號回報在背景跑_不靠畫面() {
         let lib = include_str!("lib.rs");
-        assert!(lib.contains("acct_remote::report_loop("), "啟動時開背景回報");
+        assert_eq!(lib.matches("acct_remote::report_loop(").count(), 1, "背景回報只開一條");
         let list = include_str!("../../ui/list.js");
-        assert!(!list.contains("accounts.report()"), "畫面不再定時回報：停在登入畫面時那段不會跑");
+        assert!(!list.contains("accounts.report()"), "畫面不再定時回報，才不會和背景工作各打一次");
     }
 
     use super::*;
