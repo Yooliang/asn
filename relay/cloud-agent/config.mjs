@@ -47,6 +47,7 @@ export function resolveConfig(rawEnv = process.env) {
     logFile: path.join(mailDir, 'recv.log'),
     pidFile: path.join(mailDir, 'recv.pid'),
     agentsFile: path.join(mailDir, 'agents.json'),
+    namesFile: path.join(mailDir, 'agent-names.json'),   // 夥伴編號 → 上次成功回報的名字（改名自動接上用）
     roomsFile: path.join(mailDir, 'rooms.json'),   // 群組游標（鍵「房號|成員key」→ 已讀到的 seq）
     agentsEnv: env.ASN_CLOUD_AGENTS || '',
     cwdLabel: (env.ASN_CLOUD_ROSTER_LABEL || 'grok-cloud').trim(),
@@ -126,6 +127,8 @@ function normalizeScannedEntry(a, cfg) {
     status: STATUSES.has(a?.status) ? a.status : 'idle',
     engine: String(a?.engine ?? cfg.engine).trim().slice(0, 20) || cfg.engine,
     cwd_label: String(a?.cwd_label ?? cfg.cwdLabel).trim().slice(0, 100) || cfg.cwdLabel,
+    // 夥伴自己不變的編號（Grok 夥伴資料夾名）：只在本機用來認出改名，名單回報前會拿掉，不送給後台
+    ...(UUID_RE.test(String(a?.id ?? '')) ? { profile_id: String(a.id) } : {}),
   }
 }
 
