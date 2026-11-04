@@ -1462,15 +1462,19 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     }
 
     /// 按鈕前的全部核對，回（畫面文字, 判斷結果, 窗格資訊）。任何一項不符都回錯，不給按鈕也不送字：
-    /// 視窗名只對到一扇 Claude 夥伴、session 程序活著（由呼叫端查）、有結束暗號且畫面上沒有標記、標題非空、判定是權限詢問
-    fn permission_checked(&self, name: &str, session_alive: bool) -> Result<(SessionSnap, super::claude_screen::ClaudeScreen, super::claude_screen::PromptText), String> {
-        if !session_alive {
-            return Err("確認不了這個夥伴還在跑".into());
-        }
+    /// 視窗名只對到一扇 Claude 夥伴、session 程序活著（由呼叫端查）而且在這扇視窗的程序樹內、有結束暗號且畫面上沒有標記、標題非空、判定是權限詢問
+    fn permission_checked(&self, name: &str, session_pid: Option<u32>) -> Result<(SessionSnap, super::claude_screen::ClaudeScreen, super::claude_screen::PromptText), String> {
+        let Some(session_pid) = session_pid else { return Err("確認不了這個夥伴還在跑".into()) };
         let ids: Vec<String> = self.watched_partners().into_iter().filter(|(_, n)| n == name).map(|(id, _)| id).collect();
         let [id] = ids.as_slice() else { return Err("找不到這個夥伴視窗".into()) };
         let snap = self.snapshot_p(id, true)?;
         self.verify_window(&snap)?;
+        // 別處開的同名 Claude 不能當成這扇視窗：程序要在這扇視窗底下，而且比視窗晚啟動（編號可能被回收）
+        let in_tree = self.runner.descendants_of(snap.window.gui_pid).contains(&session_pid);
+        let started_after = matches!((self.runner.started_ms(session_pid), snap.window.started_ms), (Some(p), Some(w)) if p >= w);
+        if !in_tree || !started_after {
+            return Err("確認不了這個夥伴是在這扇視窗裡".into());
+        }
         let nonce = {
             let g = self.inner.lock().unwrap();
             g.sessions.iter().find(|s| s.id == *id).and_then(|s| s.exit_nonce.clone()).ok_or("這扇視窗確認不了狀態")?
@@ -1491,15 +1495,15 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     }
 
     /// 權限詢問的文字，只給本機畫面的命令用（其他畫面、其他代號都拿不到文字）
-    fn permission_prompt_with(&self, name: &str, session_alive: bool) -> Result<PermissionPrompt, String> {
-        let (_, _, p) = self.permission_checked(name, session_alive)?;
+    fn permission_prompt_with(&self, name: &str, session_pid: Option<u32>) -> Result<PermissionPrompt, String> {
+        let (_, _, p) = self.permission_checked(name, session_pid)?;
         Ok(PermissionPrompt { name: name.to_string(), hash: crate::term_remote::hash_hex(&p.text), text: p.text, complete: p.complete })
     }
 
     /// 本人在本機畫面按了「允許這一次」或「拒絕」。送之前全部重查，文字要和顯示給本人的相同；
     /// 只送一個數字鍵，不帶 Enter：萬一判斷錯、其實停在輸入框，也只是打出一個字
-    fn permission_answer_with(&self, name: &str, hash: &str, allow: bool, session_alive: bool) -> Result<(), String> {
-        let (snap, screen, p) = self.permission_checked(name, session_alive)?;
+    fn permission_answer_with(&self, name: &str, hash: &str, allow: bool, session_pid: Option<u32>) -> Result<(), String> {
+        let (snap, screen, p) = self.permission_checked(name, session_pid)?;
         if crate::term_remote::hash_hex(&p.text) != hash {
             return Err("提示內容變了，沒有送出".into());
         }
@@ -2357,12 +2361,14 @@ pub struct PermissionPrompt {
     pub complete: bool,
 }
 
-/// 這個視窗名現在有活著的 Claude 程序：session 檔的編號活著、建立時間相符，而且只有一份
+/// 這個視窗名現在活著的 Claude 程序：session 檔的編號活著、建立時間相符，而且只有一份；不是一份就回 None
 #[cfg(feature = "gui")]
-fn live_session_named(name: &str) -> bool {
+fn live_session_named(name: &str) -> Option<u32> {
     let dir = crate::identity::home_dir().join(".claude").join("sessions");
     let live = crate::bridge::roster::read_sessions_with(&dir, crate::heartbeat::session_alive, 0, "").unwrap_or_default();
-    live.iter().filter(|w| w.name == name).count() == 1
+    let mut hits = live.iter().filter(|w| w.name == name);
+    let pid = hits.next()?.pid;
+    hits.next().is_none().then_some(pid)
 }
 
 /// 給本機畫面的提醒：只有視窗名與固定代號，沒有畫面內容
@@ -2826,6 +2832,7 @@ mod tests {
         calls: RefCell<Vec<(Vec<String>, BTreeMap<String, String>)>>,
         started: RefCell<Vec<Option<u64>>>,
         tree_killed: RefCell<Vec<u32>>,
+        descendants: RefCell<Vec<u32>>,
         list_json: RefCell<String>,
         screen: RefCell<String>,
         sleeps: RefCell<Vec<Duration>>,
@@ -2869,6 +2876,7 @@ mod tests {
             calls: RefCell::new(Vec::new()),
             started: RefCell::new(started),
             tree_killed: RefCell::new(Vec::new()),
+            descendants: RefCell::new(Vec::new()),
             list_json: RefCell::new(list_json),
             screen: RefCell::new(screen),
             sleeps: RefCell::new(Vec::new()),
@@ -2976,6 +2984,9 @@ mod tests {
         }
         fn alive(&self, _pid: u32) -> bool {
             !*self.inner.proc_dead.borrow()
+        }
+        fn descendants_of(&self, _pid: u32) -> Vec<u32> {
+            self.inner.descendants.borrow().clone()
         }
         fn started_ms(&self, pid: u32) -> Option<u64> {
             if let Some(q) = self.inner.pid_started.borrow_mut().get_mut(&pid) {
@@ -5515,6 +5526,7 @@ mod tests {
             assert!(!rig.svc.watched_partners().iter().any(|(w, _)| *w == panel));
         }
 
+        const SESSION_PID: u32 = 7777;
         const PERMISSION: &str = include_str!("../../tests/fixtures/term-screens/claude-permission-bash.txt");
 
         /// 開一扇視窗，窗格標題非空、畫面是權限詢問
@@ -5526,6 +5538,7 @@ mod tests {
             let pane = rig.svc.snapshot_p(&id, true).unwrap().pane_id;
             *rig.runner.inner.list_json.borrow_mut() = format!(r#"[{{"pane_id":{pane},"tab_id":1,"title":"◐ 工作中","workspace":"asn-{id}"}}]"#);
             *rig.runner.inner.screen.borrow_mut() = PERMISSION.into();
+            rig.runner.inner.descendants.borrow_mut().push(SESSION_PID);
             rig
         }
 
@@ -5536,11 +5549,11 @@ mod tests {
         #[test]
         fn 權限按鈕_允許只送數字_拒絕送最後的_no_都不帶_enter() {
             let rig = permission_rig();
-            let p = rig.svc.permission_prompt_with("小乙", true).unwrap();
+            let p = rig.svc.permission_prompt_with("小乙", Some(SESSION_PID)).unwrap();
             assert!(p.complete && p.text.contains("mkdir c1dir"), "{p:?}");
-            rig.svc.permission_answer_with("小乙", &p.hash, true, true).unwrap();
+            rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).unwrap();
             assert_eq!(sent(&rig), vec!["1"]);
-            rig.svc.permission_answer_with("小乙", &p.hash, false, true).unwrap();
+            rig.svc.permission_answer_with("小乙", &p.hash, false, Some(SESSION_PID)).unwrap();
             assert_eq!(sent(&rig), vec!["1", "4"]);
             assert!(!sent(&rig).iter().any(|s| s.contains('\r')));
         }
@@ -5548,42 +5561,56 @@ mod tests {
         #[test]
         fn 權限按鈕_內容變了或不完整或前景確認不了_都不送() {
             let rig = permission_rig();
-            let p = rig.svc.permission_prompt_with("小乙", true).unwrap();
+            let p = rig.svc.permission_prompt_with("小乙", Some(SESSION_PID)).unwrap();
             // 文字變了
-            assert!(rig.svc.permission_answer_with("小乙", "別的雜湊", true, true).unwrap_err().contains("變了"));
+            assert!(rig.svc.permission_answer_with("小乙", "別的雜湊", true, Some(SESSION_PID)).unwrap_err().contains("變了"));
             *rig.runner.inner.screen.borrow_mut() = PERMISSION.replace("mkdir c1dir", "rm -rf ~");
-            assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, true).unwrap_err().contains("變了"));
+            assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).unwrap_err().contains("變了"));
             // 提示消失、變成假提示
             *rig.runner.inner.screen.borrow_mut() = include_str!("../../tests/fixtures/term-screens/claude-lookalike-model-text.txt").into();
-            assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, true).is_err());
-            assert!(rig.svc.permission_prompt_with("小乙", true).is_err(), "不是權限詢問就拿不到文字");
+            assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).is_err());
+            assert!(rig.svc.permission_prompt_with("小乙", Some(SESSION_PID)).is_err(), "不是權限詢問就拿不到文字");
             // session 程序確認不了
             *rig.runner.inner.screen.borrow_mut() = PERMISSION.into();
-            assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, false).is_err());
+            assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, None).is_err());
             // 已經結束
             *rig.runner.inner.screen.borrow_mut() = format!("{PERMISSION}{DEAD_SCREEN}");
-            assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, true).is_err());
+            assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).is_err());
             // 標題是空的
             *rig.runner.inner.screen.borrow_mut() = PERMISSION.into();
             let saved = rig.runner.inner.list_json.borrow().clone();
             *rig.runner.inner.list_json.borrow_mut() = saved.replace("◐ 工作中", "");
-            assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, true).is_err());
+            assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).is_err());
             *rig.runner.inner.list_json.borrow_mut() = saved;
             // 沒有暗號
             rig.svc.inner.lock().unwrap().sessions.iter_mut().for_each(|s| s.exit_nonce = None);
-            assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, true).is_err());
+            assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).is_err());
             assert!(sent(&rig).is_empty(), "以上都沒有送任何字：{:?}", sent(&rig));
+        }
+
+        #[test]
+        fn 權限按鈕_別處開的同名程序或編號被回收_不給也不送() {
+            let rig = permission_rig();
+            let p = rig.svc.permission_prompt_with("小乙", Some(SESSION_PID)).unwrap();
+            // 不在這扇視窗的程序樹內
+            assert!(rig.svc.permission_prompt_with("小乙", Some(9999)).unwrap_err().contains("這扇視窗"));
+            assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, Some(9999)).is_err());
+            // 在樹內，但比視窗早啟動（編號被回收）或查不到時間
+            rig.runner.inner.pid_started.borrow_mut().insert(SESSION_PID, vec![Some(1), None]);
+            assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).is_err());
+            assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).is_err());
+            assert!(sent(&rig).is_empty());
         }
 
         #[test]
         fn 權限按鈕_提示太長不能允許_可以拒絕() {
             let rig = permission_rig();
             *rig.runner.inner.screen.borrow_mut() = " rm -rf a\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n".into();
-            let p = rig.svc.permission_prompt_with("小乙", true).unwrap();
+            let p = rig.svc.permission_prompt_with("小乙", Some(SESSION_PID)).unwrap();
             assert!(!p.complete);
-            assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, true).unwrap_err().contains("太長"));
+            assert!(rig.svc.permission_answer_with("小乙", &p.hash, true, Some(SESSION_PID)).unwrap_err().contains("太長"));
             assert!(sent(&rig).is_empty());
-            rig.svc.permission_answer_with("小乙", &p.hash, false, true).unwrap();
+            rig.svc.permission_answer_with("小乙", &p.hash, false, Some(SESSION_PID)).unwrap();
             assert_eq!(sent(&rig), vec!["2"]);
         }
 
