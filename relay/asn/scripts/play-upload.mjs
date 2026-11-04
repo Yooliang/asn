@@ -79,10 +79,13 @@ export const getAccessToken = async (sa, request, tokenUri = sa.token_uri) => {
   return t
 }
 
-// 更新說明：CHANGELOG 最新一段，超過上限就截斷。
+// 更新說明：CHANGELOG 最新一段，超過上限就截在整條結尾，下一行放「…」，不留半句。
+// 第一條就超過上限（找不到換行）才截在字數上限。
 export const releaseNotes = (changelog, version) => {
   const t = changelogFirstSection(changelog) || `ASN ${version} 更新`
-  return t.length > NOTES_LIMIT ? `${t.slice(0, NOTES_LIMIT - 1)}…` : t
+  if (t.length <= NOTES_LIMIT) return t
+  const end = t.lastIndexOf('\n', NOTES_LIMIT - 2)   // 含結尾的「\n…」兩個字元，總長不超過上限
+  return end > 0 ? `${t.slice(0, end).trimEnd()}\n…` : `${t.slice(0, NOTES_LIMIT - 1)}…`
 }
 
 export const publishAab = async ({ aabFile, sa, notes, version = '', packageName = PACKAGE_NAME, track = 'internal', apiBase = DEFAULT_BASE, tokenUri, request = makeRequester(), log = () => {} }) => {

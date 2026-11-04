@@ -125,10 +125,36 @@ test('重試：5xx 與網路錯誤會重試，4xx 不重試', async () => {
   assert.equal(tries, 3)
 })
 
-test('更新說明：取 CHANGELOG 最新一段，超長截斷到 500 字', () => {
+test('更新說明：取 CHANGELOG 最新一段；第一條就超長才截在 500 字', () => {
   assert.equal(releaseNotes('# t\n\n## 1.0（x）\n- 甲\n\n## 0.9（y）\n- 乙\n', '1.0'), '- 甲')
   assert.equal(releaseNotes('', '2.0'), 'ASN 2.0 更新')
-  assert.equal(releaseNotes(`## 1（x）\n- ${'字'.repeat(900)}`, '1').length, 500)
+  const long = releaseNotes(`## 1（x）\n- ${'字'.repeat(900)}`, '1')
+  assert.equal(long.length, 500)
+  assert.ok(long.endsWith('…'))
+})
+
+test('更新說明超長：截在整條結尾，不留半句，總長不超過 500', () => {
+  const line = n => `- ${String(n).padStart(3, '0')}${'字'.repeat(95)}`   // 每條 100 字，加換行 101
+  const lines = Array.from({ length: 8 }, (_, i) => line(i))
+  const notes = releaseNotes(`## 1（x）\n${lines.join('\n')}`, '1')
+  assert.equal(notes, `${lines.slice(0, 4).join('\n')}\n…`)
+  assert.ok(notes.length <= 500, String(notes.length))
+  for (const l of notes.split('\n').slice(0, -1)) assert.ok(lines.includes(l), '每一條都要完整')
+})
+
+test('更新說明長度邊界：剛好 500 不截；501 才截；結尾的「…」不會讓總長超過 500', () => {
+  const sized = n => `- ${'甲'.repeat(240)}\n- ${'乙'.repeat(n - 245)}`   // 第一條 242 字＋換行＋第二條
+  assert.equal(sized(500).length, 500)
+  assert.equal(releaseNotes(`## 1（x）\n${sized(500)}`, '1'), sized(500))
+  assert.equal(releaseNotes(`## 1（x）\n${sized(501)}`, '1'), `- ${'甲'.repeat(240)}\n…`)
+  // 換行正好落在上限前後：整條能放下就留，放不下就退到前一條，總長都不超過 500
+  for (const firstLen of [496, 497, 498, 499, 500]) {
+    const first = `- ${'甲'.repeat(firstLen - 2)}`
+    const notes = releaseNotes(`## 1（x）\n- 短\n${first}\n- 尾`, '1')
+    assert.ok(notes.length <= 500, `${firstLen}：${notes.length}`)
+    assert.ok(notes.endsWith('\n…'), `${firstLen} 要截在整條結尾`)
+    for (const l of notes.split('\n').slice(0, -1)) assert.ok(l === '- 短' || l === first, `${firstLen} 不能有半句`)
+  }
 })
 
 test('金鑰檔：缺檔給純中文設定說明、結束碼非 0；格式不對不洩漏內容', () => {

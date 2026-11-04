@@ -20,6 +20,9 @@
 6. 在群組貼：版本、主線 commit、合併了哪些 PR（含 SHA）、測試數、沒驗證的事。
 
 踩過的坑：
+- **版本號要跳號時（例如 0.2.3，手機測試版已用掉 0.2.2、main 還是 0.2.1）不能直接 `npm run release`**：它會再加一，帶 `--notes` 還會多寫一段 CHANGELOG。做法：手動改好 `relay/asn/package.json`、`relay/asn/src-tauri/tauri.conf.json`、`relay/asn/src-tauri/Cargo.toml`、`relay/claude-mod/.claude-plugin/plugin.json` 四個版本檔和 `relay/asn/src-tauri/Cargo.lock`，CHANGELOG 把缺的版本和這版都寫進去（測試不准缺號，最新一段要等於 `package.json`），再跑 `npm run release -- --no-bump`，不帶 `--notes`。可以先用 `node scripts/release.mjs --print-notes --no-bump` 看說明。
+- **`bump.mjs` 不改 `Cargo.lock`，CI 的 `bridge-check` 用 `cargo check --locked`**：先提交版本號再跑 CI 時，`Cargo.lock` 裡 `asn` 那段的版本要一起改。平常的發版流程是打包時順便更新 lock，再一起提交，所以不會碰到。
+- Play 更新說明上限 500 字：`releaseNotes` 取 CHANGELOG 最新一段，超過就截在整條結尾，後面看不到，所以最重要的限制要放第一條。電腦版的更新說明不截斷。
 - `release` 會依 `package.json` 升版；如果合併後又要補東西，先 `git checkout -- relay site/public` 還原版本檔再重跑，不然會跳版。
 - **用 `cargo build` 編測試版（沒走 `npm run build`）要先在 `relay/asn` 跑 `npm install` 與 `node scripts/prep.mjs`**：`ui/vendor/`（Vue、DiceBear 的打包檔）在 `.gitignore`，新的 checkout／工作樹沒有它，只有 `tauri build` 的 `beforeBuildCommand` 會自動跑 prep。沒跑的話畫面沒有 Vue，整頁會是沒編譯的 `{{ … }}`（2026-11-05 在 30家用 踩到）。編完先看 `ui/vendor/vue.global.prod.js` 在不在；改了 `ui/` 之後 cargo 會不會重新打包畫面我沒驗證過；保險做法是先 `touch src-tauri/src/lib.rs` 再編（我每次都這樣做，沒有比較過不做的結果）。
 - 測試用 `CARGO_TARGET_DIR=<共用的 target 資料夾>`（共用編譯快取，快很多）。
