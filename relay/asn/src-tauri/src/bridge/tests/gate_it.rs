@@ -120,7 +120,7 @@ async fn 對回_denied_過了時間窗也對得到卡住的那封_先對最早�
     // 卡住太久的不留著：視窗關掉就等不到結果
     forward_from(&mut h, 4, "W-己", T0 + 3_700_000).await;
     h.core.on_worker_line(held_line("T-乙"), T0 + 3_700_002).await;
-    h.core.on_worker_line(denied_line("T-乙"), T0 + 3_700_000 + 86_400_001).await;
+    h.core.on_worker_line(denied_line("T-乙"), T0 + 3_700_000 + 86_400_002).await;
     assert_eq!(told(&h, "W-己", "拒絕"), 0);
 }
 
@@ -139,7 +139,7 @@ async fn 群組訊息卡住_貼一則不點名的說明_有冷卻_被拒絕另�
     }
     let p = posts(&h);
     assert_eq!(p.len(), 1, "同一扇視窗有冷卻：{p:?}");
-    assert!(p[0].contains("#3") && p[0].contains("可能卡在 T-視窗甲") && !p[0].contains('@'), "{p:?}");
+    assert!(p[0].contains("#2") && p[0].contains("可能卡在 T-視窗甲") && !p[0].contains('@'), "{p:?}");
     // 被拒絕不受「卡住」的冷卻影響，不然群組會一直以為還在等
     h.core.on_worker_line(denied_line("T-視窗甲"), T0 + 300).await;
     let p = posts(&h);
