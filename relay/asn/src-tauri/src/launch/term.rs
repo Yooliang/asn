@@ -2294,7 +2294,24 @@ fn write_screen_code(dir: &Path, sid: &str, code: Option<&str>, now: u64) {
     }
 }
 
-/// 背景讀 Claude 夥伴視窗的畫面，判斷卡在哪（todo-next-162 第 2 段）。預設關；這一段只標狀態，沒有按鈕，也不送字
+/// 給本機畫面的提醒：只有視窗名與固定代號，沒有畫面內容
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct PartnerNotice {
+    pub name: String,
+    pub code: &'static str,
+}
+
+/// 背景工作最新的判斷結果（只給本機畫面的命令讀）
+#[cfg(feature = "gui")]
+static PARTNER_NOTICES: Mutex<Vec<PartnerNotice>> = Mutex::new(Vec::new());
+
+/// 本機畫面的命令用：開關關著或沒有提示就是空的。不讀畫面，只回背景工作判斷好的結果
+#[cfg(feature = "gui")]
+pub fn partner_notices() -> Vec<PartnerNotice> {
+    PARTNER_NOTICES.lock().map(|g| g.clone()).unwrap_or_default()
+}
+
+/// 背景讀 Claude 夥伴視窗的畫面，判斷卡在哪（todo-next-162）。預設關；只標狀態與提醒本人，沒有按鈕，也不送字
 #[cfg(feature = "gui")]
 pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, data_dir: &Path) {
     use super::screen_watch::{match_sessions, pace_of, Schedule, ENV_SCREEN_WATCH, TICK_MS};
@@ -2307,20 +2324,46 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, data_dir: &Path) {
     let log_dir = data_dir.to_path_buf();
     let spawned = std::thread::Builder::new().name("asn-screen-watch".into()).spawn(move || {
         let mut schedule = Schedule::default();
+        // 編號 → 目前的提醒
+        let mut notices: std::collections::BTreeMap<String, PartnerNotice> = Default::default();
         loop {
             std::thread::sleep(std::time::Duration::from_millis(TICK_MS));
             let now = crate::heartbeat::now_ms();
             // 活著的 session（程序還在、建立時間相符）。還沒有檔案的視窗這一輪不讀，名單也沒有那一列可標
             let live = crate::bridge::roster::read_sessions_with(&sessions_dir, crate::heartbeat::session_alive, 0, "").unwrap_or_default();
             let sessions: Vec<(String, String)> = live.into_iter().filter_map(|w| w.session_id.map(|sid| (w.name, sid))).collect();
-            let partners: Vec<(String, String)> = match_sessions(&terms.watched_partners(), &sessions).into_iter().filter(|(_, sid)| crate::bridge::roster::valid_sid(sid)).collect();
-            let windows: Vec<(String, super::screen_watch::Pace)> = partners.iter().map(|(id, sid)| (id.clone(), pace_of(mod_state_of(&status_dir, sid).as_deref()))).collect();
+            let all = terms.watched_partners();
+            let matched: Vec<(String, String)> = match_sessions(&all, &sessions).into_iter().filter(|(_, sid)| crate::bridge::roster::valid_sid(sid)).collect();
+            let ids: Vec<&str> = all.iter().map(|(id, _)| id.as_str()).collect();
+            let mut windows: Vec<(String, super::screen_watch::Pace)> = Vec::new();
+            for (id, _) in &all {
+                match matched.iter().find(|(w, _)| w == id) {
+                    Some((_, sid)) => windows.push((id.clone(), pace_of(mod_state_of(&status_dir, sid).as_deref()))),
+                    // 還沒有 session 檔：名單沒有這一列可標，只在剛開的一段時間內讀，結果只給本機畫面
+                    None if schedule.early(id, now, &ids) => windows.push((id.clone(), pace_of(None))),
+                    None => {}
+                }
+            }
+            notices.retain(|id, _| windows.iter().any(|(w, _)| w == id));
             for id in schedule.due(now, &windows, free_memory_bytes()) {
                 let Some(pace) = windows.iter().find(|(w, _)| *w == id).map(|(_, p)| *p) else { continue };
-                let Some((_, sid)) = partners.iter().find(|(w, _)| *w == id) else { continue };
                 let result = terms.partner_screen_code(&id);
-                write_screen_code(&screen_dir, sid, result.as_ref().ok().copied().flatten(), now);
+                let code = result.as_ref().ok().copied().flatten();
+                if let Some((_, sid)) = matched.iter().find(|(w, _)| *w == id) {
+                    write_screen_code(&screen_dir, sid, code, now);
+                }
+                match (code, all.iter().find(|(w, _)| *w == id)) {
+                    (Some(code), Some((_, name))) => {
+                        notices.insert(id.clone(), PartnerNotice { name: name.clone(), code });
+                    }
+                    _ => {
+                        notices.remove(&id);
+                    }
+                }
                 schedule.done(&id, pace, result.is_ok(), now);
+            }
+            if let Ok(mut g) = PARTNER_NOTICES.lock() {
+                *g = notices.values().cloned().collect();
             }
             if let Some(line) = schedule.report(now, windows.len()) {
                 let _ = crate::ui_log::append(&log_dir, &[format!("{} info [ASN] {line}", crate::claude_quota::iso_secs(now as i64))]);
@@ -5397,12 +5440,18 @@ mod tests {
         }
 
         #[test]
-        fn 讀畫面判斷_沒有接到前端命令() {
+        fn 讀畫面判斷_沒有接到前端命令_本機提醒只有視窗名與代號() {
             for name in ["partner_screen_code", "watched_partners"] {
                 assert!(!include_str!("../lib.rs").contains(name), "{name}");
                 assert!(!include_str!("../term_remote.rs").contains(name), "{name}");
                 assert!(!include_str!("../bridge/launcher.rs").contains(name), "{name}");
             }
+            // 本機提醒的命令不接 CLI、遠端、後台
+            for src in [include_str!("../term_remote.rs"), include_str!("../bridge/launcher.rs"), include_str!("../cli/mod.rs")] {
+                assert!(!src.contains("partner_notices"));
+            }
+            let v = serde_json::to_value(PartnerNotice { name: "甲".into(), code: "login" }).unwrap();
+            assert_eq!(v, serde_json::json!({"name": "甲", "code": "login"}), "只有這兩欄");
         }
 
         #[test]
