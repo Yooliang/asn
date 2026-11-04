@@ -762,7 +762,8 @@ mod tests {
         std::fs::create_dir_all(&bin_dir).unwrap();
         script(
             &bin_dir,
-            &format!("echo %*>> \"{}\"\r\necho CC[%CLAUDECODE%] EP[%CLAUDE_CODE_ENTRYPOINT%] KEY[%ASN_RELAY_KEY%] HOME[%USERPROFILE%]>> \"{}\"\r\nexit /b 0", log.display(), envlog.display()),
+            // .cmd 是 UTF-8，路徑可能有中文（暫存資料夾在中文帳號底下，#762）：先切字碼頁，cmd 才讀得對
+            &format!("chcp 65001 >nul\r\necho %*>> \"{}\"\r\necho CC[%CLAUDECODE%] EP[%CLAUDE_CODE_ENTRYPOINT%] KEY[%ASN_RELAY_KEY%] HOME[%USERPROFILE%]>> \"{}\"\r\nexit /b 0", log.display(), envlog.display()),
             &format!("echo \"$@\" >> '{}'\necho \"CC[$CLAUDECODE] EP[$CLAUDE_CODE_ENTRYPOINT] KEY[$ASN_RELAY_KEY] HOME[$USERPROFILE]\" >> '{}'\nexit 0", log.display(), envlog.display()),
         );
         let home_s = fake_home.to_string_lossy().into_owned();
