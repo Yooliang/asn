@@ -161,3 +161,94 @@ async fn 轉交逾時沒走到_sent_內文檔與核對紀錄也清掉_不留到�
     assert!(!h.work.path().join(forward_gate::BODY_DIR).join(uid(1)).exists(), "內文檔清掉");
     assert!(h.core.exact_ids_empty(), "核對表也清掉");
 }
+
+// ───────── 啟動自我測試（#780 第二段）：結果決定原文替換生不生效 ─────────
+
+use crate::bridge::forward_selftest::Outcome;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+/// 跑一輪 tick：沒在跑就開始跑，等背景工作交回結果、再 tick 一次把結果收下
+async fn selftest_round(h: &mut H, now: u64) {
+    h.core.tick(now).await;
+    for _ in 0..400 {
+        if !h.core.test_selftest_busy() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        h.core.tick(now).await;
+    }
+}
+
+fn fake(outs: Vec<Outcome>) -> (Arc<AtomicU32>, impl Fn(&str, &std::path::Path) -> (Option<String>, Outcome) + Send + Sync + 'static) {
+    let n = Arc::new(AtomicU32::new(0));
+    let n2 = n.clone();
+    (n, move |_: &str, _: &std::path::Path| {
+        let i = n2.fetch_add(1, Ordering::SeqCst) as usize;
+        (Some("9.9.9".to_string()), outs[i.min(outs.len() - 1)].clone())
+    })
+}
+
+fn turn_on_selftest(h: &mut H) {
+    h.core.cfg.forward_exact = true;
+    h.core.cfg.forward_exact_unverified = false;
+    h.core.cfg.forward_hook = true;
+}
+
+#[tokio::test]
+async fn 自我測試通過_原文替換才生效_log_寫明() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    turn_on_selftest(&mut h);
+    let (n, f) = fake(vec![Outcome::Passed("frame=x".into())]);
+    h.core.test_set_selftest(f);
+    assert!(!h.core.test_exact_active(), "還沒測過不生效");
+    selftest_round(&mut h, T0).await;
+    assert!(h.core.test_exact_active());
+    assert_eq!(n.load(Ordering::SeqCst), 1);
+    assert!(h.core.log.has("selftest passed claude=9.9.9"));
+}
+
+#[tokio::test]
+async fn 自我測試沒過或測不了_轉交走舊辦法_一小時內不重測_隔了再測() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    turn_on_selftest(&mut h);
+    let (n, f) = fake(vec![Outcome::Failed("內容不同".into()), Outcome::Unrun("起不來".into()), Outcome::Passed("ok".into())]);
+    h.core.test_set_selftest(f);
+    selftest_round(&mut h, T0).await;
+    assert!(!h.core.test_exact_active() && h.core.log.has("selftest FAILED") && h.core.log.has("內容不同"));
+    selftest_round(&mut h, T0 + 1_800_000).await;
+    assert_eq!(n.load(Ordering::SeqCst), 1, "一小時內不重測");
+    selftest_round(&mut h, T0 + 3_600_000).await;
+    assert!(!h.core.test_exact_active() && h.core.log.has("selftest 未驗") && h.core.log.has("起不來"));
+    selftest_round(&mut h, T0 + 7_200_000).await;
+    assert!(h.core.test_exact_active(), "之後通過就生效");
+    assert_eq!(n.load(Ordering::SeqCst), 3);
+}
+
+#[tokio::test]
+async fn 通過後每小時重看一次_換版沒過就退回舊辦法() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    turn_on_selftest(&mut h);
+    let (n, f) = fake(vec![Outcome::Passed("ok".into()), Outcome::Failed("新版內容不同".into())]);
+    h.core.test_set_selftest(f);
+    selftest_round(&mut h, T0).await;
+    assert!(h.core.test_exact_active());
+    selftest_round(&mut h, T0 + 600_000).await;
+    assert_eq!(n.load(Ordering::SeqCst), 1);
+    selftest_round(&mut h, T0 + 3_600_000).await;
+    assert!(!h.core.test_exact_active(), "換版沒過，不再生效");
+    assert!(h.core.log.has("新版內容不同"));
+}
+
+#[tokio::test]
+async fn 沒開旗標_沒有_hook_或開發機強制生效_都不跑自我測試() {
+    for (exact, hook, forced) in [(false, true, false), (true, false, false), (true, true, true)] {
+        let mut h = harness(&[("T-乙", "idle")]).await;
+        h.core.cfg.forward_exact = exact;
+        h.core.cfg.forward_hook = hook;
+        h.core.cfg.forward_exact_unverified = forced;
+        let (n, f) = fake(vec![Outcome::Passed("ok".into())]);
+        h.core.test_set_selftest(f);
+        selftest_round(&mut h, T0).await;
+        assert_eq!(n.load(Ordering::SeqCst), 0, "{exact} {hook} {forced}");
+    }
+}
