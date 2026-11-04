@@ -948,6 +948,7 @@ impl Core {
             self.fwd_text.clear(); // 只有送錯要重送時才用得到，爆量時整批丟掉也不影響正常轉交
         }
         self.fwd_text.insert(id.to_string(), (to.to_string(), text.clone()));
+        self.parser.keep_original(id, &text);
         self.write_inflight();
         let r = self.sink.say(forward_text(&self.parser.nonce, id, to, &text));
         if r.is_err() {

@@ -120,6 +120,33 @@ pub struct SendCall {
     pub other_to: Option<String>,
 }
 
+/// 轉交內容和原信比對的紀錄（只量，不擋）：只有編號與數字，絕不含內文。
+/// 比對前只統一換行和結尾空白；sent＝橋交給 worker 的字元數，got＝worker 實際送出的字元數，prefix／suffix＝開頭／結尾相同幾個字元。
+/// 原文暫存被擠掉或編號不認得時是 no-original，要另外算，分母才準。
+pub fn body_compare_line(id: &str, original: Option<&str>, got: &str) -> String {
+    let got_chars = got.chars().count();
+    let Some(original) = original else {
+        return format!("forward-body id={id} result=no-original got={got_chars}");
+    };
+    let sent_chars = original.chars().count();
+    if original == got {
+        return format!("forward-body id={id} result=same sent={sent_chars} got={got_chars}");
+    }
+    let (a, b) = (normalize_body(original), normalize_body(got));
+    if a == b {
+        return format!("forward-body id={id} result=whitespace sent={sent_chars} got={got_chars}");
+    }
+    let (ac, bc): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    let prefix = ac.iter().zip(&bc).take_while(|(x, y)| x == y).count();
+    let room = ac.len().min(bc.len()) - prefix; // 結尾不和開頭重疊
+    let suffix = ac.iter().rev().zip(bc.iter().rev()).take(room).take_while(|(x, y)| x == y).count();
+    format!("forward-body id={id} result=diff sent={sent_chars} got={got_chars} prefix={prefix} suffix={suffix}")
+}
+
+fn normalize_body(s: &str) -> String {
+    s.replace("\r\n", "\n").trim_end().to_string()
+}
+
 /// 從 SendMessage 的 tool_input 取出呼叫內容；缺 `to` 或 `message` 回 None
 pub fn parse_send_call(input: &Value) -> Option<SendCall> {
     let to = input.get("to")?.as_str()?.to_string();
@@ -213,6 +240,30 @@ mod tests {
 
     const A: &str = "00000000-0000-0000-0000-00000000000a";
     const B: &str = "00000000-0000-0000-0000-00000000000b";
+
+    #[test]
+    fn 內文比對_相同_只差換行空白_不同_沒有原文各記各的_不含內文() {
+        let secret = "機密內文-不可進記錄";
+        let original = format!("抬頭 id={A}\n{secret}\n結尾");
+        assert_eq!(body_compare_line(A, Some(&original), &original), format!("forward-body id={A} result=same sent=20 got=20").replace("sent=20 got=20", &format!("sent={0} got={0}", original.chars().count())));
+        let crlf = format!("{}\r\n", original.replace('\n', "\r\n"));
+        assert!(body_compare_line(A, Some(&original), &crlf).contains("result=whitespace"));
+        // 結尾多一行：開頭全相同、結尾 0
+        let extra = format!("{original}\n多打的一行");
+        let n = original.chars().count();
+        let line = body_compare_line(A, Some(&original), &extra);
+        assert!(line.contains("result=diff") && line.contains(&format!("prefix={n} suffix=0")), "{line}");
+        // 中間改一個字：開頭、結尾各自相同
+        let line = body_compare_line(A, Some("甲乙丙丁戊"), "甲乙X丁戊");
+        assert!(line.ends_with("sent=5 got=5 prefix=2 suffix=2"), "{line}");
+        // 重複的字：結尾不和開頭重疊
+        let line = body_compare_line(A, Some("aaa"), "aaaa");
+        assert!(line.ends_with("sent=3 got=4 prefix=3 suffix=0"), "{line}");
+        assert_eq!(body_compare_line(A, None, &original), format!("forward-body id={A} result=no-original got={n}"));
+        for l in [body_compare_line(A, Some(&original), &extra), body_compare_line(A, None, &original), body_compare_line(A, Some(&original), &crlf)] {
+            assert!(!l.contains(secret) && !l.contains("多打"), "記錄不含內文：{l}");
+        }
+    }
 
     fn item(to: &str, head: Option<&str>) -> InflightItem {
         InflightItem { to: to.to_string(), head: head.map(|h| head_hash(h)) }

@@ -131,6 +131,8 @@ pub struct Parsed {
 }
 
 const INFLIGHT_MAX: usize = 200;
+/// 比對用原文暫存的總量上限
+const ORIGINALS_MAX_BYTES: usize = 8 * 1024 * 1024;
 /// 已經結束（Sent／Fail／逾時）的編號還記著多少個：之後才出現的同編號呼叫（重複送、送錯）仍認得出來
 const RECENT_MAX: usize = 200;
 
@@ -197,6 +199,9 @@ pub struct Parser {
     misrouted_buf: Vec<(String, String, String)>,
     /// 橋送出每一封第一行的指紋（編號 → sha256）：呼叫的訊息第一行要完全一樣才算數
     heads: HashMap<String, String>,
+    /// 轉交原文（只在記憶體，編號不再等了就丟）：比對 worker 送出的內容用；總量有上限，放不下就記 no-original
+    originals: HashMap<String, String>,
+    originals_bytes: usize,
     /// inflight 有變動（核心要重寫 hook 讀的 inflight 檔）
     dirty: bool,
     /// 「工具結果看不懂」的警告已經記過（每次啟動只記第一次，不洗版）
@@ -283,12 +288,13 @@ pub fn has_foreign_nonce(txt: &str, nonce: &str) -> bool {
 
 impl Parser {
     pub fn new(nonce: &str) -> Parser {
-        Parser { nonce: nonce.into(), inflight: vec![], recent: Default::default(), send_calls: HashMap::new(), misrouted_buf: vec![], heads: HashMap::new(), dirty: false, warned_unrecognized: false, last_cost: 0.0 }
+        Parser { nonce: nonce.into(), inflight: vec![], recent: Default::default(), send_calls: HashMap::new(), misrouted_buf: vec![], heads: HashMap::new(), originals: HashMap::new(), originals_bytes: 0, dirty: false, warned_unrecognized: false, last_cost: 0.0 }
     }
     /// 轉交一封信前登記（id → 目標視窗）
     pub fn register(&mut self, id: &str, to: &str) {
         if self.inflight.len() >= INFLIGHT_MAX {
-            self.inflight.remove(0);
+            let (old, _) = self.inflight.remove(0);
+            self.drop_original(&old);
         }
         self.inflight.retain(|(i, _)| i != id);
         self.inflight.push((id.into(), to.into()));
@@ -299,11 +305,25 @@ impl Parser {
         self.register(id, to);
         self.heads.insert(id.into(), head);
     }
+    /// 記下這封交給 worker 的原文，之後比對 worker 實際送出的內容（只量，不擋）
+    pub fn keep_original(&mut self, id: &str, text: &str) {
+        self.drop_original(id);
+        if self.originals_bytes + text.len() <= ORIGINALS_MAX_BYTES {
+            self.originals_bytes += text.len();
+            self.originals.insert(id.into(), text.into());
+        }
+    }
+    fn drop_original(&mut self, id: &str) {
+        if let Some(t) = self.originals.remove(id) {
+            self.originals_bytes -= t.len();
+        }
+    }
     /// 這個編號不再等了（Sent、Fail、逾時）：從進行中拿掉，但還記著它的目標，之後同編號的呼叫仍認得
     pub fn forget(&mut self, id: &str) {
         if let Some(i) = self.inflight.iter().position(|(x, _)| x == id) {
             let (id, to) = self.inflight.remove(i);
             self.heads.remove(&id);
+            self.drop_original(&id);
             self.remember(id, to);
             self.dirty = true;
         }
@@ -387,6 +407,7 @@ impl Parser {
                     let tid = c.get("id").and_then(|v| v.as_str()).unwrap_or("");
                     let Some(call) = c.get("input").and_then(super::forward_gate::parse_send_call) else { continue };
                     let Some(id) = super::forward_gate::trailing_id(super::forward_gate::first_line(&call.message)) else { continue };
+                    out.logs.push(super::forward_gate::body_compare_line(&id, self.originals.get(&id).map(String::as_str), &call.message));
                     let Some(expected) = self.expected_of(&id) else { continue };
                     let head_ok = self.heads.get(&id).is_none_or(|h| *h == super::forward_gate::head_hash(super::forward_gate::first_line(&call.message)));
                     // 收件人對、欄位一致，但第一行和橋送出的不一樣：不算佐證（hook 也會擋），也不是送錯
@@ -956,6 +977,29 @@ mod tests {
         assert_ne!(v["message"]["content"][0]["input"]["content"], v["message"]["content"][0]["input"]["message"], "content 只是預覽");
         p.feed(&c);
         assert_eq!(p.feed(&done_ok("toolu_1")).events, vec![WorkerEvent::Sent(A.into())]);
+    }
+
+    #[test]
+    fn 轉交內容比對_記在_log_不影響轉交_結束就丟原文_有上限() {
+        let text = format!("抬頭 id={A}\n機密內文");
+        let mut p = Parser::new(N);
+        p.register(A, "T-甲");
+        p.keep_original(A, &text);
+        // 多打一行：照樣算轉交成功，只多一行紀錄，紀錄不含內文
+        let r = p.feed(&call("toolu_1", "T-甲", &format!("{text}\n多打的一行")));
+        let line = r.logs.iter().find(|l| l.starts_with("forward-body ")).expect("有比對紀錄");
+        assert!(line.contains("result=diff") && !line.contains("機密內文") && !line.contains("多打"), "{line}");
+        assert_eq!(p.feed(&done_ok("toolu_1")).events, vec![WorkerEvent::Sent(A.into())]);
+        assert!(p.originals.is_empty() && p.originals_bytes == 0, "轉交結束就丟");
+        // 原文已丟或沒記到：記 no-original，不當成相同
+        let r = p.feed(&call("toolu_2", "T-甲", &text));
+        assert!(r.logs.iter().any(|l| l.contains("result=no-original")), "{:?}", r.logs);
+        // 放不下就不存，下一封不受影響
+        p.keep_original(B, &"x".repeat(ORIGINALS_MAX_BYTES + 1));
+        assert!(p.originals.is_empty() && p.originals_bytes == 0);
+        p.keep_original(B, "短");
+        p.keep_original(B, "換一份");
+        assert_eq!(p.originals_bytes, "換一份".len(), "同編號重送不重複計算");
     }
 
     #[test]
