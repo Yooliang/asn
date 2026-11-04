@@ -346,7 +346,7 @@ pub fn start(work_dir: &Path, data_dir: &Path) {
     if entries.is_empty() {
         return;
     }
-    let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::identity::home_dir().join(".claude").join("sessions") };
+    let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::bridge::core::claude_sessions_dir() };
     let log_dir = work_dir.to_path_buf();
     let spawned = std::thread::Builder::new().name("asn-auto-resume".into()).spawn(move || {
         deps.sleep(START_DELAY_MS);
@@ -361,6 +361,17 @@ pub fn start(work_dir: &Path, data_dir: &Path) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 重開自動接回和橋看同一個_session_資料夾() {
+        let me = include_str!("auto_resume.rs").split("#[cfg(test)]").next().unwrap();
+        let core = include_str!("../bridge/core.rs").split("#[cfg(test)]").next().unwrap();
+        assert!(me.contains("sessions: crate::bridge::core::claude_sessions_dir()"), "自動接回要用橋的來源");
+        assert!(!me.contains(r#".join(".claude").join("sessions")"#), "不能自己再拼一份");
+        assert!(core.contains("sessions_dir: claude_sessions_dir(),"), "橋也要走同一個來源");
+        let d = crate::bridge::core::claude_sessions_dir();
+        assert!(d.ends_with(std::path::Path::new(".claude").join("sessions")), "{d:?}");
+    }
+
     use super::*;
     use crate::bridge::known::WindowFacts;
     use std::cell::{Cell, RefCell};

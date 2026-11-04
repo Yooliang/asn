@@ -122,6 +122,11 @@ pub struct Config {
     pub respond: Option<String>,
 }
 
+/// Claude 記工作階段的資料夾：橋與重開自動接回（launch::auto_resume）共用這一個來源，兩邊永遠看同一個地方
+pub fn claude_sessions_dir() -> PathBuf {
+    crate::identity::home_dir().join(".claude").join("sessions")
+}
+
 impl Config {
     pub fn from_env(node: &str, work_dir: PathBuf) -> Config {
         let test_handoff = work_dir.join("handoff");
@@ -143,7 +148,7 @@ impl Config {
             data_dir: None,
             extra_allow: list("ASN_RELAY_ALLOW"),
             work_dir,
-            sessions_dir: home.join(".claude").join("sessions"),
+            sessions_dir: claude_sessions_dir(),
             status_dir: home.join(".asn").join("status"),
             poll_ms: env_u64("ASN_RELAY_POLL_MS", 120_000),
             roster_ms: env_u64("ASN_ROSTER_MS", 60_000),

@@ -34,8 +34,10 @@ pub struct KnownEntry {
     pub facts: WindowFacts,
 }
 
-/// 開機時間容許的誤差：開機時間是用「現在－開機至今」算的，校時會讓它飄
-pub const BOOT_TOLERANCE_MS: u64 = 5 * 60_000;
+/// 開機時間容許的誤差：開機時間是用「現在－開機至今」算的，校時會讓它飄。
+/// 取 1 分鐘：太寬會把「開機後幾分鐘內又重開」算成同一次開機（30家用 11-04 09:48、09:50 連續重開兩次，
+/// 第一次開機就登入的話第二次就不接回）；校時造成的誤判最多多接一次，已開著的視窗會跳過，所以寧可窄
+pub const BOOT_TOLERANCE_MS: u64 = 60_000;
 
 #[derive(Default, Debug)]
 pub struct Known {
@@ -193,6 +195,13 @@ mod tests {
         back.forget("舊");
         back.save_if_dirty(&f, 1000).unwrap();
         assert!(Known::load(&f, 1000).entries().is_empty());
+    }
+
+    #[test]
+    fn 同一次開機的誤差約一分鐘_開機後幾分鐘內又重開算換了() {
+        assert_eq!(BOOT_TOLERANCE_MS, 60_000);
+        assert!(same_boot(1_000_000, 1_000_000 + 59_000), "校時的小誤差還是同一次開機");
+        assert!(!same_boot(1_000_000, 1_000_000 + 2 * 60_000), "兩分鐘後又重開（30家用 09:48、09:50 那種）要算換了");
     }
 
     #[test]
