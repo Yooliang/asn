@@ -16,6 +16,7 @@ import { NO_QUOTA_TEXT, planLabel, quotaBars, quotaView } from './account-quota.
 import { DEVICE_TEXT, canRemoveRow, dropAfter, moveFlags, removedRows, visibleRows } from './device-order.mjs'
 import { ROSTER_TEXT, usedOnText } from './account-roster.mjs'
 import { INSTALL_TEXT } from './agent-install.mjs'
+import { AGENT_INSTALL_UI } from './device-state.mjs'
 
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
 export const SETTING_OPS = [
@@ -99,7 +100,7 @@ export const SettingsPanel = {
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return {
       fileEl, act, pickFile, USAGE_NOTE, accountLine, groupOptions,
-      cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, onRow, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON,
+      cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, onRow, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, qv: a => quotaView(a), qb: a => quotaBars(a, { hookOn: props.st.quotaHook ? props.st.quotaHook.state === 'on' : null }), NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON,
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL,
       CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS, DIMS,
@@ -272,7 +273,7 @@ export const SettingsPanel = {
                       <small v-if="st.accounts.mod" role="status">{{ st.accounts.mod }}</small>
                       <label class="chk"><input type="checkbox" :checked="st.accounts.allowSwitch" @change="act('acct-allow-switch', $event.target.checked)" /><span>允許切換帳號</span></label>
                       <small>讓手機或別台設備替這台切換帳號。</small>
-                      <div class="dv-install" v-if="st.install && ((v.action && v.action.kind === 'local') || st.install.stage === 'running' || st.install.stage === 'done')">
+                      <div class="dv-install" v-if="AGENT_INSTALL_UI && st.install && ((v.action && v.action.kind === 'local') || st.install.stage === 'running' || st.install.stage === 'done')">
                         <template v-if="st.install.stage === 'idle'">
                           <button class="aero-btn" type="button" :disabled="st.install.button.disabled" @click="act('install-ask')">{{ INSTALL_TEXT.button }}</button>
                           <small class="acct-warn" v-if="st.install.button.hint">{{ st.install.button.hint }}</small>
@@ -297,8 +298,8 @@ export const SettingsPanel = {
                           </span>
                         </div>
                       </div>
-                      <label class="chk" v-if="st.install"><input type="checkbox" :checked="st.install.remoteAllow" @change="act('install-allow', $event.target.checked)" /><span>{{ INSTALL_TEXT.allowRemote }}</span></label>
-                      <small v-if="st.install">{{ INSTALL_TEXT.allowRemoteNote }}</small>
+                      <label class="chk" v-if="AGENT_INSTALL_UI && st.install"><input type="checkbox" :checked="st.install.remoteAllow" @change="act('install-allow', $event.target.checked)" /><span>{{ INSTALL_TEXT.allowRemote }}</span></label>
+                      <small v-if="AGENT_INSTALL_UI && st.install">{{ INSTALL_TEXT.allowRemoteNote }}</small>
                     </template>
                     <template v-else>
                       <ul class="dv-accts" v-if="v.accounts.length">

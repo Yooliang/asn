@@ -2,6 +2,7 @@
 // 送出後每 5 秒查一次狀態、狀態對應成畫面上的字。node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。給人看的文字純繁體中文。
 // 真正的安裝與登入在電腦上做（要電腦開著「允許從手機替這台安裝並登入」）；登入網址送到這支手機後，會用既有的「要你確認」頁打開，
 // 在那裡開啟網址、貼回授權碼，所以這裡不碰網址與授權碼。
+import { AGENT_INSTALL_UI } from './device-state.mjs'
 
 export const POLL_MS = 5000
 /** 等太久就不再等：後台 10 分鐘沒被電腦接手會自己當作過期；接手後 40 分鐘沒結果也會當作逾時 */
@@ -67,5 +68,5 @@ export function setupView(st, { since = 0, now = Date.now(), sawRequest = false 
   return { done: true, ok: st.state === 'done', text, note: st.replaced }
 }
 
-/** 設備細部頁要不要出現這個按鈕：只有 Claude 區、而且 installAction 說「別台可以裝」（kind 'remote'） */
-export const showSetupButton = (vendorKey, action) => vendorKey === 'claude' && action?.kind === 'remote'
+/** 設備細部頁要不要出現這個按鈕：入口有開（AGENT_INSTALL_UI）、只有 Claude 區、而且 installAction 說「別台可以裝」（kind 'remote'） */
+export const showSetupButton = (vendorKey, action, enabled = AGENT_INSTALL_UI) => enabled === true && vendorKey === 'claude' && action?.kind === 'remote'

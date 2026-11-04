@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { GIVE_UP_MS, POLL_MS, SETUP_TEXT, setupErrorText, setupStateOf, setupView, showSetupButton } from '../ui/lib/mobile-setup.mjs'
+import { AGENT_INSTALL_UI } from '../ui/lib/device-state.mjs'
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
@@ -51,10 +52,18 @@ test('等不到：剛送出還沒寫進去就繼續等；看過後來不見＝�
   assert.equal(setupView({ state: 'taken' }, { since: now - GIVE_UP_MS + 1000, now }).done, false)
 })
 
-test('按鈕只在 Claude 區、而且「別台可以裝」時出現；每 5 秒查一次', () => {
-  assert.equal(showSetupButton('claude', { kind: 'remote' }), true)
-  for (const [k, a] of [['claude', { kind: 'local' }], ['claude', null], ['codex', { kind: 'remote' }], ['grok', { kind: 'remote' }]]) assert.equal(showSetupButton(k, a), false)
+test('入口打開時，按鈕只在 Claude 區、而且「別台可以裝」時出現；每 5 秒查一次', () => {
+  assert.equal(showSetupButton('claude', { kind: 'remote' }, true), true)
+  for (const [k, a] of [['claude', { kind: 'local' }], ['claude', null], ['codex', { kind: 'remote' }], ['grok', { kind: 'remote' }]]) assert.equal(showSetupButton(k, a, true), false)
   assert.equal(POLL_MS, 5000)
+})
+
+test('入口預設關：手機版看不到「從手機安裝並登入」，畫面只靠這個判斷出現', () => {
+  assert.equal(AGENT_INSTALL_UI, false)
+  assert.equal(showSetupButton('claude', { kind: 'remote' }), false)
+  const html = read('ui/m.html')
+  assert.match(html, /v-if="v\.key === 'claude' && \(\(showSetupButton\(v\.key, v\.action\) && setupSt\.stage === 'idle'\)/)
+  assert.equal((html.match(/setupAsk\(/g) ?? []).length, 1, '送出要求的入口只有這一顆按鈕')
 })
 
 test('接線守門：先確認才送出、送出只在「確認安裝」、離開頁面就停止輪詢、手機註冊了兩個指令、文字是人話', () => {
