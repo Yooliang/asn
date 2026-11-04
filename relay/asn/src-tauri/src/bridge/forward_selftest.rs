@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// 通過紀錄：{"claude": "<版本>", "passed_at": <毫秒>}
+/// 通過紀錄：{"claude": "<claude 版本>", "asn": "<ASN 版本>", "passed_at": <毫秒>}。被測的兩半（claude 的行為、ASN 自己的 hook 與橋）任一邊換版都要重測
 pub const SELFTEST_FILE: &str = "forward-selftest.json";
 const PROBE_ID: &str = "5e1f7e57-0000-4000-8000-000000000001";
 const SEND_NAME: &str = "T-probe-send";
@@ -35,14 +35,25 @@ pub enum Outcome {
 
 // ───────── 通過紀錄 ─────────
 
-/// 上次通過時的 CLI 版本（沒有紀錄、讀不懂就是 None）
-pub fn passed_version(dir: &Path) -> Option<String> {
-    let v: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(SELFTEST_FILE)).ok()?).ok()?;
-    v.get("claude").and_then(Value::as_str).map(String::from).filter(|s| !s.is_empty())
+/// 上次通過時的兩個版本是不是和現在的一樣（沒有紀錄、讀不懂、舊格式沒有 ASN 版本都算不一樣）
+pub fn passed_for(dir: &Path, claude_version: &str, asn_version: &str) -> bool {
+    let Some(v) = std::fs::read_to_string(dir.join(SELFTEST_FILE)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) else {
+        return false;
+    };
+    let same = |k: &str, want: &str| !want.is_empty() && v.get(k).and_then(Value::as_str) == Some(want);
+    same("claude", claude_version) && same("asn", asn_version)
 }
 
-pub fn save_passed(dir: &Path, claude_version: &str, now_ms: u64) -> std::io::Result<()> {
-    crate::write_atomic(&dir.join(SELFTEST_FILE), &json!({ "claude": claude_version, "passed_at": now_ms }).to_string())
+pub fn save_passed(dir: &Path, claude_version: &str, asn_version: &str, now_ms: u64) -> std::io::Result<()> {
+    crate::write_atomic(&dir.join(SELFTEST_FILE), &json!({ "claude": claude_version, "asn": asn_version, "passed_at": now_ms }).to_string())
+}
+
+/// 要多開兩個 claude，空記憶體低於這個值就先不跑（比照讀畫面的規則）
+pub const MIN_FREE_BYTES: u64 = 3 * 1024 * 1024 * 1024;
+
+/// 空記憶體太低就不該跑；讀不到記憶體（沒有這項功能的平台）不靠它判斷
+pub fn too_little_memory(free: Option<u64>) -> bool {
+    free.is_some_and(|b| b < MIN_FREE_BYTES)
 }
 
 /// `claude --version` 的版本（第一個詞）；跑不起來是 None
@@ -494,11 +505,25 @@ mod tests {
     #[test]
     fn 通過紀錄存取_版本一換就不算() {
         let d = tempfile::tempdir().unwrap();
-        assert_eq!(passed_version(d.path()), None);
-        save_passed(d.path(), "2.1.318", 5).unwrap();
-        assert_eq!(passed_version(d.path()).as_deref(), Some("2.1.318"));
+        assert!(!passed_for(d.path(), "2.1.318", "0.2.1"));
+        save_passed(d.path(), "2.1.318", "0.2.1", 5).unwrap();
+        assert!(passed_for(d.path(), "2.1.318", "0.2.1"));
+        assert!(!passed_for(d.path(), "2.1.319", "0.2.1"), "claude 換版要重測");
+        assert!(!passed_for(d.path(), "2.1.318", "0.2.2"), "ASN 換版要重測");
+        assert!(!passed_for(d.path(), "", ""), "空版本不算");
+        // 舊格式（沒有 ASN 版本）不算
+        std::fs::write(d.path().join(SELFTEST_FILE), r#"{"claude":"2.1.318","passed_at":5}"#).unwrap();
+        assert!(!passed_for(d.path(), "2.1.318", "0.2.1"));
         std::fs::write(d.path().join(SELFTEST_FILE), "壞掉").unwrap();
-        assert_eq!(passed_version(d.path()), None);
+        assert!(!passed_for(d.path(), "2.1.318", "0.2.1"));
+    }
+
+    #[test]
+    fn 空記憶體低於三_gb_當成測不了_讀不到就不靠它() {
+        let gb = 1024u64 * 1024 * 1024;
+        assert!(too_little_memory(Some(3 * gb - 1)));
+        assert!(!too_little_memory(Some(3 * gb)));
+        assert!(!too_little_memory(None));
     }
 
     #[test]

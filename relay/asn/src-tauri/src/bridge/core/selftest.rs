@@ -13,12 +13,21 @@ pub fn real_selftest(claude: &str, dir: &std::path::Path) -> (Option<String>, Ou
     let Some(ver) = forward_selftest::claude_version(claude) else {
         return (None, Outcome::Unrun("讀不到 claude 的版本".into()));
     };
-    if forward_selftest::passed_version(dir).as_deref() == Some(ver.as_str()) {
+    let asn = env!("CARGO_PKG_VERSION");
+    if forward_selftest::passed_for(dir, &ver, asn) {
         return (Some(ver), Outcome::Passed("recorded".into()));
+    }
+    // 要多開兩個 claude：空記憶體太低就先不跑，當成測不了
+    #[cfg(feature = "gui")]
+    let free = crate::launch::term::free_memory_bytes();
+    #[cfg(not(feature = "gui"))]
+    let free: Option<u64> = None;
+    if forward_selftest::too_little_memory(free) {
+        return (Some(ver), Outcome::Unrun(format!("空記憶體只剩 {} MB（低於 3 GB），先不開兩個 claude 測", free.unwrap_or(0) / 1024 / 1024)));
     }
     let o = forward_selftest::probe(claude, dir, std::time::Duration::from_secs(60));
     if matches!(o, Outcome::Passed(_)) {
-        let _ = forward_selftest::save_passed(dir, &ver, crate::heartbeat::now_ms());
+        let _ = forward_selftest::save_passed(dir, &ver, asn, crate::heartbeat::now_ms());
     }
     (Some(ver), o)
 }

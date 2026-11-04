@@ -2380,7 +2380,7 @@ pub type LiveTerms = TermService<wezterm::RealRunner, wezterm::RealFs>;
 
 /// 空記憶體（位元組）；讀不到回 None
 #[cfg(all(feature = "gui", windows))]
-fn free_memory_bytes() -> Option<u64> {
+pub(crate) fn free_memory_bytes() -> Option<u64> {
     #[repr(C)]
     struct MemoryStatusEx {
         length: u32,
@@ -2402,7 +2402,7 @@ fn free_memory_bytes() -> Option<u64> {
     (unsafe { GlobalMemoryStatusEx(&mut m) } != 0).then_some(m.avail_phys)
 }
 #[cfg(all(feature = "gui", not(windows)))]
-fn free_memory_bytes() -> Option<u64> {
+pub(crate) fn free_memory_bytes() -> Option<u64> {
     None
 }
 
