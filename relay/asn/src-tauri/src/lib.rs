@@ -1773,7 +1773,7 @@ pub fn run() {
                 #[cfg(desktop)]
                 if handle.state::<App>().shot.is_none() {
                     let (r6, wd6) = (r.clone(), work_dir.clone());
-                    let every = std::time::Duration::from_millis(env_ms("ASN_ACCT_REPORT_MS", 300_000));
+                    let every = std::time::Duration::from_secs(300);
                     tauri::async_runtime::spawn(acct_remote::report_loop(std::time::Duration::from_secs(5), every, move || report_accounts(r6.clone(), wd6.clone())));
                 }
                 // 在線狀態與版本：啟動後（等前端把狀態交過來）與每 60 秒回報一次；前端改狀態會叫醒立刻回報。
