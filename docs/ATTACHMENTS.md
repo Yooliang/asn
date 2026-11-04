@@ -109,7 +109,7 @@ bucket `attachments`：**私有**、單檔上限 25 MB、`allowed_mime_types` �
 
 ## 部署順序（維護者同意後）
 
-1. 套用 migration `20261020000500_attachments.sql`（`npx supabase db push`）。
+1. 套用 migration `20261020000500_attachments.sql`（做法見 `BACKEND.md`，不用 `db push`）。
 2. 部署函式 `relay`（`npx supabase functions deploy relay --project-ref etccgmkrosbzpltudlgt`）。
 3. 冒煙：用假金鑰呼叫 `?action=attach_url&id=00000000-0000-0000-0000-000000000000` 應回 401。
 4. 發新版 ASN 與收發室橋、雲端代理腳本。
