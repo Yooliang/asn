@@ -36,6 +36,7 @@ import { composerView, entryLabel, screenText, termFriendId, termFriends, termId
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
+import { RELOGIN_BAR_ACTION, RELOGIN_BAR_DISMISS, RELOGIN_BAR_HINT, RELOGIN_BAR_TEXT, showReloginBar } from './lib/login.mjs'
 import { MODEL_CATALOG, cliInstalled, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
 import { PI_SETUP_TEXT, piSetupError, piSetupView } from './lib/pi-setup.mjs'
 import { CONNECT_TEXT } from './lib/connect-tools.mjs'
@@ -206,6 +207,23 @@ if (!info.shot) {
   await listen('update-progress', p => setUpd(withProgress(upd, p)))
   setInterval(() => { if (autoCheck.value) void checkUpdate() }, CHECK_MS)
   if (autoCheck.value) void checkUpdate()
+}
+// 沒登入的提醒條：這台已有節點金鑰、收發信照常，但登入掉了（或選了暫時不登入）時，名單上方說一次；按「知道了」就先不再提，
+// 登入之後又掉才會再出現。每分鐘看一次登入狀態（取不到就不顯示，不吵人）
+const reloginBar = reactive({ show: false })
+let reloginDismissed = false
+const refreshReloginBar = async () => {
+  try {
+    const st = await authApi.status()
+    if (st?.signed_in === true) reloginDismissed = false
+    reloginBar.show = showReloginBar(info.can_skip_login === true, st?.signed_in === true ? true : st?.signed_in === false ? false : null, reloginDismissed)
+  } catch { reloginBar.show = false }
+}
+const dismissReloginBar = () => { reloginDismissed = true; reloginBar.show = false }
+const goLogin = () => location.replace('login.html')
+if (!info.shot) {
+  void refreshReloginBar()
+  setInterval(() => void refreshReloginBar(), 60_000)
 }
 // 遠端更新：名單上別台設備顯示「有新版」時，本人（已登入、設備在同一帳號下）可按「更新」，請那台自己更新（後台留請求、
 // 對方 ASN 回報在線時取走並用內建更新器安裝，不經 AI）。remoteMine＝本人帳號下的設備與請求狀態；程式在 account.rs
@@ -1690,6 +1708,7 @@ const app = createApp({
     return {
       version: info.version, accounts, accountLine, deviceMenu, deviceMenuPos, openDeviceMenu, closeDeviceMenu, deviceMenuSwitch, deviceAcct, deviceAcctView, deviceAcctTitleText, closeDeviceAcct, deviceAcctSubmit, DEVICE_CONFIRM_NOTE, DEVICE_CLOSE_NOTE, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       upd, autoCheck, checkUpdate, installUpdate, updateNoticeText, progressText,
+      reloginBar, dismissReloginBar, goLogin, RELOGIN_BAR_TEXT, RELOGIN_BAR_HINT, RELOGIN_BAR_ACTION, RELOGIN_BAR_DISMISS,
       frame, FRAMES, FRAME_LABEL, setFrame, closeTo, CLOSE_CHOICES, CLOSE_LABEL, setCloseTo, trayOk, autostart, setAutostart, RESIZE_DIRS, resizeFrom, avMenu,
       contextLabel, avOf, meAv, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar,
       ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo: sendMsg, nudgeTo, sendAttachTo, loadOlder, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,

@@ -46,6 +46,11 @@
         <div class="av-note" v-if="avMsg" role="status">{{ avMsg }}</div>
       </div>
     </div>
+    <div class="upd-bar relogin-bar" v-if="reloginBar.show" role="status">
+      <span class="upd-text" :title="RELOGIN_BAR_HINT">{{ RELOGIN_BAR_TEXT }}</span>
+      <button class="aero-btn upd-btn" type="button" @click.stop="goLogin">{{ RELOGIN_BAR_ACTION }}</button>
+      <button class="aero-btn upd-btn" type="button" @click.stop="dismissReloginBar">{{ RELOGIN_BAR_DISMISS }}</button>
+    </div>
     <div class="upd-bar" v-if="upd.phase !== 'idle'" role="status" :class="{ failed: upd.phase === 'failed' }">
       <span class="upd-text" v-if="upd.phase === 'available'">{{ updateNoticeText(upd.info) }}</span>
       <span class="upd-text" v-else-if="upd.phase === 'installing'">{{ progressText(upd.done, upd.total) }}</span>
