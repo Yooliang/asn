@@ -32,3 +32,16 @@ test('同一階段只跳一次，換階段才再跳；查失敗不中斷', async
   for (let i = 0; i < 6; i++) await p.tick()
   assert.deepEqual(shown, ['夥伴還沒接回來', '已自動接回 1 位夥伴'])
 })
+
+test('接回的名字也列出來（最多 10 位，其餘寫還有幾位）；沒接回的不列接回行', () => {
+  const n = autoResumeNotice({ state: 'done', resumed: ['asn西川', '家用正見'], failed: [] })
+  assert.match(n.body, /接回的是：「asn西川」、「家用正見」/)
+  const many = autoResumeNotice({ state: 'done', resumed: Array.from({ length: 12 }, (_, i) => `p${i}`), failed: [] })
+  assert.match(many.body, /「p9」，還有 2 位/)
+  assert.doesNotMatch(many.body, /p10/)
+  const none = autoResumeNotice({ state: 'done', resumed: [], failed: [{ name: '乙', reason: 'x' }] })
+  assert.doesNotMatch(none.body, /接回的是/)
+  // 名字不是字串的丟掉，不當成空白行
+  const odd = autoResumeNotice({ state: 'done', resumed: ['甲', 7, '', null], failed: [] })
+  assert.match(odd.body, /接回的是：「甲」/)
+})

@@ -185,7 +185,8 @@ pub fn start_remote_window(config: &super::config::LaunchConfig, profile: &str, 
 /// 重開機後自動接回一位 Claude 夥伴（#767）：用本機的 Claude 視窗 profile，換上它原本的權限旗標，指定對話編號接回。
 /// 資料夾要在允許清單內；不走開新夥伴的每小時上限（這是本機的開機流程，不是遠端要求，一次要接回的可能超過上限）。回視窗 PID
 pub fn start_resumed_window(config: &super::config::LaunchConfig, name: &str, cwd: &str, session: &str, perm: &[String], hidden: bool) -> Result<u32, String> {
-    let canon = super::config::canonical_launch_cwd(cwd).map_err(|_| format!("原本的工作資料夾（{cwd}）已經不存在或不能用"))?;
+    // canonical_launch_cwd 遇到不存在的路徑會原樣交回（不報錯），所以要另外確認資料夾還在
+    let canon = super::config::canonical_launch_cwd(cwd).ok().filter(|p| p.is_dir()).ok_or_else(|| format!("原本的工作資料夾（{cwd}）已經不存在或不能用"))?;
     if !config.cwd_allow.contains(&canon) {
         return Err(format!("原本的工作資料夾（{cwd}）不在允許清單內"));
     }

@@ -318,7 +318,9 @@ impl Deps for RealDeps {
         self.live_session(name, Some(session))
     }
     fn launch(&self, e: &KnownEntry) -> Result<(), String> {
-        let config = super::config::load_launch_config()?;
+        let mut config = super::config::load_launch_config()?;
+        // 一般使用者從畫面選的資料夾記在本機同意清單（launch-prefs.json），不在 launcher.json；併進來才接得回來
+        super::cwds::allow_consented(&mut config, &e.facts.cwd, &self.data_dir);
         super::local::start_resumed_window(&config, &e.name, &e.facts.cwd, &e.facts.session, &e.facts.perm, e.facts.hidden).map(|_| ())
     }
     fn appeared(&self, name: &str) -> bool {
@@ -361,6 +363,15 @@ pub fn start(work_dir: &Path, data_dir: &Path) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 守門_自動接回開窗前併入本機同意過的資料夾() {
+        let me = include_str!("auto_resume.rs").split("#[cfg(test)]").next().unwrap();
+        assert!(me.contains("super::cwds::allow_consented(&mut config, &e.facts.cwd, &self.data_dir)"));
+        let i = me.find("allow_consented").unwrap();
+        let j = me.find("start_resumed_window(").unwrap();
+        assert!(i < j, "要先併白名單才開窗");
+    }
+
     #[test]
     fn 重開自動接回和橋看同一個_session_資料夾() {
         let me = include_str!("auto_resume.rs").split("#[cfg(test)]").next().unwrap();

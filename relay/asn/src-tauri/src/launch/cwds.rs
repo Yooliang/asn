@@ -135,6 +135,22 @@ pub fn add_to_prefs_allow(data_dir: &Path, cwd: &str) -> Result<(), String> {
     launch_prefs_set_sync(data_dir, prefs)
 }
 
+/// 重開自動接回用（#767）：原本的資料夾若是使用者在本機同意過的（launch-prefs.json 的 cwdAllow：從畫面選過、按「瀏覽…」加過），
+/// 就併進這次的白名單。**只認同意過的**：候選（最近用過、開著的視窗、信任過的）不算同意，這裡不併；
+/// 比對用正規路徑（含中文、空白、斜線與大小寫差異）；資料夾已不存在就不併，由開窗那一步回「已經不存在」。
+/// 呼叫端只會是開機流程、對象只會是 ASN 自己開過、存檔裡記著的視窗，不會是遠端或任意路徑。
+pub fn allow_consented(config: &mut LaunchConfig, cwd: &str, data_dir: &Path) {
+    let Ok(canon) = canonical_launch_cwd(cwd) else { return };
+    // 不存在的路徑 canonical_launch_cwd 會原樣交回，所以另外確認資料夾還在
+    if !canon.is_dir() || config.cwd_allow.contains(&canon) {
+        return;
+    }
+    let prefs = launch_prefs_get_sync(data_dir).unwrap_or(Value::Null);
+    if str_list(&prefs, "cwdAllow").iter().any(|s| same_dir(s, &canon)) {
+        config.cwd_allow.push(canon);
+    }
+}
+
 /// 本機啟動前：cwd 已在白名單就放行；否則只有它是候選（自己的建議／本機同意過）才視為使用者同意，
 /// 加進本機白名單並放行。其他來源的任意路徑一律不放行。
 pub fn grant_local_cwd(config: &mut LaunchConfig, cwd: &str, home: &Path, data_dir: &Path) -> Result<(), String> {
@@ -274,6 +290,77 @@ mod tests {
         assert!(add_to_prefs_allow(data.path(), "  ").is_err());
         // 只寫 launch-prefs.json，不碰 launcher.json
         assert!(!data.path().join("launcher.json").exists());
+    }
+
+    /// 重開自動接回（#767）併白名單：只認本機同意過的（launch-prefs.json 的 cwdAllow）
+    #[test]
+    fn 自動接回_本機同意過的資料夾併進白名單_含中文加空白() {
+        let base = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let zh = base.path().join("續接 乙");
+        std::fs::create_dir_all(&zh).unwrap();
+        let canon = canonical_launch_cwd(&zh.to_string_lossy()).unwrap();
+        // 同意清單裡用「斜線、尾端分隔線」的寫法，比對仍走同一個正規路徑
+        add_to_prefs_allow(data.path(), &format!("{}/", zh.to_string_lossy().replace('\\', "/"))).unwrap();
+        let mut c = cfg(vec![]);
+        allow_consented(&mut c, &zh.to_string_lossy(), data.path());
+        assert_eq!(c.cwd_allow, vec![canon.clone()]);
+        // 原本就在白名單：不重複加
+        allow_consented(&mut c, &zh.to_string_lossy(), data.path());
+        assert_eq!(c.cwd_allow.len(), 1);
+    }
+
+    #[test]
+    fn 自動接回_只是候選沒同意過的不併_也不寫進同意清單() {
+        let home = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let proj = home.path().join("proj");
+        std::fs::create_dir_all(&proj).unwrap();
+        // 開著的視窗、最近用過都只是候選
+        w(&home.path().join(".claude/sessions/1.json"), &json!({ "cwd": proj.to_string_lossy() }).to_string());
+        crate::launch::prefs::launch_prefs_set_sync(data.path(), json!({ "recentCwd": [proj.to_string_lossy()] })).unwrap();
+        assert!(candidates(home.path(), data.path(), &[]).iter().any(|s| same_dir(s, &canonical_launch_cwd(&proj.to_string_lossy()).unwrap())));
+        let mut c = cfg(vec![]);
+        allow_consented(&mut c, &proj.to_string_lossy(), data.path());
+        assert!(c.cwd_allow.is_empty(), "候選不算同意");
+        let prefs = launch_prefs_get_sync(data.path()).unwrap();
+        assert!(str_list(&prefs, "cwdAllow").is_empty(), "接回不會替人加同意");
+    }
+
+    #[test]
+    fn 自動接回_同意過但資料夾已刪除的不併_開窗那步回不存在() {
+        let base = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let gone = base.path().join("已刪除 資料夾");
+        std::fs::create_dir_all(&gone).unwrap();
+        add_to_prefs_allow(data.path(), &gone.to_string_lossy()).unwrap();
+        std::fs::remove_dir_all(&gone).unwrap();
+        let mut c = cfg(vec![]);
+        allow_consented(&mut c, &gone.to_string_lossy(), data.path());
+        assert!(c.cwd_allow.is_empty());
+        let err = crate::launch::local::start_resumed_window(&c, "T-乙", &gone.to_string_lossy(), "76c44a7f-d488-49f0-9d6c-d089a427b5ed", &[], false).unwrap_err();
+        assert!(err.contains("已經不存在"), "{err}");
+    }
+
+    #[test]
+    fn 自動接回_同意過的資料夾過得了白名單那一關_沒同意的被擋() {
+        let base = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let ok = base.path().join("甲 資料夾");
+        let no = base.path().join("乙 資料夾");
+        std::fs::create_dir_all(&ok).unwrap();
+        std::fs::create_dir_all(&no).unwrap();
+        add_to_prefs_allow(data.path(), &ok.to_string_lossy()).unwrap();
+        let sid = "76c44a7f-d488-49f0-9d6c-d089a427b5ed";
+        // 沒有 Claude 啟動設定的測試設定：過了白名單才會走到「沒有可用的啟動設定」，被擋的是「不在允許清單內」
+        let mut c1 = cfg(vec![]);
+        allow_consented(&mut c1, &ok.to_string_lossy(), data.path());
+        let e1 = crate::launch::local::start_resumed_window(&c1, "T-甲", &ok.to_string_lossy(), sid, &[], false).unwrap_err();
+        assert!(!e1.contains("不在允許清單內"), "{e1}");
+        let mut c2 = cfg(vec![]);
+        allow_consented(&mut c2, &no.to_string_lossy(), data.path());
+        let e2 = crate::launch::local::start_resumed_window(&c2, "T-乙", &no.to_string_lossy(), sid, &[], false).unwrap_err();
+        assert!(e2.contains("不在允許清單內"), "{e2}");
     }
 
     #[test]
