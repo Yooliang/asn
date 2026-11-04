@@ -34,11 +34,49 @@ async fn all_off_touches_nothing() {
     let d = tempfile::tempdir().unwrap();
     let mut gates = Gates::default();
     let lines = Mutex::new(vec![]);
-    tick(d.path(), d.path(), &mut gates, NOW, &|l| lines.lock().unwrap().push(l)).await;
+    tick(d.path(), d.path(), &mut gates, NOW, None, &|l| lines.lock().unwrap().push(l)).await;
     assert_eq!(gates.grok, Gate::default());
     assert_eq!(gates.agy, Gate::default());
     assert!(lines.lock().unwrap().is_empty());
     assert!(!d.path().join(".asn").exists(), "全關時不建立任何檔案");
+}
+
+#[tokio::test]
+async fn agy_low_memory_skips_without_failure() {
+    let d = tempfile::tempdir().unwrap();
+    write_settings(d.path(), r#"{"agy":true}"#);
+    let mut gates = Gates::default();
+    let lines = Mutex::new(vec![]);
+    tick(d.path(), d.path(), &mut gates, NOW, Some(AGY_PAUSE_BELOW_BYTES - 1), &|l| lines.lock().unwrap().push(l)).await;
+    assert_eq!(gates.agy, Gate::default(), "沒有動到 agy 的狀態：不算成功也不算失敗");
+    assert!(lines.lock().unwrap().is_empty());
+    tick(d.path(), d.path(), &mut gates, NOW, Some(AGY_PAUSE_BELOW_BYTES), &|l| lines.lock().unwrap().push(l)).await;
+    assert_ne!(gates.agy, Gate::default(), "夠了就照常走（這裡還沒開過視窗，只排下一輪）");
+    let mut unknown = Gates::default();
+    tick(d.path(), d.path(), &mut unknown, NOW, None, &|l| lines.lock().unwrap().push(l)).await;
+    assert_ne!(unknown.agy, Gate::default(), "讀不到空記憶體照跑");
+}
+
+/// 外層批次檔開內層，內層一直寫檔：逾時後檔案不再變大，才算整棵都收掉
+#[cfg(windows)]
+#[tokio::test]
+async fn timeout_kills_whole_tree() {
+    let d = tempfile::tempdir().unwrap();
+    let beat = d.path().join("beat.txt");
+    let inner = d.path().join("inner.cmd");
+    let outer = d.path().join("outer.cmd");
+    let script = |lines: &[String]| lines.join("\r\n") + "\r\n";
+    std::fs::write(&inner, script(&["@echo off".into(), ":loop".into(), format!("echo x>>\"{}\"", beat.display()), "ping -n 2 127.0.0.1 >NUL".into(), "goto loop".into()])).unwrap();
+    std::fs::write(&outer, script(&["@echo off".into(), format!("cmd /c \"{}\"", inner.display())])).unwrap();
+    let mut cmd = tokio::process::Command::new("cmd");
+    cmd.arg("/c").arg(&outer);
+    let r = run_with_timeout(cmd, std::time::Duration::from_secs(3)).await;
+    assert_eq!(r.err(), Some(Failure::Other("逾時".into())));
+    assert!(beat.exists(), "內層真的有跑起來");
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let before = std::fs::metadata(&beat).unwrap().len();
+    tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+    assert_eq!(std::fs::metadata(&beat).unwrap().len(), before, "內層還在跑＝只收了外層");
 }
 
 #[test]

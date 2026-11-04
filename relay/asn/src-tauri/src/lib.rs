@@ -2694,7 +2694,7 @@ pub fn run() {
                 #[cfg(desktop)]
                 if handle.state::<App>().shot.is_none() {
                     let wd7 = work_dir.clone();
-                    tauri::async_runtime::spawn(quota_readers::run_loop(identity::home_dir(), grok_accounts::grok_home(), move |line| {
+                    tauri::async_runtime::spawn(quota_readers::run_loop(identity::home_dir(), grok_accounts::grok_home(), launch::term::free_memory_bytes, move |line| {
                         let _ = ui_log::append(&wd7, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(heartbeat::now_ms() as i64))]);
                     }));
                 }
