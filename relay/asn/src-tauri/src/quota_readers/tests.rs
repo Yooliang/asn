@@ -290,3 +290,74 @@ fn cred_round_trip() {
     assert_eq!(got.as_deref(), Some("test-value"));
     assert_eq!(cred::read(&target), None);
 }
+
+#[test]
+fn settings_round_trip_and_atomic() {
+    let d = tempfile::tempdir().unwrap();
+    set_source(d.path(), "grok", true).unwrap();
+    assert!(load_settings(d.path()).grok);
+    assert!(!load_settings(d.path()).agy, "只動那一項");
+    set_source(d.path(), "grok", false).unwrap();
+    assert!(!load_settings(d.path()).grok);
+    assert!(set_source(d.path(), "別的", true).is_err());
+    let left: Vec<_> = std::fs::read_dir(d.path().join(".asn")).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(left, [std::ffi::OsString::from(FILE)], "沒有留下暫存檔");
+}
+
+#[test]
+fn key_format_checked() {
+    assert_eq!(clean_key(" k "), Some("k"));
+    assert_eq!(clean_key(""), None);
+    assert_eq!(clean_key("   "), None);
+    assert_eq!(clean_key("a\nb"), None);
+    assert_eq!(clean_key(&"x".repeat(513)), None);
+}
+
+#[test]
+fn view_has_no_key_and_defaults_off() {
+    let d = tempfile::tempdir().unwrap();
+    let v = view_with(d.path(), true, |_| panic!("沒有帳號不用查 key"));
+    assert_eq!(v["grok"], false);
+    assert_eq!(v["agy"], false);
+    assert_eq!(v["agy_account"], Value::Null);
+    assert_eq!(v["minimax"], json!([]));
+    write_settings(d.path(), r#"{"minimax":["m@x.test"]}"#);
+    let v = view_with(d.path(), true, |e| e == "m@x.test");
+    assert_eq!(v["minimax"], json!([{ "email": "m@x.test", "has_key": true }]));
+    assert!(!std::fs::read_to_string(settings_path(d.path())).unwrap().contains("key"));
+}
+
+#[test]
+fn failure_shown_then_cleared() {
+    let who = "minimax:failure-test@x.test";
+    set_failure(who, Some("連線失敗".into()));
+    let d = tempfile::tempdir().unwrap();
+    write_settings(d.path(), r#"{"minimax":["failure-test@x.test"]}"#);
+    assert_eq!(view_with(d.path(), true, |_| true)["status"]["minimax"]["failure-test@x.test"], "連線失敗");
+    set_failure(who, None);
+    assert_eq!(view_with(d.path(), true, |_| true)["status"]["minimax"].get("failure-test@x.test"), None);
+}
+
+#[cfg(windows)]
+#[test]
+fn minimax_add_and_remove_keep_key_out_of_files() {
+    let d = tempfile::tempdir().unwrap();
+    let email = format!("t{}@quota-test.invalid", std::process::id());
+    add_minimax(d.path(), &email, "test-value").unwrap();
+    assert_eq!(minimax_key(&email).as_deref(), Some("test-value"));
+    assert!(!std::fs::read_to_string(settings_path(d.path())).unwrap().contains("test-value"));
+    assert!(!view(d.path()).to_string().contains("test-value"));
+    remove_minimax(d.path(), &email).unwrap();
+    assert_eq!(minimax_key(&email), None);
+    assert!(load_settings(d.path()).minimax.is_empty());
+}
+
+#[test]
+fn minimax_limit_and_bad_input() {
+    let d = tempfile::tempdir().unwrap();
+    write_settings(d.path(), r#"{"minimax":["a@x.test","b@x.test"]}"#);
+    assert!(add_minimax(d.path(), "c@x.test", "k").is_err(), "滿了");
+    assert!(add_minimax(d.path(), "壞", "k").is_err());
+    assert!(add_minimax(d.path(), "a@x.test", "").is_err());
+    assert_eq!(load_settings(d.path()).minimax.len(), 2);
+}

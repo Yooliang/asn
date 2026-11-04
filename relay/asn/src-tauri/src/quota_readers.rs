@@ -2,7 +2,7 @@
 //!
 //! - 設定 `~/.asn/quota-readers.json`：沒有這個檔或欄位不對，一律當成全關。
 //! - Grok：讀 `~/.grok/auth.json` 的 key 查用量。只讀不換新；被拒就標「要重新登入」，auth.json 沒變之前不再打。
-//! - MiniMax：key 由使用者提供，放 Windows 憑證管理員；不寫檔案、不放環境變數。HTTP 永遠 200，要看 `base_resp`。
+//! - MiniMax：key 由使用者在設定頁輸入，放 Windows 憑證管理員；不寫檔案、不放環境變數，存好後讀不回畫面。HTTP 永遠 200，要看 `base_resp`。
 //! - agy：跑內建的 `/quota`，不消耗模型額度、不讀憑證。不是內建指令的回應就不算讀到，避免把模型回話當數字。
 //!   `/quota` 不回帳號，所以要 ASN 開過 agy 視窗、記過帳號才會讀；讀到的數字走狀態列同一套新舊判斷。
 //! - 每 10 分鐘最多讀一次，失敗退避；缺值就不送那個窗，不補 0。
@@ -11,7 +11,7 @@
 use crate::claude_accounts::normalize_email;
 use crate::claude_quota::iso_secs;
 use crate::nowin::NoWindow;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -32,7 +32,7 @@ const GROK_URL: &str = "https://cli-chat-proxy.grok.com/v1/billing?format=credit
 const MINIMAX_URL: &str = "https://api.minimax.io/v1/token_plan/remains";
 const AGY_GROUP: &str = "Gemini Models";
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Settings {
     pub grok: bool,
@@ -50,6 +50,89 @@ pub fn load_settings(home: &Path) -> Settings {
     let mut s: Settings = serde_json::from_str(text.trim_start_matches('\u{feff}')).unwrap_or_default();
     s.minimax = s.minimax.iter().filter_map(|e| normalize_email(e)).take(MAX_MINIMAX).collect();
     s
+}
+
+/// 原子寫入：先寫暫存檔再改名，寫到一半不會留下壞檔（壞檔等於全關）
+pub fn save_settings(home: &Path, s: &Settings) -> Result<(), String> {
+    let path = settings_path(home);
+    if let Some(p) = path.parent() {
+        std::fs::create_dir_all(p).map_err(|_| "無法寫入設定")?;
+    }
+    let tmp = PathBuf::from(format!("{}.{}.tmp", path.display(), std::process::id()));
+    let text = serde_json::to_string_pretty(s).map_err(|_| "無法寫入設定")?;
+    std::fs::write(&tmp, text).map_err(|_| "無法寫入設定")?;
+    std::fs::rename(&tmp, &path).map_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+        "無法寫入設定".to_string()
+    })
+}
+
+/// 設定變了就加一：背景迴圈看到會把退避狀態清掉，換了 key 或重新打開不用等
+static CHANGES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+fn changed() {
+    CHANGES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub fn set_source(home: &Path, source: &str, on: bool) -> Result<(), String> {
+    let mut s = load_settings(home);
+    match source {
+        "grok" => s.grok = on,
+        "agy" => s.agy = on,
+        _ => return Err("不認得的來源".into()),
+    }
+    save_settings(home, &s)?;
+    changed();
+    Ok(())
+}
+
+fn clean_key(key: &str) -> Option<&str> {
+    let k = key.trim();
+    (!k.is_empty() && k.len() <= 512 && !k.chars().any(char::is_control)).then_some(k)
+}
+
+/// 先存 key 再寫設定：中途失敗頂多多一筆用不到的憑證，不會有設定指著不存在的 key。key 不進檔案、不回傳。
+pub fn add_minimax(home: &Path, email: &str, key: &str) -> Result<(), String> {
+    let email = normalize_email(email).ok_or("email 格式不對")?;
+    let key = clean_key(key).ok_or("key 格式不對")?;
+    let mut s = load_settings(home);
+    if !s.minimax.contains(&email) && s.minimax.len() >= MAX_MINIMAX {
+        return Err("帳號已滿".into());
+    }
+    store_minimax_key(&email, key)?;
+    if !s.minimax.contains(&email) {
+        s.minimax.push(email);
+    }
+    save_settings(home, &s)?;
+    changed();
+    Ok(())
+}
+
+pub fn remove_minimax(home: &Path, email: &str) -> Result<(), String> {
+    let email = normalize_email(email).ok_or("email 格式不對")?;
+    let mut s = load_settings(home);
+    s.minimax.retain(|e| *e != email);
+    save_settings(home, &s)?;
+    delete_minimax_key(&email);
+    changed();
+    Ok(())
+}
+
+/// 設定頁要的資料：開關、帳號、有沒有存 key、最近的失敗原因。沒有 key 本身。
+pub fn view(home: &Path) -> Value {
+    view_with(home, cfg!(windows), |e| minimax_key(e).is_some())
+}
+
+fn view_with(home: &Path, supported: bool, has_key: impl Fn(&str) -> bool) -> Value {
+    let s = load_settings(home);
+    let failures = FAILURES.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let minimax: Vec<Value> = s.minimax.iter().map(|e| json!({ "email": e, "has_key": has_key(e) })).collect();
+    json!({
+        "grok": s.grok, "agy": s.agy, "agy_account": agy_email(home), "minimax": minimax, "minimax_supported": supported,
+        "status": {
+            "grok": failures.get("grok"), "agy": failures.get("agy"),
+            "minimax": s.minimax.iter().filter_map(|e| failures.get(&format!("minimax:{e}")).map(|f| (e.clone(), json!(f)))).collect::<serde_json::Map<_, _>>(),
+        },
+    })
 }
 
 // ---------- 解析：全部是純函式，缺值一律不產生窗 ----------
@@ -191,6 +274,15 @@ pub struct Store {
 }
 
 static STORE: Mutex<Option<Store>> = Mutex::new(None);
+/// 各來源最近一次的失敗原因（成功就清掉），給設定頁看。內容只有固定文字或狀態碼。
+static FAILURES: std::sync::LazyLock<Mutex<HashMap<String, String>>> = std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+fn set_failure(who: &str, text: Option<String>) {
+    let mut f = FAILURES.lock().unwrap_or_else(|e| e.into_inner());
+    match text {
+        Some(t) => f.insert(who.to_string(), t),
+        None => f.remove(who),
+    };
+}
 
 fn store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
     let mut g = STORE.lock().unwrap_or_else(|e| e.into_inner());
@@ -385,19 +477,20 @@ fn minimax_key(_email: &str) -> Option<String> {
     None
 }
 
-/// 存或刪 MiniMax key（設定畫面用）。只有 Windows 有憑證管理員。
 #[cfg(windows)]
-#[allow(dead_code)]
-pub fn set_minimax_key(email: &str, key: Option<&str>) -> Result<(), String> {
-    let email = normalize_email(email).ok_or("email 格式不對")?;
-    match key {
-        Some(k) => cred::write(&cred_target(&email), k),
-        None => {
-            cred::delete(&cred_target(&email));
-            Ok(())
-        }
-    }
+fn store_minimax_key(email: &str, key: &str) -> Result<(), String> {
+    cred::write(&cred_target(email), key)
 }
+#[cfg(not(windows))]
+fn store_minimax_key(_email: &str, _key: &str) -> Result<(), String> {
+    Err("這台電腦不支援".into())
+}
+#[cfg(windows)]
+fn delete_minimax_key(email: &str) {
+    cred::delete(&cred_target(email));
+}
+#[cfg(not(windows))]
+fn delete_minimax_key(_email: &str) {}
 
 // ---------- 定時讀取 ----------
 #[derive(Default)]
@@ -408,8 +501,17 @@ struct Gates {
 }
 
 fn note(log: &(impl Fn(String) + Sync), gate: &mut Gate, who: &str, f: &Failure, now_ms: i64, mark: Option<i64>) {
+    let key = if who == "Grok" { "grok" } else { "agy" };
+    set_failure(key, Some(f.text()));
     if gate.failure(f, now_ms, mark) {
         log(format!("額度讀取 {who}：{}", f.text()));
+    }
+}
+
+fn note_minimax(log: &(impl Fn(String) + Sync), gate: &mut Gate, email: &str, f: &Failure, now_ms: i64) {
+    set_failure(&format!("minimax:{email}"), Some(f.text()));
+    if gate.failure(f, now_ms, None) {
+        log(format!("額度讀取 MiniMax：{}", f.text()));
     }
 }
 
@@ -425,6 +527,7 @@ async fn tick(home: &Path, grok_home: &Path, gates: &mut Gates, now_ms: i64, fre
                 Some((email, key)) => match read_grok(&key, now_ms).await {
                     Ok(w) => {
                         gates.grok.success(now_ms);
+                        set_failure("grok", None);
                         store(|st| st.grok.insert(email, (w, now_ms)));
                     }
                     Err(f) => note(log, &mut gates.grok, "Grok", &f, now_ms, mark),
@@ -439,13 +542,14 @@ async fn tick(home: &Path, grok_home: &Path, gates: &mut Gates, now_ms: i64, fre
             continue;
         }
         match minimax_key(email) {
-            None => note(log, gate, "MiniMax", &Failure::Other("沒有 key".into()), now_ms, None),
+            None => note_minimax(log, gate, email, &Failure::Other("找不到 key".into()), now_ms),
             Some(key) => match read_minimax(&key, now_ms).await {
                 Ok(w) => {
                     gate.success(now_ms);
+                    set_failure(&format!("minimax:{email}"), None);
                     store(|st| st.minimax.insert(email.clone(), (w, now_ms)));
                 }
-                Err(f) => note(log, gate, "MiniMax", &f, now_ms, None),
+                Err(f) => note_minimax(log, gate, email, &f, now_ms),
             },
         }
     }
@@ -455,7 +559,10 @@ async fn tick(home: &Path, grok_home: &Path, gates: &mut Gates, now_ms: i64, fre
             // 還沒開過 agy 視窗，不知道是哪個帳號：不算失敗，下一輪再看
             None => gates.agy.success(now_ms),
             Some(email) => match read_agy(home, &email, now_ms).await {
-                Ok(()) => gates.agy.success(now_ms),
+                Ok(()) => {
+                    gates.agy.success(now_ms);
+                    set_failure("agy", None);
+                }
                 Err(f) => note(log, &mut gates.agy, "agy", &f, now_ms, None),
             },
         }
@@ -465,7 +572,15 @@ async fn tick(home: &Path, grok_home: &Path, gates: &mut Gates, now_ms: i64, fre
 /// 背景迴圈：每分鐘看一次設定與時間，全關時不連網、不執行任何程式。
 pub async fn run_loop(home: PathBuf, grok_home: PathBuf, free_bytes: impl Fn() -> Option<u64>, log: impl Fn(String) + Sync) {
     let mut gates = Gates::default();
+    let mut seen = CHANGES.load(std::sync::atomic::Ordering::SeqCst);
     loop {
+        // 設定頁動過：換了 key、重新打開都不用等退避。失敗原因也清掉，下一次讀取再算。
+        let now_changes = CHANGES.load(std::sync::atomic::Ordering::SeqCst);
+        if now_changes != seen {
+            seen = now_changes;
+            gates = Gates::default();
+            FAILURES.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        }
         tick(&home, &grok_home, &mut gates, crate::heartbeat::now_ms() as i64, free_bytes(), &log).await;
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
     }
