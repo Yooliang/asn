@@ -133,11 +133,13 @@ pub struct Loaded {
     pub quota_auth: bool,
     /// 因登入失效而扣住的個人信編號（重送時延遲抬頭寫登入失效）
     pub held_auth: Vec<String>,
+    /// ack 失敗、等著補的信
+    pub ack_retry: Vec<String>,
 }
 
 /// 讀檔＋清過期
 pub fn load_state(file: &Path, now: u64, keep_ms: u64) -> Loaded {
-    let mut out = Loaded { pending: vec![], last: Default::default(), dropped: 0, error: None, quota_until: 0, quota_auth: false, held_auth: vec![] };
+    let mut out = Loaded { pending: vec![], last: Default::default(), dropped: 0, error: None, quota_until: 0, quota_auth: false, held_auth: vec![], ack_retry: vec![] };
     let raw = match std::fs::read_to_string(file) {
         Ok(r) => r,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return out,
@@ -159,6 +161,7 @@ pub fn load_state(file: &Path, now: u64, keep_ms: u64) -> Loaded {
     }
     out.quota_until = data.get("quotaUntil").and_then(num).unwrap_or(0);
     out.quota_auth = data.get("quotaAuth").and_then(Value::as_bool).unwrap_or(false);
+    out.ack_retry = data.get("ackRetry").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(String::from).take(500).collect()).unwrap_or_default();
     out.held_auth = data.get("heldAuth").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(String::from).take(500).collect()).unwrap_or_default();
     for r in data.get("pending").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]) {
         match from_record(r) {

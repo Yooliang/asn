@@ -54,6 +54,8 @@ struct FState {
     /// 夥伴卡在框上的通知（waiting_notice）收到的請求；wait_notice_status 不為 0 就回這個
     wait_notices: Vec<Value>,
     wait_notice_status: u16,
+    /// 不為 0：ack 回這個狀態碼，信不算 ack
+    ack_status: u16,
     /// 假後台回的 notify（空字串＝sent）
     wait_notice_notify: String,
     misroute_status: u16,
@@ -170,6 +172,10 @@ fn handle_conn(mut c: std::net::TcpStream, st: Arc<Mutex<FState>>) {
                 }
                 (200, json!({"messages": msgs}))
             }
+        }
+        "ack" if s.ack_status != 0 => {
+            s.ack_calls += 1;
+            (s.ack_status, json!({"error": "boom"}))
         }
         "ack" => {
             s.ack_calls += 1;
@@ -1882,6 +1888,7 @@ async fn 夥伴_id_暫時失敗_500_只記一次_下一輪再試_好了就接上
     assert_eq!(core.partner_id("T-乙"), Some(PID_B));
 }
 
+mod ack_it;
 mod aegis_it;
 mod engines_it;
 mod pi_it;
