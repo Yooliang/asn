@@ -1,4 +1,4 @@
--- 退回 20261105100000_acct_quota_share.sql：所有查詢代碼失效、MiniMax 帳號列刪除、Grok 的窗清空，三支函式換回原本體。執行前先在群組問。
+-- 退回 20261105100000_acct_quota_share.sql：所有查詢代碼失效、MiniMax 帳號列刪除、Grok 的窗清空，四支函式換回原本體。執行前先在群組問。
 begin;
 
 drop function if exists public.asn_relay_quota_read(text, text);
@@ -7,6 +7,58 @@ drop table if exists relay.asn_quota_read_hits;
 
 delete from relay.asn_user_accounts where vendor = 'minimax';
 update relay.asn_user_accounts set windows = '[]'::jsonb where vendor = 'grok';
+
+create or replace function public.asn_relay_acct_window_judge(p_vendor text, p_name text, p_old jsonb, p_new jsonb, p_now timestamptz)
+ returns text
+ language plpgsql
+ stable
+ set search_path to ''
+as $function$
+declare
+  v_old_r timestamptz;
+  v_new_r timestamptz;
+  v_diff numeric;
+  v_k numeric;
+begin
+  if jsonb_typeof(p_new->'resets_at') = 'string' then
+    v_new_r := (p_new->>'resets_at')::timestamptz;
+    if v_new_r < p_now - interval '1 day' or v_new_r > p_now + interval '8 days' then
+      return 'reset_out_of_range';
+    end if;
+  end if;
+  -- Gemini 現記的是 100%（沒用過的桶，agy 給的重置時間每次都是「現在＋整個窗長」、一直往後跑）：照收新的（#1519）
+  if p_vendor = 'gemini' and p_old is not null and jsonb_typeof(p_old->'left_pct') = 'number' and (p_old->>'left_pct')::numeric = 100 then
+    return null;
+  end if;
+  if p_old is null or jsonb_typeof(p_old->'resets_at') is distinct from 'string' or v_new_r is null then
+    return null;
+  end if;
+  v_old_r := (p_old->>'resets_at')::timestamptz;
+  if v_old_r > p_now + interval '8 days' then
+    return null;
+  end if;
+  if p_now > v_old_r + interval '7 days' then
+    return null;
+  end if;
+  v_diff := extract(epoch from v_new_r - v_old_r);
+  if abs(v_diff) <= 600 then
+    return case when (p_new->>'left_pct')::int <= (p_old->>'left_pct')::int then null else 'same_period_rise' end;
+  end if;
+  if v_diff < 0 then
+    return 'earlier';
+  end if;
+  if v_old_r > p_now then
+    return 'later_not_expired';
+  end if;
+  if p_vendor = 'claude' and p_name = 'weekly' then
+    v_k := floor((v_diff + 302400) / 604800);
+    if v_k < 1 or abs(v_diff - v_k * 604800) > 600 then
+      return 'not_week_multiple';
+    end if;
+  end if;
+  return null;
+end;
+$function$;
 
 create or replace function public.asn_relay_acct_windows_clean(p_vendor text, p_windows jsonb, p_node text, p_now timestamptz)
  returns jsonb
@@ -205,6 +257,8 @@ alter table relay.asn_user_accounts drop column if exists share_created_at;
 alter table relay.asn_user_accounts drop constraint if exists asn_user_accounts_vendor_check;
 alter table relay.asn_user_accounts add constraint asn_user_accounts_vendor_check check (vendor in ('claude', 'codex', 'grok', 'gemini'));
 
+revoke all on function public.asn_relay_acct_window_judge(text, text, jsonb, jsonb, timestamptz) from public, anon, authenticated;
+grant execute on function public.asn_relay_acct_window_judge(text, text, jsonb, jsonb, timestamptz) to service_role;
 revoke all on function public.asn_relay_acct_windows_clean(text, jsonb, text, timestamptz) from public, anon, authenticated;
 grant execute on function public.asn_relay_acct_windows_clean(text, jsonb, text, timestamptz) to service_role;
 revoke all on function public.asn_relay_acct_roster_report(text, jsonb) from public, anon, authenticated;

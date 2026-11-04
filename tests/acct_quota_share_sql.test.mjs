@@ -23,13 +23,15 @@ const prior = ['20261023160000_acct_report_vendors.sql', '20261024130000_acct_sw
 const body = (sql, name) => { const s = sql.indexOf(`create or replace function public.${name}(`); assert.ok(s >= 0, name); return sql.slice(s, sql.indexOf('$function$;', s) + 11) }
 const swap = (t, a, b) => { assert.ok(t.includes(a), a); return t.replace(a, () => b) }
 const SIGS = {
-  asn_relay_acct_windows_clean: 'text, jsonb, text, timestamptz', asn_relay_acct_roster_report: 'text, jsonb', asn_relay_acct_roster: 'text, uuid',
+  asn_relay_acct_window_judge: 'text, text, jsonb, jsonb, timestamptz', asn_relay_acct_windows_clean: 'text, jsonb, text, timestamptz', asn_relay_acct_roster_report: 'text, jsonb', asn_relay_acct_roster: 'text, uuid',
   asn_relay_quota_read: 'text, text', asn_relay_acct_share_set: 'text, uuid, text, text, text',
 }
 
 test('靜態：既有函式只改明列的片段；只授權 service_role；回復檔換回現行本體', () => {
   const files = fs.readdirSync(new URL('../supabase/migrations/', import.meta.url)).filter(f => f.endsWith('.sql')).sort()
   assert.ok(files.indexOf(FILE) > files.indexOf('20261104190000_owner_mail_phone.sql'))
+  assert.equal(swap(body(mig, 'asn_relay_acct_window_judge'), "p_vendor in ('gemini', 'minimax') and p_old", "p_vendor = 'gemini' and p_old"), body(gem, 'asn_relay_acct_window_judge'))
+  assert.equal(body(down, 'asn_relay_acct_window_judge'), body(gem, 'asn_relay_acct_window_judge'))
   let c = swap(body(mig, 'asn_relay_acct_windows_clean'), "'gemini', 'grok', 'minimax') or", "'gemini') or")
   c = swap(c, "    -- MiniMax 只有 5 小時與每週、Grok 只有每週\n    continue when p_vendor = 'minimax' and v_name not in ('five_hour', 'weekly');\n    continue when p_vendor = 'grok' and v_name <> 'weekly';\n", '')
   assert.equal(c, body(gem, 'asn_relay_acct_windows_clean'))
@@ -146,6 +148,22 @@ test('實跑：沒開代碼查不到；開了查得到且不含 email；重開�
   await share(db, 'W', U1, 'claude', 'a@x.test', CODE)
   await db.exec(`update relay.asn_user_accounts set seen_at = now() - interval '31 days'`)
   assert.deepEqual(await read_(db, CODE), { record: null })
+})
+
+test('實跑：MiniMax 沒用過的窗重置時間一直往後跑，開始用之後新數字要收；用過的窗照一般規則', { skip }, async () => {
+  const db = await setup()
+  const left = async () => (await rosterOf(db, 'H', U1)).accounts[0].windows[0]
+  const R1 = iso(NOW + 5 * H), R2 = iso(NOW + 5 * H + 30 * 60_000), R3 = iso(NOW + 5 * H + 60 * 60_000)
+  const send = (pct, reset) => report(db, 'W', [{ vendor: 'minimax', email: 'm@x.test', windows: [win('five_hour', pct, reset)] }])
+  await send(100, R1)
+  assert.deepEqual((await send(100, R2)).skipped, [], '滿額遇滿額照收')
+  assert.equal((await left()).resets_at, R2)
+  assert.deepEqual((await send(91, R3)).skipped, [], '開始用了，重置時間較晚也要收')
+  assert.equal((await left()).left_pct, 91)
+  const later = await send(80, iso(NOW + 6 * H + 60 * 60_000))
+  assert.deepEqual(later.skipped.map(s => s.reason), ['later_not_expired'], '用過之後照一般規則')
+  assert.equal((await left()).left_pct, 91)
+  assert.deepEqual((await send(95, R3)).skipped.map(s => s.reason), ['same_period_rise'])
 })
 
 test('實跑：次數限制分來源計算；舊的計數列會清掉；權限只給 service_role', { skip }, async () => {
