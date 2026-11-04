@@ -69,7 +69,7 @@ export function createMobileCloud({ api, status, clip, now = () => Date.now(), t
     stage: 'list',         // list｜form｜created
     name: DEFAULT_NAME,
     approveForm: false, code: '', hostName: '', hostId: '', approved: '',
-    created: null,         // { id, name, key, invite, reissueOf } —— 只在記憶體，按「完成」就丟
+    created: null,         // { id, name, key, invite } —— 只在記憶體，按「完成」就丟
     reveal: false, copiedKey: false, copiedInvite: false, clipNote: '',
     confirmId: '',
   })

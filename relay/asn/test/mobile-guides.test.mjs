@@ -22,7 +22,8 @@ test('篇目：跟電腦版同一份（順序、標題、副標），每一篇�
 
 test('電腦才能做的篇目註明「電腦版功能」並說明原因；手機也能用的不亂標', () => {
   const by = Object.fromEntries(phoneGuideList().map(g => [g.key, g]))
-  for (const k of ['bridge', 'cloud']) { assert.equal(by[k].badge, '電腦版功能'); assert.ok(by[k].note.length > 10, k) }
+  assert.equal(by.bridge.badge, '電腦版功能'); assert.ok(by.bridge.note.length > 10)
+  assert.equal(by.cloud.badge, '部分是電腦版功能'); assert.ok(by.cloud.note.length > 10)   // #756：手機可以邀請雲端代理
   assert.match(by.start.badge, /電腦版/); assert.equal(by.groups.fit, 'phone'); assert.equal(by.faq.badge, '')
 })
 

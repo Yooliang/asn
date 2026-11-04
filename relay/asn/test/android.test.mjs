@@ -310,7 +310,7 @@ test('三個大分頁：夥伴／對話／設置，橫向翻頁、頂部分頁�
 test('名字兩層、頭像圓角方形：我的名字（帳號層、唯讀）與這台設備的名稱分開；對話與「我」頂端用帳號名；.m-pic 不是圓形', () => {
   const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
   assert.match(html, /<label>我的名字<input[^>]*v-model="nameDraft"[^>]*@change="commitName"/, '「我的名字」可改（#166：走後台 account_name）')
-  assert.doesNotMatch(html, /readonly/, '不再唯讀')
+  assert.doesNotMatch(html.replace(/<input[^>]*m-cloud-key[^>]*>/, ''), /readonly/, '不再唯讀（雲端代理金鑰顯示欄本來就只能看，不算）')
   assert.match(js, /authApi\.setAccountName\(c\.name\)/, '改名字走帳號名稱指令')
   assert.match(html, /<label>這台設備的名稱<input[^>]*v-model="me\.nick"[^>]*@change="commitNick"/, '設備名稱照舊可改（就是視窗名）')
   assert.doesNotMatch(html, /暱稱（也是對外的名字）/)
