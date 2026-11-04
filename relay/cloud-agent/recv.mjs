@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { createCore } from '../machine/relay-core.mjs'   // 沿用 API 呼叫與門鈴，不複製協定
 import { createLog } from '../machine/safe-log.mjs'
 import { normalizeAttachments } from '../machine/attach-format.mjs'
+import { aliasCursors, detectRenames, readNames, writeNames } from './rename-track.mjs'
 import { NO_KEY_MSG, readAnonKey, readKey, resolveCloudAgents, resolveConfig, rosterScanEnvFrom } from './config.mjs'
 import { applyEnvCompat } from './env-compat.mjs'
 import { backendHostCode } from './env.mjs'
@@ -146,9 +147,24 @@ export function createReceiver({
   let blockedUntil = 0, warned = false
   async function rosterOnce() {
     if (now() < blockedUntil) return false
-    const agents = await resolveCloudAgents(cfg, env, listAllFn)
+    const scanned = await resolveCloudAgents(cfg, env, listAllFn)
+    // 改名自動接上（todo-next-181）：用夥伴編號認人；名字變了就帶 renamed_from，後台走既有的改名路徑
+    const stored = readNames(cfg.namesFile)
+    const { renames, names, skipped } = detectRenames(scanned, stored)
+    for (const s of skipped) log(`rename skipped (needs manual link): ${s}`)
+    if (renames.length) {
+      // 先把群組收信游標接到新名（沒有才複製），再回報：後台改名後新名馬上出現在群組清單，游標得已經在
+      const a = aliasCursors(readCursors(), renames)
+      if (a.changed) writeFileAtomic(cfg.roomsFile, JSON.stringify(a.cursors))
+    }
+    const agents = scanned.map(({ profile_id: id, ...a }) => {
+      const r = renames.find(x => x.id === id)
+      return r ? { ...a, renamed_from: r.from } : a
+    })
     try {
       await api('roster', { method: 'POST', body: { agents, used_legacy_env: [...legacyEnv] } })
+      for (const r of renames) log(`partner renamed: ${r.from} -> ${r.to} (reported; group identity and read position are moved by the backend)`)
+      if (JSON.stringify(names) !== JSON.stringify(stored)) { try { writeNames(cfg.namesFile, names) } catch (e) { log(`agent names write failed: ${e.message}`) } }   // 回報成功才記；失敗下一輪再試
       if (warned) log('roster ok again')
       warned = false
       return true
