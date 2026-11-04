@@ -974,6 +974,16 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         Ok(())
     }
 
+    /// mux 模式開窗格不會有畫面：選了前台顯示就開看畫面的 GUI。開不了只記下來：夥伴已經在背景跑，不算開窗失敗
+    fn show_after_open(&self, id: &str, hidden: bool) {
+        if !self.use_mux || hidden {
+            return;
+        }
+        if let Err(e) = self.view(id) {
+            elog!("開夥伴視窗：夥伴已在背景執行，但開不了畫面：{e}");
+        }
+    }
+
     /// 沒有夥伴就收掉空的 mux（判斷與保險都在 `Mux::stop_if_empty`）
     fn collect_empty_mux(&self, dir: &WezTermDir, reason: &str) {
         let base_env: BTreeMap<String, String> = super::config::child_env().into_iter().collect();
@@ -2568,7 +2578,8 @@ impl super::win_term::WinTermHost for LiveTerms {
     }
     fn open_window(&self, cwd: &Path, spec: &super::win_term::WinSpec) -> Result<u32, super::win_term::WinOpenError> {
         self.ensure_config().map_err(super::win_term::WinOpenError::NotStarted)?;
-        let (_, gui) = TermService::start_window(self, cwd, spec)?;
+        let (id, gui) = TermService::start_window(self, cwd, spec)?;
+        self.show_after_open(&id, spec.hidden);
         // mux 模式沒有自己的 GUI 視窗可藏（gui 是 mux 的程序編號，不能拿去找視窗）
         if spec.hidden && !self.use_mux {
             hide_gui(gui);
@@ -5056,6 +5067,17 @@ mod tests {
 
         fn kill_panes(r: &FakeRunner) -> usize {
             count_sub(r, "kill-pane")
+        }
+
+        #[test]
+        fn 開窗後_前台要開畫面_背景不開() {
+            let (rig, _paths) = mux_rig();
+            let id = open_partner(&rig);
+            rig.svc.show_after_open(&id, true);
+            assert!(view_spawns(&rig.runner).is_empty(), "背景開：不開畫面");
+            rig.svc.show_after_open(&id, false);
+            assert_eq!(view_spawns(&rig.runner).len(), 1, "前台：開看畫面的 GUI");
+            assert!(rig.svc.viewing(&id));
         }
 
         #[test]
