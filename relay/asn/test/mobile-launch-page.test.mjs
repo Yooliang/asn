@@ -145,7 +145,7 @@ test('畫面接線：開新夥伴在第四頁籤裡、不再是滿版層；先�
   assert.match(js, /fourthNav\.closePage\('chats'\)/, '開始對話：收起後直接到對話分頁')
   assert.doesNotMatch(js, /history\.go\(nav\.step|launchNav|nav\.step === 2/)
   const ask = /<div class="m-ops" v-if="nav\.sheet === 'leave' && leaveAsk"[\s\S]*?<\/div>/.exec(html)
-  assert.ok(ask, '有先問的浮層'); assert.match(ask[0], /class="m-ops-panel"/); assert.match(ask[0], /answerLeave\(true\)/); assert.match(ask[0], /answerLeave\(false\)/); assert.match(ask[0], /LEAVE_ASK_TEXT\.lead/)
+  assert.ok(ask, '有先問的浮層'); assert.match(ask[0], /class="m-ops-panel"/); assert.match(ask[0], /answerLeave\(true\)/); assert.match(ask[0], /answerLeave\(false\)/); assert.match(ask[0], /leaveText.lead/)
   assert.doesNotMatch(js, /\bconfirm\(/, '不用瀏覽器的 confirm（會擋住 WebView）')
   for (const k of ['settingPage(key)', 'guidePage()', 'acctPage()']) assert.ok(js.includes(`askBeforeLeave(${k}`), `${k} 走先問`)
   assert.match(js, /watch\(\(\) => nav\.sheet, s => leave\.onSheet\(s\)\)/)

@@ -568,11 +568,11 @@
 
     <!-- 換內頁前先問一句（開新夥伴第 2 步還沒送出時要換成別的內頁）：底部浮層，樣式沿用「⋯」選單；點外面或系統返回鍵＝留下 -->
     <div class="m-ops" v-if="nav.sheet === 'leave' && leaveAsk" @click.self="answerLeave(false)">
-      <section class="m-ops-panel" role="alertdialog" aria-modal="true" :aria-label="LEAVE_ASK_TEXT.title">
-        <h2 class="m-ops-h">{{ LEAVE_ASK_TEXT.title }}</h2>
-        <p class="m-ops-lead">{{ LEAVE_ASK_TEXT.lead }}</p>
-        <button type="button" class="m-btn m-btn-big" @click="answerLeave(false)">{{ LEAVE_ASK_TEXT.stay }}</button>
-        <button type="button" class="m-btn m-ops-cancel m-danger" @click="answerLeave(true)">{{ LEAVE_ASK_TEXT.leave }}</button>
+      <section class="m-ops-panel" role="alertdialog" aria-modal="true" :aria-label="leaveText.title">
+        <h2 class="m-ops-h">{{ leaveText.title }}</h2>
+        <p class="m-ops-lead">{{ leaveText.lead }}</p>
+        <button type="button" class="m-btn m-btn-big" @click="answerLeave(false)">{{ leaveText.stay }}</button>
+        <button type="button" class="m-btn m-ops-cancel m-danger" @click="answerLeave(true)">{{ leaveText.leave }}</button>
       </section>
     </div>
 

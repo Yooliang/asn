@@ -38,7 +38,7 @@ import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
 import { RECENT_GROUP_KEY, RECENT_GROUP_LABEL, recentActivity } from './lib/recent.mjs'
 import { authApi, cloudApi, invoke, listen, store } from './lib/tauri.mjs'
-import { CLOUD_TEXT, COPY_NOTE as CLOUD_COPY_NOTE, INVITE_NOTE as CLOUD_INVITE_NOTE, POLL_MS as CLOUD_POLL_MS, createMobileCloud } from './lib/mobile-cloud.mjs'
+import { CLOUD_KEY_KEEP_MS, CLOUD_LEAVE_TEXT, CLOUD_TEXT, COPY_NOTE as CLOUD_COPY_NOTE, INVITE_NOTE as CLOUD_INVITE_NOTE, POLL_MS as CLOUD_POLL_MS, createMobileCloud } from './lib/mobile-cloud.mjs'
 import { buildLogView } from './lib/changelog.mjs'
 import { RETRY_LABEL, initialReleases, loadReleases, releasesNote } from './lib/releases.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
@@ -49,7 +49,7 @@ import { canInviteFrom, copyText, createGroupApi } from './lib/groups.mjs'
 import { createRoomHub } from './lib/room-hub.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
 import { ACCT_SETTING_KEYS, mobileSettingRows, mobileSettingTitle } from './lib/mobile-settings.mjs'
-import { PAGE_TAB, FOURTH_KEEP_MS, LEAVE_ASK_TEXT, acctPage, fourthMsLeft, guidePage, launchPage, needsLeaveAsk, settingPage } from './lib/mobile-fourth.mjs'
+import { PAGE_TAB, FOURTH_KEEP_MS, LEAVE_ASK_TEXT, acctPage, fourthExpired, fourthMsLeft, guidePage, launchPage, needsLeaveAsk, settingPage } from './lib/mobile-fourth.mjs'
 import { createLeaveAsk, createMobileNav, pageTitle } from './lib/mobile-nav.mjs'
 import { applyRename } from './lib/rename.mjs'
 import { checkAiWakeLimit, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE } from './lib/ai-wake-limit.mjs'
@@ -240,7 +240,9 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab], () => { const {
 history.replaceState(initialNav(), '')
 // 回到上次的大分頁：名單那層先放著，再推一筆，系統返回鍵還是回到名單
 if (savedTab !== 'list') fourthNav.go(tabNav(savedTab))
+let keyBackGuard = () => false   // setup 裡接上（雲端代理的金鑰還在畫面上時，返回鍵先問一次）
 window.addEventListener('popstate', e => {
+  if (keyBackGuard()) return
   // 通話中按返回鍵＝掛斷，畫面留在原處（不跳到上一頁）；切頁時程式自己退的記錄不算
   if (callOn.value && !fourthNav.busy()) { void liveCall?.end(); history.pushState(fourthNav.state(), ''); return }
   fourthNav.onPop(e.state)
@@ -250,11 +252,13 @@ const go = next => fourthNav.go(next)
 const goTab = t => fourthNav.goTab(t)
 // 第四頁籤離開後的 3 分鐘：切走時排一個計時器到點檢查；App 在背景時計時器可能不跑，回到前景再用絕對時間檢查一次
 let fourthTimer = 0
+let fourthKeepMs = () => FOURTH_KEEP_MS   // setup 裡接上：金鑰還在畫面上時較長
+let checkFourth = () => fourthNav.check()
 watch(() => fourthSt.fourth?.leftAt, at => {
   clearTimeout(fourthTimer)
-  if (at) fourthTimer = setTimeout(() => fourthNav.check(), Math.min(fourthMsLeft(fourthSt.fourth, Date.now()), FOURTH_KEEP_MS) + 50)
+  if (at) fourthTimer = setTimeout(() => checkFourth(), Math.min(fourthMsLeft(fourthSt.fourth, Date.now(), fourthKeepMs()), fourthKeepMs()) + 50)
 })
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') fourthNav.check() })
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkFourth() })
 
 // 下拉重整的小動畫區（夥伴、對話兩頁各一個）：我們自己的機器人，只用 transform／opacity 動
 const PtrZone = {
@@ -393,7 +397,8 @@ const app = createApp({
     const fourthPage = computed(() => fourthSt.fourth?.page ?? null)
     const fourthTitle = computed(() => (fourthPage.value?.kind === 'launch' ? lchTitle.value : fourthPage.value?.kind === 'acct' ? acctTitle.value : pageTitle(fourthPage.value)))   // 開新夥伴的標題跟著畫面（送出後的進度畫面叫「開新夥伴」）
     const tabLabel = t => tabLabelOf(t, fourthTitle.value)
-    const closePage = () => fourthNav.closePage()   // 內頁的「關閉」：整個收起第四頁籤，回到進來之前的頁籤
+    // 內頁的「關閉」：整個收起第四頁籤，回到進來之前的頁籤（雲端代理的金鑰還在畫面上時先問）
+    const closePage = () => askBeforeLeave(null, () => fourthNav.closePage())
     const openBanner = () => { const b = banner.value; banner.value = null; if (b) openChat(b.id) }
     // 橫幅上的「換班接手」：開啟那位的對話，直接帶到「換班接手」的確認框（不能換手時停在「⋯」選單，由選單說明原因）
     async function bannerHandover() {
@@ -452,9 +457,11 @@ const app = createApp({
         clearInterval(cloudTimer); cloudTimer = setInterval(() => void cloud.load(), CLOUD_POLL_MS)
       } else if (old === 'cloud') {
         clearInterval(cloudTimer); cloudTimer = null
-        void cloud.leave()
+        void cloud.leave().then(() => { if (cloudSt.msg) showToast(cloudSt.msg) })   // 頁面已關：丟金鑰、清不掉的提示改用一句話提示
       }
     })
+    fourthKeepMs = () => (cloudSt.created ? CLOUD_KEY_KEEP_MS : FOURTH_KEEP_MS)   // 金鑰還在畫面上時，內頁切走後最多留 30 分鐘
+    checkFourth = () => { if (cloudSt.created && fourthExpired(fourthSt.fourth, Date.now(), CLOUD_KEY_KEEP_MS)) cloud.markExpired(); return fourthNav.check(fourthKeepMs()) }
     document.addEventListener('visibilitychange', () => { if (!document.hidden) cloud.onVisible() })
     // 設備與帳號（#268）開的是名單設備卡「選項」的同一頁（先看設備列表），其他分類開該分類的內頁；浮層開著時不開（lib/mobile-nav.mjs 擋）
     const openSetting = key => { if (ACCT_SETTING_KEYS.includes(key)) void openAcct({ tab: key }); else askBeforeLeave(settingPage(key), () => fourthNav.openPage(settingPage(key))) }
@@ -462,10 +469,18 @@ const app = createApp({
     // 換內頁前先問一句：開新夥伴正在填第 2 步、還沒送出時，要換成別的內頁先問「要離開嗎？」（底部浮層，樣式沿用「⋯」選單；系統返回鍵＝留下）。
     // 選離開：先收起浮層，等浮層的記錄退掉（nav.sheet 變回空）才換；選留下就不動。單純切到前三頁不問（內容會保留 3 分鐘）
     const leaveSt = reactive({ ask: null })
-    const leave = createLeaveAsk({ nav, st: leaveSt, go, back: () => history.back(), needs: next => needsLeaveAsk(fourthSt.fourth, next, { draft: lchStep2.value }) })
-    const askBeforeLeave = (next, run) => { leave.ask(next, run) }
+    const leave = createLeaveAsk({ nav, st: leaveSt, go, back: () => history.back(), needs: next => !!cloudSt.created || needsLeaveAsk(fourthSt.fourth, next, { draft: lchStep2.value }) })
+    const askBeforeLeave = (next, run) => { leave.ask(next, () => { cloud.confirmLeave(); run() }) }   // 本人按了離開：丟掉金鑰不再另外提示
     const answerLeave = ok => leave.answer(ok)
     const leaveAsk = computed(() => leaveSt.ask)
+    const leaveText = computed(() => (cloudSt.created ? CLOUD_LEAVE_TEXT : LEAVE_ASK_TEXT))   // 雲端代理的金鑰還在畫面上時問的是另一句
+    // 系統返回鍵：金鑰還在畫面上時先問一次（取消這次返回、開「要離開嗎」；選離開才丟金鑰、再返回一次）
+    keyBackGuard = () => {
+      if (!cloudSt.created || nav.sheet || fourthNav.busy()) return false
+      history.pushState(fourthNav.state(), '')
+      leave.ask(null, () => { cloud.confirmLeave(); void cloud.leave(); history.back() })
+      return true
+    }
     watch(() => nav.sheet, s => leave.onSheet(s))
     const openGuide = key => fourthNav.pushLayer(guidePage(key))   // 篇目列表 → 單篇：多一層，返回鍵回列表
     // ---------- 開新夥伴（遠端開視窗）：手機只下指令，視窗開在那台電腦上。要本人簽章（Rust 端沒憑證就不送） ----------
@@ -502,7 +517,8 @@ const app = createApp({
     }
     // 開新夥伴在第四頁籤：第 1 步選電腦、第 2 步（多一層，返回鍵回第 1 步）選模型與資料夾、名字、第一句話。
     // 畫面收起（關閉或 3 分鐘到了）不影響背景的開窗：lch 留在這裡，trackLaunch 照常追蹤，開好時跳橫幅
-    function openLaunch(node) {
+    const openLaunch = node => askBeforeLeave(launchPage(), () => openLaunchNow(node))   // 金鑰還在畫面上時先問
+    function openLaunchNow(node) {
       const isLaunch = fourthPage.value?.kind === 'launch'
       // 還在開：回到進度畫面；第四頁籤上的開新夥伴還在填：切過去接著填（都不重來）
       if (launchInProgress(lch) || (isLaunch && lch.phase === 'form')) { if (isLaunch) goTab(PAGE_TAB); else fourthNav.openPage(launchPage()); return }
@@ -1022,7 +1038,7 @@ const app = createApp({
       setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, acctSw, setAcctTab, acctSwitchOn, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a), usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
-      toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT,
+      toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,
       settingRows, settingCat, settingTitle, openSetting, rel, relLog, relNote, loadRel, RETRY_LABEL, nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
