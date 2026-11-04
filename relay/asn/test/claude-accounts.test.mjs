@@ -247,8 +247,9 @@ test('只重讀額度：不重抓帳號清單，畫面的額度條換成新數�
   assert.deepEqual(quotaBars(ui.state.list[1]).bars.map(b => b.pct), [30], '讀不到就維持原樣')
 })
 
-test('重讀額度接線：每 5 分鐘回報時順便重讀、打開設定頁時重讀', () => {
+test('重讀額度接線：每 5 分鐘重讀、打開設定頁時重讀；帳號回報不靠畫面定時', () => {
   const js = read('ui/list.js')
-  assert.match(js, /setInterval\(\(\) => \{ void accounts\.report\(\); void accounts\.refreshQuota\(\);[^\n]*\}, 5 \* 60_000\)/)   // #374 起同一支也順便讀帳號列表
+  assert.match(js, /setInterval\(\(\) => \{ void accounts\.refreshQuota\(\);[^\n]*\}, 5 \* 60_000\)/)
+  assert.doesNotMatch(js, /accounts\.report\(\)/)   // #374 起同一支也順便讀帳號列表
   assert.match(js, /watch\(\(\) => ui\.panel\.setting, k => \{[^]*?if \(k\) void accounts\.refreshQuota\(\)[^]*?\}, \{ immediate: true \}\)/)
 })

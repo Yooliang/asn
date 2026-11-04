@@ -14,7 +14,9 @@ test('文字：說發生什麼、怎麼辦；沒有內部名稱', () => {
   assert.match(STILL_RUNNING_NOTE, /登入後/)
   assert.match(RELOGIN_BAR_TEXT, /收發信照常/)
   assert.ok([...RELOGIN_BAR_TEXT].length <= 20, '提醒條只有一行，名單視窗很窄，字不能太長')
-  assert.match(RELOGIN_BAR_HINT, /帳號回報和切換帳號暫停/)
+  assert.match(RELOGIN_BAR_HINT, /切換帳號暫停/)
+  assert.doesNotMatch(RELOGIN_BAR_HINT, /回報/)
+  assert.match(LOGOUT_NOTE, /繼續收發信、回報帳號/)
   assert.match(LOGOUT_NOTE, /繼續收發信/)
   // 照實說：關閉只是暫停，下次開啟會恢復；不說「結束」「不再」這種絕對的話
   for (const s of [LOGOUT_STOP_LABEL, LOGOUT_STOP_NOTE, LOGOUT_STOP_DONE_TEXT]) assert.doesNotMatch(s, /不再收發|永久|結束 ASN/, s)

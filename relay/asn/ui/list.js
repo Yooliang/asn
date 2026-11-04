@@ -1555,12 +1555,11 @@ const app = createApp({
     const agentInstall = createAgentInstall({ invoke, reactive, signedIn: async () => (await authApi.status().catch(() => null))?.signed_in === true })
     void agentInstall.load()
     void listen('agent-setup', e => agentInstall.onEvent(e))   // listen 已經把事件裡的內容（payload）直接交給函式
-    // 本機帳號庫清單定期回報給收發室（只有 email、方案、使用中）；別台送來的切換指令定期取走（預設要本機按確認才切）。--shot 不輪詢指令。
-    setTimeout(() => void accounts.report(), 5_000)
+    // 本機帳號庫清單定期回報給收發室在 Rust 背景工作（report_loop），停在登入畫面也照跑；別台送來的切換指令定期取走（預設要本機按確認才切）。--shot 不輪詢指令。
     // 每 5 分鐘回報時順便重讀這台的額度紀錄，設備卡的額度條才不會停在開機那時的數字
     // 帳號列表（#374）也跟著這個節奏，但只在「設備與帳號」開著時讀（打開那一刻另讀一次，見下面監看設定頁那段）
     const devicesOpen = () => ['devices', 'accounts'].includes(normalizeCatKey(ui.panel.setting))
-    setInterval(() => { void accounts.report(); void accounts.refreshQuota(); if (devicesOpen()) void accounts.refreshRoster() }, 5 * 60_000)
+    setInterval(() => { void accounts.refreshQuota(); if (devicesOpen()) void accounts.refreshRoster() }, 5 * 60_000)
     void listen('claude-mod-status', e => { accounts.state.mod = String(e.payload ?? '') })   // Rust 背景安裝 Claude 外掛完成
     void listen('claude-account-auto', e => void accounts.onAuto(e.payload))
     void listen('grok-account-auto', e => void accounts.onAuto(e.payload))   // Grok 自動加入也走同一支：重抓清單並回報   // Rust 背景工作自動加入／回存之後
