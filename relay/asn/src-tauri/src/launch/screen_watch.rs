@@ -44,6 +44,20 @@ pub fn pace_of(mod_state: Option<&str>) -> Pace {
     }
 }
 
+/// 夥伴視窗 → 它現在的 session。對照表的編號只有接續對話時才有，所以用視窗名去對 session 檔。
+/// `partners`＝（編號, 視窗名），`sessions`＝活著的（視窗名, session）。同名不猜；還沒有 session 檔的（例如停在信任提示）不列
+pub fn match_sessions(partners: &[(String, String)], sessions: &[(String, String)]) -> Vec<(String, String)> {
+    partners
+        .iter()
+        .filter_map(|(id, name)| {
+            let mut hits = sessions.iter().filter(|(n, _)| n == name);
+            let (_, sid) = hits.next()?;
+            let same_name_partners = partners.iter().filter(|(_, n)| n == name).count();
+            (hits.next().is_none() && same_name_partners == 1).then(|| (id.clone(), sid.clone()))
+        })
+        .collect()
+}
+
 #[derive(Default)]
 pub struct Schedule {
     next_at: HashMap<String, u64>,
@@ -123,6 +137,19 @@ mod tests {
 
     fn w(n: usize, pace: Pace) -> Vec<(String, Pace)> {
         (0..n).map(|i| (format!("w{i}"), pace)).collect()
+    }
+
+    fn pair(a: &str, b: &str) -> (String, String) {
+        (a.to_string(), b.to_string())
+    }
+
+    #[test]
+    fn 用視窗名對_session_新開的對話也對得到_同名不猜_沒有檔案不列() {
+        let partners = [pair("1", "甲"), pair("2", "乙"), pair("3", "丙")];
+        let sessions = [pair("甲", "s-甲"), pair("丙", "s-丙1"), pair("丙", "s-丙2"), pair("別的", "s-別")];
+        assert_eq!(match_sessions(&partners, &sessions), vec![pair("1", "s-甲")], "乙還沒有檔案、丙兩份不猜、別的不是夥伴");
+        let twins = [pair("1", "甲"), pair("2", "甲")];
+        assert!(match_sessions(&twins, &[pair("甲", "s")]).is_empty(), "兩扇同名也不猜");
     }
 
     #[test]
