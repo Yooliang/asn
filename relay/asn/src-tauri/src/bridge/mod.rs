@@ -7,6 +7,7 @@ pub mod corrlog;
 pub mod dup_session;
 pub mod engines;
 pub mod forward_gate;
+pub mod forward_selftest;
 pub mod handoff;
 pub mod known;
 pub mod launcher;
