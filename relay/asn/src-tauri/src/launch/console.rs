@@ -221,6 +221,13 @@ pub(crate) fn live_partner_pid(engine: &str, name: &str) -> Option<u32> {
     }
 }
 
+/// 自動接回用（#767）：把剛開出來、還沒上線（沒有 session 檔，名單裡沒有它）的隱藏視窗顯示出來。
+/// 有開出來的程序編號就用它找（找視窗前一定會再和本機的程序掃描結果比對）；回有沒有顯示成功
+pub(crate) fn show_partner_window(engine: &str, name: &str, pid: Option<u32>) -> bool {
+    let req = PartnerConsoleReq { engine: engine.into(), name: name.into(), visible: Some(true), kind: None, pid };
+    set_console_visible(&req, true).ok().and_then(|v| v.get("ok").and_then(Value::as_bool)).unwrap_or(false)
+}
+
 /// 把已在跑的同名夥伴切到前景（和夥伴清單的「前台」同一條：mux 開畫面、傳統主控台顯示視窗）。回傳 `{ok, reason?}`
 pub(crate) fn bring_partner_to_front(engine: &str, name: &str) -> Value {
     let req = PartnerConsoleReq { engine: engine.into(), name: name.into(), visible: Some(true), kind: None, pid: None };

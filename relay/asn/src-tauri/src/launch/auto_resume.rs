@@ -34,6 +34,9 @@ const MODE_FLAG: &str = "--permission-mode";
 const PI_MANUAL: &str = "pi 視窗還不會自動接回，請手動喚醒";
 const TOO_MANY: &str = "一次要接回的夥伴太多，這位請手動喚醒";
 const NOT_SEEN: &str = "視窗開了，但一直沒看到它上線，可能停在確認畫面，請到它的視窗看一下";
+/// 原本是隱藏的視窗停在確認畫面：本人看不到、到不了它，所以接回失敗時把它顯示出來（和名單的「前台」同一條）
+const NOT_SEEN_SHOWN: &str = "視窗開了，但一直沒看到它上線，可能停在確認畫面。它原本是隱藏的，已經把它的視窗顯示出來，請到它的視窗看一下";
+const NOT_SEEN_HIDDEN: &str = "視窗開了，但一直沒看到它上線，可能停在確認畫面，而且它是隱藏的，沒能自動顯示。請在夥伴名單按它的「前台」；名單沒有它的話，請重開 ASN，或關掉它再手動喚醒";
 const NO_SESSION: &str = "沒有記到原本的對話編號，請手動喚醒";
 const BAD_NAME: &str = "視窗名不能用，請手動喚醒";
 const NO_LOGIN: &str = "12 小時內沒有重新登入 Claude，沒有接回";
@@ -74,6 +77,8 @@ pub trait Deps {
     fn launch(&self, entry: &KnownEntry) -> Result<(), String>;
     /// 開出來的視窗上線了（有活著的同名 session 檔）
     fn appeared(&self, name: &str) -> bool;
+    /// 接回失敗、視窗又是隱藏的：把它顯示出來讓本人看得到（回有沒有成功）。只有隱藏的視窗才會被呼叫
+    fn reveal(&self, entry: &KnownEntry) -> bool;
     fn report(&self, status: &Status);
 }
 
@@ -161,6 +166,10 @@ pub fn run(entries: Vec<KnownEntry>, deps: &dyn Deps) -> Status {
         }
         if up {
             st.resumed.push(e.name.clone());
+        } else if e.facts.hidden {
+            // 隱藏視窗停在確認畫面：本人看不到框，只能靠我們把它顯示出來
+            let shown = deps.reveal(e);
+            fail(&mut st, (if shown { NOT_SEEN_SHOWN } else { NOT_SEEN_HIDDEN }).to_string());
         } else {
             fail(&mut st, NOT_SEEN.to_string());
         }
@@ -284,6 +293,8 @@ pub fn probe_window(pid: u32) -> (bool, Vec<String>) {
 struct RealDeps {
     data_dir: std::path::PathBuf,
     sessions: std::path::PathBuf,
+    /// 開出來的視窗的程序編號（名字 → pid），隱藏視窗沒上線時要靠它把視窗顯示出來
+    opened: std::sync::Mutex<std::collections::HashMap<String, u32>>,
 }
 
 #[cfg(feature = "gui")]
@@ -321,7 +332,15 @@ impl Deps for RealDeps {
         let mut config = super::config::load_launch_config()?;
         // 一般使用者從畫面選的資料夾記在本機同意清單（launch-prefs.json），不在 launcher.json；併進來才接得回來
         super::cwds::allow_consented(&mut config, &e.facts.cwd, &self.data_dir);
-        super::local::start_resumed_window(&config, &e.name, &e.facts.cwd, &e.facts.session, &e.facts.perm, e.facts.hidden).map(|_| ())
+        let pid = super::local::start_resumed_window(&config, &e.name, &e.facts.cwd, &e.facts.session, &e.facts.perm, e.facts.hidden)?;
+        if let Ok(mut m) = self.opened.lock() {
+            m.insert(e.name.clone(), pid);
+        }
+        Ok(())
+    }
+    fn reveal(&self, e: &KnownEntry) -> bool {
+        let pid = self.opened.lock().ok().and_then(|m| m.get(&e.name).copied());
+        super::console::show_partner_window("claude", &e.name, pid)
     }
     fn appeared(&self, name: &str) -> bool {
         self.live_session(name, None)
@@ -348,7 +367,7 @@ pub fn start(work_dir: &Path, data_dir: &Path) {
     if entries.is_empty() {
         return;
     }
-    let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::bridge::core::claude_sessions_dir() };
+    let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::bridge::core::claude_sessions_dir(), opened: Default::default() };
     let log_dir = work_dir.to_path_buf();
     let spawned = std::thread::Builder::new().name("asn-auto-resume".into()).spawn(move || {
         deps.sleep(START_DELAY_MS);
@@ -408,11 +427,13 @@ mod tests {
         states: RefCell<Vec<&'static str>>,
         running: Cell<usize>,
         peak: Cell<usize>,
+        revealed: RefCell<Vec<String>>,
+        reveal_ok: bool,
     }
 
     impl Fake {
         fn new() -> Fake {
-            Fake { now: Cell::new(1_000_000), logins: RefCell::new(vec![]), free: RefCell::new(vec![]), live: vec![], launched: RefCell::new(vec![]), fail_launch: vec![], never_appears: vec![], states: RefCell::new(vec![]), running: Cell::new(0), peak: Cell::new(0) }
+            Fake { now: Cell::new(1_000_000), logins: RefCell::new(vec![]), free: RefCell::new(vec![]), live: vec![], launched: RefCell::new(vec![]), fail_launch: vec![], never_appears: vec![], states: RefCell::new(vec![]), running: Cell::new(0), peak: Cell::new(0), revealed: RefCell::new(vec![]), reveal_ok: false }
         }
     }
 
@@ -458,6 +479,10 @@ mod tests {
             }
             up
         }
+        fn reveal(&self, e: &KnownEntry) -> bool {
+            self.revealed.borrow_mut().push(e.name.clone());
+            self.reveal_ok
+        }
         fn report(&self, s: &Status) {
             self.states.borrow_mut().push(s.state);
         }
@@ -500,6 +525,42 @@ mod tests {
         assert_eq!(st.failed.iter().map(|x| x.name.as_str()).collect::<Vec<_>>(), ["甲", "乙"]);
         assert_eq!(st.failed[0].reason, NOT_SEEN);
         assert!(st.failed[1].reason.contains("壞了"));
+    }
+
+    #[test]
+    fn 隱藏視窗沒上線_把它顯示出來並明講_沒顯示成功也要告訴本人怎麼辦() {
+        let hidden = |n: &str| {
+            let mut e = entry(n);
+            e.facts.hidden = true;
+            e
+        };
+        // 隱藏、沒上線、顯示成功
+        let mut f = Fake::new();
+        f.never_appears = vec!["甲".into(), "乙".into(), "丙".into()];
+        f.reveal_ok = true;
+        let st = run(vec![hidden("甲"), entry("乙")], &f);
+        assert_eq!(*f.revealed.borrow(), ["甲"], "只有隱藏的才顯示，看得到的視窗不動");
+        assert_eq!(st.failed[0].reason, NOT_SEEN_SHOWN);
+        assert!(st.failed[0].reason.contains("已經把它的視窗顯示出來"));
+        assert_eq!(st.failed[1].reason, NOT_SEEN);
+        // 隱藏、沒上線、顯示不成功：訊息寫明怎麼辦（名單的「前台」），不能還叫人去一個到不了的視窗
+        let mut f2 = Fake::new();
+        f2.never_appears = vec!["丙".into()];
+        f2.reveal_ok = false;
+        let st2 = run(vec![hidden("丙")], &f2);
+        assert_eq!(*f2.revealed.borrow(), ["丙"]);
+        assert_eq!(st2.failed[0].reason, NOT_SEEN_HIDDEN);
+        assert!(st2.failed[0].reason.contains("前台"));
+        // 隱藏但順利上線：不碰它
+        let f3 = Fake::new();
+        let st3 = run(vec![hidden("丁")], &f3);
+        assert_eq!(st3.resumed, ["丁"]);
+        assert!(f3.revealed.borrow().is_empty());
+        // 開不起來：沒有視窗可顯示
+        let mut f4 = Fake::new();
+        f4.fail_launch = vec!["戊".into()];
+        run(vec![hidden("戊")], &f4);
+        assert!(f4.revealed.borrow().is_empty());
     }
 
     #[test]
