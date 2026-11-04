@@ -49,6 +49,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const ITEM_RETRY_MAX = 3   // 同一封信處理失敗幾次後就先 ack 掉，不讓一封壞信擋住後面所有信
 // 一次收到超過這麼多封「Rust 代收的信」（畫面沒開時存下來的，m.spooled）就不逐封跳提示、只跳一則摘要（#339：曾一次湧進 437 封）
 export const SPOOL_QUIET_OVER = 3
+// 手機積信時等已讀位置最多這麼久：等不到就照常收信，不能讓它卡住收信
+export const BACKLOG_READ_WAIT_MS = 5_000
 
 // 舊好友存檔的一筆：畫面離線時還要用的欄位。model（模型）決定 pi 夥伴的廠商小圖示、device（設備名）與 kind（設備種類，手機與否）決定設備分組的名字與圖示；
 // 這三欄名單沒給就不寫（舊存檔本來就沒有，讀回時照舊退回 pi 圖示／未命名設備）。欄位名與名單（buildFriends）一致，讀回直接沿用
@@ -62,13 +64,13 @@ export const savedFriendOf = f => ({
 export const restoredFriendOf = ({ model, device, kind, ...rest }) => ({ ...rest, ...optStr('model', model), ...optStr('device', device), ...optStr('kind', kind) })
 
 export class AsnCore {
-  constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, localMs = 2_000, soonGapMs = 1_000, statusPollMs = STATUS_POLL_MS, aliases = [], stepMs = STEP_MS }) {
+  constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, localMs = 2_000, soonGapMs = 1_000, statusPollMs = STATUS_POLL_MS, aliases = [], backlogAfterMs = 0, stepMs = STEP_MS }) {
     // 讀取類的呼叫一律加逾時（寄信、寄檔另有自己的流程，不在這裡限時）。收信（inbox、ack）可能一次要走好幾個名字，給兩倍時間
     const guarded = { ...transport }
     for (const k of ['list', 'inbox', 'ack', 'sentStatus', 'avatar', 'partnerAvatar', 'history', 'readSync']) {
       if (typeof transport[k] === 'function') guarded[k] = (...a) => withTimeout(transport[k](...a), k === 'inbox' || k === 'ack' ? stepMs * 2 : stepMs, k)
     }
-    Object.assign(this, { aliases: new Set(aliases), transport: guarded, store, selfNode, windowName, isChatVisible, now, log, pollMs, rosterMs, localMs, statusPollMs, stepMs })
+    Object.assign(this, { backlogAfterMs, aliases: new Set(aliases), transport: guarded, store, selfNode, windowName, isChatVisible, now, log, pollMs, rosterMs, localMs, statusPollMs, stepMs })
     this.localSeen = new Set()   // 本機現讀曾經看到過的視窗名（之後不見＝剛關掉，見 overlayLocal）
     this.cwdOf = new Map()   // 好友 id → 資料夾標籤（後台名單給的），本機現讀狀態時用來重組個人訊息
     // 門鈴響、回到前景時立刻重拉名單；1 秒內多次合併成一次
@@ -269,7 +271,12 @@ export class AsnCore {
         let itemErr = null
         const forMe = m => m.to_agent === this.windowName || this.aliases.has(m.to_agent)
         // 代收的舊信很多時照常進對話、算未讀，但不逐封跳提示與音效，最後合成一則
-        const quiet = messages.filter(m => m?.spooled === true && forMe(m) && !this.seen.has(m.id)).length > SPOOL_QUIET_OVER
+        // 手機沒開 App 時留下的舊信（backlogAfterMs，只有手機版設）一樣合併
+        const backlog = m => m?.spooled === true || (this.backlogAfterMs > 0 && this.now() - (Date.parse(m?.created_at) || this.now()) > this.backlogAfterMs)
+        const fresh = messages.filter(m => backlog(m) && forMe(m) && !this.seen.has(m.id))
+        // 手機積信：先取回別台設備的已讀位置，電腦看過的信才不會又算未讀、又跳提示
+        if (this.backlogAfterMs > 0 && fresh.length) await withTimeout(this.syncReads(), Math.min(this.stepMs, BACKLOG_READ_WAIT_MS), 'readSync').catch(e => this.log(`read_sync skipped: ${e.message}`))
+        const quiet = fresh.length > SPOOL_QUIET_OVER
         let quietN = 0, quietLast = null
         for (const m of messages) {
           if (!forMe(m)) continue   // 不是寄給本視窗（或還沒過期的舊名）的絕不處理、不 ack
@@ -277,7 +284,7 @@ export class AsnCore {
             if (!this.seen.has(m.id)) {
               this.seen.add(m.id)
               if (!this.#noReplyNotice(m)) {
-                const q = quiet && m.spooled === true
+                const q = quiet && backlog(m)
                 const f = await this.#incoming(m, { quiet: q })
                 if (q && f) { quietN++; quietLast = f }
               }
@@ -369,8 +376,10 @@ export class AsnCore {
     this.#scheduleSave()
     this.emit('state')
     this.emit('log', r.id)
-    if (shown && !quiet) this.emit('notify', { kind: 'msg', friend: f, line: text ? plain(text) : noticeOf(photos), sound: 'msg', toast: !visible, hasFile: photos.some(a => a.kind === 'file') })
-    if (nudge && !quiet) this.emit('notify', { kind: 'nudge', friend: f, line: '傳送了一個震動', sound: 'nudge', toast: !visible, shake: visible })
+    // 別台設備已經讀過：進對話但不提示；合併提示也不算它（回 null）。對話正開著時已讀位置是這裡剛推進的，照常提示
+    if (already && !visible) { if (quiet) return null }
+    else if (shown && !quiet) this.emit('notify', { kind: 'msg', friend: f, line: text ? plain(text) : noticeOf(photos), sound: 'msg', toast: !visible, hasFile: photos.some(a => a.kind === 'file') })
+    if (nudge && !quiet && !(already && !visible)) this.emit('notify', { kind: 'nudge', friend: f, line: '傳送了一個震動', sound: 'nudge', toast: !visible, shake: visible })
     // 回信是扇出給我所有設備的：我在別台設備上說的話這台還沒有，順手補一次（人在別台說、這台只看到 AI 的回覆就會斷掉）
     if (typeof m.fanout_id === 'string') void this.syncHistory(r.id, { force: true })
     return f
