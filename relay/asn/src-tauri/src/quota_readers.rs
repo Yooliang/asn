@@ -261,9 +261,8 @@ async fn read_minimax(key: &str, now_ms: i64) -> Result<Vec<Value>, Failure> {
 async fn read_agy(home: &Path, email: &str, now_ms: i64) -> Result<(), Failure> {
     let bin = crate::agent_tools::resolve_binary("agy").ok_or(Failure::Other("找不到 agy".into()))?;
     let null = if cfg!(windows) { "NUL" } else { "/dev/null" };
-    let mut cmd = tokio::process::Command::new(bin);
-    cmd.args(["-p", "/quota", "--output-format", "json", "--log-file", null]).env("AGY_CLI_DISABLE_AUTO_UPDATE", "true");
-    let out = run_with_timeout(cmd, std::time::Duration::from_secs(AGY_TIMEOUT_SECS)).await?;
+    let args = ["-p", "/quota", "--output-format", "json", "--log-file", null];
+    let out = run_with_timeout(bin.as_os_str(), &args, &[("AGY_CLI_DISABLE_AUTO_UPDATE", "true")], std::time::Duration::from_secs(AGY_TIMEOUT_SECS)).await?;
     if !out.status.success() {
         return Err(Failure::Other("結束碼不是 0".into()));
     }
@@ -274,8 +273,10 @@ async fn read_agy(home: &Path, email: &str, now_ms: i64) -> Result<(), Failure> 
 
 /// 跑外部程式，逾時就收掉自己開的這一棵。`kill_on_drop` 只收得到直接的程序，
 /// `resolve_binary` 可能回包裝腳本（npm 的 `.cmd`），底下還有子程序，所以要趁它還在時用 taskkill /T。
-async fn run_with_timeout(mut cmd: tokio::process::Command, limit: std::time::Duration) -> Result<std::process::Output, Failure> {
-    let child = cmd
+async fn run_with_timeout(program: &std::ffi::OsStr, args: &[&str], envs: &[(&str, &str)], limit: std::time::Duration) -> Result<std::process::Output, Failure> {
+    let child = tokio::process::Command::new(program)
+        .args(args)
+        .envs(envs.iter().copied())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())

@@ -68,9 +68,7 @@ async fn timeout_kills_whole_tree() {
     let script = |lines: &[String]| lines.join("\r\n") + "\r\n";
     std::fs::write(&inner, script(&["@echo off".into(), ":loop".into(), format!("echo x>>\"{}\"", beat.display()), "ping -n 2 127.0.0.1 >NUL".into(), "goto loop".into()])).unwrap();
     std::fs::write(&outer, script(&["@echo off".into(), format!("cmd /c \"{}\"", inner.display())])).unwrap();
-    let mut cmd = tokio::process::Command::new("cmd");
-    cmd.arg("/c").arg(&outer);
-    let r = run_with_timeout(cmd, std::time::Duration::from_secs(3)).await;
+    let r = run_with_timeout(std::ffi::OsStr::new("cmd"), &["/c", outer.to_str().unwrap()], &[], std::time::Duration::from_secs(3)).await;
     assert_eq!(r.err(), Some(Failure::Other("逾時".into())));
     assert!(beat.exists(), "內層真的有跑起來");
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
