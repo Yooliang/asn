@@ -54,5 +54,24 @@ export const needsDeviceSetup = (hasNode, status) => !hasNode && status?.signed_
 export const showSkip = (canSkip, phase) => canSkip === true && (phase === 'idle' || phase === 'error')
 export const SKIP_LABEL = '暫時不登入（只用這台電腦的金鑰）'
 
+// 這台電腦已經有節點金鑰（舊電腦、或登入掉了）：沒登入時收發信照常，登入畫面要講清楚，免得以為停擺
+export const STILL_RUNNING_NOTE = '這台電腦還在收發信，夥伴照常工作；登入後才能在這裡打字和管理。'
+// 名單視窗上方的提醒條：沒登入時（登入掉了、或選了暫時不登入），帳號回報與切換帳號會暫停
+export const RELOGIN_BAR_TEXT = '這台電腦還沒登入，收發信照常。'
+export const RELOGIN_BAR_HINT = '收發信和夥伴照常工作，但帳號回報和切換帳號暫停。請重新登入。'
+export const RELOGIN_BAR_ACTION = '登入'
+export const RELOGIN_BAR_DISMISS = '知道了'
+// 要不要顯示提醒條：這台已有節點金鑰、目前沒登入、本人還沒按「知道了」（按了就這次不再顯示；之後登入又掉才會再出現）
+export const showReloginBar = (hasNode, signedIn, dismissed) => hasNode === true && signedIn === false && dismissed !== true
+// 主動登出的確認：預設只登出，收發信照常；要連收發信一起停，本人另外選
+export const LOGOUT_NOTE = '登出後，這台電腦還會繼續收發信，夥伴照常工作；只是不能在這裡打字和管理，帳號回報和切換帳號也會暫停。'
+export const LOGOUT_ONLY_LABEL = '只登出'
+export const LOGOUT_STOP_LABEL = '登出並關閉 ASN'
+export const LOGOUT_STOP_NOTE = '選「登出並關閉 ASN」：關閉後這台電腦停止收發信，下次開啟 ASN 才會恢復。'
+export const LOGOUT_STOP_AUTOSTART_NOTE = '你設了開機自動啟動，下次開機 ASN 會自己開啟，收發信也就恢復。'
+export const LOGOUT_CANCEL_LABEL = '取消'
+export const LOGOUT_DONE_TEXT = '已登出，正在回到登入畫面…這台電腦照常收發信。'
+export const LOGOUT_STOP_DONE_TEXT = '已登出，ASN 即將關閉，關閉期間這台電腦不收發信；下次開啟 ASN 會恢復。'
+
 // 上次用哪種方式登入，就在那顆按鈕上標這個小標籤
 export const LAST_USED_LABEL = '上次使用'
