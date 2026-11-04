@@ -453,9 +453,7 @@ impl Parser {
             match cross_session_notice(content) {
                 Some((Some(kind), Some(recipient))) => {
                     out.logs.push(format!("cross-session {kind} recipient={}", recipient.chars().take(80).collect::<String>()));
-                    if kind != "released" {
-                        out.events.push(WorkerEvent::DeliveryProblem { kind, recipient });
-                    }
+                    out.events.push(WorkerEvent::DeliveryProblem { kind, recipient });
                 }
                 Some(_) => out.logs.push(format!("cross-session notice unrecognized: {}", content.chars().take(80).collect::<String>())),
                 None => {}
@@ -1109,7 +1107,7 @@ mod tests {
         assert_eq!(r.logs, vec!["cross-session held recipient=T-甲 乙".to_string()]);
         // 下面三段文字取自 Claude 2.1.318 實測的串流
         let r = p.feed(&line("Cross-session message released after approval (recipient: @T-甲). It was approved and released to that session (final delivery is up to their queue)."));
-        assert!(r.events.is_empty(), "放行只記 log");
+        assert_eq!(r.events, vec![WorkerEvent::DeliveryProblem { kind: "released", recipient: "T-甲".into() }], "放行也要回報，才知道這封不再卡住");
         assert_eq!(r.logs, vec!["cross-session released recipient=T-甲".to_string()]);
         for (content, kind) in [
             ("Cross-session message denied (recipient: @T-甲). The recipient's user declined it; it was not delivered.", "denied"),

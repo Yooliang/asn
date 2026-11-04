@@ -24,6 +24,22 @@ fn held_line(recipient: &str) -> WorkerLine {
     WorkerLine::Line(json!({"type":"system","subtype":"informational","level":"warning","content":format!("Cross-session message held by the receiving session (recipient: @{recipient}). Claude in that session hasn't seen it.")}).to_string())
 }
 
+fn info_line(content: String) -> WorkerLine {
+    WorkerLine::Line(json!({"type":"system","subtype":"informational","content":content}).to_string())
+}
+
+fn denied_line(recipient: &str) -> WorkerLine {
+    info_line(format!("Cross-session message denied (recipient: @{recipient}). The recipient's user declined it; it was not delivered."))
+}
+
+fn refused_line(recipient: &str) -> WorkerLine {
+    info_line(format!("Cross-session message refused (recipient: @{recipient}). That session is not accepting cross-session messages; it was not delivered."))
+}
+
+fn released_line(recipient: &str) -> WorkerLine {
+    info_line(format!("Cross-session message released after approval (recipient: @{recipient}). It was approved and released to that session (final delivery is up to their queue)."))
+}
+
 fn held_notices(h: &H) -> Vec<String> {
     h.fr.sent().iter().filter_map(|s| s["body"].as_str()).filter(|b| b.contains("可能卡在")).map(String::from).collect()
 }
@@ -54,8 +70,87 @@ async fn 對方視窗扣住信_寄件人收到一次_不重送不撤回_別的�
     // 後來被拒絕：再通知一次；對方不收也會通知
     h.core.on_worker_line(WorkerLine::Line(json!({"type":"system","subtype":"informational","content":"Cross-session message denied (recipient: @T-乙). The recipient's user declined it; it was not delivered."}).to_string()), T0 + 20).await;
     assert!(h.fr.sent().iter().filter_map(|s| s["body"].as_str()).any(|b| b.contains("可能被對方視窗的使用者拒絕")));
-    h.core.on_worker_line(WorkerLine::Line(json!({"type":"system","subtype":"informational","content":"Cross-session message refused (recipient: @T-乙). That session is not accepting cross-session messages; it was not delivered."}).to_string()), T0 + 21).await;
+    h.fr.put(mail(3, json!({"to_agent": "T-乙"})));
+    h.core.pull("test", T0 + 22).await;
+    send_to(&mut h.core, &uid(3), "T-乙", "toolu_3", T0 + 23).await;
+    h.core.on_worker_line(refused_line("T-乙"), T0 + 24).await;
     assert!(h.fr.sent().iter().filter_map(|s| s["body"].as_str()).any(|b| b.contains("不接受其他視窗的信")));
+}
+
+/// 轉交一封不用回的信（寄件人 from），收件人 T-乙
+async fn forward_from(h: &mut H, n: u32, from: &str, now: u64) {
+    h.fr.put(mail(n, json!({"to_agent": "T-乙", "from_agent": from, "expects_reply": false})));
+    h.core.pull("test", now).await;
+    send_to(&mut h.core, &uid(n), "T-乙", &format!("toolu_{n}"), now + 1).await;
+}
+
+fn told(h: &H, from: &str, word: &str) -> usize {
+    h.fr.sent().iter().filter(|s| s["to_agent"] == from && s["body"].as_str().unwrap_or("").contains(word)).count()
+}
+
+#[tokio::test]
+async fn 對回_held_只通知最新一封_已送達的不通知_兩封都卡才各一次() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    forward_from(&mut h, 1, "W-甲", T0).await;
+    forward_from(&mut h, 2, "W-丙", T0 + 10).await;
+    h.core.on_worker_line(held_line("T-乙"), T0 + 12).await;
+    assert_eq!((told(&h, "W-丙", "可能卡在"), told(&h, "W-甲", "可能卡在")), (1, 0), "只通知最新一封");
+    h.core.on_worker_line(held_line("T-乙"), T0 + 13).await;
+    assert_eq!((told(&h, "W-丙", "可能卡在"), told(&h, "W-甲", "可能卡在")), (1, 1), "第二則才輪到較早那封，每封一次");
+    h.core.on_worker_line(held_line("T-乙"), T0 + 14).await;
+    assert_eq!(held_notices(&h).len(), 2, "沒有信可對就不通知");
+}
+
+#[tokio::test]
+async fn 對回_denied_過了時間窗也對得到卡住的那封_先對最早的_放行後不通知() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    forward_from(&mut h, 1, "W-甲", T0).await;
+    h.core.on_worker_line(held_line("T-乙"), T0 + 2).await;
+    forward_from(&mut h, 2, "W-丙", T0 + 10).await;
+    h.core.on_worker_line(held_line("T-乙"), T0 + 12).await;
+    // 較晚才寄的 W-戊 已經送達，不能被算成被拒絕
+    forward_from(&mut h, 3, "W-戊", T0 + 3_600_000).await;
+    h.core.on_worker_line(denied_line("T-乙"), T0 + 3_600_002).await;
+    assert_eq!((told(&h, "W-甲", "拒絕"), told(&h, "W-丙", "拒絕"), told(&h, "W-戊", "拒絕")), (1, 0, 0), "人一小時後才按，對回最早卡住的那封");
+    // 放行：W-丙 不再卡住，之後的拒絕不能算到它頭上
+    h.core.on_worker_line(released_line("T-乙"), T0 + 3_600_003).await;
+    assert_eq!(told(&h, "W-丙", "拒絕"), 0, "放行不寄通知");
+    h.core.on_worker_line(denied_line("T-乙"), T0 + 3_600_004).await;
+    assert_eq!((told(&h, "W-丙", "拒絕"), told(&h, "W-戊", "拒絕")), (0, 1), "沒有卡住中的信才退回時間窗");
+    // 卡住太久的不留著：視窗關掉就等不到結果
+    forward_from(&mut h, 4, "W-己", T0 + 3_700_000).await;
+    h.core.on_worker_line(held_line("T-乙"), T0 + 3_700_002).await;
+    h.core.on_worker_line(denied_line("T-乙"), T0 + 3_700_000 + 86_400_001).await;
+    assert_eq!(told(&h, "W-己", "拒絕"), 0);
+}
+
+#[tokio::test]
+async fn 群組訊息卡住_貼一則不點名的說明_有冷卻_被拒絕另外貼_通知本身卡住不再通知() {
+    let mut h = harness(&[("T-視窗甲", "idle")]).await;
+    let mine = json!([{"member": "T~T-視窗甲", "read_seq": 1}]);
+    let notice = rmsg(4, json!({"forMe": {"T-視窗甲": true}, "body": "（收發室）群組訊息 #2 可能卡在 某視窗 視窗的確認框"}));
+    let posts = |h: &H| h.fr.st.lock().unwrap().room_posts.iter().map(|p| p["body"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>();
+    for (i, seq) in [2u64, 3].into_iter().enumerate() {
+        let now = T0 + 100 * i as u64;
+        set_rooms(&h, vec![room(vec![rmsg(seq, json!({"forMe": {"T-視窗甲": true}}))], mine.clone())]);
+        h.core.pull_rooms(now).await;
+        send_to(&mut h.core, &crate::bridge::rooms::room_uuid("R1", seq, "T~T-視窗甲"), "T-視窗甲", &format!("toolu_{seq}"), now + 1).await;
+        h.core.on_worker_line(held_line("T-視窗甲"), now + 2).await;
+    }
+    let p = posts(&h);
+    assert_eq!(p.len(), 1, "同一扇視窗有冷卻：{p:?}");
+    assert!(p[0].contains("#3") && p[0].contains("可能卡在 T-視窗甲") && !p[0].contains('@'), "{p:?}");
+    // 被拒絕不受「卡住」的冷卻影響，不然群組會一直以為還在等
+    h.core.on_worker_line(denied_line("T-視窗甲"), T0 + 300).await;
+    let p = posts(&h);
+    assert_eq!(p.len(), 2, "{p:?}");
+    assert!(p[1].contains("可能被 T-視窗甲") && p[1].contains("拒絕"), "{p:?}");
+    // 收發室自己的通知卡住：不再通知，不會連環
+    set_rooms(&h, vec![room(vec![notice], mine.clone())]);
+    h.core.pull_rooms(T0 + 700_000).await;
+    send_to(&mut h.core, &crate::bridge::rooms::room_uuid("R1", 4, "T~T-視窗甲"), "T-視窗甲", "toolu_4", T0 + 700_001).await;
+    h.core.on_worker_line(held_line("T-視窗甲"), T0 + 700_002).await;
+    assert_eq!(posts(&h).len(), 2);
 }
 
 #[tokio::test]
