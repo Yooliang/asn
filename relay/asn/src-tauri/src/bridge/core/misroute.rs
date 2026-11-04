@@ -33,9 +33,9 @@ impl Core {
                 self.on_fail(id, MISROUTE_FAIL).await;
                 return;
             };
-            self.parser.register_head(id, &to, super::super::forward_gate::head_hash(super::super::forward_gate::first_line(&text)));
+            let payload = self.register_forward(id, &to, &text);
             self.write_inflight();
-            match self.sink.say(forward_text(&self.parser.nonce, id, &to, &text)) {
+            match self.sink.say(payload) {
                 Ok(_) => self.log.line(&format!("misrouted id={id}: resent once to {to}")),
                 Err(e) => {
                     self.log.line(&format!("misrouted id={id}: resend failed: {e}"));

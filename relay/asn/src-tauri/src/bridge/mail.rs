@@ -305,7 +305,7 @@ pub fn hold_late_line(received_ms: u64, auth: bool) -> String {
 
 pub const BODY_ESCAPE_PREFIX: &str = "（內文）";
 /// 內文中行首出現就要跳脫的開頭（與 mail-format.mjs 的 escapeBody 逐字一致）
-const BODY_ESCAPE_HEADS: [&str; 16] = ["[RELAY 來信]", "[RELAY 寄信]", "[RELAY 回信]", "寄件人：", "【要回信】", "你與收發室的往來記錄在：", "（語音通話：", "你是 ASN 的聊天對象：", "[群組 ", "順位：", QUOTA_LATE_HEAD, AUTH_LATE_HEAD, AWAIT_LATE_HEAD, "（收發室提醒）", "（收發室更正）", "（收發室）"];
+const BODY_ESCAPE_HEADS: [&str; 17] = ["[RELAY 來信]", "[RELAY 寄信]", "[RELAY 回信]", "寄件人：", "【要回信】", "你與收發室的往來記錄在：", "（語音通話：", "你是 ASN 的聊天對象：", "[群組 ", "順位：", QUOTA_LATE_HEAD, AUTH_LATE_HEAD, AWAIT_LATE_HEAD, "[ASN 轉交未帶入內文]", "（收發室提醒）", "（收發室更正）", "（收發室）"];
 
 /// 內文跳脫（對應 mail-format.mjs 的 escapeBody，兩邊逐字一致）：內文中行首（可有空白）以
 /// `[RELAY 來信]`、`[RELAY 寄信]`、`[RELAY 回信]`（parse_send_head 認得的同義詞）、`寄件人：`、`【要回信】`、`你與收發室的往來記錄在：`、`（語音通話：`、`你是 ASN 的聊天對象：`、

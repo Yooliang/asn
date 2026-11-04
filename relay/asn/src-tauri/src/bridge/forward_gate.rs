@@ -16,6 +16,10 @@ pub const INFLIGHT_FILE: &str = "forward-inflight.json";
 /// hook 的 log 檔名（放在 worker 資料夾）：只記放行或擋下、編號、理由，不記信件內文
 pub const GATE_LOG_FILE: &str = "forward-gate.log";
 const GATE_LOG_MAX: u64 = 256 * 1024;
+/// 內文檔資料夾（放在 worker 資料夾）：橋存的原文，檔名是信件編號
+pub const BODY_DIR: &str = "forward-body";
+/// 已套用紀錄資料夾：hook 換上原文之後寫下原文雜湊，檔名是信件編號
+pub const APPLIED_DIR: &str = "forward-applied";
 
 fn is_uuid(s: &str) -> bool {
     let b = s.as_bytes();
@@ -82,15 +86,90 @@ pub fn head_hash(first_line: &str) -> String {
 pub struct InflightItem {
     pub to: String,
     pub head: Option<String>,
+    /// 全文雜湊（有＝這封走原文替換：hook 讀內文檔、核對雜湊、換上原文）
+    pub body: Option<String>,
 }
 
 /// 寫 inflight 檔：{"v":2,"items":{編號:{"to":目標,"head":指紋}}}。原子寫入，hook 讀到的一定是完整的一份
 pub fn write_inflight(dir: &Path, items: &[(String, String, Option<String>)]) -> std::io::Result<()> {
+    write_inflight_with(dir, items, &HashMap::new())
+}
+
+/// 同 write_inflight；bodies＝{編號: 全文雜湊}，有的那幾封多寫一個 body 欄位
+pub fn write_inflight_with(dir: &Path, items: &[(String, String, Option<String>)], bodies: &HashMap<String, String>) -> std::io::Result<()> {
     let mut m = serde_json::Map::new();
     for (id, to, head) in items {
-        m.insert(id.to_ascii_lowercase(), json!({ "to": to, "head": head }));
+        let mut e = json!({ "to": to, "head": head });
+        if let Some(b) = bodies.get(id) {
+            e["body"] = json!(b);
+        }
+        m.insert(id.to_ascii_lowercase(), e);
     }
     crate::write_atomic(&dir.join(INFLIGHT_FILE), &json!({ "v": 2, "items": m }).to_string())
+}
+
+/// 全文雜湊（sha256，十六進位）：逐位元組，不做任何換行或空白處理
+pub fn body_hash(text: &str) -> String {
+    Sha256::digest(text.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// 走原文替換時交給 worker 的佔位行（第一行行尾有編號，hook 與 SENT 比對都認得）
+pub fn placeholder_line(id: &str) -> String {
+    format!("[ASN 轉交未帶入內文] 這封信的內文沒有送到，收發室會重送，不用回覆。 id={id}")
+}
+
+fn file_of(dir: &Path, sub: &str, id: &str) -> Option<std::path::PathBuf> {
+    is_uuid(id).then(|| dir.join(sub).join(id.to_ascii_lowercase()))
+}
+
+/// 內文與紀錄的資料夾只給本機使用者讀寫（Unix 0700；Windows 沿用使用者資料夾的權限）
+fn private_dir(dir: &Path, sub: &str) {
+    let d = dir.join(sub);
+    let _ = std::fs::create_dir_all(&d);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700));
+    }
+}
+
+pub fn write_body(dir: &Path, id: &str, text: &str) -> std::io::Result<()> {
+    let f = file_of(dir, BODY_DIR, id).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "bad id"))?;
+    private_dir(dir, BODY_DIR);
+    crate::write_atomic(&f, text)
+}
+
+pub fn remove_applied(dir: &Path, id: &str) {
+    if let Some(f) = file_of(dir, APPLIED_DIR, id) {
+        let _ = std::fs::remove_file(f);
+    }
+}
+
+pub fn read_body(dir: &Path, id: &str) -> Option<String> {
+    std::fs::read_to_string(file_of(dir, BODY_DIR, id)?).ok()
+}
+
+pub fn write_applied(dir: &Path, id: &str, hash: &str) -> std::io::Result<()> {
+    let f = file_of(dir, APPLIED_DIR, id).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "bad id"))?;
+    private_dir(dir, APPLIED_DIR);
+    crate::write_atomic(&f, hash)
+}
+
+pub fn read_applied(dir: &Path, id: &str) -> Option<String> {
+    std::fs::read_to_string(file_of(dir, APPLIED_DIR, id)?).ok()
+}
+
+/// 內文檔與已套用紀錄：編號不在 live 裡的刪掉（live＝None＝全部刪，啟動時清舊檔用）
+pub fn prune_files(dir: &Path, live: Option<&std::collections::HashSet<String>>) {
+    for sub in [BODY_DIR, APPLIED_DIR] {
+        let Ok(rd) = std::fs::read_dir(dir.join(sub)) else { continue };
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if live.is_none_or(|l| !l.contains(&name)) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
 }
 
 pub fn read_inflight(dir: &Path) -> Option<HashMap<String, InflightItem>> {
@@ -100,8 +179,8 @@ pub fn read_inflight(dir: &Path) -> Option<HashMap<String, InflightItem>> {
         items
             .iter()
             .filter_map(|(k, t)| match t {
-                Value::String(to) => Some((k.clone(), InflightItem { to: to.clone(), head: None })), // v1
-                Value::Object(o) => Some((k.clone(), InflightItem { to: o.get("to")?.as_str()?.to_string(), head: o.get("head").and_then(Value::as_str).map(String::from) })),
+                Value::String(to) => Some((k.clone(), InflightItem { to: to.clone(), head: None, body: None })), // v1
+                Value::Object(o) => Some((k.clone(), InflightItem { to: o.get("to")?.as_str()?.to_string(), head: o.get("head").and_then(Value::as_str).map(String::from), body: o.get("body").and_then(Value::as_str).map(String::from) })),
                 _ => None,
             })
             .collect(),
@@ -165,6 +244,8 @@ pub fn parse_send_call(input: &Value) -> Option<SendCall> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Verdict {
     Allow,
+    /// 放行，而且要把訊息換成橋存的原文（編號）
+    Replace(String),
     Deny(String),
 }
 
@@ -198,6 +279,9 @@ pub fn check(input: &Value, inflight: Option<&HashMap<String, InflightItem>>) ->
             return (Verdict::Deny("訊息抬頭與橋送出的不一致，請原樣轉交".into()), format!("deny id={id}: head mismatch"));
         }
     }
+    if item.body.is_some() {
+        return (Verdict::Replace(id.clone()), format!("allow id={id} to={} exact", item.to));
+    }
     (Verdict::Allow, format!("allow id={id} to={}", item.to))
 }
 
@@ -215,11 +299,35 @@ pub fn run_hook(dir: &Path, stdin: &str) -> (Option<String>, String) {
     let (v, log) = check(&input, inflight.as_ref());
     match v {
         Verdict::Allow => (None, log),
+        Verdict::Replace(id) => {
+            let want = inflight.as_ref().and_then(|f| f.get(&id)).and_then(|i| i.body.clone()).unwrap_or_default();
+            match apply_exact(dir, &input, &id, &want) {
+                Ok(out) => (Some(out), log),
+                Err(why) => (
+                    Some(json!({ "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "轉交內文暫時讀不到，收發室會重送" } }).to_string()),
+                    format!("deny id={id}: {why}"),
+                ),
+            }
+        }
         Verdict::Deny(why) => (
             Some(json!({ "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": why } }).to_string()),
             log,
         ),
     }
+}
+
+/// 原文替換：讀內文檔、核對雜湊、先寫下已套用紀錄，最後才輸出「放行並換上原文」。順序不能換：
+/// 紀錄沒寫成就不放行；放行後 stdout 出錯的情況，橋收到 Sent 時會因為有紀錄但內容沒送到而以別的方式發現（機率低，接受）
+fn apply_exact(dir: &Path, input: &Value, id: &str, want: &str) -> Result<String, String> {
+    let body = read_body(dir, id).ok_or("body file unreadable")?;
+    if body_hash(&body) != want {
+        return Err("body hash mismatch".into());
+    }
+    write_applied(dir, id, want).map_err(|e| format!("applied record write failed: {e}"))?;
+    let ti = input.get("tool_input").ok_or("no tool_input")?;
+    let to = ti.get("to").and_then(Value::as_str).ok_or("no to")?;
+    let summary = ti.get("summary").and_then(Value::as_str).unwrap_or("轉交 relay 來信");
+    Ok(json!({ "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "allow", "updatedInput": { "to": to, "summary": summary, "message": body } } }).to_string())
 }
 
 /// 在 hook 的 log 檔加一行（超過上限就換檔）；寫不進去不影響判斷
@@ -266,7 +374,7 @@ mod tests {
     }
 
     fn item(to: &str, head: Option<&str>) -> InflightItem {
-        InflightItem { to: to.to_string(), head: head.map(|h| head_hash(h)) }
+        InflightItem { to: to.to_string(), head: head.map(|h| head_hash(h)), body: None }
     }
     fn flight() -> HashMap<String, InflightItem> {
         [(A.to_string(), item("T-甲", None))].into_iter().collect()

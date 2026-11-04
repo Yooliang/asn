@@ -1886,6 +1886,7 @@ mod aegis_it;
 mod engines_it;
 mod pi_it;
 mod quota_it;
+mod exact_it;
 mod e2e_real;
 mod gate_it;
 mod wait_it;

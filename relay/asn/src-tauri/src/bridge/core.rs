@@ -11,7 +11,7 @@ use super::mail::{self, unaddressed_receipt, unaddressed_window_note, mail_head,
 use super::pending::{self, LastReq, Pending, RoomRef, State};
 use super::rooms::{self, Cursors, Held, HeldStore};
 use super::roster::{self, Window};
-use super::worker::{forward_text, Parser, WorkerEvent, WorkerLine, WorkerSink};
+use super::worker::{forward_text, forward_text_exact, Parser, WorkerEvent, WorkerLine, WorkerSink};
 use crate::relay::Relay;
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
@@ -77,6 +77,12 @@ pub struct Config {
     pub one_per_turn: bool,
     /// 夥伴卡在框上超過兩分鐘通知本人（ASN_WAIT_ALERT=1，預設關；todo-next-162）
     pub wait_alert: bool,
+    /// 轉交內容和原信逐字相同（ASN_FORWARD_EXACT=1，預設關）：開了還要通過啟動自我測試才生效
+    pub forward_exact: bool,
+    /// 還沒有自我測試時，開發機用這個強制生效（ASN_FORWARD_EXACT_UNVERIFIED=1）
+    pub forward_exact_unverified: bool,
+    /// worker 有裝轉交核對的 hook（找不到 asn-cli 時沒有）：原文替換靠 hook，沒裝就不能走
+    pub forward_hook: bool,
     pub pull_backoff_ms: Vec<u64>,
     pub claude_bin: String,
     pub claude_pre: Vec<String>,
@@ -116,6 +122,7 @@ pub struct Config {
 impl Config {
     pub fn from_env(node: &str, work_dir: PathBuf) -> Config {
         let test_handoff = work_dir.join("handoff");
+        let forward_hook = super::worker::gate_command(&work_dir).is_some();
         // 測試時絕不碰真實的設定：只載 Claude
         let engines = if cfg!(test) {
             super::engines::EngineSpec { spec: Some("claude".into()), pi_added: false }
@@ -148,6 +155,9 @@ impl Config {
             one_per_turn: crate::envc::get("ASN_FORWARD_ONE_PER_TURN").map(|v| v.trim() != "0").unwrap_or(true),
             // 新變數沒有舊環境名稱，不走 envc 的新舊名對照
             wait_alert: std::env::var("ASN_WAIT_ALERT").is_ok_and(|v| v.trim() == "1"),
+            forward_exact: super::worker::forward_exact_enabled(),
+            forward_exact_unverified: std::env::var("ASN_FORWARD_EXACT_UNVERIFIED").is_ok_and(|v| v.trim() == "1"),
+            forward_hook,
             pull_backoff_ms: vec![5_000, 10_000, 20_000, 40_000, 60_000],
             claude_bin: std::env::var("CLAUDE_BIN").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "claude".into()),
             claude_pre: vec![],
@@ -429,6 +439,12 @@ pub struct Core {
     awaiting_told: HashSet<String>,
     /// 先留著的信：編號 → 第一次被先留著的時間（毫秒），送出時在抬頭註明「原本幾點收到」
     await_first: HashMap<String, u64>,
+    /// 走原文替換的編號 → 全文雜湊（收到 Sent 時核對已套用紀錄）
+    exact_ids: HashMap<String, String>,
+    /// 啟動自我測試通過了（還沒有自我測試，永遠是 false）
+    exact_verified: bool,
+    /// 已經因為「內文沒套用」重送過一次的編號
+    not_applied_once: HashSet<String>,
     probing: bool,
 }
 
@@ -478,12 +494,27 @@ impl Core {
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
-            wait_alerts: Default::default(), wait_retry_at: 0, wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), recent_forwards: Vec::new(), held_notice_sent: HashSet::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), probing: false,
+            wait_alerts: Default::default(), wait_retry_at: 0, wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), recent_forwards: Vec::new(), held_notice_sent: HashSet::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, not_applied_once: HashSet::new(), probing: false,
         };
         c.restore();
         c.started_at = now;
         c.known = super::known::Known::load(&c.cfg.work_dir.join(super::known::KNOWN_FILE), now);
+        super::forward_gate::prune_files(&c.cfg.work_dir, None);   // 上次留下的內文檔與已套用紀錄不再有用
+        if c.cfg.forward_exact && c.cfg.forward_exact_unverified {
+            c.log.line("forward-exact forced on: 未驗證（沒有通過自我測試，只給開發機用）");
+        }
         c
+    }
+
+    /// 測試用：原文替換的編號是不是空的
+    #[cfg(test)]
+    pub fn exact_ids_empty(&self) -> bool {
+        self.exact_ids.is_empty()
+    }
+
+    #[cfg(test)]
+    pub fn test_register_forward(&mut self, id: &str, to: &str, text: &str) -> String {
+        self.register_forward(id, to, text)
     }
 
     /// 測試用：送給 worker、還在進行中的訊息（目標, 帶編號的全文）
@@ -612,6 +643,11 @@ impl Core {
         self.fwd_items.remove(id);
         self.fwd_rooms.remove(id);
         self.bounce_notices.remove(id);
+        if self.exact_ids.remove(id).is_some() {
+            self.parser.forget(id);   // 逾時等沒走到 Sent 的結束方式：內文檔與核對紀錄也一起清
+            self.write_inflight();
+            self.prune_forward_files();
+        }
         self.persist();
     }
     fn online_names(&self) -> HashSet<&str> {
@@ -1088,14 +1124,13 @@ impl Core {
         }
         // 核對轉交對象：第一行行尾一定要有這封的編號（hook 與 SENT 比對都只認行尾），先記下 {編號: 目標} 再送
         let text = super::forward_gate::ensure_head_id(text, id);
-        self.parser.register_head(id, to, super::forward_gate::head_hash(super::forward_gate::first_line(&text)));
         if self.fwd_text.len() >= 400 {
             self.fwd_text.clear(); // 只有送錯要重送時才用得到，爆量時整批丟掉也不影響正常轉交
         }
         self.fwd_text.insert(id.to_string(), (to.to_string(), text.clone()));
-        self.parser.keep_original(id, &text);
+        let payload = self.register_forward(id, to, &text);
         self.write_inflight();
-        let r = self.sink.say(forward_text(&self.parser.nonce, id, to, &text));
+        let r = self.sink.say(payload);
         if r.is_err() {
             self.parser.forget(id);
             self.fwd_text.remove(id);
@@ -1127,12 +1162,74 @@ impl Core {
         }
     }
 
+    /// 內文檔與已套用紀錄：只留還在轉交中、或還等著核對已套用紀錄的編號
+    fn prune_forward_files(&self) {
+        let mut live: HashSet<String> = self.parser.inflight_pairs().into_iter().map(|(id, _)| id.to_ascii_lowercase()).collect();
+        live.extend(self.exact_ids.keys().map(|k| k.to_ascii_lowercase()));
+        super::forward_gate::prune_files(&self.cfg.work_dir, Some(&live));
+    }
+
+    /// 轉交內容和原信逐字相同現在生效嗎：旗標開著，而且通過了自我測試（或開發機強制）
+    fn exact_active(&self) -> bool {
+        self.cfg.forward_exact && self.cfg.forward_hook && (self.exact_verified || self.cfg.forward_exact_unverified)
+    }
+
+    /// 登記一封要交給 worker 的信（hook 與 SENT 比對用），回傳要送進 worker 的指令。
+    /// 原文替換生效時：全文存內文檔、指令只帶一行佔位；內文檔寫不進去就退回舊做法（整封交給 worker）
+    fn register_forward(&mut self, id: &str, to: &str, text: &str) -> String {
+        if self.exact_active() {
+            // 重登記同一封（重送）：上一次的已套用紀錄作廢，不然這次 hook 失效時會讀到舊紀錄而假成功
+            super::forward_gate::remove_applied(&self.cfg.work_dir, id);
+            match super::forward_gate::write_body(&self.cfg.work_dir, id, text) {
+                Ok(()) => {
+                    self.parser.register_head(id, to, super::forward_gate::head_hash(&super::forward_gate::placeholder_line(id)));
+                    let h = super::forward_gate::body_hash(text);
+                    self.parser.register_exact(id, h.clone());
+                    self.exact_ids.insert(id.to_string(), h);
+                    return forward_text_exact(&self.parser.nonce, id, to);
+                }
+                Err(e) => self.log.line(&format!("forward-body write failed id={id}: {e} (falling back to full text)")),
+            }
+        }
+        self.exact_ids.remove(id);
+        self.parser.register_head(id, to, super::forward_gate::head_hash(super::forward_gate::first_line(text)));
+        self.parser.keep_original(id, text);
+        forward_text(&self.parser.nonce, id, to, text)
+    }
+
+    /// worker 說送出了，但已套用紀錄對不上（hook 沒換成原文、或換的不是這份）：不算轉交成功，不 ack，重送一次；再不行就走轉交失敗
+    async fn on_not_applied(&mut self, id: &str) {
+        self.log.line(&format!("forward-not-applied id={id}"));
+        let Some(i) = self.idx(id) else { return };
+        if self.pending[i].state != State::Forwarding {
+            return;
+        }
+        if self.not_applied_once.len() >= 1000 {
+            self.not_applied_once.clear();
+        }
+        let again = self.not_applied_once.insert(id.to_string());
+        let Some((to, text)) = self.fwd_text.get(id).cloned().filter(|_| again) else {
+            self.on_fail(id, "核對轉交內容失敗").await;
+            return;
+        };
+        let payload = self.register_forward(id, &to, &text);
+        self.write_inflight();
+        match self.sink.say(payload) {
+            Ok(_) => self.log.line(&format!("forward-not-applied id={id}: resent once to {to}")),
+            Err(e) => {
+                self.log.line(&format!("forward-not-applied id={id}: resend failed: {e}"));
+                self.on_fail(id, "核對轉交內容失敗").await;
+            }
+        }
+    }
+
     /// inflight 有變動就重寫 hook 讀的檔（寫不進去只記 log：hook 讀不到會把轉交擋下，worker 回報失敗，不會送錯）
     fn write_inflight(&mut self) {
         if !self.parser.take_dirty() {
             return;
         }
-        if let Err(e) = super::forward_gate::write_inflight(&self.cfg.work_dir, &self.parser.inflight_items()) {
+        self.prune_forward_files();
+        if let Err(e) = super::forward_gate::write_inflight_with(&self.cfg.work_dir, &self.parser.inflight_items(), &self.parser.inflight_bodies()) {
             self.parser.mark_dirty(); // 沒寫成：旗標設回去，下一個 tick 再試
             self.log.line(&format!("inflight file write failed: {e}"));
         }
@@ -1369,6 +1466,15 @@ impl Core {
                     match ev {
                         WorkerEvent::Sent(id) => {
                             self.quota_release("worker reported sent"); // worker 真的在工作＝額度恢復
+                            // 原文替換的那封：要有 hook 寫的已套用紀錄、而且雜湊對得上才算送出
+                            if let Some(h) = self.exact_ids.remove(&id) {
+                                let ok = super::forward_gate::read_applied(&self.cfg.work_dir, &id).as_deref() == Some(h.as_str());
+                                self.prune_forward_files();
+                                if !ok {
+                                    self.on_not_applied(&id).await;
+                                    continue;
+                                }
+                            }
                             self.on_sent(&id).await
                         }
                         WorkerEvent::Fail(id, reason) => {
@@ -1490,6 +1596,7 @@ impl Core {
     }
 
     pub async fn on_fail(&mut self, id: &str, reason: &str) {
+        self.exact_ids.remove(id);
         let Some(i) = self.idx(id) else { return };
         if self.pending[i].state == State::Done {
             return;
