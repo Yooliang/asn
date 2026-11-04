@@ -54,6 +54,8 @@ struct FState {
     /// 夥伴卡在框上的通知（waiting_notice）收到的請求；wait_notice_status 不為 0 就回這個
     wait_notices: Vec<Value>,
     wait_notice_status: u16,
+    /// 不為 0：ack 回這個狀態碼，信不算 ack
+    ack_status: u16,
     /// 假後台回的 notify（空字串＝sent）
     wait_notice_notify: String,
     misroute_status: u16,
@@ -170,6 +172,15 @@ fn handle_conn(mut c: std::net::TcpStream, st: Arc<Mutex<FState>>) {
                 }
                 (200, json!({"messages": msgs}))
             }
+        }
+        // 和真的後台同樣的規則：超過 100 筆或不是 UUID，整批 400
+        "ack" if ack_ids_invalid(&body) => {
+            s.ack_calls += 1;
+            (400, json!({"error": "bad_ids"}))
+        }
+        "ack" if s.ack_status != 0 => {
+            s.ack_calls += 1;
+            (s.ack_status, json!({"error": "boom"}))
         }
         "ack" => {
             s.ack_calls += 1;
@@ -331,6 +342,15 @@ async fn harness(windows: &[(&str, &str)]) -> H {
     let mut core = new_core(&fr, work.path(), sessions.path(), sink.clone(), T0);
     core.refresh_roster(T0).await;
     H { core, fr, sink, work, sessions }
+}
+
+fn ack_ids_invalid(body: &Value) -> bool {
+    let Some(ids) = body["ids"].as_array() else { return true };
+    let uuid = |s: &str| {
+        let g: Vec<&str> = s.split('-').collect();
+        g.iter().map(|x| x.len()).eq([8, 4, 4, 4, 12]) && g.iter().all(|x| x.chars().all(|c| c.is_ascii_hexdigit()))
+    };
+    ids.len() > 100 || !ids.iter().all(|i| i.as_str().is_some_and(uuid))
 }
 
 fn mail(n: u32, extra: Value) -> Value {
@@ -1882,6 +1902,7 @@ async fn 夥伴_id_暫時失敗_500_只記一次_下一輪再試_好了就接上
     assert_eq!(core.partner_id("T-乙"), Some(PID_B));
 }
 
+mod ack_it;
 mod aegis_it;
 mod engines_it;
 mod pi_it;
