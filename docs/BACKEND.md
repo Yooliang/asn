@@ -72,20 +72,18 @@ supabase/
 # 連結專案
 npx supabase link --project-ref etccgmkrosbzpltudlgt
 
-# 檢視 migration 狀態
-npx supabase migration list
+# 套用 migration：一次只跑這次要上的那一支（路徑從 repo 根目錄算）
+npx supabase db query --linked -f supabase/migrations/<檔名>.sql
 
-# 套用 migration（檔名時間戳遞增，新增檔案不要改舊檔）
-npx supabase db push
-
-# 部署 Edge Function
-npx supabase functions deploy relay --project-ref etccgmkrosbzpltudlgt
+# 部署 Edge Function（G 碟上 Docker 打包會失敗，要加 --use-api）
+npx supabase functions deploy relay --project-ref etccgmkrosbzpltudlgt --no-verify-jwt --use-api
 
 # 臨時查詢（只讀為原則）
 npx supabase db query --linked "select count(*) from relay.messages"
 ```
 
 守則：
+- **正式庫不要用 `supabase db push`，也不要用 `db pull`、`migration repair`**：記錄表 `schema_migrations` 不完整（只到 2026-10-20），`migration list` 和 push 看到的狀態都不準。要上哪一支就用上面的指令跑那一支，跑完查實際結果（函式、欄位是否如預期）。
 - migration 只新增檔案，已套用的不改；每個 migration 盡量附回復做法（見 `supabase/sql/rollback/` 的寫法）。
 - `supabase/.temp/` 是 CLI 的本機暫存，已列入 `.gitignore`。
 - 後端單元測試：`cd supabase/functions && deno test -A _shared/`。
