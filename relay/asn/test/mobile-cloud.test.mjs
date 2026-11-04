@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { CLIP_CLEAR_MS, CLOUD_TEXT, createMobileCloud } from '../ui/lib/mobile-cloud.mjs'
+import { CLIP_CLEAR_MS, CLOUD_LEAVE_TEXT, CLOUD_TEXT, createMobileCloud } from '../ui/lib/mobile-cloud.mjs'
 import { phoneGuideList } from '../ui/lib/mobile-guides.mjs'
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -110,6 +110,15 @@ test('輪詢讀取失敗的提示：下一輪讀成功就消掉，不一直掛�
   bad = false
   await ui.load()
   assert.equal(ui.state.msg, '')
+})
+
+test('金鑰還在畫面上時離開（含系統返回鍵）：先問一次；問的是金鑰那句，選離開才丟', () => {
+  assert.match(CLOUD_LEAVE_TEXT.lead, /不能重發/)
+  const js = read('ui/m.js'), html = read('ui/m.html')
+  assert.match(js, /needs: next => !!cloudSt\.created \|\|/, '離開詢問對金鑰也成立')
+  assert.match(js, /keyBackGuard = \(\) => \{[\s\S]*?!cloudSt\.created[\s\S]*?leave\.ask\(null, \(\) => \{ void cloud\.leave\(\); history\.back\(\) \}\)/, '返回鍵先取消、問、選離開才丟金鑰再返回')
+  assert.ok(js.includes("window.addEventListener('popstate', e => {\n  if (keyBackGuard()) return"), '返回鍵一進來就先問')
+  assert.match(html, /leaveText\.lead/)
 })
 
 test('代理連上來就顯示已加入', async () => {

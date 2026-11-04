@@ -38,7 +38,7 @@ import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
 import { RECENT_GROUP_KEY, RECENT_GROUP_LABEL, recentActivity } from './lib/recent.mjs'
 import { authApi, cloudApi, invoke, listen, store } from './lib/tauri.mjs'
-import { CLOUD_TEXT, COPY_NOTE as CLOUD_COPY_NOTE, INVITE_NOTE as CLOUD_INVITE_NOTE, POLL_MS as CLOUD_POLL_MS, createMobileCloud } from './lib/mobile-cloud.mjs'
+import { CLOUD_LEAVE_TEXT, CLOUD_TEXT, COPY_NOTE as CLOUD_COPY_NOTE, INVITE_NOTE as CLOUD_INVITE_NOTE, POLL_MS as CLOUD_POLL_MS, createMobileCloud } from './lib/mobile-cloud.mjs'
 import { buildLogView } from './lib/changelog.mjs'
 import { RETRY_LABEL, initialReleases, loadReleases, releasesNote } from './lib/releases.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
@@ -240,7 +240,9 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab], () => { const {
 history.replaceState(initialNav(), '')
 // 回到上次的大分頁：名單那層先放著，再推一筆，系統返回鍵還是回到名單
 if (savedTab !== 'list') fourthNav.go(tabNav(savedTab))
+let keyBackGuard = () => false   // setup 裡接上（雲端代理的金鑰還在畫面上時，返回鍵先問一次）
 window.addEventListener('popstate', e => {
+  if (keyBackGuard()) return
   // 通話中按返回鍵＝掛斷，畫面留在原處（不跳到上一頁）；切頁時程式自己退的記錄不算
   if (callOn.value && !fourthNav.busy()) { void liveCall?.end(); history.pushState(fourthNav.state(), ''); return }
   fourthNav.onPop(e.state)
@@ -462,10 +464,18 @@ const app = createApp({
     // 換內頁前先問一句：開新夥伴正在填第 2 步、還沒送出時，要換成別的內頁先問「要離開嗎？」（底部浮層，樣式沿用「⋯」選單；系統返回鍵＝留下）。
     // 選離開：先收起浮層，等浮層的記錄退掉（nav.sheet 變回空）才換；選留下就不動。單純切到前三頁不問（內容會保留 3 分鐘）
     const leaveSt = reactive({ ask: null })
-    const leave = createLeaveAsk({ nav, st: leaveSt, go, back: () => history.back(), needs: next => needsLeaveAsk(fourthSt.fourth, next, { draft: lchStep2.value }) })
+    const leave = createLeaveAsk({ nav, st: leaveSt, go, back: () => history.back(), needs: next => !!cloudSt.created || needsLeaveAsk(fourthSt.fourth, next, { draft: lchStep2.value }) })
     const askBeforeLeave = (next, run) => { leave.ask(next, run) }
     const answerLeave = ok => leave.answer(ok)
     const leaveAsk = computed(() => leaveSt.ask)
+    const leaveText = computed(() => (cloudSt.created ? CLOUD_LEAVE_TEXT : LEAVE_ASK_TEXT))   // 雲端代理的金鑰還在畫面上時問的是另一句
+    // 系統返回鍵：金鑰還在畫面上時先問一次（取消這次返回、開「要離開嗎」；選離開才丟金鑰、再返回一次）
+    keyBackGuard = () => {
+      if (!cloudSt.created || nav.sheet || fourthNav.busy()) return false
+      history.pushState(fourthNav.state(), '')
+      leave.ask(null, () => { void cloud.leave(); history.back() })
+      return true
+    }
     watch(() => nav.sheet, s => leave.onSheet(s))
     const openGuide = key => fourthNav.pushLayer(guidePage(key))   // 篇目列表 → 單篇：多一層，返回鍵回列表
     // ---------- 開新夥伴（遠端開視窗）：手機只下指令，視窗開在那台電腦上。要本人簽章（Rust 端沒憑證就不送） ----------
@@ -1022,7 +1032,7 @@ const app = createApp({
       setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, showSetupButton, acctSw, setAcctTab, acctSwitchOn, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a), usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       recentRows, RECENT_GROUP_KEY, RECENT_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
-      toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT,
+      toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,
       settingRows, settingCat, settingTitle, openSetting, rel, relLog, relNote, loadRel, RETRY_LABEL, nickErr, commitNick, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,

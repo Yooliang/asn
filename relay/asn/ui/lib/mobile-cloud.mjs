@@ -10,6 +10,8 @@ import { COPY_NOTE, DEFAULT_NAME, INVITE_NOTE, POLL_MS, cleanName, joined, rowsF
 
 export { COPY_NOTE, INVITE_NOTE, DEFAULT_NAME, POLL_MS }
 export const CLIP_CLEAR_MS = 60_000
+// 金鑰還在畫面上時要離開（含系統返回鍵）：先問一次，因為金鑰只顯示一次、不能重發
+export const CLOUD_LEAVE_TEXT = { title: '金鑰還在畫面上', lead: '離開後就看不到這把金鑰，也不能重發，只能撤銷後重新邀請。要離開嗎？', leave: '離開', stay: '留下' }
 
 export const CLOUD_TEXT = {
   title: '雲端代理',
