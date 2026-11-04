@@ -2,7 +2,8 @@
 //!
 //! 紅線：
 //! - 只碰專用資料夾底下的子資料夾。平常使用的登入資料夾永遠不碰；指到別處的連結一律跳過。
-//! - 同一個帳號只能有一支程式在換新，否則會互相作廢。這裡不偵測，靠切換順序：先停別的，才開這個開關。
+//! - 同一個帳號只能有一支程式在換新，否則會互相作廢。別的程式這裡不偵測，靠切換順序：先停別的，才開這個開關。
+//!   同一台同時開著兩個 ASN（例如測試版與安裝版）時，靠資料夾裡的鎖檔：拿到鎖才換，換之前再讀一次憑證。
 //! - 換新走的是非公開的登入流程，可能隨時失效。失效就顯示要重新登入，不補 0。
 //! - 寫回用暫存檔加改名，失敗時舊檔還在。任何換新失敗都停止，記下當時憑證檔的修改時間；重開 ASN 也不再試，
 //!   要等憑證檔變了（重新登入）或使用者重新打開開關。
@@ -26,6 +27,9 @@ const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 const PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
 const BETA: &str = "oauth-2025-04-20";
+const LOCK: &str = ".asn-refresh.lock";
+/// 鎖檔放這麼久就當作上一個程式當掉留下的（一次換新最多幾十秒）
+const LOCK_STALE: std::time::Duration = std::time::Duration::from_secs(120);
 
 fn root(home: &Path) -> PathBuf {
     home.join(ROOT)
@@ -84,6 +88,32 @@ pub fn clear_stops(home: &Path) {
     let _ = std::fs::remove_file(stops_path(home));
 }
 
+// ---------- 換新的鎖：同一台的兩個 ASN 不能同時換 ----------
+pub struct RefreshLock(PathBuf);
+
+impl RefreshLock {
+    /// 拿不到回 None。鎖檔放超過 `stale` 當作沒人在用，清掉再拿一次。
+    pub fn take(dir: &Path, stale: std::time::Duration) -> Option<RefreshLock> {
+        let path = dir.join(LOCK);
+        let create = || std::fs::OpenOptions::new().write(true).create_new(true).open(&path).is_ok();
+        if create() {
+            return Some(RefreshLock(path));
+        }
+        let age = std::fs::metadata(&path).ok()?.modified().ok()?.elapsed().ok()?;
+        if age < stale {
+            return None;
+        }
+        std::fs::remove_file(&path).ok()?;
+        create().then(|| RefreshLock(path.clone()))
+    }
+}
+
+impl Drop for RefreshLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 // ---------- 判斷與解析：純函式 ----------
 #[derive(Debug, PartialEq)]
 pub enum Step {
@@ -129,7 +159,12 @@ pub fn write_atomic(path: &Path, value: &Value) -> Result<(), ()> {
     use std::io::Write;
     let tmp = PathBuf::from(format!("{}.{}.tmp", path.display(), std::process::id()));
     let done = (|| -> std::io::Result<()> {
-        let mut f = std::fs::File::create(&tmp)?;
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        // 憑證只有本人能讀；Windows 繼承資料夾的權限
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+        let mut f = opts.open(&tmp)?;
         f.write_all(value.to_string().as_bytes())?;
         f.sync_all()?;
         drop(f);
@@ -182,13 +217,24 @@ async fn refresh(home: &Path, name: &str, path: &Path, raw: &Value, mark: Option
 /// 讀一個資料夾：回 (email, 窗)。
 pub async fn read_dir(home: &Path, name: &str, dir: &Path, may_refresh: bool, now_ms: i64) -> Result<(String, Vec<Value>), Failure> {
     let path = dir.join(CREDENTIALS);
-    let raw: Value = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).ok_or(Failure::Auth)?;
-    let mark = modified_ms(dir);
-    let may = may_refresh && !is_stopped(home, name, mark);
+    let load = || -> Result<Value, Failure> { std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).ok_or(Failure::Auth) };
+    let raw = load()?;
+    let may = may_refresh && !is_stopped(home, name, modified_ms(dir));
     let oauth = match plan(&raw[OAUTH_KEY], now_ms, may) {
         Step::Expired => return Err(Failure::Auth),
         Step::Read => raw[OAUTH_KEY].clone(),
-        Step::Refresh => refresh(home, name, &path, &raw, mark, now_ms).await?,
+        Step::Refresh => {
+            let _lock = RefreshLock::take(dir, LOCK_STALE).ok_or(fail("另一個程式正在換新"))?;
+            // 拿到鎖之後再讀一次：另一個 ASN 可能剛換好，舊的 refresh token 已經不能用
+            let raw = load()?;
+            let mark = modified_ms(dir);
+            let may = may_refresh && !is_stopped(home, name, mark);
+            match plan(&raw[OAUTH_KEY], now_ms, may) {
+                Step::Expired => return Err(Failure::Auth),
+                Step::Read => raw[OAUTH_KEY].clone(),
+                Step::Refresh => refresh(home, name, &path, &raw, mark, now_ms).await?,
+            }
+        }
     };
     let token = oauth["accessToken"].as_str().ok_or(Failure::Auth)?;
     let get = |url: &'static str| -> Result<reqwest::RequestBuilder, Failure> { Ok(client()?.get(url).bearer_auth(token).header("anthropic-beta", BETA).header("user-agent", "asn-quota-reader")) };

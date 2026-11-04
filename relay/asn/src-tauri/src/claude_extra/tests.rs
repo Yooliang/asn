@@ -197,3 +197,44 @@ fn source_only_mentions_its_own_folder() {
     assert!(!code.contains("claude_home"));
     assert!(!code.contains("println!") && !code.contains("eprintln!") && !code.contains("log::"), "這裡有權杖，不印東西");
 }
+
+#[test]
+fn lock_only_one_holder_and_released_on_drop() {
+    let d = tempfile::tempdir().unwrap();
+    let held = RefreshLock::take(d.path(), LOCK_STALE).unwrap();
+    assert!(RefreshLock::take(d.path(), LOCK_STALE).is_none(), "另一個程式拿不到");
+    drop(held);
+    assert!(!d.path().join(LOCK).exists());
+    assert!(RefreshLock::take(d.path(), LOCK_STALE).is_some(), "放掉就拿得到");
+}
+
+#[test]
+fn stale_lock_is_taken_over() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(d.path().join(LOCK), "").unwrap();
+    assert!(RefreshLock::take(d.path(), LOCK_STALE).is_none(), "還新的鎖不搶");
+    assert!(RefreshLock::take(d.path(), std::time::Duration::ZERO).is_some(), "當掉留下的鎖可以接手");
+}
+
+#[tokio::test]
+async fn locked_folder_does_not_refresh_and_is_not_a_stop() {
+    let d = tempfile::tempdir().unwrap();
+    let dir = d.path().join(ROOT).join("a");
+    login(&dir);
+    let _held = RefreshLock::take(&dir, LOCK_STALE).unwrap();
+    let before = std::fs::read(dir.join(CREDENTIALS)).unwrap();
+    let r = read_dir(d.path(), "a", &dir, true, NOW).await;
+    assert_eq!(r.err(), Some(Failure::Other("另一個程式正在換新".into())), "不算登入失效，下一輪再看");
+    assert!(!is_stopped(d.path(), "a", modified_ms(&dir)), "別人在換不算換新失敗");
+    assert_eq!(std::fs::read(dir.join(CREDENTIALS)).unwrap(), before);
+}
+
+#[cfg(unix)]
+#[test]
+fn written_credentials_are_private() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join(CREDENTIALS);
+    write_atomic(&p, &json!({})).unwrap();
+    assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+}
