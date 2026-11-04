@@ -18,10 +18,12 @@ struct Fake {
     reborn: bool,
     birth_queries: Cell<usize>,
     exe: RefCell<BTreeMap<u32, PathBuf>>,
+    /// 拿鎖時（鎖會查 ASN 自己的建立時間）才出現的檔：開窗的一方剛好在這之前逾時
+    appears_at_lock: RefCell<Option<PathBuf>>,
 }
 impl Fake {
     fn new() -> Self {
-        Fake { calls: RefCell::new(vec![]), tries: Cell::new(0), alive_after: Cell::new(None), alive_once_started: true, started: RefCell::new(vec![]), killed: RefCell::new(vec![]), birth: RefCell::new(BTreeMap::new()), list_json: "[]".into(), no_birth: false, reborn: false, birth_queries: Cell::new(0), exe: RefCell::new(BTreeMap::new()) }
+        Fake { calls: RefCell::new(vec![]), tries: Cell::new(0), alive_after: Cell::new(None), alive_once_started: true, started: RefCell::new(vec![]), killed: RefCell::new(vec![]), birth: RefCell::new(BTreeMap::new()), list_json: "[]".into(), no_birth: false, reborn: false, birth_queries: Cell::new(0), exe: RefCell::new(BTreeMap::new()), appears_at_lock: RefCell::new(None) }
     }
     fn cli_calls(&self) -> Vec<Vec<String>> {
         self.calls.borrow().iter().filter(|c| c.0.ends_with("wezterm.exe")).map(|c| c.1.clone()).collect()
@@ -51,6 +53,11 @@ impl Runner for Fake {
         self.killed.borrow_mut().push(pid);
     }
     fn started_ms(&self, pid: u32) -> Option<u64> {
+        if pid == std::process::id() {
+            if let Some(f) = self.appears_at_lock.borrow_mut().take() {
+                std::fs::write(f, "").unwrap();
+            }
+        }
         // 只數剛起的那些編號被查的次數（啟動鎖也會查 ASN 自己的編號，不算）
         if self.started.borrow().contains(&pid) {
             let n = self.birth_queries.get();
@@ -457,7 +464,7 @@ fn empty_rig(list_json: &str) -> (tempfile::TempDir, Fake) {
 
 #[test]
 fn 收空_mux_沒有夥伴就停_pid_檔清掉() {
-    let (d, r) = empty_rig(r#"[{"workspace":"default"}]"#);
+    let (d, r) = empty_rig(r#"[{"pane_id":0,"workspace":"default"}]"#);
     let m = mux(&r, d.path());
     assert!(m.stop_if_empty("測試"));
     assert_eq!(*r.killed.borrow(), vec![MUX_PID]);
@@ -474,7 +481,7 @@ fn 收空_mux_空清單也算沒有夥伴_路徑大小寫不同也算同一個()
 
 #[test]
 fn 收空_mux_還有夥伴_不停() {
-    let (d, r) = empty_rig(r#"[{"workspace":"default"},{"workspace":"asn-3"}]"#);
+    let (d, r) = empty_rig(r#"[{"pane_id":0,"workspace":"default"},{"pane_id":3,"workspace":"asn-3"}]"#);
     assert!(!mux(&r, d.path()).stop_if_empty("測試"));
     assert!(r.killed.borrow().is_empty());
     assert!(mux(&r, d.path()).paths.pid.exists());
@@ -482,7 +489,7 @@ fn 收空_mux_還有夥伴_不停() {
 
 #[test]
 fn 收空_mux_清單讀不懂一律不停() {
-    for bad in ["看不懂", "{}", "null", "3", r#"[{"pane_id":1}]"#, r#"[{"workspace":null}]"#, r#"[{"workspace":"default"},{"workspace":7}]"#] {
+    for bad in ["看不懂", "{}", "null", "3", r#"[{"workspace":"default"}]"#, r#"[{"pane_id":"0"}]"#, r#"[{"pane_id":0},{"workspace":"asn-1"}]"#] {
         let (d, r) = empty_rig(bad);
         assert!(!mux(&r, d.path()).stop_if_empty("測試"), "{bad}");
         assert!(r.killed.borrow().is_empty(), "{bad}");
@@ -571,7 +578,7 @@ fn 收空_mux_停的時候留紀錄_沒停不留() {
     let log = std::fs::read_to_string(m.paths.dir.join("mux.log")).unwrap();
     assert!(log.contains("測試原因") && log.contains(&MUX_PID.to_string()), "{log}");
 
-    let (d2, r2) = empty_rig(r#"[{"workspace":"asn-1"}]"#);
+    let (d2, r2) = empty_rig(r#"[{"pane_id":1,"workspace":"asn-1"}]"#);
     let m2 = mux(&r2, d2.path());
     assert!(!m2.stop_if_empty("測試原因"));
     assert!(!m2.paths.dir.join("mux.log").exists());
@@ -598,4 +605,67 @@ fn 工作群組_只有不准脫離又關閉時結束成員才會帶走_mux() {
     assert_eq!(job_risk(Some(true), Some(0)), Safe, "工作排程器實測旗標：關閉時不結束成員");
     assert_eq!(job_risk(Some(true), None), Unknown, "讀不到旗標");
     assert_eq!(job_risk(None, None), Unknown);
+}
+
+#[test]
+fn 收空_mux_有不是我們開的窗格也不停() {
+    let (d, r) = empty_rig(r#"[{"pane_id":0,"workspace":"default"},{"pane_id":5,"workspace":"default"}]"#);
+    assert!(!mux(&r, d.path()).stop_if_empty("測試"));
+    assert!(r.killed.borrow().is_empty());
+}
+
+#[test]
+fn 收空_mux_開窗格逾時後一段時間內不停_過了才停() {
+    let (d, r) = empty_rig("[]");
+    let m = mux(&r, d.path());
+    m.note_spawn_unsure();
+    assert!(!m.stop_if_empty("測試"), "窗格可能還在開");
+    assert!(r.killed.borrow().is_empty());
+    let f = std::fs::OpenOptions::new().write(true).open(m.paths.dir.join("spawn-unsure")).unwrap();
+    f.set_modified(std::time::SystemTime::now() - SPAWN_UNSURE_HOLD - Duration::from_secs(1)).unwrap();
+    drop(f);
+    assert!(m.stop_if_empty("測試"), "過了就照常收");
+}
+
+#[test]
+fn 收空_mux_執行檔被更新改名成_old_還認得_別的資料夾不算() {
+    let s = Path::new(r"W\wezterm-mux-server.exe");
+    for ok in [r"W\wezterm-mux-server.exe", r"w\WEZTERM-MUX-SERVER.EXE", r"W\wezterm-mux-server.exe.old", r"W\wezterm-mux-server.exe.old12"] {
+        assert!(is_server_image(Path::new(ok), s), "{ok}");
+    }
+    for bad in [r"X\wezterm-mux-server.exe.old", r"W\wezterm-mux-server.exe.oldx", r"W\wezterm-mux-server.exe.bak", r"W\NVDisplay.Container.exe"] {
+        assert!(!is_server_image(Path::new(bad), s), "{bad}");
+    }
+}
+
+#[test]
+fn 工作群組會帶走或讀不到_就不用_mux_並說明() {
+    assert_eq!(mux_after_job(false, Some(true), Some(0x2000), true), (false, None), "本來就沒要開：不多話");
+    assert_eq!(mux_after_job(true, Some(false), None, false), (true, None));
+    assert_eq!(mux_after_job(true, Some(true), Some(0x800), true), (true, None));
+    assert_eq!(mux_after_job(true, Some(true), Some(0), false), (true, None));
+    for (i, l) in [(Some(true), Some(0x2000)), (Some(true), None), (None, None)] {
+        let (on, why) = mux_after_job(true, i, l, false);
+        let why = why.unwrap();
+        assert!(!on && why.contains("一般視窗") && !why.contains("工作群組") && !why.contains("重開"), "{i:?} {l:?} {why}");
+        let (on, why) = mux_after_job(true, i, l, true);
+        assert!(!on && why.unwrap().contains("用平常的方式重開 ASN 就能接回"), "{i:?} {l:?}");
+    }
+}
+
+#[test]
+fn 收空_mux_執行檔被更新改名成_old_還是收得掉() {
+    let (d, r) = empty_rig("[]");
+    r.exe.borrow_mut().insert(MUX_PID, PathBuf::from(format!("{SERVER}.old1")));
+    assert!(mux(&r, d.path()).stop_if_empty("測試"));
+    assert_eq!(*r.killed.borrow(), vec![MUX_PID]);
+}
+
+#[test]
+fn 收空_mux_開窗的一方在拿鎖前才逾時也不停() {
+    let (d, r) = empty_rig("[]");
+    let m = mux(&r, d.path());
+    *r.appears_at_lock.borrow_mut() = Some(m.paths.dir.join("spawn-unsure"));
+    assert!(!m.stop_if_empty("測試"), "鎖放掉之前記號已經寫好，拿到鎖就看得到");
+    assert!(r.killed.borrow().is_empty());
 }

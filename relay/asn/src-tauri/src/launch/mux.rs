@@ -33,6 +33,8 @@ const BIRTH_RETRIES: u32 = 5;
 const CLI_TIMEOUT: Duration = Duration::from_secs(10);
 /// 啟動鎖的內容還沒寫好（空的或看不懂）超過這麼久，才當作寫鎖的程序起到一半當掉了
 const LOCK_STALE: Duration = Duration::from_secs(60);
+/// 開窗格結果不確定之後，多久內不收空 mux（比 cli 逾時長很多，窗格來得及出現在清單上）
+const SPAWN_UNSURE_HOLD: Duration = Duration::from_secs(600);
 /// 窗格 0 跑的程式：立刻結束（見檔頭）
 const PANE0: [&str; 3] = ["cmd.exe", "/c", "exit"];
 
@@ -147,6 +149,38 @@ impl Mux<'_> {
         Ok(n)
     }
 
+    /// 除了窗格 0（mux 自己開的那個）沒有別的窗格。不看 workspace：不是我們開的窗格也不該被一起收掉
+    fn only_pane_zero(&self) -> Result<bool, String> {
+        let o = self.cli(&["list", "--format", "json"])?;
+        if !o.success {
+            return Err("終端服務沒有在跑".into());
+        }
+        let v: serde_json::Value = serde_json::from_str(&o.stdout).map_err(|_| "終端服務回的清單看不懂".to_string())?;
+        let rows = v.as_array().ok_or("終端服務回的清單看不懂")?;
+        for p in rows {
+            if p.get("pane_id").and_then(|x| x.as_u64()).ok_or("終端服務回的清單看不懂")? != 0 {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// 下 spawn 逾時或回的東西看不懂：窗格可能已經開了或還在開。記下來，[`SPAWN_UNSURE_HOLD`] 內不收空 mux
+    pub fn note_spawn_unsure(&self) {
+        if let Err(e) = std::fs::write(self.paths.dir.join("spawn-unsure"), "") {
+            // 記號沒寫成：收空 mux 那邊就擋不住了，至少留下線索
+            let line = format!("終端服務：開窗格的結果不確定，但記號寫不進去：{e}");
+            elog!("{line}");
+            note(&self.paths.dir, &line);
+        }
+    }
+
+    fn spawn_unsure(&self) -> bool {
+        let Ok(t) = std::fs::metadata(self.paths.dir.join("spawn-unsure")).and_then(|m| m.modified()) else { return false };
+        // 檔案時間在未來（時鐘被調過）也當作還沒過
+        t.elapsed().map_or(true, |age| age < SPAWN_UNSURE_HOLD)
+    }
+
     /// 開窗格前拿的鎖，spawn 完才放：這段期間 `stop_if_empty` 不會動手，不會關到正要開的窗格。拿不到回錯（不開）
     pub fn open_lock(&self) -> Result<impl Sized, String> {
         std::fs::create_dir_all(&self.paths.dir).map_err(|e| format!("建立終端服務資料夾失敗：{e}"))?;
@@ -158,12 +192,16 @@ impl Mux<'_> {
     pub fn stop_if_empty(&self, reason: &str) -> bool {
         let Some(pid) = self.recorded_alive() else { return false };
         // 編號和建立時間對得上還不夠：路徑不是這個資料夾的 mux 執行檔（查不到也算）就不是我們的
-        if !self.runner.exe_path(pid).is_some_and(|p| same_path(&p, &self.server)) {
+        if !self.runner.exe_path(pid).is_some_and(|p| is_server_image(&p, &self.server)) {
             return false;
         }
         // 有人正在開窗格：不等，這次不收
         let Ok(_lock) = StartLock::try_acquire(&self.paths.open_lock, self.runner) else { return false };
-        if self.pane_count() != Ok(0) {
+        // 開窗格逾時過：窗格可能還在開，先不收。要在拿到鎖之後查：開窗的一方是放鎖前才寫記號
+        if self.spawn_unsure() {
+            return false;
+        }
+        if self.only_pane_zero() != Ok(true) {
             return false;
         }
         // 拿到鎖之後再核對一次：等鎖與查清單的這段時間，pid 檔記的可能已經換了
@@ -270,6 +308,21 @@ pub fn note(dir: &Path, line: &str) {
     let _ = std::fs::write(&p, format!("{old}{at} {line}\n"));
 }
 
+/// 工作群組會帶走 mux 或讀不到旗標時，不用 mux：回（用不用 mux, 給人看的原因）。
+/// `earlier_mux`：上次開的 mux 還活著。裡面的夥伴照常跑、不會多開一份（開新夥伴前查的是工作階段，不看 mux），但這次切不到前景
+pub fn mux_after_job(want: bool, inside: Option<bool>, limit: Option<u32>, earlier_mux: bool) -> (bool, Option<String>) {
+    if !want {
+        return (false, None);
+    }
+    let why = match job_risk(inside, limit) {
+        JobRisk::Safe => return (true, None),
+        JobRisk::TakesMuxDown => "這次的啟動方式會讓夥伴跟著 ASN 一起關閉，所以夥伴開在一般視窗",
+        JobRisk::Unknown => "查不到這次的啟動方式會不會讓夥伴跟著 ASN 一起關閉，保險起見，夥伴開在一般視窗",
+    };
+    let more = if earlier_mux { "。先前開的夥伴還在背景跑，這次切不到前景；用平常的方式重開 ASN 就能接回" } else { "" };
+    (false, Some(format!("{why}{more}")))
+}
+
 /// ASN 自己所在的工作群組（Job Object）對 mux 的影響
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum JobRisk {
@@ -330,6 +383,19 @@ pub fn job_line(in_job: Option<bool>, limit: Option<u32>) -> String {
 
 fn same_path(a: &Path, b: &Path) -> bool {
     a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy())
+}
+
+/// 是不是這個資料夾的 mux 執行檔。更新時占用中的檔會被改名成 `.old`、`.old1`…（見 [`clean_old`]），舊 mux 繼續跑，也算
+fn is_server_image(p: &Path, server: &Path) -> bool {
+    if same_path(p, server) {
+        return true;
+    }
+    let (Some(dir), Some(want), Some(name)) = (p.parent(), server.file_name(), p.file_name()) else { return false };
+    if !server.parent().is_some_and(|d| same_path(dir, d)) {
+        return false;
+    }
+    let (name, want) = (name.to_string_lossy().to_ascii_lowercase(), want.to_string_lossy().to_ascii_lowercase());
+    name.strip_prefix(&want).and_then(|r| r.strip_prefix(".old")).is_some_and(|n| n.chars().all(|c| c.is_ascii_digit()))
 }
 
 /// 啟動鎖：`create_new` 拿到才算，內容寫「pid 建立時間」。過期看**寫鎖的那個程序還在不在**（建立時間對得上），不看檔案時間；
