@@ -28,8 +28,8 @@ mod quota;
 const INBOX_PAGE: usize = 50;
 /// 一輪收信最多往後多拿幾批
 const INBOX_ROUNDS: usize = 5;
-/// 重開後等夥伴接回來最多等多久（毫秒）：實測重開機後約 10～20 分鐘才陸續接回
-const AWAIT_GRACE_MS: u64 = 30 * 60_000;
+/// 重開後等夥伴接回來最多等多久（毫秒）：半夜重開、沒人登入時要等到天亮，所以定 12 小時（信送出時會註明原本收到的時間）
+const AWAIT_GRACE_MS: u64 = 12 * 3_600_000;
 /// 等接回來的夥伴，最多先留這麼多封信（超過的照原本的做法退回，並講明是留滿了）
 const AWAIT_MAIL_MAX: usize = 20;
 /// 所有等接回的夥伴加起來，最多先留這麼多封
@@ -399,6 +399,8 @@ pub struct Core {
     awaiting: HashMap<String, HashSet<String>>,
     /// 已經告訴過寄件人「先留著」的（寄件人／夥伴）：同一次重開每組只說一次
     awaiting_told: HashSet<String>,
+    /// 先留著的信：編號 → 第一次被先留著的時間（毫秒），送出時在抬頭註明「原本幾點收到」
+    await_first: HashMap<String, u64>,
     probing: bool,
 }
 
@@ -448,7 +450,7 @@ impl Core {
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
-            quota_until: 0, quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), probing: false,
+            quota_until: 0, quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), probing: false,
         };
         c.restore();
         c.started_at = now;
@@ -615,7 +617,11 @@ impl Core {
             return false;
         }
         if n.insert(id.to_string()) {
-            self.log.line(&format!("id={id} to={name}: window not back yet after restart, kept in inbox (waiting up to {} min)", AWAIT_GRACE_MS / 60_000));
+            if self.await_first.len() >= 400 {
+                self.await_first.clear();
+            }
+            self.await_first.entry(id.to_string()).or_insert(self.now);
+            self.log.line(&format!("id={id} to={name}: window not back yet after restart, kept in inbox (waiting up to {} h)", AWAIT_GRACE_MS / 3_600_000));
         }
         true
     }
@@ -629,7 +635,7 @@ impl Core {
         if !self.awaiting_told.insert(format!("{}/{}->{target}", m.from_node, from_agent)) {
             return;
         }
-        let text = format!("[收發室] 「{target}」在收發室重開前有在線，還沒接回來；信已收到、先留著，接回來後會送出（最多等 {} 分鐘，不用重寄）。", AWAIT_GRACE_MS / 60_000);
+        let text = format!("[收發室] 「{target}」在收發室重開前有在線，還沒接回來；信已收到、先留著，接回來後會送出（最多等 {} 小時，不用重寄；送到時會註明原本幾點收到）。", AWAIT_GRACE_MS / 3_600_000);
         let o = Origin { id: m.id.clone(), from_node: m.from_node.clone(), from_agent };
         self.send_back(&o, &text, None, Some(false)).await;
     }
@@ -640,7 +646,7 @@ impl Core {
             return String::new();
         }
         if self.now.saturating_sub(self.started_at) >= AWAIT_GRACE_MS {
-            format!("（它在收發室重開前有在線，等了 {} 分鐘沒有回來）", AWAIT_GRACE_MS / 60_000)
+            format!("（它在收發室重開前有在線，等了 {} 小時沒有回來）", AWAIT_GRACE_MS / 3_600_000)
         } else if self.awaiting.get(name).is_some_and(|s| s.len() >= AWAIT_MAIL_MAX) || self.awaiting.values().map(HashSet::len).sum::<usize>() >= AWAIT_TOTAL_MAX {
             format!("（它在收發室重開前有在線，還沒接回來；等接回來的信已經留滿了（每位 {AWAIT_MAIL_MAX} 封、全部 {AWAIT_TOTAL_MAX} 封），這封先退回，請等它回來後再寄）")
         } else {
@@ -1207,6 +1213,7 @@ impl Core {
             return Some(target);
         }
         let late = self.late_from.take().or_else(|| self.held_first.get(&m.id).copied());
+        let await_at = self.await_first.remove(&m.id);
         let origin = Origin::of(&p);
         self.pending.push(p);
         self.refund_owner_mail(&m, &target);
@@ -1218,7 +1225,7 @@ impl Core {
         let body = attach::notes_for(&mail::escape_body(&m.body), &m.attachments, self.cfg.attach_cmd.as_deref());
         // 自動回信的 worker 由橋代寄回答：不附「請用 asn_send 回信」那行
         let pre_engine = if self.is_respond(&target) { "respond".to_string() } else { self.engine_of(&target) };
-        let text = format!("{}\n{}{}{}", mail_head(&m, &self.engine_label_of(&target)), mail::preamble_late(&m, &pre_engine, late),if note.is_empty() { String::new() } else { format!("{note}\n") }, body);
+        let text = format!("{}\n{}{}{}", mail_head(&m, &self.engine_label_of(&target)), mail::insert_await_line(mail::preamble_late(&m, &pre_engine, late), await_at),if note.is_empty() { String::new() } else { format!("{note}\n") }, body);
         let text = self.with_path_line(text, &target);
         match self.deliver(&m.id, &target, &text) {
             Ok(_) => {
@@ -1791,7 +1798,7 @@ impl Core {
             if let Err(e) = self.held.remove(&h.room_id, h.seq, &h.member) {
                 self.log.line(&format!("rooms held save failed: {e}"));
             }
-        } else if h.fails + 1 >= 120 {
+        } else if h.fails + 1 >= 120 && !self.awaiting_return(&self.canonical_target("held", &rooms::member_window(&h.member))) {
             self.drop_held(h, "gave up after repeated failures");
             if h.held_at > 0 {
                 expired.push(h.clone()); // 額度扣住的項目被放棄：改發群組摘要，不無聲丟掉

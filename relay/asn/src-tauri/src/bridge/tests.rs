@@ -1004,6 +1004,10 @@ async fn 重開後夥伴視窗還沒接回來_信留著不退回不_ack_接回�
     h.core.pull("test", T0 + 601_000).await;
     let ids: Vec<String> = h.said().iter().filter_map(|t| t.split("id=").nth(1).map(|x| x.split(' ').next().unwrap_or("").to_string())).collect();
     assert_eq!(ids.first().cloned(), Some(uid(1)), "依原順序，先送第一封（一次只交一封，第二封等這一輪結束）");
+    let first = h.said().into_iter().next().unwrap();
+    let want = super::mail::await_late_line(T0 + 1_000);
+    assert!(first.lines().any(|l| l == want), "送出時註明原本收到的時間（寄件人那行之後）：{first}");
+    assert!(first.lines().position(|l| l == want).unwrap() > first.lines().position(|l| l.starts_with("寄件人：")).unwrap());
 }
 
 #[tokio::test]
@@ -1017,7 +1021,7 @@ async fn 重開後留著信時_寄件人收到一次先留著的通知_同一位
     h.core.pull("test", T0 + 2_000).await;
     let notes: Vec<String> = notice_bodies(&h).into_iter().filter(|b| b.contains("先留著") && b.contains("T-丙")).collect();
     assert_eq!(notes.len(), 2, "兩位寄件人各一次：{notes:?}");
-    assert!(notes[0].contains("不用重寄") && notes[0].contains("30 分鐘"));
+    assert!(notes[0].contains("不用重寄") && notes[0].contains("12 小時"));
     assert!(h.fr.acked().is_empty());
 }
 
@@ -1067,11 +1071,11 @@ async fn 重開後等太久還沒回來_才退回_而且講明等了多久() {
     let mut h = harness(&[("T-乙", "idle")]).await;
     restart_with_known(&mut h, &["T-乙", "T-丙"], T0).await;
     h.fr.put(mail(1, json!({"to_agent": "T-丙"})));
-    h.core.pull("test", T0 + 29 * 60_000).await;
-    assert!(h.fr.acked().is_empty(), "29 分鐘還在等");
-    h.core.pull("test", T0 + 31 * 60_000).await;
+    h.core.pull("test", T0 + 11 * 3_600_000 + 59 * 60_000).await;
+    assert!(h.fr.acked().is_empty(), "11 小時 59 分還在等");
+    h.core.pull("test", T0 + 12 * 3_600_000 + 60_000).await;
     let notes = notice_bodies(&h);
-    assert!(notes.iter().any(|b| b.contains("找不到名叫「T-丙」") && b.contains("重開前有在線，等了 30 分鐘沒有回來")), "{notes:?}");
+    assert!(notes.iter().any(|b| b.contains("找不到名叫「T-丙」") && b.contains("重開前有在線，等了 12 小時沒有回來")), "{notes:?}");
     assert!(h.fr.acked().contains(&uid(1)), "退回後才 ack");
 }
 

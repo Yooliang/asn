@@ -1176,6 +1176,31 @@ async fn 群組_一輪只交一封_同一視窗連來兩則_第一則做完才�
 }
 
 #[tokio::test]
+async fn 群組_同房等接回的那位不動_其他在線成員照常轉交() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    let mut k = crate::bridge::known::Known::default();
+    k.touch("T-乙", "claude", T0 - 1000);
+    k.touch("T-丙", "claude", T0 - 1000);
+    k.save_if_dirty(&h.work.path().join(crate::bridge::known::KNOWN_FILE), T0 - 1000).unwrap();
+    h.core = new_core(&h.fr, h.work.path(), h.sessions.path(), h.sink.clone(), T0);
+    h.core.refresh_roster(T0).await;
+    set_rooms(
+        &h,
+        vec![room(
+            vec![rmsg(2, json!({"forMe": {"T-乙": true, "T-丙": true}}))],
+            json!([{"member": "T~T-乙", "read_seq": 1}, {"member": "T~T-丙", "read_seq": 1}]),
+        )],
+    );
+    h.core.pull("test", T0 + 1_000).await;
+    let f = fwd(&h.said());
+    assert_eq!(f.len(), 1, "在線的 T-乙 照常轉交：{f:?}");
+    assert_eq!(f[0].1, "T-乙");
+    let c = cursor_file(&h);
+    assert!(c["R1|T~T-乙"].as_u64().unwrap_or(1) >= 2, "T-乙 的游標前進：{c}");
+    assert_eq!(c["R1|T~T-丙"].as_u64().unwrap_or(1), 1, "等接回的 T-丙 游標不動：{c}");
+}
+
+#[tokio::test]
 async fn 群組_重開後被點名的夥伴還沒接回來_游標不前進_接回來才轉交() {
     let mut h = harness(&[("T-乙", "idle")]).await;
     let mut k = crate::bridge::known::Known::default();

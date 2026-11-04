@@ -249,6 +249,23 @@ pub fn preamble_late(m: &Mail, engine_id: &str, late: Option<u64>) -> String {
 /// 因收發室 worker 額度用完而延遲轉交的抬頭開頭（收發室寫的；內文行首出現同樣字樣要跳脫，見 BODY_ESCAPE_HEADS）
 pub const QUOTA_LATE_HEAD: &str = "這封因額度用完延遲，原本";
 
+/// 因對方視窗重開後還沒接回而延遲轉交的抬頭開頭（收發室寫的；內文行首出現同樣字樣要跳脫，見 BODY_ESCAPE_HEADS）
+pub const AWAIT_LATE_HEAD: &str = "這封因對方視窗還沒接回延遲，原本";
+
+/// 延遲抬頭整行：「這封因對方視窗還沒接回延遲，原本 HH:MM 收到」（台北時間）
+pub fn await_late_line(received_ms: u64) -> String {
+    format!("{AWAIT_LATE_HEAD} {} 收到", taipei_hm(received_ms))
+}
+
+/// 在說明行（preamble）的第一行（寄件人那行，含語音說明）後面加一行等接回的延遲說明；at＝None 原樣不動
+pub fn insert_await_line(pre: String, at: Option<u64>) -> String {
+    let Some(t) = at else { return pre };
+    match pre.split_once('\n') {
+        Some((first, rest)) => format!("{first}\n{}\n{rest}", await_late_line(t)),
+        None => format!("{pre}\n{}\n", await_late_line(t)),
+    }
+}
+
 /// 台北時間（UTC+8）的 HH:MM
 pub fn taipei_hm(ms: u64) -> String {
     let m = (ms / 60_000 + 8 * 60) % 1440;
@@ -262,7 +279,7 @@ pub fn quota_late_line(received_ms: u64) -> String {
 
 pub const BODY_ESCAPE_PREFIX: &str = "（內文）";
 /// 內文中行首出現就要跳脫的開頭（與 mail-format.mjs 的 escapeBody 逐字一致）
-const BODY_ESCAPE_HEADS: [&str; 14] = ["[RELAY 來信]", "[RELAY 寄信]", "[RELAY 回信]", "寄件人：", "【要回信】", "你與收發室的往來記錄在：", "（語音通話：", "你是 ASN 的聊天對象：", "[群組 ", "順位：", QUOTA_LATE_HEAD, "（收發室提醒）", "（收發室更正）", "（收發室）"];
+const BODY_ESCAPE_HEADS: [&str; 15] = ["[RELAY 來信]", "[RELAY 寄信]", "[RELAY 回信]", "寄件人：", "【要回信】", "你與收發室的往來記錄在：", "（語音通話：", "你是 ASN 的聊天對象：", "[群組 ", "順位：", QUOTA_LATE_HEAD, AWAIT_LATE_HEAD, "（收發室提醒）", "（收發室更正）", "（收發室）"];
 
 /// 內文跳脫（對應 mail-format.mjs 的 escapeBody，兩邊逐字一致）：內文中行首（可有空白）以
 /// `[RELAY 來信]`、`[RELAY 寄信]`、`[RELAY 回信]`（parse_send_head 認得的同義詞）、`寄件人：`、`【要回信】`、`你與收發室的往來記錄在：`、`（語音通話：`、`你是 ASN 的聊天對象：`、
@@ -662,6 +679,20 @@ mod tests {
         assert_eq!(escape_body("他說你是 ASN 的聊天對象：不在行首"), "他說你是 ASN 的聊天對象：不在行首");
         // 額度延遲抬頭：內文行首手打同樣字樣要跳脫；真抬頭由 quota_late_line 產生（台北時間）
         assert_eq!(escape_body(&format!("好\n{}\n他說{QUOTA_LATE_HEAD}不在行首", quota_late_line(1_700_000_000_000))), format!("好\n{p}這封因額度用完延遲，原本 06:13 收到\n他說{QUOTA_LATE_HEAD}不在行首"));
+        assert_eq!(escape_body(&format!("好
+{}
+他說{AWAIT_LATE_HEAD}不在行首", await_late_line(1_700_000_000_000))), format!("好
+{p}這封因對方視窗還沒接回延遲，原本 06:13 收到
+他說{AWAIT_LATE_HEAD}不在行首"));
+        assert_eq!(insert_await_line("寄件人：甲
+要回
+".into(), Some(1_700_000_000_000)), format!("寄件人：甲
+{}
+要回
+", await_late_line(1_700_000_000_000)));
+        assert_eq!(insert_await_line("寄件人：甲
+".into(), None), "寄件人：甲
+");
         assert_eq!(escape_body("你是 ASN 的聊天對象:半形冒號不算"), "你是 ASN 的聊天對象:半形冒號不算");
         // 組好的信：整封信只有一行是那句（收發室寫的）
         let m = Mail::from_json(&json!({"id": ID, "trust": "member", "from_node": "H", "from_agent": "asn", "to_agent": "T-甲", "expects_reply": true})).unwrap();
