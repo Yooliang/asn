@@ -25,13 +25,18 @@ mod misroute;
 mod quota;
 
 /// 後台節點信箱一次最多回幾封（與 asn_relay_inbox 的 limit 一致）
-/// 重開後等夥伴接回來最多等多久（毫秒）：實測重開機後約 10～20 分鐘才陸續接回
-const AWAIT_GRACE_MS: u64 = 30 * 60_000;
-/// 等接回來的夥伴，最多先留這麼多封信（超過的照原本的做法退回並講明）
-const AWAIT_MAIL_MAX: usize = 20;
 const INBOX_PAGE: usize = 50;
 /// 一輪收信最多往後多拿幾批
 const INBOX_ROUNDS: usize = 5;
+/// 重開後等夥伴接回來最多等多久（毫秒）：實測重開機後約 10～20 分鐘才陸續接回
+const AWAIT_GRACE_MS: u64 = 30 * 60_000;
+/// 等接回來的夥伴，最多先留這麼多封信（超過的照原本的做法退回，並講明是留滿了）
+const AWAIT_MAIL_MAX: usize = 20;
+/// 所有等接回的夥伴加起來，最多先留這麼多封
+const AWAIT_TOTAL_MAX: usize = 40;
+/// 視窗從名單消失後，收發室要繼續跑過這麼久才當成本人關掉、從存檔拿掉。
+/// 關機時視窗比收發室早結束，收發室活不到這麼久，名字就留在存檔裡，重開後信才會留著
+const FORGET_AFTER_MS: u64 = 5 * 60_000;
 /// 排除清單的名字上限（與後台 Edge Function 的上限一致）
 const MAX_EXCLUDE: usize = 20;
 
@@ -384,12 +389,16 @@ pub struct Core {
     held_first: HashMap<String, u64>,
     /// 認得的夥伴（#766）：存檔的視窗名單；重開後還沒接回來的夥伴，寄給它的信先留著、群組點名游標不前進
     known: super::known::Known,
-    /// 這一次收發室跑著的期間看過的視窗名（從名單消失＝本人關掉了，立刻從 known 拿掉）
+    /// 這一次收發室跑著的期間看過的視窗名
     seen_run: HashSet<String>,
+    /// 從名單消失的視窗：名字 → 第一次發現不見的時間；消失超過 FORGET_AFTER_MS 才從 known 拿掉（見該常數）
+    missing: HashMap<String, u64>,
     /// 收發室這次起來的時間（毫秒）：等夥伴接回來的寬限期從這裡算
     started_at: u64,
     /// 正在等接回的夥伴：名字 → 先留著的信編號（每個夥伴最多 AWAIT_MAIL_MAX 封）
     awaiting: HashMap<String, HashSet<String>>,
+    /// 已經告訴過寄件人「先留著」的（寄件人／夥伴）：同一次重開每組只說一次
+    awaiting_told: HashSet<String>,
     probing: bool,
 }
 
@@ -439,7 +448,7 @@ impl Core {
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), reply_fail: HashSet::new(), unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
-            quota_until: 0, quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), seen_run: HashSet::new(), started_at: 0, awaiting: HashMap::new(), probing: false,
+            quota_until: 0, quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), probing: false,
         };
         c.restore();
         c.started_at = now;
@@ -567,17 +576,23 @@ impl Core {
     fn online_names(&self) -> HashSet<&str> {
         self.roster.iter().map(|w| w.name.as_str()).filter(|n| *n != self.cfg.mailbox_name).collect()
     }
-    /// 名單更新：記下看得到的視窗；這次收發室跑著的期間看過、現在不見的＝本人關掉了，立刻忘記（寄給它的信照原本的做法退回）
+    /// 名單更新：記下看得到的視窗；這次收發室跑著的期間看過、現在不見的，先記下不見的時間（寄給它的信照原本的做法立刻退回），
+    /// 收發室繼續跑過 FORGET_AFTER_MS 它都沒回來，才當成本人關掉、從存檔拿掉。關機時視窗比收發室早結束，收發室活不到那時候，名字會留著
     fn note_known_windows(&mut self, now: u64) {
         let names: Vec<(String, String)> = self.roster.iter().filter(|w| w.name != self.cfg.mailbox_name).map(|w| (w.name.clone(), w.engine.clone())).collect();
         let present: HashSet<&str> = names.iter().map(|(n, _)| n.as_str()).collect();
         let gone: Vec<String> = self.seen_run.iter().filter(|n| !present.contains(n.as_str())).cloned().collect();
         for n in gone {
-            self.seen_run.remove(&n);
-            self.known.forget(&n);
-            self.awaiting.remove(&n);
+            let since = *self.missing.entry(n.clone()).or_insert(now);
+            if now.saturating_sub(since) >= FORGET_AFTER_MS {
+                self.missing.remove(&n);
+                self.seen_run.remove(&n);
+                self.known.forget(&n);
+                self.awaiting.remove(&n);
+            }
         }
         for (n, e) in &names {
+            self.missing.remove(n);
             self.seen_run.insert(n.clone());
             self.known.touch(n, e, now);
             self.awaiting.remove(n); // 接回來了：先留著的信下一輪拉信就會照順序送
@@ -594,8 +609,9 @@ impl Core {
 
     /// 先留著這封信（留在後台信箱，不 ack）。回 false＝這個夥伴已經留了太多封，這封照原本的做法退回
     fn hold_for_return(&mut self, name: &str, id: &str) -> bool {
+        let total: usize = self.awaiting.values().map(HashSet::len).sum();
         let n = self.awaiting.entry(name.to_string()).or_default();
-        if !n.contains(id) && n.len() >= AWAIT_MAIL_MAX {
+        if !n.contains(id) && (n.len() >= AWAIT_MAIL_MAX || total >= AWAIT_TOTAL_MAX) {
             return false;
         }
         if n.insert(id.to_string()) {
@@ -604,10 +620,29 @@ impl Core {
         true
     }
 
+    /// 告訴寄件人「先留著」：同一次重開、同一位寄件人對同一位夥伴只說一次；收發室寄的、通知本身都不回
+    async fn tell_sender_waiting(&mut self, m: &Mail, target: &str) {
+        let from_agent = m.from_agent.clone().unwrap_or_default();
+        if Self::is_mailbox_sender(&from_agent) || m.body.trim_start().starts_with("[收發室]") {
+            return;
+        }
+        if !self.awaiting_told.insert(format!("{}/{}->{target}", m.from_node, from_agent)) {
+            return;
+        }
+        let text = format!("[收發室] 「{target}」在收發室重開前有在線，還沒接回來；信已收到、先留著，接回來後會送出（最多等 {} 分鐘，不用重寄）。", AWAIT_GRACE_MS / 60_000);
+        let o = Origin { id: m.id.clone(), from_node: m.from_node.clone(), from_agent };
+        self.send_back(&o, &text, None, Some(false)).await;
+    }
+
     /// 退回時的說明：重開前有在線、等過寬限期還沒回來的，講明等了多久
     fn unreachable_note(&self, name: &str) -> String {
-        if self.known.contains(name) && !self.seen_run.contains(name) && self.now.saturating_sub(self.started_at) >= AWAIT_GRACE_MS {
+        if !self.known.contains(name) || self.seen_run.contains(name) {
+            return String::new();
+        }
+        if self.now.saturating_sub(self.started_at) >= AWAIT_GRACE_MS {
             format!("（它在收發室重開前有在線，等了 {} 分鐘沒有回來）", AWAIT_GRACE_MS / 60_000)
+        } else if self.awaiting.get(name).is_some_and(|s| s.len() >= AWAIT_MAIL_MAX) || self.awaiting.values().map(HashSet::len).sum::<usize>() >= AWAIT_TOTAL_MAX {
+            format!("（它在收發室重開前有在線，還沒接回來；等接回來的信已經留滿了（每位 {AWAIT_MAIL_MAX} 封、全部 {AWAIT_TOTAL_MAX} 封），這封先退回，請等它回來後再寄）")
         } else {
             String::new()
         }
@@ -1119,6 +1154,7 @@ impl Core {
         p.sender_desc = mail::sender_line(&m).trim_start_matches("寄件人：").to_string();
         // 重開後夥伴視窗還沒接回來：信留在後台信箱（不退回、不 ack），等它接回來再照順序送；等太久或留太多才退回
         if !self.forwardable(&target) && self.awaiting_return(&target) && self.hold_for_return(&target, &m.id) {
+            self.tell_sender_waiting(&m, &target).await;
             return Some(target);
         }
         if !self.forwardable(&target) {
