@@ -102,6 +102,7 @@ mod codex_accounts;
 mod codex_quota;
 #[cfg(desktop)]
 mod gemini_quota;
+mod quota_readers;
 #[cfg(desktop)]
 mod gemini_session;
 #[cfg(desktop)]
@@ -2688,6 +2689,14 @@ pub fn run() {
                     let (r6, wd6) = (r.clone(), work_dir.clone());
                     let every = std::time::Duration::from_secs(300);
                     tauri::async_runtime::spawn(acct_remote::report_loop(std::time::Duration::from_secs(5), every, move || report_accounts(r6.clone(), wd6.clone())));
+                }
+                // 額度讀取器：全部預設關閉；關著時不連網、不執行任何程式
+                #[cfg(desktop)]
+                if handle.state::<App>().shot.is_none() {
+                    let wd7 = work_dir.clone();
+                    tauri::async_runtime::spawn(quota_readers::run_loop(identity::home_dir(), grok_accounts::grok_home(), move |line| {
+                        let _ = ui_log::append(&wd7, &[format!("{} info [ASN] {line}", claude_quota::iso_secs(heartbeat::now_ms() as i64))]);
+                    }));
                 }
                 // 在線狀態與版本：啟動後（等前端把狀態交過來）與每 60 秒回報一次；前端改狀態會叫醒立刻回報。
                 // 後台還沒部署（404／400）就停止，直到下次啟動；--shot 模式連的是本機假後端。
