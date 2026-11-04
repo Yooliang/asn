@@ -583,7 +583,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         if !cwd.is_dir() {
             return Err(NotStarted(format!("工作資料夾不存在：{}", cwd.display())));
         }
-        let extra = OpenExtra { kind: spec.kind.to_string(), session_id: spec.session_id.clone(), label: normalize_title(&spec.title).ok() };
+        let extra = OpenExtra { kind: spec.kind.to_string(), session_id: spec.session_id.clone(), label: normalize_title(&spec.title).ok(), hidden: spec.hidden };
         self.open_staged(spec.kind, cwd.to_path_buf(), &spec.argv, Some(&spec.env), &extra)
     }
 
@@ -670,6 +670,10 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             // agy／grok（終端面板）：不經開窗點、沒有退路，失敗一律當已啟動（保守）
             None => w.start_in_workspace(&cwd, &workspace, command).map_err(Started)?,
         };
+        #[cfg(feature = "gui")]
+        if extra.hidden {
+            hide_gui(win.gui_pid);
+        }
         let panes = match w.list(&win.sock) {
             Ok(p) if !p.is_empty() => p,
             Ok(_) => return fail_close(&w, &win, "WezTerm 視窗裡沒有可操作的窗格".into()).map_err(Started),
@@ -1820,6 +1824,8 @@ struct OpenExtra {
     session_id: Option<String>,
     /// 接在分頁標題 ASN:編號 後面的名字（已過 normalize_title）
     label: Option<String>,
+    /// 背景開：視窗一出現就藏（不能等開窗流程做完，後面還有幾秒的結束觀察）
+    hidden: bool,
 }
 
 /// 測試注入「使用者環境變數」的名字（每個測試自己的執行緒各一份）
@@ -2553,19 +2559,30 @@ pub(crate) fn stop_own_gui(gui_pid: u32) -> Result<(), String> {
 /// 視窗可能比通訊檔晚一點出現，最多等 3 秒；藏不了只記 log、視窗照常顯示（不當成開失敗）
 #[cfg(all(windows, feature = "gui"))]
 fn hide_gui(gui_pid: u32) {
-    for _ in 0..30 {
+    use windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible;
+    // WezTerm 建好視窗之後才把它顯示出來：太早藏會被它顯示回來，所以要看到「真的顯示了」才藏，藏完再多盯一下
+    let mut hidden_at = None;
+    let mut found = false;
+    for i in 0..60 {
         let wins = super::console::win::find_wez_windows(gui_pid);
-        if !wins.is_empty() {
-            for w in wins {
-                if let Err(e) = super::console::win::set_visible(w.hwnd, false) {
-                    elog!("背景開：隱藏自帶終端的視窗失敗（{gui_pid}）：{e}");
+        found |= !wins.is_empty();
+        for w in wins {
+            if unsafe { IsWindowVisible(w.hwnd as _) } != 0 {
+                match super::console::win::set_visible(w.hwnd, false) {
+                    Ok(_) => hidden_at = Some(i),
+                    Err(e) => elog!("背景開：隱藏自帶終端的視窗失敗（{gui_pid}）：{e}"),
                 }
             }
+        }
+        // 藏好之後約 1 秒沒再顯示回來就算完成
+        if hidden_at.is_some_and(|h| i >= h + 20) {
             return;
         }
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(50));
     }
-    elog!("背景開：3 秒內找不到自帶終端的視窗（{gui_pid}），照常顯示");
+    if hidden_at.is_none() {
+        elog!("背景開：3 秒內{}（{gui_pid}），照常顯示", if found { "視窗一直沒有顯示" } else { "找不到自帶終端的視窗" });
+    }
 }
 
 #[cfg(all(not(windows), feature = "gui"))]
@@ -2579,11 +2596,8 @@ impl super::win_term::WinTermHost for LiveTerms {
     fn open_window(&self, cwd: &Path, spec: &super::win_term::WinSpec) -> Result<u32, super::win_term::WinOpenError> {
         self.ensure_config().map_err(super::win_term::WinOpenError::NotStarted)?;
         let (id, gui) = TermService::start_window(self, cwd, spec)?;
+        // 背景開的隱藏在 open_staged 裡（視窗一出現就藏）；mux 模式沒有自己的 GUI 視窗可藏
         self.show_after_open(&id, spec.hidden);
-        // mux 模式沒有自己的 GUI 視窗可藏（gui 是 mux 的程序編號，不能拿去找視窗）
-        if spec.hidden && !self.use_mux {
-            hide_gui(gui);
-        }
         Ok(gui)
     }
 }
