@@ -28,6 +28,7 @@ import { roomPostAgent, touchActive } from "../_shared/last_active.ts";
 import { handleNodeLaunchAction, LAUNCH_ACTIONS, sanitizeLauncher } from "../_shared/launch.ts";
 import { handleNodePartnerOpAction, PARTNER_OP_ACTIONS } from "../_shared/partner_ops.ts";
 import { ACCT_ACTIONS, handleAcctAction } from "../_shared/account_switch.ts";
+import { handleQuotaRead, handleQuotaShare, QUOTA_READ_ACTION, QUOTA_SHARE_ACTIONS } from "../_shared/quota_read.ts";
 import { handleTermReqAction, TERM_REQ_ACTIONS, TERM_REQ_SIGNED_ACTIONS } from "../_shared/term_request.ts";
 import { handlePermReqAction, PERM_REQ_ACTIONS, PERM_REQ_SIGNED_ACTIONS } from "../_shared/perm_request.ts";
 import { DEVICE_PAIR_ACTIONS, DEVICE_PAIR_SIGNED_ACTIONS, handleDevicePairAction } from "../_shared/device_pair.ts";
@@ -218,6 +219,16 @@ Deno.serve(async (req) => {
     const raw = await req.json().catch(() => null);
     const r = await handleAccountAction(accountDeps, action, req.headers.get("authorization"), req.headers.get("x-relay-key"), raw);
     return json(r.status, r.body);
+  }
+
+  // 額度查詢（見 _shared/quota_read.ts）：不用金鑰，憑代碼查單一帳號；回應不快取
+  if (action === QUOTA_READ_ACTION) {
+    if (req.method !== "GET") return json(405, { error: "method" });
+    const ip = (req.headers.get("x-forwarded-for") ?? "unknown").split(",")[0].trim();
+    const r = await handleQuotaRead({ rpc: async (fn, args) => await db.rpc(fn, args), sha256Hex }, url.searchParams.get("hash") ?? "", ip);
+    const res = json(r.status, r.body);
+    res.headers.set("cache-control", "no-store");
+    return res;
   }
 
   const key = req.headers.get("x-relay-key");
@@ -655,6 +666,15 @@ Deno.serve(async (req) => {
   }
   // 遠端切換 Claude 帳號（ASN 帳號管理，見 _shared/account_switch.ts）：
   // acct_list／acct_switch／acct_switch_status 只有擁有者節點（SQL 判斷）；acct_report／acct_switch_pending／acct_switch_result 只動金鑰所屬的自己節點。權杖不經過收發室。
+  // 額度查詢代碼（見 _shared/quota_read.ts）：開或撤一定要本人簽章
+  if (action && QUOTA_SHARE_ACTIONS.has(action)) {
+    if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
+    const signedShare = await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER));
+    const r = await handleQuotaShare({ rpc: async (fn, args) => await db.rpc(fn, args), sha256Hex }, me, action, await req.json().catch(() => null), signedShare);
+    const res = json(r.status, r.body);
+    res.headers.set("cache-control", "no-store");
+    return res;
+  }
   if (action && ACCT_ACTIONS.has(action)) {
     const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
