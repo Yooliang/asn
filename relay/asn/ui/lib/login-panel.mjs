@@ -1,7 +1,7 @@
 // 設定頁第一頁（個人）裡的「登入狀態」區塊：未登入顯示登入鈕；已登入顯示 email 與我的名字（登出鈕在同一頁最下面，見 LogoutPanel）（綁定是登入後自動做的，沒有按鈕）。
 // 自己呼叫 Rust 指令（登入狀態與權杖都在 Rust 端，不經名單樞紐的設定快照）；整合模式與分離視窗共用。
 // 這個檔在 node 也要能載入（測試），所以 Vue 與 Tauri 只在元件 setup 裡才取用。
-import { LOGOUT_CANCEL_LABEL, LOGOUT_DONE_TEXT, LOGOUT_NOTE, LOGOUT_ONLY_LABEL, LOGOUT_STOP_DONE_TEXT, LOGOUT_STOP_LABEL, PROVIDERS, accountView, errorText } from './login.mjs'
+import { LOGOUT_CANCEL_LABEL, LOGOUT_DONE_TEXT, LOGOUT_NOTE, LOGOUT_ONLY_LABEL, LOGOUT_STOP_AUTOSTART_NOTE, LOGOUT_STOP_DONE_TEXT, LOGOUT_STOP_LABEL, LOGOUT_STOP_NOTE, PROVIDERS, accountView, errorText } from './login.mjs'
 import { authApi, invoke } from './tauri.mjs'
 import { checkName } from './onboard.mjs'
 import { accountDisplayName } from './mobile.mjs'
@@ -75,7 +75,7 @@ export const LoginPanel = {
 export const LogoutPanel = {
   setup() {
     const { ref, onMounted } = globalThis.Vue
-    const signedIn = ref(false), busy = ref(false), msg = ref(''), asking = ref(false)
+    const signedIn = ref(false), busy = ref(false), msg = ref(''), asking = ref(false), autostartOn = ref(false)
     const refresh = async () => { try { signedIn.value = !!(await authApi.status())?.signed_in } catch (e) { msg.value = errorText(e) } }
     // 按「登出」先說明收發信會怎樣，再由本人選：只登出（預設）、登出並結束 ASN、取消
     const ask = () => { if (!busy.value) { asking.value = true; msg.value = '' } }
@@ -86,13 +86,16 @@ export const LogoutPanel = {
       try { await authApi.logout(stop === true); msg.value = stop === true ? LOGOUT_STOP_DONE_TEXT : LOGOUT_DONE_TEXT } catch (e) { msg.value = errorText(e) } finally { busy.value = false }
       await refresh()
     }
-    onMounted(refresh)
-    return { signedIn, busy, msg, asking, ask, cancel, logout, LOGOUT_NOTE, LOGOUT_ONLY_LABEL, LOGOUT_STOP_LABEL, LOGOUT_CANCEL_LABEL }
+    // 有設開機自動啟動：關閉 ASN 後下次開機會自己開，要讓人知道
+    const loadAutostart = async () => { try { autostartOn.value = (await invoke('autostart_get')) === true } catch { autostartOn.value = false } }
+    onMounted(() => { void refresh(); void loadAutostart() })
+    return { signedIn, busy, msg, asking, autostartOn, ask, cancel, logout, LOGOUT_NOTE, LOGOUT_ONLY_LABEL, LOGOUT_STOP_LABEL, LOGOUT_STOP_NOTE, LOGOUT_STOP_AUTOSTART_NOTE, LOGOUT_CANCEL_LABEL }
   },
   template: `<div class="logout-set" v-if="signedIn || msg">
       <div class="av-btns" v-if="signedIn && !asking"><button class="aero-btn logout-btn" type="button" :disabled="busy" @click="ask">登出</button></div>
       <div class="logout-ask" v-if="signedIn && asking" role="alertdialog" aria-label="確認登出">
         <small>{{ LOGOUT_NOTE }}</small>
+        <small>{{ LOGOUT_STOP_NOTE }}<template v-if="autostartOn"> {{ LOGOUT_STOP_AUTOSTART_NOTE }}</template></small>
         <div class="av-btns">
           <button class="aero-btn" type="button" :disabled="busy" @click="logout(false)">{{ LOGOUT_ONLY_LABEL }}</button>
           <button class="aero-btn" type="button" :disabled="busy" @click="logout(true)">{{ LOGOUT_STOP_LABEL }}</button>
