@@ -31,8 +31,18 @@ impl Core {
             let body = json!({ "window": w.name, "kind": kind, "detail": detail, "tool": tool });
             match self.relay.api("waiting_notice", Some(body)).await {
                 Ok(v) => {
-                    self.wait_alerts.mark_sent(&w, now);
-                    self.log.line(&format!("wait-alert window={} kind={kind} notify={}", w.name, v.get("notify").and_then(Value::as_str).unwrap_or("")));
+                    let notify = v.get("notify").and_then(Value::as_str).unwrap_or("");
+                    self.log.line(&format!("wait-alert window={} kind={kind} notify={notify}", w.name));
+                    match notify {
+                        "sent" => self.wait_alerts.mark_sent(&w, now),
+                        // 後台查不到擁有者：再試也寄不到，這次等待到此為止
+                        "skipped" => self.wait_alerts.mark_sent(&w, now),
+                        // 沒寄到（寄送失敗、到上限、看不懂的回答）不算通知過：隔一分鐘再試
+                        _ => {
+                            self.wait_retry_at = now + RETRY_MS;
+                            return;
+                        }
+                    }
                 }
                 Err(e) => {
                     self.wait_retry_at = now + RETRY_MS;

@@ -232,6 +232,10 @@ export function createStatus(clock: () => number = Date.now) {
       control = r
       return write(io, last.state, last.detail, last.tasks, last.prompt, last.waitingTool)
     },
+    // 權限框回答了：工具名清掉，不然下一個框會帶到舊的
+    clearWaitingTool(io: Io): Promise<unknown> {
+      return last.waitingTool ? write(io, last.state, last.detail, last.tasks, last.prompt) : chain
+    },
     // 跳權限框：記下工具名，其餘欄位照舊（狀態有變動時這個欄位就清掉）
     setWaitingTool(io: Io, tool: unknown): Promise<unknown> {
       const name = safeToolName(tool)

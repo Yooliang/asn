@@ -2,6 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import { safeToolName, buildStatus, createStatus, cronDetail, finalState, HEARTBEAT_MS, MAX_TASKS, questionDetail, statusPath, taskList } from './status'
 
 // 假引擎：env.get 給家目錄、fs.read 給 plugin.json、fs.write 收進 writes（可設成失敗）
+type StatusDoc0 = { waitingTool?: string; detail?: string }
 const SID = 'sess-1'
 const PATH = 'C:/Users/u/.asn/status/sess-1.json'
 type Doc = { sessionId: string; state: string; detail: string; at: number; turnId: string; plugin: string; tasks?: { id: string; desc: string; kind?: string }[] }
@@ -45,6 +46,26 @@ test('純函式：路徑、內容、詳情字串、最終狀態', () => {
   expect(finalState('answer', undefined)).toEqual({ state: 'idle', detail: '' })
   expect(finalState('aborted', { background_tasks: [{}] }).detail).toBe('中斷')
   expect(finalState('error', undefined).detail).toBe('出錯')
+})
+
+test('權限框的工具名：有寫才清，清掉後其他欄位照舊', async ($, on) => {
+  const r = await rig($, on)
+  await start($)
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await r.flush()
+  const st = createStatus()
+  const writes: StatusDoc0[] = []
+  const io = { home: async () => 'C:/Users/u', read: async () => '{"version":"1"}', write: async (_p: string, d: string) => { writes.push(JSON.parse(d)) }, sid: () => SID, root: 'R', log: () => {} }
+  await st.write(io as never, 'busy', '做事中')
+  await st.clearWaitingTool(io as never)
+  expect(writes.length).toBe(1)
+  await st.setWaitingTool(io as never, 'Bash')
+  expect(writes.at(-1)?.waitingTool).toBe('Bash')
+  await st.setWaitingTool(io as never, 'rm -rf /')
+  expect(writes.at(-1)?.waitingTool).toBe('Bash')
+  await st.clearWaitingTool(io as never)
+  expect(writes.at(-1)?.waitingTool).toBeUndefined()
+  expect(writes.at(-1)?.detail).toBe('做事中')
 })
 
 test('工具名只收一般字元', () => {

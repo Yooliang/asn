@@ -133,6 +133,25 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
+  // 權限框回答了（工具跑完、失敗或被拒）：工具名清掉
+  on('classic.PostToolUse', ($, e, next) => {
+    const io = { home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: (p: string) => $.fs.read(p), write: (p: string, t: string) => $.fs.write(p, t), sid: () => $.session.id(), log: (t: string) => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage() }
+    void st.clearWaitingTool(io)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  on('classic.PostToolUseFailure', ($, e, next) => {
+    const io = { home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: (p: string) => $.fs.read(p), write: (p: string, t: string) => $.fs.write(p, t), sid: () => $.session.id(), log: (t: string) => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage() }
+    void st.clearWaitingTool(io)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  on('classic.PermissionDenied', ($, e, next) => {
+    const io = { home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: (p: string) => $.fs.read(p), write: (p: string, t: string) => $.fs.write(p, t), sid: () => $.session.id(), log: (t: string) => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage() }
+    void st.clearWaitingTool(io)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
     const isMain = e.agentId === undefined
     const io = { home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: (p: string) => $.fs.read(p), write: (p: string, t: string) => $.fs.write(p, t), sid: () => $.session.id(), log: (t: string) => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage() }

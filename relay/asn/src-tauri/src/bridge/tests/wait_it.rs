@@ -96,6 +96,32 @@ async fn 後台失敗不算通知過_隔一分鐘再試() {
 }
 
 #[tokio::test]
+async fn 後台回沒寄到不算通知過_隔一分鐘再試_查不到擁有者才結束() {
+    for notify in ["failed", "rate_limited", "看不懂"] {
+        let mut h = rig(true).await;
+        h.fr.st.lock().unwrap().wait_notice_notify = notify.into();
+        put_waiting(h.sessions.path(), 5100, "T-丙", "sid-c", "permission prompt", T0);
+        tick_at(&mut h, T0 + W).await;
+        assert_eq!(h.fr.wait_notices().len(), 1, "{notify}");
+        assert!(h.core.log.has(&format!("notify={notify}")), "{notify}：log 要看得出來");
+        tick_at(&mut h, T0 + W + 1_000).await;
+        assert_eq!(h.fr.wait_notices().len(), 1, "{notify}：還沒到重試時間");
+        h.fr.st.lock().unwrap().wait_notice_notify = String::new();
+        tick_at(&mut h, T0 + W + 60_000).await;
+        assert_eq!(h.fr.wait_notices().len(), 2, "{notify}：再試一次");
+        tick_at(&mut h, T0 + W + 120_000).await;
+        assert_eq!(h.fr.wait_notices().len(), 2, "{notify}：寄到了就不再通知");
+    }
+    let mut h = rig(true).await;
+    h.fr.st.lock().unwrap().wait_notice_notify = "skipped".into();
+    put_waiting(h.sessions.path(), 5100, "T-丙", "sid-c", "permission prompt", T0);
+    tick_at(&mut h, T0 + W).await;
+    tick_at(&mut h, T0 + W + 600_000).await;
+    assert_eq!(h.fr.wait_notices().len(), 1, "查不到擁有者：再試也沒用");
+    assert!(h.core.log.has("notify=skipped"));
+}
+
+#[tokio::test]
 async fn session_檔沒有狀態欄位_名單標狀態不明_留紀錄_不當成沒有卡() {
     let mut h = rig(true).await;
     let v = json!({"pid": 5100, "sessionId": "sid-c", "cwd": "D:\\x", "kind": "interactive", "entrypoint": "cli", "name": "T-丙", "updatedAt": T0});

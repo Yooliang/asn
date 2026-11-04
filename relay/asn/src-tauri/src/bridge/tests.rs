@@ -54,6 +54,8 @@ struct FState {
     /// 夥伴卡在框上的通知（waiting_notice）收到的請求；wait_notice_status 不為 0 就回這個
     wait_notices: Vec<Value>,
     wait_notice_status: u16,
+    /// 假後台回的 notify（空字串＝sent）
+    wait_notice_notify: String,
     misroute_status: u16,
 }
 
@@ -184,7 +186,8 @@ fn handle_conn(mut c: std::net::TcpStream, st: Arc<Mutex<FState>>) {
         "waiting_notice" if s.wait_notice_status != 0 => (s.wait_notice_status, json!({"error": "boom"})),
         "waiting_notice" => {
             s.wait_notices.push(body);
-            (200, json!({"ok": true, "notify": "sent", "bell_topics": []}))
+            let notify = if s.wait_notice_notify.is_empty() { "sent".to_string() } else { s.wait_notice_notify.clone() };
+            (200, json!({"ok": true, "notify": notify, "bell_topics": []}))
         }
         "misroute_notice" => {
             s.misroute_notices.push(body);
