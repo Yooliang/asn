@@ -233,7 +233,7 @@ async fn 試送沒回應不是額度用完的證據_連續兩次沒回應就解�
 
 #[tokio::test]
 async fn 過了暫停時間才試送_第一次沒回應就解除() {
-    const TQ: u64 = T0 + 150 * 86_400_000;
+    const TQ: u64 = T0 + 151 * 86_400_000; // 逾時計數是全域的，各測試要用自己的時間區段
     let mut h = harness(&[("T-乙", "idle")]).await;
     h.fr.put(mail(1, json!({})));
     h.core.pull("test", TQ).await;
@@ -250,7 +250,7 @@ async fn 過了暫停時間才試送_第一次沒回應就解除() {
 
 #[tokio::test]
 async fn 中間收到真的額度事件_沒回應的計數歸零() {
-    const TQ: u64 = T0 + 150 * 86_400_000;
+    const TQ: u64 = T0 + 152 * 86_400_000;
     const RESETS_S: u64 = TQ / 1000 + 6 * 3600;
     let mut h = harness(&[("T-乙", "idle")]).await;
     h.fr.put(mail(1, json!({})));
