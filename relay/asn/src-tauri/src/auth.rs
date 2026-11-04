@@ -517,6 +517,9 @@ pub fn default_store(data_dir: &Path) -> Box<dyn TokenStore> {
 
 // ---------- 登入狀態 ----------
 
+/// 登入服務暫時失敗後，等這麼久才再試：畫面每 15 秒會查一次遠端更新，斷線時不該跟著每 15 秒打登入服務
+const RETRY_WAIT_MS: i64 = 60_000;
+
 /// 進行中的憑證輪替：背景工作回傳「用哪一把換的」和結果
 type RefreshTask = tokio::task::JoinHandle<(String, Result<Session, AuthFail>)>;
 
@@ -525,6 +528,9 @@ pub struct AuthState {
     mem: Mutex<Option<Session>>,
     /// 同時只換一次：後台會輪替更新憑證，同時換或換到一半放棄，舊憑證都會作廢
     refresh_task: tokio::sync::Mutex<Option<RefreshTask>>,
+    /// 暫時失敗後，這個時間（毫秒）之前不再打登入服務；0 表示沒有在等
+    retry_after_ms: std::sync::atomic::AtomicI64,
+    retry_wait_ms: i64,
     pub cancel: Arc<AtomicBool>,
     busy: AtomicBool,
     /// 因更新憑證被拒絕而清掉登入時呼叫（參數只有狀態碼與錯誤代碼）：正式版接到 ui.log，安裝版的 stderr 看不到
@@ -547,7 +553,7 @@ impl Drop for BusyGuard<'_> {
 
 impl AuthState {
     pub fn new(store: Box<dyn TokenStore>) -> Self {
-        Self { store: Arc::from(store), mem: Mutex::new(None), refresh_task: tokio::sync::Mutex::new(None), cancel: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false), on_signout: None }
+        Self { store: Arc::from(store), mem: Mutex::new(None), refresh_task: tokio::sync::Mutex::new(None), retry_after_ms: std::sync::atomic::AtomicI64::new(0), retry_wait_ms: if cfg!(test) { 0 } else { RETRY_WAIT_MS }, cancel: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false), on_signout: None }
     }
 
     /// 只給 `--shot` 測試用：假裝已登入（記憶體裡放一組假權杖，不寫存檔），讓端到端測試能走「已登入」的情境。
@@ -575,6 +581,7 @@ impl AuthState {
     }
 
     fn set_session(&self, s: Session) -> Result<(), String> {
+        self.retry_after_ms.store(0, Ordering::SeqCst);
         self.store.save(&StoredLogin { refresh_token: s.refresh_token.clone(), email: s.email.clone() })?;
         if let Ok(mut g) = self.mem.lock() {
             *g = Some(s);
@@ -602,6 +609,9 @@ impl AuthState {
             }
             if slot.is_none() {
                 let stored = self.store.load()?.ok_or("還沒有登入")?;
+                if (now_ms() as i64) < self.retry_after_ms.load(Ordering::SeqCst) {
+                    return Err("登入服務暫時連不上，稍後會自動再試".into());
+                }
                 *slot = Some(self.spawn_refresh(client, auth_base, anon, stored));
             }
             // 呼叫端逾時走掉時，手把留在 slot、背景工作繼續，下一個呼叫端接手結果
@@ -634,7 +644,10 @@ impl AuthState {
                         return Err("登入已過期，請重新登入".into());
                     }
                 }
-                Err(AuthFail::Transient(m)) => return Err(m),
+                Err(AuthFail::Transient(m)) => {
+                    self.retry_after_ms.store(now_ms() as i64 + self.retry_wait_ms, Ordering::SeqCst);
+                    return Err(m);
+                }
             }
         }
         Err("登入狀態剛變更，請再試一次".into())
@@ -1064,6 +1077,31 @@ mod tests {
         assert_eq!(t, "AT2");
         assert!(h2.join().unwrap().contains("\"refresh_token\":\"NEW\""));
         assert_eq!(a.store.load().unwrap().unwrap().refresh_token, "RT2");
+    }
+
+    #[tokio::test]
+    async fn 暫時失敗後_等待期間不打登入服務_過了才再試() {
+        let mut a = signed_in_with("RT");
+        a.retry_wait_ms = 60_000;
+        let (p, h) = fake_auth_server("503 Service Unavailable", "{}"); // 只收一個請求：再打就會等到逾時
+        let (c, base) = (reqwest::Client::new(), format!("http://127.0.0.1:{p}"));
+        assert!(a.access_token(&c, &base, "A").await.is_err());
+        h.join().unwrap();
+        let t0 = std::time::Instant::now();
+        let e = a.access_token(&c, &base, "A").await.unwrap_err();
+        assert!(e.contains("稍後會自動再試"), "{e}");
+        assert!(t0.elapsed() < Duration::from_secs(1), "等待期間不連線");
+        assert!(a.status().signed_in, "等待期間不登出");
+        a.retry_after_ms.store(1, Ordering::SeqCst); // 等待時間到
+        let (p2, h2) = fake_auth_server("200 OK", RENEWED);
+        assert_eq!(a.access_token(&c, &format!("http://127.0.0.1:{p2}"), "A").await.unwrap(), "AT2");
+        h2.join().unwrap();
+        assert_eq!(a.retry_after_ms.load(Ordering::SeqCst), 0, "成功後清掉");
+    }
+
+    #[test]
+    fn 正式版的等待時間大於畫面查詢間隔() {
+        assert!(RETRY_WAIT_MS > 15_000);
     }
 
     #[tokio::test]
