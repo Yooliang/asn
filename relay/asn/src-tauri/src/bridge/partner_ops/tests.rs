@@ -2413,3 +2413,25 @@ fn claude_的編號找不到紀錄_照舊一句() {
 }
 
 mod dup;
+
+
+/// #735：讀一次就判斷完。半份、空檔要算「正在寫」，不能算外掛沒了
+#[test]
+fn 讀狀態檔_半份和空檔算正在寫_沒檔和內容不對算沒有外掛() {
+    let r = rig(Opt::default());
+    let (sid, pid) = ("sid-220", 220);
+    assert!(matches!(r.ops.read_status(sid, pid), StatusRead::Gone), "沒檔案");
+    std::fs::create_dir_all(&r.status).unwrap();
+    let file = r.status.join(format!("{sid}.json"));
+    for torn in ["", "{", "{\"sessionId\":\"sid-220\",\"at\":"] {
+        std::fs::write(&file, torn).unwrap();
+        assert!(matches!(r.ops.read_status(sid, pid), StatusRead::Torn), "寫到一半：{torn:?}");
+    }
+    r.status_file(sid, json!({ "sessionId": "別人", "at": NOW, "state": "idle" }));
+    assert!(matches!(r.ops.read_status(sid, pid), StatusRead::Gone), "不是這個視窗的");
+    r.status_file(sid, json!({ "sessionId": sid, "state": "idle" }));
+    assert!(matches!(r.ops.read_status(sid, pid), StatusRead::Gone), "沒有時間");
+    r.status_file(sid, json!({ "sessionId": sid, "at": NOW, "state": "idle" }));
+    assert!(matches!(r.ops.read_status(sid, pid), StatusRead::Live(_)), "完整的");
+    assert!(matches!(r.ops.read_status("../壞", pid), StatusRead::Gone), "視窗編號不合法");
+}
