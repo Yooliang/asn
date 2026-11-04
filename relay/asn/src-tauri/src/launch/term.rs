@@ -2097,45 +2097,82 @@ fn sibling_label(line: &str, indent: usize, label_col: usize, gt_style: bool) ->
     }
 }
 
-/// 信任提問優先。選單要恰好一個游標、連續至少兩項、縮排一致才算；對不上就不猜。
-/// 兩個以上游標，或項目符號清單拼不齊，是 unknown_prompt（options 空的）。
-fn classify_prompt(text: &str) -> Option<ScreenPrompt> {
-    if text.contains(GROK_TRUST_MARK) {
-        let raw = text.lines().filter(|l| l.contains(GROK_TRUST_MARK)).map(clean_text).filter(|l| !l.is_empty()).collect::<Vec<_>>().join("\n");
-        return Some(ScreenPrompt {
-            kind: "trust_dialog",
-            text: cap_head(&raw, PROMPT_TEXT_CHARS),
-            options: vec![
-                TermOption { n: 1, label: "Yes, proceed".into() },
-                TermOption { n: 2, label: "No, quit".into() },
-            ],
-            cursor: 0,
-        });
+/// 提問下方最多容許幾行非空白（頁尾、分隔線、版本標題）。一般閒置畫面的輸入框與狀態列比這多，畫面內容長得像提問也不算
+const PROMPT_TAIL_LINES: usize = 3;
+
+fn nonblank_after(lines: &[&str], idx: usize) -> usize {
+    lines[idx + 1..].iter().filter(|l| !l.trim().is_empty()).count()
+}
+
+/// idx 這一行所在的連續非空白區塊（起, 迄）
+fn block_around(lines: &[&str], idx: usize) -> (usize, usize) {
+    let mut start = idx;
+    while start > 0 && !lines[start - 1].trim().is_empty() {
+        start -= 1;
     }
+    let mut end = idx;
+    while end + 1 < lines.len() && !lines[end + 1].trim().is_empty() {
+        end += 1;
+    }
+    (start, end)
+}
+
+/// 畫面內容（模型回覆、工具輸出）可能長得像提問，所以只看畫面最底下：下方還有輸入框，或下方內容太多，就不是提問
+fn at_bottom(lines: &[&str], idx: usize) -> bool {
+    !lines[idx + 1..].iter().any(|l| l.contains(GROK_INPUT_MARK)) && nonblank_after(lines, idx) <= PROMPT_TAIL_LINES
+}
+
+/// 信任提問優先，而且要在畫面底部、由提問句開頭。選單要恰好一個游標、連續至少兩項、縮排一致才算；對不上就不猜。
+/// 底部區塊有兩個以上游標，或項目符號清單拼不齊，是 unknown_prompt（options 空的）。
+fn classify_prompt(text: &str) -> Option<ScreenPrompt> {
     let lines: Vec<&str> = text.lines().collect();
-    let selected: Vec<usize> = lines
-        .iter()
-        .enumerate()
-        .filter_map(|(i, l)| match split_marker(l) {
-            Some((_, m, _, _)) if is_selected_marker(m) => Some(i),
-            _ => None,
-        })
-        .collect();
-    if selected.len() == 1 {
-        if let Some(menu) = parse_menu_block(&lines, selected[0]) {
-            return Some(menu);
+    // grok 的信任提問下方還留著輸入框與版本標題，所以這裡只看行數，不看輸入框
+    if let Some(i) = lines.iter().rposition(|l| l.trim_start().starts_with(GROK_TRUST_MARK)) {
+        if nonblank_after(&lines, i) <= PROMPT_TAIL_LINES {
+            return Some(ScreenPrompt {
+                kind: "trust_dialog",
+                text: cap_head(&clean_text(lines[i]), PROMPT_TEXT_CHARS),
+                options: vec![
+                    TermOption { n: 1, label: "Yes, proceed".into() },
+                    TermOption { n: 2, label: "No, quit".into() },
+                ],
+                cursor: 0,
+            });
         }
     }
-    let bullet_rows = lines.iter().filter(|l| split_marker(l).is_some_and(|(_, m, _, _)| m != '>')).count();
-    if selected.len() >= 2 || (bullet_rows >= 2 && selected.len() != 1) {
-        let start = lines.len().saturating_sub(PROMPT_TEXT_LINES);
-        let body = lines[start..].iter().map(|l| clean_text(l)).filter(|l| !l.is_empty()).collect::<Vec<_>>().join("\n");
-        return Some(ScreenPrompt {
-            kind: "unknown_prompt",
-            text: cap_tail(&body, PROMPT_TEXT_CHARS),
-            options: Vec::new(),
-            cursor: 0,
-        });
+    let last_cursor = lines.iter().rposition(|l| matches!(split_marker(l), Some((_, m, _, _)) if is_selected_marker(m)));
+    if let Some(i) = last_cursor {
+        if lines[i + 1..].iter().any(|l| l.contains(GROK_INPUT_MARK)) {
+            return None;
+        }
+        let (start, end) = block_around(&lines, i);
+        let cursors = lines[start..=end].iter().filter(|l| matches!(split_marker(l), Some((_, m, _, _)) if is_selected_marker(m))).count();
+        if cursors == 1 {
+            // 同一個區塊底下的行（含折行的選項）不算；區塊下方太多就是畫面內容
+            if nonblank_after(&lines, end) > PROMPT_TAIL_LINES {
+                return None;
+            }
+            if let Some(menu) = parse_menu_block(&lines, i) {
+                return Some(menu);
+            }
+        }
+    }
+    let last_bullet = lines.iter().rposition(|l| split_marker(l).is_some());
+    if let Some(i) = last_bullet.filter(|i| at_bottom(&lines, *i)) {
+        let (start, end) = block_around(&lines, i);
+        let block = &lines[start..=end];
+        let cursors = block.iter().filter(|l| matches!(split_marker(l), Some((_, m, _, _)) if is_selected_marker(m))).count();
+        let bullets = block.iter().filter(|l| split_marker(l).is_some_and(|(_, m, _, _)| m != '>')).count();
+        if cursors >= 2 || (bullets >= 2 && cursors != 1) {
+            let from = lines.len().saturating_sub(PROMPT_TEXT_LINES);
+            let body = lines[from..].iter().map(|l| clean_text(l)).filter(|l| !l.is_empty()).collect::<Vec<_>>().join("\n");
+            return Some(ScreenPrompt {
+                kind: "unknown_prompt",
+                text: cap_tail(&body, PROMPT_TEXT_CHARS),
+                options: Vec::new(),
+                cursor: 0,
+            });
+        }
     }
     None
 }
@@ -3727,6 +3764,40 @@ mod tests {
         }
         let long = vec![AnswerKey::Down; MAX_ANSWER_KEYS + 1];
         assert!(encode_keys(&long).unwrap_err().contains("太長"));
+    }
+
+    /// grok 的閒置底部（輸入框＋版本標題）
+    fn grok_idle_tail() -> String {
+        format!("{}\nGrok Build  1.0.70\n", real_empty_input_line())
+    }
+
+    #[test]
+    fn 畫面內容長得像提問_底下還有輸入框或狀態列_不算提問() {
+        let tail = include_str!("../../tests/fixtures/term-screens/pi-idle.txt");
+        for body in [
+            "回覆：\n > Yes\n   No\n",
+            "回覆：\n > Yes\n   No\n\n > Allow\n   Deny\n",
+            "回覆：\n ● 第一點\n ○ 第二點\n",
+            "紀錄：Do you trust the contents of this directory? (Yes, proceed y / No, quit n)\n",
+        ] {
+            let grok = format!("{body}\n{}", grok_idle_tail());
+            assert!(classify_prompt_for("grok", &grok).is_none(), "grok：{body}");
+            let pi = format!("{body}\n{tail}");
+            assert!(classify_prompt_for("pi", &pi).is_none(), "pi：{body}");
+        }
+        // 信任句在回覆裡，下面還有很多行
+        let long = format!("Do you trust the contents of this directory\n一\n二\n三\n四\n{}", grok_idle_tail());
+        assert!(classify_prompt_for("grok", &long).is_none());
+    }
+
+    #[test]
+    fn 真的提問在底部_上方有長得像選單的舊內容也認得() {
+        let real = format!("舊回覆：\n > Allow\n   Deny\n\n Pick one\n > Yes\n   No\n\n enter select\n");
+        let p = classify_prompt_for("grok", &real).unwrap();
+        assert_eq!((p.kind, p.options.len(), p.cursor), ("menu", 2, 1));
+        assert_eq!(p.options[0].label, "Yes");
+        let pi = classify_prompt_for("pi", include_str!("../../tests/fixtures/term-screens/pi-trust-folder.txt")).expect("真實畫面");
+        assert_eq!(pi.kind, "menu");
     }
 
     #[test]
