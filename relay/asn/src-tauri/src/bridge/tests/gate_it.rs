@@ -20,6 +20,44 @@ fn notice_to_sender(h: &H) -> Vec<String> {
     h.fr.sent().iter().filter_map(|s| s["body"].as_str()).filter(|b| b.contains("可能已被讀取")).map(String::from).collect()
 }
 
+fn held_line(recipient: &str) -> WorkerLine {
+    WorkerLine::Line(json!({"type":"system","subtype":"informational","level":"warning","content":format!("Cross-session message held by the receiving session (recipient: @{recipient}). Claude in that session hasn't seen it.")}).to_string())
+}
+
+fn held_notices(h: &H) -> Vec<String> {
+    h.fr.sent().iter().filter_map(|s| s["body"].as_str()).filter(|b| b.contains("可能卡在")).map(String::from).collect()
+}
+
+#[tokio::test]
+async fn 對方視窗扣住信_寄件人收到一次_不重送不撤回_別的收件人和太舊的不算() {
+    let mut h = harness(&[("T-乙", "idle"), ("T-丙", "idle")]).await;
+    h.fr.put(mail(1, json!({"to_agent": "T-乙"})));
+    h.core.pull("test", T0).await;
+    send_to(&mut h.core, &uid(1), "T-乙", "toolu_1", T0 + 1).await;
+    let said_before = h.said().len();
+    // 別的收件人：對不上，不通知
+    h.core.on_worker_line(held_line("T-丙"), T0 + 2).await;
+    assert!(held_notices(&h).is_empty());
+    // 對得上：通知一次，只有固定文字和編號，寄給寄件人
+    h.core.on_worker_line(held_line("T-乙"), T0 + 3).await;
+    h.core.on_worker_line(held_line("T-乙"), T0 + 4).await;
+    let n = held_notices(&h);
+    assert_eq!(n.len(), 1, "每封一次：{n:?}");
+    assert!(n[0].contains("T-乙") && !n[0].contains(&uid(1)) && !n[0].contains("內文-1"), "通知不放編號和內文：{}", n[0]);
+    assert_eq!(h.said().len(), said_before, "不重送");
+    // 超過時間窗：不對回舊信
+    h.fr.put(mail(2, json!({"to_agent": "T-丙"})));
+    h.core.pull("test", T0 + 10).await;
+    send_to(&mut h.core, &uid(2), "T-丙", "toolu_2", T0 + 11).await;
+    h.core.on_worker_line(held_line("T-丙"), T0 + 11 + 301_000).await;
+    assert_eq!(held_notices(&h).len(), 1, "太舊的不算");
+    // 後來被拒絕：再通知一次；對方不收也會通知
+    h.core.on_worker_line(WorkerLine::Line(json!({"type":"system","subtype":"informational","content":"Cross-session message denied (recipient: @T-乙). The recipient's user declined it; it was not delivered."}).to_string()), T0 + 20).await;
+    assert!(h.fr.sent().iter().filter_map(|s| s["body"].as_str()).any(|b| b.contains("可能被對方視窗的使用者拒絕")));
+    h.core.on_worker_line(WorkerLine::Line(json!({"type":"system","subtype":"informational","content":"Cross-session message refused (recipient: @T-乙). That session is not accepting cross-session messages; it was not delivered."}).to_string()), T0 + 21).await;
+    assert!(h.fr.sent().iter().filter_map(|s| s["body"].as_str()).any(|b| b.contains("不接受其他視窗的信")));
+}
+
 #[tokio::test]
 async fn 橋送出前先記下編號與目標_hook_讀同一份判斷_相符放行_不符擋下_結束後拿掉() {
     let mut h = harness(&[("T-乙", "idle"), ("T-丙", "idle")]).await;
