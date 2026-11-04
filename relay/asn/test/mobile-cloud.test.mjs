@@ -117,7 +117,7 @@ test('金鑰還在畫面上時離開（含系統返回鍵）：先問一次；�
   assert.match(CLOUD_LEAVE_TEXT.lead, /不能重發/)
   const js = read('ui/m.js'), html = read('ui/m.html')
   assert.match(js, /needs: next => !!cloudSt\.created \|\|/, '離開詢問對金鑰也成立')
-  assert.match(js, /keyBackGuard = \(\) => \{[\s\S]*?!cloudSt\.created[\s\S]*?leave\.ask\(null, \(\) => \{ void cloud\.leave\(\); history\.back\(\) \}\)/, '返回鍵先取消、問、選離開才丟金鑰再返回')
+  assert.match(js, /keyBackGuard = \(\) => \{[\s\S]*?!cloudSt\.created[\s\S]*?leave\.ask\(null, \(\) => \{ cloud\.confirmLeave\(\); void cloud\.leave\(\); history\.back\(\) \}\)/, '返回鍵先取消、問、選離開才丟金鑰再返回')
   assert.ok(js.includes("window.addEventListener('popstate', e => {\n  if (keyBackGuard()) return"), '返回鍵一進來就先問')
   assert.match(html, /leaveText\.lead/)
 })
@@ -143,9 +143,13 @@ test('按「完成」時清不掉剪貼簿：回到清單也看得到提示', as
 
 test('離開這一頁時清不掉剪貼簿：提示留在清除之後（不被離開時的清空蓋掉）', async () => {
   const m = makeFailing(); await withKey(m)
+  m.ui.confirmLeave()
   await m.ui.leave()
   assert.equal(m.s.created, null)
   assert.equal(m.s.msg, CLOUD_TEXT.clipFail)
+  const k = makeFailing(); await withKey(k)
+  await k.ui.leave()   // 沒經過確認又清不掉：兩句都講
+  assert.equal(k.s.msg, CLOUD_TEXT.keyDropped + CLOUD_TEXT.clipFail)
 })
 
 test('金鑰還在畫面、頁面保留時間到了才丟：明講丟了；沒有金鑰就不講', async () => {
@@ -159,6 +163,18 @@ test('金鑰還在畫面、頁面保留時間到了才丟：明講丟了；沒�
   n.ui.markExpired()   // 沒有金鑰：標記不成立
   await n.ui.leave()
   assert.equal(n.s.msg, '')
+})
+
+test('沒經過確認就丟掉金鑰（任何沒先問的離開路徑）：一律明講；本人按了離開就不再提示', async () => {
+  const m = makeFailing(); m.fixIt(); await withKey(m)
+  await m.ui.leave()   // 例如其他路徑直接切走
+  assert.equal(m.s.msg, CLOUD_TEXT.keyDropped)
+  const n = makeFailing(); n.fixIt(); await withKey(n)
+  n.ui.confirmLeave()   // 本人在「要離開嗎」按了離開
+  await n.ui.leave()
+  assert.equal(n.s.msg, '')
+  assert.match(read('ui/m.js'), /askBeforeLeave = \(next, run\) => \{ leave\.ask\(next, \(\) => \{ cloud\.confirmLeave\(\); run\(\) \}\) \}/)
+  assert.match(read('ui/m.js'), /const openLaunch = node => askBeforeLeave\(launchPage\(\)/, '開新夥伴也先問')
 })
 
 test('頁面保留時間：預設 3 分鐘；金鑰還在畫面上給 30 分鐘，超過才過期', () => {

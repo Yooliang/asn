@@ -39,6 +39,7 @@ export const CLOUD_TEXT = {
   clipNote: '複製金鑰後 60 秒會嘗試自動清掉剪貼簿（不保證清得掉）：貼完請回到這裡，才清得掉；清掉的是剪貼簿裡當時的內容，中間複製了別的也會被清。',
   clipCleared: '已清掉剪貼簿。',
   keyExpired: '金鑰已超過時間丟棄，請撤銷後重新邀請。',
+  keyDropped: '離開了這一頁，金鑰已丟棄。還沒貼給代理的話，請撤銷後重新邀請。',
   clipFail: '沒能清掉剪貼簿，金鑰可能還在裡面。請複製別的內容蓋掉。',
   empty: '還沒有邀請過雲端代理。',
   revoke: '撤銷', revokeSure: '確認撤銷',
@@ -81,6 +82,7 @@ export function createMobileCloud({ api, status, clip, now = () => Date.now(), t
   })
   let clearTimerId = null, copiedAt = 0, copiedKeyText = ''
   let loadMsg = ''   // 最近一次讀取失敗留在畫面上的提示（輪詢成功後要消掉，不能一直掛著）
+  let confirmedNext = false   // 下一次 leave 是本人在「要離開嗎」按了離開
   let expireNext = false   // 下一次 leave 是因為保留時間到了（要明講金鑰丟了）
   let epoch = 0   // 離開這一頁就加一：建立途中離開，回來的金鑰不保留（見 create）
 
@@ -150,17 +152,22 @@ export function createMobileCloud({ api, status, clip, now = () => Date.now(), t
     if (copiedKeyText) s.msg = CLOUD_TEXT.clipFail   // 這時已離開金鑰畫面：清不掉的提示改放在清單頁
   }
   const markExpired = () => { if (s.created) expireNext = true }
+  const confirmLeave = () => { if (s.created) confirmedNext = true }
   // 離開這一頁：金鑰、表單全丟，剪貼簿也清
   async function leave() {
     epoch++
     const hadKey = !!s.created
     s.created = null; s.reveal = false; s.copiedKey = false; s.copiedInvite = false; s.stage = 'list'
     s.confirmId = ''; s.msg = ''; s.approveForm = false; s.code = ''; s.hostName = ''; s.hostId = ''; s.approved = ''
-    const expired = expireNext; expireNext = false
+    const expired = expireNext, confirmed = confirmedNext
+    expireNext = false; confirmedNext = false
     await clearClipboard()
     // 清除之後才寫提示（上面清掉了舊提示）：保留時間到了＝明講金鑰丟了；清不掉＝提醒用別的內容蓋掉
-    if (expired && hadKey) s.msg = CLOUD_TEXT.keyExpired
-    else if (copiedKeyText) s.msg = CLOUD_TEXT.clipFail
+    const parts = []
+    if (expired && hadKey) parts.push(CLOUD_TEXT.keyExpired)
+    else if (hadKey && !confirmed) parts.push(CLOUD_TEXT.keyDropped)   // 沒經過確認就丟掉的金鑰（任何沒有先問的離開路徑）一律明講
+    if (copiedKeyText) parts.push(CLOUD_TEXT.clipFail)
+    if (parts.length) s.msg = parts.join('')
   }
 
   async function revoke(id) {
@@ -191,5 +198,5 @@ export function createMobileCloud({ api, status, clip, now = () => Date.now(), t
   const cancelApprove = () => { s.approveForm = false }
 
   const justJoined = () => !!s.created && joined(s.rows, s.created.id)
-  return { state: s, markExpired, load, openForm, cancelForm, create, copyKey, copyInvite, onVisible, done, leave, revoke, approve, openApprove, cancelApprove, justJoined, clearClipboard }
+  return { state: s, markExpired, confirmLeave, load, openForm, cancelForm, create, copyKey, copyInvite, onVisible, done, leave, revoke, approve, openApprove, cancelApprove, justJoined, clearClipboard }
 }

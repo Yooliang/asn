@@ -470,7 +470,7 @@ const app = createApp({
     // 選離開：先收起浮層，等浮層的記錄退掉（nav.sheet 變回空）才換；選留下就不動。單純切到前三頁不問（內容會保留 3 分鐘）
     const leaveSt = reactive({ ask: null })
     const leave = createLeaveAsk({ nav, st: leaveSt, go, back: () => history.back(), needs: next => !!cloudSt.created || needsLeaveAsk(fourthSt.fourth, next, { draft: lchStep2.value }) })
-    const askBeforeLeave = (next, run) => { leave.ask(next, run) }
+    const askBeforeLeave = (next, run) => { leave.ask(next, () => { cloud.confirmLeave(); run() }) }   // 本人按了離開：丟掉金鑰不再另外提示
     const answerLeave = ok => leave.answer(ok)
     const leaveAsk = computed(() => leaveSt.ask)
     const leaveText = computed(() => (cloudSt.created ? CLOUD_LEAVE_TEXT : LEAVE_ASK_TEXT))   // 雲端代理的金鑰還在畫面上時問的是另一句
@@ -478,7 +478,7 @@ const app = createApp({
     keyBackGuard = () => {
       if (!cloudSt.created || nav.sheet || fourthNav.busy()) return false
       history.pushState(fourthNav.state(), '')
-      leave.ask(null, () => { void cloud.leave(); history.back() })
+      leave.ask(null, () => { cloud.confirmLeave(); void cloud.leave(); history.back() })
       return true
     }
     watch(() => nav.sheet, s => leave.onSheet(s))
@@ -517,7 +517,8 @@ const app = createApp({
     }
     // 開新夥伴在第四頁籤：第 1 步選電腦、第 2 步（多一層，返回鍵回第 1 步）選模型與資料夾、名字、第一句話。
     // 畫面收起（關閉或 3 分鐘到了）不影響背景的開窗：lch 留在這裡，trackLaunch 照常追蹤，開好時跳橫幅
-    function openLaunch(node) {
+    const openLaunch = node => askBeforeLeave(launchPage(), () => openLaunchNow(node))   // 金鑰還在畫面上時先問
+    function openLaunchNow(node) {
       const isLaunch = fourthPage.value?.kind === 'launch'
       // 還在開：回到進度畫面；第四頁籤上的開新夥伴還在填：切過去接著填（都不重來）
       if (launchInProgress(lch) || (isLaunch && lch.phase === 'form')) { if (isLaunch) goTab(PAGE_TAB); else fourthNav.openPage(launchPage()); return }
