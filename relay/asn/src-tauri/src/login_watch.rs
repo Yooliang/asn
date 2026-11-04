@@ -405,9 +405,30 @@ fn worker_events(times: Vec<i64>) -> Vec<Ev> {
     times.into_iter().map(|ts| Ev { kind: Kind::WorkerAuth, ts }).collect()
 }
 
+/// worker 恢復工作的時間 → 判定用的事件（等同一筆真的模型回覆）
+fn worker_reply_events(times: Vec<i64>) -> Vec<Ev> {
+    times.into_iter().map(|ts| Ev { kind: Kind::Reply, ts }).collect()
+}
+
 static STATE: Mutex<Option<Monitor>> = Mutex::new(None);
 /// 橋的收發室 worker 報告它的 Claude 登入失效時記一筆（只有時間，沒有內容）；下一次 [`tick_real`] 併進判定，和對話紀錄裡的登入錯誤同等看待
 static WORKER_ERRORS: Mutex<Vec<i64>> = Mutex::new(Vec::new());
+/// 橋的收發室 worker 登入失效之後，試送成功（worker 真的在工作）時記一筆：下一次 [`tick_real`] 當作一筆真的模型回覆，解除失效狀態
+static WORKER_REPLIES: Mutex<Vec<i64>> = Mutex::new(Vec::new());
+pub fn record_worker_recovered(now_ms: i64) {
+    let mut v = WORKER_REPLIES.lock().unwrap_or_else(|e| e.into_inner());
+    v.push(now_ms);
+    // 不依呼叫端傳來的時間清舊的（測試的假時間會互相清掉）：只限筆數；太舊的由判定那邊的回看範圍忽略
+    if v.len() > 20 {
+        let extra = v.len() - 20;
+        v.drain(..extra);
+    }
+}
+/// （給測試看）這個時間之後記了幾筆還沒被判定拿走的恢復
+#[cfg(test)]
+pub fn worker_recoveries_since(since_ms: i64) -> usize {
+    WORKER_REPLIES.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|&&t| t >= since_ms).count()
+}
 /// Claude 登入檔（任一個真實設定資料夾）的修改時間比 `since_ms` 新＝這之後重新登入過（只看修改時間，不讀內容）
 pub fn credentials_updated_since(since_ms: u64) -> bool {
     crate::usage::real_roots().iter().any(|r| std::fs::metadata(r.join(CRED_FILE)).ok().is_some_and(|m| crate::usage::mtime_ms(&m) > since_ms as i64))
@@ -433,6 +454,7 @@ pub fn tick_real(now_ms: i64, ctx: &NoticeCtx, notifier: &dyn OwnerNotifier) -> 
     let mut g = STATE.lock().unwrap_or_else(|e| e.into_inner());
     let m = g.get_or_insert_with(Default::default);
     m.injected = worker_events(std::mem::take(&mut *WORKER_ERRORS.lock().unwrap_or_else(|e| e.into_inner())));
+    m.injected.extend(worker_reply_events(std::mem::take(&mut *WORKER_REPLIES.lock().unwrap_or_else(|e| e.into_inner()))));
     m.tick(&crate::usage::real_roots(), now_ms, ctx, &|since| FORWARD_TIMEOUTS.count_since(since), notifier, |s| elog!("{s}"))
 }
 
@@ -723,6 +745,24 @@ mod tests {
         m.injected = vec![Ev { kind: Kind::WorkerAuth, ts: now }];
         m.tick(&roots, now + MIN, &ctx(), &|_| 0, &cap, |_| {});
         assert_eq!(cap.0.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn worker_恢復工作當一筆真回覆_失效狀態解除_之後不再提醒() {
+        let d = tempfile::tempdir().unwrap();
+        let now = now_ms();
+        let roots = vec![d.path().to_path_buf()];
+        let cap = Capture(Mutex::new(vec![]));
+        let mut m = Monitor::default();
+        m.injected = vec![Ev { kind: Kind::WorkerAuth, ts: now - 20 * MIN }];
+        assert!(m.tick(&roots, now - 19 * MIN, &ctx(), &|_| 0, &cap, |_| {}), "worker 回報登入失效");
+        assert_eq!(cap.0.lock().unwrap().len(), 1);
+        // 一時失敗：試送成功＝worker 真的在工作，不用等登入檔更新或 12 小時
+        m.injected = worker_reply_events(vec![now - 10 * MIN]);
+        assert!(!m.tick(&roots, now - 9 * MIN, &ctx(), &|_| 0, &cap, |_| {}), "恢復後不再算失效");
+        // 安靜的機器：很久以後也不會再提醒（原本每 6 小時一次）
+        assert!(!m.tick(&roots, now + 7 * 3_600_000, &ctx(), &|_| 0, &cap, |_| {}));
+        assert_eq!(cap.0.lock().unwrap().len(), 1, "沒有再提醒");
     }
 
     #[test]

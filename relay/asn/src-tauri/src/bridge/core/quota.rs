@@ -53,6 +53,11 @@ impl Core {
         if self.quota_until == 0 {
             return;
         }
+        // 登入失效的扣住：worker 真的在工作了（不是「沒東西等」或試送沒回應），告訴登入失效偵測它好了，失效狀態才會解除（不然一時失敗會一直標失效、每 6 小時再提醒）
+        #[cfg(feature = "gui")]
+        if self.hold_auth && matches!(why, "worker reported sent" | "worker reported fail" | "worker reported misrouted" | "worker replied") {
+            crate::login_watch::record_worker_recovered(self.now as i64);
+        }
         self.quota_until = 0;
         self.probe_id = None;
         self.probe_misses = 0;

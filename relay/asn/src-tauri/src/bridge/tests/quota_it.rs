@@ -817,6 +817,7 @@ async fn 登入失效_每小時試送_又失效就繼續留著_好了就依原�
     assert_eq!(h.said().len(), 3);
     worker_ok(&mut h.core, &uid(1), probe2 + 1000).await;
     assert_eq!(h.core.inbox_hold_until(), None, "恢復");
+    assert!(crate::login_watch::worker_recoveries_since(TQ as i64) >= 1, "試送成功：告訴登入失效偵測 worker 好了（失效狀態才會解除）");
     h.core.tick(probe2 + 5000).await;
     let ids = |h: &H| -> Vec<String> { h.said().iter().filter_map(|t| t.split("id=").nth(1).map(|x| x.split(' ').next().unwrap_or("").to_string())).collect() };
     assert_eq!(ids(&h).last().cloned(), Some(uid(2)), "第二封先送");
