@@ -299,3 +299,48 @@ fn 指令寫法_裸名_cmd_ps1_exe_不存在() {
     }
 }
 
+/// 數量與記憶體（不花額度，夥伴是小程式）：開 ASN_15Q_N 個留著等外面量。ASN_15Q_CLAUDE_MODE=window｜mux；
+/// ASN_15Q_HIDDEN=1 走背景開（經 WinTermHost，跟正式開窗同一條路）。ASN_15Q_FLAGS 寫 `opened`（每行 編號 程序），外面寫 `done` 才收尾
+#[test]
+#[ignore]
+fn 多個夥伴_留給外面量() {
+    let (Ok(mode), Some(flags)) = (std::env::var("ASN_15Q_CLAUDE_MODE"), std::env::var_os("ASN_15Q_FLAGS")) else { return };
+    let flags = PathBuf::from(flags);
+    let n: usize = std::env::var("ASN_15Q_N").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
+    let hidden = std::env::var("ASN_15Q_HIDDEN").as_deref() == Ok("1");
+    let rig = Rig::new();
+    let mut s = rig.svc();
+    s.set_use_mux(mode == "mux");
+    let cwd = rig.tmp.path().to_path_buf();
+    let mut opened: Vec<(String, u32)> = vec![];
+    let t = Instant::now();
+    for i in 0..n {
+        let before: Vec<String> = rows(&s);
+        let script = format!("while($true){{[IO.File]::AppendAllText('{}','x');Start-Sleep -Milliseconds 500}}", rig.hb(i).display());
+        let args = vec!["-NoProfile".to_string(), "-Command".to_string(), script];
+        let env: BTreeMap<String, String> = crate::launch::win_term::term_env(crate::launch::config::child_env(), &[]);
+        let spec = crate::launch::win_term::spec_for(&format!("量測{i}"), "powershell.exe", &args, hidden, env);
+        let pid = crate::launch::win_term::WinTermHost::open_window(&s, &cwd, &spec).unwrap_or_else(|e| panic!("開第 {i} 個失敗：{e:?}"));
+        let id = rows(&s).into_iter().find(|r| !before.contains(r)).expect("多一列");
+        opened.push((id, pid));
+    }
+    elog!("RESULT 開 {n} 個花了 {:?}", t.elapsed());
+    std::fs::write(flags.join("opened"), opened.iter().map(|(a, b)| format!("{a} {b}")).collect::<Vec<_>>().join("\n")).unwrap();
+    let t = Instant::now();
+    while !flags.join("done").exists() && t.elapsed() < Duration::from_secs(300) {
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    let alive = (0..n).filter(|i| rig.beating(*i)).count();
+    elog!("RESULT 收尾前心跳還在跑：{alive}/{n}");
+    let t = Instant::now();
+    for (id, pid) in &opened {
+        if mode == "mux" {
+            let _ = s.stop_partner(id);
+        } else {
+            let _ = s.stop_gui(*pid);
+        }
+    }
+    elog!("RESULT 全關花了 {:?}", t.elapsed());
+    let _ = std::fs::write(flags.join("stopped"), "1");
+}
+
