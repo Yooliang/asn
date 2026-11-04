@@ -1,8 +1,9 @@
 //! `asn forward-gate --dir <worker 資料夾>`：收發室 worker 的 PreToolUse hook（只掛在 SendMessage 上）。
 //! 從標準輸入讀 Claude Code 給 hook 的 JSON，核對這次轉交的收件人是不是橋當初指定的那個（見 bridge/forward_gate.rs）。
 //! 符合：什麼都不印、結束碼 0（放行）；不符：印出 permissionDecision=deny 的 JSON、結束碼 0。
+//! 這封走原文替換（橋存了內文檔）：核對內文雜湊、寫下已套用紀錄後，印出 permissionDecision=allow 加 updatedInput（訊息換成橋存的原文），結束碼 0。
 //! 每次都在 worker 資料夾的 forward-gate.log 記一行放行或擋下（編號與理由，不記信件內文）。
-//! 這支程式自己執行不了時（找不到、當掉）Claude Code 會放行，由橋收到 SENT 時的比對兜底。
+//! 這支程式自己執行不了時（找不到、當掉）Claude Code 會放行：一般轉交由橋收到 SENT 時的比對兜底；原文替換的那封，橋收到 SENT 還要有這裡寫的已套用紀錄，沒有就不算送出、重送。
 use super::env::Env;
 use super::{Fail, Io, R};
 use std::io::Read;
