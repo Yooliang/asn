@@ -473,6 +473,18 @@ mod tests {
     }
 
     #[test]
+    fn 使用者結束_留記號在機器資料夾_資料夾是空的_截圖模式_不亂寫() {
+        let d = tempfile::tempdir().unwrap();
+        note_user_quit(d.path());
+        assert!(d.path().join(QUIT_MARK).exists());
+        // 空路徑：不能在目前所在的資料夾留下記號
+        let here = std::env::current_dir().unwrap().join(QUIT_MARK);
+        let existed = here.exists();
+        note_user_quit(Path::new(""));
+        assert_eq!(here.exists(), existed, "空資料夾不該寫出檔案");
+    }
+
+    #[test]
     fn 守門_自動接回開窗前併入本機同意過的資料夾() {
         let me = include_str!("auto_resume.rs").split("#[cfg(test)]").next().unwrap();
         assert!(me.contains("super::cwds::allow_consented(&mut config, &e.facts.cwd, &self.data_dir)"));
