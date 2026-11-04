@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
 const F = '20261104140000_waiting_notice.sql'
-const SIG = 'asn_relay_waiting_notice(text, text, text, text)'
+const SIG = 'asn_relay_waiting_notice(text, text, text, text, text)'
 const rd = s => s.replace(/\r+\n/g, '\n')
 const mig = rd(fs.readFileSync(new URL(`../supabase/migrations/${F}`, import.meta.url), 'utf8'))
 const down = rd(fs.readFileSync(new URL(`../supabase/sql/rollback/${F.replace('.sql', '_down.sql')}`, import.meta.url), 'utf8'))
@@ -50,7 +50,7 @@ async function setup() {
   await db.exec(mig)
   return db
 }
-const notice = async (db, node, kind = 'permission', detail = null, win = '小乙') => (await db.query('select public.asn_relay_waiting_notice($1, $2, $3, $4) r', [node, win, kind, detail])).rows[0].r
+const notice = async (db, node, kind = 'permission', detail = null, win = '小乙', tool = null) => (await db.query('select public.asn_relay_waiting_notice($1, $2, $3, $4, $5) r', [node, win, kind, detail, tool])).rows[0].r
 const msgs = async (db, node) => (await db.query('select from_agent, to_node, body, expects_reply from relay.messages where from_node = $1', [node])).rows
 
 test('實跑（pglite）：內文有設備、視窗、種類；權限框不寫內容；選擇框寫問題；reply=no', { skip }, async () => {
@@ -62,6 +62,12 @@ test('實跑（pglite）：內文有設備、視窗、種類；權限框不寫�
   assert.equal(m[0].expects_reply, false)
   assert.ok(m[0].from_agent.endsWith('收發室'))
   assert.equal(m[0].body, '這台（家用機）的夥伴「小乙」在等你確認（權限），已經等超過 2 分鐘。')
+  await db.exec(`delete from relay.messages`)
+  await notice(db, 'H', 'permission', null, '小乙', 'Bash')
+  assert.equal((await msgs(db, 'H'))[0].body, '這台（家用機）的夥伴「小乙」在等你確認（權限：Bash），已經等超過 2 分鐘。')
+  await db.exec(`delete from relay.messages`)
+  await notice(db, 'H', 'permission', null, '小乙', 'rm -rf /')
+  assert.equal((await msgs(db, 'H'))[0].body, '這台（家用機）的夥伴「小乙」在等你確認（權限），已經等超過 2 分鐘。', '不合格的工具名不寫')
   await notice(db, 'P', 'input', '問題：要選哪一個？；選項：甲、乙')
   assert.equal((await msgs(db, 'P'))[0].body, '這台（手機）的夥伴「小乙」在等你回答，已經等超過 2 分鐘。\n問題：要選哪一個？；選項：甲、乙')
   assert.equal((await msgs(db, 'P'))[0].to_node, 'u:000b', '別的節點的擁有者是另一個人')

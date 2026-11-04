@@ -26,7 +26,9 @@ impl Core {
             let kind = kind_of(w.waiting_for.as_deref());
             // 選擇框才帶問題和選項（外掛有回報時）；權限框不帶任何指令內容
             let detail = if kind == "input" { w.session_id.as_deref().and_then(|sid| roster::read_mod_question(&self.cfg.status_dir, sid)) } else { None };
-            let body = json!({ "window": w.name, "kind": kind, "detail": detail });
+            // 權限框只帶工具名（外掛有回報時），不帶指令內容
+            let tool = if kind == "permission" { w.session_id.as_deref().and_then(|sid| roster::read_mod_tool(&self.cfg.status_dir, sid)) } else { None };
+            let body = json!({ "window": w.name, "kind": kind, "detail": detail, "tool": tool });
             match self.relay.api("waiting_notice", Some(body)).await {
                 Ok(v) => {
                     self.wait_alerts.mark_sent(&w, now);

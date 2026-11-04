@@ -373,7 +373,7 @@ Deno.serve(async (req) => {
   if (action === "waiting_notice" && req.method === "POST") {
     const p = parseWaitingNotice(await req.json().catch(() => null));
     if (!p) return json(400, { error: "bad_request" });
-    const { data, error } = await db.rpc("asn_relay_waiting_notice", { p_node: me.id, p_window: p.window, p_kind: p.kind, p_detail: p.detail });
+    const { data, error } = await db.rpc("asn_relay_waiting_notice", { p_node: me.id, p_window: p.window, p_kind: p.kind, p_detail: p.detail, p_tool: p.tool });
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     if (data?.error === "forbidden") return json(403, { error: "forbidden" });
     if (data?.error) return json(400, { error: data.error });

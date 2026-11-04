@@ -38,6 +38,23 @@ async fn hook_確認框等滿兩分鐘_只帶視窗名和種類_不帶內容_只
 }
 
 #[tokio::test]
+async fn 權限框有外掛回報就帶工具名_不合格的不帶() {
+    let mut h = rig(true).await;
+    let dir = h.core.cfg.status_dir.clone();
+    std::fs::create_dir_all(&dir).unwrap();
+    let doc = |sid: &str, tool: &str| json!({"sessionId": sid, "state": "busy", "detail": "", "at": T0, "waitingTool": tool}).to_string();
+    std::fs::write(dir.join("sid-c.json"), doc("sid-c", "Bash")).unwrap();
+    std::fs::write(dir.join("sid-d.json"), doc("sid-d", "rm -rf /")).unwrap();
+    put_waiting(h.sessions.path(), 5100, "T-丙", "sid-c", "permission prompt", T0);
+    put_waiting(h.sessions.path(), 5101, "T-丁", "sid-d", "permission prompt", T0);
+    tick_at(&mut h, T0 + W).await;
+    let n = h.fr.wait_notices();
+    let of = |name: &str| n.iter().find(|x| x["window"] == name).cloned().unwrap();
+    assert_eq!(of("T-丙")["tool"], "Bash");
+    assert!(of("T-丁")["tool"].is_null());
+}
+
+#[tokio::test]
 async fn 開關沒開就不通知() {
     let mut h = rig(false).await;
     put_waiting(h.sessions.path(), 5100, "T-丙", "sid-c", "permission prompt", T0);

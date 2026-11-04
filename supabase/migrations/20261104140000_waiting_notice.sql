@@ -1,8 +1,8 @@
 -- 夥伴卡在要人處理的框上超過兩分鐘時，通知這個節點自己的擁有者（todo-next-162；人可能在手機那頭）。
 -- 做法照 20261102200000_misroute_notice.sql：收件人、寄件名、固定文字都在這裡決定。
---  asn_relay_waiting_notice(p_node, p_window, p_kind, p_detail)：
+--  asn_relay_waiting_notice(p_node, p_window, p_kind, p_detail, p_tool)：
 --   - p_node 取自節點金鑰（Edge Function 帶入）。節點不存在或已停用回 forbidden。
---   - p_kind 只收 permission／input／other；p_detail 只有 input（選擇框的問題和選項）才採用，其他一律不寫進內文。
+--   - p_kind 只收 permission／input／other；p_detail 只有 input（選擇框的問題和選項）才採用，其他一律不寫進內文；p_tool 只有 permission 才採用，只收工具名的字元。
 --   - 寄件名「等待確認收發室」（以「收發室」結尾，橋不會回覆它）；reply=no。
 --   - 限流：同一節點每小時最多 6 封（advisory lock 串行計數）。同一扇視窗 30 分鐘一封由收發室判斷。
 --   - 回傳 {ok:true, notify, bell_topics}：notify 是 'sent'／'failed'／'rate_limited'／'skipped'（擁有者查不到或核對不過）。
@@ -11,7 +11,7 @@
 -- 回復：supabase/sql/rollback/20261104140000_waiting_notice_down.sql（drop 這一支函式；已寄出的信不受影響）。
 begin;
 
-create or replace function public.asn_relay_waiting_notice(p_node text, p_window text, p_kind text, p_detail text default null)
+create or replace function public.asn_relay_waiting_notice(p_node text, p_window text, p_kind text, p_detail text default null, p_tool text default null)
  returns jsonb
  language plpgsql
  security definer
@@ -35,7 +35,7 @@ begin
     return jsonb_build_object('error', 'forbidden');
   end if;
   v_window := left(btrim(regexp_replace(coalesce(p_window, ''), '[[:cntrl:]]', '', 'g')), 60);
-  v_what := case p_kind when 'permission' then '在等你確認（權限）' when 'input' then '在等你回答' when 'other' then '在等你處理' end;
+  v_what := case p_kind when 'permission' then '在等你確認（權限' || case when p_tool ~ '^[A-Za-z0-9_.:-]{1,80}$' then '：' || p_tool else '' end || '）' when 'input' then '在等你回答' when 'other' then '在等你處理' end;
   if v_window = '' or v_what is null then
     return jsonb_build_object('error', 'bad_request');
   end if;
@@ -65,7 +65,7 @@ begin
   return jsonb_build_object('ok', true, 'notify', v_notify, 'bell_topics', v_topics);
 end;
 $function$;
-revoke all on function public.asn_relay_waiting_notice(text, text, text, text) from public, anon, authenticated;
-grant execute on function public.asn_relay_waiting_notice(text, text, text, text) to service_role;
+revoke all on function public.asn_relay_waiting_notice(text, text, text, text, text) from public, anon, authenticated;
+grant execute on function public.asn_relay_waiting_notice(text, text, text, text, text) to service_role;
 
 commit;

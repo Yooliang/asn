@@ -126,6 +126,13 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
+  // 跳權限框：只記工具名（AskUserQuestion 由下面那段處理）
+  on('classic.PermissionRequest', ($, e, next) => {
+    const io = { home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: (p: string) => $.fs.read(p), write: (p: string, t: string) => $.fs.write(p, t), sid: () => $.session.id(), log: (t: string) => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage() }
+    if (e.tool_name !== 'AskUserQuestion') void st.setWaitingTool(io, e.tool_name)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
     const isMain = e.agentId === undefined
     const io = { home: async () => (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')), read: (p: string) => $.fs.read(p), write: (p: string, t: string) => $.fs.write(p, t), sid: () => $.session.id(), log: (t: string) => $.ui.log(t), root: $.plugin.root, model: () => $.session.model(), usage: () => $.session.usage() }

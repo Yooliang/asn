@@ -93,6 +93,23 @@ pub fn read_session_wait(dir: &Path, pid: u32) -> Option<SessionWait> {
     Some(SessionWait { status: text("status"), waiting_for: text("waitingFor"), since: v.get("statusUpdatedAt").and_then(Value::as_u64).unwrap_or(0) })
 }
 
+/// 外掛回報的工具名（跳權限框時），通知本人用。只收一般字元
+pub fn read_mod_tool(dir: &Path, sid: &str) -> Option<String> {
+    if !valid_sid(sid) {
+        return None;
+    }
+    let path = dir.join(format!("{sid}.json"));
+    if std::fs::metadata(&path).ok()?.len() > MOD_STATUS_MAX_BYTES {
+        return None;
+    }
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+    if v.get("sessionId").and_then(Value::as_str) != Some(sid) {
+        return None;
+    }
+    let t = v.get("waitingTool").and_then(Value::as_str)?;
+    (!t.is_empty() && t.len() <= 80 && t.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.:-".contains(&b))).then(|| t.to_string())
+}
+
 /// 外掛回報的選擇框內容，通知本人用：「問題：…；選項：甲、乙」。只有這個 session 正在 waiting_user 才算；沒有就回 None
 pub fn read_mod_question(dir: &Path, sid: &str) -> Option<String> {
     if !valid_sid(sid) {

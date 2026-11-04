@@ -24,6 +24,8 @@ export type StatusDoc = {
   tasks?: TaskItem[]
   // 選擇框的問題和選項：只在 state 為 waiting_user 時寫（夥伴卡住太久時，收發室拿來通知本人）
   prompt?: QuestionPrompt
+  // 最近一次跳權限框的工具名（只有名字，不寫指令內容）：夥伴卡住太久時，收發室拿來通知本人
+  waitingTool?: string
 }
 
 export type QuestionPrompt = { question: string; options: string[] }
@@ -90,7 +92,7 @@ export function statusPath(home: string, sessionId: string): string {
 export function buildStatus(
   p: { sessionId: string; state: WinState; detail?: string; turnId?: string; version?: string },
   now: number,
-  extra: { model?: string; context?: ContextUsage; control?: ControlResult; tasks?: TaskItem[]; prompt?: QuestionPrompt } = {},
+  extra: { model?: string; context?: ContextUsage; control?: ControlResult; tasks?: TaskItem[]; prompt?: QuestionPrompt; waitingTool?: string } = {},
 ): StatusDoc {
   return {
     sessionId: p.sessionId,
@@ -103,6 +105,7 @@ export function buildStatus(
     ...(extra.context ? { context: extra.context } : {}),
     ...(extra.control ? { control: extra.control } : {}),
     ...(extra.prompt ? { prompt: extra.prompt } : {}),
+    ...(extra.waitingTool ? { waitingTool: extra.waitingTool } : {}),
     ...(extra.tasks && extra.tasks.length ? { tasks: extra.tasks } : {}),
   }
 }
@@ -113,6 +116,11 @@ export function contextOf(u: unknown): ContextUsage | undefined {
   if (!c || typeof c.tokens !== 'number' || typeof c.window !== 'number' || !Number.isFinite(c.tokens) || !Number.isFinite(c.window) || c.window <= 0) return undefined
   const percent = typeof c.percent === 'number' && Number.isFinite(c.percent) ? c.percent : Math.round((c.tokens / c.window) * 100)
   return { used: c.tokens, limit: c.window, percent }
+}
+
+// 工具名只收一般字元，其他一律不寫
+export function safeToolName(t: unknown): string | undefined {
+  return typeof t === 'string' && /^[A-Za-z0-9_.:-]{1,80}$/.test(t) ? t : undefined
 }
 
 // 選擇框的第一題：問題最多 200 字，選項最多 6 個、各 40 字（狀態檔有大小上限）
@@ -178,12 +186,12 @@ export function createStatus(clock: () => number = Date.now) {
   let stop: StopInfo | undefined
   let ended: string | undefined // 本輪 turn.complete 的 reason；undefined＝還沒結束
   let control: ControlResult | undefined // 最近一次控制檔結果；之後每次寫檔都保留，橋只認 id
-  let last: { state: WinState; detail: string; tasks?: TaskItem[]; prompt?: QuestionPrompt } = { state: 'idle', detail: '' }
+  let last: { state: WinState; detail: string; tasks?: TaskItem[]; prompt?: QuestionPrompt; waitingTool?: string } = { state: 'idle', detail: '' }
   let kept: { path: string; doc: StatusDoc } | undefined // 最近一次實際寫出去的內容（心跳只換 at）
 
   // 寫檔排進同一條鏈，順序不亂
-  const write = (io: Io, state: WinState, detail: string, tasks?: TaskItem[], prompt?: QuestionPrompt): Promise<unknown> => {
-    last = { state, detail, tasks, prompt }
+  const write = (io: Io, state: WinState, detail: string, tasks?: TaskItem[], prompt?: QuestionPrompt, waitingTool?: string): Promise<unknown> => {
+    last = { state, detail, tasks, prompt, waitingTool }
     chain = chain
       .then(async () => {
         const home = await io.home()
@@ -197,7 +205,7 @@ export function createStatus(clock: () => number = Date.now) {
         const sid = await io.sid()
         const model = await Promise.resolve().then(() => io.model?.()).then(m => (typeof m === 'string' ? m : ''), () => '')
         const context = await Promise.resolve().then(() => io.usage?.()).then(contextOf, () => undefined)
-        const doc = buildStatus({ sessionId: sid, state, detail, turnId, version }, clock(), { model, context, control, tasks, prompt })
+        const doc = buildStatus({ sessionId: sid, state, detail, turnId, version }, clock(), { model, context, control, tasks, prompt, waitingTool })
         const path = statusPath(home, sid)
         await io.write(path, JSON.stringify(doc))
         kept = { path, doc }
@@ -222,7 +230,12 @@ export function createStatus(clock: () => number = Date.now) {
     // 控制檔執行完：記下結果並用目前的狀態重寫一次（其餘欄位照舊）
     setControl(io: Io, r: ControlResult): Promise<unknown> {
       control = r
-      return write(io, last.state, last.detail, last.tasks)
+      return write(io, last.state, last.detail, last.tasks, last.prompt, last.waitingTool)
+    },
+    // 跳權限框：記下工具名，其餘欄位照舊（狀態有變動時這個欄位就清掉）
+    setWaitingTool(io: Io, tool: unknown): Promise<unknown> {
+      const name = safeToolName(tool)
+      return name ? write(io, last.state, last.detail, last.tasks, last.prompt, name) : chain
     },
     // 狀態沒變也定時重寫：只把 at 換成現在，其餘欄位照上次寫出去的內容。還沒寫過或還沒到 5 分鐘就不動
     heartbeat(io: Io): Promise<unknown> {

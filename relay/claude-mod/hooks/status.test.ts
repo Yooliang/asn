@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { buildStatus, createStatus, cronDetail, finalState, HEARTBEAT_MS, MAX_TASKS, questionDetail, statusPath, taskList } from './status'
+import { safeToolName, buildStatus, createStatus, cronDetail, finalState, HEARTBEAT_MS, MAX_TASKS, questionDetail, statusPath, taskList } from './status'
 
 // 假引擎：env.get 給家目錄、fs.read 給 plugin.json、fs.write 收進 writes（可設成失敗）
 const SID = 'sess-1'
@@ -45,6 +45,12 @@ test('純函式：路徑、內容、詳情字串、最終狀態', () => {
   expect(finalState('answer', undefined)).toEqual({ state: 'idle', detail: '' })
   expect(finalState('aborted', { background_tasks: [{}] }).detail).toBe('中斷')
   expect(finalState('error', undefined).detail).toBe('出錯')
+})
+
+test('工具名只收一般字元', () => {
+  expect(safeToolName('Bash')).toBe('Bash')
+  expect(safeToolName('mcp__asn__asn_send')).toBe('mcp__asn__asn_send')
+  for (const bad of ['', 'rm -rf /', 'a\nb', 1, undefined, 'x'.repeat(81)]) expect(safeToolName(bad)).toBeUndefined()
 })
 
 test('turn.start→busy（記 turnId、帶版本）、session.start→idle', async ($, on) => {
