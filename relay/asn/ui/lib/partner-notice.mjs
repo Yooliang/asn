@@ -18,25 +18,35 @@ export function noticeText(item) {
 
 /** 這一輪要新跳的提醒：上一輪沒有的才跳；回 { fresh, seen }，seen 是下一輪要帶的 */
 export function nextNotices(list, seen = new Set()) {
-  const now = new Set(), fresh = []
+  const now = new Set(), fresh = [], freshItems = []
   for (const item of Array.isArray(list) ? list : []) {
     const text = noticeText(item)
     if (!text) continue
     const key = `${item.code}\n${item.name}`
     now.add(key)
-    if (!seen.has(key)) fresh.push(text)
+    if (seen.has(key)) continue
+    // 權限詢問另外開確認框（要讀完整的提示），不跳一般提醒
+    if (item.code === 'permission') freshItems.push(item)
+    else fresh.push(text)
   }
-  return { fresh, seen: now }
+  return { fresh, freshItems, seen: now }
+}
+
+/** 權限確認框要顯示什麼：不完整就不給「允許」 */
+export function permissionView(p) {
+  const text = typeof p?.text === 'string' ? p.text : ''
+  return { text, canAllow: p?.complete === true && !!text, canDeny: !!text, hint: p?.complete === true ? '' : '提示太長，這裡顯示不完整。要允許請到它的視窗確認。' }
 }
 
 /** 定時查；查失敗（舊版後端沒有這個命令）就略過這一輪 */
-export function createPartnerNoticePoller({ fetch, show, intervalMs = NOTICE_POLL_MS, setTimer = setInterval }) {
+export function createPartnerNoticePoller({ fetch, show, onItem = null, intervalMs = NOTICE_POLL_MS, setTimer = setInterval }) {
   let seen = new Set()
   async function tick() {
     try {
       const r = nextNotices(await fetch(), seen)
       seen = r.seen
       r.fresh.forEach(show)
+      r.freshItems.forEach(i => onItem?.(i))
     } catch { /* 下一輪再查 */ }
   }
   return { tick, start: () => setTimer(tick, intervalMs) }

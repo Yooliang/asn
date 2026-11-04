@@ -33,7 +33,7 @@ import { chatTabSameZone, closeAllChatTabs, closeIdleChatTabs, idleTabIds, withC
 import { nowPlayingLine, normalizeNowPlaying } from './lib/now-playing.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, normalizeClose, normalizeFrame, totalUnread, notifyFromSaved, notifyPlan, notifyWith } from './lib/prefs.mjs'
 import { composerView, entryLabel, screenText, termFriendId, termFriends, termIdOf, termStartChoices, termStartRequest, timelineAdd, timelineSet } from './lib/term-chat.mjs'
-import { createPartnerNoticePoller } from './lib/partner-notice.mjs'
+import { createPartnerNoticePoller, permissionView } from './lib/partner-notice.mjs'
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, store, transport } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
@@ -1264,7 +1264,27 @@ async function adoptUnlockConfirm() {
   try { await transport.termAdoptUnlock(req); adopt.unlockAsk = null; void termPoller?.tickNow() } catch (e) { adopt.error = String(e?.message ?? e); adopt.unlockAsk = null } finally { adopt.busy = '' }
 }
 // 夥伴停在要本人處理的提示：每種情況提醒一次，提示消失後再出現才會再提醒；舊版後端沒有這個命令就靜默略過
-if (!info.shot) createPartnerNoticePoller({ fetch: () => transport.partnerNotices(), show: showLaunchNotice }).start()
+// 權限詢問：讀完整的提示給本人看，按下去時文字變了後端就不送
+const permissionDlg = reactive({ open: false, name: '', prompt: null, busy: false, error: '' })
+const permissionDlgView = computed(() => permissionView(permissionDlg.prompt))
+function closePermissionDlg() { permissionDlg.open = false }
+async function openPermissionDlg(item) {
+  if (permissionDlg.open) return
+  try {
+    const prompt = await transport.partnerPermissionPrompt(item.name)
+    Object.assign(permissionDlg, { open: true, name: item.name, prompt, busy: false, error: '' })
+  } catch (e) { console.info('[ASN] 權限詢問讀不到', item.name, String(e?.message ?? e)) }
+}
+async function answerPermission(allow) {
+  const p = permissionDlg.prompt
+  if (!p || permissionDlg.busy) return
+  permissionDlg.busy = true; permissionDlg.error = ''
+  try {
+    await transport.partnerPermissionAnswer(p.name, p.hash, allow)
+    permissionDlg.open = false
+  } catch (e) { permissionDlg.error = String(e?.message ?? e) } finally { permissionDlg.busy = false }
+}
+if (!info.shot) createPartnerNoticePoller({ fetch: () => transport.partnerNotices(), show: showLaunchNotice, onItem: openPermissionDlg }).start()
 // 沒有終端或舊版後端（沒有這幾個命令）時 term_list 會失敗，靜默略過；截圖模式不輪詢
 let termSince = {}
 const termPoller = info.shot ? null : createTermPoller({
@@ -1712,6 +1732,7 @@ const app = createApp({
       adopt, adoptLoad, adoptClose, adoptDo, adoptRelease, adoptUnlockAsk, adoptUnlockCancel, adoptUnlockConfirm, UNLOCK_TEXT,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
+      permissionDlg, permissionDlgView, closePermissionDlg, answerPermission,
       opDlg, closeOpDlg, buddyOpItems, openPartnerOp, archiveNote, envNotice, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddySlots, buddyModelItem, buddyMenuOpenChat, toggleBuddyConsole,
       buddyModel, buddyModelOp, buddyModelLabel, buddyModelWhy, buddyMenuView, buddyWhyOf, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,

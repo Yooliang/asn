@@ -358,6 +358,16 @@
   </ul>
   <!-- 在這台開終端（#331）：只開 grok／agy；按「開啟」才呼叫 term_start，開好直接打開它的分頁 -->
 
+  <asn-dialog v-if="permissionDlg.open" :title="`「${permissionDlg.name}」在等你同意`" @close="closePermissionDlg">
+    <pre class="permission-text">{{ permissionDlgView.text }}</pre>
+    <p class="launch-notice-body" v-if="permissionDlgView.hint">{{ permissionDlgView.hint }}</p>
+    <p class="launch-notice-body model-err" v-if="permissionDlg.error">{{ permissionDlg.error }}</p>
+    <div class="partner-actions">
+      <button class="aero-btn" type="button" @click="closePermissionDlg">之後再說</button>
+      <button class="aero-btn" type="button" :disabled="permissionDlg.busy || !permissionDlgView.canDeny" @click="answerPermission(false)">拒絕</button>
+      <button class="aero-btn primary" type="button" :disabled="permissionDlg.busy || !permissionDlgView.canAllow" @click="answerPermission(true)">允許這一次</button>
+    </div>
+  </asn-dialog>
   <asn-dialog v-if="launchNotice.open" :title="launchNotice.title" @close="closeLaunchNotice">
     <p class="launch-notice-body">{{ launchNotice.body }}</p>
     <p class="launch-notice-log" v-if="launchNotice.logPath"><span>記錄檔：</span><code>{{ launchNotice.logPath }}</code></p>

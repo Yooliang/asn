@@ -71,6 +71,38 @@ pub fn status_code(kind: ClaudeScreenKind) -> &'static str {
     }
 }
 
+/// 權限詢問顯示給本人看的文字最多幾行：再長就不算完整
+const PROMPT_TEXT_MAX_LINES: usize = 40;
+
+/// 權限詢問的完整文字（指令、路徑、選項）。只給本機畫面確認用
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptText {
+    pub text: String,
+    /// 看得到提示的開頭，而且沒有超過行數上限。不完整就不能按「允許」
+    pub complete: bool,
+}
+
+/// 畫面文字是外部內容：去掉控制字元與會改變顯示順序、藏字的字元，只留換行
+fn clean_prompt_line(line: &str) -> String {
+    line.chars().filter(|c| !c.is_control() && !matches!(*c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}')).collect::<String>().trim_end().to_string()
+}
+
+/// 只有認得的權限詢問才有文字，其他畫面一律 None
+pub fn permission_text(screen: &str) -> Option<PromptText> {
+    if classify(screen)?.kind != ClaudeScreenKind::Permission {
+        return None;
+    }
+    let lines: Vec<&str> = screen.lines().map(str::trim_end).collect();
+    let end = lines.iter().rposition(|l| !l.trim().is_empty() && !is_rule(l))? + 1;
+    let cursor = lines[..end].iter().rposition(|l| l.trim_start().starts_with(CURSOR))?;
+    // 提示框的開頭是實線（裡面的分隔是虛線）；看不到實線就是提示比畫面長
+    let top = lines[..cursor].iter().rposition(|l| is_rule(l) && l.trim().starts_with('─'));
+    let start = top.map_or(0, |t| t + 1);
+    let kept: Vec<String> = lines[start..end].iter().map(|l| clean_prompt_line(l)).collect();
+    let complete = top.is_some() && kept.len() <= PROMPT_TEXT_MAX_LINES;
+    Some(PromptText { text: kept.join("\n"), complete })
+}
+
 /// 判斷畫面。回 None 代表沒有偵測到提示（包含閒置、執行中，以及認不出來的畫面）
 pub fn classify(text: &str) -> Option<ClaudeScreen> {
     let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
@@ -421,6 +453,30 @@ mod tests {
   ? for shortcuts
 ";
         assert_eq!(kind(text), None);
+    }
+
+    #[test]
+    fn 權限文字_只有權限詢問才有_看得到開頭才算完整() {
+        let t = permission_text(fixture!("claude-permission-bash")).unwrap();
+        assert!(t.complete);
+        assert!(t.text.contains("mkdir c1dir") && t.text.contains("Do you want to proceed?") && t.text.contains("4. No"), "{}", t.text);
+        assert!(!t.text.contains("Use a shell command"), "提示框外的內容不算：{}", t.text);
+        for other in [fixture!("claude-trust-folder"), fixture!("claude-ask-user-question"), fixture!("claude-lookalike-model-text"), fixture!("claude-idle-auto-mode"), fixture!("claude-login-method")] {
+            assert_eq!(permission_text(other), None);
+        }
+        // 提示比畫面長：看不到開頭的實線
+        let cut = " rm -rf a\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n";
+        assert!(!permission_text(cut).unwrap().complete);
+        let long = format!("──────────────\n{}\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n", " x\n".repeat(50));
+        assert!(!permission_text(&long).unwrap().complete, "超過行數上限");
+    }
+
+    #[test]
+    fn 權限文字_清掉控制字元與藏字元() {
+        let s = "──────────────\n echo \u{1b}[31m紅\u{202E}反\u{200B}藏\u{7}\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n";
+        let t = permission_text(s).unwrap();
+        assert!(t.text.contains("echo [31m紅反藏"), "{:?}", t.text);
+        assert!(!t.text.chars().any(|c| c.is_control() && c != '\n'), "{:?}", t.text);
     }
 
     #[test]

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createPartnerNoticePoller, nextNotices, noticeText } from '../ui/lib/partner-notice.mjs'
+import { createPartnerNoticePoller, nextNotices, noticeText, permissionView } from '../ui/lib/partner-notice.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 
@@ -16,6 +16,34 @@ test('每個代號都有固定的字，不認得的代號或內容不顯示', ()
   for (const bad of [{ code: 'rm -rf /', name: '甲' }, { code: 'constructor', name: '甲' }, { code: 'login' }, { code: 'login', name: 7 }, null, {}]) {
     assert.equal(noticeText(bad), null, JSON.stringify(bad))
   }
+})
+
+test('權限詢問開確認框，不跳一般提醒', async () => {
+  const shown = [], items = []
+  const p = createPartnerNoticePoller({ fetch: async () => [{ code: 'permission', name: '甲' }, { code: 'login', name: '乙' }], show: t => shown.push(t), onItem: i => items.push(i), setTimer: () => 0 })
+  await p.tick()
+  await p.tick()
+  assert.equal(shown.length, 1)
+  assert.deepEqual(items, [{ code: 'permission', name: '甲' }], '只開一次')
+})
+
+test('提示不完整就不給允許', () => {
+  assert.deepEqual(permissionView({ text: 'mkdir a', complete: true }), { text: 'mkdir a', canAllow: true, canDeny: true, hint: '' })
+  const cut = permissionView({ text: '只看到一部分', complete: false })
+  assert.equal(cut.canAllow, false)
+  assert.equal(cut.canDeny, true)
+  assert.ok(cut.hint)
+  assert.equal(permissionView({ text: '', complete: true }).canAllow, false)
+  assert.equal(permissionView(null).canAllow, false)
+})
+
+test('守門：確認框的文字只用純文字顯示', () => {
+  const html = fs.readFileSync(path.join(here, '..', 'ui', 'list.html'), 'utf8')
+  const i = html.indexOf('v-if="permissionDlg.open"')
+  assert.ok(i > 0)
+  const block = html.slice(i, html.indexOf('</asn-dialog>', i))
+  assert.ok(!block.includes('v-html'), block)
+  assert.match(block, /permission-text">\{\{ permissionDlgView\.text \}\}/)
 })
 
 test('多帶的欄位不會顯示', () => {
