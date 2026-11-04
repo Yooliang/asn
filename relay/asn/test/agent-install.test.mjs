@@ -148,6 +148,15 @@ test('接線守門：七個操作都有接、按鈕與確認窗在同一個畫�
   for (const t of Object.values(INSTALL_TEXT)) assert.doesNotMatch(t, /agent|setup|install|asn_|https?:/i, t)
 })
 
+test('入口預設關：電腦版的按鈕、允許從手機安裝的勾選和說明，畫面上都要先看入口開了沒', () => {
+  const panel = read('ui/lib/settings-panel.mjs')
+  assert.match(panel, /\bAGENT_INSTALL_UI, switchTargets/, '常數要交給畫面，不然永遠看不到')
+  // 每個讀 st.install 決定顯示的區塊都要先看入口；裡面的子元素跟著外層一起藏
+  const gates = panel.match(/v-if="[^"]*st\.install(?:\s|")[^"]*"?/g) ?? []
+  assert.equal(gates.length, 3)
+  for (const g of gates) assert.match(g, /^v-if="AGENT_INSTALL_UI && st\.install/, g)
+})
+
 test('電腦上按的那一輪也用右下角小窗；已有一輪在跑就不去動它的小窗', () => {
   const lib = read('src-tauri/src/lib.rs')
   const start = lib.slice(lib.indexOf('async fn agent_setup_start'), lib.indexOf('async fn agent_setup_start') + 2500)
