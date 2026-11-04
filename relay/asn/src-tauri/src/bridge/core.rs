@@ -1303,10 +1303,16 @@ impl Core {
 
     /// 失敗原因給人看：認得的錯誤（額度用完）換成白話，其他原樣
     fn short_fail_reason(why: &str) -> String {
-        if why.contains("402") || why.to_lowercase().contains("payment required") || why.to_lowercase().contains("balance exhausted") {
+        if Self::is_payment_error(why) {
             return "額度用完了（API 402）".into();
         }
         why.to_string()
+    }
+
+    /// 是不是 HTTP 402。不能只找「402」：路徑、編號、時間裡都可能剛好有這三個數字，真正的原因會被蓋掉
+    fn is_payment_error(why: &str) -> bool {
+        let w = why.to_lowercase();
+        ["payment required", "balance exhausted", "http 402", "http/1.1 402", "http/2 402", "status 402", "status: 402", "status code 402", "api 402", "error 402", "error: 402", "code 402", "(402)", "402 {"].iter().any(|k| w.contains(k))
     }
 
     pub async fn on_fail(&mut self, id: &str, reason: &str) {
@@ -1975,5 +1981,33 @@ impl Core {
     /// 結束前：把對應表存好
     pub fn flush(&mut self) {
         self.persist();
+    }
+}
+
+#[cfg(test)]
+mod payment_error_tests {
+    use super::*;
+
+    #[test]
+    fn 真的_402_才算額度用完() {
+        for why in ["HTTP 402", "API Error: 402 {\"error\":\"x\"}", "status 402", "status code 402", "402 Payment Required", "Payment Required", "balance exhausted", "request failed (402)", "402 {\"type\":\"error\"}"] {
+            assert_eq!(Core::short_fail_reason(why), "額度用完了（API 402）", "{why}");
+        }
+    }
+
+    #[test]
+    fn 路徑或編號裡剛好有_402_不算() {
+        for why in [
+            r"想做不被允許的事：C:\Users\a\AppData\Local\Temp\.tmp402xyz\x.txt",
+            "想做不被允許的事：/tmp/.tmpA402b/scratch/x.txt",
+            "想做不被允許的事：/tmp/402 資料夾/x.txt",
+            "想做不被允許的事：/tmp/a402 b/x.txt",
+            "程序 14026 結束",
+            "pid=402 結束",
+            "程序 402 結束",
+            "逾時 1402 毫秒",
+        ] {
+            assert_eq!(Core::short_fail_reason(why), why, "{why}");
+        }
     }
 }
