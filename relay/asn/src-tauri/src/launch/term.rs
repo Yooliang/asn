@@ -1435,10 +1435,11 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         Ok(snap)
     }
 
-    /// 讀畫面判斷（todo-next-162）要看的夥伴視窗：Claude、有 session 編號。（編號, session）
+    /// 讀畫面判斷（todo-next-162）要看的夥伴視窗：Claude、有視窗名。（編號, 視窗名）。
+    /// 不用對照表的 session_id：那只有接續對話時才有，新開的對話是空的
     fn watched_partners(&self) -> Vec<(String, String)> {
         let g = self.inner.lock().unwrap();
-        g.sessions.iter().filter(|s| s.kind == super::win_term::KIND_CLAUDE).filter_map(|s| s.session_id.clone().map(|sid| (s.id.clone(), sid))).collect()
+        g.sessions.iter().filter(|s| s.kind == super::win_term::KIND_CLAUDE).filter_map(|s| partner_label(&s.id, &s.title).map(|n| (s.id.clone(), n.to_string()))).collect()
     }
 
     /// 這扇 Claude 夥伴視窗停在哪種提示，只回固定代號，不回畫面文字。
@@ -2296,10 +2297,11 @@ fn write_screen_code(dir: &Path, sid: &str, code: Option<&str>, now: u64) {
 /// 背景讀 Claude 夥伴視窗的畫面，判斷卡在哪（todo-next-162 第 2 段）。預設關；這一段只標狀態，沒有按鈕，也不送字
 #[cfg(feature = "gui")]
 pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, data_dir: &Path) {
-    use super::screen_watch::{pace_of, Schedule, ENV_SCREEN_WATCH, TICK_MS};
+    use super::screen_watch::{match_sessions, pace_of, Schedule, ENV_SCREEN_WATCH, TICK_MS};
     if std::env::var(ENV_SCREEN_WATCH).as_deref() != Ok("1") || std::env::args().any(|a| a == "--shot") {
         return;
     }
+    let sessions_dir = crate::identity::home_dir().join(".claude").join("sessions");
     let asn_dir = crate::identity::home_dir().join(".asn");
     let (status_dir, screen_dir) = (asn_dir.join("status"), asn_dir.join(crate::bridge::roster::SCREEN_DIR));
     let log_dir = data_dir.to_path_buf();
@@ -2308,7 +2310,10 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, data_dir: &Path) {
         loop {
             std::thread::sleep(std::time::Duration::from_millis(TICK_MS));
             let now = crate::heartbeat::now_ms();
-            let partners: Vec<(String, String)> = terms.watched_partners().into_iter().filter(|(_, sid)| crate::bridge::roster::valid_sid(sid)).collect();
+            // 活著的 session（程序還在、建立時間相符）。還沒有檔案的視窗這一輪不讀，名單也沒有那一列可標
+            let live = crate::bridge::roster::read_sessions_with(&sessions_dir, crate::heartbeat::session_alive, 0, "").unwrap_or_default();
+            let sessions: Vec<(String, String)> = live.into_iter().filter_map(|w| w.session_id.map(|sid| (w.name, sid))).collect();
+            let partners: Vec<(String, String)> = match_sessions(&terms.watched_partners(), &sessions).into_iter().filter(|(_, sid)| crate::bridge::roster::valid_sid(sid)).collect();
             let windows: Vec<(String, super::screen_watch::Pace)> = partners.iter().map(|(id, sid)| (id.clone(), pace_of(mod_state_of(&status_dir, sid).as_deref()))).collect();
             for id in schedule.due(now, &windows, free_memory_bytes()) {
                 let Some(pace) = windows.iter().find(|(w, _)| *w == id).map(|(_, p)| *p) else { continue };
@@ -5361,7 +5366,7 @@ mod tests {
         fn 讀畫面判斷_只回固定代號_終端面板的讀法照舊拒絕夥伴視窗() {
             let (rig, _) = mux_rig();
             let id = open_partner(&rig);
-            assert_eq!(rig.svc.watched_partners(), vec![(id.clone(), "sid-1".to_string())]);
+            assert_eq!(rig.svc.watched_partners(), vec![(id.clone(), "小乙".to_string())]);
             *rig.runner.inner.screen.borrow_mut() = include_str!("../../tests/fixtures/term-screens/claude-permission-bash.txt").into();
             assert_eq!(rig.svc.partner_screen_code(&id), Ok(Some("permission")));
             assert!(rig.svc.read(&id, 5).is_err(), "面板讀畫面仍然拒絕");
@@ -5382,6 +5387,13 @@ mod tests {
             let panel = rig.svc.start("agy", &rig.cwd, &rig.config).unwrap();
             assert!(rig.svc.partner_screen_code(&panel).is_err());
             assert!(!rig.svc.watched_partners().iter().any(|(w, _)| *w == panel));
+        }
+
+        #[test]
+        fn 讀畫面判斷_新開的對話沒有編號也看得到() {
+            let (rig, _) = mux_rig();
+            let (id, _) = rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(None)).unwrap();
+            assert_eq!(rig.svc.watched_partners(), vec![(id, "小乙".to_string())]);
         }
 
         #[test]
