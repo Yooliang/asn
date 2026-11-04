@@ -1,12 +1,21 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import { autoResumeNotice, createAutoResumePoller } from '../ui/lib/auto-resume.mjs'
 
-test('接回完成：顯示位數，說明照原本的權限與會用額度', () => {
+test('接回完成：顯示位數，說明權限相同、收到信才工作、會用額度', () => {
   const n = autoResumeNotice({ state: 'done', resumed: ['甲', '乙'], failed: [] })
   assert.equal(n.title, '已自動接回 2 位夥伴')
-  assert.match(n.body, /照原本的權限重新開始工作/)
+  assert.match(n.body, /權限和原本相同/)
+  assert.match(n.body, /收到信就會繼續工作/)
+  assert.doesNotMatch(n.body, /重新開始工作/, '接回時沒有第一句話，不會自己開始做事')
   assert.match(n.body, /額度/)
+})
+
+test('設定頁的說明也寫實際行為：收到信才工作，不寫重新開始工作', () => {
+  const panel = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8')
+  assert.match(panel, /接回原本的對話。權限和原本相同，收到信就會繼續工作，也會用到額度。/)
+  assert.doesNotMatch(panel, /重新開始工作/)
 })
 
 test('接不回來的一定列出名字與原因', () => {
