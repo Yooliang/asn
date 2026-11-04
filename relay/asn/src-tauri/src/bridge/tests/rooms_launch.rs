@@ -1174,3 +1174,109 @@ async fn 群組_一輪只交一封_同一視窗連來兩則_第一則做完才�
     assert_eq!(f.len(), 2);
     assert!(f[1].2.contains("群組內文-3"), "{}", f[1].2);
 }
+
+#[tokio::test]
+async fn 群組_同房等接回的那位不動_其他在線成員照常轉交() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    let mut k = crate::bridge::known::Known::default();
+    k.touch("T-乙", "claude", T0 - 1000);
+    k.touch("T-丙", "claude", T0 - 1000);
+    k.save_if_dirty(&h.work.path().join(crate::bridge::known::KNOWN_FILE), T0 - 1000).unwrap();
+    h.core = new_core(&h.fr, h.work.path(), h.sessions.path(), h.sink.clone(), T0);
+    h.core.refresh_roster(T0).await;
+    set_rooms(
+        &h,
+        vec![room(
+            vec![rmsg(2, json!({"forMe": {"T-乙": true, "T-丙": true}}))],
+            json!([{"member": "T~T-乙", "read_seq": 1}, {"member": "T~T-丙", "read_seq": 1}]),
+        )],
+    );
+    h.core.pull("test", T0 + 1_000).await;
+    let f = fwd(&h.said());
+    assert_eq!(f.len(), 1, "在線的 T-乙 照常轉交：{f:?}");
+    assert_eq!(f[0].1, "T-乙");
+    let c = cursor_file(&h);
+    assert!(c["R1|T~T-乙"].as_u64().unwrap_or(1) >= 2, "T-乙 的游標前進：{c}");
+    assert_eq!(c["R1|T~T-丙"].as_u64().unwrap_or(1), 1, "等接回的 T-丙 游標不動：{c}");
+}
+
+#[tokio::test]
+async fn 群組_重開後被點名的夥伴還沒接回來_游標不前進_接回來才轉交() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    let mut k = crate::bridge::known::Known::default();
+    k.touch("T-乙", "claude", T0 - 1000);
+    k.touch("T-丙", "claude", T0 - 1000);
+    k.save_if_dirty(&h.work.path().join(crate::bridge::known::KNOWN_FILE), T0 - 1000).unwrap();
+    h.core = new_core(&h.fr, h.work.path(), h.sessions.path(), h.sink.clone(), T0);
+    h.core.refresh_roster(T0).await;
+    set_rooms(
+        &h,
+        vec![room(vec![rmsg(2, json!({"forMe": {"T-丙": true}}))], json!([{"member": "T~T-丙", "read_seq": 1}]))],
+    );
+    h.core.pull("test", T0 + 1_000).await;
+    assert!(fwd(&h.said()).is_empty(), "它還沒回來：不轉交");
+    assert_eq!(cursor_file(&h)["R1|T~T-丙"].as_u64().unwrap_or(1), 1, "游標沒有前進，這則不會被略過：{}", cursor_file(&h));
+    put_session(h.sessions.path(), 5009, "T-丙", "idle", 50);
+    h.core.refresh_roster(T0 + 600_000).await;
+    h.core.pull("test", T0 + 601_000).await;
+    let f = fwd(&h.said());
+    assert_eq!(f.len(), 1, "接回來就轉交");
+    assert!(f[0].2.contains("群組內文-2"), "{}", f[0].2);
+}
+
+#[tokio::test]
+async fn 群組順位_排隊的訊息遇到對方還在等接回_超過_120_次也不放棄_接回來就轉交() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    let mut k = crate::bridge::known::Known::default();
+    k.touch("T-乙", "claude", T0 - 1000);
+    k.touch("T-丙", "claude", T0 - 1000);
+    k.save_if_dirty(&h.work.path().join(crate::bridge::known::KNOWN_FILE), T0 - 1000).unwrap();
+    h.core = new_core(&h.fr, h.work.path(), h.sessions.path(), h.sink.clone(), T0);
+    h.core.refresh_roster(T0).await;
+    set_rooms(
+        &h,
+        vec![room(
+            vec![rmsg(2, json!({"forMe": {"T-丙": true}, "wake": wake(2, 2, &["甲"])}))],
+            json!([{"member": "T~T-丙", "read_seq": 1}]),
+        )],
+    );
+    h.core.pull("test", T0).await;
+    assert_eq!(held_file(&h).as_array().unwrap().len(), 1, "排隊中");
+    // 130 次、約 67 分鐘都沒接回來：不放棄
+    for n in 1..=130u64 {
+        h.core.tick(T0 + 61_000 + n * 31_000).await;
+    }
+    assert!(!h.core.log.has("gave up after repeated failures"), "等接回期間不能放棄");
+    assert_eq!(held_file(&h).as_array().unwrap().len(), 1, "還排著");
+    assert!(fwd(&h.said()).is_empty());
+    put_session(h.sessions.path(), 5009, "T-丙", "idle", 50);
+    let t = T0 + 61_000 + 131 * 31_000;
+    h.core.refresh_roster(t).await;
+    h.core.tick(t + 31_000).await;
+    h.core.tick(t + 62_000).await;
+    assert_eq!(fwd(&h.said()).len(), 1, "接回來就轉交");
+}
+
+#[tokio::test]
+async fn 群組順位_等接回逾_12_小時還沒回來_排隊的訊息才放掉() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    let mut k = crate::bridge::known::Known::default();
+    k.touch("T-乙", "claude", T0 - 1000);
+    k.touch("T-丙", "claude", T0 - 1000);
+    k.save_if_dirty(&h.work.path().join(crate::bridge::known::KNOWN_FILE), T0 - 1000).unwrap();
+    h.core = new_core(&h.fr, h.work.path(), h.sessions.path(), h.sink.clone(), T0);
+    h.core.refresh_roster(T0).await;
+    set_rooms(
+        &h,
+        vec![room(
+            vec![rmsg(2, json!({"forMe": {"T-丙": true}, "wake": wake(2, 2, &["甲"])}))],
+            json!([{"member": "T~T-丙", "read_seq": 1}]),
+        )],
+    );
+    h.core.pull("test", T0).await;
+    h.core.tick(T0 + 11 * 3_600_000).await;
+    assert_eq!(held_file(&h).as_array().unwrap().len(), 1, "11 小時還在等");
+    h.core.tick(T0 + 12 * 3_600_000 + 61_000).await;
+    assert_eq!(held_file(&h).as_array().unwrap().len(), 0, "逾 12 小時：照原本的做法略過、不再排著");
+    assert!(fwd(&h.said()).is_empty());
+}

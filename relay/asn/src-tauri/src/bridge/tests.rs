@@ -972,8 +972,169 @@ async fn 本人簽章的私信轉交給視窗_退回那個視窗一封寄信額�
     assert_eq!(take(&rate, "T-丙", 2, now), Ok(0), "T-丙 不動：1 封，上限 2 時寄完剩 0");
 }
 
+/// 寄回給寄件人的通知內文
 fn notice_bodies(h: &H) -> Vec<String> {
     h.fr.sent().iter().map(|s| s["body"].as_str().unwrap_or("").to_string()).collect()
+}
+
+/// 模擬「重開後」：存檔裡有這些視窗名，然後用同一個工作資料夾重新起一個核心
+async fn restart_with_known(h: &mut H, known_names: &[&str], now: u64) {
+    let mut k = super::known::Known::default();
+    for n in known_names {
+        k.touch(n, "claude", now - 1000);
+    }
+    k.save_if_dirty(&h.work.path().join(super::known::KNOWN_FILE), now - 1000).unwrap();
+    h.core = new_core(&h.fr, h.work.path(), h.sessions.path(), h.sink.clone(), now);
+    h.core.refresh_roster(now).await;
+}
+
+#[tokio::test]
+async fn 重開後夥伴視窗還沒接回來_信留著不退回不_ack_接回來就依順序送() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    restart_with_known(&mut h, &["T-乙", "T-丙"], T0).await;
+    h.fr.put(mail(1, json!({"to_agent": "T-丙"})));
+    h.fr.put(mail(2, json!({"to_agent": "T-丙"})));
+    h.core.pull("test", T0 + 1_000).await;
+    assert!(h.said().is_empty(), "它還沒回來：不送");
+    assert!(h.fr.acked().is_empty(), "不 ack，信還在後台信箱");
+    assert!(notice_bodies(&h).iter().all(|b| !b.contains("找不到")), "不退回：{:?}", notice_bodies(&h));
+    // 它接回來了
+    put_session(h.sessions.path(), 5009, "T-丙", "idle", 50);
+    h.core.refresh_roster(T0 + 600_000).await;
+    h.core.pull("test", T0 + 601_000).await;
+    let ids: Vec<String> = h.said().iter().filter_map(|t| t.split("id=").nth(1).map(|x| x.split(' ').next().unwrap_or("").to_string())).collect();
+    assert_eq!(ids.first().cloned(), Some(uid(1)), "依原順序，先送第一封（一次只交一封，第二封等這一輪結束）");
+    let first = h.said().into_iter().next().unwrap();
+    let want = super::mail::await_late_line(T0 + 1_000);
+    assert!(!first.contains("2026-"), "沒有後台時間：用收發室先留著的時間");
+    assert!(first.lines().any(|l| l == want), "送出時註明原本收到的時間（寄件人那行之後）：{first}");
+    assert!(first.lines().position(|l| l == want).unwrap() > first.lines().position(|l| l.starts_with("寄件人：")).unwrap());
+}
+
+#[tokio::test]
+async fn 重開後留著信時_寄件人收到一次先留著的通知_同一位寄件人不重複() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    restart_with_known(&mut h, &["T-乙", "T-丙"], T0).await;
+    h.fr.put(mail(1, json!({"to_agent": "T-丙"})));
+    h.fr.put(mail(2, json!({"to_agent": "T-丙"})));
+    h.fr.put(mail(3, json!({"to_agent": "T-丙", "from_agent": "W-別人"})));
+    h.core.pull("test", T0 + 1_000).await;
+    h.core.pull("test", T0 + 2_000).await;
+    let notes: Vec<String> = notice_bodies(&h).into_iter().filter(|b| b.contains("先留著") && b.contains("T-丙")).collect();
+    assert_eq!(notes.len(), 2, "兩位寄件人各一次：{notes:?}");
+    assert!(notes[0].contains("不用重寄") && notes[0].contains("12 小時"));
+    assert!(h.fr.acked().is_empty());
+}
+
+#[tokio::test]
+async fn 關機時視窗比收發室早結束_名字還在存檔裡_重開後信留著_接回來送出() {
+    let mut h = harness(&[("T-乙", "idle"), ("T-丙", "idle")]).await;
+    // 關機：T-丙 的視窗先結束，收發室還活著幾秒、看到它不見了（但不到 5 分鐘）
+    std::fs::remove_file(h.sessions.path().join("5001.json")).unwrap();
+    h.core.refresh_roster(T0 + 5_000).await;
+    h.core.refresh_roster(T0 + 8_000).await;
+    // 收發室跟著結束；重開
+    h.core = new_core(&h.fr, h.work.path(), h.sessions.path(), h.sink.clone(), T0 + 600_000);
+    h.core.refresh_roster(T0 + 600_000).await;
+    h.fr.put(mail(1, json!({"to_agent": "T-丙"})));
+    h.core.pull("test", T0 + 601_000).await;
+    assert!(h.fr.acked().is_empty() && h.said().is_empty(), "存檔還認得它：信留著");
+    put_session(h.sessions.path(), 5009, "T-丙", "idle", 50);
+    h.core.refresh_roster(T0 + 700_000).await;
+    h.core.pull("test", T0 + 701_000).await;
+    assert_eq!(h.said().len(), 1, "接回來送出");
+}
+
+#[tokio::test]
+async fn 消失超過_5_分鐘收發室還活著_才當成本人關掉_存檔拿掉() {
+    let mut h = harness(&[("T-乙", "idle"), ("T-丙", "idle")]).await;
+    std::fs::remove_file(h.sessions.path().join("5001.json")).unwrap();
+    h.core.refresh_roster(T0 + 5_000).await;
+    h.core.refresh_roster(T0 + 5_000 + 4 * 60_000).await;
+    h.core = new_core(&h.fr, h.work.path(), h.sessions.path(), h.sink.clone(), T0 + 5 * 60_000);
+    h.core.refresh_roster(T0 + 5 * 60_000).await;
+    h.fr.put(mail(1, json!({"to_agent": "T-丙"})));
+    h.core.pull("test", T0 + 5 * 60_000 + 1_000).await;
+    assert!(h.fr.acked().is_empty(), "才不見 4 分鐘：存檔還留著，重開後信留著");
+    let mut g = harness(&[("T-乙", "idle"), ("T-丙", "idle")]).await;
+    std::fs::remove_file(g.sessions.path().join("5001.json")).unwrap();
+    g.core.refresh_roster(T0 + 5_000).await;
+    g.core.refresh_roster(T0 + 5_000 + 5 * 60_000).await;
+    g.core = new_core(&g.fr, g.work.path(), g.sessions.path(), g.sink.clone(), T0 + 11 * 60_000);
+    g.core.refresh_roster(T0 + 11 * 60_000).await;
+    g.fr.put(mail(1, json!({"to_agent": "T-丙"})));
+    g.core.pull("test", T0 + 11 * 60_000 + 1_000).await;
+    assert!(notice_bodies(&g).iter().any(|b| b.contains("找不到名叫「T-丙」")), "不見滿 5 分鐘＝本人關掉，存檔拿掉，信照原本退回");
+}
+
+#[tokio::test]
+async fn 先留著的信送出時_原本幾點收到優先用後台記的寄出時間() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    restart_with_known(&mut h, &["T-乙", "T-丙"], T0).await;
+    // 後台記的寄出時間比收發室留住它早很多（半夜寄來、早上才接回）
+    let sent_ms = T0 - 6 * 3_600_000;
+    let secs = (sent_ms / 1000) as i64;
+    let (y, mo, d) = crate::usage::civil_from_days(secs.div_euclid(86400));
+    let rem = secs.rem_euclid(86400);
+    let iso = format!("{y:04}-{mo:02}-{d:02}T{:02}:{:02}:{:02}.000+00:00", rem / 3600, rem % 3600 / 60, rem % 60);
+    h.fr.put(mail(1, json!({"to_agent": "T-丙", "created_at": iso})));
+    h.core.pull("test", T0 + 1_000).await;
+    put_session(h.sessions.path(), 5009, "T-丙", "idle", 50);
+    h.core.refresh_roster(T0 + 600_000).await;
+    h.core.pull("test", T0 + 601_000).await;
+    let first = h.said().into_iter().next().unwrap();
+    assert!(first.lines().any(|l| l == super::mail::await_late_line(sent_ms)), "用後台的寄出時間：{first}");
+    assert!(!first.lines().any(|l| l == super::mail::await_late_line(T0 + 1_000)), "不是收發室留住的時間：{first}");
+}
+
+#[tokio::test]
+async fn 重開後等太久還沒回來_才退回_而且講明等了多久() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    restart_with_known(&mut h, &["T-乙", "T-丙"], T0).await;
+    h.fr.put(mail(1, json!({"to_agent": "T-丙"})));
+    h.core.pull("test", T0 + 11 * 3_600_000 + 59 * 60_000).await;
+    assert!(h.fr.acked().is_empty(), "11 小時 59 分還在等");
+    h.core.pull("test", T0 + 12 * 3_600_000 + 60_000).await;
+    let notes = notice_bodies(&h);
+    assert!(notes.iter().any(|b| b.contains("找不到名叫「T-丙」") && b.contains("重開前有在線，等了 12 小時沒有回來")), "{notes:?}");
+    assert!(h.fr.acked().contains(&uid(1)), "退回後才 ack");
+}
+
+#[tokio::test]
+async fn 本人在收發室跑著的時候關掉的視窗_立刻退回_不多等() {
+    let mut h = harness(&[("T-乙", "idle"), ("T-丙", "idle")]).await;
+    // T-丙 在名單上看過；本人把它關掉（session 檔消失）
+    std::fs::remove_file(h.sessions.path().join("5001.json")).unwrap();
+    h.core.refresh_roster(T0 + 5_000).await;
+    h.fr.put(mail(1, json!({"to_agent": "T-丙"})));
+    h.core.pull("test", T0 + 6_000).await;
+    let notes = notice_bodies(&h);
+    assert!(notes.iter().any(|b| b.contains("找不到名叫「T-丙」") && !b.contains("等了")), "{notes:?}");
+    assert!(h.fr.acked().contains(&uid(1)));
+}
+
+#[tokio::test]
+async fn 從沒有過的名字照原本的做法退回_不多等() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    restart_with_known(&mut h, &["T-乙"], T0).await;
+    h.fr.put(mail(1, json!({"to_agent": "T-打錯了"})));
+    h.core.pull("test", T0 + 1_000).await;
+    assert!(notice_bodies(&h).iter().any(|b| b.contains("找不到名叫「T-打錯了」")));
+    assert!(h.fr.acked().contains(&uid(1)));
+}
+
+#[tokio::test]
+async fn 等接回來的夥伴最多先留_20_封_超過的退回() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    restart_with_known(&mut h, &["T-乙", "T-丙"], T0).await;
+    for n in 1..=22 {
+        h.fr.put(mail(n, json!({"to_agent": "T-丙"})));
+    }
+    h.core.pull("test", T0 + 1_000).await;
+    let acked = h.fr.acked();
+    assert_eq!(acked.len(), 2, "只有超過的 2 封退回並 ack：{acked:?}");
+    assert!(notice_bodies(&h).iter().filter(|b| b.contains("找不到名叫「T-丙」")).count() >= 1);
+    assert!(!acked.contains(&uid(1)), "最前面 20 封留著");
 }
 
 #[tokio::test]
